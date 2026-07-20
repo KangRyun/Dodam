@@ -1,0 +1,110 @@
+# ==================================================
+# OS / IDE
+# ==================================================
+.DS_Store
+Thumbs.db
+Desktop.ini
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+
+# ==================================================
+# Environment variables and secrets
+# ==================================================
+.env
+.env.*
+!.env.example
+!**/.env.example
+*.pem
+*.key
+secrets/
+
+# ==================================================
+# Logs / temporary files
+# ==================================================
+*.log
+logs/
+tmp/
+temp/
+coverage/
+
+# ==================================================
+# Frontend - Flutter / Dart
+# ==================================================
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub-cache/
+.pub/
+build/
+frontend/mobile/android/.gradle/
+frontend/mobile/android/local.properties
+frontend/mobile/ios/Pods/
+frontend/mobile/ios/.symlinks/
+frontend/mobile/ios/Flutter/ephemeral/
+frontend/mobile/macos/Flutter/ephemeral/
+
+# Keep Flutter source-controlled metadata and lockfile
+!.metadata
+!pubspec.lock
+
+# ==================================================
+# Frontend - Next.js / Node.js
+# ==================================================
+node_modules/
+.next/
+out/
+.turbo/
+.vercel/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ==================================================
+# Backend - Spring Boot / Gradle
+# ==================================================
+.gradle/
+backend/build/
+backend/out/
+backend/bin/
+
+# Keep Gradle Wrapper
+!backend/gradle/wrapper/gradle-wrapper.jar
+
+# ==================================================
+# AI - Python / Jupyter / ML artifacts
+# ==================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Datasets, experiment outputs, and model weights
+ai/data/
+ai/datasets/
+ai/runs/
+ai/artifacts/
+ai/checkpoints/
+*.pt
+*.pth
+*.ckpt
+*.onnx
+*.engine
+
+# ==================================================
+# Docker / local volumes
+# ==================================================
+docker-data/
+volumes/
+
