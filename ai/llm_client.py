@@ -13,25 +13,12 @@ from __future__ import annotations
 
 import logging
 
-from openai import OpenAI, OpenAIError
+from openai import OpenAIError
 
 import config
+from gms import get_client  # GMS(OpenAI 호환) 공용 클라이언트
 
 logger = logging.getLogger(__name__)
-
-# OpenAI 클라이언트는 '지연 생성'한다 — 키가 없어도 import 자체는 실패하지 않게(테스트/부분 실행 대비).
-_client: OpenAI | None = None
-
-
-def _get_client() -> OpenAI:
-    global _client
-    if _client is None:
-        _client = OpenAI(
-            api_key=config.require_gms_key(),  # 없으면 여기서 명확히 실패
-            base_url=config.GMS_BASE_URL,      # ★ base_url을 GMS로 → GMS 프록시로 호출
-            timeout=30.0,                      # 응답 지연 상한(초)
-        )
-    return _client
 
 
 def chat(
@@ -55,7 +42,7 @@ def chat(
     """
     used_model = model or config.LLM_MODEL
     try:
-        resp = _get_client().chat.completions.create(
+        resp = get_client().chat.completions.create(
             model=used_model,
             messages=messages,
             temperature=temperature,
