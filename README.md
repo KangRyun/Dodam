@@ -14,6 +14,9 @@ Flutter 모바일 앱과 Next.js 웹은 Spring Boot REST API를 공통으로 사
 - Spring Boot 3.5.16
 - Gradle 8.14.3 Wrapper
 - Spring Web MVC
+- Spring Data JPA
+- MySQL 8.4.10 LTS, Flyway
+- H2 In-memory, Testcontainers MySQL
 - Jakarta Bean Validation
 - JUnit 5, Mockito, Spring Boot Test
 - Spotless 8.8.0과 Google Java Format
@@ -21,7 +24,6 @@ Flutter 모바일 앱과 Next.js 웹은 Spring Boot REST API를 공통으로 사
 
 다음 기술은 후속 작업에서 필요한 시점에 추가합니다.
 
-- Spring Data JPA, MySQL 8.4.10 LTS, Flyway
 - Spring Security와 JWT
 - AWS S3, Redis, Firebase Cloud Messaging
 - FastAPI 연동
@@ -48,8 +50,12 @@ S15P11B209/
 │       │   └── resources/
 │       │       ├── application.yml
 │       │       ├── application-local.yml
-│       │       └── application-test.yml
-│       └── test/java/com/ssafy/b209/B209ApplicationTests.java
+│       │       ├── application-test.yml
+│       │       ├── application-integration-test.yml
+│       │       └── db/migration/V1__create_initial_schema.sql
+│       └── test/java/com/ssafy/b209/
+│           ├── B209ApplicationTests.java
+│           └── database/DatabaseMigrationIntegrationTest.java
 ├── frontend/
 │   ├── mobile/
 │   └── web/
@@ -132,6 +138,109 @@ Profile을 명시하려면 다음 명령을 사용합니다.
 gradlew.bat bootRun --args="--spring.profiles.active=local"
 ```
 
+## Database
+
+```text
+MySQL: 8.4.10 LTS
+H2: 빠른 테스트 전용
+Testcontainers MySQL: 통합 테스트 전용
+Migration: Flyway
+Character Set: utf8mb4
+Collation: utf8mb4_0900_ai_ci
+Storage Engine: InnoDB
+```
+
+Profile별 Database 책임은 다음과 같습니다.
+
+| Profile | Database | Flyway | Hibernate `ddl-auto` | 용도 |
+| --- | --- | --- | --- | --- |
+| `local` | 로컬 MySQL | 활성화 | `validate` | 개발 서버 실행 |
+| `test` | H2 In-memory | 비활성화 | `create-drop` | 빠른 Context·Service 테스트 |
+| `integration-test` | Testcontainers MySQL | 활성화 | `validate` | 실제 Migration과 제약조건 검증 |
+
+H2는 MySQL `JSON`, Collation, FK 삭제 정책, Unique와 Index의 최종 검증에 사용하지 않습니다. MySQL용 Migration을 H2용으로 복제하지 않으며, 최종 호환성은 Testcontainers에서 확인합니다.
+
+### Local Database 준비
+
+MySQL에서 먼저 Database 존재 여부를 확인합니다.
+
+```sql
+SHOW DATABASES;
+```
+
+`dodam`이 없다면 다음과 같이 생성합니다. Database 생성은 Flyway Migration 범위가 아닙니다.
+
+```sql
+CREATE DATABASE dodam
+    CHARACTER SET utf8mb4
+    COLLATE utf8mb4_0900_ai_ci;
+```
+
+로컬 개발에서는 임시로 `root` 계정을 사용할 수 있습니다. 팀 공용 또는 운영 환경에서는 필요한 권한만 가진 `dodam_app` 전용 계정을 사용하고 실제 비밀번호를 문서나 Git에 저장하지 않습니다.
+
+Local Profile은 다음 환경 변수를 사용합니다.
+
+```text
+DB_HOST
+DB_PORT
+DB_NAME
+DB_USERNAME
+DB_PASSWORD
+```
+
+Spring Boot는 저장소 루트의 `.env` 파일을 자동으로 읽지 않습니다. IntelliJ에서는 아래 위치의 개인 Run Configuration에 환경 변수를 입력합니다.
+
+```text
+Run
+→ Edit Configurations
+→ Spring Boot 실행 설정 선택
+→ Environment variables
+```
+
+비밀번호가 없는 로컬 MySQL에서는 `DB_PASSWORD`를 빈 값으로 둘 수 있습니다. 개인 Run Configuration과 실제 `.env`는 Git에 포함하지 않습니다.
+
+### Local Profile 실행
+
+macOS 또는 Linux:
+
+```bash
+DB_HOST=127.0.0.1 \
+DB_PORT=3306 \
+DB_NAME=dodam \
+DB_USERNAME=root \
+DB_PASSWORD='개인 비밀번호' \
+./gradlew bootRun --args='--spring.profiles.active=local'
+```
+
+Windows PowerShell:
+
+```powershell
+$env:DB_HOST="127.0.0.1"
+$env:DB_PORT="3306"
+$env:DB_NAME="dodam"
+$env:DB_USERNAME="root"
+$env:DB_PASSWORD="개인 비밀번호"
+
+.\gradlew.bat bootRun --args="--spring.profiles.active=local"
+```
+
+### Migration 관리
+
+- 애플리케이션 실행 시 Flyway가 `src/main/resources/db/migration`의 Migration을 적용합니다.
+- 파일명은 `V{버전}__{설명}.sql` 형식을 사용합니다.
+- 이미 적용된 Migration은 수정하지 않고 스키마 변경 시 새 Migration을 추가합니다.
+- Local과 Integration Test에서는 Hibernate `ddl-auto=validate`만 사용합니다.
+- Flyway가 스키마 변경의 단일 기준이며 Flyway Clean은 비활성화되어 있습니다.
+- ERDCloud에는 `V1__create_initial_schema.sql`을 SQL Import합니다.
+
+예시:
+
+```text
+V1__create_initial_schema.sql
+V2__add_drawing_indexes.sql
+V3__add_report_status.sql
+```
+
 ## 테스트
 
 ```bash
@@ -140,6 +249,16 @@ gradlew.bat bootRun --args="--spring.profiles.active=local"
 
 # Windows
 gradlew.bat clean test
+```
+
+전체 테스트에는 Testcontainers MySQL 통합 테스트가 포함되므로 Docker가 실행 중이어야 합니다. 통합 테스트만 실행하려면 다음 명령을 사용합니다.
+
+```bash
+# macOS / Linux
+./gradlew test --tests "*DatabaseMigrationIntegrationTest"
+
+# Windows
+gradlew.bat test --tests "*DatabaseMigrationIntegrationTest"
 ```
 
 ## 코드 포맷
