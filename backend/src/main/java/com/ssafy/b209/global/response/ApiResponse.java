@@ -2,6 +2,7 @@ package com.ssafy.b209.global.response;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.Objects;
 
 /**
@@ -13,6 +14,7 @@ import java.util.Objects;
  * @param <T> 응답 데이터 타입
  */
 @JsonPropertyOrder({"success", "code", "message", "data"})
+@Schema(description = "공통 성공 응답")
 public final class ApiResponse<T> {
 
   private final boolean success;
@@ -67,6 +69,7 @@ public final class ApiResponse<T> {
    * @return 항상 {@code true}
    */
   @JsonProperty("success")
+  @Schema(description = "요청 성공 여부", example = "true")
   public boolean success() {
     return success;
   }
@@ -77,6 +80,7 @@ public final class ApiResponse<T> {
    * @return 성공 코드
    */
   @JsonProperty("code")
+  @Schema(description = "애플리케이션 성공 코드", example = "COMMON_200")
   public String code() {
     return code;
   }
@@ -87,6 +91,7 @@ public final class ApiResponse<T> {
    * @return 성공 메시지
    */
   @JsonProperty("message")
+  @Schema(description = "성공 메시지", example = "요청이 성공했습니다.")
   public String message() {
     return message;
   }
@@ -97,6 +102,7 @@ public final class ApiResponse<T> {
    * @return 응답 데이터, 데이터가 없는 HTTP 200 응답이면 {@code null}
    */
   @JsonProperty("data")
+  @Schema(description = "응답 데이터")
   public T data() {
     return data;
   }

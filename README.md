@@ -19,6 +19,7 @@ Flutter 모바일 앱과 Next.js 웹은 Spring Boot REST API를 공통으로 사
 - H2 In-memory, Testcontainers MySQL
 - Jakarta Bean Validation
 - JUnit 5, Mockito, Spring Boot Test
+- springdoc-openapi
 - Spotless 8.8.0과 Google Java Format
 - SLF4J와 Logback
 
@@ -27,7 +28,6 @@ Flutter 모바일 앱과 Next.js 웹은 Spring Boot REST API를 공통으로 사
 - Spring Security와 JWT
 - AWS S3, Redis, Firebase Cloud Messaging
 - FastAPI 연동
-- springdoc-openapi, Testcontainers
 - Actuator와 Micrometer
 
 Actuator는 초기 Application Context와 서버 실행 확인에 필수적이지 않아 현재 의존성에서 제외했습니다.
@@ -137,6 +137,35 @@ Profile을 명시하려면 다음 명령을 사용합니다.
 # Windows
 gradlew.bat bootRun --args="--spring.profiles.active=local"
 ```
+
+## Swagger UI와 OpenAPI
+
+백엔드 실행 후 아래 URL에서 API 문서를 확인할 수 있습니다. 기본 포트는 `8080`이며, 서버 포트를 변경했다면 URL의 포트도 함께 변경합니다.
+
+```text
+http://localhost:8080/swagger-ui.html
+http://localhost:8080/swagger-ui/index.html
+http://localhost:8080/v3/api-docs
+http://localhost:8080/v3/api-docs/api-v1
+```
+
+`/swagger-ui.html`은 `/swagger-ui/index.html`로 리다이렉트되는 호환 경로입니다. Swagger UI를 연 뒤 API와 공통 Schema를 확인하고, 각 Endpoint에서 **Try it out**을 선택해 요청 값을 입력한 다음 **Execute**로 요청합니다. 실행 결과의 HTTP Status와 Response Body를 함께 확인합니다.
+
+기본 OpenAPI 문서는 `/v3/api-docs`이고, `/v3/api-docs/api-v1`은 `/api/v1/**` 경로만 포함하는 `api-v1` 그룹 문서입니다. 현재 Production Controller가 아직 없으므로 문서의 API 목록은 비어 있을 수 있습니다. Controller와 요청·응답 DTO를 추가하면 해당 API와 공통 Schema가 문서에 표시됩니다.
+
+## CORS 정책
+
+CORS는 `/api/v1/**`에만 적용합니다. local Profile에서는 아래 정책을 사용합니다.
+
+| 항목 | 값 |
+| --- | --- |
+| 허용 Origin | `http://localhost:3000`, `http://127.0.0.1:3000` |
+| 허용 Method | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `OPTIONS` |
+| 허용 Header | `Content-Type`, `Accept`, `Authorization` |
+| Credentials | `false` |
+| Preflight Max Age | 3600초 |
+
+Origin은 scheme·host·port가 모두 정확히 일치해야 하며 wildcard는 허용하지 않습니다. 허용 Origin은 Profile별 `app.cors.allowed-origins`로 분리해 설정하고, 설정이 비어 있으면 Cross-Origin 요청을 허용하지 않습니다. CORS는 브라우저의 Cross-Origin 접근 제어일 뿐 Cookie 인증이나 Spring Security 도입 전의 인증·인가·CSRF 방어를 대체하지 않습니다.
 
 ## Database
 
