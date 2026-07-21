@@ -466,3 +466,53 @@ throw new BusinessException(SomeDomainErrorCode.RESOURCE_NOT_FOUND);
 8. Spring Security와 JWT 인증
 9. S3 Pre-signed URL 업로드
 10. FastAPI AI 서버 연동
+
+## 그림 활동 세션 생성 API
+
+아동의 그림 활동을 시작할 때 다음 Endpoint를 사용합니다.
+
+```http
+POST /api/v1/drawing-sessions
+Idempotency-Key: 550e8400-e29b-41d4-a716-446655440000
+Content-Type: application/json
+```
+
+CANVAS 입력 방식은 Canvas 설정이 필요합니다.
+
+```json
+{
+  "childId": 1,
+  "drawingTypeId": 2,
+  "inputMethod": "CANVAS",
+  "clientStartedAt": "2026-07-21T11:30:00+09:00",
+  "canvas": {
+    "width": 1920,
+    "height": 1080,
+    "backgroundColor": "#FFFFFF"
+  }
+}
+```
+
+UPLOAD 입력 방식에서는 `canvas`를 사용하지 않습니다. 이미지 파일 업로드는 이 API의 범위가 아니며 후속 API에서 처리합니다.
+
+```json
+{
+  "childId": 1,
+  "drawingTypeId": 2,
+  "inputMethod": "UPLOAD",
+  "clientStartedAt": "2026-07-21T11:30:00+09:00",
+  "canvas": null
+}
+```
+
+생성 성공 시 HTTP 201과 `Location: /api/v1/drawing-sessions/{drawingSessionId}`를 반환합니다. 초기 상태는
+`IN_PROGRESS`, 초기 단계는 `DRAWING`이며, 공식 `startedAt`은 클라이언트 시각이 아닌 서버 UTC 시각을
+사용합니다.
+
+- `Idempotency-Key`는 8~100자이며 제어 문자를 포함할 수 없습니다.
+- 동일한 Key와 동일한 `childId`, `drawingTypeId`, `inputMethod` 요청은 기존 세션을 반환합니다.
+- 동일한 Key를 다른 핵심 요청에 사용하면 HTTP 409를 반환합니다.
+- 아동 한 명에게 동시에 하나의 진행 중인 그림 활동 세션만 허용합니다.
+- CANVAS 크기는 가로·세로 각각 1~8192이며 배경색은 `#RRGGBB` 형식입니다.
+- 운영용 `drawing_types` Seed는 포함하지 않습니다. API 호출 전에 환경에 맞는 활성 유형 데이터가 필요합니다.
+- 현재 인증·보호자 소유 관계·필수 동의 검증은 아직 연결되지 않았으며 `startedByUserId`는 `null`로 저장됩니다.
