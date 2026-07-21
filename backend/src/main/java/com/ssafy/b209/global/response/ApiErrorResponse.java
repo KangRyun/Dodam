@@ -2,6 +2,7 @@ package com.ssafy.b209.global.response;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.Objects;
 
 /**
@@ -13,6 +14,7 @@ import java.util.Objects;
  * @param <T> 오류 상세 데이터 타입
  */
 @JsonPropertyOrder({"success", "code", "message", "data"})
+@Schema(description = "공통 오류 응답")
 public final class ApiErrorResponse<T> {
 
   private final boolean success;
@@ -58,6 +60,7 @@ public final class ApiErrorResponse<T> {
    * @return 항상 {@code false}
    */
   @JsonProperty("success")
+  @Schema(description = "요청 성공 여부", example = "false")
   public boolean success() {
     return success;
   }
@@ -68,6 +71,7 @@ public final class ApiErrorResponse<T> {
    * @return 오류 코드
    */
   @JsonProperty("code")
+  @Schema(description = "애플리케이션 오류 코드", example = "COMMON_400_001")
   public String code() {
     return code;
   }
@@ -78,6 +82,7 @@ public final class ApiErrorResponse<T> {
    * @return 오류 메시지
    */
   @JsonProperty("message")
+  @Schema(description = "오류 메시지", example = "요청 값이 올바르지 않습니다.")
   public String message() {
     return message;
   }
@@ -88,6 +93,7 @@ public final class ApiErrorResponse<T> {
    * @return 오류 상세 데이터, 상세 데이터가 없으면 {@code null}
    */
   @JsonProperty("data")
+  @Schema(description = "오류 상세 데이터")
   public T data() {
     return data;
   }

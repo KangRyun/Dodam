@@ -1,6 +1,7 @@
 package com.ssafy.b209.global.response;
 
 import com.fasterxml.jackson.annotation.JsonPropertyOrder;
+import io.swagger.v3.oas.annotations.media.Schema;
 import java.util.List;
 import java.util.Objects;
 
@@ -13,7 +14,10 @@ import java.util.Objects;
  * @param globalErrors 객체 전체에 적용되는 오류 메시지 목록
  */
 @JsonPropertyOrder({"fieldErrors", "globalErrors"})
-public record ValidationErrorData(List<FieldErrorDetail> fieldErrors, List<String> globalErrors) {
+@Schema(description = "유효성 검증 오류 상세 데이터")
+public record ValidationErrorData(
+    @Schema(description = "필드별 유효성 검증 오류 목록") List<FieldErrorDetail> fieldErrors,
+    @Schema(description = "객체 전체에 적용되는 유효성 검증 오류 메시지 목록") List<String> globalErrors) {
 
   /** 전달받은 오류 목록의 null 여부를 검증하고 변경할 수 없는 복사본으로 저장한다. */
   public ValidationErrorData {

@@ -18,3 +18,7 @@ spring:
     validate-on-migrate: true
     out-of-order: false
     clean-disabled: true
+
+app:
+  cors:
+    allowed-origins: []
