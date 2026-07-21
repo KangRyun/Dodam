@@ -1,0 +1,13 @@
+package com.ssafy.b209.drawing.domain;
+
+/** 그림 활동 세션의 처리 상태를 표현한다. */
+public enum DrawingSessionStatus {
+  /** 그림 활동이 진행 중인 상태다. */
+  IN_PROGRESS,
+  /** 그림 활동의 전체 절차를 마친 상태다. */
+  COMPLETED,
+  /** 처리 오류로 그림 활동을 완료하지 못한 상태다. */
+  FAILED,
+  /** 그림 활동이 삭제 처리된 상태다. */
+  DELETED
+}

@@ -38,7 +38,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesInitialMigration() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("1");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(30);
   }
@@ -68,6 +68,20 @@ class DatabaseMigrationIntegrationTest {
     assertThat(indexExists("analyses", "idx_analyses_drawing_session_id", false)).isTrue();
     assertThat(indexExists("notifications", "idx_notifications_recipient_created_at", false))
         .isTrue();
+    assertThat(columnExists("drawing_sessions", "idempotency_key")).isTrue();
+    assertThat(indexExists("drawing_sessions", "uk_drawing_sessions_idempotency_key", true))
+        .isTrue();
+    assertThat(indexExists("drawing_sessions", "idx_drawing_sessions_active_child", false))
+        .isTrue();
+  }
+
+  private boolean columnExists(String tableName, String columnName) {
+    return count(
+            "SELECT COUNT(*) FROM information_schema.columns "
+                + "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?",
+            tableName,
+            columnName)
+        > 0;
   }
 
   private int tableCount() {
