@@ -20,6 +20,8 @@ Desktop.ini
 *.pem
 *.key
 secrets/
+application-secret.yml
+application-*-secret.yml
 
 # ==================================================
 # Logs / temporary files
@@ -107,4 +109,3 @@ ai/checkpoints/
 # ==================================================
 docker-data/
 volumes/
-
