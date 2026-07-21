@@ -287,6 +287,62 @@ gradlew.bat javadoc
 
 생성된 문서는 `build/docs/javadoc/index.html`에서 확인합니다. 저장소 루트 기준 경로는 `backend/build/docs/javadoc/index.html`입니다. Javadoc은 빌드 결과물이므로 `build/` 디렉터리와 함께 Git에 Commit하지 않습니다.
 
+## 공통 API 성공 응답
+
+일반 성공 응답은 다음 구조를 사용합니다.
+
+```json
+{
+  "success": true,
+  "code": "COMMON_200",
+  "message": "요청이 성공했습니다.",
+  "data": {}
+}
+```
+
+- `success`: 요청 성공 여부이며 성공 응답에서는 항상 `true`입니다.
+- `code`: HTTP Status와 구분되는 애플리케이션 응답 코드입니다.
+- `message`: 성공 상황의 기본 설명입니다.
+- `data`: 실제 반환 데이터이며, 데이터가 없는 HTTP 200 응답에서는 `null`입니다.
+
+공통 성공 코드는 다음과 같습니다.
+
+| Code | HTTP Status | Message |
+| --- | --- | --- |
+| `COMMON_200` | `200 OK` | 요청이 성공했습니다. |
+| `COMMON_201` | `201 Created` | 리소스가 생성되었습니다. |
+
+Controller에서는 다음과 같이 사용합니다.
+
+```java
+return ResponseEntity.ok(ApiResponse.ok(response));
+```
+
+```java
+return ResponseEntity
+        .status(CommonSuccessCode.CREATED.getHttpStatus())
+        .body(ApiResponse.of(CommonSuccessCode.CREATED, response));
+```
+
+반환 데이터가 없는 HTTP 200 응답은 다음과 같이 생성합니다.
+
+```java
+return ResponseEntity.ok(ApiResponse.ok());
+```
+
+HTTP 204 응답에는 Body를 포함하지 않습니다.
+
+```java
+return ResponseEntity.noContent().build();
+```
+
+- 일반 성공 응답은 `ApiResponse<T>`로 감쌉니다.
+- HTTP Status는 `ResponseEntity`로 표현하고 Response Body에 중복해서 넣지 않습니다.
+- 목록이 비어 있으면 `null` 대신 빈 배열을 반환합니다.
+- Controller에서 Code와 Message를 문자열로 직접 작성하지 않습니다.
+- 파일 다운로드와 Streaming 응답에는 공통 Wrapper를 강제하지 않습니다.
+- 오류 응답은 후속 전역 예외 처리 Jira 이슈에서 구현합니다.
+
 ## API 버전과 외부 시스템 경계
 
 외부 REST API는 `/api/v1` 경로를 사용합니다. `/api/v1`을 전역 Context Path로 설정하지 않고 향후 Controller의 Request Mapping 또는 공통 상수로 관리합니다. 따라서 Actuator나 Swagger 같은 비즈니스 API 외 경로에 API 버전이 강제로 붙지 않습니다.
