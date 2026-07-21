@@ -343,6 +343,67 @@ return ResponseEntity.noContent().build();
 - 파일 다운로드와 Streaming 응답에는 공통 Wrapper를 강제하지 않습니다.
 - 오류 응답은 후속 전역 예외 처리 Jira 이슈에서 구현합니다.
 
+## 공통 API 오류 응답
+
+일반 오류 응답은 성공 응답과 동일한 최상위 필드를 사용하며 `success`는 항상 `false`입니다.
+
+```json
+{
+  "success": false,
+  "code": "COMMON_400_001",
+  "message": "요청 값이 올바르지 않습니다.",
+  "data": null
+}
+```
+
+Request Body 또는 Model Attribute Validation이 실패하면 안전한 필드 오류와 객체 오류만 `data`에 포함합니다.
+
+```json
+{
+  "success": false,
+  "code": "COMMON_400_001",
+  "message": "요청 값이 올바르지 않습니다.",
+  "data": {
+    "fieldErrors": [
+      {
+        "field": "childName",
+        "message": "아동 이름은 필수입니다."
+      }
+    ],
+    "globalErrors": []
+  }
+}
+```
+
+공통 오류 코드는 다음과 같습니다.
+
+| Code | HTTP Status | Message |
+| --- | --- | --- |
+| `COMMON_400_001` | `400 Bad Request` | 요청 값이 올바르지 않습니다. |
+| `COMMON_400_002` | `400 Bad Request` | 요청 값의 형식이 올바르지 않습니다. |
+| `COMMON_400_003` | `400 Bad Request` | 요청 본문을 읽을 수 없습니다. |
+| `COMMON_400_004` | `400 Bad Request` | 필수 요청 파라미터가 누락되었습니다. |
+| `COMMON_404_001` | `404 Not Found` | 요청한 리소스를 찾을 수 없습니다. |
+| `COMMON_405_001` | `405 Method Not Allowed` | 지원하지 않는 HTTP 메서드입니다. |
+| `COMMON_409_001` | `409 Conflict` | 요청이 현재 데이터 상태와 충돌합니다. |
+| `COMMON_500_001` | `500 Internal Server Error` | 서버 내부 오류가 발생했습니다. |
+
+예상 가능한 비즈니스 오류는 도메인별 `ErrorCode`를 구현한 뒤 `BusinessException`으로 전달합니다.
+
+```java
+throw new BusinessException(SomeDomainErrorCode.RESOURCE_NOT_FOUND);
+```
+
+- Controller에서 반복적인 `try-catch`를 작성하지 않습니다.
+- `GlobalExceptionHandler`가 예외를 HTTP Status와 `ApiErrorResponse<T>`로 변환합니다.
+- 요청 파라미터 Validation 실패는 400으로, Controller 반환값 Validation 실패는 서버 응답 계약 오류인 500으로 처리합니다.
+- HTTP Status는 `ResponseEntity`로 전달하고 Response Body에 중복하지 않습니다.
+- Exception 원문 메시지와 Stack Trace를 클라이언트에 반환하지 않습니다.
+- Validation 오류에는 필드명과 안전한 메시지만 포함하며 `rejectedValue`는 반환하지 않습니다.
+- SQL, 테이블·컬럼·제약조건 이름과 요청 Body 전체를 응답하지 않습니다.
+- 예상 가능한 4xx는 `DEBUG`, 데이터 무결성 충돌은 `WARN`, 예상하지 못한 5xx는 `ERROR`로 기록합니다.
+- 로그에 Token, 비밀번호, 요청 Body와 개인정보를 기록하지 않습니다.
+
 ## API 버전과 외부 시스템 경계
 
 외부 REST API는 `/api/v1` 경로를 사용합니다. `/api/v1`을 전역 Context Path로 설정하지 않고 향후 Controller의 Request Mapping 또는 공통 상수로 관리합니다. 따라서 Actuator나 Swagger 같은 비즈니스 API 외 경로에 API 버전이 강제로 붙지 않습니다.
