@@ -28,7 +28,7 @@ class ChildOpenApiTest {
   @MockitoBean private TemporaryGuardianResolver guardianResolver;
 
   @Test
-  void documentsTheChildDetailLookupContractAndTemporaryAuthenticationBoundary() throws Exception {
+  void documentsTheChildDetailLookupContractAndAccessTokenBoundary() throws Exception {
     JsonNode operation = apiDocument().at("/paths/~1api~1v1~1children~1{childId}/get");
 
     assertThat(operation.isMissingNode()).isFalse();
@@ -37,7 +37,7 @@ class ChildOpenApiTest {
     assertThat(operation.path("description").asText())
         .contains("연결된 활성 아동")
         .contains("상태를 변경하지 않습니다")
-        .contains("임시 인증 Header");
+        .contains("Access Token");
     assertThat(operation.path("parameters"))
         .anySatisfy(
             parameter -> {
@@ -45,16 +45,10 @@ class ChildOpenApiTest {
               assertThat(parameter.path("in").asText()).isEqualTo("path");
               assertThat(parameter.path("required").asBoolean()).isTrue();
             })
-        .anySatisfy(
-            parameter -> {
-              assertThat(parameter.path("name").asText()).isEqualTo("Authorization");
-              assertThat(parameter.path("in").asText()).isEqualTo("header");
-            })
-        .anySatisfy(
-            parameter -> {
-              assertThat(parameter.path("name").asText()).isEqualTo("X-Guardian-User-Id");
-              assertThat(parameter.path("in").asText()).isEqualTo("header");
-            });
+        .noneMatch(
+            parameter ->
+                Set.of("Authorization", "X-Guardian-User-Id")
+                    .contains(parameter.path("name").asText()));
     assertThat(operation.path("responses").fieldNames())
         .toIterable()
         .containsExactlyInAnyOrderElementsOf(Set.of("200", "400", "401", "404", "500"));

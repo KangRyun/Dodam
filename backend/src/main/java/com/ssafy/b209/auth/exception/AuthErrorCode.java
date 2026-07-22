@@ -11,6 +11,9 @@ public enum AuthErrorCode implements ErrorCode {
   /** authorization code가 만료되었거나 Provider가 거부한 경우이다. */
   OAUTH_CODE_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_401_001", "OAuth 인증 정보가 유효하지 않습니다."),
 
+  /** Access Token의 서명, 만료, 발급자 또는 용도 검증이 실패한 경우이다. */
+  ACCESS_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_401_002", "Access Token이 유효하지 않습니다."),
+
   /** 정지되었거나 과거 탈퇴 상태인 사용자가 로그인을 시도한 경우이다. */
   ACCOUNT_SUSPENDED(HttpStatus.FORBIDDEN, "AUTH_403_001", "이용이 제한된 계정입니다."),
 

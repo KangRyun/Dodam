@@ -507,7 +507,9 @@ Content-Type: application/json
 - `redirectUri`는 서버 환경 변수의 Provider별 URI와 정확히 일치해야 합니다.
 - `JWT_SECRET`은 UTF-8 기준 32 Byte 이상이어야 하며 기본 Secret은 제공하지 않습니다.
 - Provider 설정은 `KAKAO_CLIENT_ID`, `KAKAO_CLIENT_SECRET`, `KAKAO_REDIRECT_URI`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, `NAVER_REDIRECT_URI`로 주입합니다.
-- Access Token 인증 연결은 S15P11B209-307, Refresh Token Redis 저장·회전은 S15P11B209-308에서 완료합니다.
+- Access Token Filter는 적용되어 있으며, Refresh Token Redis 저장·회전은 S15P11B209-308에서 완료합니다.
+- Access Token이 전달되면 HS256 서명, 발급자, 만료, `token_type=access`, 사용자 ID Subject를 검증하고 요청 Principal로 사용합니다. Refresh Token을 API 인증에 사용할 수 없습니다.
+- Swagger UI의 `bearerAuth` Authorize 입력에는 `Bearer ` 접두어 없이 Access JWT 값만 입력합니다.
 
 실제 Client Secret, JWT Secret과 Redirect URI는 `.env` 또는 배포 Secret으로 관리하며 Git에 커밋하지 않습니다.
 
@@ -548,7 +550,7 @@ X-Guardian-User-Id: 10
 - `responseModes`는 보호자가 지정한 표시 순서대로 반환합니다.
 - 존재하지 않음, 삭제됨, 비활성 상태와 보호자 연결 없음은 식별자 노출 방지를 위해 모두 HTTP 404와 `CHILD_404_001`을 반환합니다.
 - 조회만으로 아동 프로필이나 보호자 관계 상태를 변경하지 않습니다.
-- 정식 JWT 인증이 아직 구현되지 않아 기존 대화 API와 동일한 임시 `Authorization` 및 `X-Guardian-User-Id` Header를 사용합니다. `X-Guardian-User-Id`는 정식 인증 도입 시 제거할 임시 개발 계약입니다.
+- 운영 요청은 `Authorization: Bearer <access-token>`의 검증된 사용자 ID를 사용합니다. `X-Guardian-User-Id`는 기존 자동화 테스트 전환을 위해 Test Profile에서만 허용되며 운영 기본값에서는 거부됩니다.
 
 ## 그림 활동 세션 생성 API
 
