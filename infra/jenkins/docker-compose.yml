@@ -1,0 +1,54 @@
+# 도담 CI/CD — Jenkins 컨트롤러 (이 EC2에 단독 운영; 앱 스택과 분리된 compose 프로젝트)
+# 관련 이슈: S15P11B209-189 (Jenkins CI/CD)
+#
+# 실행 (repo 루트에서):
+#   docker compose -f infra/jenkins/docker-compose.yml up -d --build
+# 초기 관리자 암호 확인:
+#   docker exec dodam-jenkins cat /var/jenkins_home/secrets/initialAdminPassword
+# UI 접속(외부 미노출 → SSH 터널):
+#   ssh -L 9090:localhost:9090 <ec2>   후 브라우저에서 http://localhost:9090
+
+# 앱 스택(name: dodam)과 분리 — Jenkins는 별도 프로젝트로 관리
+name: dodam-cicd
+
+services:
+  jenkins:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        DOCKER_GID: "988"          # 호스트 docker 그룹 GID (getent group docker 로 확인)
+    image: dodam-jenkins:local
+    container_name: dodam-jenkins
+    restart: unless-stopped
+
+    volumes:
+      - jenkins-home:/var/jenkins_home              # 설정·잡·플러그인·자격증명 영속화(반드시 볼륨)
+      # ⚠️ 호스트 docker 소켓 마운트 = 이 컨테이너에 사실상 호스트 root급 권한.
+      #    → Jenkins UI는 반드시 (a) 인증 활성 (b) 로컬 바인딩(아래 ports)으로만 접근하게 보호.
+      - /var/run/docker.sock:/var/run/docker.sock   # 이미지 빌드·compose 배포용
+
+    ports:
+      # 외부 미노출: 호스트 로컬(127.0.0.1)만 바인딩 → EC2 UFW 80/443 정책 유지.
+      # UI는 SSH 터널로 접근. GitLab 웹훅 도달은 2단계에서 nginx 프록시 or SCM 폴링으로 해결.
+      - "127.0.0.1:9090:8080"       # Jenkins 웹 UI (호스트 9090 → 컨테이너 8080)
+      # 50000(에이전트 포트)은 컨트롤러 인-빌드라 미개방.
+
+    # Jenkins 기동 완료(로그인 페이지 응답) 여부 — 이미지에 설치한 curl 사용
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/login"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 60s             # 최초 기동(플러그인 로딩)에 여유
+
+    networks:
+      - dodam-cicd-net
+
+networks:
+  dodam-cicd-net:
+    driver: bridge
+
+# Jenkins 홈(모든 설정·자격증명·빌드 이력) — 컨테이너 재생성해도 유지
+volumes:
+  jenkins-home:
