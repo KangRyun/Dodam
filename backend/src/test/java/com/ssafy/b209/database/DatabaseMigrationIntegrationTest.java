@@ -1,6 +1,7 @@
 package com.ssafy.b209.database;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
@@ -38,7 +39,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(63);
     assertThat(tableExists("refresh_tokens")).isFalse();
@@ -126,6 +127,43 @@ class DatabaseMigrationIntegrationTest {
         .isTrue();
   }
 
+  @Test
+  void createsDrawingAssetUploadColumnsAndUniqueConstraints() {
+    assertThat(columnExists("drawing_assets", "captured_at")).isTrue();
+    assertThat(columnIsNullable("drawing_assets", "captured_at")).isFalse();
+    assertThat(indexExists("drawing_assets", "uk_drawing_assets_session_type_version", true))
+        .isTrue();
+    assertThat(columnExists("drawing_assets", "final_drawing_session_id")).isTrue();
+    assertThat(generatedColumnContains("drawing_assets", "final_drawing_session_id", "FINAL"))
+        .isTrue();
+    assertThat(indexExists("drawing_assets", "uk_drawing_assets_final_session", true)).isTrue();
+  }
+
+  @Test
+  void enforcesDrawingAssetVersionAndFinalAssetUniqueness() {
+    jdbcTemplate.update(
+        "INSERT INTO children (id, nickname, birth_date) VALUES (9001, '테스트 아동', '2020-01-01')");
+    jdbcTemplate.update(
+        "INSERT INTO drawing_types (id, code, name, activity_category, selectable_by) "
+            + "VALUES (9001, 'SNAPSHOT_TEST', '스냅샷 테스트', 'GENERAL', 'BOTH')");
+    jdbcTemplate.update(
+        "INSERT INTO drawing_sessions "
+            + "(id, child_id, drawing_type_id, input_method, session_status, current_stage) "
+            + "VALUES (9001, 9001, 9001, 'CANVAS', 'IN_PROGRESS', 'DRAWING'), "
+            + "(9002, 9001, 9001, 'CANVAS', 'IN_PROGRESS', 'DRAWING')");
+
+    insertDrawingAsset(9001, "INTERMEDIATE", 1, "first");
+
+    assertThatThrownBy(() -> insertDrawingAsset(9001, "INTERMEDIATE", 1, "duplicate"))
+        .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+
+    insertDrawingAsset(9001, "FINAL", 1, "final-first");
+    assertThatThrownBy(() -> insertDrawingAsset(9001, "FINAL", 2, "final-second"))
+        .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+
+    insertDrawingAsset(9002, "INTERMEDIATE", 1, "other-session");
+  }
+
   private boolean columnExists(String tableName, String columnName) {
     return count(
             "SELECT COUNT(*) FROM information_schema.columns "
@@ -133,6 +171,41 @@ class DatabaseMigrationIntegrationTest {
             tableName,
             columnName)
         > 0;
+  }
+
+  private boolean columnIsNullable(String tableName, String columnName) {
+    return count(
+            "SELECT COUNT(*) FROM information_schema.columns "
+                + "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? "
+                + "AND is_nullable = 'YES'",
+            tableName,
+            columnName)
+        > 0;
+  }
+
+  private boolean generatedColumnContains(
+      String tableName, String columnName, String expectedFragment) {
+    return count(
+            "SELECT COUNT(*) FROM information_schema.columns "
+                + "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? "
+                + "AND generation_expression LIKE ?",
+            tableName,
+            columnName,
+            "%" + expectedFragment + "%")
+        > 0;
+  }
+
+  private void insertDrawingAsset(
+      long drawingSessionId, String assetType, int assetVersion, String storageKey) {
+    jdbcTemplate.update(
+        "INSERT INTO drawing_assets "
+            + "(drawing_session_id, asset_type, asset_version, storage_key, mime_type, "
+            + "file_size_bytes, checksum_sha256, captured_at) "
+            + "VALUES (?, ?, ?, ?, 'image/png', 8, REPEAT('a', 64), NOW(6))",
+        drawingSessionId,
+        assetType,
+        assetVersion,
+        storageKey);
   }
 
   private int tableCount() {

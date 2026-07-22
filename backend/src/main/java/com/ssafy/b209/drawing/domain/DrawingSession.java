@@ -123,6 +123,17 @@ public class DrawingSession {
   }
 
   /**
+   * 현재 세션이 그림 스냅샷 업로드를 받을 수 있는 상태인지 확인한다.
+   *
+   * @return 삭제되지 않은 진행 중 DRAWING 단계이면 {@code true}
+   */
+  public boolean isSnapshotUploadable() {
+    return deletedAt == null
+        && sessionStatus == DrawingSessionStatus.IN_PROGRESS
+        && currentStage == DrawingStage.DRAWING;
+  }
+
+  /**
    * 그림 활동 세션 식별자를 반환한다.
    *
    * @return 영속화된 세션 식별자

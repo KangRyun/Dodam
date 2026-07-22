@@ -11,11 +11,14 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.HexFormat;
 import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -48,9 +51,57 @@ class LocalImageStorageTest {
     assertThat(stored.storedFileName()).isEqualTo(FIRST_UUID + ".png");
     assertThat(stored.contentType()).isEqualTo("image/png");
     assertThat(stored.size()).isEqualTo(PNG.length);
+    assertThat(stored.checksumSha256()).isEqualTo(sha256(PNG));
     assertThat(Path.of(stored.storageKey())).isRelative();
     assertThat(stored.storageKey()).doesNotContain("\\").doesNotContain(root.toString());
     assertThat(Files.readAllBytes(resolveStorageKey(root, stored.storageKey()))).isEqualTo(PNG);
+  }
+
+  @Test
+  void deletesAStoredImageByItsRelativeKey() {
+    Path root = tempDir.resolve("images");
+    LocalImageStorage storage = storage(root, 1024, () -> FIRST_UUID);
+    StoredImage stored = storage.store(command(PNG, "image/png", "drawing.png"));
+
+    storage.delete(stored.storageKey());
+
+    assertThat(resolveStorageKey(root, stored.storageKey())).doesNotExist();
+  }
+
+  @Test
+  void treatsDeletingAMissingImageAsCompleted() {
+    LocalImageStorage storage = storage(tempDir.resolve("images"), 1024, () -> FIRST_UUID);
+
+    storage.delete("2026/07/22/missing.png");
+  }
+
+  @Test
+  void rejectsAbsoluteAndEscapingDeletionKeys() {
+    Path root = tempDir.resolve("images");
+    LocalImageStorage storage = storage(root, 1024, () -> FIRST_UUID);
+
+    assertBusinessError(
+        () -> storage.delete(root.resolve("drawing.png").toString()),
+        ImageStorageErrorCode.INVALID_STORAGE_PATH);
+    assertBusinessError(
+        () -> storage.delete("../outside.png"), ImageStorageErrorCode.INVALID_STORAGE_PATH);
+  }
+
+  @Test
+  void rejectsASymbolicLinkInADeletionKey() throws IOException {
+    Path root = tempDir.resolve("images");
+    Path outside = tempDir.resolve("outside");
+    Files.createDirectories(root);
+    Files.createDirectories(outside);
+    try {
+      Files.createSymbolicLink(root.resolve("linked"), outside);
+    } catch (UnsupportedOperationException | IOException | SecurityException exception) {
+      assumeTrue(false, "Symbolic links are unavailable: " + exception.getClass().getSimpleName());
+    }
+    LocalImageStorage storage = storage(root, 1024, () -> FIRST_UUID);
+
+    assertBusinessError(
+        () -> storage.delete("linked/image.png"), ImageStorageErrorCode.INVALID_STORAGE_PATH);
   }
 
   @Test
@@ -273,6 +324,14 @@ class LocalImageStorageTest {
       result[index] = (byte) values[index];
     }
     return result;
+  }
+
+  private static String sha256(byte[] bytes) {
+    try {
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes));
+    } catch (NoSuchAlgorithmException exception) {
+      throw new AssertionError(exception);
+    }
   }
 
   private static class TrackingInputStream extends InputStream {

@@ -2,6 +2,7 @@ package com.ssafy.b209.drawing.exception;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.EnumMap;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -10,7 +11,7 @@ class DrawingErrorCodeTest {
 
   @Test
   void exposesTheExactDrawingErrorCodeContract() {
-    Map<DrawingErrorCode, ErrorContract> expected =
+    Map<DrawingErrorCode, ErrorContract> original =
         Map.of(
             DrawingErrorCode.CHILD_NOT_FOUND,
             new ErrorContract(HttpStatus.NOT_FOUND, "DRAWING_404_001", "아동 정보를 찾을 수 없습니다."),
@@ -33,6 +34,34 @@ class DrawingErrorCodeTest {
                 HttpStatus.CONFLICT, "DRAWING_409_002", "동일한 Idempotency-Key가 다른 요청에 사용되었습니다."),
             DrawingErrorCode.DRAWING_SESSION_CREATION_CONFLICT,
             new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_003", "그림 활동 생성 요청이 충돌했습니다."));
+
+    Map<DrawingErrorCode, ErrorContract> expected = new EnumMap<>(DrawingErrorCode.class);
+    expected.putAll(original);
+    expected.put(
+        DrawingErrorCode.DRAWING_SESSION_NOT_FOUND,
+        new ErrorContract(HttpStatus.NOT_FOUND, "DRAWING_404_003", "그림 활동을 찾을 수 없습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_SESSION_NOT_UPLOADABLE,
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_004", "현재 상태에서는 그림을 업로드할 수 없습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_SNAPSHOT_FILE_REQUIRED,
+        new ErrorContract(HttpStatus.BAD_REQUEST, "DRAWING_400_005", "업로드할 그림 파일이 필요합니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_SNAPSHOT_METADATA_INVALID,
+        new ErrorContract(HttpStatus.BAD_REQUEST, "DRAWING_400_006", "그림 스냅샷 정보가 올바르지 않습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_SNAPSHOT_SEQUENCE_CONFLICT,
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_005", "같은 순서의 그림 스냅샷이 이미 존재합니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_FINAL_SNAPSHOT_EXISTS,
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_006", "최종 그림 스냅샷이 이미 존재합니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_SNAPSHOT_STORAGE_FAILED,
+        new ErrorContract(
+            HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_500_001", "그림 스냅샷 저장 중 오류가 발생했습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_SNAPSHOT_CREATION_CONFLICT,
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_007", "그림 스냅샷 저장 요청이 충돌했습니다."));
 
     assertThat(DrawingErrorCode.values()).containsExactlyInAnyOrderElementsOf(expected.keySet());
     expected.forEach(

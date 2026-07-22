@@ -7,12 +7,16 @@ import java.io.OutputStream;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.util.HexFormat;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
@@ -96,13 +100,63 @@ public final class LocalImageStorage implements ImageStorage {
         validateCopiedImage(command.size(), copied, declaredFormat);
       }
       return moveToFinalFile(
-          temporaryFile, root, targetDirectory, date, declaredFormat, copied.size());
+          temporaryFile,
+          root,
+          targetDirectory,
+          date,
+          declaredFormat,
+          copied.size(),
+          copied.checksumSha256());
     } catch (BusinessException exception) {
       throw exception;
     } catch (IOException | SecurityException exception) {
       throw new BusinessException(ImageStorageErrorCode.IMAGE_STORAGE_FAILED);
     } finally {
       deleteTemporaryFile(temporaryFile);
+    }
+  }
+
+  /**
+   * 로컬 Storage Root 내부의 이미지 한 건을 보상 삭제한다.
+   *
+   * @param storageKey 저장 시 반환된 {@code /} 구분 상대 Key
+   * @throws BusinessException Key가 Root를 벗어나거나 파일 시스템 삭제에 실패한 경우
+   */
+  @Override
+  public void delete(String storageKey) {
+    try {
+      String[] segments = validateStorageKey(storageKey);
+      Path root = prepareRoot();
+      Path current = root;
+      for (int index = 0; index < segments.length - 1; index++) {
+        Path candidate = current.resolve(segments[index]).normalize();
+        validateInsideRoot(root, candidate);
+        if (!Files.exists(candidate, LinkOption.NOFOLLOW_LINKS)) {
+          return;
+        }
+        if (Files.isSymbolicLink(candidate)
+            || !Files.isDirectory(candidate, LinkOption.NOFOLLOW_LINKS)) {
+          throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
+        }
+        current = candidate.toRealPath();
+        validateInsideRoot(root, current);
+      }
+
+      Path target = current.resolve(segments[segments.length - 1]).normalize();
+      validateInsideRoot(root, target);
+      if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+        return;
+      }
+      if (Files.isSymbolicLink(target) || !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+        throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
+      }
+      Files.deleteIfExists(target);
+    } catch (BusinessException exception) {
+      throw exception;
+    } catch (InvalidPathException exception) {
+      throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
+    } catch (IOException | SecurityException exception) {
+      throw new BusinessException(ImageStorageErrorCode.IMAGE_STORAGE_FAILED);
     }
   }
 
@@ -170,6 +224,7 @@ public final class LocalImageStorage implements ImageStorage {
     byte[] header = new byte[HEADER_SIZE];
     int headerLength = 0;
     long total = 0;
+    MessageDigest checksum = sha256Digest();
 
     try (OutputStream outputStream =
         Files.newOutputStream(temporaryFile, StandardOpenOption.WRITE)) {
@@ -187,10 +242,11 @@ public final class LocalImageStorage implements ImageStorage {
           headerLength += headerBytes;
         }
         outputStream.write(buffer, 0, read);
+        checksum.update(buffer, 0, read);
         total += read;
       }
     }
-    return new CopyResult(header, headerLength, total);
+    return new CopyResult(header, headerLength, total, HexFormat.of().formatHex(checksum.digest()));
   }
 
   private void validateCopiedImage(
@@ -213,7 +269,8 @@ public final class LocalImageStorage implements ImageStorage {
       Path targetDirectory,
       LocalDate date,
       ImageFormat format,
-      long size)
+      long size,
+      String checksumSha256)
       throws IOException {
     for (int attempt = 0; attempt < MAX_FILE_NAME_ATTEMPTS; attempt++) {
       UUID uuid = uuidSupplier.get();
@@ -237,7 +294,8 @@ public final class LocalImageStorage implements ImageStorage {
                 date.getMonthValue(),
                 date.getDayOfMonth(),
                 storedFileName);
-        return new StoredImage(storageKey, storedFileName, format.contentType, size);
+        return new StoredImage(
+            storageKey, storedFileName, format.contentType, size, checksumSha256);
       } catch (FileAlreadyExistsException ignored) {
         // 동시에 같은 UUID가 선점된 경우 새 UUID로 재시도한다.
       }
@@ -256,6 +314,33 @@ public final class LocalImageStorage implements ImageStorage {
   private void validateInsideRoot(Path root, Path candidate) {
     if (!candidate.isAbsolute() || !candidate.normalize().startsWith(root)) {
       throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
+    }
+  }
+
+  private String[] validateStorageKey(String storageKey) {
+    if (storageKey == null
+        || storageKey.isBlank()
+        || storageKey.indexOf('\\') >= 0
+        || Path.of(storageKey).isAbsolute()) {
+      throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
+    }
+    String[] segments = storageKey.split("/", -1);
+    if (segments.length == 0) {
+      throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
+    }
+    for (String segment : segments) {
+      if (segment.isBlank() || ".".equals(segment) || "..".equals(segment)) {
+        throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
+      }
+    }
+    return segments;
+  }
+
+  private MessageDigest sha256Digest() {
+    try {
+      return MessageDigest.getInstance("SHA-256");
+    } catch (NoSuchAlgorithmException exception) {
+      throw new IllegalStateException("SHA-256 algorithm is unavailable", exception);
     }
   }
 
@@ -291,7 +376,7 @@ public final class LocalImageStorage implements ImageStorage {
     }
   }
 
-  private record CopyResult(byte[] header, int headerLength, long size) {}
+  private record CopyResult(byte[] header, int headerLength, long size, String checksumSha256) {}
 
   private enum ImageFormat {
     PNG("image/png", "png", Set.of("png")),
