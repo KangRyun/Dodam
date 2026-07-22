@@ -14,6 +14,42 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('Remote Draft 저장은 v1.0 PUT endpoint와 multipart를 사용한다', () async {
+    final recorder = _RecordingInterceptor();
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        interceptors: [recorder],
+      ),
+    );
+
+    final result = await repository.saveDraft(
+      42,
+      _png,
+      const DraftCanvasStateDto(
+        lastEventSequence: 17,
+        toolState: null,
+        viewport: null,
+        clientSavedAt: '2026-07-22T10:00:00Z',
+      ),
+    );
+
+    final request = recorder.requests.single;
+    expect(request.method, 'PUT');
+    expect(request.uri.path, '/api/v1/drawing-sessions/42/draft');
+    final form = request.data as FormData;
+    expect(form.files.single.key, 'preview');
+    expect(form.fields.single.key, 'canvasState');
+    expect(form.fields.single.value, contains('"lastEventSequence":17'));
+    expect(form.fields.map((field) => field.key), isNot(contains('image')));
+    expect(
+      form.fields.map((field) => field.key),
+      isNot(contains('lastEventSequence')),
+    );
+    expect(result.drawingAssetId, 140);
+    expect(result.assetVersion, 4);
+  });
+
   test(
     'Remote는 drawing-complete와 PUT reflection v1.0 endpoint를 사용한다',
     () async {
@@ -452,11 +488,11 @@ final class _CompletionRepository implements DrawingRepository {
     StrokeBatchRequestDto request,
   ) => throw UnimplementedError();
   @override
-  Future<DrawingAssetDto> saveDraft(
+  Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
-    BinaryUploadDto image, {
-    int? lastEventSequence,
-  }) => throw UnimplementedError();
+    BinaryUploadDto preview,
+    DraftCanvasStateDto canvasState,
+  ) => throw UnimplementedError();
   @override
   Future<DrawingSessionDto> createSession(
     CreateDrawingSessionRequestDto request,
@@ -489,6 +525,22 @@ final class _RecordingInterceptor extends Interceptor {
   @override
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     requests.add(options);
+    if (options.path.endsWith('/draft') && options.method == 'PUT') {
+      handler.resolve(
+        Response<Map<String, dynamic>>(
+          requestOptions: options,
+          statusCode: 200,
+          data: const {
+            'drawingAssetId': 140,
+            'assetVersion': 4,
+            'lastEventSequence': 17,
+            'savedAt': '2026-07-22T10:00:01Z',
+            'expiresAt': '2026-07-29T10:00:01Z',
+          },
+        ),
+      );
+      return;
+    }
     if (options.path.endsWith('/drawing-complete')) {
       handler.resolve(
         Response<Map<String, dynamic>>(

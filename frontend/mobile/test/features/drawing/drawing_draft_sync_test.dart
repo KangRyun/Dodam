@@ -10,29 +10,34 @@ import 'package:dodam/features/drawing/presentation/models/drawing_stroke.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Draft multipart에 PNG MIME과 lastEventSequence를 포함한다', () {
+  test('Draft multipart는 preview와 canvasState만 포함한다', () {
+    const canvasState = DraftCanvasStateDto(
+      lastEventSequence: 17,
+      toolState: null,
+      viewport: null,
+      clientSavedAt: '2026-07-22T00:00:00Z',
+    );
     final form = buildDraftFormData(
       const BinaryUploadDto(
         bytes: [1, 2, 3],
         fileName: 'draft.png',
         mimeType: 'image/png',
       ),
-      lastEventSequence: 17,
+      canvasState,
     );
 
-    expect(form.files.single.key, 'image');
+    expect(form.files.single.key, 'preview');
     expect(form.files.single.value.filename, 'draft.png');
     expect(form.files.single.value.contentType?.toString(), 'image/png');
-    expect(
-      form.fields
-          .singleWhere((field) => field.key == 'lastEventSequence')
-          .value,
-      '17',
-    );
+    expect(form.fields.map((field) => field.key), ['canvasState']);
+    expect(form.fields.single.value, contains('"lastEventSequence":17'));
+    expect(form.fields.single.value, contains('"toolState":null'));
+    expect(form.fields.single.value, contains('"viewport":null'));
+    expect(form.fields.map((field) => field.key), isNot(contains('image')));
   });
 
   test('Draft 저장 중 성공 상태와 snapshot 시점의 마지막 seq를 전달한다', () async {
-    final completer = Completer<DrawingAssetDto>();
+    final completer = Completer<DraftSaveResponseDto>();
     final repository = _FakeDrawingRepository(saveCompleter: completer);
     final coordinator = DrawingSyncCoordinator(
       sessionId: 42,
@@ -47,7 +52,7 @@ void main() {
     expect(coordinator.saveStatus, DrawingSaveStatus.saving);
     expect(repository.lastEventSequence, 2);
 
-    completer.complete(_asset);
+    completer.complete(_draftSaveResponse);
     await saving;
     expect(coordinator.saveStatus, DrawingSaveStatus.saved);
   });
@@ -118,14 +123,12 @@ const _png = BinaryUploadDto(
   mimeType: 'image/png',
 );
 
-const _asset = DrawingAssetDto(
-  assetId: 1,
-  assetType: 'DRAFT',
+const _draftSaveResponse = DraftSaveResponseDto(
+  drawingAssetId: 1,
   assetVersion: 1,
-  fileUrl: 'https://example.test/draft.png',
-  mimeType: 'image/png',
-  widthPx: 100,
-  heightPx: 100,
+  lastEventSequence: 2,
+  savedAt: '2026-07-22T00:00:00Z',
+  expiresAt: null,
 );
 
 DrawingStroke _stroke({int t = 10}) => DrawingStroke(
@@ -140,7 +143,7 @@ DrawingStroke _stroke({int t = 10}) => DrawingStroke(
 final class _FakeDrawingRepository implements DrawingRepository {
   _FakeDrawingRepository({this.saveCompleter, this.saveError});
 
-  Completer<DrawingAssetDto>? saveCompleter;
+  Completer<DraftSaveResponseDto>? saveCompleter;
   Object? saveError;
   int strokeCalls = 0;
   int draftCalls = 0;
@@ -161,15 +164,15 @@ final class _FakeDrawingRepository implements DrawingRepository {
   }
 
   @override
-  Future<DrawingAssetDto> saveDraft(
+  Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
-    BinaryUploadDto image, {
-    int? lastEventSequence,
-  }) async {
+    BinaryUploadDto preview,
+    DraftCanvasStateDto canvasState,
+  ) async {
     draftCalls += 1;
-    this.lastEventSequence = lastEventSequence;
+    lastEventSequence = canvasState.lastEventSequence;
     if (saveError case final error?) throw error;
-    return saveCompleter?.future ?? _asset;
+    return saveCompleter?.future ?? _draftSaveResponse;
   }
 
   @override
