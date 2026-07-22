@@ -21,6 +21,7 @@ abstract final class AppRouter {
     AuthProviderSignIn? authSignIn,
     AuthOnboardingComplete? authCompleteOnboarding,
     AuthSignOut? authSignOut,
+    AuthSessionRestore? authRestoreSession,
     ActivityRepository? activityRepository,
     DrawingRepository? drawingRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
@@ -29,6 +30,12 @@ abstract final class AppRouter {
     final segments = Uri.tryParse(location)?.pathSegments ?? const <String>[];
 
     final screen = switch (segments) {
+      ['auth', 'bootstrap'] when authRestoreSession != null =>
+        AuthBootstrapScreen(
+          restoreSession: authRestoreSession,
+          onGuardianAuthenticated: goGuardianHome,
+          onLoginRequired: goLogin,
+        ),
       ['auth', 'login']
           when authSignIn != null && authCompleteOnboarding != null =>
         AuthenticationFlowScreen(
