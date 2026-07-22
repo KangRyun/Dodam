@@ -1,16 +1,33 @@
+import 'dart:async';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../../../../app/router/app_routes.dart';
 import '../../../../app/widgets/app_placeholder_scaffold.dart';
 import '../../../../design_system/design_system.dart';
+import '../../../drawing/application/drawing_sync_coordinator.dart';
+import '../../../drawing/data/dto/drawing_dtos.dart';
+import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 
 class DrawingScreen extends StatefulWidget {
-  const DrawingScreen({required this.childId, this.sessionId, super.key});
+  const DrawingScreen({
+    required this.childId,
+    this.sessionId,
+    this.drawingRepository,
+    this.syncPolicy = const DrawingSyncPolicy(),
+    this.syncCoordinator,
+    super.key,
+  });
 
   final String childId;
   final int? sessionId;
+  final DrawingRepository? drawingRepository;
+  final DrawingSyncPolicy syncPolicy;
+  final DrawingSyncCoordinator? syncCoordinator;
 
   @override
   State<DrawingScreen> createState() => _DrawingScreenState();
@@ -26,6 +43,39 @@ class _DrawingScreenState extends State<DrawingScreen> {
   Color _color = AppColors.drawingInk;
   double _thickness = _regular;
   int? _activePointer;
+  final GlobalKey _canvasBoundaryKey = GlobalKey();
+  late final DrawingSyncCoordinator _syncCoordinator;
+  late final bool _ownsSyncCoordinator;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownsSyncCoordinator = widget.syncCoordinator == null;
+    _syncCoordinator =
+        widget.syncCoordinator ??
+        DrawingSyncCoordinator(
+          sessionId: widget.sessionId,
+          repository: widget.drawingRepository,
+          policy: widget.syncPolicy,
+        );
+    _syncCoordinator.addListener(_handleSyncChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _syncCoordinator.start(snapshotProvider: _captureCanvasSnapshot);
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _syncCoordinator.removeListener(_handleSyncChanged);
+    if (_ownsSyncCoordinator) _syncCoordinator.dispose();
+    super.dispose();
+  }
+
+  void _handleSyncChanged() {
+    if (mounted) setState(() {});
+  }
 
   void _startStroke(PointerDownEvent event) {
     if (_activePointer != null) return;
@@ -48,25 +98,57 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   void _endStroke(PointerEvent event) {
     if (_activePointer != event.pointer) return;
+    final stroke = _activeStroke;
+    final completed = event is PointerUpEvent && stroke != null;
     setState(() {
-      final stroke = _activeStroke;
-      if (event is PointerUpEvent && stroke != null) {
+      if (completed) {
         _completedStrokes.add(stroke);
       }
       _activeStroke = null;
       _activePointer = null;
     });
+    final canvasSize = _canvasBoundaryKey.currentContext?.size;
+    if (completed && canvasSize != null) {
+      _syncCoordinator.recordStroke(stroke, canvasSize);
+    }
   }
 
   void _undoLastStroke() {
     if (_activeStroke != null || _completedStrokes.isEmpty) return;
     setState(() => _completedStrokes.removeLast());
+    _syncCoordinator.recordUndo();
   }
 
   DrawingPoint _pointFrom(PointerEvent event) => DrawingPoint(
     position: event.localPosition,
-    pressure: event.pressureMin == event.pressureMax ? 1 : event.pressure,
+    elapsedMilliseconds: _syncCoordinator.elapsedMilliseconds,
+    pressure: _supportedPressure(event),
   );
+
+  double? _supportedPressure(PointerEvent event) {
+    final stylus =
+        event.kind == ui.PointerDeviceKind.stylus ||
+        event.kind == ui.PointerDeviceKind.invertedStylus;
+    if (!stylus || event.pressureMax <= event.pressureMin) return null;
+    // TODO(DEVICE): Verify capability reporting on the target Galaxy Tab/S Pen.
+    return event.pressure.clamp(0.0, 1.0);
+  }
+
+  Future<BinaryUploadDto?> _captureCanvasSnapshot() async {
+    final boundary = _canvasBoundaryKey.currentContext?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary) return null;
+    final image = await boundary.toImage(pixelRatio: 1);
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    image.dispose();
+    if (data == null) return null;
+    final bytes = data.buffer.asUint8List();
+    if (bytes.length > 10 * 1024 * 1024) return null;
+    return BinaryUploadDto(
+      bytes: bytes,
+      fileName: 'drawing-draft.png',
+      mimeType: 'image/png',
+    );
+  }
 
   void _showCompletePlaceholder() {
     showAppMessage(context, message: '그림 완료는 다음 단계에서 연결할게요.');
@@ -105,6 +187,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final canvas = _CanvasPanel(
+            repaintBoundaryKey: _canvasBoundaryKey,
             strokes: _visibleStrokes,
             onPointerDown: _startStroke,
             onPointerMove: _extendStroke,
@@ -117,6 +200,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
             onThicknessChanged: (value) => setState(() => _thickness = value),
             canComplete: _activeStroke == null && _completedStrokes.isNotEmpty,
             onComplete: _showCompletePlaceholder,
+            saveStatus: _syncCoordinator.saveStatus,
+            onRetrySave: () => unawaited(_syncCoordinator.retry()),
           );
           if (constraints.maxWidth >= 900) {
             return Padding(
@@ -148,12 +233,14 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
 class _CanvasPanel extends StatelessWidget {
   const _CanvasPanel({
+    required this.repaintBoundaryKey,
     required this.strokes,
     required this.onPointerDown,
     required this.onPointerMove,
     required this.onPointerUp,
   });
 
+  final GlobalKey repaintBoundaryKey;
   final List<DrawingStroke> strokes;
   final ValueChanged<PointerDownEvent> onPointerDown;
   final ValueChanged<PointerMoveEvent> onPointerMove;
@@ -173,11 +260,14 @@ class _CanvasPanel extends StatelessWidget {
         ),
       ],
     ),
-    child: DrawingCanvas(
-      strokes: strokes,
-      onPointerDown: onPointerDown,
-      onPointerMove: onPointerMove,
-      onPointerUp: onPointerUp,
+    child: RepaintBoundary(
+      key: repaintBoundaryKey,
+      child: DrawingCanvas(
+        strokes: strokes,
+        onPointerDown: onPointerDown,
+        onPointerMove: onPointerMove,
+        onPointerUp: onPointerUp,
+      ),
     ),
   );
 }
@@ -190,6 +280,8 @@ class _DrawingSidePanel extends StatelessWidget {
     required this.onThicknessChanged,
     required this.canComplete,
     required this.onComplete,
+    required this.saveStatus,
+    required this.onRetrySave,
   });
 
   final Color selectedColor;
@@ -198,6 +290,8 @@ class _DrawingSidePanel extends StatelessWidget {
   final ValueChanged<double> onThicknessChanged;
   final bool canComplete;
   final VoidCallback onComplete;
+  final DrawingSaveStatus saveStatus;
+  final VoidCallback onRetrySave;
 
   static const _colors = <(String, Color)>[
     ('검정', AppColors.drawingInk),
@@ -291,6 +385,8 @@ class _DrawingSidePanel extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.lg),
+        _SaveStatusIndicator(status: saveStatus, onRetry: onRetrySave),
+        const SizedBox(height: AppSpacing.sm),
         AppButton(
           key: const ValueKey('drawing-complete'),
           label: '다 그렸어요!',
@@ -300,6 +396,63 @@ class _DrawingSidePanel extends StatelessWidget {
       ],
     ),
   );
+}
+
+class _SaveStatusIndicator extends StatelessWidget {
+  const _SaveStatusIndicator({required this.status, required this.onRetry});
+
+  final DrawingSaveStatus status;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, label, color) = switch (status) {
+      DrawingSaveStatus.localOnly => (
+        Icons.edit_note_rounded,
+        '그림을 안전하게 담고 있어요',
+        AppColors.inkMuted,
+      ),
+      DrawingSaveStatus.saving => (
+        Icons.cloud_upload_outlined,
+        '저장 중...',
+        AppColors.lavender,
+      ),
+      DrawingSaveStatus.saved => (
+        Icons.cloud_done_outlined,
+        '저장됨',
+        AppColors.success,
+      ),
+      DrawingSaveStatus.failed => (
+        Icons.cloud_off_outlined,
+        '저장하지 못했어요',
+        AppColors.error,
+      ),
+    };
+    return Semantics(
+      liveRegion: true,
+      label: label,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 20, color: color),
+          const SizedBox(width: AppSpacing.xs),
+          Flexible(
+            child: Text(
+              label,
+              style: TextStyle(color: color, fontWeight: FontWeight.w700),
+            ),
+          ),
+          if (status == DrawingSaveStatus.failed)
+            IconButton(
+              key: const ValueKey('save-retry'),
+              tooltip: '저장 다시 시도',
+              onPressed: onRetry,
+              icon: const Icon(Icons.refresh_rounded),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _ToolHeading extends StatelessWidget {

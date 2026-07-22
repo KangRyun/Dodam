@@ -156,6 +156,7 @@ services:
     volumes:
       - letsencrypt:/etc/letsencrypt:ro         # 인증서 읽기(발급·갱신은 certbot이 씀)
       - certbot-webroot:/var/www/certbot:ro     # ACME 챌린지 토큰 서빙용
+      - apk-dist:/var/www/apk                   # 팀·데모용 APK 서빙(docker cp로 업로드, git 비추적)
 
     depends_on:
       backend:
@@ -194,3 +195,4 @@ volumes:
   mysql-data:
   letsencrypt:        # /etc/letsencrypt (인증서·계정) — 컨테이너 재생성에도 유지, 저장소 비추적
   certbot-webroot:    # ACME HTTP-01 챌린지 토큰 교환용 (certbot 씀 ↔ nginx 서빙)
+  apk-dist:           # 팀·데모용 APK 파일 (docker cp로 업로드 — 바이너리는 git에 넣지 않음)

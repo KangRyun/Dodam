@@ -4,9 +4,13 @@ Map<String, dynamic> _map(Object? value) =>
     Map<String, dynamic>.from(value! as Map);
 
 final class BinaryUploadDto {
-  const BinaryUploadDto({required this.bytes, required this.fileName});
+  const BinaryUploadDto({
+    required this.bytes,
+    required this.fileName,
+    required this.mimeType,
+  });
   final List<int> bytes;
-  final String fileName;
+  final String fileName, mimeType;
 }
 
 final class DrawingTypeDto {

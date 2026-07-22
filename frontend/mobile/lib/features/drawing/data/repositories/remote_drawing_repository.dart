@@ -4,6 +4,17 @@ import '../../../../core/network/network.dart';
 import '../../domain/repositories/drawing_repository.dart';
 import '../dto/drawing_dtos.dart';
 
+FormData buildDraftFormData(BinaryUploadDto image, {int? lastEventSequence}) =>
+    FormData.fromMap({
+      'image': MultipartFile.fromBytes(
+        image.bytes,
+        filename: image.fileName,
+        contentType: DioMediaType.parse(image.mimeType),
+      ),
+      if (lastEventSequence != null)
+        'lastEventSequence': lastEventSequence.toString(),
+    });
+
 final class RemoteDrawingRepository implements DrawingRepository {
   const RemoteDrawingRepository(this._apiClient);
   final ApiClient _apiClient;
@@ -59,11 +70,7 @@ final class RemoteDrawingRepository implements DrawingRepository {
   }) async {
     final response = await _apiClient.post<Map<String, dynamic>>(
       'drawing-sessions/$sessionId/draft',
-      data: FormData.fromMap({
-        'image': MultipartFile.fromBytes(image.bytes, filename: image.fileName),
-        if (lastEventSequence != null)
-          'lastEventSequence': lastEventSequence.toString(),
-      }),
+      data: buildDraftFormData(image, lastEventSequence: lastEventSequence),
     );
     return DrawingAssetDto.fromJson(response.data!);
   }
@@ -94,6 +101,7 @@ final class RemoteDrawingRepository implements DrawingRepository {
           'image': MultipartFile.fromBytes(
             image.bytes,
             filename: image.fileName,
+            contentType: DioMediaType.parse(image.mimeType),
           ),
         if (lastEventSequence != null)
           'lastEventSequence': lastEventSequence.toString(),
@@ -111,7 +119,11 @@ final class RemoteDrawingRepository implements DrawingRepository {
     final response = await _apiClient.post<Map<String, dynamic>>(
       'drawing-sessions/$sessionId/upload',
       data: FormData.fromMap({
-        'image': MultipartFile.fromBytes(image.bytes, filename: image.fileName),
+        'image': MultipartFile.fromBytes(
+          image.bytes,
+          filename: image.fileName,
+          contentType: DioMediaType.parse(image.mimeType),
+        ),
         'objectCode': ?objectCode,
       }),
     );
