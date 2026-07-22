@@ -97,6 +97,10 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be configured in .env or deployment secrets}
+      # BE→AI 내부 계약 인증 토큰 (S15P11B209-183 · safety review C-183-1).
+      #   RestClientAiQuestionClient가 X-Internal-Token 헤더로 전송 — ai 서비스와 반드시 같은 값.
+      #   reason: :? fail-fast — 미설정 채로 떠서 BE 호출이 전부 401→폴백으로 조용히 저하되는 것 방지.
+      AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN:?AI_INTERNAL_TOKEN must be configured in .env or deployment secrets}
 
     # ⚠️ ports 를 열지 않는다 — 호스트엔 노출 안 함. 내부망(dodam-net)에서 'backend:8080'으로만 접근.
     expose:
@@ -142,6 +146,11 @@ services:
       STT_MODEL: ${STT_MODEL:-whisper-1}         # 음성→텍스트
       TTS_MODEL: ${TTS_MODEL:-gpt-4o-mini-tts}   # 텍스트→음성(지시형)
       TTS_VOICE: ${TTS_VOICE:-fable}             # 곰돌이 톤 보이스
+      # BE↔AI 내부 계약 인증 토큰 (S15P11B209-183 · safety review C-183-1).
+      #   backend 서비스와 반드시 같은 값 — ai가 X-Internal-Token 헤더를 이 값과 대조.
+      #   reason: :? fail-fast(redis와 동일) — 미설정이면 내부 계약이 무인증으로 뜨는 게 최악이라
+      #           compose 기동 자체를 막는다. ai 앱도 미설정 시 기동 실패(ai/main.py — 이중 안전장치).
+      AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN:?AI_INTERNAL_TOKEN must be configured in .env or deployment secrets}
 
     # ⚠️ ports 를 열지 않는다 — 호스트엔 노출 안 함. 내부망(dodam-net)에서 'ai:8000'으로만 접근.
     expose:
