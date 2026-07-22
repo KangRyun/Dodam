@@ -559,3 +559,79 @@ curl -X POST "http://localhost:8080/api/v1/drawing-sessions/100/snapshots" \
 - 응답에는 서버 내부 Storage Key, 절대 경로와 원본 파일명을 포함하지 않습니다.
 - 현재 인증과 그림 활동 소유권 검증은 아직 연결되지 않았습니다.
 - 업로드만으로 세션 상태를 변경하거나 AI 분석을 실행하지 않습니다.
+
+## 그림 초안 자동 저장 및 조회 API
+
+진행 중인 `IN_PROGRESS/DRAWING` 세션의 현재 캔버스 전체본은 다음 Endpoint로 저장합니다.
+
+```http
+PUT /api/v1/drawing-sessions/{drawingSessionId}/draft
+Content-Type: multipart/form-data
+```
+
+```bash
+curl -X PUT "http://localhost:8080/api/v1/drawing-sessions/100/draft" \
+  -H "Accept: application/json" \
+  -F "preview=@draft.png;type=image/png" \
+  -F 'canvasState={"lastEventSequence":17,"clientSavedAt":"2026-07-22T14:30:00+09:00"};type=application/json'
+```
+
+가장 최근 초안 Metadata는 다음 Endpoint로 조회합니다.
+
+```http
+GET /api/v1/drawing-sessions/{drawingSessionId}/draft
+```
+
+- `preview`는 최대 10MB의 JPEG 또는 PNG 이미지이며 기존 `ImageStorage` 검증을 동일하게 적용합니다.
+- `lastEventSequence`는 초안에 반영된 마지막 그림 이벤트 순서이며 저장할 때마다 증가해야 합니다.
+- 현재 초안과 같은 이벤트 순서는 HTTP 409, 더 이전 순서는 HTTP 409로 거부합니다.
+- 서버는 세션 잠금 안에서 `assetVersion`을 1부터 증가시키며 최신 초안은 가장 높은 `assetVersion`으로 결정합니다.
+- 초안은 `DRAFT` 유형이며 최종 그림이나 분석용 `INTERMEDIATE` 스냅샷과 구분됩니다.
+- 자동 저장은 세션 상태·단계를 변경하거나 AI 분석과 최종 그림 생성을 실행하지 않습니다.
+- 최신 조회는 이미지 다운로드 API가 아닙니다. 현재 다운로드 API가 없으므로 `previewUrl`은 `null`이며 내부 Storage Key와 서버 절대 경로를 반환하지 않습니다.
+- 현재 인증과 그림 활동 소유권 검증은 아직 연결되지 않았습니다.
+- 도구 상태·Viewport를 포함한 종합 활동 재개와 초안 삭제는 후속 작업 범위입니다.
+
+## 진행 중 그림 활동 조회 및 재개 API
+
+앱을 다시 열거나 그림 화면으로 돌아왔을 때 아동의 진행 중 세션과 최신 자동 저장 초안을 한 번에 조회합니다.
+
+```http
+GET /api/v1/drawing-sessions/active?childId=1
+```
+
+```json
+{
+  "success": true,
+  "code": "COMMON_200",
+  "message": "요청이 성공했습니다.",
+  "data": {
+    "drawingSessionId": 100,
+    "childId": 1,
+    "drawingType": {"drawingTypeId": 2, "code": "FREE_DRAWING", "name": "자유화"},
+    "inputMethod": "CANVAS",
+    "sessionStatus": "IN_PROGRESS",
+    "currentStage": "DRAWING",
+    "startedAt": "2026-07-21T02:30:00Z",
+    "latestDraft": {
+      "drawingAssetId": 200,
+      "assetVersion": 3,
+      "lastEventSequence": 17,
+      "contentType": "image/png",
+      "fileSize": 4096,
+      "clientSavedAt": "2026-07-21T02:35:00Z",
+      "savedAt": "2026-07-21T02:35:01Z",
+      "previewUrl": null
+    }
+  }
+}
+```
+
+- 삭제되지 않은 `IN_PROGRESS` 세션만 반환하며, 현재 `currentStage`를 그대로 전달합니다. 조회 자체는 상태나 단계를 변경하지 않습니다.
+- 활성 세션이 없으면 HTTP 404와 `DRAWING_404_005`를 반환합니다.
+- 데이터 이상으로 활성 세션이 둘 이상이면 하나를 임의 선택하지 않고 HTTP 500과 `DRAWING_500_003`을 반환합니다.
+- 저장된 초안이 없으면 세션 조회는 성공하고 `latestDraft`가 `null`입니다.
+- `latestDraft`는 `DRAFT` 중 가장 높은 `assetVersion`이며 `FINAL`·`INTERMEDIATE` 스냅샷은 포함하지 않습니다.
+- 현재 이미지 다운로드 API가 없으므로 `previewUrl`은 `null`이며 Storage Key, 절대 경로, 이미지 Byte는 노출하지 않습니다.
+- 조회만으로 초안이나 세션을 생성하지 않고 AI 분석을 실행하지 않으며, 파일 시스템에도 접근하지 않습니다.
+- 현재 인증과 아동 소유권 검증은 아직 연결되지 않았습니다.

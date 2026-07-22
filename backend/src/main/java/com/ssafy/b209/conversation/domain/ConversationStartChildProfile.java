@@ -9,6 +9,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import org.hibernate.annotations.ColumnDefault;
 
 /** 282번 시작 응답과 난이도 Snapshot에 필요한 아동 프로필 읽기 모델이다. */
 @Entity

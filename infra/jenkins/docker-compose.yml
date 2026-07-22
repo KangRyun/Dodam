@@ -28,15 +28,20 @@ services:
       #    → Jenkins UI는 반드시 (a) 인증 활성 (b) 로컬 바인딩(아래 ports)으로만 접근하게 보호.
       - /var/run/docker.sock:/var/run/docker.sock   # 이미지 빌드·compose 배포용
 
+    # nginx 프록시(/jenkins) 뒤 서브패스로 동작 — 외부 접근: https://i15b209.p.ssafy.io/jenkins/
+    environment:
+      JENKINS_OPTS: "--prefix=/jenkins"
+
     ports:
-      # 외부 미노출: 호스트 로컬(127.0.0.1)만 바인딩 → EC2 UFW 80/443 정책 유지.
-      # UI는 SSH 터널로 접근. GitLab 웹훅 도달은 2단계에서 nginx 프록시 or SCM 폴링으로 해결.
+      # 호스트 직접 바인딩은 여전히 로컬만(비상용 터널 경로) → UFW 80/443 정책 유지.
+      # ⚠️ prefix 적용 후 터널 접속 주소는 http://localhost:9090/jenkins/ (루트 아님).
       - "127.0.0.1:9090:8080"       # Jenkins 웹 UI (호스트 9090 → 컨테이너 8080)
       # 50000(에이전트 포트)은 컨트롤러 인-빌드라 미개방.
 
     # Jenkins 기동 완료(로그인 페이지 응답) 여부 — 이미지에 설치한 curl 사용
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/login"]
+      # prefix(/jenkins) 적용에 맞춘 경로 — 구경로 /login은 404가 정상이라 헬스체크가 오탐한다
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/jenkins/login"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -44,10 +49,14 @@ services:
 
     networks:
       - dodam-cicd-net
+      - dodam-net                   # 앱 nginx가 'dodam-jenkins:8080'으로 프록시하기 위해 앱 내부망에도 참여
 
 networks:
   dodam-cicd-net:
     driver: bridge
+  dodam-net:                        # 앱 스택(infra/docker-compose.yml)의 네트워크 — 외부 참조
+    external: true
+    name: dodam_dodam-net
 
 # Jenkins 홈(모든 설정·자격증명·빌드 이력) — 컨테이너 재생성해도 유지
 volumes:

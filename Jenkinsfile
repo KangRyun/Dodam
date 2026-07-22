@@ -40,8 +40,11 @@ def notifyMattermost(String emoji, String title) {
       def branch   = env.BRANCH_NAME ?: '?'
       def duration = (currentBuild.durationString ?: '').replace(' and counting', '')
       def deployed = (branch == 'develop' && emoji == '✅') ? ' · 🚀 서버 배포됨' : ''
+      // 빌드 링크 — Jenkins가 https://…/jenkins/ 로 공개(S15P11B209-319)되며 클릭 가능해짐.
+      //   BUILD_URL은 Manage Jenkins의 "Jenkins URL" 설정 기반으로 생성됨(로그인 필요).
+      def link = env.BUILD_URL ? " · [빌드 보기](${env.BUILD_URL})" : ''
       def text = "${emoji} **${title}** · `${branch}` #${env.BUILD_NUMBER} · ${duration}${deployed}\n" +
-                 "👤 ${env.GIT_AUTHOR ?: '?'} · 커밋 `${env.IMAGE_TAG ?: '?'}`"
+                 "👤 ${env.GIT_AUTHOR ?: '?'} · 커밋 `${env.IMAGE_TAG ?: '?'}`${link}"
       if (emoji == '❌') { text += failureDetail() }   // 실패면 "어디서 터졌나" 분석 첨부
       // JSON은 이스케이프 사고 방지를 위해 파일로 만들어 curl -d @file 로 전송(따옴표 지옥 회피)
       writeFile file: '.mm-payload.json', text: groovy.json.JsonOutput.toJson([text: text])
@@ -103,12 +106,15 @@ pipeline {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
         // 앱 이미지(backend·ai)를 호스트 도커에 바로 빌드(레지스트리 없음). 배포는 :local 사용.
         // 빌드 후 :<SHA> 태그도 부여 → 불변 복원지점(롤백=190에서 이 태그로 되돌림).
-        sh '''
-          docker compose -f "$COMPOSE_FILE" build
-          docker tag dodam-backend:local dodam-backend:${IMAGE_TAG}
-          docker tag dodam-ai:local      dodam-ai:${IMAGE_TAG}
-          docker tag dodam-nginx:local   dodam-nginx:${IMAGE_TAG}
-        '''
+        // Compose는 build만 실행해도 전체 파일의 필수 변수를 먼저 보간하므로 배포와 같은 Secret File이 필요하다.
+        withCredentials([file(credentialsId: 'dodam-env', variable: 'ENV_FILE')]) {
+          sh '''
+            docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build
+            docker tag dodam-backend:local dodam-backend:${IMAGE_TAG}
+            docker tag dodam-ai:local      dodam-ai:${IMAGE_TAG}
+            docker tag dodam-nginx:local   dodam-nginx:${IMAGE_TAG}
+          '''
+        }
       }
     }
 

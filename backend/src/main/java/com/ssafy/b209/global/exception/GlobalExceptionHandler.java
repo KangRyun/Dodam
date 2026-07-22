@@ -28,6 +28,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 /**
@@ -112,6 +113,14 @@ public class GlobalExceptionHandler {
   @ExceptionHandler(MissingServletRequestParameterException.class)
   ResponseEntity<ApiErrorResponse<Void>> handleMissingServletRequestParameterException(
       MissingServletRequestParameterException exception) {
+    ErrorCode errorCode = CommonErrorCode.MISSING_REQUEST_PARAMETER;
+    logClientError(errorCode);
+    return response(errorCode);
+  }
+
+  @ExceptionHandler(MissingServletRequestPartException.class)
+  ResponseEntity<ApiErrorResponse<Void>> handleMissingServletRequestPartException(
+      MissingServletRequestPartException exception) {
     ErrorCode errorCode = CommonErrorCode.MISSING_REQUEST_PARAMETER;
     logClientError(errorCode);
     return response(errorCode);

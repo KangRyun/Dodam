@@ -118,6 +118,37 @@ class DrawingSessionRepositoryTest {
   }
 
   @Test
+  void findsAllAndOnlyInProgressNonDeletedSessionsForTheRequestedChild() {
+    PersistedReferences references = persistReferences(null);
+    DrawingSession firstActive = saveSession(references, "active-list-first");
+    DrawingSession secondActive = saveSession(references, "active-list-second");
+    DrawingSession completed = saveSession(references, "active-list-completed");
+    DrawingSession deleted = saveSession(references, "active-list-deleted");
+    Child anotherChild = childRepository.save(child(null));
+    DrawingSession anotherChildSession =
+        saveSession(
+            new PersistedReferences(anotherChild, references.drawingType()),
+            "active-list-another-child");
+
+    entityManager.flush();
+    entityManager
+        .createNativeQuery("update drawing_sessions set session_status = 'COMPLETED' where id = ?")
+        .setParameter(1, completed.getId())
+        .executeUpdate();
+    entityManager
+        .createNativeQuery("update drawing_sessions set deleted_at = ? where id = ?")
+        .setParameter(1, LocalDateTime.of(2026, 7, 22, 9, 0))
+        .setParameter(2, deleted.getId())
+        .executeUpdate();
+    entityManager.clear();
+
+    assertThat(drawingSessionRepository.findActiveSessionsByChildId(references.child().getId()))
+        .extracting(DrawingSession::getId)
+        .containsExactly(firstActive.getId(), secondActive.getId())
+        .doesNotContain(completed.getId(), deleted.getId(), anotherChildSession.getId());
+  }
+
+  @Test
   void excludesCompletedSessionsFromTheActiveSessionLookup() {
     PersistedReferences references = persistReferences(null);
     DrawingSession saved = saveSession(references, "completed-key");

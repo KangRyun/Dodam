@@ -62,6 +62,38 @@ class DrawingErrorCodeTest {
     expected.put(
         DrawingErrorCode.DRAWING_SNAPSHOT_CREATION_CONFLICT,
         new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_007", "그림 스냅샷 저장 요청이 충돌했습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_DRAFT_NOT_FOUND,
+        new ErrorContract(HttpStatus.NOT_FOUND, "DRAWING_404_004", "저장된 그림 초안이 없습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_DRAFT_NOT_ALLOWED,
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_008", "현재 상태에서는 그림 초안을 저장할 수 없습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_DRAFT_VERSION_CONFLICT,
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_009", "같은 순서의 그림 초안이 이미 저장되어 있습니다."));
+    expected.put(
+        DrawingErrorCode.STALE_DRAWING_DRAFT_VERSION,
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_010", "더 최근의 그림 초안이 이미 저장되어 있습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_DRAFT_SAVE_CONFLICT,
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_011", "그림 초안 저장 요청이 충돌했습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_DRAFT_STORAGE_FAILED,
+        new ErrorContract(
+            HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_500_002", "그림 초안 저장 중 오류가 발생했습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_DRAFT_FILE_REQUIRED,
+        new ErrorContract(HttpStatus.BAD_REQUEST, "DRAWING_400_007", "초안 미리보기 파일이 필요합니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_DRAFT_METADATA_INVALID,
+        new ErrorContract(HttpStatus.BAD_REQUEST, "DRAWING_400_008", "그림 초안 정보가 올바르지 않습니다."));
+    expected.put(
+        DrawingErrorCode.ACTIVE_DRAWING_SESSION_NOT_FOUND,
+        new ErrorContract(HttpStatus.NOT_FOUND, "DRAWING_404_005", "진행 중인 그림 활동이 없습니다."));
+    expected.put(
+        DrawingErrorCode.MULTIPLE_ACTIVE_DRAWING_SESSIONS,
+        new ErrorContract(
+            HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_500_003", "진행 중인 그림 활동 데이터가 중복되었습니다."));
 
     assertThat(DrawingErrorCode.values()).containsExactlyInAnyOrderElementsOf(expected.keySet());
     expected.forEach(
