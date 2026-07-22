@@ -14,6 +14,26 @@
 name: dodam
 
 services:
+  redis:
+    image: redis:7.4.2-alpine
+    container_name: dodam-redis
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be configured in .env or deployment secrets}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dodam-net
+
   mysql:
     image: mysql:8.0.40            # latest 금지 — 재현성 위해 패치 버전 고정 (원하면 최신 8.0.x로 상향)
     container_name: dodam-mysql
@@ -74,6 +94,9 @@ services:
       DB_NAME: ${MYSQL_DATABASE}       # = mysql 서비스의 MYSQL_DATABASE (b209)
       DB_USERNAME: ${MYSQL_USER}       # = 앱 전용 최소권한 계정 (root 아님)
       DB_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be configured in .env or deployment secrets}
 
     # ⚠️ ports 를 열지 않는다 — 호스트엔 노출 안 함. 내부망(dodam-net)에서 'backend:8080'으로만 접근.
     expose:
@@ -82,6 +105,8 @@ services:
     # DB가 healthy 된 뒤 기동. (지금 backend는 DB 미사용이나, JPA 도입 대비 순서 보장)
     depends_on:
       mysql:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
     # actuator가 없어 HTTP 헬스체크 불가 → 8080 리슨 여부만 TCP로 확인 (jre-jammy에 bash 존재)
@@ -192,6 +217,7 @@ networks:
 
 # 네임드 볼륨 — mysql 데이터 · TLS 인증서 · ACME 챌린지
 volumes:
+  redis-data:
   mysql-data:
   letsencrypt:        # /etc/letsencrypt (인증서·계정) — 컨테이너 재생성에도 유지, 저장소 비추적
   certbot-webroot:    # ACME HTTP-01 챌린지 토큰 교환용 (certbot 씀 ↔ nginx 서빙)
