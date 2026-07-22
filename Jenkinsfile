@@ -8,6 +8,26 @@
 //   - 컨트롤러 인-빌드(별도 에이전트 없음)
 //
 // 흐름: Checkout → Build&Test(backend) → Docker Build → ai import 스모크 → Deploy(develop) → Healthcheck
+// 알림: 빌드 성공/실패를 Mattermost Incoming Webhook으로 전송 (크레덴셜 id: mattermost-webhook)
+
+// Mattermost 알림 — 알림 실패가 빌드 결과를 바꾸면 안 되므로 try/catch + `|| true`로 이중 방어.
+//   크레덴셜(mattermost-webhook, Secret text)이 아직 없으면 경고만 찍고 넘어간다.
+def notifyMattermost(String emoji, String title) {
+  try {
+    withCredentials([string(credentialsId: 'mattermost-webhook', variable: 'MM_WEBHOOK')]) {
+      def branch   = env.BRANCH_NAME ?: '?'
+      def duration = (currentBuild.durationString ?: '').replace(' and counting', '')
+      def deployed = (branch == 'develop' && emoji == '✅') ? ' · 🚀 서버 배포됨' : ''
+      def text = "${emoji} **${title}** · `${branch}` #${env.BUILD_NUMBER} · ${duration}${deployed}\n" +
+                 "커밋 `${env.IMAGE_TAG ?: '?'}` · 로그: ${env.BUILD_URL}console (SSH 터널 필요)"
+      // JSON은 이스케이프 사고 방지를 위해 파일로 만들어 curl -d @file 로 전송(따옴표 지옥 회피)
+      writeFile file: '.mm-payload.json', text: groovy.json.JsonOutput.toJson([text: text])
+      sh 'curl -sf -X POST -H "Content-Type: application/json" -d @.mm-payload.json "$MM_WEBHOOK" || true'
+    }
+  } catch (err) {
+    echo "Mattermost 알림 전송 실패(빌드에는 영향 없음): ${err}"
+  }
+}
 
 pipeline {
   agent any
@@ -103,8 +123,14 @@ pipeline {
   }
 
   post {
-    success { echo "✅ 파이프라인 성공 (배포 이미지 태그=${env.IMAGE_TAG})" }
-    failure { echo "❌ 실패 — 미배포이거나 헬스체크 실패. 콘솔 로그 확인 후 대응." }
+    success {
+      echo "✅ 파이프라인 성공 (배포 이미지 태그=${env.IMAGE_TAG})"
+      script { notifyMattermost('✅', '빌드 성공') }
+    }
+    failure {
+      echo "❌ 실패 — 미배포이거나 헬스체크 실패. 콘솔 로그 확인 후 대응."
+      script { notifyMattermost('❌', '빌드 실패') }
+    }
     always  { sh 'docker image prune -f >/dev/null 2>&1 || true' }  // 대롱거리는 중간 이미지 정리(디스크 절약)
   }
 }
