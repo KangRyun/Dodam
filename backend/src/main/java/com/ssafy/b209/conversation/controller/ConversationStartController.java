@@ -5,7 +5,7 @@ import com.ssafy.b209.conversation.dto.StartConversationResponse;
 import com.ssafy.b209.conversation.exception.ActiveConversationExistsException;
 import com.ssafy.b209.conversation.service.ConversationStartIdempotencyStore;
 import com.ssafy.b209.conversation.service.ConversationStartService;
-import com.ssafy.b209.conversation.service.TemporaryGuardianResolver;
+import com.ssafy.b209.conversation.service.GuardianUserResolver;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.ApiResponse;
@@ -28,7 +28,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/v1/drawing-sessions")
 public class ConversationStartController {
-  private final TemporaryGuardianResolver guardianResolver;
+  private final GuardianUserResolver guardianResolver;
   private final ConversationStartIdempotencyStore idempotencyStore;
   private final ConversationStartService conversationStartService;
 
@@ -40,7 +40,7 @@ public class ConversationStartController {
    * @param conversationStartService 대화 세션 시작 업무 서비스
    */
   public ConversationStartController(
-      TemporaryGuardianResolver guardianResolver,
+      GuardianUserResolver guardianResolver,
       ConversationStartIdempotencyStore idempotencyStore,
       ConversationStartService conversationStartService) {
     this.guardianResolver = guardianResolver;

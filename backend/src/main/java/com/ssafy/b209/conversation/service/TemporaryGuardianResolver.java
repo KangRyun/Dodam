@@ -15,7 +15,7 @@ import org.springframework.stereotype.Component;
  * Test Profile에서만 활성화한다.
  */
 @Component
-public class TemporaryGuardianResolver {
+public class TemporaryGuardianResolver implements GuardianUserResolver {
 
   private final AuthFilterProperties properties;
 
@@ -36,6 +36,7 @@ public class TemporaryGuardianResolver {
    * @return Access Token Subject의 사용자 ID
    * @throws BusinessException 인증 Principal이 없고 임시 Header도 허용되지 않은 경우
    */
+  @Override
   public Long resolve(String authorization, String guardianUserId) {
     Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
     if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedUser user) {

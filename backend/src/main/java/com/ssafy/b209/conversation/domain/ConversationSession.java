@@ -126,6 +126,24 @@ public class ConversationSession {
     return questionCount < maxQuestionCount;
   }
 
+  /**
+   * 현재 세션이 질문을 계속 생성할 수 있는 진행 상태인지 판별한다.
+   *
+   * @return 상태가 {@code CONVERSING}이면 {@code true}
+   */
+  public boolean isConversing() {
+    return "CONVERSING".equals(conversationStatus);
+  }
+
+  /**
+   * 대화가 명시적으로 완료됐는지 판별한다.
+   *
+   * @return 상태가 {@code COMPLETED}이면 {@code true}
+   */
+  public boolean isCompleted() {
+    return "COMPLETED".equals(conversationStatus);
+  }
+
   public void increaseQuestionCount() {
     if (!canAskQuestion()) {
       throw new IllegalStateException("Question count limit has been reached");
