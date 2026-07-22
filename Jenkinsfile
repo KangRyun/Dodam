@@ -106,12 +106,15 @@ pipeline {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
         // 앱 이미지(backend·ai)를 호스트 도커에 바로 빌드(레지스트리 없음). 배포는 :local 사용.
         // 빌드 후 :<SHA> 태그도 부여 → 불변 복원지점(롤백=190에서 이 태그로 되돌림).
-        sh '''
-          docker compose -f "$COMPOSE_FILE" build
-          docker tag dodam-backend:local dodam-backend:${IMAGE_TAG}
-          docker tag dodam-ai:local      dodam-ai:${IMAGE_TAG}
-          docker tag dodam-nginx:local   dodam-nginx:${IMAGE_TAG}
-        '''
+        // Compose는 build만 실행해도 전체 파일의 필수 변수를 먼저 보간하므로 배포와 같은 Secret File이 필요하다.
+        withCredentials([file(credentialsId: 'dodam-env', variable: 'ENV_FILE')]) {
+          sh '''
+            docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build
+            docker tag dodam-backend:local dodam-backend:${IMAGE_TAG}
+            docker tag dodam-ai:local      dodam-ai:${IMAGE_TAG}
+            docker tag dodam-nginx:local   dodam-nginx:${IMAGE_TAG}
+          '''
+        }
       }
     }
 
