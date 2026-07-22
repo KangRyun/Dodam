@@ -87,3 +87,23 @@ AI 호출은 DB 트랜잭션 밖에서 수행한다. 실제 제시할 질문이 
 ## 6. AI Mock 이행
 
 현재 `/analyze/conversation` placeholder는 이 계약의 구현으로 인정하지 않는다. AI 담당자는 별도 작업에서 이를 본 문서의 endpoint와 요청·응답 구조로 이행한다. BE는 목표 endpoint 외 경로와 `chips`, `model_id`, `prompt_version` 별칭을 허용하거나 자동 변환하지 않는다.
+
+## 7. 백엔드 검증 결과 (2026-07-22)
+
+> 검토 범위: API 명세, `도담.sql`, develop 최신 `V1__create_initial_schema.sql`, 현재 `ai/main.py` 및 본 계약서의 문서 대조. 코드·DB·설정·Git은 변경하지 않았다. DB 물리 스키마 판정은 V1을 기준으로 한다.
+
+| 검증 항목 | 판정 | 근거 | 검증 결과·다음 담당자 |
+| --- | --- | --- | --- |
+| `drawingSessionId` 변환과 FK | PASS | 본 문서 §4 55행; V1 `conversation_sessions.drawing_session_id`, `fk_conversation_sessions_drawing_session_id` (315~318행) | DTO의 `drawingSessionId`를 `drawing_session_id`로 변환하고 `drawing_sessions.id` FK를 사용하도록 명시되어 있다. `도담.sql`의 `conversation_id`는 §4 V1-참고 ERD 불일치로만 기록했으며 구현 기준으로 요구하지 않는다. 150번 생성자가 이 변환 규칙을 구현한다. |
+| 대상 객체·bounding box 저장 | PASS | 본 문서 §4 58행·§4 V1-참고 ERD 불일치 69행; V1 `conversation_messages.target_object_json` (341행) | V1에 독립 `bounding_box`가 없음을 정확히 명시하고 `targetObject`와 `boundingBox`를 `target_object_json` 내부 JSON으로 함께 저장한다. 150번은 독립 컬럼을 참조하지 않는다. |
+| 질문 메시지 컬럼·CHECK 매핑 | PASS | 본 문서 §4 56~59행; V1 `conversation_messages` (330~356행) | `raw_text`, `options_json`, `question_template_id`가 실제 컬럼과 일치한다. `sender_type='AI'` 및 `message_type='QUESTION'`은 각각 V1 CHECK 허용값에 포함된다. AI 생성 질문의 템플릿 ID null과 BE 템플릿 폴백의 실제 템플릿 ID 저장도 FK와 모순되지 않는다. |
+| 메시지 순번 UNIQUE | PASS | 본 문서 §4 60행·§5 84행; V1 `uk_conversation_messages_session_sequence` (345~346행) | `UNIQUE(conversation_session_id, message_sequence)`가 이미 존재함을 명시하며 추가 migration을 요구하지 않는다. 150번은 세션 잠금과 기존 UNIQUE 충돌 처리만 구현하면 된다. |
+| 질문별 버전 이력 | PASS | 본 문서 §4 62행·72행; V1 전체 스키마 | `ai_question_generation_histories` 또는 질문별 버전 영속 컬럼을 실제 V1 테이블처럼 요구하지 않는다. 본 V1 범위에서는 DB 비영속으로 처리하며 별도 승인 범위로 분리했다. |
+| 현재 AI Mock 호환성 | 미결(별도 작업) | 본 문서 §6 88행; `ai/main.py` 63~88행 | Mock은 현재 `POST /analyze/conversation` 및 `question`/`chips`/`model_id`/`prompt_version`을 사용해 목표 계약과 다르다. 본 문서가 이를 별도 AI 이행 작업으로 명시하므로 150번의 DB 비변경 저장 구현을 차단하지는 않는다. AI 담당자가 목표 endpoint·스키마 이행을 완료하고, 백엔드 생성자가 목표 계약 통합 테스트로 확인한다. |
+| 안전 차단 오류 코드 | 확인 필요(API 명세) | 본 문서 §5 80행; `API_완전_명세서_v1.0.md` AI 오류 표 §3.2 | 본 계약은 `422 AI_SAFETY_POLICY_BLOCKED`를 정하지만, 현행 API 명세 오류 표에는 해당 코드가 없다. DB 저장 매핑과 150번의 DB 비변경 구현을 차단하지는 않으나, 문서 담당자·AI 담당자가 API 명세와 계약 중 어느 문서를 기준으로 확정할지 결정하고 통합 테스트 기대값을 일치시켜야 한다. |
+
+### S15P11B209-150 DB 비변경 구현 판정: PASS
+
+V1 실제 물리 스키마만 사용하면 150번은 DB migration이나 존재하지 않는 테이블·컬럼 없이 구현할 수 있다. 필수 구현 범위는 `drawingSessionId → drawing_session_id`, `targetObject`·`boundingBox → target_object_json`, AI/QUESTION·`raw_text`·`options_json`·`question_template_id` 저장, 기존 세션별 순번 UNIQUE 및 질문 수 CHECK 준수다.
+
+미결 사항은 AI Mock의 별도 endpoint 이행과 안전 차단 오류 코드의 API 명세 정합성이다. 둘 다 DB 저장 매핑의 FAIL 사유는 아니며, AI 담당자·문서 담당자·백엔드 생성자가 후속 통합 테스트 전에 해소한다.
