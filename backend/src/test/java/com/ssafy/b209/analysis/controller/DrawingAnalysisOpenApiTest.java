@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ssafy.b209.analysis.service.DrawingAnalysisQueryService;
 import com.ssafy.b209.analysis.service.DrawingAnalysisService;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ class DrawingAnalysisOpenApiTest {
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
   @MockitoBean private DrawingAnalysisService drawingAnalysisService;
+  @MockitoBean private DrawingAnalysisQueryService drawingAnalysisQueryService;
 
   @Test
   void documentsDrawingAnalysisCreationContract() throws Exception {
@@ -37,6 +39,22 @@ class DrawingAnalysisOpenApiTest {
     assertThat(operation.path("responses").fieldNames())
         .toIterable()
         .containsAll(Set.of("201", "400", "404", "409", "500", "502"));
+    assertThat(operation.has("security")).isFalse();
+  }
+
+  @Test
+  void documentsDrawingAnalysisResultQueryContract() throws Exception {
+    JsonNode operation =
+        apiDocument()
+            .at(
+                "/paths/~1api~1v1~1drawing-sessions~1{drawingSessionId}~1analyses~1{drawingAnalysisId}/get");
+
+    assertThat(operation.isMissingNode()).isFalse();
+    assertThat(operation.path("tags"))
+        .anySatisfy(tag -> assertThat(tag.asText()).isEqualTo("Drawing Analyses"));
+    assertThat(operation.path("responses").fieldNames())
+        .toIterable()
+        .containsAll(Set.of("200", "400", "404", "500"));
     assertThat(operation.has("security")).isFalse();
   }
 

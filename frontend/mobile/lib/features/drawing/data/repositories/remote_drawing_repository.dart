@@ -1,19 +1,34 @@
+import 'dart:convert';
+
 import 'package:dio/dio.dart';
 
 import '../../../../core/network/network.dart';
 import '../../domain/repositories/drawing_repository.dart';
 import '../dto/drawing_dtos.dart';
 
-FormData buildDraftFormData(BinaryUploadDto image, {int? lastEventSequence}) =>
-    FormData.fromMap({
-      'image': MultipartFile.fromBytes(
-        image.bytes,
-        filename: image.fileName,
-        contentType: DioMediaType.parse(image.mimeType),
-      ),
-      if (lastEventSequence != null)
-        'lastEventSequence': lastEventSequence.toString(),
-    });
+FormData buildDraftFormData(
+  BinaryUploadDto preview,
+  DraftCanvasStateDto canvasState,
+) => FormData.fromMap({
+  'preview': MultipartFile.fromBytes(
+    preview.bytes,
+    filename: preview.fileName,
+    contentType: DioMediaType.parse(preview.mimeType),
+  ),
+  'canvasState': jsonEncode(canvasState.toJson()),
+});
+
+FormData buildDrawingCompleteFormData(
+  BinaryUploadDto finalImage,
+  DrawingCompleteMetadataDto metadata,
+) => FormData.fromMap({
+  'finalImage': MultipartFile.fromBytes(
+    finalImage.bytes,
+    filename: finalImage.fileName,
+    contentType: DioMediaType.parse(finalImage.mimeType),
+  ),
+  'metadata': jsonEncode(metadata.toJson()),
+});
 
 final class RemoteDrawingRepository implements DrawingRepository {
   const RemoteDrawingRepository(this._apiClient);
@@ -63,16 +78,16 @@ final class RemoteDrawingRepository implements DrawingRepository {
   }
 
   @override
-  Future<DrawingAssetDto> saveDraft(
+  Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
-    BinaryUploadDto image, {
-    int? lastEventSequence,
-  }) async {
-    final response = await _apiClient.post<Map<String, dynamic>>(
+    BinaryUploadDto preview,
+    DraftCanvasStateDto canvasState,
+  ) async {
+    final response = await _apiClient.put<Map<String, dynamic>>(
       'drawing-sessions/$sessionId/draft',
-      data: buildDraftFormData(image, lastEventSequence: lastEventSequence),
+      data: buildDraftFormData(preview, canvasState),
     );
-    return DrawingAssetDto.fromJson(response.data!);
+    return DraftSaveResponseDto.fromJson(_payload(response.data!));
   }
 
   @override
@@ -82,8 +97,13 @@ final class RemoteDrawingRepository implements DrawingRepository {
     );
     final data = response.data;
     if (data == null || data.isEmpty) return null;
-    return DraftRecoveryDto.fromJson(data);
+    return DraftRecoveryDto.fromJson(_payload(data));
   }
+
+  Map<String, dynamic> _payload(Map<String, dynamic> body) =>
+      body['data'] is Map
+      ? Map<String, dynamic>.from(body['data']! as Map)
+      : body;
 
   @override
   Future<void> deleteDraft(int sessionId) async {
@@ -91,25 +111,33 @@ final class RemoteDrawingRepository implements DrawingRepository {
   }
 
   @override
-  Future<CompleteDrawingResponseDto> completeDrawing(
+  Future<DrawingStageCompleteResponseDto> completeDrawingStage(
     int sessionId, {
-    BinaryUploadDto? image,
-    int? lastEventSequence,
+    required BinaryUploadDto finalImage,
+    required DrawingCompleteMetadataDto metadata,
+    required String idempotencyKey,
   }) async {
     final response = await _apiClient.post<Map<String, dynamic>>(
-      'drawing-sessions/$sessionId/complete',
-      data: FormData.fromMap({
-        if (image != null)
-          'image': MultipartFile.fromBytes(
-            image.bytes,
-            filename: image.fileName,
-            contentType: DioMediaType.parse(image.mimeType),
-          ),
-        if (lastEventSequence != null)
-          'lastEventSequence': lastEventSequence.toString(),
-      }),
+      'drawing-sessions/$sessionId/drawing-complete',
+      data: buildDrawingCompleteFormData(finalImage, metadata),
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
     );
-    return CompleteDrawingResponseDto.fromJson(response.data!);
+    final body = response.data!;
+    final payload = body['data'] is Map
+        ? Map<String, dynamic>.from(body['data']! as Map)
+        : body;
+    return DrawingStageCompleteResponseDto.fromJson(payload);
+  }
+
+  @override
+  Future<void> saveReflection(
+    int sessionId,
+    SaveDrawingReflectionRequestDto request,
+  ) async {
+    await _apiClient.put<void>(
+      'drawing-sessions/$sessionId/reflection',
+      data: request.toJson(),
+    );
   }
 
   @override

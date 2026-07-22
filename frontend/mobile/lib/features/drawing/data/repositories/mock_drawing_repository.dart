@@ -4,10 +4,20 @@ import '../dto/drawing_dtos.dart';
 
 enum MockDraftScenario { found, absent, failure }
 
+enum MockCompletionScenario { success, failure }
+
+enum MockReflectionScenario { success, failure }
+
 final class MockDrawingRepository implements DrawingRepository {
-  const MockDrawingRepository({this.draftScenario = MockDraftScenario.found});
+  const MockDrawingRepository({
+    this.draftScenario = MockDraftScenario.found,
+    this.completionScenario = MockCompletionScenario.success,
+    this.reflectionScenario = MockReflectionScenario.success,
+  });
 
   final MockDraftScenario draftScenario;
+  final MockCompletionScenario completionScenario;
+  final MockReflectionScenario reflectionScenario;
   static const _type = {
     'drawingTypeId': 5,
     'code': 'ART_DIARY',
@@ -84,11 +94,17 @@ final class MockDrawingRepository implements DrawingRepository {
     'receivedAt': '2026-07-21T09:41:03.542Z',
   });
   @override
-  Future<DrawingAssetDto> saveDraft(
+  Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
-    BinaryUploadDto image, {
-    int? lastEventSequence,
-  }) async => DrawingAssetDto.fromJson(_asset);
+    BinaryUploadDto preview,
+    DraftCanvasStateDto canvasState,
+  ) async => DraftSaveResponseDto.fromJson({
+    'drawingAssetId': 120,
+    'assetVersion': 3,
+    'lastEventSequence': canvasState.lastEventSequence,
+    'savedAt': '2026-07-21T09:41:10Z',
+    'expiresAt': '2026-07-28T09:41:10Z',
+  });
   @override
   Future<DraftRecoveryDto> getDraft(int sessionId) async {
     switch (draftScenario) {
@@ -108,16 +124,14 @@ final class MockDrawingRepository implements DrawingRepository {
         );
       case MockDraftScenario.found:
         return DraftRecoveryDto.fromJson({
-          'drawingSessionId': 42,
-          'sessionStatus': 'DRAWING',
-          'currentStage': 'DRAWING',
-          'drawingType': {
-            'drawingTypeId': 5,
-            'code': 'ART_DIARY',
-            'name': '그림일기',
+          'previewUrl': _asset['fileUrl'],
+          'canvasState': {
+            'lastEventSequence': 1105,
+            'toolState': null,
+            'viewport': null,
+            'clientSavedAt': '2026-07-21T09:41:10Z',
           },
-          'draftAsset': _asset,
-          'strokeSync': {'lastBatchSequence': 12, 'lastEventSequence': 1105},
+          'assetVersion': 3,
         });
     }
   }
@@ -125,21 +139,39 @@ final class MockDrawingRepository implements DrawingRepository {
   @override
   Future<void> deleteDraft(int sessionId) async {}
   @override
-  Future<CompleteDrawingResponseDto> completeDrawing(
+  Future<DrawingStageCompleteResponseDto> completeDrawingStage(
     int sessionId, {
-    BinaryUploadDto? image,
-    int? lastEventSequence,
-  }) async => CompleteDrawingResponseDto.fromJson({
-    'drawingSessionId': 42,
-    'sessionStatus': 'CONVERSING',
-    'currentStage': 'CONVERSING',
-    'finalAsset': {
-      ..._asset,
-      'assetId': 140,
-      'assetType': 'FINAL',
-      'assetVersion': 1,
-    },
-  });
+    required BinaryUploadDto finalImage,
+    required DrawingCompleteMetadataDto metadata,
+    required String idempotencyKey,
+  }) async {
+    if (completionScenario == MockCompletionScenario.failure) {
+      throw const ApiTransportFailure(type: ApiTransportFailureType.connection);
+    }
+    return DrawingStageCompleteResponseDto.fromJson({
+      'drawingSessionId': 42,
+      'finalAssetId': 140,
+      'sessionStatus': 'IN_PROGRESS',
+      'currentStage': 'ANALYZING',
+      'analysis': {
+        'analysisId': 700,
+        'analysisType': 'INTERMEDIATE',
+        'status': 'PENDING',
+      },
+      'nextAction': 'POLL_ANALYSIS',
+    });
+  }
+
+  @override
+  Future<void> saveReflection(
+    int sessionId,
+    SaveDrawingReflectionRequestDto request,
+  ) async {
+    if (reflectionScenario == MockReflectionScenario.failure) {
+      throw const ApiTransportFailure(type: ApiTransportFailureType.connection);
+    }
+  }
+
   @override
   Future<DrawingUploadResponseDto> uploadDrawing(
     int sessionId,

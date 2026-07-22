@@ -2,6 +2,7 @@ package com.ssafy.b209.conversation.service;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.ssafy.b209.auth.filter.AuthFilterProperties;
 import com.ssafy.b209.conversation.exception.ConversationStartErrorCode;
 import com.ssafy.b209.global.exception.BusinessException;
 import org.junit.jupiter.api.Test;
@@ -10,14 +11,14 @@ class GuardianUserResolverTest {
 
   @Test
   void temporaryResolverRejectsRequestWithoutBearerAndGuardianHeaders() {
-    TemporaryGuardianResolver resolver = new TemporaryGuardianResolver();
+    TemporaryGuardianResolver resolver = new TemporaryGuardianResolver(new AuthFilterProperties(false));
 
     assertUnauthorized(() -> resolver.resolve(null, null));
   }
 
   @Test
-  void productionGuardRejectsUnverifiedBearerAndTemporaryGuardianHeader() {
-    UnavailableProductionGuardianResolver resolver = new UnavailableProductionGuardianResolver();
+  void resolverRejectsUnverifiedBearerAndTemporaryGuardianHeaderWhenLegacyModeIsDisabled() {
+    TemporaryGuardianResolver resolver = new TemporaryGuardianResolver(new AuthFilterProperties(false));
 
     assertUnauthorized(() -> resolver.resolve("Bearer unverified", "9"));
   }

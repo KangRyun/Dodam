@@ -15,6 +15,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -86,6 +87,7 @@ public class DrawingAnalysis {
   private LocalDateTime createdAt;
 
   @OneToMany(mappedBy = "drawingAnalysis", cascade = CascadeType.ALL, orphanRemoval = true)
+  @OrderBy("displayOrder ASC, id ASC")
   private List<DrawingDetectedObject> detections = new ArrayList<>();
 
   /** JPA가 Entity를 복원할 때 사용하는 생성자다. */

@@ -2,6 +2,8 @@ package com.ssafy.b209.analysis.controller;
 
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisResponse;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisDetailResponse;
+import com.ssafy.b209.analysis.service.DrawingAnalysisQueryService;
 import com.ssafy.b209.analysis.service.DrawingAnalysisService;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.response.ApiErrorResponse;
@@ -17,6 +19,7 @@ import jakarta.validation.constraints.Positive;
 import java.net.URI;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -24,26 +27,71 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 그림 활동 세션의 최종 스냅샷 분석 요청과 저장 API를 제공한다.
+ * 그림 활동 세션의 최종 스냅샷 분석 요청과 저장 결과 조회 API를 제공한다.
  *
- * <p>HTTP 입력 검증, 생성 리소스 Location과 공통 응답 조립만 담당하며 분석 상태와 AI 연동 규칙은 {@link DrawingAnalysisService}에
- * 위임한다.
+ * <p>HTTP 입력 검증, 생성 리소스 Location과 공통 응답 조립만 담당하며 실행 규칙은 {@link DrawingAnalysisService}, 조회 규칙은
+ * {@link DrawingAnalysisQueryService}에 위임한다.
  */
-@Tag(name = "Drawing Analyses", description = "그림 분석 요청 및 결과 저장 API")
+@Tag(name = "Drawing Analyses", description = "그림 분석 요청, 결과 저장 및 상태 조회 API")
 @Validated
 @RestController
 @RequestMapping("/api/v1/drawing-sessions/{drawingSessionId}/analyses")
 public class DrawingAnalysisController {
 
   private final DrawingAnalysisService drawingAnalysisService;
+  private final DrawingAnalysisQueryService drawingAnalysisQueryService;
 
   /**
    * 그림 분석 Application Service를 사용하는 Controller를 생성한다.
    *
    * @param drawingAnalysisService 분석 실행과 결과 저장을 조율하는 서비스
+   * @param drawingAnalysisQueryService 저장된 분석 상태와 결과를 조회하는 서비스
    */
-  public DrawingAnalysisController(DrawingAnalysisService drawingAnalysisService) {
+  public DrawingAnalysisController(
+      DrawingAnalysisService drawingAnalysisService,
+      DrawingAnalysisQueryService drawingAnalysisQueryService) {
     this.drawingAnalysisService = drawingAnalysisService;
+    this.drawingAnalysisQueryService = drawingAnalysisQueryService;
+  }
+
+  /**
+   * 분석 요청 식별자로 저장된 진행 상태와 객체 탐지 결과를 조회한다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @param drawingAnalysisId 분석 실행 식별자
+   * @return HTTP 200과 상태별 분석 상세 공통 응답
+   * @throws BusinessException 분석을 찾을 수 없거나 저장 상태가 모순되는 경우
+   */
+  @Operation(
+      summary = "그림 분석 진행 상태 및 결과 조회",
+      description =
+          "분석 요청 ID로 PENDING, PROCESSING, SUCCEEDED, FAILED 상태를 Polling합니다. "
+              + "FAILED도 정상 조회이므로 HTTP 200으로 반환하며, 성공 시 저장된 Detection을 제공합니다. "
+              + "조회 과정에서 AI 서버를 다시 호출하거나 분석을 재시도하지 않습니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "분석 진행 상태 또는 저장 결과 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "Path Variable 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "요청한 Session에서 분석을 찾을 수 없음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "500",
+        description = "분석 상태와 저장 결과가 일치하지 않음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping("/{drawingAnalysisId}")
+  public ResponseEntity<ApiResponse<DrawingAnalysisDetailResponse>> getAnalysis(
+      @PathVariable @Positive Long drawingSessionId,
+      @PathVariable @Positive Long drawingAnalysisId) {
+    DrawingAnalysisDetailResponse response =
+        drawingAnalysisQueryService.getDrawingAnalysis(drawingSessionId, drawingAnalysisId);
+    return ResponseEntity.ok(ApiResponse.of(CommonSuccessCode.OK, response));
   }
 
   /**

@@ -3,7 +3,26 @@
 > Jira: `S15P11B209-144`
 > 범위: Spring Boot와 AI 서버 사이의 그림 객체 탐지 JSON 계약
 
-이 문서는 내부 AI 연동에서 사용할 값 구조만 정의한다. 현재 실제 AI 서버 호출과 외부 공개 Endpoint는 구현되어 있지 않다.
+이 문서는 Spring Boot와 AI 서버 사이의 값 구조 및 저장된 분석 상태를 조회하는 공개 API 계약을 정의한다.
+
+## 공개 분석 상태 및 결과 조회
+
+```http
+GET /api/v1/drawing-sessions/{drawingSessionId}/analyses/{drawingAnalysisId}
+```
+
+분석 요청 API가 반환한 `drawingAnalysisId`로 저장된 상태를 Polling한다. 조회 API는 모든 정상 상태에서 HTTP 200을 반환하며 DB에 저장된 결과만 사용한다. AI 서버를 다시 호출하거나 실패한 분석을 자동 재시도하지 않는다.
+
+| 저장 상태 | 공개 상태 | 응답 정책 |
+| --- | --- | --- |
+| `PENDING` | `PENDING` | `model=null`, `detections=[]`, `processedAt=null`, `failure=null` |
+| `PROCESSING` | `PROCESSING` | `model=null`, `detections=[]`, `processedAt=null`, `failure=null` |
+| `SUCCESS` | `SUCCEEDED` | 저장된 Model, Detection과 완료 시각 반환 |
+| `FAILED` | `FAILED` | HTTP 200, `detections=[]`, 안전한 `failure` 반환 |
+
+성공 분석에서 탐지된 객체가 없어도 `detections=[]`가 정상 응답이다. Detection은 저장된 `detection_order` 오름차순으로 반환한다. 다른 Session의 분석, 삭제된 Session의 분석 또는 존재하지 않는 분석은 동일한 404 응답으로 처리한다.
+
+현재 `analyses`와 `analysis_detected_objects`에는 Soft Delete 컬럼이 없으며 `drawing_sessions.deleted_at`만 기존 조회 정책에 따라 제외한다. 그림 API 공통 인증이 도입되기 전까지 임시 사용자 Header나 사용자 ID를 사용하지 않는다.
 
 ## 요청
 

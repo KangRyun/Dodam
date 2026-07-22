@@ -3,7 +3,7 @@ package com.ssafy.b209.analysis.exception;
 import com.ssafy.b209.global.response.ErrorCode;
 import org.springframework.http.HttpStatus;
 
-/** 그림 분석 요청과 결과 저장 과정에서 외부에 반환할 안전한 오류 코드를 정의한다. */
+/** 그림 분석 요청, 결과 저장과 조회 과정에서 외부에 반환할 안전한 오류 코드를 정의한다. */
 public enum DrawingAnalysisErrorCode implements ErrorCode {
   /** 분석 대상 그림 파일을 찾을 수 없는 경우다. */
   DRAWING_ANALYSIS_TARGET_NOT_FOUND(HttpStatus.NOT_FOUND, "ANALYSIS_404_001", "분석할 그림을 찾을 수 없습니다."),
@@ -20,7 +20,12 @@ public enum DrawingAnalysisErrorCode implements ErrorCode {
       HttpStatus.BAD_GATEWAY, "ANALYSIS_502_002", "그림 분석 응답을 처리할 수 없습니다."),
   /** 유효한 분석 결과를 데이터베이스에 저장하지 못한 경우다. */
   DRAWING_ANALYSIS_RESULT_SAVE_FAILED(
-      HttpStatus.INTERNAL_SERVER_ERROR, "ANALYSIS_500_001", "그림 분석 결과 저장 중 오류가 발생했습니다.");
+      HttpStatus.INTERNAL_SERVER_ERROR, "ANALYSIS_500_001", "그림 분석 결과 저장 중 오류가 발생했습니다."),
+  /** 요청한 Session에서 분석을 찾을 수 없는 경우다. */
+  DRAWING_ANALYSIS_NOT_FOUND(HttpStatus.NOT_FOUND, "ANALYSIS_404_002", "그림 분석 결과를 찾을 수 없습니다."),
+  /** 분석 상태와 저장된 Model·Detection·실패 정보가 서로 모순되는 경우다. */
+  DRAWING_ANALYSIS_RESULT_INCONSISTENT(
+      HttpStatus.INTERNAL_SERVER_ERROR, "ANALYSIS_500_002", "그림 분석 결과 상태가 올바르지 않습니다.");
 
   private final HttpStatus httpStatus;
   private final String code;

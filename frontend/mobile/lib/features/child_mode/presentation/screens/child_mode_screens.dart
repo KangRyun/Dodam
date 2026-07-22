@@ -4,11 +4,72 @@ import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../child/data/dto/child_dtos.dart';
+import '../../../drawing/data/dto/drawing_dtos.dart';
+import '../../../drawing/domain/repositories/drawing_repository.dart';
 
-class ChildModeHomeScreen extends StatelessWidget {
-  const ChildModeHomeScreen({required this.child, super.key});
+class ChildModeHomeScreen extends StatefulWidget {
+  const ChildModeHomeScreen({
+    required this.child,
+    required this.drawingRepository,
+    this.completionSnapshotProvider,
+    super.key,
+  });
 
   final ChildSummaryDto child;
+  final DrawingRepository drawingRepository;
+  final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
+
+  @override
+  State<ChildModeHomeScreen> createState() => _ChildModeHomeScreenState();
+}
+
+class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
+  bool _isStartingDrawing = false;
+
+  Future<void> _startDrawing() async {
+    if (_isStartingDrawing) return;
+    setState(() => _isStartingDrawing = true);
+    try {
+      final typePage = await widget.drawingRepository.getDrawingTypes(
+        childId: widget.child.childId,
+      );
+      if (typePage.content.isEmpty) {
+        if (mounted) {
+          showAppMessage(context, message: '시작할 수 있는 그림 활동이 아직 없어요.');
+        }
+        return;
+      }
+      final types = [
+        ...typePage.content,
+      ]..sort((left, right) => left.displayOrder.compareTo(right.displayOrder));
+      final session = await widget.drawingRepository.createSession(
+        CreateDrawingSessionRequestDto(
+          childId: widget.child.childId,
+          drawingTypeId: types.first.drawingTypeId,
+          inputMethod: 'CANVAS',
+        ),
+      );
+      if (!mounted) return;
+      await Navigator.of(context).pushNamed(
+        AppRoutes.drawing(widget.child.childId.toString()),
+        arguments: DrawingRouteArguments(
+          sessionId: session.drawingSessionId,
+          repository: widget.drawingRepository,
+          completionSnapshotProvider: widget.completionSnapshotProvider,
+        ),
+      );
+    } on Object {
+      if (mounted) {
+        showAppMessage(
+          context,
+          message: '그림 활동을 시작하지 못했어요. 다시 시도해 주세요.',
+          type: AppMessageType.error,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isStartingDrawing = false);
+    }
+  }
 
   @override
   Widget build(BuildContext context) => PopScope(
@@ -82,7 +143,7 @@ class ChildModeHomeScreen extends StatelessWidget {
                           ),
                           const SizedBox(height: AppSpacing.lg),
                           Text(
-                            '${child.nickname}, 오늘은 무엇을 그려 볼까?',
+                            '${widget.child.nickname}, 오늘은 무엇을 그려 볼까?',
                             textAlign: TextAlign.center,
                             style: Theme.of(context).textTheme.headlineMedium
                                 ?.copyWith(
@@ -109,9 +170,10 @@ class ChildModeHomeScreen extends StatelessWidget {
                                 title: '그림 그리기',
                                 description: '새로운 그림을 시작해 보자',
                                 color: AppColors.tangerine,
-                                onTap: () => Navigator.of(context).pushNamed(
-                                  AppRoutes.drawing(child.childId.toString()),
-                                ),
+                                isLoading: _isStartingDrawing,
+                                onTap: _isStartingDrawing
+                                    ? null
+                                    : _startDrawing,
                               );
                               const history = _ChildActionCard(
                                 icon: Icons.collections_bookmark_outlined,
@@ -157,12 +219,14 @@ class _ChildActionCard extends StatelessWidget {
     required this.title,
     required this.description,
     required this.color,
+    this.isLoading = false,
     this.onTap,
     super.key,
   });
   final IconData icon;
   final String title, description;
   final Color color;
+  final bool isLoading;
   final VoidCallback? onTap;
 
   @override
@@ -182,11 +246,22 @@ class _ChildActionCard extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(
-                  icon,
-                  size: 58,
-                  color: onTap == null ? AppColors.disabled : color,
-                ),
+                if (isLoading)
+                  const SizedBox.square(
+                    dimension: 58,
+                    child: Padding(
+                      padding: EdgeInsets.all(AppSpacing.sm),
+                      child: CircularProgressIndicator(
+                        color: AppColors.tangerine,
+                      ),
+                    ),
+                  )
+                else
+                  Icon(
+                    icon,
+                    size: 58,
+                    color: onTap == null ? AppColors.disabled : color,
+                  ),
                 const SizedBox(height: AppSpacing.md),
                 Text(
                   title,

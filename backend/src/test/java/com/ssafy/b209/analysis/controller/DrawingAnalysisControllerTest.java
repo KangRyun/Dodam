@@ -3,6 +3,7 @@ package com.ssafy.b209.analysis.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -11,17 +12,22 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.ssafy.b209.analysis.dto.BoundingBoxResponse;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisResponse;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisDetailResponse;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisFailureResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisModelResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.dto.DrawingDetectionResponse;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
+import com.ssafy.b209.analysis.service.DrawingAnalysisQueryService;
 import com.ssafy.b209.analysis.service.DrawingAnalysisService;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.MediaType;
@@ -35,6 +41,7 @@ class DrawingAnalysisControllerTest {
 
   @Autowired private MockMvc mockMvc;
   @MockitoBean private DrawingAnalysisService drawingAnalysisService;
+  @MockitoBean private DrawingAnalysisQueryService drawingAnalysisQueryService;
 
   @Test
   void returnsCreatedResponseAndAnalysisLocation() throws Exception {
@@ -98,6 +105,73 @@ class DrawingAnalysisControllerTest {
         .andExpect(jsonPath("$.stackTrace").doesNotExist());
   }
 
+  @Test
+  void returnsStoredAnalysisResultWithOkResponse() throws Exception {
+    given(drawingAnalysisQueryService.getDrawingAnalysis(10L, 30L))
+        .willReturn(detailResponse(DrawingAnalysisStatus.SUCCEEDED));
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/{drawingSessionId}/analyses/{analysisId}", 10, 30))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.drawingAnalysisId").value(30))
+        .andExpect(jsonPath("$.data.status").value("SUCCEEDED"))
+        .andExpect(jsonPath("$.data.detections[0].label").value("HOUSE"))
+        .andExpect(jsonPath("$.data.failure").isEmpty())
+        .andExpect(jsonPath("$.data.storageKey").doesNotExist());
+  }
+
+  @Test
+  void returnsFailedAnalysisAsHttpOk() throws Exception {
+    given(drawingAnalysisQueryService.getDrawingAnalysis(10L, 30L))
+        .willReturn(detailResponse(DrawingAnalysisStatus.FAILED));
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/{drawingSessionId}/analyses/{analysisId}", 10, 30))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("FAILED"))
+        .andExpect(jsonPath("$.data.detections").isArray())
+        .andExpect(jsonPath("$.data.detections").isEmpty())
+        .andExpect(jsonPath("$.data.failure.code").value("AI_ANALYSIS_FAILED"));
+  }
+
+  @ParameterizedTest
+  @EnumSource(
+      value = DrawingAnalysisStatus.class,
+      names = {"PENDING", "PROCESSING"})
+  void returnsInProgressStatusWithEmptyDetections(DrawingAnalysisStatus statusValue)
+      throws Exception {
+    given(drawingAnalysisQueryService.getDrawingAnalysis(10L, 30L))
+        .willReturn(detailResponse(statusValue));
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/{drawingSessionId}/analyses/{analysisId}", 10, 30))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value(statusValue.name()))
+        .andExpect(jsonPath("$.data.model").isEmpty())
+        .andExpect(jsonPath("$.data.detections").isArray())
+        .andExpect(jsonPath("$.data.detections").isEmpty())
+        .andExpect(jsonPath("$.data.processedAt").isEmpty())
+        .andExpect(jsonPath("$.data.failure").isEmpty());
+  }
+
+  @Test
+  void validatesAnalysisPathAndReturnsSafeNotFound() throws Exception {
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/{drawingSessionId}/analyses/{analysisId}", 10, 0))
+        .andExpect(status().isBadRequest());
+
+    given(drawingAnalysisQueryService.getDrawingAnalysis(10L, 30L))
+        .willThrow(new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_FOUND));
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/{drawingSessionId}/analyses/{analysisId}", 10, 30))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("ANALYSIS_404_002"))
+        .andExpect(jsonPath("$.stackTrace").doesNotExist());
+  }
+
   private CreateDrawingAnalysisResponse response() {
     return new CreateDrawingAnalysisResponse(
         30L,
@@ -118,5 +192,34 @@ class DrawingAnalysisControllerTest {
                     new BigDecimal("520")))),
         Instant.parse("2026-07-22T05:00:00Z"),
         Instant.parse("2026-07-22T05:00:01Z"));
+  }
+
+  private DrawingAnalysisDetailResponse detailResponse(DrawingAnalysisStatus status) {
+    boolean succeeded = status == DrawingAnalysisStatus.SUCCEEDED;
+    boolean failed = status == DrawingAnalysisStatus.FAILED;
+    return new DrawingAnalysisDetailResponse(
+        30L,
+        10L,
+        20L,
+        "550e8400-e29b-41d4-a716-446655440000",
+        DrawingAnalysisType.OBJECT_DETECTION,
+        status,
+        succeeded ? new DrawingAnalysisModelResponse("mock-drawing-detector", "1.0") : null,
+        succeeded
+            ? List.of(
+                new DrawingDetectionResponse(
+                    "HOUSE",
+                    new BigDecimal("0.95"),
+                    new BoundingBoxResponse(
+                        new BigDecimal("120"),
+                        new BigDecimal("80"),
+                        new BigDecimal("640"),
+                        new BigDecimal("520"))))
+            : List.of(),
+        Instant.parse("2026-07-22T05:00:00Z"),
+        failed || succeeded ? Instant.parse("2026-07-22T05:00:01Z") : null,
+        failed
+            ? new DrawingAnalysisFailureResponse("AI_ANALYSIS_FAILED", "그림 분석 처리에 실패했습니다.")
+            : null);
   }
 }

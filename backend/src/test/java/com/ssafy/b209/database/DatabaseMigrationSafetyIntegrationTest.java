@@ -13,7 +13,7 @@ import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
-/** 기존 V2 데이터가 있는 데이터베이스에서 V3가 파괴적 변경 전에 중단되는지 검증한다. */
+/** 기존 데이터가 있는 데이터베이스에서 파괴적 Migration이 안전 조건을 확인하는지 검증한다. */
 @Testcontainers
 class DatabaseMigrationSafetyIntegrationTest {
 
@@ -92,6 +92,24 @@ class DatabaseMigrationSafetyIntegrationTest {
             jdbcTemplate.queryForObject(
                 "SELECT deleted_at IS NOT NULL FROM users WHERE id = 1", Boolean.class))
         .isTrue();
+  }
+
+  @Test
+  void refusesV6WhenLocalAuthAccountsExist() {
+    jdbcTemplate.update("INSERT INTO users (id, role) VALUES (1, 'GUARDIAN')");
+    jdbcTemplate.update(
+        "INSERT INTO auth_accounts "
+            + "(user_id, provider, provider_subject, login_email, password_hash) "
+            + "VALUES (1, 'LOCAL', 'legacy@example.com', 'legacy@example.com', 'encoded')");
+
+    assertThatThrownBy(() -> flyway().migrate())
+        .hasMessageContaining("ck_migration_v6_social_auth_guard");
+
+    assertThat(columnExists("auth_accounts", "password_hash")).isTrue();
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM auth_accounts WHERE provider = 'LOCAL'", Integer.class))
+        .isEqualTo(1);
   }
 
   private Flyway flyway() {

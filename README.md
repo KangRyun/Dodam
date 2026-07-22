@@ -486,6 +486,74 @@ throw new BusinessException(SomeDomainErrorCode.RESOURCE_NOT_FOUND);
 9. S3 Pre-signed URL 업로드
 10. FastAPI AI 서버 연동
 
+## OAuth 로그인 API
+
+자체 이메일·비밀번호 로그인 없이 Kakao·Google·Naver authorization code를 백엔드에서 검증합니다.
+
+```http
+POST /api/v1/auth/oauth/{provider}
+Content-Type: application/json
+
+{
+  "authorizationCode": "provider가 발급한 일회성 code",
+  "redirectUri": "Provider Console에 등록된 URI",
+  "state": "Naver 로그인에서 사용한 state",
+  "deviceId": "앱 설치 단위 식별자"
+}
+```
+
+- `{provider}`는 `kakao`, `google`, `naver` 중 하나입니다.
+- Kakao `id`, Google `sub`, Naver `response.id`를 계정 식별자로 사용하며 이메일·전화번호는 사용하지 않습니다.
+- `redirectUri`는 서버 환경 변수의 Provider별 URI와 정확히 일치해야 합니다.
+- `JWT_SECRET`은 UTF-8 기준 32 Byte 이상이어야 하며 기본 Secret은 제공하지 않습니다.
+- Provider 설정은 `KAKAO_CLIENT_ID`, `KAKAO_CLIENT_SECRET`, `KAKAO_REDIRECT_URI`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, `NAVER_REDIRECT_URI`로 주입합니다.
+- Access Token Filter와 Redis 기반 Refresh Token rotation이 적용되어 있습니다.
+- Access Token이 전달되면 HS256 서명, 발급자, 만료, `token_type=access`, 사용자 ID Subject를 검증하고 요청 Principal로 사용합니다. Refresh Token을 API 인증에 사용할 수 없습니다.
+- `POST /api/v1/auth/reissue`는 `refreshToken`과 로그인 때 사용한 `deviceId`를 받아 Access·Refresh Token을 모두 교체합니다. Redis에는 Token 원문 대신 SHA-256 hash만 저장하며, 과거 Token 재사용을 탐지하면 해당 Token family를 폐기합니다.
+- Redis 장애 시 로그인과 재발급은 fail-closed로 실패하며, MySQL에는 Refresh Token을 저장하지 않습니다.
+- Swagger UI의 `bearerAuth` Authorize 입력에는 `Bearer ` 접두어 없이 Access JWT 값만 입력합니다.
+
+실제 Client Secret, JWT Secret과 Redirect URI는 `.env` 또는 배포 Secret으로 관리하며 Git에 커밋하지 않습니다.
+
+## 아동 정보 조회 API
+
+연결된 보호자는 다음 Endpoint로 삭제되지 않은 활성 아동의 상세 프로필을 조회합니다.
+
+```http
+GET /api/v1/children/{childId}
+Authorization: Bearer <access-token>
+X-Guardian-User-Id: 10
+```
+
+```json
+{
+  "success": true,
+  "code": "COMMON_200",
+  "message": "요청이 성공했습니다.",
+  "data": {
+    "childId": 3,
+    "nickname": "별이",
+    "birthDate": "2019-03-15",
+    "age": 7,
+    "profileImageUrl": null,
+    "preferredCharacter": "MONGLE",
+    "questionDifficulty": "LOWER_ELEMENTARY",
+    "responseModes": ["VOICE", "EMOJI", "COLOR"],
+    "tutorialStatus": "NOT_STARTED",
+    "profileStatus": "ACTIVE",
+    "relationshipType": "MOTHER",
+    "createdAt": "2026-07-21T02:30:00Z",
+    "updatedAt": "2026-07-21T02:30:00Z"
+  }
+}
+```
+
+- `age`는 조회일 기준 만 나이입니다.
+- `responseModes`는 보호자가 지정한 표시 순서대로 반환합니다.
+- 존재하지 않음, 삭제됨, 비활성 상태와 보호자 연결 없음은 식별자 노출 방지를 위해 모두 HTTP 404와 `CHILD_404_001`을 반환합니다.
+- 조회만으로 아동 프로필이나 보호자 관계 상태를 변경하지 않습니다.
+- 운영 요청은 `Authorization: Bearer <access-token>`의 검증된 사용자 ID를 사용합니다. `X-Guardian-User-Id`는 기존 자동화 테스트 전환을 위해 Test Profile에서만 허용되며 운영 기본값에서는 거부됩니다.
+
 ## 그림 활동 세션 생성 API
 
 아동의 그림 활동을 시작할 때 다음 Endpoint를 사용합니다.

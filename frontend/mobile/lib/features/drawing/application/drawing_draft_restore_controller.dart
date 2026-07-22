@@ -65,9 +65,8 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
         return;
       }
       _draft = result;
-      syncCoordinator.resumeFromDraft(
-        lastEventSequence: result.lastEventSequence,
-        lastBatchSequence: result.lastBatchSequence,
+      syncCoordinator.resumeEventSequenceFromDraft(
+        result.canvasState.lastEventSequence,
       );
       _setStatus(DrawingDraftRestoreStatus.found);
     } on ApiResponseFailure catch (failure) {
@@ -83,7 +82,7 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
   }
 
   void continueDrawing() {
-    final url = _draft?.draftAsset.fileUrl;
+    final url = _draft?.previewUrl;
     if (url == null || url.isEmpty) {
       _setStatus(DrawingDraftRestoreStatus.imageFailed);
       return;

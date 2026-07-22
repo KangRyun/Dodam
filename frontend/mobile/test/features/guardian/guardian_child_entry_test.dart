@@ -2,8 +2,11 @@ import 'dart:async';
 
 import 'package:dodam/app/app.dart';
 import 'package:dodam/app/router/app_routes.dart';
+import 'package:dodam/core/network/api_page.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
 import 'package:dodam/features/child/domain/repositories/child_repository.dart';
+import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
+import 'package:dodam/features/drawing/domain/repositories/drawing_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -87,6 +90,104 @@ void main() {
     expect(find.text('그림 활동'), findsWidgets);
   });
 
+  testWidgets('실제 앱 진입 흐름에서 생성한 세션으로 완료부터 보호자 홈까지 이어진다', (tester) async {
+    final drawingRepository = _TrackingDrawingRepository(sessionId: 731);
+    await tester.pumpWidget(
+      DodamApp(
+        childRepository: _FakeChildRepository(children: _children),
+        drawingRepository: drawingRepository,
+        drawingCompletionSnapshotProvider: () async => _png,
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('child-3')));
+    await tester.pump();
+    await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
+    await tester.pumpAndSettle();
+
+    await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    await tester.pumpAndSettle();
+
+    expect(drawingRepository.getTypesChildId, 3);
+    expect(drawingRepository.createCalls, 1);
+    expect(drawingRepository.createRequest?.childId, 3);
+    expect(drawingRepository.createRequest?.drawingTypeId, 77);
+    expect(drawingRepository.createRequest?.inputMethod, 'CANVAS');
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    final gesture = await tester.startGesture(center);
+    await gesture.moveBy(const Offset(30, 20));
+    await gesture.up();
+    await tester.pump();
+    final complete = find.byKey(const ValueKey('drawing-complete'));
+    await tester.ensureVisible(complete);
+    await tester.pump();
+    await tester.tap(complete);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다 그렸어요'));
+    for (
+      var attempt = 0;
+      attempt < 30 && drawingRepository.completeSessionId == null;
+      attempt += 1
+    ) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    expect(drawingRepository.completeSessionId, 731);
+    await tester.pumpAndSettle();
+    expect(find.text('내 마음 고르기'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('emotion-submit')));
+    await tester.pumpAndSettle();
+
+    expect(drawingRepository.reflectionSessionId, 731);
+    expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('guardian-handoff')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('확인'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('보호자 홈'), findsWidgets);
+    expect(find.text('내 마음 고르기'), findsNothing);
+  });
+
+  testWidgets('세션 생성 실패 시 Drawing으로 이동하지 않고 다시 시도할 수 있다', (tester) async {
+    final drawingRepository = _TrackingDrawingRepository(
+      createError: StateError('create failed'),
+    );
+    await _pumpChildHome(tester, drawingRepository);
+
+    await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    await tester.pumpAndSettle();
+
+    expect(drawingRepository.createCalls, 1);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
+    expect(find.textContaining('그림 활동을 시작하지 못했어요'), findsOneWidget);
+    expect(find.byKey(const ValueKey('draw-action')), findsOneWidget);
+  });
+
+  testWidgets('활동 시작 연속 탭은 DrawingSession을 중복 생성하지 않는다', (tester) async {
+    final pending = Completer<DrawingSessionDto>();
+    final drawingRepository = _TrackingDrawingRepository(pending: pending);
+    await _pumpChildHome(tester, drawingRepository);
+
+    final action = find.byKey(const ValueKey('draw-action'));
+    await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    await tester.pump();
+    await tester.tap(action);
+    await tester.pump();
+
+    expect(drawingRepository.createCalls, 1);
+    expect(find.byType(CircularProgressIndicator), findsWidgets);
+    pending.complete(drawingRepository.session());
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+  });
+
   testWidgets('아동 모드에는 보호자 전용 요약과 리포트 정보가 노출되지 않는다', (tester) async {
     await tester.pumpWidget(
       DodamApp(childRepository: _FakeChildRepository(children: _children)),
@@ -123,6 +224,23 @@ Future<void> _tapAfterScroll(WidgetTester tester, Key key) async {
   await tester.tap(target);
 }
 
+Future<void> _pumpChildHome(
+  WidgetTester tester,
+  DrawingRepository drawingRepository,
+) async {
+  await tester.pumpWidget(
+    DodamApp(
+      childRepository: _FakeChildRepository(children: _children),
+      drawingRepository: drawingRepository,
+    ),
+  );
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const ValueKey('child-3')));
+  await tester.pump();
+  await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
+  await tester.pumpAndSettle();
+}
+
 const _children = [
   ChildSummaryDto(
     childId: 3,
@@ -155,6 +273,12 @@ const _children = [
     ),
   ),
 ];
+
+const _png = BinaryUploadDto(
+  bytes: [137, 80, 78, 71],
+  fileName: 'final.png',
+  mimeType: 'image/png',
+);
 
 final class _FakeChildRepository implements ChildRepository {
   _FakeChildRepository({this.children = const [], this.error, this.pending});
@@ -193,4 +317,148 @@ final class _FakeChildRepository implements ChildRepository {
     int childId,
     UpdateTutorialRequestDto request,
   ) => throw UnimplementedError();
+}
+
+final class _TrackingDrawingRepository implements DrawingRepository {
+  _TrackingDrawingRepository({
+    this.sessionId = 731,
+    this.createError,
+    this.pending,
+  });
+
+  final int sessionId;
+  final Object? createError;
+  final Completer<DrawingSessionDto>? pending;
+  int createCalls = 0;
+  int? getTypesChildId;
+  int? completeSessionId;
+  int? reflectionSessionId;
+  CreateDrawingSessionRequestDto? createRequest;
+
+  DrawingSessionDto session() => DrawingSessionDto.fromJson({
+    'drawingSessionId': sessionId,
+    'childId': 3,
+    'drawingType': {'drawingTypeId': 77, 'code': 'FREE', 'name': '자유화'},
+    'inputMethod': 'CANVAS',
+    'title': null,
+    'sessionStatus': 'DRAWING',
+    'currentStage': 'DRAWING',
+    'selectedEmotions': null,
+    'expressedEmotionText': null,
+    'startedAt': '2026-07-22T00:00:00Z',
+    'completedAt': null,
+    'conversation': null,
+    'latestAnalysis': null,
+    'assets': <Object>[],
+  });
+
+  @override
+  Future<ApiPage<DrawingTypeDto>> getDrawingTypes({
+    int? childId,
+    String? ageGroup,
+  }) async {
+    getTypesChildId = childId;
+    return const ApiPage(
+      content: [
+        DrawingTypeDto(
+          drawingTypeId: 77,
+          code: 'FREE',
+          name: '자유화',
+          activityCategory: 'GENERAL',
+          selectableBy: 'GUARDIAN_OR_CHILD',
+          recommendedAgeMin: null,
+          recommendedAgeMax: null,
+          guideText: '자유롭게 그려 보세요.',
+          displayOrder: 1,
+        ),
+      ],
+      page: 0,
+      size: 1,
+      totalElements: 1,
+      totalPages: 1,
+      hasNext: false,
+    );
+  }
+
+  @override
+  Future<DrawingSessionDto> createSession(
+    CreateDrawingSessionRequestDto request,
+  ) async {
+    createCalls += 1;
+    createRequest = request;
+    if (createError case final error?) throw error;
+    return pending?.future ?? session();
+  }
+
+  @override
+  Future<DraftRecoveryDto?> getDraft(int sessionId) async => null;
+
+  @override
+  Future<StrokeBatchResponseDto> sendStrokeBatch(
+    int sessionId,
+    StrokeBatchRequestDto request,
+  ) async => StrokeBatchResponseDto(
+    strokeBatchId: 1,
+    batchSequence: request.batchSequence,
+    eventCount: request.events.length,
+    receivedAt: '2026-07-22T00:00:00Z',
+  );
+
+  @override
+  Future<DrawingStageCompleteResponseDto> completeDrawingStage(
+    int sessionId, {
+    required BinaryUploadDto finalImage,
+    required DrawingCompleteMetadataDto metadata,
+    required String idempotencyKey,
+  }) async {
+    completeSessionId = sessionId;
+    return DrawingStageCompleteResponseDto.fromJson({
+      'drawingSessionId': sessionId,
+      'finalAssetId': 900,
+      'sessionStatus': 'IN_PROGRESS',
+      'currentStage': 'ANALYZING',
+      'analysis': {
+        'analysisId': 901,
+        'analysisType': 'INTERMEDIATE',
+        'status': 'PENDING',
+      },
+      'nextAction': 'POLL_ANALYSIS',
+    });
+  }
+
+  @override
+  Future<void> saveReflection(
+    int sessionId,
+    SaveDrawingReflectionRequestDto request,
+  ) async => reflectionSessionId = sessionId;
+
+  @override
+  Future<DraftSaveResponseDto> saveDraft(
+    int sessionId,
+    BinaryUploadDto preview,
+    DraftCanvasStateDto canvasState,
+  ) async => DraftSaveResponseDto(
+    drawingAssetId: 1,
+    assetVersion: 1,
+    lastEventSequence: canvasState.lastEventSequence,
+    savedAt: '2026-07-22T00:00:00Z',
+    expiresAt: null,
+  );
+
+  @override
+  Future<void> deleteDraft(int sessionId) async {}
+  @override
+  Future<DrawingSessionDto> getSession(int sessionId) async => session();
+  @override
+  Future<AnalysisAcceptedDto> requestAnalysis(
+    int sessionId,
+    RequestAnalysisDto request, {
+    required String idempotencyKey,
+  }) => throw UnimplementedError();
+  @override
+  Future<DrawingUploadResponseDto> uploadDrawing(
+    int sessionId,
+    BinaryUploadDto image, {
+    String? objectCode,
+  }) => throw UnimplementedError();
 }
