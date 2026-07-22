@@ -146,11 +146,15 @@ services:
     restart: unless-stopped
 
     ports:
-      - "80:80"                  # 외부 진입점. HTTPS 도입 시 "443:443" 추가 + 인증서 볼륨 마운트
+      - "80:80"                  # 외부 진입점. 443은 인증서 발급 후 Step3 MR에서 추가(S15P11B209-301)
 
     # ⚠️ conf 를 bind 마운트하지 않는다 — 실행 위치(호스트/Jenkins)에 따라 경로가 달라져
     #    빈 conf 가 마운트되는 사고(2026-07-22)가 있었음. conf 는 이미지에 bake(위 build 참조).
     #    conf 변경 → 커밋 → 파이프라인이 이미지 재빌드 + 컨테이너 재생성으로 반영.
+    # 인증서·ACME 챌린지는 "네임드 볼륨"이라 실행 위치와 무관(bind 아님) + 저장소에 인증서 커밋 금지(가드레일).
+    volumes:
+      - letsencrypt:/etc/letsencrypt:ro         # 인증서 읽기(발급·갱신은 certbot이 씀)
+      - certbot-webroot:/var/www/certbot:ro     # ACME 챌린지 토큰 서빙용
 
     depends_on:
       backend:
@@ -161,11 +165,31 @@ services:
     networks:
       - dodam-net
 
+  # ───────────────────────────────────────────────────────────────
+  # certbot — Let's Encrypt 인증서 자동 갱신 (S15P11B209-301).
+  #   12시간마다 renew 시도(실제 갱신은 만료 30일 전부터만 일어남 — 그 외엔 no-op).
+  #   최초 발급은 1회 수동:
+  #   docker compose -f infra/docker-compose.yml run --rm certbot \
+  #     certonly --webroot -w /var/www/certbot -d i15b209.p.ssafy.io --email <이메일> --agree-tos --no-eff-email
+  #   (내부망 불필요 — LE와의 통신은 아웃바운드, 챌린지 서빙은 nginx가 담당)
+  # ───────────────────────────────────────────────────────────────
+  certbot:
+    image: certbot/certbot:v2.11.0   # latest 금지 — 버전 고정
+    container_name: dodam-certbot
+    restart: unless-stopped
+    volumes:
+      - letsencrypt:/etc/letsencrypt            # 인증서 저장(쓰기)
+      - certbot-webroot:/var/www/certbot        # 챌린지 토큰 쓰기(nginx가 서빙)
+    # 갱신 루프 — 인증서가 없으면 "갱신 대상 없음"으로 조용히 지나감(안전)
+    entrypoint: sh -c 'trap exit TERM; while true; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $$!; done'
+
 # 내부 전용 네트워크 — mysql·backend·ai·nginx가 여기 붙는다. 외부 노출은 nginx만.
 networks:
   dodam-net:
     driver: bridge
 
-# 네임드 볼륨 — mysql 데이터가 실제로 보관되는 곳
+# 네임드 볼륨 — mysql 데이터 · TLS 인증서 · ACME 챌린지
 volumes:
   mysql-data:
+  letsencrypt:        # /etc/letsencrypt (인증서·계정) — 컨테이너 재생성에도 유지, 저장소 비추적
+  certbot-webroot:    # ACME HTTP-01 챌린지 토큰 교환용 (certbot 씀 ↔ nginx 서빙)
