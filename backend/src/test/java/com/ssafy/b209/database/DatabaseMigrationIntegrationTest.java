@@ -36,11 +36,62 @@ class DatabaseMigrationIntegrationTest {
   @Autowired Flyway flyway;
 
   @Test
-  void appliesInitialMigration() {
+  void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("2");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("3");
     assertThat(tableExists("flyway_schema_history")).isTrue();
-    assertThat(tableCount()).isEqualTo(30);
+    assertThat(tableCount()).isEqualTo(63);
+    assertThat(tableExists("refresh_tokens")).isFalse();
+    assertThat(jsonColumnCount()).isZero();
+  }
+
+  @Test
+  void createsNormalizedChildTablesAndRelationships() {
+    assertThat(tableExists("stroke_events")).isTrue();
+    assertThat(tableExists("stroke_event_points")).isTrue();
+    assertThat(tableExists("conversation_message_options")).isTrue();
+    assertThat(tableExists("conversation_message_selected_options")).isTrue();
+    assertThat(tableExists("report_evidence_references")).isTrue();
+    assertThat(tableExists("audit_log_changes")).isTrue();
+    assertThat(foreignKeyExists("stroke_events", "fk_stroke_events_batch_id")).isTrue();
+    assertThat(foreignKeyExists("stroke_event_points", "fk_stroke_event_points_event_id")).isTrue();
+    assertThat(
+            foreignKeyExists(
+                "conversation_message_selected_options",
+                "fk_conversation_message_selected_options_question_option"))
+        .isTrue();
+    assertThat(
+            foreignKeyExists("report_evidence_authors", "fk_report_evidence_authors_evidence_id"))
+        .isTrue();
+  }
+
+  @Test
+  void createsNormalizedUniqueConstraintsAndCorrectedColumns() {
+    assertThat(indexExists("child_response_modes", "uk_child_response_modes_child_mode", true))
+        .isTrue();
+    assertThat(
+            indexExists(
+                "drawing_session_emotions", "uk_drawing_session_emotions_session_emotion", true))
+        .isTrue();
+    assertThat(indexExists("expert_follows", "uk_expert_follows_guardian_expert", true)).isTrue();
+    assertThat(columnExists("conversation_sessions", "drawing_session_id")).isTrue();
+    assertThat(columnExists("conversation_sessions", "conversation_id")).isFalse();
+    assertThat(columnExists("analysis_behavior_features", "tool_change_count")).isTrue();
+    assertThat(columnExists("analysis_behavior_features", "tool_chnage_count")).isFalse();
+    assertThat(columnExists("users", "deleted_at")).isTrue();
+    assertThat(checkConstraintContains("users", "ck_users_account_status", "DELETED")).isTrue();
+    assertThat(columnExists("conversation_message_selected_options", "question_message_id"))
+        .isTrue();
+    assertThat(
+            foreignKeyExists(
+                "conversation_message_selected_options",
+                "fk_conversation_message_selected_options_answer_question"))
+        .isTrue();
+    assertThat(
+            foreignKeyExists(
+                "conversation_message_selected_options",
+                "fk_conversation_message_selected_options_question_option"))
+        .isTrue();
   }
 
   @Test
@@ -90,6 +141,13 @@ class DatabaseMigrationIntegrationTest {
         Integer.class);
   }
 
+  private int jsonColumnCount() {
+    return jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM information_schema.columns "
+            + "WHERE table_schema = DATABASE() AND data_type = 'json'",
+        Integer.class);
+  }
+
   private boolean tableExists(String tableName) {
     return count(
             "SELECT COUNT(*) FROM information_schema.tables "
@@ -125,6 +183,21 @@ class DatabaseMigrationIntegrationTest {
             tableName,
             indexName,
             unique ? 0 : 1)
+        > 0;
+  }
+
+  private boolean checkConstraintContains(
+      String tableName, String constraintName, String expectedFragment) {
+    return count(
+            "SELECT COUNT(*) FROM information_schema.table_constraints tc "
+                + "JOIN information_schema.check_constraints cc "
+                + "ON cc.constraint_schema = tc.constraint_schema "
+                + "AND cc.constraint_name = tc.constraint_name "
+                + "WHERE tc.constraint_schema = DATABASE() AND tc.table_name = ? "
+                + "AND tc.constraint_name = ? AND cc.check_clause LIKE ?",
+            tableName,
+            constraintName,
+            "%" + expectedFragment + "%")
         > 0;
   }
 
