@@ -6,6 +6,7 @@ import com.ssafy.b209.conversation.dto.AiQuestionRequest;
 import com.ssafy.b209.conversation.dto.AiQuestionResponse;
 import java.net.SocketTimeoutException;
 import java.time.Duration;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -24,6 +25,7 @@ public class RestClientAiQuestionClient implements AiQuestionClient {
   private final String internalToken;
   private final ObjectMapper objectMapper;
 
+  @Autowired
   public RestClientAiQuestionClient(
       RestClient.Builder builder,
       @Value("${AI_BASE_URL:http://localhost:8000}") String baseUrl,
