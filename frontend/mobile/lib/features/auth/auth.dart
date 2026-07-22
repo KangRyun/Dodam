@@ -1,10 +1,14 @@
+export 'application/google_login_coordinator.dart';
 export 'application/social_login_service.dart';
+export 'data/clients/google_login_client_impl.dart';
+export 'data/mock/google_login_scenario.dart';
 export 'data/mock/mock_auth_scenario.dart';
 export 'data/repositories/auth_repository_impl.dart';
 export 'domain/entities/auth_session.dart';
 export 'domain/entities/auth_tokens.dart';
 export 'domain/entities/authenticated_user.dart';
 export 'domain/entities/oauth_credential.dart';
+export 'domain/clients/google_login_client.dart';
 export 'domain/enums/auth_provider.dart';
 export 'domain/enums/auth_status.dart';
 export 'domain/enums/user_role.dart';
