@@ -111,6 +111,15 @@ final class StrokeBatchQueue {
         batch.status == StrokeBatchQueueStatus.failedPermanent,
   );
 
+  bool resumeBatchSequence(int nextValue) {
+    if (nextValue < 0) throw ArgumentError.value(nextValue, 'nextValue');
+    if (_buffer.isNotEmpty || _queue.isNotEmpty || _completed.isNotEmpty) {
+      return false;
+    }
+    _nextBatchSequence = nextValue;
+    return true;
+  }
+
   void addEvents(Iterable<StrokeEventDto> events) {
     _buffer.addAll(events);
     onChanged?.call();
@@ -227,6 +236,17 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
   DrawingSaveStatus _draftStatus = DrawingSaveStatus.localOnly;
 
   int get elapsedMilliseconds => journal.elapsedMilliseconds;
+
+  bool resumeFromDraft({int? lastEventSequence, int? lastBatchSequence}) {
+    final eventResumed =
+        lastEventSequence == null ||
+        journal.resumeEventSequence(lastEventSequence + 1);
+    final batchResumed =
+        lastBatchSequence == null ||
+        batchQueue.resumeBatchSequence(lastBatchSequence + 1);
+    return eventResumed && batchResumed;
+  }
+
   DrawingSaveStatus get saveStatus {
     if (_draftStatus == DrawingSaveStatus.failed || batchQueue.hasFailure) {
       return DrawingSaveStatus.failed;

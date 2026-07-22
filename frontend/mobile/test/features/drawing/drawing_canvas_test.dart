@@ -192,7 +192,7 @@ void main() {
   testWidgets('작은 화면에서는 세로 배치하며 overflow가 발생하지 않는다', (tester) async {
     await _pumpDrawing(tester, size: const Size(600, 800));
     await tester.drag(
-      find.byType(SingleChildScrollView),
+      find.byType(SingleChildScrollView).first,
       const Offset(0, -300),
     );
     await tester.pump();
@@ -200,6 +200,38 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
     expect(find.text('다 그렸어요!'), findsOneWidget);
+  });
+
+  testWidgets('넓지만 높이가 작은 화면에서는 도구 패널이 스크롤되어 overflow가 없다', (tester) async {
+    await _pumpDrawing(tester, size: const Size(1200, 600));
+
+    expect(tester.takeException(), isNull);
+    expect(
+      find.byKey(const ValueKey('drawing-tool-panel-scroll')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+
+    await tester.drag(
+      find.byKey(const ValueKey('drawing-tool-panel-scroll')),
+      const Offset(0, -1000),
+    );
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    expect(find.text('그림을 안전하게 담고 있어요'), findsOneWidget);
+    expect(find.text('다 그렸어요!'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('drawing-complete-bottom-space')),
+      findsOneWidget,
+    );
+    final panelBottom = tester
+        .getRect(find.byKey(const ValueKey('drawing-tool-panel-scroll')))
+        .bottom;
+    final buttonBottom = tester
+        .getRect(find.byKey(const ValueKey('drawing-complete')))
+        .bottom;
+    expect(panelBottom - buttonBottom, greaterThanOrEqualTo(AppSpacing.md));
   });
 
   testWidgets('Drawing 화면에는 보호자 전용 정보가 노출되지 않는다', (tester) async {
