@@ -94,7 +94,7 @@ void main() {
     expect(controller.status, DrawingDraftRestoreStatus.loadingImage);
   });
 
-  test('복구 뒤 첫 event와 batch는 서버 마지막 번호 다음부터 시작한다', () async {
+  test('복구 뒤 event는 이어지고 batch는 Draft와 독립적으로 시작한다', () async {
     final repository = _DraftRepository();
     final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
     final controller = DrawingDraftRestoreController(
@@ -110,7 +110,7 @@ void main() {
     await sync.flushEvents();
 
     expect(events.first.seq, 1106);
-    expect(repository.lastBatch?.batchSequence, 13);
+    expect(repository.lastBatch?.batchSequence, 1);
     expect(repository.lastBatch?.firstEventSequence, 1106);
     expect(sync.journal.events, hasLength(2));
   });
@@ -311,17 +311,14 @@ final class _DraftRepository implements DrawingRepository {
     }
     if (scenario == _Scenario.empty) return null;
     return DraftRecoveryDto(
-      drawingSessionId: sessionId,
-      sessionStatus: 'DRAWING',
-      currentStage: 'DRAWING',
-      drawingType: const DrawingTypeSummaryDto(
-        drawingTypeId: 5,
-        code: 'ART_DIARY',
-        name: '그림일기',
+      previewUrl: _asset.fileUrl,
+      canvasState: DraftCanvasStateDto(
+        lastEventSequence: nullSequences ? null : 1105,
+        toolState: null,
+        viewport: null,
+        clientSavedAt: '2026-07-21T09:41:10Z',
       ),
-      draftAsset: _asset,
-      lastBatchSequence: nullSequences ? null : 12,
-      lastEventSequence: nullSequences ? null : 1105,
+      assetVersion: 3,
     );
   }
 
@@ -340,14 +337,20 @@ final class _DraftRepository implements DrawingRepository {
   }
 
   @override
-  Future<DrawingAssetDto> saveDraft(
+  Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
-    BinaryUploadDto image, {
-    int? lastEventSequence,
-  }) async {
-    savedImage = image;
-    savedLastEventSequence = lastEventSequence;
-    return _asset;
+    BinaryUploadDto preview,
+    DraftCanvasStateDto canvasState,
+  ) async {
+    savedImage = preview;
+    savedLastEventSequence = canvasState.lastEventSequence;
+    return DraftSaveResponseDto(
+      drawingAssetId: 1,
+      assetVersion: 3,
+      lastEventSequence: canvasState.lastEventSequence,
+      savedAt: '2026-07-22T00:00:00Z',
+      expiresAt: null,
+    );
   }
 
   @override

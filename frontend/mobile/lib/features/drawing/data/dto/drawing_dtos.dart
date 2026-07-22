@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../../../../core/network/api_page.dart';
 
 Map<String, dynamic> _map(Object? value) =>
@@ -232,34 +234,81 @@ final class StrokeBatchResponseDto {
   final String receivedAt;
 }
 
+final class DraftCanvasStateDto {
+  const DraftCanvasStateDto({
+    required this.lastEventSequence,
+    required this.toolState,
+    required this.viewport,
+    required this.clientSavedAt,
+  });
+
+  factory DraftCanvasStateDto.fromJson(Map<String, dynamic> json) =>
+      DraftCanvasStateDto(
+        lastEventSequence: json['lastEventSequence'] as int?,
+        toolState: json['toolState'] == null ? null : _map(json['toolState']),
+        viewport: json['viewport'] == null ? null : _map(json['viewport']),
+        clientSavedAt: json['clientSavedAt'] as String?,
+      );
+
+  final int? lastEventSequence;
+  final Map<String, dynamic>? toolState;
+  final Map<String, dynamic>? viewport;
+  final String? clientSavedAt;
+
+  Map<String, dynamic> toJson() => {
+    'lastEventSequence': lastEventSequence,
+    'toolState': toolState,
+    'viewport': viewport,
+    'clientSavedAt': clientSavedAt,
+  };
+}
+
+final class DraftSaveResponseDto {
+  const DraftSaveResponseDto({
+    required this.drawingAssetId,
+    required this.assetVersion,
+    required this.lastEventSequence,
+    required this.savedAt,
+    required this.expiresAt,
+  });
+
+  factory DraftSaveResponseDto.fromJson(Map<String, dynamic> json) =>
+      DraftSaveResponseDto(
+        drawingAssetId: json['drawingAssetId'] as int,
+        assetVersion: json['assetVersion'] as int,
+        lastEventSequence: json['lastEventSequence'] as int?,
+        savedAt: json['savedAt'] as String,
+        expiresAt: json['expiresAt'] as String?,
+      );
+
+  final int drawingAssetId, assetVersion;
+  final int? lastEventSequence;
+  final String savedAt;
+  final String? expiresAt;
+}
+
 final class DraftRecoveryDto {
   const DraftRecoveryDto({
-    required this.drawingSessionId,
-    required this.sessionStatus,
-    required this.currentStage,
-    required this.drawingType,
-    required this.draftAsset,
-    required this.lastBatchSequence,
-    required this.lastEventSequence,
+    required this.previewUrl,
+    required this.canvasState,
+    required this.assetVersion,
   });
+
   factory DraftRecoveryDto.fromJson(Map<String, dynamic> json) {
-    final sync = _map(json['strokeSync']);
-    final draft = _map(json['draftAsset']);
+    final rawCanvasState = json['canvasState'];
+    final canvasState = rawCanvasState is String
+        ? jsonDecode(rawCanvasState) as Map<String, dynamic>
+        : _map(rawCanvasState);
     return DraftRecoveryDto(
-      drawingSessionId: json['drawingSessionId'] as int,
-      sessionStatus: json['sessionStatus'] as String,
-      currentStage: json['currentStage'] as String,
-      drawingType: DrawingTypeSummaryDto.fromJson(_map(json['drawingType'])),
-      draftAsset: DrawingAssetDto.fromJson({...draft, 'assetType': 'DRAFT'}),
-      lastBatchSequence: sync['lastBatchSequence'] as int?,
-      lastEventSequence: sync['lastEventSequence'] as int?,
+      previewUrl: json['previewUrl'] as String,
+      canvasState: DraftCanvasStateDto.fromJson(canvasState),
+      assetVersion: json['assetVersion'] as int,
     );
   }
-  final int drawingSessionId;
-  final String sessionStatus, currentStage;
-  final DrawingTypeSummaryDto drawingType;
-  final DrawingAssetDto draftAsset;
-  final int? lastBatchSequence, lastEventSequence;
+
+  final String previewUrl;
+  final DraftCanvasStateDto canvasState;
+  final int assetVersion;
 }
 
 final class DrawingCompleteMetadataDto {

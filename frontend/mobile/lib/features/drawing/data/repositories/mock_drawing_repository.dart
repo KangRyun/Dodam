@@ -94,11 +94,17 @@ final class MockDrawingRepository implements DrawingRepository {
     'receivedAt': '2026-07-21T09:41:03.542Z',
   });
   @override
-  Future<DrawingAssetDto> saveDraft(
+  Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
-    BinaryUploadDto image, {
-    int? lastEventSequence,
-  }) async => DrawingAssetDto.fromJson(_asset);
+    BinaryUploadDto preview,
+    DraftCanvasStateDto canvasState,
+  ) async => DraftSaveResponseDto.fromJson({
+    'drawingAssetId': 120,
+    'assetVersion': 3,
+    'lastEventSequence': canvasState.lastEventSequence,
+    'savedAt': '2026-07-21T09:41:10Z',
+    'expiresAt': '2026-07-28T09:41:10Z',
+  });
   @override
   Future<DraftRecoveryDto> getDraft(int sessionId) async {
     switch (draftScenario) {
@@ -118,16 +124,14 @@ final class MockDrawingRepository implements DrawingRepository {
         );
       case MockDraftScenario.found:
         return DraftRecoveryDto.fromJson({
-          'drawingSessionId': 42,
-          'sessionStatus': 'DRAWING',
-          'currentStage': 'DRAWING',
-          'drawingType': {
-            'drawingTypeId': 5,
-            'code': 'ART_DIARY',
-            'name': '그림일기',
+          'previewUrl': _asset['fileUrl'],
+          'canvasState': {
+            'lastEventSequence': 1105,
+            'toolState': null,
+            'viewport': null,
+            'clientSavedAt': '2026-07-21T09:41:10Z',
           },
-          'draftAsset': _asset,
-          'strokeSync': {'lastBatchSequence': 12, 'lastEventSequence': 1105},
+          'assetVersion': 3,
         });
     }
   }

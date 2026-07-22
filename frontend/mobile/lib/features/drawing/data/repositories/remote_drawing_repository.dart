@@ -6,16 +6,17 @@ import '../../../../core/network/network.dart';
 import '../../domain/repositories/drawing_repository.dart';
 import '../dto/drawing_dtos.dart';
 
-FormData buildDraftFormData(BinaryUploadDto image, {int? lastEventSequence}) =>
-    FormData.fromMap({
-      'image': MultipartFile.fromBytes(
-        image.bytes,
-        filename: image.fileName,
-        contentType: DioMediaType.parse(image.mimeType),
-      ),
-      if (lastEventSequence != null)
-        'lastEventSequence': lastEventSequence.toString(),
-    });
+FormData buildDraftFormData(
+  BinaryUploadDto preview,
+  DraftCanvasStateDto canvasState,
+) => FormData.fromMap({
+  'preview': MultipartFile.fromBytes(
+    preview.bytes,
+    filename: preview.fileName,
+    contentType: DioMediaType.parse(preview.mimeType),
+  ),
+  'canvasState': jsonEncode(canvasState.toJson()),
+});
 
 FormData buildDrawingCompleteFormData(
   BinaryUploadDto finalImage,
@@ -77,16 +78,16 @@ final class RemoteDrawingRepository implements DrawingRepository {
   }
 
   @override
-  Future<DrawingAssetDto> saveDraft(
+  Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
-    BinaryUploadDto image, {
-    int? lastEventSequence,
-  }) async {
-    final response = await _apiClient.post<Map<String, dynamic>>(
+    BinaryUploadDto preview,
+    DraftCanvasStateDto canvasState,
+  ) async {
+    final response = await _apiClient.put<Map<String, dynamic>>(
       'drawing-sessions/$sessionId/draft',
-      data: buildDraftFormData(image, lastEventSequence: lastEventSequence),
+      data: buildDraftFormData(preview, canvasState),
     );
-    return DrawingAssetDto.fromJson(response.data!);
+    return DraftSaveResponseDto.fromJson(_payload(response.data!));
   }
 
   @override
@@ -96,8 +97,13 @@ final class RemoteDrawingRepository implements DrawingRepository {
     );
     final data = response.data;
     if (data == null || data.isEmpty) return null;
-    return DraftRecoveryDto.fromJson(data);
+    return DraftRecoveryDto.fromJson(_payload(data));
   }
+
+  Map<String, dynamic> _payload(Map<String, dynamic> body) =>
+      body['data'] is Map
+      ? Map<String, dynamic>.from(body['data']! as Map)
+      : body;
 
   @override
   Future<void> deleteDraft(int sessionId) async {

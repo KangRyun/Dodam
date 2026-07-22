@@ -232,20 +232,14 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
   Timer? _autosaveTimer;
   Future<BinaryUploadDto?> Function()? _snapshotProvider;
   BinaryUploadDto? _lastDraft;
-  int? _lastDraftEventSequence;
+  DraftCanvasStateDto? _lastDraftCanvasState;
   DrawingSaveStatus _draftStatus = DrawingSaveStatus.localOnly;
 
   int get elapsedMilliseconds => journal.elapsedMilliseconds;
 
-  bool resumeFromDraft({int? lastEventSequence, int? lastBatchSequence}) {
-    final eventResumed =
-        lastEventSequence == null ||
-        journal.resumeEventSequence(lastEventSequence + 1);
-    final batchResumed =
-        lastBatchSequence == null ||
-        batchQueue.resumeBatchSequence(lastBatchSequence + 1);
-    return eventResumed && batchResumed;
-  }
+  bool resumeEventSequenceFromDraft(int? lastEventSequence) =>
+      lastEventSequence == null ||
+      journal.resumeEventSequence(lastEventSequence + 1);
 
   DrawingSaveStatus get saveStatus {
     if (_draftStatus == DrawingSaveStatus.failed || batchQueue.hasFailure) {
@@ -304,7 +298,12 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
     }
     if (image == null) return;
     _lastDraft = image;
-    _lastDraftEventSequence = journal.lastEventSequence;
+    _lastDraftCanvasState = DraftCanvasStateDto(
+      lastEventSequence: journal.lastEventSequence,
+      toolState: null,
+      viewport: null,
+      clientSavedAt: DateTime.now().toUtc().toIso8601String(),
+    );
     await _uploadLastDraft();
   }
 
@@ -317,22 +316,24 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
 
   Future<void> _uploadLastDraft() async {
     final image = _lastDraft;
-    if (image == null || sessionId == null || repository == null) return;
+    final canvasState = _lastDraftCanvasState;
+    if (image == null ||
+        canvasState == null ||
+        sessionId == null ||
+        repository == null) {
+      return;
+    }
     _draftStatus = DrawingSaveStatus.saving;
     notifyListeners();
     try {
-      await repository!.saveDraft(
-        sessionId!,
-        image,
-        lastEventSequence: _lastDraftEventSequence,
-      );
+      await repository!.saveDraft(sessionId!, image, canvasState);
       _draftStatus = DrawingSaveStatus.saved;
     } on Object {
       _draftStatus = DrawingSaveStatus.failed;
     }
     notifyListeners();
-    // POST persistence is confirmed via drawing_assets.last_event_sequence.
-    // TODO(API): Revalidate GET snapshot-specific sync after implementation.
+    // Draft v1.0 has no batchSequence resume contract. The batch queue therefore
+    // starts independently until the server defines a safe resume source.
   }
 
   void _notifyFromQueue() => notifyListeners();

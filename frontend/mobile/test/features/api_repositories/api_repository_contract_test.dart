@@ -115,25 +115,14 @@ void main() {
 
     test('parses draft recovery and analysis accepted responses', () {
       final draft = DraftRecoveryDto.fromJson(const {
-        'drawingSessionId': 42,
-        'sessionStatus': 'DRAWING',
-        'currentStage': 'DRAWING',
-        'drawingType': {
-          'drawingTypeId': 5,
-          'code': 'ART_DIARY',
-          'name': '그림일기',
+        'previewUrl': 'https://example.com/draft.png',
+        'canvasState': {
+          'lastEventSequence': 1105,
+          'toolState': null,
+          'viewport': null,
+          'clientSavedAt': '2026-07-21T09:41:10Z',
         },
-        'draftAsset': {
-          'assetId': 120,
-          'assetVersion': 3,
-          'fileUrl': 'https://example.com/draft.png',
-          'mimeType': 'image/png',
-          'widthPx': 1536,
-          'heightPx': 1024,
-          'checksumSha256': 'abc',
-          'createdAt': '2026-07-21T09:41:10Z',
-        },
-        'strokeSync': {'lastBatchSequence': 12, 'lastEventSequence': 1105},
+        'assetVersion': 3,
       });
       final accepted = AnalysisAcceptedDto.fromJson(const {
         'analysisId': 15901,
@@ -142,7 +131,9 @@ void main() {
         'analysisStatus': 'PENDING',
         'requestedAt': '2026-07-21T09:41:12Z',
       });
-      expect(draft.draftAsset.assetType, 'DRAFT');
+      expect(draft.previewUrl, 'https://example.com/draft.png');
+      expect(draft.canvasState.lastEventSequence, 1105);
+      expect(draft.assetVersion, 3);
       expect(accepted.analysisStatus, 'PENDING');
     });
   });

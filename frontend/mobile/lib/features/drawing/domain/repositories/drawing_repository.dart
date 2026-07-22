@@ -16,11 +16,11 @@ abstract interface class DrawingRepository {
     int sessionId,
     StrokeBatchRequestDto request,
   );
-  Future<DrawingAssetDto> saveDraft(
+  Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
-    BinaryUploadDto image, {
-    int? lastEventSequence,
-  });
+    BinaryUploadDto preview,
+    DraftCanvasStateDto canvasState,
+  );
   Future<DraftRecoveryDto?> getDraft(int sessionId);
   Future<void> deleteDraft(int sessionId);
   Future<DrawingStageCompleteResponseDto> completeDrawingStage(
