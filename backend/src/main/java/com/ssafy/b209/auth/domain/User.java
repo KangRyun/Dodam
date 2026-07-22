@@ -36,6 +36,12 @@ public class User {
   @Column(name = "is_completed", nullable = false)
   private boolean onboardingCompleted;
 
+  @Column(name = "nickname", length = 50)
+  private String nickname;
+
+  @Column(name = "last_login_at")
+  private LocalDateTime lastLoginAt;
+
   @Column(name = "created_at", nullable = false)
   private LocalDateTime createdAt;
 
@@ -84,5 +90,42 @@ public class User {
    */
   public boolean isOnboardingCompleted() {
     return onboardingCompleted;
+  }
+
+  /**
+   * 사용자 역할을 반환한다.
+   *
+   * @return Onboarding 전이면 {@code null}, 완료 후에는 확정된 역할
+   */
+  public UserRole getRole() {
+    return role;
+  }
+
+  /**
+   * 계정 이용 상태를 반환한다.
+   *
+   * @return 현재 계정 상태
+   */
+  public AccountStatus getAccountStatus() {
+    return accountStatus;
+  }
+
+  /**
+   * 사용자 표시 이름을 반환한다.
+   *
+   * @return Onboarding에서 입력한 닉네임 또는 입력 전이면 {@code null}
+   */
+  public String getNickname() {
+    return nickname;
+  }
+
+  /**
+   * 성공한 로그인 시각을 갱신한다.
+   *
+   * @param loggedInAt Provider 인증과 서비스 계정 확인을 마친 시각
+   */
+  public void recordSuccessfulLogin(LocalDateTime loggedInAt) {
+    this.lastLoginAt = Objects.requireNonNull(loggedInAt, "loggedInAt must not be null");
+    this.updatedAt = loggedInAt;
   }
 }
