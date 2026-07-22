@@ -1,26 +1,49 @@
 package com.ssafy.b209.conversation.service;
 
+import com.ssafy.b209.auth.filter.AuthFilterProperties;
+import com.ssafy.b209.auth.token.AuthenticatedUser;
 import com.ssafy.b209.conversation.exception.ConversationStartErrorCode;
 import com.ssafy.b209.global.exception.BusinessException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
 
 /**
- * 정식 JWT 인증 도입 전 {@code X-Guardian-User-Id}에서 보호자 식별자를 읽는 임시 경계다.
+ * 검증된 Access Token Principal에서 보호자 식별자를 읽고 테스트 전환 기간의 임시 Header를 제한적으로 지원한다.
  *
- * <p>Bearer 토큰의 실제 검증은 수행하지 않으므로 정식 인증 구현과 함께 반드시 교체해야 한다.
+ * <p>운영 기본값에서는 {@code X-Guardian-User-Id}를 신뢰하지 않는다. 임시 Header 경로는 기존 Controller 테스트를 단계적으로 전환하기 위한
+ * Test Profile에서만 활성화한다.
  */
 @Component
 public class TemporaryGuardianResolver {
 
+  private final AuthFilterProperties properties;
+
   /**
-   * 임시 Header와 Bearer 형식으로부터 보호자 식별자를 읽는다.
+   * 보호자 식별자 Resolver를 구성한다.
    *
-   * @param authorization Bearer 형식만 점검하는 임시 Authorization Header
-   * @param guardianUserId 임시 보호자 사용자 ID Header
-   * @return 양의 보호자 사용자 ID
-   * @throws BusinessException Header가 누락되었거나 유효하지 않은 경우
+   * @param properties 임시 Header 허용 여부
+   */
+  public TemporaryGuardianResolver(AuthFilterProperties properties) {
+    this.properties = properties;
+  }
+
+  /**
+   * 검증된 Access Token Principal에서 보호자 식별자를 읽는다.
+   *
+   * @param authorization Test Profile의 기존 요청이 전달하는 임시 Authorization Header
+   * @param guardianUserId Test Profile의 기존 요청이 전달하는 임시 보호자 ID Header
+   * @return Access Token Subject의 사용자 ID
+   * @throws BusinessException 인증 Principal이 없고 임시 Header도 허용되지 않은 경우
    */
   public Long resolve(String authorization, String guardianUserId) {
+    Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+    if (authentication != null && authentication.getPrincipal() instanceof AuthenticatedUser user) {
+      return user.userId();
+    }
+    if (!properties.legacyHeaderEnabled()) {
+      throw new BusinessException(ConversationStartErrorCode.UNAUTHORIZED);
+    }
     if (authorization == null
         || !authorization.startsWith("Bearer ")
         || authorization.length() <= 7) {

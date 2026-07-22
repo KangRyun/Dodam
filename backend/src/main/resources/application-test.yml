@@ -19,6 +19,9 @@ spring:
     enabled: false
 
 app:
+  auth:
+    filter:
+      legacy-header-enabled: true
   cors:
     allowed-origins:
       - http://localhost:3000
