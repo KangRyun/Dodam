@@ -146,7 +146,8 @@ services:
     restart: unless-stopped
 
     ports:
-      - "80:80"                  # 외부 진입점. 443은 인증서 발급 후 Step3 MR에서 추가(S15P11B209-301)
+      - "80:80"                  # ACME 챌린지 + https 리다이렉트 전용
+      - "443:443"                # 실서비스 진입점(TLS 종단) — S15P11B209-301
 
     # ⚠️ conf 를 bind 마운트하지 않는다 — 실행 위치(호스트/Jenkins)에 따라 경로가 달라져
     #    빈 conf 가 마운트되는 사고(2026-07-22)가 있었음. conf 는 이미지에 bake(위 build 참조).
@@ -168,10 +169,10 @@ services:
   # ───────────────────────────────────────────────────────────────
   # certbot — Let's Encrypt 인증서 자동 갱신 (S15P11B209-301).
   #   12시간마다 renew 시도(실제 갱신은 만료 30일 전부터만 일어남 — 그 외엔 no-op).
-  #   최초 발급은 1회 수동:
-  #   docker compose -f infra/docker-compose.yml run --rm certbot \
+  #   최초 발급은 1회 수동 — ⚠️ 이 서비스는 entrypoint가 갱신 루프라 --entrypoint 덮어쓰기 필수:
+  #   docker compose -f infra/docker-compose.yml run --rm --entrypoint certbot certbot \
   #     certonly --webroot -w /var/www/certbot -d i15b209.p.ssafy.io --email <이메일> --agree-tos --no-eff-email
-  #   (내부망 불필요 — LE와의 통신은 아웃바운드, 챌린지 서빙은 nginx가 담당)
+  #   (내부망 불필요 — LE와의 통신은 아웃바운드, 챌린지 서빙은 nginx가 담당. 2026-07-22 발급 완료)
   # ───────────────────────────────────────────────────────────────
   certbot:
     image: certbot/certbot:v2.11.0   # latest 금지 — 버전 고정
