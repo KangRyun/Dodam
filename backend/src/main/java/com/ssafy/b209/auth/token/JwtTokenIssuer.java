@@ -45,17 +45,37 @@ public class JwtTokenIssuer {
    * @throws BusinessException Secret이 없거나 HS256 최소 길이를 충족하지 못한 경우
    */
   public IssuedTokenPair issue(Long userId) {
+    return issue(userId, UUID.randomUUID().toString());
+  }
+
+  /**
+   * 기존 Refresh Token family를 유지하면서 새로운 Access·Refresh JWT를 발급한다.
+   *
+   * @param userId 인증된 서비스 사용자 ID
+   * @param refreshTokenFamilyId Redis rotation 세션과 연결할 family 식별자
+   * @return 동일 family 식별자를 포함한 새 Token 묶음
+   * @throws BusinessException Secret이 없거나 HS256 최소 길이를 충족하지 못한 경우
+   */
+  public IssuedTokenPair issue(Long userId, String refreshTokenFamilyId) {
     JwtEncoder encoder = createEncoder();
     Instant issuedAt = clock.instant();
     String accessToken =
-        encode(encoder, userId, "access", issuedAt, issuedAt.plus(properties.accessTokenTtl()));
+        encode(
+            encoder, userId, "access", null, issuedAt, issuedAt.plus(properties.accessTokenTtl()));
     String refreshToken =
-        encode(encoder, userId, "refresh", issuedAt, issuedAt.plus(properties.refreshTokenTtl()));
+        encode(
+            encoder,
+            userId,
+            "refresh",
+            refreshTokenFamilyId,
+            issuedAt,
+            issuedAt.plus(properties.refreshTokenTtl()));
     return new IssuedTokenPair(
         accessToken,
         properties.accessTokenTtl().toSeconds(),
         refreshToken,
-        properties.refreshTokenTtl().toSeconds());
+        properties.refreshTokenTtl().toSeconds(),
+        refreshTokenFamilyId);
   }
 
   /**
@@ -86,17 +106,24 @@ public class JwtTokenIssuer {
   }
 
   private String encode(
-      JwtEncoder encoder, Long userId, String tokenType, Instant issuedAt, Instant expiresAt) {
-    JwtClaimsSet claims =
+      JwtEncoder encoder,
+      Long userId,
+      String tokenType,
+      String refreshTokenFamilyId,
+      Instant issuedAt,
+      Instant expiresAt) {
+    JwtClaimsSet.Builder claims =
         JwtClaimsSet.builder()
             .issuer(properties.issuer())
             .subject(userId.toString())
             .issuedAt(issuedAt)
             .expiresAt(expiresAt)
             .id(UUID.randomUUID().toString())
-            .claim("token_type", tokenType)
-            .build();
+            .claim("token_type", tokenType);
+    if (refreshTokenFamilyId != null) {
+      claims.claim("family_id", refreshTokenFamilyId);
+    }
     JwsHeader headers = JwsHeader.with(MacAlgorithm.HS256).type("JWT").build();
-    return encoder.encode(JwtEncoderParameters.from(headers, claims)).getTokenValue();
+    return encoder.encode(JwtEncoderParameters.from(headers, claims.build())).getTokenValue();
   }
 }

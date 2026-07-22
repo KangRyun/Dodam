@@ -15,6 +15,7 @@ import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.repository.UserRepository;
 import com.ssafy.b209.auth.token.IssuedTokenPair;
 import com.ssafy.b209.auth.token.JwtTokenIssuer;
+import com.ssafy.b209.auth.token.RefreshTokenHasher;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
 import java.time.Instant;
@@ -35,6 +36,7 @@ class OAuthLoginServiceTest {
   @Mock private OAuthAccountProvisioningService provisioningService;
   @Mock private UserRepository userRepository;
   @Mock private JwtTokenIssuer tokenIssuer;
+  @Mock private RefreshTokenSessionStore sessionStore;
 
   private OAuthLoginService service;
 
@@ -46,6 +48,8 @@ class OAuthLoginServiceTest {
             provisioningService,
             userRepository,
             tokenIssuer,
+            new RefreshTokenHasher(),
+            sessionStore,
             Clock.fixed(Instant.parse("2026-07-22T12:00:00Z"), ZoneOffset.UTC));
   }
 
@@ -64,7 +68,7 @@ class OAuthLoginServiceTest {
     when(userRepository.findById(41L)).thenReturn(Optional.of(user));
     when(userRepository.save(user)).thenReturn(user);
     when(tokenIssuer.issue(41L))
-        .thenReturn(new IssuedTokenPair("access", 1800, "refresh", 1209600));
+        .thenReturn(new IssuedTokenPair("access", 1800, "refresh", 1209600, "family-1"));
 
     OAuthLoginResult result = service.login(AuthProvider.KAKAO, request);
 
@@ -77,6 +81,13 @@ class OAuthLoginServiceTest {
     verify(userRepository).save(user);
     verify(tokenIssuer).validateConfiguration();
     verify(tokenIssuer).issue(41L);
+    verify(sessionStore)
+        .register(
+            "family-1",
+            41L,
+            "device-1",
+            new RefreshTokenHasher().hash("refresh"),
+            java.time.Duration.ofDays(14));
   }
 
   @Test

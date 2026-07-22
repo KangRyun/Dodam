@@ -12,6 +12,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import java.util.Locale;
@@ -67,6 +68,7 @@ public class OAuthController {
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
   })
   @PostMapping("/oauth/{provider}")
+  @SecurityRequirements
   public ResponseEntity<ApiResponse<OAuthLoginResult>> login(
       @PathVariable String provider, @Valid @RequestBody OAuthLoginRequest request) {
     AuthProvider authProvider = parseProvider(provider);

@@ -25,8 +25,8 @@ import org.springframework.web.filter.OncePerRequestFilter;
 /**
  * {@code Authorization: Bearer} Access JWT를 검증하고 요청 동안 {@link AuthenticatedUser} Principal을 제공한다.
  *
- * <p>Token이 없는 요청의 접근 강제 정책은 309번 인증·인가 예외 전환에서 적용한다. Token이 전달된 경우에는 서명과 용도를 반드시 검증하며, 원본 Token이나
- * 내부 검증 오류를 응답에 노출하지 않는다.
+ * <p>OAuth 로그인·재발급과 CORS preflight를 제외한 v1 API는 Access Token을 필수로 요구한다. Token 원문이나 내부 검증 오류는 응답에
+ * 노출하지 않는다.
  */
 public class AccessTokenAuthenticationFilter extends OncePerRequestFilter {
 
@@ -56,7 +56,15 @@ public class AccessTokenAuthenticationFilter extends OncePerRequestFilter {
       HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
       throws ServletException, IOException {
     String authorization = request.getHeader(HttpHeaders.AUTHORIZATION);
-    if (authorization == null || authorization.isBlank() || isLegacyTestRequest(request)) {
+    if (authorization == null || authorization.isBlank()) {
+      if (properties.legacyHeaderEnabled()) {
+        filterChain.doFilter(request, response);
+      } else {
+        writeError(response, AuthErrorCode.AUTHENTICATION_REQUIRED);
+      }
+      return;
+    }
+    if (isLegacyTestRequest(request)) {
       filterChain.doFilter(request, response);
       return;
     }
@@ -80,6 +88,15 @@ public class AccessTokenAuthenticationFilter extends OncePerRequestFilter {
     } finally {
       SecurityContextHolder.clearContext();
     }
+  }
+
+  @Override
+  protected boolean shouldNotFilter(HttpServletRequest request) {
+    if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+      return true;
+    }
+    String uri = request.getRequestURI();
+    return uri.startsWith("/api/v1/auth/oauth/") || "/api/v1/auth/reissue".equals(uri);
   }
 
   private boolean isLegacyTestRequest(HttpServletRequest request) {

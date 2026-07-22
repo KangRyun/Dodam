@@ -97,6 +97,53 @@ services:
       REDIS_HOST: redis
       REDIS_PORT: "6379"
       REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be configured in .env or deployment secrets}
+      # BE→AI 내부 계약 인증 토큰 (S15P11B209-183 · safety review C-183-1).
+      #   RestClientAiQuestionClient가 X-Internal-Token 헤더로 전송 — ai 서비스와 반드시 같은 값.
+      #   reason: :? fail-fast — 미설정 채로 떠서 BE 호출이 전부 401→폴백으로 조용히 저하되는 것 방지.
+      AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN:?AI_INTERNAL_TOKEN must be configured in .env or deployment secrets}
+      # ── 인증(JWT) — S15P11B209-320 (306~309 인증 머지 후속 배선).
+      #   JWT_SECRET은 application.yml에 기본값이 없어, 미주입 시 인증 API 전체가
+      #   503(AUTH_503_001)으로 조용히 죽는 것을 라이브에서 실측(D-190-1).
+      #   reason: :? fail-fast — 인증은 서비스 필수. 조용한 503보다 배포가 명시적으로
+      #           실패하는 게 낫다(REDIS_PASSWORD·AI_INTERNAL_TOKEN과 동일 정책).
+      #   생성 예: openssl rand -hex 32  (32바이트 이상 필수)
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be configured in .env or deployment secrets}
+      # 선택 오버라이드 4종 — 앱에 안전한 기본값이 있어 비차단. compose 기본값은
+      #   application.yml 기본값을 그대로 미러링한다.
+      #   reason: ${VAR:-} (빈 문자열 전달)로 두면 스프링이 "빈 값이 설정됨"으로 읽어
+      #           앱 기본값이 무시되고 TTL(Duration) 파싱 실패로 부팅이 깨진다
+      #           → 기본값을 명시해 빈 문자열 주입을 원천 차단.
+      JWT_ISSUER: ${JWT_ISSUER:-dodam-api}
+      JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL:-30m}
+      JWT_REFRESH_TOKEN_TTL: ${JWT_REFRESH_TOKEN_TTL:-14d}
+      OAUTH_CONNECT_TIMEOUT: ${OAUTH_CONNECT_TIMEOUT:-3s}
+      OAUTH_READ_TIMEOUT: ${OAUTH_READ_TIMEOUT:-5s}
+      # ── OAuth 3사(카카오/구글/네이버) 콘솔 키 — S15P11B209-320.
+      #   reason: :- (빈 기본값) 비차단 passthrough — 콘솔 키가 아직 미발급일 수 있어
+      #           :? 로 걸면 전체 배포가 막힌다. 앱이 provider별 fail-closed(미설정
+      #           provider만 503)로 안전하게 처리하므로 "배포는 뜨고, 미설정 provider만
+      #           막히는" 쪽을 택했다. 트레이드오프: 키를 깜빡해도 배포가 성공하므로
+      #           배포 후 소셜 로그인 검증(503→정상) 필수. 앱 기본값도 빈 값이라
+      #           빈 문자열 주입 = 미설정과 동일(위 TTL과 달리 안전).
+      KAKAO_CLIENT_ID: ${KAKAO_CLIENT_ID:-}
+      KAKAO_CLIENT_SECRET: ${KAKAO_CLIENT_SECRET:-}
+      KAKAO_REDIRECT_URI: ${KAKAO_REDIRECT_URI:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
+      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
+      NAVER_REDIRECT_URI: ${NAVER_REDIRECT_URI:-}
+      # ── BE→AI 질문 호출 대상 주소 — S15P11B209-320 (D-183-1).
+      #   RestClientAiQuestionClient가 ${AI_BASE_URL}로 읽는다. 앱 기본값은
+      #   http://localhost:8000 인데 컨테이너 안 localhost는 backend 자신 = 도달 불가
+      #   → 내부망 DNS(ai 서비스명)를 compose 기본값으로 주입. .env로 오버라이드 가능.
+      AI_BASE_URL: ${AI_BASE_URL:-http://ai:8000}
+      # 그림 분석 클라이언트(app.ai.drawing-analysis) — 현재 기본 mock(HTTP 미호출).
+      #   http 전환 시 compose 수정 없이 .env(AI_DRAWING_ANALYSIS_MODE=http)로 켤 수 있게
+      #   passthrough. base-url 앱 기본값도 localhost(도달 불가)라 내부망 DNS로 교정.
+      AI_DRAWING_ANALYSIS_MODE: ${AI_DRAWING_ANALYSIS_MODE:-mock}
+      AI_DRAWING_ANALYSIS_BASE_URL: ${AI_DRAWING_ANALYSIS_BASE_URL:-http://ai:8000}
 
     # ⚠️ ports 를 열지 않는다 — 호스트엔 노출 안 함. 내부망(dodam-net)에서 'backend:8080'으로만 접근.
     expose:
@@ -142,6 +189,11 @@ services:
       STT_MODEL: ${STT_MODEL:-whisper-1}         # 음성→텍스트
       TTS_MODEL: ${TTS_MODEL:-gpt-4o-mini-tts}   # 텍스트→음성(지시형)
       TTS_VOICE: ${TTS_VOICE:-fable}             # 곰돌이 톤 보이스
+      # BE↔AI 내부 계약 인증 토큰 (S15P11B209-183 · safety review C-183-1).
+      #   backend 서비스와 반드시 같은 값 — ai가 X-Internal-Token 헤더를 이 값과 대조.
+      #   reason: :? fail-fast(redis와 동일) — 미설정이면 내부 계약이 무인증으로 뜨는 게 최악이라
+      #           compose 기동 자체를 막는다. ai 앱도 미설정 시 기동 실패(ai/main.py — 이중 안전장치).
+      AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN:?AI_INTERNAL_TOKEN must be configured in .env or deployment secrets}
 
     # ⚠️ ports 를 열지 않는다 — 호스트엔 노출 안 함. 내부망(dodam-net)에서 'ai:8000'으로만 접근.
     expose:

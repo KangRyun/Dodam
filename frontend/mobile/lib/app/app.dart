@@ -2,20 +2,31 @@ import 'package:flutter/material.dart';
 
 import '../design_system/design_system.dart';
 import '../features/auth/auth.dart';
+import '../features/activity/data/repositories/mock_activity_repository.dart';
+import '../features/activity/domain/repositories/activity_repository.dart';
 import '../features/child/data/repositories/mock_child_repository.dart';
 import '../features/child/domain/repositories/child_repository.dart';
+import '../features/drawing/data/dto/drawing_dtos.dart';
+import '../features/drawing/data/repositories/mock_drawing_repository.dart';
+import '../features/drawing/domain/repositories/drawing_repository.dart';
 import 'router/app_router.dart';
 import 'router/app_routes.dart';
 import 'state/guardian_child_controller.dart';
 
 class DodamApp extends StatefulWidget {
   const DodamApp({
+    this.activityRepository = const MockActivityRepository(),
     this.childRepository = const MockChildRepository(),
+    this.drawingRepository = const MockDrawingRepository(),
+    this.drawingCompletionSnapshotProvider,
     this.initialRoute = AppRoutes.guardianHome,
     super.key,
   });
 
+  final ActivityRepository activityRepository;
   final ChildRepository childRepository;
+  final DrawingRepository drawingRepository;
+  final Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider;
   final String initialRoute;
 
   @override
@@ -81,6 +92,10 @@ class _DodamAppState extends State<DodamApp> {
       settings,
       childController: _childController,
       authSignIn: _signIn,
+      activityRepository: widget.activityRepository,
+      drawingRepository: widget.drawingRepository,
+      drawingCompletionSnapshotProvider:
+          widget.drawingCompletionSnapshotProvider,
     ),
   );
 }

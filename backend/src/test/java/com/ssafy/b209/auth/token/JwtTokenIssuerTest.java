@@ -46,6 +46,7 @@ class JwtTokenIssuerTest {
     assertThat(access.getExpiresAt()).isEqualTo(NOW.plus(Duration.ofMinutes(30)));
     assertThat(refresh.getSubject()).isEqualTo("41");
     assertThat(refresh.getClaimAsString("token_type")).isEqualTo("refresh");
+    assertThat(refresh.getClaimAsString("family_id")).isEqualTo(pair.refreshTokenFamilyId());
     assertThat(refresh.getExpiresAt()).isEqualTo(NOW.plus(Duration.ofDays(14)));
     assertThat(pair.accessTokenExpiresInSeconds()).isEqualTo(1800);
     assertThat(pair.refreshTokenExpiresInSeconds()).isEqualTo(1209600);

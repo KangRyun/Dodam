@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../../../../app/router/app_routes.dart';
-import '../../../../app/widgets/app_placeholder_scaffold.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../drawing/application/drawing_sync_coordinator.dart';
 import '../../../drawing/application/drawing_draft_restore_controller.dart';
@@ -1090,10 +1089,97 @@ class ActivityCompleteScreen extends StatelessWidget {
   final String childId;
 
   @override
-  Widget build(BuildContext context) => const AppPlaceholderScaffold(
-    title: '활동 완료',
-    description: '참 잘했어요. 이제 보호자에게 태블릿을 전달해 주세요.',
-    childFriendly: true,
+  Widget build(BuildContext context) => PopScope(
     canPop: false,
+    child: Scaffold(
+      backgroundColor: AppColors.childCanvas,
+      body: SafeArea(
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            key: const ValueKey('activity-complete-scroll'),
+            padding: const EdgeInsets.all(AppSpacing.xl),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: constraints.maxHeight - AppSpacing.xl * 2,
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: Container(
+                    padding: const EdgeInsets.all(AppSpacing.xl),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface,
+                      borderRadius: BorderRadius.circular(AppRadius.lg),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const CircleAvatar(
+                          radius: 56,
+                          backgroundColor: AppColors.tangerineSoft,
+                          child: Icon(
+                            Icons.celebration_rounded,
+                            color: AppColors.tangerine,
+                            size: 60,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.lg),
+                        const Text(
+                          '그림 활동을 모두 마쳤어요!',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: AppColors.ink,
+                            fontSize: 32,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.sm),
+                        const Text(
+                          '이제 보호자에게 기기를 건네주세요.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: AppColors.inkMuted,
+                            fontSize: 20,
+                            height: 1.45,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: AppSpacing.xl),
+                        AppButton(
+                          key: const ValueKey('guardian-handoff'),
+                          label: '보호자에게 건넸어요',
+                          variant: AppButtonVariant.child,
+                          leading: const Icon(Icons.family_restroom_rounded),
+                          onPressed: () => _confirmGuardianTransition(context),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
+
+  Future<void> _confirmGuardianTransition(BuildContext context) async {
+    final confirmed = await showAppConfirmDialog(
+      context: context,
+      title: '보호자 화면으로 이동할까요?',
+      message: '보호자가 기기를 받았다면 확인을 눌러 주세요.',
+      confirmLabel: '확인',
+      cancelLabel: '취소',
+      illustration: const Icon(
+        Icons.family_restroom_rounded,
+        color: AppColors.leaf,
+        size: 56,
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(AppRoutes.guardianHome, (route) => false);
+  }
 }
