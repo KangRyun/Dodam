@@ -7,14 +7,19 @@ import '../../../../design_system/design_system.dart';
 import '../../../child/data/dto/child_dtos.dart';
 
 class GuardianHomeScreen extends StatelessWidget {
-  const GuardianHomeScreen({required this.controller, super.key});
+  const GuardianHomeScreen({
+    required this.controller,
+    this.actions = const [],
+    super.key,
+  });
 
   final GuardianChildController controller;
+  final List<Widget> actions;
 
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: AppColors.canvas,
-    appBar: const AppTopBar(title: '보호자 홈'),
+    appBar: AppTopBar(title: '보호자 홈', actions: actions),
     body: SafeArea(
       child: AnimatedBuilder(
         animation: controller,

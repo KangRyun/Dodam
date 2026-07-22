@@ -19,6 +19,8 @@ abstract final class AppRouter {
     RouteSettings settings, {
     GuardianChildController? childController,
     AuthProviderSignIn? authSignIn,
+    AuthOnboardingComplete? authCompleteOnboarding,
+    AuthSignOut? authSignOut,
     ActivityRepository? activityRepository,
     DrawingRepository? drawingRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
@@ -27,12 +29,23 @@ abstract final class AppRouter {
     final segments = Uri.tryParse(location)?.pathSegments ?? const <String>[];
 
     final screen = switch (segments) {
-      ['auth', 'login'] when authSignIn != null => AuthenticationFlowScreen(
-        onSignIn: authSignIn,
-        onGuardianAuthenticated: goGuardianHome,
-      ),
+      ['auth', 'login']
+          when authSignIn != null && authCompleteOnboarding != null =>
+        AuthenticationFlowScreen(
+          onSignIn: authSignIn,
+          onCompleteOnboarding: authCompleteOnboarding,
+          onGuardianAuthenticated: goGuardianHome,
+        ),
       ['guardian', 'home'] when childController != null => GuardianHomeScreen(
         controller: childController,
+        actions: authSignOut == null
+            ? const []
+            : [
+                LogoutActionButton(
+                  onSignOut: authSignOut,
+                  onSignedOut: goLogin,
+                ),
+              ],
       ),
       ['guardian', 'children', 'select'] when childController != null =>
         ChildSelectScreen(controller: childController),
@@ -108,6 +121,12 @@ abstract final class AppRouter {
     Navigator.of(
       context,
     ).pushNamedAndRemoveUntil(AppRoutes.guardianHome, (route) => false);
+  }
+
+  static void goLogin(BuildContext context) {
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(AppRoutes.login, (route) => false);
   }
 }
 

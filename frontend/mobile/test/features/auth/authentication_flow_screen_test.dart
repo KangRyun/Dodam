@@ -12,6 +12,8 @@ void main() {
           onSignIn: (_) async => AuthState.authenticated(
             _session(role: UserRole.guardian, onboardingCompleted: true),
           ),
+          onCompleteOnboarding: (_) async =>
+              _session(role: UserRole.guardian, onboardingCompleted: true),
           onGuardianAuthenticated: (_) => movedToGuardianHome = true,
         ),
       ),
@@ -30,6 +32,8 @@ void main() {
           onSignIn: (_) async => AuthState.onboardingRequired(
             _session(role: UserRole.guardian, onboardingCompleted: false),
           ),
+          onCompleteOnboarding: (_) async =>
+              _session(role: UserRole.guardian, onboardingCompleted: true),
           onGuardianAuthenticated: (_) {},
         ),
       ),
@@ -48,6 +52,8 @@ void main() {
           onSignIn: (_) async => AuthState.authenticated(
             _session(role: UserRole.expert, onboardingCompleted: true),
           ),
+          onCompleteOnboarding: (_) async =>
+              _session(role: UserRole.expert, onboardingCompleted: true),
           onGuardianAuthenticated: (_) {},
         ),
       ),

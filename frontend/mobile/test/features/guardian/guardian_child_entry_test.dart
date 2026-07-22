@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dodam/app/app.dart';
 import 'package:dodam/app/router/app_routes.dart';
+import 'package:dodam/app/state/guardian_child_controller.dart';
 import 'package:dodam/core/network/api_page.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
 import 'package:dodam/features/child/domain/repositories/child_repository.dart';
@@ -11,6 +12,36 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('로그아웃하면 선택 아동을 초기화하고 로그인 화면으로 이동한다', (tester) async {
+    await tester.pumpWidget(
+      DodamApp(childRepository: _FakeChildRepository(children: _children)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('child-7')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('logout-action')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('로그아웃').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('그림과 대화로\n아이의 마음을 만나봐요'), findsOneWidget);
+  });
+
+  test('보호자 선택 상태를 초기화한다', () async {
+    final controller = GuardianChildController(
+      _FakeChildRepository(children: _children),
+    );
+    await controller.loadChildren();
+    controller.selectChild(_children.first);
+
+    expect(controller.selectedChildId, _children.first.childId);
+    controller.clearSelection();
+
+    expect(controller.selectedChild, isNull);
+    controller.dispose();
+  });
+
   testWidgets('Child 목록 Loading 상태를 표시한다', (tester) async {
     final completer = Completer<List<ChildSummaryDto>>();
     final repository = _FakeChildRepository(pending: completer);
