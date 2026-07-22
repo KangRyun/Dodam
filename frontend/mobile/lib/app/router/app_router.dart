@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../design_system/design_system.dart';
 import '../../features/activity/domain/repositories/activity_repository.dart';
 import '../../features/activity/presentation/screens/activity_screens.dart';
+import '../../features/auth/auth.dart';
 import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
 import '../../features/drawing/data/dto/drawing_dtos.dart';
 import '../../features/drawing/domain/repositories/drawing_repository.dart';
@@ -17,6 +18,7 @@ abstract final class AppRouter {
   static Route<void> onGenerateRoute(
     RouteSettings settings, {
     GuardianChildController? childController,
+    AuthProviderSignIn? authSignIn,
     ActivityRepository? activityRepository,
     DrawingRepository? drawingRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
@@ -25,6 +27,10 @@ abstract final class AppRouter {
     final segments = Uri.tryParse(location)?.pathSegments ?? const <String>[];
 
     final screen = switch (segments) {
+      ['auth', 'login'] when authSignIn != null => AuthenticationFlowScreen(
+        onSignIn: authSignIn,
+        onGuardianAuthenticated: goGuardianHome,
+      ),
       ['guardian', 'home'] when childController != null => GuardianHomeScreen(
         controller: childController,
       ),
