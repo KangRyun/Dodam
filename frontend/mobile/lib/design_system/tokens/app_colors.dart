@@ -20,6 +20,11 @@ abstract final class AppColors {
   static const Color lavender = Color(0xFF8A76C8);
   static const Color lavenderSoft = Color(0xFFF0ECFF);
 
+  static const Color drawingInk = Color(0xFF30343B);
+  static const Color drawingRed = Color(0xFFE35D6A);
+  static const Color drawingBlue = Color(0xFF4D82D8);
+  static const Color drawingYellow = Color(0xFFF2C94C);
+
   static const Color success = Color(0xFF4F8C63);
   static const Color successSoft = Color(0xFFE7F4EA);
   static const Color warning = Color(0xFFC7812F);
