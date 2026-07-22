@@ -2,6 +2,7 @@ package com.ssafy.b209.drawing.repository;
 
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingAssetType;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /** 그림 파일 Metadata의 저장과 세션 내 중복 여부 조회를 담당한다. */
@@ -26,4 +27,25 @@ public interface DrawingAssetRepository extends JpaRepository<DrawingAsset, Long
    * @return 해당 유형의 Metadata가 존재하면 {@code true}
    */
   boolean existsByDrawingSessionIdAndAssetType(Long drawingSessionId, DrawingAssetType assetType);
+
+  /**
+   * 세션과 파일 유형에 해당하는 가장 높은 버전의 Metadata 한 건을 조회한다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @param assetType 그림 파일 용도
+   * @return 가장 높은 버전의 Metadata, 해당 파일이 없으면 빈 값
+   */
+  Optional<DrawingAsset> findFirstByDrawingSessionIdAndAssetTypeOrderByAssetVersionDesc(
+      Long drawingSessionId, DrawingAssetType assetType);
+
+  /**
+   * 세션의 가장 최근 DRAFT Metadata를 조회한다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @return 가장 높은 초안 버전, 초안이 없으면 빈 값
+   */
+  default Optional<DrawingAsset> findLatestDraft(Long drawingSessionId) {
+    return findFirstByDrawingSessionIdAndAssetTypeOrderByAssetVersionDesc(
+        drawingSessionId, DrawingAssetType.DRAFT);
+  }
 }

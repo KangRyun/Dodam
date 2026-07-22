@@ -45,7 +45,25 @@ public enum DrawingErrorCode implements ErrorCode {
       HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_500_001", "그림 스냅샷 저장 중 오류가 발생했습니다."),
   /** 동시 요청으로 스냅샷 Metadata의 DB 제약이 충돌한 경우다. */
   DRAWING_SNAPSHOT_CREATION_CONFLICT(
-      HttpStatus.CONFLICT, "DRAWING_409_007", "그림 스냅샷 저장 요청이 충돌했습니다.");
+      HttpStatus.CONFLICT, "DRAWING_409_007", "그림 스냅샷 저장 요청이 충돌했습니다."),
+  /** 저장된 그림 초안을 찾을 수 없는 경우다. */
+  DRAWING_DRAFT_NOT_FOUND(HttpStatus.NOT_FOUND, "DRAWING_404_004", "저장된 그림 초안이 없습니다."),
+  /** 현재 세션 상태나 단계에서 초안을 저장할 수 없는 경우다. */
+  DRAWING_DRAFT_NOT_ALLOWED(HttpStatus.CONFLICT, "DRAWING_409_008", "현재 상태에서는 그림 초안을 저장할 수 없습니다."),
+  /** 마지막 이벤트 순서가 현재 초안과 같은 경우다. */
+  DRAWING_DRAFT_VERSION_CONFLICT(
+      HttpStatus.CONFLICT, "DRAWING_409_009", "같은 순서의 그림 초안이 이미 저장되어 있습니다."),
+  /** 마지막 이벤트 순서가 현재 초안보다 이전인 경우다. */
+  STALE_DRAWING_DRAFT_VERSION(HttpStatus.CONFLICT, "DRAWING_409_010", "더 최근의 그림 초안이 이미 저장되어 있습니다."),
+  /** 동시 요청으로 초안 Metadata 저장이 충돌한 경우다. */
+  DRAWING_DRAFT_SAVE_CONFLICT(HttpStatus.CONFLICT, "DRAWING_409_011", "그림 초안 저장 요청이 충돌했습니다."),
+  /** 초안 Metadata 저장 과정에서 복구할 수 없는 오류가 발생한 경우다. */
+  DRAWING_DRAFT_STORAGE_FAILED(
+      HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_500_002", "그림 초안 저장 중 오류가 발생했습니다."),
+  /** 초안 미리보기 파일이 누락된 경우다. */
+  DRAWING_DRAFT_FILE_REQUIRED(HttpStatus.BAD_REQUEST, "DRAWING_400_007", "초안 미리보기 파일이 필요합니다."),
+  /** 초안 복구 기준 Metadata가 누락되거나 유효하지 않은 경우다. */
+  DRAWING_DRAFT_METADATA_INVALID(HttpStatus.BAD_REQUEST, "DRAWING_400_008", "그림 초안 정보가 올바르지 않습니다.");
 
   private final HttpStatus httpStatus;
   private final String code;
