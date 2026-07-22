@@ -1,0 +1,31 @@
+# YOLO 객체 탐지 모델 학습 (아동 그림 대상) 패키지 목록
+
+# --- 핵심 학습 프레임워크 ---
+# ⚠️ torch/torchvision은 먼저 CUDA 인덱스로 설치할 것 (plain pip install은 Windows/Linux 모두
+#    CPU 전용 빌드를 받아온다 — 2026-07-21 로컬 확인). 드라이버가 지원하는 최신 CUDA에 맞춰 선택:
+#    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+ultralytics>=8.2.0        # YOLOv8/v11 학습·추론 라이브러리
+torch>=2.1.0               # PyTorch (ultralytics의 백엔드) — 위 CUDA 인덱스로 먼저 설치
+torchvision>=0.16.0         # 위 CUDA 인덱스로 먼저 설치
+
+# --- 데이터 처리 / 이미지 처리 ---
+opencv-python>=4.9.0
+Pillow>=10.0.0
+numpy>=1.26.0
+pandas>=2.1.0
+
+# --- 시각화 / 결과 확인 ---
+matplotlib>=3.8.0
+seaborn>=0.13.0
+
+# --- 데이터 증강 (그림체 다양성 보강 시 유용) ---
+albumentations>=1.4.0
+
+# --- 유틸 ---
+pyyaml>=6.0.1               # data.yaml (클래스/경로 설정) 파싱
+tqdm>=4.66.0                # 학습 진행률 표시
+tensorboard>=2.15.0         # 학습 로그 시각화 (선택)
+
+# --- 데이터셋 라벨링/관리 (선택) ---
+# roboflow>=1.1.0            # Roboflow에서 라벨링된 데이터셋 받아올 경우 주석 해제
+# labelImg                   # 로컬에서 직접 바운딩박스 라벨링 시 주석 해제
