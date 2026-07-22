@@ -507,8 +507,10 @@ Content-Type: application/json
 - `redirectUri`는 서버 환경 변수의 Provider별 URI와 정확히 일치해야 합니다.
 - `JWT_SECRET`은 UTF-8 기준 32 Byte 이상이어야 하며 기본 Secret은 제공하지 않습니다.
 - Provider 설정은 `KAKAO_CLIENT_ID`, `KAKAO_CLIENT_SECRET`, `KAKAO_REDIRECT_URI`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, `NAVER_REDIRECT_URI`로 주입합니다.
-- Access Token Filter는 적용되어 있으며, Refresh Token Redis 저장·회전은 S15P11B209-308에서 완료합니다.
+- Access Token Filter와 Redis 기반 Refresh Token rotation이 적용되어 있습니다.
 - Access Token이 전달되면 HS256 서명, 발급자, 만료, `token_type=access`, 사용자 ID Subject를 검증하고 요청 Principal로 사용합니다. Refresh Token을 API 인증에 사용할 수 없습니다.
+- `POST /api/v1/auth/reissue`는 `refreshToken`과 로그인 때 사용한 `deviceId`를 받아 Access·Refresh Token을 모두 교체합니다. Redis에는 Token 원문 대신 SHA-256 hash만 저장하며, 과거 Token 재사용을 탐지하면 해당 Token family를 폐기합니다.
+- Redis 장애 시 로그인과 재발급은 fail-closed로 실패하며, MySQL에는 Refresh Token을 저장하지 않습니다.
 - Swagger UI의 `bearerAuth` Authorize 입력에는 `Bearer ` 접두어 없이 Access JWT 값만 입력합니다.
 
 실제 Client Secret, JWT Secret과 Redirect URI는 `.env` 또는 배포 Secret으로 관리하며 Git에 커밋하지 않습니다.

@@ -8,9 +8,12 @@ import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.repository.UserRepository;
 import com.ssafy.b209.auth.token.IssuedTokenPair;
 import com.ssafy.b209.auth.token.JwtTokenIssuer;
+import com.ssafy.b209.auth.token.RefreshTokenHasher;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
+import java.time.Duration;
 import java.time.LocalDateTime;
+import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
 /** Provider code 검증, 서비스 계정 연결, 로그인 시각 갱신과 JWT 발급을 조율한다. */
@@ -21,6 +24,8 @@ public class OAuthLoginService {
   private final OAuthAccountProvisioningService provisioningService;
   private final UserRepository userRepository;
   private final JwtTokenIssuer tokenIssuer;
+  private final RefreshTokenHasher tokenHasher;
+  private final RefreshTokenSessionStore sessionStore;
   private final Clock clock;
 
   /**
@@ -30,6 +35,8 @@ public class OAuthLoginService {
    * @param provisioningService 검증된 신원을 서비스 사용자와 연결하는 Service
    * @param userRepository 사용자 저장소
    * @param tokenIssuer 서비스 JWT 발급기
+   * @param tokenHasher Redis 저장용 Refresh Token hash 계산기
+   * @param sessionStore Refresh Token family 세션 저장소
    * @param clock 로그인 시각을 제공하는 Clock
    */
   public OAuthLoginService(
@@ -37,11 +44,15 @@ public class OAuthLoginService {
       OAuthAccountProvisioningService provisioningService,
       UserRepository userRepository,
       JwtTokenIssuer tokenIssuer,
+      RefreshTokenHasher tokenHasher,
+      RefreshTokenSessionStore sessionStore,
       Clock clock) {
     this.providerClient = providerClient;
     this.provisioningService = provisioningService;
     this.userRepository = userRepository;
     this.tokenIssuer = tokenIssuer;
+    this.tokenHasher = tokenHasher;
+    this.sessionStore = sessionStore;
     this.clock = clock;
   }
 
@@ -68,6 +79,7 @@ public class OAuthLoginService {
     user.recordSuccessfulLogin(LocalDateTime.now(clock));
     userRepository.save(user);
     IssuedTokenPair tokens = tokenIssuer.issue(user.getId());
+    registerRefreshSession(user.getId(), request.deviceId(), tokens);
     OAuthLoginUser loginUser =
         new OAuthLoginUser(
             user.getId(),
@@ -82,5 +94,18 @@ public class OAuthLoginService {
         tokens.refreshToken(),
         tokens.refreshTokenExpiresInSeconds(),
         loginUser);
+  }
+
+  private void registerRefreshSession(Long userId, String deviceId, IssuedTokenPair tokens) {
+    try {
+      sessionStore.register(
+          tokens.refreshTokenFamilyId(),
+          userId,
+          deviceId,
+          tokenHasher.hash(tokens.refreshToken()),
+          Duration.ofSeconds(tokens.refreshTokenExpiresInSeconds()));
+    } catch (DataAccessException exception) {
+      throw new BusinessException(AuthErrorCode.AUTH_SESSION_UNAVAILABLE, exception);
+    }
   }
 }

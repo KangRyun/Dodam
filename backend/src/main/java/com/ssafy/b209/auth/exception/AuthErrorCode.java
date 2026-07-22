@@ -14,6 +14,17 @@ public enum AuthErrorCode implements ErrorCode {
   /** Access Token의 서명, 만료, 발급자 또는 용도 검증이 실패한 경우이다. */
   ACCESS_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_401_002", "Access Token이 유효하지 않습니다."),
 
+  /** Refresh Token의 서명, 만료, 용도 또는 Redis 세션 검증이 실패한 경우이다. */
+  REFRESH_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_401_003", "Refresh Token이 유효하지 않습니다."),
+
+  /** 이미 rotation된 Refresh Token이 다시 사용되어 해당 family를 폐기한 경우이다. */
+  REFRESH_TOKEN_REUSED(
+      HttpStatus.UNAUTHORIZED, "AUTH_401_004", "재사용된 Refresh Token입니다. 다시 로그인해 주세요."),
+
+  /** Refresh Token을 발급받은 기기와 다른 기기에서 재발급을 요청한 경우이다. */
+  REFRESH_TOKEN_DEVICE_MISMATCH(
+      HttpStatus.UNAUTHORIZED, "AUTH_401_005", "Refresh Token의 기기 정보가 일치하지 않습니다."),
+
   /** 정지되었거나 과거 탈퇴 상태인 사용자가 로그인을 시도한 경우이다. */
   ACCOUNT_SUSPENDED(HttpStatus.FORBIDDEN, "AUTH_403_001", "이용이 제한된 계정입니다."),
 
@@ -26,6 +37,9 @@ public enum AuthErrorCode implements ErrorCode {
   /** 운영 환경의 OAuth 또는 JWT 필수 설정이 누락되거나 안전하지 않은 경우이다. */
   AUTH_CONFIGURATION_INVALID(
       HttpStatus.SERVICE_UNAVAILABLE, "AUTH_503_001", "인증 서비스 설정이 완료되지 않았습니다."),
+
+  /** Redis 장애로 Refresh Token 세션을 안전하게 확인하거나 갱신할 수 없는 경우이다. */
+  AUTH_SESSION_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AUTH_503_002", "인증 세션을 확인하지 못했습니다."),
 
   /** 인증 계정이 참조하는 사용자를 찾을 수 없어 로그인을 완료할 수 없는 경우이다. */
   AUTH_ACCOUNT_INVALID(HttpStatus.INTERNAL_SERVER_ERROR, "AUTH_500_001", "인증 계정 정보를 확인하지 못했습니다.");
