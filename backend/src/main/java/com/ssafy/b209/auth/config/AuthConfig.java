@@ -39,7 +39,8 @@ public class AuthConfig {
   }
 
   /**
-   * Access Token Filter를 모든 v1 API 경로의 앞단에 등록한다.
+   * Access Token Filter를 모든 v1 API 경로의 앞단에 등록한다. 공개 인증 Endpoint와 CORS preflight 제외는 Filter 내부의 명시적
+   * allowlist가 담당한다.
    *
    * @param filter 등록할 Access Token Filter
    * @return {@code /api/v1/*}에 한 번 적용되는 Filter 등록 정보

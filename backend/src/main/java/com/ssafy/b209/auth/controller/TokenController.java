@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
+import io.swagger.v3.oas.annotations.security.SecurityRequirements;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
@@ -55,6 +56,7 @@ public class TokenController {
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
   })
   @PostMapping("/reissue")
+  @SecurityRequirements
   public ResponseEntity<ApiResponse<OAuthLoginResult>> reissue(
       @Valid @RequestBody TokenReissueRequest request) {
     return ResponseEntity.ok(ApiResponse.ok(refreshTokenService.reissue(request)));
