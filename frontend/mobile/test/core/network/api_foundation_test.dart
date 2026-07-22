@@ -1,4 +1,7 @@
+import 'dart:typed_data';
+
 import 'package:dodam/core/network/network.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -95,4 +98,122 @@ void main() {
     expect(results, [true, true]);
     expect(callCount, 1);
   });
+
+  test('401 응답이면 Token을 한 번 재발급하고 새 헤더로 요청을 재시도한다', () async {
+    final tokens = _MutableTokenProvider('expired-access-token');
+    final refresher = _TestTokenRefresher(() async {
+      tokens.accessToken = 'refreshed-access-token';
+      return true;
+    });
+    final server = _UnauthorizedOnceAdapter();
+    final client = ApiClient(
+      environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+      accessTokenProvider: tokens,
+      tokenRefresher: refresher,
+      httpClientAdapter: server,
+    );
+
+    final response = await client.get<Map<String, dynamic>>('children');
+
+    expect(response.data, {'ok': true});
+    expect(refresher.callCount, 1);
+    expect(server.authorizationHeaders, [
+      'Bearer expired-access-token',
+      'Bearer refreshed-access-token',
+    ]);
+  });
+
+  test('재시도 요청도 401이면 추가 재발급 없이 오류를 반환한다', () async {
+    final tokens = _MutableTokenProvider('expired-access-token');
+    final refresher = _TestTokenRefresher(() async {
+      tokens.accessToken = 'refreshed-access-token';
+      return true;
+    });
+    final client = ApiClient(
+      environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+      accessTokenProvider: tokens,
+      tokenRefresher: refresher,
+      httpClientAdapter: _AlwaysUnauthorizedAdapter(),
+    );
+
+    await expectLater(
+      client.get<Map<String, dynamic>>('children'),
+      throwsA(isA<ApiResponseFailure>()),
+    );
+    expect(refresher.callCount, 1);
+  });
+}
+
+final class _MutableTokenProvider implements AccessTokenProvider {
+  _MutableTokenProvider(this.accessToken);
+
+  String? accessToken;
+
+  @override
+  Future<String?> readAccessToken() async => accessToken;
+}
+
+final class _TestTokenRefresher implements TokenRefresher {
+  _TestTokenRefresher(this._refresh);
+
+  final Future<bool> Function() _refresh;
+  int callCount = 0;
+
+  @override
+  Future<bool> refreshAccessToken() {
+    callCount += 1;
+    return _refresh();
+  }
+}
+
+final class _UnauthorizedOnceAdapter implements HttpClientAdapter {
+  final List<String?> authorizationHeaders = [];
+  int _requestCount = 0;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    authorizationHeaders.add(options.headers['Authorization'] as String?);
+    _requestCount += 1;
+    if (_requestCount == 1) {
+      return ResponseBody.fromString(
+        '{"success":false,"code":"AUTH_EXPIRED"}',
+        401,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        },
+      );
+    }
+    return ResponseBody.fromString(
+      '{"ok":true}',
+      200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+final class _AlwaysUnauthorizedAdapter implements HttpClientAdapter {
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async => ResponseBody.fromString(
+    '{"success":false,"code":"AUTH_EXPIRED"}',
+    401,
+    headers: {
+      Headers.contentTypeHeader: [Headers.jsonContentType],
+    },
+  );
+
+  @override
+  void close({bool force = false}) {}
 }

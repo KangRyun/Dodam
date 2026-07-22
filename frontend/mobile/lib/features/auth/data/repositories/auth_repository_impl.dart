@@ -1,3 +1,5 @@
+import '../../../../core/network/auth/access_token_provider.dart';
+import '../../../../core/network/auth/token_refresher.dart';
 import '../../domain/entities/auth_session.dart';
 import '../../domain/entities/auth_tokens.dart';
 import '../../domain/entities/authenticated_user.dart';
@@ -9,7 +11,8 @@ import '../../domain/failures/auth_failure.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../mock/mock_auth_scenario.dart';
 
-class AuthRepositoryImpl implements AuthRepository {
+class AuthRepositoryImpl
+    implements AuthRepository, AccessTokenProvider, TokenRefresher {
   AuthRepositoryImpl({
     this.scenario = MockAuthScenario.existingGuardian,
     this.providerScenarios = const {},
@@ -141,6 +144,26 @@ class AuthRepositoryImpl implements AuthRepository {
     );
     _currentSession = _currentSession!.copyWith(tokens: tokens);
     return tokens;
+  }
+
+  // 현재 인증 세션의 Access Token 제공
+  @override
+  Future<String?> readAccessToken() async =>
+      _currentSession?.tokens.accessToken;
+
+  // 현재 Refresh Token으로 Token pair 교체
+  @override
+  Future<bool> refreshAccessToken() async {
+    final session = _currentSession;
+    if (session == null) return false;
+
+    try {
+      await refreshTokens(session.tokens.refreshToken);
+      return true;
+    } on AuthFailure {
+      _currentSession = null;
+      return false;
+    }
   }
 
   @override
