@@ -154,8 +154,15 @@ pipeline {
           done
           # 게이트웨이 e2e — 컨테이너 health만으론 nginx 라우팅 고장(빈 conf 등)을 못 잡는다(2026-07-22 사고).
           # nginx 안에서 자기 자신을 거쳐 ai까지: 외부 진입 경로 전체를 실검증.
+          # ⚠️ 재시도 필수: nginx가 Started 직후 리슨 열기까지 짧은 틈이 있어, 즉시 1회 체크는
+          #    기동 레이스로 오탐한다(실제로 같은 초에 체크해 refused 난 사례 있음).
           echo "게이트웨이 e2e 확인: nginx → /ai/health"
-          docker exec dodam-nginx wget -q -O /dev/null -T 5 http://localhost/ai/health
+          ok=false
+          for i in $(seq 1 10); do
+            if docker exec dodam-nginx wget -q -O /dev/null -T 5 http://localhost/ai/health 2>/dev/null; then ok=true; break; fi
+            sleep 2
+          done
+          if [ "$ok" != "true" ]; then echo "  ✗ 게이트웨이 e2e 실패(20초 재시도 후에도 응답 없음)"; exit 1; fi
           echo "✅ 전체 서비스 healthy + 게이트웨이 라우팅 정상"
         '''
       }
