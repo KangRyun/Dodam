@@ -2,8 +2,8 @@ package com.ssafy.b209.conversation.service;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.filter.AuthFilterProperties;
+import com.ssafy.b209.conversation.exception.ConversationStartErrorCode;
 import com.ssafy.b209.global.exception.BusinessException;
 import org.junit.jupiter.api.Test;
 
@@ -31,6 +31,6 @@ class GuardianUserResolverTest {
             BusinessException.class,
             exception ->
                 org.assertj.core.api.Assertions.assertThat(exception.getErrorCode())
-                    .isEqualTo(AuthErrorCode.AUTHENTICATION_REQUIRED));
+                    .isEqualTo(ConversationStartErrorCode.UNAUTHORIZED));
   }
 }
