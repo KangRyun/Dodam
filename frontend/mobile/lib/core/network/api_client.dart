@@ -5,12 +5,15 @@ import 'api_error.dart';
 import 'api_failure.dart';
 import 'auth/access_token_provider.dart';
 import 'auth/auth_header_interceptor.dart';
+import 'auth/token_refresher.dart';
 import 'public_api_path.dart';
 
 final class ApiClient {
   ApiClient({
     required ApiEnvironment environment,
     AccessTokenProvider? accessTokenProvider,
+    TokenRefresher? tokenRefresher,
+    HttpClientAdapter? httpClientAdapter,
     List<Interceptor> interceptors = const [],
     Duration connectTimeout = const Duration(seconds: 10),
     Duration sendTimeout = const Duration(seconds: 30),
@@ -24,10 +27,22 @@ final class ApiClient {
            headers: const {'Accept': 'application/json'},
          ),
        ) {
+    if (httpClientAdapter != null) {
+      _dio.httpClientAdapter = httpClientAdapter;
+    }
     if (accessTokenProvider != null) {
       _dio.interceptors.add(AuthHeaderInterceptor(accessTokenProvider));
     }
     _dio.interceptors.addAll(interceptors);
+    if (accessTokenProvider != null && tokenRefresher != null) {
+      _dio.interceptors.add(
+        AuthTokenRetryInterceptor(
+          _dio,
+          accessTokenProvider,
+          SingleFlightTokenRefresher(tokenRefresher.refreshAccessToken),
+        ),
+      );
+    }
   }
 
   final Dio _dio;
