@@ -22,10 +22,10 @@ public class ConversationSession {
   @Column(name = "difficulty_snapshot", nullable = false)
   private String difficultySnapshot;
 
-  @Column(name = "max_question_count", nullable = false)
+  @Column(name = "max_question_count", nullable = false, columnDefinition = "SMALLINT")
   private int maxQuestionCount;
 
-  @Column(name = "question_count", nullable = false)
+  @Column(name = "question_count", nullable = false, columnDefinition = "SMALLINT")
   private int questionCount;
 
   protected ConversationSession() {}

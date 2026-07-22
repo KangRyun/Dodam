@@ -535,3 +535,27 @@ UPLOAD 입력 방식에서는 `canvas`를 사용하지 않습니다. 이미지 �
 - CANVAS 크기는 가로·세로 각각 1~8192이며 배경색은 `#RRGGBB` 형식입니다.
 - 운영용 `drawing_types` Seed는 포함하지 않습니다. API 호출 전에 환경에 맞는 활성 유형 데이터가 필요합니다.
 - 현재 인증·보호자 소유 관계·필수 동의 검증은 아직 연결되지 않았으며 `startedByUserId`는 `null`로 저장됩니다.
+
+## 그림 스냅샷 업로드 API
+
+진행 중인 `DRAWING` 단계의 그림 활동 세션에는 다음 Endpoint로 중간 또는 최종 그림을 등록합니다.
+
+```http
+POST /api/v1/drawing-sessions/{drawingSessionId}/snapshots
+Content-Type: multipart/form-data
+```
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/drawing-sessions/100/snapshots" \
+  -H "Accept: application/json" \
+  -F "file=@sample.png;type=image/png" \
+  -F 'metadata={"assetType":"INTERMEDIATE","assetVersion":1,"capturedAt":"2026-07-22T13:30:00+09:00"};type=application/json'
+```
+
+- `file`은 최대 10MB의 JPEG 또는 PNG 이미지이며 확장자, MIME Type과 실제 파일 Signature를 함께 검증합니다.
+- `metadata.assetType`은 `INTERMEDIATE` 또는 `FINAL`, `assetVersion`은 1 이상의 정수입니다.
+- 같은 세션·유형·버전은 중복 등록할 수 없고, `FINAL` 파일은 세션당 하나만 허용합니다.
+- 성공 시 HTTP 201과 `Location: /api/v1/drawing-sessions/{drawingSessionId}/snapshots/{drawingAssetId}`를 반환합니다.
+- 응답에는 서버 내부 Storage Key, 절대 경로와 원본 파일명을 포함하지 않습니다.
+- 현재 인증과 그림 활동 소유권 검증은 아직 연결되지 않았습니다.
+- 업로드만으로 세션 상태를 변경하거나 AI 분석을 실행하지 않습니다.

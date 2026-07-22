@@ -18,4 +18,14 @@ public interface ImageStorage {
    * @throws BusinessException 이미지가 유효하지 않거나 안전하게 저장할 수 없는 경우
    */
   StoredImage store(StoreImageCommand command);
+
+  /**
+   * 보상 처리 대상 이미지를 상대 Storage Key로 삭제한다.
+   *
+   * <p>이미 삭제된 파일은 성공으로 처리한다. 구현체는 Key가 허용된 Storage Root를 벗어나거나 Symbolic Link를 통과하지 않도록 검증해야 한다.
+   *
+   * @param storageKey {@link #store(StoreImageCommand)}가 반환한 상대 Storage Key
+   * @throws BusinessException Key가 안전하지 않거나 파일 시스템에서 삭제할 수 없는 경우
+   */
+  void delete(String storageKey);
 }
