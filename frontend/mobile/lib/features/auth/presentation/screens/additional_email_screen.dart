@@ -7,9 +7,10 @@ typedef AdditionalEmailSubmit =
     Future<void> Function(AdditionalEmailInput input);
 
 class AdditionalEmailScreen extends StatefulWidget {
-  const AdditionalEmailScreen({required this.onSubmit, super.key});
+  const AdditionalEmailScreen({required this.onSubmit, this.onBack, super.key});
 
   final AdditionalEmailSubmit onSubmit;
+  final VoidCallback? onBack;
 
   @override
   State<AdditionalEmailScreen> createState() => _AdditionalEmailScreenState();
@@ -83,6 +84,10 @@ class _AdditionalEmailScreenState extends State<AdditionalEmailScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (widget.onBack != null) ...[
+                      _OnboardingBackButton(onPressed: widget.onBack!),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
                     const _ProgressHeader(),
                     const SizedBox(height: AppSpacing.xl),
                     const _EmailIllustration(),
@@ -139,6 +144,27 @@ class _AdditionalEmailScreenState extends State<AdditionalEmailScreen> {
             ),
           );
         },
+      ),
+    ),
+  );
+}
+
+class _OnboardingBackButton extends StatelessWidget {
+  const _OnboardingBackButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => TextButton.icon(
+    key: const ValueKey('additional-email-back'),
+    onPressed: onPressed,
+    icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
+    label: const Text('뒤로'),
+    style: TextButton.styleFrom(
+      foregroundColor: AppColors.ink,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
       ),
     ),
   );
