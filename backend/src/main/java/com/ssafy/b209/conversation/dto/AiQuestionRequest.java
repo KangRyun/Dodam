@@ -1,6 +1,6 @@
 package com.ssafy.b209.conversation.dto;
 
-import com.ssafy.b209.conversation.domain.ConversationDifficulty;
+import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.conversation.domain.ResponseMode;
 import java.util.List;
 
@@ -10,7 +10,7 @@ public record AiQuestionRequest(
     Long drawingSessionId,
     Long basisAnalysisId,
     int childAge,
-    ConversationDifficulty difficulty,
+    QuestionDifficulty difficulty,
     List<ResponseMode> allowedResponseModes,
     int currentQuestionCount,
     int maxQuestionCount,

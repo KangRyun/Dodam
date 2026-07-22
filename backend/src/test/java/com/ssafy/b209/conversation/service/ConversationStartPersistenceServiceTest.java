@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 
+import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.domain.ConversationStartChildProfile;
 import com.ssafy.b209.conversation.domain.ConversationStartDrawingSession;
@@ -123,7 +124,8 @@ class ConversationStartPersistenceServiceTest {
   private ConversationStartChildProfile child(String difficulty) throws Exception {
     ConversationStartChildProfile child = instantiate(ConversationStartChildProfile.class);
     ReflectionTestUtils.setField(child, "id", 1L);
-    ReflectionTestUtils.setField(child, "questionDifficulty", difficulty);
+    ReflectionTestUtils.setField(
+        child, "questionDifficulty", QuestionDifficulty.valueOf(difficulty));
     return child;
   }
 

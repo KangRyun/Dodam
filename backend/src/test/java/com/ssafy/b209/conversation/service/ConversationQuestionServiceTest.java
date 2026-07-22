@@ -10,9 +10,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.conversation.domain.AiQuestionTemplate;
 import com.ssafy.b209.conversation.domain.AiQuestionTemplateOption;
-import com.ssafy.b209.conversation.domain.ConversationDifficulty;
 import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.domain.ResponseMode;
 import com.ssafy.b209.conversation.dto.AiQuestionResponse;
@@ -61,7 +61,7 @@ class ConversationQuestionServiceTest {
             questionPersistenceService);
     session = mock(ConversationSession.class);
     lenient().when(session.getDrawingSessionId()).thenReturn(9L);
-    lenient().when(session.getDifficulty()).thenReturn(ConversationDifficulty.ELEMENTARY);
+    lenient().when(session.getDifficulty()).thenReturn(QuestionDifficulty.LOWER_ELEMENTARY);
     lenient().when(session.getQuestionCount()).thenReturn(2);
     lenient().when(session.getMaxQuestionCount()).thenReturn(10);
     given(session.canAskQuestion()).willReturn(true);
