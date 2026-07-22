@@ -78,6 +78,22 @@ final class ApiClient {
     ),
   );
 
+  Future<Response<T>> put<T>(
+    String path, {
+    Object? data,
+    Map<String, dynamic>? queryParameters,
+    Options? options,
+    CancelToken? cancelToken,
+  }) => _request(
+    () => _dio.put<T>(
+      PublicApiPath.normalize(path),
+      data: data,
+      queryParameters: queryParameters,
+      options: options,
+      cancelToken: cancelToken,
+    ),
+  );
+
   Future<Response<T>> delete<T>(
     String path, {
     Object? data,
