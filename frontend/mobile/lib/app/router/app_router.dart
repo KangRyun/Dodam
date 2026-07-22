@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../design_system/design_system.dart';
 import '../../features/activity/presentation/screens/activity_screens.dart';
+import '../../features/auth/auth.dart';
 import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
 import '../../features/guardian/presentation/screens/guardian_screens.dart';
 import '../../features/history/presentation/screens/history_screens.dart';
@@ -14,11 +15,16 @@ abstract final class AppRouter {
   static Route<void> onGenerateRoute(
     RouteSettings settings, {
     GuardianChildController? childController,
+    AuthProviderSignIn? authSignIn,
   }) {
     final location = settings.name ?? AppRoutes.guardianHome;
     final segments = Uri.tryParse(location)?.pathSegments ?? const <String>[];
 
     final screen = switch (segments) {
+      ['auth', 'login'] when authSignIn != null => AuthenticationFlowScreen(
+        onSignIn: authSignIn,
+        onGuardianAuthenticated: goGuardianHome,
+      ),
       ['guardian', 'home'] when childController != null => GuardianHomeScreen(
         controller: childController,
       ),

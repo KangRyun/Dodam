@@ -1,4 +1,5 @@
 export 'application/missing_email_onboarding_flow.dart';
+export 'application/auth_landing_resolver.dart';
 export 'application/google_login_coordinator.dart';
 export 'application/kakao_login_coordinator.dart';
 export 'application/naver_login_coordinator.dart';
@@ -29,6 +30,7 @@ export 'domain/failures/auth_failure.dart';
 export 'domain/repositories/auth_repository.dart';
 export 'presentation/models/auth_state.dart';
 export 'presentation/screens/additional_email_screen.dart';
+export 'presentation/screens/authentication_flow_screen.dart';
 export 'presentation/screens/onboarding_profile_screen.dart';
 export 'presentation/screens/onboarding_consent_screen.dart';
 export 'presentation/screens/new_user_onboarding_flow_screen.dart';
