@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -156,6 +158,60 @@ class DrawingAnalysisIntegrationTest {
                     + "AND analysis_status = 'FAILED'",
                 Integer.class))
         .isEqualTo(1);
+  }
+
+  @Test
+  void queriesStoredSuccessWithoutCallingAnalysisClientAgain() throws Exception {
+    given(drawingAnalysisClient.analyze(any()))
+        .willAnswer(
+            invocation -> {
+              DrawingAnalysisRequest request = invocation.getArgument(0);
+              return successResponse(request.requestId());
+            });
+    mockMvc.perform(request()).andExpect(status().isCreated());
+    Long analysisId =
+        jdbcTemplate.queryForObject(
+            "SELECT id FROM analyses WHERE drawing_asset_id = 20", Long.class);
+    reset(drawingAnalysisClient);
+
+    mockMvc
+        .perform(
+            get(
+                "/api/v1/drawing-sessions/{drawingSessionId}/analyses/{drawingAnalysisId}",
+                10,
+                analysisId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("SUCCEEDED"))
+        .andExpect(jsonPath("$.data.detections[0].label").value("HOUSE"))
+        .andExpect(jsonPath("$.data.detections[1].label").value("TREE"))
+        .andExpect(jsonPath("$.data.failure").isEmpty());
+
+    verifyNoInteractions(drawingAnalysisClient);
+  }
+
+  @Test
+  void queriesStoredFailureAsHttpOkWithoutCallingAnalysisClientAgain() throws Exception {
+    given(drawingAnalysisClient.analyze(any()))
+        .willThrow(new DrawingAnalysisClientException(DrawingAnalysisClientException.Type.TIMEOUT));
+    mockMvc.perform(request()).andExpect(status().isBadGateway());
+    Long analysisId =
+        jdbcTemplate.queryForObject(
+            "SELECT id FROM analyses WHERE drawing_asset_id = 20", Long.class);
+    reset(drawingAnalysisClient);
+
+    mockMvc
+        .perform(
+            get(
+                "/api/v1/drawing-sessions/{drawingSessionId}/analyses/{drawingAnalysisId}",
+                10,
+                analysisId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.status").value("FAILED"))
+        .andExpect(jsonPath("$.data.detections").isEmpty())
+        .andExpect(jsonPath("$.data.failure.code").value("AI_ANALYSIS_FAILED"))
+        .andExpect(jsonPath("$.data.failure.message").value("그림 분석 처리에 실패했습니다."));
+
+    verifyNoInteractions(drawingAnalysisClient);
   }
 
   private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request() {
