@@ -1,5 +1,5 @@
 # 도담(dodam) 배포 스택 — MySQL 8.0 서비스
-# 관련 이슈: S15P11B209-184(MySQL 컨테이너) · S15P11B209-185(compose 골격) · S15P11B209-186(.env)
+# 관련 이슈: S15P11B209-184(MySQL 컨테이너) · S15P11B209-185(compose 골격) · S15P11B209-186(.env) · S15P11B209-188(ai 서비스)
 #
 # 실행 (repo 루트에서):
 #   docker compose -f infra/docker-compose.yml --env-file .env up -d mysql
@@ -91,6 +91,44 @@ services:
       - dodam-net
 
   # ───────────────────────────────────────────────────────────────
+  # ai — 도담 AI 분석 서버(FastAPI, Python). 내부망 전용. 대화 LLM·STT·TTS를 GMS로 호출.
+  #      ⚠️ 아동 음성/발화가 지나가는 서비스 → 호스트 포트 미개방, 외부 진입은 nginx /ai 로만.
+  # ───────────────────────────────────────────────────────────────
+  ai:
+    build:
+      context: ../ai             # 빌드 컨텍스트 = 리포지토리 ai/ (compose 파일 위치 기준 상대경로)
+      dockerfile: Dockerfile     # ai/Dockerfile
+    image: dodam-ai:local        # 로컬 빌드 이미지 이름. CI 도입 시 레지스트리 태그로 대체
+    container_name: dodam-ai
+    restart: unless-stopped
+
+    # GMS 접속·모델 설정을 .env에서 주입(이 파일엔 값 없음). ai가 필요로 하는 키만 선별 주입(최소권한).
+    #   ⚠️ GMS_KEY 는 비밀 — 절대 하드코딩·로그 금지. 값은 .env 에만 존재.
+    environment:
+      GMS_KEY: ${GMS_KEY}                        # GMS(OpenAI 호환) 인증 키 — 필수, 기본값 없음
+      GMS_BASE_URL: ${GMS_BASE_URL}              # GMS 프록시 엔드포인트
+      LLM_MODEL: ${LLM_MODEL:-gpt-4o-mini}       # 대화 LLM
+      STT_MODEL: ${STT_MODEL:-whisper-1}         # 음성→텍스트
+      TTS_MODEL: ${TTS_MODEL:-gpt-4o-mini-tts}   # 텍스트→음성(지시형)
+      TTS_VOICE: ${TTS_VOICE:-fable}             # 곰돌이 톤 보이스
+
+    # ⚠️ ports 를 열지 않는다 — 호스트엔 노출 안 함. 내부망(dodam-net)에서 'ai:8000'으로만 접근.
+    expose:
+      - "8000"                   # 문서화 목적(같은 네트워크의 nginx가 이 포트로 프록시)
+
+    # /health 로 기동 완료 판단. slim 이미지엔 curl이 없어 python stdlib(urllib)로 확인.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s          # 앱 import(openai·pydantic 로딩)에 1~2초 걸림 → 여유
+    # NOTE: ai 는 mysql을 쓰지 않으므로 depends_on 없음(GMS만 호출). backend와 독립 기동.
+
+    networks:
+      - dodam-net
+
+  # ───────────────────────────────────────────────────────────────
   # nginx — 리버스 프록시. ★ 유일하게 외부(호스트)로 열리는 서비스. (EC2 UFW도 80/443만 허용)
   # ───────────────────────────────────────────────────────────────
   nginx:
@@ -108,11 +146,13 @@ services:
     depends_on:
       backend:
         condition: service_healthy   # backend가 뜬 뒤 프록시 시작
+      ai:
+        condition: service_started   # ai 컨테이너 '시작'만 보장(=nginx가 'ai' 호스트를 해석 가능). health엔 안 묶음 → ai 장애가 게이트웨이(/api)까지 막지 않게. (초기 /ai 는 일시 502 가능)
 
     networks:
       - dodam-net
 
-# 내부 전용 네트워크 — mysql·backend·nginx(+추가 예정 ai)가 여기 붙는다. 외부 노출은 nginx만.
+# 내부 전용 네트워크 — mysql·backend·ai·nginx가 여기 붙는다. 외부 노출은 nginx만.
 networks:
   dodam-net:
     driver: bridge
