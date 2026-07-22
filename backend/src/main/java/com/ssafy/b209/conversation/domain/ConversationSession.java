@@ -1,5 +1,6 @@
 package com.ssafy.b209.conversation.domain;
 
+import com.ssafy.b209.child.domain.QuestionDifficulty;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.GeneratedValue;
@@ -77,8 +78,13 @@ public class ConversationSession {
     return drawingSessionId;
   }
 
-  public ConversationDifficulty getDifficulty() {
-    return ConversationDifficulty.valueOf(difficultySnapshot);
+  /**
+   * 시작 시점에 고정한 질문 난이도를 반환한다.
+   *
+   * @return DB v1.2와 API 계약에 정의된 질문 난이도
+   */
+  public QuestionDifficulty getDifficulty() {
+    return QuestionDifficulty.valueOf(difficultySnapshot);
   }
 
   /**

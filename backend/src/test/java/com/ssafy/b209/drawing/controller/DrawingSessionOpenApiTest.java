@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ssafy.b209.drawing.service.DrawingSessionQueryService;
 import com.ssafy.b209.drawing.service.DrawingSessionService;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -24,6 +25,7 @@ class DrawingSessionOpenApiTest {
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
   @MockitoBean private DrawingSessionService drawingSessionService;
+  @MockitoBean private DrawingSessionQueryService drawingSessionQueryService;
 
   @Test
   void documentsCreationContractWithoutUnimplementedAuthentication() throws Exception {
@@ -43,6 +45,32 @@ class DrawingSessionOpenApiTest {
     assertThat(operation.path("responses").fieldNames())
         .toIterable()
         .containsAll(Set.of("201", "400", "404", "409", "500"));
+    assertThat(operation.has("security")).isFalse();
+  }
+
+  @Test
+  void documentsActiveSessionLookupWithoutUnimplementedAuthentication() throws Exception {
+    JsonNode operation = apiDocument().at("/paths/~1api~1v1~1drawing-sessions~1active/get");
+
+    assertThat(operation.isMissingNode()).isFalse();
+    assertThat(operation.path("tags"))
+        .anySatisfy(tag -> assertThat(tag.asText()).isEqualTo("Drawing Sessions"));
+    assertThat(operation.path("description").asText())
+        .contains("최신 초안이 없을 수 있습니다")
+        .contains("세션 상태를 변경하지 않습니다")
+        .contains("AI 분석을 실행하지 않습니다")
+        .contains("이미지 파일 다운로드 API가 아닙니다");
+    assertThat(operation.path("parameters"))
+        .singleElement()
+        .satisfies(
+            parameter -> {
+              assertThat(parameter.path("name").asText()).isEqualTo("childId");
+              assertThat(parameter.path("in").asText()).isEqualTo("query");
+              assertThat(parameter.path("required").asBoolean()).isTrue();
+            });
+    assertThat(operation.path("responses").fieldNames())
+        .toIterable()
+        .containsExactlyInAnyOrder("200", "400", "404", "500");
     assertThat(operation.has("security")).isFalse();
   }
 

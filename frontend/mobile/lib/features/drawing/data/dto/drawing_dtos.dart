@@ -262,23 +262,102 @@ final class DraftRecoveryDto {
   final int? lastBatchSequence, lastEventSequence;
 }
 
-final class CompleteDrawingResponseDto {
-  const CompleteDrawingResponseDto({
+final class DrawingCompleteMetadataDto {
+  const DrawingCompleteMetadataDto({
+    required this.drawingDurationMs,
+    required this.clientCompletedAt,
+    this.sourceAssetId,
+    this.lastEventSequence,
+  });
+
+  final int drawingDurationMs;
+  final String clientCompletedAt;
+  final int? sourceAssetId, lastEventSequence;
+
+  Map<String, dynamic> toJson() => {
+    if (sourceAssetId != null) 'sourceAssetId': sourceAssetId,
+    if (lastEventSequence != null) 'lastEventSequence': lastEventSequence,
+    'drawingDurationMs': drawingDurationMs,
+    'clientCompletedAt': clientCompletedAt,
+  };
+}
+
+final class DrawingStageAnalysisDto {
+  const DrawingStageAnalysisDto({
+    required this.analysisId,
+    required this.analysisType,
+    required this.status,
+  });
+
+  factory DrawingStageAnalysisDto.fromJson(Map<String, dynamic> json) =>
+      DrawingStageAnalysisDto(
+        analysisId: json['analysisId'] as int,
+        analysisType: json['analysisType'] as String,
+        status: json['status'] as String,
+      );
+
+  final int analysisId;
+  final String analysisType, status;
+}
+
+final class DrawingStageCompleteResponseDto {
+  const DrawingStageCompleteResponseDto({
     required this.drawingSessionId,
+    required this.finalAssetId,
     required this.sessionStatus,
     required this.currentStage,
-    required this.finalAsset,
+    required this.analysis,
+    required this.nextAction,
   });
-  factory CompleteDrawingResponseDto.fromJson(Map<String, dynamic> json) =>
-      CompleteDrawingResponseDto(
+
+  factory DrawingStageCompleteResponseDto.fromJson(Map<String, dynamic> json) =>
+      DrawingStageCompleteResponseDto(
         drawingSessionId: json['drawingSessionId'] as int,
+        finalAssetId: json['finalAssetId'] as int,
         sessionStatus: json['sessionStatus'] as String,
         currentStage: json['currentStage'] as String,
-        finalAsset: DrawingAssetDto.fromJson(_map(json['finalAsset'])),
+        analysis: DrawingStageAnalysisDto.fromJson(_map(json['analysis'])),
+        nextAction: json['nextAction'] as String,
       );
-  final int drawingSessionId;
-  final String sessionStatus, currentStage;
-  final DrawingAssetDto finalAsset;
+
+  final int drawingSessionId, finalAssetId;
+  final String sessionStatus, currentStage, nextAction;
+  final DrawingStageAnalysisDto analysis;
+}
+
+enum DrawingEmotionType {
+  happy('HAPPY'),
+  sad('SAD'),
+  angry('ANGRY'),
+  scared('SCARED'),
+  calm('CALM'),
+  unknown('UNKNOWN');
+
+  const DrawingEmotionType(this.apiValue);
+  final String apiValue;
+}
+
+final class SaveDrawingReflectionRequestDto {
+  const SaveDrawingReflectionRequestDto({
+    required this.title,
+    required this.selectedEmotions,
+    required this.expressedEmotionText,
+    required this.skipped,
+  });
+
+  final String? title;
+  final List<DrawingEmotionType> selectedEmotions;
+  final String? expressedEmotionText;
+  final bool skipped;
+
+  Map<String, dynamic> toJson() => {
+    'title': title,
+    'selectedEmotions': selectedEmotions
+        .map((emotion) => emotion.apiValue)
+        .toList(growable: false),
+    'expressedEmotionText': expressedEmotionText,
+    'skipped': skipped,
+  };
 }
 
 final class DrawingUploadResponseDto {

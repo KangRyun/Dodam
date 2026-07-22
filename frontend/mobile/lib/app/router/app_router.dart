@@ -41,7 +41,15 @@ abstract final class AppRouter {
         DrawingScreen(childId: childId),
       ['child', final childId, 'activity', 'emotions']
           when _hasChildContext(childController, childId) =>
-        EmotionSelectScreen(childId: childId),
+        EmotionSelectScreen(
+          childId: childId,
+          sessionId: settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments).sessionId
+              : null,
+          drawingRepository: settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments).repository
+              : null,
+        ),
       ['child', final childId, 'activity', 'complete']
           when _hasChildContext(childController, childId) =>
         ActivityCompleteScreen(childId: childId),

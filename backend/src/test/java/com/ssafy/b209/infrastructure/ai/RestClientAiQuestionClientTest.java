@@ -5,6 +5,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.conversation.dto.AiQuestionRequest;
 import com.ssafy.b209.conversation.dto.AiQuestionResponse;
 import java.net.SocketTimeoutException;
@@ -138,7 +139,7 @@ class RestClientAiQuestionClientTest {
         9L,
         null,
         8,
-        com.ssafy.b209.conversation.domain.ConversationDifficulty.ELEMENTARY,
+        QuestionDifficulty.LOWER_ELEMENTARY,
         java.util.List.of(com.ssafy.b209.conversation.domain.ResponseMode.VOICE),
         0,
         10,

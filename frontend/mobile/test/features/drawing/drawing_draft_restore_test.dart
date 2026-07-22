@@ -354,11 +354,17 @@ final class _DraftRepository implements DrawingRepository {
   Future<void> deleteDraft(int sessionId) async => deleteDraftCalls += 1;
 
   @override
-  Future<CompleteDrawingResponseDto> completeDrawing(
+  Future<DrawingStageCompleteResponseDto> completeDrawingStage(
     int sessionId, {
-    BinaryUploadDto? image,
-    int? lastEventSequence,
+    required BinaryUploadDto finalImage,
+    required DrawingCompleteMetadataDto metadata,
+    required String idempotencyKey,
   }) => throw UnimplementedError();
+  @override
+  Future<void> saveReflection(
+    int sessionId,
+    SaveDrawingReflectionRequestDto request,
+  ) => throw UnimplementedError();
   @override
   Future<DrawingSessionDto> createSession(
     CreateDrawingSessionRequestDto request,

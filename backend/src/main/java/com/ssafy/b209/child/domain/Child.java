@@ -36,6 +36,10 @@ public class Child {
   @Column(name = "profile_status", nullable = false)
   private ChildProfileStatus profileStatus;
 
+  @Enumerated(EnumType.STRING)
+  @Column(name = "question_difficulty", nullable = false)
+  private QuestionDifficulty questionDifficulty;
+
   @Column(name = "deleted_at")
   private LocalDateTime deletedAt;
 
@@ -48,12 +52,15 @@ public class Child {
       LocalDate birthDate,
       ChildTutorialStatus tutorialStatus,
       ChildProfileStatus profileStatus,
+      QuestionDifficulty questionDifficulty,
       LocalDateTime deletedAt) {
     this.id = id;
     this.nickname = Objects.requireNonNull(nickname, "nickname must not be null");
     this.birthDate = Objects.requireNonNull(birthDate, "birthDate must not be null");
     this.tutorialStatus = Objects.requireNonNull(tutorialStatus, "tutorialStatus must not be null");
     this.profileStatus = Objects.requireNonNull(profileStatus, "profileStatus must not be null");
+    this.questionDifficulty =
+        Objects.requireNonNull(questionDifficulty, "questionDifficulty must not be null");
     this.deletedAt = deletedAt;
   }
 
@@ -94,5 +101,14 @@ public class Child {
    */
   public Long getId() {
     return id;
+  }
+
+  /**
+   * DB v1.2와 API 계약에 따른 아동의 질문 난이도를 반환한다.
+   *
+   * @return 아동 질문 생성에 사용할 난이도
+   */
+  public QuestionDifficulty getQuestionDifficulty() {
+    return questionDifficulty;
   }
 }

@@ -87,6 +87,13 @@ class DrawingErrorCodeTest {
     expected.put(
         DrawingErrorCode.DRAWING_DRAFT_METADATA_INVALID,
         new ErrorContract(HttpStatus.BAD_REQUEST, "DRAWING_400_008", "그림 초안 정보가 올바르지 않습니다."));
+    expected.put(
+        DrawingErrorCode.ACTIVE_DRAWING_SESSION_NOT_FOUND,
+        new ErrorContract(HttpStatus.NOT_FOUND, "DRAWING_404_005", "진행 중인 그림 활동이 없습니다."));
+    expected.put(
+        DrawingErrorCode.MULTIPLE_ACTIVE_DRAWING_SESSIONS,
+        new ErrorContract(
+            HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_500_003", "진행 중인 그림 활동 데이터가 중복되었습니다."));
 
     assertThat(DrawingErrorCode.values()).containsExactlyInAnyOrderElementsOf(expected.keySet());
     expected.forEach(

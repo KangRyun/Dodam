@@ -1,7 +1,9 @@
 package com.ssafy.b209.drawing.controller;
 
 import com.ssafy.b209.drawing.dto.request.CreateDrawingSessionRequest;
+import com.ssafy.b209.drawing.dto.response.ActiveDrawingSessionResponse;
 import com.ssafy.b209.drawing.dto.response.CreateDrawingSessionResponse;
+import com.ssafy.b209.drawing.service.DrawingSessionQueryService;
 import com.ssafy.b209.drawing.service.DrawingSessionService;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.ApiResponse;
@@ -13,33 +15,83 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import java.net.URI;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 그림 활동 세션 생성 HTTP API를 제공하는 Controller다.
+ * 그림 활동 세션 생성과 진행 중 세션 조회 HTTP API를 제공하는 Controller다.
  *
- * <p>요청 형식 검증과 공통 응답 조립만 담당하며, 아동·그림 유형 및 멱등성에 관한 업무 규칙은 {@link DrawingSessionService}에 위임한다.
+ * <p>요청 형식 검증과 공통 응답 조립만 담당한다. 생성 규칙은 {@link DrawingSessionService}, 재개 정보 조회 규칙은 {@link
+ * DrawingSessionQueryService}에 위임한다.
  */
 @Tag(name = "Drawing Sessions", description = "그림 활동 세션 API")
+@Validated
 @RestController
 @RequestMapping("/api/v1/drawing-sessions")
 public class DrawingSessionController {
 
   private final DrawingSessionService drawingSessionService;
+  private final DrawingSessionQueryService drawingSessionQueryService;
 
   /**
-   * 그림 활동 세션 서비스를 사용하는 Controller를 생성한다.
+   * 그림 활동 세션 생성·조회 서비스를 사용하는 Controller를 생성한다.
    *
    * @param drawingSessionService 그림 활동 세션 생성 업무를 처리하는 서비스
+   * @param drawingSessionQueryService 진행 중 그림 활동 조회 업무를 처리하는 서비스
    */
-  public DrawingSessionController(DrawingSessionService drawingSessionService) {
+  public DrawingSessionController(
+      DrawingSessionService drawingSessionService,
+      DrawingSessionQueryService drawingSessionQueryService) {
     this.drawingSessionService = drawingSessionService;
+    this.drawingSessionQueryService = drawingSessionQueryService;
+  }
+
+  /**
+   * 아동의 진행 중 그림 활동 세션과 최신 자동 저장 초안을 조회한다.
+   *
+   * <p>초안이 없는 세션도 조회에 성공하며 응답의 {@code latestDraft}가 {@code null}이 된다. 이 요청은 세션 상태를 변경하지 않는다.
+   *
+   * @param childId 진행 중인 그림 활동을 조회할 아동 식별자
+   * @return HTTP 200과 재개에 필요한 세션·최신 초안 정보
+   */
+  @Operation(
+      summary = "진행 중 그림 활동 조회",
+      description =
+          "아동의 현재 진행 중 Session과 최신 초안 Metadata를 조회합니다. 최신 초안이 없을 수 있습니다. "
+              + "조회만으로 세션 상태를 변경하지 않습니다. 조회만으로 AI 분석을 실행하지 않습니다. "
+              + "이미지 파일 다운로드 API가 아닙니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "진행 중 그림 활동 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "아동 식별자 형식 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "진행 중인 그림 활동을 찾을 수 없음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "500",
+        description = "진행 중 세션 데이터 중복 또는 서버 내부 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping("/active")
+  public ResponseEntity<ApiResponse<ActiveDrawingSessionResponse>> getActiveDrawingSession(
+      @Parameter(description = "조회할 아동 식별자", required = true) @RequestParam @Positive
+          Long childId) {
+    return ResponseEntity.ok(
+        ApiResponse.ok(drawingSessionQueryService.getActiveDrawingSession(childId)));
   }
 
   /**
