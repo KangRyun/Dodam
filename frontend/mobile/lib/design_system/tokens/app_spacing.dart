@@ -20,5 +20,7 @@ abstract final class AppSizes {
   static const double buttonHeight = 56;
   static const double childButtonHeight = 64;
   static const double iconButton = 48;
+  static const double stateIcon = 64;
+  static const double loadingIndicator = 48;
   static const double contentMaxWidth = 720;
 }
