@@ -268,9 +268,7 @@ void main() {
     expect(_choice(tester, '슬픔').isSelected, isTrue);
   });
 
-  testWidgets('Reflection 성공 시 v1.0 요청을 전달하고 다음 placeholder로 이동한다', (
-    tester,
-  ) async {
+  testWidgets('Reflection 성공 시 아동 활동 완료 안내 화면으로 이동한다', (tester) async {
     final repository = _CompletionRepository();
     await _pumpEmotion(tester, repository: repository, sessionId: 42);
     await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
@@ -290,7 +288,52 @@ void main() {
     );
     expect(repository.lastReflection?.expressedEmotionText, isNull);
     expect(repository.lastReflection?.skipped, isFalse);
-    expect(find.text('활동 완료'), findsWidgets);
+    expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
+    expect(find.text('이제 보호자에게 기기를 건네주세요.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
+  });
+
+  testWidgets('보호자 확인을 취소하면 아동 완료 안내 화면을 유지한다', (tester) async {
+    await _pumpComplete(tester);
+
+    await tester.tap(find.byKey(const ValueKey('guardian-handoff')));
+    await tester.pumpAndSettle();
+    expect(find.text('보호자 화면으로 이동할까요?'), findsOneWidget);
+
+    await tester.tap(find.text('취소'));
+    await tester.pumpAndSettle();
+    expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
+    expect(find.text('보호자 화면으로 이동할까요?'), findsNothing);
+  });
+
+  testWidgets('보호자 확인 후 스택을 정리해 Guardian Home으로 이동한다', (tester) async {
+    await _pumpComplete(tester);
+
+    await tester.tap(find.byKey(const ValueKey('guardian-handoff')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('확인'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('보호자 홈 테스트'), findsOneWidget);
+    expect(find.text('그림 활동을 모두 마쳤어요!'), findsNothing);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('보호자 홈 테스트'), findsOneWidget);
+    expect(find.text('그림 활동을 모두 마쳤어요!'), findsNothing);
+  });
+
+  testWidgets('식별자가 비어 있고 높이가 작아도 완료 안내 화면은 안전하다', (tester) async {
+    await _pumpComplete(tester, childId: '', size: const Size(600, 420));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
+    await tester.drag(
+      find.byKey(const ValueKey('activity-complete-scroll')),
+      const Offset(0, -500),
+    );
+    await tester.pump();
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('건너뛰기는 빈 감정과 null 직접 표현을 제출한다', (tester) async {
@@ -399,12 +442,33 @@ Future<void> _pumpEmotion(
       routes: {
         AppRoutes.activityComplete('3'): (_) =>
             const ActivityCompleteScreen(childId: '3'),
+        AppRoutes.guardianHome: (_) => const Scaffold(body: Text('보호자 홈 테스트')),
       },
       home: EmotionSelectScreen(
         childId: '3',
         sessionId: sessionId,
         drawingRepository: repository,
       ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+Future<void> _pumpComplete(
+  WidgetTester tester, {
+  String childId = '3',
+  Size size = const Size(1200, 800),
+}) async {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(
+    MaterialApp(
+      routes: {
+        AppRoutes.guardianHome: (_) => const Scaffold(body: Text('보호자 홈 테스트')),
+      },
+      home: ActivityCompleteScreen(childId: childId),
     ),
   );
   await tester.pumpAndSettle();
