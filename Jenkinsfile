@@ -107,6 +107,7 @@ pipeline {
           docker compose -f "$COMPOSE_FILE" build
           docker tag dodam-backend:local dodam-backend:${IMAGE_TAG}
           docker tag dodam-ai:local      dodam-ai:${IMAGE_TAG}
+          docker tag dodam-nginx:local   dodam-nginx:${IMAGE_TAG}
         '''
       }
     }
@@ -126,6 +127,8 @@ pipeline {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
         // 시크릿 .env 를 Credentials(secret file)에서 워크스페이스 밖 임시경로로 주입 → compose up.
         // 같은 호스트라 방금 빌드한 :local 이미지를 그대로 사용(push/pull 불필요).
+        // nginx conf 는 이미지에 bake(infra/nginx/Dockerfile) — conf 변경 시 이미지가 바뀌므로
+        // up -d 가 컨테이너를 재생성해 자동 반영된다(bind 마운트 경로 사고 방지, 2026-07-22 교훈).
         withCredentials([file(credentialsId: 'dodam-env', variable: 'ENV_FILE')]) {
           sh 'docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d'
         }
@@ -149,7 +152,11 @@ pipeline {
             done
             if [ "$ok" != "true" ]; then echo "  ✗ $svc 헬스체크 실패(마지막 상태: $status)"; exit 1; fi
           done
-          echo "✅ 전체 서비스 healthy"
+          # 게이트웨이 e2e — 컨테이너 health만으론 nginx 라우팅 고장(빈 conf 등)을 못 잡는다(2026-07-22 사고).
+          # nginx 안에서 자기 자신을 거쳐 ai까지: 외부 진입 경로 전체를 실검증.
+          echo "게이트웨이 e2e 확인: nginx → /ai/health"
+          docker exec dodam-nginx wget -q -O /dev/null -T 5 http://localhost/ai/health
+          echo "✅ 전체 서비스 healthy + 게이트웨이 라우팅 정상"
         '''
       }
     }

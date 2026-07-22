@@ -138,16 +138,19 @@ services:
   # nginx — 리버스 프록시. ★ 유일하게 외부(호스트)로 열리는 서비스. (EC2 UFW도 80/443만 허용)
   # ───────────────────────────────────────────────────────────────
   nginx:
-    image: nginx:1.27-alpine     # latest 금지 — 버전 고정
+    build:
+      context: ./nginx           # 빌드 컨텍스트 = infra/nginx (conf.d 포함 — Dockerfile이 이미지에 COPY)
+      dockerfile: Dockerfile
+    image: dodam-nginx:local     # 로컬 빌드 이미지 — conf 내장. 베이스는 nginx:1.27-alpine(버전 고정)
     container_name: dodam-nginx
     restart: unless-stopped
 
     ports:
       - "80:80"                  # 외부 진입점. HTTPS 도입 시 "443:443" 추가 + 인증서 볼륨 마운트
 
-    volumes:
-      # 리버스 프록시 설정을 읽기전용으로 마운트 (infra/nginx/conf.d → 컨테이너 기본 include 경로)
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+    # ⚠️ conf 를 bind 마운트하지 않는다 — 실행 위치(호스트/Jenkins)에 따라 경로가 달라져
+    #    빈 conf 가 마운트되는 사고(2026-07-22)가 있었음. conf 는 이미지에 bake(위 build 참조).
+    #    conf 변경 → 커밋 → 파이프라인이 이미지 재빌드 + 컨테이너 재생성으로 반영.
 
     depends_on:
       backend:
