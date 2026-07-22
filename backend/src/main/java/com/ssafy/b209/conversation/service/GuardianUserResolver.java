@@ -13,7 +13,8 @@ public interface GuardianUserResolver {
    * @param authorization 외부 Authorization Header
    * @param guardianUserId 개발·테스트 전용 임시 보호자 Header
    * @return 인증된 현재 보호자 식별자
-   * @throws com.ssafy.b209.global.exception.BusinessException 인증 정보가 유효하지 않거나 임시 Header 사용이 허용되지 않은 경우
+   * @throws com.ssafy.b209.global.exception.BusinessException 인증 정보가 유효하지 않거나 임시 Header 사용이 허용되지 않은
+   *     경우
    */
   Long resolve(String authorization, String guardianUserId);
 }
