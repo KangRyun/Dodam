@@ -19,7 +19,7 @@ def notifyMattermost(String emoji, String title) {
       def duration = (currentBuild.durationString ?: '').replace(' and counting', '')
       def deployed = (branch == 'develop' && emoji == '✅') ? ' · 🚀 서버 배포됨' : ''
       def text = "${emoji} **${title}** · `${branch}` #${env.BUILD_NUMBER} · ${duration}${deployed}\n" +
-                 "커밋 `${env.IMAGE_TAG ?: '?'}` · 로그: ${env.BUILD_URL}console (SSH 터널 필요)"
+                 "👤 ${env.GIT_AUTHOR ?: '?'} · 커밋 `${env.IMAGE_TAG ?: '?'}`"
       // JSON은 이스케이프 사고 방지를 위해 파일로 만들어 curl -d @file 로 전송(따옴표 지옥 회피)
       writeFile file: '.mm-payload.json', text: groovy.json.JsonOutput.toJson([text: text])
       sh 'curl -sf -X POST -H "Content-Type: application/json" -d @.mm-payload.json "$MM_WEBHOOK" || true'
@@ -50,7 +50,9 @@ pipeline {
         script {
           // 이미지 추적·롤백용 짧은 커밋 해시. 배포 후 "무엇이 떠 있나"를 커밋으로 식별.
           env.IMAGE_TAG = sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
-          echo "브랜치=${env.BRANCH_NAME ?: 'N/A'} · 이미지태그(SHA)=${env.IMAGE_TAG}"
+          // 알림용 — 이 브랜치 마지막 커밋의 작성자(= 사실상 푸시한 사람)
+          env.GIT_AUTHOR = sh(returnStdout: true, script: 'git log -1 --format=%an').trim()
+          echo "브랜치=${env.BRANCH_NAME ?: 'N/A'} · 이미지태그(SHA)=${env.IMAGE_TAG} · 작성자=${env.GIT_AUTHOR}"
         }
       }
     }
