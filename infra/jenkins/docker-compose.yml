@@ -40,7 +40,8 @@ services:
 
     # Jenkins 기동 완료(로그인 페이지 응답) 여부 — 이미지에 설치한 curl 사용
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/login"]
+      # prefix(/jenkins) 적용에 맞춘 경로 — 구경로 /login은 404가 정상이라 헬스체크가 오탐한다
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/jenkins/login"]
       interval: 15s
       timeout: 5s
       retries: 5
