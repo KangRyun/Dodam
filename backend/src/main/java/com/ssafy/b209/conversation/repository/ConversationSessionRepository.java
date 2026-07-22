@@ -14,4 +14,12 @@ public interface ConversationSessionRepository extends JpaRepository<Conversatio
   @Lock(LockModeType.PESSIMISTIC_WRITE)
   @Query("select session from ConversationSession session where session.id = :id")
   Optional<ConversationSession> findByIdForUpdate(@Param("id") Long id);
+
+  /**
+   * 그림 활동 세션에 연결된 기존 대화 세션을 조회한다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @return 기존 대화 세션 또는 빈 값
+   */
+  Optional<ConversationSession> findByDrawingSessionId(Long drawingSessionId);
 }

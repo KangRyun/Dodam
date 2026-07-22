@@ -9,6 +9,13 @@ spring:
     multipart:
       max-file-size: 10MB
       max-request-size: 11MB
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL_ENABLED:false}
 
 server:
   port: 8080
@@ -27,3 +34,10 @@ app:
     image:
       root: ${LOCAL_IMAGE_STORAGE_ROOT:./storage/images}
       max-size: ${LOCAL_IMAGE_MAX_SIZE:10485760}
+  idempotency:
+    conversation:
+      processing-ttl: ${CONVERSATION_IDEMPOTENCY_PROCESSING_TTL:30s}
+      completed-ttl: ${CONVERSATION_IDEMPOTENCY_COMPLETED_TTL:24h}
+      failure-ttl: ${CONVERSATION_IDEMPOTENCY_FAILURE_TTL:5m}
+      processing-wait: ${CONVERSATION_IDEMPOTENCY_PROCESSING_WAIT:3s}
+      polling-interval: ${CONVERSATION_IDEMPOTENCY_POLLING_INTERVAL:50ms}
