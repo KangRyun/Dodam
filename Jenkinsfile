@@ -154,15 +154,19 @@ pipeline {
           done
           # 게이트웨이 e2e — 컨테이너 health만으론 nginx 라우팅 고장(빈 conf 등)을 못 잡는다(2026-07-22 사고).
           # nginx 안에서 자기 자신을 거쳐 ai까지: 외부 진입 경로 전체를 실검증.
-          # ⚠️ 재시도 필수: nginx가 Started 직후 리슨 열기까지 짧은 틈이 있어, 즉시 1회 체크는
-          #    기동 레이스로 오탐한다(실제로 같은 초에 체크해 refused 난 사례 있음).
-          echo "게이트웨이 e2e 확인: nginx → /ai/health"
+          # ⚠️ 주소는 반드시 127.0.0.1 — 컨테이너 안 'localhost'는 ::1(IPv6)로 먼저 풀리는데
+          #    우리 nginx는 IPv4(0.0.0.0:80)만 리슨하고 busybox wget은 IPv4 폴백이 없어
+          #    항상 refused 난다(이걸로 오탐 2회: 처음엔 기동 레이스로 오진했음).
+          #    재시도 루프는 기동 직후 리슨 대기용으로 유지. 에러 출력은 숨기지 않는다(진단 가능하게).
+          echo "게이트웨이 e2e 확인: nginx → https /ai/health"
+          # https 전환(S15P11B209-301) 후 80은 리다이렉트 전용 → e2e는 443(TLS)을 직접 친다.
+          # --no-check-certificate: 인증서는 도메인용인데 체크는 127.0.0.1(IP)로 접속하므로 검증 생략.
           ok=false
           for i in $(seq 1 10); do
-            if docker exec dodam-nginx wget -q -O /dev/null -T 5 http://localhost/ai/health 2>/dev/null; then ok=true; break; fi
+            if docker exec dodam-nginx wget --no-check-certificate -q -O /dev/null -T 5 https://127.0.0.1/ai/health; then ok=true; break; fi
             sleep 2
           done
-          if [ "$ok" != "true" ]; then echo "  ✗ 게이트웨이 e2e 실패(20초 재시도 후에도 응답 없음)"; exit 1; fi
+          if [ "$ok" != "true" ]; then echo "  ✗ 게이트웨이 e2e 실패(재시도 소진)"; exit 1; fi
           echo "✅ 전체 서비스 healthy + 게이트웨이 라우팅 정상"
         '''
       }
