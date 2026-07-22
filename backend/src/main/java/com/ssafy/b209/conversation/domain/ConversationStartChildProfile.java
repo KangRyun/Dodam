@@ -1,7 +1,12 @@
 package com.ssafy.b209.conversation.domain;
 
+import com.ssafy.b209.child.domain.QuestionDifficulty;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import org.hibernate.annotations.ColumnDefault;
@@ -11,18 +16,20 @@ import org.hibernate.annotations.ColumnDefault;
 @Table(name = "children")
 public class ConversationStartChildProfile {
 
-  @Id private Long id;
+  @Id
+  @GeneratedValue(strategy = GenerationType.IDENTITY)
+  private Long id;
 
+  @Enumerated(EnumType.STRING)
   @Column(name = "question_difficulty", nullable = false)
-  @ColumnDefault("'PRESCHOOL'")
-  private String questionDifficulty;
+  private QuestionDifficulty questionDifficulty;
 
   protected ConversationStartChildProfile() {}
 
   /**
-   * @return DB v1.2에 정의된 질문 난이도
+   * @return DB v1.2와 API 계약에 정의된 질문 난이도
    */
-  public String getQuestionDifficulty() {
+  public QuestionDifficulty getQuestionDifficulty() {
     return questionDifficulty;
   }
 }

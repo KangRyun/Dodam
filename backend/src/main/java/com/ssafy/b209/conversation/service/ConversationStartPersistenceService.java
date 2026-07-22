@@ -101,7 +101,7 @@ public class ConversationStartPersistenceService {
           conversationSessionRepository.saveAndFlush(
               ConversationSession.start(
                   drawingSessionId,
-                  child.getQuestionDifficulty(),
+                  child.getQuestionDifficulty().name(),
                   maxQuestionCount,
                   LocalDateTime.ofInstant(now, ZoneOffset.UTC)));
       drawingSession.moveToConversing();

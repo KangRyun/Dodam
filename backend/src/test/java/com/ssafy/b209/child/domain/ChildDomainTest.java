@@ -72,6 +72,7 @@ class ChildDomainTest {
     assertThat(child.ageOn(LocalDate.of(2026, 7, 20))).isEqualTo(7);
     assertThat(child.ageOn(LocalDate.of(2026, 7, 21))).isEqualTo(8);
     assertThat(child.getId()).isEqualTo(9L);
+    assertThat(child.getQuestionDifficulty()).isEqualTo(QuestionDifficulty.PRESCHOOL);
   }
 
   @Test
