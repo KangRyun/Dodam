@@ -15,6 +15,19 @@ class SocialLoginPreview extends StatelessWidget {
     home: SocialLoginScreen(
       onSignIn: (provider) async {
         // Provider별 로그인 결과 미리보기
+        if (provider == AuthProvider.naver) {
+          final coordinator = NaverLoginCoordinator(
+            NaverLoginClientImpl(),
+            SocialLoginService(
+              AuthRepositoryImpl(scenario: MockAuthScenario.existingGuardian),
+            ),
+          );
+          final state = await coordinator.signIn();
+          debugPrint('Preview login result: ${state.status.name}');
+          if (state.failure case final failure?) throw failure;
+          return;
+        }
+
         if (provider == AuthProvider.google) {
           final coordinator = GoogleLoginCoordinator(
             GoogleLoginClientImpl(),
