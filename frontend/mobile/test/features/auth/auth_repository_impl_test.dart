@@ -9,6 +9,27 @@ void main() {
   );
 
   group('AuthRepositoryImpl', () {
+    test('새 Repository 인스턴스에서도 저장된 인증 세션을 복원한다', () async {
+      final store = InMemoryAuthSessionStore();
+      final firstRepository = AuthRepositoryImpl(
+        sessionStore: store,
+        responseDelay: Duration.zero,
+      );
+      final signedIn = await firstRepository.signIn(kakaoCredential);
+      final restartedRepository = AuthRepositoryImpl(
+        sessionStore: store,
+        responseDelay: Duration.zero,
+      );
+
+      final restored = await restartedRepository.restoreSession();
+
+      expect(restored, signedIn);
+      expect(
+        await restartedRepository.readAccessToken(),
+        signedIn.tokens.accessToken,
+      );
+    });
+
     test('기존 보호자는 온보딩 없이 인증된다', () async {
       final repository = AuthRepositoryImpl(responseDelay: Duration.zero);
 

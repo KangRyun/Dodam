@@ -9,7 +9,9 @@ import '../../domain/enums/auth_provider.dart';
 import '../../domain/enums/user_role.dart';
 import '../../domain/failures/auth_failure.dart';
 import '../../domain/repositories/auth_repository.dart';
+import '../../domain/repositories/auth_session_store.dart';
 import '../mock/mock_auth_scenario.dart';
+import '../storage/in_memory_auth_session_store.dart';
 
 class AuthRepositoryImpl
     implements AuthRepository, AccessTokenProvider, TokenRefresher {
@@ -17,11 +19,13 @@ class AuthRepositoryImpl
     this.scenario = MockAuthScenario.existingGuardian,
     this.providerScenarios = const {},
     this.responseDelay = const Duration(milliseconds: 500),
-  });
+    AuthSessionStore? sessionStore,
+  }) : _sessionStore = sessionStore ?? InMemoryAuthSessionStore();
 
   MockAuthScenario scenario;
   final Map<AuthProvider, MockAuthScenario> providerScenarios;
   final Duration responseDelay;
+  final AuthSessionStore _sessionStore;
   AuthSession? _currentSession;
   final Map<AuthProvider, AuthenticatedUser> _registeredUsers = {};
 
@@ -143,6 +147,7 @@ class AuthRepositoryImpl
       accessTokenExpiresAt: DateTime.now().add(const Duration(hours: 1)),
     );
     _currentSession = _currentSession!.copyWith(tokens: tokens);
+    await _sessionStore.save(_currentSession!);
     return tokens;
   }
 
@@ -162,6 +167,7 @@ class AuthRepositoryImpl
       return true;
     } on AuthFailure {
       _currentSession = null;
+      await _sessionStore.clear();
       return false;
     }
   }
@@ -169,17 +175,21 @@ class AuthRepositoryImpl
   @override
   Future<AuthSession?> restoreSession() async {
     await Future<void>.delayed(responseDelay);
-    return _currentSession;
+    final session = await _sessionStore.read();
+    _currentSession = session;
+    return session;
   }
 
   @override
   Future<void> signOut() async {
     await Future<void>.delayed(responseDelay);
     _currentSession = null;
+    await _sessionStore.clear();
   }
 
-  AuthSession _saveSession(AuthSession session) {
+  Future<AuthSession> _saveSession(AuthSession session) async {
     _currentSession = session;
+    await _sessionStore.save(session);
     return session;
   }
 

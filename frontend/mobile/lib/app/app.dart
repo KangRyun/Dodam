@@ -19,6 +19,7 @@ class DodamApp extends StatefulWidget {
     this.childRepository = const MockChildRepository(),
     this.drawingRepository = const MockDrawingRepository(),
     this.drawingCompletionSnapshotProvider,
+    this.authSessionStore,
     this.initialRoute = AppRoutes.guardianHome,
     super.key,
   });
@@ -27,6 +28,7 @@ class DodamApp extends StatefulWidget {
   final ChildRepository childRepository;
   final DrawingRepository drawingRepository;
   final Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider;
+  final AuthSessionStore? authSessionStore;
   final String initialRoute;
 
   @override
@@ -53,6 +55,7 @@ class _DodamAppState extends State<DodamApp> {
         AuthProvider.google: MockAuthScenario.newGuardian,
         AuthProvider.naver: MockAuthScenario.newGuardian,
       },
+      sessionStore: widget.authSessionStore,
     );
     _socialLoginService = SocialLoginService(_authRepository);
     _kakaoLoginCoordinator = KakaoLoginCoordinator(
@@ -78,6 +81,18 @@ class _DodamAppState extends State<DodamApp> {
 
   Future<AuthSession> _completeOnboarding(NewUserOnboardingInput input) =>
       _authRepository.completeOnboarding(input);
+
+  // 저장 세션 복원 및 만료된 Access Token 갱신
+  Future<AuthSession?> _restoreSession() async {
+    var session = await _authRepository.restoreSession();
+    if (session == null) return null;
+    if (!session.tokens.isAccessTokenExpired()) return session;
+
+    final refreshed = await _authRepository.refreshAccessToken();
+    if (!refreshed) return null;
+    session = await _authRepository.restoreSession();
+    return session;
+  }
 
   // 인증 세션과 보호자 선택 상태 초기화
   Future<void> _signOut() async {
@@ -110,6 +125,7 @@ class _DodamAppState extends State<DodamApp> {
       authSignIn: _signIn,
       authCompleteOnboarding: _completeOnboarding,
       authSignOut: _signOut,
+      authRestoreSession: _restoreSession,
       activityRepository: widget.activityRepository,
       drawingRepository: widget.drawingRepository,
       drawingCompletionSnapshotProvider:
