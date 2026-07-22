@@ -112,6 +112,18 @@ class _GuardianHomeContent extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
             AppButton(
+              key: const ValueKey('activity-history-entry'),
+              label: '활동 이력 보기',
+              leading: const Icon(Icons.history_rounded),
+              variant: AppButtonVariant.secondary,
+              onPressed: controller.selectedChild == null
+                  ? null
+                  : () => Navigator.of(
+                      context,
+                    ).pushNamed(AppRoutes.activityHistory),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            AppButton(
               label: '아동 선택 화면에서 보기',
               variant: AppButtonVariant.secondary,
               onPressed: () =>
