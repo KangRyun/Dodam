@@ -98,6 +98,16 @@ ai/datasets/
 ai/runs/
 ai/artifacts/
 ai/checkpoints/
+ai/models/data/
+ai/models/prepared/
+ai/models/htp_yolo/
+ai/**/data/
+ai/**/runs/
+
+# Google Drive 업로드용 OAuth 인증 정보 (model_download.ipynb)
+ai/models/client_secrets.json
+ai/models/mycreds.txt
+ai/models/downloaded_models/
 *.pt
 *.pth
 *.ckpt
