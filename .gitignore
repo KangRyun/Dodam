@@ -109,6 +109,8 @@ ai/checkpoints/
 # ==================================================
 docker-data/
 volumes/
+/storage/
+/backend/storage/
 
 # ==================================================
 # Claude Code harness (개인 도구 — 팀 저장소 비추적)
@@ -119,4 +121,3 @@ volumes/
 .claude
 _workspace
 CLAUDE.md
-
