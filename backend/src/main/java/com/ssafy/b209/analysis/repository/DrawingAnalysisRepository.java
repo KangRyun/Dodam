@@ -9,8 +9,30 @@ import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-/** 그림 분석 실행의 저장, 동시성 잠금과 활성 분석 중복 조회를 담당한다. */
+/** 그림 분석 실행의 저장, 동시성 잠금, 중복 확인과 상세 조회를 담당한다. */
 public interface DrawingAnalysisRepository extends JpaRepository<DrawingAnalysis, Long> {
+
+  /**
+   * 삭제되지 않은 Session에 속한 분석과 공개 응답에 필요한 Asset·Detection을 함께 조회한다.
+   *
+   * <p>Session ID와 Analysis ID를 동시에 조건으로 사용해 다른 Session의 분석 존재 여부를 노출하지 않는다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @param drawingAnalysisId 분석 실행 식별자
+   * @return Session·Asset·Detection이 초기화된 분석, 조건에 맞지 않으면 빈 값
+   */
+  @Query(
+      "select distinct a from DrawingAnalysis a "
+          + "join fetch a.drawingSession s "
+          + "left join fetch a.drawingAsset asset "
+          + "left join fetch asset.drawingSession "
+          + "left join fetch a.detections d "
+          + "where s.id = :drawingSessionId and a.id = :drawingAnalysisId "
+          + "and s.deletedAt is null "
+          + "order by d.displayOrder asc, d.id asc")
+  Optional<DrawingAnalysis> findDetailBySessionIdAndAnalysisId(
+      @Param("drawingSessionId") Long drawingSessionId,
+      @Param("drawingAnalysisId") Long drawingAnalysisId);
 
   /**
    * 동일 그림과 작업 유형에 처리 중이거나 성공한 분석이 존재하는지 확인한다.

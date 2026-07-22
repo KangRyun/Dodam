@@ -1,0 +1,213 @@
+package com.ssafy.b209.analysis.service;
+
+import com.ssafy.b209.analysis.domain.DrawingAnalysis;
+import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
+import com.ssafy.b209.analysis.dto.BoundingBoxResponse;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisDetailResponse;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisFailureResponse;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisModelResponse;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
+import com.ssafy.b209.analysis.dto.DrawingDetectionResponse;
+import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
+import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
+import com.ssafy.b209.global.exception.BusinessException;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+/**
+ * 저장된 그림 분석 상태와 객체 탐지 결과를 공개 조회 계약으로 변환한다.
+ *
+ * <p>조회 시 AI Client나 파일 저장소를 호출하지 않으며 상태와 결과의 저장 정합성을 검증한다.
+ */
+@Service
+public class DrawingAnalysisQueryService {
+
+  private static final String FAILURE_CODE = "AI_ANALYSIS_FAILED";
+  private static final String FAILURE_MESSAGE = "그림 분석 처리에 실패했습니다.";
+
+  private final DrawingAnalysisRepository drawingAnalysisRepository;
+
+  /**
+   * 분석 조회에 사용할 Repository를 주입받는다.
+   *
+   * @param drawingAnalysisRepository Session과 결과를 함께 조회하는 Repository
+   */
+  public DrawingAnalysisQueryService(DrawingAnalysisRepository drawingAnalysisRepository) {
+    this.drawingAnalysisRepository = drawingAnalysisRepository;
+  }
+
+  /**
+   * 요청한 Session에 속한 분석의 현재 상태와 저장된 Detection을 조회한다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @param drawingAnalysisId 분석 실행 식별자
+   * @return 상태별 규칙에 맞게 조립된 분석 상세 응답
+   * @throws BusinessException 분석이 없거나 저장 데이터가 상태 규칙과 모순되는 경우
+   */
+  @Transactional(readOnly = true)
+  public DrawingAnalysisDetailResponse getDrawingAnalysis(
+      Long drawingSessionId, Long drawingAnalysisId) {
+    DrawingAnalysis analysis =
+        drawingAnalysisRepository
+            .findDetailBySessionIdAndAnalysisId(drawingSessionId, drawingAnalysisId)
+            .orElseThrow(
+                () -> new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_FOUND));
+
+    validateCommonFields(analysis);
+    return switch (analysis.getState()) {
+      case PENDING -> inProgressResponse(analysis, DrawingAnalysisStatus.PENDING);
+      case PROCESSING -> inProgressResponse(analysis, DrawingAnalysisStatus.PROCESSING);
+      case SUCCESS -> successResponse(analysis);
+      case FAILED -> failureResponse(analysis);
+      case PARTIAL_SUCCESS -> throw inconsistent();
+    };
+  }
+
+  private DrawingAnalysisDetailResponse inProgressResponse(
+      DrawingAnalysis analysis, DrawingAnalysisStatus status) {
+    if (hasModel(analysis)
+        || hasFailure(analysis)
+        || analysis.getCompletedAt() != null
+        || !analysis.getDetections().isEmpty()) {
+      throw inconsistent();
+    }
+    return response(analysis, status, null, List.of(), null, null);
+  }
+
+  private DrawingAnalysisDetailResponse successResponse(DrawingAnalysis analysis) {
+    if (!hasCompleteModel(analysis) || hasFailure(analysis) || analysis.getCompletedAt() == null) {
+      throw inconsistent();
+    }
+    DrawingAnalysisModelResponse model =
+        new DrawingAnalysisModelResponse(analysis.getModelName(), analysis.getModelVersion());
+    List<DrawingDetectionResponse> detections =
+        analysis.getDetections().stream().map(this::detectionResponse).toList();
+    return response(
+        analysis,
+        DrawingAnalysisStatus.SUCCEEDED,
+        model,
+        detections,
+        toInstant(analysis.getCompletedAt()),
+        null);
+  }
+
+  private DrawingAnalysisDetailResponse failureResponse(DrawingAnalysis analysis) {
+    if (hasModel(analysis)
+        || !hasCompleteFailure(analysis)
+        || analysis.getCompletedAt() == null
+        || !analysis.getDetections().isEmpty()) {
+      throw inconsistent();
+    }
+    return response(
+        analysis,
+        DrawingAnalysisStatus.FAILED,
+        null,
+        List.of(),
+        toInstant(analysis.getCompletedAt()),
+        new DrawingAnalysisFailureResponse(FAILURE_CODE, FAILURE_MESSAGE));
+  }
+
+  private DrawingAnalysisDetailResponse response(
+      DrawingAnalysis analysis,
+      DrawingAnalysisStatus status,
+      DrawingAnalysisModelResponse model,
+      List<DrawingDetectionResponse> detections,
+      Instant processedAt,
+      DrawingAnalysisFailureResponse failure) {
+    return new DrawingAnalysisDetailResponse(
+        analysis.getId(),
+        analysis.getDrawingSession().getId(),
+        analysis.getDrawingAsset().getId(),
+        analysis.getRequestId(),
+        analysis.getTaskType(),
+        status,
+        model,
+        detections,
+        toInstant(analysis.getRequestedAt()),
+        processedAt,
+        failure);
+  }
+
+  private DrawingDetectionResponse detectionResponse(DrawingDetectedObject detection) {
+    if (!hasText(detection.getLabel())
+        || !betweenZeroAndOne(detection.getConfidence())
+        || !atLeastZero(detection.getX())
+        || !atLeastZero(detection.getY())
+        || !greaterThanZero(detection.getWidth())
+        || !greaterThanZero(detection.getHeight())
+        || detection.getDisplayOrder() < 0) {
+      throw inconsistent();
+    }
+    return new DrawingDetectionResponse(
+        detection.getLabel(),
+        detection.getConfidence(),
+        new BoundingBoxResponse(
+            detection.getX(), detection.getY(), detection.getWidth(), detection.getHeight()));
+  }
+
+  private void validateCommonFields(DrawingAnalysis analysis) {
+    if (analysis.getId() == null
+        || analysis.getDrawingSession() == null
+        || analysis.getDrawingSession().getId() == null
+        || analysis.getDrawingAsset() == null
+        || analysis.getDrawingAsset().getId() == null
+        || analysis.getDrawingAsset().getDrawingSession() == null
+        || !analysis
+            .getDrawingSession()
+            .getId()
+            .equals(analysis.getDrawingAsset().getDrawingSession().getId())
+        || analysis.getTaskType() == null
+        || analysis.getState() == null
+        || !hasText(analysis.getRequestId())
+        || analysis.getRequestedAt() == null) {
+      throw inconsistent();
+    }
+  }
+
+  private boolean hasModel(DrawingAnalysis analysis) {
+    return analysis.getModelName() != null || analysis.getModelVersion() != null;
+  }
+
+  private boolean hasCompleteModel(DrawingAnalysis analysis) {
+    return hasText(analysis.getModelName()) && hasText(analysis.getModelVersion());
+  }
+
+  private boolean hasFailure(DrawingAnalysis analysis) {
+    return analysis.getErrorCode() != null || analysis.getErrorMessage() != null;
+  }
+
+  private boolean hasCompleteFailure(DrawingAnalysis analysis) {
+    return hasText(analysis.getErrorCode()) && hasText(analysis.getErrorMessage());
+  }
+
+  private boolean hasText(String value) {
+    return value != null && !value.isBlank();
+  }
+
+  private boolean betweenZeroAndOne(BigDecimal value) {
+    return value != null
+        && value.compareTo(BigDecimal.ZERO) >= 0
+        && value.compareTo(BigDecimal.ONE) <= 0;
+  }
+
+  private boolean atLeastZero(BigDecimal value) {
+    return value != null && value.compareTo(BigDecimal.ZERO) >= 0;
+  }
+
+  private boolean greaterThanZero(BigDecimal value) {
+    return value != null && value.compareTo(BigDecimal.ZERO) > 0;
+  }
+
+  private Instant toInstant(LocalDateTime value) {
+    return value.toInstant(ZoneOffset.UTC);
+  }
+
+  private BusinessException inconsistent() {
+    return new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RESULT_INCONSISTENT);
+  }
+}
