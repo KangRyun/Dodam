@@ -100,6 +100,19 @@ class SwaggerEndpointTest {
   }
 
   @Test
+  void openApiRequiresBearerByDefaultAndKeepsAuthenticationEndpointsPublic() throws Exception {
+    JsonNode document = apiV1Document();
+    JsonNode oauthSecurity = document.at("/paths/~1api~1v1~1auth~1oauth~1{provider}/post/security");
+    JsonNode reissueSecurity = document.at("/paths/~1api~1v1~1auth~1reissue/post/security");
+
+    assertThat(document.at("/security/0/bearerAuth").isArray()).isTrue();
+    assertThat(oauthSecurity.isArray()).isTrue();
+    assertThat(oauthSecurity).isEmpty();
+    assertThat(reissueSecurity.isArray()).isTrue();
+    assertThat(reissueSecurity).isEmpty();
+  }
+
+  @Test
   void schemaExposesOnlyThePublicCommonResponseProperties() throws Exception {
     JsonNode document = apiV1Document();
 

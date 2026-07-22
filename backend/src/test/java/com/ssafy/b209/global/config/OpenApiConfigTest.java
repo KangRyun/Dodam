@@ -24,6 +24,8 @@ class OpenApiConfigTest {
           assertThat(openApi.getInfo().getVersion()).isEqualTo("v1");
           assertThat(openApi.getServers()).isNullOrEmpty();
           assertThat(openApi.getComponents().getSecuritySchemes()).containsKey("bearerAuth");
+          assertThat(openApi.getSecurity()).hasSize(1);
+          assertThat(openApi.getSecurity().getFirst()).containsKey("bearerAuth");
           assertThat(openApi.getComponents().getSecuritySchemes().get("bearerAuth").getScheme())
               .isEqualTo("bearer");
           assertThat(

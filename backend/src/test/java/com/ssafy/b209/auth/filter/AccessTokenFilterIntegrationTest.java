@@ -24,7 +24,11 @@ import org.springframework.web.bind.annotation.RestController;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@TestPropertySource(properties = "app.auth.jwt.secret=0123456789abcdef0123456789abcdef")
+@TestPropertySource(
+    properties = {
+      "app.auth.jwt.secret=0123456789abcdef0123456789abcdef",
+      "app.auth.filter.legacy-header-enabled=false"
+    })
 @Import(AccessTokenFilterIntegrationTest.FilterProbeController.class)
 class AccessTokenFilterIntegrationTest {
 
@@ -50,6 +54,14 @@ class AccessTokenFilterIntegrationTest {
             get("/api/v1/filter-probe").header("Authorization", "Bearer " + tokens.refreshToken()))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.code").value("AUTH_401_002"));
+  }
+
+  @Test
+  void registeredFilterRejectsMissingAccessToken() throws Exception {
+    mockMvc
+        .perform(get("/api/v1/filter-probe"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUTH_401_006"));
   }
 
   @RestController

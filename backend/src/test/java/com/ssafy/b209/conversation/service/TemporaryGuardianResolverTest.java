@@ -3,9 +3,9 @@ package com.ssafy.b209.conversation.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.filter.AuthFilterProperties;
 import com.ssafy.b209.auth.token.AuthenticatedUser;
-import com.ssafy.b209.conversation.exception.ConversationStartErrorCode;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
@@ -42,7 +42,7 @@ class TemporaryGuardianResolverTest {
             BusinessException.class,
             exception ->
                 assertThat(exception.getErrorCode())
-                    .isEqualTo(ConversationStartErrorCode.UNAUTHORIZED));
+                    .isEqualTo(AuthErrorCode.AUTHENTICATION_REQUIRED));
   }
 
   @Test

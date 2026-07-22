@@ -1,5 +1,6 @@
 package com.ssafy.b209.global.exception;
 
+import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.CommonErrorCode;
 import com.ssafy.b209.global.response.ErrorCode;
@@ -18,6 +19,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.validation.BindException;
 import org.springframework.validation.BindingResult;
 import org.springframework.validation.ObjectError;
@@ -53,6 +56,22 @@ public class GlobalExceptionHandler {
     } else {
       logClientError(errorCode);
     }
+    return response(errorCode);
+  }
+
+  @ExceptionHandler(AuthenticationException.class)
+  ResponseEntity<ApiErrorResponse<Void>> handleAuthenticationException(
+      AuthenticationException exception) {
+    ErrorCode errorCode = AuthErrorCode.AUTHENTICATION_REQUIRED;
+    logClientError(errorCode);
+    return response(errorCode);
+  }
+
+  @ExceptionHandler(AccessDeniedException.class)
+  ResponseEntity<ApiErrorResponse<Void>> handleAccessDeniedException(
+      AccessDeniedException exception) {
+    ErrorCode errorCode = AuthErrorCode.ACCESS_DENIED;
+    logClientError(errorCode);
     return response(errorCode);
   }
 

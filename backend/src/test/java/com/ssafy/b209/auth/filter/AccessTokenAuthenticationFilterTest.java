@@ -66,9 +66,21 @@ class AccessTokenAuthenticationFilterTest {
   }
 
   @Test
-  void allowsRequestWithoutAuthorizationUntilEndpointEnforcementIsMigrated() throws Exception {
+  void rejectsProtectedRequestWithoutAuthorization() throws Exception {
     MockHttpServletRequest request =
         new MockHttpServletRequest("GET", "/api/v1/drawing-sessions/active");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    FilterChain chain = mock(FilterChain.class);
+
+    filter.doFilter(request, response, chain);
+
+    assertThat(response.getStatus()).isEqualTo(401);
+    assertThat(response.getContentAsString()).contains("AUTH_401_006");
+  }
+
+  @Test
+  void allowsPublicOAuthRequestWithoutAuthorization() throws Exception {
+    MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/oauth/kakao");
     MockHttpServletResponse response = new MockHttpServletResponse();
     FilterChain chain = mock(FilterChain.class);
 

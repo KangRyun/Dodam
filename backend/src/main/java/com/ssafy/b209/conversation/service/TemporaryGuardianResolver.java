@@ -1,8 +1,8 @@
 package com.ssafy.b209.conversation.service;
 
+import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.filter.AuthFilterProperties;
 import com.ssafy.b209.auth.token.AuthenticatedUser;
-import com.ssafy.b209.conversation.exception.ConversationStartErrorCode;
 import com.ssafy.b209.global.exception.BusinessException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -42,19 +42,19 @@ public class TemporaryGuardianResolver {
       return user.userId();
     }
     if (!properties.legacyHeaderEnabled()) {
-      throw new BusinessException(ConversationStartErrorCode.UNAUTHORIZED);
+      throw new BusinessException(AuthErrorCode.AUTHENTICATION_REQUIRED);
     }
     if (authorization == null
         || !authorization.startsWith("Bearer ")
         || authorization.length() <= 7) {
-      throw new BusinessException(ConversationStartErrorCode.UNAUTHORIZED);
+      throw new BusinessException(AuthErrorCode.AUTHENTICATION_REQUIRED);
     }
     try {
       long resolved = Long.parseLong(guardianUserId);
       if (resolved <= 0) throw new NumberFormatException();
       return resolved;
     } catch (RuntimeException exception) {
-      throw new BusinessException(ConversationStartErrorCode.UNAUTHORIZED);
+      throw new BusinessException(AuthErrorCode.AUTHENTICATION_REQUIRED);
     }
   }
 }

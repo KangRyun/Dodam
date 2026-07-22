@@ -25,8 +25,14 @@ public enum AuthErrorCode implements ErrorCode {
   REFRESH_TOKEN_DEVICE_MISMATCH(
       HttpStatus.UNAUTHORIZED, "AUTH_401_005", "Refresh Token의 기기 정보가 일치하지 않습니다."),
 
+  /** 보호 API 요청에 검증 가능한 Access Token이 없는 경우이다. */
+  AUTHENTICATION_REQUIRED(HttpStatus.UNAUTHORIZED, "AUTH_401_006", "인증이 필요합니다."),
+
   /** 정지되었거나 과거 탈퇴 상태인 사용자가 로그인을 시도한 경우이다. */
   ACCOUNT_SUSPENDED(HttpStatus.FORBIDDEN, "AUTH_403_001", "이용이 제한된 계정입니다."),
+
+  /** 인증된 사용자가 요청 자원 또는 기능에 필요한 권한을 가지지 않은 경우이다. */
+  ACCESS_DENIED(HttpStatus.FORBIDDEN, "AUTH_403_002", "요청한 작업에 대한 권한이 없습니다."),
 
   /** 요청한 Provider 또는 Redirect URI 설정이 허용되지 않은 경우이다. */
   OAUTH_REQUEST_INVALID(HttpStatus.BAD_REQUEST, "AUTH_400_001", "OAuth 로그인 요청이 유효하지 않습니다."),

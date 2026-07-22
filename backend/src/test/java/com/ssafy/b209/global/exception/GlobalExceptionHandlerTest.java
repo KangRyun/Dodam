@@ -27,6 +27,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.validation.BindException;
@@ -58,6 +60,24 @@ class GlobalExceptionHandlerTest {
         HttpStatus.NOT_FOUND,
         "COMMON_404_001",
         "요청한 리소스를 찾을 수 없습니다.");
+  }
+
+  @Test
+  void handlesAuthenticationExceptionWithCommonUnauthorizedResponse() throws Exception {
+    expectError(
+        mockMvc.perform(get("/test/errors/authentication")),
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_401_006",
+        "인증이 필요합니다.");
+  }
+
+  @Test
+  void handlesAccessDeniedExceptionWithCommonForbiddenResponse() throws Exception {
+    expectError(
+        mockMvc.perform(get("/test/errors/access-denied")),
+        HttpStatus.FORBIDDEN,
+        "AUTH_403_002",
+        "요청한 작업에 대한 권한이 없습니다.");
   }
 
   @Test
@@ -298,6 +318,16 @@ class GlobalExceptionHandlerTest {
     void businessServer() {
       throw new BusinessException(
           CommonErrorCode.INTERNAL_SERVER_ERROR, new IllegalStateException("token=secret"));
+    }
+
+    @GetMapping("/authentication")
+    void authentication() {
+      throw new BadCredentialsException("sensitive authentication detail");
+    }
+
+    @GetMapping("/access-denied")
+    void accessDenied() {
+      throw new AccessDeniedException("sensitive authorization detail");
     }
 
     @PostMapping("/body-validation")
