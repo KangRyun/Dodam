@@ -486,6 +486,31 @@ throw new BusinessException(SomeDomainErrorCode.RESOURCE_NOT_FOUND);
 9. S3 Pre-signed URL 업로드
 10. FastAPI AI 서버 연동
 
+## OAuth 로그인 API
+
+자체 이메일·비밀번호 로그인 없이 Kakao·Google·Naver authorization code를 백엔드에서 검증합니다.
+
+```http
+POST /api/v1/auth/oauth/{provider}
+Content-Type: application/json
+
+{
+  "authorizationCode": "provider가 발급한 일회성 code",
+  "redirectUri": "Provider Console에 등록된 URI",
+  "state": "Naver 로그인에서 사용한 state",
+  "deviceId": "앱 설치 단위 식별자"
+}
+```
+
+- `{provider}`는 `kakao`, `google`, `naver` 중 하나입니다.
+- Kakao `id`, Google `sub`, Naver `response.id`를 계정 식별자로 사용하며 이메일·전화번호는 사용하지 않습니다.
+- `redirectUri`는 서버 환경 변수의 Provider별 URI와 정확히 일치해야 합니다.
+- `JWT_SECRET`은 UTF-8 기준 32 Byte 이상이어야 하며 기본 Secret은 제공하지 않습니다.
+- Provider 설정은 `KAKAO_CLIENT_ID`, `KAKAO_CLIENT_SECRET`, `KAKAO_REDIRECT_URI`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, `NAVER_REDIRECT_URI`로 주입합니다.
+- Access Token 인증 연결은 S15P11B209-307, Refresh Token Redis 저장·회전은 S15P11B209-308에서 완료합니다.
+
+실제 Client Secret, JWT Secret과 Redirect URI는 `.env` 또는 배포 Secret으로 관리하며 Git에 커밋하지 않습니다.
+
 ## 아동 정보 조회 API
 
 연결된 보호자는 다음 Endpoint로 삭제되지 않은 활성 아동의 상세 프로필을 조회합니다.
