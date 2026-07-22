@@ -16,6 +16,7 @@ server:
 app:
   ai:
     drawing-analysis:
+      mode: ${AI_DRAWING_ANALYSIS_MODE:mock}
       base-url: ${AI_DRAWING_ANALYSIS_BASE_URL:http://localhost:8000}
       endpoint-path: ${AI_DRAWING_ANALYSIS_ENDPOINT_PATH:/internal/ai/v1/drawings/analysis}
       connect-timeout: ${AI_DRAWING_ANALYSIS_CONNECT_TIMEOUT:3s}

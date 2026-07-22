@@ -3,10 +3,15 @@ import 'dart:ui';
 enum DrawingTool { pen }
 
 final class DrawingPoint {
-  const DrawingPoint({required this.position, this.pressure = 1});
+  const DrawingPoint({
+    required this.position,
+    required this.elapsedMilliseconds,
+    this.pressure,
+  });
 
   final Offset position;
-  final double pressure;
+  final int elapsedMilliseconds;
+  final double? pressure;
 }
 
 final class DrawingStroke {

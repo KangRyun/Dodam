@@ -5,10 +5,11 @@ import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
- * 그림 분석 AI 서버 연결에 필요한 설정을 외부 환경에서 Binding한다.
+ * 그림 분석 Client 구현 선택과 HTTP 서버 연결 설정을 외부 환경에서 Binding한다.
  *
- * <p>Bean 생성 과정에서는 네트워크 연결을 시도하지 않으며 Base URL과 Timeout의 안전한 형식만 검증한다.
+ * <p>Bean 생성 과정에서는 네트워크 연결을 시도하지 않으며 mode, Base URL과 Timeout의 안전한 형식만 검증한다.
  *
+ * @param mode 사용할 그림 분석 Client 구현 모드
  * @param baseUrl 그림 분석 AI 서버의 HTTP 또는 HTTPS Base URL
  * @param endpointPath 그림 분석 요청을 전송할 절대 Path
  * @param connectTimeout TCP 연결 제한 시간
@@ -16,18 +17,22 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  */
 @ConfigurationProperties(prefix = "app.ai.drawing-analysis")
 public record DrawingAnalysisClientProperties(
-    URI baseUrl, String endpointPath, Duration connectTimeout, Duration readTimeout) {
+    String mode, URI baseUrl, String endpointPath, Duration connectTimeout, Duration readTimeout) {
 
   /**
-   * 외부 HTTP Client가 안전하게 사용할 수 있도록 연결 설정의 불변 조건을 검증한다.
+   * 활성 Client와 외부 HTTP 연결 설정이 안전하게 사용되도록 불변 조건을 검증한다.
    *
+   * @param mode 사용할 그림 분석 Client 구현 모드
    * @param baseUrl 그림 분석 AI 서버의 HTTP 또는 HTTPS Base URL
    * @param endpointPath 그림 분석 요청을 전송할 절대 Path
    * @param connectTimeout TCP 연결 제한 시간
    * @param readTimeout 응답을 기다리는 제한 시간
-   * @throws IllegalArgumentException URL·Path·Timeout이 안전한 연결 설정 조건을 충족하지 못하는 경우
+   * @throws IllegalArgumentException mode·URL·Path·Timeout이 안전한 Client 설정 조건을 충족하지 못하는 경우
    */
   public DrawingAnalysisClientProperties {
+    if (!"mock".equals(mode) && !"http".equals(mode)) {
+      throw new IllegalArgumentException("Drawing analysis mode must be mock or http");
+    }
     if (baseUrl == null
         || !baseUrl.isAbsolute()
         || !("http".equalsIgnoreCase(baseUrl.getScheme())

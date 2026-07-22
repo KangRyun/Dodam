@@ -9,3 +9,5 @@
 
 FROM nginx:1.27-alpine
 COPY conf.d/ /etc/nginx/conf.d/
+# 커뮤니티 웹 준비 전 임시 페이지 (S15P11B209-302) — 산출물 생기면 이 COPY 대상 교체(정적) 또는 proxy 전환(SSR)
+COPY html/  /usr/share/nginx/html/

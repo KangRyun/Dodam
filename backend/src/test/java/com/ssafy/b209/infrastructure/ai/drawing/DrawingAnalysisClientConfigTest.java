@@ -2,6 +2,9 @@ package com.ssafy.b209.infrastructure.ai.drawing;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
@@ -21,15 +24,41 @@ class DrawingAnalysisClientConfigTest {
               "app.ai.drawing-analysis.read-timeout=30s");
 
   @Test
-  void createsClientBoundaryAndRestClientWithoutNetworkCall() {
-    contextRunner.run(
-        context -> {
-          assertThat(context).hasNotFailed();
-          assertThat(context).hasSingleBean(DrawingAnalysisClientProperties.class);
-          assertThat(context).hasSingleBean(RestClient.class);
-          assertThat(context).hasSingleBean(DrawingAnalysisClient.class);
-          assertThat(DrawingAnalysisClient.class).isInterface();
-        });
+  void selectsMockClientByDefaultWithoutCreatingHttpClient() {
+    contextRunner
+        .withPropertyValues("app.ai.drawing-analysis.mode=mock")
+        .run(
+            context -> {
+              assertThat(context).hasNotFailed();
+              assertThat(context).hasSingleBean(DrawingAnalysisClientProperties.class);
+              assertThat(context).doesNotHaveBean(RestClient.class);
+              assertThat(context).hasSingleBean(DrawingAnalysisClient.class);
+              assertThat(context.getBean(DrawingAnalysisClient.class))
+                  .isInstanceOf(MockDrawingAnalysisClient.class);
+              assertThat(DrawingAnalysisClient.class).isInterface();
+            });
+  }
+
+  @Test
+  void selectsHttpClientWithoutCreatingMockClient() {
+    contextRunner
+        .withPropertyValues("app.ai.drawing-analysis.mode=http")
+        .run(
+            context -> {
+              assertThat(context).hasNotFailed();
+              assertThat(context).hasSingleBean(RestClient.class);
+              assertThat(context).hasSingleBean(DrawingAnalysisClient.class);
+              assertThat(context.getBean(DrawingAnalysisClient.class))
+                  .isInstanceOf(RestClientDrawingAnalysisClient.class);
+              assertThat(context).doesNotHaveBean(MockDrawingAnalysisClient.class);
+            });
+  }
+
+  @Test
+  void rejectsUnsupportedClientMode() {
+    contextRunner
+        .withPropertyValues("app.ai.drawing-analysis.mode=unknown")
+        .run(context -> assertThat(context).hasFailed());
   }
 
   @Test
@@ -50,6 +79,11 @@ class DrawingAnalysisClientConfigTest {
     @Bean
     LocalValidatorFactoryBean validator() {
       return new LocalValidatorFactoryBean();
+    }
+
+    @Bean
+    Clock clock() {
+      return Clock.fixed(Instant.parse("2026-07-22T05:00:00Z"), ZoneOffset.UTC);
     }
   }
 }
