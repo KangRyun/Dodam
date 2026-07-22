@@ -10,4 +10,15 @@ record QuestionCandidate(
     List<QuestionOption> options,
     DetectedObject targetObject,
     Long questionTemplateId,
-    boolean fallbackUsed) {}
+    boolean fallbackUsed,
+    Long parentMessageId) {
+
+  QuestionCandidate(
+      String questionText,
+      List<QuestionOption> options,
+      DetectedObject targetObject,
+      Long questionTemplateId,
+      boolean fallbackUsed) {
+    this(questionText, options, targetObject, questionTemplateId, fallbackUsed, null);
+  }
+}

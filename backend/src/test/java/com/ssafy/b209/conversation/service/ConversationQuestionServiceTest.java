@@ -64,6 +64,8 @@ class ConversationQuestionServiceTest {
     lenient().when(session.getDifficulty()).thenReturn(QuestionDifficulty.LOWER_ELEMENTARY);
     lenient().when(session.getQuestionCount()).thenReturn(2);
     lenient().when(session.getMaxQuestionCount()).thenReturn(10);
+    lenient().when(session.isConversing()).thenReturn(true);
+    lenient().when(session.isCompleted()).thenReturn(false);
     given(session.canAskQuestion()).willReturn(true);
     given(conversationSessionRepository.findById(1L)).willReturn(Optional.of(session));
   }

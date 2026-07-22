@@ -10,6 +10,7 @@ import com.ssafy.b209.conversation.dto.GenerateQuestionCommand;
 import com.ssafy.b209.conversation.dto.GeneratedQuestion;
 import com.ssafy.b209.conversation.dto.QuestionOption;
 import com.ssafy.b209.conversation.exception.ConversationErrorCode;
+import com.ssafy.b209.conversation.exception.ConversationStartErrorCode;
 import com.ssafy.b209.conversation.repository.AiQuestionTemplateOptionRepository;
 import com.ssafy.b209.conversation.repository.AiQuestionTemplateRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
@@ -36,6 +37,15 @@ public class ConversationQuestionService {
   private final AiQuestionClient aiQuestionClient;
   private final QuestionPersistenceService questionPersistenceService;
 
+  /**
+   * AI 질문 생성·폴백·저장 흐름의 의존성을 생성한다.
+   *
+   * @param conversationSessionRepository 대화 상태 조회 경계
+   * @param questionTemplateRepository 활성 폴백 템플릿 조회 경계
+   * @param questionTemplateOptionRepository 폴백 선택지 Snapshot 조회 경계
+   * @param aiQuestionClient 최신 내부 AI 계약 호출 경계
+   * @param questionPersistenceService 세션 잠금 기반 원자 저장 경계
+   */
   public ConversationQuestionService(
       ConversationSessionRepository conversationSessionRepository,
       AiQuestionTemplateRepository questionTemplateRepository,
@@ -49,6 +59,16 @@ public class ConversationQuestionService {
     this.questionPersistenceService = questionPersistenceService;
   }
 
+  /**
+   * 내부 AI 계약으로 다음 질문을 생성하고 검증된 결과 또는 폴백 질문을 저장한다.
+   *
+   * <p>AI 요청에는 계약에 정의된 {@code recentMessages}만 전달하며, 외부의 {@code previousAnswerMessageId}는 JSON 필드로
+   * 추가하지 않고 저장 시 부모 메시지로만 전달한다. 안전 정책 차단은 저장하지 않고 422로 종료하며, schema·연결·timeout 오류는 활성 폴백 템플릿을 저장한다.
+   *
+   * @param command 대화·그림·분석·난이도 문맥, 허용 응답 방식, 최근 메시지와 부모 답변 식별자
+   * @return 새로 저장된 AI 질문 및 Snapshot
+   * @throws BusinessException 세션 상태·질문 상한·안전 정책·폴백 템플릿 계약을 위반한 경우
+   */
   public GeneratedQuestion generateQuestion(GenerateQuestionCommand command) {
     validateCommand(command);
     ConversationSession session =
@@ -58,6 +78,12 @@ public class ConversationQuestionService {
                 () -> new BusinessException(ConversationErrorCode.CONVERSATION_SESSION_NOT_FOUND));
     if (!session.getDrawingSessionId().equals(command.drawingSessionId())) {
       throw new BusinessException(ConversationErrorCode.CONVERSATION_SESSION_NOT_FOUND);
+    }
+    if (session.isCompleted()) {
+      throw new BusinessException(ConversationErrorCode.CONVERSATION_ALREADY_COMPLETED);
+    }
+    if (!session.isConversing()) {
+      throw new BusinessException(ConversationStartErrorCode.INVALID_STATE_TRANSITION);
     }
     if (!session.canAskQuestion()) {
       throw new BusinessException(ConversationErrorCode.QUESTION_LIMIT_REACHED);
@@ -70,7 +96,10 @@ public class ConversationQuestionService {
       if (response == null
           || !response.isContractValidFor(Set.copyOf(command.allowedResponseModes()))) {
         log.warn("AI question response schema invalid. requestId={}", requestId);
-        return saveFallback(command.conversationId(), command.allowedResponseModes());
+        return saveFallback(
+            command.conversationId(),
+            command.allowedResponseModes(),
+            command.previousAnswerMessageId());
       }
       return questionPersistenceService.save(
           command.conversationId(),
@@ -79,13 +108,17 @@ public class ConversationQuestionService {
               response.options(),
               response.targetObject(),
               null,
-              response.fallbackUsed()));
+              response.fallbackUsed(),
+              command.previousAnswerMessageId()));
     } catch (AiQuestionClientException exception) {
       if (exception.getType() == AiQuestionClientException.Type.SAFETY_POLICY_BLOCKED) {
         throw new BusinessException(ConversationErrorCode.AI_SAFETY_POLICY_BLOCKED, exception);
       }
       log.warn("AI question call failed. requestId={}, type={}", requestId, exception.getType());
-      return saveFallback(command.conversationId(), command.allowedResponseModes());
+      return saveFallback(
+          command.conversationId(),
+          command.allowedResponseModes(),
+          command.previousAnswerMessageId());
     }
   }
 
@@ -106,7 +139,7 @@ public class ConversationQuestionService {
   }
 
   private GeneratedQuestion saveFallback(
-      Long conversationId, List<ResponseMode> allowedResponseModes) {
+      Long conversationId, List<ResponseMode> allowedResponseModes, Long previousAnswerMessageId) {
     AiQuestionTemplate template =
         questionTemplateRepository
             .findFirstByTemplateTypeAndActiveTrueOrderByIdAsc(FALLBACK_TEMPLATE_TYPE)
@@ -121,7 +154,8 @@ public class ConversationQuestionService {
                 : null,
             null,
             template.getId(),
-            true));
+            true,
+            previousAnswerMessageId));
   }
 
   private List<QuestionOption> parseTemplateOptions(Long templateId) {

@@ -48,6 +48,8 @@ class QuestionPersistenceServiceTest {
             conversationMessageOptionRepository,
             conversationMessageTargetRepository);
     session = mock(ConversationSession.class);
+    given(session.isConversing()).willReturn(true);
+    given(session.isCompleted()).willReturn(false);
     given(session.canAskQuestion()).willReturn(true);
     given(conversationSessionRepository.findByIdForUpdate(1L)).willReturn(Optional.of(session));
   }
@@ -76,6 +78,47 @@ class QuestionPersistenceServiceTest {
     verify(session).increaseQuestionCount();
     org.assertj.core.api.Assertions.assertThat(messageCaptor.getValue().getMessageSequence())
         .isEqualTo(5);
+    org.assertj.core.api.Assertions.assertThat(messageCaptor.getValue().getParentMessageId())
+        .isNull();
+  }
+
+  @Test
+  void savesValidatedPreviousAnswerAsQuestionParent() {
+    ConversationMessage answer = mock(ConversationMessage.class);
+    given(conversationMessageRepository.findMaxMessageSequenceByConversationSessionId(1L))
+        .willReturn(1);
+    given(conversationMessageRepository.findByIdAndConversationSessionId(44L, 1L))
+        .willReturn(Optional.of(answer));
+    given(answer.isAnswerMessage()).willReturn(true);
+    given(conversationMessageRepository.saveAndFlush(any()))
+        .willAnswer(
+            invocation -> {
+              ConversationMessage message = invocation.getArgument(0);
+              ReflectionTestUtils.setField(message, "id", 32L);
+              return message;
+            });
+
+    service.save(1L, new QuestionCandidate("안전한 질문", null, null, null, false, 44L));
+
+    ArgumentCaptor<ConversationMessage> messageCaptor =
+        ArgumentCaptor.forClass(ConversationMessage.class);
+    verify(conversationMessageRepository).saveAndFlush(messageCaptor.capture());
+    org.assertj.core.api.Assertions.assertThat(messageCaptor.getValue().getParentMessageId())
+        .isEqualTo(44L);
+  }
+
+  @Test
+  void rejectsNonAnswerParentWithoutSavingQuestion() {
+    ConversationMessage question = mock(ConversationMessage.class);
+    given(conversationMessageRepository.findByIdAndConversationSessionId(44L, 1L))
+        .willReturn(Optional.of(question));
+    given(question.isAnswerMessage()).willReturn(false);
+
+    assertBusinessError(
+        () -> service.save(1L, new QuestionCandidate("안전한 질문", null, null, null, false, 44L)),
+        ConversationErrorCode.QUESTION_MESSAGE_NOT_FOUND);
+
+    verify(conversationMessageRepository, never()).saveAndFlush(any());
   }
 
   @Test
