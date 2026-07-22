@@ -11,3 +11,4 @@ export 'domain/enums/user_role.dart';
 export 'domain/failures/auth_failure.dart';
 export 'domain/repositories/auth_repository.dart';
 export 'presentation/models/auth_state.dart';
+export 'presentation/screens/social_login_screen.dart';
