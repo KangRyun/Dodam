@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 
 import '../../../../app/router/app_routes.dart';
 import '../../../../app/state/guardian_child_controller.dart';
-import '../../../../app/widgets/app_placeholder_scaffold.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../activity/data/dto/activity_dtos.dart';
 import '../../../activity/domain/repositories/activity_repository.dart';
@@ -611,14 +610,378 @@ String _date(String isoDate) => isoDate.length >= 10
     ? isoDate.substring(0, 10).replaceAll('-', '.')
     : isoDate;
 
-class ActivityDetailScreen extends StatelessWidget {
-  const ActivityDetailScreen({required this.activityId, super.key});
+enum _DetailStatus { loading, success, empty, error, invalidId }
+
+class ActivityDetailScreen extends StatefulWidget {
+  const ActivityDetailScreen({
+    required this.activityId,
+    required this.repository,
+    super.key,
+  });
 
   final String activityId;
+  final ActivityRepository repository;
 
   @override
-  Widget build(BuildContext context) => const AppPlaceholderScaffold(
-    title: '활동 상세',
-    description: '선택한 활동의 그림, 감정과 진행 정보를 확인하는 화면이에요.',
+  State<ActivityDetailScreen> createState() => _ActivityDetailScreenState();
+}
+
+class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
+  _DetailStatus _status = _DetailStatus.loading;
+  ActivityDetailDto? _activity;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  Future<void> _load() async {
+    final activityId = int.tryParse(widget.activityId);
+    if (activityId == null || activityId <= 0) {
+      setState(() => _status = _DetailStatus.invalidId);
+      return;
+    }
+    setState(() => _status = _DetailStatus.loading);
+    try {
+      final activity = await widget.repository.getActivity(activityId);
+      if (!mounted) return;
+      setState(() {
+        _activity = activity.activityId == activityId ? activity : null;
+        _status = _activity == null
+            ? _DetailStatus.empty
+            : _DetailStatus.success;
+      });
+    } on Object {
+      if (mounted) setState(() => _status = _DetailStatus.error);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: AppColors.canvas,
+    appBar: AppTopBar(
+      title: '활동 상세',
+      onBack: () => Navigator.of(context).maybePop(),
+    ),
+    body: SafeArea(top: false, child: _body()),
+  );
+
+  Widget _body() => switch (_status) {
+    _DetailStatus.loading => const AppLoadingView(
+      key: ValueKey('activity-detail-loading'),
+      message: '활동 상세를 불러오고 있어요',
+    ),
+    _DetailStatus.error => AppRetryView(
+      key: const ValueKey('activity-detail-error'),
+      title: '활동 상세를 불러오지 못했어요',
+      onRetry: _load,
+    ),
+    _DetailStatus.invalidId => const AppErrorView(
+      key: ValueKey('activity-detail-invalid-id'),
+      title: '활동 정보가 올바르지 않아요',
+      message: '활동 이력에서 다시 선택해 주세요.',
+    ),
+    _DetailStatus.empty => const AppEmptyView(
+      key: ValueKey('activity-detail-empty'),
+      title: '활동 상세 정보가 없어요',
+      message: '이력 목록으로 돌아가 다른 활동을 선택해 주세요.',
+    ),
+    _DetailStatus.success => _ActivityDetailContent(activity: _activity!),
+  };
+}
+
+class _ActivityDetailContent extends StatelessWidget {
+  const _ActivityDetailContent({required this.activity});
+  final ActivityDetailDto activity;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final left = _ActivityArtwork(activity: activity);
+      final right = _ActivityInformation(activity: activity);
+      return SingleChildScrollView(
+        key: ValueKey(
+          constraints.maxWidth >= 900
+              ? 'activity-detail-wide-layout'
+              : 'activity-detail-small-layout',
+        ),
+        padding: const EdgeInsets.all(AppSpacing.lg),
+        child: constraints.maxWidth >= 900
+            ? Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(flex: 5, child: left),
+                  const SizedBox(width: AppSpacing.lg),
+                  Expanded(flex: 6, child: right),
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  left,
+                  const SizedBox(height: AppSpacing.lg),
+                  right,
+                ],
+              ),
+      );
+    },
   );
 }
+
+class _ActivityArtwork extends StatelessWidget {
+  const _ActivityArtwork({required this.activity});
+  final ActivityDetailDto activity;
+
+  ActivityAssetDto? get _asset {
+    for (final asset in activity.assets.reversed) {
+      if (asset.assetType == 'FINAL') return asset;
+    }
+    return activity.assets.lastOrNull;
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _DetailCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              activity.title ?? activity.drawingType.name,
+              style: const TextStyle(
+                color: AppColors.ink,
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              '${_date(activity.completedAt ?? activity.startedAt)} · ${activity.drawingType.name}',
+              style: const TextStyle(color: AppColors.inkMuted),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: AppSpacing.md),
+      AspectRatio(
+        aspectRatio: 16 / 10,
+        child: Container(
+          key: const ValueKey('activity-detail-image'),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            border: Border.all(color: AppColors.outline),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: _asset == null
+              ? const _DetailImagePlaceholder()
+              : Image.network(
+                  _asset!.fileUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) => const _DetailImagePlaceholder(),
+                ),
+        ),
+      ),
+    ],
+  );
+}
+
+class _ActivityInformation extends StatelessWidget {
+  const _ActivityInformation({required this.activity});
+  final ActivityDetailDto activity;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _DetailSection(
+        title: '활동 정보',
+        key: const ValueKey('activity-detail-basic-info'),
+        children: [
+          _DetailLine(label: '활동 유형', value: activity.drawingType.name),
+          _DetailLine(label: '입력 방식', value: activity.inputMethod),
+          _DetailLine(label: '진행 상태', value: activity.sessionStatus),
+          _DetailLine(label: '현재 단계', value: activity.currentStage),
+          _DetailLine(label: '시작', value: _dateTime(activity.startedAt)),
+          if (activity.completedAt case final completedAt?)
+            _DetailLine(label: '완료', value: _dateTime(completedAt)),
+        ],
+      ),
+      const SizedBox(height: AppSpacing.md),
+      _DetailSection(
+        title: '아동이 선택한 감정',
+        key: const ValueKey('activity-detail-emotions'),
+        children: [
+          if (activity.selectedEmotions.isEmpty)
+            const Text(
+              '선택한 감정 정보가 없어요.',
+              style: TextStyle(color: AppColors.inkMuted),
+            )
+          else
+            Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: [
+                for (final emotion in activity.selectedEmotions)
+                  Chip(label: Text(_emotionLabel(emotion))),
+              ],
+            ),
+          if (activity.expressedEmotionText case final text?) ...[
+            const SizedBox(height: AppSpacing.md),
+            Text('“$text”', style: const TextStyle(color: AppColors.ink)),
+          ],
+        ],
+      ),
+      const SizedBox(height: AppSpacing.md),
+      _DetailSection(
+        title: '대화 정보',
+        key: const ValueKey('activity-detail-conversation'),
+        children: [
+          if (activity.conversation case final conversation?) ...[
+            _DetailLine(label: '대화 상태', value: conversation.conversationStatus),
+            _DetailLine(label: '질문 수', value: '${conversation.questionCount}개'),
+            if (conversation.completedAt case final completedAt?)
+              _DetailLine(label: '대화 완료', value: _dateTime(completedAt)),
+          ] else
+            const Text(
+              '이 활동에서 제공된 대화 정보가 없어요.',
+              style: TextStyle(color: AppColors.inkMuted),
+            ),
+        ],
+      ),
+      const SizedBox(height: AppSpacing.md),
+      _DetailSection(
+        title: '분석과 관찰 요약',
+        key: const ValueKey('activity-detail-analysis'),
+        children: [
+          if (activity.analysis case final analysis?)
+            _DetailLine(label: '분석 상태', value: analysis.analysisStatus)
+          else
+            const Text(
+              '아직 생성된 요약이 없어요.',
+              style: TextStyle(color: AppColors.inkMuted),
+            ),
+        ],
+      ),
+      if (activity.report case final report?) ...[
+        const SizedBox(height: AppSpacing.md),
+        AppButton(
+          key: const ValueKey('activity-report-cta'),
+          label: '관찰 리포트 보기',
+          onPressed: () => Navigator.of(
+            context,
+          ).pushNamed(AppRoutes.report(report.reportId.toString())),
+        ),
+      ],
+    ],
+  );
+}
+
+class _DetailCard extends StatelessWidget {
+  const _DetailCard({required this.child});
+  final Widget child;
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(AppSpacing.lg),
+    decoration: BoxDecoration(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(AppRadius.lg),
+      border: Border.all(color: AppColors.outline),
+    ),
+    child: child,
+  );
+}
+
+class _DetailSection extends StatelessWidget {
+  const _DetailSection({
+    required this.title,
+    required this.children,
+    super.key,
+  });
+  final String title;
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) => _DetailCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          title,
+          style: const TextStyle(
+            color: AppColors.leaf,
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        ...children,
+      ],
+    ),
+  );
+}
+
+class _DetailLine extends StatelessWidget {
+  const _DetailLine({required this.label, required this.value});
+  final String label, value;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        SizedBox(
+          width: 96,
+          child: Text(label, style: const TextStyle(color: AppColors.inkMuted)),
+        ),
+        Expanded(
+          child: Text(
+            value,
+            style: const TextStyle(
+              color: AppColors.ink,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _DetailImagePlaceholder extends StatelessWidget {
+  const _DetailImagePlaceholder();
+  @override
+  Widget build(BuildContext context) => const ColoredBox(
+    key: ValueKey('activity-detail-image-placeholder'),
+    color: AppColors.surfaceSoft,
+    child: Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.image_outlined, color: AppColors.inkMuted, size: 44),
+          SizedBox(height: AppSpacing.sm),
+          Text('그림을 불러오지 못했어요', style: TextStyle(color: AppColors.inkMuted)),
+        ],
+      ),
+    ),
+  );
+}
+
+String _dateTime(String isoDate) {
+  final parsed = DateTime.tryParse(isoDate)?.toLocal();
+  if (parsed == null) return isoDate;
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${parsed.year}.${two(parsed.month)}.${two(parsed.day)} '
+      '${two(parsed.hour)}:${two(parsed.minute)}';
+}
+
+String _emotionLabel(String emotion) => switch (emotion) {
+  'HAPPY' || 'JOY' => '기쁨',
+  'SAD' => '슬픔',
+  'ANGRY' => '화남',
+  'SCARED' => '무서움',
+  'CALM' => '편안함',
+  'UNKNOWN' || 'UNSURE' => '잘 모르겠음',
+  _ => emotion,
+};
