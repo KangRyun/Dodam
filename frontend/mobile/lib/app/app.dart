@@ -1,11 +1,41 @@
 import 'package:flutter/material.dart';
 
 import '../design_system/design_system.dart';
+import '../features/child/data/repositories/mock_child_repository.dart';
+import '../features/child/domain/repositories/child_repository.dart';
 import 'router/app_router.dart';
 import 'router/app_routes.dart';
+import 'state/guardian_child_controller.dart';
 
-class DodamApp extends StatelessWidget {
-  const DodamApp({super.key});
+class DodamApp extends StatefulWidget {
+  const DodamApp({
+    this.childRepository = const MockChildRepository(),
+    this.initialRoute = AppRoutes.guardianHome,
+    super.key,
+  });
+
+  final ChildRepository childRepository;
+  final String initialRoute;
+
+  @override
+  State<DodamApp> createState() => _DodamAppState();
+}
+
+class _DodamAppState extends State<DodamApp> {
+  late final GuardianChildController _childController;
+
+  @override
+  void initState() {
+    super.initState();
+    _childController = GuardianChildController(widget.childRepository);
+    _childController.loadChildren();
+  }
+
+  @override
+  void dispose() {
+    _childController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -19,7 +49,8 @@ class DodamApp extends StatelessWidget {
       ),
       scaffoldBackgroundColor: AppColors.canvas,
     ),
-    initialRoute: AppRoutes.guardianHome,
-    onGenerateRoute: AppRouter.onGenerateRoute,
+    initialRoute: widget.initialRoute,
+    onGenerateRoute: (settings) =>
+        AppRouter.onGenerateRoute(settings, childController: _childController),
   );
 }
