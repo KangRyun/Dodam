@@ -39,7 +39,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("4");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("5");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(63);
     assertThat(tableExists("refresh_tokens")).isFalse();
@@ -140,6 +140,53 @@ class DatabaseMigrationIntegrationTest {
   }
 
   @Test
+  void createsDrawingAnalysisRequestColumnsAndConstraints() {
+    assertThat(columnExists("analyses", "drawing_asset_id")).isTrue();
+    assertThat(columnExists("analyses", "analysis_task_type")).isTrue();
+    assertThat(columnExists("analyses", "active_drawing_asset_id")).isTrue();
+    assertThat(foreignKeyExists("analyses", "fk_analyses_drawing_asset_id")).isTrue();
+    assertThat(checkConstraintContains("analyses", "ck_analyses_task_type", "OBJECT_DETECTION"))
+        .isTrue();
+    assertThat(indexExists("analyses", "idx_analyses_asset_task_status", false)).isTrue();
+    assertThat(indexExists("analyses", "uk_analyses_active_asset_task", true)).isTrue();
+    assertThat(decimalColumnHasPrecision("analysis_detected_objects", "bbox_x", 12, 3)).isTrue();
+    assertThat(decimalColumnHasPrecision("analysis_detected_objects", "bbox_height", 12, 3))
+        .isTrue();
+    assertThat(
+            checkConstraintContains(
+                "analysis_detected_objects", "ck_analysis_detected_objects_bbox", "bbox_width"))
+        .isTrue();
+  }
+
+  @Test
+  void preventsActiveDuplicateAnalysisAndAllowsRetryAfterFailure() {
+    jdbcTemplate.update(
+        "INSERT INTO children (id, nickname, birth_date) VALUES (9101, '분석 테스트 아동', '2020-01-01')");
+    jdbcTemplate.update(
+        "INSERT INTO drawing_types (id, code, name, activity_category, selectable_by) "
+            + "VALUES (9101, 'ANALYSIS_TEST', '분석 테스트', 'GENERAL', 'BOTH')");
+    jdbcTemplate.update(
+        "INSERT INTO drawing_sessions "
+            + "(id, child_id, drawing_type_id, input_method, session_status, current_stage) "
+            + "VALUES (9101, 9101, 9101, 'CANVAS', 'IN_PROGRESS', 'DRAWING')");
+    jdbcTemplate.update(
+        "INSERT INTO drawing_assets "
+            + "(id, drawing_session_id, asset_type, asset_version, storage_key, mime_type, "
+            + "file_size_bytes, checksum_sha256, captured_at) "
+            + "VALUES (9101, 9101, 'FINAL', 1, 'analysis/final.png', 'image/png', "
+            + "8, REPEAT('b', 64), NOW(6))");
+
+    insertAnalysis(9101, "request-processing", "PROCESSING");
+    assertThatThrownBy(() -> insertAnalysis(9101, "request-duplicate", "SUCCESS"))
+        .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
+
+    jdbcTemplate.update(
+        "UPDATE analyses SET analysis_status = 'FAILED' WHERE idempotency_key = ?",
+        "request-processing");
+    insertAnalysis(9101, "request-retry", "SUCCESS");
+  }
+
+  @Test
   void enforcesDrawingAssetVersionAndFinalAssetUniqueness() {
     jdbcTemplate.update(
         "INSERT INTO children (id, nickname, birth_date) VALUES (9001, '테스트 아동', '2020-01-01')");
@@ -195,6 +242,19 @@ class DatabaseMigrationIntegrationTest {
         > 0;
   }
 
+  private boolean decimalColumnHasPrecision(
+      String tableName, String columnName, int precision, int scale) {
+    return count(
+            "SELECT COUNT(*) FROM information_schema.columns "
+                + "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? "
+                + "AND data_type = 'decimal' AND numeric_precision = ? AND numeric_scale = ?",
+            tableName,
+            columnName,
+            precision,
+            scale)
+        > 0;
+  }
+
   private void insertDrawingAsset(
       long drawingSessionId, String assetType, int assetVersion, String storageKey) {
     jdbcTemplate.update(
@@ -206,6 +266,17 @@ class DatabaseMigrationIntegrationTest {
         assetType,
         assetVersion,
         storageKey);
+  }
+
+  private void insertAnalysis(long drawingAssetId, String requestId, String status) {
+    jdbcTemplate.update(
+        "INSERT INTO analyses "
+            + "(drawing_session_id, drawing_asset_id, analysis_type, analysis_task_type, "
+            + "idempotency_key, analysis_status) "
+            + "VALUES (9101, ?, 'FINAL', 'OBJECT_DETECTION', ?, ?)",
+        drawingAssetId,
+        requestId,
+        status);
   }
 
   private int tableCount() {
