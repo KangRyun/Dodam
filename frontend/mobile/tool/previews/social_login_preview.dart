@@ -22,10 +22,15 @@ class SocialLoginPreview extends StatelessWidget {
         final loginService = SocialLoginService(
           AuthRepositoryImpl(scenario: scenario),
         );
+        // Provider별 목 로그인 흐름
         final state = switch (provider) {
-          AuthProvider.kakao => await loginService.signInWithKakao(
-            'preview-kakao-access-token',
-          ),
+          AuthProvider.kakao => await KakaoLoginCoordinator(
+            KakaoLoginClientImpl(
+              responseDelay: const Duration(milliseconds: 500),
+              accessToken: 'preview-kakao-access-token',
+            ),
+            loginService,
+          ).signIn(),
           AuthProvider.google => await loginService.signInWithGoogle(
             'preview-google-id-token',
           ),
