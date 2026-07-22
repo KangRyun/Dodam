@@ -47,7 +47,13 @@ class _DodamAppState extends State<DodamApp> {
     _childController = GuardianChildController(widget.childRepository);
     _childController.loadChildren();
 
-    _authRepository = AuthRepositoryImpl();
+    _authRepository = AuthRepositoryImpl(
+      providerScenarios: const {
+        AuthProvider.kakao: MockAuthScenario.newUserWithoutEmail,
+        AuthProvider.google: MockAuthScenario.newGuardian,
+        AuthProvider.naver: MockAuthScenario.newGuardian,
+      },
+    );
     _socialLoginService = SocialLoginService(_authRepository);
     _kakaoLoginCoordinator = KakaoLoginCoordinator(
       KakaoLoginClientImpl(),
@@ -69,6 +75,9 @@ class _DodamAppState extends State<DodamApp> {
     AuthProvider.google => _googleLoginCoordinator.signIn(),
     AuthProvider.naver => _naverLoginCoordinator.signIn(),
   };
+
+  Future<AuthSession> _completeOnboarding(NewUserOnboardingInput input) =>
+      _authRepository.completeOnboarding(input);
 
   // 인증 세션과 보호자 선택 상태 초기화
   Future<void> _signOut() async {
@@ -99,6 +108,7 @@ class _DodamAppState extends State<DodamApp> {
       settings,
       childController: _childController,
       authSignIn: _signIn,
+      authCompleteOnboarding: _completeOnboarding,
       authSignOut: _signOut,
       activityRepository: widget.activityRepository,
       drawingRepository: widget.drawingRepository,

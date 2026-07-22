@@ -11,16 +11,20 @@ import 'new_user_onboarding_flow_screen.dart';
 import 'social_login_screen.dart';
 
 typedef AuthProviderSignIn = Future<AuthState> Function(AuthProvider provider);
+typedef AuthOnboardingComplete =
+    Future<AuthSession> Function(NewUserOnboardingInput input);
 typedef AuthGuardianNavigation = void Function(BuildContext context);
 
 class AuthenticationFlowScreen extends StatefulWidget {
   const AuthenticationFlowScreen({
     required this.onSignIn,
+    required this.onCompleteOnboarding,
     required this.onGuardianAuthenticated,
     super.key,
   });
 
   final AuthProviderSignIn onSignIn;
+  final AuthOnboardingComplete onCompleteOnboarding;
   final AuthGuardianNavigation onGuardianAuthenticated;
 
   @override
@@ -51,7 +55,8 @@ class _AuthenticationFlowScreenState extends State<AuthenticationFlowScreen> {
 
   // 온보딩 입력 역할에 따른 다음 화면 결정
   Future<void> _completeOnboarding(NewUserOnboardingInput input) async {
-    _moveToRoleDestination(input.profile.role);
+    final session = await widget.onCompleteOnboarding(input);
+    _moveToRoleDestination(session.user.role);
   }
 
   void _moveToRoleDestination(UserRole role) {

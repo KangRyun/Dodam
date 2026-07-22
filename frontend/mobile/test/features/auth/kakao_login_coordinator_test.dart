@@ -94,6 +94,10 @@ final class _RecordingAuthRepository implements AuthRepository {
   int signInCallCount = 0;
 
   @override
+  Future<AuthSession> completeOnboarding(NewUserOnboardingInput input) =>
+      throw UnimplementedError();
+
+  @override
   Future<AuthSession> signIn(OAuthCredential credential) async {
     signInCallCount += 1;
     this.credential = credential;

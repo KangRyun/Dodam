@@ -19,6 +19,7 @@ abstract final class AppRouter {
     RouteSettings settings, {
     GuardianChildController? childController,
     AuthProviderSignIn? authSignIn,
+    AuthOnboardingComplete? authCompleteOnboarding,
     AuthSignOut? authSignOut,
     ActivityRepository? activityRepository,
     DrawingRepository? drawingRepository,
@@ -28,10 +29,13 @@ abstract final class AppRouter {
     final segments = Uri.tryParse(location)?.pathSegments ?? const <String>[];
 
     final screen = switch (segments) {
-      ['auth', 'login'] when authSignIn != null => AuthenticationFlowScreen(
-        onSignIn: authSignIn,
-        onGuardianAuthenticated: goGuardianHome,
-      ),
+      ['auth', 'login']
+          when authSignIn != null && authCompleteOnboarding != null =>
+        AuthenticationFlowScreen(
+          onSignIn: authSignIn,
+          onCompleteOnboarding: authCompleteOnboarding,
+          onGuardianAuthenticated: goGuardianHome,
+        ),
       ['guardian', 'home'] when childController != null => GuardianHomeScreen(
         controller: childController,
         actions: authSignOut == null
