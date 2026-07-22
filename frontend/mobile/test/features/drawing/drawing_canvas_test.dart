@@ -1,5 +1,6 @@
 import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
+import 'package:dodam/features/drawing/application/drawing_sync_coordinator.dart';
 import 'package:dodam/features/drawing/presentation/widgets/drawing_canvas.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -9,6 +10,7 @@ void main() {
     await _pumpDrawing(tester);
 
     expect(find.text('그림 활동'), findsOneWidget);
+    expect(find.text('그림을 안전하게 담고 있어요'), findsOneWidget);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
     expect(_canvas(tester).strokes, isEmpty);
     expect(_undoButton(tester).onPressed, isNull);
@@ -152,6 +154,41 @@ void main() {
     expect(_completeButton(tester).onPressed, isNull);
   });
 
+  testWidgets('Canvas Undo는 stroke event를 유지하고 UNDO를 journal에 append한다', (
+    tester,
+  ) async {
+    final coordinator = DrawingSyncCoordinator(
+      sessionId: null,
+      repository: null,
+    );
+    await _pumpDrawing(tester, coordinator: coordinator);
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    await _drawStroke(tester, center - const Offset(50, 20));
+    await _drawStroke(tester, center + const Offset(50, 20));
+    expect(coordinator.journal.events, hasLength(4));
+
+    await tester.tap(find.byKey(const ValueKey('undo-action')));
+    await tester.pump();
+    expect(_canvas(tester).strokes, hasLength(1));
+    expect(coordinator.journal.events, hasLength(5));
+    expect(coordinator.journal.events.last.type, 'UNDO');
+
+    await tester.tap(find.byKey(const ValueKey('undo-action')));
+    await tester.pump();
+    expect(_canvas(tester).strokes, isEmpty);
+    expect(coordinator.journal.events.last.type, 'UNDO');
+    expect(coordinator.journal.events, hasLength(6));
+
+    await tester.tap(find.byKey(const ValueKey('undo-action')));
+    await tester.pump();
+    expect(coordinator.journal.events, hasLength(6));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    coordinator.dispose();
+  });
+
   testWidgets('작은 화면에서는 세로 배치하며 overflow가 발생하지 않는다', (tester) async {
     await _pumpDrawing(tester, size: const Size(600, 800));
     await tester.drag(
@@ -178,12 +215,17 @@ void main() {
 Future<void> _pumpDrawing(
   WidgetTester tester, {
   Size size = const Size(1200, 800),
+  DrawingSyncCoordinator? coordinator,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
-  await tester.pumpWidget(const MaterialApp(home: DrawingScreen(childId: '3')));
+  await tester.pumpWidget(
+    MaterialApp(
+      home: DrawingScreen(childId: '3', syncCoordinator: coordinator),
+    ),
+  );
   await tester.pumpAndSettle();
 }
 
