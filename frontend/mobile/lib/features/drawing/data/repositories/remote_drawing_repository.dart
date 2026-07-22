@@ -76,11 +76,13 @@ final class RemoteDrawingRepository implements DrawingRepository {
   }
 
   @override
-  Future<DraftRecoveryDto> getDraft(int sessionId) async {
+  Future<DraftRecoveryDto?> getDraft(int sessionId) async {
     final response = await _apiClient.get<Map<String, dynamic>>(
       'drawing-sessions/$sessionId/draft',
     );
-    return DraftRecoveryDto.fromJson(response.data!);
+    final data = response.data;
+    if (data == null || data.isEmpty) return null;
+    return DraftRecoveryDto.fromJson(data);
   }
 
   @override

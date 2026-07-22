@@ -8,6 +8,7 @@ import '../../../../app/router/app_routes.dart';
 import '../../../../app/widgets/app_placeholder_scaffold.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../drawing/application/drawing_sync_coordinator.dart';
+import '../../../drawing/application/drawing_draft_restore_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
@@ -20,6 +21,8 @@ class DrawingScreen extends StatefulWidget {
     this.drawingRepository,
     this.syncPolicy = const DrawingSyncPolicy(),
     this.syncCoordinator,
+    this.draftRestoreController,
+    this.draftImageProviderFactory,
     super.key,
   });
 
@@ -28,6 +31,8 @@ class DrawingScreen extends StatefulWidget {
   final DrawingRepository? drawingRepository;
   final DrawingSyncPolicy syncPolicy;
   final DrawingSyncCoordinator? syncCoordinator;
+  final DrawingDraftRestoreController? draftRestoreController;
+  final DraftImageProviderFactory? draftImageProviderFactory;
 
   @override
   State<DrawingScreen> createState() => _DrawingScreenState();
@@ -46,6 +51,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
   final GlobalKey _canvasBoundaryKey = GlobalKey();
   late final DrawingSyncCoordinator _syncCoordinator;
   late final bool _ownsSyncCoordinator;
+  late final DrawingDraftRestoreController _draftRestoreController;
+  late final bool _ownsDraftRestoreController;
 
   @override
   void initState() {
@@ -59,9 +66,20 @@ class _DrawingScreenState extends State<DrawingScreen> {
           policy: widget.syncPolicy,
         );
     _syncCoordinator.addListener(_handleSyncChanged);
+    _ownsDraftRestoreController = widget.draftRestoreController == null;
+    _draftRestoreController =
+        widget.draftRestoreController ??
+        DrawingDraftRestoreController(
+          sessionId: widget.sessionId,
+          repository: widget.drawingRepository,
+          syncCoordinator: _syncCoordinator,
+          imageProviderFactory: widget.draftImageProviderFactory,
+        );
+    _draftRestoreController.addListener(_handleDraftRestoreChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _syncCoordinator.start(snapshotProvider: _captureCanvasSnapshot);
+        unawaited(_draftRestoreController.load());
       }
     });
   }
@@ -69,11 +87,17 @@ class _DrawingScreenState extends State<DrawingScreen> {
   @override
   void dispose() {
     _syncCoordinator.removeListener(_handleSyncChanged);
+    _draftRestoreController.removeListener(_handleDraftRestoreChanged);
+    if (_ownsDraftRestoreController) _draftRestoreController.dispose();
     if (_ownsSyncCoordinator) _syncCoordinator.dispose();
     super.dispose();
   }
 
   void _handleSyncChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _handleDraftRestoreChanged() {
     if (mounted) setState(() {});
   }
 
@@ -115,6 +139,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   void _undoLastStroke() {
     if (_activeStroke != null || _completedStrokes.isEmpty) return;
+    // A recovered Draft is a bitmap, so Undo intentionally targets only
+    // vector strokes created after restore. TODO(API): Revisit when the server
+    // provides an authoritative vector-history recovery contract.
     setState(() => _completedStrokes.removeLast());
     _syncCoordinator.recordUndo();
   }
@@ -192,6 +219,15 @@ class _DrawingScreenState extends State<DrawingScreen> {
             onPointerDown: _startStroke,
             onPointerMove: _extendStroke,
             onPointerUp: _endStroke,
+            backgroundImage: _draftRestoreController.backgroundImage,
+            inputEnabled: _draftRestoreController.canDraw,
+            onBackgroundLoaded: _draftRestoreController.markImageLoaded,
+            onBackgroundError: _draftRestoreController.markImageFailed,
+            restoreStatus: _draftRestoreController.status,
+            onContinue: _draftRestoreController.continueDrawing,
+            onStartNew: _draftRestoreController.startNewDrawing,
+            onRetryQuery: () => unawaited(_draftRestoreController.load()),
+            onRetryImage: _draftRestoreController.retryImage,
           );
           final sidePanel = _DrawingSidePanel(
             selectedColor: _color,
@@ -238,6 +274,15 @@ class _CanvasPanel extends StatelessWidget {
     required this.onPointerDown,
     required this.onPointerMove,
     required this.onPointerUp,
+    required this.backgroundImage,
+    required this.inputEnabled,
+    required this.onBackgroundLoaded,
+    required this.onBackgroundError,
+    required this.restoreStatus,
+    required this.onContinue,
+    required this.onStartNew,
+    required this.onRetryQuery,
+    required this.onRetryImage,
   });
 
   final GlobalKey repaintBoundaryKey;
@@ -245,6 +290,15 @@ class _CanvasPanel extends StatelessWidget {
   final ValueChanged<PointerDownEvent> onPointerDown;
   final ValueChanged<PointerMoveEvent> onPointerMove;
   final ValueChanged<PointerEvent> onPointerUp;
+  final ImageProvider<Object>? backgroundImage;
+  final bool inputEnabled;
+  final VoidCallback onBackgroundLoaded;
+  final VoidCallback onBackgroundError;
+  final DrawingDraftRestoreStatus restoreStatus;
+  final VoidCallback onContinue;
+  final VoidCallback onStartNew;
+  final VoidCallback onRetryQuery;
+  final VoidCallback onRetryImage;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -260,16 +314,132 @@ class _CanvasPanel extends StatelessWidget {
         ),
       ],
     ),
-    child: RepaintBoundary(
-      key: repaintBoundaryKey,
-      child: DrawingCanvas(
-        strokes: strokes,
-        onPointerDown: onPointerDown,
-        onPointerMove: onPointerMove,
-        onPointerUp: onPointerUp,
-      ),
+    child: Stack(
+      fit: StackFit.expand,
+      children: [
+        RepaintBoundary(
+          key: repaintBoundaryKey,
+          child: DrawingCanvas(
+            strokes: strokes,
+            onPointerDown: onPointerDown,
+            onPointerMove: onPointerMove,
+            onPointerUp: onPointerUp,
+            backgroundImage: backgroundImage,
+            inputEnabled: inputEnabled,
+            onBackgroundLoaded: onBackgroundLoaded,
+            onBackgroundError: onBackgroundError,
+          ),
+        ),
+        if (!inputEnabled)
+          _DraftRestoreOverlay(
+            status: restoreStatus,
+            onContinue: onContinue,
+            onStartNew: onStartNew,
+            onRetryQuery: onRetryQuery,
+            onRetryImage: onRetryImage,
+          ),
+      ],
     ),
   );
+}
+
+class _DraftRestoreOverlay extends StatelessWidget {
+  const _DraftRestoreOverlay({
+    required this.status,
+    required this.onContinue,
+    required this.onStartNew,
+    required this.onRetryQuery,
+    required this.onRetryImage,
+  });
+
+  final DrawingDraftRestoreStatus status;
+  final VoidCallback onContinue;
+  final VoidCallback onStartNew;
+  final VoidCallback onRetryQuery;
+  final VoidCallback onRetryImage;
+
+  @override
+  Widget build(BuildContext context) {
+    final loading =
+        status == DrawingDraftRestoreStatus.loading ||
+        status == DrawingDraftRestoreStatus.loadingImage;
+    final imageFailure = status == DrawingDraftRestoreStatus.imageFailed;
+    final queryFailure = status == DrawingDraftRestoreStatus.queryFailed;
+    final title = switch (status) {
+      DrawingDraftRestoreStatus.found => '그리던 그림이 있어요',
+      DrawingDraftRestoreStatus.imageFailed => '그림을 불러오지 못했어요',
+      DrawingDraftRestoreStatus.queryFailed => '저장된 그림을 확인하지 못했어요',
+      DrawingDraftRestoreStatus.loadingImage => '그림을 불러오고 있어요',
+      _ => '그리던 그림을 확인하고 있어요',
+    };
+    final description = status == DrawingDraftRestoreStatus.found
+        ? '이어서 그릴까요?'
+        : loading
+        ? '잠시만 기다려 주세요.'
+        : '다시 시도하거나 새 그림으로 시작할 수 있어요.';
+
+    return ColoredBox(
+      color: const Color(0x66000000),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Card(
+            margin: const EdgeInsets.all(AppSpacing.lg),
+            child: Padding(
+              padding: const EdgeInsets.all(AppSpacing.lg),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (loading) const CircularProgressIndicator(),
+                  if (loading) const SizedBox(height: AppSpacing.md),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(description, textAlign: TextAlign.center),
+                  if (!loading) ...[
+                    const SizedBox(height: AppSpacing.lg),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: AppButton(
+                            key: const ValueKey('draft-start-new'),
+                            label: '새로 시작하기',
+                            onPressed: onStartNew,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: AppButton(
+                            key: const ValueKey('draft-primary-action'),
+                            label: imageFailure || queryFailure
+                                ? '다시 시도'
+                                : '이어서 그리기',
+                            variant: AppButtonVariant.child,
+                            onPressed: imageFailure
+                                ? onRetryImage
+                                : queryFailure
+                                ? onRetryQuery
+                                : onContinue,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _DrawingSidePanel extends StatelessWidget {
@@ -312,88 +482,95 @@ class _DrawingSidePanel extends StatelessWidget {
       color: AppColors.surface,
       borderRadius: BorderRadius.circular(AppRadius.lg),
     ),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Row(
-          children: [
-            CircleAvatar(
-              radius: 26,
-              backgroundColor: AppColors.tangerineSoft,
-              child: Icon(
-                Icons.emoji_nature_rounded,
-                color: AppColors.tangerine,
-              ),
-            ),
-            SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: Text(
-                '자유롭게 그려 보자!',
-                style: TextStyle(
-                  color: AppColors.ink,
-                  fontSize: 20,
-                  fontWeight: FontWeight.w900,
+    child: SingleChildScrollView(
+      key: const ValueKey('drawing-tool-panel-scroll'),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const Row(
+            children: [
+              CircleAvatar(
+                radius: 26,
+                backgroundColor: AppColors.tangerineSoft,
+                child: Icon(
+                  Icons.emoji_nature_rounded,
+                  color: AppColors.tangerine,
                 ),
               ),
-            ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        const _ToolHeading(icon: Icons.edit_rounded, label: '펜'),
-        const SizedBox(height: AppSpacing.xs),
-        const _SelectedToolCard(),
-        const SizedBox(height: AppSpacing.lg),
-        const _ToolHeading(icon: Icons.palette_outlined, label: '색상'),
-        const SizedBox(height: AppSpacing.xs),
-        Wrap(
-          spacing: AppSpacing.sm,
-          runSpacing: AppSpacing.sm,
-          children: [
-            for (final (name, color) in _colors)
-              _ColorChoice(
-                name: name,
-                color: color,
-                selected: selectedColor == color,
-                onTap: () => onColorChanged(color),
+              SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  '자유롭게 그려 보자!',
+                  style: TextStyle(
+                    color: AppColors.ink,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
               ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        const _ToolHeading(icon: Icons.line_weight_rounded, label: '굵기'),
-        const SizedBox(height: AppSpacing.xs),
-        SegmentedButton<double>(
-          segments: [
-            for (final (label, value) in _thicknesses)
-              ButtonSegment(value: value, label: Text(label)),
-          ],
-          selected: {selectedThickness},
-          showSelectedIcon: true,
-          onSelectionChanged: (values) => onThicknessChanged(values.first),
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        Container(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          decoration: BoxDecoration(
-            color: AppColors.lavenderSoft,
-            borderRadius: BorderRadius.circular(AppRadius.md),
+            ],
           ),
-          child: const Text(
-            '대화와 마이크는 다음 단계에서 만나요.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: AppColors.inkMuted, fontSize: 16),
+          const SizedBox(height: AppSpacing.lg),
+          const _ToolHeading(icon: Icons.edit_rounded, label: '펜'),
+          const SizedBox(height: AppSpacing.xs),
+          const _SelectedToolCard(),
+          const SizedBox(height: AppSpacing.lg),
+          const _ToolHeading(icon: Icons.palette_outlined, label: '색상'),
+          const SizedBox(height: AppSpacing.xs),
+          Wrap(
+            spacing: AppSpacing.sm,
+            runSpacing: AppSpacing.sm,
+            children: [
+              for (final (name, color) in _colors)
+                _ColorChoice(
+                  name: name,
+                  color: color,
+                  selected: selectedColor == color,
+                  onTap: () => onColorChanged(color),
+                ),
+            ],
           ),
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        _SaveStatusIndicator(status: saveStatus, onRetry: onRetrySave),
-        const SizedBox(height: AppSpacing.sm),
-        AppButton(
-          key: const ValueKey('drawing-complete'),
-          label: '다 그렸어요!',
-          variant: AppButtonVariant.child,
-          onPressed: canComplete ? onComplete : null,
-        ),
-      ],
+          const SizedBox(height: AppSpacing.lg),
+          const _ToolHeading(icon: Icons.line_weight_rounded, label: '굵기'),
+          const SizedBox(height: AppSpacing.xs),
+          SegmentedButton<double>(
+            segments: [
+              for (final (label, value) in _thicknesses)
+                ButtonSegment(value: value, label: Text(label)),
+            ],
+            selected: {selectedThickness},
+            showSelectedIcon: true,
+            onSelectionChanged: (values) => onThicknessChanged(values.first),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          Container(
+            padding: const EdgeInsets.all(AppSpacing.md),
+            decoration: BoxDecoration(
+              color: AppColors.lavenderSoft,
+              borderRadius: BorderRadius.circular(AppRadius.md),
+            ),
+            child: const Text(
+              '대화와 마이크는 다음 단계에서 만나요.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.inkMuted, fontSize: 16),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          _SaveStatusIndicator(status: saveStatus, onRetry: onRetrySave),
+          const SizedBox(height: AppSpacing.sm),
+          AppButton(
+            key: const ValueKey('drawing-complete'),
+            label: '다 그렸어요!',
+            variant: AppButtonVariant.child,
+            onPressed: canComplete ? onComplete : null,
+          ),
+          const SizedBox(
+            key: ValueKey('drawing-complete-bottom-space'),
+            height: AppSpacing.md,
+          ),
+        ],
+      ),
     ),
   );
 }

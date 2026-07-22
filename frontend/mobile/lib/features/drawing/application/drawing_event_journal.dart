@@ -26,6 +26,11 @@ final class SessionSequenceAllocator {
   int get nextValue => _nextValue;
 
   int allocate() => _nextValue++;
+
+  void resumeAt(int nextValue) {
+    if (nextValue < 0) throw ArgumentError.value(nextValue, 'nextValue');
+    _nextValue = nextValue;
+  }
 }
 
 final class DrawingEventJournal {
@@ -44,6 +49,12 @@ final class DrawingEventJournal {
   List<StrokeEventDto> get events => List.unmodifiable(_events);
   int? get lastEventSequence => _events.lastOrNull?.seq;
   int get undoableStrokeCount => _undoableStrokeCount;
+
+  bool resumeEventSequence(int nextValue) {
+    if (_events.isNotEmpty) return false;
+    _sequenceAllocator.resumeAt(nextValue);
+    return true;
+  }
 
   List<StrokeEventDto> recordStroke(DrawingStroke stroke, Size canvasSize) {
     final converted = DrawingStrokeEventConverter.convert(
