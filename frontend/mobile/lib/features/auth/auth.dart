@@ -1,3 +1,4 @@
+export 'application/social_login_service.dart';
 export 'data/mock/mock_auth_scenario.dart';
 export 'data/repositories/auth_repository_impl.dart';
 export 'domain/entities/auth_session.dart';
