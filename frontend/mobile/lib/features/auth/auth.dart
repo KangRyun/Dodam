@@ -1,6 +1,10 @@
+export 'application/kakao_login_coordinator.dart';
 export 'application/social_login_service.dart';
+export 'data/clients/kakao_login_client_impl.dart';
+export 'data/mock/kakao_login_scenario.dart';
 export 'data/mock/mock_auth_scenario.dart';
 export 'data/repositories/auth_repository_impl.dart';
+export 'domain/clients/kakao_login_client.dart';
 export 'domain/entities/auth_session.dart';
 export 'domain/entities/auth_tokens.dart';
 export 'domain/entities/authenticated_user.dart';
