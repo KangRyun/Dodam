@@ -316,6 +316,25 @@ gradlew.bat javadoc
 
 생성된 문서는 `build/docs/javadoc/index.html`에서 확인합니다. 저장소 루트 기준 경로는 `backend/build/docs/javadoc/index.html`입니다. Javadoc은 빌드 결과물이므로 `build/` 디렉터리와 함께 Git에 Commit하지 않습니다.
 
+## 로컬 이미지 저장
+
+개발 및 1차 MVP에서는 후속 그림 스냅샷 업로드 API가 사용할 이미지 저장 경계로 로컬 파일 시스템을 사용합니다.
+
+```dotenv
+LOCAL_IMAGE_STORAGE_ROOT=./storage/images
+LOCAL_IMAGE_MAX_SIZE=10485760
+```
+
+- 기본 Root는 애플리케이션 실행 디렉터리 기준 `./storage/images`입니다.
+- JPEG와 PNG를 지원하며 파일별 최대 크기는 기본 10 MiB입니다.
+- 전달된 MIME Type과 확장자만 신뢰하지 않고 실제 이미지 Signature와 교차 검증합니다.
+- 원본 파일명은 저장 경로에 사용하지 않으며 날짜와 UUID로 상대 `storageKey`를 생성합니다.
+- 서버 절대 경로는 저장 결과에 포함하지 않고 Storage Root 외부 경로와 Symbolic Link 이탈을 거부합니다.
+- 저장 중에는 Root 내부 임시 파일을 사용하고 기존 파일을 덮어쓰지 않습니다.
+- 로컬 저장 파일은 `.gitignore` 대상이며 Git에 Commit하지 않습니다.
+- 서버 인스턴스 교체나 디스크 초기화 시 파일이 유실될 수 있으므로 운영 환경에서는 S3 호환 Object Storage로 전환해야 합니다.
+- 이번 기능에는 HTTP 업로드 API, DB Metadata 저장, 이미지 조회, AI 분석이 포함되지 않습니다.
+
 ## 공통 API 성공 응답
 
 일반 성공 응답은 다음 구조를 사용합니다.
@@ -440,7 +459,7 @@ throw new BusinessException(SomeDomainErrorCode.RESOURCE_NOT_FOUND);
 - Flutter와 Next.js는 Spring Boot의 `/api/v1/**`만 호출합니다.
 - Spring Boot만 FastAPI의 `/internal/v1/**`를 호출합니다.
 - 클라이언트는 FastAPI 내부 API나 S3 `storageKey`를 직접 지정하지 않습니다.
-- 그림과 음성 파일은 Spring Boot가 형식과 권한을 검증한 뒤 S3에 저장합니다.
+- 그림과 음성 파일은 Spring Boot가 형식과 권한을 검증합니다. 현재 1차 MVP 이미지는 로컬에 저장하며 운영 환경에서는 S3 호환 Object Storage로 전환합니다.
 - Firebase 연동은 알림 인프라 구현으로 분리합니다.
 
 그림 활동 생성과 파일 등록 API에는 향후 `Idempotency-Key` Header를 적용합니다. 중복 요청 검사와 저장 방식은 해당 API 작업에서 설계합니다.

@@ -12,3 +12,7 @@ server:
 app:
   cors:
     allowed-origins: []
+  storage:
+    image:
+      root: ${LOCAL_IMAGE_STORAGE_ROOT:./storage/images}
+      max-size: ${LOCAL_IMAGE_MAX_SIZE:10485760}
