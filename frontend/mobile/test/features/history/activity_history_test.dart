@@ -50,6 +50,10 @@ void main() {
           .activityId,
       '121',
     );
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('activity-history-list')), findsOneWidget);
   });
 
   testWidgets('목록 Loading 상태를 표시한다', (tester) async {

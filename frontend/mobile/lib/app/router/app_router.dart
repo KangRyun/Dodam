@@ -38,9 +38,12 @@ abstract final class AppRouter {
         ),
       ['guardian', 'activities', final activityId, 'confirm'] =>
         GuardianConfirmScreen(activityId: activityId),
-      ['guardian', 'activities', final activityId] => ActivityDetailScreen(
-        activityId: activityId,
-      ),
+      ['guardian', 'activities', final activityId]
+          when activityRepository != null =>
+        ActivityDetailScreen(
+          activityId: activityId,
+          repository: activityRepository,
+        ),
       ['guardian', 'reports', final reportId] => ReportScreen(
         reportId: reportId,
       ),
