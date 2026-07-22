@@ -3,6 +3,7 @@ package com.ssafy.b209.global.exception;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -38,7 +39,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @WebMvcTest(controllers = GlobalExceptionHandlerTest.TestExceptionController.class)
@@ -190,6 +193,15 @@ class GlobalExceptionHandlerTest {
   }
 
   @Test
+  void handlesMissingMultipartRequestPart() throws Exception {
+    expectError(
+        mockMvc.perform(multipart("/test/errors/required-part")),
+        HttpStatus.BAD_REQUEST,
+        "COMMON_400_004",
+        "필수 요청 파라미터가 누락되었습니다.");
+  }
+
+  @Test
   void handlesMethodNotAllowedAndPreservesAllowHeader() throws Exception {
     expectError(
             mockMvc.perform(post("/test/errors/method")),
@@ -335,6 +347,9 @@ class GlobalExceptionHandlerTest {
 
     @GetMapping("/required")
     void required(@RequestParam String value) {}
+
+    @PostMapping(value = "/required-part", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    void requiredPart(@RequestPart MultipartFile file) {}
 
     @GetMapping("/method")
     void method() {}

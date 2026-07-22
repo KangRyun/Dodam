@@ -151,6 +151,55 @@ public class DrawingAsset {
   }
 
   /**
+   * 자동 저장된 현재 캔버스의 미리보기 Metadata를 생성한다.
+   *
+   * <p>초안은 최종·분석용 스냅샷과 구분되는 {@link DrawingAssetType#DRAFT}로 저장하며, 마지막 그림 이벤트 순서를 함께 기록해 늦게 도착한 이전
+   * 초안을 판별할 수 있게 한다.
+   *
+   * @param drawingSession 초안이 속한 그림 활동 세션
+   * @param assetVersion 세션의 초안 저장 순서에 따라 서버가 부여한 양의 버전
+   * @param storageKey 이미지 저장소 내부 상대 Key
+   * @param mimeType 실제 파일 Signature로 검증된 MIME Type
+   * @param fileSizeBytes 실제 저장된 파일 크기(Byte)
+   * @param checksumSha256 실제 저장된 Byte의 SHA-256 Hex
+   * @param lastEventSequence 초안에 반영된 마지막 그림 이벤트 순서
+   * @param capturedAt 클라이언트가 초안을 저장한 UTC 시각
+   * @param createdAt 서버가 Metadata를 생성한 UTC 시각
+   * @return 영속화 전 초안 Metadata
+   * @throws IllegalArgumentException 버전이나 마지막 이벤트 순서가 양수가 아닌 경우
+   */
+  public static DrawingAsset draft(
+      DrawingSession drawingSession,
+      int assetVersion,
+      String storageKey,
+      String mimeType,
+      long fileSizeBytes,
+      String checksumSha256,
+      long lastEventSequence,
+      LocalDateTime capturedAt,
+      LocalDateTime createdAt) {
+    if (assetVersion <= 0) {
+      throw new IllegalArgumentException("assetVersion must be positive");
+    }
+    if (lastEventSequence <= 0) {
+      throw new IllegalArgumentException("lastEventSequence must be positive");
+    }
+    DrawingAsset asset =
+        new DrawingAsset(
+            Objects.requireNonNull(drawingSession, "drawingSession must not be null"),
+            DrawingAssetType.DRAFT,
+            assetVersion,
+            Objects.requireNonNull(storageKey, "storageKey must not be null"),
+            Objects.requireNonNull(mimeType, "mimeType must not be null"),
+            fileSizeBytes,
+            Objects.requireNonNull(checksumSha256, "checksumSha256 must not be null"),
+            Objects.requireNonNull(capturedAt, "capturedAt must not be null"),
+            Objects.requireNonNull(createdAt, "createdAt must not be null"));
+    asset.lastEventSequence = lastEventSequence;
+    return asset;
+  }
+
+  /**
    * 영속화된 그림 파일의 식별자를 제공한다.
    *
    * @return 그림 파일 식별자
@@ -220,6 +269,15 @@ public class DrawingAsset {
    */
   public String getChecksumSha256() {
     return checksumSha256;
+  }
+
+  /**
+   * 초안에 반영된 마지막 그림 이벤트 순서를 제공한다.
+   *
+   * @return 초안이 아니거나 이벤트 순서를 기록하지 않은 파일이면 {@code null}
+   */
+  public Long getLastEventSequence() {
+    return lastEventSequence;
   }
 
   /**
