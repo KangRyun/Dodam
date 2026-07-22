@@ -486,6 +486,45 @@ throw new BusinessException(SomeDomainErrorCode.RESOURCE_NOT_FOUND);
 9. S3 Pre-signed URL 업로드
 10. FastAPI AI 서버 연동
 
+## 아동 정보 조회 API
+
+연결된 보호자는 다음 Endpoint로 삭제되지 않은 활성 아동의 상세 프로필을 조회합니다.
+
+```http
+GET /api/v1/children/{childId}
+Authorization: Bearer <access-token>
+X-Guardian-User-Id: 10
+```
+
+```json
+{
+  "success": true,
+  "code": "COMMON_200",
+  "message": "요청이 성공했습니다.",
+  "data": {
+    "childId": 3,
+    "nickname": "별이",
+    "birthDate": "2019-03-15",
+    "age": 7,
+    "profileImageUrl": null,
+    "preferredCharacter": "MONGLE",
+    "questionDifficulty": "LOWER_ELEMENTARY",
+    "responseModes": ["VOICE", "EMOJI", "COLOR"],
+    "tutorialStatus": "NOT_STARTED",
+    "profileStatus": "ACTIVE",
+    "relationshipType": "MOTHER",
+    "createdAt": "2026-07-21T02:30:00Z",
+    "updatedAt": "2026-07-21T02:30:00Z"
+  }
+}
+```
+
+- `age`는 조회일 기준 만 나이입니다.
+- `responseModes`는 보호자가 지정한 표시 순서대로 반환합니다.
+- 존재하지 않음, 삭제됨, 비활성 상태와 보호자 연결 없음은 식별자 노출 방지를 위해 모두 HTTP 404와 `CHILD_404_001`을 반환합니다.
+- 조회만으로 아동 프로필이나 보호자 관계 상태를 변경하지 않습니다.
+- 정식 JWT 인증이 아직 구현되지 않아 기존 대화 API와 동일한 임시 `Authorization` 및 `X-Guardian-User-Id` Header를 사용합니다. `X-Guardian-User-Id`는 정식 인증 도입 시 제거할 임시 개발 계약입니다.
+
 ## 그림 활동 세션 생성 API
 
 아동의 그림 활동을 시작할 때 다음 Endpoint를 사용합니다.
