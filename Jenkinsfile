@@ -11,6 +11,27 @@
 //   브랜치(MR) 빌드는 테스트까지만 — 자원 절약 + 모든 브랜치가 :local 태그를 덮어쓰는 레이스 방지.
 // 알림: 빌드 성공/실패를 Mattermost Incoming Webhook으로 전송 (크레덴셜 id: mattermost-webhook)
 
+// 실패 알림에 붙일 "어디서 터졌나" 분석 — 실패 스테이지 + (테스트 실패면) 실패 테스트 요약.
+//   분석이 실패해도 알림 자체는 나가야 하므로 try/catch로 감싼다.
+def failureDetail() {
+  def detail = "\n💥 실패 지점: ${env.CURRENT_STAGE ?: '?'}"
+  try {
+    // 테스트 스테이지에서 죽었을 때만 junit XML 분석
+    // (다른 스테이지 실패 시 이전 빌드의 잔재 결과를 잘못 읽는 것 방지)
+    if ((env.CURRENT_STAGE ?: '').contains('backend')) {
+      def cnt = sh(returnStdout: true,
+        script: 'grep -h "<failure" backend/build/test-results/test/*.xml 2>/dev/null | wc -l').trim()
+      if (cnt && cnt != '0') {
+        // 실패 포함 클래스명(패키지 제거) 상위 5개를 콤마로
+        def classes = sh(returnStdout: true,
+          script: 'grep -l "<failure" backend/build/test-results/test/*.xml 2>/dev/null | sed -e "s/.*TEST-//" -e "s/\\.xml//" -e "s/.*\\.//" | head -5 | paste -sd ", " -').trim()
+        detail += "\n🧪 실패 테스트 ${cnt}건: ${classes}"
+      }
+    }
+  } catch (ignored) { }   // 분석 실패는 조용히 무시 — 알림은 계속
+  return detail
+}
+
 // Mattermost 알림 — 알림 실패가 빌드 결과를 바꾸면 안 되므로 try/catch + `|| true`로 이중 방어.
 //   크레덴셜(mattermost-webhook, Secret text)이 아직 없으면 경고만 찍고 넘어간다.
 def notifyMattermost(String emoji, String title) {
@@ -21,6 +42,7 @@ def notifyMattermost(String emoji, String title) {
       def deployed = (branch == 'develop' && emoji == '✅') ? ' · 🚀 서버 배포됨' : ''
       def text = "${emoji} **${title}** · `${branch}` #${env.BUILD_NUMBER} · ${duration}${deployed}\n" +
                  "👤 ${env.GIT_AUTHOR ?: '?'} · 커밋 `${env.IMAGE_TAG ?: '?'}`"
+      if (emoji == '❌') { text += failureDetail() }   // 실패면 "어디서 터졌나" 분석 첨부
       // JSON은 이스케이프 사고 방지를 위해 파일로 만들어 curl -d @file 로 전송(따옴표 지옥 회피)
       writeFile file: '.mm-payload.json', text: groovy.json.JsonOutput.toJson([text: text])
       sh 'curl -sf -X POST -H "Content-Type: application/json" -d @.mm-payload.json "$MM_WEBHOOK" || true'
@@ -47,6 +69,7 @@ pipeline {
 
     stage('Checkout') {
       steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }   // 실패 지점 추적(알림용) — 각 스테이지 첫 줄 공통
         checkout scm
         script {
           // 이미지 추적·롤백용 짧은 커밋 해시. 배포 후 "무엇이 떠 있나"를 커밋으로 식별.
@@ -60,6 +83,7 @@ pipeline {
 
     stage('Build & Test — backend') {
       steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }
         dir('backend') {
           // 테스트를 여기서 돌린다(이미지 빌드는 -x test로 스킵). 실패 시 파이프라인 중단 = 배포 안 함.
           sh 'chmod +x gradlew && ./gradlew --no-daemon clean test'
@@ -76,6 +100,7 @@ pipeline {
     stage('Docker Build') {
       when { branch 'develop' }      // develop만 이미지 빌드 — 브랜치 빌드가 :local을 덮어 배포 레이스 만드는 것 차단
       steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }
         // 앱 이미지(backend·ai)를 호스트 도커에 바로 빌드(레지스트리 없음). 배포는 :local 사용.
         // 빌드 후 :<SHA> 태그도 부여 → 불변 복원지점(롤백=190에서 이 태그로 되돌림).
         sh '''
@@ -89,6 +114,7 @@ pipeline {
     stage('Test — ai (import smoke)') {
       when { branch 'develop' }      // 빌드된 이미지가 필요해 Docker Build와 세트로 develop 전용
       steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }
         // ai는 아직 유닛테스트 없음 → 빌드된 이미지에서 앱이 import 되는지만 확인. (TODO: 실제 테스트 추가)
         sh 'docker run --rm dodam-ai:local python -c "import main; print(\'ai import OK\')"'
       }
@@ -97,6 +123,7 @@ pipeline {
     stage('Deploy (develop only)') {
       when { branch 'develop' }        // develop 브랜치에서만 배포 (그 외는 여기까지 = 빌드·테스트만)
       steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }
         // 시크릿 .env 를 Credentials(secret file)에서 워크스페이스 밖 임시경로로 주입 → compose up.
         // 같은 호스트라 방금 빌드한 :local 이미지를 그대로 사용(push/pull 불필요).
         withCredentials([file(credentialsId: 'dodam-env', variable: 'ENV_FILE')]) {
@@ -108,6 +135,7 @@ pipeline {
     stage('Healthcheck') {
       when { branch 'develop' }
       steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }
         // 배포 직후 컨테이너 health가 healthy 될 때까지 대기 — 안 되면 실패로 즉시 인지(190 롤백 트리거 지점).
         sh '''
           set -e
