@@ -8,9 +8,14 @@ typedef OnboardingProfileSubmit =
     Future<void> Function(OnboardingProfileInput input);
 
 class OnboardingProfileScreen extends StatefulWidget {
-  const OnboardingProfileScreen({required this.onSubmit, super.key});
+  const OnboardingProfileScreen({
+    required this.onSubmit,
+    this.onBack,
+    super.key,
+  });
 
   final OnboardingProfileSubmit onSubmit;
+  final VoidCallback? onBack;
 
   @override
   State<OnboardingProfileScreen> createState() =>
@@ -90,6 +95,10 @@ class _OnboardingProfileScreenState extends State<OnboardingProfileScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    if (widget.onBack != null) ...[
+                      _OnboardingBackButton(onPressed: widget.onBack!),
+                      const SizedBox(height: AppSpacing.md),
+                    ],
                     const _ProgressHeader(),
                     const SizedBox(height: AppSpacing.xl),
                     const Text(
@@ -150,6 +159,27 @@ class _OnboardingProfileScreenState extends State<OnboardingProfileScreen> {
             ),
           );
         },
+      ),
+    ),
+  );
+}
+
+class _OnboardingBackButton extends StatelessWidget {
+  const _OnboardingBackButton({required this.onPressed});
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => TextButton.icon(
+    key: const ValueKey('onboarding-profile-back'),
+    onPressed: onPressed,
+    icon: const Icon(Icons.arrow_back_ios_new_rounded, size: 18),
+    label: const Text('뒤로'),
+    style: TextButton.styleFrom(
+      foregroundColor: AppColors.ink,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
       ),
     ),
   );
