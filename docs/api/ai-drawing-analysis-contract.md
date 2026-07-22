@@ -133,6 +133,7 @@ public interface DrawingAnalysisClient {
 
 | 환경 변수 | 기본값 | 용도 |
 | --- | --- | --- |
+| `AI_DRAWING_ANALYSIS_MODE` | `mock` | 사용할 Client 구현. `mock` 또는 `http` |
 | `AI_DRAWING_ANALYSIS_BASE_URL` | `http://localhost:8000` | 그림 분석 AI 서버 Base URL |
 | `AI_DRAWING_ANALYSIS_ENDPOINT_PATH` | `/internal/ai/v1/drawings/analysis` | 그림 분석 내부 Endpoint Path |
 | `AI_DRAWING_ANALYSIS_CONNECT_TIMEOUT` | `3s` | 연결 제한 시간 |
@@ -153,4 +154,33 @@ HTTP 2xx의 유효한 `status=FAILED` 응답은 통신 실패가 아니므로 Ex
 
 ### 현재 연동 제한
 
-현재 실제 FastAPI 서버와의 정상 동작은 검증하지 않았으며 테스트는 `MockRestServiceServer`만 사용한다. `storageKey`는 계약대로 전달되지만 AI 서버가 Backend의 로컬 Storage를 공유하지 않으면 이미지 파일을 읽을 수 없다. Client에서 절대 경로, Base64, URL 또는 multipart로 임의 변환하지 않으며 실제 이미지 접근 방식은 배포 Architecture에서 별도로 해결해야 한다.
+현재 실제 FastAPI 서버와의 정상 동작은 검증하지 않았으며 HTTP Client 테스트는 `MockRestServiceServer`만 사용한다. `storageKey`는 계약대로 전달되지만 AI 서버가 Backend의 로컬 Storage를 공유하지 않으면 이미지 파일을 읽을 수 없다. Client에서 절대 경로, Base64, URL 또는 multipart로 임의 변환하지 않으며 실제 이미지 접근 방식은 배포 Architecture에서 별도로 해결해야 한다.
+
+## Mock 그림 분석 Client
+
+`S15P11B209-146`에서는 실제 AI 서버가 없는 개발 환경에서 후속 흐름을 확인할 수 있도록 `MockDrawingAnalysisClient`를 제공한다. 기본 mode는 `mock`이며 다음 환경 변수로 명시할 수 있다.
+
+```dotenv
+AI_DRAWING_ANALYSIS_MODE=mock
+```
+
+Mock mode에서는 HTTP 전용 `RestClient`와 `RestClientDrawingAnalysisClient`가 생성되지 않으며 실제 AI 서버로 네트워크 요청을 전송하지 않는다. HTTP 연동을 사용할 환경에서는 다음과 같이 전환한다.
+
+```dotenv
+AI_DRAWING_ANALYSIS_MODE=http
+```
+
+허용되지 않은 mode 값은 Application Context 시작 시 설정 오류로 처리한다. `mock`과 `http` 구현체는 동시에 `DrawingAnalysisClient` Bean으로 등록되지 않는다.
+
+### 고정 Mock 결과
+
+- 상태: `SUCCEEDED`
+- 모델: `mock-drawing-detector`, 버전 `1.0`
+- 탐지 Label: `HOUSE`, `TREE`
+- Confidence: 각각 `0.95`, `0.91`
+- Bounding Box: 각각 `(120, 80, 640, 520)`, `(820, 120, 380, 700)`
+- `requestId`: 요청 값을 그대로 반환
+- `processedAt`: Spring의 UTC `Clock`을 기준으로 생성
+- `error`: `null`
+
+탐지 목록과 수치는 모든 정상 요청에 동일한 결정적 Fixture로 반환된다. Bounding Box는 계약상 픽셀 좌표 형식을 따르지만 실제 요청 이미지의 크기나 내용을 반영하지 않는다. 이 결과는 개발·계약 검증용이며 실제 객체 탐지 성능, 분석 정확도 또는 아동 심리 분석 결과를 의미하지 않는다.
