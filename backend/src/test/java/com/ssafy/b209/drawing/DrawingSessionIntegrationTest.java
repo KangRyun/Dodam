@@ -1,0 +1,255 @@
+package com.ssafy.b209.drawing;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.ssafy.b209.child.domain.Child;
+import com.ssafy.b209.child.domain.ChildFixture;
+import com.ssafy.b209.child.domain.ChildProfileStatus;
+import com.ssafy.b209.child.domain.ChildTutorialStatus;
+import com.ssafy.b209.child.repository.ChildRepository;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
+import com.ssafy.b209.drawing.domain.DrawingType;
+import com.ssafy.b209.drawing.domain.DrawingTypeFixture;
+import com.ssafy.b209.drawing.domain.DrawingTypeSelectableBy;
+import com.ssafy.b209.drawing.dto.request.CanvasConfigurationRequest;
+import com.ssafy.b209.drawing.dto.request.CreateDrawingSessionRequest;
+import com.ssafy.b209.drawing.dto.response.CreateDrawingSessionResponse;
+import com.ssafy.b209.drawing.exception.DrawingErrorCode;
+import com.ssafy.b209.drawing.repository.DrawingTypeRepository;
+import com.ssafy.b209.drawing.service.DrawingSessionService;
+import com.ssafy.b209.global.exception.BusinessException;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+@Testcontainers
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles("integration-test")
+class DrawingSessionIntegrationTest {
+
+  @Container @ServiceConnection
+  static final MySQLContainer<?> MYSQL_CONTAINER =
+      new MySQLContainer<>("mysql:8.4.10")
+          .withDatabaseName("dodam")
+          .withUsername("test")
+          .withPassword("test");
+
+  @Autowired private MockMvc mockMvc;
+  @Autowired private JdbcTemplate jdbcTemplate;
+  @Autowired private DrawingSessionService drawingSessionService;
+  @Autowired private ChildRepository childRepository;
+  @Autowired private DrawingTypeRepository drawingTypeRepository;
+
+  @BeforeEach
+  void setUp() {
+    jdbcTemplate.update("DELETE FROM drawing_sessions");
+    jdbcTemplate.execute("ALTER TABLE drawing_sessions AUTO_INCREMENT = 1");
+    jdbcTemplate.update("DELETE FROM drawing_types");
+    jdbcTemplate.update("DELETE FROM children");
+    jdbcTemplate.update(
+        "INSERT INTO children "
+            + "(id, nickname, birth_date, question_difficulty, tutorial_status, profile_status) "
+            + "VALUES (1, 'child-one', '2020-07-21', 'PRESCHOOL', 'NOT_STARTED', 'ACTIVE'), "
+            + "(2, 'child-two', '2019-07-21', 'PRESCHOOL', 'COMPLETED', 'ACTIVE')");
+    jdbcTemplate.update(
+        "INSERT INTO drawing_types "
+            + "(id, code, name, activity_category, selectable_by, recommended_age_min, "
+            + "recommended_age_max, is_active, display_order) "
+            + "VALUES (1, 'FREE_DRAWING', 'Free Drawing', 'GENERAL', 'BOTH', 3, 12, TRUE, 1)");
+  }
+
+  @Test
+  void createsCanvasSessionThroughHttpAndReturnsSameResourceForRetry() throws Exception {
+    String body = canvasJson(1L);
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions")
+                .header("Idempotency-Key", "integration-key-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isCreated())
+        .andExpect(header().string("Location", "/api/v1/drawing-sessions/1"))
+        .andExpect(jsonPath("$.data.sessionStatus").value("IN_PROGRESS"))
+        .andExpect(jsonPath("$.data.currentStage").value("DRAWING"))
+        .andExpect(jsonPath("$.data.tutorialRequired").value(true));
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions")
+                .header("Idempotency-Key", "integration-key-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isCreated())
+        .andExpect(header().string("Location", "/api/v1/drawing-sessions/1"));
+
+    assertThat(sessionCount()).isEqualTo(1);
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT session_status, current_stage, completed_at, deleted_at "
+                    + "FROM drawing_sessions WHERE id = 1"))
+        .containsEntry("session_status", "IN_PROGRESS")
+        .containsEntry("current_stage", "DRAWING")
+        .containsEntry("completed_at", null)
+        .containsEntry("deleted_at", null);
+  }
+
+  @Test
+  void persistsRequiredReferenceColumnsThroughRepositories() {
+    Child child =
+        ChildFixture.create(
+            null,
+            LocalDate.of(2020, 7, 21),
+            ChildTutorialStatus.NOT_STARTED,
+            ChildProfileStatus.ACTIVE,
+            null);
+    DrawingType drawingType =
+        DrawingTypeFixture.create(
+            null, "MYSQL_PERSIST", "MySQL Persist", DrawingTypeSelectableBy.BOTH, 3, 12, true);
+
+    Child savedChild = childRepository.saveAndFlush(child);
+    DrawingType savedType = drawingTypeRepository.saveAndFlush(drawingType);
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT nickname FROM children WHERE id = ?", String.class, savedChild.getId()))
+        .isEqualTo("fixture-child");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT activity_category FROM drawing_types WHERE id = ?",
+                String.class,
+                savedType.getId()))
+        .isEqualTo("GENERAL");
+  }
+
+  @Test
+  void serializesConcurrentRequestsForSameChildWithDifferentKeys() throws Exception {
+    List<Object> outcomes =
+        invokeConcurrently(
+            () -> create("concurrent-child-key-1", 1L), () -> create("concurrent-child-key-2", 1L));
+
+    assertThat(outcomes).filteredOn(CreateDrawingSessionResponse.class::isInstance).hasSize(1);
+    assertThat(outcomes)
+        .filteredOn(BusinessException.class::isInstance)
+        .singleElement()
+        .satisfies(
+            outcome ->
+                assertThat(((BusinessException) outcome).getErrorCode())
+                    .isEqualTo(DrawingErrorCode.ACTIVE_DRAWING_SESSION_EXISTS));
+    assertThat(sessionCount()).isEqualTo(1);
+  }
+
+  @Test
+  void returnsSameSessionForConcurrentEquivalentRetries() throws Exception {
+    List<Object> outcomes =
+        invokeConcurrently(
+            () -> create("concurrent-same-key", 1L), () -> create("concurrent-same-key", 1L));
+
+    assertThat(outcomes).allMatch(CreateDrawingSessionResponse.class::isInstance);
+    assertThat(outcomes)
+        .extracting(outcome -> ((CreateDrawingSessionResponse) outcome).drawingSessionId())
+        .containsOnly(
+            outcomes.stream()
+                .map(outcome -> ((CreateDrawingSessionResponse) outcome).drawingSessionId())
+                .findFirst()
+                .orElseThrow());
+    assertThat(sessionCount()).isEqualTo(1);
+  }
+
+  @Test
+  void rejectsConcurrentReuseOfSameKeyForDifferentChildren() throws Exception {
+    List<Object> outcomes =
+        invokeConcurrently(
+            () -> create("concurrent-cross-child-key", 1L),
+            () -> create("concurrent-cross-child-key", 2L));
+
+    assertThat(outcomes).filteredOn(CreateDrawingSessionResponse.class::isInstance).hasSize(1);
+    assertThat(outcomes)
+        .filteredOn(BusinessException.class::isInstance)
+        .singleElement()
+        .satisfies(
+            outcome ->
+                assertThat(((BusinessException) outcome).getErrorCode())
+                    .isEqualTo(DrawingErrorCode.IDEMPOTENCY_KEY_CONFLICT));
+    assertThat(sessionCount()).isEqualTo(1);
+  }
+
+  private CreateDrawingSessionResponse create(String key, long childId) {
+    return drawingSessionService.createDrawingSession(key, request(childId));
+  }
+
+  private List<Object> invokeConcurrently(Callable<Object> first, Callable<Object> second)
+      throws Exception {
+    CountDownLatch ready = new CountDownLatch(2);
+    CountDownLatch start = new CountDownLatch(1);
+    try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+      Future<Object> firstResult = executor.submit(guarded(first, ready, start));
+      Future<Object> secondResult = executor.submit(guarded(second, ready, start));
+      ready.await();
+      start.countDown();
+      return List.of(firstResult.get(), secondResult.get());
+    }
+  }
+
+  private Callable<Object> guarded(
+      Callable<Object> action, CountDownLatch ready, CountDownLatch start) {
+    return () -> {
+      ready.countDown();
+      start.await();
+      try {
+        return action.call();
+      } catch (BusinessException exception) {
+        return exception;
+      }
+    };
+  }
+
+  private CreateDrawingSessionRequest request(long childId) {
+    return new CreateDrawingSessionRequest(
+        childId,
+        1L,
+        DrawingInputMethod.CANVAS,
+        OffsetDateTime.parse("2026-07-21T11:30:00+09:00"),
+        new CanvasConfigurationRequest(1920, 1080, "#FFFFFF"));
+  }
+
+  private String canvasJson(long childId) {
+    return """
+        {
+          "childId": %d,
+          "drawingTypeId": 1,
+          "inputMethod": "CANVAS",
+          "clientStartedAt": "2026-07-21T11:30:00+09:00",
+          "canvas": {"width": 1920, "height": 1080, "backgroundColor": "#FFFFFF"}
+        }
+        """
+        .formatted(childId);
+  }
+
+  private int sessionCount() {
+    return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM drawing_sessions", Integer.class);
+  }
+}
