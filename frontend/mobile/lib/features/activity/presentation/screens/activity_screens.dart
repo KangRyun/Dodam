@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
@@ -14,6 +15,19 @@ import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 
+String _createIdempotencyKey() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  final hex = bytes
+      .map((value) => value.toRadixString(16).padLeft(2, '0'))
+      .join();
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+      '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+      '${hex.substring(20)}';
+}
+
 class DrawingScreen extends StatefulWidget {
   const DrawingScreen({
     required this.childId,
@@ -23,6 +37,8 @@ class DrawingScreen extends StatefulWidget {
     this.syncCoordinator,
     this.draftRestoreController,
     this.draftImageProviderFactory,
+    this.completionSnapshotProvider,
+    this.idempotencyKeyProvider,
     super.key,
   });
 
@@ -33,6 +49,8 @@ class DrawingScreen extends StatefulWidget {
   final DrawingSyncCoordinator? syncCoordinator;
   final DrawingDraftRestoreController? draftRestoreController;
   final DraftImageProviderFactory? draftImageProviderFactory;
+  final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
+  final String Function()? idempotencyKeyProvider;
 
   @override
   State<DrawingScreen> createState() => _DrawingScreenState();
@@ -53,6 +71,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
   late final bool _ownsSyncCoordinator;
   late final DrawingDraftRestoreController _draftRestoreController;
   late final bool _ownsDraftRestoreController;
+  bool _isCompleting = false;
+  String? _pendingCompletionKey;
+  BinaryUploadDto? _pendingCompletionImage;
+  DrawingCompleteMetadataDto? _pendingCompletionMetadata;
 
   @override
   void initState() {
@@ -103,6 +125,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   void _startStroke(PointerDownEvent event) {
     if (_activePointer != null) return;
+    _invalidatePendingCompletion();
     setState(() {
       _activePointer = event.pointer;
       _activeStroke = DrawingStroke(
@@ -139,6 +162,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   void _undoLastStroke() {
     if (_activeStroke != null || _completedStrokes.isEmpty) return;
+    _invalidatePendingCompletion();
     // A recovered Draft is a bitmap, so Undo intentionally targets only
     // vector strokes created after restore. TODO(API): Revisit when the server
     // provides an authoritative vector-history recovery contract.
@@ -177,8 +201,88 @@ class _DrawingScreenState extends State<DrawingScreen> {
     );
   }
 
-  void _showCompletePlaceholder() {
-    showAppMessage(context, message: '그림 완료는 다음 단계에서 연결할게요.');
+  Future<void> _confirmAndComplete() async {
+    if (_isCompleting || _activeStroke != null || _completedStrokes.isEmpty) {
+      return;
+    }
+    final confirmed = await showAppConfirmDialog(
+      context: context,
+      title: '그림을 다 그렸나요?',
+      message: '완성한 그림을 저장하고 다음으로 넘어갈까요?',
+      confirmLabel: '다 그렸어요',
+      cancelLabel: '조금 더 그릴래요',
+      illustration: const Icon(
+        Icons.draw_rounded,
+        size: 56,
+        color: AppColors.tangerine,
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final sessionId = widget.sessionId;
+    final repository = widget.drawingRepository;
+    if (sessionId == null || repository == null) {
+      showAppMessage(context, message: '아직 활동을 완료할 수 없어요. 잠시 후 다시 해 주세요.');
+      return;
+    }
+    setState(() => _isCompleting = true);
+    try {
+      // TODO(API): Define the authoritative pending-batch/Draft flush order
+      // before coordinating a forced flush here.
+      final snapshot =
+          _pendingCompletionImage ??
+          await (widget.completionSnapshotProvider ?? _captureCanvasSnapshot)();
+      if (snapshot == null) throw StateError('Final snapshot unavailable');
+      final metadata =
+          _pendingCompletionMetadata ??
+          DrawingCompleteMetadataDto(
+            lastEventSequence: _syncCoordinator.journal.lastEventSequence,
+            drawingDurationMs: _syncCoordinator.elapsedMilliseconds,
+            clientCompletedAt: DateTime.now().toUtc().toIso8601String(),
+          );
+      final idempotencyKey =
+          _pendingCompletionKey ??
+          widget.idempotencyKeyProvider?.call() ??
+          _createIdempotencyKey();
+      _pendingCompletionImage = snapshot;
+      _pendingCompletionMetadata = metadata;
+      _pendingCompletionKey = idempotencyKey;
+      final response = await repository.completeDrawingStage(
+        sessionId,
+        finalImage: snapshot,
+        metadata: metadata,
+        idempotencyKey: idempotencyKey,
+      );
+      if (response.currentStage != 'ANALYZING') {
+        throw StateError('Unexpected drawing stage');
+      }
+      if (!mounted) return;
+      _invalidatePendingCompletion();
+      // TODO(CONVERSATION): Replace this temporary MVP transition with
+      // ANALYZING polling -> CONVERSING -> REFLECTION.
+      Navigator.of(context).pushReplacementNamed(
+        AppRoutes.emotionSelect(widget.childId),
+        arguments: EmotionSelectRouteArguments(
+          sessionId: sessionId,
+          repository: repository,
+        ),
+      );
+    } on Object {
+      if (mounted) {
+        showAppMessage(
+          context,
+          message: '그림을 완료하지 못했어요. 그림은 그대로 있으니 다시 시도해 주세요.',
+          type: AppMessageType.error,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isCompleting = false);
+    }
+  }
+
+  void _invalidatePendingCompletion() {
+    _pendingCompletionKey = null;
+    _pendingCompletionImage = null;
+    _pendingCompletionMetadata = null;
   }
 
   List<DrawingStroke> get _visibleStrokes {
@@ -234,8 +338,12 @@ class _DrawingScreenState extends State<DrawingScreen> {
             selectedThickness: _thickness,
             onColorChanged: (color) => setState(() => _color = color),
             onThicknessChanged: (value) => setState(() => _thickness = value),
-            canComplete: _activeStroke == null && _completedStrokes.isNotEmpty,
-            onComplete: _showCompletePlaceholder,
+            canComplete:
+                !_isCompleting &&
+                _activeStroke == null &&
+                _completedStrokes.isNotEmpty,
+            isCompleting: _isCompleting,
+            onComplete: () => unawaited(_confirmAndComplete()),
             saveStatus: _syncCoordinator.saveStatus,
             onRetrySave: () => unawaited(_syncCoordinator.retry()),
           );
@@ -449,6 +557,7 @@ class _DrawingSidePanel extends StatelessWidget {
     required this.onColorChanged,
     required this.onThicknessChanged,
     required this.canComplete,
+    required this.isCompleting,
     required this.onComplete,
     required this.saveStatus,
     required this.onRetrySave,
@@ -459,6 +568,7 @@ class _DrawingSidePanel extends StatelessWidget {
   final ValueChanged<Color> onColorChanged;
   final ValueChanged<double> onThicknessChanged;
   final bool canComplete;
+  final bool isCompleting;
   final VoidCallback onComplete;
   final DrawingSaveStatus saveStatus;
   final VoidCallback onRetrySave;
@@ -563,6 +673,7 @@ class _DrawingSidePanel extends StatelessWidget {
             key: const ValueKey('drawing-complete'),
             label: '다 그렸어요!',
             variant: AppButtonVariant.child,
+            isLoading: isCompleting,
             onPressed: canComplete ? onComplete : null,
           ),
           const SizedBox(
@@ -721,20 +832,255 @@ class _ColorChoice extends StatelessWidget {
   );
 }
 
-class EmotionSelectScreen extends StatelessWidget {
-  const EmotionSelectScreen({required this.childId, super.key});
+final class EmotionSelectRouteArguments {
+  const EmotionSelectRouteArguments({
+    required this.sessionId,
+    required this.repository,
+  });
+
+  final int? sessionId;
+  final DrawingRepository? repository;
+}
+
+class EmotionSelectScreen extends StatefulWidget {
+  const EmotionSelectScreen({
+    required this.childId,
+    this.sessionId,
+    this.drawingRepository,
+    super.key,
+  });
 
   final String childId;
+  final int? sessionId;
+  final DrawingRepository? drawingRepository;
 
   @override
-  Widget build(BuildContext context) => AppPlaceholderScaffold(
-    title: '감정 선택',
-    description: '그림을 그리며 느낀 감정을 고르는 화면이에요.',
-    childFriendly: true,
-    primaryLabel: '선택 완료',
-    onPrimary: () => Navigator.of(
-      context,
-    ).pushReplacementNamed(AppRoutes.activityComplete(childId)),
+  State<EmotionSelectScreen> createState() => _EmotionSelectScreenState();
+}
+
+class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
+  static const _emotions = <(DrawingEmotionType, String, IconData)>[
+    (DrawingEmotionType.happy, '기쁨', Icons.sentiment_very_satisfied_rounded),
+    (DrawingEmotionType.sad, '슬픔', Icons.sentiment_dissatisfied_rounded),
+    (DrawingEmotionType.angry, '화남', Icons.mood_bad_rounded),
+    (DrawingEmotionType.scared, '무서움', Icons.visibility_off_rounded),
+    (DrawingEmotionType.calm, '편안함', Icons.sentiment_satisfied_rounded),
+    (DrawingEmotionType.unknown, '모르겠어', Icons.help_outline_rounded),
+  ];
+
+  final Set<DrawingEmotionType> _selectedEmotions = {};
+  final TextEditingController _titleController = TextEditingController();
+  bool _isSubmitting = false;
+
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
+
+  void _toggleEmotion(DrawingEmotionType emotion) {
+    setState(() {
+      if (_selectedEmotions.remove(emotion)) return;
+      if (emotion == DrawingEmotionType.unknown) {
+        _selectedEmotions
+          ..clear()
+          ..add(emotion);
+      } else {
+        _selectedEmotions
+          ..remove(DrawingEmotionType.unknown)
+          ..add(emotion);
+      }
+    });
+  }
+
+  Future<void> _submitReflection({required bool skipped}) async {
+    if (_isSubmitting) return;
+    final sessionId = widget.sessionId;
+    final repository = widget.drawingRepository;
+    if (sessionId == null || repository == null) {
+      showAppMessage(context, message: '아직 마음을 저장할 수 없어요. 잠시 후 다시 해 주세요.');
+      return;
+    }
+    if (!skipped && _selectedEmotions.isEmpty) return;
+    setState(() => _isSubmitting = true);
+    final rawTitle = _titleController.text;
+    try {
+      await repository.saveReflection(
+        sessionId,
+        SaveDrawingReflectionRequestDto(
+          title: rawTitle.isEmpty ? null : rawTitle,
+          selectedEmotions: skipped
+              ? const []
+              : List.unmodifiable(_selectedEmotions),
+          // TODO(REFLECTION): Add direct-expression UI when its UX is agreed.
+          expressedEmotionText: null,
+          skipped: skipped,
+        ),
+      );
+      if (!mounted) return;
+      // TODO(ACTIVITY_COMPLETE): Replace this placeholder transition with
+      // POST /drawing-sessions/{id}/complete in the later completion step.
+      Navigator.of(
+        context,
+      ).pushReplacementNamed(AppRoutes.activityComplete(widget.childId));
+    } on Object {
+      if (mounted) {
+        showAppMessage(
+          context,
+          message: '마음을 저장하지 못했어요. 고른 내용은 그대로 있으니 다시 해 주세요.',
+          type: AppMessageType.error,
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    backgroundColor: AppColors.childCanvas,
+    appBar: AppTopBar(
+      title: '내 마음 고르기',
+      onBack: () => Navigator.of(context).maybePop(),
+    ),
+    body: SafeArea(
+      top: false,
+      child: LayoutBuilder(
+        builder: (context, constraints) => SingleChildScrollView(
+          key: const ValueKey('emotion-screen-scroll'),
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 960),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const _EmotionGuideCard(),
+                  const SizedBox(height: AppSpacing.lg),
+                  GridView.count(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisCount: constraints.maxWidth >= 800 ? 3 : 2,
+                    mainAxisSpacing: AppSpacing.sm,
+                    crossAxisSpacing: AppSpacing.sm,
+                    childAspectRatio: constraints.maxWidth >= 800 ? 2.5 : 2,
+                    children: [
+                      for (final (emotion, label, icon) in _emotions)
+                        AppChoiceCard(
+                          key: ValueKey('emotion-$label'),
+                          label: label,
+                          isSelected: _selectedEmotions.contains(emotion),
+                          childFriendly: true,
+                          leading: Icon(icon, color: AppColors.tangerine),
+                          onTap: _isSubmitting
+                              ? null
+                              : () => _toggleEmotion(emotion),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  AppTextField(
+                    key: const ValueKey('drawing-title'),
+                    controller: _titleController,
+                    label: '그림 제목 (선택)',
+                    hintText: '그림에 이름을 붙여볼까요?',
+                    textInputAction: TextInputAction.done,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  if (widget.sessionId == null ||
+                      widget.drawingRepository == null) ...[
+                    const Text(
+                      '아직 마음을 저장할 수 없어요. 잠시 후 다시 해 주세요.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: AppColors.inkMuted),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                  ],
+                  Row(
+                    children: [
+                      Expanded(
+                        child: AppButton(
+                          key: const ValueKey('emotion-skip'),
+                          label: '건너뛰기',
+                          variant: AppButtonVariant.secondary,
+                          isLoading: _isSubmitting,
+                          onPressed: _isSubmitting
+                              ? null
+                              : () =>
+                                    unawaited(_submitReflection(skipped: true)),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: AppButton(
+                          key: const ValueKey('emotion-submit'),
+                          label: '다 했어요!',
+                          variant: AppButtonVariant.child,
+                          isLoading: _isSubmitting,
+                          onPressed: _isSubmitting || _selectedEmotions.isEmpty
+                              ? null
+                              : () => unawaited(
+                                  _submitReflection(skipped: false),
+                                ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _EmotionGuideCard extends StatelessWidget {
+  const _EmotionGuideCard();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(AppSpacing.lg),
+    decoration: BoxDecoration(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(AppRadius.lg),
+    ),
+    child: const Row(
+      children: [
+        CircleAvatar(
+          radius: 30,
+          backgroundColor: AppColors.tangerineSoft,
+          child: Icon(
+            Icons.emoji_nature_rounded,
+            color: AppColors.tangerine,
+            size: 32,
+          ),
+        ),
+        SizedBox(width: AppSpacing.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '그림을 그리며 어떤 마음이었나요?',
+                style: TextStyle(
+                  color: AppColors.ink,
+                  fontSize: 22,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              SizedBox(height: AppSpacing.xxs),
+              Text(
+                '내 마음과 닮은 카드를 직접 골라 보세요.',
+                style: TextStyle(color: AppColors.inkMuted, fontSize: 16),
+              ),
+            ],
+          ),
+        ),
+      ],
+    ),
   );
 }
 
