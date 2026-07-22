@@ -1,5 +1,6 @@
 import 'package:dodam/app/app.dart';
 import 'package:dodam/app/router/app_routes.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -24,6 +25,16 @@ void main() {
 
     expect(find.text('선택된 아동이 없어요'), findsOneWidget);
     expect(find.text('보호자 홈으로 이동'), findsOneWidget);
+  });
+
+  testWidgets('선택 컨텍스트 없이 Drawing 경로로 직접 진입하면 차단한다', (tester) async {
+    await tester.pumpWidget(
+      DodamApp(initialRoute: AppRoutes.drawing('3')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('선택된 아동이 없어요'), findsOneWidget);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
   });
 
   testWidgets('알 수 없는 경로는 공통 Error UI를 사용한다', (tester) async {
