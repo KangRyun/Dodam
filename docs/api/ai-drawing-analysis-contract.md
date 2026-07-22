@@ -111,3 +111,46 @@
 - `S15P11B209-147`: 분석 결과 저장 Application Service와 DB 연동
 
 이번 범위에서는 Timeout, Retry, Circuit Breaker, Message Queue, 분석 저장, 그림 활동 상태 변경, 대화·감정·리포트 생성을 구현하지 않는다.
+
+## Spring Boot AI Client
+
+`S15P11B209-145`에서 다음 동기식 Client 경계를 제공한다.
+
+```java
+public interface DrawingAnalysisClient {
+    DrawingAnalysisResponse analyze(DrawingAnalysisRequest request);
+}
+```
+
+- HTTP 구현체: `RestClientDrawingAnalysisClient`
+- HTTP Client: Spring `RestClient`
+- Method/Endpoint: `POST /internal/ai/v1/drawings/analysis`
+- Request/Response: 이 문서의 144번 계약 DTO를 그대로 사용
+- 인증 Header: 현재 추가하지 않음
+- 자동 Retry, Circuit Breaker, Fallback: 구현하지 않음
+
+### 설정 환경 변수
+
+| 환경 변수 | 기본값 | 용도 |
+| --- | --- | --- |
+| `AI_DRAWING_ANALYSIS_BASE_URL` | `http://localhost:8000` | 그림 분석 AI 서버 Base URL |
+| `AI_DRAWING_ANALYSIS_ENDPOINT_PATH` | `/internal/ai/v1/drawings/analysis` | 그림 분석 내부 Endpoint Path |
+| `AI_DRAWING_ANALYSIS_CONNECT_TIMEOUT` | `3s` | 연결 제한 시간 |
+| `AI_DRAWING_ANALYSIS_READ_TIMEOUT` | `30s` | 응답 대기 제한 시간 |
+
+Base URL은 Query와 Fragment가 없는 HTTP 또는 HTTPS 절대 URI여야 한다. Endpoint Path는 `/` 하나로 시작해야 하며 Timeout은 0보다 커야 한다. Client Bean 생성 시 AI 서버 연결을 시도하지 않으므로 서버가 꺼져 있어도 Application Context를 시작할 수 있다.
+
+### Client 오류 매핑
+
+| 상황 | `DrawingAnalysisClientException.Type` |
+| --- | --- |
+| 요청 Validation 실패, AI 서버 3xx·4xx, 일반 연결 실패 | `REQUEST_FAILED` |
+| Connect 또는 Read Timeout | `TIMEOUT` |
+| 빈 Body, JSON·Enum 오류, 응답 계약 위반 | `INVALID_RESPONSE` |
+| AI 서버 5xx | `SERVER_ERROR` |
+
+HTTP 2xx의 유효한 `status=FAILED` 응답은 통신 실패가 아니므로 Exception으로 변환하지 않는다. 응답 `requestId`가 요청 값과 다르면 다른 호출의 결과로 판단해 `INVALID_RESPONSE`로 처리한다. Client는 전체 Request/Response, Storage Key, 서버 URL, AI 오류 원문을 로그나 Exception 메시지에 기록하지 않는다.
+
+### 현재 연동 제한
+
+현재 실제 FastAPI 서버와의 정상 동작은 검증하지 않았으며 테스트는 `MockRestServiceServer`만 사용한다. `storageKey`는 계약대로 전달되지만 AI 서버가 Backend의 로컬 Storage를 공유하지 않으면 이미지 파일을 읽을 수 없다. Client에서 절대 경로, Base64, URL 또는 multipart로 임의 변환하지 않으며 실제 이미지 접근 방식은 배포 Architecture에서 별도로 해결해야 한다.

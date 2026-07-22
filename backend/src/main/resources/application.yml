@@ -14,6 +14,12 @@ server:
   port: 8080
 
 app:
+  ai:
+    drawing-analysis:
+      base-url: ${AI_DRAWING_ANALYSIS_BASE_URL:http://localhost:8000}
+      endpoint-path: ${AI_DRAWING_ANALYSIS_ENDPOINT_PATH:/internal/ai/v1/drawings/analysis}
+      connect-timeout: ${AI_DRAWING_ANALYSIS_CONNECT_TIMEOUT:3s}
+      read-timeout: ${AI_DRAWING_ANALYSIS_READ_TIMEOUT:30s}
   cors:
     allowed-origins: []
   storage:
