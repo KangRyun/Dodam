@@ -40,8 +40,11 @@ def notifyMattermost(String emoji, String title) {
       def branch   = env.BRANCH_NAME ?: '?'
       def duration = (currentBuild.durationString ?: '').replace(' and counting', '')
       def deployed = (branch == 'develop' && emoji == '✅') ? ' · 🚀 서버 배포됨' : ''
+      // 빌드 링크 — Jenkins가 https://…/jenkins/ 로 공개(S15P11B209-319)되며 클릭 가능해짐.
+      //   BUILD_URL은 Manage Jenkins의 "Jenkins URL" 설정 기반으로 생성됨(로그인 필요).
+      def link = env.BUILD_URL ? " · [빌드 보기](${env.BUILD_URL})" : ''
       def text = "${emoji} **${title}** · `${branch}` #${env.BUILD_NUMBER} · ${duration}${deployed}\n" +
-                 "👤 ${env.GIT_AUTHOR ?: '?'} · 커밋 `${env.IMAGE_TAG ?: '?'}`"
+                 "👤 ${env.GIT_AUTHOR ?: '?'} · 커밋 `${env.IMAGE_TAG ?: '?'}`${link}"
       if (emoji == '❌') { text += failureDetail() }   // 실패면 "어디서 터졌나" 분석 첨부
       // JSON은 이스케이프 사고 방지를 위해 파일로 만들어 curl -d @file 로 전송(따옴표 지옥 회피)
       writeFile file: '.mm-payload.json', text: groovy.json.JsonOutput.toJson([text: text])

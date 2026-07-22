@@ -21,7 +21,7 @@ abstract interface class DrawingRepository {
     BinaryUploadDto image, {
     int? lastEventSequence,
   });
-  Future<DraftRecoveryDto> getDraft(int sessionId);
+  Future<DraftRecoveryDto?> getDraft(int sessionId);
   Future<void> deleteDraft(int sessionId);
   Future<CompleteDrawingResponseDto> completeDrawing(
     int sessionId, {

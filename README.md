@@ -559,3 +559,35 @@ curl -X POST "http://localhost:8080/api/v1/drawing-sessions/100/snapshots" \
 - 응답에는 서버 내부 Storage Key, 절대 경로와 원본 파일명을 포함하지 않습니다.
 - 현재 인증과 그림 활동 소유권 검증은 아직 연결되지 않았습니다.
 - 업로드만으로 세션 상태를 변경하거나 AI 분석을 실행하지 않습니다.
+
+## 그림 초안 자동 저장 및 조회 API
+
+진행 중인 `IN_PROGRESS/DRAWING` 세션의 현재 캔버스 전체본은 다음 Endpoint로 저장합니다.
+
+```http
+PUT /api/v1/drawing-sessions/{drawingSessionId}/draft
+Content-Type: multipart/form-data
+```
+
+```bash
+curl -X PUT "http://localhost:8080/api/v1/drawing-sessions/100/draft" \
+  -H "Accept: application/json" \
+  -F "preview=@draft.png;type=image/png" \
+  -F 'canvasState={"lastEventSequence":17,"clientSavedAt":"2026-07-22T14:30:00+09:00"};type=application/json'
+```
+
+가장 최근 초안 Metadata는 다음 Endpoint로 조회합니다.
+
+```http
+GET /api/v1/drawing-sessions/{drawingSessionId}/draft
+```
+
+- `preview`는 최대 10MB의 JPEG 또는 PNG 이미지이며 기존 `ImageStorage` 검증을 동일하게 적용합니다.
+- `lastEventSequence`는 초안에 반영된 마지막 그림 이벤트 순서이며 저장할 때마다 증가해야 합니다.
+- 현재 초안과 같은 이벤트 순서는 HTTP 409, 더 이전 순서는 HTTP 409로 거부합니다.
+- 서버는 세션 잠금 안에서 `assetVersion`을 1부터 증가시키며 최신 초안은 가장 높은 `assetVersion`으로 결정합니다.
+- 초안은 `DRAFT` 유형이며 최종 그림이나 분석용 `INTERMEDIATE` 스냅샷과 구분됩니다.
+- 자동 저장은 세션 상태·단계를 변경하거나 AI 분석과 최종 그림 생성을 실행하지 않습니다.
+- 최신 조회는 이미지 다운로드 API가 아닙니다. 현재 다운로드 API가 없으므로 `previewUrl`은 `null`이며 내부 Storage Key와 서버 절대 경로를 반환하지 않습니다.
+- 현재 인증과 그림 활동 소유권 검증은 아직 연결되지 않았습니다.
+- 도구 상태·Viewport를 포함한 종합 활동 재개와 초안 삭제는 후속 작업 범위입니다.

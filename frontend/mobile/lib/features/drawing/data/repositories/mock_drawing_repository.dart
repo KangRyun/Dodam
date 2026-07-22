@@ -1,9 +1,13 @@
-import '../../../../core/network/api_page.dart';
+import '../../../../core/network/network.dart';
 import '../../domain/repositories/drawing_repository.dart';
 import '../dto/drawing_dtos.dart';
 
+enum MockDraftScenario { found, absent, failure }
+
 final class MockDrawingRepository implements DrawingRepository {
-  const MockDrawingRepository();
+  const MockDrawingRepository({this.draftScenario = MockDraftScenario.found});
+
+  final MockDraftScenario draftScenario;
   static const _type = {
     'drawingTypeId': 5,
     'code': 'ART_DIARY',
@@ -86,19 +90,38 @@ final class MockDrawingRepository implements DrawingRepository {
     int? lastEventSequence,
   }) async => DrawingAssetDto.fromJson(_asset);
   @override
-  Future<DraftRecoveryDto> getDraft(int sessionId) async =>
-      DraftRecoveryDto.fromJson({
-        'drawingSessionId': 42,
-        'sessionStatus': 'DRAWING',
-        'currentStage': 'DRAWING',
-        'drawingType': {
-          'drawingTypeId': 5,
-          'code': 'ART_DIARY',
-          'name': '그림일기',
-        },
-        'draftAsset': _asset,
-        'strokeSync': {'lastBatchSequence': 12, 'lastEventSequence': 1105},
-      });
+  Future<DraftRecoveryDto> getDraft(int sessionId) async {
+    switch (draftScenario) {
+      case MockDraftScenario.absent:
+        throw ApiResponseFailure(
+          statusCode: 404,
+          error: ApiError(
+            timestamp: '2026-07-22T00:00:00Z',
+            path: '/api/v1/drawing-sessions/$sessionId/draft',
+            code: 'DRAWING_DRAFT_NOT_FOUND',
+            message: 'Draft not found',
+          ),
+        );
+      case MockDraftScenario.failure:
+        throw const ApiTransportFailure(
+          type: ApiTransportFailureType.connection,
+        );
+      case MockDraftScenario.found:
+        return DraftRecoveryDto.fromJson({
+          'drawingSessionId': 42,
+          'sessionStatus': 'DRAWING',
+          'currentStage': 'DRAWING',
+          'drawingType': {
+            'drawingTypeId': 5,
+            'code': 'ART_DIARY',
+            'name': '그림일기',
+          },
+          'draftAsset': _asset,
+          'strokeSync': {'lastBatchSequence': 12, 'lastEventSequence': 1105},
+        });
+    }
+  }
+
   @override
   Future<void> deleteDraft(int sessionId) async {}
   @override
