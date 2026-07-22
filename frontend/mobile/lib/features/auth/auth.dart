@@ -1,5 +1,5 @@
 export 'data/mock/mock_auth_scenario.dart';
-export 'data/repositories/mock_auth_repository.dart';
+export 'data/repositories/auth_repository_impl.dart';
 export 'domain/entities/auth_session.dart';
 export 'domain/entities/auth_tokens.dart';
 export 'domain/entities/authenticated_user.dart';

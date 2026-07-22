@@ -7,8 +7,8 @@ import '../../domain/failures/auth_failure.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../mock/mock_auth_scenario.dart';
 
-class MockAuthRepository implements AuthRepository {
-  MockAuthRepository({
+class AuthRepositoryImpl implements AuthRepository {
+  AuthRepositoryImpl({
     this.scenario = MockAuthScenario.existingGuardian,
     this.responseDelay = const Duration(milliseconds: 500),
   });

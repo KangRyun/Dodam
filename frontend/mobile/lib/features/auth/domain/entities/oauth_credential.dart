@@ -1,6 +1,6 @@
 import '../enums/auth_provider.dart';
 
-enum OAuthCredentialType { authorizationCode, accessToken, idToken }
+enum OAuthCredentialType { accessToken, idToken }
 
 class OAuthCredential {
   const OAuthCredential({
@@ -13,5 +13,11 @@ class OAuthCredential {
   final OAuthCredentialType type;
   final String value;
 
-  bool get isValid => value.trim().isNotEmpty;
+  bool get isValid => value.trim().isNotEmpty && hasExpectedType;
+
+  bool get hasExpectedType => switch (provider) {
+    AuthProvider.kakao ||
+    AuthProvider.naver => type == OAuthCredentialType.accessToken,
+    AuthProvider.google => type == OAuthCredentialType.idToken,
+  };
 }
