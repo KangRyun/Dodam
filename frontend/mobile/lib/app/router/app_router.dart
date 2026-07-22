@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../design_system/design_system.dart';
+import '../../features/activity/domain/repositories/activity_repository.dart';
 import '../../features/activity/presentation/screens/activity_screens.dart';
 import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
 import '../../features/drawing/data/dto/drawing_dtos.dart';
@@ -16,6 +17,7 @@ abstract final class AppRouter {
   static Route<void> onGenerateRoute(
     RouteSettings settings, {
     GuardianChildController? childController,
+    ActivityRepository? activityRepository,
     DrawingRepository? drawingRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
   }) {
@@ -28,7 +30,12 @@ abstract final class AppRouter {
       ),
       ['guardian', 'children', 'select'] when childController != null =>
         ChildSelectScreen(controller: childController),
-      ['guardian', 'activities'] => const ActivityHistoryScreen(),
+      ['guardian', 'activities']
+          when childController != null && activityRepository != null =>
+        ActivityHistoryScreen(
+          childController: childController,
+          repository: activityRepository,
+        ),
       ['guardian', 'activities', final activityId, 'confirm'] =>
         GuardianConfirmScreen(activityId: activityId),
       ['guardian', 'activities', final activityId] => ActivityDetailScreen(
