@@ -516,6 +516,15 @@ Content-Type: application/json
 
 실제 Client Secret, JWT Secret과 Redirect URI는 `.env` 또는 배포 Secret으로 관리하며 Git에 커밋하지 않습니다.
 
+## 최초 동의 등록 API
+
+`POST /api/v1/consents`는 Access Token의 사용자를 동의 처리자로 사용해 사용자 또는 연결 아동의 약관별 `AGREE`·`WITHDRAW` 행위를 저장합니다. 사용자 대상 약관만 등록하면 `childId`를 생략하고, 아동 대상 약관에는 연결된 아동의 `childId`를 전달합니다.
+
+- 현재 활성·시행 중인 필수 약관은 모두 `AGREE`여야 합니다.
+- 동의 이력은 기존 행을 수정하지 않고 `consent_records`에 append합니다.
+- 요청 사용자 ID는 Body로 받지 않으며 IP와 User-Agent를 감사 정보로 저장합니다.
+- 기존 `consent_terms`, `consent_records`, `consent_record_evidences` 구조를 사용하므로 신규 DB Migration은 없습니다.
+
 ## 아동 정보 조회 API
 
 연결된 보호자는 다음 Endpoint로 삭제되지 않은 활성 아동의 상세 프로필을 조회합니다.
