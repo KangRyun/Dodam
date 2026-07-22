@@ -21,34 +21,46 @@ class _DrawingScreenState extends State<DrawingScreen> {
   static const _regular = 8.0;
   static const _thick = 14.0;
 
-  final List<DrawingStroke> _strokes = [];
+  final List<DrawingStroke> _completedStrokes = [];
+  DrawingStroke? _activeStroke;
   Color _color = AppColors.drawingInk;
   double _thickness = _regular;
   int? _activePointer;
 
   void _startStroke(PointerDownEvent event) {
     if (_activePointer != null) return;
-    _activePointer = event.pointer;
     setState(() {
-      _strokes.add(
-        DrawingStroke(
-          points: [_pointFrom(event)],
-          color: _color,
-          thickness: _thickness,
-        ),
+      _activePointer = event.pointer;
+      _activeStroke = DrawingStroke(
+        points: [_pointFrom(event)],
+        color: _color,
+        thickness: _thickness,
       );
     });
   }
 
   void _extendStroke(PointerMoveEvent event) {
-    if (_activePointer != event.pointer || _strokes.isEmpty) return;
+    if (_activePointer != event.pointer || _activeStroke == null) return;
     setState(() {
-      _strokes[_strokes.length - 1] = _strokes.last.addPoint(_pointFrom(event));
+      _activeStroke = _activeStroke!.addPoint(_pointFrom(event));
     });
   }
 
   void _endStroke(PointerEvent event) {
-    if (_activePointer == event.pointer) _activePointer = null;
+    if (_activePointer != event.pointer) return;
+    setState(() {
+      final stroke = _activeStroke;
+      if (event is PointerUpEvent && stroke != null) {
+        _completedStrokes.add(stroke);
+      }
+      _activeStroke = null;
+      _activePointer = null;
+    });
+  }
+
+  void _undoLastStroke() {
+    if (_activeStroke != null || _completedStrokes.isEmpty) return;
+    setState(() => _completedStrokes.removeLast());
   }
 
   DrawingPoint _pointFrom(PointerEvent event) => DrawingPoint(
@@ -60,6 +72,12 @@ class _DrawingScreenState extends State<DrawingScreen> {
     showAppMessage(context, message: '그림 완료는 다음 단계에서 연결할게요.');
   }
 
+  List<DrawingStroke> get _visibleStrokes {
+    final strokes = [..._completedStrokes];
+    if (_activeStroke case final stroke?) strokes.add(stroke);
+    return List.unmodifiable(strokes);
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: AppColors.childCanvas,
@@ -69,13 +87,15 @@ class _DrawingScreenState extends State<DrawingScreen> {
       actions: [
         Padding(
           padding: const EdgeInsets.only(right: AppSpacing.md),
-          child: Tooltip(
-            message: '실행 취소는 다음 단계에서 제공해요',
-            child: IconButton.filledTonal(
-              key: const ValueKey('undo-action'),
-              onPressed: null,
-              icon: const Icon(Icons.undo_rounded),
-            ),
+          child: IconButton.filledTonal(
+            key: const ValueKey('undo-action'),
+            tooltip: _activeStroke != null
+                ? '그리는 중에는 실행 취소할 수 없어요'
+                : '마지막 그림 획 실행 취소',
+            onPressed: _activeStroke == null && _completedStrokes.isNotEmpty
+                ? _undoLastStroke
+                : null,
+            icon: const Icon(Icons.undo_rounded),
           ),
         ),
       ],
@@ -85,7 +105,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final canvas = _CanvasPanel(
-            strokes: List.unmodifiable(_strokes),
+            strokes: _visibleStrokes,
             onPointerDown: _startStroke,
             onPointerMove: _extendStroke,
             onPointerUp: _endStroke,
@@ -95,7 +115,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
             selectedThickness: _thickness,
             onColorChanged: (color) => setState(() => _color = color),
             onThicknessChanged: (value) => setState(() => _thickness = value),
-            canComplete: _strokes.isNotEmpty,
+            canComplete: _activeStroke == null && _completedStrokes.isNotEmpty,
             onComplete: _showCompletePlaceholder,
           );
           if (constraints.maxWidth >= 900) {

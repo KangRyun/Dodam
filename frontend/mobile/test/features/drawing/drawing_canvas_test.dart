@@ -11,13 +11,8 @@ void main() {
     expect(find.text('그림 활동'), findsOneWidget);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
     expect(_canvas(tester).strokes, isEmpty);
-    final button = tester.widget<FilledButton>(
-      find.descendant(
-        of: find.byKey(const ValueKey('drawing-complete')),
-        matching: find.byType(FilledButton),
-      ),
-    );
-    expect(button.onPressed, isNull);
+    expect(_undoButton(tester).onPressed, isNull);
+    expect(_completeButton(tester).onPressed, isNull);
   });
 
   testWidgets('pointer down부터 up까지 하나의 stroke로 만들고 여러 획을 누적한다', (tester) async {
@@ -73,13 +68,88 @@ void main() {
       tester.getCenter(find.byKey(const ValueKey('drawing-canvas'))),
     );
 
-    final button = tester.widget<FilledButton>(
-      find.descendant(
-        of: find.byKey(const ValueKey('drawing-complete')),
-        matching: find.byType(FilledButton),
-      ),
+    expect(_undoButton(tester).onPressed, isNotNull);
+    expect(_completeButton(tester).onPressed, isNotNull);
+  });
+
+  testWidgets('Undo는 마지막 완료 stroke만 제거하고 기존 속성을 유지한다', (tester) async {
+    await _pumpDrawing(tester);
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
     );
-    expect(button.onPressed, isNotNull);
+    await _drawStroke(tester, center - const Offset(50, 20));
+    await tester.tap(find.byKey(const ValueKey('color-빨강')));
+    await tester.tap(find.text('얇게'));
+    await tester.pump();
+    await _drawStroke(tester, center + const Offset(50, 20));
+
+    expect(_canvas(tester).strokes, hasLength(2));
+    await tester.tap(find.byKey(const ValueKey('undo-action')));
+    await tester.pump();
+
+    final remaining = _canvas(tester).strokes.single;
+    expect(remaining.color, AppColors.drawingInk);
+    expect(remaining.thickness, 8);
+    expect(_completeButton(tester).onPressed, isNotNull);
+  });
+
+  testWidgets('연속 Undo로 빈 Canvas가 되면 버튼들을 비활성화한다', (tester) async {
+    await _pumpDrawing(tester);
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    await _drawStroke(tester, center - const Offset(60, 20));
+    await _drawStroke(tester, center);
+    await _drawStroke(tester, center + const Offset(60, 20));
+
+    for (final expectedCount in [2, 1, 0]) {
+      await tester.tap(find.byKey(const ValueKey('undo-action')));
+      await tester.pump();
+      expect(_canvas(tester).strokes, hasLength(expectedCount));
+    }
+    expect(_undoButton(tester).onPressed, isNull);
+    expect(_completeButton(tester).onPressed, isNull);
+
+    await tester.tap(find.byKey(const ValueKey('undo-action')));
+    await tester.pump();
+    expect(_canvas(tester).strokes, isEmpty);
+  });
+
+  testWidgets('그리는 중에는 Undo와 완료를 비활성화한다', (tester) async {
+    await _pumpDrawing(tester);
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    await _drawStroke(tester, center - const Offset(50, 20));
+    final gesture = await tester.startGesture(center + const Offset(50, 20));
+    await gesture.moveBy(const Offset(20, 12));
+    await tester.pump();
+
+    expect(_canvas(tester).strokes, hasLength(2));
+    expect(_undoButton(tester).onPressed, isNull);
+    expect(_completeButton(tester).onPressed, isNull);
+
+    await gesture.up();
+    await tester.pump();
+    expect(_canvas(tester).strokes, hasLength(2));
+    expect(_undoButton(tester).onPressed, isNotNull);
+    expect(_completeButton(tester).onPressed, isNotNull);
+  });
+
+  testWidgets('pointer cancel은 active stroke를 폐기하고 Undo 상태를 안전하게 복구한다', (
+    tester,
+  ) async {
+    await _pumpDrawing(tester);
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('drawing-canvas'))),
+    );
+    await gesture.moveBy(const Offset(20, 12));
+    await gesture.cancel();
+    await tester.pump();
+
+    expect(_canvas(tester).strokes, isEmpty);
+    expect(_undoButton(tester).onPressed, isNull);
+    expect(_completeButton(tester).onPressed, isNull);
   });
 
   testWidgets('작은 화면에서는 세로 배치하며 overflow가 발생하지 않는다', (tester) async {
@@ -119,6 +189,17 @@ Future<void> _pumpDrawing(
 
 DrawingCanvas _canvas(WidgetTester tester) =>
     tester.widget<DrawingCanvas>(find.byType(DrawingCanvas));
+
+IconButton _undoButton(WidgetTester tester) =>
+    tester.widget<IconButton>(find.byKey(const ValueKey('undo-action')));
+
+FilledButton _completeButton(WidgetTester tester) =>
+    tester.widget<FilledButton>(
+      find.descendant(
+        of: find.byKey(const ValueKey('drawing-complete')),
+        matching: find.byType(FilledButton),
+      ),
+    );
 
 Future<void> _drawStroke(WidgetTester tester, Offset start) async {
   final gesture = await tester.startGesture(start);
