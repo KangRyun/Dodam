@@ -11,6 +11,31 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('로그아웃하면 선택 아동을 초기화하고 로그인 화면으로 이동한다', (tester) async {
+    await tester.pumpWidget(
+      DodamApp(childRepository: _FakeChildRepository(children: _children)),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('child-7')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('logout-action')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('로그아웃').last);
+    await tester.pumpAndSettle();
+
+    expect(find.text('그림과 대화로\n아이의 마음을 만나봐요'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('social-login-kakao')));
+    await tester.pumpAndSettle();
+
+    final startButton = find.descendant(
+      of: find.byKey(const ValueKey('start-child-mode')),
+      matching: find.byType(FilledButton),
+    );
+    expect(tester.widget<FilledButton>(startButton).onPressed, isNull);
+  });
+
   testWidgets('Child 목록 Loading 상태를 표시한다', (tester) async {
     final completer = Completer<List<ChildSummaryDto>>();
     final repository = _FakeChildRepository(pending: completer);

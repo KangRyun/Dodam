@@ -45,5 +45,12 @@ final class GuardianChildController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // 로그아웃 시 보호자 선택 상태 초기화
+  void clearSelection() {
+    if (_selectedChild == null) return;
+    _selectedChild = null;
+    notifyListeners();
+  }
+
   bool hasSelectedChild(int childId) => _selectedChild?.childId == childId;
 }

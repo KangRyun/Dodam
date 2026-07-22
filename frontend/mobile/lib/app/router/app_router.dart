@@ -19,6 +19,7 @@ abstract final class AppRouter {
     RouteSettings settings, {
     GuardianChildController? childController,
     AuthProviderSignIn? authSignIn,
+    AuthSignOut? authSignOut,
     ActivityRepository? activityRepository,
     DrawingRepository? drawingRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
@@ -33,6 +34,14 @@ abstract final class AppRouter {
       ),
       ['guardian', 'home'] when childController != null => GuardianHomeScreen(
         controller: childController,
+        actions: authSignOut == null
+            ? const []
+            : [
+                LogoutActionButton(
+                  onSignOut: authSignOut,
+                  onSignedOut: goLogin,
+                ),
+              ],
       ),
       ['guardian', 'children', 'select'] when childController != null =>
         ChildSelectScreen(controller: childController),
@@ -108,6 +117,12 @@ abstract final class AppRouter {
     Navigator.of(
       context,
     ).pushNamedAndRemoveUntil(AppRoutes.guardianHome, (route) => false);
+  }
+
+  static void goLogin(BuildContext context) {
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(AppRoutes.login, (route) => false);
   }
 }
 

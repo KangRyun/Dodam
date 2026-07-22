@@ -35,6 +35,7 @@ class DodamApp extends StatefulWidget {
 
 class _DodamAppState extends State<DodamApp> {
   late final GuardianChildController _childController;
+  late final AuthRepositoryImpl _authRepository;
   late final SocialLoginService _socialLoginService;
   late final KakaoLoginCoordinator _kakaoLoginCoordinator;
   late final GoogleLoginCoordinator _googleLoginCoordinator;
@@ -46,8 +47,8 @@ class _DodamAppState extends State<DodamApp> {
     _childController = GuardianChildController(widget.childRepository);
     _childController.loadChildren();
 
-    final authRepository = AuthRepositoryImpl();
-    _socialLoginService = SocialLoginService(authRepository);
+    _authRepository = AuthRepositoryImpl();
+    _socialLoginService = SocialLoginService(_authRepository);
     _kakaoLoginCoordinator = KakaoLoginCoordinator(
       KakaoLoginClientImpl(),
       _socialLoginService,
@@ -68,6 +69,12 @@ class _DodamAppState extends State<DodamApp> {
     AuthProvider.google => _googleLoginCoordinator.signIn(),
     AuthProvider.naver => _naverLoginCoordinator.signIn(),
   };
+
+  // 인증 세션과 보호자 선택 상태 초기화
+  Future<void> _signOut() async {
+    await _authRepository.signOut();
+    _childController.clearSelection();
+  }
 
   @override
   void dispose() {
@@ -92,6 +99,7 @@ class _DodamAppState extends State<DodamApp> {
       settings,
       childController: _childController,
       authSignIn: _signIn,
+      authSignOut: _signOut,
       activityRepository: widget.activityRepository,
       drawingRepository: widget.drawingRepository,
       drawingCompletionSnapshotProvider:
