@@ -50,10 +50,10 @@
 
 외부·내부 JSON은 camelCase, DB 컬럼은 snake_case, Enum 직렬값은 UPPER_SNAKE_CASE를 사용한다. AI 질문은 `conversation_messages`에 `sender_type=AI`, `message_type=QUESTION`으로 저장한다.
 
-- `options_json`: 선택지가 있을 때만 `{code, label}` 배열을 저장한다. 중복 code, 빈 배열, 빈 label은 금지한다.
-- `target_object_json`, `bounding_box`: 대상 객체가 있을 때만 저장한다. 대상이 없으면 `null`이며 빈 객체·빈 배열은 금지한다.
+- 선택지는 `conversation_message_options`에 행 단위 Snapshot으로 저장한다. 중복 code, 빈 배열, 빈 label은 금지한다.
+- 대상 객체와 Bounding Box는 `conversation_message_targets`에 1:1로 저장한다. 대상이 없으면 행을 생성하지 않는다.
 - AI 생성 질문은 `question_template_id=null`이다. BE 템플릿 폴백은 선택한 활성 템플릿 ID를 저장한다.
-- 논리명 `drawingSessionId`는 현행 `conversation_sessions.conversation_id` 물리 컬럼에 명시 매핑한다. API에는 `conversation_id` 별칭을 노출하지 않는다.
+- 논리명 `drawingSessionId`는 `conversation_sessions.drawing_session_id`에 매핑한다.
 
 질문 생성 이력은 별도 migration으로 `ai_question_generation_histories`에 저장한다. 이력에는 세션/메시지/분석 FK, 요청 ID의 SHA-256 해시, 모델·프롬프트·안전 규칙 버전, 결과 상태, 폴백 여부, UTC 생성 시각을 저장한다. 원문 대화·질문·프롬프트 본문·토큰·시크릿·안전 필터 추론 근거는 저장하지 않는다.
 
