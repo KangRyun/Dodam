@@ -7,7 +7,8 @@
 //   - 시크릿 .env 는 Jenkins Credentials(secret file, id: dodam-env)로 주입 — 저장소 커밋 금지
 //   - 컨트롤러 인-빌드(별도 에이전트 없음)
 //
-// 흐름: Checkout → Build&Test(backend) → Docker Build → ai import 스모크 → Deploy(develop) → Healthcheck
+// 흐름: Checkout → Build&Test(backend) → [이하 develop만] Docker Build → ai import 스모크 → Deploy → Healthcheck
+//   브랜치(MR) 빌드는 테스트까지만 — 자원 절약 + 모든 브랜치가 :local 태그를 덮어쓰는 레이스 방지.
 // 알림: 빌드 성공/실패를 Mattermost Incoming Webhook으로 전송 (크레덴셜 id: mattermost-webhook)
 
 // Mattermost 알림 — 알림 실패가 빌드 결과를 바꾸면 안 되므로 try/catch + `|| true`로 이중 방어.
@@ -73,6 +74,7 @@ pipeline {
     }
 
     stage('Docker Build') {
+      when { branch 'develop' }      // develop만 이미지 빌드 — 브랜치 빌드가 :local을 덮어 배포 레이스 만드는 것 차단
       steps {
         // 앱 이미지(backend·ai)를 호스트 도커에 바로 빌드(레지스트리 없음). 배포는 :local 사용.
         // 빌드 후 :<SHA> 태그도 부여 → 불변 복원지점(롤백=190에서 이 태그로 되돌림).
@@ -85,6 +87,7 @@ pipeline {
     }
 
     stage('Test — ai (import smoke)') {
+      when { branch 'develop' }      // 빌드된 이미지가 필요해 Docker Build와 세트로 develop 전용
       steps {
         // ai는 아직 유닛테스트 없음 → 빌드된 이미지에서 앱이 import 되는지만 확인. (TODO: 실제 테스트 추가)
         sh 'docker run --rm dodam-ai:local python -c "import main; print(\'ai import OK\')"'
