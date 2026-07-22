@@ -39,9 +39,9 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("5");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("6");
     assertThat(tableExists("flyway_schema_history")).isTrue();
-    assertThat(tableCount()).isEqualTo(63);
+    assertThat(tableCount()).isEqualTo(62);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
   }
@@ -93,6 +93,58 @@ class DatabaseMigrationIntegrationTest {
                 "conversation_message_selected_options",
                 "fk_conversation_message_selected_options_question_option"))
         .isTrue();
+  }
+
+  @Test
+  void supportsSocialOnlyAccountsAndImmediateUserDeletion() {
+    assertThat(columnIsNullable("users", "role")).isTrue();
+    assertThat(columnExists("auth_accounts", "provider_email")).isTrue();
+    assertThat(columnIsNullable("auth_accounts", "provider_email")).isTrue();
+    assertThat(columnExists("auth_accounts", "login_email")).isFalse();
+    assertThat(columnExists("auth_accounts", "local_login_email")).isFalse();
+    assertThat(columnExists("auth_accounts", "password_hash")).isFalse();
+    assertThat(columnExists("auth_accounts", "provider_email_verified_at")).isTrue();
+    assertThat(columnExists("auth_accounts", "email_verified_at")).isFalse();
+    assertThat(tableExists("email_verifications")).isFalse();
+    assertThat(checkConstraintContains("auth_accounts", "ck_auth_accounts_provider", "KAKAO"))
+        .isTrue();
+    assertThat(checkConstraintContains("auth_accounts", "ck_auth_accounts_provider", "LOCAL"))
+        .isFalse();
+    assertThat(foreignKeyDeleteRuleIs("expert_profiles", "fk_expert_profiles_user_id", "CASCADE"))
+        .isTrue();
+
+    jdbcTemplate.update("INSERT INTO users (id, role) VALUES (9201, NULL)");
+    jdbcTemplate.update(
+        "INSERT INTO auth_accounts (user_id, provider, provider_subject, provider_email) "
+            + "VALUES (9201, 'KAKAO', '123456789', NULL)");
+    jdbcTemplate.update("INSERT INTO users (id, role) VALUES (9202, NULL), (9203, NULL)");
+    jdbcTemplate.update(
+        "INSERT INTO auth_accounts (user_id, provider, provider_subject, provider_email) "
+            + "VALUES (9202, 'GOOGLE', 'shared-provider-subject', 'google@example.com'), "
+            + "(9203, 'NAVER', 'shared-provider-subject', NULL)");
+    jdbcTemplate.update(
+        "INSERT INTO expert_profiles (id, display_name, user_id) VALUES (9201, '탈퇴 테스트', 9201)");
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM auth_accounts "
+                    + "WHERE provider IN ('KAKAO', 'GOOGLE', 'NAVER')",
+                Integer.class))
+        .isEqualTo(3);
+
+    assertThatThrownBy(
+            () ->
+                jdbcTemplate.update(
+                    "INSERT INTO auth_accounts (user_id, provider, provider_subject) "
+                        + "VALUES (9201, 'LOCAL', 'legacy@example.com')"))
+        .isInstanceOf(org.springframework.dao.DataAccessException.class);
+
+    jdbcTemplate.update("DELETE FROM users WHERE id = 9201");
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM expert_profiles WHERE id = 9201", Integer.class))
+        .isZero();
   }
 
   @Test
@@ -316,6 +368,18 @@ class DatabaseMigrationIntegrationTest {
                 + "AND constraint_name = ? AND constraint_type = 'FOREIGN KEY'",
             tableName,
             constraintName)
+        > 0;
+  }
+
+  private boolean foreignKeyDeleteRuleIs(
+      String tableName, String constraintName, String deleteRule) {
+    return count(
+            "SELECT COUNT(*) FROM information_schema.referential_constraints "
+                + "WHERE constraint_schema = DATABASE() AND table_name = ? "
+                + "AND constraint_name = ? AND delete_rule = ?",
+            tableName,
+            constraintName,
+            deleteRule)
         > 0;
   }
 
