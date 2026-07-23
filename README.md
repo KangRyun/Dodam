@@ -607,6 +607,25 @@ X-Guardian-User-Id: 10
 - 조회만으로 아동 프로필이나 보호자 관계 상태를 변경하지 않습니다.
 - 운영 요청은 `Authorization: Bearer <access-token>`의 검증된 사용자 ID를 사용합니다. `X-Guardian-User-Id`는 기존 자동화 테스트 전환을 위해 Test Profile에서만 허용되며 운영 기본값에서는 거부됩니다.
 
+## 아동 프로필 수정 API
+
+`PATCH /api/v1/children/{childId}`는 연결 보호자가 전달한 프로필 필드만 변경하고 최신 상세 정보를 반환합니다.
+
+```json
+{
+  "nickname": "새별이",
+  "relationshipType": "FATHER",
+  "questionDifficulty": "UPPER_ELEMENTARY",
+  "responseModes": ["EMOJI", "VOICE"]
+}
+```
+
+- 생략한 필드는 기존 값을 유지합니다.
+- `responseModes`를 전달하면 기존 응답 방식 목록을 요청 순서대로 교체하고 중복 값은 첫 순서만 유지합니다.
+- `birthDate`를 변경할 때도 요청일 기준 만 4~12세 범위를 적용합니다.
+- 존재하지 않음, 삭제됨, 비활성 상태와 보호자 연결 없음은 모두 `CHILD_404_001`로 처리합니다.
+- `profileImageFileId`는 현재 사전 업로드 이미지 연결 기반이 없어 계약 호환 목적으로만 받으며 프로필 이미지 저장은 수행하지 않습니다.
+
 ## 그림 활동 세션 생성 API
 
 아동의 그림 활동을 시작할 때 다음 Endpoint를 사용합니다.
