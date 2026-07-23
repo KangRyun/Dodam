@@ -1,10 +1,23 @@
+import {
+  CommunityCategoryTabs,
+  parseCommunityCategory,
+} from "@/features/community/components/community-category-tabs";
 import { CommunityShell } from "@/features/community/components/community-shell";
 
-export default function CommunityPage() {
+type CommunityPageProps = {
+  searchParams: Promise<{ category?: string }>;
+};
+
+export default async function CommunityPage({
+  searchParams,
+}: CommunityPageProps) {
+  const { category } = await searchParams;
+  const selectedCategory = parseCommunityCategory(category);
+
   return (
     <CommunityShell
       navigation={
-        <div className="h-10" aria-label="커뮤니티 카테고리 영역" />
+        <CommunityCategoryTabs selectedCategory={selectedCategory} />
       }
       sidebar={
         <>
