@@ -179,6 +179,31 @@ public class DrawingSession {
   }
 
   /**
+   * 그림 활동 완료 접수를 받을 수 있는 상태인지 확인한다.
+   *
+   * @return 삭제되지 않은 진행 중 REFLECTION 단계이면 {@code true}
+   */
+  public boolean canRequestCompletion() {
+    return deletedAt == null
+        && sessionStatus == DrawingSessionStatus.IN_PROGRESS
+        && currentStage == DrawingStage.REFLECTION;
+  }
+
+  /**
+   * 최종 분석과 선택적 리포트 생성 대기 단계로 전환한다.
+   *
+   * <p>이 전이는 비동기 작업 접수만 나타내므로 세션을 완료 처리하거나 완료 시각을 기록하지 않는다.
+   *
+   * @throws IllegalStateException 현재 세션이 완료 접수를 받을 수 없는 경우
+   */
+  public void startReporting() {
+    if (!canRequestCompletion()) {
+      throw new IllegalStateException("현재 단계에서는 완료 처리를 접수할 수 없습니다.");
+    }
+    currentStage = DrawingStage.REPORTING;
+  }
+
+  /**
    * 그림 활동 세션 식별자를 반환한다.
    *
    * @return 영속화된 세션 식별자

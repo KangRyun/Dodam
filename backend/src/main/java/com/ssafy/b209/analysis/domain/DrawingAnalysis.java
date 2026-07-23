@@ -135,6 +135,38 @@ public class DrawingAnalysis {
   }
 
   /**
+   * 그림 활동 완료 후 비동기 처리를 기다리는 최종 분석 요청을 생성한다.
+   *
+   * <p>외부 AI 처리를 아직 시작하지 않았으므로 {@code startedAt}과 {@code completedAt}은 기록하지 않는다.
+   *
+   * @param drawingSession 분석 대상 그림 활동 세션
+   * @param drawingAsset 분석 대상 최종 그림
+   * @param taskType 수행할 최종 분석 작업 유형
+   * @param idempotencyKey 완료 접수 요청을 식별하는 멱등 키
+   * @param requestedAt 서버가 요청을 접수한 UTC 시각
+   * @return {@link DrawingAnalysisState#PENDING} 상태의 최종 분석 요청
+   */
+  public static DrawingAnalysis pending(
+      DrawingSession drawingSession,
+      DrawingAsset drawingAsset,
+      DrawingAnalysisType taskType,
+      String idempotencyKey,
+      LocalDateTime requestedAt) {
+    DrawingAnalysis analysis = new DrawingAnalysis();
+    analysis.drawingSession =
+        Objects.requireNonNull(drawingSession, "drawingSession must not be null");
+    analysis.drawingAsset = Objects.requireNonNull(drawingAsset, "drawingAsset must not be null");
+    analysis.scope = DrawingAnalysisScope.FINAL;
+    analysis.taskType = Objects.requireNonNull(taskType, "taskType must not be null");
+    analysis.requestId = requireText(idempotencyKey, "idempotencyKey");
+    analysis.state = DrawingAnalysisState.PENDING;
+    analysis.triggerReason = "ACTIVITY_COMPLETE";
+    analysis.requestedAt = Objects.requireNonNull(requestedAt, "requestedAt must not be null");
+    analysis.createdAt = requestedAt;
+    return analysis;
+  }
+
+  /**
    * 유효한 AI 결과와 Detection을 연결하고 분석을 성공 상태로 전환한다.
    *
    * @param modelName 분석에 사용한 Model 이름
@@ -254,6 +286,15 @@ public class DrawingAnalysis {
    */
   public LocalDateTime getRequestedAt() {
     return requestedAt;
+  }
+
+  /**
+   * 외부 분석 처리를 실제로 시작한 시각을 반환한다.
+   *
+   * @return 처리를 시작하기 전이면 {@code null}
+   */
+  public LocalDateTime getStartedAt() {
+    return startedAt;
   }
 
   /**

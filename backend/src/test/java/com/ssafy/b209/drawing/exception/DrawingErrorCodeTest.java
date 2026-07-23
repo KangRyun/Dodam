@@ -101,6 +101,21 @@ class DrawingErrorCodeTest {
         DrawingErrorCode.DRAWING_REFLECTION_NOT_ALLOWED,
         new ErrorContract(
             HttpStatus.CONFLICT, "DRAWING_409_012", "현재 상태에서는 그림 활동 감정을 저장할 수 없습니다."));
+    expected.put(
+        DrawingErrorCode.FINAL_ASSET_REQUIRED,
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_013", "최종 그림이 필요합니다."));
+    expected.put(
+        DrawingErrorCode.REFLECTION_REQUIRED,
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_014", "감정 돌아보기 입력이 필요합니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_CONVERSATION_NOT_COMPLETED,
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_015", "대화 완료 또는 생략 상태가 올바르지 않습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_SESSION_ALREADY_COMPLETED,
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_016", "그림 활동 완료가 이미 접수되었습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_COMPLETION_CONFLICT,
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_017", "그림 활동 완료 접수 요청이 충돌했습니다."));
 
     assertThat(DrawingErrorCode.values()).containsExactlyInAnyOrderElementsOf(expected.keySet());
     expected.forEach(

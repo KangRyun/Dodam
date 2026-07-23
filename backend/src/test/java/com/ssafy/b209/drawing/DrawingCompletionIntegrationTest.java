@@ -1,0 +1,157 @@
+package com.ssafy.b209.drawing;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.ssafy.b209.auth.token.AuthenticatedUser;
+import java.util.List;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.containers.MySQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
+
+/** MySQL에서 그림 활동 완료 접수의 분석·리포트·세션 전환과 DB 멱등성을 함께 검증한다. */
+@Testcontainers(disabledWithoutDocker = true)
+@SpringBootTest
+@AutoConfigureMockMvc
+@ActiveProfiles("integration-test")
+class DrawingCompletionIntegrationTest {
+
+  private static final long GUARDIAN_ID = 41L;
+  private static final long SESSION_ID = 1430L;
+
+  @Container @ServiceConnection
+  static final MySQLContainer<?> MYSQL_CONTAINER =
+      new MySQLContainer<>("mysql:8.4.10")
+          .withDatabaseName("dodam_completion")
+          .withUsername("test")
+          .withPassword("test");
+
+  @Autowired private MockMvc mockMvc;
+  @Autowired private JdbcTemplate jdbcTemplate;
+
+  @BeforeEach
+  void setUp() {
+    SecurityContextHolder.getContext()
+        .setAuthentication(
+            UsernamePasswordAuthenticationToken.authenticated(
+                new AuthenticatedUser(GUARDIAN_ID), null, List.of()));
+    jdbcTemplate.update("DELETE FROM reports");
+    jdbcTemplate.update("DELETE FROM analyses");
+    jdbcTemplate.update("DELETE FROM conversation_sessions");
+    jdbcTemplate.update("DELETE FROM drawing_assets");
+    jdbcTemplate.update("DELETE FROM drawing_session_emotions");
+    jdbcTemplate.update("DELETE FROM drawing_sessions");
+    jdbcTemplate.update("DELETE FROM guardian_child_relations");
+    jdbcTemplate.update("DELETE FROM drawing_types");
+    jdbcTemplate.update("DELETE FROM children");
+    jdbcTemplate.update("DELETE FROM users");
+    jdbcTemplate.update(
+        "INSERT INTO users (id, role, nickname, account_status) "
+            + "VALUES (?, 'GUARDIAN', 'completion-guardian', 'ACTIVE')",
+        GUARDIAN_ID);
+    jdbcTemplate.update(
+        "INSERT INTO children "
+            + "(id, nickname, birth_date, question_difficulty, tutorial_status, profile_status) "
+            + "VALUES (143, 'completion-child', '2020-07-23', 'PRESCHOOL', 'COMPLETED', 'ACTIVE')");
+    jdbcTemplate.update(
+        "INSERT INTO guardian_child_relations "
+            + "(guardian_user_id, child_id, relationship_type) VALUES (?, 143, 'MOTHER')",
+        GUARDIAN_ID);
+    jdbcTemplate.update(
+        "INSERT INTO drawing_types "
+            + "(id, code, name, activity_category, selectable_by, is_active, display_order) "
+            + "VALUES (143, 'COMPLETION_TEST', 'Completion Test', 'GENERAL', 'BOTH', TRUE, 1)");
+    jdbcTemplate.update(
+        "INSERT INTO drawing_sessions "
+            + "(id, child_id, drawing_type_id, input_method, session_status, current_stage, started_at) "
+            + "VALUES (?, 143, 143, 'CANVAS', 'IN_PROGRESS', 'REFLECTION', UTC_TIMESTAMP(6))",
+        SESSION_ID);
+    jdbcTemplate.update(
+        "INSERT INTO drawing_assets "
+            + "(id, drawing_session_id, asset_type, asset_version, storage_key, mime_type, "
+            + "file_size_bytes, checksum_sha256, captured_at) "
+            + "VALUES (1430, ?, 'FINAL', 1, 'completion/final.png', 'image/png', "
+            + "8, REPEAT('c', 64), UTC_TIMESTAMP(6))",
+        SESSION_ID);
+    jdbcTemplate.update(
+        "INSERT INTO conversation_sessions "
+            + "(drawing_session_id, conversation_status, difficulty_snapshot, "
+            + "max_question_count, question_count, started_at, completed_at) "
+            + "VALUES (?, 'COMPLETED', 'PRESCHOOL', 5, 3, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))",
+        SESSION_ID);
+  }
+
+  @AfterEach
+  void clearSecurityContext() {
+    SecurityContextHolder.clearContext();
+  }
+
+  @Test
+  void storesCompletionAtomicallyAndReturnsSameResultForRetry() throws Exception {
+    String firstBody =
+        mockMvc
+            .perform(completionRequest("completion-key-143"))
+            .andExpect(status().isAccepted())
+            .andExpect(jsonPath("$.data.currentStage").value("REPORTING"))
+            .andExpect(jsonPath("$.data.analysisStatus").value("PENDING"))
+            .andExpect(jsonPath("$.data.reportStatus").value("GENERATING"))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    String retryBody =
+        mockMvc
+            .perform(completionRequest("completion-key-143"))
+            .andExpect(status().isAccepted())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    assertThat(retryBody).isEqualTo(firstBody);
+    assertThat(count("analyses")).isEqualTo(1);
+    assertThat(count("reports")).isEqualTo(1);
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT current_stage FROM drawing_sessions WHERE id = ?",
+                String.class,
+                SESSION_ID))
+        .isEqualTo("REPORTING");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT analysis_task_type FROM analyses WHERE drawing_session_id = ?",
+                String.class,
+                SESSION_ID))
+        .isEqualTo("ACTIVITY_REPORT");
+
+    mockMvc.perform(completionRequest("another-completion-key")).andExpect(status().isConflict());
+    assertThat(count("analyses")).isEqualTo(1);
+    assertThat(count("reports")).isEqualTo(1);
+  }
+
+  private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
+      completionRequest(String idempotencyKey) {
+    return post("/api/v1/drawing-sessions/{drawingSessionId}/complete", SESSION_ID)
+        .header("Idempotency-Key", idempotencyKey)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("{\"conversationSkipped\":false,\"requestReport\":true}");
+  }
+
+  private int count(String tableName) {
+    return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + tableName, Integer.class);
+  }
+}
