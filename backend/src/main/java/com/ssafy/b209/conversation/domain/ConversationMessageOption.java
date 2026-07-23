@@ -51,4 +51,28 @@ public class ConversationMessageOption {
       Long conversationMessageId, QuestionOption option, short displayOrder) {
     return new ConversationMessageOption(conversationMessageId, option, displayOrder);
   }
+
+  public Long getId() {
+    return id;
+  }
+
+  public Long getConversationMessageId() {
+    return conversationMessageId;
+  }
+
+  public String getOptionKey() {
+    return optionKey;
+  }
+
+  public String getOptionType() {
+    return optionType;
+  }
+
+  public String getOptionValue() {
+    return optionValue;
+  }
+
+  public String getLabel() {
+    return label;
+  }
 }
