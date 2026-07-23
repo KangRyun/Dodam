@@ -10,23 +10,21 @@ void main() {
   runApp(createDefaultApp());
 }
 
-/// Creates the normal app runtime with the public API-backed Drawing flow.
+/// 공개 API와 Provider SDK를 사용하는 기본 애플리케이션 구성을 생성한다.
 ///
-/// Tests and explicit mock entry points can continue constructing [DodamApp]
-/// with a [MockDrawingRepository] through its existing constructor injection.
+/// 테스트에서는 [DodamApp]의 생성자 주입을 통해 Mock Repository를 사용할 수
+/// 있으며, 기본 구성은 인증 세션과 Drawing API가 같은 [ApiClient]를 공유한다.
 DodamApp createDefaultApp({
   ApiEnvironment? environment,
   AuthSessionStore? authSessionStore,
 }) {
-  final authRepository = AuthRepositoryImpl(
-    providerScenarios: const {
-      AuthProvider.kakao: MockAuthScenario.newUserWithoutEmail,
-      AuthProvider.google: MockAuthScenario.newGuardian,
-      AuthProvider.naver: MockAuthScenario.newGuardian,
-    },
+  late final ApiClient apiClient;
+  final authRepository = RemoteAuthRepository(
+    apiClient: () => apiClient,
+    deviceIdProvider: SecureDeviceIdProvider(),
     sessionStore: authSessionStore ?? SecureAuthSessionStore(),
   );
-  final apiClient = ApiClient(
+  apiClient = ApiClient(
     environment: environment ?? ApiEnvironment.fromDartDefine(),
     accessTokenProvider: authRepository,
     tokenRefresher: authRepository,

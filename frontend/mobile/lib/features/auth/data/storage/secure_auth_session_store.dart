@@ -42,7 +42,7 @@ final class SecureAuthSessionStore implements AuthSessionStore {
       'id': session.user.id,
       'provider': session.user.provider.wireName,
       'providerUserId': session.user.providerUserId,
-      'role': session.user.role.wireName,
+      'role': session.user.role?.wireName,
       'onboardingCompleted': session.user.onboardingCompleted,
       'email': session.user.email,
       'nickname': session.user.nickname,
@@ -66,9 +66,11 @@ final class SecureAuthSessionStore implements AuthSessionStore {
         id: user['id'] as String,
         provider: AuthProvider.fromWireName(user['provider'] as String),
         providerUserId: user['providerUserId'] as String,
-        role: UserRole.values.firstWhere(
-          (role) => role.wireName == user['role'],
-        ),
+        role: user['role'] == null
+            ? null
+            : UserRole.values.firstWhere(
+                (role) => role.wireName == user['role'],
+              ),
         onboardingCompleted: user['onboardingCompleted'] as bool,
         email: user['email'] as String?,
         nickname: user['nickname'] as String?,
