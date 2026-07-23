@@ -3,6 +3,8 @@ package com.ssafy.b209.analysis.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
@@ -13,6 +15,8 @@ import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
+import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
+import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.global.exception.BusinessException;
@@ -34,6 +38,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 class DrawingAnalysisQueryServiceTest {
 
   private static final long SESSION_ID = 10L;
+  private static final long GUARDIAN_USER_ID = 41L;
   private static final long ASSET_ID = 20L;
   private static final long ANALYSIS_ID = 30L;
   private static final LocalDateTime REQUESTED_AT = LocalDateTime.parse("2026-07-22T05:00:00");
@@ -42,12 +47,31 @@ class DrawingAnalysisQueryServiceTest {
   @Mock private DrawingAnalysisRepository drawingAnalysisRepository;
   @Mock private DrawingSession session;
   @Mock private DrawingAsset asset;
+  @Mock private CurrentAuthenticatedUserResolver currentUserResolver;
+  @Mock private GuardianResourceAccessValidator accessValidator;
 
   private DrawingAnalysisQueryService service;
 
   @BeforeEach
   void setUp() {
-    service = new DrawingAnalysisQueryService(drawingAnalysisRepository);
+    service =
+        new DrawingAnalysisQueryService(
+            drawingAnalysisRepository, currentUserResolver, accessValidator);
+  }
+
+  @Test
+  void rejectsUnownedSessionBeforeReadingAnalysis() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    willThrow(
+            new BusinessException(
+                com.ssafy.b209.drawing.exception.DrawingErrorCode.DRAWING_SESSION_NOT_FOUND))
+        .given(accessValidator)
+        .requireDrawingSessionAccess(GUARDIAN_USER_ID, SESSION_ID);
+
+    assertThatThrownBy(() -> service.getDrawingAnalysis(SESSION_ID, ANALYSIS_ID))
+        .isInstanceOf(BusinessException.class);
+
+    verifyNoInteractions(drawingAnalysisRepository);
   }
 
   @ParameterizedTest

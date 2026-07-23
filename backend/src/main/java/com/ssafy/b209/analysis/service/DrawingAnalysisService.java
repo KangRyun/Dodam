@@ -7,6 +7,8 @@ import com.ssafy.b209.analysis.dto.DrawingAnalysisResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingImageReference;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
+import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
+import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClient;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClientException;
@@ -37,6 +39,8 @@ public class DrawingAnalysisService {
   private final DrawingAnalysisClient drawingAnalysisClient;
   private final Validator validator;
   private final Clock clock;
+  private final CurrentAuthenticatedUserResolver currentUserResolver;
+  private final GuardianResourceAccessValidator accessValidator;
   private final Supplier<UUID> requestIdSupplier;
 
   /**
@@ -46,14 +50,25 @@ public class DrawingAnalysisService {
    * @param drawingAnalysisClient 활성화된 그림 분석 Client
    * @param validator AI 응답 계약을 검증하는 Bean Validator
    * @param clock 요청 및 실패 시각을 생성하는 UTC 시계
+   * @param currentUserResolver Access Token에서 현재 사용자 ID를 제공하는 Resolver
+   * @param accessValidator 보호자와 그림 활동의 연결 관계를 검증하는 Validator
    */
   @Autowired
   public DrawingAnalysisService(
       DrawingAnalysisPersistenceService persistenceService,
       DrawingAnalysisClient drawingAnalysisClient,
       Validator validator,
-      Clock clock) {
-    this(persistenceService, drawingAnalysisClient, validator, clock, UUID::randomUUID);
+      Clock clock,
+      CurrentAuthenticatedUserResolver currentUserResolver,
+      GuardianResourceAccessValidator accessValidator) {
+    this(
+        persistenceService,
+        drawingAnalysisClient,
+        validator,
+        clock,
+        currentUserResolver,
+        accessValidator,
+        UUID::randomUUID);
   }
 
   DrawingAnalysisService(
@@ -61,11 +76,15 @@ public class DrawingAnalysisService {
       DrawingAnalysisClient drawingAnalysisClient,
       Validator validator,
       Clock clock,
+      CurrentAuthenticatedUserResolver currentUserResolver,
+      GuardianResourceAccessValidator accessValidator,
       Supplier<UUID> requestIdSupplier) {
     this.persistenceService = Objects.requireNonNull(persistenceService);
     this.drawingAnalysisClient = Objects.requireNonNull(drawingAnalysisClient);
     this.validator = Objects.requireNonNull(validator);
     this.clock = Objects.requireNonNull(clock);
+    this.currentUserResolver = Objects.requireNonNull(currentUserResolver);
+    this.accessValidator = Objects.requireNonNull(accessValidator);
     this.requestIdSupplier = Objects.requireNonNull(requestIdSupplier);
   }
 
@@ -79,6 +98,8 @@ public class DrawingAnalysisService {
    */
   public CreateDrawingAnalysisResponse requestAnalysis(
       Long drawingSessionId, CreateDrawingAnalysisRequest request) {
+    Long guardianUserId = currentUserResolver.requireUserId();
+    accessValidator.requireDrawingSessionAccess(guardianUserId, drawingSessionId);
     String requestId = requestIdSupplier.get().toString();
     Instant requestedInstant = clock.instant();
     LocalDateTime requestedAt = LocalDateTime.ofInstant(requestedInstant, ZoneOffset.UTC);

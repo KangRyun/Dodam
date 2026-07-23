@@ -3,8 +3,11 @@ package com.ssafy.b209.drawing.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
+import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingInputMethod;
@@ -31,6 +34,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 class DrawingSessionQueryServiceTest {
 
   private static final Long CHILD_ID = 3L;
+  private static final Long GUARDIAN_USER_ID = 41L;
   private static final Long SESSION_ID = 10L;
   private static final LocalDateTime STARTED_AT = LocalDateTime.of(2026, 7, 22, 4, 0);
   private static final LocalDateTime CLIENT_SAVED_AT = LocalDateTime.of(2026, 7, 22, 4, 5);
@@ -43,12 +47,29 @@ class DrawingSessionQueryServiceTest {
   @Mock private DrawingAsset draft;
   @Mock private Child child;
   @Mock private DrawingType drawingType;
+  @Mock private CurrentAuthenticatedUserResolver currentUserResolver;
+  @Mock private GuardianResourceAccessValidator accessValidator;
 
   private DrawingSessionQueryService service;
 
   @BeforeEach
   void setUp() {
-    service = new DrawingSessionQueryService(drawingSessionRepository, drawingAssetRepository);
+    service =
+        new DrawingSessionQueryService(
+            drawingSessionRepository, drawingAssetRepository, currentUserResolver, accessValidator);
+  }
+
+  @Test
+  void rejectsUnownedChildBeforeReadingActiveSession() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    willThrow(new BusinessException(com.ssafy.b209.child.exception.ChildErrorCode.CHILD_NOT_FOUND))
+        .given(accessValidator)
+        .requireChildAccess(GUARDIAN_USER_ID, CHILD_ID);
+
+    assertThatThrownBy(() -> service.getActiveDrawingSession(CHILD_ID))
+        .isInstanceOf(BusinessException.class);
+
+    verifyNoInteractions(drawingSessionRepository, drawingAssetRepository);
   }
 
   @Test

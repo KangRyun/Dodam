@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.dto.BoundingBoxResponse;
@@ -17,6 +19,8 @@ import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.dto.DrawingDetectionResponse;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
+import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
+import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClient;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClientException;
@@ -41,6 +45,7 @@ import org.springframework.dao.DataAccessResourceFailureException;
 class DrawingAnalysisServiceTest {
 
   private static final long SESSION_ID = 10L;
+  private static final long GUARDIAN_USER_ID = 41L;
   private static final long ASSET_ID = 20L;
   private static final long ANALYSIS_ID = 30L;
   private static final Instant REQUESTED_AT = Instant.parse("2026-07-22T05:00:00Z");
@@ -49,6 +54,8 @@ class DrawingAnalysisServiceTest {
 
   @Mock private DrawingAnalysisPersistenceService persistenceService;
   @Mock private DrawingAnalysisClient drawingAnalysisClient;
+  @Mock private CurrentAuthenticatedUserResolver currentUserResolver;
+  @Mock private GuardianResourceAccessValidator accessValidator;
 
   private DrawingAnalysisService service;
 
@@ -61,7 +68,29 @@ class DrawingAnalysisServiceTest {
             drawingAnalysisClient,
             validator,
             Clock.fixed(REQUESTED_AT, ZoneOffset.UTC),
+            currentUserResolver,
+            accessValidator,
             () -> REQUEST_ID);
+  }
+
+  @Test
+  void rejectsUnownedSessionBeforeStartingOrCallingAi() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    willThrow(
+            new BusinessException(
+                com.ssafy.b209.drawing.exception.DrawingErrorCode.DRAWING_SESSION_NOT_FOUND))
+        .given(accessValidator)
+        .requireDrawingSessionAccess(GUARDIAN_USER_ID, SESSION_ID);
+
+    assertThatThrownBy(
+            () ->
+                service.requestAnalysis(
+                    SESSION_ID,
+                    new CreateDrawingAnalysisRequest(
+                        ASSET_ID, DrawingAnalysisType.OBJECT_DETECTION)))
+        .isInstanceOf(BusinessException.class);
+
+    verifyNoInteractions(persistenceService, drawingAnalysisClient);
   }
 
   @Test

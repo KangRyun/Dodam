@@ -4,10 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
+import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.dto.request.SaveDrawingDraftRequest;
@@ -37,6 +40,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 class DrawingDraftServiceTest {
 
   private static final Long SESSION_ID = 10L;
+  private static final Long GUARDIAN_USER_ID = 41L;
   private static final Instant NOW = Instant.parse("2026-07-22T05:30:01Z");
   private static final String STORAGE_KEY = "drafts/10/new.png";
 
@@ -44,6 +48,8 @@ class DrawingDraftServiceTest {
   @Mock private DrawingAssetRepository drawingAssetRepository;
   @Mock private ImageStorage imageStorage;
   @Mock private DrawingSession drawingSession;
+  @Mock private CurrentAuthenticatedUserResolver currentUserResolver;
+  @Mock private GuardianResourceAccessValidator accessValidator;
 
   private DrawingDraftService service;
   private StoreImageCommand preview;
@@ -55,10 +61,24 @@ class DrawingDraftServiceTest {
             drawingSessionRepository,
             drawingAssetRepository,
             imageStorage,
+            currentUserResolver,
+            accessValidator,
             Clock.fixed(NOW, ZoneOffset.UTC));
     preview =
         new StoreImageCommand(
             new ByteArrayInputStream(new byte[] {1}), 1, "image/png", "draft.png");
+  }
+
+  @Test
+  void rejectsUnownedSessionBeforeReadingDraftMetadata() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    willThrow(new BusinessException(DrawingErrorCode.DRAWING_SESSION_NOT_FOUND))
+        .given(accessValidator)
+        .requireDrawingSessionAccess(GUARDIAN_USER_ID, SESSION_ID);
+
+    assertThatThrownBy(() -> service.getLatest(SESSION_ID)).isInstanceOf(BusinessException.class);
+
+    verifyNoInteractions(drawingSessionRepository, drawingAssetRepository, imageStorage);
   }
 
   @Test

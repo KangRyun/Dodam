@@ -17,11 +17,13 @@ import com.ssafy.b209.analysis.dto.DrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingDetectionResponse;
+import com.ssafy.b209.auth.token.AuthenticatedUser;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClient;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClientException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +32,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
@@ -42,6 +46,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @AutoConfigureMockMvc
 @ActiveProfiles("integration-test")
 class DrawingAnalysisIntegrationTest {
+
+  private static final Long GUARDIAN_USER_ID = 41L;
 
   @Container @ServiceConnection
   static final MySQLContainer<?> MYSQL_CONTAINER =
@@ -56,16 +62,30 @@ class DrawingAnalysisIntegrationTest {
 
   @BeforeEach
   void setUp() {
+    SecurityContextHolder.getContext()
+        .setAuthentication(
+            UsernamePasswordAuthenticationToken.authenticated(
+                new AuthenticatedUser(GUARDIAN_USER_ID), null, List.of()));
     jdbcTemplate.update("DELETE FROM analysis_detected_objects");
     jdbcTemplate.update("DELETE FROM analyses");
     jdbcTemplate.update("DELETE FROM drawing_assets");
     jdbcTemplate.update("DELETE FROM drawing_sessions");
+    jdbcTemplate.update("DELETE FROM guardian_child_relations");
     jdbcTemplate.update("DELETE FROM drawing_types");
     jdbcTemplate.update("DELETE FROM children");
+    jdbcTemplate.update("DELETE FROM users");
+    jdbcTemplate.update(
+        "INSERT INTO users (id, role, nickname, account_status) "
+            + "VALUES (?, 'GUARDIAN', 'analysis-guardian', 'ACTIVE')",
+        GUARDIAN_USER_ID);
     jdbcTemplate.update(
         "INSERT INTO children "
             + "(id, nickname, birth_date, question_difficulty, tutorial_status, profile_status) "
             + "VALUES (1, 'analysis-child', '2020-07-21', 'PRESCHOOL', 'NOT_STARTED', 'ACTIVE')");
+    jdbcTemplate.update(
+        "INSERT INTO guardian_child_relations "
+            + "(guardian_user_id, child_id, relationship_type) VALUES (?, 1, 'MOTHER')",
+        GUARDIAN_USER_ID);
     jdbcTemplate.update(
         "INSERT INTO drawing_types "
             + "(id, code, name, activity_category, selectable_by, recommended_age_min, "
@@ -82,6 +102,11 @@ class DrawingAnalysisIntegrationTest {
             + "file_size_bytes, checksum_sha256, captured_at) "
             + "VALUES (20, 10, 'FINAL', 1, '2026/07/22/final.png', 'image/png', "
             + "1024, REPEAT('a', 64), UTC_TIMESTAMP(6))");
+  }
+
+  @AfterEach
+  void clearSecurityContext() {
+    SecurityContextHolder.clearContext();
   }
 
   @Test

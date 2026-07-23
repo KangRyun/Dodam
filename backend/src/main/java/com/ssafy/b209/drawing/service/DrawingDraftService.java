@@ -1,5 +1,7 @@
 package com.ssafy.b209.drawing.service;
 
+import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
+import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.dto.request.SaveDrawingDraftRequest;
@@ -34,6 +36,8 @@ public class DrawingDraftService {
   private final DrawingSessionRepository drawingSessionRepository;
   private final DrawingAssetRepository drawingAssetRepository;
   private final ImageStorage imageStorage;
+  private final CurrentAuthenticatedUserResolver currentUserResolver;
+  private final GuardianResourceAccessValidator accessValidator;
   private final Clock clock;
 
   /**
@@ -42,16 +46,22 @@ public class DrawingDraftService {
    * @param drawingSessionRepository 세션 조회와 잠금 Repository
    * @param drawingAssetRepository 초안 Metadata Repository
    * @param imageStorage 검증된 이미지 저장과 보상 삭제 경계
+   * @param currentUserResolver Access Token에서 현재 사용자 ID를 제공하는 Resolver
+   * @param accessValidator 보호자와 그림 활동의 연결 관계를 검증하는 Validator
    * @param clock 서버 저장 시각을 제공하는 Clock
    */
   public DrawingDraftService(
       DrawingSessionRepository drawingSessionRepository,
       DrawingAssetRepository drawingAssetRepository,
       ImageStorage imageStorage,
+      CurrentAuthenticatedUserResolver currentUserResolver,
+      GuardianResourceAccessValidator accessValidator,
       Clock clock) {
     this.drawingSessionRepository = drawingSessionRepository;
     this.drawingAssetRepository = drawingAssetRepository;
     this.imageStorage = imageStorage;
+    this.currentUserResolver = currentUserResolver;
+    this.accessValidator = accessValidator;
     this.clock = clock;
   }
 
@@ -68,6 +78,7 @@ public class DrawingDraftService {
   public DrawingDraftResponse save(
       Long drawingSessionId, StoreImageCommand preview, SaveDrawingDraftRequest request) {
     validate(preview, request);
+    requireAccess(drawingSessionId);
     DrawingSession session =
         drawingSessionRepository
             .findNotDeletedByIdForUpdate(drawingSessionId)
@@ -112,6 +123,7 @@ public class DrawingDraftService {
    */
   @Transactional(readOnly = true)
   public DrawingDraftResponse getLatest(Long drawingSessionId) {
+    requireAccess(drawingSessionId);
     drawingSessionRepository
         .findNotDeletedById(drawingSessionId)
         .orElseThrow(() -> new BusinessException(DrawingErrorCode.DRAWING_SESSION_NOT_FOUND));
@@ -120,6 +132,11 @@ public class DrawingDraftService {
             .findLatestDraft(drawingSessionId)
             .orElseThrow(() -> new BusinessException(DrawingErrorCode.DRAWING_DRAFT_NOT_FOUND));
     return toResponse(draft);
+  }
+
+  private void requireAccess(Long drawingSessionId) {
+    Long guardianUserId = currentUserResolver.requireUserId();
+    accessValidator.requireDrawingSessionAccess(guardianUserId, drawingSessionId);
   }
 
   private void validate(StoreImageCommand preview, SaveDrawingDraftRequest request) {

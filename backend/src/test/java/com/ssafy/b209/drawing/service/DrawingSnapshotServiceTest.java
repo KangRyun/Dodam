@@ -4,10 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
+import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingAssetType;
 import com.ssafy.b209.drawing.domain.DrawingSession;
@@ -39,12 +42,15 @@ class DrawingSnapshotServiceTest {
 
   private static final Instant NOW = Instant.parse("2026-07-22T01:00:00Z");
   private static final Long SESSION_ID = 10L;
+  private static final Long GUARDIAN_USER_ID = 41L;
   private static final String STORAGE_KEY = "2026/07/image.png";
 
   @Mock private DrawingSessionRepository drawingSessionRepository;
   @Mock private DrawingAssetRepository drawingAssetRepository;
   @Mock private ImageStorage imageStorage;
   @Mock private DrawingSession drawingSession;
+  @Mock private CurrentAuthenticatedUserResolver currentUserResolver;
+  @Mock private GuardianResourceAccessValidator accessValidator;
 
   private DrawingSnapshotService service;
   private StoreImageCommand file;
@@ -56,8 +62,24 @@ class DrawingSnapshotServiceTest {
             drawingSessionRepository,
             drawingAssetRepository,
             imageStorage,
+            currentUserResolver,
+            accessValidator,
             Clock.fixed(NOW, ZoneOffset.UTC));
     file = new StoreImageCommand(new ByteArrayInputStream(new byte[] {1}), 1, "image/png", "a.png");
+  }
+
+  @Test
+  void rejectsUnownedSessionBeforeStoringSnapshot() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    willThrow(new BusinessException(DrawingErrorCode.DRAWING_SESSION_NOT_FOUND))
+        .given(accessValidator)
+        .requireDrawingSessionAccess(GUARDIAN_USER_ID, SESSION_ID);
+
+    assertThatThrownBy(
+            () -> service.upload(SESSION_ID, file, request(DrawingAssetType.INTERMEDIATE, 1)))
+        .isInstanceOf(BusinessException.class);
+
+    verifyNoInteractions(drawingSessionRepository, drawingAssetRepository, imageStorage);
   }
 
   @Test

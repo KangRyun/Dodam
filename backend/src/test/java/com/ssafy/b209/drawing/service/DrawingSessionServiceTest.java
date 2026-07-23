@@ -6,10 +6,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
+import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.child.domain.ChildFixture;
 import com.ssafy.b209.child.domain.ChildProfileStatus;
@@ -49,12 +52,15 @@ import org.springframework.test.util.ReflectionTestUtils;
 class DrawingSessionServiceTest {
 
   private static final String KEY = "drawing-key-1234";
+  private static final Long GUARDIAN_USER_ID = 41L;
   private static final Instant NOW = Instant.parse("2026-07-21T02:30:00Z");
   private static final LocalDateTime SERVER_TIME = LocalDateTime.ofInstant(NOW, ZoneOffset.UTC);
 
   @Mock private ChildRepository childRepository;
   @Mock private DrawingTypeRepository drawingTypeRepository;
   @Mock private DrawingSessionRepository drawingSessionRepository;
+  @Mock private CurrentAuthenticatedUserResolver currentUserResolver;
+  @Mock private GuardianResourceAccessValidator accessValidator;
 
   private DrawingSessionService service;
   private Child child;
@@ -67,6 +73,8 @@ class DrawingSessionServiceTest {
             childRepository,
             drawingTypeRepository,
             drawingSessionRepository,
+            currentUserResolver,
+            accessValidator,
             Clock.fixed(NOW, ZoneOffset.UTC));
     child =
         ChildFixture.create(
@@ -78,6 +86,19 @@ class DrawingSessionServiceTest {
     drawingType =
         DrawingTypeFixture.create(
             2L, "FREE_DRAWING", "자유화 활동", DrawingTypeSelectableBy.BOTH, 5, 10, true);
+  }
+
+  @Test
+  void rejectsUnownedChildBeforeReadingOrCreatingSession() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    willThrow(new BusinessException(com.ssafy.b209.child.exception.ChildErrorCode.CHILD_NOT_FOUND))
+        .given(accessValidator)
+        .requireChildAccess(GUARDIAN_USER_ID, 1L);
+
+    assertThatThrownBy(() -> service.createDrawingSession(KEY, request(CANVAS)))
+        .isInstanceOf(BusinessException.class);
+
+    verifyNoInteractions(childRepository, drawingTypeRepository, drawingSessionRepository);
   }
 
   @Test

@@ -6,9 +6,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ssafy.b209.auth.token.AuthenticatedUser;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,6 +21,8 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -32,6 +37,7 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @ActiveProfiles("integration-test")
 class DrawingSnapshotUploadIntegrationTest {
 
+  private static final Long GUARDIAN_USER_ID = 41L;
   private static final byte[] PNG =
       new byte[] {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01};
   private static final Path STORAGE_ROOT = createStorageRoot();
@@ -53,14 +59,28 @@ class DrawingSnapshotUploadIntegrationTest {
 
   @BeforeEach
   void setUp() {
+    SecurityContextHolder.getContext()
+        .setAuthentication(
+            UsernamePasswordAuthenticationToken.authenticated(
+                new AuthenticatedUser(GUARDIAN_USER_ID), null, List.of()));
     jdbcTemplate.update("DELETE FROM drawing_assets");
     jdbcTemplate.update("DELETE FROM drawing_sessions");
+    jdbcTemplate.update("DELETE FROM guardian_child_relations");
     jdbcTemplate.update("DELETE FROM drawing_types");
     jdbcTemplate.update("DELETE FROM children");
+    jdbcTemplate.update("DELETE FROM users");
+    jdbcTemplate.update(
+        "INSERT INTO users (id, role, nickname, account_status) "
+            + "VALUES (?, 'GUARDIAN', 'snapshot-guardian', 'ACTIVE')",
+        GUARDIAN_USER_ID);
     jdbcTemplate.update(
         "INSERT INTO children "
             + "(id, nickname, birth_date, question_difficulty, tutorial_status, profile_status) "
             + "VALUES (1, 'child-one', '2020-07-21', 'PRESCHOOL', 'NOT_STARTED', 'ACTIVE')");
+    jdbcTemplate.update(
+        "INSERT INTO guardian_child_relations "
+            + "(guardian_user_id, child_id, relationship_type) VALUES (?, 1, 'MOTHER')",
+        GUARDIAN_USER_ID);
     jdbcTemplate.update(
         "INSERT INTO drawing_types "
             + "(id, code, name, activity_category, selectable_by, recommended_age_min, "
@@ -70,6 +90,11 @@ class DrawingSnapshotUploadIntegrationTest {
         "INSERT INTO drawing_sessions "
             + "(id, child_id, drawing_type_id, input_method, session_status, current_stage, started_at) "
             + "VALUES (10, 1, 1, 'CANVAS', 'IN_PROGRESS', 'DRAWING', UTC_TIMESTAMP(6))");
+  }
+
+  @AfterEach
+  void clearSecurityContext() {
+    SecurityContextHolder.clearContext();
   }
 
   @Test

@@ -1,5 +1,7 @@
 package com.ssafy.b209.drawing.service;
 
+import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
+import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingAssetType;
 import com.ssafy.b209.drawing.domain.DrawingSession;
@@ -35,6 +37,8 @@ public class DrawingSnapshotService {
   private final DrawingSessionRepository drawingSessionRepository;
   private final DrawingAssetRepository drawingAssetRepository;
   private final ImageStorage imageStorage;
+  private final CurrentAuthenticatedUserResolver currentUserResolver;
+  private final GuardianResourceAccessValidator accessValidator;
   private final Clock clock;
 
   /**
@@ -43,16 +47,22 @@ public class DrawingSnapshotService {
    * @param drawingSessionRepository 세션 조회와 잠금에 사용하는 저장소
    * @param drawingAssetRepository 중복 확인과 Metadata 저장에 사용하는 저장소
    * @param imageStorage 이미지 검증·저장과 보상 삭제를 담당하는 저장소
+   * @param currentUserResolver Access Token에서 현재 사용자 ID를 제공하는 Resolver
+   * @param accessValidator 보호자와 그림 활동의 연결 관계를 검증하는 Validator
    * @param clock 서버 저장 시각을 결정하는 시계
    */
   public DrawingSnapshotService(
       DrawingSessionRepository drawingSessionRepository,
       DrawingAssetRepository drawingAssetRepository,
       ImageStorage imageStorage,
+      CurrentAuthenticatedUserResolver currentUserResolver,
+      GuardianResourceAccessValidator accessValidator,
       Clock clock) {
     this.drawingSessionRepository = drawingSessionRepository;
     this.drawingAssetRepository = drawingAssetRepository;
     this.imageStorage = imageStorage;
+    this.currentUserResolver = currentUserResolver;
+    this.accessValidator = accessValidator;
     this.clock = clock;
   }
 
@@ -68,6 +78,8 @@ public class DrawingSnapshotService {
   public UploadDrawingSnapshotResponse upload(
       Long drawingSessionId, StoreImageCommand file, UploadDrawingSnapshotRequest request) {
     validateRequest(file, request);
+    Long guardianUserId = currentUserResolver.requireUserId();
+    accessValidator.requireDrawingSessionAccess(guardianUserId, drawingSessionId);
     DrawingSession session =
         drawingSessionRepository
             .findNotDeletedByIdForUpdate(drawingSessionId)
