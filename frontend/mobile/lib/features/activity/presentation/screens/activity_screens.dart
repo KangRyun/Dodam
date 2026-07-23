@@ -139,6 +139,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
             ),
       );
     }
+    _objectDetectionController?.addListener(_handleObjectDetectionChanged);
     _ownsDraftRestoreController = widget.draftRestoreController == null;
     _draftRestoreController =
         widget.draftRestoreController ??
@@ -211,6 +212,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     _syncCoordinator.removeListener(_handleSyncChanged);
     _draftRestoreController.removeListener(_handleDraftRestoreChanged);
     if (_ownsDraftRestoreController) _draftRestoreController.dispose();
+    _objectDetectionController?.removeListener(_handleObjectDetectionChanged);
     if (_ownsObjectDetectionController) {
       _objectDetectionController?.dispose();
     }
@@ -246,6 +248,20 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   void _handleDraftRestoreChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _handleObjectDetectionChanged() {
+    final detectionController = _objectDetectionController;
+    final questionController = _questionController;
+    final result = detectionController?.validResult;
+    if (detectionController?.status != DrawingObjectDetectionStatus.succeeded ||
+        result == null ||
+        questionController == null ||
+        _conversationEndController?.completed == true) {
+      return;
+    }
+    // 최신 탐지 결과의 분석 ID로 질문을 생성해 그림과 질문의 기준을 일치
+    unawaited(questionController.loadForAnalysis(result.drawingAnalysisId));
   }
 
   void _handleQuestionChanged() {
@@ -1025,7 +1041,7 @@ class _DrawingSidePanel extends StatelessWidget {
           ),
           const SizedBox(height: AppSpacing.lg),
           if (questionController case final controller?)
-            AiQuestionLoadPanel(controller: controller)
+            AiQuestionLoadPanel(controller: controller, loadOnMount: false)
           else
             Container(
               padding: const EdgeInsets.all(AppSpacing.md),

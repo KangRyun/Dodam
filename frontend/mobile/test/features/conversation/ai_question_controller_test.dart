@@ -55,6 +55,24 @@ void main() {
       expect(controller.status, AiQuestionStatus.success);
       expect(repository.idempotencyKeys, ['stable-key', 'stable-key']);
     });
+
+    test('새 객체 탐지 결과마다 분석 ID를 바꿔 다음 질문을 요청한다', () async {
+      var keySequence = 0;
+      final repository = _RecordingConversationRepository();
+      final controller = AiQuestionController(
+        repository,
+        conversationId: 11,
+        idempotencyKeyProvider: () => 'question-key-${++keySequence}',
+      );
+
+      await controller.loadForAnalysis(701);
+      await controller.loadForAnalysis(701);
+      await controller.loadForAnalysis(702);
+
+      expect(repository.callCount, 2);
+      expect(repository.basisAnalysisIds, [701, 702]);
+      expect(repository.idempotencyKeys, ['question-key-1', 'question-key-2']);
+    });
   });
 }
 
@@ -68,6 +86,7 @@ final class _RecordingConversationRepository implements ConversationRepository {
   NextQuestionRequest? lastRequest;
   String? lastIdempotencyKey;
   final List<String> idempotencyKeys = [];
+  final List<int?> basisAnalysisIds = [];
 
   @override
   Future<AiQuestion> requestNextQuestion({
@@ -78,6 +97,7 @@ final class _RecordingConversationRepository implements ConversationRepository {
     callCount++;
     lastConversationId = conversationId;
     lastRequest = request;
+    basisAnalysisIds.add(request.basisAnalysisId);
     lastIdempotencyKey = idempotencyKey;
     idempotencyKeys.add(idempotencyKey);
     if (failOnce && callCount == 1) throw Exception('temporary failure');

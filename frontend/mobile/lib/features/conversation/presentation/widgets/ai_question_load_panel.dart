@@ -7,9 +7,14 @@ import '../../application/ai_question_controller.dart';
 
 // 질문 조회 로딩·오류·준비 완료 상태 표시
 final class AiQuestionLoadPanel extends StatefulWidget {
-  const AiQuestionLoadPanel({required this.controller, super.key});
+  const AiQuestionLoadPanel({
+    required this.controller,
+    this.loadOnMount = true,
+    super.key,
+  });
 
   final AiQuestionController controller;
+  final bool loadOnMount;
 
   @override
   State<AiQuestionLoadPanel> createState() => _AiQuestionLoadPanelState();
@@ -20,7 +25,7 @@ final class _AiQuestionLoadPanelState extends State<AiQuestionLoadPanel> {
   void initState() {
     super.initState();
     widget.controller.addListener(_refresh);
-    unawaited(widget.controller.load());
+    if (widget.loadOnMount) unawaited(widget.controller.load());
   }
 
   @override
@@ -29,7 +34,7 @@ final class _AiQuestionLoadPanelState extends State<AiQuestionLoadPanel> {
     if (oldWidget.controller == widget.controller) return;
     oldWidget.controller.removeListener(_refresh);
     widget.controller.addListener(_refresh);
-    unawaited(widget.controller.load());
+    if (widget.loadOnMount) unawaited(widget.controller.load());
   }
 
   @override
@@ -48,6 +53,16 @@ final class _AiQuestionLoadPanelState extends State<AiQuestionLoadPanel> {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 200),
       child: switch (controller.status) {
+        AiQuestionStatus.initial when !widget.loadOnMount => const _StatusCard(
+          key: ValueKey('ai-question-waiting-for-drawing'),
+          icon: Icon(
+            Icons.auto_awesome_rounded,
+            color: AppColors.tangerine,
+            size: 32,
+          ),
+          title: '그림을 자유롭게 그려 보세요',
+          description: '그림을 보고 도다미가 궁금한 것을 물어볼 거예요.',
+        ),
         AiQuestionStatus.initial ||
         AiQuestionStatus.loading => const _StatusCard(
           key: ValueKey('ai-question-loading'),
