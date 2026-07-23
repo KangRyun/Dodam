@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -16,6 +17,7 @@ import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.user.dto.response.UserResponse;
 import com.ssafy.b209.user.service.UserOnboardingService;
 import com.ssafy.b209.user.service.UserQueryService;
+import com.ssafy.b209.user.service.UserUpdateService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -32,6 +34,25 @@ class UserControllerTest {
   @MockitoBean private CurrentAuthenticatedUserResolver currentUserResolver;
   @MockitoBean private UserOnboardingService onboardingService;
   @MockitoBean private UserQueryService queryService;
+  @MockitoBean private UserUpdateService updateService;
+
+  @Test
+  void updatesTheAuthenticatedUsersNickname() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(51L);
+    given(updateService.updateProfile(eq(51L), any()))
+        .willReturn(
+            new UserResponse(
+                51L, UserRole.GUARDIAN, "새별이", "guardian@example.com", AccountStatus.ACTIVE, true));
+
+    mockMvc
+        .perform(
+            patch("/api/v1/users/me")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"nickname\": \"새별이\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.nickname").value("새별이"));
+  }
 
   @Test
   void returnsTheAuthenticatedUsersCurrentState() throws Exception {

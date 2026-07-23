@@ -151,6 +151,17 @@ public class User {
   }
 
   /**
+   * 사용자 표시 이름을 변경한다.
+   *
+   * @param nickname 변경할 닉네임
+   * @param now 변경 처리 시각
+   */
+  public void changeNickname(String nickname, LocalDateTime now) {
+    this.nickname = Objects.requireNonNull(nickname, "nickname must not be null");
+    this.updatedAt = Objects.requireNonNull(now, "now must not be null");
+  }
+
+  /**
    * 성공한 로그인 시각을 갱신한다.
    *
    * @param loggedInAt Provider 인증과 서비스 계정 확인을 마친 시각
