@@ -1,22 +1,13 @@
 # syntax=docker/dockerfile:1
-# 도담 backend(Spring Boot, Java 21) 이미지 — 멀티스테이지로 빌드/런타임 분리해 이미지 최소화.
-# 관련 이슈: S15P11B209-185 (docker-compose 서비스 골격)
+# 도담 backend(Spring Boot, Java 21) 런타임 이미지.
+# 관련 이슈: S15P11B209-185(compose 골격) · S15P11B209-391 Phase 2(이중 컴파일 제거)
+#
+# ⚠️ 빌드 전제: CI(Jenkins)가 이 이미지를 빌드하기 전에 `./gradlew test bootJar`로
+#   backend/build/libs/*.jar 를 먼저 산출한다. 그 jar를 COPY만 하므로 이미지 빌드에
+#   Gradle 컴파일이 없다(테스트 단계에서 이미 컴파일한 결과를 재사용 — 이중 컴파일 제거).
+#   로컬에서 이 이미지를 단독/compose로 빌드하려면 먼저 `cd backend && ./gradlew bootJar`.
+#   (jar가 없으면 아래 COPY가 실패 → "먼저 bootJar 하라"는 신호.)
 
-##### 1) build stage — Gradle로 실행 가능한 jar(bootJar) 생성 #####
-FROM eclipse-temurin:21-jdk-jammy AS build
-WORKDIR /app
-
-# 의존성 캐시 레이어를 살리기 위해 빌드 스크립트/래퍼를 소스보다 "먼저" 복사한다.
-#   → src만 바뀌면 아래 의존성 다운로드 레이어는 캐시 재사용(빌드 빨라짐).
-COPY gradlew settings.gradle build.gradle ./
-COPY gradle ./gradle
-RUN chmod +x gradlew && ./gradlew --no-daemon dependencies || true
-
-# 소스 복사 후 실제 빌드. 테스트는 CI 단계에서 별도 수행하므로 여기선 제외(-x test)해 빌드 단축.
-COPY src ./src
-RUN ./gradlew --no-daemon clean bootJar -x test
-
-##### 2) runtime stage — JRE만 담아 실행(이미지 크기↓) #####
 FROM eclipse-temurin:21-jre-jammy AS runtime
 WORKDIR /app
 
@@ -32,8 +23,10 @@ RUN mkdir -p /app/storage/images && chown -R spring:spring /app/storage
 
 USER spring
 
-# 빌드 스테이지 산출물 jar만 가져온다(버전 무관하게 app.jar로 고정 → 태그 바뀌어도 ENTRYPOINT 불변).
-COPY --from=build /app/build/libs/*.jar app.jar
+# CI가 산출한 실행 가능 jar만 가져온다(버전 무관하게 app.jar로 고정 → 태그 바뀌어도 ENTRYPOINT 불변).
+#   .dockerignore가 build/libs 를 예외로 포함하고 plain jar(*-plain.jar)는 제외하므로
+#   와일드카드는 bootJar 하나만 매칭한다.
+COPY build/libs/*.jar app.jar
 
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

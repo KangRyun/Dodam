@@ -120,7 +120,10 @@ pipeline {
           // 테스트를 여기서 돌린다(이미지 빌드는 -x test로 스킵). 실패 시 파이프라인 중단 = 배포 안 함.
           // clean 제거 + --build-cache: 워크스페이스가 브랜치별로 재사용되므로 증분 컴파일 활용
           //   (S15P11B209-391 — clean은 매번 풀컴파일을 강제해 2~4분 낭비였음)
-          sh 'chmod +x gradlew && ./gradlew --no-daemon --build-cache test'
+          // test와 bootJar를 한 Gradle 호출로 산출(Phase 2): 테스트용 컴파일 결과를 bootJar가
+          //   그대로 재사용하므로 이미지 빌드에서 재컴파일하지 않는다(이중 컴파일 제거).
+          //   backend/build/libs/*.jar 를 Docker가 COPY만 한다(backend/Dockerfile 참조).
+          sh 'chmod +x gradlew && ./gradlew --no-daemon --build-cache test bootJar'
         }
       }
       post {
