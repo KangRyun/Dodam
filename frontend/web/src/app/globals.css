@@ -140,6 +140,53 @@ a {
   min-width: 0;
 }
 
+.community-category-tabs {
+  display: flex;
+  gap: 10px;
+  min-height: 50px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.community-category-tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.community-category-tab {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  height: 38px;
+  padding: 0 18px;
+  border: 1px solid #dfe4dc;
+  border-radius: 999px;
+  background: #fff;
+  color: #6e7882;
+  font-size: 14px;
+  font-weight: 600;
+  transition:
+    border-color 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease;
+}
+
+.community-category-tab:hover {
+  border-color: #9eaaa0;
+  color: #29323d;
+}
+
+.community-category-tab[data-selected="true"] {
+  border-color: #29323d;
+  background: #29323d;
+  color: #fff;
+}
+
+.community-category-tab:focus-visible {
+  outline: 3px solid rgb(108 163 124 / 30%);
+  outline-offset: 2px;
+}
+
 .community-feed {
   min-height: 620px;
 }
