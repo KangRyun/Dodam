@@ -40,6 +40,7 @@ class DrawingScreen extends StatefulWidget {
     this.completionSnapshotProvider,
     this.idempotencyKeyProvider,
     this.conversationRepository,
+    this.conversationAnswerRepository,
     this.conversationId,
     this.basisAnalysisId,
     super.key,
@@ -55,6 +56,7 @@ class DrawingScreen extends StatefulWidget {
   final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
   final String Function()? idempotencyKeyProvider;
   final ConversationRepository? conversationRepository;
+  final ConversationAnswerRepository? conversationAnswerRepository;
   final int? conversationId;
   final int? basisAnalysisId;
 
@@ -84,6 +86,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   AiQuestionController? _questionController;
   late final AiQuestionDisplayController _questionDisplayController;
   late final AiQuestionSelectionController _questionSelectionController;
+  OptionAnswerSubmissionController? _answerSubmissionController;
 
   @override
   void initState() {
@@ -121,6 +124,13 @@ class _DrawingScreenState extends State<DrawingScreen> {
         basisAnalysisId: widget.basisAnalysisId,
       );
       _questionController!.addListener(_handleQuestionChanged);
+      _answerSubmissionController = OptionAnswerSubmissionController(
+        widget.conversationAnswerRepository ??
+            const MockConversationAnswerRepository(),
+        conversationId: conversationId,
+        idempotencyKeyProvider:
+            widget.idempotencyKeyProvider ?? _createIdempotencyKey,
+      )..addListener(_handleAnswerSubmissionChanged);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -144,6 +154,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
       _handleQuestionSelectionChanged,
     );
     _questionSelectionController.dispose();
+    _answerSubmissionController?.removeListener(_handleAnswerSubmissionChanged);
+    _answerSubmissionController?.dispose();
     super.dispose();
   }
 
@@ -166,7 +178,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final accepted = _questionDisplayController.receive(question);
-      if (accepted) _questionSelectionController.beginQuestion(question);
+      if (accepted) {
+        _questionSelectionController.beginQuestion(question);
+        _answerSubmissionController?.beginQuestion();
+      }
     });
   }
 
@@ -178,10 +193,21 @@ class _DrawingScreenState extends State<DrawingScreen> {
     if (mounted) setState(() {});
   }
 
-  void _selectQuestionOption(int optionId) {
+  void _handleAnswerSubmissionChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _selectQuestionOption(int optionId) async {
     final question = _questionDisplayController.visibleQuestion;
     if (question == null) return;
-    _questionSelectionController.select(question, optionId);
+    final valid = _questionSelectionController.select(question, optionId);
+    final controller = _answerSubmissionController;
+    if (!valid || controller == null) return;
+    final submitted = await controller.submit(
+      questionMessageId: question.messageId,
+      optionId: optionId,
+    );
+    if (submitted) _questionDisplayController.dismiss();
   }
 
   void _skipQuestionLocally() {
@@ -407,7 +433,12 @@ class _DrawingScreenState extends State<DrawingScreen> {
                 _draftRestoreController.canDraw,
             selectedQuestionOptionId:
                 _questionSelectionController.selectedOptionId,
-            onQuestionOptionSelected: _selectQuestionOption,
+            onQuestionOptionSelected: (optionId) {
+              unawaited(_selectQuestionOption(optionId));
+            },
+            answerSubmissionStatus:
+                _answerSubmissionController?.status ??
+                OptionAnswerSubmissionStatus.idle,
             showQuestionResponseActions:
                 _questionSelectionController.optionsVisible,
             onQuestionSkip: _skipQuestionLocally,
@@ -475,6 +506,7 @@ class _CanvasPanel extends StatelessWidget {
     required this.showQuestion,
     required this.selectedQuestionOptionId,
     required this.onQuestionOptionSelected,
+    required this.answerSubmissionStatus,
     required this.showQuestionResponseActions,
     required this.onQuestionSkip,
   });
@@ -497,6 +529,7 @@ class _CanvasPanel extends StatelessWidget {
   final bool showQuestion;
   final int? selectedQuestionOptionId;
   final ValueChanged<int> onQuestionOptionSelected;
+  final OptionAnswerSubmissionStatus answerSubmissionStatus;
   final bool showQuestionResponseActions;
   final VoidCallback onQuestionSkip;
 
@@ -536,6 +569,7 @@ class _CanvasPanel extends StatelessWidget {
           selectedOptionId: selectedQuestionOptionId,
           onOptionSelected: onQuestionOptionSelected,
           showResponseActions: showQuestionResponseActions,
+          submissionStatus: answerSubmissionStatus,
           onSkip: onQuestionSkip,
         ),
         if (!inputEnabled)

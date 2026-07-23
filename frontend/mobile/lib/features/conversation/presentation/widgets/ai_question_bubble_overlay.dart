@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../design_system/design_system.dart';
+import '../../application/option_answer_submission_controller.dart';
 import '../../domain/models/ai_question.dart';
 
 // 질문 도착 시 캔버스 위에 표시하는 캐릭터와 말풍선
@@ -11,6 +12,7 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
     required this.selectedOptionId,
     required this.onOptionSelected,
     required this.showResponseActions,
+    required this.submissionStatus,
     required this.onSkip,
     super.key,
   });
@@ -22,6 +24,7 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
   final int? selectedOptionId;
   final ValueChanged<int> onOptionSelected;
   final bool showResponseActions;
+  final OptionAnswerSubmissionStatus submissionStatus;
   final VoidCallback onSkip;
 
   @override
@@ -68,6 +71,7 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                             selectedOptionId: selectedOptionId,
                             onSelected: onOptionSelected,
                             onSkip: onSkip,
+                            submissionStatus: submissionStatus,
                           ),
                         ),
                       ],
@@ -91,6 +95,7 @@ final class _ResponseActions extends StatelessWidget {
     required this.selectedOptionId,
     required this.onSelected,
     required this.onSkip,
+    required this.submissionStatus,
     super.key,
   });
 
@@ -98,6 +103,7 @@ final class _ResponseActions extends StatelessWidget {
   final int? selectedOptionId;
   final ValueChanged<int> onSelected;
   final VoidCallback onSkip;
+  final OptionAnswerSubmissionStatus submissionStatus;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -108,11 +114,29 @@ final class _ResponseActions extends StatelessWidget {
           options: options,
           selectedOptionId: selectedOptionId,
           onSelected: onSelected,
+          enabled: submissionStatus != OptionAnswerSubmissionStatus.submitting,
         ),
+      if (submissionStatus == OptionAnswerSubmissionStatus.submitting) ...[
+        const SizedBox(height: AppSpacing.xs),
+        const LinearProgressIndicator(
+          key: ValueKey('ai-question-answer-submitting'),
+        ),
+      ],
+      if (submissionStatus == OptionAnswerSubmissionStatus.failure) ...[
+        const SizedBox(height: AppSpacing.xs),
+        const Text(
+          '답을 보내지 못했어요. 다시 눌러 주세요.',
+          key: ValueKey('ai-question-answer-failure'),
+          textAlign: TextAlign.center,
+          style: TextStyle(color: AppColors.error, fontWeight: FontWeight.w700),
+        ),
+      ],
       const SizedBox(height: AppSpacing.xs),
       TextButton.icon(
         key: const ValueKey('ai-question-skip'),
-        onPressed: onSkip,
+        onPressed: submissionStatus == OptionAnswerSubmissionStatus.submitting
+            ? null
+            : onSkip,
         icon: const Icon(Icons.sentiment_neutral_rounded),
         label: const Text('말 안 할래'),
         style: TextButton.styleFrom(
@@ -134,11 +158,13 @@ final class _QuestionOptions extends StatelessWidget {
     required this.options,
     required this.selectedOptionId,
     required this.onSelected,
+    required this.enabled,
   });
 
   final List<AiQuestionOption> options;
   final int? selectedOptionId;
   final ValueChanged<int> onSelected;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -154,7 +180,7 @@ final class _QuestionOptions extends StatelessWidget {
               child: _QuestionOptionButton(
                 option: option,
                 selected: selectedOptionId == option.optionId,
-                onTap: () => onSelected(option.optionId),
+                onTap: enabled ? () => onSelected(option.optionId) : null,
               ),
             ),
         ],
@@ -172,7 +198,7 @@ final class _QuestionOptionButton extends StatelessWidget {
 
   final AiQuestionOption option;
   final bool selected;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) => Semantics(
