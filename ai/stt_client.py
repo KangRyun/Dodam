@@ -29,7 +29,7 @@ def transcribe(audio_path: str, *, language: str = "ko") -> str:
         RuntimeError: GMS 호출 실패 시.
     """
     try:
-        with open("/home/kr/S15P11B209/ai/out.mp3", "rb") as f:
+        with open(audio_path, "rb") as f:
             resp = get_client().audio.transcriptions.create(
                 model=config.STT_MODEL,
                 file=f,
