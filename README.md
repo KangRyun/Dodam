@@ -568,6 +568,8 @@ Google 요청:
 
 선택 약관은 `PATCH /api/v1/consents`에서 같은 요청 형식으로 동의·철회·재동의할 수 있습니다. 이 API는 선택 약관만 허용하며, 변경 결과도 기존 행을 갱신하지 않고 새 `consent_records` 이력으로 추가합니다. 필수 약관 변경은 `CONSENT_400_002`로 거부됩니다.
 
+`GET /api/v1/consents/history`는 사용자 본인과 현재 연결된 아동의 버전별 동의·철회 이력을 최신순으로 반환합니다. `childId`, `termCode`, `from`, `to`, `page`, `size`로 결과를 좁힐 수 있으며 날짜는 ISO date 형식이고 양 끝 날짜를 모두 포함합니다. 특정 `childId`를 지정하면 현재 연결 보호자인지 확인하고, 감사용 IP와 User-Agent는 응답에 노출하지 않습니다.
+
 ## 아동 정보 조회 API
 
 연결된 보호자는 다음 Endpoint로 삭제되지 않은 활성 아동의 상세 프로필을 조회합니다.

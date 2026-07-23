@@ -121,6 +121,39 @@ class ConsentStatusIntegrationTest {
         .andExpect(jsonPath("$.data.items[1].agreed").value(true));
   }
 
+  @Test
+  void returnsEveryAccessibleConsentVersionAndActionInNewestFirstOrder() throws Exception {
+    jdbcTemplate.update(
+        "INSERT INTO consent_terms "
+            + "(id, term_code, target_scope, is_required, version, title, effective_at, is_active) "
+            + "VALUES (3, 'MARKETING', 'USER', FALSE, 'v2', '마케팅 수신 개정', "
+            + "'2020-01-01 00:00:00', TRUE)");
+    jdbcTemplate.update(
+        "UPDATE consent_records SET recorded_at = '2026-07-20 00:00:00' WHERE consent_term_id = 2");
+    jdbcTemplate.update(
+        "INSERT INTO consent_records "
+            + "(consent_term_id, actor_user_id, subject_child_id, subject_reference_hash, action, recorded_at) "
+            + "VALUES (3, ?, NULL, REPEAT('b', 64), 'AGREE', '2026-07-23 00:00:00')",
+        USER_ID);
+
+    mockMvc
+        .perform(
+            get("/api/v1/consents/history")
+                .param("termCode", "MARKETING")
+                .param("from", "2026-07-20")
+                .param("to", "2026-07-23")
+                .param("page", "0")
+                .param("size", "2"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.content.length()").value(2))
+        .andExpect(jsonPath("$.data.content[0].version").value("v2"))
+        .andExpect(jsonPath("$.data.content[0].action").value("AGREE"))
+        .andExpect(jsonPath("$.data.content[1].version").value("v1"))
+        .andExpect(jsonPath("$.data.totalElements").value(3))
+        .andExpect(jsonPath("$.data.totalPages").value(2))
+        .andExpect(jsonPath("$.data.hasNext").value(true));
+  }
+
   private void setAuthenticatedUser(Long userId) {
     SecurityContextHolder.getContext()
         .setAuthentication(
