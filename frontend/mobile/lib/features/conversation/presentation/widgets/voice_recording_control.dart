@@ -20,10 +20,12 @@ final class VoiceRecordingControl extends StatefulWidget {
   State<VoiceRecordingControl> createState() => _VoiceRecordingControlState();
 }
 
-final class _VoiceRecordingControlState extends State<VoiceRecordingControl> {
+final class _VoiceRecordingControlState extends State<VoiceRecordingControl>
+    with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     widget.controller.addListener(_handleChanged);
   }
 
@@ -37,8 +39,19 @@ final class _VoiceRecordingControlState extends State<VoiceRecordingControl> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     widget.controller.removeListener(_handleChanged);
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      widget.controller.interrupt();
+    }
   }
 
   void _handleChanged() {
@@ -125,6 +138,30 @@ final class _VoiceRecordingControlState extends State<VoiceRecordingControl> {
             onPressed: controller.openPermissionSettings,
             icon: const Icon(Icons.settings_rounded),
             label: const Text('기기 설정 열기'),
+          ),
+        ],
+        if (controller.status == VoiceRecordingStatus.failed) ...[
+          const SizedBox(height: AppSpacing.xs),
+          const Text(
+            '목소리를 담지 못했어요. 다시 말하거나 아래에서 골라도 괜찮아요.',
+            key: ValueKey('voice-recording-failed'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.error,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+        if (controller.status == VoiceRecordingStatus.interrupted) ...[
+          const SizedBox(height: AppSpacing.xs),
+          const Text(
+            '녹음이 잠시 멈췄어요. 다시 말하거나 아래에서 골라 주세요.',
+            key: ValueKey('voice-recording-interrupted'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.inkMuted,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ],
         if (recording != null && !recordingNow) ...[

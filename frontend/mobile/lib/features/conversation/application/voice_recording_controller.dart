@@ -15,6 +15,8 @@ enum VoiceRecordingStatus {
   completed,
   permissionDenied,
   permissionPermanentlyDenied,
+  failed,
+  interrupted,
 }
 
 final class VoiceRecordingController extends ChangeNotifier {
@@ -54,7 +56,8 @@ final class VoiceRecordingController extends ChangeNotifier {
       _status == VoiceRecordingStatus.awaitingChoice ||
       _status == VoiceRecordingStatus.permissionDenied ||
       _status == VoiceRecordingStatus.permissionPermanentlyDenied ||
-      (_status == VoiceRecordingStatus.idle && _lastError != null);
+      _status == VoiceRecordingStatus.failed ||
+      _status == VoiceRecordingStatus.interrupted;
   Duration get elapsed => _stopwatch.elapsed;
   bool get isRecording => _status == VoiceRecordingStatus.recording;
   bool get isBusy =>
@@ -82,6 +85,7 @@ final class VoiceRecordingController extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+    if (_status != VoiceRecordingStatus.starting) return false;
 
     _recording = null;
     _lastError = null;
@@ -90,6 +94,10 @@ final class VoiceRecordingController extends ChangeNotifier {
     notifyListeners();
     try {
       await _recorder.start();
+      if (_status != VoiceRecordingStatus.starting) {
+        await _recorder.cancel();
+        return false;
+      }
       _stopwatch
         ..reset()
         ..start();
@@ -105,7 +113,7 @@ final class VoiceRecordingController extends ChangeNotifier {
       return true;
     } on Object catch (error) {
       _lastError = error;
-      _status = VoiceRecordingStatus.idle;
+      _status = VoiceRecordingStatus.failed;
       notifyListeners();
       return false;
     }
@@ -116,7 +124,10 @@ final class VoiceRecordingController extends ChangeNotifier {
       await permissionService?.openSettings() ?? false;
 
   // 녹음을 종료하고 생성된 로컬 파일 정보 보관
-  Future<VoiceRecording?> stop() async {
+  Future<VoiceRecording?> stop({
+    VoiceRecordingCompletionReason reason =
+        VoiceRecordingCompletionReason.manual,
+  }) async {
     if (_status != VoiceRecordingStatus.recording) return null;
 
     _status = VoiceRecordingStatus.stopping;
@@ -132,17 +143,30 @@ final class VoiceRecordingController extends ChangeNotifier {
       if (path == null || path.isEmpty) {
         throw StateError('Recorded file path is missing');
       }
-      final result = VoiceRecording(filePath: path, duration: duration);
+      final result = VoiceRecording(
+        filePath: path,
+        duration: duration,
+        completionReason: reason,
+      );
       _recording = result;
       _status = VoiceRecordingStatus.completed;
       notifyListeners();
       return result;
     } on Object catch (error) {
       _lastError = error;
-      _status = VoiceRecordingStatus.idle;
+      _status = VoiceRecordingStatus.failed;
       notifyListeners();
       return null;
     }
+  }
+
+  // 앱 전환이나 통화 등으로 중단된 녹음 폐기
+  Future<void> interrupt() async {
+    if (_status != VoiceRecordingStatus.recording &&
+        _status != VoiceRecordingStatus.starting) {
+      return;
+    }
+    await _discardActiveRecording(VoiceRecordingStatus.interrupted);
   }
 
   // 진행 중인 음성 답변을 폐기하고 대기 상태로 복귀
@@ -191,19 +215,19 @@ final class VoiceRecordingController extends ChangeNotifier {
       if (_hasDetectedSpeech &&
           lastSpeechAt != null &&
           elapsed - lastSpeechAt >= postSpeechSilenceTimeout) {
-        await stop();
+        await stop(reason: VoiceRecordingCompletionReason.silence);
         return;
       }
       if (elapsed >= maximumDuration) {
         if (_hasDetectedSpeech) {
-          await stop();
+          await stop(reason: VoiceRecordingCompletionReason.maximumDuration);
         } else {
           await _moveToChoice();
         }
       }
     } on Object catch (error) {
       _lastError = error;
-      await _moveToChoice();
+      await _discardActiveRecording(VoiceRecordingStatus.failed);
     } finally {
       _readingAmplitude = false;
     }
@@ -211,6 +235,10 @@ final class VoiceRecordingController extends ChangeNotifier {
 
   Future<void> _moveToChoice() async {
     if (_status != VoiceRecordingStatus.recording) return;
+    await _discardActiveRecording(VoiceRecordingStatus.awaitingChoice);
+  }
+
+  Future<void> _discardActiveRecording(VoiceRecordingStatus nextStatus) async {
     _ticker?.cancel();
     _ticker = null;
     _amplitudeTimer?.cancel();
@@ -224,7 +252,7 @@ final class VoiceRecordingController extends ChangeNotifier {
       _lastError = error;
     }
     _recording = null;
-    _status = VoiceRecordingStatus.awaitingChoice;
+    _status = nextStatus;
     notifyListeners();
   }
 

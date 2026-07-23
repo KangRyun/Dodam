@@ -132,6 +132,58 @@ void main() {
 
     expect(controller.status, VoiceRecordingStatus.completed);
     expect(recorder.stopCount, 1);
+    expect(
+      controller.recording?.completionReason,
+      VoiceRecordingCompletionReason.maximumDuration,
+    );
+  });
+
+  testWidgets('녹음 시작 실패 시 재시도 안내와 선택지를 제공한다', (tester) async {
+    final recorder = _FakeVoiceRecorder(failOnStart: true);
+    final controller = VoiceRecordingController(recorder);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: VoiceRecordingControl(controller: controller)),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('voice-recording-toggle')));
+    await tester.pump();
+
+    expect(controller.status, VoiceRecordingStatus.failed);
+    expect(controller.shouldShowOptions, isTrue);
+    expect(
+      find.byKey(const ValueKey('voice-recording-failed')),
+      findsOneWidget,
+    );
+  });
+
+  test('앱 전환으로 중단된 녹음을 폐기하고 선택지를 제공한다', () async {
+    final recorder = _FakeVoiceRecorder();
+    final controller = VoiceRecordingController(recorder);
+    addTearDown(controller.dispose);
+
+    await controller.start();
+    await controller.interrupt();
+
+    expect(controller.status, VoiceRecordingStatus.interrupted);
+    expect(controller.shouldShowOptions, isTrue);
+    expect(controller.recording, isNull);
+    expect(recorder.cancelCount, 1);
+  });
+
+  test('녹음 종료 실패 시 파일을 완료 처리하지 않는다', () async {
+    final recorder = _FakeVoiceRecorder(failOnStop: true);
+    final controller = VoiceRecordingController(recorder);
+    addTearDown(controller.dispose);
+
+    await controller.start();
+    final recording = await controller.stop();
+
+    expect(recording, isNull);
+    expect(controller.status, VoiceRecordingStatus.failed);
+    expect(controller.shouldShowOptions, isTrue);
   });
 
   testWidgets('마이크 권한 거부 시 다시 허용할 수 있는 안내를 표시한다', (tester) async {
@@ -207,11 +259,17 @@ final class _FakeMicrophonePermissionService
 }
 
 final class _FakeVoiceRecorder implements VoiceRecorder {
-  _FakeVoiceRecorder({this.amplitude = -20, List<double>? amplitudes})
-    : _amplitudes = amplitudes ?? [];
+  _FakeVoiceRecorder({
+    this.amplitude = -20,
+    List<double>? amplitudes,
+    this.failOnStart = false,
+    this.failOnStop = false,
+  }) : _amplitudes = amplitudes ?? [];
 
   final double amplitude;
   final List<double> _amplitudes;
+  final bool failOnStart;
+  final bool failOnStop;
   int startCount = 0;
   int stopCount = 0;
   int cancelCount = 0;
@@ -219,6 +277,7 @@ final class _FakeVoiceRecorder implements VoiceRecorder {
   @override
   Future<void> start() async {
     startCount += 1;
+    if (failOnStart) throw StateError('start failed');
   }
 
   @override
@@ -228,6 +287,7 @@ final class _FakeVoiceRecorder implements VoiceRecorder {
   @override
   Future<String?> stop() async {
     stopCount += 1;
+    if (failOnStop) throw StateError('stop failed');
     return '/tmp/voice-answer.m4a';
   }
 
