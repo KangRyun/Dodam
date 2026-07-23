@@ -93,6 +93,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   OptionAnswerSubmissionController? _answerSubmissionController;
   QuestionSkipController? _questionSkipController;
   ConversationEndController? _conversationEndController;
+  VoiceRecordingController? _voiceRecordingController;
 
   @override
   void initState() {
@@ -150,6 +151,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
         idempotencyKeyProvider:
             widget.idempotencyKeyProvider ?? _createIdempotencyKey,
       )..addListener(_handleConversationEndChanged);
+      _voiceRecordingController = VoiceRecordingController(
+        DeviceVoiceRecorder(),
+      )..addListener(_handleVoiceRecordingChanged);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -179,6 +183,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
     _questionSkipController?.dispose();
     _conversationEndController?.removeListener(_handleConversationEndChanged);
     _conversationEndController?.dispose();
+    _voiceRecordingController?.removeListener(_handleVoiceRecordingChanged);
+    _voiceRecordingController?.dispose();
     super.dispose();
   }
 
@@ -203,9 +209,14 @@ class _DrawingScreenState extends State<DrawingScreen> {
       if (!mounted) return;
       final accepted = _questionDisplayController.receive(question);
       if (accepted) {
-        _questionSelectionController.beginQuestion(question);
+        _questionSelectionController.beginQuestion(
+          question,
+          scheduleReveal: false,
+        );
         _answerSubmissionController?.beginQuestion();
         _questionSkipController?.beginQuestion();
+        // 질문이 표시되면 선택지보다 먼저 음성 답변 수집 시작
+        unawaited(_voiceRecordingController?.start());
       }
     });
   }
@@ -230,12 +241,29 @@ class _DrawingScreenState extends State<DrawingScreen> {
     if (mounted) setState(() {});
   }
 
+  void _handleVoiceRecordingChanged() {
+    final controller = _voiceRecordingController;
+    if (controller == null) return;
+    if (controller.shouldShowOptions) {
+      _questionSelectionController.revealOptions();
+    } else if (controller.status == VoiceRecordingStatus.starting ||
+        controller.status == VoiceRecordingStatus.recording) {
+      _questionSelectionController.hideOptions();
+    } else if (controller.status == VoiceRecordingStatus.completed) {
+      // 음성 답변이 완성되면 현재 질문과 캐릭터 숨김
+      _questionSelectionController.hideOptions();
+      _questionDisplayController.dismiss();
+    }
+    if (mounted) setState(() {});
+  }
+
   Future<void> _selectQuestionOption(int optionId) async {
     final question = _questionDisplayController.visibleQuestion;
     if (question == null) return;
     final valid = _questionSelectionController.select(question, optionId);
     final controller = _answerSubmissionController;
     if (!valid || controller == null) return;
+    await _voiceRecordingController?.cancel();
     final submitted = await controller.submit(
       questionMessageId: question.messageId,
       optionId: optionId,
@@ -247,6 +275,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final question = _questionDisplayController.visibleQuestion;
     final controller = _questionSkipController;
     if (question == null || controller == null) return;
+    await _voiceRecordingController?.cancel();
     final skipped = await controller.submit(
       questionMessageId: question.messageId,
     );
@@ -269,6 +298,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
+    await _voiceRecordingController?.cancel();
     final ended = await controller.submit(
       lastQuestionMessageId:
           _questionDisplayController.visibleQuestion?.messageId,
@@ -277,7 +307,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
   }
 
   void _startStroke(PointerDownEvent event) {
-    if (_activePointer != null) return;
+    if (_activePointer != null ||
+        _voiceRecordingController?.isRecording == true) {
+      return;
+    }
     _invalidatePendingCompletion();
     // 그림 입력이 시작되면 질문 오버레이 숨김
     _questionDisplayController.dismiss();
@@ -513,6 +546,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
             onConversationEnd: () {
               unawaited(_confirmAndEndConversation());
             },
+            voiceRecordingController: _voiceRecordingController,
           );
           final sidePanel = _DrawingSidePanel(
             selectedColor: _color,
@@ -583,6 +617,7 @@ class _CanvasPanel extends StatelessWidget {
     required this.showQuestionResponseActions,
     required this.onQuestionSkip,
     required this.onConversationEnd,
+    required this.voiceRecordingController,
   });
 
   final GlobalKey repaintBoundaryKey;
@@ -609,6 +644,7 @@ class _CanvasPanel extends StatelessWidget {
   final bool showQuestionResponseActions;
   final VoidCallback onQuestionSkip;
   final VoidCallback onConversationEnd;
+  final VoiceRecordingController? voiceRecordingController;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -651,6 +687,7 @@ class _CanvasPanel extends StatelessWidget {
           onSkip: onQuestionSkip,
           endStatus: conversationEndStatus,
           onEnd: onConversationEnd,
+          voiceRecordingController: voiceRecordingController,
         ),
         if (!inputEnabled)
           _DraftRestoreOverlay(

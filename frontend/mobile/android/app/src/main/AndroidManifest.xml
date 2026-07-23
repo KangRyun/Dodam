@@ -1,4 +1,7 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- 음성 답변 녹음에 필요한 마이크 권한 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
     <application
         android:label="dodam"
         android:name="${applicationName}"

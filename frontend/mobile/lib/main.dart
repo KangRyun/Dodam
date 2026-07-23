@@ -4,6 +4,7 @@ import 'app/app.dart';
 import 'app/router/app_routes.dart';
 import 'core/network/network.dart';
 import 'features/auth/auth.dart';
+import 'features/drawing/data/repositories/mock_drawing_repository.dart';
 import 'features/drawing/data/repositories/remote_drawing_repository.dart';
 
 void main() {
@@ -31,10 +32,17 @@ DodamApp createDefaultApp({
     accessTokenProvider: authRepository,
     tokenRefresher: authRepository,
   );
+  const useMockDrawing = bool.fromEnvironment(
+    'USE_MOCK_DRAWING',
+    defaultValue: false,
+  );
 
   return DodamApp(
     authRepository: authRepository,
-    drawingRepository: RemoteDrawingRepository(apiClient),
+    // 백엔드 미연결 개발 환경에서만 목 그림 세션 사용
+    drawingRepository: useMockDrawing
+        ? const MockDrawingRepository()
+        : RemoteDrawingRepository(apiClient),
     initialRoute: AppRoutes.authBootstrap,
   );
 }
