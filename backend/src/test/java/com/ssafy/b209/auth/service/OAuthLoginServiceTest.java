@@ -54,15 +54,15 @@ class OAuthLoginServiceTest {
   }
 
   @Test
-  void exchangesCodeProvisionsAccountAndIssuesServiceTokens() {
-    OAuthLoginRequest request =
-        new OAuthLoginRequest(
-            "one-time-code", "https://app.example/oauth/callback", null, "device-1");
+  void verifiesKakaoAccessTokenProvisionsAccountAndIssuesServiceTokens() {
+    OAuthLoginRequest request = new OAuthLoginRequest("kakao-access-token", null, "device-1");
+    OAuthProviderCredential credential =
+        new OAuthProviderCredential(OAuthCredentialType.ACCESS_TOKEN, "kakao-access-token");
     VerifiedOAuthIdentity identity =
         new VerifiedOAuthIdentity(AuthProvider.KAKAO, "kakao-id", null);
     User user = User.pending(LocalDateTime.of(2026, 7, 22, 11, 0));
     ReflectionTestUtils.setField(user, "id", 41L);
-    when(providerClient.verify(AuthProvider.KAKAO, request)).thenReturn(identity);
+    when(providerClient.verify(AuthProvider.KAKAO, credential)).thenReturn(identity);
     when(provisioningService.provision(identity))
         .thenReturn(new ProvisionedOAuthAccount(41L, AuthProvider.KAKAO, true, true));
     when(userRepository.findById(41L)).thenReturn(Optional.of(user));
@@ -91,15 +91,43 @@ class OAuthLoginServiceTest {
   }
 
   @Test
-  void rejectsInvalidJwtConfigurationBeforeConsumingAuthorizationCode() {
-    OAuthLoginRequest request =
-        new OAuthLoginRequest("one-time-code", "https://app.example/google", null, "device-1");
+  void rejectsInvalidJwtConfigurationBeforeConsumingProviderToken() {
+    OAuthLoginRequest request = new OAuthLoginRequest(null, "google-id-token", "device-1");
     doThrow(new BusinessException(AuthErrorCode.AUTH_CONFIGURATION_INVALID))
         .when(tokenIssuer)
         .validateConfiguration();
 
     assertThatThrownBy(() -> service.login(AuthProvider.GOOGLE, request))
         .isInstanceOf(BusinessException.class);
+
+    verifyNoInteractions(providerClient, provisioningService, userRepository);
+  }
+
+  @Test
+  void rejectsGoogleAccessTokenBeforeCallingProvider() {
+    OAuthLoginRequest request = new OAuthLoginRequest("google-access-token", null, "device-1");
+
+    assertThatThrownBy(() -> service.login(AuthProvider.GOOGLE, request))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception ->
+                assertThat(exception.getErrorCode())
+                    .isEqualTo(AuthErrorCode.OAUTH_REQUEST_INVALID));
+
+    verifyNoInteractions(providerClient, provisioningService, userRepository);
+  }
+
+  @Test
+  void rejectsBothProviderTokensBeforeCallingProvider() {
+    OAuthLoginRequest request =
+        new OAuthLoginRequest("kakao-access-token", "unexpected-id-token", "device-1");
+
+    assertThatThrownBy(() -> service.login(AuthProvider.KAKAO, request))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception ->
+                assertThat(exception.getErrorCode())
+                    .isEqualTo(AuthErrorCode.OAUTH_REQUEST_INVALID));
 
     verifyNoInteractions(providerClient, provisioningService, userRepository);
   }

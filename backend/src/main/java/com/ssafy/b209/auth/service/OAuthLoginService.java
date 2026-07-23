@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
 import org.springframework.dao.DataAccessException;
 import org.springframework.stereotype.Service;
 
-/** Provider code 검증, 서비스 계정 연결, 로그인 시각 갱신과 JWT 발급을 조율한다. */
+/** Provider Token 검증, 서비스 계정 연결, 로그인 시각 갱신과 JWT 발급을 조율한다. */
 @Service
 public class OAuthLoginService {
 
@@ -31,7 +31,7 @@ public class OAuthLoginService {
   /**
    * OAuth 로그인 Use Case를 구성한다.
    *
-   * @param providerClient Provider authorization code 검증 Client
+   * @param providerClient Provider Token 검증 Client
    * @param provisioningService 검증된 신원을 서비스 사용자와 연결하는 Service
    * @param userRepository 사용자 저장소
    * @param tokenIssuer 서비스 JWT 발급기
@@ -57,16 +57,17 @@ public class OAuthLoginService {
   }
 
   /**
-   * authorization code로 OAuth 신원을 확인하고 서비스 Token을 발급한다.
+   * Provider Token으로 OAuth 신원을 확인하고 서비스 Token을 발급한다.
    *
-   * @param provider code를 발급한 OAuth Provider
-   * @param request authorization code, Redirect URI와 기기 식별자
+   * @param provider Token을 발급한 OAuth Provider
+   * @param request Provider Token과 기기 식별자
    * @return Access·Refresh Token과 사용자 상태
    * @throws BusinessException Provider 검증 실패, 계정 정지 또는 인증 설정 오류인 경우
    */
   public OAuthLoginResult login(AuthProvider provider, OAuthLoginRequest request) {
+    OAuthProviderCredential credential = OAuthProviderCredential.from(provider, request);
     tokenIssuer.validateConfiguration();
-    VerifiedOAuthIdentity identity = providerClient.verify(provider, request);
+    VerifiedOAuthIdentity identity = providerClient.verify(provider, credential);
     ProvisionedOAuthAccount provisioned = provisioningService.provision(identity);
     User user =
         userRepository

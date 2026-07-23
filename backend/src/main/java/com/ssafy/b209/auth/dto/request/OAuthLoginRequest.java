@@ -1,18 +1,21 @@
 package com.ssafy.b209.auth.dto.request;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
 /**
- * 앱이 OAuth Provider에서 받은 일회성 authorization code를 서비스 로그인으로 교환하는 요청이다.
+ * 모바일 앱이 OAuth Provider에서 받은 Token을 서비스 로그인으로 교환하는 요청이다.
  *
- * @param authorizationCode OAuth Provider가 발급한 일회성 code
- * @param redirectUri code 발급 요청에 사용했고 서버 설정과 정확히 일치하는 URI
- * @param state Naver code 발급 요청과 응답에 사용한 state, 다른 Provider에서는 {@code null} 가능
+ * <p>Provider별 허용 필드 조합은 Path의 Provider와 함께 Service 계층에서 검증한다.
+ *
+ * @param accessToken Kakao·Naver SDK가 발급한 Access Token
+ * @param idToken Google SDK가 발급한 ID Token
  * @param deviceId 앱 설치 단위 식별자. 308번 Refresh Token 세션 저장에서 사용한다.
  */
+@Schema(description = "모바일 OAuth Provider Token 로그인 요청")
 public record OAuthLoginRequest(
-    @NotBlank @Size(max = 2048) String authorizationCode,
-    @NotBlank @Size(max = 1000) String redirectUri,
-    @Size(max = 255) String state,
-    @NotBlank @Size(max = 255) String deviceId) {}
+    @Schema(description = "Kakao·Naver SDK가 발급한 Access Token") @Size(max = 4096) String accessToken,
+    @Schema(description = "Google SDK가 발급한 ID Token") @Size(max = 4096) String idToken,
+    @Schema(description = "Refresh Token 세션을 구분하는 앱 설치 단위 식별자") @NotBlank @Size(max = 255)
+        String deviceId) {}

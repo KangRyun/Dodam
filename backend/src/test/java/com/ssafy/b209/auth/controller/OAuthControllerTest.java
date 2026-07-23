@@ -1,7 +1,9 @@
 package com.ssafy.b209.auth.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -27,7 +29,7 @@ class OAuthControllerTest {
   @MockitoBean private OAuthLoginService loginService;
 
   @Test
-  void logsInWithLowercaseProviderPathAndCommonResponseEnvelope() throws Exception {
+  void logsInWithKakaoAccessTokenAndCommonResponseEnvelope() throws Exception {
     when(loginService.login(eq(AuthProvider.KAKAO), any(OAuthLoginRequest.class)))
         .thenReturn(
             new OAuthLoginResult(
@@ -45,8 +47,7 @@ class OAuthControllerTest {
                 .content(
                     """
                     {
-                      "authorizationCode": "one-time-code",
-                      "redirectUri": "https://app.example/kakao",
+                      "accessToken": "kakao-access-token",
                       "deviceId": "device-1"
                     }
                     """))
@@ -58,6 +59,49 @@ class OAuthControllerTest {
         .andExpect(jsonPath("$.data.user.userId").value(41))
         .andExpect(jsonPath("$.data.user.accountStatus").value("PENDING"))
         .andExpect(jsonPath("$.data.user.onboardingCompleted").value(false));
+
+    verify(loginService)
+        .login(
+            eq(AuthProvider.KAKAO),
+            argThat(
+                request ->
+                    "kakao-access-token".equals(request.accessToken())
+                        && request.idToken() == null));
+  }
+
+  @Test
+  void logsInWithGoogleIdToken() throws Exception {
+    when(loginService.login(eq(AuthProvider.GOOGLE), any(OAuthLoginRequest.class)))
+        .thenReturn(
+            new OAuthLoginResult(
+                "Bearer",
+                "access-token",
+                1800,
+                "refresh-token",
+                1209600,
+                new OAuthLoginUser(42L, null, null, AccountStatus.ACTIVE, true)));
+
+    mockMvc
+        .perform(
+            post("/api/v1/auth/oauth/google")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "idToken": "google-id-token",
+                      "deviceId": "device-1"
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.data.user.userId").value(42));
+
+    verify(loginService)
+        .login(
+            eq(AuthProvider.GOOGLE),
+            argThat(
+                request ->
+                    request.accessToken() == null && "google-id-token".equals(request.idToken())));
   }
 
   @Test
@@ -69,8 +113,7 @@ class OAuthControllerTest {
                 .content(
                     """
                     {
-                      "authorizationCode": "one-time-code",
-                      "redirectUri": "https://app.example/local",
+                      "accessToken": "provider-token",
                       "deviceId": "device-1"
                     }
                     """))
@@ -80,7 +123,7 @@ class OAuthControllerTest {
   }
 
   @Test
-  void validatesRequiredCodeRedirectAndDeviceId() throws Exception {
+  void validatesRequiredProviderTokenAndDeviceId() throws Exception {
     mockMvc
         .perform(
             post("/api/v1/auth/oauth/google").contentType(MediaType.APPLICATION_JSON).content("{}"))
