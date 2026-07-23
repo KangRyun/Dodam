@@ -247,6 +247,15 @@ public class DrawingAnalysis {
   }
 
   /**
+   * 분석이 중간 그림과 최종 그림 중 어느 범위에 해당하는지 반환한다.
+   *
+   * @return 분석 대상 범위
+   */
+  public DrawingAnalysisScope getScope() {
+    return scope;
+  }
+
+  /**
    * @return DB에 저장되는 현재 분석 상태
    */
   public DrawingAnalysisState getState() {

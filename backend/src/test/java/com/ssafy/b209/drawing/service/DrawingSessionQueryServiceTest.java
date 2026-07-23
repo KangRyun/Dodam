@@ -6,20 +6,34 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.verifyNoInteractions;
 
+import com.ssafy.b209.analysis.domain.DrawingAnalysis;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
+import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.child.domain.Child;
+import com.ssafy.b209.conversation.domain.ConversationSession;
+import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
+import com.ssafy.b209.drawing.domain.DrawingAssetType;
+import com.ssafy.b209.drawing.domain.DrawingEmotionCode;
 import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.domain.DrawingSession;
+import com.ssafy.b209.drawing.domain.DrawingSessionEmotion;
 import com.ssafy.b209.drawing.domain.DrawingSessionStatus;
 import com.ssafy.b209.drawing.domain.DrawingStage;
 import com.ssafy.b209.drawing.domain.DrawingType;
 import com.ssafy.b209.drawing.dto.response.ActiveDrawingSessionResponse;
+import com.ssafy.b209.drawing.dto.response.DrawingSessionDetailResponse;
 import com.ssafy.b209.drawing.exception.DrawingErrorCode;
 import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
+import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.global.exception.BusinessException;
+import com.ssafy.b209.report.domain.Report;
+import com.ssafy.b209.report.repository.ReportRepository;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -42,9 +56,18 @@ class DrawingSessionQueryServiceTest {
 
   @Mock private DrawingSessionRepository drawingSessionRepository;
   @Mock private DrawingAssetRepository drawingAssetRepository;
+  @Mock private DrawingSessionEmotionRepository drawingSessionEmotionRepository;
+  @Mock private DrawingAnalysisRepository drawingAnalysisRepository;
+  @Mock private ConversationSessionRepository conversationSessionRepository;
+  @Mock private ReportRepository reportRepository;
   @Mock private DrawingSession session;
   @Mock private DrawingSession duplicateSession;
   @Mock private DrawingAsset draft;
+  @Mock private DrawingAsset asset;
+  @Mock private DrawingAnalysis analysis;
+  @Mock private DrawingSessionEmotion emotion;
+  @Mock private ConversationSession conversation;
+  @Mock private Report report;
   @Mock private Child child;
   @Mock private DrawingType drawingType;
   @Mock private CurrentAuthenticatedUserResolver currentUserResolver;
@@ -56,7 +79,113 @@ class DrawingSessionQueryServiceTest {
   void setUp() {
     service =
         new DrawingSessionQueryService(
-            drawingSessionRepository, drawingAssetRepository, currentUserResolver, accessValidator);
+            drawingSessionRepository,
+            drawingAssetRepository,
+            drawingSessionEmotionRepository,
+            drawingAnalysisRepository,
+            conversationSessionRepository,
+            reportRepository,
+            currentUserResolver,
+            accessValidator);
+  }
+
+  @Test
+  void returnsAuthorizedSessionDetailWithLatestResources() {
+    givenDetailSession();
+    given(
+            drawingSessionEmotionRepository.findAllByDrawingSessionIdOrderBySelectionOrderAscIdAsc(
+                SESSION_ID))
+        .willReturn(List.of(emotion));
+    given(emotion.getEmotionCode()).willReturn(DrawingEmotionCode.HAPPY);
+    given(drawingAssetRepository.findFirstByDrawingSessionIdOrderByCreatedAtDescIdDesc(SESSION_ID))
+        .willReturn(Optional.of(asset));
+    given(asset.getId()).willReturn(20L);
+    given(asset.getAssetType()).willReturn(DrawingAssetType.DRAFT);
+    given(asset.getAssetVersion()).willReturn(2);
+    given(asset.getMimeType()).willReturn("image/png");
+    given(asset.getFileSizeBytes()).willReturn(2048L);
+    given(asset.getCapturedAt()).willReturn(CLIENT_SAVED_AT);
+    given(asset.getCreatedAt()).willReturn(SAVED_AT);
+    given(
+            drawingAnalysisRepository.findFirstByDrawingSessionIdOrderByRequestedAtDescIdDesc(
+                SESSION_ID))
+        .willReturn(Optional.of(analysis));
+    given(analysis.getId()).willReturn(30L);
+    given(analysis.getScope()).willReturn(DrawingAnalysisScope.INTERMEDIATE);
+    given(analysis.getTaskType()).willReturn(DrawingAnalysisType.OBJECT_DETECTION);
+    given(analysis.getState()).willReturn(DrawingAnalysisState.SUCCESS);
+    given(analysis.getRequestedAt()).willReturn(SAVED_AT);
+    given(analysis.getCompletedAt()).willReturn(SAVED_AT.plusSeconds(1));
+    given(conversationSessionRepository.findByDrawingSessionId(SESSION_ID))
+        .willReturn(Optional.of(conversation));
+    given(conversation.getId()).willReturn(40L);
+    given(reportRepository.findFirstByDrawingSessionIdOrderByCreatedAtDescIdDesc(SESSION_ID))
+        .willReturn(Optional.of(report));
+    given(report.getId()).willReturn(50L);
+    given(
+            drawingAssetRepository.existsByDrawingSessionIdAndAssetType(
+                SESSION_ID, DrawingAssetType.DRAFT))
+        .willReturn(true);
+
+    DrawingSessionDetailResponse response = service.getDrawingSessionDetail(SESSION_ID);
+
+    assertThat(response.drawingSessionId()).isEqualTo(SESSION_ID);
+    assertThat(response.child().childId()).isEqualTo(CHILD_ID);
+    assertThat(response.child().nickname()).isEqualTo("fixture-child");
+    assertThat(response.selectedEmotions()).containsExactly(DrawingEmotionCode.HAPPY);
+    assertThat(response.latestAsset().drawingAssetId()).isEqualTo(20L);
+    assertThat(response.latestAnalysis().drawingAnalysisId()).isEqualTo(30L);
+    assertThat(response.conversationId()).isEqualTo(40L);
+    assertThat(response.reportId()).isEqualTo(50L);
+    assertThat(response.recoverableDraft()).isTrue();
+  }
+
+  @Test
+  void returnsNullOptionalResourcesAndEmptyEmotions() {
+    givenDetailSession();
+    given(
+            drawingSessionEmotionRepository.findAllByDrawingSessionIdOrderBySelectionOrderAscIdAsc(
+                SESSION_ID))
+        .willReturn(List.of());
+    given(drawingAssetRepository.findFirstByDrawingSessionIdOrderByCreatedAtDescIdDesc(SESSION_ID))
+        .willReturn(Optional.empty());
+    given(
+            drawingAnalysisRepository.findFirstByDrawingSessionIdOrderByRequestedAtDescIdDesc(
+                SESSION_ID))
+        .willReturn(Optional.empty());
+    given(conversationSessionRepository.findByDrawingSessionId(SESSION_ID))
+        .willReturn(Optional.empty());
+    given(reportRepository.findFirstByDrawingSessionIdOrderByCreatedAtDescIdDesc(SESSION_ID))
+        .willReturn(Optional.empty());
+
+    DrawingSessionDetailResponse response = service.getDrawingSessionDetail(SESSION_ID);
+
+    assertThat(response.selectedEmotions()).isEmpty();
+    assertThat(response.latestAsset()).isNull();
+    assertThat(response.latestAnalysis()).isNull();
+    assertThat(response.conversationId()).isNull();
+    assertThat(response.reportId()).isNull();
+    assertThat(response.recoverableDraft()).isFalse();
+  }
+
+  @Test
+  void rejectsUnauthorizedDetailBeforeReadingSession() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    willThrow(new BusinessException(DrawingErrorCode.DRAWING_SESSION_NOT_FOUND))
+        .given(accessValidator)
+        .requireDrawingSessionAccess(GUARDIAN_USER_ID, SESSION_ID);
+
+    assertError(
+        () -> service.getDrawingSessionDetail(SESSION_ID),
+        DrawingErrorCode.DRAWING_SESSION_NOT_FOUND);
+
+    verifyNoInteractions(
+        drawingSessionRepository,
+        drawingAssetRepository,
+        drawingSessionEmotionRepository,
+        drawingAnalysisRepository,
+        conversationSessionRepository,
+        reportRepository);
   }
 
   @Test
@@ -157,5 +286,23 @@ class DrawingSessionQueryServiceTest {
         .isInstanceOfSatisfying(
             BusinessException.class,
             exception -> assertThat(exception.getErrorCode()).isEqualTo(expected));
+  }
+
+  private void givenDetailSession() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    given(drawingSessionRepository.findDetailById(SESSION_ID)).willReturn(Optional.of(session));
+    given(session.getId()).willReturn(SESSION_ID);
+    given(session.getChild()).willReturn(child);
+    given(child.getId()).willReturn(CHILD_ID);
+    given(child.getNickname()).willReturn("fixture-child");
+    given(session.getDrawingType()).willReturn(drawingType);
+    given(drawingType.getId()).willReturn(7L);
+    given(drawingType.getCode()).willReturn("HOUSE");
+    given(drawingType.getName()).willReturn("집");
+    given(session.getInputMethod()).willReturn(DrawingInputMethod.CANVAS);
+    given(session.getTitle()).willReturn("우리 집");
+    given(session.getSessionStatus()).willReturn(DrawingSessionStatus.IN_PROGRESS);
+    given(session.getCurrentStage()).willReturn(DrawingStage.REFLECTION);
+    given(session.getStartedAt()).willReturn(STARTED_AT);
   }
 }
