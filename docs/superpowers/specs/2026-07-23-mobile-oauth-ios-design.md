@@ -94,8 +94,9 @@ SDK 세부 API는 Adapter 내부에만 존재하며 기존 Coordinator와 Domain
 - 로그인 응답, Session 저장·복원, Refresh Token 재발급, 로그아웃을 테스트한다.
 - `flutter analyze`, `flutter test`, Android Debug APK 빌드를 실행한다.
 - Windows에서는 iOS 프로젝트 정적 설정까지만 검증한다.
-- iOS 실제 빌드, CocoaPods 설치와 실기기 Provider 콜백은 macOS·Xcode에서 최종
-  검증해야 한다.
+- iOS 실제 빌드와 실기기 Provider 콜백은 macOS·Xcode에서 최종 검증해야 한다.
+- 현재는 Flutter Swift Package Manager를 사용하며, 향후 Plugin이 요구하는
+  경우에만 CocoaPods 설치를 추가한다.
 
 ## 8. 출시 제약
 

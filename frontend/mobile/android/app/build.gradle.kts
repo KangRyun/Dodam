@@ -18,6 +18,19 @@ fun oauthValue(name: String): String =
         ?: oauthProperties.getProperty(name)
         ?: "missing-${name.lowercase().replace('_', '-')}"
 
+fun requireOAuthValue(name: String) {
+    val value = oauthValue(name)
+    require(
+        value.isNotBlank() &&
+            !value.startsWith("missing-") &&
+            !value.startsWith("your-") &&
+            !value.contains("\n") &&
+            !value.contains("\r"),
+    ) {
+        "Missing or invalid required OAuth configuration: $name"
+    }
+}
+
 android {
     namespace = "com.dodam.app"
     compileSdk = flutter.compileSdkVersion
@@ -60,3 +73,16 @@ kotlin {
 flutter {
     source = "../.."
 }
+
+tasks
+    .matching { it.name == "preReleaseBuild" || it.name == "preProfileBuild" }
+    .configureEach {
+        doFirst {
+            listOf(
+                "KAKAO_NATIVE_APP_KEY",
+                "NAVER_CLIENT_ID",
+                "NAVER_CLIENT_SECRET",
+                "NAVER_APP_NAME",
+            ).forEach(::requireOAuthValue)
+        }
+    }

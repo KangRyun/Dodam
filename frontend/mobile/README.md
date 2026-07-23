@@ -22,7 +22,8 @@ Android `applicationId`와 iOS `Bundle Identifier`는 모두 `com.dodam.app`을
 사용한다. Provider 콘솔에도 같은 식별자를 등록해야 한다.
 
 OAuth 설정은 실제 값을 Git에 기록하지 않고 로컬 설정 파일이나 CI/CD
-변수로 주입한다. 예시 파일을 복사한 뒤 각 팀 환경의 값을 입력한다.
+변수로 주입한다. 로컬에서는 예시 파일을 복사한 뒤 각 팀 환경의 값을
+입력할 수 있다.
 
 ```powershell
 # Windows
@@ -38,6 +39,23 @@ cp ios/Flutter/OAuth.xcconfig.example ios/Flutter/OAuth.xcconfig
 
 두 로컬 설정 파일은 `.gitignore`에 포함되어 있다. 실제 Key, Client ID,
 Client Secret을 예시 파일이나 다른 추적 파일에 작성하지 않는다.
+
+CI/CD에서는 필요한 값을 보호 환경 변수로 등록하고 다음 명령으로 빌드
+직전에 비추적 설정 파일을 생성한다. 값은 로그에 출력되지 않으며,
+placeholder 또는 누락된 값이 있으면 명령이 실패한다.
+
+```bash
+dart run tool/configure_oauth.dart --platform=android
+dart run tool/configure_oauth.dart --platform=ios
+# 두 플랫폼을 함께 생성할 때
+dart run tool/configure_oauth.dart --platform=all
+```
+
+Naver Mobile SDK 특성상 `NAVER_CLIENT_SECRET`은 앱 패키지에 포함되므로
+역공학으로 추출될 수 있다. `.gitignore`는 소스 관리 노출만 방지한다.
+Provider 콘솔의 package·Bundle ID 제한과 Release 서명 정보를 함께
+등록하고, 해당 값을 서버 비밀 정보와 같은 수준의 장기 Secret으로
+간주하지 않는다.
 
 | 변수 | 용도 |
 | --- | --- |
@@ -68,11 +86,12 @@ iOS 의존성 설치, 서명, Simulator 및 실기기 빌드 검증에는 macOS�
 
 ```bash
 flutter pub get
-cd ios
-pod install
-cd ..
 flutter build ios --no-codesign
 ```
+
+현재 iOS 프로젝트는 Flutter Swift Package Manager를 사용한다. 향후
+Plugin이 CocoaPods를 요구하여 `ios/Podfile`이 생성된 경우에만
+`cd ios && pod install`을 추가로 실행한다.
 
 Release 배포 전에는 Google Play App Signing 인증서의 SHA-1을 Google
 Android OAuth Client에 추가하고, 같은 인증서의 Kakao Release Key Hash를

@@ -345,7 +345,8 @@ git commit -m "feat(auth): S15P11B209-380 모바일 OAuth Native 설정 추가"
 - iOS: `ios/Flutter/OAuth.xcconfig.example`을 `OAuth.xcconfig`로 복사
 - CI: 동일한 변수 이름을 환경 변수 또는 생성된 비추적 파일로 주입
 - Release: Google Play App Signing SHA-1과 Kakao Release Key Hash 추가
-- iOS: macOS에서 `flutter pub get`, `cd ios`, `pod install`, `flutter build ios --no-codesign`
+- iOS: macOS에서 `flutter pub get`, `flutter build ios --no-codesign`
+- CocoaPods를 요구하는 Plugin과 `ios/Podfile`이 생긴 경우에만 `pod install`
 - 실제 Credential 파일은 Git에 추가하지 않음
 
 - [x] **Step 2: Secret 추적 여부 확인**

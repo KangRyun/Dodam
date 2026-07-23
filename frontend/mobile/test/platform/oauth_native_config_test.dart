@@ -42,7 +42,7 @@ void main() {
     expect(gitignore, contains('/ios/Flutter/OAuth.xcconfig'));
   });
 
-  test('Repository에는 실제 OAuth Credential 값이 포함되지 않는다', () {
+  test('OAuth 설정 예시는 실제 값 대신 명시적인 placeholder를 사용한다', () {
     final trackedExamples = [
       File('android/oauth.properties.example').readAsStringSync(),
       File('ios/Flutter/OAuth.xcconfig.example').readAsStringSync(),
@@ -64,5 +64,21 @@ void main() {
     expect(readme, contains('com.dodam.app'));
     expect(readme, contains('macOS와 Xcode'));
     expect(readme, contains('실제 Provider SDK 로그인'));
+    expect(readme, contains('dart run tool/configure_oauth.dart'));
+  });
+
+  test('Release 빌드는 누락된 OAuth 설정을 허용하지 않는다', () {
+    final androidGradle = File(
+      'android/app/build.gradle.kts',
+    ).readAsStringSync();
+    final iosReleaseConfig = File(
+      'ios/Flutter/Release.xcconfig',
+    ).readAsStringSync();
+
+    expect(androidGradle, contains('preReleaseBuild'));
+    expect(androidGradle, contains('preProfileBuild'));
+    expect(androidGradle, contains('requireOAuthValue'));
+    expect(iosReleaseConfig, contains('#include "OAuth.xcconfig"'));
+    expect(iosReleaseConfig, isNot(contains('#include? "OAuth.xcconfig"')));
   });
 }
