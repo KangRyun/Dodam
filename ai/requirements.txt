@@ -9,5 +9,12 @@ prometheus-fastapi-instrumentator==8.0.2
 # 그림분석: YOLO(HTP) 객체탐지 (S15P11B209-176). ultralytics가 torch를 견인해 이미지가 무거워진다.
 #   yolo_client가 지연 import하므로 서버 기동/import 자체엔 없어도 되지만, 실제 탐지엔 필요.
 #   (향후 별도 추론 서비스로 분리 여지) VLM 서술은 기존 openai(GMS)로 처리 — 추가 의존성 없음.
+# CPU 전용 torch 핀 (2026-07-24): 기본 GPU 휠이 NVIDIA cu13 라이브러리 수 GB를 견인해
+#   CPU 서버(EC2)에서 이미지 비대 + containerd 거대 레이어 diff 실패(빌드 123~125 연쇄 원인).
+#   추론=EC2 CPU 설계 그대로이므로 연산 결과 동일 · 학습은 SSAFY GPU 서버 별도 환경이라 무영향.
+#   버전은 GPU 휠이 설치하던 것과 동일(2.13.0/0.28.0)을 +cpu로 고정 — 휠 존재 검증 완료(cp311·x86_64).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0+cpu
+torchvision==0.28.0+cpu
 ultralytics
 opencv-python-headless
