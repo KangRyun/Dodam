@@ -32,6 +32,17 @@ public interface DrawingAnalysisRepository extends JpaRepository<DrawingAnalysis
       Long drawingSessionId);
 
   /**
+   * 여러 세션의 분석 실행을 세션·요청 시각·식별자 순으로 한 번에 조회한다.
+   *
+   * <p>목록 조회에서 세션마다 개별 조회를 하지 않고 배치로 읽어 조립하기 위한 경계다. 각 세션의 첫 항목이 가장 최근 분석이다.
+   *
+   * @param drawingSessionIds 그림 활동 세션 식별자 목록
+   * @return 세션 식별자 오름차순, 요청 시각과 식별자 역순으로 정렬된 분석 목록
+   */
+  List<DrawingAnalysis> findByDrawingSessionIdInOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
+      List<Long> drawingSessionIds);
+
+  /**
    * 완료 접수 요청에 사용한 멱등 키로 분석을 조회한다.
    *
    * @param requestId {@code Idempotency-Key} Header 값

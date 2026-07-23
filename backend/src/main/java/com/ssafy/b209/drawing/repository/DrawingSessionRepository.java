@@ -1,9 +1,14 @@
 package com.ssafy.b209.drawing.repository;
 
 import com.ssafy.b209.drawing.domain.DrawingSession;
+import com.ssafy.b209.drawing.domain.DrawingSessionStatus;
+import com.ssafy.b209.report.domain.ReportStatus;
 import jakarta.persistence.LockModeType;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -95,4 +100,60 @@ public interface DrawingSessionRepository extends JpaRepository<DrawingSession, 
           + "and s.deletedAt is null "
           + "order by s.id asc")
   List<DrawingSession> findActiveSessionsByChildId(@Param("childId") Long childId);
+
+  /**
+   * 보호자 활동 기록 목록을 위해 아동의 삭제되지 않은 그림 활동을 필터·정렬·페이지로 조회한다.
+   *
+   * <p>삭제 상태이거나 Soft Delete된 세션은 제외하며, {@code null} 필터는 해당 조건을 적용하지 않는다. 리포트 상태 필터는 세션의 가장 최근 리포트
+   * 상태를 기준으로 판단한다. 목록 응답 조립에 필요한 그림 활동 유형을 함께 조회해 유형별 추가 조회를 피한다.
+   *
+   * @param childId 조회 대상 아동 식별자
+   * @param fromInclusive 시작 시각 하한(이상), 미지정이면 {@code null}
+   * @param toExclusive 시작 시각 상한(미만), 미지정이면 {@code null}
+   * @param drawingTypeCode 그림 활동 유형 코드 필터, 미지정이면 {@code null}
+   * @param sessionStatus 세션 상태 필터, 미지정이면 {@code null}
+   * @param reportStatus 최신 리포트 상태 필터, 미지정이면 {@code null}
+   * @param pageable 페이지와 정렬(시작·완료 시각) 조건
+   * @return 조건에 맞는 세션 페이지, 없으면 빈 페이지
+   */
+  @Query(
+      value =
+          "select s from DrawingSession s "
+              + "join fetch s.drawingType t "
+              + "where s.child.id = :childId "
+              + "and s.deletedAt is null "
+              + "and s.sessionStatus <> "
+              + "com.ssafy.b209.drawing.domain.DrawingSessionStatus.DELETED "
+              + "and (:fromInclusive is null or s.startedAt >= :fromInclusive) "
+              + "and (:toExclusive is null or s.startedAt < :toExclusive) "
+              + "and (:drawingTypeCode is null or t.code = :drawingTypeCode) "
+              + "and (:sessionStatus is null or s.sessionStatus = :sessionStatus) "
+              + "and (:reportStatus is null or exists ("
+              + "  select 1 from Report r "
+              + "  where r.drawingSession = s "
+              + "  and r.status = :reportStatus "
+              + "  and r.id = (select max(r2.id) from Report r2 where r2.drawingSession = s)))",
+      countQuery =
+          "select count(s) from DrawingSession s "
+              + "where s.child.id = :childId "
+              + "and s.deletedAt is null "
+              + "and s.sessionStatus <> "
+              + "com.ssafy.b209.drawing.domain.DrawingSessionStatus.DELETED "
+              + "and (:fromInclusive is null or s.startedAt >= :fromInclusive) "
+              + "and (:toExclusive is null or s.startedAt < :toExclusive) "
+              + "and (:drawingTypeCode is null or s.drawingType.code = :drawingTypeCode) "
+              + "and (:sessionStatus is null or s.sessionStatus = :sessionStatus) "
+              + "and (:reportStatus is null or exists ("
+              + "  select 1 from Report r "
+              + "  where r.drawingSession = s "
+              + "  and r.status = :reportStatus "
+              + "  and r.id = (select max(r2.id) from Report r2 where r2.drawingSession = s)))")
+  Page<DrawingSession> findHistoryPage(
+      @Param("childId") Long childId,
+      @Param("fromInclusive") LocalDateTime fromInclusive,
+      @Param("toExclusive") LocalDateTime toExclusive,
+      @Param("drawingTypeCode") String drawingTypeCode,
+      @Param("sessionStatus") DrawingSessionStatus sessionStatus,
+      @Param("reportStatus") ReportStatus reportStatus,
+      Pageable pageable);
 }
