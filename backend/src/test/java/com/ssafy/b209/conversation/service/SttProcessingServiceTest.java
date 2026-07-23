@@ -89,8 +89,6 @@ class SttProcessingServiceTest {
   void marksFailedWithoutKeepingTextWhenAiCallFails() {
     given(persistenceService.claim(MESSAGE_ID))
         .willReturn(claim(SttClaimResult.Action.CLAIMED, "PENDING", null, null, false));
-    given(audioReader.open("2026/07/23/voice.wav"))
-        .willReturn(new OpenedAudio(new ByteArrayInputStream(new byte[] {1}), "voice.wav"));
     given(aiSttClient.transcribe(any()))
         .willThrow(new AiSttClientException(AiSttClientException.Type.READ_TIMEOUT));
     given(persistenceService.completeFailure(MESSAGE_ID, false))
