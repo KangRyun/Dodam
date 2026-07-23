@@ -27,6 +27,8 @@ class DodamApp extends StatefulWidget {
     this.authSessionStore,
     this.authRepository,
     this.conversationRepository = const MockConversationRepository(),
+    this.voiceAnswerRepository,
+    this.sttResultRepository,
     this.conversationAnswerRepository,
     this.conversationId = 8001,
     this.basisAnalysisId = 7001,
@@ -42,6 +44,8 @@ class DodamApp extends StatefulWidget {
   final AuthSessionStore? authSessionStore;
   final AuthRepository? authRepository;
   final ConversationRepository? conversationRepository;
+  final VoiceAnswerRepository? voiceAnswerRepository;
+  final SttResultRepository? sttResultRepository;
   final ConversationAnswerRepository? conversationAnswerRepository;
   final int? conversationId;
   final int? basisAnalysisId;
@@ -180,6 +184,8 @@ class _DodamAppState extends State<DodamApp> {
       drawingCompletionSnapshotProvider:
           widget.drawingCompletionSnapshotProvider,
       conversationRepository: widget.conversationRepository,
+      voiceAnswerRepository: widget.voiceAnswerRepository,
+      sttResultRepository: widget.sttResultRepository,
       conversationAnswerRepository: widget.conversationAnswerRepository,
       conversationId: widget.conversationId,
       basisAnalysisId: widget.basisAnalysisId,

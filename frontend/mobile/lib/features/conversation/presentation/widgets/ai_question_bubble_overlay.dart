@@ -4,7 +4,10 @@ import '../../../../design_system/design_system.dart';
 import '../../application/conversation_end_controller.dart';
 import '../../application/option_answer_submission_controller.dart';
 import '../../application/question_skip_controller.dart';
+import '../../application/voice_recording_controller.dart';
+import '../../application/voice_answer_upload_controller.dart';
 import '../../domain/models/ai_question.dart';
+import 'voice_recording_control.dart';
 
 // 질문 도착 시 캔버스 위에 표시하는 캐릭터와 말풍선
 final class AiQuestionBubbleOverlay extends StatelessWidget {
@@ -19,6 +22,9 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
     required this.onSkip,
     required this.endStatus,
     required this.onEnd,
+    this.voiceRecordingController,
+    this.voiceAnswerUploadStatus = VoiceAnswerUploadStatus.idle,
+    this.onRetryVoiceAnswerUpload,
     super.key,
   });
 
@@ -34,6 +40,9 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
   final VoidCallback onSkip;
   final ConversationEndStatus endStatus;
   final VoidCallback onEnd;
+  final VoiceRecordingController? voiceRecordingController;
+  final VoiceAnswerUploadStatus voiceAnswerUploadStatus;
+  final VoidCallback? onRetryVoiceAnswerUpload;
 
   @override
   Widget build(BuildContext context) {
@@ -67,25 +76,65 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                       IgnorePointer(
                         child: _QuestionBubble(text: currentQuestion.text),
                       ),
-                      if (showResponseActions) ...[
+                      if (voiceRecordingController case final controller?) ...[
                         const SizedBox(height: AppSpacing.sm),
-                        AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 220),
-                          child: _ResponseActions(
-                            key: ValueKey(
-                              'ai-question-actions-${currentQuestion.messageId}',
-                            ),
-                            options: currentQuestion.options,
-                            selectedOptionId: selectedOptionId,
-                            onSelected: onOptionSelected,
-                            onSkip: onSkip,
-                            submissionStatus: submissionStatus,
-                            skipStatus: skipStatus,
-                            endStatus: endStatus,
-                            onEnd: onEnd,
-                          ),
+                        VoiceRecordingControl(
+                          controller: controller,
+                          enabled:
+                              submissionStatus !=
+                                  OptionAnswerSubmissionStatus.submitting &&
+                              skipStatus != QuestionSkipStatus.submitting &&
+                              endStatus != ConversationEndStatus.submitting,
                         ),
+                        if (voiceAnswerUploadStatus ==
+                            VoiceAnswerUploadStatus.uploading) ...[
+                          const SizedBox(height: AppSpacing.xs),
+                          const LinearProgressIndicator(
+                            key: ValueKey('voice-answer-uploading'),
+                          ),
+                          const SizedBox(height: AppSpacing.xs),
+                          const Text(
+                            '목소리를 보내고 있어요.',
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                        if (voiceAnswerUploadStatus ==
+                            VoiceAnswerUploadStatus.failure) ...[
+                          const SizedBox(height: AppSpacing.xs),
+                          const Text(
+                            '목소리를 보내지 못했어요.',
+                            key: ValueKey('voice-answer-upload-failure'),
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: AppColors.error,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          TextButton(
+                            key: const ValueKey('voice-answer-upload-retry'),
+                            onPressed: onRetryVoiceAnswerUpload,
+                            child: const Text('다시 보내기'),
+                          ),
+                        ],
                       ],
+                      const SizedBox(height: AppSpacing.sm),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        child: _ResponseActions(
+                          key: ValueKey(
+                            'ai-question-actions-${currentQuestion.messageId}',
+                          ),
+                          showOptions: showResponseActions,
+                          options: currentQuestion.options,
+                          selectedOptionId: selectedOptionId,
+                          onSelected: onOptionSelected,
+                          onSkip: onSkip,
+                          submissionStatus: submissionStatus,
+                          skipStatus: skipStatus,
+                          endStatus: endStatus,
+                          onEnd: onEnd,
+                        ),
+                      ),
                       const SizedBox(height: AppSpacing.xs),
                       const IgnorePointer(child: _DodamiCharacter()),
                     ],
@@ -102,6 +151,7 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
 
 final class _ResponseActions extends StatelessWidget {
   const _ResponseActions({
+    required this.showOptions,
     required this.options,
     required this.selectedOptionId,
     required this.onSelected,
@@ -113,6 +163,7 @@ final class _ResponseActions extends StatelessWidget {
     super.key,
   });
 
+  final bool showOptions;
   final List<AiQuestionOption> options;
   final String? selectedOptionId;
   final ValueChanged<String> onSelected;
@@ -126,7 +177,7 @@ final class _ResponseActions extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      if (options.isNotEmpty)
+      if (showOptions && options.isNotEmpty)
         _QuestionOptions(
           options: options,
           selectedOptionId: selectedOptionId,

@@ -16,17 +16,29 @@ final class AiQuestionSelectionController extends ChangeNotifier {
   String? selectedOptionId;
   bool optionsVisible = false;
 
-  void beginQuestion(AiQuestion question) {
+  void beginQuestion(AiQuestion question, {bool scheduleReveal = true}) {
     if (questionMessageId == question.messageId) return;
     _revealTimer?.cancel();
     questionMessageId = question.messageId;
     selectedOptionId = null;
     optionsVisible = false;
     notifyListeners();
-    _revealTimer = Timer(revealDelay, () {
-      optionsVisible = true;
-      notifyListeners();
-    });
+    if (scheduleReveal) {
+      _revealTimer = Timer(revealDelay, revealOptions);
+    }
+  }
+
+  void revealOptions() {
+    if (optionsVisible) return;
+    optionsVisible = true;
+    notifyListeners();
+  }
+
+  void hideOptions() {
+    _revealTimer?.cancel();
+    if (!optionsVisible) return;
+    optionsVisible = false;
+    notifyListeners();
   }
 
   bool select(AiQuestion question, String optionId) {

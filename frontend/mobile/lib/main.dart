@@ -5,8 +5,8 @@ import 'app/router/app_routes.dart';
 import 'core/network/network.dart';
 import 'features/auth/auth.dart';
 import 'features/child/data/repositories/remote_child_repository.dart';
-import 'features/conversation/data/repositories/remote_conversation_answer_repository.dart';
-import 'features/conversation/data/repositories/remote_conversation_repository.dart';
+import 'features/conversation/conversation.dart';
+import 'features/drawing/data/repositories/mock_drawing_repository.dart';
 import 'features/drawing/data/repositories/remote_drawing_repository.dart';
 
 void main() {
@@ -36,13 +36,22 @@ DodamApp createDefaultApp({
     accessTokenProvider: authRepository,
     tokenRefresher: authRepository,
   );
+  const useMockDrawing = bool.fromEnvironment(
+    'USE_MOCK_DRAWING',
+    defaultValue: false,
+  );
 
   return DodamApp(
     authRepository: authRepository,
     childRepository: RemoteChildRepository(apiClient),
     conversationRepository: RemoteConversationRepository(apiClient),
     conversationAnswerRepository: RemoteConversationAnswerRepository(apiClient),
-    drawingRepository: RemoteDrawingRepository(apiClient),
+    // 백엔드 미연결 개발 환경에서만 목 그림 세션 사용
+    drawingRepository: useMockDrawing
+        ? const MockDrawingRepository()
+        : RemoteDrawingRepository(apiClient),
+    voiceAnswerRepository: RemoteVoiceAnswerRepository(apiClient),
+    sttResultRepository: RemoteSttResultRepository(apiClient),
     initialRoute: AppRoutes.authBootstrap,
   );
 }
