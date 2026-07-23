@@ -8,8 +8,8 @@ final class RemoteChildRepository implements ChildRepository {
 
   @override
   Future<List<ChildSummaryDto>> getChildren() async {
-    final response = await _apiClient.get<List<dynamic>>('children');
-    return response.data!
+    final response = await _apiClient.get<Object?>('children');
+    return envelopeList(response.data)
         .map((item) => ChildSummaryDto.fromJson(jsonObject(item)))
         .toList(growable: false);
   }
@@ -20,7 +20,7 @@ final class RemoteChildRepository implements ChildRepository {
       'children',
       data: request.toJson(),
     );
-    return ChildDetailDto.fromJson(response.data!);
+    return ChildDetailDto.fromJson(envelopeObject(response.data));
   }
 
   @override
@@ -28,7 +28,7 @@ final class RemoteChildRepository implements ChildRepository {
     final response = await _apiClient.get<Map<String, dynamic>>(
       'children/$childId',
     );
-    return ChildDetailDto.fromJson(response.data!);
+    return ChildDetailDto.fromJson(envelopeObject(response.data));
   }
 
   @override
@@ -40,7 +40,7 @@ final class RemoteChildRepository implements ChildRepository {
       'children/$childId',
       data: request.toJson(),
     );
-    return ChildDetailDto.fromJson(response.data!);
+    return ChildDetailDto.fromJson(envelopeObject(response.data));
   }
 
   @override
@@ -56,7 +56,7 @@ final class RemoteChildRepository implements ChildRepository {
     final response = await _apiClient.get<Map<String, dynamic>>(
       'children/$childId/tutorial',
     );
-    return TutorialProgressDto.fromJson(response.data!);
+    return TutorialProgressDto.fromJson(envelopeObject(response.data));
   }
 
   @override
@@ -68,6 +68,6 @@ final class RemoteChildRepository implements ChildRepository {
       'children/$childId/tutorial',
       data: request.toJson(),
     );
-    return TutorialProgressDto.fromJson(response.data!);
+    return TutorialProgressDto.fromJson(envelopeObject(response.data));
   }
 }

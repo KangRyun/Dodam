@@ -6,7 +6,7 @@ final class OptionAnswerRequest {
   });
 
   final int questionMessageId;
-  final List<int> selectedOptionIds;
+  final List<String> selectedOptionIds;
 
   Map<String, dynamic> toJson() => {
     'questionMessageId': questionMessageId,

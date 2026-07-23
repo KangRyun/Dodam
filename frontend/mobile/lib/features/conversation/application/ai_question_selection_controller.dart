@@ -13,7 +13,7 @@ final class AiQuestionSelectionController extends ChangeNotifier {
   final Duration revealDelay;
   Timer? _revealTimer;
   int? questionMessageId;
-  int? selectedOptionId;
+  String? selectedOptionId;
   bool optionsVisible = false;
 
   void beginQuestion(AiQuestion question) {
@@ -29,7 +29,7 @@ final class AiQuestionSelectionController extends ChangeNotifier {
     });
   }
 
-  bool select(AiQuestion question, int optionId) {
+  bool select(AiQuestion question, String optionId) {
     final validOption = question.options.any(
       (option) => option.optionId == optionId,
     );

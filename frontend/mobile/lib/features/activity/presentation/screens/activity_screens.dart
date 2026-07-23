@@ -230,7 +230,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _selectQuestionOption(int optionId) async {
+  Future<void> _selectQuestionOption(String optionId) async {
     final question = _questionDisplayController.visibleQuestion;
     if (question == null) return;
     final valid = _questionSelectionController.select(question, optionId);
@@ -602,7 +602,7 @@ class _CanvasPanel extends StatelessWidget {
   final AiQuestion? question;
   final bool showQuestion;
   final int? selectedQuestionOptionId;
-  final ValueChanged<int> onQuestionOptionSelected;
+  final ValueChanged<String> onQuestionOptionSelected;
   final OptionAnswerSubmissionStatus answerSubmissionStatus;
   final QuestionSkipStatus questionSkipStatus;
   final ConversationEndStatus conversationEndStatus;

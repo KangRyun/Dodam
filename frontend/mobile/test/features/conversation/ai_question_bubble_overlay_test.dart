@@ -38,7 +38,7 @@ void main() {
   });
 
   testWidgets('선택지를 누르면 optionId를 전달하고 선택 상태를 표시한다', (tester) async {
-    int? selectedOptionId;
+    String? selectedOptionId;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
@@ -47,7 +47,7 @@ void main() {
               AiQuestionBubbleOverlay(
                 question: _question,
                 visible: true,
-                selectedOptionId: 1,
+                selectedOptionId: '1',
                 onOptionSelected: (optionId) => selectedOptionId = optionId,
                 showResponseActions: true,
                 submissionStatus: OptionAnswerSubmissionStatus.idle,
@@ -64,7 +64,7 @@ void main() {
 
     expect(find.byIcon(Icons.check_circle_rounded), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('ai-question-option-2')));
-    expect(selectedOptionId, 2);
+    expect(selectedOptionId, '2');
   });
 
   testWidgets('말 안 할래를 누르면 건너뛰기 요청을 전달한다', (tester) async {
@@ -161,13 +161,13 @@ final _question = AiQuestion(
   text: '그림에는 누가 함께 있어?',
   options: const [
     AiQuestionOption(
-      optionId: 1,
+      optionId: '1',
       type: 'TEXT',
       label: '가족이 있어',
       value: '가족이 있어',
     ),
     AiQuestionOption(
-      optionId: 2,
+      optionId: '2',
       type: 'TEXT',
       label: '친구가 있어',
       value: '친구가 있어',

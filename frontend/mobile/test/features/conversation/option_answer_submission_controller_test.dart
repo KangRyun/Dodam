@@ -14,7 +14,7 @@ void main() {
 
     final submitted = await controller.submit(
       questionMessageId: 10,
-      optionId: 2,
+      optionId: '2',
     );
 
     expect(submitted, isTrue);
@@ -22,7 +22,7 @@ void main() {
     expect(controller.answerMessageId, 30);
     expect(repository.conversationId, 20);
     expect(repository.request?.questionMessageId, 10);
-    expect(repository.request?.selectedOptionIds, [2]);
+    expect(repository.request?.selectedOptionIds, ['2']);
     expect(repository.idempotencyKeys, ['answer-key']);
   });
 
@@ -35,12 +35,12 @@ void main() {
     );
 
     expect(
-      await controller.submit(questionMessageId: 10, optionId: 1),
+      await controller.submit(questionMessageId: 10, optionId: '1'),
       isFalse,
     );
     expect(controller.status, OptionAnswerSubmissionStatus.failure);
 
-    expect(await controller.submit(questionMessageId: 10, optionId: 1), isTrue);
+    expect(await controller.submit(questionMessageId: 10, optionId: '1'), isTrue);
     expect(repository.idempotencyKeys, ['stable-key', 'stable-key']);
   });
 
@@ -53,8 +53,8 @@ void main() {
       idempotencyKeyProvider: () => 'answer-key',
     );
 
-    final first = controller.submit(questionMessageId: 10, optionId: 1);
-    final second = await controller.submit(questionMessageId: 10, optionId: 2);
+    final first = controller.submit(questionMessageId: 10, optionId: '1');
+    final second = await controller.submit(questionMessageId: 10, optionId: '2');
 
     expect(second, isFalse);
     expect(repository.callCount, 1);

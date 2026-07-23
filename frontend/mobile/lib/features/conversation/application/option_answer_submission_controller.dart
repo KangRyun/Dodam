@@ -18,13 +18,13 @@ final class OptionAnswerSubmissionController extends ChangeNotifier {
   final String Function() idempotencyKeyProvider;
 
   OptionAnswerSubmissionStatus status = OptionAnswerSubmissionStatus.idle;
-  int? selectedOptionId;
+  String? selectedOptionId;
   int? answerMessageId;
   String? _pendingIdempotencyKey;
 
   Future<bool> submit({
     required int questionMessageId,
-    required int optionId,
+    required String optionId,
   }) async {
     if (status == OptionAnswerSubmissionStatus.submitting) return false;
     selectedOptionId = optionId;
