@@ -253,6 +253,29 @@ $env:DB_PASSWORD="개인 비밀번호"
 .\gradlew.bat bootRun --args="--spring.profiles.active=local"
 ```
 
+### MVP Mock 데이터
+
+`local` Profile에서 `APP_MOCK_DATA_ENABLED=true`를 명시하면 보호자, 소셜 인증 계정, 아동,
+보호자·아동 관계, 그림 유형과 진행 중 그림 활동 개발용 데이터가 주입됩니다. 동일 데이터는
+재실행해도 중복 생성되지 않습니다.
+
+macOS 또는 Linux:
+
+```bash
+APP_MOCK_DATA_ENABLED=true \
+./gradlew bootRun --args='--spring.profiles.active=local'
+```
+
+Windows PowerShell:
+
+```powershell
+$env:APP_MOCK_DATA_ENABLED="true"
+.\gradlew.bat bootRun --args="--spring.profiles.active=local"
+```
+
+Mock 데이터는 OAuth 또는 JWT 인증을 우회하지 않으며 실제 Provider Token을 포함하지 않습니다.
+운영 환경에서는 이 설정을 활성화하지 않습니다.
+
 ### Migration 관리
 
 - 애플리케이션 실행 시 Flyway가 `src/main/resources/db/migration`의 Migration을 적용합니다.

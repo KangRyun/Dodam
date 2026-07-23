@@ -26,6 +26,9 @@ spring:
     clean-disabled: true
 
 app:
+  mock-data:
+    enabled: ${APP_MOCK_DATA_ENABLED:false}
+
   cors:
     allowed-origins:
       - http://localhost:3000
