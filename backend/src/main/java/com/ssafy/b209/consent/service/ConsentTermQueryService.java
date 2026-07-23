@@ -67,6 +67,7 @@ public class ConsentTermQueryService {
         term.getVersion(),
         term.getTitle(),
         term.getContentUrl(),
+        term.getContentHtml(),
         term.getEffectiveAt().toInstant(ZoneOffset.UTC));
   }
 }

@@ -39,6 +39,9 @@ public class ConsentTerm {
   @Column(name = "content_url", length = 1000)
   private String contentUrl;
 
+  @Column(name = "content_html", columnDefinition = "TEXT")
+  private String contentHtml;
+
   @Column(name = "effective_at", nullable = false)
   private LocalDateTime effectiveAt;
 
@@ -169,6 +172,15 @@ public class ConsentTerm {
    */
   public String getContentUrl() {
     return contentUrl;
+  }
+
+  /**
+   * 약관 원문 HTML을 반환한다.
+   *
+   * @return 약관 원문 HTML 또는 아직 확정되지 않았으면 {@code null}
+   */
+  public String getContentHtml() {
+    return contentHtml;
   }
 
   /**
