@@ -82,12 +82,13 @@ class _DrawingScreenState extends State<DrawingScreen> {
   BinaryUploadDto? _pendingCompletionImage;
   DrawingCompleteMetadataDto? _pendingCompletionMetadata;
   AiQuestionController? _questionController;
-  int? _visibleQuestionMessageId;
-  bool _questionDismissed = false;
+  late final AiQuestionDisplayController _questionDisplayController;
 
   @override
   void initState() {
     super.initState();
+    _questionDisplayController = AiQuestionDisplayController()
+      ..addListener(_handleQuestionDisplayChanged);
     _ownsSyncCoordinator = widget.syncCoordinator == null;
     _syncCoordinator =
         widget.syncCoordinator ??
@@ -134,6 +135,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
     if (_ownsSyncCoordinator) _syncCoordinator.dispose();
     _questionController?.removeListener(_handleQuestionChanged);
     _questionController?.dispose();
+    _questionDisplayController.removeListener(_handleQuestionDisplayChanged);
+    _questionDisplayController.dispose();
     super.dispose();
   }
 
@@ -149,27 +152,25 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final question = _questionController?.question;
     if (!mounted ||
         _questionController?.status != AiQuestionStatus.success ||
-        question == null ||
-        question.messageId == _visibleQuestionMessageId) {
+        question == null) {
       return;
     }
     // 하위 상태 UI의 빌드 중 알림과 겹치지 않도록 다음 프레임에 반영
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || question.messageId == _visibleQuestionMessageId) return;
-      setState(() {
-        // 새로운 질문 응답이 도착한 경우에만 캐릭터와 말풍선 노출
-        _visibleQuestionMessageId = question.messageId;
-        _questionDismissed = false;
-      });
+      if (mounted) _questionDisplayController.receive(question);
     });
+  }
+
+  void _handleQuestionDisplayChanged() {
+    if (mounted) setState(() {});
   }
 
   void _startStroke(PointerDownEvent event) {
     if (_activePointer != null) return;
     _invalidatePendingCompletion();
+    // 그림 입력이 시작되면 질문 오버레이 숨김
+    _questionDisplayController.dismiss();
     setState(() {
-      // 그림 입력이 시작되면 질문 오버레이 숨김
-      _questionDismissed = true;
       _activePointer = event.pointer;
       _activeStroke = DrawingStroke(
         points: [_pointFrom(event)],
@@ -375,10 +376,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
             onStartNew: _draftRestoreController.startNewDrawing,
             onRetryQuery: () => unawaited(_draftRestoreController.load()),
             onRetryImage: _draftRestoreController.retryImage,
-            question: _questionController?.question,
+            question: _questionDisplayController.visibleQuestion,
             showQuestion:
-                _questionController?.status == AiQuestionStatus.success &&
-                !_questionDismissed &&
+                _questionDisplayController.isVisible &&
+                _activePointer == null &&
                 _draftRestoreController.canDraw,
           );
           final sidePanel = _DrawingSidePanel(
