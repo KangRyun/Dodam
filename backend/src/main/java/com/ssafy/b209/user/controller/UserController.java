@@ -6,6 +6,7 @@ import com.ssafy.b209.global.response.ApiResponse;
 import com.ssafy.b209.user.dto.request.OnboardingRequest;
 import com.ssafy.b209.user.dto.response.UserResponse;
 import com.ssafy.b209.user.service.UserOnboardingService;
+import com.ssafy.b209.user.service.UserQueryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
@@ -16,6 +17,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -38,18 +40,57 @@ public class UserController {
 
   private final CurrentAuthenticatedUserResolver currentUserResolver;
   private final UserOnboardingService onboardingService;
+  private final UserQueryService queryService;
 
   /**
-   * 사용자 식별 경계와 Onboarding 서비스를 사용하는 Controller를 생성한다.
+   * 사용자 식별 경계와 조회·Onboarding 서비스를 사용하는 Controller를 생성한다.
    *
    * @param currentUserResolver Access Token Principal에서 사용자 식별자를 해석하는 경계
    * @param onboardingService 최초 정보 등록·온보딩 완료 Use Case
+   * @param queryService 사용자 본인 정보 조회 Use Case
    */
   public UserController(
       CurrentAuthenticatedUserResolver currentUserResolver,
-      UserOnboardingService onboardingService) {
+      UserOnboardingService onboardingService,
+      UserQueryService queryService) {
     this.currentUserResolver = currentUserResolver;
     this.onboardingService = onboardingService;
+    this.queryService = queryService;
+  }
+
+  /**
+   * 인증 사용자의 현재 계정 상태를 조회한다.
+   *
+   * <p>조회만 수행하며 계정 상태를 변경하지 않는다. Authorization Bearer Access Token의 사용자 ID를 대상으로 한다.
+   *
+   * @return HTTP 200과 사용자 본인 상태 공통 응답
+   */
+  @Operation(
+      summary = "내 정보 조회",
+      description =
+          "인증 사용자의 현재 계정 상태를 조회합니다. 조회만으로 상태를 변경하지 않습니다. "
+              + "Authorization Bearer Access Token의 사용자 ID를 대상으로 합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "내 정보 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "사용자를 찾을 수 없음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "500",
+        description = "서버 내부 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping("/me")
+  public ResponseEntity<ApiResponse<UserResponse>> getMe() {
+    return ResponseEntity.ok(
+        ApiResponse.ok(queryService.getMe(currentUserResolver.requireUserId())));
   }
 
   /**
