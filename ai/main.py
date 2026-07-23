@@ -10,10 +10,10 @@
 - GMS 일시 오류는 이 서버 안에서 지수 백오프로 제한 재시도(question_service.py).
   근거 정리: _workspace/183_ai_loop-decision.md
 
-STT/TTS 경로 정리(179, 2026-07-23 · A안):
+STT/TTS 경로 정리(179·289, 2026-07-23):
 - 공개 초안 /stt·/tts 삭제 — nginx /ai/ 프록시로 무인증 인터넷 노출되던 경로(GMS 비용·아동 음성).
-- E(STT)·G(TTS)는 BE 전용 /internal/ai/v1/speech/transcription·synthesis 로 제공(X-Internal-Token).
-  계약 제안: docs/ai/ai-speech-contract.md — BE 289·299 착수 시 확정.
+- E(STT)·G(TTS)는 BE 전용 /internal/ai/v1/speech/stt·synthesis 로 제공(X-Internal-Token).
+  계약: docs/ai/ai-speech-contract.md.
 
 ⚠️ /analyze/* 등 기존 경로의 계약은 '초안'이고, /internal/ai/v1/* 는 BE 코드와 맞춘 내부 계약.
 원본 음성·발화는 저장·로그하지 않는다(가드레일).
@@ -179,6 +179,48 @@ def _internal_token_ok(received: str) -> bool:
     return hmac.compare_digest(received or "", config.AI_INTERNAL_TOKEN)
 
 
+def _safe_stt_suffix(filename: str | None) -> str:
+    """원본 이름을 보존하지 않고 OpenAI 형식 판별에 필요한 확장자만 만든다."""
+    if not filename or "." not in filename:
+        return ".mp3"
+    extension = filename.rsplit(".", 1)[-1].lower()
+    if not extension.isalnum() or len(extension) > 10:
+        return ".mp3"
+    return f".{extension}"
+
+
+@app.post("/internal/ai/v1/speech/stt")
+async def internal_speech_stt(
+    file: UploadFile = File(...),
+    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+    x_request_id: str = Header(default="", alias="X-Request-Id"),
+):
+    """BE 전용 STT adapter: 파일은 임시로만 처리하고 계약 DTO로 정규화한다."""
+    if not _internal_token_ok(x_internal_token):
+        return JSONResponse(
+            status_code=401, content={"errorCode": "INVALID_INTERNAL_TOKEN"}
+        )
+    if not x_request_id.strip():
+        return JSONResponse(status_code=422, content={"errorCode": "INVALID_REQUEST"})
+
+    started_at = time.monotonic()
+    try:
+        with tempfile.NamedTemporaryFile(suffix=_safe_stt_suffix(file.filename)) as tmp:
+            tmp.write(await file.read())
+            tmp.flush()
+            text = stt_client.transcribe(tmp.name)
+        return {
+            "text": text,
+            "confidence": None,
+            "modelName": config.STT_MODEL,
+            "processingTimeMs": int((time.monotonic() - started_at) * 1000),
+        }
+    except RuntimeError:
+        return JSONResponse(status_code=502, content={"errorCode": "AI_UPSTREAM_ERROR"})
+    finally:
+        await file.close()
+
+
 @app.post(
     "/internal/ai/v1/conversations/question",
     response_model=internal_contracts.QuestionResponse,
@@ -227,46 +269,7 @@ def internal_conversation_question(
 #   인터넷에 노출되던 경로였다(GMS 비용 소진 + 아동 음성 경로 공개).
 #   /internal/ai/v1/* 로 옮기면 기존 nginx /ai/internal/ 차단(404)이 그대로
 #   적용되고, BE 호출도 conversations/question과 같은 토큰 패턴으로 통일된다.
-#   계약 제안: docs/ai/ai-speech-contract.md (BE 289·299 착수 시 확정)
-
-
-@app.post(
-    "/internal/ai/v1/speech/transcription",
-    response_model=internal_contracts.TranscriptionResponse,
-)
-async def internal_speech_transcription(
-    file: UploadFile = File(...),
-    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
-):
-    """BE(-289 STT 처리기)가 호출하는 음성→텍스트 변환.
-
-    원본 음성은 임시파일로만 다루고 저장·로그하지 않는다(가드레일).
-    """
-    if not _internal_token_ok(x_internal_token):
-        return JSONResponse(
-            status_code=401, content={"errorCode": "INVALID_INTERNAL_TOKEN"}
-        )
-    started = time.monotonic()
-    ext = ""
-    if file.filename and "." in file.filename:
-        ext = "." + file.filename.rsplit(".", 1)[-1]
-    with tempfile.NamedTemporaryFile(suffix=ext or ".mp3") as tmp:
-        tmp.write(await file.read())
-        tmp.flush()
-        try:
-            text = stt_client.transcribe(tmp.name)
-        except RuntimeError:
-            # GMS 실패는 이 서버의 결함(500)이 아니라 상류 장애 — 502로 구분해
-            # BE가 재시도/실패 상태 저장으로 분기할 수 있게 한다(question 계약과 동일).
-            return JSONResponse(
-                status_code=502, content={"errorCode": "AI_UPSTREAM_ERROR"}
-            )
-    return internal_contracts.TranscriptionResponse(
-        text=text,
-        confidence=None,  # whisper-1은 신뢰도 미제공 — BE sttConfidence는 null 허용 필요
-        model_name=config.STT_MODEL,
-        processing_time_ms=int((time.monotonic() - started) * 1000),
-    )
+#   계약: docs/ai/ai-speech-contract.md
 
 
 @app.post(
