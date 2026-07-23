@@ -1,5 +1,7 @@
 package com.ssafy.b209.child;
 
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -13,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -44,6 +47,10 @@ class ChildListIntegrationTest {
   @BeforeEach
   void setUp() {
     setAuthenticatedUser(GUARDIAN_USER_ID);
+    jdbcTemplate.update("DELETE FROM storage_deletion_jobs");
+    jdbcTemplate.update("DELETE FROM drawing_assets");
+    jdbcTemplate.update("DELETE FROM drawing_sessions");
+    jdbcTemplate.update("DELETE FROM drawing_types");
     jdbcTemplate.update("DELETE FROM child_response_modes");
     jdbcTemplate.update("DELETE FROM guardian_child_relations");
     jdbcTemplate.update("DELETE FROM children");
@@ -105,6 +112,84 @@ class ChildListIntegrationTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data").isArray())
         .andExpect(jsonPath("$.data").isEmpty());
+  }
+
+  @Test
+  void softDeletesTheOnlyGuardiansChildAndSchedulesItsStoredDrawing() throws Exception {
+    jdbcTemplate.update(
+        """
+        INSERT INTO drawing_types
+          (id, code, name, activity_category, selectable_by)
+        VALUES (101, 'DELETE_TEST', '삭제 테스트', 'GENERAL', 'GUARDIAN')
+        """);
+    jdbcTemplate.update(
+        """
+        INSERT INTO drawing_sessions
+          (id, child_id, drawing_type_id, started_by_user_id, input_method)
+        VALUES (201, 1, 101, ?, 'CANVAS')
+        """,
+        GUARDIAN_USER_ID);
+    jdbcTemplate.update(
+        """
+        INSERT INTO drawing_assets
+          (id, drawing_session_id, asset_type, storage_key, mime_type,
+           file_size_bytes, checksum_sha256, captured_at)
+        VALUES
+          (301, 201, 'DRAFT', 'children/1/draft.png', 'image/png', 10,
+           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+           CURRENT_TIMESTAMP(6))
+        """);
+
+    mockMvc
+        .perform(
+            delete("/api/v1/children/1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DELETE\"}"))
+        .andExpect(status().isNoContent());
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT profile_status FROM children WHERE id = 1", String.class))
+        .isEqualTo("DELETED");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT deleted_at IS NOT NULL FROM children WHERE id = 1", Boolean.class))
+        .isTrue();
+    assertThat(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                  FROM storage_deletion_jobs
+                 WHERE storage_key = 'children/1/draft.png'
+                   AND resource_type = 'DRAWING_ASSET'
+                   AND resource_id = 301
+                   AND deletion_status = 'PENDING'
+                """,
+                Integer.class))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void rejectsWholeChildDeletionWhenAnotherGuardianIsConnected() throws Exception {
+    jdbcTemplate.update(
+        """
+        INSERT INTO guardian_child_relations (guardian_user_id, child_id, relationship_type)
+        VALUES (?, 1, 'FATHER')
+        """,
+        OTHER_GUARDIAN_USER_ID);
+
+    mockMvc
+        .perform(
+            delete("/api/v1/children/1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DELETE\"}"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("CHILD_409_001"));
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT profile_status FROM children WHERE id = 1", String.class))
+        .isEqualTo("ACTIVE");
   }
 
   private void setAuthenticatedUser(Long userId) {

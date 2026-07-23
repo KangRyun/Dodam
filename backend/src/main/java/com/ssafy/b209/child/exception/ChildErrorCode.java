@@ -10,7 +10,14 @@ public enum ChildErrorCode implements ErrorCode {
 
   /** 등록일 기준 만 나이가 허용 범위(만 4~12세)를 벗어난 경우다. */
   CHILD_AGE_OUT_OF_RANGE(
-      HttpStatus.BAD_REQUEST, "CHILD_400_001", "아동 나이는 만 4세 이상 12세 이하만 등록할 수 있습니다.");
+      HttpStatus.BAD_REQUEST, "CHILD_400_001", "아동 나이는 만 4세 이상 12세 이하만 등록할 수 있습니다."),
+
+  /** 삭제 확인 문자열이 일치하지 않는 경우다. */
+  CHILD_DELETION_CONFIRMATION_MISMATCH(
+      HttpStatus.BAD_REQUEST, "CHILD_400_002", "아동 삭제 확인 값이 올바르지 않습니다."),
+
+  /** 다른 보호자가 연결되어 전체 프로필 삭제를 허용할 수 없는 경우다. */
+  CHILD_HAS_OTHER_GUARDIAN(HttpStatus.CONFLICT, "CHILD_409_001", "다른 보호자가 연결된 아동은 삭제할 수 없습니다.");
 
   private final HttpStatus httpStatus;
   private final String code;
