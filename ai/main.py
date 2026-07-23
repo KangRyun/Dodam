@@ -59,32 +59,50 @@ async def stt(file: UploadFile = File(...)):
     }
 
 
-# ── F. 대화 LLM — gpt-4o-mini (real, 프롬프트는 placeholder) ──────
+# ── F. 대화 LLM — gpt-4o-mini (real) ─────────────────────────────
 class ConversationRequest(BaseModel):
-    utterance: str                       # STT로 받은 아이 발화
+    utterance: str | None = None         # STT로 받은 아이 발화. 없으면 첫 질문을 만든다.
     drawing_analysis: str | None = None  # 그림분석 결과(있으면 맥락으로)
+    history: list[dict] | None = None    # 지금까지의 대화 [{"role","content"}, ...]
+    child_name: str | None = None        # 아이 이름(호칭용). 없으면 "너"라고 부른다.
+    speak: bool = True                   # True면 생성한 질문을 TTS(mp3)로 함께 합성
+    voice: str | None = None             # TTS 목소리. 미지정 시 config.TTS_VOICE
 
 
 @app.post("/analyze/conversation")
 def analyze_conversation(req: ConversationRequest):
-    """아이 발화(+그림분석) → 캐릭터 다음 질문."""
-    # TODO(편주희): 실제 시스템 프롬프트 / 질문·선택칩 생성 규칙(ai/prompts/). 아래는 배선용 placeholder.
-    system = (
-        "너는 아이와 대화하는 따뜻한 곰돌이야. 아이 말과 그림을 보고 "
-        "쉽고 짧은 다음 질문 하나만 해줘."
-    )
-    context = f"[그림분석] {req.drawing_analysis}\n" if req.drawing_analysis else ""
-    messages = [
-        {"role": "system", "content": system},
-        {"role": "user", "content": f"{context}[아이 말] {req.utterance}"},
-    ]
-    question = llm_client.chat(messages)
+    """아이 발화(+그림분석) → 캐릭터 다음 질문 → (speak면) 곧바로 TTS로 합성.
+
+    질문 문자열은 answer_check로 이미 정화된 상태라 그대로 TTS에 넘겨도 안전하다.
+    응답(질문+음성)은 이 AI 서버를 호출한 백엔드로 반환되고, 백엔드가 프런트로 중계한다.
+    (질문 생성 후 별도 /tts 왕복 없이 한 번에 받게 하려는 것.)
+    """
+    if req.utterance:
+        question = llm_client.next_question(
+            req.utterance,
+            drawing_analysis=req.drawing_analysis,
+            history=req.history,
+            child_name=req.child_name,
+        )
+    else:
+        question = llm_client.first_question(
+            req.drawing_analysis, child_name=req.child_name
+        )
+
+    # 생성한 질문을 그대로 음성으로 — 백엔드가 질문+음성을 한 번에 받는다.
+    audio_base64 = None
+    if req.speak:
+        audio = tts_client.synthesize(question, voice=req.voice)
+        audio_base64 = base64.b64encode(audio).decode()
+
     return {
         "status": "ok",
         "question": question,
+        "audio_base64": audio_base64,  # speak=False면 null
+        "tts_model_id": config.TTS_MODEL if req.speak else None,
         "chips": [],  # 선택칩 생성은 편주희 프롬프트 영역
         "model_id": config.LLM_MODEL,
-        "prompt_version": "placeholder-0",
+        "prompt_version": llm_client.PROMPT_VERSION,
         "pipeline_version": config.PIPELINE_VERSION,
     }
 
