@@ -6,6 +6,7 @@ import 'core/network/network.dart';
 import 'features/auth/auth.dart';
 import 'features/drawing/data/repositories/mock_drawing_repository.dart';
 import 'features/drawing/data/repositories/remote_drawing_repository.dart';
+import 'features/conversation/conversation.dart';
 
 void main() {
   runApp(createDefaultApp());
@@ -43,6 +44,7 @@ DodamApp createDefaultApp({
     drawingRepository: useMockDrawing
         ? const MockDrawingRepository()
         : RemoteDrawingRepository(apiClient),
+    voiceAnswerRepository: RemoteVoiceAnswerRepository(apiClient),
     initialRoute: AppRoutes.authBootstrap,
   );
 }

@@ -47,6 +47,7 @@ final class VoiceRecordingController extends ChangeNotifier {
   Object? _lastError;
   bool _hasDetectedSpeech = false;
   Duration? _lastSpeechAt;
+  DateTime? _startedAt;
 
   VoiceRecordingStatus get status => _status;
   VoiceRecording? get recording => _recording;
@@ -101,6 +102,7 @@ final class VoiceRecordingController extends ChangeNotifier {
       _stopwatch
         ..reset()
         ..start();
+      _startedAt = DateTime.now().toUtc();
       _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
         notifyListeners();
       });
@@ -138,6 +140,7 @@ final class VoiceRecordingController extends ChangeNotifier {
     _amplitudeTimer = null;
     _stopwatch.stop();
     final duration = _stopwatch.elapsed;
+    final endedAt = DateTime.now().toUtc();
     try {
       final path = await _recorder.stop();
       if (path == null || path.isEmpty) {
@@ -146,6 +149,8 @@ final class VoiceRecordingController extends ChangeNotifier {
       final result = VoiceRecording(
         filePath: path,
         duration: duration,
+        startedAt: _startedAt ?? endedAt.subtract(duration),
+        endedAt: endedAt,
         completionReason: reason,
       );
       _recording = result;

@@ -43,6 +43,7 @@ class DrawingScreen extends StatefulWidget {
     this.conversationAnswerRepository,
     this.questionSkipRepository,
     this.conversationEndRepository,
+    this.voiceAnswerRepository,
     this.conversationId,
     this.basisAnalysisId,
     super.key,
@@ -61,6 +62,7 @@ class DrawingScreen extends StatefulWidget {
   final ConversationAnswerRepository? conversationAnswerRepository;
   final QuestionSkipRepository? questionSkipRepository;
   final ConversationEndRepository? conversationEndRepository;
+  final VoiceAnswerRepository? voiceAnswerRepository;
   final int? conversationId;
   final int? basisAnalysisId;
 
@@ -94,6 +96,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   QuestionSkipController? _questionSkipController;
   ConversationEndController? _conversationEndController;
   VoiceRecordingController? _voiceRecordingController;
+  VoiceAnswerUploadController? _voiceAnswerUploadController;
 
   @override
   void initState() {
@@ -155,6 +158,14 @@ class _DrawingScreenState extends State<DrawingScreen> {
         DeviceVoiceRecorder(),
         permissionService: DeviceMicrophonePermissionService(),
       )..addListener(_handleVoiceRecordingChanged);
+      if (widget.voiceAnswerRepository case final repository?) {
+        _voiceAnswerUploadController = VoiceAnswerUploadController(
+          repository,
+          conversationId: conversationId,
+          idempotencyKeyProvider:
+              widget.idempotencyKeyProvider ?? _createIdempotencyKey,
+        )..addListener(_handleVoiceAnswerUploadChanged);
+      }
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -186,6 +197,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
     _conversationEndController?.dispose();
     _voiceRecordingController?.removeListener(_handleVoiceRecordingChanged);
     _voiceRecordingController?.dispose();
+    _voiceAnswerUploadController?.removeListener(
+      _handleVoiceAnswerUploadChanged,
+    );
+    _voiceAnswerUploadController?.dispose();
     super.dispose();
   }
 
@@ -216,6 +231,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
         );
         _answerSubmissionController?.beginQuestion();
         _questionSkipController?.beginQuestion();
+        _voiceAnswerUploadController?.beginQuestion();
         // 질문이 표시되면 선택지보다 먼저 음성 답변 수집 시작
         unawaited(_voiceRecordingController?.start());
       }
@@ -251,11 +267,34 @@ class _DrawingScreenState extends State<DrawingScreen> {
         controller.status == VoiceRecordingStatus.recording) {
       _questionSelectionController.hideOptions();
     } else if (controller.status == VoiceRecordingStatus.completed) {
-      // 음성 답변이 완성되면 현재 질문과 캐릭터 숨김
       _questionSelectionController.hideOptions();
+      final question = _questionDisplayController.visibleQuestion;
+      final recording = controller.recording;
+      final uploadController = _voiceAnswerUploadController;
+      if (question == null || recording == null || uploadController == null) {
+        _questionDisplayController.dismiss();
+      } else if (uploadController.status == VoiceAnswerUploadStatus.idle) {
+        unawaited(
+          uploadController.submit(
+            questionMessageId: question.messageId,
+            recording: recording,
+          ),
+        );
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _handleVoiceAnswerUploadChanged() {
+    if (_voiceAnswerUploadController?.status ==
+        VoiceAnswerUploadStatus.success) {
       _questionDisplayController.dismiss();
     }
     if (mounted) setState(() {});
+  }
+
+  void _retryVoiceAnswerUpload() {
+    unawaited(_voiceAnswerUploadController?.retry());
   }
 
   Future<void> _selectQuestionOption(int optionId) async {
@@ -548,6 +587,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
               unawaited(_confirmAndEndConversation());
             },
             voiceRecordingController: _voiceRecordingController,
+            voiceAnswerUploadStatus:
+                _voiceAnswerUploadController?.status ??
+                VoiceAnswerUploadStatus.idle,
+            onRetryVoiceAnswerUpload: _retryVoiceAnswerUpload,
           );
           final sidePanel = _DrawingSidePanel(
             selectedColor: _color,
@@ -619,6 +662,8 @@ class _CanvasPanel extends StatelessWidget {
     required this.onQuestionSkip,
     required this.onConversationEnd,
     required this.voiceRecordingController,
+    required this.voiceAnswerUploadStatus,
+    required this.onRetryVoiceAnswerUpload,
   });
 
   final GlobalKey repaintBoundaryKey;
@@ -646,6 +691,8 @@ class _CanvasPanel extends StatelessWidget {
   final VoidCallback onQuestionSkip;
   final VoidCallback onConversationEnd;
   final VoiceRecordingController? voiceRecordingController;
+  final VoiceAnswerUploadStatus voiceAnswerUploadStatus;
+  final VoidCallback onRetryVoiceAnswerUpload;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -689,6 +736,8 @@ class _CanvasPanel extends StatelessWidget {
           endStatus: conversationEndStatus,
           onEnd: onConversationEnd,
           voiceRecordingController: voiceRecordingController,
+          voiceAnswerUploadStatus: voiceAnswerUploadStatus,
+          onRetryVoiceAnswerUpload: onRetryVoiceAnswerUpload,
         ),
         if (!inputEnabled)
           _DraftRestoreOverlay(

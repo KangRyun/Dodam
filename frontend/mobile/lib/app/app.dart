@@ -26,6 +26,7 @@ class DodamApp extends StatefulWidget {
     this.authSessionStore,
     this.authRepository,
     this.conversationRepository = const MockConversationRepository(),
+    this.voiceAnswerRepository,
     this.conversationId = 8001,
     this.basisAnalysisId = 7001,
     this.initialRoute = AppRoutes.guardianHome,
@@ -40,6 +41,7 @@ class DodamApp extends StatefulWidget {
   final AuthSessionStore? authSessionStore;
   final AuthRepositoryImpl? authRepository;
   final ConversationRepository? conversationRepository;
+  final VoiceAnswerRepository? voiceAnswerRepository;
   final int? conversationId;
   final int? basisAnalysisId;
   final String initialRoute;
@@ -147,6 +149,7 @@ class _DodamAppState extends State<DodamApp> {
       drawingCompletionSnapshotProvider:
           widget.drawingCompletionSnapshotProvider,
       conversationRepository: widget.conversationRepository,
+      voiceAnswerRepository: widget.voiceAnswerRepository,
       conversationId: widget.conversationId,
       basisAnalysisId: widget.basisAnalysisId,
     ),
