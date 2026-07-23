@@ -41,6 +41,7 @@ class DrawingScreen extends StatefulWidget {
     this.idempotencyKeyProvider,
     this.conversationRepository,
     this.conversationAnswerRepository,
+    this.questionSkipRepository,
     this.conversationId,
     this.basisAnalysisId,
     super.key,
@@ -57,6 +58,7 @@ class DrawingScreen extends StatefulWidget {
   final String Function()? idempotencyKeyProvider;
   final ConversationRepository? conversationRepository;
   final ConversationAnswerRepository? conversationAnswerRepository;
+  final QuestionSkipRepository? questionSkipRepository;
   final int? conversationId;
   final int? basisAnalysisId;
 
@@ -87,6 +89,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   late final AiQuestionDisplayController _questionDisplayController;
   late final AiQuestionSelectionController _questionSelectionController;
   OptionAnswerSubmissionController? _answerSubmissionController;
+  QuestionSkipController? _questionSkipController;
 
   @override
   void initState() {
@@ -131,6 +134,12 @@ class _DrawingScreenState extends State<DrawingScreen> {
         idempotencyKeyProvider:
             widget.idempotencyKeyProvider ?? _createIdempotencyKey,
       )..addListener(_handleAnswerSubmissionChanged);
+      _questionSkipController = QuestionSkipController(
+        widget.questionSkipRepository ?? const MockQuestionSkipRepository(),
+        conversationId: conversationId,
+        idempotencyKeyProvider:
+            widget.idempotencyKeyProvider ?? _createIdempotencyKey,
+      )..addListener(_handleQuestionSkipChanged);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -156,6 +165,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
     _questionSelectionController.dispose();
     _answerSubmissionController?.removeListener(_handleAnswerSubmissionChanged);
     _answerSubmissionController?.dispose();
+    _questionSkipController?.removeListener(_handleQuestionSkipChanged);
+    _questionSkipController?.dispose();
     super.dispose();
   }
 
@@ -181,6 +192,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
       if (accepted) {
         _questionSelectionController.beginQuestion(question);
         _answerSubmissionController?.beginQuestion();
+        _questionSkipController?.beginQuestion();
       }
     });
   }
@@ -197,6 +209,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
     if (mounted) setState(() {});
   }
 
+  void _handleQuestionSkipChanged() {
+    if (mounted) setState(() {});
+  }
+
   Future<void> _selectQuestionOption(int optionId) async {
     final question = _questionDisplayController.visibleQuestion;
     if (question == null) return;
@@ -210,9 +226,14 @@ class _DrawingScreenState extends State<DrawingScreen> {
     if (submitted) _questionDisplayController.dismiss();
   }
 
-  void _skipQuestionLocally() {
-    // 건너뛰기 API 확정 전 Mock 화면에서 현재 질문만 닫기
-    _questionDisplayController.dismiss();
+  Future<void> _skipQuestion() async {
+    final question = _questionDisplayController.visibleQuestion;
+    final controller = _questionSkipController;
+    if (question == null || controller == null) return;
+    final skipped = await controller.submit(
+      questionMessageId: question.messageId,
+    );
+    if (skipped) _questionDisplayController.dismiss();
   }
 
   void _startStroke(PointerDownEvent event) {
@@ -439,9 +460,13 @@ class _DrawingScreenState extends State<DrawingScreen> {
             answerSubmissionStatus:
                 _answerSubmissionController?.status ??
                 OptionAnswerSubmissionStatus.idle,
+            questionSkipStatus:
+                _questionSkipController?.status ?? QuestionSkipStatus.idle,
             showQuestionResponseActions:
                 _questionSelectionController.optionsVisible,
-            onQuestionSkip: _skipQuestionLocally,
+            onQuestionSkip: () {
+              unawaited(_skipQuestion());
+            },
           );
           final sidePanel = _DrawingSidePanel(
             selectedColor: _color,
@@ -507,6 +532,7 @@ class _CanvasPanel extends StatelessWidget {
     required this.selectedQuestionOptionId,
     required this.onQuestionOptionSelected,
     required this.answerSubmissionStatus,
+    required this.questionSkipStatus,
     required this.showQuestionResponseActions,
     required this.onQuestionSkip,
   });
@@ -530,6 +556,7 @@ class _CanvasPanel extends StatelessWidget {
   final int? selectedQuestionOptionId;
   final ValueChanged<int> onQuestionOptionSelected;
   final OptionAnswerSubmissionStatus answerSubmissionStatus;
+  final QuestionSkipStatus questionSkipStatus;
   final bool showQuestionResponseActions;
   final VoidCallback onQuestionSkip;
 
@@ -570,6 +597,7 @@ class _CanvasPanel extends StatelessWidget {
           onOptionSelected: onQuestionOptionSelected,
           showResponseActions: showQuestionResponseActions,
           submissionStatus: answerSubmissionStatus,
+          skipStatus: questionSkipStatus,
           onSkip: onQuestionSkip,
         ),
         if (!inputEnabled)
