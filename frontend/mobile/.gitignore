@@ -47,3 +47,4 @@ app.*.map.json
 # Local OAuth provider configuration
 /android/oauth.properties
 /ios/Flutter/OAuth.xcconfig
+/oauth_defines.json
