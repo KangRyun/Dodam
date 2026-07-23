@@ -116,6 +116,21 @@ class DrawingErrorCodeTest {
     expected.put(
         DrawingErrorCode.DRAWING_COMPLETION_CONFLICT,
         new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_017", "그림 활동 완료 접수 요청이 충돌했습니다."));
+    expected.put(
+        DrawingErrorCode.STROKE_BATCH_INVALID,
+        new ErrorContract(HttpStatus.BAD_REQUEST, "DRAWING_400_010", "그림 과정 데이터가 올바르지 않습니다."));
+    expected.put(
+        DrawingErrorCode.STROKE_BATCH_PAYLOAD_TOO_LARGE,
+        new ErrorContract(
+            HttpStatus.PAYLOAD_TOO_LARGE, "DRAWING_413_001", "그림 과정 데이터 크기가 제한을 초과했습니다."));
+    expected.put(
+        DrawingErrorCode.STROKE_BATCH_NOT_ALLOWED,
+        new ErrorContract(
+            HttpStatus.CONFLICT, "DRAWING_409_018", "현재 상태에서는 그림 과정 데이터를 저장할 수 없습니다."));
+    expected.put(
+        DrawingErrorCode.STROKE_BATCH_CONFLICT,
+        new ErrorContract(
+            HttpStatus.CONFLICT, "DRAWING_409_019", "같은 순번의 다른 그림 과정 데이터가 이미 저장되었습니다."));
 
     assertThat(DrawingErrorCode.values()).containsExactlyInAnyOrderElementsOf(expected.keySet());
     expected.forEach(
