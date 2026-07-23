@@ -6,6 +6,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /** DB v1.2의 PENDING 음성 답변 행만 생성·조회하는 전용 Entity다. */
@@ -47,8 +48,9 @@ public class VoiceAnswerMessage {
   @Column(name = "speech_status")
   private String speechStatus;
 
-  @Column(name = "stt_confidence")
-  private Double sttConfidence;
+  /** DB v1.2의 DECIMAL(5,4) 신뢰도 컬럼과 정밀도를 보존해 매핑한다. */
+  @Column(name = "stt_confidence", precision = 5, scale = 4)
+  private BigDecimal sttConfidence;
 
   @Column(name = "needs_guardian_confirmation", nullable = false)
   private boolean needsGuardianConfirmation;
@@ -133,7 +135,7 @@ public class VoiceAnswerMessage {
     return speechStatus;
   }
 
-  public Double getSttConfidence() {
+  public BigDecimal getSttConfidence() {
     return sttConfidence;
   }
 

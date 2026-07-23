@@ -1,5 +1,6 @@
 package com.ssafy.b209.conversation.dto;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 /**
@@ -26,6 +27,6 @@ public record VoiceAnswerResponse(
     String rawText,
     String sttText,
     String speechStatus,
-    Double sttConfidence,
+    BigDecimal sttConfidence,
     boolean needsGuardianConfirmation,
     LocalDateTime createdAt) {}
