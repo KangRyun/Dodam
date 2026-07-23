@@ -3,3 +3,6 @@ uvicorn[standard]
 openai
 python-dotenv
 python-multipart
+# 관측 메트릭 노출 (S15P11B209-351) — GMS(LLM/STT/TTS) 호출 지연·에러율 스크레이프용.
+#   버전 고정(핀): 스크레이프 스키마·미들웨어 동작이 배포마다 흔들리지 않도록 재현성 확보.
+prometheus-fastapi-instrumentator==8.0.2
