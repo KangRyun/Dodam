@@ -8,8 +8,8 @@ public enum AuthErrorCode implements ErrorCode {
   /** 동시에 동일한 OAuth 계정 연결이 생성되어 단일 사용자로 확정할 수 없는 경우이다. */
   ACCOUNT_LINK_CONFLICT(HttpStatus.CONFLICT, "AUTH_409_001", "이미 연결 처리 중이거나 연결된 OAuth 계정입니다."),
 
-  /** authorization code가 만료되었거나 Provider가 거부한 경우이다. */
-  OAUTH_CODE_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_401_001", "OAuth 인증 정보가 유효하지 않습니다."),
+  /** Provider Token이 만료되었거나 검증에 실패한 경우이다. */
+  OAUTH_CREDENTIAL_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_401_001", "OAuth 인증 정보가 유효하지 않습니다."),
 
   /** Access Token의 서명, 만료, 발급자 또는 용도 검증이 실패한 경우이다. */
   ACCESS_TOKEN_INVALID(HttpStatus.UNAUTHORIZED, "AUTH_401_002", "Access Token이 유효하지 않습니다."),
@@ -34,7 +34,7 @@ public enum AuthErrorCode implements ErrorCode {
   /** 인증된 사용자가 요청 자원 또는 기능에 필요한 권한을 가지지 않은 경우이다. */
   ACCESS_DENIED(HttpStatus.FORBIDDEN, "AUTH_403_002", "요청한 작업에 대한 권한이 없습니다."),
 
-  /** 요청한 Provider 또는 Redirect URI 설정이 허용되지 않은 경우이다. */
+  /** 요청한 Provider 또는 Provider별 Token 필드 조합이 허용되지 않은 경우이다. */
   OAUTH_REQUEST_INVALID(HttpStatus.BAD_REQUEST, "AUTH_400_001", "OAuth 로그인 요청이 유효하지 않습니다."),
 
   /** Provider가 정상 응답하지 않거나 검증 가능한 신원을 제공하지 않은 경우이다. */

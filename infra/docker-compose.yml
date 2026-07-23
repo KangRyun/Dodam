@@ -120,22 +120,15 @@ services:
       JWT_REFRESH_TOKEN_TTL: ${JWT_REFRESH_TOKEN_TTL:-14d}
       OAUTH_CONNECT_TIMEOUT: ${OAUTH_CONNECT_TIMEOUT:-3s}
       OAUTH_READ_TIMEOUT: ${OAUTH_READ_TIMEOUT:-5s}
-      # ── OAuth 3사(카카오/구글/네이버) 콘솔 키 — S15P11B209-320.
+      # ── 모바일 OAuth Provider Token 검증 설정 — S15P11B209-375.
       #   reason: :- (빈 기본값) 비차단 passthrough — 콘솔 키가 아직 미발급일 수 있어
       #           :? 로 걸면 전체 배포가 막힌다. 앱이 provider별 fail-closed(미설정
       #           provider만 503)로 안전하게 처리하므로 "배포는 뜨고, 미설정 provider만
       #           막히는" 쪽을 택했다. 트레이드오프: 키를 깜빡해도 배포가 성공하므로
       #           배포 후 소셜 로그인 검증(503→정상) 필수. 앱 기본값도 빈 값이라
       #           빈 문자열 주입 = 미설정과 동일(위 TTL과 달리 안전).
-      KAKAO_CLIENT_ID: ${KAKAO_CLIENT_ID:-}
-      KAKAO_CLIENT_SECRET: ${KAKAO_CLIENT_SECRET:-}
-      KAKAO_REDIRECT_URI: ${KAKAO_REDIRECT_URI:-}
+      KAKAO_APP_ID: ${KAKAO_APP_ID:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
-      NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
-      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
-      NAVER_REDIRECT_URI: ${NAVER_REDIRECT_URI:-}
       # ── BE→AI 질문 호출 대상 주소 — S15P11B209-320 (D-183-1).
       #   RestClientAiQuestionClient가 ${AI_BASE_URL}로 읽는다. 앱 기본값은
       #   http://localhost:8000 인데 컨테이너 안 localhost는 backend 자신 = 도달 불가

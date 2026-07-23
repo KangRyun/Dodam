@@ -9,8 +9,8 @@
 ## OAuth Provider 식별 규칙
 
 - 앱은 이메일, 전화번호 또는 Provider 로그인 문자열을 인증 식별자로 전달하지 않는다.
-- 앱은 Provider에서 받은 일회성 `authorizationCode`를 백엔드로 전달한다.
-- 백엔드는 Provider Token 교환과 서명·발급자·대상·만료 검증 후 Provider의 불변 사용자 ID를
+- 앱은 Kakao·Naver의 `accessToken` 또는 Google의 `idToken`을 백엔드로 전달한다.
+- 백엔드는 Kakao App ID, Naver 사용자 정보, Google 서명·발급자·대상·만료를 검증한 후 Provider의 불변 사용자 ID를
   `auth_accounts.provider_subject`에 문자열로 저장한다.
 - 이메일은 선택 속성이다. 미동의, 미보유, 비유효 또는 미인증이면 없을 수 있다.
 - 이메일이 없거나 이메일 형식이 아니어도 불변 사용자 ID가 유효하면 로그인·가입을 거부하지 않는다.
@@ -98,7 +98,7 @@ V6 적용 전에 `provider='LOCAL'` 인증 계정 또는 `email_verifications` �
 ## 후속 API 이슈 반영
 
 - S15P11B209-304: 자체 회원가입을 구현하지 않고 Kakao·Google·Naver 최초 로그인 시 사용자·인증 계정 생성 흐름으로 재정의
-- S15P11B209-306: Provider별 authorization code 검증과 JWT 발급
+- S15P11B209-306, S15P11B209-375: Provider Token 검증과 서비스 JWT 발급
 - S15P11B209-305: 자체 이메일 중복 확인 API가 불필요하므로 구현 대상에서 제외
 - S15P11B209-308: Refresh Token은 MySQL이 아닌 Redis에서 저장·회전·폐기
 - 회원 탈퇴 API: 비밀번호 확인 필드를 제거하고 인증된 사용자 요청을 즉시 hard delete

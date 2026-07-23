@@ -511,25 +511,39 @@ throw new BusinessException(SomeDomainErrorCode.RESOURCE_NOT_FOUND);
 
 ## OAuth 로그인 API
 
-자체 이메일·비밀번호 로그인 없이 Kakao·Google·Naver authorization code를 백엔드에서 검증합니다.
+자체 이메일·비밀번호 로그인 없이 모바일 SDK가 발급한 Provider Token을 백엔드에서 검증합니다.
 
 ```http
 POST /api/v1/auth/oauth/{provider}
 Content-Type: application/json
+```
 
+Kakao·Naver 요청:
+
+```json
 {
-  "authorizationCode": "provider가 발급한 일회성 code",
-  "redirectUri": "Provider Console에 등록된 URI",
-  "state": "Naver 로그인에서 사용한 state",
+  "accessToken": "provider-access-token",
+  "deviceId": "앱 설치 단위 식별자"
+}
+```
+
+Google 요청:
+
+```json
+{
+  "idToken": "google-id-token",
   "deviceId": "앱 설치 단위 식별자"
 }
 ```
 
 - `{provider}`는 `kakao`, `google`, `naver` 중 하나입니다.
+- Kakao·Naver는 `accessToken`, Google은 `idToken`만 전달하며 두 필드를 함께 보내거나 Provider와 다른 필드를 보내면 `AUTH_400_001`로 거부합니다.
 - Kakao `id`, Google `sub`, Naver `response.id`를 계정 식별자로 사용하며 이메일·전화번호는 사용하지 않습니다.
-- `redirectUri`는 서버 환경 변수의 Provider별 URI와 정확히 일치해야 합니다.
+- Kakao는 Token의 `app_id`가 `KAKAO_APP_ID`와 같은지 확인하고, Google은 공개 JWK 서명과 `iss`, `aud`, `exp`, `sub`를 검증합니다.
+- Flutter Google 로그인 `serverClientId`와 Backend `GOOGLE_CLIENT_ID`는 동일한 Web Client ID여야 합니다.
 - `JWT_SECRET`은 UTF-8 기준 32 Byte 이상이어야 하며 기본 Secret은 제공하지 않습니다.
-- Provider 설정은 `KAKAO_CLIENT_ID`, `KAKAO_CLIENT_SECRET`, `KAKAO_REDIRECT_URI`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, `NAVER_REDIRECT_URI`로 주입합니다.
+- Provider 검증 설정은 `KAKAO_APP_ID`, `GOOGLE_CLIENT_ID`로 주입합니다. Naver는 전달받은 Access Token으로 사용자 정보 API를 직접 검증합니다.
+- Provider Token은 검증 요청에만 사용하며 DB·Redis·파일에 저장하거나 로그에 기록하지 않습니다.
 - Access Token Filter와 Redis 기반 Refresh Token rotation이 적용되어 있습니다.
 - Access Token이 전달되면 HS256 서명, 발급자, 만료, `token_type=access`, 사용자 ID Subject를 검증하고 요청 Principal로 사용합니다. Refresh Token을 API 인증에 사용할 수 없습니다.
 - OAuth 로그인·Token 재발급과 CORS preflight를 제외한 `/api/v1/**` 요청에는 `Authorization: Bearer {accessToken}`이 필수입니다. Token 누락·검증 실패는 공통 401, 인증 후 권한 부족은 공통 403 응답으로 반환합니다.
@@ -537,7 +551,7 @@ Content-Type: application/json
 - Redis 장애 시 로그인과 재발급은 fail-closed로 실패하며, MySQL에는 Refresh Token을 저장하지 않습니다.
 - Swagger UI의 `bearerAuth` Authorize 입력에는 `Bearer ` 접두어 없이 Access JWT 값만 입력합니다.
 
-실제 Client Secret, JWT Secret과 Redirect URI는 `.env` 또는 배포 Secret으로 관리하며 Git에 커밋하지 않습니다.
+실제 Provider 설정과 JWT Secret은 `.env` 또는 배포 Secret으로 관리하며 Git에 커밋하지 않습니다.
 
 ## 최초 동의 등록 API
 
