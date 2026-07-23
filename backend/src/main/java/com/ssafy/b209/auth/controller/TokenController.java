@@ -1,6 +1,8 @@
 package com.ssafy.b209.auth.controller;
 
+import com.ssafy.b209.auth.dto.request.LogoutRequest;
 import com.ssafy.b209.auth.dto.request.TokenReissueRequest;
+import com.ssafy.b209.auth.service.LogoutService;
 import com.ssafy.b209.auth.service.OAuthLoginResult;
 import com.ssafy.b209.auth.service.RefreshTokenService;
 import com.ssafy.b209.global.response.ApiErrorResponse;
@@ -18,21 +20,24 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** Refresh Token rotation을 통해 서비스 JWT를 재발급하는 HTTP API를 제공한다. */
-@Tag(name = "Authentication", description = "OAuth 로그인 및 Token 재발급 API")
+/** Refresh Token rotation과 현재 기기 로그아웃을 제공하는 인증 HTTP API다. */
+@Tag(name = "Authentication", description = "OAuth 로그인, Token 재발급 및 로그아웃 API")
 @RestController
 @RequestMapping("/api/v1/auth")
 public class TokenController {
 
   private final RefreshTokenService refreshTokenService;
+  private final LogoutService logoutService;
 
   /**
    * Token 재발급 Controller를 구성한다.
    *
    * @param refreshTokenService Refresh Token 검증과 rotation을 수행하는 Service
+   * @param logoutService 현재 기기 Refresh Token 세션을 폐기하는 Service
    */
-  public TokenController(RefreshTokenService refreshTokenService) {
+  public TokenController(RefreshTokenService refreshTokenService, LogoutService logoutService) {
     this.refreshTokenService = refreshTokenService;
+    this.logoutService = logoutService;
   }
 
   /**
@@ -60,5 +65,37 @@ public class TokenController {
   public ResponseEntity<ApiResponse<OAuthLoginResult>> reissue(
       @Valid @RequestBody TokenReissueRequest request) {
     return ResponseEntity.ok(ApiResponse.ok(refreshTokenService.reissue(request)));
+  }
+
+  /**
+   * 인증된 사용자의 현재 기기 Refresh Token 세션을 폐기한다.
+   *
+   * @param request 현재 기기의 Refresh Token과 기기 식별자
+   * @return HTTP 200 공통 성공 응답
+   */
+  @Operation(
+      summary = "현재 기기 로그아웃",
+      description = "Access Token 사용자와 일치하는 현재 기기의 Refresh Token 세션을 폐기합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "로그아웃 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "요청 형식 또는 필수 값 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 또는 Refresh Token이 유효하지 않음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "503",
+        description = "인증 세션 저장소 장애",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @PostMapping("/logout")
+  public ResponseEntity<ApiResponse<Void>> logout(@Valid @RequestBody LogoutRequest request) {
+    logoutService.logout(request);
+    return ResponseEntity.ok(ApiResponse.ok());
   }
 }
