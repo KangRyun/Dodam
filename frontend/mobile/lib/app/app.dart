@@ -9,6 +9,8 @@ import '../features/child/domain/repositories/child_repository.dart';
 import '../features/drawing/data/dto/drawing_dtos.dart';
 import '../features/drawing/data/repositories/mock_drawing_repository.dart';
 import '../features/drawing/domain/repositories/drawing_repository.dart';
+import '../features/report/data/repositories/mock_report_repository.dart';
+import '../features/report/domain/repositories/report_repository.dart';
 import 'router/app_router.dart';
 import 'router/app_routes.dart';
 import 'state/guardian_child_controller.dart';
@@ -18,6 +20,7 @@ class DodamApp extends StatefulWidget {
     this.activityRepository = const MockActivityRepository(),
     this.childRepository = const MockChildRepository(),
     this.drawingRepository = const MockDrawingRepository(),
+    this.reportRepository = const MockReportRepository(),
     this.drawingCompletionSnapshotProvider,
     this.authSessionStore,
     this.initialRoute = AppRoutes.guardianHome,
@@ -27,6 +30,7 @@ class DodamApp extends StatefulWidget {
   final ActivityRepository activityRepository;
   final ChildRepository childRepository;
   final DrawingRepository drawingRepository;
+  final ReportRepository reportRepository;
   final Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider;
   final AuthSessionStore? authSessionStore;
   final String initialRoute;
@@ -128,6 +132,7 @@ class _DodamAppState extends State<DodamApp> {
       authRestoreSession: _restoreSession,
       activityRepository: widget.activityRepository,
       drawingRepository: widget.drawingRepository,
+      reportRepository: widget.reportRepository,
       drawingCompletionSnapshotProvider:
           widget.drawingCompletionSnapshotProvider,
     ),
