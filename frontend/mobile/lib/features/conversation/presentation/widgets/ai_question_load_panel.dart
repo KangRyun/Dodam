@@ -76,15 +76,9 @@ final class _AiQuestionLoadPanelState extends State<AiQuestionLoadPanel> {
             label: const Text('다시 불러오기'),
           ),
         ),
-        AiQuestionStatus.success => const _StatusCard(
+        // 성공 응답은 캔버스의 캐릭터 말풍선에서 표시
+        AiQuestionStatus.success => const SizedBox.shrink(
           key: ValueKey('ai-question-ready'),
-          icon: Icon(
-            Icons.auto_awesome_rounded,
-            color: AppColors.tangerine,
-            size: 32,
-          ),
-          title: '새 질문을 준비했어요!',
-          description: '곧 친구가 그림에 관해 물어볼 거예요.',
         ),
       },
     );
