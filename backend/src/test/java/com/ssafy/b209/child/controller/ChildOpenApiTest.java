@@ -74,6 +74,26 @@ class ChildOpenApiTest {
         .containsExactlyInAnyOrderElementsOf(Set.of("201", "400", "401", "500"));
   }
 
+  @Test
+  void documentsTheChildListLookupContract() throws Exception {
+    JsonNode operation = apiDocument().at("/paths/~1api~1v1~1children/get");
+
+    assertThat(operation.isMissingNode()).isFalse();
+    assertThat(operation.path("tags"))
+        .anySatisfy(tag -> assertThat(tag.asText()).isEqualTo("Children"));
+    assertThat(operation.path("description").asText())
+        .contains("연결된 활성 아동 목록")
+        .contains("Access Token");
+    assertThat(operation.path("parameters"))
+        .noneMatch(
+            parameter ->
+                Set.of("Authorization", "X-Guardian-User-Id")
+                    .contains(parameter.path("name").asText()));
+    assertThat(operation.path("responses").fieldNames())
+        .toIterable()
+        .containsExactlyInAnyOrderElementsOf(Set.of("200", "401", "500"));
+  }
+
   private JsonNode apiDocument() throws Exception {
     String content =
         mockMvc

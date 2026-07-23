@@ -16,6 +16,7 @@ import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.child.domain.ResponseMode;
 import com.ssafy.b209.child.dto.response.ChildDetailResponse;
 import com.ssafy.b209.child.dto.response.ChildRegistrationResponse;
+import com.ssafy.b209.child.dto.response.ChildSummaryResponse;
 import com.ssafy.b209.child.exception.ChildErrorCode;
 import com.ssafy.b209.child.service.ChildQueryService;
 import com.ssafy.b209.child.service.ChildRegistrationService;
@@ -174,6 +175,51 @@ class ChildControllerTest {
                 .content(registrationRequestJson()))
         .andExpect(status().isUnauthorized())
         .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+  }
+
+  @Test
+  void returnsTheConnectedChildrenListInTheCommonResponse() throws Exception {
+    given(guardianResolver.resolve("Bearer access-token", "10")).willReturn(10L);
+    given(childQueryService.getChildren(10L))
+        .willReturn(
+            List.of(
+                new ChildSummaryResponse(
+                    3L,
+                    "별이",
+                    LocalDate.of(2019, 3, 15),
+                    7,
+                    null,
+                    QuestionDifficulty.LOWER_ELEMENTARY,
+                    ChildTutorialStatus.NOT_STARTED,
+                    ChildProfileStatus.ACTIVE,
+                    "MOTHER")));
+
+    mockMvc
+        .perform(
+            get("/api/v1/children")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data[0].childId").value(3))
+        .andExpect(jsonPath("$.data[0].nickname").value("별이"))
+        .andExpect(jsonPath("$.data[0].age").value(7))
+        .andExpect(jsonPath("$.data[0].relationshipType").value("MOTHER"));
+  }
+
+  @Test
+  void returnsAnEmptyChildrenListWhenNoneAreConnected() throws Exception {
+    given(guardianResolver.resolve("Bearer access-token", "10")).willReturn(10L);
+    given(childQueryService.getChildren(10L)).willReturn(List.of());
+
+    mockMvc
+        .perform(
+            get("/api/v1/children")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data").isArray())
+        .andExpect(jsonPath("$.data").isEmpty());
   }
 
   private String registrationRequestJson() {

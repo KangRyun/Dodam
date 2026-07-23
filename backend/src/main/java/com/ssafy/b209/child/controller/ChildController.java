@@ -3,6 +3,7 @@ package com.ssafy.b209.child.controller;
 import com.ssafy.b209.child.dto.request.RegisterChildRequest;
 import com.ssafy.b209.child.dto.response.ChildDetailResponse;
 import com.ssafy.b209.child.dto.response.ChildRegistrationResponse;
+import com.ssafy.b209.child.dto.response.ChildSummaryResponse;
 import com.ssafy.b209.child.service.ChildQueryService;
 import com.ssafy.b209.child.service.ChildRegistrationService;
 import com.ssafy.b209.conversation.service.TemporaryGuardianResolver;
@@ -18,6 +19,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import java.net.URI;
+import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -105,6 +107,44 @@ public class ChildController {
     URI location = URI.create("/api/v1/children/" + response.childId());
     return ResponseEntity.created(location)
         .body(ApiResponse.of(CommonSuccessCode.CREATED, response));
+  }
+
+  /**
+   * 요청 보호자에게 연결된 활성 아동 목록을 조회한다.
+   *
+   * <p>조회만 수행하며 목록 화면에 필요한 요약 정보만 반환한다. 연결된 아동이 없으면 빈 목록을 반환한다.
+   *
+   * @param authorization Test Profile의 호환성 검증에만 사용하는 임시 Header
+   * @param guardianUserId Test Profile의 호환성 검증에만 사용하는 임시 Header
+   * @return HTTP 200과 연결된 아동 요약 목록 공통 응답
+   */
+  @Operation(
+      summary = "아동 목록 조회",
+      description =
+          "요청 보호자에게 연결된 활성 아동 목록을 조회합니다. "
+              + "조회만으로 아동이나 관계 상태를 변경하지 않습니다. "
+              + "Authorization Bearer Access Token의 사용자 ID로 보호자 관계를 검증합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "아동 목록 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "500",
+        description = "서버 내부 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping
+  public ResponseEntity<ApiResponse<List<ChildSummaryResponse>>> getChildren(
+      @Parameter(hidden = true) @RequestHeader(value = "Authorization", required = false)
+          String authorization,
+      @Parameter(hidden = true) @RequestHeader(value = "X-Guardian-User-Id", required = false)
+          String guardianUserId) {
+    Long resolvedGuardianUserId = guardianResolver.resolve(authorization, guardianUserId);
+    return ResponseEntity.ok(ApiResponse.ok(childQueryService.getChildren(resolvedGuardianUserId)));
   }
 
   /**
