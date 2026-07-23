@@ -39,7 +39,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("6");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("7");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(62);
     assertThat(tableExists("refresh_tokens")).isFalse();
@@ -198,6 +198,8 @@ class DatabaseMigrationIntegrationTest {
     assertThat(columnExists("analyses", "active_drawing_asset_id")).isTrue();
     assertThat(foreignKeyExists("analyses", "fk_analyses_drawing_asset_id")).isTrue();
     assertThat(checkConstraintContains("analyses", "ck_analyses_task_type", "OBJECT_DETECTION"))
+        .isTrue();
+    assertThat(checkConstraintContains("analyses", "ck_analyses_task_type", "ACTIVITY_REPORT"))
         .isTrue();
     assertThat(indexExists("analyses", "idx_analyses_asset_task_status", false)).isTrue();
     assertThat(indexExists("analyses", "uk_analyses_active_asset_task", true)).isTrue();
