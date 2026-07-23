@@ -14,6 +14,7 @@ import java.time.Instant;
  * @param version 약관 버전
  * @param title 약관 제목
  * @param contentUrl 약관 원문 URL, 없으면 {@code null}
+ * @param contentHtml 약관 원문 HTML, 아직 확정되지 않았으면 {@code null}
  * @param effectiveAt 약관 시행 시각
  */
 public record ConsentTermResponse(
@@ -24,4 +25,5 @@ public record ConsentTermResponse(
     String version,
     String title,
     String contentUrl,
+    String contentHtml,
     @JsonFormat(shape = JsonFormat.Shape.STRING) Instant effectiveAt) {}

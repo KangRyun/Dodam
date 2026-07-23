@@ -48,6 +48,7 @@ class ConsentControllerTest {
                     "v1",
                     "서비스 이용약관",
                     "https://example.com/tos",
+                    "<h1>서비스 이용약관</h1>",
                     Instant.parse("2026-07-20T00:00:00Z"))));
 
     mockMvc
@@ -57,7 +58,8 @@ class ConsentControllerTest {
         .andExpect(jsonPath("$.data[0].termId").value(1))
         .andExpect(jsonPath("$.data[0].termCode").value("SERVICE_TOS"))
         .andExpect(jsonPath("$.data[0].targetScope").value("USER"))
-        .andExpect(jsonPath("$.data[0].required").value(true));
+        .andExpect(jsonPath("$.data[0].required").value(true))
+        .andExpect(jsonPath("$.data[0].contentHtml").value("<h1>서비스 이용약관</h1>"));
   }
 
   @Test
