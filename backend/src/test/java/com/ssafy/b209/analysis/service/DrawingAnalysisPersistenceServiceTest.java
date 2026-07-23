@@ -9,6 +9,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
 import com.ssafy.b209.analysis.dto.BoundingBoxResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
@@ -28,6 +29,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -81,7 +83,34 @@ class DrawingAnalysisPersistenceServiceTest {
     assertThat(started.storageKey()).isEqualTo("drawing/final.png");
     assertThat(started.contentType()).isEqualTo("image/png");
     assertThat(started.requestedAt()).isEqualTo(REQUESTED_AT);
-    verify(drawingAnalysisRepository).saveAndFlush(any(DrawingAnalysis.class));
+    ArgumentCaptor<DrawingAnalysis> captor = ArgumentCaptor.forClass(DrawingAnalysis.class);
+    verify(drawingAnalysisRepository).saveAndFlush(captor.capture());
+    assertThat(ReflectionTestUtils.getField(captor.getValue(), "scope"))
+        .isEqualTo(DrawingAnalysisScope.FINAL);
+  }
+
+  @Test
+  void startsIntermediateObjectDetectionForDraftAsset() {
+    givenValidTarget();
+    given(asset.getAssetType()).willReturn(DrawingAssetType.DRAFT);
+    given(asset.getStorageKey()).willReturn("drawing/draft.png");
+    given(asset.getMimeType()).willReturn("image/png");
+    given(drawingAnalysisRepository.saveAndFlush(any(DrawingAnalysis.class)))
+        .willAnswer(invocation -> invocation.getArgument(0));
+
+    StartedDrawingAnalysis started =
+        service.start(
+            SESSION_ID,
+            ASSET_ID,
+            DrawingAnalysisType.OBJECT_DETECTION,
+            "550e8400-e29b-41d4-a716-446655440000",
+            REQUESTED_AT);
+
+    assertThat(started.storageKey()).isEqualTo("drawing/draft.png");
+    ArgumentCaptor<DrawingAnalysis> captor = ArgumentCaptor.forClass(DrawingAnalysis.class);
+    verify(drawingAnalysisRepository).saveAndFlush(captor.capture());
+    assertThat(ReflectionTestUtils.getField(captor.getValue(), "scope"))
+        .isEqualTo(DrawingAnalysisScope.INTERMEDIATE);
   }
 
   @Test
@@ -109,7 +138,7 @@ class DrawingAnalysisPersistenceServiceTest {
   }
 
   @Test
-  void rejectsAssetFromAnotherSessionAndNonFinalAsset() {
+  void rejectsAssetFromAnotherSessionAndUnsupportedAssetType() {
     given(drawingSessionRepository.findNotDeletedByIdForUpdate(SESSION_ID))
         .willReturn(Optional.of(session));
     given(session.isAnalysisRequestable()).willReturn(true);
@@ -132,6 +161,25 @@ class DrawingAnalysisPersistenceServiceTest {
             service.start(
                 SESSION_ID, ASSET_ID, DrawingAnalysisType.OBJECT_DETECTION, "id", REQUESTED_AT),
         DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
+  }
+
+  @Test
+  void rejectsActivityReportFromPublicAnalysisRequest() {
+    givenValidTarget();
+
+    assertError(
+        () ->
+            service.start(
+                SESSION_ID, ASSET_ID, DrawingAnalysisType.ACTIVITY_REPORT, "id", REQUESTED_AT),
+        DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
+
+    given(asset.getAssetType()).willReturn(DrawingAssetType.DRAFT);
+    assertError(
+        () ->
+            service.start(
+                SESSION_ID, ASSET_ID, DrawingAnalysisType.ACTIVITY_REPORT, "id", REQUESTED_AT),
+        DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
+    verify(drawingAnalysisRepository, never()).saveAndFlush(any());
   }
 
   @Test

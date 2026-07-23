@@ -27,7 +27,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * 그림 활동 세션의 최종 스냅샷 분석 요청과 저장 결과 조회 API를 제공한다.
+ * 그림 활동 세션의 자동 저장·최종 그림 객체 탐지 요청과 저장 결과 조회 API를 제공한다.
  *
  * <p>HTTP 입력 검증, 생성 리소스 Location과 공통 응답 조립만 담당하며 실행 규칙은 {@link DrawingAnalysisService}, 조회 규칙은
  * {@link DrawingAnalysisQueryService}에 위임한다.
@@ -95,7 +95,7 @@ public class DrawingAnalysisController {
   }
 
   /**
-   * 세션의 최종 그림 분석을 실행하고 저장된 분석 리소스를 반환한다.
+   * 세션의 DRAFT 또는 FINAL 그림 객체 탐지를 실행하고 저장된 분석 리소스를 반환한다.
    *
    * @param drawingSessionId 그림 활동 세션 식별자
    * @param request 분석 대상 그림 파일과 작업 유형
@@ -104,7 +104,10 @@ public class DrawingAnalysisController {
    */
   @Operation(
       summary = "그림 분석 요청 및 결과 저장",
-      description = "세션의 최종 그림을 활성화된 DrawingAnalysisClient로 분석하고 객체 탐지 결과를 저장합니다.")
+      description =
+          "세션의 DRAFT 자동 저장 그림 또는 FINAL 그림을 DrawingAnalysisClient로 분석하고 객체 탐지 결과를 저장합니다. "
+              + "DRAFT는 INTERMEDIATE 분석으로, FINAL은 FINAL 분석으로 기록합니다. "
+              + "자동 저장 후 3초 debounce는 Client가 담당합니다.")
   @ApiResponses({
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "201",
