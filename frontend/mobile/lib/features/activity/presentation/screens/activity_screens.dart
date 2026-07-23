@@ -83,12 +83,15 @@ class _DrawingScreenState extends State<DrawingScreen> {
   DrawingCompleteMetadataDto? _pendingCompletionMetadata;
   AiQuestionController? _questionController;
   late final AiQuestionDisplayController _questionDisplayController;
+  late final AiQuestionSelectionController _questionSelectionController;
 
   @override
   void initState() {
     super.initState();
     _questionDisplayController = AiQuestionDisplayController()
       ..addListener(_handleQuestionDisplayChanged);
+    _questionSelectionController = AiQuestionSelectionController()
+      ..addListener(_handleQuestionSelectionChanged);
     _ownsSyncCoordinator = widget.syncCoordinator == null;
     _syncCoordinator =
         widget.syncCoordinator ??
@@ -137,6 +140,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
     _questionController?.dispose();
     _questionDisplayController.removeListener(_handleQuestionDisplayChanged);
     _questionDisplayController.dispose();
+    _questionSelectionController.removeListener(
+      _handleQuestionSelectionChanged,
+    );
+    _questionSelectionController.dispose();
     super.dispose();
   }
 
@@ -157,12 +164,29 @@ class _DrawingScreenState extends State<DrawingScreen> {
     }
     // 하위 상태 UI의 빌드 중 알림과 겹치지 않도록 다음 프레임에 반영
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _questionDisplayController.receive(question);
+      if (!mounted) return;
+      final accepted = _questionDisplayController.receive(question);
+      if (accepted) _questionSelectionController.beginQuestion(question);
     });
   }
 
   void _handleQuestionDisplayChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _handleQuestionSelectionChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _selectQuestionOption(int optionId) {
+    final question = _questionDisplayController.visibleQuestion;
+    if (question == null) return;
+    _questionSelectionController.select(question, optionId);
+  }
+
+  void _skipQuestionLocally() {
+    // 건너뛰기 API 확정 전 Mock 화면에서 현재 질문만 닫기
+    _questionDisplayController.dismiss();
   }
 
   void _startStroke(PointerDownEvent event) {
@@ -381,6 +405,12 @@ class _DrawingScreenState extends State<DrawingScreen> {
                 _questionDisplayController.isVisible &&
                 _activePointer == null &&
                 _draftRestoreController.canDraw,
+            selectedQuestionOptionId:
+                _questionSelectionController.selectedOptionId,
+            onQuestionOptionSelected: _selectQuestionOption,
+            showQuestionResponseActions:
+                _questionSelectionController.optionsVisible,
+            onQuestionSkip: _skipQuestionLocally,
           );
           final sidePanel = _DrawingSidePanel(
             selectedColor: _color,
@@ -443,6 +473,10 @@ class _CanvasPanel extends StatelessWidget {
     required this.onRetryImage,
     required this.question,
     required this.showQuestion,
+    required this.selectedQuestionOptionId,
+    required this.onQuestionOptionSelected,
+    required this.showQuestionResponseActions,
+    required this.onQuestionSkip,
   });
 
   final GlobalKey repaintBoundaryKey;
@@ -461,6 +495,10 @@ class _CanvasPanel extends StatelessWidget {
   final VoidCallback onRetryImage;
   final AiQuestion? question;
   final bool showQuestion;
+  final int? selectedQuestionOptionId;
+  final ValueChanged<int> onQuestionOptionSelected;
+  final bool showQuestionResponseActions;
+  final VoidCallback onQuestionSkip;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -492,7 +530,14 @@ class _CanvasPanel extends StatelessWidget {
             onBackgroundError: onBackgroundError,
           ),
         ),
-        AiQuestionBubbleOverlay(question: question, visible: showQuestion),
+        AiQuestionBubbleOverlay(
+          question: question,
+          visible: showQuestion,
+          selectedOptionId: selectedQuestionOptionId,
+          onOptionSelected: onQuestionOptionSelected,
+          showResponseActions: showQuestionResponseActions,
+          onSkip: onQuestionSkip,
+        ),
         if (!inputEnabled)
           _DraftRestoreOverlay(
             status: restoreStatus,
