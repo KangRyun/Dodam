@@ -37,7 +37,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-@WebMvcTest(DrawingAnalysisController.class)
+@WebMvcTest({DrawingAnalysisController.class, DrawingAnalysisRetryController.class})
 @org.springframework.context.annotation.Import(
     com.ssafy.b209.global.exception.GlobalExceptionHandler.class)
 class DrawingAnalysisControllerTest {
@@ -90,6 +90,31 @@ class DrawingAnalysisControllerTest {
         .andExpect(jsonPath("$.data.model.name").value("mock-drawing-detector"))
         .andExpect(jsonPath("$.data.detections[0].label").value("HOUSE"))
         .andExpect(jsonPath("$.data.storageKey").doesNotExist());
+  }
+
+  @Test
+  void retriesAFailedAnalysisByItsIdentifier() throws Exception {
+    given(drawingAnalysisService.retryAnalysis(eq(30L), any())).willReturn(response());
+
+    mockMvc
+        .perform(
+            post("/api/v1/analyses/{analysisId}/retry", 30L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"USER_REQUEST\",\"useLatestInputs\":true}"))
+        .andExpect(status().isCreated())
+        .andExpect(header().string("Location", "/api/v1/drawing-sessions/10/analyses/30"))
+        .andExpect(jsonPath("$.data.status").value("SUCCEEDED"));
+  }
+
+  @Test
+  void rejectsAnInvalidRetryRequest() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/analyses/{analysisId}/retry", 30L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"useLatestInputs\":true}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
   }
 
   @Test

@@ -15,9 +15,11 @@ import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisModelResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisResponse;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisRetryReason;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.dto.DrawingDetectionResponse;
+import com.ssafy.b209.analysis.dto.RetryDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
@@ -211,6 +213,41 @@ class DrawingAnalysisServiceTest {
             eq("RESULT_SAVE_FAILED"),
             eq(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RESULT_SAVE_FAILED.getMessage()),
             eq(LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC)));
+  }
+
+  @Test
+  void retriesAFailedAnalysisAfterCheckingGuardianAccess() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    given(persistenceService.findRetrySource(ANALYSIS_ID))
+        .willReturn(new RetryDrawingAnalysisSource(ANALYSIS_ID, SESSION_ID));
+    given(
+            persistenceService.startRetry(
+                ANALYSIS_ID,
+                true,
+                REQUEST_ID.toString(),
+                LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC)))
+        .willReturn(
+            new StartedDrawingAnalysis(
+                31L,
+                SESSION_ID,
+                ASSET_ID,
+                REQUEST_ID.toString(),
+                "drawing/final.png",
+                "image/png",
+                LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC)));
+    given(drawingAnalysisClient.analyze(any())).willReturn(successResponse(REQUEST_ID.toString()));
+    given(persistenceService.complete(eq(31L), any(), any(), any(), any()))
+        .willReturn(org.mockito.Mockito.mock(DrawingAnalysis.class));
+
+    CreateDrawingAnalysisResponse response =
+        service.retryAnalysis(
+            ANALYSIS_ID,
+            new RetryDrawingAnalysisRequest(DrawingAnalysisRetryReason.USER_REQUEST, true));
+
+    verify(accessValidator).requireDrawingSessionAccess(GUARDIAN_USER_ID, SESSION_ID);
+    assertThat(response.drawingAnalysisId()).isEqualTo(31L);
+    assertThat(response.drawingSessionId()).isEqualTo(SESSION_ID);
+    assertThat(response.status()).isEqualTo(DrawingAnalysisStatus.SUCCEEDED);
   }
 
   private void givenStartedAnalysis() {

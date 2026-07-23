@@ -58,6 +58,20 @@ class DrawingAnalysisOpenApiTest {
     assertThat(operation.has("security")).isFalse();
   }
 
+  @Test
+  void documentsFailedDrawingAnalysisRetryContract() throws Exception {
+    JsonNode operation = apiDocument().at("/paths/~1api~1v1~1analyses~1{analysisId}~1retry/post");
+
+    assertThat(operation.isMissingNode()).isFalse();
+    assertThat(operation.path("tags"))
+        .anySatisfy(tag -> assertThat(tag.asText()).isEqualTo("Drawing Analyses"));
+    assertThat(operation.at("/requestBody/required").asBoolean()).isTrue();
+    assertThat(operation.path("responses").fieldNames())
+        .toIterable()
+        .containsAll(Set.of("201", "400", "404", "409", "502"));
+    assertThat(operation.has("security")).isFalse();
+  }
+
   private JsonNode apiDocument() throws Exception {
     String content =
         mockMvc
