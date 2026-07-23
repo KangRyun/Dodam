@@ -24,6 +24,7 @@ class DodamApp extends StatefulWidget {
     this.reportRepository = const MockReportRepository(),
     this.drawingCompletionSnapshotProvider,
     this.authSessionStore,
+    this.authRepository,
     this.conversationRepository = const MockConversationRepository(),
     this.conversationId = 8001,
     this.basisAnalysisId = 7001,
@@ -37,6 +38,7 @@ class DodamApp extends StatefulWidget {
   final ReportRepository reportRepository;
   final Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider;
   final AuthSessionStore? authSessionStore;
+  final AuthRepositoryImpl? authRepository;
   final ConversationRepository? conversationRepository;
   final int? conversationId;
   final int? basisAnalysisId;
@@ -60,14 +62,16 @@ class _DodamAppState extends State<DodamApp> {
     _childController = GuardianChildController(widget.childRepository);
     _childController.loadChildren();
 
-    _authRepository = AuthRepositoryImpl(
-      providerScenarios: const {
-        AuthProvider.kakao: MockAuthScenario.newUserWithoutEmail,
-        AuthProvider.google: MockAuthScenario.newGuardian,
-        AuthProvider.naver: MockAuthScenario.newGuardian,
-      },
-      sessionStore: widget.authSessionStore,
-    );
+    _authRepository =
+        widget.authRepository ??
+        AuthRepositoryImpl(
+          providerScenarios: const {
+            AuthProvider.kakao: MockAuthScenario.newUserWithoutEmail,
+            AuthProvider.google: MockAuthScenario.newGuardian,
+            AuthProvider.naver: MockAuthScenario.newGuardian,
+          },
+          sessionStore: widget.authSessionStore,
+        );
     _socialLoginService = SocialLoginService(_authRepository);
     _kakaoLoginCoordinator = KakaoLoginCoordinator(
       KakaoLoginClientImpl(),

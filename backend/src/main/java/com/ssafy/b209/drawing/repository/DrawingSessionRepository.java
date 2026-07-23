@@ -13,6 +13,19 @@ import org.springframework.data.repository.query.Param;
 public interface DrawingSessionRepository extends JpaRepository<DrawingSession, Long> {
 
   /**
+   * 상세 응답 조립에 필요한 아동과 그림 유형을 포함해 삭제되지 않은 세션을 조회한다.
+   *
+   * @param id 그림 활동 세션 식별자
+   * @return 접근 가능한 세션, 존재하지 않거나 삭제됐으면 빈 값
+   */
+  @Query(
+      "select s from DrawingSession s "
+          + "join fetch s.child "
+          + "join fetch s.drawingType "
+          + "where s.id = :id and s.deletedAt is null")
+  Optional<DrawingSession> findDetailById(@Param("id") Long id);
+
+  /**
    * 삭제되지 않은 그림 활동 세션을 잠금 없이 조회한다.
    *
    * @param id 그림 활동 세션 식별자

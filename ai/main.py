@@ -10,6 +10,11 @@
 - GMS 일시 오류는 이 서버 안에서 지수 백오프로 제한 재시도(question_service.py).
   근거 정리: _workspace/183_ai_loop-decision.md
 
+STT/TTS 경로 정리(179·289, 2026-07-23):
+- 공개 초안 /stt·/tts 삭제 — nginx /ai/ 프록시로 무인증 인터넷 노출되던 경로(GMS 비용·아동 음성).
+- E(STT)·G(TTS)는 BE 전용 /internal/ai/v1/speech/stt·synthesis 로 제공(X-Internal-Token).
+  계약: docs/ai/ai-speech-contract.md.
+
 ⚠️ /analyze/* 등 기존 경로의 계약은 '초안'이고, /internal/ai/v1/* 는 BE 코드와 맞춘 내부 계약.
 원본 음성·발화는 저장·로그하지 않는다(가드레일).
 """
@@ -17,6 +22,7 @@
 import base64
 import hmac
 import tempfile
+import time
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, File, Header, UploadFile
@@ -106,26 +112,6 @@ def analyze_drawing():
     }
 
 
-# ── E. 아동 발화 STT — whisper-1 (real) ──────────────────────────
-@app.post("/stt")
-async def stt(file: UploadFile = File(...)):
-    """음성 파일 → 텍스트. (원본 음성은 임시파일로만 다루고 저장·로그 안 함)"""
-    ext = ""
-    if file.filename and "." in file.filename:
-        ext = "." + file.filename.rsplit(".", 1)[-1]
-    with tempfile.NamedTemporaryFile(suffix=ext or ".mp3") as tmp:
-        tmp.write(await file.read())
-        tmp.flush()
-        text = stt_client.transcribe(tmp.name)
-    return {
-        "status": "ok",
-        "text": text,
-        "confidence": None,  # whisper-1은 단순 신뢰도 미제공(스키마 유지용 null)
-        "model_id": config.STT_MODEL,
-        "pipeline_version": config.PIPELINE_VERSION,
-    }
-
-
 # ── F. 대화 LLM — gpt-4o-mini (real) ─────────────────────────────
 class ConversationRequest(BaseModel):
     utterance: str | None = None         # STT로 받은 아이 발화. 없으면 첫 질문을 만든다.
@@ -193,6 +179,48 @@ def _internal_token_ok(received: str) -> bool:
     return hmac.compare_digest(received or "", config.AI_INTERNAL_TOKEN)
 
 
+def _safe_stt_suffix(filename: str | None) -> str:
+    """원본 이름을 보존하지 않고 OpenAI 형식 판별에 필요한 확장자만 만든다."""
+    if not filename or "." not in filename:
+        return ".mp3"
+    extension = filename.rsplit(".", 1)[-1].lower()
+    if not extension.isalnum() or len(extension) > 10:
+        return ".mp3"
+    return f".{extension}"
+
+
+@app.post("/internal/ai/v1/speech/stt")
+async def internal_speech_stt(
+    file: UploadFile = File(...),
+    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+    x_request_id: str = Header(default="", alias="X-Request-Id"),
+):
+    """BE 전용 STT adapter: 파일은 임시로만 처리하고 계약 DTO로 정규화한다."""
+    if not _internal_token_ok(x_internal_token):
+        return JSONResponse(
+            status_code=401, content={"errorCode": "INVALID_INTERNAL_TOKEN"}
+        )
+    if not x_request_id.strip():
+        return JSONResponse(status_code=422, content={"errorCode": "INVALID_REQUEST"})
+
+    started_at = time.monotonic()
+    try:
+        with tempfile.NamedTemporaryFile(suffix=_safe_stt_suffix(file.filename)) as tmp:
+            tmp.write(await file.read())
+            tmp.flush()
+            text = stt_client.transcribe(tmp.name)
+        return {
+            "text": text,
+            "confidence": None,
+            "modelName": config.STT_MODEL,
+            "processingTimeMs": int((time.monotonic() - started_at) * 1000),
+        }
+    except RuntimeError:
+        return JSONResponse(status_code=502, content={"errorCode": "AI_UPSTREAM_ERROR"})
+    finally:
+        await file.close()
+
+
 @app.post(
     "/internal/ai/v1/conversations/question",
     response_model=internal_contracts.QuestionResponse,
@@ -236,24 +264,39 @@ def internal_conversation_question(
         return JSONResponse(status_code=502, content={"errorCode": e.error_code})
 
 
-# ── G. 질문/답변 TTS — gpt-4o-mini-tts (real) ────────────────────
-class TtsRequest(BaseModel):
-    text: str
-    voice: str | None = None
+# ── BE 내부 계약: 음성 STT(E) / TTS(G) (179 · A안 2026-07-23) ────
+#   공개 초안 /stt·/tts 는 삭제했다: nginx /ai/ 프록시를 타고 무인증으로
+#   인터넷에 노출되던 경로였다(GMS 비용 소진 + 아동 음성 경로 공개).
+#   /internal/ai/v1/* 로 옮기면 기존 nginx /ai/internal/ 차단(404)이 그대로
+#   적용되고, BE 호출도 conversations/question과 같은 토큰 패턴으로 통일된다.
+#   계약: docs/ai/ai-speech-contract.md
 
 
-@app.post("/tts")
-def tts(req: TtsRequest):
-    """텍스트 → 음성(mp3, base64)."""
-    audio = tts_client.synthesize(req.text, voice=req.voice)
-    return {
-        "status": "ok",
-        "audio_url": None,
-        "audio_base64": base64.b64encode(audio).decode(),
-        "duration_sec": None,
-        "model_id": config.TTS_MODEL,
-        "pipeline_version": config.PIPELINE_VERSION,
-    }
+@app.post(
+    "/internal/ai/v1/speech/synthesis",
+    response_model=internal_contracts.SynthesisResponse,
+)
+def internal_speech_synthesis(
+    req: internal_contracts.SynthesisRequest,
+    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+):
+    """BE(-299 질문 TTS 생성)가 호출하는 텍스트→음성(mp3 base64) 합성."""
+    if not _internal_token_ok(x_internal_token):
+        return JSONResponse(
+            status_code=401, content={"errorCode": "INVALID_INTERNAL_TOKEN"}
+        )
+    started = time.monotonic()
+    try:
+        audio = tts_client.synthesize(req.text, voice=req.voice)
+    except RuntimeError:
+        # transcription과 동일 — 상류(GMS) 장애는 502로 매핑.
+        return JSONResponse(status_code=502, content={"errorCode": "AI_UPSTREAM_ERROR"})
+    return internal_contracts.SynthesisResponse(
+        audio_base64=base64.b64encode(audio).decode(),
+        voice=req.voice or config.TTS_VOICE,
+        model_name=config.TTS_MODEL,
+        processing_time_ms=int((time.monotonic() - started) * 1000),
+    )
 
 
 @app.post("/analyze/report")
