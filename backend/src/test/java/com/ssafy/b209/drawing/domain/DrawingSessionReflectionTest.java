@@ -37,6 +37,41 @@ class DrawingSessionReflectionTest {
         .isInstanceOf(IllegalStateException.class);
   }
 
+  @Test
+  void completesReportingSessionWithServerTimestamp() {
+    DrawingSession session = session();
+    ReflectionTestUtils.setField(session, "currentStage", DrawingStage.REFLECTION);
+    session.startReporting();
+    LocalDateTime completedAt = LocalDateTime.of(2026, 7, 23, 3, 0);
+
+    session.completeReporting(completedAt);
+
+    assertThat(session.getSessionStatus()).isEqualTo(DrawingSessionStatus.COMPLETED);
+    assertThat(session.getCurrentStage()).isEqualTo(DrawingStage.COMPLETED);
+    assertThat(session.getCompletedAt()).isEqualTo(completedAt);
+  }
+
+  @Test
+  void rejectsCompletionBeforeReportingStage() {
+    DrawingSession session = session();
+
+    assertThatThrownBy(() -> session.completeReporting(LocalDateTime.of(2026, 7, 23, 3, 0)))
+        .isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
+  void failsReportingSessionWithoutMarkingItCompleted() {
+    DrawingSession session = session();
+    ReflectionTestUtils.setField(session, "currentStage", DrawingStage.REFLECTION);
+    session.startReporting();
+
+    session.failReporting();
+
+    assertThat(session.getSessionStatus()).isEqualTo(DrawingSessionStatus.FAILED);
+    assertThat(session.getCurrentStage()).isEqualTo(DrawingStage.REPORTING);
+    assertThat(session.getCompletedAt()).isNull();
+  }
+
   private DrawingSession session() {
     return DrawingSession.start(
         ChildFixture.create(

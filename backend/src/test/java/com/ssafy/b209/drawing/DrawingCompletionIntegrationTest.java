@@ -1,11 +1,15 @@
 package com.ssafy.b209.drawing;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ssafy.b209.auth.token.AuthenticatedUser;
+import com.ssafy.b209.infrastructure.ai.observation.AiObservationClient;
+import com.ssafy.b209.infrastructure.ai.observation.AiObservationClientException;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -19,6 +23,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
@@ -43,6 +48,7 @@ class DrawingCompletionIntegrationTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbcTemplate;
+  @MockitoSpyBean private AiObservationClient observationClient;
 
   @BeforeEach
   void setUp() {
@@ -111,7 +117,7 @@ class DrawingCompletionIntegrationTest {
         .andExpect(jsonPath("$.data.analysisStatus").value("PENDING"))
         .andExpect(jsonPath("$.data.reportStatus").value("GENERATING"));
 
-    // AFTER_COMMIT 동기 Mock 생성이 완료되어 분석은 SUCCESS, 리포트는 COMPLETED로 전이된다.
+    // AFTER_COMMIT 동기 Mock 생성이 완료되어 분석·리포트와 활동 세션이 함께 완료 전이된다.
     assertThat(
             jdbcTemplate.queryForObject(
                 "SELECT analysis_status FROM analyses WHERE drawing_session_id = ?",
@@ -130,6 +136,14 @@ class DrawingCompletionIntegrationTest {
                 String.class,
                 SESSION_ID))
         .isEqualTo("ACTIVITY_REPORT");
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT session_status, current_stage, completed_at "
+                    + "FROM drawing_sessions WHERE id = ?",
+                SESSION_ID))
+        .containsEntry("session_status", "COMPLETED")
+        .containsEntry("current_stage", "COMPLETED")
+        .doesNotContainEntry("completed_at", null);
 
     // 정규화 저장이 실제로 채워졌는지 확인한다.
     assertThat(count("analysis_observation_results")).isGreaterThanOrEqualTo(1);
@@ -151,12 +165,45 @@ class DrawingCompletionIntegrationTest {
                 "SELECT current_stage FROM drawing_sessions WHERE id = ?",
                 String.class,
                 SESSION_ID))
-        .isEqualTo("REPORTING");
+        .isEqualTo("COMPLETED");
 
-    // 다른 키 요청은 세션이 이미 REPORTING이라 409로 거절되고 행 수는 그대로다.
+    // 다른 키 요청은 세션이 이미 COMPLETED라 409로 거절되고 행 수는 그대로다.
     mockMvc.perform(completionRequest("another-completion-key")).andExpect(status().isConflict());
     assertThat(count("analyses")).isEqualTo(1);
     assertThat(count("reports")).isEqualTo(1);
+  }
+
+  @Test
+  void marksSessionFailedWhenReportGenerationFails() throws Exception {
+    doThrow(new AiObservationClientException(AiObservationClientException.Type.TIMEOUT))
+        .when(observationClient)
+        .generate(any());
+
+    mockMvc
+        .perform(completionRequest("failure-key-335"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.data.currentStage").value("REPORTING"));
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT analysis_status FROM analyses WHERE drawing_session_id = ?",
+                String.class,
+                SESSION_ID))
+        .isEqualTo("FAILED");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT report_status FROM reports WHERE drawing_session_id = ?",
+                String.class,
+                SESSION_ID))
+        .isEqualTo("FAILED");
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT session_status, current_stage, completed_at "
+                    + "FROM drawing_sessions WHERE id = ?",
+                SESSION_ID))
+        .containsEntry("session_status", "FAILED")
+        .containsEntry("current_stage", "REPORTING")
+        .containsEntry("completed_at", null);
   }
 
   private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
