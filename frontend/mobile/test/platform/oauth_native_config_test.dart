@@ -27,6 +27,9 @@ void main() {
       'android/app/src/main/kotlin/com/dodam/app/MainActivity.kt',
     ).readAsStringSync();
     final iosInfo = File('ios/Runner/Info.plist').readAsStringSync();
+    final sceneDelegate = File(
+      'ios/Runner/SceneDelegate.swift',
+    ).readAsStringSync();
     final gitignore = File('.gitignore').readAsStringSync();
 
     expect(androidGradle, contains('KAKAO_NATIVE_APP_KEY'));
@@ -38,8 +41,10 @@ void main() {
     expect(iosInfo, contains(r'kakao$(KAKAO_NATIVE_APP_KEY)'));
     expect(iosInfo, contains(r'$(GOOGLE_REVERSED_CLIENT_ID)'));
     expect(iosInfo, contains(r'$(NAVER_URL_SCHEME)'));
+    expect(sceneDelegate, contains('NidOAuth.shared.handleURL'));
     expect(gitignore, contains('/android/oauth.properties'));
     expect(gitignore, contains('/ios/Flutter/OAuth.xcconfig'));
+    expect(gitignore, contains('/oauth_defines.json'));
   });
 
   test('OAuth 설정 예시는 실제 값 대신 명시적인 placeholder를 사용한다', () {
@@ -63,8 +68,9 @@ void main() {
     expect(readme, contains('ios/Flutter/OAuth.xcconfig.example'));
     expect(readme, contains('com.dodam.app'));
     expect(readme, contains('macOS와 Xcode'));
-    expect(readme, contains('실제 Provider SDK 로그인'));
+    expect(readme, contains('Kakao·Naver Access Token과 Google ID Token'));
     expect(readme, contains('dart run tool/configure_oauth.dart'));
+    expect(readme, contains('--dart-define-from-file=oauth_defines.json'));
   });
 
   test('Release 빌드는 누락된 OAuth 설정을 허용하지 않는다', () {

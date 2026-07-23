@@ -16,7 +16,7 @@ void main() {
       );
 
       expect(app.drawingRepository, isA<RemoteDrawingRepository>());
-      expect(app.authRepository, isA<AuthRepositoryImpl>());
+      expect(app.authRepository, isA<RemoteAuthRepository>());
     },
   );
 

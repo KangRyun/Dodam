@@ -16,4 +16,6 @@ final class KakaoLoginCancelled extends KakaoLoginResult {
 // 카카오 SDK 연결 계약
 abstract interface class KakaoLoginClient {
   Future<KakaoLoginResult> signIn();
+
+  Future<void> signOut();
 }

@@ -29,4 +29,7 @@ final class KakaoLoginClientImpl implements KakaoLoginClient {
       ),
     };
   }
+
+  @override
+  Future<void> signOut() async {}
 }

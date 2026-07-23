@@ -51,6 +51,16 @@ dart run tool/configure_oauth.dart --platform=ios
 dart run tool/configure_oauth.dart --platform=all
 ```
 
+앱 실행과 빌드에는 생성된 Dart define 파일을 함께 전달한다.
+
+```bash
+flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080 --dart-define-from-file=oauth_defines.json
+flutter build apk --debug --dart-define=API_BASE_URL=http://10.0.2.2:8080 --dart-define-from-file=oauth_defines.json
+```
+
+위 주소는 Android Emulator에서 PC의 로컬 Backend로 접속하는 예시다.
+실기기와 iOS Simulator에서는 실행 환경에 맞는 Backend origin으로 교체한다.
+
 Naver Mobile SDK 특성상 `NAVER_CLIENT_SECRET`은 앱 패키지에 포함되므로
 역공학으로 추출될 수 있다. `.gitignore`는 소스 관리 노출만 방지한다.
 Provider 콘솔의 package·Bundle ID 제한과 Release 서명 정보를 함께
@@ -78,7 +88,7 @@ Provider 콘솔은 다음 값과 일치해야 한다.
 Android 빌드는 Windows에서도 검증할 수 있다.
 
 ```powershell
-C:\src\flutter\bin\flutter.bat build apk --debug
+C:\src\flutter\bin\flutter.bat build apk --debug --dart-define=API_BASE_URL=http://10.0.2.2:8080 --dart-define-from-file=oauth_defines.json
 ```
 
 iOS 의존성 설치, 서명, Simulator 및 실기기 빌드 검증에는 macOS와 Xcode가
@@ -86,16 +96,18 @@ iOS 의존성 설치, 서명, Simulator 및 실기기 빌드 검증에는 macOS�
 
 ```bash
 flutter pub get
-flutter build ios --no-codesign
+flutter build ios --no-codesign --dart-define=API_BASE_URL=http://localhost:8080 --dart-define-from-file=oauth_defines.json
 ```
 
-현재 iOS 프로젝트는 Flutter Swift Package Manager를 사용한다. 향후
-Plugin이 CocoaPods를 요구하여 `ios/Podfile`이 생성된 경우에만
-`cd ios && pod install`을 추가로 실행한다.
+Google·Kakao Plugin은 Flutter Swift Package Manager 구성을 따르지만
+`flutter_naver_login`은 Naver iOS SDK를 CocoaPods로 연결한다. macOS에서
+Flutter가 `ios/Podfile`을 생성한 뒤 `cd ios && pod install`을 실행하고,
+Xcode Workspace로 최종 빌드한다. Windows에서는 이 과정을 검증할 수 없다.
 
 Release 배포 전에는 Google Play App Signing 인증서의 SHA-1을 Google
 Android OAuth Client에 추가하고, 같은 인증서의 Kakao Release Key Hash를
 Kakao Native App Key에 추가해야 한다.
 
-현재 단계는 Android와 iOS 플랫폼 및 Native 설정을 제공한다. 실제 Provider SDK 로그인,
-Provider Token 획득, Backend OAuth API 호출은 후속 이슈에서 구현한다.
+현재 앱은 Kakao·Naver Access Token과 Google ID Token을 Provider SDK에서 획득하고,
+Backend OAuth API에서 서비스 Access·Refresh Token으로 교환한다. 실제 Key는
+Repository에 저장하지 않고 로컬 설정 파일이나 CI/CD Secret으로 주입한다.

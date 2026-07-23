@@ -6,7 +6,7 @@ class AuthenticatedUser {
     required this.id,
     required this.provider,
     required this.providerUserId,
-    required this.role,
+    this.role,
     required this.onboardingCompleted,
     this.email,
     this.nickname,
@@ -16,7 +16,7 @@ class AuthenticatedUser {
   final String id;
   final AuthProvider provider;
   final String providerUserId;
-  final UserRole role;
+  final UserRole? role;
   final bool onboardingCompleted;
   final String? email;
   final String? nickname;

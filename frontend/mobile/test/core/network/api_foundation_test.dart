@@ -65,6 +65,20 @@ void main() {
     expect(ordinaryError.errors, isEmpty);
   });
 
+  test('ApiError는 현재 공통 오류 응답의 code와 message를 파싱한다', () {
+    final error = ApiError.fromJson({
+      'success': false,
+      'code': 'AUTH_401_001',
+      'message': 'OAuth 인증 정보가 유효하지 않습니다.',
+      'data': null,
+    });
+
+    expect(error.code, 'AUTH_401_001');
+    expect(error.message, 'OAuth 인증 정보가 유효하지 않습니다.');
+    expect(error.timestamp, isNull);
+    expect(error.path, isNull);
+  });
+
   test('ApiPage parses the common top-level pagination shape', () {
     final page = ApiPage<int>.fromJson({
       'content': [

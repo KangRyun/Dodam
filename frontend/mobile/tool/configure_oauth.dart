@@ -1,12 +1,19 @@
+import 'dart:convert';
 import 'dart:io';
 
 enum OAuthTarget { android, ios, all }
 
 const androidOAuthVariableNames = [
   'KAKAO_NATIVE_APP_KEY',
+  'GOOGLE_SERVER_CLIENT_ID',
   'NAVER_CLIENT_ID',
   'NAVER_CLIENT_SECRET',
   'NAVER_APP_NAME',
+];
+
+const dartDefineOAuthVariableNames = [
+  'KAKAO_NATIVE_APP_KEY',
+  'GOOGLE_SERVER_CLIENT_ID',
 ];
 
 const iosOAuthVariableNames = [
@@ -45,12 +52,21 @@ String renderAndroidOAuthProperties(Map<String, String> values) =>
 String renderIosOAuthXcconfig(Map<String, String> values) =>
     '${iosOAuthVariableNames.map((name) => '$name=${values[name]!.trim()}').join('\n')}\n';
 
+String renderOAuthDartDefines(Map<String, String> values) =>
+    '${const JsonEncoder.withIndent('  ').convert({for (final name in dartDefineOAuthVariableNames) name: values[name]!.trim()})}\n';
+
 Future<List<String>> writeOAuthConfiguration({
   required Directory projectRoot,
   required Map<String, String> values,
   required OAuthTarget target,
 }) async {
   final writtenFiles = <String>[];
+  validateOAuthValues(values, dartDefineOAuthVariableNames);
+  final dartDefinesFile = File(
+    '${projectRoot.path}${Platform.pathSeparator}oauth_defines.json',
+  );
+  await dartDefinesFile.writeAsString(renderOAuthDartDefines(values));
+  writtenFiles.add(dartDefinesFile.path);
 
   if (target == OAuthTarget.android || target == OAuthTarget.all) {
     validateOAuthValues(values, androidOAuthVariableNames);
