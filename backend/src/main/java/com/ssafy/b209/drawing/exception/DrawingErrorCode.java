@@ -68,7 +68,12 @@ public enum DrawingErrorCode implements ErrorCode {
   ACTIVE_DRAWING_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "DRAWING_404_005", "진행 중인 그림 활동이 없습니다."),
   /** 한 아동에게 진행 중 그림 활동 세션이 둘 이상 존재해 단일 세션을 결정할 수 없는 경우다. */
   MULTIPLE_ACTIVE_DRAWING_SESSIONS(
-      HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_500_003", "진행 중인 그림 활동 데이터가 중복되었습니다.");
+      HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_500_003", "진행 중인 그림 활동 데이터가 중복되었습니다."),
+  /** 감정 선택과 건너뛰기 요청 조합이 유효하지 않은 경우다. */
+  DRAWING_REFLECTION_INVALID(HttpStatus.BAD_REQUEST, "DRAWING_400_009", "그림 활동 감정 정보가 올바르지 않습니다."),
+  /** 현재 세션 상태나 단계에서 감정 표현을 저장할 수 없는 경우다. */
+  DRAWING_REFLECTION_NOT_ALLOWED(
+      HttpStatus.CONFLICT, "DRAWING_409_012", "현재 상태에서는 그림 활동 감정을 저장할 수 없습니다.");
 
   private final HttpStatus httpStatus;
   private final String code;

@@ -94,6 +94,13 @@ class DrawingErrorCodeTest {
         DrawingErrorCode.MULTIPLE_ACTIVE_DRAWING_SESSIONS,
         new ErrorContract(
             HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_500_003", "진행 중인 그림 활동 데이터가 중복되었습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_REFLECTION_INVALID,
+        new ErrorContract(HttpStatus.BAD_REQUEST, "DRAWING_400_009", "그림 활동 감정 정보가 올바르지 않습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_REFLECTION_NOT_ALLOWED,
+        new ErrorContract(
+            HttpStatus.CONFLICT, "DRAWING_409_012", "현재 상태에서는 그림 활동 감정을 저장할 수 없습니다."));
 
     assertThat(DrawingErrorCode.values()).containsExactlyInAnyOrderElementsOf(expected.keySet());
     expected.forEach(
