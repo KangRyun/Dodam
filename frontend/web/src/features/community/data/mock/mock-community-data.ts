@@ -51,6 +51,7 @@ export const mockCommunityFeed: CommunityFeed = {
         "6살 아이인데 최근 한 달째 그림을 그릴 때마다 검은 크레파스만 골라요. 처음엔 그냥 그러려니 했는데 이제는 조금 걱정이 돼요.\n\n억지로 다른 색을 권하는 게 맞을까요? 아니면 그냥 지켜보는 게 나을까요? 비슷한 경험 있으신 분들 조언 부탁드려요.",
       author: guardianAuthor,
       tags: ["색채심리", "유아미술"],
+      imageUrl: "/community/child-drawing-placeholder.png",
       isAnonymous: false,
       isLiked: false,
       likeCount: 24,
