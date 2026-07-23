@@ -104,6 +104,15 @@ public class Child {
   }
 
   /**
+   * 보호자 화면에 표시할 아동 별칭을 반환한다.
+   *
+   * @return 아동 별칭
+   */
+  public String getNickname() {
+    return nickname;
+  }
+
+  /**
    * DB v1.2와 API 계약에 따른 아동의 질문 난이도를 반환한다.
    *
    * @return 아동 질문 생성에 사용할 난이도

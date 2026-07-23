@@ -1,6 +1,7 @@
 package com.ssafy.b209.drawing;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -72,6 +73,12 @@ class DrawingSessionIntegrationTest {
   @BeforeEach
   void setUp() {
     setAuthenticatedGuardian();
+    jdbcTemplate.update("DELETE FROM reports");
+    jdbcTemplate.update("DELETE FROM conversation_sessions");
+    jdbcTemplate.update("DELETE FROM analysis_detected_objects");
+    jdbcTemplate.update("DELETE FROM analyses");
+    jdbcTemplate.update("DELETE FROM drawing_session_emotions");
+    jdbcTemplate.update("DELETE FROM drawing_assets");
     jdbcTemplate.update("DELETE FROM drawing_sessions");
     jdbcTemplate.execute("ALTER TABLE drawing_sessions AUTO_INCREMENT = 1");
     jdbcTemplate.update("DELETE FROM guardian_child_relations");
@@ -80,7 +87,8 @@ class DrawingSessionIntegrationTest {
     jdbcTemplate.update("DELETE FROM users");
     jdbcTemplate.update(
         "INSERT INTO users (id, role, nickname, account_status) "
-            + "VALUES (?, 'GUARDIAN', 'drawing-guardian', 'ACTIVE')",
+            + "VALUES (?, 'GUARDIAN', 'drawing-guardian', 'ACTIVE'), "
+            + "(99, 'GUARDIAN', 'another-guardian', 'ACTIVE')",
         GUARDIAN_USER_ID);
     jdbcTemplate.update(
         "INSERT INTO children "
@@ -221,6 +229,37 @@ class DrawingSessionIntegrationTest {
     assertThat(sessionCount()).isEqualTo(1);
   }
 
+  @Test
+  void returnsOwnedDrawingSessionDetailAndHidesInternalStorageKey() throws Exception {
+    Long drawingSessionId = create("detail-integration-key", 1L).drawingSessionId();
+    insertDetailResources(drawingSessionId);
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/{drawingSessionId}", drawingSessionId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.child.childId").value(1))
+        .andExpect(jsonPath("$.data.child.nickname").value("child-one"))
+        .andExpect(jsonPath("$.data.selectedEmotions[0]").value("HAPPY"))
+        .andExpect(jsonPath("$.data.selectedEmotions[1]").value("CALM"))
+        .andExpect(jsonPath("$.data.latestAsset.drawingAssetId").value(21))
+        .andExpect(jsonPath("$.data.latestAsset.storageKey").doesNotExist())
+        .andExpect(jsonPath("$.data.latestAnalysis.drawingAnalysisId").value(30))
+        .andExpect(jsonPath("$.data.conversationId").value(40))
+        .andExpect(jsonPath("$.data.reportId").value(50))
+        .andExpect(jsonPath("$.data.recoverableDraft").value(true));
+  }
+
+  @Test
+  void hidesDrawingSessionExistenceFromUnrelatedGuardian() throws Exception {
+    Long drawingSessionId = create("detail-access-key", 1L).drawingSessionId();
+    setAuthenticatedUser(99L);
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/{drawingSessionId}", drawingSessionId))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("DRAWING_404_003"));
+  }
+
   private CreateDrawingSessionResponse create(String key, long childId) {
     return drawingSessionService.createDrawingSession(key, request(childId));
   }
@@ -255,10 +294,56 @@ class DrawingSessionIntegrationTest {
   }
 
   private void setAuthenticatedGuardian() {
+    setAuthenticatedUser(GUARDIAN_USER_ID);
+  }
+
+  private void setAuthenticatedUser(Long userId) {
     SecurityContextHolder.getContext()
         .setAuthentication(
             UsernamePasswordAuthenticationToken.authenticated(
-                new AuthenticatedUser(GUARDIAN_USER_ID), null, List.of()));
+                new AuthenticatedUser(userId), null, List.of()));
+  }
+
+  private void insertDetailResources(Long drawingSessionId) {
+    jdbcTemplate.update(
+        "INSERT INTO drawing_session_emotions "
+            + "(drawing_session_id, emotion_code, selection_order) "
+            + "VALUES (?, 'CALM', 1), (?, 'HAPPY', 0)",
+        drawingSessionId,
+        drawingSessionId);
+    jdbcTemplate.update(
+        "INSERT INTO drawing_assets "
+            + "(id, drawing_session_id, asset_type, asset_version, storage_key, mime_type, "
+            + "file_size_bytes, checksum_sha256, last_event_sequence, captured_at, created_at) "
+            + "VALUES (20, ?, 'DRAFT', 1, 'private/draft-1.png', 'image/png', 1024, "
+            + "REPEAT('a', 64), 1, '2026-07-23 01:01:00', '2026-07-23 01:01:00'), "
+            + "(21, ?, 'DRAFT', 2, 'private/draft-2.png', 'image/png', 2048, "
+            + "REPEAT('b', 64), 2, '2026-07-23 01:02:00', '2026-07-23 01:02:00')",
+        drawingSessionId,
+        drawingSessionId);
+    jdbcTemplate.update(
+        "INSERT INTO analyses "
+            + "(id, drawing_session_id, drawing_asset_id, analysis_type, analysis_task_type, "
+            + "idempotency_key, analysis_status, trigger_reason, requested_at, started_at, "
+            + "completed_at, created_at) "
+            + "VALUES (30, ?, 21, 'INTERMEDIATE', 'OBJECT_DETECTION', "
+            + "'detail-analysis-key', 'SUCCESS', 'INTERVAL', "
+            + "'2026-07-23 01:03:00', '2026-07-23 01:03:00', "
+            + "'2026-07-23 01:03:01', '2026-07-23 01:03:00')",
+        drawingSessionId);
+    jdbcTemplate.update(
+        "INSERT INTO conversation_sessions "
+            + "(id, drawing_session_id, conversation_status, difficulty_snapshot, "
+            + "max_question_count, question_count, started_at) "
+            + "VALUES (40, ?, 'CONVERSING', 'PRESCHOOL', 10, 0, '2026-07-23 01:04:00')",
+        drawingSessionId);
+    jdbcTemplate.update(
+        "INSERT INTO reports "
+            + "(id, drawing_session_id, analysis_id, report_version, report_status, "
+            + "is_expert_review_recommended, limitations_text, pdf_status, created_at, updated_at) "
+            + "VALUES (50, ?, 30, 1, 'GENERATING', FALSE, "
+            + "'생성 중인 리포트입니다.', 'NONE', '2026-07-23 01:05:00', '2026-07-23 01:05:00')",
+        drawingSessionId);
   }
 
   private CreateDrawingSessionRequest request(long childId) {

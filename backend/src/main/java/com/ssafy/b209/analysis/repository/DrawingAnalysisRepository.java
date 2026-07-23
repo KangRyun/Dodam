@@ -13,6 +13,15 @@ import org.springframework.data.repository.query.Param;
 public interface DrawingAnalysisRepository extends JpaRepository<DrawingAnalysis, Long> {
 
   /**
+   * 세션에서 가장 최근 요청된 분석 실행을 조회한다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @return 요청 시각과 식별자 역순의 첫 번째 분석, 없으면 빈 값
+   */
+  Optional<DrawingAnalysis> findFirstByDrawingSessionIdOrderByRequestedAtDescIdDesc(
+      Long drawingSessionId);
+
+  /**
    * 완료 접수 요청에 사용한 멱등 키로 분석을 조회한다.
    *
    * @param requestId {@code Idempotency-Key} Header 값

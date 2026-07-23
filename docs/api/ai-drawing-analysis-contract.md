@@ -24,6 +24,22 @@ GET /api/v1/drawing-sessions/{drawingSessionId}/analyses/{drawingAnalysisId}
 
 현재 `analyses`와 `analysis_detected_objects`에는 Soft Delete 컬럼이 없으며 `drawing_sessions.deleted_at`만 기존 조회 정책에 따라 제외한다. 그림 API 공통 인증이 도입되기 전까지 임시 사용자 Header나 사용자 ID를 사용하지 않는다.
 
+## 공개 분석 요청의 Asset 정책
+
+`POST /api/v1/drawing-sessions/{drawingSessionId}/analyses`는 다음 조합만 허용한다.
+
+| Asset 유형 | 요청 가능 작업 | 저장 분석 범위 |
+| --- | --- | --- |
+| `DRAFT` | `OBJECT_DETECTION` | `INTERMEDIATE` |
+| `FINAL` | `OBJECT_DETECTION` | `FINAL` |
+
+`INTERMEDIATE`, `UPLOADED`, `THUMBNAIL`, `TIMELAPSE` Asset과 공개 API의 `ACTIVITY_REPORT`
+요청은 거부한다. `ACTIVITY_REPORT`는 그림 활동 완료 Service의 내부 처리에서만 생성한다.
+
+자동 저장 그림은 DRAFT 저장 응답의 `drawingAssetId`를 사용한다. 마지막 자동 저장 성공 후 3초 동안
+추가 변경이 없을 때 분석을 요청하는 debounce는 프론트엔드가 담당하며, Backend는 지연 실행용
+Scheduler나 Timer를 생성하지 않는다.
+
 ## 요청
 
 ```json

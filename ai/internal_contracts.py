@@ -105,6 +105,38 @@ class SafetyResult(_CamelModel):
     block_reason_code: str | None = None
 
 
+# ── 음성 STT/TTS 계약 (S15P11B209-179 — 제안 상태) ──────────────
+# ⚠️ conversations/question과 달리 BE 소비자(-289 STT 처리기 · -299 질문 TTS)가
+#    아직 미착수라 이 계약은 AI 쪽 '제안'이다. BE 착수 시 함께 확정하고,
+#    변경은 양쪽 동시 반영한다. 문서: docs/ai/ai-speech-contract.md
+
+
+class TranscriptionResponse(_CamelModel):
+    """음성→텍스트(STT) 응답. text는 아이 발화 원문 — repr에서 감춘다(로그 유출 방지)."""
+
+    text: str = Field(repr=False)
+    confidence: float | None = None  # whisper-1은 신뢰도 미제공 — null 고정(스키마 유지용)
+    model_name: str
+    processing_time_ms: int
+
+
+class SynthesisRequest(_CamelModel):
+    """텍스트→음성(TTS) 합성 요청. text는 아이에게 들려줄 캐릭터 대사(질문 등)."""
+
+    text: str
+    voice: str | None = None  # 미지정 시 서버 기본(config.TTS_VOICE)
+
+
+class SynthesisResponse(_CamelModel):
+    """텍스트→음성(TTS) 합성 응답(mp3 base64)."""
+
+    audio_base64: str = Field(repr=False)  # 큰 바이너리 — repr 오염 방지
+    audio_format: Literal["mp3"] = "mp3"
+    voice: str
+    model_name: str
+    processing_time_ms: int
+
+
 class QuestionResponse(_CamelModel):
     """BE AiQuestionResponse와 1:1 대응. isContractValidFor 통과 조건 요약:
 

@@ -9,6 +9,15 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface DrawingAssetRepository extends JpaRepository<DrawingAsset, Long> {
 
   /**
+   * 세션에서 가장 최근 생성된 그림 파일 Metadata를 조회한다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @return 생성 시각과 식별자 역순의 첫 번째 그림 파일, 없으면 빈 값
+   */
+  Optional<DrawingAsset> findFirstByDrawingSessionIdOrderByCreatedAtDescIdDesc(
+      Long drawingSessionId);
+
+  /**
    * 동일 세션·유형·버전의 그림 파일이 이미 존재하는지 확인한다.
    *
    * @param drawingSessionId 그림 활동 세션 식별자
