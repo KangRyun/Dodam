@@ -81,11 +81,14 @@ public class OAuthLoginService {
     userRepository.save(user);
     IssuedTokenPair tokens = tokenIssuer.issue(user.getId());
     registerRefreshSession(user.getId(), request.deviceId(), tokens);
+    String email = user.getEmail() != null ? user.getEmail() : identity.providerEmail();
     OAuthLoginUser loginUser =
         new OAuthLoginUser(
             user.getId(),
             user.getRole(),
             user.getNickname(),
+            email,
+            email == null,
             user.getAccountStatus(),
             user.isOnboardingCompleted());
     return new OAuthLoginResult(
