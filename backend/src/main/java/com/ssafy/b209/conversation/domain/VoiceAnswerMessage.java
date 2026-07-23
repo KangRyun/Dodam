@@ -40,7 +40,8 @@ public class VoiceAnswerMessage {
   @Column(name = "audio_storage_key")
   private String audioStorageKey;
 
-  @Column(name = "audio_checksum_sha256")
+  /** DB v1.2의 SHA-256 고정 길이(64자) 문자열 컬럼과 매핑한다. */
+  @Column(name = "audio_checksum_sha256", columnDefinition = "CHAR(64)")
   private String audioChecksumSha256;
 
   @Column(name = "speech_status")
