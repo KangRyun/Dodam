@@ -13,6 +13,7 @@ import com.ssafy.b209.consent.domain.ConsentTargetScope;
 import com.ssafy.b209.consent.domain.ConsentTerm;
 import com.ssafy.b209.consent.dto.request.ConsentAgreementRequest;
 import com.ssafy.b209.consent.dto.request.CreateConsentRequest;
+import com.ssafy.b209.consent.dto.response.ConsentChangeResponse;
 import com.ssafy.b209.consent.dto.response.ConsentRegistrationResponse;
 import com.ssafy.b209.consent.exception.ConsentErrorCode;
 import com.ssafy.b209.consent.repository.ConsentAuthorizationRepository;
@@ -137,6 +138,42 @@ class ConsentRegistrationServiceTest {
             exception ->
                 assertThat(exception.getErrorCode())
                     .isEqualTo(ConsentErrorCode.TERM_VERSION_INACTIVE));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void appendsOptionalConsentChangeWithoutRequiringRequiredTermsInTheRequest() {
+    ConsentTerm optional = term(3L, ConsentTargetScope.USER, false, true);
+    CreateConsentRequest request = request(null, agreement(3L, ConsentAction.WITHDRAW));
+    when(termRepository.findAllById(org.mockito.ArgumentMatchers.anySet()))
+        .thenReturn(List.of(optional));
+
+    ConsentChangeResponse response =
+        service.changeOptional(41L, request, "127.0.0.1", "test-agent");
+
+    assertThat(response.recordedCount()).isEqualTo(1);
+    ArgumentCaptor<List<ConsentRecord>> captor = ArgumentCaptor.forClass(List.class);
+    verify(recordRepository).saveAll(captor.capture());
+    assertThat(ReflectionTestUtils.getField(captor.getValue().get(0), "action"))
+        .isEqualTo(ConsentAction.WITHDRAW);
+    verify(termRepository, never()).findAllByActiveTrue();
+  }
+
+  @Test
+  void rejectsChangingRequiredConsentThroughOptionalChangeApi() {
+    ConsentTerm required = term(1L, ConsentTargetScope.USER, true, true);
+    CreateConsentRequest request = request(null, agreement(1L, ConsentAction.WITHDRAW));
+    when(termRepository.findAllById(org.mockito.ArgumentMatchers.anySet()))
+        .thenReturn(List.of(required));
+
+    assertThatThrownBy(() -> service.changeOptional(41L, request, null, null))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception ->
+                assertThat(exception.getErrorCode())
+                    .isEqualTo(ConsentErrorCode.REQUIRED_CONSENT_CHANGE_NOT_ALLOWED));
+
+    verify(recordRepository, never()).saveAll(anyList());
   }
 
   private ConsentTerm term(Long id, ConsentTargetScope scope, boolean required, boolean active) {

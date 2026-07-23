@@ -3,6 +3,7 @@ package com.ssafy.b209.consent.controller;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.consent.domain.ConsentTargetScope;
 import com.ssafy.b209.consent.dto.request.CreateConsentRequest;
+import com.ssafy.b209.consent.dto.response.ConsentChangeResponse;
 import com.ssafy.b209.consent.dto.response.ConsentRegistrationResponse;
 import com.ssafy.b209.consent.dto.response.ConsentStatusResponse;
 import com.ssafy.b209.consent.dto.response.ConsentTermResponse;
@@ -24,6 +25,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -176,6 +178,51 @@ public class ConsentController {
             limit(httpRequest.getHeader(HttpHeaders.USER_AGENT), MAX_USER_AGENT_LENGTH));
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(ApiResponse.of(CommonSuccessCode.CREATED, response));
+  }
+
+  /**
+   * 선택 약관의 동의·철회·재동의를 append-only 이력으로 기록한다.
+   *
+   * @param request 아동 ID와 변경할 선택 약관별 행위
+   * @param httpRequest 원격 IP와 User-Agent 증빙을 제공하는 HTTP 요청
+   * @return HTTP 200과 저장된 변경 이력 수
+   */
+  @Operation(summary = "선택 동의 변경", description = "선택 약관의 동의·철회·재동의를 기존 기록을 덮어쓰지 않고 새 이력으로 저장합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "선택 동의 변경 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "필수 약관 변경 또는 요청 범위 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 실패",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "403",
+        description = "아동 연결 보호자가 아님",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "약관을 찾을 수 없음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "409",
+        description = "비활성 또는 시행 전 약관",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @PatchMapping
+  public ResponseEntity<ApiResponse<ConsentChangeResponse>> changeOptional(
+      @Valid @RequestBody CreateConsentRequest request, HttpServletRequest httpRequest) {
+    ConsentChangeResponse response =
+        registrationService.changeOptional(
+            currentUserResolver.requireUserId(),
+            request,
+            limit(httpRequest.getRemoteAddr(), MAX_IP_LENGTH),
+            limit(httpRequest.getHeader(HttpHeaders.USER_AGENT), MAX_USER_AGENT_LENGTH));
+    return ResponseEntity.ok(ApiResponse.ok(response));
   }
 
   private String limit(String value, int maximumLength) {

@@ -1,6 +1,8 @@
 package com.ssafy.b209.consent;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -13,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -87,6 +90,35 @@ class ConsentStatusIntegrationTest {
         .andExpect(jsonPath("$.data.items[1].termId").value(2))
         .andExpect(jsonPath("$.data.items[1].required").value(false))
         .andExpect(jsonPath("$.data.items[1].agreed").value(false));
+  }
+
+  @Test
+  void appendsOptionalConsentChangeAndExposesItAsTheLatestStatus() throws Exception {
+    mockMvc
+        .perform(
+            patch("/api/v1/consents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "agreements": [
+                        {"termId": 2, "action": "AGREE"}
+                      ]
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.recordedCount").value(1));
+
+    Integer recordCount =
+        jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM consent_records WHERE consent_term_id = 2", Integer.class);
+    assertThat(recordCount).isEqualTo(3);
+
+    mockMvc
+        .perform(get("/api/v1/consents"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.items[1].agreed").value(true));
   }
 
   private void setAuthenticatedUser(Long userId) {
