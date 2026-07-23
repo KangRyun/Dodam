@@ -4,8 +4,10 @@ import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.consent.domain.ConsentTargetScope;
 import com.ssafy.b209.consent.dto.request.CreateConsentRequest;
 import com.ssafy.b209.consent.dto.response.ConsentRegistrationResponse;
+import com.ssafy.b209.consent.dto.response.ConsentStatusResponse;
 import com.ssafy.b209.consent.dto.response.ConsentTermResponse;
 import com.ssafy.b209.consent.service.ConsentRegistrationService;
+import com.ssafy.b209.consent.service.ConsentStatusQueryService;
 import com.ssafy.b209.consent.service.ConsentTermQueryService;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.ApiResponse;
@@ -40,21 +42,61 @@ public class ConsentController {
   private final CurrentAuthenticatedUserResolver currentUserResolver;
   private final ConsentRegistrationService registrationService;
   private final ConsentTermQueryService termQueryService;
+  private final ConsentStatusQueryService statusQueryService;
 
   /**
-   * 동의 등록·약관 조회 Controller를 구성한다.
+   * 동의 등록·약관 조회·동의 현황 조회 Controller를 구성한다.
    *
    * @param currentUserResolver Access Token 사용자 식별 경계
    * @param registrationService 최초 동의 검증·저장 Service
    * @param termQueryService 현재 적용 약관 조회 Service
+   * @param statusQueryService 사용자·아동 동의 현황 조회 Service
    */
   public ConsentController(
       CurrentAuthenticatedUserResolver currentUserResolver,
       ConsentRegistrationService registrationService,
-      ConsentTermQueryService termQueryService) {
+      ConsentTermQueryService termQueryService,
+      ConsentStatusQueryService statusQueryService) {
     this.currentUserResolver = currentUserResolver;
     this.registrationService = registrationService;
     this.termQueryService = termQueryService;
+    this.statusQueryService = statusQueryService;
+  }
+
+  /**
+   * 사용자 본인과 선택 아동의 현재 동의 현황을 조회한다.
+   *
+   * <p>적용 범위의 필수 동의 충족 여부와 약관별 현재 동의 상태를 반환한다.
+   *
+   * @param childId 아동 대상 현황을 함께 조회할 아동 식별자, 사용자 약관만 조회하면 {@code null}
+   * @return HTTP 200과 동의 현황 공통 응답
+   */
+  @Operation(
+      summary = "동의 현황 조회",
+      description = "로그인 사용자와 선택 아동의 현재 동의 현황을 조회합니다. childId를 지정하면 아동 대상 약관 현황을 함께 반환합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "동의 현황 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "Query 값 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 실패",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "403",
+        description = "아동 연결 보호자가 아님",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping
+  public ResponseEntity<ApiResponse<ConsentStatusResponse>> getConsentStatus(
+      @RequestParam(value = "childId", required = false) Long childId) {
+    return ResponseEntity.ok(
+        ApiResponse.ok(
+            statusQueryService.getConsentStatus(currentUserResolver.requireUserId(), childId)));
   }
 
   /**

@@ -13,8 +13,11 @@ import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.consent.domain.ConsentTargetScope;
 import com.ssafy.b209.consent.dto.request.CreateConsentRequest;
 import com.ssafy.b209.consent.dto.response.ConsentRegistrationResponse;
+import com.ssafy.b209.consent.dto.response.ConsentStatusItemResponse;
+import com.ssafy.b209.consent.dto.response.ConsentStatusResponse;
 import com.ssafy.b209.consent.dto.response.ConsentTermResponse;
 import com.ssafy.b209.consent.service.ConsentRegistrationService;
+import com.ssafy.b209.consent.service.ConsentStatusQueryService;
 import com.ssafy.b209.consent.service.ConsentTermQueryService;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -33,6 +36,34 @@ class ConsentControllerTest {
   @MockitoBean private CurrentAuthenticatedUserResolver currentUserResolver;
   @MockitoBean private ConsentRegistrationService registrationService;
   @MockitoBean private ConsentTermQueryService termQueryService;
+  @MockitoBean private ConsentStatusQueryService statusQueryService;
+
+  @Test
+  void returnsConsentStatusForTheAuthenticatedUser() throws Exception {
+    when(currentUserResolver.requireUserId()).thenReturn(41L);
+    when(statusQueryService.getConsentStatus(41L, null))
+        .thenReturn(
+            new ConsentStatusResponse(
+                null,
+                true,
+                List.of(
+                    new ConsentStatusItemResponse(
+                        1L,
+                        "SERVICE_TOS",
+                        true,
+                        "v1",
+                        true,
+                        Instant.parse("2026-07-21T02:30:00Z")))));
+
+    mockMvc
+        .perform(get("/api/v1/consents"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.requiredConsentsSatisfied").value(true))
+        .andExpect(jsonPath("$.data.items[0].termId").value(1))
+        .andExpect(jsonPath("$.data.items[0].termCode").value("SERVICE_TOS"))
+        .andExpect(jsonPath("$.data.items[0].agreed").value(true));
+  }
 
   @Test
   void returnsActiveTermsForTheAuthenticatedUser() throws Exception {
