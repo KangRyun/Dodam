@@ -50,6 +50,32 @@ void main() {
     expect(result.assetVersion, 4);
   });
 
+  test('Remote 객체 탐지는 복수형 analyses endpoint와 최신 DRAFT ID를 사용한다', () async {
+    final recorder = _RecordingInterceptor();
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        interceptors: [recorder],
+      ),
+    );
+
+    final result = await repository.requestObjectDetection(
+      42,
+      const ObjectDetectionRequestDto(drawingAssetId: 140),
+    );
+
+    final request = recorder.requests.single;
+    expect(request.method, 'POST');
+    expect(request.uri.path, '/api/v1/drawing-sessions/42/analyses');
+    expect(request.uri.path.endsWith('/analysis'), isFalse);
+    expect(request.data, {
+      'drawingAssetId': 140,
+      'analysisType': 'OBJECT_DETECTION',
+    });
+    expect(result.drawingAssetId, 140);
+    expect(result.status, 'SUCCEEDED');
+  });
+
   test(
     'Remote는 drawing-complete와 PUT reflection v1.0 endpoint를 사용한다',
     () async {
@@ -570,11 +596,10 @@ final class _CompletionRepository implements DrawingRepository {
   Future<DrawingTypePage> getDrawingTypes({int? childId, String? ageGroup}) =>
       throw UnimplementedError();
   @override
-  Future<AnalysisAcceptedDto> requestAnalysis(
+  Future<ObjectDetectionResponseDto> requestObjectDetection(
     int sessionId,
-    RequestAnalysisDto request, {
-    required String idempotencyKey,
-  }) => throw UnimplementedError();
+    ObjectDetectionRequestDto request,
+  ) => throw UnimplementedError();
   @override
   Future<DrawingUploadResponseDto> uploadDrawing(
     int sessionId,
@@ -621,6 +646,29 @@ final class _RecordingInterceptor extends Interceptor {
               'status': 'PENDING',
             },
             'nextAction': 'POLL_ANALYSIS',
+          },
+        ),
+      );
+      return;
+    }
+    if (options.path.endsWith('/analyses')) {
+      handler.resolve(
+        Response<Map<String, dynamic>>(
+          requestOptions: options,
+          statusCode: 201,
+          data: const {
+            'data': {
+              'drawingAnalysisId': 700,
+              'drawingSessionId': 42,
+              'drawingAssetId': 140,
+              'requestId': '550e8400-e29b-41d4-a716-446655440000',
+              'analysisType': 'OBJECT_DETECTION',
+              'status': 'SUCCEEDED',
+              'model': {'name': 'dodam-detector', 'version': '1.0'},
+              'detections': [],
+              'requestedAt': '2026-07-22T10:00:01Z',
+              'processedAt': '2026-07-22T10:00:02Z',
+            },
           },
         ),
       );

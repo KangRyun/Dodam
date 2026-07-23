@@ -38,9 +38,8 @@ abstract interface class DrawingRepository {
     BinaryUploadDto image, {
     String? objectCode,
   });
-  Future<AnalysisAcceptedDto> requestAnalysis(
+  Future<ObjectDetectionResponseDto> requestObjectDetection(
     int sessionId,
-    RequestAnalysisDto request, {
-    required String idempotencyKey,
-  });
+    ObjectDetectionRequestDto request,
+  );
 }

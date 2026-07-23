@@ -379,11 +379,10 @@ final class _DraftRepository implements DrawingRepository {
   Future<DrawingTypePage> getDrawingTypes({int? childId, String? ageGroup}) =>
       throw UnimplementedError();
   @override
-  Future<AnalysisAcceptedDto> requestAnalysis(
+  Future<ObjectDetectionResponseDto> requestObjectDetection(
     int sessionId,
-    RequestAnalysisDto request, {
-    required String idempotencyKey,
-  }) => throw UnimplementedError();
+    ObjectDetectionRequestDto request,
+  ) => throw UnimplementedError();
   @override
   Future<DrawingUploadResponseDto> uploadDrawing(
     int sessionId,
