@@ -13,6 +13,14 @@ import org.springframework.data.repository.query.Param;
 public interface DrawingAnalysisRepository extends JpaRepository<DrawingAnalysis, Long> {
 
   /**
+   * 완료 접수 요청에 사용한 멱등 키로 분석을 조회한다.
+   *
+   * @param requestId {@code Idempotency-Key} Header 값
+   * @return 해당 키로 생성된 분석, 사용되지 않은 키면 빈 값
+   */
+  Optional<DrawingAnalysis> findByRequestId(String requestId);
+
+  /**
    * 삭제되지 않은 Session에 속한 분석과 공개 응답에 필요한 Asset·Detection을 함께 조회한다.
    *
    * <p>Session ID와 Analysis ID를 동시에 조건으로 사용해 다른 Session의 분석 존재 여부를 노출하지 않는다.

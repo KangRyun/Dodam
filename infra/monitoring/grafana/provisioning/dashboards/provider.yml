@@ -1,0 +1,17 @@
+# Grafana dashboards provider — S15P11B209-352
+# 대시보드 "파일 자동 로드" 경로 등록. 현재 dashboards/ 는 비어있음 —
+# 표준 대시보드(4701 JVM Micrometer · 1860 Node Exporter Full)는 UI에서 ID로 import한다(README 참조).
+# reason: JSON을 저장소에 박제하는 건 k3s 재배치 전 과투자 — 파일 드롭 경로만 미리 열어둔다.
+#   JSON을 infra/monitoring/grafana/dashboards/ 에 두면 1분 내 자동 반영.
+apiVersion: 1
+
+providers:
+  - name: dodam-file-dashboards
+    orgId: 1
+    folder: ""                # 루트 폴더에 표시
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 60
+    allowUiUpdates: true      # UI에서 수정 허용(임시 운용 단계 — 잠글 이유 없음)
+    options:
+      path: /var/lib/grafana/dashboards   # compose가 ./grafana/dashboards 를 ro 마운트하는 지점

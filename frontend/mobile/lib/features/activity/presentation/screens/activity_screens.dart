@@ -40,6 +40,8 @@ class DrawingScreen extends StatefulWidget {
     this.completionSnapshotProvider,
     this.idempotencyKeyProvider,
     this.conversationRepository,
+    this.conversationAnswerRepository,
+    this.questionSkipRepository,
     this.conversationId,
     this.basisAnalysisId,
     super.key,
@@ -55,6 +57,8 @@ class DrawingScreen extends StatefulWidget {
   final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
   final String Function()? idempotencyKeyProvider;
   final ConversationRepository? conversationRepository;
+  final ConversationAnswerRepository? conversationAnswerRepository;
+  final QuestionSkipRepository? questionSkipRepository;
   final int? conversationId;
   final int? basisAnalysisId;
 
@@ -83,12 +87,17 @@ class _DrawingScreenState extends State<DrawingScreen> {
   DrawingCompleteMetadataDto? _pendingCompletionMetadata;
   AiQuestionController? _questionController;
   late final AiQuestionDisplayController _questionDisplayController;
+  late final AiQuestionSelectionController _questionSelectionController;
+  OptionAnswerSubmissionController? _answerSubmissionController;
+  QuestionSkipController? _questionSkipController;
 
   @override
   void initState() {
     super.initState();
     _questionDisplayController = AiQuestionDisplayController()
       ..addListener(_handleQuestionDisplayChanged);
+    _questionSelectionController = AiQuestionSelectionController()
+      ..addListener(_handleQuestionSelectionChanged);
     _ownsSyncCoordinator = widget.syncCoordinator == null;
     _syncCoordinator =
         widget.syncCoordinator ??
@@ -118,6 +127,19 @@ class _DrawingScreenState extends State<DrawingScreen> {
         basisAnalysisId: widget.basisAnalysisId,
       );
       _questionController!.addListener(_handleQuestionChanged);
+      _answerSubmissionController = OptionAnswerSubmissionController(
+        widget.conversationAnswerRepository ??
+            const MockConversationAnswerRepository(),
+        conversationId: conversationId,
+        idempotencyKeyProvider:
+            widget.idempotencyKeyProvider ?? _createIdempotencyKey,
+      )..addListener(_handleAnswerSubmissionChanged);
+      _questionSkipController = QuestionSkipController(
+        widget.questionSkipRepository ?? const MockQuestionSkipRepository(),
+        conversationId: conversationId,
+        idempotencyKeyProvider:
+            widget.idempotencyKeyProvider ?? _createIdempotencyKey,
+      )..addListener(_handleQuestionSkipChanged);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -137,6 +159,14 @@ class _DrawingScreenState extends State<DrawingScreen> {
     _questionController?.dispose();
     _questionDisplayController.removeListener(_handleQuestionDisplayChanged);
     _questionDisplayController.dispose();
+    _questionSelectionController.removeListener(
+      _handleQuestionSelectionChanged,
+    );
+    _questionSelectionController.dispose();
+    _answerSubmissionController?.removeListener(_handleAnswerSubmissionChanged);
+    _answerSubmissionController?.dispose();
+    _questionSkipController?.removeListener(_handleQuestionSkipChanged);
+    _questionSkipController?.dispose();
     super.dispose();
   }
 
@@ -157,12 +187,53 @@ class _DrawingScreenState extends State<DrawingScreen> {
     }
     // 하위 상태 UI의 빌드 중 알림과 겹치지 않도록 다음 프레임에 반영
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _questionDisplayController.receive(question);
+      if (!mounted) return;
+      final accepted = _questionDisplayController.receive(question);
+      if (accepted) {
+        _questionSelectionController.beginQuestion(question);
+        _answerSubmissionController?.beginQuestion();
+        _questionSkipController?.beginQuestion();
+      }
     });
   }
 
   void _handleQuestionDisplayChanged() {
     if (mounted) setState(() {});
+  }
+
+  void _handleQuestionSelectionChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _handleAnswerSubmissionChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _handleQuestionSkipChanged() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _selectQuestionOption(int optionId) async {
+    final question = _questionDisplayController.visibleQuestion;
+    if (question == null) return;
+    final valid = _questionSelectionController.select(question, optionId);
+    final controller = _answerSubmissionController;
+    if (!valid || controller == null) return;
+    final submitted = await controller.submit(
+      questionMessageId: question.messageId,
+      optionId: optionId,
+    );
+    if (submitted) _questionDisplayController.dismiss();
+  }
+
+  Future<void> _skipQuestion() async {
+    final question = _questionDisplayController.visibleQuestion;
+    final controller = _questionSkipController;
+    if (question == null || controller == null) return;
+    final skipped = await controller.submit(
+      questionMessageId: question.messageId,
+    );
+    if (skipped) _questionDisplayController.dismiss();
   }
 
   void _startStroke(PointerDownEvent event) {
@@ -381,6 +452,21 @@ class _DrawingScreenState extends State<DrawingScreen> {
                 _questionDisplayController.isVisible &&
                 _activePointer == null &&
                 _draftRestoreController.canDraw,
+            selectedQuestionOptionId:
+                _questionSelectionController.selectedOptionId,
+            onQuestionOptionSelected: (optionId) {
+              unawaited(_selectQuestionOption(optionId));
+            },
+            answerSubmissionStatus:
+                _answerSubmissionController?.status ??
+                OptionAnswerSubmissionStatus.idle,
+            questionSkipStatus:
+                _questionSkipController?.status ?? QuestionSkipStatus.idle,
+            showQuestionResponseActions:
+                _questionSelectionController.optionsVisible,
+            onQuestionSkip: () {
+              unawaited(_skipQuestion());
+            },
           );
           final sidePanel = _DrawingSidePanel(
             selectedColor: _color,
@@ -443,6 +529,12 @@ class _CanvasPanel extends StatelessWidget {
     required this.onRetryImage,
     required this.question,
     required this.showQuestion,
+    required this.selectedQuestionOptionId,
+    required this.onQuestionOptionSelected,
+    required this.answerSubmissionStatus,
+    required this.questionSkipStatus,
+    required this.showQuestionResponseActions,
+    required this.onQuestionSkip,
   });
 
   final GlobalKey repaintBoundaryKey;
@@ -461,6 +553,12 @@ class _CanvasPanel extends StatelessWidget {
   final VoidCallback onRetryImage;
   final AiQuestion? question;
   final bool showQuestion;
+  final int? selectedQuestionOptionId;
+  final ValueChanged<int> onQuestionOptionSelected;
+  final OptionAnswerSubmissionStatus answerSubmissionStatus;
+  final QuestionSkipStatus questionSkipStatus;
+  final bool showQuestionResponseActions;
+  final VoidCallback onQuestionSkip;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -492,7 +590,16 @@ class _CanvasPanel extends StatelessWidget {
             onBackgroundError: onBackgroundError,
           ),
         ),
-        AiQuestionBubbleOverlay(question: question, visible: showQuestion),
+        AiQuestionBubbleOverlay(
+          question: question,
+          visible: showQuestion,
+          selectedOptionId: selectedQuestionOptionId,
+          onOptionSelected: onQuestionOptionSelected,
+          showResponseActions: showQuestionResponseActions,
+          submissionStatus: answerSubmissionStatus,
+          skipStatus: questionSkipStatus,
+          onSkip: onQuestionSkip,
+        ),
         if (!inputEnabled)
           _DraftRestoreOverlay(
             status: restoreStatus,

@@ -1,0 +1,38 @@
+# 도담(dodam) Prometheus 스크레이프 설정 — S15P11B209-352
+# 대상 5종: backend(Spring actuator) · ai(FastAPI) · node-exporter(호스트) · cadvisor(컨테이너) · prometheus 자신
+# ⚠️ backend·ai 는 기존 스택 내부망(dodam_dodam-net)의 서비스 DNS(backend·ai)로 접근
+#    — docker-compose.yml에서 prometheus가 external 네트워크(dodam-net)에 참여하고 있어야 해석된다.
+
+global:
+  scrape_interval: 15s        # 수집 주기 — 대시보드 용도로 충분(과투자 금지, k3s 이전 시 재평가)
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Spring Boot backend — management 포트 9404, micrometer prometheus 레지스트리.
+  #   (2026-07-23 내부망 무인증 200 실측 — 9404는 호스트 미개방·내부망 전용이라 무인증 허용.
+  #    ⚠️ 9404를 호스트/nginx로 노출하는 순간 이 전제가 깨짐 — 절대 노출 금지)
+  - job_name: backend
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["backend:9404"]
+
+  # FastAPI ai — /metrics (기본 경로지만 명시 — backend와 대비를 위해)
+  - job_name: ai
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["ai:8000"]
+
+  # EC2 호스트 메트릭
+  - job_name: node-exporter
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  # 컨테이너별 리소스 메트릭
+  - job_name: cadvisor
+    static_configs:
+      - targets: ["cadvisor:8080"]
+
+  # 수집기 자신 — 수집기 장애를 수집기로 관찰
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
