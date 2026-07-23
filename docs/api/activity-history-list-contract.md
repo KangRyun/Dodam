@@ -62,12 +62,11 @@
 | --- | --- | --- |
 | 400 | INVALID_INPUT_VALUE | from>to, sort 미허용, enum 밖 값, size 범위 초과 |
 | 401 | AUTH_UNAUTHORIZED | 토큰 없음/만료 |
-| 403 | CHILD_ACCESS_DENIED | child-보호자 관계 없음 |
-| 404 | CHILD_NOT_FOUND | 아동 없음/비활성 |
-- 신규 `ActivityHistoryErrorCode`(또는 기존 child/drawing 에러 재사용). BusinessException→GlobalExceptionHandler.
+| 404 | CHILD_NOT_FOUND | 아동 없음/비활성 **또는 보호자-아동 관계 없음** |
+- **as-built(구현 확정):** 권한 없음과 아동 부재를 **모두 404 `CHILD_NOT_FOUND`로 통일**한다(존재 비노출, 형제 API `requireChildAccess` 관례 우선 — develop 코드 기준). §7-d1의 403/404 분리안 대신 이 통일안을 채택. BusinessException→GlobalExceptionHandler.
 
 ## 9. 테스트
 - 정상 목록(필터 없음), 각 필터(from/to·drawingTypeCode·sessionStatus·reportStatus) 적용, 정렬(startedAt/completedAt asc/desc), 페이지네이션, 빈 결과.
-- 권한 없음 403, child 없음 404, 잘못된 sort/enum/from>to 400.
+- 권한 없음·child 없음 모두 404(존재 비노출), 잘못된 sort/enum/from>to 400.
 - N+1 회피(배치 조회) 확인, selectedEmotions=아동 선택만, report/analysis 없는 세션 null 안전.
 - 컨트롤러/서비스/DTO JSON 테스트(151/153 구조). Docker 통합테스트 신규 없음.
