@@ -3,9 +3,11 @@ package com.ssafy.b209.user.controller;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.ApiResponse;
+import com.ssafy.b209.user.dto.request.DeleteUserRequest;
 import com.ssafy.b209.user.dto.request.OnboardingRequest;
 import com.ssafy.b209.user.dto.request.UpdateUserRequest;
 import com.ssafy.b209.user.dto.response.UserResponse;
+import com.ssafy.b209.user.service.UserDeletionService;
 import com.ssafy.b209.user.service.UserOnboardingService;
 import com.ssafy.b209.user.service.UserQueryService;
 import com.ssafy.b209.user.service.UserUpdateService;
@@ -19,6 +21,7 @@ import jakarta.validation.Valid;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -45,6 +48,7 @@ public class UserController {
   private final UserOnboardingService onboardingService;
   private final UserQueryService queryService;
   private final UserUpdateService updateService;
+  private final UserDeletionService deletionService;
 
   /**
    * 사용자 식별 경계와 조회·Onboarding·수정 서비스를 사용하는 Controller를 생성한다.
@@ -53,16 +57,51 @@ public class UserController {
    * @param onboardingService 최초 정보 등록·온보딩 완료 Use Case
    * @param queryService 사용자 본인 정보 조회 Use Case
    * @param updateService 사용자 본인 정보 수정 Use Case
+   * @param deletionService 사용자 계정 즉시 삭제 Use Case
    */
   public UserController(
       CurrentAuthenticatedUserResolver currentUserResolver,
       UserOnboardingService onboardingService,
       UserQueryService queryService,
-      UserUpdateService updateService) {
+      UserUpdateService updateService,
+      UserDeletionService deletionService) {
     this.currentUserResolver = currentUserResolver;
     this.onboardingService = onboardingService;
     this.queryService = queryService;
     this.updateService = updateService;
+    this.deletionService = deletionService;
+  }
+
+  /**
+   * 인증 사용자의 계정 식별정보를 즉시 삭제한다.
+   *
+   * @param request 탈퇴 확인 문자열
+   * @return Body가 없는 HTTP 204 응답
+   */
+  @Operation(
+      summary = "회원 탈퇴",
+      description = "confirmation 값이 DELETE인 경우 인증 사용자의 계정 식별정보를 즉시 삭제합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "204",
+        description = "회원 탈퇴 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "탈퇴 확인 값 불일치",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "사용자를 찾을 수 없음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @DeleteMapping("/me")
+  public ResponseEntity<Void> deleteMe(@Valid @RequestBody DeleteUserRequest request) {
+    deletionService.delete(currentUserResolver.requireUserId(), request);
+    return ResponseEntity.noContent().build();
   }
 
   /**

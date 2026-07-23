@@ -3,6 +3,8 @@ package com.ssafy.b209.user.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
@@ -15,6 +17,7 @@ import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.user.dto.response.UserResponse;
+import com.ssafy.b209.user.service.UserDeletionService;
 import com.ssafy.b209.user.service.UserOnboardingService;
 import com.ssafy.b209.user.service.UserQueryService;
 import com.ssafy.b209.user.service.UserUpdateService;
@@ -35,6 +38,25 @@ class UserControllerTest {
   @MockitoBean private UserOnboardingService onboardingService;
   @MockitoBean private UserQueryService queryService;
   @MockitoBean private UserUpdateService updateService;
+  @MockitoBean private UserDeletionService deletionService;
+
+  @Test
+  void immediatelyDeletesTheAuthenticatedUserAfterExplicitConfirmation() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(51L);
+
+    mockMvc
+        .perform(
+            delete("/api/v1/users/me")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DELETE\"}"))
+        .andExpect(status().isNoContent());
+
+    verify(deletionService)
+        .delete(
+            eq(51L),
+            org.mockito.ArgumentMatchers.argThat(
+                request -> "DELETE".equals(request.confirmation())));
+  }
 
   @Test
   void updatesTheAuthenticatedUsersNickname() throws Exception {
