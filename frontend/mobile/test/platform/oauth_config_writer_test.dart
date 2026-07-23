@@ -65,8 +65,14 @@ void main() {
       '${Platform.pathSeparator}Flutter'
       '${Platform.pathSeparator}OAuth.xcconfig',
     );
+    final dartDefinesFile = File(
+      '${projectRoot.path}${Platform.pathSeparator}oauth_defines.json',
+    );
 
-    expect(writtenFiles, containsAll([androidFile.path, iosFile.path]));
+    expect(
+      writtenFiles,
+      containsAll([dartDefinesFile.path, androidFile.path, iosFile.path]),
+    );
     expect(await androidFile.readAsString(), contains('NAVER_APP_NAME=Dodam'));
     expect(
       await androidFile.readAsString(),
@@ -75,6 +81,10 @@ void main() {
     expect(
       await iosFile.readAsString(),
       contains('GOOGLE_IOS_CLIENT_ID=test-google-ios-client-id'),
+    );
+    expect(
+      await dartDefinesFile.readAsString(),
+      contains('"GOOGLE_SERVER_CLIENT_ID": "test-google-server-client-id"'),
     );
   });
 }

@@ -138,6 +138,9 @@ final class _PendingKakaoLoginClient implements KakaoLoginClient {
     return _completer.future;
   }
 
+  @override
+  Future<void> signOut() async {}
+
   void complete() =>
       _completer.complete(const KakaoLoginSuccess('kakao-access-token'));
 }

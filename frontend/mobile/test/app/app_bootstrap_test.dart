@@ -26,7 +26,7 @@ void main() {
       // (S15P11B209-384 contract check).
       expect(app.activityRepository, isA<MockActivityRepository>());
       expect(app.reportRepository, isA<MockReportRepository>());
-      expect(app.authRepository, isA<AuthRepositoryImpl>());
+      expect(app.authRepository, isA<RemoteAuthRepository>());
     },
   );
 

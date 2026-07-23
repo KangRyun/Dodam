@@ -29,4 +29,7 @@ final class NaverLoginClientImpl implements NaverLoginClient {
       ),
     };
   }
+
+  @override
+  Future<void> signOut() async {}
 }

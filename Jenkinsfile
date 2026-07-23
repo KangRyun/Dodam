@@ -7,7 +7,7 @@
 //   - 시크릿 .env 는 Jenkins Credentials(secret file, id: dodam-env)로 주입 — 저장소 커밋 금지
 //   - 컨트롤러 인-빌드(별도 에이전트 없음)
 //
-// 흐름: Checkout → Build&Test(backend) → [이하 develop만] Docker Build → ai import 스모크 → Deploy → Healthcheck
+// 흐름: Checkout → [develop만] Secrets Preflight → Build&Test(backend) → [이하 develop만] Docker Build → ai import 스모크 → Deploy → Healthcheck
 //   브랜치(MR) 빌드는 테스트까지만 — 자원 절약 + 모든 브랜치가 :local 태그를 덮어쓰는 레이스 방지.
 // 알림: 빌드 성공/실패를 Mattermost Incoming Webhook으로 전송 (크레덴셜 id: mattermost-webhook)
 
@@ -80,6 +80,35 @@ pipeline {
           // 알림용 — 이 브랜치 마지막 커밋의 작성자(= 사실상 푸시한 사람)
           env.GIT_AUTHOR = sh(returnStdout: true, script: 'git log -1 --format=%an').trim()
           echo "브랜치=${env.BRANCH_NAME ?: 'N/A'} · 이미지태그(SHA)=${env.IMAGE_TAG} · 작성자=${env.GIT_AUTHOR}"
+        }
+      }
+    }
+
+    stage('Secrets Preflight') {
+      when { branch 'develop' }   // 시크릿은 develop(이미지 빌드·배포)에서만 쓰인다 — MR 빌드는 불필요
+      steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }
+        // dodam-env 크리덴셜의 필수 키를 테스트(≈10분) 전에 전수 검증한다.
+        // reason: 2026-07-24 빌드 114~116 — 크리덴셜 교체 중 키 누락 시 compose 보간은
+        //   "처음 만난 누락 변수 1개"만 보고해, 전모 파악에 빌드 3번을 소모했다.
+        //   여기서 누락 목록 전체를 한 번에 보고하고 즉시 실패시킨다.
+        // 필수 목록은 compose의 `:?` 가드에서 자동 추출 — 하드코딩 금지(가드 추가 시 자동 반영).
+        // ⚠️ 시크릿 값은 절대 출력하지 않는다 — 키 이름만 다룬다.
+        withCredentials([file(credentialsId: 'dodam-env', variable: 'ENV_FILE')]) {
+          sh '''
+            required=$(grep -v "^[[:space:]]*#" "$COMPOSE_FILE" | grep -oE '\\$\\{[A-Z_]+:\\?' | tr -cd 'A-Z_\\n' | sort -u)
+            missing=""
+            for k in $required; do
+              grep -qE "^${k}=." "$ENV_FILE" || missing="$missing $k"
+            done
+            if [ -n "$missing" ]; then
+              echo "❌ dodam-env 시크릿에 필수 키 누락:$missing"
+              echo "   → Jenkins 크리덴셜(dodam-env)을 '기존 전체 키 + 신규 키' 병합본으로 재업로드할 것."
+              echo "     dodam-env는 교체가 아니라 병합이 규칙 (S15P11B209-386)"
+              exit 1
+            fi
+            echo "✅ 시크릿 preflight 통과 — 필수 키 $(echo "$required" | wc -w)개 확인: $(echo $required)"
+          '''
         }
       }
     }
