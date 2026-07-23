@@ -10,6 +10,8 @@ import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingDetectionResponse;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
+import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
+import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -31,14 +33,23 @@ public class DrawingAnalysisQueryService {
   private static final String FAILURE_MESSAGE = "그림 분석 처리에 실패했습니다.";
 
   private final DrawingAnalysisRepository drawingAnalysisRepository;
+  private final CurrentAuthenticatedUserResolver currentUserResolver;
+  private final GuardianResourceAccessValidator accessValidator;
 
   /**
    * 분석 조회에 사용할 Repository를 주입받는다.
    *
    * @param drawingAnalysisRepository Session과 결과를 함께 조회하는 Repository
+   * @param currentUserResolver Access Token에서 현재 사용자 ID를 제공하는 Resolver
+   * @param accessValidator 보호자와 그림 활동의 연결 관계를 검증하는 Validator
    */
-  public DrawingAnalysisQueryService(DrawingAnalysisRepository drawingAnalysisRepository) {
+  public DrawingAnalysisQueryService(
+      DrawingAnalysisRepository drawingAnalysisRepository,
+      CurrentAuthenticatedUserResolver currentUserResolver,
+      GuardianResourceAccessValidator accessValidator) {
     this.drawingAnalysisRepository = drawingAnalysisRepository;
+    this.currentUserResolver = currentUserResolver;
+    this.accessValidator = accessValidator;
   }
 
   /**
@@ -52,6 +63,8 @@ public class DrawingAnalysisQueryService {
   @Transactional(readOnly = true)
   public DrawingAnalysisDetailResponse getDrawingAnalysis(
       Long drawingSessionId, Long drawingAnalysisId) {
+    Long guardianUserId = currentUserResolver.requireUserId();
+    accessValidator.requireDrawingSessionAccess(guardianUserId, drawingSessionId);
     DrawingAnalysis analysis =
         drawingAnalysisRepository
             .findDetailBySessionIdAndAnalysisId(drawingSessionId, drawingAnalysisId)

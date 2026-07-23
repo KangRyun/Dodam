@@ -1,5 +1,7 @@
 package com.ssafy.b209.drawing.service;
 
+import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
+import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.child.repository.ChildRepository;
 import com.ssafy.b209.drawing.domain.DrawingInputMethod;
@@ -43,6 +45,8 @@ public class DrawingSessionService {
   private final ChildRepository childRepository;
   private final DrawingTypeRepository drawingTypeRepository;
   private final DrawingSessionRepository drawingSessionRepository;
+  private final CurrentAuthenticatedUserResolver currentUserResolver;
+  private final GuardianResourceAccessValidator accessValidator;
   private final Clock clock;
 
   /**
@@ -51,16 +55,22 @@ public class DrawingSessionService {
    * @param childRepository 아동 조회와 잠금에 사용하는 저장소
    * @param drawingTypeRepository 그림 활동 유형 조회에 사용하는 저장소
    * @param drawingSessionRepository 세션 중복 확인과 저장에 사용하는 저장소
+   * @param currentUserResolver Access Token에서 현재 사용자 ID를 제공하는 Resolver
+   * @param accessValidator 보호자와 아동의 연결 관계를 검증하는 Validator
    * @param clock 나이 계산과 공식 시작 시각 산정에 사용하는 서버 시계
    */
   public DrawingSessionService(
       ChildRepository childRepository,
       DrawingTypeRepository drawingTypeRepository,
       DrawingSessionRepository drawingSessionRepository,
+      CurrentAuthenticatedUserResolver currentUserResolver,
+      GuardianResourceAccessValidator accessValidator,
       Clock clock) {
     this.childRepository = childRepository;
     this.drawingTypeRepository = drawingTypeRepository;
     this.drawingSessionRepository = drawingSessionRepository;
+    this.currentUserResolver = currentUserResolver;
+    this.accessValidator = accessValidator;
     this.clock = clock;
   }
 
@@ -79,6 +89,8 @@ public class DrawingSessionService {
       String idempotencyKey, CreateDrawingSessionRequest request) {
     validateIdempotencyKey(idempotencyKey);
     validateCanvas(request);
+    Long guardianUserId = currentUserResolver.requireUserId();
+    accessValidator.requireChildAccess(guardianUserId, request.childId());
 
     Optional<DrawingSession> existing =
         drawingSessionRepository.findByIdempotencyKey(idempotencyKey);

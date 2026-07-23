@@ -1,5 +1,7 @@
 package com.ssafy.b209.drawing.service;
 
+import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
+import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.domain.DrawingType;
@@ -27,18 +29,26 @@ public class DrawingSessionQueryService {
 
   private final DrawingSessionRepository drawingSessionRepository;
   private final DrawingAssetRepository drawingAssetRepository;
+  private final CurrentAuthenticatedUserResolver currentUserResolver;
+  private final GuardianResourceAccessValidator accessValidator;
 
   /**
    * 진행 중 세션과 최신 초안 Metadata 조회에 사용할 저장소를 구성한다.
    *
    * @param drawingSessionRepository 진행 중 세션 조회 저장소
    * @param drawingAssetRepository 최신 초안 Metadata 조회 저장소
+   * @param currentUserResolver Access Token에서 현재 사용자 ID를 제공하는 Resolver
+   * @param accessValidator 보호자와 아동의 연결 관계를 검증하는 Validator
    */
   public DrawingSessionQueryService(
       DrawingSessionRepository drawingSessionRepository,
-      DrawingAssetRepository drawingAssetRepository) {
+      DrawingAssetRepository drawingAssetRepository,
+      CurrentAuthenticatedUserResolver currentUserResolver,
+      GuardianResourceAccessValidator accessValidator) {
     this.drawingSessionRepository = drawingSessionRepository;
     this.drawingAssetRepository = drawingAssetRepository;
+    this.currentUserResolver = currentUserResolver;
+    this.accessValidator = accessValidator;
   }
 
   /**
@@ -51,6 +61,8 @@ public class DrawingSessionQueryService {
    * @throws BusinessException 진행 중 세션이 없거나 둘 이상 존재하는 경우
    */
   public ActiveDrawingSessionResponse getActiveDrawingSession(Long childId) {
+    Long guardianUserId = currentUserResolver.requireUserId();
+    accessValidator.requireChildAccess(guardianUserId, childId);
     List<DrawingSession> sessions = drawingSessionRepository.findActiveSessionsByChildId(childId);
     if (sessions.isEmpty()) {
       throw new BusinessException(DrawingErrorCode.ACTIVE_DRAWING_SESSION_NOT_FOUND);

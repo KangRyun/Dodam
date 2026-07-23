@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ssafy.b209.auth.token.AuthenticatedUser;
 import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.child.domain.ChildFixture;
 import com.ssafy.b209.child.domain.ChildProfileStatus;
@@ -30,6 +31,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,6 +40,8 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.MySQLContainer;
@@ -49,6 +53,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
 @AutoConfigureMockMvc
 @ActiveProfiles("integration-test")
 class DrawingSessionIntegrationTest {
+
+  private static final Long GUARDIAN_USER_ID = 41L;
 
   @Container @ServiceConnection
   static final MySQLContainer<?> MYSQL_CONTAINER =
@@ -65,20 +71,38 @@ class DrawingSessionIntegrationTest {
 
   @BeforeEach
   void setUp() {
+    setAuthenticatedGuardian();
     jdbcTemplate.update("DELETE FROM drawing_sessions");
     jdbcTemplate.execute("ALTER TABLE drawing_sessions AUTO_INCREMENT = 1");
+    jdbcTemplate.update("DELETE FROM guardian_child_relations");
     jdbcTemplate.update("DELETE FROM drawing_types");
     jdbcTemplate.update("DELETE FROM children");
+    jdbcTemplate.update("DELETE FROM users");
+    jdbcTemplate.update(
+        "INSERT INTO users (id, role, nickname, account_status) "
+            + "VALUES (?, 'GUARDIAN', 'drawing-guardian', 'ACTIVE')",
+        GUARDIAN_USER_ID);
     jdbcTemplate.update(
         "INSERT INTO children "
             + "(id, nickname, birth_date, question_difficulty, tutorial_status, profile_status) "
             + "VALUES (1, 'child-one', '2020-07-21', 'PRESCHOOL', 'NOT_STARTED', 'ACTIVE'), "
             + "(2, 'child-two', '2019-07-21', 'PRESCHOOL', 'COMPLETED', 'ACTIVE')");
     jdbcTemplate.update(
+        "INSERT INTO guardian_child_relations "
+            + "(guardian_user_id, child_id, relationship_type) "
+            + "VALUES (?, 1, 'MOTHER'), (?, 2, 'MOTHER')",
+        GUARDIAN_USER_ID,
+        GUARDIAN_USER_ID);
+    jdbcTemplate.update(
         "INSERT INTO drawing_types "
             + "(id, code, name, activity_category, selectable_by, recommended_age_min, "
             + "recommended_age_max, is_active, display_order) "
             + "VALUES (1, 'FREE_DRAWING', 'Free Drawing', 'GENERAL', 'BOTH', 3, 12, TRUE, 1)");
+  }
+
+  @AfterEach
+  void clearSecurityContext() {
+    SecurityContextHolder.clearContext();
   }
 
   @Test
@@ -217,14 +241,24 @@ class DrawingSessionIntegrationTest {
   private Callable<Object> guarded(
       Callable<Object> action, CountDownLatch ready, CountDownLatch start) {
     return () -> {
+      setAuthenticatedGuardian();
       ready.countDown();
       start.await();
       try {
         return action.call();
       } catch (BusinessException exception) {
         return exception;
+      } finally {
+        SecurityContextHolder.clearContext();
       }
     };
+  }
+
+  private void setAuthenticatedGuardian() {
+    SecurityContextHolder.getContext()
+        .setAuthentication(
+            UsernamePasswordAuthenticationToken.authenticated(
+                new AuthenticatedUser(GUARDIAN_USER_ID), null, List.of()));
   }
 
   private CreateDrawingSessionRequest request(long childId) {
