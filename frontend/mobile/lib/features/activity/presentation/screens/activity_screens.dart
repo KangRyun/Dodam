@@ -605,7 +605,7 @@ class _CanvasPanel extends StatelessWidget {
   final VoidCallback onRetryImage;
   final AiQuestion? question;
   final bool showQuestion;
-  final int? selectedQuestionOptionId;
+  final String? selectedQuestionOptionId;
   final ValueChanged<String> onQuestionOptionSelected;
   final OptionAnswerSubmissionStatus answerSubmissionStatus;
   final QuestionSkipStatus questionSkipStatus;
