@@ -83,6 +83,8 @@ public class RefreshTokenService {
             user.getId(),
             user.getRole(),
             user.getNickname(),
+            user.getEmail(),
+            user.getEmail() == null,
             user.getAccountStatus(),
             user.isOnboardingCompleted());
     return new OAuthLoginResult(

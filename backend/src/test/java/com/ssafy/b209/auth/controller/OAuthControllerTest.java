@@ -38,7 +38,7 @@ class OAuthControllerTest {
                 1800,
                 "refresh-token",
                 1209600,
-                new OAuthLoginUser(41L, null, null, AccountStatus.PENDING, false)));
+                new OAuthLoginUser(41L, null, null, null, true, AccountStatus.PENDING, false)));
 
     mockMvc
         .perform(
@@ -79,7 +79,8 @@ class OAuthControllerTest {
                 1800,
                 "refresh-token",
                 1209600,
-                new OAuthLoginUser(42L, null, null, AccountStatus.ACTIVE, true)));
+                new OAuthLoginUser(
+                    42L, null, null, "guardian@example.com", false, AccountStatus.ACTIVE, true)));
 
     mockMvc
         .perform(

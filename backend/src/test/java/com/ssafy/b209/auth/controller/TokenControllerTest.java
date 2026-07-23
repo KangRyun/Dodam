@@ -36,7 +36,7 @@ class TokenControllerTest {
                 1800,
                 "new-refresh",
                 1209600,
-                new OAuthLoginUser(41L, null, null, AccountStatus.PENDING, false)));
+                new OAuthLoginUser(41L, null, null, null, true, AccountStatus.PENDING, false)));
 
     mockMvc
         .perform(

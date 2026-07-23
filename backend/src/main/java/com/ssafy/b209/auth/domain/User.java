@@ -39,6 +39,9 @@ public class User {
   @Column(name = "nickname", length = 50)
   private String nickname;
 
+  @Column(name = "email", length = 255)
+  private String email;
+
   @Column(name = "last_login_at")
   private LocalDateTime lastLoginAt;
 
@@ -117,6 +120,34 @@ public class User {
    */
   public String getNickname() {
     return nickname;
+  }
+
+  /**
+   * 사용자 연락 이메일을 반환한다.
+   *
+   * @return Onboarding에서 확정한 이메일 또는 확정 전이면 {@code null}
+   */
+  public String getEmail() {
+    return email;
+  }
+
+  /**
+   * 최초 사용자 정보를 확정하고 Onboarding을 완료 상태로 전이한다.
+   *
+   * <p>역할, 닉네임, 연락 이메일을 저장하고 계정을 이용 가능한 {@link AccountStatus#ACTIVE}로 전환한다.
+   *
+   * @param role 사용자가 선택한 역할
+   * @param nickname 사용자 표시 이름
+   * @param email 사용자 연락 이메일
+   * @param now 온보딩 처리 시각
+   */
+  public void completeOnboarding(UserRole role, String nickname, String email, LocalDateTime now) {
+    this.role = Objects.requireNonNull(role, "role must not be null");
+    this.nickname = Objects.requireNonNull(nickname, "nickname must not be null");
+    this.email = Objects.requireNonNull(email, "email must not be null");
+    this.accountStatus = AccountStatus.ACTIVE;
+    this.onboardingCompleted = true;
+    this.updatedAt = Objects.requireNonNull(now, "now must not be null");
   }
 
   /**
