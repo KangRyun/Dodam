@@ -153,6 +153,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
       )..addListener(_handleConversationEndChanged);
       _voiceRecordingController = VoiceRecordingController(
         DeviceVoiceRecorder(),
+        permissionService: DeviceMicrophonePermissionService(),
       )..addListener(_handleVoiceRecordingChanged);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {

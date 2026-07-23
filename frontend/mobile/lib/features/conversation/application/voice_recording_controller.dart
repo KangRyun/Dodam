@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../domain/models/voice_recording.dart';
+import '../domain/services/microphone_permission_service.dart';
 import '../domain/services/voice_recorder.dart';
 
 enum VoiceRecordingStatus {
@@ -12,11 +13,14 @@ enum VoiceRecordingStatus {
   awaitingChoice,
   stopping,
   completed,
+  permissionDenied,
+  permissionPermanentlyDenied,
 }
 
 final class VoiceRecordingController extends ChangeNotifier {
   VoiceRecordingController(
     this._recorder, {
+    this.permissionService,
     this.noSpeechTimeout = const Duration(seconds: 3),
     this.postSpeechSilenceTimeout = const Duration(seconds: 3),
     this.maximumDuration = const Duration(minutes: 1),
@@ -25,6 +29,7 @@ final class VoiceRecordingController extends ChangeNotifier {
   });
 
   final VoiceRecorder _recorder;
+  final MicrophonePermissionService? permissionService;
   final Duration noSpeechTimeout;
   final Duration postSpeechSilenceTimeout;
   final Duration maximumDuration;
@@ -47,6 +52,8 @@ final class VoiceRecordingController extends ChangeNotifier {
   bool get hasDetectedSpeech => _hasDetectedSpeech;
   bool get shouldShowOptions =>
       _status == VoiceRecordingStatus.awaitingChoice ||
+      _status == VoiceRecordingStatus.permissionDenied ||
+      _status == VoiceRecordingStatus.permissionPermanentlyDenied ||
       (_status == VoiceRecordingStatus.idle && _lastError != null);
   Duration get elapsed => _stopwatch.elapsed;
   bool get isRecording => _status == VoiceRecordingStatus.recording;
@@ -63,6 +70,19 @@ final class VoiceRecordingController extends ChangeNotifier {
     }
 
     _status = VoiceRecordingStatus.starting;
+    notifyListeners();
+    final permissionStatus = await permissionService?.request();
+    if (permissionStatus == MicrophonePermissionStatus.denied) {
+      _status = VoiceRecordingStatus.permissionDenied;
+      notifyListeners();
+      return false;
+    }
+    if (permissionStatus == MicrophonePermissionStatus.permanentlyDenied) {
+      _status = VoiceRecordingStatus.permissionPermanentlyDenied;
+      notifyListeners();
+      return false;
+    }
+
     _recording = null;
     _lastError = null;
     _hasDetectedSpeech = false;
@@ -90,6 +110,10 @@ final class VoiceRecordingController extends ChangeNotifier {
       return false;
     }
   }
+
+  // 영구 거부된 마이크 권한을 변경할 수 있도록 앱 설정 열기
+  Future<bool> openPermissionSettings() async =>
+      await permissionService?.openSettings() ?? false;
 
   // 녹음을 종료하고 생성된 로컬 파일 정보 보관
   Future<VoiceRecording?> stop() async {

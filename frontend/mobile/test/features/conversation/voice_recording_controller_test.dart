@@ -133,6 +133,77 @@ void main() {
     expect(controller.status, VoiceRecordingStatus.completed);
     expect(recorder.stopCount, 1);
   });
+
+  testWidgets('마이크 권한 거부 시 다시 허용할 수 있는 안내를 표시한다', (tester) async {
+    final recorder = _FakeVoiceRecorder();
+    final permission = _FakeMicrophonePermissionService(
+      MicrophonePermissionStatus.denied,
+    );
+    final controller = VoiceRecordingController(
+      recorder,
+      permissionService: permission,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: VoiceRecordingControl(controller: controller)),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('voice-recording-toggle')));
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('microphone-permission-denied')),
+      findsOneWidget,
+    );
+    expect(recorder.startCount, 0);
+  });
+
+  testWidgets('마이크 권한 영구 거부 시 기기 설정 이동을 제공한다', (tester) async {
+    final recorder = _FakeVoiceRecorder();
+    final permission = _FakeMicrophonePermissionService(
+      MicrophonePermissionStatus.permanentlyDenied,
+    );
+    final controller = VoiceRecordingController(
+      recorder,
+      permissionService: permission,
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: VoiceRecordingControl(controller: controller)),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('voice-recording-toggle')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('microphone-open-settings')));
+
+    expect(
+      find.byKey(const ValueKey('microphone-permission-permanently-denied')),
+      findsOneWidget,
+    );
+    expect(permission.openSettingsCount, 1);
+    expect(recorder.startCount, 0);
+  });
+}
+
+final class _FakeMicrophonePermissionService
+    implements MicrophonePermissionService {
+  _FakeMicrophonePermissionService(this.status);
+
+  final MicrophonePermissionStatus status;
+  int openSettingsCount = 0;
+
+  @override
+  Future<MicrophonePermissionStatus> request() async => status;
+
+  @override
+  Future<bool> openSettings() async {
+    openSettingsCount += 1;
+    return true;
+  }
 }
 
 final class _FakeVoiceRecorder implements VoiceRecorder {

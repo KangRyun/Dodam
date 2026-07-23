@@ -95,6 +95,38 @@ final class _VoiceRecordingControlState extends State<VoiceRecordingControl> {
             ),
           ),
         ),
+        if (controller.status == VoiceRecordingStatus.permissionDenied) ...[
+          const SizedBox(height: AppSpacing.xs),
+          const Text(
+            '말로 대답하려면 마이크 사용을 허용해 주세요.',
+            key: ValueKey('microphone-permission-denied'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.inkMuted,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+        if (controller.status ==
+            VoiceRecordingStatus.permissionPermanentlyDenied) ...[
+          const SizedBox(height: AppSpacing.xs),
+          const Text(
+            '기기 설정에서 도담의 마이크 권한을 켜 주세요.',
+            key: ValueKey('microphone-permission-permanently-denied'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.inkMuted,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          OutlinedButton.icon(
+            key: const ValueKey('microphone-open-settings'),
+            onPressed: controller.openPermissionSettings,
+            icon: const Icon(Icons.settings_rounded),
+            label: const Text('기기 설정 열기'),
+          ),
+        ],
         if (recording != null && !recordingNow) ...[
           const SizedBox(height: AppSpacing.xs),
           Text(
