@@ -3,6 +3,8 @@ package com.ssafy.b209.drawing.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -97,6 +99,15 @@ class DrawingDraftControllerTest {
         .andExpect(jsonPath("$.data.canvasState.lastEventSequence").value(17))
         .andExpect(jsonPath("$.data.canvasState.clientSavedAt").value("2026-07-22T05:30:00Z"))
         .andExpect(jsonPath("$.data.previewUrl").value(org.hamcrest.Matchers.nullValue()));
+  }
+
+  @Test
+  void deletesDraftWithoutResponseBody() throws Exception {
+    mockMvc
+        .perform(delete("/api/v1/drawing-sessions/{id}/draft", 10L))
+        .andExpect(status().isNoContent());
+
+    verify(drawingDraftService).delete(10L);
   }
 
   private MockMultipartFile preview() {
