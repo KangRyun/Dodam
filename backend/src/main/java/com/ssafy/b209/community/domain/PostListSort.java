@@ -12,8 +12,8 @@ public record PostListSort(SortField field, SortDirection direction) {
   public enum SortField {
     /** 게시글 생성 시각을 기준으로 정렬한다. */
     CREATED_AT,
-    /** 게시글 수정 시각을 기준으로 정렬한다. */
-    UPDATED_AT
+    /** 게시글 좋아요 수를 기준으로 정렬한다. */
+    LIKE_COUNT
   }
 
   /** 목록 API에서 허용하는 정렬 방향이다. */

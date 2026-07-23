@@ -12,6 +12,7 @@ import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.repository.UserRepository;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.auth.token.AuthenticatedUser;
+import com.ssafy.b209.community.domain.PostFeed;
 import com.ssafy.b209.community.domain.PostListSort.SortDirection;
 import com.ssafy.b209.community.domain.PostListSort.SortField;
 import com.ssafy.b209.community.domain.PostType;
@@ -71,16 +72,21 @@ class CommunityPostListServiceTest {
         .willReturn(new CommunityPostListPage(List.of(row), 21));
 
     var response =
-        service.getPosts(new PostListQuery("EXPERT_COLUMN", "1", "10", "updatedAt,desc"));
+        service.getPosts(
+            new PostListQuery(
+                "EXPERT_COLUMN", " 그림 상담 ", "FOLLOWING", "EXPERT", "1", "10", "likeCount,desc"));
 
     ArgumentCaptor<PostListSearchCriteria> criteriaCaptor =
         ArgumentCaptor.forClass(PostListSearchCriteria.class);
     verify(communityPostListRepository).findPosts(criteriaCaptor.capture());
     PostListSearchCriteria criteria = criteriaCaptor.getValue();
     assertThat(criteria.postType()).isEqualTo(PostType.EXPERT_COLUMN);
+    assertThat(criteria.keywordPattern()).isEqualTo("%그림 상담%");
+    assertThat(criteria.feed()).isEqualTo(PostFeed.FOLLOWING);
+    assertThat(criteria.authorRole()).isEqualTo(UserRole.EXPERT);
     assertThat(criteria.page()).isEqualTo(1);
     assertThat(criteria.size()).isEqualTo(10);
-    assertThat(criteria.sort().field()).isEqualTo(SortField.UPDATED_AT);
+    assertThat(criteria.sort().field()).isEqualTo(SortField.LIKE_COUNT);
     assertThat(criteria.sort().direction()).isEqualTo(SortDirection.DESC);
     assertThat(criteria.viewerUserId()).isEqualTo(VIEWER_ID);
     assertThat(response.content()).hasSize(1);
@@ -101,7 +107,7 @@ class CommunityPostListServiceTest {
             new CommunityPostListPage(
                 List.of(row(true, UserRole.GUARDIAN, "실명", null, 0L, 0L, false)), 1));
 
-    var response = service.getPosts(new PostListQuery(null, null, null, null));
+    var response = service.getPosts(new PostListQuery(null, null, null, null, null, null, null));
 
     assertThat(response.content().getFirst().isAnonymous()).isTrue();
     assertThat(response.content().getFirst().author()).isNull();
@@ -110,17 +116,47 @@ class CommunityPostListServiceTest {
   @Test
   void rejectsInvalidPostTypePageSizeAndSort() {
     assertError(
-        () -> service.getPosts(new PostListQuery("COLUMN", null, null, null)),
+        () -> service.getPosts(new PostListQuery("COLUMN", null, null, null, null, null, null)),
         CommunityErrorCode.VALIDATION_FAILED);
     assertError(
-        () -> service.getPosts(new PostListQuery(null, "-1", null, null)),
+        () -> service.getPosts(new PostListQuery(null, null, null, null, "-1", null, null)),
         CommunityErrorCode.VALIDATION_FAILED);
     assertError(
-        () -> service.getPosts(new PostListQuery(null, null, "101", null)),
+        () -> service.getPosts(new PostListQuery(null, null, null, null, null, "101", null)),
         CommunityErrorCode.VALIDATION_FAILED);
     assertError(
-        () -> service.getPosts(new PostListQuery(null, null, null, "likeCount,desc")),
+        () ->
+            service.getPosts(
+                new PostListQuery(null, null, null, null, null, null, "updatedAt,desc")),
         CommunityErrorCode.VALIDATION_FAILED);
+    assertError(
+        () -> service.getPosts(new PostListQuery(null, null, "FRIENDS", null, null, null, null)),
+        CommunityErrorCode.VALIDATION_FAILED);
+    assertError(
+        () -> service.getPosts(new PostListQuery(null, null, null, "ADMIN", null, null, null)),
+        CommunityErrorCode.VALIDATION_FAILED);
+  }
+
+  @Test
+  void rejectsKeywordLongerThanOneHundredCodePoints() {
+    String keyword = "가".repeat(101);
+
+    assertError(
+        () -> service.getPosts(new PostListQuery(null, keyword, null, null, null, null, null)),
+        CommunityErrorCode.VALIDATION_FAILED);
+  }
+
+  @Test
+  void treatsBlankKeywordAsNoFilterAndEscapesLikeMetacharacters() {
+    PostListSearchCriteria blank =
+        service.toCriteria(new PostListQuery(null, "   ", null, null, null, null, null), VIEWER_ID);
+    PostListSearchCriteria escaped =
+        service.toCriteria(
+            new PostListQuery(null, "50%_완료!", null, null, null, null, null), VIEWER_ID);
+
+    assertThat(blank.keywordPattern()).isNull();
+    assertThat(blank.feed()).isEqualTo(PostFeed.ALL);
+    assertThat(escaped.keywordPattern()).isEqualTo("%50!%!_완료!!%");
   }
 
   @Test
@@ -128,7 +164,7 @@ class CommunityPostListServiceTest {
     SecurityContextHolder.clearContext();
 
     assertError(
-        () -> service.getPosts(new PostListQuery(null, null, null, null)),
+        () -> service.getPosts(new PostListQuery(null, null, null, null, null, null, null)),
         AuthErrorCode.AUTHENTICATION_REQUIRED);
   }
 
@@ -137,7 +173,7 @@ class CommunityPostListServiceTest {
     given(communityPostListRepository.findPosts(org.mockito.ArgumentMatchers.any()))
         .willReturn(new CommunityPostListPage(List.of(), 0));
 
-    var response = service.getPosts(new PostListQuery(null, null, null, null));
+    var response = service.getPosts(new PostListQuery(null, null, null, null, null, null, null));
 
     assertThat(response.content()).isEmpty();
     assertThat(response.page()).isZero();
