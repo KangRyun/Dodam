@@ -1,4 +1,4 @@
-# 도담(dodam) 배포 스택 — MySQL 8.0 서비스
+# 도담(dodam) 배포 스택 — MySQL 8.4 서비스
 # 관련 이슈: S15P11B209-184(MySQL 컨테이너) · S15P11B209-185(compose 골격) · S15P11B209-186(.env) · S15P11B209-188(ai 서비스)
 #
 # 실행 (repo 루트에서):
@@ -15,7 +15,7 @@ name: dodam
 
 services:
   redis:
-    image: redis:7.4.2-alpine
+    image: redis:7.4.8-alpine    # 기술스택 문서(7.4.8) 정렬 — S15P11B209-321. latest 금지, 패치 버전 고정
     container_name: dodam-redis
     restart: unless-stopped
     environment:
@@ -35,7 +35,9 @@ services:
       - dodam-net
 
   mysql:
-    image: mysql:8.0.40            # latest 금지 — 재현성 위해 패치 버전 고정 (원하면 최신 8.0.x로 상향)
+    image: mysql:8.4.10            # 8.4 LTS — 기술스택 문서·Testcontainers(테스트=운영) 정렬. S15P11B209-321
+                                   #   ⚠️ 8.0→8.4 데이터 디렉토리 자동 업그레이드는 "비가역"(다운그레이드 불가).
+                                   #   롤백 수단은 사전 mysqldump 복원뿐 — 배포 전 백업이 관문. latest 금지, 패치 버전 고정.
     container_name: dodam-mysql
     restart: unless-stopped
 

@@ -1,8 +1,14 @@
-"""GMS 대화 LLM 클라이언트 (얇은 래퍼).
+"""GMS 대화 LLM 클라이언트 + 질문 생성.
 
 GMS는 OpenAI 호환 게이트웨이라, 공식 `openai` SDK에 base_url만 GMS로 주면 그대로 동작한다.
-이 모듈은 '배선'만 담당한다 — messages를 받아 호출하고 응답 텍스트를 돌려줄 뿐,
-프롬프트 '내용'은 여기 두지 않는다(그건 ai/prompts/, 편주희 담당).
+
+- chat(): 배선 — messages를 받아 호출하고 응답 텍스트를 돌려준다.
+- first_question() / next_question(): ai/prompts/ 템플릿을 채워 아이에게 건넬 말을 받아온다.
+  프롬프트 문구 자체는 코드가 아니라 ai/prompts/*.txt에 있다 — 문구만 고칠 땐 txt만 고치면 된다.
+
+흐름:
+    그림분석 → first_question()            → 첫 질문
+    아이 발화 → next_question(history=...) → 다음 말
 
 가드레일:
 - 키는 로그로 남기지 않는다.
@@ -12,13 +18,32 @@ GMS는 OpenAI 호환 게이트웨이라, 공식 `openai` SDK에 base_url만 GMS�
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
+from pathlib import Path
 
 from openai import OpenAIError
 
+import answer_check  # 생성 답변 사후 검사(LLM 재호출 없이 규칙 기반)
 import config
 from gms import get_client  # GMS(OpenAI 호환) 공용 클라이언트
 
 logger = logging.getLogger(__name__)
+
+PROMPT_DIR = Path(__file__).parent / "prompts"
+
+# 프롬프트 파일이 바뀌면 올린다(분석 결과에 기록 → 어떤 프롬프트로 뽑힌 질문인지 추적용).
+PROMPT_VERSION = "1.1.0"
+
+# 캐릭터 이름. 프롬프트 txt에도 '도담'으로 적혀 있으니 바꾸려면 양쪽을 같이 고칠 것.
+CHARACTER_NAME = "도담"
+
+# 그림분석이 아직 없을 때 템플릿에 넣을 문구(템플릿 규칙상 "오늘은 뭘 그렸어?"로 유도됨).
+NO_ANALYSIS = "(아직 그림 분석 결과가 없어요)"
+
+# 아이 이름을 모를 때. 템플릿의 '이름 규칙'이 이걸 보고 "너"로 부르게 한다.
+NO_CHILD_NAME = "(이름은 아직 몰라요)"
+
+DEFAULT_AGE_BAND = "5~7"
 
 
 def chat(
@@ -55,12 +80,139 @@ def chat(
     return resp.choices[0].message.content or ""
 
 
-if __name__ == "__main__":
-    # 스모크 테스트: GMS 배선이 되는지만 확인한다(실제 프롬프트는 편주희 담당).
-    #   실행:  cd ai && python llm_client.py
-    logging.basicConfig(level=logging.INFO)
-    demo_messages = [
-        {"role": "system", "content": "너는 아이와 대화하는 따뜻한 곰돌이야. 쉽고 짧게 말해."},
-        {"role": "user", "content": "안녕? 한국어로 인사해줘."},
+# ── 프롬프트 로딩 / 렌더링 ──────────────────────────────────────
+
+
+@lru_cache(maxsize=None)
+def _load(name: str) -> str:
+    """ai/prompts/<name>.txt 를 읽어 캐시한다(서버 기동 중 파일은 안 바뀐다고 가정)."""
+    return (PROMPT_DIR / f"{name}.txt").read_text(encoding="utf-8").strip()
+
+
+def _format_history(history: list[dict] | None) -> str:
+    """대화 이력을 템플릿에 넣을 여러 줄 텍스트로 만든다.
+
+    Args:
+        history: [{"role": "assistant"|"user", "content": str}, ...] 순서대로.
+                 role은 OpenAI 형식을 그대로 쓴다(assistant=도담, user=아이).
+
+    Returns:
+        "도담: ...\n아이: ..." 형태. 이력이 없으면 안내 문구.
+        (라벨이 아이 이름으로 오해되지 않도록 템플릿의 '이름 규칙'이 짝을 이룬다.)
+    """
+    if not history:
+        return "(아직 나눈 대화가 없어요)"
+
+    lines = []
+    for turn in history:
+        speaker = "아이" if turn.get("role") == "user" else CHARACTER_NAME
+        lines.append(f"{speaker}: {turn.get('content', '')}")
+    return "\n".join(lines)
+
+
+def _ask(system_prompt: str, trigger: str, *, temperature: float) -> str:
+    """렌더링된 프롬프트로 LLM에 한 문장을 요청하고, 답변을 사후 검사한다.
+
+    템플릿이 이미 맥락을 다 담고 있어서 system 하나로 충분하지만,
+    chat 모델은 user 메시지가 하나는 있어야 하므로 짧은 trigger를 붙인다.
+
+    생성 결과는 answer_check.enforce로 한 번 더 거른다(LLM 재호출 없이 규칙 기반).
+    프롬프트 가드레일이 뚫린 경우의 마지막 방어선이다.
+    """
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": trigger},
     ]
-    print(chat(demo_messages))
+    raw = chat(messages, temperature=temperature)
+    return answer_check.enforce(raw)
+
+
+# ── 질문 생성 ───────────────────────────────────────────────────
+
+
+def first_question(
+    drawing_analysis: str | None = None,
+    *,
+    child_name: str | None = None,
+    age_band: str = DEFAULT_AGE_BAND,
+    temperature: float = 0.7,
+) -> str:
+    """그림 분석 결과를 보고 아이에게 건넬 첫 질문을 만든다.
+
+    Args:
+        drawing_analysis: 그림분석 모델 결과 요약. None이면 "뭘 그렸어?"류로 유도된다.
+        child_name: 아이 이름(호칭용). None이면 "너"라고 부르게 된다.
+        age_band: 연령대 문구(템플릿의 {age_band}에 그대로 들어감).
+        temperature: 첫 질문은 조금 다양해도 좋아 기본 0.7.
+
+    Returns:
+        첫 질문 한 문장.
+
+    Raises:
+        RuntimeError: GMS 호출 실패 시.
+    """
+    system = _load("first_question").format(
+        age_band=age_band,
+        child_name=child_name or NO_CHILD_NAME,
+        drawing_analysis=drawing_analysis or NO_ANALYSIS,
+        guardrails=_load("guardrails"),
+    )
+    return _ask(system, "아이에게 건넬 첫 질문을 해줘.", temperature=temperature)
+
+
+def next_question(
+    child_utterance: str,
+    *,
+    drawing_analysis: str | None = None,
+    history: list[dict] | None = None,
+    child_name: str | None = None,
+    age_band: str = DEFAULT_AGE_BAND,
+    temperature: float = 0.6,
+) -> str:
+    """아이가 방금 한 말에 반응하고 다음 질문을 이어간다.
+
+    Args:
+        child_utterance: STT로 받은 아이의 마지막 발화.
+        drawing_analysis: 그림분석 결과(있으면 맥락으로).
+        history: 지금까지의 대화(마지막 발화는 제외하고 넘기면 중복이 없다).
+        child_name: 아이 이름(호칭용). None이면 "너"라고 부르게 된다.
+        age_band: 연령대 문구.
+        temperature: 이어지는 대화는 튀지 않게 기본 0.6.
+
+    Returns:
+        아이에게 건넬 다음 말(한두 문장).
+
+    Raises:
+        RuntimeError: GMS 호출 실패 시.
+    """
+    system = _load("conversations").format(
+        age_band=age_band,
+        child_name=child_name or NO_CHILD_NAME,
+        drawing_analysis=drawing_analysis or NO_ANALYSIS,
+        history=_format_history(history),
+        child_utterance=child_utterance,
+        guardrails=_load("guardrails"),
+    )
+    return _ask(system, "아이에게 건넬 다음 말을 해줘.", temperature=temperature)
+
+
+if __name__ == "__main__":
+    # 스모크 테스트:  cd ai && python llm_client.py
+    logging.basicConfig(level=logging.INFO)
+
+    analysis = "집 1개(가운데, 큼), 나무 1개(왼쪽), 사람 2명(오른쪽)"
+
+    # 이름을 아는 경우 — 아이를 '도담'이라 부르지 않는지 함께 확인한다.
+    q1 = first_question(analysis, child_name="지우")
+    print("[첫 질문]", q1)
+
+    q2 = next_question(
+        "이건 우리 집이야. 여기 엄마랑 나 있어.",
+        drawing_analysis=analysis,
+        history=[{"role": "assistant", "content": q1}],
+        child_name="지우",
+    )
+    print("[다음 말]", q2)
+
+    # 이름을 모르는 경우 — "너"로 부르는지 확인.
+    print("[이름 모를 때]", first_question(analysis))
