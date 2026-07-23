@@ -52,7 +52,7 @@ public class DrawingAnalysisPersistenceService {
   }
 
   /**
-   * 세션과 최종 그림의 관계 및 중복을 검증하고 PROCESSING 분석 행을 저장한다.
+   * 세션과 허용된 그림 파일의 관계 및 중복을 검증하고 PROCESSING 분석 행을 저장한다.
    *
    * @param drawingSessionId 그림 활동 세션 식별자
    * @param drawingAssetId 분석 대상 그림 파일 식별자
@@ -84,17 +84,16 @@ public class DrawingAnalysisPersistenceService {
                 () ->
                     new BusinessException(
                         DrawingAnalysisErrorCode.DRAWING_ANALYSIS_TARGET_NOT_FOUND));
-    if (!Objects.equals(asset.getDrawingSession().getId(), session.getId())
-        || asset.getAssetType() != DrawingAssetType.FINAL) {
+    if (!Objects.equals(asset.getDrawingSession().getId(), session.getId())) {
       throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
     }
+    DrawingAnalysisScope scope = resolveScope(asset.getAssetType(), taskType);
     if (drawingAnalysisRepository.existsActiveByAssetAndTaskType(drawingAssetId, taskType)) {
       throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_ALREADY_EXISTS);
     }
 
     DrawingAnalysis analysis =
-        DrawingAnalysis.processing(
-            session, asset, DrawingAnalysisScope.FINAL, taskType, requestId, requestedAt);
+        DrawingAnalysis.processing(session, asset, scope, taskType, requestId, requestedAt);
     try {
       DrawingAnalysis saved = drawingAnalysisRepository.saveAndFlush(analysis);
       return new StartedDrawingAnalysis(
@@ -172,5 +171,17 @@ public class DrawingAnalysisPersistenceService {
             () ->
                 new BusinessException(
                     DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RESULT_SAVE_FAILED));
+  }
+
+  private DrawingAnalysisScope resolveScope(
+      DrawingAssetType assetType, DrawingAnalysisType taskType) {
+    if (taskType != DrawingAnalysisType.OBJECT_DETECTION) {
+      throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
+    }
+    return switch (assetType) {
+      case DRAFT -> DrawingAnalysisScope.INTERMEDIATE;
+      case FINAL -> DrawingAnalysisScope.FINAL;
+      default -> throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
+    };
   }
 }

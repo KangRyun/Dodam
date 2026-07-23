@@ -89,7 +89,7 @@ public class DrawingAnalysisService {
   }
 
   /**
-   * 최종 그림 분석을 동기식으로 실행하고 저장된 성공 결과를 반환한다.
+   * DRAFT 또는 FINAL 그림 객체 탐지를 동기식으로 실행하고 저장된 성공 결과를 반환한다.
    *
    * @param drawingSessionId 분석 대상 그림 활동 세션 식별자
    * @param request 그림 파일 식별자와 AI 분석 작업 유형

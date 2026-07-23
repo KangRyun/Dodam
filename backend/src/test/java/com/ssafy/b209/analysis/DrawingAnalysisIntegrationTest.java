@@ -101,7 +101,9 @@ class DrawingAnalysisIntegrationTest {
             + "(id, drawing_session_id, asset_type, asset_version, storage_key, mime_type, "
             + "file_size_bytes, checksum_sha256, captured_at) "
             + "VALUES (20, 10, 'FINAL', 1, '2026/07/22/final.png', 'image/png', "
-            + "1024, REPEAT('a', 64), UTC_TIMESTAMP(6))");
+            + "1024, REPEAT('a', 64), UTC_TIMESTAMP(6)), "
+            + "(21, 10, 'DRAFT', 1, '2026/07/22/draft.png', 'image/png', "
+            + "768, REPEAT('b', 64), UTC_TIMESTAMP(6))");
   }
 
   @AfterEach
@@ -119,7 +121,7 @@ class DrawingAnalysisIntegrationTest {
             });
 
     mockMvc
-        .perform(request())
+        .perform(request(20L, "OBJECT_DETECTION"))
         .andExpect(status().isCreated())
         .andExpect(header().exists("Location"))
         .andExpect(jsonPath("$.data.status").value("SUCCEEDED"))
@@ -144,9 +146,39 @@ class DrawingAnalysisIntegrationTest {
         .isEqualTo(2);
 
     mockMvc
-        .perform(request())
+        .perform(request(20L, "OBJECT_DETECTION"))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("ANALYSIS_409_002"));
+  }
+
+  @Test
+  void storesDraftObjectDetectionAsIntermediateAnalysis() throws Exception {
+    given(drawingAnalysisClient.analyze(any()))
+        .willAnswer(
+            invocation -> {
+              DrawingAnalysisRequest request = invocation.getArgument(0);
+              return successResponse(request.requestId());
+            });
+
+    mockMvc
+        .perform(request(21L, "OBJECT_DETECTION"))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.drawingAssetId").value(21));
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT analysis_type FROM analyses WHERE drawing_asset_id = 21", String.class))
+        .isEqualTo("INTERMEDIATE");
+  }
+
+  @Test
+  void rejectsActivityReportFromPublicRequestWithoutCallingAnalysisClient() throws Exception {
+    mockMvc
+        .perform(request(21L, "ACTIVITY_REPORT"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("ANALYSIS_409_001"));
+
+    verifyNoInteractions(drawingAnalysisClient);
   }
 
   @Test
@@ -155,7 +187,7 @@ class DrawingAnalysisIntegrationTest {
         .willThrow(new DrawingAnalysisClientException(DrawingAnalysisClientException.Type.TIMEOUT));
 
     mockMvc
-        .perform(request())
+        .perform(request(20L, "OBJECT_DETECTION"))
         .andExpect(status().isBadGateway())
         .andExpect(jsonPath("$.code").value("ANALYSIS_502_001"));
 
@@ -171,7 +203,7 @@ class DrawingAnalysisIntegrationTest {
               DrawingAnalysisRequest request = invocation.getArgument(0);
               return successResponse(request.requestId());
             });
-    mockMvc.perform(request()).andExpect(status().isCreated());
+    mockMvc.perform(request(20L, "OBJECT_DETECTION")).andExpect(status().isCreated());
 
     assertThat(
             jdbcTemplate.queryForObject(
@@ -193,7 +225,7 @@ class DrawingAnalysisIntegrationTest {
               DrawingAnalysisRequest request = invocation.getArgument(0);
               return successResponse(request.requestId());
             });
-    mockMvc.perform(request()).andExpect(status().isCreated());
+    mockMvc.perform(request(20L, "OBJECT_DETECTION")).andExpect(status().isCreated());
     Long analysisId =
         jdbcTemplate.queryForObject(
             "SELECT id FROM analyses WHERE drawing_asset_id = 20", Long.class);
@@ -218,7 +250,7 @@ class DrawingAnalysisIntegrationTest {
   void queriesStoredFailureAsHttpOkWithoutCallingAnalysisClientAgain() throws Exception {
     given(drawingAnalysisClient.analyze(any()))
         .willThrow(new DrawingAnalysisClientException(DrawingAnalysisClientException.Type.TIMEOUT));
-    mockMvc.perform(request()).andExpect(status().isBadGateway());
+    mockMvc.perform(request(20L, "OBJECT_DETECTION")).andExpect(status().isBadGateway());
     Long analysisId =
         jdbcTemplate.queryForObject(
             "SELECT id FROM analyses WHERE drawing_asset_id = 20", Long.class);
@@ -239,10 +271,15 @@ class DrawingAnalysisIntegrationTest {
     verifyNoInteractions(drawingAnalysisClient);
   }
 
-  private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request() {
+  private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder request(
+      long drawingAssetId, String analysisType) {
     return post("/api/v1/drawing-sessions/{drawingSessionId}/analyses", 10)
         .contentType(MediaType.APPLICATION_JSON)
-        .content("{\"drawingAssetId\":20,\"analysisType\":\"OBJECT_DETECTION\"}");
+        .content(
+            """
+            {"drawingAssetId":%d,"analysisType":"%s"}
+            """
+                .formatted(drawingAssetId, analysisType));
   }
 
   private DrawingAnalysisResponse successResponse(String requestId) {
