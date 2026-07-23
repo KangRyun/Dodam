@@ -4,28 +4,28 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   test('Android와 iOS 애플리케이션 식별자는 com.dodam.app이다', () {
-    final androidGradle =
-        File('android/app/build.gradle.kts').readAsStringSync();
-    final iosProject =
-        File('ios/Runner.xcodeproj/project.pbxproj').readAsStringSync();
+    final androidGradle = File(
+      'android/app/build.gradle.kts',
+    ).readAsStringSync();
+    final iosProject = File(
+      'ios/Runner.xcodeproj/project.pbxproj',
+    ).readAsStringSync();
 
     expect(androidGradle, contains('namespace = "com.dodam.app"'));
     expect(androidGradle, contains('applicationId = "com.dodam.app"'));
-    expect(
-      iosProject,
-      contains('PRODUCT_BUNDLE_IDENTIFIER = com.dodam.app;'),
-    );
+    expect(iosProject, contains('PRODUCT_BUNDLE_IDENTIFIER = com.dodam.app;'));
   });
 
   test('OAuth Native 설정은 외부 값 참조와 Provider URL Scheme을 제공한다', () {
-    final androidGradle =
-        File('android/app/build.gradle.kts').readAsStringSync();
-    final androidManifest =
-        File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
-    final androidActivity =
-        File(
-          'android/app/src/main/kotlin/com/dodam/app/MainActivity.kt',
-        ).readAsStringSync();
+    final androidGradle = File(
+      'android/app/build.gradle.kts',
+    ).readAsStringSync();
+    final androidManifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+    final androidActivity = File(
+      'android/app/src/main/kotlin/com/dodam/app/MainActivity.kt',
+    ).readAsStringSync();
     final iosInfo = File('ios/Runner/Info.plist').readAsStringSync();
     final gitignore = File('.gitignore').readAsStringSync();
 
@@ -54,5 +54,15 @@ void main() {
     expect(trackedExamples, contains('NAVER_CLIENT_ID=your-'));
     expect(trackedExamples, contains('NAVER_CLIENT_SECRET=your-'));
     expect(trackedExamples, isNot(contains('apps.googleusercontent.com')));
+  });
+
+  test('README는 모바일 OAuth 로컬 설정과 iOS 빌드 제한을 안내한다', () {
+    final readme = File('README.md').readAsStringSync();
+
+    expect(readme, contains('android/oauth.properties.example'));
+    expect(readme, contains('ios/Flutter/OAuth.xcconfig.example'));
+    expect(readme, contains('com.dodam.app'));
+    expect(readme, contains('macOS와 Xcode'));
+    expect(readme, contains('실제 Provider SDK 로그인'));
   });
 }

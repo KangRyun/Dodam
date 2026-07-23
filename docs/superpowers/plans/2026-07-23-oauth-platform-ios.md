@@ -317,6 +317,16 @@ git add frontend/mobile/.gitignore frontend/mobile/android frontend/mobile/ios f
 git commit -m "feat(auth): S15P11B209-380 모바일 OAuth Native 설정 추가"
 ```
 
+### Task 2.5: Provider Console 플랫폼 등록
+
+- [x] Kakao 앱 이름을 `Dodam`으로 정리하고 모바일 Native App Key에 Android package와
+      iOS Bundle ID `com.dodam.app`을 등록한다.
+- [x] Google Cloud에 `Dodam iOS` OAuth Client를 생성하고 Bundle ID
+      `com.dodam.app`을 등록한다.
+- [x] Naver `Dodam` 앱에 iOS 환경을 추가하고 URL Scheme `dodamnaver`를 등록한다.
+- [x] 실제 Client ID, Client Secret, Native App Key는 Repository 문서나 예시 파일에
+      기록하지 않는다.
+
 ### Task 3: 설정 문서와 전체 검증
 
 **Files:**
@@ -327,7 +337,7 @@ git commit -m "feat(auth): S15P11B209-380 모바일 OAuth Native 설정 추가"
 - Consumes: Task 1·2의 플랫폼 설정
 - Produces: 로컬 개발·CI·macOS 검증자가 재현 가능한 설정 안내
 
-- [ ] **Step 1: README에 설정 절차 작성**
+- [x] **Step 1: README에 설정 절차 작성**
 
 다음 항목을 실제 파일명과 함께 기록한다.
 
@@ -338,7 +348,7 @@ git commit -m "feat(auth): S15P11B209-380 모바일 OAuth Native 설정 추가"
 - iOS: macOS에서 `flutter pub get`, `cd ios`, `pod install`, `flutter build ios --no-codesign`
 - 실제 Credential 파일은 Git에 추가하지 않음
 
-- [ ] **Step 2: Secret 추적 여부 확인**
+- [x] **Step 2: Secret 추적 여부 확인**
 
 Run:
 
@@ -350,7 +360,7 @@ git status --short --ignored frontend/mobile/android/oauth.properties frontend/m
 Expected: 첫 명령은 출력이 없고 두 번째 명령은 로컬 Credential 파일이 ignored
 상태임을 보여준다.
 
-- [ ] **Step 3: Flutter 정적 분석과 테스트**
+- [x] **Step 3: Flutter 정적 분석과 테스트**
 
 Run:
 
@@ -362,7 +372,7 @@ C:\src\flutter\bin\flutter.bat test
 
 Expected: `No issues found`, 모든 테스트 PASS.
 
-- [ ] **Step 4: Android Debug APK 빌드**
+- [x] **Step 4: Android Debug APK 빌드**
 
 Run:
 
@@ -373,7 +383,7 @@ C:\src\flutter\bin\flutter.bat build apk --debug
 
 Expected: `build/app/outputs/flutter-apk/app-debug.apk` 생성.
 
-- [ ] **Step 5: iOS 정적 설정 확인**
+- [x] **Step 5: iOS 정적 설정 확인**
 
 Run:
 
@@ -387,7 +397,7 @@ Select-String -Path ios/Runner/Info.plist -Pattern "KAKAO_NATIVE_APP_KEY|GOOGLE_
 Expected: 플랫폼 계약 테스트 PASS와 설정 항목 출력. Windows에서는 iOS build 명령을
 실행하지 않는다.
 
-- [ ] **Step 6: 계획 체크 상태와 README Commit**
+- [x] **Step 6: 계획 체크 상태와 README Commit**
 
 완료된 체크박스를 `[x]`로 변경한 뒤 다음 Commit을 생성한다.
 
@@ -396,7 +406,7 @@ git add frontend/mobile/README.md docs/superpowers/plans/2026-07-23-oauth-platfo
 git commit -m "docs(auth): S15P11B209-380 OAuth 플랫폼 설정 안내 추가"
 ```
 
-- [ ] **Step 7: Branch 최종 검증**
+- [x] **Step 7: Branch 최종 검증**
 
 Run:
 
