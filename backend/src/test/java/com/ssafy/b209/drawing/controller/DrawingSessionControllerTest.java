@@ -3,6 +3,8 @@ package com.ssafy.b209.drawing.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -18,6 +20,7 @@ import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.domain.DrawingSessionStatus;
 import com.ssafy.b209.drawing.domain.DrawingStage;
 import com.ssafy.b209.drawing.dto.request.CreateDrawingSessionRequest;
+import com.ssafy.b209.drawing.dto.request.DeleteDrawingSessionRequest;
 import com.ssafy.b209.drawing.dto.response.ActiveDrawingSessionResponse;
 import com.ssafy.b209.drawing.dto.response.CreateDrawingSessionResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingSessionAnalysisSummaryResponse;
@@ -26,9 +29,13 @@ import com.ssafy.b209.drawing.dto.response.DrawingSessionChildSummaryResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingSessionDetailResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingTypeSummaryResponse;
 import com.ssafy.b209.drawing.dto.response.LatestDrawingDraftResponse;
+import com.ssafy.b209.drawing.dto.response.StrokeBatchResponse;
 import com.ssafy.b209.drawing.exception.DrawingErrorCode;
+import com.ssafy.b209.drawing.service.DrawingSessionDeletionService;
 import com.ssafy.b209.drawing.service.DrawingSessionQueryService;
 import com.ssafy.b209.drawing.service.DrawingSessionService;
+import com.ssafy.b209.drawing.service.StrokeBatchSaveResult;
+import com.ssafy.b209.drawing.service.StrokeBatchService;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Instant;
 import java.util.List;
@@ -40,7 +47,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-@WebMvcTest(DrawingSessionController.class)
+@WebMvcTest({DrawingSessionController.class, StrokeBatchController.class})
 @Import(com.ssafy.b209.global.exception.GlobalExceptionHandler.class)
 class DrawingSessionControllerTest {
 
@@ -59,6 +66,46 @@ class DrawingSessionControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private DrawingSessionService drawingSessionService;
   @MockitoBean private DrawingSessionQueryService drawingSessionQueryService;
+  @MockitoBean private DrawingSessionDeletionService drawingSessionDeletionService;
+  @MockitoBean private StrokeBatchService strokeBatchService;
+
+  @Test
+  void returnsCreatedForANewStrokeBatchAndOkForTheSamePayloadRetry() throws Exception {
+    StrokeBatchResponse response =
+        new StrokeBatchResponse(15L, 3, 1, 101, Instant.parse("2026-07-21T02:32:10Z"));
+    given(strokeBatchService.save(eq(100L), any()))
+        .willReturn(new StrokeBatchSaveResult(response, true))
+        .willReturn(new StrokeBatchSaveResult(response, false));
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/100/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(validStrokeBatch()))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.code").value("COMMON_201"))
+        .andExpect(jsonPath("$.data.batchId").value(15))
+        .andExpect(jsonPath("$.data.acceptedEventCount").value(1));
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/100/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(validStrokeBatch()))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"));
+  }
+
+  @Test
+  void rejectsInvalidStrokeCoordinatesBeforeCallingTheService() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/100/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(validStrokeBatch().replace("\"x\":0.18", "\"x\":1.18")))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
 
   @Test
   void returnsCreatedResponseAndLocation() throws Exception {
@@ -182,6 +229,55 @@ class DrawingSessionControllerTest {
         .perform(get("/api/v1/drawing-sessions/{drawingSessionId}", 999))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("DRAWING_404_003"));
+  }
+
+  @Test
+  void deletesDrawingSessionAfterExplicitConfirmation() throws Exception {
+    mockMvc
+        .perform(
+            delete("/api/v1/drawing-sessions/100")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DELETE\"}"))
+        .andExpect(status().isNoContent());
+
+    verify(drawingSessionDeletionService).delete(100L, new DeleteDrawingSessionRequest("DELETE"));
+  }
+
+  @Test
+  void rejectsDrawingSessionDeletionWithoutConfirmation() throws Exception {
+    mockMvc
+        .perform(
+            delete("/api/v1/drawing-sessions/100")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
+  private String validStrokeBatch() {
+    return """
+        {
+          "batchSequence": 3,
+          "firstEventSequence": 101,
+          "lastEventSequence": 101,
+          "clientCreatedAt": "2026-07-21T11:32:10.120+09:00",
+          "events": [{
+            "sequence": 101,
+            "eventType": "STROKE",
+            "tool": "PEN",
+            "color": "#FFCC00",
+            "width": 8.0,
+            "pressure": null,
+            "points": [{"x":0.18,"y":0.42,"t":0},{"x":0.19,"y":0.43,"t":16}]
+          }],
+          "metrics": {
+            "undoCountDelta": 1,
+            "redoCountDelta": 0,
+            "eraseCountDelta": 2,
+            "pauseDurationMsDelta": 3200
+          }
+        }
+        """;
   }
 
   private CreateDrawingSessionResponse response() {

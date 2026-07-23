@@ -90,6 +90,18 @@ class AccessTokenAuthenticationFilterTest {
   }
 
   @Test
+  void rejectsLogoutWithoutAccessToken() throws Exception {
+    MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/v1/auth/logout");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    FilterChain chain = mock(FilterChain.class);
+
+    filter.doFilter(request, response, chain);
+
+    assertThat(response.getStatus()).isEqualTo(401);
+    assertThat(response.getContentAsString()).contains("AUTH_401_006");
+  }
+
+  @Test
   void testProfileCanTemporarilyBypassLegacyGuardianHeaders() throws Exception {
     AccessTokenAuthenticationFilter legacyFilter =
         new AccessTokenAuthenticationFilter(

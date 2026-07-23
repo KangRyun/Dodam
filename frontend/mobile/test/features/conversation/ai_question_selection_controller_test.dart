@@ -8,11 +8,11 @@ void main() {
       addTearDown(controller.dispose);
       controller.beginQuestion(_question(10));
 
-      final selected = controller.select(_question(10), 2);
+      final selected = controller.select(_question(10), '2');
 
       expect(selected, isTrue);
       expect(controller.questionMessageId, 10);
-      expect(controller.selectedOptionId, 2);
+      expect(controller.selectedOptionId, '2');
     });
 
     test('질문에 없는 optionId는 선택하지 않는다', () {
@@ -20,7 +20,7 @@ void main() {
       addTearDown(controller.dispose);
       controller.beginQuestion(_question(10));
 
-      final selected = controller.select(_question(10), 99);
+      final selected = controller.select(_question(10), '99');
 
       expect(selected, isFalse);
       expect(controller.selectedOptionId, isNull);
@@ -30,7 +30,7 @@ void main() {
       final controller = AiQuestionSelectionController();
       addTearDown(controller.dispose);
       controller.beginQuestion(_question(10));
-      controller.select(_question(10), 1);
+      controller.select(_question(10), '1');
 
       controller.beginQuestion(_question(11));
 
@@ -67,13 +67,13 @@ AiQuestion _question(int messageId) => AiQuestion(
   text: '그림에는 누가 함께 있어?',
   options: const [
     AiQuestionOption(
-      optionId: 1,
+      optionId: '1',
       type: 'TEXT',
       label: '가족이 있어',
       value: '가족이 있어',
     ),
     AiQuestionOption(
-      optionId: 2,
+      optionId: '2',
       type: 'TEXT',
       label: '친구가 있어',
       value: '친구가 있어',

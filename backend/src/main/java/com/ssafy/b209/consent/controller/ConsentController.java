@@ -3,14 +3,19 @@ package com.ssafy.b209.consent.controller;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.consent.domain.ConsentTargetScope;
 import com.ssafy.b209.consent.dto.request.CreateConsentRequest;
+import com.ssafy.b209.consent.dto.response.ConsentChangeResponse;
+import com.ssafy.b209.consent.dto.response.ConsentHistoryPageResponse;
 import com.ssafy.b209.consent.dto.response.ConsentRegistrationResponse;
 import com.ssafy.b209.consent.dto.response.ConsentStatusResponse;
 import com.ssafy.b209.consent.dto.response.ConsentTermResponse;
+import com.ssafy.b209.consent.service.ConsentHistoryQueryService;
 import com.ssafy.b209.consent.service.ConsentRegistrationService;
 import com.ssafy.b209.consent.service.ConsentStatusQueryService;
 import com.ssafy.b209.consent.service.ConsentTermQueryService;
+import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.ApiResponse;
+import com.ssafy.b209.global.response.CommonErrorCode;
 import com.ssafy.b209.global.response.CommonSuccessCode;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -19,18 +24,21 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.time.LocalDate;
 import java.util.List;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 인증 사용자 또는 연결 아동의 최초 약관 동의 이력을 등록하는 HTTP API를 제공한다. */
+/** 인증 사용자 또는 연결 아동의 약관 동의 등록·현황·버전별 이력 관리 HTTP API를 제공한다. */
 @Tag(name = "Consents", description = "사용자·아동 동의 관리 API")
 @RestController
 @RequestMapping("/api/v1/consents")
@@ -38,29 +46,85 @@ public class ConsentController {
 
   private static final int MAX_IP_LENGTH = 45;
   private static final int MAX_USER_AGENT_LENGTH = 500;
+  private static final int MAX_PAGE_SIZE = 100;
 
   private final CurrentAuthenticatedUserResolver currentUserResolver;
   private final ConsentRegistrationService registrationService;
   private final ConsentTermQueryService termQueryService;
   private final ConsentStatusQueryService statusQueryService;
+  private final ConsentHistoryQueryService historyQueryService;
 
   /**
-   * 동의 등록·약관 조회·동의 현황 조회 Controller를 구성한다.
+   * 동의 등록·약관·현황·이력 조회 Controller를 구성한다.
    *
    * @param currentUserResolver Access Token 사용자 식별 경계
    * @param registrationService 최초 동의 검증·저장 Service
    * @param termQueryService 현재 적용 약관 조회 Service
    * @param statusQueryService 사용자·아동 동의 현황 조회 Service
+   * @param historyQueryService 접근 가능한 버전별 동의 이력 조회 Service
    */
   public ConsentController(
       CurrentAuthenticatedUserResolver currentUserResolver,
       ConsentRegistrationService registrationService,
       ConsentTermQueryService termQueryService,
-      ConsentStatusQueryService statusQueryService) {
+      ConsentStatusQueryService statusQueryService,
+      ConsentHistoryQueryService historyQueryService) {
     this.currentUserResolver = currentUserResolver;
     this.registrationService = registrationService;
     this.termQueryService = termQueryService;
     this.statusQueryService = statusQueryService;
+    this.historyQueryService = historyQueryService;
+  }
+
+  /**
+   * 인증 사용자가 접근할 수 있는 버전별 동의·철회 이력을 조회한다.
+   *
+   * @param childId 특정 아동 필터, 전체 접근 가능 이력이면 {@code null}
+   * @param termCode 약관 코드 필터
+   * @param from 기록일 하한
+   * @param to 기록일 상한
+   * @param page 0부터 시작하는 페이지 번호
+   * @param size 페이지 크기
+   * @return HTTP 200과 동의 이력 페이지
+   */
+  @Operation(summary = "동의 이력 조회", description = "사용자 본인과 현재 연결된 아동의 버전별 동의·철회 이력을 최신순으로 조회합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "동의 이력 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "페이지 또는 날짜 범위 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 실패",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "403",
+        description = "아동 연결 보호자가 아님",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping("/history")
+  public ResponseEntity<ApiResponse<ConsentHistoryPageResponse>> getConsentHistory(
+      @RequestParam(required = false) Long childId,
+      @RequestParam(required = false) String termCode,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+      @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+      @RequestParam(defaultValue = "0") int page,
+      @RequestParam(defaultValue = "20") int size) {
+    if ((childId != null && childId < 1)
+        || (from != null && to != null && from.isAfter(to))
+        || page < 0
+        || size < 1
+        || size > MAX_PAGE_SIZE
+        || (long) page * size > Integer.MAX_VALUE) {
+      throw new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE);
+    }
+    return ResponseEntity.ok(
+        ApiResponse.ok(
+            historyQueryService.getHistory(
+                currentUserResolver.requireUserId(), childId, termCode, from, to, page, size)));
   }
 
   /**
@@ -176,6 +240,51 @@ public class ConsentController {
             limit(httpRequest.getHeader(HttpHeaders.USER_AGENT), MAX_USER_AGENT_LENGTH));
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(ApiResponse.of(CommonSuccessCode.CREATED, response));
+  }
+
+  /**
+   * 선택 약관의 동의·철회·재동의를 append-only 이력으로 기록한다.
+   *
+   * @param request 아동 ID와 변경할 선택 약관별 행위
+   * @param httpRequest 원격 IP와 User-Agent 증빙을 제공하는 HTTP 요청
+   * @return HTTP 200과 저장된 변경 이력 수
+   */
+  @Operation(summary = "선택 동의 변경", description = "선택 약관의 동의·철회·재동의를 기존 기록을 덮어쓰지 않고 새 이력으로 저장합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "선택 동의 변경 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "필수 약관 변경 또는 요청 범위 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 실패",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "403",
+        description = "아동 연결 보호자가 아님",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "약관을 찾을 수 없음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "409",
+        description = "비활성 또는 시행 전 약관",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @PatchMapping
+  public ResponseEntity<ApiResponse<ConsentChangeResponse>> changeOptional(
+      @Valid @RequestBody CreateConsentRequest request, HttpServletRequest httpRequest) {
+    ConsentChangeResponse response =
+        registrationService.changeOptional(
+            currentUserResolver.requireUserId(),
+            request,
+            limit(httpRequest.getRemoteAddr(), MAX_IP_LENGTH),
+            limit(httpRequest.getHeader(HttpHeaders.USER_AGENT), MAX_USER_AGENT_LENGTH));
+    return ResponseEntity.ok(ApiResponse.ok(response));
   }
 
   private String limit(String value, int maximumLength) {

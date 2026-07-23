@@ -13,7 +13,7 @@ final class AiQuestionSelectionController extends ChangeNotifier {
   final Duration revealDelay;
   Timer? _revealTimer;
   int? questionMessageId;
-  int? selectedOptionId;
+  String? selectedOptionId;
   bool optionsVisible = false;
 
   void beginQuestion(AiQuestion question, {bool scheduleReveal = true}) {
@@ -41,7 +41,7 @@ final class AiQuestionSelectionController extends ChangeNotifier {
     notifyListeners();
   }
 
-  bool select(AiQuestion question, int optionId) {
+  bool select(AiQuestion question, String optionId) {
     final validOption = question.options.any(
       (option) => option.optionId == optionId,
     );

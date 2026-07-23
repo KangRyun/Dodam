@@ -80,6 +80,7 @@ tasks
         doFirst {
             listOf(
                 "KAKAO_NATIVE_APP_KEY",
+                "GOOGLE_SERVER_CLIENT_ID",
                 "NAVER_CLIENT_ID",
                 "NAVER_CLIENT_SECRET",
                 "NAVER_APP_NAME",

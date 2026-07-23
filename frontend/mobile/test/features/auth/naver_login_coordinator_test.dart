@@ -138,6 +138,9 @@ final class _PendingNaverLoginClient implements NaverLoginClient {
     return _completer.future;
   }
 
+  @override
+  Future<void> signOut() async {}
+
   void complete() =>
       _completer.complete(const NaverLoginSuccess('naver-access-token'));
 }

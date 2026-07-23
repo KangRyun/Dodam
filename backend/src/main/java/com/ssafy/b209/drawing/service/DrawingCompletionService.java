@@ -20,9 +20,11 @@ import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.repository.ReportRepository;
+import com.ssafy.b209.report.service.ReportGenerationRequestedEvent;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.Optional;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -46,6 +48,7 @@ public class DrawingCompletionService {
   private final ConversationSessionRepository conversationRepository;
   private final DrawingAnalysisRepository analysisRepository;
   private final ReportRepository reportRepository;
+  private final ApplicationEventPublisher eventPublisher;
   private final Clock clock;
 
   /**
@@ -58,6 +61,7 @@ public class DrawingCompletionService {
    * @param conversationRepository 대화 상태 조회 Repository
    * @param analysisRepository 최종 분석 저장 Repository
    * @param reportRepository 리포트 생성 접수 Repository
+   * @param eventPublisher 커밋 후 리포트 생성을 요청하는 이벤트 발행기
    * @param clock 서버 접수 시각을 제공하는 UTC Clock
    */
   public DrawingCompletionService(
@@ -68,6 +72,7 @@ public class DrawingCompletionService {
       ConversationSessionRepository conversationRepository,
       DrawingAnalysisRepository analysisRepository,
       ReportRepository reportRepository,
+      ApplicationEventPublisher eventPublisher,
       Clock clock) {
     this.currentUserResolver = currentUserResolver;
     this.accessValidator = accessValidator;
@@ -76,6 +81,7 @@ public class DrawingCompletionService {
     this.conversationRepository = conversationRepository;
     this.analysisRepository = analysisRepository;
     this.reportRepository = reportRepository;
+    this.eventPublisher = eventPublisher;
     this.clock = clock;
   }
 
@@ -128,6 +134,9 @@ public class DrawingCompletionService {
             reportRepository.saveAndFlush(Report.generating(session, analysis, 1, requestedAt));
       }
       session.startReporting();
+      if (report != null) {
+        eventPublisher.publishEvent(new ReportGenerationRequestedEvent(analysis.getId()));
+      }
       return response(session, analysis, report);
     } catch (DataIntegrityViolationException exception) {
       throw new BusinessException(DrawingErrorCode.DRAWING_COMPLETION_CONFLICT, exception);

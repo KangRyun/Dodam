@@ -142,6 +142,15 @@ public class DrawingSession {
   }
 
   /**
+   * 현재 세션이 Canvas 행동 이벤트 배치를 받을 수 있는지 확인한다.
+   *
+   * @return Canvas 입력 방식이며 삭제되지 않은 진행 중 DRAWING 단계이면 {@code true}
+   */
+  public boolean canAcceptStrokeBatch() {
+    return inputMethod == DrawingInputMethod.CANVAS && isSnapshotUploadable();
+  }
+
+  /**
    * 현재 세션이 최종 그림 분석 요청을 시작할 수 있는 상태인지 확인한다.
    *
    * <p>분석 요청은 최종 스냅샷 업로드와 같은 그림 단계에서만 허용하며, 삭제되거나 완료된 세션의 재분석은 별도 정책으로 분리한다.
@@ -201,6 +210,61 @@ public class DrawingSession {
       throw new IllegalStateException("현재 단계에서는 완료 처리를 접수할 수 없습니다.");
     }
     currentStage = DrawingStage.REPORTING;
+  }
+
+  /**
+   * 최종 분석과 리포트 저장이 성공한 활동을 완료 상태로 전이한다.
+   *
+   * <p>리포트 결과 저장 Transaction 안에서 호출해 분석·리포트·세션 상태가 함께 반영되도록 한다.
+   *
+   * @param completedAt 서버가 결정한 UTC 기준 완료 시각
+   * @throws NullPointerException {@code completedAt}이 {@code null}인 경우
+   * @throws IllegalStateException 삭제됐거나 REPORTING 중인 진행 세션이 아닌 경우
+   */
+  public void completeReporting(LocalDateTime completedAt) {
+    Objects.requireNonNull(completedAt, "completedAt must not be null");
+    if (deletedAt != null
+        || sessionStatus != DrawingSessionStatus.IN_PROGRESS
+        || currentStage != DrawingStage.REPORTING) {
+      throw new IllegalStateException("리포트 생성 중인 세션만 완료할 수 있습니다.");
+    }
+    sessionStatus = DrawingSessionStatus.COMPLETED;
+    currentStage = DrawingStage.COMPLETED;
+    this.completedAt = completedAt;
+  }
+
+  /**
+   * 최종 분석 또는 리포트 생성에 실패한 활동을 실패 상태로 전이한다.
+   *
+   * <p>완료 시각은 기록하지 않고 REPORTING 단계를 유지해 실패 지점을 나타낸다. 세션 상태가 {@link DrawingSessionStatus#FAILED}로
+   * 바뀌므로 새 활동의 진행 중 중복 검사에서는 제외된다.
+   *
+   * @throws IllegalStateException REPORTING 중인 진행 세션이 아닌 경우
+   */
+  public void failReporting() {
+    if (sessionStatus != DrawingSessionStatus.IN_PROGRESS
+        || currentStage != DrawingStage.REPORTING) {
+      throw new IllegalStateException("리포트 생성 중인 세션만 실패 처리할 수 있습니다.");
+    }
+    sessionStatus = DrawingSessionStatus.FAILED;
+  }
+
+  /**
+   * 그림 활동을 삭제 상태로 전환하고 삭제 시각을 기록한다.
+   *
+   * <p>현재 단계와 완료 시각은 감사 및 운영 기록을 위해 유지한다.
+   *
+   * @param deletedAt 서버가 결정한 UTC 기준 삭제 시각
+   * @throws NullPointerException {@code deletedAt}이 {@code null}인 경우
+   * @throws IllegalStateException 이미 삭제된 세션인 경우
+   */
+  public void softDelete(LocalDateTime deletedAt) {
+    Objects.requireNonNull(deletedAt, "deletedAt must not be null");
+    if (this.deletedAt != null || sessionStatus == DrawingSessionStatus.DELETED) {
+      throw new IllegalStateException("이미 삭제된 그림 활동입니다.");
+    }
+    sessionStatus = DrawingSessionStatus.DELETED;
+    this.deletedAt = deletedAt;
   }
 
   /**

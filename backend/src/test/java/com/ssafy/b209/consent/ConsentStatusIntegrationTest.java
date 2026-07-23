@@ -1,6 +1,8 @@
 package com.ssafy.b209.consent;
 
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -13,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
+import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -87,6 +90,68 @@ class ConsentStatusIntegrationTest {
         .andExpect(jsonPath("$.data.items[1].termId").value(2))
         .andExpect(jsonPath("$.data.items[1].required").value(false))
         .andExpect(jsonPath("$.data.items[1].agreed").value(false));
+  }
+
+  @Test
+  void appendsOptionalConsentChangeAndExposesItAsTheLatestStatus() throws Exception {
+    mockMvc
+        .perform(
+            patch("/api/v1/consents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "agreements": [
+                        {"termId": 2, "action": "AGREE"}
+                      ]
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.recordedCount").value(1));
+
+    Integer recordCount =
+        jdbcTemplate.queryForObject(
+            "SELECT COUNT(*) FROM consent_records WHERE consent_term_id = 2", Integer.class);
+    assertThat(recordCount).isEqualTo(3);
+
+    mockMvc
+        .perform(get("/api/v1/consents"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.items[1].agreed").value(true));
+  }
+
+  @Test
+  void returnsEveryAccessibleConsentVersionAndActionInNewestFirstOrder() throws Exception {
+    jdbcTemplate.update(
+        "INSERT INTO consent_terms "
+            + "(id, term_code, target_scope, is_required, version, title, effective_at, is_active) "
+            + "VALUES (3, 'MARKETING', 'USER', FALSE, 'v2', '마케팅 수신 개정', "
+            + "'2020-01-01 00:00:00', TRUE)");
+    jdbcTemplate.update(
+        "UPDATE consent_records SET recorded_at = '2026-07-20 00:00:00' WHERE consent_term_id = 2");
+    jdbcTemplate.update(
+        "INSERT INTO consent_records "
+            + "(consent_term_id, actor_user_id, subject_child_id, subject_reference_hash, action, recorded_at) "
+            + "VALUES (3, ?, NULL, REPEAT('b', 64), 'AGREE', '2026-07-23 00:00:00')",
+        USER_ID);
+
+    mockMvc
+        .perform(
+            get("/api/v1/consents/history")
+                .param("termCode", "MARKETING")
+                .param("from", "2026-07-20")
+                .param("to", "2026-07-23")
+                .param("page", "0")
+                .param("size", "2"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.content.length()").value(2))
+        .andExpect(jsonPath("$.data.content[0].version").value("v2"))
+        .andExpect(jsonPath("$.data.content[0].action").value("AGREE"))
+        .andExpect(jsonPath("$.data.content[1].version").value("v1"))
+        .andExpect(jsonPath("$.data.totalElements").value(3))
+        .andExpect(jsonPath("$.data.totalPages").value(2))
+        .andExpect(jsonPath("$.data.hasNext").value(true));
   }
 
   private void setAuthenticatedUser(Long userId) {

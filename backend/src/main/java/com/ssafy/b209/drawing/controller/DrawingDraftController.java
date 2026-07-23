@@ -20,6 +20,7 @@ import java.io.InputStream;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -137,5 +138,33 @@ public class DrawingDraftController {
   public ResponseEntity<ApiResponse<DrawingDraftResponse>> getLatestDraft(
       @PathVariable @Positive Long drawingSessionId) {
     return ResponseEntity.ok(ApiResponse.ok(drawingDraftService.getLatest(drawingSessionId)));
+  }
+
+  /**
+   * 세션의 자동 저장 초안과 복구 Metadata를 삭제한다.
+   *
+   * @param drawingSessionId 초안을 삭제할 그림 활동 세션 식별자
+   * @return 본문이 없는 HTTP 204 응답
+   */
+  @Operation(
+      summary = "그림 초안 삭제",
+      description = "세션의 DRAFT 파일과 복구 Metadata만 삭제하며 다른 스냅샷과 Stroke 원본은 유지합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "204",
+        description = "그림 초안 삭제 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "유효하지 않은 세션 식별자",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "그림 활동 세션 또는 저장된 초안을 찾을 수 없음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @DeleteMapping
+  public ResponseEntity<Void> deleteDraft(@PathVariable @Positive Long drawingSessionId) {
+    drawingDraftService.delete(drawingSessionId);
+    return ResponseEntity.noContent().build();
   }
 }

@@ -553,6 +553,10 @@ Google 요청:
 
 실제 Provider 설정과 JWT Secret은 `.env` 또는 배포 Secret으로 관리하며 Git에 커밋하지 않습니다.
 
+## 회원 탈퇴 API
+
+`DELETE /api/v1/users/me`는 Access Token으로 식별한 사용자 계정을 즉시 hard delete합니다. 요청 Body의 `confirmation`은 정확히 `DELETE`여야 하며 비밀번호는 받지 않습니다. 인증 계정과 사용자 설정은 DB FK 정책으로 함께 삭제되고, 감사·활동 기록의 사용자 참조는 `null`로 비식별화됩니다. 아동과 활동 데이터 자체의 삭제는 별도 API 정책으로 처리합니다.
+
 ## 최초 동의 등록 API
 
 `POST /api/v1/consents`는 Access Token의 사용자를 동의 처리자로 사용해 사용자 또는 연결 아동의 약관별 `AGREE`·`WITHDRAW` 행위를 저장합니다. 사용자 대상 약관만 등록하면 `childId`를 생략하고, 아동 대상 약관에는 연결된 아동의 `childId`를 전달합니다.
@@ -561,6 +565,10 @@ Google 요청:
 - 동의 이력은 기존 행을 수정하지 않고 `consent_records`에 append합니다.
 - 요청 사용자 ID는 Body로 받지 않으며 IP와 User-Agent를 감사 정보로 저장합니다.
 - 기존 `consent_terms`, `consent_records`, `consent_record_evidences` 구조를 사용하므로 신규 DB Migration은 없습니다.
+
+선택 약관은 `PATCH /api/v1/consents`에서 같은 요청 형식으로 동의·철회·재동의할 수 있습니다. 이 API는 선택 약관만 허용하며, 변경 결과도 기존 행을 갱신하지 않고 새 `consent_records` 이력으로 추가합니다. 필수 약관 변경은 `CONSENT_400_002`로 거부됩니다.
+
+`GET /api/v1/consents/history`는 사용자 본인과 현재 연결된 아동의 버전별 동의·철회 이력을 최신순으로 반환합니다. `childId`, `termCode`, `from`, `to`, `page`, `size`로 결과를 좁힐 수 있으며 날짜는 ISO date 형식이고 양 끝 날짜를 모두 포함합니다. 특정 `childId`를 지정하면 현재 연결 보호자인지 확인하고, 감사용 IP와 User-Agent는 응답에 노출하지 않습니다.
 
 ## 아동 정보 조회 API
 
@@ -600,6 +608,25 @@ X-Guardian-User-Id: 10
 - 존재하지 않음, 삭제됨, 비활성 상태와 보호자 연결 없음은 식별자 노출 방지를 위해 모두 HTTP 404와 `CHILD_404_001`을 반환합니다.
 - 조회만으로 아동 프로필이나 보호자 관계 상태를 변경하지 않습니다.
 - 운영 요청은 `Authorization: Bearer <access-token>`의 검증된 사용자 ID를 사용합니다. `X-Guardian-User-Id`는 기존 자동화 테스트 전환을 위해 Test Profile에서만 허용되며 운영 기본값에서는 거부됩니다.
+
+## 아동 프로필 수정 API
+
+`PATCH /api/v1/children/{childId}`는 연결 보호자가 전달한 프로필 필드만 변경하고 최신 상세 정보를 반환합니다.
+
+```json
+{
+  "nickname": "새별이",
+  "relationshipType": "FATHER",
+  "questionDifficulty": "UPPER_ELEMENTARY",
+  "responseModes": ["EMOJI", "VOICE"]
+}
+```
+
+- 생략한 필드는 기존 값을 유지합니다.
+- `responseModes`를 전달하면 기존 응답 방식 목록을 요청 순서대로 교체하고 중복 값은 첫 순서만 유지합니다.
+- `birthDate`를 변경할 때도 요청일 기준 만 4~12세 범위를 적용합니다.
+- 존재하지 않음, 삭제됨, 비활성 상태와 보호자 연결 없음은 모두 `CHILD_404_001`로 처리합니다.
+- `profileImageFileId`는 현재 사전 업로드 이미지 연결 기반이 없어 계약 호환 목적으로만 받으며 프로필 이미지 저장은 수행하지 않습니다.
 
 ## 그림 활동 세션 생성 API
 
@@ -643,6 +670,8 @@ UPLOAD 입력 방식에서는 `canvas`를 사용하지 않습니다. 이미지 �
 `IN_PROGRESS`, 초기 단계는 `DRAWING`이며, 공식 `startedAt`은 클라이언트 시각이 아닌 서버 UTC 시각을
 사용합니다.
 
+Canvas 입력의 그림 과정은 `POST /api/v1/drawing-sessions/{drawingSessionId}/stroke-batches`로 최대 500개 이벤트씩 저장합니다. 좌표는 `0~1` 정규화 값이고 payload는 압축 전 1 MiB 이하이며, 배치·이벤트·좌표를 한 Transaction에서 정규화 테이블에 기록합니다. 같은 `batchSequence`와 동일 payload는 기존 결과를 반환하고 다른 payload로 순번을 재사용하면 `DRAWING_409_019`를 반환합니다.
+
 - `Idempotency-Key`는 8~100자이며 제어 문자를 포함할 수 없습니다.
 - 동일한 Key와 동일한 `childId`, `drawingTypeId`, `inputMethod` 요청은 기존 세션을 반환합니다.
 - 동일한 Key를 다른 핵심 요청에 사용하면 HTTP 409를 반환합니다.
@@ -674,6 +703,23 @@ curl -X POST "http://localhost:8080/api/v1/drawing-sessions/100/snapshots" \
 - 응답에는 서버 내부 Storage Key, 절대 경로와 원본 파일명을 포함하지 않습니다.
 - 현재 인증과 그림 활동 소유권 검증은 아직 연결되지 않았습니다.
 - 업로드만으로 세션 상태를 변경하거나 AI 분석을 실행하지 않습니다.
+
+## 실패한 그림 분석 재요청 API
+
+`POST /api/v1/analyses/{analysisId}/retry`는 연결 보호자가 FAILED 분석을 새 실행으로 재요청합니다.
+
+```json
+{
+  "reason": "USER_REQUEST",
+  "useLatestInputs": true
+}
+```
+
+- 원본 분석 행은 변경하지 않고 새 행의 `retry_of_analysis_id`에 원본 식별자를 기록합니다.
+- `useLatestInputs=false`는 원본 그림을, `true`는 같은 세션·자산 유형의 최신 버전을 사용합니다.
+- FAILED가 아닌 분석은 `ANALYSIS_409_003`, 선택된 그림에 진행 중이거나 성공한 분석이 있으면 `ANALYSIS_409_002`로 거부합니다.
+- 성공 응답의 `Location`은 현재 공개 조회 URI인 `/api/v1/drawing-sessions/{drawingSessionId}/analyses/{drawingAnalysisId}`를 가리킵니다.
+- 현재 분석 실행은 동기식이며 자동 Retry, 리포트 재생성과 버전 증가는 수행하지 않습니다.
 
 ## 그림 초안 자동 저장 및 조회 API
 

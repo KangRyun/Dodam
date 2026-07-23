@@ -3,7 +3,10 @@ package com.ssafy.b209.child.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -14,12 +17,15 @@ import com.ssafy.b209.child.domain.ChildTutorialStatus;
 import com.ssafy.b209.child.domain.GuardianRelationshipType;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.child.domain.ResponseMode;
+import com.ssafy.b209.child.dto.request.DeleteChildRequest;
 import com.ssafy.b209.child.dto.response.ChildDetailResponse;
 import com.ssafy.b209.child.dto.response.ChildRegistrationResponse;
 import com.ssafy.b209.child.dto.response.ChildSummaryResponse;
 import com.ssafy.b209.child.exception.ChildErrorCode;
+import com.ssafy.b209.child.service.ChildDeletionService;
 import com.ssafy.b209.child.service.ChildQueryService;
 import com.ssafy.b209.child.service.ChildRegistrationService;
+import com.ssafy.b209.child.service.ChildUpdateService;
 import com.ssafy.b209.conversation.exception.ConversationStartErrorCode;
 import com.ssafy.b209.conversation.service.TemporaryGuardianResolver;
 import com.ssafy.b209.global.exception.BusinessException;
@@ -41,6 +47,8 @@ class ChildControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private ChildQueryService childQueryService;
   @MockitoBean private ChildRegistrationService childRegistrationService;
+  @MockitoBean private ChildUpdateService childUpdateService;
+  @MockitoBean private ChildDeletionService childDeletionService;
   @MockitoBean private TemporaryGuardianResolver guardianResolver;
 
   @Test
@@ -220,6 +228,78 @@ class ChildControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data").isArray())
         .andExpect(jsonPath("$.data").isEmpty());
+  }
+
+  @Test
+  void updatesAConnectedChildAndReturnsTheLatestDetail() throws Exception {
+    given(guardianResolver.resolve("Bearer access-token", "10")).willReturn(10L);
+    given(childUpdateService.update(eq(10L), eq(3L), any())).willReturn(response());
+
+    mockMvc
+        .perform(
+            patch("/api/v1/children/3")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "nickname": "새별이",
+                      "questionDifficulty": "UPPER_ELEMENTARY",
+                      "responseModes": ["EMOJI", "VOICE"]
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.childId").value(3));
+  }
+
+  @Test
+  void rejectsAnInvalidChildProfileUpdateBeforeCallingTheService() throws Exception {
+    mockMvc
+        .perform(
+            patch("/api/v1/children/3")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "nickname": " ",
+                      "responseModes": []
+                    }
+                    """))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
+  @Test
+  void deletesAChildAfterExplicitConfirmation() throws Exception {
+    given(guardianResolver.resolve("Bearer access-token", "10")).willReturn(10L);
+
+    mockMvc
+        .perform(
+            delete("/api/v1/children/3")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DELETE\"}"))
+        .andExpect(status().isNoContent());
+
+    verify(childDeletionService).delete(10L, 3L, new DeleteChildRequest("DELETE"));
+  }
+
+  @Test
+  void rejectsChildDeletionWithoutConfirmation() throws Exception {
+    mockMvc
+        .perform(
+            delete("/api/v1/children/3")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
   }
 
   private String registrationRequestJson() {

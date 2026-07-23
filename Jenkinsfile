@@ -7,7 +7,7 @@
 //   - 시크릿 .env 는 Jenkins Credentials(secret file, id: dodam-env)로 주입 — 저장소 커밋 금지
 //   - 컨트롤러 인-빌드(별도 에이전트 없음)
 //
-// 흐름: Checkout → Build&Test(backend) → [이하 develop만] Docker Build → ai import 스모크 → Deploy → Healthcheck
+// 흐름: Checkout → [develop만] Secrets Preflight → Build&Test(backend) → [이하 develop만] Docker Build → ai import 스모크 → Deploy → Healthcheck
 //   브랜치(MR) 빌드는 테스트까지만 — 자원 절약 + 모든 브랜치가 :local 태그를 덮어쓰는 레이스 방지.
 // 알림: 빌드 성공/실패를 Mattermost Incoming Webhook으로 전송 (크레덴셜 id: mattermost-webhook)
 
@@ -84,12 +84,46 @@ pipeline {
       }
     }
 
+    stage('Secrets Preflight') {
+      when { branch 'develop' }   // 시크릿은 develop(이미지 빌드·배포)에서만 쓰인다 — MR 빌드는 불필요
+      steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }
+        // dodam-env 크리덴셜의 필수 키를 테스트(≈10분) 전에 전수 검증한다.
+        // reason: 2026-07-24 빌드 114~116 — 크리덴셜 교체 중 키 누락 시 compose 보간은
+        //   "처음 만난 누락 변수 1개"만 보고해, 전모 파악에 빌드 3번을 소모했다.
+        //   여기서 누락 목록 전체를 한 번에 보고하고 즉시 실패시킨다.
+        // 필수 목록은 compose의 `:?` 가드에서 자동 추출 — 하드코딩 금지(가드 추가 시 자동 반영).
+        // ⚠️ 시크릿 값은 절대 출력하지 않는다 — 키 이름만 다룬다.
+        withCredentials([file(credentialsId: 'dodam-env', variable: 'ENV_FILE')]) {
+          sh '''
+            required=$(grep -v "^[[:space:]]*#" "$COMPOSE_FILE" | grep -oE '\\$\\{[A-Z_]+:\\?' | tr -cd 'A-Z_\\n' | sort -u)
+            missing=""
+            for k in $required; do
+              grep -qE "^${k}=." "$ENV_FILE" || missing="$missing $k"
+            done
+            if [ -n "$missing" ]; then
+              echo "❌ dodam-env 시크릿에 필수 키 누락:$missing"
+              echo "   → Jenkins 크리덴셜(dodam-env)을 '기존 전체 키 + 신규 키' 병합본으로 재업로드할 것."
+              echo "     dodam-env는 교체가 아니라 병합이 규칙 (S15P11B209-386)"
+              exit 1
+            fi
+            echo "✅ 시크릿 preflight 통과 — 필수 키 $(echo "$required" | wc -w)개 확인: $(echo $required)"
+          '''
+        }
+      }
+    }
+
     stage('Build & Test — backend') {
       steps {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
         dir('backend') {
           // 테스트를 여기서 돌린다(이미지 빌드는 -x test로 스킵). 실패 시 파이프라인 중단 = 배포 안 함.
-          sh 'chmod +x gradlew && ./gradlew --no-daemon clean test'
+          // clean 제거 + --build-cache: 워크스페이스가 브랜치별로 재사용되므로 증분 컴파일 활용
+          //   (S15P11B209-391 — clean은 매번 풀컴파일을 강제해 2~4분 낭비였음)
+          // test와 bootJar를 한 Gradle 호출로 산출(Phase 2): 테스트용 컴파일 결과를 bootJar가
+          //   그대로 재사용하므로 이미지 빌드에서 재컴파일하지 않는다(이중 컴파일 제거).
+          //   backend/build/libs/*.jar 를 Docker가 COPY만 한다(backend/Dockerfile 참조).
+          sh 'chmod +x gradlew && ./gradlew --no-daemon --build-cache test bootJar'
         }
       }
       post {
@@ -188,6 +222,18 @@ pipeline {
       echo "❌ 실패 — 미배포이거나 헬스체크 실패. 콘솔 로그 확인 후 대응."
       script { notifyMattermost('❌', '빌드 실패') }
     }
-    always  { sh 'docker image prune -f >/dev/null 2>&1 || true' }  // 대롱거리는 중간 이미지 정리(디스크 절약)
+    always  {
+      // 이미지 보존정책(S15P11B209-391): SHA 태그는 서비스별 최신 3세대만 유지(:local 불가침).
+      //   reason: 무조건 `image prune -f`는 빌드 캐시를 파괴해 콜드 빌드(타임아웃 경주)를 유발했고,
+      //   SHA 태그는 프룬 대상이 아니라 무한 누적됐다(07/24 실측 268개·62GB → 1회 정리 후 이 정책으로 유지).
+      //   dangling 프룬은 until=24h 필터로 최근 캐시 레이어를 보존한다.
+      sh '''
+        for repo in dodam-backend dodam-ai dodam-nginx; do
+          docker images --format '{{.Repository}}:{{.Tag}}' "$repo" 2>/dev/null \
+            | grep -v ':local' | tail -n +4 | xargs -r docker rmi >/dev/null 2>&1 || true
+        done
+        docker image prune -f --filter "until=24h" >/dev/null 2>&1 || true
+      '''
+    }
   }
 }

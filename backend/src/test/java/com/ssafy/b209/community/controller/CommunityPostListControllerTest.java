@@ -63,8 +63,11 @@ class CommunityPostListControllerTest {
         .perform(
             get("/api/v1/posts")
                 .header("Authorization", "Bearer valid-token")
-                .param("postType", "EXPERT_COLUMN")
-                .param("sort", "updatedAt,asc"))
+                .param("type", "EXPERT_COLUMN")
+                .param("keyword", "그림 상담")
+                .param("feed", "FOLLOWING")
+                .param("authorRole", "EXPERT")
+                .param("sort", "likeCount,asc"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.code").value("COMMON_200"))
@@ -72,8 +75,11 @@ class CommunityPostListControllerTest {
 
     ArgumentCaptor<PostListQuery> queryCaptor = ArgumentCaptor.forClass(PostListQuery.class);
     Mockito.verify(communityPostListService).getPosts(queryCaptor.capture());
-    assertThat(queryCaptor.getValue().postType()).isEqualTo("EXPERT_COLUMN");
-    assertThat(queryCaptor.getValue().sort()).isEqualTo("updatedAt,asc");
+    assertThat(queryCaptor.getValue().type()).isEqualTo("EXPERT_COLUMN");
+    assertThat(queryCaptor.getValue().keyword()).isEqualTo("그림 상담");
+    assertThat(queryCaptor.getValue().feed()).isEqualTo("FOLLOWING");
+    assertThat(queryCaptor.getValue().authorRole()).isEqualTo("EXPERT");
+    assertThat(queryCaptor.getValue().sort()).isEqualTo("likeCount,asc");
   }
 
   @Test

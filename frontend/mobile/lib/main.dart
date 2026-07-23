@@ -4,31 +4,34 @@ import 'app/app.dart';
 import 'app/router/app_routes.dart';
 import 'core/network/network.dart';
 import 'features/auth/auth.dart';
+import 'features/child/data/repositories/remote_child_repository.dart';
+import 'features/conversation/conversation.dart';
 import 'features/drawing/data/repositories/mock_drawing_repository.dart';
 import 'features/drawing/data/repositories/remote_drawing_repository.dart';
-import 'features/conversation/conversation.dart';
 
 void main() {
   runApp(createDefaultApp());
 }
 
-/// Creates the normal app runtime with the public API-backed Drawing flow.
+/// 공개 API와 Provider SDK를 사용하는 기본 애플리케이션 구성을 생성한다.
 ///
-/// Tests and explicit mock entry points can continue constructing [DodamApp]
-/// with a [MockDrawingRepository] through its existing constructor injection.
+/// child·conversation(다음질문)·drawing은 실API(Remote) 리포지토리를 주입하고,
+/// activity·report는 백엔드 API가 생길 때까지 Mock 기본값을 유지한다
+/// (S15P11B209-384 계약 교차 검증, 2026-07-24).
+///
+/// 테스트에서는 [DodamApp]의 생성자 주입을 통해 Mock Repository를 사용할 수
+/// 있으며, 기본 구성은 인증 세션과 각 도메인 API가 같은 [ApiClient]를 공유한다.
 DodamApp createDefaultApp({
   ApiEnvironment? environment,
   AuthSessionStore? authSessionStore,
 }) {
-  final authRepository = AuthRepositoryImpl(
-    providerScenarios: const {
-      AuthProvider.kakao: MockAuthScenario.newUserWithoutEmail,
-      AuthProvider.google: MockAuthScenario.newGuardian,
-      AuthProvider.naver: MockAuthScenario.newGuardian,
-    },
+  late final ApiClient apiClient;
+  final authRepository = RemoteAuthRepository(
+    apiClient: () => apiClient,
+    deviceIdProvider: SecureDeviceIdProvider(),
     sessionStore: authSessionStore ?? SecureAuthSessionStore(),
   );
-  final apiClient = ApiClient(
+  apiClient = ApiClient(
     environment: environment ?? ApiEnvironment.fromDartDefine(),
     accessTokenProvider: authRepository,
     tokenRefresher: authRepository,
@@ -40,6 +43,9 @@ DodamApp createDefaultApp({
 
   return DodamApp(
     authRepository: authRepository,
+    childRepository: RemoteChildRepository(apiClient),
+    conversationRepository: RemoteConversationRepository(apiClient),
+    conversationAnswerRepository: RemoteConversationAnswerRepository(apiClient),
     // 백엔드 미연결 개발 환경에서만 목 그림 세션 사용
     drawingRepository: useMockDrawing
         ? const MockDrawingRepository()

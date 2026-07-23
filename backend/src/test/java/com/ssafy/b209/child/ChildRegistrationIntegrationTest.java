@@ -1,12 +1,14 @@
 package com.ssafy.b209.child;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ssafy.b209.auth.token.AuthenticatedUser;
+import java.time.LocalDate;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -138,6 +140,69 @@ class ChildRegistrationIntegrationTest {
 
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM children", Integer.class))
         .isZero();
+  }
+
+  @Test
+  void updatesTheProfileRelationAndNormalizedResponseModesAtomically() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/children")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "nickname": "별이",
+                      "birthDate": "2019-03-15",
+                      "relationshipType": "MOTHER",
+                      "preferredCharacter": "MONGLE",
+                      "questionDifficulty": "LOWER_ELEMENTARY",
+                      "responseModes": ["VOICE", "COLOR"]
+                    }
+                    """))
+        .andExpect(status().isCreated());
+
+    mockMvc
+        .perform(
+            patch("/api/v1/children/1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "nickname": "새별이",
+                      "relationshipType": "FATHER",
+                      "questionDifficulty": "UPPER_ELEMENTARY",
+                      "responseModes": ["EMOJI", "VOICE", "EMOJI"]
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.nickname").value("새별이"))
+        .andExpect(jsonPath("$.data.birthDate").value("2019-03-15"))
+        .andExpect(jsonPath("$.data.relationshipType").value("FATHER"))
+        .andExpect(jsonPath("$.data.questionDifficulty").value("UPPER_ELEMENTARY"))
+        .andExpect(jsonPath("$.data.responseModes[0]").value("EMOJI"))
+        .andExpect(jsonPath("$.data.responseModes[1]").value("VOICE"));
+
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT nickname, birth_date, preferred_character, question_difficulty "
+                    + "FROM children WHERE id = 1"))
+        .containsEntry("nickname", "새별이")
+        .containsEntry("birth_date", java.sql.Date.valueOf(LocalDate.of(2019, 3, 15)))
+        .containsEntry("preferred_character", "MONGLE")
+        .containsEntry("question_difficulty", "UPPER_ELEMENTARY");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT relationship_type FROM guardian_child_relations "
+                    + "WHERE guardian_user_id = ? AND child_id = 1",
+                String.class,
+                GUARDIAN_USER_ID))
+        .isEqualTo("FATHER");
+    assertThat(
+            jdbcTemplate.queryForList(
+                "SELECT response_mode FROM child_response_modes "
+                    + "WHERE child_id = 1 ORDER BY display_order",
+                String.class))
+        .containsExactly("EMOJI", "VOICE");
   }
 
   private void setAuthenticatedGuardian() {

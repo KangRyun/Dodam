@@ -32,8 +32,8 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
 
   final AiQuestion? question;
   final bool visible;
-  final int? selectedOptionId;
-  final ValueChanged<int> onOptionSelected;
+  final String? selectedOptionId;
+  final ValueChanged<String> onOptionSelected;
   final bool showResponseActions;
   final OptionAnswerSubmissionStatus submissionStatus;
   final QuestionSkipStatus skipStatus;
@@ -165,8 +165,8 @@ final class _ResponseActions extends StatelessWidget {
 
   final bool showOptions;
   final List<AiQuestionOption> options;
-  final int? selectedOptionId;
-  final ValueChanged<int> onSelected;
+  final String? selectedOptionId;
+  final ValueChanged<String> onSelected;
   final VoidCallback onSkip;
   final OptionAnswerSubmissionStatus submissionStatus;
   final QuestionSkipStatus skipStatus;
@@ -288,8 +288,8 @@ final class _QuestionOptions extends StatelessWidget {
   });
 
   final List<AiQuestionOption> options;
-  final int? selectedOptionId;
-  final ValueChanged<int> onSelected;
+  final String? selectedOptionId;
+  final ValueChanged<String> onSelected;
   final bool enabled;
 
   @override

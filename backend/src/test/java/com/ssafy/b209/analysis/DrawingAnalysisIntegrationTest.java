@@ -218,6 +218,48 @@ class DrawingAnalysisIntegrationTest {
   }
 
   @Test
+  void retriesAFailedAnalysisWithTheLatestMatchingAssetAndLinksItsSource() throws Exception {
+    given(drawingAnalysisClient.analyze(any()))
+        .willThrow(new DrawingAnalysisClientException(DrawingAnalysisClientException.Type.TIMEOUT));
+    mockMvc.perform(request(21L, "OBJECT_DETECTION")).andExpect(status().isBadGateway());
+    Long failedAnalysisId =
+        jdbcTemplate.queryForObject(
+            "SELECT id FROM analyses WHERE drawing_asset_id = 21", Long.class);
+    jdbcTemplate.update(
+        "INSERT INTO drawing_assets "
+            + "(id, drawing_session_id, asset_type, asset_version, storage_key, mime_type, "
+            + "file_size_bytes, checksum_sha256, captured_at) "
+            + "VALUES (22, 10, 'DRAFT', 2, '2026/07/22/draft-v2.png', 'image/png', "
+            + "1200, REPEAT('c', 64), UTC_TIMESTAMP(6))");
+
+    reset(drawingAnalysisClient);
+    given(drawingAnalysisClient.analyze(any()))
+        .willAnswer(
+            invocation -> {
+              DrawingAnalysisRequest request = invocation.getArgument(0);
+              return successResponse(request.requestId());
+            });
+
+    mockMvc
+        .perform(
+            post("/api/v1/analyses/{analysisId}/retry", failedAnalysisId)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"USER_REQUEST\",\"useLatestInputs\":true}"))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.drawingAssetId").value(22))
+        .andExpect(jsonPath("$.data.status").value("SUCCEEDED"));
+
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT retry_of_analysis_id, trigger_reason, drawing_asset_id "
+                    + "FROM analyses WHERE retry_of_analysis_id = ?",
+                failedAnalysisId))
+        .containsEntry("retry_of_analysis_id", failedAnalysisId)
+        .containsEntry("trigger_reason", "RETRY")
+        .containsEntry("drawing_asset_id", 22L);
+  }
+
+  @Test
   void queriesStoredSuccessWithoutCallingAnalysisClientAgain() throws Exception {
     given(drawingAnalysisClient.analyze(any()))
         .willAnswer(

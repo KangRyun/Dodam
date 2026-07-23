@@ -18,7 +18,11 @@ public enum ConsentErrorCode implements ErrorCode {
   CONSENT_ACTOR_NOT_GUARDIAN(HttpStatus.FORBIDDEN, "CONSENT_403_002", "아동의 동의를 처리할 권한이 없습니다."),
 
   /** 약관 적용 범위, 중복 약관 또는 아동 식별자 조합이 유효하지 않은 경우이다. */
-  CONSENT_REQUEST_INVALID(HttpStatus.BAD_REQUEST, "CONSENT_400_001", "동의 요청이 유효하지 않습니다.");
+  CONSENT_REQUEST_INVALID(HttpStatus.BAD_REQUEST, "CONSENT_400_001", "동의 요청이 유효하지 않습니다."),
+
+  /** 선택 동의 변경 API로 필수 약관을 변경하려는 경우이다. */
+  REQUIRED_CONSENT_CHANGE_NOT_ALLOWED(
+      HttpStatus.BAD_REQUEST, "CONSENT_400_002", "필수 약관은 선택 동의 변경 대상이 아닙니다.");
 
   private final HttpStatus httpStatus;
   private final String code;

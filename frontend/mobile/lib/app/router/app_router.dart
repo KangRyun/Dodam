@@ -31,6 +31,7 @@ abstract final class AppRouter {
     ConversationRepository? conversationRepository,
     VoiceAnswerRepository? voiceAnswerRepository,
     SttResultRepository? sttResultRepository,
+    ConversationAnswerRepository? conversationAnswerRepository,
     int? conversationId,
     int? basisAnalysisId,
   }) {
@@ -102,6 +103,7 @@ abstract final class AppRouter {
           conversationRepository: conversationRepository,
           voiceAnswerRepository: voiceAnswerRepository,
           sttResultRepository: sttResultRepository,
+          conversationAnswerRepository: conversationAnswerRepository,
           conversationId: conversationId,
           basisAnalysisId: basisAnalysisId,
         ),

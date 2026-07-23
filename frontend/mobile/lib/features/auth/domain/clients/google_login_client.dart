@@ -16,4 +16,6 @@ final class GoogleLoginCancelled extends GoogleLoginResult {
 // 구글 SDK 연결 계약
 abstract interface class GoogleLoginClient {
   Future<GoogleLoginResult> signIn();
+
+  Future<void> signOut();
 }

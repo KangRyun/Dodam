@@ -1,16 +1,31 @@
+import 'ai_question.dart';
+
 // 선택지 답변 제출 요청
+//
+// 백엔드 OptionAnswerRequest 계약(2026-07-24 확인)은 선택지 id뿐 아니라
+// 선택 당시의 스냅샷(type·value·labelSnapshot, 전부 필수)을 요구하므로
+// id 목록이 아니라 선택지 객체 자체를 담아 전송한다.
 final class OptionAnswerRequest {
   const OptionAnswerRequest({
     required this.questionMessageId,
-    required this.selectedOptionIds,
+    required this.selectedOptions,
   });
 
   final int questionMessageId;
-  final List<int> selectedOptionIds;
+  final List<AiQuestionOption> selectedOptions;
 
   Map<String, dynamic> toJson() => {
     'questionMessageId': questionMessageId,
-    'selectedOptionIds': selectedOptionIds,
+    'selectedOptions': [
+      for (final option in selectedOptions)
+        {
+          'optionId': option.optionId,
+          'type': option.type,
+          'value': option.value,
+          // BE 필드명은 labelSnapshot — 답변 시점의 라벨 보존용
+          'labelSnapshot': option.label,
+        },
+    ],
   };
 }
 
