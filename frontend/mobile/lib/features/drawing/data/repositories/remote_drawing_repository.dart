@@ -161,16 +161,14 @@ final class RemoteDrawingRepository implements DrawingRepository {
   }
 
   @override
-  Future<AnalysisAcceptedDto> requestAnalysis(
+  Future<ObjectDetectionResponseDto> requestObjectDetection(
     int sessionId,
-    RequestAnalysisDto request, {
-    required String idempotencyKey,
-  }) async {
+    ObjectDetectionRequestDto request,
+  ) async {
     final response = await _apiClient.post<Map<String, dynamic>>(
-      'drawing-sessions/$sessionId/analysis',
+      'drawing-sessions/$sessionId/analyses',
       data: request.toJson(),
-      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
     );
-    return AnalysisAcceptedDto.fromJson(response.data!);
+    return ObjectDetectionResponseDto.fromJson(_payload(response.data!));
   }
 }

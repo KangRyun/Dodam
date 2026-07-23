@@ -428,13 +428,101 @@ final class DrawingUploadResponseDto {
   final DrawingAssetDto originalAsset, correctedAsset;
 }
 
-final class RequestAnalysisDto {
-  const RequestAnalysisDto({this.triggerReason, this.inputChecksumSha256});
-  final String? triggerReason, inputChecksumSha256;
+final class ObjectDetectionRequestDto {
+  const ObjectDetectionRequestDto({required this.drawingAssetId});
+
+  final int drawingAssetId;
+
   Map<String, dynamic> toJson() => {
-    if (triggerReason != null) 'triggerReason': triggerReason,
-    if (inputChecksumSha256 != null) 'inputChecksumSha256': inputChecksumSha256,
+    'drawingAssetId': drawingAssetId,
+    'analysisType': 'OBJECT_DETECTION',
   };
+}
+
+final class DrawingBoundingBoxDto {
+  const DrawingBoundingBoxDto({
+    required this.x,
+    required this.y,
+    required this.width,
+    required this.height,
+  });
+
+  factory DrawingBoundingBoxDto.fromJson(Map<String, dynamic> json) =>
+      DrawingBoundingBoxDto(
+        x: (json['x'] as num).toDouble(),
+        y: (json['y'] as num).toDouble(),
+        width: (json['width'] as num).toDouble(),
+        height: (json['height'] as num).toDouble(),
+      );
+
+  final double x, y, width, height;
+}
+
+final class DrawingDetectionDto {
+  const DrawingDetectionDto({
+    required this.label,
+    required this.confidence,
+    required this.boundingBox,
+  });
+
+  factory DrawingDetectionDto.fromJson(Map<String, dynamic> json) =>
+      DrawingDetectionDto(
+        label: json['label'] as String,
+        confidence: (json['confidence'] as num).toDouble(),
+        boundingBox: DrawingBoundingBoxDto.fromJson(_map(json['boundingBox'])),
+      );
+
+  final String label;
+  final double confidence;
+  final DrawingBoundingBoxDto boundingBox;
+}
+
+final class DrawingAnalysisModelDto {
+  const DrawingAnalysisModelDto({required this.name, required this.version});
+
+  factory DrawingAnalysisModelDto.fromJson(Map<String, dynamic> json) =>
+      DrawingAnalysisModelDto(
+        name: json['name'] as String,
+        version: json['version'] as String,
+      );
+
+  final String name, version;
+}
+
+final class ObjectDetectionResponseDto {
+  const ObjectDetectionResponseDto({
+    required this.drawingAnalysisId,
+    required this.drawingSessionId,
+    required this.drawingAssetId,
+    required this.requestId,
+    required this.analysisType,
+    required this.status,
+    required this.model,
+    required this.detections,
+    required this.requestedAt,
+    required this.processedAt,
+  });
+
+  factory ObjectDetectionResponseDto.fromJson(Map<String, dynamic> json) =>
+      ObjectDetectionResponseDto(
+        drawingAnalysisId: json['drawingAnalysisId'] as int,
+        drawingSessionId: json['drawingSessionId'] as int,
+        drawingAssetId: json['drawingAssetId'] as int,
+        requestId: json['requestId'] as String,
+        analysisType: json['analysisType'] as String,
+        status: json['status'] as String,
+        model: DrawingAnalysisModelDto.fromJson(_map(json['model'])),
+        detections: (json['detections'] as List? ?? const [])
+            .map((item) => DrawingDetectionDto.fromJson(_map(item)))
+            .toList(growable: false),
+        requestedAt: json['requestedAt'] as String,
+        processedAt: json['processedAt'] as String,
+      );
+
+  final int drawingAnalysisId, drawingSessionId, drawingAssetId;
+  final String requestId, analysisType, status, requestedAt, processedAt;
+  final DrawingAnalysisModelDto model;
+  final List<DrawingDetectionDto> detections;
 }
 
 final class AnalysisAcceptedDto {

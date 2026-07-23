@@ -481,11 +481,10 @@ final class _TrackingDrawingRepository implements DrawingRepository {
   @override
   Future<DrawingSessionDto> getSession(int sessionId) async => session();
   @override
-  Future<AnalysisAcceptedDto> requestAnalysis(
+  Future<ObjectDetectionResponseDto> requestObjectDetection(
     int sessionId,
-    RequestAnalysisDto request, {
-    required String idempotencyKey,
-  }) => throw UnimplementedError();
+    ObjectDetectionRequestDto request,
+  ) => throw UnimplementedError();
   @override
   Future<DrawingUploadResponseDto> uploadDrawing(
     int sessionId,

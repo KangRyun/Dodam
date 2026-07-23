@@ -7,6 +7,7 @@ import 'package:flutter/rendering.dart';
 
 import '../../../../app/router/app_routes.dart';
 import '../../../../design_system/design_system.dart';
+import '../../../drawing/application/drawing_object_detection_controller.dart';
 import '../../../drawing/application/drawing_sync_coordinator.dart';
 import '../../../drawing/application/drawing_draft_restore_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
@@ -35,6 +36,7 @@ class DrawingScreen extends StatefulWidget {
     this.drawingRepository,
     this.syncPolicy = const DrawingSyncPolicy(),
     this.syncCoordinator,
+    this.objectDetectionController,
     this.draftRestoreController,
     this.draftImageProviderFactory,
     this.completionSnapshotProvider,
@@ -53,6 +55,7 @@ class DrawingScreen extends StatefulWidget {
   final DrawingRepository? drawingRepository;
   final DrawingSyncPolicy syncPolicy;
   final DrawingSyncCoordinator? syncCoordinator;
+  final DrawingObjectDetectionController? objectDetectionController;
   final DrawingDraftRestoreController? draftRestoreController;
   final DraftImageProviderFactory? draftImageProviderFactory;
   final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
@@ -81,6 +84,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
   final GlobalKey _canvasBoundaryKey = GlobalKey();
   late final DrawingSyncCoordinator _syncCoordinator;
   late final bool _ownsSyncCoordinator;
+  DrawingObjectDetectionController? _objectDetectionController;
+  late final bool _ownsObjectDetectionController;
   late final DrawingDraftRestoreController _draftRestoreController;
   late final bool _ownsDraftRestoreController;
   bool _isCompleting = false;
@@ -110,6 +115,23 @@ class _DrawingScreenState extends State<DrawingScreen> {
           policy: widget.syncPolicy,
         );
     _syncCoordinator.addListener(_handleSyncChanged);
+    _ownsObjectDetectionController = widget.objectDetectionController == null;
+    _objectDetectionController = widget.objectDetectionController;
+    final sessionId = widget.sessionId;
+    final drawingRepository = widget.drawingRepository;
+    if (_objectDetectionController == null &&
+        sessionId != null &&
+        drawingRepository != null) {
+      // 그림판은 입력 시점만 전달하고 탐지 상태와 최신 결과 검증은 별도 관리
+      _objectDetectionController = DrawingObjectDetectionController(
+        saveDraft: _syncCoordinator.saveDraftNow,
+        requestDetection: (drawingAssetId) =>
+            drawingRepository.requestObjectDetection(
+              sessionId,
+              ObjectDetectionRequestDto(drawingAssetId: drawingAssetId),
+            ),
+      );
+    }
     _ownsDraftRestoreController = widget.draftRestoreController == null;
     _draftRestoreController =
         widget.draftRestoreController ??
@@ -164,6 +186,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
     _syncCoordinator.removeListener(_handleSyncChanged);
     _draftRestoreController.removeListener(_handleDraftRestoreChanged);
     if (_ownsDraftRestoreController) _draftRestoreController.dispose();
+    if (_ownsObjectDetectionController) {
+      _objectDetectionController?.dispose();
+    }
     if (_ownsSyncCoordinator) _syncCoordinator.dispose();
     _questionController?.removeListener(_handleQuestionChanged);
     _questionController?.dispose();
@@ -279,6 +304,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
   void _startStroke(PointerDownEvent event) {
     if (_activePointer != null) return;
     _invalidatePendingCompletion();
+    // 새 입력은 진행 중인 객체 탐지 결과를 현재 그림에서 제외
+    _objectDetectionController?.onDrawingInputStarted();
     // 그림 입력이 시작되면 질문 오버레이 숨김
     _questionDisplayController.dismiss();
     setState(() {
@@ -312,17 +339,20 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final canvasSize = _canvasBoundaryKey.currentContext?.size;
     if (completed && canvasSize != null) {
       _syncCoordinator.recordStroke(stroke, canvasSize);
+      _objectDetectionController?.onDrawingInputEnded();
     }
   }
 
   void _undoLastStroke() {
     if (_activeStroke != null || _completedStrokes.isEmpty) return;
     _invalidatePendingCompletion();
+    _objectDetectionController?.onDrawingInputStarted();
     // A recovered Draft is a bitmap, so Undo intentionally targets only
     // vector strokes created after restore. TODO(API): Revisit when the server
     // provides an authoritative vector-history recovery contract.
     setState(() => _completedStrokes.removeLast());
     _syncCoordinator.recordUndo();
+    _objectDetectionController?.onDrawingInputEnded();
   }
 
   DrawingPoint _pointFrom(PointerEvent event) => DrawingPoint(

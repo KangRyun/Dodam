@@ -184,15 +184,25 @@ final class MockDrawingRepository implements DrawingRepository {
     'correctedAsset': {..._asset, 'assetId': 131, 'assetType': 'CORRECTED'},
   });
   @override
-  Future<AnalysisAcceptedDto> requestAnalysis(
+  Future<ObjectDetectionResponseDto> requestObjectDetection(
     int sessionId,
-    RequestAnalysisDto request, {
-    required String idempotencyKey,
-  }) async => AnalysisAcceptedDto.fromJson(const {
-    'analysisId': 15901,
-    'drawingSessionId': 481,
-    'analysisType': 'FINAL',
-    'analysisStatus': 'PENDING',
+    ObjectDetectionRequestDto request,
+  ) async => ObjectDetectionResponseDto.fromJson({
+    'drawingAnalysisId': 15901,
+    'drawingSessionId': sessionId,
+    'drawingAssetId': request.drawingAssetId,
+    'requestId': '550e8400-e29b-41d4-a716-446655440000',
+    'analysisType': 'OBJECT_DETECTION',
+    'status': 'SUCCEEDED',
+    'model': {'name': 'dodam-detector', 'version': '1.0'},
+    'detections': const [
+      {
+        'label': 'HOUSE',
+        'confidence': 0.94,
+        'boundingBox': {'x': 120.0, 'y': 80.0, 'width': 320.0, 'height': 280.0},
+      },
+    ],
     'requestedAt': '2026-07-21T09:41:12Z',
+    'processedAt': '2026-07-21T09:41:13Z',
   });
 }

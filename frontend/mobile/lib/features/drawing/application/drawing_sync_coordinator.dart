@@ -233,6 +233,7 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
   Future<BinaryUploadDto?> Function()? _snapshotProvider;
   BinaryUploadDto? _lastDraft;
   DraftCanvasStateDto? _lastDraftCanvasState;
+  DraftSaveResponseDto? _latestDraftResponse;
   DrawingSaveStatus _draftStatus = DrawingSaveStatus.localOnly;
 
   int get elapsedMilliseconds => journal.elapsedMilliseconds;
@@ -283,28 +284,33 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
 
   Future<void> flushEvents() => batchQueue.flush();
 
-  Future<void> saveDraftNow() async {
+  Future<DraftSaveResponseDto?> saveDraftNow() async {
     if (sessionId == null || repository == null || _snapshotProvider == null) {
-      return;
+      return null;
     }
-    if (journal.events.isEmpty) return;
+    if (journal.events.isEmpty) return null;
+    final lastEventSequence = journal.lastEventSequence;
+    // 같은 그림 상태가 이미 저장됐다면 기존 자산을 재사용한다.
+    if (_latestDraftResponse?.lastEventSequence == lastEventSequence) {
+      return _latestDraftResponse;
+    }
     BinaryUploadDto? image;
     try {
       image = await _snapshotProvider!();
     } on Object {
       _draftStatus = DrawingSaveStatus.failed;
       notifyListeners();
-      return;
+      return null;
     }
-    if (image == null) return;
+    if (image == null) return null;
     _lastDraft = image;
     _lastDraftCanvasState = DraftCanvasStateDto(
-      lastEventSequence: journal.lastEventSequence,
+      lastEventSequence: lastEventSequence,
       toolState: null,
       viewport: null,
       clientSavedAt: DateTime.now().toUtc().toIso8601String(),
     );
-    await _uploadLastDraft();
+    return _uploadLastDraft();
   }
 
   Future<void> retry() async {
@@ -314,26 +320,33 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
     }
   }
 
-  Future<void> _uploadLastDraft() async {
+  Future<DraftSaveResponseDto?> _uploadLastDraft() async {
     final image = _lastDraft;
     final canvasState = _lastDraftCanvasState;
     if (image == null ||
         canvasState == null ||
         sessionId == null ||
         repository == null) {
-      return;
+      return null;
     }
     _draftStatus = DrawingSaveStatus.saving;
     notifyListeners();
+    // Draft v1.0은 획 묶음 순서 복원 계약과 독립적으로 저장한다.
     try {
-      await repository!.saveDraft(sessionId!, image, canvasState);
+      final response = await repository!.saveDraft(
+        sessionId!,
+        image,
+        canvasState,
+      );
+      _latestDraftResponse = response;
       _draftStatus = DrawingSaveStatus.saved;
+      notifyListeners();
+      return response;
     } on Object {
       _draftStatus = DrawingSaveStatus.failed;
+      notifyListeners();
+      return null;
     }
-    notifyListeners();
-    // Draft v1.0 has no batchSequence resume contract. The batch queue therefore
-    // starts independently until the server defines a safe resume source.
   }
 
   void _notifyFromQueue() => notifyListeners();

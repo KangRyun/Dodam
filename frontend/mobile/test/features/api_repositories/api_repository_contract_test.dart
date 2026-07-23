@@ -113,7 +113,7 @@ void main() {
       expect((json['events'] as List).first, isNot(contains('pressure')));
     });
 
-    test('parses draft recovery and analysis accepted responses', () {
+    test('parses draft recovery and object detection responses', () {
       final draft = DraftRecoveryDto.fromJson(const {
         'previewUrl': 'https://example.com/draft.png',
         'canvasState': {
@@ -124,17 +124,29 @@ void main() {
         },
         'assetVersion': 3,
       });
-      final accepted = AnalysisAcceptedDto.fromJson(const {
-        'analysisId': 15901,
+      final detection = ObjectDetectionResponseDto.fromJson(const {
+        'drawingAnalysisId': 15901,
         'drawingSessionId': 481,
-        'analysisType': 'FINAL',
-        'analysisStatus': 'PENDING',
+        'drawingAssetId': 120,
+        'requestId': '550e8400-e29b-41d4-a716-446655440000',
+        'analysisType': 'OBJECT_DETECTION',
+        'status': 'SUCCEEDED',
+        'model': {'name': 'dodam-detector', 'version': '1.0'},
+        'detections': [
+          {
+            'label': 'HOUSE',
+            'confidence': 0.94,
+            'boundingBox': {'x': 10, 'y': 20, 'width': 30, 'height': 40},
+          },
+        ],
         'requestedAt': '2026-07-21T09:41:12Z',
+        'processedAt': '2026-07-21T09:41:13Z',
       });
       expect(draft.previewUrl, 'https://example.com/draft.png');
       expect(draft.canvasState.lastEventSequence, 1105);
       expect(draft.assetVersion, 3);
-      expect(accepted.analysisStatus, 'PENDING');
+      expect(detection.drawingAssetId, 120);
+      expect(detection.detections.single.label, 'HOUSE');
     });
   });
 
