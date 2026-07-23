@@ -128,6 +128,7 @@ class ObservationReportPersistenceServiceTest {
     assertThat(report.getStatus()).isEqualTo(ReportStatus.COMPLETED);
     assertThat(report.isExpertReviewRecommended()).isFalse();
     assertThat(report.getLimitationsText()).isEqualTo("한계 문구");
+    verify(analysis.getDrawingSession()).completeReporting(LocalDateTime.now(CLOCK));
 
     verify(observationResultRepository).save(observationCaptor.capture());
     assertThat(observationCaptor.getValue().getDisclaimerText()).isEqualTo(DISCLAIMER);
@@ -261,6 +262,7 @@ class ObservationReportPersistenceServiceTest {
     assertThat(analysis.getState()).isEqualTo(DrawingAnalysisState.FAILED);
     assertThat(analysis.getErrorCode()).isEqualTo("TIMEOUT");
     assertThat(report.getStatus()).isEqualTo(ReportStatus.FAILED);
+    verify(analysis.getDrawingSession()).failReporting();
   }
 
   @Test

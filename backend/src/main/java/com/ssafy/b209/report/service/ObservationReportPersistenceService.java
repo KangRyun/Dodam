@@ -50,7 +50,7 @@ import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 관찰 리포트 생성 결과를 정규화 테이블에 저장하고 분석·리포트 상태를 전이한다.
+ * 관찰 리포트 생성 결과를 정규화 테이블에 저장하고 분석·리포트·그림 활동 세션 상태를 전이한다.
  *
  * <p>AI Client 호출은 이 클래스 밖에서 수행하며, 저장은 하나의 Transaction에서 전부 반영하거나 실패 시 전체 Rollback한다. 이미 완료된 대상은
  * 재생성 없이 종료해 멱등성을 보장한다.
@@ -206,11 +206,12 @@ public class ObservationReportPersistenceService {
   }
 
   /**
-   * 검증된 관찰 결과를 정규화 테이블에 저장하고 분석과 리포트를 완료 상태로 전이한다.
+   * 검증된 관찰 결과를 정규화 테이블에 저장하고 분석·리포트·그림 활동 세션을 완료 상태로 전이한다.
    *
    * @param context 생성 맥락
    * @param result AI Client가 반환한 관찰 리포트 결과
    * @throws BusinessException 대상이 사라졌거나 저장 충돌이 발생한 경우
+   * @throws IllegalStateException 그림 활동 세션이 REPORTING 중인 진행 상태가 아닌 경우
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public void complete(ObservationGenerationContext context, ObservationGenerationResult result) {
@@ -295,6 +296,7 @@ public class ObservationReportPersistenceService {
       saveGuardianQuestions(report, safeList(result.guardianQuestions()));
 
       report.complete(draft.expertReviewRequired(), result.limitationsText(), now);
+      analysis.getDrawingSession().completeReporting(now);
     } catch (DataIntegrityViolationException exception) {
       throw new BusinessException(
           MockObservationReportErrorCode.REPORT_STORAGE_CONFLICT, exception);
@@ -316,7 +318,11 @@ public class ObservationReportPersistenceService {
     analysisRepository
         .findByIdForUpdate(analysisId)
         .filter(DrawingAnalysis::isPending)
-        .ifPresent(analysis -> analysis.failFinal(failureCode, failureMessage, now));
+        .ifPresent(
+            analysis -> {
+              analysis.failFinal(failureCode, failureMessage, now);
+              analysis.getDrawingSession().failReporting();
+            });
     if (reportId != null) {
       reportRepository
           .findByIdForUpdate(reportId)

@@ -204,6 +204,43 @@ public class DrawingSession {
   }
 
   /**
+   * 최종 분석과 리포트 저장이 성공한 활동을 완료 상태로 전이한다.
+   *
+   * <p>리포트 결과 저장 Transaction 안에서 호출해 분석·리포트·세션 상태가 함께 반영되도록 한다.
+   *
+   * @param completedAt 서버가 결정한 UTC 기준 완료 시각
+   * @throws NullPointerException {@code completedAt}이 {@code null}인 경우
+   * @throws IllegalStateException 삭제됐거나 REPORTING 중인 진행 세션이 아닌 경우
+   */
+  public void completeReporting(LocalDateTime completedAt) {
+    Objects.requireNonNull(completedAt, "completedAt must not be null");
+    if (deletedAt != null
+        || sessionStatus != DrawingSessionStatus.IN_PROGRESS
+        || currentStage != DrawingStage.REPORTING) {
+      throw new IllegalStateException("리포트 생성 중인 세션만 완료할 수 있습니다.");
+    }
+    sessionStatus = DrawingSessionStatus.COMPLETED;
+    currentStage = DrawingStage.COMPLETED;
+    this.completedAt = completedAt;
+  }
+
+  /**
+   * 최종 분석 또는 리포트 생성에 실패한 활동을 실패 상태로 전이한다.
+   *
+   * <p>완료 시각은 기록하지 않고 REPORTING 단계를 유지해 실패 지점을 나타낸다. 세션 상태가 {@link DrawingSessionStatus#FAILED}로
+   * 바뀌므로 새 활동의 진행 중 중복 검사에서는 제외된다.
+   *
+   * @throws IllegalStateException REPORTING 중인 진행 세션이 아닌 경우
+   */
+  public void failReporting() {
+    if (sessionStatus != DrawingSessionStatus.IN_PROGRESS
+        || currentStage != DrawingStage.REPORTING) {
+      throw new IllegalStateException("리포트 생성 중인 세션만 실패 처리할 수 있습니다.");
+    }
+    sessionStatus = DrawingSessionStatus.FAILED;
+  }
+
+  /**
    * 그림 활동 세션 식별자를 반환한다.
    *
    * @return 영속화된 세션 식별자
