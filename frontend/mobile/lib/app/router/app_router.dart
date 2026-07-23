@@ -7,6 +7,7 @@ import '../../features/auth/auth.dart';
 import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
 import '../../features/drawing/data/dto/drawing_dtos.dart';
 import '../../features/drawing/domain/repositories/drawing_repository.dart';
+import '../../features/conversation/conversation.dart';
 import '../../features/guardian/presentation/screens/guardian_screens.dart';
 import '../../features/history/presentation/screens/history_screens.dart';
 import '../../features/report/presentation/screens/report_screen.dart';
@@ -27,6 +28,9 @@ abstract final class AppRouter {
     DrawingRepository? drawingRepository,
     ReportRepository? reportRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
+    ConversationRepository? conversationRepository,
+    int? conversationId,
+    int? basisAnalysisId,
   }) {
     final location = settings.name ?? AppRoutes.guardianHome;
     final segments = Uri.tryParse(location)?.pathSegments ?? const <String>[];
@@ -93,6 +97,9 @@ abstract final class AppRouter {
           completionSnapshotProvider:
               (settings.arguments! as DrawingRouteArguments)
                   .completionSnapshotProvider,
+          conversationRepository: conversationRepository,
+          conversationId: conversationId,
+          basisAnalysisId: basisAnalysisId,
         ),
       ['child', final childId, 'activity', 'emotions']
           when _hasChildContext(childController, childId) =>

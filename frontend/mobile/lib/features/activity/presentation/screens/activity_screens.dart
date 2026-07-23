@@ -13,6 +13,7 @@ import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
+import '../../../conversation/conversation.dart';
 
 String _createIdempotencyKey() {
   final random = Random.secure();
@@ -38,6 +39,9 @@ class DrawingScreen extends StatefulWidget {
     this.draftImageProviderFactory,
     this.completionSnapshotProvider,
     this.idempotencyKeyProvider,
+    this.conversationRepository,
+    this.conversationId,
+    this.basisAnalysisId,
     super.key,
   });
 
@@ -50,6 +54,9 @@ class DrawingScreen extends StatefulWidget {
   final DraftImageProviderFactory? draftImageProviderFactory;
   final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
   final String Function()? idempotencyKeyProvider;
+  final ConversationRepository? conversationRepository;
+  final int? conversationId;
+  final int? basisAnalysisId;
 
   @override
   State<DrawingScreen> createState() => _DrawingScreenState();
@@ -74,6 +81,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   String? _pendingCompletionKey;
   BinaryUploadDto? _pendingCompletionImage;
   DrawingCompleteMetadataDto? _pendingCompletionMetadata;
+  AiQuestionController? _questionController;
 
   @override
   void initState() {
@@ -97,6 +105,16 @@ class _DrawingScreenState extends State<DrawingScreen> {
           imageProviderFactory: widget.draftImageProviderFactory,
         );
     _draftRestoreController.addListener(_handleDraftRestoreChanged);
+    final conversationRepository = widget.conversationRepository;
+    final conversationId = widget.conversationId;
+    // 대화 컨텍스트가 있는 활동에서만 질문 조회 시작
+    if (conversationRepository != null && conversationId != null) {
+      _questionController = AiQuestionController(
+        conversationRepository,
+        conversationId: conversationId,
+        basisAnalysisId: widget.basisAnalysisId,
+      );
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _syncCoordinator.start(snapshotProvider: _captureCanvasSnapshot);
@@ -111,6 +129,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     _draftRestoreController.removeListener(_handleDraftRestoreChanged);
     if (_ownsDraftRestoreController) _draftRestoreController.dispose();
     if (_ownsSyncCoordinator) _syncCoordinator.dispose();
+    _questionController?.dispose();
     super.dispose();
   }
 
@@ -345,6 +364,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
             onComplete: () => unawaited(_confirmAndComplete()),
             saveStatus: _syncCoordinator.saveStatus,
             onRetrySave: () => unawaited(_syncCoordinator.retry()),
+            questionController: _questionController,
           );
           if (constraints.maxWidth >= 900) {
             return Padding(
@@ -560,6 +580,7 @@ class _DrawingSidePanel extends StatelessWidget {
     required this.onComplete,
     required this.saveStatus,
     required this.onRetrySave,
+    this.questionController,
   });
 
   final Color selectedColor;
@@ -571,6 +592,7 @@ class _DrawingSidePanel extends StatelessWidget {
   final VoidCallback onComplete;
   final DrawingSaveStatus saveStatus;
   final VoidCallback onRetrySave;
+  final AiQuestionController? questionController;
 
   static const _colors = <(String, Color)>[
     ('검정', AppColors.drawingInk),
@@ -653,18 +675,21 @@ class _DrawingSidePanel extends StatelessWidget {
             onSelectionChanged: (values) => onThicknessChanged(values.first),
           ),
           const SizedBox(height: AppSpacing.lg),
-          Container(
-            padding: const EdgeInsets.all(AppSpacing.md),
-            decoration: BoxDecoration(
-              color: AppColors.lavenderSoft,
-              borderRadius: BorderRadius.circular(AppRadius.md),
+          if (questionController case final controller?)
+            AiQuestionLoadPanel(controller: controller)
+          else
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.md),
+              decoration: BoxDecoration(
+                color: AppColors.lavenderSoft,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+              ),
+              child: const Text(
+                '대화를 준비하고 있어요.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: AppColors.inkMuted, fontSize: 16),
+              ),
             ),
-            child: const Text(
-              '대화와 마이크는 다음 단계에서 만나요.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.inkMuted, fontSize: 16),
-            ),
-          ),
           const SizedBox(height: AppSpacing.lg),
           _SaveStatusIndicator(status: saveStatus, onRetry: onRetrySave),
           const SizedBox(height: AppSpacing.sm),

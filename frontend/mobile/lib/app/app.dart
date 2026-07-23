@@ -9,6 +9,7 @@ import '../features/child/domain/repositories/child_repository.dart';
 import '../features/drawing/data/dto/drawing_dtos.dart';
 import '../features/drawing/data/repositories/mock_drawing_repository.dart';
 import '../features/drawing/domain/repositories/drawing_repository.dart';
+import '../features/conversation/conversation.dart';
 import '../features/report/data/repositories/mock_report_repository.dart';
 import '../features/report/domain/repositories/report_repository.dart';
 import 'router/app_router.dart';
@@ -23,6 +24,9 @@ class DodamApp extends StatefulWidget {
     this.reportRepository = const MockReportRepository(),
     this.drawingCompletionSnapshotProvider,
     this.authSessionStore,
+    this.conversationRepository = const MockConversationRepository(),
+    this.conversationId = 8001,
+    this.basisAnalysisId = 7001,
     this.initialRoute = AppRoutes.guardianHome,
     super.key,
   });
@@ -33,6 +37,9 @@ class DodamApp extends StatefulWidget {
   final ReportRepository reportRepository;
   final Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider;
   final AuthSessionStore? authSessionStore;
+  final ConversationRepository? conversationRepository;
+  final int? conversationId;
+  final int? basisAnalysisId;
   final String initialRoute;
 
   @override
@@ -135,6 +142,9 @@ class _DodamAppState extends State<DodamApp> {
       reportRepository: widget.reportRepository,
       drawingCompletionSnapshotProvider:
           widget.drawingCompletionSnapshotProvider,
+      conversationRepository: widget.conversationRepository,
+      conversationId: widget.conversationId,
+      basisAnalysisId: widget.basisAnalysisId,
     ),
   );
 }
