@@ -236,9 +236,13 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final valid = _questionSelectionController.select(question, optionId);
     final controller = _answerSubmissionController;
     if (!valid || controller == null) return;
+    // BE 답변 계약이 선택 시점 스냅샷(type·value·label)을 요구해 객체째 전달
+    final option = question.options.firstWhere(
+      (candidate) => candidate.optionId == optionId,
+    );
     final submitted = await controller.submit(
       questionMessageId: question.messageId,
-      optionId: optionId,
+      option: option,
     );
     if (submitted) _questionDisplayController.dismiss();
   }

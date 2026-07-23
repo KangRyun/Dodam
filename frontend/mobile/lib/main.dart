@@ -5,6 +5,7 @@ import 'app/router/app_routes.dart';
 import 'core/network/network.dart';
 import 'features/auth/auth.dart';
 import 'features/child/data/repositories/remote_child_repository.dart';
+import 'features/conversation/data/repositories/remote_conversation_answer_repository.dart';
 import 'features/conversation/data/repositories/remote_conversation_repository.dart';
 import 'features/drawing/data/repositories/remote_drawing_repository.dart';
 
@@ -40,6 +41,7 @@ DodamApp createDefaultApp({
     authRepository: authRepository,
     childRepository: RemoteChildRepository(apiClient),
     conversationRepository: RemoteConversationRepository(apiClient),
+    conversationAnswerRepository: RemoteConversationAnswerRepository(apiClient),
     drawingRepository: RemoteDrawingRepository(apiClient),
     initialRoute: AppRoutes.authBootstrap,
   );
