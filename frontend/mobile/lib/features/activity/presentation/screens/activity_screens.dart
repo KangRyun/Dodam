@@ -82,6 +82,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
   BinaryUploadDto? _pendingCompletionImage;
   DrawingCompleteMetadataDto? _pendingCompletionMetadata;
   AiQuestionController? _questionController;
+  int? _visibleQuestionMessageId;
+  bool _questionDismissed = false;
 
   @override
   void initState() {
@@ -114,6 +116,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
         conversationId: conversationId,
         basisAnalysisId: widget.basisAnalysisId,
       );
+      _questionController!.addListener(_handleQuestionChanged);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -129,6 +132,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     _draftRestoreController.removeListener(_handleDraftRestoreChanged);
     if (_ownsDraftRestoreController) _draftRestoreController.dispose();
     if (_ownsSyncCoordinator) _syncCoordinator.dispose();
+    _questionController?.removeListener(_handleQuestionChanged);
     _questionController?.dispose();
     super.dispose();
   }
@@ -141,10 +145,31 @@ class _DrawingScreenState extends State<DrawingScreen> {
     if (mounted) setState(() {});
   }
 
+  void _handleQuestionChanged() {
+    final question = _questionController?.question;
+    if (!mounted ||
+        _questionController?.status != AiQuestionStatus.success ||
+        question == null ||
+        question.messageId == _visibleQuestionMessageId) {
+      return;
+    }
+    // 하위 상태 UI의 빌드 중 알림과 겹치지 않도록 다음 프레임에 반영
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || question.messageId == _visibleQuestionMessageId) return;
+      setState(() {
+        // 새로운 질문 응답이 도착한 경우에만 캐릭터와 말풍선 노출
+        _visibleQuestionMessageId = question.messageId;
+        _questionDismissed = false;
+      });
+    });
+  }
+
   void _startStroke(PointerDownEvent event) {
     if (_activePointer != null) return;
     _invalidatePendingCompletion();
     setState(() {
+      // 그림 입력이 시작되면 질문 오버레이 숨김
+      _questionDismissed = true;
       _activePointer = event.pointer;
       _activeStroke = DrawingStroke(
         points: [_pointFrom(event)],
@@ -350,6 +375,11 @@ class _DrawingScreenState extends State<DrawingScreen> {
             onStartNew: _draftRestoreController.startNewDrawing,
             onRetryQuery: () => unawaited(_draftRestoreController.load()),
             onRetryImage: _draftRestoreController.retryImage,
+            question: _questionController?.question,
+            showQuestion:
+                _questionController?.status == AiQuestionStatus.success &&
+                !_questionDismissed &&
+                _draftRestoreController.canDraw,
           );
           final sidePanel = _DrawingSidePanel(
             selectedColor: _color,
@@ -410,6 +440,8 @@ class _CanvasPanel extends StatelessWidget {
     required this.onStartNew,
     required this.onRetryQuery,
     required this.onRetryImage,
+    required this.question,
+    required this.showQuestion,
   });
 
   final GlobalKey repaintBoundaryKey;
@@ -426,6 +458,8 @@ class _CanvasPanel extends StatelessWidget {
   final VoidCallback onStartNew;
   final VoidCallback onRetryQuery;
   final VoidCallback onRetryImage;
+  final AiQuestion? question;
+  final bool showQuestion;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -457,6 +491,7 @@ class _CanvasPanel extends StatelessWidget {
             onBackgroundError: onBackgroundError,
           ),
         ),
+        AiQuestionBubbleOverlay(question: question, visible: showQuestion),
         if (!inputEnabled)
           _DraftRestoreOverlay(
             status: restoreStatus,
