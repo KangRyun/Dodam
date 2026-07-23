@@ -33,7 +33,7 @@
 - Consumes: Flutter project metadata and Android application configuration
 - Produces: Android·iOS identifier contract fixed to `com.dodam.app`
 
-- [ ] **Step 1: 플랫폼 계약 실패 테스트 작성**
+- [x] **Step 1: 플랫폼 계약 실패 테스트 작성**
 
 ```dart
 import 'dart:io';
@@ -56,7 +56,7 @@ void main() {
 }
 ```
 
-- [ ] **Step 2: 테스트가 iOS 프로젝트 부재로 실패하는지 확인**
+- [x] **Step 2: 테스트가 iOS 프로젝트 부재로 실패하는지 확인**
 
 Run:
 
@@ -67,7 +67,7 @@ C:\src\flutter\bin\flutter.bat test test/platform/oauth_native_config_test.dart
 
 Expected: `ios/Runner.xcodeproj/project.pbxproj` 파일을 찾을 수 없어 실패한다.
 
-- [ ] **Step 3: Flutter iOS 플랫폼 생성**
+- [x] **Step 3: Flutter iOS 플랫폼 생성**
 
 Run:
 
@@ -78,7 +78,7 @@ C:\src\flutter\bin\flutter.bat create --platforms=ios --org com.dodam .
 
 생성 후 `git diff`를 확인해 기존 `lib/`, `test/`, Android 설정이 덮어써지지 않았는지 검증한다. 생성기가 기존 관리 파일을 변경하면 iOS 플랫폼 등록에 필요한 변경만 유지한다.
 
-- [ ] **Step 4: iOS Bundle ID와 Deployment Target 확정**
+- [x] **Step 4: iOS Bundle ID와 Deployment Target 확정**
 
 `ios/Runner.xcodeproj/project.pbxproj`의 Runner Target Debug·Profile·Release 설정을 다음 값으로 통일한다.
 
@@ -93,7 +93,7 @@ RunnerTests Target은 다음 값을 사용한다.
 PRODUCT_BUNDLE_IDENTIFIER = com.dodam.app.RunnerTests;
 ```
 
-- [ ] **Step 5: Android Package 이동과 설정 확인**
+- [x] **Step 5: Android Package 이동과 설정 확인**
 
 `MainActivity.kt`는 다음 내용으로 유지한다.
 
@@ -105,7 +105,7 @@ import io.flutter.embedding.android.FlutterActivity
 class MainActivity : FlutterActivity()
 ```
 
-- [ ] **Step 6: 플랫폼 식별자 테스트 통과 확인**
+- [x] **Step 6: 플랫폼 식별자 테스트 통과 확인**
 
 Run:
 
