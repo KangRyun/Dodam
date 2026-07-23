@@ -5,6 +5,7 @@ GMS = SSAFY의 OpenAI 호환 게이트웨이. 키는 절대 코드/로그에 남
 """
 
 import os
+from pathlib import Path
 
 from dotenv import find_dotenv, load_dotenv
 
@@ -27,6 +28,20 @@ TTS_VOICE = os.environ.get("TTS_VOICE", "fable")  # fable=만화적·개성 / no
 
 # 파이프라인 버전(분석 결과에 기록 → 재현·재분석용). 프롬프트 버전은 프롬프트 파일 쪽에서 관리.
 PIPELINE_VERSION = "0.1.0"
+
+# ── 그림분석: YOLO 객체탐지 + VLM 서술 (S15P11B209-176) ──────────
+# VLM(그림 서술)도 GMS(OpenAI 호환) 비전 모델을 쓴다 — gpt-4o-mini는 이미지 입력 지원.
+VLM_MODEL = os.environ.get("VLM_MODEL", "gpt-4o-mini")
+
+# YOLO HTP 가중치 경로. 가중치는 저장소에 커밋하지 않고 별도 다운로드/학습으로 준비된다.
+#   기본은 ai/models/htp_yolo/htp_best.pt. 다른 환경에선 YOLO_MODEL_PATH로 덮어쓴다.
+YOLO_MODEL_PATH = os.environ.get(
+    "YOLO_MODEL_PATH",
+    str(Path(__file__).parent / "models" / "htp_yolo" / "htp_best.pt"),
+)
+
+# 탐지 신뢰도 하한 — 이보다 낮은 박스는 버린다(아동 스케치 과탐지 억제).
+YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.25"))
 
 # ── BE 내부 계약(183): 대화 질문 생성 ───────────────────────────
 # BE ↔ AI 내부 호출 인증 토큰. BE도 같은 이름(AI_INTERNAL_TOKEN)의 환경변수를 쓴다
