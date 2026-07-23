@@ -20,6 +20,24 @@ spring:
 server:
   port: 8080
 
+# 모니터링(actuator/micrometer) — 관리 엔드포인트는 앱 포트(8080)와 분리
+management:
+  server:
+    # 관리 포트 분리: nginx는 8080만 프록시하므로 actuator 외부 노출 경로가 구조적으로 0
+    port: 9404
+  endpoints:
+    web:
+      exposure:
+        # health(프로브용)·prometheus(메트릭 수집)만 노출, 그 외 엔드포인트는 비공개
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        # k8s liveness/readiness 프로브 전환 대비 (/actuator/health/liveness, /readiness)
+        enabled: true
+      # 내부 상태 상세(DB/Redis 등) 비노출 — 아동 서비스 가드레일
+      show-details: never
+
 app:
   auth:
     filter:
