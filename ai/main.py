@@ -22,6 +22,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, File, Header, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
 
 import config
@@ -57,6 +58,17 @@ async def _lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="도담 AI 분석 서버", version="0.1.0", lifespan=_lifespan)
+
+# ── 관측: Prometheus 메트릭 노출 (S15P11B209-351) ─────────────────
+#   reason: GMS(LLM/STT/TTS) 호출 지연·에러율을 관측해 모니터링 사각지대를 없앤다.
+#     Day2 Prometheus가 내부망에서 ai:8000/metrics 를 스크레이프한다.
+#     외부 노출은 nginx가 /ai/metrics 를 404로 차단(infra/nginx/conf.d/default.conf).
+#   ⚠️ 기본 설정 유지 — 라벨은 라우트 '템플릿 경로'(예: /analyze/conversation, 고정 문자열)만
+#     쓰고 요청 본문·쿼리 값은 넣지 않는다. 아동 발화 텍스트가 메트릭에 실릴 경로를 원천 차단(가드레일).
+#     경로 파라미터가 있는 라우트가 없어 카디널리티도 유계 — 커스텀 라벨을 추가하지 않는다.
+#   기동 순서: 미들웨어 등록(instrument)은 uvicorn 기동 전 import 시점에 끝나야 하므로 모듈 로드
+#     시점인 여기에 둔다. lifespan(_lifespan)은 기동 시 내부 토큰 설정만 검증 — 이 배선과 순서 충돌 없음.
+Instrumentator().instrument(app).expose(app, endpoint="/metrics", include_in_schema=False)
 
 
 @app.exception_handler(RequestValidationError)
