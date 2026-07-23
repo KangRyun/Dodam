@@ -553,6 +553,10 @@ Google 요청:
 
 실제 Provider 설정과 JWT Secret은 `.env` 또는 배포 Secret으로 관리하며 Git에 커밋하지 않습니다.
 
+## 회원 탈퇴 API
+
+`DELETE /api/v1/users/me`는 Access Token으로 식별한 사용자 계정을 즉시 hard delete합니다. 요청 Body의 `confirmation`은 정확히 `DELETE`여야 하며 비밀번호는 받지 않습니다. 인증 계정과 사용자 설정은 DB FK 정책으로 함께 삭제되고, 감사·활동 기록의 사용자 참조는 `null`로 비식별화됩니다. 아동과 활동 데이터 자체의 삭제는 별도 API 정책으로 처리합니다.
+
 ## 최초 동의 등록 API
 
 `POST /api/v1/consents`는 Access Token의 사용자를 동의 처리자로 사용해 사용자 또는 연결 아동의 약관별 `AGREE`·`WITHDRAW` 행위를 저장합니다. 사용자 대상 약관만 등록하면 `childId`를 생략하고, 아동 대상 약관에는 연결된 아동의 `childId`를 전달합니다.
