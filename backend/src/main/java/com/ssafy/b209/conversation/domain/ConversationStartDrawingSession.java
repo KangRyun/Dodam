@@ -53,6 +53,20 @@ public class ConversationStartDrawingSession {
     currentStage = DrawingStage.CONVERSING;
   }
 
+  /** 아동이 질문을 건너뛰고 계속 그리기를 선택하면 그림 활동 화면 단계를 그리기로 되돌린다. */
+  public void moveToDrawing() {
+    currentStage = DrawingStage.DRAWING;
+  }
+
+  /**
+   * 현재 그림 활동 화면 단계를 반환한다.
+   *
+   * @return DB v1.2 그림 활동 단계
+   */
+  public DrawingStage getCurrentStage() {
+    return currentStage;
+  }
+
   /**
    * @return 그림 활동 세션 식별자
    */
