@@ -35,6 +35,12 @@ public class DrawingSession {
   @Column(name = "started_by_user_id")
   private Long startedByUserId;
 
+  @Column(name = "title", length = 200)
+  private String title;
+
+  @Column(name = "expressed_emotion_text", columnDefinition = "TEXT")
+  private String expressedEmotionText;
+
   @Enumerated(EnumType.STRING)
   @Column(name = "input_method", nullable = false)
   private DrawingInputMethod inputMethod;
@@ -71,6 +77,8 @@ public class DrawingSession {
     this.child = child;
     this.drawingType = drawingType;
     this.startedByUserId = null;
+    this.title = null;
+    this.expressedEmotionText = null;
     this.inputMethod = inputMethod;
     this.sessionStatus = DrawingSessionStatus.IN_PROGRESS;
     this.currentStage = DrawingStage.DRAWING;
@@ -145,6 +153,32 @@ public class DrawingSession {
   }
 
   /**
+   * 현재 세션이 감정 표현을 최초 저장하거나 수정할 수 있는지 확인한다.
+   *
+   * @return 삭제되지 않은 진행 중 CONVERSING 또는 REFLECTION 단계이면 {@code true}
+   */
+  public boolean canSaveReflection() {
+    return deletedAt == null
+        && sessionStatus == DrawingSessionStatus.IN_PROGRESS
+        && (currentStage == DrawingStage.CONVERSING || currentStage == DrawingStage.REFLECTION);
+  }
+
+  /**
+   * 그림 활동의 제목과 직접 표현을 저장하고 감정 돌아보기 단계로 전이한다.
+   *
+   * @param title 정규화된 그림 제목
+   * @param expressedEmotionText 정규화된 아동의 직접 감정 표현
+   */
+  public void saveReflection(String title, String expressedEmotionText) {
+    if (!canSaveReflection()) {
+      throw new IllegalStateException("현재 단계에서는 감정 회고를 저장할 수 없습니다.");
+    }
+    this.title = title;
+    this.expressedEmotionText = expressedEmotionText;
+    this.currentStage = DrawingStage.REFLECTION;
+  }
+
+  /**
    * 그림 활동 세션 식별자를 반환한다.
    *
    * @return 영속화된 세션 식별자
@@ -178,6 +212,24 @@ public class DrawingSession {
    */
   public Long getStartedByUserId() {
     return startedByUserId;
+  }
+
+  /**
+   * 그림 활동 제목을 반환한다.
+   *
+   * @return 제목을 작성하지 않았으면 {@code null}
+   */
+  public String getTitle() {
+    return title;
+  }
+
+  /**
+   * 아동이 직접 표현한 감정 내용을 반환한다.
+   *
+   * @return 직접 표현을 작성하지 않았으면 {@code null}
+   */
+  public String getExpressedEmotionText() {
+    return expressedEmotionText;
   }
 
   /**
