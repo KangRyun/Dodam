@@ -1,9 +1,12 @@
 package com.ssafy.b209.consent.controller;
 
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
+import com.ssafy.b209.consent.domain.ConsentTargetScope;
 import com.ssafy.b209.consent.dto.request.CreateConsentRequest;
 import com.ssafy.b209.consent.dto.response.ConsentRegistrationResponse;
+import com.ssafy.b209.consent.dto.response.ConsentTermResponse;
 import com.ssafy.b209.consent.service.ConsentRegistrationService;
+import com.ssafy.b209.consent.service.ConsentTermQueryService;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.ApiResponse;
 import com.ssafy.b209.global.response.CommonSuccessCode;
@@ -14,12 +17,15 @@ import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
+import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /** 인증 사용자 또는 연결 아동의 최초 약관 동의 이력을 등록하는 HTTP API를 제공한다. */
@@ -33,18 +39,55 @@ public class ConsentController {
 
   private final CurrentAuthenticatedUserResolver currentUserResolver;
   private final ConsentRegistrationService registrationService;
+  private final ConsentTermQueryService termQueryService;
 
   /**
-   * 동의 등록 Controller를 구성한다.
+   * 동의 등록·약관 조회 Controller를 구성한다.
    *
    * @param currentUserResolver Access Token 사용자 식별 경계
    * @param registrationService 최초 동의 검증·저장 Service
+   * @param termQueryService 현재 적용 약관 조회 Service
    */
   public ConsentController(
       CurrentAuthenticatedUserResolver currentUserResolver,
-      ConsentRegistrationService registrationService) {
+      ConsentRegistrationService registrationService,
+      ConsentTermQueryService termQueryService) {
     this.currentUserResolver = currentUserResolver;
     this.registrationService = registrationService;
+    this.termQueryService = termQueryService;
+  }
+
+  /**
+   * 현재 시행 중인 활성 약관 목록을 조회한다.
+   *
+   * <p>로그인 사용자에게 동일한 약관 목록을 제공하며 적용 범위와 버전으로 결과를 좁힐 수 있다.
+   *
+   * @param targetScope 적용 범위 필터, 전체 범위면 {@code null}
+   * @param version 버전 필터, 전체 버전이면 {@code null}
+   * @return HTTP 200과 현재 적용 약관 목록 공통 응답
+   */
+  @Operation(
+      summary = "활성 약관 목록 조회",
+      description = "로그인 사용자에게 현재 시행 중인 활성 약관 목록을 제공합니다. targetScope와 version으로 좁힐 수 있습니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "활성 약관 목록 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "Query 값 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 실패",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping("/terms")
+  public ResponseEntity<ApiResponse<List<ConsentTermResponse>>> getActiveTerms(
+      @RequestParam(value = "targetScope", required = false) ConsentTargetScope targetScope,
+      @RequestParam(value = "version", required = false) String version) {
+    currentUserResolver.requireUserId();
+    return ResponseEntity.ok(ApiResponse.ok(termQueryService.getActiveTerms(targetScope, version)));
   }
 
   /**

@@ -136,6 +136,51 @@ public class ConsentTerm {
   }
 
   /**
+   * 기능에서 약관을 식별하는 안정적인 코드를 반환한다.
+   *
+   * @return 약관 코드
+   */
+  public String getTermCode() {
+    return termCode;
+  }
+
+  /**
+   * 변경 불가능한 약관 버전을 반환한다.
+   *
+   * @return 약관 버전
+   */
+  public String getVersion() {
+    return version;
+  }
+
+  /**
+   * 사용자에게 표시할 약관 제목을 반환한다.
+   *
+   * @return 약관 제목
+   */
+  public String getTitle() {
+    return title;
+  }
+
+  /**
+   * 약관 원문 URL을 반환한다.
+   *
+   * @return 약관 원문 URL 또는 {@code null}
+   */
+  public String getContentUrl() {
+    return contentUrl;
+  }
+
+  /**
+   * 약관 시행 시각을 반환한다.
+   *
+   * @return 약관 시행 시각
+   */
+  public LocalDateTime getEffectiveAt() {
+    return effectiveAt;
+  }
+
+  /**
    * 지정 시각에 신규 동의를 받을 수 있는 버전인지 확인한다.
    *
    * @param now 서버가 판정한 현재 시각
