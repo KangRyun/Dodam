@@ -23,4 +23,6 @@ abstract final class AppSizes {
   static const double stateIcon = 64;
   static const double loadingIndicator = 48;
   static const double contentMaxWidth = 720;
+  static const double wideContentMaxWidth = 1120;
+  static const double childAvatar = 72;
 }

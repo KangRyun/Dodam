@@ -1,21 +1,33 @@
+import '../../../../core/network/auth/access_token_provider.dart';
+import '../../../../core/network/auth/token_refresher.dart';
 import '../../domain/entities/auth_session.dart';
 import '../../domain/entities/auth_tokens.dart';
 import '../../domain/entities/authenticated_user.dart';
+import '../../domain/entities/new_user_onboarding_input.dart';
 import '../../domain/entities/oauth_credential.dart';
+import '../../domain/enums/auth_provider.dart';
 import '../../domain/enums/user_role.dart';
 import '../../domain/failures/auth_failure.dart';
 import '../../domain/repositories/auth_repository.dart';
+import '../../domain/repositories/auth_session_store.dart';
 import '../mock/mock_auth_scenario.dart';
+import '../storage/in_memory_auth_session_store.dart';
 
-class AuthRepositoryImpl implements AuthRepository {
+class AuthRepositoryImpl
+    implements AuthRepository, AccessTokenProvider, TokenRefresher {
   AuthRepositoryImpl({
     this.scenario = MockAuthScenario.existingGuardian,
+    this.providerScenarios = const {},
     this.responseDelay = const Duration(milliseconds: 500),
-  });
+    AuthSessionStore? sessionStore,
+  }) : _sessionStore = sessionStore ?? InMemoryAuthSessionStore();
 
   MockAuthScenario scenario;
+  final Map<AuthProvider, MockAuthScenario> providerScenarios;
   final Duration responseDelay;
+  final AuthSessionStore _sessionStore;
   AuthSession? _currentSession;
+  final Map<AuthProvider, AuthenticatedUser> _registeredUsers = {};
 
   @override
   Future<AuthSession> signIn(OAuthCredential credential) async {
@@ -29,7 +41,13 @@ class AuthRepositoryImpl implements AuthRepository {
       );
     }
 
-    switch (scenario) {
+    final registeredUser = _registeredUsers[credential.provider];
+    if (registeredUser != null) {
+      return _saveSession(AuthSession(user: registeredUser, tokens: _tokens()));
+    }
+
+    final activeScenario = providerScenarios[credential.provider] ?? scenario;
+    switch (activeScenario) {
       case MockAuthScenario.cancelled:
         throw const AuthFailure(
           type: AuthFailureType.cancelled,
@@ -89,6 +107,30 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
+  Future<AuthSession> completeOnboarding(NewUserOnboardingInput input) async {
+    await Future<void>.delayed(responseDelay);
+
+    final currentSession = _currentSession;
+    if (currentSession == null) {
+      throw const AuthFailure(
+        type: AuthFailureType.serverRejected,
+        code: 'AUTH_SESSION_REQUIRED',
+        message: '로그인 정보를 확인할 수 없어요. 다시 로그인해 주세요.',
+      );
+    }
+
+    final completedUser = currentSession.user.copyWith(
+      role: input.profile.role,
+      onboardingCompleted: true,
+      email: input.email ?? currentSession.user.email,
+      nickname: input.profile.nickname,
+    );
+    _registeredUsers[completedUser.provider] = completedUser;
+
+    return _saveSession(currentSession.copyWith(user: completedUser));
+  }
+
+  @override
   Future<AuthTokens> refreshTokens(String refreshToken) async {
     await Future<void>.delayed(responseDelay);
     if (refreshToken.isEmpty || _currentSession == null) {
@@ -105,23 +147,49 @@ class AuthRepositoryImpl implements AuthRepository {
       accessTokenExpiresAt: DateTime.now().add(const Duration(hours: 1)),
     );
     _currentSession = _currentSession!.copyWith(tokens: tokens);
+    await _sessionStore.save(_currentSession!);
     return tokens;
+  }
+
+  // 현재 인증 세션의 Access Token 제공
+  @override
+  Future<String?> readAccessToken() async =>
+      _currentSession?.tokens.accessToken;
+
+  // 현재 Refresh Token으로 Token pair 교체
+  @override
+  Future<bool> refreshAccessToken() async {
+    final session = _currentSession;
+    if (session == null) return false;
+
+    try {
+      await refreshTokens(session.tokens.refreshToken);
+      return true;
+    } on AuthFailure {
+      _currentSession = null;
+      await _sessionStore.clear();
+      return false;
+    }
   }
 
   @override
   Future<AuthSession?> restoreSession() async {
     await Future<void>.delayed(responseDelay);
-    return _currentSession;
+    final session = await _sessionStore.read();
+    _currentSession = session;
+    return session;
   }
 
   @override
   Future<void> signOut() async {
     await Future<void>.delayed(responseDelay);
     _currentSession = null;
+    await _sessionStore.clear();
   }
 
-  AuthSession _saveSession(AuthSession session) {
+  Future<AuthSession> _saveSession(AuthSession session) async {
     _currentSession = session;
+    await _sessionStore.save(session);
     return session;
   }
 
@@ -141,10 +209,12 @@ class AuthRepositoryImpl implements AuthRepository {
       email: email,
       nickname: nickname,
     ),
-    tokens: AuthTokens(
-      accessToken: 'mock-access-token',
-      refreshToken: 'mock-refresh-token',
-      accessTokenExpiresAt: DateTime.now().add(const Duration(hours: 1)),
-    ),
+    tokens: _tokens(),
+  );
+
+  AuthTokens _tokens() => AuthTokens(
+    accessToken: 'mock-access-token',
+    refreshToken: 'mock-refresh-token',
+    accessTokenExpiresAt: DateTime.now().add(const Duration(hours: 1)),
   );
 }

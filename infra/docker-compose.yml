@@ -1,4 +1,4 @@
-# 도담(dodam) 배포 스택 — MySQL 8.0 서비스
+# 도담(dodam) 배포 스택 — MySQL 8.4 서비스
 # 관련 이슈: S15P11B209-184(MySQL 컨테이너) · S15P11B209-185(compose 골격) · S15P11B209-186(.env) · S15P11B209-188(ai 서비스)
 #
 # 실행 (repo 루트에서):
@@ -14,8 +14,30 @@
 name: dodam
 
 services:
+  redis:
+    image: redis:7.4.8-alpine    # 기술스택 문서(7.4.8) 정렬 — S15P11B209-321. latest 금지, 패치 버전 고정
+    container_name: dodam-redis
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be configured in .env or deployment secrets}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - dodam-net
+
   mysql:
-    image: mysql:8.0.40            # latest 금지 — 재현성 위해 패치 버전 고정 (원하면 최신 8.0.x로 상향)
+    image: mysql:8.4.10            # 8.4 LTS — 기술스택 문서·Testcontainers(테스트=운영) 정렬. S15P11B209-321
+                                   #   ⚠️ 8.0→8.4 데이터 디렉토리 자동 업그레이드는 "비가역"(다운그레이드 불가).
+                                   #   롤백 수단은 사전 mysqldump 복원뿐 — 배포 전 백업이 관문. latest 금지, 패치 버전 고정.
     container_name: dodam-mysql
     restart: unless-stopped
 
@@ -74,6 +96,56 @@ services:
       DB_NAME: ${MYSQL_DATABASE}       # = mysql 서비스의 MYSQL_DATABASE (b209)
       DB_USERNAME: ${MYSQL_USER}       # = 앱 전용 최소권한 계정 (root 아님)
       DB_PASSWORD: ${MYSQL_PASSWORD}
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be configured in .env or deployment secrets}
+      # BE→AI 내부 계약 인증 토큰 (S15P11B209-183 · safety review C-183-1).
+      #   RestClientAiQuestionClient가 X-Internal-Token 헤더로 전송 — ai 서비스와 반드시 같은 값.
+      #   reason: :? fail-fast — 미설정 채로 떠서 BE 호출이 전부 401→폴백으로 조용히 저하되는 것 방지.
+      AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN:?AI_INTERNAL_TOKEN must be configured in .env or deployment secrets}
+      # ── 인증(JWT) — S15P11B209-320 (306~309 인증 머지 후속 배선).
+      #   JWT_SECRET은 application.yml에 기본값이 없어, 미주입 시 인증 API 전체가
+      #   503(AUTH_503_001)으로 조용히 죽는 것을 라이브에서 실측(D-190-1).
+      #   reason: :? fail-fast — 인증은 서비스 필수. 조용한 503보다 배포가 명시적으로
+      #           실패하는 게 낫다(REDIS_PASSWORD·AI_INTERNAL_TOKEN과 동일 정책).
+      #   생성 예: openssl rand -hex 32  (32바이트 이상 필수)
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be configured in .env or deployment secrets}
+      # 선택 오버라이드 4종 — 앱에 안전한 기본값이 있어 비차단. compose 기본값은
+      #   application.yml 기본값을 그대로 미러링한다.
+      #   reason: ${VAR:-} (빈 문자열 전달)로 두면 스프링이 "빈 값이 설정됨"으로 읽어
+      #           앱 기본값이 무시되고 TTL(Duration) 파싱 실패로 부팅이 깨진다
+      #           → 기본값을 명시해 빈 문자열 주입을 원천 차단.
+      JWT_ISSUER: ${JWT_ISSUER:-dodam-api}
+      JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL:-30m}
+      JWT_REFRESH_TOKEN_TTL: ${JWT_REFRESH_TOKEN_TTL:-14d}
+      OAUTH_CONNECT_TIMEOUT: ${OAUTH_CONNECT_TIMEOUT:-3s}
+      OAUTH_READ_TIMEOUT: ${OAUTH_READ_TIMEOUT:-5s}
+      # ── OAuth 3사(카카오/구글/네이버) 콘솔 키 — S15P11B209-320.
+      #   reason: :- (빈 기본값) 비차단 passthrough — 콘솔 키가 아직 미발급일 수 있어
+      #           :? 로 걸면 전체 배포가 막힌다. 앱이 provider별 fail-closed(미설정
+      #           provider만 503)로 안전하게 처리하므로 "배포는 뜨고, 미설정 provider만
+      #           막히는" 쪽을 택했다. 트레이드오프: 키를 깜빡해도 배포가 성공하므로
+      #           배포 후 소셜 로그인 검증(503→정상) 필수. 앱 기본값도 빈 값이라
+      #           빈 문자열 주입 = 미설정과 동일(위 TTL과 달리 안전).
+      KAKAO_CLIENT_ID: ${KAKAO_CLIENT_ID:-}
+      KAKAO_CLIENT_SECRET: ${KAKAO_CLIENT_SECRET:-}
+      KAKAO_REDIRECT_URI: ${KAKAO_REDIRECT_URI:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_REDIRECT_URI: ${GOOGLE_REDIRECT_URI:-}
+      NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
+      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
+      NAVER_REDIRECT_URI: ${NAVER_REDIRECT_URI:-}
+      # ── BE→AI 질문 호출 대상 주소 — S15P11B209-320 (D-183-1).
+      #   RestClientAiQuestionClient가 ${AI_BASE_URL}로 읽는다. 앱 기본값은
+      #   http://localhost:8000 인데 컨테이너 안 localhost는 backend 자신 = 도달 불가
+      #   → 내부망 DNS(ai 서비스명)를 compose 기본값으로 주입. .env로 오버라이드 가능.
+      AI_BASE_URL: ${AI_BASE_URL:-http://ai:8000}
+      # 그림 분석 클라이언트(app.ai.drawing-analysis) — 현재 기본 mock(HTTP 미호출).
+      #   http 전환 시 compose 수정 없이 .env(AI_DRAWING_ANALYSIS_MODE=http)로 켤 수 있게
+      #   passthrough. base-url 앱 기본값도 localhost(도달 불가)라 내부망 DNS로 교정.
+      AI_DRAWING_ANALYSIS_MODE: ${AI_DRAWING_ANALYSIS_MODE:-mock}
+      AI_DRAWING_ANALYSIS_BASE_URL: ${AI_DRAWING_ANALYSIS_BASE_URL:-http://ai:8000}
 
     # ⚠️ ports 를 열지 않는다 — 호스트엔 노출 안 함. 내부망(dodam-net)에서 'backend:8080'으로만 접근.
     expose:
@@ -82,6 +154,8 @@ services:
     # DB가 healthy 된 뒤 기동. (지금 backend는 DB 미사용이나, JPA 도입 대비 순서 보장)
     depends_on:
       mysql:
+        condition: service_healthy
+      redis:
         condition: service_healthy
 
     # actuator가 없어 HTTP 헬스체크 불가 → 8080 리슨 여부만 TCP로 확인 (jre-jammy에 bash 존재)
@@ -117,6 +191,11 @@ services:
       STT_MODEL: ${STT_MODEL:-whisper-1}         # 음성→텍스트
       TTS_MODEL: ${TTS_MODEL:-gpt-4o-mini-tts}   # 텍스트→음성(지시형)
       TTS_VOICE: ${TTS_VOICE:-fable}             # 곰돌이 톤 보이스
+      # BE↔AI 내부 계약 인증 토큰 (S15P11B209-183 · safety review C-183-1).
+      #   backend 서비스와 반드시 같은 값 — ai가 X-Internal-Token 헤더를 이 값과 대조.
+      #   reason: :? fail-fast(redis와 동일) — 미설정이면 내부 계약이 무인증으로 뜨는 게 최악이라
+      #           compose 기동 자체를 막는다. ai 앱도 미설정 시 기동 실패(ai/main.py — 이중 안전장치).
+      AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN:?AI_INTERNAL_TOKEN must be configured in .env or deployment secrets}
 
     # ⚠️ ports 를 열지 않는다 — 호스트엔 노출 안 함. 내부망(dodam-net)에서 'ai:8000'으로만 접근.
     expose:
@@ -138,16 +217,25 @@ services:
   # nginx — 리버스 프록시. ★ 유일하게 외부(호스트)로 열리는 서비스. (EC2 UFW도 80/443만 허용)
   # ───────────────────────────────────────────────────────────────
   nginx:
-    image: nginx:1.27-alpine     # latest 금지 — 버전 고정
+    build:
+      context: ./nginx           # 빌드 컨텍스트 = infra/nginx (conf.d 포함 — Dockerfile이 이미지에 COPY)
+      dockerfile: Dockerfile
+    image: dodam-nginx:local     # 로컬 빌드 이미지 — conf 내장. 베이스는 nginx:1.27-alpine(버전 고정)
     container_name: dodam-nginx
     restart: unless-stopped
 
     ports:
-      - "80:80"                  # 외부 진입점. HTTPS 도입 시 "443:443" 추가 + 인증서 볼륨 마운트
+      - "80:80"                  # ACME 챌린지 + https 리다이렉트 전용
+      - "443:443"                # 실서비스 진입점(TLS 종단) — S15P11B209-301
 
+    # ⚠️ conf 를 bind 마운트하지 않는다 — 실행 위치(호스트/Jenkins)에 따라 경로가 달라져
+    #    빈 conf 가 마운트되는 사고(2026-07-22)가 있었음. conf 는 이미지에 bake(위 build 참조).
+    #    conf 변경 → 커밋 → 파이프라인이 이미지 재빌드 + 컨테이너 재생성으로 반영.
+    # 인증서·ACME 챌린지는 "네임드 볼륨"이라 실행 위치와 무관(bind 아님) + 저장소에 인증서 커밋 금지(가드레일).
     volumes:
-      # 리버스 프록시 설정을 읽기전용으로 마운트 (infra/nginx/conf.d → 컨테이너 기본 include 경로)
-      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - letsencrypt:/etc/letsencrypt:ro         # 인증서 읽기(발급·갱신은 certbot이 씀)
+      - certbot-webroot:/var/www/certbot:ro     # ACME 챌린지 토큰 서빙용
+      - apk-dist:/var/www/apk                   # 팀·데모용 APK 서빙(docker cp로 업로드, git 비추적)
 
     depends_on:
       backend:
@@ -158,11 +246,33 @@ services:
     networks:
       - dodam-net
 
+  # ───────────────────────────────────────────────────────────────
+  # certbot — Let's Encrypt 인증서 자동 갱신 (S15P11B209-301).
+  #   12시간마다 renew 시도(실제 갱신은 만료 30일 전부터만 일어남 — 그 외엔 no-op).
+  #   최초 발급은 1회 수동 — ⚠️ 이 서비스는 entrypoint가 갱신 루프라 --entrypoint 덮어쓰기 필수:
+  #   docker compose -f infra/docker-compose.yml run --rm --entrypoint certbot certbot \
+  #     certonly --webroot -w /var/www/certbot -d i15b209.p.ssafy.io --email <이메일> --agree-tos --no-eff-email
+  #   (내부망 불필요 — LE와의 통신은 아웃바운드, 챌린지 서빙은 nginx가 담당. 2026-07-22 발급 완료)
+  # ───────────────────────────────────────────────────────────────
+  certbot:
+    image: certbot/certbot:v2.11.0   # latest 금지 — 버전 고정
+    container_name: dodam-certbot
+    restart: unless-stopped
+    volumes:
+      - letsencrypt:/etc/letsencrypt            # 인증서 저장(쓰기)
+      - certbot-webroot:/var/www/certbot        # 챌린지 토큰 쓰기(nginx가 서빙)
+    # 갱신 루프 — 인증서가 없으면 "갱신 대상 없음"으로 조용히 지나감(안전)
+    entrypoint: sh -c 'trap exit TERM; while true; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $$!; done'
+
 # 내부 전용 네트워크 — mysql·backend·ai·nginx가 여기 붙는다. 외부 노출은 nginx만.
 networks:
   dodam-net:
     driver: bridge
 
-# 네임드 볼륨 — mysql 데이터가 실제로 보관되는 곳
+# 네임드 볼륨 — mysql 데이터 · TLS 인증서 · ACME 챌린지
 volumes:
+  redis-data:
   mysql-data:
+  letsencrypt:        # /etc/letsencrypt (인증서·계정) — 컨테이너 재생성에도 유지, 저장소 비추적
+  certbot-webroot:    # ACME HTTP-01 챌린지 토큰 교환용 (certbot 씀 ↔ nginx 서빙)
+  apk-dist:           # 팀·데모용 APK 파일 (docker cp로 업로드 — 바이너리는 git에 넣지 않음)

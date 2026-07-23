@@ -3,6 +3,7 @@ package com.ssafy.b209.global.exception;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -26,6 +27,8 @@ import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.validation.BindException;
@@ -38,7 +41,9 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 @WebMvcTest(controllers = GlobalExceptionHandlerTest.TestExceptionController.class)
@@ -55,6 +60,24 @@ class GlobalExceptionHandlerTest {
         HttpStatus.NOT_FOUND,
         "COMMON_404_001",
         "요청한 리소스를 찾을 수 없습니다.");
+  }
+
+  @Test
+  void handlesAuthenticationExceptionWithCommonUnauthorizedResponse() throws Exception {
+    expectError(
+        mockMvc.perform(get("/test/errors/authentication")),
+        HttpStatus.UNAUTHORIZED,
+        "AUTH_401_006",
+        "인증이 필요합니다.");
+  }
+
+  @Test
+  void handlesAccessDeniedExceptionWithCommonForbiddenResponse() throws Exception {
+    expectError(
+        mockMvc.perform(get("/test/errors/access-denied")),
+        HttpStatus.FORBIDDEN,
+        "AUTH_403_002",
+        "요청한 작업에 대한 권한이 없습니다.");
   }
 
   @Test
@@ -190,6 +213,15 @@ class GlobalExceptionHandlerTest {
   }
 
   @Test
+  void handlesMissingMultipartRequestPart() throws Exception {
+    expectError(
+        mockMvc.perform(multipart("/test/errors/required-part")),
+        HttpStatus.BAD_REQUEST,
+        "COMMON_400_004",
+        "필수 요청 파라미터가 누락되었습니다.");
+  }
+
+  @Test
   void handlesMethodNotAllowedAndPreservesAllowHeader() throws Exception {
     expectError(
             mockMvc.perform(post("/test/errors/method")),
@@ -288,6 +320,16 @@ class GlobalExceptionHandlerTest {
           CommonErrorCode.INTERNAL_SERVER_ERROR, new IllegalStateException("token=secret"));
     }
 
+    @GetMapping("/authentication")
+    void authentication() {
+      throw new BadCredentialsException("sensitive authentication detail");
+    }
+
+    @GetMapping("/access-denied")
+    void accessDenied() {
+      throw new AccessDeniedException("sensitive authorization detail");
+    }
+
     @PostMapping("/body-validation")
     void bodyValidation(@Valid @RequestBody TestRequest request) {}
 
@@ -335,6 +377,9 @@ class GlobalExceptionHandlerTest {
 
     @GetMapping("/required")
     void required(@RequestParam String value) {}
+
+    @PostMapping(value = "/required-part", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    void requiredPart(@RequestPart MultipartFile file) {}
 
     @GetMapping("/method")
     void method() {}

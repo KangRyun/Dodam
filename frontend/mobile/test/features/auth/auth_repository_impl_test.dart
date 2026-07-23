@@ -9,6 +9,27 @@ void main() {
   );
 
   group('AuthRepositoryImpl', () {
+    test('새 Repository 인스턴스에서도 저장된 인증 세션을 복원한다', () async {
+      final store = InMemoryAuthSessionStore();
+      final firstRepository = AuthRepositoryImpl(
+        sessionStore: store,
+        responseDelay: Duration.zero,
+      );
+      final signedIn = await firstRepository.signIn(kakaoCredential);
+      final restartedRepository = AuthRepositoryImpl(
+        sessionStore: store,
+        responseDelay: Duration.zero,
+      );
+
+      final restored = await restartedRepository.restoreSession();
+
+      expect(restored, signedIn);
+      expect(
+        await restartedRepository.readAccessToken(),
+        signedIn.tokens.accessToken,
+      );
+    });
+
     test('기존 보호자는 온보딩 없이 인증된다', () async {
       final repository = AuthRepositoryImpl(responseDelay: Duration.zero);
 
@@ -44,6 +65,63 @@ void main() {
       final session = await repository.signIn(kakaoCredential);
 
       expect(session.requiresAdditionalEmail, isTrue);
+    });
+
+    test('Provider별 신규 사용자 시나리오를 반환한다', () async {
+      final repository = AuthRepositoryImpl(
+        providerScenarios: const {
+          AuthProvider.kakao: MockAuthScenario.newUserWithoutEmail,
+          AuthProvider.google: MockAuthScenario.newGuardian,
+        },
+        responseDelay: Duration.zero,
+      );
+
+      final kakaoSession = await repository.signIn(kakaoCredential);
+      const googleCredential = OAuthCredential(
+        provider: AuthProvider.google,
+        type: OAuthCredentialType.idToken,
+        value: 'google-id-token',
+      );
+      final googleSession = await repository.signIn(googleCredential);
+
+      expect(kakaoSession.requiresAdditionalEmail, isTrue);
+      expect(googleSession.requiresOnboarding, isTrue);
+      expect(googleSession.requiresAdditionalEmail, isFalse);
+    });
+
+    test('온보딩 완료 후 같은 Provider 재로그인은 기존 사용자로 처리한다', () async {
+      final repository = AuthRepositoryImpl(
+        scenario: MockAuthScenario.newUserWithoutEmail,
+        responseDelay: Duration.zero,
+      );
+      await repository.signIn(kakaoCredential);
+
+      final completedSession = await repository.completeOnboarding(
+        NewUserOnboardingInput(
+          profile: const OnboardingProfileInput(
+            role: UserRole.guardian,
+            nickname: '민지엄마',
+          ),
+          email: 'guardian@dodam.test',
+          consents: ConsentAgreementInput(
+            agreedConsents: {
+              ConsentCode.serviceTerms,
+              ConsentCode.childPrivacy,
+              ConsentCode.drawingAnalysis,
+            },
+          ),
+        ),
+      );
+
+      expect(completedSession.requiresOnboarding, isFalse);
+      expect(completedSession.user.nickname, '민지엄마');
+      expect(completedSession.user.email, 'guardian@dodam.test');
+
+      await repository.signOut();
+      final signedInAgain = await repository.signIn(kakaoCredential);
+
+      expect(signedInAgain.requiresOnboarding, isFalse);
+      expect(signedInAgain.user.nickname, '민지엄마');
     });
 
     test('네트워크 실패는 재시도 가능한 실패로 반환된다', () async {

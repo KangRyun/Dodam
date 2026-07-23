@@ -23,7 +23,14 @@ class OpenApiConfigTest {
           assertThat(openApi.getInfo().getDescription()).isEqualTo("백엔드 REST API 명세");
           assertThat(openApi.getInfo().getVersion()).isEqualTo("v1");
           assertThat(openApi.getServers()).isNullOrEmpty();
-          assertThat(openApi.getComponents()).isNull();
+          assertThat(openApi.getComponents().getSecuritySchemes()).containsKey("bearerAuth");
+          assertThat(openApi.getSecurity()).hasSize(1);
+          assertThat(openApi.getSecurity().getFirst()).containsKey("bearerAuth");
+          assertThat(openApi.getComponents().getSecuritySchemes().get("bearerAuth").getScheme())
+              .isEqualTo("bearer");
+          assertThat(
+                  openApi.getComponents().getSecuritySchemes().get("bearerAuth").getBearerFormat())
+              .isEqualTo("JWT");
 
           assertThat(groupedOpenApi.getGroup()).isEqualTo("api-v1");
           assertThat(groupedOpenApi.getPathsToMatch()).containsExactly("/api/v1/**");

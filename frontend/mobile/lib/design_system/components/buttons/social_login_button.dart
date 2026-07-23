@@ -24,20 +24,23 @@ class SocialLoginButton extends StatelessWidget {
 
     return Semantics(
       button: true,
-      label: '${visual.name}로 시작하기',
+      enabled: enabled,
+      label: visual.label,
       child: SizedBox(
+        key: ValueKey('social-login-${provider.name}'),
         width: double.infinity,
         height: AppSizes.buttonHeight,
         child: FilledButton(
           onPressed: enabled ? onPressed : null,
           style: FilledButton.styleFrom(
             elevation: 0,
+            padding: EdgeInsets.symmetric(horizontal: visual.horizontalPadding),
             backgroundColor: visual.background,
             foregroundColor: visual.foreground,
             disabledBackgroundColor: AppColors.disabled,
             disabledForegroundColor: AppColors.onDisabled,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadius.md),
+              borderRadius: BorderRadius.circular(visual.borderRadius),
               side: BorderSide(color: visual.border),
             ),
           ),
@@ -51,10 +54,16 @@ class SocialLoginButton extends StatelessWidget {
                   children: [
                     Align(
                       alignment: Alignment.centerLeft,
-                      child: _ProviderMark(provider: provider),
+                      child: Image.asset(
+                        visual.iconAsset,
+                        width: visual.iconSize,
+                        height: visual.iconSize,
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.high,
+                      ),
                     ),
                     Text(
-                      '${visual.name}로 시작하기',
+                      visual.label,
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
@@ -68,66 +77,57 @@ class SocialLoginButton extends StatelessWidget {
   }
 }
 
-class _ProviderMark extends StatelessWidget {
-  const _ProviderMark({required this.provider});
-
-  final SocialLoginProvider provider;
-
-  @override
-  Widget build(BuildContext context) => SizedBox.square(
-    dimension: 28,
-    child: Center(
-      child: Text(
-        switch (provider) {
-          SocialLoginProvider.kakao => 'K',
-          SocialLoginProvider.google => 'G',
-          SocialLoginProvider.naver => 'N',
-        },
-        style: TextStyle(
-          color: switch (provider) {
-            SocialLoginProvider.kakao => const Color(0xFF391B1B),
-            SocialLoginProvider.google => const Color(0xFF4285F4),
-            SocialLoginProvider.naver => Colors.white,
-          },
-          fontSize: 17,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-    ),
-  );
-}
-
 class _SocialVisual {
   const _SocialVisual({
-    required this.name,
+    required this.label,
+    required this.iconAsset,
+    required this.iconSize,
     required this.background,
     required this.foreground,
     required this.border,
+    required this.borderRadius,
+    required this.horizontalPadding,
   });
 
-  final String name;
+  final String label;
+  final String iconAsset;
+  final double iconSize;
   final Color background;
   final Color foreground;
   final Color border;
+  final double borderRadius;
+  final double horizontalPadding;
 }
 
 _SocialVisual _visualFor(SocialLoginProvider provider) => switch (provider) {
   SocialLoginProvider.kakao => const _SocialVisual(
-    name: '카카오',
-    background: Color(0xFFFEEA45),
-    foreground: Color(0xFF2D2323),
+    label: '카카오로 시작',
+    iconAsset: 'assets/branding/kakao_symbol.png',
+    iconSize: 28,
+    background: Color(0xFFFEE500),
+    foreground: Color(0xD9000000),
     border: Colors.transparent,
+    borderRadius: 12,
+    horizontalPadding: 20,
   ),
   SocialLoginProvider.google => const _SocialVisual(
-    name: '구글',
+    label: 'Google 계정으로 시작',
+    iconAsset: 'assets/branding/google_g.png',
+    iconSize: 22,
     background: Colors.white,
-    foreground: AppColors.ink,
-    border: AppColors.outline,
+    foreground: Color(0xFF1F1F1F),
+    border: Color(0xFF747775),
+    borderRadius: 12,
+    horizontalPadding: 12,
   ),
   SocialLoginProvider.naver => const _SocialVisual(
-    name: '네이버',
-    background: Color(0xFF03C75A),
+    label: '네이버로 시작',
+    iconAsset: 'assets/branding/naver_n.png',
+    iconSize: 26,
+    background: Color(0xFF03A94D),
     foreground: Colors.white,
     border: Colors.transparent,
+    borderRadius: 12,
+    horizontalPadding: 20,
   ),
 };

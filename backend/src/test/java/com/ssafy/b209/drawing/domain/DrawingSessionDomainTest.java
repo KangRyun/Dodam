@@ -33,6 +33,7 @@ class DrawingSessionDomainTest {
     assertThat(session.getCompletedAt()).isNull();
     assertThat(session.getDeletedAt()).isNull();
     assertThat(session.getIdempotencyKey()).isEqualTo("request-1");
+    assertThat(session.isSnapshotUploadable()).isTrue();
   }
 
   @Test

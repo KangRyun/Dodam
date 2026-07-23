@@ -316,6 +316,25 @@ gradlew.bat javadoc
 
 생성된 문서는 `build/docs/javadoc/index.html`에서 확인합니다. 저장소 루트 기준 경로는 `backend/build/docs/javadoc/index.html`입니다. Javadoc은 빌드 결과물이므로 `build/` 디렉터리와 함께 Git에 Commit하지 않습니다.
 
+## 로컬 이미지 저장
+
+개발 및 1차 MVP에서는 후속 그림 스냅샷 업로드 API가 사용할 이미지 저장 경계로 로컬 파일 시스템을 사용합니다.
+
+```dotenv
+LOCAL_IMAGE_STORAGE_ROOT=./storage/images
+LOCAL_IMAGE_MAX_SIZE=10485760
+```
+
+- 기본 Root는 애플리케이션 실행 디렉터리 기준 `./storage/images`입니다.
+- JPEG와 PNG를 지원하며 파일별 최대 크기는 기본 10 MiB입니다.
+- 전달된 MIME Type과 확장자만 신뢰하지 않고 실제 이미지 Signature와 교차 검증합니다.
+- 원본 파일명은 저장 경로에 사용하지 않으며 날짜와 UUID로 상대 `storageKey`를 생성합니다.
+- 서버 절대 경로는 저장 결과에 포함하지 않고 Storage Root 외부 경로와 Symbolic Link 이탈을 거부합니다.
+- 저장 중에는 Root 내부 임시 파일을 사용하고 기존 파일을 덮어쓰지 않습니다.
+- 로컬 저장 파일은 `.gitignore` 대상이며 Git에 Commit하지 않습니다.
+- 서버 인스턴스 교체나 디스크 초기화 시 파일이 유실될 수 있으므로 운영 환경에서는 S3 호환 Object Storage로 전환해야 합니다.
+- 이번 기능에는 HTTP 업로드 API, DB Metadata 저장, 이미지 조회, AI 분석이 포함되지 않습니다.
+
 ## 공통 API 성공 응답
 
 일반 성공 응답은 다음 구조를 사용합니다.
@@ -440,7 +459,7 @@ throw new BusinessException(SomeDomainErrorCode.RESOURCE_NOT_FOUND);
 - Flutter와 Next.js는 Spring Boot의 `/api/v1/**`만 호출합니다.
 - Spring Boot만 FastAPI의 `/internal/v1/**`를 호출합니다.
 - 클라이언트는 FastAPI 내부 API나 S3 `storageKey`를 직접 지정하지 않습니다.
-- 그림과 음성 파일은 Spring Boot가 형식과 권한을 검증한 뒤 S3에 저장합니다.
+- 그림과 음성 파일은 Spring Boot가 형식과 권한을 검증합니다. 현재 1차 MVP 이미지는 로컬에 저장하며 운영 환경에서는 S3 호환 Object Storage로 전환합니다.
 - Firebase 연동은 알림 인프라 구현으로 분리합니다.
 
 그림 활동 생성과 파일 등록 API에는 향후 `Idempotency-Key` Header를 적용합니다. 중복 요청 검사와 저장 방식은 해당 API 작업에서 설계합니다.
@@ -466,6 +485,84 @@ throw new BusinessException(SomeDomainErrorCode.RESOURCE_NOT_FOUND);
 8. Spring Security와 JWT 인증
 9. S3 Pre-signed URL 업로드
 10. FastAPI AI 서버 연동
+
+## OAuth 로그인 API
+
+자체 이메일·비밀번호 로그인 없이 Kakao·Google·Naver authorization code를 백엔드에서 검증합니다.
+
+```http
+POST /api/v1/auth/oauth/{provider}
+Content-Type: application/json
+
+{
+  "authorizationCode": "provider가 발급한 일회성 code",
+  "redirectUri": "Provider Console에 등록된 URI",
+  "state": "Naver 로그인에서 사용한 state",
+  "deviceId": "앱 설치 단위 식별자"
+}
+```
+
+- `{provider}`는 `kakao`, `google`, `naver` 중 하나입니다.
+- Kakao `id`, Google `sub`, Naver `response.id`를 계정 식별자로 사용하며 이메일·전화번호는 사용하지 않습니다.
+- `redirectUri`는 서버 환경 변수의 Provider별 URI와 정확히 일치해야 합니다.
+- `JWT_SECRET`은 UTF-8 기준 32 Byte 이상이어야 하며 기본 Secret은 제공하지 않습니다.
+- Provider 설정은 `KAKAO_CLIENT_ID`, `KAKAO_CLIENT_SECRET`, `KAKAO_REDIRECT_URI`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`, `NAVER_REDIRECT_URI`로 주입합니다.
+- Access Token Filter와 Redis 기반 Refresh Token rotation이 적용되어 있습니다.
+- Access Token이 전달되면 HS256 서명, 발급자, 만료, `token_type=access`, 사용자 ID Subject를 검증하고 요청 Principal로 사용합니다. Refresh Token을 API 인증에 사용할 수 없습니다.
+- OAuth 로그인·Token 재발급과 CORS preflight를 제외한 `/api/v1/**` 요청에는 `Authorization: Bearer {accessToken}`이 필수입니다. Token 누락·검증 실패는 공통 401, 인증 후 권한 부족은 공통 403 응답으로 반환합니다.
+- `POST /api/v1/auth/reissue`는 `refreshToken`과 로그인 때 사용한 `deviceId`를 받아 Access·Refresh Token을 모두 교체합니다. Redis에는 Token 원문 대신 SHA-256 hash만 저장하며, 과거 Token 재사용을 탐지하면 해당 Token family를 폐기합니다.
+- Redis 장애 시 로그인과 재발급은 fail-closed로 실패하며, MySQL에는 Refresh Token을 저장하지 않습니다.
+- Swagger UI의 `bearerAuth` Authorize 입력에는 `Bearer ` 접두어 없이 Access JWT 값만 입력합니다.
+
+실제 Client Secret, JWT Secret과 Redirect URI는 `.env` 또는 배포 Secret으로 관리하며 Git에 커밋하지 않습니다.
+
+## 최초 동의 등록 API
+
+`POST /api/v1/consents`는 Access Token의 사용자를 동의 처리자로 사용해 사용자 또는 연결 아동의 약관별 `AGREE`·`WITHDRAW` 행위를 저장합니다. 사용자 대상 약관만 등록하면 `childId`를 생략하고, 아동 대상 약관에는 연결된 아동의 `childId`를 전달합니다.
+
+- 현재 활성·시행 중인 필수 약관은 모두 `AGREE`여야 합니다.
+- 동의 이력은 기존 행을 수정하지 않고 `consent_records`에 append합니다.
+- 요청 사용자 ID는 Body로 받지 않으며 IP와 User-Agent를 감사 정보로 저장합니다.
+- 기존 `consent_terms`, `consent_records`, `consent_record_evidences` 구조를 사용하므로 신규 DB Migration은 없습니다.
+
+## 아동 정보 조회 API
+
+연결된 보호자는 다음 Endpoint로 삭제되지 않은 활성 아동의 상세 프로필을 조회합니다.
+
+```http
+GET /api/v1/children/{childId}
+Authorization: Bearer <access-token>
+X-Guardian-User-Id: 10
+```
+
+```json
+{
+  "success": true,
+  "code": "COMMON_200",
+  "message": "요청이 성공했습니다.",
+  "data": {
+    "childId": 3,
+    "nickname": "별이",
+    "birthDate": "2019-03-15",
+    "age": 7,
+    "profileImageUrl": null,
+    "preferredCharacter": "MONGLE",
+    "questionDifficulty": "LOWER_ELEMENTARY",
+    "responseModes": ["VOICE", "EMOJI", "COLOR"],
+    "tutorialStatus": "NOT_STARTED",
+    "profileStatus": "ACTIVE",
+    "relationshipType": "MOTHER",
+    "createdAt": "2026-07-21T02:30:00Z",
+    "updatedAt": "2026-07-21T02:30:00Z"
+  }
+}
+```
+
+- `age`는 조회일 기준 만 나이입니다.
+- `responseModes`는 보호자가 지정한 표시 순서대로 반환합니다.
+- 존재하지 않음, 삭제됨, 비활성 상태와 보호자 연결 없음은 식별자 노출 방지를 위해 모두 HTTP 404와 `CHILD_404_001`을 반환합니다.
+- 조회만으로 아동 프로필이나 보호자 관계 상태를 변경하지 않습니다.
+- 운영 요청은 `Authorization: Bearer <access-token>`의 검증된 사용자 ID를 사용합니다. `X-Guardian-User-Id`는 기존 자동화 테스트 전환을 위해 Test Profile에서만 허용되며 운영 기본값에서는 거부됩니다.
 
 ## 그림 활동 세션 생성 API
 
@@ -516,3 +613,103 @@ UPLOAD 입력 방식에서는 `canvas`를 사용하지 않습니다. 이미지 �
 - CANVAS 크기는 가로·세로 각각 1~8192이며 배경색은 `#RRGGBB` 형식입니다.
 - 운영용 `drawing_types` Seed는 포함하지 않습니다. API 호출 전에 환경에 맞는 활성 유형 데이터가 필요합니다.
 - 현재 인증·보호자 소유 관계·필수 동의 검증은 아직 연결되지 않았으며 `startedByUserId`는 `null`로 저장됩니다.
+
+## 그림 스냅샷 업로드 API
+
+진행 중인 `DRAWING` 단계의 그림 활동 세션에는 다음 Endpoint로 중간 또는 최종 그림을 등록합니다.
+
+```http
+POST /api/v1/drawing-sessions/{drawingSessionId}/snapshots
+Content-Type: multipart/form-data
+```
+
+```bash
+curl -X POST "http://localhost:8080/api/v1/drawing-sessions/100/snapshots" \
+  -H "Accept: application/json" \
+  -F "file=@sample.png;type=image/png" \
+  -F 'metadata={"assetType":"INTERMEDIATE","assetVersion":1,"capturedAt":"2026-07-22T13:30:00+09:00"};type=application/json'
+```
+
+- `file`은 최대 10MB의 JPEG 또는 PNG 이미지이며 확장자, MIME Type과 실제 파일 Signature를 함께 검증합니다.
+- `metadata.assetType`은 `INTERMEDIATE` 또는 `FINAL`, `assetVersion`은 1 이상의 정수입니다.
+- 같은 세션·유형·버전은 중복 등록할 수 없고, `FINAL` 파일은 세션당 하나만 허용합니다.
+- 성공 시 HTTP 201과 `Location: /api/v1/drawing-sessions/{drawingSessionId}/snapshots/{drawingAssetId}`를 반환합니다.
+- 응답에는 서버 내부 Storage Key, 절대 경로와 원본 파일명을 포함하지 않습니다.
+- 현재 인증과 그림 활동 소유권 검증은 아직 연결되지 않았습니다.
+- 업로드만으로 세션 상태를 변경하거나 AI 분석을 실행하지 않습니다.
+
+## 그림 초안 자동 저장 및 조회 API
+
+진행 중인 `IN_PROGRESS/DRAWING` 세션의 현재 캔버스 전체본은 다음 Endpoint로 저장합니다.
+
+```http
+PUT /api/v1/drawing-sessions/{drawingSessionId}/draft
+Content-Type: multipart/form-data
+```
+
+```bash
+curl -X PUT "http://localhost:8080/api/v1/drawing-sessions/100/draft" \
+  -H "Accept: application/json" \
+  -F "preview=@draft.png;type=image/png" \
+  -F 'canvasState={"lastEventSequence":17,"clientSavedAt":"2026-07-22T14:30:00+09:00"};type=application/json'
+```
+
+가장 최근 초안 Metadata는 다음 Endpoint로 조회합니다.
+
+```http
+GET /api/v1/drawing-sessions/{drawingSessionId}/draft
+```
+
+- `preview`는 최대 10MB의 JPEG 또는 PNG 이미지이며 기존 `ImageStorage` 검증을 동일하게 적용합니다.
+- `lastEventSequence`는 초안에 반영된 마지막 그림 이벤트 순서이며 저장할 때마다 증가해야 합니다.
+- 현재 초안과 같은 이벤트 순서는 HTTP 409, 더 이전 순서는 HTTP 409로 거부합니다.
+- 서버는 세션 잠금 안에서 `assetVersion`을 1부터 증가시키며 최신 초안은 가장 높은 `assetVersion`으로 결정합니다.
+- 초안은 `DRAFT` 유형이며 최종 그림이나 분석용 `INTERMEDIATE` 스냅샷과 구분됩니다.
+- 자동 저장은 세션 상태·단계를 변경하거나 AI 분석과 최종 그림 생성을 실행하지 않습니다.
+- 최신 조회는 이미지 다운로드 API가 아닙니다. 현재 다운로드 API가 없으므로 `previewUrl`은 `null`이며 내부 Storage Key와 서버 절대 경로를 반환하지 않습니다.
+- 현재 인증과 그림 활동 소유권 검증은 아직 연결되지 않았습니다.
+- 도구 상태·Viewport를 포함한 종합 활동 재개와 초안 삭제는 후속 작업 범위입니다.
+
+## 진행 중 그림 활동 조회 및 재개 API
+
+앱을 다시 열거나 그림 화면으로 돌아왔을 때 아동의 진행 중 세션과 최신 자동 저장 초안을 한 번에 조회합니다.
+
+```http
+GET /api/v1/drawing-sessions/active?childId=1
+```
+
+```json
+{
+  "success": true,
+  "code": "COMMON_200",
+  "message": "요청이 성공했습니다.",
+  "data": {
+    "drawingSessionId": 100,
+    "childId": 1,
+    "drawingType": {"drawingTypeId": 2, "code": "FREE_DRAWING", "name": "자유화"},
+    "inputMethod": "CANVAS",
+    "sessionStatus": "IN_PROGRESS",
+    "currentStage": "DRAWING",
+    "startedAt": "2026-07-21T02:30:00Z",
+    "latestDraft": {
+      "drawingAssetId": 200,
+      "assetVersion": 3,
+      "lastEventSequence": 17,
+      "contentType": "image/png",
+      "fileSize": 4096,
+      "clientSavedAt": "2026-07-21T02:35:00Z",
+      "savedAt": "2026-07-21T02:35:01Z",
+      "previewUrl": null
+    }
+  }
+}
+```
+
+- 삭제되지 않은 `IN_PROGRESS` 세션만 반환하며, 현재 `currentStage`를 그대로 전달합니다. 조회 자체는 상태나 단계를 변경하지 않습니다.
+- 활성 세션이 없으면 HTTP 404와 `DRAWING_404_005`를 반환합니다.
+- 데이터 이상으로 활성 세션이 둘 이상이면 하나를 임의 선택하지 않고 HTTP 500과 `DRAWING_500_003`을 반환합니다.
+- 저장된 초안이 없으면 세션 조회는 성공하고 `latestDraft`가 `null`입니다.
+- `latestDraft`는 `DRAFT` 중 가장 높은 `assetVersion`이며 `FINAL`·`INTERMEDIATE` 스냅샷은 포함하지 않습니다.
+- 현재 이미지 다운로드 API가 없으므로 `previewUrl`은 `null`이며 Storage Key, 절대 경로, 이미지 Byte는 노출하지 않습니다.
+- 조회만으로 초안이나 세션을 생성하지 않고 AI 분석을 실행하지 않으며, 파일 시스템에도 접근하지 않습니다.
+- 현재 인증과 아동 소유권 검증은 아직 연결되지 않았습니다.

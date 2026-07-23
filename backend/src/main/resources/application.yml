@@ -5,10 +5,62 @@ spring:
     default: local
   jpa:
     open-in-view: false
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 11MB
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL_ENABLED:false}
 
 server:
   port: 8080
 
 app:
+  auth:
+    filter:
+      legacy-header-enabled: false
+    jwt:
+      secret: ${JWT_SECRET:}
+      issuer: ${JWT_ISSUER:dodam-api}
+      access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:30m}
+      refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL:14d}
+    oauth:
+      connect-timeout: ${OAUTH_CONNECT_TIMEOUT:3s}
+      read-timeout: ${OAUTH_READ_TIMEOUT:5s}
+      kakao:
+        client-id: ${KAKAO_CLIENT_ID:}
+        client-secret: ${KAKAO_CLIENT_SECRET:}
+        redirect-uri: ${KAKAO_REDIRECT_URI:}
+      google:
+        client-id: ${GOOGLE_CLIENT_ID:}
+        client-secret: ${GOOGLE_CLIENT_SECRET:}
+        redirect-uri: ${GOOGLE_REDIRECT_URI:}
+      naver:
+        client-id: ${NAVER_CLIENT_ID:}
+        client-secret: ${NAVER_CLIENT_SECRET:}
+        redirect-uri: ${NAVER_REDIRECT_URI:}
+  ai:
+    drawing-analysis:
+      mode: ${AI_DRAWING_ANALYSIS_MODE:mock}
+      base-url: ${AI_DRAWING_ANALYSIS_BASE_URL:http://localhost:8000}
+      endpoint-path: ${AI_DRAWING_ANALYSIS_ENDPOINT_PATH:/internal/ai/v1/drawings/analysis}
+      connect-timeout: ${AI_DRAWING_ANALYSIS_CONNECT_TIMEOUT:3s}
+      read-timeout: ${AI_DRAWING_ANALYSIS_READ_TIMEOUT:30s}
   cors:
     allowed-origins: []
+  storage:
+    image:
+      root: ${LOCAL_IMAGE_STORAGE_ROOT:./storage/images}
+      max-size: ${LOCAL_IMAGE_MAX_SIZE:10485760}
+  idempotency:
+    conversation:
+      processing-ttl: ${CONVERSATION_IDEMPOTENCY_PROCESSING_TTL:30s}
+      completed-ttl: ${CONVERSATION_IDEMPOTENCY_COMPLETED_TTL:24h}
+      failure-ttl: ${CONVERSATION_IDEMPOTENCY_FAILURE_TTL:5m}
+      processing-wait: ${CONVERSATION_IDEMPOTENCY_PROCESSING_WAIT:3s}
+      polling-interval: ${CONVERSATION_IDEMPOTENCY_POLLING_INTERVAL:50ms}

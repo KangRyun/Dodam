@@ -3,23 +3,78 @@
 흐름:  아동 발화 STT(E) → 대화 LLM(F: 그림분석+발화→질문) → 질문 TTS(G) → (대화 루프)
 
 배선(엔드포인트 호출)은 이강륜(173). F의 프롬프트 '내용'·칩 생성과 그림분석 모델은 편주희.
-대화 루프(G→E 반복)·재시도는 183(별도) + 루프 위치는 BE 합의 필요.
 
-⚠️ 요청/응답 계약은 '초안' — BE와 합의 후 확정. 원본 음성·발화는 저장·로그하지 않는다(가드레일).
+대화 루프 위치 확정(183, 2026-07-23 · BE 283 머지 근거):
+- 루프(질문 반복·질문 수 상한·세션 잠금·폴백 템플릿)는 BE ConversationQuestionService 소유.
+- 이 서버는 stateless '질문 1건 생성' 내부 계약(/internal/ai/v1/conversations/question)만 제공.
+- GMS 일시 오류는 이 서버 안에서 지수 백오프로 제한 재시도(question_service.py).
+  근거 정리: _workspace/183_ai_loop-decision.md
+
+⚠️ /analyze/* 등 기존 경로의 계약은 '초안'이고, /internal/ai/v1/* 는 BE 코드와 맞춘 내부 계약.
+원본 음성·발화는 저장·로그하지 않는다(가드레일).
 """
 
 import base64
+import hmac
 import tempfile
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, UploadFile
+from fastapi import FastAPI, File, Header, UploadFile
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 import config
+import internal_contracts
 import llm_client
+import question_service
 import stt_client
 import tts_client
 
-app = FastAPI(title="도담 AI 분석 서버", version="0.1.0")
+
+def _require_internal_auth_config() -> None:
+    """기동 시점 fail-fast: 내부 토큰 미설정이면 서버를 띄우지 않는다(safety review C-183-1).
+
+    reason: '조용히 무인증으로 뜨는 것'이 최악의 실패 모드 — compose의
+    ${AI_INTERNAL_TOKEN:?} 검증과 이 검증이 이중 안전장치를 이룬다.
+    import 시점이 아닌 lifespan(서버 기동) 시점에 검증하므로 CI의
+    import 스모크(`python -c "import main"`)는 깨지지 않는다.
+    로컬 전용 opt-out: AI_INTERNAL_AUTH_DISABLED=true 를 명시적으로 설정한 경우에만 허용.
+    """
+    if config.AI_INTERNAL_TOKEN or config.AI_INTERNAL_AUTH_DISABLED:
+        return
+    raise RuntimeError(
+        "AI_INTERNAL_TOKEN이 설정되지 않았습니다. 배포에선 backend·ai 양쪽 컨테이너에 "
+        "같은 값을 주입해야 합니다(infra/docker-compose.yml · 배포 시크릿). "
+        "로컬 개발에서 토큰 없이 띄우려면 AI_INTERNAL_AUTH_DISABLED=true 를 명시적으로 설정하세요."
+    )
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    _require_internal_auth_config()
+    yield
+
+
+app = FastAPI(title="도담 AI 분석 서버", version="0.1.0", lifespan=_lifespan)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_without_echo(_request, exc: RequestValidationError):
+    """422 검증 오류에서 입력 값 echo를 제거한다(필드 위치·오류 유형만 반환).
+
+    reason: FastAPI 기본 422 본문은 입력 값을 그대로 되돌려주는데,
+    요청에는 아이 발화(recentMessages.text)가 실릴 수 있다 — 가드레일 위반 경로 차단.
+    BE는 422 본문의 errorCode만 판별하므로 INVALID_REQUEST는
+    Type.OTHER → 폴백 템플릿으로 분류된다(안전 차단과 혼동 없음).
+    """
+    errors = [
+        {"loc": [str(part) for part in err.get("loc", [])], "type": err.get("type", "")}
+        for err in exc.errors()
+    ]
+    return JSONResponse(
+        status_code=422, content={"errorCode": "INVALID_REQUEST", "errors": errors}
+    )
 
 
 @app.get("/health")
@@ -105,6 +160,68 @@ def analyze_conversation(req: ConversationRequest):
         "prompt_version": llm_client.PROMPT_VERSION,
         "pipeline_version": config.PIPELINE_VERSION,
     }
+
+
+# ── BE 내부 계약: 대화 질문 1건 생성 (183) ───────────────────────
+def _internal_token_ok(received: str) -> bool:
+    """X-Internal-Token 검사. 기본은 토큰 필수 — 미설정 시 무조건 거부.
+
+    이전의 "미설정이면 검사 생략" fallback은 제거했다(safety review C-183-1):
+    compose 미주입 + nginx /ai/ 접두제거 프록시와 결합하면 이 내부 계약이
+    무인증으로 인터넷에 노출되는 사고 경로였다. 미설정 상태는 기동 시점에
+    이미 실패하지만(_require_internal_auth_config), 어떤 경로로든 떠 있어도
+    무인증 통과는 없도록 여기서도 거부한다(심층 방어).
+    명시적 opt-out(AI_INTERNAL_AUTH_DISABLED=true, 로컬 개발 전용)일 때만 검사 생략.
+    compare_digest: 문자열 비교 시간 차이로 토큰이 유추되지 않게(타이밍 공격 방지).
+    """
+    if config.AI_INTERNAL_AUTH_DISABLED:
+        return True
+    if not config.AI_INTERNAL_TOKEN:
+        return False
+    return hmac.compare_digest(received or "", config.AI_INTERNAL_TOKEN)
+
+
+@app.post(
+    "/internal/ai/v1/conversations/question",
+    response_model=internal_contracts.QuestionResponse,
+)
+def internal_conversation_question(
+    req: internal_contracts.QuestionRequest,
+    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+    x_request_id: str = Header(default="", alias="X-Request-Id"),
+):
+    """BE(ConversationQuestionService → RestClientAiQuestionClient)가 호출하는 다음 질문 생성.
+
+    응답 ↔ BE 분류 매핑:
+    - 200 + 계약 응답(isContractValidFor 통과) → BE가 질문 저장
+    - 422 {"errorCode": "AI_SAFETY_POLICY_BLOCKED"} → BE가 저장 없이 사용자 422로 종료
+    - 422 {"errorCode": "INVALID_REQUEST"}(검증 실패) → BE Type.OTHER → 폴백 템플릿
+    - 502(GMS 재시도 소진·재시도 불가 오류) → BE Type.OTHER → 폴백 템플릿
+    - 401(내부 토큰 불일치) → BE Type.OTHER → 폴백 템플릿(운영 로그로 원인 확인)
+
+    루프·질문 수 상한·폴백 템플릿은 BE 소유 — 여기서는 질문 1건만 생성한다(stateless).
+    """
+    if not _internal_token_ok(x_internal_token):
+        # ⚠️ 수신 토큰 값은 본문·로그 어디에도 남기지 않는다.
+        return JSONResponse(
+            status_code=401, content={"errorCode": "INVALID_INTERNAL_TOKEN"}
+        )
+    try:
+        return question_service.generate(req, x_request_id)
+    except question_service.SafetyBlockedError as e:
+        # BE RestClientAiQuestionClient는 422 본문의 errorCode가 정확히
+        # "AI_SAFETY_POLICY_BLOCKED"일 때만 SAFETY_POLICY_BLOCKED로 분류한다.
+        return JSONResponse(
+            status_code=422,
+            content={
+                "errorCode": "AI_SAFETY_POLICY_BLOCKED",
+                "blockReasonCode": e.block_reason_code,
+                "ruleVersion": e.rule_version,
+            },
+        )
+    except question_service.UpstreamError as e:
+        # 5xx → BE Type.OTHER → 폴백 템플릿. 원인 유형은 이미 warning 로그로 남았다.
+        return JSONResponse(status_code=502, content={"errorCode": e.error_code})
 
 
 # ── G. 질문/답변 TTS — gpt-4o-mini-tts (real) ────────────────────

@@ -1,7 +1,10 @@
 package com.ssafy.b209.global.config;
 
+import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
+import io.swagger.v3.oas.models.security.SecurityRequirement;
+import io.swagger.v3.oas.models.security.SecurityScheme;
 import org.springdoc.core.models.GroupedOpenApi;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -9,7 +12,7 @@ import org.springframework.context.annotation.Configuration;
 /**
  * OpenAPI 기본 정보와 API 그룹 구성을 제공한다.
  *
- * <p>각 Endpoint의 문서는 Controller가 담당하며, 이 설정에는 Security Scheme을 포함하지 않는다.
+ * <p>각 Endpoint의 문서는 Controller가 담당하며, Swagger UI가 Access JWT를 전송할 수 있도록 Bearer Scheme을 제공한다.
  */
 @Configuration
 public class OpenApiConfig {
@@ -25,6 +28,15 @@ public class OpenApiConfig {
   @Bean
   public OpenAPI openAPI() {
     return new OpenAPI()
+        .addSecurityItem(new SecurityRequirement().addList("bearerAuth"))
+        .components(
+            new Components()
+                .addSecuritySchemes(
+                    "bearerAuth",
+                    new SecurityScheme()
+                        .type(SecurityScheme.Type.HTTP)
+                        .scheme("bearer")
+                        .bearerFormat("JWT")))
         .info(
             new Info()
                 .title("아동 그림·대화 기반 정서 지원 서비스 API")
