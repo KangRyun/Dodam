@@ -90,6 +90,28 @@ class DrawingSessionQueryServiceTest {
   }
 
   @Test
+  void listsSnapshotSummariesForAnAccessibleSession() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    given(asset.getId()).willReturn(20L);
+    given(asset.getAssetType()).willReturn(DrawingAssetType.INTERMEDIATE);
+    given(asset.getAssetVersion()).willReturn(1);
+    given(asset.getMimeType()).willReturn("image/png");
+    given(asset.getFileSizeBytes()).willReturn(1024L);
+    given(asset.getCapturedAt()).willReturn(CLIENT_SAVED_AT);
+    given(asset.getCreatedAt()).willReturn(SAVED_AT);
+    given(drawingAssetRepository.findAllByDrawingSessionIdOrderByCreatedAtDescIdDesc(SESSION_ID))
+        .willReturn(List.of(asset));
+
+    var snapshots = service.getSnapshots(SESSION_ID);
+
+    assertThat(snapshots).hasSize(1);
+    assertThat(snapshots.getFirst().drawingAssetId()).isEqualTo(20L);
+    assertThat(snapshots.getFirst().assetType()).isEqualTo(DrawingAssetType.INTERMEDIATE);
+    assertThat(snapshots.getFirst().capturedAt())
+        .isEqualTo(CLIENT_SAVED_AT.toInstant(ZoneOffset.UTC));
+  }
+
+  @Test
   void returnsAuthorizedSessionDetailWithLatestResources() {
     givenDetailSession();
     given(

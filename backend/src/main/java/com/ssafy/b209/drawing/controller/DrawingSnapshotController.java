@@ -1,8 +1,10 @@
 package com.ssafy.b209.drawing.controller;
 
 import com.ssafy.b209.drawing.dto.request.UploadDrawingSnapshotRequest;
+import com.ssafy.b209.drawing.dto.response.DrawingSessionAssetSummaryResponse;
 import com.ssafy.b209.drawing.dto.response.UploadDrawingSnapshotResponse;
 import com.ssafy.b209.drawing.exception.DrawingErrorCode;
+import com.ssafy.b209.drawing.service.DrawingSessionQueryService;
 import com.ssafy.b209.drawing.service.DrawingSnapshotService;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.response.ApiErrorResponse;
@@ -10,6 +12,7 @@ import com.ssafy.b209.global.response.ApiResponse;
 import com.ssafy.b209.global.response.CommonSuccessCode;
 import com.ssafy.b209.storage.image.StoreImageCommand;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -19,9 +22,11 @@ import jakarta.validation.constraints.Positive;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URI;
+import java.util.List;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -42,14 +47,55 @@ import org.springframework.web.multipart.MultipartFile;
 public class DrawingSnapshotController {
 
   private final DrawingSnapshotService drawingSnapshotService;
+  private final DrawingSessionQueryService drawingSessionQueryService;
 
   /**
-   * 스냅샷 업로드 서비스를 사용하는 Controller를 생성한다.
+   * 스냅샷 업로드·조회 서비스를 사용하는 Controller를 생성한다.
    *
    * @param drawingSnapshotService 이미지와 Metadata 업로드를 처리하는 서비스
+   * @param drawingSessionQueryService 그림 활동 읽기 전용 조회 서비스
    */
-  public DrawingSnapshotController(DrawingSnapshotService drawingSnapshotService) {
+  public DrawingSnapshotController(
+      DrawingSnapshotService drawingSnapshotService,
+      DrawingSessionQueryService drawingSessionQueryService) {
     this.drawingSnapshotService = drawingSnapshotService;
+    this.drawingSessionQueryService = drawingSessionQueryService;
+  }
+
+  /**
+   * 그림 활동 세션의 그림 파일 스냅샷 목록을 최신순으로 조회한다.
+   *
+   * <p>조회만 수행하며 내부 저장 위치는 응답에 포함하지 않는다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @return HTTP 200과 최신순 스냅샷 Metadata 목록 공통 응답
+   */
+  @Operation(
+      summary = "그림 스냅샷 목록 조회",
+      description = "연결 보호자가 그림 활동 세션의 스냅샷 Metadata를 최신순으로 조회합니다. 내부 저장 위치는 포함하지 않습니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "그림 스냅샷 목록 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "그림 활동 세션 식별자 형식 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "접근 가능한 그림 활동을 찾을 수 없음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping
+  public ResponseEntity<ApiResponse<List<DrawingSessionAssetSummaryResponse>>> getDrawingSnapshots(
+      @Parameter(description = "조회할 그림 활동 세션 식별자", required = true) @PathVariable @Positive
+          Long drawingSessionId) {
+    return ResponseEntity.ok(
+        ApiResponse.ok(drawingSessionQueryService.getSnapshots(drawingSessionId)));
   }
 
   /**

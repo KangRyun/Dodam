@@ -176,6 +176,25 @@ public class DrawingSessionQueryService {
         latestDraft);
   }
 
+  /**
+   * 보호자가 접근할 수 있는 그림 활동의 그림 파일 스냅샷 목록을 최신순으로 조회한다.
+   *
+   * <p>내부 저장 위치는 응답에 포함하지 않으며 조회 과정에서 상태를 변경하지 않는다.
+   *
+   * @param drawingSessionId 조회할 그림 활동 세션 식별자
+   * @return 최신순 그림 파일 Metadata 목록, 없으면 빈 목록
+   * @throws BusinessException 접근할 수 없거나 삭제된 세션인 경우
+   */
+  public List<DrawingSessionAssetSummaryResponse> getSnapshots(Long drawingSessionId) {
+    Long guardianUserId = currentUserResolver.requireUserId();
+    accessValidator.requireDrawingSessionAccess(guardianUserId, drawingSessionId);
+    return drawingAssetRepository
+        .findAllByDrawingSessionIdOrderByCreatedAtDescIdDesc(drawingSessionId)
+        .stream()
+        .map(this::toAssetSummary)
+        .toList();
+  }
+
   private LatestDrawingDraftResponse toLatestDraftResponse(DrawingAsset draft) {
     return new LatestDrawingDraftResponse(
         draft.getId(),
