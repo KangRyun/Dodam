@@ -1,4 +1,4 @@
-# 보호자 활동 기록 목록 조회 계약서 (HISTORY-01 / S15P11B209-154)
+# 보호자 활동 기록 목록 조회 계약서 (HISTORY-01 / S15P11B209-154, S15P11B209-292)
 
 - 상태: 구현 기준 계약 (draft)
 - 작성: 2026-07-24
@@ -23,8 +23,8 @@
 | drawingTypeCode | string | 없음 | 그림 유형 코드 필터 |
 | sessionStatus | `DrawingSessionStatus` | 없음 | 상태 필터(enum 밖 값 400) |
 | reportStatus | `ReportStatus` | 없음 | 리포트 상태 필터 |
-| page, size | int | 0, 20 | size 상한(예: 100) 적용 |
-| sort | string | `startedAt,desc` | **`startedAt`, `completedAt`만 허용**(그 외 400). asc/desc |
+| page, size | int | 0, 20 | size 상한 100, JPA가 처리할 수 없는 offset은 400 |
+| sort | string | `startedAt,desc` | **`startedAt`, `completedAt`만 허용**. `필드,방향` 두 요소 형식이며 같은 시각은 ID로 안정 정렬 |
 
 ## 3. 응답 (페이지네이션)
 기존 공통 페이지 응답 포맷 재사용(다른 목록 API 관례 따름). 목록 항목:
@@ -52,8 +52,8 @@
 
 ## 7. 결정 로그 / 기본값
 - **d1 (권한):** child→보호자 관계 검증(`GuardianResourceAccessRepository`/child access 재사용). 관계 없으면 403. child 없음 404.
-- **d2 (정렬 화이트리스트):** sort 필드는 startedAt/completedAt만. 그 외/형식 오류 400(임의 컬럼 정렬 금지 — 인젝션·성능 방어).
-- **d3 (analysis/report 다중건):** 세션당 최신 1건 기준(reportId=최신, analysisStatus=최신 FINAL). 규칙은 153/152 관례 참고.
+- **d2 (정렬 화이트리스트):** sort 필드는 startedAt/completedAt만. 그 외/형식 오류 400(임의 컬럼 정렬 금지 — 인젝션·성능 방어). NULL은 뒤로 보내고 동일 시각은 ID를 보조 키로 사용한다.
+- **d3 (analysis/report 다중건):** 세션당 최신 1건 기준(report는 createdAt·ID 역순, analysisStatus는 최신 FINAL). 규칙은 153/152 관례 참고.
 - **d4 (thumbnailUrl):** 서명 URL 규칙이 별도 있으면 재사용, 없으면 asset 저장 URL/키, 그래도 없으면 null.
 - **d5 (빈 결과):** 필터 결과 없음은 빈 페이지(200), 오류 아님.
 
