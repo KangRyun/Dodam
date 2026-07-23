@@ -10,6 +10,7 @@ import '../../features/drawing/domain/repositories/drawing_repository.dart';
 import '../../features/guardian/presentation/screens/guardian_screens.dart';
 import '../../features/history/presentation/screens/history_screens.dart';
 import '../../features/report/presentation/screens/report_screen.dart';
+import '../../features/report/domain/repositories/report_repository.dart';
 import '../state/guardian_child_controller.dart';
 import '../widgets/app_placeholder_scaffold.dart';
 import 'app_routes.dart';
@@ -24,6 +25,7 @@ abstract final class AppRouter {
     AuthSessionRestore? authRestoreSession,
     ActivityRepository? activityRepository,
     DrawingRepository? drawingRepository,
+    ReportRepository? reportRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
   }) {
     final location = settings.name ?? AppRoutes.guardianHome;
@@ -70,9 +72,8 @@ abstract final class AppRouter {
           activityId: activityId,
           repository: activityRepository,
         ),
-      ['guardian', 'reports', final reportId] => ReportScreen(
-        reportId: reportId,
-      ),
+      ['guardian', 'reports', final reportId] when reportRepository != null =>
+        ReportScreen(reportId: reportId, repository: reportRepository),
       ['child', final childId, 'home']
           when _hasChildContext(childController, childId) &&
               drawingRepository != null =>
