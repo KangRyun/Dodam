@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../design_system/design_system.dart';
+import '../../application/conversation_end_controller.dart';
 import '../../application/option_answer_submission_controller.dart';
 import '../../application/question_skip_controller.dart';
 import '../../domain/models/ai_question.dart';
@@ -16,6 +17,8 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
     required this.submissionStatus,
     required this.skipStatus,
     required this.onSkip,
+    required this.endStatus,
+    required this.onEnd,
     super.key,
   });
 
@@ -29,6 +32,8 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
   final OptionAnswerSubmissionStatus submissionStatus;
   final QuestionSkipStatus skipStatus;
   final VoidCallback onSkip;
+  final ConversationEndStatus endStatus;
+  final VoidCallback onEnd;
 
   @override
   Widget build(BuildContext context) {
@@ -76,6 +81,8 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                             onSkip: onSkip,
                             submissionStatus: submissionStatus,
                             skipStatus: skipStatus,
+                            endStatus: endStatus,
+                            onEnd: onEnd,
                           ),
                         ),
                       ],
@@ -101,6 +108,8 @@ final class _ResponseActions extends StatelessWidget {
     required this.onSkip,
     required this.submissionStatus,
     required this.skipStatus,
+    required this.endStatus,
+    required this.onEnd,
     super.key,
   });
 
@@ -110,6 +119,8 @@ final class _ResponseActions extends StatelessWidget {
   final VoidCallback onSkip;
   final OptionAnswerSubmissionStatus submissionStatus;
   final QuestionSkipStatus skipStatus;
+  final ConversationEndStatus endStatus;
+  final VoidCallback onEnd;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -122,7 +133,8 @@ final class _ResponseActions extends StatelessWidget {
           onSelected: onSelected,
           enabled:
               submissionStatus != OptionAnswerSubmissionStatus.submitting &&
-              skipStatus != QuestionSkipStatus.submitting,
+              skipStatus != QuestionSkipStatus.submitting &&
+              endStatus != ConversationEndStatus.submitting,
         ),
       if (submissionStatus == OptionAnswerSubmissionStatus.submitting) ...[
         const SizedBox(height: AppSpacing.xs),
@@ -148,12 +160,22 @@ final class _ResponseActions extends StatelessWidget {
           style: TextStyle(color: AppColors.error, fontWeight: FontWeight.w700),
         ),
       ],
+      if (endStatus == ConversationEndStatus.failure) ...[
+        const SizedBox(height: AppSpacing.xs),
+        const Text(
+          '대화를 끝내지 못했어요. 다시 시도해 주세요.',
+          key: ValueKey('ai-conversation-end-failure'),
+          textAlign: TextAlign.center,
+          style: TextStyle(color: AppColors.error, fontWeight: FontWeight.w700),
+        ),
+      ],
       const SizedBox(height: AppSpacing.xs),
       TextButton.icon(
         key: const ValueKey('ai-question-skip'),
         onPressed:
             submissionStatus == OptionAnswerSubmissionStatus.submitting ||
-                skipStatus == QuestionSkipStatus.submitting
+                skipStatus == QuestionSkipStatus.submitting ||
+                endStatus == ConversationEndStatus.submitting
             ? null
             : onSkip,
         icon: skipStatus == QuestionSkipStatus.submitting
@@ -165,7 +187,7 @@ final class _ResponseActions extends StatelessWidget {
         label: Text(
           skipStatus == QuestionSkipStatus.submitting
               ? '계속 그리기로 돌아가는 중'
-              : '말 안 할래',
+              : '이 질문은 넘어갈래',
         ),
         style: TextButton.styleFrom(
           foregroundColor: AppColors.inkMuted,
@@ -175,6 +197,31 @@ final class _ResponseActions extends StatelessWidget {
             borderRadius: BorderRadius.circular(AppRadius.md),
             side: const BorderSide(color: AppColors.outlineStrong),
           ),
+        ),
+      ),
+      const SizedBox(height: AppSpacing.xs),
+      TextButton.icon(
+        key: const ValueKey('ai-conversation-end'),
+        onPressed:
+            submissionStatus == OptionAnswerSubmissionStatus.submitting ||
+                skipStatus == QuestionSkipStatus.submitting ||
+                endStatus == ConversationEndStatus.submitting
+            ? null
+            : onEnd,
+        icon: endStatus == ConversationEndStatus.submitting
+            ? const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.stop_circle_outlined),
+        label: Text(
+          endStatus == ConversationEndStatus.submitting
+              ? '대화를 마무리하는 중'
+              : '이제 질문 그만 받을래',
+        ),
+        style: TextButton.styleFrom(
+          foregroundColor: AppColors.inkMuted,
+          minimumSize: const Size.fromHeight(44),
         ),
       ),
     ],

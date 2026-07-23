@@ -17,6 +17,8 @@ void main() {
                 showResponseActions: true,
                 submissionStatus: OptionAnswerSubmissionStatus.idle,
                 skipStatus: QuestionSkipStatus.idle,
+                endStatus: ConversationEndStatus.idle,
+                onEnd: () {},
                 onSkip: () {},
               ),
             ],
@@ -31,7 +33,8 @@ void main() {
     expect(find.text('그림에는 누가 함께 있어?'), findsOneWidget);
     expect(find.text('가족이 있어'), findsOneWidget);
     expect(find.text('친구가 있어'), findsOneWidget);
-    expect(find.text('말 안 할래'), findsOneWidget);
+    expect(find.text('이 질문은 넘어갈래'), findsOneWidget);
+    expect(find.text('이제 질문 그만 받을래'), findsOneWidget);
   });
 
   testWidgets('선택지를 누르면 optionId를 전달하고 선택 상태를 표시한다', (tester) async {
@@ -49,6 +52,8 @@ void main() {
                 showResponseActions: true,
                 submissionStatus: OptionAnswerSubmissionStatus.idle,
                 skipStatus: QuestionSkipStatus.idle,
+                endStatus: ConversationEndStatus.idle,
+                onEnd: () {},
                 onSkip: () {},
               ),
             ],
@@ -77,6 +82,8 @@ void main() {
                 showResponseActions: true,
                 submissionStatus: OptionAnswerSubmissionStatus.idle,
                 skipStatus: QuestionSkipStatus.idle,
+                endStatus: ConversationEndStatus.idle,
+                onEnd: () {},
                 onSkip: () => skipRequested = true,
               ),
             ],
@@ -87,6 +94,35 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('ai-question-skip')));
     expect(skipRequested, isTrue);
+  });
+
+  testWidgets('대화 그만하기를 누르면 종료 확인 요청을 전달한다', (tester) async {
+    var endRequested = false;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Stack(
+            children: [
+              AiQuestionBubbleOverlay(
+                question: _question,
+                visible: true,
+                selectedOptionId: null,
+                onOptionSelected: (_) {},
+                showResponseActions: true,
+                submissionStatus: OptionAnswerSubmissionStatus.idle,
+                skipStatus: QuestionSkipStatus.idle,
+                onSkip: () {},
+                endStatus: ConversationEndStatus.idle,
+                onEnd: () => endRequested = true,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('ai-conversation-end')));
+    expect(endRequested, isTrue);
   });
 
   testWidgets('질문 데이터가 없으면 캐릭터와 말풍선을 만들지 않는다', (tester) async {
@@ -103,6 +139,8 @@ void main() {
                 showResponseActions: false,
                 submissionStatus: OptionAnswerSubmissionStatus.idle,
                 skipStatus: QuestionSkipStatus.idle,
+                endStatus: ConversationEndStatus.idle,
+                onEnd: () {},
                 onSkip: () {},
               ),
             ],
