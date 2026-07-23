@@ -97,14 +97,12 @@ OAuthTarget parseTarget(List<String> arguments) {
 Future<void> main(List<String> arguments) async {
   try {
     final target = parseTarget(arguments);
-    final writtenFiles = await writeOAuthConfiguration(
+    await writeOAuthConfiguration(
       projectRoot: Directory.current,
       values: Platform.environment,
       target: target,
     );
-    for (final path in writtenFiles) {
-      stdout.writeln('OAuth 설정 파일 생성 완료: $path');
-    }
+    stdout.writeln('OAuth 설정 파일 생성 완료.');
   } on FormatException catch (error) {
     stderr.writeln(error.message);
     exitCode = 64;
