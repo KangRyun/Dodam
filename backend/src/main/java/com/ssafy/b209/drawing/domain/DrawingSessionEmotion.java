@@ -60,6 +60,15 @@ public class DrawingSessionEmotion {
   }
 
   /**
+   * 감정을 선택한 그림 활동 세션을 반환한다.
+   *
+   * @return 감정이 속한 그림 활동 세션
+   */
+  public DrawingSession getDrawingSession() {
+    return drawingSession;
+  }
+
+  /**
    * 선택된 감정 코드를 반환한다.
    *
    * @return 선택 감정 코드

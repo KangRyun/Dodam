@@ -57,6 +57,19 @@ public interface DrawingAssetRepository extends JpaRepository<DrawingAsset, Long
       Long drawingSessionId, DrawingAssetType assetType);
 
   /**
+   * 여러 세션의 특정 유형 그림 파일을 세션·버전·식별자 순으로 한 번에 조회한다.
+   *
+   * <p>목록 조회에서 세션마다 개별 조회를 하지 않고 배치로 읽어 조립하기 위한 경계다. 각 세션의 첫 항목이 가장 높은 버전이다.
+   *
+   * @param drawingSessionIds 그림 활동 세션 식별자 목록
+   * @param assetType 그림 파일 용도
+   * @return 세션 식별자 오름차순, 버전과 식별자 역순으로 정렬된 그림 파일 목록
+   */
+  List<DrawingAsset>
+      findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+          List<Long> drawingSessionIds, DrawingAssetType assetType);
+
+  /**
    * 세션의 가장 최근 DRAFT Metadata를 조회한다.
    *
    * @param drawingSessionId 그림 활동 세션 식별자

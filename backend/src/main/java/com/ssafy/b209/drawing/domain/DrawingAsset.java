@@ -245,6 +245,17 @@ public class DrawingAsset {
   }
 
   /**
+   * 목록·미리보기에 사용할 수 있는 공개 파일 URL을 제공한다.
+   *
+   * <p>내부 저장 Key와 달리 외부에 노출해도 되는 값이며, 아직 공개 URL을 부여하지 않은 파일이면 {@code null}이다.
+   *
+   * @return 공개 파일 URL, 부여되지 않았으면 {@code null}
+   */
+  public String getFileUrl() {
+    return fileUrl;
+  }
+
+  /**
    * 요청 Header가 아닌 파일 내용으로 확정한 형식을 제공한다.
    *
    * @return 실제 파일 Signature로 검증된 MIME Type
