@@ -118,7 +118,9 @@ pipeline {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
         dir('backend') {
           // 테스트를 여기서 돌린다(이미지 빌드는 -x test로 스킵). 실패 시 파이프라인 중단 = 배포 안 함.
-          sh 'chmod +x gradlew && ./gradlew --no-daemon clean test'
+          // clean 제거 + --build-cache: 워크스페이스가 브랜치별로 재사용되므로 증분 컴파일 활용
+          //   (S15P11B209-391 — clean은 매번 풀컴파일을 강제해 2~4분 낭비였음)
+          sh 'chmod +x gradlew && ./gradlew --no-daemon --build-cache test'
         }
       }
       post {
@@ -217,6 +219,18 @@ pipeline {
       echo "❌ 실패 — 미배포이거나 헬스체크 실패. 콘솔 로그 확인 후 대응."
       script { notifyMattermost('❌', '빌드 실패') }
     }
-    always  { sh 'docker image prune -f >/dev/null 2>&1 || true' }  // 대롱거리는 중간 이미지 정리(디스크 절약)
+    always  {
+      // 이미지 보존정책(S15P11B209-391): SHA 태그는 서비스별 최신 3세대만 유지(:local 불가침).
+      //   reason: 무조건 `image prune -f`는 빌드 캐시를 파괴해 콜드 빌드(타임아웃 경주)를 유발했고,
+      //   SHA 태그는 프룬 대상이 아니라 무한 누적됐다(07/24 실측 268개·62GB → 1회 정리 후 이 정책으로 유지).
+      //   dangling 프룬은 until=24h 필터로 최근 캐시 레이어를 보존한다.
+      sh '''
+        for repo in dodam-backend dodam-ai dodam-nginx; do
+          docker images --format '{{.Repository}}:{{.Tag}}' "$repo" 2>/dev/null \
+            | grep -v ':local' | tail -n +4 | xargs -r docker rmi >/dev/null 2>&1 || true
+        done
+        docker image prune -f --filter "until=24h" >/dev/null 2>&1 || true
+      '''
+    }
   }
 }
