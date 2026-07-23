@@ -1,10 +1,12 @@
 package com.ssafy.b209.child.controller;
 
+import com.ssafy.b209.child.dto.request.DeleteChildRequest;
 import com.ssafy.b209.child.dto.request.RegisterChildRequest;
 import com.ssafy.b209.child.dto.request.UpdateChildRequest;
 import com.ssafy.b209.child.dto.response.ChildDetailResponse;
 import com.ssafy.b209.child.dto.response.ChildRegistrationResponse;
 import com.ssafy.b209.child.dto.response.ChildSummaryResponse;
+import com.ssafy.b209.child.service.ChildDeletionService;
 import com.ssafy.b209.child.service.ChildQueryService;
 import com.ssafy.b209.child.service.ChildRegistrationService;
 import com.ssafy.b209.child.service.ChildUpdateService;
@@ -24,6 +26,7 @@ import java.net.URI;
 import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -48,6 +51,7 @@ public class ChildController {
   private final ChildQueryService childQueryService;
   private final ChildRegistrationService childRegistrationService;
   private final ChildUpdateService childUpdateService;
+  private final ChildDeletionService childDeletionService;
 
   /**
    * 보호자 식별 경계와 아동 조회·등록 서비스를 사용하는 Controller를 생성한다.
@@ -56,16 +60,19 @@ public class ChildController {
    * @param childQueryService 아동 상세 조회 Use Case
    * @param childRegistrationService 아동 프로필 등록 Use Case
    * @param childUpdateService 아동 프로필 부분 수정 Use Case
+   * @param childDeletionService 아동 프로필 삭제 Use Case
    */
   public ChildController(
       TemporaryGuardianResolver guardianResolver,
       ChildQueryService childQueryService,
       ChildRegistrationService childRegistrationService,
-      ChildUpdateService childUpdateService) {
+      ChildUpdateService childUpdateService,
+      ChildDeletionService childDeletionService) {
     this.guardianResolver = guardianResolver;
     this.childQueryService = childQueryService;
     this.childRegistrationService = childRegistrationService;
     this.childUpdateService = childUpdateService;
+    this.childDeletionService = childDeletionService;
   }
 
   /**
@@ -243,5 +250,47 @@ public class ChildController {
     Long resolvedGuardianUserId = guardianResolver.resolve(authorization, guardianUserId);
     return ResponseEntity.ok(
         ApiResponse.ok(childUpdateService.update(resolvedGuardianUserId, childId, request)));
+  }
+
+  /**
+   * 요청 보호자가 유일하게 연결된 아동 프로필을 삭제 상태로 전환한다.
+   *
+   * @param childId 삭제할 아동 식별자
+   * @param request 명시적 삭제 확인 값
+   * @param authorization Test Profile의 호환성 검증에만 사용하는 임시 Header
+   * @param guardianUserId Test Profile의 호환성 검증에만 사용하는 임시 Header
+   * @return 본문이 없는 HTTP 204 응답
+   */
+  @Operation(
+      summary = "아동 프로필 삭제",
+      description = "confirmation이 DELETE이고 요청자가 유일한 연결 보호자인 경우 프로필을 삭제 상태로 전환하고 연관 파일 삭제를 예약합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "204",
+        description = "아동 프로필 삭제 접수 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "아동 식별자 또는 삭제 확인 값 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "아동이 없거나 삭제됐거나 요청 보호자에게 연결되지 않음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "409",
+        description = "다른 보호자가 연결되어 전체 삭제 불가",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @DeleteMapping("/{childId}")
+  public ResponseEntity<Void> deleteChild(
+      @Parameter(description = "삭제할 아동 식별자", required = true) @PathVariable @Positive Long childId,
+      @Valid @RequestBody DeleteChildRequest request,
+      @Parameter(hidden = true) @RequestHeader(value = "Authorization", required = false)
+          String authorization,
+      @Parameter(hidden = true) @RequestHeader(value = "X-Guardian-User-Id", required = false)
+          String guardianUserId) {
+    Long resolvedGuardianUserId = guardianResolver.resolve(authorization, guardianUserId);
+    childDeletionService.delete(resolvedGuardianUserId, childId, request);
+    return ResponseEntity.noContent().build();
   }
 }
