@@ -3,6 +3,7 @@ package com.ssafy.b209.analysis.controller;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisDetailResponse;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisHistoryResponse;
 import com.ssafy.b209.analysis.service.DrawingAnalysisQueryService;
 import com.ssafy.b209.analysis.service.DrawingAnalysisService;
 import com.ssafy.b209.global.exception.BusinessException;
@@ -17,6 +18,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Positive;
 import java.net.URI;
+import java.util.List;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -52,6 +54,39 @@ public class DrawingAnalysisController {
       DrawingAnalysisQueryService drawingAnalysisQueryService) {
     this.drawingAnalysisService = drawingAnalysisService;
     this.drawingAnalysisQueryService = drawingAnalysisQueryService;
+  }
+
+  /**
+   * 세션에 속한 그림 분석 이력을 요청 시각 역순으로 조회한다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @return HTTP 200과 요청 시각 역순의 분석 이력 목록 공통 응답
+   */
+  @Operation(
+      summary = "활동별 그림 분석 이력 조회",
+      description = "연결 보호자가 그림 활동 세션의 분석 이력을 요청 시각 역순으로 조회합니다. 객체 탐지 결과는 상세 조회에서 제공합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "분석 이력 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "그림 활동 세션 식별자 형식 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "접근 가능한 그림 활동을 찾을 수 없음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping
+  public ResponseEntity<ApiResponse<List<DrawingAnalysisHistoryResponse>>> getAnalyses(
+      @PathVariable @Positive Long drawingSessionId) {
+    return ResponseEntity.ok(
+        ApiResponse.ok(drawingAnalysisQueryService.getDrawingAnalyses(drawingSessionId)));
   }
 
   /**

@@ -3,6 +3,7 @@ package com.ssafy.b209.analysis.repository;
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import jakarta.persistence.LockModeType;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
@@ -19,6 +20,15 @@ public interface DrawingAnalysisRepository extends JpaRepository<DrawingAnalysis
    * @return 요청 시각과 식별자 역순의 첫 번째 분석, 없으면 빈 값
    */
   Optional<DrawingAnalysis> findFirstByDrawingSessionIdOrderByRequestedAtDescIdDesc(
+      Long drawingSessionId);
+
+  /**
+   * 세션에 속한 모든 분석 실행을 요청 시각 역순으로 조회한다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @return 요청 시각과 식별자 역순의 분석 이력, 없으면 빈 목록
+   */
+  List<DrawingAnalysis> findAllByDrawingSessionIdOrderByRequestedAtDescIdDesc(
       Long drawingSessionId);
 
   /**

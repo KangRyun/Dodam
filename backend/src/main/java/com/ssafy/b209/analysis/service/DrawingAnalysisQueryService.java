@@ -5,6 +5,7 @@ import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
 import com.ssafy.b209.analysis.dto.BoundingBoxResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisDetailResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisFailureResponse;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisHistoryResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisModelResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingDetectionResponse;
@@ -79,6 +80,37 @@ public class DrawingAnalysisQueryService {
       case FAILED -> failureResponse(analysis);
       case PARTIAL_SUCCESS -> throw inconsistent();
     };
+  }
+
+  /**
+   * 요청한 세션의 그림 분석 이력을 요청 시각 역순으로 조회한다.
+   *
+   * <p>객체 탐지 결과는 포함하지 않고 상태 요약만 반환하며 조회 과정에서 상태를 변경하지 않는다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @return 요청 시각 역순의 분석 이력 목록, 없으면 빈 목록
+   * @throws BusinessException 접근할 수 없거나 삭제된 세션인 경우
+   */
+  @Transactional(readOnly = true)
+  public List<DrawingAnalysisHistoryResponse> getDrawingAnalyses(Long drawingSessionId) {
+    Long guardianUserId = currentUserResolver.requireUserId();
+    accessValidator.requireDrawingSessionAccess(guardianUserId, drawingSessionId);
+    return drawingAnalysisRepository
+        .findAllByDrawingSessionIdOrderByRequestedAtDescIdDesc(drawingSessionId)
+        .stream()
+        .map(this::toHistory)
+        .toList();
+  }
+
+  private DrawingAnalysisHistoryResponse toHistory(DrawingAnalysis analysis) {
+    return new DrawingAnalysisHistoryResponse(
+        analysis.getId(),
+        analysis.getDrawingAsset().getId(),
+        analysis.getScope(),
+        analysis.getTaskType(),
+        analysis.getState(),
+        toInstant(analysis.getRequestedAt()),
+        analysis.getCompletedAt() == null ? null : toInstant(analysis.getCompletedAt()));
   }
 
   private DrawingAnalysisDetailResponse inProgressResponse(

@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
@@ -57,6 +58,32 @@ class DrawingAnalysisQueryServiceTest {
     service =
         new DrawingAnalysisQueryService(
             drawingAnalysisRepository, currentUserResolver, accessValidator);
+  }
+
+  @Test
+  void listsAnalysisHistoryForAnAccessibleSession() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    DrawingAnalysis analysis = mock(DrawingAnalysis.class);
+    given(analysis.getId()).willReturn(ANALYSIS_ID);
+    given(analysis.getDrawingAsset()).willReturn(asset);
+    given(asset.getId()).willReturn(ASSET_ID);
+    given(analysis.getScope()).willReturn(DrawingAnalysisScope.FINAL);
+    given(analysis.getTaskType()).willReturn(DrawingAnalysisType.OBJECT_DETECTION);
+    given(analysis.getState()).willReturn(DrawingAnalysisState.SUCCESS);
+    given(analysis.getRequestedAt()).willReturn(REQUESTED_AT);
+    given(analysis.getCompletedAt()).willReturn(PROCESSED_AT);
+    given(
+            drawingAnalysisRepository.findAllByDrawingSessionIdOrderByRequestedAtDescIdDesc(
+                SESSION_ID))
+        .willReturn(List.of(analysis));
+
+    var history = service.getDrawingAnalyses(SESSION_ID);
+
+    assertThat(history).hasSize(1);
+    assertThat(history.getFirst().drawingAnalysisId()).isEqualTo(ANALYSIS_ID);
+    assertThat(history.getFirst().drawingAssetId()).isEqualTo(ASSET_ID);
+    assertThat(history.getFirst().scope()).isEqualTo(DrawingAnalysisScope.FINAL);
+    assertThat(history.getFirst().state()).isEqualTo(DrawingAnalysisState.SUCCESS);
   }
 
   @Test
