@@ -562,6 +562,8 @@ Google 요청:
 - 요청 사용자 ID는 Body로 받지 않으며 IP와 User-Agent를 감사 정보로 저장합니다.
 - 기존 `consent_terms`, `consent_records`, `consent_record_evidences` 구조를 사용하므로 신규 DB Migration은 없습니다.
 
+선택 약관은 `PATCH /api/v1/consents`에서 같은 요청 형식으로 동의·철회·재동의할 수 있습니다. 이 API는 선택 약관만 허용하며, 변경 결과도 기존 행을 갱신하지 않고 새 `consent_records` 이력으로 추가합니다. 필수 약관 변경은 `CONSENT_400_002`로 거부됩니다.
+
 ## 아동 정보 조회 API
 
 연결된 보호자는 다음 Endpoint로 삭제되지 않은 활성 아동의 상세 프로필을 조회합니다.

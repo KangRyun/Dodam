@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -12,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.consent.domain.ConsentTargetScope;
 import com.ssafy.b209.consent.dto.request.CreateConsentRequest;
+import com.ssafy.b209.consent.dto.response.ConsentChangeResponse;
 import com.ssafy.b209.consent.dto.response.ConsentRegistrationResponse;
 import com.ssafy.b209.consent.dto.response.ConsentStatusItemResponse;
 import com.ssafy.b209.consent.dto.response.ConsentStatusResponse;
@@ -137,5 +139,33 @@ class ConsentControllerTest {
                     """))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.success").value(false));
+  }
+
+  @Test
+  void changesOptionalConsentAsAppendOnlyHistory() throws Exception {
+    when(currentUserResolver.requireUserId()).thenReturn(41L);
+    when(registrationService.changeOptional(
+            eq(41L), any(CreateConsentRequest.class), any(), eq("app/1.0")))
+        .thenReturn(new ConsentChangeResponse(null, 1, LocalDateTime.of(2026, 7, 24, 0, 0)));
+
+    mockMvc
+        .perform(
+            patch("/api/v1/consents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("User-Agent", "app/1.0")
+                .content(
+                    """
+                    {
+                      "agreements": [
+                        {"termId": 4, "action": "WITHDRAW"}
+                      ]
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.recordedCount").value(1));
+
+    verify(registrationService)
+        .changeOptional(eq(41L), any(CreateConsentRequest.class), any(), eq("app/1.0"));
   }
 }
