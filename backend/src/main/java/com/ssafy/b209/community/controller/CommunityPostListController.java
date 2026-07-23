@@ -37,10 +37,13 @@ public class CommunityPostListController {
   /**
    * 공개·활성 게시글을 필터, 정렬과 페이지 조건으로 조회한다.
    *
-   * @param postType 게시글 유형 필터
+   * @param type 게시글 유형 필터
+   * @param keyword 제목·내용 검색어
+   * @param feed {@code ALL} 또는 팔로우한 전문가의 {@code FOLLOWING} 피드
+   * @param authorRole {@code GUARDIAN} 또는 {@code EXPERT} 작성자 역할
    * @param page 0부터 시작하는 페이지 번호
    * @param size 페이지 크기
-   * @param sort {@code createdAt,desc} 또는 {@code updatedAt,asc} 형식의 정렬 조건
+   * @param sort {@code createdAt,desc} 또는 {@code likeCount,asc} 형식의 정렬 조건
    * @return HTTP 200과 공통 성공 응답으로 감싼 목록 페이지
    * @throws BusinessException 인증이 없거나 Query가 공개 계약을 위반한 경우
    */
@@ -60,12 +63,16 @@ public class CommunityPostListController {
   })
   @GetMapping
   public ResponseEntity<ApiResponse<PostListPageResponse>> getPosts(
-      @RequestParam(required = false) String postType,
+      @RequestParam(required = false) String type,
+      @RequestParam(required = false) String keyword,
+      @RequestParam(required = false) String feed,
+      @RequestParam(required = false) String authorRole,
       @RequestParam(required = false) String page,
       @RequestParam(required = false) String size,
       @RequestParam(required = false) String sort) {
     PostListPageResponse response =
-        communityPostListService.getPosts(new PostListQuery(postType, page, size, sort));
+        communityPostListService.getPosts(
+            new PostListQuery(type, keyword, feed, authorRole, page, size, sort));
     return ResponseEntity.ok(ApiResponse.ok(response));
   }
 }

@@ -1,9 +1,11 @@
 package com.ssafy.b209.community.service;
 
 import com.ssafy.b209.auth.domain.User;
+import com.ssafy.b209.auth.domain.UserRole;
 import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.repository.UserRepository;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
+import com.ssafy.b209.community.domain.PostFeed;
 import com.ssafy.b209.community.domain.PostListSort;
 import com.ssafy.b209.community.domain.PostListSort.SortDirection;
 import com.ssafy.b209.community.domain.PostListSort.SortField;
@@ -35,6 +37,7 @@ public class CommunityPostListService {
   private static final int DEFAULT_PAGE = 0;
   private static final int DEFAULT_SIZE = 20;
   private static final int MAX_SIZE = 100;
+  private static final int MAX_KEYWORD_CODE_POINTS = 100;
   private static final int CONTENT_PREVIEW_CODE_POINTS = 200;
 
   private final CurrentAuthenticatedUserResolver currentAuthenticatedUserResolver;
@@ -109,11 +112,36 @@ public class CommunityPostListService {
       throw new BusinessException(CommunityErrorCode.VALIDATION_FAILED);
     }
     return new PostListSearchCriteria(
-        parseOptionalEnum(query.postType(), PostType.class),
+        parseOptionalEnum(query.type(), PostType.class),
+        parseKeywordPattern(query.keyword()),
+        query.feed() == null ? PostFeed.ALL : parseRequiredEnum(query.feed(), PostFeed.class),
+        parseAuthorRole(query.authorRole()),
         page,
         size,
         parseSort(query.sort()),
         viewerUserId);
+  }
+
+  private String parseKeywordPattern(String rawKeyword) {
+    if (rawKeyword == null || rawKeyword.isBlank()) {
+      return null;
+    }
+    String keyword = rawKeyword.trim();
+    if (keyword.codePointCount(0, keyword.length()) > MAX_KEYWORD_CODE_POINTS) {
+      throw new BusinessException(CommunityErrorCode.VALIDATION_FAILED);
+    }
+    return "%" + keyword.replace("!", "!!").replace("%", "!%").replace("_", "!_") + "%";
+  }
+
+  private UserRole parseAuthorRole(String rawAuthorRole) {
+    if (rawAuthorRole == null) {
+      return null;
+    }
+    UserRole role = parseRequiredEnum(rawAuthorRole, UserRole.class);
+    if (role != UserRole.GUARDIAN && role != UserRole.EXPERT) {
+      throw new BusinessException(CommunityErrorCode.VALIDATION_FAILED);
+    }
+    return role;
   }
 
   private PostListItemResponse toResponse(CommunityPostListRow row) {
@@ -196,7 +224,7 @@ public class CommunityPostListService {
     SortField field =
         switch (tokens[0]) {
           case "createdAt" -> SortField.CREATED_AT;
-          case "updatedAt" -> SortField.UPDATED_AT;
+          case "likeCount" -> SortField.LIKE_COUNT;
           default -> throw new BusinessException(CommunityErrorCode.VALIDATION_FAILED);
         };
     SortDirection direction =

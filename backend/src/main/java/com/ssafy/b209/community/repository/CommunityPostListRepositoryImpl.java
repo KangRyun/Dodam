@@ -26,13 +26,25 @@ public class CommunityPostListRepositoryImpl implements CommunityPostListReposit
         AND p.is_visible = true
         AND p.deleted_at IS NULL
         AND (:postType IS NULL OR p.post_type = :postType)
+        AND (:keywordPattern IS NULL
+          OR p.title LIKE :keywordPattern ESCAPE '!'
+          OR p.content LIKE :keywordPattern ESCAPE '!')
+        AND (:authorRole IS NULL OR u.role = :authorRole)
+        AND (:feed = 'ALL' OR EXISTS (
+          SELECT 1
+          FROM expert_follows ef
+          JOIN expert_profiles ep ON ep.id = ef.expert_profile_id
+          WHERE ef.guardian_user_id = :viewerUserId
+            AND ep.user_id = p.author_user_id
+            AND ep.deleted_at IS NULL
+        ))
       """;
 
   private static final String SELECT_COLUMNS =
       """
       SELECT p.id, p.post_type, p.title, p.content, p.is_anonymous, p.created_at, p.updated_at,
              u.id, u.nickname,
-             (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id),
+             (SELECT COUNT(*) FROM post_likes pl WHERE pl.post_id = p.id) AS like_count,
              (SELECT COUNT(*) FROM comments c
                 WHERE c.post_id = p.id
                   AND c.comment_status = 'ACTIVE'
@@ -80,7 +92,7 @@ public class CommunityPostListRepositoryImpl implements CommunityPostListReposit
 
   private String contentSql(PostListSearchCriteria criteria) {
     String orderColumn =
-        criteria.sort().field() == SortField.CREATED_AT ? "p.created_at" : "p.updated_at";
+        criteria.sort().field() == SortField.CREATED_AT ? "p.created_at" : "like_count";
     String direction = criteria.sort().direction() == SortDirection.ASC ? "ASC" : "DESC";
     return SELECT_COLUMNS
         + FROM_AND_WHERE
@@ -93,6 +105,10 @@ public class CommunityPostListRepositoryImpl implements CommunityPostListReposit
 
   private void bindConditions(Query query, PostListSearchCriteria criteria) {
     query.setParameter("postType", criteria.postType() == null ? null : criteria.postType().name());
+    query.setParameter("keywordPattern", criteria.keywordPattern());
+    query.setParameter(
+        "authorRole", criteria.authorRole() == null ? null : criteria.authorRole().name());
+    query.setParameter("feed", criteria.feed().name());
     query.setParameter("viewerUserId", criteria.viewerUserId());
   }
 
