@@ -205,20 +205,58 @@ class DrawingSessionHistoryRepositoryTest {
   }
 
   @Test
+  void filtersLatestReportByCreatedAtBeforeId() {
+    DrawingAsset asset = saveDraft(failedHouse, 1, LocalDateTime.of(2026, 7, 10, 8, 1));
+    DrawingAnalysis analysis =
+        drawingAnalysisRepository.save(
+            DrawingAnalysis.processing(
+                failedHouse,
+                asset,
+                DrawingAnalysisScope.FINAL,
+                DrawingAnalysisType.OBJECT_DETECTION,
+                "hist-analysis-created-at",
+                LocalDateTime.of(2026, 7, 10, 8, 2)));
+    Report latestByTime =
+        Report.generating(failedHouse, analysis, 1, LocalDateTime.of(2026, 7, 10, 9, 0));
+    latestByTime.complete(false, "latest completed", LocalDateTime.of(2026, 7, 10, 9, 1));
+    reportRepository.save(latestByTime);
+    Report higherIdButOlder =
+        Report.generating(failedHouse, analysis, 2, LocalDateTime.of(2026, 7, 10, 8, 0));
+    higherIdButOlder.fail("older failed", LocalDateTime.of(2026, 7, 10, 8, 1));
+    reportRepository.save(higherIdButOlder);
+    entityManager.flush();
+    entityManager.clear();
+
+    assertThat(
+            drawingSessionRepository
+                .findHistoryPage(
+                    childId,
+                    null,
+                    null,
+                    null,
+                    null,
+                    ReportStatus.COMPLETED,
+                    PageRequest.of(0, 20, STARTED_DESC))
+                .getContent())
+        .extracting(DrawingSession::getId)
+        .containsExactly(failedHouse.getId());
+  }
+
+  @Test
   void sortsByCompletedAtAndPaginates() {
+    Sort completedDesc =
+        Sort.by(
+            new Sort.Order(Sort.Direction.DESC, "completedAt", Sort.NullHandling.NULLS_LAST),
+            new Sort.Order(Sort.Direction.DESC, "id"));
     Page<DrawingSession> firstPage =
         drawingSessionRepository.findHistoryPage(
-            childId,
-            null,
-            null,
-            null,
-            null,
-            null,
-            PageRequest.of(0, 2, Sort.by(Sort.Direction.DESC, "startedAt")));
+            childId, null, null, null, null, null, PageRequest.of(0, 2, completedDesc));
 
     assertThat(firstPage.getTotalElements()).isEqualTo(3);
     assertThat(firstPage.getTotalPages()).isEqualTo(2);
-    assertThat(firstPage.getContent()).hasSize(2);
+    assertThat(firstPage.getContent())
+        .extracting(DrawingSession::getId)
+        .containsExactly(completedHouse.getId(), failedHouse.getId());
     assertThat(firstPage.hasNext()).isTrue();
   }
 

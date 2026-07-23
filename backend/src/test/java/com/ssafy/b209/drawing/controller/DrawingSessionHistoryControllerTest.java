@@ -74,7 +74,7 @@ class DrawingSessionHistoryControllerTest {
             isNull(),
             isNull(),
             isNull(),
-            eq(PageRequest.of(0, 20, Sort.by(Sort.Direction.DESC, "startedAt"))));
+            eq(historyPage(0, 20, Sort.Direction.DESC, "startedAt")));
   }
 
   @Test
@@ -111,7 +111,7 @@ class DrawingSessionHistoryControllerTest {
             eq("HOUSE"),
             eq(DrawingSessionStatus.COMPLETED),
             eq(ReportStatus.COMPLETED),
-            eq(PageRequest.of(1, 5, Sort.by(Sort.Direction.ASC, "completedAt"))));
+            eq(historyPage(1, 5, Sort.Direction.ASC, "completedAt")));
   }
 
   @Test
@@ -137,6 +137,26 @@ class DrawingSessionHistoryControllerTest {
   void rejectsSizeAboveLimitWithBadRequest() throws Exception {
     mockMvc
         .perform(get("/api/v1/children/3/drawing-sessions").param("size", "101"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
+  @Test
+  void rejectsMalformedSortWithBadRequest() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/children/3/drawing-sessions").param("sort", "startedAt,desc,unexpected"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
+  @Test
+  void rejectsPageOffsetBeyondJpaLimitWithBadRequest() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/children/3/drawing-sessions")
+                .param("page", String.valueOf(Integer.MAX_VALUE))
+                .param("size", "100"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("COMMON_400_001"));
   }
@@ -184,5 +204,13 @@ class DrawingSessionHistoryControllerTest {
             Instant.parse("2026-07-22T04:00:00Z"),
             Instant.parse("2026-07-22T04:30:00Z"));
     return new DrawingSessionHistoryPageResponse(List.of(item), 0, 20, 1, 1, true, true, false);
+  }
+
+  private PageRequest historyPage(int page, int size, Sort.Direction direction, String property) {
+    Sort sort =
+        Sort.by(
+            new Sort.Order(direction, property, Sort.NullHandling.NULLS_LAST),
+            new Sort.Order(direction, "id"));
+    return PageRequest.of(page, size, sort);
   }
 }

@@ -1,6 +1,7 @@
 package com.ssafy.b209.drawing.service;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
@@ -18,9 +19,12 @@ import com.ssafy.b209.drawing.dto.response.DrawingTypeSummaryResponse;
 import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
+import com.ssafy.b209.global.exception.BusinessException;
+import com.ssafy.b209.global.response.CommonErrorCode;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportStatus;
 import com.ssafy.b209.report.repository.ReportRepository;
+import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -106,7 +110,7 @@ public class DrawingSessionHistoryQueryService {
     accessValidator.requireChildAccess(guardianUserId, childId);
 
     LocalDateTime fromInclusive = from == null ? null : from.atStartOfDay();
-    LocalDateTime toExclusive = to == null ? null : to.plusDays(1).atStartOfDay();
+    LocalDateTime toExclusive = toExclusive(to);
 
     Page<DrawingSession> page =
         drawingSessionRepository.findHistoryPage(
@@ -193,7 +197,8 @@ public class DrawingSessionHistoryQueryService {
     }
     for (DrawingAnalysis analysis :
         drawingAnalysisRepository
-            .findByDrawingSessionIdInOrderByDrawingSessionIdAscRequestedAtDescIdDesc(sessionIds)) {
+            .findByDrawingSessionIdInAndScopeOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
+                sessionIds, DrawingAnalysisScope.FINAL)) {
       bySession.putIfAbsent(
           analysis.getDrawingSession().getId(), DrawingAnalysisStatus.from(analysis.getState()));
     }
@@ -219,5 +224,16 @@ public class DrawingSessionHistoryQueryService {
 
   private Instant toNullableInstant(LocalDateTime dateTime) {
     return dateTime == null ? null : dateTime.toInstant(ZoneOffset.UTC);
+  }
+
+  private LocalDateTime toExclusive(LocalDate to) {
+    if (to == null) {
+      return null;
+    }
+    try {
+      return to.plusDays(1).atStartOfDay();
+    } catch (DateTimeException exception) {
+      throw new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE);
+    }
   }
 }

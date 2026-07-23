@@ -132,7 +132,11 @@ public interface DrawingSessionRepository extends JpaRepository<DrawingSession, 
               + "  select 1 from Report r "
               + "  where r.drawingSession = s "
               + "  and r.status = :reportStatus "
-              + "  and r.id = (select max(r2.id) from Report r2 where r2.drawingSession = s)))",
+              + "  and not exists ("
+              + "    select 1 from Report r2 "
+              + "    where r2.drawingSession = s "
+              + "    and (r2.createdAt > r.createdAt "
+              + "      or (r2.createdAt = r.createdAt and r2.id > r.id)))))",
       countQuery =
           "select count(s) from DrawingSession s "
               + "where s.child.id = :childId "
@@ -147,7 +151,11 @@ public interface DrawingSessionRepository extends JpaRepository<DrawingSession, 
               + "  select 1 from Report r "
               + "  where r.drawingSession = s "
               + "  and r.status = :reportStatus "
-              + "  and r.id = (select max(r2.id) from Report r2 where r2.drawingSession = s)))")
+              + "  and not exists ("
+              + "    select 1 from Report r2 "
+              + "    where r2.drawingSession = s "
+              + "    and (r2.createdAt > r.createdAt "
+              + "      or (r2.createdAt = r.createdAt and r2.id > r.id)))))")
   Page<DrawingSession> findHistoryPage(
       @Param("childId") Long childId,
       @Param("fromInclusive") LocalDateTime fromInclusive,

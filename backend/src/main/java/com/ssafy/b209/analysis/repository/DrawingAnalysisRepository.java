@@ -1,6 +1,7 @@
 package com.ssafy.b209.analysis.repository;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import jakarta.persistence.LockModeType;
 import java.util.List;
@@ -41,6 +42,19 @@ public interface DrawingAnalysisRepository extends JpaRepository<DrawingAnalysis
    */
   List<DrawingAnalysis> findByDrawingSessionIdInOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
       List<Long> drawingSessionIds);
+
+  /**
+   * 여러 세션의 특정 분석 시점 실행을 세션·요청 시각·식별자 순서로 한 번에 조회한다.
+   *
+   * <p>활동 기록에서는 중간 저장 그림 분석이 최종 그림의 분석 상태를 가리지 않도록 {@code FINAL} 분석만 조회할 때 사용한다.
+   *
+   * @param drawingSessionIds 그림 활동 세션 식별자 목록
+   * @param scope 조회할 중간 또는 최종 분석 시점
+   * @return 세션 식별자 오름차순, 요청 시각과 식별자 역순으로 정렬된 분석 목록
+   */
+  List<DrawingAnalysis>
+      findByDrawingSessionIdInAndScopeOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
+          List<Long> drawingSessionIds, DrawingAnalysisScope scope);
 
   /**
    * 완료 접수 요청에 사용한 멱등 키로 분석을 조회한다.

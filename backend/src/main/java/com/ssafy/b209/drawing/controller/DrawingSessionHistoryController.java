@@ -127,7 +127,7 @@ public class DrawingSessionHistoryController {
   }
 
   private Pageable toPageable(int page, int size, String sort) {
-    if (page < 0 || size < 1 || size > MAX_PAGE_SIZE) {
+    if (page < 0 || size < 1 || size > MAX_PAGE_SIZE || (long) page * size > Integer.MAX_VALUE) {
       throw new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE);
     }
     return PageRequest.of(page, size, toSort(sort));
@@ -137,17 +137,19 @@ public class DrawingSessionHistoryController {
     if (sort == null || sort.isBlank()) {
       throw new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE);
     }
-    String[] parts = sort.split(",");
+    String[] parts = sort.split(",", -1);
+    if (parts.length != 2) {
+      throw new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE);
+    }
     String field = parts[0].trim();
     if (!SORTABLE_FIELDS.contains(field)) {
       throw new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE);
     }
-    Sort.Direction direction = Sort.Direction.DESC;
-    if (parts.length > 1) {
-      direction =
-          Sort.Direction.fromOptionalString(parts[1].trim())
-              .orElseThrow(() -> new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE));
-    }
-    return Sort.by(direction, field);
+    Sort.Direction direction =
+        Sort.Direction.fromOptionalString(parts[1].trim())
+            .orElseThrow(() -> new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE));
+    return Sort.by(
+        new Sort.Order(direction, field, Sort.NullHandling.NULLS_LAST),
+        new Sort.Order(direction, "id"));
   }
 }

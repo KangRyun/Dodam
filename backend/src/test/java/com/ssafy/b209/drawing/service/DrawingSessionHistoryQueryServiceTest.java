@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
@@ -113,8 +114,8 @@ class DrawingSessionHistoryQueryServiceTest {
     given(analysis.getState()).willReturn(DrawingAnalysisState.SUCCESS);
     given(
             drawingAnalysisRepository
-                .findByDrawingSessionIdInOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
-                    List.of(SESSION_ID)))
+                .findByDrawingSessionIdInAndScopeOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
+                    List.of(SESSION_ID), DrawingAnalysisScope.FINAL))
         .willReturn(List.of(analysis));
 
     given(report.getDrawingSession()).willReturn(session);
@@ -165,8 +166,8 @@ class DrawingSessionHistoryQueryServiceTest {
     given(analysis.getState()).willReturn(DrawingAnalysisState.PARTIAL_SUCCESS);
     given(
             drawingAnalysisRepository
-                .findByDrawingSessionIdInOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
-                    List.of(SESSION_ID)))
+                .findByDrawingSessionIdInAndScopeOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
+                    List.of(SESSION_ID), DrawingAnalysisScope.FINAL))
         .willReturn(List.of(analysis));
     given(
             drawingAssetRepository
@@ -210,8 +211,8 @@ class DrawingSessionHistoryQueryServiceTest {
         .willReturn(List.of());
     given(
             drawingAnalysisRepository
-                .findByDrawingSessionIdInOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
-                    List.of(SESSION_ID)))
+                .findByDrawingSessionIdInAndScopeOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
+                    List.of(SESSION_ID), DrawingAnalysisScope.FINAL))
         .willReturn(List.of());
     given(
             reportRepository.findByDrawingSessionIdInOrderByDrawingSessionIdAscCreatedAtDescIdDesc(
@@ -283,6 +284,22 @@ class DrawingSessionHistoryQueryServiceTest {
             DrawingSessionStatus.COMPLETED,
             ReportStatus.COMPLETED,
             PAGEABLE);
+  }
+
+  @Test
+  void rejectsDateRangeWhoseExclusiveUpperBoundOverflows() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+
+    assertThatThrownBy(
+            () -> service().getHistory(CHILD_ID, null, LocalDate.MAX, null, null, null, PAGEABLE))
+        .isInstanceOf(BusinessException.class);
+
+    verifyNoInteractions(
+        drawingSessionRepository,
+        drawingAssetRepository,
+        drawingSessionEmotionRepository,
+        drawingAnalysisRepository,
+        reportRepository);
   }
 
   @Test
