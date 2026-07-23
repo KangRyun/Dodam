@@ -1,0 +1,12 @@
+# Grafana datasource 자동 등록 — S15P11B209-352
+# 컨테이너 기동 시 Prometheus 데이터소스를 자동 생성 — UI에서 수동 등록 불필요.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: dodam-prometheus     # uid 고정 — 대시보드 JSON이 datasource를 uid로 참조해도 깨지지 않게
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090   # monitoring-net 내부 DNS — 호스트 9091 아님(그건 SSH 터널용 바인딩)
+    isDefault: true
+    editable: false           # reason: UI에서 실수로 변경 방지 — 변경은 이 파일 수정 + 재기동으로만
