@@ -44,6 +44,7 @@ class DrawingScreen extends StatefulWidget {
     this.questionSkipRepository,
     this.conversationEndRepository,
     this.voiceAnswerRepository,
+    this.sttResultRepository,
     this.conversationId,
     this.basisAnalysisId,
     super.key,
@@ -63,6 +64,7 @@ class DrawingScreen extends StatefulWidget {
   final QuestionSkipRepository? questionSkipRepository;
   final ConversationEndRepository? conversationEndRepository;
   final VoiceAnswerRepository? voiceAnswerRepository;
+  final SttResultRepository? sttResultRepository;
   final int? conversationId;
   final int? basisAnalysisId;
 
@@ -97,6 +99,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   ConversationEndController? _conversationEndController;
   VoiceRecordingController? _voiceRecordingController;
   VoiceAnswerUploadController? _voiceAnswerUploadController;
+  SttResultController? _sttResultController;
 
   @override
   void initState() {
@@ -166,6 +169,12 @@ class _DrawingScreenState extends State<DrawingScreen> {
               widget.idempotencyKeyProvider ?? _createIdempotencyKey,
         )..addListener(_handleVoiceAnswerUploadChanged);
       }
+      if (widget.sttResultRepository case final repository?) {
+        _sttResultController = SttResultController(
+          repository,
+          conversationId: conversationId,
+        )..addListener(_handleSttResultChanged);
+      }
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -201,6 +210,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
       _handleVoiceAnswerUploadChanged,
     );
     _voiceAnswerUploadController?.dispose();
+    _sttResultController?.removeListener(_handleSttResultChanged);
+    _sttResultController?.dispose();
     super.dispose();
   }
 
@@ -286,10 +297,23 @@ class _DrawingScreenState extends State<DrawingScreen> {
   }
 
   void _handleVoiceAnswerUploadChanged() {
-    if (_voiceAnswerUploadController?.status ==
-        VoiceAnswerUploadStatus.success) {
+    final uploadController = _voiceAnswerUploadController;
+    if (uploadController?.status == VoiceAnswerUploadStatus.success) {
       _questionDisplayController.dismiss();
+      final result = uploadController?.result;
+      if (result != null) {
+        unawaited(
+          _sttResultController?.watch(
+            messageId: result.messageId,
+            sequence: result.sequence,
+          ),
+        );
+      }
     }
+    if (mounted) setState(() {});
+  }
+
+  void _handleSttResultChanged() {
     if (mounted) setState(() {});
   }
 
@@ -591,6 +615,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
                 _voiceAnswerUploadController?.status ??
                 VoiceAnswerUploadStatus.idle,
             onRetryVoiceAnswerUpload: _retryVoiceAnswerUpload,
+            sttResultController: _sttResultController,
           );
           final sidePanel = _DrawingSidePanel(
             selectedColor: _color,
@@ -664,6 +689,7 @@ class _CanvasPanel extends StatelessWidget {
     required this.voiceRecordingController,
     required this.voiceAnswerUploadStatus,
     required this.onRetryVoiceAnswerUpload,
+    required this.sttResultController,
   });
 
   final GlobalKey repaintBoundaryKey;
@@ -693,6 +719,7 @@ class _CanvasPanel extends StatelessWidget {
   final VoiceRecordingController? voiceRecordingController;
   final VoiceAnswerUploadStatus voiceAnswerUploadStatus;
   final VoidCallback onRetryVoiceAnswerUpload;
+  final SttResultController? sttResultController;
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -739,6 +766,12 @@ class _CanvasPanel extends StatelessWidget {
           voiceAnswerUploadStatus: voiceAnswerUploadStatus,
           onRetryVoiceAnswerUpload: onRetryVoiceAnswerUpload,
         ),
+        if (sttResultController case final controller?)
+          Positioned(
+            left: AppSpacing.md,
+            bottom: AppSpacing.md,
+            child: SttResultPanel(controller: controller),
+          ),
         if (!inputEnabled)
           _DraftRestoreOverlay(
             status: restoreStatus,

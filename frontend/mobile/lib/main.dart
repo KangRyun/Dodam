@@ -45,6 +45,7 @@ DodamApp createDefaultApp({
         ? const MockDrawingRepository()
         : RemoteDrawingRepository(apiClient),
     voiceAnswerRepository: RemoteVoiceAnswerRepository(apiClient),
+    sttResultRepository: RemoteSttResultRepository(apiClient),
     initialRoute: AppRoutes.authBootstrap,
   );
 }

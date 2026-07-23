@@ -106,6 +106,7 @@ void main() {
 const _result = VoiceAnswerUploadResult(
   messageId: 30,
   parentMessageId: 10,
+  sequence: 3,
   speechStatus: 'PENDING',
 );
 

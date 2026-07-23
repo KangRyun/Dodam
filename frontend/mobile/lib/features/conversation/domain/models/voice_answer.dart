@@ -25,6 +25,7 @@ final class VoiceAnswerUploadResult {
   const VoiceAnswerUploadResult({
     required this.messageId,
     required this.parentMessageId,
+    required this.sequence,
     required this.speechStatus,
   });
 
@@ -32,10 +33,12 @@ final class VoiceAnswerUploadResult {
       VoiceAnswerUploadResult(
         messageId: json['messageId'] as int,
         parentMessageId: json['parentMessageId'] as int,
+        sequence: json['sequence'] as int,
         speechStatus: json['speechStatus'] as String,
       );
 
   final int messageId;
   final int parentMessageId;
+  final int sequence;
   final String speechStatus;
 }
