@@ -1,4 +1,5 @@
 export 'application/ai_question_controller.dart';
+export 'application/ai_question_display_controller.dart';
 export 'data/repositories/mock_conversation_repository.dart';
 export 'data/repositories/remote_conversation_repository.dart';
 export 'domain/models/ai_question.dart';
