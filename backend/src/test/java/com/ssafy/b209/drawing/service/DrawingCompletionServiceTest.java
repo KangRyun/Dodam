@@ -30,6 +30,7 @@ import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportStatus;
 import com.ssafy.b209.report.repository.ReportRepository;
+import com.ssafy.b209.report.service.ReportGenerationRequestedEvent;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -55,6 +56,7 @@ class DrawingCompletionServiceTest {
   @Mock private ConversationSessionRepository conversationRepository;
   @Mock private DrawingAnalysisRepository analysisRepository;
   @Mock private ReportRepository reportRepository;
+  @Mock private org.springframework.context.ApplicationEventPublisher eventPublisher;
   @Mock private DrawingSession session;
   @Mock private DrawingAsset finalAsset;
   @Mock private ConversationSession conversation;
@@ -72,6 +74,7 @@ class DrawingCompletionServiceTest {
             conversationRepository,
             analysisRepository,
             reportRepository,
+            eventPublisher,
             Clock.fixed(Instant.parse("2026-07-23T10:30:00Z"), ZoneOffset.UTC));
     lenient().when(currentUserResolver.requireUserId()).thenReturn(GUARDIAN_ID);
     lenient()
@@ -116,6 +119,7 @@ class DrawingCompletionServiceTest {
 
     verify(accessValidator).requireDrawingSessionAccess(GUARDIAN_ID, SESSION_ID);
     verify(session).startReporting();
+    verify(eventPublisher).publishEvent(new ReportGenerationRequestedEvent(701L));
     assertThat(response.drawingSessionId()).isEqualTo(SESSION_ID);
     assertThat(response.analysisId()).isEqualTo(701L);
     assertThat(response.analysisStatus()).isEqualTo(DrawingAnalysisState.PENDING);
@@ -129,6 +133,7 @@ class DrawingCompletionServiceTest {
         service.complete(SESSION_ID, KEY, new CompleteDrawingSessionRequest(false, false));
 
     verify(reportRepository, never()).saveAndFlush(any());
+    verify(eventPublisher, never()).publishEvent(any());
     assertThat(response.reportId()).isNull();
     assertThat(response.reportStatus()).isNull();
   }

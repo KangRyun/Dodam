@@ -1,8 +1,12 @@
 package com.ssafy.b209.report.repository;
 
 import com.ssafy.b209.report.domain.Report;
+import jakarta.persistence.LockModeType;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /** 그림 활동 리포트의 생성 접수 저장과 분석별 조회를 담당한다. */
 public interface ReportRepository extends JpaRepository<Report, Long> {
@@ -22,4 +26,14 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
    * @return 리포트를 요청하지 않았거나 생성되지 않았으면 빈 값
    */
   Optional<Report> findByAnalysisId(Long analysisId);
+
+  /**
+   * 리포트를 한 번만 완료 또는 실패 처리하도록 쓰기 잠금으로 조회한다.
+   *
+   * @param id 리포트 식별자
+   * @return 잠근 리포트, 존재하지 않으면 빈 값
+   */
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("select r from Report r where r.id = :id")
+  Optional<Report> findByIdForUpdate(@Param("id") Long id);
 }

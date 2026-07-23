@@ -98,6 +98,40 @@ public class Report {
   }
 
   /**
+   * 생성 중 리포트를 완료 상태로 전환하고 전문가 검토 권장 여부와 한계 문구를 갱신한다.
+   *
+   * @param expertReviewRecommended 전문가 검토 권장 여부
+   * @param limitationsText 리포트 해석 시 적용할 필수 한계 문구
+   * @param updatedAt 완료 처리를 기록한 UTC 시각
+   * @throws IllegalStateException 현재 상태가 GENERATING이 아닌 경우
+   * @throws IllegalArgumentException 한계 문구가 비어 있는 경우
+   */
+  public void complete(
+      boolean expertReviewRecommended, String limitationsText, LocalDateTime updatedAt) {
+    ensureGenerating();
+    this.status = ReportStatus.COMPLETED;
+    this.expertReviewRecommended = expertReviewRecommended;
+    this.limitationsText = requireText(limitationsText, "limitationsText");
+    this.updatedAt = Objects.requireNonNull(updatedAt, "updatedAt must not be null");
+  }
+
+  /**
+   * 생성 중 리포트를 실패 상태로 전환하고 한계 문구를 갱신한다.
+   *
+   * @param limitationsText 실패 상황을 알리는 필수 한계 문구
+   * @param updatedAt 실패 처리를 기록한 UTC 시각
+   * @throws IllegalStateException 현재 상태가 GENERATING이 아닌 경우
+   * @throws IllegalArgumentException 한계 문구가 비어 있는 경우
+   */
+  public void fail(String limitationsText, LocalDateTime updatedAt) {
+    ensureGenerating();
+    this.status = ReportStatus.FAILED;
+    this.expertReviewRecommended = false;
+    this.limitationsText = requireText(limitationsText, "limitationsText");
+    this.updatedAt = Objects.requireNonNull(updatedAt, "updatedAt must not be null");
+  }
+
+  /**
    * @return 영속화된 리포트 식별자
    */
   public Long getId() {
@@ -158,5 +192,25 @@ public class Report {
    */
   public LocalDateTime getCreatedAt() {
     return createdAt;
+  }
+
+  /**
+   * @return 리포트 상태가 마지막으로 갱신된 UTC 시각
+   */
+  public LocalDateTime getUpdatedAt() {
+    return updatedAt;
+  }
+
+  private void ensureGenerating() {
+    if (status != ReportStatus.GENERATING) {
+      throw new IllegalStateException("only generating report can change its completion state");
+    }
+  }
+
+  private static String requireText(String value, String name) {
+    if (value == null || value.isBlank()) {
+      throw new IllegalArgumentException(name + " must not be blank");
+    }
+    return value;
   }
 }

@@ -17,6 +17,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.OneToMany;
 import jakarta.persistence.OrderBy;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -67,6 +68,9 @@ public class DrawingAnalysis {
 
   @Column(name = "model_version", length = 100)
   private String modelVersion;
+
+  @Column(name = "confidence", precision = 5, scale = 4)
+  private BigDecimal confidence;
 
   @Column(name = "error_code", length = 80)
   private String errorCode;
@@ -212,6 +216,53 @@ public class DrawingAnalysis {
   }
 
   /**
+   * 완료 접수로 대기 중인 최종 분석을 성공 상태로 전환한다.
+   *
+   * @param modelName 최종 분석에 사용한 Model 이름
+   * @param modelVersion 최종 분석에 사용한 Model 버전
+   * @param confidence 0 이상 1 이하의 신뢰도이며 없으면 {@code null}
+   * @param completedAt 최종 분석 처리가 끝난 UTC 시각
+   * @throws IllegalStateException 현재 상태가 PENDING이 아닌 경우
+   * @throws IllegalArgumentException 신뢰도가 허용 범위를 벗어난 경우
+   */
+  public void succeedFinal(
+      String modelName, String modelVersion, BigDecimal confidence, LocalDateTime completedAt) {
+    ensurePending();
+    this.modelName = requireText(modelName, "modelName");
+    this.modelVersion = requireText(modelVersion, "modelVersion");
+    this.confidence = requireConfidence(confidence);
+    this.state = DrawingAnalysisState.SUCCESS;
+    this.startedAt = this.startedAt == null ? completedAt : this.startedAt;
+    this.completedAt = Objects.requireNonNull(completedAt, "completedAt must not be null");
+    this.errorCode = null;
+    this.errorMessage = null;
+  }
+
+  /**
+   * 완료 접수로 대기 중인 최종 분석을 실패 상태로 전환한다.
+   *
+   * @param failureCode 내부 분류에 사용하는 안전한 오류 코드
+   * @param failureMessage 원문 예외를 포함하지 않는 안전한 오류 메시지
+   * @param failedAt 실패 처리가 끝난 UTC 시각
+   * @throws IllegalStateException 현재 상태가 PENDING이 아닌 경우
+   */
+  public void failFinal(String failureCode, String failureMessage, LocalDateTime failedAt) {
+    ensurePending();
+    this.state = DrawingAnalysisState.FAILED;
+    this.errorCode = requireText(failureCode, "failureCode");
+    this.errorMessage = requireText(failureMessage, "failureMessage");
+    this.startedAt = this.startedAt == null ? failedAt : this.startedAt;
+    this.completedAt = Objects.requireNonNull(failedAt, "failedAt must not be null");
+  }
+
+  /**
+   * @return 대기 중인 최종 분석이면 {@code true}
+   */
+  public boolean isPending() {
+    return state == DrawingAnalysisState.PENDING;
+  }
+
+  /**
    * @return 분석 실행 식별자
    */
   public Long getId() {
@@ -320,10 +371,33 @@ public class DrawingAnalysis {
     return Collections.unmodifiableList(detections);
   }
 
+  /**
+   * @return 성공한 최종 분석의 신뢰도이며 기록하지 않았으면 {@code null}
+   */
+  public BigDecimal getConfidence() {
+    return confidence;
+  }
+
   private void ensureProcessing() {
     if (state != DrawingAnalysisState.PROCESSING) {
       throw new IllegalStateException("only processing analysis can be completed");
     }
+  }
+
+  private void ensurePending() {
+    if (state != DrawingAnalysisState.PENDING) {
+      throw new IllegalStateException("only pending final analysis can change its result state");
+    }
+  }
+
+  private static BigDecimal requireConfidence(BigDecimal value) {
+    if (value == null) {
+      return null;
+    }
+    if (value.compareTo(BigDecimal.ZERO) < 0 || value.compareTo(BigDecimal.ONE) > 0) {
+      throw new IllegalArgumentException("confidence is out of range");
+    }
+    return value;
   }
 
   private static String requireText(String value, String name) {
