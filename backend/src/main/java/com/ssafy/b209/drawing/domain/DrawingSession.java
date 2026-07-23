@@ -250,6 +250,24 @@ public class DrawingSession {
   }
 
   /**
+   * 그림 활동을 삭제 상태로 전환하고 삭제 시각을 기록한다.
+   *
+   * <p>현재 단계와 완료 시각은 감사 및 운영 기록을 위해 유지한다.
+   *
+   * @param deletedAt 서버가 결정한 UTC 기준 삭제 시각
+   * @throws NullPointerException {@code deletedAt}이 {@code null}인 경우
+   * @throws IllegalStateException 이미 삭제된 세션인 경우
+   */
+  public void softDelete(LocalDateTime deletedAt) {
+    Objects.requireNonNull(deletedAt, "deletedAt must not be null");
+    if (this.deletedAt != null || sessionStatus == DrawingSessionStatus.DELETED) {
+      throw new IllegalStateException("이미 삭제된 그림 활동입니다.");
+    }
+    sessionStatus = DrawingSessionStatus.DELETED;
+    this.deletedAt = deletedAt;
+  }
+
+  /**
    * 그림 활동 세션 식별자를 반환한다.
    *
    * @return 영속화된 세션 식별자

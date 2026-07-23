@@ -131,6 +131,9 @@ class DrawingErrorCodeTest {
         DrawingErrorCode.STROKE_BATCH_CONFLICT,
         new ErrorContract(
             HttpStatus.CONFLICT, "DRAWING_409_019", "같은 순번의 다른 그림 과정 데이터가 이미 저장되었습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_DELETION_CONFIRMATION_MISMATCH,
+        new ErrorContract(HttpStatus.BAD_REQUEST, "DRAWING_400_011", "그림 활동 삭제 확인 값이 올바르지 않습니다."));
 
     assertThat(DrawingErrorCode.values()).containsExactlyInAnyOrderElementsOf(expected.keySet());
     expected.forEach(
