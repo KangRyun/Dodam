@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../core/network/auth/token_refresher.dart';
 import '../design_system/design_system.dart';
 import '../features/auth/auth.dart';
 import '../features/activity/data/repositories/mock_activity_repository.dart';
@@ -26,6 +27,9 @@ class DodamApp extends StatefulWidget {
     this.authSessionStore,
     this.authRepository,
     this.conversationRepository = const MockConversationRepository(),
+    this.voiceAnswerRepository,
+    this.sttResultRepository,
+    this.conversationAnswerRepository,
     this.conversationId = 8001,
     this.basisAnalysisId = 7001,
     this.initialRoute = AppRoutes.guardianHome,
@@ -38,8 +42,11 @@ class DodamApp extends StatefulWidget {
   final ReportRepository reportRepository;
   final Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider;
   final AuthSessionStore? authSessionStore;
-  final AuthRepositoryImpl? authRepository;
+  final AuthRepository? authRepository;
   final ConversationRepository? conversationRepository;
+  final VoiceAnswerRepository? voiceAnswerRepository;
+  final SttResultRepository? sttResultRepository;
+  final ConversationAnswerRepository? conversationAnswerRepository;
   final int? conversationId;
   final int? basisAnalysisId;
   final String initialRoute;
@@ -50,8 +57,11 @@ class DodamApp extends StatefulWidget {
 
 class _DodamAppState extends State<DodamApp> {
   late final GuardianChildController _childController;
-  late final AuthRepositoryImpl _authRepository;
+  late final AuthRepository _authRepository;
   late final SocialLoginService _socialLoginService;
+  late final KakaoLoginClient _kakaoLoginClient;
+  late final GoogleLoginClient _googleLoginClient;
+  late final NaverLoginClient _naverLoginClient;
   late final KakaoLoginCoordinator _kakaoLoginCoordinator;
   late final GoogleLoginCoordinator _googleLoginCoordinator;
   late final NaverLoginCoordinator _naverLoginCoordinator;
@@ -73,16 +83,26 @@ class _DodamAppState extends State<DodamApp> {
           sessionStore: widget.authSessionStore,
         );
     _socialLoginService = SocialLoginService(_authRepository);
+    final usesRemoteAuth = _authRepository is RemoteAuthRepository;
+    _kakaoLoginClient = usesRemoteAuth
+        ? KakaoSdkLoginClient()
+        : KakaoLoginClientImpl();
+    _googleLoginClient = usesRemoteAuth
+        ? GoogleSdkLoginClient()
+        : GoogleLoginClientImpl();
+    _naverLoginClient = usesRemoteAuth
+        ? NaverSdkLoginClient()
+        : NaverLoginClientImpl();
     _kakaoLoginCoordinator = KakaoLoginCoordinator(
-      KakaoLoginClientImpl(),
+      _kakaoLoginClient,
       _socialLoginService,
     );
     _googleLoginCoordinator = GoogleLoginCoordinator(
-      GoogleLoginClientImpl(),
+      _googleLoginClient,
       _socialLoginService,
     );
     _naverLoginCoordinator = NaverLoginCoordinator(
-      NaverLoginClientImpl(),
+      _naverLoginClient,
       _socialLoginService,
     );
   }
@@ -103,7 +123,9 @@ class _DodamAppState extends State<DodamApp> {
     if (session == null) return null;
     if (!session.tokens.isAccessTokenExpired()) return session;
 
-    final refreshed = await _authRepository.refreshAccessToken();
+    final repository = _authRepository;
+    if (repository is! TokenRefresher) return null;
+    final refreshed = await (repository as TokenRefresher).refreshAccessToken();
     if (!refreshed) return null;
     session = await _authRepository.restoreSession();
     return session;
@@ -111,7 +133,22 @@ class _DodamAppState extends State<DodamApp> {
 
   // 인증 세션과 보호자 선택 상태 초기화
   Future<void> _signOut() async {
+    final provider = (await _authRepository.restoreSession())?.user.provider;
     await _authRepository.signOut();
+    try {
+      switch (provider) {
+        case AuthProvider.kakao:
+          await _kakaoLoginClient.signOut();
+        case AuthProvider.google:
+          await _googleLoginClient.signOut();
+        case AuthProvider.naver:
+          await _naverLoginClient.signOut();
+        case null:
+          break;
+      }
+    } on Object {
+      // 서비스 세션은 이미 제거했으므로 Provider 로그아웃 실패로 되돌리지 않는다.
+    }
     _childController.clearSelection();
   }
 
@@ -147,6 +184,9 @@ class _DodamAppState extends State<DodamApp> {
       drawingCompletionSnapshotProvider:
           widget.drawingCompletionSnapshotProvider,
       conversationRepository: widget.conversationRepository,
+      voiceAnswerRepository: widget.voiceAnswerRepository,
+      sttResultRepository: widget.sttResultRepository,
+      conversationAnswerRepository: widget.conversationAnswerRepository,
       conversationId: widget.conversationId,
       basisAnalysisId: widget.basisAnalysisId,
     ),

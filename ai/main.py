@@ -21,6 +21,7 @@ STT/TTS 경로 정리(179·289, 2026-07-23):
 
 import base64
 import hmac
+import os
 import tempfile
 import time
 from contextlib import asynccontextmanager
@@ -37,6 +38,8 @@ import llm_client
 import question_service
 import stt_client
 import tts_client
+import vlm_client
+import yolo_client
 
 
 def _require_internal_auth_config() -> None:
@@ -101,14 +104,47 @@ def health():
     return {"status": "ok"}
 
 
-# ── 그림분석 / 리포트: 아직 mock (편주희 모델 연결 전) ─────────────
+# ── 그림분석: YOLO 객체탐지 → VLM 한국어 서술 (S15P11B209-176) ─────
+#   ⚠️ 이 /analyze/drawing 은 '초안' 경로다. BE↔AI 정식 객체탐지 계약
+#      (/internal/ai/v1/drawings/analysis, 픽셀 bbox·UPPER_SNAKE 라벨)과는 별개.
+#      여기 description 은 대화 첫 질문의 {drawing_analysis} 슬롯 재료로 쓰인다.
+#   무거운 추론 의존성(ultralytics/torch)은 yolo_client가 지연 import한다.
 @app.post("/analyze/drawing")
-def analyze_drawing():
-    """그림 이미지 분석 → 오브젝트/설명. (mock)"""
+async def analyze_drawing(file: UploadFile = File(...)):
+    """그림 이미지 → YOLO 객체탐지 → (bbox 이미지 + 탐지목록) → VLM 한국어 서술.
+
+    원본 이미지는 임시파일로만 다루고 저장·로그하지 않는다(가드레일).
+    """
+    ext = ""
+    if file.filename and "." in file.filename:
+        ext = "." + file.filename.rsplit(".", 1)[-1]
+    # Windows에서 추론기가 경로를 다시 열 수 있게 delete=False로 만들고 finally에서 지운다.
+    with tempfile.NamedTemporaryFile(suffix=ext or ".png", delete=False) as tmp:
+        tmp.write(await file.read())
+        tmp_path = tmp.name
+    try:
+        detections, annotated_png = yolo_client.detect_and_annotate(tmp_path)
+        description = vlm_client.describe(annotated_png, detections)
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        await file.close()
     return {
         "status": "ok",
-        "objects": [{"label": "집", "confidence": 0.9}],
-        "description": "집과 나무가 보이는 그림이에요",
+        "objects": [
+            {
+                "label": d.label,
+                "confidence": round(d.confidence, 4),
+                "bbox": [round(v, 1) for v in d.bbox_xyxy],
+            }
+            for d in detections
+        ],
+        "description": description,
+        "model_id": config.VLM_MODEL,
+        "prompt_version": vlm_client.PROMPT_VERSION,
+        "pipeline_version": config.PIPELINE_VERSION,
     }
 
 

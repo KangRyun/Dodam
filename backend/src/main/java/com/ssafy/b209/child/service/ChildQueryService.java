@@ -4,14 +4,17 @@ import com.ssafy.b209.child.domain.ChildProfileStatus;
 import com.ssafy.b209.child.domain.ChildTutorialStatus;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.child.dto.response.ChildDetailResponse;
+import com.ssafy.b209.child.dto.response.ChildSummaryResponse;
 import com.ssafy.b209.child.exception.ChildErrorCode;
 import com.ssafy.b209.child.repository.ChildDetailProjection;
 import com.ssafy.b209.child.repository.ChildRepository;
+import com.ssafy.b209.child.repository.ChildSummaryProjection;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.time.Period;
 import java.time.ZoneOffset;
+import java.util.List;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -74,5 +77,33 @@ public class ChildQueryService {
         child.getRelationshipType(),
         child.getCreatedAt().toInstant(ZoneOffset.UTC),
         child.getUpdatedAt().toInstant(ZoneOffset.UTC));
+  }
+
+  /**
+   * 요청 보호자에게 연결된 활성 아동 목록을 등록 순서로 조회한다.
+   *
+   * <p>연결된 아동이 없으면 빈 목록을 반환하며 각 항목에 조회일 기준 만 나이를 포함한다.
+   *
+   * @param guardianUserId 목록을 조회할 보호자 사용자 식별자
+   * @return 등록 순서가 적용된 아동 요약 목록
+   */
+  public List<ChildSummaryResponse> getChildren(Long guardianUserId) {
+    LocalDate today = LocalDate.now(clock);
+    return childRepository.findSummariesByGuardianUserId(guardianUserId).stream()
+        .map(child -> toSummary(child, today))
+        .toList();
+  }
+
+  private ChildSummaryResponse toSummary(ChildSummaryProjection child, LocalDate today) {
+    return new ChildSummaryResponse(
+        child.getChildId(),
+        child.getNickname(),
+        child.getBirthDate(),
+        Period.between(child.getBirthDate(), today).getYears(),
+        child.getProfileImageUrl(),
+        QuestionDifficulty.valueOf(child.getQuestionDifficulty()),
+        ChildTutorialStatus.valueOf(child.getTutorialStatus()),
+        ChildProfileStatus.valueOf(child.getProfileStatus()),
+        child.getRelationshipType());
   }
 }

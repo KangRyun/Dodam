@@ -40,6 +40,20 @@ class DrawingSnapshotOpenApiTest {
     assertThat(operation.has("security")).isFalse();
   }
 
+  @Test
+  void documentsSnapshotListContract() throws Exception {
+    JsonNode operation =
+        apiDocument().at("/paths/~1api~1v1~1drawing-sessions~1{drawingSessionId}~1snapshots/get");
+
+    assertThat(operation.isMissingNode()).isFalse();
+    assertThat(operation.path("tags"))
+        .anySatisfy(tag -> assertThat(tag.asText()).isEqualTo("Drawing Snapshots"));
+    assertThat(operation.path("responses").fieldNames())
+        .toIterable()
+        .containsAll(Set.of("200", "400", "401", "404"));
+    assertThat(operation.has("security")).isFalse();
+  }
+
   private JsonNode apiDocument() throws Exception {
     String content =
         mockMvc

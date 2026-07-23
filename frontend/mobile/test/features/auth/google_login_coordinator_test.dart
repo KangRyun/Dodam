@@ -138,6 +138,9 @@ final class _PendingGoogleLoginClient implements GoogleLoginClient {
     return _completer.future;
   }
 
+  @override
+  Future<void> signOut() async {}
+
   void complete() =>
       _completer.complete(const GoogleLoginSuccess('google-id-token'));
 }

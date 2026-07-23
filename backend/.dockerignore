@@ -1,5 +1,10 @@
 # 빌드 컨텍스트에서 제외 — 로컬 산출물/IDE 파일이 이미지 빌드에 끼지 않게(캐시·크기·재현성).
-build/
+# ⚠️ build/ 를 통째 제외하지 않는다(S15P11B209-391 Phase 2): CI가 산출한 build/libs/*.jar 를
+#    이미지가 COPY하기 때문. Docker는 부모 디렉토리를 통째 제외하면 자식 !예외가 안 먹으므로
+#    build/* 로 하위 항목만 제외하고 build/libs 만 되살린다. plain jar는 다시 제외.
+build/*
+!build/libs
+build/libs/*-plain.jar
 .gradle/
 .idea/
 *.iml

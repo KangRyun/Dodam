@@ -12,21 +12,24 @@ final class ApiValidationError {
   final String reason;
 }
 
-/// Error body defined by API common contract v1.0.
+/// API 공통 계약의 오류 응답을 역직렬화한다.
+///
+/// 현재 응답의 `data.errors`와 이전 응답의 최상위 `errors`를 모두 허용해
+/// 서버 배포 전환 중에도 필드 오류를 일관되게 제공한다.
 final class ApiError {
   const ApiError({
-    required this.timestamp,
-    required this.path,
+    this.timestamp,
+    this.path,
     required this.code,
     required this.message,
     this.errors = const [],
   });
 
   factory ApiError.fromJson(Map<String, dynamic> json) {
-    final rawErrors = json['errors'];
+    final rawErrors = json['errors'] ?? _validationErrorsFromData(json['data']);
     return ApiError(
-      timestamp: json['timestamp'] as String,
-      path: json['path'] as String,
+      timestamp: json['timestamp'] as String?,
+      path: json['path'] as String?,
       code: json['code'] as String,
       message: json['message'] as String,
       errors: rawErrors == null
@@ -50,9 +53,16 @@ final class ApiError {
     }
   }
 
-  final String timestamp;
-  final String path;
+  final String? timestamp;
+  final String? path;
   final String code;
   final String message;
   final List<ApiValidationError> errors;
+
+  static Object? _validationErrorsFromData(Object? data) {
+    if (data is Map && data['errors'] is List) {
+      return data['errors'];
+    }
+    return null;
+  }
 }

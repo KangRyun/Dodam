@@ -1,6 +1,7 @@
 package com.ssafy.b209.drawing;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -73,6 +74,7 @@ class DrawingSessionIntegrationTest {
   @BeforeEach
   void setUp() {
     setAuthenticatedGuardian();
+    jdbcTemplate.update("DELETE FROM storage_deletion_jobs");
     jdbcTemplate.update("DELETE FROM reports");
     jdbcTemplate.update("DELETE FROM conversation_sessions");
     jdbcTemplate.update("DELETE FROM analysis_detected_objects");
@@ -147,6 +149,155 @@ class DrawingSessionIntegrationTest {
         .containsEntry("current_stage", "DRAWING")
         .containsEntry("completed_at", null)
         .containsEntry("deleted_at", null);
+  }
+
+  @Test
+  void cancelsDrawingSessionWithSoftDeleteAndSchedulesStoredFiles() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions")
+                .header("Idempotency-Key", "cancel-session-key")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(canvasJson(1L)))
+        .andExpect(status().isCreated());
+    jdbcTemplate.update(
+        """
+        INSERT INTO drawing_assets
+          (id, drawing_session_id, asset_type, storage_key, mime_type,
+           file_size_bytes, checksum_sha256, captured_at)
+        VALUES
+          (301, 1, 'DRAFT', 'drawing-sessions/1/draft.png', 'image/png', 10,
+           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+           CURRENT_TIMESTAMP(6))
+        """);
+
+    mockMvc
+        .perform(
+            delete("/api/v1/drawing-sessions/1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DELETE\"}"))
+        .andExpect(status().isNoContent());
+
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT session_status, current_stage, deleted_at "
+                    + "FROM drawing_sessions WHERE id = 1"))
+        .containsEntry("session_status", "DELETED")
+        .containsEntry("current_stage", "DRAWING");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT deleted_at IS NOT NULL FROM drawing_sessions WHERE id = 1", Boolean.class))
+        .isTrue();
+    assertThat(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                  FROM storage_deletion_jobs
+                 WHERE storage_key = 'drawing-sessions/1/draft.png'
+                   AND resource_type = 'DRAWING_ASSET'
+                   AND resource_id = 301
+                   AND deletion_status = 'PENDING'
+                """,
+                Integer.class))
+        .isEqualTo(1);
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/1"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("DRAWING_404_003"));
+  }
+
+  @Test
+  void deletesOnlyDraftAssetsAndSchedulesTheirStoredFiles() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions")
+                .header("Idempotency-Key", "delete-draft-session-key")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(canvasJson(1L)))
+        .andExpect(status().isCreated());
+    jdbcTemplate.update(
+        """
+        INSERT INTO drawing_assets
+          (id, drawing_session_id, asset_type, asset_version, storage_key, mime_type,
+           file_size_bytes, checksum_sha256, captured_at)
+        VALUES
+          (301, 1, 'DRAFT', 1, 'drawing-sessions/1/draft-1.png', 'image/png', 10,
+           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+           CURRENT_TIMESTAMP(6)),
+          (302, 1, 'DRAFT', 2, 'drawing-sessions/1/draft-2.png', 'image/png', 10,
+           'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+           CURRENT_TIMESTAMP(6)),
+          (303, 1, 'INTERMEDIATE', 1, 'drawing-sessions/1/intermediate.png', 'image/png', 10,
+           'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+           CURRENT_TIMESTAMP(6))
+        """);
+
+    mockMvc.perform(delete("/api/v1/drawing-sessions/1/draft")).andExpect(status().isNoContent());
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM drawing_assets WHERE drawing_session_id = 1 "
+                    + "AND asset_type = 'DRAFT'",
+                Integer.class))
+        .isZero();
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM drawing_assets WHERE id = 303", Integer.class))
+        .isEqualTo(1);
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM storage_deletion_jobs "
+                    + "WHERE resource_type = 'DRAWING_ASSET' AND resource_id IN (301, 302) "
+                    + "AND deletion_status = 'PENDING'",
+                Integer.class))
+        .isEqualTo(2);
+  }
+
+  @Test
+  void storesNormalizedStrokeBatchIdempotentlyAndRejectsSequenceReuse() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions")
+                .header("Idempotency-Key", "stroke-integration-session")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(canvasJson(1L)))
+        .andExpect(status().isCreated());
+
+    String payload = strokeBatchJson(101);
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/1/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.batchSequence").value(3))
+        .andExpect(jsonPath("$.data.acceptedEventCount").value(1))
+        .andExpect(jsonPath("$.data.lastEventSequence").value(101));
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/1/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.batchId").isNumber());
+
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM stroke_batches", Integer.class))
+        .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM stroke_events", Integer.class))
+        .isEqualTo(1);
+    assertThat(
+            jdbcTemplate.queryForObject("SELECT COUNT(*) FROM stroke_event_points", Integer.class))
+        .isEqualTo(2);
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/1/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(strokeBatchJson(102)))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("DRAWING_409_019"));
   }
 
   @Test
@@ -366,6 +517,32 @@ class DrawingSessionIntegrationTest {
         }
         """
         .formatted(childId);
+  }
+
+  private String strokeBatchJson(long eventSequence) {
+    return """
+        {
+          "batchSequence": 3,
+          "firstEventSequence": %1$d,
+          "lastEventSequence": %1$d,
+          "clientCreatedAt": "2026-07-21T11:32:10.120+09:00",
+          "events": [{
+            "sequence": %1$d,
+            "eventType": "STROKE",
+            "tool": "PEN",
+            "color": "#FFCC00",
+            "width": 8.0,
+            "points": [{"x":0.18,"y":0.42,"t":0},{"x":0.19,"y":0.43,"t":16}]
+          }],
+          "metrics": {
+            "undoCountDelta": 1,
+            "redoCountDelta": 0,
+            "eraseCountDelta": 2,
+            "pauseDurationMsDelta": 3200
+          }
+        }
+        """
+        .formatted(eventSequence);
   }
 
   private int sessionCount() {

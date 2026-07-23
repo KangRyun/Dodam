@@ -6,6 +6,7 @@ import com.ssafy.b209.consent.domain.ConsentTargetScope;
 import com.ssafy.b209.consent.domain.ConsentTerm;
 import com.ssafy.b209.consent.dto.request.ConsentAgreementRequest;
 import com.ssafy.b209.consent.dto.request.CreateConsentRequest;
+import com.ssafy.b209.consent.dto.response.ConsentChangeResponse;
 import com.ssafy.b209.consent.dto.response.ConsentRegistrationResponse;
 import com.ssafy.b209.consent.exception.ConsentErrorCode;
 import com.ssafy.b209.consent.repository.ConsentAuthorizationRepository;
@@ -67,37 +68,83 @@ public class ConsentRegistrationService {
   @Transactional
   public ConsentRegistrationResponse register(
       Long actorUserId, CreateConsentRequest request, String ipAddress, String userAgent) {
-    if (request.childId() != null
-        && !authorizationRepository.hasGuardianChildRelation(actorUserId, request.childId())) {
+    validateGuardian(actorUserId, request.childId());
+    Map<Long, ConsentAction> requestedActions = requestedActions(request.agreements());
+    List<ConsentTerm> terms = referencedTerms(requestedActions);
+    LocalDateTime now = LocalDateTime.now(clock);
+    validateReferencedTerms(terms, request.childId(), now);
+    validateRequiredTerms(requestedActions, request.childId(), now);
+    List<ConsentRecord> records =
+        records(actorUserId, request.childId(), requestedActions, terms, ipAddress, userAgent, now);
+    recordRepository.saveAll(records);
+    return new ConsentRegistrationResponse(request.childId(), records.size(), true, now);
+  }
+
+  /**
+   * 선택 약관의 동의·철회·재동의를 기존 이력을 덮어쓰지 않고 새 행으로 기록한다.
+   *
+   * <p>필수 약관은 최초 동의 계약으로만 관리하며 이 API에서는 변경할 수 없다.
+   *
+   * @param actorUserId Access Token으로 인증된 동의 처리 사용자 ID
+   * @param request 아동 ID와 변경할 선택 약관별 행위
+   * @param ipAddress 요청 원격 IP, 확인할 수 없으면 {@code null}
+   * @param userAgent 요청 User-Agent, 확인할 수 없으면 {@code null}
+   * @return 저장 수와 변경 기록 시각
+   * @throws BusinessException 약관, 적용 범위 또는 보호자 관계가 유효하지 않거나 필수 약관 변경을 요청한 경우
+   */
+  @Transactional
+  public ConsentChangeResponse changeOptional(
+      Long actorUserId, CreateConsentRequest request, String ipAddress, String userAgent) {
+    validateGuardian(actorUserId, request.childId());
+    Map<Long, ConsentAction> requestedActions = requestedActions(request.agreements());
+    List<ConsentTerm> terms = referencedTerms(requestedActions);
+    LocalDateTime now = LocalDateTime.now(clock);
+    validateReferencedTerms(terms, request.childId(), now);
+    if (terms.stream().anyMatch(ConsentTerm::isRequired)) {
+      throw new BusinessException(ConsentErrorCode.REQUIRED_CONSENT_CHANGE_NOT_ALLOWED);
+    }
+    List<ConsentRecord> records =
+        records(actorUserId, request.childId(), requestedActions, terms, ipAddress, userAgent, now);
+    recordRepository.saveAll(records);
+    return new ConsentChangeResponse(request.childId(), records.size(), now);
+  }
+
+  private void validateGuardian(Long actorUserId, Long childId) {
+    if (childId != null
+        && !authorizationRepository.hasGuardianChildRelation(actorUserId, childId)) {
       throw new BusinessException(ConsentErrorCode.CONSENT_ACTOR_NOT_GUARDIAN);
     }
+  }
 
-    Map<Long, ConsentAction> requestedActions = requestedActions(request.agreements());
+  private List<ConsentTerm> referencedTerms(Map<Long, ConsentAction> requestedActions) {
     List<ConsentTerm> terms = termRepository.findAllById(requestedActions.keySet());
     if (terms.size() != requestedActions.size()) {
       throw new BusinessException(ConsentErrorCode.TERM_NOT_FOUND);
     }
+    return terms;
+  }
 
-    LocalDateTime now = LocalDateTime.now(clock);
-    validateReferencedTerms(terms, request.childId(), now);
-    validateRequiredTerms(requestedActions, request.childId(), now);
-
-    List<ConsentRecord> records =
-        terms.stream()
-            .map(
-                term ->
-                    ConsentRecord.record(
-                        term,
-                        actorUserId,
-                        childSubjectId(term, request.childId()),
-                        subjectHash(term, actorUserId, request.childId()),
-                        requestedActions.get(term.getId()),
-                        ipAddress,
-                        userAgent,
-                        now))
-            .toList();
-    recordRepository.saveAll(records);
-    return new ConsentRegistrationResponse(request.childId(), records.size(), true, now);
+  private List<ConsentRecord> records(
+      Long actorUserId,
+      Long childId,
+      Map<Long, ConsentAction> requestedActions,
+      List<ConsentTerm> terms,
+      String ipAddress,
+      String userAgent,
+      LocalDateTime recordedAt) {
+    return terms.stream()
+        .map(
+            term ->
+                ConsentRecord.record(
+                    term,
+                    actorUserId,
+                    childSubjectId(term, childId),
+                    subjectHash(term, actorUserId, childId),
+                    requestedActions.get(term.getId()),
+                    ipAddress,
+                    userAgent,
+                    recordedAt))
+        .toList();
   }
 
   private Map<Long, ConsentAction> requestedActions(List<ConsentAgreementRequest> agreements) {

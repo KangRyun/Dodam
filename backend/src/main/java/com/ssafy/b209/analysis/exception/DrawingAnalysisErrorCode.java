@@ -12,6 +12,9 @@ public enum DrawingAnalysisErrorCode implements ErrorCode {
   /** 같은 그림과 작업 유형의 진행 또는 성공 분석이 이미 존재하는 경우다. */
   DRAWING_ANALYSIS_ALREADY_EXISTS(
       HttpStatus.CONFLICT, "ANALYSIS_409_002", "해당 그림의 분석이 이미 진행되었거나 완료되었습니다."),
+  /** 원본 분석 상태가 실패가 아니어서 재시도할 수 없는 경우다. */
+  DRAWING_ANALYSIS_RETRY_NOT_ALLOWED(
+      HttpStatus.CONFLICT, "ANALYSIS_409_003", "현재 상태에서는 그림 분석을 재시도할 수 없습니다."),
   /** AI Client가 분석 요청을 완료하지 못한 경우다. */
   DRAWING_ANALYSIS_REQUEST_FAILED(
       HttpStatus.BAD_GATEWAY, "ANALYSIS_502_001", "그림 분석 요청을 완료하지 못했습니다."),

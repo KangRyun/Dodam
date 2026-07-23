@@ -10,9 +10,11 @@ import com.ssafy.b209.child.domain.ChildProfileStatus;
 import com.ssafy.b209.child.domain.ChildTutorialStatus;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.child.dto.response.ChildDetailResponse;
+import com.ssafy.b209.child.dto.response.ChildSummaryResponse;
 import com.ssafy.b209.child.exception.ChildErrorCode;
 import com.ssafy.b209.child.repository.ChildDetailProjection;
 import com.ssafy.b209.child.repository.ChildRepository;
+import com.ssafy.b209.child.repository.ChildSummaryProjection;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
 import java.time.Instant;
@@ -92,6 +94,48 @@ class ChildQueryServiceTest {
             exception ->
                 assertThat(exception.getErrorCode()).isEqualTo(ChildErrorCode.CHILD_NOT_FOUND));
     verifyNoMoreInteractions(childRepository);
+  }
+
+  @Test
+  void returnsConnectedChildrenSummariesInRepositoryOrder() {
+    ChildSummaryProjection first = summaryProjection(3L, "별이", LocalDate.of(2019, 7, 23), "MOTHER");
+    ChildSummaryProjection second = summaryProjection(4L, "달이", LocalDate.of(2016, 1, 1), "FATHER");
+    given(childRepository.findSummariesByGuardianUserId(GUARDIAN_USER_ID))
+        .willReturn(List.of(first, second));
+
+    List<ChildSummaryResponse> children = service.getChildren(GUARDIAN_USER_ID);
+
+    assertThat(children).hasSize(2);
+    assertThat(children.get(0).childId()).isEqualTo(3L);
+    assertThat(children.get(0).nickname()).isEqualTo("별이");
+    assertThat(children.get(0).age()).isEqualTo(6);
+    assertThat(children.get(0).relationshipType()).isEqualTo("MOTHER");
+    assertThat(children.get(0).questionDifficulty()).isEqualTo(QuestionDifficulty.LOWER_ELEMENTARY);
+    assertThat(children.get(0).tutorialStatus()).isEqualTo(ChildTutorialStatus.IN_PROGRESS);
+    assertThat(children.get(0).profileStatus()).isEqualTo(ChildProfileStatus.ACTIVE);
+    assertThat(children.get(1).childId()).isEqualTo(4L);
+    assertThat(children.get(1).age()).isEqualTo(10);
+  }
+
+  @Test
+  void returnsAnEmptyListWhenNoChildrenAreConnected() {
+    given(childRepository.findSummariesByGuardianUserId(GUARDIAN_USER_ID)).willReturn(List.of());
+
+    assertThat(service.getChildren(GUARDIAN_USER_ID)).isEmpty();
+  }
+
+  private ChildSummaryProjection summaryProjection(
+      Long childId, String nickname, LocalDate birthDate, String relationshipType) {
+    ChildSummaryProjection projection = mock(ChildSummaryProjection.class);
+    given(projection.getChildId()).willReturn(childId);
+    given(projection.getNickname()).willReturn(nickname);
+    given(projection.getBirthDate()).willReturn(birthDate);
+    given(projection.getProfileImageUrl()).willReturn(null);
+    given(projection.getQuestionDifficulty()).willReturn("LOWER_ELEMENTARY");
+    given(projection.getTutorialStatus()).willReturn("IN_PROGRESS");
+    given(projection.getProfileStatus()).willReturn("ACTIVE");
+    given(projection.getRelationshipType()).willReturn(relationshipType);
+    return projection;
   }
 
   private ChildDetailProjection projection(LocalDate birthDate) {

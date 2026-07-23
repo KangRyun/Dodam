@@ -17,6 +17,7 @@ import com.ssafy.b209.drawing.dto.request.SaveDrawingDraftRequest;
 import com.ssafy.b209.drawing.dto.response.DrawingDraftResponse;
 import com.ssafy.b209.drawing.exception.DrawingErrorCode;
 import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
+import com.ssafy.b209.drawing.repository.DrawingDraftDeletionRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.storage.image.ImageStorage;
@@ -46,6 +47,7 @@ class DrawingDraftServiceTest {
 
   @Mock private DrawingSessionRepository drawingSessionRepository;
   @Mock private DrawingAssetRepository drawingAssetRepository;
+  @Mock private DrawingDraftDeletionRepository drawingDraftDeletionRepository;
   @Mock private ImageStorage imageStorage;
   @Mock private DrawingSession drawingSession;
   @Mock private CurrentAuthenticatedUserResolver currentUserResolver;
@@ -60,6 +62,7 @@ class DrawingDraftServiceTest {
         new DrawingDraftService(
             drawingSessionRepository,
             drawingAssetRepository,
+            drawingDraftDeletionRepository,
             imageStorage,
             currentUserResolver,
             accessValidator,
@@ -167,6 +170,29 @@ class DrawingDraftServiceTest {
 
     given(drawingAssetRepository.findLatestDraft(SESSION_ID)).willReturn(Optional.empty());
     assertError(() -> service.getLatest(SESSION_ID), DrawingErrorCode.DRAWING_DRAFT_NOT_FOUND);
+  }
+
+  @Test
+  void deletesAllDraftMetadataAndSchedulesStoredFiles() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    given(drawingSessionRepository.findNotDeletedByIdForUpdate(SESSION_ID))
+        .willReturn(Optional.of(drawingSession));
+    given(drawingDraftDeletionRepository.scheduleAndDeleteAll(SESSION_ID)).willReturn(2);
+
+    service.delete(SESSION_ID);
+
+    verify(accessValidator).requireDrawingSessionAccess(GUARDIAN_USER_ID, SESSION_ID);
+    verify(drawingDraftDeletionRepository).scheduleAndDeleteAll(SESSION_ID);
+  }
+
+  @Test
+  void reportsNotFoundWhenSessionHasNoDraft() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    given(drawingSessionRepository.findNotDeletedByIdForUpdate(SESSION_ID))
+        .willReturn(Optional.of(drawingSession));
+    given(drawingDraftDeletionRepository.scheduleAndDeleteAll(SESSION_ID)).willReturn(0);
+
+    assertError(() -> service.delete(SESSION_ID), DrawingErrorCode.DRAWING_DRAFT_NOT_FOUND);
   }
 
   private void allowSession() {

@@ -9,11 +9,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
 import com.ssafy.b209.analysis.dto.BoundingBoxResponse;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisDetailResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisFailureResponse;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisHistoryResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisModelResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
@@ -34,7 +37,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-@WebMvcTest(DrawingAnalysisController.class)
+@WebMvcTest({DrawingAnalysisController.class, DrawingAnalysisRetryController.class})
 @org.springframework.context.annotation.Import(
     com.ssafy.b209.global.exception.GlobalExceptionHandler.class)
 class DrawingAnalysisControllerTest {
@@ -42,6 +45,30 @@ class DrawingAnalysisControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private DrawingAnalysisService drawingAnalysisService;
   @MockitoBean private DrawingAnalysisQueryService drawingAnalysisQueryService;
+
+  @Test
+  void returnsAnalysisHistoryForTheSession() throws Exception {
+    given(drawingAnalysisQueryService.getDrawingAnalyses(10L))
+        .willReturn(
+            List.of(
+                new DrawingAnalysisHistoryResponse(
+                    30L,
+                    20L,
+                    DrawingAnalysisScope.FINAL,
+                    DrawingAnalysisType.OBJECT_DETECTION,
+                    DrawingAnalysisState.SUCCESS,
+                    Instant.parse("2026-07-22T05:00:00Z"),
+                    Instant.parse("2026-07-22T05:00:01Z"))));
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/{drawingSessionId}/analyses", 10L))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data[0].drawingAnalysisId").value(30))
+        .andExpect(jsonPath("$.data[0].drawingAssetId").value(20))
+        .andExpect(jsonPath("$.data[0].state").value("SUCCESS"))
+        .andExpect(jsonPath("$.data[0].taskType").value("OBJECT_DETECTION"));
+  }
 
   @Test
   void returnsCreatedResponseAndAnalysisLocation() throws Exception {
@@ -63,6 +90,31 @@ class DrawingAnalysisControllerTest {
         .andExpect(jsonPath("$.data.model.name").value("mock-drawing-detector"))
         .andExpect(jsonPath("$.data.detections[0].label").value("HOUSE"))
         .andExpect(jsonPath("$.data.storageKey").doesNotExist());
+  }
+
+  @Test
+  void retriesAFailedAnalysisByItsIdentifier() throws Exception {
+    given(drawingAnalysisService.retryAnalysis(eq(30L), any())).willReturn(response());
+
+    mockMvc
+        .perform(
+            post("/api/v1/analyses/{analysisId}/retry", 30L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"USER_REQUEST\",\"useLatestInputs\":true}"))
+        .andExpect(status().isCreated())
+        .andExpect(header().string("Location", "/api/v1/drawing-sessions/10/analyses/30"))
+        .andExpect(jsonPath("$.data.status").value("SUCCEEDED"));
+  }
+
+  @Test
+  void rejectsAnInvalidRetryRequest() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/analyses/{analysisId}/retry", 30L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"useLatestInputs\":true}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
   }
 
   @Test

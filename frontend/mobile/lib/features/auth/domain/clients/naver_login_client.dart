@@ -16,4 +16,6 @@ final class NaverLoginCancelled extends NaverLoginResult {
 // 네이버 SDK 연결 계약
 abstract interface class NaverLoginClient {
   Future<NaverLoginResult> signIn();
+
+  Future<void> signOut();
 }

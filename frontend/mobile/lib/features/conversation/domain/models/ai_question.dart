@@ -37,14 +37,14 @@ final class AiQuestionOption {
 
   factory AiQuestionOption.fromJson(Map<String, dynamic> json) =>
       AiQuestionOption(
-        optionId: json['optionId'] as int,
+        optionId: json['optionId'].toString(),
         type: json['type'] as String,
         label: json['label'] as String,
         value: json['value'] as String,
         emoji: json['emoji'] as String?,
       );
 
-  final int optionId;
+  final String optionId;
   final String type;
   final String label;
   final String value;

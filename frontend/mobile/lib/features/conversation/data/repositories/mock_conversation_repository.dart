@@ -27,13 +27,13 @@ final class MockConversationRepository implements ConversationRepository {
       text: '그림 속에는 누가 함께 있어?',
       options: const [
         AiQuestionOption(
-          optionId: 1,
+          optionId: '1',
           type: 'TEXT',
           label: '가족이 있어',
           value: '가족이 있어',
         ),
         AiQuestionOption(
-          optionId: 2,
+          optionId: '2',
           type: 'TEXT',
           label: '친구가 있어',
           value: '친구가 있어',

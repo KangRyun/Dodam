@@ -34,4 +34,15 @@ public interface RefreshTokenSessionStore {
       String currentTokenHash,
       String newTokenHash,
       Duration ttl);
+
+  /**
+   * 사용자·기기·Token hash가 모두 일치하는 현재 Refresh Token family를 폐기한다.
+   *
+   * @param familyId Token family 식별자
+   * @param userId Access JWT와 Refresh JWT에서 확인한 사용자 ID
+   * @param deviceId 로그아웃 요청 기기 식별자
+   * @param tokenHash 요청 Refresh Token의 SHA-256 hash
+   * @return 세션을 폐기했으면 {@code true}, 세션이 없거나 식별 정보가 다르면 {@code false}
+   */
+  boolean revoke(String familyId, Long userId, String deviceId, String tokenHash);
 }

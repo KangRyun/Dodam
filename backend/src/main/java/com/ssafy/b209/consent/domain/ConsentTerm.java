@@ -39,6 +39,9 @@ public class ConsentTerm {
   @Column(name = "content_url", length = 1000)
   private String contentUrl;
 
+  @Column(name = "content_html", columnDefinition = "TEXT")
+  private String contentHtml;
+
   @Column(name = "effective_at", nullable = false)
   private LocalDateTime effectiveAt;
 
@@ -133,6 +136,60 @@ public class ConsentTerm {
    */
   public boolean isRequired() {
     return required;
+  }
+
+  /**
+   * 기능에서 약관을 식별하는 안정적인 코드를 반환한다.
+   *
+   * @return 약관 코드
+   */
+  public String getTermCode() {
+    return termCode;
+  }
+
+  /**
+   * 변경 불가능한 약관 버전을 반환한다.
+   *
+   * @return 약관 버전
+   */
+  public String getVersion() {
+    return version;
+  }
+
+  /**
+   * 사용자에게 표시할 약관 제목을 반환한다.
+   *
+   * @return 약관 제목
+   */
+  public String getTitle() {
+    return title;
+  }
+
+  /**
+   * 약관 원문 URL을 반환한다.
+   *
+   * @return 약관 원문 URL 또는 {@code null}
+   */
+  public String getContentUrl() {
+    return contentUrl;
+  }
+
+  /**
+   * 약관 원문 HTML을 반환한다.
+   *
+   * @return 약관 원문 HTML 또는 아직 확정되지 않았으면 {@code null}
+   */
+  public String getContentHtml() {
+    return contentHtml;
+  }
+
+  /**
+   * 약관 시행 시각을 반환한다.
+   *
+   * @return 약관 시행 시각
+   */
+  public LocalDateTime getEffectiveAt() {
+    return effectiveAt;
   }
 
   /**

@@ -64,6 +64,36 @@ public interface ChildRepository extends JpaRepository<Child, Long> {
   List<String> findResponseModesByChildId(@Param("childId") Long childId);
 
   /**
+   * 요청 보호자에게 연결된 활성 아동 목록을 등록 순서로 조회한다.
+   *
+   * <p>Soft Delete되었거나 비활성 상태인 아동은 제외하며 보호자 소유권 조건을 Query에서 함께 적용한다.
+   *
+   * @param guardianUserId 목록을 조회할 보호자 사용자 식별자
+   * @return 등록 순서가 적용된 아동 요약 목록, 없으면 빈 목록
+   */
+  @Query(
+      value =
+          """
+          select c.id as childId,
+                 c.nickname as nickname,
+                 c.birth_date as birthDate,
+                 c.profile_image_url as profileImageUrl,
+                 c.question_difficulty as questionDifficulty,
+                 c.tutorial_status as tutorialStatus,
+                 c.profile_status as profileStatus,
+                 relation.relationship_type as relationshipType
+            from children c
+            join guardian_child_relations relation on relation.child_id = c.id
+           where relation.guardian_user_id = :guardianUserId
+             and c.deleted_at is null
+             and c.profile_status = 'ACTIVE'
+           order by c.created_at, c.id
+          """,
+      nativeQuery = true)
+  List<ChildSummaryProjection> findSummariesByGuardianUserId(
+      @Param("guardianUserId") Long guardianUserId);
+
+  /**
    * 삭제되지 않은 아동을 쓰기 잠금과 함께 조회한다.
    *
    * @param childId 잠글 아동 식별자

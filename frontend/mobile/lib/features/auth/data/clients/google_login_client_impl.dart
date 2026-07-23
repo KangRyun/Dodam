@@ -29,4 +29,7 @@ final class GoogleLoginClientImpl implements GoogleLoginClient {
       ),
     };
   }
+
+  @override
+  Future<void> signOut() async {}
 }

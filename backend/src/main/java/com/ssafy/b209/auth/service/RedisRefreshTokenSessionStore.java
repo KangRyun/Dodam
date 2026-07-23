@@ -29,6 +29,14 @@ public class RedisRefreshTokenSessionStore implements RefreshTokenSessionStore {
               + "redis.call('HSET', KEYS[1], 'tokenHash', ARGV[4]) "
               + "redis.call('PEXPIRE', KEYS[1], ARGV[5]) return 0",
           Long.class);
+  private static final DefaultRedisScript<Long> REVOKE_SCRIPT =
+      new DefaultRedisScript<>(
+          "if redis.call('EXISTS', KEYS[1]) == 0 then return 0 end "
+              + "if redis.call('HGET', KEYS[1], 'userId') ~= ARGV[1] then return 0 end "
+              + "if redis.call('HGET', KEYS[1], 'deviceId') ~= ARGV[2] then return 0 end "
+              + "if redis.call('HGET', KEYS[1], 'tokenHash') ~= ARGV[3] then return 0 end "
+              + "redis.call('DEL', KEYS[1]) return 1",
+          Long.class);
 
   private final StringRedisTemplate redisTemplate;
 
@@ -87,6 +95,14 @@ public class RedisRefreshTokenSessionStore implements RefreshTokenSessionStore {
       return RefreshTokenRotationResult.REUSED;
     }
     throw new IllegalStateException("Unexpected Redis refresh rotation result");
+  }
+
+  @Override
+  public boolean revoke(String familyId, Long userId, String deviceId, String tokenHash) {
+    Long revoked =
+        redisTemplate.execute(
+            REVOKE_SCRIPT, List.of(key(familyId)), userId.toString(), deviceId, tokenHash);
+    return Long.valueOf(1L).equals(revoked);
   }
 
   private String key(String familyId) {

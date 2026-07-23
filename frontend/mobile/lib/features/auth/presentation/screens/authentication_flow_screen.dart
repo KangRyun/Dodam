@@ -59,7 +59,7 @@ class _AuthenticationFlowScreenState extends State<AuthenticationFlowScreen> {
     _moveToRoleDestination(session.user.role);
   }
 
-  void _moveToRoleDestination(UserRole role) {
+  void _moveToRoleDestination(UserRole? role) {
     switch (AuthLandingResolver.resolve(role)) {
       case AuthLandingDestination.guardianHome:
         widget.onGuardianAuthenticated(context);

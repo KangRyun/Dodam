@@ -3,6 +3,14 @@ package com.ssafy.b209.database;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.ssafy.b209.auth.domain.UserRole;
+import com.ssafy.b209.community.domain.PostFeed;
+import com.ssafy.b209.community.domain.PostListSort;
+import com.ssafy.b209.community.domain.PostListSort.SortDirection;
+import com.ssafy.b209.community.domain.PostListSort.SortField;
+import com.ssafy.b209.community.domain.PostType;
+import com.ssafy.b209.community.repository.CommunityPostListRepository;
+import com.ssafy.b209.community.repository.PostListSearchCriteria;
 import org.flywaydb.core.Flyway;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -36,10 +44,12 @@ class DatabaseMigrationIntegrationTest {
 
   @Autowired Flyway flyway;
 
+  @Autowired CommunityPostListRepository communityPostListRepository;
+
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("7");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(62);
     assertThat(tableExists("refresh_tokens")).isFalse();
@@ -145,6 +155,60 @@ class DatabaseMigrationIntegrationTest {
             jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM expert_profiles WHERE id = 9201", Integer.class))
         .isZero();
+  }
+
+  @Test
+  void filtersCommunityPostsByFollowingExpertKeywordRoleAndLikeCount() {
+    jdbcTemplate.update(
+        "INSERT INTO users (id, role, nickname, account_status) VALUES "
+            + "(9401, 'GUARDIAN', '조회자', 'ACTIVE'), "
+            + "(9402, 'EXPERT', '전문가', 'ACTIVE'), "
+            + "(9403, 'GUARDIAN', '다른 보호자', 'ACTIVE')");
+    jdbcTemplate.update(
+        "INSERT INTO expert_profiles "
+            + "(id, display_name, career_years, verification_status, user_id) "
+            + "VALUES (9410, '전문가', 3, 'VERIFIED', 9402)");
+    jdbcTemplate.update(
+        "INSERT INTO expert_follows (id, guardian_user_id, expert_profile_id) "
+            + "VALUES (9420, 9401, 9410)");
+    jdbcTemplate.update(
+        "INSERT INTO community_posts "
+            + "(id, author_user_id, post_type, title, content, post_status) VALUES "
+            + "(9431, 9402, 'EXPERT_COLUMN', '그림 상담 안내', '마음 읽기', 'ACTIVE'), "
+            + "(9433, 9402, 'EXPERT_COLUMN', '그림 상담 기초', '첫 단계', 'ACTIVE'), "
+            + "(9432, 9403, 'GUARDIAN_STORY', '그림 상담 후기', '보호자 경험', 'ACTIVE')");
+    jdbcTemplate.update(
+        "INSERT INTO post_likes (post_id, user_id) VALUES (9431, 9401), (9431, 9403)");
+
+    var page =
+        communityPostListRepository.findPosts(
+            new PostListSearchCriteria(
+                PostType.EXPERT_COLUMN,
+                "%그림 상담%",
+                PostFeed.FOLLOWING,
+                UserRole.EXPERT,
+                0,
+                20,
+                new PostListSort(SortField.LIKE_COUNT, SortDirection.DESC),
+                9401L));
+
+    assertThat(page.totalElements()).isEqualTo(2);
+    assertThat(page.content()).extracting(row -> row.postId()).containsExactly(9431L, 9433L);
+    assertThat(page.content().getFirst().likeCount()).isEqualTo(2);
+    assertThat(page.content().getFirst().likedByMe()).isTrue();
+
+    var allPosts =
+        communityPostListRepository.findPosts(
+            new PostListSearchCriteria(
+                null,
+                null,
+                PostFeed.ALL,
+                null,
+                0,
+                20,
+                new PostListSort(SortField.CREATED_AT, SortDirection.DESC),
+                9401L));
+    assertThat(allPosts.totalElements()).isGreaterThanOrEqualTo(3);
   }
 
   @Test

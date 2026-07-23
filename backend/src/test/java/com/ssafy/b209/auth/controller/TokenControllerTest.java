@@ -1,30 +1,36 @@
 package com.ssafy.b209.auth.controller;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ssafy.b209.auth.domain.AccountStatus;
+import com.ssafy.b209.auth.dto.request.LogoutRequest;
 import com.ssafy.b209.auth.dto.request.TokenReissueRequest;
 import com.ssafy.b209.auth.exception.AuthErrorCode;
+import com.ssafy.b209.auth.service.LogoutService;
 import com.ssafy.b209.auth.service.OAuthLoginResult;
 import com.ssafy.b209.auth.service.OAuthLoginUser;
 import com.ssafy.b209.auth.service.RefreshTokenService;
 import com.ssafy.b209.global.exception.BusinessException;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
 @WebMvcTest(TokenController.class)
+@AutoConfigureMockMvc(addFilters = false)
 class TokenControllerTest {
 
   @Autowired private MockMvc mockMvc;
   @MockitoBean private RefreshTokenService refreshTokenService;
+  @MockitoBean private LogoutService logoutService;
 
   @Test
   void reissuesTokenPairWithCommonResponseEnvelope() throws Exception {
@@ -36,7 +42,7 @@ class TokenControllerTest {
                 1800,
                 "new-refresh",
                 1209600,
-                new OAuthLoginUser(41L, null, null, AccountStatus.PENDING, false)));
+                new OAuthLoginUser(41L, null, null, null, true, AccountStatus.PENDING, false)));
 
     mockMvc
         .perform(
@@ -76,5 +82,22 @@ class TokenControllerTest {
         .perform(post("/api/v1/auth/reissue").contentType(MediaType.APPLICATION_JSON).content("{}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.success").value(false));
+  }
+
+  @Test
+  void logsOutCurrentDeviceWithCommonResponseEnvelope() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/auth/logout")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {"refreshToken":"refresh-token","deviceId":"device-1"}
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.data").isEmpty());
+
+    verify(logoutService).logout(new LogoutRequest("refresh-token", "device-1"));
   }
 }

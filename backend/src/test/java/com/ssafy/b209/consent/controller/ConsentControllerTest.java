@@ -4,15 +4,29 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
+import com.ssafy.b209.consent.domain.ConsentTargetScope;
 import com.ssafy.b209.consent.dto.request.CreateConsentRequest;
+import com.ssafy.b209.consent.dto.response.ConsentChangeResponse;
+import com.ssafy.b209.consent.dto.response.ConsentHistoryItemResponse;
+import com.ssafy.b209.consent.dto.response.ConsentHistoryPageResponse;
 import com.ssafy.b209.consent.dto.response.ConsentRegistrationResponse;
+import com.ssafy.b209.consent.dto.response.ConsentStatusItemResponse;
+import com.ssafy.b209.consent.dto.response.ConsentStatusResponse;
+import com.ssafy.b209.consent.dto.response.ConsentTermResponse;
+import com.ssafy.b209.consent.service.ConsentHistoryQueryService;
 import com.ssafy.b209.consent.service.ConsentRegistrationService;
+import com.ssafy.b209.consent.service.ConsentStatusQueryService;
+import com.ssafy.b209.consent.service.ConsentTermQueryService;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -26,6 +40,124 @@ class ConsentControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private CurrentAuthenticatedUserResolver currentUserResolver;
   @MockitoBean private ConsentRegistrationService registrationService;
+  @MockitoBean private ConsentTermQueryService termQueryService;
+  @MockitoBean private ConsentStatusQueryService statusQueryService;
+  @MockitoBean private ConsentHistoryQueryService historyQueryService;
+
+  @Test
+  void returnsAccessibleConsentHistoryWithFiltersAndPageMetadata() throws Exception {
+    when(currentUserResolver.requireUserId()).thenReturn(41L);
+    when(historyQueryService.getHistory(
+            41L,
+            7L,
+            "CHILD_PERSONAL_DATA",
+            java.time.LocalDate.of(2026, 7, 1),
+            java.time.LocalDate.of(2026, 7, 24),
+            0,
+            20))
+        .thenReturn(
+            new ConsentHistoryPageResponse(
+                List.of(
+                    new ConsentHistoryItemResponse(
+                        12L,
+                        3L,
+                        "CHILD_PERSONAL_DATA",
+                        ConsentTargetScope.CHILD,
+                        true,
+                        "v2",
+                        "아동 개인정보 동의",
+                        7L,
+                        com.ssafy.b209.consent.domain.ConsentAction.AGREE,
+                        Instant.parse("2026-07-23T12:00:00Z"))),
+                0,
+                20,
+                1,
+                1,
+                true,
+                true,
+                false));
+
+    mockMvc
+        .perform(
+            get("/api/v1/consents/history")
+                .param("childId", "7")
+                .param("termCode", "CHILD_PERSONAL_DATA")
+                .param("from", "2026-07-01")
+                .param("to", "2026-07-24"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.content[0].consentRecordId").value(12))
+        .andExpect(jsonPath("$.data.content[0].version").value("v2"))
+        .andExpect(jsonPath("$.data.content[0].action").value("AGREE"))
+        .andExpect(jsonPath("$.data.totalElements").value(1));
+  }
+
+  @Test
+  void rejectsInvalidConsentHistoryPageAndDateRange() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/consents/history")
+                .param("from", "2026-07-24")
+                .param("to", "2026-07-01")
+                .param("size", "101"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
+  @Test
+  void returnsConsentStatusForTheAuthenticatedUser() throws Exception {
+    when(currentUserResolver.requireUserId()).thenReturn(41L);
+    when(statusQueryService.getConsentStatus(41L, null))
+        .thenReturn(
+            new ConsentStatusResponse(
+                null,
+                true,
+                List.of(
+                    new ConsentStatusItemResponse(
+                        1L,
+                        "SERVICE_TOS",
+                        true,
+                        "v1",
+                        true,
+                        Instant.parse("2026-07-21T02:30:00Z")))));
+
+    mockMvc
+        .perform(get("/api/v1/consents"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.requiredConsentsSatisfied").value(true))
+        .andExpect(jsonPath("$.data.items[0].termId").value(1))
+        .andExpect(jsonPath("$.data.items[0].termCode").value("SERVICE_TOS"))
+        .andExpect(jsonPath("$.data.items[0].agreed").value(true));
+  }
+
+  @Test
+  void returnsActiveTermsForTheAuthenticatedUser() throws Exception {
+    when(currentUserResolver.requireUserId()).thenReturn(41L);
+    when(termQueryService.getActiveTerms(null, null))
+        .thenReturn(
+            List.of(
+                new ConsentTermResponse(
+                    1L,
+                    "SERVICE_TOS",
+                    ConsentTargetScope.USER,
+                    true,
+                    "v1",
+                    "서비스 이용약관",
+                    "https://example.com/tos",
+                    "<h1>서비스 이용약관</h1>",
+                    Instant.parse("2026-07-20T00:00:00Z"))));
+
+    mockMvc
+        .perform(get("/api/v1/consents/terms"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data[0].termId").value(1))
+        .andExpect(jsonPath("$.data[0].termCode").value("SERVICE_TOS"))
+        .andExpect(jsonPath("$.data[0].targetScope").value("USER"))
+        .andExpect(jsonPath("$.data[0].required").value(true))
+        .andExpect(jsonPath("$.data[0].contentHtml").value("<h1>서비스 이용약관</h1>"));
+  }
 
   @Test
   void registersConsentHistoryWithAuthenticatedActorAndRequestEvidence() throws Exception {
@@ -71,5 +203,33 @@ class ConsentControllerTest {
                     """))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.success").value(false));
+  }
+
+  @Test
+  void changesOptionalConsentAsAppendOnlyHistory() throws Exception {
+    when(currentUserResolver.requireUserId()).thenReturn(41L);
+    when(registrationService.changeOptional(
+            eq(41L), any(CreateConsentRequest.class), any(), eq("app/1.0")))
+        .thenReturn(new ConsentChangeResponse(null, 1, LocalDateTime.of(2026, 7, 24, 0, 0)));
+
+    mockMvc
+        .perform(
+            patch("/api/v1/consents")
+                .contentType(MediaType.APPLICATION_JSON)
+                .header("User-Agent", "app/1.0")
+                .content(
+                    """
+                    {
+                      "agreements": [
+                        {"termId": 4, "action": "WITHDRAW"}
+                      ]
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.recordedCount").value(1));
+
+    verify(registrationService)
+        .changeOptional(eq(41L), any(CreateConsentRequest.class), any(), eq("app/1.0"));
   }
 }

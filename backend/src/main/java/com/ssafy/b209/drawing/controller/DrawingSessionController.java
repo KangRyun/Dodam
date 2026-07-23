@@ -1,9 +1,11 @@
 package com.ssafy.b209.drawing.controller;
 
 import com.ssafy.b209.drawing.dto.request.CreateDrawingSessionRequest;
+import com.ssafy.b209.drawing.dto.request.DeleteDrawingSessionRequest;
 import com.ssafy.b209.drawing.dto.response.ActiveDrawingSessionResponse;
 import com.ssafy.b209.drawing.dto.response.CreateDrawingSessionResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingSessionDetailResponse;
+import com.ssafy.b209.drawing.service.DrawingSessionDeletionService;
 import com.ssafy.b209.drawing.service.DrawingSessionQueryService;
 import com.ssafy.b209.drawing.service.DrawingSessionService;
 import com.ssafy.b209.global.response.ApiErrorResponse;
@@ -20,6 +22,7 @@ import jakarta.validation.constraints.Positive;
 import java.net.URI;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -43,18 +46,22 @@ public class DrawingSessionController {
 
   private final DrawingSessionService drawingSessionService;
   private final DrawingSessionQueryService drawingSessionQueryService;
+  private final DrawingSessionDeletionService drawingSessionDeletionService;
 
   /**
    * 그림 활동 세션 생성·조회 서비스를 사용하는 Controller를 생성한다.
    *
    * @param drawingSessionService 그림 활동 세션 생성 업무를 처리하는 서비스
    * @param drawingSessionQueryService 진행 중 그림 활동 조회 업무를 처리하는 서비스
+   * @param drawingSessionDeletionService 그림 활동 취소·삭제 업무를 처리하는 서비스
    */
   public DrawingSessionController(
       DrawingSessionService drawingSessionService,
-      DrawingSessionQueryService drawingSessionQueryService) {
+      DrawingSessionQueryService drawingSessionQueryService,
+      DrawingSessionDeletionService drawingSessionDeletionService) {
     this.drawingSessionService = drawingSessionService;
     this.drawingSessionQueryService = drawingSessionQueryService;
+    this.drawingSessionDeletionService = drawingSessionDeletionService;
   }
 
   /**
@@ -170,5 +177,37 @@ public class DrawingSessionController {
     URI location = URI.create("/api/v1/drawing-sessions/" + response.drawingSessionId());
     return ResponseEntity.created(location)
         .body(ApiResponse.of(CommonSuccessCode.CREATED, response));
+  }
+
+  /**
+   * 연결 보호자의 그림 활동을 삭제 상태로 전환하고 파일 삭제를 예약한다.
+   *
+   * @param drawingSessionId 삭제할 그림 활동 세션 식별자
+   * @param request 명시적 삭제 확인 값
+   * @return 본문이 없는 HTTP 204 응답
+   */
+  @Operation(
+      summary = "그림 활동 취소·삭제",
+      description = "confirmation이 DELETE인 연결 보호자의 그림 활동을 Soft Delete하고 연관 파일의 비동기 삭제를 예약합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "204",
+        description = "그림 활동 삭제 접수 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "세션 식별자 또는 삭제 확인 값 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "접근 가능한 그림 활동을 찾을 수 없음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @DeleteMapping("/{drawingSessionId}")
+  public ResponseEntity<Void> deleteDrawingSession(
+      @Parameter(description = "삭제할 그림 활동 세션 식별자", required = true) @PathVariable @Positive
+          Long drawingSessionId,
+      @Valid @RequestBody DeleteDrawingSessionRequest request) {
+    drawingSessionDeletionService.delete(drawingSessionId, request);
+    return ResponseEntity.noContent().build();
   }
 }
