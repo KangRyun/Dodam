@@ -61,6 +61,8 @@ app:
       endpoint-path: ${AI_DRAWING_ANALYSIS_ENDPOINT_PATH:/internal/ai/v1/drawings/analysis}
       connect-timeout: ${AI_DRAWING_ANALYSIS_CONNECT_TIMEOUT:3s}
       read-timeout: ${AI_DRAWING_ANALYSIS_READ_TIMEOUT:30s}
+    observation:
+      mode: ${AI_OBSERVATION_MODE:mock}
   cors:
     allowed-origins: []
   storage:
