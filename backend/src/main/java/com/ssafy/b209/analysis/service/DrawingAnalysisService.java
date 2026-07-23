@@ -5,7 +5,9 @@ import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.dto.DrawingImageReference;
+import com.ssafy.b209.analysis.dto.RetryDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
@@ -111,13 +113,43 @@ public class DrawingAnalysisService {
             requestId,
             requestedAt);
 
+    return executeAnalysis(started, request.analysisType(), requestedInstant);
+  }
+
+  /**
+   * FAILED 분석을 원본으로 연결한 새 분석 실행을 요청한다.
+   *
+   * @param analysisId 실패한 원본 분석 식별자
+   * @param request 재시도 사유와 입력 선택 정책
+   * @return 새로 생성되고 저장된 분석 결과
+   * @throws BusinessException 원본 접근·상태 검증, Client 호출 또는 결과 저장에 실패한 경우
+   */
+  public CreateDrawingAnalysisResponse retryAnalysis(
+      Long analysisId, RetryDrawingAnalysisRequest request) {
+    Long guardianUserId = currentUserResolver.requireUserId();
+    RetryDrawingAnalysisSource source = persistenceService.findRetrySource(analysisId);
+    accessValidator.requireDrawingSessionAccess(guardianUserId, source.drawingSessionId());
+    String requestId = requestIdSupplier.get().toString();
+    Instant requestedInstant = clock.instant();
+    StartedDrawingAnalysis started =
+        persistenceService.startRetry(
+            analysisId,
+            request.useLatestInputs(),
+            requestId,
+            LocalDateTime.ofInstant(requestedInstant, ZoneOffset.UTC));
+    return executeAnalysis(started, DrawingAnalysisType.OBJECT_DETECTION, requestedInstant);
+  }
+
+  private CreateDrawingAnalysisResponse executeAnalysis(
+      StartedDrawingAnalysis started, DrawingAnalysisType taskType, Instant requestedInstant) {
+    String requestId = started.requestId();
     DrawingAnalysisRequest clientRequest =
         new DrawingAnalysisRequest(
             requestId,
             started.drawingSessionId(),
             started.drawingAssetId(),
             new DrawingImageReference(started.storageKey(), started.contentType()),
-            request.analysisType());
+            taskType);
     DrawingAnalysisResponse clientResponse;
     try {
       clientResponse = drawingAnalysisClient.analyze(clientRequest);
@@ -154,7 +186,7 @@ public class DrawingAnalysisService {
         started.drawingSessionId(),
         started.drawingAssetId(),
         requestId,
-        request.analysisType(),
+        taskType,
         DrawingAnalysisStatus.SUCCEEDED,
         clientResponse.model(),
         clientResponse.detections(),

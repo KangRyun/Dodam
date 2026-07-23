@@ -24,6 +24,29 @@ GET /api/v1/drawing-sessions/{drawingSessionId}/analyses/{drawingAnalysisId}
 
 현재 `analyses`와 `analysis_detected_objects`에는 Soft Delete 컬럼이 없으며 `drawing_sessions.deleted_at`만 기존 조회 정책에 따라 제외한다. 그림 API 공통 인증이 도입되기 전까지 임시 사용자 Header나 사용자 ID를 사용하지 않는다.
 
+## 실패 분석 재시도
+
+```http
+POST /api/v1/analyses/{analysisId}/retry
+```
+
+```json
+{
+  "reason": "USER_REQUEST",
+  "useLatestInputs": true
+}
+```
+
+FAILED 분석만 재시도할 수 있다. 원본 행을 다시 PROCESSING으로 변경하지 않고 새 분석 행을 생성해
+`retry_of_analysis_id`로 원본과 연결하며 `trigger_reason=RETRY`를 기록한다. `useLatestInputs=false`는
+원본 그림을, `true`는 같은 Session·Asset 유형의 가장 높은 버전을 선택한다.
+
+재시도도 현재 공개 분석 요청과 동일한 동기식 AI Client 경계를 사용한다. 성공 응답은 HTTP 201이며
+`Location`은 현재 저장 결과 조회 URI인
+`/api/v1/drawing-sessions/{drawingSessionId}/analyses/{drawingAnalysisId}`다. FAILED가 아닌 원본은
+`ANALYSIS_409_003`, 선택된 그림에 PROCESSING 또는 SUCCESS 분석이 존재하면 `ANALYSIS_409_002`로
+거부한다. 자동 Retry와 리포트 재생성은 수행하지 않는다.
+
 ## 공개 분석 요청의 Asset 정책
 
 `POST /api/v1/drawing-sessions/{drawingSessionId}/analyses`는 다음 조합만 허용한다.
@@ -145,7 +168,7 @@ Scheduler나 Timer를 생성하지 않는다.
 - `S15P11B209-146`: 외부 호출 없는 Mock 분석 결과
 - `S15P11B209-147`: 분석 결과 저장 Application Service와 DB 연동
 
-이번 범위에서는 Timeout, Retry, Circuit Breaker, Message Queue, 분석 저장, 그림 활동 상태 변경, 대화·감정·리포트 생성을 구현하지 않는다.
+현재 계약은 자동 Retry, Circuit Breaker, Message Queue, 그림 활동 상태 변경, 대화·감정·리포트 생성을 포함하지 않는다.
 
 ## Spring Boot AI Client
 

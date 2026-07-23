@@ -239,6 +239,20 @@ class DrawingAnalysisPersistenceServiceTest {
     verify(drawingAnalysisRepository).flush();
   }
 
+  @Test
+  void rejectsRetryWhenTheSourceAnalysisHasNotFailed() {
+    DrawingAnalysis source = processingAnalysis();
+    given(drawingAnalysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(source));
+
+    assertError(
+        () ->
+            service.startRetry(
+                ANALYSIS_ID, false, "660e8400-e29b-41d4-a716-446655440000", PROCESSED_AT),
+        DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RETRY_NOT_ALLOWED);
+
+    verify(drawingAnalysisRepository, never()).saveAndFlush(any());
+  }
+
   private void givenValidTarget() {
     given(drawingSessionRepository.findNotDeletedByIdForUpdate(SESSION_ID))
         .willReturn(Optional.of(session));

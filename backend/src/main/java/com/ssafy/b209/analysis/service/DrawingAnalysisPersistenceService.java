@@ -111,6 +111,81 @@ public class DrawingAnalysisPersistenceService {
   }
 
   /**
+   * 재시도 원본 분석과 연결된 세션 식별자를 조회한다.
+   *
+   * @param analysisId 재시도할 원본 분석 식별자
+   * @return 보호자 접근 검증에 사용할 원본 분석과 세션 식별자
+   * @throws BusinessException 원본 분석을 찾을 수 없는 경우
+   */
+  @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+  public RetryDrawingAnalysisSource findRetrySource(Long analysisId) {
+    DrawingAnalysis source =
+        drawingAnalysisRepository
+            .findById(analysisId)
+            .orElseThrow(
+                () -> new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_FOUND));
+    return new RetryDrawingAnalysisSource(source.getId(), source.getDrawingSession().getId());
+  }
+
+  /**
+   * FAILED 원본을 검증하고 원본 또는 최신 그림을 사용하는 PROCESSING 재시도 행을 저장한다.
+   *
+   * @param analysisId 실패한 원본 분석 식별자
+   * @param useLatestInputs 같은 세션·자산 유형의 최신 그림 사용 여부
+   * @param requestId 새 AI 요청을 식별하는 서버 생성 UUID
+   * @param requestedAt 서버가 재시도를 시작한 UTC 시각
+   * @return Transaction 밖 Client 호출에 필요한 새 분석과 이미지 참조
+   * @throws BusinessException 원본이 없거나 FAILED가 아니거나 활성 중복 분석이 존재하는 경우
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public StartedDrawingAnalysis startRetry(
+      Long analysisId, boolean useLatestInputs, String requestId, LocalDateTime requestedAt) {
+    DrawingAnalysis source =
+        drawingAnalysisRepository
+            .findByIdForUpdate(analysisId)
+            .orElseThrow(
+                () -> new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_FOUND));
+    if (source.getState() != com.ssafy.b209.analysis.domain.DrawingAnalysisState.FAILED
+        || source.getDrawingAsset() == null
+        || source.getTaskType() == null
+        || source.getScope() == null) {
+      throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RETRY_NOT_ALLOWED);
+    }
+
+    DrawingSession session =
+        drawingSessionRepository
+            .findNotDeletedByIdForUpdate(source.getDrawingSession().getId())
+            .orElseThrow(() -> new BusinessException(DrawingErrorCode.DRAWING_SESSION_NOT_FOUND));
+    DrawingAsset asset =
+        useLatestInputs
+            ? drawingAssetRepository
+                .findFirstByDrawingSessionIdAndAssetTypeOrderByAssetVersionDesc(
+                    session.getId(), source.getDrawingAsset().getAssetType())
+                .orElse(source.getDrawingAsset())
+            : source.getDrawingAsset();
+    if (drawingAnalysisRepository.existsActiveByAssetAndTaskType(
+        asset.getId(), source.getTaskType())) {
+      throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_ALREADY_EXISTS);
+    }
+
+    DrawingAnalysis retry = DrawingAnalysis.processingRetry(source, asset, requestId, requestedAt);
+    try {
+      DrawingAnalysis saved = drawingAnalysisRepository.saveAndFlush(retry);
+      return new StartedDrawingAnalysis(
+          saved.getId(),
+          session.getId(),
+          asset.getId(),
+          requestId,
+          asset.getStorageKey(),
+          asset.getMimeType(),
+          requestedAt);
+    } catch (DataIntegrityViolationException exception) {
+      throw new BusinessException(
+          DrawingAnalysisErrorCode.DRAWING_ANALYSIS_ALREADY_EXISTS, exception);
+    }
+  }
+
+  /**
    * 유효한 Client 결과를 Detection으로 변환해 저장하고 분석을 성공 상태로 전환한다.
    *
    * @param analysisId 완료할 분석 실행 식별자

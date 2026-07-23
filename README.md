@@ -700,6 +700,23 @@ curl -X POST "http://localhost:8080/api/v1/drawing-sessions/100/snapshots" \
 - 현재 인증과 그림 활동 소유권 검증은 아직 연결되지 않았습니다.
 - 업로드만으로 세션 상태를 변경하거나 AI 분석을 실행하지 않습니다.
 
+## 실패한 그림 분석 재요청 API
+
+`POST /api/v1/analyses/{analysisId}/retry`는 연결 보호자가 FAILED 분석을 새 실행으로 재요청합니다.
+
+```json
+{
+  "reason": "USER_REQUEST",
+  "useLatestInputs": true
+}
+```
+
+- 원본 분석 행은 변경하지 않고 새 행의 `retry_of_analysis_id`에 원본 식별자를 기록합니다.
+- `useLatestInputs=false`는 원본 그림을, `true`는 같은 세션·자산 유형의 최신 버전을 사용합니다.
+- FAILED가 아닌 분석은 `ANALYSIS_409_003`, 선택된 그림에 진행 중이거나 성공한 분석이 있으면 `ANALYSIS_409_002`로 거부합니다.
+- 성공 응답의 `Location`은 현재 공개 조회 URI인 `/api/v1/drawing-sessions/{drawingSessionId}/analyses/{drawingAnalysisId}`를 가리킵니다.
+- 현재 분석 실행은 동기식이며 자동 Retry, 리포트 재생성과 버전 증가는 수행하지 않습니다.
+
 ## 그림 초안 자동 저장 및 조회 API
 
 진행 중인 `IN_PROGRESS/DRAWING` 세션의 현재 캔버스 전체본은 다음 Endpoint로 저장합니다.

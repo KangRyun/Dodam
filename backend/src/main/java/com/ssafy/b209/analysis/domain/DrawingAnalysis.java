@@ -45,6 +45,10 @@ public class DrawingAnalysis {
   @JoinColumn(name = "drawing_asset_id", nullable = false)
   private DrawingAsset drawingAsset;
 
+  @ManyToOne(fetch = FetchType.LAZY)
+  @JoinColumn(name = "retry_of_analysis_id")
+  private DrawingAnalysis retryOfAnalysis;
+
   @Enumerated(EnumType.STRING)
   @Column(name = "analysis_type", nullable = false, length = 20)
   private DrawingAnalysisScope scope;
@@ -136,6 +140,34 @@ public class DrawingAnalysis {
       LocalDateTime requestedAt) {
     return new DrawingAnalysis(
         drawingSession, drawingAsset, scope, taskType, requestId, requestedAt);
+  }
+
+  /**
+   * 실패한 원본 분석과 연결된 새 분석 실행을 생성한다.
+   *
+   * @param source 실패한 원본 분석
+   * @param drawingAsset 재시도에 사용할 원본 또는 최신 그림 파일
+   * @param requestId 새 AI 요청을 식별하는 서버 생성 UUID
+   * @param requestedAt 서버가 재시도를 시작한 UTC 시각
+   * @return 원본 분석과 연결된 {@link DrawingAnalysisState#PROCESSING} 실행
+   */
+  public static DrawingAnalysis processingRetry(
+      DrawingAnalysis source,
+      DrawingAsset drawingAsset,
+      String requestId,
+      LocalDateTime requestedAt) {
+    Objects.requireNonNull(source, "source must not be null");
+    DrawingAnalysis retry =
+        new DrawingAnalysis(
+            source.drawingSession,
+            drawingAsset,
+            source.scope,
+            source.taskType,
+            requestId,
+            requestedAt);
+    retry.retryOfAnalysis = source;
+    retry.triggerReason = "RETRY";
+    return retry;
   }
 
   /**
@@ -281,6 +313,15 @@ public class DrawingAnalysis {
    */
   public DrawingAsset getDrawingAsset() {
     return drawingAsset;
+  }
+
+  /**
+   * 재시도 원본 분석을 반환한다.
+   *
+   * @return 최초 요청이면 {@code null}, 재시도이면 원본 분석
+   */
+  public DrawingAnalysis getRetryOfAnalysis() {
+    return retryOfAnalysis;
   }
 
   /**
