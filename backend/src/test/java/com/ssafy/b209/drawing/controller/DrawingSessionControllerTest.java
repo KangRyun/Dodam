@@ -3,6 +3,8 @@ package com.ssafy.b209.drawing.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -18,6 +20,7 @@ import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.domain.DrawingSessionStatus;
 import com.ssafy.b209.drawing.domain.DrawingStage;
 import com.ssafy.b209.drawing.dto.request.CreateDrawingSessionRequest;
+import com.ssafy.b209.drawing.dto.request.DeleteDrawingSessionRequest;
 import com.ssafy.b209.drawing.dto.response.ActiveDrawingSessionResponse;
 import com.ssafy.b209.drawing.dto.response.CreateDrawingSessionResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingSessionAnalysisSummaryResponse;
@@ -28,6 +31,7 @@ import com.ssafy.b209.drawing.dto.response.DrawingTypeSummaryResponse;
 import com.ssafy.b209.drawing.dto.response.LatestDrawingDraftResponse;
 import com.ssafy.b209.drawing.dto.response.StrokeBatchResponse;
 import com.ssafy.b209.drawing.exception.DrawingErrorCode;
+import com.ssafy.b209.drawing.service.DrawingSessionDeletionService;
 import com.ssafy.b209.drawing.service.DrawingSessionQueryService;
 import com.ssafy.b209.drawing.service.DrawingSessionService;
 import com.ssafy.b209.drawing.service.StrokeBatchSaveResult;
@@ -62,6 +66,7 @@ class DrawingSessionControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private DrawingSessionService drawingSessionService;
   @MockitoBean private DrawingSessionQueryService drawingSessionQueryService;
+  @MockitoBean private DrawingSessionDeletionService drawingSessionDeletionService;
   @MockitoBean private StrokeBatchService strokeBatchService;
 
   @Test
@@ -224,6 +229,29 @@ class DrawingSessionControllerTest {
         .perform(get("/api/v1/drawing-sessions/{drawingSessionId}", 999))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("DRAWING_404_003"));
+  }
+
+  @Test
+  void deletesDrawingSessionAfterExplicitConfirmation() throws Exception {
+    mockMvc
+        .perform(
+            delete("/api/v1/drawing-sessions/100")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DELETE\"}"))
+        .andExpect(status().isNoContent());
+
+    verify(drawingSessionDeletionService).delete(100L, new DeleteDrawingSessionRequest("DELETE"));
+  }
+
+  @Test
+  void rejectsDrawingSessionDeletionWithoutConfirmation() throws Exception {
+    mockMvc
+        .perform(
+            delete("/api/v1/drawing-sessions/100")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
   }
 
   private String validStrokeBatch() {

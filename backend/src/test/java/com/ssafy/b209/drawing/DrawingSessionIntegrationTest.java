@@ -1,6 +1,7 @@
 package com.ssafy.b209.drawing;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -73,6 +74,7 @@ class DrawingSessionIntegrationTest {
   @BeforeEach
   void setUp() {
     setAuthenticatedGuardian();
+    jdbcTemplate.update("DELETE FROM storage_deletion_jobs");
     jdbcTemplate.update("DELETE FROM reports");
     jdbcTemplate.update("DELETE FROM conversation_sessions");
     jdbcTemplate.update("DELETE FROM analysis_detected_objects");
@@ -147,6 +149,62 @@ class DrawingSessionIntegrationTest {
         .containsEntry("current_stage", "DRAWING")
         .containsEntry("completed_at", null)
         .containsEntry("deleted_at", null);
+  }
+
+  @Test
+  void cancelsDrawingSessionWithSoftDeleteAndSchedulesStoredFiles() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions")
+                .header("Idempotency-Key", "cancel-session-key")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(canvasJson(1L)))
+        .andExpect(status().isCreated());
+    jdbcTemplate.update(
+        """
+        INSERT INTO drawing_assets
+          (id, drawing_session_id, asset_type, storage_key, mime_type,
+           file_size_bytes, checksum_sha256, captured_at)
+        VALUES
+          (301, 1, 'DRAFT', 'drawing-sessions/1/draft.png', 'image/png', 10,
+           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+           CURRENT_TIMESTAMP(6))
+        """);
+
+    mockMvc
+        .perform(
+            delete("/api/v1/drawing-sessions/1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DELETE\"}"))
+        .andExpect(status().isNoContent());
+
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT session_status, current_stage, deleted_at "
+                    + "FROM drawing_sessions WHERE id = 1"))
+        .containsEntry("session_status", "DELETED")
+        .containsEntry("current_stage", "DRAWING");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT deleted_at IS NOT NULL FROM drawing_sessions WHERE id = 1", Boolean.class))
+        .isTrue();
+    assertThat(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                  FROM storage_deletion_jobs
+                 WHERE storage_key = 'drawing-sessions/1/draft.png'
+                   AND resource_type = 'DRAWING_ASSET'
+                   AND resource_id = 301
+                   AND deletion_status = 'PENDING'
+                """,
+                Integer.class))
+        .isEqualTo(1);
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/1"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("DRAWING_404_003"));
   }
 
   @Test
