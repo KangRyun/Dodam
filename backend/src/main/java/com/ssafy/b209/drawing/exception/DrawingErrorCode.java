@@ -85,7 +85,17 @@ public enum DrawingErrorCode implements ErrorCode {
   DRAWING_SESSION_ALREADY_COMPLETED(
       HttpStatus.CONFLICT, "DRAWING_409_016", "그림 활동 완료가 이미 접수되었습니다."),
   /** 완료 접수 저장 과정에서 동시 요청이 충돌한 경우다. */
-  DRAWING_COMPLETION_CONFLICT(HttpStatus.CONFLICT, "DRAWING_409_017", "그림 활동 완료 접수 요청이 충돌했습니다.");
+  DRAWING_COMPLETION_CONFLICT(HttpStatus.CONFLICT, "DRAWING_409_017", "그림 활동 완료 접수 요청이 충돌했습니다."),
+  /** Stroke 이벤트 순서, 좌표 또는 지표 조합이 유효하지 않은 경우다. */
+  STROKE_BATCH_INVALID(HttpStatus.BAD_REQUEST, "DRAWING_400_010", "그림 과정 데이터가 올바르지 않습니다."),
+  /** 압축 전 Stroke payload가 허용 크기를 초과한 경우다. */
+  STROKE_BATCH_PAYLOAD_TOO_LARGE(
+      HttpStatus.PAYLOAD_TOO_LARGE, "DRAWING_413_001", "그림 과정 데이터 크기가 제한을 초과했습니다."),
+  /** 현재 세션 상태 또는 입력 방식에서 Stroke를 저장할 수 없는 경우다. */
+  STROKE_BATCH_NOT_ALLOWED(
+      HttpStatus.CONFLICT, "DRAWING_409_018", "현재 상태에서는 그림 과정 데이터를 저장할 수 없습니다."),
+  /** 같은 배치 순번이 다른 payload에 사용된 경우다. */
+  STROKE_BATCH_CONFLICT(HttpStatus.CONFLICT, "DRAWING_409_019", "같은 순번의 다른 그림 과정 데이터가 이미 저장되었습니다.");
 
   private final HttpStatus httpStatus;
   private final String code;

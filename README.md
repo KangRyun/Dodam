@@ -670,6 +670,8 @@ UPLOAD 입력 방식에서는 `canvas`를 사용하지 않습니다. 이미지 �
 `IN_PROGRESS`, 초기 단계는 `DRAWING`이며, 공식 `startedAt`은 클라이언트 시각이 아닌 서버 UTC 시각을
 사용합니다.
 
+Canvas 입력의 그림 과정은 `POST /api/v1/drawing-sessions/{drawingSessionId}/stroke-batches`로 최대 500개 이벤트씩 저장합니다. 좌표는 `0~1` 정규화 값이고 payload는 압축 전 1 MiB 이하이며, 배치·이벤트·좌표를 한 Transaction에서 정규화 테이블에 기록합니다. 같은 `batchSequence`와 동일 payload는 기존 결과를 반환하고 다른 payload로 순번을 재사용하면 `DRAWING_409_019`를 반환합니다.
+
 - `Idempotency-Key`는 8~100자이며 제어 문자를 포함할 수 없습니다.
 - 동일한 Key와 동일한 `childId`, `drawingTypeId`, `inputMethod` 요청은 기존 세션을 반환합니다.
 - 동일한 Key를 다른 핵심 요청에 사용하면 HTTP 409를 반환합니다.

@@ -142,6 +142,15 @@ public class DrawingSession {
   }
 
   /**
+   * 현재 세션이 Canvas 행동 이벤트 배치를 받을 수 있는지 확인한다.
+   *
+   * @return Canvas 입력 방식이며 삭제되지 않은 진행 중 DRAWING 단계이면 {@code true}
+   */
+  public boolean canAcceptStrokeBatch() {
+    return inputMethod == DrawingInputMethod.CANVAS && isSnapshotUploadable();
+  }
+
+  /**
    * 현재 세션이 최종 그림 분석 요청을 시작할 수 있는 상태인지 확인한다.
    *
    * <p>분석 요청은 최종 스냅샷 업로드와 같은 그림 단계에서만 허용하며, 삭제되거나 완료된 세션의 재분석은 별도 정책으로 분리한다.

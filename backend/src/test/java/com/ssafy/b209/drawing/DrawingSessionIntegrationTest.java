@@ -150,6 +150,52 @@ class DrawingSessionIntegrationTest {
   }
 
   @Test
+  void storesNormalizedStrokeBatchIdempotentlyAndRejectsSequenceReuse() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions")
+                .header("Idempotency-Key", "stroke-integration-session")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(canvasJson(1L)))
+        .andExpect(status().isCreated());
+
+    String payload = strokeBatchJson(101);
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/1/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.batchSequence").value(3))
+        .andExpect(jsonPath("$.data.acceptedEventCount").value(1))
+        .andExpect(jsonPath("$.data.lastEventSequence").value(101));
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/1/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.batchId").isNumber());
+
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM stroke_batches", Integer.class))
+        .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM stroke_events", Integer.class))
+        .isEqualTo(1);
+    assertThat(
+            jdbcTemplate.queryForObject("SELECT COUNT(*) FROM stroke_event_points", Integer.class))
+        .isEqualTo(2);
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/1/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(strokeBatchJson(102)))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("DRAWING_409_019"));
+  }
+
+  @Test
   void persistsRequiredReferenceColumnsThroughRepositories() {
     Child child =
         ChildFixture.create(
@@ -366,6 +412,32 @@ class DrawingSessionIntegrationTest {
         }
         """
         .formatted(childId);
+  }
+
+  private String strokeBatchJson(long eventSequence) {
+    return """
+        {
+          "batchSequence": 3,
+          "firstEventSequence": %1$d,
+          "lastEventSequence": %1$d,
+          "clientCreatedAt": "2026-07-21T11:32:10.120+09:00",
+          "events": [{
+            "sequence": %1$d,
+            "eventType": "STROKE",
+            "tool": "PEN",
+            "color": "#FFCC00",
+            "width": 8.0,
+            "points": [{"x":0.18,"y":0.42,"t":0},{"x":0.19,"y":0.43,"t":16}]
+          }],
+          "metrics": {
+            "undoCountDelta": 1,
+            "redoCountDelta": 0,
+            "eraseCountDelta": 2,
+            "pauseDurationMsDelta": 3200
+          }
+        }
+        """
+        .formatted(eventSequence);
   }
 
   private int sessionCount() {
