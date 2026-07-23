@@ -3,6 +3,7 @@ package com.ssafy.b209.user.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -14,6 +15,7 @@ import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.user.dto.response.UserResponse;
 import com.ssafy.b209.user.service.UserOnboardingService;
+import com.ssafy.b209.user.service.UserQueryService;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -29,6 +31,29 @@ class UserControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private CurrentAuthenticatedUserResolver currentUserResolver;
   @MockitoBean private UserOnboardingService onboardingService;
+  @MockitoBean private UserQueryService queryService;
+
+  @Test
+  void returnsTheAuthenticatedUsersCurrentState() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(51L);
+    given(queryService.getMe(51L))
+        .willReturn(
+            new UserResponse(
+                51L,
+                UserRole.GUARDIAN,
+                "튼튼이엄마",
+                "guardian@example.com",
+                AccountStatus.ACTIVE,
+                true));
+
+    mockMvc
+        .perform(get("/api/v1/users/me"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.userId").value(51))
+        .andExpect(jsonPath("$.data.role").value("GUARDIAN"))
+        .andExpect(jsonPath("$.data.onboardingCompleted").value(true));
+  }
 
   @Test
   void completesOnboardingAndReturnsTheUpdatedUser() throws Exception {
