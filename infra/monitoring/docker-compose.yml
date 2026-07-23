@@ -46,8 +46,10 @@ services:
       - dodam-net                     # backend:9404 · ai:8000 스크레이프용 — 기존 스택 내부망 참여
 
   # ───────────────────────────────────────────────────────────────
-  # grafana — 대시보드 UI. prometheus만 바라봄 — dodam-net엔 참여하지 않음(최소권한:
-  #   아동 데이터가 흐르는 내부망에 닿는 컨테이너 수를 늘리지 않는다).
+  # grafana — 대시보드 UI. S15P11B209-366부터 dodam-net에도 참여:
+  #   reason: nginx(/grafana/ 프록시)가 닿을 경로 필요. nginx를 모니터링망에 넣는 역방향은
+  #           "모니터링 부재 = 앱 배포 실패"의 의존 역전이라 금지 — 의존 방향은 모니터링→앱만.
+  #   트레이드오프: 앱망에 닿는 컨테이너 +1. 보완: Grafana 자체 인증(익명·가입 차단) + 버전 고정.
   # ───────────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:11.6.0     # 버전 고정 — latest 금지. k3s 이전 시 최신 마이너로 재평가
@@ -60,17 +62,23 @@ services:
       #   (본 compose의 REDIS_PASSWORD·JWT_SECRET과 동일 정책).
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be configured in infra/.env}
       GF_AUTH_ANONYMOUS_ENABLED: "false"   # 익명 접근 차단 — 메트릭에도 내부 구조·트래픽 패턴이 드러남
-      GF_USERS_ALLOW_SIGN_UP: "false"      # 임의 가입 차단 — 단일 admin 계정만 사용
+      GF_USERS_ALLOW_SIGN_UP: "false"      # 임의 가입 차단 — 계정은 admin이 생성(팀원=Viewer 권한)
+      # ── 웹 경로 노출 (S15P11B209-366) — https://i15b209.p.ssafy.io/grafana/ 서브패스 서빙.
+      #   reason: nginx가 /grafana 접두를 유지한 채 프록시(Jenkins /jenkins/와 동일 패턴)하므로,
+      #           Grafana가 하위 경로를 스스로 인지해야 리다이렉트·정적 자원 경로가 안 깨진다.
+      GF_SERVER_ROOT_URL: "https://i15b209.p.ssafy.io/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
     volumes:
       - grafana-data:/var/lib/grafana                        # UI에서 import한 대시보드·설정 영속화
       - ./grafana/provisioning:/etc/grafana/provisioning:ro  # datasource·dashboards provider 자동 등록
       - ./grafana/dashboards:/var/lib/grafana/dashboards:ro  # JSON 드롭 시 자동 로드(현재 비어있음 — import는 UI로, README)
     ports:
-      - "127.0.0.1:3000:3000"         # ⚠️ 루프백 전용 — SSH 터널로만 접근
+      - "127.0.0.1:3000:3000"         # 루프백 바인딩 유지 — nginx 장애 시 SSH 터널 예비 접근로
     depends_on:
       - prometheus                    # 기동 순서만 보장(datasource 연결 대상)
     networks:
       - monitoring-net
+      - dodam-net                     # nginx /grafana/ 프록시 도달 경로 (S15P11B209-366 — 위 주석 참조)
 
   # ───────────────────────────────────────────────────────────────
   # node-exporter — EC2 호스트 메트릭(CPU/메모리/디스크/스왑). 호스트 포트 미개방(내부 스크레이프 전용).
