@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../design_system/design_system.dart';
 import '../../application/option_answer_submission_controller.dart';
+import '../../application/question_skip_controller.dart';
 import '../../domain/models/ai_question.dart';
 
 // 질문 도착 시 캔버스 위에 표시하는 캐릭터와 말풍선
@@ -13,6 +14,7 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
     required this.onOptionSelected,
     required this.showResponseActions,
     required this.submissionStatus,
+    required this.skipStatus,
     required this.onSkip,
     super.key,
   });
@@ -25,6 +27,7 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
   final ValueChanged<int> onOptionSelected;
   final bool showResponseActions;
   final OptionAnswerSubmissionStatus submissionStatus;
+  final QuestionSkipStatus skipStatus;
   final VoidCallback onSkip;
 
   @override
@@ -72,6 +75,7 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                             onSelected: onOptionSelected,
                             onSkip: onSkip,
                             submissionStatus: submissionStatus,
+                            skipStatus: skipStatus,
                           ),
                         ),
                       ],
@@ -96,6 +100,7 @@ final class _ResponseActions extends StatelessWidget {
     required this.onSelected,
     required this.onSkip,
     required this.submissionStatus,
+    required this.skipStatus,
     super.key,
   });
 
@@ -104,6 +109,7 @@ final class _ResponseActions extends StatelessWidget {
   final ValueChanged<int> onSelected;
   final VoidCallback onSkip;
   final OptionAnswerSubmissionStatus submissionStatus;
+  final QuestionSkipStatus skipStatus;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -114,7 +120,9 @@ final class _ResponseActions extends StatelessWidget {
           options: options,
           selectedOptionId: selectedOptionId,
           onSelected: onSelected,
-          enabled: submissionStatus != OptionAnswerSubmissionStatus.submitting,
+          enabled:
+              submissionStatus != OptionAnswerSubmissionStatus.submitting &&
+              skipStatus != QuestionSkipStatus.submitting,
         ),
       if (submissionStatus == OptionAnswerSubmissionStatus.submitting) ...[
         const SizedBox(height: AppSpacing.xs),
@@ -131,14 +139,34 @@ final class _ResponseActions extends StatelessWidget {
           style: TextStyle(color: AppColors.error, fontWeight: FontWeight.w700),
         ),
       ],
+      if (skipStatus == QuestionSkipStatus.failure) ...[
+        const SizedBox(height: AppSpacing.xs),
+        const Text(
+          '계속 그리기로 돌아가지 못했어요. 다시 눌러 주세요.',
+          key: ValueKey('ai-question-skip-failure'),
+          textAlign: TextAlign.center,
+          style: TextStyle(color: AppColors.error, fontWeight: FontWeight.w700),
+        ),
+      ],
       const SizedBox(height: AppSpacing.xs),
       TextButton.icon(
         key: const ValueKey('ai-question-skip'),
-        onPressed: submissionStatus == OptionAnswerSubmissionStatus.submitting
+        onPressed:
+            submissionStatus == OptionAnswerSubmissionStatus.submitting ||
+                skipStatus == QuestionSkipStatus.submitting
             ? null
             : onSkip,
-        icon: const Icon(Icons.sentiment_neutral_rounded),
-        label: const Text('말 안 할래'),
+        icon: skipStatus == QuestionSkipStatus.submitting
+            ? const SizedBox.square(
+                dimension: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            : const Icon(Icons.sentiment_neutral_rounded),
+        label: Text(
+          skipStatus == QuestionSkipStatus.submitting
+              ? '계속 그리기로 돌아가는 중'
+              : '말 안 할래',
+        ),
         style: TextButton.styleFrom(
           foregroundColor: AppColors.inkMuted,
           backgroundColor: AppColors.surface,
