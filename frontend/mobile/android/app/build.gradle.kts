@@ -1,8 +1,22 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
 }
+
+val oauthProperties = Properties().apply {
+    val oauthFile = rootProject.file("oauth.properties")
+    if (oauthFile.exists()) {
+        oauthFile.inputStream().use(::load)
+    }
+}
+
+fun oauthValue(name: String): String =
+    System.getenv(name)
+        ?: oauthProperties.getProperty(name)
+        ?: "missing-${name.lowercase().replace('_', '-')}"
 
 android {
     namespace = "com.dodam.app"
@@ -22,6 +36,10 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        manifestPlaceholders["kakaoScheme"] = "kakao${oauthValue("KAKAO_NATIVE_APP_KEY")}"
+        manifestPlaceholders["naverClientId"] = oauthValue("NAVER_CLIENT_ID")
+        manifestPlaceholders["naverClientSecret"] = oauthValue("NAVER_CLIENT_SECRET")
+        manifestPlaceholders["naverClientName"] = oauthValue("NAVER_APP_NAME")
     }
 
     buildTypes {

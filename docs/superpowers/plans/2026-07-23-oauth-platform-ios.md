@@ -140,7 +140,7 @@ git commit -m "feat(platform): S15P11B209-380 Flutter iOS 플랫폼 구성"
 - Consumes: 로컬 Gradle property, 환경 변수, iOS optional xcconfig
 - Produces: Kakao·Google·Naver SDK가 후속 이슈에서 재사용할 Native 설정
 
-- [ ] **Step 1: OAuth 설정 계약 실패 테스트 추가**
+- [x] **Step 1: OAuth 설정 계약 실패 테스트 추가**
 
 ```dart
 test('OAuth Native 설정은 환경 변수 참조와 URL Scheme을 제공한다', () {
@@ -177,7 +177,7 @@ test('Repository에 실제 OAuth Credential 값이 포함되지 않는다', () {
 });
 ```
 
-- [ ] **Step 2: 테스트가 Native 설정 부재로 실패하는지 확인**
+- [x] **Step 2: 테스트가 Native 설정 부재로 실패하는지 확인**
 
 Run:
 
@@ -188,7 +188,7 @@ C:\src\flutter\bin\flutter.bat test test/platform/oauth_native_config_test.dart
 
 Expected: 필요한 placeholder, URL Scheme 또는 예시 파일이 없어 실패한다.
 
-- [ ] **Step 3: Android 설정 주입 구현**
+- [x] **Step 3: Android 설정 주입 구현**
 
 `build.gradle.kts`는 `android/oauth.properties` 또는 같은 이름의 환경 변수를 읽고
 Manifest placeholder에 전달한다. 실제 값이 없을 때는 빌드는 가능하지만 OAuth 호출이
@@ -217,7 +217,7 @@ manifestPlaceholders["naverClientSecret"] = oauthValue("NAVER_CLIENT_SECRET")
 manifestPlaceholders["naverClientName"] = oauthValue("NAVER_APP_NAME")
 ```
 
-- [ ] **Step 4: Android Manifest OAuth 항목 추가**
+- [x] **Step 4: Android Manifest OAuth 항목 추가**
 
 Application에 Naver metadata를 추가하고 Kakao callback Activity를 등록한다.
 
@@ -233,7 +233,7 @@ Application에 Naver metadata를 추가하고 Kakao callback Activity를 등록�
     android:value="${naverClientName}" />
 
 <activity
-    android:name="com.kakao.sdk.flutter.auth.AppsHandlerActivity"
+    android:name="com.kakao.sdk.flutter.auth.AuthCodeHandlerActivity"
     android:exported="true">
     <intent-filter>
         <action android:name="android.intent.action.VIEW" />
@@ -244,7 +244,7 @@ Application에 Naver metadata를 추가하고 Kakao callback Activity를 등록�
 </activity>
 ```
 
-- [ ] **Step 5: iOS optional Build Configuration 추가**
+- [x] **Step 5: iOS optional Build Configuration 추가**
 
 `Debug.xcconfig`와 `Release.xcconfig`에 다음 optional include를 추가한다.
 
@@ -265,7 +265,7 @@ NAVER_APP_NAME=Dodam
 NAVER_URL_SCHEME=your-naver-url-scheme
 ```
 
-- [ ] **Step 6: iOS Info.plist OAuth Scheme 추가**
+- [x] **Step 6: iOS Info.plist OAuth Scheme 추가**
 
 `Info.plist`에 Kakao, Google, Naver URL Scheme과 Provider App 조회 Scheme을 하나의
 `CFBundleURLTypes` 배열로 구성한다. Google Server Client ID와 Naver 설정은
@@ -290,7 +290,7 @@ URL Scheme은 `kakao$(KAKAO_NATIVE_APP_KEY)`, `$(GOOGLE_REVERSED_CLIENT_ID)`,
 `$(NAVER_URL_SCHEME)` 세 항목을 각각 등록한다. `LSApplicationQueriesSchemes`에는
 Kakao와 Naver SDK가 조회하는 Scheme을 등록한다.
 
-- [ ] **Step 7: 로컬 설정 파일 Git 제외**
+- [x] **Step 7: 로컬 설정 파일 Git 제외**
 
 `.gitignore`에 다음을 추가한다.
 
@@ -299,7 +299,7 @@ Kakao와 Naver SDK가 조회하는 Scheme을 등록한다.
 /ios/Flutter/OAuth.xcconfig
 ```
 
-- [ ] **Step 8: OAuth 설정 계약 테스트 통과 확인**
+- [x] **Step 8: OAuth 설정 계약 테스트 통과 확인**
 
 Run:
 
@@ -310,7 +310,7 @@ C:\src\flutter\bin\flutter.bat test test/platform/oauth_native_config_test.dart
 
 Expected: PASS.
 
-- [ ] **Step 9: 변경 Commit**
+- [x] **Step 9: 변경 Commit**
 
 ```powershell
 git add frontend/mobile/.gitignore frontend/mobile/android frontend/mobile/ios frontend/mobile/test/platform/oauth_native_config_test.dart
