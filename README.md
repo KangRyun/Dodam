@@ -736,3 +736,20 @@ GET /api/v1/drawing-sessions/active?childId=1
 - 현재 이미지 다운로드 API가 없으므로 `previewUrl`은 `null`이며 Storage Key, 절대 경로, 이미지 Byte는 노출하지 않습니다.
 - 조회만으로 초안이나 세션을 생성하지 않고 AI 분석을 실행하지 않으며, 파일 시스템에도 접근하지 않습니다.
 - 현재 인증과 아동 소유권 검증은 아직 연결되지 않았습니다.
+
+## 그림 활동 상세 조회 API
+
+연결 보호자는 그림 활동 식별자로 세션 상태와 최신 연관 리소스 Metadata를 조회할 수 있습니다.
+
+```http
+GET /api/v1/drawing-sessions/{drawingSessionId}
+Authorization: Bearer <access-token>
+```
+
+- 선택 감정은 저장된 선택 순서대로 반환합니다.
+- `latestAsset`과 `latestAnalysis`는 각각 가장 최근 생성·요청된 항목입니다.
+- 대화나 리포트가 아직 없으면 `conversationId`와 `reportId`는 `null`입니다.
+- DRAFT가 존재하면 `recoverableDraft=true`이며 실제 복구 Metadata는 초안 조회 API를 사용합니다.
+- 내부 Storage Key, 이미지 Byte, 아동 생년월일은 반환하지 않습니다.
+- 조회 과정에서 세션 상태를 변경하거나 AI 분석·파일 다운로드를 실행하지 않습니다.
+- 현재는 연결 보호자만 지원하며 공유 전문가 조회 권한은 아직 제공하지 않습니다.

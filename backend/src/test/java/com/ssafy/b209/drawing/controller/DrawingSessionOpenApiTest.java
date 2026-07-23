@@ -74,6 +74,30 @@ class DrawingSessionOpenApiTest {
     assertThat(operation.has("security")).isFalse();
   }
 
+  @Test
+  void documentsDrawingSessionDetailAsReadOnlyPathOperation() throws Exception {
+    JsonNode operation =
+        apiDocument().at("/paths/~1api~1v1~1drawing-sessions~1{drawingSessionId}/get");
+
+    assertThat(operation.isMissingNode()).isFalse();
+    assertThat(operation.path("summary").asText()).isEqualTo("그림 활동 상세 조회");
+    assertThat(operation.path("description").asText())
+        .contains("세션 상태를 변경")
+        .contains("AI 분석을 실행하지 않습니다");
+    assertThat(operation.has("requestBody")).isFalse();
+    assertThat(operation.path("parameters"))
+        .singleElement()
+        .satisfies(
+            parameter -> {
+              assertThat(parameter.path("name").asText()).isEqualTo("drawingSessionId");
+              assertThat(parameter.path("in").asText()).isEqualTo("path");
+              assertThat(parameter.path("required").asBoolean()).isTrue();
+            });
+    assertThat(operation.path("responses").fieldNames())
+        .toIterable()
+        .containsExactlyInAnyOrder("200", "400", "404");
+  }
+
   private JsonNode apiDocument() throws Exception {
     String content =
         mockMvc

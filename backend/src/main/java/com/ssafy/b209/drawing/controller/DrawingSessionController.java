@@ -3,6 +3,7 @@ package com.ssafy.b209.drawing.controller;
 import com.ssafy.b209.drawing.dto.request.CreateDrawingSessionRequest;
 import com.ssafy.b209.drawing.dto.response.ActiveDrawingSessionResponse;
 import com.ssafy.b209.drawing.dto.response.CreateDrawingSessionResponse;
+import com.ssafy.b209.drawing.dto.response.DrawingSessionDetailResponse;
 import com.ssafy.b209.drawing.service.DrawingSessionQueryService;
 import com.ssafy.b209.drawing.service.DrawingSessionService;
 import com.ssafy.b209.global.response.ApiErrorResponse;
@@ -20,6 +21,7 @@ import java.net.URI;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -92,6 +94,40 @@ public class DrawingSessionController {
           Long childId) {
     return ResponseEntity.ok(
         ApiResponse.ok(drawingSessionQueryService.getActiveDrawingSession(childId)));
+  }
+
+  /**
+   * 보호자가 접근할 수 있는 그림 활동의 현재 상태와 최신 연관 리소스를 조회한다.
+   *
+   * <p>조회만 수행하며 그림 파일 원본, 내부 저장 위치, 아동 생년월일은 응답에 포함하지 않는다.
+   *
+   * @param drawingSessionId 조회할 그림 활동 세션 식별자
+   * @return HTTP 200과 그림 활동 상세 정보
+   */
+  @Operation(
+      summary = "그림 활동 상세 조회",
+      description =
+          "연결 보호자가 그림 활동 상태와 최신 그림·분석·대화·리포트 Metadata를 조회합니다. "
+              + "조회 과정에서 세션 상태를 변경하거나 AI 분석을 실행하지 않습니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "그림 활동 상세 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "그림 활동 세션 식별자 형식 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "접근 가능한 그림 활동을 찾을 수 없음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping("/{drawingSessionId}")
+  public ResponseEntity<ApiResponse<DrawingSessionDetailResponse>> getDrawingSessionDetail(
+      @Parameter(description = "조회할 그림 활동 세션 식별자", required = true) @PathVariable @Positive
+          Long drawingSessionId) {
+    return ResponseEntity.ok(
+        ApiResponse.ok(drawingSessionQueryService.getDrawingSessionDetail(drawingSessionId)));
   }
 
   /**

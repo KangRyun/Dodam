@@ -9,12 +9,21 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
+import com.ssafy.b209.drawing.domain.DrawingAssetType;
+import com.ssafy.b209.drawing.domain.DrawingEmotionCode;
 import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.domain.DrawingSessionStatus;
 import com.ssafy.b209.drawing.domain.DrawingStage;
 import com.ssafy.b209.drawing.dto.request.CreateDrawingSessionRequest;
 import com.ssafy.b209.drawing.dto.response.ActiveDrawingSessionResponse;
 import com.ssafy.b209.drawing.dto.response.CreateDrawingSessionResponse;
+import com.ssafy.b209.drawing.dto.response.DrawingSessionAnalysisSummaryResponse;
+import com.ssafy.b209.drawing.dto.response.DrawingSessionAssetSummaryResponse;
+import com.ssafy.b209.drawing.dto.response.DrawingSessionChildSummaryResponse;
+import com.ssafy.b209.drawing.dto.response.DrawingSessionDetailResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingTypeSummaryResponse;
 import com.ssafy.b209.drawing.dto.response.LatestDrawingDraftResponse;
 import com.ssafy.b209.drawing.exception.DrawingErrorCode;
@@ -22,6 +31,7 @@ import com.ssafy.b209.drawing.service.DrawingSessionQueryService;
 import com.ssafy.b209.drawing.service.DrawingSessionService;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -138,6 +148,42 @@ class DrawingSessionControllerTest {
         .andExpect(jsonPath("$.code").value("COMMON_400_001"));
   }
 
+  @Test
+  void returnsDrawingSessionDetailWithoutInternalStorageKey() throws Exception {
+    given(drawingSessionQueryService.getDrawingSessionDetail(100L)).willReturn(detailResponse());
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/{drawingSessionId}", 100))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.drawingSessionId").value(100))
+        .andExpect(jsonPath("$.data.child.nickname").value("도담"))
+        .andExpect(jsonPath("$.data.selectedEmotions[0]").value("HAPPY"))
+        .andExpect(jsonPath("$.data.latestAsset.drawingAssetId").value(200))
+        .andExpect(jsonPath("$.data.latestAsset.storageKey").doesNotExist())
+        .andExpect(jsonPath("$.data.latestAnalysis.drawingAnalysisId").value(300))
+        .andExpect(jsonPath("$.data.recoverableDraft").value(true));
+  }
+
+  @Test
+  void rejectsNonPositiveDrawingSessionId() throws Exception {
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/{drawingSessionId}", 0))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
+  @Test
+  void returnsNotFoundForInaccessibleDrawingSession() throws Exception {
+    given(drawingSessionQueryService.getDrawingSessionDetail(999L))
+        .willThrow(new BusinessException(DrawingErrorCode.DRAWING_SESSION_NOT_FOUND));
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/{drawingSessionId}", 999))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("DRAWING_404_003"));
+  }
+
   private CreateDrawingSessionResponse response() {
     return new CreateDrawingSessionResponse(
         100L,
@@ -172,5 +218,37 @@ class DrawingSessionControllerTest {
         Instant.parse("2026-07-21T02:35:00Z"),
         Instant.parse("2026-07-21T02:35:01Z"),
         null);
+  }
+
+  private DrawingSessionDetailResponse detailResponse() {
+    return new DrawingSessionDetailResponse(
+        100L,
+        new DrawingSessionChildSummaryResponse(1L, "도담"),
+        new DrawingTypeSummaryResponse(2L, "FREE_DRAWING", "자유화"),
+        DrawingInputMethod.CANVAS,
+        "우리 집",
+        List.of(DrawingEmotionCode.HAPPY),
+        DrawingSessionStatus.IN_PROGRESS,
+        DrawingStage.REFLECTION,
+        new DrawingSessionAssetSummaryResponse(
+            200L,
+            DrawingAssetType.DRAFT,
+            3,
+            "image/png",
+            4096L,
+            Instant.parse("2026-07-21T02:35:00Z"),
+            Instant.parse("2026-07-21T02:35:01Z")),
+        new DrawingSessionAnalysisSummaryResponse(
+            300L,
+            DrawingAnalysisScope.INTERMEDIATE,
+            DrawingAnalysisType.OBJECT_DETECTION,
+            DrawingAnalysisState.SUCCESS,
+            Instant.parse("2026-07-21T02:35:02Z"),
+            Instant.parse("2026-07-21T02:35:03Z")),
+        400L,
+        null,
+        Instant.parse("2026-07-21T02:30:00Z"),
+        null,
+        true);
   }
 }
