@@ -10,9 +10,7 @@ import static org.mockito.Mockito.verify;
 import com.ssafy.b209.infrastructure.ai.AiSttClient;
 import com.ssafy.b209.infrastructure.ai.AiSttClientException;
 import com.ssafy.b209.infrastructure.ai.AiSttResponse;
-import com.ssafy.b209.storage.audio.OpenedAudio;
 import com.ssafy.b209.storage.audio.StoredAudioReader;
-import java.io.ByteArrayInputStream;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -70,8 +68,6 @@ class SttProcessingServiceTest {
   void persistsValidatedSuccessWithBigDecimalConfidence() {
     given(persistenceService.claim(MESSAGE_ID))
         .willReturn(claim(SttClaimResult.Action.CLAIMED, "PENDING", null, null, false));
-    given(audioReader.open("2026/07/23/voice.wav"))
-        .willReturn(new OpenedAudio(new ByteArrayInputStream(new byte[] {1}), "voice.wav"));
     given(aiSttClient.transcribe(any()))
         .willReturn(new AiSttResponse("놀았어요", null, "whisper-1", 20L));
     given(persistenceService.completeSuccess(eq(MESSAGE_ID), eq("놀았어요"), any(), eq(false)))
