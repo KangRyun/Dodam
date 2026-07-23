@@ -208,6 +208,53 @@ class DrawingSessionIntegrationTest {
   }
 
   @Test
+  void deletesOnlyDraftAssetsAndSchedulesTheirStoredFiles() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions")
+                .header("Idempotency-Key", "delete-draft-session-key")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(canvasJson(1L)))
+        .andExpect(status().isCreated());
+    jdbcTemplate.update(
+        """
+        INSERT INTO drawing_assets
+          (id, drawing_session_id, asset_type, asset_version, storage_key, mime_type,
+           file_size_bytes, checksum_sha256, captured_at)
+        VALUES
+          (301, 1, 'DRAFT', 1, 'drawing-sessions/1/draft-1.png', 'image/png', 10,
+           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+           CURRENT_TIMESTAMP(6)),
+          (302, 1, 'DRAFT', 2, 'drawing-sessions/1/draft-2.png', 'image/png', 10,
+           'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+           CURRENT_TIMESTAMP(6)),
+          (303, 1, 'INTERMEDIATE', 1, 'drawing-sessions/1/intermediate.png', 'image/png', 10,
+           'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+           CURRENT_TIMESTAMP(6))
+        """);
+
+    mockMvc.perform(delete("/api/v1/drawing-sessions/1/draft")).andExpect(status().isNoContent());
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM drawing_assets WHERE drawing_session_id = 1 "
+                    + "AND asset_type = 'DRAFT'",
+                Integer.class))
+        .isZero();
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM drawing_assets WHERE id = 303", Integer.class))
+        .isEqualTo(1);
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM storage_deletion_jobs "
+                    + "WHERE resource_type = 'DRAWING_ASSET' AND resource_id IN (301, 302) "
+                    + "AND deletion_status = 'PENDING'",
+                Integer.class))
+        .isEqualTo(2);
+  }
+
+  @Test
   void storesNormalizedStrokeBatchIdempotentlyAndRejectsSequenceReuse() throws Exception {
     mockMvc
         .perform(

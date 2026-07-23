@@ -26,12 +26,13 @@ class DrawingDraftOpenApiTest {
   @MockitoBean private DrawingDraftService drawingDraftService;
 
   @Test
-  void documentsDraftSaveAndLatestLookupContract() throws Exception {
+  void documentsDraftSaveLookupAndDeletionContract() throws Exception {
     JsonNode path =
         apiDocument().at("/paths/~1api~1v1~1drawing-sessions~1{drawingSessionId}~1draft");
 
     assertThat(path.path("put").isMissingNode()).isFalse();
     assertThat(path.path("get").isMissingNode()).isFalse();
+    assertThat(path.path("delete").isMissingNode()).isFalse();
     assertThat(path.at("/put/requestBody/content/multipart~1form-data").isMissingNode()).isFalse();
     assertThat(path.path("put").path("responses").fieldNames())
         .toIterable()
@@ -39,6 +40,9 @@ class DrawingDraftOpenApiTest {
     assertThat(path.path("get").path("responses").fieldNames())
         .toIterable()
         .containsAll(Set.of("200", "400", "404"));
+    assertThat(path.path("delete").path("responses").fieldNames())
+        .toIterable()
+        .containsAll(Set.of("204", "400", "404"));
     assertThat(path.path("put").has("security")).isFalse();
   }
 
