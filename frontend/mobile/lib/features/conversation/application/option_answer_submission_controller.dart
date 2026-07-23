@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../domain/models/ai_question.dart';
 import '../domain/models/option_answer.dart';
 import '../domain/repositories/conversation_answer_repository.dart';
 
@@ -18,16 +19,16 @@ final class OptionAnswerSubmissionController extends ChangeNotifier {
   final String Function() idempotencyKeyProvider;
 
   OptionAnswerSubmissionStatus status = OptionAnswerSubmissionStatus.idle;
-  int? selectedOptionId;
+  String? selectedOptionId;
   int? answerMessageId;
   String? _pendingIdempotencyKey;
 
   Future<bool> submit({
     required int questionMessageId,
-    required int optionId,
+    required AiQuestionOption option,
   }) async {
     if (status == OptionAnswerSubmissionStatus.submitting) return false;
-    selectedOptionId = optionId;
+    selectedOptionId = option.optionId;
     status = OptionAnswerSubmissionStatus.submitting;
     _pendingIdempotencyKey ??= idempotencyKeyProvider();
     notifyListeners();
@@ -37,7 +38,7 @@ final class OptionAnswerSubmissionController extends ChangeNotifier {
         conversationId: conversationId,
         request: OptionAnswerRequest(
           questionMessageId: questionMessageId,
-          selectedOptionIds: [optionId],
+          selectedOptions: [option],
         ),
         idempotencyKey: _pendingIdempotencyKey!,
       );

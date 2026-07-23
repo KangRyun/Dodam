@@ -230,15 +230,19 @@ class _DrawingScreenState extends State<DrawingScreen> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _selectQuestionOption(int optionId) async {
+  Future<void> _selectQuestionOption(String optionId) async {
     final question = _questionDisplayController.visibleQuestion;
     if (question == null) return;
     final valid = _questionSelectionController.select(question, optionId);
     final controller = _answerSubmissionController;
     if (!valid || controller == null) return;
+    // BE 답변 계약이 선택 시점 스냅샷(type·value·label)을 요구해 객체째 전달
+    final option = question.options.firstWhere(
+      (candidate) => candidate.optionId == optionId,
+    );
     final submitted = await controller.submit(
       questionMessageId: question.messageId,
-      optionId: optionId,
+      option: option,
     );
     if (submitted) _questionDisplayController.dismiss();
   }
@@ -602,7 +606,7 @@ class _CanvasPanel extends StatelessWidget {
   final AiQuestion? question;
   final bool showQuestion;
   final int? selectedQuestionOptionId;
-  final ValueChanged<int> onQuestionOptionSelected;
+  final ValueChanged<String> onQuestionOptionSelected;
   final OptionAnswerSubmissionStatus answerSubmissionStatus;
   final QuestionSkipStatus questionSkipStatus;
   final ConversationEndStatus conversationEndStatus;
