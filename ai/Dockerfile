@@ -14,7 +14,21 @@ WORKDIR /app
 COPY requirements.txt ./
 # --prefix=/install: 설치물을 한 디렉터리에 모아 런타임 스테이지로 통째 복사하기 위함.
 # --no-cache-dir: pip 다운로드 캐시를 이미지에 남기지 않아 크기↓.
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+#
+# opencv는 headless만 남긴다 — ultralytics가 GUI판 opencv-python을 의존성으로 끌어오는데,
+# 두 배포판이 같은 site-packages/cv2 디렉터리를 공유해 나중에 설치된 GUI판이 headless를 덮어쓴다.
+# GUI판은 libxcb.so.1을 요구하지만 slim 런타임에는 없어 `import cv2`가 ImportError로 죽는다
+#   → yolo_client._encode_png(주석 이미지 인코딩)와 종합 분석의 시각 특징 계산이 통째로 실패.
+# requirements.txt에 headless를 적어둔 것만으로는 막을 수 없어(의존성 해석이 GUI판을 다시 설치)
+# 설치 후 cv2 디렉터리와 두 dist-info를 지우고 headless를 --no-deps로 다시 넣는다.
+#   reason: --prefix 설치본은 pip uninstall이 인식하지 못해 파일 단위로 정리해야 한다.
+#   libxcb를 런타임에 추가하는 대안은 이미지가 커지고 GUI판을 그대로 두게 되어 택하지 않았다.
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt \
+ && rm -rf /install/lib/python3.11/site-packages/cv2 \
+           /install/lib/python3.11/site-packages/opencv_python-*.dist-info \
+           /install/lib/python3.11/site-packages/opencv_python_headless-*.dist-info \
+ && pip install --no-cache-dir --no-deps --prefix=/install opencv-python-headless \
+ && PYTHONPATH=/install/lib/python3.11/site-packages python -c "import cv2; print('cv2 headless ok', cv2.__version__)"
 
 ##### 2) runtime stage — 실행에 필요한 것만 담는다(빌드 잔여물 없음) #####
 FROM python:3.11-slim-bookworm AS runtime
