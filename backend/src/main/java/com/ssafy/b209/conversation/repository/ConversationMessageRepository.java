@@ -37,6 +37,25 @@ public interface ConversationMessageRepository extends JpaRepository<Conversatio
       Long id, Long conversationSessionId);
 
   /**
+   * 지정한 이전 답변을 이어받은 QUESTION 메시지가 세션에 이미 있는지 확인한다.
+   *
+   * <p>호출자는 대화 세션 비관 잠금 안에서 이 값을 사용해, 서로 다른 요청이 같은 답변을 부모로 참조하며 질문을 두 번 생성하는 중복을 차단한다. 부모 답변 1건당 후속
+   * 질문은 1건만 허용한다.
+   *
+   * @param conversationSessionId 대화 세션 식별자
+   * @param parentMessageId 이어받은 이전 답변 메시지 식별자
+   * @return 같은 부모 답변을 이어받은 QUESTION 메시지가 있으면 {@code true}
+   */
+  @Query(
+      "select count(message) > 0 from ConversationMessage message "
+          + "where message.conversationSessionId = :conversationSessionId "
+          + "and message.parentMessageId = :parentMessageId "
+          + "and message.messageType = 'QUESTION'")
+  boolean existsQuestionByParentMessageId(
+      @Param("conversationSessionId") Long conversationSessionId,
+      @Param("parentMessageId") Long parentMessageId);
+
+  /**
    * 세션에서 실제 제시한 질문 메시지 수를 집계한다.
    *
    * @param conversationSessionId 대화 세션 식별자

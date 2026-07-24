@@ -69,6 +69,7 @@ class QuestionPersistenceService {
       throw new BusinessException(ConversationErrorCode.QUESTION_LIMIT_REACHED);
     }
     validateParentMessage(conversationId, candidate.parentMessageId());
+    rejectDuplicateFollowUpQuestion(conversationId, candidate.parentMessageId());
 
     int nextSequence =
         conversationMessageRepository.findMaxMessageSequenceByConversationSessionId(conversationId)
@@ -94,6 +95,27 @@ class QuestionPersistenceService {
           candidate.targetObject());
     } catch (DataIntegrityViolationException exception) {
       throw new BusinessException(ConversationErrorCode.QUESTION_STORAGE_CONFLICT, exception);
+    }
+  }
+
+  /**
+   * 같은 이전 답변을 부모로 이어받은 질문이 이미 저장돼 있으면 중복 생성으로 판단해 거부한다.
+   *
+   * <p>세션 비관 잠금 아래에서 순번 계산·저장 직전에 수행하는 도메인 턴교대 가드다. 서로 다른 멱등성 키로 next-question이 두 번 호출되면서 둘 다 같은 아동
+   * 답변을 참조하면, 각 요청이 서로 다른 순번을 얻어 답변 1건에 질문이 2건 이어지는 갭이 생긴다. 세션별 순번 UNIQUE는 같은 순번만 막으므로 이 갭을 여기서
+   * 차단한다. 부모 답변이 없는 최초 질문({@code parentMessageId == null})은 정상 흐름이므로 막지 않는다.
+   *
+   * @param conversationId 잠근 대화 세션 식별자
+   * @param parentMessageId 이어받은 이전 답변 메시지 식별자 또는 최초 질문의 {@code null}
+   * @throws BusinessException 같은 부모 답변을 이어받은 질문이 이미 있는 경우
+   */
+  private void rejectDuplicateFollowUpQuestion(Long conversationId, Long parentMessageId) {
+    if (parentMessageId == null) {
+      return;
+    }
+    if (conversationMessageRepository.existsQuestionByParentMessageId(
+        conversationId, parentMessageId)) {
+      throw new BusinessException(ConversationErrorCode.QUESTION_STORAGE_CONFLICT);
     }
   }
 
