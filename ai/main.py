@@ -32,6 +32,7 @@ from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel, ValidationError
 
+import analysis_service
 import config
 import internal_contracts
 import llm_client
@@ -198,22 +199,29 @@ def analyze_conversation(req: ConversationRequest):
 
 
 # ── BE 내부 계약: 대화 질문 1건 생성 (183) ───────────────────────
-def _internal_token_ok(received: str) -> bool:
-    """X-Internal-Token 검사. 기본은 토큰 필수 — 미설정 시 무조건 거부.
+def _internal_auth_ok(token: str = "", api_key: str = "") -> bool:
+    """내부 호출 인증. X-Internal-Token(기존 BE) 또는 X-Internal-Api-Key(정본 §3.2) 중 하나면 통과.
 
-    이전의 "미설정이면 검사 생략" fallback은 제거했다(safety review C-183-1):
-    compose 미주입 + nginx /ai/ 접두제거 프록시와 결합하면 이 내부 계약이
-    무인증으로 인터넷에 노출되는 사고 경로였다. 미설정 상태는 기동 시점에
-    이미 실패하지만(_require_internal_auth_config), 어떤 경로로든 떠 있어도
-    무인증 통과는 없도록 여기서도 거부한다(심층 방어).
-    명시적 opt-out(AI_INTERNAL_AUTH_DISABLED=true, 로컬 개발 전용)일 때만 검사 생략.
-    compare_digest: 문자열 비교 시간 차이로 토큰이 유추되지 않게(타이밍 공격 방지).
+    reason: 정본 명세는 헤더 이름을 X-Internal-Api-Key로 규정하지만, 이미 배포된 BE
+    소비자(RestClientAiQuestionClient·RestClientAiSttClient)는 X-Internal-Token을 보낸다.
+    한쪽만 받으면 전환 시점에 BE 호출이 401 → BE가 폴백 템플릿으로 조용히 대체된다.
+    두 헤더를 함께 받아 BE가 자기 속도로 옮겨오게 하고, 전환 확인 후 구 헤더를 제거한다.
+    기본 시크릿은 하나다 — AI_INTERNAL_API_KEY 미설정 시 AI_INTERNAL_TOKEN과 같은 값(config).
     """
     if config.AI_INTERNAL_AUTH_DISABLED:
         return True
-    if not config.AI_INTERNAL_TOKEN:
+    expectations = []
+    if config.AI_INTERNAL_TOKEN:
+        expectations.append((token, config.AI_INTERNAL_TOKEN))
+    if config.AI_INTERNAL_API_KEY:
+        expectations.append((api_key, config.AI_INTERNAL_API_KEY))
+    if not expectations:
         return False
-    return hmac.compare_digest(received or "", config.AI_INTERNAL_TOKEN)
+    # compare_digest: 비교 시간 차이로 시크릿이 유추되지 않게(타이밍 공격 방지).
+    return any(
+        hmac.compare_digest(received or "", expected)
+        for received, expected in expectations
+    )
 
 
 def _safe_stt_suffix(filename: str | None) -> str:
@@ -230,10 +238,11 @@ def _safe_stt_suffix(filename: str | None) -> str:
 async def internal_speech_stt(
     file: UploadFile = File(...),
     x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+    x_internal_api_key: str = Header(default="", alias="X-Internal-Api-Key"),
     x_request_id: str = Header(default="", alias="X-Request-Id"),
 ):
     """BE 전용 STT adapter: 파일은 임시로만 처리하고 계약 DTO로 정규화한다."""
-    if not _internal_token_ok(x_internal_token):
+    if not _internal_auth_ok(x_internal_token, x_internal_api_key):
         return JSONResponse(
             status_code=401, content={"errorCode": "INVALID_INTERNAL_TOKEN"}
         )
@@ -265,6 +274,7 @@ async def internal_speech_stt(
 def internal_conversation_question(
     req: internal_contracts.QuestionRequest,
     x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+    x_internal_api_key: str = Header(default="", alias="X-Internal-Api-Key"),
     x_request_id: str = Header(default="", alias="X-Request-Id"),
 ):
     """BE(ConversationQuestionService → RestClientAiQuestionClient)가 호출하는 다음 질문 생성.
@@ -278,7 +288,7 @@ def internal_conversation_question(
 
     루프·질문 수 상한·폴백 템플릿은 BE 소유 — 여기서는 질문 1건만 생성한다(stateless).
     """
-    if not _internal_token_ok(x_internal_token):
+    if not _internal_auth_ok(x_internal_token, x_internal_api_key):
         # ⚠️ 수신 토큰 값은 본문·로그 어디에도 남기지 않는다.
         return JSONResponse(
             status_code=401, content={"errorCode": "INVALID_INTERNAL_TOKEN"}
@@ -316,9 +326,10 @@ def internal_conversation_question(
 def internal_speech_synthesis(
     req: internal_contracts.SynthesisRequest,
     x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+    x_internal_api_key: str = Header(default="", alias="X-Internal-Api-Key"),
 ):
     """BE(-299 질문 TTS 생성)가 호출하는 텍스트→음성(mp3 base64) 합성."""
-    if not _internal_token_ok(x_internal_token):
+    if not _internal_auth_ok(x_internal_token, x_internal_api_key):
         return JSONResponse(
             status_code=401, content={"errorCode": "INVALID_INTERNAL_TOKEN"}
         )
@@ -343,6 +354,64 @@ def internal_speech_synthesis(
 #   ⚠️ BE 계약(ObservationGenerationRequest)엔 그림 서술이 없다. 그래서 관찰을 그림에 근거하게
 #      하려고, 이 draft 경로에서 그림 이미지를 받아 기존 yolo_client+vlm_client로 서술을 만들어
 #      리포트 입력에 넣는다. 이미지는 임시파일로만 다루고 저장·로그하지 않는다(가드레일).
+# ── 정본 계약: 내부 API v1 (API_명세서_최종.md §19) ──────────────
+#   정본은 /internal/v1/* 를 규정한다. 기존 /internal/ai/v1/* 는 이미 배포된 BE 소비자가
+#   경로를 하드코딩해 호출 중이라 그대로 둔다 — 두 경로 병행은 정본 §21이 허용한 전환 방식이고,
+#   BE가 옮겨온 뒤 구 경로를 제거한다(3단계).
+#   ⚠️ 같은 대상에 서로 다른 로직을 두지 않는다(§21) — 아래는 구 경로에 없던 신규 계약이다.
+
+
+@app.get("/internal/v1/health")
+def internal_health():
+    """§19.1 AI-05. AI 서버·모델 준비 상태.
+
+    기존 /health와 달리 객체탐지 가중치 적재 여부까지 알린다.
+    ⚠️ 가중치 '경로'는 노출하지 않는다(서버 파일 구조 힌트) — 존재 여부만.
+    """
+    from pathlib import Path as _Path
+
+    return {
+        "status": "ok",
+        "objectDetectionReady": _Path(config.YOLO_MODEL_PATH).exists(),
+        "pipelineVersion": config.PIPELINE_VERSION,
+    }
+
+
+@app.post(
+    "/internal/v1/analyses",
+    response_model=internal_contracts.AnalysisResponse,
+)
+def internal_analyses(
+    req: internal_contracts.AnalysisRequest,
+    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+    x_internal_api_key: str = Header(default="", alias="X-Internal-Api-Key"),
+    x_request_id: str = Header(default="", alias="X-Request-Id"),
+):
+    """§19.1 AI-01. 객체·시각·행동·대화 종합 분석.
+
+    응답 매핑:
+    - 200 + §19.4 계약 → BE가 결과 저장(status=SUCCESS | PARTIAL_SUCCESS)
+    - 401 INVALID_INTERNAL_TOKEN → 내부 인증 실패
+    - 422 ANALYSIS_INPUT_INVALID → 그림을 못 가져왔거나 checksum 불일치(같은 입력이면 재시도 무의미)
+    - 502 AI_UPSTREAM_ERROR → 탐지·서술 실패(재시도 여지 있음)
+
+    ⚠️ 이 서버는 상태를 저장하지 않는다 — 분석 행 생성·상태 전이·재시도 정책은 BE 소유다.
+    """
+    if not _internal_auth_ok(x_internal_token, x_internal_api_key):
+        return JSONResponse(
+            status_code=401, content={"errorCode": "INVALID_INTERNAL_TOKEN"}
+        )
+    try:
+        return analysis_service.analyze(req, x_request_id)
+    except analysis_service.AnalysisInputError:
+        # 사유 문구에 URL·이미지 내용이 들어가지 않도록 코드만 반환한다.
+        return JSONResponse(
+            status_code=422, content={"errorCode": "ANALYSIS_INPUT_INVALID"}
+        )
+    except analysis_service.AnalysisUpstreamError:
+        return JSONResponse(status_code=502, content={"errorCode": "AI_UPSTREAM_ERROR"})
+
+
 @app.post("/analyze/report", response_model=internal_contracts.ObservationGenerationResult)
 async def analyze_report(
     request: str = Form(...),

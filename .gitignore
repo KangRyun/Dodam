@@ -104,6 +104,12 @@ ai/models/htp_yolo/
 ai/**/data/
 ai/**/runs/
 
+# TTS/STT 수동 확인으로 생기는 음성 산출물 — 아동 음성이 섞일 수 있어 커밋 금지(가드레일).
+ai/*.mp3
+ai/*.wav
+ai/*.m4a
+ai/*.webm
+
 # Google Drive 업로드용 OAuth 인증 정보 (model_download.ipynb)
 ai/models/client_secrets.json
 ai/models/mycreds.txt

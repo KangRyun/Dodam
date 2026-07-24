@@ -265,3 +265,224 @@ class ObservationGenerationResult(_CamelModel):
     follow_up_guides: list[FollowUpGuideDraft] = Field(default_factory=list)
     guardian_questions: list[GuardianQuestionDraft] = Field(default_factory=list)
     limitations_text: str
+
+
+# ── 종합 분석 계약 (API_명세서_최종.md §19.3 · §19.4) ────────────
+# `POST /internal/v1/analyses`. 정본이 규정한 '객체+시각+행동+대화 종합' 계약이다.
+#
+# ⚠️ 위 두 계약과 소유권이 다르다. 질문·관찰 리포트 계약은 BE 코드가 정본이지만,
+#    이 계약의 정본은 문서(API_명세서_최종.md §19)다. BE 소비자
+#    (RestClientDrawingAnalysisClient)는 아직 구 계약을 보고 있어 현재 소비자가 없다 —
+#    그래서 이 경로 신설은 기존 연동을 깨지 않는다. BE 전환은 application.yml의
+#    AI_DRAWING_ANALYSIS_ENDPOINT_PATH 교체와 응답 DTO 수정이 필요하다.
+#
+# ⚠️ 이름 충돌 주의: 위 관찰 리포트 계약에도 ObservationDraft가 있고 형태가 다르다.
+#    여기서는 AnalysisObservationDraft로 구분한다 — 같은 이름을 재사용하면
+#    한쪽 계약이 조용히 덮여 BE에 잘못된 형태가 나간다.
+#
+# 가드레일:
+# - 아이 발화가 실리는 필드는 전부 repr=False — 모델이 통째로 로그에 찍혀도 원문이 새지 않는다.
+# - 요청에 아이 실명·생년월일은 없다(나이·연령대만). 추가 금지(§19.2).
+# - 진단명·질환 확률·원인 단정은 만들지 않는다(§24.3). 근거 없는 문장 대신
+#   unusedInputs/warnings로 '못 했음'을 명시한다.
+
+AnalysisType = Literal["INTERMEDIATE", "FINAL"]
+
+# §4 AnalysisTriggerReason 전체 값.
+TriggerReason = Literal[
+    "PAUSE",
+    "INTERVAL",
+    "STROKE_COUNT",
+    "CHANGE_RATIO",
+    "USER_REQUEST",
+    "DRAWING_COMPLETE",
+    "ACTIVITY_COMPLETE",
+    "RETRY",
+]
+
+# §4 EmotionType. 아이가 직접 고른 값만 들어온다(AI 추정 아님).
+EmotionType = Literal["HAPPY", "SAD", "ANGRY", "SCARED", "CALM", "UNKNOWN"]
+
+
+# ── 요청 (§19.3) ────────────────────────────────────────────────
+class ChildContext(_CamelModel):
+    """분석에 필요한 최소 아동 맥락. 이름·생년월일은 계약에 없다(§19.2)."""
+
+    age: int
+    age_group: Difficulty
+    question_difficulty: Difficulty
+
+
+class DrawingInput(_CamelModel):
+    """분석 대상 그림. signedUrl은 짧은 만료의 읽기 전용 URL이다(§19.2)."""
+
+    drawing_asset_id: int
+    signed_url: str = Field(repr=False)  # 만료 전 접근 자격 — 로그에 남기지 않는다
+    mime_type: str
+    width: int | None = None
+    height: int | None = None
+    checksum_sha256: str | None = None
+
+
+class BehaviorSummary(_CamelModel):
+    """캔버스 과정 데이터 요약. BE가 stroke 배치에서 집계해 넘긴다.
+
+    pressure_available=False면 필압 통계를 만들지 않는다 — 0으로 대체 금지(§25 계약 테스트).
+    """
+
+    drawing_duration_ms: int | None = None
+    active_drawing_ms: int | None = None
+    pause_count: int | None = None
+    undo_count: int | None = None
+    erase_count: int | None = None
+    tool_change_count: int | None = None
+    color_change_count: int | None = None
+    pressure_available: bool = False
+
+
+class BehaviorInput(_CamelModel):
+    """행동 입력. strokeBatchUrls가 비면 summary만으로 특징을 만든다."""
+
+    stroke_batch_urls: list[str] = Field(default_factory=list, repr=False)
+    summary: BehaviorSummary | None = None
+
+
+class ConversationMessage(_CamelModel):
+    """대화 한 건. text는 아이 발화일 수 있어 repr에서 감춘다."""
+
+    message_id: int | None = None
+    sender_type: str
+    message_type: str
+    text: str | None = Field(default=None, repr=False)
+
+
+class ConversationInput(_CamelModel):
+    messages: list[ConversationMessage] = Field(default_factory=list)
+
+
+class ReflectionInput(_CamelModel):
+    """활동 종료 시 아이가 고른 감정(복수 선택)과 자유 서술."""
+
+    selected_emotions: list[EmotionType] = Field(default_factory=list)
+    expressed_emotion_text: str | None = Field(default=None, repr=False)
+
+
+class RagInput(_CamelModel):
+    """RAG 검색 조건. 검색 파이프라인 미구현 — 응답에서 unusedInputs로 알린다."""
+
+    knowledge_base_version: str | None = None
+    allowed_source_types: list[str] = Field(default_factory=list)
+    max_references: int = 5
+
+
+class AnalysisRequest(_CamelModel):
+    """§19.3 종합 분석 요청."""
+
+    analysis_id: int
+    drawing_session_id: int
+    analysis_type: AnalysisType
+    trigger_reason: TriggerReason | None = None
+    child_context: ChildContext | None = None
+    drawing: DrawingInput
+    behavior: BehaviorInput | None = None
+    conversation: ConversationInput | None = None
+    reflection: ReflectionInput | None = None
+    rag: RagInput | None = None
+
+
+# ── 응답 (§19.4) ────────────────────────────────────────────────
+class ModelRef(_CamelModel):
+    """구성요소별 모델 식별. 재현·재분석을 위해 결과마다 기록한다."""
+
+    name: str
+    version: str
+
+
+class ModelInfo(_CamelModel):
+    """§19.4 modelInfo — 객체탐지·Vision·LLM·RAG 버전을 분리해 기록한다.
+
+    reason: 하나로 뭉치면 어느 구성요소가 바뀌어 결과가 달라졌는지 추적할 수 없다(§26.2).
+    """
+
+    object_detection: ModelRef | None = None
+    vision: ModelRef | None = None
+    language: ModelRef | None = None
+    knowledge_base_version: str | None = None
+
+
+class AnalysisDetectedObject(_CamelModel):
+    """§19.4 detectedObjects[]. boundingBox는 0~1 정규화.
+
+    object_code는 htp_labels의 계약 라벨(UPPER_SNAKE), object_name은 한국어 표시명.
+    """
+
+    object_code: str
+    object_name: str | None = None
+    confidence: float
+    bounding_box: BoundingBox
+    area_ratio: float | None = None
+    detection_order: int
+
+
+class AnalysisConversationSummary(_CamelModel):
+    """§19.4 conversationSummary. 실제 발화와 AI 요약을 필드로 분리한다(§11.3).
+
+    representative_utterance는 아이 '실제' 발화 원문이므로 repr에서 감춘다.
+    """
+
+    summary_text: str | None = None
+    representative_utterance: str | None = Field(default=None, repr=False)
+    question_count: int = 0
+    response_count: int = 0
+    skipped_question_count: int = 0
+    unrecognized_speech_count: int = 0
+
+
+class AnalysisObservationDraft(_CamelModel):
+    """§19.4 observationDraft — 전문가 검토 전 초안. 보호자에게 그대로 노출 금지(§2.4).
+
+    status는 §4 ObservationReviewStatus. AI가 만든 것은 항상 AI_DRAFT다.
+    """
+
+    status: Literal[
+        "AI_DRAFT", "EXPERT_REVIEW_REQUIRED", "EXPERT_REVIEWED", "REJECTED"
+    ] = "AI_DRAFT"
+    overall_summary: str | None = None
+    observations: list[str] = Field(default_factory=list)
+    follow_up_questions: list[str] = Field(default_factory=list)
+    expert_review_required: bool = True
+    disclaimer: str
+
+
+class UnusedInput(_CamelModel):
+    """§19.4 unusedInputs[] — 쓰지 못한 입력과 사유.
+
+    reason: '왜 이 정보가 결과에 없는지'를 남겨야 보호자·전문가가 결과를 과신하지 않는다.
+    retryable=True면 조건이 바뀌면 재분석으로 채울 수 있다는 뜻이다.
+    """
+
+    source_type: str
+    reason_code: str
+    reason_detail: str | None = None
+    retryable: bool = False
+
+
+class AnalysisResponse(_CamelModel):
+    """§19.4 종합 분석 응답.
+
+    status는 §4 AnalysisStatus 중 AI가 낼 수 있는 값만 쓴다.
+    PARTIAL_SUCCESS는 일부 입력을 못 썼다는 뜻이며, 이때 unusedInputs는 비어 있지 않다(§11.4).
+    """
+
+    analysis_id: int
+    status: Literal["SUCCESS", "PARTIAL_SUCCESS", "FAILED"]
+    model_info: ModelInfo
+    detected_objects: list[AnalysisDetectedObject] = Field(default_factory=list)
+    visual_features: dict[str, float | str | None] = Field(default_factory=dict)
+    behavior_features: dict[str, int | bool | None] = Field(default_factory=dict)
+    conversation_summary: AnalysisConversationSummary | None = None
+    observation_draft: AnalysisObservationDraft | None = None
+    evidence_references: list[dict] = Field(default_factory=list)
+    unused_inputs: list[UnusedInput] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    processing_time_ms: int

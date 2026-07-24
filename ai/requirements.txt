@@ -3,6 +3,9 @@ uvicorn[standard]
 openai
 python-dotenv
 python-multipart
+# 종합 분석(§19.3)에서 BE가 준 signedUrl로 그림을 받아온다. openai가 전이 의존으로 끌어오지만
+#   전이 의존에 기대면 상위 패키지 교체 시 조용히 사라진다 — 직접 쓰는 이상 명시한다.
+httpx
 # 관측 메트릭 노출 (S15P11B209-351) — GMS(LLM/STT/TTS) 호출 지연·에러율 스크레이프용.
 #   버전 고정(핀): 스크레이프 스키마·미들웨어 동작이 배포마다 흔들리지 않도록 재현성 확보.
 prometheus-fastapi-instrumentator==8.0.2
