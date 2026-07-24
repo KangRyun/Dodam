@@ -1,7 +1,10 @@
 import 'package:dodam/features/auth/auth.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
   group('OAuth SDK Login Client', () {
     test('Kakao SDK Access Token을 반환한다', () async {
       final client = KakaoSdkLoginClient(
@@ -170,6 +173,46 @@ void main() {
       await client.signOut();
 
       expect(gateway.signOutCallCount, 1);
+    });
+
+    test('Android에서는 앱의 Naver OAuth channel에서 Access Token을 받는다', () async {
+      const channel = MethodChannel('com.dodam.app/naver_oauth_test');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        expect(call.method, 'login');
+        return 'naver-access-token';
+      });
+      final nativeGateway = NaverProviderSdkGateway(
+        androidChannel: channel,
+        useAndroidBridge: true,
+      );
+
+      final nativeToken = await nativeGateway.signIn();
+
+      expect(nativeToken, 'naver-access-token');
+    });
+
+    test('Android Naver 로그아웃은 앱의 OAuth channel에 위임한다', () async {
+      const channel = MethodChannel('com.dodam.app/naver_oauth_logout_test');
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
+      var logoutCallCount = 0;
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        expect(call.method, 'logout');
+        logoutCallCount += 1;
+        return null;
+      });
+      final gateway = NaverProviderSdkGateway(
+        androidChannel: channel,
+        useAndroidBridge: true,
+      );
+
+      await gateway.signOut();
+
+      expect(logoutCallCount, 1);
     });
   });
 }

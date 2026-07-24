@@ -161,10 +161,9 @@ packages:
   flutter_naver_login:
     dependency: "direct main"
     description:
-      name: flutter_naver_login
-      sha256: "6acac40088d4d05cdb8d7dceb0cf690a80833de7bdbb7c53209fc1c1442add1c"
-      url: "https://pub.dev"
-    source: hosted
+      path: "packages/flutter_naver_login"
+      relative: true
+    source: path
     version: "2.1.1"
   flutter_secure_storage:
     dependency: "direct main"

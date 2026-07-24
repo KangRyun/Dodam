@@ -74,6 +74,10 @@ flutter {
     source = "../.."
 }
 
+dependencies {
+    implementation("com.navercorp.nid:oauth:5.11.2")
+}
+
 tasks
     .matching {
         it.name == "preDebugBuild" ||
