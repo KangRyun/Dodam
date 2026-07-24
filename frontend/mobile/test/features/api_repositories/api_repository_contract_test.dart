@@ -47,17 +47,20 @@ void main() {
         nickname: '도담이',
         birthDate: '2019-03-14',
         relationshipType: 'MOTHER',
-        consents: const [
-          ChildConsentRequestDto(consentTermId: 3, agreed: true),
-        ],
+        questionDifficulty: 'LOWER_ELEMENTARY',
+        responseModes: const ['VOICE'],
       );
       const update = UpdateChildRequestDto(
         questionDifficulty: 'ELEMENTARY',
         includeProfileImageUrl: true,
       );
-      expect(create.toJson()['consents'], [
-        {'consentTermId': 3, 'agreed': true},
-      ]);
+      expect(create.toJson(), {
+        'nickname': '도담이',
+        'birthDate': '2019-03-14',
+        'relationshipType': 'MOTHER',
+        'questionDifficulty': 'LOWER_ELEMENTARY',
+        'responseModes': ['VOICE'],
+      });
       expect(update.toJson(), containsPair('profileImageUrl', null));
     });
   });

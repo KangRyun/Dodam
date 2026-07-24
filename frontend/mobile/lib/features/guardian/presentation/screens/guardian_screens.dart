@@ -39,10 +39,12 @@ class GuardianHomeScreen extends StatelessWidget {
       message: '잠시 후 다시 시도해 주세요.',
       onRetry: controller.loadChildren,
     ),
-    ChildListStatus.empty => const AppEmptyView(
+    ChildListStatus.empty => AppEmptyView(
       key: ValueKey('child-list-empty'),
       title: '등록된 아이가 없어요',
       message: '아이 프로필을 등록하면 그림 활동을 시작할 수 있어요.',
+      actionLabel: '아이 등록하기',
+      onAction: () => Navigator.of(context).pushNamed(AppRoutes.childRegister),
     ),
     ChildListStatus.success => _GuardianHomeContent(controller: controller),
   };
@@ -114,6 +116,15 @@ class _GuardianHomeContent extends StatelessWidget {
                         controller.selectedChild!.childId.toString(),
                       ),
                     ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            AppButton(
+              key: const ValueKey('child-registration-entry'),
+              label: '아이 추가 등록',
+              leading: const Icon(Icons.person_add_alt_1_rounded),
+              variant: AppButtonVariant.secondary,
+              onPressed: () =>
+                  Navigator.of(context).pushNamed(AppRoutes.childRegister),
             ),
             const SizedBox(height: AppSpacing.sm),
             AppButton(

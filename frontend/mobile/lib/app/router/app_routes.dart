@@ -3,6 +3,7 @@ abstract final class AppRoutes {
   static const String login = '/auth/login';
   static const String guardianHome = '/guardian/home';
   static const String childSelect = '/guardian/children/select';
+  static const String childRegister = '/guardian/children/register';
   static const String activityHistory = '/guardian/activities';
 
   static String childModeHome(String childId) =>

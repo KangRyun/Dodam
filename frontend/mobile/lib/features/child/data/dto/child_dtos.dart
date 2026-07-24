@@ -104,48 +104,32 @@ final class ChildDetailDto {
   final String? updatedAt;
 }
 
-final class ChildConsentRequestDto {
-  const ChildConsentRequestDto({
-    required this.consentTermId,
-    required this.agreed,
-  });
-  final int consentTermId;
-  final bool agreed;
-  Map<String, dynamic> toJson() => {
-    'consentTermId': consentTermId,
-    'agreed': agreed,
-  };
-}
-
 final class CreateChildRequestDto {
   const CreateChildRequestDto({
     required this.nickname,
     required this.birthDate,
     required this.relationshipType,
-    required this.consents,
-    this.profileImageUrl,
+    required this.questionDifficulty,
+    required this.responseModes,
     this.preferredCharacter,
-    this.questionDifficulty,
-    this.responseModes,
+    this.profileImageFileId,
   });
   final String nickname;
   final String birthDate;
-  final String? profileImageUrl;
   final String? preferredCharacter;
-  final String? questionDifficulty;
-  final List<String>? responseModes;
+  final String questionDifficulty;
+  final List<String> responseModes;
   final String relationshipType;
-  final List<ChildConsentRequestDto> consents;
+  final String? profileImageFileId;
 
   Map<String, dynamic> toJson() => {
     'nickname': nickname,
     'birthDate': birthDate,
-    if (profileImageUrl != null) 'profileImageUrl': profileImageUrl,
-    if (preferredCharacter != null) 'preferredCharacter': preferredCharacter,
-    if (questionDifficulty != null) 'questionDifficulty': questionDifficulty,
-    if (responseModes != null) 'responseModes': responseModes,
     'relationshipType': relationshipType,
-    'consents': consents.map((item) => item.toJson()).toList(growable: false),
+    if (preferredCharacter != null) 'preferredCharacter': preferredCharacter,
+    'questionDifficulty': questionDifficulty,
+    'responseModes': responseModes,
+    if (profileImageFileId != null) 'profileImageFileId': profileImageFileId,
   };
 }
 
