@@ -204,6 +204,26 @@ public class DrawingSession {
   }
 
   /**
+   * 대화를 마친 그림 활동을 감정 회고 단계로 전환한다.
+   *
+   * <p>이미 감정 회고 단계이면 상태를 유지하며, 감정·제목 값은 변경하지 않는다.
+   *
+   * @throws IllegalStateException 삭제됐거나 진행 중이 아니거나 대화 단계가 아닌 경우
+   */
+  public void enterReflection() {
+    if (deletedAt != null || sessionStatus != DrawingSessionStatus.IN_PROGRESS) {
+      throw new IllegalStateException("진행 중인 그림 활동만 감정 회고로 이동할 수 있습니다.");
+    }
+    if (currentStage == DrawingStage.REFLECTION) {
+      return;
+    }
+    if (currentStage != DrawingStage.CONVERSING) {
+      throw new IllegalStateException("대화 단계에서만 감정 회고로 이동할 수 있습니다.");
+    }
+    currentStage = DrawingStage.REFLECTION;
+  }
+
+  /**
    * 그림 활동의 제목과 직접 표현을 저장하고 감정 돌아보기 단계로 전이한다.
    *
    * @param title 정규화된 그림 제목

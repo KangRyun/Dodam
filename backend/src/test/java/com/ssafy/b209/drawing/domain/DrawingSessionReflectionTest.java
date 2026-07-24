@@ -29,6 +29,24 @@ class DrawingSessionReflectionTest {
   }
 
   @Test
+  void entersReflectionFromConversingAndKeepsItIdempotently() {
+    DrawingSession session = session();
+    ReflectionTestUtils.setField(session, "currentStage", DrawingStage.CONVERSING);
+
+    session.enterReflection();
+    session.enterReflection();
+
+    assertThat(session.getCurrentStage()).isEqualTo(DrawingStage.REFLECTION);
+  }
+
+  @Test
+  void rejectsEnteringReflectionFromDrawingStage() {
+    DrawingSession session = session();
+
+    assertThatThrownBy(session::enterReflection).isInstanceOf(IllegalStateException.class);
+  }
+
+  @Test
   void doesNotAllowReflectionFromDrawingStage() {
     DrawingSession session = session();
 
