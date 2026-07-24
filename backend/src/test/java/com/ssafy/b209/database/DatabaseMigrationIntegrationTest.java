@@ -49,7 +49,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("10");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("11");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(67);
     assertThat(tableExists("refresh_tokens")).isFalse();
@@ -336,6 +336,14 @@ class DatabaseMigrationIntegrationTest {
         .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class);
 
     insertDrawingAsset(9002, "INTERMEDIATE", 1, "other-session");
+  }
+
+  @Test
+  void createsReportFailureColumns() {
+    assertThat(columnExists("reports", "failure_reason")).isTrue();
+    assertThat(columnIsNullable("reports", "failure_reason")).isTrue();
+    assertThat(columnExists("reports", "failed_at")).isTrue();
+    assertThat(columnIsNullable("reports", "failed_at")).isTrue();
   }
 
   private boolean columnExists(String tableName, String columnName) {
