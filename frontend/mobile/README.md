@@ -52,6 +52,10 @@ dart run tool/configure_oauth.dart --platform=all
 ```
 
 앱 실행과 빌드에는 생성된 Dart define 파일을 함께 전달한다.
+Debug·Profile·Release Android 빌드는 필수 OAuth 설정이 누락되거나
+placeholder인 경우 즉시 실패한다. iOS의 Debug·Release 설정도
+`OAuth.xcconfig`를 필수로 포함하므로, 설정을 생략한 채 정상 앱처럼
+실행되지 않는다.
 
 ```bash
 flutter run --dart-define=API_BASE_URL=http://10.0.2.2:8080 --dart-define-from-file=oauth_defines.json
@@ -60,6 +64,11 @@ flutter build apk --debug --dart-define=API_BASE_URL=http://10.0.2.2:8080 --dart
 
 위 주소는 Android Emulator에서 PC의 로컬 Backend로 접속하는 예시다.
 실기기와 iOS Simulator에서는 실행 환경에 맞는 Backend origin으로 교체한다.
+
+로그인 버튼은 Provider 공식 벡터 자산을 사용한다. 세 버튼은 로고 영역
+20dp, 로고와 문구 사이 간격 10dp, 문구 크기 16sp를 공통으로 적용한다.
+SVG의 `viewBox`, 색상과 비율은 변경하지 않으며 새 자산으로 교체할 때도
+각 Provider의 최신 브랜드 가이드를 먼저 확인한다.
 
 Naver Mobile SDK 특성상 `NAVER_CLIENT_SECRET`은 앱 패키지에 포함되므로
 역공학으로 추출될 수 있다. `.gitignore`는 소스 관리 노출만 방지한다.

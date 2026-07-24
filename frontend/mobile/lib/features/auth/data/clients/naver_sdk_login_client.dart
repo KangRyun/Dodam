@@ -26,7 +26,9 @@ final class NaverSdkLoginClient implements NaverLoginClient {
         return const NaverLoginCancelled();
       }
       throw AuthFailure(
-        type: AuthFailureType.providerRejected,
+        type: failure.type == ProviderSdkFailureType.configuration
+            ? AuthFailureType.configuration
+            : AuthFailureType.providerRejected,
         code: failure.type == ProviderSdkFailureType.configuration
             ? 'NAVER_CONFIGURATION_INVALID'
             : 'NAVER_LOGIN_FAILED',

@@ -26,7 +26,9 @@ final class GoogleSdkLoginClient implements GoogleLoginClient {
         return const GoogleLoginCancelled();
       }
       throw AuthFailure(
-        type: AuthFailureType.providerRejected,
+        type: failure.type == ProviderSdkFailureType.configuration
+            ? AuthFailureType.configuration
+            : AuthFailureType.providerRejected,
         code: failure.type == ProviderSdkFailureType.configuration
             ? 'GOOGLE_CONFIGURATION_INVALID'
             : 'GOOGLE_LOGIN_FAILED',

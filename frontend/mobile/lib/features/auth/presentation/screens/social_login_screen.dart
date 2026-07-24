@@ -232,6 +232,7 @@ String _failureMessage(AuthFailureType type) => switch (type) {
   AuthFailureType.providerRejected ||
   AuthFailureType.invalidCredential ||
   AuthFailureType.tokenExpired => '로그인 정보를 확인하지 못했어요. 다시 로그인해 주세요.',
+  AuthFailureType.configuration => '앱 로그인 설정을 확인해 주세요. 문제가 계속되면 관리자에게 문의해 주세요.',
   AuthFailureType.accountSuspended ||
   AuthFailureType.accountWithdrawn => '이 계정으로는 로그인할 수 없어요. 고객센터에 문의해 주세요.',
   AuthFailureType.cancelled => '로그인이 취소됐어요.',

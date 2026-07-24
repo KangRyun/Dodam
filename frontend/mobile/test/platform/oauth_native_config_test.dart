@@ -73,17 +73,23 @@ void main() {
     expect(readme, contains('--dart-define-from-file=oauth_defines.json'));
   });
 
-  test('Release 빌드는 누락된 OAuth 설정을 허용하지 않는다', () {
+  test('모든 앱 빌드는 누락된 OAuth 설정을 허용하지 않는다', () {
     final androidGradle = File(
       'android/app/build.gradle.kts',
+    ).readAsStringSync();
+    final iosDebugConfig = File(
+      'ios/Flutter/Debug.xcconfig',
     ).readAsStringSync();
     final iosReleaseConfig = File(
       'ios/Flutter/Release.xcconfig',
     ).readAsStringSync();
 
+    expect(androidGradle, contains('preDebugBuild'));
     expect(androidGradle, contains('preReleaseBuild'));
     expect(androidGradle, contains('preProfileBuild'));
     expect(androidGradle, contains('requireOAuthValue'));
+    expect(iosDebugConfig, contains('#include "OAuth.xcconfig"'));
+    expect(iosDebugConfig, isNot(contains('#include? "OAuth.xcconfig"')));
     expect(iosReleaseConfig, contains('#include "OAuth.xcconfig"'));
     expect(iosReleaseConfig, isNot(contains('#include? "OAuth.xcconfig"')));
   });

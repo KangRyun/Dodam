@@ -75,7 +75,11 @@ flutter {
 }
 
 tasks
-    .matching { it.name == "preReleaseBuild" || it.name == "preProfileBuild" }
+    .matching {
+        it.name == "preDebugBuild" ||
+            it.name == "preReleaseBuild" ||
+            it.name == "preProfileBuild"
+    }
     .configureEach {
         doFirst {
             listOf(

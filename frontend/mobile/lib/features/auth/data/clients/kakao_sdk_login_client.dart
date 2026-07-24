@@ -26,7 +26,9 @@ final class KakaoSdkLoginClient implements KakaoLoginClient {
         return const KakaoLoginCancelled();
       }
       throw AuthFailure(
-        type: AuthFailureType.providerRejected,
+        type: failure.type == ProviderSdkFailureType.configuration
+            ? AuthFailureType.configuration
+            : AuthFailureType.providerRejected,
         code: failure.type == ProviderSdkFailureType.configuration
             ? 'KAKAO_CONFIGURATION_INVALID'
             : 'KAKAO_LOGIN_FAILED',

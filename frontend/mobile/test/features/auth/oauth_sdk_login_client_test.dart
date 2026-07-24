@@ -32,10 +32,58 @@ void main() {
       await expectLater(
         client.signIn(),
         throwsA(
+          isA<AuthFailure>()
+              .having(
+                (failure) => failure.type,
+                'type',
+                AuthFailureType.configuration,
+              )
+              .having(
+                (failure) => failure.code,
+                'code',
+                'KAKAO_CONFIGURATION_INVALID',
+              ),
+        ),
+      );
+    });
+
+    test('Google SDK 설정 오류를 구성 실패로 매핑한다', () async {
+      final client = GoogleSdkLoginClient(
+        gateway: _FakeProviderSdkGateway(
+          failure: const ProviderSdkFailure(
+            ProviderSdkFailureType.configuration,
+          ),
+        ),
+      );
+
+      await expectLater(
+        client.signIn(),
+        throwsA(
           isA<AuthFailure>().having(
-            (failure) => failure.code,
-            'code',
-            'KAKAO_CONFIGURATION_INVALID',
+            (failure) => failure.type,
+            'type',
+            AuthFailureType.configuration,
+          ),
+        ),
+      );
+    });
+
+    test('Naver SDK 설정 오류를 구성 실패로 매핑한다', () async {
+      final client = NaverSdkLoginClient(
+        gateway: _FakeProviderSdkGateway(
+          failure: const ProviderSdkFailure(
+            ProviderSdkFailureType.configuration,
+          ),
+        ),
+      );
+
+      await expectLater(
+        client.signIn(),
+        throwsA(
+          isA<AuthFailure>().having(
+            (failure) => failure.type,
+            'type',
+            AuthFailureType.configuration,
           ),
         ),
       );
