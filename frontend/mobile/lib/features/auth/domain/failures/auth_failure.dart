@@ -6,6 +6,7 @@ enum AuthFailureType {
   accountSuspended,
   accountWithdrawn,
   invalidCredential,
+  configuration,
   tokenExpired,
   unknown,
 }

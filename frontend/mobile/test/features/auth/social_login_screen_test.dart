@@ -111,6 +111,26 @@ void main() {
     expect(find.text('다시 시도'), findsNothing);
   });
 
+  testWidgets('OAuth 설정 오류는 재로그인이 아닌 앱 설정 안내를 표시한다', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SocialLoginScreen(
+          onSignIn: (_) async => throw const AuthFailure(
+            type: AuthFailureType.configuration,
+            message: 'configuration error',
+          ),
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('social-login-google')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('앱 로그인 설정을 확인해 주세요'), findsOneWidget);
+    expect(find.textContaining('다시 로그인해 주세요'), findsNothing);
+    expect(find.text('다시 시도'), findsNothing);
+  });
+
   testWidgets('작은 휴대폰 화면에서도 오버플로 없이 표시한다', (tester) async {
     tester.view.physicalSize = const Size(640, 960);
     tester.view.devicePixelRatio = 2;

@@ -66,7 +66,7 @@ Provider 공식 배포물에서 추출한 SVG 세 개를 `assets/branding/`에 �
 `pubspec.yaml`의 dependencies에 다음을 선언한다.
 
 ```yaml
-flutter_svg: ^2.2.3
+flutter_svg: ^2.3.0
 ```
 
 - [ ] **Step 4: `Stack`을 고정 규격 `Row`로 교체**

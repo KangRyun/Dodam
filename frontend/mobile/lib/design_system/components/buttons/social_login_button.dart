@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../tokens/app_colors.dart';
 import '../../tokens/app_spacing.dart';
@@ -34,7 +35,7 @@ class SocialLoginButton extends StatelessWidget {
           onPressed: enabled ? onPressed : null,
           style: FilledButton.styleFrom(
             elevation: 0,
-            padding: EdgeInsets.symmetric(horizontal: visual.horizontalPadding),
+            padding: const EdgeInsets.symmetric(horizontal: 20),
             backgroundColor: visual.background,
             foregroundColor: visual.foreground,
             disabledBackgroundColor: AppColors.disabled,
@@ -49,24 +50,28 @@ class SocialLoginButton extends StatelessWidget {
                   strokeWidth: 2.5,
                   color: visual.foreground,
                 )
-              : Stack(
-                  alignment: Alignment.center,
+              : Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Align(
-                      alignment: Alignment.centerLeft,
-                      child: Image.asset(
+                    SizedBox.square(
+                      key: ValueKey('social-login-${provider.name}-icon'),
+                      dimension: 20,
+                      child: SvgPicture.asset(
                         visual.iconAsset,
-                        width: visual.iconSize,
-                        height: visual.iconSize,
                         fit: BoxFit.contain,
-                        filterQuality: FilterQuality.high,
                       ),
                     ),
-                    Text(
-                      visual.label,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
+                    const SizedBox(width: 10),
+                    Flexible(
+                      child: Text(
+                        visual.label,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ],
@@ -81,53 +86,43 @@ class _SocialVisual {
   const _SocialVisual({
     required this.label,
     required this.iconAsset,
-    required this.iconSize,
     required this.background,
     required this.foreground,
     required this.border,
     required this.borderRadius,
-    required this.horizontalPadding,
   });
 
   final String label;
   final String iconAsset;
-  final double iconSize;
   final Color background;
   final Color foreground;
   final Color border;
   final double borderRadius;
-  final double horizontalPadding;
 }
 
 _SocialVisual _visualFor(SocialLoginProvider provider) => switch (provider) {
   SocialLoginProvider.kakao => const _SocialVisual(
     label: '카카오로 시작',
-    iconAsset: 'assets/branding/kakao_symbol.png',
-    iconSize: 28,
+    iconAsset: 'assets/branding/kakao_symbol.svg',
     background: Color(0xFFFEE500),
     foreground: Color(0xD9000000),
     border: Colors.transparent,
     borderRadius: 12,
-    horizontalPadding: 20,
   ),
   SocialLoginProvider.google => const _SocialVisual(
     label: 'Google 계정으로 시작',
-    iconAsset: 'assets/branding/google_g.png',
-    iconSize: 22,
+    iconAsset: 'assets/branding/google_g.svg',
     background: Colors.white,
     foreground: Color(0xFF1F1F1F),
     border: Color(0xFF747775),
     borderRadius: 12,
-    horizontalPadding: 12,
   ),
   SocialLoginProvider.naver => const _SocialVisual(
     label: '네이버로 시작',
-    iconAsset: 'assets/branding/naver_n.png',
-    iconSize: 26,
+    iconAsset: 'assets/branding/naver_n.svg',
     background: Color(0xFF03A94D),
     foreground: Colors.white,
     border: Colors.transparent,
     borderRadius: 12,
-    horizontalPadding: 20,
   ),
 };
