@@ -134,7 +134,10 @@ class RestClientDrawingAnalysisClientTest {
             builder.build(),
             "/internal/v1/analyses",
             "internal-token",
-            new UnavailableDrawingAnalysisImageUrlProvider(),
+            storageKey -> {
+              throw new DrawingAnalysisClientException(
+                  DrawingAnalysisClientException.Type.REQUEST_FAILED);
+            },
             Validation.buildDefaultValidatorFactory().getValidator());
 
     assertThatThrownBy(() -> unavailableClient.analyze(validCommand()))

@@ -15,6 +15,8 @@ public enum ImageStorageErrorCode implements ErrorCode {
   INVALID_STORAGE_PATH(HttpStatus.BAD_REQUEST, "STORAGE_400_004", "유효하지 않은 이미지 저장 경로입니다."),
   /** 생성한 최종 파일명이 기존 파일과 충돌하여 안전하게 저장하지 못한 경우다. */
   IMAGE_STORAGE_CONFLICT(HttpStatus.CONFLICT, "STORAGE_409_001", "이미지 저장 요청이 충돌했습니다."),
+  /** 유효한 Storage Key에 해당하는 이미지 파일이 존재하지 않는 경우다. */
+  IMAGE_NOT_FOUND(HttpStatus.NOT_FOUND, "STORAGE_404_001", "이미지 파일을 찾을 수 없습니다."),
   /** 선언 크기 또는 실제 Stream 크기가 설정된 최대 크기를 초과한 경우다. */
   IMAGE_FILE_TOO_LARGE(
       HttpStatus.PAYLOAD_TOO_LARGE, "STORAGE_413_001", "이미지 파일 크기가 허용 범위를 초과했습니다."),

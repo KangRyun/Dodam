@@ -139,6 +139,9 @@ services:
       #   passthrough. base-url 앱 기본값도 localhost(도달 불가)라 내부망 DNS로 교정.
       AI_DRAWING_ANALYSIS_MODE: ${AI_DRAWING_ANALYSIS_MODE:-mock}
       AI_DRAWING_ANALYSIS_BASE_URL: ${AI_DRAWING_ANALYSIS_BASE_URL:-http://ai:8000}
+      # AI가 LocalImageStorage 원본을 가져갈 일회성 내부 URL. 외부 도메인이나 nginx를 사용하지 않는다.
+      AI_IMAGE_ACCESS_BASE_URL: ${AI_IMAGE_ACCESS_BASE_URL:-http://backend:8080}
+      AI_IMAGE_ACCESS_TOKEN_TTL: ${AI_IMAGE_ACCESS_TOKEN_TTL:-60s}
       # ── 아동 그림 스냅샷 저장 경로 — S15P11B209-349 (2차 MVP Day1 · 긴급 F1).
       #   application.yml 기본값이 상대경로(./storage/images)라 WORKDIR(/app) 기준으로 잡히는데,
       #   backend에 볼륨 마운트가 없어 컨테이너 재생성(매 배포)마다 아동 그림이 유실되는 구조였다.

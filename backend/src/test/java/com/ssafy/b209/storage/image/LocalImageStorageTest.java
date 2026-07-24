@@ -69,6 +69,51 @@ class LocalImageStorageTest {
   }
 
   @Test
+  void readsAStoredImageWithoutExposingItsAbsolutePath() throws IOException {
+    Path root = tempDir.resolve("images");
+    LocalImageStorage storage = storage(root, 1024, () -> FIRST_UUID);
+    StoredImage stored = storage.store(command(PNG, "image/png", "drawing.png"));
+
+    try (StoredImageContent content = storage.read(stored.storageKey())) {
+      assertThat(content.contentType()).isEqualTo("image/png");
+      assertThat(content.size()).isEqualTo(PNG.length);
+      assertThat(content.inputStream().readAllBytes()).isEqualTo(PNG);
+      assertThat(content.toString()).doesNotContain(root.toString());
+    }
+  }
+
+  @Test
+  void rejectsMissingAndEscapingReadKeysWithoutOpeningAFile() {
+    Path root = tempDir.resolve("images");
+    LocalImageStorage storage = storage(root, 1024, () -> FIRST_UUID);
+
+    assertBusinessError(
+        () -> storage.read("2026/07/22/missing.png"), ImageStorageErrorCode.IMAGE_NOT_FOUND);
+    assertBusinessError(
+        () -> storage.read("../outside.png"), ImageStorageErrorCode.INVALID_STORAGE_PATH);
+    assertBusinessError(
+        () -> storage.read(root.resolve("drawing.png").toString()),
+        ImageStorageErrorCode.INVALID_STORAGE_PATH);
+  }
+
+  @Test
+  void rejectsASymbolicLinkInAReadKey() throws IOException {
+    Path root = tempDir.resolve("images");
+    Path outside = tempDir.resolve("outside.png");
+    Files.createDirectories(root);
+    Files.write(outside, PNG);
+    try {
+      Files.createSymbolicLink(root.resolve("linked.png"), outside);
+    } catch (UnsupportedOperationException | IOException | SecurityException exception) {
+      assumeTrue(false, "Symbolic links are unavailable: " + exception.getClass().getSimpleName());
+    }
+    LocalImageStorage storage = storage(root, 1024, () -> FIRST_UUID);
+
+    assertBusinessError(
+        () -> storage.read("linked.png"), ImageStorageErrorCode.INVALID_STORAGE_PATH);
+  }
+
+  @Test
   void treatsDeletingAMissingImageAsCompleted() {
     LocalImageStorage storage = storage(tempDir.resolve("images"), 1024, () -> FIRST_UUID);
 
