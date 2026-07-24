@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 /**
  * DB v1.2 {@code community_posts} 테이블에 매핑되는 커뮤니티 게시글 Entity다.
@@ -100,6 +101,50 @@ public class CommunityPost {
   }
 
   /**
+   * 게시글의 유형, 제목, 본문, 익명 여부를 새 값으로 교체하고 수정 시각을 갱신한다.
+   *
+   * <p>전체 교체 성격의 수정이며 영속성 컨텍스트의 Dirty Checking으로 반영된다. 상태와 공개 여부, 삭제 시각은 이 메서드로 변경하지 않는다.
+   *
+   * @param postType 교체할 게시글 유형
+   * @param title 교체할 게시글 제목
+   * @param content 교체할 게시글 본문
+   * @param anonymous 교체할 익명 게시글 여부
+   * @param now 수정 시각으로 사용할 UTC 기준 시각
+   * @throws NullPointerException {@code postType}, {@code title}, {@code content}, {@code now} 중
+   *     하나가 {@code null}인 경우
+   */
+  public void update(
+      PostType postType, String title, String content, boolean anonymous, LocalDateTime now) {
+    Objects.requireNonNull(postType, "postType must not be null");
+    Objects.requireNonNull(title, "title must not be null");
+    Objects.requireNonNull(content, "content must not be null");
+    Objects.requireNonNull(now, "now must not be null");
+    this.postType = postType;
+    this.title = title;
+    this.content = content;
+    this.anonymous = anonymous;
+    this.updatedAt = now;
+  }
+
+  /**
+   * 게시글을 삭제 상태로 전환한다.
+   *
+   * <p>상태를 {@link PostStatus#DELETED}로 바꾸고 삭제 시각을 기록한다. 목록·상세 공개 조회는 이 상태를 제외하므로 즉시 비노출된다.
+   *
+   * @param now 서버가 결정한 UTC 기준 삭제 시각
+   * @throws NullPointerException {@code now}가 {@code null}인 경우
+   * @throws IllegalStateException 이미 삭제된 게시글인 경우
+   */
+  public void softDelete(LocalDateTime now) {
+    Objects.requireNonNull(now, "now must not be null");
+    if (this.deletedAt != null || this.postStatus == PostStatus.DELETED) {
+      throw new IllegalStateException("이미 삭제된 게시글입니다.");
+    }
+    this.postStatus = PostStatus.DELETED;
+    this.deletedAt = now;
+  }
+
+  /**
    * 게시글 식별자를 반환한다.
    *
    * @return 저장 후 채번된 게시글 ID, 저장 전에는 {@code null}
@@ -187,5 +232,14 @@ public class CommunityPost {
    */
   public LocalDateTime getUpdatedAt() {
     return updatedAt;
+  }
+
+  /**
+   * 삭제 시각을 반환한다.
+   *
+   * @return UTC 기준 삭제 시각, 삭제되지 않았으면 {@code null}
+   */
+  public LocalDateTime getDeletedAt() {
+    return deletedAt;
   }
 }
