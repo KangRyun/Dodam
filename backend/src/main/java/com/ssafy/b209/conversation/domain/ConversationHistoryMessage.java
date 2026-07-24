@@ -40,6 +40,9 @@ public class ConversationHistoryMessage {
   @Column(name = "stt_text")
   private String sttText;
 
+  @Column(name = "audio_storage_key")
+  private String audioStorageKey;
+
   @Column(name = "speech_status")
   private String speechStatus;
 
@@ -89,6 +92,17 @@ public class ConversationHistoryMessage {
     return sttText;
   }
 
+  /**
+   * 음성 답변 재생을 위한 Root-relative 음성 저장 key를 반환한다.
+   *
+   * <p>이 값은 내부 저장 위치이므로 API 응답이나 로그에 노출하지 않는다.
+   *
+   * @return 저장된 음성 key 또는 원본이 없거나 삭제된 경우 {@code null}
+   */
+  public String getAudioStorageKey() {
+    return audioStorageKey;
+  }
+
   public String getSpeechStatus() {
     return speechStatus;
   }
@@ -125,5 +139,14 @@ public class ConversationHistoryMessage {
    */
   public boolean isOptionAnswer() {
     return "OPTION_ANSWER".equals(messageType);
+  }
+
+  /**
+   * 저장된 DB 메시지 유형이 음성 답변인지 판별한다.
+   *
+   * @return 재생 가능한 원본 음성을 가질 수 있는 음성 답변 메시지이면 {@code true}
+   */
+  public boolean isVoiceAnswer() {
+    return "VOICE_ANSWER".equals(messageType);
   }
 }

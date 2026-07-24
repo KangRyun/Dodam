@@ -47,6 +47,19 @@ enum AudioFormat {
     throw new BusinessException(AudioStorageErrorCode.UNSUPPORTED_AUDIO_FORMAT);
   }
 
+  static String contentTypeForExtension(String extension) {
+    if (extension == null) {
+      return null;
+    }
+    String normalized = extension.trim().toLowerCase(Locale.ROOT);
+    for (AudioFormat format : values()) {
+      if (format.acceptedExtensions.contains(normalized)) {
+        return format.canonicalContentType;
+      }
+    }
+    return null;
+  }
+
   static AudioFormat detect(byte[] header, int length) {
     if (length >= 4
         && (header[0] & 0xFF) == 0x1A
