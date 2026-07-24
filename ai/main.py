@@ -26,16 +26,17 @@ import tempfile
 import time
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Header, UploadFile
+from fastapi import FastAPI, File, Form, Header, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from prometheus_fastapi_instrumentator import Instrumentator
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 import config
 import internal_contracts
 import llm_client
 import question_service
+import report_client
 import stt_client
 import tts_client
 import vlm_client
@@ -335,21 +336,55 @@ def internal_speech_synthesis(
     )
 
 
-@app.post("/analyze/report")
-def analyze_report():
-    """그림 + 대화 + 감정 종합 → 관찰 리포트. (mock)"""
-    return {
-        "status": "ok",
-        "observations": [
-            "집을 화면 가운데에 크게 그렸어요.",
-            "따뜻한 색을 주로 사용했어요.",
-        ],
-        "key_dialogues": [
-            {"speaker": "child", "text": "여기는 우리 집이야."},
-            {"speaker": "bear", "text": "누구랑 같이 살아?"},
-        ],
-        "check_points": [
-            "가족을 그릴 때 어떤 이야기를 나눴는지 함께 이야기해 보세요.",
-        ],
-        "disclaimer": "이 리포트는 의학적 진단이 아니라 아이를 이해하기 위한 관찰 참고 자료예요. 걱정되는 점이 있다면 전문가와 상담해 주세요.",
-    }
+# ── 관찰 리포트 생성 — (그림 이미지→YOLO+VLM 서술) + 활동 집계·감정 → 관찰 초안 (S15P11B209-180) ──
+#   ⚠️ 이 /analyze/report 는 '초안' 경로다. 정식 소비자는 BE AiObservationClient이고,
+#      현재 활성 구현은 MockAiObservationClient(고정 fixture)다. 실제 HTTP 배선(mode=http)과
+#      내부 토큰 계약, 그림 서술을 BE가 어떻게 넘길지는 후속 이슈가 같은 경계 뒤에 붙인다.
+#   ⚠️ BE 계약(ObservationGenerationRequest)엔 그림 서술이 없다. 그래서 관찰을 그림에 근거하게
+#      하려고, 이 draft 경로에서 그림 이미지를 받아 기존 yolo_client+vlm_client로 서술을 만들어
+#      리포트 입력에 넣는다. 이미지는 임시파일로만 다루고 저장·로그하지 않는다(가드레일).
+@app.post("/analyze/report", response_model=internal_contracts.ObservationGenerationResult)
+async def analyze_report(
+    request: str = Form(...),
+    file: UploadFile | None = File(default=None),
+):
+    """활동 요청(JSON) + 선택적 그림 이미지 → 그림 서술 근거 관찰 리포트 초안(BE 계약 형태).
+
+    - request: ObservationGenerationRequest JSON 문자열(멀티파트 form 필드).
+    - file: 최종 그림 이미지(선택). 있으면 YOLO+VLM으로 서술을 만들어 관찰 근거로 넣고,
+      없으면 활동 데이터(집계·감정·대표 발화)만으로 생성한다.
+
+    analysisType 이 FINAL 이 아니면 422(BE Mock과 동일한 계약 위반 취급).
+    GMS 상류 장애·서술 실패·응답 형식 오류는 502로 매핑한다(진단 문구를 지어내 반환하지 않는다).
+    """
+    try:
+        req = internal_contracts.ObservationGenerationRequest.model_validate_json(request)
+    except ValidationError:
+        return JSONResponse(status_code=422, content={"errorCode": "INVALID_REQUEST"})
+    if req.analysis_type != "FINAL":
+        return JSONResponse(status_code=422, content={"errorCode": "INVALID_REQUEST"})
+
+    tmp_path = None
+    try:
+        drawing_description = None
+        if file is not None:
+            ext = ""
+            if file.filename and "." in file.filename:
+                ext = "." + file.filename.rsplit(".", 1)[-1]
+            # Windows에서 추론기가 경로를 다시 열 수 있게 delete=False로 만들고 finally에서 지운다.
+            with tempfile.NamedTemporaryFile(suffix=ext or ".png", delete=False) as tmp:
+                tmp.write(await file.read())
+                tmp_path = tmp.name
+            detections, annotated_png = yolo_client.detect_and_annotate(tmp_path)
+            drawing_description = vlm_client.describe(annotated_png, detections)
+        return report_client.generate(req, drawing_description=drawing_description)
+    except RuntimeError:
+        return JSONResponse(status_code=502, content={"errorCode": "AI_UPSTREAM_ERROR"})
+    finally:
+        if tmp_path is not None:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
+        if file is not None:
+            await file.close()
