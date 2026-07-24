@@ -313,5 +313,40 @@ class VisualFeatureTest(unittest.TestCase):
         self.assertIn("OCCUPANCY_RATIO_CLAMPED", warnings)
 
 
+class InternalHealthTest(unittest.TestCase):
+    """§19.8 health 응답 형태. 소비자(BE 운영 모니터링)가 붙기 전에 고정한다."""
+
+    def _payload(self):
+        import main
+
+        return main.internal_health()
+
+    def test_spec_shape(self):
+        payload = self._payload()
+        self.assertEqual(payload["status"], "UP")
+        self.assertEqual(
+            set(payload["models"]),
+            {"objectDetection", "vision", "language", "stt", "tts", "rag"},
+        )
+        self.assertIn("knowledgeBaseVersion", payload)
+        self.assertTrue(payload["timestamp"].endswith("Z"))
+
+    def test_component_values_are_spec_literals(self):
+        """정본이 정의한 READY 외에는 NOT_READY만 쓴다 — 임의 값 유입 방지."""
+        for name, value in self._payload()["models"].items():
+            with self.subTest(component=name):
+                self.assertIn(value, ("READY", "NOT_READY"))
+
+    def test_does_not_leak_weight_path(self):
+        """가중치 경로는 서버 파일 구조 힌트라 노출하지 않는다(가드레일)."""
+        import json
+
+        import config
+
+        text = json.dumps(self._payload(), ensure_ascii=False)
+        self.assertNotIn(config.YOLO_MODEL_PATH, text)
+        self.assertNotIn("/", text.split('"timestamp"')[0])
+
+
 if __name__ == "__main__":
     unittest.main()

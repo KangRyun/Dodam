@@ -1,8 +1,43 @@
 # AI 음성 STT/TTS 내부 요청·응답 계약
 
 > Jira: `S15P11B209-289`, `S15P11B209-179`
-> 상태: **확정** (2026-07-23 KST)
+> **정본: `docs/api/API_명세서_최종.md`** (S15P11B209-400)
+> 상태: 운영 중 (as-built, 2026-07-23 확정) — 정본 §19.1과 경로 차이 있음
 > 범위: Spring Boot와 FastAPI AI 서버 사이의 음성 변환(STT)·합성(TTS) 내부 계약
+
+## ⚠️ 정본과의 차이
+
+계약의 정본은 `API_명세서_최종.md`다. 이 문서는 **현재 운영 중인 as-built 계약**을 기술하며, 정본 §19.1과 경로·헤더가 다르다.
+
+경로·헤더뿐 아니라 **본문 스키마도 상당히 다르다.** 전환 시 단순 경로 교체로는 끝나지 않는다.
+
+### STT (정본 §19.1 · §19.6)
+
+| 항목 | 이 문서(운영 중) | 정본 |
+| --- | --- | --- |
+| 경로 | `POST /internal/ai/v1/speech/stt` | `POST /internal/v1/speech/stt` |
+| 인증 헤더 | `X-Internal-Token` | `X-Internal-Api-Key` |
+| 요청 파트 | `file` 하나 + `X-Request-Id` Header | `audio` + `metadata` JSON(`requestId`, `language=ko-KR`, `ageGroup`, `maxDurationMs`) |
+| 응답 | `text`, `confidence`, `modelName`, `processingTimeMs` | `status`, `text`, `confidence`, `language`, `segments[]`, `needsConfirmation`, `modelVersion`, `processingTimeMs` |
+| 실패 표현 | HTTP 401/422/502 + `errorCode` | 본문 `status=FAILED` + `failureReason`(`NO_SPEECH`\|`LOW_CONFIDENCE`\|`UNSUPPORTED_AUDIO`\|`TIMEOUT`) |
+
+정본은 `needsConfirmation`과 `failureReason`을 요구한다. 이는 §25 계약 테스트의 "STT low confidence → 추정 텍스트 확정 금지, 폴백 선택지 제공"을 구현하기 위한 필드로, 아동 발화를 임의로 확정하지 않기 위한 가드레일이다. 현행 계약에는 이에 대응하는 필드가 없다.
+
+### TTS (정본 §19.1 · §19.7)
+
+| 항목 | 이 문서(운영 중) | 정본 |
+| --- | --- | --- |
+| 경로 | `POST /internal/ai/v1/speech/synthesis` | `POST /internal/v1/speech/tts` |
+| 요청 | `text`, `voice` | `text`, `voice`, `speed`, `format` |
+| 응답 | **JSON** — `audioBase64`, `audioFormat`, `voice`, `modelName`, `processingTimeMs` | **`audio/mpeg` 바이너리** + `X-Audio-Duration-Ms`·`X-TTS-Model-Version` Header |
+
+응답 형식이 base64 JSON ↔ 바이너리로 근본적으로 다르다. 어느 쪽이 나은지는 별도 판단이 필요하다(바이너리는 전송량이 약 25% 적고, base64 JSON은 BE 중계·캐싱 코드가 단순하다).
+
+### 전환 방침
+
+STT는 배포된 BE(`RestClientAiSttClient`)가 경로를 하드코딩해 호출 중이라 바꾸면 즉시 실패한다. TTS는 아직 BE 소비자(S15P11B209-299)가 착수 전이라 여유가 있다 — **TTS를 먼저 정본에 맞추고 STT를 나중에 옮기는 순서**가 위험이 적다.
+
+정합화는 BE·AI 동시 수정이 필요한 2단계 작업이며, 정본 §21이 허용한 방식(새 경로 추가 → BE 전환 확인 → 구 경로 제거)으로 진행한다. 인증 헤더는 이미 AI 서버가 두 헤더를 함께 수용하도록 바뀌어 있다(S15P11B209-398).
 
 기존 공개 초안 `/stt`·`/tts`는 제공하지 않는다. 아동 음성 원본·인식 텍스트·내부 토큰·저장 key·절대 경로는 로그나 오류·공개 응답에 포함하지 않는다.
 

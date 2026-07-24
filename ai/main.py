@@ -363,16 +363,41 @@ def internal_speech_synthesis(
 
 @app.get("/internal/v1/health")
 def internal_health():
-    """§19.1 AI-05. AI 서버·모델 준비 상태.
+    """§19.1 AI-05 · §19.8. AI 서버와 구성요소별 모델 준비 상태.
 
-    기존 /health와 달리 객체탐지 가중치 적재 여부까지 알린다.
-    ⚠️ 가중치 '경로'는 노출하지 않는다(서버 파일 구조 힌트) — 존재 여부만.
+    준비 여부 판정 근거:
+    - objectDetection: YOLO 가중치 파일 존재 여부(실제 로드는 첫 추론 때 지연 수행).
+    - vision·language·stt·tts: GMS 키 설정 여부. 원격 모델이라 실제 호출로 확인하면
+      health 조회마다 비용이 발생하므로 설정 유무를 대리 지표로 쓴다.
+    - rag: 검색 파이프라인 미구현 — 항상 NOT_READY.
+
+    ⚠️ 가중치 '경로'는 노출하지 않는다(서버 파일 구조 힌트) — 준비 여부만.
+    ⚠️ status는 서버 응답 가능 여부이고, 구성요소 상태는 models로 따로 알린다.
+       정본 §19.8이 정의한 값은 READY뿐이라 미준비는 NOT_READY로 표기한다.
     """
+    from datetime import datetime, timezone
     from pathlib import Path as _Path
 
+    gms_ready = "READY" if config.GMS_KEY else "NOT_READY"
+
+    def ready(flag: bool) -> str:
+        return "READY" if flag else "NOT_READY"
+
     return {
-        "status": "ok",
-        "objectDetectionReady": _Path(config.YOLO_MODEL_PATH).exists(),
+        "status": "UP",
+        "models": {
+            "objectDetection": ready(_Path(config.YOLO_MODEL_PATH).exists()),
+            "vision": gms_ready,
+            "language": gms_ready,
+            "stt": gms_ready,
+            "tts": gms_ready,
+            # 근거 검색이 없으면 근거 기반 문장을 만들 수 없다(§24.3) — 준비됨으로 표시하지 않는다.
+            "rag": ready(bool(config.RAG_KNOWLEDGE_BASE_VERSION)),
+        },
+        "knowledgeBaseVersion": config.RAG_KNOWLEDGE_BASE_VERSION or None,
+        "timestamp": datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z"),
         "pipelineVersion": config.PIPELINE_VERSION,
     }
 
