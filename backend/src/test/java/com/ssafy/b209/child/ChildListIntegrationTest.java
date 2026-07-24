@@ -1,6 +1,7 @@
 package com.ssafy.b209.child;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -99,6 +100,36 @@ class ChildListIntegrationTest {
         .andExpect(jsonPath("$.data[0].relationshipType").value("MOTHER"))
         .andExpect(jsonPath("$.data[1].childId").value(2))
         .andExpect(jsonPath("$.data[1].relationshipType").value("FATHER"));
+  }
+
+  @Test
+  void summarizesRecentActivityFromNonDeletedDrawingSessions() throws Exception {
+    jdbcTemplate.update(
+        """
+        INSERT INTO drawing_types (id, code, name, activity_category, selectable_by)
+        VALUES (101, 'RECENT_ACTIVITY_TEST', '최근 활동 테스트', 'GENERAL', 'GUARDIAN')
+        """);
+    jdbcTemplate.update(
+        """
+        INSERT INTO drawing_sessions
+          (id, child_id, drawing_type_id, input_method, session_status, current_stage,
+           started_at, deleted_at)
+        VALUES
+          (201, 1, 101, 'CANVAS', 'IN_PROGRESS', 'DRAWING', '2026-07-18 09:00:00', NULL),
+          (202, 1, 101, 'CANVAS', 'COMPLETED', 'COMPLETED', '2026-07-20 08:15:00', NULL),
+          (203, 1, 101, 'CANVAS', 'DELETED', 'DRAWING', '2026-07-21 10:00:00', '2026-07-21 11:00:00')
+        """);
+
+    mockMvc
+        .perform(get("/api/v1/children"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].childId").value(1))
+        .andExpect(jsonPath("$.data[0].recentActivity.totalActivityCount").value(2))
+        .andExpect(
+            jsonPath("$.data[0].recentActivity.lastActivityAt").value("2026-07-20T08:15:00Z"))
+        .andExpect(jsonPath("$.data[1].childId").value(2))
+        .andExpect(jsonPath("$.data[1].recentActivity.totalActivityCount").value(0))
+        .andExpect(jsonPath("$.data[1].recentActivity.lastActivityAt").value(nullValue()));
   }
 
   @Test

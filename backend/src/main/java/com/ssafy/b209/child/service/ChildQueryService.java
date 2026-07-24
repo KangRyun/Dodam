@@ -12,6 +12,7 @@ import com.ssafy.b209.child.repository.ChildSummaryProjection;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.Period;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -95,15 +96,20 @@ public class ChildQueryService {
   }
 
   private ChildSummaryResponse toSummary(ChildSummaryProjection child, LocalDate today) {
+    LocalDateTime lastActivityAt = child.getLastActivityAt();
     return new ChildSummaryResponse(
         child.getChildId(),
         child.getNickname(),
         child.getBirthDate(),
         Period.between(child.getBirthDate(), today).getYears(),
         child.getProfileImageUrl(),
+        child.getPreferredCharacter(),
         QuestionDifficulty.valueOf(child.getQuestionDifficulty()),
         ChildTutorialStatus.valueOf(child.getTutorialStatus()),
         ChildProfileStatus.valueOf(child.getProfileStatus()),
-        child.getRelationshipType());
+        child.getRelationshipType(),
+        new ChildSummaryResponse.RecentActivity(
+            lastActivityAt == null ? null : lastActivityAt.toInstant(ZoneOffset.UTC),
+            child.getTotalActivityCount()));
   }
 }

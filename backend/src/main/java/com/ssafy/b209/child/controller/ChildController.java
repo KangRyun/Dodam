@@ -124,18 +124,21 @@ public class ChildController {
   }
 
   /**
-   * 요청 보호자에게 연결된 활성 아동 목록을 조회한다.
+   * 요청 보호자에게 연결된 활성 아동 목록을 최근 활동 요약과 함께 조회한다.
    *
-   * <p>조회만 수행하며 목록 화면에 필요한 요약 정보만 반환한다. 연결된 아동이 없으면 빈 목록을 반환한다.
+   * <p>조회만 수행하며 보호자 홈 카드에 필요한 요약 정보와 아동별 최근 활동 요약(마지막 활동 시각, 누적 그림 세션 수)을 반환한다. 연결된 아동이 없으면 빈 목록을
+   * 반환하며 공통 응답의 {@code data}는 아동 배열이다.
    *
    * @param authorization Test Profile의 호환성 검증에만 사용하는 임시 Header
    * @param guardianUserId Test Profile의 호환성 검증에만 사용하는 임시 Header
-   * @return HTTP 200과 연결된 아동 요약 목록 공통 응답
+   * @return HTTP 200과 최근 활동 요약을 포함한 아동 요약 목록 공통 응답
    */
   @Operation(
       summary = "아동 목록 조회",
       description =
-          "요청 보호자에게 연결된 활성 아동 목록을 조회합니다. "
+          "요청 보호자에게 연결된 활성 아동 목록을 최근 활동 요약과 함께 조회합니다. "
+              + "각 항목에 마지막 활동 시각과 누적 그림 세션 수를 담은 recentActivity를 포함하며 "
+              + "공통 응답의 data는 아동 배열입니다. "
               + "조회만으로 아동이나 관계 상태를 변경하지 않습니다. "
               + "Authorization Bearer Access Token의 사용자 ID로 보호자 관계를 검증합니다.")
   @ApiResponses({
