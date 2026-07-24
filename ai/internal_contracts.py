@@ -160,3 +160,108 @@ class QuestionResponse(_CamelModel):
     model_version: str
     prompt_version: str
     processing_time_ms: int
+
+
+# ── 관찰 리포트 생성 계약 (S15P11B209-180) ──────────────────────
+# BE report.dto.ObservationGenerationRequest / ObservationGenerationResult(+중첩 record)와
+# 1:1 대응한다. BE 경계는 infrastructure.ai.observation.AiObservationClient 이고,
+# 현재 활성 구현은 MockAiObservationClient(고정 fixture)다.
+# ⚠️ 계약 소유자는 BE. 실제 HTTP 배선(app.ai.observation.mode=http)은 후속 이슈가
+#    같은 AiObservationClient 경계 뒤에 붙인다 — 이 AI 서버는 draft 경로로 같은 결과 형태만 제공.
+# ⚠️ 요청엔 그림 서술·대화 원문·탐지 객체가 없다(개인정보 최소화 계약) — 임의로 추가하지 말 것.
+
+
+class ObservationGenerationRequest(_CamelModel):
+    """BE ObservationGenerationRequest와 1:1. 집계 수치·비민감 맥락만 담는다.
+
+    representative_utterance·expressed_emotion_text 에는 아이 표현이 들어올 수 있어
+    repr에서 감춘다(로그 유출 방지). 이미지·음성 원문·식별 개인정보는 계약에 없다.
+    """
+
+    request_id: str
+    analysis_id: int
+    drawing_session_id: int
+    analysis_type: str  # 최종 분석은 "FINAL"
+    question_difficulty: str | None = None
+    question_count: int = 0
+    answered_count: int = 0
+    skipped_count: int = 0
+    unrecognized_speech_count: int = 0
+    selected_emotions: list[str] = Field(default_factory=list)
+    expressed_emotion_text: str | None = Field(default=None, repr=False)
+    representative_utterance: str | None = Field(default=None, repr=False)
+
+
+class ObservedFeatureDraft(_CamelModel):
+    """관찰 특징 초안(BE ObservedFeatureDraft). visibility_scope로 노출 범위를 나눈다."""
+
+    feature_code: str
+    title: str
+    description: str
+    evidence_summary: str
+    visibility_scope: Literal["EXPERT_ONLY", "REVIEWED_GUARDIAN"]
+
+
+class ObservationDraft(_CamelModel):
+    """전문가 검토 전 관찰 초안(BE ObservationDraft). status는 항상 AI_DRAFT.
+
+    attention_points는 전문가 내부 검토용 — 보호자에게 바로 노출하지 않는다.
+    disclaimer(진단 아님)는 필수.
+    """
+
+    status: str = "AI_DRAFT"
+    overall_summary: str
+    positive_signals: str
+    attention_points: str
+    evidence_summary: str
+    guardian_guidance: str
+    follow_up_question: str
+    expert_review_required: bool = False
+    disclaimer: str
+    features: list[ObservedFeatureDraft] = Field(default_factory=list)
+
+
+class ConversationSummaryDraft(_CamelModel):
+    """대화 요약 초안(BE ConversationSummaryDraft).
+
+    representative_utterance는 아이 발화일 수 있어 repr에서 감춘다.
+    집계 수치(질문/응답/건너뜀 수)는 여기 없다 — BE가 요청 값으로 채운다.
+    """
+
+    summary_text: str
+    main_topic: str
+    expressed_emotion: str
+    emotion_source: Literal["SELECTED", "STATED", "INFERRED"]
+    representative_utterance: str = Field(repr=False)
+
+
+class FollowUpGuideDraft(_CamelModel):
+    """보호자 후속 안내 초안(BE FollowUpGuideDraft)."""
+
+    guidance: str
+    detail_text: str
+
+
+class GuardianQuestionDraft(_CamelModel):
+    """보호자 질문 초안(BE GuardianQuestionDraft)."""
+
+    question_text: str
+    question_purpose: str
+
+
+class ObservationGenerationResult(_CamelModel):
+    """BE ObservationGenerationResult와 1:1. disclaimer·limitations_text는 필수.
+
+    confidence는 0~1 또는 None. model_name/model_version은 생성 주체 표기.
+    """
+
+    request_id: str
+    model_name: str
+    model_version: str
+    confidence: float | None = None
+    observation_draft: ObservationDraft
+    conversation_summary: ConversationSummaryDraft
+    activity_notes: list[str] = Field(default_factory=list)
+    follow_up_guides: list[FollowUpGuideDraft] = Field(default_factory=list)
+    guardian_questions: list[GuardianQuestionDraft] = Field(default_factory=list)
+    limitations_text: str
