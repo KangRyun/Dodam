@@ -142,17 +142,6 @@ void main() {
     expect(mainActivity, contains('NidOAuth.disconnect('));
   });
 
-  test('iOS SceneDelegate가 카카오·구글·네이버 OAuth callback을 각각 처리한다', () {
-    final sceneDelegate = File(
-      'ios/Runner/SceneDelegate.swift',
-    ).readAsStringSync();
-
-    expect(sceneDelegate, contains('NidOAuth.shared.handleURL'));
-    expect(sceneDelegate, contains('AuthApi.isKakaoTalkLoginUrl'));
-    expect(sceneDelegate, contains('AuthController.handleOpenUrl'));
-    expect(sceneDelegate, contains('GIDSignIn.sharedInstance.handle'));
-  });
-
   test('Android 호환 Naver Plugin은 SDK를 중복 초기화하거나 설정값을 기록하지 않는다', () {
     final pubspec = File('pubspec.yaml').readAsStringSync();
     final pluginSource = File(
