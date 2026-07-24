@@ -66,6 +66,10 @@ app:
       token-ttl: ${AI_IMAGE_ACCESS_TOKEN_TTL:60s}
     observation:
       mode: ${AI_OBSERVATION_MODE:mock}
+      base-url: ${AI_OBSERVATION_BASE_URL:http://localhost:8000}
+      endpoint-path: ${AI_OBSERVATION_ENDPOINT_PATH:/internal/v1/observations}
+      connect-timeout: ${AI_OBSERVATION_CONNECT_TIMEOUT:3s}
+      read-timeout: ${AI_OBSERVATION_READ_TIMEOUT:30s}
   cors:
     allowed-origins: []
   storage:
