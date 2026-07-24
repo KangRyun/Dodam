@@ -45,7 +45,9 @@ class DrawingSessionRepositoryTest {
   @Test
   void usesTheMySqlModeDatasourceConfiguredForTheTestProfile() throws SQLException {
     try (Connection connection = dataSource.getConnection()) {
-      assertThat(connection.getMetaData().getURL()).startsWith("jdbc:h2:mem:dodam-test");
+      assertThat(connection.getMetaData().getURL())
+          .startsWith("jdbc:h2:mem:dodam-test-")
+          .doesNotContain("jdbc:h2:mem:dodam-test;");
 
       try (PreparedStatement statement =
               connection.prepareStatement(
