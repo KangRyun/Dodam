@@ -45,13 +45,15 @@ Android `preDebugBuild`, `preProfileBuild`, `preReleaseBuild`가 모두 실제 �
 필요한 네이티브 OAuth 값을 검증하게 한다. 검증 대상은 다음과 같다.
 
 - `KAKAO_NATIVE_APP_KEY`
+- `GOOGLE_SERVER_CLIENT_ID`
 - `NAVER_CLIENT_ID`
 - `NAVER_CLIENT_SECRET`
 - `NAVER_APP_NAME`
 
-`GOOGLE_SERVER_CLIENT_ID`는 Android Manifest placeholder가 아니라 Dart SDK
-초기화 값이므로 Gradle 네이티브 검증과 분리한다. Dart define 전체 값은 기존
-`tool/configure_oauth.dart`가 생성하는 `oauth_defines.json`으로 관리한다.
+`GOOGLE_SERVER_CLIENT_ID`는 Android Manifest placeholder가 아니지만
+`tool/configure_oauth.dart`를 거치지 않은 불완전한 빌드를 막기 위해 동일한
+설정 묶음으로 검증한다. Dart define 값은 이 도구가 함께 생성하는
+`oauth_defines.json`으로 관리한다.
 
 테스트와 정적 분석은 Provider Secret 없이 실행 가능해야 한다. OAuth 값 검증은
 Android APK를 실제로 조립할 때만 수행한다.
@@ -93,6 +95,26 @@ API를 호출하는 현재 구조를 유지한다.
 - Kakao Token의 App ID와 서버 `KAKAO_APP_ID` 불일치
 - Provider 정상 Token이 공통 오류 응답으로 잘못 변환됨
 
+### 3.6 공식 브랜드 SVG와 버튼 정렬
+
+기존 PNG 로고는 Provider가 배포한 벡터 원본으로 교체한다. Google은 Google
+Identity가 제공하는 사전 승인 SVG, Kakao는 공식 Flutter SDK에 포함된 로그인
+심볼 SVG, Naver는 Naver Developers가 제공하는 벡터 버튼 자산의 N 로고를
+사용한다. 출처가 불분명한 웹 이미지나 임의로 다시 그린 로고는 사용하지 않는다.
+
+세 버튼은 공통 레이아웃 규격을 사용한다.
+
+- 버튼 높이와 radius는 기존 공통 규격 유지
+- 로고 렌더링 영역은 `20x20dp`
+- 로고와 레이블 사이 간격은 `10dp`
+- 레이블은 `16sp`, `FontWeight.w700`
+- 로고와 레이블을 하나의 가운데 정렬된 `Row`로 배치
+- SVG의 원래 `viewBox`, 색상과 종횡비 유지
+
+버튼 배경과 전경색은 각 Provider 공식 가이드를 유지한다. Kakao는
+`#FEE500`과 검정 85%, Google은 흰색·`#747775` 테두리·표준 컬러 G, Naver는
+`#03A94D`와 흰색 N을 사용한다.
+
 ## 4. 테스트 전략
 
 1. 설정 오류가 전용 `AuthFailureType`으로 변환되는 실패 테스트를 먼저 작성한다.
@@ -100,11 +122,14 @@ API를 호출하는 현재 구조를 유지한다.
 3. Android Debug 빌드 검증 대상에 OAuth 설정이 포함되는 정적 계약 테스트를
    작성한다.
 4. iOS Debug config가 정상 include 문법을 사용하는 정적 계약 테스트를 작성한다.
-5. 변경 후 `flutter analyze`, `flutter test`를 실행한다.
-6. 실제 비추적 설정을 생성하고 Android Debug APK를 빌드·설치한다.
-7. 세 버튼이 Provider 인증 화면으로 진입하는지 확인한다.
-8. 사용자 인증 후 Backend Token 교환과 세션 저장을 확인한다.
-9. Backend를 수정한 경우 `clean test`, `spotlessCheck`, `javadoc`을 추가 실행한다.
+5. 버튼 세 개가 SVG를 사용하고 동일한 로고 영역·간격·텍스트 크기를 갖는 Widget
+   테스트를 작성한다.
+6. 변경 후 `flutter analyze`, `flutter test`를 실행한다.
+7. 실제 비추적 설정을 생성하고 Android Debug APK를 빌드·설치한다.
+8. 세 버튼이 Provider 인증 화면으로 진입하는지 확인한다.
+9. 사용자 인증 후 Backend Token 교환과 세션 저장을 확인한다.
+10. Backend를 수정한 경우 `clean test`, `spotlessCheck`, `javadoc`을 추가
+    실행한다.
 
 ## 5. 제외 범위
 
@@ -120,6 +145,7 @@ API를 호출하는 현재 구조를 유지한다.
 - 설정 누락 Android Debug APK가 조립되지 않는다.
 - 설정 오류가 Provider 거부나 Token 오류와 구분된다.
 - iOS Debug OAuth include 문법이 올바르다.
+- 세 Provider 버튼이 공식 SVG와 동일한 로고 영역·간격·텍스트 크기를 사용한다.
 - Android에서 Kakao·Google·Naver Provider 인증 화면에 진입한다.
 - Provider Token이 기존 Backend 계약으로 교환되고 서비스 세션이 저장된다.
 - 실제 Secret이 Git 변경사항에 포함되지 않는다.
