@@ -24,17 +24,29 @@ class ReportCompletionTest {
     assertThat(report.isExpertReviewRecommended()).isTrue();
     assertThat(report.getLimitationsText()).contains("단정하지 않습니다");
     assertThat(report.getUpdatedAt()).isEqualTo(UPDATED_AT);
+    assertThat(report.getFailureReason()).isNull();
+    assertThat(report.getFailedAt()).isNull();
   }
 
   @Test
   void failsGeneratingReport() {
     Report report = generating();
 
-    report.fail("생성에 실패했습니다.", UPDATED_AT);
+    report.fail("생성에 실패했습니다.", "TIMEOUT", UPDATED_AT);
 
     assertThat(report.getStatus()).isEqualTo(ReportStatus.FAILED);
     assertThat(report.isExpertReviewRecommended()).isFalse();
     assertThat(report.getUpdatedAt()).isEqualTo(UPDATED_AT);
+    assertThat(report.getFailureReason()).isEqualTo("TIMEOUT");
+    assertThat(report.getFailedAt()).isEqualTo(UPDATED_AT);
+  }
+
+  @Test
+  void keepsFailureFieldsNullBeforeFailure() {
+    Report report = generating();
+
+    assertThat(report.getFailureReason()).isNull();
+    assertThat(report.getFailedAt()).isNull();
   }
 
   @Test

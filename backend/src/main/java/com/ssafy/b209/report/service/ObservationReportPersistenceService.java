@@ -327,7 +327,7 @@ public class ObservationReportPersistenceService {
       reportRepository
           .findByIdForUpdate(reportId)
           .filter(report -> report.getStatus() == ReportStatus.GENERATING)
-          .ifPresent(report -> report.fail(FAILED_LIMITATIONS, now));
+          .ifPresent(report -> report.fail(FAILED_LIMITATIONS, failureCode, now));
     }
   }
 
