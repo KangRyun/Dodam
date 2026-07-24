@@ -56,6 +56,28 @@ YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.20"))
 #    결합해 내부 계약이 무인증으로 인터넷에 노출되는 사고 경로였다 — 제거.
 AI_INTERNAL_TOKEN = os.environ.get("AI_INTERNAL_TOKEN", "")
 
+# 정본 명세(API_명세서_최종.md §3.2 · §19.2)가 요구하는 내부 인증 헤더는 X-Internal-Api-Key다.
+# 이미 배포된 BE 소비자(RestClientAiQuestionClient·RestClientAiSttClient)는 X-Internal-Token을
+# 보내므로 두 헤더를 함께 받아야 전환 중에도 연동이 끊기지 않는다.
+#   reason: 헤더 이름만 갈아끼우면 BE 호출이 401 → BE는 Type.OTHER로 분류해 폴백 템플릿으로
+#     조용히 대체된다(internal_contracts.py 상단 경고와 같은 실패 모드).
+# 값을 따로 주지 않으면 기존 토큰과 같은 값으로 본다 — 운영 시크릿을 한 번에 하나만 관리.
+AI_INTERNAL_API_KEY = os.environ.get("AI_INTERNAL_API_KEY", "") or AI_INTERNAL_TOKEN
+
+# ── 종합 분석 계약(§19.3/§19.4) ─────────────────────────────────
+# BE가 넘긴 signedUrl(짧은 만료·읽기 전용)에서 그림을 받아오는 제한 시간.
+#   reason: 만료된 URL이나 저장소 지연에 분석이 무한정 매달리지 않게 한다.
+ANALYSIS_IMAGE_TIMEOUT_SEC = float(os.environ.get("ANALYSIS_IMAGE_TIMEOUT_SEC", "10.0"))
+
+# 내려받을 그림 최대 크기. 정본 §3.8의 그림 업로드 상한(10 MiB)과 같은 값.
+ANALYSIS_IMAGE_MAX_BYTES = int(
+    os.environ.get("ANALYSIS_IMAGE_MAX_BYTES", str(10 * 1024 * 1024))
+)
+
+# RAG 지식베이스 버전. 검색 파이프라인이 아직 없어 근거를 만들지 못한다 —
+# 그 사실을 응답 unusedInputs로 명시하고 evidenceReferences는 비운다(§24.3).
+RAG_KNOWLEDGE_BASE_VERSION = os.environ.get("RAG_KNOWLEDGE_BASE_VERSION", "")
+
 # 로컬 개발 전용 명시적 opt-out — 정확히 "true"일 때만 토큰 없이 기동·검사 생략을 허용.
 # reason: 로컬 편의는 '조용한 기본값'이 아니라 개발자가 의도를 선언한 경우에만(C-183-1).
 #         배포 compose에는 이 변수를 절대 주입하지 않는다.
