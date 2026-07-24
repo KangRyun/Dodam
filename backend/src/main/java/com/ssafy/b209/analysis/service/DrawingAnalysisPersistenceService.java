@@ -2,10 +2,11 @@ package com.ssafy.b209.analysis.service;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
 import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
-import com.ssafy.b209.analysis.dto.DrawingDetectionResponse;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
+import com.ssafy.b209.analysis.repository.AnalysisResultJdbcRepository;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingAssetType;
@@ -14,6 +15,7 @@ import com.ssafy.b209.drawing.exception.DrawingErrorCode;
 import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.global.exception.BusinessException;
+import com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,6 +36,7 @@ public class DrawingAnalysisPersistenceService {
   private final DrawingSessionRepository drawingSessionRepository;
   private final DrawingAssetRepository drawingAssetRepository;
   private final DrawingAnalysisRepository drawingAnalysisRepository;
+  private final AnalysisResultJdbcRepository analysisResultJdbcRepository;
 
   /**
    * 분석 저장에 필요한 Repository를 주입받는다.
@@ -41,14 +44,17 @@ public class DrawingAnalysisPersistenceService {
    * @param drawingSessionRepository 분석 가능 세션 조회와 잠금 저장소
    * @param drawingAssetRepository 분석 대상 그림 파일 저장소
    * @param drawingAnalysisRepository 분석 실행 저장소
+   * @param analysisResultJdbcRepository 정규화된 종합 분석 보조 결과 저장소
    */
   public DrawingAnalysisPersistenceService(
       DrawingSessionRepository drawingSessionRepository,
       DrawingAssetRepository drawingAssetRepository,
-      DrawingAnalysisRepository drawingAnalysisRepository) {
+      DrawingAnalysisRepository drawingAnalysisRepository,
+      AnalysisResultJdbcRepository analysisResultJdbcRepository) {
     this.drawingSessionRepository = drawingSessionRepository;
     this.drawingAssetRepository = drawingAssetRepository;
     this.drawingAnalysisRepository = drawingAnalysisRepository;
+    this.analysisResultJdbcRepository = analysisResultJdbcRepository;
   }
 
   /**
@@ -101,8 +107,12 @@ public class DrawingAnalysisPersistenceService {
           session.getId(),
           asset.getId() == null ? drawingAssetId : asset.getId(),
           requestId,
+          scope,
           asset.getStorageKey(),
           asset.getMimeType(),
+          asset.getWidthPx(),
+          asset.getHeightPx(),
+          asset.getChecksumSha256(),
           requestedAt);
     } catch (DataIntegrityViolationException exception) {
       throw new BusinessException(
@@ -176,8 +186,12 @@ public class DrawingAnalysisPersistenceService {
           session.getId(),
           asset.getId(),
           requestId,
+          source.getScope(),
           asset.getStorageKey(),
           asset.getMimeType(),
+          asset.getWidthPx(),
+          asset.getHeightPx(),
+          asset.getChecksumSha256(),
           requestedAt);
     } catch (DataIntegrityViolationException exception) {
       throw new BusinessException(
@@ -186,39 +200,41 @@ public class DrawingAnalysisPersistenceService {
   }
 
   /**
-   * 유효한 Client 결과를 Detection으로 변환해 저장하고 분석을 성공 상태로 전환한다.
+   * 정본 AI 응답의 객체명·정규화 좌표·면적 비율을 보존하고 전체 또는 부분 성공 상태로 전환한다.
    *
    * @param analysisId 완료할 분석 실행 식별자
-   * @param modelName 분석에 사용한 Model 이름
-   * @param modelVersion 분석에 사용한 Model 버전
-   * @param detections Client가 반환한 객체 탐지 목록
-   * @param processedAt Client 처리가 끝난 UTC 시각
-   * @return Detection과 성공 상태가 반영된 분석 실행
+   * @param response 검증된 정본 종합 분석 응답
+   * @param processedAt Spring Boot가 응답 처리를 완료한 UTC 시각
+   * @return 탐지 결과와 완료 상태가 반영된 분석 실행
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public DrawingAnalysis complete(
-      Long analysisId,
-      String modelName,
-      String modelVersion,
-      List<DrawingDetectionResponse> detections,
-      LocalDateTime processedAt) {
+  public DrawingAnalysis completeCanonical(
+      Long analysisId, AiDrawingAnalysisResponse response, LocalDateTime processedAt) {
     DrawingAnalysis analysis = findForUpdate(analysisId);
+    AiDrawingAnalysisResponse.ModelRef model = response.modelInfo().objectDetection();
     List<DrawingDetectedObject> entities = new ArrayList<>();
-    for (int index = 0; index < detections.size(); index++) {
-      DrawingDetectionResponse detection = detections.get(index);
+    for (AiDrawingAnalysisResponse.DetectedObject detection : response.detectedObjects()) {
+      AiDrawingAnalysisResponse.BoundingBox box = detection.boundingBox();
       entities.add(
           DrawingDetectedObject.detected(
-              detection.label(),
+              detection.objectCode(),
+              detection.objectName(),
               detection.confidence(),
-              detection.boundingBox().x(),
-              detection.boundingBox().y(),
-              detection.boundingBox().width(),
-              detection.boundingBox().height(),
-              index,
-              modelVersion,
+              box.x(),
+              box.y(),
+              box.width(),
+              box.height(),
+              detection.areaRatio(),
+              detection.detectionOrder(),
+              model.version(),
               processedAt));
     }
-    analysis.succeed(modelName, modelVersion, entities, processedAt);
+    DrawingAnalysisState completedState =
+        response.status() == AiDrawingAnalysisResponse.AnalysisStatus.PARTIAL_SUCCESS
+            ? DrawingAnalysisState.PARTIAL_SUCCESS
+            : DrawingAnalysisState.SUCCESS;
+    analysis.complete(completedState, model.name(), model.version(), entities, processedAt);
+    analysisResultJdbcRepository.replace(analysisId, response, processedAt);
     drawingAnalysisRepository.flush();
     return analysis;
   }

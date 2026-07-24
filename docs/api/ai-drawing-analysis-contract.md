@@ -14,6 +14,12 @@
 
 이 문서가 규정하던 `POST /internal/ai/v1/drawings/analysis`는 **AI 서버에 구현된 적이 없다.** 정본 §19를 따르는 `POST /internal/v1/analyses`가 이를 대신하며 구현·배포까지 완료됐다(S15P11B209-398). BE는 `AI_DRAWING_ANALYSIS_ENDPOINT_PATH`를 새 경로로 교체하고 응답 DTO를 §19.4 형태로 맞춰야 한다.
 
+`S15P11B209-159`에서 Backend Client도 정본 §19.3·§19.4로 전환했다. `X-Internal-Token`과
+`X-Request-Id`를 전송하고, 객체 탐지뿐 아니라 구성요소별 Model, 시각·행동 특징, 대화 요약,
+관찰 초안, 미사용 입력, 경고와 근거를 정규화 Table에 저장한다. 기존 픽셀 Bounding Box는
+`coordinate_space=PIXEL`, 새 종합 분석 결과는 `NORMALIZED`로 구분하며 대화 질문에는 정규화
+결과만 전달한다.
+
 주요 차이는 다음과 같다.
 
 | 항목 | 이 문서(구) | 정본 §19 (현행) |
@@ -75,6 +81,7 @@ GET /api/v1/drawing-sessions/{drawingSessionId}/analyses/{drawingAnalysisId}
 | `PENDING` | `PENDING` | `model=null`, `detections=[]`, `processedAt=null`, `failure=null` |
 | `PROCESSING` | `PROCESSING` | `model=null`, `detections=[]`, `processedAt=null`, `failure=null` |
 | `SUCCESS` | `SUCCEEDED` | 저장된 Model, Detection과 완료 시각 반환 |
+| `PARTIAL_SUCCESS` | `SUCCEEDED` | 사용 가능한 Model·Detection과 완료 시각 반환 |
 | `FAILED` | `FAILED` | HTTP 200, `detections=[]`, 안전한 `failure` 반환 |
 
 성공 분석에서 탐지된 객체가 없어도 `detections=[]`가 정상 응답이다. Detection은 저장된 `detection_order` 오름차순으로 반환한다. 다른 Session의 분석, 삭제된 Session의 분석 또는 존재하지 않는 분석은 동일한 404 응답으로 처리한다.
@@ -233,15 +240,16 @@ Scheduler나 Timer를 생성하지 않는다.
 
 ```java
 public interface DrawingAnalysisClient {
-    DrawingAnalysisResponse analyze(DrawingAnalysisRequest request);
+    AiDrawingAnalysisResponse analyze(DrawingAnalysisClientCommand command);
 }
 ```
 
 - HTTP 구현체: `RestClientDrawingAnalysisClient`
 - HTTP Client: Spring `RestClient`
-- Method/Endpoint: `POST /internal/ai/v1/drawings/analysis`
-- Request/Response: 이 문서의 144번 계약 DTO를 그대로 사용
-- 인증 Header: 현재 추가하지 않음
+- Method/Endpoint: `POST /internal/v1/analyses`
+- Request/Response: 정본 §19.3의 JSON 요청과 §19.4 응답
+- 인증 Header: `X-Internal-Token` 필수
+- 상관관계 Header: `X-Request-Id`
 - 자동 Retry, Circuit Breaker, Fallback: 구현하지 않음
 
 ### 설정 환경 변수
@@ -250,7 +258,8 @@ public interface DrawingAnalysisClient {
 | --- | --- | --- |
 | `AI_DRAWING_ANALYSIS_MODE` | `mock` | 사용할 Client 구현. `mock` 또는 `http` |
 | `AI_DRAWING_ANALYSIS_BASE_URL` | `http://localhost:8000` | 그림 분석 AI 서버 Base URL |
-| `AI_DRAWING_ANALYSIS_ENDPOINT_PATH` | `/internal/ai/v1/drawings/analysis` | 그림 분석 내부 Endpoint Path |
+| `AI_DRAWING_ANALYSIS_ENDPOINT_PATH` | `/internal/v1/analyses` | 그림 분석 내부 Endpoint Path |
+| `AI_INTERNAL_TOKEN` | 없음 | HTTP mode 내부 인증 Token. Secret 저장소에서 주입 |
 | `AI_DRAWING_ANALYSIS_CONNECT_TIMEOUT` | `3s` | 연결 제한 시간 |
 | `AI_DRAWING_ANALYSIS_READ_TIMEOUT` | `30s` | 응답 대기 제한 시간 |
 
@@ -265,11 +274,18 @@ Base URL은 Query와 Fragment가 없는 HTTP 또는 HTTPS 절대 URI여야 한�
 | 빈 Body, JSON·Enum 오류, 응답 계약 위반 | `INVALID_RESPONSE` |
 | AI 서버 5xx | `SERVER_ERROR` |
 
-HTTP 2xx의 유효한 `status=FAILED` 응답은 통신 실패가 아니므로 Exception으로 변환하지 않는다. 응답 `requestId`가 요청 값과 다르면 다른 호출의 결과로 판단해 `INVALID_RESPONSE`로 처리한다. Client는 전체 Request/Response, Storage Key, 서버 URL, AI 오류 원문을 로그나 Exception 메시지에 기록하지 않는다.
+HTTP 2xx의 유효한 `status=FAILED` 응답은 통신 실패가 아니므로 Exception으로 변환하지 않는다. 응답
+`analysisId`가 요청 값과 다르면 다른 호출의 결과로 판단해 `INVALID_RESPONSE`로 처리한다. Client는
+전체 Request/Response, Storage Key, 읽기 URL, 내부 Token과 AI 오류 원문을 로그나 Exception
+메시지에 기록하지 않는다.
 
 ### 현재 연동 제한
 
-현재 실제 FastAPI 서버와의 정상 동작은 검증하지 않았으며 HTTP Client 테스트는 `MockRestServiceServer`만 사용한다. `storageKey`는 계약대로 전달되지만 AI 서버가 Backend의 로컬 Storage를 공유하지 않으면 이미지 파일을 읽을 수 없다. Client에서 절대 경로, Base64, URL 또는 multipart로 임의 변환하지 않으며 실제 이미지 접근 방식은 배포 Architecture에서 별도로 해결해야 한다.
+현재 실제 FastAPI 서버와의 정상 동작은 검증하지 않았으며 HTTP Client 테스트는
+`MockRestServiceServer`만 사용한다. 정본 요청은 `storageKey`를 전달하지 않고 짧은 만료의 읽기
+전용 `signedUrl`을 요구한다. 현재 저장소에는 이 URL을 발급하는 구현이 없어 HTTP mode 요청은
+네트워크 호출 전에 안전하게 거부한다. YOLO 가중치는 배포 Volume로 주입되지만 이미지 접근
+Provider가 연결될 때까지 기본 `AI_DRAWING_ANALYSIS_MODE=mock`을 유지한다.
 
 ## Mock 그림 분석 Client
 

@@ -216,7 +216,32 @@ public class DrawingAnalysis {
       String modelVersion,
       List<DrawingDetectedObject> detectedObjects,
       LocalDateTime processedAt) {
+    complete(DrawingAnalysisState.SUCCESS, modelName, modelVersion, detectedObjects, processedAt);
+  }
+
+  /**
+   * AI 종합 분석 결과를 Detection과 연결하고 전체 또는 부분 성공 상태로 전환한다.
+   *
+   * @param completedState {@link DrawingAnalysisState#SUCCESS} 또는 {@link
+   *     DrawingAnalysisState#PARTIAL_SUCCESS}
+   * @param modelName 대표 객체 탐지 Model 이름
+   * @param modelVersion 대표 객체 탐지 Model 버전
+   * @param detectedObjects 저장할 객체 탐지 결과
+   * @param processedAt 분석 처리가 끝난 UTC 시각
+   * @throws IllegalArgumentException 완료 상태가 성공 상태가 아니거나 Model 정보가 유효하지 않은 경우
+   * @throws IllegalStateException 현재 상태가 PROCESSING이 아닌 경우
+   */
+  public void complete(
+      DrawingAnalysisState completedState,
+      String modelName,
+      String modelVersion,
+      List<DrawingDetectedObject> detectedObjects,
+      LocalDateTime processedAt) {
     ensureProcessing();
+    if (completedState != DrawingAnalysisState.SUCCESS
+        && completedState != DrawingAnalysisState.PARTIAL_SUCCESS) {
+      throw new IllegalArgumentException("completedState must be a success state");
+    }
     this.modelName = requireText(modelName, "modelName");
     this.modelVersion = requireText(modelVersion, "modelVersion");
     Objects.requireNonNull(detectedObjects, "detectedObjects must not be null")
@@ -225,7 +250,7 @@ public class DrawingAnalysis {
               Objects.requireNonNull(detection, "detection must not be null").attachTo(this);
               detections.add(detection);
             });
-    this.state = DrawingAnalysisState.SUCCESS;
+    this.state = completedState;
     this.completedAt = Objects.requireNonNull(processedAt, "processedAt must not be null");
     this.errorCode = null;
     this.errorMessage = null;

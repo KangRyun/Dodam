@@ -1,11 +1,17 @@
 package com.ssafy.b209.conversation.service;
 
+import com.ssafy.b209.analysis.domain.DrawingAnalysis;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
+import com.ssafy.b209.analysis.domain.DrawingCoordinateSpace;
+import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
+import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.child.repository.ChildRepository;
 import com.ssafy.b209.conversation.domain.ConversationHistoryMessage;
 import com.ssafy.b209.conversation.domain.ConversationMessage;
 import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.domain.ResponseMode;
+import com.ssafy.b209.conversation.dto.BoundingBox;
 import com.ssafy.b209.conversation.dto.DetectedObject;
 import com.ssafy.b209.conversation.dto.GenerateQuestionCommand;
 import com.ssafy.b209.conversation.dto.GeneratedQuestion;
@@ -44,6 +50,7 @@ public class ConversationNextQuestionService {
   private final ConversationStartDrawingSessionRepository drawingSessionRepository;
   private final ConversationStartAuthorizationRepository authorizationRepository;
   private final ChildRepository childRepository;
+  private final DrawingAnalysisRepository drawingAnalysisRepository;
   private final ConversationQuestionService questionService;
   private final Clock clock;
 
@@ -56,6 +63,7 @@ public class ConversationNextQuestionService {
    * @param drawingSessionRepository 그림 활동-아동 연결 조회 경계
    * @param authorizationRepository 보호자 관계·필수 동의 검증 경계
    * @param childRepository AI 최소 아동 문맥 조회 경계
+   * @param drawingAnalysisRepository 분석 근거와 정규화 객체 조회 경계
    * @param questionService AI 호출·폴백·원자 저장 서비스
    * @param clock 응답 생성 시각 경계
    */
@@ -66,6 +74,7 @@ public class ConversationNextQuestionService {
       ConversationStartDrawingSessionRepository drawingSessionRepository,
       ConversationStartAuthorizationRepository authorizationRepository,
       ChildRepository childRepository,
+      DrawingAnalysisRepository drawingAnalysisRepository,
       ConversationQuestionService questionService,
       Clock clock) {
     this.conversationSessionRepository = conversationSessionRepository;
@@ -74,6 +83,7 @@ public class ConversationNextQuestionService {
     this.drawingSessionRepository = drawingSessionRepository;
     this.authorizationRepository = authorizationRepository;
     this.childRepository = childRepository;
+    this.drawingAnalysisRepository = drawingAnalysisRepository;
     this.questionService = questionService;
     this.clock = clock;
   }
@@ -122,7 +132,7 @@ public class ConversationNextQuestionService {
                 request.basisAnalysisId(),
                 child.ageOn(LocalDate.now(clock)),
                 modes,
-                assembleDetectedObjects(request.basisAnalysisId()),
+                assembleDetectedObjects(session.getDrawingSessionId(), request.basisAnalysisId()),
                 assembleRecentMessages(conversationId),
                 SAFETY_RULE_VERSION,
                 request.previousAnswerMessageId()));
@@ -166,15 +176,43 @@ public class ConversationNextQuestionService {
   /**
    * 그림 분석 근거가 있으면 탐지 객체를 AI 요청 문맥으로 조립한다.
    *
-   * <p>저장된 탐지 객체({@code analysis_detected_objects})의 Bounding Box는 원본 이미지 픽셀 좌표이고 대화 계약은 0~1 정규화
-   * 좌표를 요구하는데, 정규화에 필요한 이미지 크기({@code drawing_assets.width_px/height_px})가 채워지지 않아 두 좌표계를 안전하게 변환할
-   * 수 없다. 규격에 맞지 않는 값을 보내면 계약 검증에서 요청 자체가 실패하므로, 이 좌표계 불일치가 해소되기 전까지 탐지 객체 문맥은 빈 목록으로 둔다.
+   * <p>같은 그림 활동에 속한 성공 또는 부분 성공 분석만 사용하며, 기존 픽셀 좌표 결과는 변환하지 않고 제외한다. 종합 AI 계약에서 {@link
+   * DrawingCoordinateSpace#NORMALIZED}로 저장한 객체만 대화 질문 계약으로 전달한다.
    *
+   * @param drawingSessionId 현재 대화가 속한 그림 활동 식별자
    * @param basisAnalysisId 그림 분석 근거 식별자 또는 근거가 없을 때의 {@code null}
-   * @return 현재는 항상 빈 탐지 객체 목록
+   * @return 정규화 좌표를 가진 탐지 객체 목록, 사용할 근거가 없으면 빈 목록
    */
-  private List<DetectedObject> assembleDetectedObjects(Long basisAnalysisId) {
-    return List.of();
+  private List<DetectedObject> assembleDetectedObjects(
+      Long drawingSessionId, Long basisAnalysisId) {
+    if (basisAnalysisId == null) {
+      return List.of();
+    }
+    return drawingAnalysisRepository
+        .findDetailBySessionIdAndAnalysisId(drawingSessionId, basisAnalysisId)
+        .filter(this::isCompletedAnalysis)
+        .stream()
+        .flatMap(analysis -> analysis.getDetections().stream())
+        .filter(detection -> detection.getCoordinateSpace() == DrawingCoordinateSpace.NORMALIZED)
+        .map(this::toDetectedObject)
+        .toList();
+  }
+
+  private boolean isCompletedAnalysis(DrawingAnalysis analysis) {
+    return analysis.getState() == DrawingAnalysisState.SUCCESS
+        || analysis.getState() == DrawingAnalysisState.PARTIAL_SUCCESS;
+  }
+
+  private DetectedObject toDetectedObject(DrawingDetectedObject detection) {
+    return new DetectedObject(
+        detection.getLabel(),
+        detection.getObjectName(),
+        detection.getConfidence().doubleValue(),
+        new BoundingBox(
+            detection.getX().doubleValue(),
+            detection.getY().doubleValue(),
+            detection.getWidth().doubleValue(),
+            detection.getHeight().doubleValue()));
   }
 
   private void validateCurrentState(ConversationSession session) {

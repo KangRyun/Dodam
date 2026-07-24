@@ -76,9 +76,8 @@ public class DrawingAnalysisQueryService {
     return switch (analysis.getState()) {
       case PENDING -> inProgressResponse(analysis, DrawingAnalysisStatus.PENDING);
       case PROCESSING -> inProgressResponse(analysis, DrawingAnalysisStatus.PROCESSING);
-      case SUCCESS -> successResponse(analysis);
+      case SUCCESS, PARTIAL_SUCCESS -> successResponse(analysis);
       case FAILED -> failureResponse(analysis);
-      case PARTIAL_SUCCESS -> throw inconsistent();
     };
   }
 

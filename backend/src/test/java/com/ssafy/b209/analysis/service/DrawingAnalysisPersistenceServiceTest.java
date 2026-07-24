@@ -11,10 +11,9 @@ import static org.mockito.Mockito.verify;
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
-import com.ssafy.b209.analysis.dto.BoundingBoxResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
-import com.ssafy.b209.analysis.dto.DrawingDetectionResponse;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
+import com.ssafy.b209.analysis.repository.AnalysisResultJdbcRepository;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingAssetType;
@@ -25,6 +24,7 @@ import com.ssafy.b209.global.exception.BusinessException;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -46,6 +46,7 @@ class DrawingAnalysisPersistenceServiceTest {
   @Mock private DrawingSessionRepository drawingSessionRepository;
   @Mock private DrawingAssetRepository drawingAssetRepository;
   @Mock private DrawingAnalysisRepository drawingAnalysisRepository;
+  @Mock private AnalysisResultJdbcRepository analysisResultJdbcRepository;
   @Mock private DrawingSession session;
   @Mock private DrawingAsset asset;
 
@@ -55,7 +56,10 @@ class DrawingAnalysisPersistenceServiceTest {
   void setUp() {
     service =
         new DrawingAnalysisPersistenceService(
-            drawingSessionRepository, drawingAssetRepository, drawingAnalysisRepository);
+            drawingSessionRepository,
+            drawingAssetRepository,
+            drawingAnalysisRepository,
+            analysisResultJdbcRepository);
   }
 
   @Test
@@ -87,6 +91,47 @@ class DrawingAnalysisPersistenceServiceTest {
     verify(drawingAnalysisRepository).saveAndFlush(captor.capture());
     assertThat(ReflectionTestUtils.getField(captor.getValue(), "scope"))
         .isEqualTo(DrawingAnalysisScope.FINAL);
+  }
+
+  @Test
+  void savesCanonicalSupplementalResultsInTheCompletionTransaction() {
+    DrawingAnalysis processing =
+        DrawingAnalysis.processing(
+            session,
+            asset,
+            DrawingAnalysisScope.FINAL,
+            DrawingAnalysisType.OBJECT_DETECTION,
+            "request-1",
+            REQUESTED_AT);
+    ReflectionTestUtils.setField(processing, "id", ANALYSIS_ID);
+    given(drawingAnalysisRepository.findByIdForUpdate(ANALYSIS_ID))
+        .willReturn(Optional.of(processing));
+    var model =
+        new com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse.ModelRef(
+            "yolo", "1.0");
+    var response =
+        new com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse(
+            ANALYSIS_ID,
+            com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse
+                .AnalysisStatus.PARTIAL_SUCCESS,
+            new com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse
+                .ModelInfo(model, null, null, null),
+            List.of(),
+            Map.of("inkRatio", new BigDecimal("0.2")),
+            Map.of("pressureAvailable", false),
+            null,
+            null,
+            List.of(),
+            List.of(
+                new com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse
+                    .UnusedInput("PRESSURE", "DEVICE_NOT_SUPPORTED", null, false)),
+            List.of("PRESSURE_DATA_UNAVAILABLE"),
+            10L);
+
+    service.completeCanonical(ANALYSIS_ID, response, PROCESSED_AT);
+
+    assertThat(processing.getState()).isEqualTo(DrawingAnalysisState.PARTIAL_SUCCESS);
+    verify(analysisResultJdbcRepository).replace(ANALYSIS_ID, response, PROCESSED_AT);
   }
 
   @Test
@@ -196,34 +241,6 @@ class DrawingAnalysisPersistenceServiceTest {
                 SESSION_ID, ASSET_ID, DrawingAnalysisType.OBJECT_DETECTION, "id", REQUESTED_AT),
         DrawingAnalysisErrorCode.DRAWING_ANALYSIS_ALREADY_EXISTS);
     verify(drawingAnalysisRepository, never()).saveAndFlush(any());
-  }
-
-  @Test
-  void storesDetectionsAndSuccessState() {
-    DrawingAnalysis analysis = processingAnalysis();
-    given(drawingAnalysisRepository.findByIdForUpdate(ANALYSIS_ID))
-        .willReturn(Optional.of(analysis));
-
-    DrawingAnalysis completed =
-        service.complete(
-            ANALYSIS_ID,
-            "mock-drawing-detector",
-            "1.0",
-            List.of(
-                new DrawingDetectionResponse(
-                    "HOUSE",
-                    new BigDecimal("0.95"),
-                    new BoundingBoxResponse(
-                        new BigDecimal("120"),
-                        new BigDecimal("80"),
-                        new BigDecimal("640"),
-                        new BigDecimal("520")))),
-            PROCESSED_AT);
-
-    assertThat(completed.getState()).isEqualTo(DrawingAnalysisState.SUCCESS);
-    assertThat(completed.getDetections()).hasSize(1);
-    assertThat(completed.getDetections().getFirst().getDisplayOrder()).isZero();
-    verify(drawingAnalysisRepository).flush();
   }
 
   @Test

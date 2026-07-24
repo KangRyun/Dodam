@@ -191,13 +191,20 @@ class DrawingAnalysisQueryServiceTest {
   }
 
   @Test
-  void rejectsPartialSuccessBecauseItHasNoPublicContract() {
-    DrawingAnalysis analysis = analysis(DrawingAnalysisState.PARTIAL_SUCCESS);
+  void exposesPartialSuccessAsSucceededWhenItHasAValidResult() {
+    DrawingAnalysis analysis = analysis(DrawingAnalysisState.PROCESSING);
+    analysis.complete(
+        DrawingAnalysisState.PARTIAL_SUCCESS,
+        "mock-drawing-detector",
+        "1.0",
+        List.of(detection("HOUSE", 0)),
+        PROCESSED_AT);
     givenDetail(analysis);
 
-    assertError(
-        () -> service.getDrawingAnalysis(SESSION_ID, ANALYSIS_ID),
-        DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RESULT_INCONSISTENT);
+    DrawingAnalysisDetailResponse response = service.getDrawingAnalysis(SESSION_ID, ANALYSIS_ID);
+
+    assertThat(response.status()).isEqualTo(DrawingAnalysisStatus.SUCCEEDED);
+    assertThat(response.detections()).hasSize(1);
   }
 
   @Test

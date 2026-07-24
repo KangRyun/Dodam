@@ -1,12 +1,13 @@
 package com.ssafy.b209.analysis.service;
 
+import com.ssafy.b209.analysis.dto.BoundingBoxResponse;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisResponse;
-import com.ssafy.b209.analysis.dto.DrawingAnalysisRequest;
-import com.ssafy.b209.analysis.dto.DrawingAnalysisResponse;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisClientCommand;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisModelResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
-import com.ssafy.b209.analysis.dto.DrawingImageReference;
+import com.ssafy.b209.analysis.dto.DrawingDetectionResponse;
 import com.ssafy.b209.analysis.dto.RetryDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
@@ -14,11 +15,13 @@ import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClient;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClientException;
+import com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse;
 import jakarta.validation.Validator;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Objects;
 import java.util.UUID;
 import java.util.function.Supplier;
@@ -143,14 +146,19 @@ public class DrawingAnalysisService {
   private CreateDrawingAnalysisResponse executeAnalysis(
       StartedDrawingAnalysis started, DrawingAnalysisType taskType, Instant requestedInstant) {
     String requestId = started.requestId();
-    DrawingAnalysisRequest clientRequest =
-        new DrawingAnalysisRequest(
+    DrawingAnalysisClientCommand clientRequest =
+        new DrawingAnalysisClientCommand(
             requestId,
+            started.analysisId(),
             started.drawingSessionId(),
             started.drawingAssetId(),
-            new DrawingImageReference(started.storageKey(), started.contentType()),
-            taskType);
-    DrawingAnalysisResponse clientResponse;
+            started.analysisScope(),
+            started.storageKey(),
+            started.contentType(),
+            started.widthPx(),
+            started.heightPx(),
+            started.checksumSha256());
+    AiDrawingAnalysisResponse clientResponse;
     try {
       clientResponse = drawingAnalysisClient.analyze(clientRequest);
     } catch (DrawingAnalysisClientException exception) {
@@ -159,19 +167,21 @@ public class DrawingAnalysisService {
       throw new BusinessException(errorCode, exception);
     }
 
-    DrawingAnalysisErrorCode validationError = validateResponse(requestId, clientResponse);
+    DrawingAnalysisErrorCode validationError =
+        validateResponse(started.analysisId(), clientResponse);
     if (validationError != null) {
       markFailed(started.analysisId(), failureCode(validationError), validationError);
       throw new BusinessException(validationError);
     }
 
+    Instant processedInstant = clock.instant();
+    AiDrawingAnalysisResponse.ModelRef objectDetection =
+        clientResponse.modelInfo().objectDetection();
     try {
-      persistenceService.complete(
+      persistenceService.completeCanonical(
           started.analysisId(),
-          clientResponse.model().name(),
-          clientResponse.model().version(),
-          clientResponse.detections(),
-          LocalDateTime.ofInstant(clientResponse.processedAt(), ZoneOffset.UTC));
+          clientResponse,
+          LocalDateTime.ofInstant(processedInstant, ZoneOffset.UTC));
     } catch (RuntimeException exception) {
       markFailed(
           started.analysisId(),
@@ -181,6 +191,21 @@ public class DrawingAnalysisService {
           DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RESULT_SAVE_FAILED, exception);
     }
 
+    DrawingAnalysisModelResponse publicModel =
+        new DrawingAnalysisModelResponse(objectDetection.name(), objectDetection.version());
+    List<DrawingDetectionResponse> publicDetections =
+        clientResponse.detectedObjects().stream()
+            .map(
+                detection ->
+                    new DrawingDetectionResponse(
+                        detection.objectCode(),
+                        detection.confidence(),
+                        new BoundingBoxResponse(
+                            detection.boundingBox().x(),
+                            detection.boundingBox().y(),
+                            detection.boundingBox().width(),
+                            detection.boundingBox().height())))
+            .toList();
     return new CreateDrawingAnalysisResponse(
         started.analysisId(),
         started.drawingSessionId(),
@@ -188,23 +213,23 @@ public class DrawingAnalysisService {
         requestId,
         taskType,
         DrawingAnalysisStatus.SUCCEEDED,
-        clientResponse.model(),
-        clientResponse.detections(),
+        publicModel,
+        publicDetections,
         requestedInstant,
-        clientResponse.processedAt());
+        processedInstant);
   }
 
   private DrawingAnalysisErrorCode validateResponse(
-      String requestId, DrawingAnalysisResponse response) {
+      Long analysisId, AiDrawingAnalysisResponse response) {
     if (response == null
-        || !requestId.equals(response.requestId())
+        || !analysisId.equals(response.analysisId())
         || !validator.validate(response).isEmpty()) {
       return DrawingAnalysisErrorCode.DRAWING_ANALYSIS_INVALID_RESPONSE;
     }
-    if (response.status() == DrawingAnalysisStatus.FAILED) {
+    if (response.status() == AiDrawingAnalysisResponse.AnalysisStatus.FAILED) {
       return DrawingAnalysisErrorCode.DRAWING_ANALYSIS_REQUEST_FAILED;
     }
-    if (response.status() != DrawingAnalysisStatus.SUCCEEDED) {
+    if (response.modelInfo().objectDetection() == null) {
       return DrawingAnalysisErrorCode.DRAWING_ANALYSIS_INVALID_RESPONSE;
     }
     return null;

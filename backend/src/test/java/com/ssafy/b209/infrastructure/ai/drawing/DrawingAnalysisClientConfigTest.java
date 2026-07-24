@@ -19,7 +19,7 @@ class DrawingAnalysisClientConfigTest {
           .withUserConfiguration(DrawingAnalysisClientConfig.class, RestClientBuilderConfig.class)
           .withPropertyValues(
               "app.ai.drawing-analysis.base-url=http://127.0.0.1:1",
-              "app.ai.drawing-analysis.endpoint-path=/internal/ai/v1/drawings/analysis",
+              "app.ai.drawing-analysis.endpoint-path=/internal/v1/analyses",
               "app.ai.drawing-analysis.connect-timeout=3s",
               "app.ai.drawing-analysis.read-timeout=30s");
 
@@ -42,7 +42,7 @@ class DrawingAnalysisClientConfigTest {
   @Test
   void selectsHttpClientWithoutCreatingMockClient() {
     contextRunner
-        .withPropertyValues("app.ai.drawing-analysis.mode=http")
+        .withPropertyValues("app.ai.drawing-analysis.mode=http", "AI_INTERNAL_TOKEN=internal-token")
         .run(
             context -> {
               assertThat(context).hasNotFailed();
@@ -52,6 +52,13 @@ class DrawingAnalysisClientConfigTest {
                   .isInstanceOf(RestClientDrawingAnalysisClient.class);
               assertThat(context).doesNotHaveBean(MockDrawingAnalysisClient.class);
             });
+  }
+
+  @Test
+  void rejectsHttpClientWithoutInternalToken() {
+    contextRunner
+        .withPropertyValues("app.ai.drawing-analysis.mode=http")
+        .run(context -> assertThat(context).hasFailed());
   }
 
   @Test

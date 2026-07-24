@@ -8,6 +8,11 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import com.ssafy.b209.analysis.domain.DrawingAnalysis;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
+import com.ssafy.b209.analysis.domain.DrawingCoordinateSpace;
+import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
+import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.child.repository.ChildRepository;
 import com.ssafy.b209.conversation.domain.ConversationHistoryMessage;
@@ -54,6 +59,7 @@ class ConversationNextQuestionServiceTest {
   @Mock private ConversationStartDrawingSessionRepository drawingSessionRepository;
   @Mock private ConversationStartAuthorizationRepository authorizationRepository;
   @Mock private ChildRepository childRepository;
+  @Mock private DrawingAnalysisRepository drawingAnalysisRepository;
   @Mock private ConversationQuestionService questionService;
   @Mock private ConversationSession session;
   @Mock private ConversationStartDrawingSession drawingSession;
@@ -71,6 +77,7 @@ class ConversationNextQuestionServiceTest {
             drawingSessionRepository,
             authorizationRepository,
             childRepository,
+            drawingAnalysisRepository,
             questionService,
             Clock.fixed(Instant.parse("2026-07-22T00:00:00Z"), ZoneOffset.UTC));
   }
@@ -160,6 +167,39 @@ class ConversationNextQuestionServiceTest {
     verify(questionService).generateQuestion(commandCaptor.capture());
     assertThat(commandCaptor.getValue().recentMessages()).isEmpty();
     assertThat(commandCaptor.getValue().detectedObjects()).isEmpty();
+  }
+
+  @Test
+  void sendsOnlyNormalizedObjectsFromCompletedBasisAnalysis() {
+    stubAuthorizedConversation(false, true, true);
+    stubChildContext();
+    DrawingAnalysis analysis = org.mockito.Mockito.mock(DrawingAnalysis.class);
+    DrawingDetectedObject normalized = org.mockito.Mockito.mock(DrawingDetectedObject.class);
+    DrawingDetectedObject pixel = org.mockito.Mockito.mock(DrawingDetectedObject.class);
+    given(drawingAnalysisRepository.findDetailBySessionIdAndAnalysisId(101L, 700L))
+        .willReturn(Optional.of(analysis));
+    given(analysis.getState()).willReturn(DrawingAnalysisState.PARTIAL_SUCCESS);
+    given(analysis.getDetections()).willReturn(List.of(normalized, pixel));
+    given(normalized.getCoordinateSpace()).willReturn(DrawingCoordinateSpace.NORMALIZED);
+    given(normalized.getLabel()).willReturn("HOUSE");
+    given(normalized.getObjectName()).willReturn("집");
+    given(normalized.getConfidence()).willReturn(new java.math.BigDecimal("0.93"));
+    given(normalized.getX()).willReturn(new java.math.BigDecimal("0.1"));
+    given(normalized.getY()).willReturn(new java.math.BigDecimal("0.2"));
+    given(normalized.getWidth()).willReturn(new java.math.BigDecimal("0.3"));
+    given(normalized.getHeight()).willReturn(new java.math.BigDecimal("0.4"));
+    given(pixel.getCoordinateSpace()).willReturn(DrawingCoordinateSpace.PIXEL);
+    given(questionService.generateQuestion(any()))
+        .willReturn(new GeneratedQuestion(905L, "집에는 누가 있니?", false, 1, List.of(), null));
+
+    service.generate(3L, 11L, request());
+
+    ArgumentCaptor<GenerateQuestionCommand> commandCaptor =
+        ArgumentCaptor.forClass(GenerateQuestionCommand.class);
+    verify(questionService).generateQuestion(commandCaptor.capture());
+    assertThat(commandCaptor.getValue().detectedObjects())
+        .containsExactly(
+            new DetectedObject("HOUSE", "집", 0.93, new BoundingBox(0.1, 0.2, 0.3, 0.4)));
   }
 
   @Test

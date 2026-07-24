@@ -507,7 +507,7 @@ throw new BusinessException(SomeDomainErrorCode.RESOURCE_NOT_FOUND);
 7. `Idempotency-Key` 처리
 8. Spring Security와 JWT 인증
 9. S3 Pre-signed URL 업로드
-10. FastAPI AI 서버 연동
+10. FastAPI AI 서버의 이미지 접근 URL 연동과 배포 환경 실연동 검증
 
 ## OAuth 로그인 API
 
