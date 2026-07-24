@@ -17,6 +17,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -41,6 +42,7 @@ public class CommunityPostCreateService {
    * @param userRepository 작성자 역할 확인 저장소
    * @param communityPostRepository 게시글 저장소
    */
+  @Autowired
   public CommunityPostCreateService(
       CurrentAuthenticatedUserResolver currentAuthenticatedUserResolver,
       UserRepository userRepository,
