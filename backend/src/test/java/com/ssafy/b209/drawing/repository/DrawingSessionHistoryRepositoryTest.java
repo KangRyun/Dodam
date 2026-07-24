@@ -168,7 +168,7 @@ class DrawingSessionHistoryRepositoryTest {
                 "hist-analysis-1",
                 LocalDateTime.of(2026, 7, 10, 8, 2)));
     Report older = Report.generating(failedHouse, analysis, 1, LocalDateTime.of(2026, 7, 10, 8, 3));
-    older.fail("older failed", LocalDateTime.of(2026, 7, 10, 8, 4));
+    older.fail("older failed", "TIMEOUT", LocalDateTime.of(2026, 7, 10, 8, 4));
     reportRepository.save(older);
     Report latest =
         Report.generating(failedHouse, analysis, 2, LocalDateTime.of(2026, 7, 10, 8, 5));
@@ -222,7 +222,7 @@ class DrawingSessionHistoryRepositoryTest {
     reportRepository.save(latestByTime);
     Report higherIdButOlder =
         Report.generating(failedHouse, analysis, 2, LocalDateTime.of(2026, 7, 10, 8, 0));
-    higherIdButOlder.fail("older failed", LocalDateTime.of(2026, 7, 10, 8, 1));
+    higherIdButOlder.fail("older failed", "TIMEOUT", LocalDateTime.of(2026, 7, 10, 8, 1));
     reportRepository.save(higherIdButOlder);
     entityManager.flush();
     entityManager.clear();

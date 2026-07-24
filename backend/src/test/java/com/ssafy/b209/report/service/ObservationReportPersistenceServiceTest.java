@@ -262,6 +262,8 @@ class ObservationReportPersistenceServiceTest {
     assertThat(analysis.getState()).isEqualTo(DrawingAnalysisState.FAILED);
     assertThat(analysis.getErrorCode()).isEqualTo("TIMEOUT");
     assertThat(report.getStatus()).isEqualTo(ReportStatus.FAILED);
+    assertThat(report.getFailureReason()).isEqualTo("TIMEOUT");
+    assertThat(report.getFailedAt()).isEqualTo(LocalDateTime.now(CLOCK));
     verify(analysis.getDrawingSession()).failReporting();
   }
 

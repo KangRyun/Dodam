@@ -57,6 +57,12 @@ public class Report {
   @Column(name = "pdf_status", nullable = false, length = 20)
   private ReportPdfStatus pdfStatus;
 
+  @Column(name = "failure_reason", length = 100)
+  private String failureReason;
+
+  @Column(name = "failed_at")
+  private LocalDateTime failedAt;
+
   @Column(name = "created_at", nullable = false)
   private LocalDateTime createdAt;
 
@@ -116,19 +122,25 @@ public class Report {
   }
 
   /**
-   * 생성 중 리포트를 실패 상태로 전환하고 한계 문구를 갱신한다.
+   * 생성 중 리포트를 실패 상태로 전환하고 실패 분류 코드와 실패 시각을 보존한다.
+   *
+   * <p>{@code limitationsText}는 보호자에게 노출하는 한계 문구이고, {@code failureReason}은 원문이나 개인정보를 담지 않는 내부 진단용
+   * 분류 코드다. 두 값은 서로 독립적으로 저장한다.
    *
    * @param limitationsText 실패 상황을 알리는 필수 한계 문구
-   * @param updatedAt 실패 처리를 기록한 UTC 시각
+   * @param failureReason 원문을 포함하지 않는 실패 분류 코드이며 없으면 {@code null}
+   * @param failedAt 실패를 기록한 UTC 시각이며 상태 갱신 시각으로도 사용한다
    * @throws IllegalStateException 현재 상태가 GENERATING이 아닌 경우
    * @throws IllegalArgumentException 한계 문구가 비어 있는 경우
    */
-  public void fail(String limitationsText, LocalDateTime updatedAt) {
+  public void fail(String limitationsText, String failureReason, LocalDateTime failedAt) {
     ensureGenerating();
     this.status = ReportStatus.FAILED;
     this.expertReviewRecommended = false;
     this.limitationsText = requireText(limitationsText, "limitationsText");
-    this.updatedAt = Objects.requireNonNull(updatedAt, "updatedAt must not be null");
+    this.failureReason = failureReason;
+    this.failedAt = Objects.requireNonNull(failedAt, "failedAt must not be null");
+    this.updatedAt = failedAt;
   }
 
   /**
@@ -185,6 +197,20 @@ public class Report {
    */
   public ReportPdfStatus getPdfStatus() {
     return pdfStatus;
+  }
+
+  /**
+   * @return 실패 상태일 때의 내부 진단용 실패 분류 코드이며 실패하지 않았으면 {@code null}
+   */
+  public String getFailureReason() {
+    return failureReason;
+  }
+
+  /**
+   * @return 리포트 생성이 실패한 UTC 시각이며 실패하지 않았으면 {@code null}
+   */
+  public LocalDateTime getFailedAt() {
+    return failedAt;
   }
 
   /**
