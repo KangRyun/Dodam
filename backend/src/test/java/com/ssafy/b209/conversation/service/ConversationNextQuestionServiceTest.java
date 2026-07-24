@@ -4,11 +4,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.child.repository.ChildRepository;
+import com.ssafy.b209.conversation.domain.ConversationHistoryMessage;
 import com.ssafy.b209.conversation.domain.ConversationMessage;
 import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.domain.ConversationStartDrawingSession;
@@ -20,8 +22,10 @@ import com.ssafy.b209.conversation.dto.GeneratedQuestion;
 import com.ssafy.b209.conversation.dto.NextQuestionRequest;
 import com.ssafy.b209.conversation.dto.PreferredResponseMode;
 import com.ssafy.b209.conversation.dto.QuestionOption;
+import com.ssafy.b209.conversation.dto.RecentMessage;
 import com.ssafy.b209.conversation.exception.ConversationErrorCode;
 import com.ssafy.b209.conversation.exception.ConversationStartErrorCode;
+import com.ssafy.b209.conversation.repository.ConversationHistoryMessageRepository;
 import com.ssafy.b209.conversation.repository.ConversationMessageRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartAuthorizationRepository;
@@ -39,12 +43,14 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.domain.Pageable;
 
 /** 283 공개 DTO 변환과 보호자 접근 경계를 검증한다. */
 @ExtendWith(MockitoExtension.class)
 class ConversationNextQuestionServiceTest {
   @Mock private ConversationSessionRepository conversationSessionRepository;
   @Mock private ConversationMessageRepository conversationMessageRepository;
+  @Mock private ConversationHistoryMessageRepository conversationHistoryMessageRepository;
   @Mock private ConversationStartDrawingSessionRepository drawingSessionRepository;
   @Mock private ConversationStartAuthorizationRepository authorizationRepository;
   @Mock private ChildRepository childRepository;
@@ -61,6 +67,7 @@ class ConversationNextQuestionServiceTest {
         new ConversationNextQuestionService(
             conversationSessionRepository,
             conversationMessageRepository,
+            conversationHistoryMessageRepository,
             drawingSessionRepository,
             authorizationRepository,
             childRepository,
@@ -98,6 +105,61 @@ class ConversationNextQuestionServiceTest {
     assertThat(response.messageType()).isEqualTo("QUESTION");
     assertThat(response.options().getFirst().type()).isEqualTo("OPTION");
     assertThat(response.targetObject().boundingBox().width()).isEqualTo(0.3);
+  }
+
+  @Test
+  void assemblesRecentMessagesInChronologicalOrderPreferringSttText() {
+    stubAuthorizedConversation(false, true, true);
+    stubChildContext();
+    ConversationHistoryMessage olderQuestion =
+        historyMessage(101L, "AI", "QUESTION", "무엇을 그렸니?", null);
+    ConversationHistoryMessage newerAnswer =
+        historyMessage(102L, "CHILD", "VOICE_ANSWER", null, "강아지요");
+    given(
+            conversationHistoryMessageRepository.findRecentContextMessages(
+                org.mockito.ArgumentMatchers.eq(11L),
+                org.mockito.ArgumentMatchers.any(Pageable.class)))
+        .willReturn(List.of(newerAnswer, olderQuestion));
+    given(questionService.generateQuestion(any()))
+        .willReturn(new GeneratedQuestion(903L, "강아지는 어떤 색이니?", false, 3, List.of(), null));
+
+    service.generate(
+        3L, 11L, new NextQuestionRequest(700L, null, List.of(PreferredResponseMode.VOICE)));
+
+    ArgumentCaptor<GenerateQuestionCommand> commandCaptor =
+        ArgumentCaptor.forClass(GenerateQuestionCommand.class);
+    verify(questionService).generateQuestion(commandCaptor.capture());
+    assertThat(commandCaptor.getValue().recentMessages())
+        .containsExactly(
+            new RecentMessage(101L, "AI", "QUESTION", "무엇을 그렸니?"),
+            new RecentMessage(102L, "CHILD", "VOICE_ANSWER", "강아지요"));
+
+    ArgumentCaptor<Pageable> pageableCaptor = ArgumentCaptor.forClass(Pageable.class);
+    verify(conversationHistoryMessageRepository)
+        .findRecentContextMessages(org.mockito.ArgumentMatchers.eq(11L), pageableCaptor.capture());
+    assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(10);
+  }
+
+  @Test
+  void sendsEmptyContextWhenNoRecentMessagesAndKeepsDetectedObjectsEmpty() {
+    stubAuthorizedConversation(false, true, true);
+    stubChildContext();
+    given(
+            conversationHistoryMessageRepository.findRecentContextMessages(
+                org.mockito.ArgumentMatchers.eq(11L),
+                org.mockito.ArgumentMatchers.any(Pageable.class)))
+        .willReturn(List.of());
+    given(questionService.generateQuestion(any()))
+        .willReturn(new GeneratedQuestion(904L, "무엇을 그리고 있니?", false, 1, List.of(), null));
+
+    service.generate(
+        3L, 11L, new NextQuestionRequest(700L, null, List.of(PreferredResponseMode.VOICE)));
+
+    ArgumentCaptor<GenerateQuestionCommand> commandCaptor =
+        ArgumentCaptor.forClass(GenerateQuestionCommand.class);
+    verify(questionService).generateQuestion(commandCaptor.capture());
+    assertThat(commandCaptor.getValue().recentMessages()).isEmpty();
+    assertThat(commandCaptor.getValue().detectedObjects()).isEmpty();
   }
 
   @Test
@@ -234,6 +296,17 @@ class ConversationNextQuestionServiceTest {
   private void stubChildContext() {
     given(childRepository.findById(7L)).willReturn(Optional.of(child));
     given(child.ageOn(any(LocalDate.class))).willReturn(8);
+  }
+
+  private ConversationHistoryMessage historyMessage(
+      Long id, String senderType, String messageType, String rawText, String sttText) {
+    ConversationHistoryMessage message = org.mockito.Mockito.mock(ConversationHistoryMessage.class);
+    lenient().when(message.getId()).thenReturn(id);
+    lenient().when(message.getSenderType()).thenReturn(senderType);
+    lenient().when(message.getMessageType()).thenReturn(messageType);
+    lenient().when(message.getRawText()).thenReturn(rawText);
+    lenient().when(message.getSttText()).thenReturn(sttText);
+    return message;
   }
 
   private NextQuestionRequest request() {

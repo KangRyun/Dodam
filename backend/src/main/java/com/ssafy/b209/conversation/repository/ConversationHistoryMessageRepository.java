@@ -1,6 +1,7 @@
 package com.ssafy.b209.conversation.repository;
 
 import com.ssafy.b209.conversation.domain.ConversationHistoryMessage;
+import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -30,4 +31,23 @@ public interface ConversationHistoryMessageRepository
       @Param("conversationSessionId") Long conversationSessionId,
       @Param("afterSequence") Integer afterSequence,
       Pageable pageable);
+
+  /**
+   * 다음 AI 질문 요청에 실을 세션의 최근 질문·답변 메시지를 순번 내림차순으로 조회한다.
+   *
+   * <p>건너뛴 답변과 시스템 안내는 대화 문맥이 아니므로 제외하며, 실제 문맥 순서(순번 오름차순)로 재배열하는 책임은 호출자에게 둔다. 조회 건수는 {@code
+   * pageable}의 크기로 제한한다.
+   *
+   * @param conversationSessionId 대화 세션 식별자
+   * @param pageable 최근 순 정렬과 건수 제한을 담은 페이지 요청
+   * @return 순번 내림차순의 최근 질문·답변 메시지, 없으면 빈 목록
+   */
+  @Query(
+      "select message from ConversationHistoryMessage message "
+          + "where message.conversationSessionId = :conversationSessionId "
+          + "and message.messageType in ('QUESTION', 'VOICE_ANSWER', 'OPTION_ANSWER', 'TEXT_ANSWER') "
+          + "and message.skipped = false "
+          + "order by message.messageSequence desc")
+  List<ConversationHistoryMessage> findRecentContextMessages(
+      @Param("conversationSessionId") Long conversationSessionId, Pageable pageable);
 }
