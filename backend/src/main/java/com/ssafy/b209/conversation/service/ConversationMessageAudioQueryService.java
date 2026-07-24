@@ -19,8 +19,9 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 대화 음성 답변 원본을 프록시 스트리밍하기 위한 재생 자원을 조립하는 읽기 전용 서비스다.
  *
- * <p>메시지가 속한 대화 세션의 아동에 대한 연결 보호자 소유권을 먼저 검증한다. 읽기 경로이므로 음성 처리 동의 게이트는 적용하지 않고 소유권만 확인한다. 음성 답변이
- * 아니거나 원본 key가 없거나 저장소에서 원본을 열 수 없으면(삭제·유실 포함) 재생 자원 없음으로 판정한다. 내부 저장 key·절대 경로·발화 원문은 로그에 남기지 않는다.
+ * <p>메시지가 속한 대화 세션의 아동에 대한 연결 보호자 소유권을 먼저 검증한다. 읽기 경로이므로 음성 처리 동의 게이트는 적용하지 않고 소유권만 확인한다. 아동 음성 답변과
+ * AI 질문 TTS 음성을 모두 서빙하며, 두 유형이 아니거나 원본 key가 없거나 저장소에서 원본을 열 수 없으면(삭제·유실 포함) 재생 자원 없음으로 판정한다. 내부 저장
+ * key·절대 경로·발화 원문은 로그에 남기지 않는다.
  */
 @Service
 @Transactional(readOnly = true)
@@ -73,7 +74,9 @@ public class ConversationMessageAudioQueryService {
     authorize(guardianUserId, message.getConversationSessionId());
 
     String storageKey = message.getAudioStorageKey();
-    if (!message.isVoiceAnswer() || storageKey == null || storageKey.isBlank()) {
+    if ((!message.isVoiceAnswer() && !message.isQuestion())
+        || storageKey == null
+        || storageKey.isBlank()) {
       throw new BusinessException(
           ConversationMessageAudioErrorCode.CONVERSATION_AUDIO_NOT_AVAILABLE);
     }

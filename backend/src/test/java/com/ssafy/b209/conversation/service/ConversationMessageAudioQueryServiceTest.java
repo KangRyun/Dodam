@@ -141,6 +141,21 @@ class ConversationMessageAudioQueryServiceTest {
     assertThat(resource.audio().inputStream().readAllBytes()).isEqualTo(audioBytes);
   }
 
+  @Test
+  void streamsQuestionTtsAudioWhenPresent() throws Exception {
+    authorizeChild();
+    byte[] audioBytes = "mp3-bytes".getBytes(StandardCharsets.UTF_8);
+    when(messageRepository.findById(804L))
+        .thenReturn(Optional.of(voiceMessage("QUESTION", "2026/07/24/2f0b8f5e-tts.mp3")));
+    when(audioReader.open("2026/07/24/2f0b8f5e-tts.mp3"))
+        .thenReturn(new OpenedAudio(new ByteArrayInputStream(audioBytes), "audio.mp3"));
+
+    VoiceAnswerAudioResource resource = service.getPlayableAudio(10L, 804L);
+
+    assertThat(resource.contentType()).isEqualTo("audio/mpeg");
+    assertThat(resource.audio().inputStream().readAllBytes()).isEqualTo(audioBytes);
+  }
+
   private void authorizeChild() {
     when(conversationSessionRepository.findById(800L)).thenReturn(Optional.of(session()));
     when(drawingSessionRepository.findById(100L)).thenReturn(Optional.of(drawingSession(1L)));
