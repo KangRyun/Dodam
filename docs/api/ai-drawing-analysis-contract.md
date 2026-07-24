@@ -27,15 +27,28 @@
 
 좌표계 차이가 특히 중요하다. 픽셀 좌표는 이미 운영 중인 대화 질문 계약(0~1 정규화)과 호환되지 않아, 같은 서버가 같은 이름의 필드로 두 가지 좌표계를 내보내게 된다.
 
-### Health — 정본 §19.8과 미정합 (알려진 차이)
+### Health — 정본 §19.8 준수
 
-398에서 함께 만든 `GET /internal/v1/health`는 현재 다음을 반환한다.
+`GET /internal/v1/health`는 정본 §19.8 형태로 응답한다. 398에서는 축약형(`status: "ok"` + `objectDetectionReady`)이었으나 소비자가 생기기 전에 맞췄다(S15P11B209-400).
 
 ```json
-{ "status": "ok", "objectDetectionReady": false, "pipelineVersion": "0.1.0" }
+{
+  "status": "UP",
+  "models": {
+    "objectDetection": "READY",
+    "vision": "READY",
+    "language": "READY",
+    "stt": "READY",
+    "tts": "READY",
+    "rag": "NOT_READY"
+  },
+  "knowledgeBaseVersion": null,
+  "timestamp": "2026-07-24T04:30:00.000Z",
+  "pipelineVersion": "0.1.0"
+}
 ```
 
-정본 §19.8은 `status: "UP"`, 구성요소별 준비 상태(`models{objectDetection, vision, language, stt, tts, rag}`), `knowledgeBaseVersion`, `timestamp`를 요구한다. **아직 BE 소비자가 없어 언제든 바꿀 수 있으므로 정본 형태로 맞춘다.**
+판정 근거는 구성요소마다 다르다. `objectDetection`은 가중치 파일 존재 여부, `vision`·`language`·`stt`·`tts`는 GMS 키 설정 여부(원격 모델이라 실제 호출로 확인하면 조회마다 비용이 든다), `rag`는 지식베이스 버전 설정 여부다. 정본이 정의한 값은 `READY`뿐이라 미준비는 `NOT_READY`로 표기한다. `pipelineVersion`은 정본에 없는 확장 필드로, 재현·재분석 추적용이다.
 
 ### 외부 공개 API — 미정합, 팀 결정 대기
 
