@@ -108,6 +108,43 @@ class QuestionPersistenceServiceTest {
   }
 
   @Test
+  void rejectsSecondQuestionThatReusesTheSameParentAnswer() {
+    ConversationMessage answer = mock(ConversationMessage.class);
+    given(conversationMessageRepository.findByIdAndConversationSessionId(44L, 1L))
+        .willReturn(Optional.of(answer));
+    given(answer.isAnswerMessage()).willReturn(true);
+    given(conversationMessageRepository.existsQuestionByParentMessageId(1L, 44L)).willReturn(true);
+
+    assertBusinessError(
+        () -> service.save(1L, new QuestionCandidate("안전한 질문", null, null, null, false, 44L)),
+        ConversationErrorCode.QUESTION_STORAGE_CONFLICT);
+
+    verify(conversationMessageRepository, never())
+        .findMaxMessageSequenceByConversationSessionId(any());
+    verify(conversationMessageRepository, never()).saveAndFlush(any());
+    verify(session, never()).increaseQuestionCount();
+  }
+
+  @Test
+  void allowsFirstQuestionWithoutParentAnswerWithoutDuplicateCheck() {
+    given(conversationMessageRepository.findMaxMessageSequenceByConversationSessionId(1L))
+        .willReturn(0);
+    given(conversationMessageRepository.saveAndFlush(any()))
+        .willAnswer(
+            invocation -> {
+              ConversationMessage message = invocation.getArgument(0);
+              ReflectionTestUtils.setField(message, "id", 40L);
+              return message;
+            });
+
+    service.save(1L, new QuestionCandidate("안전한 질문", null, null, null, false, null));
+
+    verify(conversationMessageRepository, never()).existsQuestionByParentMessageId(any(), any());
+    verify(conversationMessageRepository).saveAndFlush(any());
+    verify(session).increaseQuestionCount();
+  }
+
+  @Test
   void rejectsNonAnswerParentWithoutSavingQuestion() {
     ConversationMessage question = mock(ConversationMessage.class);
     given(conversationMessageRepository.findByIdAndConversationSessionId(44L, 1L))
