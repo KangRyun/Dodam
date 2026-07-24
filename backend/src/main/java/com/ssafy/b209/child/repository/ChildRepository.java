@@ -64,9 +64,11 @@ public interface ChildRepository extends JpaRepository<Child, Long> {
   List<String> findResponseModesByChildId(@Param("childId") Long childId);
 
   /**
-   * 요청 보호자에게 연결된 활성 아동 목록을 등록 순서로 조회한다.
+   * 요청 보호자에게 연결된 활성 아동 목록을 최근 활동 요약과 함께 등록 순서로 조회한다.
    *
-   * <p>Soft Delete되었거나 비활성 상태인 아동은 제외하며 보호자 소유권 조건을 Query에서 함께 적용한다.
+   * <p>Soft Delete되었거나 비활성 상태인 아동은 제외하며 보호자 소유권 조건을 Query에서 함께 적용한다. 아동별 최근 활동 요약은 {@code
+   * drawing_sessions}를 {@code deleted_at is null} 조건으로 한 번만 LEFT JOIN해 집계하므로 아동 수만큼 추가 Query가 발생하지
+   * 않는다. 활동 이력이 없는 아동은 마지막 활동 시각이 {@code null}이고 누적 수가 {@code 0}이다.
    *
    * @param guardianUserId 목록을 조회할 보호자 사용자 식별자
    * @return 등록 순서가 적용된 아동 요약 목록, 없으면 빈 목록
@@ -78,15 +80,23 @@ public interface ChildRepository extends JpaRepository<Child, Long> {
                  c.nickname as nickname,
                  c.birth_date as birthDate,
                  c.profile_image_url as profileImageUrl,
+                 c.preferred_character as preferredCharacter,
                  c.question_difficulty as questionDifficulty,
                  c.tutorial_status as tutorialStatus,
                  c.profile_status as profileStatus,
-                 relation.relationship_type as relationshipType
+                 relation.relationship_type as relationshipType,
+                 max(ds.started_at) as lastActivityAt,
+                 count(ds.id) as totalActivityCount
             from children c
             join guardian_child_relations relation on relation.child_id = c.id
+            left join drawing_sessions ds
+              on ds.child_id = c.id and ds.deleted_at is null
            where relation.guardian_user_id = :guardianUserId
              and c.deleted_at is null
              and c.profile_status = 'ACTIVE'
+           group by c.id, c.nickname, c.birth_date, c.profile_image_url, c.preferred_character,
+                    c.question_difficulty, c.tutorial_status, c.profile_status,
+                    relation.relationship_type, c.created_at
            order by c.created_at, c.id
           """,
       nativeQuery = true)

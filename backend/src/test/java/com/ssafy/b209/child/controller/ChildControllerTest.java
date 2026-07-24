@@ -197,10 +197,13 @@ class ChildControllerTest {
                     LocalDate.of(2019, 3, 15),
                     7,
                     null,
+                    "MONGLE",
                     QuestionDifficulty.LOWER_ELEMENTARY,
                     ChildTutorialStatus.NOT_STARTED,
                     ChildProfileStatus.ACTIVE,
-                    "MOTHER")));
+                    "MOTHER",
+                    new ChildSummaryResponse.RecentActivity(
+                        Instant.parse("2026-07-20T08:15:00Z"), 12L))));
 
     mockMvc
         .perform(
@@ -212,7 +215,11 @@ class ChildControllerTest {
         .andExpect(jsonPath("$.data[0].childId").value(3))
         .andExpect(jsonPath("$.data[0].nickname").value("별이"))
         .andExpect(jsonPath("$.data[0].age").value(7))
-        .andExpect(jsonPath("$.data[0].relationshipType").value("MOTHER"));
+        .andExpect(jsonPath("$.data[0].preferredCharacter").value("MONGLE"))
+        .andExpect(jsonPath("$.data[0].relationshipType").value("MOTHER"))
+        .andExpect(
+            jsonPath("$.data[0].recentActivity.lastActivityAt").value("2026-07-20T08:15:00Z"))
+        .andExpect(jsonPath("$.data[0].recentActivity.totalActivityCount").value(12));
   }
 
   @Test

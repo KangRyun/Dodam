@@ -88,6 +88,45 @@ class ChildRepositoryTest {
   }
 
   @Test
+  void summarizesRecentActivityFromNonDeletedDrawingSessionsWithoutExtraQueries() {
+    jdbcTemplate.update(
+        "INSERT INTO children "
+            + "(id, nickname, birth_date, question_difficulty, tutorial_status, profile_status, "
+            + "created_at, updated_at) "
+            + "VALUES (4, ?, ?, ?, ?, ?, ?, ?)",
+        "달이",
+        Date.valueOf(LocalDate.of(2016, 1, 1)),
+        "UPPER_ELEMENTARY",
+        "NOT_STARTED",
+        "ACTIVE",
+        Timestamp.valueOf(LocalDateTime.of(2026, 7, 20, 2, 0, 0)),
+        Timestamp.valueOf(LocalDateTime.of(2026, 7, 20, 2, 0, 0)));
+    jdbcTemplate.update(
+        "INSERT INTO guardian_child_relations "
+            + "(id, guardian_user_id, child_id, relationship_type) VALUES (2, 10, 4, 'FATHER')");
+    jdbcTemplate.update(
+        "INSERT INTO drawing_types (id, code, name, activity_category, selectable_by, is_active) "
+            + "VALUES (101, 'AGG_TEST', '집계 테스트', 'GENERAL', 'GUARDIAN', TRUE)");
+    insertDrawingSession(201, 3, LocalDateTime.of(2026, 7, 18, 9, 0, 0), null);
+    insertDrawingSession(202, 3, LocalDateTime.of(2026, 7, 20, 8, 15, 0), null);
+    insertDrawingSession(203, 3, LocalDateTime.of(2026, 7, 21, 10, 0, 0), LocalDateTime.now());
+
+    var summaries = childRepository.findSummariesByGuardianUserId(10L);
+
+    assertThat(summaries).hasSize(2);
+    ChildSummaryProjection firstChild = summaries.get(0);
+    assertThat(firstChild.getChildId()).isEqualTo(3L);
+    assertThat(firstChild.getPreferredCharacter()).isEqualTo("MONGLE");
+    assertThat(firstChild.getTotalActivityCount()).isEqualTo(2L);
+    assertThat(firstChild.getLastActivityAt()).isEqualTo(LocalDateTime.of(2026, 7, 20, 8, 15, 0));
+
+    ChildSummaryProjection secondChild = summaries.get(1);
+    assertThat(secondChild.getChildId()).isEqualTo(4L);
+    assertThat(secondChild.getTotalActivityCount()).isZero();
+    assertThat(secondChild.getLastActivityAt()).isNull();
+  }
+
+  @Test
   void ordersResponseModesByDisplayOrderAndThenIdentifier() {
     jdbcTemplate.update(
         "INSERT INTO child_response_modes "
@@ -101,5 +140,17 @@ class ChildRepositoryTest {
 
     assertThat(childRepository.findResponseModesByChildId(3L))
         .containsExactly("VOICE", "EMOJI", "COLOR");
+  }
+
+  private void insertDrawingSession(
+      long id, long childId, LocalDateTime startedAt, LocalDateTime deletedAt) {
+    jdbcTemplate.update(
+        "INSERT INTO drawing_sessions "
+            + "(id, child_id, drawing_type_id, input_method, session_status, current_stage, "
+            + "started_at, deleted_at) VALUES (?, ?, 101, 'CANVAS', 'IN_PROGRESS', 'DRAWING', ?, ?)",
+        id,
+        childId,
+        Timestamp.valueOf(startedAt),
+        deletedAt == null ? null : Timestamp.valueOf(deletedAt));
   }
 }

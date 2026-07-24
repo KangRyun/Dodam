@@ -98,8 +98,17 @@ class ChildQueryServiceTest {
 
   @Test
   void returnsConnectedChildrenSummariesInRepositoryOrder() {
-    ChildSummaryProjection first = summaryProjection(3L, "별이", LocalDate.of(2019, 7, 23), "MOTHER");
-    ChildSummaryProjection second = summaryProjection(4L, "달이", LocalDate.of(2016, 1, 1), "FATHER");
+    ChildSummaryProjection first =
+        summaryProjection(
+            3L,
+            "별이",
+            LocalDate.of(2019, 7, 23),
+            "MOTHER",
+            "MONGLE",
+            LocalDateTime.of(2026, 7, 20, 8, 15, 0),
+            12L);
+    ChildSummaryProjection second =
+        summaryProjection(4L, "달이", LocalDate.of(2016, 1, 1), "FATHER", null, null, 0L);
     given(childRepository.findSummariesByGuardianUserId(GUARDIAN_USER_ID))
         .willReturn(List.of(first, second));
 
@@ -113,8 +122,15 @@ class ChildQueryServiceTest {
     assertThat(children.get(0).questionDifficulty()).isEqualTo(QuestionDifficulty.LOWER_ELEMENTARY);
     assertThat(children.get(0).tutorialStatus()).isEqualTo(ChildTutorialStatus.IN_PROGRESS);
     assertThat(children.get(0).profileStatus()).isEqualTo(ChildProfileStatus.ACTIVE);
+    assertThat(children.get(0).preferredCharacter()).isEqualTo("MONGLE");
+    assertThat(children.get(0).recentActivity().lastActivityAt())
+        .isEqualTo(Instant.parse("2026-07-20T08:15:00Z"));
+    assertThat(children.get(0).recentActivity().totalActivityCount()).isEqualTo(12L);
     assertThat(children.get(1).childId()).isEqualTo(4L);
     assertThat(children.get(1).age()).isEqualTo(10);
+    assertThat(children.get(1).preferredCharacter()).isNull();
+    assertThat(children.get(1).recentActivity().lastActivityAt()).isNull();
+    assertThat(children.get(1).recentActivity().totalActivityCount()).isZero();
   }
 
   @Test
@@ -125,16 +141,25 @@ class ChildQueryServiceTest {
   }
 
   private ChildSummaryProjection summaryProjection(
-      Long childId, String nickname, LocalDate birthDate, String relationshipType) {
+      Long childId,
+      String nickname,
+      LocalDate birthDate,
+      String relationshipType,
+      String preferredCharacter,
+      LocalDateTime lastActivityAt,
+      long totalActivityCount) {
     ChildSummaryProjection projection = mock(ChildSummaryProjection.class);
     given(projection.getChildId()).willReturn(childId);
     given(projection.getNickname()).willReturn(nickname);
     given(projection.getBirthDate()).willReturn(birthDate);
     given(projection.getProfileImageUrl()).willReturn(null);
+    given(projection.getPreferredCharacter()).willReturn(preferredCharacter);
     given(projection.getQuestionDifficulty()).willReturn("LOWER_ELEMENTARY");
     given(projection.getTutorialStatus()).willReturn("IN_PROGRESS");
     given(projection.getProfileStatus()).willReturn("ACTIVE");
     given(projection.getRelationshipType()).willReturn(relationshipType);
+    given(projection.getLastActivityAt()).willReturn(lastActivityAt);
+    given(projection.getTotalActivityCount()).willReturn(totalActivityCount);
     return projection;
   }
 
