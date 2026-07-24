@@ -258,7 +258,7 @@ public class ConversationMessageQueryService {
         message.getParentMessageId(),
         message.getMessageSequence(),
         message.getSenderType(),
-        toPublicMessageType(message.getMessageType()),
+        ConversationMessageTypeMapper.toPublicMessageType(message.getMessageType()),
         message.getRawText(),
         message.getSttText(),
         message.getSpeechStatus(),
@@ -285,21 +285,5 @@ public class ConversationMessageQueryService {
 
   private double toDouble(BigDecimal value) {
     return value == null ? 0d : value.doubleValue();
-  }
-
-  /**
-   * DB 저장 메시지 유형을 공개 API 값으로 변환한다.
-   *
-   * @param messageType DB {@code conversation_messages.message_type} 값
-   * @return 공개 계약 §4에 정의된 공개 메시지 유형
-   */
-  private String toPublicMessageType(String messageType) {
-    return switch (messageType) {
-      case "VOICE_ANSWER" -> "ANSWER_VOICE";
-      case "OPTION_ANSWER" -> "ANSWER_OPTION";
-      case "TEXT_ANSWER" -> "ANSWER_TEXT";
-      case "SYSTEM_NOTICE" -> "SYSTEM";
-      default -> messageType;
-    };
   }
 }
