@@ -362,7 +362,7 @@ class MvpFlowIntegrationTest {
                         """
                             .formatted(analysisId)))
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.conversationStatus").value("CONVERSING"))
+            .andExpect(jsonPath("$.data.status").value("CONVERSING"))
             .andReturn()
             .getResponse()
             .getContentAsString(StandardCharsets.UTF_8);
