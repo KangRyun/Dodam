@@ -41,7 +41,12 @@ YOLO_MODEL_PATH = os.environ.get(
 )
 
 # 탐지 신뢰도 하한 — 이보다 낮은 박스는 버린다(아동 스케치 과탐지 억제).
-YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.25"))
+#   0.20은 실측 근거값(S15P11B209-376): stageB_htp test 80장(집·나무·남자사람·여자사람 각 20장)에서
+#   임계값별 '주제 전체 박스' 검출률이 0.20에서 99%, 0.25에서 96%, 0.50에서 91%였다.
+#   0.15로 더 내려도 검출률은 99% 그대로인데 장당 부위 탐지만 1.7개 늘어 이득이 없다.
+#   과탐지의 주범이던 교차 주제 오탐(나무 그림의 PERSON_EYE 등)은 신뢰도가 아니라
+#   htp_labels.suppress_cross_subject_parts로 거른다 — 그래서 임계값을 검출률 쪽에 맞출 수 있다.
+YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.20"))
 
 # ── BE 내부 계약(183): 대화 질문 생성 ───────────────────────────
 # BE ↔ AI 내부 호출 인증 토큰. BE도 같은 이름(AI_INTERNAL_TOKEN)의 환경변수를 쓴다

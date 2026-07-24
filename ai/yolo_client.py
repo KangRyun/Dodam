@@ -117,16 +117,39 @@ def detect_and_annotate(
 
 if __name__ == "__main__":
     # 스모크 테스트:  cd ai && python yolo_client.py <이미지파일>
+    #   가중치·torch가 필요하다(저장소 미커밋 — models/model_download.ipynb 참고).
+    #   후처리(교차 주제 오탐 억제·그룹 집계)까지 함께 보여준다 — S15P11B209-376.
     import sys
+
+    import htp_labels
 
     logging.basicConfig(level=logging.INFO)
     if len(sys.argv) < 2:
         print("사용법: python yolo_client.py <이미지파일>")
         raise SystemExit(1)
-    dets, png = detect_and_annotate(sys.argv[1])
+
+    # 가중치의 클래스 집합이 htp_labels 표와 어긋나면 라벨이 전부 UNKNOWN으로 접힌다 —
+    # 추론 결과를 보기 전에 먼저 확인한다(재학습 후 표 갱신 누락을 여기서 잡는다).
+    model_names = _get_model().names
+    unmapped = htp_labels.verify_against_model_names(model_names.values())
+    print(f"클래스 {len(model_names)}종 · 매핑 누락: {unmapped or '없음'}")
+
+    raw, png = detect_and_annotate(sys.argv[1])
+    dets = htp_labels.suppress_cross_subject_parts(raw)
+    print(f"탐지 {len(raw)}건 → 후처리 후 {len(dets)}건 (conf ≥ {config.YOLO_CONF_THRESHOLD})")
     for d in dets:
         xyxy = tuple(round(v, 1) for v in d.bbox_xyxy)
-        print(f"- {d.label} ({d.confidence:.2f}) xyxy={xyxy}")
+        print(f"- {htp_labels.to_contract_label(d.label)} ({d.confidence:.2f}) xyxy={xyxy}")
+
+    summary = htp_labels.summarize(dets)
+    print(f"그린 주제: {summary.subjects_drawn or '판단 불가(전체 박스 없음)'}")
+    for group, group_summary in sorted(summary.groups.items()):
+        print(
+            f"  {group}: 전체={group_summary.whole_detected} "
+            f"부위={group_summary.part_labels} maxconf={group_summary.max_confidence:.2f}"
+        )
+
+    # 주석 이미지는 후처리 전 원본 결과 기준이다(plot()이 모델 출력에서 그려짐).
     out = Path("yolo_annotated.png")
     out.write_bytes(png)
     print(f"주석 이미지 저장: {out} ({len(png)} bytes)")
