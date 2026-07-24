@@ -96,5 +96,15 @@ final class GuardianChildController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// 로그아웃한 계정의 아동 정보가 다음 인증 세션에 남지 않도록 전체 상태를 초기화한다.
+  void clear() {
+    _status = ChildListStatus.idle;
+    _children = const [];
+    _selectedChild = null;
+    _registrationStatus = ChildRegistrationStatus.idle;
+    _registrationError = null;
+    notifyListeners();
+  }
+
   bool hasSelectedChild(int childId) => _selectedChild?.childId == childId;
 }

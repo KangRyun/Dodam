@@ -70,7 +70,9 @@ class _DodamAppState extends State<DodamApp> {
   void initState() {
     super.initState();
     _childController = GuardianChildController(widget.childRepository);
-    _childController.loadChildren();
+    if (widget.initialRoute != AppRoutes.authBootstrap) {
+      _childController.loadChildren();
+    }
 
     _authRepository =
         widget.authRepository ??
@@ -108,27 +110,45 @@ class _DodamAppState extends State<DodamApp> {
   }
 
   // Provider별 로그인 실행
-  Future<AuthState> _signIn(AuthProvider provider) => switch (provider) {
-    AuthProvider.kakao => _kakaoLoginCoordinator.signIn(),
-    AuthProvider.google => _googleLoginCoordinator.signIn(),
-    AuthProvider.naver => _naverLoginCoordinator.signIn(),
-  };
+  Future<AuthState> _signIn(AuthProvider provider) async {
+    final state = await switch (provider) {
+      AuthProvider.kakao => _kakaoLoginCoordinator.signIn(),
+      AuthProvider.google => _googleLoginCoordinator.signIn(),
+      AuthProvider.naver => _naverLoginCoordinator.signIn(),
+    };
+    await _loadGuardianChildren(state.session);
+    return state;
+  }
 
-  Future<AuthSession> _completeOnboarding(NewUserOnboardingInput input) =>
-      _authRepository.completeOnboarding(input);
+  Future<AuthSession> _completeOnboarding(NewUserOnboardingInput input) async {
+    final session = await _authRepository.completeOnboarding(input);
+    await _loadGuardianChildren(session);
+    return session;
+  }
 
   // 저장 세션 복원 및 만료된 Access Token 갱신
   Future<AuthSession?> _restoreSession() async {
     var session = await _authRepository.restoreSession();
     if (session == null) return null;
-    if (!session.tokens.isAccessTokenExpired()) return session;
-
-    final repository = _authRepository;
-    if (repository is! TokenRefresher) return null;
-    final refreshed = await (repository as TokenRefresher).refreshAccessToken();
-    if (!refreshed) return null;
-    session = await _authRepository.restoreSession();
+    if (session.tokens.isAccessTokenExpired()) {
+      final repository = _authRepository;
+      if (repository is! TokenRefresher) return null;
+      final refreshed = await (repository as TokenRefresher)
+          .refreshAccessToken();
+      if (!refreshed) return null;
+      session = await _authRepository.restoreSession();
+    }
+    await _loadGuardianChildren(session);
     return session;
+  }
+
+  Future<void> _loadGuardianChildren(AuthSession? session) async {
+    if (session == null ||
+        session.requiresOnboarding ||
+        session.user.role != UserRole.guardian) {
+      return;
+    }
+    await _childController.loadChildren();
   }
 
   // 인증 세션과 보호자 선택 상태 초기화
@@ -149,7 +169,7 @@ class _DodamAppState extends State<DodamApp> {
     } on Object {
       // 서비스 세션은 이미 제거했으므로 Provider 로그아웃 실패로 되돌리지 않는다.
     }
-    _childController.clearSelection();
+    _childController.clear();
   }
 
   @override
