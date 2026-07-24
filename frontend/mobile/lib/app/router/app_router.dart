@@ -5,6 +5,7 @@ import '../../features/activity/domain/repositories/activity_repository.dart';
 import '../../features/activity/presentation/screens/activity_screens.dart';
 import '../../features/auth/auth.dart';
 import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
+import '../../features/child/presentation/screens/child_registration_screen.dart';
 import '../../features/drawing/data/dto/drawing_dtos.dart';
 import '../../features/drawing/domain/repositories/drawing_repository.dart';
 import '../../features/conversation/conversation.dart';
@@ -65,6 +66,8 @@ abstract final class AppRouter {
       ),
       ['guardian', 'children', 'select'] when childController != null =>
         ChildSelectScreen(controller: childController),
+      ['guardian', 'children', 'register'] when childController != null =>
+        ChildRegistrationScreen(controller: childController),
       ['guardian', 'activities']
           when childController != null && activityRepository != null =>
         ActivityHistoryScreen(
@@ -124,6 +127,7 @@ abstract final class AppRouter {
       ['child', _, ...] => const ChildContextGuardScreen(),
       ['guardian', 'home'] => const ChildContextGuardScreen(),
       ['guardian', 'children', 'select'] => const ChildContextGuardScreen(),
+      ['guardian', 'children', 'register'] => const ChildContextGuardScreen(),
       _ => UnknownRouteScreen(location: location),
     };
 
