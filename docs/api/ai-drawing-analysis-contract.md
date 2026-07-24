@@ -1,9 +1,53 @@
 # AI 그림 분석 요청·응답 계약
 
 > Jira: `S15P11B209-144`
+> **정본: `docs/api/API_명세서_최종.md`** (S15P11B209-400)
 > 범위: Spring Boot와 AI 서버 사이의 그림 객체 탐지 JSON 계약
 
 이 문서는 Spring Boot와 AI 서버 사이의 값 구조 및 저장된 분석 상태를 조회하는 공개 API 계약을 정의한다.
+
+## ⚠️ 정본과의 관계
+
+이 문서는 **as-built 기록**이다. 계약의 정본은 `API_명세서_최종.md`이며, 아래 내용과 정본이 어긋나면 정본이 우선한다. 정본 §24.4에 따라 API 변경은 먼저 정본을 고친 뒤 FE·BE·AI가 함께 검토한다.
+
+### 내부 BE↔AI 계약 — 대체됨
+
+이 문서가 규정하던 `POST /internal/ai/v1/drawings/analysis`는 **AI 서버에 구현된 적이 없다.** 정본 §19를 따르는 `POST /internal/v1/analyses`가 이를 대신하며 구현·배포까지 완료됐다(S15P11B209-398). BE는 `AI_DRAWING_ANALYSIS_ENDPOINT_PATH`를 새 경로로 교체하고 응답 DTO를 §19.4 형태로 맞춰야 한다.
+
+주요 차이는 다음과 같다.
+
+| 항목 | 이 문서(구) | 정본 §19 (현행) |
+| --- | --- | --- |
+| 경로 | `/internal/ai/v1/drawings/analysis` | `/internal/v1/analyses` |
+| 분석 범위 | 객체 탐지만 | 객체·시각·행동·대화 종합 |
+| 좌표계 | 픽셀 | **0~1 정규화** (대화 질문 계약과 동일) |
+| 탐지 필드 | `detections[]{label, ...}` | `detectedObjects[]{objectCode, objectName, areaRatio, detectionOrder, ...}` |
+| 모델 정보 | `model{name, version}` | `modelInfo{objectDetection, vision, language, knowledgeBaseVersion}` |
+| 인증 헤더 | `X-Internal-Token` | `X-Internal-Api-Key` (전환 기간 동안 구 헤더도 함께 수용) |
+
+좌표계 차이가 특히 중요하다. 픽셀 좌표는 이미 운영 중인 대화 질문 계약(0~1 정규화)과 호환되지 않아, 같은 서버가 같은 이름의 필드로 두 가지 좌표계를 내보내게 된다.
+
+### Health — 정본 §19.8과 미정합 (알려진 차이)
+
+398에서 함께 만든 `GET /internal/v1/health`는 현재 다음을 반환한다.
+
+```json
+{ "status": "ok", "objectDetectionReady": false, "pipelineVersion": "0.1.0" }
+```
+
+정본 §19.8은 `status: "UP"`, 구성요소별 준비 상태(`models{objectDetection, vision, language, stt, tts, rag}`), `knowledgeBaseVersion`, `timestamp`를 요구한다. **아직 BE 소비자가 없어 언제든 바꿀 수 있으므로 정본 형태로 맞춘다.**
+
+### 외부 공개 API — 미정합, 팀 결정 대기
+
+아래 "공개 분석 상태 및 결과 조회"·"실패 분석 재시도"·"공개 분석 요청의 Asset 정책" 절은 **현재 구현을 기술한 것이며 정본 §11과 다르다.** 어느 쪽으로 통일할지는 팀 안건으로 남아 있다.
+
+- 동기 `201` 즉시 완료 ↔ 정본은 비동기 `202` 접수 + 폴링(§3.6·§11.2)
+- 조회 경로가 세션 하위 ↔ 정본은 `GET /analyses/{analysisId}`(§11.1)
+- `SUCCEEDED` ↔ 정본 Enum은 `SUCCESS`(§4)
+- 오류 코드 체계 `ANALYSIS_404_001` ↔ 정본은 의미 기반 코드명(§11.6)
+- 보호자 응답에 `confidence` 포함 ↔ 정본은 raw score 비노출(§2.4·§27-7)
+
+차이 전체와 이슈 분해는 노션 문서 「AI 분석 API 계약 불일치 — 정합화 안건 및 이슈 분해」에 정리돼 있다.
 
 ## 공개 분석 상태 및 결과 조회
 

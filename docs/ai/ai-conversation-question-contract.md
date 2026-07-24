@@ -1,8 +1,25 @@
 # AI 대화 질문 생성 내부 요청·응답 계약
 
 > Jira: `S15P11B209-148`
-> 상태: 최종 확정(2026-07-22)
+> **정본: `docs/api/API_명세서_최종.md`** (S15P11B209-400)
+> 상태: 운영 중 (as-built, 2026-07-22 확정) — 정본 §19.5와 차이 있음
 > 범위: Spring Boot와 FastAPI AI 서버 사이의 내부 질문 생성 계약
+
+## ⚠️ 정본과의 차이
+
+계약의 정본은 `API_명세서_최종.md`다. 이 문서는 **현재 운영 중인 as-built 계약**을 기술하며, 정본 §19.5와 아래가 다르다.
+
+| 항목 | 이 문서(운영 중) | 정본 §19.5 |
+| --- | --- | --- |
+| 경로 | `POST /internal/ai/v1/conversations/question` | `POST /internal/v1/conversations/next-question` |
+| 응답 구조 | 평면 — `questionText`, `questionPurpose`, `options`, `targetObject` | 중첩 — `question{text, purpose, options, targetObject}` |
+| 안전 결과 | `safetyResult{status, ruleVersion, blockReasonCode}` | `safety{passed, blockedReasons}` |
+| 모델 표기 | `modelName`, `modelVersion`, `promptVersion` | `modelVersion` |
+| 인증 헤더 | `X-Internal-Token` | `X-Internal-Api-Key` |
+
+**지금 이 차이를 정본 쪽으로 바꾸면 안 된다.** 배포된 BE(`RestClientAiQuestionClient`)가 경로를 하드코딩해 호출하고 있고, 응답이 `AiQuestionResponse.isContractValidFor` 검증에 실패하면 BE는 예외 없이 **폴백 템플릿으로 조용히 대체**한다. 즉 한쪽만 바꾸면 에러 없이 AI 질문 품질만 떨어진다.
+
+정합화는 BE·AI 동시 수정이 필요한 2단계 작업이며, 정본 §21이 허용한 방식(새 경로 추가 → BE 전환 확인 → 구 경로 제거)으로 진행한다. 인증 헤더는 이미 AI 서버가 두 헤더를 함께 수용하도록 바뀌어 있어(S15P11B209-398) BE가 자기 속도로 옮길 수 있다.
 
 이 문서는 계약만 정의한다. 구현, DB migration, FastAPI Mock 이행, 테스트와 배포는 각각 별도 작업으로 처리한다. AI 결과는 진단이 아닌 대화 보조 용도이며, 아동 발화 원문·운영 프롬프트·토큰·시크릿은 로그나 오류 응답에 포함하지 않는다.
 
