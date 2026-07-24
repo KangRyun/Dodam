@@ -283,6 +283,24 @@ public class DrawingAsset {
   }
 
   /**
+   * 저장 시 확인된 원본 이미지 너비를 반환한다.
+   *
+   * @return 픽셀 단위 너비이며 아직 수집되지 않았으면 {@code null}
+   */
+  public Integer getWidthPx() {
+    return widthPx;
+  }
+
+  /**
+   * 저장 시 확인된 원본 이미지 높이를 반환한다.
+   *
+   * @return 픽셀 단위 높이이며 아직 수집되지 않았으면 {@code null}
+   */
+  public Integer getHeightPx() {
+    return heightPx;
+  }
+
+  /**
    * 초안에 반영된 마지막 그림 이벤트 순서를 제공한다.
    *
    * @return 초안이 아니거나 이벤트 순서를 기록하지 않은 파일이면 {@code null}

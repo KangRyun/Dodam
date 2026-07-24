@@ -52,6 +52,21 @@ class DrawingAnalysisDomainTest {
   }
 
   @Test
+  void completesAsPartialSuccessWhenAiReportsUnusedInputs() {
+    DrawingAnalysis analysis = processingAnalysis();
+
+    analysis.complete(
+        DrawingAnalysisState.PARTIAL_SUCCESS,
+        "mock-drawing-detector",
+        "1.0",
+        List.of(),
+        PROCESSED_AT);
+
+    assertThat(analysis.getState()).isEqualTo(DrawingAnalysisState.PARTIAL_SUCCESS);
+    assertThat(analysis.getCompletedAt()).isEqualTo(PROCESSED_AT);
+  }
+
+  @Test
   void preservesSafeFailureInformation() {
     DrawingAnalysis analysis = processingAnalysis();
 

@@ -49,9 +49,9 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("9");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("10");
     assertThat(tableExists("flyway_schema_history")).isTrue();
-    assertThat(tableCount()).isEqualTo(62);
+    assertThat(tableCount()).isEqualTo(67);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
   }
@@ -267,12 +267,21 @@ class DatabaseMigrationIntegrationTest {
         .isTrue();
     assertThat(indexExists("analyses", "idx_analyses_asset_task_status", false)).isTrue();
     assertThat(indexExists("analyses", "uk_analyses_active_asset_task", true)).isTrue();
-    assertThat(decimalColumnHasPrecision("analysis_detected_objects", "bbox_x", 12, 3)).isTrue();
-    assertThat(decimalColumnHasPrecision("analysis_detected_objects", "bbox_height", 12, 3))
+    assertThat(decimalColumnHasPrecision("analysis_detected_objects", "bbox_x", 12, 6)).isTrue();
+    assertThat(decimalColumnHasPrecision("analysis_detected_objects", "bbox_height", 12, 6))
         .isTrue();
+    assertThat(columnExists("analysis_detected_objects", "coordinate_space")).isTrue();
+    assertThat(columnExists("analysis_visual_features", "image_width_px")).isTrue();
+    assertThat(columnExists("analysis_visual_features", "image_height_px")).isTrue();
+    assertThat(columnExists("analysis_behavior_features", "pressure_available")).isTrue();
+    assertThat(columnExists("analysis_behavior_features", "maximum_pressure")).isTrue();
     assertThat(
             checkConstraintContains(
-                "analysis_detected_objects", "ck_analysis_detected_objects_bbox", "bbox_width"))
+                "analysis_detected_objects",
+                "ck_analysis_detected_objects_bbox_coordinate",
+                "coordinate_space"))
+        .isTrue();
+    assertThat(generatedColumnContains("analyses", "active_drawing_asset_id", "PARTIAL_SUCCESS"))
         .isTrue();
   }
 

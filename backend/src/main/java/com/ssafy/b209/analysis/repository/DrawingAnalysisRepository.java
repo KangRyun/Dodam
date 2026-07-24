@@ -97,7 +97,8 @@ public interface DrawingAnalysisRepository extends JpaRepository<DrawingAnalysis
       "select (count(a) > 0) from DrawingAnalysis a "
           + "where a.drawingAsset.id = :drawingAssetId and a.taskType = :taskType "
           + "and a.state in (com.ssafy.b209.analysis.domain.DrawingAnalysisState.PROCESSING, "
-          + "com.ssafy.b209.analysis.domain.DrawingAnalysisState.SUCCESS)")
+          + "com.ssafy.b209.analysis.domain.DrawingAnalysisState.SUCCESS, "
+          + "com.ssafy.b209.analysis.domain.DrawingAnalysisState.PARTIAL_SUCCESS)")
   boolean existsActiveByAssetAndTaskType(
       @Param("drawingAssetId") Long drawingAssetId,
       @Param("taskType") DrawingAnalysisType taskType);

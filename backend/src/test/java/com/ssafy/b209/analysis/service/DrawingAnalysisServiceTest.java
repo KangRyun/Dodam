@@ -10,15 +10,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
-import com.ssafy.b209.analysis.dto.BoundingBoxResponse;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisResponse;
-import com.ssafy.b209.analysis.dto.DrawingAnalysisModelResponse;
-import com.ssafy.b209.analysis.dto.DrawingAnalysisResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisRetryReason;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
-import com.ssafy.b209.analysis.dto.DrawingDetectionResponse;
 import com.ssafy.b209.analysis.dto.RetryDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
@@ -98,10 +94,8 @@ class DrawingAnalysisServiceTest {
   @Test
   void requestsAnalysisAndReturnsStoredSuccessResult() {
     givenStartedAnalysis();
-    given(drawingAnalysisClient.analyze(any())).willReturn(successResponse(REQUEST_ID.toString()));
-    given(
-            persistenceService.complete(
-                eq(ANALYSIS_ID), eq("mock-drawing-detector"), eq("1.0"), any(), any()))
+    given(drawingAnalysisClient.analyze(any())).willReturn(successResponse(ANALYSIS_ID));
+    given(persistenceService.completeCanonical(eq(ANALYSIS_ID), any(), any()))
         .willReturn(org.mockito.Mockito.mock(DrawingAnalysis.class));
 
     CreateDrawingAnalysisResponse response =
@@ -117,30 +111,23 @@ class DrawingAnalysisServiceTest {
     assertThat(response.model().name()).isEqualTo("mock-drawing-detector");
     assertThat(response.detections()).hasSize(1);
     assertThat(response.requestedAt()).isEqualTo(REQUESTED_AT);
-    assertThat(response.processedAt()).isEqualTo(PROCESSED_AT);
+    assertThat(response.processedAt()).isEqualTo(REQUESTED_AT);
 
-    ArgumentCaptor<com.ssafy.b209.analysis.dto.DrawingAnalysisRequest> requestCaptor =
-        ArgumentCaptor.forClass(com.ssafy.b209.analysis.dto.DrawingAnalysisRequest.class);
+    ArgumentCaptor<com.ssafy.b209.analysis.dto.DrawingAnalysisClientCommand> requestCaptor =
+        ArgumentCaptor.forClass(com.ssafy.b209.analysis.dto.DrawingAnalysisClientCommand.class);
     verify(drawingAnalysisClient).analyze(requestCaptor.capture());
     assertThat(requestCaptor.getValue().requestId()).isEqualTo(REQUEST_ID.toString());
-    assertThat(requestCaptor.getValue().imageReference().storageKey())
-        .isEqualTo("drawing/final.png");
-    assertThat(requestCaptor.getValue().imageReference().contentType()).isEqualTo("image/png");
+    assertThat(requestCaptor.getValue().analysisId()).isEqualTo(ANALYSIS_ID);
+    assertThat(requestCaptor.getValue().storageKey()).isEqualTo("drawing/final.png");
+    assertThat(requestCaptor.getValue().mimeType()).isEqualTo("image/png");
   }
 
   @Test
   void acceptsSuccessfulResponseWithEmptyDetections() {
     givenStartedAnalysis();
-    DrawingAnalysisResponse response =
-        new DrawingAnalysisResponse(
-            REQUEST_ID.toString(),
-            DrawingAnalysisStatus.SUCCEEDED,
-            new DrawingAnalysisModelResponse("mock-drawing-detector", "1.0"),
-            List.of(),
-            null,
-            PROCESSED_AT);
+    var response = successResponse(ANALYSIS_ID, List.of());
     given(drawingAnalysisClient.analyze(any())).willReturn(response);
-    given(persistenceService.complete(eq(ANALYSIS_ID), any(), any(), eq(List.of()), any()))
+    given(persistenceService.completeCanonical(eq(ANALYSIS_ID), any(), any()))
         .willReturn(org.mockito.Mockito.mock(DrawingAnalysis.class));
 
     CreateDrawingAnalysisResponse result =
@@ -173,10 +160,9 @@ class DrawingAnalysisServiceTest {
   }
 
   @Test
-  void recordsInvalidResponseWhenRequestIdDoesNotMatch() {
+  void recordsInvalidResponseWhenAnalysisIdDoesNotMatch() {
     givenStartedAnalysis();
-    given(drawingAnalysisClient.analyze(any()))
-        .willReturn(successResponse("11111111-1111-4111-8111-111111111111"));
+    given(drawingAnalysisClient.analyze(any())).willReturn(successResponse(11111111L));
 
     assertError(
         () ->
@@ -196,8 +182,8 @@ class DrawingAnalysisServiceTest {
   @Test
   void recordsFailureWhenResultSaveFails() {
     givenStartedAnalysis();
-    given(drawingAnalysisClient.analyze(any())).willReturn(successResponse(REQUEST_ID.toString()));
-    given(persistenceService.complete(eq(ANALYSIS_ID), any(), any(), any(), any()))
+    given(drawingAnalysisClient.analyze(any())).willReturn(successResponse(ANALYSIS_ID));
+    given(persistenceService.completeCanonical(eq(ANALYSIS_ID), any(), any()))
         .willThrow(new DataAccessResourceFailureException("db unavailable"));
 
     assertError(
@@ -232,11 +218,15 @@ class DrawingAnalysisServiceTest {
                 SESSION_ID,
                 ASSET_ID,
                 REQUEST_ID.toString(),
+                com.ssafy.b209.analysis.domain.DrawingAnalysisScope.FINAL,
                 "drawing/final.png",
                 "image/png",
+                null,
+                null,
+                null,
                 LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC)));
-    given(drawingAnalysisClient.analyze(any())).willReturn(successResponse(REQUEST_ID.toString()));
-    given(persistenceService.complete(eq(31L), any(), any(), any(), any()))
+    given(drawingAnalysisClient.analyze(any())).willReturn(successResponse(31L));
+    given(persistenceService.completeCanonical(eq(31L), any(), any()))
         .willReturn(org.mockito.Mockito.mock(DrawingAnalysis.class));
 
     CreateDrawingAnalysisResponse response =
@@ -264,27 +254,59 @@ class DrawingAnalysisServiceTest {
                 SESSION_ID,
                 ASSET_ID,
                 REQUEST_ID.toString(),
+                com.ssafy.b209.analysis.domain.DrawingAnalysisScope.FINAL,
                 "drawing/final.png",
                 "image/png",
+                null,
+                null,
+                null,
                 LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC)));
   }
 
-  private DrawingAnalysisResponse successResponse(String requestId) {
-    return new DrawingAnalysisResponse(
-        requestId,
-        DrawingAnalysisStatus.SUCCEEDED,
-        new DrawingAnalysisModelResponse("mock-drawing-detector", "1.0"),
-        List.of(
-            new DrawingDetectionResponse(
-                "HOUSE",
-                new BigDecimal("0.95"),
-                new BoundingBoxResponse(
-                    new BigDecimal("120"),
-                    new BigDecimal("80"),
-                    new BigDecimal("640"),
-                    new BigDecimal("520")))),
+  private com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse
+      successResponse(Long analysisId) {
+    var detection =
+        new com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse
+            .DetectedObject(
+            "HOUSE",
+            "집",
+            new BigDecimal("0.95"),
+            new com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse
+                .BoundingBox(
+                new BigDecimal("0.1"),
+                new BigDecimal("0.1"),
+                new BigDecimal("0.4"),
+                new BigDecimal("0.5")),
+            new BigDecimal("0.2"),
+            0);
+    return successResponse(analysisId, List.of(detection));
+  }
+
+  private com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse
+      successResponse(
+          Long analysisId,
+          List<
+                  com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse
+                      .DetectedObject>
+              detections) {
+    var model =
+        new com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse.ModelRef(
+            "mock-drawing-detector", "1.0");
+    return new com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse(
+        analysisId,
+        com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse.AnalysisStatus
+            .SUCCESS,
+        new com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse.ModelInfo(
+            model, null, null, null),
+        detections,
+        java.util.Map.of(),
+        java.util.Map.of(),
         null,
-        PROCESSED_AT);
+        null,
+        List.of(),
+        List.of(),
+        List.of(),
+        10L);
   }
 
   private void assertError(Runnable invocation, DrawingAnalysisErrorCode expected) {

@@ -32,7 +32,7 @@ class DrawingAnalysisClientPropertiesTest {
               context.getBean(DrawingAnalysisClientProperties.class);
           assertThat(properties.mode()).isEqualTo("mock");
           assertThat(properties.baseUrl().toString()).isEqualTo("http://localhost:8000");
-          assertThat(properties.endpointPath()).isEqualTo("/internal/ai/v1/drawings/analysis");
+          assertThat(properties.endpointPath()).isEqualTo("/internal/v1/analyses");
           assertThat(properties.connectTimeout()).isEqualTo(Duration.ofSeconds(3));
           assertThat(properties.readTimeout()).isEqualTo(Duration.ofSeconds(30));
         });
