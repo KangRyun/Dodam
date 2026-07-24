@@ -42,6 +42,23 @@ void main() {
     controller.dispose();
   });
 
+  test('로그아웃하면 아동 목록과 선택 및 등록 상태를 모두 초기화한다', () async {
+    final controller = GuardianChildController(
+      _FakeChildRepository(children: _children),
+    );
+    await controller.loadChildren();
+    controller.selectChild(_children.first);
+
+    controller.clear();
+
+    expect(controller.status, ChildListStatus.idle);
+    expect(controller.children, isEmpty);
+    expect(controller.selectedChild, isNull);
+    expect(controller.registrationStatus, ChildRegistrationStatus.idle);
+    expect(controller.registrationError, isNull);
+    controller.dispose();
+  });
+
   testWidgets('Child 목록 Loading 상태를 표시한다', (tester) async {
     final completer = Completer<List<ChildSummaryDto>>();
     final repository = _FakeChildRepository(pending: completer);
