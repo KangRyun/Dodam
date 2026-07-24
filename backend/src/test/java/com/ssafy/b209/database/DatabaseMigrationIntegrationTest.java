@@ -49,11 +49,19 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("11");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("12");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(67);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
+    assertThat(
+            jdbcTemplate.queryForList(
+                "SELECT code FROM drawing_types "
+                    + "WHERE code IN ('ART_DIARY', 'FREE_DRAWING', "
+                    + "'EMOTION_COLORING', 'WEATHER_MIND') "
+                    + "ORDER BY display_order",
+                String.class))
+        .containsExactly("ART_DIARY", "FREE_DRAWING", "EMOTION_COLORING", "WEATHER_MIND");
   }
 
   @Test

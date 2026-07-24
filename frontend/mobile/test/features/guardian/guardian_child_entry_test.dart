@@ -402,8 +402,9 @@ final class _TrackingDrawingRepository implements DrawingRepository {
 
   @override
   Future<ApiPage<DrawingTypeDto>> getDrawingTypes({
-    int? childId,
-    String? ageGroup,
+    required int childId,
+    String? category,
+    bool activeOnly = true,
   }) async {
     getTypesChildId = childId;
     return const ApiPage(

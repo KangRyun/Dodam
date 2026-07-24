@@ -35,11 +35,12 @@ final class DrawingTypeDto {
     selectableBy: json['selectableBy'] as String,
     recommendedAgeMin: json['recommendedAgeMin'] as int?,
     recommendedAgeMax: json['recommendedAgeMax'] as int?,
-    guideText: json['guideText'] as String,
+    guideText: json['guideText'] as String?,
     displayOrder: json['displayOrder'] as int,
   );
   final int drawingTypeId;
-  final String code, name, activityCategory, selectableBy, guideText;
+  final String code, name, activityCategory, selectableBy;
+  final String? guideText;
   final int? recommendedAgeMin, recommendedAgeMax;
   final int displayOrder;
 }

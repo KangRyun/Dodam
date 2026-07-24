@@ -228,7 +228,7 @@ void main() {
     const ActivityRepository activity = MockActivityRepository();
     const ReportRepository report = MockReportRepository();
     expect(await child.getChildren(), isNotEmpty);
-    expect((await drawing.getDrawingTypes()).content, isNotEmpty);
+    expect((await drawing.getDrawingTypes(childId: 3)).content, isNotEmpty);
     expect((await activity.getActivities(3)).content, isNotEmpty);
     expect((await report.getReports(3)).content, isNotEmpty);
   });

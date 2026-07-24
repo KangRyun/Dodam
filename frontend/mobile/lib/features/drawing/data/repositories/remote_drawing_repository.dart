@@ -36,14 +36,22 @@ final class RemoteDrawingRepository implements DrawingRepository {
 
   @override
   Future<ApiPage<DrawingTypeDto>> getDrawingTypes({
-    int? childId,
-    String? ageGroup,
+    required int childId,
+    String? category,
+    bool activeOnly = true,
   }) async {
     final response = await _apiClient.get<Map<String, dynamic>>(
       'drawing-types',
-      queryParameters: {'childId': ?childId, 'ageGroup': ?ageGroup},
+      queryParameters: {
+        'childId': childId,
+        'category': ?category,
+        'activeOnly': activeOnly,
+      },
     );
-    return ApiPage.fromJson(response.data!, DrawingTypeDto.fromJson);
+    return ApiPage.fromJson(
+      envelopeObject(response.data),
+      DrawingTypeDto.fromJson,
+    );
   }
 
   @override
@@ -54,7 +62,7 @@ final class RemoteDrawingRepository implements DrawingRepository {
       'drawing-sessions',
       data: request.toJson(),
     );
-    return DrawingSessionDto.fromJson(response.data!);
+    return DrawingSessionDto.fromJson(envelopeObject(response.data));
   }
 
   @override

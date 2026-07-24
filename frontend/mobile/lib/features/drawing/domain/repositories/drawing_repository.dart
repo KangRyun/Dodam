@@ -5,8 +5,9 @@ abstract interface class DrawingRepository {
   // TODO(API): Add emotion/final-completion orchestration only after the
   // /emotions versus /analysis state-transition contract is resolved.
   Future<ApiPage<DrawingTypeDto>> getDrawingTypes({
-    int? childId,
-    String? ageGroup,
+    required int childId,
+    String? category,
+    bool activeOnly = true,
   });
   Future<DrawingSessionDto> createSession(
     CreateDrawingSessionRequestDto request,
