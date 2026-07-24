@@ -19,45 +19,30 @@ import com.ssafy.b209.auth.service.RefreshTokenRotationResult;
 import com.ssafy.b209.auth.service.RefreshTokenSessionStore;
 import com.ssafy.b209.auth.service.VerifiedOAuthIdentity;
 import com.ssafy.b209.auth.token.RefreshTokenHasher;
+import com.ssafy.b209.support.IntegrationTestSupport;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
-@Testcontainers
-@SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("integration-test")
 @TestPropertySource(
     properties = {
       "app.auth.jwt.secret=0123456789abcdef0123456789abcdef",
       "app.auth.filter.legacy-header-enabled=false"
     })
-class OAuthAuthenticationFlowIntegrationTest {
+class OAuthAuthenticationFlowIntegrationTest extends IntegrationTestSupport {
 
   private static final String DEVICE_ID = "integration-device-001";
   private static final String PROVIDER_SUBJECT = "kakao-integration-user";
-
-  @Container @ServiceConnection
-  static final MySQLContainer<?> MYSQL_CONTAINER =
-      new MySQLContainer<>("mysql:8.4.10")
-          .withDatabaseName("dodam")
-          .withUsername("test")
-          .withPassword("test");
 
   @Autowired private MockMvc mockMvc;
   @Autowired private ObjectMapper objectMapper;
@@ -68,8 +53,6 @@ class OAuthAuthenticationFlowIntegrationTest {
 
   @BeforeEach
   void setUp() {
-    jdbcTemplate.update("DELETE FROM auth_accounts");
-    jdbcTemplate.update("DELETE FROM users");
     when(providerClient.verify(eq(AuthProvider.KAKAO), any()))
         .thenReturn(new VerifiedOAuthIdentity(AuthProvider.KAKAO, PROVIDER_SUBJECT, null));
   }

@@ -10,41 +10,26 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.ssafy.b209.auth.token.AuthenticatedUser;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClient;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClientException;
+import com.ssafy.b209.support.IntegrationTestSupport;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
 /** MySQL에서 그림 활동 완료 접수의 분석·리포트·세션 전환과 DB 멱등성을 함께 검증한다. */
-@Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("integration-test")
-class DrawingCompletionIntegrationTest {
+class DrawingCompletionIntegrationTest extends IntegrationTestSupport {
 
   private static final long GUARDIAN_ID = 41L;
   private static final long SESSION_ID = 1430L;
-
-  @Container @ServiceConnection
-  static final MySQLContainer<?> MYSQL_CONTAINER =
-      new MySQLContainer<>("mysql:8.4.10")
-          .withDatabaseName("dodam_completion")
-          .withUsername("test")
-          .withPassword("test");
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbcTemplate;
@@ -56,16 +41,6 @@ class DrawingCompletionIntegrationTest {
         .setAuthentication(
             UsernamePasswordAuthenticationToken.authenticated(
                 new AuthenticatedUser(GUARDIAN_ID), null, List.of()));
-    jdbcTemplate.update("DELETE FROM reports");
-    jdbcTemplate.update("DELETE FROM analyses");
-    jdbcTemplate.update("DELETE FROM conversation_sessions");
-    jdbcTemplate.update("DELETE FROM drawing_assets");
-    jdbcTemplate.update("DELETE FROM drawing_session_emotions");
-    jdbcTemplate.update("DELETE FROM drawing_sessions");
-    jdbcTemplate.update("DELETE FROM guardian_child_relations");
-    jdbcTemplate.update("DELETE FROM drawing_types");
-    jdbcTemplate.update("DELETE FROM children");
-    jdbcTemplate.update("DELETE FROM users");
     jdbcTemplate.update(
         "INSERT INTO users (id, role, nickname, account_status) "
             + "VALUES (?, 'GUARDIAN', 'completion-guardian', 'ACTIVE')",

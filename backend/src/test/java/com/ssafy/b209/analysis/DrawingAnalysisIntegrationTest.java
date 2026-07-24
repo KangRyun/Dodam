@@ -20,6 +20,7 @@ import com.ssafy.b209.analysis.dto.DrawingDetectionResponse;
 import com.ssafy.b209.auth.token.AuthenticatedUser;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClient;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClientException;
+import com.ssafy.b209.support.IntegrationTestSupport;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
@@ -28,33 +29,17 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
-@Testcontainers
-@SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("integration-test")
-class DrawingAnalysisIntegrationTest {
+class DrawingAnalysisIntegrationTest extends IntegrationTestSupport {
 
   private static final Long GUARDIAN_USER_ID = 41L;
-
-  @Container @ServiceConnection
-  static final MySQLContainer<?> MYSQL_CONTAINER =
-      new MySQLContainer<>("mysql:8.4.10")
-          .withDatabaseName("dodam_analysis")
-          .withUsername("test")
-          .withPassword("test");
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbcTemplate;
@@ -66,14 +51,6 @@ class DrawingAnalysisIntegrationTest {
         .setAuthentication(
             UsernamePasswordAuthenticationToken.authenticated(
                 new AuthenticatedUser(GUARDIAN_USER_ID), null, List.of()));
-    jdbcTemplate.update("DELETE FROM analysis_detected_objects");
-    jdbcTemplate.update("DELETE FROM analyses");
-    jdbcTemplate.update("DELETE FROM drawing_assets");
-    jdbcTemplate.update("DELETE FROM drawing_sessions");
-    jdbcTemplate.update("DELETE FROM guardian_child_relations");
-    jdbcTemplate.update("DELETE FROM drawing_types");
-    jdbcTemplate.update("DELETE FROM children");
-    jdbcTemplate.update("DELETE FROM users");
     jdbcTemplate.update(
         "INSERT INTO users (id, role, nickname, account_status) "
             + "VALUES (?, 'GUARDIAN', 'analysis-guardian', 'ACTIVE')",
