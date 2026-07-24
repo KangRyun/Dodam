@@ -93,4 +93,65 @@ void main() {
     expect(iosReleaseConfig, contains('#include "OAuth.xcconfig"'));
     expect(iosReleaseConfig, isNot(contains('#include? "OAuth.xcconfig"')));
   });
+
+  test('네이버 Android SDK는 Custom Tab callback 호환 버전을 사용한다', () {
+    final androidGradle = File(
+      'android/app/build.gradle.kts',
+    ).readAsStringSync();
+
+    expect(
+      androidGradle,
+      contains('implementation("com.navercorp.nid:oauth:5.11.2")'),
+    );
+  });
+
+  test('네이버 OAuth Activity는 앱 전용 task affinity를 공유한다', () {
+    final manifest = File(
+      'android/app/src/main/AndroidManifest.xml',
+    ).readAsStringSync();
+
+    expect(
+      manifest,
+      contains(
+        'android:name="com.navercorp.nid.oauth.activity.NidOAuthBridgeActivity"',
+      ),
+    );
+    expect(
+      manifest,
+      contains(
+        'android:name="com.navercorp.nid.oauth.activity.NidOAuthCustomTabActivity"',
+      ),
+    );
+    expect(
+      RegExp(
+        r'android:taskAffinity="\$\{applicationId\}"',
+      ).allMatches(manifest).length,
+      3,
+    );
+  });
+
+  test('Android Naver bridge는 초기화 완료와 lifecycle을 관리한다', () {
+    final mainActivity = File(
+      'android/app/src/main/kotlin/com/dodam/app/MainActivity.kt',
+    ).readAsStringSync();
+
+    expect(mainActivity, contains('NidOAuthInitializingCallback'));
+    expect(mainActivity, contains('pendingLoginResult?.let'));
+    expect(mainActivity, contains('cleanUpFlutterEngine'));
+    expect(mainActivity, contains('NidOAuth.oauthLoginCallback = null'));
+    expect(mainActivity, contains('NidOAuth.disconnect('));
+  });
+
+  test('Android 호환 Naver Plugin은 SDK를 중복 초기화하거나 설정값을 기록하지 않는다', () {
+    final pubspec = File('pubspec.yaml').readAsStringSync();
+    final pluginSource = File(
+      'packages/flutter_naver_login/android/src/main/kotlin/'
+      'com/example/flutter_naver_login/FlutterNaverLoginPlugin.kt',
+    ).readAsStringSync();
+
+    expect(pubspec, contains('path: packages/flutter_naver_login'));
+    expect(pluginSource, isNot(contains('showDevelopersLog')));
+    expect(pluginSource, isNot(contains('clientSecret')));
+    expect(pluginSource, isNot(contains('MethodChannel')));
+  });
 }

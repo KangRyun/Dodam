@@ -143,9 +143,28 @@ final class GoogleProviderSdkGateway implements ProviderSdkGateway {
 
 /// Naver Login SDK에서 Naver Access Token을 발급받는다.
 final class NaverProviderSdkGateway implements ProviderSdkGateway {
+  factory NaverProviderSdkGateway({
+    MethodChannel androidChannel = const MethodChannel(
+      'com.dodam.app/naver_oauth',
+    ),
+    bool? useAndroidBridge,
+  }) => NaverProviderSdkGateway._(
+    androidChannel,
+    useAndroidBridge ??
+        (!kIsWeb && defaultTargetPlatform == TargetPlatform.android),
+  );
+
+  NaverProviderSdkGateway._(this._androidChannel, this._useAndroidBridge);
+
+  final MethodChannel _androidChannel;
+  final bool _useAndroidBridge;
+
   @override
   Future<String?> signIn() async {
     try {
+      if (_useAndroidBridge) {
+        return _androidChannel.invokeMethod<String>('login');
+      }
       final result = await FlutterNaverLogin.logIn();
       return switch (result.status) {
         NaverLoginStatus.loggedIn => result.accessToken?.accessToken,
@@ -174,6 +193,10 @@ final class NaverProviderSdkGateway implements ProviderSdkGateway {
   @override
   Future<void> signOut() async {
     try {
+      if (_useAndroidBridge) {
+        await _androidChannel.invokeMethod<void>('logout');
+        return;
+      }
       await FlutterNaverLogin.logOutAndDeleteToken();
     } on Object catch (error) {
       throw ProviderSdkFailure(ProviderSdkFailureType.rejected, cause: error);

@@ -10,7 +10,7 @@
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
-            android:taskAffinity=""
+            android:taskAffinity="${applicationId}"
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
@@ -40,14 +40,21 @@
                     android:scheme="${kakaoScheme}" />
             </intent-filter>
         </activity>
+        <!-- OAuth callback이 MainActivity와 같은 Task로 복귀하도록 affinity를 맞춘다. -->
+        <activity
+            android:name="com.navercorp.nid.oauth.activity.NidOAuthBridgeActivity"
+            android:taskAffinity="${applicationId}" />
+        <activity
+            android:name="com.navercorp.nid.oauth.activity.NidOAuthCustomTabActivity"
+            android:taskAffinity="${applicationId}" />
         <meta-data
-            android:name="com.naver.sdk.clientId"
+            android:name="com.dodam.naver.clientId"
             android:value="${naverClientId}" />
         <meta-data
-            android:name="com.naver.sdk.clientSecret"
+            android:name="com.dodam.naver.clientSecret"
             android:value="${naverClientSecret}" />
         <meta-data
-            android:name="com.naver.sdk.clientName"
+            android:name="com.dodam.naver.clientName"
             android:value="${naverClientName}" />
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
