@@ -262,6 +262,8 @@ public interface DrawingAnalysisClient {
 | `AI_INTERNAL_TOKEN` | 없음 | HTTP mode 내부 인증 Token. Secret 저장소에서 주입 |
 | `AI_DRAWING_ANALYSIS_CONNECT_TIMEOUT` | `3s` | 연결 제한 시간 |
 | `AI_DRAWING_ANALYSIS_READ_TIMEOUT` | `30s` | 응답 대기 제한 시간 |
+| `AI_IMAGE_ACCESS_BASE_URL` | `http://backend:8080` | AI 서버에서 Backend로 접근할 Docker 내부 Base URL |
+| `AI_IMAGE_ACCESS_TOKEN_TTL` | `60s` | 이미지 조회 일회성 Token 유효 시간. 최대 5분 |
 
 Base URL은 Query와 Fragment가 없는 HTTP 또는 HTTPS 절대 URI여야 한다. Endpoint Path는 `/` 하나로 시작해야 하며 Timeout은 0보다 커야 한다. Client Bean 생성 시 AI 서버 연결을 시도하지 않으므로 서버가 꺼져 있어도 Application Context를 시작할 수 있다.
 
@@ -279,13 +281,17 @@ HTTP 2xx의 유효한 `status=FAILED` 응답은 통신 실패가 아니므로 Ex
 전체 Request/Response, Storage Key, 읽기 URL, 내부 Token과 AI 오류 원문을 로그나 Exception
 메시지에 기록하지 않는다.
 
-### 현재 연동 제한
+### 이미지 접근과 현재 연동 제한
 
-현재 실제 FastAPI 서버와의 정상 동작은 검증하지 않았으며 HTTP Client 테스트는
-`MockRestServiceServer`만 사용한다. 정본 요청은 `storageKey`를 전달하지 않고 짧은 만료의 읽기
-전용 `signedUrl`을 요구한다. 현재 저장소에는 이 URL을 발급하는 구현이 없어 HTTP mode 요청은
-네트워크 호출 전에 안전하게 거부한다. YOLO 가중치는 배포 Volume로 주입되지만 이미지 접근
-Provider가 연결될 때까지 기본 `AI_DRAWING_ANALYSIS_MODE=mock`을 유지한다.
+정본 요청은 `storageKey`를 전달하지 않고 짧은 만료의 읽기 전용 `signedUrl`을 사용한다. Backend는
+256-bit 일회성 Token을 발급하고 Redis에 Token의 SHA-256 digest와 `storageKey`를 기본 60초 동안
+저장한다. AI 서버는 Docker 내부망의 `GET /internal/v1/ai-images/{token}`으로 이미지를 한 번만
+조회한다. 소비는 Lua `GET`·`DEL`로 원자적으로 처리하며 Nginx는 외부 `/internal/` 요청을 404로
+차단한다.
+
+HTTP Client와 내부 이미지 조회는 단위·구성 테스트로 검증했다. 실제 FastAPI 추론의 정상 동작과
+YOLO 가중치 배치는 별도 운영 검증 범위이므로, 준비 전에는 기본
+`AI_DRAWING_ANALYSIS_MODE=mock`을 유지한다.
 
 ## Mock 그림 분석 Client
 

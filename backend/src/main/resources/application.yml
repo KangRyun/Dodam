@@ -61,6 +61,9 @@ app:
       endpoint-path: ${AI_DRAWING_ANALYSIS_ENDPOINT_PATH:/internal/v1/analyses}
       connect-timeout: ${AI_DRAWING_ANALYSIS_CONNECT_TIMEOUT:3s}
       read-timeout: ${AI_DRAWING_ANALYSIS_READ_TIMEOUT:30s}
+    image-access:
+      internal-base-url: ${AI_IMAGE_ACCESS_BASE_URL:http://backend:8080}
+      token-ttl: ${AI_IMAGE_ACCESS_TOKEN_TTL:60s}
     observation:
       mode: ${AI_OBSERVATION_MODE:mock}
   cors:

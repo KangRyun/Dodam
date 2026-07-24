@@ -25,6 +25,8 @@ class ImageStorageErrorCodeTest {
                     HttpStatus.BAD_REQUEST, "STORAGE_400_004", "유효하지 않은 이미지 저장 경로입니다."),
             ImageStorageErrorCode.IMAGE_STORAGE_CONFLICT,
                 new ErrorContract(HttpStatus.CONFLICT, "STORAGE_409_001", "이미지 저장 요청이 충돌했습니다."),
+            ImageStorageErrorCode.IMAGE_NOT_FOUND,
+                new ErrorContract(HttpStatus.NOT_FOUND, "STORAGE_404_001", "이미지 파일을 찾을 수 없습니다."),
             ImageStorageErrorCode.IMAGE_FILE_TOO_LARGE,
                 new ErrorContract(
                     HttpStatus.PAYLOAD_TOO_LARGE, "STORAGE_413_001", "이미지 파일 크기가 허용 범위를 초과했습니다."),

@@ -1928,7 +1928,7 @@ COUNSEL-08 요청 예시:
   },
   "drawing": {
     "drawingAssetId": 502,
-    "signedUrl": "https://signed.example.com/assets/502",
+    "signedUrl": "http://backend:8080/internal/v1/ai-images/opaque-one-time-token",
     "mimeType": "image/png",
     "width": 1920,
     "height": 1080,
@@ -1961,6 +1961,10 @@ COUNSEL-08 요청 예시:
   }
 }
 ```
+
+`drawing.signedUrl`은 외부 공개 URL이 아니다. Backend가 분석 요청 직전에 발급하는 Docker 내부망
+전용 URL이며 기본 60초 안에 최초 한 번만 조회할 수 있다. AI 서버는 URL, Token 또는 원본 이미지
+Byte를 로그에 기록하지 않는다.
 
 ### 19.4 종합 분석 응답
 

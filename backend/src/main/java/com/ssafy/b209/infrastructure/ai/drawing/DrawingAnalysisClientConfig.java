@@ -3,7 +3,6 @@ package com.ssafy.b209.infrastructure.ai.drawing;
 import jakarta.validation.Validator;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
@@ -53,18 +52,6 @@ public class DrawingAnalysisClientConfig {
       Validator validator) {
     return new RestClientDrawingAnalysisClient(
         restClient, properties.endpointPath(), internalToken, imageUrlProvider, validator);
-  }
-
-  /**
-   * 실제 이미지 접근 Provider가 아직 연결되지 않은 환경에서 안전한 차단 구현을 제공한다.
-   *
-   * @return 저장소 Key를 외부 URL로 변환하지 않는 차단 Provider
-   */
-  @Bean
-  @ConditionalOnProperty(prefix = "app.ai.drawing-analysis", name = "mode", havingValue = "http")
-  @ConditionalOnMissingBean(DrawingAnalysisImageUrlProvider.class)
-  public DrawingAnalysisImageUrlProvider unavailableDrawingAnalysisImageUrlProvider() {
-    return new UnavailableDrawingAnalysisImageUrlProvider();
   }
 
   /**

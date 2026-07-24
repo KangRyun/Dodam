@@ -9,6 +9,7 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -50,6 +51,41 @@ public final class LocalImageStorage implements ImageStorage {
    */
   public LocalImageStorage(ImageStorageProperties properties, Clock clock) {
     this(properties, clock, UUID::randomUUID);
+  }
+
+  /**
+   * 상대 Storage Key가 가리키는 로컬 이미지를 안전하게 조회한다.
+   *
+   * @param storageKey 저장 시 반환된 {@code /} 구분 상대 Key
+   * @return 이미지 Stream과 Content-Type, 크기
+   * @throws BusinessException Key가 Storage Root를 벗어나거나 파일이 없거나 조회에 실패한 경우
+   */
+  @Override
+  public StoredImageContent read(String storageKey) {
+    try {
+      String[] segments = validateStorageKey(storageKey);
+      Path target = resolveExistingFile(prepareRoot(), segments);
+      if (target == null) {
+        throw new BusinessException(ImageStorageErrorCode.IMAGE_NOT_FOUND);
+      }
+      ImageFormat format = ImageFormat.fromStoredFileName(target.getFileName().toString());
+      long size = Files.size(target);
+      if (size <= 0) {
+        throw new BusinessException(ImageStorageErrorCode.IMAGE_NOT_FOUND);
+      }
+      return new StoredImageContent(
+          Files.newInputStream(target, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS),
+          format.contentType,
+          size);
+    } catch (BusinessException exception) {
+      throw exception;
+    } catch (NoSuchFileException exception) {
+      throw new BusinessException(ImageStorageErrorCode.IMAGE_NOT_FOUND);
+    } catch (InvalidPathException exception) {
+      throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
+    } catch (IOException | SecurityException exception) {
+      throw new BusinessException(ImageStorageErrorCode.IMAGE_STORAGE_FAILED);
+    }
   }
 
   LocalImageStorage(ImageStorageProperties properties, Clock clock, Supplier<UUID> uuidSupplier) {
@@ -127,28 +163,9 @@ public final class LocalImageStorage implements ImageStorage {
     try {
       String[] segments = validateStorageKey(storageKey);
       Path root = prepareRoot();
-      Path current = root;
-      for (int index = 0; index < segments.length - 1; index++) {
-        Path candidate = current.resolve(segments[index]).normalize();
-        validateInsideRoot(root, candidate);
-        if (!Files.exists(candidate, LinkOption.NOFOLLOW_LINKS)) {
-          return;
-        }
-        if (Files.isSymbolicLink(candidate)
-            || !Files.isDirectory(candidate, LinkOption.NOFOLLOW_LINKS)) {
-          throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
-        }
-        current = candidate.toRealPath();
-        validateInsideRoot(root, current);
-      }
-
-      Path target = current.resolve(segments[segments.length - 1]).normalize();
-      validateInsideRoot(root, target);
-      if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+      Path target = resolveExistingFile(root, segments);
+      if (target == null) {
         return;
-      }
-      if (Files.isSymbolicLink(target) || !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
-        throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
       }
       Files.deleteIfExists(target);
     } catch (BusinessException exception) {
@@ -158,6 +175,33 @@ public final class LocalImageStorage implements ImageStorage {
     } catch (IOException | SecurityException exception) {
       throw new BusinessException(ImageStorageErrorCode.IMAGE_STORAGE_FAILED);
     }
+  }
+
+  private Path resolveExistingFile(Path root, String[] segments) throws IOException {
+    Path current = root;
+    for (int index = 0; index < segments.length - 1; index++) {
+      Path candidate = current.resolve(segments[index]).normalize();
+      validateInsideRoot(root, candidate);
+      if (!Files.exists(candidate, LinkOption.NOFOLLOW_LINKS)) {
+        return null;
+      }
+      if (Files.isSymbolicLink(candidate)
+          || !Files.isDirectory(candidate, LinkOption.NOFOLLOW_LINKS)) {
+        throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
+      }
+      current = candidate.toRealPath();
+      validateInsideRoot(root, current);
+    }
+
+    Path target = current.resolve(segments[segments.length - 1]).normalize();
+    validateInsideRoot(root, target);
+    if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+      return null;
+    }
+    if (Files.isSymbolicLink(target) || !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+      throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
+    }
+    return target;
   }
 
   private void validateDeclaredSize(long size) {
@@ -406,6 +450,16 @@ public final class LocalImageStorage implements ImageStorage {
         }
       }
       throw new BusinessException(ImageStorageErrorCode.UNSUPPORTED_IMAGE_FORMAT);
+    }
+
+    private static ImageFormat fromStoredFileName(String storedFileName) {
+      String normalized = storedFileName.toLowerCase(Locale.ROOT);
+      for (ImageFormat format : values()) {
+        if (normalized.endsWith("." + format.extension)) {
+          return format;
+        }
+      }
+      throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
     }
 
     private static ImageFormat fromSignature(byte[] header, int length) {

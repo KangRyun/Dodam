@@ -20,6 +20,18 @@ public interface ImageStorage {
   StoredImage store(StoreImageCommand command);
 
   /**
+   * 저장된 이미지를 상대 Storage Key로 조회한다.
+   *
+   * <p>반환된 Stream의 소유권은 호출자에게 있으며 사용 후 닫아야 한다. 구현체는 Storage Root를 벗어나거나 Symbolic Link를 통과하는 Key를
+   * 거부해야 한다.
+   *
+   * @param storageKey {@link #store(StoreImageCommand)}가 반환한 상대 Storage Key
+   * @return 이미지 Stream과 전송 Metadata
+   * @throws BusinessException Key가 안전하지 않거나 이미지가 없거나 조회할 수 없는 경우
+   */
+  StoredImageContent read(String storageKey);
+
+  /**
    * 보상 처리 대상 이미지를 상대 Storage Key로 삭제한다.
    *
    * <p>이미 삭제된 파일은 성공으로 처리한다. 구현체는 Key가 허용된 Storage Root를 벗어나거나 Symbolic Link를 통과하지 않도록 검증해야 한다.

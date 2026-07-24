@@ -356,7 +356,23 @@ LOCAL_IMAGE_MAX_SIZE=10485760
 - 저장 중에는 Root 내부 임시 파일을 사용하고 기존 파일을 덮어쓰지 않습니다.
 - 로컬 저장 파일은 `.gitignore` 대상이며 Git에 Commit하지 않습니다.
 - 서버 인스턴스 교체나 디스크 초기화 시 파일이 유실될 수 있으므로 운영 환경에서는 S3 호환 Object Storage로 전환해야 합니다.
-- 이번 기능에는 HTTP 업로드 API, DB Metadata 저장, 이미지 조회, AI 분석이 포함되지 않습니다.
+- 공개 이미지 다운로드 API는 제공하지 않습니다. HTTP 그림 분석 mode에서는 AI 서버에 한해 아래 일회성 내부 조회를 사용합니다.
+
+### AI 그림 분석용 일회성 이미지 조회
+
+`AI_DRAWING_ANALYSIS_MODE=http`일 때 Backend는 `storageKey` 대신 짧은 수명의 내부 URL을 AI 서버에 전달합니다.
+
+```dotenv
+AI_IMAGE_ACCESS_BASE_URL=http://backend:8080
+AI_IMAGE_ACCESS_TOKEN_TTL=60s
+```
+
+- 내부 Endpoint는 `GET /internal/v1/ai-images/{token}`이며 Swagger와 외부 Nginx 경로에 노출하지 않습니다.
+- Token은 256-bit 난수로 생성하고 Redis에는 원문 대신 SHA-256 digest만 TTL과 함께 저장합니다.
+- Lua `GET`·`DEL`로 최초 요청만 이미지를 받을 수 있으며 만료·재사용·잘못된 Token은 모두 404로 처리합니다.
+- 응답은 원본 MIME Type과 크기를 유지하고 `Cache-Control: no-store`를 적용합니다.
+- URL, Token, `storageKey`, 서버 절대 경로와 이미지 Byte는 로그에 기록하지 않습니다.
+- 기본값은 여전히 `mock`입니다. AI 서버 가중치와 실제 추론 준비가 완료된 환경에서만 `http`로 전환합니다.
 
 ## 공통 API 성공 응답
 
