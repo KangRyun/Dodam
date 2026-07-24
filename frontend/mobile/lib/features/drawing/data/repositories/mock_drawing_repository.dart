@@ -23,7 +23,7 @@ final class MockDrawingRepository implements DrawingRepository {
     'code': 'ART_DIARY',
     'name': '그림일기',
     'activityCategory': 'GENERAL',
-    'selectableBy': 'GUARDIAN_OR_CHILD',
+    'selectableBy': 'BOTH',
     'recommendedAgeMin': 4,
     'recommendedAgeMax': 12,
     'guideText': '오늘 있었던 일을 그림으로 그려 볼까?',
@@ -61,8 +61,9 @@ final class MockDrawingRepository implements DrawingRepository {
 
   @override
   Future<ApiPage<DrawingTypeDto>> getDrawingTypes({
-    int? childId,
-    String? ageGroup,
+    required int childId,
+    String? category,
+    bool activeOnly = true,
   }) async => ApiPage(
     content: [DrawingTypeDto.fromJson(_type)],
     page: 0,

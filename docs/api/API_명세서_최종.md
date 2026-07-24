@@ -688,7 +688,12 @@ IN_PROGRESS/DRAWING
 
 `drawingTypeId`, `code`, `name`, `activityCategory`, `selectableBy`, `recommendedAgeMin`, `recommendedAgeMax`, `guideText`, `displayOrder`.
 
+응답은 공통 성공 응답의 `data`에 `content`, `page`, `size`, `totalElements`, `totalPages`, `hasNext`를 포함하는 단일 페이지로 반환한다.
+유형은 `displayOrder`, `drawingTypeId` 오름차순으로 정렬되며 아동의 만 나이가 권장 연령 범위에 포함되는 항목만 노출한다.
+`activeOnly=false`이면 비활성 유형도 조회 대상에 포함하지만 연령 조건은 동일하게 적용한다.
+
 검사형 코드를 지원하더라도 API·화면은 AI가 검사를 실시하거나 진단을 확정하는 것처럼 표현하지 않는다. 일반 활동 코드는 `ART_DIARY`, `FREE_DRAWING`, `EMOTION_COLORING`, `WEATHER_MIND` 등을 사용한다.
+초기 기준 데이터로 위 네 가지 일반 활동 코드를 제공하며, 코드는 화면 표시명이 아닌 클라이언트와 서버 간 식별값으로 사용한다.
 
 ### 10.4 세션 생성
 

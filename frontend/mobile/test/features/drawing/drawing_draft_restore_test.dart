@@ -376,8 +376,11 @@ final class _DraftRepository implements DrawingRepository {
   Future<DrawingSessionDto> getSession(int sessionId) =>
       throw UnimplementedError();
   @override
-  Future<DrawingTypePage> getDrawingTypes({int? childId, String? ageGroup}) =>
-      throw UnimplementedError();
+  Future<DrawingTypePage> getDrawingTypes({
+    required int childId,
+    String? category,
+    bool activeOnly = true,
+  }) => throw UnimplementedError();
   @override
   Future<ObjectDetectionResponseDto> requestObjectDetection(
     int sessionId,
