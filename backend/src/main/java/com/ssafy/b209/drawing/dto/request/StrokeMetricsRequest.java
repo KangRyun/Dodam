@@ -1,5 +1,6 @@
 package com.ssafy.b209.drawing.dto.request;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.PositiveOrZero;
 
 /**
@@ -11,7 +12,8 @@ import jakarta.validation.constraints.PositiveOrZero;
  * @param pauseDurationMsDelta 일시 정지 시간 증가량(ms)
  */
 public record StrokeMetricsRequest(
-    @PositiveOrZero int undoCountDelta,
-    @PositiveOrZero int redoCountDelta,
-    @PositiveOrZero int eraseCountDelta,
-    @PositiveOrZero long pauseDurationMsDelta) {}
+    @Schema(description = "실행 취소 증가량", example = "0") @PositiveOrZero int undoCountDelta,
+    @Schema(description = "다시 실행 증가량", example = "0") @PositiveOrZero int redoCountDelta,
+    @Schema(description = "지우기 증가량", example = "0") @PositiveOrZero int eraseCountDelta,
+    @Schema(description = "일시 정지 시간 증가량(ms)", example = "0") @PositiveOrZero
+        long pauseDurationMsDelta) {}

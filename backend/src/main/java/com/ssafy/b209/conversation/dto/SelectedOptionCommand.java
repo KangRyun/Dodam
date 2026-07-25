@@ -1,5 +1,6 @@
 package com.ssafy.b209.conversation.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 
@@ -14,7 +15,20 @@ import jakarta.validation.constraints.Size;
  * @param labelSnapshot 화면에 노출된 문구로 서버 선택지의 {@code label}과 일치해야 하는 값
  */
 public record SelectedOptionCommand(
-    @NotBlank @Size(max = 80) String optionId,
-    @NotBlank @Size(max = 30) String type,
-    @NotBlank @Size(max = 255) String value,
-    @NotBlank @Size(max = 200) String labelSnapshot) {}
+    @Schema(description = "질문 선택지의 option_key와 일치하는 선택지 식별자", example = "HOUSE")
+        @NotBlank
+        @Size(max = 80)
+        String optionId,
+    @Schema(
+            description =
+                "질문 선택지 Snapshot의 option_type과 일치하는 값. 저장 값은 항상 STATIC이며 질문 응답의 노출 type(OPTION)이 아니다.",
+            example = "STATIC")
+        @NotBlank
+        @Size(max = 30)
+        String type,
+    @Schema(description = "질문 선택지 Snapshot의 option_value와 일치하는 값(코드와 동일)", example = "HOUSE")
+        @NotBlank
+        @Size(max = 255)
+        String value,
+    @Schema(description = "서버 선택지 label과 일치해야 하는 노출 문구", example = "집") @NotBlank @Size(max = 200)
+        String labelSnapshot) {}

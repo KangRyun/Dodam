@@ -1,5 +1,6 @@
 package com.ssafy.b209.drawing.dto.request;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -19,9 +20,10 @@ import java.util.List;
  * @param metrics 현재 배치에서 증가한 행동 지표
  */
 public record SaveStrokeBatchRequest(
-    @Positive int batchSequence,
-    @Positive long firstEventSequence,
-    @Positive long lastEventSequence,
-    @NotNull OffsetDateTime clientCreatedAt,
+    @Schema(description = "세션 내 배치 순번", example = "1") @Positive int batchSequence,
+    @Schema(description = "첫 이벤트 순번", example = "1") @Positive long firstEventSequence,
+    @Schema(description = "마지막 이벤트 순번", example = "1") @Positive long lastEventSequence,
+    @Schema(description = "클라이언트가 배치를 만든 시각", example = "2026-07-21T11:32:10.120+09:00") @NotNull
+        OffsetDateTime clientCreatedAt,
     @NotEmpty @Size(max = 500) List<@Valid StrokeEventRequest> events,
     @NotNull @Valid StrokeMetricsRequest metrics) {}
