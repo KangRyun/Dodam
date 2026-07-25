@@ -10,6 +10,7 @@ import com.ssafy.b209.auth.token.AuthenticatedUser;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,7 +40,9 @@ class DrawingSnapshotUploadIntegrationTest {
 
   private static final Long GUARDIAN_USER_ID = 41L;
   private static final byte[] PNG =
-      new byte[] {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01};
+      Base64.getDecoder()
+          .decode(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
   private static final Path STORAGE_ROOT = createStorageRoot();
 
   @Container @ServiceConnection

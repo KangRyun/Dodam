@@ -832,24 +832,28 @@ Header `Idempotency-Key` 필수. `multipart/form-data`로 요청한다.
 1. 최종 이미지와 미수신 stroke 순번을 검증한다.
 2. `assetType=FINAL`을 저장한다.
 3. `currentStage=ANALYZING`으로 변경한다.
-4. `AnalysisType=FINAL`이 아니라 대화 준비용 그림 분석을 요청할 수 있다. 전체 관찰 리포트 생성은 DRAWING-11에서 시작한다.
-5. 대화 준비용 분석이 성공하면 `currentStage=CONVERSING`으로 변경한다. 실패하면 폴백 질문을 사용할 수 있도록 분석 실패 상태와 기존 그림을 유지한다.
-6. 분석 접수 결과와 다음 화면 정보를 반환한다.
+4. `analysisType=OBJECT_DETECTION`, `scope=FINAL`인 대화 준비용 그림 분석을 동기 요청한다. 전체 관찰 리포트 생성은 DRAWING-11에서 시작한다.
+5. 대화 준비용 분석의 성공 또는 실패 상태를 저장한 뒤 `currentStage=CONVERSING`으로 변경한다. 실패하면 저장한 FINAL 그림과 실패 이력을 유지하고 폴백 질문을 사용한다.
+6. 실제 저장된 분석 결과와 감정 선택 화면으로 이동할 다음 동작을 반환한다.
 
 ```json
 {
   "drawingSessionId": 100,
   "finalAssetId": 502,
   "sessionStatus": "IN_PROGRESS",
-  "currentStage": "ANALYZING",
+  "currentStage": "CONVERSING",
   "analysis": {
     "analysisId": 700,
-    "analysisType": "INTERMEDIATE",
-    "status": "PENDING"
+    "analysisType": "OBJECT_DETECTION",
+    "status": "SUCCEEDED"
   },
-  "nextAction": "POLL_ANALYSIS"
+  "nextAction": "SELECT_EMOTION"
 }
 ```
+
+분석 서버 호출이 실패한 경우에도 HTTP 요청 자체가 유효하고 실패 이력이 저장되면 `200 OK`를 반환한다.
+이때 `analysis.status=FAILED`, `currentStage=CONVERSING`, `nextAction=SELECT_EMOTION`이며 이후 대화는
+기존 폴백 질문 정책을 사용한다. 분석 생성 이전의 요청 검증·저장 실패는 해당 오류 응답을 반환한다.
 
 ### 10.9 감정·제목 저장
 

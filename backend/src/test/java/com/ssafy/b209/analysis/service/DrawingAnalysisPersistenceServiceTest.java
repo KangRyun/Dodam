@@ -91,6 +91,30 @@ class DrawingAnalysisPersistenceServiceTest {
     verify(drawingAnalysisRepository).saveAndFlush(captor.capture());
     assertThat(ReflectionTestUtils.getField(captor.getValue(), "scope"))
         .isEqualTo(DrawingAnalysisScope.FINAL);
+    verify(session, never()).startDrawingAnalysis();
+  }
+
+  @Test
+  void startsDrawingStageCompletionAndMovesTheSessionToAnalyzing() {
+    givenValidTarget();
+    given(asset.getStorageKey()).willReturn("drawing/final.png");
+    given(asset.getMimeType()).willReturn("image/png");
+    given(drawingAnalysisRepository.saveAndFlush(any(DrawingAnalysis.class)))
+        .willAnswer(
+            invocation -> {
+              DrawingAnalysis analysis = invocation.getArgument(0);
+              ReflectionTestUtils.setField(analysis, "id", ANALYSIS_ID);
+              return analysis;
+            });
+
+    service.startForDrawingCompletion(
+        SESSION_ID,
+        ASSET_ID,
+        DrawingAnalysisType.OBJECT_DETECTION,
+        "drawing-complete-key",
+        REQUESTED_AT);
+
+    verify(session).startDrawingAnalysis();
   }
 
   @Test
@@ -106,6 +130,8 @@ class DrawingAnalysisPersistenceServiceTest {
     ReflectionTestUtils.setField(processing, "id", ANALYSIS_ID);
     given(drawingAnalysisRepository.findByIdForUpdate(ANALYSIS_ID))
         .willReturn(Optional.of(processing));
+    given(session.getCurrentStage())
+        .willReturn(com.ssafy.b209.drawing.domain.DrawingStage.ANALYZING);
     var model =
         new com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse.ModelRef(
             "yolo", "1.0");
@@ -132,6 +158,7 @@ class DrawingAnalysisPersistenceServiceTest {
 
     assertThat(processing.getState()).isEqualTo(DrawingAnalysisState.PARTIAL_SUCCESS);
     verify(analysisResultJdbcRepository).replace(ANALYSIS_ID, response, PROCESSED_AT);
+    verify(session).finishDrawingAnalysis();
   }
 
   @Test
@@ -156,6 +183,7 @@ class DrawingAnalysisPersistenceServiceTest {
     verify(drawingAnalysisRepository).saveAndFlush(captor.capture());
     assertThat(ReflectionTestUtils.getField(captor.getValue(), "scope"))
         .isEqualTo(DrawingAnalysisScope.INTERMEDIATE);
+    verify(session, never()).startDrawingAnalysis();
   }
 
   @Test
@@ -248,12 +276,39 @@ class DrawingAnalysisPersistenceServiceTest {
     DrawingAnalysis analysis = processingAnalysis();
     given(drawingAnalysisRepository.findByIdForUpdate(ANALYSIS_ID))
         .willReturn(Optional.of(analysis));
+    given(session.getCurrentStage())
+        .willReturn(com.ssafy.b209.drawing.domain.DrawingStage.ANALYZING);
 
     service.fail(ANALYSIS_ID, "TIMEOUT", "그림 분석 요청을 완료하지 못했습니다.", PROCESSED_AT);
 
     assertThat(analysis.getState()).isEqualTo(DrawingAnalysisState.FAILED);
     assertThat(analysis.getErrorCode()).isEqualTo("TIMEOUT");
     verify(drawingAnalysisRepository).flush();
+    verify(session).finishDrawingAnalysis();
+  }
+
+  @Test
+  void findsStoredAnalysisSummaryByRequestId() {
+    DrawingAnalysis analysis = processingAnalysis();
+    given(session.getId()).willReturn(SESSION_ID);
+    given(asset.getId()).willReturn(ASSET_ID);
+    given(session.getSessionStatus())
+        .willReturn(com.ssafy.b209.drawing.domain.DrawingSessionStatus.IN_PROGRESS);
+    given(session.getCurrentStage())
+        .willReturn(com.ssafy.b209.drawing.domain.DrawingStage.ANALYZING);
+    given(drawingAnalysisRepository.findByRequestId("drawing-complete-key"))
+        .willReturn(Optional.of(analysis));
+
+    DrawingAnalysisRequestSummary summary =
+        service.findByRequestId("drawing-complete-key").orElseThrow();
+
+    assertThat(summary.analysisId()).isEqualTo(ANALYSIS_ID);
+    assertThat(summary.drawingSessionId()).isEqualTo(SESSION_ID);
+    assertThat(summary.drawingAssetId()).isEqualTo(ASSET_ID);
+    assertThat(summary.taskType()).isEqualTo(DrawingAnalysisType.OBJECT_DETECTION);
+    assertThat(summary.state()).isEqualTo(DrawingAnalysisState.PROCESSING);
+    assertThat(summary.currentStage())
+        .isEqualTo(com.ssafy.b209.drawing.domain.DrawingStage.ANALYZING);
   }
 
   @Test

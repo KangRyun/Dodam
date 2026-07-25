@@ -123,6 +123,49 @@ class DrawingAnalysisServiceTest {
   }
 
   @Test
+  void usesCallerProvidedRequestIdForDrawingStageCompletion() {
+    String idempotencyKey = "drawing-complete-key-0001";
+    given(
+            persistenceService.startForDrawingCompletion(
+                SESSION_ID,
+                ASSET_ID,
+                DrawingAnalysisType.OBJECT_DETECTION,
+                idempotencyKey,
+                LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC)))
+        .willReturn(
+            new StartedDrawingAnalysis(
+                ANALYSIS_ID,
+                SESSION_ID,
+                ASSET_ID,
+                idempotencyKey,
+                com.ssafy.b209.analysis.domain.DrawingAnalysisScope.FINAL,
+                "drawing/final.png",
+                "image/png",
+                1200,
+                800,
+                "checksum",
+                LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC)));
+    given(drawingAnalysisClient.analyze(any())).willReturn(successResponse(ANALYSIS_ID));
+    given(persistenceService.completeCanonical(eq(ANALYSIS_ID), any(), any()))
+        .willReturn(org.mockito.Mockito.mock(DrawingAnalysis.class));
+
+    CreateDrawingAnalysisResponse response =
+        service.requestAnalysis(
+            SESSION_ID,
+            new CreateDrawingAnalysisRequest(ASSET_ID, DrawingAnalysisType.OBJECT_DETECTION),
+            idempotencyKey);
+
+    assertThat(response.requestId()).isEqualTo(idempotencyKey);
+    verify(persistenceService)
+        .startForDrawingCompletion(
+            SESSION_ID,
+            ASSET_ID,
+            DrawingAnalysisType.OBJECT_DETECTION,
+            idempotencyKey,
+            LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC));
+  }
+
+  @Test
   void acceptsSuccessfulResponseWithEmptyDetections() {
     givenStartedAnalysis();
     var response = successResponse(ANALYSIS_ID, List.of());

@@ -20,6 +20,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -75,6 +76,37 @@ public class DrawingAnalysisPersistenceService {
       DrawingAnalysisType taskType,
       String requestId,
       LocalDateTime requestedAt) {
+    return start(drawingSessionId, drawingAssetId, taskType, requestId, requestedAt, false);
+  }
+
+  /**
+   * 그림 단계 완료 요청의 PROCESSING 분석을 만들고 FINAL 분석이면 세션을 ANALYZING으로 전환한다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @param drawingAssetId 분석 대상 FINAL 그림 파일 식별자
+   * @param taskType 수행할 AI 분석 작업 유형
+   * @param requestId 완료 요청의 {@code Idempotency-Key}
+   * @param requestedAt 서버가 분석 요청을 시작한 UTC 시각
+   * @return Transaction 밖의 Client 호출에 필요한 저장 결과와 이미지 참조
+   * @throws BusinessException 세션·그림이 없거나 분석 불가 또는 중복인 경우
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public StartedDrawingAnalysis startForDrawingCompletion(
+      Long drawingSessionId,
+      Long drawingAssetId,
+      DrawingAnalysisType taskType,
+      String requestId,
+      LocalDateTime requestedAt) {
+    return start(drawingSessionId, drawingAssetId, taskType, requestId, requestedAt, true);
+  }
+
+  private StartedDrawingAnalysis start(
+      Long drawingSessionId,
+      Long drawingAssetId,
+      DrawingAnalysisType taskType,
+      String requestId,
+      LocalDateTime requestedAt,
+      boolean drawingStageCompletion) {
     DrawingSession session =
         drawingSessionRepository
             .findNotDeletedByIdForUpdate(drawingSessionId)
@@ -102,6 +134,9 @@ public class DrawingAnalysisPersistenceService {
         DrawingAnalysis.processing(session, asset, scope, taskType, requestId, requestedAt);
     try {
       DrawingAnalysis saved = drawingAnalysisRepository.saveAndFlush(analysis);
+      if (drawingStageCompletion && scope == DrawingAnalysisScope.FINAL) {
+        session.startDrawingAnalysis();
+      }
       return new StartedDrawingAnalysis(
           saved.getId(),
           session.getId(),
@@ -135,6 +170,28 @@ public class DrawingAnalysisPersistenceService {
             .orElseThrow(
                 () -> new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_FOUND));
     return new RetryDrawingAnalysisSource(source.getId(), source.getDrawingSession().getId());
+  }
+
+  /**
+   * 멱등 요청 식별자로 저장된 분석과 현재 세션 상태를 조회한다.
+   *
+   * @param requestId 분석 생성에 사용한 요청 식별자
+   * @return 저장된 분석 요약, 사용되지 않은 식별자면 빈 값
+   */
+  @Transactional(readOnly = true, propagation = Propagation.REQUIRES_NEW)
+  public Optional<DrawingAnalysisRequestSummary> findByRequestId(String requestId) {
+    return drawingAnalysisRepository
+        .findByRequestId(requestId)
+        .map(
+            analysis ->
+                new DrawingAnalysisRequestSummary(
+                    analysis.getId(),
+                    analysis.getDrawingSession().getId(),
+                    analysis.getDrawingAsset().getId(),
+                    analysis.getTaskType(),
+                    analysis.getState(),
+                    analysis.getDrawingSession().getSessionStatus(),
+                    analysis.getDrawingSession().getCurrentStage()));
   }
 
   /**
@@ -234,6 +291,7 @@ public class DrawingAnalysisPersistenceService {
             ? DrawingAnalysisState.PARTIAL_SUCCESS
             : DrawingAnalysisState.SUCCESS;
     analysis.complete(completedState, model.name(), model.version(), entities, processedAt);
+    finishFinalDrawingAnalysis(analysis);
     analysisResultJdbcRepository.replace(analysisId, response, processedAt);
     drawingAnalysisRepository.flush();
     return analysis;
@@ -252,7 +310,16 @@ public class DrawingAnalysisPersistenceService {
       Long analysisId, String failureCode, String failureMessage, LocalDateTime failedAt) {
     DrawingAnalysis analysis = findForUpdate(analysisId);
     analysis.fail(failureCode, failureMessage, failedAt);
+    finishFinalDrawingAnalysis(analysis);
     drawingAnalysisRepository.flush();
+  }
+
+  private void finishFinalDrawingAnalysis(DrawingAnalysis analysis) {
+    if (analysis.getScope() == DrawingAnalysisScope.FINAL
+        && analysis.getDrawingSession().getCurrentStage()
+            == com.ssafy.b209.drawing.domain.DrawingStage.ANALYZING) {
+      analysis.getDrawingSession().finishDrawingAnalysis();
+    }
   }
 
   private DrawingAnalysis findForUpdate(Long analysisId) {
