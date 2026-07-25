@@ -15,7 +15,8 @@ FROM minio/mc:RELEASE.2025-04-16T18-13-26Z
 
 # 스크립트와 정책을 같은 디렉터리에 둔다 — init.sh 는 $(dirname $0)/policies 로 참조하므로
 # 이미지 안이든(아래 경로) 개발자가 로컬에서 직접 실행하든 동일하게 동작한다.
-COPY init.sh      /opt/dodam/init.sh
-COPY policies/    /opt/dodam/policies/
+COPY init.sh       /opt/dodam/init.sh
+COPY policies/     /opt/dodam/policies/
+COPY lifecycle.json /opt/dodam/lifecycle.json
 
 ENTRYPOINT ["/bin/sh", "/opt/dodam/init.sh"]

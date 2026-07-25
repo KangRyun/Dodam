@@ -1,0 +1,10 @@
+{
+  "Rules": [
+    {
+      "ID": "tts-cache-expire-30d",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "tts-cache/" },
+      "Expiration": { "Days": 30 }
+    }
+  ]
+}

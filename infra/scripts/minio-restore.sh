@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# ============================================================================
+# minio-restore.sh — 도담 파일 스토리지(MinIO 버킷 dodam) 백업 복원 (S15P11B209-622)
+#
+# ⚠️ 백업 파일 = 아동 민감정보 — 복사·전송 금지. 복원은 Infra 담당(root)만.
+# ⚠️ 복원은 백업에 담긴 파일을 버킷 dodam 에 "되돌려 덮어쓴다".
+#    - 되돌리는 대상: images/ audio/ reports/ evidences/  (백업에 포함된 것)
+#    - tts-cache/ 는 백업에서 제외됐으므로 건드리지 않는다(원문에서 재생성됨).
+#    - 백업 이후 새로 추가된 객체는 지우지 않는다(mirror --remove 미사용 — 비파괴).
+#    그래서 실행 전 확인 프롬프트를 강제하고, --dry-run 으로 먼저 검증하게 한다.
+#
+# 사용법:
+#   minio-restore.sh [--dry-run] <백업파일(minio-*.tar.gz.enc)>
+#   --dry-run : 복호화 + tar 무결성 검증 + 담긴 프리픽스 목록만(버킷 미변경).
+#               reason: 월 1회 백업 드릴에서 "이 백업이 복원 가능한 파일인지"를
+#               운영 버킷에 손대지 않고 확인 (docs/인프라/MinIO백업-복원.md).
+#
+# 종료 코드: 0 성공 / 2 root 아님·인자 오류 / 3 패스프레이즈 문제
+#            4 백업 파일 문제 / 5 minio 컨테이너 미기동 / 6 복호화·복원 파이프라인 실패
+# ============================================================================
+set -euo pipefail
+
+MINIO_CONTAINER="dodam-minio"
+MC_IMAGE="minio/mc:RELEASE.2025-04-16T18-13-26Z"
+NET="dodam-net"
+BUCKET="dodam"
+PASS_FILE="/etc/dodam/backup-passphrase"    # 백업 때와 동일한 패스프레이즈 (root 600)
+STAGE=""; TMP_ENV=""
+
+cleanup() {
+  local code=$?
+  [[ -n "${STAGE}"   ]] && rm -rf "${STAGE}"   2>/dev/null || true
+  [[ -n "${TMP_ENV}" ]] && rm -f  "${TMP_ENV}" 2>/dev/null || true
+  exit "${code}"
+}
+trap cleanup EXIT
+
+# ── 인자 파싱 ────────────────────────────────────────────────────────────────
+DRY_RUN=0
+if [[ "${1:-}" == "--dry-run" ]]; then DRY_RUN=1; shift; fi
+if [[ $# -lt 1 ]]; then
+  echo "사용법: $0 [--dry-run] <백업파일(minio-*.tar.gz.enc)>" >&2
+  exit 2
+fi
+BACKUP_FILE="$1"
+
+# ── 사전 검증 ────────────────────────────────────────────────────────────────
+if [[ ${EUID} -ne 0 ]]; then
+  echo "[minio-restore] FAIL: root로 실행해야 합니다." >&2
+  exit 2
+fi
+if [[ ! -f "${PASS_FILE}" || "$(stat -c '%u %a' "${PASS_FILE}")" != "0 600" ]]; then
+  echo "[minio-restore] FAIL: 패스프레이즈 파일 없음/권한오류: ${PASS_FILE} (root 600 필요)" >&2
+  exit 3
+fi
+if [[ ! -f "${BACKUP_FILE}" ]]; then
+  echo "[minio-restore] FAIL: 백업 파일이 없습니다: ${BACKUP_FILE}" >&2
+  exit 4
+fi
+
+umask 077
+STAGE="$(mktemp -d)"
+
+# ── 복호화 + 해제 (dry-run 은 여기까지) ──────────────────────────────────────
+# reason: 복호화·gzip·tar 무결성이 깨졌는지 여기서 먼저 걸러낸다(운영 버킷 손대기 전).
+if ! openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -iter 200000 -pass "file:${PASS_FILE}" -in "${BACKUP_FILE}" \
+     | tar -C "${STAGE}" -xzf -; then
+  echo "[minio-restore] FAIL: 복호화/해제 실패 (패스프레이즈 불일치 또는 파일 손상)" >&2
+  exit 6
+fi
+
+if [[ ${DRY_RUN} -eq 1 ]]; then
+  echo "[minio-restore] DRY-RUN OK: 복호화·해제 정상. 담긴 프리픽스:"
+  find "${STAGE}" -maxdepth 1 -mindepth 1 -type d -printf '  - %f/\n' 2>/dev/null || true
+  echo "  (실복원: --dry-run 없이 재실행)"
+  exit 0
+fi
+
+# ── 실복원: 확인 프롬프트 → mc mirror(스테이지 → 버킷, 비파괴 overwrite) ──────
+if ! docker inspect -f '{{.State.Running}}' "${MINIO_CONTAINER}" 2>/dev/null | grep -q true; then
+  echo "[minio-restore] FAIL: 컨테이너 ${MINIO_CONTAINER} 가 실행 중이 아닙니다" >&2
+  exit 5
+fi
+echo "⚠️  버킷 '${BUCKET}' 에 백업 파일을 되돌려 덮어씁니다(비파괴 — 신규 객체·tts-cache 유지)."
+read -r -p "정말 진행하려면 'RESTORE' 입력: " CONFIRM
+if [[ "${CONFIRM}" != "RESTORE" ]]; then
+  echo "[minio-restore] 취소됨 (확인 문자열 불일치)"
+  exit 0
+fi
+
+MINIO_USER="$(docker exec "${MINIO_CONTAINER}" printenv MINIO_ROOT_USER)"
+MINIO_PASS="$(docker exec "${MINIO_CONTAINER}" printenv MINIO_ROOT_PASSWORD)"
+TMP_ENV="$(mktemp)"; chmod 600 "${TMP_ENV}"
+{ printf 'MINIO_ROOT_USER=%s\n' "${MINIO_USER}"
+  printf 'MINIO_ROOT_PASSWORD=%s\n' "${MINIO_PASS}"; } > "${TMP_ENV}"
+
+if ! docker run --rm --network "${NET}" --env-file "${TMP_ENV}" \
+      -v "${STAGE}:/restore:ro" --entrypoint /bin/sh "${MC_IMAGE}" -c \
+      'mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 \
+        && mc mirror --quiet --overwrite /restore local/'"${BUCKET}"; then
+  echo "[minio-restore] FAIL: mc mirror 복원 실패" >&2
+  exit 6
+fi
+
+echo "[minio-restore] OK: '${BACKUP_FILE}' → 버킷 ${BUCKET} 복원 완료(비파괴 overwrite)."
