@@ -6,6 +6,8 @@ import 'package:dodam/core/config/api_environment.dart';
 import 'package:dodam/core/network/api_client.dart';
 import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
+import 'package:dodam/features/drawing/application/drawing_event_journal.dart';
+import 'package:dodam/features/drawing/application/drawing_sync_coordinator.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/drawing/data/repositories/mock_drawing_repository.dart';
 import 'package:dodam/features/drawing/data/repositories/remote_drawing_repository.dart';
@@ -93,13 +95,13 @@ void main() {
         ),
       );
 
-      await repository.completeDrawingStage(
+      final response = await repository.completeDrawingStage(
         42,
         finalImage: _png,
         metadata: const DrawingCompleteMetadataDto(
           lastEventSequence: 17,
           drawingDurationMs: 1000,
-          clientCompletedAt: '2026-07-22T10:00:00Z',
+          clientCompletedAt: '2026-07-22T19:00:00+09:00',
         ),
         idempotencyKey: 'request-key',
       );
@@ -111,12 +113,30 @@ void main() {
       expect(recorder.requests.first.uri.path.endsWith('/complete'), isFalse);
       expect(recorder.requests.first.headers['Idempotency-Key'], 'request-key');
       final form = recorder.requests.first.data as FormData;
-      expect(form.files.single.key, 'finalImage');
-      expect(form.fields.single.key, 'metadata');
-      expect(form.fields.single.value, contains('"lastEventSequence":17'));
-      expect(form.fields.single.value, contains('"drawingDurationMs":1000'));
-      expect(form.fields.single.value, contains('"clientCompletedAt"'));
-      expect(form.fields.single.value, isNot(contains('sourceAssetId')));
+      expect(form.fields, isEmpty);
+      final finalImage = form.files.singleWhere(
+        (part) => part.key == 'finalImage',
+      );
+      expect(finalImage.value.filename, 'drawing.png');
+      expect(finalImage.value.contentType?.toString(), 'image/png');
+      expect(await _multipartBytes(finalImage.value), _png.bytes);
+      final metadata = form.files.singleWhere((part) => part.key == 'metadata');
+      expect(metadata.value.filename, 'metadata.json');
+      expect(metadata.value.contentType?.toString(), 'application/json');
+      expect(jsonDecode(utf8.decode(await _multipartBytes(metadata.value))), {
+        'lastEventSequence': 17,
+        'drawingDurationMs': 1000,
+        'clientCompletedAt': '2026-07-22T19:00:00+09:00',
+      });
+      expect(recorder.requests, hasLength(1));
+      expect(
+        recorder.requests.where(
+          (request) => request.uri.path.endsWith('/analyses'),
+        ),
+        isEmpty,
+      );
+      expect(response.currentStage, 'CONVERSING');
+      expect(response.nextAction, 'SELECT_EMOTION');
 
       await repository.saveReflection(
         42,
@@ -134,6 +154,23 @@ void main() {
       );
     },
   );
+
+  test('Drawing Complete metadata는 선택적 sourceAssetId를 보존한다', () {
+    expect(
+      const DrawingCompleteMetadataDto(
+        sourceAssetId: 88,
+        lastEventSequence: 17,
+        drawingDurationMs: 1000,
+        clientCompletedAt: '2026-07-22T19:00:00+09:00',
+      ).toJson(),
+      {
+        'sourceAssetId': 88,
+        'lastEventSequence': 17,
+        'drawingDurationMs': 1000,
+        'clientCompletedAt': '2026-07-22T19:00:00+09:00',
+      },
+    );
+  });
 
   testWidgets('완료 버튼은 확인 Dialog를 열고 조금 더 그리면 Canvas를 유지한다', (tester) async {
     await _pumpDrawing(tester, repository: const MockDrawingRepository());
@@ -161,6 +198,98 @@ void main() {
 
     expect(find.text('내 마음 고르기'), findsOneWidget);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
+  });
+
+  testWidgets('0ms 완료도 Backend 최소 duration인 1ms를 전송한다', (tester) async {
+    final repository = _CompletionRepository();
+    final coordinator = DrawingSyncCoordinator(
+      sessionId: 42,
+      repository: repository,
+      journal: DrawingEventJournal(sessionClock: Stopwatch()),
+    );
+    await _pumpDrawing(
+      tester,
+      repository: repository,
+      syncCoordinator: coordinator,
+    );
+    await _drawStroke(tester);
+
+    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다 그렸어요'));
+    await tester.pumpAndSettle();
+
+    expect(repository.completionMetadata.single.drawingDurationMs, 1);
+    coordinator.dispose();
+  });
+
+  testWidgets('양수 경과 시간은 Drawing Complete metadata에 그대로 유지한다', (tester) async {
+    final clock = Stopwatch()..start();
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 10)),
+    );
+    clock.stop();
+    final elapsedMilliseconds = clock.elapsedMilliseconds;
+    expect(elapsedMilliseconds, greaterThan(1));
+    final repository = _CompletionRepository();
+    final coordinator = DrawingSyncCoordinator(
+      sessionId: 42,
+      repository: repository,
+      journal: DrawingEventJournal(sessionClock: clock),
+    );
+    await _pumpDrawing(
+      tester,
+      repository: repository,
+      syncCoordinator: coordinator,
+    );
+    await _drawStroke(tester);
+
+    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다 그렸어요'));
+    await tester.pumpAndSettle();
+
+    expect(
+      repository.completionMetadata.single.drawingDurationMs,
+      elapsedMilliseconds,
+    );
+    coordinator.dispose();
+  });
+
+  testWidgets('완료 응답 stage가 다르면 Canvas를 유지하고 이동하지 않는다', (tester) async {
+    final repository = _CompletionRepository(
+      completionResponse: _unexpectedStageResponse,
+    );
+    await _pumpDrawing(tester, repository: repository);
+    await _drawStroke(tester);
+
+    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다 그렸어요'));
+    await tester.pumpAndSettle();
+
+    expect(repository.completeCalls, 1);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+    expect(find.textContaining('그림은 그대로'), findsOneWidget);
+    expect(find.text('내 마음 고르기'), findsNothing);
+  });
+
+  testWidgets('완료 응답 nextAction이 다르면 Canvas를 유지하고 이동하지 않는다', (tester) async {
+    final repository = _CompletionRepository(
+      completionResponse: _unexpectedNextActionResponse,
+    );
+    await _pumpDrawing(tester, repository: repository);
+    await _drawStroke(tester);
+
+    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다 그렸어요'));
+    await tester.pumpAndSettle();
+
+    expect(repository.completeCalls, 1);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+    expect(find.textContaining('그림은 그대로'), findsOneWidget);
+    expect(find.text('내 마음 고르기'), findsNothing);
   });
 
   testWidgets('완료 실패 시 Canvas와 Stroke를 유지하고 이동하지 않는다', (tester) async {
@@ -239,6 +368,10 @@ void main() {
     expect(
       repository.completionMetadata[1],
       same(repository.completionMetadata[0]),
+    );
+    expect(
+      repository.completionMetadata[1].drawingDurationMs,
+      repository.completionMetadata[0].drawingDurationMs,
     );
   });
 
@@ -433,6 +566,7 @@ Future<void> _pumpDrawing(
   WidgetTester tester, {
   required DrawingRepository repository,
   int? sessionId = 42,
+  DrawingSyncCoordinator? syncCoordinator,
 }) async {
   tester.view.physicalSize = const Size(1200, 800);
   tester.view.devicePixelRatio = 1;
@@ -448,6 +582,7 @@ Future<void> _pumpDrawing(
         childId: '3',
         sessionId: sessionId,
         drawingRepository: repository,
+        syncCoordinator: syncCoordinator,
         completionSnapshotProvider: () async => _png,
       ),
     ),
@@ -531,11 +666,37 @@ const _completeResponse = DrawingStageCompleteResponseDto(
   drawingSessionId: 42,
   finalAssetId: 140,
   sessionStatus: 'IN_PROGRESS',
+  currentStage: 'CONVERSING',
+  analysis: DrawingStageAnalysisDto(
+    analysisId: 700,
+    analysisType: 'OBJECT_DETECTION',
+    status: 'SUCCEEDED',
+  ),
+  nextAction: 'SELECT_EMOTION',
+);
+
+const _unexpectedStageResponse = DrawingStageCompleteResponseDto(
+  drawingSessionId: 42,
+  finalAssetId: 140,
+  sessionStatus: 'IN_PROGRESS',
   currentStage: 'ANALYZING',
   analysis: DrawingStageAnalysisDto(
     analysisId: 700,
-    analysisType: 'INTERMEDIATE',
-    status: 'PENDING',
+    analysisType: 'OBJECT_DETECTION',
+    status: 'SUCCEEDED',
+  ),
+  nextAction: 'SELECT_EMOTION',
+);
+
+const _unexpectedNextActionResponse = DrawingStageCompleteResponseDto(
+  drawingSessionId: 42,
+  finalAssetId: 140,
+  sessionStatus: 'IN_PROGRESS',
+  currentStage: 'CONVERSING',
+  analysis: DrawingStageAnalysisDto(
+    analysisId: 700,
+    analysisType: 'OBJECT_DETECTION',
+    status: 'SUCCEEDED',
   ),
   nextAction: 'POLL_ANALYSIS',
 );
@@ -544,10 +705,12 @@ final class _CompletionRepository implements DrawingRepository {
   _CompletionRepository({
     this.completer,
     this.completionError,
+    this.completionResponse = _completeResponse,
     this.reflectionError,
   });
 
   final Completer<DrawingStageCompleteResponseDto>? completer;
+  final DrawingStageCompleteResponseDto completionResponse;
   Object? completionError;
   int completeCalls = 0;
   final List<String> completionKeys = [];
@@ -567,7 +730,7 @@ final class _CompletionRepository implements DrawingRepository {
     completionKeys.add(idempotencyKey);
     completionMetadata.add(metadata);
     if (completionError case final error?) return Future.error(error);
-    return completer?.future ?? Future.value(_completeResponse);
+    return completer?.future ?? Future.value(completionResponse);
   }
 
   @override
@@ -654,16 +817,21 @@ final class _RecordingInterceptor extends Interceptor {
           requestOptions: options,
           statusCode: 200,
           data: const {
-            'drawingSessionId': 42,
-            'finalAssetId': 140,
-            'sessionStatus': 'IN_PROGRESS',
-            'currentStage': 'ANALYZING',
-            'analysis': {
-              'analysisId': 700,
-              'analysisType': 'INTERMEDIATE',
-              'status': 'PENDING',
+            'success': true,
+            'code': 'COMMON_200',
+            'message': '요청에 성공했습니다.',
+            'data': {
+              'drawingSessionId': 42,
+              'finalAssetId': 140,
+              'sessionStatus': 'IN_PROGRESS',
+              'currentStage': 'CONVERSING',
+              'analysis': {
+                'analysisId': 700,
+                'analysisType': 'OBJECT_DETECTION',
+                'status': 'SUCCEEDED',
+              },
+              'nextAction': 'SELECT_EMOTION',
             },
-            'nextAction': 'POLL_ANALYSIS',
           },
         ),
       );

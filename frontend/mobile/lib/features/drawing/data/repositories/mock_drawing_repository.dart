@@ -154,13 +154,13 @@ final class MockDrawingRepository implements DrawingRepository {
       'drawingSessionId': 42,
       'finalAssetId': 140,
       'sessionStatus': 'IN_PROGRESS',
-      'currentStage': 'ANALYZING',
+      'currentStage': 'CONVERSING',
       'analysis': {
         'analysisId': 700,
-        'analysisType': 'INTERMEDIATE',
-        'status': 'PENDING',
+        'analysisType': 'OBJECT_DETECTION',
+        'status': 'SUCCEEDED',
       },
-      'nextAction': 'POLL_ANALYSIS',
+      'nextAction': 'SELECT_EMOTION',
     });
   }
 
