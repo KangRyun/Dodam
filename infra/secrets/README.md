@@ -3,7 +3,7 @@
 이 폴더의 실제 비밀 파일(`*.json` 등)은 **`.gitignore`(`secrets/`)로 무시**된다. 이 `README.md`만 커밋된다.
 compose(`docker-compose.yml`)의 top-level `secrets:` 가 파일을 읽어 컨테이너에 read-only로 주입한다.
 
-## ⚠️ 배포 서버의 실제 파일은 이 폴더가 아니라 `/opt/dodam/secrets/` 에 둔다
+## ⚠️ 배포 서버의 실제 파일은 이 폴더가 아니라 `/etc/dodam/secrets/` 에 둔다
 
 Jenkins 파이프라인은 **Jenkins 컨테이너 안에서 호스트 도커 데몬을 호출**한다(Docker-out-of-Docker).
 compose의 상대경로(`./secrets/...`)는 Jenkins 컨테이너 안 워크스페이스 기준으로 해석되지만
@@ -14,6 +14,10 @@ compose의 상대경로(`./secrets/...`)는 Jenkins 컨테이너 안 워크스�
 `Secrets Preflight` 스테이지가 상대경로를 발견하면 빌드를 실패시킨다.
 
 이 폴더는 **로컬 개발용**(호스트에서 직접 `docker compose` 를 돌릴 때)이다.
+
+경로를 `/etc/dodam/` 아래로 두는 이유: 이 서버의 운영 비밀 파일은 이미
+`/etc/dodam/backup-passphrase`(DB 백업 암호, S15P11B209-353)를 쓰고 있다. 같은 규칙에 맞춰
+**서버 운영 비밀 = `/etc/dodam/`** 로 통일한다 — 위치가 갈리면 백업·권한 점검에서 빠뜨리기 쉽다.
 
 ## fcm-service-account.json — FCM 푸시 발송용 (S15P11B209-619)
 
@@ -27,13 +31,13 @@ compose의 상대경로(`./secrets/...`)는 Jenkins 컨테이너 안 워크스�
 
 1. 워크스페이스 밖 경로에 폴더를 만들고 JSON을 둔다 (권한은 소유자만 읽기):
    ```
-   sudo mkdir -p /opt/dodam/secrets
-   sudo install -m 600 -o root -g root fcm-service-account.json /opt/dodam/secrets/
+   sudo mkdir -p /etc/dodam/secrets
+   sudo install -m 600 -o root -g root fcm-service-account.json /etc/dodam/secrets/
    ```
 2. Jenkins 크리덴셜 `dodam-env` 에 두 줄 추가 — **절대경로**로 (교체가 아니라 기존 키 + 신규 키 병합, S15P11B209-386):
    ```
    APP_PUSH_FCM_ENABLED=true
-   FCM_CREDENTIALS_HOST_PATH=/opt/dodam/secrets/fcm-service-account.json
+   FCM_CREDENTIALS_HOST_PATH=/etc/dodam/secrets/fcm-service-account.json
    ```
 3. 재배포. 컨테이너 내부 `/run/secrets/fcm-service-account.json` 로 마운트된다.
 
