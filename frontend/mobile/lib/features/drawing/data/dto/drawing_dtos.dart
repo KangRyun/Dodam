@@ -66,16 +66,32 @@ final class CreateDrawingSessionRequestDto {
     required this.childId,
     required this.drawingTypeId,
     required this.inputMethod,
+    required this.clientStartedAt,
     this.selectionActor,
+    this.canvasWidth,
+    this.canvasHeight,
+    this.canvasBackgroundColor,
   });
   final int childId, drawingTypeId;
   final String inputMethod;
+  final String clientStartedAt;
   final String? selectionActor;
+  final int? canvasWidth, canvasHeight;
+  final String? canvasBackgroundColor;
   Map<String, dynamic> toJson() => {
     'childId': childId,
     'drawingTypeId': drawingTypeId,
     'inputMethod': inputMethod,
+    'clientStartedAt': clientStartedAt,
     if (selectionActor != null) 'selectionActor': selectionActor,
+    if (canvasWidth != null &&
+        canvasHeight != null &&
+        canvasBackgroundColor != null)
+      'canvas': {
+        'width': canvasWidth,
+        'height': canvasHeight,
+        'backgroundColor': canvasBackgroundColor,
+      },
   };
 }
 
