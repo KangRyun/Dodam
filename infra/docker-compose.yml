@@ -116,10 +116,24 @@ services:
   # ───────────────────────────────────────────────────────────────
   # minio-init — 1회성 프로비저닝. 버킷 dodam·프리픽스·최소권한 계정 2벌 생성 후 종료.
   #   be-rw(버킷 rw) / ai-ro(images/ 읽기전용). 스크립트: infra/minio/init.sh
+  #
+  # ⚠️ 평시 배포에서는 뜨지 않는다(profiles: init) — 2026-07-26 장애 재발 방지.
+  #   프로비저닝은 멱등한 1회성 작업인데, 이게 실패하면서 backend·nginx까지 막아
+  #   서비스가 두 번 전면 중단됐다(빌드 191·192). 게이트웨이의 가용성을
+  #   1회성 초기화 작업에 묶지 않는다.
+  #
+  # 실행이 필요할 때(최초 구축·MinIO 재생성·정책 변경)만 수동으로:
+  #   docker compose --profile init build minio-init
+  #   docker compose --profile init run --rm minio-init
   # ───────────────────────────────────────────────────────────────
   minio-init:
-    image: minio/mc:RELEASE.2025-04-16T18-13-26Z   # latest 금지 — 실존하는 안정 태그로 확인·교체
+    # 스크립트·정책은 이미지에 bake — bind 마운트 금지(infra/minio/Dockerfile 주석의 DooD 경로 함정 참조)
+    build:
+      context: ./minio           # 빌드 컨텍스트는 tar 로 데몬에 전송 → 실행 위치(호스트/Jenkins) 무관
+      dockerfile: Dockerfile
+    image: dodam-minio-init:local
     container_name: dodam-minio-init
+    profiles: ["init"]           # ← 기본 up -d 대상에서 제외. 위 수동 명령으로만 기동.
     depends_on:
       - minio
     environment:
@@ -129,9 +143,7 @@ services:
       MINIO_BE_PASSWORD: ${MINIO_BE_PASSWORD}
       MINIO_AI_USER: ${MINIO_AI_USER}           # dodam-ai-ro
       MINIO_AI_PASSWORD: ${MINIO_AI_PASSWORD}
-    entrypoint: ["/bin/sh", "/init/init.sh"]
-    volumes:
-      - ./minio:/init:ro
+    # entrypoint·스크립트는 이미지에 내장(infra/minio/Dockerfile) — 여기서 마운트하지 않는다.
     networks:
       - dodam-net
     restart: "no"     # 1회성 — 프로비저닝 후 종료(정상적으로 Exited 0)
@@ -236,8 +248,10 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
-      minio-init:
-        condition: service_completed_successfully
+      # ⚠️ minio-init 에는 의존하지 않는다 — 2026-07-26 장애의 직접 연결고리였다.
+      #   service_completed_successfully 로 묶여 있어 1회성 프로비저닝이 실패하자
+      #   backend 가 기동조차 못 했고, backend 를 기다리던 nginx 까지 멈춰 전면 중단됐다.
+      #   프로비저닝(버킷·계정)은 배포와 분리된 선행 조건으로 다룬다(minio-init 은 profiles: init).
 
     # actuator가 없어 HTTP 헬스체크 불가 → 8080 리슨 여부만 TCP로 확인 (jre-jammy에 bash 존재)
     #   더 정확한 헬스체크를 원하면 actuator 추가 후 /actuator/health 로 교체 (리뷰 포인트)
