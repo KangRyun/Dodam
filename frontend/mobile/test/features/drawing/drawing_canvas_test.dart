@@ -202,6 +202,104 @@ void main() {
     expect(find.text('다 그렸어요!'), findsOneWidget);
   });
 
+  testWidgets('844×419 모바일 가로에서는 Canvas와 도구 패널을 한 화면에 배치한다', (tester) async {
+    await _pumpDrawing(tester, size: const Size(844, 419));
+
+    expect(tester.takeException(), isNull);
+    expect(
+      find.byKey(const ValueKey('drawing-layout-compact-landscape')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('drawing-tool-panel-scroll')),
+      findsOneWidget,
+    );
+    expect(
+      tester.getRect(find.byKey(const ValueKey('drawing-canvas'))).bottom,
+      lessThanOrEqualTo(419),
+    );
+  });
+
+  testWidgets('더 작은 모바일 가로에서도 compact Layout이 overflow 없이 유지된다', (
+    tester,
+  ) async {
+    await _pumpDrawing(tester, size: const Size(700, 360));
+
+    expect(tester.takeException(), isNull);
+    expect(
+      find.byKey(const ValueKey('drawing-layout-compact-landscape')),
+      findsOneWidget,
+    );
+    expect(
+      tester
+          .getRect(find.byKey(const ValueKey('drawing-tool-panel-scroll')))
+          .bottom,
+      lessThanOrEqualTo(360),
+    );
+  });
+
+  testWidgets('900×520 경계에서는 낮은 높이를 우선해 compact Layout을 사용한다', (tester) async {
+    await _pumpDrawing(tester, size: const Size(900, 520));
+
+    expect(tester.takeException(), isNull);
+    expect(
+      find.byKey(const ValueKey('drawing-layout-compact-landscape')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('drawing-layout-tablet')), findsNothing);
+  });
+
+  testWidgets('1194×419 태블릿 너비도 낮은 높이에서는 compact Layout을 사용한다', (tester) async {
+    await _pumpDrawing(tester, size: const Size(1194, 419));
+
+    expect(tester.takeException(), isNull);
+    expect(
+      find.byKey(const ValueKey('drawing-layout-compact-landscape')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('drawing-layout-tablet')), findsNothing);
+  });
+
+  testWidgets('900×521 경계부터 tablet Layout을 사용한다', (tester) async {
+    await _pumpDrawing(tester, size: const Size(900, 521));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('drawing-layout-tablet')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('drawing-layout-compact-landscape')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('약 800px 세로 태블릿은 Canvas와 도구 패널을 스크롤 가능한 세로로 배치한다', (
+    tester,
+  ) async {
+    await _pumpDrawing(tester, size: const Size(800, 1000));
+
+    expect(tester.takeException(), isNull);
+    expect(
+      find.byKey(const ValueKey('drawing-layout-stacked')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+  });
+
+  testWidgets('1194px 태블릿 가로에서는 넓은 Canvas와 우측 패널 구조를 유지한다', (tester) async {
+    await _pumpDrawing(tester, size: const Size(1194, 834));
+
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('drawing-layout-tablet')), findsOneWidget);
+    final canvasRect = tester.getRect(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    final panelRect = tester.getRect(
+      find.byKey(const ValueKey('drawing-tool-panel-scroll')),
+    );
+    expect(canvasRect.width, greaterThan(panelRect.width));
+    expect(canvasRect.right, lessThan(panelRect.left));
+  });
+
   testWidgets('넓지만 높이가 작은 화면에서는 도구 패널이 스크롤되어 overflow가 없다', (tester) async {
     await _pumpDrawing(tester, size: const Size(1200, 600));
 

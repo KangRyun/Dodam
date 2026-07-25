@@ -682,23 +682,41 @@ class _DrawingScreenState extends State<DrawingScreen> {
             onRetrySave: () => unawaited(_syncCoordinator.retry()),
             questionController: _questionController,
           );
-          if (constraints.maxWidth >= 900) {
+          final screenSize = MediaQuery.sizeOf(context);
+          final useCompactLandscape =
+              screenSize.width >= 640 && screenSize.height <= 520;
+          final useTabletLayout =
+              !useCompactLandscape && screenSize.width >= 900;
+          if (useCompactLandscape || useTabletLayout) {
+            final padding = useCompactLandscape ? AppSpacing.sm : AppSpacing.lg;
+            final panelWidth = useCompactLandscape ? 240.0 : 320.0;
             return Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
+              key: ValueKey(
+                useCompactLandscape
+                    ? 'drawing-layout-compact-landscape'
+                    : 'drawing-layout-tablet',
+              ),
+              padding: EdgeInsets.all(padding),
               child: Row(
                 children: [
                   Expanded(flex: 3, child: canvas),
-                  const SizedBox(width: AppSpacing.lg),
-                  SizedBox(width: 320, child: sidePanel),
+                  SizedBox(
+                    width: useCompactLandscape ? AppSpacing.sm : AppSpacing.lg,
+                  ),
+                  SizedBox(width: panelWidth, child: sidePanel),
                 ],
               ),
             );
           }
+          final canvasHeight = constraints.maxWidth >= 720
+              ? min(520.0, max(420.0, constraints.maxHeight * 0.55))
+              : 420.0;
           return SingleChildScrollView(
+            key: const ValueKey('drawing-layout-stacked'),
             padding: const EdgeInsets.all(AppSpacing.md),
             child: Column(
               children: [
-                SizedBox(height: 420, child: canvas),
+                SizedBox(height: canvasHeight, child: canvas),
                 const SizedBox(height: AppSpacing.md),
                 sidePanel,
               ],
@@ -785,52 +803,66 @@ class _CanvasPanel extends StatelessWidget {
         ),
       ],
     ),
-    child: Stack(
-      fit: StackFit.expand,
-      children: [
-        RepaintBoundary(
-          key: repaintBoundaryKey,
-          child: DrawingCanvas(
-            strokes: strokes,
-            onPointerDown: onPointerDown,
-            onPointerMove: onPointerMove,
-            onPointerUp: onPointerUp,
-            backgroundImage: backgroundImage,
-            inputEnabled: inputEnabled,
-            onBackgroundLoaded: onBackgroundLoaded,
-            onBackgroundError: onBackgroundError,
-          ),
-        ),
-        AiQuestionBubbleOverlay(
-          question: question,
-          visible: showQuestion,
-          selectedOptionId: selectedQuestionOptionId,
-          onOptionSelected: onQuestionOptionSelected,
-          showResponseActions: showQuestionResponseActions,
-          submissionStatus: answerSubmissionStatus,
-          skipStatus: questionSkipStatus,
-          onSkip: onQuestionSkip,
-          endStatus: conversationEndStatus,
-          onEnd: onConversationEnd,
-          voiceRecordingController: voiceRecordingController,
-          voiceAnswerUploadStatus: voiceAnswerUploadStatus,
-          onRetryVoiceAnswerUpload: onRetryVoiceAnswerUpload,
-        ),
-        if (sttResultController case final controller?)
-          Positioned(
-            left: AppSpacing.md,
-            bottom: AppSpacing.md,
-            child: SttResultPanel(controller: controller),
-          ),
-        if (!inputEnabled)
-          _DraftRestoreOverlay(
-            status: restoreStatus,
-            onContinue: onContinue,
-            onStartNew: onStartNew,
-            onRetryQuery: onRetryQuery,
-            onRetryImage: onRetryImage,
-          ),
-      ],
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final sttMaxHeight = (constraints.maxHeight - AppSpacing.md * 2)
+            .clamp(96.0, 180.0)
+            .toDouble();
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            RepaintBoundary(
+              key: repaintBoundaryKey,
+              child: DrawingCanvas(
+                strokes: strokes,
+                onPointerDown: onPointerDown,
+                onPointerMove: onPointerMove,
+                onPointerUp: onPointerUp,
+                backgroundImage: backgroundImage,
+                inputEnabled: inputEnabled,
+                onBackgroundLoaded: onBackgroundLoaded,
+                onBackgroundError: onBackgroundError,
+              ),
+            ),
+            AiQuestionBubbleOverlay(
+              question: question,
+              visible: showQuestion,
+              selectedOptionId: selectedQuestionOptionId,
+              onOptionSelected: onQuestionOptionSelected,
+              showResponseActions: showQuestionResponseActions,
+              submissionStatus: answerSubmissionStatus,
+              skipStatus: questionSkipStatus,
+              onSkip: onQuestionSkip,
+              endStatus: conversationEndStatus,
+              onEnd: onConversationEnd,
+              voiceRecordingController: voiceRecordingController,
+              voiceAnswerUploadStatus: voiceAnswerUploadStatus,
+              onRetryVoiceAnswerUpload: onRetryVoiceAnswerUpload,
+            ),
+            if (sttResultController case final controller?)
+              Positioned(
+                left: AppSpacing.md,
+                right: AppSpacing.md,
+                bottom: AppSpacing.md,
+                child: Align(
+                  alignment: Alignment.bottomLeft,
+                  child: SttResultPanel(
+                    controller: controller,
+                    maxHeight: sttMaxHeight,
+                  ),
+                ),
+              ),
+            if (!inputEnabled)
+              _DraftRestoreOverlay(
+                status: restoreStatus,
+                onContinue: onContinue,
+                onStartNew: onStartNew,
+                onRetryQuery: onRetryQuery,
+                onRetryImage: onRetryImage,
+              ),
+          ],
+        );
+      },
     ),
   );
 }
