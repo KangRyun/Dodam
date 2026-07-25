@@ -16,7 +16,16 @@ FormData buildDraftFormData(
     filename: preview.fileName,
     contentType: DioMediaType.parse(preview.mimeType),
   ),
-  'canvasState': jsonEncode(canvasState.toJson()),
+  'canvasState': MultipartFile.fromBytes(
+    utf8.encode(
+      jsonEncode({
+        'lastEventSequence': canvasState.lastEventSequence,
+        'clientSavedAt': canvasState.clientSavedAt,
+      }),
+    ),
+    filename: 'canvas-state.json',
+    contentType: DioMediaType.parse('application/json'),
+  ),
 });
 
 FormData buildDrawingCompleteFormData(
@@ -109,7 +118,7 @@ final class RemoteDrawingRepository implements DrawingRepository {
       'drawing-sessions/$sessionId/draft',
       data: buildDraftFormData(preview, canvasState),
     );
-    return DraftSaveResponseDto.fromJson(_payload(response.data!));
+    return DraftSaveResponseDto.fromJson(envelopeObject(response.data));
   }
 
   @override

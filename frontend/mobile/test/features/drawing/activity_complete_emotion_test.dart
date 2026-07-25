@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:dodam/app/router/app_routes.dart';
 import 'package:dodam/core/config/api_environment.dart';
@@ -38,14 +39,19 @@ void main() {
     expect(request.method, 'PUT');
     expect(request.uri.path, '/api/v1/drawing-sessions/42/draft');
     final form = request.data as FormData;
-    expect(form.files.single.key, 'preview');
-    expect(form.fields.single.key, 'canvasState');
-    expect(form.fields.single.value, contains('"lastEventSequence":17'));
-    expect(form.fields.map((field) => field.key), isNot(contains('image')));
+    expect(form.fields, isEmpty);
     expect(
-      form.fields.map((field) => field.key),
-      isNot(contains('lastEventSequence')),
+      form.files.map((part) => part.key),
+      containsAll(['preview', 'canvasState']),
     );
+    final canvasState = form.files.singleWhere(
+      (part) => part.key == 'canvasState',
+    );
+    expect(canvasState.value.contentType?.toString(), 'application/json');
+    expect(jsonDecode(utf8.decode(await _multipartBytes(canvasState.value))), {
+      'lastEventSequence': 17,
+      'clientSavedAt': '2026-07-22T10:00:00Z',
+    });
     expect(result.drawingAssetId, 140);
     expect(result.assetVersion, 4);
   });
@@ -517,6 +523,10 @@ const _png = BinaryUploadDto(
   mimeType: 'image/png',
 );
 
+Future<List<int>> _multipartBytes(MultipartFile file) => file
+    .finalize()
+    .fold<List<int>>(<int>[], (bytes, chunk) => bytes..addAll(chunk));
+
 const _completeResponse = DrawingStageCompleteResponseDto(
   drawingSessionId: 42,
   finalAssetId: 140,
@@ -623,11 +633,16 @@ final class _RecordingInterceptor extends Interceptor {
           requestOptions: options,
           statusCode: 200,
           data: const {
-            'drawingAssetId': 140,
-            'assetVersion': 4,
-            'lastEventSequence': 17,
-            'savedAt': '2026-07-22T10:00:01Z',
-            'expiresAt': '2026-07-29T10:00:01Z',
+            'success': true,
+            'code': 'COMMON_200',
+            'message': '요청에 성공했습니다.',
+            'data': {
+              'drawingAssetId': 140,
+              'assetVersion': 4,
+              'lastEventSequence': 17,
+              'savedAt': '2026-07-22T10:00:01Z',
+              'expiresAt': '2026-07-29T10:00:01Z',
+            },
           },
         ),
       );
