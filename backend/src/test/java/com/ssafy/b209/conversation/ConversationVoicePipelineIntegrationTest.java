@@ -6,11 +6,13 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ssafy.b209.auth.token.AuthenticatedUser;
@@ -46,6 +48,7 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -399,15 +402,7 @@ class ConversationVoicePipelineIntegrationTest {
     byte[] uploaded = wav(1);
     long messageId = uploadAndReturnMessageId("voice-answer-key-201", uploaded);
 
-    byte[] streamed =
-        mockMvc
-            .perform(get("/api/v1/conversation-messages/{messageId}/audio", messageId))
-            .andExpect(status().isOk())
-            .andExpect(header().string("Content-Type", "audio/wav"))
-            .andExpect(header().string("Cache-Control", "no-store, private"))
-            .andReturn()
-            .getResponse()
-            .getContentAsByteArray();
+    byte[] streamed = streamAudio(messageId, "audio/wav");
 
     assertThat(streamed).isEqualTo(uploaded);
   }
@@ -468,14 +463,7 @@ class ConversationVoicePipelineIntegrationTest {
                 QUESTION_MESSAGE_ID))
         .isEqualTo("SUCCESS");
 
-    byte[] streamed =
-        mockMvc
-            .perform(get("/api/v1/conversation-messages/{messageId}/audio", QUESTION_MESSAGE_ID))
-            .andExpect(status().isOk())
-            .andExpect(header().string("Content-Type", "audio/mpeg"))
-            .andReturn()
-            .getResponse()
-            .getContentAsByteArray();
+    byte[] streamed = streamAudio(QUESTION_MESSAGE_ID, "audio/mpeg");
     assertThat(streamed).isNotEmpty();
   }
 
@@ -544,6 +532,30 @@ class ConversationVoicePipelineIntegrationTest {
   }
 
   // ---------------------------------------------------------------- 요청·fixture 도우미
+
+  /**
+   * 음성 재생 endpoint의 본문을 async 완료 후 읽는다.
+   *
+   * <p>재생 응답은 {@code StreamingResponseBody}라 MockMvc가 async를 시작하고 본문은 별도 Executor Thread가 쓴다. 최초
+   * 결과에서 바로 Byte를 읽으면 쓰기 완료 전 잘린 본문을 보게 되어 느린 실행 환경에서만 깨진다. Spring 권장대로 async 시작을 확인하고 {@code
+   * asyncDispatch}로 재-dispatch해 완결된 응답을 읽는다.
+   */
+  private byte[] streamAudio(long messageId, String expectedContentType) throws Exception {
+    MvcResult started =
+        mockMvc
+            .perform(get("/api/v1/conversation-messages/{messageId}/audio", messageId))
+            .andExpect(request().asyncStarted())
+            .andReturn();
+
+    return mockMvc
+        .perform(asyncDispatch(started))
+        .andExpect(status().isOk())
+        .andExpect(header().string("Content-Type", expectedContentType))
+        .andExpect(header().string("Cache-Control", "no-store, private"))
+        .andReturn()
+        .getResponse()
+        .getContentAsByteArray();
+  }
 
   private org.springframework.test.web.servlet.RequestBuilder requestTts(
       long messageId, String bodyFields) {
