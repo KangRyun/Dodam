@@ -218,6 +218,8 @@ public class DrawingSessionQueryService {
         asset.getAssetVersion(),
         asset.getMimeType(),
         asset.getFileSizeBytes(),
+        asset.getWidthPx(),
+        asset.getHeightPx(),
         asset.getCapturedAt().toInstant(ZoneOffset.UTC),
         asset.getCreatedAt().toInstant(ZoneOffset.UTC));
   }

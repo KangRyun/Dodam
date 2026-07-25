@@ -23,6 +23,9 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
+import javax.imageio.ImageIO;
+import javax.imageio.ImageReader;
+import javax.imageio.stream.ImageInputStream;
 
 /**
  * 이미지 Stream을 설정된 로컬 파일 시스템 Root에 저장하는 {@link ImageStorage} 구현체다.
@@ -135,6 +138,7 @@ public final class LocalImageStorage implements ImageStorage {
         copied = copyToTemporaryFile(inputStream, temporaryFile);
         validateCopiedImage(command.size(), copied, declaredFormat);
       }
+      ImageDimensions dimensions = readImageDimensions(temporaryFile);
       return moveToFinalFile(
           temporaryFile,
           root,
@@ -142,7 +146,8 @@ public final class LocalImageStorage implements ImageStorage {
           date,
           declaredFormat,
           copied.size(),
-          copied.checksumSha256());
+          copied.checksumSha256(),
+          dimensions);
     } catch (BusinessException exception) {
       throw exception;
     } catch (IOException | SecurityException exception) {
@@ -314,7 +319,8 @@ public final class LocalImageStorage implements ImageStorage {
       LocalDate date,
       ImageFormat format,
       long size,
-      String checksumSha256)
+      String checksumSha256,
+      ImageDimensions dimensions)
       throws IOException {
     for (int attempt = 0; attempt < MAX_FILE_NAME_ATTEMPTS; attempt++) {
       UUID uuid = uuidSupplier.get();
@@ -339,7 +345,13 @@ public final class LocalImageStorage implements ImageStorage {
                 date.getDayOfMonth(),
                 storedFileName);
         return new StoredImage(
-            storageKey, storedFileName, format.contentType, size, checksumSha256);
+            storageKey,
+            storedFileName,
+            format.contentType,
+            size,
+            checksumSha256,
+            dimensions.widthPx(),
+            dimensions.heightPx());
       } catch (FileAlreadyExistsException ignored) {
         // 동시에 같은 UUID가 선점된 경우 새 UUID로 재시도한다.
       }
@@ -352,6 +364,34 @@ public final class LocalImageStorage implements ImageStorage {
       Files.move(source, destination, StandardCopyOption.ATOMIC_MOVE);
     } catch (AtomicMoveNotSupportedException ignored) {
       Files.move(source, destination);
+    }
+  }
+
+  private ImageDimensions readImageDimensions(Path imageFile) {
+    try (ImageInputStream imageInput = ImageIO.createImageInputStream(imageFile.toFile())) {
+      if (imageInput == null) {
+        throw new BusinessException(ImageStorageErrorCode.INVALID_IMAGE_FILE);
+      }
+      var readers = ImageIO.getImageReaders(imageInput);
+      if (!readers.hasNext()) {
+        throw new BusinessException(ImageStorageErrorCode.INVALID_IMAGE_FILE);
+      }
+      ImageReader reader = readers.next();
+      try {
+        reader.setInput(imageInput, true, true);
+        int width = reader.getWidth(0);
+        int height = reader.getHeight(0);
+        if (width <= 0 || height <= 0) {
+          throw new BusinessException(ImageStorageErrorCode.INVALID_IMAGE_FILE);
+        }
+        return new ImageDimensions(width, height);
+      } finally {
+        reader.dispose();
+      }
+    } catch (BusinessException exception) {
+      throw exception;
+    } catch (IOException | RuntimeException exception) {
+      throw new BusinessException(ImageStorageErrorCode.INVALID_IMAGE_FILE);
     }
   }
 
@@ -421,6 +461,8 @@ public final class LocalImageStorage implements ImageStorage {
   }
 
   private record CopyResult(byte[] header, int headerLength, long size, String checksumSha256) {}
+
+  private record ImageDimensions(int widthPx, int heightPx) {}
 
   private enum ImageFormat {
     PNG("image/png", "png", Set.of("png")),

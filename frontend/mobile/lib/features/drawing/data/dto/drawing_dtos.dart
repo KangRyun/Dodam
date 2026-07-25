@@ -102,9 +102,9 @@ final class DrawingAssetDto {
     required this.assetVersion,
     required this.fileUrl,
     required this.mimeType,
-    required this.widthPx,
-    required this.heightPx,
     this.fileSizeBytes,
+    this.widthPx,
+    this.heightPx,
     this.checksumSha256,
     this.expiresAt,
     this.createdAt,
@@ -117,15 +117,16 @@ final class DrawingAssetDto {
         assetVersion: json['assetVersion'] as int,
         fileUrl: json['fileUrl'] as String,
         mimeType: json['mimeType'] as String,
-        widthPx: json['widthPx'] as int,
-        heightPx: json['heightPx'] as int,
+        widthPx: json['widthPx'] as int?,
+        heightPx: json['heightPx'] as int?,
         fileSizeBytes: json['fileSizeBytes'] as int?,
         checksumSha256: json['checksumSha256'] as String?,
         expiresAt: json['expiresAt'] as String?,
         createdAt: json['createdAt'] as String?,
         drawingSessionId: json['drawingSessionId'] as int?,
       );
-  final int assetId, assetVersion, widthPx, heightPx;
+  final int assetId, assetVersion;
+  final int? widthPx, heightPx;
   final String assetType, fileUrl, mimeType;
   final int? fileSizeBytes;
   final int? drawingSessionId;
@@ -287,6 +288,8 @@ final class DraftSaveResponseDto {
     required this.lastEventSequence,
     required this.savedAt,
     required this.expiresAt,
+    this.widthPx,
+    this.heightPx,
   });
 
   factory DraftSaveResponseDto.fromJson(Map<String, dynamic> json) =>
@@ -296,10 +299,13 @@ final class DraftSaveResponseDto {
         lastEventSequence: json['lastEventSequence'] as int?,
         savedAt: json['savedAt'] as String,
         expiresAt: json['expiresAt'] as String?,
+        widthPx: json['widthPx'] as int?,
+        heightPx: json['heightPx'] as int?,
       );
 
   final int drawingAssetId, assetVersion;
   final int? lastEventSequence;
+  final int? widthPx, heightPx;
   final String savedAt;
   final String? expiresAt;
 }

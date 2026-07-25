@@ -99,6 +99,8 @@ class DrawingDraftServiceTest {
     assertThat(response.lastEventSequence()).isEqualTo(11);
     assertThat(response.finalSnapshot()).isFalse();
     assertThat(response.savedAt()).isEqualTo(NOW);
+    assertThat(response.widthPx()).isEqualTo(1280);
+    assertThat(response.heightPx()).isEqualTo(720);
     verify(imageStorage).store(preview);
     verify(imageStorage, never()).delete(any());
   }
@@ -227,7 +229,7 @@ class DrawingDraftServiceTest {
   }
 
   private StoredImage storedImage() {
-    return new StoredImage(STORAGE_KEY, "new.png", "image/png", 1, "b".repeat(64));
+    return new StoredImage(STORAGE_KEY, "new.png", "image/png", 1, "b".repeat(64), 1280, 720);
   }
 
   private void assertError(Runnable invocation, DrawingErrorCode expected) {

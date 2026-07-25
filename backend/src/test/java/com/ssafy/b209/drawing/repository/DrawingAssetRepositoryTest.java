@@ -45,8 +45,12 @@ class DrawingAssetRepositoryTest {
     entityManager.clear();
 
     assertThat(drawingAssetRepository.findLatestDraft(firstSession.getId()))
-        .map(DrawingAsset::getId)
-        .contains(latest.getId());
+        .hasValueSatisfying(
+            asset -> {
+              assertThat(asset.getId()).isEqualTo(latest.getId());
+              assertThat(asset.getWidthPx()).isEqualTo(1280);
+              assertThat(asset.getHeightPx()).isEqualTo(720);
+            });
   }
 
   private DrawingSession saveSession(String idempotencyKey) {
@@ -85,6 +89,8 @@ class DrawingAssetRepositoryTest {
             "drafts/" + session.getId() + "/" + version + ".png",
             "image/png",
             100,
+            1280,
+            720,
             "a".repeat(64),
             lastEventSequence,
             LocalDateTime.of(2026, 7, 22, 1, version),
