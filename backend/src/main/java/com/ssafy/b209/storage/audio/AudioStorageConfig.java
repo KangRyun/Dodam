@@ -1,12 +1,18 @@
 package com.ssafy.b209.storage.audio;
 
 import java.time.Clock;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /** 음성 전용 로컬 저장 구현체를 Spring Bean으로 등록한다. */
 @Configuration(proxyBeanMethods = false)
+@ConditionalOnProperty(
+    prefix = "app.storage",
+    name = "mode",
+    havingValue = "local",
+    matchIfMissing = true)
 @EnableConfigurationProperties(AudioStorageProperties.class)
 public class AudioStorageConfig {
 

@@ -9,7 +9,9 @@ import java.nio.ByteOrder;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.InvalidPathException;
 import java.nio.file.LinkOption;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
@@ -139,6 +141,61 @@ public final class LocalAudioStorage implements AudioStorage {
       throw new BusinessException(AudioStorageErrorCode.AUDIO_STORAGE_CONFLICT);
     } catch (BusinessException exception) {
       throw exception;
+    } catch (IOException | SecurityException exception) {
+      throw new BusinessException(AudioStorageErrorCode.AUDIO_STORAGE_FAILED);
+    }
+  }
+
+  /** {@inheritDoc} */
+  @Override
+  public StoredAudioContent read(String storageKey) {
+    try {
+      String[] segments = validateKey(storageKey);
+      Path root = prepareRoot();
+      Path current = root;
+      for (int index = 0; index < segments.length - 1; index++) {
+        Path candidate = current.resolve(segments[index]).normalize();
+        validateInside(root, candidate);
+        if (!Files.exists(candidate, LinkOption.NOFOLLOW_LINKS)) {
+          throw new BusinessException(AudioStorageErrorCode.AUDIO_NOT_FOUND);
+        }
+        if (Files.isSymbolicLink(candidate)
+            || !Files.isDirectory(candidate, LinkOption.NOFOLLOW_LINKS)) {
+          throw new BusinessException(AudioStorageErrorCode.INVALID_STORAGE_PATH);
+        }
+        current = candidate.toRealPath();
+        validateInside(root, current);
+      }
+
+      Path target = current.resolve(segments[segments.length - 1]).normalize();
+      validateInside(root, target);
+      if (!Files.exists(target, LinkOption.NOFOLLOW_LINKS)) {
+        throw new BusinessException(AudioStorageErrorCode.AUDIO_NOT_FOUND);
+      }
+      if (Files.isSymbolicLink(target) || !Files.isRegularFile(target, LinkOption.NOFOLLOW_LINKS)) {
+        throw new BusinessException(AudioStorageErrorCode.INVALID_STORAGE_PATH);
+      }
+      String filename = target.getFileName().toString();
+      int dot = filename.lastIndexOf('.');
+      String contentType =
+          dot < 0 ? null : AudioFormat.contentTypeForExtension(filename.substring(dot + 1));
+      if (contentType == null) {
+        throw new BusinessException(AudioStorageErrorCode.INVALID_STORAGE_PATH);
+      }
+      long size = Files.size(target);
+      if (size <= 0) {
+        throw new BusinessException(AudioStorageErrorCode.AUDIO_NOT_FOUND);
+      }
+      return new StoredAudioContent(
+          Files.newInputStream(target, StandardOpenOption.READ, LinkOption.NOFOLLOW_LINKS),
+          contentType,
+          size);
+    } catch (BusinessException exception) {
+      throw exception;
+    } catch (NoSuchFileException exception) {
+      throw new BusinessException(AudioStorageErrorCode.AUDIO_NOT_FOUND);
+    } catch (InvalidPathException exception) {
+      throw new BusinessException(AudioStorageErrorCode.INVALID_STORAGE_PATH);
     } catch (IOException | SecurityException exception) {
       throw new BusinessException(AudioStorageErrorCode.AUDIO_STORAGE_FAILED);
     }

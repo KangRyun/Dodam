@@ -79,6 +79,16 @@ app:
   cors:
     allowed-origins: []
   storage:
+    mode: ${STORAGE_MODE:local}
+    s3:
+      endpoint: ${S3_ENDPOINT:http://localhost:9000}
+      region: ${S3_REGION:ap-northeast-2}
+      bucket: ${S3_BUCKET:dodam}
+      access-key: ${MINIO_BE_USER:}
+      secret-key: ${MINIO_BE_PASSWORD:}
+      image-prefix: ${S3_IMAGE_PREFIX:images}
+      audio-prefix: ${S3_AUDIO_PREFIX:audio}
+      path-style-access-enabled: ${S3_PATH_STYLE_ACCESS_ENABLED:true}
     image:
       root: ${LOCAL_IMAGE_STORAGE_ROOT:./storage/images}
       max-size: ${LOCAL_IMAGE_MAX_SIZE:10485760}
