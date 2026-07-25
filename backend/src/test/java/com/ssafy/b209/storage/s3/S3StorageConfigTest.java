@@ -51,7 +51,7 @@ class S3StorageConfigTest {
               assertThat(context).hasNotFailed();
               assertThat(context).hasSingleBean(S3Client.class);
               assertThat(context.getBean(ImageStorage.class)).isInstanceOf(S3ImageStorage.class);
-              assertThat(context).doesNotHaveBean(AudioStorage.class);
+              assertThat(context.getBean(AudioStorage.class)).isInstanceOf(S3AudioStorage.class);
             });
   }
 

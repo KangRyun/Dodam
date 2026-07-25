@@ -1,5 +1,8 @@
 package com.ssafy.b209.storage.s3;
 
+import com.ssafy.b209.storage.audio.AudioStorage;
+import com.ssafy.b209.storage.audio.AudioStorageProperties;
+import com.ssafy.b209.storage.audio.LocalAudioStorage;
 import com.ssafy.b209.storage.image.ImageStorage;
 import com.ssafy.b209.storage.image.ImageStorageProperties;
 import com.ssafy.b209.storage.image.LocalImageStorage;
@@ -18,7 +21,11 @@ import software.amazon.awssdk.services.s3.S3Configuration;
 /** S3 모드에서 MinIO 호환 Client와 Storage Adapter 기반 설정을 등록한다. */
 @Configuration(proxyBeanMethods = false)
 @ConditionalOnProperty(prefix = "app.storage", name = "mode", havingValue = "s3")
-@EnableConfigurationProperties({S3StorageProperties.class, ImageStorageProperties.class})
+@EnableConfigurationProperties({
+  S3StorageProperties.class,
+  ImageStorageProperties.class,
+  AudioStorageProperties.class
+})
 public class S3StorageConfig {
 
   /** Spring이 S3 모드 설정을 생성할 때 사용하는 기본 생성자다. */
@@ -63,5 +70,24 @@ public class S3StorageConfig {
       Clock clock) {
     return new S3ImageStorage(
         s3Client, s3Properties, new LocalImageStorage(imageProperties, clock));
+  }
+
+  /**
+   * 기존 검증·staging 흐름을 재사용하는 S3 음성 저장소를 생성한다.
+   *
+   * @param s3Client S3 호환 API Client
+   * @param s3Properties Bucket과 Prefix 설정
+   * @param audioProperties Local staging 경로와 음성 크기 제한
+   * @param clock 날짜 기반 Storage Key 생성용 UTC 시계
+   * @return S3 모드에서 사용할 음성 Storage
+   */
+  @Bean
+  public AudioStorage audioStorage(
+      S3Client s3Client,
+      S3StorageProperties s3Properties,
+      AudioStorageProperties audioProperties,
+      Clock clock) {
+    return new S3AudioStorage(
+        s3Client, s3Properties, new LocalAudioStorage(audioProperties, clock));
   }
 }
