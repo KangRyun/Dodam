@@ -166,22 +166,34 @@ public class DrawingSessionService {
     }
   }
 
+  /**
+   * 캔버스 설정을 검증한다.
+   *
+   * <p>캔버스 물리 크기는 세션 생성 시점에 필수가 아니다. Stroke는 캔버스 크기와 무관한 정규화 좌표로 저장되고 실제 렌더 크기는 스냅샷 업로드 시점에 확정되므로,
+   * 클라이언트가 렌더 이전에 정확한 크기를 확보하지 못해도 세션 생성을 막지 않는다. 값을 전달한 경우에만 각 필드의 유효 범위를 확인한다. UPLOAD 방식은 캔버스 설정을
+   * 사용하지 않으므로 검증하지 않는다.
+   */
   private void validateCanvas(CreateDrawingSessionRequest request) {
     if (request.inputMethod() != DrawingInputMethod.CANVAS) {
       return;
     }
     CanvasConfigurationRequest canvas = request.canvas();
-    if (canvas == null
-        || !isCanvasSizeValid(canvas.width())
-        || !isCanvasSizeValid(canvas.height())
-        || canvas.backgroundColor() == null
-        || !HEX_COLOR_PATTERN.matcher(canvas.backgroundColor()).matches()) {
+    if (canvas == null) {
+      return;
+    }
+    if (!isCanvasSizeValidOrAbsent(canvas.width())
+        || !isCanvasSizeValidOrAbsent(canvas.height())
+        || !isBackgroundColorValidOrAbsent(canvas.backgroundColor())) {
       throw new BusinessException(DrawingErrorCode.INVALID_CANVAS_CONFIGURATION);
     }
   }
 
-  private boolean isCanvasSizeValid(Integer size) {
-    return size != null && size >= CANVAS_MIN_SIZE && size <= CANVAS_MAX_SIZE;
+  private boolean isCanvasSizeValidOrAbsent(Integer size) {
+    return size == null || (size >= CANVAS_MIN_SIZE && size <= CANVAS_MAX_SIZE);
+  }
+
+  private boolean isBackgroundColorValidOrAbsent(String backgroundColor) {
+    return backgroundColor == null || HEX_COLOR_PATTERN.matcher(backgroundColor).matches();
   }
 
   private CreateDrawingSessionResponse toResponse(DrawingSession session) {

@@ -192,10 +192,31 @@ class DrawingSessionServiceTest {
 
   @Test
   void rejectsInvalidCanvasConfigurations() {
-    assertInvalidCanvas(null);
     assertInvalidCanvas(new CanvasConfigurationRequest(0, 100, "#FFFFFF"));
     assertInvalidCanvas(new CanvasConfigurationRequest(100, 8193, "#FFFFFF"));
     assertInvalidCanvas(new CanvasConfigurationRequest(100, 100, "FFFFFF"));
+  }
+
+  @Test
+  void acceptsCanvasSessionWithoutCanvasConfiguration() {
+    stubSuccessfulCreation();
+
+    CreateDrawingSessionResponse response =
+        service.createDrawingSession(KEY, requestWithCanvas(null));
+
+    assertThat(response.inputMethod()).isEqualTo(CANVAS);
+    assertThat(response.currentStage()).isEqualTo(DrawingStage.DRAWING);
+  }
+
+  @Test
+  void acceptsCanvasSessionWithPartialConfiguration() {
+    stubSuccessfulCreation();
+
+    CreateDrawingSessionResponse response =
+        service.createDrawingSession(
+            KEY, requestWithCanvas(new CanvasConfigurationRequest(1080, null, null)));
+
+    assertThat(response.inputMethod()).isEqualTo(CANVAS);
   }
 
   @Test
@@ -321,12 +342,14 @@ class DrawingSessionServiceTest {
     return session;
   }
 
+  private CreateDrawingSessionRequest requestWithCanvas(CanvasConfigurationRequest canvas) {
+    return new CreateDrawingSessionRequest(
+        1L, 2L, CANVAS, OffsetDateTime.parse("2026-07-21T11:30:00+09:00"), canvas);
+  }
+
   private void assertInvalidCanvas(CanvasConfigurationRequest canvas) {
-    CreateDrawingSessionRequest request =
-        new CreateDrawingSessionRequest(
-            1L, 2L, CANVAS, OffsetDateTime.parse("2026-07-21T11:30:00+09:00"), canvas);
     assertBusinessError(
-        () -> service.createDrawingSession(KEY, request),
+        () -> service.createDrawingSession(KEY, requestWithCanvas(canvas)),
         DrawingErrorCode.INVALID_CANVAS_CONFIGURATION);
   }
 
