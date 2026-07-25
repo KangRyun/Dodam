@@ -74,7 +74,7 @@ public class OAuthLoginService {
             .findById(provisioned.userId())
             .orElseThrow(() -> new BusinessException(AuthErrorCode.AUTH_ACCOUNT_INVALID));
     if (user.getAccountStatus() == AccountStatus.SUSPENDED
-        || user.getAccountStatus() == AccountStatus.WITHDRAWN) {
+        || user.getAccountStatus() == AccountStatus.DELETED) {
       throw new BusinessException(AuthErrorCode.ACCOUNT_SUSPENDED);
     }
     user.recordSuccessfulLogin(LocalDateTime.now(clock));
