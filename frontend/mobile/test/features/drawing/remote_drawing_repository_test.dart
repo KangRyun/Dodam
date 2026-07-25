@@ -63,10 +63,27 @@ void main() {
         childId: 3,
         drawingTypeId: 11,
         inputMethod: 'CANVAS',
+        clientStartedAt: '2026-07-25T08:00:00.000Z',
       ),
     );
 
-    expect(interceptor.requests.single.uri.path, '/api/v1/drawing-sessions');
+    final request = interceptor.requests.single;
+    expect(request.uri.path, '/api/v1/drawing-sessions');
+    expect(request.data, {
+      'childId': 3,
+      'drawingTypeId': 11,
+      'inputMethod': 'CANVAS',
+      'clientStartedAt': '2026-07-25T08:00:00.000Z',
+    });
+    expect(
+      request.headers['Idempotency-Key'],
+      matches(
+        RegExp(
+          r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-'
+          r'[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+        ),
+      ),
+    );
     expect(session.drawingSessionId, 42);
     expect(session.drawingType.code, 'FREE_DRAWING');
   });
