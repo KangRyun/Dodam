@@ -89,6 +89,56 @@ class ChildListIntegrationTest {
   }
 
   @Test
+  void returnsChildDetailWithResponseModesAndRelationship() throws Exception {
+    jdbcTemplate.update(
+        "UPDATE children SET preferred_character = 'MONGLE', "
+            + "profile_image_url = 'https://cdn.example.com/child-1.png' WHERE id = 1");
+    jdbcTemplate.update(
+        "INSERT INTO child_response_modes (child_id, response_mode, display_order) "
+            + "VALUES (1, 'VOICE', 1), (1, 'EMOJI', 0)");
+    int expectedAge =
+        java.time.Period.between(java.time.LocalDate.of(2018, 5, 10), java.time.LocalDate.now())
+            .getYears();
+
+    mockMvc
+        .perform(get("/api/v1/children/1"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.childId").value(1))
+        .andExpect(jsonPath("$.data.nickname").value("child-one"))
+        .andExpect(jsonPath("$.data.birthDate").value("2018-05-10"))
+        .andExpect(jsonPath("$.data.age").value(expectedAge))
+        .andExpect(jsonPath("$.data.profileImageUrl").value("https://cdn.example.com/child-1.png"))
+        .andExpect(jsonPath("$.data.preferredCharacter").value("MONGLE"))
+        .andExpect(jsonPath("$.data.questionDifficulty").value("LOWER_ELEMENTARY"))
+        .andExpect(jsonPath("$.data.responseModes[0]").value("EMOJI"))
+        .andExpect(jsonPath("$.data.responseModes[1]").value("VOICE"))
+        .andExpect(jsonPath("$.data.tutorialStatus").value("NOT_STARTED"))
+        .andExpect(jsonPath("$.data.profileStatus").value("ACTIVE"))
+        .andExpect(jsonPath("$.data.relationshipType").value("MOTHER"))
+        .andExpect(jsonPath("$.data.createdAt").exists());
+  }
+
+  @Test
+  void hidesDeletedAndUnlinkedChildrenFromDetailWithTheSameNotFound() throws Exception {
+    for (long childId : List.of(3L, 4L, 999L)) {
+      mockMvc
+          .perform(get("/api/v1/children/{childId}", childId))
+          .andExpect(status().isNotFound())
+          .andExpect(jsonPath("$.code").value("CHILD_404_001"));
+    }
+  }
+
+  @Test
+  void requiresAuthenticationForChildDetail() throws Exception {
+    SecurityContextHolder.clearContext();
+
+    mockMvc
+        .perform(get("/api/v1/children/1"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUTH_401_006"));
+  }
+
+  @Test
   void listsOnlyActiveConnectedChildrenInRegistrationOrder() throws Exception {
     mockMvc
         .perform(get("/api/v1/children"))

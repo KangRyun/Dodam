@@ -172,6 +172,93 @@ class OAuthAuthenticationFlowIntegrationTest {
             newHash -> assertThat(newHash).isNotEqualTo(currentTokenHashes.getAllValues().get(0)));
   }
 
+  @Test
+  void logoutRevokesOnlyTheCurrentDeviceSession() throws Exception {
+    JsonNode loginResponse = login();
+    long userId = loginResponse.at("/data/user/userId").asLong();
+    String accessToken = loginResponse.at("/data/accessToken").asText();
+    String refreshToken = loginResponse.at("/data/refreshToken").asText();
+    when(sessionStore.revoke(any(String.class), eq(userId), eq(DEVICE_ID), any(String.class)))
+        .thenReturn(true);
+
+    mockMvc
+        .perform(
+            post("/api/v1/auth/logout")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    objectMapper.writeValueAsString(
+                        Map.of("refreshToken", refreshToken, "deviceId", DEVICE_ID))))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"));
+
+    ArgumentCaptor<String> tokenHashes = ArgumentCaptor.forClass(String.class);
+    verify(sessionStore)
+        .revoke(any(String.class), eq(userId), eq(DEVICE_ID), tokenHashes.capture());
+    assertThat(tokenHashes.getValue()).isEqualTo(new RefreshTokenHasher().hash(refreshToken));
+    // 로그아웃은 세션만 폐기하며 사용자·인증 계정 행은 유지한다.
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Integer.class))
+        .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM auth_accounts", Integer.class))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void logoutRejectsUnknownSessionAndRequiresAuthentication() throws Exception {
+    JsonNode loginResponse = login();
+    long userId = loginResponse.at("/data/user/userId").asLong();
+    String accessToken = loginResponse.at("/data/accessToken").asText();
+    String refreshToken = loginResponse.at("/data/refreshToken").asText();
+    when(sessionStore.revoke(any(String.class), eq(userId), eq(DEVICE_ID), any(String.class)))
+        .thenReturn(false);
+
+    mockMvc
+        .perform(
+            post("/api/v1/auth/logout")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    objectMapper.writeValueAsString(
+                        Map.of("refreshToken", refreshToken, "deviceId", DEVICE_ID))))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUTH_401_003"));
+
+    mockMvc
+        .perform(
+            post("/api/v1/auth/logout")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    objectMapper.writeValueAsString(
+                        Map.of("refreshToken", refreshToken, "deviceId", DEVICE_ID))))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUTH_401_006"));
+  }
+
+  @Test
+  void logoutRejectsMalformedRefreshTokenAndMissingFields() throws Exception {
+    String accessToken = login().at("/data/accessToken").asText();
+
+    mockMvc
+        .perform(
+            post("/api/v1/auth/logout")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    objectMapper.writeValueAsString(
+                        Map.of("refreshToken", "not-a-jwt", "deviceId", DEVICE_ID))))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUTH_401_003"));
+
+    mockMvc
+        .perform(
+            post("/api/v1/auth/logout")
+                .header(HttpHeaders.AUTHORIZATION, "Bearer " + accessToken)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"deviceId\":\"" + DEVICE_ID + "\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
   private JsonNode login() throws Exception {
     String body =
         mockMvc
