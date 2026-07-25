@@ -829,3 +829,25 @@ Authorization: Bearer <access-token>
 - 내부 Storage Key, 이미지 Byte, 아동 생년월일은 반환하지 않습니다.
 - 조회 과정에서 세션 상태를 변경하거나 AI 분석·파일 다운로드를 실행하지 않습니다.
 - 현재는 연결 보호자만 지원하며 공유 전문가 조회 권한은 아직 제공하지 않습니다.
+
+## MinIO 파일 저장소 전환
+
+Backend는 기본적으로 기존 Local Storage를 사용하며 `STORAGE_MODE=s3`일 때 MinIO의
+S3 호환 API를 사용합니다.
+
+```dotenv
+STORAGE_MODE=s3
+S3_ENDPOINT=http://minio:9000
+S3_REGION=ap-northeast-2
+S3_BUCKET=dodam
+MINIO_BE_USER=<Jenkins credential에서 주입>
+MINIO_BE_PASSWORD=<Jenkins credential에서 주입>
+```
+
+- 그림은 `dodam/images`, 음성은 `dodam/audio` Prefix에 저장합니다.
+- DB에는 Prefix를 제외한 기존 상대 `storageKey` 형식을 유지합니다.
+- Secret은 `.env` 또는 Jenkins Credential로만 주입하고 Git에 커밋하지 않습니다.
+- 장애 시 `STORAGE_MODE=local`로 되돌리면 기존 Local 구현을 즉시 사용할 수 있습니다.
+- 기존 파일은 Backend 쓰기를 중단한 상태에서 MinIO로 복사한 뒤 Prefix별 객체 수,
+  전체 Byte 크기와 표본 SHA-256을 원본과 대조합니다.
+- 전환 후 기존 Local Volume은 1주간 읽기 전용으로 보존하고 별도 승인 후 정리합니다.
