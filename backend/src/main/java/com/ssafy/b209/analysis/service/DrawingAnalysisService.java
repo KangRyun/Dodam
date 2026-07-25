@@ -196,6 +196,10 @@ public class DrawingAnalysisService {
       DrawingAnalysisErrorCode errorCode = errorCodeFor(exception);
       markFailed(started.analysisId(), exception.getType().name(), errorCode);
       throw new BusinessException(errorCode, exception);
+    } catch (RuntimeException exception) {
+      DrawingAnalysisErrorCode errorCode = DrawingAnalysisErrorCode.DRAWING_ANALYSIS_REQUEST_FAILED;
+      markFailed(started.analysisId(), "UNEXPECTED_CLIENT_ERROR", errorCode);
+      throw new BusinessException(errorCode, exception);
     }
 
     DrawingAnalysisErrorCode validationError =

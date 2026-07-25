@@ -97,10 +97,11 @@ public class DrawingStageCompletionController {
   public ResponseEntity<ApiResponse<CompleteDrawingStageResponse>> completeDrawingStage(
       @Parameter(description = "그림 활동 세션 식별자", required = true) @PathVariable @Positive
           Long drawingSessionId,
-      @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+      @Parameter(description = "완료 요청을 식별하는 멱등 Key", required = true)
+          @RequestHeader(value = "Idempotency-Key", required = false)
+          String idempotencyKey,
       @RequestPart(value = "finalImage", required = false) MultipartFile finalImage,
-      @Valid @RequestPart(value = "metadata", required = false)
-          CompleteDrawingStageRequest request) {
+      @Valid @RequestPart("metadata") CompleteDrawingStageRequest request) {
     if (finalImage == null) {
       return ok(
           drawingStageCompletionService.complete(drawingSessionId, idempotencyKey, null, request));

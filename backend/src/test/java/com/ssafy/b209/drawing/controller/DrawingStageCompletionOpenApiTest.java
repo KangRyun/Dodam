@@ -40,7 +40,10 @@ class DrawingStageCompletionOpenApiTest {
             parameter -> {
               assertThat(parameter.path("name").asText()).isEqualTo("Idempotency-Key");
               assertThat(parameter.path("in").asText()).isEqualTo("header");
+              assertThat(parameter.path("required").asBoolean()).isTrue();
             });
+    assertThat(operation.at("/requestBody/content/multipart~1form-data/schema/required"))
+        .anySatisfy(required -> assertThat(required.asText()).isEqualTo("metadata"));
     assertThat(operation.path("responses").fieldNames())
         .toIterable()
         .containsAll(Set.of("200", "400", "401", "404", "409", "413", "500"));

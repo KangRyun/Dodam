@@ -203,6 +203,27 @@ class DrawingAnalysisServiceTest {
   }
 
   @Test
+  void recordsFailureWhenTheClientThrowsAnUnexpectedRuntimeException() {
+    givenStartedAnalysis();
+    given(drawingAnalysisClient.analyze(any()))
+        .willThrow(new IllegalStateException("unexpected client failure"));
+
+    assertError(
+        () ->
+            service.requestAnalysis(
+                SESSION_ID,
+                new CreateDrawingAnalysisRequest(ASSET_ID, DrawingAnalysisType.OBJECT_DETECTION)),
+        DrawingAnalysisErrorCode.DRAWING_ANALYSIS_REQUEST_FAILED);
+
+    verify(persistenceService)
+        .fail(
+            eq(ANALYSIS_ID),
+            eq("UNEXPECTED_CLIENT_ERROR"),
+            eq(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_REQUEST_FAILED.getMessage()),
+            eq(LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC)));
+  }
+
+  @Test
   void recordsInvalidResponseWhenAnalysisIdDoesNotMatch() {
     givenStartedAnalysis();
     given(drawingAnalysisClient.analyze(any())).willReturn(successResponse(11111111L));
