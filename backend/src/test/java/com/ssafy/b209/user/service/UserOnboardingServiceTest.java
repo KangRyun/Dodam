@@ -19,6 +19,7 @@ import com.ssafy.b209.consent.dto.request.CreateConsentRequest;
 import com.ssafy.b209.consent.service.ConsentRegistrationService;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.user.dto.request.OnboardingRequest;
+import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
 import com.ssafy.b209.user.exception.UserErrorCode;
 import java.time.Clock;
@@ -42,18 +43,23 @@ class UserOnboardingServiceTest {
 
   @Mock private UserRepository userRepository;
   @Mock private ConsentRegistrationService consentRegistrationService;
+  @Mock private UserNotificationSettingsReader notificationSettingsReader;
 
   private UserOnboardingService service;
 
   @BeforeEach
   void setUp() {
-    service = new UserOnboardingService(userRepository, consentRegistrationService, CLOCK);
+    service =
+        new UserOnboardingService(
+            userRepository, consentRegistrationService, notificationSettingsReader, CLOCK);
   }
 
   @Test
   void completesOnboardingRegistersConsentAndActivatesTheAccount() {
     User user = User.pending(LocalDateTime.of(2026, 7, 23, 0, 0));
     given(userRepository.findById(USER_ID)).willReturn(Optional.of(user));
+    given(notificationSettingsReader.read(USER_ID))
+        .willReturn(NotificationSettingsResponse.defaults());
     List<ConsentAgreementRequest> consents =
         List.of(new ConsentAgreementRequest(1L, ConsentAction.AGREE));
 
@@ -80,6 +86,8 @@ class UserOnboardingServiceTest {
     user.completeOnboarding(
         UserRole.EXPERT, "이미완료", "done@example.com", LocalDateTime.of(2026, 7, 23, 1, 0));
     given(userRepository.findById(USER_ID)).willReturn(Optional.of(user));
+    given(notificationSettingsReader.read(USER_ID))
+        .willReturn(NotificationSettingsResponse.defaults());
 
     UserResponse response =
         service.completeOnboarding(

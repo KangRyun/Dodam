@@ -14,14 +14,18 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserQueryService {
 
   private final UserRepository userRepository;
+  private final UserNotificationSettingsReader notificationSettingsReader;
 
   /**
    * 사용자 조회 서비스를 구성한다.
    *
    * @param userRepository 사용자 저장소
+   * @param notificationSettingsReader 알림 수신 설정 조회기
    */
-  public UserQueryService(UserRepository userRepository) {
+  public UserQueryService(
+      UserRepository userRepository, UserNotificationSettingsReader notificationSettingsReader) {
     this.userRepository = userRepository;
+    this.notificationSettingsReader = notificationSettingsReader;
   }
 
   /**
@@ -36,12 +40,6 @@ public class UserQueryService {
         userRepository
             .findById(userId)
             .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
-    return new UserResponse(
-        user.getId(),
-        user.getRole(),
-        user.getNickname(),
-        user.getEmail(),
-        user.getAccountStatus(),
-        user.isOnboardingCompleted());
+    return UserResponseMapper.toResponse(user, notificationSettingsReader.read(userId));
   }
 }

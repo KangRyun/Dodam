@@ -16,11 +16,13 @@ import com.ssafy.b209.auth.domain.UserRole;
 import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.exception.BusinessException;
+import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
 import com.ssafy.b209.user.service.UserDeletionService;
 import com.ssafy.b209.user.service.UserOnboardingService;
 import com.ssafy.b209.user.service.UserQueryService;
 import com.ssafy.b209.user.service.UserUpdateService;
+import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -61,10 +63,7 @@ class UserControllerTest {
   @Test
   void updatesTheAuthenticatedUsersNickname() throws Exception {
     given(currentUserResolver.requireUserId()).willReturn(51L);
-    given(updateService.updateProfile(eq(51L), any()))
-        .willReturn(
-            new UserResponse(
-                51L, UserRole.GUARDIAN, "새별이", "guardian@example.com", AccountStatus.ACTIVE, true));
+    given(updateService.updateProfile(eq(51L), any())).willReturn(userResponse("새별이"));
 
     mockMvc
         .perform(
@@ -79,15 +78,7 @@ class UserControllerTest {
   @Test
   void returnsTheAuthenticatedUsersCurrentState() throws Exception {
     given(currentUserResolver.requireUserId()).willReturn(51L);
-    given(queryService.getMe(51L))
-        .willReturn(
-            new UserResponse(
-                51L,
-                UserRole.GUARDIAN,
-                "튼튼이엄마",
-                "guardian@example.com",
-                AccountStatus.ACTIVE,
-                true));
+    given(queryService.getMe(51L)).willReturn(userResponse("튼튼이엄마"));
 
     mockMvc
         .perform(get("/api/v1/users/me"))
@@ -102,14 +93,7 @@ class UserControllerTest {
   void completesOnboardingAndReturnsTheUpdatedUser() throws Exception {
     given(currentUserResolver.requireUserId()).willReturn(51L);
     given(onboardingService.completeOnboarding(eq(51L), any(), any(), any()))
-        .willReturn(
-            new UserResponse(
-                51L,
-                UserRole.GUARDIAN,
-                "튼튼이엄마",
-                "guardian@example.com",
-                AccountStatus.ACTIVE,
-                true));
+        .willReturn(userResponse("튼튼이엄마"));
 
     mockMvc
         .perform(
@@ -171,5 +155,19 @@ class UserControllerTest {
                     }
                     """))
         .andExpect(status().isUnauthorized());
+  }
+
+  private static UserResponse userResponse(String nickname) {
+    return new UserResponse(
+        51L,
+        UserRole.GUARDIAN,
+        nickname,
+        "guardian@example.com",
+        AccountStatus.ACTIVE,
+        "https://cdn.example.com/profile/51.png",
+        NotificationSettingsResponse.defaults(),
+        true,
+        Instant.parse("2026-07-24T12:00:00Z"),
+        Instant.parse("2026-07-20T01:00:00Z"));
   }
 }

@@ -9,8 +9,10 @@ import com.ssafy.b209.auth.domain.User;
 import com.ssafy.b209.auth.domain.UserRole;
 import com.ssafy.b209.auth.repository.UserRepository;
 import com.ssafy.b209.global.exception.BusinessException;
+import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
 import com.ssafy.b209.user.exception.UserErrorCode;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,12 +27,13 @@ class UserQueryServiceTest {
   private static final Long USER_ID = 51L;
 
   @Mock private UserRepository userRepository;
+  @Mock private UserNotificationSettingsReader notificationSettingsReader;
 
   private UserQueryService service;
 
   @BeforeEach
   void setUp() {
-    service = new UserQueryService(userRepository);
+    service = new UserQueryService(userRepository, notificationSettingsReader);
   }
 
   @Test
@@ -39,6 +42,8 @@ class UserQueryServiceTest {
     user.completeOnboarding(
         UserRole.GUARDIAN, "튼튼이엄마", "guardian@example.com", LocalDateTime.of(2026, 7, 23, 1, 0));
     given(userRepository.findById(USER_ID)).willReturn(Optional.of(user));
+    given(notificationSettingsReader.read(USER_ID))
+        .willReturn(new NotificationSettingsResponse(true, false, true, false));
 
     UserResponse response = service.getMe(USER_ID);
 
@@ -47,6 +52,11 @@ class UserQueryServiceTest {
     assertThat(response.email()).isEqualTo("guardian@example.com");
     assertThat(response.accountStatus()).isEqualTo(AccountStatus.ACTIVE);
     assertThat(response.onboardingCompleted()).isTrue();
+    assertThat(response.notificationSettings())
+        .isEqualTo(new NotificationSettingsResponse(true, false, true, false));
+    assertThat(response.createdAt()).isEqualTo(Instant.parse("2026-07-23T00:00:00Z"));
+    assertThat(response.lastLoginAt()).isNull();
+    assertThat(response.profileImageUrl()).isNull();
   }
 
   @Test

@@ -21,20 +21,27 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserUpdateService {
 
   private final UserRepository userRepository;
+  private final UserNotificationSettingsReader notificationSettingsReader;
   private final Clock clock;
 
   /**
    * 사용자 수정 서비스를 구성한다.
    *
    * @param userRepository 사용자 저장소
+   * @param notificationSettingsReader 알림 수신 설정 조회기
    */
   @Autowired
-  public UserUpdateService(UserRepository userRepository) {
-    this(userRepository, Clock.systemUTC());
+  public UserUpdateService(
+      UserRepository userRepository, UserNotificationSettingsReader notificationSettingsReader) {
+    this(userRepository, notificationSettingsReader, Clock.systemUTC());
   }
 
-  UserUpdateService(UserRepository userRepository, Clock clock) {
+  UserUpdateService(
+      UserRepository userRepository,
+      UserNotificationSettingsReader notificationSettingsReader,
+      Clock clock) {
     this.userRepository = userRepository;
+    this.notificationSettingsReader = notificationSettingsReader;
     this.clock = clock;
   }
 
@@ -58,12 +65,6 @@ public class UserUpdateService {
       userRepository.save(user);
     }
 
-    return new UserResponse(
-        user.getId(),
-        user.getRole(),
-        user.getNickname(),
-        user.getEmail(),
-        user.getAccountStatus(),
-        user.isOnboardingCompleted());
+    return UserResponseMapper.toResponse(user, notificationSettingsReader.read(userId));
   }
 }

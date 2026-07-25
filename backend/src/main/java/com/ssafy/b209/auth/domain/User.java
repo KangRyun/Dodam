@@ -42,6 +42,9 @@ public class User {
   @Column(name = "email", length = 255)
   private String email;
 
+  @Column(name = "profile_image_url", length = 1000)
+  private String profileImageUrl;
+
   @Column(name = "last_login_at")
   private LocalDateTime lastLoginAt;
 
@@ -169,5 +172,32 @@ public class User {
   public void recordSuccessfulLogin(LocalDateTime loggedInAt) {
     this.lastLoginAt = Objects.requireNonNull(loggedInAt, "loggedInAt must not be null");
     this.updatedAt = loggedInAt;
+  }
+
+  /**
+   * 사용자 프로필 이미지 URL을 반환한다.
+   *
+   * @return 저장된 프로필 이미지 URL 또는 등록 전이면 {@code null}
+   */
+  public String getProfileImageUrl() {
+    return profileImageUrl;
+  }
+
+  /**
+   * 마지막 로그인 시각을 반환한다.
+   *
+   * @return 최근 로그인 시각 또는 로그인 기록이 없으면 {@code null}
+   */
+  public LocalDateTime getLastLoginAt() {
+    return lastLoginAt;
+  }
+
+  /**
+   * 계정 생성 시각을 반환한다.
+   *
+   * @return 계정 생성 시각
+   */
+  public LocalDateTime getCreatedAt() {
+    return createdAt;
   }
 }

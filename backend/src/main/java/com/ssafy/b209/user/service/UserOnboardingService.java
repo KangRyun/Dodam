@@ -26,6 +26,7 @@ public class UserOnboardingService {
 
   private final UserRepository userRepository;
   private final ConsentRegistrationService consentRegistrationService;
+  private final UserNotificationSettingsReader notificationSettingsReader;
   private final Clock clock;
 
   /**
@@ -33,19 +34,24 @@ public class UserOnboardingService {
    *
    * @param userRepository 사용자 저장소
    * @param consentRegistrationService 사용자 범위 필수 동의 검증·저장 Service
+   * @param notificationSettingsReader 알림 수신 설정 조회기
    */
   @Autowired
   public UserOnboardingService(
-      UserRepository userRepository, ConsentRegistrationService consentRegistrationService) {
-    this(userRepository, consentRegistrationService, Clock.systemUTC());
+      UserRepository userRepository,
+      ConsentRegistrationService consentRegistrationService,
+      UserNotificationSettingsReader notificationSettingsReader) {
+    this(userRepository, consentRegistrationService, notificationSettingsReader, Clock.systemUTC());
   }
 
   UserOnboardingService(
       UserRepository userRepository,
       ConsentRegistrationService consentRegistrationService,
+      UserNotificationSettingsReader notificationSettingsReader,
       Clock clock) {
     this.userRepository = userRepository;
     this.consentRegistrationService = consentRegistrationService;
+    this.notificationSettingsReader = notificationSettingsReader;
     this.clock = clock;
   }
 
@@ -71,7 +77,7 @@ public class UserOnboardingService {
             .orElseThrow(() -> new BusinessException(UserErrorCode.USER_NOT_FOUND));
 
     if (user.isOnboardingCompleted()) {
-      return toResponse(user);
+      return toResponse(userId, user);
     }
 
     consentRegistrationService.register(
@@ -79,16 +85,10 @@ public class UserOnboardingService {
     user.completeOnboarding(
         request.role(), request.nickname(), request.email(), LocalDateTime.now(clock));
     userRepository.save(user);
-    return toResponse(user);
+    return toResponse(userId, user);
   }
 
-  private UserResponse toResponse(User user) {
-    return new UserResponse(
-        user.getId(),
-        user.getRole(),
-        user.getNickname(),
-        user.getEmail(),
-        user.getAccountStatus(),
-        user.isOnboardingCompleted());
+  private UserResponse toResponse(Long userId, User user) {
+    return UserResponseMapper.toResponse(user, notificationSettingsReader.read(userId));
   }
 }
