@@ -22,7 +22,7 @@ set -euo pipefail
 
 MINIO_CONTAINER="dodam-minio"
 MC_IMAGE="minio/mc:RELEASE.2025-04-16T18-13-26Z"
-NET="dodam-net"
+NET="dodam_dodam-net"                       # compose 프로젝트(dodam)_네트워크(dodam-net) — 접두 필수
 BUCKET="dodam"
 PASS_FILE="/etc/dodam/backup-passphrase"    # 백업 때와 동일한 패스프레이즈 (root 600)
 STAGE=""; TMP_ENV=""

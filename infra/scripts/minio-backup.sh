@@ -25,7 +25,9 @@ set -euo pipefail
 # ── 설정 (값 변경 시 docs/인프라/MinIO백업-복원.md 도 함께 갱신) ──────────────
 MINIO_CONTAINER="dodam-minio"               # 대상 MinIO 컨테이너 (내부망 minio:9000)
 MC_IMAGE="minio/mc:RELEASE.2025-04-16T18-13-26Z"  # mc CLI (latest 금지 — init 과 동일 태그)
-NET="dodam-net"                             # MinIO 가 붙은 내부 네트워크
+NET="dodam_dodam-net"                       # 실제 도커 네트워크 = compose 프로젝트(dodam)_네트워크(dodam-net).
+                                            #   compose 의 'name: dodam' 이 고정이라 이 이름은 안정적이다.
+                                            #   ⚠️ 'dodam-net'(접두 없음)은 존재하지 않는다 — docker run 이 실패한다.
 BUCKET="dodam"                              # 백업 대상 버킷
 EXCLUDE="tts-cache/*"                       # 재생성 가능 파생물 → 백업 제외(설계 §1)
 BACKUP_DIR="/var/backups/dodam"             # 백업 저장 위치 (root 700, mysql 과 공용)
