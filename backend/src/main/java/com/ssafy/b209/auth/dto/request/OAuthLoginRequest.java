@@ -15,7 +15,11 @@ import jakarta.validation.constraints.Size;
  */
 @Schema(description = "모바일 OAuth Provider Token 로그인 요청")
 public record OAuthLoginRequest(
-    @Schema(description = "Kakao·Naver SDK가 발급한 Access Token") @Size(max = 4096) String accessToken,
+    @Schema(description = "Kakao·Naver SDK가 발급한 Access Token", example = "provider-token")
+        @Size(max = 4096)
+        String accessToken,
     @Schema(description = "Google SDK가 발급한 ID Token") @Size(max = 4096) String idToken,
-    @Schema(description = "Refresh Token 세션을 구분하는 앱 설치 단위 식별자") @NotBlank @Size(max = 255)
+    @Schema(description = "Refresh Token 세션을 구분하는 앱 설치 단위 식별자", example = "mvp-device-001")
+        @NotBlank
+        @Size(max = 255)
         String deviceId) {}

@@ -3,6 +3,8 @@ package com.ssafy.b209.child.dto.request;
 import com.ssafy.b209.child.domain.GuardianRelationshipType;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.child.domain.ResponseMode;
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -26,10 +28,13 @@ import java.util.List;
  * @param profileImageFileId 사전 업로드 프로필 이미지 식별자, 없으면 {@code null}
  */
 public record RegisterChildRequest(
-    @NotBlank @Size(max = 50) String nickname,
-    @NotNull @Past LocalDate birthDate,
-    @NotNull GuardianRelationshipType relationshipType,
-    @Size(max = 50) String preferredCharacter,
-    @NotNull QuestionDifficulty questionDifficulty,
-    @NotEmpty List<@NotNull ResponseMode> responseModes,
-    @Size(max = 255) String profileImageFileId) {}
+    @Schema(description = "아동 별칭", example = "별이") @NotBlank @Size(max = 50) String nickname,
+    @Schema(description = "아동 생년월일", example = "2018-05-10") @NotNull @Past LocalDate birthDate,
+    @Schema(description = "보호자와 아동의 관계 유형", example = "MOTHER") @NotNull
+        GuardianRelationshipType relationshipType,
+    @Schema(description = "선호 캐릭터", example = "MONGLE") @Size(max = 50) String preferredCharacter,
+    @Schema(description = "대화 질문 난이도", example = "LOWER_ELEMENTARY") @NotNull
+        QuestionDifficulty questionDifficulty,
+    @ArraySchema(schema = @Schema(implementation = ResponseMode.class, example = "EMOJI")) @NotEmpty
+        List<@NotNull ResponseMode> responseModes,
+    @Schema(description = "사전 업로드 프로필 이미지 식별자") @Size(max = 255) String profileImageFileId) {}

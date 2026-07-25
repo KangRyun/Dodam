@@ -1,5 +1,6 @@
 package com.ssafy.b209.drawing.dto.request;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 
 /**
@@ -9,4 +10,7 @@ import jakarta.validation.constraints.NotNull;
  * @param requestReport 보호자 리포트 생성도 함께 요청하면 {@code true}
  */
 public record CompleteDrawingSessionRequest(
-    @NotNull Boolean conversationSkipped, @NotNull Boolean requestReport) {}
+    @Schema(description = "대화를 시작하지 않고 생략했으면 true", example = "false") @NotNull
+        Boolean conversationSkipped,
+    @Schema(description = "보호자 리포트 생성도 함께 요청하면 true", example = "true") @NotNull
+        Boolean requestReport) {}
