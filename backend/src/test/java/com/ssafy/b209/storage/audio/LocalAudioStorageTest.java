@@ -40,6 +40,37 @@ class LocalAudioStorageTest {
   }
 
   @Test
+  void readsPromotedAudioWithoutExposingItsAbsolutePath() throws Exception {
+    LocalAudioStorage storage = storage(20 * 1024 * 1024);
+    byte[] wav = wav(1);
+    StoredAudio stored =
+        storage.promote(
+            storage.stage(
+                new StoreAudioCommand(
+                    new ByteArrayInputStream(wav), wav.length, "audio/wav", "answer.wav")));
+
+    try (StoredAudioContent content = storage.read(stored.storageKey())) {
+      assertThat(content.contentType()).isEqualTo("audio/wav");
+      assertThat(content.size()).isEqualTo(wav.length);
+      assertThat(content.inputStream().readAllBytes()).isEqualTo(wav);
+      assertThat(content.toString()).doesNotContain(temporaryDirectory.toString());
+    }
+  }
+
+  @Test
+  void rejectsMissingAndEscapingAudioReadKeys() {
+    LocalAudioStorage storage = storage(20 * 1024 * 1024);
+
+    assertBusinessError(
+        () -> storage.read("2026/07/23/missing.wav"), AudioStorageErrorCode.AUDIO_NOT_FOUND);
+    assertBusinessError(
+        () -> storage.read("../outside.wav"), AudioStorageErrorCode.INVALID_STORAGE_PATH);
+    assertBusinessError(
+        () -> storage.read(temporaryDirectory.resolve("answer.wav").toString()),
+        AudioStorageErrorCode.INVALID_STORAGE_PATH);
+  }
+
+  @Test
   void rejectsDurationLongerThanSixtySeconds() {
     LocalAudioStorage storage = storage(20 * 1024 * 1024);
     byte[] wav = wav(61);
@@ -94,6 +125,13 @@ class LocalAudioStorageTest {
     return new LocalAudioStorage(
         new AudioStorageProperties(temporaryDirectory, maxSize),
         Clock.fixed(Instant.parse("2026-07-23T00:00:00Z"), ZoneOffset.UTC));
+  }
+
+  private void assertBusinessError(Runnable action, AudioStorageErrorCode expected) {
+    assertThatThrownBy(action::run)
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception -> assertThat(exception.getErrorCode()).isEqualTo(expected));
   }
 
   private byte[] wav(int seconds) {

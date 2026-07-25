@@ -210,6 +210,15 @@ services:
       #   reason: 절대경로(/app/storage/images)로 고정 + 아래 backend-storage 네임드 볼륨 마운트로
       #           컨테이너 재생성에도 그림을 보존한다(가드레일 9절 — 아동 데이터 수명주기·유실 방지).
       LOCAL_IMAGE_STORAGE_ROOT: /app/storage/images
+      # ── 파일 스토리지 전환(MinIO/S3) — S15P11B209-370. 로컬 디스크 → S3 호환 오브젝트 스토리지.
+      #   STORAGE_MODE=local(기본)이면 로컬 볼륨, s3면 minio 사용. be-rw 계정으로 버킷 dodam 접근.
+      LOCAL_AUDIO_STORAGE_ROOT: /app/storage/audio
+      STORAGE_MODE: ${STORAGE_MODE:-local}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_REGION: ${S3_REGION:-ap-northeast-2}
+      S3_BUCKET: ${S3_BUCKET:-dodam}
+      MINIO_BE_USER: ${MINIO_BE_USER}
+      MINIO_BE_PASSWORD: ${MINIO_BE_PASSWORD}
       # ── FCM 푸시(분석 완료 알림) 자격증명 — S15P11B209-619(인프라 배관) ↔ BE S15P11B209-556(발송 코드).
       #   목적: 백엔드가 Firebase로 푸시를 보낼 때 쓰는 Service Account JSON(개인키 포함)을
       #         이미지/코드에 굽지 않고 런타임에 /run/secrets/ 로만 주입한다(유출면 최소화 · 가드레일 9절).
@@ -247,6 +256,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
 
     # actuator가 없어 HTTP 헬스체크 불가 → 8080 리슨 여부만 TCP로 확인 (jre-jammy에 bash 존재)
     #   더 정확한 헬스체크를 원하면 actuator 추가 후 /actuator/health 로 교체 (리뷰 포인트)

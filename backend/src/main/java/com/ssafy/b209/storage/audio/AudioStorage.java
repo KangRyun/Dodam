@@ -25,6 +25,16 @@ public interface AudioStorage {
   StoredAudio promote(StagedAudio stagedAudio);
 
   /**
+   * 저장된 음성을 Storage Key로 조회한다.
+   *
+   * <p>반환된 Stream의 소유권은 호출자에게 있으며 사용 후 닫아야 한다.
+   *
+   * @param storageKey {@link #promote(StagedAudio)}가 반환한 상대 Storage Key
+   * @return 음성 Stream과 HTTP 전송 Metadata
+   */
+  StoredAudioContent read(String storageKey);
+
+  /**
    * 아직 승격되지 않은 임시 파일을 정리한다.
    *
    * @param stagedAudio 이 요청에서 생성한 임시 파일
