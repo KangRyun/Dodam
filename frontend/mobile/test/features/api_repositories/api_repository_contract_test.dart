@@ -94,26 +94,32 @@ void main() {
     test('serializes stroke batches and omits unsupported pressure', () {
       const request = StrokeBatchRequestDto(
         batchSequence: 12,
-        firstEventSequence: 1101,
-        lastEventSequence: 1102,
+        firstEventSequence: 1103,
+        lastEventSequence: 1105,
         clientCreatedAt: '2026-07-21T09:41:03.120Z',
         events: [
-          StrokeEventDto(
-            seq: 1101,
-            t: 412350,
-            type: 'STROKE_START',
-            x: 0.42,
-            y: 0.61,
+          StrokeBatchEventDto(
+            sequence: 1103,
+            eventType: 'STROKE',
             tool: 'PEN',
             color: '#E8823C',
-            thickness: 8,
+            width: 8,
+            points: [
+              StrokePointDto(x: 0.42, y: 0.61, t: 0),
+              StrokePointDto(x: 0.5, y: 0.7, t: 16),
+            ],
           ),
-          StrokeEventDto(seq: 1102, t: 417800, type: 'UNDO'),
+          StrokeBatchEventDto(sequence: 1105, eventType: 'UNDO', points: []),
         ],
+        metrics: StrokeMetricsDto(undoCountDelta: 1),
       );
       final json = request.toJson();
-      expect(json['eventCount'], 2);
-      expect((json['events'] as List).first, isNot(contains('pressure')));
+      expect(json, isNot(contains('eventCount')));
+      expect(
+        ((json['events'] as List).first as Map)['points'],
+        everyElement(isNot(contains('pressure'))),
+      );
+      expect(json['metrics'], containsPair('undoCountDelta', 1));
     });
 
     test('parses draft recovery and object detection responses', () {

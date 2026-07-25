@@ -156,9 +156,10 @@ final class _FakeDrawingRepository implements DrawingRepository {
   ) async {
     strokeCalls += 1;
     return StrokeBatchResponseDto(
-      strokeBatchId: 1,
+      batchId: 1,
       batchSequence: request.batchSequence,
-      eventCount: request.events.length,
+      acceptedEventCount: request.events.length,
+      lastEventSequence: request.lastEventSequence,
       receivedAt: '2026-07-22T00:00:00Z',
     );
   }

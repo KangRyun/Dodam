@@ -110,9 +110,12 @@ void main() {
     await sync.flushEvents();
 
     expect(events.first.seq, 1106);
+    expect(events.last.seq, 1107);
     expect(repository.lastBatch?.batchSequence, 1);
-    expect(repository.lastBatch?.firstEventSequence, 1106);
+    expect(repository.lastBatch?.firstEventSequence, events.last.seq);
+    expect(repository.lastBatch?.lastEventSequence, events.last.seq);
     expect(sync.journal.events, hasLength(2));
+    expect(sync.journal.lastEventSequence, events.last.seq);
   });
 
   test('서버 시퀀스가 null이면 기존 로컬 기본값을 유지한다', () async {
@@ -329,9 +332,10 @@ final class _DraftRepository implements DrawingRepository {
   ) async {
     lastBatch = request;
     return StrokeBatchResponseDto(
-      strokeBatchId: 1,
+      batchId: 1,
       batchSequence: request.batchSequence,
-      eventCount: request.events.length,
+      acceptedEventCount: request.events.length,
+      lastEventSequence: request.lastEventSequence,
       receivedAt: '2026-07-22T00:00:00Z',
     );
   }

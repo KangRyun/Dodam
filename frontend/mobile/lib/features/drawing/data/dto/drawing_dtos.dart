@@ -213,6 +213,71 @@ final class StrokeEventDto {
   };
 }
 
+final class StrokePointDto {
+  const StrokePointDto({
+    required this.x,
+    required this.y,
+    required this.t,
+    this.pressure,
+  });
+
+  final double x, y;
+  final int t;
+  final double? pressure;
+
+  Map<String, dynamic> toJson() => {
+    'x': x,
+    'y': y,
+    't': t,
+    if (pressure != null) 'pressure': pressure,
+  };
+}
+
+final class StrokeBatchEventDto {
+  const StrokeBatchEventDto({
+    required this.sequence,
+    required this.eventType,
+    required this.points,
+    this.tool,
+    this.color,
+    this.width,
+  });
+
+  final int sequence;
+  final String eventType;
+  final String? tool, color;
+  final double? width;
+  final List<StrokePointDto> points;
+
+  Map<String, dynamic> toJson() => {
+    'sequence': sequence,
+    'eventType': eventType,
+    if (tool != null) 'tool': tool,
+    if (color != null) 'color': color,
+    if (width != null) 'width': width,
+    'points': points.map((point) => point.toJson()).toList(growable: false),
+  };
+}
+
+final class StrokeMetricsDto {
+  const StrokeMetricsDto({
+    required this.undoCountDelta,
+    this.redoCountDelta = 0,
+    this.eraseCountDelta = 0,
+    this.pauseDurationMsDelta = 0,
+  });
+
+  final int undoCountDelta, redoCountDelta, eraseCountDelta;
+  final int pauseDurationMsDelta;
+
+  Map<String, dynamic> toJson() => {
+    'undoCountDelta': undoCountDelta,
+    'redoCountDelta': redoCountDelta,
+    'eraseCountDelta': eraseCountDelta,
+    'pauseDurationMsDelta': pauseDurationMsDelta,
+  };
+}
+
 final class StrokeBatchRequestDto {
   const StrokeBatchRequestDto({
     required this.batchSequence,
@@ -220,35 +285,40 @@ final class StrokeBatchRequestDto {
     required this.lastEventSequence,
     required this.clientCreatedAt,
     required this.events,
+    required this.metrics,
   });
   final int batchSequence, firstEventSequence, lastEventSequence;
   final String clientCreatedAt;
-  final List<StrokeEventDto> events;
+  final List<StrokeBatchEventDto> events;
+  final StrokeMetricsDto metrics;
+
   Map<String, dynamic> toJson() => {
     'batchSequence': batchSequence,
     'firstEventSequence': firstEventSequence,
     'lastEventSequence': lastEventSequence,
-    'eventCount': events.length,
     'clientCreatedAt': clientCreatedAt,
     'events': events.map((event) => event.toJson()).toList(growable: false),
+    'metrics': metrics.toJson(),
   };
 }
 
 final class StrokeBatchResponseDto {
   const StrokeBatchResponseDto({
-    required this.strokeBatchId,
+    required this.batchId,
     required this.batchSequence,
-    required this.eventCount,
+    required this.acceptedEventCount,
+    required this.lastEventSequence,
     required this.receivedAt,
   });
   factory StrokeBatchResponseDto.fromJson(Map<String, dynamic> json) =>
       StrokeBatchResponseDto(
-        strokeBatchId: json['strokeBatchId'] as int,
+        batchId: json['batchId'] as int,
         batchSequence: json['batchSequence'] as int,
-        eventCount: json['eventCount'] as int,
+        acceptedEventCount: json['acceptedEventCount'] as int,
+        lastEventSequence: json['lastEventSequence'] as int,
         receivedAt: json['receivedAt'] as String,
       );
-  final int strokeBatchId, batchSequence, eventCount;
+  final int batchId, batchSequence, acceptedEventCount, lastEventSequence;
   final String receivedAt;
 }
 

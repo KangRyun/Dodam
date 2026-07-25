@@ -128,24 +128,30 @@ final class StrokeBatchQueue {
 
   Future<void> flush() async {
     if (_buffer.isNotEmpty) {
-      final events = List<StrokeEventDto>.unmodifiable(_buffer);
-      _buffer.clear();
-      final request = StrokeBatchRequestDto(
-        batchSequence: _nextBatchSequence++,
-        firstEventSequence: events.first.seq,
-        lastEventSequence: events.last.seq,
-        clientCreatedAt: _now().toUtc().toIso8601String(),
-        events: events,
-      );
-      _queue.add(
-        QueuedStrokeBatch(
-          request: request,
-          status: StrokeBatchQueueStatus.pending,
-        ),
-      );
-      // The request object is retained unchanged for idempotent retries.
-      // TODO(BE): Revalidate the planned 409 for same sequence/different payload.
-      onChanged?.call();
+      final conversion = StrokeBatchEventConverter.convert(_buffer);
+      if (conversion.events.isNotEmpty) {
+        final events = List<StrokeBatchEventDto>.unmodifiable(
+          conversion.events,
+        );
+        final request = StrokeBatchRequestDto(
+          batchSequence: _nextBatchSequence++,
+          firstEventSequence: events.first.sequence,
+          lastEventSequence: events.last.sequence,
+          clientCreatedAt: _now().toUtc().toIso8601String(),
+          events: events,
+          metrics: StrokeMetricsDto(undoCountDelta: conversion.undoCount),
+        );
+        _buffer.removeRange(0, conversion.consumedRawEventCount);
+        _queue.add(
+          QueuedStrokeBatch(
+            request: request,
+            status: StrokeBatchQueueStatus.pending,
+          ),
+        );
+        // The complete request, including clientCreatedAt, is retained
+        // unchanged for payload-checksum based retries.
+        onChanged?.call();
+      }
     }
     await _drain();
   }
@@ -199,6 +205,132 @@ final class StrokeBatchQueue {
     } finally {
       _draining = false;
     }
+  }
+}
+
+final class StrokeBatchConversion {
+  const StrokeBatchConversion({
+    required this.events,
+    required this.consumedRawEventCount,
+    required this.undoCount,
+  });
+
+  final List<StrokeBatchEventDto> events;
+  final int consumedRawEventCount;
+  final int undoCount;
+}
+
+abstract final class StrokeBatchEventConverter {
+  static StrokeBatchConversion convert(List<StrokeEventDto> rawEvents) {
+    final converted = <StrokeBatchEventDto>[];
+    var undoCount = 0;
+    var index = 0;
+    var previousSequence = 0;
+
+    while (index < rawEvents.length) {
+      final event = rawEvents[index];
+      if (event.seq <= previousSequence) {
+        throw StateError('Stroke event sequence must be strictly increasing.');
+      }
+
+      if (event.type == DrawingEventTypes.undo) {
+        converted.add(
+          StrokeBatchEventDto(
+            sequence: event.seq,
+            eventType: DrawingEventTypes.undo,
+            points: const [],
+          ),
+        );
+        undoCount += 1;
+        previousSequence = event.seq;
+        index += 1;
+        continue;
+      }
+
+      if (event.type != DrawingEventTypes.strokeStart) {
+        throw StateError('Stroke batch must start with STROKE_START or UNDO.');
+      }
+
+      final startIndex = index;
+      var cursor = index + 1;
+      while (cursor < rawEvents.length &&
+          rawEvents[cursor].type == DrawingEventTypes.strokeMove) {
+        if (rawEvents[cursor].seq <= rawEvents[cursor - 1].seq) {
+          throw StateError(
+            'Stroke event sequence must be strictly increasing.',
+          );
+        }
+        cursor += 1;
+      }
+
+      if (cursor == rawEvents.length) {
+        return StrokeBatchConversion(
+          events: List.unmodifiable(converted),
+          consumedRawEventCount: startIndex,
+          undoCount: undoCount,
+        );
+      }
+
+      final end = rawEvents[cursor];
+      if (end.type != DrawingEventTypes.strokeEnd) {
+        throw StateError(
+          'Incomplete stroke cannot be followed by another event.',
+        );
+      }
+      if (end.seq <= rawEvents[cursor - 1].seq) {
+        throw StateError('Stroke event sequence must be strictly increasing.');
+      }
+
+      converted.add(_convertStroke(rawEvents.sublist(startIndex, cursor + 1)));
+      previousSequence = end.seq;
+      index = cursor + 1;
+    }
+
+    return StrokeBatchConversion(
+      events: List.unmodifiable(converted),
+      consumedRawEventCount: index,
+      undoCount: undoCount,
+    );
+  }
+
+  static StrokeBatchEventDto _convertStroke(List<StrokeEventDto> events) {
+    final start = events.first;
+    final end = events.last;
+    if (start.tool == null ||
+        start.color == null ||
+        start.thickness == null ||
+        start.thickness! <= 0) {
+      throw StateError('STROKE_START must contain valid stroke attributes.');
+    }
+
+    final firstTime = start.t;
+    var previousTime = firstTime;
+    final points = <StrokePointDto>[];
+    for (final event in events) {
+      if (event.x == null || event.y == null || event.t < previousTime) {
+        throw StateError(
+          'Stroke points must have ordered coordinates and time.',
+        );
+      }
+      points.add(
+        StrokePointDto(
+          x: event.x!,
+          y: event.y!,
+          t: event.t - firstTime,
+          pressure: event.pressure,
+        ),
+      );
+      previousTime = event.t;
+    }
+
+    return StrokeBatchEventDto(
+      sequence: end.seq,
+      eventType: 'STROKE',
+      tool: start.tool,
+      color: start.color,
+      width: start.thickness,
+      points: List.unmodifiable(points),
+    );
   }
 }
 
