@@ -47,6 +47,10 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
           childId: widget.child.childId,
           drawingTypeId: types.first.drawingTypeId,
           inputMethod: 'CANVAS',
+          clientStartedAt: DateTime.now().toUtc().toIso8601String(),
+          canvasWidth: 1920,
+          canvasHeight: 1080,
+          canvasBackgroundColor: '#FFFFFF',
         ),
       );
       if (!mounted) return;
