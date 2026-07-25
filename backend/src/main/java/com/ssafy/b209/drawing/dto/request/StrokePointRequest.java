@@ -1,5 +1,6 @@
 package com.ssafy.b209.drawing.dto.request;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotNull;
@@ -15,7 +16,16 @@ import java.math.BigDecimal;
  * @param pressure 기기가 제공한 필압, 지원하지 않으면 {@code null}
  */
 public record StrokePointRequest(
-    @NotNull @DecimalMin("0.0") @DecimalMax("1.0") BigDecimal x,
-    @NotNull @DecimalMin("0.0") @DecimalMax("1.0") BigDecimal y,
-    @PositiveOrZero long t,
-    @DecimalMin("0.0") @DecimalMax("1.0") BigDecimal pressure) {}
+    @Schema(description = "0 이상 1 이하의 X 정규화 좌표", example = "0.18")
+        @NotNull
+        @DecimalMin("0.0")
+        @DecimalMax("1.0")
+        BigDecimal x,
+    @Schema(description = "0 이상 1 이하의 Y 정규화 좌표", example = "0.42")
+        @NotNull
+        @DecimalMin("0.0")
+        @DecimalMax("1.0")
+        BigDecimal y,
+    @Schema(description = "이벤트 시작 후 경과 시간(ms)", example = "0") @PositiveOrZero long t,
+    @Schema(description = "기기가 제공한 필압, 미지원 시 null") @DecimalMin("0.0") @DecimalMax("1.0")
+        BigDecimal pressure) {}

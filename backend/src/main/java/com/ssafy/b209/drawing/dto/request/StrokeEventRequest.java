@@ -1,5 +1,6 @@
 package com.ssafy.b209.drawing.dto.request;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
@@ -23,10 +24,20 @@ import java.util.List;
  * @param points 이벤트 내부 좌표 목록
  */
 public record StrokeEventRequest(
-    @Positive long sequence,
-    @NotBlank @Size(max = 30) @Pattern(regexp = "[A-Z][A-Z0-9_]*") String eventType,
-    @Size(max = 30) @Pattern(regexp = "[A-Z][A-Z0-9_]*") String tool,
-    @Pattern(regexp = "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$") String color,
-    @DecimalMin(value = "0.0", inclusive = false) BigDecimal width,
-    @DecimalMin("0.0") @DecimalMax("1.0") BigDecimal pressure,
+    @Schema(description = "세션 전체에서 증가하는 이벤트 순번", example = "1") @Positive long sequence,
+    @Schema(description = "이벤트 유형 코드", example = "STROKE")
+        @NotBlank
+        @Size(max = 30)
+        @Pattern(regexp = "[A-Z][A-Z0-9_]*")
+        String eventType,
+    @Schema(description = "그리기 도구 코드", example = "PEN")
+        @Size(max = 30)
+        @Pattern(regexp = "[A-Z][A-Z0-9_]*")
+        String tool,
+    @Schema(description = "RGB 또는 RGBA Hex 색상", example = "#FFCC00")
+        @Pattern(regexp = "^#[0-9A-Fa-f]{6}([0-9A-Fa-f]{2})?$")
+        String color,
+    @Schema(description = "선 굵기", example = "8.0") @DecimalMin(value = "0.0", inclusive = false)
+        BigDecimal width,
+    @Schema(description = "이벤트 대표 필압") @DecimalMin("0.0") @DecimalMax("1.0") BigDecimal pressure,
     @NotNull @Size(max = 10000) List<@Valid StrokePointRequest> points) {}

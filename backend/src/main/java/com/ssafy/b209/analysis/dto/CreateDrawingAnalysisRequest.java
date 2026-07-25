@@ -1,5 +1,6 @@
 package com.ssafy.b209.analysis.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 
@@ -10,4 +11,9 @@ import jakarta.validation.constraints.Positive;
  * @param analysisType 수행할 AI 분석 작업 유형
  */
 public record CreateDrawingAnalysisRequest(
-    @NotNull @Positive Long drawingAssetId, @NotNull DrawingAnalysisType analysisType) {}
+    @Schema(description = "분석 대상 그림 파일 Metadata 식별자(최종 스냅샷의 drawingAssetId)", example = "1")
+        @NotNull
+        @Positive
+        Long drawingAssetId,
+    @Schema(description = "수행할 AI 분석 작업 유형", example = "OBJECT_DETECTION") @NotNull
+        DrawingAnalysisType analysisType) {}

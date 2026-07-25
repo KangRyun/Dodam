@@ -1,5 +1,6 @@
 package com.ssafy.b209.conversation.dto;
 
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
@@ -18,6 +19,7 @@ import java.util.List;
  * @param directText 선택적 문장 직접 입력 값
  */
 public record OptionAnswerRequest(
-    @NotNull @Positive Long questionMessageId,
+    @Schema(description = "답변을 연결할 같은 대화 세션의 QUESTION 메시지 식별자", example = "1") @NotNull @Positive
+        Long questionMessageId,
     @NotEmpty @Valid List<SelectedOptionCommand> selectedOptions,
-    @Size(max = 500) String directText) {}
+    @Schema(description = "선택적 문장 직접 입력 값") @Size(max = 500) String directText) {}

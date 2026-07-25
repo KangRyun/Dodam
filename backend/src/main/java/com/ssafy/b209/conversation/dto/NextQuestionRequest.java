@@ -1,5 +1,7 @@
 package com.ssafy.b209.conversation.dto;
 
+import io.swagger.v3.oas.annotations.media.ArraySchema;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.Positive;
 import java.util.List;
@@ -11,6 +13,8 @@ import java.util.List;
  * 사용한다.
  */
 public record NextQuestionRequest(
-    @Positive Long basisAnalysisId,
-    @Positive Long previousAnswerMessageId,
-    @NotEmpty List<PreferredResponseMode> preferredResponseModes) {}
+    @Schema(description = "질문 근거가 되는 그림 분석 식별자", example = "1") @Positive Long basisAnalysisId,
+    @Schema(description = "직전 답변 메시지 식별자(첫 질문은 생략)") @Positive Long previousAnswerMessageId,
+    @ArraySchema(schema = @Schema(implementation = PreferredResponseMode.class, example = "EMOJI"))
+        @NotEmpty
+        List<PreferredResponseMode> preferredResponseModes) {}
