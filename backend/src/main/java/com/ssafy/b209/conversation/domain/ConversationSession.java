@@ -3,6 +3,8 @@ package com.ssafy.b209.conversation.domain;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
@@ -34,8 +36,15 @@ public class ConversationSession {
   @Column(name = "question_count", nullable = false, columnDefinition = "SMALLINT")
   private int questionCount;
 
+  @Enumerated(EnumType.STRING)
+  @Column(name = "completion_reason", length = 30)
+  private ConversationCompletionReason completionReason;
+
   @Column(name = "started_at", nullable = false)
   private LocalDateTime startedAt;
+
+  @Column(name = "completed_at")
+  private LocalDateTime completedAt;
 
   protected ConversationSession() {}
 
@@ -142,6 +151,48 @@ public class ConversationSession {
    */
   public boolean isCompleted() {
     return "COMPLETED".equals(conversationStatus);
+  }
+
+  /**
+   * 진행 중인 대화를 완료하고 최초 종료 사유와 완료 시각을 기록한다.
+   *
+   * <p>이미 완료된 세션에 대한 재호출은 최초 기록을 유지해 멱등하게 처리한다.
+   *
+   * @param reason 대화를 끝낸 직접적인 계기
+   * @param completedAt 서버가 결정한 UTC 완료 시각
+   * @throws NullPointerException 종료 사유나 완료 시각이 {@code null}인 경우
+   * @throws IllegalStateException 진행 중 또는 완료 상태가 아닌 경우
+   */
+  public void complete(ConversationCompletionReason reason, LocalDateTime completedAt) {
+    Objects.requireNonNull(reason, "reason must not be null");
+    Objects.requireNonNull(completedAt, "completedAt must not be null");
+    if (isCompleted()) {
+      return;
+    }
+    if (!isConversing()) {
+      throw new IllegalStateException("진행 중인 대화만 완료할 수 있습니다.");
+    }
+    conversationStatus = "COMPLETED";
+    completionReason = reason;
+    this.completedAt = completedAt;
+  }
+
+  /**
+   * 최초 완료 시 기록된 종료 사유를 반환한다.
+   *
+   * @return 완료 전에는 {@code null}, 완료 후에는 종료 사유
+   */
+  public ConversationCompletionReason getCompletionReason() {
+    return completionReason;
+  }
+
+  /**
+   * 대화 완료 시각을 반환한다.
+   *
+   * @return 완료 전에는 {@code null}, 완료 후에는 UTC 완료 시각
+   */
+  public LocalDateTime getCompletedAt() {
+    return completedAt;
   }
 
   public void increaseQuestionCount() {

@@ -37,6 +37,17 @@ public interface ConversationMessageRepository extends JpaRepository<Conversatio
       Long id, Long conversationSessionId);
 
   /**
+   * 대화 종료 화면이 확인한 질문과 비교할 현재 최신 질문을 조회한다.
+   *
+   * @param conversationSessionId 대화 세션 식별자
+   * @param messageType 조회할 메시지 유형
+   * @return 시퀀스가 가장 큰 해당 유형 메시지 또는 메시지가 없을 때 빈 값
+   */
+  Optional<ConversationMessage>
+      findFirstByConversationSessionIdAndMessageTypeOrderByMessageSequenceDesc(
+          Long conversationSessionId, String messageType);
+
+  /**
    * 지정한 이전 답변을 이어받은 QUESTION 메시지가 세션에 이미 있는지 확인한다.
    *
    * <p>호출자는 대화 세션 비관 잠금 안에서 이 값을 사용해, 서로 다른 요청이 같은 답변을 부모로 참조하며 질문을 두 번 생성하는 중복을 차단한다. 부모 답변 1건당 후속

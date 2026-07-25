@@ -1057,7 +1057,7 @@ Header `Idempotency-Key` 필수.
 | CONV-06 | POST | `/conversations/{conversationId}/answers/option` | 연결 보호자 | 이모지·색상·그림·문장 선택 답변 |
 | CONV-07 | GET | `/conversations/{conversationId}/fallback-questions` | 연결 보호자 | AI·STT 실패 시 기본 질문 조회 |
 | CONV-08 | POST | `/conversations/{conversationId}/skip` | 연결 보호자 | 질문 건너뛰기·다시 그리기 |
-| CONV-09 | POST | `/conversations/{conversationId}/complete` | 연결 보호자 | 대화 세션 종료 |
+| CONV-09 | POST | `/conversations/{conversationId}/end` | 연결 보호자 | 대화 세션 종료 |
 
 ### 12.2 대화 시작
 
@@ -1218,11 +1218,14 @@ Query: `drawingTypeCode?`, `difficulty?`, `reason=STT_FAILED|AI_FAILED|TIMEOUT`,
 
 ```json
 {
-  "reason": "QUESTION_LIMIT_REACHED"
+  "reason": "QUESTION_LIMIT_REACHED",
+  "lastQuestionMessageId": 803
 }
 ```
 
-허용 reason은 `QUESTION_LIMIT_REACHED`, `CHILD_REQUEST`, `GUARDIAN_REQUEST`, `NO_MORE_QUESTION`이다. 성공 시 대화 `COMPLETED`, 그림 세션 `currentStage=REFLECTION`으로 변경한다.
+`Idempotency-Key` Header는 필수다. 허용 reason은 `QUESTION_LIMIT_REACHED`, `CHILD_REQUEST`, `GUARDIAN_REQUEST`, `NO_MORE_QUESTION`이다.
+`lastQuestionMessageId`는 선택 필드이며 전달하면 해당 대화의 최신 질문과 일치해야 한다. 성공 시 대화 `COMPLETED`, 그림 세션
+`currentStage=REFLECTION`으로 변경한다.
 
 ### 12.9 메시지 조회
 
@@ -2227,7 +2230,7 @@ AI 응답에 진단명, 질환 확률, 가정환경 원인 단정이 포함되�
 15. POST /conversations/{id}/next-question
 16. POST /conversation-messages/{messageId}/tts
 17. POST /conversations/{id}/answers/voice|option      반복
-18. POST /conversations/{id}/complete
+18. POST /conversations/{id}/end
 19. PUT  /drawing-sessions/{id}/reflection
 20. POST /drawing-sessions/{id}/complete
 21. GET  /analyses/{analysisId}                        최종 종합 분석 폴링
