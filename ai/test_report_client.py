@@ -212,6 +212,61 @@ class GenerateTest(unittest.TestCase):
                 report_client.generate(_sample_request(), model="m")
 
 
+class DefinitiveDiagnosisQuarantineTest(unittest.TestCase):
+    """단정적 진단 표현 격리 — 전문가 검토 + EXPERT_ONLY 강등 (S15P11B209-591)."""
+
+    def _generate(self, **overrides):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(
+            _llm_json(**overrides)
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            return report_client.generate(_sample_request(), model="m")
+
+    def test_guardian_feature_with_diagnosis_downgraded_to_expert_only(self):
+        result = self._generate(
+            features=[
+                {
+                    "featureCode": "X",
+                    "title": "정서 관찰",
+                    "description": "이 아이는 불안장애로 진단됩니다.",  # 단정
+                    "evidenceSummary": "e",
+                    "visibilityScope": "REVIEWED_GUARDIAN",
+                }
+            ]
+        )
+        self.assertEqual(
+            result.observation_draft.features[0].visibility_scope, "EXPERT_ONLY"
+        )
+        # 보호자 노출 내용에 단정 진단이 있으면 전문가 검토를 강제한다.
+        self.assertTrue(result.observation_draft.expert_review_required)
+
+    def test_hedged_concern_feature_stays_guardian_visible(self):
+        result = self._generate(
+            expertReviewRequired=False,
+            features=[
+                {
+                    "featureCode": "X",
+                    "title": "정서 관찰",
+                    "description": "속상한 마음이 담긴 듯 보일 수 있어요.",  # 여지
+                    "evidenceSummary": "e",
+                    "visibilityScope": "REVIEWED_GUARDIAN",
+                }
+            ],
+        )
+        self.assertEqual(
+            result.observation_draft.features[0].visibility_scope, "REVIEWED_GUARDIAN"
+        )
+        self.assertFalse(result.observation_draft.expert_review_required)
+
+    def test_diagnosis_in_overall_summary_forces_expert_review(self):
+        result = self._generate(
+            expertReviewRequired=False,
+            overallSummary="이 아이는 우울증이 있어 보입니다.",  # 장애명 단정
+        )
+        self.assertTrue(result.observation_draft.expert_review_required)
+
+
 class EmotionSourceTest(unittest.TestCase):
     def test_selected(self):
         req = _sample_request(selected_emotions=["JOY"], expressed_emotion_text=None)
