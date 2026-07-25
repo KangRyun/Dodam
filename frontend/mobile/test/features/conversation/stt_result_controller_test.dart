@@ -55,6 +55,66 @@ void main() {
     expect(find.text('강아지랑 같이 있어'), findsOneWidget);
   });
 
+  testWidgets('긴 STT 결과와 큰 글자도 화면 경계 안에서 스크롤해 확인한다', (tester) async {
+    tester.view.physicalSize = const Size(320, 180);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final controller = SttResultController(
+      const _FakeSttResultRepository(
+        SttResult(
+          messageId: 31,
+          status: SttSpeechStatus.success,
+          text: '엄마 아빠와 강아지가 거실에 함께 앉아서 오늘 있었던 일을 아주 천천히 이야기하고 있어요.',
+        ),
+      ),
+      conversationId: 20,
+      pollInterval: Duration.zero,
+      maxAttempts: 1,
+    );
+    addTearDown(controller.dispose);
+    await controller.watch(messageId: 31, sequence: 4);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(
+            context,
+          ).copyWith(textScaler: const TextScaler.linear(2)),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: Align(
+            alignment: Alignment.bottomLeft,
+            child: SttResultPanel(controller: controller, maxHeight: 150),
+          ),
+        ),
+      ),
+    );
+
+    expect(tester.takeException(), isNull);
+    final panel = find.byKey(const ValueKey('stt-result-panel'));
+    expect(panel, findsOneWidget);
+    final panelRect = tester.getRect(panel);
+    expect(panelRect.left, greaterThanOrEqualTo(0));
+    expect(panelRect.right, lessThanOrEqualTo(320));
+    expect(panelRect.top, greaterThanOrEqualTo(0));
+    expect(panelRect.bottom, lessThanOrEqualTo(180));
+
+    await tester.drag(
+      find.byKey(const ValueKey('stt-result-scroll')),
+      const Offset(0, -200),
+    );
+    await tester.pump();
+
+    expect(tester.takeException(), isNull);
+    final dismissSize = tester.getSize(
+      find.byKey(const ValueKey('stt-result-dismiss')),
+    );
+    expect(dismissSize.width, greaterThanOrEqualTo(48));
+    expect(dismissSize.height, greaterThanOrEqualTo(48));
+  });
+
   test('PENDING이 계속되면 지연 상태로 전환한다', () async {
     final controller = SttResultController(
       const _FakeSttResultRepository(

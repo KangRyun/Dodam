@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/material.dart';
 
 import '../../../../design_system/design_system.dart';
@@ -49,101 +51,185 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
     final currentQuestion = question;
     if (currentQuestion == null) return const SizedBox.shrink();
 
-    return Positioned(
-      right: AppSpacing.lg,
-      bottom: AppSpacing.lg,
-      child: IgnorePointer(
-        ignoring: !visible,
-        child: ExcludeSemantics(
-          excluding: !visible,
-          child: AnimatedSlide(
-            offset: visible ? Offset.zero : const Offset(0, 0.12),
-            duration: const Duration(milliseconds: 220),
-            curve: Curves.easeOutCubic,
-            child: AnimatedOpacity(
-              opacity: visible ? 1 : 0,
-              duration: const Duration(milliseconds: 180),
-              child: Semantics(
-                container: true,
-                liveRegion: true,
-                label: '도다미 질문. ${currentQuestion.text}',
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 300),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      IgnorePointer(
-                        child: _QuestionBubble(text: currentQuestion.text),
-                      ),
-                      if (voiceRecordingController case final controller?) ...[
-                        const SizedBox(height: AppSpacing.sm),
-                        VoiceRecordingControl(
-                          controller: controller,
-                          enabled:
-                              submissionStatus !=
-                                  OptionAnswerSubmissionStatus.submitting &&
-                              skipStatus != QuestionSkipStatus.submitting &&
-                              endStatus != ConversationEndStatus.submitting,
-                        ),
-                        if (voiceAnswerUploadStatus ==
-                            VoiceAnswerUploadStatus.uploading) ...[
-                          const SizedBox(height: AppSpacing.xs),
-                          const LinearProgressIndicator(
-                            key: ValueKey('voice-answer-uploading'),
+    return Positioned.fill(
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxHeight <= 480;
+          final inset = compact ? AppSpacing.sm : AppSpacing.lg;
+          final maxWidth = min(
+            compact ? 280.0 : 300.0,
+            max(1.0, constraints.maxWidth - inset * 2),
+          );
+          final maxHeight = max(1.0, constraints.maxHeight - inset * 2);
+
+          return Padding(
+            padding: EdgeInsets.all(inset),
+            child: Align(
+              alignment: Alignment.bottomRight,
+              child: IgnorePointer(
+                ignoring: !visible,
+                child: ExcludeSemantics(
+                  excluding: !visible,
+                  child: AnimatedSlide(
+                    offset: visible ? Offset.zero : const Offset(0, 0.12),
+                    duration: const Duration(milliseconds: 220),
+                    curve: Curves.easeOutCubic,
+                    child: AnimatedOpacity(
+                      opacity: visible ? 1 : 0,
+                      duration: const Duration(milliseconds: 180),
+                      child: Semantics(
+                        container: true,
+                        liveRegion: true,
+                        label: '도다미 질문. ${currentQuestion.text}',
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: maxWidth,
+                            maxHeight: maxHeight,
                           ),
-                          const SizedBox(height: AppSpacing.xs),
-                          const Text(
-                            '목소리를 보내고 있어요.',
-                            textAlign: TextAlign.center,
-                          ),
-                        ],
-                        if (voiceAnswerUploadStatus ==
-                            VoiceAnswerUploadStatus.failure) ...[
-                          const SizedBox(height: AppSpacing.xs),
-                          const Text(
-                            '목소리를 보내지 못했어요.',
-                            key: ValueKey('voice-answer-upload-failure'),
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: AppColors.error,
-                              fontWeight: FontWeight.w700,
+                          child: Scrollbar(
+                            child: CustomScrollView(
+                              key: const ValueKey('ai-question-overlay-scroll'),
+                              primary: false,
+                              shrinkWrap: true,
+                              slivers: [
+                                SliverToBoxAdapter(
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.stretch,
+                                    children: [
+                                      if (compact)
+                                        Row(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            IgnorePointer(
+                                              child: _DodamiCharacter(
+                                                compact: true,
+                                              ),
+                                            ),
+                                            const SizedBox(
+                                              width: AppSpacing.xs,
+                                            ),
+                                            Expanded(
+                                              child: IgnorePointer(
+                                                child: _QuestionBubble(
+                                                  text: currentQuestion.text,
+                                                  compact: true,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        )
+                                      else
+                                        IgnorePointer(
+                                          child: _QuestionBubble(
+                                            text: currentQuestion.text,
+                                          ),
+                                        ),
+                                      if (voiceRecordingController
+                                          case final controller?) ...[
+                                        const SizedBox(height: AppSpacing.sm),
+                                        VoiceRecordingControl(
+                                          controller: controller,
+                                          enabled:
+                                              submissionStatus !=
+                                                  OptionAnswerSubmissionStatus
+                                                      .submitting &&
+                                              skipStatus !=
+                                                  QuestionSkipStatus
+                                                      .submitting &&
+                                              endStatus !=
+                                                  ConversationEndStatus
+                                                      .submitting,
+                                        ),
+                                        if (voiceAnswerUploadStatus ==
+                                            VoiceAnswerUploadStatus
+                                                .uploading) ...[
+                                          const SizedBox(height: AppSpacing.xs),
+                                          const LinearProgressIndicator(
+                                            key: ValueKey(
+                                              'voice-answer-uploading',
+                                            ),
+                                          ),
+                                          const SizedBox(height: AppSpacing.xs),
+                                          const Text(
+                                            '목소리를 보내고 있어요.',
+                                            textAlign: TextAlign.center,
+                                          ),
+                                        ],
+                                        if (voiceAnswerUploadStatus ==
+                                            VoiceAnswerUploadStatus
+                                                .failure) ...[
+                                          const SizedBox(height: AppSpacing.xs),
+                                          const Text(
+                                            '목소리를 보내지 못했어요.',
+                                            key: ValueKey(
+                                              'voice-answer-upload-failure',
+                                            ),
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              color: AppColors.error,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                          TextButton(
+                                            key: const ValueKey(
+                                              'voice-answer-upload-retry',
+                                            ),
+                                            onPressed: onRetryVoiceAnswerUpload,
+                                            style: TextButton.styleFrom(
+                                              minimumSize: const Size(48, 48),
+                                            ),
+                                            child: const Text('다시 보내기'),
+                                          ),
+                                        ],
+                                      ],
+                                      const SizedBox(height: AppSpacing.sm),
+                                      AnimatedSwitcher(
+                                        duration: const Duration(
+                                          milliseconds: 220,
+                                        ),
+                                        child: _ResponseActions(
+                                          key: ValueKey(
+                                            'ai-question-actions-'
+                                            '${currentQuestion.messageId}',
+                                          ),
+                                          showOptions: showResponseActions,
+                                          options: currentQuestion.options,
+                                          selectedOptionId: selectedOptionId,
+                                          onSelected: onOptionSelected,
+                                          onSkip: onSkip,
+                                          submissionStatus: submissionStatus,
+                                          skipStatus: skipStatus,
+                                          endStatus: endStatus,
+                                          onEnd: onEnd,
+                                        ),
+                                      ),
+                                      if (!compact) ...[
+                                        const SizedBox(height: AppSpacing.xs),
+                                        const Align(
+                                          alignment: Alignment.centerRight,
+                                          child: IgnorePointer(
+                                            child: _DodamiCharacter(),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                ),
+                              ],
                             ),
                           ),
-                          TextButton(
-                            key: const ValueKey('voice-answer-upload-retry'),
-                            onPressed: onRetryVoiceAnswerUpload,
-                            child: const Text('다시 보내기'),
-                          ),
-                        ],
-                      ],
-                      const SizedBox(height: AppSpacing.sm),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 220),
-                        child: _ResponseActions(
-                          key: ValueKey(
-                            'ai-question-actions-${currentQuestion.messageId}',
-                          ),
-                          showOptions: showResponseActions,
-                          options: currentQuestion.options,
-                          selectedOptionId: selectedOptionId,
-                          onSelected: onOptionSelected,
-                          onSkip: onSkip,
-                          submissionStatus: submissionStatus,
-                          skipStatus: skipStatus,
-                          endStatus: endStatus,
-                          onEnd: onEnd,
                         ),
                       ),
-                      const SizedBox(height: AppSpacing.xs),
-                      const IgnorePointer(child: _DodamiCharacter()),
-                    ],
+                    ),
                   ),
                 ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -272,7 +358,7 @@ final class _ResponseActions extends StatelessWidget {
         ),
         style: TextButton.styleFrom(
           foregroundColor: AppColors.inkMuted,
-          minimumSize: const Size.fromHeight(44),
+          minimumSize: const Size(48, 48),
         ),
       ),
     ],
@@ -387,16 +473,17 @@ final class _QuestionOptionButton extends StatelessWidget {
 }
 
 final class _QuestionBubble extends StatelessWidget {
-  const _QuestionBubble({required this.text});
+  const _QuestionBubble({required this.text, this.compact = false});
 
   final String text;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) => Container(
     key: const ValueKey('ai-question-bubble'),
-    padding: const EdgeInsets.symmetric(
-      horizontal: AppSpacing.lg,
-      vertical: AppSpacing.md,
+    padding: EdgeInsets.symmetric(
+      horizontal: compact ? AppSpacing.sm : AppSpacing.lg,
+      vertical: compact ? AppSpacing.xs : AppSpacing.md,
     ),
     decoration: BoxDecoration(
       color: AppColors.surface,
@@ -413,9 +500,9 @@ final class _QuestionBubble extends StatelessWidget {
     child: Text(
       text,
       textAlign: TextAlign.center,
-      style: const TextStyle(
+      style: TextStyle(
         color: AppColors.ink,
-        fontSize: 19,
+        fontSize: compact ? 16 : 19,
         fontWeight: FontWeight.w800,
         height: 1.35,
       ),
@@ -424,13 +511,15 @@ final class _QuestionBubble extends StatelessWidget {
 }
 
 final class _DodamiCharacter extends StatelessWidget {
-  const _DodamiCharacter();
+  const _DodamiCharacter({this.compact = false});
+
+  final bool compact;
 
   @override
   Widget build(BuildContext context) => Container(
     key: const ValueKey('dodami-character'),
-    width: 124,
-    height: 124,
+    width: compact ? 64 : 124,
+    height: compact ? 64 : 124,
     decoration: BoxDecoration(
       shape: BoxShape.circle,
       color: AppColors.surface,

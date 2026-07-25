@@ -4,9 +4,14 @@ import '../../../../design_system/design_system.dart';
 import '../../application/stt_result_controller.dart';
 
 final class SttResultPanel extends StatelessWidget {
-  const SttResultPanel({required this.controller, super.key});
+  const SttResultPanel({
+    required this.controller,
+    this.maxHeight = 180,
+    super.key,
+  });
 
   final SttResultController controller;
+  final double maxHeight;
 
   @override
   Widget build(BuildContext context) {
@@ -43,34 +48,39 @@ final class SttResultPanel extends StatelessWidget {
       color: AppColors.surface,
       borderRadius: BorderRadius.circular(AppRadius.lg),
       child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 360),
+        constraints: BoxConstraints(maxWidth: 360, maxHeight: maxHeight),
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.md),
           child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Icon(icon, color: AppColors.leaf, size: 30),
               const SizedBox(width: AppSpacing.sm),
               Expanded(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        color: AppColors.ink,
-                        fontWeight: FontWeight.w800,
+                child: SingleChildScrollView(
+                  key: const ValueKey('stt-result-scroll'),
+                  primary: false,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          color: AppColors.ink,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      message,
-                      key: controller.status == SttResultStatus.success
-                          ? const ValueKey('stt-result-text')
-                          : null,
-                      style: const TextStyle(color: AppColors.inkMuted),
-                    ),
-                  ],
+                      const SizedBox(height: 4),
+                      Text(
+                        message,
+                        key: controller.status == SttResultStatus.success
+                            ? const ValueKey('stt-result-text')
+                            : null,
+                        style: const TextStyle(color: AppColors.inkMuted),
+                      ),
+                    ],
+                  ),
                 ),
               ),
               if (controller.status != SttResultStatus.polling)
