@@ -5,7 +5,9 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import com.ssafy.b209.global.exception.BusinessException;
+import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -22,6 +24,7 @@ import java.util.HexFormat;
 import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
+import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -31,9 +34,8 @@ class LocalImageStorageTest {
       Clock.fixed(Instant.parse("2026-07-22T01:02:03Z"), ZoneOffset.UTC);
   private static final UUID FIRST_UUID = UUID.fromString("11111111-1111-4111-8111-111111111111");
   private static final UUID SECOND_UUID = UUID.fromString("22222222-2222-4222-8222-222222222222");
-  private static final byte[] PNG =
-      bytes(0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01, 0x02, 0x03);
-  private static final byte[] JPEG = bytes(0xFF, 0xD8, 0xFF, 0xE0, 0x01, 0x02, 0xFF, 0xD9);
+  private static final byte[] PNG = imageBytes("png");
+  private static final byte[] JPEG = imageBytes("jpeg");
   private static final byte[] WEBP =
       bytes(0x52, 0x49, 0x46, 0x46, 0x04, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50);
 
@@ -52,9 +54,23 @@ class LocalImageStorageTest {
     assertThat(stored.contentType()).isEqualTo("image/png");
     assertThat(stored.size()).isEqualTo(PNG.length);
     assertThat(stored.checksumSha256()).isEqualTo(sha256(PNG));
+    assertThat(stored.widthPx()).isEqualTo(2);
+    assertThat(stored.heightPx()).isEqualTo(3);
     assertThat(Path.of(stored.storageKey())).isRelative();
     assertThat(stored.storageKey()).doesNotContain("\\").doesNotContain(root.toString());
     assertThat(Files.readAllBytes(resolveStorageKey(root, stored.storageKey()))).isEqualTo(PNG);
+  }
+
+  private static byte[] imageBytes(String format) {
+    BufferedImage image = new BufferedImage(2, 3, BufferedImage.TYPE_INT_RGB);
+    try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+      if (!ImageIO.write(image, format, output)) {
+        throw new IllegalStateException("Test image writer is unavailable: " + format);
+      }
+      return output.toByteArray();
+    } catch (IOException exception) {
+      throw new IllegalStateException("Failed to create a test image", exception);
+    }
   }
 
   @Test

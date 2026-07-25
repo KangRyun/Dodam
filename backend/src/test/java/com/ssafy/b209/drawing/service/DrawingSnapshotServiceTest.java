@@ -90,7 +90,8 @@ class DrawingSnapshotServiceTest {
     given(drawingSession.getId()).willReturn(SESSION_ID);
     given(drawingSession.isSnapshotUploadable()).willReturn(true);
     given(imageStorage.store(file))
-        .willReturn(new StoredImage(STORAGE_KEY, "image.png", "image/png", 1, "a".repeat(64)));
+        .willReturn(
+            new StoredImage(STORAGE_KEY, "image.png", "image/png", 1, "a".repeat(64), 1920, 1080));
     given(drawingAssetRepository.saveAndFlush(any(DrawingAsset.class)))
         .willAnswer(
             invocation -> {
@@ -106,6 +107,8 @@ class DrawingSnapshotServiceTest {
     assertThat(response.assetType()).isEqualTo(DrawingAssetType.INTERMEDIATE);
     assertThat(response.assetVersion()).isEqualTo(2);
     assertThat(response.checksumSha256()).isEqualTo("a".repeat(64));
+    assertThat(response.widthPx()).isEqualTo(1920);
+    assertThat(response.heightPx()).isEqualTo(1080);
     assertThat(response.uploadedAt()).isEqualTo(NOW);
     verify(imageStorage).store(file);
     verify(imageStorage, never()).delete(any());
@@ -158,7 +161,8 @@ class DrawingSnapshotServiceTest {
         .willReturn(Optional.of(drawingSession));
     given(drawingSession.isSnapshotUploadable()).willReturn(true);
     given(imageStorage.store(file))
-        .willReturn(new StoredImage(STORAGE_KEY, "image.png", "image/png", 1, "a".repeat(64)));
+        .willReturn(
+            new StoredImage(STORAGE_KEY, "image.png", "image/png", 1, "a".repeat(64), 1920, 1080));
     given(drawingAssetRepository.saveAndFlush(any(DrawingAsset.class)))
         .willThrow(new DataIntegrityViolationException("duplicate"));
 

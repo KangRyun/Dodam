@@ -704,19 +704,15 @@ Header `Idempotency-Key` 필수.
   "childId": 1,
   "drawingTypeId": 2,
   "inputMethod": "CANVAS",
-  "clientStartedAt": "2026-07-21T11:30:00+09:00",
-  "canvas": {
-    "width": 1920,
-    "height": 1080,
-    "backgroundColor": "#FFFFFF"
-  }
+  "clientStartedAt": "2026-07-21T11:30:00+09:00"
 }
 ```
 
 #### 검증
 
 - 보호자-아동 연결과 필수 동의를 확인한다.
-- `CANVAS`이면 `canvas`가 필수, `UPLOAD`이면 `canvas`를 무시한다.
+- `canvas`는 입력 방식과 무관하게 선택 필드이다. Flutter는 화면 렌더링 전에 세션을 생성하므로 임의의 고정 크기를 보내지 않고 생략한다.
+- `canvas`를 전달할 때 `width`, `height`, `backgroundColor`는 각각 양수와 `#RRGGBB` 형식을 만족해야 한다. 이 값은 클라이언트의 논리 화면 설정이며 저장 이미지의 실제 픽셀 크기로 사용하지 않는다.
 - 그림 유형의 연령과 선택 주체를 확인한다.
 - 같은 아동에게 복구 가능한 `IN_PROGRESS` 세션이 있으면 `409 ACTIVE_DRAWING_SESSION_EXISTS`와 해당 `drawingSessionId`를 반환한다.
 
@@ -787,12 +783,14 @@ Header `Idempotency-Key` 필수.
 
 | Part | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
-| `preview` | image binary | O | 현재 캔버스 미리보기 |
+| `preview` | image binary | O | 현재 캔버스 미리보기. 서버가 이미지 Header에서 실제 픽셀 크기를 확인한다. |
 | `canvasState` | JSON string | O | `lastEventSequence`, `toolState`, `viewport`, `clientSavedAt` |
 
-PUT은 마지막 임시 저장 전체본을 교체한다. 응답은 `drawingAssetId`, `assetVersion`, `lastEventSequence`, `savedAt`, `expiresAt`이다.
+PUT은 마지막 임시 저장 전체본을 교체한다. 응답은 `drawingAssetId`, `assetVersion`, `lastEventSequence`, `widthPx`, `heightPx`, `savedAt`, `expiresAt`이다.
 
 GET 응답에는 복구용 `previewUrl`, `canvasState`, `assetVersion`을 포함한다. DELETE는 DRAFT asset과 복구 메타데이터만 제거하고 stroke batch 원본의 보관 여부는 데이터 정책을 따른다.
+
+`widthPx`, `heightPx`는 Storage에 저장한 이미지의 Header에서 검증한 값을 `drawing_assets`에 기록한 결과이다. 신규 업로드에는 값이 저장되지만 기존 데이터와 구버전 Storage Adapter의 호환을 위해 API 타입은 nullable이다. 객체 탐지와 분석에서는 세션 생성의 논리 `canvas`가 아니라 이 검증된 Asset 크기를 사용한다.
 
 ### 10.7 종이 그림 업로드
 
@@ -800,7 +798,7 @@ GET 응답에는 복구용 `previewUrl`, `canvasState`, `assetVersion`을 포함
 
 | Part | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
-| `image` | image binary | O | JPEG/PNG/WEBP, 최대 10 MiB |
+| `image` | image binary | O | JPEG/PNG/WEBP, 최대 10 MiB. 서버가 이미지 Header에서 실제 픽셀 크기를 확인한다. |
 | `metadata` | JSON string | O | `clientCapturedAt?`, `rotationDegrees?`, `cropApplied:boolean` |
 
 Spring Boot는 방향 보정, EXIF 제거, 그림 영역 기본 검증 후 `assetType=UPLOADED`로 저장한다.

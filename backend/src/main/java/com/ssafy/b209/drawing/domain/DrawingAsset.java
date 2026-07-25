@@ -85,6 +85,8 @@ public class DrawingAsset {
       String storageKey,
       String mimeType,
       long fileSizeBytes,
+      Integer widthPx,
+      Integer heightPx,
       String checksumSha256,
       LocalDateTime capturedAt,
       LocalDateTime createdAt) {
@@ -95,8 +97,8 @@ public class DrawingAsset {
     this.fileUrl = null;
     this.mimeType = mimeType;
     this.fileSizeBytes = fileSizeBytes;
-    this.widthPx = null;
-    this.heightPx = null;
+    this.widthPx = requirePositiveDimensionOrNull(widthPx, "widthPx");
+    this.heightPx = requirePositiveDimensionOrNull(heightPx, "heightPx");
     this.checksumSha256 = checksumSha256;
     this.lastEventSequence = null;
     this.objectCode = null;
@@ -127,6 +129,8 @@ public class DrawingAsset {
       String storageKey,
       String mimeType,
       long fileSizeBytes,
+      Integer widthPx,
+      Integer heightPx,
       String checksumSha256,
       LocalDateTime capturedAt,
       LocalDateTime createdAt) {
@@ -145,9 +149,49 @@ public class DrawingAsset {
         Objects.requireNonNull(storageKey, "storageKey must not be null"),
         Objects.requireNonNull(mimeType, "mimeType must not be null"),
         fileSizeBytes,
+        widthPx,
+        heightPx,
         Objects.requireNonNull(checksumSha256, "checksumSha256 must not be null"),
         Objects.requireNonNull(capturedAt, "capturedAt must not be null"),
         Objects.requireNonNull(createdAt, "createdAt must not be null"));
+  }
+
+  /**
+   * 이미지 크기가 수집되지 않은 기존 데이터 생성 경로를 위한 호환 팩터리다.
+   *
+   * @param drawingSession 스냅샷이 속한 그림 활동 세션
+   * @param assetType 중간 또는 최종 스냅샷 유형
+   * @param assetVersion 세션과 유형 안에서 증가하는 버전
+   * @param storageKey 이미지 저장소 내부 상대 Key
+   * @param mimeType 검증된 이미지 MIME Type
+   * @param fileSizeBytes 실제 파일 크기
+   * @param checksumSha256 실제 이미지 Byte의 SHA-256
+   * @param capturedAt 클라이언트가 이미지를 캡처한 시각
+   * @param createdAt 서버가 Metadata를 생성한 시각
+   * @return 크기가 아직 수집되지 않은 스냅샷 Metadata
+   */
+  public static DrawingAsset snapshot(
+      DrawingSession drawingSession,
+      DrawingAssetType assetType,
+      int assetVersion,
+      String storageKey,
+      String mimeType,
+      long fileSizeBytes,
+      String checksumSha256,
+      LocalDateTime capturedAt,
+      LocalDateTime createdAt) {
+    return snapshot(
+        drawingSession,
+        assetType,
+        assetVersion,
+        storageKey,
+        mimeType,
+        fileSizeBytes,
+        null,
+        null,
+        checksumSha256,
+        capturedAt,
+        createdAt);
   }
 
   /**
@@ -174,6 +218,8 @@ public class DrawingAsset {
       String storageKey,
       String mimeType,
       long fileSizeBytes,
+      Integer widthPx,
+      Integer heightPx,
       String checksumSha256,
       long lastEventSequence,
       LocalDateTime capturedAt,
@@ -192,11 +238,58 @@ public class DrawingAsset {
             Objects.requireNonNull(storageKey, "storageKey must not be null"),
             Objects.requireNonNull(mimeType, "mimeType must not be null"),
             fileSizeBytes,
+            widthPx,
+            heightPx,
             Objects.requireNonNull(checksumSha256, "checksumSha256 must not be null"),
             Objects.requireNonNull(capturedAt, "capturedAt must not be null"),
             Objects.requireNonNull(createdAt, "createdAt must not be null"));
     asset.lastEventSequence = lastEventSequence;
     return asset;
+  }
+
+  /**
+   * 이미지 크기가 수집되지 않은 기존 초안 생성 경로를 위한 호환 팩터리다.
+   *
+   * @param drawingSession 초안이 속한 그림 활동 세션
+   * @param assetVersion 세션 내 초안 저장 버전
+   * @param storageKey 이미지 저장소 내부 상대 Key
+   * @param mimeType 검증된 이미지 MIME Type
+   * @param fileSizeBytes 실제 파일 크기
+   * @param checksumSha256 실제 이미지 Byte의 SHA-256
+   * @param lastEventSequence 초안에 반영된 마지막 이벤트 순서
+   * @param capturedAt 클라이언트가 초안을 저장한 시각
+   * @param createdAt 서버가 Metadata를 생성한 시각
+   * @return 크기가 아직 수집되지 않은 초안 Metadata
+   */
+  public static DrawingAsset draft(
+      DrawingSession drawingSession,
+      int assetVersion,
+      String storageKey,
+      String mimeType,
+      long fileSizeBytes,
+      String checksumSha256,
+      long lastEventSequence,
+      LocalDateTime capturedAt,
+      LocalDateTime createdAt) {
+    return draft(
+        drawingSession,
+        assetVersion,
+        storageKey,
+        mimeType,
+        fileSizeBytes,
+        null,
+        null,
+        checksumSha256,
+        lastEventSequence,
+        capturedAt,
+        createdAt);
+  }
+
+  private static Integer requirePositiveDimensionOrNull(Integer dimension, String fieldName) {
+    if (dimension != null && dimension <= 0) {
+      throw new IllegalArgumentException(fieldName + " must be positive");
+    }
+    return dimension;
   }
 
   /**

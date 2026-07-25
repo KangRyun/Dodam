@@ -99,6 +99,8 @@ public class DrawingSnapshotService {
             storedImage.storageKey(),
             storedImage.contentType(),
             storedImage.size(),
+            storedImage.widthPx(),
+            storedImage.heightPx(),
             storedImage.checksumSha256(),
             request.capturedAt().withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime(),
             uploadedAt);
@@ -155,6 +157,8 @@ public class DrawingSnapshotService {
         asset.getAssetVersion(),
         asset.getMimeType(),
         asset.getFileSizeBytes(),
+        asset.getWidthPx(),
+        asset.getHeightPx(),
         asset.getChecksumSha256(),
         asset.getCapturedAt().toInstant(ZoneOffset.UTC),
         asset.getCreatedAt().toInstant(ZoneOffset.UTC));
