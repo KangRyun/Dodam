@@ -28,6 +28,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
@@ -76,7 +77,9 @@ class MvpFlowIntegrationTest {
   private static final String DEVICE_ID = "mvp-device-001";
   private static final String PROVIDER_SUBJECT = "kakao-mvp-user";
   private static final byte[] PNG =
-      new byte[] {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0x01};
+      Base64.getDecoder()
+          .decode(
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
   private static final Path STORAGE_ROOT = createStorageRoot();
 
   @Container @ServiceConnection

@@ -82,6 +82,43 @@ class DrawingSessionDomainTest {
     assertThat(session.matchesCoreRequest(10L, 20L, DrawingInputMethod.UPLOAD)).isFalse();
   }
 
+  @Test
+  void drawingAnalysisTransitionsFromDrawingToAnalyzingAndConversing() {
+    DrawingSession session = session();
+
+    session.startDrawingAnalysis();
+
+    assertThat(session.getSessionStatus()).isEqualTo(DrawingSessionStatus.IN_PROGRESS);
+    assertThat(session.getCurrentStage()).isEqualTo(DrawingStage.ANALYZING);
+    assertThat(session.isAnalysisRequestable()).isFalse();
+
+    session.finishDrawingAnalysis();
+
+    assertThat(session.getSessionStatus()).isEqualTo(DrawingSessionStatus.IN_PROGRESS);
+    assertThat(session.getCurrentStage()).isEqualTo(DrawingStage.CONVERSING);
+    assertThat(session.canSaveReflection()).isTrue();
+  }
+
+  @Test
+  void drawingAnalysisTransitionRejectsAnUnexpectedStage() {
+    DrawingSession session = session();
+
+    assertThatThrownBy(session::finishDrawingAnalysis).isInstanceOf(IllegalStateException.class);
+
+    session.startDrawingAnalysis();
+
+    assertThatThrownBy(session::startDrawingAnalysis).isInstanceOf(IllegalStateException.class);
+  }
+
+  private DrawingSession session() {
+    return DrawingSession.start(
+        child(10L),
+        drawingType(20L),
+        DrawingInputMethod.CANVAS,
+        LocalDateTime.of(2026, 7, 21, 10, 30),
+        "request-1");
+  }
+
   private Child child(Long id) {
     return ChildFixture.create(
         id,

@@ -103,18 +103,49 @@ public class DrawingAnalysisService {
    */
   public CreateDrawingAnalysisResponse requestAnalysis(
       Long drawingSessionId, CreateDrawingAnalysisRequest request) {
+    return requestAnalysis(drawingSessionId, request, requestIdSupplier.get().toString(), false);
+  }
+
+  /**
+   * 호출자가 지정한 요청 식별자로 FINAL 그림 객체 탐지를 동기식으로 실행한다.
+   *
+   * <p>그림 단계 완료 API의 {@code Idempotency-Key}와 분석 실행을 연결할 때 사용한다. 접근 권한과 분석 대상 검증은 일반 분석 요청과 동일하게
+   * 적용한다.
+   *
+   * @param drawingSessionId 분석 대상 그림 활동 세션 식별자
+   * @param request 그림 파일 식별자와 AI 분석 작업 유형
+   * @param requestId 분석 실행을 식별하는 멱등 요청 값
+   * @return 내부 저장소 정보를 제외한 저장 완료 결과
+   * @throws BusinessException 대상·상태·중복 검증, Client 호출 또는 결과 저장에 실패한 경우
+   */
+  public CreateDrawingAnalysisResponse requestAnalysis(
+      Long drawingSessionId, CreateDrawingAnalysisRequest request, String requestId) {
+    return requestAnalysis(drawingSessionId, request, requestId, true);
+  }
+
+  private CreateDrawingAnalysisResponse requestAnalysis(
+      Long drawingSessionId,
+      CreateDrawingAnalysisRequest request,
+      String requestId,
+      boolean drawingStageCompletion) {
     Long guardianUserId = currentUserResolver.requireUserId();
     accessValidator.requireDrawingSessionAccess(guardianUserId, drawingSessionId);
-    String requestId = requestIdSupplier.get().toString();
     Instant requestedInstant = clock.instant();
     LocalDateTime requestedAt = LocalDateTime.ofInstant(requestedInstant, ZoneOffset.UTC);
     StartedDrawingAnalysis started =
-        persistenceService.start(
-            drawingSessionId,
-            request.drawingAssetId(),
-            request.analysisType(),
-            requestId,
-            requestedAt);
+        drawingStageCompletion
+            ? persistenceService.startForDrawingCompletion(
+                drawingSessionId,
+                request.drawingAssetId(),
+                request.analysisType(),
+                requestId,
+                requestedAt)
+            : persistenceService.start(
+                drawingSessionId,
+                request.drawingAssetId(),
+                request.analysisType(),
+                requestId,
+                requestedAt);
 
     return executeAnalysis(started, request.analysisType(), requestedInstant);
   }
@@ -164,6 +195,10 @@ public class DrawingAnalysisService {
     } catch (DrawingAnalysisClientException exception) {
       DrawingAnalysisErrorCode errorCode = errorCodeFor(exception);
       markFailed(started.analysisId(), exception.getType().name(), errorCode);
+      throw new BusinessException(errorCode, exception);
+    } catch (RuntimeException exception) {
+      DrawingAnalysisErrorCode errorCode = DrawingAnalysisErrorCode.DRAWING_ANALYSIS_REQUEST_FAILED;
+      markFailed(started.analysisId(), "UNEXPECTED_CLIENT_ERROR", errorCode);
       throw new BusinessException(errorCode, exception);
     }
 

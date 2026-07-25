@@ -162,6 +162,37 @@ public class DrawingSession {
   }
 
   /**
+   * 최종 그림 저장이 끝난 세션을 대화 준비용 분석 단계로 전환한다.
+   *
+   * <p>진행 중인 {@link DrawingStage#DRAWING} 세션에서만 호출할 수 있다. 이 전이는 전체 그림 활동을 완료하지 않으며, 분석 결과가 확정될 때까지
+   * 추가 스냅샷 업로드를 차단한다.
+   *
+   * @throws IllegalStateException 삭제되었거나 진행 중이 아니거나 DRAWING 단계가 아닌 경우
+   */
+  public void startDrawingAnalysis() {
+    if (!isAnalysisRequestable()) {
+      throw new IllegalStateException("그림 작성 단계의 진행 중인 세션만 분석을 시작할 수 있습니다.");
+    }
+    currentStage = DrawingStage.ANALYZING;
+  }
+
+  /**
+   * 대화 준비용 그림 분석을 확정하고 후속 대화·감정 선택 단계로 전환한다.
+   *
+   * <p>분석 성공과 실패 모두 이 전이를 사용한다. 분석 실패 시에도 저장된 최종 그림을 유지하고 폴백 질문을 제공할 수 있도록 세션 자체는 진행 상태를 유지한다.
+   *
+   * @throws IllegalStateException 삭제되었거나 진행 중이 아니거나 ANALYZING 단계가 아닌 경우
+   */
+  public void finishDrawingAnalysis() {
+    if (deletedAt != null
+        || sessionStatus != DrawingSessionStatus.IN_PROGRESS
+        || currentStage != DrawingStage.ANALYZING) {
+      throw new IllegalStateException("분석 중인 진행 세션만 대화 단계로 전환할 수 있습니다.");
+    }
+    currentStage = DrawingStage.CONVERSING;
+  }
+
+  /**
    * 현재 세션이 감정 표현을 최초 저장하거나 수정할 수 있는지 확인한다.
    *
    * @return 삭제되지 않은 진행 중 CONVERSING 또는 REFLECTION 단계이면 {@code true}
