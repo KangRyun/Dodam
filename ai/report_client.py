@@ -27,6 +27,7 @@ from openai import OpenAIError
 
 import config
 import internal_contracts as contracts
+import report_safety
 from gms import get_client
 
 logger = logging.getLogger(__name__)
@@ -188,13 +189,27 @@ def _scope(value) -> str:
 
 
 def _feature(item: dict) -> contracts.ObservedFeatureDraft:
-    """LLM이 만든 특징 dict 하나를 계약 모델로. 누락 필드는 빈 문자열로 채운다."""
+    """LLM이 만든 특징 dict 하나를 계약 모델로. 누락 필드는 빈 문자열로 채운다.
+
+    단정적 진단 표현(S15P11B209-591)이 든 보호자 노출 feature는 EXPERT_ONLY로 강등해
+    전문가 검토로 격리한다 — 경향성 우려 소견은 그대로 통과한다.
+    """
+    title = str(item.get("title", ""))
+    description = str(item.get("description", ""))
+    evidence = str(item.get("evidenceSummary", ""))
+    scope = _scope(item.get("visibilityScope"))
+    if scope != "EXPERT_ONLY" and report_safety.has_definitive_diagnosis(
+        title, description, evidence
+    ):
+        # ⚠️ 원문은 로그로 남기지 않는다 — 격리 사실만.
+        logger.warning("리포트 feature 단정 진단 표현 격리 — EXPERT_ONLY 강등")
+        scope = "EXPERT_ONLY"
     return contracts.ObservedFeatureDraft(
         feature_code=str(item.get("featureCode", "")),
-        title=str(item.get("title", "")),
-        description=str(item.get("description", "")),
-        evidence_summary=str(item.get("evidenceSummary", "")),
-        visibility_scope=_scope(item.get("visibilityScope")),
+        title=title,
+        description=description,
+        evidence_summary=evidence,
+        visibility_scope=scope,
     )
 
 
@@ -203,6 +218,23 @@ def _assemble(
 ) -> contracts.ObservationGenerationResult:
     """LLM 정성 결과(data) + 서버 고정 필드를 합쳐 계약 결과를 만든다."""
     conv = data.get("conversationSummary") or {}
+    features = [_feature(f) for f in data.get("features", []) if isinstance(f, dict)]
+
+    # 단정적 진단 표현이 보호자 노출 문장·특징에 하나라도 있으면 전문가 검토를 강제한다
+    # (S15P11B209-591). attentionPoints는 전문가 전용 채널이라 검사 대상에서 제외한다.
+    guardian_texts = [
+        str(data.get("overallSummary", "")),
+        str(data.get("positiveSignals", "")),
+        str(data.get("evidenceSummary", "")),
+        str(data.get("guardianGuidance", "")),
+        str(data.get("followUpQuestion", "")),
+        str(conv.get("summaryText", "")),
+        str(conv.get("mainTopic", "")),
+        str(conv.get("expressedEmotion", "")),
+        *(f"{f.title} {f.description} {f.evidence_summary}" for f in features),
+    ]
+    needs_expert_review = report_safety.has_definitive_diagnosis(*guardian_texts)
+
     observation = contracts.ObservationDraft(
         status="AI_DRAFT",
         overall_summary=str(data.get("overallSummary", "")),
@@ -211,9 +243,10 @@ def _assemble(
         evidence_summary=str(data.get("evidenceSummary", "")),
         guardian_guidance=str(data.get("guardianGuidance", "")),
         follow_up_question=str(data.get("followUpQuestion", "")),
-        expert_review_required=bool(data.get("expertReviewRequired", False)),
+        expert_review_required=bool(data.get("expertReviewRequired", False))
+        or needs_expert_review,
         disclaimer=DISCLAIMER,
-        features=[_feature(f) for f in data.get("features", []) if isinstance(f, dict)],
+        features=features,
     )
     conversation_summary = contracts.ConversationSummaryDraft(
         summary_text=str(conv.get("summaryText", "")),

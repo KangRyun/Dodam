@@ -91,6 +91,9 @@ class DrawingErrorCodeTest {
         DrawingErrorCode.ACTIVE_DRAWING_SESSION_NOT_FOUND,
         new ErrorContract(HttpStatus.NOT_FOUND, "DRAWING_404_005", "진행 중인 그림 활동이 없습니다."));
     expected.put(
+        DrawingErrorCode.DRAWING_ASSET_NOT_FOUND,
+        new ErrorContract(HttpStatus.NOT_FOUND, "DRAWING_404_006", "그림 파일을 찾을 수 없습니다."));
+    expected.put(
         DrawingErrorCode.MULTIPLE_ACTIVE_DRAWING_SESSIONS,
         new ErrorContract(
             HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_500_003", "진행 중인 그림 활동 데이터가 중복되었습니다."));

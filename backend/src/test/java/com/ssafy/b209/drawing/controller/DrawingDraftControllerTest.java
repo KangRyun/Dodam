@@ -57,7 +57,7 @@ class DrawingDraftControllerTest {
         .andExpect(jsonPath("$.data.lastEventSequence").value(17))
         .andExpect(jsonPath("$.data.finalSnapshot").value(false))
         .andExpect(jsonPath("$.data.storageKey").doesNotExist())
-        .andExpect(jsonPath("$.data.previewUrl").doesNotExist());
+        .andExpect(jsonPath("$.data.previewUrl").value("/api/v1/drawing-assets/20/file"));
   }
 
   @Test
@@ -98,7 +98,7 @@ class DrawingDraftControllerTest {
         .andExpect(jsonPath("$.data.lastEventSequence").value(17))
         .andExpect(jsonPath("$.data.canvasState.lastEventSequence").value(17))
         .andExpect(jsonPath("$.data.canvasState.clientSavedAt").value("2026-07-22T05:30:00Z"))
-        .andExpect(jsonPath("$.data.previewUrl").value(org.hamcrest.Matchers.nullValue()));
+        .andExpect(jsonPath("$.data.previewUrl").value("/api/v1/drawing-assets/20/file"));
   }
 
   @Test
@@ -138,7 +138,7 @@ class DrawingDraftControllerTest {
         Instant.parse("2026-07-22T05:30:00Z"),
         Instant.parse("2026-07-22T05:30:01Z"),
         null,
-        null,
+        "/api/v1/drawing-assets/20/file",
         new DrawingCanvasStateResponse(17, Instant.parse("2026-07-22T05:30:00Z")));
   }
 }

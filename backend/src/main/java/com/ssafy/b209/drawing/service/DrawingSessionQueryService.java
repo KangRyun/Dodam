@@ -51,6 +51,7 @@ public class DrawingSessionQueryService {
   private final ReportRepository reportRepository;
   private final CurrentAuthenticatedUserResolver currentUserResolver;
   private final GuardianResourceAccessValidator accessValidator;
+  private final DrawingAssetFileUrlFactory drawingAssetFileUrlFactory;
 
   /**
    * 그림 활동 상태와 연관 리소스 Metadata 조회에 사용할 저장소를 구성한다.
@@ -63,6 +64,7 @@ public class DrawingSessionQueryService {
    * @param reportRepository 리포트 조회 저장소
    * @param currentUserResolver Access Token에서 현재 사용자 ID를 제공하는 Resolver
    * @param accessValidator 보호자와 그림 활동의 연결 관계를 검증하는 Validator
+   * @param drawingAssetFileUrlFactory 저장된 그림의 인증 조회 URL 생성기
    */
   public DrawingSessionQueryService(
       DrawingSessionRepository drawingSessionRepository,
@@ -72,7 +74,8 @@ public class DrawingSessionQueryService {
       ConversationSessionRepository conversationSessionRepository,
       ReportRepository reportRepository,
       CurrentAuthenticatedUserResolver currentUserResolver,
-      GuardianResourceAccessValidator accessValidator) {
+      GuardianResourceAccessValidator accessValidator,
+      DrawingAssetFileUrlFactory drawingAssetFileUrlFactory) {
     this.drawingSessionRepository = drawingSessionRepository;
     this.drawingAssetRepository = drawingAssetRepository;
     this.drawingSessionEmotionRepository = drawingSessionEmotionRepository;
@@ -81,6 +84,7 @@ public class DrawingSessionQueryService {
     this.reportRepository = reportRepository;
     this.currentUserResolver = currentUserResolver;
     this.accessValidator = accessValidator;
+    this.drawingAssetFileUrlFactory = drawingAssetFileUrlFactory;
   }
 
   /**
@@ -204,7 +208,7 @@ public class DrawingSessionQueryService {
         draft.getFileSizeBytes(),
         draft.getCapturedAt().toInstant(ZoneOffset.UTC),
         draft.getCreatedAt().toInstant(ZoneOffset.UTC),
-        null);
+        drawingAssetFileUrlFactory.create(draft.getId()));
   }
 
   private DrawingTypeSummaryResponse toDrawingTypeSummary(DrawingType type) {
