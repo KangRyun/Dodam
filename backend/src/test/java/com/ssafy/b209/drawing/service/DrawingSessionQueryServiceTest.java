@@ -86,7 +86,8 @@ class DrawingSessionQueryServiceTest {
             conversationSessionRepository,
             reportRepository,
             currentUserResolver,
-            accessValidator);
+            accessValidator,
+            new DrawingAssetFileUrlFactory());
   }
 
   @Test
@@ -263,7 +264,7 @@ class DrawingSessionQueryServiceTest {
     assertThat(response.latestDraft().clientSavedAt())
         .isEqualTo(CLIENT_SAVED_AT.toInstant(ZoneOffset.UTC));
     assertThat(response.latestDraft().savedAt()).isEqualTo(SAVED_AT.toInstant(ZoneOffset.UTC));
-    assertThat(response.latestDraft().previewUrl()).isNull();
+    assertThat(response.latestDraft().previewUrl()).isEqualTo("/api/v1/drawing-assets/20/file");
   }
 
   @Test

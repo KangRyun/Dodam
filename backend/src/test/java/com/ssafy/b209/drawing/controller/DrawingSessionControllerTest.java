@@ -173,7 +173,8 @@ class DrawingSessionControllerTest {
         .andExpect(jsonPath("$.data.latestDraft.drawingAssetId").value(200))
         .andExpect(jsonPath("$.data.latestDraft.assetVersion").value(3))
         .andExpect(jsonPath("$.data.latestDraft.lastEventSequence").value(17))
-        .andExpect(jsonPath("$.data.latestDraft.previewUrl").isEmpty());
+        .andExpect(
+            jsonPath("$.data.latestDraft.previewUrl").value("/api/v1/drawing-assets/200/file"));
   }
 
   @Test
@@ -313,7 +314,7 @@ class DrawingSessionControllerTest {
         4096L,
         Instant.parse("2026-07-21T02:35:00Z"),
         Instant.parse("2026-07-21T02:35:01Z"),
-        null);
+        "/api/v1/drawing-assets/200/file");
   }
 
   private DrawingSessionDetailResponse detailResponse() {

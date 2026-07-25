@@ -66,6 +66,8 @@ public enum DrawingErrorCode implements ErrorCode {
   DRAWING_DRAFT_METADATA_INVALID(HttpStatus.BAD_REQUEST, "DRAWING_400_008", "그림 초안 정보가 올바르지 않습니다."),
   /** 아동에게 삭제되지 않은 진행 중 그림 활동 세션이 없는 경우다. */
   ACTIVE_DRAWING_SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "DRAWING_404_005", "진행 중인 그림 활동이 없습니다."),
+  /** 요청한 그림 파일 Metadata가 없는 경우다. */
+  DRAWING_ASSET_NOT_FOUND(HttpStatus.NOT_FOUND, "DRAWING_404_006", "그림 파일을 찾을 수 없습니다."),
   /** 한 아동에게 진행 중 그림 활동 세션이 둘 이상 존재해 단일 세션을 결정할 수 없는 경우다. */
   MULTIPLE_ACTIVE_DRAWING_SESSIONS(
       HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_500_003", "진행 중인 그림 활동 데이터가 중복되었습니다."),

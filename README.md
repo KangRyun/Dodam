@@ -759,15 +759,23 @@ curl -X PUT "http://localhost:8080/api/v1/drawing-sessions/100/draft" \
 GET /api/v1/drawing-sessions/{drawingSessionId}/draft
 ```
 
+응답의 `previewUrl`에 Access Token을 전달하면 실제 이미지를 조회할 수 있습니다.
+
+```http
+GET /api/v1/drawing-assets/{drawingAssetId}/file
+Authorization: Bearer <access-token>
+```
+
 - `preview`는 최대 10MB의 JPEG 또는 PNG 이미지이며 기존 `ImageStorage` 검증을 동일하게 적용합니다.
 - `lastEventSequence`는 초안에 반영된 마지막 그림 이벤트 순서이며 저장할 때마다 증가해야 합니다.
 - 현재 초안과 같은 이벤트 순서는 HTTP 409, 더 이전 순서는 HTTP 409로 거부합니다.
 - 서버는 세션 잠금 안에서 `assetVersion`을 1부터 증가시키며 최신 초안은 가장 높은 `assetVersion`으로 결정합니다.
 - 초안은 `DRAFT` 유형이며 최종 그림이나 분석용 `INTERMEDIATE` 스냅샷과 구분됩니다.
 - 자동 저장은 세션 상태·단계를 변경하거나 AI 분석과 최종 그림 생성을 실행하지 않습니다.
-- 최신 조회는 이미지 다운로드 API가 아닙니다. 현재 다운로드 API가 없으므로 `previewUrl`은 `null`이며 내부 Storage Key와 서버 절대 경로를 반환하지 않습니다.
-- 현재 인증과 그림 활동 소유권 검증은 아직 연결되지 않았습니다.
-- 도구 상태·Viewport를 포함한 종합 활동 재개와 초안 삭제는 후속 작업 범위입니다.
+- 최신 조회의 `previewUrl`은 `/api/v1/drawing-assets/{drawingAssetId}/file` 형식의 상대 경로이며, 같은 Access Token으로 호출해야 합니다.
+- 파일 조회 API는 그림 활동 소유권을 다시 검증하고 `Cache-Control: private, no-store`로 원본 이미지를 프록시 스트리밍합니다.
+- 내부 Storage Key와 서버 절대 경로는 반환하지 않으며, `previewUrl` 자체에는 별도 만료 시각이 없습니다.
+- 도구 상태·Viewport를 포함한 종합 화면 복원은 Flutter 통합 작업 범위입니다.
 
 ## 진행 중 그림 활동 조회 및 재개 API
 
@@ -798,7 +806,7 @@ GET /api/v1/drawing-sessions/active?childId=1
       "fileSize": 4096,
       "clientSavedAt": "2026-07-21T02:35:00Z",
       "savedAt": "2026-07-21T02:35:01Z",
-      "previewUrl": null
+      "previewUrl": "/api/v1/drawing-assets/200/file"
     }
   }
 }
@@ -809,9 +817,9 @@ GET /api/v1/drawing-sessions/active?childId=1
 - 데이터 이상으로 활성 세션이 둘 이상이면 하나를 임의 선택하지 않고 HTTP 500과 `DRAWING_500_003`을 반환합니다.
 - 저장된 초안이 없으면 세션 조회는 성공하고 `latestDraft`가 `null`입니다.
 - `latestDraft`는 `DRAFT` 중 가장 높은 `assetVersion`이며 `FINAL`·`INTERMEDIATE` 스냅샷은 포함하지 않습니다.
-- 현재 이미지 다운로드 API가 없으므로 `previewUrl`은 `null`이며 Storage Key, 절대 경로, 이미지 Byte는 노출하지 않습니다.
-- 조회만으로 초안이나 세션을 생성하지 않고 AI 분석을 실행하지 않으며, 파일 시스템에도 접근하지 않습니다.
-- 현재 인증과 아동 소유권 검증은 아직 연결되지 않았습니다.
+- `previewUrl`은 JWT 인증이 필요한 상대 경로이며 Storage Key, 절대 경로, 이미지 Byte를 세션 조회 응답에 노출하지 않습니다.
+- 활성 세션 조회만으로 초안이나 세션을 생성하거나 AI 분석을 실행하지 않습니다. 실제 이미지는 `previewUrl`을 별도로 호출할 때만 Storage에서 읽습니다.
+- 파일 조회 시 현재 보호자와 그림 활동 세션의 연결 관계를 검증하며, 접근할 수 없는 자원은 존재 여부를 숨기기 위해 404로 응답합니다.
 
 ## 그림 활동 상세 조회 API
 
