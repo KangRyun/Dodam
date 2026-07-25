@@ -21,7 +21,7 @@ import java.time.Instant;
  * @param clientSavedAt 클라이언트가 저장한 시각
  * @param savedAt 서버가 저장한 시각
  * @param expiresAt 만료 정책이 없다면 {@code null}
- * @param previewUrl 초안 조회 URL이 아직 제공되지 않으면 {@code null}
+ * @param previewUrl JWT 인증과 함께 호출하는 그림 파일 상대 조회 URL
  * @param canvasState 초안과 그림 이벤트를 맞추기 위한 최소 복구 기준
  */
 public record DrawingDraftResponse(

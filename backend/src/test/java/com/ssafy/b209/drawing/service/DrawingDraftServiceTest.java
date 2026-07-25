@@ -66,6 +66,7 @@ class DrawingDraftServiceTest {
             imageStorage,
             currentUserResolver,
             accessValidator,
+            new DrawingAssetFileUrlFactory(),
             Clock.fixed(NOW, ZoneOffset.UTC));
     preview =
         new StoreImageCommand(
@@ -168,7 +169,10 @@ class DrawingDraftServiceTest {
     DrawingAsset latest = draft(4, 31, 20L);
     given(drawingAssetRepository.findLatestDraft(SESSION_ID)).willReturn(Optional.of(latest));
 
-    assertThat(service.getLatest(SESSION_ID).drawingAssetId()).isEqualTo(20L);
+    DrawingDraftResponse response = service.getLatest(SESSION_ID);
+
+    assertThat(response.drawingAssetId()).isEqualTo(20L);
+    assertThat(response.previewUrl()).isEqualTo("/api/v1/drawing-assets/20/file");
 
     given(drawingAssetRepository.findLatestDraft(SESSION_ID)).willReturn(Optional.empty());
     assertError(() -> service.getLatest(SESSION_ID), DrawingErrorCode.DRAWING_DRAFT_NOT_FOUND);

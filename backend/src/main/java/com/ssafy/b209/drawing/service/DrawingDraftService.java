@@ -40,6 +40,7 @@ public class DrawingDraftService {
   private final ImageStorage imageStorage;
   private final CurrentAuthenticatedUserResolver currentUserResolver;
   private final GuardianResourceAccessValidator accessValidator;
+  private final DrawingAssetFileUrlFactory drawingAssetFileUrlFactory;
   private final Clock clock;
 
   /**
@@ -51,6 +52,7 @@ public class DrawingDraftService {
    * @param imageStorage 검증된 이미지 저장과 보상 삭제 경계
    * @param currentUserResolver Access Token에서 현재 사용자 ID를 제공하는 Resolver
    * @param accessValidator 보호자와 그림 활동의 연결 관계를 검증하는 Validator
+   * @param drawingAssetFileUrlFactory 저장된 그림의 인증 조회 URL 생성기
    * @param clock 서버 저장 시각을 제공하는 Clock
    */
   public DrawingDraftService(
@@ -60,6 +62,7 @@ public class DrawingDraftService {
       ImageStorage imageStorage,
       CurrentAuthenticatedUserResolver currentUserResolver,
       GuardianResourceAccessValidator accessValidator,
+      DrawingAssetFileUrlFactory drawingAssetFileUrlFactory,
       Clock clock) {
     this.drawingSessionRepository = drawingSessionRepository;
     this.drawingAssetRepository = drawingAssetRepository;
@@ -67,6 +70,7 @@ public class DrawingDraftService {
     this.imageStorage = imageStorage;
     this.currentUserResolver = currentUserResolver;
     this.accessValidator = accessValidator;
+    this.drawingAssetFileUrlFactory = drawingAssetFileUrlFactory;
     this.clock = clock;
   }
 
@@ -210,7 +214,7 @@ public class DrawingDraftService {
         asset.getCapturedAt().toInstant(ZoneOffset.UTC),
         asset.getCreatedAt().toInstant(ZoneOffset.UTC),
         null,
-        null,
+        drawingAssetFileUrlFactory.create(asset.getId()),
         new DrawingCanvasStateResponse(
             asset.getLastEventSequence(), asset.getCapturedAt().toInstant(ZoneOffset.UTC)));
   }
