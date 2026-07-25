@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:ui';
 
 import 'package:dodam/design_system/design_system.dart';
@@ -7,33 +8,38 @@ import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/drawing/data/repositories/remote_drawing_repository.dart';
 import 'package:dodam/features/drawing/domain/repositories/drawing_repository.dart';
 import 'package:dodam/features/drawing/presentation/models/drawing_stroke.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Draft multipart는 preview와 canvasState만 포함한다', () {
+  test('Draft multipart는 PNG와 JSON MIME part만 포함한다', () async {
     const canvasState = DraftCanvasStateDto(
       lastEventSequence: 17,
       toolState: null,
       viewport: null,
-      clientSavedAt: '2026-07-22T00:00:00Z',
+      clientSavedAt: '2026-07-22T09:00:00+09:00',
     );
     final form = buildDraftFormData(
       const BinaryUploadDto(
         bytes: [1, 2, 3],
-        fileName: 'draft.png',
+        fileName: 'drawing-draft.png',
         mimeType: 'image/png',
       ),
       canvasState,
     );
 
-    expect(form.files.single.key, 'preview');
-    expect(form.files.single.value.filename, 'draft.png');
-    expect(form.files.single.value.contentType?.toString(), 'image/png');
-    expect(form.fields.map((field) => field.key), ['canvasState']);
-    expect(form.fields.single.value, contains('"lastEventSequence":17'));
-    expect(form.fields.single.value, contains('"toolState":null'));
-    expect(form.fields.single.value, contains('"viewport":null'));
-    expect(form.fields.map((field) => field.key), isNot(contains('image')));
+    expect(form.fields, isEmpty);
+    final preview = form.files.singleWhere((part) => part.key == 'preview');
+    expect(preview.value.filename, 'drawing-draft.png');
+    expect(preview.value.contentType?.toString(), 'image/png');
+    expect(await _multipartBytes(preview.value), [1, 2, 3]);
+    final request = form.files.singleWhere((part) => part.key == 'canvasState');
+    expect(request.value.filename, 'canvas-state.json');
+    expect(request.value.contentType?.toString(), 'application/json');
+    expect(jsonDecode(utf8.decode(await _multipartBytes(request.value))), {
+      'lastEventSequence': 17,
+      'clientSavedAt': '2026-07-22T09:00:00+09:00',
+    });
   });
 
   test('Draft 저장 중 성공 상태와 snapshot 시점의 마지막 seq를 전달한다', () async {
@@ -76,7 +82,44 @@ void main() {
     repository.saveError = null;
     await coordinator.retry();
     expect(coordinator.saveStatus, DrawingSaveStatus.saved);
+    expect(repository.draftCalls, 2);
+    expect(
+      identical(repository.draftPreviews.first, repository.draftPreviews.last),
+      isTrue,
+    );
+    expect(
+      identical(
+        repository.draftCanvasStates.first,
+        repository.draftCanvasStates.last,
+      ),
+      isTrue,
+    );
+    expect(repository.draftCanvasStates.last.lastEventSequence, 2);
+    expect(
+      repository.draftCanvasStates.last.clientSavedAt,
+      repository.draftCanvasStates.first.clientSavedAt,
+    );
   });
+
+  test(
+    'Undo가 마지막 Canvas event이면 Draft sequence에 Undo sequence를 유지한다',
+    () async {
+      final repository = _FakeDrawingRepository();
+      final coordinator = DrawingSyncCoordinator(
+        sessionId: 42,
+        repository: repository,
+      );
+      addTearDown(coordinator.dispose);
+      coordinator.recordStroke(_stroke(), const Size(100, 100));
+      final undo = coordinator.recordUndo();
+      coordinator.start(snapshotProvider: () async => _png);
+
+      await coordinator.saveDraftNow();
+
+      expect(undo?.seq, 3);
+      expect(repository.lastEventSequence, 3);
+    },
+  );
 
   test('sessionId 미연결 상태에서는 journal만 기록하고 네트워크를 호출하지 않는다', () async {
     final repository = _FakeDrawingRepository();
@@ -131,6 +174,10 @@ const _draftSaveResponse = DraftSaveResponseDto(
   expiresAt: null,
 );
 
+Future<List<int>> _multipartBytes(MultipartFile file) => file
+    .finalize()
+    .fold<List<int>>(<int>[], (bytes, chunk) => bytes..addAll(chunk));
+
 DrawingStroke _stroke({int t = 10}) => DrawingStroke(
   color: AppColors.drawingInk,
   thickness: 8,
@@ -148,6 +195,8 @@ final class _FakeDrawingRepository implements DrawingRepository {
   int strokeCalls = 0;
   int draftCalls = 0;
   int? lastEventSequence;
+  final List<BinaryUploadDto> draftPreviews = [];
+  final List<DraftCanvasStateDto> draftCanvasStates = [];
 
   @override
   Future<StrokeBatchResponseDto> sendStrokeBatch(
@@ -172,6 +221,8 @@ final class _FakeDrawingRepository implements DrawingRepository {
   ) async {
     draftCalls += 1;
     lastEventSequence = canvasState.lastEventSequence;
+    draftPreviews.add(preview);
+    draftCanvasStates.add(canvasState);
     if (saveError case final error?) throw error;
     return saveCompleter?.future ?? _draftSaveResponse;
   }
