@@ -8,8 +8,9 @@
 
 ## 범위
 
-- `ImageStorage`와 `AudioStorage`에 저장 객체를 스트리밍으로 읽는 계약 추가
-- 기존 Local 구현의 읽기 기능 및 경로 안전성 검증
+- 기존 `ImageStorage.read`와 `StoredImageContent` 계약 재사용
+- `AudioStorage`에 저장 객체를 스트리밍으로 읽는 계약 추가
+- 기존 Local 그림 읽기 회귀 및 Local 음성 읽기 경로 안전성 검증
 - AWS SDK for Java v2 기반 S3/MinIO 구현
 - Local/S3 구현 선택을 위한 Spring Boot 설정
 - Docker Compose의 Backend MinIO 환경 변수 배선
@@ -24,10 +25,11 @@
 
 ## 현재 구조와 충돌
 
-`ImageStorage`는 `store`와 `delete`만 제공하고, `AudioStorage`는
-`stage`·`promote`·`discard`·`delete`만 제공한다. 따라서 DB의 `storageKey`를 알아도
-파일을 다시 내려줄 수 없다. MinIO Container와 Bucket은 이미 `develop`에 포함되어
-있지만 Backend 자격증명과 S3 Client는 연결되지 않았다.
+`ImageStorage`는 S15P11B209-402에서 `StoredImageContent read(String)`까지
+구현되어 AI 일회성 이미지 조회에 사용된다. `AudioStorage`는
+`stage`·`promote`·`discard`·`delete`만 제공해 동일한 읽기 경계가 없다. MinIO
+Container와 Bucket은 이미 `develop`에 포함되어 있지만 Backend 자격증명과 S3
+Client는 연결되지 않았다.
 
 `AudioStorage.stage`는 파일 형식과 재생 시간을 검증하기 위해 임시 로컬 파일을
 사용한다. 이 검증을 S3에 위임하지 않고 기존 Local staging 과정을 유지하며,
@@ -35,19 +37,14 @@
 
 ## 저장 객체 읽기 계약
 
-그림과 음성은 각각 다음 형태의 읽기 결과를 반환한다.
+그림은 기존 `StoredImageContent`를 변경하지 않고 사용한다. 음성은 같은 소유권
+규칙을 따르는 `StoredAudioContent`를 추가한다.
 
 ```java
-public record StoredImageResource(
+public record StoredAudioContent(
     InputStream inputStream,
     String contentType,
-    long contentLength
-) implements AutoCloseable {}
-
-public record StoredAudioResource(
-    InputStream inputStream,
-    String contentType,
-    long contentLength
+    long size
 ) implements AutoCloseable {}
 ```
 

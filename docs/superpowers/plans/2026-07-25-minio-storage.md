@@ -22,9 +22,9 @@
 
 ## File Structure
 
-- `storage/image/StoredImageResource.java`: 그림 읽기 Stream과 Metadata의 소유권 계약
-- `storage/audio/StoredAudioResource.java`: 음성 읽기 Stream과 Metadata의 소유권 계약
-- `storage/image/ImageStorage.java`, `storage/audio/AudioStorage.java`: `read` 공개 계약
+- `storage/image/StoredImageContent.java`: 기존 그림 읽기 Stream 계약 재사용
+- `storage/audio/StoredAudioContent.java`: 음성 읽기 Stream과 Metadata의 소유권 계약
+- `storage/audio/AudioStorage.java`: 음성 `read` 공개 계약
 - `storage/image/LocalImageStorage.java`, `storage/audio/LocalAudioStorage.java`: 안전한 Local 읽기
 - `storage/s3/S3StorageProperties.java`: Endpoint, Region, Bucket, 자격증명, Prefix 설정
 - `storage/s3/S3StorageConfig.java`: `S3Client`와 S3 Adapter Bean 구성
@@ -33,77 +33,35 @@
 - `storage/image/ImageStorageConfig.java`, `storage/audio/AudioStorageConfig.java`: Local 모드 조건
 - `application.yml`, `infra/docker-compose.yml`: 배포 환경 변수 배선
 
-### Task 1: Local Storage 스트리밍 읽기 계약
+### Task 1: 기존 그림 read 회귀와 Local 음성 스트리밍 읽기 계약
 
 **Files:**
-- Create: `backend/src/main/java/com/ssafy/b209/storage/image/StoredImageResource.java`
-- Create: `backend/src/main/java/com/ssafy/b209/storage/audio/StoredAudioResource.java`
-- Modify: `backend/src/main/java/com/ssafy/b209/storage/image/ImageStorage.java`
+- Create: `backend/src/main/java/com/ssafy/b209/storage/audio/StoredAudioContent.java`
 - Modify: `backend/src/main/java/com/ssafy/b209/storage/audio/AudioStorage.java`
-- Modify: `backend/src/main/java/com/ssafy/b209/storage/image/LocalImageStorage.java`
 - Modify: `backend/src/main/java/com/ssafy/b209/storage/audio/LocalAudioStorage.java`
 - Test: `backend/src/test/java/com/ssafy/b209/storage/image/LocalImageStorageTest.java`
 - Test: `backend/src/test/java/com/ssafy/b209/storage/audio/LocalAudioStorageTest.java`
 
 **Interfaces:**
-- Produces: `StoredImageResource ImageStorage.read(String storageKey)`
-- Produces: `StoredAudioResource AudioStorage.read(String storageKey)`
+- Reuses: `StoredImageContent ImageStorage.read(String storageKey)`
+- Produces: `StoredAudioContent AudioStorage.read(String storageKey)`
 
-- [ ] **Step 1: 그림 Local read 실패 테스트 작성**
+- [ ] **Step 1: 기존 그림 Local read 회귀 테스트 확인**
 
 ```java
 @Test
 void readsStoredImageWithoutLoadingTheWholeFile() throws Exception {
   StoredImage stored = storage.store(pngCommand());
 
-  try (StoredImageResource resource = storage.read(stored.storageKey())) {
+  try (StoredImageContent resource = storage.read(stored.storageKey())) {
     assertThat(resource.contentType()).isEqualTo("image/png");
-    assertThat(resource.contentLength()).isEqualTo(PNG_BYTES.length);
+    assertThat(resource.size()).isEqualTo(PNG_BYTES.length);
     assertThat(resource.inputStream().readAllBytes()).isEqualTo(PNG_BYTES);
   }
 }
-
-@Test
-void rejectsTraversalAndMissingImageKeys() {
-  assertBusinessError(
-      () -> storage.read("../outside.png"),
-      ImageStorageErrorCode.INVALID_STORAGE_PATH);
-  assertBusinessError(
-      () -> storage.read("2026/07/25/missing.png"),
-      ImageStorageErrorCode.IMAGE_STORAGE_FAILED);
-}
 ```
 
-- [ ] **Step 2: RED 확인**
-
-Run:
-
-```powershell
-gradlew.bat test --tests '*LocalImageStorageTest' --no-daemon
-```
-
-Expected: `ImageStorage.read`와 `StoredImageResource`가 없어 compile 실패.
-
-- [ ] **Step 3: 그림 읽기 최소 구현**
-
-```java
-public record StoredImageResource(
-    InputStream inputStream,
-    String contentType,
-    long contentLength) implements AutoCloseable {
-
-  @Override
-  public void close() throws IOException {
-    inputStream.close();
-  }
-}
-```
-
-`LocalImageStorage.read`는 기존 `validateStorageKey`, `prepareRoot`,
-`LinkOption.NOFOLLOW_LINKS` 규칙으로 대상이 Root 내부 일반 파일인지 검증한 뒤
-확장자에서 Content-Type을 확정하고 `Files.newInputStream`을 반환한다.
-
-- [ ] **Step 4: 그림 테스트 GREEN 확인**
+- [ ] **Step 2: 기존 그림 테스트 GREEN 확인**
 
 Run:
 
@@ -113,22 +71,22 @@ gradlew.bat test --tests '*LocalImageStorageTest' --no-daemon
 
 Expected: PASS.
 
-- [ ] **Step 5: 음성 Local read 실패 테스트 작성**
+- [ ] **Step 3: 음성 Local read 실패 테스트 작성**
 
 ```java
 @Test
 void readsPromotedAudioAsAStream() throws Exception {
   StoredAudio stored = storage.promote(storage.stage(wavCommand()));
 
-  try (StoredAudioResource resource = storage.read(stored.storageKey())) {
+  try (StoredAudioContent resource = storage.read(stored.storageKey())) {
     assertThat(resource.contentType()).isEqualTo("audio/wav");
-    assertThat(resource.contentLength()).isEqualTo(WAV_BYTES.length);
+    assertThat(resource.size()).isEqualTo(WAV_BYTES.length);
     assertThat(resource.inputStream().readAllBytes()).isEqualTo(WAV_BYTES);
   }
 }
 ```
 
-- [ ] **Step 6: RED 확인 후 음성 읽기 최소 구현**
+- [ ] **Step 4: RED 확인 후 음성 읽기 최소 구현**
 
 Run:
 
@@ -138,11 +96,11 @@ gradlew.bat test --tests '*LocalAudioStorageTest' --no-daemon
 
 Expected: `AudioStorage.read`와 `StoredAudioResource`가 없어 compile 실패.
 
-`StoredAudioResource`는 그림과 같은 소유권 계약을 사용한다. `LocalAudioStorage.read`는
+`StoredAudioContent`는 그림과 같은 소유권 계약을 사용한다. `LocalAudioStorage.read`는
 기존 Key·Symbolic Link 검증을 재사용하고 확장자를 `wav`, `mp3`, `m4a`, `webm`
 Content-Type으로 매핑한다.
 
-- [ ] **Step 7: Local Storage GREEN 및 회귀 확인**
+- [ ] **Step 5: Local Storage GREEN 및 회귀 확인**
 
 Run:
 
@@ -152,7 +110,7 @@ gradlew.bat test --tests '*LocalImageStorageTest' --tests '*LocalAudioStorageTes
 
 Expected: PASS.
 
-- [ ] **Step 8: Commit**
+- [ ] **Step 6: Commit**
 
 ```powershell
 git add backend/src/main/java/com/ssafy/b209/storage backend/src/test/java/com/ssafy/b209/storage
@@ -279,7 +237,7 @@ git commit -m "[S15P11B209-370] feat(storage): Local MinIO 모드 설정 추가"
 - Modify: `backend/src/main/java/com/ssafy/b209/storage/s3/S3StorageConfig.java`
 
 **Interfaces:**
-- Consumes: `ImageStorage`, `StoredImageResource`, `S3Client`, `S3StorageProperties`
+- Consumes: `ImageStorage`, `StoredImageContent`, `S3Client`, `S3StorageProperties`
 - Produces: S3 모드의 `ImageStorage`
 
 - [ ] **Step 1: 저장·읽기·삭제 실패 테스트 작성**
@@ -302,9 +260,9 @@ void readsS3ImageAsResponseStream() throws Exception {
   when(s3Client.getObject(any(GetObjectRequest.class)))
       .thenReturn(imageResponseStream(PNG_BYTES));
 
-  try (StoredImageResource resource = storage.read("2026/07/25/image.png")) {
+  try (StoredImageContent resource = storage.read("2026/07/25/image.png")) {
     assertThat(resource.contentType()).isEqualTo("image/png");
-    assertThat(resource.contentLength()).isEqualTo(PNG_BYTES.length);
+    assertThat(resource.size()).isEqualTo(PNG_BYTES.length);
   }
 }
 
@@ -362,7 +320,7 @@ git commit -m "[S15P11B209-370] feat(storage): MinIO 그림 저장소 구현"
 - Modify: `backend/src/main/java/com/ssafy/b209/storage/s3/S3StorageConfig.java`
 
 **Interfaces:**
-- Consumes: `AudioStorage`, `StoredAudioResource`, `S3Client`, `S3StorageProperties`
+- Consumes: `AudioStorage`, `StoredAudioContent`, `S3Client`, `S3StorageProperties`
 - Produces: S3 모드의 `AudioStorage`
 
 - [ ] **Step 1: stage·promote·read·delete 실패 테스트 작성**
@@ -467,7 +425,7 @@ class S3StorageIntegrationTest {
                 PNG_BYTES.length,
                 "image/png",
                 "drawing.png"));
-    try (StoredImageResource resource = imageStorage.read(image.storageKey())) {
+    try (StoredImageContent resource = imageStorage.read(image.storageKey())) {
       assertThat(resource.inputStream().readAllBytes()).isEqualTo(PNG_BYTES);
     }
 
@@ -479,7 +437,7 @@ class S3StorageIntegrationTest {
                     WAV_BYTES.length,
                     "audio/wav",
                     "answer.wav")));
-    try (StoredAudioResource resource = audioStorage.read(audio.storageKey())) {
+    try (StoredAudioContent resource = audioStorage.read(audio.storageKey())) {
       assertThat(resource.inputStream().readAllBytes()).isEqualTo(WAV_BYTES);
     }
 
