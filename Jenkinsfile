@@ -84,6 +84,30 @@ pipeline {
       }
     }
 
+    stage('Compose Preflight') {
+      // when 없음 = 모든 브랜치. MR 빌드에서 미리 잡아야 develop 머지 후 장애를 막는다.
+      steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }
+        // 리포지토리 상대경로를 "호스트 마운트"로 쓰는 선언을 금지한다.
+        // reason: 이 파이프라인은 Jenkins 컨테이너 안에서 호스트 도커 데몬을 호출한다(Docker-out-of-Docker).
+        //   compose 의 상대경로는 Jenkins 컨테이너 안 워크스페이스 기준으로 해석되지만 마운트는 호스트가 한다.
+        //   호스트에 없는 경로엔 도커가 빈 디렉터리를 만들어 붙여, 설정·스크립트가 조용히 사라진다.
+        //   실제 사고 2회: 2026-07-22 nginx 빈 conf, 2026-07-26 minio-init exit 127(전면 중단 2회, 빌드 191·192).
+        //   해법은 이미지 bake(build 컨텍스트는 tar 로 전송돼 안전) 또는 호스트 절대경로.
+        //   ※ build.context 의 './' 는 마운트가 아니라 빌드 컨텍스트라 안전 — 검출 대상이 아니다.
+        sh '''
+          bad=$(grep -nE "^[[:space:]]*-[[:space:]]+\\./|^[[:space:]]*file:[[:space:]]*\\./" "$COMPOSE_FILE" || true)
+          if [ -n "$bad" ]; then
+            echo "❌ compose 에 리포지토리 상대경로 마운트가 있습니다 (DooD 경로 함정):"
+            echo "$bad"
+            echo "   → 파일은 이미지에 bake(build:) 하거나, 워크스페이스 밖 호스트 절대경로를 쓸 것."
+            exit 1
+          fi
+          echo "✅ compose preflight 통과 — 상대경로 호스트 마운트 없음"
+        '''
+      }
+    }
+
     stage('Secrets Preflight') {
       when { branch 'develop' }   // 시크릿은 develop(이미지 빌드·배포)에서만 쓰인다 — MR 빌드는 불필요
       steps {
@@ -105,6 +129,16 @@ pipeline {
               echo "❌ dodam-env 시크릿에 필수 키 누락:$missing"
               echo "   → Jenkins 크리덴셜(dodam-env)을 '기존 전체 키 + 신규 키' 병합본으로 재업로드할 것."
               echo "     dodam-env는 교체가 아니라 병합이 규칙 (S15P11B209-386)"
+              exit 1
+            fi
+            # 값이 상대경로인 키 검출 — 호스트 마운트 소스로 쓰이면 compose preflight 와 같은 사고가 난다.
+            #   예: FCM_CREDENTIALS_HOST_PATH=./secrets/fcm-service-account.json (S15P11B209-619)
+            #   compose 파일엔 ${VAR:-/dev/null} 로만 보여 앞 단계에서 안 잡힌다 — 값 쪽에서 막는다.
+            #   ⚠️ 키 이름만 출력한다(시크릿 값 금지 · 가드레일 9절).
+            relative=$(grep -E "^[A-Z_][A-Z0-9_]*=[[:space:]]*\\./" "$ENV_FILE" | cut -d= -f1 | tr '\\n' ' ' || true)
+            if [ -n "$relative" ]; then
+              echo "❌ dodam-env 에 상대경로 값을 가진 키: $relative"
+              echo "   → 호스트 마운트 소스는 워크스페이스 밖 절대경로여야 한다(예: /opt/dodam/secrets/...)."
               exit 1
             fi
             echo "✅ 시크릿 preflight 통과 — 필수 키 $(echo "$required" | wc -w)개 확인: $(echo $required)"
