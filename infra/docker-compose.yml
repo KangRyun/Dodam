@@ -223,9 +223,10 @@ services:
       #   목적: 백엔드가 Firebase로 푸시를 보낼 때 쓰는 Service Account JSON(개인키 포함)을
       #         이미지/코드에 굽지 않고 런타임에 /run/secrets/ 로만 주입한다(유출면 최소화 · 가드레일 9절).
       #   기본 OFF: 616 JSON·556 코드가 아직 없어도 backend가 정상 부팅하도록 enabled=false.
-      #   활성화(616 발급 + 556 머지 후): .env 에 두 줄만 추가 —
+      #   활성화(616 발급 + 556 머지 후): .env(배포는 Jenkins 크리덴셜 dodam-env)에 두 줄만 추가 —
       #     APP_PUSH_FCM_ENABLED=true
-      #     FCM_CREDENTIALS_HOST_PATH=./secrets/fcm-service-account.json   # 아래 top-level secrets가 참조
+      #     FCM_CREDENTIALS_HOST_PATH=/opt/dodam/secrets/fcm-service-account.json   # 아래 top-level secrets가 참조
+      #     ⚠️ 반드시 호스트 절대경로 — 상대경로 금지(사유는 파일 하단 secrets: 주석 · S15P11B209-641)
       #   reason: :- 기본값(false)으로 미설정·미발급에도 배포가 안 깨진다. 푸시는 선택 기능이라
       #           REDIS_PASSWORD·JWT_SECRET 같은 :? fail-fast 대상이 아니다(있으면 켜고 없으면 조용히 끔).
       APP_PUSH_FCM_ENABLED: ${APP_PUSH_FCM_ENABLED:-false}
@@ -396,10 +397,15 @@ volumes:
 # secrets — 런타임 비밀 파일 주입(도커 시크릿). 이미지·compose에 값이 남지 않고 컨테이너 tmpfs로만 전달.
 #   fcm_service_account: Firebase 푸시 발송용 Service Account JSON(개인키). S15P11B209-619.
 #     · 기본 소스 = /dev/null → 616 발급 전에는 빈 파일이 마운트돼 compose·부팅이 안 깨진다.
-#     · 발급 후: 호스트에 infra/secrets/fcm-service-account.json(git 비추적) 을 두고
-#               .env 에 FCM_CREDENTIALS_HOST_PATH=./secrets/fcm-service-account.json 지정.
-#     · file: 상대경로는 compose 파일 위치(infra/) 기준 — ./minio, ./nginx 와 동일 규칙.
-#     ⚠️ 이 JSON은 절대 커밋 금지 — infra/secrets/ 는 .gitignore(secrets/)로 무시된다.
+#     · 발급 후: 배포 서버 /opt/dodam/secrets/fcm-service-account.json (권한 600) 에 두고
+#               Jenkins 크리덴셜 dodam-env 에
+#               FCM_CREDENTIALS_HOST_PATH=/opt/dodam/secrets/fcm-service-account.json 지정.
+#     ⚠️ file: 은 반드시 "워크스페이스 밖 호스트 절대경로". 상대경로(./secrets/...)를 쓰면 안 된다 —
+#        배포는 Jenkins 컨테이너 안에서 호스트 도커 데몬을 호출하므로(DooD) 상대경로가
+#        호스트에 없는 워크스페이스 경로로 해석돼 빈 디렉터리가 붙는다. 같은 함정으로
+#        2026-07-22 nginx 빈 conf · 2026-07-26 minio-init 전면 장애(S15P11B209-641)가 났다.
+#        파이프라인의 Compose/Secrets Preflight 가 상대경로를 발견하면 빌드를 실패시킨다.
+#     ⚠️ 이 JSON은 절대 커밋 금지 — infra/secrets/ 는 .gitignore(secrets/)로 무시된다. 상세: infra/secrets/README.md
 # ───────────────────────────────────────────────────────────────
 secrets:
   fcm_service_account:
