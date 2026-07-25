@@ -75,6 +75,68 @@ services:
       - dodam-net
 
   # ───────────────────────────────────────────────────────────────
+  # minio — 오브젝트 스토리지(S3 호환). 아동 그림·음성 등 파일 저장. 내부망 전용.
+  #   현재 backend-storage(로컬 볼륨) 대체. 단일 버킷 dodam + 프리픽스 5종.
+  #   설계: docs/database/저장소-아키텍처.md · S15P11B209-620.
+  #   ⚠️ 첫 기동 시 검증(리눅스 세션에서 실행 불가): ① 이미지 태그 실존 ② healthcheck 명령 ③ mc 정책 명령 버전.
+  # ───────────────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z   # latest 금지 — 실존하는 안정 태그로 확인·교체
+    container_name: dodam-minio
+    restart: unless-stopped
+
+    # 프로비저닝 전용 관리자(root) — 앱은 이 계정으로 접속하지 않음. 값은 .env에서 주입(이 파일엔 값 없음).
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+
+    # 9000=S3 API, 9001=콘솔. 데이터는 /data(네임드 볼륨).
+    command: server /data --console-address ":9001"
+
+    volumes:
+      - minio-data:/data
+
+    # ⚠️ ports 미개방 — 아동 파일 저장소 외부 노출면 = 0 (mysql과 동일 가드레일).
+    #    backend는 dodam-net으로 'minio:9000'(S3 API) 접근. 콘솔(9001)도 미노출.
+    #    콘솔 관리가 필요하면 SSH 터널:  ssh -L 9001:<minio-container-ip>:9001 kr@i15b209.p.ssafy.io
+    # ports:
+    #   - "9000:9000"   # ← 절대 열지 말 것. 불가피하면 "127.0.0.1:9001:9001"(콘솔만 로컬).
+
+    healthcheck:
+      # ⚠️ minio 이미지에 curl 유무는 첫 기동 시 확인. 없으면 mc 사이드카·다른 명령으로 조정.
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+    networks:
+      - dodam-net
+
+  # ───────────────────────────────────────────────────────────────
+  # minio-init — 1회성 프로비저닝. 버킷 dodam·프리픽스·최소권한 계정 2벌 생성 후 종료.
+  #   be-rw(버킷 rw) / ai-ro(images/ 읽기전용). 스크립트: infra/minio/init.sh
+  # ───────────────────────────────────────────────────────────────
+  minio-init:
+    image: minio/mc:RELEASE.2025-04-16T18-13-26Z   # latest 금지 — 실존하는 안정 태그로 확인·교체
+    container_name: dodam-minio-init
+    depends_on:
+      - minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_BE_USER: ${MINIO_BE_USER}           # dodam-be-rw
+      MINIO_BE_PASSWORD: ${MINIO_BE_PASSWORD}
+      MINIO_AI_USER: ${MINIO_AI_USER}           # dodam-ai-ro
+      MINIO_AI_PASSWORD: ${MINIO_AI_PASSWORD}
+    entrypoint: ["/bin/sh", "/init/init.sh"]
+    volumes:
+      - ./minio:/init:ro
+    networks:
+      - dodam-net
+    restart: "no"     # 1회성 — 프로비저닝 후 종료(정상적으로 Exited 0)
+
+  # ───────────────────────────────────────────────────────────────
   # backend — Spring Boot(Java 21). 내부망 전용(호스트 포트 미개방), 외부 진입은 nginx로만.
   # ───────────────────────────────────────────────────────────────
   backend:
@@ -295,3 +357,4 @@ volumes:
   apk-dist:           # 팀·데모용 APK 파일 (docker cp로 업로드 — 바이너리는 git에 넣지 않음)
   backend-storage:    # /app/storage (아동 그림 스냅샷) — 컨테이너 재생성에도 유지 (S15P11B209-349 · 가드레일 9절)
   ai-models:          # YOLO 가중치 (*.pt) — 바이너리는 git에 넣지 않는다
+  minio-data:         # MinIO 오브젝트 데이터 (아동 그림·음성 파일) — 컨테이너 재생성에도 유지 (가드레일 9절)
