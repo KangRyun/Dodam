@@ -1,12 +1,18 @@
 package com.ssafy.b209.storage.image;
 
 import java.time.Clock;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /** 로컬 이미지 저장 설정을 Spring Application Context에 등록하는 구성이다. */
 @Configuration(proxyBeanMethods = false)
+@ConditionalOnProperty(
+    prefix = "app.storage",
+    name = "mode",
+    havingValue = "local",
+    matchIfMissing = true)
 @EnableConfigurationProperties(ImageStorageProperties.class)
 public class ImageStorageConfig {
 
