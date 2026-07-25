@@ -30,7 +30,7 @@ Content-Type: multipart/form-data
 | 필드 | 타입 | 필수 | 검증 |
 | --- | --- | --- | --- |
 | `sourceAssetId` | Long | 선택 | 지정 시 같은 세션의 FINAL asset이어야 한다. |
-| `lastEventSequence` | Long | 선택 | 0 이상이어야 하며 서버가 저장한 최신 event보다 작을 수 없다. |
+| `lastEventSequence` | Long | 선택 | 0 이상이어야 한다. 강제 flush 순서가 확정되기 전에는 서버 저장 순번과의 일치 검증에 사용하지 않는다. |
 | `drawingDurationMs` | Long | 필수 | 1 이상이어야 한다. |
 | `clientCompletedAt` | OffsetDateTime | 필수 | ISO-8601 시각이어야 한다. |
 
