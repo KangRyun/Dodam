@@ -447,9 +447,10 @@ final class _TrackingDrawingRepository implements DrawingRepository {
     int sessionId,
     StrokeBatchRequestDto request,
   ) async => StrokeBatchResponseDto(
-    strokeBatchId: 1,
+    batchId: 1,
     batchSequence: request.batchSequence,
-    eventCount: request.events.length,
+    acceptedEventCount: request.events.length,
+    lastEventSequence: request.lastEventSequence,
     receivedAt: '2026-07-22T00:00:00Z',
   );
 

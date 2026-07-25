@@ -1,5 +1,6 @@
 import 'package:dodam/core/config/api_environment.dart';
 import 'package:dodam/core/network/api_client.dart';
+import 'package:dodam/core/network/api_failure.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/drawing/data/repositories/remote_drawing_repository.dart';
 import 'package:dio/dio.dart';
@@ -87,6 +88,152 @@ void main() {
     expect(session.drawingSessionId, 42);
     expect(session.drawingType.code, 'FREE_DRAWING');
   });
+
+  for (final statusCode in [201, 200]) {
+    test('Stroke Batch HTTP $statusCode 응답과 공통 봉투를 처리한다', () async {
+      final interceptor = _StrokeBatchInterceptor(statusCode: statusCode);
+      final repository = RemoteDrawingRepository(
+        ApiClient(
+          environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+          interceptors: [interceptor],
+        ),
+      );
+
+      final response = await repository.sendStrokeBatch(42, _strokeRequest);
+
+      final request = interceptor.requests.single;
+      expect(request.method, 'POST');
+      expect(request.uri.path, '/api/v1/drawing-sessions/42/stroke-batches');
+      expect(request.contentType, Headers.jsonContentType);
+      expect(request.headers, isNot(contains('Idempotency-Key')));
+      expect(request.data, {
+        'batchSequence': 7,
+        'firstEventSequence': 13,
+        'lastEventSequence': 14,
+        'clientCreatedAt': '2026-07-25T08:00:00.000Z',
+        'events': [
+          {
+            'sequence': 13,
+            'eventType': 'STROKE',
+            'tool': 'PEN',
+            'color': '#E35D6A',
+            'width': 8.0,
+            'points': [
+              {'x': 0.1, 'y': 0.2, 't': 0, 'pressure': 0.4},
+              {'x': 0.3, 'y': 0.4, 't': 20},
+            ],
+          },
+          {'sequence': 14, 'eventType': 'UNDO', 'points': <Object?>[]},
+        ],
+        'metrics': {
+          'undoCountDelta': 1,
+          'redoCountDelta': 0,
+          'eraseCountDelta': 0,
+          'pauseDurationMsDelta': 0,
+        },
+      });
+      expect(response.batchId, 501);
+      expect(response.batchSequence, 7);
+      expect(response.acceptedEventCount, 2);
+      expect(response.lastEventSequence, 14);
+      expect(response.receivedAt, '2026-07-25T08:00:01Z');
+    });
+  }
+
+  for (final statusCode in [400, 404, 409]) {
+    test('Stroke Batch HTTP $statusCode를 ApiResponseFailure로 변환한다', () async {
+      final repository = RemoteDrawingRepository(
+        ApiClient(
+          environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+          interceptors: [_StrokeBatchInterceptor(errorStatusCode: statusCode)],
+        ),
+      );
+
+      await expectLater(
+        repository.sendStrokeBatch(42, _strokeRequest),
+        throwsA(
+          isA<ApiResponseFailure>().having(
+            (failure) => failure.statusCode,
+            'statusCode',
+            statusCode,
+          ),
+        ),
+      );
+    });
+  }
+}
+
+const _strokeRequest = StrokeBatchRequestDto(
+  batchSequence: 7,
+  firstEventSequence: 13,
+  lastEventSequence: 14,
+  clientCreatedAt: '2026-07-25T08:00:00.000Z',
+  events: [
+    StrokeBatchEventDto(
+      sequence: 13,
+      eventType: 'STROKE',
+      tool: 'PEN',
+      color: '#E35D6A',
+      width: 8,
+      points: [
+        StrokePointDto(x: 0.1, y: 0.2, t: 0, pressure: 0.4),
+        StrokePointDto(x: 0.3, y: 0.4, t: 20),
+      ],
+    ),
+    StrokeBatchEventDto(sequence: 14, eventType: 'UNDO', points: []),
+  ],
+  metrics: StrokeMetricsDto(undoCountDelta: 1),
+);
+
+final class _StrokeBatchInterceptor extends Interceptor {
+  _StrokeBatchInterceptor({this.statusCode = 201, this.errorStatusCode});
+
+  final int statusCode;
+  final int? errorStatusCode;
+  final List<RequestOptions> requests = [];
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    requests.add(options);
+    final failureStatus = errorStatusCode;
+    if (failureStatus != null) {
+      handler.reject(
+        DioException(
+          requestOptions: options,
+          response: Response<Map<String, dynamic>>(
+            requestOptions: options,
+            statusCode: failureStatus,
+            data: {
+              'success': false,
+              'code': 'DRAWING_$failureStatus',
+              'message': 'Stroke Batch 요청 실패',
+            },
+          ),
+          type: DioExceptionType.badResponse,
+        ),
+      );
+      return;
+    }
+
+    handler.resolve(
+      Response<Map<String, dynamic>>(
+        requestOptions: options,
+        statusCode: statusCode,
+        data: const {
+          'success': true,
+          'code': 'COMMON_201',
+          'message': '요청에 성공했습니다.',
+          'data': {
+            'batchId': 501,
+            'batchSequence': 7,
+            'acceptedEventCount': 2,
+            'lastEventSequence': 14,
+            'receivedAt': '2026-07-25T08:00:01Z',
+          },
+        },
+      ),
+    );
+  }
 }
 
 final class _DrawingStartInterceptor extends Interceptor {

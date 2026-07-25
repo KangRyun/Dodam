@@ -89,9 +89,10 @@ final class MockDrawingRepository implements DrawingRepository {
     int sessionId,
     StrokeBatchRequestDto request,
   ) async => StrokeBatchResponseDto.fromJson({
-    'strokeBatchId': 501,
+    'batchId': 501,
     'batchSequence': request.batchSequence,
-    'eventCount': request.events.length,
+    'acceptedEventCount': request.events.length,
+    'lastEventSequence': request.lastEventSequence,
     'receivedAt': '2026-07-21T09:41:03.542Z',
   });
   @override

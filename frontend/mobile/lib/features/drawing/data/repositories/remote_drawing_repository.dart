@@ -93,10 +93,10 @@ final class RemoteDrawingRepository implements DrawingRepository {
     StrokeBatchRequestDto request,
   ) async {
     final response = await _apiClient.post<Map<String, dynamic>>(
-      'drawing-sessions/$sessionId/strokes',
+      'drawing-sessions/$sessionId/stroke-batches',
       data: request.toJson(),
     );
-    return StrokeBatchResponseDto.fromJson(response.data!);
+    return StrokeBatchResponseDto.fromJson(envelopeObject(response.data));
   }
 
   @override
