@@ -9,7 +9,9 @@ public enum ConversationEndErrorCode implements ErrorCode {
   CONVERSATION_NOT_CONVERSING(
       HttpStatus.CONFLICT, "CONVERSATION_NOT_CONVERSING", "현재 상태에서는 대화를 종료할 수 없습니다."),
   CONVERSATION_LAST_QUESTION_MISMATCH(
-      HttpStatus.CONFLICT, "CONVERSATION_LAST_QUESTION_MISMATCH", "마지막 질문이 현재 대화 상태와 일치하지 않습니다.");
+      HttpStatus.CONFLICT, "CONVERSATION_LAST_QUESTION_MISMATCH", "마지막 질문이 현재 대화 상태와 일치하지 않습니다."),
+  CONVERSATION_END_CONFLICT(
+      HttpStatus.CONFLICT, "CONVERSATION_END_CONFLICT", "대화 종료 요청이 처리 중이거나 충돌했습니다.");
 
   private final HttpStatus httpStatus;
   private final String code;

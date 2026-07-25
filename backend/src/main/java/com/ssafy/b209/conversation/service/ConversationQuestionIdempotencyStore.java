@@ -7,6 +7,7 @@ import com.ssafy.b209.conversation.exception.ConversationStartErrorCode;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.CommonErrorCode;
+import com.ssafy.b209.global.response.ErrorCode;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
@@ -62,6 +63,36 @@ public class ConversationQuestionIdempotencyStore {
       String idempotencyKey,
       Object request,
       Supplier<ResponseEntity<?>> responseSupplier) {
+    return execute(
+        guardianUserId,
+        uri,
+        idempotencyKey,
+        request,
+        responseSupplier,
+        ConversationErrorCode.QUESTION_STORAGE_CONFLICT);
+  }
+
+  /**
+   * 같은 보호자·URI·키·Body의 최초 명령 응답을 저장하거나 완료 응답을 재생한다.
+   *
+   * <p>질문 생성 외의 대화 명령도 동일한 Redis 원자 연산을 재사용하되, 처리 중 충돌은 각 Use Case의 공개 오류 코드로 반환한다.
+   *
+   * @param guardianUserId 보호자 식별자
+   * @param uri 외부 API URI
+   * @param idempotencyKey 재전송 식별 Header
+   * @param request fingerprint 대상 요청
+   * @param responseSupplier 최초 명령 HTTP 응답 함수
+   * @param processingConflict 처리 중 대기 만료 시 반환할 공개 오류 코드
+   * @return 최초 또는 재생된 응답
+   * @throws BusinessException 키가 잘못됐거나 다른 Body에 재사용됐거나 처리 중 대기가 만료된 경우
+   */
+  public ResponseEntity<?> execute(
+      Long guardianUserId,
+      String uri,
+      String idempotencyKey,
+      Object request,
+      Supplier<ResponseEntity<?>> responseSupplier,
+      ErrorCode processingConflict) {
     if (idempotencyKey == null || idempotencyKey.isBlank()) {
       throw new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE);
     }
@@ -77,7 +108,7 @@ public class ConversationQuestionIdempotencyStore {
         return ResponseEntity.status(claim.response().status()).body(claim.response().body());
       }
       if (claim.status() == IdempotencyClaimStatus.PROCESSING) {
-        return waitForCompletion(key, fingerprint);
+        return waitForCompletion(key, fingerprint, processingConflict);
       }
       return process(key, fingerprint, responseSupplier);
     } catch (DataAccessException exception) {
@@ -87,7 +118,8 @@ public class ConversationQuestionIdempotencyStore {
     }
   }
 
-  private ResponseEntity<?> waitForCompletion(String key, String fingerprint) {
+  private ResponseEntity<?> waitForCompletion(
+      String key, String fingerprint, ErrorCode processingConflict) {
     Instant deadline = Instant.now().plus(properties.getProcessingWait());
     while (Instant.now().isBefore(deadline)) {
       try {
@@ -105,7 +137,7 @@ public class ConversationQuestionIdempotencyStore {
         return ResponseEntity.status(claim.response().status()).body(claim.response().body());
       }
     }
-    throw new BusinessException(ConversationErrorCode.QUESTION_STORAGE_CONFLICT);
+    throw new BusinessException(processingConflict);
   }
 
   private ResponseEntity<?> process(
