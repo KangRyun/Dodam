@@ -538,7 +538,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
           _pendingCompletionMetadata ??
           DrawingCompleteMetadataDto(
             lastEventSequence: _syncCoordinator.journal.lastEventSequence,
-            drawingDurationMs: _syncCoordinator.elapsedMilliseconds,
+            drawingDurationMs: _syncCoordinator.elapsedMilliseconds < 1
+                ? 1
+                : _syncCoordinator.elapsedMilliseconds,
             clientCompletedAt: DateTime.now().toUtc().toIso8601String(),
           );
       final idempotencyKey =
@@ -554,13 +556,12 @@ class _DrawingScreenState extends State<DrawingScreen> {
         metadata: metadata,
         idempotencyKey: idempotencyKey,
       );
-      if (response.currentStage != 'ANALYZING') {
-        throw StateError('Unexpected drawing stage');
+      if (response.currentStage != 'CONVERSING' ||
+          response.nextAction != 'SELECT_EMOTION') {
+        throw StateError('Unexpected drawing completion result');
       }
       if (!mounted) return;
       _invalidatePendingCompletion();
-      // TODO(CONVERSATION): Replace this temporary MVP transition with
-      // ANALYZING polling -> CONVERSING -> REFLECTION.
       Navigator.of(context).pushReplacementNamed(
         AppRoutes.emotionSelect(widget.childId),
         arguments: EmotionSelectRouteArguments(

@@ -34,10 +34,14 @@ FormData buildDrawingCompleteFormData(
 ) => FormData.fromMap({
   'finalImage': MultipartFile.fromBytes(
     finalImage.bytes,
-    filename: finalImage.fileName,
-    contentType: DioMediaType.parse(finalImage.mimeType),
+    filename: 'drawing.png',
+    contentType: DioMediaType.parse('image/png'),
   ),
-  'metadata': jsonEncode(metadata.toJson()),
+  'metadata': MultipartFile.fromBytes(
+    utf8.encode(jsonEncode(metadata.toJson())),
+    filename: 'metadata.json',
+    contentType: DioMediaType.parse('application/json'),
+  ),
 });
 
 String _idempotencyKey() {
@@ -153,11 +157,9 @@ final class RemoteDrawingRepository implements DrawingRepository {
       data: buildDrawingCompleteFormData(finalImage, metadata),
       options: Options(headers: {'Idempotency-Key': idempotencyKey}),
     );
-    final body = response.data!;
-    final payload = body['data'] is Map
-        ? Map<String, dynamic>.from(body['data']! as Map)
-        : body;
-    return DrawingStageCompleteResponseDto.fromJson(payload);
+    return DrawingStageCompleteResponseDto.fromJson(
+      envelopeObject(response.data),
+    );
   }
 
   @override
