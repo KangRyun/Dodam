@@ -94,7 +94,7 @@ Run:
 gradlew.bat test --tests '*LocalAudioStorageTest' --no-daemon
 ```
 
-Expected: `AudioStorage.read`와 `StoredAudioResource`가 없어 compile 실패.
+Expected: `AudioStorage.read`와 `StoredAudioContent`가 없어 compile 실패.
 
 `StoredAudioContent`는 그림과 같은 소유권 계약을 사용한다. `LocalAudioStorage.read`는
 기존 Key·Symbolic Link 검증을 재사용하고 확장자를 `wav`, `mp3`, `m4a`, `webm`

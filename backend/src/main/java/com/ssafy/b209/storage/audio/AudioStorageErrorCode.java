@@ -12,6 +12,7 @@ public enum AudioStorageErrorCode implements ErrorCode {
   INVALID_STORAGE_PATH(HttpStatus.BAD_REQUEST, "AUDIO_400_005", "유효하지 않은 음성 저장 경로입니다."),
   AUDIO_FILE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "AUDIO_413_001", "음성 파일 크기가 허용 범위를 초과했습니다."),
   AUDIO_STORAGE_CONFLICT(HttpStatus.CONFLICT, "AUDIO_409_001", "음성 파일 저장 요청이 충돌했습니다."),
+  AUDIO_NOT_FOUND(HttpStatus.NOT_FOUND, "AUDIO_404_001", "음성 파일을 찾을 수 없습니다."),
   AUDIO_STORAGE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "AUDIO_500_001", "음성 파일 저장 중 오류가 발생했습니다.");
 
   private final HttpStatus httpStatus;
