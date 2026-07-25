@@ -62,7 +62,7 @@ public class RefreshTokenService {
             .findById(verified.userId())
             .orElseThrow(() -> new BusinessException(AuthErrorCode.REFRESH_TOKEN_INVALID));
     if (user.getAccountStatus() == AccountStatus.SUSPENDED
-        || user.getAccountStatus() == AccountStatus.WITHDRAWN) {
+        || user.getAccountStatus() == AccountStatus.DELETED) {
       throw new BusinessException(AuthErrorCode.ACCOUNT_SUSPENDED);
     }
 

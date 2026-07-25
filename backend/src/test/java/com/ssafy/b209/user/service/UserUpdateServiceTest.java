@@ -12,6 +12,7 @@ import com.ssafy.b209.auth.domain.UserRole;
 import com.ssafy.b209.auth.repository.UserRepository;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.user.dto.request.UpdateUserRequest;
+import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
 import com.ssafy.b209.user.exception.UserErrorCode;
 import java.time.Clock;
@@ -33,27 +34,33 @@ class UserUpdateServiceTest {
       Clock.fixed(Instant.parse("2026-07-23T12:00:00Z"), ZoneOffset.UTC);
 
   @Mock private UserRepository userRepository;
+  @Mock private UserNotificationSettingsReader notificationSettingsReader;
 
   private UserUpdateService service;
 
   @BeforeEach
   void setUp() {
-    service = new UserUpdateService(userRepository, CLOCK);
+    service = new UserUpdateService(userRepository, notificationSettingsReader, CLOCK);
   }
 
   @Test
   void updatesTheNicknameWhenProvided() {
     given(userRepository.findById(USER_ID)).willReturn(Optional.of(onboardedUser()));
+    given(notificationSettingsReader.read(USER_ID))
+        .willReturn(NotificationSettingsResponse.defaults());
 
     UserResponse response = service.updateProfile(USER_ID, new UpdateUserRequest("새별이", null));
 
     verify(userRepository).save(any(User.class));
     assertThat(response.nickname()).isEqualTo("새별이");
+    assertThat(response.notificationSettings()).isEqualTo(NotificationSettingsResponse.defaults());
   }
 
   @Test
   void leavesTheProfileUnchangedWhenNoFieldIsProvided() {
     given(userRepository.findById(USER_ID)).willReturn(Optional.of(onboardedUser()));
+    given(notificationSettingsReader.read(USER_ID))
+        .willReturn(NotificationSettingsResponse.defaults());
 
     UserResponse response = service.updateProfile(USER_ID, new UpdateUserRequest(null, null));
 
