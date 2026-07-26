@@ -278,8 +278,9 @@ public class ConversationNextQuestionService {
   }
 
   private NextQuestionOptionResponse toOptionResponse(QuestionOption option) {
+    // 노출 type은 OPTION으로 고정한다. 저장 Snapshot의 option_type(STATIC)과 다른 값이며 선택 답변 요청은 저장 값을 보낸다.
     return new NextQuestionOptionResponse(
-        option.code(), "OPTION", option.label(), option.code(), null);
+        option.code(), "OPTION", option.label(), option.code(), option.emoji());
   }
 
   private NextQuestionTargetResponse toTargetResponse(DetectedObject target) {

@@ -32,6 +32,9 @@ public class ConversationMessageOption {
   @Column(name = "label", nullable = false, length = 200)
   private String label;
 
+  @Column(name = "emoji", length = 20)
+  private String emoji;
+
   @Column(name = "display_order", nullable = false)
   private short displayOrder;
 
@@ -41,9 +44,11 @@ public class ConversationMessageOption {
       Long conversationMessageId, QuestionOption option, short displayOrder) {
     this.conversationMessageId = conversationMessageId;
     this.optionKey = option.code();
+    // 저장 값은 항상 STATIC이다. 질문 응답의 노출 type(OPTION)과 다르며 선택 답변 요청이 이 값을 그대로 보낸다.
     this.optionType = "STATIC";
     this.optionValue = option.code();
     this.label = option.label();
+    this.emoji = option.emoji();
     this.displayOrder = displayOrder;
   }
 
@@ -74,5 +79,9 @@ public class ConversationMessageOption {
 
   public String getLabel() {
     return label;
+  }
+
+  public String getEmoji() {
+    return emoji;
   }
 }

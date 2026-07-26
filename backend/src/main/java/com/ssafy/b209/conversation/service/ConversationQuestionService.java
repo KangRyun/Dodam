@@ -175,7 +175,7 @@ public class ConversationQuestionService {
     if (option == null) {
       return null;
     }
-    return new QuestionOption(option.getOptionKey(), option.getLabel());
+    return new QuestionOption(option.getOptionKey(), option.getLabel(), option.getEmoji());
   }
 
   private boolean areValidOptions(List<QuestionOption> options) {
