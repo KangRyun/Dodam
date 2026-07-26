@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../tokens/app_colors.dart';
 import '../../tokens/app_spacing.dart';
+import '../../tokens/app_typography.dart';
 
 enum AppMessageType { info, success, warning, error }
 
@@ -35,11 +36,7 @@ void showAppMessage(
             Expanded(
               child: Text(
                 message,
-                style: TextStyle(
-                  color: visual.foreground,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: AppTypography.bodyStrong.copyWith(color: visual.foreground),
               ),
             ),
           ],

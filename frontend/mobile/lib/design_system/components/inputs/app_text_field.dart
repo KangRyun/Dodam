@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../tokens/app_colors.dart';
 import '../../tokens/app_spacing.dart';
+import '../../tokens/app_typography.dart';
 
 class AppTextField extends StatelessWidget {
   const AppTextField({
@@ -47,7 +48,7 @@ class AppTextField extends StatelessWidget {
     maxLines: obscureText ? 1 : maxLines,
     onChanged: onChanged,
     onSubmitted: onSubmitted,
-    style: const TextStyle(color: AppColors.ink, fontSize: 16),
+    style: AppTypography.body,
     decoration: InputDecoration(
       labelText: label,
       hintText: hintText,
