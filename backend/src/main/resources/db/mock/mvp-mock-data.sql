@@ -38,4 +38,22 @@ VALUES
      'IN_PROGRESS', 'DRAWING', 'mock-s15p11b209-136-session')
 ON DUPLICATE KEY UPDATE id = id;
 
+-- 음성 답변(288·289) 로컬 확인용 약관 마스터.
+--   VoiceAnswerAuthorizationRepository는 활성 VOICE_PROCESSING(CHILD) 약관의 최신 이력이
+--   AGREE여야 업로드를 허용한다. 약관 마스터가 없으면 로컬에서 음성 경로가 항상
+--   403 VOICE_CONSENT_REQUIRED로 막혀 흐름을 확인할 수 없다(2026-07-27 실측).
+--   운영 약관 문구·버전은 이 파일의 소관이 아니며, 여기 값은 local 개발 전용이다.
+--
+--   동의 이력(consent_records)은 넣지 않는다. 동의는 보호자 행위이므로 로컬에서도
+--   POST /api/v1/consents 로 받는 것이 실제 경로와 같다.
+--   id를 지정하지 않는 이유: CreateConsentRequest.termId가 @Positive라서 이 파일의 다른
+--   행처럼 음수 id를 쓰면 동의 API로 참조할 수 없다. 자연 키(term_code, version) UNIQUE에
+--   맡겨 양수 자동 id를 받고 재실행 시 중복도 막는다.
+INSERT INTO consent_terms
+    (term_code, target_scope, is_required, version, title, effective_at, is_active)
+VALUES
+    ('VOICE_PROCESSING', 'CHILD', TRUE, 'mock-v1', '음성 처리 동의(로컬 개발용)',
+     '2026-01-01 00:00:00.000000', TRUE)
+ON DUPLICATE KEY UPDATE title = VALUES(title);
+
 COMMIT;
