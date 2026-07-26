@@ -49,7 +49,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("14");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("15");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(67);
     assertThat(tableExists("refresh_tokens")).isFalse();
@@ -377,6 +377,41 @@ class DatabaseMigrationIntegrationTest {
     assertThat(
             indexExists("notification_device_tokens", "uk_notification_device_tokens_hash", true))
         .isTrue();
+  }
+
+  @Test
+  void seedsActiveFallbackQuestionTemplateWithOptions() {
+    // AI 호출이 실패하면 서비스는 활성 FALLBACK Template과 그 선택지를 저장해 대화를 잇는다.
+    // 이 데이터가 없으면 폴백 자체가 CONVERSATION_503_001로 실패하므로 시드 존재를 제약처럼 검증한다.
+    Long templateId =
+        jdbcTemplate.queryForObject(
+            "SELECT id FROM ai_question_templates "
+                + "WHERE template_type = 'FALLBACK' AND is_active = TRUE "
+                + "ORDER BY id ASC LIMIT 1",
+            Long.class);
+    assertThat(templateId).isNotNull();
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT question_text FROM ai_question_templates WHERE id = ?",
+                String.class,
+                templateId))
+        .isNotBlank();
+
+    // EMOJI 응답 방식은 내부 OPTION으로 매핑되어 선택지를 요구한다. 선택지가 비면 같은 503이 된다.
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM ai_question_template_options WHERE question_template_id = ?",
+                Integer.class,
+                templateId))
+        .isGreaterThanOrEqualTo(2);
+
+    assertThat(
+            jdbcTemplate.queryForList(
+                "SELECT option_key FROM ai_question_template_options "
+                    + "WHERE question_template_id = ? AND (option_key = '' OR label = '')",
+                templateId))
+        .isEmpty();
   }
 
   private boolean columnExists(String tableName, String columnName) {
