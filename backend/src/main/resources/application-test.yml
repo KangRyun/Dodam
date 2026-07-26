@@ -25,3 +25,7 @@ app:
   cors:
     allowed-origins:
       - http://localhost:3000
+  # 슬라이스·컨텍스트 테스트는 주기 작업 대상이 아니므로 회수 스케줄러를 끈다.
+  stt:
+    recovery:
+      enabled: false

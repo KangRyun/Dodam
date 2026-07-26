@@ -5,6 +5,7 @@ import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 /**
  * 288이 생성한 음성 답변 행의 STT 상태와 결과만 갱신하는 289 전용 읽기·갱신 Entity다.
@@ -45,6 +46,9 @@ public class SttVoiceAnswerMessage {
 
   @Column(name = "needs_guardian_confirmation", nullable = false)
   private boolean needsGuardianConfirmation;
+
+  @Column(name = "created_at", nullable = false, updatable = false)
+  private LocalDateTime createdAt;
 
   protected SttVoiceAnswerMessage() {}
 
@@ -90,5 +94,9 @@ public class SttVoiceAnswerMessage {
 
   public boolean isNeedsGuardianConfirmation() {
     return needsGuardianConfirmation;
+  }
+
+  public LocalDateTime getCreatedAt() {
+    return createdAt;
   }
 }
