@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "451009721648",
+    "project_id": "dodam-mvp-90114",
+    "storage_bucket": "dodam-mvp-90114.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:451009721648:android:7cddede5ff400d0afd44f5",
+        "android_client_info": {
+          "package_name": "com.dodam.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD10QhN8A8YELSjSNTQPFf1wtQ9BuOCiPk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
