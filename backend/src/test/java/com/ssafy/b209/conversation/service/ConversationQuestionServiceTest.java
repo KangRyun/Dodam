@@ -164,6 +164,41 @@ class ConversationQuestionServiceTest {
   }
 
   @Test
+  void carriesTemplateOptionEmojiIntoSavedFallbackOptions() {
+    AiQuestionTemplate template = mock(AiQuestionTemplate.class);
+    AiQuestionTemplateOption happy = mock(AiQuestionTemplateOption.class);
+    AiQuestionTemplateOption unsure = mock(AiQuestionTemplateOption.class);
+    given(template.getId()).willReturn(7L);
+    given(template.getQuestionText()).willReturn("그림을 그리는 동안 기분이 어땠어?");
+    given(happy.getOptionKey()).willReturn("HAPPY");
+    given(happy.getLabel()).willReturn("기분이 좋았어요");
+    given(happy.getEmoji()).willReturn("😊");
+    given(unsure.getOptionKey()).willReturn("NOT_SURE");
+    given(unsure.getLabel()).willReturn("잘 모르겠어요");
+    given(unsure.getEmoji()).willReturn(null);
+    given(aiQuestionClient.generate(any(), any()))
+        .willThrow(
+            new AiQuestionClientException(AiQuestionClientException.Type.CONNECTION_FAILURE));
+    given(questionTemplateRepository.findFirstByTemplateTypeAndActiveTrueOrderByIdAsc("FALLBACK"))
+        .willReturn(Optional.of(template));
+    given(questionTemplateOptionRepository.findByQuestionTemplateIdOrderByDisplayOrderAsc(7L))
+        .willReturn(List.of(happy, unsure));
+    given(questionPersistenceService.save(eq(1L), any()))
+        .willReturn(new GeneratedQuestion(23L, "그림을 그리는 동안 기분이 어땠어?", true));
+
+    service.generateQuestion(command(List.of(ResponseMode.OPTION)));
+
+    ArgumentCaptor<QuestionCandidate> candidateCaptor =
+        ArgumentCaptor.forClass(QuestionCandidate.class);
+    verify(questionPersistenceService).save(eq(1L), candidateCaptor.capture());
+    // Emoji는 Template 선택지에만 있는 값이다. 저장·응답까지 옮기지 않으면 시드한 Emoji가 버려진다.
+    assertThat(candidateCaptor.getValue().options())
+        .containsExactly(
+            new QuestionOption("HAPPY", "기분이 좋았어요", "😊"),
+            new QuestionOption("NOT_SURE", "잘 모르겠어요", null));
+  }
+
+  @Test
   void doesNotSaveWhenNoActiveFallbackTemplateExists() {
     given(aiQuestionClient.generate(any(), any()))
         .willThrow(

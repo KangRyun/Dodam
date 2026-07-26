@@ -25,6 +25,9 @@ public class AiQuestionTemplateOption {
   @Column(name = "label", nullable = false, length = 200)
   private String label;
 
+  @Column(name = "emoji", length = 20)
+  private String emoji;
+
   @Column(name = "display_order", nullable = false)
   private short displayOrder;
 
@@ -36,5 +39,9 @@ public class AiQuestionTemplateOption {
 
   public String getLabel() {
     return label;
+  }
+
+  public String getEmoji() {
+    return emoji;
   }
 }
