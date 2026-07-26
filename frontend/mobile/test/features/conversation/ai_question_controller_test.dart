@@ -89,6 +89,14 @@ final class _RecordingConversationRepository implements ConversationRepository {
   final List<int?> basisAnalysisIds = [];
 
   @override
+  Future<int> startConversation({
+    required int drawingSessionId,
+    int? analysisId,
+    int? maxQuestionCount,
+    required String idempotencyKey,
+  }) async => 800;
+
+  @override
   Future<AiQuestion> requestNextQuestion({
     required int conversationId,
     required NextQuestionRequest request,

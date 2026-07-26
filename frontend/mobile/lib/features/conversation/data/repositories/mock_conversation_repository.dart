@@ -12,6 +12,18 @@ final class MockConversationRepository implements ConversationRepository {
   final bool shouldFail;
 
   @override
+  Future<int> startConversation({
+    required int drawingSessionId,
+    int? analysisId,
+    int? maxQuestionCount,
+    required String idempotencyKey,
+  }) async {
+    await Future<void>.delayed(delay);
+    if (shouldFail) throw Exception('Mock conversation start failed');
+    return 8001;
+  }
+
+  @override
   Future<AiQuestion> requestNextQuestion({
     required int conversationId,
     required NextQuestionRequest request,

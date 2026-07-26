@@ -30,8 +30,8 @@ class DodamApp extends StatefulWidget {
     this.voiceAnswerRepository,
     this.sttResultRepository,
     this.conversationAnswerRepository,
-    this.conversationId = 8001,
-    this.basisAnalysisId = 7001,
+    this.conversationId,
+    this.basisAnalysisId,
     this.initialRoute = AppRoutes.guardianHome,
     super.key,
   });

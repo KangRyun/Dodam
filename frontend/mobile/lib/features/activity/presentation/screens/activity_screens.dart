@@ -105,6 +105,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   VoiceRecordingController? _voiceRecordingController;
   VoiceAnswerUploadController? _voiceAnswerUploadController;
   SttResultController? _sttResultController;
+  bool _conversationSetupStarted = false;
 
   @override
   void initState() {
@@ -150,54 +151,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
           imageProviderFactory: widget.draftImageProviderFactory,
         );
     _draftRestoreController.addListener(_handleDraftRestoreChanged);
-    final conversationRepository = widget.conversationRepository;
-    final conversationId = widget.conversationId;
-    // 대화 컨텍스트가 있는 활동에서만 질문 조회 시작
-    if (conversationRepository != null && conversationId != null) {
-      _questionController = AiQuestionController(
-        conversationRepository,
-        conversationId: conversationId,
-        basisAnalysisId: widget.basisAnalysisId,
-      );
-      _questionController!.addListener(_handleQuestionChanged);
-      _answerSubmissionController = OptionAnswerSubmissionController(
-        widget.conversationAnswerRepository ??
-            const MockConversationAnswerRepository(),
-        conversationId: conversationId,
-        idempotencyKeyProvider:
-            widget.idempotencyKeyProvider ?? _createIdempotencyKey,
-      )..addListener(_handleAnswerSubmissionChanged);
-      _questionSkipController = QuestionSkipController(
-        widget.questionSkipRepository ?? const MockQuestionSkipRepository(),
-        conversationId: conversationId,
-        idempotencyKeyProvider:
-            widget.idempotencyKeyProvider ?? _createIdempotencyKey,
-      )..addListener(_handleQuestionSkipChanged);
-      _conversationEndController = ConversationEndController(
-        widget.conversationEndRepository ??
-            const MockConversationEndRepository(),
-        conversationId: conversationId,
-        idempotencyKeyProvider:
-            widget.idempotencyKeyProvider ?? _createIdempotencyKey,
-      )..addListener(_handleConversationEndChanged);
-      _voiceRecordingController = VoiceRecordingController(
-        DeviceVoiceRecorder(),
-        permissionService: DeviceMicrophonePermissionService(),
-      )..addListener(_handleVoiceRecordingChanged);
-      if (widget.voiceAnswerRepository case final repository?) {
-        _voiceAnswerUploadController = VoiceAnswerUploadController(
-          repository,
-          conversationId: conversationId,
-          idempotencyKeyProvider:
-              widget.idempotencyKeyProvider ?? _createIdempotencyKey,
-        )..addListener(_handleVoiceAnswerUploadChanged);
-      }
-      if (widget.sttResultRepository case final repository?) {
-        _sttResultController = SttResultController(
-          repository,
-          conversationId: conversationId,
-        )..addListener(_handleSttResultChanged);
-      }
+    // 주입된 대화 컨텍스트(테스트·미리보기)는 즉시 구성하고, 실제 앱은 객체 탐지
+    // 성공 후 대화를 생성해 실제 conversationId로 구성한다(S15P11B209-246).
+    if (widget.conversationRepository != null && widget.conversationId != null) {
+      _setupConversationControllers(widget.conversationId!);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -252,16 +209,103 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   void _handleObjectDetectionChanged() {
     final detectionController = _objectDetectionController;
-    final questionController = _questionController;
     final result = detectionController?.validResult;
     if (detectionController?.status != DrawingObjectDetectionStatus.succeeded ||
         result == null ||
-        questionController == null ||
         _conversationEndController?.completed == true) {
+      return;
+    }
+    final questionController = _questionController;
+    if (questionController == null) {
+      // 아직 대화가 없으면 탐지 분석 ID로 대화를 생성한 뒤 질문을 요청한다.
+      unawaited(
+        _ensureConversationStarted(result.drawingAnalysisId).then(
+          (_) => _questionController?.loadForAnalysis(result.drawingAnalysisId),
+        ),
+      );
       return;
     }
     // 최신 탐지 결과의 분석 ID로 질문을 생성해 그림과 질문의 기준을 일치
     unawaited(questionController.loadForAnalysis(result.drawingAnalysisId));
+  }
+
+  /// 객체 탐지 분석 ID로 대화 세션을 생성하고 대화 컨트롤러를 구성한다.
+  ///
+  /// 명세 §12.2: `POST /drawing-sessions/{id}/conversations`로 대화를 만들고
+  /// 반환된 conversationId로 이후 질문·답변 흐름을 연결한다(S15P11B209-246).
+  Future<void> _ensureConversationStarted(int analysisId) async {
+    if (_conversationSetupStarted) return;
+    final conversationRepository = widget.conversationRepository;
+    final sessionId = widget.sessionId;
+    if (conversationRepository == null || sessionId == null) return;
+    _conversationSetupStarted = true;
+    try {
+      final conversationId = await conversationRepository.startConversation(
+        drawingSessionId: sessionId,
+        analysisId: analysisId,
+        idempotencyKey: (widget.idempotencyKeyProvider ?? _createIdempotencyKey)(),
+      );
+      if (!mounted) return;
+      setState(() => _setupConversationControllers(conversationId));
+    } on Object {
+      // 실패 시 다음 탐지 성공에서 재시도할 수 있도록 플래그를 되돌린다.
+      _conversationSetupStarted = false;
+    }
+  }
+
+  /// 확정된 conversationId로 질문·답변·건너뛰기·종료·음성 컨트롤러를 구성한다.
+  void _setupConversationControllers(int conversationId) {
+    final conversationRepository = widget.conversationRepository;
+    if (conversationRepository == null || _questionController != null) return;
+    _conversationSetupStarted = true;
+    _questionController =
+        AiQuestionController(
+          conversationRepository,
+          conversationId: conversationId,
+          basisAnalysisId: widget.basisAnalysisId,
+        )..addListener(_handleQuestionChanged);
+    _answerSubmissionController =
+        OptionAnswerSubmissionController(
+          widget.conversationAnswerRepository ??
+              const MockConversationAnswerRepository(),
+          conversationId: conversationId,
+          idempotencyKeyProvider:
+              widget.idempotencyKeyProvider ?? _createIdempotencyKey,
+        )..addListener(_handleAnswerSubmissionChanged);
+    _questionSkipController =
+        QuestionSkipController(
+          widget.questionSkipRepository ?? const MockQuestionSkipRepository(),
+          conversationId: conversationId,
+          idempotencyKeyProvider:
+              widget.idempotencyKeyProvider ?? _createIdempotencyKey,
+        )..addListener(_handleQuestionSkipChanged);
+    _conversationEndController =
+        ConversationEndController(
+          widget.conversationEndRepository ??
+              const MockConversationEndRepository(),
+          conversationId: conversationId,
+          idempotencyKeyProvider:
+              widget.idempotencyKeyProvider ?? _createIdempotencyKey,
+        )..addListener(_handleConversationEndChanged);
+    _voiceRecordingController =
+        VoiceRecordingController(
+          DeviceVoiceRecorder(),
+          permissionService: DeviceMicrophonePermissionService(),
+        )..addListener(_handleVoiceRecordingChanged);
+    if (widget.voiceAnswerRepository case final repository?) {
+      _voiceAnswerUploadController =
+          VoiceAnswerUploadController(
+            repository,
+            conversationId: conversationId,
+            idempotencyKeyProvider:
+                widget.idempotencyKeyProvider ?? _createIdempotencyKey,
+          )..addListener(_handleVoiceAnswerUploadChanged);
+    }
+    if (widget.sttResultRepository case final repository?) {
+      _sttResultController =
+          SttResultController(repository, conversationId: conversationId)
+            ..addListener(_handleSttResultChanged);
+    }
   }
 
   void _handleQuestionChanged() {
