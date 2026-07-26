@@ -1,10 +1,26 @@
 // 대화 종료 요청
-final class ConversationEndRequest {
-  const ConversationEndRequest({required this.lastQuestionMessageId});
+enum ConversationCompletionReason {
+  questionLimitReached('QUESTION_LIMIT_REACHED'),
+  childRequest('CHILD_REQUEST'),
+  guardianRequest('GUARDIAN_REQUEST'),
+  noMoreQuestion('NO_MORE_QUESTION');
 
+  const ConversationCompletionReason(this.wireName);
+
+  final String wireName;
+}
+
+final class ConversationEndRequest {
+  const ConversationEndRequest({
+    required this.reason,
+    required this.lastQuestionMessageId,
+  });
+
+  final ConversationCompletionReason reason;
   final int? lastQuestionMessageId;
 
   Map<String, dynamic> toJson() => {
+    'reason': reason.wireName,
     'lastQuestionMessageId': ?lastQuestionMessageId,
   };
 }

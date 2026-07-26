@@ -17,6 +17,10 @@ void main() {
     expect(ended, isTrue);
     expect(controller.completed, isTrue);
     expect(repository.conversationId, 20);
+    expect(
+      repository.request?.reason,
+      ConversationCompletionReason.childRequest,
+    );
     expect(repository.request?.lastQuestionMessageId, 10);
     expect(repository.idempotencyKeys, ['end-key']);
   });

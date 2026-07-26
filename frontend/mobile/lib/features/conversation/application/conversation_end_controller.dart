@@ -32,6 +32,7 @@ final class ConversationEndController extends ChangeNotifier {
       final result = await _repository.endConversation(
         conversationId: conversationId,
         request: ConversationEndRequest(
+          reason: ConversationCompletionReason.childRequest,
           lastQuestionMessageId: lastQuestionMessageId,
         ),
         idempotencyKey: _pendingIdempotencyKey!,

@@ -30,6 +30,7 @@ abstract final class AppRouter {
     ReportRepository? reportRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
     ConversationRepository? conversationRepository,
+    ConversationEndRepository? conversationEndRepository,
     VoiceAnswerRepository? voiceAnswerRepository,
     SttResultRepository? sttResultRepository,
     ConversationAnswerRepository? conversationAnswerRepository,
@@ -104,6 +105,7 @@ abstract final class AppRouter {
               (settings.arguments! as DrawingRouteArguments)
                   .completionSnapshotProvider,
           conversationRepository: conversationRepository,
+          conversationEndRepository: conversationEndRepository,
           voiceAnswerRepository: voiceAnswerRepository,
           sttResultRepository: sttResultRepository,
           conversationAnswerRepository: conversationAnswerRepository,

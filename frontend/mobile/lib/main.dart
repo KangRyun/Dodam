@@ -45,6 +45,7 @@ DodamApp createDefaultApp({
     authRepository: authRepository,
     childRepository: RemoteChildRepository(apiClient),
     conversationRepository: RemoteConversationRepository(apiClient),
+    conversationEndRepository: RemoteConversationEndRepository(apiClient),
     conversationAnswerRepository: RemoteConversationAnswerRepository(apiClient),
     // 백엔드 미연결 개발 환경에서만 목 그림 세션 사용
     drawingRepository: useMockDrawing
