@@ -241,6 +241,12 @@ final class _FakeDrawingRepository implements DrawingRepository {
     SaveDrawingReflectionRequestDto request,
   ) => throw UnimplementedError();
   @override
+  Future<DrawingCompletionResponseDto> completeActivity(
+    int sessionId, {
+    required CompleteActivityRequestDto request,
+    required String idempotencyKey,
+  }) => throw UnimplementedError();
+  @override
   Future<DrawingSessionDto> createSession(
     CreateDrawingSessionRequestDto request,
   ) => throw UnimplementedError();

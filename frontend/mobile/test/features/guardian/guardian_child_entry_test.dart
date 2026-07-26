@@ -521,6 +521,21 @@ final class _TrackingDrawingRepository implements DrawingRepository {
   ) async => reflectionSessionId = sessionId;
 
   @override
+  Future<DrawingCompletionResponseDto> completeActivity(
+    int sessionId, {
+    required CompleteActivityRequestDto request,
+    required String idempotencyKey,
+  }) async => const DrawingCompletionResponseDto(
+    drawingSessionId: 731,
+    sessionStatus: 'IN_PROGRESS',
+    currentStage: 'REPORTING',
+    analysisId: 801,
+    analysisStatus: 'PENDING',
+    reportId: 901,
+    reportStatus: 'GENERATING',
+  );
+
+  @override
   Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
     BinaryUploadDto preview,

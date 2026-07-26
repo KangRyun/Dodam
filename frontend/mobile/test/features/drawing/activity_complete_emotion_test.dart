@@ -745,6 +745,21 @@ final class _CompletionRepository implements DrawingRepository {
   }
 
   @override
+  Future<DrawingCompletionResponseDto> completeActivity(
+    int sessionId, {
+    required CompleteActivityRequestDto request,
+    required String idempotencyKey,
+  }) async => const DrawingCompletionResponseDto(
+    drawingSessionId: 42,
+    sessionStatus: 'IN_PROGRESS',
+    currentStage: 'REPORTING',
+    analysisId: 801,
+    analysisStatus: 'PENDING',
+    reportId: 901,
+    reportStatus: 'GENERATING',
+  );
+
+  @override
   Future<DraftRecoveryDto?> getDraft(int sessionId) async => null;
   @override
   Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async => null;
