@@ -109,7 +109,7 @@ class CommunityPostListServiceTest {
 
     var response = service.getPosts(new PostListQuery(null, null, null, null, null, null, null));
 
-    assertThat(response.content().getFirst().isAnonymous()).isTrue();
+    assertThat(response.content().getFirst().anonymous()).isTrue();
     assertThat(response.content().getFirst().author()).isNull();
   }
 

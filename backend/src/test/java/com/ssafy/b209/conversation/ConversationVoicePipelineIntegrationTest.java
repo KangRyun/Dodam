@@ -64,8 +64,9 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * 경로는 실제 코드를 실행한다. TTS 합성 Byte는 저장 계층의 형식·길이 검증을 통과해야 하므로 {@link MockAiTtsClient}가 만드는 실제 재생 가능한
  * MP3를 그대로 사용한다.
  *
- * <p><strong>브리지</strong>: PENDING 음성 답변을 STT 처리로 넘기는 프로덕션 트리거(HTTP·이벤트·스케줄러)가 존재하지 않아 289 파이프라인은
- * {@link SttProcessingService} 빈을 직접 호출해 전이시킨다. 트리거 부재는 프로덕션 갭이며 이 테스트의 범위 밖이다.
+ * <p><strong>STT 트리거</strong>: 이 클래스는 각 endpoint의 상태 경계를 검증하므로 배경 Thread가 상태를 바꾸지 않도록 {@code
+ * integration-test} profile에서 트리거·회수를 꺼두고 {@link SttProcessingService}를 직접 호출해 전이시킨다. 업로드가 실제로 STT를
+ * 시작하는지는 {@code ConversationVoiceSttTriggerIntegrationTest}가 검증한다.
  */
 @Testcontainers
 @SpringBootTest
@@ -177,6 +178,8 @@ class ConversationVoicePipelineIntegrationTest {
             .andExpect(jsonPath("$.data.parentMessageId").value(QUESTION_MESSAGE_ID))
             .andExpect(jsonPath("$.data.sequence").value(2))
             .andExpect(jsonPath("$.data.senderType").value("CHILD"))
+            // 공개 Enum 어휘를 노출한다. DB 값 VOICE_ANSWER를 그대로 내보내지 않는다.
+            .andExpect(jsonPath("$.data.messageType").value("ANSWER_VOICE"))
             .andExpect(jsonPath("$.data.speechStatus").value("PENDING"))
             .andExpect(jsonPath("$.data.sttText").doesNotExist())
             .andExpect(jsonPath("$.data.sttConfidence").doesNotExist())

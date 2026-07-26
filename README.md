@@ -374,6 +374,22 @@ AI_IMAGE_ACCESS_TOKEN_TTL=60s
 - URL, Token, `storageKey`, 서버 절대 경로와 이미지 Byte는 로그에 기록하지 않습니다.
 - 기본값은 여전히 `mock`입니다. AI 서버 가중치와 실제 추론 준비가 완료된 환경에서만 `http`로 전환합니다.
 
+### 음성 답변 STT 트리거
+
+음성 답변 업로드가 커밋되면 Backend가 배경 Thread에서 내부 STT를 호출합니다. 업로드 응답(201)은 STT 완료를 기다리지 않으며 결과는 `GET /api/v1/conversation-messages/{messageId}` 폴링으로 확인합니다.
+
+```dotenv
+STT_TRIGGER_ENABLED=true
+STT_RECOVERY_ENABLED=true
+STT_RECOVERY_INTERVAL=60s
+STT_RECOVERY_MINIMUM_AGE=2m
+STT_RECOVERY_BATCH_SIZE=20
+```
+
+- `STT_TRIGGER_ENABLED=false`로 두면 업로드는 `speech_status=PENDING`만 남깁니다. 내부 STT 장애 시 호출을 멈추는 개폐 장치이며, 이때는 `STT_RECOVERY_ENABLED`도 함께 끕니다.
+- 회수 작업은 `STT_RECOVERY_MINIMUM_AGE`를 넘긴 PENDING 중 대화가 아직 `CONVERSING`인 것만 다시 처리합니다. 선점은 원자 조건 갱신이므로 이벤트 처리와 겹쳐도 AI를 두 번 호출하지 않습니다.
+- STT는 전용 Thread Pool(`stt-`)에서 실행합니다. 음성 프록시 스트리밍이 쓰는 공용 MVC async Pool과 분리해 재생이 STT 대기에 밀리지 않게 합니다.
+
 ## 공통 API 성공 응답
 
 일반 성공 응답은 다음 구조를 사용합니다.

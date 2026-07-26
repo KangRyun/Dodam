@@ -13,6 +13,10 @@ import org.springframework.stereotype.Repository;
  * 게시글 상세 공개 계약에 필요한 정규화 관계를 Native Query로 조회하는 Repository 구현체다.
  *
  * <p>게시글 ID와 일반 공개 상태를 하나의 WHERE 조건으로 적용해 HIDDEN·DELETED·비공개 게시글의 존재 정보를 반환하지 않는다.
+ *
+ * <p>{@code editableByMe}는 익명 여부와 무관하게 작성자 본인이면 참이다. 실제 수정 권한을 판정하는 {@code
+ * CommunityPostCommandService.updatePost()}가 익명 글도 작성자에게 허용하므로 응답 플래그를 그 판정과 일치시킨다. 익명성은 작성자 표시를
+ * 마스킹해 보호하며 수정 권한을 없애서 보호하지 않는다.
  */
 @Repository
 public class CommunityPostDetailRepositoryImpl implements CommunityPostDetailRepository {
@@ -31,8 +35,7 @@ public class CommunityPostDetailRepositoryImpl implements CommunityPostDetailRep
                SELECT 1 FROM post_likes mine
                WHERE mine.post_id = p.id AND mine.user_id = :viewerUserId
              ) THEN 1 ELSE 0 END,
-             CASE WHEN p.is_anonymous = false AND p.author_user_id = :viewerUserId
-               THEN 1 ELSE 0 END
+             CASE WHEN p.author_user_id = :viewerUserId THEN 1 ELSE 0 END
       FROM community_posts p
       LEFT JOIN users u ON u.id = p.author_user_id
       WHERE p.id = :postId

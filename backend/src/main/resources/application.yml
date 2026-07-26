@@ -95,6 +95,14 @@ app:
     audio:
       root: ${LOCAL_AUDIO_STORAGE_ROOT:./storage/audio}
       max-size: ${LOCAL_AUDIO_MAX_SIZE:20971520}
+  stt:
+    trigger:
+      enabled: ${STT_TRIGGER_ENABLED:true}
+    recovery:
+      enabled: ${STT_RECOVERY_ENABLED:true}
+      interval: ${STT_RECOVERY_INTERVAL:60s}
+      minimum-age: ${STT_RECOVERY_MINIMUM_AGE:2m}
+      batch-size: ${STT_RECOVERY_BATCH_SIZE:20}
   idempotency:
     conversation:
       processing-ttl: ${CONVERSATION_IDEMPOTENCY_PROCESSING_TTL:30s}

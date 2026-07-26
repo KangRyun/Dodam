@@ -12,6 +12,7 @@ import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.domain.ConversationStartDrawingSession;
 import com.ssafy.b209.conversation.domain.VoiceAnswerMessage;
 import com.ssafy.b209.conversation.dto.VoiceAnswerMetadata;
+import com.ssafy.b209.conversation.dto.VoiceAnswerResponse;
 import com.ssafy.b209.conversation.dto.VoiceAnswerStopReason;
 import com.ssafy.b209.conversation.exception.VoiceAnswerErrorCode;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -56,6 +58,7 @@ class VoiceAnswerServiceTest {
   @Mock private VoiceAnswerAuthorizationRepository authorizationRepository;
   @Mock private VoiceAnswerMessageRepository messageRepository;
   @Mock private AudioStorage audioStorage;
+  @Mock private ApplicationEventPublisher eventPublisher;
   @Mock private ConversationSession session;
   @Mock private ConversationStartDrawingSession drawingSession;
   @Mock private VoiceAnswerMessage question;
@@ -74,7 +77,8 @@ class VoiceAnswerServiceTest {
             messageRepository,
             audioStorage,
             new ObjectMapper(),
-            Clock.fixed(Instant.parse("2026-07-23T00:00:00Z"), ZoneOffset.UTC));
+            Clock.fixed(Instant.parse("2026-07-23T00:00:00Z"), ZoneOffset.UTC),
+            eventPublisher);
   }
 
   @Test
@@ -103,6 +107,8 @@ class VoiceAnswerServiceTest {
     VoiceAnswerMessage message = messageCaptor.getValue();
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CREATED);
     assertThat(response.getBody()).isInstanceOf(ApiResponse.class);
+    assertThat(((VoiceAnswerResponse) ((ApiResponse<?>) response.getBody()).data()).messageType())
+        .isEqualTo("ANSWER_VOICE");
     assertThat(message.getConversationSessionId()).isEqualTo(CONVERSATION_ID);
     assertThat(message.getParentMessageId()).isEqualTo(QUESTION_ID);
     assertThat(message.getMessageSequence()).isEqualTo(5);
@@ -113,6 +119,45 @@ class VoiceAnswerServiceTest {
     assertThat(message.getSpeechStatus()).isEqualTo("PENDING");
     assertThat(ReflectionTestUtils.getField(message, "audioStorageKey")).isEqualTo(STORAGE_KEY);
     assertThat(ReflectionTestUtils.getField(message, "audioChecksumSha256")).isEqualTo(CHECKSUM);
+  }
+
+  @Test
+  void publishesSttRequestEventForTheSavedMessage() {
+    givenAuthorizedLockedSession();
+    given(messageRepository.findQuestionByIdAndConversationSessionId(QUESTION_ID, CONVERSATION_ID))
+        .willReturn(Optional.of(question));
+    given(messageRepository.findMaxMessageSequenceByConversationSessionId(CONVERSATION_ID))
+        .willReturn(4);
+    given(audioStorage.promote(stagedAudio)).willReturn(storedAudio());
+    given(savedMessage.getId()).willReturn(60L);
+    given(savedMessage.getParentMessageId()).willReturn(QUESTION_ID);
+    given(savedMessage.getMessageSequence()).willReturn(5);
+    given(savedMessage.getSenderType()).willReturn("CHILD");
+    given(savedMessage.getMessageType()).willReturn("VOICE_ANSWER");
+    given(savedMessage.getSpeechStatus()).willReturn("PENDING");
+    given(savedMessage.isNeedsGuardianConfirmation()).willReturn(false);
+    given(messageRepository.saveAndFlush(any(VoiceAnswerMessage.class))).willReturn(savedMessage);
+
+    service.persist(GUARDIAN_ID, CONVERSATION_ID, metadata(), stagedAudio);
+
+    verify(eventPublisher).publishEvent(new VoiceAnswerStoredEvent(60L));
+  }
+
+  @Test
+  void doesNotPublishSttRequestEventWhenPersistenceFails() {
+    givenAuthorizedLockedSession();
+    given(messageRepository.findQuestionByIdAndConversationSessionId(QUESTION_ID, CONVERSATION_ID))
+        .willReturn(Optional.of(question));
+    given(messageRepository.findMaxMessageSequenceByConversationSessionId(CONVERSATION_ID))
+        .willReturn(4);
+    given(audioStorage.promote(stagedAudio)).willReturn(storedAudio());
+    given(messageRepository.saveAndFlush(any(VoiceAnswerMessage.class)))
+        .willThrow(new DataIntegrityViolationException("sequence conflict"));
+
+    assertThatThrownBy(() -> service.persist(GUARDIAN_ID, CONVERSATION_ID, metadata(), stagedAudio))
+        .isInstanceOf(BusinessException.class);
+
+    verify(eventPublisher, never()).publishEvent(any(VoiceAnswerStoredEvent.class));
   }
 
   @Test
