@@ -7,38 +7,23 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ssafy.b209.auth.token.AuthenticatedUser;
+import com.ssafy.b209.support.IntegrationTestSupport;
 import java.util.List;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
-@Testcontainers
-@SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("integration-test")
-class ConsentStatusIntegrationTest {
+class ConsentStatusIntegrationTest extends IntegrationTestSupport {
 
   private static final Long USER_ID = 41L;
-
-  @Container @ServiceConnection
-  static final MySQLContainer<?> MYSQL_CONTAINER =
-      new MySQLContainer<>("mysql:8.4.10")
-          .withDatabaseName("dodam")
-          .withUsername("test")
-          .withPassword("test");
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbcTemplate;
@@ -46,9 +31,6 @@ class ConsentStatusIntegrationTest {
   @BeforeEach
   void setUp() {
     setAuthenticatedUser(USER_ID);
-    jdbcTemplate.update("DELETE FROM consent_records");
-    jdbcTemplate.update("DELETE FROM consent_terms");
-    jdbcTemplate.update("DELETE FROM users");
     jdbcTemplate.update(
         "INSERT INTO users (id, role, account_status, is_completed) "
             + "VALUES (?, 'GUARDIAN', 'ACTIVE', TRUE)",

@@ -25,6 +25,7 @@ import com.ssafy.b209.drawing.exception.DrawingErrorCode;
 import com.ssafy.b209.drawing.repository.DrawingTypeRepository;
 import com.ssafy.b209.drawing.service.DrawingSessionService;
 import com.ssafy.b209.global.exception.BusinessException;
+import com.ssafy.b209.support.IntegrationTestSupport;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -38,32 +39,16 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
-@Testcontainers
-@SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("integration-test")
-class DrawingSessionIntegrationTest {
+class DrawingSessionIntegrationTest extends IntegrationTestSupport {
 
   private static final Long GUARDIAN_USER_ID = 41L;
-
-  @Container @ServiceConnection
-  static final MySQLContainer<?> MYSQL_CONTAINER =
-      new MySQLContainer<>("mysql:8.4.10")
-          .withDatabaseName("dodam")
-          .withUsername("test")
-          .withPassword("test");
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbcTemplate;
@@ -74,19 +59,7 @@ class DrawingSessionIntegrationTest {
   @BeforeEach
   void setUp() {
     setAuthenticatedGuardian();
-    jdbcTemplate.update("DELETE FROM storage_deletion_jobs");
-    jdbcTemplate.update("DELETE FROM reports");
-    jdbcTemplate.update("DELETE FROM conversation_sessions");
-    jdbcTemplate.update("DELETE FROM analysis_detected_objects");
-    jdbcTemplate.update("DELETE FROM analyses");
-    jdbcTemplate.update("DELETE FROM drawing_session_emotions");
-    jdbcTemplate.update("DELETE FROM drawing_assets");
-    jdbcTemplate.update("DELETE FROM drawing_sessions");
-    jdbcTemplate.execute("ALTER TABLE drawing_sessions AUTO_INCREMENT = 1");
-    jdbcTemplate.update("DELETE FROM guardian_child_relations");
-    jdbcTemplate.update("DELETE FROM drawing_types");
-    jdbcTemplate.update("DELETE FROM children");
-    jdbcTemplate.update("DELETE FROM users");
+    // 데이터 정리와 AUTO_INCREMENT 리셋은 IntegrationTestSupport의 TRUNCATE가 담당한다.
     jdbcTemplate.update(
         "INSERT INTO users (id, role, nickname, account_status) "
             + "VALUES (?, 'GUARDIAN', 'drawing-guardian', 'ACTIVE'), "

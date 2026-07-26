@@ -2,44 +2,24 @@ package com.ssafy.b209.auth.authorization;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ssafy.b209.support.IntegrationTestSupport;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.ActiveProfiles;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
-@Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest
-@ActiveProfiles("integration-test")
-class GuardianResourceAccessRepositoryIntegrationTest {
+class GuardianResourceAccessRepositoryIntegrationTest extends IntegrationTestSupport {
 
   private static final Long GUARDIAN_USER_ID = 41L;
   private static final Long OTHER_GUARDIAN_USER_ID = 42L;
   private static final Long CHILD_ID = 7L;
   private static final Long DRAWING_SESSION_ID = 9L;
 
-  @Container @ServiceConnection
-  static final MySQLContainer<?> MYSQL_CONTAINER =
-      new MySQLContainer<>("mysql:8.4.10")
-          .withDatabaseName("dodam")
-          .withUsername("test")
-          .withPassword("test");
-
   @Autowired private GuardianResourceAccessRepository repository;
   @Autowired private JdbcTemplate jdbcTemplate;
 
   @BeforeEach
   void setUp() {
-    jdbcTemplate.update("delete from drawing_sessions");
-    jdbcTemplate.update("delete from guardian_child_relations");
-    jdbcTemplate.update("delete from drawing_types");
-    jdbcTemplate.update("delete from children");
-    jdbcTemplate.update("delete from users");
     jdbcTemplate.update(
         "insert into users (id, role, nickname, account_status) values "
             + "(?, 'GUARDIAN', 'guardian-one', 'ACTIVE'), "

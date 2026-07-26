@@ -6,6 +6,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ssafy.b209.auth.token.AuthenticatedUser;
+import com.ssafy.b209.support.IntegrationTestSupport;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -13,33 +14,17 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
-import org.testcontainers.containers.MySQLContainer;
-import org.testcontainers.junit.jupiter.Container;
-import org.testcontainers.junit.jupiter.Testcontainers;
 
-@Testcontainers(disabledWithoutDocker = true)
-@SpringBootTest
 @AutoConfigureMockMvc
-@ActiveProfiles("integration-test")
-class DrawingReflectionIntegrationTest {
+class DrawingReflectionIntegrationTest extends IntegrationTestSupport {
 
   private static final Long GUARDIAN_USER_ID = 41L;
   private static final Long DRAWING_SESSION_ID = 10L;
-
-  @Container @ServiceConnection
-  static final MySQLContainer<?> MYSQL_CONTAINER =
-      new MySQLContainer<>("mysql:8.4.10")
-          .withDatabaseName("dodam_reflection")
-          .withUsername("test")
-          .withPassword("test");
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbcTemplate;
@@ -50,12 +35,6 @@ class DrawingReflectionIntegrationTest {
         .setAuthentication(
             UsernamePasswordAuthenticationToken.authenticated(
                 new AuthenticatedUser(GUARDIAN_USER_ID), null, List.of()));
-    jdbcTemplate.update("DELETE FROM drawing_session_emotions");
-    jdbcTemplate.update("DELETE FROM drawing_sessions");
-    jdbcTemplate.update("DELETE FROM guardian_child_relations");
-    jdbcTemplate.update("DELETE FROM drawing_types");
-    jdbcTemplate.update("DELETE FROM children");
-    jdbcTemplate.update("DELETE FROM users");
     jdbcTemplate.update(
         "INSERT INTO users (id, role, nickname, account_status) "
             + "VALUES (?, 'GUARDIAN', 'reflection-guardian', 'ACTIVE')",

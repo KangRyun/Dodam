@@ -49,6 +49,15 @@ dependencies {
 
 tasks.named('test') {
     useJUnitPlatform()
+
+    // 통합테스트는 MySQL Testcontainer 1개를 공유하므로(IntegrationTestSupport) 클래스 간 데이터
+    // 격리가 실행 순서에 의존하지 않아야 한다. `./gradlew test -PrandomTestOrder` 로 클래스 순서를
+    // 무작위로 섞어 그 전제를 검증한다. (S15P11B209-391 Phase 3)
+    // 평소 빌드는 결정적 순서를 유지한다 — CI가 무작위로 초록/빨강을 오가면 안 되므로 옵트인이다.
+    if (project.hasProperty('randomTestOrder')) {
+        systemProperty 'junit.jupiter.testclass.order.default',
+                'org.junit.jupiter.api.ClassOrderer$Random'
+    }
 }
 
 tasks.withType(Javadoc).configureEach {
