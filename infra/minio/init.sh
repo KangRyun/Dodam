@@ -37,4 +37,17 @@ mc admin policy attach local dodam-be-rw --user "$MINIO_BE_USER" 2>/dev/null || 
 mc admin policy attach local dodam-ai-ro --user "$MINIO_AI_USER" 2>/dev/null || \
   mc admin policy set    local dodam-ai-ro "user=$MINIO_AI_USER"
 
-echo "[minio-init] done: bucket=dodam, users=be-rw(rw) / ai-ro(images:read)"
+# 5) 수명주기(ILM) — S15P11B209-622.
+#    lifecycle.json 을 선언적으로 import(전체 교체 → 멱등). 현재 규칙은 tts-cache/ 만:
+#      - tts-cache/  : 30일 자동 만료. TTS 캐시는 원문에서 재생성되는 파생물이라 안전(설계 §1).
+#      - images/ audio/ reports/ : 보존기간이 동의정책·팀결정 대기(622 §D) → 만료 규칙 미부여.
+#      - evidences/  : 법적 보존 → 자동 만료 구조적 제외(설계 §8) → 만료 규칙 미부여.
+#    ⚠️ 첫 실행 검증(리눅스서 미검증): 이 mc 태그의 'mc ilm import' 지원 여부.
+#       실패 시 프로비저닝은 계속(계정·버킷이 우선) — 경고만 남기고 수동 적용 안내.
+if mc ilm import local/dodam < "$SCRIPT_DIR/lifecycle.json" 2>/dev/null; then
+  echo "[minio-init] ILM applied: tts-cache/ expire 30d"
+else
+  echo "[minio-init] WARN: ILM import 실패(mc 버전 미지원?) — 수동 적용: mc ilm rule add local/dodam --prefix tts-cache/ --expire-days 30"
+fi
+
+echo "[minio-init] done: bucket=dodam, users=be-rw(rw) / ai-ro(images:read), ilm=tts-cache/30d"
