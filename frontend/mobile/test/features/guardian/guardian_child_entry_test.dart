@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:dodam/app/app.dart';
 import 'package:dodam/app/router/app_routes.dart';
@@ -136,6 +137,18 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('그림 활동'), findsWidgets);
+  });
+
+  testWidgets('활성 그림 세션이 있으면 새로 만들지 않고 기존 sessionId로 재개한다', (tester) async {
+    final drawingRepository = _TrackingDrawingRepository(activeSessionId: 812);
+    await _pumpChildHome(tester, drawingRepository);
+
+    await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    await tester.pumpAndSettle();
+
+    expect(drawingRepository.createCalls, 0);
+    expect(drawingRepository.getTypesChildId, isNull);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
   });
 
   testWidgets('실제 앱 진입 흐름에서 생성한 세션으로 완료부터 보호자 홈까지 이어진다', (tester) async {
@@ -370,11 +383,13 @@ final class _FakeChildRepository implements ChildRepository {
 final class _TrackingDrawingRepository implements DrawingRepository {
   _TrackingDrawingRepository({
     this.sessionId = 731,
+    this.activeSessionId,
     this.createError,
     this.pending,
   });
 
   final int sessionId;
+  final int? activeSessionId;
   final Object? createError;
   final Completer<DrawingSessionDto>? pending;
   int createCalls = 0;
@@ -441,6 +456,29 @@ final class _TrackingDrawingRepository implements DrawingRepository {
 
   @override
   Future<DraftRecoveryDto?> getDraft(int sessionId) async => null;
+  @override
+  Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async {
+    final id = activeSessionId;
+    if (id == null) return null;
+    return ActiveDrawingSessionDto(
+      drawingSessionId: id,
+      childId: childId,
+      drawingType: const DrawingTypeSummaryDto(
+        drawingTypeId: 77,
+        code: 'FREE',
+        name: '자유화',
+      ),
+      inputMethod: 'CANVAS',
+      sessionStatus: 'DRAWING',
+      currentStage: 'DRAWING',
+      startedAt: '2026-07-22T00:00:00Z',
+      latestDraft: null,
+    );
+  }
+
+  @override
+  Future<Uint8List> downloadDraftPreview(String previewUrl) =>
+      throw UnimplementedError();
 
   @override
   Future<StrokeBatchResponseDto> sendStrokeBatch(
@@ -466,13 +504,13 @@ final class _TrackingDrawingRepository implements DrawingRepository {
       'drawingSessionId': sessionId,
       'finalAssetId': 900,
       'sessionStatus': 'IN_PROGRESS',
-      'currentStage': 'ANALYZING',
+      'currentStage': 'CONVERSING',
       'analysis': {
         'analysisId': 901,
         'analysisType': 'INTERMEDIATE',
-        'status': 'PENDING',
+        'status': 'SUCCEEDED',
       },
-      'nextAction': 'POLL_ANALYSIS',
+      'nextAction': 'SELECT_EMOTION',
     });
   }
 

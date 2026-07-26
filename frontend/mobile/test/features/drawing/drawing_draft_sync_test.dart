@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:dodam/design_system/design_system.dart';
@@ -247,6 +248,11 @@ final class _FakeDrawingRepository implements DrawingRepository {
   Future<void> deleteDraft(int sessionId) => throw UnimplementedError();
   @override
   Future<DraftRecoveryDto> getDraft(int sessionId) =>
+      throw UnimplementedError();
+  @override
+  Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async => null;
+  @override
+  Future<Uint8List> downloadDraftPreview(String previewUrl) =>
       throw UnimplementedError();
   @override
   Future<DrawingSessionDto> getSession(int sessionId) =>

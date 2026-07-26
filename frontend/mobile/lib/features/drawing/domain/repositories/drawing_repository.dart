@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../../data/dto/drawing_dtos.dart';
 import '../../../../core/network/api_page.dart';
 
@@ -13,6 +15,7 @@ abstract interface class DrawingRepository {
     CreateDrawingSessionRequestDto request,
   );
   Future<DrawingSessionDto> getSession(int sessionId);
+  Future<ActiveDrawingSessionDto?> getActiveSession(int childId);
   Future<StrokeBatchResponseDto> sendStrokeBatch(
     int sessionId,
     StrokeBatchRequestDto request,
@@ -23,6 +26,7 @@ abstract interface class DrawingRepository {
     DraftCanvasStateDto canvasState,
   );
   Future<DraftRecoveryDto?> getDraft(int sessionId);
+  Future<Uint8List> downloadDraftPreview(String previewUrl);
   Future<void> deleteDraft(int sessionId);
   Future<DrawingStageCompleteResponseDto> completeDrawingStage(
     int sessionId, {

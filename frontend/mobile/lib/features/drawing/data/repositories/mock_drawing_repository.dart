@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import '../../../../core/network/network.dart';
 import '../../domain/repositories/drawing_repository.dart';
 import '../dto/drawing_dtos.dart';
@@ -33,7 +36,7 @@ final class MockDrawingRepository implements DrawingRepository {
     'assetId': 120,
     'assetType': 'DRAFT',
     'assetVersion': 3,
-    'fileUrl': 'https://storage.i15b209.p.ssafy.io/drawings/42/draft/v3.png',
+    'fileUrl': '/api/v1/drawing-assets/120/file',
     'mimeType': 'image/png',
     'fileSizeBytes': 384512,
     'widthPx': 1536,
@@ -85,6 +88,8 @@ final class MockDrawingRepository implements DrawingRepository {
   Future<DrawingSessionDto> getSession(int sessionId) async =>
       DrawingSessionDto.fromJson(_session);
   @override
+  Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async => null;
+  @override
   Future<StrokeBatchResponseDto> sendStrokeBatch(
     int sessionId,
     StrokeBatchRequestDto request,
@@ -108,18 +113,10 @@ final class MockDrawingRepository implements DrawingRepository {
     'expiresAt': '2026-07-28T09:41:10Z',
   });
   @override
-  Future<DraftRecoveryDto> getDraft(int sessionId) async {
+  Future<DraftRecoveryDto?> getDraft(int sessionId) async {
     switch (draftScenario) {
       case MockDraftScenario.absent:
-        throw ApiResponseFailure(
-          statusCode: 404,
-          error: ApiError(
-            timestamp: '2026-07-22T00:00:00Z',
-            path: '/api/v1/drawing-sessions/$sessionId/draft',
-            code: 'DRAWING_DRAFT_NOT_FOUND',
-            message: 'Draft not found',
-          ),
-        );
+        return null;
       case MockDraftScenario.failure:
         throw const ApiTransportFailure(
           type: ApiTransportFailureType.connection,
@@ -137,6 +134,13 @@ final class MockDrawingRepository implements DrawingRepository {
         });
     }
   }
+
+  @override
+  Future<Uint8List> downloadDraftPreview(String previewUrl) async =>
+      base64Decode(
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1Pe'
+        'AAAADElEQVR42mP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+      );
 
   @override
   Future<void> deleteDraft(int sessionId) async {}

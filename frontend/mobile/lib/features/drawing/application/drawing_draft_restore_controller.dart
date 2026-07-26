@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/widgets.dart';
 
 import '../../../core/network/network.dart';
@@ -5,7 +7,8 @@ import '../data/dto/drawing_dtos.dart';
 import '../domain/repositories/drawing_repository.dart';
 import 'drawing_sync_coordinator.dart';
 
-typedef DraftImageProviderFactory = ImageProvider<Object> Function(String url);
+typedef DraftImageProviderFactory =
+    ImageProvider<Object> Function(Uint8List bytes);
 
 enum DrawingDraftRestoreStatus {
   unavailable,
@@ -26,8 +29,7 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
     required this.syncCoordinator,
     DraftImageProviderFactory? imageProviderFactory,
   }) : _imageProviderFactory =
-           imageProviderFactory ??
-           ((url) => NetworkImage(url) as ImageProvider<Object>),
+           imageProviderFactory ?? ((bytes) => MemoryImage(bytes)),
        _status = sessionId == null || repository == null
            ? DrawingDraftRestoreStatus.unavailable
            : DrawingDraftRestoreStatus.loading;
@@ -70,7 +72,7 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
       );
       _setStatus(DrawingDraftRestoreStatus.found);
     } on ApiResponseFailure catch (failure) {
-      if (failure.error?.code == 'DRAWING_DRAFT_NOT_FOUND') {
+      if (failure.error?.code == 'DRAWING_404_004') {
         _draft = null;
         _setStatus(DrawingDraftRestoreStatus.noDraft);
       } else {
@@ -81,14 +83,22 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
     }
   }
 
-  void continueDrawing() {
+  Future<void> continueDrawing() async {
     final url = _draft?.previewUrl;
-    if (url == null || url.isEmpty) {
+    final dataSource = repository;
+    if (url == null || url.isEmpty || dataSource == null) {
       _setStatus(DrawingDraftRestoreStatus.imageFailed);
       return;
     }
-    _backgroundImage = _imageProviderFactory(url);
     _setStatus(DrawingDraftRestoreStatus.loadingImage);
+    try {
+      final bytes = await dataSource.downloadDraftPreview(url);
+      _backgroundImage = _imageProviderFactory(bytes);
+      notifyListeners();
+    } on Object {
+      _backgroundImage = null;
+      _setStatus(DrawingDraftRestoreStatus.imageFailed);
+    }
   }
 
   void markImageLoaded() {
@@ -104,7 +114,7 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
     }
   }
 
-  void retryImage() => continueDrawing();
+  Future<void> retryImage() => continueDrawing();
 
   void startNewDrawing() {
     _backgroundImage = null;

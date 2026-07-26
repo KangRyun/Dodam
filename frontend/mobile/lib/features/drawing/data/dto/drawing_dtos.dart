@@ -184,6 +184,59 @@ final class DrawingSessionDto {
   final List<DrawingAssetDto> assets;
 }
 
+final class ActiveDrawingSessionDto {
+  const ActiveDrawingSessionDto({
+    required this.drawingSessionId,
+    required this.childId,
+    required this.drawingType,
+    required this.inputMethod,
+    required this.sessionStatus,
+    required this.currentStage,
+    required this.startedAt,
+    required this.latestDraft,
+  });
+
+  factory ActiveDrawingSessionDto.fromJson(Map<String, dynamic> json) =>
+      ActiveDrawingSessionDto(
+        drawingSessionId: json['drawingSessionId'] as int,
+        childId: json['childId'] as int,
+        drawingType: DrawingTypeSummaryDto.fromJson(_map(json['drawingType'])),
+        inputMethod: json['inputMethod'] as String,
+        sessionStatus: json['sessionStatus'] as String,
+        currentStage: json['currentStage'] as String,
+        startedAt: json['startedAt'] as String,
+        latestDraft: json['latestDraft'] == null
+            ? null
+            : ActiveDrawingDraftDto.fromJson(_map(json['latestDraft'])),
+      );
+
+  final int drawingSessionId, childId;
+  final DrawingTypeSummaryDto drawingType;
+  final String inputMethod, sessionStatus, currentStage, startedAt;
+  final ActiveDrawingDraftDto? latestDraft;
+}
+
+final class ActiveDrawingDraftDto {
+  const ActiveDrawingDraftDto({
+    required this.drawingAssetId,
+    required this.assetVersion,
+    required this.lastEventSequence,
+    required this.savedAt,
+  });
+
+  factory ActiveDrawingDraftDto.fromJson(Map<String, dynamic> json) =>
+      ActiveDrawingDraftDto(
+        drawingAssetId: json['drawingAssetId'] as int,
+        assetVersion: json['assetVersion'] as int,
+        lastEventSequence: json['lastEventSequence'] as int?,
+        savedAt: json['savedAt'] as String,
+      );
+
+  final int drawingAssetId, assetVersion;
+  final int? lastEventSequence;
+  final String savedAt;
+}
+
 final class StrokeEventDto {
   const StrokeEventDto({
     required this.seq,
