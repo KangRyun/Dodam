@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:dodam/core/network/api_failure.dart';
 import 'package:dodam/features/conversation/conversation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -9,20 +10,30 @@ void main() {
     final controller = ConversationEndController(
       repository,
       conversationId: 20,
-      idempotencyKeyProvider: () => 'end-key',
+      idempotencyKeyProvider: () => 'end-key-1',
     );
 
     final ended = await controller.submit(lastQuestionMessageId: 10);
 
     expect(ended, isTrue);
     expect(controller.completed, isTrue);
+    expect(controller.requestIdempotencyKey, 'end-key-1');
+    expect(controller.requestSnapshot?.toJson(), {
+      'reason': 'CHILD_REQUEST',
+      'lastQuestionMessageId': 10,
+    });
     expect(repository.conversationId, 20);
+    expect(repository.request?.reason, ConversationEndReason.childRequest);
     expect(repository.request?.lastQuestionMessageId, 10);
-    expect(repository.idempotencyKeys, ['end-key']);
+    expect(repository.idempotencyKeys, ['end-key-1']);
   });
 
-  test('실패 후 다시 요청하면 같은 멱등성 키로 재시도한다', () async {
-    final repository = _RecordingEndRepository(failOnce: true);
+  test('응답 유실 후 다시 요청하면 같은 멱등성 키와 Body로 재시도한다', () async {
+    final repository = _RecordingEndRepository(
+      firstFailure: const ApiTransportFailure(
+        type: ApiTransportFailureType.receiveTimeout,
+      ),
+    );
     final controller = ConversationEndController(
       repository,
       conversationId: 20,
@@ -32,8 +43,79 @@ void main() {
     expect(await controller.submit(lastQuestionMessageId: 10), isFalse);
     expect(controller.status, ConversationEndStatus.failure);
 
-    expect(await controller.submit(lastQuestionMessageId: 10), isTrue);
+    expect(await controller.submit(lastQuestionMessageId: 99), isTrue);
     expect(repository.idempotencyKeys, ['stable-key', 'stable-key']);
+    expect(repository.requests.map((request) => request.toJson()), [
+      {'reason': 'CHILD_REQUEST', 'lastQuestionMessageId': 10},
+      {'reason': 'CHILD_REQUEST', 'lastQuestionMessageId': 10},
+    ]);
+  });
+
+  test('Conversation End 5xx 후에도 같은 멱등성 키와 Body를 유지한다', () async {
+    final repository = _RecordingEndRepository(
+      firstFailure: const ApiResponseFailure(statusCode: 503, error: null),
+    );
+    final controller = ConversationEndController(
+      repository,
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'stable-key',
+    );
+
+    expect(await controller.submit(lastQuestionMessageId: 10), isFalse);
+    expect(await controller.submit(lastQuestionMessageId: 99), isTrue);
+    expect(repository.idempotencyKeys, ['stable-key', 'stable-key']);
+    expect(
+      repository.requests.map((request) => request.toJson()),
+      everyElement({'reason': 'CHILD_REQUEST', 'lastQuestionMessageId': 10}),
+    );
+  });
+
+  test('응답의 conversationId와 완료 상태 및 다음 단계가 모두 일치해야 성공한다', () async {
+    final invalidResults = [
+      const ConversationEndResult(
+        conversationId: 99,
+        conversationStatus: 'COMPLETED',
+        completed: true,
+        completionReason: 'CHILD_REQUEST',
+        completedAt: '2026-07-26T12:00:00',
+        nextStage: 'REFLECTION',
+      ),
+      const ConversationEndResult(
+        conversationId: 20,
+        conversationStatus: 'IN_PROGRESS',
+        completed: true,
+        completionReason: 'CHILD_REQUEST',
+        completedAt: '2026-07-26T12:00:00',
+        nextStage: 'REFLECTION',
+      ),
+      const ConversationEndResult(
+        conversationId: 20,
+        conversationStatus: 'COMPLETED',
+        completed: false,
+        completionReason: 'CHILD_REQUEST',
+        completedAt: '2026-07-26T12:00:00',
+        nextStage: 'REFLECTION',
+      ),
+      const ConversationEndResult(
+        conversationId: 20,
+        conversationStatus: 'COMPLETED',
+        completed: true,
+        completionReason: 'CHILD_REQUEST',
+        completedAt: '2026-07-26T12:00:00',
+        nextStage: 'REPORTING',
+      ),
+    ];
+
+    for (final result in invalidResults) {
+      final controller = ConversationEndController(
+        _RecordingEndRepository(result: Future.value(result)),
+        conversationId: 20,
+        idempotencyKeyProvider: () => 'end-key-1',
+      );
+
+      expect(await controller.submit(lastQuestionMessageId: 10), isFalse);
+      expect(controller.status, ConversationEndStatus.failure);
+    }
   });
 
   test('종료 요청 중 연속 호출은 중복 저장하지 않는다', () async {
@@ -42,7 +124,7 @@ void main() {
     final controller = ConversationEndController(
       repository,
       conversationId: 20,
-      idempotencyKeyProvider: () => 'end-key',
+      idempotencyKeyProvider: () => 'end-key-1',
     );
 
     final first = controller.submit(lastQuestionMessageId: 10);
@@ -50,19 +132,20 @@ void main() {
 
     expect(second, isFalse);
     expect(repository.callCount, 1);
-    completer.complete(const ConversationEndResult(completed: true));
+    completer.complete(_completedResult);
     expect(await first, isTrue);
   });
 }
 
 final class _RecordingEndRepository implements ConversationEndRepository {
-  _RecordingEndRepository({this.failOnce = false, this.result});
+  _RecordingEndRepository({this.firstFailure, this.result});
 
-  final bool failOnce;
+  final Object? firstFailure;
   final Future<ConversationEndResult>? result;
   int callCount = 0;
   int? conversationId;
   ConversationEndRequest? request;
+  final List<ConversationEndRequest> requests = [];
   final List<String> idempotencyKeys = [];
 
   @override
@@ -74,8 +157,18 @@ final class _RecordingEndRepository implements ConversationEndRepository {
     callCount++;
     this.conversationId = conversationId;
     this.request = request;
+    requests.add(request);
     idempotencyKeys.add(idempotencyKey);
-    if (failOnce && callCount == 1) throw Exception('temporary failure');
-    return result ?? const ConversationEndResult(completed: true);
+    if (callCount == 1 && firstFailure != null) throw firstFailure!;
+    return result ?? _completedResult;
   }
 }
+
+const _completedResult = ConversationEndResult(
+  conversationId: 20,
+  conversationStatus: 'COMPLETED',
+  completed: true,
+  completionReason: 'CHILD_REQUEST',
+  completedAt: '2026-07-26T12:00:00',
+  nextStage: 'REFLECTION',
+);

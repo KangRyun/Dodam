@@ -88,6 +88,21 @@ final class MockDrawingRepository implements DrawingRepository {
   Future<DrawingSessionDto> getSession(int sessionId) async =>
       DrawingSessionDto.fromJson(_session);
   @override
+  Future<DrawingSessionCompletionStatusDto> getSessionCompletionStatus(
+    int sessionId,
+  ) async => DrawingSessionCompletionStatusDto.fromJson({
+    'drawingSessionId': sessionId,
+    'sessionStatus': 'COMPLETED',
+    'currentStage': 'COMPLETED',
+    'latestAnalysis': {
+      'drawingAnalysisId': 701,
+      'analysisScope': 'FINAL',
+      'analysisType': 'ACTIVITY_REPORT',
+      'analysisStatus': 'SUCCESS',
+    },
+    'reportId': 501,
+  });
+  @override
   Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async => null;
   @override
   Future<StrokeBatchResponseDto> sendStrokeBatch(
@@ -177,6 +192,21 @@ final class MockDrawingRepository implements DrawingRepository {
       throw const ApiTransportFailure(type: ApiTransportFailureType.connection);
     }
   }
+
+  @override
+  Future<DrawingActivityCompleteResponseDto> completeActivity(
+    int sessionId, {
+    required DrawingActivityCompleteRequestDto request,
+    required String idempotencyKey,
+  }) async => DrawingActivityCompleteResponseDto.fromJson({
+    'drawingSessionId': sessionId,
+    'sessionStatus': 'IN_PROGRESS',
+    'currentStage': 'REPORTING',
+    'analysisId': 701,
+    'analysisStatus': 'PENDING',
+    'reportId': 501,
+    'reportStatus': 'GENERATING',
+  });
 
   @override
   Future<DrawingUploadResponseDto> uploadDrawing(

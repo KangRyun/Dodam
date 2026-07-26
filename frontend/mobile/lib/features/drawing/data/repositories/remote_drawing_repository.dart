@@ -102,6 +102,18 @@ final class RemoteDrawingRepository implements DrawingRepository {
   }
 
   @override
+  Future<DrawingSessionCompletionStatusDto> getSessionCompletionStatus(
+    int sessionId,
+  ) async {
+    final response = await _apiClient.get<Map<String, dynamic>>(
+      'drawing-sessions/$sessionId',
+    );
+    return DrawingSessionCompletionStatusDto.fromJson(
+      envelopeObject(response.data),
+    );
+  }
+
+  @override
   Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async {
     try {
       final response = await _apiClient.get<Map<String, dynamic>>(
@@ -204,6 +216,27 @@ final class RemoteDrawingRepository implements DrawingRepository {
     await _apiClient.put<void>(
       'drawing-sessions/$sessionId/reflection',
       data: request.toJson(),
+    );
+  }
+
+  @override
+  Future<DrawingActivityCompleteResponseDto> completeActivity(
+    int sessionId, {
+    required DrawingActivityCompleteRequestDto request,
+    required String idempotencyKey,
+  }) async {
+    final response = await _apiClient.post<Map<String, dynamic>>(
+      'drawing-sessions/$sessionId/complete',
+      data: request.toJson(),
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+    );
+    if (response.statusCode != 202) {
+      throw StateError(
+        'Unexpected Drawing Activity Complete status: ${response.statusCode}',
+      );
+    }
+    return DrawingActivityCompleteResponseDto.fromJson(
+      envelopeObject(response.data),
     );
   }
 

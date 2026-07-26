@@ -184,6 +184,57 @@ final class DrawingSessionDto {
   final List<DrawingAssetDto> assets;
 }
 
+final class DrawingSessionCompletionStatusDto {
+  const DrawingSessionCompletionStatusDto({
+    required this.drawingSessionId,
+    required this.sessionStatus,
+    required this.currentStage,
+    required this.latestAnalysis,
+    required this.reportId,
+    this.conversationId,
+  });
+
+  factory DrawingSessionCompletionStatusDto.fromJson(
+    Map<String, dynamic> json,
+  ) => DrawingSessionCompletionStatusDto(
+    drawingSessionId: json['drawingSessionId'] as int,
+    sessionStatus: json['sessionStatus'] as String,
+    currentStage: json['currentStage'] as String,
+    latestAnalysis: json['latestAnalysis'] == null
+        ? null
+        : DrawingSessionLatestAnalysisDto.fromJson(
+            _map(json['latestAnalysis']),
+          ),
+    reportId: json['reportId'] as int?,
+    conversationId: json['conversationId'] as int?,
+  );
+
+  final int drawingSessionId;
+  final String sessionStatus, currentStage;
+  final DrawingSessionLatestAnalysisDto? latestAnalysis;
+  final int? reportId, conversationId;
+}
+
+final class DrawingSessionLatestAnalysisDto {
+  const DrawingSessionLatestAnalysisDto({
+    required this.drawingAnalysisId,
+    required this.analysisScope,
+    required this.analysisType,
+    required this.analysisStatus,
+  });
+
+  factory DrawingSessionLatestAnalysisDto.fromJson(Map<String, dynamic> json) =>
+      DrawingSessionLatestAnalysisDto(
+        drawingAnalysisId: json['drawingAnalysisId'] as int,
+        analysisScope: json['analysisScope'] as String,
+        analysisType: json['analysisType'] as String,
+        analysisStatus: json['analysisStatus'] as String,
+      );
+
+  final int drawingAnalysisId;
+  final String analysisScope, analysisType, analysisStatus;
+}
+
 final class ActiveDrawingSessionDto {
   const ActiveDrawingSessionDto({
     required this.drawingSessionId,
@@ -553,6 +604,49 @@ final class SaveDrawingReflectionRequestDto {
     'expressedEmotionText': expressedEmotionText,
     'skipped': skipped,
   };
+}
+
+final class DrawingActivityCompleteRequestDto {
+  const DrawingActivityCompleteRequestDto({
+    required this.conversationSkipped,
+    this.requestReport = true,
+  });
+
+  final bool conversationSkipped, requestReport;
+
+  Map<String, dynamic> toJson() => {
+    'conversationSkipped': conversationSkipped,
+    'requestReport': requestReport,
+  };
+}
+
+final class DrawingActivityCompleteResponseDto {
+  const DrawingActivityCompleteResponseDto({
+    required this.drawingSessionId,
+    required this.sessionStatus,
+    required this.currentStage,
+    required this.analysisId,
+    required this.analysisStatus,
+    required this.reportId,
+    required this.reportStatus,
+  });
+
+  factory DrawingActivityCompleteResponseDto.fromJson(
+    Map<String, dynamic> json,
+  ) => DrawingActivityCompleteResponseDto(
+    drawingSessionId: json['drawingSessionId'] as int,
+    sessionStatus: json['sessionStatus'] as String,
+    currentStage: json['currentStage'] as String,
+    analysisId: json['analysisId'] as int,
+    analysisStatus: json['analysisStatus'] as String,
+    reportId: json['reportId'] as int?,
+    reportStatus: json['reportStatus'] as String?,
+  );
+
+  final int drawingSessionId, analysisId;
+  final int? reportId;
+  final String sessionStatus, currentStage, analysisStatus;
+  final String? reportStatus;
 }
 
 final class DrawingUploadResponseDto {

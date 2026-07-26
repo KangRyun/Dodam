@@ -19,6 +19,13 @@ final class MockConversationEndRepository implements ConversationEndRepository {
   }) async {
     await Future<void>.delayed(delay);
     if (shouldFail) throw Exception('Mock conversation end failed');
-    return const ConversationEndResult(completed: true);
+    return ConversationEndResult(
+      conversationId: conversationId,
+      conversationStatus: 'COMPLETED',
+      completed: true,
+      completionReason: request.reason.apiValue,
+      completedAt: '2026-07-26T12:00:00Z',
+      nextStage: 'REFLECTION',
+    );
   }
 }

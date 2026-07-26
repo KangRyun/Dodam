@@ -15,6 +15,9 @@ abstract interface class DrawingRepository {
     CreateDrawingSessionRequestDto request,
   );
   Future<DrawingSessionDto> getSession(int sessionId);
+  Future<DrawingSessionCompletionStatusDto> getSessionCompletionStatus(
+    int sessionId,
+  );
   Future<ActiveDrawingSessionDto?> getActiveSession(int childId);
   Future<StrokeBatchResponseDto> sendStrokeBatch(
     int sessionId,
@@ -38,6 +41,11 @@ abstract interface class DrawingRepository {
     int sessionId,
     SaveDrawingReflectionRequestDto request,
   );
+  Future<DrawingActivityCompleteResponseDto> completeActivity(
+    int sessionId, {
+    required DrawingActivityCompleteRequestDto request,
+    required String idempotencyKey,
+  });
   Future<DrawingUploadResponseDto> uploadDrawing(
     int sessionId,
     BinaryUploadDto image, {

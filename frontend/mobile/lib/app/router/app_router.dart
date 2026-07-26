@@ -30,6 +30,7 @@ abstract final class AppRouter {
     ReportRepository? reportRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
     ConversationRepository? conversationRepository,
+    ConversationEndRepository? conversationEndRepository,
     VoiceAnswerRepository? voiceAnswerRepository,
     SttResultRepository? sttResultRepository,
     ConversationAnswerRepository? conversationAnswerRepository,
@@ -104,6 +105,7 @@ abstract final class AppRouter {
               (settings.arguments! as DrawingRouteArguments)
                   .completionSnapshotProvider,
           conversationRepository: conversationRepository,
+          conversationEndRepository: conversationEndRepository,
           voiceAnswerRepository: voiceAnswerRepository,
           sttResultRepository: sttResultRepository,
           conversationAnswerRepository: conversationAnswerRepository,
@@ -119,6 +121,39 @@ abstract final class AppRouter {
               : null,
           drawingRepository: settings.arguments is EmotionSelectRouteArguments
               ? (settings.arguments! as EmotionSelectRouteArguments).repository
+              : null,
+          conversationId: settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .conversationId
+              : null,
+          conversationAlreadyEnded:
+              settings.arguments is EmotionSelectRouteArguments &&
+              (settings.arguments! as EmotionSelectRouteArguments)
+                  .conversationAlreadyEnded,
+          conversationEndRepository:
+              settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .conversationEndRepository
+              : null,
+          conversationEndIdempotencyKey:
+              settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .conversationEndIdempotencyKey
+              : null,
+          conversationEndRequest:
+              settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .conversationEndRequest
+              : null,
+          lastQuestionMessageId:
+              settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .lastQuestionMessageId
+              : null,
+          idempotencyKeyProvider:
+              settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .idempotencyKeyProvider
               : null,
         ),
       ['child', final childId, 'activity', 'complete']
