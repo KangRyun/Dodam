@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../tokens/app_colors.dart';
 import '../../tokens/app_spacing.dart';
+import '../../tokens/app_typography.dart';
 
 enum AppButtonVariant { primary, child, secondary, quiet, danger }
 
@@ -96,10 +97,7 @@ class AppButton extends StatelessWidget {
                         child: Text(
                           label,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w700,
-                          ),
+                          style: AppTypography.button,
                         ),
                       ),
                       if (trailing case final trailing?) ...[

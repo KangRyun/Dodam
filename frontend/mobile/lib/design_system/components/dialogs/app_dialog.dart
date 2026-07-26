@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../tokens/app_colors.dart';
 import '../../tokens/app_spacing.dart';
+import '../../tokens/app_typography.dart';
 import '../buttons/app_button.dart';
 
 Future<bool?> showAppConfirmDialog({
@@ -32,21 +33,13 @@ Future<bool?> showAppConfirmDialog({
           Text(
             title,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: AppColors.ink,
-              fontSize: 22,
-              fontWeight: FontWeight.w800,
-            ),
+            style: AppTypography.titleLg,
           ),
           const SizedBox(height: AppSpacing.xs),
           Text(
             message,
             textAlign: TextAlign.center,
-            style: const TextStyle(
-              color: AppColors.inkMuted,
-              fontSize: 16,
-              height: 1.45,
-            ),
+            style: AppTypography.body.copyWith(color: AppColors.inkMuted),
           ),
           const SizedBox(height: AppSpacing.lg),
           Row(

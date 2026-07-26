@@ -3,6 +3,7 @@ import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../tokens/app_colors.dart';
 import '../../tokens/app_spacing.dart';
+import '../../tokens/app_typography.dart';
 
 enum SocialLoginProvider { kakao, google, naver }
 
@@ -68,10 +69,7 @@ class SocialLoginButton extends StatelessWidget {
                         visual.label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                        ),
+                        style: AppTypography.button,
                       ),
                     ),
                   ],
