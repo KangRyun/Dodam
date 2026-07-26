@@ -2,6 +2,9 @@ package com.ssafy.b209.conversation.repository;
 
 import com.ssafy.b209.conversation.domain.SttVoiceAnswerMessage;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.util.List;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -60,4 +63,24 @@ public interface SttVoiceAnswerMessageRepository
           + "where message.id = :messageId and message.speechStatus = 'PROCESSING'")
   int completeFailure(
       @Param("messageId") Long messageId, @Param("needsConfirmation") boolean needsConfirmation);
+
+  /**
+   * 트리거 유실로 PENDING에 정체된 음성 답변 ID를 오래된 순서로 조회한다.
+   *
+   * <p>대화가 아직 CONVERSING인 행만 반환한다. 종료된 대화의 PENDING은 선점 단계에서 거부되므로 회수해도 상태가 바뀌지 않는다.
+   *
+   * @param threshold 이 시각 이전에 생성된 행만 정체로 판단하는 기준
+   * @param pageable 한 번에 회수할 최대 건수
+   * @return 회수 대상 메시지 ID 목록
+   */
+  @Query(
+      "select message.id from SttVoiceAnswerMessage message "
+          + "where message.speechStatus = 'PENDING' and message.senderType = 'CHILD' "
+          + "and message.messageType = 'VOICE_ANSWER' and message.audioStorageKey is not null "
+          + "and message.createdAt <= :threshold "
+          + "and exists (select session.id from ConversationSession session "
+          + "where session.id = message.conversationSessionId "
+          + "and session.conversationStatus = 'CONVERSING') "
+          + "order by message.createdAt asc, message.id asc")
+  List<Long> findStalePendingIds(@Param("threshold") LocalDateTime threshold, Pageable pageable);
 }

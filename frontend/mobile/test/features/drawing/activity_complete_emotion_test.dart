@@ -7,6 +7,7 @@ import 'package:dodam/core/config/api_environment.dart';
 import 'package:dodam/core/network/api_client.dart';
 import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
+import 'package:dodam/features/conversation/conversation.dart';
 import 'package:dodam/features/drawing/application/drawing_activity_completion_controller.dart';
 import 'package:dodam/features/drawing/application/drawing_event_journal.dart';
 import 'package:dodam/features/drawing/application/drawing_sync_coordinator.dart';
@@ -200,6 +201,29 @@ void main() {
 
     expect(find.text('내 마음 고르기'), findsOneWidget);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
+  });
+
+  testWidgets('생성된 대화를 종료하기 전에는 감정 선택 화면으로 이동하지 않는다', (tester) async {
+    final repository = _CompletionRepository();
+    await _pumpDrawing(
+      tester,
+      repository: repository,
+      conversationId: 99,
+      conversationRepository: const MockConversationRepository(
+        delay: Duration.zero,
+      ),
+    );
+    await _drawStroke(tester);
+
+    await tester.ensureVisible(find.byKey(const ValueKey('drawing-complete')));
+    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다 그렸어요'));
+    await tester.pumpAndSettle();
+
+    expect(repository.completeCalls, 0);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+    expect(find.text('대화를 먼저 마친 뒤 그림 활동을 완료해 주세요.'), findsOneWidget);
   });
 
   testWidgets('0ms 완료도 Backend 최소 duration인 1ms를 전송한다', (tester) async {
@@ -437,7 +461,12 @@ void main() {
 
   testWidgets('Reflection 성공 시 아동 활동 완료 안내 화면으로 이동한다', (tester) async {
     final repository = _CompletionRepository();
-    await _pumpEmotion(tester, repository: repository, sessionId: 42);
+    await _pumpEmotion(
+      tester,
+      repository: repository,
+      sessionId: 42,
+      conversationSkipped: false,
+    );
     await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
     await tester.tap(find.byKey(const ValueKey('emotion-편안함')));
     await tester.enterText(
@@ -455,6 +484,9 @@ void main() {
     );
     expect(repository.lastReflection?.expressedEmotionText, isNull);
     expect(repository.lastReflection?.skipped, isFalse);
+    expect(repository.activityCompletionCalls, 1);
+    expect(repository.lastActivityRequest?.conversationSkipped, isFalse);
+    expect(repository.lastActivityRequest?.requestReport, isTrue);
     expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
     expect(find.text('이제 보호자에게 기기를 건네주세요.'), findsOneWidget);
     expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
@@ -471,6 +503,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
     expect(find.text('보호자 화면으로 이동할까요?'), findsNothing);
+  });
+
+  testWidgets('REPORTING 상태는 COMPLETED가 될 때까지 조회한 뒤 완료를 안내한다', (tester) async {
+    final repository = _CompletionRepository(
+      sessionStatuses: ['IN_PROGRESS', 'COMPLETED'],
+    );
+
+    await _pumpComplete(
+      tester,
+      repository: repository,
+      sessionId: 42,
+      pollInterval: Duration.zero,
+    );
+
+    expect(repository.sessionStatusCalls, 2);
+    expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('activity-completion-progress')),
+      findsNothing,
+    );
   });
 
   testWidgets('보호자 확인 후 스택을 정리해 Guardian Home으로 이동한다', (tester) async {
@@ -671,6 +723,8 @@ Future<void> _pumpDrawing(
   required DrawingRepository repository,
   int? sessionId = 42,
   DrawingSyncCoordinator? syncCoordinator,
+  int? conversationId,
+  ConversationRepository? conversationRepository,
 }) async {
   tester.view.physicalSize = const Size(1200, 800);
   tester.view.devicePixelRatio = 1;
@@ -687,6 +741,8 @@ Future<void> _pumpDrawing(
         sessionId: sessionId,
         drawingRepository: repository,
         syncCoordinator: syncCoordinator,
+        conversationId: conversationId,
+        conversationRepository: conversationRepository,
         completionSnapshotProvider: () async => _png,
       ),
     ),
@@ -705,6 +761,7 @@ Future<void> _pumpEmotion(
   int? sessionId,
   DrawingActivityCompletionController? activityCompletionController,
   NavigatorObserver? navigatorObserver,
+  bool conversationSkipped = true,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -722,7 +779,10 @@ Future<void> _pumpEmotion(
         childId: '3',
         sessionId: sessionId,
         drawingRepository: repository,
+        conversationId: conversationSkipped ? null : 20,
+        conversationAlreadyEnded: !conversationSkipped,
         activityCompletionController: activityCompletionController,
+        conversationSkipped: conversationSkipped,
       ),
     ),
   );
@@ -733,6 +793,9 @@ Future<void> _pumpComplete(
   WidgetTester tester, {
   String childId = '3',
   Size size = const Size(1200, 800),
+  DrawingRepository? repository,
+  int? sessionId,
+  Duration pollInterval = const Duration(seconds: 2),
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -743,7 +806,12 @@ Future<void> _pumpComplete(
       routes: {
         AppRoutes.guardianHome: (_) => const Scaffold(body: Text('보호자 홈 테스트')),
       },
-      home: ActivityCompleteScreen(childId: childId),
+      home: ActivityCompleteScreen(
+        childId: childId,
+        sessionId: sessionId,
+        drawingRepository: repository,
+        pollInterval: pollInterval,
+      ),
     ),
   );
   await tester.pumpAndSettle();
@@ -816,7 +884,8 @@ final class _CompletionRepository implements DrawingRepository {
     this.completionResponse = _completeResponse,
     this.reflectionError,
     this.reflectionCompleter,
-  });
+    List<String> sessionStatuses = const ['COMPLETED'],
+  }) : _sessionStatuses = List.of(sessionStatuses);
 
   final Completer<DrawingStageCompleteResponseDto>? completer;
   final DrawingStageCompleteResponseDto completionResponse;
@@ -830,6 +899,10 @@ final class _CompletionRepository implements DrawingRepository {
   Object? reflectionError;
   final Completer<void>? reflectionCompleter;
   SaveDrawingReflectionRequestDto? lastReflection;
+  int activityCompletionCalls = 0;
+  CompleteActivityRequestDto? lastActivityRequest;
+  final List<String> _sessionStatuses;
+  int sessionStatusCalls = 0;
 
   @override
   Future<DrawingStageCompleteResponseDto> completeDrawingStage(
@@ -863,6 +936,8 @@ final class _CompletionRepository implements DrawingRepository {
     required String idempotencyKey,
   }) async {
     activityCompleteCalls += 1;
+    activityCompletionCalls += 1;
+    lastActivityRequest = request;
     return DrawingActivityCompleteResponseDto(
       drawingSessionId: sessionId,
       sessionStatus: 'IN_PROGRESS',
@@ -918,8 +993,29 @@ final class _CompletionRepository implements DrawingRepository {
   @override
   Future<void> deleteDraft(int sessionId) => throw UnimplementedError();
   @override
-  Future<DrawingSessionDto> getSession(int sessionId) =>
-      throw UnimplementedError();
+  Future<DrawingSessionDto> getSession(int sessionId) async {
+    sessionStatusCalls += 1;
+    final status = _sessionStatuses.length > 1
+        ? _sessionStatuses.removeAt(0)
+        : _sessionStatuses.single;
+    return DrawingSessionDto.fromJson({
+      'drawingSessionId': sessionId,
+      'childId': 3,
+      'drawingType': {'id': 1, 'code': 'HTP', 'name': '집-나무-사람'},
+      'inputMethod': 'TOUCH',
+      'title': null,
+      'sessionStatus': status,
+      'currentStage': status == 'COMPLETED' ? 'COMPLETED' : 'REPORTING',
+      'selectedEmotions': const <String>[],
+      'expressedEmotionText': null,
+      'startedAt': '2026-07-26T10:00:00Z',
+      'completedAt': status == 'COMPLETED' ? '2026-07-26T10:10:00Z' : null,
+      'conversation': null,
+      'latestAnalysis': null,
+      'assets': const <Map<String, dynamic>>[],
+    });
+  }
+
   @override
   Future<DrawingTypePage> getDrawingTypes({
     required int childId,

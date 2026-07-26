@@ -26,6 +26,7 @@ import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.HexFormat;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -38,8 +39,11 @@ import org.springframework.web.multipart.MultipartFile;
 /**
  * CONV-05 음성 답변의 인증 이후 권한·동의·파일 검증·PENDING 메시지 생성을 처리한다.
  *
- * <p>이 서비스는 STT Client를 호출하거나 STT 결과를 갱신하지 않는다. 생성한 message ID와 내부 storage key는 289번 처리기가 사용할 연결
- * 지점이다.
+ * <p>이 서비스는 STT Client를 호출하거나 STT 결과를 갱신하지 않는다. 저장이 커밋된 뒤 {@link VoiceAnswerStoredEvent}를 발행해 289번
+ * 처리기로 넘긴다.
+ *
+ * <p>응답 {@code messageType}은 {@link ConversationMessageTypeMapper}로 공개 Enum 값으로 변환한다. 조회·폴링 경로와 같은
+ * 어휘를 쓰기 위한 것이며 DB CHECK 값은 바꾸지 않는다.
  */
 @Service
 public class VoiceAnswerService {
@@ -50,6 +54,7 @@ public class VoiceAnswerService {
   private final AudioStorage audioStorage;
   private final ObjectMapper objectMapper;
   private final Clock clock;
+  private final ApplicationEventPublisher eventPublisher;
 
   /**
    * 음성 답변 Use Case 의존성을 생성한다.
@@ -61,6 +66,7 @@ public class VoiceAnswerService {
    * @param audioStorage 음성 전용 임시 검증·최종 저장 경계
    * @param objectMapper metadata fingerprint 직렬화 도구
    * @param clock 서버 생성 시각 기준
+   * @param eventPublisher 커밋 후 STT 처리를 요청하는 이벤트 발행 경계
    */
   public VoiceAnswerService(
       ConversationSessionRepository conversationSessionRepository,
@@ -69,7 +75,8 @@ public class VoiceAnswerService {
       VoiceAnswerMessageRepository messageRepository,
       AudioStorage audioStorage,
       ObjectMapper objectMapper,
-      Clock clock) {
+      Clock clock,
+      ApplicationEventPublisher eventPublisher) {
     this.conversationSessionRepository = conversationSessionRepository;
     this.drawingSessionRepository = drawingSessionRepository;
     this.authorizationRepository = authorizationRepository;
@@ -77,6 +84,7 @@ public class VoiceAnswerService {
     this.audioStorage = audioStorage;
     this.objectMapper = objectMapper;
     this.clock = clock;
+    this.eventPublisher = eventPublisher;
   }
 
   /**
@@ -132,7 +140,7 @@ public class VoiceAnswerService {
   /**
    * 세션 비관 잠금 안에서 질문을 다시 검증하고 최종 파일·PENDING 답변 메시지를 함께 저장한다.
    *
-   * <p>질문 수는 변경하지 않는다. DB 트랜잭션이 rollback되면 최종 파일을 보상 삭제한다.
+   * <p>질문 수는 변경하지 않는다. DB 트랜잭션이 rollback되면 최종 파일을 보상 삭제하고, 발행한 STT 요청 이벤트도 커밋되지 않아 소비되지 않는다.
    *
    * @param guardianUserId JWT Authentication의 보호자 ID
    * @param conversationId URL 대화 세션 ID
@@ -177,13 +185,14 @@ public class VoiceAnswerService {
               saved.getParentMessageId(),
               saved.getMessageSequence(),
               saved.getSenderType(),
-              saved.getMessageType(),
+              ConversationMessageTypeMapper.toPublicMessageType(saved.getMessageType()),
               saved.getRawText(),
               saved.getSttText(),
               saved.getSpeechStatus(),
               saved.getSttConfidence(),
               saved.isNeedsGuardianConfirmation(),
               saved.getCreatedAt());
+      eventPublisher.publishEvent(new VoiceAnswerStoredEvent(saved.getId()));
       return ResponseEntity.status(HttpStatus.CREATED)
           .body(ApiResponse.of(CommonSuccessCode.CREATED, response));
     } catch (DataIntegrityViolationException exception) {

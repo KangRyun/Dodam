@@ -303,7 +303,8 @@ class CommunityPostIntegrationTest {
     mockMvc
         .perform(get("/api/v1/posts"))
         .andExpect(status().isOk())
-        .andExpect(jsonPath("$.data.content[0].isAnonymous").value(true))
+        .andExpect(jsonPath("$.data.content[0].anonymous").value(true))
+        .andExpect(jsonPath("$.data.content[0].isAnonymous").doesNotExist())
         .andExpect(jsonPath("$.data.content[0].author").doesNotExist())
         .andExpect(jsonPath("$.data.content[0].previewContent").value("가".repeat(200) + "…"));
   }
@@ -403,6 +404,19 @@ class CommunityPostIntegrationTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.editableByMe").value(false))
         .andExpect(jsonPath("$.data.author.userId").value(OTHER_GUARDIAN_USER_ID));
+  }
+
+  @Test
+  void keepsAnonymousPostEditableForItsAuthor() throws Exception {
+    insertPost(1, GUARDIAN_USER_ID, "GUARDIAN_STORY", "내 익명 글", "본문", true, "ACTIVE", true, null);
+
+    mockMvc
+        .perform(get("/api/v1/posts/{postId}", 1))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.anonymous").value(true))
+        .andExpect(jsonPath("$.data.author").doesNotExist())
+        // 수정 API는 익명 글도 작성자에게 허용하므로 응답 플래그도 참이어야 한다.
+        .andExpect(jsonPath("$.data.editableByMe").value(true));
   }
 
   // ---------------------------------------------------------------- 168 게시글 수정·삭제

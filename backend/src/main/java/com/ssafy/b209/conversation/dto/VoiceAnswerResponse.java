@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
  * @param parentMessageId 연결한 질문 메시지 ID
  * @param sequence 세션 내 메시지 순번
  * @param senderType 항상 {@code CHILD}
- * @param messageType 항상 {@code VOICE_ANSWER}
+ * @param messageType 공개 Enum 값이며 항상 {@code ANSWER_VOICE}. DB 값 {@code VOICE_ANSWER}를 그대로 노출하지 않는다
  * @param rawText STT 전에는 항상 {@code null}
  * @param sttText STT 전에는 항상 {@code null}
  * @param speechStatus 항상 {@code PENDING}

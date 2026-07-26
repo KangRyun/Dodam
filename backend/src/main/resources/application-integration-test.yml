@@ -25,3 +25,10 @@ app:
       legacy-header-enabled: true
   cors:
     allowed-origins: []
+  # 업로드 직후 배경 Thread가 상태를 전이시키면 PENDING 경계를 검증하는 테스트가 흔들린다.
+  # 트리거·회수를 기본 차단하고, 배선 자체는 ConversationVoiceSttTriggerIntegrationTest가 켜서 검증한다.
+  stt:
+    trigger:
+      enabled: false
+    recovery:
+      enabled: false

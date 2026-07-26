@@ -7,6 +7,7 @@ import 'package:flutter/rendering.dart';
 
 import '../../../../app/router/app_routes.dart';
 import '../../../../design_system/design_system.dart';
+import '../../../drawing/application/activity_completion_controller.dart';
 import '../../../drawing/application/drawing_object_detection_controller.dart';
 import '../../../drawing/application/drawing_activity_completion_controller.dart';
 import '../../../drawing/application/drawing_sync_coordinator.dart';
@@ -570,6 +571,17 @@ class _DrawingScreenState extends State<DrawingScreen> {
       showAppMessage(context, message: '아직 활동을 완료할 수 없어요. 잠시 후 다시 해 주세요.');
       return;
     }
+    final conversationEndController = _conversationEndController;
+    if (conversationEndController != null &&
+        !conversationEndController.completed) {
+      showAppMessage(
+        context,
+        message: '대화를 먼저 마친 뒤 그림 활동을 완료해 주세요.',
+        type: AppMessageType.error,
+      );
+      return;
+    }
+    final conversationSkipped = conversationEndController == null;
     setState(() => _isCompleting = true);
     try {
       // TODO(API): Define the authoritative pending-batch/Draft flush order
@@ -620,6 +632,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
           conversationEndRequest: _conversationEndController?.requestSnapshot,
           lastQuestionMessageId: _lastQuestionMessageId,
           idempotencyKeyProvider: widget.idempotencyKeyProvider,
+          conversationSkipped: conversationSkipped,
         ),
       );
     } on Object {
@@ -1318,6 +1331,7 @@ final class EmotionSelectRouteArguments {
     required this.conversationEndRequest,
     required this.lastQuestionMessageId,
     required this.idempotencyKeyProvider,
+    required this.conversationSkipped,
   });
 
   final int? sessionId;
@@ -1328,6 +1342,7 @@ final class EmotionSelectRouteArguments {
   final String? conversationEndIdempotencyKey;
   final ConversationEndRequest? conversationEndRequest;
   final String Function()? idempotencyKeyProvider;
+  final bool conversationSkipped;
 }
 
 class EmotionSelectScreen extends StatefulWidget {
@@ -1343,6 +1358,7 @@ class EmotionSelectScreen extends StatefulWidget {
     this.lastQuestionMessageId,
     this.idempotencyKeyProvider,
     this.activityCompletionController,
+    this.conversationSkipped = true,
     super.key,
   });
 
@@ -1356,6 +1372,7 @@ class EmotionSelectScreen extends StatefulWidget {
   final ConversationEndRequest? conversationEndRequest;
   final String Function()? idempotencyKeyProvider;
   final DrawingActivityCompletionController? activityCompletionController;
+  final bool conversationSkipped;
 
   @override
   State<EmotionSelectScreen> createState() => _EmotionSelectScreenState();
@@ -1462,9 +1479,13 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
             StateError('Drawing activity completion failed.');
       }
       if (!mounted) return;
-      Navigator.of(
-        context,
-      ).pushReplacementNamed(AppRoutes.activityComplete(widget.childId));
+      Navigator.of(context).pushReplacementNamed(
+        AppRoutes.activityComplete(widget.childId),
+        arguments: ActivityCompleteRouteArguments(
+          sessionId: sessionId,
+          repository: repository,
+        ),
+      );
     } on Object {
       if (mounted) {
         final reflectionFailed =
@@ -1657,10 +1678,74 @@ class _EmotionGuideCard extends StatelessWidget {
   );
 }
 
-class ActivityCompleteScreen extends StatelessWidget {
-  const ActivityCompleteScreen({required this.childId, super.key});
+final class ActivityCompleteRouteArguments {
+  const ActivityCompleteRouteArguments({
+    required this.sessionId,
+    required this.repository,
+  });
+
+  final int sessionId;
+  final DrawingRepository repository;
+}
+
+class ActivityCompleteScreen extends StatefulWidget {
+  const ActivityCompleteScreen({
+    required this.childId,
+    this.sessionId,
+    this.drawingRepository,
+    this.pollInterval = const Duration(seconds: 2),
+    this.maxPollAttempts = 30,
+    super.key,
+  });
 
   final String childId;
+  final int? sessionId;
+  final DrawingRepository? drawingRepository;
+  final Duration pollInterval;
+  final int maxPollAttempts;
+
+  @override
+  State<ActivityCompleteScreen> createState() => _ActivityCompleteScreenState();
+}
+
+class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
+  ActivityCompletionController? _completionController;
+
+  bool get _legacyCompleted =>
+      widget.sessionId == null || widget.drawingRepository == null;
+
+  @override
+  void initState() {
+    super.initState();
+    final sessionId = widget.sessionId;
+    final repository = widget.drawingRepository;
+    if (sessionId == null || repository == null) return;
+    _completionController = ActivityCompletionController.forStatus(
+      repository,
+      sessionId: sessionId,
+      pollInterval: widget.pollInterval,
+      maxPollAttempts: widget.maxPollAttempts,
+    )..addListener(_handleCompletionStatusChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_completionController?.pollUntilTerminal());
+    });
+  }
+
+  @override
+  void dispose() {
+    _completionController
+      ?..removeListener(_handleCompletionStatusChanged)
+      ..dispose();
+    super.dispose();
+  }
+
+  void _handleCompletionStatusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _retryStatusCheck() {
+    unawaited(_completionController?.pollUntilTerminal());
+  }
 
   @override
   Widget build(BuildContext context) => PopScope(
@@ -1685,49 +1770,7 @@ class ActivityCompleteScreen extends StatelessWidget {
                       color: AppColors.surface,
                       borderRadius: BorderRadius.circular(AppRadius.lg),
                     ),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const CircleAvatar(
-                          radius: 56,
-                          backgroundColor: AppColors.tangerineSoft,
-                          child: Icon(
-                            Icons.celebration_rounded,
-                            color: AppColors.tangerine,
-                            size: 60,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.lg),
-                        const Text(
-                          '그림 활동을 모두 마쳤어요!',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: AppColors.ink,
-                            fontSize: 32,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.sm),
-                        const Text(
-                          '이제 보호자에게 기기를 건네주세요.',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: AppColors.inkMuted,
-                            fontSize: 20,
-                            height: 1.45,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        const SizedBox(height: AppSpacing.xl),
-                        AppButton(
-                          key: const ValueKey('guardian-handoff'),
-                          label: '보호자에게 건넸어요',
-                          variant: AppButtonVariant.child,
-                          leading: const Icon(Icons.family_restroom_rounded),
-                          onPressed: () => _confirmGuardianTransition(context),
-                        ),
-                      ],
-                    ),
+                    child: _buildStatusContent(context),
                   ),
                 ),
               ),
@@ -1737,6 +1780,85 @@ class ActivityCompleteScreen extends StatelessWidget {
       ),
     ),
   );
+
+  Widget _buildStatusContent(BuildContext context) {
+    final status = _completionController?.status;
+    if (_legacyCompleted || status == ActivityCompletionStatus.completed) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const CircleAvatar(
+            radius: 56,
+            backgroundColor: AppColors.tangerineSoft,
+            child: Icon(
+              Icons.celebration_rounded,
+              color: AppColors.tangerine,
+              size: 60,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.lg),
+          const Text(
+            '그림 활동을 모두 마쳤어요!',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.ink,
+              fontSize: 32,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          const Text(
+            '이제 보호자에게 기기를 건네주세요.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.inkMuted,
+              fontSize: 20,
+              height: 1.45,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xl),
+          AppButton(
+            key: const ValueKey('guardian-handoff'),
+            label: '보호자에게 건넸어요',
+            variant: AppButtonVariant.child,
+            leading: const Icon(Icons.family_restroom_rounded),
+            onPressed: () => _confirmGuardianTransition(context),
+          ),
+        ],
+      );
+    }
+
+    if (status == ActivityCompletionStatus.pollingFailure) {
+      return _CompletionStatusMessage(
+        icon: Icons.wifi_off_rounded,
+        title: '완료 상태를 확인하지 못했어요',
+        description: '활동은 접수되어 있어요. 연결을 확인하고 다시 시도해 주세요.',
+        button: AppButton(
+          key: const ValueKey('activity-completion-retry'),
+          label: '다시 확인',
+          variant: AppButtonVariant.child,
+          onPressed: _retryStatusCheck,
+        ),
+      );
+    }
+
+    if (status == ActivityCompletionStatus.terminalFailure) {
+      return const _CompletionStatusMessage(
+        icon: Icons.error_outline_rounded,
+        title: '활동을 마무리하지 못했어요',
+        description: '보호자에게 알려 다시 확인해 주세요.',
+      );
+    }
+
+    return const _CompletionStatusMessage(
+      key: ValueKey('activity-completion-progress'),
+      icon: Icons.hourglass_top_rounded,
+      title: '활동을 마무리하고 있어요',
+      description: '분석과 리포트를 준비하고 있어요. 잠시만 기다려 주세요.',
+      showProgress: true,
+    );
+  }
 
   Future<void> _confirmGuardianTransition(BuildContext context) async {
     final confirmed = await showAppConfirmDialog(
@@ -1756,4 +1878,57 @@ class ActivityCompleteScreen extends StatelessWidget {
       context,
     ).pushNamedAndRemoveUntil(AppRoutes.guardianHome, (route) => false);
   }
+}
+
+class _CompletionStatusMessage extends StatelessWidget {
+  const _CompletionStatusMessage({
+    required this.icon,
+    required this.title,
+    required this.description,
+    this.button,
+    this.showProgress = false,
+    super.key,
+  });
+
+  final IconData icon;
+  final String title;
+  final String description;
+  final Widget? button;
+  final bool showProgress;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Icon(icon, color: AppColors.tangerine, size: 64),
+      const SizedBox(height: AppSpacing.lg),
+      Text(
+        title,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: AppColors.ink,
+          fontSize: 28,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+      const SizedBox(height: AppSpacing.sm),
+      Text(
+        description,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: AppColors.inkMuted,
+          fontSize: 18,
+          height: 1.45,
+        ),
+      ),
+      if (showProgress) ...[
+        const SizedBox(height: AppSpacing.lg),
+        const CircularProgressIndicator(),
+      ],
+      if (button case final action?) ...[
+        const SizedBox(height: AppSpacing.xl),
+        action,
+      ],
+    ],
+  );
 }

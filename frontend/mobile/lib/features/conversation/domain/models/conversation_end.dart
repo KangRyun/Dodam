@@ -1,9 +1,17 @@
-enum ConversationEndReason {
-  childRequest('CHILD_REQUEST');
+enum ConversationCompletionReason {
+  questionLimitReached('QUESTION_LIMIT_REACHED'),
+  childRequest('CHILD_REQUEST'),
+  guardianRequest('GUARDIAN_REQUEST'),
+  noMoreQuestion('NO_MORE_QUESTION');
 
-  const ConversationEndReason(this.apiValue);
+  const ConversationCompletionReason(this.wireName);
 
-  final String apiValue;
+  final String wireName;
+  String get apiValue => wireName;
+}
+
+abstract final class ConversationEndReason {
+  static const childRequest = ConversationCompletionReason.childRequest;
 }
 
 // 대화 종료 요청
@@ -13,11 +21,11 @@ final class ConversationEndRequest {
     required this.lastQuestionMessageId,
   });
 
-  final ConversationEndReason reason;
+  final ConversationCompletionReason reason;
   final int? lastQuestionMessageId;
 
   Map<String, dynamic> toJson() => {
-    'reason': reason.apiValue,
+    'reason': reason.wireName,
     'lastQuestionMessageId': ?lastQuestionMessageId,
   };
 }

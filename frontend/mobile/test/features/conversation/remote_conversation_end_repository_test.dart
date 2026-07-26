@@ -17,7 +17,7 @@ void main() {
     final result = await repository.endConversation(
       conversationId: 20,
       request: const ConversationEndRequest(
-        reason: ConversationEndReason.childRequest,
+        reason: ConversationCompletionReason.childRequest,
         lastQuestionMessageId: 31,
       ),
       idempotencyKey: 'conversation-end-key',
@@ -58,7 +58,7 @@ final class _ConversationEndInterceptor extends Interceptor {
             'conversationStatus': 'COMPLETED',
             'completed': true,
             'completionReason': 'CHILD_REQUEST',
-            'completedAt': '2026-07-26T12:00:00',
+            'completedAt': '2026-07-26T01:00:00Z',
             'nextStage': 'REFLECTION',
           },
         },

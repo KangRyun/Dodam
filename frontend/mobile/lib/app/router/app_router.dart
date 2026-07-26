@@ -155,10 +155,25 @@ abstract final class AppRouter {
               ? (settings.arguments! as EmotionSelectRouteArguments)
                     .idempotencyKeyProvider
               : null,
+          conversationSkipped: settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .conversationSkipped
+              : true,
         ),
       ['child', final childId, 'activity', 'complete']
           when _hasChildContext(childController, childId) =>
-        ActivityCompleteScreen(childId: childId),
+        ActivityCompleteScreen(
+          childId: childId,
+          sessionId: settings.arguments is ActivityCompleteRouteArguments
+              ? (settings.arguments! as ActivityCompleteRouteArguments)
+                    .sessionId
+              : null,
+          drawingRepository:
+              settings.arguments is ActivityCompleteRouteArguments
+              ? (settings.arguments! as ActivityCompleteRouteArguments)
+                    .repository
+              : null,
+        ),
       ['child', _, ...] => const ChildContextGuardScreen(),
       ['guardian', 'home'] => const ChildContextGuardScreen(),
       ['guardian', 'children', 'select'] => const ChildContextGuardScreen(),

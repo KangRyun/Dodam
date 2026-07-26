@@ -352,6 +352,35 @@ void main() {
       );
     });
   }
+
+  test('활동 완료는 리포트를 요청하고 멱등 키를 전달한다', () async {
+    final interceptor = _ActivityCompletionInterceptor();
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        interceptors: [interceptor],
+      ),
+    );
+
+    final result = await repository.completeActivity(
+      91,
+      request: const CompleteActivityRequestDto(
+        conversationSkipped: false,
+        requestReport: true,
+      ),
+      idempotencyKey: 'activity-key-1234',
+    );
+
+    final request = interceptor.requests.single;
+    expect(request.method, 'POST');
+    expect(request.uri.path, '/api/v1/drawing-sessions/91/complete');
+    expect(request.headers['Idempotency-Key'], 'activity-key-1234');
+    expect(request.data, {'conversationSkipped': false, 'requestReport': true});
+    expect(result.sessionStatus, 'IN_PROGRESS');
+    expect(result.currentStage, 'REPORTING');
+    expect(result.analysisStatus, 'PENDING');
+    expect(result.reportStatus, 'GENERATING');
+  });
 }
 
 const _strokeRequest = StrokeBatchRequestDto(
@@ -592,6 +621,35 @@ final class _DraftPreviewInterceptor extends Interceptor {
         requestOptions: options,
         statusCode: 200,
         data: const [137, 80, 78, 71],
+      ),
+    );
+  }
+}
+
+final class _ActivityCompletionInterceptor extends Interceptor {
+  final List<RequestOptions> requests = [];
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    requests.add(options);
+    handler.resolve(
+      Response<Map<String, dynamic>>(
+        requestOptions: options,
+        statusCode: 202,
+        data: const {
+          'success': true,
+          'code': 'COMMON_200',
+          'message': '요청에 성공했습니다.',
+          'data': {
+            'drawingSessionId': 91,
+            'sessionStatus': 'IN_PROGRESS',
+            'currentStage': 'REPORTING',
+            'analysisId': 801,
+            'analysisStatus': 'PENDING',
+            'reportId': 901,
+            'reportStatus': 'GENERATING',
+          },
+        },
       ),
     );
   }

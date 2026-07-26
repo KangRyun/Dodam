@@ -649,6 +649,9 @@ final class DrawingActivityCompleteResponseDto {
   final String? reportStatus;
 }
 
+typedef CompleteActivityRequestDto = DrawingActivityCompleteRequestDto;
+typedef DrawingCompletionResponseDto = DrawingActivityCompleteResponseDto;
+
 final class DrawingUploadResponseDto {
   const DrawingUploadResponseDto({
     required this.drawingSessionId,

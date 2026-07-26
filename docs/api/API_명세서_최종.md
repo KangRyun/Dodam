@@ -1168,7 +1168,7 @@ Header `Idempotency-Key` 필수.
   "parentMessageId": 803,
   "sequence": 4,
   "senderType": "CHILD",
-  "messageType": "VOICE_ANSWER",
+  "messageType": "ANSWER_VOICE",
   "rawText": null,
   "sttText": "친구랑 같이 있어서 좋아",
   "speechStatus": "SUCCESS",
@@ -1179,6 +1179,8 @@ Header `Idempotency-Key` 필수.
 ```
 
 음성 원본 보관 정책은 동의 설정에 따른다. 원본을 삭제해도 STT 텍스트와 삭제 시각을 감사 가능한 형태로 남긴다.
+
+> ✅ **정정 (2026-07-26)**: 위 응답 예시의 `messageType`을 DB 값 `VOICE_ANSWER` → 공개 값 `ANSWER_VOICE`로 수정했다. `docs/api/conversation-option-answer-contract.md` §3 확정(2026-07-23, QA 반영) "공개 API는 공개 Enum 값을 노출한다"와 §4 공개↔DB 매핑표를 따른 것이며, 같은 문서가 이 예시를 명세 측 불일치로 지목하고 통일을 권고했다. DB `conversation_messages.message_type` CHECK 값은 `VOICE_ANSWER`로 그대로다(§Enum 사전). 조회·폴링 응답은 이미 공개 값을 노출했고 업로드 201 응답만 DB 값을 내보내던 불일치를 코드에서도 함께 정합화했다(S15P11B209-158 후속).
 
 ### 12.6 선택형 답변
 

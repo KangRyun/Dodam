@@ -396,6 +396,7 @@ final class _TrackingDrawingRepository implements DrawingRepository {
   int? getTypesChildId;
   int? completeSessionId;
   int? reflectionSessionId;
+  bool activityCompletionAccepted = false;
   CreateDrawingSessionRequestDto? createRequest;
 
   DrawingSessionDto session() => DrawingSessionDto.fromJson({
@@ -404,12 +405,12 @@ final class _TrackingDrawingRepository implements DrawingRepository {
     'drawingType': {'drawingTypeId': 77, 'code': 'FREE', 'name': '자유화'},
     'inputMethod': 'CANVAS',
     'title': null,
-    'sessionStatus': 'DRAWING',
-    'currentStage': 'DRAWING',
+    'sessionStatus': activityCompletionAccepted ? 'COMPLETED' : 'DRAWING',
+    'currentStage': activityCompletionAccepted ? 'COMPLETED' : 'DRAWING',
     'selectedEmotions': null,
     'expressedEmotionText': null,
     'startedAt': '2026-07-22T00:00:00Z',
-    'completedAt': null,
+    'completedAt': activityCompletionAccepted ? '2026-07-22T00:10:00Z' : null,
     'conversation': null,
     'latestAnalysis': null,
     'assets': <Object>[],
@@ -525,15 +526,18 @@ final class _TrackingDrawingRepository implements DrawingRepository {
     int sessionId, {
     required DrawingActivityCompleteRequestDto request,
     required String idempotencyKey,
-  }) async => DrawingActivityCompleteResponseDto(
-    drawingSessionId: sessionId,
-    sessionStatus: 'IN_PROGRESS',
-    currentStage: 'REPORTING',
-    analysisId: 902,
-    analysisStatus: 'PENDING',
-    reportId: 903,
-    reportStatus: 'GENERATING',
-  );
+  }) async {
+    activityCompletionAccepted = true;
+    return DrawingActivityCompleteResponseDto(
+      drawingSessionId: sessionId,
+      sessionStatus: 'IN_PROGRESS',
+      currentStage: 'REPORTING',
+      analysisId: 902,
+      analysisStatus: 'PENDING',
+      reportId: 903,
+      reportStatus: 'GENERATING',
+    );
+  }
 
   @override
   Future<DraftSaveResponseDto> saveDraft(
