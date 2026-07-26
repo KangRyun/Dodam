@@ -95,6 +95,11 @@ app:
     audio:
       root: ${LOCAL_AUDIO_STORAGE_ROOT:./storage/audio}
       max-size: ${LOCAL_AUDIO_MAX_SIZE:20971520}
+  push:
+    device-token:
+      # Base64(32바이트) AES-256 키. 운영은 시크릿으로 주입한다.
+      # 비어 있으면 기기 Token 등록만 503으로 거부하고 애플리케이션은 정상 부팅한다.
+      encryption-key: ${PUSH_DEVICE_TOKEN_ENCRYPTION_KEY:}
   stt:
     trigger:
       enabled: ${STT_TRIGGER_ENABLED:true}
