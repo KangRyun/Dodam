@@ -11,8 +11,10 @@ import com.ssafy.b209.child.service.ChildQueryService;
 import com.ssafy.b209.child.service.ChildRegistrationService;
 import com.ssafy.b209.child.service.ChildUpdateService;
 import com.ssafy.b209.conversation.service.TemporaryGuardianResolver;
+import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.ApiResponse;
+import com.ssafy.b209.global.response.CommonErrorCode;
 import com.ssafy.b209.global.response.CommonSuccessCode;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -34,6 +36,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -258,22 +261,31 @@ public class ChildController {
   /**
    * 요청 보호자가 유일하게 연결된 아동 프로필을 삭제 상태로 전환한다.
    *
+   * <p>삭제 범위는 서버 정책으로 고정하므로 Query {@code cascade}를 받지 않는다. 값이 오면 클라이언트가 삭제 범위를 지정할 수 있다고 오해하지 않도록
+   * 무시하지 않고 거부한다.
+   *
+   * <p>확인 값 검증은 {@link ChildDeletionService}가 단독으로 수행한다. 본문 누락·공백·오값이 모두 같은 오류로 응답해야 하므로 Bean
+   * Validation으로 나누지 않는다.
+   *
    * @param childId 삭제할 아동 식별자
-   * @param request 명시적 삭제 확인 값
+   * @param request 명시적 삭제 확인 값이며 본문이 없으면 {@code null}
+   * @param cascade 지원하지 않는 Query이며 값이 오면 400으로 거부한다
    * @param authorization Test Profile의 호환성 검증에만 사용하는 임시 Header
    * @param guardianUserId Test Profile의 호환성 검증에만 사용하는 임시 Header
    * @return 본문이 없는 HTTP 204 응답
    */
   @Operation(
       summary = "아동 프로필 삭제",
-      description = "confirmation이 DELETE이고 요청자가 유일한 연결 보호자인 경우 프로필을 삭제 상태로 전환하고 연관 파일 삭제를 예약합니다.")
+      description =
+          "confirmation이 DELETE이고 요청자가 유일한 연결 보호자인 경우 프로필을 삭제 상태로 전환하고 연관 파일 삭제를 예약합니다. "
+              + "삭제 범위는 서버 정책으로 고정하므로 Query cascade는 지원하지 않습니다.")
   @ApiResponses({
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "204",
         description = "아동 프로필 삭제 접수 성공"),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "400",
-        description = "아동 식별자 또는 삭제 확인 값 오류",
+        description = "아동 식별자 오류, 삭제 확인 값 오류(CHILD_400_002), 지원하지 않는 cascade Query(COMMON_400_001)",
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "404",
@@ -287,11 +299,15 @@ public class ChildController {
   @DeleteMapping("/{childId}")
   public ResponseEntity<Void> deleteChild(
       @Parameter(description = "삭제할 아동 식별자", required = true) @PathVariable @Positive Long childId,
-      @Valid @RequestBody DeleteChildRequest request,
+      @RequestBody(required = false) DeleteChildRequest request,
+      @Parameter(hidden = true) @RequestParam(value = "cascade", required = false) String cascade,
       @Parameter(hidden = true) @RequestHeader(value = "Authorization", required = false)
           String authorization,
       @Parameter(hidden = true) @RequestHeader(value = "X-Guardian-User-Id", required = false)
           String guardianUserId) {
+    if (cascade != null) {
+      throw new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE);
+    }
     Long resolvedGuardianUserId = guardianResolver.resolve(authorization, guardianUserId);
     childDeletionService.delete(resolvedGuardianUserId, childId, request);
     return ResponseEntity.noContent().build();

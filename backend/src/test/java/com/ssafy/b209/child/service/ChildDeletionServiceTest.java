@@ -78,6 +78,21 @@ class ChildDeletionServiceTest {
         ChildErrorCode.CHILD_NOT_FOUND);
   }
 
+  @Test
+  void treatsMissingBodyAndBlankConfirmationAsTheSameConfirmationError() {
+    assertError(
+        () -> childDeletionService.delete(GUARDIAN_ID, CHILD_ID, null),
+        ChildErrorCode.CHILD_DELETION_CONFIRMATION_MISMATCH);
+    assertError(
+        () -> childDeletionService.delete(GUARDIAN_ID, CHILD_ID, new DeleteChildRequest("")),
+        ChildErrorCode.CHILD_DELETION_CONFIRMATION_MISMATCH);
+    assertError(
+        () -> childDeletionService.delete(GUARDIAN_ID, CHILD_ID, new DeleteChildRequest(null)),
+        ChildErrorCode.CHILD_DELETION_CONFIRMATION_MISMATCH);
+
+    verify(childDeletionRepository, never()).lockAccessibleChild(GUARDIAN_ID, CHILD_ID);
+  }
+
   private void assertError(Runnable invocation, ChildErrorCode expectedCode) {
     assertThatThrownBy(invocation::run)
         .isInstanceOfSatisfying(
