@@ -3,6 +3,8 @@ package com.ssafy.b209.child.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -298,6 +300,11 @@ class ChildControllerTest {
 
   @Test
   void rejectsChildDeletionWithoutConfirmation() throws Exception {
+    given(guardianResolver.resolve("Bearer access-token", "10")).willReturn(10L);
+    willThrow(new BusinessException(ChildErrorCode.CHILD_DELETION_CONFIRMATION_MISMATCH))
+        .given(childDeletionService)
+        .delete(10L, 3L, new DeleteChildRequest(""));
+
     mockMvc
         .perform(
             delete("/api/v1/children/3")
@@ -306,7 +313,39 @@ class ChildControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"confirmation\":\"\"}"))
         .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("CHILD_400_002"));
+  }
+
+  @Test
+  void treatsMissingDeletionBodyAsConfirmationError() throws Exception {
+    given(guardianResolver.resolve("Bearer access-token", "10")).willReturn(10L);
+    willThrow(new BusinessException(ChildErrorCode.CHILD_DELETION_CONFIRMATION_MISMATCH))
+        .given(childDeletionService)
+        .delete(10L, 3L, null);
+
+    mockMvc
+        .perform(
+            delete("/api/v1/children/3")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("CHILD_400_002"));
+  }
+
+  @Test
+  void rejectsUnsupportedCascadeQueryBeforeDeleting() throws Exception {
+    mockMvc
+        .perform(
+            delete("/api/v1/children/3")
+                .queryParam("cascade", "true")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DELETE\"}"))
+        .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+
+    verify(childDeletionService, never()).delete(any(), any(), any());
   }
 
   private String registrationRequestJson() {
