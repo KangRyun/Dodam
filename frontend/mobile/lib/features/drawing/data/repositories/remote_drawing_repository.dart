@@ -98,7 +98,7 @@ final class RemoteDrawingRepository implements DrawingRepository {
     final response = await _apiClient.get<Map<String, dynamic>>(
       'drawing-sessions/$sessionId',
     );
-    return DrawingSessionDto.fromJson(response.data!);
+    return DrawingSessionDto.fromJson(envelopeObject(response.data));
   }
 
   @override

@@ -35,6 +35,42 @@ void main() {
       {'conversationSkipped': false, 'requestReport': true},
     ]);
   });
+
+  test('REPORTING 세션은 COMPLETED가 될 때까지 조회한다', () async {
+    final interceptor = _CompletionStatusInterceptor();
+    final controller = ActivityCompletionController.forStatus(
+      RemoteDrawingRepository(
+        ApiClient(
+          environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+          interceptors: [interceptor],
+        ),
+      ),
+      sessionId: 91,
+      pollInterval: Duration.zero,
+      maxPollAttempts: 3,
+    );
+
+    expect(await controller.pollUntilTerminal(), isTrue);
+    expect(controller.status, ActivityCompletionStatus.completed);
+    expect(interceptor.requestCount, 2);
+  });
+
+  test('완료 상태 조회가 실패해도 활동 자체를 실패로 단정하지 않는다', () async {
+    final controller = ActivityCompletionController.forStatus(
+      RemoteDrawingRepository(
+        ApiClient(
+          environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+          interceptors: [_FailingStatusInterceptor()],
+        ),
+      ),
+      sessionId: 91,
+      pollInterval: Duration.zero,
+      maxPollAttempts: 1,
+    );
+
+    expect(await controller.pollUntilTerminal(), isFalse);
+    expect(controller.status, ActivityCompletionStatus.pollingFailure);
+  });
 }
 
 final class _FailOnceCompletionInterceptor extends Interceptor {
@@ -74,3 +110,59 @@ final class _FailOnceCompletionInterceptor extends Interceptor {
     );
   }
 }
+
+final class _CompletionStatusInterceptor extends Interceptor {
+  int requestCount = 0;
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    requestCount += 1;
+    handler.resolve(
+      Response<Map<String, dynamic>>(
+        requestOptions: options,
+        statusCode: 200,
+        data: {
+          'success': true,
+          'code': 'COMMON_200',
+          'message': '요청에 성공했습니다.',
+          'data': _session(
+            status: requestCount == 1 ? 'IN_PROGRESS' : 'COMPLETED',
+            stage: requestCount == 1 ? 'REPORTING' : 'COMPLETED',
+          ),
+        },
+      ),
+    );
+  }
+}
+
+final class _FailingStatusInterceptor extends Interceptor {
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    handler.reject(
+      DioException(
+        requestOptions: options,
+        type: DioExceptionType.connectionError,
+      ),
+    );
+  }
+}
+
+Map<String, dynamic> _session({
+  required String status,
+  required String stage,
+}) => {
+  'drawingSessionId': 91,
+  'childId': 3,
+  'drawingType': {'id': 1, 'code': 'HTP', 'name': '집-나무-사람'},
+  'inputMethod': 'TOUCH',
+  'title': null,
+  'sessionStatus': status,
+  'currentStage': stage,
+  'selectedEmotions': const <String>[],
+  'expressedEmotionText': null,
+  'startedAt': '2026-07-26T10:00:00Z',
+  'completedAt': status == 'COMPLETED' ? '2026-07-26T10:10:00Z' : null,
+  'conversation': null,
+  'latestAnalysis': null,
+  'assets': const <Map<String, dynamic>>[],
+};
