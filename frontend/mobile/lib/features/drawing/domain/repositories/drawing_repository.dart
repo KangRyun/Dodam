@@ -38,6 +38,11 @@ abstract interface class DrawingRepository {
     int sessionId,
     SaveDrawingReflectionRequestDto request,
   );
+  Future<DrawingCompletionResponseDto> completeActivity(
+    int sessionId, {
+    required CompleteActivityRequestDto request,
+    required String idempotencyKey,
+  });
   Future<DrawingUploadResponseDto> uploadDrawing(
     int sessionId,
     BinaryUploadDto image, {

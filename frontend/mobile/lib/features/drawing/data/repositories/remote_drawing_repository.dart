@@ -98,7 +98,7 @@ final class RemoteDrawingRepository implements DrawingRepository {
     final response = await _apiClient.get<Map<String, dynamic>>(
       'drawing-sessions/$sessionId',
     );
-    return DrawingSessionDto.fromJson(response.data!);
+    return DrawingSessionDto.fromJson(envelopeObject(response.data));
   }
 
   @override
@@ -205,6 +205,20 @@ final class RemoteDrawingRepository implements DrawingRepository {
       'drawing-sessions/$sessionId/reflection',
       data: request.toJson(),
     );
+  }
+
+  @override
+  Future<DrawingCompletionResponseDto> completeActivity(
+    int sessionId, {
+    required CompleteActivityRequestDto request,
+    required String idempotencyKey,
+  }) async {
+    final response = await _apiClient.post<Map<String, dynamic>>(
+      'drawing-sessions/$sessionId/complete',
+      data: request.toJson(),
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+    );
+    return DrawingCompletionResponseDto.fromJson(envelopeObject(response.data));
   }
 
   @override
