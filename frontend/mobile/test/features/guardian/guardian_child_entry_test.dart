@@ -528,13 +528,13 @@ final class _TrackingDrawingRepository implements DrawingRepository {
     required String idempotencyKey,
   }) async {
     activityCompletionAccepted = true;
-    return const DrawingCompletionResponseDto(
-      drawingSessionId: 731,
+    return DrawingCompletionResponseDto(
+      drawingSessionId: sessionId,
       sessionStatus: 'IN_PROGRESS',
       currentStage: 'REPORTING',
-      analysisId: 801,
+      analysisId: 902,
       analysisStatus: 'PENDING',
-      reportId: 901,
+      reportId: 903,
       reportStatus: 'GENERATING',
     );
   }

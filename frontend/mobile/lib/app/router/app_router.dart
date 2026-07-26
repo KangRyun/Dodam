@@ -122,11 +122,39 @@ abstract final class AppRouter {
           drawingRepository: settings.arguments is EmotionSelectRouteArguments
               ? (settings.arguments! as EmotionSelectRouteArguments).repository
               : null,
-          conversationSkipped:
+          conversationId: settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .conversationId
+              : null,
+          conversationAlreadyEnded:
+              settings.arguments is EmotionSelectRouteArguments &&
+              (settings.arguments! as EmotionSelectRouteArguments)
+                  .conversationAlreadyEnded,
+          conversationEndRepository:
               settings.arguments is EmotionSelectRouteArguments
               ? (settings.arguments! as EmotionSelectRouteArguments)
-                    .conversationSkipped
-              : true,
+                    .conversationEndRepository
+              : null,
+          conversationEndIdempotencyKey:
+              settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .conversationEndIdempotencyKey
+              : null,
+          conversationEndRequest:
+              settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .conversationEndRequest
+              : null,
+          lastQuestionMessageId:
+              settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .lastQuestionMessageId
+              : null,
+          idempotencyKeyProvider:
+              settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .idempotencyKeyProvider
+              : null,
         ),
       ['child', final childId, 'activity', 'complete']
           when _hasChildContext(childController, childId) =>

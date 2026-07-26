@@ -1,11 +1,11 @@
-import 'package:dio/dio.dart';
 import 'package:dodam/core/config/api_environment.dart';
 import 'package:dodam/core/network/api_client.dart';
 import 'package:dodam/features/conversation/conversation.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('대화 종료는 필수 사유와 멱등 키를 실제 API에 전달한다', () async {
+  test('reason을 포함해 Conversation End를 요청하고 data 응답을 파싱한다', () async {
     final interceptor = _ConversationEndInterceptor();
     final repository = RemoteConversationEndRepository(
       ApiClient(
@@ -15,23 +15,27 @@ void main() {
     );
 
     final result = await repository.endConversation(
-      conversationId: 31,
+      conversationId: 20,
       request: const ConversationEndRequest(
         reason: ConversationCompletionReason.childRequest,
-        lastQuestionMessageId: 77,
+        lastQuestionMessageId: 31,
       ),
-      idempotencyKey: 'end-key-1234',
+      idempotencyKey: 'conversation-end-key',
     );
 
     final request = interceptor.requests.single;
     expect(request.method, 'POST');
-    expect(request.uri.path, '/api/v1/conversations/31/end');
-    expect(request.headers['Idempotency-Key'], 'end-key-1234');
+    expect(request.uri.path, '/api/v1/conversations/20/end');
+    expect(request.headers['Idempotency-Key'], 'conversation-end-key');
     expect(request.data, {
       'reason': 'CHILD_REQUEST',
-      'lastQuestionMessageId': 77,
+      'lastQuestionMessageId': 31,
     });
+    expect(result.conversationId, 20);
+    expect(result.conversationStatus, 'COMPLETED');
     expect(result.completed, isTrue);
+    expect(result.completionReason, 'CHILD_REQUEST');
+    expect(result.nextStage, 'REFLECTION');
   });
 }
 
@@ -50,7 +54,7 @@ final class _ConversationEndInterceptor extends Interceptor {
           'code': 'COMMON_200',
           'message': '요청에 성공했습니다.',
           'data': {
-            'conversationId': 31,
+            'conversationId': 20,
             'conversationStatus': 'COMPLETED',
             'completed': true,
             'completionReason': 'CHILD_REQUEST',

@@ -9,6 +9,7 @@ import '../../../../app/router/app_routes.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../drawing/application/activity_completion_controller.dart';
 import '../../../drawing/application/drawing_object_detection_controller.dart';
+import '../../../drawing/application/drawing_activity_completion_controller.dart';
 import '../../../drawing/application/drawing_sync_coordinator.dart';
 import '../../../drawing/application/drawing_draft_restore_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
@@ -107,6 +108,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
   VoiceAnswerUploadController? _voiceAnswerUploadController;
   SttResultController? _sttResultController;
   bool _conversationSetupStarted = false;
+  int? _activeConversationId;
+  int? _lastQuestionMessageId;
 
   @override
   void initState() {
@@ -261,6 +264,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final conversationRepository = widget.conversationRepository;
     if (conversationRepository == null || _questionController != null) return;
     _conversationSetupStarted = true;
+    _activeConversationId = conversationId;
     _questionController = AiQuestionController(
       conversationRepository,
       conversationId: conversationId,
@@ -313,6 +317,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
         question == null) {
       return;
     }
+    _lastQuestionMessageId = question.messageId;
     // 하위 상태 UI의 빌드 중 알림과 겹치지 않도록 다음 프레임에 반영
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -450,8 +455,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     if (confirmed != true || !mounted) return;
     await _voiceRecordingController?.cancel();
     final ended = await controller.submit(
-      lastQuestionMessageId:
-          _questionDisplayController.visibleQuestion?.messageId,
+      lastQuestionMessageId: _lastQuestionMessageId,
     );
     if (ended) _questionDisplayController.dismiss();
   }
@@ -577,7 +581,6 @@ class _DrawingScreenState extends State<DrawingScreen> {
       );
       return;
     }
-    final conversationSkipped = conversationEndController == null;
     setState(() => _isCompleting = true);
     try {
       // TODO(API): Define the authoritative pending-batch/Draft flush order
@@ -619,7 +622,15 @@ class _DrawingScreenState extends State<DrawingScreen> {
         arguments: EmotionSelectRouteArguments(
           sessionId: sessionId,
           repository: repository,
-          conversationSkipped: conversationSkipped,
+          conversationId: _activeConversationId,
+          conversationAlreadyEnded:
+              _conversationEndController?.completed == true,
+          conversationEndRepository: widget.conversationEndRepository,
+          conversationEndIdempotencyKey:
+              _conversationEndController?.requestIdempotencyKey,
+          conversationEndRequest: _conversationEndController?.requestSnapshot,
+          lastQuestionMessageId: _lastQuestionMessageId,
+          idempotencyKeyProvider: widget.idempotencyKeyProvider,
         ),
       );
     } on Object {
@@ -1311,12 +1322,23 @@ final class EmotionSelectRouteArguments {
   const EmotionSelectRouteArguments({
     required this.sessionId,
     required this.repository,
-    required this.conversationSkipped,
+    required this.conversationId,
+    required this.conversationAlreadyEnded,
+    required this.conversationEndRepository,
+    required this.conversationEndIdempotencyKey,
+    required this.conversationEndRequest,
+    required this.lastQuestionMessageId,
+    required this.idempotencyKeyProvider,
   });
 
   final int? sessionId;
   final DrawingRepository? repository;
-  final bool conversationSkipped;
+  final int? conversationId, lastQuestionMessageId;
+  final bool conversationAlreadyEnded;
+  final ConversationEndRepository? conversationEndRepository;
+  final String? conversationEndIdempotencyKey;
+  final ConversationEndRequest? conversationEndRequest;
+  final String Function()? idempotencyKeyProvider;
 }
 
 class EmotionSelectScreen extends StatefulWidget {
@@ -1324,14 +1346,27 @@ class EmotionSelectScreen extends StatefulWidget {
     required this.childId,
     this.sessionId,
     this.drawingRepository,
-    this.conversationSkipped = true,
+    this.conversationId,
+    this.conversationAlreadyEnded = false,
+    this.conversationEndRepository,
+    this.conversationEndIdempotencyKey,
+    this.conversationEndRequest,
+    this.lastQuestionMessageId,
+    this.idempotencyKeyProvider,
+    this.activityCompletionController,
     super.key,
   });
 
   final String childId;
   final int? sessionId;
   final DrawingRepository? drawingRepository;
-  final bool conversationSkipped;
+  final int? conversationId, lastQuestionMessageId;
+  final bool conversationAlreadyEnded;
+  final ConversationEndRepository? conversationEndRepository;
+  final String? conversationEndIdempotencyKey;
+  final ConversationEndRequest? conversationEndRequest;
+  final String Function()? idempotencyKeyProvider;
+  final DrawingActivityCompletionController? activityCompletionController;
 
   @override
   State<EmotionSelectScreen> createState() => _EmotionSelectScreenState();
@@ -1349,13 +1384,45 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
 
   final Set<DrawingEmotionType> _selectedEmotions = {};
   final TextEditingController _titleController = TextEditingController();
+  DrawingActivityCompletionController? _activityCompletionController;
+  late final bool _ownsActivityCompletionController;
   bool _isSubmitting = false;
-  ActivityCompletionController? _activityCompletionController;
+
+  bool get _reflectionInputLocked =>
+      _activityCompletionController?.reflectionInputLocked == true;
+
+  @override
+  void initState() {
+    super.initState();
+    _ownsActivityCompletionController =
+        widget.activityCompletionController == null;
+    _activityCompletionController = widget.activityCompletionController;
+    final sessionId = widget.sessionId;
+    final repository = widget.drawingRepository;
+    if (_activityCompletionController == null &&
+        sessionId != null &&
+        repository != null) {
+      _activityCompletionController = DrawingActivityCompletionController(
+        drawingRepository: repository,
+        sessionId: sessionId,
+        conversationId: widget.conversationId,
+        conversationAlreadyEnded: widget.conversationAlreadyEnded,
+        conversationEndRepository: widget.conversationEndRepository,
+        idempotencyKeyProvider:
+            widget.idempotencyKeyProvider ?? _createIdempotencyKey,
+        previousConversationEndIdempotencyKey:
+            widget.conversationEndIdempotencyKey,
+        previousConversationEndRequest: widget.conversationEndRequest,
+      );
+    }
+  }
 
   @override
   void dispose() {
-    _activityCompletionController?.dispose();
     _titleController.dispose();
+    if (_ownsActivityCompletionController) {
+      _activityCompletionController?.dispose();
+    }
     super.dispose();
   }
 
@@ -1378,7 +1445,10 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
     if (_isSubmitting) return;
     final sessionId = widget.sessionId;
     final repository = widget.drawingRepository;
-    if (sessionId == null || repository == null) {
+    final completionController = _activityCompletionController;
+    if (sessionId == null ||
+        repository == null ||
+        completionController == null) {
       showAppMessage(context, message: '아직 마음을 저장할 수 없어요. 잠시 후 다시 해 주세요.');
       return;
     }
@@ -1386,9 +1456,8 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
     setState(() => _isSubmitting = true);
     final rawTitle = _titleController.text;
     try {
-      await repository.saveReflection(
-        sessionId,
-        SaveDrawingReflectionRequestDto(
+      final completed = await completionController.submit(
+        reflection: SaveDrawingReflectionRequestDto(
           title: rawTitle.isEmpty ? null : rawTitle,
           selectedEmotions: skipped
               ? const []
@@ -1397,15 +1466,12 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
           expressedEmotionText: null,
           skipped: skipped,
         ),
+        lastQuestionMessageId: widget.lastQuestionMessageId,
       );
-      _activityCompletionController ??= ActivityCompletionController(
-        repository,
-        sessionId: sessionId,
-        conversationSkipped: widget.conversationSkipped,
-        idempotencyKeyProvider: _createIdempotencyKey,
-      );
-      final accepted = await _activityCompletionController!.submit();
-      if (!accepted) throw StateError('Activity completion was not accepted');
+      if (!completed) {
+        throw completionController.error ??
+            StateError('Drawing activity completion failed.');
+      }
       if (!mounted) return;
       Navigator.of(context).pushReplacementNamed(
         AppRoutes.activityComplete(widget.childId),
@@ -1416,9 +1482,14 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
       );
     } on Object {
       if (mounted) {
+        final reflectionFailed =
+            completionController.failedStep ==
+            DrawingActivityCompletionStatus.savingReflection;
         showAppMessage(
           context,
-          message: '마음을 저장하지 못했어요. 고른 내용은 그대로 있으니 다시 해 주세요.',
+          message: reflectionFailed
+              ? '마음을 저장하지 못했어요. 고른 내용은 그대로 있으니 다시 해 주세요.'
+              : '활동을 완료하지 못했어요. 고른 내용은 그대로 있으니 다시 시도해 주세요.',
           type: AppMessageType.error,
         );
       }
@@ -1428,104 +1499,130 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: AppColors.childCanvas,
-    appBar: AppTopBar(
-      title: '내 마음 고르기',
-      onBack: () => Navigator.of(context).maybePop(),
-    ),
-    body: SafeArea(
-      top: false,
-      child: LayoutBuilder(
-        builder: (context, constraints) => SingleChildScrollView(
-          key: const ValueKey('emotion-screen-scroll'),
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 960),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  const _EmotionGuideCard(),
-                  const SizedBox(height: AppSpacing.lg),
-                  GridView.count(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    crossAxisCount: constraints.maxWidth >= 800 ? 3 : 2,
-                    mainAxisSpacing: AppSpacing.sm,
-                    crossAxisSpacing: AppSpacing.sm,
-                    childAspectRatio: constraints.maxWidth >= 800 ? 2.5 : 2,
-                    children: [
-                      for (final (emotion, label, icon) in _emotions)
-                        AppChoiceCard(
-                          key: ValueKey('emotion-$label'),
-                          label: label,
-                          isSelected: _selectedEmotions.contains(emotion),
-                          childFriendly: true,
-                          leading: Icon(icon, color: AppColors.tangerine),
-                          onTap: _isSubmitting
-                              ? null
-                              : () => _toggleEmotion(emotion),
-                        ),
-                    ],
-                  ),
-                  const SizedBox(height: AppSpacing.lg),
-                  AppTextField(
-                    key: const ValueKey('drawing-title'),
-                    controller: _titleController,
-                    label: '그림 제목 (선택)',
-                    hintText: '그림에 이름을 붙여볼까요?',
-                    textInputAction: TextInputAction.done,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  if (widget.sessionId == null ||
-                      widget.drawingRepository == null) ...[
-                    const Text(
-                      '아직 마음을 저장할 수 없어요. 잠시 후 다시 해 주세요.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: AppColors.inkMuted),
+  Widget build(BuildContext context) {
+    final reflectionInputLocked = _reflectionInputLocked;
+    final retrySkipped =
+        _activityCompletionController?.reflectionWasSkipped == true;
+    return Scaffold(
+      backgroundColor: AppColors.childCanvas,
+      appBar: AppTopBar(
+        title: '내 마음 고르기',
+        onBack: () => Navigator.of(context).maybePop(),
+      ),
+      body: SafeArea(
+        top: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) => SingleChildScrollView(
+            key: const ValueKey('emotion-screen-scroll'),
+            padding: const EdgeInsets.all(AppSpacing.lg),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 960),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const _EmotionGuideCard(),
+                    const SizedBox(height: AppSpacing.lg),
+                    GridView.count(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      crossAxisCount: constraints.maxWidth >= 800 ? 3 : 2,
+                      mainAxisSpacing: AppSpacing.sm,
+                      crossAxisSpacing: AppSpacing.sm,
+                      childAspectRatio: constraints.maxWidth >= 800 ? 2.5 : 2,
+                      children: [
+                        for (final (emotion, label, icon) in _emotions)
+                          AppChoiceCard(
+                            key: ValueKey('emotion-$label'),
+                            label: label,
+                            isSelected: _selectedEmotions.contains(emotion),
+                            childFriendly: true,
+                            leading: Icon(icon, color: AppColors.tangerine),
+                            onTap: _isSubmitting || reflectionInputLocked
+                                ? null
+                                : () => _toggleEmotion(emotion),
+                          ),
+                      ],
                     ),
-                    const SizedBox(height: AppSpacing.sm),
-                  ],
-                  Row(
-                    children: [
-                      Expanded(
-                        child: AppButton(
-                          key: const ValueKey('emotion-skip'),
-                          label: '건너뛰기',
-                          variant: AppButtonVariant.secondary,
-                          isLoading: _isSubmitting,
-                          onPressed: _isSubmitting
-                              ? null
-                              : () =>
-                                    unawaited(_submitReflection(skipped: true)),
-                        ),
+                    const SizedBox(height: AppSpacing.lg),
+                    AppTextField(
+                      key: const ValueKey('drawing-title'),
+                      controller: _titleController,
+                      label: '그림 제목 (선택)',
+                      hintText: '그림에 이름을 붙여볼까요?',
+                      textInputAction: TextInputAction.done,
+                      enabled: !reflectionInputLocked,
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    if (reflectionInputLocked) ...[
+                      const Text(
+                        '저장 결과를 확인할 때까지 같은 내용으로 다시 시도해 주세요.',
+                        key: ValueKey('reflection-input-locked-message'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.inkMuted),
                       ),
-                      const SizedBox(width: AppSpacing.sm),
-                      Expanded(
-                        child: AppButton(
-                          key: const ValueKey('emotion-submit'),
-                          label: '다 했어요!',
-                          variant: AppButtonVariant.child,
-                          isLoading: _isSubmitting,
-                          onPressed: _isSubmitting || _selectedEmotions.isEmpty
-                              ? null
-                              : () => unawaited(
-                                  _submitReflection(skipped: false),
-                                ),
-                        ),
-                      ),
+                      const SizedBox(height: AppSpacing.sm),
                     ],
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                ],
+                    if (widget.sessionId == null ||
+                        widget.drawingRepository == null) ...[
+                      const Text(
+                        '아직 마음을 저장할 수 없어요. 잠시 후 다시 해 주세요.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: AppColors.inkMuted),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                    ],
+                    Row(
+                      children: [
+                        Expanded(
+                          child: AppButton(
+                            key: const ValueKey('emotion-skip'),
+                            label: reflectionInputLocked && retrySkipped
+                                ? '다시 시도'
+                                : '건너뛰기',
+                            variant: AppButtonVariant.secondary,
+                            isLoading: _isSubmitting,
+                            onPressed:
+                                _isSubmitting ||
+                                    (reflectionInputLocked && !retrySkipped)
+                                ? null
+                                : () => unawaited(
+                                    _submitReflection(skipped: true),
+                                  ),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: AppButton(
+                            key: const ValueKey('emotion-submit'),
+                            label: reflectionInputLocked && !retrySkipped
+                                ? '다시 시도'
+                                : '다 했어요!',
+                            variant: AppButtonVariant.child,
+                            isLoading: _isSubmitting,
+                            onPressed:
+                                _isSubmitting ||
+                                    (reflectionInputLocked && retrySkipped) ||
+                                    (!reflectionInputLocked &&
+                                        _selectedEmotions.isEmpty)
+                                ? null
+                                : () => unawaited(
+                                    _submitReflection(skipped: false),
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
+                ),
               ),
             ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _EmotionGuideCard extends StatelessWidget {

@@ -150,6 +150,8 @@ final class DrawingSessionDto {
     required this.latestAnalysis,
     required this.assets,
     this.guideText,
+    this.conversationId,
+    this.reportId,
   });
   factory DrawingSessionDto.fromJson(Map<String, dynamic> json) =>
       DrawingSessionDto(
@@ -170,6 +172,8 @@ final class DrawingSessionDto {
         latestAnalysis: json['latestAnalysis'] == null
             ? null
             : _map(json['latestAnalysis']),
+        conversationId: json['conversationId'] as int?,
+        reportId: json['reportId'] as int?,
         assets: (json['assets'] as List? ?? const [])
             .map((item) => DrawingAssetDto.fromJson(_map(item)))
             .toList(growable: false),
@@ -179,55 +183,10 @@ final class DrawingSessionDto {
   final DrawingTypeSummaryDto drawingType;
   final String inputMethod, sessionStatus, currentStage, startedAt;
   final String? title, expressedEmotionText, completedAt, guideText;
+  final int? conversationId, reportId;
   final List<String>? selectedEmotions;
   final Map<String, dynamic>? conversation, latestAnalysis;
   final List<DrawingAssetDto> assets;
-}
-
-final class CompleteActivityRequestDto {
-  const CompleteActivityRequestDto({
-    required this.conversationSkipped,
-    this.requestReport = true,
-  });
-
-  final bool conversationSkipped;
-  final bool requestReport;
-
-  Map<String, dynamic> toJson() => {
-    'conversationSkipped': conversationSkipped,
-    'requestReport': requestReport,
-  };
-}
-
-final class DrawingCompletionResponseDto {
-  const DrawingCompletionResponseDto({
-    required this.drawingSessionId,
-    required this.sessionStatus,
-    required this.currentStage,
-    required this.analysisId,
-    required this.analysisStatus,
-    required this.reportId,
-    required this.reportStatus,
-  });
-
-  factory DrawingCompletionResponseDto.fromJson(Map<String, dynamic> json) =>
-      DrawingCompletionResponseDto(
-        drawingSessionId: json['drawingSessionId'] as int,
-        sessionStatus: json['sessionStatus'] as String,
-        currentStage: json['currentStage'] as String,
-        analysisId: json['analysisId'] as int,
-        analysisStatus: json['analysisStatus'] as String,
-        reportId: json['reportId'] as int?,
-        reportStatus: json['reportStatus'] as String?,
-      );
-
-  final int drawingSessionId;
-  final String sessionStatus;
-  final String currentStage;
-  final int analysisId;
-  final String analysisStatus;
-  final int? reportId;
-  final String? reportStatus;
 }
 
 final class ActiveDrawingSessionDto {
@@ -599,6 +558,48 @@ final class SaveDrawingReflectionRequestDto {
     'expressedEmotionText': expressedEmotionText,
     'skipped': skipped,
   };
+}
+
+final class CompleteActivityRequestDto {
+  const CompleteActivityRequestDto({
+    required this.conversationSkipped,
+    this.requestReport = true,
+  });
+
+  final bool conversationSkipped, requestReport;
+
+  Map<String, dynamic> toJson() => {
+    'conversationSkipped': conversationSkipped,
+    'requestReport': requestReport,
+  };
+}
+
+final class DrawingCompletionResponseDto {
+  const DrawingCompletionResponseDto({
+    required this.drawingSessionId,
+    required this.sessionStatus,
+    required this.currentStage,
+    required this.analysisId,
+    required this.analysisStatus,
+    required this.reportId,
+    required this.reportStatus,
+  });
+
+  factory DrawingCompletionResponseDto.fromJson(Map<String, dynamic> json) =>
+      DrawingCompletionResponseDto(
+        drawingSessionId: json['drawingSessionId'] as int,
+        sessionStatus: json['sessionStatus'] as String,
+        currentStage: json['currentStage'] as String,
+        analysisId: json['analysisId'] as int,
+        analysisStatus: json['analysisStatus'] as String,
+        reportId: json['reportId'] as int?,
+        reportStatus: json['reportStatus'] as String?,
+      );
+
+  final int drawingSessionId, analysisId;
+  final int? reportId;
+  final String sessionStatus, currentStage, analysisStatus;
+  final String? reportStatus;
 }
 
 final class DrawingUploadResponseDto {

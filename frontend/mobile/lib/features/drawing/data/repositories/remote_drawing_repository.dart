@@ -218,6 +218,11 @@ final class RemoteDrawingRepository implements DrawingRepository {
       data: request.toJson(),
       options: Options(headers: {'Idempotency-Key': idempotencyKey}),
     );
+    if (response.statusCode != 202) {
+      throw StateError(
+        'Unexpected Drawing Activity Complete status: ${response.statusCode}',
+      );
+    }
     return DrawingCompletionResponseDto.fromJson(envelopeObject(response.data));
   }
 

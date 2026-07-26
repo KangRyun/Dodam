@@ -19,27 +19,35 @@ final class ConversationEndController extends ChangeNotifier {
 
   ConversationEndStatus status = ConversationEndStatus.idle;
   String? _pendingIdempotencyKey;
+  ConversationEndRequest? _pendingRequest;
 
   bool get completed => status == ConversationEndStatus.success;
+  String? get requestIdempotencyKey => _pendingIdempotencyKey;
+  ConversationEndRequest? get requestSnapshot => _pendingRequest;
 
   Future<bool> submit({required int? lastQuestionMessageId}) async {
     if (status == ConversationEndStatus.submitting || completed) return false;
     status = ConversationEndStatus.submitting;
     _pendingIdempotencyKey ??= idempotencyKeyProvider();
+    _pendingRequest ??= ConversationEndRequest(
+      reason: ConversationEndReason.childRequest,
+      lastQuestionMessageId: lastQuestionMessageId,
+    );
     notifyListeners();
 
     try {
       final result = await _repository.endConversation(
         conversationId: conversationId,
-        request: ConversationEndRequest(
-          reason: ConversationCompletionReason.childRequest,
-          lastQuestionMessageId: lastQuestionMessageId,
-        ),
+        request: _pendingRequest!,
         idempotencyKey: _pendingIdempotencyKey!,
       );
-      if (!result.completed) throw StateError('Conversation was not completed');
+      if (result.conversationId != conversationId ||
+          !result.completed ||
+          result.conversationStatus != 'COMPLETED' ||
+          result.nextStage != 'REFLECTION') {
+        throw StateError('Unexpected conversation end result.');
+      }
       status = ConversationEndStatus.success;
-      _pendingIdempotencyKey = null;
       notifyListeners();
       return true;
     } catch (_) {

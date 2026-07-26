@@ -21,7 +21,6 @@ final class RemoteConversationEndRepository
       data: request.toJson(),
       options: Options(headers: {'Idempotency-Key': idempotencyKey}),
     );
-    final payload = envelopeObject(response.data);
-    return ConversationEndResult(completed: payload['completed'] == true);
+    return ConversationEndResult.fromJson(envelopeObject(response.data));
   }
 }

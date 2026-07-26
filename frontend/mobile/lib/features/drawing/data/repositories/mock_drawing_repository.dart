@@ -183,15 +183,15 @@ final class MockDrawingRepository implements DrawingRepository {
     int sessionId, {
     required CompleteActivityRequestDto request,
     required String idempotencyKey,
-  }) async => const DrawingCompletionResponseDto(
-    drawingSessionId: 42,
-    sessionStatus: 'IN_PROGRESS',
-    currentStage: 'REPORTING',
-    analysisId: 801,
-    analysisStatus: 'PENDING',
-    reportId: 901,
-    reportStatus: 'GENERATING',
-  );
+  }) async => DrawingCompletionResponseDto.fromJson({
+    'drawingSessionId': sessionId,
+    'sessionStatus': 'IN_PROGRESS',
+    'currentStage': 'REPORTING',
+    'analysisId': 701,
+    'analysisStatus': 'PENDING',
+    'reportId': 501,
+    'reportStatus': 'GENERATING',
+  });
 
   @override
   Future<DrawingUploadResponseDto> uploadDrawing(
