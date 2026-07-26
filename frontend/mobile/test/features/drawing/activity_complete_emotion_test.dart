@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dodam/app/router/app_routes.dart';
 import 'package:dodam/core/config/api_environment.dart';
@@ -745,6 +746,11 @@ final class _CompletionRepository implements DrawingRepository {
 
   @override
   Future<DraftRecoveryDto?> getDraft(int sessionId) async => null;
+  @override
+  Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async => null;
+  @override
+  Future<Uint8List> downloadDraftPreview(String previewUrl) =>
+      throw UnimplementedError();
   @override
   Future<StrokeBatchResponseDto> sendStrokeBatch(
     int sessionId,

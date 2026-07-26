@@ -86,11 +86,31 @@ void main() {
 
     repository.scenario = _Scenario.found;
     await controller.load();
-    controller.continueDrawing();
+    await controller.continueDrawing();
     controller.markImageFailed();
     expect(controller.status, DrawingDraftRestoreStatus.imageFailed);
 
-    controller.retryImage();
+    await controller.retryImage();
+    expect(controller.status, DrawingDraftRestoreStatus.loadingImage);
+  });
+
+  test('이어 그리기는 Repository에서 인증된 이미지 bytes를 내려받는다', () async {
+    final repository = _DraftRepository();
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    final controller = DrawingDraftRestoreController(
+      sessionId: 42,
+      repository: repository,
+      syncCoordinator: sync,
+    );
+    addTearDown(sync.dispose);
+    addTearDown(controller.dispose);
+
+    await controller.load();
+    await controller.continueDrawing();
+
+    expect(repository.downloadDraftPreviewCalls, 1);
+    expect(repository.downloadedPreviewUrl, _asset.fileUrl);
+    expect(controller.backgroundImage, isA<MemoryImage>());
     expect(controller.status, DrawingDraftRestoreStatus.loadingImage);
   });
 
@@ -290,7 +310,9 @@ final class _DraftRepository implements DrawingRepository {
   _Scenario scenario;
   final bool nullSequences;
   int getDraftCalls = 0;
+  int downloadDraftPreviewCalls = 0;
   int deleteDraftCalls = 0;
+  String? downloadedPreviewUrl;
   StrokeBatchRequestDto? lastBatch;
   BinaryUploadDto? savedImage;
   int? savedLastEventSequence;
@@ -307,7 +329,7 @@ final class _DraftRepository implements DrawingRepository {
         error: ApiError(
           timestamp: '2026-07-22T00:00:00Z',
           path: '/api/v1/drawing-sessions/$sessionId/draft',
-          code: 'DRAWING_DRAFT_NOT_FOUND',
+          code: 'DRAWING_404_004',
           message: 'not found',
         ),
       );
@@ -324,6 +346,19 @@ final class _DraftRepository implements DrawingRepository {
       assetVersion: 3,
     );
   }
+
+  @override
+  Future<Uint8List> downloadDraftPreview(String previewUrl) async {
+    downloadDraftPreviewCalls += 1;
+    downloadedPreviewUrl = previewUrl;
+    if (scenario == _Scenario.failure) {
+      throw const ApiTransportFailure(type: ApiTransportFailureType.connection);
+    }
+    return _validPng;
+  }
+
+  @override
+  Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async => null;
 
   @override
   Future<StrokeBatchResponseDto> sendStrokeBatch(

@@ -4,6 +4,7 @@ import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../child/data/dto/child_dtos.dart';
+import '../../../drawing/application/drawing_session_start_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
 
@@ -30,31 +31,14 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     if (_isStartingDrawing) return;
     setState(() => _isStartingDrawing = true);
     try {
-      final typePage = await widget.drawingRepository.getDrawingTypes(
-        childId: widget.child.childId,
-      );
-      if (typePage.content.isEmpty) {
-        if (mounted) {
-          showAppMessage(context, message: '시작할 수 있는 그림 활동이 아직 없어요.');
-        }
-        return;
-      }
-      final types = [
-        ...typePage.content,
-      ]..sort((left, right) => left.displayOrder.compareTo(right.displayOrder));
-      final session = await widget.drawingRepository.createSession(
-        CreateDrawingSessionRequestDto(
-          childId: widget.child.childId,
-          drawingTypeId: types.first.drawingTypeId,
-          inputMethod: 'CANVAS',
-          clientStartedAt: DateTime.now().toUtc().toIso8601String(),
-        ),
-      );
+      final sessionId = await DrawingSessionStartController(
+        repository: widget.drawingRepository,
+      ).resolveSession(childId: widget.child.childId);
       if (!mounted) return;
       await Navigator.of(context).pushNamed(
         AppRoutes.drawing(widget.child.childId.toString()),
         arguments: DrawingRouteArguments(
-          sessionId: session.drawingSessionId,
+          sessionId: sessionId,
           repository: widget.drawingRepository,
           completionSnapshotProvider: widget.completionSnapshotProvider,
         ),

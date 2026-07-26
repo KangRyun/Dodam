@@ -1,8 +1,10 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:dodam/core/config/api_environment.dart';
 import 'package:dodam/core/network/api_client.dart';
 import 'package:dodam/core/network/api_failure.dart';
+import 'package:dodam/core/network/auth/access_token_provider.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/drawing/data/repositories/remote_drawing_repository.dart';
 import 'package:dio/dio.dart';
@@ -140,6 +142,92 @@ void main() {
     expect(response.widthPx, isNull);
     expect(response.heightPx, 1080);
   });
+
+  test('활성 그림 세션 조회는 공통 응답 data를 역직렬화한다', () async {
+    final interceptor = _ActiveSessionInterceptor();
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        interceptors: [interceptor],
+      ),
+    );
+
+    final session = await repository.getActiveSession(3);
+
+    final request = interceptor.requests.single;
+    expect(request.method, 'GET');
+    expect(request.uri.path, '/api/v1/drawing-sessions/active');
+    expect(request.queryParameters, {'childId': 3});
+    expect(session?.drawingSessionId, 42);
+    expect(session?.childId, 3);
+    expect(session?.latestDraft?.drawingAssetId, 140);
+  });
+
+  test('활성 그림 세션 없음 오류는 null로 변환한다', () async {
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        interceptors: [_ActiveSessionInterceptor(errorCode: 'DRAWING_404_005')],
+      ),
+    );
+
+    expect(await repository.getActiveSession(3), isNull);
+  });
+
+  test('최신 Draft 없음 오류는 null로 변환한다', () async {
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        interceptors: [_DraftQueryInterceptor(errorCode: 'DRAWING_404_004')],
+      ),
+    );
+
+    expect(await repository.getDraft(42), isNull);
+  });
+
+  test('Draft preview는 Backend Asset 경로에서 bytes로 내려받는다', () async {
+    final interceptor = _DraftPreviewInterceptor();
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        accessTokenProvider: const _AccessTokenProvider(),
+        interceptors: [interceptor],
+      ),
+    );
+
+    final bytes = await repository.downloadDraftPreview(
+      '/api/v1/drawing-assets/140/file',
+    );
+
+    expect(bytes, Uint8List.fromList([137, 80, 78, 71]));
+    final request = interceptor.requests.single;
+    expect(request.uri.path, '/api/v1/drawing-assets/140/file');
+    expect(request.responseType, ResponseType.bytes);
+    expect(request.headers['Authorization'], 'Bearer access-token');
+  });
+
+  for (final invalidUrl in const [
+    'https://evil.example/api/v1/drawing-assets/140/file',
+    '/api/v1/drawing-assets/140/file?token=leak',
+    '/api/v1/drawing-assets/0/file',
+    '/api/v1/children/3/file',
+  ]) {
+    test('Draft preview는 허용되지 않은 URL을 요청하지 않는다: $invalidUrl', () async {
+      final interceptor = _DraftPreviewInterceptor();
+      final repository = RemoteDrawingRepository(
+        ApiClient(
+          environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+          interceptors: [interceptor],
+        ),
+      );
+
+      await expectLater(
+        repository.downloadDraftPreview(invalidUrl),
+        throwsArgumentError,
+      );
+      expect(interceptor.requests, isEmpty);
+    });
+  }
 
   for (final failure in const [
     (statusCode: 400, code: 'DRAWING_400_008'),
@@ -405,6 +493,115 @@ final class _StrokeBatchInterceptor extends Interceptor {
       ),
     );
   }
+}
+
+final class _ActiveSessionInterceptor extends Interceptor {
+  _ActiveSessionInterceptor({this.errorCode});
+
+  final String? errorCode;
+  final List<RequestOptions> requests = [];
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    requests.add(options);
+    final code = errorCode;
+    if (code != null) {
+      handler.reject(
+        DioException(
+          requestOptions: options,
+          response: Response<Map<String, dynamic>>(
+            requestOptions: options,
+            statusCode: 404,
+            data: {
+              'success': false,
+              'code': code,
+              'message': '활성 그림 세션이 없습니다.',
+            },
+          ),
+          type: DioExceptionType.badResponse,
+        ),
+      );
+      return;
+    }
+    handler.resolve(
+      Response<Map<String, dynamic>>(
+        requestOptions: options,
+        statusCode: 200,
+        data: const {
+          'success': true,
+          'code': 'COMMON_200',
+          'message': '요청에 성공했습니다.',
+          'data': {
+            'drawingSessionId': 42,
+            'childId': 3,
+            'drawingType': {
+              'drawingTypeId': 11,
+              'code': 'FREE_DRAWING',
+              'name': '자유 그리기',
+            },
+            'inputMethod': 'CANVAS',
+            'sessionStatus': 'DRAWING',
+            'currentStage': 'DRAWING',
+            'startedAt': '2026-07-25T08:00:00Z',
+            'latestDraft': {
+              'drawingAssetId': 140,
+              'assetVersion': 4,
+              'lastEventSequence': 17,
+              'savedAt': '2026-07-25T08:05:00Z',
+            },
+          },
+        },
+      ),
+    );
+  }
+}
+
+final class _DraftQueryInterceptor extends Interceptor {
+  _DraftQueryInterceptor({required this.errorCode});
+
+  final String errorCode;
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    handler.reject(
+      DioException(
+        requestOptions: options,
+        response: Response<Map<String, dynamic>>(
+          requestOptions: options,
+          statusCode: 404,
+          data: {
+            'success': false,
+            'code': errorCode,
+            'message': '최신 Draft가 없습니다.',
+          },
+        ),
+        type: DioExceptionType.badResponse,
+      ),
+    );
+  }
+}
+
+final class _DraftPreviewInterceptor extends Interceptor {
+  final List<RequestOptions> requests = [];
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    requests.add(options);
+    handler.resolve(
+      Response<List<int>>(
+        requestOptions: options,
+        statusCode: 200,
+        data: const [137, 80, 78, 71],
+      ),
+    );
+  }
+}
+
+final class _AccessTokenProvider implements AccessTokenProvider {
+  const _AccessTokenProvider();
+
+  @override
+  Future<String?> readAccessToken() async => 'access-token';
 }
 
 final class _DrawingStartInterceptor extends Interceptor {

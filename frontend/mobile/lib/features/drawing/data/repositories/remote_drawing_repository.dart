@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
@@ -101,6 +102,20 @@ final class RemoteDrawingRepository implements DrawingRepository {
   }
 
   @override
+  Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async {
+    try {
+      final response = await _apiClient.get<Map<String, dynamic>>(
+        'drawing-sessions/active',
+        queryParameters: {'childId': childId},
+      );
+      return ActiveDrawingSessionDto.fromJson(envelopeObject(response.data));
+    } on ApiResponseFailure catch (failure) {
+      if (failure.error?.code == 'DRAWING_404_005') return null;
+      rethrow;
+    }
+  }
+
+  @override
   Future<StrokeBatchResponseDto> sendStrokeBatch(
     int sessionId,
     StrokeBatchRequestDto request,
@@ -127,12 +142,31 @@ final class RemoteDrawingRepository implements DrawingRepository {
 
   @override
   Future<DraftRecoveryDto?> getDraft(int sessionId) async {
-    final response = await _apiClient.get<Map<String, dynamic>>(
-      'drawing-sessions/$sessionId/draft',
+    try {
+      final response = await _apiClient.get<Map<String, dynamic>>(
+        'drawing-sessions/$sessionId/draft',
+      );
+      final data = response.data;
+      if (data == null || data.isEmpty) return null;
+      return DraftRecoveryDto.fromJson(_payload(data));
+    } on ApiResponseFailure catch (failure) {
+      if (failure.error?.code == 'DRAWING_404_004') return null;
+      rethrow;
+    }
+  }
+
+  @override
+  Future<Uint8List> downloadDraftPreview(String previewUrl) async {
+    final path = _draftPreviewApiPath(previewUrl);
+    final response = await _apiClient.get<List<int>>(
+      path,
+      options: Options(responseType: ResponseType.bytes),
     );
-    final data = response.data;
-    if (data == null || data.isEmpty) return null;
-    return DraftRecoveryDto.fromJson(_payload(data));
+    final bytes = response.data;
+    if (bytes == null || bytes.isEmpty) {
+      throw const FormatException('Draft preview response is empty.');
+    }
+    return Uint8List.fromList(bytes);
   }
 
   Map<String, dynamic> _payload(Map<String, dynamic> body) =>
@@ -204,4 +238,22 @@ final class RemoteDrawingRepository implements DrawingRepository {
     );
     return ObjectDetectionResponseDto.fromJson(_payload(response.data!));
   }
+}
+
+String _draftPreviewApiPath(String previewUrl) {
+  final uri = Uri.tryParse(previewUrl);
+  if (uri == null ||
+      uri.hasScheme ||
+      uri.hasAuthority ||
+      uri.hasQuery ||
+      uri.hasFragment) {
+    throw ArgumentError.value(previewUrl, 'previewUrl');
+  }
+  final match = RegExp(
+    r'^/api/v1/drawing-assets/([1-9][0-9]*)/file$',
+  ).firstMatch(uri.path);
+  if (match == null) {
+    throw ArgumentError.value(previewUrl, 'previewUrl');
+  }
+  return 'drawing-assets/${match.group(1)}/file';
 }
