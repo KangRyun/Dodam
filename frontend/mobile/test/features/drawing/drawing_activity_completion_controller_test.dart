@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dodam/core/network/api_failure.dart';
@@ -13,7 +12,7 @@ void main() {
   test('Conversation End 다음 회고 저장과 Activity Complete를 순서대로 처리한다', () async {
     final calls = <String>[];
     final conversation = _RecordingConversationEndRepository(calls);
-    final drawing = _RecordingDrawingRepository(calls: calls, preflight: false);
+    final drawing = _RecordingDrawingRepository(calls: calls);
     final keys = ['conversation-key', 'activity-key'].iterator;
     final controller = DrawingActivityCompletionController(
       drawingRepository: drawing,
@@ -25,7 +24,6 @@ void main() {
         keys.moveNext();
         return keys.current;
       },
-      pollInterval: Duration.zero,
     );
 
     final completed = await controller.submit(
@@ -34,7 +32,7 @@ void main() {
     );
 
     expect(completed, isTrue);
-    expect(calls, ['end', 'reflection', 'complete', 'status']);
+    expect(calls, ['end', 'reflection', 'complete']);
     expect(conversation.request?.reason, ConversationEndReason.childRequest);
     expect(conversation.request?.lastQuestionMessageId, 31);
     expect(drawing.completeRequest?.conversationSkipped, isFalse);
@@ -42,8 +40,8 @@ void main() {
     expect(conversation.keys.single, 'conversation-key');
     expect(drawing.completeKeys.single, 'activity-key');
     expect(conversation.keys.single, isNot(drawing.completeKeys.single));
-    expect(controller.status, DrawingActivityCompletionStatus.completed);
-    expect(controller.analysisStatus, 'SUCCESS');
+    expect(controller.status, DrawingActivityCompletionStatus.accepted);
+    expect(controller.analysisStatus, 'PENDING');
     expect(controller.reportId, 501);
   });
 
@@ -57,7 +55,6 @@ void main() {
       conversationAlreadyEnded: false,
       conversationEndRepository: null,
       idempotencyKeyProvider: () => 'activity-key',
-      pollInterval: Duration.zero,
     );
 
     final completed = await controller.submit(
@@ -66,7 +63,7 @@ void main() {
     );
 
     expect(completed, isTrue);
-    expect(calls, ['status', 'reflection', 'complete', 'status']);
+    expect(calls, ['status', 'reflection', 'complete']);
     expect(drawing.completeRequest?.conversationSkipped, isTrue);
   });
 
@@ -88,7 +85,6 @@ void main() {
         keys.moveNext();
         return keys.current;
       },
-      pollInterval: Duration.zero,
     );
 
     expect(
@@ -98,7 +94,7 @@ void main() {
       ),
       isTrue,
     );
-    expect(calls, ['status', 'end', 'reflection', 'complete', 'status']);
+    expect(calls, ['status', 'end', 'reflection', 'complete']);
     expect(drawing.completeRequest?.conversationSkipped, isFalse);
   });
 
@@ -116,7 +112,6 @@ void main() {
       conversationAlreadyEnded: false,
       conversationEndRepository: conversation,
       idempotencyKeyProvider: () => 'conversation-key',
-      pollInterval: Duration.zero,
     );
 
     expect(
@@ -143,7 +138,6 @@ void main() {
       conversationAlreadyEnded: false,
       conversationEndRepository: null,
       idempotencyKeyProvider: () => 'activity-key',
-      pollInterval: Duration.zero,
     );
 
     expect(
@@ -162,7 +156,7 @@ void main() {
       calls,
       failures: 1,
     );
-    final drawing = _RecordingDrawingRepository(calls: calls, preflight: false);
+    final drawing = _RecordingDrawingRepository(calls: calls);
     final keys = ['conversation-key', 'activity-key'].iterator;
     final controller = DrawingActivityCompletionController(
       drawingRepository: drawing,
@@ -174,7 +168,6 @@ void main() {
         keys.moveNext();
         return keys.current;
       },
-      pollInterval: Duration.zero,
     );
     const changedReflection = SaveDrawingReflectionRequestDto(
       title: '바꾼 제목',
@@ -210,7 +203,7 @@ void main() {
   test('이전 화면의 불확실한 Conversation End Key와 Body를 그대로 이어받는다', () async {
     final calls = <String>[];
     final conversation = _RecordingConversationEndRepository(calls);
-    final drawing = _RecordingDrawingRepository(calls: calls, preflight: false);
+    final drawing = _RecordingDrawingRepository(calls: calls);
     final controller = DrawingActivityCompletionController(
       drawingRepository: drawing,
       sessionId: 42,
@@ -223,7 +216,6 @@ void main() {
         reason: ConversationEndReason.childRequest,
         lastQuestionMessageId: 31,
       ),
-      pollInterval: Duration.zero,
     );
 
     expect(
@@ -254,7 +246,6 @@ void main() {
       conversationAlreadyEnded: false,
       conversationEndRepository: null,
       idempotencyKeyProvider: () => 'activity-key',
-      pollInterval: Duration.zero,
     );
 
     expect(
@@ -299,7 +290,6 @@ void main() {
       conversationAlreadyEnded: false,
       conversationEndRepository: null,
       idempotencyKeyProvider: () => 'activity-key',
-      pollInterval: Duration.zero,
     );
     const changedReflection = SaveDrawingReflectionRequestDto(
       title: '수정한 제목',
@@ -340,7 +330,6 @@ void main() {
       conversationAlreadyEnded: false,
       conversationEndRepository: null,
       idempotencyKeyProvider: () => 'activity-key',
-      pollInterval: Duration.zero,
     );
 
     expect(
@@ -370,7 +359,6 @@ void main() {
         keyCalls += 1;
         return 'activity-key';
       },
-      pollInterval: Duration.zero,
     );
 
     expect(
@@ -400,132 +388,6 @@ void main() {
       drawing.completeRequests[1].toJson(),
     );
     expect(keyCalls, 1);
-  });
-
-  test('polling에서 FAILED를 받으면 완료 화면으로 진행하지 않는다', () async {
-    final drawing = _RecordingDrawingRepository(
-      calls: [],
-      terminalSessionStatus: 'FAILED',
-      terminalStage: 'REPORTING',
-    );
-    final controller = DrawingActivityCompletionController(
-      drawingRepository: drawing,
-      sessionId: 42,
-      conversationId: null,
-      conversationAlreadyEnded: false,
-      conversationEndRepository: null,
-      idempotencyKeyProvider: () => 'activity-key',
-      pollInterval: Duration.zero,
-    );
-
-    expect(
-      await controller.submit(
-        reflection: _reflection,
-        lastQuestionMessageId: null,
-      ),
-      isFalse,
-    );
-    expect(controller.status, DrawingActivityCompletionStatus.failed);
-  });
-
-  test('polling transient 오류는 최대 3회 backoff 후 성공할 수 있다', () async {
-    final drawing = _RecordingDrawingRepository(
-      calls: [],
-      preflight: false,
-      statusFailures: [
-        const ApiTransportFailure(type: ApiTransportFailureType.connection),
-        const ApiResponseFailure(statusCode: 503, error: null),
-        const ApiResponseFailure(statusCode: 429, error: null),
-      ],
-    );
-    final delays = <Duration>[];
-    final controller = DrawingActivityCompletionController(
-      drawingRepository: drawing,
-      sessionId: 42,
-      conversationId: 20,
-      conversationAlreadyEnded: true,
-      conversationEndRepository: null,
-      idempotencyKeyProvider: () => 'activity-key',
-      delay: (duration) async => delays.add(duration),
-      pollInterval: Duration.zero,
-      transientPollBackoff: const Duration(milliseconds: 100),
-    );
-
-    expect(
-      await controller.submit(
-        reflection: _reflection,
-        lastQuestionMessageId: null,
-      ),
-      isTrue,
-    );
-    expect(drawing.statusCallCount, 4);
-    expect(delays, const [
-      Duration(milliseconds: 100),
-      Duration(milliseconds: 200),
-      Duration(milliseconds: 400),
-    ]);
-  });
-
-  test('polling transient 오류가 3회 재시도를 넘으면 실패한다', () async {
-    final drawing = _RecordingDrawingRepository(
-      calls: [],
-      preflight: false,
-      statusFailures: List<Object>.generate(
-        4,
-        (_) =>
-            const ApiTransportFailure(type: ApiTransportFailureType.connection),
-      ),
-    );
-    final controller = DrawingActivityCompletionController(
-      drawingRepository: drawing,
-      sessionId: 42,
-      conversationId: 20,
-      conversationAlreadyEnded: true,
-      conversationEndRepository: null,
-      idempotencyKeyProvider: () => 'activity-key',
-      delay: (_) async {},
-      pollInterval: Duration.zero,
-      transientPollBackoff: Duration.zero,
-    );
-
-    expect(
-      await controller.submit(
-        reflection: _reflection,
-        lastQuestionMessageId: null,
-      ),
-      isFalse,
-    );
-    expect(drawing.statusCallCount, 4);
-  });
-
-  test('dispose 후 대기 중인 polling은 추가 GET 없이 종료한다', () async {
-    final pollingStarted = Completer<void>();
-    final releasePolling = Completer<void>();
-    final drawing = _RecordingDrawingRepository(calls: [], preflight: false);
-    final controller = DrawingActivityCompletionController(
-      drawingRepository: drawing,
-      sessionId: 42,
-      conversationId: 20,
-      conversationAlreadyEnded: true,
-      conversationEndRepository: null,
-      idempotencyKeyProvider: () => 'activity-key',
-      delay: (_) {
-        if (!pollingStarted.isCompleted) pollingStarted.complete();
-        return releasePolling.future;
-      },
-      pollInterval: const Duration(seconds: 1),
-    );
-
-    final completion = controller.submit(
-      reflection: _reflection,
-      lastQuestionMessageId: null,
-    );
-    await pollingStarted.future;
-    controller.dispose();
-    releasePolling.complete();
-
-    expect(await completion, isFalse);
-    expect(drawing.statusCallCount, 0);
   });
 }
 
@@ -581,29 +443,21 @@ final class _RecordingDrawingRepository implements DrawingRepository {
     this.reflectionFailure,
     List<Object> reflectionFailures = const [],
     this.completeFailures = 0,
-    List<Object> statusFailures = const [],
-    this.terminalSessionStatus = 'COMPLETED',
-    this.terminalStage = 'COMPLETED',
     this.existingConversationId,
-    this.preflight = true,
-  }) : reflectionFailures = [...reflectionFailures],
-       statusFailures = [...statusFailures];
+  }) : reflectionFailures = [...reflectionFailures];
 
   final List<String> calls;
   final Object? reflectionFailure;
   final List<Object> reflectionFailures;
   final int completeFailures;
-  final List<Object> statusFailures;
-  final String terminalSessionStatus, terminalStage;
   final int? existingConversationId;
-  final bool preflight;
   int completeCallCount = 0;
   int statusCallCount = 0;
   final List<SaveDrawingReflectionRequestDto> reflectionRequests = [];
-  final List<DrawingActivityCompleteRequestDto> completeRequests = [];
+  final List<CompleteActivityRequestDto> completeRequests = [];
   final List<String> completeKeys = [];
 
-  DrawingActivityCompleteRequestDto? get completeRequest =>
+  CompleteActivityRequestDto? get completeRequest =>
       completeRequests.lastOrNull;
 
   @override
@@ -618,9 +472,9 @@ final class _RecordingDrawingRepository implements DrawingRepository {
   }
 
   @override
-  Future<DrawingActivityCompleteResponseDto> completeActivity(
+  Future<DrawingCompletionResponseDto> completeActivity(
     int sessionId, {
-    required DrawingActivityCompleteRequestDto request,
+    required CompleteActivityRequestDto request,
     required String idempotencyKey,
   }) async {
     calls.add('complete');
@@ -630,7 +484,7 @@ final class _RecordingDrawingRepository implements DrawingRepository {
     if (completeCallCount <= completeFailures) {
       throw StateError('complete failed');
     }
-    return DrawingActivityCompleteResponseDto(
+    return DrawingCompletionResponseDto(
       drawingSessionId: sessionId,
       sessionStatus: 'IN_PROGRESS',
       currentStage: 'REPORTING',
@@ -642,34 +496,27 @@ final class _RecordingDrawingRepository implements DrawingRepository {
   }
 
   @override
-  Future<DrawingSessionCompletionStatusDto> getSessionCompletionStatus(
-    int sessionId,
-  ) async {
+  Future<DrawingSessionDto> getSession(int sessionId) async {
     calls.add('status');
     statusCallCount += 1;
-    if (statusFailures.isNotEmpty) throw statusFailures.removeAt(0);
-    if (preflight && statusCallCount == 1) {
-      return DrawingSessionCompletionStatusDto(
-        drawingSessionId: sessionId,
-        sessionStatus: 'IN_PROGRESS',
-        currentStage: 'CONVERSING',
-        latestAnalysis: null,
-        reportId: null,
-        conversationId: existingConversationId,
-      );
-    }
-    return DrawingSessionCompletionStatusDto(
-      drawingSessionId: sessionId,
-      sessionStatus: terminalSessionStatus,
-      currentStage: terminalStage,
-      latestAnalysis: const DrawingSessionLatestAnalysisDto(
-        drawingAnalysisId: 700,
-        analysisScope: 'FINAL',
-        analysisType: 'ACTIVITY_REPORT',
-        analysisStatus: 'SUCCESS',
-      ),
-      reportId: 501,
-    );
+    return DrawingSessionDto.fromJson({
+      'drawingSessionId': sessionId,
+      'childId': 3,
+      'drawingType': {'drawingTypeId': 1, 'code': 'HTP', 'name': '집-나무-사람'},
+      'inputMethod': 'TOUCH',
+      'title': null,
+      'sessionStatus': 'IN_PROGRESS',
+      'currentStage': 'CONVERSING',
+      'selectedEmotions': const <String>[],
+      'expressedEmotionText': null,
+      'startedAt': '2026-07-26T10:00:00Z',
+      'completedAt': null,
+      'conversation': null,
+      'conversationId': existingConversationId,
+      'latestAnalysis': null,
+      'reportId': null,
+      'assets': const <Map<String, dynamic>>[],
+    });
   }
 
   @override
@@ -686,9 +533,6 @@ final class _RecordingDrawingRepository implements DrawingRepository {
       throw UnimplementedError();
   @override
   Future<DraftRecoveryDto?> getDraft(int sessionId) =>
-      throw UnimplementedError();
-  @override
-  Future<DrawingSessionDto> getSession(int sessionId) =>
       throw UnimplementedError();
   @override
   Future<ApiPage<DrawingTypeDto>> getDrawingTypes({

@@ -102,18 +102,6 @@ final class RemoteDrawingRepository implements DrawingRepository {
   }
 
   @override
-  Future<DrawingSessionCompletionStatusDto> getSessionCompletionStatus(
-    int sessionId,
-  ) async {
-    final response = await _apiClient.get<Map<String, dynamic>>(
-      'drawing-sessions/$sessionId',
-    );
-    return DrawingSessionCompletionStatusDto.fromJson(
-      envelopeObject(response.data),
-    );
-  }
-
-  @override
   Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async {
     try {
       final response = await _apiClient.get<Map<String, dynamic>>(
@@ -220,9 +208,9 @@ final class RemoteDrawingRepository implements DrawingRepository {
   }
 
   @override
-  Future<DrawingActivityCompleteResponseDto> completeActivity(
+  Future<DrawingCompletionResponseDto> completeActivity(
     int sessionId, {
-    required DrawingActivityCompleteRequestDto request,
+    required CompleteActivityRequestDto request,
     required String idempotencyKey,
   }) async {
     final response = await _apiClient.post<Map<String, dynamic>>(
@@ -235,9 +223,7 @@ final class RemoteDrawingRepository implements DrawingRepository {
         'Unexpected Drawing Activity Complete status: ${response.statusCode}',
       );
     }
-    return DrawingActivityCompleteResponseDto.fromJson(
-      envelopeObject(response.data),
-    );
+    return DrawingCompletionResponseDto.fromJson(envelopeObject(response.data));
   }
 
   @override

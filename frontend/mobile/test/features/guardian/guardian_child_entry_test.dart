@@ -522,13 +522,13 @@ final class _TrackingDrawingRepository implements DrawingRepository {
   ) async => reflectionSessionId = sessionId;
 
   @override
-  Future<DrawingActivityCompleteResponseDto> completeActivity(
+  Future<DrawingCompletionResponseDto> completeActivity(
     int sessionId, {
-    required DrawingActivityCompleteRequestDto request,
+    required CompleteActivityRequestDto request,
     required String idempotencyKey,
   }) async {
     activityCompletionAccepted = true;
-    return DrawingActivityCompleteResponseDto(
+    return DrawingCompletionResponseDto(
       drawingSessionId: sessionId,
       sessionStatus: 'IN_PROGRESS',
       currentStage: 'REPORTING',
@@ -556,21 +556,6 @@ final class _TrackingDrawingRepository implements DrawingRepository {
   Future<void> deleteDraft(int sessionId) async {}
   @override
   Future<DrawingSessionDto> getSession(int sessionId) async => session();
-  @override
-  Future<DrawingSessionCompletionStatusDto> getSessionCompletionStatus(
-    int sessionId,
-  ) async => DrawingSessionCompletionStatusDto(
-    drawingSessionId: sessionId,
-    sessionStatus: 'COMPLETED',
-    currentStage: 'COMPLETED',
-    latestAnalysis: const DrawingSessionLatestAnalysisDto(
-      drawingAnalysisId: 902,
-      analysisScope: 'FINAL',
-      analysisType: 'ACTIVITY_REPORT',
-      analysisStatus: 'SUCCESS',
-    ),
-    reportId: 903,
-  );
   @override
   Future<ObjectDetectionResponseDto> requestObjectDetection(
     int sessionId,

@@ -155,10 +155,6 @@ abstract final class AppRouter {
               ? (settings.arguments! as EmotionSelectRouteArguments)
                     .idempotencyKeyProvider
               : null,
-          conversationSkipped: settings.arguments is EmotionSelectRouteArguments
-              ? (settings.arguments! as EmotionSelectRouteArguments)
-                    .conversationSkipped
-              : true,
         ),
       ['child', final childId, 'activity', 'complete']
           when _hasChildContext(childController, childId) =>

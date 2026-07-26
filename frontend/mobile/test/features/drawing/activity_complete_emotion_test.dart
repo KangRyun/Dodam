@@ -525,6 +525,46 @@ void main() {
     );
   });
 
+  testWidgets('REPORTING 다음 FAILED이면 완료 실패 UI를 표시한다', (tester) async {
+    final repository = _CompletionRepository(
+      sessionStatuses: ['IN_PROGRESS', 'FAILED'],
+    );
+
+    await _pumpComplete(
+      tester,
+      repository: repository,
+      sessionId: 42,
+      pollInterval: Duration.zero,
+    );
+
+    expect(repository.sessionStatusCalls, 2);
+    expect(find.text('활동을 마무리하지 못했어요'), findsOneWidget);
+    expect(find.byKey(const ValueKey('guardian-handoff')), findsNothing);
+  });
+
+  testWidgets('상태 조회 네트워크 실패 후 완료 화면에서 수동 재확인한다', (tester) async {
+    final repository = _CompletionRepository(
+      sessionFailures: [StateError('network')],
+    );
+
+    await _pumpComplete(
+      tester,
+      repository: repository,
+      sessionId: 42,
+      pollInterval: Duration.zero,
+    );
+    expect(
+      find.byKey(const ValueKey('activity-completion-retry')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('activity-completion-retry')));
+    await tester.pumpAndSettle();
+
+    expect(repository.sessionStatusCalls, 2);
+    expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
+  });
+
   testWidgets('보호자 확인 후 스택을 정리해 Guardian Home으로 이동한다', (tester) async {
     await _pumpComplete(tester);
 
@@ -596,7 +636,6 @@ void main() {
       conversationAlreadyEnded: false,
       conversationEndRepository: null,
       idempotencyKeyProvider: () => 'activity-key',
-      pollInterval: Duration.zero,
     );
     final observer = _CompletionNavigationObserver();
     await _pumpEmotion(
@@ -643,45 +682,65 @@ void main() {
     expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
   });
 
-  testWidgets('화면 이탈로 dispose되면 추가 polling과 완료 화면 이동이 없다', (tester) async {
-    final pollingStarted = Completer<void>();
-    final releasePolling = Completer<void>();
-    final repository = _CompletionRepository();
-    final controller = DrawingActivityCompletionController(
-      drawingRepository: repository,
-      sessionId: 42,
-      conversationId: null,
-      conversationAlreadyEnded: false,
-      conversationEndRepository: null,
-      idempotencyKeyProvider: () => 'activity-key',
-      delay: (_) {
-        if (!pollingStarted.isCompleted) pollingStarted.complete();
-        return releasePolling.future;
-      },
-      pollInterval: const Duration(seconds: 1),
+  testWidgets('HTTP 202 직후 완료 상태 화면으로 이동하고 그 화면에서만 조회한다', (tester) async {
+    final sessionCompleter = Completer<DrawingSessionDto>();
+    final repository = _CompletionRepository(
+      sessionCompleter: sessionCompleter,
     );
     final observer = _CompletionNavigationObserver();
     await _pumpEmotion(
       tester,
       repository: repository,
       sessionId: 42,
-      activityCompletionController: controller,
       navigatorObserver: observer,
+      conversationSkipped: false,
     );
     await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('emotion-submit')));
+    for (var pump = 0; pump < 5; pump += 1) {
+      await tester.pump();
+    }
+
+    expect(repository.activityCompleteCalls, 1);
+    expect(observer.activityCompleteReplacements, 1);
+    expect(
+      find.byKey(const ValueKey('activity-completion-progress')),
+      findsOneWidget,
+    );
+    expect(repository.sessionStatusCalls, 1);
+
+    sessionCompleter.complete(_sessionDto(sessionId: 42, status: 'COMPLETED'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
+  });
+
+  testWidgets('완료 화면 dispose 후 진행 중 조회가 끝나도 추가 GET이 없다', (tester) async {
+    final sessionCompleter = Completer<DrawingSessionDto>();
+    final repository = _CompletionRepository(
+      sessionCompleter: sessionCompleter,
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ActivityCompleteScreen(
+          childId: '3',
+          sessionId: 42,
+          drawingRepository: repository,
+          pollInterval: Duration.zero,
+        ),
+      ),
+    );
     await tester.pump();
-    await pollingStarted.future;
-    final statusCallsBeforeExit = repository.statusCalls;
+    expect(repository.sessionStatusCalls, 1);
 
     await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
-    controller.dispose();
-    releasePolling.complete();
+    sessionCompleter.complete(
+      _sessionDto(sessionId: 42, status: 'IN_PROGRESS'),
+    );
     await tester.pumpAndSettle();
 
-    expect(repository.statusCalls, statusCallsBeforeExit);
-    expect(observer.activityCompleteReplacements, 0);
+    expect(repository.sessionStatusCalls, 1);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('sessionId가 없으면 Reflection을 호출하지 않는다', (tester) async {
@@ -771,9 +830,20 @@ Future<void> _pumpEmotion(
     MaterialApp(
       navigatorObservers: [?navigatorObserver],
       routes: {
-        AppRoutes.activityComplete('3'): (_) =>
-            const ActivityCompleteScreen(childId: '3'),
         AppRoutes.guardianHome: (_) => const Scaffold(body: Text('보호자 홈 테스트')),
+      },
+      onGenerateRoute: (settings) {
+        if (settings.name != AppRoutes.activityComplete('3')) return null;
+        final arguments = settings.arguments! as ActivityCompleteRouteArguments;
+        return MaterialPageRoute<void>(
+          settings: settings,
+          builder: (_) => ActivityCompleteScreen(
+            childId: '3',
+            sessionId: arguments.sessionId,
+            drawingRepository: arguments.repository,
+            pollInterval: Duration.zero,
+          ),
+        );
       },
       home: EmotionSelectScreen(
         childId: '3',
@@ -782,7 +852,6 @@ Future<void> _pumpEmotion(
         conversationId: conversationSkipped ? null : 20,
         conversationAlreadyEnded: !conversationSkipped,
         activityCompletionController: activityCompletionController,
-        conversationSkipped: conversationSkipped,
       ),
     ),
   );
@@ -885,7 +954,10 @@ final class _CompletionRepository implements DrawingRepository {
     this.reflectionError,
     this.reflectionCompleter,
     List<String> sessionStatuses = const ['COMPLETED'],
-  }) : _sessionStatuses = List.of(sessionStatuses);
+    List<Object> sessionFailures = const [],
+    this.sessionCompleter,
+  }) : _sessionStatuses = List.of(sessionStatuses),
+       _sessionFailures = List.of(sessionFailures);
 
   final Completer<DrawingStageCompleteResponseDto>? completer;
   final DrawingStageCompleteResponseDto completionResponse;
@@ -895,13 +967,14 @@ final class _CompletionRepository implements DrawingRepository {
   final List<DrawingCompleteMetadataDto> completionMetadata = [];
   int reflectionCalls = 0;
   int activityCompleteCalls = 0;
-  int statusCalls = 0;
   Object? reflectionError;
   final Completer<void>? reflectionCompleter;
+  final Completer<DrawingSessionDto>? sessionCompleter;
   SaveDrawingReflectionRequestDto? lastReflection;
   int activityCompletionCalls = 0;
   CompleteActivityRequestDto? lastActivityRequest;
   final List<String> _sessionStatuses;
+  final List<Object> _sessionFailures;
   int sessionStatusCalls = 0;
 
   @override
@@ -930,15 +1003,15 @@ final class _CompletionRepository implements DrawingRepository {
   }
 
   @override
-  Future<DrawingActivityCompleteResponseDto> completeActivity(
+  Future<DrawingCompletionResponseDto> completeActivity(
     int sessionId, {
-    required DrawingActivityCompleteRequestDto request,
+    required CompleteActivityRequestDto request,
     required String idempotencyKey,
   }) async {
     activityCompleteCalls += 1;
     activityCompletionCalls += 1;
     lastActivityRequest = request;
-    return DrawingActivityCompleteResponseDto(
+    return DrawingCompletionResponseDto(
       drawingSessionId: sessionId,
       sessionStatus: 'IN_PROGRESS',
       currentStage: 'REPORTING',
@@ -946,25 +1019,6 @@ final class _CompletionRepository implements DrawingRepository {
       analysisStatus: 'PENDING',
       reportId: 901,
       reportStatus: 'GENERATING',
-    );
-  }
-
-  @override
-  Future<DrawingSessionCompletionStatusDto> getSessionCompletionStatus(
-    int sessionId,
-  ) async {
-    statusCalls += 1;
-    return DrawingSessionCompletionStatusDto(
-      drawingSessionId: sessionId,
-      sessionStatus: 'COMPLETED',
-      currentStage: 'COMPLETED',
-      latestAnalysis: const DrawingSessionLatestAnalysisDto(
-        drawingAnalysisId: 801,
-        analysisScope: 'FINAL',
-        analysisType: 'ACTIVITY_REPORT',
-        analysisStatus: 'SUCCESS',
-      ),
-      reportId: 901,
     );
   }
 
@@ -995,25 +1049,12 @@ final class _CompletionRepository implements DrawingRepository {
   @override
   Future<DrawingSessionDto> getSession(int sessionId) async {
     sessionStatusCalls += 1;
+    if (_sessionFailures.isNotEmpty) throw _sessionFailures.removeAt(0);
+    if (sessionCompleter case final completer?) return completer.future;
     final status = _sessionStatuses.length > 1
         ? _sessionStatuses.removeAt(0)
         : _sessionStatuses.single;
-    return DrawingSessionDto.fromJson({
-      'drawingSessionId': sessionId,
-      'childId': 3,
-      'drawingType': {'id': 1, 'code': 'HTP', 'name': '집-나무-사람'},
-      'inputMethod': 'TOUCH',
-      'title': null,
-      'sessionStatus': status,
-      'currentStage': status == 'COMPLETED' ? 'COMPLETED' : 'REPORTING',
-      'selectedEmotions': const <String>[],
-      'expressedEmotionText': null,
-      'startedAt': '2026-07-26T10:00:00Z',
-      'completedAt': status == 'COMPLETED' ? '2026-07-26T10:10:00Z' : null,
-      'conversation': null,
-      'latestAnalysis': null,
-      'assets': const <Map<String, dynamic>>[],
-    });
+    return _sessionDto(sessionId: sessionId, status: status);
   }
 
   @override
@@ -1034,6 +1075,26 @@ final class _CompletionRepository implements DrawingRepository {
     String? objectCode,
   }) => throw UnimplementedError();
 }
+
+DrawingSessionDto _sessionDto({
+  required int sessionId,
+  required String status,
+}) => DrawingSessionDto.fromJson({
+  'drawingSessionId': sessionId,
+  'childId': 3,
+  'drawingType': {'drawingTypeId': 1, 'code': 'HTP', 'name': '집-나무-사람'},
+  'inputMethod': 'TOUCH',
+  'title': null,
+  'sessionStatus': status,
+  'currentStage': status == 'COMPLETED' ? 'COMPLETED' : 'REPORTING',
+  'selectedEmotions': const <String>[],
+  'expressedEmotionText': null,
+  'startedAt': '2026-07-26T10:00:00Z',
+  'completedAt': status == 'COMPLETED' ? '2026-07-26T10:10:00Z' : null,
+  'conversation': null,
+  'latestAnalysis': null,
+  'assets': const <Map<String, dynamic>>[],
+});
 
 final class _CompletionNavigationObserver extends NavigatorObserver {
   int activityCompleteReplacements = 0;

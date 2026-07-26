@@ -6,15 +6,12 @@ import '../../conversation/domain/repositories/conversation_end_repository.dart'
 import '../data/dto/drawing_dtos.dart';
 import '../domain/repositories/drawing_repository.dart';
 
-typedef DrawingCompletionDelay = Future<void> Function(Duration duration);
-
 enum DrawingActivityCompletionStatus {
   idle,
   endingConversation,
   savingReflection,
   requestingCompletion,
-  reporting,
-  completed,
+  accepted,
   failed,
 }
 
@@ -28,26 +25,15 @@ final class DrawingActivityCompletionController extends ChangeNotifier {
     required this.idempotencyKeyProvider,
     String? previousConversationEndIdempotencyKey,
     ConversationEndRequest? previousConversationEndRequest,
-    DrawingCompletionDelay? delay,
-    this.pollInterval = const Duration(seconds: 1),
-    this.maxPollAttempts = 60,
-    this.maxTransientPollRetries = 3,
-    this.transientPollBackoff = const Duration(seconds: 1),
-  }) : _delay = delay ?? Future<void>.delayed,
-       _conversationResolved = conversationId != null,
+  }) : _conversationResolved = conversationId != null,
        _conversationEndKey = previousConversationEndIdempotencyKey,
        _conversationEndRequest = previousConversationEndRequest;
 
   final DrawingRepository drawingRepository;
   final ConversationEndRepository? conversationEndRepository;
   final String Function() idempotencyKeyProvider;
-  final DrawingCompletionDelay _delay;
   final int sessionId;
   int? conversationId;
-  final Duration pollInterval;
-  final int maxPollAttempts;
-  final int maxTransientPollRetries;
-  final Duration transientPollBackoff;
 
   DrawingActivityCompletionStatus status = DrawingActivityCompletionStatus.idle;
   bool conversationAlreadyEnded;
@@ -61,7 +47,7 @@ final class DrawingActivityCompletionController extends ChangeNotifier {
   String? _activityCompleteKey;
   ConversationEndRequest? _conversationEndRequest;
   SaveDrawingReflectionRequestDto? _reflectionRequest;
-  DrawingActivityCompleteRequestDto? _activityCompleteRequest;
+  CompleteActivityRequestDto? _activityCompleteRequest;
   bool _reflectionSaved = false;
   bool _conversationResolved;
   bool _disposed = false;
@@ -69,8 +55,7 @@ final class DrawingActivityCompletionController extends ChangeNotifier {
   bool get isSubmitting => switch (status) {
     DrawingActivityCompletionStatus.endingConversation ||
     DrawingActivityCompletionStatus.savingReflection ||
-    DrawingActivityCompletionStatus.requestingCompletion ||
-    DrawingActivityCompletionStatus.reporting => true,
+    DrawingActivityCompletionStatus.requestingCompletion => true,
     _ => false,
   };
   bool get reflectionInputLocked => _reflectionRequest != null;
@@ -80,7 +65,7 @@ final class DrawingActivityCompletionController extends ChangeNotifier {
     required SaveDrawingReflectionRequestDto reflection,
     required int? lastQuestionMessageId,
   }) async {
-    if (isSubmitting || status == DrawingActivityCompletionStatus.completed) {
+    if (isSubmitting || status == DrawingActivityCompletionStatus.accepted) {
       return false;
     }
     error = null;
@@ -94,7 +79,7 @@ final class DrawingActivityCompletionController extends ChangeNotifier {
       if (_disposed) return false;
       await _requestActivityCompletion();
       if (_disposed) return false;
-      return await _pollUntilTerminal();
+      return true;
     } on Object catch (failure) {
       error = failure;
       failedStep = status;
@@ -105,9 +90,7 @@ final class DrawingActivityCompletionController extends ChangeNotifier {
 
   Future<void> _resolveConversationContext() async {
     if (_conversationResolved) return;
-    final detail = await drawingRepository.getSessionCompletionStatus(
-      sessionId,
-    );
+    final detail = await drawingRepository.getSession(sessionId);
     conversationId = detail.conversationId;
     if (conversationId != null &&
         detail.currentStage != 'CONVERSING' &&
@@ -164,7 +147,7 @@ final class DrawingActivityCompletionController extends ChangeNotifier {
 
   Future<void> _requestActivityCompletion() async {
     _setStatus(DrawingActivityCompletionStatus.requestingCompletion);
-    _activityCompleteRequest ??= DrawingActivityCompleteRequestDto(
+    _activityCompleteRequest ??= CompleteActivityRequestDto(
       conversationSkipped: conversationId == null,
     );
     _activityCompleteKey ??= _nextDistinctIdempotencyKey();
@@ -176,75 +159,11 @@ final class DrawingActivityCompletionController extends ChangeNotifier {
     analysisId = response.analysisId;
     analysisStatus = response.analysisStatus;
     reportId = response.reportId;
-    if (response.sessionStatus == 'COMPLETED' &&
-        response.currentStage == 'COMPLETED') {
-      _setStatus(DrawingActivityCompletionStatus.completed);
-      return;
-    }
     if (response.sessionStatus != 'IN_PROGRESS' ||
         response.currentStage != 'REPORTING') {
       throw StateError('Unexpected activity completion result.');
     }
-    _setStatus(DrawingActivityCompletionStatus.reporting);
-  }
-
-  Future<bool> _pollUntilTerminal() async {
-    if (status == DrawingActivityCompletionStatus.completed) return true;
-    var transientRetries = 0;
-    for (var attempt = 0; attempt < maxPollAttempts; attempt += 1) {
-      if (!await _waitWhileActive(pollInterval)) return false;
-      late DrawingSessionCompletionStatusDto detail;
-      while (true) {
-        if (_disposed) return false;
-        try {
-          detail = await drawingRepository.getSessionCompletionStatus(
-            sessionId,
-          );
-          break;
-        } on Object catch (failure) {
-          if (!_isTransientPollingFailure(failure) ||
-              transientRetries >= maxTransientPollRetries) {
-            rethrow;
-          }
-          final backoff = transientPollBackoff * (1 << transientRetries);
-          transientRetries += 1;
-          if (!await _waitWhileActive(backoff)) return false;
-        }
-      }
-      if (_disposed) return false;
-      analysisId = detail.latestAnalysis?.drawingAnalysisId;
-      analysisStatus = detail.latestAnalysis?.analysisStatus;
-      reportId = detail.reportId;
-      if (detail.sessionStatus == 'COMPLETED' &&
-          detail.currentStage == 'COMPLETED') {
-        _setStatus(DrawingActivityCompletionStatus.completed);
-        return true;
-      }
-      if (detail.sessionStatus == 'FAILED') {
-        throw StateError('Drawing activity completion failed.');
-      }
-      if (detail.sessionStatus != 'IN_PROGRESS' ||
-          detail.currentStage != 'REPORTING') {
-        throw StateError('Unexpected drawing session completion status.');
-      }
-      _setStatus(DrawingActivityCompletionStatus.reporting);
-    }
-    throw StateError('Drawing activity completion polling timed out.');
-  }
-
-  bool _isTransientPollingFailure(Object failure) => switch (failure) {
-    ApiTransportFailure() => true,
-    ApiResponseFailure(statusCode: final statusCode?) =>
-      statusCode == 408 ||
-          statusCode == 429 ||
-          (statusCode >= 500 && statusCode < 600),
-    _ => false,
-  };
-
-  Future<bool> _waitWhileActive(Duration duration) async {
-    if (_disposed) return false;
-    if (duration > Duration.zero) await _delay(duration);
-    return !_disposed;
+    _setStatus(DrawingActivityCompletionStatus.accepted);
   }
 
   String _nextDistinctIdempotencyKey() {

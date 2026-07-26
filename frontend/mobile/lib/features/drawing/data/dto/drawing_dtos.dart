@@ -150,6 +150,8 @@ final class DrawingSessionDto {
     required this.latestAnalysis,
     required this.assets,
     this.guideText,
+    this.conversationId,
+    this.reportId,
   });
   factory DrawingSessionDto.fromJson(Map<String, dynamic> json) =>
       DrawingSessionDto(
@@ -170,6 +172,8 @@ final class DrawingSessionDto {
         latestAnalysis: json['latestAnalysis'] == null
             ? null
             : _map(json['latestAnalysis']),
+        conversationId: json['conversationId'] as int?,
+        reportId: json['reportId'] as int?,
         assets: (json['assets'] as List? ?? const [])
             .map((item) => DrawingAssetDto.fromJson(_map(item)))
             .toList(growable: false),
@@ -179,60 +183,10 @@ final class DrawingSessionDto {
   final DrawingTypeSummaryDto drawingType;
   final String inputMethod, sessionStatus, currentStage, startedAt;
   final String? title, expressedEmotionText, completedAt, guideText;
+  final int? conversationId, reportId;
   final List<String>? selectedEmotions;
   final Map<String, dynamic>? conversation, latestAnalysis;
   final List<DrawingAssetDto> assets;
-}
-
-final class DrawingSessionCompletionStatusDto {
-  const DrawingSessionCompletionStatusDto({
-    required this.drawingSessionId,
-    required this.sessionStatus,
-    required this.currentStage,
-    required this.latestAnalysis,
-    required this.reportId,
-    this.conversationId,
-  });
-
-  factory DrawingSessionCompletionStatusDto.fromJson(
-    Map<String, dynamic> json,
-  ) => DrawingSessionCompletionStatusDto(
-    drawingSessionId: json['drawingSessionId'] as int,
-    sessionStatus: json['sessionStatus'] as String,
-    currentStage: json['currentStage'] as String,
-    latestAnalysis: json['latestAnalysis'] == null
-        ? null
-        : DrawingSessionLatestAnalysisDto.fromJson(
-            _map(json['latestAnalysis']),
-          ),
-    reportId: json['reportId'] as int?,
-    conversationId: json['conversationId'] as int?,
-  );
-
-  final int drawingSessionId;
-  final String sessionStatus, currentStage;
-  final DrawingSessionLatestAnalysisDto? latestAnalysis;
-  final int? reportId, conversationId;
-}
-
-final class DrawingSessionLatestAnalysisDto {
-  const DrawingSessionLatestAnalysisDto({
-    required this.drawingAnalysisId,
-    required this.analysisScope,
-    required this.analysisType,
-    required this.analysisStatus,
-  });
-
-  factory DrawingSessionLatestAnalysisDto.fromJson(Map<String, dynamic> json) =>
-      DrawingSessionLatestAnalysisDto(
-        drawingAnalysisId: json['drawingAnalysisId'] as int,
-        analysisScope: json['analysisScope'] as String,
-        analysisType: json['analysisType'] as String,
-        analysisStatus: json['analysisStatus'] as String,
-      );
-
-  final int drawingAnalysisId;
-  final String analysisScope, analysisType, analysisStatus;
 }
 
 final class ActiveDrawingSessionDto {
@@ -606,8 +560,8 @@ final class SaveDrawingReflectionRequestDto {
   };
 }
 
-final class DrawingActivityCompleteRequestDto {
-  const DrawingActivityCompleteRequestDto({
+final class CompleteActivityRequestDto {
+  const CompleteActivityRequestDto({
     required this.conversationSkipped,
     this.requestReport = true,
   });
@@ -620,8 +574,8 @@ final class DrawingActivityCompleteRequestDto {
   };
 }
 
-final class DrawingActivityCompleteResponseDto {
-  const DrawingActivityCompleteResponseDto({
+final class DrawingCompletionResponseDto {
+  const DrawingCompletionResponseDto({
     required this.drawingSessionId,
     required this.sessionStatus,
     required this.currentStage,
@@ -631,26 +585,22 @@ final class DrawingActivityCompleteResponseDto {
     required this.reportStatus,
   });
 
-  factory DrawingActivityCompleteResponseDto.fromJson(
-    Map<String, dynamic> json,
-  ) => DrawingActivityCompleteResponseDto(
-    drawingSessionId: json['drawingSessionId'] as int,
-    sessionStatus: json['sessionStatus'] as String,
-    currentStage: json['currentStage'] as String,
-    analysisId: json['analysisId'] as int,
-    analysisStatus: json['analysisStatus'] as String,
-    reportId: json['reportId'] as int?,
-    reportStatus: json['reportStatus'] as String?,
-  );
+  factory DrawingCompletionResponseDto.fromJson(Map<String, dynamic> json) =>
+      DrawingCompletionResponseDto(
+        drawingSessionId: json['drawingSessionId'] as int,
+        sessionStatus: json['sessionStatus'] as String,
+        currentStage: json['currentStage'] as String,
+        analysisId: json['analysisId'] as int,
+        analysisStatus: json['analysisStatus'] as String,
+        reportId: json['reportId'] as int?,
+        reportStatus: json['reportStatus'] as String?,
+      );
 
   final int drawingSessionId, analysisId;
   final int? reportId;
   final String sessionStatus, currentStage, analysisStatus;
   final String? reportStatus;
 }
-
-typedef CompleteActivityRequestDto = DrawingActivityCompleteRequestDto;
-typedef DrawingCompletionResponseDto = DrawingActivityCompleteResponseDto;
 
 final class DrawingUploadResponseDto {
   const DrawingUploadResponseDto({

@@ -581,7 +581,6 @@ class _DrawingScreenState extends State<DrawingScreen> {
       );
       return;
     }
-    final conversationSkipped = conversationEndController == null;
     setState(() => _isCompleting = true);
     try {
       // TODO(API): Define the authoritative pending-batch/Draft flush order
@@ -632,7 +631,6 @@ class _DrawingScreenState extends State<DrawingScreen> {
           conversationEndRequest: _conversationEndController?.requestSnapshot,
           lastQuestionMessageId: _lastQuestionMessageId,
           idempotencyKeyProvider: widget.idempotencyKeyProvider,
-          conversationSkipped: conversationSkipped,
         ),
       );
     } on Object {
@@ -1331,7 +1329,6 @@ final class EmotionSelectRouteArguments {
     required this.conversationEndRequest,
     required this.lastQuestionMessageId,
     required this.idempotencyKeyProvider,
-    required this.conversationSkipped,
   });
 
   final int? sessionId;
@@ -1342,7 +1339,6 @@ final class EmotionSelectRouteArguments {
   final String? conversationEndIdempotencyKey;
   final ConversationEndRequest? conversationEndRequest;
   final String Function()? idempotencyKeyProvider;
-  final bool conversationSkipped;
 }
 
 class EmotionSelectScreen extends StatefulWidget {
@@ -1358,7 +1354,6 @@ class EmotionSelectScreen extends StatefulWidget {
     this.lastQuestionMessageId,
     this.idempotencyKeyProvider,
     this.activityCompletionController,
-    this.conversationSkipped = true,
     super.key,
   });
 
@@ -1372,7 +1367,6 @@ class EmotionSelectScreen extends StatefulWidget {
   final ConversationEndRequest? conversationEndRequest;
   final String Function()? idempotencyKeyProvider;
   final DrawingActivityCompletionController? activityCompletionController;
-  final bool conversationSkipped;
 
   @override
   State<EmotionSelectScreen> createState() => _EmotionSelectScreenState();

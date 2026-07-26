@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:dodam/core/config/api_environment.dart';
 import 'package:dodam/core/network/api_client.dart';
@@ -6,36 +8,6 @@ import 'package:dodam/features/drawing/data/repositories/remote_drawing_reposito
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('완료 접수 실패 후 같은 멱등 키와 요청으로 재시도한다', () async {
-    final interceptor = _FailOnceCompletionInterceptor();
-    final controller = ActivityCompletionController(
-      RemoteDrawingRepository(
-        ApiClient(
-          environment: ApiEnvironment.fromBaseUrl('https://example.test'),
-          interceptors: [interceptor],
-        ),
-      ),
-      sessionId: 91,
-      conversationSkipped: false,
-      idempotencyKeyProvider: () => 'stable-activity-key',
-    );
-
-    expect(await controller.submit(), isFalse);
-    expect(controller.status, ActivityCompletionStatus.failure);
-    expect(await controller.submit(), isTrue);
-    expect(controller.status, ActivityCompletionStatus.accepted);
-    expect(
-      interceptor.requests.map((request) {
-        return request.headers['Idempotency-Key'];
-      }),
-      ['stable-activity-key', 'stable-activity-key'],
-    );
-    expect(interceptor.requests.map((request) => request.data), [
-      {'conversationSkipped': false, 'requestReport': true},
-      {'conversationSkipped': false, 'requestReport': true},
-    ]);
-  });
-
   test('REPORTING 세션은 COMPLETED가 될 때까지 조회한다', () async {
     final interceptor = _CompletionStatusInterceptor();
     final controller = ActivityCompletionController.forStatus(
@@ -55,6 +27,25 @@ void main() {
     expect(interceptor.requestCount, 2);
   });
 
+  test('REPORTING 세션이 FAILED가 되면 종단 실패로 처리한다', () async {
+    final controller = ActivityCompletionController.forStatus(
+      RemoteDrawingRepository(
+        ApiClient(
+          environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+          interceptors: [
+            _CompletionStatusInterceptor(terminalStatus: 'FAILED'),
+          ],
+        ),
+      ),
+      sessionId: 91,
+      pollInterval: Duration.zero,
+      maxPollAttempts: 3,
+    );
+
+    expect(await controller.pollUntilTerminal(), isFalse);
+    expect(controller.status, ActivityCompletionStatus.terminalFailure);
+  });
+
   test('완료 상태 조회가 실패해도 활동 자체를 실패로 단정하지 않는다', () async {
     final controller = ActivityCompletionController.forStatus(
       RemoteDrawingRepository(
@@ -71,47 +62,60 @@ void main() {
     expect(await controller.pollUntilTerminal(), isFalse);
     expect(controller.status, ActivityCompletionStatus.pollingFailure);
   });
-}
 
-final class _FailOnceCompletionInterceptor extends Interceptor {
-  final List<RequestOptions> requests = [];
-
-  @override
-  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
-    requests.add(options);
-    if (requests.length == 1) {
-      handler.reject(
-        DioException(
-          requestOptions: options,
-          type: DioExceptionType.connectionError,
+  test('상태 조회 네트워크 실패 후 수동 재확인할 수 있다', () async {
+    final interceptor = _FailOnceStatusInterceptor();
+    final controller = ActivityCompletionController.forStatus(
+      RemoteDrawingRepository(
+        ApiClient(
+          environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+          interceptors: [interceptor],
         ),
-      );
-      return;
-    }
-    handler.resolve(
-      Response<Map<String, dynamic>>(
-        requestOptions: options,
-        statusCode: 202,
-        data: const {
-          'success': true,
-          'code': 'COMMON_200',
-          'message': '요청에 성공했습니다.',
-          'data': {
-            'drawingSessionId': 91,
-            'sessionStatus': 'IN_PROGRESS',
-            'currentStage': 'REPORTING',
-            'analysisId': 801,
-            'analysisStatus': 'PENDING',
-            'reportId': 901,
-            'reportStatus': 'GENERATING',
-          },
-        },
       ),
+      sessionId: 91,
+      pollInterval: Duration.zero,
+      maxPollAttempts: 1,
     );
-  }
+
+    expect(await controller.pollUntilTerminal(), isFalse);
+    expect(controller.status, ActivityCompletionStatus.pollingFailure);
+    expect(await controller.pollUntilTerminal(), isTrue);
+    expect(controller.status, ActivityCompletionStatus.completed);
+    expect(interceptor.requestCount, 2);
+  });
+
+  test('dispose 후 진행 중 조회가 끝나도 추가 GET과 상태 알림이 없다', () async {
+    final interceptor = _DelayedStatusInterceptor();
+    final controller = ActivityCompletionController.forStatus(
+      RemoteDrawingRepository(
+        ApiClient(
+          environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+          interceptors: [interceptor],
+        ),
+      ),
+      sessionId: 91,
+      pollInterval: Duration.zero,
+      maxPollAttempts: 3,
+    );
+    var notifications = 0;
+    controller.addListener(() => notifications += 1);
+
+    final polling = controller.pollUntilTerminal();
+    await interceptor.requested.future;
+    expect(notifications, 1);
+    controller.dispose();
+    interceptor.complete();
+
+    expect(await polling, isFalse);
+    expect(interceptor.requestCount, 1);
+    expect(notifications, 1);
+  });
 }
 
 final class _CompletionStatusInterceptor extends Interceptor {
+  _CompletionStatusInterceptor({this.terminalStatus = 'COMPLETED'});
+
+  final String terminalStatus;
   int requestCount = 0;
 
   @override
@@ -126,9 +130,73 @@ final class _CompletionStatusInterceptor extends Interceptor {
           'code': 'COMMON_200',
           'message': '요청에 성공했습니다.',
           'data': _session(
-            status: requestCount == 1 ? 'IN_PROGRESS' : 'COMPLETED',
-            stage: requestCount == 1 ? 'REPORTING' : 'COMPLETED',
+            status: requestCount == 1 ? 'IN_PROGRESS' : terminalStatus,
+            stage: requestCount == 1
+                ? 'REPORTING'
+                : terminalStatus == 'COMPLETED'
+                ? 'COMPLETED'
+                : 'REPORTING',
           ),
+        },
+      ),
+    );
+  }
+}
+
+final class _FailOnceStatusInterceptor extends Interceptor {
+  int requestCount = 0;
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    requestCount += 1;
+    if (requestCount == 1) {
+      handler.reject(
+        DioException(
+          requestOptions: options,
+          type: DioExceptionType.connectionError,
+        ),
+      );
+      return;
+    }
+    handler.resolve(
+      Response<Map<String, dynamic>>(
+        requestOptions: options,
+        statusCode: 200,
+        data: {
+          'success': true,
+          'code': 'COMMON_200',
+          'message': '요청에 성공했습니다.',
+          'data': _session(status: 'COMPLETED', stage: 'COMPLETED'),
+        },
+      ),
+    );
+  }
+}
+
+final class _DelayedStatusInterceptor extends Interceptor {
+  final Completer<void> requested = Completer<void>();
+  RequestOptions? _options;
+  RequestInterceptorHandler? _handler;
+  int requestCount = 0;
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    requestCount += 1;
+    _options = options;
+    _handler = handler;
+    requested.complete();
+  }
+
+  void complete() {
+    _handler!.resolve(
+      Response<Map<String, dynamic>>(
+        requestOptions: _options!,
+        statusCode: 200,
+        data: {
+          'success': true,
+          'code': 'COMMON_200',
+          'message': '요청에 성공했습니다.',
+          'data': _session(status: 'IN_PROGRESS', stage: 'REPORTING'),
         },
       ),
     );

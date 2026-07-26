@@ -88,21 +88,6 @@ final class MockDrawingRepository implements DrawingRepository {
   Future<DrawingSessionDto> getSession(int sessionId) async =>
       DrawingSessionDto.fromJson(_session);
   @override
-  Future<DrawingSessionCompletionStatusDto> getSessionCompletionStatus(
-    int sessionId,
-  ) async => DrawingSessionCompletionStatusDto.fromJson({
-    'drawingSessionId': sessionId,
-    'sessionStatus': 'COMPLETED',
-    'currentStage': 'COMPLETED',
-    'latestAnalysis': {
-      'drawingAnalysisId': 701,
-      'analysisScope': 'FINAL',
-      'analysisType': 'ACTIVITY_REPORT',
-      'analysisStatus': 'SUCCESS',
-    },
-    'reportId': 501,
-  });
-  @override
   Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async => null;
   @override
   Future<StrokeBatchResponseDto> sendStrokeBatch(
@@ -194,11 +179,11 @@ final class MockDrawingRepository implements DrawingRepository {
   }
 
   @override
-  Future<DrawingActivityCompleteResponseDto> completeActivity(
+  Future<DrawingCompletionResponseDto> completeActivity(
     int sessionId, {
-    required DrawingActivityCompleteRequestDto request,
+    required CompleteActivityRequestDto request,
     required String idempotencyKey,
-  }) async => DrawingActivityCompleteResponseDto.fromJson({
+  }) async => DrawingCompletionResponseDto.fromJson({
     'drawingSessionId': sessionId,
     'sessionStatus': 'IN_PROGRESS',
     'currentStage': 'REPORTING',

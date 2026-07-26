@@ -381,6 +381,24 @@ void main() {
     expect(result.analysisStatus, 'PENDING');
     expect(result.reportStatus, 'GENERATING');
   });
+
+  test('활동 완료는 정상 Body여도 HTTP 202가 아니면 거부한다', () async {
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        interceptors: [_ActivityCompletionInterceptor(statusCode: 200)],
+      ),
+    );
+
+    await expectLater(
+      repository.completeActivity(
+        91,
+        request: const CompleteActivityRequestDto(conversationSkipped: false),
+        idempotencyKey: 'activity-key-1234',
+      ),
+      throwsStateError,
+    );
+  });
 }
 
 const _strokeRequest = StrokeBatchRequestDto(
@@ -627,6 +645,9 @@ final class _DraftPreviewInterceptor extends Interceptor {
 }
 
 final class _ActivityCompletionInterceptor extends Interceptor {
+  _ActivityCompletionInterceptor({this.statusCode = 202});
+
+  final int statusCode;
   final List<RequestOptions> requests = [];
 
   @override
@@ -635,7 +656,7 @@ final class _ActivityCompletionInterceptor extends Interceptor {
     handler.resolve(
       Response<Map<String, dynamic>>(
         requestOptions: options,
-        statusCode: 202,
+        statusCode: statusCode,
         data: const {
           'success': true,
           'code': 'COMMON_200',

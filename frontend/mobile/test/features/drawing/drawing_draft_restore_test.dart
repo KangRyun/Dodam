@@ -408,9 +408,9 @@ final class _DraftRepository implements DrawingRepository {
     SaveDrawingReflectionRequestDto request,
   ) => throw UnimplementedError();
   @override
-  Future<DrawingActivityCompleteResponseDto> completeActivity(
+  Future<DrawingCompletionResponseDto> completeActivity(
     int sessionId, {
-    required DrawingActivityCompleteRequestDto request,
+    required CompleteActivityRequestDto request,
     required String idempotencyKey,
   }) => throw UnimplementedError();
   @override
@@ -420,10 +420,6 @@ final class _DraftRepository implements DrawingRepository {
   @override
   Future<DrawingSessionDto> getSession(int sessionId) =>
       throw UnimplementedError();
-  @override
-  Future<DrawingSessionCompletionStatusDto> getSessionCompletionStatus(
-    int sessionId,
-  ) => throw UnimplementedError();
   @override
   Future<DrawingTypePage> getDrawingTypes({
     required int childId,
