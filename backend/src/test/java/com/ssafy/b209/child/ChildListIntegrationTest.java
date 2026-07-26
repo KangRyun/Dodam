@@ -251,6 +251,38 @@ class ChildListIntegrationTest {
   }
 
   @Test
+  void rejectsChildDeletionWithoutConfirmationBodyAndKeepsProfileActive() throws Exception {
+    mockMvc
+        .perform(delete("/api/v1/children/1"))
+        .andExpect(status().isBadRequest())
+        // 본문 누락도 확인 값 오류와 같은 코드로 응답한다(CHILD-05 계약 통일).
+        .andExpect(jsonPath("$.code").value("CHILD_400_002"));
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT profile_status FROM children WHERE id = 1", String.class))
+        .isEqualTo("ACTIVE");
+  }
+
+  @Test
+  void rejectsUnsupportedCascadeQueryAndKeepsProfileActive() throws Exception {
+    mockMvc
+        .perform(
+            delete("/api/v1/children/1")
+                .queryParam("cascade", "true")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DELETE\"}"))
+        .andExpect(status().isBadRequest())
+        // 삭제 범위는 서버 정책으로 고정하므로 cascade를 무시하지 않고 거부한다.
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT profile_status FROM children WHERE id = 1", String.class))
+        .isEqualTo("ACTIVE");
+  }
+
+  @Test
   void rejectsWholeChildDeletionWhenAnotherGuardianIsConnected() throws Exception {
     jdbcTemplate.update(
         """

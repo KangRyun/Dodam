@@ -55,6 +55,15 @@ android {
         manifestPlaceholders["naverClientName"] = oauthValue("NAVER_APP_NAME")
     }
 
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("dodam-debug.keystore")
+            storePassword = "android"
+            keyAlias = "androiddebugkey"
+            keyPassword = "android"
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

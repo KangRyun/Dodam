@@ -1,5 +1,11 @@
 import 'package:flutter/material.dart';
 
+/// 색상 디자인 토큰 (S15P11B209-433).
+///
+/// ⚠️ 골격 단계 — 값(hex)은 현행이며 다음 주 새 디자인 확정 시 이 파일에서 값만
+/// 교체한다(참조 컴포넌트 수정 불필요). 이름은 의미 기반(leaf=주색상·error 등)이라
+/// 값이 바뀌어도 뜻이 유지된다. 상태색(success/warning/error/disabled)과
+/// 변형(~Soft 배경용·~Pressed 눌림)을 포함해 공통 UI에서 재사용한다.
 abstract final class AppColors {
   static const Color ink = Color(0xFF27313A);
   static const Color inkMuted = Color(0xFF68737D);

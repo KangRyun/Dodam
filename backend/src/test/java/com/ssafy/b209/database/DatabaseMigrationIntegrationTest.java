@@ -49,7 +49,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("13");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("14");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(67);
     assertThat(tableExists("refresh_tokens")).isFalse();
@@ -359,6 +359,24 @@ class DatabaseMigrationIntegrationTest {
     assertThat(columnIsNullable("reports", "failure_reason")).isTrue();
     assertThat(columnExists("reports", "failed_at")).isTrue();
     assertThat(columnIsNullable("reports", "failed_at")).isTrue();
+  }
+
+  @Test
+  void createsDeviceIdentifierColumnsAndUpsertKeyForPushTokens() {
+    assertThat(columnExists("notification_device_tokens", "device_id")).isTrue();
+    assertThat(columnIsNullable("notification_device_tokens", "device_id")).isFalse();
+    assertThat(columnExists("notification_device_tokens", "app_version")).isTrue();
+    assertThat(columnIsNullable("notification_device_tokens", "app_version")).isTrue();
+
+    // (user_id, device_id) UNIQUE가 upsert 키다. 없으면 Token 갱신이 행 누적이 된다.
+    assertThat(
+            indexExists(
+                "notification_device_tokens", "uk_notification_device_tokens_user_device", true))
+        .isTrue();
+    // 같은 Token이 다른 계정에 중복 등록되는 것을 막는 제약은 그대로 유지한다.
+    assertThat(
+            indexExists("notification_device_tokens", "uk_notification_device_tokens_hash", true))
+        .isTrue();
   }
 
   private boolean columnExists(String tableName, String columnName) {

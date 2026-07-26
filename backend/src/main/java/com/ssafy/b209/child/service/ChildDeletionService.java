@@ -42,14 +42,17 @@ public class ChildDeletionService {
   /**
    * 확인 문자열과 보호자 관계를 검증한 뒤 아동 프로필을 Soft Delete한다.
    *
+   * <p>본문 누락, 공백, {@code DELETE} 이외의 값은 모두 같은 확인 값 오류로 처리한다. 클라이언트가 오작동 방지 장치를 우회했는지를 한 가지 응답으로 알 수
+   * 있어야 하므로 요청 형태에 따라 오류를 나누지 않는다.
+   *
    * @param guardianUserId 삭제를 요청한 인증 보호자 사용자 ID
    * @param childId 삭제할 아동 ID
-   * @param request 명시적 삭제 확인 요청
-   * @throws BusinessException 확인 문자열이 다르거나, 접근할 수 없거나, 다른 보호자가 연결된 경우
+   * @param request 명시적 삭제 확인 요청이며 본문이 없으면 {@code null}
+   * @throws BusinessException 확인 문자열이 없거나 다르거나, 접근할 수 없거나, 다른 보호자가 연결된 경우
    */
   @Transactional
   public void delete(Long guardianUserId, Long childId, DeleteChildRequest request) {
-    if (!CONFIRMATION.equals(request.confirmation())) {
+    if (request == null || !CONFIRMATION.equals(request.confirmation())) {
       throw new BusinessException(ChildErrorCode.CHILD_DELETION_CONFIRMATION_MISMATCH);
     }
     if (!childDeletionRepository.lockAccessibleChild(guardianUserId, childId)) {

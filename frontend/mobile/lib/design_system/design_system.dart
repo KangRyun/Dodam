@@ -8,4 +8,5 @@ export 'components/navigation/app_top_bar.dart';
 export 'components/selection/app_selection.dart';
 export 'tokens/app_colors.dart';
 export 'tokens/app_spacing.dart';
+export 'tokens/app_shadow.dart';
 export 'tokens/app_typography.dart';
