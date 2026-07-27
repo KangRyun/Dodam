@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
@@ -32,8 +34,16 @@ Future<bool> _initializePush() async {
   try {
     await Firebase.initializeApp();
     FirebaseMessaging.onBackgroundMessage(handlePushInBackground);
+    developer.log('Firebase 초기화 완료 — 푸시 사용', name: 'push');
     return true;
-  } on Object {
+  } on Object catch (error, stackTrace) {
+    // 조용히 끄면 "알림이 안 온다"를 추적할 방법이 없다.
+    developer.log(
+      'Firebase 초기화 실패 — 푸시를 끈 채로 계속한다',
+      name: 'push',
+      error: error,
+      stackTrace: stackTrace,
+    );
     return false;
   }
 }

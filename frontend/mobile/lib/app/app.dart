@@ -1,3 +1,5 @@
+import 'dart:developer' as developer;
+
 import 'package:flutter/material.dart';
 
 import '../core/network/auth/token_refresher.dart';
@@ -181,9 +183,20 @@ class _DodamAppState extends State<DodamApp> {
     if (session == null ||
         session.requiresOnboarding ||
         session.user.role != UserRole.guardian) {
+      developer.log(
+        '보호자 세션 아님 — 푸시 시작 안 함 '
+        '(session=${session != null}, onboarding=${session?.requiresOnboarding}, '
+        'role=${session?.user.role?.name})',
+        name: 'push',
+      );
       return;
     }
     await _childController.loadChildren();
+
+    if (_pushCoordinator == null) {
+      developer.log('pushSetup 미주입 — 푸시 비활성', name: 'push');
+      return;
+    }
     await _pushCoordinator?.start();
   }
 

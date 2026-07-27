@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:developer' as developer;
 
 import '../entities/push_message.dart';
 import '../repositories/push_token_repository.dart';
@@ -59,6 +60,7 @@ final class PushCoordinator {
     _started = true;
 
     final status = await _permissionService.request();
+    developer.log('알림 권한 = ${status.name}', name: 'push');
     if (status != PushPermissionStatus.granted) return;
 
     await _presenter.initialize();
@@ -90,11 +92,18 @@ final class PushCoordinator {
 
   Future<void> _registerCurrentToken() async {
     final token = await _guardValue(_gateway.getToken);
-    if (token != null) await _registerToken(token);
+    if (token == null) {
+      developer.log('FCM Token 발급 실패 — 등록을 건너뛴다', name: 'push');
+      return;
+    }
+    await _registerToken(token);
   }
 
-  Future<void> _registerToken(String token) =>
-      _guard(() => _tokenRepository.register(token));
+  Future<void> _registerToken(String token) async {
+    // Token 원문은 비밀이라 로그에 남기지 않는다(계약 §5.4). 길이만 남긴다.
+    developer.log('FCM Token 등록 시도 (${token.length}자)', name: 'push');
+    await _guard(() => _tokenRepository.register(token));
+  }
 
   Future<void> _present(PushMessage message) async {
     // 아동 활동 화면을 알림이 덮거나 위험 문구가 아이에게 노출되면 안 된다
@@ -115,15 +124,16 @@ final class PushCoordinator {
   Future<void> _guard(Future<void> Function() action) async {
     try {
       await action();
-    } on Object {
-      return;
+    } on Object catch (error) {
+      developer.log('푸시 작업 실패(무시)', name: 'push', error: error);
     }
   }
 
   Future<T?> _guardValue<T>(Future<T?> Function() action) async {
     try {
       return await action();
-    } on Object {
+    } on Object catch (error) {
+      developer.log('푸시 조회 실패(무시)', name: 'push', error: error);
       return null;
     }
   }
