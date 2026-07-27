@@ -31,7 +31,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * 알림 4개 endpoint(NOTI-01~04)를 실 MySQL로 관통 검증한다.
+ * 알림 endpoint(NOTI-01~05)를 실 MySQL로 관통 검증한다.
  *
  * <p>V14가 추가한 {@code device_id} UNIQUE 제약이 실제로 upsert를 성립시키는지, Token이 평문으로 저장되지 않는지, 목록이 정규화된 부가
  * 속성과 관련 자원을 조립하는지를 DB 상태까지 확인한다. 인증은 다른 단면 통합 테스트와 같이 검증된 {@link AuthenticatedUser} Principal을
@@ -327,6 +327,85 @@ class NotificationIntegrationTest {
         .isEqualTo(1);
   }
 
+  // ---------------------------------------------------------------- NOTI-05 전체 읽음
+
+  @Test
+  void marksAllOwnUnreadNotificationsReadAndReturnsCount() throws Exception {
+    insertNotification(900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 10:00:00");
+    insertNotification(
+        901L, USER_ID, "RETENTION_NOTICE", "SENT", "2026-07-26 09:00:00", "2026-07-26 11:00:00");
+    insertNotification(902L, USER_ID, "COMMENT_CREATED", "SENT", null, "2026-07-26 12:00:00");
+
+    mockMvc
+        .perform(patch("/api/v1/notifications/read-all"))
+        .andExpect(status().isOk())
+        // 이미 읽은 901은 세지 않는다.
+        .andExpect(jsonPath("$.data.updatedCount").value(2))
+        .andExpect(jsonPath("$.data.readAt").exists());
+
+    assertThat(unreadCount(USER_ID)).isZero();
+    // 이미 읽은 알림의 최초 읽은 시각은 유지된다.
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT read_at FROM notifications WHERE id = 901", String.class))
+        .startsWith("2026-07-26 09:00:00");
+  }
+
+  @Test
+  void marksOnlyRequestedTypeOnReadAll() throws Exception {
+    insertNotification(900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 10:00:00");
+    insertNotification(901L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 11:00:00");
+    insertNotification(902L, USER_ID, "RETENTION_NOTICE", "SENT", null, "2026-07-26 12:00:00");
+
+    mockMvc
+        .perform(patch("/api/v1/notifications/read-all").queryParam("type", "ANALYSIS_COMPLETED"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.updatedCount").value(2));
+
+    // 다른 유형(902)은 미열람으로 남는다.
+    assertThat(unreadCount(USER_ID)).isEqualTo(1);
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM notifications WHERE id = 902 AND read_at IS NULL",
+                Integer.class))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void isIdempotentWhenNothingIsUnread() throws Exception {
+    insertNotification(
+        900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", "2026-07-26 09:00:00", "2026-07-26 10:00:00");
+
+    mockMvc
+        .perform(patch("/api/v1/notifications/read-all"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.updatedCount").value(0))
+        .andExpect(jsonPath("$.data.readAt").doesNotExist());
+  }
+
+  @Test
+  void doesNotTouchOtherUsersNotificationsOnReadAll() throws Exception {
+    insertNotification(900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 10:00:00");
+    insertNotification(
+        902L, OTHER_USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 12:00:00");
+
+    mockMvc
+        .perform(patch("/api/v1/notifications/read-all"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.updatedCount").value(1));
+
+    // 남의 알림은 그대로 미열람이다.
+    assertThat(unreadCount(OTHER_USER_ID)).isEqualTo(1);
+  }
+
+  @Test
+  void rejectsUnknownTypeOnReadAll() throws Exception {
+    mockMvc
+        .perform(patch("/api/v1/notifications/read-all").queryParam("type", "UNKNOWN_TYPE"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
   // ---------------------------------------------------------------- helpers
 
   private org.springframework.test.web.servlet.RequestBuilder registerDeviceToken(
@@ -369,6 +448,13 @@ class NotificationIntegrationTest {
   private int deviceTokenCount() {
     return jdbcTemplate.queryForObject(
         "SELECT COUNT(*) FROM notification_device_tokens", Integer.class);
+  }
+
+  private int unreadCount(Long recipientUserId) {
+    return jdbcTemplate.queryForObject(
+        "SELECT COUNT(*) FROM notifications WHERE recipient_user_id = ? AND read_at IS NULL",
+        Integer.class,
+        recipientUserId);
   }
 
   private void authenticate(Long userId) {

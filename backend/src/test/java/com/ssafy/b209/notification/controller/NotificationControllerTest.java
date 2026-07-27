@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.BDDMockito.willThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -12,11 +13,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.exception.BusinessException;
+import com.ssafy.b209.global.response.CommonErrorCode;
 import com.ssafy.b209.notification.dto.response.DeviceTokenResponse;
 import com.ssafy.b209.notification.dto.response.NotificationListItemResponse;
 import com.ssafy.b209.notification.dto.response.NotificationListPageResponse;
+import com.ssafy.b209.notification.dto.response.NotificationMarkAllReadResponse;
 import com.ssafy.b209.notification.dto.response.NotificationReadResponse;
 import com.ssafy.b209.notification.exception.NotificationErrorCode;
 import com.ssafy.b209.notification.service.DeviceTokenService;
@@ -33,7 +37,7 @@ import org.springframework.http.MediaType;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 
-/** 알림 4개 endpoint의 HTTP 계약(응답 형태·오류 코드·Token 비노출)을 검증한다. */
+/** 알림 endpoint의 HTTP 계약(응답 형태·오류 코드·Token 비노출)을 검증한다. */
 @WebMvcTest({NotificationDeviceTokenController.class, NotificationInboxController.class})
 @Import(com.ssafy.b209.global.exception.GlobalExceptionHandler.class)
 class NotificationControllerTest {
@@ -206,6 +210,64 @@ class NotificationControllerTest {
         .perform(patch("/api/v1/notifications/{notificationId}/read", 999L))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("NOTIFICATION_NOT_FOUND"));
+  }
+
+  @Test
+  void marksAllNotificationsReadAndReturnsCountAndReadTime() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(USER_ID);
+    given(notificationReadService.markAllRead(USER_ID, null))
+        .willReturn(
+            new NotificationMarkAllReadResponse(3, LocalDateTime.parse("2026-07-26T12:00:00")));
+
+    mockMvc
+        .perform(patch("/api/v1/notifications/read-all"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.updatedCount").value(3))
+        .andExpect(jsonPath("$.data.readAt").value("2026-07-26T12:00:00"));
+
+    verify(notificationReadService).markAllRead(USER_ID, null);
+  }
+
+  @Test
+  void passesTypeFilterToMarkAllRead() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(USER_ID);
+    given(notificationReadService.markAllRead(USER_ID, "ANALYSIS_COMPLETED"))
+        .willReturn(new NotificationMarkAllReadResponse(0, null));
+
+    mockMvc
+        .perform(patch("/api/v1/notifications/read-all").queryParam("type", "ANALYSIS_COMPLETED"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.updatedCount").value(0))
+        .andExpect(jsonPath("$.data.readAt").doesNotExist());
+
+    verify(notificationReadService).markAllRead(USER_ID, "ANALYSIS_COMPLETED");
+  }
+
+  @Test
+  void reportsInvalidTypeOnMarkAllReadWithCommonCode() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(USER_ID);
+    willThrow(new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE))
+        .given(notificationReadService)
+        .markAllRead(USER_ID, "UNKNOWN_TYPE");
+
+    mockMvc
+        .perform(patch("/api/v1/notifications/read-all").queryParam("type", "UNKNOWN_TYPE"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
+  @Test
+  void rejectsMarkAllReadWithoutAuthentication() throws Exception {
+    willThrow(new BusinessException(AuthErrorCode.AUTHENTICATION_REQUIRED))
+        .given(currentUserResolver)
+        .requireUserId();
+
+    mockMvc
+        .perform(patch("/api/v1/notifications/read-all"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("AUTH_401_006"));
+
+    verify(notificationReadService, never()).markAllRead(any(), any());
   }
 
   private NotificationListPageResponse page(List<NotificationListItemResponse> content) {
