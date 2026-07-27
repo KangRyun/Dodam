@@ -53,9 +53,9 @@ public interface ConversationStartAuthorizationRepository
    * <p>네이티브 {@code not exists(...)}의 boolean 매핑 문제를 피하려 미충족 약관 수를 {@code count(*)}로 조회한다. 결과가
    * {@code 0}이면 모든 필수 동의가 충족된 것이다.
    *
-   * <p>{@code target_scope = 'CHILD'}로 범위를 좁힌다. 보호자 본인 대상({@code USER}) 동의는 {@code
-   * subject_child_id}가 {@code null}로 기록되므로 아동 기준 대조에 포함하면 어떤 아동도 충족할 수 없다. {@code USER} 필수 동의는 동의
-   * 등록 시점에 강제된다.
+   * <p>{@code target_scope = 'CHILD'}로 아동 약관만 센다. USER-scope 약관(예: SERVICE_TOS)은 보호자 계정 동의로
+   * 온보딩에서 확인되며 {@code subject_child_id} 이력이 생길 수 없어, 필터가 없으면 어떤 아동도 충족할 수 없는
+   * 약관이 되어 대화가 영구 차단된다.
    *
    * @param childId 동의 대상 아동 식별자
    * @return 최신 동의가 AGREE가 아닌 필수·활성 아동 약관 수

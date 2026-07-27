@@ -49,7 +49,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("16");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("17");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(67);
     assertThat(tableExists("refresh_tokens")).isFalse();
@@ -62,6 +62,28 @@ class DatabaseMigrationIntegrationTest {
                     + "ORDER BY display_order",
                 String.class))
         .containsExactly("ART_DIARY", "FREE_DRAWING", "EMOTION_COLORING", "WEATHER_MIND");
+    // V17 동의 약관 시드 — 앱이 아는 7개 term_code 가 모두 활성으로 심겼는지 확인한다.
+    assertThat(
+            jdbcTemplate.queryForList(
+                "SELECT term_code FROM consent_terms WHERE is_active = TRUE",
+                String.class))
+        .contains(
+            "SERVICE_TOS",
+            "MARKETING",
+            "CHILD_PERSONAL_INFO",
+            "DRAWING_ANALYSIS",
+            "VOICE_PROCESSING",
+            "EXPERT_SHARING",
+            "AI_TRAINING");
+    // 가드레일: 빈 테이블이면 필수 약관 집합이 ∅ → 온보딩이 무동의로 통과(vacuous true)한다.
+    // USER-scope 필수 약관(SERVICE_TOS)이 있어야 온보딩이 실제 동의를 요구한다.
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM consent_terms "
+                    + "WHERE term_code = 'SERVICE_TOS' AND target_scope = 'USER' "
+                    + "AND is_required = TRUE AND is_active = TRUE",
+                Integer.class))
+        .isEqualTo(1);
   }
 
   @Test
