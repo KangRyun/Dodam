@@ -39,6 +39,9 @@ android {
     ndkVersion = flutter.ndkVersion
 
     compileOptions {
+        // flutter_local_notifications 가 요구한다 — 없으면 checkDebugAarMetadata 실패
+        // (S15P11B209-617). 구버전 Android에서도 java.time 계열을 쓰기 위한 설정이다.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -87,6 +90,8 @@ flutter {
 
 dependencies {
     implementation("com.navercorp.nid:oauth:5.11.2")
+    // 위 isCoreLibraryDesugaringEnabled 와 짝 — flutter_local_notifications 22.x 요구 버전
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 
 tasks
