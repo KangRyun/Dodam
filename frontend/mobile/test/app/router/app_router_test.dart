@@ -16,16 +16,43 @@ void main() {
     expect(find.text('보호자 홈'), findsOneWidget);
   });
 
+  testWidgets('보호자 홈 뒤로가기는 프로필 선택 화면으로 이동한다', (tester) async {
+    await tester.pumpWidget(const DodamApp());
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('뒤로 가기'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('누가 도담을 이용하나요?'), findsOneWidget);
+    expect(find.byKey(const ValueKey('guardian-profile')), findsOneWidget);
+  });
+
   testWidgets('프로필 선택에서 아동을 누르면 해당 아동 홈으로 이동한다', (tester) async {
     await tester.pumpWidget(
       const DodamApp(initialRoute: AppRoutes.profileSelection),
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('child-profile-3')));
+    final childProfile = find.byKey(const ValueKey('child-profile-3'));
+    await tester.ensureVisible(childProfile);
+    await tester.tap(childProfile);
     await tester.pumpAndSettle();
 
     expect(find.text('도담이, 오늘은 무엇을 그려 볼까?'), findsOneWidget);
+  });
+
+  testWidgets('프로필 선택에서 아이 추가를 누르면 등록 화면으로 이동한다', (tester) async {
+    await tester.pumpWidget(
+      const DodamApp(initialRoute: AppRoutes.profileSelection),
+    );
+    await tester.pumpAndSettle();
+
+    final addChildProfile = find.byKey(const ValueKey('add-child-profile'));
+    await tester.ensureVisible(addChildProfile);
+    await tester.tap(addChildProfile);
+    await tester.pumpAndSettle();
+
+    expect(find.text('아이 등록'), findsOneWidget);
   });
 
   testWidgets('보호자 홈에서 아동 선택 화면으로 이동한다', (tester) async {
