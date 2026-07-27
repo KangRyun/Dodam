@@ -154,7 +154,9 @@ public class DrawingCompletionService {
     if (!sameSession || analysis.getTaskType() != DrawingAnalysisType.ACTIVITY_REPORT) {
       throw new BusinessException(DrawingErrorCode.IDEMPOTENCY_KEY_CONFLICT);
     }
-    validateConversation(request, conversation);
+    if (!matchesConversation(request, conversation)) {
+      throw new BusinessException(DrawingErrorCode.IDEMPOTENCY_KEY_CONFLICT);
+    }
     Optional<Report> report = reportRepository.findByAnalysisId(analysis.getId());
     if (report.isPresent() != Boolean.TRUE.equals(request.requestReport())) {
       throw new BusinessException(DrawingErrorCode.IDEMPOTENCY_KEY_CONFLICT);
@@ -179,14 +181,16 @@ public class DrawingCompletionService {
 
   private void validateConversation(
       CompleteDrawingSessionRequest request, Optional<ConversationSession> conversation) {
-    boolean skipped = Boolean.TRUE.equals(request.conversationSkipped());
-    boolean matches =
-        skipped
-            ? conversation.isEmpty()
-            : conversation.filter(ConversationSession::isCompleted).isPresent();
-    if (!matches) {
+    if (!matchesConversation(request, conversation)) {
       throw new BusinessException(DrawingErrorCode.DRAWING_CONVERSATION_NOT_COMPLETED);
     }
+  }
+
+  private boolean matchesConversation(
+      CompleteDrawingSessionRequest request, Optional<ConversationSession> conversation) {
+    return Boolean.TRUE.equals(request.conversationSkipped())
+        ? conversation.isEmpty()
+        : conversation.filter(ConversationSession::isCompleted).isPresent();
   }
 
   private DrawingCompletionResponse response(
@@ -206,7 +210,9 @@ public class DrawingCompletionService {
       throw new BusinessException(DrawingErrorCode.IDEMPOTENCY_KEY_REQUIRED);
     }
     int length = idempotencyKey.length();
-    if (length < IDEMPOTENCY_KEY_MIN_LENGTH || length > IDEMPOTENCY_KEY_MAX_LENGTH) {
+    if (length < IDEMPOTENCY_KEY_MIN_LENGTH
+        || length > IDEMPOTENCY_KEY_MAX_LENGTH
+        || idempotencyKey.chars().anyMatch(Character::isISOControl)) {
       throw new BusinessException(DrawingErrorCode.IDEMPOTENCY_KEY_INVALID);
     }
   }

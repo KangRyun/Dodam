@@ -160,6 +160,37 @@ class DrawingCompletionServiceTest {
   }
 
   @Test
+  void rejectsTheSameKeyWhenTheCompletionOptionsDiffer() {
+    DrawingAnalysis existing = org.mockito.Mockito.mock(DrawingAnalysis.class);
+    given(analysisRepository.findByRequestId(KEY)).willReturn(Optional.of(existing));
+    given(existing.getDrawingSession()).willReturn(session);
+    given(existing.getTaskType()).willReturn(DrawingAnalysisType.ACTIVITY_REPORT);
+
+    assertThatThrownBy(
+            () -> service.complete(SESSION_ID, KEY, new CompleteDrawingSessionRequest(true, false)))
+        .isInstanceOf(BusinessException.class)
+        .satisfies(
+            exception ->
+                assertThat(((BusinessException) exception).getErrorCode())
+                    .isEqualTo(DrawingErrorCode.IDEMPOTENCY_KEY_CONFLICT));
+  }
+
+  @Test
+  void rejectsControlCharactersInIdempotencyKey() {
+    assertThatThrownBy(
+            () ->
+                service.complete(
+                    SESSION_ID, "completion\nkey", new CompleteDrawingSessionRequest(false, false)))
+        .isInstanceOf(BusinessException.class)
+        .satisfies(
+            exception ->
+                assertThat(((BusinessException) exception).getErrorCode())
+                    .isEqualTo(DrawingErrorCode.IDEMPOTENCY_KEY_INVALID));
+
+    verify(accessValidator, never()).requireDrawingSessionAccess(any(), any());
+  }
+
+  @Test
   void rejectsSkippingWhenConversationAlreadyExists() {
     assertThatThrownBy(
             () -> service.complete(SESSION_ID, KEY, new CompleteDrawingSessionRequest(true, true)))

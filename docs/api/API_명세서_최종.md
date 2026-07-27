@@ -235,6 +235,8 @@ Query 기본값은 `page=0`, `size=20`이며 `size`는 `1~100`이다.
 - `Idempotency-Key`는 사용자·URI·요청 Body 해시와 함께 저장한다.
 - 같은 키와 같은 Body: 최초 상태 코드와 응답을 반환한다.
 - 같은 키와 다른 Body: `409 IDEMPOTENCY_KEY_REUSED`.
+- 그림 세션 생성·그림 단계 완료·전체 활동 완료의 현재 구현 계약과 오류 코드는
+  `drawing-idempotency-contract-v1.md`를 따른다.
 - `stroke_batches`는 `(drawing_session_id, batch_sequence)`를 유일하게 관리한다.
 - `analyses.idempotency_key`와 입력 이미지 checksum으로 중복 분석을 방지한다.
 - 좋아요·팔로우는 사용자와 대상의 복합 unique 제약으로 중복을 방지한다.
