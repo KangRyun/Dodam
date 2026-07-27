@@ -14,8 +14,13 @@ import org.springframework.util.StringUtils;
  *
  * @param type 검증할 Token 종류
  * @param value Provider가 발급한 원본 Token
+ * @param rawNonce Apple ID Token의 nonce Claim과 대조할 원본 nonce
  */
-public record OAuthProviderCredential(OAuthCredentialType type, String value) {
+public record OAuthProviderCredential(OAuthCredentialType type, String value, String rawNonce) {
+
+  OAuthProviderCredential(OAuthCredentialType type, String value) {
+    this(type, value, null);
+  }
 
   /**
    * 비어 있지 않은 Token Credential을 생성한다.
@@ -47,16 +52,24 @@ public record OAuthProviderCredential(OAuthCredentialType type, String value) {
     }
     return switch (provider) {
       case KAKAO, NAVER -> {
-        if (!hasAccessToken) {
+        if (!hasAccessToken || StringUtils.hasText(request.rawNonce())) {
           throw new BusinessException(AuthErrorCode.OAUTH_REQUEST_INVALID);
         }
-        yield new OAuthProviderCredential(OAuthCredentialType.ACCESS_TOKEN, request.accessToken());
+        yield new OAuthProviderCredential(
+            OAuthCredentialType.ACCESS_TOKEN, request.accessToken(), null);
       }
       case GOOGLE -> {
-        if (!hasIdToken) {
+        if (!hasIdToken || StringUtils.hasText(request.rawNonce())) {
           throw new BusinessException(AuthErrorCode.OAUTH_REQUEST_INVALID);
         }
-        yield new OAuthProviderCredential(OAuthCredentialType.ID_TOKEN, request.idToken());
+        yield new OAuthProviderCredential(OAuthCredentialType.ID_TOKEN, request.idToken(), null);
+      }
+      case APPLE -> {
+        if (!hasIdToken || !StringUtils.hasText(request.rawNonce())) {
+          throw new BusinessException(AuthErrorCode.OAUTH_REQUEST_INVALID);
+        }
+        yield new OAuthProviderCredential(
+            OAuthCredentialType.ID_TOKEN, request.idToken(), request.rawNonce());
       }
     };
   }

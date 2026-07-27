@@ -265,7 +265,7 @@ Query 기본값은 `page=0`, `size=20`이며 `size`는 `1~100`이다.
 | --- | --- |
 | `UserRole` | `GUARDIAN`, `EXPERT`, `ADMIN` |
 | `AccountStatus` | `PENDING`, `ACTIVE`, `SUSPENDED`, `WITHDRAWN` |
-| `AuthProvider` | `LOCAL`, `KAKAO`, `GOOGLE`, `NAVER` |
+| `AuthProvider` | `KAKAO`, `GOOGLE`, `NAVER`, `APPLE` |
 | `QuestionDifficulty` | `PRESCHOOL`, `LOWER_ELEMENTARY`, `UPPER_ELEMENTARY`, `SUPPORT` |
 | `TutorialStatus` | `NOT_STARTED`, `IN_PROGRESS`, `COMPLETED`, `SKIPPED` |
 | `ProfileStatus` | `ACTIVE`, `DELETED` |
@@ -335,9 +335,10 @@ Query 기본값은 `page=0`, `size=20`이며 `size`는 `1~100`이다.
 
 | 필드 | 타입 | 필수 | 제약 |
 | --- | --- | --- | --- |
-| Path `provider` | `AuthProvider` | O | `KAKAO`, `GOOGLE`, `NAVER` |
-| `authorizationCode` | string | O | 소셜 SDK가 받은 일회성 code |
-| `redirectUri` | string | 조건부 | Provider 설정과 정확히 일치 |
+| Path `provider` | `AuthProvider` | O | `KAKAO`, `GOOGLE`, `NAVER`, `APPLE` |
+| `accessToken` | string | 조건부 | Kakao·Naver에서 필수, 최대 4096자 |
+| `idToken` | string | 조건부 | Google·Apple에서 필수, 최대 4096자 |
+| `rawNonce` | string | 조건부 | Apple에서만 필수, 최대 512자 |
 | `deviceId` | string | O | 기기 식별자 |
 
 #### `TokenReissueRequest`

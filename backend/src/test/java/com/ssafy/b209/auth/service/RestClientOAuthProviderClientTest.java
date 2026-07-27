@@ -29,6 +29,7 @@ import org.springframework.web.client.RestClient;
 class RestClientOAuthProviderClientTest {
 
   @Mock private GoogleIdTokenVerifier googleIdTokenVerifier;
+  @Mock private AppleIdTokenVerifier appleIdTokenVerifier;
 
   private MockRestServiceServer server;
   private RestClientOAuthProviderClient client;
@@ -41,9 +42,12 @@ class RestClientOAuthProviderClientTest {
         new OAuthProviderProperties(
             new OAuthProviderProperties.Kakao("1234"),
             new OAuthProviderProperties.Google("google-client-id"),
+            new OAuthProviderProperties.Apple("com.dodam.app"),
             Duration.ofSeconds(3),
             Duration.ofSeconds(5));
-    client = new RestClientOAuthProviderClient(builder.build(), properties, googleIdTokenVerifier);
+    client =
+        new RestClientOAuthProviderClient(
+            builder.build(), properties, googleIdTokenVerifier, appleIdTokenVerifier);
   }
 
   @Test
@@ -177,6 +181,21 @@ class RestClientOAuthProviderClientTest {
     assertThat(client.verify(AuthProvider.GOOGLE, credential)).isEqualTo(identity);
 
     verify(googleIdTokenVerifier).verify("google-id-token");
+    server.verify();
+  }
+
+  @Test
+  void delegatesAppleIdTokenAndRawNonceVerification() {
+    OAuthProviderCredential credential =
+        new OAuthProviderCredential(OAuthCredentialType.ID_TOKEN, "apple-id-token", "raw-nonce");
+    VerifiedOAuthIdentity identity =
+        new VerifiedOAuthIdentity(
+            AuthProvider.APPLE, "apple-subject", "relay@privaterelay.appleid.com");
+    when(appleIdTokenVerifier.verify("apple-id-token", "raw-nonce")).thenReturn(identity);
+
+    assertThat(client.verify(AuthProvider.APPLE, credential)).isEqualTo(identity);
+
+    verify(appleIdTokenVerifier).verify("apple-id-token", "raw-nonce");
     server.verify();
   }
 

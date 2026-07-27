@@ -116,8 +116,8 @@ class SwaggerEndpointTest {
   void oauthRequestSchemaDocumentsProviderTokenFields() throws Exception {
     JsonNode schema = componentSchema(apiV1Document(), "OAuthLoginRequest");
 
-    assertSchemaProperties(schema, Set.of("accessToken", "idToken", "deviceId"));
-    assertSchemaDescriptions(schema, Set.of("accessToken", "idToken", "deviceId"));
+    assertSchemaProperties(schema, Set.of("accessToken", "idToken", "rawNonce", "deviceId"));
+    assertSchemaDescriptions(schema, Set.of("accessToken", "idToken", "rawNonce", "deviceId"));
   }
 
   @Test
