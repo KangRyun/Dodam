@@ -106,6 +106,51 @@ class OAuthControllerTest {
   }
 
   @Test
+  void logsInWithAppleIdTokenAndRawNonce() throws Exception {
+    when(loginService.login(eq(AuthProvider.APPLE), any(OAuthLoginRequest.class)))
+        .thenReturn(
+            new OAuthLoginResult(
+                "Bearer",
+                "access-token",
+                1800,
+                "refresh-token",
+                1209600,
+                new OAuthLoginUser(
+                    43L,
+                    null,
+                    null,
+                    "relay@privaterelay.appleid.com",
+                    false,
+                    AccountStatus.PENDING,
+                    false)));
+
+    mockMvc
+        .perform(
+            post("/api/v1/auth/oauth/apple")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "idToken": "apple-id-token",
+                      "rawNonce": "raw-nonce",
+                      "deviceId": "device-1"
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.success").value(true))
+        .andExpect(jsonPath("$.data.user.userId").value(43));
+
+    verify(loginService)
+        .login(
+            eq(AuthProvider.APPLE),
+            argThat(
+                request ->
+                    request.accessToken() == null
+                        && "apple-id-token".equals(request.idToken())
+                        && "raw-nonce".equals(request.rawNonce())));
+  }
+
+  @Test
   void rejectsUnsupportedProviderWithoutCallingExternalSystem() throws Exception {
     mockMvc
         .perform(

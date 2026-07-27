@@ -14,7 +14,7 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestClientResponseException;
 
 /**
- * Kakao·Naver Access Token을 Provider REST API에서 검증하고 Google 검증을 전용 구현에 위임한다.
+ * Kakao·Naver Access Token을 Provider REST API에서 검증하고 Google·Apple ID Token 검증을 전용 구현에 위임한다.
  *
  * <p>전달받은 Provider Token은 요청 중에만 사용하며 저장하거나 로그에 기록하지 않는다.
  */
@@ -29,6 +29,7 @@ public class RestClientOAuthProviderClient implements OAuthProviderClient {
   private final RestClient restClient;
   private final OAuthProviderProperties properties;
   private final GoogleIdTokenVerifier googleIdTokenVerifier;
+  private final AppleIdTokenVerifier appleIdTokenVerifier;
 
   /**
    * Provider API Client를 구성한다.
@@ -36,27 +37,32 @@ public class RestClientOAuthProviderClient implements OAuthProviderClient {
    * @param builder Spring이 제공하는 RestClient Builder
    * @param properties Provider 애플리케이션과 통신 제한 시간 설정
    * @param googleIdTokenVerifier Google ID Token 로컬 검증기
+   * @param appleIdTokenVerifier Apple Identity Token 로컬 검증기
    */
   @Autowired
   public RestClientOAuthProviderClient(
       RestClient.Builder builder,
       OAuthProviderProperties properties,
-      GoogleIdTokenVerifier googleIdTokenVerifier) {
+      GoogleIdTokenVerifier googleIdTokenVerifier,
+      AppleIdTokenVerifier appleIdTokenVerifier) {
     SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
     requestFactory.setConnectTimeout(properties.connectTimeout());
     requestFactory.setReadTimeout(properties.readTimeout());
     this.restClient = builder.requestFactory(requestFactory).build();
     this.properties = properties;
     this.googleIdTokenVerifier = googleIdTokenVerifier;
+    this.appleIdTokenVerifier = appleIdTokenVerifier;
   }
 
   RestClientOAuthProviderClient(
       RestClient restClient,
       OAuthProviderProperties properties,
-      GoogleIdTokenVerifier googleIdTokenVerifier) {
+      GoogleIdTokenVerifier googleIdTokenVerifier,
+      AppleIdTokenVerifier appleIdTokenVerifier) {
     this.restClient = restClient;
     this.properties = properties;
     this.googleIdTokenVerifier = googleIdTokenVerifier;
+    this.appleIdTokenVerifier = appleIdTokenVerifier;
   }
 
   /**
@@ -72,6 +78,9 @@ public class RestClientOAuthProviderClient implements OAuthProviderClient {
     requireCredentialType(provider, credential);
     if (provider == AuthProvider.GOOGLE) {
       return googleIdTokenVerifier.verify(credential.value());
+    }
+    if (provider == AuthProvider.APPLE) {
+      return appleIdTokenVerifier.verify(credential.value(), credential.rawNonce());
     }
     try {
       return switch (provider) {
