@@ -1,8 +1,11 @@
 # Flutter-Backend 공개 API 계약 동결본 v1
 
-> Jira: S15P11B209-525  
-> 기준일: 2026-07-27  
-> 기준 Commit: `9138eccdd832cba9063f7b017b22c94e0194846a`  
+> Jira: S15P11B209-525
+>
+> 기준일: 2026-07-27
+>
+> 기준 Commit: `9138eccdd832cba9063f7b017b22c94e0194846a`
+>
 > 외부 Base URL: `/api/v1`
 
 ## 1. 문서 역할
