@@ -10,9 +10,8 @@ void main() {
     'type': 'ANALYSIS_COMPLETED',
     'title': '분석이 완료됐어요',
     'content': '리포트를 확인해 보세요',
-    if (relatedResourceType != null) 'relatedResourceType':
-        relatedResourceType,
-    if (relatedResourceId != null) 'relatedResourceId': relatedResourceId,
+    'relatedResourceType': ?relatedResourceType,
+    'relatedResourceId': ?relatedResourceId,
   };
 
   test('계약대로 온 data 메시지를 파싱한다', () {
