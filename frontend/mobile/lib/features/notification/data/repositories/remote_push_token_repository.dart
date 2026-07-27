@@ -7,15 +7,24 @@ import '../../domain/repositories/push_token_repository.dart';
 /// `deviceId`는 인증이 쓰는 설치 식별자([DeviceIdProvider])를 그대로 재사용한다.
 /// 호출마다 새 값을 만들면 upsert가 성립하지 않아 죽은 Token이 누적된다.
 final class RemotePushTokenRepository implements PushTokenRepository {
-  RemotePushTokenRepository({
+  factory RemotePushTokenRepository({
     required ApiClient apiClient,
     required DeviceIdProvider deviceIdProvider,
     String platform = 'ANDROID',
     String appVersion = _fallbackAppVersion,
-  }) : _apiClient = apiClient,
-       _deviceIdProvider = deviceIdProvider,
-       _platform = platform,
-       _appVersion = appVersion;
+  }) => RemotePushTokenRepository._(
+    apiClient,
+    deviceIdProvider,
+    platform,
+    appVersion,
+  );
+
+  RemotePushTokenRepository._(
+    this._apiClient,
+    this._deviceIdProvider,
+    this._platform,
+    this._appVersion,
+  );
 
   static const _path = 'notifications/device-tokens';
 
