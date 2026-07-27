@@ -84,6 +84,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   final List<DrawingStroke> _completedStrokes = [];
   DrawingStroke? _activeStroke;
+  DrawingTool _tool = DrawingTool.pen;
   Color _color = AppColors.drawingInk;
   double _thickness = _regular;
   int? _activePointer;
@@ -476,6 +477,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
         points: [_pointFrom(event)],
         color: _color,
         thickness: _thickness,
+        tool: _tool,
       );
     });
   }
@@ -509,9 +511,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
     if (_activeStroke != null || _completedStrokes.isEmpty) return;
     _invalidatePendingCompletion();
     _objectDetectionController?.onDrawingInputStarted();
-    // A recovered Draft is a bitmap, so Undo intentionally targets only
-    // vector strokes created after restore. TODO(API): Revisit when the server
-    // provides an authoritative vector-history recovery contract.
+    // Rebuilding the vector action list also restores pixels removed from a
+    // recovered Draft by the last local eraser stroke.
     setState(() => _completedStrokes.removeLast());
     _syncCoordinator.recordUndo();
     _objectDetectionController?.onDrawingInputEnded();
@@ -733,8 +734,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
             sttResultController: _sttResultController,
           );
           final sidePanel = _DrawingSidePanel(
+            selectedTool: _tool,
             selectedColor: _color,
             selectedThickness: _thickness,
+            onToolChanged: (tool) => setState(() => _tool = tool),
             onColorChanged: (color) => setState(() => _color = color),
             onThicknessChanged: (value) => setState(() => _thickness = value),
             canComplete:
@@ -1033,8 +1036,10 @@ class _DraftRestoreOverlay extends StatelessWidget {
 
 class _DrawingSidePanel extends StatelessWidget {
   const _DrawingSidePanel({
+    required this.selectedTool,
     required this.selectedColor,
     required this.selectedThickness,
+    required this.onToolChanged,
     required this.onColorChanged,
     required this.onThicknessChanged,
     required this.canComplete,
@@ -1045,8 +1050,10 @@ class _DrawingSidePanel extends StatelessWidget {
     this.questionController,
   });
 
+  final DrawingTool selectedTool;
   final Color selectedColor;
   final double selectedThickness;
+  final ValueChanged<DrawingTool> onToolChanged;
   final ValueChanged<Color> onColorChanged;
   final ValueChanged<double> onThicknessChanged;
   final bool canComplete;
@@ -1105,9 +1112,31 @@ class _DrawingSidePanel extends StatelessWidget {
             ],
           ),
           const SizedBox(height: AppSpacing.lg),
-          const _ToolHeading(icon: Icons.edit_rounded, label: '펜'),
+          const _ToolHeading(icon: Icons.edit_rounded, label: '도구'),
           const SizedBox(height: AppSpacing.xs),
-          const _SelectedToolCard(),
+          Row(
+            children: [
+              Expanded(
+                child: _ToolChoice(
+                  key: const ValueKey('drawing-tool-pen'),
+                  label: '펜',
+                  icon: Icons.edit_rounded,
+                  selected: selectedTool == DrawingTool.pen,
+                  onTap: () => onToolChanged(DrawingTool.pen),
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: _ToolChoice(
+                  key: const ValueKey('drawing-tool-eraser'),
+                  label: '지우개',
+                  icon: Icons.auto_fix_normal_rounded,
+                  selected: selectedTool == DrawingTool.eraser,
+                  onTap: () => onToolChanged(DrawingTool.eraser),
+                ),
+              ),
+            ],
+          ),
           const SizedBox(height: AppSpacing.lg),
           const _ToolHeading(icon: Icons.palette_outlined, label: '색상'),
           const SizedBox(height: AppSpacing.xs),
@@ -1251,24 +1280,71 @@ class _ToolHeading extends StatelessWidget {
   );
 }
 
-class _SelectedToolCard extends StatelessWidget {
-  const _SelectedToolCard();
+class _ToolChoice extends StatelessWidget {
+  const _ToolChoice({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+    super.key,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => Container(
-    constraints: const BoxConstraints(minHeight: AppSizes.minTouchTarget),
-    padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
-    decoration: BoxDecoration(
-      color: AppColors.leafSoft,
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    selected: selected,
+    label: '$label 도구',
+    child: InkWell(
+      onTap: onTap,
       borderRadius: BorderRadius.circular(AppRadius.md),
-      border: Border.all(color: AppColors.leaf, width: 2),
-    ),
-    child: const Row(
-      children: [
-        Icon(Icons.edit_rounded, color: AppColors.leaf),
-        SizedBox(width: AppSpacing.xs),
-        Text('기본 펜 선택됨', style: TextStyle(fontWeight: FontWeight.w800)),
-      ],
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 150),
+        constraints: const BoxConstraints(
+          minHeight: AppSizes.minTouchTarget,
+          minWidth: AppSizes.minTouchTarget,
+        ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.sm,
+          vertical: AppSpacing.xs,
+        ),
+        decoration: BoxDecoration(
+          color: selected ? AppColors.leafSoft : AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          border: Border.all(
+            color: selected ? AppColors.leaf : AppColors.outline,
+            width: selected ? 2 : 1,
+          ),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: selected ? AppColors.leaf : AppColors.inkMuted),
+            const SizedBox(width: AppSpacing.xs),
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(
+                  color: selected ? AppColors.ink : AppColors.inkMuted,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            if (selected) ...[
+              const SizedBox(width: AppSpacing.xs),
+              const Icon(
+                Icons.check_circle_rounded,
+                size: 18,
+                color: AppColors.leaf,
+              ),
+            ],
+          ],
+        ),
+      ),
     ),
   );
 }

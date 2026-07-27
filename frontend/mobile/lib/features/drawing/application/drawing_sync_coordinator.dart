@@ -139,7 +139,10 @@ final class StrokeBatchQueue {
           lastEventSequence: events.last.sequence,
           clientCreatedAt: _now().toUtc().toIso8601String(),
           events: events,
-          metrics: StrokeMetricsDto(undoCountDelta: conversion.undoCount),
+          metrics: StrokeMetricsDto(
+            undoCountDelta: conversion.undoCount,
+            eraseCountDelta: conversion.eraseCount,
+          ),
         );
         _buffer.removeRange(0, conversion.consumedRawEventCount);
         _queue.add(
@@ -213,17 +216,20 @@ final class StrokeBatchConversion {
     required this.events,
     required this.consumedRawEventCount,
     required this.undoCount,
+    required this.eraseCount,
   });
 
   final List<StrokeBatchEventDto> events;
   final int consumedRawEventCount;
   final int undoCount;
+  final int eraseCount;
 }
 
 abstract final class StrokeBatchEventConverter {
   static StrokeBatchConversion convert(List<StrokeEventDto> rawEvents) {
     final converted = <StrokeBatchEventDto>[];
     var undoCount = 0;
+    var eraseCount = 0;
     var index = 0;
     var previousSequence = 0;
 
@@ -268,6 +274,7 @@ abstract final class StrokeBatchEventConverter {
           events: List.unmodifiable(converted),
           consumedRawEventCount: startIndex,
           undoCount: undoCount,
+          eraseCount: eraseCount,
         );
       }
 
@@ -281,7 +288,9 @@ abstract final class StrokeBatchEventConverter {
         throw StateError('Stroke event sequence must be strictly increasing.');
       }
 
-      converted.add(_convertStroke(rawEvents.sublist(startIndex, cursor + 1)));
+      final stroke = _convertStroke(rawEvents.sublist(startIndex, cursor + 1));
+      converted.add(stroke);
+      if (stroke.tool == 'ERASER') eraseCount += 1;
       previousSequence = end.seq;
       index = cursor + 1;
     }
@@ -290,14 +299,15 @@ abstract final class StrokeBatchEventConverter {
       events: List.unmodifiable(converted),
       consumedRawEventCount: index,
       undoCount: undoCount,
+      eraseCount: eraseCount,
     );
   }
 
   static StrokeBatchEventDto _convertStroke(List<StrokeEventDto> events) {
     final start = events.first;
     final end = events.last;
-    if (start.tool == null ||
-        start.color == null ||
+    if ((start.tool != 'PEN' && start.tool != 'ERASER') ||
+        (start.tool == 'PEN' && start.color == null) ||
         start.thickness == null ||
         start.thickness! <= 0) {
       throw StateError('STROKE_START must contain valid stroke attributes.');

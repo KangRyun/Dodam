@@ -61,6 +61,37 @@ void main() {
     expect(journal.events, hasLength(4));
   });
 
+  test('지우개 stroke는 ERASER 도구와 굵기를 보존하고 색상은 전송하지 않는다', () {
+    final events = DrawingStrokeEventConverter.convert(
+      stroke: const DrawingStroke(
+        tool: DrawingTool.eraser,
+        color: AppColors.drawingRed,
+        thickness: 14,
+        points: [
+          DrawingPoint(
+            position: Offset(10, 20),
+            elapsedMilliseconds: 100,
+            pressure: 0.25,
+          ),
+          DrawingPoint(
+            position: Offset(30, 40),
+            elapsedMilliseconds: 120,
+            pressure: 0.75,
+          ),
+        ],
+      ),
+      canvasSize: const Size(100, 100),
+      sequenceAllocator: SessionSequenceAllocator(),
+    );
+
+    expect(events.first.tool, 'ERASER');
+    expect(events.first.color, isNull);
+    expect(events.first.thickness, 14);
+    expect(events.map((event) => event.pressure), [0.25, 0.75]);
+    expect(events.first.toJson(), isNot(contains('color')));
+    expect(events.map((event) => event.type), ['STROKE_START', 'STROKE_END']);
+  });
+
   test('단일 point stroke는 동일 좌표의 START END를 생성하고 seq 2개를 소비한다', () {
     final allocator = SessionSequenceAllocator(startValue: 5);
     final events = DrawingStrokeEventConverter.convert(
