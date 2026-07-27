@@ -136,7 +136,7 @@ class RestClientOAuthProviderClientTest {
             new OAuthProviderCredential(OAuthCredentialType.ACCESS_TOKEN, "naver-access-token"));
 
     assertThat(identity.providerSubject()).isEqualTo("naver-id");
-    assertThat(identity.providerEmail()).isNull();
+    assertThat(identity.providerEmail()).isEqualTo("user@example.com");
     server.verify();
   }
 

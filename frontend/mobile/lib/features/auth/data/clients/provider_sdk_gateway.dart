@@ -63,25 +63,47 @@ abstract interface class ProviderSdkGateway {
   Future<void> signOut();
 }
 
+/// Kakao SDK 호출을 로그인 정책과 분리하는 경계다.
+abstract interface class KakaoSdkClient {
+  Future<void> initialize(String nativeAppKey);
+
+  Future<String> login();
+
+  Future<bool> needsEmailAgreement();
+
+  Future<String?> requestAdditionalConsent(List<String> scopes);
+
+  Future<void> logout();
+}
+
 /// Kakao Flutter SDK를 초기화하고 Kakao Access Token을 발급받는다.
 final class KakaoProviderSdkGateway implements ProviderSdkGateway {
   factory KakaoProviderSdkGateway({
     String nativeAppKey = const String.fromEnvironment('KAKAO_NATIVE_APP_KEY'),
-  }) => KakaoProviderSdkGateway._(nativeAppKey);
+    KakaoSdkClient? sdkClient,
+  }) => KakaoProviderSdkGateway._(
+    nativeAppKey,
+    sdkClient ?? _DefaultKakaoSdkClient(),
+  );
 
-  KakaoProviderSdkGateway._(this._nativeAppKey);
+  KakaoProviderSdkGateway._(this._nativeAppKey, this._sdkClient);
 
   final String _nativeAppKey;
+  final KakaoSdkClient _sdkClient;
   Future<void>? _initialization;
 
   @override
   Future<String?> signIn() async {
     try {
       await _initialize();
-      final token = await ((await isKakaoTalkInstalled())
-          ? UserApi.instance.loginWithKakaoTalk()
-          : UserApi.instance.loginWithKakaoAccount());
-      return token.accessToken;
+      final initialToken = await _sdkClient.login();
+      if (!await _sdkClient.needsEmailAgreement()) {
+        return initialToken;
+      }
+      return await _sdkClient.requestAdditionalConsent(const [
+            'account_email',
+          ]) ??
+          initialToken;
     } on KakaoClientException catch (error) {
       throw _sdkFailure(
         'kakao',
@@ -106,7 +128,7 @@ final class KakaoProviderSdkGateway implements ProviderSdkGateway {
   Future<void> signOut() async {
     try {
       await _initialize();
-      await UserApi.instance.logout();
+      await _sdkClient.logout();
     } on ProviderSdkFailure {
       rethrow;
     } on Object catch (error, stackTrace) {
@@ -125,11 +147,41 @@ final class KakaoProviderSdkGateway implements ProviderSdkGateway {
         _nativeAppKey.startsWith('missing-')) {
       throw _sdkFailure('kakao', ProviderSdkFailureType.configuration, null);
     }
-    return _initialization ??= KakaoSdk.init(
-      nativeAppKey: _nativeAppKey,
-      loggingEnabled: false,
-    );
+    return _initialization ??= _sdkClient.initialize(_nativeAppKey);
   }
+}
+
+final class _DefaultKakaoSdkClient implements KakaoSdkClient {
+  @override
+  Future<void> initialize(String nativeAppKey) =>
+      KakaoSdk.init(nativeAppKey: nativeAppKey, loggingEnabled: false);
+
+  @override
+  Future<String> login() async {
+    final token = await ((await isKakaoTalkInstalled())
+        ? UserApi.instance.loginWithKakaoTalk()
+        : UserApi.instance.loginWithKakaoAccount());
+    return token.accessToken;
+  }
+
+  @override
+  Future<bool> needsEmailAgreement() async =>
+      (await UserApi.instance.me()).kakaoAccount?.emailNeedsAgreement == true;
+
+  @override
+  Future<String?> requestAdditionalConsent(List<String> scopes) async {
+    try {
+      return (await UserApi.instance.loginWithNewScopes(scopes)).accessToken;
+    } on KakaoClientException catch (error) {
+      if (error.reason == ClientErrorCause.cancelled) {
+        return null;
+      }
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> logout() => UserApi.instance.logout();
 }
 
 /// Google Sign-In SDK에서 Backend Audience용 ID Token을 발급받는다.
