@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import dataclass
+from unittest import mock
 
 import analysis_service as svc
 import internal_contracts as contracts
@@ -346,6 +347,32 @@ class InternalHealthTest(unittest.TestCase):
         text = json.dumps(self._payload(), ensure_ascii=False)
         self.assertNotIn(config.YOLO_MODEL_PATH, text)
         self.assertNotIn("/", text.split('"timestamp"')[0])
+
+
+class DetectOrDegradeTest(unittest.TestCase):
+    """604 fallback — 탐지 실패 시 502 대신 빈 탐지 + 경고로 degrade한다."""
+
+    def test_returns_detection_result_on_success(self):
+        with mock.patch.object(
+            svc.yolo_client, "detect_and_annotate", return_value=(["d"], b"png")
+        ):
+            warnings: list[str] = []
+            detections, annotated = svc._detect_or_degrade("/x.png", b"orig", warnings)
+        self.assertEqual(detections, ["d"])
+        self.assertEqual(annotated, b"png")
+        self.assertEqual(warnings, [])
+
+    def test_degrades_to_empty_with_warning_on_failure(self):
+        with mock.patch.object(
+            svc.yolo_client,
+            "detect_and_annotate",
+            side_effect=RuntimeError("가중치 무결성 검증 실패"),
+        ):
+            warnings: list[str] = []
+            detections, annotated = svc._detect_or_degrade("/x.png", b"orig-bytes", warnings)
+        self.assertEqual(detections, [])
+        self.assertEqual(annotated, b"orig-bytes")  # 원본 이미지로 진행
+        self.assertIn("OBJECT_DETECTION_UNAVAILABLE", warnings)
 
 
 if __name__ == "__main__":

@@ -6,7 +6,11 @@ ultralytics 결과 객체를 흉내 낸 가짜(fake)로 _parse_result 를 직접
 
 from __future__ import annotations
 
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest import mock
 
 import yolo_client
 
@@ -72,6 +76,104 @@ class ParseResultTest(unittest.TestCase):
     def test_empty_detections(self):
         result = _FakeResult(rows=[], names={0: "가지"}, shape=(100, 100))
         self.assertEqual(yolo_client._parse_result(result), [])
+
+
+class VerifyChecksumTest(unittest.TestCase):
+    """가중치 무결성 검증 — torch/실제 가중치 없이 sha256 로직만 검증한다."""
+
+    def _tmpfile(self, content: bytes) -> Path:
+        fd, name = tempfile.mkstemp()
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+        self.addCleanup(os.unlink, name)
+        return Path(name)
+
+    def test_matching_checksum_passes(self):
+        path = self._tmpfile(b"weights-bytes")
+        expected = yolo_client._sha256_of_file(path)
+        # 일치하면 예외 없이 통과한다.
+        yolo_client._verify_checksum(path, expected)
+
+    def test_mismatch_raises_runtimeerror(self):
+        path = self._tmpfile(b"weights-bytes")
+        with self.assertRaises(RuntimeError):
+            yolo_client._verify_checksum(path, "0" * 64)
+
+    def test_unset_expected_skips_verification(self):
+        path = self._tmpfile(b"weights-bytes")
+        # 미설정(빈 문자열·None)이면 예외 없이 통과한다(경고만).
+        yolo_client._verify_checksum(path, "")
+        yolo_client._verify_checksum(path, None)
+
+    def test_expected_is_case_and_whitespace_insensitive(self):
+        path = self._tmpfile(b"weights-bytes")
+        digest = yolo_client._sha256_of_file(path)
+        yolo_client._verify_checksum(path, f"  {digest.upper()}  ")
+
+
+class ModelRegistryTest(unittest.TestCase):
+    def test_registry_exposes_htp_and_sketch(self):
+        registry = yolo_client._model_registry()
+        self.assertIn("htp", registry)
+        self.assertIn("sketch", registry)
+
+    def test_unknown_model_key_raises_valueerror(self):
+        # torch를 건드리기 전에 알 수 없는 키를 거른다.
+        with self.assertRaises(ValueError):
+            yolo_client._get_model("does-not-exist")
+
+
+class ModelReadinessTest(unittest.TestCase):
+    """health용 준비 여부 — 예외 없이 boolean, 존재+checksum 반영, 캐시."""
+
+    def setUp(self):
+        yolo_client._readiness_cache = None
+        self.addCleanup(setattr, yolo_client, "_readiness_cache", None)
+
+    def _tmpfile(self, content: bytes) -> str:
+        fd, name = tempfile.mkstemp()
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+        self.addCleanup(os.unlink, name)
+        return name
+
+    def test_ready_when_present_and_checksum_matches(self):
+        path = self._tmpfile(b"weights")
+        digest = yolo_client._sha256_of_file(Path(path))
+        with mock.patch.object(
+            yolo_client, "_model_registry", return_value={"htp": (path, digest)}
+        ):
+            self.assertEqual(yolo_client.model_readiness(refresh=True), {"htp": True})
+
+    def test_not_ready_when_checksum_mismatches(self):
+        path = self._tmpfile(b"weights")
+        with mock.patch.object(
+            yolo_client, "_model_registry", return_value={"htp": (path, "0" * 64)}
+        ):
+            self.assertEqual(yolo_client.model_readiness(refresh=True), {"htp": False})
+
+    def test_not_ready_when_file_missing(self):
+        with mock.patch.object(
+            yolo_client, "_model_registry", return_value={"htp": ("/no/such.pt", "0" * 64)}
+        ):
+            self.assertEqual(yolo_client.model_readiness(refresh=True), {"htp": False})
+
+    def test_ready_when_expected_unset(self):
+        path = self._tmpfile(b"weights")
+        with mock.patch.object(
+            yolo_client, "_model_registry", return_value={"htp": (path, "")}
+        ):
+            self.assertEqual(yolo_client.model_readiness(refresh=True), {"htp": True})
+
+    def test_result_is_cached_until_refresh(self):
+        path = self._tmpfile(b"weights")
+        digest = yolo_client._sha256_of_file(Path(path))
+        with mock.patch.object(
+            yolo_client, "_model_registry", return_value={"htp": (path, digest)}
+        ) as registry:
+            yolo_client.model_readiness(refresh=True)
+            yolo_client.model_readiness()  # 캐시 사용 — 레지스트리 재조회 없음
+            self.assertEqual(registry.call_count, 1)
 
 
 if __name__ == "__main__":

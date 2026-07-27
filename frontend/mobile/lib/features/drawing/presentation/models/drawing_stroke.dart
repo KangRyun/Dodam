@@ -1,6 +1,6 @@
 import 'dart:ui';
 
-enum DrawingTool { pen }
+enum DrawingTool { pen, eraser }
 
 final class DrawingPoint {
   const DrawingPoint({

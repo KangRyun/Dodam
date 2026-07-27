@@ -1,6 +1,7 @@
 import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
 import 'package:dodam/features/drawing/application/drawing_sync_coordinator.dart';
+import 'package:dodam/features/drawing/presentation/models/drawing_stroke.dart';
 import 'package:dodam/features/drawing/presentation/widgets/drawing_canvas.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -61,6 +62,73 @@ void main() {
     expect(strokes[1].thickness, 8);
     expect(strokes[2].color, AppColors.drawingRed);
     expect(strokes[2].thickness, 4);
+  });
+
+  testWidgets('PEN과 ERASER 전환은 펜 색상을 보존하고 굵기 3단계를 공유한다', (tester) async {
+    await _pumpDrawing(tester);
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('color-빨강')));
+    await tester.tap(find.byKey(const ValueKey('drawing-tool-eraser')));
+    await tester.pump();
+
+    for (final (label, _, offset) in [
+      ('얇게', 4.0, const Offset(-80, -40)),
+      ('보통', 8.0, Offset.zero),
+      ('굵게', 14.0, const Offset(80, 40)),
+    ]) {
+      await tester.tap(find.text(label));
+      await tester.pump();
+      await _drawStroke(tester, center + offset);
+    }
+
+    await tester.tap(find.byKey(const ValueKey('drawing-tool-pen')));
+    await tester.pump();
+    await _drawStroke(tester, center + const Offset(120, -50));
+
+    final strokes = _canvas(tester).strokes;
+    expect(strokes.map((stroke) => stroke.tool), [
+      DrawingTool.eraser,
+      DrawingTool.eraser,
+      DrawingTool.eraser,
+      DrawingTool.pen,
+    ]);
+    expect(strokes.take(3).map((stroke) => stroke.thickness), [4, 8, 14]);
+    expect(strokes.last.color, AppColors.drawingRed);
+    expect(strokes.last.thickness, 14);
+  });
+
+  testWidgets('펜과 지우개 선택 영역은 48×48 이상이며 아이콘과 테두리로 상태를 구분한다', (tester) async {
+    await _pumpDrawing(tester, size: const Size(844, 419));
+
+    final pen = find.byKey(const ValueKey('drawing-tool-pen'));
+    final eraser = find.byKey(const ValueKey('drawing-tool-eraser'));
+    for (final tool in [pen, eraser]) {
+      final size = tester.getSize(tool);
+      expect(size.width, greaterThanOrEqualTo(48));
+      expect(size.height, greaterThanOrEqualTo(48));
+    }
+    expect(
+      find.descendant(
+        of: eraser,
+        matching: find.byIcon(Icons.auto_fix_normal_rounded),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(eraser);
+    await tester.pumpAndSettle();
+
+    final selectedContainer = tester.widget<AnimatedContainer>(
+      find.descendant(of: eraser, matching: find.byType(AnimatedContainer)),
+    );
+    final selectedDecoration = selectedContainer.decoration! as BoxDecoration;
+    final selectedBorder = selectedDecoration.border! as Border;
+    expect(selectedBorder.top.color, AppColors.leaf);
+    expect(selectedBorder.top.width, 2);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('stroke 생성 후 완료 버튼이 활성화된다', (tester) async {

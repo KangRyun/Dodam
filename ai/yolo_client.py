@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +18,8 @@ import config
 
 logger = logging.getLogger(__name__)
 
-_model = None  # 지연 로딩 싱글턴
+_models: dict[str, object] = {}  # 모델 키별 지연 로딩 싱글턴 캐시
+_readiness_cache: dict[str, bool] | None = None  # 모델별 준비 여부(health용) 1회 계산 캐시
 
 
 @dataclass(frozen=True)
@@ -34,20 +36,113 @@ class Detection:
     bbox_norm_xywh: tuple[float, float, float, float]
 
 
-def _get_model():
-    """YOLO 가중치를 한 번만 로드한다(지연 싱글턴). 파일이 없으면 명확히 실패."""
-    global _model
-    if _model is None:
-        path = Path(config.YOLO_MODEL_PATH)
+def _model_registry() -> dict[str, tuple[str, str]]:
+    """모델 키 → (가중치 경로, 기대 sha256). config에서 조립한다.
+
+    HTP(집-나무-사람)와 그림일기(자유 그림)는 가중치가 다르다. 키로 구분해 각각
+    로드·검증한다. 그림일기(sketch) 모델은 현재 등록·검증만 하며, 분석 파이프라인
+    라우팅은 후속 계약과 함께 붙인다.
+    """
+    return {
+        "htp": (config.YOLO_MODEL_PATH, config.YOLO_MODEL_SHA256),
+        "sketch": (config.SKETCH_MODEL_PATH, config.SKETCH_MODEL_SHA256),
+    }
+
+
+def _sha256_of_file(path: Path) -> str:
+    """가중치 파일의 sha256 hex. 대용량이라 청크로 읽어 메모리를 아낀다."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _verify_checksum(path: Path, expected: str | None) -> None:
+    """가중치 무결성 검증. 불일치면 실패(fail-closed), 미설정이면 경고 후 통과.
+
+    reason: 파일 존재만 보면 전송 중 손상·오배포된 가중치가 조용히 로드돼 분석 결과가
+    오염된다. 로드 전에 sha256을 기대값과 대조한다. 해시는 비밀이 아니라 무결성 지문이라
+    불일치 시 로그·예외에 남겨도 된다(가드레일: 이미지 원본·경로가 아니다).
+    """
+    if not expected or not expected.strip():
+        logger.warning("가중치 checksum 미설정(%s) — 무결성 검증을 건너뜁니다.", path.name)
+        return
+    actual = _sha256_of_file(path)
+    if actual != expected.strip().lower():
+        raise RuntimeError(
+            f"YOLO 가중치 무결성 검증 실패: {path.name} "
+            f"(기대 {expected.strip().lower()[:12]}…, 실제 {actual[:12]}…). "
+            "배포된 가중치가 손상됐거나 기대 해시가 어긋났습니다."
+        )
+
+
+def _get_model(key: str = "htp"):
+    """지정 모델 가중치를 한 번만 로드한다(키별 지연 싱글턴). 로드 전 checksum을 검증한다.
+
+    파일이 없거나(RuntimeError) checksum이 어긋나면(RuntimeError) 명확히 실패한다.
+    """
+    if key not in _models:
+        registry = _model_registry()
+        if key not in registry:
+            raise ValueError(f"알 수 없는 모델 키: {key!r} (가능: {sorted(registry)}).")
+        path_str, expected = registry[key]
+        path = Path(path_str)
         if not path.exists():
             raise RuntimeError(
                 f"YOLO 가중치를 찾을 수 없어요: {path.name} "
-                "(YOLO_MODEL_PATH로 경로를 지정하거나 모델을 먼저 다운로드하세요)."
+                "(경로 env로 지정하거나 모델을 먼저 배포하세요)."
             )
+        _verify_checksum(path, expected)
         from ultralytics import YOLO  # 지연 import — torch는 여기서만 필요
 
-        _model = YOLO(str(path))
-    return _model
+        _models[key] = YOLO(str(path))
+    return _models[key]
+
+
+def verify_all_models() -> dict[str, str]:
+    """등록된 모든 모델의 존재·checksum을 torch 로드 없이 점검한다(배포 검증·health용).
+
+    각 모델 키에 "ok"(검증 통과) / "unverified"(기대 해시 미설정)를 돌려주고, 파일 부재·
+    checksum 불일치는 예외로 즉시 드러낸다(fail-closed). 실제 추론 전에 운영 가중치가
+    기대한 것인지 독립적으로 확인하는 경로다(S15P11B209-603 완료조건).
+    """
+    statuses: dict[str, str] = {}
+    for key, (path_str, expected) in _model_registry().items():
+        path = Path(path_str)
+        if not path.exists():
+            raise RuntimeError(f"YOLO 가중치를 찾을 수 없어요: {key}={path.name}")
+        _verify_checksum(path, expected)
+        statuses[key] = "ok" if (expected and expected.strip()) else "unverified"
+    return statuses
+
+
+def model_readiness(*, refresh: bool = False) -> dict[str, bool]:
+    """등록된 모델별 준비 여부(존재 + checksum 일치)를 예외 없이 boolean으로 반환한다(health용).
+
+    verify_all_models()는 실패를 예외로 드러내지만(배포 검증·fail-closed), health는 자주
+    조회되므로 예외 대신 True/False로 조용히 보고한다. 손상·부재·읽기 오류는 False,
+    기대 해시 미설정은 '존재하면 준비'로 본다.
+
+    가중치는 프로세스 수명 동안 바뀌지 않으므로(볼륨 :ro, 교체 시 컨테이너 재기동) 첫 계산을
+    캐시해 poll마다 대용량 파일을 다시 해시하지 않는다. refresh=True로 강제 재계산한다.
+    """
+    global _readiness_cache
+    if _readiness_cache is None or refresh:
+        readiness: dict[str, bool] = {}
+        for key, (path_str, expected) in _model_registry().items():
+            path = Path(path_str)
+            if not path.exists():
+                readiness[key] = False
+            elif not expected or not expected.strip():
+                readiness[key] = True
+            else:
+                try:
+                    readiness[key] = _sha256_of_file(path) == expected.strip().lower()
+                except OSError:
+                    readiness[key] = False
+        _readiness_cache = readiness
+    return dict(_readiness_cache)
 
 
 def _parse_result(result) -> list[Detection]:

@@ -152,7 +152,9 @@ abstract final class DrawingStrokeEventConverter {
     x: (point.position.dx / canvasSize.width).clamp(0.0, 1.0),
     y: (point.position.dy / canvasSize.height).clamp(0.0, 1.0),
     tool: includeStyle ? _toolCode(stroke.tool) : null,
-    color: includeStyle ? _colorHex(stroke.color) : null,
+    color: includeStyle && stroke.tool == DrawingTool.pen
+        ? _colorHex(stroke.color)
+        : null,
     // Team policy uses the same Flutter logical pixel value as Paint.strokeWidth.
     // TODO(API): Document logical pixels as the final backend unit.
     thickness: includeStyle ? stroke.thickness : null,
@@ -161,6 +163,7 @@ abstract final class DrawingStrokeEventConverter {
 
   static String _toolCode(DrawingTool tool) => switch (tool) {
     DrawingTool.pen => 'PEN',
+    DrawingTool.eraser => 'ERASER',
   };
 
   static String _colorHex(Color color) {
