@@ -10,6 +10,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import yolo_client
 
@@ -120,6 +121,59 @@ class ModelRegistryTest(unittest.TestCase):
         # torch를 건드리기 전에 알 수 없는 키를 거른다.
         with self.assertRaises(ValueError):
             yolo_client._get_model("does-not-exist")
+
+
+class ModelReadinessTest(unittest.TestCase):
+    """health용 준비 여부 — 예외 없이 boolean, 존재+checksum 반영, 캐시."""
+
+    def setUp(self):
+        yolo_client._readiness_cache = None
+        self.addCleanup(setattr, yolo_client, "_readiness_cache", None)
+
+    def _tmpfile(self, content: bytes) -> str:
+        fd, name = tempfile.mkstemp()
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(content)
+        self.addCleanup(os.unlink, name)
+        return name
+
+    def test_ready_when_present_and_checksum_matches(self):
+        path = self._tmpfile(b"weights")
+        digest = yolo_client._sha256_of_file(Path(path))
+        with mock.patch.object(
+            yolo_client, "_model_registry", return_value={"htp": (path, digest)}
+        ):
+            self.assertEqual(yolo_client.model_readiness(refresh=True), {"htp": True})
+
+    def test_not_ready_when_checksum_mismatches(self):
+        path = self._tmpfile(b"weights")
+        with mock.patch.object(
+            yolo_client, "_model_registry", return_value={"htp": (path, "0" * 64)}
+        ):
+            self.assertEqual(yolo_client.model_readiness(refresh=True), {"htp": False})
+
+    def test_not_ready_when_file_missing(self):
+        with mock.patch.object(
+            yolo_client, "_model_registry", return_value={"htp": ("/no/such.pt", "0" * 64)}
+        ):
+            self.assertEqual(yolo_client.model_readiness(refresh=True), {"htp": False})
+
+    def test_ready_when_expected_unset(self):
+        path = self._tmpfile(b"weights")
+        with mock.patch.object(
+            yolo_client, "_model_registry", return_value={"htp": (path, "")}
+        ):
+            self.assertEqual(yolo_client.model_readiness(refresh=True), {"htp": True})
+
+    def test_result_is_cached_until_refresh(self):
+        path = self._tmpfile(b"weights")
+        digest = yolo_client._sha256_of_file(Path(path))
+        with mock.patch.object(
+            yolo_client, "_model_registry", return_value={"htp": (path, digest)}
+        ) as registry:
+            yolo_client.model_readiness(refresh=True)
+            yolo_client.model_readiness()  # 캐시 사용 — 레지스트리 재조회 없음
+            self.assertEqual(registry.call_count, 1)
 
 
 if __name__ == "__main__":

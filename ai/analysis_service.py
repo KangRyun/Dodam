@@ -312,12 +312,40 @@ def _to_detected_objects(
 
 
 # ── 진입점 ──────────────────────────────────────────────────────
+def _detect_or_degrade(
+    image_path: str, image_bytes: bytes, warnings: list[str], analysis_id: str = ""
+) -> tuple[list, bytes]:
+    """객체 탐지를 시도하되 실패하면 탐지 없이 진행할 수 있게 degrade한다(S15P11B209-604).
+
+    reason: 가중치 부재·무결성 실패·추론 오류로 탐지가 죽어도 관찰 서술·행동·대화 요약은 낼 수
+    있다. 전체 분석을 502로 버리는 대신 탐지만 비우고 원본 이미지로 이어간다. 못 채운 부분은
+    지어내지 않고 OBJECT_DETECTION_UNAVAILABLE로 명시한다(모듈 철학). 서버의 구성요소 준비 상태는
+    /internal/v1/health의 objectDetection=NOT_READY로 따로 드러난다.
+
+    Returns:
+        (탐지 목록, VLM 서술에 쓸 이미지 bytes). 실패 시 ([], 원본 image_bytes).
+    """
+    try:
+        return yolo_client.detect_and_annotate(image_path)
+    except RuntimeError as error:
+        logger.error(
+            "객체 탐지 실패 — 탐지 없이 진행(fallback): analysisId=%s type=%s",
+            analysis_id,
+            type(error).__name__,
+        )
+        warnings.append("OBJECT_DETECTION_UNAVAILABLE")
+        return [], image_bytes
+
+
 def analyze(req: contracts.AnalysisRequest, request_id: str = "") -> contracts.AnalysisResponse:
     """§19.3 요청 → §19.4 응답.
 
     Raises:
         AnalysisInputError: 그림을 못 가져왔거나 무결성 검증 실패(422로 매핑).
-        AnalysisUpstreamError: 탐지·서술 실패(502로 매핑).
+        AnalysisUpstreamError: 관찰 서술(VLM) 실패(502로 매핑).
+
+    객체 탐지 실패는 502가 아니라 탐지 없이 진행하는 fallback으로 처리한다
+    (OBJECT_DETECTION_UNAVAILABLE 경고, S15P11B209-604).
     """
     started = time.monotonic()
     unused: list[contracts.UnusedInput] = []
@@ -330,13 +358,9 @@ def analyze(req: contracts.AnalysisRequest, request_id: str = "") -> contracts.A
     with tempfile.NamedTemporaryFile(suffix=suffix) as temp:
         temp.write(image_bytes)
         temp.flush()
-        try:
-            detections, annotated_png = yolo_client.detect_and_annotate(temp.name)
-        except RuntimeError as e:
-            logger.error(
-                "객체 탐지 실패: analysisId=%s type=%s", req.analysis_id, type(e).__name__
-            )
-            raise AnalysisUpstreamError("객체 탐지에 실패했어요.") from e
+        detections, annotated_png = _detect_or_degrade(
+            temp.name, image_bytes, warnings, req.analysis_id
+        )
 
     # 교차 주제 오탐 제거(S15P11B209-376) — 나무 그림에 잡힌 PERSON_EYE 같은 것.
     # 신뢰도 임계값으로는 거를 수 없어 별도 규칙이 필요하다. 억제된 개수는 숨기지 않는다.

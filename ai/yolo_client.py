@@ -19,6 +19,7 @@ import config
 logger = logging.getLogger(__name__)
 
 _models: dict[str, object] = {}  # 모델 키별 지연 로딩 싱글턴 캐시
+_readiness_cache: dict[str, bool] | None = None  # 모델별 준비 여부(health용) 1회 계산 캐시
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,34 @@ def verify_all_models() -> dict[str, str]:
         _verify_checksum(path, expected)
         statuses[key] = "ok" if (expected and expected.strip()) else "unverified"
     return statuses
+
+
+def model_readiness(*, refresh: bool = False) -> dict[str, bool]:
+    """등록된 모델별 준비 여부(존재 + checksum 일치)를 예외 없이 boolean으로 반환한다(health용).
+
+    verify_all_models()는 실패를 예외로 드러내지만(배포 검증·fail-closed), health는 자주
+    조회되므로 예외 대신 True/False로 조용히 보고한다. 손상·부재·읽기 오류는 False,
+    기대 해시 미설정은 '존재하면 준비'로 본다.
+
+    가중치는 프로세스 수명 동안 바뀌지 않으므로(볼륨 :ro, 교체 시 컨테이너 재기동) 첫 계산을
+    캐시해 poll마다 대용량 파일을 다시 해시하지 않는다. refresh=True로 강제 재계산한다.
+    """
+    global _readiness_cache
+    if _readiness_cache is None or refresh:
+        readiness: dict[str, bool] = {}
+        for key, (path_str, expected) in _model_registry().items():
+            path = Path(path_str)
+            if not path.exists():
+                readiness[key] = False
+            elif not expected or not expected.strip():
+                readiness[key] = True
+            else:
+                try:
+                    readiness[key] = _sha256_of_file(path) == expected.strip().lower()
+                except OSError:
+                    readiness[key] = False
+        _readiness_cache = readiness
+    return dict(_readiness_cache)
 
 
 def _parse_result(result) -> list[Detection]:
