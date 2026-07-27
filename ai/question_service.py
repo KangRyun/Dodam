@@ -30,6 +30,7 @@ import time
 from openai import APIConnectionError, APIStatusError, OpenAIError
 
 import config
+import crisis_detection
 import llm_client
 from gms import get_client
 from internal_contracts import (
@@ -43,7 +44,7 @@ from internal_contracts import (
 logger = logging.getLogger(__name__)
 
 # 내부 계약 경로도 draft 경로(llm_client)와 같은 프롬프트 파일을 쓴다 — 버전도 그대로 따른다.
-# 프롬프트 파일 단위 버전 관리 체계는 S15P11B209-595에서 정식화한다.
+# 버전은 prompts_registry가 중앙 관리하는 통합 버전이다(S15P11B209-595).
 PROMPT_VERSION = llm_client.PROMPT_VERSION
 
 
@@ -264,6 +265,54 @@ def _is_consistent(
     return True
 
 
+# 위기 신호 감지 시 아이에게 건네는 안전·지지형 응답(S15P11B209-593).
+# 위기를 직접 언급·캐묻지 않고, 대화를 끊지 않으며, 아이에게 이야기할 여지를 부드럽게 준다.
+CRISIS_SAFE_QUESTION = "이야기해줘서 고마워. 네 마음은 참 소중해. 지금 더 하고 싶은 이야기가 있어?"
+_CRISIS_SAFE_OPTIONS = [
+    QuestionOption(code="CHIP_YES", label="응, 더 이야기할래"),
+    QuestionOption(code="CHIP_NO", label="아니, 괜찮아"),
+    QuestionOption(code="CHIP_NOT_SURE", label="잘 모르겠어"),
+]
+
+
+def _crisis_safe_response(req: QuestionRequest, started: float) -> QuestionResponse:
+    """위기 감지 시 대화를 끊지 않고 건네는 결정적 안전·지지형 응답.
+
+    GMS를 호출하지 않는다 — 위기 상황에서 LLM이 위기를 캐묻거나 잘못된 조언을 하지 않도록
+    사전에 검토된 고정 문구를 쓴다. safetyResult는 PASSED라 BE가 정상 저장하고 대화가 이어진다.
+    """
+    option_allowed = "OPTION" in req.allowed_response_modes
+    return QuestionResponse(
+        question_text=CRISIS_SAFE_QUESTION,
+        question_purpose="EXPRESSION",
+        options=list(_CRISIS_SAFE_OPTIONS) if option_allowed else None,
+        target_object=None,
+        fallback_used=False,
+        safety_result=SafetyResult(
+            status="PASSED", rule_version=req.safety_rule_version, block_reason_code=None
+        ),
+        model_name=config.LLM_MODEL,
+        # GMS를 호출하지 않았으므로 파생 모델 ID가 없다 — 엔진명으로 대신 기록한다.
+        model_version=config.LLM_MODEL,
+        prompt_version=PROMPT_VERSION,
+        processing_time_ms=int((time.monotonic() - started) * 1000),
+    )
+
+
+def _detect_crisis(req: QuestionRequest) -> str | None:
+    """아이 발화에서 자해·학대·위기 신호를 탐지한다(S15P11B209-593).
+
+    곰돌이(AI) 발화는 우리가 만든 것이라 검사하지 않고, senderType이 CHILD인 발화만 본다.
+    신호가 있으면 사유 코드를 반환한다(없으면 None).
+    """
+    child_texts = [
+        m.text
+        for m in req.recent_messages
+        if (m.sender_type or "").upper() == "CHILD" and m.text
+    ]
+    return crisis_detection.scan(child_texts)
+
+
 def _evaluate_safety(question_text: str, rule_version: str) -> SafetyResult:
     """생성된 질문의 안전 규칙 판단. (통과 스텁)
 
@@ -343,6 +392,21 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         SafetyBlockedError: 안전 정책 차단(→ 422, BE 사용자 422 경로).
     """
     started = time.monotonic()
+
+    # 위기 신호(자해·학대·위기 의도)는 대화를 끊지 않고 안전·지지형 응답으로 이어간다
+    # (S15P11B209-593). 아이에게 dead-end(422)를 주는 대신, 위기를 캐묻지 않는 결정적
+    # 안전 응답을 돌려주고 위기 사실은 서버 경보 로그(사유 코드)로 남긴다.
+    # 보호자 실시간 알림의 정식 배선은 후속(S15P11B209-598)에서 계약 확장과 함께 붙인다.
+    crisis_reason = _detect_crisis(req)
+    if crisis_reason:
+        # ⚠️ 아이 발화 원문은 남기지 않는다 — 사유 코드·request_id만.
+        logger.warning(
+            "위기 신호 감지 — 안전 응답으로 지속: reason=%s request_id=%s",
+            crisis_reason,
+            request_id,
+        )
+        return _crisis_safe_response(req, started)
+
     messages = _build_messages(req)
     text, served_model = _call_gms_with_retry(messages, request_id)
     text = text.strip()

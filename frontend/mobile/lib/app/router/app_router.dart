@@ -60,6 +60,10 @@ abstract final class AppRouter {
         ProfileSelectionScreen(
           controller: childController,
           onGuardianSelected: goGuardianHome,
+          onAddChild: (context) =>
+              Navigator.of(context).pushNamed(AppRoutes.childRegister),
+          onEditProfiles: (context) =>
+              showAppMessage(context, message: '프로필 수정·삭제 화면은 준비 중이에요.'),
           onChildSelected: (context, child) {
             childController.selectChild(child);
             Navigator.of(context).pushNamedAndRemoveUntil(

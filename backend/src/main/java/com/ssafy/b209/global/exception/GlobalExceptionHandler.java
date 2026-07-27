@@ -31,6 +31,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -173,6 +174,14 @@ public class GlobalExceptionHandler {
       DataIntegrityViolationException exception) {
     ErrorCode errorCode = CommonErrorCode.DATA_INTEGRITY_VIOLATION;
     log.warn("Handled data integrity violation: code={}", errorCode.getCode());
+    return response(errorCode);
+  }
+
+  @ExceptionHandler(MaxUploadSizeExceededException.class)
+  ResponseEntity<ApiErrorResponse<Void>> handleMaxUploadSizeExceededException(
+      MaxUploadSizeExceededException exception) {
+    ErrorCode errorCode = CommonErrorCode.PAYLOAD_TOO_LARGE;
+    logClientError(errorCode);
     return response(errorCode);
   }
 

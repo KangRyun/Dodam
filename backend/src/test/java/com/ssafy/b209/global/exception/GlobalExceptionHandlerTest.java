@@ -43,6 +43,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestPart;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
@@ -222,6 +223,22 @@ class GlobalExceptionHandlerTest {
   }
 
   @Test
+  void handlesMaxUploadSizeExceededAsPayloadTooLarge(CapturedOutput output) throws Exception {
+    expectError(
+            mockMvc.perform(multipart("/test/errors/oversize")),
+            HttpStatus.PAYLOAD_TOO_LARGE,
+            "COMMON_413_001",
+            "파일 용량이 허용 범위를 초과했습니다.")
+        .andExpect(
+            content()
+                .string(
+                    org.hamcrest.Matchers.not(
+                        org.hamcrest.Matchers.containsString("MaxUploadSizeExceededException"))));
+
+    assertThat(output).doesNotContain("ERROR", "COMMON_413_001");
+  }
+
+  @Test
   void handlesMethodNotAllowedAndPreservesAllowHeader() throws Exception {
     expectError(
             mockMvc.perform(post("/test/errors/method")),
@@ -380,6 +397,11 @@ class GlobalExceptionHandlerTest {
 
     @PostMapping(value = "/required-part", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     void requiredPart(@RequestPart MultipartFile file) {}
+
+    @PostMapping(value = "/oversize", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    void oversize() {
+      throw new MaxUploadSizeExceededException(20971520L);
+    }
 
     @GetMapping("/method")
     void method() {}

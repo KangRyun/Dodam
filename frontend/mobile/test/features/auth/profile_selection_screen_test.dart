@@ -21,8 +21,20 @@ void main() {
     );
 
     expect(find.text('누가 도담을 이용하나요?'), findsOneWidget);
+    expect(find.text('보호자 프로필'), findsOneWidget);
+    expect(find.text('아동 프로필'), findsOneWidget);
     expect(find.byKey(const ValueKey('guardian-profile')), findsOneWidget);
     expect(find.byKey(const ValueKey('child-profile-3')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('child-profile-carousel')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('add-child-profile')), findsOneWidget);
+    expect(find.byKey(const ValueKey('edit-child-profiles')), findsOneWidget);
+    expect(
+      tester.getBottomRight(find.byKey(const ValueKey('child-profile-3'))).dy,
+      lessThanOrEqualTo(600),
+    );
   });
 
   testWidgets('아동 프로필을 누르면 해당 아동을 전달한다', (tester) async {
@@ -41,7 +53,9 @@ void main() {
       ),
     );
 
-    await tester.tap(find.byKey(const ValueKey('child-profile-3')));
+    final childProfile = find.byKey(const ValueKey('child-profile-3'));
+    await tester.ensureVisible(childProfile);
+    await tester.tap(childProfile);
 
     expect(selectedChildId, 3);
   });

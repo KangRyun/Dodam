@@ -18,21 +18,20 @@ GMS는 OpenAI 호환 게이트웨이라, 공식 `openai` SDK에 base_url만 GMS�
 from __future__ import annotations
 
 import logging
-from functools import lru_cache
-from pathlib import Path
 
 from openai import OpenAIError
 
 import answer_check  # 생성 답변 사후 검사(LLM 재호출 없이 규칙 기반)
 import config
+import prompts_registry  # 프롬프트 파일 로딩·버전 관리 중앙화 (S15P11B209-595)
 from gms import get_client  # GMS(OpenAI 호환) 공용 클라이언트
 
 logger = logging.getLogger(__name__)
 
-PROMPT_DIR = Path(__file__).parent / "prompts"
-
-# 프롬프트 파일이 바뀌면 올린다(분석 결과에 기록 → 어떤 프롬프트로 뽑힌 질문인지 추적용).
-PROMPT_VERSION = "1.1.0"
+# 질문 생성에 쓰는 프롬프트 파일 조합의 통합 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
+PROMPT_VERSION = prompts_registry.composite_version(
+    "first_question", "conversations", "guardrails"
+)
 
 # 캐릭터 이름. 프롬프트 txt에도 '도담'으로 적혀 있으니 바꾸려면 양쪽을 같이 고칠 것.
 CHARACTER_NAME = "도담"
@@ -88,10 +87,9 @@ def chat(
 # ── 프롬프트 로딩 / 렌더링 ──────────────────────────────────────
 
 
-@lru_cache(maxsize=None)
 def _load(name: str) -> str:
-    """ai/prompts/<name>.txt 를 읽어 캐시한다(서버 기동 중 파일은 안 바뀐다고 가정)."""
-    return (PROMPT_DIR / f"{name}.txt").read_text(encoding="utf-8").strip()
+    """프롬프트 로딩은 prompts_registry로 중앙화했다(S15P11B209-595)."""
+    return prompts_registry.load(name)
 
 
 def _format_history(history: list[dict] | None) -> str:
