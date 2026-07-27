@@ -4,6 +4,7 @@ import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.ApiResponse;
 import com.ssafy.b209.notification.dto.response.NotificationListPageResponse;
+import com.ssafy.b209.notification.dto.response.NotificationMarkAllReadResponse;
 import com.ssafy.b209.notification.dto.response.NotificationReadResponse;
 import com.ssafy.b209.notification.service.NotificationQueryService;
 import com.ssafy.b209.notification.service.NotificationReadService;
@@ -123,5 +124,36 @@ public class NotificationInboxController {
     Long userId = currentUserResolver.requireUserId();
     return ResponseEntity.ok(
         ApiResponse.ok(notificationReadService.markRead(userId, notificationId)));
+  }
+
+  /**
+   * 수신자 본인의 미열람 알림을 일괄 읽음 처리한다.
+   *
+   * <p>멱등하다. 미열람 알림만 갱신하므로 이미 읽은 알림에는 영향이 없고 중복 호출도 안전하다. {@code type}을 지정하면 해당 유형만 처리한다.
+   *
+   * @param type 처리할 알림 유형이며 미지정 시 전체
+   * @return 새로 읽음 처리된 건수와 기록한 읽은 시각 공통 응답
+   */
+  @Operation(
+      summary = "알림 전체 읽음 처리",
+      description = "수신자 본인의 미열람 알림을 일괄 읽음 처리합니다. type을 지정하면 해당 유형만 처리하며 재호출은 멱등합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "읽음 처리 성공이며 바뀐 건이 없으면 updatedCount는 0"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "허용하지 않는 type(COMMON_400_001)",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @PatchMapping("/read-all")
+  public ResponseEntity<ApiResponse<NotificationMarkAllReadResponse>> markAllNotificationsRead(
+      @Parameter(description = "처리할 알림 유형") @RequestParam(required = false) String type) {
+    Long userId = currentUserResolver.requireUserId();
+    return ResponseEntity.ok(ApiResponse.ok(notificationReadService.markAllRead(userId, type)));
   }
 }

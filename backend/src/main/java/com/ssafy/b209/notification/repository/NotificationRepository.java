@@ -1,10 +1,12 @@
 package com.ssafy.b209.notification.repository;
 
 import com.ssafy.b209.notification.domain.Notification;
+import java.time.LocalDateTime;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -44,4 +46,30 @@ public interface NotificationRepository extends JpaRepository<Notification, Long
    * @return 본인 알림이면 해당 알림
    */
   Optional<Notification> findByIdAndRecipientUserId(Long id, Long recipientUserId);
+
+  /**
+   * 수신자의 미열람 알림을 한 번의 UPDATE로 읽음 처리한다.
+   *
+   * <p>{@code read_at IS NULL}인 행만 갱신하므로 이미 읽은 알림의 최초 읽은 시각은 유지되고 재호출은 멱등하다. {@code type}이 {@code
+   * null}이면 유형을 가리지 않고, 값이 있으면 해당 유형만 처리한다. {@code recipient_user_id} 조건으로 본인 알림만 대상이 되어 남의 알림은
+   * 건드리지 않는다.
+   *
+   * <p>벌크 UPDATE는 영속성 컨텍스트를 우회하므로 {@code flushAutomatically}로 대기 중인 변경을 먼저 반영하고 {@code
+   * clearAutomatically}로 갱신 후 남는 낡은 Entity를 비운다.
+   *
+   * @param recipientUserId 수신자 사용자 ID
+   * @param type 처리할 알림 유형 또는 전체 처리를 뜻하는 {@code null}
+   * @param readAt 읽음으로 기록할 시각
+   * @return 이번 호출로 새로 읽음 처리된 행 수
+   */
+  @Modifying(clearAutomatically = true, flushAutomatically = true)
+  @Query(
+      "update Notification notification set notification.readAt = :readAt "
+          + "where notification.recipientUserId = :recipientUserId "
+          + "and notification.readAt is null "
+          + "and (:type is null or notification.notificationType = :type)")
+  int markAllReadByRecipient(
+      @Param("recipientUserId") Long recipientUserId,
+      @Param("type") String type,
+      @Param("readAt") LocalDateTime readAt);
 }

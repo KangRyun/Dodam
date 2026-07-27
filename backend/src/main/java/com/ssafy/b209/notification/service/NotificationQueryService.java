@@ -4,6 +4,7 @@ import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.response.CommonErrorCode;
 import com.ssafy.b209.notification.domain.Notification;
 import com.ssafy.b209.notification.domain.NotificationAttribute;
+import com.ssafy.b209.notification.domain.NotificationTypes;
 import com.ssafy.b209.notification.dto.response.NotificationListItemResponse;
 import com.ssafy.b209.notification.dto.response.NotificationListPageResponse;
 import com.ssafy.b209.notification.repository.NotificationAttributeRepository;
@@ -11,7 +12,6 @@ import com.ssafy.b209.notification.repository.NotificationRepository;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -29,17 +29,6 @@ import org.springframework.transaction.annotation.Transactional;
 public class NotificationQueryService {
 
   private static final int MAX_PAGE_SIZE = 100;
-  private static final Set<String> ALLOWED_TYPES =
-      Set.of(
-          "ANALYSIS_COMPLETED",
-          "ANALYSIS_FAILED",
-          "REPORT_COMPLETED",
-          "NEW_EXPERT_POST",
-          "COMMENT_CREATED",
-          "CONSENT_UPDATED",
-          "RETENTION_NOTICE",
-          "ACTIVITY_REMINDER",
-          "RISK_REVIEW_GUIDE");
 
   private final NotificationRepository notificationRepository;
   private final NotificationAttributeRepository attributeRepository;
@@ -149,7 +138,7 @@ public class NotificationQueryService {
       return null;
     }
     String normalized = type.trim();
-    if (!ALLOWED_TYPES.contains(normalized)) {
+    if (!NotificationTypes.isAllowed(normalized)) {
       throw new BusinessException(CommonErrorCode.INVALID_INPUT_VALUE);
     }
     return normalized;
