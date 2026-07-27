@@ -46,14 +46,14 @@ class SocialLoginButton extends StatelessWidget {
               side: BorderSide(color: visual.border),
             ),
           ),
+          // 로고는 좌측에 고정하고 라벨은 버튼 전체 기준 가운데 정렬한다.
+          // (좌측 아이콘 20 ↔ 우측 여백 20을 대칭으로 두어 텍스트가 정중앙에 온다.)
           child: isLoading
               ? CircularProgressIndicator(
                   strokeWidth: 2.5,
                   color: visual.foreground,
                 )
               : Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
                   children: [
                     SizedBox.square(
                       key: ValueKey('social-login-${provider.name}-icon'),
@@ -63,15 +63,16 @@ class SocialLoginButton extends StatelessWidget {
                         fit: BoxFit.contain,
                       ),
                     ),
-                    const SizedBox(width: 10),
-                    Flexible(
+                    Expanded(
                       child: Text(
                         visual.label,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
                         style: AppTypography.button,
                       ),
                     ),
+                    const SizedBox(width: 20),
                   ],
                 ),
         ),
@@ -100,7 +101,7 @@ class _SocialVisual {
 
 _SocialVisual _visualFor(SocialLoginProvider provider) => switch (provider) {
   SocialLoginProvider.kakao => const _SocialVisual(
-    label: '카카오로 시작',
+    label: '카카오로 시작하기',
     iconAsset: 'assets/branding/kakao_symbol.svg',
     background: Color(0xFFFEE500),
     foreground: Color(0xD9000000),
@@ -108,7 +109,7 @@ _SocialVisual _visualFor(SocialLoginProvider provider) => switch (provider) {
     borderRadius: 12,
   ),
   SocialLoginProvider.google => const _SocialVisual(
-    label: 'Google 계정으로 시작',
+    label: 'Google로 시작하기',
     iconAsset: 'assets/branding/google_g.svg',
     background: Colors.white,
     foreground: Color(0xFF1F1F1F),
@@ -116,7 +117,7 @@ _SocialVisual _visualFor(SocialLoginProvider provider) => switch (provider) {
     borderRadius: 12,
   ),
   SocialLoginProvider.naver => const _SocialVisual(
-    label: '네이버로 시작',
+    label: '네이버로 시작하기',
     iconAsset: 'assets/branding/naver_n.svg',
     background: Color(0xFF03A94D),
     foreground: Colors.white,
