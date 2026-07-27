@@ -1,11 +1,11 @@
 # 알림 API 공개 계약 (디바이스 토큰·목록·읽음)
 
-> Jira: `S15P11B209-549`(NOTI-01) · `550`(NOTI-02) · `551`(NOTI-03) · `552`(NOTI-04)
-> 범위: 푸시 디바이스 Token 등록·해제, 알림 목록 조회, 단건 읽음 처리
+> Jira: `S15P11B209-549`(NOTI-01) · `550`(NOTI-02) · `551`(NOTI-03) · `552`(NOTI-04) · `553`(NOTI-05)
+> 범위: 푸시 디바이스 Token 등록·해제, 알림 목록 조회, 단건 읽음 처리, 전체 읽음 처리
 > 기준 명세: `API_명세서_최종.md` §15 알림, `erd-cloud-schema-v1.2`
-> 최종 수정: 2026-07-26
+> 최종 수정: 2026-07-27
 
-명세 §15가 정의하지 않은 응답 본문·오류 코드·경계 동작을 as-built로 확정한다. 프론트엔드와 백엔드가 이 문서를 단일 기준으로 사용한다. NOTI-05(`PATCH /notifications/read-all`, S15P11B209-553)는 이 계약 범위 밖이다.
+명세 §15가 정의하지 않은 응답 본문·오류 코드·경계 동작을 as-built로 확정한다. 프론트엔드와 백엔드가 이 문서를 단일 기준으로 사용한다. NOTI-05(`PATCH /notifications/read-all`, S15P11B209-553)의 as-built는 §6.5에 있다.
 
 ## 0. 이 계약이 확정한 것
 
@@ -221,6 +221,48 @@ Authorization: Bearer {accessToken}
 
 `403 NOTIFICATION_ACCESS_DENIED`(§15.5)는 조회·읽음 경로에서 사용하지 않는다. 권한 오류로 구분하면 알림 ID의 실재 여부가 드러나 ID를 훑어 지도를 만들 수 있다. 코드 자체는 향후 다른 경로(예: 전문가 공유 알림)를 위해 정의만 두었다.
 
+## 6.5 NOTI-05 전체 읽음 처리
+
+```http
+PATCH /api/v1/notifications/read-all?type=
+Authorization: Bearer {accessToken}
+```
+
+수신자 본인의 **미열람 알림을 한 번에 읽음 처리**한다. `type`을 주면 해당 유형만, 없으면 전체 유형을 처리한다. 요청 본문은 없다.
+
+| Query | 기본값 | 규칙 |
+| --- | --- | --- |
+| `type` | 없음(전체) | §5 목록 조회와 같은 허용 어휘만. 공백은 미적용(전체) |
+
+### 성공 응답 `200 OK`
+
+```json
+{
+  "data": {
+    "updatedCount": 3,
+    "readAt": "2026-07-26T12:00:00"
+  }
+}
+```
+
+- `updatedCount`: 이번 호출로 **새로 읽음 처리된 건수**다. 이미 읽은 알림은 세지 않는다
+- `readAt`: 이번 호출로 기록한 읽은 시각(서버 시각)이다. 바뀐 건이 없으면(`updatedCount = 0`) `null`이다 — §5 목록의 미열람 항목이 `readAt: null`인 것과 같은 규약이다
+
+**상태 코드는 `204`가 아니라 `200`이다.** NOTI-04와 같은 이유로, 클라이언트가 목록을 다시 받지 않고 미열람 배지를 갱신할 수 있게 처리 건수와 시각을 본문으로 준다. 본문이 의미를 가지므로 `204`(본문 없음)는 맞지 않다.
+
+**멱등하다.** `read_at IS NULL`인 행만 갱신하므로 이미 읽은 알림의 최초 읽은 시각은 유지되고, 중복 호출은 두 번째부터 `updatedCount = 0`이다.
+
+### 권한
+
+`WHERE recipient_user_id = {인증 사용자}` 조건의 벌크 UPDATE라 **본인 알림만 대상**이 된다. 남의 알림·미존재 알림은 애초에 조건에 걸리지 않으므로 `404`·`403`을 쓰지 않는다. 처리할 것이 없으면 오류가 아니라 `200`과 `updatedCount = 0`이다(단건 NOTI-04의 존재 은닉과 목적은 같다 — 남의 알림 존재 여부를 노출하지 않는다).
+
+### 오류
+
+| HTTP | 코드 | 조건 |
+| --- | --- | --- |
+| 400 | `COMMON_400_001` | 허용하지 않는 `type` |
+| 401 | `AUTH_*` | Access Token 누락 또는 검증 오류 |
+
 ## 7. DB 매핑
 
 | 응답·동작 | 테이블·컬럼 |
@@ -231,6 +273,7 @@ Authorization: Bearer {accessToken}
 | 목록 조건 | `notifications(recipient_user_id, notification_type, read_at)`, 인덱스 `idx_notifications_recipient_created_at` |
 | `data` | `notification_attributes(notification_id, attribute_key, value_text)` |
 | 읽음 | `notifications.read_at` |
+| 전체 읽음 | `notifications.read_at` 벌크 UPDATE(`recipient_user_id` + `read_at IS NULL` + 선택 `notification_type`) |
 
 `token_hash`는 DB가 `CHAR(64)`다. JPA에서 `length`만 지정하면 `VARCHAR`로 검증돼 `ddl-auto: validate`가 기동을 거부하므로 `columnDefinition = "CHAR(64)"`로 매핑해야 한다.
 
@@ -247,7 +290,7 @@ Authorization: Bearer {accessToken}
 - `DeviceTokenCipherTest` — 왕복 복원, 같은 Token의 암호문이 매번 다름, 키 미구성·비32바이트·비Base64·변조 암호문 거부
 - `DeviceTokenServiceTest` — 평문 미저장, 같은 기기 갱신 시 행 누적 없음·재활성화, 타 계정 Token 409, 잘못된 요청 5종이 같은 코드, 해제는 비활성화
 - `NotificationQueryServiceTest` — 정렬 tie-breaker, 자원 우선순위, 부가 속성 조립, 빈 페이지에서 속성 조회 생략, `type`·페이지 범위 거부
-- `NotificationReadServiceTest` — 멱등성(최초 시각 유지·쓰기 생략), 남의 알림 404
+- `NotificationReadServiceTest` — 멱등성(최초 시각 유지·쓰기 생략), 남의 알림 404, 전체 읽음(유형 필터·0건 시 시각 null·잘못된 유형 400)
 - `NotificationControllerTest` — Token 미노출, 오류 코드, 명세 기본 Query 값 전달
-- `NotificationIntegrationTest` — 실 MySQL 관통 14건. 암호문 왕복, V14 UNIQUE가 upsert를 성립시키는지, 해제 후 행 유지·재활성화, 필터 조합, 빈 페이지 200, 읽음 멱등, 존재 은닉
+- `NotificationIntegrationTest` — 실 MySQL 관통. 암호문 왕복, V14 UNIQUE가 upsert를 성립시키는지, 해제 후 행 유지·재활성화, 필터 조합, 빈 페이지 200, 읽음 멱등, 존재 은닉, 전체 읽음(유형 필터·이미 읽은 시각 유지·타 사용자 미영향)
 - `DatabaseMigrationIntegrationTest` — V14 컬럼과 **두 UNIQUE 공존** 단언

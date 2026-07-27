@@ -23,7 +23,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-/** 모바일 SDK가 발급한 OAuth Provider Token을 서비스 로그인 Token으로 교환하는 HTTP API를 제공한다. */
+/** 모바일 SDK가 발급한 Kakao·Google·Naver·Apple OAuth Token을 서비스 로그인 Token으로 교환하는 HTTP API를 제공한다. */
 @Tag(name = "Authentication", description = "OAuth 로그인 API")
 @RestController
 @RequestMapping("/api/v1/auth")
@@ -43,14 +43,14 @@ public class OAuthController {
   /**
    * Provider가 발급한 Access Token 또는 ID Token을 검증하고 서비스 JWT를 발급한다.
    *
-   * @param provider Kakao, Google 또는 Naver를 나타내는 URI 값
+   * @param provider Kakao, Google, Naver 또는 Apple을 나타내는 URI 값
    * @param request Provider별 Token과 기기 식별자
    * @return HTTP 200과 Access·Refresh Token 및 사용자 상태
    */
   @Operation(
       summary = "OAuth 로그인",
       description =
-          "Kakao·Naver accessToken 또는 Google idToken을 검증하고 서비스 Access·Refresh Token을 발급합니다.")
+          "Kakao·Naver accessToken 또는 Google·Apple idToken을 검증하고 서비스 Access·Refresh Token을 발급합니다.")
   @ApiResponses({
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "200",

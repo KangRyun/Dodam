@@ -146,11 +146,9 @@ RAG는 관련 논문·검사 지침·전문 자료를 검색해 근거를 연결
 ```json
 {
   "success": true,
-  "code": "SUCCESS",
+  "code": "COMMON_200",
   "message": "요청이 성공했습니다.",
-  "data": {},
-  "timestamp": "2026-07-21T02:30:00.123Z",
-  "requestId": "f53ebfd5-64b7-4bc5-9e85-44127d2bd290"
+  "data": {}
 }
 ```
 
@@ -164,21 +162,23 @@ RAG는 관련 논문·검사 지침·전문 자료를 검색해 근거를 연결
 ```json
 {
   "success": false,
-  "code": "CHILD_AGE_OUT_OF_RANGE",
-  "message": "서비스 대상 연령은 만 4세부터 12세까지입니다.",
-  "errors": [
-    {
-      "field": "birthDate",
-      "rejectedValue": "2021-08-01",
-      "reason": "AGE_OUT_OF_RANGE"
-    }
-  ],
-  "timestamp": "2026-07-21T02:30:00.123Z",
-  "requestId": "f53ebfd5-64b7-4bc5-9e85-44127d2bd290"
+  "code": "COMMON_400_001",
+  "message": "요청 값이 올바르지 않습니다.",
+  "data": {
+    "fieldErrors": [
+      {
+        "field": "birthDate",
+        "message": "생년월일이 올바르지 않습니다."
+      }
+    ],
+    "globalErrors": []
+  }
 }
 ```
 
-운영 환경에서는 내부 예외명, SQL, 저장소 경로, AI 프롬프트, 토큰을 `message`에 포함하지 않는다.
+운영 환경에서는 내부 예외명, SQL, 저장소 경로, AI 프롬프트, 토큰을
+`message`에 포함하지 않는다. 사용자 입력 원문인 `rejectedValue`도 반환하지
+않는다. 상세 계약은 `common-response-error-contract-v1.md`를 따른다.
 
 ### 3.6 HTTP 상태 코드
 
@@ -235,6 +235,8 @@ Query 기본값은 `page=0`, `size=20`이며 `size`는 `1~100`이다.
 - `Idempotency-Key`는 사용자·URI·요청 Body 해시와 함께 저장한다.
 - 같은 키와 같은 Body: 최초 상태 코드와 응답을 반환한다.
 - 같은 키와 다른 Body: `409 IDEMPOTENCY_KEY_REUSED`.
+- 그림 세션 생성·그림 단계 완료·전체 활동 완료의 현재 구현 계약과 오류 코드는
+  `drawing-idempotency-contract-v1.md`를 따른다.
 - `stroke_batches`는 `(drawing_session_id, batch_sequence)`를 유일하게 관리한다.
 - `analyses.idempotency_key`와 입력 이미지 checksum으로 중복 분석을 방지한다.
 - 좋아요·팔로우는 사용자와 대상의 복합 unique 제약으로 중복을 방지한다.
@@ -243,20 +245,17 @@ Query 기본값은 `page=0`, `size=20`이며 `size`는 `1~100`이다.
 
 | 코드 | HTTP | 의미 |
 | --- | --- | --- |
-| `INVALID_REQUEST` | 400 | 요청 형식 오류 |
-| `VALIDATION_FAILED` | 422 | 필드 또는 업무 규칙 검증 실패 |
-| `UNAUTHORIZED` | 401 | 인증 필요 |
-| `TOKEN_EXPIRED` | 401 | Access Token 만료 |
-| `FORBIDDEN` | 403 | 역할 권한 부족 |
-| `RESOURCE_NOT_FOUND` | 404 | 대상 없음 |
-| `RESOURCE_OWNERSHIP_DENIED` | 404 | 다른 사용자의 리소스 접근 |
-| `INVALID_STATE_TRANSITION` | 409 | 현재 상태에서 요청 불가 |
-| `IDEMPOTENCY_KEY_REUSED` | 409 | 동일 키를 다른 Body에 재사용 |
-| `RATE_LIMIT_EXCEEDED` | 429 | 요청 제한 초과 |
-| `FILE_TYPE_NOT_SUPPORTED` | 400 | 지원하지 않는 파일 |
-| `FILE_SIZE_EXCEEDED` | 413 | 파일 크기 초과 |
-| `EXTERNAL_SERVICE_ERROR` | 502 | 외부 서비스 실패 |
-| `INTERNAL_SERVER_ERROR` | 500 | 서버 내부 오류 |
+| `COMMON_400_001` | 400 | 요청 값 또는 Validation 오류 |
+| `COMMON_400_002` | 400 | Path·Query 값 타입 변환 오류 |
+| `COMMON_400_003` | 400 | JSON Body 읽기·역직렬화 오류 |
+| `COMMON_400_004` | 400 | 필수 Query·Multipart Part 누락 |
+| `COMMON_404_001` | 404 | API 또는 일반 리소스 없음 |
+| `COMMON_405_001` | 405 | 지원하지 않는 HTTP Method |
+| `COMMON_409_001` | 409 | 데이터 무결성 조건 충돌 |
+| `COMMON_500_001` | 500 | 처리되지 않은 서버 오류 |
+
+도메인 오류와 기존 의미 기반 코드의 호환성 규칙은
+`common-response-error-contract-v1.md`를 따른다.
 
 ---
 
@@ -266,7 +265,7 @@ Query 기본값은 `page=0`, `size=20`이며 `size`는 `1~100`이다.
 | --- | --- |
 | `UserRole` | `GUARDIAN`, `EXPERT`, `ADMIN` |
 | `AccountStatus` | `PENDING`, `ACTIVE`, `SUSPENDED`, `WITHDRAWN` |
-| `AuthProvider` | `LOCAL`, `KAKAO`, `GOOGLE`, `NAVER` |
+| `AuthProvider` | `KAKAO`, `GOOGLE`, `NAVER`, `APPLE` |
 | `QuestionDifficulty` | `PRESCHOOL`, `LOWER_ELEMENTARY`, `UPPER_ELEMENTARY`, `SUPPORT` |
 | `TutorialStatus` | `NOT_STARTED`, `IN_PROGRESS`, `COMPLETED`, `SKIPPED` |
 | `ProfileStatus` | `ACTIVE`, `DELETED` |
@@ -336,9 +335,10 @@ Query 기본값은 `page=0`, `size=20`이며 `size`는 `1~100`이다.
 
 | 필드 | 타입 | 필수 | 제약 |
 | --- | --- | --- | --- |
-| Path `provider` | `AuthProvider` | O | `KAKAO`, `GOOGLE`, `NAVER` |
-| `authorizationCode` | string | O | 소셜 SDK가 받은 일회성 code |
-| `redirectUri` | string | 조건부 | Provider 설정과 정확히 일치 |
+| Path `provider` | `AuthProvider` | O | `KAKAO`, `GOOGLE`, `NAVER`, `APPLE` |
+| `accessToken` | string | 조건부 | Kakao·Naver에서 필수, 최대 4096자 |
+| `idToken` | string | 조건부 | Google·Apple에서 필수, 최대 4096자 |
+| `rawNonce` | string | 조건부 | Apple에서만 필수, 최대 512자 |
 | `deviceId` | string | O | 기기 식별자 |
 
 #### `TokenReissueRequest`
@@ -366,6 +366,14 @@ Query 기본값은 `page=0`, `size=20`이며 `size`는 `1~100`이다.
   }
 }
 ```
+
+Apple 계정 처리 규칙:
+
+- Apple 계정 식별자는 이메일이 아니라 `(APPLE, sub)` 조합이다.
+- 최초 Apple 로그인에서 검증된 이메일은 인증 계정에 보존하며, 후속 Token에 이메일이 없어도 로그인 응답에 재사용한다.
+- 온보딩에서 확정한 `users.email`이 있으면 인증 계정의 Provider 이메일보다 우선한다.
+- 이메일이 같은 다른 OAuth Provider 계정과 자동 병합하지 않는다.
+- 회원 탈퇴로 사용자와 Apple 인증 계정이 삭제된 뒤 같은 `sub`로 로그인하면 신규 사용자로 가입한다.
 
 ### 5.4 처리 규칙과 오류
 

@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.ssafy.b209.auth.domain.AccountStatus;
 import com.ssafy.b209.auth.domain.AuthProvider;
 import com.ssafy.b209.auth.domain.User;
+import com.ssafy.b209.auth.domain.UserRole;
 import com.ssafy.b209.auth.dto.request.OAuthLoginRequest;
 import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.repository.UserRepository;
@@ -55,7 +56,7 @@ class OAuthLoginServiceTest {
 
   @Test
   void verifiesKakaoAccessTokenProvisionsAccountAndIssuesServiceTokens() {
-    OAuthLoginRequest request = new OAuthLoginRequest("kakao-access-token", null, "device-1");
+    OAuthLoginRequest request = new OAuthLoginRequest("kakao-access-token", null, null, "device-1");
     OAuthProviderCredential credential =
         new OAuthProviderCredential(OAuthCredentialType.ACCESS_TOKEN, "kakao-access-token");
     VerifiedOAuthIdentity identity =
@@ -64,7 +65,7 @@ class OAuthLoginServiceTest {
     ReflectionTestUtils.setField(user, "id", 41L);
     when(providerClient.verify(AuthProvider.KAKAO, credential)).thenReturn(identity);
     when(provisioningService.provision(identity))
-        .thenReturn(new ProvisionedOAuthAccount(41L, AuthProvider.KAKAO, true, true));
+        .thenReturn(new ProvisionedOAuthAccount(41L, AuthProvider.KAKAO, null, true, true));
     when(userRepository.findById(41L)).thenReturn(Optional.of(user));
     when(userRepository.save(user)).thenReturn(user);
     when(tokenIssuer.issue(41L))
@@ -91,8 +92,60 @@ class OAuthLoginServiceTest {
   }
 
   @Test
+  void usesStoredAppleProviderEmailWhenRepeatedTokenOmitsEmail() {
+    OAuthLoginRequest request =
+        new OAuthLoginRequest(null, "apple-id-token", "raw-nonce", "device-1");
+    OAuthProviderCredential credential =
+        new OAuthProviderCredential(OAuthCredentialType.ID_TOKEN, "apple-id-token", "raw-nonce");
+    VerifiedOAuthIdentity identity =
+        new VerifiedOAuthIdentity(AuthProvider.APPLE, "apple-sub", null);
+    User user = User.pending(LocalDateTime.of(2026, 7, 22, 11, 0));
+    ReflectionTestUtils.setField(user, "id", 41L);
+    when(providerClient.verify(AuthProvider.APPLE, credential)).thenReturn(identity);
+    when(provisioningService.provision(identity))
+        .thenReturn(
+            new ProvisionedOAuthAccount(
+                41L, AuthProvider.APPLE, "relay@privaterelay.appleid.com", false, true));
+    when(userRepository.findById(41L)).thenReturn(Optional.of(user));
+    when(tokenIssuer.issue(41L))
+        .thenReturn(new IssuedTokenPair("access", 1800, "refresh", 1209600, "family-1"));
+
+    OAuthLoginResult result = service.login(AuthProvider.APPLE, request);
+
+    assertThat(result.user().email()).isEqualTo("relay@privaterelay.appleid.com");
+    assertThat(result.user().emailRequired()).isFalse();
+  }
+
+  @Test
+  void prefersOnboardingEmailOverStoredAppleProviderEmail() {
+    OAuthLoginRequest request =
+        new OAuthLoginRequest(null, "apple-id-token", "raw-nonce", "device-1");
+    OAuthProviderCredential credential =
+        new OAuthProviderCredential(OAuthCredentialType.ID_TOKEN, "apple-id-token", "raw-nonce");
+    VerifiedOAuthIdentity identity =
+        new VerifiedOAuthIdentity(AuthProvider.APPLE, "apple-sub", null);
+    User user = User.pending(LocalDateTime.of(2026, 7, 22, 11, 0));
+    user.completeOnboarding(
+        UserRole.GUARDIAN, "보호자", "guardian@example.com", LocalDateTime.of(2026, 7, 22, 11, 30));
+    ReflectionTestUtils.setField(user, "id", 41L);
+    when(providerClient.verify(AuthProvider.APPLE, credential)).thenReturn(identity);
+    when(provisioningService.provision(identity))
+        .thenReturn(
+            new ProvisionedOAuthAccount(
+                41L, AuthProvider.APPLE, "relay@privaterelay.appleid.com", false, false));
+    when(userRepository.findById(41L)).thenReturn(Optional.of(user));
+    when(tokenIssuer.issue(41L))
+        .thenReturn(new IssuedTokenPair("access", 1800, "refresh", 1209600, "family-1"));
+
+    OAuthLoginResult result = service.login(AuthProvider.APPLE, request);
+
+    assertThat(result.user().email()).isEqualTo("guardian@example.com");
+    assertThat(result.user().emailRequired()).isFalse();
+  }
+
+  @Test
   void rejectsInvalidJwtConfigurationBeforeConsumingProviderToken() {
-    OAuthLoginRequest request = new OAuthLoginRequest(null, "google-id-token", "device-1");
+    OAuthLoginRequest request = new OAuthLoginRequest(null, "google-id-token", null, "device-1");
     doThrow(new BusinessException(AuthErrorCode.AUTH_CONFIGURATION_INVALID))
         .when(tokenIssuer)
         .validateConfiguration();
@@ -105,7 +158,8 @@ class OAuthLoginServiceTest {
 
   @Test
   void rejectsGoogleAccessTokenBeforeCallingProvider() {
-    OAuthLoginRequest request = new OAuthLoginRequest("google-access-token", null, "device-1");
+    OAuthLoginRequest request =
+        new OAuthLoginRequest("google-access-token", null, null, "device-1");
 
     assertThatThrownBy(() -> service.login(AuthProvider.GOOGLE, request))
         .isInstanceOfSatisfying(
@@ -120,7 +174,7 @@ class OAuthLoginServiceTest {
   @Test
   void rejectsBothProviderTokensBeforeCallingProvider() {
     OAuthLoginRequest request =
-        new OAuthLoginRequest("kakao-access-token", "unexpected-id-token", "device-1");
+        new OAuthLoginRequest("kakao-access-token", "unexpected-id-token", null, "device-1");
 
     assertThatThrownBy(() -> service.login(AuthProvider.KAKAO, request))
         .isInstanceOfSatisfying(

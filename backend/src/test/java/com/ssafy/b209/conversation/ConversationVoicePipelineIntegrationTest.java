@@ -158,6 +158,12 @@ class ConversationVoicePipelineIntegrationTest {
             + "(id, term_code, target_scope, is_required, version, title, effective_at, is_active) "
             + "VALUES (1, 'VOICE_PROCESSING', 'CHILD', TRUE, 'v1', '음성 처리 동의', "
             + "'2020-01-01 00:00:00', TRUE)");
+    // 보호자 본인 대상 필수 약관은 아동 동의 이력을 남기지 않으므로 아동 인가에 영향을 주지 않아야 한다.
+    jdbcTemplate.update(
+        "INSERT INTO consent_terms "
+            + "(id, term_code, target_scope, is_required, version, title, effective_at, is_active) "
+            + "VALUES (2, 'SERVICE_TOS', 'USER', TRUE, 'v1', '서비스 이용약관', "
+            + "'2020-01-01 00:00:00', TRUE)");
     agreeVoiceProcessing();
   }
 

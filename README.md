@@ -568,13 +568,28 @@ Google 요청:
 }
 ```
 
-- `{provider}`는 `kakao`, `google`, `naver` 중 하나입니다.
-- Kakao·Naver는 `accessToken`, Google은 `idToken`만 전달하며 두 필드를 함께 보내거나 Provider와 다른 필드를 보내면 `AUTH_400_001`로 거부합니다.
-- Kakao `id`, Google `sub`, Naver `response.id`를 계정 식별자로 사용하며 이메일·전화번호는 사용하지 않습니다.
+Apple 요청:
+
+```json
+{
+  "idToken": "apple-identity-token",
+  "rawNonce": "Apple 로그인 요청 전에 생성한 원본 nonce",
+  "deviceId": "앱 설치 단위 식별자"
+}
+```
+
+- `{provider}`는 `kakao`, `google`, `naver`, `apple` 중 하나입니다.
+- Kakao·Naver는 `accessToken`, Google은 `idToken`, Apple은 `idToken`과 `rawNonce`만 전달하며 Provider와 다른 필드를 보내면 `AUTH_400_001`로 거부합니다.
+- Kakao `id`, Google·Apple `sub`, Naver `response.id`를 계정 식별자로 사용하며 이메일·전화번호는 계정 식별자로 사용하지 않습니다.
 - Kakao는 Token의 `app_id`가 `KAKAO_APP_ID`와 같은지 확인하고, Google은 공개 JWK 서명과 `iss`, `aud`, `exp`, `sub`를 검증합니다.
+- Apple은 공개 JWK 서명, `iss`, `aud`, `exp`, `sub`와 `SHA-256(rawNonce)`에 해당하는 `nonce` Claim을 검증합니다.
+- Apple 계정은 이메일이 아니라 `(APPLE, sub)`로 식별하며, 같은 `sub`의 재로그인은 기존 서비스 사용자를 재사용합니다.
+- Apple이 최초 로그인에서 제공한 검증 이메일은 `auth_accounts.provider_email`에 보존하며, 후속 Token에 이메일이 없어도 로그인 응답에 재사용합니다.
+- 서로 다른 OAuth Provider의 이메일이 같아도 계정을 자동 병합하지 않습니다. 회원 탈퇴로 Apple 연결이 삭제된 뒤 같은 계정으로 로그인하면 신규 사용자로 가입합니다.
 - Flutter Google 로그인 `serverClientId`와 Backend `GOOGLE_CLIENT_ID`는 동일한 Web Client ID여야 합니다.
+- `APPLE_CLIENT_ID`는 Sign in with Apple이 활성화된 iOS Bundle ID `com.dodam.app`을 사용합니다.
 - `JWT_SECRET`은 UTF-8 기준 32 Byte 이상이어야 하며 기본 Secret은 제공하지 않습니다.
-- Provider 검증 설정은 `KAKAO_APP_ID`, `GOOGLE_CLIENT_ID`로 주입합니다. Naver는 전달받은 Access Token으로 사용자 정보 API를 직접 검증합니다.
+- Provider 검증 설정은 `KAKAO_APP_ID`, `GOOGLE_CLIENT_ID`, `APPLE_CLIENT_ID`로 주입합니다. Naver는 전달받은 Access Token으로 사용자 정보 API를 직접 검증합니다.
 - Provider Token은 검증 요청에만 사용하며 DB·Redis·파일에 저장하거나 로그에 기록하지 않습니다.
 - Access Token Filter와 Redis 기반 Refresh Token rotation이 적용되어 있습니다.
 - Access Token이 전달되면 HS256 서명, 발급자, 만료, `token_type=access`, 사용자 ID Subject를 검증하고 요청 Principal로 사용합니다. Refresh Token을 API 인증에 사용할 수 없습니다.

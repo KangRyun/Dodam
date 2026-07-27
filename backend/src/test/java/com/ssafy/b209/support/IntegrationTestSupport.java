@@ -30,8 +30,8 @@ import org.testcontainers.containers.MySQLContainer;
  * 단위</i>로 시작·종료하므로 JVM singleton이라는 목적과 어긋난다. 아래 static 초기화로 한 번만 시작하고, 종료는 Testcontainers의 Ryuk
  * 사이드카가 JVM 종료 후 정리하도록 맡긴다.
  *
- * <p><b>격리:</b> 컨테이너를 공유하므로 클래스 간 데이터가 새는 것을 막아야 한다. 매 테스트 전에 더럽혀진 테이블만 TRUNCATE 한다(자세한 규칙과 성능
- * 근거는 {@link #truncateSharedDatabase()} 참고). 실행 순서에 의존하지 않으므로 {@code ./gradlew test -PrandomTestOrder}로
+ * <p><b>격리:</b> 컨테이너를 공유하므로 클래스 간 데이터가 새는 것을 막아야 한다. 매 테스트 전에 더럽혀진 테이블만 TRUNCATE 한다(자세한 규칙과 성능 근거는
+ * {@link #truncateSharedDatabase()} 참고). 실행 순서에 의존하지 않으므로 {@code ./gradlew test -PrandomTestOrder}로
  * 클래스 순서를 섞어도 통과한다.
  *
  * <p><b>⚠️ 병렬 실행 금지:</b> 이 격리 방식은 같은 JVM 안에서의 클래스 병렬 실행과 양립할 수 없다(서로의 데이터를 지운다). {@code

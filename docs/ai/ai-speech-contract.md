@@ -93,6 +93,22 @@ X-Internal-Token: <AI_INTERNAL_TOKEN>
 
 요청은 필수 `text`와 선택 `voice`를 사용한다. 성공 응답은 `audioBase64`, `audioFormat`(`mp3`), `voice`, `modelName`, `processingTimeMs`를 포함한다. 캐릭터 말투 정책은 AI 서버 소유이며 계약으로 노출하지 않는다.
 
+### `voice` 허용 값 (2026-07-27 추가)
+
+AI 서버가 받는 값은 **서비스 voice 코드**이며, GMS provider voice id로의 변환은 AI가 담당한다(`ai/tts_client.py`의 `SERVICE_VOICE_TO_PROVIDER`). 대소문자는 구분하지 않는다.
+
+| 서비스 코드 | 실제 목소리 |
+| --- | --- |
+| `CHILD_FRIENDLY_01` | fable (기본 곰돌이 톤) |
+| `FABLE` | fable |
+| `ALLOY` | alloy |
+| `NOVA` | nova |
+| `CORAL` | coral |
+
+- **모르는 코드는 거절하지 않고 서버 기본값(`TTS_VOICE`, 기본 `fable`)으로 대체한다.** 목소리 코드 하나 때문에 아이와의 대화에서 음성이 아예 나오지 않는 것을 피하기 위한 선택이며, 대체 시 AI 로그에 경고를 남긴다.
+- 이 규칙 이전에는 받은 값을 GMS에 그대로 넘겨, 명세 예시 값(`CHILD_FRIENDLY_01`)을 포함한 모든 대문자 코드가 `BadRequestError` → 502로 실패했다(2026-07-27 실측).
+- `speed`는 이 운영 계약의 요청 필드가 **아니다**. 정본 §19.7에는 있으나 아직 반영되지 않았으므로 보내도 무시된다.
+
 ## 저장·상태 전이
 
 ```text

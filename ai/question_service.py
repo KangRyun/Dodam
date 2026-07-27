@@ -30,6 +30,7 @@ import time
 from openai import APIConnectionError, APIStatusError, OpenAIError
 
 import config
+import llm_client
 from gms import get_client
 from internal_contracts import (
     DetectedObject,
@@ -41,8 +42,9 @@ from internal_contracts import (
 
 logger = logging.getLogger(__name__)
 
-# 프롬프트 버전 — TODO(편주희): 실제 프롬프트를 ai/prompts/로 옮기면서 버전 관리 시작.
-PROMPT_VERSION = "placeholder-0"
+# 내부 계약 경로도 draft 경로(llm_client)와 같은 프롬프트 파일을 쓴다 — 버전도 그대로 따른다.
+# 프롬프트 파일 단위 버전 관리 체계는 S15P11B209-595에서 정식화한다.
+PROMPT_VERSION = llm_client.PROMPT_VERSION
 
 
 class UpstreamError(Exception):
@@ -67,48 +69,150 @@ class SafetyBlockedError(Exception):
         self.rule_version = rule_version
 
 
-# ── 프롬프트 조립 (placeholder — 내용은 편주희 담당) ─────────────
-# TODO(편주희): 난이도별 톤 가이드 확정(유아형/초등형/지원형). 아래는 배선용 최소값.
-_DIFFICULTY_TONE = {
-    "PRESCHOOL": "유아에게 말하듯 아주 짧고 쉬운 말",
-    "LOWER_ELEMENTARY": "초등 저학년에게 말하듯 쉬운 말",
-    "UPPER_ELEMENTARY": "초등 고학년에게 말하듯 또렷하고 쉬운 말",
-    "SUPPORT": "천천히, 아주 쉽고 다정한 말",
+# ── 프롬프트 조립 (S15P11B209-589) ──────────────────────────────
+# 이전 placeholder는 무맥락 고정 시스템 프롬프트 + "[상황] 아이가 방금 그림을 그렸어요"
+# 고정 문구를 써서 첫 질문이 매번 비슷하게 고정됐다(첫 질문 고정 현상).
+# 이제 draft 경로가 이미 검증한 프롬프트(first_question.txt·conversations.txt)를 재사용해
+# 그림 탐지 객체·대화 문맥 기반으로 생성한다 — 두 경로를 한 프롬프트로 통일.
+# ⚠️ 내부 계약엔 아이 이름이 없다(개인정보 최소화) → 항상 "너"로 부른다.
+
+# 연령(난이도)별 질문 규칙 — 길이·어휘·말투 세 축으로 나눠 draft 프롬프트에 덧붙인다
+# (S15P11B209-590). BE QuestionDifficulty enum과 키를 맞춘다. 아이에게 그대로 들려줄
+# 질문이므로 길이·어휘를 연령에 맞춰 통제하는 것이 품질의 핵심이다.
+_DIFFICULTY_RULES = {
+    "PRESCHOOL": {
+        "length": "한 문장, 아주 짧게(대략 10자 안팎). 한 번에 한 가지만 물어봐.",
+        "vocabulary": "유아도 아는 아주 쉬운 말만. 어려운 낱말·한자어·추상어는 쓰지 마.",
+        "tone": "다정하고 밝게. '우와' 같은 반가운 반응으로 시작해도 좋아.",
+    },
+    "LOWER_ELEMENTARY": {
+        "length": "한 문장, 짧고 간결하게. 한 번에 한 가지만.",
+        "vocabulary": "일상에서 자주 쓰는 쉬운 말.",
+        "tone": "따뜻하고 친근하게, 칭찬을 살짝 섞어.",
+    },
+    "UPPER_ELEMENTARY": {
+        "length": "한두 문장까지 괜찮지만 그래도 간결하게.",
+        "vocabulary": "조금 더 구체적인 낱말도 좋지만 어렵지 않게.",
+        "tone": "또렷하고 아이를 존중하는 말투.",
+    },
+    "SUPPORT": {
+        "length": "아주 짧은 한 문장. 천천히, 한 번에 한 가지만.",
+        "vocabulary": "가장 쉬운 말만. 낯선 낱말은 피해.",
+        "tone": "아주 다정하고 차분하게. 재촉하거나 다그치지 마.",
+    },
 }
+
+# 알 수 없는 난이도가 오면 저학년 기준으로 둔다(요청은 계약상 검증되지만 방어적으로).
+_DEFAULT_DIFFICULTY = "LOWER_ELEMENTARY"
+
+
+def _difficulty_guidance(req: QuestionRequest) -> str:
+    """난이도에 맞는 길이·어휘·말투 규칙 블록. draft 프롬프트 뒤에 덧붙는다."""
+    rule = _DIFFICULTY_RULES.get(req.difficulty, _DIFFICULTY_RULES[_DEFAULT_DIFFICULTY])
+    return (
+        "[연령별 말하기 규칙]\n"
+        f"- 문장 길이: {rule['length']}\n"
+        f"- 어휘: {rule['vocabulary']}\n"
+        f"- 말투: {rule['tone']}"
+    )
+
+
+def _drawing_analysis_text(req: QuestionRequest) -> str | None:
+    """탐지 객체를 첫 질문 프롬프트의 {drawing_analysis} 재료(쉼표 목록)로 만든다."""
+    if not req.detected_objects:
+        return None
+    return ", ".join(o.object_name or o.object_code for o in req.detected_objects)
+
+
+def _last_child_index(req: QuestionRequest) -> int | None:
+    """가장 최근 아이 발화(텍스트 있는 것)의 인덱스. 없으면 None(=첫 질문)."""
+    for index in range(len(req.recent_messages) - 1, -1, -1):
+        message = req.recent_messages[index]
+        if (message.sender_type or "").upper() == "CHILD" and (message.text or "").strip():
+            return index
+    return None
+
+
+def _history_dicts(messages: list) -> list[dict]:
+    """recent_messages → llm_client._format_history가 받는 [{"role","content"}] 형태로."""
+    turns: list[dict] = []
+    for m in messages:
+        if not (m.text or "").strip():
+            continue
+        role = "user" if (m.sender_type or "").upper() == "CHILD" else "assistant"
+        turns.append({"role": role, "content": m.text})
+    return turns
 
 
 def _build_messages(req: QuestionRequest) -> list[dict]:
-    """요청 문맥 → GMS messages. (placeholder)
+    """요청 문맥 → GMS messages. draft 프롬프트를 재사용해 컨텍스트 기반으로 생성한다.
 
-    TODO(편주희): 실제 시스템 프롬프트·질문 규칙·금지 표현 목록을 ai/prompts/로
-    교체. 아래는 계약 배선 확인용 — 평가·판정 표현 없이 그림에 대한 쉬운 질문만 유도.
+    - 아이 발화가 아직 없으면: 첫 질문 프롬프트(그림 탐지 객체 기반).
+    - 아이 발화가 있으면: 다음 질문 프롬프트(마지막 발화 + 그 이전 이력).
+    연령대는 아이 나이를 넘기고, 난이도별 길이·어휘·말투 규칙을 덧붙인다.
     """
-    tone = _DIFFICULTY_TONE.get(req.difficulty, _DIFFICULTY_TONE["LOWER_ELEMENTARY"])
-    system = (
-        "너는 아이와 그림을 보며 이야기하는 따뜻한 곰돌이야. "
-        f"{tone}로, 아이 마음을 평가하지 말고 그림에 대한 쉬운 질문 하나만 해줘."
-    )
-    lines: list[str] = []
-    if req.detected_objects:
-        names = ", ".join(o.object_name or o.object_code for o in req.detected_objects)
-        lines.append(f"[그림에서 보인 것] {names}")
-    for m in req.recent_messages:
-        # senderType은 BE 저장값 기준(AI/CHILD 계열). CHILD가 아니면 곰돌이 발화로 본다.
-        speaker = "아이" if (m.sender_type or "").upper() == "CHILD" else "곰돌이"
-        if m.text:
-            lines.append(f"[{speaker}] {m.text}")
-    if not lines:
-        lines.append("[상황] 아이가 방금 그림을 그렸어요. 첫 질문을 해주세요.")
+    age_band = str(req.child_age)
+    drawing = _drawing_analysis_text(req)
+    last_child = _last_child_index(req)
+
+    if last_child is None:
+        system = llm_client.render_first_question_prompt(drawing, age_band=age_band)
+        trigger = llm_client.FIRST_QUESTION_TRIGGER
+    else:
+        utterance = req.recent_messages[last_child].text or ""
+        history = _history_dicts(req.recent_messages[:last_child])
+        system = llm_client.render_next_question_prompt(
+            utterance, drawing_analysis=drawing, history=history, age_band=age_band
+        )
+        trigger = llm_client.NEXT_QUESTION_TRIGGER
+
+    system = f"{system}\n\n{_difficulty_guidance(req)}"
     return [
         {"role": "system", "content": system},
-        {"role": "user", "content": "\n".join(lines)},
+        {"role": "user", "content": trigger},
     ]
 
 
-def _pick_question_purpose(req: QuestionRequest) -> str:
-    """질문 목적 결정. (placeholder — 계약 통과용 최소 규칙)
+# ── 질문 목적 ↔ 대상 객체 ↔ 선택 Chip 정합성 (S15P11B209-594) ────
+# 세 값이 서로 어긋나면 아동 화면에 엉뚱한 칩·객체가 붙는다. 목적을 먼저 정하고
+# 대상 객체·칩을 그 목적에 맞춰 파생시켜 항상 일관되게 만든다.
+#   - OBJECT_DESCRIPTION: 특정 객체를 묻는다 → 대상 객체 있음, 예/아니오/더 말하기 칩.
+#   - DRAWING_CONTEXT: 그림 전체 맥락을 묻는다 → 대상 객체 없음, 실제/상상 칩.
+#   - EXPRESSION: 마음·느낌을 묻는다 → 대상 객체 없음, 감정 칩.
+#   - FOLLOW_UP: 아이 발화에 이어 묻는다 → 대상 객체 없음, 예/아니오/더 말하기 칩.
+VALID_PURPOSES = {"OBJECT_DESCRIPTION", "DRAWING_CONTEXT", "EXPRESSION", "FOLLOW_UP"}
 
-    TODO(편주희): 프롬프트 설계와 함께 목적 분류(EXPRESSION 포함)를 확정.
+# 목적별 선택 Chip. 아동 화면에 그대로 노출되므로 쉽고 따뜻한 말만. code는 응답 안에서 유일.
+_OPTIONS_BY_PURPOSE: dict[str, list[QuestionOption]] = {
+    "OBJECT_DESCRIPTION": [
+        QuestionOption(code="CHIP_YES", label="응, 맞아!"),
+        QuestionOption(code="CHIP_NO", label="음, 아니야"),
+        QuestionOption(code="CHIP_TELL_MORE", label="더 이야기해 줄래"),
+    ],
+    "DRAWING_CONTEXT": [
+        QuestionOption(code="CHIP_REAL", label="진짜 있었던 일이야"),
+        QuestionOption(code="CHIP_IMAGINE", label="상상해서 그렸어"),
+        QuestionOption(code="CHIP_TELL_MORE", label="더 이야기해 줄래"),
+    ],
+    "EXPRESSION": [
+        QuestionOption(code="CHIP_GOOD", label="좋아!"),
+        QuestionOption(code="CHIP_SOSO", label="그냥 그래"),
+        QuestionOption(code="CHIP_NOT_SURE", label="잘 모르겠어"),
+    ],
+    "FOLLOW_UP": [
+        QuestionOption(code="CHIP_YES", label="응, 맞아!"),
+        QuestionOption(code="CHIP_NO", label="음, 아니야"),
+        QuestionOption(code="CHIP_TELL_MORE", label="더 이야기해 줄래"),
+    ],
+}
+
+
+def _pick_question_purpose(req: QuestionRequest) -> str:
+    """질문 목적 결정.
+
+    아이가 이미 말했으면 그 말에 이어가는 FOLLOW_UP, 첫 질문이면 탐지 객체가 있을 때
+    그 객체를 묻는 OBJECT_DESCRIPTION, 없으면 그림 전체를 묻는 DRAWING_CONTEXT.
+    (EXPRESSION은 질문 내용 기반 분류가 필요해 후속 프롬프트 구조화 과제로 둔다.)
     """
     if any((m.sender_type or "").upper() == "CHILD" for m in req.recent_messages):
         return "FOLLOW_UP"
@@ -117,26 +221,47 @@ def _pick_question_purpose(req: QuestionRequest) -> str:
     return "DRAWING_CONTEXT"
 
 
-# TODO(편주희): 질문 내용과 연동된 실제 선택칩 생성 규칙. 아래는 계약 통과용 placeholder
-#  (OPTION 허용 시 options가 비어 있으면 BE가 스키마 위반으로 보고 폴백 템플릿을 쓴다).
-#  칩 문구는 아동 화면에 그대로 노출되므로 쉽고 따뜻한 말만 사용한다.
-_PLACEHOLDER_OPTIONS = [
-    QuestionOption(code="CHIP_YES", label="응, 맞아!"),
-    QuestionOption(code="CHIP_NO", label="음, 아니야"),
-    QuestionOption(code="CHIP_TELL_MORE", label="더 이야기해 줄래"),
-]
+def _options_for_purpose(purpose: str) -> list[QuestionOption]:
+    """목적에 맞는 선택 Chip. 모르는 목적이면 무난한 예/아니오/더 말하기."""
+    return list(_OPTIONS_BY_PURPOSE.get(purpose, _OPTIONS_BY_PURPOSE["FOLLOW_UP"]))
 
 
-def _pick_target_object(req: QuestionRequest) -> DetectedObject | None:
-    """질문이 가리키는 객체 선택. (placeholder: 신뢰도 최고 객체)
+def _target_for_purpose(req: QuestionRequest, purpose: str) -> DetectedObject | None:
+    """대상 객체는 특정 객체를 묻는 OBJECT_DESCRIPTION일 때만 붙인다(목적과 정합).
 
-    요청의 detectedObjects는 BE가 이미 검증(objectCode·confidence·정규화 bbox)한
-    값이라 그대로 되돌려도 응답 계약을 통과한다.
-    TODO(편주희): 질문 내용과 실제로 연결되는 객체를 고르도록 프롬프트와 함께 확정.
+    요청의 detectedObjects는 BE가 이미 검증(objectCode·confidence·정규화 bbox)한 값이라
+    그대로 되돌려도 계약을 통과한다. 신뢰도 최고 객체를 대상으로 고른다.
     """
-    if not req.detected_objects:
+    if purpose != "OBJECT_DESCRIPTION" or not req.detected_objects:
         return None
     return max(req.detected_objects, key=lambda o: o.confidence)
+
+
+def _is_consistent(
+    purpose: str,
+    target: DetectedObject | None,
+    options: list[QuestionOption] | None,
+    option_allowed: bool,
+) -> bool:
+    """목적·대상·칩·응답 방식이 서로 정합한지 검증한다(BE isContractValidFor 사전 방어).
+
+    - 목적은 계약 허용값이어야 한다.
+    - 대상 객체는 OBJECT_DESCRIPTION일 때만 허용(다른 목적엔 붙지 않는다).
+    - OPTION 허용 시 칩은 비어 있지 않고 code가 유일해야 하며, 비허용 시 칩은 None.
+    """
+    if purpose not in VALID_PURPOSES:
+        return False
+    if target is not None and purpose != "OBJECT_DESCRIPTION":
+        return False
+    if option_allowed:
+        if not options:
+            return False
+        codes = [o.code for o in options]
+        if len(codes) != len(set(codes)):
+            return False
+    elif options is not None:
+        return False
+    return True
 
 
 def _evaluate_safety(question_text: str, rule_version: str) -> SafetyResult:
@@ -231,13 +356,21 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
             safety.block_reason_code or "UNSPECIFIED", req.safety_rule_version
         )
 
+    # 목적을 먼저 정하고 대상 객체·칩을 그 목적에 맞춰 파생 — 셋을 항상 정합하게 만든다.
     option_allowed = "OPTION" in req.allowed_response_modes
+    purpose = _pick_question_purpose(req)
+    target = _target_for_purpose(req, purpose)
+    # OPTION 비허용이면 반드시 null — 빈 배열도 계약 위반이다(isContractValidFor).
+    options = _options_for_purpose(purpose) if option_allowed else None
+    if not _is_consistent(purpose, target, options, option_allowed):
+        # 정합성이 깨진 조합은 아동 화면에 내보내지 않는다 → 실패로 돌려 BE 폴백에 맡긴다.
+        raise UpstreamError("AI_INCONSISTENT_RESPONSE", "Consistency")
+
     return QuestionResponse(
         question_text=text,
-        question_purpose=_pick_question_purpose(req),
-        # OPTION 비허용이면 반드시 null — 빈 배열도 계약 위반이다(isContractValidFor).
-        options=list(_PLACEHOLDER_OPTIONS) if option_allowed else None,
-        target_object=_pick_target_object(req),
+        question_purpose=purpose,
+        options=options,
+        target_object=target,
         fallback_used=False,  # AI 서버 자체 폴백 없음 — 폴백 템플릿은 BE 소유
         safety_result=safety,
         model_name=config.LLM_MODEL,
