@@ -152,6 +152,7 @@ class NimbusGoogleIdTokenVerifierTest {
     return new OAuthProviderProperties(
         new OAuthProviderProperties.Kakao("1234"),
         new OAuthProviderProperties.Google(clientId),
+        new OAuthProviderProperties.Apple("com.dodam.app"),
         Duration.ofSeconds(3),
         Duration.ofSeconds(5));
   }

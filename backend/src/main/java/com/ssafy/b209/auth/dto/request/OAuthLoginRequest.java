@@ -10,7 +10,8 @@ import jakarta.validation.constraints.Size;
  * <p>Provider별 허용 필드 조합은 Path의 Provider와 함께 Service 계층에서 검증한다.
  *
  * @param accessToken Kakao·Naver SDK가 발급한 Access Token
- * @param idToken Google SDK가 발급한 ID Token
+ * @param idToken Google·Apple SDK가 발급한 ID Token
+ * @param rawNonce Apple 로그인 요청 전에 앱이 생성한 원본 nonce
  * @param deviceId 앱 설치 단위 식별자. 308번 Refresh Token 세션 저장에서 사용한다.
  */
 @Schema(description = "모바일 OAuth Provider Token 로그인 요청")
@@ -18,7 +19,9 @@ public record OAuthLoginRequest(
     @Schema(description = "Kakao·Naver SDK가 발급한 Access Token", example = "provider-token")
         @Size(max = 4096)
         String accessToken,
-    @Schema(description = "Google SDK가 발급한 ID Token") @Size(max = 4096) String idToken,
+    @Schema(description = "Google·Apple SDK가 발급한 ID Token") @Size(max = 4096) String idToken,
+    @Schema(description = "Apple ID Token nonce 검증에 사용하는 원본 nonce") @Size(max = 512)
+        String rawNonce,
     @Schema(description = "Refresh Token 세션을 구분하는 앱 설치 단위 식별자", example = "mvp-device-001")
         @NotBlank
         @Size(max = 255)

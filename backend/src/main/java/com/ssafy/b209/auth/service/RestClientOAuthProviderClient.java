@@ -78,6 +78,7 @@ public class RestClientOAuthProviderClient implements OAuthProviderClient {
         case KAKAO -> verifyKakao(credential.value());
         case NAVER -> verifyNaver(credential.value());
         case GOOGLE -> throw new IllegalStateException("Google verification must be delegated");
+        case APPLE -> throw new IllegalStateException("Apple verification must be delegated");
       };
     } catch (RestClientResponseException exception) {
       if (exception.getStatusCode().is4xxClientError()) {
@@ -149,7 +150,7 @@ public class RestClientOAuthProviderClient implements OAuthProviderClient {
 
   private void requireCredentialType(AuthProvider provider, OAuthProviderCredential credential) {
     OAuthCredentialType expected =
-        provider == AuthProvider.GOOGLE
+        provider == AuthProvider.GOOGLE || provider == AuthProvider.APPLE
             ? OAuthCredentialType.ID_TOKEN
             : OAuthCredentialType.ACCESS_TOKEN;
     if (credential.type() != expected) {

@@ -49,7 +49,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("15");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("16");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(67);
     assertThat(tableExists("refresh_tokens")).isFalse();
@@ -132,6 +132,8 @@ class DatabaseMigrationIntegrationTest {
     assertThat(columnExists("auth_accounts", "email_verified_at")).isFalse();
     assertThat(tableExists("email_verifications")).isFalse();
     assertThat(checkConstraintContains("auth_accounts", "ck_auth_accounts_provider", "KAKAO"))
+        .isTrue();
+    assertThat(checkConstraintContains("auth_accounts", "ck_auth_accounts_provider", "APPLE"))
         .isTrue();
     assertThat(checkConstraintContains("auth_accounts", "ck_auth_accounts_provider", "LOCAL"))
         .isFalse();

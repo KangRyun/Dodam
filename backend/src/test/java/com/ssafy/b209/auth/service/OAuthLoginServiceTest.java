@@ -55,7 +55,7 @@ class OAuthLoginServiceTest {
 
   @Test
   void verifiesKakaoAccessTokenProvisionsAccountAndIssuesServiceTokens() {
-    OAuthLoginRequest request = new OAuthLoginRequest("kakao-access-token", null, "device-1");
+    OAuthLoginRequest request = new OAuthLoginRequest("kakao-access-token", null, null, "device-1");
     OAuthProviderCredential credential =
         new OAuthProviderCredential(OAuthCredentialType.ACCESS_TOKEN, "kakao-access-token");
     VerifiedOAuthIdentity identity =
@@ -92,7 +92,7 @@ class OAuthLoginServiceTest {
 
   @Test
   void rejectsInvalidJwtConfigurationBeforeConsumingProviderToken() {
-    OAuthLoginRequest request = new OAuthLoginRequest(null, "google-id-token", "device-1");
+    OAuthLoginRequest request = new OAuthLoginRequest(null, "google-id-token", null, "device-1");
     doThrow(new BusinessException(AuthErrorCode.AUTH_CONFIGURATION_INVALID))
         .when(tokenIssuer)
         .validateConfiguration();
@@ -105,7 +105,8 @@ class OAuthLoginServiceTest {
 
   @Test
   void rejectsGoogleAccessTokenBeforeCallingProvider() {
-    OAuthLoginRequest request = new OAuthLoginRequest("google-access-token", null, "device-1");
+    OAuthLoginRequest request =
+        new OAuthLoginRequest("google-access-token", null, null, "device-1");
 
     assertThatThrownBy(() -> service.login(AuthProvider.GOOGLE, request))
         .isInstanceOfSatisfying(
@@ -120,7 +121,7 @@ class OAuthLoginServiceTest {
   @Test
   void rejectsBothProviderTokensBeforeCallingProvider() {
     OAuthLoginRequest request =
-        new OAuthLoginRequest("kakao-access-token", "unexpected-id-token", "device-1");
+        new OAuthLoginRequest("kakao-access-token", "unexpected-id-token", null, "device-1");
 
     assertThatThrownBy(() -> service.login(AuthProvider.KAKAO, request))
         .isInstanceOfSatisfying(

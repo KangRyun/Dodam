@@ -7,5 +7,7 @@ public enum AuthProvider {
   /** Google OpenID Connect가 보증한 계정이다. */
   GOOGLE,
   /** Naver Login이 보증한 계정이다. */
-  NAVER
+  NAVER,
+  /** Sign in with Apple이 보증한 계정이다. */
+  APPLE
 }
