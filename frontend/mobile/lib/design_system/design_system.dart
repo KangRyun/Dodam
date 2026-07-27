@@ -1,6 +1,7 @@
 export 'components/buttons/app_button.dart';
 export 'components/buttons/social_login_button.dart';
 export 'components/dialogs/app_dialog.dart';
+export 'components/feedback/app_skeleton.dart';
 export 'components/feedback/app_snack_bar.dart';
 export 'components/feedback/app_state_view.dart';
 export 'components/inputs/app_text_field.dart';
