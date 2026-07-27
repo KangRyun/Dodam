@@ -65,8 +65,7 @@ class DatabaseMigrationIntegrationTest {
     // V17 동의 약관 시드 — 앱이 아는 7개 term_code 가 모두 활성으로 심겼는지 확인한다.
     assertThat(
             jdbcTemplate.queryForList(
-                "SELECT term_code FROM consent_terms WHERE is_active = TRUE",
-                String.class))
+                "SELECT term_code FROM consent_terms WHERE is_active = TRUE", String.class))
         .contains(
             "SERVICE_TOS",
             "MARKETING",
