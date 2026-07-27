@@ -43,7 +43,7 @@ from internal_contracts import (
 logger = logging.getLogger(__name__)
 
 # 내부 계약 경로도 draft 경로(llm_client)와 같은 프롬프트 파일을 쓴다 — 버전도 그대로 따른다.
-# 프롬프트 파일 단위 버전 관리 체계는 S15P11B209-595에서 정식화한다.
+# 버전은 prompts_registry가 중앙 관리하는 통합 버전이다(S15P11B209-595).
 PROMPT_VERSION = llm_client.PROMPT_VERSION
 
 
