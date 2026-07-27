@@ -27,6 +27,20 @@ void main() {
     expect(find.byKey(const ValueKey('guardian-profile')), findsOneWidget);
   });
 
+  testWidgets('프로필 선택에서 로그아웃하면 로그인 화면으로 이동한다', (tester) async {
+    await tester.pumpWidget(
+      const DodamApp(initialRoute: AppRoutes.profileSelection),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('logout-action')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('로그아웃').last);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('social-login-kakao')), findsOneWidget);
+  });
+
   testWidgets('프로필 선택에서 아동을 누르면 해당 아동 홈으로 이동한다', (tester) async {
     await tester.pumpWidget(
       const DodamApp(initialRoute: AppRoutes.profileSelection),

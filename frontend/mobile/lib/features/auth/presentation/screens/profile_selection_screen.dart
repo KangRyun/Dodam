@@ -14,6 +14,7 @@ class ProfileSelectionScreen extends StatelessWidget {
     required this.onChildSelected,
     this.onAddChild,
     this.onEditProfiles,
+    this.headerAction,
     super.key,
   });
 
@@ -22,6 +23,7 @@ class ProfileSelectionScreen extends StatelessWidget {
   final ChildProfileSelected onChildSelected;
   final ValueChanged<BuildContext>? onAddChild;
   final ValueChanged<BuildContext>? onEditProfiles;
+  final Widget? headerAction;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -41,7 +43,7 @@ class ProfileSelectionScreen extends StatelessWidget {
               constraints: const BoxConstraints(maxWidth: 1180),
               child: Column(
                 children: [
-                  const _ProfileHeader(),
+                  _ProfileHeader(action: headerAction),
                   const SizedBox(height: AppSpacing.xl),
                   _GuardianSection(
                     onSelected: () => onGuardianSelected(context),
@@ -68,27 +70,39 @@ class ProfileSelectionScreen extends StatelessWidget {
 }
 
 class _ProfileHeader extends StatelessWidget {
-  const _ProfileHeader();
+  const _ProfileHeader({this.action});
+
+  final Widget? action;
 
   @override
-  Widget build(BuildContext context) => const Column(
-    children: [
-      Text(
-        '누가 도담을 이용하나요?',
-        textAlign: TextAlign.center,
-        style: TextStyle(
-          color: AppColors.ink,
-          fontSize: 32,
-          fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) => SizedBox(
+    width: double.infinity,
+    child: Stack(
+      alignment: Alignment.center,
+      children: [
+        const Column(
+          children: [
+            Text(
+              '누가 도담을 이용하나요?',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.ink,
+                fontSize: 32,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            SizedBox(height: AppSpacing.sm),
+            Text(
+              '이용할 프로필을 선택해 주세요.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: AppColors.inkMuted, fontSize: 18),
+            ),
+          ],
         ),
-      ),
-      SizedBox(height: AppSpacing.sm),
-      Text(
-        '이용할 프로필을 선택해 주세요.',
-        textAlign: TextAlign.center,
-        style: TextStyle(color: AppColors.inkMuted, fontSize: 18),
-      ),
-    ],
+        if (action != null)
+          Positioned(right: 0, top: 0, bottom: 0, child: action!),
+      ],
+    ),
   );
 }
 
