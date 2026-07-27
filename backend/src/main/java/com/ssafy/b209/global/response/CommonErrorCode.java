@@ -25,6 +25,9 @@ public enum CommonErrorCode implements ErrorCode {
   /** 요청이 데이터 무결성 조건과 충돌한 경우다. */
   DATA_INTEGRITY_VIOLATION(HttpStatus.CONFLICT, "COMMON_409_001", "요청이 현재 데이터 상태와 충돌합니다."),
 
+  /** 업로드 파일 또는 요청 본문이 허용 용량을 초과한 경우다. */
+  PAYLOAD_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "COMMON_413_001", "파일 용량이 허용 범위를 초과했습니다."),
+
   /** 예상하지 못한 서버 내부 오류가 발생한 경우다. */
   INTERNAL_SERVER_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "COMMON_500_001", "서버 내부 오류가 발생했습니다.");
 
