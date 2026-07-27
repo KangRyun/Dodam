@@ -79,14 +79,8 @@ class OAuthAccountProvisioningServiceTest {
     ReflectionTestUtils.setField(user, "id", 7L);
     AuthAccount account =
         AuthAccount.social(
-            user,
-            AuthProvider.APPLE,
-            "apple-sub",
-            "relay@privaterelay.appleid.com",
-            NOW,
-            NOW);
-    when(authAccountRepository.findByProviderAndProviderSubject(
-            AuthProvider.APPLE, "apple-sub"))
+            user, AuthProvider.APPLE, "apple-sub", "relay@privaterelay.appleid.com", NOW, NOW);
+    when(authAccountRepository.findByProviderAndProviderSubject(AuthProvider.APPLE, "apple-sub"))
         .thenReturn(Optional.of(account));
 
     ProvisionedOAuthAccount result =

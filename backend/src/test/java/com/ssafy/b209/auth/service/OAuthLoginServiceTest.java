@@ -96,8 +96,7 @@ class OAuthLoginServiceTest {
     OAuthLoginRequest request =
         new OAuthLoginRequest(null, "apple-id-token", "raw-nonce", "device-1");
     OAuthProviderCredential credential =
-        new OAuthProviderCredential(
-            OAuthCredentialType.ID_TOKEN, "apple-id-token", "raw-nonce");
+        new OAuthProviderCredential(OAuthCredentialType.ID_TOKEN, "apple-id-token", "raw-nonce");
     VerifiedOAuthIdentity identity =
         new VerifiedOAuthIdentity(AuthProvider.APPLE, "apple-sub", null);
     User user = User.pending(LocalDateTime.of(2026, 7, 22, 11, 0));
@@ -106,11 +105,7 @@ class OAuthLoginServiceTest {
     when(provisioningService.provision(identity))
         .thenReturn(
             new ProvisionedOAuthAccount(
-                41L,
-                AuthProvider.APPLE,
-                "relay@privaterelay.appleid.com",
-                false,
-                true));
+                41L, AuthProvider.APPLE, "relay@privaterelay.appleid.com", false, true));
     when(userRepository.findById(41L)).thenReturn(Optional.of(user));
     when(tokenIssuer.issue(41L))
         .thenReturn(new IssuedTokenPair("access", 1800, "refresh", 1209600, "family-1"));
@@ -126,26 +121,18 @@ class OAuthLoginServiceTest {
     OAuthLoginRequest request =
         new OAuthLoginRequest(null, "apple-id-token", "raw-nonce", "device-1");
     OAuthProviderCredential credential =
-        new OAuthProviderCredential(
-            OAuthCredentialType.ID_TOKEN, "apple-id-token", "raw-nonce");
+        new OAuthProviderCredential(OAuthCredentialType.ID_TOKEN, "apple-id-token", "raw-nonce");
     VerifiedOAuthIdentity identity =
         new VerifiedOAuthIdentity(AuthProvider.APPLE, "apple-sub", null);
     User user = User.pending(LocalDateTime.of(2026, 7, 22, 11, 0));
     user.completeOnboarding(
-        UserRole.GUARDIAN,
-        "보호자",
-        "guardian@example.com",
-        LocalDateTime.of(2026, 7, 22, 11, 30));
+        UserRole.GUARDIAN, "보호자", "guardian@example.com", LocalDateTime.of(2026, 7, 22, 11, 30));
     ReflectionTestUtils.setField(user, "id", 41L);
     when(providerClient.verify(AuthProvider.APPLE, credential)).thenReturn(identity);
     when(provisioningService.provision(identity))
         .thenReturn(
             new ProvisionedOAuthAccount(
-                41L,
-                AuthProvider.APPLE,
-                "relay@privaterelay.appleid.com",
-                false,
-                false));
+                41L, AuthProvider.APPLE, "relay@privaterelay.appleid.com", false, false));
     when(userRepository.findById(41L)).thenReturn(Optional.of(user));
     when(tokenIssuer.issue(41L))
         .thenReturn(new IssuedTokenPair("access", 1800, "refresh", 1209600, "family-1"));

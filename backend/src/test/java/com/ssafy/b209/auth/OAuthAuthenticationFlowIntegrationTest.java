@@ -151,16 +151,14 @@ class OAuthAuthenticationFlowIntegrationTest extends IntegrationTestSupport {
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM auth_accounts", Integer.class))
         .isEqualTo(1);
     assertThat(
-            jdbcTemplate.queryForObject(
-                "SELECT provider_subject FROM auth_accounts", String.class))
+            jdbcTemplate.queryForObject("SELECT provider_subject FROM auth_accounts", String.class))
         .isEqualTo("apple-sub");
   }
 
   @Test
   void sameVerifiedEmailAcrossProvidersDoesNotMergeAccounts() throws Exception {
     when(providerClient.verify(eq(AuthProvider.APPLE), any()))
-        .thenReturn(
-            new VerifiedOAuthIdentity(AuthProvider.APPLE, "apple-sub", "same@example.com"));
+        .thenReturn(new VerifiedOAuthIdentity(AuthProvider.APPLE, "apple-sub", "same@example.com"));
     when(providerClient.verify(eq(AuthProvider.GOOGLE), any()))
         .thenReturn(
             new VerifiedOAuthIdentity(AuthProvider.GOOGLE, "google-sub", "same@example.com"));
