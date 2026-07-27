@@ -58,6 +58,7 @@ public class OAuthAccountProvisioningService {
                 new ProvisionedOAuthAccount(
                     account.getUser().getId(),
                     account.getProvider(),
+                    account.getProviderEmail(),
                     false,
                     !account.getUser().isOnboardingCompleted()))
         .orElseGet(() -> createAccount(identity));
@@ -80,6 +81,7 @@ public class OAuthAccountProvisioningService {
     } catch (DataIntegrityViolationException exception) {
       throw new BusinessException(AuthErrorCode.ACCOUNT_LINK_CONFLICT, exception);
     }
-    return new ProvisionedOAuthAccount(user.getId(), identity.provider(), true, true);
+    return new ProvisionedOAuthAccount(
+        user.getId(), identity.provider(), identity.providerEmail(), true, true);
   }
 }

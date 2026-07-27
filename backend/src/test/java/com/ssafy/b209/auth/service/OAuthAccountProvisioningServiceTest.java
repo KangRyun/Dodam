@@ -65,6 +65,7 @@ class OAuthAccountProvisioningServiceTest {
 
     assertThat(result.userId()).isEqualTo(41L);
     assertThat(result.provider()).isEqualTo(provider);
+    assertThat(result.providerEmail()).isNull();
     assertThat(result.newUser()).isTrue();
     assertThat(result.needsOnboarding()).isTrue();
     ArgumentCaptor<AuthAccount> accountCaptor = ArgumentCaptor.forClass(AuthAccount.class);
@@ -73,17 +74,26 @@ class OAuthAccountProvisioningServiceTest {
   }
 
   @Test
-  void returnsExistingAccountWithoutCreatingAnotherUser() {
+  void returnsStoredAppleEmailWhenRepeatedTokenOmitsEmail() {
     User user = User.pending(NOW);
     ReflectionTestUtils.setField(user, "id", 7L);
-    AuthAccount account = AuthAccount.social(user, AuthProvider.KAKAO, "kakao-id", null, null, NOW);
-    when(authAccountRepository.findByProviderAndProviderSubject(AuthProvider.KAKAO, "kakao-id"))
+    AuthAccount account =
+        AuthAccount.social(
+            user,
+            AuthProvider.APPLE,
+            "apple-sub",
+            "relay@privaterelay.appleid.com",
+            NOW,
+            NOW);
+    when(authAccountRepository.findByProviderAndProviderSubject(
+            AuthProvider.APPLE, "apple-sub"))
         .thenReturn(Optional.of(account));
 
     ProvisionedOAuthAccount result =
-        service.provision(new VerifiedOAuthIdentity(AuthProvider.KAKAO, "kakao-id", null));
+        service.provision(new VerifiedOAuthIdentity(AuthProvider.APPLE, "apple-sub", null));
 
     assertThat(result.userId()).isEqualTo(7L);
+    assertThat(result.providerEmail()).isEqualTo("relay@privaterelay.appleid.com");
     assertThat(result.newUser()).isFalse();
     assertThat(result.needsOnboarding()).isTrue();
     verify(userRepository, never()).save(any());
@@ -104,9 +114,11 @@ class OAuthAccountProvisioningServiceTest {
     when(authAccountRepository.saveAndFlush(any(AuthAccount.class)))
         .thenAnswer(invocation -> invocation.getArgument(0));
 
-    service.provision(
-        new VerifiedOAuthIdentity(AuthProvider.GOOGLE, "google-sub", "USER@EXAMPLE.COM"));
+    ProvisionedOAuthAccount result =
+        service.provision(
+            new VerifiedOAuthIdentity(AuthProvider.GOOGLE, "google-sub", "USER@EXAMPLE.COM"));
 
+    assertThat(result.providerEmail()).isEqualTo("user@example.com");
     ArgumentCaptor<AuthAccount> accountCaptor = ArgumentCaptor.forClass(AuthAccount.class);
     verify(authAccountRepository).saveAndFlush(accountCaptor.capture());
     assertThat(accountCaptor.getValue().getProviderEmail()).isEqualTo("user@example.com");

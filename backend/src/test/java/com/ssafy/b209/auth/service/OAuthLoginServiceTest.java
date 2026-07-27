@@ -64,7 +64,7 @@ class OAuthLoginServiceTest {
     ReflectionTestUtils.setField(user, "id", 41L);
     when(providerClient.verify(AuthProvider.KAKAO, credential)).thenReturn(identity);
     when(provisioningService.provision(identity))
-        .thenReturn(new ProvisionedOAuthAccount(41L, AuthProvider.KAKAO, true, true));
+        .thenReturn(new ProvisionedOAuthAccount(41L, AuthProvider.KAKAO, null, true, true));
     when(userRepository.findById(41L)).thenReturn(Optional.of(user));
     when(userRepository.save(user)).thenReturn(user);
     when(tokenIssuer.issue(41L))
