@@ -213,6 +213,12 @@ services:
       #   passthrough. base-url 앱 기본값도 localhost(도달 불가)라 내부망 DNS로 교정.
       AI_DRAWING_ANALYSIS_MODE: ${AI_DRAWING_ANALYSIS_MODE:-mock}
       AI_DRAWING_ANALYSIS_BASE_URL: ${AI_DRAWING_ANALYSIS_BASE_URL:-http://ai:8000}
+      # 관찰 리포트 클라이언트(app.ai.observation) — 위 그림 분석과 같은 passthrough.
+      #   2026-07-27: AI에 POST /internal/v1/observations 를 신설해 실호출이 가능해졌다(그 전에는 404).
+      #   기본값은 mock 유지 — AI 배포가 먼저 반영된 뒤 .env(AI_OBSERVATION_MODE=http)로 켠다.
+      #   base-url 앱 기본값이 localhost(컨테이너 안에선 backend 자신 = 도달 불가)라 내부망 DNS로 교정.
+      AI_OBSERVATION_MODE: ${AI_OBSERVATION_MODE:-mock}
+      AI_OBSERVATION_BASE_URL: ${AI_OBSERVATION_BASE_URL:-http://ai:8000}
       # AI가 LocalImageStorage 원본을 가져갈 일회성 내부 URL. 외부 도메인이나 nginx를 사용하지 않는다.
       AI_IMAGE_ACCESS_BASE_URL: ${AI_IMAGE_ACCESS_BASE_URL:-http://backend:8080}
       AI_IMAGE_ACCESS_TOKEN_TTL: ${AI_IMAGE_ACCESS_TOKEN_TTL:-60s}

@@ -250,20 +250,33 @@ async def internal_speech_stt(
         return JSONResponse(status_code=422, content={"errorCode": "INVALID_REQUEST"})
 
     started_at = time.monotonic()
+    tmp_path = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=_safe_stt_suffix(file.filename)) as tmp:
+        # transcribe가 경로로 파일을 다시 열기 때문에 delete=False로 만들고 닫은 뒤 넘긴다.
+        #   Windows는 NamedTemporaryFile이 열려 있는 동안 같은 파일의 재오픈을 막아
+        #   PermissionError가 났다(analyze_report가 이미 같은 이유로 delete=False를 쓴다).
+        with tempfile.NamedTemporaryFile(
+            suffix=_safe_stt_suffix(file.filename), delete=False
+        ) as tmp:
             tmp.write(await file.read())
-            tmp.flush()
-            text = stt_client.transcribe(tmp.name)
+            tmp_path = tmp.name
+        text = stt_client.transcribe(tmp_path)
         return {
             "text": text,
             "confidence": None,
             "modelName": config.STT_MODEL,
             "processingTimeMs": int((time.monotonic() - started_at) * 1000),
         }
-    except RuntimeError:
+    except (RuntimeError, OSError):
+        # OSError까지 잡는다. 임시파일·디스크 오류가 500으로 누출되면 BE가 상류 장애로
+        # 분류하지 못하고 스택트레이스만 남는다.
         return JSONResponse(status_code=502, content={"errorCode": "AI_UPSTREAM_ERROR"})
     finally:
+        if tmp_path is not None:
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
         await file.close()
 
 
@@ -336,8 +349,8 @@ def internal_speech_synthesis(
     started = time.monotonic()
     try:
         audio = tts_client.synthesize(req.text, voice=req.voice)
-    except RuntimeError:
-        # transcription과 동일 — 상류(GMS) 장애는 502로 매핑.
+    except (RuntimeError, OSError):
+        # transcription과 동일 — 상류(GMS) 장애와 예상 못한 OS 오류를 502로 매핑한다.
         return JSONResponse(status_code=502, content={"errorCode": "AI_UPSTREAM_ERROR"})
     return internal_contracts.SynthesisResponse(
         audio_base64=base64.b64encode(audio).decode(),
@@ -434,6 +447,42 @@ def internal_analyses(
             status_code=422, content={"errorCode": "ANALYSIS_INPUT_INVALID"}
         )
     except analysis_service.AnalysisUpstreamError:
+        return JSONResponse(status_code=502, content={"errorCode": "AI_UPSTREAM_ERROR"})
+
+
+@app.post(
+    "/internal/v1/observations",
+    response_model=internal_contracts.ObservationGenerationResult,
+)
+def internal_observations(
+    req: internal_contracts.ObservationGenerationRequest,
+    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+    x_internal_api_key: str = Header(default="", alias="X-Internal-Api-Key"),
+    x_request_id: str = Header(default="", alias="X-Request-Id"),
+):
+    """BE(RestClientAiObservationClient)가 호출하는 관찰 리포트 초안 생성.
+
+    같은 생성기를 쓰는 /analyze/report 는 멀티파트에 인증이 없어 nginx /ai/ 프록시로
+    노출되는 계열이다. 아동 활동 데이터를 보내는 내부 호출은 다른 BE→AI 계약과 같은 형태
+    (JSON 본문 + X-Internal-Token)로 두기 위해 이 경로를 별도로 제공한다.
+
+    응답 매핑:
+    - 200 + BE ObservationGenerationResult 계약 → BE가 리포트 저장
+    - 401 INVALID_INTERNAL_TOKEN → 내부 인증 실패
+    - 422 INVALID_REQUEST → analysisType이 FINAL이 아님(같은 입력이면 재시도 무의미)
+    - 502 AI_UPSTREAM_ERROR → 상류(GMS) 장애·응답 형식 오류
+
+    그림 서술은 받지 않는다. 이미지가 필요한 호출은 파일을 함께 보내는 /analyze/report를 쓴다.
+    """
+    if not _internal_auth_ok(x_internal_token, x_internal_api_key):
+        return JSONResponse(
+            status_code=401, content={"errorCode": "INVALID_INTERNAL_TOKEN"}
+        )
+    if req.analysis_type != "FINAL":
+        return JSONResponse(status_code=422, content={"errorCode": "INVALID_REQUEST"})
+    try:
+        return report_client.generate(req, drawing_description=None)
+    except (RuntimeError, OSError):
         return JSONResponse(status_code=502, content={"errorCode": "AI_UPSTREAM_ERROR"})
 
 
