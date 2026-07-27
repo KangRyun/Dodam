@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -97,6 +98,79 @@ class OAuthAuthenticationFlowIntegrationTest extends IntegrationTestSupport {
         .isEqualTo(1);
     verify(sessionStore, times(2))
         .register(any(String.class), eq(firstUserId), eq(DEVICE_ID), any(String.class), any());
+  }
+
+  @Test
+  void repeatedAppleLoginReusesStoredEmailWhenLaterTokenOmitsIt() throws Exception {
+    when(providerClient.verify(eq(AuthProvider.APPLE), any()))
+        .thenReturn(
+            new VerifiedOAuthIdentity(
+                AuthProvider.APPLE, "apple-sub", "relay@privaterelay.appleid.com"),
+            new VerifiedOAuthIdentity(AuthProvider.APPLE, "apple-sub", null));
+
+    JsonNode firstLogin = appleLogin();
+    JsonNode secondLogin = appleLogin();
+
+    assertThat(secondLogin.at("/data/user/userId").asLong())
+        .isEqualTo(firstLogin.at("/data/user/userId").asLong());
+    assertThat(secondLogin.at("/data/user/email").asText())
+        .isEqualTo("relay@privaterelay.appleid.com");
+    assertThat(secondLogin.at("/data/user/emailRequired").asBoolean()).isFalse();
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Integer.class))
+        .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM auth_accounts", Integer.class))
+        .isEqualTo(1);
+  }
+
+  @Test
+  void appleLoginAfterWithdrawalCreatesANewUserForTheSameSubject() throws Exception {
+    when(providerClient.verify(eq(AuthProvider.APPLE), any()))
+        .thenReturn(
+            new VerifiedOAuthIdentity(
+                AuthProvider.APPLE, "apple-sub", "relay@privaterelay.appleid.com"),
+            new VerifiedOAuthIdentity(AuthProvider.APPLE, "apple-sub", null));
+    JsonNode firstLogin = appleLogin();
+    long withdrawnUserId = firstLogin.at("/data/user/userId").asLong();
+
+    mockMvc
+        .perform(
+            delete("/api/v1/users/me")
+                .header(
+                    HttpHeaders.AUTHORIZATION,
+                    "Bearer " + firstLogin.at("/data/accessToken").asText())
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DELETE\"}"))
+        .andExpect(status().isNoContent());
+
+    JsonNode rejoined = appleLogin();
+
+    assertThat(rejoined.at("/data/user/userId").asLong()).isNotEqualTo(withdrawnUserId);
+    assertThat(rejoined.at("/data/user/emailRequired").asBoolean()).isTrue();
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Integer.class))
+        .isEqualTo(1);
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM auth_accounts", Integer.class))
+        .isEqualTo(1);
+    assertThat(
+            jdbcTemplate.queryForObject("SELECT provider_subject FROM auth_accounts", String.class))
+        .isEqualTo("apple-sub");
+  }
+
+  @Test
+  void sameVerifiedEmailAcrossProvidersDoesNotMergeAccounts() throws Exception {
+    when(providerClient.verify(eq(AuthProvider.APPLE), any()))
+        .thenReturn(new VerifiedOAuthIdentity(AuthProvider.APPLE, "apple-sub", "same@example.com"));
+    when(providerClient.verify(eq(AuthProvider.GOOGLE), any()))
+        .thenReturn(
+            new VerifiedOAuthIdentity(AuthProvider.GOOGLE, "google-sub", "same@example.com"));
+
+    long appleUserId = appleLogin().at("/data/user/userId").asLong();
+    long googleUserId = googleLogin().at("/data/user/userId").asLong();
+
+    assertThat(googleUserId).isNotEqualTo(appleUserId);
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Integer.class))
+        .isEqualTo(2);
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM auth_accounts", Integer.class))
+        .isEqualTo(2);
   }
 
   @Test
@@ -254,6 +328,44 @@ class OAuthAuthenticationFlowIntegrationTest extends IntegrationTestSupport {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$.data.grantType").value("Bearer"))
             .andExpect(jsonPath("$.data.user.emailRequired").value(true))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    return objectMapper.readTree(body);
+  }
+
+  private JsonNode appleLogin() throws Exception {
+    String body =
+        mockMvc
+            .perform(
+                post("/api/v1/auth/oauth/apple")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        objectMapper.writeValueAsString(
+                            Map.of(
+                                "idToken",
+                                "apple-id-token",
+                                "rawNonce",
+                                "apple-raw-nonce",
+                                "deviceId",
+                                DEVICE_ID))))
+            .andExpect(status().isOk())
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+    return objectMapper.readTree(body);
+  }
+
+  private JsonNode googleLogin() throws Exception {
+    String body =
+        mockMvc
+            .perform(
+                post("/api/v1/auth/oauth/google")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(
+                        objectMapper.writeValueAsString(
+                            Map.of("idToken", "google-id-token", "deviceId", DEVICE_ID))))
+            .andExpect(status().isOk())
             .andReturn()
             .getResponse()
             .getContentAsString();

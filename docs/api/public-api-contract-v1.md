@@ -29,8 +29,11 @@ Spring Boot와 AI 서버 사이의 `/internal/v1/**`는 이 문서의 범위가 
 - Controller에 남은 `X-Guardian-User-Id`는 OpenAPI에서 숨긴 전환기 입력이며
   공개 클라이언트 계약이 아니다. Flutter는 이를 전송하지 않는다.
 - 현재 OAuth `provider`는 `KAKAO`, `GOOGLE`, `NAVER`, `APPLE`이다.
-- Apple은 `idToken`, `rawNonce`, `deviceId`를 전달하며 계정 재가입 정책은
-  S15P11B209-529에서 별도로 확정한다.
+- Apple은 `idToken`, `rawNonce`, `deviceId`를 전달한다.
+- Apple 계정은 `(APPLE, sub)`로 식별한다. 같은 `sub`는 기존 사용자를 재사용하고,
+  최초 검증 이메일은 후속 Token에 없어도 로그인 응답에 재사용한다.
+- 이메일이 같은 다른 Provider 계정은 자동 병합하지 않는다. 회원 탈퇴로 Apple
+  연결이 삭제된 뒤 같은 Apple 계정으로 로그인하면 신규 사용자로 가입한다.
 
 ### 2.2 요청과 응답
 
