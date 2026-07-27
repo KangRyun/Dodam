@@ -11,10 +11,15 @@ import '../features/drawing/data/dto/drawing_dtos.dart';
 import '../features/drawing/data/repositories/mock_drawing_repository.dart';
 import '../features/drawing/domain/repositories/drawing_repository.dart';
 import '../features/conversation/conversation.dart';
+import '../features/notification/domain/entities/push_message.dart';
+import '../features/notification/domain/services/push_coordinator.dart';
+import '../features/notification/domain/services/push_setup.dart';
 import '../features/report/data/repositories/mock_report_repository.dart';
 import '../features/report/domain/repositories/report_repository.dart';
 import 'router/app_router.dart';
 import 'router/app_routes.dart';
+import 'router/current_route_observer.dart';
+import 'router/push_route_resolver.dart';
 import 'state/guardian_child_controller.dart';
 
 class DodamApp extends StatefulWidget {
@@ -33,6 +38,7 @@ class DodamApp extends StatefulWidget {
     this.conversationAnswerRepository,
     this.conversationId,
     this.basisAnalysisId,
+    this.pushSetup,
     this.initialRoute = AppRoutes.guardianHome,
     super.key,
   });
@@ -51,6 +57,9 @@ class DodamApp extends StatefulWidget {
   final ConversationAnswerRepository? conversationAnswerRepository;
   final int? conversationId;
   final int? basisAnalysisId;
+
+  /// 푸시 구성 요소다. 주지 않으면 푸시 기능이 꺼진 채로 동작한다.
+  final PushSetup? pushSetup;
   final String initialRoute;
 
   @override
@@ -67,6 +76,9 @@ class _DodamAppState extends State<DodamApp> {
   late final KakaoLoginCoordinator _kakaoLoginCoordinator;
   late final GoogleLoginCoordinator _googleLoginCoordinator;
   late final NaverLoginCoordinator _naverLoginCoordinator;
+  final _navigatorKey = GlobalKey<NavigatorState>();
+  final _routeObserver = CurrentRouteObserver();
+  PushCoordinator? _pushCoordinator;
 
   @override
   void initState() {
@@ -109,7 +121,24 @@ class _DodamAppState extends State<DodamApp> {
       _naverLoginClient,
       _socialLoginService,
     );
+    _pushCoordinator = widget.pushSetup?.createCoordinator(
+      onOpen: _openPushTarget,
+      isChildModeActive: () => _routeObserver.isChildModeActive,
+    );
   }
+
+  /// 푸시가 가리키는 화면으로 이동한다.
+  ///
+  /// 대응 화면이 없으면 아무 데도 보내지 않는다. 서버가 준 자원과 무관한 화면을
+  /// 여는 것보다 앱만 열린 채 두는 편이 낫다(계약 §4.3). 알림함 화면
+  /// (S15P11B209-499)이 붙으면 그쪽으로 보낸다.
+  void _openPushTarget(PushMessage message) {
+    final route = resolvePushRoute(message);
+    if (route == null) return;
+
+    _navigatorKey.currentState?.pushNamed(route);
+  }
+
 
   // Provider별 로그인 실행
   Future<AuthState> _signIn(AuthProvider provider) async {
@@ -118,13 +147,13 @@ class _DodamAppState extends State<DodamApp> {
       AuthProvider.google => _googleLoginCoordinator.signIn(),
       AuthProvider.naver => _naverLoginCoordinator.signIn(),
     };
-    await _loadGuardianChildren(state.session);
+    await _onGuardianSessionReady(state.session);
     return state;
   }
 
   Future<AuthSession> _completeOnboarding(NewUserOnboardingInput input) async {
     final session = await _authRepository.completeOnboarding(input);
-    await _loadGuardianChildren(session);
+    await _onGuardianSessionReady(session);
     return session;
   }
 
@@ -140,22 +169,29 @@ class _DodamAppState extends State<DodamApp> {
       if (!refreshed) return null;
       session = await _authRepository.restoreSession();
     }
-    await _loadGuardianChildren(session);
+    await _onGuardianSessionReady(session);
     return session;
   }
 
-  Future<void> _loadGuardianChildren(AuthSession? session) async {
+  /// 보호자 세션이 확정된 뒤에 필요한 준비를 모은다.
+  ///
+  /// 푸시 Token 등록은 로그인 이후여야 한다. 세션 없이 등록하면 서버가 어느
+  /// 사용자의 기기인지 알 수 없다.
+  Future<void> _onGuardianSessionReady(AuthSession? session) async {
     if (session == null ||
         session.requiresOnboarding ||
         session.user.role != UserRole.guardian) {
       return;
     }
     await _childController.loadChildren();
+    await _pushCoordinator?.start();
   }
 
   // 인증 세션과 보호자 선택 상태 초기화
   Future<void> _signOut() async {
     final provider = (await _authRepository.restoreSession())?.user.provider;
+    // Token 해제 API는 인증이 필요하므로 세션을 지우기 전에 부른다.
+    await _pushCoordinator?.stop();
     await _authRepository.signOut();
     try {
       switch (provider) {
@@ -193,6 +229,8 @@ class _DodamAppState extends State<DodamApp> {
       ),
       scaffoldBackgroundColor: AppColors.canvas,
     ),
+    navigatorKey: _navigatorKey,
+    navigatorObservers: [_routeObserver],
     initialRoute: widget.initialRoute,
     onGenerateRoute: (settings) => AppRouter.onGenerateRoute(
       settings,

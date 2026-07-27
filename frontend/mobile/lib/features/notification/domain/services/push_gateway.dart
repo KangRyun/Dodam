@@ -28,4 +28,9 @@ abstract interface class PushPresenter {
   Future<void> initialize();
 
   Future<void> show(PushMessage message);
+
+  /// 표시한 알림을 사용자가 누른 경우다.
+  ///
+  /// 이동은 화면 계층의 관심사라 표시자가 직접 처리하지 않고 흘려보낸다.
+  Stream<PushMessage> get taps;
 }

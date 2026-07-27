@@ -67,7 +67,9 @@ final class PushCoordinator {
     _subscriptions
       ..add(_gateway.tokenRefreshes.listen(_registerToken))
       ..add(_gateway.foregroundMessages.listen(_present))
-      ..add(_gateway.openedMessages.listen(_open));
+      ..add(_gateway.openedMessages.listen(_open))
+      // 앱이 떠 있을 때 직접 띄운 알림을 누른 경우다.
+      ..add(_presenter.taps.listen(_open));
 
     // 종료 상태에서 알림을 눌러 실행된 경우를 이어받는다.
     final initial = await _gateway.getInitialMessage();

@@ -40,7 +40,10 @@ void main() {
     childModeActive = false;
   });
 
-  tearDown(() => gateway.dispose());
+  tearDown(() {
+    gateway.dispose();
+    presenter.dispose();
+  });
 
   test('권한이 허용되면 현재 Token을 등록한다', () async {
     gateway.token = 'fcm-token';
@@ -109,6 +112,15 @@ void main() {
     await pumpEventQueue();
 
     expect(opened.single.notificationId, 900);
+  });
+
+  test('앱이 떠 있을 때 띄운 알림을 눌러도 이동 콜백을 부른다', () async {
+    await build().start();
+
+    presenter.emitTap(message(902));
+    await pumpEventQueue();
+
+    expect(opened.single.notificationId, 902);
   });
 
   test('아동 모드에서는 알림 탭으로 이동하지 않는다', () async {
@@ -203,7 +215,14 @@ final class _FakeGateway implements PushGateway {
 
 final class _FakePresenter implements PushPresenter {
   final List<PushMessage> shown = [];
+  final _taps = StreamController<PushMessage>.broadcast();
   bool initialized = false;
+
+  void emitTap(PushMessage value) => _taps.add(value);
+  void dispose() => _taps.close();
+
+  @override
+  Stream<PushMessage> get taps => _taps.stream;
 
   @override
   Future<void> initialize() async => initialized = true;
