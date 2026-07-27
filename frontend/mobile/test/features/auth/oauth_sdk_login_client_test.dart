@@ -23,6 +23,39 @@ void main() {
       );
     });
 
+    test('Kakao 이메일 추가 동의가 필요하면 account_email 동의를 요청한다', () async {
+      final sdkClient = _FakeKakaoSdkClient(
+        initialToken: 'initial-access-token',
+        emailConsentRequired: true,
+        consentedToken: 'consented-access-token',
+      );
+      final gateway = KakaoProviderSdkGateway(
+        nativeAppKey: 'test-native-app-key',
+        sdkClient: sdkClient,
+      );
+
+      final token = await gateway.signIn();
+
+      expect(token, 'consented-access-token');
+      expect(sdkClient.requestedScopes, ['account_email']);
+    });
+
+    test('Kakao 이메일 추가 동의를 취소하면 최초 Access Token을 유지한다', () async {
+      final sdkClient = _FakeKakaoSdkClient(
+        initialToken: 'initial-access-token',
+        emailConsentRequired: true,
+      );
+      final gateway = KakaoProviderSdkGateway(
+        nativeAppKey: 'test-native-app-key',
+        sdkClient: sdkClient,
+      );
+
+      final token = await gateway.signIn();
+
+      expect(token, 'initial-access-token');
+      expect(sdkClient.requestedScopes, ['account_email']);
+    });
+
     test('Kakao SDK 설정 오류를 식별 가능한 인증 실패로 매핑한다', () async {
       final client = KakaoSdkLoginClient(
         gateway: _FakeProviderSdkGateway(
@@ -235,4 +268,35 @@ final class _FakeProviderSdkGateway implements ProviderSdkGateway {
   Future<void> signOut() async {
     signOutCallCount += 1;
   }
+}
+
+final class _FakeKakaoSdkClient implements KakaoSdkClient {
+  _FakeKakaoSdkClient({
+    required this.initialToken,
+    required this.emailConsentRequired,
+    this.consentedToken,
+  });
+
+  final String initialToken;
+  final bool emailConsentRequired;
+  final String? consentedToken;
+  List<String>? requestedScopes;
+
+  @override
+  Future<void> initialize(String nativeAppKey) async {}
+
+  @override
+  Future<String> login() async => initialToken;
+
+  @override
+  Future<bool> needsEmailAgreement() async => emailConsentRequired;
+
+  @override
+  Future<String?> requestAdditionalConsent(List<String> scopes) async {
+    requestedScopes = scopes;
+    return consentedToken;
+  }
+
+  @override
+  Future<void> logout() async {}
 }

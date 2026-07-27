@@ -137,7 +137,8 @@ public class RestClientOAuthProviderClient implements OAuthProviderClient {
     if (!"00".equals(response.resultCode()) || !StringUtils.hasText(response.response().id())) {
       throw new BusinessException(AuthErrorCode.OAUTH_CREDENTIAL_INVALID);
     }
-    return new VerifiedOAuthIdentity(AuthProvider.NAVER, response.response().id(), null);
+    return new VerifiedOAuthIdentity(
+        AuthProvider.NAVER, response.response().id(), response.response().email());
   }
 
   private <T> T get(String uri, String accessToken, Class<T> responseType) {
@@ -179,5 +180,5 @@ public class RestClientOAuthProviderClient implements OAuthProviderClient {
 
   private record NaverUser(@JsonProperty("resultcode") String resultCode, NaverProfile response) {}
 
-  private record NaverProfile(String id) {}
+  private record NaverProfile(String id, String email) {}
 }
