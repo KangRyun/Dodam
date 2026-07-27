@@ -4,6 +4,30 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('프로필 선택에서 보호자를 누르면 보호자 홈으로 이동한다', (tester) async {
+    await tester.pumpWidget(
+      const DodamApp(initialRoute: AppRoutes.profileSelection),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('guardian-profile')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('보호자 홈'), findsOneWidget);
+  });
+
+  testWidgets('프로필 선택에서 아동을 누르면 해당 아동 홈으로 이동한다', (tester) async {
+    await tester.pumpWidget(
+      const DodamApp(initialRoute: AppRoutes.profileSelection),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('child-profile-3')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('도담이, 오늘은 무엇을 그려 볼까?'), findsOneWidget);
+  });
+
   testWidgets('보호자 홈에서 아동 선택 화면으로 이동한다', (tester) async {
     await tester.pumpWidget(const DodamApp());
     await tester.pumpAndSettle();
@@ -28,9 +52,7 @@ void main() {
   });
 
   testWidgets('선택 컨텍스트 없이 Drawing 경로로 직접 진입하면 차단한다', (tester) async {
-    await tester.pumpWidget(
-      DodamApp(initialRoute: AppRoutes.drawing('3')),
-    );
+    await tester.pumpWidget(DodamApp(initialRoute: AppRoutes.drawing('3')));
     await tester.pumpAndSettle();
 
     expect(find.text('선택된 아동이 없어요'), findsOneWidget);

@@ -45,5 +45,6 @@ export 'presentation/screens/authentication_flow_screen.dart';
 export 'presentation/screens/onboarding_profile_screen.dart';
 export 'presentation/screens/onboarding_consent_screen.dart';
 export 'presentation/screens/new_user_onboarding_flow_screen.dart';
+export 'presentation/screens/profile_selection_screen.dart';
 export 'presentation/screens/social_login_screen.dart';
 export 'presentation/widgets/logout_action_button.dart';

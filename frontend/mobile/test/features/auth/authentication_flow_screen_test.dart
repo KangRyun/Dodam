@@ -3,8 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('기존 보호자 로그인 완료 후 보호자 홈 이동을 요청한다', (tester) async {
-    var movedToGuardianHome = false;
+  testWidgets('기존 보호자 로그인 완료 후 프로필 선택 이동을 요청한다', (tester) async {
+    var movedToProfileSelection = false;
 
     await tester.pumpWidget(
       MaterialApp(
@@ -14,7 +14,8 @@ void main() {
           ),
           onCompleteOnboarding: (_) async =>
               _session(role: UserRole.guardian, onboardingCompleted: true),
-          onGuardianAuthenticated: (_) => movedToGuardianHome = true,
+          onProfileSelectionRequired: (_) => movedToProfileSelection = true,
+          onExpertAuthenticated: (_) {},
         ),
       ),
     );
@@ -22,7 +23,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('social-login-kakao')));
     await tester.pumpAndSettle();
 
-    expect(movedToGuardianHome, isTrue);
+    expect(movedToProfileSelection, isTrue);
   });
 
   testWidgets('신규 사용자는 로그인 후 기본 정보 입력 화면으로 이동한다', (tester) async {
@@ -34,7 +35,8 @@ void main() {
           ),
           onCompleteOnboarding: (_) async =>
               _session(role: UserRole.guardian, onboardingCompleted: true),
-          onGuardianAuthenticated: (_) {},
+          onProfileSelectionRequired: (_) {},
+          onExpertAuthenticated: (_) {},
         ),
       ),
     );
@@ -45,7 +47,9 @@ void main() {
     expect(find.text('도담에서 어떻게 활동할까요?'), findsOneWidget);
   });
 
-  testWidgets('전문가 로그인 완료 시 1차 MVP 미지원 안내를 표시한다', (tester) async {
+  testWidgets('전문가 로그인 완료 시 전문가 화면 이동을 요청한다', (tester) async {
+    var movedToExpertProfile = false;
+
     await tester.pumpWidget(
       MaterialApp(
         home: AuthenticationFlowScreen(
@@ -54,7 +58,8 @@ void main() {
           ),
           onCompleteOnboarding: (_) async =>
               _session(role: UserRole.expert, onboardingCompleted: true),
-          onGuardianAuthenticated: (_) {},
+          onProfileSelectionRequired: (_) {},
+          onExpertAuthenticated: (_) => movedToExpertProfile = true,
         ),
       ),
     );
@@ -62,8 +67,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('social-login-naver')));
     await tester.pumpAndSettle();
 
-    expect(find.text('아직 준비 중인 기능이에요'), findsOneWidget);
-    expect(find.text('로그인 화면으로 돌아가기'), findsOneWidget);
+    expect(movedToExpertProfile, isTrue);
   });
 }
 
