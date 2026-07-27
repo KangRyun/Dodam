@@ -203,6 +203,7 @@ services:
       #           빈 문자열 주입 = 미설정과 동일(위 TTL과 달리 안전).
       KAKAO_APP_ID: ${KAKAO_APP_ID:-}
       GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      APPLE_CLIENT_ID: ${APPLE_CLIENT_ID:-}
       # ── BE→AI 질문 호출 대상 주소 — S15P11B209-320 (D-183-1).
       #   RestClientAiQuestionClient가 ${AI_BASE_URL}로 읽는다. 앱 기본값은
       #   http://localhost:8000 인데 컨테이너 안 localhost는 backend 자신 = 도달 불가

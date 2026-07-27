@@ -28,8 +28,9 @@ Spring Boot와 AI 서버 사이의 `/internal/v1/**`는 이 문서의 범위가 
 - 그 외 `/api/v1/**`는 `Authorization: Bearer {accessToken}`이 필수다.
 - Controller에 남은 `X-Guardian-User-Id`는 OpenAPI에서 숨긴 전환기 입력이며
   공개 클라이언트 계약이 아니다. Flutter는 이를 전송하지 않는다.
-- 현재 OAuth `provider`는 `KAKAO`, `GOOGLE`, `NAVER`다. Apple은
-  S15P11B209-528과 S15P11B209-529에서 별도로 추가한다.
+- 현재 OAuth `provider`는 `KAKAO`, `GOOGLE`, `NAVER`, `APPLE`이다.
+- Apple은 `idToken`, `rawNonce`, `deviceId`를 전달하며 계정 재가입 정책은
+  S15P11B209-529에서 별도로 확정한다.
 
 ### 2.2 요청과 응답
 

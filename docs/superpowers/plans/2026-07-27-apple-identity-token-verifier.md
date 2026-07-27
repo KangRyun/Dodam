@@ -224,6 +224,9 @@ git commit -m "feat(auth): [S15P11B209-528] Apple OAuth 검증 흐름 연결"
 - Modify: `.env.example`
 - Modify: `README.md`
 - Modify: `docs/api/API_명세서_최종.md`
+- Modify: `docs/api/public-api-contract-v1.md`
+- Modify: `infra/docker-compose.yml`
+- Modify: `exec/포팅매뉴얼.md`
 
 **Interfaces:**
 - Produces: `APPLE_CLIENT_ID`
