@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../app/state/guardian_child_controller.dart';
 import '../../../../app/widgets/app_placeholder_scaffold.dart';
@@ -19,7 +20,11 @@ class GuardianHomeScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: AppColors.canvas,
-    appBar: AppTopBar(title: '보호자 홈', actions: actions),
+    appBar: AppTopBar(
+      title: '보호자 홈',
+      onBack: () => AppRouter.goProfileSelection(context),
+      actions: actions,
+    ),
     body: SafeArea(
       child: AnimatedBuilder(
         animation: controller,
