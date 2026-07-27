@@ -14,7 +14,7 @@ public enum VoiceAnswerErrorCode implements ErrorCode {
       HttpStatus.FORBIDDEN, "CONVERSATION_ACCESS_DENIED", "대화에 접근할 권한이 없습니다."),
   VOICE_CONSENT_REQUIRED(HttpStatus.FORBIDDEN, "VOICE_CONSENT_REQUIRED", "음성 처리 동의가 필요합니다."),
   CONVERSATION_NOT_CONVERSING(
-      HttpStatus.CONFLICT, "CONVERSATION_NOT_CONVERSING", "현재 상태에서는 음성 답변을 저장할 수 없습니다."),
+      HttpStatus.CONFLICT, "CONVERSATION_NOT_CONVERSING", "현재 상태에서는 대화를 진행할 수 없습니다."),
   IDEMPOTENCY_IN_PROGRESS(
       HttpStatus.CONFLICT, "VOICE_ANSWER_IN_PROGRESS", "동일한 음성 답변 요청을 처리 중입니다."),
   IDEMPOTENCY_UNAVAILABLE(

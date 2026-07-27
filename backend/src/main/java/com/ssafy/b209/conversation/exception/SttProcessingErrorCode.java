@@ -8,7 +8,7 @@ public enum SttProcessingErrorCode implements ErrorCode {
   STT_MESSAGE_NOT_FOUND(HttpStatus.NOT_FOUND, "STT_MESSAGE_NOT_FOUND", "음성 답변 메시지를 찾을 수 없습니다."),
   INVALID_STT_MESSAGE(HttpStatus.CONFLICT, "INVALID_STT_MESSAGE", "STT 처리할 수 없는 음성 답변입니다."),
   CONVERSATION_NOT_CONVERSING(
-      HttpStatus.CONFLICT, "CONVERSATION_NOT_CONVERSING", "현재 상태에서는 STT 처리를 시작할 수 없습니다."),
+      HttpStatus.CONFLICT, "CONVERSATION_NOT_CONVERSING", "현재 상태에서는 대화를 진행할 수 없습니다."),
   STT_AUDIO_NOT_AVAILABLE(
       HttpStatus.SERVICE_UNAVAILABLE, "STT_AUDIO_NOT_AVAILABLE", "STT 처리용 음성 파일을 읽을 수 없습니다.");
 

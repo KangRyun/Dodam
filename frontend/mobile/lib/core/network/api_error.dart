@@ -4,7 +4,7 @@ final class ApiValidationError {
   factory ApiValidationError.fromJson(Map<String, dynamic> json) {
     return ApiValidationError(
       field: json['field'] as String,
-      reason: json['reason'] as String,
+      reason: (json['message'] ?? json['reason']) as String,
     );
   }
 
@@ -14,8 +14,8 @@ final class ApiValidationError {
 
 /// API 공통 계약의 오류 응답을 역직렬화한다.
 ///
-/// 현재 응답의 `data.errors`와 이전 응답의 최상위 `errors`를 모두 허용해
-/// 서버 배포 전환 중에도 필드 오류를 일관되게 제공한다.
+/// 현재 응답의 `data.fieldErrors`와 이전 응답의 최상위 `errors`를 모두
+/// 허용해 서버 배포 전환 중에도 필드 오류를 일관되게 제공한다.
 final class ApiError {
   const ApiError({
     this.timestamp,
@@ -23,10 +23,13 @@ final class ApiError {
     required this.code,
     required this.message,
     this.errors = const [],
+    this.globalErrors = const [],
   });
 
   factory ApiError.fromJson(Map<String, dynamic> json) {
-    final rawErrors = json['errors'] ?? _validationErrorsFromData(json['data']);
+    final data = json['data'];
+    final rawErrors = json['errors'] ?? _fieldErrorsFromData(data);
+    final rawGlobalErrors = _globalErrorsFromData(data);
     return ApiError(
       timestamp: json['timestamp'] as String?,
       path: json['path'] as String?,
@@ -41,6 +44,9 @@ final class ApiError {
                   ),
                 )
                 .toList(growable: false),
+      globalErrors: rawGlobalErrors == null
+          ? const []
+          : List<String>.from(rawGlobalErrors),
     );
   }
 
@@ -58,10 +64,21 @@ final class ApiError {
   final String code;
   final String message;
   final List<ApiValidationError> errors;
+  final List<String> globalErrors;
 
-  static Object? _validationErrorsFromData(Object? data) {
+  static Object? _fieldErrorsFromData(Object? data) {
+    if (data is Map && data['fieldErrors'] is List) {
+      return data['fieldErrors'];
+    }
     if (data is Map && data['errors'] is List) {
       return data['errors'];
+    }
+    return null;
+  }
+
+  static List<dynamic>? _globalErrorsFromData(Object? data) {
+    if (data is Map && data['globalErrors'] is List) {
+      return data['globalErrors']! as List<dynamic>;
     }
     return null;
   }

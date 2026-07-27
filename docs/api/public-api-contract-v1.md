@@ -61,8 +61,8 @@ Spring Boot와 AI 서버 사이의 `/internal/v1/**`는 이 문서의 범위가 
 ```
 
 - HTTP 204와 이미지·음성 Binary 응답에는 Envelope를 사용하지 않는다.
-- 전체 명세서의 `timestamp`, `requestId`, `errors`와 현재 구현의 차이는
-  S15P11B209-526에서 확정한다. 이 문서에서는 현재 실행 결과를 기준으로 한다.
+- 공통 Envelope와 Validation 상세, 오류 코드 호환성은
+  `common-response-error-contract-v1.md`를 정본으로 사용한다.
 
 ### 2.3 상태 표기
 
