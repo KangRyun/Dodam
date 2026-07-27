@@ -29,7 +29,7 @@ final class LocalPushPresenter implements PushPresenter {
   @override
   Future<void> initialize() async {
     await _plugin.initialize(
-      const InitializationSettings(
+      settings: const InitializationSettings(
         android: AndroidInitializationSettings('@mipmap/ic_launcher'),
       ),
       onDidReceiveNotificationResponse: _handleResponse,
@@ -38,10 +38,10 @@ final class LocalPushPresenter implements PushPresenter {
 
   @override
   Future<void> show(PushMessage message) => _plugin.show(
-    message.notificationId,
-    message.title,
-    message.content,
-    const NotificationDetails(
+    id: message.notificationId,
+    title: message.title,
+    body: message.content,
+    notificationDetails: const NotificationDetails(
       android: AndroidNotificationDetails(
         _channelId,
         _channelName,
