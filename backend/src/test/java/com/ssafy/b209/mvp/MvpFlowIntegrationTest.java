@@ -113,6 +113,12 @@ class MvpFlowIntegrationTest {
             + "(id, code, name, activity_category, selectable_by, recommended_age_min, "
             + "recommended_age_max, is_active, display_order) "
             + "VALUES (1, 'FREE_DRAWING', 'Free Drawing', 'GENERAL', 'BOTH', 3, 12, TRUE, 1)");
+    // 보호자 본인 대상 필수 약관은 아동 동의 이력을 남기지 않으므로 아동 대화 인가를 막지 않아야 한다.
+    jdbcTemplate.update(
+        "INSERT INTO consent_terms "
+            + "(id, term_code, target_scope, is_required, version, title, effective_at, is_active) "
+            + "VALUES (1, 'SERVICE_TOS', 'USER', TRUE, 'v1', '서비스 이용약관', "
+            + "'2020-01-01 00:00:00', TRUE)");
 
     given(providerClient.verify(eq(AuthProvider.KAKAO), any()))
         .willReturn(new VerifiedOAuthIdentity(AuthProvider.KAKAO, PROVIDER_SUBJECT, null));
@@ -532,6 +538,8 @@ class MvpFlowIntegrationTest {
     jdbcTemplate.update("DELETE FROM drawing_assets");
     jdbcTemplate.update("DELETE FROM drawing_sessions");
     jdbcTemplate.update("DELETE FROM guardian_child_relations");
+    jdbcTemplate.update("DELETE FROM consent_records");
+    jdbcTemplate.update("DELETE FROM consent_terms");
     jdbcTemplate.update("DELETE FROM child_response_modes");
     jdbcTemplate.update("DELETE FROM children");
     jdbcTemplate.update("DELETE FROM auth_accounts");
