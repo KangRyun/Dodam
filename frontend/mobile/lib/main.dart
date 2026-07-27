@@ -1,3 +1,7 @@
+import 'dart:developer' as developer;
+
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 
 import 'app/app.dart';
@@ -8,9 +12,40 @@ import 'features/child/data/repositories/remote_child_repository.dart';
 import 'features/conversation/conversation.dart';
 import 'features/drawing/data/repositories/mock_drawing_repository.dart';
 import 'features/drawing/data/repositories/remote_drawing_repository.dart';
+import 'features/notification/data/repositories/remote_push_token_repository.dart';
+import 'features/notification/data/services/device_push_permission_service.dart';
+import 'features/notification/data/services/firebase_push_gateway.dart';
+import 'features/notification/data/services/local_push_presenter.dart';
+import 'features/notification/data/services/push_background_handler.dart';
+import 'features/notification/domain/services/push_setup.dart';
 
-void main() {
-  runApp(createDefaultApp());
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  // 푸시는 선택 기능이라 초기화가 실패해도 앱은 떠야 한다(계약 §0-6).
+  final pushReady = await _initializePush();
+  runApp(createDefaultApp(pushEnabled: pushReady));
+}
+
+/// Firebase를 준비하고 백그라운드 수신 경로를 등록한다.
+///
+/// 자격증명 누락·플랫폼 미지원 등으로 실패하면 `false`를 돌려주고, 앱은 푸시만
+/// 꺼진 채로 정상 동작한다.
+Future<bool> _initializePush() async {
+  try {
+    await Firebase.initializeApp();
+    FirebaseMessaging.onBackgroundMessage(handlePushInBackground);
+    developer.log('Firebase 초기화 완료 — 푸시 사용', name: 'push');
+    return true;
+  } on Object catch (error, stackTrace) {
+    // 조용히 끄면 "알림이 안 온다"를 추적할 방법이 없다.
+    developer.log(
+      'Firebase 초기화 실패 — 푸시를 끈 채로 계속한다',
+      name: 'push',
+      error: error,
+      stackTrace: stackTrace,
+    );
+    return false;
+  }
 }
 
 /// 공개 API와 Provider SDK를 사용하는 기본 애플리케이션 구성을 생성한다.
@@ -24,11 +59,13 @@ void main() {
 DodamApp createDefaultApp({
   ApiEnvironment? environment,
   AuthSessionStore? authSessionStore,
+  bool pushEnabled = false,
 }) {
   late final ApiClient apiClient;
+  final deviceIdProvider = SecureDeviceIdProvider();
   final authRepository = RemoteAuthRepository(
     apiClient: () => apiClient,
-    deviceIdProvider: SecureDeviceIdProvider(),
+    deviceIdProvider: deviceIdProvider,
     sessionStore: authSessionStore ?? SecureAuthSessionStore(),
   );
   apiClient = ApiClient(
@@ -53,6 +90,22 @@ DodamApp createDefaultApp({
         : RemoteDrawingRepository(apiClient),
     voiceAnswerRepository: RemoteVoiceAnswerRepository(apiClient),
     sttResultRepository: RemoteSttResultRepository(apiClient),
+    // Firebase 준비에 실패하면 주입하지 않아 푸시 경로 자체가 꺼진다.
+    pushSetup: pushEnabled
+        ? PushSetup(
+            gateway: FirebasePushGateway(),
+            presenter: LocalPushPresenter(),
+            tokenRepository: RemotePushTokenRepository(
+              apiClient: apiClient,
+              // 인증과 같은 설치 식별자를 써야 서버의 upsert가 성립한다.
+              deviceIdProvider: deviceIdProvider,
+            ),
+            permissionService: DevicePushPermissionService(),
+            // 실기기 검증용. 기본 꺼짐 —
+            // flutter run --dart-define=PUSH_LOG_TOKEN=true
+            exposeTokenInLogs: const bool.fromEnvironment('PUSH_LOG_TOKEN'),
+          )
+        : null,
     initialRoute: AppRoutes.authBootstrap,
   );
 }
