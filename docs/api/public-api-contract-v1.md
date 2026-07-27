@@ -124,7 +124,7 @@ Spring Boot와 AI 서버 사이의 `/internal/v1/**`는 이 문서의 범위가 
 | POST | `/api/v1/drawing-sessions/{drawingSessionId}/analyses` | JSON | 구현 | 연동 | Draft 객체 탐지 또는 Final 분석 |
 | GET | `/api/v1/drawing-sessions/{drawingSessionId}/analyses` | Bearer | 구현 | 미연동 | 분석 이력 |
 | GET | `/api/v1/drawing-sessions/{drawingSessionId}/analyses/{drawingAnalysisId}` | Bearer | 구현 | 불일치 | Flutter는 `/analyses/{analysisId}` 호출 |
-| POST | `/api/v1/analyses/{analysisId}/retry` | `Idempotency-Key` | 구현 | 연동 | 실패 분석 재시도 |
+| POST | `/api/v1/analyses/{analysisId}/retry` | JSON | 구현 | 연동 | 실패 분석 재시도, Client 멱등 Header 미적용 |
 
 ## 6. 대화 API
 
