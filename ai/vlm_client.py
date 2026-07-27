@@ -13,26 +13,22 @@ from __future__ import annotations
 
 import base64
 import logging
-from functools import lru_cache
-from pathlib import Path
 
 from openai import OpenAIError
 
 import config
+import prompts_registry  # 프롬프트 파일 로딩·버전 관리 중앙화 (S15P11B209-595)
 from gms import get_client
 
 logger = logging.getLogger(__name__)
 
-PROMPT_DIR = Path(__file__).parent / "prompts"
-
-# 프롬프트 파일이 바뀌면 올린다(어떤 프롬프트로 뽑힌 서술인지 추적용).
-PROMPT_VERSION = "1.0.0"
+# 그림 서술 프롬프트 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
+PROMPT_VERSION = prompts_registry.version("drawing_description")
 
 
-@lru_cache(maxsize=None)
 def _load(name: str) -> str:
-    """ai/prompts/<name>.txt 를 읽어 캐시한다(llm_client와 같은 로딩 방식)."""
-    return (PROMPT_DIR / f"{name}.txt").read_text(encoding="utf-8").strip()
+    """프롬프트 로딩은 prompts_registry로 중앙화했다(S15P11B209-595)."""
+    return prompts_registry.load(name)
 
 
 def _position_hint(cx: float, cy: float) -> str:

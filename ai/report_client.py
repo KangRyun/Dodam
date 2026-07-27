@@ -20,22 +20,19 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from functools import lru_cache
-from pathlib import Path
 
 from openai import OpenAIError
 
 import config
 import internal_contracts as contracts
+import prompts_registry  # 프롬프트 파일 로딩·버전 관리 중앙화 (S15P11B209-595)
 import report_safety
 from gms import get_client
 
 logger = logging.getLogger(__name__)
 
-PROMPT_DIR = Path(__file__).parent / "prompts"
-
-# 프롬프트가 바뀌면 올린다(결과 model_version에 실려 어떤 프롬프트로 뽑혔는지 추적).
-PROMPT_VERSION = "1.0.0"
+# 리포트 프롬프트 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
+PROMPT_VERSION = prompts_registry.version("report")
 
 # 안전 문구는 LLM이 빠뜨리거나 바꾸면 안 되는 필수 고지 — 서버가 상수로 보장한다.
 # (BE MockAiObservationClient와 동일 문구를 써서 두 구현의 고지가 일관되게.)
@@ -72,10 +69,9 @@ class DrawingBehaviorMetrics:
     average_pressure: float | None = None
 
 
-@lru_cache(maxsize=None)
 def _load(name: str) -> str:
-    """ai/prompts/<name>.txt 를 읽어 캐시한다(다른 클라이언트와 같은 방식)."""
-    return (PROMPT_DIR / f"{name}.txt").read_text(encoding="utf-8").strip()
+    """프롬프트 로딩은 prompts_registry로 중앙화했다(S15P11B209-595)."""
+    return prompts_registry.load(name)
 
 
 def _system_prompt() -> str:
