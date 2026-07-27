@@ -4,6 +4,8 @@ plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    // google-services.json 을 읽어 FCM 설정을 주입한다 (S15P11B209-617).
+    id("com.google.gms.google-services")
 }
 
 val oauthProperties = Properties().apply {

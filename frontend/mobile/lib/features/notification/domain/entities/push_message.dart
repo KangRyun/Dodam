@@ -3,16 +3,22 @@
 /// 서버는 이동 URL·딥링크를 만들지 않고 유형과 식별자만 준다
 /// (`docs/api/push-notification-delivery-contract.md` §0-3).
 enum PushResourceType {
-  report,
-  drawingSession,
-  post;
+  report('REPORT'),
+  drawingSession('DRAWING_SESSION'),
+  post('POST');
 
-  static PushResourceType? tryParse(String? value) => switch (value) {
-    'REPORT' => PushResourceType.report,
-    'DRAWING_SESSION' => PushResourceType.drawingSession,
-    'POST' => PushResourceType.post,
-    _ => null,
-  };
+  const PushResourceType(this.wireValue);
+
+  /// 서버·앱이 주고받는 문자열이다.
+  final String wireValue;
+
+  static PushResourceType? tryParse(String? value) {
+    if (value == null) return null;
+    for (final type in values) {
+      if (type.wireValue == value) return type;
+    }
+    return null;
+  }
 }
 
 /// FCM `data`-only 메시지를 앱이 다루는 형태로 옮긴 값이다.
