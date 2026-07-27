@@ -9,13 +9,19 @@
 -- 왜 마이그레이션인가: 수동 INSERT 는 컨테이너 재기동(fresh volume) 시 사라져 구멍이 재발한다.
 -- 시드를 migration 으로 두면 fresh 배포·판정 환경에서도 항상 재현된다(V12 drawing_types·V15 폴백 질문과 동일 패턴).
 --
--- scope·필수 결정 근거: 값은 임의로 정하지 않고 이미 배포된 앱과 게이팅 로직에서 역산했다.
---   - 필수 여부 = 앱 onboarding_consent_screen 의 isRequired 플래그 그대로
---     (SERVICE_TOS·아동개인정보·그림분석=필수, 음성·전문가공유·AI학습·마케팅=선택).
---   - target_scope: 앱 온보딩은 consents/terms?targetScope=USER 만 조회·제출하므로
---     가입 시점에 걸려야 하는 서비스 약관·마케팅만 USER, 아동 데이터에 관한 약관은 CHILD.
---     CHILD 약관은 childId 가 있어야 등록되므로(아동 등록 단계) 가입 온보딩을 막지 않는다.
---   → 결과적으로 가입 온보딩은 USER-scope 필수 = SERVICE_TOS 동의를 요구하게 된다.
+-- target_scope 결정 근거: 앱 온보딩은 consents/terms?targetScope=USER 만 조회·제출하므로
+-- 가입 시점에 걸려야 하는 서비스 약관·마케팅만 USER, 아동 데이터에 관한 약관은 CHILD 로 둔다.
+--
+-- 필수 여부 결정(중요): USER-scope SERVICE_TOS 만 is_required=TRUE 로 둔다.
+--   → 가입 온보딩은 USER-scope 필수 = SERVICE_TOS 동의를 요구하게 되어 vacuous-true 구멍이 닫힌다.
+--   CHILD 약관은 앱 화면상 '필수'로 보이지만 여기서는 is_required=FALSE 로 시드한다. 이유:
+--   대화 시작·음성 답변 authorization(ConversationStart/VoiceAnswerAuthorizationRepository)이
+--   활성 필수 CHILD 약관에 아동 AGREE 이력이 있는지로 게이트한다. 그런데 아동 동의를 기록하는
+--   흐름이 아직 없다(앱 아동 등록 요청에 consents 없음). CHILD 약관을 필수로 심으면 어떤 아동도
+--   충족할 수 없어 대화가 영구 차단된다(2026-07-27 CI 실측: MvpFlow·Fallback 대화 테스트 실패).
+--   → 아동 동의 기록 흐름이 생기면 그때 CHILD 약관을 TRUE 로 flip 한다.
+--   같은 변경에서 위 두 authorization 쿼리에 target_scope='CHILD' 필터를 넣어, USER-scope
+--   SERVICE_TOS 가 아동 게이트에 잘못 포함돼 대화를 막던 문제도 함께 고쳤다.
 --
 -- content_html·content_url 을 NULL 로 두는 이유: 약관 원문(법무 확정 문구)이 확정되기 전이며,
 -- V9 가 content_html 을 nullable 로 둔 것도 "원문 확정 전 구조만 시드" 를 허용하기 위함이다.
@@ -37,8 +43,8 @@ INSERT IGNORE INTO consent_terms (
     is_active
 ) VALUES
     ('SERVICE_TOS',         'USER',  TRUE,  'v1', '서비스 이용약관',        '2020-01-01 00:00:00', TRUE),
-    ('CHILD_PERSONAL_INFO', 'CHILD', TRUE,  'v1', '아동 개인정보 수집·이용', '2020-01-01 00:00:00', TRUE),
-    ('DRAWING_ANALYSIS',    'CHILD', TRUE,  'v1', '그림 데이터 분석 활용',   '2020-01-01 00:00:00', TRUE),
+    ('CHILD_PERSONAL_INFO', 'CHILD', FALSE, 'v1', '아동 개인정보 수집·이용', '2020-01-01 00:00:00', TRUE),
+    ('DRAWING_ANALYSIS',    'CHILD', FALSE, 'v1', '그림 데이터 분석 활용',   '2020-01-01 00:00:00', TRUE),
     ('VOICE_PROCESSING',    'CHILD', FALSE, 'v1', '음성 데이터 처리',        '2020-01-01 00:00:00', TRUE),
     ('EXPERT_SHARING',      'CHILD', FALSE, 'v1', '전문가 리포트 공유',      '2020-01-01 00:00:00', TRUE),
     ('AI_TRAINING',         'CHILD', FALSE, 'v1', 'AI 학습 데이터 활용',     '2020-01-01 00:00:00', TRUE),

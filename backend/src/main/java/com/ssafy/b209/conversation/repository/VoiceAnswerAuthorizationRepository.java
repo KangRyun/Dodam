@@ -41,8 +41,11 @@ public class VoiceAnswerAuthorizationRepository {
   /**
    * 활성 필수 아동 약관이 모두 최신 AGREE 상태인지 확인한다.
    *
+   * <p>{@code target_scope = 'CHILD'}로 아동 약관만 본다. USER-scope 약관(예: SERVICE_TOS)은 보호자 계정 동의라
+   * {@code subject_child_id} 이력이 없어, 필터가 없으면 어떤 아동도 충족할 수 없어 음성 답변이 영구 차단된다.
+   *
    * @param childId 동의 대상 아동 ID
-   * @return 모든 활성 필수 약관에 최신 동의가 있으면 {@code true}
+   * @return 모든 활성 필수 아동 약관에 최신 동의가 있으면 {@code true}
    */
   public boolean hasRequiredConsents(Long childId) {
     return exists(
@@ -50,6 +53,7 @@ public class VoiceAnswerAuthorizationRepository {
         select not exists (
           select 1 from consent_terms term
           where term.is_required = true and term.is_active = true
+            and term.target_scope = 'CHILD'
             and not exists (
               select 1 from consent_records record
               where record.consent_term_id = term.id and record.subject_child_id = ?

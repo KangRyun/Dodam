@@ -53,12 +53,16 @@ public interface ConversationStartAuthorizationRepository
    * <p>네이티브 {@code not exists(...)}의 boolean 매핑 문제를 피하려 미충족 약관 수를 {@code count(*)}로 조회한다. 결과가
    * {@code 0}이면 모든 필수 동의가 충족된 것이다.
    *
+   * <p>{@code target_scope = 'CHILD'}로 아동 약관만 센다. USER-scope 약관(예: SERVICE_TOS)은 보호자 계정 동의로
+   * 온보딩에서 확인되며 {@code subject_child_id} 이력이 생길 수 없어, 필터가 없으면 어떤 아동도 충족할 수 없는
+   * 약관이 되어 대화가 영구 차단된다.
+   *
    * @param childId 동의 대상 아동 식별자
-   * @return 최신 동의가 AGREE가 아닌 필수·활성 약관 수
+   * @return 최신 동의가 AGREE가 아닌 필수·활성 아동 약관 수
    */
   @Query(
       value =
-          "select count(*) from consent_terms t where t.is_required = true and t.is_active = true and not exists (select 1 from consent_records r where r.consent_term_id = t.id and r.subject_child_id = :childId and r.recorded_at = (select max(r2.recorded_at) from consent_records r2 where r2.consent_term_id = t.id and r2.subject_child_id = :childId) and r.action = 'AGREE')",
+          "select count(*) from consent_terms t where t.is_required = true and t.is_active = true and t.target_scope = 'CHILD' and not exists (select 1 from consent_records r where r.consent_term_id = t.id and r.subject_child_id = :childId and r.recorded_at = (select max(r2.recorded_at) from consent_records r2 where r2.consent_term_id = t.id and r2.subject_child_id = :childId) and r.action = 'AGREE')",
       nativeQuery = true)
   long countUnsatisfiedRequiredConsents(@Param("childId") Long childId);
 }
