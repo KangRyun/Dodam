@@ -82,12 +82,33 @@ class BuildMessagesTest(unittest.TestCase):
         ]
         self.assertIn(llm_client.NO_ANALYSIS, system)
 
-    def test_difficulty_tone_is_appended(self):
+    def test_difficulty_rules_block_is_appended(self):
         system = question_service._build_messages(_request(difficulty="PRESCHOOL"))[0][
             "content"
         ]
-        self.assertIn("[말투 지침]", system)
-        self.assertIn(question_service._DIFFICULTY_TONE["PRESCHOOL"], system)
+        self.assertIn("[연령별 말하기 규칙]", system)
+        rule = question_service._DIFFICULTY_RULES["PRESCHOOL"]
+        self.assertIn(rule["length"], system)
+        self.assertIn(rule["vocabulary"], system)
+        self.assertIn(rule["tone"], system)
+
+    def test_each_difficulty_injects_its_own_rules(self):
+        for difficulty, rule in question_service._DIFFICULTY_RULES.items():
+            with self.subTest(difficulty=difficulty):
+                system = question_service._build_messages(_request(difficulty=difficulty))[
+                    0
+                ]["content"]
+                self.assertIn(rule["length"], system)
+                self.assertIn(rule["tone"], system)
+
+    def test_unknown_difficulty_falls_back_to_lower_elementary(self):
+        # 계약상 검증되지만 방어적으로 — 알 수 없는 값이면 저학년 규칙을 쓴다.
+        # _difficulty_guidance는 .difficulty만 읽으므로 가짜 객체로 경계 조건을 검증한다.
+        fake = types.SimpleNamespace(difficulty="UNKNOWN_LEVEL")
+        guidance = question_service._difficulty_guidance(fake)
+        self.assertIn(
+            question_service._DIFFICULTY_RULES["LOWER_ELEMENTARY"]["length"], guidance
+        )
 
     def test_internal_contract_has_no_child_name(self):
         # 개인정보 최소화 — 이름 슬롯은 항상 "너"(대체 문구)로 채워진다.

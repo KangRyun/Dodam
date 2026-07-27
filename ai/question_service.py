@@ -76,19 +76,45 @@ class SafetyBlockedError(Exception):
 # 그림 탐지 객체·대화 문맥 기반으로 생성한다 — 두 경로를 한 프롬프트로 통일.
 # ⚠️ 내부 계약엔 아이 이름이 없다(개인정보 최소화) → 항상 "너"로 부른다.
 
-# 난이도별 말투 가이드. draft 프롬프트에 덧붙여 연령/난이도에 맞는 어투를 유도한다.
-# (연령대별 길이·어휘 규칙 세분화·강화는 S15P11B209-590에서 확장.)
-_DIFFICULTY_TONE = {
-    "PRESCHOOL": "유아에게 말하듯 아주 짧고 쉬운 말",
-    "LOWER_ELEMENTARY": "초등 저학년에게 말하듯 쉬운 말",
-    "UPPER_ELEMENTARY": "초등 고학년에게 말하듯 또렷하고 쉬운 말",
-    "SUPPORT": "천천히, 아주 쉽고 다정한 말",
+# 연령(난이도)별 질문 규칙 — 길이·어휘·말투 세 축으로 나눠 draft 프롬프트에 덧붙인다
+# (S15P11B209-590). BE QuestionDifficulty enum과 키를 맞춘다. 아이에게 그대로 들려줄
+# 질문이므로 길이·어휘를 연령에 맞춰 통제하는 것이 품질의 핵심이다.
+_DIFFICULTY_RULES = {
+    "PRESCHOOL": {
+        "length": "한 문장, 아주 짧게(대략 10자 안팎). 한 번에 한 가지만 물어봐.",
+        "vocabulary": "유아도 아는 아주 쉬운 말만. 어려운 낱말·한자어·추상어는 쓰지 마.",
+        "tone": "다정하고 밝게. '우와' 같은 반가운 반응으로 시작해도 좋아.",
+    },
+    "LOWER_ELEMENTARY": {
+        "length": "한 문장, 짧고 간결하게. 한 번에 한 가지만.",
+        "vocabulary": "일상에서 자주 쓰는 쉬운 말.",
+        "tone": "따뜻하고 친근하게, 칭찬을 살짝 섞어.",
+    },
+    "UPPER_ELEMENTARY": {
+        "length": "한두 문장까지 괜찮지만 그래도 간결하게.",
+        "vocabulary": "조금 더 구체적인 낱말도 좋지만 어렵지 않게.",
+        "tone": "또렷하고 아이를 존중하는 말투.",
+    },
+    "SUPPORT": {
+        "length": "아주 짧은 한 문장. 천천히, 한 번에 한 가지만.",
+        "vocabulary": "가장 쉬운 말만. 낯선 낱말은 피해.",
+        "tone": "아주 다정하고 차분하게. 재촉하거나 다그치지 마.",
+    },
 }
 
+# 알 수 없는 난이도가 오면 저학년 기준으로 둔다(요청은 계약상 검증되지만 방어적으로).
+_DEFAULT_DIFFICULTY = "LOWER_ELEMENTARY"
 
-def _tone(req: QuestionRequest) -> str:
-    """난이도에 맞는 말투 지침. 알 수 없는 값이면 저학년 기준으로 둔다."""
-    return _DIFFICULTY_TONE.get(req.difficulty, _DIFFICULTY_TONE["LOWER_ELEMENTARY"])
+
+def _difficulty_guidance(req: QuestionRequest) -> str:
+    """난이도에 맞는 길이·어휘·말투 규칙 블록. draft 프롬프트 뒤에 덧붙는다."""
+    rule = _DIFFICULTY_RULES.get(req.difficulty, _DIFFICULTY_RULES[_DEFAULT_DIFFICULTY])
+    return (
+        "[연령별 말하기 규칙]\n"
+        f"- 문장 길이: {rule['length']}\n"
+        f"- 어휘: {rule['vocabulary']}\n"
+        f"- 말투: {rule['tone']}"
+    )
 
 
 def _drawing_analysis_text(req: QuestionRequest) -> str | None:
@@ -123,7 +149,7 @@ def _build_messages(req: QuestionRequest) -> list[dict]:
 
     - 아이 발화가 아직 없으면: 첫 질문 프롬프트(그림 탐지 객체 기반).
     - 아이 발화가 있으면: 다음 질문 프롬프트(마지막 발화 + 그 이전 이력).
-    연령대는 아이 나이를 넘기고, 난이도별 말투 지침을 덧붙인다.
+    연령대는 아이 나이를 넘기고, 난이도별 길이·어휘·말투 규칙을 덧붙인다.
     """
     age_band = str(req.child_age)
     drawing = _drawing_analysis_text(req)
@@ -140,7 +166,7 @@ def _build_messages(req: QuestionRequest) -> list[dict]:
         )
         trigger = llm_client.NEXT_QUESTION_TRIGGER
 
-    system = f"{system}\n\n[말투 지침] {_tone(req)}"
+    system = f"{system}\n\n{_difficulty_guidance(req)}"
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": trigger},
