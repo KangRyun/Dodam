@@ -51,6 +51,52 @@ def _size_hint(area_ratio: float) -> str:
     return "보통"
 
 
+# GMS(OpenAI 호환 게이트웨이)는 요청 본문 크기에 한도가 있어, base64 페이로드가
+# 약 100KB를 넘으면 400('Model not found ...')을 돌려준다(실측: 96KB OK · 105KB 실패).
+# 그런데 yolo_client의 주석 이미지는 원본 해상도(예: 1280²) PNG라 base64가 1MB에 달해
+# 실그림 호출이 항상 실패했다. → 전송 전 축소·JPEG 인코딩으로 한도 안에 넣는다.
+#   ⚠️ 토큰은 이미지 '픽셀 크기'와 무관하게 고정이다(gpt-4o-mini 실측: 64px·512px 모두
+#      prompt 8,512로 동일). 그래서 축소는 비용을 늘리지 않고 전송량만 줄인다 — 화질만 감수.
+_UPLOAD_MAX_SIDE = 512  # 512px·품질 60이면 실측 약 54KB — 한도 대비 여유
+_UPLOAD_MAX_B64_KB = 90  # 100KB 한도에 안전 마진
+_UPLOAD_JPEG_QUALITIES = (60, 45, 30, 20)  # 그림에 따라 압축률이 달라 한도 초과 시 낮춰 재시도
+
+
+def _encode_for_upload(png: bytes) -> tuple[str, str]:
+    """주석 PNG를 GMS 페이로드 한도 안에 드는 (mime, base64) 로 인코딩한다.
+
+    실제 이미지는 512px로 줄여 JPEG로 인코딩하고, 한도를 넘으면 품질을 낮춰 재시도한다.
+    디코드가 안 되는 입력(테스트용 가짜 바이트 등)은 원본 PNG를 그대로 돌려준다 —
+    축소는 어디까지나 '전송 가능하게' 하려는 것이지 입력 검증이 아니다.
+    """
+    import cv2  # 지연 import — yolo_client와 동일(opencv-python-headless)
+    import numpy as np
+
+    image = cv2.imdecode(np.frombuffer(png, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        return "image/png", base64.b64encode(png).decode()
+
+    height, width = image.shape[:2]
+    longest = max(height, width)
+    if longest > _UPLOAD_MAX_SIDE:
+        scale = _UPLOAD_MAX_SIDE / longest
+        image = cv2.resize(
+            image, (max(1, round(width * scale)), max(1, round(height * scale))),
+            interpolation=cv2.INTER_AREA,
+        )
+
+    encoded = ""
+    for quality in _UPLOAD_JPEG_QUALITIES:
+        ok, buf = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, quality])
+        if not ok:
+            continue
+        encoded = base64.b64encode(buf.tobytes()).decode()
+        if len(encoded) / 1024 <= _UPLOAD_MAX_B64_KB:
+            break
+    # 최저 품질에서도 한도를 넘으면 마지막 결과라도 넘긴다(호출 실패는 상위에서 처리).
+    return "image/jpeg", encoded
+
+
 def _format_detections(detections) -> str:
     """탐지 목록을 프롬프트에 넣을 한국어 텍스트로. 없으면 안내 문구."""
     if not detections:
@@ -79,7 +125,8 @@ def describe(annotated_png: bytes, detections, *, model: str | None = None) -> s
         RuntimeError: GMS 호출 실패 시(원본 내용은 감추고 에러 유형만 로그).
     """
     used_model = model or config.VLM_MODEL
-    data_url = "data:image/png;base64," + base64.b64encode(annotated_png).decode()
+    mime, image_b64 = _encode_for_upload(annotated_png)
+    data_url = f"data:{mime};base64,{image_b64}"
     system = _load("drawing_description").format(detections=_format_detections(detections))
     messages = [
         {"role": "system", "content": system},
