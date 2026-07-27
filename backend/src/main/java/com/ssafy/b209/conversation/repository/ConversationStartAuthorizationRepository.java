@@ -38,7 +38,7 @@ public interface ConversationStartAuthorizationRepository
       @Param("guardianUserId") Long guardianUserId, @Param("childId") Long childId);
 
   /**
-   * 모든 활성 필수 약관의 최신 아동 동의가 AGREE인지 확인한다.
+   * 모든 활성 필수 아동 약관({@code target_scope = 'CHILD'})의 최신 아동 동의가 AGREE인지 확인한다.
    *
    * @param childId 동의 대상 아동 식별자
    * @return 필수 동의가 모두 충족되면 {@code true}
@@ -48,7 +48,7 @@ public interface ConversationStartAuthorizationRepository
   }
 
   /**
-   * 최신 동의가 AGREE가 아닌 활성 필수 약관의 수를 센다.
+   * 최신 아동 동의가 AGREE가 아닌 활성 필수 아동 약관의 수를 센다.
    *
    * <p>네이티브 {@code not exists(...)}의 boolean 매핑 문제를 피하려 미충족 약관 수를 {@code count(*)}로 조회한다. 결과가
    * {@code 0}이면 모든 필수 동의가 충족된 것이다.

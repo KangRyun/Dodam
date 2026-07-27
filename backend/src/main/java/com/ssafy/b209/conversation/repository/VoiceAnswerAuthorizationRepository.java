@@ -39,7 +39,10 @@ public class VoiceAnswerAuthorizationRepository {
   }
 
   /**
-   * 활성 필수 아동 약관이 모두 최신 AGREE 상태인지 확인한다.
+   * 활성 필수 아동 약관({@code target_scope = 'CHILD'})이 모두 최신 AGREE 상태인지 확인한다.
+   *
+   * <p>보호자 본인 대상({@code USER}) 동의는 {@code subject_child_id}가 {@code null}로 기록되므로 아동 기준 대조에서 제외한다.
+   * 포함하면 어떤 아동도 충족할 수 없다. {@code USER} 필수 동의는 동의 등록 시점에 강제된다.
    *
    * <p>{@code target_scope = 'CHILD'}로 아동 약관만 본다. USER-scope 약관(예: SERVICE_TOS)은 보호자 계정 동의라
    * {@code subject_child_id} 이력이 없어, 필터가 없으면 어떤 아동도 충족할 수 없어 음성 답변이 영구 차단된다.

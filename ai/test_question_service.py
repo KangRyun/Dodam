@@ -155,5 +155,98 @@ class GenerateTest(unittest.TestCase):
         self.assertIsNone(resp.options)
 
 
+class PurposeTargetChipConsistencyTest(unittest.TestCase):
+    """목적·대상 객체·선택 Chip 정합성 (S15P11B209-594)."""
+
+    def _generate(self, req):
+        capture: dict = {}
+        client = _mock_client(capture, reply="이 집은 어떤 집이야?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            return question_service.generate(req, "req-1")
+
+    def test_object_description_carries_target_and_object_chips(self):
+        # 첫 질문 + 탐지 객체 + OPTION 허용 → 목적 OBJECT_DESCRIPTION, 대상 객체 있음, 객체용 칩.
+        resp = self._generate(_request(allowed_response_modes=["OPTION"]))
+        self.assertEqual(resp.question_purpose, "OBJECT_DESCRIPTION")
+        self.assertIsNotNone(resp.target_object)
+        self.assertEqual(resp.target_object.object_code, "HOUSE")
+        self.assertEqual(
+            [o.code for o in resp.options],
+            [o.code for o in question_service._OPTIONS_BY_PURPOSE["OBJECT_DESCRIPTION"]],
+        )
+
+    def test_followup_has_no_target_object(self):
+        req = _request(
+            allowed_response_modes=["OPTION"],
+            recent_messages=[
+                RecentMessage(sender_type="AI", message_type="QUESTION", text="이 집엔 누가 살아?"),
+                RecentMessage(sender_type="CHILD", message_type="VOICE_ANSWER", text="엄마랑 나."),
+            ],
+        )
+        resp = self._generate(req)
+        self.assertEqual(resp.question_purpose, "FOLLOW_UP")
+        # 대상 객체는 OBJECT_DESCRIPTION일 때만 — FOLLOW_UP엔 붙지 않는다.
+        self.assertIsNone(resp.target_object)
+
+    def test_drawing_context_when_no_objects(self):
+        resp = self._generate(
+            _request(allowed_response_modes=["OPTION"], detected_objects=[])
+        )
+        self.assertEqual(resp.question_purpose, "DRAWING_CONTEXT")
+        self.assertIsNone(resp.target_object)
+        self.assertEqual(
+            [o.code for o in resp.options],
+            [o.code for o in question_service._OPTIONS_BY_PURPOSE["DRAWING_CONTEXT"]],
+        )
+
+    def test_target_only_for_object_description(self):
+        req = _request()  # 탐지 객체 있음
+        self.assertIsNotNone(
+            question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        )
+        for purpose in ("DRAWING_CONTEXT", "EXPRESSION", "FOLLOW_UP"):
+            with self.subTest(purpose=purpose):
+                self.assertIsNone(question_service._target_for_purpose(req, purpose))
+
+    def test_is_consistent_rules(self):
+        target = _detected()
+        opts = question_service._OPTIONS_BY_PURPOSE["OBJECT_DESCRIPTION"]
+        # 정상: OBJECT_DESCRIPTION + 대상 + 칩(OPTION 허용)
+        self.assertTrue(
+            question_service._is_consistent("OBJECT_DESCRIPTION", target, opts, True)
+        )
+        # 대상 객체가 OBJECT_DESCRIPTION이 아닌 목적에 붙으면 불일치
+        self.assertFalse(
+            question_service._is_consistent("FOLLOW_UP", target, opts, True)
+        )
+        # OPTION 허용인데 칩이 없으면 불일치
+        self.assertFalse(
+            question_service._is_consistent("FOLLOW_UP", None, None, True)
+        )
+        # OPTION 비허용인데 칩이 있으면 불일치
+        self.assertFalse(
+            question_service._is_consistent("FOLLOW_UP", None, opts, False)
+        )
+        # 계약에 없는 목적은 불일치
+        self.assertFalse(
+            question_service._is_consistent("UNKNOWN", None, None, False)
+        )
+        # 칩 code 중복이면 불일치
+        dup = [
+            question_service.QuestionOption(code="X", label="a"),
+            question_service.QuestionOption(code="X", label="b"),
+        ]
+        self.assertFalse(
+            question_service._is_consistent("FOLLOW_UP", None, dup, True)
+        )
+
+    def test_every_purpose_has_unique_chip_codes(self):
+        for purpose, opts in question_service._OPTIONS_BY_PURPOSE.items():
+            with self.subTest(purpose=purpose):
+                codes = [o.code for o in opts]
+                self.assertEqual(len(codes), len(set(codes)))
+                self.assertTrue(all(o.code and o.label for o in opts))
+
+
 if __name__ == "__main__":
     unittest.main()
