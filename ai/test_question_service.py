@@ -248,5 +248,71 @@ class PurposeTargetChipConsistencyTest(unittest.TestCase):
                 self.assertTrue(all(o.code and o.label for o in opts))
 
 
+class CrisisSafeResponseTest(unittest.TestCase):
+    """자해·학대·위기 신호 → 차단이 아니라 안전·지지형 응답으로 지속 (S15P11B209-593)."""
+
+    def _child(self, text):
+        return RecentMessage(sender_type="CHILD", message_type="VOICE_ANSWER", text=text)
+
+    def _generate(self, req):
+        capture: dict = {}
+        client = _mock_client(capture)
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            with self.assertLogs("question_service", level="WARNING") as logs:
+                resp = question_service.generate(req, "req-1")
+        return resp, client, logs
+
+    def test_crisis_returns_safe_response_without_calling_gms(self):
+        req = _request(recent_messages=[self._child("나 그냥 죽고 싶어.")])
+        resp, client, logs = self._generate(req)
+        # 대화를 끊지 않고 안전·지지형 고정 응답을 돌려준다(차단 아님).
+        self.assertEqual(resp.question_text, question_service.CRISIS_SAFE_QUESTION)
+        self.assertEqual(resp.question_purpose, "EXPRESSION")
+        self.assertIsNone(resp.target_object)
+        self.assertEqual(resp.safety_result.status, "PASSED")
+        # 위기 상황에선 GMS를 호출하지 않는다(잘못된 생성 방지).
+        client.chat.completions.create.assert_not_called()
+        # 위기 사실은 사유 코드로 서버 경보 로그에 남는다(원문 없이).
+        self.assertTrue(any("SELF_HARM_RISK" in m for m in logs.output))
+
+    def test_abuse_disclosure_also_continues_safely(self):
+        req = _request(recent_messages=[self._child("아빠가 자꾸 때려서 무서워.")])
+        resp, client, logs = self._generate(req)
+        self.assertEqual(resp.question_text, question_service.CRISIS_SAFE_QUESTION)
+        self.assertTrue(any("ABUSE_DISCLOSURE" in m for m in logs.output))
+
+    def test_crisis_safe_response_has_option_chips_when_allowed(self):
+        req = _request(
+            allowed_response_modes=["OPTION"],
+            recent_messages=[self._child("다 사라지고 싶어.")],
+        )
+        resp, _client, _logs = self._generate(req)
+        self.assertEqual(
+            [o.code for o in resp.options],
+            [o.code for o in question_service._CRISIS_SAFE_OPTIONS],
+        )
+
+    def test_safe_child_talk_is_not_flagged(self):
+        req = _request(recent_messages=[self._child("이 집에는 엄마랑 나랑 살아.")])
+        capture: dict = {}
+        client = _mock_client(capture, reply="엄마랑 뭐 하고 놀아?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-1")
+        # 위기어가 없으면 평소대로 GMS 질문이 생성된다.
+        self.assertEqual(resp.question_text, "엄마랑 뭐 하고 놀아?")
+        client.chat.completions.create.assert_called_once()
+
+    def test_ai_utterance_is_not_scanned_for_crisis(self):
+        # 곰돌이(AI) 발화에 위기어가 있어도 검사 대상이 아니다 — 아이 발화만 본다.
+        req = _request(
+            recent_messages=[
+                RecentMessage(
+                    sender_type="AI", message_type="QUESTION", text="죽고 싶은 기분이 들 때가 있어?"
+                )
+            ]
+        )
+        self.assertIsNone(question_service._detect_crisis(req))
+
+
 if __name__ == "__main__":
     unittest.main()
