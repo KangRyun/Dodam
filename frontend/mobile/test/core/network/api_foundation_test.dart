@@ -79,6 +79,24 @@ void main() {
     expect(error.path, isNull);
   });
 
+  test('ApiError는 Backend Validation 상세 응답을 파싱한다', () {
+    final error = ApiError.fromJson({
+      'success': false,
+      'code': 'COMMON_400_001',
+      'message': '요청 값이 올바르지 않습니다.',
+      'data': {
+        'fieldErrors': [
+          {'field': 'childName', 'message': '아동 이름은 필수입니다.'},
+        ],
+        'globalErrors': ['요청 조합이 올바르지 않습니다.'],
+      },
+    });
+
+    expect(error.errors.single.field, 'childName');
+    expect(error.errors.single.reason, '아동 이름은 필수입니다.');
+    expect(error.globalErrors, ['요청 조합이 올바르지 않습니다.']);
+  });
+
   test('ApiPage parses the common top-level pagination shape', () {
     final page = ApiPage<int>.fromJson({
       'content': [

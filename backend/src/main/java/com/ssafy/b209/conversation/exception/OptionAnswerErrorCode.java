@@ -13,7 +13,7 @@ public enum OptionAnswerErrorCode implements ErrorCode {
       HttpStatus.FORBIDDEN, "CONVERSATION_ACCESS_DENIED", "대화에 접근할 권한이 없습니다."),
   CONSENT_REQUIRED(HttpStatus.FORBIDDEN, "CONSENT_REQUIRED", "필수 동의가 필요합니다."),
   CONVERSATION_NOT_CONVERSING(
-      HttpStatus.CONFLICT, "CONVERSATION_NOT_CONVERSING", "현재 상태에서는 선택형 답변을 저장할 수 없습니다."),
+      HttpStatus.CONFLICT, "CONVERSATION_NOT_CONVERSING", "현재 상태에서는 대화를 진행할 수 없습니다."),
   CONVERSATION_ALREADY_COMPLETED(
       HttpStatus.CONFLICT, "CONVERSATION_ALREADY_COMPLETED", "이미 종료된 대화입니다."),
   ANSWER_ALREADY_SUBMITTED(
