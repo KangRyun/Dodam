@@ -8,19 +8,19 @@ import 'app_colors.dart';
 /// - 이 파일은 텍스트 스타일의 **이름(API)** 을 확정한다. 값(크기·굵기·폰트)은
 ///   현재 화면/컴포넌트에서 쓰던 값을 임시로 옮겨둔 것이며, 다음 주 새 디자인이
 ///   확정되면 **이 파일에서 값만** 교체한다(참조하는 컴포넌트는 수정 불필요).
-/// - 폰트(Do Hyeon·IBM Plex)는 아직 pubspec에 번들되지 않았다. [AppFontFamily]
-///   이름은 미리 지정해 두었고, 번들 전까지는 플랫폼 기본 폰트로 대체 렌더링된다
-///   (현재 동작과 동일). 폰트 파일 추가·pubspec 연결은 별도 작업.
+/// - 폰트: 나눔스퀘어 네오를 assets/fonts에 번들하고 pubspec에 등록했다
+///   (S15P11B209-442). display·body·mono 모두 이 family를 사용하며, 앱 전역
+///   기본 폰트도 [ThemeData.fontFamily]로 동일하게 지정한다.
 /// - 이름은 의미 기반(titleLg·body·label…)이라 값이 바뀌어도 뜻이 유지된다.
 abstract final class AppFontFamily {
-  /// 제목·버튼 — Do Hyeon (CLAUDE.md §8). pubspec 번들 시 family명 일치 필요.
-  static const String display = 'DoHyeon';
+  /// 제목·버튼 — 나눔스퀘어 네오 (assets/fonts 번들, S15P11B209-442).
+  static const String display = 'NanumSquareNeo';
 
-  /// 본문 — IBM Plex Sans KR.
-  static const String body = 'IBMPlexSansKR';
+  /// 본문 — 나눔스퀘어 네오.
+  static const String body = 'NanumSquareNeo';
 
-  /// 라벨·수치 — IBM Plex Mono.
-  static const String mono = 'IBMPlexMono';
+  /// 라벨·수치 — 나눔스퀘어 네오 (숫자 고정폭이 필요하면 별도 모노 폰트로 교체).
+  static const String mono = 'NanumSquareNeo';
 }
 
 /// 앱 전역 텍스트 스타일 토큰.

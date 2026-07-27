@@ -71,6 +71,16 @@ flutter:
     - assets/branding/
     - assets/characters/
 
+  fonts:
+    - family: NanumSquareNeo
+      fonts:
+        - asset: assets/fonts/NanumSquareNeo-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/NanumSquareNeo-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/NanumSquareNeo-ExtraBold.ttf
+          weight: 800
+
   # To add assets to your application, add an assets section, like this:
   # assets:
   #   - images/a_dot_burr.jpeg

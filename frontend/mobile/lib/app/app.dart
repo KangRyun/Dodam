@@ -186,6 +186,7 @@ class _DodamAppState extends State<DodamApp> {
     debugShowCheckedModeBanner: false,
     theme: ThemeData(
       useMaterial3: true,
+      fontFamily: AppFontFamily.body,
       colorScheme: ColorScheme.fromSeed(
         seedColor: AppColors.leaf,
         surface: AppColors.surface,
