@@ -30,6 +30,7 @@ import time
 from openai import APIConnectionError, APIStatusError, OpenAIError
 
 import config
+import llm_client
 from gms import get_client
 from internal_contracts import (
     DetectedObject,
@@ -41,8 +42,9 @@ from internal_contracts import (
 
 logger = logging.getLogger(__name__)
 
-# 프롬프트 버전 — TODO(편주희): 실제 프롬프트를 ai/prompts/로 옮기면서 버전 관리 시작.
-PROMPT_VERSION = "placeholder-0"
+# 내부 계약 경로도 draft 경로(llm_client)와 같은 프롬프트 파일을 쓴다 — 버전도 그대로 따른다.
+# 프롬프트 파일 단위 버전 관리 체계는 S15P11B209-595에서 정식화한다.
+PROMPT_VERSION = llm_client.PROMPT_VERSION
 
 
 class UpstreamError(Exception):
@@ -67,8 +69,15 @@ class SafetyBlockedError(Exception):
         self.rule_version = rule_version
 
 
-# ── 프롬프트 조립 (placeholder — 내용은 편주희 담당) ─────────────
-# TODO(편주희): 난이도별 톤 가이드 확정(유아형/초등형/지원형). 아래는 배선용 최소값.
+# ── 프롬프트 조립 (S15P11B209-589) ──────────────────────────────
+# 이전 placeholder는 무맥락 고정 시스템 프롬프트 + "[상황] 아이가 방금 그림을 그렸어요"
+# 고정 문구를 써서 첫 질문이 매번 비슷하게 고정됐다(첫 질문 고정 현상).
+# 이제 draft 경로가 이미 검증한 프롬프트(first_question.txt·conversations.txt)를 재사용해
+# 그림 탐지 객체·대화 문맥 기반으로 생성한다 — 두 경로를 한 프롬프트로 통일.
+# ⚠️ 내부 계약엔 아이 이름이 없다(개인정보 최소화) → 항상 "너"로 부른다.
+
+# 난이도별 말투 가이드. draft 프롬프트에 덧붙여 연령/난이도에 맞는 어투를 유도한다.
+# (연령대별 길이·어휘 규칙 세분화·강화는 S15P11B209-590에서 확장.)
 _DIFFICULTY_TONE = {
     "PRESCHOOL": "유아에게 말하듯 아주 짧고 쉬운 말",
     "LOWER_ELEMENTARY": "초등 저학년에게 말하듯 쉬운 말",
@@ -77,31 +86,64 @@ _DIFFICULTY_TONE = {
 }
 
 
-def _build_messages(req: QuestionRequest) -> list[dict]:
-    """요청 문맥 → GMS messages. (placeholder)
+def _tone(req: QuestionRequest) -> str:
+    """난이도에 맞는 말투 지침. 알 수 없는 값이면 저학년 기준으로 둔다."""
+    return _DIFFICULTY_TONE.get(req.difficulty, _DIFFICULTY_TONE["LOWER_ELEMENTARY"])
 
-    TODO(편주희): 실제 시스템 프롬프트·질문 규칙·금지 표현 목록을 ai/prompts/로
-    교체. 아래는 계약 배선 확인용 — 평가·판정 표현 없이 그림에 대한 쉬운 질문만 유도.
+
+def _drawing_analysis_text(req: QuestionRequest) -> str | None:
+    """탐지 객체를 첫 질문 프롬프트의 {drawing_analysis} 재료(쉼표 목록)로 만든다."""
+    if not req.detected_objects:
+        return None
+    return ", ".join(o.object_name or o.object_code for o in req.detected_objects)
+
+
+def _last_child_index(req: QuestionRequest) -> int | None:
+    """가장 최근 아이 발화(텍스트 있는 것)의 인덱스. 없으면 None(=첫 질문)."""
+    for index in range(len(req.recent_messages) - 1, -1, -1):
+        message = req.recent_messages[index]
+        if (message.sender_type or "").upper() == "CHILD" and (message.text or "").strip():
+            return index
+    return None
+
+
+def _history_dicts(messages: list) -> list[dict]:
+    """recent_messages → llm_client._format_history가 받는 [{"role","content"}] 형태로."""
+    turns: list[dict] = []
+    for m in messages:
+        if not (m.text or "").strip():
+            continue
+        role = "user" if (m.sender_type or "").upper() == "CHILD" else "assistant"
+        turns.append({"role": role, "content": m.text})
+    return turns
+
+
+def _build_messages(req: QuestionRequest) -> list[dict]:
+    """요청 문맥 → GMS messages. draft 프롬프트를 재사용해 컨텍스트 기반으로 생성한다.
+
+    - 아이 발화가 아직 없으면: 첫 질문 프롬프트(그림 탐지 객체 기반).
+    - 아이 발화가 있으면: 다음 질문 프롬프트(마지막 발화 + 그 이전 이력).
+    연령대는 아이 나이를 넘기고, 난이도별 말투 지침을 덧붙인다.
     """
-    tone = _DIFFICULTY_TONE.get(req.difficulty, _DIFFICULTY_TONE["LOWER_ELEMENTARY"])
-    system = (
-        "너는 아이와 그림을 보며 이야기하는 따뜻한 곰돌이야. "
-        f"{tone}로, 아이 마음을 평가하지 말고 그림에 대한 쉬운 질문 하나만 해줘."
-    )
-    lines: list[str] = []
-    if req.detected_objects:
-        names = ", ".join(o.object_name or o.object_code for o in req.detected_objects)
-        lines.append(f"[그림에서 보인 것] {names}")
-    for m in req.recent_messages:
-        # senderType은 BE 저장값 기준(AI/CHILD 계열). CHILD가 아니면 곰돌이 발화로 본다.
-        speaker = "아이" if (m.sender_type or "").upper() == "CHILD" else "곰돌이"
-        if m.text:
-            lines.append(f"[{speaker}] {m.text}")
-    if not lines:
-        lines.append("[상황] 아이가 방금 그림을 그렸어요. 첫 질문을 해주세요.")
+    age_band = str(req.child_age)
+    drawing = _drawing_analysis_text(req)
+    last_child = _last_child_index(req)
+
+    if last_child is None:
+        system = llm_client.render_first_question_prompt(drawing, age_band=age_band)
+        trigger = llm_client.FIRST_QUESTION_TRIGGER
+    else:
+        utterance = req.recent_messages[last_child].text or ""
+        history = _history_dicts(req.recent_messages[:last_child])
+        system = llm_client.render_next_question_prompt(
+            utterance, drawing_analysis=drawing, history=history, age_band=age_band
+        )
+        trigger = llm_client.NEXT_QUESTION_TRIGGER
+
+    system = f"{system}\n\n[말투 지침] {_tone(req)}"
     return [
         {"role": "system", "content": system},
-        {"role": "user", "content": "\n".join(lines)},
+        {"role": "user", "content": trigger},
     ]
 
 
