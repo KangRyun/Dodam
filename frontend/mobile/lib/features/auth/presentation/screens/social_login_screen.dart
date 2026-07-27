@@ -254,34 +254,137 @@ class _SignupNote extends StatelessWidget {
   );
 }
 
-/// 태블릿 좌측 브랜드 패널 — 도담 워드마크 + 태그라인 + 도담이.
+/// 태블릿 좌측 브랜드 패널 — 도담 워드마크 + 배경에 둥둥 떠다니는 손그림 + 도담이.
 class _BrandPanel extends StatelessWidget {
   const _BrandPanel();
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
     decoration: const BoxDecoration(gradient: _heroGradient),
-    child: Stack(
-      children: [
-        const Positioned(
-          left: AppSpacing.xl,
-          top: AppSpacing.xxl,
-          child: _HeroWordmark(),
-        ),
-        Align(
-          alignment: Alignment.bottomCenter,
-          child: FractionallySizedBox(
-            widthFactor: 0.82,
-            child: Image.asset(
-              _mascotAsset,
-              fit: BoxFit.contain,
-              semanticLabel: '그림 그리는 도담이',
-              errorBuilder: (context, error, stackTrace) =>
-                  const SizedBox.shrink(),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        final h = constraints.maxHeight;
+        // 손그림 크기는 패널 폭 비율로 두되 과도하게 커지지 않게 제한한다.
+        double doodle(double factor) => (w * factor).clamp(40.0, 190.0);
+        // Stack 기본 클립으로 손그림이 패널 밖으로 새지 않는다.
+        return Stack(
+          children: [
+            // 배경 손그림 — 크기·위치·속도를 서로 다르게 둬 자연스럽게 떠다닌다.
+            Positioned(
+              left: w * 0.44,
+              top: h * 0.17,
+              width: doodle(0.135),
+              child: const _FloatingDoodle(
+                asset: 'assets/characters/doodle_tree.png',
+                period: Duration(milliseconds: 8000),
+                dy: -8,
+              ),
             ),
-          ),
-        ),
-      ],
+            Positioned(
+              left: w * 0.02,
+              top: h * 0.27,
+              width: doodle(0.29),
+              child: const _FloatingDoodle(
+                asset: 'assets/characters/doodle_dino.png',
+                period: Duration(milliseconds: 6000),
+                dx: 6,
+                dy: -12,
+              ),
+            ),
+            Positioned(
+              left: w * 0.57,
+              top: h * 0.36,
+              width: doodle(0.35),
+              child: const _FloatingDoodle(
+                asset: 'assets/characters/doodle_sun.png',
+                period: Duration(milliseconds: 7000),
+                dy: -16,
+              ),
+            ),
+            const Positioned(
+              left: AppSpacing.xl,
+              top: AppSpacing.xxl,
+              child: _HeroWordmark(),
+            ),
+            Align(
+              alignment: Alignment.bottomCenter,
+              child: FractionallySizedBox(
+                widthFactor: 0.82,
+                child: Image.asset(
+                  _mascotAsset,
+                  fit: BoxFit.contain,
+                  semanticLabel: '그림 그리는 도담이',
+                  errorBuilder: (context, error, stackTrace) =>
+                      const SizedBox.shrink(),
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    ),
+  );
+}
+
+/// 배경에서 상하(및 약간의 좌우)로 부드럽게 떠다니는 손그림.
+/// 시스템 애니메이션 최소화(reduce motion)면 정지한다.
+class _FloatingDoodle extends StatefulWidget {
+  const _FloatingDoodle({
+    required this.asset,
+    required this.period,
+    this.dx = 0,
+    this.dy = -12,
+  });
+
+  final String asset;
+  final Duration period;
+  final double dx;
+  final double dy;
+
+  @override
+  State<_FloatingDoodle> createState() => _FloatingDoodleState();
+}
+
+class _FloatingDoodleState extends State<_FloatingDoodle>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: widget.period,
+  );
+  late final Animation<double> _progress = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeInOut,
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    if (reduceMotion) {
+      _controller.stop();
+    } else if (!_controller.isAnimating) {
+      _controller.repeat(reverse: true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _progress,
+    builder: (context, child) => Transform.translate(
+      offset: Offset(widget.dx * _progress.value, widget.dy * _progress.value),
+      child: child,
+    ),
+    child: Image.asset(
+      widget.asset,
+      fit: BoxFit.contain,
+      errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
     ),
   );
 }

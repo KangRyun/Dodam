@@ -2,7 +2,11 @@ import 'package:dodam/features/auth/auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../support/reduced_motion.dart';
+
 void main() {
+  useReducedMotionForTests();
+
   testWidgets('기존 보호자 로그인 완료 후 프로필 선택 이동을 요청한다', (tester) async {
     var movedToProfileSelection = false;
 
