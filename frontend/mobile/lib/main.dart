@@ -101,6 +101,9 @@ DodamApp createDefaultApp({
               deviceIdProvider: deviceIdProvider,
             ),
             permissionService: DevicePushPermissionService(),
+            // 실기기 검증용. 기본 꺼짐 —
+            // flutter run --dart-define=PUSH_LOG_TOKEN=true
+            exposeTokenInLogs: const bool.fromEnvironment('PUSH_LOG_TOKEN'),
           )
         : null,
     initialRoute: AppRoutes.authBootstrap,

@@ -20,6 +20,7 @@ final class PushCoordinator {
     required void Function(PushMessage message) onOpen,
     required bool Function() isChildModeActive,
     PushDedupe? dedupe,
+    bool exposeTokenInLogs = false,
   }) => PushCoordinator._(
     gateway,
     presenter,
@@ -28,6 +29,7 @@ final class PushCoordinator {
     onOpen,
     isChildModeActive,
     dedupe ?? PushDedupe(),
+    exposeTokenInLogs,
   );
 
   PushCoordinator._(
@@ -38,6 +40,7 @@ final class PushCoordinator {
     this._onOpen,
     this._isChildModeActive,
     this._dedupe,
+    this._exposeTokenInLogs,
   );
 
   final PushGateway _gateway;
@@ -47,6 +50,7 @@ final class PushCoordinator {
   final void Function(PushMessage message) _onOpen;
   final bool Function() _isChildModeActive;
   final PushDedupe _dedupe;
+  final bool _exposeTokenInLogs;
 
   final _subscriptions = <StreamSubscription<Object>>[];
   bool _started = false;
@@ -100,8 +104,13 @@ final class PushCoordinator {
   }
 
   Future<void> _registerToken(String token) async {
-    // Token 원문은 비밀이라 로그에 남기지 않는다(계약 §5.4). 길이만 남긴다.
-    developer.log('FCM Token 등록 시도 (${token.length}자)', name: 'push');
+    // Token 원문은 비밀이라 평소엔 길이만 남긴다(계약 §5.4). 실기기 검증에서
+    // 발송 대상 Token이 필요할 때만 --dart-define=PUSH_LOG_TOKEN=true 로 연다.
+    if (_exposeTokenInLogs) {
+      developer.log('⚠️ 검증용 FCM Token 노출: $token', name: 'push');
+    } else {
+      developer.log('FCM Token 등록 시도 (${token.length}자)', name: 'push');
+    }
     await _guard(() => _tokenRepository.register(token));
   }
 

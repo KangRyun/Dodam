@@ -15,12 +15,16 @@ final class PushSetup {
     required this.presenter,
     required this.tokenRepository,
     required this.permissionService,
+    this.exposeTokenInLogs = false,
   });
 
   final PushGateway gateway;
   final PushPresenter presenter;
   final PushTokenRepository tokenRepository;
   final PushPermissionService permissionService;
+
+  /// 실기기 검증에서 발송 대상 Token을 확인해야 할 때만 켠다.
+  final bool exposeTokenInLogs;
 
   PushCoordinator createCoordinator({
     required void Function(PushMessage message) onOpen,
@@ -32,5 +36,6 @@ final class PushSetup {
     permissionService: permissionService,
     onOpen: onOpen,
     isChildModeActive: isChildModeActive,
+    exposeTokenInLogs: exposeTokenInLogs,
   );
 }
