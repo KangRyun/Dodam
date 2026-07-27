@@ -44,7 +44,8 @@ abstract final class AppRouter {
       ['auth', 'bootstrap'] when authRestoreSession != null =>
         AuthBootstrapScreen(
           restoreSession: authRestoreSession,
-          onGuardianAuthenticated: goGuardianHome,
+          onProfileSelectionRequired: goProfileSelection,
+          onExpertAuthenticated: goExpertProfile,
           onLoginRequired: goLogin,
         ),
       ['auth', 'login']
@@ -52,8 +53,22 @@ abstract final class AppRouter {
         AuthenticationFlowScreen(
           onSignIn: authSignIn,
           onCompleteOnboarding: authCompleteOnboarding,
-          onGuardianAuthenticated: goGuardianHome,
+          onProfileSelectionRequired: goProfileSelection,
+          onExpertAuthenticated: goExpertProfile,
         ),
+      ['profiles', 'select'] when childController != null =>
+        ProfileSelectionScreen(
+          controller: childController,
+          onGuardianSelected: goGuardianHome,
+          onChildSelected: (context, child) {
+            childController.selectChild(child);
+            Navigator.of(context).pushNamedAndRemoveUntil(
+              AppRoutes.childModeHome(child.childId.toString()),
+              (route) => false,
+            );
+          },
+        ),
+      ['expert', 'profile'] => const ExpertProfileEntryScreen(),
       ['guardian', 'home'] when childController != null => GuardianHomeScreen(
         controller: childController,
         actions: authSignOut == null
@@ -192,6 +207,18 @@ abstract final class AppRouter {
     Navigator.of(
       context,
     ).pushNamedAndRemoveUntil(AppRoutes.guardianHome, (route) => false);
+  }
+
+  static void goProfileSelection(BuildContext context) {
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(AppRoutes.profileSelection, (route) => false);
+  }
+
+  static void goExpertProfile(BuildContext context) {
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(AppRoutes.expertProfile, (route) => false);
   }
 
   static void goLogin(BuildContext context) {

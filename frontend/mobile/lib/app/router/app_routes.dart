@@ -1,6 +1,8 @@
 abstract final class AppRoutes {
   static const String authBootstrap = '/auth/bootstrap';
   static const String login = '/auth/login';
+  static const String profileSelection = '/profiles/select';
+  static const String expertProfile = '/expert/profile';
   static const String guardianHome = '/guardian/home';
   static const String childSelect = '/guardian/children/select';
   static const String childRegister = '/guardian/children/register';

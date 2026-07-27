@@ -19,13 +19,15 @@ class AuthenticationFlowScreen extends StatefulWidget {
   const AuthenticationFlowScreen({
     required this.onSignIn,
     required this.onCompleteOnboarding,
-    required this.onGuardianAuthenticated,
+    required this.onProfileSelectionRequired,
+    required this.onExpertAuthenticated,
     super.key,
   });
 
   final AuthProviderSignIn onSignIn;
   final AuthOnboardingComplete onCompleteOnboarding;
-  final AuthGuardianNavigation onGuardianAuthenticated;
+  final AuthGuardianNavigation onProfileSelectionRequired;
+  final AuthGuardianNavigation onExpertAuthenticated;
 
   @override
   State<AuthenticationFlowScreen> createState() =>
@@ -61,8 +63,10 @@ class _AuthenticationFlowScreenState extends State<AuthenticationFlowScreen> {
 
   void _moveToRoleDestination(UserRole? role) {
     switch (AuthLandingResolver.resolve(role)) {
-      case AuthLandingDestination.guardianHome:
-        widget.onGuardianAuthenticated(context);
+      case AuthLandingDestination.profileSelection:
+        widget.onProfileSelectionRequired(context);
+      case AuthLandingDestination.expertProfile:
+        widget.onExpertAuthenticated(context);
       case AuthLandingDestination.unsupportedRole:
         setState(() => _showsUnsupportedRole = true);
     }

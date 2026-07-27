@@ -10,13 +10,15 @@ typedef AuthBootstrapNavigation = void Function(BuildContext context);
 class AuthBootstrapScreen extends StatefulWidget {
   const AuthBootstrapScreen({
     required this.restoreSession,
-    required this.onGuardianAuthenticated,
+    required this.onProfileSelectionRequired,
+    required this.onExpertAuthenticated,
     required this.onLoginRequired,
     super.key,
   });
 
   final AuthSessionRestore restoreSession;
-  final AuthBootstrapNavigation onGuardianAuthenticated;
+  final AuthBootstrapNavigation onProfileSelectionRequired;
+  final AuthBootstrapNavigation onExpertAuthenticated;
   final AuthBootstrapNavigation onLoginRequired;
 
   @override
@@ -38,11 +40,17 @@ class _AuthBootstrapScreenState extends State<AuthBootstrapScreen> {
     final destination = session == null || session.requiresOnboarding
         ? null
         : AuthLandingResolver.resolve(session.user.role);
-    if (destination == AuthLandingDestination.guardianHome) {
-      widget.onGuardianAuthenticated(context);
-      return;
+    switch (destination) {
+      case AuthLandingDestination.profileSelection:
+        widget.onProfileSelectionRequired(context);
+        return;
+      case AuthLandingDestination.expertProfile:
+        widget.onExpertAuthenticated(context);
+        return;
+      case AuthLandingDestination.unsupportedRole || null:
+        widget.onLoginRequired(context);
+        return;
     }
-    widget.onLoginRequired(context);
   }
 
   @override
