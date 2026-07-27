@@ -1,6 +1,9 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 음성 답변 녹음에 필요한 마이크 권한 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 분석 완료 등 보호자 알림 표시에 필요한 권한 (Android 13+ 런타임 요청 · S15P11B209-617).
+         거부돼도 앱과 알림함은 정상 동작한다 — docs/api/push-notification-delivery-contract.md §4.2 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:label="dodam"
