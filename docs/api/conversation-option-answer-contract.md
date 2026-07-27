@@ -3,7 +3,7 @@
 > Jira: `S15P11B209-149` (범위 일부) · `S15P11B209-284` (동일 범위, 이 계약으로 흡수)
 > 범위: 대화 세션의 선택형 답변 제출 공개 API (`POST /conversations/{conversationId}/answers/option`)
 > 기준 명세: `API_명세서_최종.md` 12.1·12.6 (CONV-06), `erd-cloud-schema-v1.2`
-> 최종 수정: 2026-07-23
+> 최종 수정: 2026-07-27 (§2·§3 `type` 예시 `EMOTION`→`STATIC` 정정, next-question 노출 `type="OPTION"` 에코 금지 경고 추가, m5 해결)
 
 이 문서는 아동의 **선택형 답변**(이모지·색상·그림·문장 선택)을 저장하는 공개 API의 요청·응답·검증·DB 매핑 계약을 정의한다. 프론트엔드와 백엔드가 이 문서를 단일 기준으로 사용한다.
 
@@ -33,7 +33,7 @@ POST /api/v1/conversations/{conversationId}/answers/option
 {
   "questionMessageId": 803,
   "selectedOptions": [
-    { "optionId": "happy", "type": "EMOTION", "value": "HAPPY", "labelSnapshot": "기뻐요" }
+    { "optionId": "happy", "type": "STATIC", "value": "HAPPY", "labelSnapshot": "기뻐요" }
   ],
   "directText": null
 }
@@ -44,10 +44,15 @@ POST /api/v1/conversations/{conversationId}/answers/option
 | `questionMessageId` | O | 같은 대화 세션의 `messageType=QUESTION` 메시지 ID여야 한다 |
 | `selectedOptions` | O | 비어 있지 않은 배열. 배열 순서를 `selection_order`로 저장한다 |
 | `selectedOptions[].optionId` | O | 해당 질문(`questionMessageId`)에 노출된 선택지의 `option_key`와 일치해야 한다 |
-| `selectedOptions[].type` | O | 선택지 유형. 질문 선택지 Snapshot의 `option_type`과 일치해야 한다 |
+| `selectedOptions[].type` | O | 질문 선택지 Snapshot의 `option_type`과 일치해야 한다. **저장 값은 항상 `"STATIC"`이다.** 질문 조회(next-question) 응답의 노출 `type`은 표시용 `"OPTION"`이지 이 값이 아니며, 그대로 되보내면 `409 OPTION_NOT_ALLOWED`가 난다(아래 ⚠️ 참고) |
 | `selectedOptions[].value` | O | 선택지 값. 질문 선택지 Snapshot의 `option_value`와 일치해야 한다 |
 | `selectedOptions[].labelSnapshot` | O | 화면에 실제 노출된 문구. 서버 선택지의 `label`과 일치해야 한다 |
 | `directText` | X | 문장 직접 입력 값(선택). 미사용 시 `null` |
+
+> ⚠️ **`type` 값 주의 (FE 필독)**: 질문 조회(next-question, CONV-07) 응답의 `options[].type`은 **표시용으로 항상 `"OPTION"`**을 노출한다. 하지만 선택형 답변 제출 시 `selectedOptions[].type`에는 **서버에 저장된 값 `"STATIC"`을 그대로 보내야 한다.** 응답의 `"OPTION"`을 에코하거나 의미형 값(예: `"EMOTION"`)을 보내면 서버 Snapshot과 불일치해 `409 OPTION_NOT_ALLOWED`로 거부된다.
+> - 저장 값 근거: `ConversationMessageOption.snapshot()`이 `option_type`을 항상 `"STATIC"`으로 확정한다(`ConversationMessageOption.java`).
+> - 노출 값 근거: `ConversationNextQuestionService`가 응답 `type`을 `"OPTION"`으로 고정한다.
+> - 검증 근거: `OptionAnswerService.matchSelectedOptions()`가 `type`·`value`·`labelSnapshot`을 저장 Snapshot과 정확히 비교한다.
 
 ### 처리 규칙
 
@@ -70,7 +75,7 @@ HTTP `201 Created` · `Location: /api/v1/conversations/{conversationId}/messages
   "senderType": "CHILD",
   "messageType": "ANSWER_OPTION",
   "selectedOptions": [
-    { "optionId": "happy", "type": "EMOTION", "value": "HAPPY", "labelSnapshot": "기뻐요" }
+    { "optionId": "happy", "type": "STATIC", "value": "HAPPY", "labelSnapshot": "기뻐요" }
   ],
   "directText": null,
   "createdAt": "2026-07-22T09:31:00Z"
@@ -163,4 +168,4 @@ DB `message_type` CHECK 제약 허용값: `QUESTION`, `VOICE_ANSWER`, `OPTION_AN
 - **m2** 음성 전용 코드 `VOICE_ANSWER_IN_PROGRESS`가 선택형 endpoint 타임아웃에 노출 → 공용/전용 코드 분리 검토.
 - **m3** Controller try-catch 도메인 처리 — 기존 `VoiceAnswerController` 패턴과 동일, 일관성 위해 유지.
 - **m4** `OPTION_NOT_ALLOWED`가 (질문외/snapshot불일치/요청내 중복) 3원인 통일 — 요청 내 중복은 400 분리 검토 가능.
-- **m5** [크로스팀] `ConversationMessageOption.snapshot()`의 `option_type="STATIC"` 하드코딩(150 범위) vs 명세 예시 `EMOTION` — 150↔프론트 계약 통합 시 확인.
+- **m5** [크로스팀] ✅ **해결 (2026-07-27)**: `ConversationMessageOption.snapshot()`의 `option_type="STATIC"` 하드코딩(150 범위) vs 명세 예시 `EMOTION` 불일치. **확정**: 저장 값은 설계상 항상 `"STATIC"`이며(코드 주석·Swagger example로 고정), 본 계약의 요청·응답 예시(§2·§3)를 `EMOTION`→`STATIC`으로 정정하고 §2에 next-question 노출 `type="OPTION"`을 에코하면 안 된다는 ⚠️ 경고를 추가했다. E2E 스모크(2026-07-27, 최신 develop)에서 `type="OPTION"` 에코 시 `409 OPTION_NOT_ALLOWED`, `"STATIC"` 시 201 확인. 코드 변경 없음(계약서 정정만).
