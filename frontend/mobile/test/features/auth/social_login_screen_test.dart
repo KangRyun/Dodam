@@ -4,7 +4,11 @@ import 'package:dodam/features/auth/auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import '../../support/reduced_motion.dart';
+
 void main() {
+  useReducedMotionForTests();
+
   testWidgets('자체 로그인 없이 소셜 로그인 버튼 3개를 표시한다', (tester) async {
     await tester.pumpWidget(
       MaterialApp(home: SocialLoginScreen(onSignIn: (_) async {})),
