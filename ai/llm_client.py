@@ -45,6 +45,11 @@ NO_CHILD_NAME = "(이름은 아직 몰라요)"
 
 DEFAULT_AGE_BAND = "5~7"
 
+# _ask에 넘기는 짧은 트리거(system 하나로 맥락은 충분하지만 chat 모델은 user 1건이 필요하다).
+# 내부 계약 경로(question_service)도 같은 프롬프트를 재사용하도록 상수로 공개한다.
+FIRST_QUESTION_TRIGGER = "아이에게 건넬 첫 질문을 해줘."
+NEXT_QUESTION_TRIGGER = "아이에게 건넬 다음 말을 해줘."
+
 
 def chat(
     messages: list[dict],
@@ -130,6 +135,24 @@ def _ask(system_prompt: str, trigger: str, *, temperature: float) -> str:
 # ── 질문 생성 ───────────────────────────────────────────────────
 
 
+def render_first_question_prompt(
+    drawing_analysis: str | None = None,
+    *,
+    child_name: str | None = None,
+    age_band: str = DEFAULT_AGE_BAND,
+) -> str:
+    """첫 질문 system 프롬프트를 렌더링한다(GMS 호출 없음).
+
+    draft 경로와 내부 계약 경로(question_service)가 같은 프롬프트를 쓰도록 렌더링만 분리했다.
+    """
+    return _load("first_question").format(
+        age_band=age_band,
+        child_name=child_name or NO_CHILD_NAME,
+        drawing_analysis=drawing_analysis or NO_ANALYSIS,
+        guardrails=_load("guardrails"),
+    )
+
+
 def first_question(
     drawing_analysis: str | None = None,
     *,
@@ -151,13 +174,32 @@ def first_question(
     Raises:
         RuntimeError: GMS 호출 실패 시.
     """
-    system = _load("first_question").format(
+    system = render_first_question_prompt(
+        drawing_analysis, child_name=child_name, age_band=age_band
+    )
+    return _ask(system, FIRST_QUESTION_TRIGGER, temperature=temperature)
+
+
+def render_next_question_prompt(
+    child_utterance: str,
+    *,
+    drawing_analysis: str | None = None,
+    history: list[dict] | None = None,
+    child_name: str | None = None,
+    age_band: str = DEFAULT_AGE_BAND,
+) -> str:
+    """다음 질문 system 프롬프트를 렌더링한다(GMS 호출 없음).
+
+    draft 경로와 내부 계약 경로(question_service)가 같은 프롬프트를 쓰도록 렌더링만 분리했다.
+    """
+    return _load("conversations").format(
         age_band=age_band,
         child_name=child_name or NO_CHILD_NAME,
         drawing_analysis=drawing_analysis or NO_ANALYSIS,
+        history=_format_history(history),
+        child_utterance=child_utterance,
         guardrails=_load("guardrails"),
     )
-    return _ask(system, "아이에게 건넬 첫 질문을 해줘.", temperature=temperature)
 
 
 def next_question(
@@ -185,15 +227,14 @@ def next_question(
     Raises:
         RuntimeError: GMS 호출 실패 시.
     """
-    system = _load("conversations").format(
+    system = render_next_question_prompt(
+        child_utterance,
+        drawing_analysis=drawing_analysis,
+        history=history,
+        child_name=child_name,
         age_band=age_band,
-        child_name=child_name or NO_CHILD_NAME,
-        drawing_analysis=drawing_analysis or NO_ANALYSIS,
-        history=_format_history(history),
-        child_utterance=child_utterance,
-        guardrails=_load("guardrails"),
     )
-    return _ask(system, "아이에게 건넬 다음 말을 해줘.", temperature=temperature)
+    return _ask(system, NEXT_QUESTION_TRIGGER, temperature=temperature)
 
 
 if __name__ == "__main__":
