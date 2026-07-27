@@ -48,6 +48,27 @@ YOLO_MODEL_PATH = os.environ.get(
 #   htp_labels.suppress_cross_subject_parts로 거른다 — 그래서 임계값을 검출률 쪽에 맞출 수 있다.
 YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.20"))
 
+# YOLO 가중치 무결성 핀(sha256) — 운영 볼륨에 배포된 실제 가중치의 해시다.
+#   reason: 파일 존재만 확인하면 전송 중 손상·오배포된 가중치를 못 거른다. 로드 전에
+#           sha256을 이 값과 대조해 다르면 로드를 거부한다(fail-closed). 값이 비면(미설정)
+#           검증을 생략하고 경고만 남긴다(로컬·CI 편의). 해시는 비밀이 아니라 무결성 지문이다.
+#   ⚠️ 가중치를 재학습·교체하면 이 값도 함께 갱신한다(마이그레이션 버전 핀과 같은 성격).
+YOLO_MODEL_SHA256 = os.environ.get(
+    "YOLO_MODEL_SHA256",
+    "2b901729ace2a7199382771770f0a38491f9981713f9453fb0b11b7258c5f5e0",
+)
+
+# 그림일기(자유 그림) 객체탐지 모델 — HTP와 별도 가중치. 현재는 등록·checksum 검증만 하고
+# 분석 파이프라인 라우팅(활동 유형별 모델 선택)은 후속 계약과 함께 붙인다(603 스코프 밖).
+SKETCH_MODEL_PATH = os.environ.get(
+    "SKETCH_MODEL_PATH",
+    str(Path(__file__).parent / "models" / "htp_yolo" / "sketch_base.pt"),
+)
+SKETCH_MODEL_SHA256 = os.environ.get(
+    "SKETCH_MODEL_SHA256",
+    "85c93447e30d19456d7b8c40d4bc566f914df0f7c777eead60e07e86f2e8433b",
+)
+
 # ── BE 내부 계약(183): 대화 질문 생성 ───────────────────────────
 # BE ↔ AI 내부 호출 인증 토큰. BE도 같은 이름(AI_INTERNAL_TOKEN)의 환경변수를 쓴다
 # (backend RestClientAiQuestionClient가 X-Internal-Token 헤더로 전송).
