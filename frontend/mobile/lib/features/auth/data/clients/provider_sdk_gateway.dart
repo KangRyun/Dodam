@@ -15,6 +15,47 @@ final class ProviderSdkFailure implements Exception {
   final Object? cause;
 }
 
+/// Provider SDK 실패 원인을 Debug 빌드에서만 기록하고 정규화된 실패를 만든다.
+///
+/// Google Android SDK가 돌려주는 숫자 상태 코드(`[10]` 설정 오류 · `[16]` 재인증
+/// 실패)는 [GoogleSignInException.code]가 아니라 description·details에만 실려
+/// 오기 때문에, 실기기 실패 원인을 가르려면 이 Field들을 함께 남겨야 한다.
+///
+/// 아동 민감정보 가드레일에 따라 예외 객체를 통째로 출력하지 않는다. Token과
+/// 계정 식별자가 로그로 새지 않도록 진단에 필요한 Field만 골라 기록하고,
+/// Release 빌드에서는 [kDebugMode] 분기로 기록 자체를 실행하지 않는다.
+ProviderSdkFailure _sdkFailure(
+  String provider,
+  ProviderSdkFailureType type,
+  Object? cause, {
+  StackTrace? stackTrace,
+}) {
+  if (kDebugMode) {
+    final detail = StringBuffer('[OAuth][$provider] type=${type.name}');
+    if (cause != null) {
+      switch (cause) {
+        case GoogleSignInException(
+          :final code,
+          :final description,
+          :final details,
+        ):
+          detail.write(' code=$code description=$description details=$details');
+        case KakaoClientException(:final reason):
+          detail.write(' reason=$reason');
+        case PlatformException(:final code, :final message):
+          detail.write(' code=$code message=$message');
+        default:
+          detail.write(' error=${cause.runtimeType}');
+      }
+    }
+    debugPrint(detail.toString());
+    if (stackTrace != null) {
+      debugPrintStack(stackTrace: stackTrace);
+    }
+  }
+  return ProviderSdkFailure(type, cause: cause);
+}
+
 /// Provider별 Native SDK 호출을 Login Client에서 분리하는 경계다.
 abstract interface class ProviderSdkGateway {
   Future<String?> signIn();
@@ -42,16 +83,22 @@ final class KakaoProviderSdkGateway implements ProviderSdkGateway {
           : UserApi.instance.loginWithKakaoAccount());
       return token.accessToken;
     } on KakaoClientException catch (error) {
-      throw ProviderSdkFailure(
+      throw _sdkFailure(
+        'kakao',
         error.reason == ClientErrorCause.cancelled
             ? ProviderSdkFailureType.cancelled
             : ProviderSdkFailureType.rejected,
-        cause: error,
+        error,
       );
     } on ProviderSdkFailure {
       rethrow;
-    } on Object catch (error) {
-      throw ProviderSdkFailure(ProviderSdkFailureType.rejected, cause: error);
+    } on Object catch (error, stackTrace) {
+      throw _sdkFailure(
+        'kakao',
+        ProviderSdkFailureType.rejected,
+        error,
+        stackTrace: stackTrace,
+      );
     }
   }
 
@@ -62,8 +109,13 @@ final class KakaoProviderSdkGateway implements ProviderSdkGateway {
       await UserApi.instance.logout();
     } on ProviderSdkFailure {
       rethrow;
-    } on Object catch (error) {
-      throw ProviderSdkFailure(ProviderSdkFailureType.rejected, cause: error);
+    } on Object catch (error, stackTrace) {
+      throw _sdkFailure(
+        'kakao',
+        ProviderSdkFailureType.rejected,
+        error,
+        stackTrace: stackTrace,
+      );
     }
   }
 
@@ -71,7 +123,7 @@ final class KakaoProviderSdkGateway implements ProviderSdkGateway {
     if (_nativeAppKey.isEmpty ||
         _nativeAppKey.startsWith('your-') ||
         _nativeAppKey.startsWith('missing-')) {
-      throw const ProviderSdkFailure(ProviderSdkFailureType.configuration);
+      throw _sdkFailure('kakao', ProviderSdkFailureType.configuration, null);
     }
     return _initialization ??= KakaoSdk.init(
       nativeAppKey: _nativeAppKey,
@@ -109,11 +161,16 @@ final class GoogleProviderSdkGateway implements ProviderSdkGateway {
           ProviderSdkFailureType.configuration,
         _ => ProviderSdkFailureType.rejected,
       };
-      throw ProviderSdkFailure(type, cause: error);
+      throw _sdkFailure('google', type, error);
     } on ProviderSdkFailure {
       rethrow;
-    } on Object catch (error) {
-      throw ProviderSdkFailure(ProviderSdkFailureType.rejected, cause: error);
+    } on Object catch (error, stackTrace) {
+      throw _sdkFailure(
+        'google',
+        ProviderSdkFailureType.rejected,
+        error,
+        stackTrace: stackTrace,
+      );
     }
   }
 
@@ -124,8 +181,13 @@ final class GoogleProviderSdkGateway implements ProviderSdkGateway {
       await GoogleSignIn.instance.signOut();
     } on ProviderSdkFailure {
       rethrow;
-    } on Object catch (error) {
-      throw ProviderSdkFailure(ProviderSdkFailureType.rejected, cause: error);
+    } on Object catch (error, stackTrace) {
+      throw _sdkFailure(
+        'google',
+        ProviderSdkFailureType.rejected,
+        error,
+        stackTrace: stackTrace,
+      );
     }
   }
 
@@ -133,7 +195,7 @@ final class GoogleProviderSdkGateway implements ProviderSdkGateway {
     if (_serverClientId.isEmpty ||
         _serverClientId.startsWith('your-') ||
         _serverClientId.startsWith('missing-')) {
-      throw const ProviderSdkFailure(ProviderSdkFailureType.configuration);
+      throw _sdkFailure('google', ProviderSdkFailureType.configuration, null);
     }
     return _initialization ??= GoogleSignIn.instance.initialize(
       serverClientId: _serverClientId,
@@ -168,25 +230,35 @@ final class NaverProviderSdkGateway implements ProviderSdkGateway {
       final result = await FlutterNaverLogin.logIn();
       return switch (result.status) {
         NaverLoginStatus.loggedIn => result.accessToken?.accessToken,
-        NaverLoginStatus.loggedOut => throw const ProviderSdkFailure(
+        NaverLoginStatus.loggedOut => throw _sdkFailure(
+          'naver',
           ProviderSdkFailureType.cancelled,
+          null,
         ),
-        NaverLoginStatus.error => throw ProviderSdkFailure(
+        NaverLoginStatus.error => throw _sdkFailure(
+          'naver',
           failureTypeForErrorMessage(result.errorMessage),
+          null,
         ),
       };
     } on PlatformException catch (error) {
       final code = error.code.toUpperCase();
-      throw ProviderSdkFailure(
+      throw _sdkFailure(
+        'naver',
         code.contains('CANCEL')
             ? ProviderSdkFailureType.cancelled
             : ProviderSdkFailureType.rejected,
-        cause: error,
+        error,
       );
     } on ProviderSdkFailure {
       rethrow;
-    } on Object catch (error) {
-      throw ProviderSdkFailure(ProviderSdkFailureType.rejected, cause: error);
+    } on Object catch (error, stackTrace) {
+      throw _sdkFailure(
+        'naver',
+        ProviderSdkFailureType.rejected,
+        error,
+        stackTrace: stackTrace,
+      );
     }
   }
 
@@ -198,8 +270,13 @@ final class NaverProviderSdkGateway implements ProviderSdkGateway {
         return;
       }
       await FlutterNaverLogin.logOutAndDeleteToken();
-    } on Object catch (error) {
-      throw ProviderSdkFailure(ProviderSdkFailureType.rejected, cause: error);
+    } on Object catch (error, stackTrace) {
+      throw _sdkFailure(
+        'naver',
+        ProviderSdkFailureType.rejected,
+        error,
+        stackTrace: stackTrace,
+      );
     }
   }
 
