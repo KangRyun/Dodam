@@ -60,6 +60,12 @@ abstract final class AppRouter {
         ProfileSelectionScreen(
           controller: childController,
           onGuardianSelected: goGuardianHome,
+          headerAction: authSignOut == null
+              ? null
+              : LogoutActionButton(
+                  onSignOut: authSignOut,
+                  onSignedOut: goLogin,
+                ),
           onAddChild: (context) =>
               Navigator.of(context).pushNamed(AppRoutes.childRegister),
           onEditProfiles: (context) =>
