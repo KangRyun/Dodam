@@ -79,6 +79,81 @@ void main() {
     expect(request.metrics.undoCountDelta, 1);
   });
 
+  test('PEN과 ERASER를 순서대로 보존하고 지우개 횟수를 집계한다', () async {
+    final queue = _queue();
+    queue.addEvents([
+      ..._stroke(startSeq: 1, endSeq: 3, startTime: 10),
+      ..._stroke(
+        startSeq: 5,
+        endSeq: 7,
+        startTime: 40,
+        tool: 'ERASER',
+        color: null,
+        width: 14,
+      ),
+      const StrokeEventDto(seq: 9, t: 80, type: 'UNDO'),
+    ]);
+
+    await queue.flush();
+
+    final request = queue.pendingBatches.single.request;
+    expect(request.events.map((event) => event.eventType), [
+      'STROKE',
+      'STROKE',
+      'UNDO',
+    ]);
+    expect(request.events.map((event) => event.sequence), [3, 7, 9]);
+    expect(request.firstEventSequence, 3);
+    expect(request.lastEventSequence, 9);
+    expect(request.events[0].tool, 'PEN');
+    expect(request.events[1].tool, 'ERASER');
+    expect(request.events[1].color, isNull);
+    expect(request.events[1].width, 14);
+    expect(request.metrics.undoCountDelta, 1);
+    expect(request.metrics.eraseCountDelta, 1);
+  });
+
+  test('ERASER-only batch는 eraseCountDelta를 stroke 수만큼 전송한다', () async {
+    final queue = _queue();
+    queue.addEvents([
+      ..._stroke(
+        startSeq: 11,
+        endSeq: 12,
+        startTime: 100,
+        tool: 'ERASER',
+        color: null,
+        startPressure: 0.2,
+        endPressure: 0.8,
+      ),
+      ..._stroke(
+        startSeq: 20,
+        endSeq: 22,
+        startTime: 130,
+        tool: 'ERASER',
+        color: null,
+      ),
+    ]);
+
+    await queue.flush();
+
+    final request = queue.pendingBatches.single.request;
+    expect(request.events.every((event) => event.tool == 'ERASER'), isTrue);
+    expect(request.events.first.toJson(), {
+      'sequence': 12,
+      'eventType': 'STROKE',
+      'tool': 'ERASER',
+      'width': 8.0,
+      'points': [
+        {'x': 0.1, 'y': 0.2, 't': 0, 'pressure': 0.2},
+        {'x': 0.3, 'y': 0.4, 't': 20, 'pressure': 0.8},
+      ],
+    });
+    expect(request.metrics.eraseCountDelta, 2);
+    expect(request.metrics.undoCountDelta, 0);
+    expect(request.firstEventSequence, 12);
+    expect(request.lastEventSequence, 22);
+  });
+
   test('Undo-only batch도 event와 metrics를 함께 전송한다', () async {
     final queue = _queue();
     queue.addEvents([
@@ -217,7 +292,15 @@ void main() {
         return DateTime.utc(2026, 7, 22, 1, 2, 3);
       },
     );
-    queue.addEvents(_stroke(startSeq: 1, endSeq: 3, startTime: 10));
+    queue.addEvents(
+      _stroke(
+        startSeq: 1,
+        endSeq: 3,
+        startTime: 10,
+        tool: 'ERASER',
+        color: null,
+      ),
+    );
     await queue.flush();
     final failedRequest = queue.pendingBatches.single.request;
     final failedPayload = failedRequest.toJson();
@@ -230,6 +313,8 @@ void main() {
     expect(identical(requests[0], requests[1]), isTrue);
     expect(identical(requests[0], failedRequest), isTrue);
     expect(requests[1].toJson(), failedPayload);
+    expect(requests[1].events.single.tool, 'ERASER');
+    expect(requests[1].metrics.eraseCountDelta, 1);
     expect(queue.pendingBatches, isEmpty);
     expect(
       queue.completedBatches.single.status,
@@ -301,6 +386,11 @@ List<StrokeEventDto> _stroke({
   required int startSeq,
   required int endSeq,
   required int startTime,
+  String tool = 'PEN',
+  String? color = '#E35D6A',
+  double width = 8,
+  double? startPressure,
+  double? endPressure,
 }) {
   final moveSeq = endSeq - startSeq > 1 ? startSeq + 1 : null;
   return [
@@ -311,6 +401,10 @@ List<StrokeEventDto> _stroke({
       x: 0.1,
       y: 0.2,
       includeStyle: true,
+      tool: tool,
+      color: color,
+      width: width,
+      pressure: startPressure,
     ),
     if (moveSeq != null)
       _pointEvent(
@@ -326,6 +420,7 @@ List<StrokeEventDto> _stroke({
       type: 'STROKE_END',
       x: 0.3,
       y: 0.4,
+      pressure: endPressure,
     ),
   ];
 }
@@ -338,15 +433,18 @@ StrokeEventDto _pointEvent({
   required double y,
   double? pressure,
   bool includeStyle = false,
+  String tool = 'PEN',
+  String? color = '#E35D6A',
+  double width = 8,
 }) => StrokeEventDto(
   seq: seq,
   t: t,
   type: type,
   x: x,
   y: y,
-  tool: includeStyle ? 'PEN' : null,
-  color: includeStyle ? '#E35D6A' : null,
-  thickness: includeStyle ? 8 : null,
+  tool: includeStyle ? tool : null,
+  color: includeStyle ? color : null,
+  thickness: includeStyle ? width : null,
   pressure: pressure,
 );
 
