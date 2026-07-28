@@ -25,6 +25,7 @@ resources:
   - ai.yaml
   - gateway.yaml
   - jenkins-external.yaml
+  - jenkins-deployer-rbac.yaml   # S15P11B209-359 — 배포 전용 SA(네임스페이스 한정, Secret 읽기 없음)
   - cronjobs.yaml
 
 commonLabels:

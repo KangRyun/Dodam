@@ -27,4 +27,14 @@ ARG DOCKER_GID=988
 RUN if ! getent group "${DOCKER_GID}" >/dev/null; then groupadd -g "${DOCKER_GID}" hostdocker; fi \
  && usermod -aG "$(getent group "${DOCKER_GID}" | cut -d: -f1)" jenkins
 
+# 3) kubectl — compose→k8s 배포 전환용 (S15P11B209-359)
+#    ⚠️ 버전 고정. `stable.txt` 로 받으면 같은 Dockerfile 이 시점마다 다른 이미지를 만든다.
+#    k8s 는 kubectl 과 서버 버전이 마이너 ±1 까지 호환된다 — k3s 를 올릴 때 이 값도 함께 본다.
+#    (k3s v1.31.x 대상. 설치한 k3s 버전과 2 마이너 이상 벌어지면 명령이 조용히 실패할 수 있다)
+ARG KUBECTL_VERSION=v1.31.4
+RUN curl -fsSLo /usr/local/bin/kubectl \
+      "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/$(dpkg --print-architecture)/kubectl" \
+ && chmod 0755 /usr/local/bin/kubectl \
+ && kubectl version --client=true
+
 USER jenkins
