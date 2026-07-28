@@ -1,0 +1,37 @@
+# 클러스터 밖 Jenkins 연결 — Service + 수동 Endpoints (S15P11B209-357)
+#
+# 문제: Jenkins 는 k8s 가 아니라 호스트 compose(dodam-cicd)에 있다. 그래서 gateway 의
+#       /jenkins/ 프록시가 가리킬 Service 가 클러스터 안에 존재하지 않는다.
+#
+# 해법: **셀렉터가 없는 Service** 를 만들면 k8s 가 Endpoints 를 자동으로 채우지 않는다.
+#       그 자리에 우리가 손으로 주소를 적어 넣는다. 이러면 클러스터 안에서는
+#       `dodam-jenkins` 라는 평범한 Service 처럼 보이지만 실제 트래픽은 호스트로 나간다.
+#
+# ⚠️ 아래 IP 는 **노드의 실제 주소로 바꿔야 한다.** 자리표시자다.
+#      kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'
+#    그리고 Jenkins 는 지금 127.0.0.1:9090 으로만 바인딩돼 있어(compose ports 참조)
+#    파드에서 접근하려면 **바인딩을 노드 IP 로 여는 작업이 선행**돼야 한다.
+#    이건 359(Jenkins 배포 전환)와 함께 결정할 사안이라 여기서는 배선만 준비한다.
+#    → 그 전까지 /jenkins/ 는 502 다. 이는 알려진 상태이며 게이트웨이 전체를 막지는 않는다
+#      (변수+resolver 패턴 덕분).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dodam-jenkins
+  namespace: dodam
+spec:
+  # selector 없음 — 이게 핵심이다. 있으면 k8s 가 Endpoints 를 덮어써 버린다.
+  ports:
+    - { name: http, port: 8080, targetPort: 8080, protocol: TCP }
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: dodam-jenkins        # ★ Service 와 이름이 반드시 같아야 연결된다
+  namespace: dodam
+subsets:
+  - addresses:
+      - ip: "10.0.0.1"       # ← 자리표시자. 위 명령으로 확인한 노드 InternalIP 로 교체
+    ports:
+      - { name: http, port: 8080, protocol: TCP }

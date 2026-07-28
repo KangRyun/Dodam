@@ -7,7 +7,9 @@ import '../design_system/design_system.dart';
 import '../features/auth/auth.dart';
 import '../features/activity/data/repositories/mock_activity_repository.dart';
 import '../features/activity/domain/repositories/activity_repository.dart';
+import '../features/child/data/repositories/mock_child_consent_repository.dart';
 import '../features/child/data/repositories/mock_child_repository.dart';
+import '../features/child/domain/repositories/child_consent_repository.dart';
 import '../features/child/domain/repositories/child_repository.dart';
 import '../features/drawing/data/dto/drawing_dtos.dart';
 import '../features/drawing/data/repositories/mock_drawing_repository.dart';
@@ -29,6 +31,7 @@ class DodamApp extends StatefulWidget {
   const DodamApp({
     this.activityRepository = const MockActivityRepository(),
     this.childRepository = const MockChildRepository(),
+    this.childConsentRepository = const MockChildConsentRepository(),
     this.drawingRepository = const MockDrawingRepository(),
     this.reportRepository = const MockReportRepository(),
     this.drawingCompletionSnapshotProvider,
@@ -49,6 +52,9 @@ class DodamApp extends StatefulWidget {
 
   final ActivityRepository activityRepository;
   final ChildRepository childRepository;
+
+  /// 아동 대상 약관 조회·동의 기록 경계. 실 연동 시 원격 구현을 주입한다.
+  final ChildConsentRepository childConsentRepository;
   final DrawingRepository drawingRepository;
   final ReportRepository reportRepository;
   final Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider;
@@ -88,7 +94,10 @@ class _DodamAppState extends State<DodamApp> {
   @override
   void initState() {
     super.initState();
-    _childController = GuardianChildController(widget.childRepository);
+    _childController = GuardianChildController(
+      widget.childRepository,
+      widget.childConsentRepository,
+    );
     if (widget.initialRoute != AppRoutes.authBootstrap) {
       _childController.loadChildren();
     }

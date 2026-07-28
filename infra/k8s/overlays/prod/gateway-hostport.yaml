@@ -1,0 +1,32 @@
+# gateway 가 호스트 80/443 을 직접 잡는다 — 컷오버(360) 전용 (S15P11B209-357)
+#
+# 왜 LoadBalancer 가 아니라 hostPort 인가:
+#   k3s 의 ServiceLB(klipper)를 `--disable servicelb` 로 껐기 때문이다(356 권고).
+#   껐다면 남는 선택지는 hostPort 나 NodePort 인데, 노드가 하나뿐이라 hostPort 가
+#   가장 단순하고 경로도 짧다(추가 프록시 홉 없음).
+#
+# ⚠️ hostPort 는 **노드당 하나의 파드만** 그 포트를 가질 수 있다.
+#    그래서 gateway 는 replicas 1 이며, 롤링 업데이트 시 새 파드가 같은 포트를
+#    잡으려다 Pending 이 된다. maxSurge 를 0 으로 낮춰 "먼저 내리고 올리는" 방식으로
+#    바꾼다 — 게이트웨이는 수 초 끊긴다.
+#    ★ 무중단이 필요한 것은 backend 이고, 그건 이 파드 뒤에서 별도로 보장된다.
+#      게이트웨이 자체의 무중단은 노드가 둘 이상일 때 얻을 수 있다(3차 과제).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: dodam
+spec:
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0            # 같은 hostPort 를 두 파드가 동시에 잡을 수 없다
+      maxUnavailable: 1
+  template:
+    spec:
+      containers:
+        - name: nginx
+          ports:
+            - { name: http,  containerPort: 80,  hostPort: 80 }
+            - { name: https, containerPort: 443, hostPort: 443 }

@@ -7,7 +7,9 @@ import 'package:flutter/material.dart';
 import 'app/app.dart';
 import 'app/router/app_routes.dart';
 import 'core/network/network.dart';
+import 'features/activity/data/repositories/remote_activity_repository.dart';
 import 'features/auth/auth.dart';
+import 'features/child/data/repositories/remote_child_consent_repository.dart';
 import 'features/child/data/repositories/remote_child_repository.dart';
 import 'features/conversation/conversation.dart';
 import 'features/drawing/data/repositories/mock_drawing_repository.dart';
@@ -82,7 +84,9 @@ DodamApp createDefaultApp({
 
   return DodamApp(
     authRepository: authRepository,
+    activityRepository: RemoteActivityRepository(apiClient),
     childRepository: RemoteChildRepository(apiClient),
+    childConsentRepository: RemoteChildConsentRepository(apiClient),
     conversationRepository: RemoteConversationRepository(apiClient),
     conversationEndRepository: RemoteConversationEndRepository(apiClient),
     conversationAnswerRepository: RemoteConversationAnswerRepository(apiClient),
