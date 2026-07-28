@@ -1,0 +1,325 @@
+# k3s 단일 노드 설치 runbook (S15P11B209-356)
+
+> 대상: EC2 `i15b209.p.ssafy.io` (Ubuntu 24.04, 단일 노드). 담당: Infra(이강륜).
+> 목적: compose→k8s 전환(357~362)의 **기반만** 깔기. 이 문서 범위에서 서비스는 **하나도 옮기지 않는다.**
+> 후속: 357(kustomize 매니페스트) → 358(스테이징 검증) → 359(Jenkins kubectl 전환) → 360(컷오버)
+
+⚠️ **이 문서의 명령은 서버 상태를 바꾼다. 제안이지 실행이 아니다 — 강륜님이 직접 실행한다.**
+각 단계마다 "무엇을 확인하고 다음으로 넘어가는지"가 붙어 있다. 확인 없이 다음 단계로 가지 않는다.
+
+---
+
+## 라이브 무접촉 원칙
+
+지금 이 EC2는 **운영 중**이다. 팀 시연·개발이 이 서버를 쓴다.
+
+- k3s를 깔되 **워크로드는 올리지 않는다.** 80/443은 계속 기존 nginx가 가진다.
+- 그래서 `--disable traefik` 이다. Traefik이 들어오면 인그레스 두 개가 같은 포트를 노린다.
+- **성공 기준은 "k3s가 떴다"가 아니라 "k3s를 깔았는데 기존 서비스가 그대로다"** 이다.
+
+---
+
+## 사전 조건 — 2026-07-28 실측
+
+| 항목 | 실측값 | 판단 |
+|---|---|---|
+| OS / 커널 | Ubuntu 24.04.4 LTS / 6.17.0-1017-aws | ✅ |
+| cgroup | v2 (`cgroup2fs`) | ✅ k3s 요구 충족 |
+| Docker | 29.6.2, overlayfs, cgroup driver `systemd` | ✅ 공존 가능 |
+| 디스크 | 309G 중 232G 여유 | ✅ |
+| 포트 5000 / 6443 / 10250 | 전부 비어 있음 | ✅ |
+| **메모리** | 15,987MB 중 **available 4,421MB**, free 349MB | ⚠️ **빠듯하다** |
+| **스왑** | 4,095MB 중 **2,058MB 이미 사용 중** | ⚠️ 이미 압박이 있다는 신호 |
+
+### ⚠️ 메모리가 이 작업의 진짜 제약이다
+
+실행 중 컨테이너 실측(2026-07-28 17:30):
+
+```
+dodam-jenkins   4,571MB  (빌드 중 — CPU 285%)
+dodam-backend     760MB
+dodam-mysql       490MB
+dodam-minio       237MB
+dodam-ai           77MB
+그 외(nginx·redis·grafana·prometheus·cadvisor 등) 합계 약 170MB
++ Testcontainers MySQL 3~4개 (빌드 중에만, 개당 약 330MB)
+```
+
+- k3s 서버(API server + etcd(sqlite) + kubelet + CoreDNS + flannel)만으로 **약 600MB~1GB**가 더 든다.
+- **358(스테이징 검증)에서는 앱을 compose와 k3s에 동시에 띄운다.** backend+mysql+minio 사본이
+  추가로 약 1.5GB → 합계 **2.5GB 안팎이 더 필요**하다. available 4.4GB에서 감당은 되지만,
+  **Jenkins 빌드가 동시에 돌면 확실히 스왑으로 밀리고 응답시간이 무너진다.**
+
+**→ 설치·검증은 빌드가 돌지 않는 시간대에 한다.** 시작 전에 반드시 확인:
+
+```bash
+# Testcontainers(ryuk)가 떠 있으면 백엔드 테스트가 도는 중이다.
+# 컨테이너 이름은 무작위로 붙으므로 이름이 아니라 **이미지**로 판별한다.
+docker ps --format '{{.Image}}' | grep -q testcontainers \
+  && echo "⚠️ 빌드 진행 중 — 끝난 뒤에" \
+  || echo "빌드 없음 — 진행 가능"
+
+free -m | awk '/^Mem:/ {print "available " $7 "MB"} /^Swap:/ {print "swap used " $3 "MB"}'
+```
+
+`available`가 4GB를 밑돌거나 swap 사용이 계속 늘고 있으면 미룹니다.
+
+> 참고: kubelet은 원래 스왑이 켜져 있으면 기동을 거부하지만 k3s는 이를 완화해 띄운다.
+> 다만 **이 서버에서 확인한 적이 없다.** 3단계에서 노드가 `Ready`인지로 판정한다.
+> `NotReady`면 스왑이 원인일 수 있다 — 추측하지 말고 `sudo journalctl -u k3s -n 100`을 본다.
+
+---
+
+## 위험 3가지와 대응
+
+| # | 위험 | 왜 생기나 | 대응 |
+|---|---|---|---|
+| 1 | **iptables 간섭** | k3s(kube-proxy·flannel)가 자기 규칙을 넣는다. Docker도 `DOCKER`·`DOCKER-USER` 체인을 쓴다. 규칙 순서가 꼬이면 컨테이너 간 통신이나 외부 접속이 끊긴다 | 설치 **전에 규칙을 저장**해 두고 설치 후 비교. 서비스 e2e가 하나라도 깨지면 즉시 롤백 |
+| 2 | **메모리 고갈** | 위 표 참조 | 빌드 없는 시간대 + 358에서 동시 기동 시 사전 재확인 |
+| 3 | **80/443 탈취** | k3s의 ServiceLB(klipper)가 `LoadBalancer` 타입 Service를 만나면 **호스트 포트를 잡는다**. 실수로 하나 만들면 nginx와 충돌해 서비스가 죽는다 | `--disable servicelb`로 **기능 자체를 끈다**(아래 참조) |
+
+### `--disable servicelb`를 권합니다
+
+이슈 본문은 *"LB Service는 컷오버까지 미생성"* 으로 잡혀 있습니다. 그건 **약속**이고,
+`--disable servicelb`는 **장치**입니다. 지키기로 한 것과 지켜지는 것은 다릅니다 —
+잘못 붙인 매니페스트 하나로 운영 80/443이 넘어가는 걸 사람이 안 만드는 걸로 막지 않습니다.
+
+컷오버(360) 때 다시 켜면 됩니다(`/etc/systemd/system/k3s.service`의 `--disable servicelb`
+제거 → `daemon-reload` → `restart`). 또는 계속 끈 채로 nginx가 NodePort로 프록시하는 구성도
+가능하며, **그 편이 전환 폭이 작습니다.** 어느 쪽으로 갈지는 357에서 결정합니다.
+
+---
+
+## 절차
+
+### 0단계 — 기준선 저장 (반드시 먼저)
+
+무엇을 되돌려야 하는지 모르면 롤백도 못 합니다.
+
+```bash
+cd ~/S15P11B209
+
+# 서비스 정상 응답 — 이 3줄이 설치 후에도 똑같이 나와야 한다
+curl -s -o /dev/null -w 'landing  %{http_code}\n' https://i15b209.p.ssafy.io/
+curl -s -o /dev/null -w 'ai       %{http_code}\n' https://i15b209.p.ssafy.io/ai/health
+curl -s -o /dev/null -w 'api-401  %{http_code}\n' https://i15b209.p.ssafy.io/api/v1/users/me
+
+# 컨테이너 상태와 방화벽 규칙 스냅샷
+docker ps --format '{{.Names}}\t{{.Status}}' | sort > /tmp/before-k3s-containers.txt
+sudo iptables-save > /tmp/before-k3s-iptables.rules
+sudo ip6tables-save > /tmp/before-k3s-ip6tables.rules
+wc -l /tmp/before-k3s-*.rules
+```
+
+**기대:** `landing 200` · `ai 200` · `api-401 401`. — 2026-07-28 실측으로 확인한 값입니다.
+401이 정상입니다 — 토큰 없이 보호 경로를 부른 것이니 인가가 살아 있다는 뜻입니다.
+
+---
+
+### 1단계 — 로컬 레지스트리 기동
+
+```bash
+docker compose -f infra/jenkins/docker-compose.yml up -d registry
+curl -fsS http://127.0.0.1:5000/v2/ && echo "  ← 레지스트리 정상"
+```
+
+**기대:** `{}` 출력. 외부에서는 닫혀 있어야 정상입니다:
+
+```bash
+curl -s -m 3 -o /dev/null -w '%{http_code}\n' http://i15b209.p.ssafy.io:5000/v2/   # 000/타임아웃이 정상
+```
+
+**왜 레지스트리가 필요한가** — 지금 파이프라인은 이미지를 만들어 **호스트 Docker 데몬 안에만**
+둡니다(`dodam-backend:local` → `:<SHA>`, push 없음). 그런데 k3s는 Docker가 아니라
+**containerd**를 씁니다. 둘은 이미지 저장소가 완전히 별개라서 k3s는 Docker의 이미지를
+**볼 수 없습니다.** 그래서 둘이 함께 보는 레지스트리를 중간에 둡니다.
+
+```
+Jenkins ─ docker build ─→ docker push 127.0.0.1:5000/... ─→ k3s(containerd) ─ pull
+```
+
+---
+
+### 2단계 — k3s 설치
+
+**버전을 먼저 고릅니다.** `latest`로 깔면 다음에 재설치할 때 다른 게 깔립니다.
+설치 시점에 실제 존재하는 안정 버전을 확인하세요:
+
+```bash
+curl -s https://api.github.com/repos/k3s-io/k3s/releases | grep -oE '"tag_name": "[^"]+"' | head -10
+```
+
+고른 버전을 넣고 설치합니다:
+
+```bash
+curl -sfL https://get.k3s.io | \
+  INSTALL_K3S_VERSION="<위에서 고른 태그>" sh -s - \
+    --disable traefik \
+    --disable servicelb
+```
+
+**플래그 근거**
+
+| 플래그 | 이유 |
+|---|---|
+| `--disable traefik` | 기존 nginx가 계속 게이트웨이. 인그레스 컨트롤러 둘이 같은 포트를 노리면 안 된다. Traefik 전환은 3차 과제 |
+| `--disable servicelb` | 실수로 만든 `LoadBalancer` Service가 운영 80/443을 잡는 사고를 **구조적으로** 차단 |
+
+**`--write-kubeconfig-mode 644`는 쓰지 마세요.** 편하지만 호스트의 모든 사용자가
+클러스터를 완전히 제어하게 됩니다. 이 서버에는 **호스트 docker 소켓을 마운트한 Jenkins**가
+떠 있어 노출면이 작지 않습니다. 대신 본인 계정으로 복사해서 씁니다:
+
+```bash
+mkdir -p ~/.kube
+sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config
+sudo chown "$USER:$USER" ~/.kube/config
+chmod 600 ~/.kube/config
+```
+
+---
+
+### 3단계 — 레지스트리 설정 배치 + 기동 확인
+
+```bash
+sudo install -D -m 644 -o root -g root \
+  infra/k3s/registries.yaml /etc/rancher/k3s/registries.yaml
+sudo systemctl restart k3s          # 이 재시작이 있어야 반영된다
+
+kubectl get nodes
+kubectl get pods -A
+```
+
+**기대:** 노드가 `Ready`, `kube-system`의 coredns·metrics-server·local-path-provisioner가 `Running`.
+`traefik`·`svclb-*`는 **없어야** 정상입니다(위에서 껐으므로).
+
+`NotReady`면 멈추고 원인부터 봅니다 — 스왑일 수도, 다른 것일 수도 있습니다:
+
+```bash
+sudo journalctl -u k3s -n 100 --no-pager
+kubectl describe node "$(hostname)" | sed -n '/Conditions/,/Addresses/p'
+```
+
+---
+
+### 4단계 — ★ 기존 서비스 e2e 재확인 (통과 못 하면 롤백)
+
+**이 단계가 356의 진짜 완료 조건입니다.** k3s가 뜬 것은 성공이 아닙니다.
+
+```bash
+# 0단계와 똑같은 3줄 — 값이 같아야 한다
+curl -s -o /dev/null -w 'landing  %{http_code}\n' https://i15b209.p.ssafy.io/
+curl -s -o /dev/null -w 'ai       %{http_code}\n' https://i15b209.p.ssafy.io/ai/health
+curl -s -o /dev/null -w 'api-401  %{http_code}\n' https://i15b209.p.ssafy.io/api/v1/users/me
+
+# 컨테이너가 하나도 죽지 않았는지 — 출력이 비어야 정상
+docker ps --format '{{.Names}}\t{{.Status}}' | sort > /tmp/after-k3s-containers.txt
+diff /tmp/before-k3s-containers.txt /tmp/after-k3s-containers.txt
+
+# 컨테이너 → 외부 DNS·HTTPS (flannel이 아웃바운드를 깨지 않았는지)
+docker exec dodam-backend sh -c 'getent hosts api.github.com >/dev/null && echo "DNS ok"'
+
+# 컨테이너 → 컨테이너 (앱 내부망이 살아있는지)
+# ⚠️ actuator 는 8080 이 아니라 **관리 포트 9404** 에 있다(application.yml `management.server.port`).
+#    nginx 가 8080 만 프록시하도록 일부러 분리해 둔 것이라, 8080/actuator/health 는 404 다.
+docker exec dodam-nginx sh -c 'wget -q -O- http://backend:9404/actuator/health | head -c 120; echo'
+
+# iptables 변화량 — 늘어난 것 자체는 정상이다. DOCKER 체인이 사라졌는지를 본다
+sudo iptables-save > /tmp/after-k3s-iptables.rules
+echo "규칙 수: $(wc -l < /tmp/before-k3s-iptables.rules) → $(wc -l < /tmp/after-k3s-iptables.rules)"
+diff /tmp/before-k3s-iptables.rules /tmp/after-k3s-iptables.rules | grep '^<' | head -20
+```
+
+**판정**
+
+- 3개 curl 값이 0단계와 동일 + `diff`(컨테이너) 무출력 + 내부 통신 정상 → **통과**
+- `diff | grep '^<'` 에 `DOCKER` 계열 규칙이 **사라진 것**으로 찍히면 → **위험 신호, 즉시 롤백**
+  (규칙이 **추가**된 것은 정상입니다. 없어진 게 문제입니다)
+- 하나라도 어긋나면 다음 단계로 가지 말고 **롤백**합니다
+
+---
+
+### 5단계 — 레지스트리 왕복 확인 (선택이지만 권장)
+
+357로 넘어가기 전에 "Jenkins가 밀어넣은 이미지를 k3s가 실제로 당겨오는가"를 한 번 봅니다.
+여기서 안 보면 357에서 매니페스트 문제인지 레지스트리 문제인지 구분하지 못합니다.
+
+```bash
+docker pull hello-world
+docker tag hello-world 127.0.0.1:5000/hello-world:probe
+docker push 127.0.0.1:5000/hello-world:probe
+
+kubectl run k3s-registry-probe --restart=Never \
+  --image=127.0.0.1:5000/hello-world:probe
+kubectl wait --for=jsonpath='{.status.phase}'=Succeeded pod/k3s-registry-probe --timeout=60s \
+  && echo "✅ containerd가 로컬 레지스트리에서 pull 성공"
+kubectl logs k3s-registry-probe
+kubectl delete pod k3s-registry-probe
+```
+
+`ImagePullBackOff`가 나면 `registries.yaml` 배치 또는 3단계의 `systemctl restart k3s`가
+빠진 것입니다. `kubectl describe pod k3s-registry-probe`의 Events를 봅니다.
+
+---
+
+## 롤백
+
+4단계를 통과하지 못했다면 **주저 없이 되돌립니다.** 되돌리는 비용보다 서비스가 이상한 채로
+남는 비용이 훨씬 큽니다.
+
+```bash
+sudo /usr/local/bin/k3s-uninstall.sh     # k3s가 넣은 iptables 규칙도 함께 정리된다
+
+# 서비스 재확인
+curl -s -o /dev/null -w 'landing %{http_code}\n' https://i15b209.p.ssafy.io/
+docker ps --format '{{.Names}}\t{{.Status}}' | sort | diff /tmp/before-k3s-containers.txt -
+```
+
+그래도 컨테이너 네트워크가 이상하면 Docker가 자기 규칙을 다시 깔게 합니다:
+
+```bash
+sudo systemctl restart docker
+```
+
+> ⚠️ **`docker restart`는 모든 컨테이너를 재시작합니다 = 짧은 서비스 중단.**
+> 마지막 수단이며, 팀에 알리고 실행합니다. 재시작 후 백엔드가 healthy가 될 때까지
+> nginx가 `Created`에 머무를 수 있습니다(정상 — `depends_on: service_healthy`).
+
+레지스트리만 내리려면:
+
+```bash
+docker compose -f infra/jenkins/docker-compose.yml stop registry
+```
+
+---
+
+## 유지 관리 — 레지스트리 디스크
+
+커밋 SHA마다 태그가 쌓입니다. 방치하면 디스크를 채웁니다.
+
+```bash
+docker exec dodam-registry du -sh /var/lib/registry          # 사용량
+docker exec dodam-registry registry garbage-collect \
+  /etc/docker/registry/config.yml                            # 미참조 레이어 회수
+```
+
+> 태그 삭제 API는 `REGISTRY_STORAGE_DELETE_ENABLED=true`로 켜 두었지만,
+> **삭제 후 garbage-collect를 돌려야 실제 디스크가 회수됩니다.** 태그만 지우고
+> 용량이 줄었다고 판단하지 마세요.
+
+---
+
+## 아직 하지 않은 것
+
+이 runbook은 **설치까지**입니다. 아래는 후속 이슈 소관입니다.
+
+- 앱 매니페스트(Deployment/Service/ConfigMap/Secret) — **357**
+- 스테이징 검증(compose와 병행 기동) — **358**
+- Jenkins `docker compose up` → `kubectl apply` 전환 — **359**
+- 80/443 전환(ServiceLB 재활성 또는 nginx→NodePort) — **360**
+- Prometheus/Grafana 재배치 — **361**
+
+## 참조
+
+- 레지스트리 설정: `infra/k3s/registries.yaml` · `infra/jenkins/docker-compose.yml`
+- 현행 파이프라인: `Jenkinsfile` · `docs/인프라/CICD.md`
+- 배포 검증·롤백 절차: `docs/인프라/배포검증-롤백.md`

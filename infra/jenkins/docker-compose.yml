@@ -51,6 +51,46 @@ services:
       - dodam-cicd-net
       - dodam-net                   # 앱 nginx가 'dodam-jenkins:8080'으로 프록시하기 위해 앱 내부망에도 참여
 
+  # ── 로컬 이미지 레지스트리 (S15P11B209-356 · k3s 전환 준비) ──────────────────
+  # 왜 필요한가: 지금 파이프라인은 이미지를 호스트 **Docker 데몬 안에만** 둔다
+  #   (dodam-backend:local → :<SHA>, push 없음). k3s 는 Docker 가 아니라
+  #   **containerd** 를 쓰고 둘은 이미지 저장소가 완전히 별개다 — k3s 는 Docker 의
+  #   이미지를 볼 수 없다. 그래서 둘이 함께 볼 수 있는 레지스트리를 중간에 둔다.
+  #     Jenkins → docker push 127.0.0.1:5000/... → k3s(containerd) → pull
+  #
+  # ⚠️ k3s 쪽에는 infra/k3s/registries.yaml 을 /etc/rancher/k3s/ 에 배치해야 한다.
+  #    Docker 는 loopback 을 기본 insecure registry 로 취급해 별도 설정이 필요 없다.
+  #    한쪽만 보고 "설정 끝"이라 판단하지 말 것.
+  registry:
+    image: registry:2.8.3           # latest 금지 — 컷오버 중 조용한 동작 변경을 막는다
+    container_name: dodam-registry
+    restart: unless-stopped
+
+    ports:
+      # ⚠️ 반드시 127.0.0.1 바인딩. 평문 HTTP 라서 외부에 열리면 누구나 이미지를
+      #    올리고 내릴 수 있다 = 배포 파이프라인 장악. UFW 에 의존하지 말고 여기서 막는다.
+      - "127.0.0.1:5000:5000"
+
+    environment:
+      # 삭제 API 활성 — 태그가 SHA 단위로 쌓이므로 정리 수단이 없으면 디스크가 찬다.
+      REGISTRY_STORAGE_DELETE_ENABLED: "true"
+
+    volumes:
+      - registry-data:/var/lib/registry
+
+    # 이 서버는 메모리 여유가 크지 않다(2026-07-28 실측: available 4.4GB, swap 2GB 사용 중).
+    # 레지스트리가 커널 페이지 캐시를 밀어내지 않도록 상한을 둔다.
+    mem_limit: 512m
+
+    # healthcheck 는 두지 않았다. registry:2.8.3 이미지에 curl/wget 이 들어 있는지
+    # 이 세션에서 확인하지 못했고, 없는 명령으로 헬스체크를 걸면 "설정은 있는데
+    # 동작하지 않는" 상태가 된다. 대신 호스트에서 확인한다:
+    #   curl -fsS http://127.0.0.1:5000/v2/   → 빈 JSON {} 이면 정상
+    # 이미지에 실제로 무엇이 들어 있는지 확인한 뒤 healthcheck 를 추가할 것.
+
+    networks:
+      - dodam-cicd-net
+
 networks:
   dodam-cicd-net:
     driver: bridge
@@ -61,3 +101,4 @@ networks:
 # Jenkins 홈(모든 설정·자격증명·빌드 이력) — 컨테이너 재생성해도 유지
 volumes:
   jenkins-home:
+  registry-data:      # 빌드 이미지 레이어. 커밋 SHA 태그가 계속 쌓이므로 주기적 정리 필요(356 runbook)
