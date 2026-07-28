@@ -224,6 +224,8 @@ final class RemoteAuthRepository
           ? null
           : UserRole.values.firstWhere((value) => value.wireName == role),
       onboardingCompleted: data['onboardingCompleted'] as bool,
+      // Provider 종류가 아니라 백엔드가 판정한 이메일 추가 수집 여부를 따른다.
+      emailRequired: data['emailRequired'] as bool? ?? false,
       email: data['email'] as String?,
       nickname: data['nickname'] as String?,
     );

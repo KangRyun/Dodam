@@ -101,6 +101,7 @@ class AuthRepositoryImpl
             credential: credential,
             role: UserRole.guardian,
             onboardingCompleted: false,
+            emailRequired: true,
           ),
         );
     }
@@ -122,6 +123,7 @@ class AuthRepositoryImpl
     final completedUser = currentSession.user.copyWith(
       role: input.profile.role,
       onboardingCompleted: true,
+      emailRequired: false,
       email: input.email ?? currentSession.user.email,
       nickname: input.profile.nickname,
     );
@@ -197,6 +199,7 @@ class AuthRepositoryImpl
     required OAuthCredential credential,
     required UserRole role,
     required bool onboardingCompleted,
+    bool emailRequired = false,
     String? email,
     String? nickname,
   }) => AuthSession(
@@ -206,6 +209,7 @@ class AuthRepositoryImpl
       providerUserId: 'mock-provider-user-001',
       role: role,
       onboardingCompleted: onboardingCompleted,
+      emailRequired: emailRequired,
       email: email,
       nickname: nickname,
     ),

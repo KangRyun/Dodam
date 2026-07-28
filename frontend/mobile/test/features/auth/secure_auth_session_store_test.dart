@@ -33,6 +33,7 @@ AuthSession _session() => AuthSession(
     providerUserId: 'provider-1',
     role: UserRole.guardian,
     onboardingCompleted: true,
+    emailRequired: false,
     email: 'guardian@dodam.test',
     nickname: '민지엄마',
   ),

@@ -44,6 +44,7 @@ final class SecureAuthSessionStore implements AuthSessionStore {
       'providerUserId': session.user.providerUserId,
       'role': session.user.role?.wireName,
       'onboardingCompleted': session.user.onboardingCompleted,
+      'emailRequired': session.user.emailRequired,
       'email': session.user.email,
       'nickname': session.user.nickname,
       'profileImageUrl': session.user.profileImageUrl,
@@ -60,6 +61,8 @@ final class SecureAuthSessionStore implements AuthSessionStore {
     final user = json['user'] as Map<String, dynamic>;
     final tokens = json['tokens'] as Map<String, dynamic>;
     final expiresAt = tokens['accessTokenExpiresAt'] as String?;
+    final email = user['email'] as String?;
+    final onboardingCompleted = user['onboardingCompleted'] as bool;
 
     return AuthSession(
       user: AuthenticatedUser(
@@ -71,8 +74,12 @@ final class SecureAuthSessionStore implements AuthSessionStore {
             : UserRole.values.firstWhere(
                 (role) => role.wireName == user['role'],
               ),
-        onboardingCompleted: user['onboardingCompleted'] as bool,
-        email: user['email'] as String?,
+        onboardingCompleted: onboardingCompleted,
+        // 기존 저장 세션에는 필드가 없으므로 한 번만 기존 이메일 상태로 복원한다.
+        emailRequired:
+            user['emailRequired'] as bool? ??
+            (!onboardingCompleted && (email == null || email.trim().isEmpty)),
+        email: email,
         nickname: user['nickname'] as String?,
         profileImageUrl: user['profileImageUrl'] as String?,
       ),
