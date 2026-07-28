@@ -66,14 +66,7 @@ class StrokeBatchServiceTest {
 
   @Test
   void storesAValidatedBatchWithNormalizedEventsAndPoints() {
-    DrawingSession session = canvasSession();
-    when(currentUserResolver.requireUserId()).thenReturn(41L);
-    when(drawingSessionRepository.findNotDeletedByIdForUpdate(100L))
-        .thenReturn(Optional.of(session));
-    when(strokeBatchRepository.findByDrawingSession_IdAndBatchSequence(100L, 3))
-        .thenReturn(Optional.empty());
-    when(strokeBatchRepository.saveAndFlush(any()))
-        .thenAnswer(invocation -> invocation.getArgument(0));
+    stubCanvasSession();
 
     StrokeBatchSaveResult result = service.save(100L, request(101, 101));
 
@@ -81,6 +74,44 @@ class StrokeBatchServiceTest {
     assertThat(result.response().acceptedEventCount()).isEqualTo(1);
     assertThat(result.response().lastEventSequence()).isEqualTo(101);
     assertThat(result.response().receivedAt()).isEqualTo(NOW);
+  }
+
+  @Test
+  void acceptsSequenceGapsCreatedByAggregatingClientStrokeEvents() {
+    stubCanvasSession();
+    SaveStrokeBatchRequest request =
+        new SaveStrokeBatchRequest(
+            3,
+            12,
+            15,
+            OffsetDateTime.parse("2026-07-21T11:32:10.120+09:00"),
+            List.of(strokeEvent(12), strokeEvent(15)),
+            new StrokeMetricsRequest(0, 0, 0, 0));
+
+    StrokeBatchSaveResult result = service.save(100L, request);
+
+    assertThat(result.created()).isTrue();
+    assertThat(result.response().acceptedEventCount()).isEqualTo(2);
+    assertThat(result.response().lastEventSequence()).isEqualTo(15);
+  }
+
+  @Test
+  void acceptsAStandaloneUndoEventWithoutPoints() {
+    stubCanvasSession();
+    SaveStrokeBatchRequest request =
+        new SaveStrokeBatchRequest(
+            3,
+            13,
+            13,
+            OffsetDateTime.parse("2026-07-21T11:32:10.120+09:00"),
+            List.of(new StrokeEventRequest(13, "UNDO", null, null, null, null, List.of())),
+            new StrokeMetricsRequest(1, 0, 0, 0));
+
+    StrokeBatchSaveResult result = service.save(100L, request);
+
+    assertThat(result.created()).isTrue();
+    assertThat(result.response().acceptedEventCount()).isEqualTo(1);
+    assertThat(result.response().lastEventSequence()).isEqualTo(13);
   }
 
   @Test
@@ -131,6 +162,28 @@ class StrokeBatchServiceTest {
                     new StrokePointRequest(
                         BigDecimal.valueOf(0.19), BigDecimal.valueOf(0.43), 16, null)))),
         new StrokeMetricsRequest(1, 0, 2, 3200));
+  }
+
+  private StrokeEventRequest strokeEvent(long sequence) {
+    return new StrokeEventRequest(
+        sequence,
+        "STROKE",
+        "PEN",
+        "#FFCC00",
+        BigDecimal.valueOf(8),
+        null,
+        List.of(
+            new StrokePointRequest(BigDecimal.valueOf(0.18), BigDecimal.valueOf(0.42), 0, null)));
+  }
+
+  private void stubCanvasSession() {
+    when(currentUserResolver.requireUserId()).thenReturn(41L);
+    when(drawingSessionRepository.findNotDeletedByIdForUpdate(100L))
+        .thenReturn(Optional.of(canvasSession()));
+    when(strokeBatchRepository.findByDrawingSession_IdAndBatchSequence(100L, 3))
+        .thenReturn(Optional.empty());
+    when(strokeBatchRepository.saveAndFlush(any()))
+        .thenAnswer(invocation -> invocation.getArgument(0));
   }
 
   private DrawingSession canvasSession() {

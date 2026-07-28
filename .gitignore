@@ -141,3 +141,8 @@ volumes/
 _workspace
 CLAUDE.md
 _workspace_prev
+
+# AI 작업 과정에서 생성되는 구현 계획·프레젠테이션 산출물
+/docs/plans/
+/docs/superpowers/
+/docs/presentations/
