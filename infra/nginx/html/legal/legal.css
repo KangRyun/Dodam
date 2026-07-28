@@ -1,0 +1,41 @@
+/* 도담 법적 고지 문서 공용 스타일 (S15P11B209-628)
+   index.html 의 토큰(CLAUDE.md 8절 디자인 시스템)을 따르되, 긴 본문 가독성에 맞춰 조정했다. */
+:root { --green:#3E9B6B; --greenD:#2E7A52; --bg:#F6F7F3; --ink:#25313A; --muted:#5a6670; --line:#E3E6E1; --warn:#C7812F; --warnBg:#FFF6E5; }
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  font-family:'IBM Plex Sans KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;
+  background:var(--bg); color:var(--ink); line-height:1.75; padding:24px 16px 64px;
+}
+.wrap { max-width:760px; margin:0 auto; }
+header.doc {
+  background:#fff; border:1px solid var(--line); border-radius:20px;
+  padding:32px 28px; margin-bottom:20px; box-shadow:0 4px 24px rgba(37,49,58,.06);
+}
+header.doc h1 { font-size:26px; color:var(--green); margin-bottom:8px; }
+header.doc .meta { font-size:13px; color:var(--muted); }
+nav.crumb { font-size:13px; margin-bottom:14px; }
+nav.crumb a { color:var(--greenD); text-decoration:none; font-weight:600; }
+article {
+  background:#fff; border:1px solid var(--line); border-radius:20px;
+  padding:32px 28px; box-shadow:0 4px 24px rgba(37,49,58,.06);
+}
+h2 { font-size:19px; color:var(--ink); margin:32px 0 10px; padding-top:8px; border-top:1px solid var(--line); }
+article > h2:first-of-type { margin-top:0; border-top:none; padding-top:0; }
+h3 { font-size:16px; margin:20px 0 8px; color:var(--greenD); }
+p, li { font-size:15px; color:#3d4a54; }
+ul, ol { margin:8px 0 8px 20px; }
+li { margin-bottom:6px; }
+table { width:100%; border-collapse:collapse; margin:12px 0; font-size:14px; }
+th, td { border:1px solid var(--line); padding:9px 10px; text-align:left; vertical-align:top; }
+th { background:#f2f6f3; font-weight:700; }
+.pending {
+  background:var(--warnBg); border:1px solid #F0D9A8; border-radius:12px;
+  padding:14px 16px; margin:16px 0; font-size:14px; color:#6b5320;
+}
+.pending strong { color:var(--warn); }
+code { background:#f2f4f2; padding:1px 5px; border-radius:4px; font-size:13px; }
+footer.doc { margin-top:28px; font-size:13px; color:var(--muted); text-align:center; }
+@media (max-width:600px) {
+  header.doc, article { padding:24px 18px; border-radius:16px; }
+  table, th, td { font-size:13px; }
+}
