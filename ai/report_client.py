@@ -187,18 +187,18 @@ def _scope(value) -> str:
 def _feature(item: dict) -> contracts.ObservedFeatureDraft:
     """LLM이 만든 특징 dict 하나를 계약 모델로. 누락 필드는 빈 문자열로 채운다.
 
-    단정적 진단 표현(S15P11B209-591)이 든 보호자 노출 feature는 EXPERT_ONLY로 강등해
-    전문가 검토로 격리한다 — 경향성 우려 소견은 그대로 통과한다.
+    단정적 진단(S15P11B209-591)이나 감정·성격 과잉 추론(S15P11B209-592)이 든 보호자 노출
+    feature는 EXPERT_ONLY로 강등해 전문가 검토로 격리한다 — 경향성 우려 소견은 그대로 통과한다.
     """
     title = str(item.get("title", ""))
     description = str(item.get("description", ""))
     evidence = str(item.get("evidenceSummary", ""))
     scope = _scope(item.get("visibilityScope"))
-    if scope != "EXPERT_ONLY" and report_safety.has_definitive_diagnosis(
+    if scope != "EXPERT_ONLY" and report_safety.has_unsafe_expression(
         title, description, evidence
     ):
         # ⚠️ 원문은 로그로 남기지 않는다 — 격리 사실만.
-        logger.warning("리포트 feature 단정 진단 표현 격리 — EXPERT_ONLY 강등")
+        logger.warning("리포트 feature 과도 규정·단정 표현 격리 — EXPERT_ONLY 강등")
         scope = "EXPERT_ONLY"
     return contracts.ObservedFeatureDraft(
         feature_code=str(item.get("featureCode", "")),
@@ -216,8 +216,8 @@ def _assemble(
     conv = data.get("conversationSummary") or {}
     features = [_feature(f) for f in data.get("features", []) if isinstance(f, dict)]
 
-    # 단정적 진단 표현이 보호자 노출 문장·특징에 하나라도 있으면 전문가 검토를 강제한다
-    # (S15P11B209-591). attentionPoints는 전문가 전용 채널이라 검사 대상에서 제외한다.
+    # 단정적 진단(591)이나 감정·성격 과잉 추론(592) 표현이 보호자 노출 문장·특징에 하나라도
+    # 있으면 전문가 검토를 강제한다. attentionPoints는 전문가 전용 채널이라 검사 대상에서 제외한다.
     guardian_texts = [
         str(data.get("overallSummary", "")),
         str(data.get("positiveSignals", "")),
@@ -229,7 +229,7 @@ def _assemble(
         str(conv.get("expressedEmotion", "")),
         *(f"{f.title} {f.description} {f.evidence_summary}" for f in features),
     ]
-    needs_expert_review = report_safety.has_definitive_diagnosis(*guardian_texts)
+    needs_expert_review = report_safety.has_unsafe_expression(*guardian_texts)
 
     observation = contracts.ObservationDraft(
         status="AI_DRAFT",
