@@ -19,6 +19,7 @@ import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
 import com.ssafy.b209.user.service.UserDeletionService;
+import com.ssafy.b209.user.service.UserNotificationSettingsReader;
 import com.ssafy.b209.user.service.UserOnboardingService;
 import com.ssafy.b209.user.service.UserQueryService;
 import com.ssafy.b209.user.service.UserUpdateService;
@@ -41,6 +42,7 @@ class UserControllerTest {
   @MockitoBean private UserQueryService queryService;
   @MockitoBean private UserUpdateService updateService;
   @MockitoBean private UserDeletionService deletionService;
+  @MockitoBean private UserNotificationSettingsReader notificationSettingsReader;
 
   @Test
   void immediatelyDeletesTheAuthenticatedUserAfterExplicitConfirmation() throws Exception {
@@ -87,6 +89,47 @@ class UserControllerTest {
         .andExpect(jsonPath("$.data.userId").value(51))
         .andExpect(jsonPath("$.data.role").value("GUARDIAN"))
         .andExpect(jsonPath("$.data.onboardingCompleted").value(true));
+  }
+
+  @Test
+  void returnsTheAuthenticatedUsersNotificationSettings() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(51L);
+    given(notificationSettingsReader.read(51L))
+        .willReturn(new NotificationSettingsResponse(false, true, false, true));
+
+    mockMvc
+        .perform(get("/api/v1/users/me/notification-settings"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.analysisCompleted").value(false))
+        .andExpect(jsonPath("$.data.community").value(true))
+        .andExpect(jsonPath("$.data.serviceNotice").value(false))
+        .andExpect(jsonPath("$.data.marketing").value(true));
+  }
+
+  @Test
+  void returnsDefaultNotificationSettingsWhenNoRowExists() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(51L);
+    given(notificationSettingsReader.read(51L)).willReturn(NotificationSettingsResponse.defaults());
+
+    mockMvc
+        .perform(get("/api/v1/users/me/notification-settings"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.analysisCompleted").value(true))
+        .andExpect(jsonPath("$.data.community").value(true))
+        .andExpect(jsonPath("$.data.serviceNotice").value(true))
+        .andExpect(jsonPath("$.data.marketing").value(false));
+  }
+
+  @Test
+  void returnsUnauthorizedForNotificationSettingsWhenAccessTokenIsMissing() throws Exception {
+    given(currentUserResolver.requireUserId())
+        .willThrow(new BusinessException(AuthErrorCode.AUTHENTICATION_REQUIRED));
+
+    mockMvc
+        .perform(get("/api/v1/users/me/notification-settings"))
+        .andExpect(status().isUnauthorized());
   }
 
   @Test
