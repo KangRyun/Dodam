@@ -21,7 +21,7 @@
 | --- | --- | --- |
 | `POST /api/v1/drawing-sessions` | `childId`, `drawingTypeId`, `inputMethod`가 기존 세션과 일치 | 기존 `drawingSessionId`를 포함한 HTTP 201 응답 |
 | `POST /api/v1/drawing-sessions/{drawingSessionId}/drawing-complete` | 같은 Session에서 같은 키로 생성된 FINAL 객체 탐지 분석 | 저장·분석을 반복하지 않고 기존 Asset·분석 상태 반환 |
-| `POST /api/v1/drawing-sessions/{drawingSessionId}/complete` | 같은 Session, `conversationSkipped`, `requestReport`가 최초 접수와 일치 | 기존 분석·리포트 접수 상태를 포함한 HTTP 202 응답 |
+| `POST /api/v1/drawing-sessions/{drawingSessionId}/complete` | 같은 Session, `conversationSkipped`가 최초 접수와 일치하고 `requestReport=true` | 기존 분석·리포트 접수 상태를 포함한 HTTP 202 응답 |
 
 `clientStartedAt`, Canvas 설정과 클라이언트 완료 시각은 서버의 공식 생성 시각이나
 이미 저장된 결과를 바꾸지 않는 관측 정보다. 그림 단계 완료 재전송은 최초 처리에서
