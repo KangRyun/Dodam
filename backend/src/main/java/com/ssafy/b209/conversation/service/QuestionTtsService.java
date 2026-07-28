@@ -20,6 +20,7 @@ import com.ssafy.b209.storage.audio.StagedAudio;
 import com.ssafy.b209.storage.audio.StoreAudioCommand;
 import com.ssafy.b209.storage.audio.StoredAudio;
 import java.io.ByteArrayInputStream;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 /**
@@ -60,7 +61,7 @@ public class QuestionTtsService {
       VoiceAnswerAuthorizationRepository authorizationRepository,
       QuestionTtsPersistenceService persistenceService,
       AiTtsClient aiTtsClient,
-      AudioStorage audioStorage) {
+      @Qualifier("ttsAudioStorage") AudioStorage audioStorage) {
     this.messageRepository = messageRepository;
     this.conversationSessionRepository = conversationSessionRepository;
     this.drawingSessionRepository = drawingSessionRepository;

@@ -10,9 +10,12 @@ import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartDrawingSessionRepository;
 import com.ssafy.b209.conversation.repository.VoiceAnswerAuthorizationRepository;
 import com.ssafy.b209.global.exception.BusinessException;
-import com.ssafy.b209.storage.audio.AudioContentTypeResolver;
+import com.ssafy.b209.storage.audio.AudioStorage;
+import com.ssafy.b209.storage.audio.AudioStorageErrorCode;
 import com.ssafy.b209.storage.audio.OpenedAudio;
-import com.ssafy.b209.storage.audio.StoredAudioReader;
+import com.ssafy.b209.storage.audio.StoredAudioContent;
+import java.util.Locale;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,7 +34,8 @@ public class ConversationMessageAudioQueryService {
   private final ConversationSessionRepository conversationSessionRepository;
   private final ConversationStartDrawingSessionRepository drawingSessionRepository;
   private final VoiceAnswerAuthorizationRepository authorizationRepository;
-  private final StoredAudioReader audioReader;
+  private final AudioStorage audioStorage;
+  private final AudioStorage ttsAudioStorage;
 
   /**
    * 음성 답변 재생 Use Case 의존성을 생성한다.
@@ -40,19 +44,22 @@ public class ConversationMessageAudioQueryService {
    * @param conversationSessionRepository 대화 세션 조회 경계
    * @param drawingSessionRepository 대화와 아동을 연결하는 그림 세션 조회 경계
    * @param authorizationRepository 보호자-아동 소유권 조회 경계
-   * @param audioReader 288 저장 음성을 경로 검증과 함께 읽기 전용으로 여는 경계
+   * @param audioStorage 아동 음성 원본 저장소
+   * @param ttsAudioStorage 재생성 가능한 AI 질문 TTS 캐시 저장소
    */
   public ConversationMessageAudioQueryService(
       ConversationHistoryMessageRepository messageRepository,
       ConversationSessionRepository conversationSessionRepository,
       ConversationStartDrawingSessionRepository drawingSessionRepository,
       VoiceAnswerAuthorizationRepository authorizationRepository,
-      StoredAudioReader audioReader) {
+      @Qualifier("audioStorage") AudioStorage audioStorage,
+      @Qualifier("ttsAudioStorage") AudioStorage ttsAudioStorage) {
     this.messageRepository = messageRepository;
     this.conversationSessionRepository = conversationSessionRepository;
     this.drawingSessionRepository = drawingSessionRepository;
     this.authorizationRepository = authorizationRepository;
-    this.audioReader = audioReader;
+    this.audioStorage = audioStorage;
+    this.ttsAudioStorage = ttsAudioStorage;
   }
 
   /**
@@ -80,9 +87,7 @@ public class ConversationMessageAudioQueryService {
       throw new BusinessException(
           ConversationMessageAudioErrorCode.CONVERSATION_AUDIO_NOT_AVAILABLE);
     }
-    String contentType = AudioContentTypeResolver.resolveFromStorageKey(storageKey);
-    OpenedAudio audio = openOrNotAvailable(storageKey);
-    return new VoiceAnswerAudioResource(contentType, audio);
+    return openOrNotAvailable(message, storageKey);
   }
 
   private void authorize(Long guardianUserId, Long conversationSessionId) {
@@ -106,12 +111,35 @@ public class ConversationMessageAudioQueryService {
     }
   }
 
-  private OpenedAudio openOrNotAvailable(String storageKey) {
+  private VoiceAnswerAudioResource openOrNotAvailable(
+      ConversationHistoryMessage message, String storageKey) {
     try {
-      return audioReader.open(storageKey);
+      if (!message.isQuestion()) {
+        return resource(audioStorage.read(storageKey), storageKey);
+      }
+      try {
+        return resource(ttsAudioStorage.read(storageKey), storageKey);
+      } catch (BusinessException cacheMiss) {
+        if (cacheMiss.getErrorCode() != AudioStorageErrorCode.AUDIO_NOT_FOUND) {
+          throw cacheMiss;
+        }
+        return resource(audioStorage.read(storageKey), storageKey);
+      }
     } catch (BusinessException exception) {
       throw new BusinessException(
           ConversationMessageAudioErrorCode.CONVERSATION_AUDIO_NOT_AVAILABLE, exception);
     }
+  }
+
+  private VoiceAnswerAudioResource resource(StoredAudioContent content, String storageKey) {
+    return new VoiceAnswerAudioResource(
+        content.contentType(),
+        new OpenedAudio(content.inputStream(), transferFilename(storageKey)));
+  }
+
+  private String transferFilename(String storageKey) {
+    int dot = storageKey.lastIndexOf('.');
+    String extension = dot < 0 ? "bin" : storageKey.substring(dot + 1).toLowerCase(Locale.ROOT);
+    return "audio." + extension.replaceAll("[^a-z0-9]", "");
   }
 }

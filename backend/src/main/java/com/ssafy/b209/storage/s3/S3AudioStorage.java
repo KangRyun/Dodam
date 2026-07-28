@@ -40,11 +40,32 @@ public final class S3AudioStorage implements AudioStorage {
    */
   public S3AudioStorage(
       S3Client s3Client, S3StorageProperties properties, LocalAudioStorage stagingStorage) {
+    this(s3Client, properties, properties.audioPrefix(), stagingStorage);
+  }
+
+  /**
+   * 용도별 Prefix를 지정하는 S3 음성 저장소를 생성한다.
+   *
+   * <p>아동 음성 원본과 재생성 가능한 TTS 캐시가 서로 다른 보존 정책을 따를 때 사용한다.
+   *
+   * @param s3Client S3 호환 API Client
+   * @param properties Bucket 설정
+   * @param prefix 이 저장소가 전용으로 사용할 정규화된 Prefix
+   * @param stagingStorage 음성 검증과 Local staging을 담당하는 저장소
+   */
+  public S3AudioStorage(
+      S3Client s3Client,
+      S3StorageProperties properties,
+      String prefix,
+      LocalAudioStorage stagingStorage) {
     this.s3Client = Objects.requireNonNull(s3Client, "s3Client must not be null");
     S3StorageProperties requiredProperties =
         Objects.requireNonNull(properties, "properties must not be null");
     this.bucket = requiredProperties.bucket();
-    this.prefix = requiredProperties.audioPrefix();
+    if (prefix == null || prefix.isBlank()) {
+      throw new IllegalArgumentException("audio prefix must not be blank");
+    }
+    this.prefix = prefix;
     this.stagingStorage = Objects.requireNonNull(stagingStorage, "stagingStorage must not be null");
   }
 

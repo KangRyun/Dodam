@@ -105,6 +105,9 @@ public class DrawingCompletionService {
         sessionRepository
             .findNotDeletedByIdForUpdate(drawingSessionId)
             .orElseThrow(() -> new BusinessException(DrawingErrorCode.DRAWING_SESSION_NOT_FOUND));
+    if (session.getDrawingType() != null && "HTP".equals(session.getDrawingType().getCode())) {
+      throw new BusinessException(DrawingErrorCode.HTP_AGGREGATE_COMPLETION_REQUIRED);
+    }
     Optional<ConversationSession> conversation =
         conversationRepository.findByDrawingSessionId(drawingSessionId);
 

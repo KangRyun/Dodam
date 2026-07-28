@@ -1,6 +1,7 @@
 package com.ssafy.b209.report.service;
 
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessRepository;
+import com.ssafy.b209.drawing.service.DrawingAssetFileUrlFactory;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.ReportActivitySummaryView;
 import com.ssafy.b209.report.domain.ReportConversationSummaryView;
@@ -64,6 +65,7 @@ public class ReportDetailQueryService {
   private final ReportFollowUpGuideViewRepository followUpGuideRepository;
   private final ReportConversationSummaryViewRepository conversationSummaryRepository;
   private final ReportDetectedObjectViewRepository detectedObjectRepository;
+  private final DrawingAssetFileUrlFactory fileUrlFactory;
 
   /**
    * 리포트 상세 조회 Use Case 의존성을 생성한다.
@@ -80,6 +82,7 @@ public class ReportDetailQueryService {
    * @param followUpGuideRepository 보호자 후속 안내 조회 경계
    * @param conversationSummaryRepository 대화 요약 대체 출처 조회 경계
    * @param detectedObjectRepository 탐지 객체명 조회 경계
+   * @param fileUrlFactory 인증된 그림 파일 조회 URL 생성기
    */
   public ReportDetailQueryService(
       GuardianResourceAccessRepository guardianAccessRepository,
@@ -93,7 +96,8 @@ public class ReportDetailQueryService {
       ReportKeyConversationViewRepository keyConversationRepository,
       ReportFollowUpGuideViewRepository followUpGuideRepository,
       ReportConversationSummaryViewRepository conversationSummaryRepository,
-      ReportDetectedObjectViewRepository detectedObjectRepository) {
+      ReportDetectedObjectViewRepository detectedObjectRepository,
+      DrawingAssetFileUrlFactory fileUrlFactory) {
     this.guardianAccessRepository = guardianAccessRepository;
     this.reportRepository = reportRepository;
     this.drawingSessionRepository = drawingSessionRepository;
@@ -106,6 +110,7 @@ public class ReportDetailQueryService {
     this.followUpGuideRepository = followUpGuideRepository;
     this.conversationSummaryRepository = conversationSummaryRepository;
     this.detectedObjectRepository = detectedObjectRepository;
+    this.fileUrlFactory = fileUrlFactory;
   }
 
   /**
@@ -178,12 +183,14 @@ public class ReportDetailQueryService {
         latestByType.put(asset.getAssetType(), asset);
       }
     }
+    String finalImageUrl = urlOf(latestByType.get(FINAL_ASSET_TYPE));
+    String thumbnailUrl = urlOf(latestByType.get(THUMBNAIL_ASSET_TYPE));
     return new ReportDrawingResponse(
-        urlOf(latestByType.get(FINAL_ASSET_TYPE)), urlOf(latestByType.get(THUMBNAIL_ASSET_TYPE)));
+        finalImageUrl, thumbnailUrl == null ? finalImageUrl : thumbnailUrl);
   }
 
   private String urlOf(ReportDrawingAssetView asset) {
-    return asset == null ? null : asset.getFileUrl();
+    return asset == null ? null : fileUrlFactory.create(asset.getId());
   }
 
   private ReportChildExpressionResponse buildChildExpression(

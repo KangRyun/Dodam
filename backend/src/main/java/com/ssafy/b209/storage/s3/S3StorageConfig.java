@@ -11,6 +11,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.StaticCredentialsProvider;
 import software.amazon.awssdk.http.urlconnection.UrlConnectionHttpClient;
@@ -82,6 +83,7 @@ public class S3StorageConfig {
    * @return S3 모드에서 사용할 음성 Storage
    */
   @Bean
+  @Primary
   public AudioStorage audioStorage(
       S3Client s3Client,
       S3StorageProperties s3Properties,
@@ -89,5 +91,27 @@ public class S3StorageConfig {
       Clock clock) {
     return new S3AudioStorage(
         s3Client, s3Properties, new LocalAudioStorage(audioProperties, clock));
+  }
+
+  /**
+   * 30일 만료 정책이 적용되는 Prefix에 AI 질문 TTS 캐시를 저장한다.
+   *
+   * @param s3Client S3 호환 API Client
+   * @param s3Properties Bucket과 TTS 캐시 Prefix 설정
+   * @param audioProperties Local staging 경로와 음성 크기 제한
+   * @param clock 날짜 기반 Storage Key 생성용 UTC 시계
+   * @return TTS 생성·재생 전용 Storage
+   */
+  @Bean("ttsAudioStorage")
+  public AudioStorage ttsAudioStorage(
+      S3Client s3Client,
+      S3StorageProperties s3Properties,
+      AudioStorageProperties audioProperties,
+      Clock clock) {
+    return new S3AudioStorage(
+        s3Client,
+        s3Properties,
+        s3Properties.ttsPrefix(),
+        new LocalAudioStorage(audioProperties, clock));
   }
 }

@@ -14,7 +14,8 @@ import java.util.List;
  * @param drawingSessionId 그림 활동 세션 식별자
  * @param drawingType 그림 유형 요약
  * @param title 활동 제목이며 없으면 그림 유형 이름
- * @param thumbnailUrl JWT 인증이 필요한 썸네일 상대 URL이며 없으면 {@code null}
+ * @param thumbnailUrl JWT 인증이 필요한 미리보기 상대 URL. 별도 썸네일이 없으면 최신 FINAL 그림을 가리키며, 그림 파일이 없으면 {@code
+ *     null}
  * @param activityDate 활동을 시작한 날짜
  * @param durationMs 활동 소요 시간이며 완료 전이면 {@code null}
  * @param selectedEmotions 아동이 직접 선택한 감정 코드

@@ -53,6 +53,7 @@ public class DrawingSessionHistoryQueryService {
   private final DrawingSessionEmotionRepository drawingSessionEmotionRepository;
   private final DrawingAnalysisRepository drawingAnalysisRepository;
   private final ReportRepository reportRepository;
+  private final DrawingAssetFileUrlFactory fileUrlFactory;
   private final CurrentAuthenticatedUserResolver currentUserResolver;
   private final GuardianResourceAccessValidator accessValidator;
 
@@ -64,6 +65,7 @@ public class DrawingSessionHistoryQueryService {
    * @param drawingSessionEmotionRepository 선택 감정 배치 조회 저장소
    * @param drawingAnalysisRepository 분석 상태 배치 조회 저장소
    * @param reportRepository 리포트 배치 조회 저장소
+   * @param fileUrlFactory 인증된 그림 파일 조회 URL 생성기
    * @param currentUserResolver Access Token에서 현재 보호자 ID를 제공하는 Resolver
    * @param accessValidator 보호자와 아동의 연결 관계를 검증하는 Validator
    */
@@ -73,6 +75,7 @@ public class DrawingSessionHistoryQueryService {
       DrawingSessionEmotionRepository drawingSessionEmotionRepository,
       DrawingAnalysisRepository drawingAnalysisRepository,
       ReportRepository reportRepository,
+      DrawingAssetFileUrlFactory fileUrlFactory,
       CurrentAuthenticatedUserResolver currentUserResolver,
       GuardianResourceAccessValidator accessValidator) {
     this.drawingSessionRepository = drawingSessionRepository;
@@ -80,6 +83,7 @@ public class DrawingSessionHistoryQueryService {
     this.drawingSessionEmotionRepository = drawingSessionEmotionRepository;
     this.drawingAnalysisRepository = drawingAnalysisRepository;
     this.reportRepository = reportRepository;
+    this.fileUrlFactory = fileUrlFactory;
     this.currentUserResolver = currentUserResolver;
     this.accessValidator = accessValidator;
   }
@@ -170,7 +174,20 @@ public class DrawingSessionHistoryQueryService {
         drawingAssetRepository
             .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
                 sessionIds, DrawingAssetType.THUMBNAIL)) {
-      bySession.putIfAbsent(asset.getDrawingSession().getId(), asset.getFileUrl());
+      bySession.putIfAbsent(
+          asset.getDrawingSession().getId(), fileUrlFactory.create(asset.getId()));
+    }
+    List<Long> sessionsWithoutThumbnail =
+        sessionIds.stream().filter(sessionId -> !bySession.containsKey(sessionId)).toList();
+    if (sessionsWithoutThumbnail.isEmpty()) {
+      return bySession;
+    }
+    for (DrawingAsset asset :
+        drawingAssetRepository
+            .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                sessionsWithoutThumbnail, DrawingAssetType.FINAL)) {
+      bySession.putIfAbsent(
+          asset.getDrawingSession().getId(), fileUrlFactory.create(asset.getId()));
     }
     return bySession;
   }

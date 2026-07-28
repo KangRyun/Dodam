@@ -8,6 +8,8 @@ public enum HtpAssessmentStatus {
   ANALYZING,
   /** 종합 분석과 활동 완료 처리가 끝난 상태다. */
   COMPLETED,
+  /** 종합 리포트 생성에 실패해 보호자가 다시 요청할 수 있는 상태다. */
+  FAILED,
   /** 보호자가 진행 중인 HTP 활동을 포기한 상태다. */
   ABANDONED,
   /** 생성 후 24시간이 지나 더 이상 재개할 수 없는 상태다. */

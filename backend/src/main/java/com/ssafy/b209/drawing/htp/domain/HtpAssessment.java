@@ -65,6 +65,15 @@ public class HtpAssessment {
   @Column(name = "idempotency_key", nullable = false, unique = true, length = 100)
   private String idempotencyKey;
 
+  @Column(name = "completion_idempotency_key", unique = true, length = 100)
+  private String completionIdempotencyKey;
+
+  @Column(name = "report_analysis_id")
+  private Long reportAnalysisId;
+
+  @Column(name = "report_id")
+  private Long reportId;
+
   @OneToMany(mappedBy = "assessment", cascade = CascadeType.ALL, orphanRemoval = true)
   @OrderBy("stepOrder ASC")
   private List<HtpAssessmentStep> steps = new ArrayList<>();
@@ -86,6 +95,9 @@ public class HtpAssessment {
     this.expiresAt = expiresAt;
     this.completedAt = null;
     this.idempotencyKey = idempotencyKey;
+    this.completionIdempotencyKey = null;
+    this.reportAnalysisId = null;
+    this.reportId = null;
   }
 
   /**
@@ -203,6 +215,61 @@ public class HtpAssessment {
   }
 
   /**
+   * 세 단계 검증이 끝난 HTP 활동의 단일 리포트 생성을 접수한다.
+   *
+   * @param completionIdempotencyKey 완료 요청을 식별하는 {@code Idempotency-Key}
+   * @param reportAnalysisId 리포트 생성 파이프라인이 처리할 분석 식별자
+   * @param reportId HTP 묶음에 단 하나만 노출할 리포트 식별자
+   * @throws IllegalStateException 완료 전 단계이거나 이미 처리 중·완료된 활동인 경우
+   */
+  public void startAnalysis(String completionIdempotencyKey, Long reportAnalysisId, Long reportId) {
+    Objects.requireNonNull(completionIdempotencyKey, "completionIdempotencyKey must not be null");
+    Objects.requireNonNull(reportAnalysisId, "reportAnalysisId must not be null");
+    Objects.requireNonNull(reportId, "reportId must not be null");
+    if (status != HtpAssessmentStatus.IN_PROGRESS && status != HtpAssessmentStatus.FAILED) {
+      throw new IllegalStateException("HTP activity cannot start aggregate analysis");
+    }
+    if (currentStepOrder != 3
+        || getCurrentStep().getDrawingSession().getSessionStatus()
+            != DrawingSessionStatus.COMPLETED) {
+      throw new IllegalStateException("all HTP drawing steps must be completed");
+    }
+    status = HtpAssessmentStatus.ANALYZING;
+    this.completionIdempotencyKey = completionIdempotencyKey;
+    this.reportAnalysisId = reportAnalysisId;
+    this.reportId = reportId;
+    this.completedAt = null;
+  }
+
+  /**
+   * 단일 HTP 리포트 저장이 끝난 활동을 완료 상태로 전환한다.
+   *
+   * @param completedAt 리포트 저장을 완료한 UTC 시각
+   */
+  public void completeAnalysis(LocalDateTime completedAt) {
+    Objects.requireNonNull(completedAt, "completedAt must not be null");
+    if (status == HtpAssessmentStatus.COMPLETED) {
+      return;
+    }
+    if (status != HtpAssessmentStatus.ANALYZING) {
+      throw new IllegalStateException("only analyzing HTP activity can be completed");
+    }
+    status = HtpAssessmentStatus.COMPLETED;
+    this.completedAt = completedAt;
+  }
+
+  /** 리포트 생성 실패를 기록해 새 멱등 키를 사용한 재시도를 허용한다. */
+  public void failAnalysis() {
+    if (status == HtpAssessmentStatus.FAILED) {
+      return;
+    }
+    if (status != HtpAssessmentStatus.ANALYZING) {
+      throw new IllegalStateException("only analyzing HTP activity can fail");
+    }
+    status = HtpAssessmentStatus.FAILED;
+  }
+
+  /**
    * 현재 진행 순서에 연결된 단계를 반환한다.
    *
    * @return 현재 HOUSE, TREE 또는 PERSON 단계
@@ -275,6 +342,27 @@ public class HtpAssessment {
    */
   public String getIdempotencyKey() {
     return idempotencyKey;
+  }
+
+  /**
+   * @return 마지막 HTP 완료 요청의 멱등 키이며 접수 전이면 {@code null}
+   */
+  public String getCompletionIdempotencyKey() {
+    return completionIdempotencyKey;
+  }
+
+  /**
+   * @return 현재 HTP 리포트 생성 분석 식별자이며 접수 전이면 {@code null}
+   */
+  public Long getReportAnalysisId() {
+    return reportAnalysisId;
+  }
+
+  /**
+   * @return 현재 HTP 단일 리포트 식별자이며 접수 전이면 {@code null}
+   */
+  public Long getReportId() {
+    return reportId;
   }
 
   /**

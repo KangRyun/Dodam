@@ -144,6 +144,23 @@ public class Report {
   }
 
   /**
+   * 실패한 HTP 종합 리포트를 재시도할 때 이전 버전을 목록에서 숨긴다.
+   *
+   * <p>실패 이력과 분석 근거는 삭제하지 않고 보존하며, 보호자에게는 새로 접수한 단일 리포트만 노출한다.
+   *
+   * @param hiddenAt 숨김 처리한 UTC 시각
+   * @throws IllegalStateException 실패 상태가 아닌 리포트인 경우
+   */
+  public void hideFailedVersion(LocalDateTime hiddenAt) {
+    Objects.requireNonNull(hiddenAt, "hiddenAt must not be null");
+    if (status != ReportStatus.FAILED) {
+      throw new IllegalStateException("only failed report can be hidden for retry");
+    }
+    status = ReportStatus.HIDDEN;
+    updatedAt = hiddenAt;
+  }
+
+  /**
    * @return 영속화된 리포트 식별자
    */
   public Long getId() {

@@ -82,6 +82,7 @@ class DrawingSessionHistoryQueryServiceTest {
         drawingSessionEmotionRepository,
         drawingAnalysisRepository,
         reportRepository,
+        new DrawingAssetFileUrlFactory(),
         currentUserResolver,
         accessValidator);
   }
@@ -95,7 +96,7 @@ class DrawingSessionHistoryQueryServiceTest {
     givenPageOf(session);
 
     given(thumbnail.getDrawingSession()).willReturn(session);
-    given(thumbnail.getFileUrl()).willReturn("https://cdn.example.com/thumb.png");
+    given(thumbnail.getId()).willReturn(30L);
     given(
             drawingAssetRepository
                 .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
@@ -132,7 +133,7 @@ class DrawingSessionHistoryQueryServiceTest {
     assertThat(response.content()).hasSize(1);
     var item = response.content().getFirst();
     assertThat(item.drawingSessionId()).isEqualTo(SESSION_ID);
-    assertThat(item.thumbnailUrl()).isEqualTo("https://cdn.example.com/thumb.png");
+    assertThat(item.thumbnailUrl()).isEqualTo("/api/v1/drawing-assets/30/file");
     assertThat(item.drawingType().code()).isEqualTo("HOUSE");
     assertThat(item.title()).isEqualTo("우리 집");
     assertThat(item.inputMethod()).isEqualTo(DrawingInputMethod.CANVAS);
@@ -175,6 +176,11 @@ class DrawingSessionHistoryQueryServiceTest {
                     List.of(SESSION_ID), DrawingAssetType.THUMBNAIL))
         .willReturn(List.of());
     given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    List.of(SESSION_ID), DrawingAssetType.FINAL))
+        .willReturn(List.of());
+    given(
             drawingSessionEmotionRepository
                 .findByDrawingSessionIdInOrderByDrawingSessionIdAscSelectionOrderAscIdAsc(
                     List.of(SESSION_ID)))
@@ -205,6 +211,11 @@ class DrawingSessionHistoryQueryServiceTest {
                     List.of(SESSION_ID), DrawingAssetType.THUMBNAIL))
         .willReturn(List.of());
     given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    List.of(SESSION_ID), DrawingAssetType.FINAL))
+        .willReturn(List.of());
+    given(
             drawingSessionEmotionRepository
                 .findByDrawingSessionIdInOrderByDrawingSessionIdAscSelectionOrderAscIdAsc(
                     List.of(SESSION_ID)))
@@ -229,6 +240,35 @@ class DrawingSessionHistoryQueryServiceTest {
     assertThat(item.reportId()).isNull();
     assertThat(item.reportStatus()).isNull();
     assertThat(item.completedAt()).isNull();
+  }
+
+  @Test
+  void usesLatestFinalImageAsThumbnailFallback() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    givenSession();
+    given(session.getTitle()).willReturn(null);
+    given(session.getCompletedAt()).willReturn(COMPLETED_AT);
+    givenPageOf(session);
+
+    DrawingAsset finalAsset = org.mockito.Mockito.mock(DrawingAsset.class);
+    given(finalAsset.getId()).willReturn(31L);
+    given(finalAsset.getDrawingSession()).willReturn(session);
+    given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    List.of(SESSION_ID), DrawingAssetType.THUMBNAIL))
+        .willReturn(List.of());
+    given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    List.of(SESSION_ID), DrawingAssetType.FINAL))
+        .willReturn(List.of(finalAsset));
+
+    DrawingSessionHistoryPageResponse response =
+        service().getHistory(CHILD_ID, null, null, null, null, null, PAGEABLE);
+
+    assertThat(response.content().getFirst().thumbnailUrl())
+        .isEqualTo("/api/v1/drawing-assets/31/file");
   }
 
   @Test
