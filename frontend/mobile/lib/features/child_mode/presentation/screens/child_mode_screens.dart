@@ -32,7 +32,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     if (_isStartingDrawing) return;
     setState(() => _isStartingDrawing = true);
     try {
-      final sessionId = await DrawingSessionStartController(
+      final resolution = await DrawingSessionStartController(
         repository: widget.drawingRepository,
       ).resolveSession(childId: widget.child.childId);
       if (!mounted) return;
@@ -40,9 +40,11 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         context,
         AppRoutes.drawing(widget.child.childId.toString()),
         arguments: DrawingRouteArguments(
-          sessionId: sessionId,
+          sessionId: resolution.sessionId,
           repository: widget.drawingRepository,
           completionSnapshotProvider: widget.completionSnapshotProvider,
+          // 그림 단계를 지난 세션은 저장·탐지가 막혀 있어 대화를 바로 이어받는다.
+          resumeConversation: !resolution.isDrawingStage,
         ),
       );
     } on Object {

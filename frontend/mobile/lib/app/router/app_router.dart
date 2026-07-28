@@ -217,6 +217,8 @@ abstract final class AppRouter {
           conversationAnswerRepository: conversationAnswerRepository,
           conversationId: conversationId,
           basisAnalysisId: basisAnalysisId,
+          resumeConversation:
+              (settings.arguments! as DrawingRouteArguments).resumeConversation,
         ),
       ['child', final childId, 'activity', 'emotions']
           when _hasChildContext(childController, childId) =>
@@ -341,11 +343,15 @@ final class DrawingRouteArguments {
     required this.sessionId,
     required this.repository,
     this.completionSnapshotProvider,
+    this.resumeConversation = false,
   });
 
   final int sessionId;
   final DrawingRepository repository;
   final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
+
+  /// 그림 단계를 지난 세션으로 들어올 때 대화를 즉시 이어받게 한다.
+  final bool resumeConversation;
 }
 
 class ChildContextGuardScreen extends StatelessWidget {

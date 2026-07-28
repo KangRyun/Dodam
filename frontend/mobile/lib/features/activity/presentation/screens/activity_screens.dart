@@ -52,6 +52,7 @@ class DrawingScreen extends StatefulWidget {
     this.sttResultRepository,
     this.conversationId,
     this.basisAnalysisId,
+    this.resumeConversation = false,
     super.key,
   });
 
@@ -73,6 +74,12 @@ class DrawingScreen extends StatefulWidget {
   final SttResultRepository? sttResultRepository;
   final int? conversationId;
   final int? basisAnalysisId;
+
+  /// 세션이 그림 단계를 지난 상태로 들어온 경우 대화를 즉시 이어받는다.
+  ///
+  /// 서버는 `IN_PROGRESS` + `DRAWING` 단계에서만 초안·획 저장을 허용하므로
+  /// 대화·회고 단계로 복귀할 때는 저장과 객체 탐지를 시작하지 않는다.
+  final bool resumeConversation;
 
   @override
   State<DrawingScreen> createState() => _DrawingScreenState();
@@ -134,6 +141,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final sessionId = widget.sessionId;
     final drawingRepository = widget.drawingRepository;
     if (_objectDetectionController == null &&
+        !widget.resumeConversation &&
         sessionId != null &&
         drawingRepository != null) {
       // 그림판은 입력 시점만 전달하고 탐지 상태와 최신 결과 검증은 별도 관리
@@ -164,11 +172,25 @@ class _DrawingScreenState extends State<DrawingScreen> {
       _setupConversationControllers(widget.conversationId!);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _syncCoordinator.start(snapshotProvider: _captureCanvasSnapshot);
-        unawaited(_draftRestoreController.load());
+      if (!mounted) return;
+      if (widget.resumeConversation) {
+        // 그림 단계가 끝난 세션이므로 저장·탐지 없이 대화만 이어받는다.
+        unawaited(_resumeConversation());
+        return;
       }
+      _syncCoordinator.start(snapshotProvider: _captureCanvasSnapshot);
+      unawaited(_draftRestoreController.load());
     });
+  }
+
+  /// 진행 중 대화를 이어받아 질문을 다시 불러온다.
+  ///
+  /// 대화 생성 요청은 이미 대화가 있으면 `ACTIVE_CONVERSATION_EXISTS`(409)로
+  /// 기존 `conversationId`를 돌려주므로 분석 ID 없이도 복귀할 수 있다.
+  Future<void> _resumeConversation() async {
+    await _ensureConversationStarted(null);
+    if (!mounted) return;
+    await _questionController?.load();
   }
 
   @override
@@ -240,7 +262,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   ///
   /// 명세 §12.2: `POST /drawing-sessions/{id}/conversations`로 대화를 만들고
   /// 반환된 conversationId로 이후 질문·답변 흐름을 연결한다(S15P11B209-246).
-  Future<void> _ensureConversationStarted(int analysisId) async {
+  Future<void> _ensureConversationStarted(int? analysisId) async {
     if (_conversationSetupStarted) return;
     final conversationRepository = widget.conversationRepository;
     final sessionId = widget.sessionId;
@@ -696,7 +718,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
             onPointerMove: _extendStroke,
             onPointerUp: _endStroke,
             backgroundImage: _draftRestoreController.backgroundImage,
-            inputEnabled: _draftRestoreController.canDraw,
+            inputEnabled: !widget.resumeConversation &&
+                _draftRestoreController.canDraw,
+            showRestoreOverlay: !widget.resumeConversation &&
+                !_draftRestoreController.canDraw,
             onBackgroundLoaded: _draftRestoreController.markImageLoaded,
             onBackgroundError: _draftRestoreController.markImageFailed,
             restoreStatus: _draftRestoreController.status,
@@ -708,7 +733,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
             showQuestion:
                 _questionDisplayController.isVisible &&
                 _activePointer == null &&
-                _draftRestoreController.canDraw,
+                (widget.resumeConversation ||
+                    _draftRestoreController.canDraw),
             selectedQuestionOptionId:
                 _questionSelectionController.selectedOptionId,
             onQuestionOptionSelected: (optionId) {
@@ -809,6 +835,7 @@ class _CanvasPanel extends StatelessWidget {
     required this.onPointerUp,
     required this.backgroundImage,
     required this.inputEnabled,
+    required this.showRestoreOverlay,
     required this.onBackgroundLoaded,
     required this.onBackgroundError,
     required this.restoreStatus,
@@ -839,6 +866,9 @@ class _CanvasPanel extends StatelessWidget {
   final ValueChanged<PointerEvent> onPointerUp;
   final ImageProvider<Object>? backgroundImage;
   final bool inputEnabled;
+
+  /// 초안 복원 안내를 덮어 띄울지 여부다. 대화 복귀 모드에서는 띄우지 않는다.
+  final bool showRestoreOverlay;
   final VoidCallback onBackgroundLoaded;
   final VoidCallback onBackgroundError;
   final DrawingDraftRestoreStatus restoreStatus;
@@ -924,7 +954,7 @@ class _CanvasPanel extends StatelessWidget {
                   ),
                 ),
               ),
-            if (!inputEnabled)
+            if (showRestoreOverlay)
               _DraftRestoreOverlay(
                 status: restoreStatus,
                 onContinue: onContinue,
