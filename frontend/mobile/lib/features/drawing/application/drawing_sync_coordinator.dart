@@ -412,6 +412,17 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
     }
   }
 
+  /// 자동 저장과 주기 전송을 멈춘다.
+  ///
+  /// 그림 단계가 끝난 뒤에는 서버가 초안·획 저장을 받지 않으므로(409) 타이머를
+  /// 남겨두면 실패만 반복한다.
+  void stop() {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    _autosaveTimer?.cancel();
+    _autosaveTimer = null;
+  }
+
   List<StrokeEventDto> recordStroke(DrawingStroke stroke, Size canvasSize) {
     final events = journal.recordStroke(stroke, canvasSize);
     batchQueue.addEvents(events);

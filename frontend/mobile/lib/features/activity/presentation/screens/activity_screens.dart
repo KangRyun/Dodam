@@ -110,6 +110,12 @@ class _DrawingScreenState extends State<DrawingScreen> {
   VoiceAnswerUploadController? _voiceAnswerUploadController;
   SttResultController? _sttResultController;
   bool _conversationSetupStarted = false;
+
+  /// 그림 단계 완료(`drawing-complete`)가 접수된 뒤 켜진다.
+  ///
+  /// 이 뒤로 세션은 `CONVERSING`이므로 캔버스 저장은 막히고 대화만 진행한다.
+  bool _drawingStageFinished = false;
+  bool _movedToReflection = false;
   int? _activeConversationId;
   int? _lastQuestionMessageId;
 
@@ -355,7 +361,13 @@ class _DrawingScreenState extends State<DrawingScreen> {
   }
 
   void _handleConversationEndChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    // 그림 단계가 끝난 뒤 대화까지 마쳤으면 감정 회고 단계로 넘어간다(명세 §23.1).
+    if (_drawingStageFinished &&
+        _conversationEndController?.completed == true) {
+      _goToEmotionSelect();
+    }
   }
 
   void _handleVoiceRecordingChanged() {
@@ -551,7 +563,11 @@ class _DrawingScreenState extends State<DrawingScreen> {
   }
 
   Future<void> _confirmAndComplete() async {
-    if (_isCompleting || _activeStroke != null || _completedStrokes.isEmpty) {
+    // 그림 단계는 한 번만 완료한다. 재요청은 서버가 거부한다.
+    if (_drawingStageFinished ||
+        _isCompleting ||
+        _activeStroke != null ||
+        _completedStrokes.isEmpty) {
       return;
     }
     final confirmed = await showAppConfirmDialog(
@@ -613,28 +629,18 @@ class _DrawingScreenState extends State<DrawingScreen> {
         metadata: metadata,
         idempotencyKey: idempotencyKey,
       );
-      if (response.currentStage != 'CONVERSING' ||
-          response.nextAction != 'SELECT_EMOTION') {
+      // 서버가 `CONVERSING`으로 올려주면 대화 단계가 열린다. `nextAction`은 판단
+      // 근거로 쓰지 않는다 — 명세 §10.8은 감정 선택을 가리키지만 정본 활동 흐름
+      // §23.1은 대화(14~18) 뒤에 회고(19)를 두므로 단계로만 분기한다.
+      if (response.currentStage != 'CONVERSING') {
         throw StateError('Unexpected drawing completion result');
       }
       if (!mounted) return;
       _invalidatePendingCompletion();
-      Navigator.of(context).pushReplacementNamed(
-        AppRoutes.emotionSelect(widget.childId),
-        arguments: EmotionSelectRouteArguments(
-          sessionId: sessionId,
-          repository: repository,
-          conversationId: _activeConversationId,
-          conversationAlreadyEnded:
-              _conversationEndController?.completed == true,
-          conversationEndRepository: widget.conversationEndRepository,
-          conversationEndIdempotencyKey:
-              _conversationEndController?.requestIdempotencyKey,
-          conversationEndRequest: _conversationEndController?.requestSnapshot,
-          lastQuestionMessageId: _lastQuestionMessageId,
-          idempotencyKeyProvider: widget.idempotencyKeyProvider,
-        ),
-      );
+      // 이 뒤로 캔버스 저장은 서버가 받지 않으므로 자동 저장을 멈춘다.
+      _syncCoordinator.stop();
+      setState(() => _drawingStageFinished = true);
+      await _startConversationAfterDrawing(response.analysis.analysisId);
     } on Object {
       if (mounted) {
         showAppMessage(
@@ -646,6 +652,50 @@ class _DrawingScreenState extends State<DrawingScreen> {
     } finally {
       if (mounted) setState(() => _isCompleting = false);
     }
+  }
+
+  /// 그림 단계 완료 직후 대화를 시작하고 첫 질문을 불러온다.
+  ///
+  /// 대화를 열지 못하면(대화 저장소 미주입·서버 거부) 흐름이 멈추지 않도록 기존
+  /// 동작대로 감정 회고 화면으로 넘긴다.
+  Future<void> _startConversationAfterDrawing(int analysisId) async {
+    if (widget.conversationRepository == null) {
+      _goToEmotionSelect();
+      return;
+    }
+    await _ensureConversationStarted(analysisId);
+    if (!mounted) return;
+    final questionController = _questionController;
+    if (questionController == null) {
+      _goToEmotionSelect();
+      return;
+    }
+    await questionController.loadForAnalysis(analysisId);
+  }
+
+  /// 감정 회고 화면으로 한 번만 이동한다.
+  void _goToEmotionSelect() {
+    if (_movedToReflection || !mounted) return;
+    final sessionId = widget.sessionId;
+    final repository = widget.drawingRepository;
+    if (sessionId == null || repository == null) return;
+    _movedToReflection = true;
+    Navigator.of(context).pushReplacementNamed(
+      AppRoutes.emotionSelect(widget.childId),
+      arguments: EmotionSelectRouteArguments(
+        sessionId: sessionId,
+        repository: repository,
+        conversationId: _activeConversationId,
+        conversationAlreadyEnded:
+            _conversationEndController?.completed == true,
+        conversationEndRepository: widget.conversationEndRepository,
+        conversationEndIdempotencyKey:
+            _conversationEndController?.requestIdempotencyKey,
+        conversationEndRequest: _conversationEndController?.requestSnapshot,
+        lastQuestionMessageId: _lastQuestionMessageId,
+        idempotencyKeyProvider: widget.idempotencyKeyProvider,
+      ),
+    );
   }
 
   void _invalidatePendingCompletion() {
@@ -696,7 +746,10 @@ class _DrawingScreenState extends State<DrawingScreen> {
             onPointerMove: _extendStroke,
             onPointerUp: _endStroke,
             backgroundImage: _draftRestoreController.backgroundImage,
-            inputEnabled: _draftRestoreController.canDraw,
+            inputEnabled:
+                !_drawingStageFinished && _draftRestoreController.canDraw,
+            showRestoreOverlay:
+                !_drawingStageFinished && !_draftRestoreController.canDraw,
             onBackgroundLoaded: _draftRestoreController.markImageLoaded,
             onBackgroundError: _draftRestoreController.markImageFailed,
             restoreStatus: _draftRestoreController.status,
@@ -708,7 +761,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
             showQuestion:
                 _questionDisplayController.isVisible &&
                 _activePointer == null &&
-                _draftRestoreController.canDraw,
+                (_drawingStageFinished || _draftRestoreController.canDraw),
             selectedQuestionOptionId:
                 _questionSelectionController.selectedOptionId,
             onQuestionOptionSelected: (optionId) {
@@ -745,6 +798,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
             onColorChanged: (color) => setState(() => _color = color),
             onThicknessChanged: (value) => setState(() => _thickness = value),
             canComplete:
+                !_drawingStageFinished &&
                 !_isCompleting &&
                 _activeStroke == null &&
                 _completedStrokes.isNotEmpty,
@@ -809,6 +863,7 @@ class _CanvasPanel extends StatelessWidget {
     required this.onPointerUp,
     required this.backgroundImage,
     required this.inputEnabled,
+    required this.showRestoreOverlay,
     required this.onBackgroundLoaded,
     required this.onBackgroundError,
     required this.restoreStatus,
@@ -839,6 +894,9 @@ class _CanvasPanel extends StatelessWidget {
   final ValueChanged<PointerEvent> onPointerUp;
   final ImageProvider<Object>? backgroundImage;
   final bool inputEnabled;
+
+  /// 초안 복원 안내를 덮어 띄울지 여부다. 그림 단계가 끝난 뒤에는 띄우지 않는다.
+  final bool showRestoreOverlay;
   final VoidCallback onBackgroundLoaded;
   final VoidCallback onBackgroundError;
   final DrawingDraftRestoreStatus restoreStatus;
@@ -924,7 +982,7 @@ class _CanvasPanel extends StatelessWidget {
                   ),
                 ),
               ),
-            if (!inputEnabled)
+            if (showRestoreOverlay)
               _DraftRestoreOverlay(
                 status: restoreStatus,
                 onContinue: onContinue,
