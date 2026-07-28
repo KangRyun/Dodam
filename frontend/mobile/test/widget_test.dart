@@ -7,6 +7,6 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('보호자 홈'), findsWidgets);
-    expect(find.text('그림 활동 시작하기'), findsOneWidget);
+    expect(find.text('새 활동 시작하기'), findsOneWidget);
   });
 }

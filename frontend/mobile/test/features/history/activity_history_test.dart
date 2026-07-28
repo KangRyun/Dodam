@@ -118,9 +118,11 @@ void main() {
 
   testWidgets('선택된 childId가 없으면 가짜 조회 없이 안내한다', (tester) async {
     final repository = _ActivityRepository();
+    // 개편 홈은 아이가 있으면 첫 아이를 자동 선택하므로, "선택 없음"은 곧 아이가
+    // 하나도 없는 경우다. 빈 목록으로 그 상태를 만든다.
     await tester.pumpWidget(
       DodamApp(
-        childRepository: const _ChildRepository(),
+        childRepository: const _ChildRepository(children: []),
         activityRepository: repository,
         initialRoute: AppRoutes.activityHistory,
       ),
@@ -139,7 +141,17 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    await _openHistory(tester, _ActivityRepository());
+    // 보호자 홈은 태블릿 전용 레이아웃이라 작은 화면에선 홈을 거치지 않고 이력 화면을
+    // 직접 띄워 이력 화면의 반응형만 검증한다(홈은 첫 아이를 자동 선택).
+    final repository = _ActivityRepository();
+    await tester.pumpWidget(
+      DodamApp(
+        childRepository: const _ChildRepository(),
+        activityRepository: repository,
+        initialRoute: AppRoutes.activityHistory,
+      ),
+    );
+    await tester.pumpAndSettle();
     await tester.pump(const Duration(seconds: 1));
 
     expect(tester.takeException(), isNull);
@@ -164,7 +176,7 @@ void main() {
 
 Future<void> _openHistory(
   WidgetTester tester,
-  ActivityRepository repository, {
+  _ActivityRepository repository, {
   bool settleAfterNavigation = true,
 }) async {
   await tester.pumpWidget(
@@ -178,6 +190,12 @@ Future<void> _openHistory(
   await tester.pump();
   final entry = find.byKey(const ValueKey('activity-history-entry'));
   await tester.ensureVisible(entry);
+  // 개편된 보호자 홈은 최근 활동·마음 달력용으로 활동을 미리 조회한다. 이력 화면의
+  // 조회만 세도록 진입 직전에 카운터를 초기화한다.
+  repository
+    ..calls = 0
+    ..lastChildId = null
+    ..lastFilter = null;
   await tester.tap(entry);
   if (settleAfterNavigation) {
     await tester.pumpAndSettle();
@@ -251,9 +269,10 @@ ActivitySummaryDto _activity(int id, String title, String code, String name) =>
     );
 
 final class _ChildRepository implements ChildRepository {
-  const _ChildRepository();
+  const _ChildRepository({this.children = const [_child]});
+  final List<ChildSummaryDto> children;
   @override
-  Future<List<ChildSummaryDto>> getChildren() async => const [_child];
+  Future<List<ChildSummaryDto>> getChildren() async => children;
   @override
   Future<ChildDetailDto> createChild(CreateChildRequestDto request) =>
       throw UnimplementedError();

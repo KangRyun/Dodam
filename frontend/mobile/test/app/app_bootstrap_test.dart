@@ -1,6 +1,6 @@
 import 'package:dodam/core/config/api_environment.dart';
 import 'package:dodam/app/app.dart';
-import 'package:dodam/features/activity/data/repositories/mock_activity_repository.dart';
+import 'package:dodam/features/activity/data/repositories/remote_activity_repository.dart';
 import 'package:dodam/features/auth/auth.dart';
 import 'package:dodam/features/child/data/repositories/remote_child_repository.dart';
 import 'package:dodam/features/conversation/data/repositories/remote_conversation_answer_repository.dart';
@@ -31,9 +31,8 @@ void main() {
     );
     expect(app.drawingRepository, isA<RemoteDrawingRepository>());
     expect(app.reportRepository, isA<RemoteReportRepository>());
-    // Activity keeps the mock default until its backend API exists
-    // (S15P11B209-384 contract check).
-    expect(app.activityRepository, isA<MockActivityRepository>());
+    // Activity now uses the real backend API (S15P11B209 activity 연동).
+    expect(app.activityRepository, isA<RemoteActivityRepository>());
     expect(app.authRepository, isA<RemoteAuthRepository>());
   });
 

@@ -41,6 +41,10 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // 복원 후 프로필 선택 화면 → 보호자 선택
+    await tester.tap(find.byKey(const ValueKey('guardian-profile')));
+    await tester.pumpAndSettle();
+
     expect(childRepository.getChildrenCalls, 1);
     expect(find.byKey(const ValueKey('child-list-empty')), findsOneWidget);
   });
@@ -61,6 +65,10 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('social-login-kakao')));
+    await tester.pumpAndSettle();
+
+    // 로그인 후 프로필 선택 화면 → 보호자 선택
+    await tester.tap(find.byKey(const ValueKey('guardian-profile')));
     await tester.pumpAndSettle();
 
     expect(childRepository.getChildrenCalls, 1);
@@ -107,6 +115,10 @@ void main() {
     await tester.tap(
       find.descendant(of: consentSubmit, matching: find.byType(FilledButton)),
     );
+    await tester.pumpAndSettle();
+
+    // 온보딩 완료 후 프로필 선택 화면 → 보호자 선택
+    await tester.tap(find.byKey(const ValueKey('guardian-profile')));
     await tester.pumpAndSettle();
 
     expect(childRepository.getChildrenCalls, 1);

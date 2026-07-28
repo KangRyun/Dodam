@@ -16,11 +16,11 @@ void main() {
     expect(find.text('보호자 홈'), findsOneWidget);
   });
 
-  testWidgets('보호자 홈 뒤로가기는 프로필 선택 화면으로 이동한다', (tester) async {
+  testWidgets('보호자 홈 사이드바 "프로필 전환"은 프로필 선택 화면으로 이동한다', (tester) async {
     await tester.pumpWidget(const DodamApp());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byTooltip('뒤로 가기'));
+    await tester.tap(find.byKey(const ValueKey('guardian-switch-profile')));
     await tester.pumpAndSettle();
 
     expect(find.text('누가 도담을 이용하나요?'), findsOneWidget);
@@ -69,17 +69,20 @@ void main() {
     expect(find.text('아이 등록'), findsOneWidget);
   });
 
-  testWidgets('보호자 홈에서 아동 선택 화면으로 이동한다', (tester) async {
+  testWidgets('보호자 홈의 아동 선택은 인라인 칩으로 처리한다(화면 이동 없음)', (tester) async {
+    // 개편 전에는 "아동 선택 화면에서 보기"로 별도 화면(활동 대상 아동 선택)으로
+    // 이동했지만, 지금은 홈 안 인라인 칩(_MiniSwitch)에서 바로 선택한다.
     await tester.pumpWidget(const DodamApp());
     await tester.pumpAndSettle();
 
-    final childSelectLink = find.text('아동 선택 화면에서 보기');
-    await tester.ensureVisible(childSelectLink);
-    await tester.tap(childSelectLink);
+    final childChip = find.byKey(const ValueKey('child-3'));
+    expect(childChip, findsOneWidget);
+    await tester.tap(childChip);
     await tester.pumpAndSettle();
 
-    expect(find.text('활동 대상 아동 선택'), findsOneWidget);
-    expect(find.text('선택한 아이로 시작'), findsOneWidget);
+    // 화면 이동 없이 보호자 홈에 그대로 머문다.
+    expect(find.text('보호자 홈'), findsWidgets);
+    expect(find.byKey(const ValueKey('child-list-success')), findsOneWidget);
   });
 
   testWidgets('선택 컨텍스트 없는 childId 직접 경로는 진입을 막는다', (tester) async {
