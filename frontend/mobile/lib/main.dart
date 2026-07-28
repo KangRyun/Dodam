@@ -13,6 +13,7 @@ import 'features/conversation/conversation.dart';
 import 'features/drawing/data/repositories/mock_drawing_repository.dart';
 import 'features/drawing/data/repositories/remote_drawing_repository.dart';
 import 'features/notification/data/repositories/remote_push_token_repository.dart';
+import 'features/notification/data/repositories/remote_notification_inbox_repository.dart';
 import 'features/notification/data/services/device_push_permission_service.dart';
 import 'features/notification/data/services/firebase_push_gateway.dart';
 import 'features/notification/data/services/local_push_presenter.dart';
@@ -92,6 +93,7 @@ DodamApp createDefaultApp({
     voiceAnswerRepository: RemoteVoiceAnswerRepository(apiClient),
     sttResultRepository: RemoteSttResultRepository(apiClient),
     reportRepository: RemoteReportRepository(apiClient),
+    notificationInboxRepository: RemoteNotificationInboxRepository(apiClient),
     // Firebase 준비에 실패하면 주입하지 않아 푸시 경로 자체가 꺼진다.
     pushSetup: pushEnabled
         ? PushSetup(

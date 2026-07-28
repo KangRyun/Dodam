@@ -14,6 +14,7 @@ import '../features/drawing/data/repositories/mock_drawing_repository.dart';
 import '../features/drawing/domain/repositories/drawing_repository.dart';
 import '../features/conversation/conversation.dart';
 import '../features/notification/domain/entities/push_message.dart';
+import '../features/notification/domain/repositories/notification_inbox_repository.dart';
 import '../features/notification/domain/services/push_coordinator.dart';
 import '../features/notification/domain/services/push_setup.dart';
 import '../features/report/data/repositories/mock_report_repository.dart';
@@ -41,6 +42,7 @@ class DodamApp extends StatefulWidget {
     this.conversationId,
     this.basisAnalysisId,
     this.pushSetup,
+    this.notificationInboxRepository,
     this.initialRoute = AppRoutes.guardianHome,
     super.key,
   });
@@ -62,6 +64,7 @@ class DodamApp extends StatefulWidget {
 
   /// 푸시 구성 요소다. 주지 않으면 푸시 기능이 꺼진 채로 동작한다.
   final PushSetup? pushSetup;
+  final NotificationInboxRepository? notificationInboxRepository;
   final String initialRoute;
 
   @override
@@ -140,7 +143,6 @@ class _DodamAppState extends State<DodamApp> {
 
     _navigatorKey.currentState?.pushNamed(route);
   }
-
 
   // Provider별 로그인 실행
   Future<AuthState> _signIn(AuthProvider provider) async {
@@ -255,6 +257,7 @@ class _DodamAppState extends State<DodamApp> {
       activityRepository: widget.activityRepository,
       drawingRepository: widget.drawingRepository,
       reportRepository: widget.reportRepository,
+      notificationInboxRepository: widget.notificationInboxRepository,
       drawingCompletionSnapshotProvider:
           widget.drawingCompletionSnapshotProvider,
       conversationRepository: widget.conversationRepository,

@@ -11,6 +11,8 @@ import '../../features/drawing/domain/repositories/drawing_repository.dart';
 import '../../features/conversation/conversation.dart';
 import '../../features/guardian/presentation/screens/guardian_screens.dart';
 import '../../features/history/presentation/screens/history_screens.dart';
+import '../../features/notification/domain/repositories/notification_inbox_repository.dart';
+import '../../features/notification/presentation/screens/notification_list_screen.dart';
 import '../../features/report/presentation/screens/report_screen.dart';
 import '../../features/report/presentation/screens/report_list_screen.dart';
 import '../../features/report/domain/repositories/report_repository.dart';
@@ -34,6 +36,7 @@ abstract final class AppRouter {
     ActivityRepository? activityRepository,
     DrawingRepository? drawingRepository,
     ReportRepository? reportRepository,
+    NotificationInboxRepository? notificationInboxRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
     ConversationRepository? conversationRepository,
     ConversationEndRepository? conversationEndRepository,
@@ -62,6 +65,7 @@ abstract final class AppRouter {
       activityRepository: activityRepository,
       drawingRepository: drawingRepository,
       reportRepository: reportRepository,
+      notificationInboxRepository: notificationInboxRepository,
       drawingCompletionSnapshotProvider: drawingCompletionSnapshotProvider,
       conversationRepository: conversationRepository,
       conversationEndRepository: conversationEndRepository,
@@ -150,13 +154,16 @@ abstract final class AppRouter {
               selectedIcon: Icons.notifications_rounded,
               label: '알림',
             ),
-            // 알림함 화면(S15P11B209-499)이 완성되면 이 자리에 주입한다.
             builder:
                 notificationsTabBuilder ??
-                (_) => const _TabPreparingScreen(
-                  title: '알림',
-                  description: '알림함은 준비 중이에요. 곧 이곳에서 새 소식을 확인할 수 있어요.',
-                ),
+                (_) => notificationInboxRepository == null
+                    ? const _TabPreparingScreen(
+                        title: '알림',
+                        description: '로그인 후 알림을 확인할 수 있어요.',
+                      )
+                    : NotificationListScreen(
+                        repository: notificationInboxRepository,
+                      ),
           ),
           GuardianShellTab(
             item: const AppBottomTabItem(
@@ -204,13 +211,8 @@ abstract final class AppRouter {
         ),
       ['guardian', 'reports', final reportId] when reportRepository != null =>
         ReportScreen(reportId: reportId, repository: reportRepository),
-      // 아래 세 경로는 전용 화면(알림 S15P11B209-499 · 설정 S15P11B209-454)이
-      // 완성되기 전까지 자리표시자로만 매핑해 둔다. 담당 화면이 붙으면 이 arm만 교체한다.
-      ['guardian', 'notifications'] => const AppPlaceholderScaffold(
-        // NOTI-03 GET /notifications
-        title: '알림',
-        description: '알림함은 준비 중이에요. 곧 이곳에서 분석 완료·리포트 소식을 확인할 수 있어요.',
-      ),
+      ['guardian', 'notifications'] when notificationInboxRepository != null =>
+        NotificationListScreen(repository: notificationInboxRepository),
       ['guardian', 'settings']
           when authRestoreSession != null && authSignOut != null =>
         SettingsMainScreen(
