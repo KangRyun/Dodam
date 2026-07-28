@@ -17,7 +17,8 @@ import java.util.List;
  * 포함하지 않는다.
  *
  * @param drawingSessionId 그림 활동 세션 식별자
- * @param thumbnailUrl 목록 미리보기 이미지 URL, 부여되지 않았으면 {@code null}
+ * @param thumbnailUrl JWT 인증이 필요한 미리보기 상대 URL. 별도 썸네일이 없으면 최신 FINAL 그림을 가리키며, 그림 파일이 없으면 {@code
+ *     null}
  * @param drawingType 선택한 그림 활동 유형
  * @param title 아동이 정한 그림 제목, 미작성 시 {@code null}
  * @param inputMethod 그림 입력 방식

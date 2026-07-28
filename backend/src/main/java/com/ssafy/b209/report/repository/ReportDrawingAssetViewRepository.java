@@ -5,7 +5,7 @@ import java.util.Collection;
 import java.util.List;
 import org.springframework.data.jpa.repository.JpaRepository;
 
-/** REPORT-02 보호자용 리포트 상세 조회에서 그림 파일의 공개 URL을 읽는 저장소다. */
+/** REPORT-02 보호자용 리포트 상세 조회에서 그림 파일 식별 정보를 읽는 저장소다. */
 public interface ReportDrawingAssetViewRepository
     extends JpaRepository<ReportDrawingAssetView, Long> {
 

@@ -153,6 +153,18 @@ public class ReportListQueryService {
       bySession.putIfAbsent(
           asset.getDrawingSession().getId(), fileUrlFactory.create(asset.getId()));
     }
+    List<Long> sessionsWithoutThumbnail =
+        sessionIds.stream().filter(sessionId -> !bySession.containsKey(sessionId)).toList();
+    if (sessionsWithoutThumbnail.isEmpty()) {
+      return bySession;
+    }
+    for (DrawingAsset asset :
+        drawingAssetRepository
+            .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                sessionsWithoutThumbnail, DrawingAssetType.FINAL)) {
+      bySession.putIfAbsent(
+          asset.getDrawingSession().getId(), fileUrlFactory.create(asset.getId()));
+    }
     return bySession;
   }
 
