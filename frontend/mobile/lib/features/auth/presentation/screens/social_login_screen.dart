@@ -277,15 +277,13 @@ class _BrandPanel extends StatelessWidget {
         // Stack 기본 클립으로 손그림이 패널 밖으로 새지 않는다.
         return Stack(
           children: [
-            // 배경 손그림 — 크기·위치·속도를 서로 다르게 둬 자연스럽게 떠다닌다.
+            // 배경 장식 손그림 — 크기·위치를 다르게 배치(정적).
             Positioned(
               left: w * 0.44,
               top: h * 0.17,
               width: doodle(0.135),
               child: const _FloatingDoodle(
                 asset: 'assets/characters/doodle_tree.png',
-                period: Duration(milliseconds: 8000),
-                dy: -8,
               ),
             ),
             Positioned(
@@ -294,9 +292,6 @@ class _BrandPanel extends StatelessWidget {
               width: doodle(0.29),
               child: const _FloatingDoodle(
                 asset: 'assets/characters/doodle_dino.png',
-                period: Duration(milliseconds: 6000),
-                dx: 6,
-                dy: -12,
               ),
             ),
             Positioned(
@@ -305,8 +300,6 @@ class _BrandPanel extends StatelessWidget {
               width: doodle(0.35),
               child: const _FloatingDoodle(
                 asset: 'assets/characters/doodle_sun.png',
-                period: Duration(milliseconds: 7000),
-                dy: -16,
               ),
             ),
             const Positioned(
@@ -334,66 +327,21 @@ class _BrandPanel extends StatelessWidget {
   );
 }
 
-/// 배경에서 상하(및 약간의 좌우)로 부드럽게 떠다니는 손그림.
-/// 시스템 애니메이션 최소화(reduce motion)면 정지한다.
-class _FloatingDoodle extends StatefulWidget {
-  const _FloatingDoodle({
-    required this.asset,
-    required this.period,
-    this.dx = 0,
-    this.dy = -12,
-  });
+/// 배경 장식 손그림(정적).
+///
+/// 이전에는 상하로 떠다니는 반복 애니메이션이 있었으나, 끝나지 않는 반복
+/// 애니메이션이 위젯 테스트의 `pumpAndSettle`을 무한 대기시켜 제거했다
+/// (S15P11B209-688).
+class _FloatingDoodle extends StatelessWidget {
+  const _FloatingDoodle({required this.asset});
 
   final String asset;
-  final Duration period;
-  final double dx;
-  final double dy;
 
   @override
-  State<_FloatingDoodle> createState() => _FloatingDoodleState();
-}
-
-class _FloatingDoodleState extends State<_FloatingDoodle>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _controller = AnimationController(
-    vsync: this,
-    duration: widget.period,
-  );
-  late final Animation<double> _progress = CurvedAnimation(
-    parent: _controller,
-    curve: Curves.easeInOut,
-  );
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    final reduceMotion =
-        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    if (reduceMotion) {
-      _controller.stop();
-    } else if (!_controller.isAnimating) {
-      _controller.repeat(reverse: true);
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _progress,
-    builder: (context, child) => Transform.translate(
-      offset: Offset(widget.dx * _progress.value, widget.dy * _progress.value),
-      child: child,
-    ),
-    child: Image.asset(
-      widget.asset,
-      fit: BoxFit.contain,
-      errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
-    ),
+  Widget build(BuildContext context) => Image.asset(
+    asset,
+    fit: BoxFit.contain,
+    errorBuilder: (context, error, stackTrace) => const SizedBox.shrink(),
   );
 }
 
