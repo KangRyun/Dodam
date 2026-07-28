@@ -14,7 +14,8 @@
   1) 형식 정화 → 정화본을 이후 단계·최종 출력에 쓴다.
   2) 진단·심리해석 표현 → 차단(DIAGNOSTIC_LANGUAGE).
   3) 위기 소재를 담은 질문 → 차단(CRISIS_CONTENT).
-  4) 통과 → 정화본을 안전한 질문으로 돌려준다.
+  4) 내부 사유 코드·위기 경고 문구 유출 → 차단(CHILD_UNSAFE_NOTICE, S15P11B209-597).
+  5) 통과 → 정화본을 안전한 질문으로 돌려준다.
 
 처리(차단 시): question_service가 SafetyBlockedError로 올려 엔드포인트가 422
 AI_SAFETY_POLICY_BLOCKED로 매핑한다 → BE가 저장 없이 폴백 템플릿으로 대체한다.
@@ -29,11 +30,13 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import answer_check
+import child_screen_guard
 import crisis_detection
 
 # 차단 사유 코드(SafetyResult.blockReasonCode로 전달). BE·후속 위기 안내가 이 값으로 분기한다.
 DIAGNOSTIC_LANGUAGE = "DIAGNOSTIC_LANGUAGE"  # 진단·심리해석·검사 채점 표현
 CRISIS_CONTENT = "CRISIS_CONTENT"  # 자해·학대·위기 소재를 질문이 담음
+CHILD_UNSAFE_NOTICE = "CHILD_UNSAFE_NOTICE"  # 내부 사유 코드·위기 경고 문구 유출(S15P11B209-597)
 
 # 규칙 묶음의 버전 태그 — 규칙이 바뀌면 올려 재현성을 기록한다. 요청의 safety_rule_version과
 # 별개로, '이 파이프라인이 어떤 규칙 집합으로 판정했는지'를 나타낸다.
@@ -77,6 +80,11 @@ def evaluate(question_text: str) -> SafetyVerdict:
     # 위기 소재(자해·학대·위기)를 질문이 되레 담고 있으면 차단 — 모델 오작동 방어.
     if crisis_detection.detect(cleaned):
         return SafetyVerdict("BLOCKED", cleaned, CRISIS_CONTENT)
+
+    # 내부 사유 코드·보호자용 위기 경고 문구가 아이 화면에 새면 차단(S15P11B209-597).
+    # 같은 위기라도 아이에겐 부드러운 지지만, 경고·안내는 보호자 경로(598)로 간다.
+    if child_screen_guard.contains_child_unsafe(cleaned):
+        return SafetyVerdict("BLOCKED", cleaned, CHILD_UNSAFE_NOTICE)
 
     return SafetyVerdict("PASSED", cleaned, None)
 

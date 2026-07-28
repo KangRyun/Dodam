@@ -14,6 +14,7 @@ import types
 import unittest
 from unittest import mock
 
+import child_screen_guard
 import llm_client
 import question_safety
 import question_service
@@ -199,6 +200,40 @@ class SafetyPipelineTest(unittest.TestCase):
             with self.assertRaises(question_service.UpstreamError) as ctx:
                 question_service.generate(_request(), "req-1")
         self.assertEqual(ctx.exception.error_code, "AI_EMPTY_COMPLETION")
+
+    def test_risk_notice_question_blocked(self):
+        # 보호자용 위기 경고 문구가 질문에 섞이면 아이 화면에 못 나가게 차단(S15P11B209-597).
+        capture: dict = {}
+        client = _mock_client(capture, reply="위험이 감지되어 보호자에게 알렸어. 지금 기분은 어때?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            with self.assertRaises(question_service.SafetyBlockedError) as ctx:
+                question_service.generate(_request(), "req-1")
+        self.assertEqual(
+            ctx.exception.block_reason_code, question_safety.CHILD_UNSAFE_NOTICE
+        )
+
+
+class ChildScreenSafeConstantsTest(unittest.TestCase):
+    """아이 화면에 그대로 나가는 서버 상수(위기 안전 질문·선택 칩)에 위험 문구가 없어야 한다
+    (S15P11B209-597 회귀 방어 — 누군가 상수를 위험 문구로 바꾸면 즉시 실패)."""
+
+    def test_crisis_safe_question_has_no_risk_notice(self):
+        self.assertFalse(
+            child_screen_guard.contains_child_unsafe(
+                question_service.CRISIS_SAFE_QUESTION
+            )
+        )
+
+    def test_all_option_chip_labels_have_no_risk_notice(self):
+        chips = [
+            opt
+            for options in question_service._OPTIONS_BY_PURPOSE.values()
+            for opt in options
+        ]
+        chips += list(question_service._CRISIS_SAFE_OPTIONS)
+        for opt in chips:
+            with self.subTest(label=opt.label):
+                self.assertFalse(child_screen_guard.contains_child_unsafe(opt.label))
 
 
 class PurposeTargetChipConsistencyTest(unittest.TestCase):

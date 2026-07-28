@@ -60,6 +60,24 @@ class BlocksCrisisContentTest(unittest.TestCase):
                 self.assertEqual(v.block_reason_code, qs.CRISIS_CONTENT)
 
 
+class BlocksChildUnsafeNoticeTest(unittest.TestCase):
+    """내부 사유 코드·보호자용 위기 경고 문구 유출 차단 (S15P11B209-597)."""
+
+    SAMPLES = [
+        "학대가 의심되면 신고하세요.",           # 신고 안내
+        "상담 전화로 연락해 보세요.",             # 상담 전화 안내
+        "위험이 감지되어 보호자에게 알렸어요.",     # 경고 + 보호자 알림
+        "차단 사유: SELF_HARM_RISK",             # 사유 코드 유출(정화로 밑줄 제거돼도 잡힘)
+    ]
+
+    def test_notice_questions_blocked(self):
+        for text in self.SAMPLES:
+            with self.subTest(text=text):
+                v = qs.evaluate(text)
+                self.assertTrue(v.blocked)
+                self.assertEqual(v.block_reason_code, qs.CHILD_UNSAFE_NOTICE)
+
+
 class OrderingTest(unittest.TestCase):
     def test_diagnostic_takes_priority_over_crisis(self):
         # 진단 표현이 먼저 걸리면 그 사유로 차단한다(파이프라인 순서 고정).
