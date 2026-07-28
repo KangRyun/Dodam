@@ -155,6 +155,38 @@ void main() {
     ]);
   });
 
+  test('401 재시도 시 multipart(FormData) 요청도 finalized 오류 없이 재전송된다', () async {
+    final tokens = _MutableTokenProvider('expired-access-token');
+    final refresher = _TestTokenRefresher(() async {
+      tokens.accessToken = 'refreshed-access-token';
+      return true;
+    });
+    final server = _UnauthorizedOnceAdapter();
+    final client = ApiClient(
+      environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+      accessTokenProvider: tokens,
+      tokenRefresher: refresher,
+      httpClientAdapter: server,
+    );
+
+    // 첫 전송에서 finalize되는 multipart 본문. 재시도가 clone 없이 같은 FormData를
+    // 다시 보내면 "The FormData has already been finalized"로 실패한다.
+    final response = await client.post<Map<String, dynamic>>(
+      'conversations/1/answers/voice',
+      data: FormData.fromMap({
+        'audio': MultipartFile.fromBytes(
+          const [1, 2, 3],
+          filename: 'voice-answer.m4a',
+        ),
+        'metadata': '{}',
+      }),
+    );
+
+    expect(response.data, {'ok': true});
+    expect(refresher.callCount, 1);
+    expect(server.authorizationHeaders.length, 2);
+  });
+
   test('재시도 요청도 401이면 추가 재발급 없이 오류를 반환한다', () async {
     final tokens = _MutableTokenProvider('expired-access-token');
     final refresher = _TestTokenRefresher(() async {

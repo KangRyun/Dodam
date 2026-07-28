@@ -63,6 +63,12 @@ final class AuthTokenRetryInterceptor extends Interceptor {
 
     request.extra[_retriedKey] = true;
     request.headers['Authorization'] = 'Bearer $accessToken';
+    // multipart 본문(FormData)은 첫 전송에서 finalize돼 그대로는 재전송할 수 없다.
+    // 토큰 갱신 후 재요청 시 clone으로 새 FormData를 만들어야 "The FormData has
+    // already been finalized" 오류 없이 초안·완료·음성 업로드가 재시도된다.
+    if (request.data is FormData) {
+      request.data = (request.data as FormData).clone();
+    }
 
     try {
       handler.resolve(await _dio.fetch<dynamic>(request));
