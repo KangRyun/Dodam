@@ -3,6 +3,7 @@ package com.ssafy.b209.user.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -20,6 +21,7 @@ import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
 import com.ssafy.b209.user.service.UserDeletionService;
 import com.ssafy.b209.user.service.UserNotificationSettingsReader;
+import com.ssafy.b209.user.service.UserNotificationSettingsUpdateService;
 import com.ssafy.b209.user.service.UserOnboardingService;
 import com.ssafy.b209.user.service.UserQueryService;
 import com.ssafy.b209.user.service.UserUpdateService;
@@ -43,6 +45,7 @@ class UserControllerTest {
   @MockitoBean private UserUpdateService updateService;
   @MockitoBean private UserDeletionService deletionService;
   @MockitoBean private UserNotificationSettingsReader notificationSettingsReader;
+  @MockitoBean private UserNotificationSettingsUpdateService notificationSettingsUpdateService;
 
   @Test
   void immediatelyDeletesTheAuthenticatedUserAfterExplicitConfirmation() throws Exception {
@@ -129,6 +132,86 @@ class UserControllerTest {
 
     mockMvc
         .perform(get("/api/v1/users/me/notification-settings"))
+        .andExpect(status().isUnauthorized());
+  }
+
+  @Test
+  void updatesTheAuthenticatedUsersNotificationSettings() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(51L);
+    given(notificationSettingsUpdateService.update(eq(51L), any()))
+        .willReturn(new NotificationSettingsResponse(false, true, false, true));
+
+    mockMvc
+        .perform(
+            patch("/api/v1/users/me/notification-settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "analysisCompleted": false,
+                      "community": true,
+                      "serviceNotice": false,
+                      "marketing": true
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.analysisCompleted").value(false))
+        .andExpect(jsonPath("$.data.community").value(true))
+        .andExpect(jsonPath("$.data.serviceNotice").value(false))
+        .andExpect(jsonPath("$.data.marketing").value(true));
+
+    verify(notificationSettingsUpdateService)
+        .update(
+            eq(51L),
+            org.mockito.ArgumentMatchers.argThat(
+                request ->
+                    Boolean.FALSE.equals(request.analysisCompleted())
+                        && Boolean.TRUE.equals(request.community())
+                        && Boolean.FALSE.equals(request.serviceNotice())
+                        && Boolean.TRUE.equals(request.marketing())));
+  }
+
+  @Test
+  void rejectsNotificationSettingsUpdateMissingRequiredField() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(51L);
+
+    mockMvc
+        .perform(
+            patch("/api/v1/users/me/notification-settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "analysisCompleted": true,
+                      "community": true,
+                      "serviceNotice": true
+                    }
+                    """))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+
+    verify(notificationSettingsUpdateService, never()).update(any(), any());
+  }
+
+  @Test
+  void returnsUnauthorizedForNotificationSettingsUpdateWhenAccessTokenIsMissing() throws Exception {
+    given(currentUserResolver.requireUserId())
+        .willThrow(new BusinessException(AuthErrorCode.AUTHENTICATION_REQUIRED));
+
+    mockMvc
+        .perform(
+            patch("/api/v1/users/me/notification-settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "analysisCompleted": true,
+                      "community": true,
+                      "serviceNotice": true,
+                      "marketing": false
+                    }
+                    """))
         .andExpect(status().isUnauthorized());
   }
 
