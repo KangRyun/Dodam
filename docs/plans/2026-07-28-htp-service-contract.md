@@ -50,7 +50,8 @@ HtpAssessment
 
 ### 3.1 HTP 묶음 상태
 
-`IN_PROGRESS`, `ANALYZING`, `COMPLETED`, `ABANDONED`, `EXPIRED`를 사용한다.
+`IN_PROGRESS`, `ANALYZING`, `COMPLETED`, `FAILED`, `ABANDONED`, `EXPIRED`를 사용한다.
+종합 리포트 생성에 실패하면 `FAILED`로 전환하고 새 `Idempotency-Key`로 재시도한다. 실패 리포트 이력은 보존하되 목록에서는 숨겨 새 단일 리포트만 노출한다.
 
 ### 3.2 단계 상태
 
@@ -98,6 +99,8 @@ HTP 단계에서는 일반 활동의 `POST /drawing-sessions/{id}/complete`를 �
 상태를 변경하는 POST 요청은 `Idempotency-Key`를 필수로 사용한다. 같은 Key와 같은 요청은 최초 결과를 반환하고, 같은 Key에 다른 요청 Body가 들어오면 `409`로 거부한다.
 
 `steps/next`는 직전 단계의 FINAL 이미지, 분석 결과, 대화 종료 여부를 검증하고 직전 세션을 리포트 없이 완료한 뒤 다음 세션을 생성한다. 마지막 `PERSON` 단계에서는 다음 세션을 만들지 않고 단계 완료 결과만 반환한다. `complete`는 세 단계가 모두 끝났는지 확인한 뒤 기존 주제별 분석을 집계하고 HTP 리포트 하나만 접수한다.
+
+`complete`는 HTTP 202를 반환한다. 응답에는 `status=ANALYZING`, `analysisId`, `analysisStatus`, `reportId`, `reportStatus`가 포함된다. 클라이언트는 `reportId`로 기존 리포트 상태 조회 계약을 사용한다. 세 단계 중 FINAL 이미지, 성공 또는 부분 성공한 객체 탐지, 완료된 대화가 하나라도 없으면 `HTP_409_006`으로 거부한다.
 
 ### 4.1 단계 응답
 
@@ -242,13 +245,14 @@ HTP 전용 테이블을 다음처럼 둔다.
 | 정량 특징 계산 | AI 서버 |
 | 탐지 라벨 | 47개 세부 라벨 유지 |
 
-## 10. 남은 구현 항목
+## 10. 구현 상태
 
-다음은 정책 미결정이 아니라 이 문서대로 구현해야 하는 작업이다.
+다음 항목은 구현됐다.
 
-1. `HTP` 기준 데이터와 HTP 묶음·단계 Flyway Migration 추가
-2. HTP 묶음 API와 상태 전이 구현
-3. 세 단계 저장 분석 결과 집계와 단일 리포트 연결
-4. HTP API·AI 계약·DB 제약·재개·멱등성 통합 테스트
+1. `HTP` 기준 데이터와 HTP 묶음·단계 Flyway Migration
+2. 시작·조회·다음 단계·활동 Reflection·완료·포기 API와 상태 전이
+3. 세 단계 FINAL·객체 탐지·대화 완료 검증과 단일 리포트 연결
+4. HTP 리포트 성공·실패·재시도 및 실패 버전 숨김
+5. 일반 그림 완료 API를 통한 단계별 리포트 생성 차단
 
-위 여섯 항목이 모두 배포되기 전에는 `HTP` 유형을 활성화하지 않는다.
+실제 MySQL Migration과 AI 종단 호출은 배포 Pipeline에서 추가 확인한다.

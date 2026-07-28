@@ -1,6 +1,9 @@
 package com.ssafy.b209.drawing.htp.controller;
 
+import com.ssafy.b209.drawing.dto.request.SaveDrawingReflectionRequest;
+import com.ssafy.b209.drawing.dto.response.DrawingReflectionResponse;
 import com.ssafy.b209.drawing.htp.dto.HtpAssessmentResponse;
+import com.ssafy.b209.drawing.htp.dto.HtpCompletionResponse;
 import com.ssafy.b209.drawing.htp.dto.StartHtpAssessmentRequest;
 import com.ssafy.b209.drawing.htp.service.HtpAssessmentService;
 import com.ssafy.b209.global.response.ApiErrorResponse;
@@ -19,6 +22,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -100,6 +104,49 @@ public class HtpAssessmentController {
       @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
     return ResponseEntity.ok(
         ApiResponse.ok(htpAssessmentService.nextStep(assessmentId, idempotencyKey)));
+  }
+
+  /**
+   * 세 HTP 그림 단계의 저장·분석·대화 완료를 검증하고 단일 리포트 생성을 접수한다.
+   *
+   * @param assessmentId HTP 활동 묶음 식별자
+   * @param idempotencyKey 완료 요청을 식별하는 멱등 키
+   * @return HTTP 202와 종합 리포트 작업 식별자
+   */
+  @Operation(
+      summary = "HTP 종합 완료",
+      description = "HOUSE, TREE, PERSON 결과가 모두 준비된 경우 HTP 리포트 하나의 생성을 접수합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "202",
+        description = "HTP 단일 리포트 생성 접수"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "409",
+        description = "세 단계 결과 미완료 또는 처리 상태 충돌",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @PostMapping("/{assessmentId}/complete")
+  public ResponseEntity<ApiResponse<HtpCompletionResponse>> complete(
+      @PathVariable @Positive Long assessmentId,
+      @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+    return ResponseEntity.accepted()
+        .body(ApiResponse.ok(htpAssessmentService.complete(assessmentId, idempotencyKey)));
+  }
+
+  /**
+   * PERSON 단계의 감정을 HTP 활동 단위 Reflection으로 저장한다.
+   *
+   * @param assessmentId HTP 활동 묶음 식별자
+   * @param request 선택 감정과 건너뛰기 여부
+   * @return 저장된 Reflection 결과
+   */
+  @Operation(summary = "HTP 활동 감정 저장", description = "세 그림을 마친 PERSON 단계에서 활동 전체의 감정을 한 번 저장합니다.")
+  @PutMapping("/{assessmentId}/reflection")
+  public ResponseEntity<ApiResponse<DrawingReflectionResponse>> saveReflection(
+      @PathVariable @Positive Long assessmentId,
+      @Valid @RequestBody SaveDrawingReflectionRequest request) {
+    return ResponseEntity.ok(
+        ApiResponse.ok(htpAssessmentService.saveReflection(assessmentId, request)));
   }
 
   /**

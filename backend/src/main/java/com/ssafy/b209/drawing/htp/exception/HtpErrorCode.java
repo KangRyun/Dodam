@@ -21,7 +21,11 @@ public enum HtpErrorCode implements ErrorCode {
   /** HTP 상태 변경 요청에 멱등 키가 없는 경우다. */
   IDEMPOTENCY_KEY_REQUIRED(HttpStatus.BAD_REQUEST, "HTP_400_001", "Idempotency-Key가 필요합니다."),
   /** HTP 상태 변경 요청의 멱등 키 형식이 잘못된 경우다. */
-  IDEMPOTENCY_KEY_INVALID(HttpStatus.BAD_REQUEST, "HTP_400_002", "Idempotency-Key 형식이 올바르지 않습니다.");
+  IDEMPOTENCY_KEY_INVALID(HttpStatus.BAD_REQUEST, "HTP_400_002", "Idempotency-Key 형식이 올바르지 않습니다."),
+  /** HOUSE, TREE, PERSON 중 완료에 필요한 결과가 하나라도 준비되지 않은 경우다. */
+  HTP_RESULTS_NOT_READY(HttpStatus.CONFLICT, "HTP_409_006", "HTP 세 단계의 그림, 분석, 대화 완료가 필요합니다."),
+  /** 다른 완료 요청이 처리 중이거나 이미 완료된 HTP 활동인 경우다. */
+  HTP_COMPLETION_CONFLICT(HttpStatus.CONFLICT, "HTP_409_007", "HTP 종합 완료 요청을 처리할 수 없습니다.");
 
   private final HttpStatus httpStatus;
   private final String code;

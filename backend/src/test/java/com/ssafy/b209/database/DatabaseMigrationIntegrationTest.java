@@ -114,6 +114,9 @@ class DatabaseMigrationIntegrationTest {
         .isTrue();
     assertThat(indexExists("htp_assessments", "uk_htp_assessments_active_child", true)).isTrue();
     assertThat(columnExists("htp_assessment_steps", "completion_idempotency_key")).isTrue();
+    assertThat(columnExists("htp_assessments", "completion_idempotency_key")).isTrue();
+    assertThat(columnExists("htp_assessments", "report_analysis_id")).isTrue();
+    assertThat(columnExists("htp_assessments", "report_id")).isTrue();
     assertThat(
             jdbcTemplate.queryForObject(
                 "SELECT activity_category FROM drawing_types WHERE code = 'HTP'", String.class))

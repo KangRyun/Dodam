@@ -17,10 +17,14 @@ import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.repository.AnalysisConversationSummaryRepository;
 import com.ssafy.b209.analysis.repository.AnalysisObservationResultRepository;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
+import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.repository.ConversationMessageRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingSession;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessment;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
+import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.Report;
@@ -84,6 +88,7 @@ class ObservationReportPersistenceServiceTest {
   @Mock private ConversationSessionRepository conversationSessionRepository;
   @Mock private ConversationMessageRepository conversationMessageRepository;
   @Mock private DrawingSessionEmotionRepository emotionRepository;
+  @Mock private HtpAssessmentRepository htpAssessmentRepository;
   @Mock private ApplicationEventPublisher eventPublisher;
 
   @Captor private ArgumentCaptor<AnalysisObservationResult> observationCaptor;
@@ -112,6 +117,7 @@ class ObservationReportPersistenceServiceTest {
             conversationSessionRepository,
             conversationMessageRepository,
             emotionRepository,
+            htpAssessmentRepository,
             eventPublisher,
             CLOCK);
   }
@@ -172,6 +178,47 @@ class ObservationReportPersistenceServiceTest {
   }
 
   @Test
+  void loadsAggregateConversationCountsFromAllHtpSteps() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    HtpAssessmentStep currentStep = org.mockito.Mockito.mock(HtpAssessmentStep.class);
+    HtpAssessment assessment = org.mockito.Mockito.mock(HtpAssessment.class);
+    List<HtpAssessmentStep> steps =
+        List.of(htpStepWithSession(98L), htpStepWithSession(99L), htpStepWithSession(100L));
+    given(currentStep.getAssessment()).willReturn(assessment);
+    given(assessment.getSteps()).willReturn(steps);
+    given(analysisRepository.findById(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByAnalysisId(ANALYSIS_ID)).willReturn(Optional.of(report));
+    given(htpAssessmentRepository.findStepByDrawingSessionId(DRAWING_SESSION_ID))
+        .willReturn(Optional.of(currentStep));
+    for (int index = 0; index < 3; index++) {
+      long sessionId = 98L + index;
+      ConversationSession conversation = org.mockito.Mockito.mock(ConversationSession.class);
+      given(conversation.getId()).willReturn(300L + index);
+      lenient().when(conversation.getDifficultySnapshot()).thenReturn("NORMAL");
+      given(conversationSessionRepository.findByDrawingSessionId(sessionId))
+          .willReturn(Optional.of(conversation));
+      given(conversationMessageRepository.countQuestions(300L + index)).willReturn(2L);
+      given(conversationMessageRepository.countAnswered(300L + index)).willReturn(1L);
+      given(conversationMessageRepository.countSkipped(300L + index)).willReturn(1L);
+      given(conversationMessageRepository.countUnrecognizedSpeech(300L + index)).willReturn(0L);
+      given(conversationMessageRepository.findKeyConversationSources(300L + index))
+          .willReturn(List.of());
+    }
+    given(
+            emotionRepository
+                .findByDrawingSessionIdInOrderByDrawingSessionIdAscSelectionOrderAscIdAsc(
+                    List.of(98L, 99L, 100L)))
+        .willReturn(List.of());
+
+    ObservationGenerationContext context = service.loadContext(ANALYSIS_ID).orElseThrow();
+
+    assertThat(context.questionCount()).isEqualTo(6);
+    assertThat(context.answeredCount()).isEqualTo(3);
+    assertThat(context.skippedCount()).isEqualTo(3);
+  }
+
+  @Test
   void completeDoesNotPublishAnalysisCompletedWhenReportAlreadyCompleted() {
     DrawingAnalysis analysis = pendingAnalysis();
     Report report = generatingReport(analysis);
@@ -214,6 +261,22 @@ class ObservationReportPersistenceServiceTest {
     verify(keyConversationRepository).saveAll(keyConversationsCaptor.capture());
     assertThat(keyConversationsCaptor.getValue()).isEmpty();
     assertThat(report.getStatus()).isEqualTo(ReportStatus.COMPLETED);
+  }
+
+  @Test
+  void completesHtpAggregateWithoutRecompletingPersonDrawingSession() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    HtpAssessment assessment = org.mockito.Mockito.mock(HtpAssessment.class);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+    given(htpAssessmentRepository.findByStepDrawingSessionIdForUpdate(DRAWING_SESSION_ID))
+        .willReturn(Optional.of(assessment));
+
+    service.complete(emptyConversationContext(), validResult());
+
+    verify(assessment).completeAnalysis(LocalDateTime.now(CLOCK));
+    verify(analysis.getDrawingSession(), never()).completeReporting(any());
   }
 
   @Test
@@ -286,6 +349,22 @@ class ObservationReportPersistenceServiceTest {
   }
 
   @Test
+  void marksHtpAggregateFailedWithoutFailingCompletedPersonSession() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    HtpAssessment assessment = org.mockito.Mockito.mock(HtpAssessment.class);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+    given(htpAssessmentRepository.findByStepDrawingSessionIdForUpdate(DRAWING_SESSION_ID))
+        .willReturn(Optional.of(assessment));
+
+    service.markFailed(ANALYSIS_ID, REPORT_ID, "TIMEOUT", "생성 실패");
+
+    verify(assessment).failAnalysis();
+    verify(analysis.getDrawingSession(), never()).failReporting();
+  }
+
+  @Test
   void markFailedSkipsWhenAnalysisNotPending() {
     DrawingAnalysis analysis = pendingAnalysis();
     analysis.succeedFinal("mock", "1.0", null, LocalDateTime.now(CLOCK));
@@ -306,6 +385,14 @@ class ObservationReportPersistenceServiceTest {
         DrawingAnalysisType.ACTIVITY_REPORT,
         "completion-key-1234",
         LocalDateTime.of(2026, 7, 23, 10, 30));
+  }
+
+  private HtpAssessmentStep htpStepWithSession(Long sessionId) {
+    HtpAssessmentStep step = org.mockito.Mockito.mock(HtpAssessmentStep.class);
+    DrawingSession session = org.mockito.Mockito.mock(DrawingSession.class);
+    lenient().when(session.getId()).thenReturn(sessionId);
+    given(step.getDrawingSession()).willReturn(session);
+    return step;
   }
 
   private Report generatingReport(DrawingAnalysis analysis) {

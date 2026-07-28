@@ -14,6 +14,8 @@ import com.ssafy.b209.conversation.repository.ConversationMessageRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.domain.DrawingSessionEmotion;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessment;
+import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.Report;
@@ -75,6 +77,7 @@ public class ObservationReportPersistenceService {
   private final ConversationSessionRepository conversationSessionRepository;
   private final ConversationMessageRepository conversationMessageRepository;
   private final DrawingSessionEmotionRepository emotionRepository;
+  private final HtpAssessmentRepository htpAssessmentRepository;
   private final ApplicationEventPublisher eventPublisher;
   private final Clock clock;
 
@@ -94,6 +97,7 @@ public class ObservationReportPersistenceService {
    * @param conversationSessionRepository 대화 세션 저장소
    * @param conversationMessageRepository 대화 메시지 집계 저장소
    * @param emotionRepository 그림 활동 선택 감정 저장소
+   * @param htpAssessmentRepository HTP 묶음의 세 세션 집계와 상태 전이 저장소
    * @param eventPublisher 완료 커밋 후 분석 완료 알림을 요청할 이벤트 발행기
    * @param clock 저장 시각을 제공하는 UTC 시계
    */
@@ -111,6 +115,7 @@ public class ObservationReportPersistenceService {
       ConversationSessionRepository conversationSessionRepository,
       ConversationMessageRepository conversationMessageRepository,
       DrawingSessionEmotionRepository emotionRepository,
+      HtpAssessmentRepository htpAssessmentRepository,
       ApplicationEventPublisher eventPublisher,
       Clock clock) {
     this.analysisRepository = analysisRepository;
@@ -126,6 +131,7 @@ public class ObservationReportPersistenceService {
     this.conversationSessionRepository = conversationSessionRepository;
     this.conversationMessageRepository = conversationMessageRepository;
     this.emotionRepository = emotionRepository;
+    this.htpAssessmentRepository = htpAssessmentRepository;
     this.eventPublisher = eventPublisher;
     this.clock = clock;
   }
@@ -153,25 +159,44 @@ public class ObservationReportPersistenceService {
     DrawingSession session = analysis.getDrawingSession();
     Long drawingSessionId = session.getId();
     String expressedEmotionText = session.getExpressedEmotionText();
+    List<Long> contextSessionIds =
+        htpAssessmentRepository
+            .findStepByDrawingSessionId(drawingSessionId)
+            .map(
+                step ->
+                    step.getAssessment().getSteps().stream()
+                        .map(htpStep -> htpStep.getDrawingSession().getId())
+                        .toList())
+            .orElseGet(() -> List.of(drawingSessionId));
 
-    ConversationSession conversation =
+    ConversationSession representativeConversation =
         conversationSessionRepository.findByDrawingSessionId(drawingSessionId).orElse(null);
-    Long conversationSessionId = conversation == null ? null : conversation.getId();
-    String questionDifficulty = conversation == null ? null : conversation.getDifficultySnapshot();
+    Long conversationSessionId =
+        representativeConversation == null ? null : representativeConversation.getId();
+    String questionDifficulty =
+        representativeConversation == null
+            ? null
+            : representativeConversation.getDifficultySnapshot();
 
     int questionCount = 0;
     int answeredCount = 0;
     int skippedCount = 0;
     int unrecognizedSpeechCount = 0;
     List<ObservationGenerationContext.KeyConversationLine> keyConversations = new ArrayList<>();
-    if (conversationSessionId != null) {
-      questionCount = (int) conversationMessageRepository.countQuestions(conversationSessionId);
-      answeredCount = (int) conversationMessageRepository.countAnswered(conversationSessionId);
-      skippedCount = (int) conversationMessageRepository.countSkipped(conversationSessionId);
-      unrecognizedSpeechCount =
-          (int) conversationMessageRepository.countUnrecognizedSpeech(conversationSessionId);
+    for (Long contextSessionId : contextSessionIds) {
+      ConversationSession conversation =
+          conversationSessionRepository.findByDrawingSessionId(contextSessionId).orElse(null);
+      if (conversation == null) {
+        continue;
+      }
+      Long contextConversationId = conversation.getId();
+      questionCount += (int) conversationMessageRepository.countQuestions(contextConversationId);
+      answeredCount += (int) conversationMessageRepository.countAnswered(contextConversationId);
+      skippedCount += (int) conversationMessageRepository.countSkipped(contextConversationId);
+      unrecognizedSpeechCount +=
+          (int) conversationMessageRepository.countUnrecognizedSpeech(contextConversationId);
       List<KeyConversationSource> sources =
-          conversationMessageRepository.findKeyConversationSources(conversationSessionId);
+          conversationMessageRepository.findKeyConversationSources(contextConversationId);
       for (KeyConversationSource source : sources) {
         if (keyConversations.size() >= MAX_KEY_CONVERSATIONS) {
           break;
@@ -186,13 +211,15 @@ public class ObservationReportPersistenceService {
       }
     }
 
+    List<DrawingSessionEmotion> emotionSources =
+        contextSessionIds.size() == 1
+            ? emotionRepository.findAllByDrawingSessionIdOrderBySelectionOrderAscIdAsc(
+                drawingSessionId)
+            : emotionRepository
+                .findByDrawingSessionIdInOrderByDrawingSessionIdAscSelectionOrderAscIdAsc(
+                    contextSessionIds);
     List<String> selectedEmotions =
-        emotionRepository
-            .findAllByDrawingSessionIdOrderBySelectionOrderAscIdAsc(drawingSessionId)
-            .stream()
-            .map(DrawingSessionEmotion::getEmotionCode)
-            .map(Enum::name)
-            .toList();
+        emotionSources.stream().map(DrawingSessionEmotion::getEmotionCode).map(Enum::name).toList();
 
     return Optional.of(
         new ObservationGenerationContext(
@@ -301,7 +328,14 @@ public class ObservationReportPersistenceService {
       saveGuardianQuestions(report, safeList(result.guardianQuestions()));
 
       report.complete(draft.expertReviewRequired(), result.limitationsText(), now);
-      analysis.getDrawingSession().completeReporting(now);
+      Optional<HtpAssessment> htpAssessment =
+          htpAssessmentRepository.findByStepDrawingSessionIdForUpdate(
+              analysis.getDrawingSession().getId());
+      if (htpAssessment.isPresent()) {
+        htpAssessment.get().completeAnalysis(now);
+      } else {
+        analysis.getDrawingSession().completeReporting(now);
+      }
       eventPublisher.publishEvent(new AnalysisCompletedEvent(context.reportId()));
     } catch (DataIntegrityViolationException exception) {
       throw new BusinessException(
@@ -327,7 +361,14 @@ public class ObservationReportPersistenceService {
         .ifPresent(
             analysis -> {
               analysis.failFinal(failureCode, failureMessage, now);
-              analysis.getDrawingSession().failReporting();
+              Optional<HtpAssessment> htpAssessment =
+                  htpAssessmentRepository.findByStepDrawingSessionIdForUpdate(
+                      analysis.getDrawingSession().getId());
+              if (htpAssessment.isPresent()) {
+                htpAssessment.get().failAnalysis();
+              } else {
+                analysis.getDrawingSession().failReporting();
+              }
             });
     if (reportId != null) {
       reportRepository

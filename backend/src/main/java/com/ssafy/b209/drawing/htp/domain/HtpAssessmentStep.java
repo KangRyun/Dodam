@@ -91,6 +91,13 @@ public class HtpAssessmentStep {
   }
 
   /**
+   * @return 이 단계를 소유한 HTP 활동 묶음
+   */
+  public HtpAssessment getAssessment() {
+    return assessment;
+  }
+
+  /**
    * 서버가 이 단계에 지정한 HTP 그림 주제를 반환한다.
    *
    * @return HOUSE, TREE 또는 PERSON
