@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../../../app/router/app_navigation.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../app/state/guardian_child_controller.dart';
 import '../../../../app/widgets/app_failure_view.dart';
@@ -42,14 +45,33 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
     return null;
   }
 
+  /// 마지막으로 불러온 아동. 컨트롤러는 여러 이유로 알림을 보내므로,
+  /// 대상 아동이 실제로 바뀐 경우에만 다시 조회한다.
+  int? _loadedChildId;
+
   @override
   void initState() {
     super.initState();
+    // 하단 탭의 뿌리로 살아 있는 동안 보호자가 아이를 바꿀 수 있다.
+    // 한 번만 불러오고 말면 그 화면은 옛 아이의 기록에 굳는다.
+    widget.childController.addListener(_onChildChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void dispose() {
+    widget.childController.removeListener(_onChildChanged);
+    super.dispose();
+  }
+
+  void _onChildChanged() {
+    if (widget.childController.selectedChildId == _loadedChildId) return;
+    unawaited(_load());
   }
 
   Future<void> _load() async {
     final childId = widget.childController.selectedChildId;
+    _loadedChildId = childId;
     if (childId == null) {
       setState(() {
         _status = _HistoryStatus.noChild;
@@ -551,7 +573,8 @@ class _ActivitySummary extends StatelessWidget {
             AppButton(
               key: const ValueKey('activity-detail-cta'),
               label: '자세히 보기',
-              onPressed: () => Navigator.of(context).pushNamed(
+              onPressed: () => AppNavigation.pushNamed(
+                context,
                 AppRoutes.activityDetail(activity.activityId.toString()),
               ),
             ),
@@ -891,9 +914,10 @@ class _ActivityInformation extends StatelessWidget {
         AppButton(
           key: const ValueKey('activity-report-cta'),
           label: '관찰 리포트 보기',
-          onPressed: () => Navigator.of(
+          onPressed: () => AppNavigation.pushNamed(
             context,
-          ).pushNamed(AppRoutes.report(report.reportId.toString())),
+            AppRoutes.report(report.reportId.toString()),
+          ),
         ),
       ],
     ],

@@ -5,6 +5,7 @@ export 'components/feedback/app_skeleton.dart';
 export 'components/feedback/app_snack_bar.dart';
 export 'components/feedback/app_state_view.dart';
 export 'components/inputs/app_text_field.dart';
+export 'components/navigation/app_bottom_tab_bar.dart';
 export 'components/navigation/app_top_bar.dart';
 export 'components/selection/app_selection.dart';
 export 'tokens/app_colors.dart';

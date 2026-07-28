@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/router/app_navigation.dart';
 import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../design_system/design_system.dart';
@@ -35,7 +36,8 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         repository: widget.drawingRepository,
       ).resolveSession(childId: widget.child.childId);
       if (!mounted) return;
-      await Navigator.of(context).pushNamed(
+      await AppNavigation.pushNamed(
+        context,
         AppRoutes.drawing(widget.child.childId.toString()),
         arguments: DrawingRouteArguments(
           sessionId: sessionId,

@@ -87,6 +87,9 @@ void main() {
     );
 
     repository.error = null;
+    // 하단 탭이 생기면서 세로 여유가 줄었다. 같은 파일의 다른 이동처럼
+    // 보이는 곳까지 스크롤한 뒤 누른다.
+    await tester.ensureVisible(find.text('다시 시도'));
     await tester.tap(find.text('다시 시도'));
     await tester.pumpAndSettle();
     expect(repository.calls, 2);
