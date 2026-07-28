@@ -241,3 +241,23 @@ ERDCloud Import SQL은 신규 환경을 위한 완전한 기준 스키마로 작
 - 임의의 진단·위험 점수 컬럼 추가
 
 위 항목은 이번 스키마가 방해하지 않도록 확장 가능성을 유지하되, 구현된 기능처럼 DDL에 선반영하지 않는다.
+
+## 14. 2026-07-28 HTP·그림일기 확장 기준
+
+이번 출시 활동은 `HTP`와 `ART_DIARY`로 제한한다. 이 결정은 기존 정규화 원칙을 바꾸지 않으며, 활동별 신규 구조는 후속 Flyway Migration으로만 추가한다.
+
+### HTP
+
+- HTP는 `HOUSE`, `TREE`, `PERSON` 세 단계와 세 개의 `drawing_sessions`를 하나의 묶음으로 관리한다.
+- 단계 주제의 정본은 신규 `htp_assessment_steps.drawing_subject`다.
+- `drawing_assets.object_code`는 다중 객체 업로드 식별 목적으로 만들어진 nullable 컬럼이므로 HTP 주제 저장에 재사용하지 않는다.
+- `UNIQUE (htp_assessment_id, step_order)`, `UNIQUE (htp_assessment_id, drawing_subject)`, `UNIQUE (drawing_session_id)`로 중복 단계를 방지한다.
+- `drawing_subject`는 `HOUSE`, `TREE`, `PERSON`만 허용한다.
+
+### 그림일기
+
+- 그림일기는 기존 `drawing_sessions` 한 건과 FINAL 자산 한 건을 중심으로 구성하므로 별도 활동 묶음 테이블을 만들지 않는다.
+- 시작 전·종료 후 감정 2회 저장안은 이번 출시에서 제외한다. 기존 세션당 Reflection 1회 구조를 유지한다.
+- `FREE_DRAWING`, `EMOTION_COLORING`, `WEATHER_MIND` 기준 데이터는 과거 참조를 위해 삭제하지 않고 비활성화한다.
+
+세부 계약은 `2026-07-28-htp-service-contract.md`와 `2026-07-28-art-diary-service-contract.md`를 따른다.
