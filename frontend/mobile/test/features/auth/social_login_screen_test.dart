@@ -135,6 +135,30 @@ void main() {
     expect(find.text('다시 시도'), findsNothing);
   });
 
+  testWidgets('예상하지 못한 오류도 공통 실패 UI와 재시도로 처리한다', (tester) async {
+    var attemptCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SocialLoginScreen(
+          onSignIn: (_) async {
+            attemptCount += 1;
+            throw StateError('unexpected provider response');
+          },
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('social-login-kakao')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('login-failure')), findsOneWidget);
+    expect(find.textContaining('예상하지 못한 문제가 발생했어요'), findsOneWidget);
+
+    await tester.tap(find.text('다시 시도'));
+    await tester.pumpAndSettle();
+    expect(attemptCount, 2);
+  });
+
   testWidgets('작은 휴대폰 화면에서도 오버플로 없이 표시한다', (tester) async {
     tester.view.physicalSize = const Size(640, 960);
     tester.view.devicePixelRatio = 2;

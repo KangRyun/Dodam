@@ -82,7 +82,8 @@ class _SocialLoginScreenState extends State<SocialLoginScreen> {
     backgroundColor: AppColors.canvas,
     body: SafeArea(
       child: LayoutBuilder(
-        builder: (context, constraints) => constraints.maxWidth >= _kTabletBreakpoint
+        builder: (context, constraints) =>
+            constraints.maxWidth >= _kTabletBreakpoint
             ? _buildTablet(context)
             : _buildMobile(context),
       ),
@@ -173,7 +174,10 @@ class _HeroBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final height = (MediaQuery.sizeOf(context).height * 0.40).clamp(220.0, 320.0);
+    final height = (MediaQuery.sizeOf(context).height * 0.40).clamp(
+      220.0,
+      320.0,
+    );
     return ClipPath(
       clipper: _HeroWaveClipper(),
       child: Container(
@@ -182,7 +186,10 @@ class _HeroBanner extends StatelessWidget {
         decoration: const BoxDecoration(gradient: _heroGradient),
         alignment: Alignment.bottomCenter,
         // 물결에 그림이 잘리지 않도록 아래 여백을 둔다.
-        padding: const EdgeInsets.only(top: AppSpacing.md, bottom: AppSpacing.lg),
+        padding: const EdgeInsets.only(
+          top: AppSpacing.md,
+          bottom: AppSpacing.lg,
+        ),
         child: Image.asset(
           _mascotAsset,
           fit: BoxFit.contain,
@@ -360,7 +367,8 @@ class _FloatingDoodleState extends State<_FloatingDoodle>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final reduceMotion = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
     if (reduceMotion) {
       _controller.stop();
     } else if (!_controller.isAnimating) {
@@ -479,19 +487,26 @@ class _LoginProgress extends StatelessWidget {
   final AuthProvider provider;
 
   @override
-  Widget build(BuildContext context) => Padding(
-    key: const ValueKey('login-progress'),
-    padding: const EdgeInsets.only(top: AppSpacing.md),
-    child: Text(
-      '${_providerLabel(provider)} 계정으로 연결하고 있어요…',
-      textAlign: TextAlign.center,
-      style: const TextStyle(
-        color: AppColors.inkMuted,
-        fontSize: 14,
-        fontWeight: FontWeight.w600,
+  Widget build(BuildContext context) {
+    final message = '${_providerLabel(provider)} 계정으로 연결하고 있어요…';
+    return Semantics(
+      liveRegion: true,
+      label: message,
+      child: Padding(
+        key: const ValueKey('login-progress'),
+        padding: const EdgeInsets.only(top: AppSpacing.md),
+        child: Text(
+          message,
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: AppColors.inkMuted,
+            fontSize: 14,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _LoginFailurePanel extends StatelessWidget {
@@ -501,60 +516,67 @@ class _LoginFailurePanel extends StatelessWidget {
   final VoidCallback? onRetry;
 
   @override
-  Widget build(BuildContext context) => Container(
-    key: const ValueKey('login-failure'),
-    width: double.infinity,
-    margin: const EdgeInsets.only(top: AppSpacing.md),
-    padding: const EdgeInsets.all(AppSpacing.md),
-    decoration: BoxDecoration(
-      color: AppColors.errorSoft,
-      borderRadius: BorderRadius.circular(AppRadius.md),
-    ),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Icon(Icons.error_outline_rounded, color: AppColors.error),
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                '로그인을 완료하지 못했어요',
-                style: TextStyle(
-                  color: AppColors.ink,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xxs),
-              Text(
-                _failureMessage(failure.type),
-                style: const TextStyle(
-                  color: AppColors.inkMuted,
-                  fontSize: 13,
-                  height: 1.4,
-                ),
-              ),
-              if (failure.canRetry && onRetry != null) ...[
-                const SizedBox(height: AppSpacing.xs),
-                TextButton.icon(
-                  onPressed: onRetry,
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
-                  label: const Text('다시 시도'),
-                  style: TextButton.styleFrom(
-                    foregroundColor: AppColors.error,
-                    padding: EdgeInsets.zero,
-                    minimumSize: const Size(0, AppSizes.minTouchTarget),
-                  ),
-                ),
-              ],
-            ],
-          ),
+  Widget build(BuildContext context) {
+    final message = _failureMessage(failure.type);
+    return Semantics(
+      liveRegion: true,
+      label: '로그인을 완료하지 못했어요. $message',
+      child: Container(
+        key: const ValueKey('login-failure'),
+        width: double.infinity,
+        margin: const EdgeInsets.only(top: AppSpacing.md),
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: AppColors.errorSoft,
+          borderRadius: BorderRadius.circular(AppRadius.md),
         ),
-      ],
-    ),
-  );
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.error_outline_rounded, color: AppColors.error),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    '로그인을 완료하지 못했어요',
+                    style: TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xxs),
+                  Text(
+                    message,
+                    style: const TextStyle(
+                      color: AppColors.inkMuted,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                  ),
+                  if (failure.canRetry && onRetry != null) ...[
+                    const SizedBox(height: AppSpacing.xs),
+                    TextButton.icon(
+                      onPressed: onRetry,
+                      icon: const Icon(Icons.refresh_rounded, size: 18),
+                      label: const Text('다시 시도'),
+                      style: TextButton.styleFrom(
+                        foregroundColor: AppColors.error,
+                        padding: EdgeInsets.zero,
+                        minimumSize: const Size(0, AppSizes.minTouchTarget),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 String _providerLabel(AuthProvider provider) => switch (provider) {
@@ -564,7 +586,7 @@ String _providerLabel(AuthProvider provider) => switch (provider) {
 };
 
 String _failureMessage(AuthFailureType type) => switch (type) {
-  AuthFailureType.network => '인터넷 연결이 불안정해요. 연결을 확인한 뒤 다시 시도해 주세요.',
+  AuthFailureType.network => '인터넷 연결이 불안정해요.\n연결을 확인한 뒤 다시 시도해 주세요.',
   AuthFailureType.serverRejected => '잠시 로그인 서비스를 이용하기 어려워요. 잠시 후 다시 시도해 주세요.',
   AuthFailureType.providerRejected ||
   AuthFailureType.invalidCredential ||
