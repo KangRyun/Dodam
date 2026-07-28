@@ -40,6 +40,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
               style: IconButton.styleFrom(
                 backgroundColor: AppColors.surfaceSoft,
                 foregroundColor: AppColors.ink,
+                minimumSize: const Size.square(AppSizes.iconButton),
               ),
             ),
           ),
