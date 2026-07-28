@@ -50,6 +50,7 @@ void main() {
     expect(session.user.id, '42');
     expect(session.user.provider, AuthProvider.kakao);
     expect(session.user.role, isNull);
+    expect(session.user.emailRequired, isTrue);
     expect(session.requiresAdditionalEmail, isTrue);
     expect(await store.read(), session);
   });

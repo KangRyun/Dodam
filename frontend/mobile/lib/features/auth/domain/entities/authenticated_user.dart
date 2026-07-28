@@ -8,6 +8,7 @@ class AuthenticatedUser {
     required this.providerUserId,
     this.role,
     required this.onboardingCompleted,
+    this.emailRequired = false,
     this.email,
     this.nickname,
     this.profileImageUrl,
@@ -18,11 +19,12 @@ class AuthenticatedUser {
   final String providerUserId;
   final UserRole? role;
   final bool onboardingCompleted;
+  final bool emailRequired;
   final String? email;
   final String? nickname;
   final String? profileImageUrl;
 
-  bool get needsEmail => email == null || email!.trim().isEmpty;
+  bool get needsEmail => emailRequired;
 
   AuthenticatedUser copyWith({
     String? id,
@@ -30,6 +32,7 @@ class AuthenticatedUser {
     String? providerUserId,
     UserRole? role,
     bool? onboardingCompleted,
+    bool? emailRequired,
     String? email,
     String? nickname,
     String? profileImageUrl,
@@ -39,6 +42,7 @@ class AuthenticatedUser {
     providerUserId: providerUserId ?? this.providerUserId,
     role: role ?? this.role,
     onboardingCompleted: onboardingCompleted ?? this.onboardingCompleted,
+    emailRequired: emailRequired ?? this.emailRequired,
     email: email ?? this.email,
     nickname: nickname ?? this.nickname,
     profileImageUrl: profileImageUrl ?? this.profileImageUrl,
@@ -53,6 +57,7 @@ class AuthenticatedUser {
           providerUserId == other.providerUserId &&
           role == other.role &&
           onboardingCompleted == other.onboardingCompleted &&
+          emailRequired == other.emailRequired &&
           email == other.email &&
           nickname == other.nickname &&
           profileImageUrl == other.profileImageUrl;
@@ -64,6 +69,7 @@ class AuthenticatedUser {
     providerUserId,
     role,
     onboardingCompleted,
+    emailRequired,
     email,
     nickname,
     profileImageUrl,
