@@ -13,20 +13,26 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('로그아웃하면 선택 아동을 초기화하고 로그인 화면으로 이동한다', (tester) async {
+  testWidgets('사이드바 "프로필 전환"은 프로필 선택 화면으로 이동한다', (tester) async {
+    // 보호자 홈은 태블릿 사이드바 레이아웃이라 태블릿 크기로 검증한다.
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
     await tester.pumpWidget(
       DodamApp(childRepository: _FakeChildRepository(children: _children)),
     );
     await tester.pumpAndSettle();
+    // 홈 대시보드가 떠 있어야 한다(아이 자동 선택 상태).
+    expect(find.byKey(const ValueKey('child-list-success')), findsOneWidget);
 
-    await tester.tap(find.byKey(const ValueKey('child-7')));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('logout-action')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('로그아웃').last);
+    // 사이드바의 "프로필 전환" → 프로필 선택 화면. 로그아웃은 그 화면에서 한다.
+    await tester.tap(find.byKey(const ValueKey('guardian-switch-profile')));
     await tester.pumpAndSettle();
 
-    expect(find.text('그림과 대화로\n아이의 마음을 만나봐요'), findsOneWidget);
+    expect(find.text('누가 도담을 이용하나요?'), findsOneWidget);
+    expect(find.byKey(const ValueKey('logout-action')), findsOneWidget);
   });
 
   test('보호자 선택 상태를 초기화한다', () async {

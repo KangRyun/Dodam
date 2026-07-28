@@ -41,6 +41,9 @@ final class GuardianChildController extends ChangeNotifier {
           orElse: () => null,
         );
       }
+      // 첫 진입 시 첫 아이를 자동 선택해 보호자 홈 대시보드가 바로 데이터를
+      // 보여준다(마음 카드·최근 활동·마음 달력). 선택 이력이 있으면 유지한다.
+      _selectedChild ??= children.isEmpty ? null : children.first;
       _status = children.isEmpty
           ? ChildListStatus.empty
           : ChildListStatus.success;

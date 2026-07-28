@@ -1,38 +1,31 @@
 import 'package:flutter/material.dart';
 
 import '../../../../app/router/app_navigation.dart';
-import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../app/state/guardian_child_controller.dart';
 import '../../../../app/widgets/app_failure_view.dart';
 import '../../../../app/widgets/app_placeholder_scaffold.dart';
 import '../../../../design_system/design_system.dart';
+import '../../../activity/domain/repositories/activity_repository.dart';
 import '../../../child/data/dto/child_dtos.dart';
+import '../widgets/guardian_dashboard.dart';
 
 class GuardianHomeScreen extends StatelessWidget {
   const GuardianHomeScreen({
     required this.controller,
-    this.actions = const [],
+    this.activityRepository,
     super.key,
   });
 
   final GuardianChildController controller;
-  final List<Widget> actions;
+
+  /// 마음 달력·최근 활동을 그리는 데 쓰는 활동 이력 레포.
+  final ActivityRepository? activityRepository;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: AppColors.canvas,
-    appBar: AppTopBar(
-      title: '보호자 홈',
-      onBack: () => AppRouter.goProfileSelection(context),
-      actions: actions,
-    ),
-    body: SafeArea(
-      child: AnimatedBuilder(
-        animation: controller,
-        builder: (context, _) => _buildBody(context),
-      ),
-    ),
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: controller,
+    builder: (context, _) => _buildBody(context),
   );
 
   Widget _buildBody(BuildContext context) => switch (controller.status) {
@@ -47,122 +40,18 @@ class GuardianHomeScreen extends StatelessWidget {
       onRetry: controller.loadChildren,
     ),
     ChildListStatus.empty => AppEmptyView(
-      key: ValueKey('child-list-empty'),
+      key: const ValueKey('child-list-empty'),
       title: '등록된 아이가 없어요',
       message: '아이 프로필을 등록하면 그림 활동을 시작할 수 있어요.',
       actionLabel: '아이 등록하기',
       onAction: () => AppNavigation.pushNamed(context, AppRoutes.childRegister),
     ),
-    ChildListStatus.success => _GuardianHomeContent(controller: controller),
-  };
-}
-
-class _GuardianHomeContent extends StatelessWidget {
-  const _GuardianHomeContent({required this.controller});
-  final GuardianChildController controller;
-
-  @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    key: const ValueKey('child-list-success'),
-    padding: const EdgeInsets.all(AppSpacing.xl),
-    child: Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          maxWidth: AppSizes.wideContentMaxWidth,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              '보호자님, 오늘도 아이와 함께해요',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: AppColors.ink,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            const Text(
-              '활동할 아이를 선택하고 편안한 그림 시간을 시작해 주세요.',
-              style: TextStyle(color: AppColors.inkMuted, fontSize: 16),
-            ),
-            const SizedBox(height: AppSpacing.xl),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final selection = _ChildSelectionCard(controller: controller);
-                final overview = _GuardianOverview(
-                  selectedChild: controller.selectedChild,
-                );
-                if (constraints.maxWidth < 820) {
-                  return Column(
-                    children: [
-                      selection,
-                      const SizedBox(height: AppSpacing.lg),
-                      overview,
-                    ],
-                  );
-                }
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(flex: 6, child: selection),
-                    const SizedBox(width: AppSpacing.lg),
-                    Expanded(flex: 4, child: overview),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            AppButton(
-              key: const ValueKey('start-child-mode'),
-              label: '그림 활동 시작하기',
-              leading: const Icon(Icons.palette_outlined),
-              // 아동 모드는 하단 탭이 보이면 안 되고, 최상단 라우트 관찰자가
-              // 아동 화면임을 알아야 푸시가 차단된다. 반드시 최상단에 띄운다.
-              onPressed: controller.selectedChild == null
-                  ? null
-                  : () => AppNavigation.pushNamed(
-                      context,
-                      AppRoutes.childModeHome(
-                        controller.selectedChild!.childId.toString(),
-                      ),
-                      rootNavigator: true,
-                    ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            AppButton(
-              key: const ValueKey('child-registration-entry'),
-              label: '아이 추가 등록',
-              leading: const Icon(Icons.person_add_alt_1_rounded),
-              variant: AppButtonVariant.secondary,
-              onPressed: () =>
-                  AppNavigation.pushNamed(context, AppRoutes.childRegister),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            AppButton(
-              key: const ValueKey('activity-history-entry'),
-              label: '활동 이력 보기',
-              leading: const Icon(Icons.history_rounded),
-              variant: AppButtonVariant.secondary,
-              onPressed: controller.selectedChild == null
-                  ? null
-                  : () =>
-                        AppNavigation.pushNamed(
-                          context,
-                          AppRoutes.activityHistory,
-                        ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            AppButton(
-              label: '아동 선택 화면에서 보기',
-              variant: AppButtonVariant.secondary,
-              onPressed: () =>
-                  AppNavigation.pushNamed(context, AppRoutes.childSelect),
-            ),
-          ],
-        ),
-      ),
+    ChildListStatus.success => GuardianDashboard(
+      key: ValueKey('guardian-dashboard-${controller.selectedChildId}'),
+      controller: controller,
+      activityRepository: activityRepository,
     ),
-  );
+  };
 }
 
 class ChildSelectScreen extends StatelessWidget {
@@ -289,119 +178,6 @@ class _ChildSelectionCard extends StatelessWidget {
         ],
       ],
     ),
-  );
-}
-
-class _GuardianOverview extends StatelessWidget {
-  const _GuardianOverview({required this.selectedChild});
-  final ChildSummaryDto? selectedChild;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(AppSpacing.lg),
-    decoration: BoxDecoration(
-      color: AppColors.leafSoft,
-      borderRadius: BorderRadius.circular(AppRadius.lg),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        const Text(
-          '선택된 아이 요약',
-          style: TextStyle(
-            color: AppColors.ink,
-            fontSize: 19,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (selectedChild == null)
-          const Text(
-            '왼쪽에서 활동할 아이를 선택해 주세요.',
-            style: TextStyle(color: AppColors.inkMuted),
-          )
-        else ...[
-          Row(
-            children: [
-              _ChildAvatar(child: selectedChild!),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  selectedChild!.nickname,
-                  style: const TextStyle(
-                    color: AppColors.ink,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Text(
-            '최근 활동 ${selectedChild!.recentActivity.totalActivityCount}회',
-            style: const TextStyle(
-              color: AppColors.ink,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            selectedChild!.recentActivity.lastActivityAt == null
-                ? '아직 기록된 활동이 없어요.'
-                : '최근 활동: ${selectedChild!.recentActivity.lastActivityAt}',
-            style: const TextStyle(color: AppColors.inkMuted),
-          ),
-        ],
-        const Divider(height: AppSpacing.xl),
-        const _OverviewPlaceholder(
-          icon: Icons.insights_outlined,
-          label: '월간 활동 요약',
-          caption: '활동 통계 연결 예정',
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        const _OverviewPlaceholder(
-          icon: Icons.description_outlined,
-          label: '관찰 리포트',
-          caption: '리포트 화면 연결 예정',
-        ),
-      ],
-    ),
-  );
-}
-
-class _OverviewPlaceholder extends StatelessWidget {
-  const _OverviewPlaceholder({
-    required this.icon,
-    required this.label,
-    required this.caption,
-  });
-  final IconData icon;
-  final String label, caption;
-  @override
-  Widget build(BuildContext context) => Row(
-    children: [
-      Icon(icon, color: AppColors.leaf),
-      const SizedBox(width: AppSpacing.sm),
-      Expanded(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              label,
-              style: const TextStyle(
-                color: AppColors.ink,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            Text(
-              caption,
-              style: const TextStyle(color: AppColors.inkMuted, fontSize: 13),
-            ),
-          ],
-        ),
-      ),
-    ],
   );
 }
 
