@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../drawing/application/activity_completion_controller.dart';
@@ -1944,9 +1945,7 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
       ),
     );
     if (confirmed != true || !context.mounted) return;
-    Navigator.of(
-      context,
-    ).pushNamedAndRemoveUntil(AppRoutes.guardianHome, (route) => false);
+    AppRouter.goGuardianHome(context);
   }
 }
 

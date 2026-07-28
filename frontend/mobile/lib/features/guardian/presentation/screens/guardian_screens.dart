@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/router/app_navigation.dart';
 import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../app/state/guardian_child_controller.dart';
@@ -49,7 +50,7 @@ class GuardianHomeScreen extends StatelessWidget {
       title: '등록된 아이가 없어요',
       message: '아이 프로필을 등록하면 그림 활동을 시작할 수 있어요.',
       actionLabel: '아이 등록하기',
-      onAction: () => Navigator.of(context).pushNamed(AppRoutes.childRegister),
+      onAction: () => AppNavigation.pushNamed(context, AppRoutes.childRegister),
     ),
     ChildListStatus.success => _GuardianHomeContent(controller: controller),
   };
@@ -114,12 +115,16 @@ class _GuardianHomeContent extends StatelessWidget {
               key: const ValueKey('start-child-mode'),
               label: '그림 활동 시작하기',
               leading: const Icon(Icons.palette_outlined),
+              // 아동 모드는 하단 탭이 보이면 안 되고, 최상단 라우트 관찰자가
+              // 아동 화면임을 알아야 푸시가 차단된다. 반드시 최상단에 띄운다.
               onPressed: controller.selectedChild == null
                   ? null
-                  : () => Navigator.of(context).pushNamed(
+                  : () => AppNavigation.pushNamed(
+                      context,
                       AppRoutes.childModeHome(
                         controller.selectedChild!.childId.toString(),
                       ),
+                      rootNavigator: true,
                     ),
             ),
             const SizedBox(height: AppSpacing.sm),
@@ -129,7 +134,7 @@ class _GuardianHomeContent extends StatelessWidget {
               leading: const Icon(Icons.person_add_alt_1_rounded),
               variant: AppButtonVariant.secondary,
               onPressed: () =>
-                  Navigator.of(context).pushNamed(AppRoutes.childRegister),
+                  AppNavigation.pushNamed(context, AppRoutes.childRegister),
             ),
             const SizedBox(height: AppSpacing.sm),
             AppButton(
@@ -139,16 +144,18 @@ class _GuardianHomeContent extends StatelessWidget {
               variant: AppButtonVariant.secondary,
               onPressed: controller.selectedChild == null
                   ? null
-                  : () => Navigator.of(
-                      context,
-                    ).pushNamed(AppRoutes.activityHistory),
+                  : () =>
+                        AppNavigation.pushNamed(
+                          context,
+                          AppRoutes.activityHistory,
+                        ),
             ),
             const SizedBox(height: AppSpacing.sm),
             AppButton(
               label: '아동 선택 화면에서 보기',
               variant: AppButtonVariant.secondary,
               onPressed: () =>
-                  Navigator.of(context).pushNamed(AppRoutes.childSelect),
+                  AppNavigation.pushNamed(context, AppRoutes.childSelect),
             ),
           ],
         ),
@@ -221,13 +228,16 @@ class _ChildSelectContent extends StatelessWidget {
             const SizedBox(height: AppSpacing.lg),
             AppButton(
               label: '선택한 아이로 시작',
+              // 보호자 홈은 최상단에 그대로 두고 그 위에 아동 모드를 얹는다.
+              // 아이가 활동을 마치면 뒤로가기 한 번으로 보호자 모드에 돌아온다.
               onPressed: controller.selectedChild == null
                   ? null
-                  : () => Navigator.of(context).pushNamedAndRemoveUntil(
+                  : () => AppNavigation.pushNamed(
+                      context,
                       AppRoutes.childModeHome(
                         controller.selectedChild!.childId.toString(),
                       ),
-                      (route) => route.settings.name == AppRoutes.guardianHome,
+                      rootNavigator: true,
                     ),
             ),
           ],
