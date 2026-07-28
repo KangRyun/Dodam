@@ -404,10 +404,16 @@ Apple 계정 처리 규칙:
 
 | API | Body |
 | --- | --- |
-| USER-02 | `nickname:string(1~50)`, `role:GUARDIAN\|EXPERT`, `profileImageFileId?:string` |
+| USER-02 | `nickname:string(1~50)`, `role:GUARDIAN\|EXPERT`, `email:string(이메일 형식, 최대 255자)`, `profileImageFileId?:string` |
 | USER-03 | 변경할 필드만 전달: `nickname?:string(1~50)`, `profileImageFileId?:string|null` |
 | USER-04 | `analysisCompleted:boolean`, `community:boolean`, `serviceNotice:boolean`, `marketing:boolean` |
 | USER-05 | `password?:string`(LOCAL 계정), `confirmation:string` 값은 `DELETE`, `deleteChildData:boolean` |
+
+USER-02 연락 이메일 계약:
+
+- `email:string`은 필수이며 이메일 형식, 최대 255자 제약을 적용한다.
+- Backend는 이메일의 앞뒤 공백을 제거하고 `Locale.ROOT` 기준 소문자로 정규화한 뒤 `users.email`에 저장한다.
+- `users.email`은 계정 식별자가 아닌 연락 이메일이다. 동일 이메일을 사용하는 서로 다른 OAuth 사용자를 허용하며 이메일을 기준으로 계정을 자동 병합하지 않는다.
 
 ### 6.3 `UserResponse`
 
@@ -416,6 +422,7 @@ Apple 계정 처리 규칙:
   "userId": 1,
   "role": "GUARDIAN",
   "nickname": "튼튼이엄마",
+  "email": "guardian@example.com",
   "accountStatus": "ACTIVE",
   "profileImageUrl": "https://signed.example.com/profile/1",
   "notificationSettings": {

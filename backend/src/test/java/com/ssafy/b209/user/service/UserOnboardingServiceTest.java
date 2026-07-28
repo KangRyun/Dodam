@@ -81,6 +81,26 @@ class UserOnboardingServiceTest {
   }
 
   @Test
+  void normalizesContactEmailBeforeStoringOnboardingProfile() {
+    User user = User.pending(LocalDateTime.of(2026, 7, 23, 0, 0));
+    given(userRepository.findById(USER_ID)).willReturn(Optional.of(user));
+    given(notificationSettingsReader.read(USER_ID))
+        .willReturn(NotificationSettingsResponse.defaults());
+    OnboardingRequest request =
+        new OnboardingRequest(
+            UserRole.GUARDIAN,
+            "보호자",
+            "  Guardian@Example.COM  ",
+            null,
+            List.of(new ConsentAgreementRequest(1L, ConsentAction.AGREE)));
+
+    UserResponse response = service.completeOnboarding(USER_ID, request, null, null);
+
+    assertThat(response.email()).isEqualTo("guardian@example.com");
+    assertThat(user.getEmail()).isEqualTo("guardian@example.com");
+  }
+
+  @Test
   void returnsCurrentStateWithoutSideEffectsWhenAlreadyOnboarded() {
     User user = User.pending(LocalDateTime.of(2026, 7, 23, 0, 0));
     user.completeOnboarding(
