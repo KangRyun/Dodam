@@ -32,6 +32,16 @@ scrape_configs:
     static_configs:
       - targets: ["cadvisor:8080"]
 
+  # MinIO 오브젝트 스토리지 — 아동 그림·음성 파일 저장소 (S15P11B209-369)
+  #   무인증 스크레이프는 compose 의 MINIO_PROMETHEUS_AUTH_TYPE=public 에 의존한다.
+  #   그 값이 없으면 403 이 되므로, 타깃이 down 이면 그 환경변수부터 확인할 것.
+  #   경로는 v2 cluster — 버킷 단위 지표가 필요해지면 /minio/v2/metrics/bucket 을 추가한다
+  #   (버킷 지표는 객체 수가 늘수록 수집 비용이 커져 기본에서는 제외).
+  - job_name: minio
+    metrics_path: /minio/v2/metrics/cluster
+    static_configs:
+      - targets: ["minio:9000"]
+
   # 수집기 자신 — 수집기 장애를 수집기로 관찰
   - job_name: prometheus
     static_configs:
