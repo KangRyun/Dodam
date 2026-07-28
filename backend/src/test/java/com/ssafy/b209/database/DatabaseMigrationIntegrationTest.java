@@ -49,19 +49,17 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("17");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("18");
     assertThat(tableExists("flyway_schema_history")).isTrue();
-    assertThat(tableCount()).isEqualTo(67);
+    assertThat(tableCount()).isEqualTo(69);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
     assertThat(
             jdbcTemplate.queryForList(
-                "SELECT code FROM drawing_types "
-                    + "WHERE code IN ('ART_DIARY', 'FREE_DRAWING', "
-                    + "'EMOTION_COLORING', 'WEATHER_MIND') "
-                    + "ORDER BY display_order",
+                "SELECT code FROM drawing_types WHERE is_active = TRUE "
+                    + "AND code IN ('ART_DIARY', 'HTP') ORDER BY display_order",
                 String.class))
-        .containsExactly("ART_DIARY", "FREE_DRAWING", "EMOTION_COLORING", "WEATHER_MIND");
+        .containsExactly("ART_DIARY", "HTP");
     // V17 동의 약관 시드 — 앱이 아는 7개 term_code 가 모두 활성으로 심겼는지 확인한다.
     assertThat(
             jdbcTemplate.queryForList(
@@ -103,6 +101,30 @@ class DatabaseMigrationIntegrationTest {
     assertThat(
             foreignKeyExists("report_evidence_authors", "fk_report_evidence_authors_evidence_id"))
         .isTrue();
+  }
+
+  @Test
+  void createsHtpAggregateTablesAndStepConstraints() {
+    assertThat(tableExists("htp_assessments")).isTrue();
+    assertThat(tableExists("htp_assessment_steps")).isTrue();
+    assertThat(
+            foreignKeyExists("htp_assessment_steps", "fk_htp_assessment_steps_drawing_session_id"))
+        .isTrue();
+    assertThat(indexExists("htp_assessment_steps", "uk_htp_assessment_steps_session", true))
+        .isTrue();
+    assertThat(indexExists("htp_assessments", "uk_htp_assessments_active_child", true)).isTrue();
+    assertThat(columnExists("htp_assessment_steps", "completion_idempotency_key")).isTrue();
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT activity_category FROM drawing_types WHERE code = 'HTP'", String.class))
+        .isEqualTo("ASSESSMENT");
+    assertThat(
+            jdbcTemplate.queryForList(
+                "SELECT code FROM drawing_types "
+                    + "WHERE code IN ('FREE_DRAWING', 'EMOTION_COLORING', 'WEATHER_MIND') "
+                    + "AND is_active = TRUE",
+                String.class))
+        .isEmpty();
   }
 
   @Test

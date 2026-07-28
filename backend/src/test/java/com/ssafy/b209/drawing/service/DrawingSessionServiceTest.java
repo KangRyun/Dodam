@@ -302,6 +302,20 @@ class DrawingSessionServiceTest {
         DrawingErrorCode.IDEMPOTENCY_KEY_CONFLICT);
   }
 
+  @Test
+  void rejectsHtpTypeFromTheGenericDrawingSessionEndpoint() {
+    drawingType =
+        DrawingTypeFixture.create(
+            2L, "HTP", "집·나무·사람 그림", DrawingTypeSelectableBy.GUARDIAN, 4, 12, true);
+    given(drawingSessionRepository.findByIdempotencyKeyForUpdate(KEY)).willReturn(Optional.empty());
+    given(childRepository.findNotDeletedByIdForUpdate(1L)).willReturn(Optional.of(child));
+    given(drawingTypeRepository.findById(2L)).willReturn(Optional.of(drawingType));
+
+    assertBusinessError(
+        () -> service.createDrawingSession(KEY, request(CANVAS)),
+        DrawingErrorCode.DRAWING_TYPE_NOT_AVAILABLE);
+  }
+
   private void stubSuccessfulCreation() {
     given(drawingSessionRepository.findByIdempotencyKeyForUpdate(KEY)).willReturn(Optional.empty());
     given(childRepository.findNotDeletedByIdForUpdate(1L)).willReturn(Optional.of(child));
