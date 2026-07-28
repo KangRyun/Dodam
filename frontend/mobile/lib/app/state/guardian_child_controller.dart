@@ -16,8 +16,12 @@ final class GuardianChildController extends ChangeNotifier {
   ChildSummaryDto? _selectedChild;
   ChildRegistrationStatus _registrationStatus = ChildRegistrationStatus.idle;
   Object? _registrationError;
+  Object? _listError;
 
   ChildListStatus get status => _status;
+
+  /// 목록 조회가 실패한 원인. 화면이 오프라인·서버 오류를 구분해 안내하는 데 쓴다.
+  Object? get listError => _listError;
   List<ChildSummaryDto> get children => _children;
   ChildSummaryDto? get selectedChild => _selectedChild;
   int? get selectedChildId => _selectedChild?.childId;
@@ -26,6 +30,7 @@ final class GuardianChildController extends ChangeNotifier {
 
   Future<void> loadChildren() async {
     _status = ChildListStatus.loading;
+    _listError = null;
     notifyListeners();
     try {
       final children = await _repository.getChildren();
@@ -39,7 +44,8 @@ final class GuardianChildController extends ChangeNotifier {
       _status = children.isEmpty
           ? ChildListStatus.empty
           : ChildListStatus.success;
-    } on Object {
+    } on Object catch (error) {
+      _listError = error;
       _status = ChildListStatus.error;
     }
     notifyListeners();
@@ -101,6 +107,7 @@ final class GuardianChildController extends ChangeNotifier {
     _status = ChildListStatus.idle;
     _children = const [];
     _selectedChild = null;
+    _listError = null;
     _registrationStatus = ChildRegistrationStatus.idle;
     _registrationError = null;
     notifyListeners();

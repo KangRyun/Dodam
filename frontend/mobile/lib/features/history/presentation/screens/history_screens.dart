@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../app/router/app_routes.dart';
 import '../../../../app/state/guardian_child_controller.dart';
+import '../../../../app/widgets/app_failure_view.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../activity/data/dto/activity_dtos.dart';
 import '../../../activity/domain/repositories/activity_repository.dart';
@@ -27,6 +28,7 @@ class ActivityHistoryScreen extends StatefulWidget {
 
 class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
   _HistoryStatus _status = _HistoryStatus.loading;
+  Object? _failure;
   List<ActivitySummaryDto> _activities = const [];
   List<ActivityDrawingTypeDto> _knownTypes = const [];
   int? _selectedActivityId;
@@ -56,7 +58,10 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
       });
       return;
     }
-    setState(() => _status = _HistoryStatus.loading);
+    setState(() {
+      _status = _HistoryStatus.loading;
+      _failure = null;
+    });
     try {
       final now = DateTime.now().toUtc();
       final response = await widget.repository.getActivities(
@@ -91,8 +96,13 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
             ? _HistoryStatus.empty
             : _HistoryStatus.success;
       });
-    } on Object {
-      if (mounted) setState(() => _status = _HistoryStatus.error);
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _failure = error;
+          _status = _HistoryStatus.error;
+        });
+      }
     }
   }
 
@@ -160,9 +170,10 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
     ),
     _HistoryStatus.error => _HistoryContent(
       filter: _buildFilter(),
-      content: AppRetryView(
+      content: AppFailureView(
         key: const ValueKey('activity-history-error'),
         title: '활동 기록을 불러오지 못했어요',
+        failure: _failure,
         onRetry: _load,
       ),
     ),
@@ -629,6 +640,7 @@ class ActivityDetailScreen extends StatefulWidget {
 class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
   _DetailStatus _status = _DetailStatus.loading;
   ActivityDetailDto? _activity;
+  Object? _failure;
 
   @override
   void initState() {
@@ -642,7 +654,10 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
       setState(() => _status = _DetailStatus.invalidId);
       return;
     }
-    setState(() => _status = _DetailStatus.loading);
+    setState(() {
+      _status = _DetailStatus.loading;
+      _failure = null;
+    });
     try {
       final activity = await widget.repository.getActivity(activityId);
       if (!mounted) return;
@@ -652,8 +667,13 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
             ? _DetailStatus.empty
             : _DetailStatus.success;
       });
-    } on Object {
-      if (mounted) setState(() => _status = _DetailStatus.error);
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _failure = error;
+          _status = _DetailStatus.error;
+        });
+      }
     }
   }
 
@@ -672,9 +692,10 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
       key: ValueKey('activity-detail-loading'),
       message: '활동 상세를 불러오고 있어요',
     ),
-    _DetailStatus.error => AppRetryView(
+    _DetailStatus.error => AppFailureView(
       key: const ValueKey('activity-detail-error'),
       title: '활동 상세를 불러오지 못했어요',
+      failure: _failure,
       onRetry: _load,
     ),
     _DetailStatus.invalidId => const AppErrorView(
