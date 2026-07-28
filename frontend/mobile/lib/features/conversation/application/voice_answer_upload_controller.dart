@@ -10,7 +10,13 @@ import '../domain/repositories/voice_answer_repository.dart';
 /// [consentRequired]는 아동 음성 처리 동의가 없어 서버가 `403 VOICE_CONSENT_REQUIRED`로
 /// 거절한 경우다. 재시도해도 같은 결과이므로 [failure]와 구분해 선택형 답변으로 안내한다
 /// (API 명세 §12 "음성 처리 동의가 없으면 선택형 답변을 사용한다").
-enum VoiceAnswerUploadStatus { idle, uploading, success, failure, consentRequired }
+enum VoiceAnswerUploadStatus {
+  idle,
+  uploading,
+  success,
+  failure,
+  consentRequired,
+}
 
 final class VoiceAnswerUploadController extends ChangeNotifier {
   static const _consentRequiredCode = 'VOICE_CONSENT_REQUIRED';
