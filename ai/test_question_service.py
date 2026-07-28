@@ -15,6 +15,7 @@ import unittest
 from unittest import mock
 
 import llm_client
+import question_safety
 import question_service
 from internal_contracts import (
     BoundingBox,
@@ -153,6 +154,51 @@ class GenerateTest(unittest.TestCase):
             )
         # OPTION 비허용 → options는 null이어야 계약 통과
         self.assertIsNone(resp.options)
+
+
+class SafetyPipelineTest(unittest.TestCase):
+    """생성 질문 안전 판정 파이프라인 (S15P11B209-596)."""
+
+    def test_generated_question_is_sanitized(self):
+        # 내부 계약 경로도 이제 정화된 질문을 내보낸다(이모지·마크업 제거).
+        capture: dict = {}
+        client = _mock_client(capture, reply="**우와** 멋진 집이네! 누가 살아? 😊")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(_request(), "req-1")
+        self.assertEqual(resp.safety_result.status, "PASSED")
+        self.assertNotIn("😊", resp.question_text)
+        self.assertNotIn("*", resp.question_text)
+        self.assertIn("멋진 집이네", resp.question_text)
+
+    def test_diagnostic_question_blocked_maps_to_422(self):
+        capture: dict = {}
+        client = _mock_client(capture, reply="이 그림은 불안을 의미하니?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            with self.assertRaises(question_service.SafetyBlockedError) as ctx:
+                question_service.generate(_request(), "req-1")
+        self.assertEqual(
+            ctx.exception.block_reason_code, question_safety.DIAGNOSTIC_LANGUAGE
+        )
+        self.assertEqual(ctx.exception.rule_version, "safety-2026-07")
+
+    def test_crisis_content_question_blocked(self):
+        capture: dict = {}
+        client = _mock_client(capture, reply="혹시 죽고 싶었던 적 있어?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            with self.assertRaises(question_service.SafetyBlockedError) as ctx:
+                question_service.generate(_request(), "req-1")
+        self.assertEqual(
+            ctx.exception.block_reason_code, question_safety.CRISIS_CONTENT
+        )
+
+    def test_symbol_only_question_treated_as_empty(self):
+        # 정화 후 남는 게 없으면 안전 차단이 아니라 빈 출력 → 폴백 경로(UpstreamError).
+        capture: dict = {}
+        client = _mock_client(capture, reply="🎨🌟")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            with self.assertRaises(question_service.UpstreamError) as ctx:
+                question_service.generate(_request(), "req-1")
+        self.assertEqual(ctx.exception.error_code, "AI_EMPTY_COMPLETION")
 
 
 class PurposeTargetChipConsistencyTest(unittest.TestCase):

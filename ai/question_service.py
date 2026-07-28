@@ -32,6 +32,7 @@ from openai import APIConnectionError, APIStatusError, OpenAIError
 import config
 import crisis_detection
 import llm_client
+import question_safety
 from gms import get_client
 from internal_contracts import (
     DetectedObject,
@@ -313,15 +314,32 @@ def _detect_crisis(req: QuestionRequest) -> str | None:
     return crisis_detection.scan(child_texts)
 
 
-def _evaluate_safety(question_text: str, rule_version: str) -> SafetyResult:
-    """생성된 질문의 안전 규칙 판단. (통과 스텁)
+def _evaluate_safety(
+    question_text: str, rule_version: str, request_id: str
+) -> tuple[SafetyResult, str]:
+    """생성된 질문을 안전 판정 파이프라인에 통과시킨다(S15P11B209-596).
 
-    TODO(편주희): 금지 표현·위험 신호 판단 규칙(ai/prompts/의 안전 규칙 버전과 연동).
-    차단으로 판단되면 여기서 SafetyBlockedError를 던진다 →
-    엔드포인트가 422 AI_SAFETY_POLICY_BLOCKED로 매핑(BE는 저장 없이 사용자 422).
-    ⚠️ 차단 시에도 질문 원문을 로그에 남기지 않는다 — reason 코드만.
+    question_safety.evaluate가 형식 정화 + 진단표현·위기 소재 차단을 순서대로 판정한다.
+    - 차단이면 SafetyBlockedError를 던진다 → 엔드포인트가 422 AI_SAFETY_POLICY_BLOCKED로
+      매핑(BE는 저장 없이 폴백 템플릿으로 대체).
+    - 통과면 (PASSED SafetyResult, 정화된 질문 텍스트)를 돌려준다 — 정화본을 아동 화면에 쓴다.
+
+    ⚠️ 차단 시에도 질문 원문은 로그에 남기지 않는다 — 사유 코드만.
     """
-    return SafetyResult(status="PASSED", rule_version=rule_version, block_reason_code=None)
+    verdict = question_safety.evaluate(question_text)
+    if verdict.blocked:
+        logger.warning(
+            "생성 질문 안전 차단: reason=%s request_id=%s",
+            verdict.block_reason_code,
+            request_id,
+        )
+        raise SafetyBlockedError(
+            verdict.block_reason_code or "UNSPECIFIED", rule_version
+        )
+    safety = SafetyResult(
+        status="PASSED", rule_version=rule_version, block_reason_code=None
+    )
+    return safety, verdict.sanitized_text
 
 
 # ── GMS 호출 + 제한적 재시도 ────────────────────────────────────
@@ -414,11 +432,11 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         # 빈 질문은 아동 화면에 내보낼 수 없다 → 실패로 취급해 BE 폴백 템플릿에 맡긴다.
         raise UpstreamError("AI_EMPTY_COMPLETION", "EmptyCompletion")
 
-    safety = _evaluate_safety(text, req.safety_rule_version)
-    if safety.status != "PASSED":
-        raise SafetyBlockedError(
-            safety.block_reason_code or "UNSPECIFIED", req.safety_rule_version
-        )
+    # 안전 판정 파이프라인 통과 후 정화된 질문을 쓴다(차단이면 여기서 422로 올린다).
+    safety, text = _evaluate_safety(text, req.safety_rule_version, request_id)
+    if not text:
+        # 정화 후 남는 게 없으면(기호뿐이었으면) 빈 출력 — 폴백 템플릿에 맡긴다.
+        raise UpstreamError("AI_EMPTY_COMPLETION", "EmptyCompletion")
 
     # 목적을 먼저 정하고 대상 객체·칩을 그 목적에 맞춰 파생 — 셋을 항상 정합하게 만든다.
     option_allowed = "OPTION" in req.allowed_response_modes
