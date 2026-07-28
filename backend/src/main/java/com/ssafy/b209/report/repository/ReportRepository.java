@@ -1,9 +1,13 @@
 package com.ssafy.b209.report.repository;
 
 import com.ssafy.b209.report.domain.Report;
+import com.ssafy.b209.report.domain.ReportStatus;
 import jakarta.persistence.LockModeType;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -11,6 +15,55 @@ import org.springframework.data.repository.query.Param;
 
 /** 그림 활동 리포트의 생성 접수 저장과 분석별 조회를 담당한다. */
 public interface ReportRepository extends JpaRepository<Report, Long> {
+
+  /**
+   * 연결 보호자에게 노출할 아동별 리포트를 활동일 기준으로 조회한다.
+   *
+   * <p>숨김 상태는 목록에서 제외하고, 그림 유형과 상태 조건은 값이 전달된 경우에만 적용한다.
+   *
+   * @param childId 조회 대상 아동 식별자
+   * @param fromInclusive 활동 시작 일시 하한이며 없으면 {@code null}
+   * @param toExclusive 활동 시작 일시 상한이며 없으면 {@code null}
+   * @param drawingTypeCode 그림 유형 코드이며 없으면 {@code null}
+   * @param reportStatus 리포트 상태이며 없으면 {@code null}
+   * @param pageable 페이지 조건
+   * @return 최신 생성 순으로 정렬된 리포트 페이지
+   */
+  @Query(
+      value =
+          """
+          select r
+          from Report r
+          join fetch r.drawingSession ds
+          join fetch ds.drawingType dt
+          where ds.child.id = :childId
+            and r.status <> com.ssafy.b209.report.domain.ReportStatus.HIDDEN
+            and (:fromInclusive is null or ds.startedAt >= :fromInclusive)
+            and (:toExclusive is null or ds.startedAt < :toExclusive)
+            and (:drawingTypeCode is null or dt.code = :drawingTypeCode)
+            and (:reportStatus is null or r.status = :reportStatus)
+          order by r.createdAt desc, r.id desc
+          """,
+      countQuery =
+          """
+          select count(r)
+          from Report r
+          join r.drawingSession ds
+          join ds.drawingType dt
+          where ds.child.id = :childId
+            and r.status <> com.ssafy.b209.report.domain.ReportStatus.HIDDEN
+            and (:fromInclusive is null or ds.startedAt >= :fromInclusive)
+            and (:toExclusive is null or ds.startedAt < :toExclusive)
+            and (:drawingTypeCode is null or dt.code = :drawingTypeCode)
+            and (:reportStatus is null or r.status = :reportStatus)
+          """)
+  Page<Report> findVisiblePage(
+      @Param("childId") Long childId,
+      @Param("fromInclusive") LocalDateTime fromInclusive,
+      @Param("toExclusive") LocalDateTime toExclusive,
+      @Param("drawingTypeCode") String drawingTypeCode,
+      @Param("reportStatus") ReportStatus reportStatus,
+      Pageable pageable);
 
   /**
    * 세션에서 가장 최근 생성된 리포트를 조회한다.
