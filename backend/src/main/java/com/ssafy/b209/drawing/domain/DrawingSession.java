@@ -301,6 +301,23 @@ public class DrawingSession {
   }
 
   /**
+   * 리포트 생성에 실패한 Session을 같은 REPORTING 단계에서 재시작한다.
+   *
+   * <p>재생성은 새 Analysis와 Report 버전으로 진행되므로 완료 시각과 이전 생성 결과를 변경하지 않는다.
+   *
+   * @throws IllegalStateException 삭제됐거나 FAILED/REPORTING 상태가 아닌 경우
+   */
+  public void restartReporting() {
+    if (deletedAt != null
+        || sessionStatus != DrawingSessionStatus.FAILED
+        || currentStage != DrawingStage.REPORTING) {
+      throw new IllegalStateException(
+          "only a failed reporting session can restart report generation");
+    }
+    sessionStatus = DrawingSessionStatus.IN_PROGRESS;
+  }
+
+  /**
    * 그림 활동을 삭제 상태로 전환하고 삭제 시각을 기록한다.
    *
    * <p>현재 단계와 완료 시각은 감사 및 운영 기록을 위해 유지한다.

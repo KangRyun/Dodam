@@ -26,6 +26,24 @@ class DrawingSessionCompletionTest {
     assertThatThrownBy(session::startReporting).isInstanceOf(IllegalStateException.class);
   }
 
+  @Test
+  void restartsFailedReportingSessionForReportRegeneration() {
+    DrawingSession session = sessionAt(DrawingSessionStatus.FAILED, DrawingStage.REPORTING);
+
+    session.restartReporting();
+
+    assertThat(session.getSessionStatus()).isEqualTo(DrawingSessionStatus.IN_PROGRESS);
+    assertThat(session.getCurrentStage()).isEqualTo(DrawingStage.REPORTING);
+    assertThat(session.getCompletedAt()).isNull();
+  }
+
+  @Test
+  void rejectsReportRegenerationOutsideFailedReportingState() {
+    DrawingSession session = sessionAt(DrawingSessionStatus.COMPLETED, DrawingStage.COMPLETED);
+
+    assertThatThrownBy(session::restartReporting).isInstanceOf(IllegalStateException.class);
+  }
+
   private DrawingSession sessionAt(DrawingSessionStatus status, DrawingStage stage) {
     DrawingSession session = new DrawingSession();
     ReflectionTestUtils.setField(session, "sessionStatus", status);

@@ -1275,6 +1275,8 @@ AI 초안과 전문가 의견을 같은 필드에 덮어쓰지 않는다. `repor
 | REPORT-03 | GET | `/expert/reports/{reportId}` | 공유 승인 EXPERT | 전문가용 검토 자료 상세 |
 | REPORT-04 | POST | `/reports/{reportId}/exports` | 연결 보호자 | PDF 내보내기 생성 요청 |
 | REPORT-05 | GET | `/reports/{reportId}/exports/{exportId}` | 연결 보호자 | PDF 생성 상태·다운로드 URL 조회 |
+| REPORT-06 | GET | `/reports/{reportId}/generation-status` | 연결 보호자 | 리포트 생성 상태·재시도 가능 여부 조회 |
+| REPORT-07 | POST | `/reports/{reportId}/regenerate` | 연결 보호자 | 실패한 최신 리포트 생성 재접수 |
 
 부적절한 리포트 신고는 공통 신고 API `POST /complaints`를 사용한다.
 
@@ -1459,9 +1461,33 @@ REPORT-04 요청:
 - REPORT-05 완료 응답: `exportId`, `status=COMPLETED`, `downloadUrl`, `expiresAt`.
 - PDF 모든 페이지에 “진단 결과가 아닌 참고용 활동 기록” 문구를 표시한다.
 
-### 13.8 오류
+### 13.8 생성 상태 조회·재생성
 
-`REPORT_NOT_FOUND`, `REPORT_NOT_READY`, `REPORT_ACCESS_DENIED`, `EXPERT_SHARE_CONSENT_REQUIRED`, `EXPERT_SHARE_EXPIRED`, `EXPERT_NOT_VERIFIED`, `REPORT_EXPORT_FAILED`.
+REPORT-06은 상세 리포트 본문을 조립하지 않고 생성 작업 확인에 필요한 다음 필드만 반환한다.
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `reportId` | long | 조회한 리포트 ID |
+| `drawingSessionId` | long | 리포트가 속한 그림 활동 세션 ID |
+| `analysisId` | long | 리포트 생성에 사용되는 최종 분석 ID |
+| `reportVersion` | integer | 세션 내 리포트 버전 |
+| `reportStatus` | `ReportStatus` | `GENERATING`, `COMPLETED`, `FAILED`, `HIDDEN` |
+| `retryable` | boolean | 해당 리포트가 최신 버전의 `FAILED` 리포트인지 여부 |
+| `failureReason` | string, nullable | 개인정보를 포함하지 않는 실패 분류 코드 |
+| `createdAt`, `updatedAt` | datetime | 생성 접수·최종 상태 변경 시각 |
+| `failedAt` | datetime, nullable | 실패 시각 |
+
+REPORT-07은 Request Body 없이 `Idempotency-Key` Header를 필수로 받는다.
+
+- 최신 버전이면서 `FAILED`인 리포트만 재생성할 수 있다.
+- 성공 시 기존 리포트를 덮어쓰지 않고 `reportVersion`을 1 증가시킨 `GENERATING` 리포트와 재시도 분석을 생성한다.
+- 동일한 `Idempotency-Key`와 동일한 원본 리포트로 재호출하면 최초 접수 결과를 반환한다.
+- `202 Accepted`와 새 리포트 상태를 반환하며 `Location` Header는 `/api/v1/reports/{newReportId}/generation-status`이다.
+- 생성 작업은 Transaction Commit 후 기존 비동기 리포트 생성 흐름으로 전달된다.
+
+### 13.9 오류
+
+`REPORT_NOT_FOUND`, `REPORT_NOT_READY`, `REPORT_ACCESS_DENIED`, `EXPERT_SHARE_CONSENT_REQUIRED`, `EXPERT_SHARE_EXPIRED`, `EXPERT_NOT_VERIFIED`, `REPORT_EXPORT_FAILED`, `REPORT_400_001`(Idempotency-Key 누락), `REPORT_400_002`(Idempotency-Key 형식 오류), `REPORT_409_002`(멱등 키 충돌), `REPORT_409_003`(재생성 불가 상태), `REPORT_409_004`(FINAL Asset 없음), `REPORT_409_005`(동시 재생성 충돌).
 
 ---
 
