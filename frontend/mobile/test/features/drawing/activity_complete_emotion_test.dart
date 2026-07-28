@@ -226,6 +226,38 @@ void main() {
     expect(find.text('대화를 먼저 마친 뒤 그림 활동을 완료해 주세요.'), findsOneWidget);
   });
 
+  testWidgets('그림 단계 완료 후 대화를 열고 회고로 바로 넘어가지 않는다', (tester) async {
+    final repository = _CompletionRepository();
+    await _pumpDrawing(
+      tester,
+      repository: repository,
+      conversationRepository: const MockConversationRepository(
+        delay: Duration.zero,
+      ),
+    );
+    await _drawStroke(tester);
+
+    await tester.ensureVisible(find.byKey(const ValueKey('drawing-complete')));
+    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다 그렸어요'));
+    // 대화가 열리면 질문 노출 타이머가 계속 돌아 pumpAndSettle이 끝나지 않는다.
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(repository.completeCalls, 1);
+    // 대화 단계에 머무르므로 회고 화면으로 넘어가지 않는다.
+    expect(find.text('내 마음 고르기'), findsNothing);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+    // 그림 단계는 끝났으므로 완료 요청이 다시 나가지 않는다.
+    await tester.tap(
+      find.byKey(const ValueKey('drawing-complete')),
+      warnIfMissed: false,
+    );
+    await tester.pump();
+    expect(repository.completeCalls, 1);
+  });
+
   testWidgets('0ms 완료도 Backend 최소 duration인 1ms를 전송한다', (tester) async {
     final repository = _CompletionRepository();
     final coordinator = DrawingSyncCoordinator(
@@ -300,7 +332,11 @@ void main() {
     expect(find.text('내 마음 고르기'), findsNothing);
   });
 
-  testWidgets('완료 응답 nextAction이 다르면 Canvas를 유지하고 이동하지 않는다', (tester) async {
+  // 명세 §10.8은 nextAction으로 감정 선택을 가리키지만 정본 활동 흐름 §23.1은 대화
+  // 뒤에 회고를 둔다. 그래서 다음 화면은 nextAction이 아니라 currentStage로 정한다.
+  testWidgets('완료 응답 nextAction이 달라도 stage가 CONVERSING이면 다음 단계로 넘어간다', (
+    tester,
+  ) async {
     final repository = _CompletionRepository(
       completionResponse: _unexpectedNextActionResponse,
     );
@@ -313,9 +349,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repository.completeCalls, 1);
-    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
-    expect(find.textContaining('그림은 그대로'), findsOneWidget);
-    expect(find.text('내 마음 고르기'), findsNothing);
+    expect(find.textContaining('그림은 그대로'), findsNothing);
+    // 대화 저장소가 없는 구성이므로 대화를 열지 못하고 회고 화면으로 넘어간다.
+    expect(find.text('내 마음 고르기'), findsOneWidget);
   });
 
   testWidgets('완료 실패 시 Canvas와 Stroke를 유지하고 이동하지 않는다', (tester) async {
