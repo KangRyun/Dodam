@@ -1,0 +1,31 @@
+# 도담 앱 스택 base (S15P11B209-357)
+#
+# ⚠️ base 는 **단독으로 apply 하지 않는다.** 이미지 태그와 외부 노출 방식이 비어 있다.
+#    반드시 overlay 를 통해 쓴다:
+#      kubectl apply -k infra/k8s/overlays/staging
+#      kubectl apply -k infra/k8s/overlays/prod
+#
+# ⚠️ Secret 이 이 목록에 없는 것은 실수가 아니라 설계다.
+#    kustomize 가 Secret 을 관리하면 값이 빈 매니페스트를 apply 하는 순간
+#    운영 비밀이 통째로 지워진다. 그래서 Secret 은 kustomize 밖에 두고
+#    infra/scripts/sync-secrets.sh 로만 만들고 갱신한다. 자세한 이유는 README 참조.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dodam
+
+resources:
+  - namespace.yaml
+  - configmap-app.yaml
+  - pvc.yaml
+  - mysql.yaml
+  - redis.yaml
+  - minio.yaml
+  - backend.yaml
+  - ai.yaml
+  - gateway.yaml
+  - jenkins-external.yaml
+  - cronjobs.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: dodam

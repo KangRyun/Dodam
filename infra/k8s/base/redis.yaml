@@ -1,0 +1,68 @@
+# Redis 7.4 — StatefulSet (S15P11B209-357)
+#
+# appendonly(AOF) 를 쓰므로 디스크가 필요하다 → StatefulSet + PVC.
+# 캐시로만 쓴다면 Deployment + emptyDir 로도 되지만, compose 가 appendonly yes 라 동일하게 맞춘다.
+#
+# ⚠️ 비밀번호를 command 인자로 넘기지 않는다. 인자로 넘기면 `ps` 와 파드 스펙에 평문이 남는다.
+#    환경변수로 받아 셸이 확장하게 한다(compose 와 같은 방식).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis
+  namespace: dodam
+  labels: { app: redis }
+spec:
+  clusterIP: None
+  selector: { app: redis }
+  ports:
+    - { name: redis, port: 6379, targetPort: 6379 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: dodam
+spec:
+  serviceName: redis
+  replicas: 1
+  selector:
+    matchLabels: { app: redis }
+  template:
+    metadata:
+      labels: { app: redis }
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.4.8-alpine
+          command: ["sh", "-c"]
+          args: ['exec redis-server --appendonly yes --requirepass "$REDIS_PASSWORD"']
+          env:
+            - { name: REDIS_PASSWORD, valueFrom: { secretKeyRef: { name: dodam-secrets, key: REDIS_PASSWORD } } }
+          ports:
+            - { name: redis, containerPort: 6379 }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", 'redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG']
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", 'redis-cli -a "$REDIS_PASSWORD" ping | grep -q PONG']
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          # 실측 4.4MB(2026-07-28). AOF 재작성 시 순간적으로 늘 수 있어 상한은 넉넉히.
+          resources:
+            requests: { memory: 64Mi,  cpu: 50m }
+            limits:   { memory: 256Mi, cpu: 500m }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests: { storage: 2Gi }

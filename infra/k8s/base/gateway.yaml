@@ -1,0 +1,232 @@
+# Gateway(nginx) — Deployment + conf ConfigMap (S15P11B209-357)
+#
+# compose 의 nginx 서비스를 옮긴 것. 이미지는 그대로 쓴다(dodam-nginx) — 정적 페이지
+# (랜딩·/download·/legal)가 이미지에 bake 돼 있기 때문이다. **conf 만 ConfigMap 으로 뺀다.**
+#   → conf 를 고칠 때 이미지 재빌드 없이 ConfigMap 만 바꾸고 롤아웃하면 된다.
+#
+# ⚠️ 80/443 을 언제 잡는지는 이 base 가 정하지 않는다.
+#     overlays/staging → NodePort (30080/30443, 운영 포트 미점유)
+#     overlays/prod    → hostPort 80/443 (컷오버 360 시점에만)
+#   356 의 "라이브 무접촉" 원칙을 매니페스트 구조로 강제한 것이다.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-conf
+  namespace: dodam
+data:
+  default.conf: |
+    # ⚠️ 이 파일은 infra/nginx/conf.d/default.conf 를 k8s 용으로 옮긴 것이다.
+    #    원본을 고치면 여기도 같이 고쳐야 한다 — 두 벌이 갈라지면 컷오버에서 사고가 난다.
+    #    (360 이후에는 이쪽이 단일 원본이 되고 compose 쪽은 폐기한다)
+    #
+    # compose 판과 다른 점은 딱 두 가지다:
+    #   ① resolver 127.0.0.11(도커 내장 DNS) → kube-dns ClusterIP
+    #   ② dodam-jenkins / dodam-grafana 는 클러스터 밖에 있어 수동 Endpoints 로 연결
+    server_tokens off;
+
+    server {
+        listen 80;
+        server_name _;
+
+        location /.well-known/acme-challenge/ {
+            root /var/www/certbot;
+        }
+
+        location / {
+            return 301 https://$host$request_uri;
+        }
+    }
+
+    server {
+        listen 443 ssl;
+        http2 on;
+        server_name i15b209.p.ssafy.io;
+
+        ssl_certificate     /etc/letsencrypt/live/i15b209.p.ssafy.io/fullchain.pem;
+        ssl_certificate_key /etc/letsencrypt/live/i15b209.p.ssafy.io/privkey.pem;
+        ssl_protocols TLSv1.2 TLSv1.3;
+        ssl_prefer_server_ciphers off;
+        ssl_session_cache shared:SSL:10m;
+        ssl_session_timeout 1d;
+
+        client_max_body_size 20m;
+
+        add_header X-Content-Type-Options nosniff always;
+        add_header X-Frame-Options SAMEORIGIN always;
+        add_header Referrer-Policy strict-origin-when-cross-origin always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+
+        location /api/ {
+            proxy_pass http://backend:8080;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+
+        # BE 내부 API — 외부에는 경로 존재 자체를 숨긴다(403은 "있다"는 힌트가 된다).
+        # ⚠️ location 에 add_header 가 생기면 server 블록 상속이 끊긴다 → 4종을 복사한다.
+        location /internal/ {
+            add_header X-Content-Type-Options nosniff always;
+            add_header X-Frame-Options SAMEORIGIN always;
+            add_header Referrer-Policy strict-origin-when-cross-origin always;
+            add_header Strict-Transport-Security "max-age=31536000" always;
+            return 404;
+        }
+
+        # /ai/ 는 접두를 떼고 전달하므로, 아래 두 블록이 없으면 외부에서
+        # ai 컨테이너의 /internal/* 과 /metrics 에 그대로 도달한다.
+        # nginx 최장 접두 매칭 — 둘 다 /ai/ 보다 길어 먼저 매칭된다.
+        location /ai/internal/ {
+            add_header X-Content-Type-Options nosniff always;
+            add_header X-Frame-Options SAMEORIGIN always;
+            add_header Referrer-Policy strict-origin-when-cross-origin always;
+            add_header Strict-Transport-Security "max-age=31536000" always;
+            return 404;
+        }
+
+        location /ai/metrics {
+            add_header X-Content-Type-Options nosniff always;
+            add_header X-Frame-Options SAMEORIGIN always;
+            add_header Referrer-Policy strict-origin-when-cross-origin always;
+            add_header Strict-Transport-Security "max-age=31536000" always;
+            return 404;
+        }
+
+        location /ai/ {
+            proxy_pass http://ai:8000/;   # ★ 끝의 '/' = 접두(/ai/)를 떼고 전달
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 120s;
+            proxy_send_timeout 120s;
+        }
+
+        location = /download/dodam.apk {
+            alias /var/www/apk/dodam.apk;
+        }
+
+        # /jenkins/ · /grafana/ 는 **클러스터 밖**(호스트 compose)에 있다.
+        #   ① resolver 를 kube-dns 로 바꿨다. 도커 내장 DNS(127.0.0.11)는 파드 안에 없다.
+        #   ② 변수+resolver 패턴은 그대로 유지 — 대상이 꺼져 있어도 nginx 는 뜨고 해당 경로만 502.
+        #      고정 proxy_pass 로 바꾸면 Jenkins 가 없을 때 게이트웨이 전체가 못 뜬다.
+        #   ③ dodam-jenkins 는 base/jenkins-external.yaml 의 수동 Endpoints 가 호스트로 연결한다.
+        #      dodam-grafana 는 S15P11B209-361 에서 붙인다 — 그 전까지 /grafana/ 는 502 가 정상이다.
+        # ⚠️ resolver 는 **IP 리터럴만** 받는다. 호스트명도, 환경변수도 못 쓴다
+        #    (dodam-nginx 이미지는 envsubst 템플릿을 쓰지 않고 conf 를 그대로 읽는다).
+        #    아래 10.43.0.10 은 k3s 기본 Service CIDR(10.43.0.0/16)의 kube-dns 주소다.
+        #    설치 후 반드시 실측으로 확인할 것:
+        #      kubectl -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}'
+        #    다르면 이 값을 고치고 `kubectl -n dodam rollout restart deployment/gateway`.
+        location /jenkins/ {
+            resolver 10.43.0.10 valid=30s;
+            set $jenkins_upstream http://dodam-jenkins.dodam.svc.cluster.local:8080;
+            proxy_pass $jenkins_upstream;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade    $http_upgrade;
+            proxy_set_header Connection $http_connection;
+        }
+
+        location /grafana/ {
+            resolver 10.43.0.10 valid=30s;   # 위 주석 참조 — 설치 후 실측 확인
+            set $grafana_upstream http://dodam-grafana.dodam.svc.cluster.local:3000;
+            proxy_pass $grafana_upstream;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_http_version 1.1;
+            proxy_set_header Upgrade    $http_upgrade;
+            proxy_set_header Connection $http_connection;
+        }
+
+        location / {
+            root /usr/share/nginx/html;
+            index index.html;
+            try_files $uri $uri/ /index.html;
+        }
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: dodam
+  labels: { app: gateway }
+spec:
+  # base 는 ClusterIP. 외부 노출 방식은 overlay 가 정한다(운영 포트 사고 방지).
+  type: ClusterIP
+  selector: { app: gateway }
+  ports:
+    - { name: http,  port: 80,  targetPort: 80 }
+    - { name: https, port: 443, targetPort: 443 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  namespace: dodam
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: gateway }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels: { app: gateway }
+      annotations:
+        # ConfigMap 이 바뀌어도 Deployment 스펙이 그대로면 파드가 재시작하지 않는다.
+        # kustomize 의 configMapGenerator 를 쓰면 이름에 해시가 붙어 자동 롤아웃되지만,
+        # 여기서는 conf 가 길어 가독성을 택했다 — 대신 conf 수정 후 아래를 반드시 실행한다:
+        #   kubectl -n dodam rollout restart deployment/gateway
+        dodam.io/conf-reload: "manual"
+    spec:
+      containers:
+        - name: nginx
+          image: dodam-nginx        # 태그는 overlay 의 images 트랜스포머가 채운다
+          # ⚠️ nginx 는 시작 시 proxy_pass 의 호스트명을 해석한다. backend/ai Service 가
+          #    아직 없으면 기동에 실패하는데, k8s 에는 compose 의 depends_on 이 없다.
+          #    → 파드가 CrashLoopBackOff 로 재시도하다 Service 가 생기면 스스로 뜬다(자가 치유).
+          #      최초 apply 직후 잠깐 재시작이 보이는 것은 정상이다.
+          ports:
+            - { name: http,  containerPort: 80 }
+            - { name: https, containerPort: 443 }
+          volumeMounts:
+            - { name: conf,        mountPath: /etc/nginx/conf.d }
+            - { name: letsencrypt, mountPath: /etc/letsencrypt, readOnly: true }
+            - { name: webroot,     mountPath: /var/www/certbot, readOnly: true }
+            - { name: apk,         mountPath: /var/www/apk }
+          # 프로브는 **80 포트의 `/`** 를 친다. 이유가 두 개다:
+          #   ① 443 을 치면 인증서가 아직 없을 때 파드가 영원히 Ready 가 안 된다.
+          #      80 은 ACME·리다이렉트 전용이라 인증서와 무관하게 항상 응답한다.
+          #   ② `/` 는 `return 301` 이다. k8s httpGet 프로브는 **2xx·3xx 만 성공**으로 보고
+          #      404 는 실패로 센다 — /.well-known/acme-challenge/ 로 걸면 (파일이 없어 404라)
+          #      영원히 Ready 가 되지 않는다.
+          readinessProbe:
+            httpGet: { path: /, port: 80 }
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /, port: 80 }
+            periodSeconds: 20
+            failureThreshold: 5
+          resources:
+            requests: { memory: 32Mi,  cpu: 50m }
+            limits:   { memory: 128Mi, cpu: 500m }
+      volumes:
+        - name: conf
+          configMap: { name: gateway-conf }
+        - name: letsencrypt
+          persistentVolumeClaim: { claimName: letsencrypt }
+        - name: webroot
+          persistentVolumeClaim: { claimName: certbot-webroot }
+        - name: apk
+          persistentVolumeClaim: { claimName: apk-dist }
