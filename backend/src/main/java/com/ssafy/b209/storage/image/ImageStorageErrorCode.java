@@ -20,6 +20,9 @@ public enum ImageStorageErrorCode implements ErrorCode {
   /** 선언 크기 또는 실제 Stream 크기가 설정된 최대 크기를 초과한 경우다. */
   IMAGE_FILE_TOO_LARGE(
       HttpStatus.PAYLOAD_TOO_LARGE, "STORAGE_413_001", "이미지 파일 크기가 허용 범위를 초과했습니다."),
+  /** 이미지의 가로 또는 세로 픽셀 수가 API 계약의 허용 범위를 벗어난 경우다. */
+  IMAGE_DIMENSION_INVALID(
+      HttpStatus.UNPROCESSABLE_ENTITY, "STORAGE_422_001", "이미지 픽셀 크기가 허용 범위를 벗어났습니다."),
   /** 파일 시스템 오류로 이미지를 안전하게 저장하지 못한 경우다. */
   IMAGE_STORAGE_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "STORAGE_500_001", "이미지 저장 중 오류가 발생했습니다.");
 

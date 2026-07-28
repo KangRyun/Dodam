@@ -138,6 +138,8 @@ public final class LocalImageStorage implements ImageStorage {
         copied = copyToTemporaryFile(inputStream, temporaryFile);
         validateCopiedImage(command.size(), copied, declaredFormat);
       }
+      ImageDimensions originalDimensions = readImageDimensions(temporaryFile);
+      ImageDimensionPolicy.validate(originalDimensions.widthPx(), originalDimensions.heightPx());
       ImageMetadataSanitizer.sanitize(temporaryFile, declaredFormat.imageIoFormatName);
       StoredFileMetadata metadata = readStoredFileMetadata(temporaryFile);
       return moveToFinalFile(
@@ -402,6 +404,8 @@ public final class LocalImageStorage implements ImageStorage {
     if (size > maxSize) {
       throw new BusinessException(ImageStorageErrorCode.IMAGE_FILE_TOO_LARGE);
     }
+    ImageDimensions dimensions = readImageDimensions(imageFile);
+    ImageDimensionPolicy.validate(dimensions.widthPx(), dimensions.heightPx());
     MessageDigest checksum = sha256Digest();
     try (InputStream input = Files.newInputStream(imageFile, StandardOpenOption.READ)) {
       byte[] buffer = new byte[BUFFER_SIZE];
@@ -412,8 +416,7 @@ public final class LocalImageStorage implements ImageStorage {
         }
       }
     }
-    return new StoredFileMetadata(
-        size, HexFormat.of().formatHex(checksum.digest()), readImageDimensions(imageFile));
+    return new StoredFileMetadata(size, HexFormat.of().formatHex(checksum.digest()), dimensions);
   }
 
   private void validateInsideRoot(Path root, Path candidate) {
