@@ -399,7 +399,7 @@ final class _TrackingDrawingRepository implements DrawingRepository {
   bool activityCompletionAccepted = false;
   CreateDrawingSessionRequestDto? createRequest;
 
-  DrawingSessionDto session() => DrawingSessionDto.fromJson({
+  DrawingSessionDto session() => DrawingSessionDto.fromCreateJson({
     'drawingSessionId': sessionId,
     'childId': 3,
     'drawingType': {'drawingTypeId': 77, 'code': 'FREE', 'name': '자유화'},

@@ -78,7 +78,7 @@ final class MockDrawingRepository implements DrawingRepository {
   @override
   Future<DrawingSessionDto> createSession(
     CreateDrawingSessionRequestDto request,
-  ) async => DrawingSessionDto.fromJson({
+  ) async => DrawingSessionDto.fromCreateJson({
     ..._session,
     'sessionStatus': 'DRAWING',
     'currentStage': 'DRAWING',
@@ -86,7 +86,10 @@ final class MockDrawingRepository implements DrawingRepository {
   });
   @override
   Future<DrawingSessionDto> getSession(int sessionId) async =>
-      DrawingSessionDto.fromJson(_session);
+      DrawingSessionDto.fromDetailJson({
+        ..._session,
+        'child': {'childId': _session['childId'], 'nickname': '도담'},
+      });
   @override
   Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async => null;
   @override

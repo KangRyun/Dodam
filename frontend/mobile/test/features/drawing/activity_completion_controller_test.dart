@@ -220,8 +220,8 @@ Map<String, dynamic> _session({
   required String stage,
 }) => {
   'drawingSessionId': 91,
-  'childId': 3,
-  'drawingType': {'id': 1, 'code': 'HTP', 'name': '집-나무-사람'},
+  'child': {'childId': 3, 'nickname': '도담'},
+  'drawingType': {'drawingTypeId': 1, 'code': 'HTP', 'name': '집-나무-사람'},
   'inputMethod': 'TOUCH',
   'title': null,
   'sessionStatus': status,
