@@ -100,7 +100,10 @@ public enum DrawingErrorCode implements ErrorCode {
   STROKE_BATCH_CONFLICT(HttpStatus.CONFLICT, "DRAWING_409_019", "같은 순번의 다른 그림 과정 데이터가 이미 저장되었습니다."),
   /** 삭제 확인 문자열이 일치하지 않는 경우다. */
   DRAWING_DELETION_CONFIRMATION_MISMATCH(
-      HttpStatus.BAD_REQUEST, "DRAWING_400_011", "그림 활동 삭제 확인 값이 올바르지 않습니다.");
+      HttpStatus.BAD_REQUEST, "DRAWING_400_011", "그림 활동 삭제 확인 값이 올바르지 않습니다."),
+  /** 리포트 생성 없이 활동 완료를 요청한 경우다. */
+  REPORT_REQUEST_REQUIRED(
+      HttpStatus.BAD_REQUEST, "DRAWING_400_012", "활동 완료 시 관찰 리포트 생성을 요청해야 합니다.");
 
   private final HttpStatus httpStatus;
   private final String code;

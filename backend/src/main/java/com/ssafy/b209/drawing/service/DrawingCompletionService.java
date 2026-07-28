@@ -98,6 +98,7 @@ public class DrawingCompletionService {
   public DrawingCompletionResponse complete(
       Long drawingSessionId, String idempotencyKey, CompleteDrawingSessionRequest request) {
     validateIdempotencyKey(idempotencyKey);
+    validateReportRequest(request);
     Long guardianId = currentUserResolver.requireUserId();
     accessValidator.requireDrawingSessionAccess(guardianId, drawingSessionId);
     DrawingSession session =
@@ -128,15 +129,10 @@ public class DrawingCompletionService {
                   DrawingAnalysisType.ACTIVITY_REPORT,
                   idempotencyKey,
                   requestedAt));
-      Report report = null;
-      if (Boolean.TRUE.equals(request.requestReport())) {
-        report =
-            reportRepository.saveAndFlush(Report.generating(session, analysis, 1, requestedAt));
-      }
+      Report report =
+          reportRepository.saveAndFlush(Report.generating(session, analysis, 1, requestedAt));
       session.startReporting();
-      if (report != null) {
-        eventPublisher.publishEvent(new ReportGenerationRequestedEvent(analysis.getId()));
-      }
+      eventPublisher.publishEvent(new ReportGenerationRequestedEvent(analysis.getId()));
       return response(session, analysis, report);
     } catch (DataIntegrityViolationException exception) {
       throw new BusinessException(DrawingErrorCode.DRAWING_COMPLETION_CONFLICT, exception);
@@ -158,10 +154,10 @@ public class DrawingCompletionService {
       throw new BusinessException(DrawingErrorCode.IDEMPOTENCY_KEY_CONFLICT);
     }
     Optional<Report> report = reportRepository.findByAnalysisId(analysis.getId());
-    if (report.isPresent() != Boolean.TRUE.equals(request.requestReport())) {
+    if (report.isEmpty()) {
       throw new BusinessException(DrawingErrorCode.IDEMPOTENCY_KEY_CONFLICT);
     }
-    return response(session, analysis, report.orElse(null));
+    return response(session, analysis, report.get());
   }
 
   private void validateNewRequest(
@@ -201,8 +197,14 @@ public class DrawingCompletionService {
         session.getCurrentStage(),
         analysis.getId(),
         analysis.getState(),
-        report == null ? null : report.getId(),
-        report == null ? null : report.getStatus());
+        report.getId(),
+        report.getStatus());
+  }
+
+  private void validateReportRequest(CompleteDrawingSessionRequest request) {
+    if (!Boolean.TRUE.equals(request.requestReport())) {
+      throw new BusinessException(DrawingErrorCode.REPORT_REQUEST_REQUIRED);
+    }
   }
 
   private void validateIdempotencyKey(String idempotencyKey) {

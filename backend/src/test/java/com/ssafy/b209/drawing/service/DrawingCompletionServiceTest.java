@@ -128,14 +128,20 @@ class DrawingCompletionServiceTest {
   }
 
   @Test
-  void omitsReportWhenItWasNotRequested() {
-    DrawingCompletionResponse response =
-        service.complete(SESSION_ID, KEY, new CompleteDrawingSessionRequest(false, false));
+  void rejectsCompletionWithoutReportBeforeCreatingAnalysis() {
+    assertThatThrownBy(
+            () ->
+                service.complete(SESSION_ID, KEY, new CompleteDrawingSessionRequest(false, false)))
+        .isInstanceOf(BusinessException.class)
+        .satisfies(
+            exception ->
+                assertThat(((BusinessException) exception).getErrorCode())
+                    .isEqualTo(DrawingErrorCode.REPORT_REQUEST_REQUIRED));
 
+    verify(analysisRepository, never()).saveAndFlush(any());
     verify(reportRepository, never()).saveAndFlush(any());
     verify(eventPublisher, never()).publishEvent(any());
-    assertThat(response.reportId()).isNull();
-    assertThat(response.reportStatus()).isNull();
+    verify(session, never()).startReporting();
   }
 
   @Test
@@ -167,7 +173,7 @@ class DrawingCompletionServiceTest {
     given(existing.getTaskType()).willReturn(DrawingAnalysisType.ACTIVITY_REPORT);
 
     assertThatThrownBy(
-            () -> service.complete(SESSION_ID, KEY, new CompleteDrawingSessionRequest(true, false)))
+            () -> service.complete(SESSION_ID, KEY, new CompleteDrawingSessionRequest(true, true)))
         .isInstanceOf(BusinessException.class)
         .satisfies(
             exception ->

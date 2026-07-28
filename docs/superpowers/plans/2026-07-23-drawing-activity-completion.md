@@ -1,5 +1,7 @@
 # Drawing Activity Completion Implementation Plan
 
+> 계약 변경: S15P11B209-645부터 `requestReport=false`는 `400 DRAWING_400_012`로 거절한다. 이 문서의 `false` 저장·검증 단계는 초기 구현 이력이며 현재 API 계약이 아니다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 그림 활동의 최종 분석과 선택적 리포트 생성을 멱등하게 접수하고 세션을 REPORTING 단계로 전환하는 HTTP 202 API를 구현한다.

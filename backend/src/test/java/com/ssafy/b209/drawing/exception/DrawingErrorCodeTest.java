@@ -137,6 +137,10 @@ class DrawingErrorCodeTest {
     expected.put(
         DrawingErrorCode.DRAWING_DELETION_CONFIRMATION_MISMATCH,
         new ErrorContract(HttpStatus.BAD_REQUEST, "DRAWING_400_011", "그림 활동 삭제 확인 값이 올바르지 않습니다."));
+    expected.put(
+        DrawingErrorCode.REPORT_REQUEST_REQUIRED,
+        new ErrorContract(
+            HttpStatus.BAD_REQUEST, "DRAWING_400_012", "활동 완료 시 관찰 리포트 생성을 요청해야 합니다."));
 
     assertThat(DrawingErrorCode.values()).containsExactlyInAnyOrderElementsOf(expected.keySet());
     expected.forEach(

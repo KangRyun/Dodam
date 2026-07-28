@@ -898,6 +898,8 @@ Header `Idempotency-Key` 필수. Body는 다음과 같다.
 }
 ```
 
+현재 전체 활동 완료는 관찰 리포트 생성을 포함하는 단일 흐름만 지원하므로 `requestReport`는 반드시 `true`여야 한다. `false`는 `400 DRAWING_400_012`로 거절하며 Analysis, Report, Drawing Session 상태를 변경하지 않는다.
+
 처리 순서:
 
 1. 최종 그림, 종료되었거나 건너뛴 대화, 감정 입력 상태를 검증한다.
@@ -926,7 +928,7 @@ Header `Idempotency-Key` 필수. Body는 다음과 같다.
 
 - DRAWING-12는 `confirmation:"DELETE"` Body를 받으며 soft delete 후 비동기 파일 삭제를 수행한다.
 - 공유 중인 전문가 접근 권한을 즉시 중단한다.
-- 오류: `DRAWING_SESSION_NOT_FOUND`, `DRAWING_SESSION_ACCESS_DENIED`, `ACTIVE_DRAWING_SESSION_EXISTS`, `DRAWING_TYPE_NOT_AVAILABLE`, `FINAL_ASSET_REQUIRED`, `STROKE_SEQUENCE_GAP`, `STROKE_BATCH_CONFLICT`, `REFLECTION_REQUIRED`, `DRAWING_SESSION_ALREADY_COMPLETED`.
+- 오류: `DRAWING_SESSION_NOT_FOUND`, `DRAWING_SESSION_ACCESS_DENIED`, `ACTIVE_DRAWING_SESSION_EXISTS`, `DRAWING_TYPE_NOT_AVAILABLE`, `FINAL_ASSET_REQUIRED`, `STROKE_SEQUENCE_GAP`, `STROKE_BATCH_CONFLICT`, `REFLECTION_REQUIRED`, `DRAWING_SESSION_ALREADY_COMPLETED`, `DRAWING_400_012`(리포트 미요청 완료 거절).
 
 ---
 

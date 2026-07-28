@@ -13,8 +13,8 @@ import com.ssafy.b209.report.domain.ReportStatus;
  * @param currentStage 접수 직후 그림 활동 단계
  * @param analysisId 최종 분석 식별자
  * @param analysisStatus 최종 분석 처리 상태
- * @param reportId 생성 요청한 리포트 식별자, 요청하지 않았으면 {@code null}
- * @param reportStatus 리포트 처리 상태, 요청하지 않았으면 {@code null}
+ * @param reportId 생성 요청한 리포트 식별자
+ * @param reportStatus 리포트 처리 상태
  */
 public record DrawingCompletionResponse(
     Long drawingSessionId,
