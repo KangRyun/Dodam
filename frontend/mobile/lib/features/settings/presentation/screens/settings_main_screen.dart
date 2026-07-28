@@ -10,12 +10,12 @@ import '../../../auth/auth.dart';
 /// 설정 메뉴를 한곳에 모아 제공한다.
 class SettingsMainScreen extends StatefulWidget {
   const SettingsMainScreen({
-    required this.loadSession,
+    required this.user,
     required this.onSignOut,
     super.key,
   });
 
-  final AuthSessionRestore loadSession;
+  final AuthenticatedUser? user;
   final AuthSignOut onSignOut;
 
   @override
@@ -23,14 +23,7 @@ class SettingsMainScreen extends StatefulWidget {
 }
 
 class _SettingsMainScreenState extends State<SettingsMainScreen> {
-  late Future<AuthSession?> _session;
   bool _isSigningOut = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _session = widget.loadSession();
-  }
 
   Future<void> _signOut() async {
     if (_isSigningOut) return;
@@ -75,28 +68,11 @@ class _SettingsMainScreenState extends State<SettingsMainScreen> {
     backgroundColor: AppColors.canvas,
     appBar: const AppTopBar(title: '설정'),
     body: SafeArea(
-      child: FutureBuilder<AuthSession?>(
-        future: _session,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const AppLoadingView(message: '설정 정보를 불러오고 있어요');
-          }
-          if (snapshot.hasError) {
-            return AppErrorView(
-              title: '설정 정보를 불러오지 못했어요',
-              message: '잠시 후 다시 시도해 주세요.',
-              retryLabel: '다시 시도',
-              onRetry: () => setState(() => _session = widget.loadSession()),
-            );
-          }
-
-          return _SettingsContent(
-            user: snapshot.data?.user,
-            isSigningOut: _isSigningOut,
-            onItemSelected: _showPending,
-            onSignOut: _signOut,
-          );
-        },
+      child: _SettingsContent(
+        user: widget.user,
+        isSigningOut: _isSigningOut,
+        onItemSelected: _showPending,
+        onSignOut: _signOut,
       ),
     ),
   );

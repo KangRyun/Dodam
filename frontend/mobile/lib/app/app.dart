@@ -90,6 +90,7 @@ class _DodamAppState extends State<DodamApp> {
   final _navigatorKey = GlobalKey<NavigatorState>();
   final _routeObserver = CurrentRouteObserver();
   PushCoordinator? _pushCoordinator;
+  AuthSession? _currentSession;
 
   @override
   void initState() {
@@ -160,12 +161,14 @@ class _DodamAppState extends State<DodamApp> {
       AuthProvider.google => _googleLoginCoordinator.signIn(),
       AuthProvider.naver => _naverLoginCoordinator.signIn(),
     };
+    _currentSession = state.session;
     await _onGuardianSessionReady(state.session);
     return state;
   }
 
   Future<AuthSession> _completeOnboarding(NewUserOnboardingInput input) async {
     final session = await _authRepository.completeOnboarding(input);
+    _currentSession = session;
     await _onGuardianSessionReady(session);
     return session;
   }
@@ -173,15 +176,25 @@ class _DodamAppState extends State<DodamApp> {
   // 저장 세션 복원 및 만료된 Access Token 갱신
   Future<AuthSession?> _restoreSession() async {
     var session = await _authRepository.restoreSession();
-    if (session == null) return null;
+    if (session == null) {
+      _currentSession = null;
+      return null;
+    }
     if (session.tokens.isAccessTokenExpired()) {
       final repository = _authRepository;
-      if (repository is! TokenRefresher) return null;
+      if (repository is! TokenRefresher) {
+        _currentSession = null;
+        return null;
+      }
       final refreshed = await (repository as TokenRefresher)
           .refreshAccessToken();
-      if (!refreshed) return null;
+      if (!refreshed) {
+        _currentSession = null;
+        return null;
+      }
       session = await _authRepository.restoreSession();
     }
+    _currentSession = session;
     await _onGuardianSessionReady(session);
     return session;
   }
@@ -213,7 +226,7 @@ class _DodamAppState extends State<DodamApp> {
 
   // 인증 세션과 보호자 선택 상태 초기화
   Future<void> _signOut() async {
-    final provider = (await _authRepository.restoreSession())?.user.provider;
+    final provider = _currentSession?.user.provider;
     // Token 해제 API는 인증이 필요하므로 세션을 지우기 전에 부른다.
     await _pushCoordinator?.stop();
     await _authRepository.signOut();
@@ -231,6 +244,7 @@ class _DodamAppState extends State<DodamApp> {
     } on Object {
       // 서비스 세션은 이미 제거했으므로 Provider 로그아웃 실패로 되돌리지 않는다.
     }
+    _currentSession = null;
     _childController.clear();
   }
 
@@ -263,6 +277,7 @@ class _DodamAppState extends State<DodamApp> {
       authCompleteOnboarding: _completeOnboarding,
       authSignOut: _signOut,
       authRestoreSession: _restoreSession,
+      authCurrentUser: () => _currentSession?.user,
       activityRepository: widget.activityRepository,
       drawingRepository: widget.drawingRepository,
       reportRepository: widget.reportRepository,

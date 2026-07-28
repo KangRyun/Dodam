@@ -33,6 +33,7 @@ abstract final class AppRouter {
     AuthOnboardingComplete? authCompleteOnboarding,
     AuthSignOut? authSignOut,
     AuthSessionRestore? authRestoreSession,
+    AuthenticatedUser? Function()? authCurrentUser,
     ActivityRepository? activityRepository,
     DrawingRepository? drawingRepository,
     ReportRepository? reportRepository,
@@ -144,9 +145,9 @@ abstract final class AppRouter {
             label: '설정',
             builder:
                 settingsTabBuilder ??
-                (_) => authRestoreSession != null && authSignOut != null
+                (_) => authSignOut != null
                     ? SettingsMainScreen(
-                        loadSession: authRestoreSession,
+                        user: authCurrentUser?.call(),
                         onSignOut: authSignOut,
                       )
                     : const _TabPreparingScreen(
@@ -184,12 +185,10 @@ abstract final class AppRouter {
         ReportScreen(reportId: reportId, repository: reportRepository),
       ['guardian', 'notifications'] when notificationInboxRepository != null =>
         NotificationListScreen(repository: notificationInboxRepository),
-      ['guardian', 'settings']
-          when authRestoreSession != null && authSignOut != null =>
-        SettingsMainScreen(
-          loadSession: authRestoreSession,
-          onSignOut: authSignOut,
-        ),
+      ['guardian', 'settings'] when authSignOut != null => SettingsMainScreen(
+        user: authCurrentUser?.call(),
+        onSignOut: authSignOut,
+      ),
       // 커뮤니티는 웹 전용(CLAUDE.md 6절). 웹 커뮤니티 URL과 webview_flutter가
       // 준비되면 이 자리표시자를 WebView 화면으로 교체한다. COMM-01 GET /posts.
       ['guardian', 'community'] => const AppPlaceholderScaffold(
