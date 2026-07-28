@@ -1,0 +1,76 @@
+# MinIO — StatefulSet (S15P11B209-357)
+#
+# ⚠️ 이슈 357 본문의 PVC 목록에는 minio-data 가 없다. 이슈가 작성된 시점(Day 4)에는
+#    파일이 아직 backend-storage(로컬 볼륨)에 있었고, **MinIO 컷오버는 2026-07-28에
+#    완료**됐다(S15P11B209-368~374, 객체 71개 이관·sha256 검증 완료).
+#    그래서 minio 를 여기 추가했다 — 빠뜨리면 컷오버 후 파일이 갈 곳이 없다.
+#
+# ⚠️ 이 PVC 안의 데이터 = 아동 그림·음성(가드레일 9절).
+#    360 컷오버 시 compose 볼륨(dodam_minio-data)에서 이관해야 하며, 자동으로 넘어오지 않는다.
+#    절차는 docs/인프라/MinIO백업-복원.md 의 mc mirror 방식을 그대로 쓴다.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: dodam
+  labels: { app: minio }
+spec:
+  clusterIP: None
+  selector: { app: minio }
+  ports:
+    - { name: s3,      port: 9000, targetPort: 9000 }
+    - { name: console, port: 9001, targetPort: 9001 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: dodam
+spec:
+  serviceName: minio
+  replicas: 1
+  selector:
+    matchLabels: { app: minio }
+  template:
+    metadata:
+      labels: { app: minio }
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - { name: MINIO_ROOT_USER,     valueFrom: { secretKeyRef: { name: dodam-secrets, key: MINIO_ROOT_USER } } }
+            - { name: MINIO_ROOT_PASSWORD, valueFrom: { secretKeyRef: { name: dodam-secrets, key: MINIO_ROOT_PASSWORD } } }
+            # Prometheus 무인증 스크레이프 허용(S15P11B209-369).
+            # 전제: 9000 을 클러스터 밖으로 노출하지 않는다. Service 가 headless 인 이유이기도 하다.
+            - { name: MINIO_PROMETHEUS_AUTH_TYPE, value: "public" }
+          ports:
+            - { name: s3,      containerPort: 9000 }
+            - { name: console, containerPort: 9001 }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          # /minio/health/live 200 확인 — 2026-07-28 실측으로 동작 확인함.
+          readinessProbe:
+            httpGet: { path: /minio/health/live, port: 9000 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            httpGet: { path: /minio/health/live, port: 9000 }
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          # 실측 237MB(2026-07-28, 객체 71개). MinIO 는 여유 메모리를 캐시로 계속 흡수하는
+          # 성격이라 상한이 특히 중요하다 — compose 의 mem_limit: 1g 와 동일하게 맞춘다.
+          resources:
+            requests: { memory: 256Mi, cpu: 100m }
+            limits:   { memory: 1Gi,   cpu: "1" }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path
+        resources:
+          requests: { storage: 20Gi }

@@ -1,0 +1,57 @@
+# 비밀이 아닌 앱 설정 (S15P11B209-357)
+#
+# compose 의 `${VAR:-기본값}` 중 **비밀이 아닌 것**만 여기로 옮긴다.
+# 비밀(`${VAR}` · `${VAR:?}`)은 Secret `dodam-secrets` 로 가며, 이 파일에는 절대 넣지 않는다.
+#   → 값 주입은 infra/scripts/sync-secrets.sh (kustomize 가 Secret 을 건드리지 않는 이유는 README 참조)
+#
+# 값은 infra/.env.example 의 기본값과 compose 의 `:-` 기본값을 그대로 미러링한다.
+# 둘이 어긋나면 "compose 에선 되는데 k8s 에선 안 되는" 상황이 생긴다.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dodam-config
+  namespace: dodam
+data:
+  # ── 내부 서비스 주소 ────────────────────────────────────────────────
+  # Service 이름을 compose 서비스명과 같게 뒀기 때문에 값이 compose 와 동일하다.
+  DB_HOST: "mysql"
+  DB_PORT: "3306"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  AI_BASE_URL: "http://ai:8000"
+  AI_DRAWING_ANALYSIS_BASE_URL: "http://ai:8000"
+  AI_OBSERVATION_BASE_URL: "http://ai:8000"
+  AI_IMAGE_ACCESS_BASE_URL: "http://backend:8080"
+  S3_ENDPOINT: "http://minio:9000"
+
+  # ── 앱 동작 모드 ────────────────────────────────────────────────────
+  SPRING_PROFILES_ACTIVE: "prod"
+  AI_DRAWING_ANALYSIS_MODE: "mock"
+  AI_OBSERVATION_MODE: "mock"
+  AI_IMAGE_ACCESS_TOKEN_TTL: "60s"
+
+  # ── 저장소 ──────────────────────────────────────────────────────────
+  # ⚠️ MinIO 컷오버(S15P11B209-368~374, 2026-07-28 완료) 이후 s3 가 정상값이다.
+  #    local 로 두면 파일이 파드 로컬 디스크로 떨어져 재시작마다 유실된다.
+  STORAGE_MODE: "s3"
+  S3_REGION: "ap-northeast-2"
+  S3_BUCKET: "dodam"
+  LOCAL_IMAGE_STORAGE_ROOT: "/app/storage/images"
+  LOCAL_AUDIO_STORAGE_ROOT: "/app/storage/audio"
+
+  # ── JWT (비밀은 JWT_SECRET 하나뿐 — 나머지는 정책값) ─────────────────
+  JWT_ISSUER: "dodam-api"
+  JWT_ACCESS_TOKEN_TTL: "30m"
+  JWT_REFRESH_TOKEN_TTL: "14d"
+  OAUTH_CONNECT_TIMEOUT: "3s"
+  OAUTH_READ_TIMEOUT: "5s"
+
+  # ── AI 모델 ─────────────────────────────────────────────────────────
+  LLM_MODEL: "gpt-4o-mini"
+  STT_MODEL: "whisper-1"
+  TTS_MODEL: "gpt-4o-mini-tts"
+  TTS_VOICE: "fable"
+  YOLO_MODEL_PATH: "/models/htp_yolo/htp_best.pt"
+
+  # ── 푸시 ────────────────────────────────────────────────────────────
+  APP_PUSH_FCM_CREDENTIALS_PATH: "/run/secrets/fcm-service-account.json"

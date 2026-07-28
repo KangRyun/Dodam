@@ -1,0 +1,14 @@
+# gateway 를 NodePort 로 — 운영 80/443 미점유 (S15P11B209-357 / 358 검증용)
+#
+# NodePort 는 노드의 30000~32767 대역 포트를 잡는다. 80/443 과 겹치지 않으므로
+# compose nginx 가 서비스하는 동안에도 안전하게 띄울 수 있다.
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  namespace: dodam
+spec:
+  type: NodePort
+  ports:
+    - { name: http,  port: 80,  targetPort: 80,  nodePort: 30080 }
+    - { name: https, port: 443, targetPort: 443, nodePort: 30443 }

@@ -1,0 +1,17 @@
+# 스테이징에서는 backend 1벌만 (S15P11B209-357)
+#
+# 이유는 순전히 메모리다. 358 구간에서는 compose 앱과 k8s 앱이 동시에 떠 있고,
+# backend 가 실측 760MB 로 가장 큰 소비자다. 2벌이면 1.5GB — available 4.4GB 에서
+# k3s 자체(약 1GB)와 mysql·minio 사본까지 더하면 스왑으로 밀린다.
+#
+# ⚠️ 대신 스테이징에서는 **무중단 롤링을 검증할 수 없다.** replicas 1 에
+#    maxUnavailable 0 이면 새 파드가 Ready 될 때까지 옛 파드가 남아 있긴 하지만,
+#    "2벌 중 1벌씩 교체"라는 실제 시나리오와는 다르다.
+#    무중단 실증(362)은 컷오버 후 prod 에서 한다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: dodam
+spec:
+  replicas: 1

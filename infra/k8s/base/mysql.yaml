@@ -1,0 +1,92 @@
+# MySQL 8.4 — StatefulSet (S15P11B209-357)
+#
+# 왜 Deployment 가 아니라 StatefulSet 인가:
+#   Deployment 는 롤링 중 **새 파드를 먼저 띄우고** 옛 파드를 지운다. DB 는 같은 디스크를
+#   두 프로세스가 동시에 쓰면 데이터가 깨진다. StatefulSet 은 순서를 지켜 하나씩 교체하고,
+#   PVC 를 파드 이름에 고정(volumeClaimTemplates)해 재시작해도 같은 디스크를 잡는다.
+#
+# ⚠️ 8.0→8.4 데이터 디렉토리 업그레이드는 **비가역**이다(다운그레이드 불가).
+#    롤백 수단은 사전 mysqldump 복원뿐 — compose 파일의 경고와 동일하다.
+#
+# ⚠️ 컷오버(360) 시 데이터 이관이 이 파일의 최대 난제다.
+#    이 매니페스트는 **빈 PVC** 로 시작한다. 운영 데이터는 compose 볼륨(dodam_mysql-data)에 있고
+#    자동으로 넘어오지 않는다. 반드시 mysqldump → restore 절차를 거친다(docs/인프라/DB백업-복원.md).
+#    358(스테이징)에서는 빈 DB 로 뜨는 게 **정상이자 의도**다 — 운영 데이터와 섞지 않는다.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: dodam
+  labels: { app: mysql }
+spec:
+  # headless(clusterIP: None) — StatefulSet 파드에 안정적인 DNS 이름을 준다.
+  # 이름을 'mysql' 로 둔 덕에 backend 의 DB_HOST=mysql 이 그대로 동작한다.
+  clusterIP: None
+  selector: { app: mysql }
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: dodam
+spec:
+  serviceName: mysql
+  replicas: 1
+  selector:
+    matchLabels: { app: mysql }
+  template:
+    metadata:
+      labels: { app: mysql }
+    spec:
+      # 데이터 무결성이 우선 — 종료 신호를 받으면 InnoDB 가 정리할 시간을 준다.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: mysql
+          image: mysql:8.4.10          # latest 금지 — compose 와 동일 태그 고정
+          args:
+            - --character-set-server=utf8mb4
+            - --collation-server=utf8mb4_unicode_ci
+          env:
+            # 값은 Secret 에서만 온다. 이 파일에 비밀은 한 글자도 없다.
+            - { name: MYSQL_ROOT_PASSWORD, valueFrom: { secretKeyRef: { name: dodam-secrets, key: MYSQL_ROOT_PASSWORD } } }
+            - { name: MYSQL_DATABASE,      valueFrom: { secretKeyRef: { name: dodam-secrets, key: MYSQL_DATABASE } } }
+            - { name: MYSQL_USER,          valueFrom: { secretKeyRef: { name: dodam-secrets, key: MYSQL_USER } } }
+            - { name: MYSQL_PASSWORD,      valueFrom: { secretKeyRef: { name: dodam-secrets, key: MYSQL_PASSWORD } } }
+          ports:
+            - { name: mysql, containerPort: 3306 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/mysql }
+          # compose healthcheck(mysqladmin ping)를 그대로 옮긴다.
+          #   startupProbe 가 핵심 — 최초 init(DB·계정 생성)은 30초 넘게 걸린다.
+          #   이게 없으면 liveness 가 먼저 실패해 부팅 중인 DB 를 계속 죽인다(크래시 루프).
+          startupProbe:
+            exec: { command: ["mysqladmin", "ping", "-h", "localhost"] }
+            periodSeconds: 5
+            failureThreshold: 30       # 최대 150초 대기
+          readinessProbe:
+            exec: { command: ["mysqladmin", "ping", "-h", "localhost"] }
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec: { command: ["mysqladmin", "ping", "-h", "localhost"] }
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          # 실측 490MB(2026-07-28) 기준. requests 는 스케줄러가 잡아두는 양,
+          # limits 는 넘으면 죽는 상한이다. DB 는 OOMKill 이 가장 위험하므로 여유를 둔다.
+          resources:
+            requests: { memory: 512Mi, cpu: 200m }
+            limits:   { memory: 1Gi,   cpu: "1" }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        storageClassName: local-path   # k3s 기본 프로비저너
+        resources:
+          requests: { storage: 10Gi }

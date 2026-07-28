@@ -1,0 +1,72 @@
+# 공유 볼륨(PVC) — compose 네임드 볼륨 대응 (S15P11B209-357)
+#
+# mysql·redis·minio 는 StatefulSet 의 volumeClaimTemplates 로 각자 만든다.
+# 여기 있는 것은 **여러 워크로드가 함께 쓰거나 Deployment 에 붙는** 볼륨이다.
+#
+# | PVC              | compose 볼륨      | 쓰는 쪽                     |
+# |------------------|-------------------|-----------------------------|
+# | letsencrypt      | letsencrypt       | gateway(읽기) · certbot(쓰기) |
+# | certbot-webroot  | certbot-webroot   | gateway(읽기) · certbot(쓰기) |
+# | apk-dist         | apk-dist          | gateway                      |
+# | backend-storage  | backend-storage   | backend                      |
+# | ai-models        | ai-models         | ai(읽기 전용)                 |
+# | db-backup        | (신규)            | db-backup CronJob            |
+#
+# ⚠️ storageClassName: local-path 는 k3s 기본 프로비저너로, **노드의 로컬 디스크**에 만든다.
+#    노드가 하나뿐이라 지금은 문제가 없지만, 노드가 늘면 파드가 다른 노드로 가는 순간
+#    데이터에 접근하지 못한다. 다중 노드로 갈 때 반드시 다시 볼 것.
+#
+# ⚠️ 이 PVC 들은 **비어 있는 채로** 생성된다. compose 볼륨의 내용은 자동으로 넘어오지 않는다.
+#    특히 letsencrypt(인증서)와 backend-storage·minio(아동 데이터)는 360 컷오버에서
+#    명시적으로 이관해야 한다. 이관 절차 없이 prod overlay 를 올리면 TLS 가 깨진다.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: letsencrypt, namespace: dodam }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: certbot-webroot, namespace: dodam }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: apk-dist, namespace: dodam }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: backend-storage, namespace: dodam }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: { requests: { storage: 10Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: ai-models, namespace: dodam }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: { requests: { storage: 5Gi } }
+---
+# DB 백업 산출물. compose 에서는 호스트 /var/backups/dodam 을 썼지만,
+# k8s 에서는 파드가 호스트 경로에 직접 쓰지 않도록 PVC 로 받는다(hostPath 회피).
+# ⚠️ 백업 파일 = 아동 민감정보. 서버 밖 반출 금지(가드레일 9절).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: db-backup, namespace: dodam }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: { requests: { storage: 20Gi } }

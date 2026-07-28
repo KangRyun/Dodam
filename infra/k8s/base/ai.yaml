@@ -1,0 +1,67 @@
+# AI 분석 서버(FastAPI) — Deployment (S15P11B209-357)
+#
+# 상태가 없어 Deployment 로 간다. 가중치(*.pt)만 읽기 전용 볼륨으로 주입한다.
+#
+# ⚠️ 아동 음성·발화가 지나가는 서비스다(가드레일 9절).
+#    Service 는 ClusterIP — 클러스터 밖으로 열지 않는다. 외부 진입은 gateway 의 /ai/ 뿐이다.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ai
+  namespace: dodam
+  labels: { app: ai }
+spec:
+  selector: { app: ai }
+  ports:
+    - { name: http, port: 8000, targetPort: 8000 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ai
+  namespace: dodam
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: ai }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels: { app: ai }
+    spec:
+      containers:
+        - name: ai
+          image: dodam-ai          # 태그는 overlay 의 images 트랜스포머가 채운다
+          envFrom:
+            - configMapRef: { name: dodam-config }
+          env:
+            - { name: GMS_KEY,           valueFrom: { secretKeyRef: { name: dodam-secrets, key: GMS_KEY } } }
+            - { name: GMS_BASE_URL,      valueFrom: { secretKeyRef: { name: dodam-secrets, key: GMS_BASE_URL } } }
+            - { name: AI_INTERNAL_TOKEN, valueFrom: { secretKeyRef: { name: dodam-secrets, key: AI_INTERNAL_TOKEN } } }
+          ports:
+            - { name: http, containerPort: 8000 }
+          volumeMounts:
+            # :ro — 추론만 하므로 쓰기 권한을 주지 않는다(최소권한, compose 와 동일).
+            - { name: models, mountPath: /models, readOnly: true }
+          # /health → {"status":"ok"} — 2026-07-28 실측 확인.
+          startupProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 3
+            failureThreshold: 20     # import(openai·pydantic) 로딩 여유
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 20
+            failureThreshold: 5
+          # 실측 77MB(2026-07-28). YOLO 추론이 붙으면 늘 수 있어 상한에 여유를 뒀다.
+          resources:
+            requests: { memory: 128Mi, cpu: 100m }
+            limits:   { memory: 512Mi, cpu: "1" }
+      volumes:
+        - name: models
+          persistentVolumeClaim: { claimName: ai-models }
