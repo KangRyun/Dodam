@@ -20,6 +20,24 @@ fun oauthValue(name: String): String =
         ?: oauthProperties.getProperty(name)
         ?: "missing-${name.lowercase().replace('_', '-')}"
 
+// 릴리스 서명 자재 (S15P11B209-623).
+// key.properties 와 keystore 는 .gitignore 대상 — 저장소에 절대 들어오지 않는다.
+// CI 에서는 infra/mobile/build-aab.sh 가 Jenkins Credentials 에서 받아 컨테이너에 넣는다.
+val keystoreProperties = Properties().apply {
+    val keystoreFile = rootProject.file("key.properties")
+    if (keystoreFile.exists()) {
+        keystoreFile.inputStream().use(::load)
+    }
+}
+
+// "파일이 있다"가 아니라 "네 값이 다 있다"로 판정한다.
+// 한 줄이라도 비면 AGP 가 조용히 서명을 건너뛰고, 그 AAB 는 업로드 단계에서야 거절당한다.
+val releaseSigningKeys = listOf("storeFile", "storePassword", "keyAlias", "keyPassword")
+val hasReleaseKeystore =
+    releaseSigningKeys.all { !keystoreProperties.getProperty(it).isNullOrBlank() } &&
+        keystoreProperties.getProperty("storeFile")
+            ?.let { rootProject.file(it).exists() } == true
+
 fun requireOAuthValue(name: String) {
     val value = oauthValue(name)
     require(
@@ -67,13 +85,31 @@ android {
             keyAlias = "androiddebugkey"
             keyPassword = "android"
         }
+
+        // key.properties 가 갖춰졌을 때만 만든다. 없는데 만들면 storeFile=null 로
+        // configuration 단계에서 죽어, 서명이 필요 없는 debug 빌드까지 못 하게 된다.
+        if (hasReleaseKeystore) {
+            create("release") {
+                // 경로는 rootProject(android/) 기준으로 푼다. 절대경로면 그대로 쓰인다.
+                storeFile = rootProject.file(keystoreProperties.getProperty("storeFile"))
+                storePassword = keystoreProperties.getProperty("storePassword")
+                keyAlias = keystoreProperties.getProperty("keyAlias")
+                keyPassword = keystoreProperties.getProperty("keyPassword")
+            }
+        }
     }
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // 릴리스 키가 있으면 그것으로, 없으면 debug 로 폴백한다.
+            // 폴백을 남겨 두는 이유: 개발자가 로컬에서 `flutter run --release` 로 성능을 볼 때
+            //   키를 요구하면 아무도 못 돌린다. 대신 **CI 에서는 폴백을 금지**한다(아래 가드).
+            signingConfig =
+                if (hasReleaseKeystore) {
+                    signingConfigs.getByName("release")
+                } else {
+                    signingConfigs.getByName("debug")
+                }
         }
     }
 }
@@ -109,5 +145,24 @@ tasks
                 "NAVER_CLIENT_SECRET",
                 "NAVER_APP_NAME",
             ).forEach(::requireOAuthValue)
+        }
+    }
+
+// CI 릴리스 빌드에서 debug 서명 폴백을 금지한다 (S15P11B209-623).
+// reason: 위 폴백은 로컬 편의를 위한 것이라, CI 에서도 조용히 동작하면
+//   "빌드는 초록불인데 Play 업로드에서 거절되는" 상태가 만들어진다.
+//   이 프로젝트에서 반복된 실패 양상이 정확히 "설정은 켜져 있는데 실제로는 아닌" 것이라,
+//   폴백이 일어났는지를 빌드 시점에 판정해 즉시 끊는다.
+tasks
+    .matching { it.name == "preReleaseBuild" }
+    .configureEach {
+        doFirst {
+            val required =
+                (System.getenv("DODAM_REQUIRE_RELEASE_SIGNING") ?: "false").equals("true", ignoreCase = true)
+            check(!required || hasReleaseKeystore) {
+                "DODAM_REQUIRE_RELEASE_SIGNING=true 인데 릴리스 keystore 가 갖춰지지 않았다. " +
+                    "android/key.properties 의 storeFile·storePassword·keyAlias·keyPassword 4개와 " +
+                    "storeFile 이 가리키는 파일의 실존을 확인할 것 (debug 서명 폴백은 CI 에서 금지)."
+            }
         }
     }
