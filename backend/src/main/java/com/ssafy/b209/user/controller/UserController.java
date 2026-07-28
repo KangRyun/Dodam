@@ -4,12 +4,14 @@ import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.ApiResponse;
 import com.ssafy.b209.user.dto.request.DeleteUserRequest;
+import com.ssafy.b209.user.dto.request.NotificationSettingsUpdateRequest;
 import com.ssafy.b209.user.dto.request.OnboardingRequest;
 import com.ssafy.b209.user.dto.request.UpdateUserRequest;
 import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
 import com.ssafy.b209.user.service.UserDeletionService;
 import com.ssafy.b209.user.service.UserNotificationSettingsReader;
+import com.ssafy.b209.user.service.UserNotificationSettingsUpdateService;
 import com.ssafy.b209.user.service.UserOnboardingService;
 import com.ssafy.b209.user.service.UserQueryService;
 import com.ssafy.b209.user.service.UserUpdateService;
@@ -52,6 +54,7 @@ public class UserController {
   private final UserUpdateService updateService;
   private final UserDeletionService deletionService;
   private final UserNotificationSettingsReader notificationSettingsReader;
+  private final UserNotificationSettingsUpdateService notificationSettingsUpdateService;
 
   /**
    * 사용자 식별 경계와 조회·Onboarding·수정 서비스를 사용하는 Controller를 생성한다.
@@ -62,6 +65,7 @@ public class UserController {
    * @param updateService 사용자 본인 정보 수정 Use Case
    * @param deletionService 사용자 계정 즉시 삭제 Use Case
    * @param notificationSettingsReader 알림 수신 설정 조회 Use Case
+   * @param notificationSettingsUpdateService 알림 수신 설정 변경 Use Case
    */
   public UserController(
       CurrentAuthenticatedUserResolver currentUserResolver,
@@ -69,13 +73,15 @@ public class UserController {
       UserQueryService queryService,
       UserUpdateService updateService,
       UserDeletionService deletionService,
-      UserNotificationSettingsReader notificationSettingsReader) {
+      UserNotificationSettingsReader notificationSettingsReader,
+      UserNotificationSettingsUpdateService notificationSettingsUpdateService) {
     this.currentUserResolver = currentUserResolver;
     this.onboardingService = onboardingService;
     this.queryService = queryService;
     this.updateService = updateService;
     this.deletionService = deletionService;
     this.notificationSettingsReader = notificationSettingsReader;
+    this.notificationSettingsUpdateService = notificationSettingsUpdateService;
   }
 
   /**
@@ -208,6 +214,43 @@ public class UserController {
   public ResponseEntity<ApiResponse<NotificationSettingsResponse>> getMyNotificationSettings() {
     return ResponseEntity.ok(
         ApiResponse.ok(notificationSettingsReader.read(currentUserResolver.requireUserId())));
+  }
+
+  /**
+   * 인증 사용자의 알림 수신 설정을 전체 교체한다.
+   *
+   * <p>부분 수정이 아니라 네 값을 모두 받는 전체 교체이므로 필드를 하나라도 누락하면 400이다. 저장된 설정 행이 없으면 새로 만들고 있으면 갱신하는 upsert이며,
+   * 저장 후 최신 값을 반환한다. Authorization Bearer Access Token의 사용자 ID를 대상으로 한다.
+   *
+   * @param request 변경할 알림 수신 설정 네 값
+   * @return HTTP 200과 수정 후 알림 수신 설정 공통 응답
+   */
+  @Operation(
+      summary = "알림 설정 수정",
+      description =
+          "인증 사용자의 알림 수신 설정을 변경합니다. 네 값을 모두 전달하는 전체 교체이며 하나라도 누락하면 400을 반환합니다. "
+              + "저장된 설정이 없으면 새로 만들고 있으면 갱신합니다. "
+              + "Authorization Bearer Access Token의 사용자 ID를 대상으로 합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "알림 설정 수정 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "요청 값 오류 또는 필수 필드 누락",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @PatchMapping("/me/notification-settings")
+  public ResponseEntity<ApiResponse<NotificationSettingsResponse>> updateMyNotificationSettings(
+      @Valid @RequestBody NotificationSettingsUpdateRequest request) {
+    return ResponseEntity.ok(
+        ApiResponse.ok(
+            notificationSettingsUpdateService.update(
+                currentUserResolver.requireUserId(), request)));
   }
 
   /**

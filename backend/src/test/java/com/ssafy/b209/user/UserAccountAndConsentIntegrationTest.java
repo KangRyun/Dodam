@@ -343,6 +343,96 @@ class UserAccountAndConsentIntegrationTest {
         .andExpect(jsonPath("$.code").value("USER_404_001"));
   }
 
+  // ---------------------------------------------------------------- 555 알림 설정 수정
+
+  @Test
+  void insertsNotificationSettingsRowWhenNoneExistsOnUpdate() throws Exception {
+    assertThat(count("SELECT COUNT(*) FROM user_notification_settings WHERE user_id = " + USER_ID))
+        .isZero();
+
+    mockMvc
+        .perform(
+            patch("/api/v1/users/me/notification-settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "analysisCompleted": false,
+                      "community": false,
+                      "serviceNotice": true,
+                      "marketing": true
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.analysisCompleted").value(false))
+        .andExpect(jsonPath("$.data.community").value(false))
+        .andExpect(jsonPath("$.data.serviceNotice").value(true))
+        .andExpect(jsonPath("$.data.marketing").value(true));
+
+    assertThat(count("SELECT COUNT(*) FROM user_notification_settings WHERE user_id = " + USER_ID))
+        .isEqualTo(1);
+    assertThat(notificationSetting("analysis_completed")).isFalse();
+    assertThat(notificationSetting("community")).isFalse();
+    assertThat(notificationSetting("service_notice")).isTrue();
+    assertThat(notificationSetting("marketing")).isTrue();
+  }
+
+  @Test
+  void updatesExistingNotificationSettingsRowAndKeepsSingleRow() throws Exception {
+    jdbcTemplate.update(
+        "INSERT INTO user_notification_settings "
+            + "(user_id, analysis_completed, community, service_notice, marketing) "
+            + "VALUES (?, TRUE, TRUE, TRUE, FALSE)",
+        USER_ID);
+
+    mockMvc
+        .perform(
+            patch("/api/v1/users/me/notification-settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "analysisCompleted": false,
+                      "community": true,
+                      "serviceNotice": false,
+                      "marketing": true
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.analysisCompleted").value(false))
+        .andExpect(jsonPath("$.data.community").value(true))
+        .andExpect(jsonPath("$.data.serviceNotice").value(false))
+        .andExpect(jsonPath("$.data.marketing").value(true));
+
+    assertThat(count("SELECT COUNT(*) FROM user_notification_settings WHERE user_id = " + USER_ID))
+        .isEqualTo(1);
+    assertThat(notificationSetting("analysis_completed")).isFalse();
+    assertThat(notificationSetting("community")).isTrue();
+    assertThat(notificationSetting("service_notice")).isFalse();
+    assertThat(notificationSetting("marketing")).isTrue();
+  }
+
+  @Test
+  void rejectsNotificationSettingsUpdateMissingRequiredField() throws Exception {
+    mockMvc
+        .perform(
+            patch("/api/v1/users/me/notification-settings")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "analysisCompleted": true,
+                      "community": true,
+                      "serviceNotice": true
+                    }
+                    """))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+
+    assertThat(count("SELECT COUNT(*) FROM user_notification_settings WHERE user_id = " + USER_ID))
+        .isZero();
+  }
+
   // ---------------------------------------------------------------- 345~348 아동 범위 동의
 
   @Test
@@ -497,6 +587,14 @@ class UserAccountAndConsentIntegrationTest {
 
   private int count(String sql) {
     return jdbcTemplate.queryForObject(sql, Integer.class);
+  }
+
+  private boolean notificationSetting(String column) {
+    return Boolean.TRUE.equals(
+        jdbcTemplate.queryForObject(
+            "SELECT " + column + " FROM user_notification_settings WHERE user_id = ?",
+            Boolean.class,
+            USER_ID));
   }
 
   private void authenticate(Long userId) {
