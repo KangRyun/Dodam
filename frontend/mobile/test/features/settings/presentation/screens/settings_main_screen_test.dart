@@ -23,13 +23,10 @@ void main() {
   testWidgets('설정 메인에 사용자와 보호자용 메뉴를 표시한다', (tester) async {
     await tester.pumpWidget(
       MaterialApp(
-        home: SettingsMainScreen(
-          loadSession: () async => session,
-          onSignOut: () async {},
-        ),
+        home: SettingsMainScreen(user: session.user, onSignOut: () async {}),
       ),
     );
-    await tester.pumpAndSettle();
+    await tester.pump();
 
     expect(find.text('민지엄마'), findsOneWidget);
     expect(find.text('카카오 계정 연결됨'), findsOneWidget);
