@@ -100,6 +100,21 @@ class DrawingSessionDomainTest {
   }
 
   @Test
+  void completesHtpStepFromReflectionWithoutEnteringReporting() {
+    DrawingSession session = session();
+    LocalDateTime completedAt = LocalDateTime.of(2026, 7, 21, 11, 30);
+    session.startDrawingAnalysis();
+    session.finishDrawingAnalysis();
+    session.enterReflection();
+
+    session.completeHtpStep(completedAt);
+
+    assertThat(session.getSessionStatus()).isEqualTo(DrawingSessionStatus.COMPLETED);
+    assertThat(session.getCurrentStage()).isEqualTo(DrawingStage.COMPLETED);
+    assertThat(session.getCompletedAt()).isEqualTo(completedAt);
+  }
+
+  @Test
   void drawingAnalysisTransitionRejectsAnUnexpectedStage() {
     DrawingSession session = session();
 

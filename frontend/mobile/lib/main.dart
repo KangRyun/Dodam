@@ -18,6 +18,7 @@ import 'features/notification/data/services/firebase_push_gateway.dart';
 import 'features/notification/data/services/local_push_presenter.dart';
 import 'features/notification/data/services/push_background_handler.dart';
 import 'features/notification/domain/services/push_setup.dart';
+import 'features/report/data/repositories/remote_report_repository.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -50,9 +51,9 @@ Future<bool> _initializePush() async {
 
 /// 공개 API와 Provider SDK를 사용하는 기본 애플리케이션 구성을 생성한다.
 ///
-/// child·conversation(다음질문)·drawing은 실API(Remote) 리포지토리를 주입하고,
-/// activity·report는 백엔드 API가 생길 때까지 Mock 기본값을 유지한다
-/// (S15P11B209-384 계약 교차 검증, 2026-07-24).
+/// child·conversation(다음질문)·drawing·report는 실API(Remote) 리포지토리를
+/// 주입하고, activity는 백엔드 API가 생길 때까지 Mock 기본값을 유지한다
+/// (S15P11B209-384 계약 교차 검증 2026-07-24, report는 S15P11B209-496에서 연동).
 ///
 /// 테스트에서는 [DodamApp]의 생성자 주입을 통해 Mock Repository를 사용할 수
 /// 있으며, 기본 구성은 인증 세션과 각 도메인 API가 같은 [ApiClient]를 공유한다.
@@ -90,6 +91,7 @@ DodamApp createDefaultApp({
         : RemoteDrawingRepository(apiClient),
     voiceAnswerRepository: RemoteVoiceAnswerRepository(apiClient),
     sttResultRepository: RemoteSttResultRepository(apiClient),
+    reportRepository: RemoteReportRepository(apiClient),
     // Firebase 준비에 실패하면 주입하지 않아 푸시 경로 자체가 꺼진다.
     pushSetup: pushEnabled
         ? PushSetup(

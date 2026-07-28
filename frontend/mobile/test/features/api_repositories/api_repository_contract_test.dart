@@ -204,14 +204,20 @@ void main() {
       final report = ReportDetailDto.fromJson(
         _reportJson('COMPLETED', includeSections: true),
       );
-      expect(report.observedFeatures!.single.evidenceRef, 'OBJ_PERSON_1');
-      expect(report.limitationsText, isNotEmpty);
+      expect(report.drawingSession!.drawingTypeName, '그림일기');
+      expect(
+        report.childExpression!.representativeUtterances.single.messageId,
+        804,
+      );
+      expect(report.limitations, isNotEmpty);
     });
     test('allows GENERATING and FAILED detail sections to be null', () {
       for (final status in ['GENERATING', 'FAILED']) {
         final report = ReportDetailDto.fromJson(_reportJson(status));
-        expect(report.activitySummary, isNull);
-        expect(report.observedFeatures, isNull);
+        expect(report.drawingSession, isNull);
+        expect(report.childExpression, isNull);
+        expect(report.limitations, isEmpty);
+        expect(report.hasNoObservations, isTrue);
       }
     });
     test('parses PENDING RUNNING COMPLETED and FAILED analysis states', () {
@@ -240,60 +246,67 @@ void main() {
   });
 }
 
+/// REPORT-02 보호자 공개 계약(§13.4)의 `data` 페이로드.
+/// GENERATING·FAILED는 같은 모양으로 오되 섹션이 비어 있다.
 Map<String, dynamic> _reportJson(
   String status, {
   bool includeSections = false,
 }) => {
   'reportId': 501,
-  'drawingSessionId': 120,
-  'analysisId': 88,
   'reportVersion': 1,
   'reportStatus': status,
-  'activitySummary': includeSections
+  'drawingSession': includeSections
       ? {
+          'drawingSessionId': 120,
+          'childId': 3,
+          'drawingTypeCode': 'ART_DIARY',
+          'drawingTypeName': '그림일기',
           'title': '우리 가족',
-          'drawingType': {'code': 'ART_DIARY', 'name': '그림일기'},
           'inputMethod': 'CANVAS',
-          'startedAt': '2026-07-20T09:40:00Z',
-          'completedAt': '2026-07-20T10:03:00Z',
-          'durationMinutes': 23,
+          'startedAt': '2026-07-20T09:40:00',
+          'completedAt': '2026-07-20T10:03:00',
+          'durationMs': 1380000,
+        }
+      : null,
+  'drawing': includeSections
+      ? {'finalImageUrl': 'https://example.com/final.png', 'thumbnailUrl': null}
+      : null,
+  'childExpression': includeSections
+      ? {
           'selectedEmotions': ['JOY'],
+          'expressedEmotionText': '동생이랑 놀아서 좋았어요',
+          'representativeUtterances': [
+            {
+              'messageId': 804,
+              'text': '우리 동생이야.',
+              'source': 'STT',
+              'sttNeedsConfirmation': false,
+            },
+          ],
         }
       : null,
-  'drawingImageUrl': includeSections ? 'https://example.com/final.png' : null,
-  'observedFeatures': includeSections
-      ? [
-          {
-            'label': '가족을 가운데에 그렸어요',
-            'description': '따뜻한 색을 사용했어요.',
-            'evidenceRef': 'OBJ_PERSON_1',
-          },
-        ]
-      : null,
-  'keyConversations': includeSections
-      ? [
-          {
-            'question': '이 사람은 누구야?',
-            'answer': '우리 동생이야.',
-            'answerType': 'VOICE',
-          },
-        ]
-      : null,
-  'evidence': includeSections
+  'activityFacts': includeSections
       ? {
-          'drawingRefs': ['OBJ_PERSON_1'],
-          'conversationRefs': [3021],
+          'detectedObjects': ['사람'],
+          'drawingDurationMs': 1320000,
+          'pauseCount': 4,
+          'eraseCount': 2,
+          'pressureAvailable': false,
+          'notes': <String>[],
         }
       : null,
-  'followUp': includeSections
+  'conversationSummary': includeSections
       ? {
-          'attentionPoints': ['함께 확인해 주세요.'],
-          'guidance': '열린 질문을 해 주세요.',
+          'questionCount': 5,
+          'answeredCount': 4,
+          'skippedCount': 1,
+          'summary': '편안하게 대화했어요.',
         }
       : null,
-  'guardianQuestions': includeSections ? ['어떤 부분이 좋아?'] : null,
-  'isExpertReviewRecommended': includeSections ? false : null,
-  'limitationsText': '이 리포트는 진단이 아닌 관찰 참고 자료입니다.',
-  'modelVersion': includeSections ? 'dodam-report-v1.2' : null,
-  'createdAt': '2026-07-20T10:12:00Z',
+  'guardianConversationGuide': includeSections ? ['어떤 부분이 좋아?'] : <String>[],
+  'limitations': includeSections ? ['이 리포트는 진단이 아닌 관찰 참고 자료입니다.'] : <String>[],
+  'expertReview': includeSections
+      ? {'status': 'NOT_REQUESTED', 'available': false}
+      : null,
+  'createdAt': '2026-07-20T10:12:00',
 };

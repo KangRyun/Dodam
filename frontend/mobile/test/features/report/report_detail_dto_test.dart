@@ -1,0 +1,257 @@
+import 'package:dodam/features/report/data/dto/report_dtos.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+/// REPORT-02 보호자 공개 계약(`docs/api/report-detail-guardian-contract.md` §2)
+/// 그대로의 nested 응답을 파싱하는지 검증한다.
+void main() {
+  group('ReportDetailDto.fromJson', () {
+    test('nested 계약 응답의 모든 섹션을 파싱한다', () {
+      final report = ReportDetailDto.fromJson(_fullJson());
+
+      expect(report.reportId, 500);
+      expect(report.reportVersion, 1);
+      expect(report.reportStatus, 'COMPLETED');
+      expect(report.createdAt, '2026-07-21T02:06:00');
+
+      final session = report.drawingSession!;
+      expect(session.drawingSessionId, 100);
+      expect(session.childId, 1);
+      expect(session.drawingTypeCode, 'HOUSE_TREE_PERSON');
+      expect(session.drawingTypeName, '집-나무-사람');
+      expect(session.title, '우리 가족');
+      expect(session.inputMethod, 'CANVAS');
+      expect(session.durationMs, 300000);
+
+      expect(report.drawing!.finalImageUrl, 'https://cdn.example/final.png');
+      expect(report.drawing!.thumbnailUrl, 'https://cdn.example/thumb.png');
+
+      final expression = report.childExpression!;
+      expect(expression.selectedEmotions, ['HAPPY']);
+      expect(expression.expressedEmotionText, '행복한 하루였어요');
+
+      final facts = report.activityFacts!;
+      expect(facts.detectedObjects, ['집']);
+      expect(facts.drawingDurationMs, 295000);
+      expect(facts.pauseCount, 4);
+      expect(facts.eraseCount, 2);
+      expect(facts.pressureAvailable, isTrue);
+      expect(facts.notes, ['멈춤 4회 관찰']);
+
+      final conversation = report.conversationSummary!;
+      expect(conversation.questionCount, 5);
+      expect(conversation.answeredCount, 4);
+      expect(conversation.skippedCount, 1);
+      expect(conversation.summary, '아이가 편안하게 대화했습니다');
+
+      expect(report.guardianConversationGuide, ['오늘 그림에 대해 함께 이야기해 보세요']);
+      expect(report.limitations, ['이 리포트는 진단이 아닙니다']);
+      expect(report.expertReview!.status, 'NOT_REQUESTED');
+      expect(report.expertReview!.available, isFalse);
+    });
+
+    test('구형 flat 필드(keyConversations 등)는 더 이상 읽지 않는다', () {
+      final json = _fullJson()
+        ..['keyConversations'] = [
+          {'question': 'q', 'answer': 'a', 'answerType': 'VOICE'},
+        ]
+        ..['observedFeatures'] = [
+          {'label': 'l', 'description': 'd', 'evidenceRef': 'e'},
+        ];
+
+      final report = ReportDetailDto.fromJson(json);
+
+      // childExpression 경로만 대표 발화의 출처다.
+      expect(report.childExpression!.representativeUtterances, hasLength(1));
+      expect(
+        report.childExpression!.representativeUtterances.single.text,
+        '친구랑 있어서 좋아',
+      );
+    });
+
+    test('GENERATING 부분 응답처럼 nested 섹션이 없어도 안전하게 파싱한다', () {
+      final report = ReportDetailDto.fromJson(const {
+        'reportId': 500,
+        'reportVersion': 1,
+        'reportStatus': 'GENERATING',
+        'drawingSession': null,
+        'drawing': null,
+        'childExpression': null,
+        'activityFacts': null,
+        'conversationSummary': null,
+        'guardianConversationGuide': null,
+        'limitations': null,
+        'expertReview': null,
+        'createdAt': null,
+      });
+
+      expect(report.reportStatus, 'GENERATING');
+      expect(report.drawingSession, isNull);
+      expect(report.drawing, isNull);
+      expect(report.childExpression, isNull);
+      expect(report.guardianConversationGuide, isEmpty);
+      expect(report.limitations, isEmpty);
+      expect(report.createdAt, isNull);
+      expect(report.hasNoObservations, isTrue);
+    });
+
+    test('nullable 스칼라가 null이어도 파싱한다', () {
+      final json = _fullJson()
+        ..['drawingSession'] = {
+          'drawingSessionId': 100,
+          'childId': 1,
+          'drawingTypeCode': null,
+          'drawingTypeName': null,
+          'title': null,
+          'inputMethod': null,
+          'startedAt': null,
+          'completedAt': null,
+          'durationMs': null,
+        }
+        ..['drawing'] = {'finalImageUrl': null, 'thumbnailUrl': null}
+        ..['conversationSummary'] = {
+          'questionCount': null,
+          'answeredCount': null,
+          'skippedCount': null,
+          'summary': null,
+        };
+
+      final report = ReportDetailDto.fromJson(json);
+
+      expect(report.drawingSession!.title, isNull);
+      expect(report.drawingSession!.durationMs, isNull);
+      expect(report.drawing!.finalImageUrl, isNull);
+      expect(report.conversationSummary!.isEmpty, isTrue);
+    });
+  });
+
+  group('representativeUtterances', () {
+    test('정상 항목을 순서대로 파싱한다', () {
+      final report = ReportDetailDto.fromJson(_fullJson());
+      final utterance = report.childExpression!.representativeUtterances.single;
+
+      expect(utterance.messageId, 804);
+      expect(utterance.text, '친구랑 있어서 좋아');
+      expect(utterance.source, 'STT');
+      expect(utterance.sttNeedsConfirmation, isFalse);
+    });
+
+    test('빈 배열이면 빈 목록이 된다', () {
+      final json = _fullJson()
+        ..['childExpression'] = {
+          'selectedEmotions': <String>[],
+          'expressedEmotionText': null,
+          'representativeUtterances': <Object>[],
+        };
+
+      final report = ReportDetailDto.fromJson(json);
+
+      expect(report.childExpression!.representativeUtterances, isEmpty);
+      expect(report.childExpression!.isEmpty, isTrue);
+    });
+
+    test('representativeUtterances 키가 아예 없어도 빈 목록이 된다', () {
+      final json = _fullJson()
+        ..['childExpression'] = {'selectedEmotions': <String>[]};
+
+      final report = ReportDetailDto.fromJson(json);
+
+      expect(report.childExpression!.representativeUtterances, isEmpty);
+    });
+
+    test('messageId와 text가 null이어도 파싱하고 source 기본값은 TEXT다', () {
+      final json = _fullJson()
+        ..['childExpression'] = {
+          'selectedEmotions': <String>[],
+          'expressedEmotionText': null,
+          'representativeUtterances': [
+            {
+              'messageId': null,
+              'text': null,
+              'source': null,
+              'sttNeedsConfirmation': null,
+            },
+          ],
+        };
+
+      final utterance = ReportDetailDto.fromJson(
+        json,
+      ).childExpression!.representativeUtterances.single;
+
+      expect(utterance.messageId, isNull);
+      expect(utterance.text, isNull);
+      expect(utterance.source, 'TEXT');
+      expect(utterance.sttNeedsConfirmation, isFalse);
+    });
+
+    test('source=STT와 TEXT를 그대로 구분해 보존한다', () {
+      final json = _fullJson()
+        ..['childExpression'] = {
+          'selectedEmotions': <String>[],
+          'representativeUtterances': [
+            {'messageId': 804, 'text': '음성', 'source': 'STT'},
+            {'messageId': null, 'text': '음성인데 원본 없음', 'source': 'STT'},
+            {'messageId': 805, 'text': '텍스트', 'source': 'TEXT'},
+          ],
+        };
+
+      final utterances = ReportDetailDto.fromJson(
+        json,
+      ).childExpression!.representativeUtterances;
+
+      expect(utterances.map((item) => item.source), ['STT', 'STT', 'TEXT']);
+      expect(utterances.map((item) => item.messageId), [804, null, 805]);
+    });
+  });
+}
+
+/// 백엔드 `ReportDetailResponseJsonTest`의 golden 표본과 같은 모양.
+Map<String, dynamic> _fullJson() => {
+  'reportId': 500,
+  'reportVersion': 1,
+  'reportStatus': 'COMPLETED',
+  'drawingSession': {
+    'drawingSessionId': 100,
+    'childId': 1,
+    'drawingTypeCode': 'HOUSE_TREE_PERSON',
+    'drawingTypeName': '집-나무-사람',
+    'title': '우리 가족',
+    'inputMethod': 'CANVAS',
+    'startedAt': '2026-07-21T02:00:00',
+    'completedAt': '2026-07-21T02:05:00',
+    'durationMs': 300000,
+  },
+  'drawing': {
+    'finalImageUrl': 'https://cdn.example/final.png',
+    'thumbnailUrl': 'https://cdn.example/thumb.png',
+  },
+  'childExpression': {
+    'selectedEmotions': ['HAPPY'],
+    'expressedEmotionText': '행복한 하루였어요',
+    'representativeUtterances': [
+      {
+        'messageId': 804,
+        'text': '친구랑 있어서 좋아',
+        'source': 'STT',
+        'sttNeedsConfirmation': false,
+      },
+    ],
+  },
+  'activityFacts': {
+    'detectedObjects': ['집'],
+    'drawingDurationMs': 295000,
+    'pauseCount': 4,
+    'eraseCount': 2,
+    'pressureAvailable': true,
+    'notes': ['멈춤 4회 관찰'],
+  },
+  'conversationSummary': {
+    'questionCount': 5,
+    'answeredCount': 4,
+    'skippedCount': 1,
+    'summary': '아이가 편안하게 대화했습니다',
+  },
+  'guardianConversationGuide': ['오늘 그림에 대해 함께 이야기해 보세요'],
+  'limitations': ['이 리포트는 진단이 아닙니다'],
+  'expertReview': {'status': 'NOT_REQUESTED', 'available': false},
+  'createdAt': '2026-07-21T02:06:00',
+};

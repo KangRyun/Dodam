@@ -48,7 +48,8 @@ void main() {
     expect(json['selectedOptions'], [
       {
         'optionId': '2',
-        'type': 'EMOTION',
+        // 질문 응답의 노출 type과 별개인 백엔드 저장 스냅샷 값
+        'type': 'STATIC',
         'value': 'HAPPY',
         // BE 계약 필드명은 labelSnapshot — 답변 시점 라벨 보존
         'labelSnapshot': '기뻤어요',

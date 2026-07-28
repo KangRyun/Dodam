@@ -199,8 +199,10 @@ class _ReportContent extends StatelessWidget {
                 const SizedBox(height: AppSpacing.lg),
                 _ReportDetails(report: report),
               ],
-              const SizedBox(height: AppSpacing.lg),
-              _NoticeCard(text: report.limitationsText),
+              if (report.limitations.isNotEmpty) ...[
+                const SizedBox(height: AppSpacing.lg),
+                _NoticeCard(lines: report.limitations),
+              ],
               const SizedBox(height: AppSpacing.lg),
               AppButton(
                 key: const ValueKey('report-home-cta'),
@@ -222,7 +224,23 @@ class _ReportOverview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final summary = report.activitySummary;
+    final session = report.drawingSession;
+    final emotions = report.childExpression?.selectedEmotions ?? const [];
+    // 서버는 완성본이 없으면 finalImageUrl을 비우므로 썸네일로 물러난다.
+    final imageUrl =
+        report.drawing?.finalImageUrl ?? report.drawing?.thumbnailUrl;
+    final activityLines = <Widget>[
+      if ((session?.drawingTypeName ?? session?.drawingTypeCode)
+          case final type?)
+        _InfoLine(label: '활동 유형', value: type),
+      if (session?.inputMethod case final inputMethod?)
+        _InfoLine(label: '입력 방식', value: inputMethod),
+      if (_minutes(session?.durationMs) case final duration?)
+        _InfoLine(label: '활동 시간', value: duration),
+      if (session?.completedAt case final completedAt?)
+        _InfoLine(label: '완료일', value: _date(completedAt)),
+    ];
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -231,7 +249,7 @@ class _ReportOverview extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                summary?.title ?? '그림 활동 관찰 기록',
+                session?.title ?? '그림 활동 관찰 기록',
                 style: const TextStyle(
                   color: AppColors.ink,
                   fontSize: 23,
@@ -240,7 +258,10 @@ class _ReportOverview extends StatelessWidget {
               ),
               const SizedBox(height: AppSpacing.xs),
               Text(
-                '${_date(report.createdAt)} · 리포트 v${report.reportVersion}',
+                [
+                  if (report.createdAt case final createdAt?) _date(createdAt),
+                  '리포트 v${report.reportVersion}',
+                ].join(' · '),
                 style: const TextStyle(color: AppColors.inkMuted),
               ),
             ],
@@ -257,31 +278,23 @@ class _ReportOverview extends StatelessWidget {
               border: Border.all(color: AppColors.outline),
             ),
             clipBehavior: Clip.antiAlias,
-            child: report.drawingImageUrl == null
+            child: imageUrl == null
                 ? const _ImagePlaceholder()
                 : Image.network(
-                    report.drawingImageUrl!,
+                    imageUrl,
                     fit: BoxFit.contain,
                     errorBuilder: (_, _, _) => const _ImagePlaceholder(),
                   ),
           ),
         ),
-        if (summary != null) ...[
+        if (activityLines.isNotEmpty || emotions.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
           _ReportSection(
+            key: const ValueKey('report-activity-info'),
             title: '활동 정보',
             children: [
-              _InfoLine(
-                label: '활동 유형',
-                value:
-                    summary.drawingType['name']?.toString() ??
-                    summary.drawingType['code']?.toString() ??
-                    '-',
-              ),
-              _InfoLine(label: '입력 방식', value: summary.inputMethod),
-              _InfoLine(label: '활동 시간', value: '${summary.durationMinutes}분'),
-              _InfoLine(label: '완료일', value: _date(summary.completedAt)),
-              if (summary.selectedEmotions.isNotEmpty) ...[
+              ...activityLines,
+              if (emotions.isNotEmpty) ...[
                 const SizedBox(height: AppSpacing.xs),
                 const Text(
                   '아이가 선택한 감정',
@@ -292,7 +305,7 @@ class _ReportOverview extends StatelessWidget {
                   spacing: AppSpacing.xs,
                   runSpacing: AppSpacing.xs,
                   children: [
-                    for (final emotion in summary.selectedEmotions)
+                    for (final emotion in emotions)
                       Chip(label: Text(_emotionLabel(emotion))),
                   ],
                 ),
@@ -310,81 +323,99 @@ class _ReportDetails extends StatelessWidget {
   final ReportDetailDto report;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      if (report.observedFeatures case final features? when features.isNotEmpty)
+  Widget build(BuildContext context) {
+    final expression = report.childExpression;
+    final facts = report.activityFacts;
+    final conversation = report.conversationSummary;
+    final guide = report.guardianConversationGuide;
+
+    final sections = <Widget>[
+      if (expression != null && !expression.isEmpty)
         _ReportSection(
-          key: const ValueKey('report-observed-features'),
-          title: '이런 모습이 보였어요',
+          key: const ValueKey('report-child-expression'),
+          title: '아이가 표현한 것',
           children: [
-            for (final feature in features)
-              _Bullet(title: feature.label, description: feature.description),
-          ],
-        ),
-      if (report.keyConversations case final conversations?
-          when conversations.isNotEmpty) ...[
-        if (report.observedFeatures?.isNotEmpty == true)
-          const SizedBox(height: AppSpacing.md),
-        _ReportSection(
-          key: const ValueKey('report-conversations'),
-          title: '주요 대화',
-          children: [
-            for (final item in conversations) _Conversation(item: item),
-          ],
-        ),
-      ],
-      if (report.followUp != null ||
-          report.guardianQuestions?.isNotEmpty == true) ...[
-        const SizedBox(height: AppSpacing.md),
-        _ReportSection(
-          key: const ValueKey('report-follow-up'),
-          title: '함께 확인해볼 점',
-          children: [
-            if (report.followUp case final followUp?) ...[
-              for (final point in followUp.attentionPoints)
-                _Bullet(title: point),
-              if (followUp.guidance.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: AppSpacing.xs),
-                  child: Text(
-                    followUp.guidance,
-                    style: const TextStyle(color: AppColors.ink),
-                  ),
-                ),
+            if (expression.expressedEmotionText case final text?) ...[
+              Text(text, style: const TextStyle(color: AppColors.ink)),
+              if (expression.representativeUtterances.isNotEmpty)
+                const SizedBox(height: AppSpacing.md),
             ],
-            if (report.guardianQuestions case final questions?
-                when questions.isNotEmpty) ...[
-              const SizedBox(height: AppSpacing.md),
-              const Text(
-                '이런 질문으로 대화해 보세요',
-                style: TextStyle(
-                  color: AppColors.inkMuted,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
+            for (final utterance in expression.representativeUtterances)
+              if (utterance.text case final text?) _Utterance(text: text),
+          ],
+        ),
+      if (facts != null && !facts.isEmpty)
+        _ReportSection(
+          key: const ValueKey('report-activity-facts'),
+          title: '활동 기록',
+          children: [
+            if (facts.detectedObjects.isNotEmpty)
+              _InfoLine(label: '그린 것', value: facts.detectedObjects.join(', ')),
+            if (facts.pauseCount case final count?)
+              _InfoLine(label: '멈춤', value: '$count회'),
+            if (facts.eraseCount case final count?)
+              _InfoLine(label: '지우기', value: '$count회'),
+            for (final note in facts.notes) _Bullet(title: note),
+          ],
+        ),
+      if (conversation != null && !conversation.isEmpty)
+        _ReportSection(
+          key: const ValueKey('report-conversation-summary'),
+          title: '대화 요약',
+          children: [
+            if (conversation.questionCount case final count?)
+              _InfoLine(label: '질문', value: '$count개'),
+            if (conversation.answeredCount case final count?)
+              _InfoLine(label: '대답', value: '$count개'),
+            if (conversation.skippedCount case final count?)
+              _InfoLine(label: '건너뜀', value: '$count개'),
+            if (conversation.summary case final summary?) ...[
               const SizedBox(height: AppSpacing.xs),
-              for (final question in questions) _Bullet(title: question),
+              Text(summary, style: const TextStyle(color: AppColors.ink)),
             ],
           ],
         ),
-      ],
-      if (report.observedFeatures?.isNotEmpty != true &&
-          report.keyConversations?.isNotEmpty != true &&
-          report.followUp == null &&
-          report.guardianQuestions?.isNotEmpty != true)
-        const _ReportCard(
-          child: Text(
-            '아직 표시할 관찰 기록이 없어요.',
-            style: TextStyle(color: AppColors.inkMuted),
-          ),
+      if (guide.isNotEmpty)
+        _ReportSection(
+          key: const ValueKey('report-conversation-guide'),
+          title: '이런 질문으로 대화해 보세요',
+          children: [for (final question in guide) _Bullet(title: question)],
         ),
-    ],
-  );
+    ];
+
+    if (sections.isEmpty) {
+      return const _ReportCard(
+        key: ValueKey('report-no-observations'),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.inbox_outlined, color: AppColors.inkMuted),
+            SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text(
+                '아직 표시할 관찰 기록이 없어요.',
+                style: TextStyle(color: AppColors.inkMuted),
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final (index, section) in sections.indexed) ...[
+          if (index > 0) const SizedBox(height: AppSpacing.md),
+          section,
+        ],
+      ],
+    );
+  }
 }
 
 class _ReportCard extends StatelessWidget {
-  const _ReportCard({required this.child});
+  const _ReportCard({required this.child, super.key});
   final Widget child;
   @override
   Widget build(BuildContext context) => Container(
@@ -453,9 +484,8 @@ class _InfoLine extends StatelessWidget {
 }
 
 class _Bullet extends StatelessWidget {
-  const _Bullet({required this.title, this.description});
+  const _Bullet({required this.title});
   final String title;
-  final String? description;
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: AppSpacing.sm),
@@ -468,24 +498,12 @@ class _Bullet extends StatelessWidget {
         ),
         const SizedBox(width: AppSpacing.sm),
         Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                title,
-                style: const TextStyle(
-                  color: AppColors.ink,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-              if (description case final description?) ...[
-                const SizedBox(height: AppSpacing.xxs),
-                Text(
-                  description,
-                  style: const TextStyle(color: AppColors.inkMuted),
-                ),
-              ],
-            ],
+          child: Text(
+            title,
+            style: const TextStyle(
+              color: AppColors.ink,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
       ],
@@ -493,39 +511,21 @@ class _Bullet extends StatelessWidget {
   );
 }
 
-class _Conversation extends StatelessWidget {
-  const _Conversation({required this.item});
-  final KeyConversationDto item;
+/// 대표 발화 한 줄. 음성/텍스트 출처와 무관하게 문장만 보여준다.
+/// (음성 원본 재생은 S15P11B209-490에서 별도로 붙인다.)
+class _Utterance extends StatelessWidget {
+  const _Utterance({required this.text});
+  final String text;
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: AppSpacing.md),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          'Q. ${item.question}',
-          style: const TextStyle(
-            color: AppColors.inkMuted,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        Text('A. ${item.answer}', style: const TextStyle(color: AppColors.ink)),
-        if (item.answerType == 'VOICE') ...[
-          const SizedBox(height: AppSpacing.xxs),
-          const Text(
-            '음성으로 답했어요 · 재생 파일 미제공',
-            style: TextStyle(color: AppColors.inkMuted, fontSize: 12),
-          ),
-        ],
-      ],
-    ),
+    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+    child: Text('“$text”', style: const TextStyle(color: AppColors.ink)),
   );
 }
 
 class _NoticeCard extends StatelessWidget {
-  const _NoticeCard({required this.text});
-  final String text;
+  const _NoticeCard({required this.lines});
+  final List<String> lines;
   @override
   Widget build(BuildContext context) => Container(
     key: const ValueKey('report-non-diagnostic-notice'),
@@ -540,9 +540,23 @@ class _NoticeCard extends StatelessWidget {
         const Icon(Icons.info_outline_rounded, color: AppColors.lavender),
         const SizedBox(width: AppSpacing.sm),
         Expanded(
-          child: Text(
-            text,
-            style: const TextStyle(color: AppColors.inkMuted, height: 1.45),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final line in lines)
+                Padding(
+                  padding: EdgeInsets.only(
+                    bottom: line == lines.last ? 0 : AppSpacing.xs,
+                  ),
+                  child: Text(
+                    line,
+                    style: const TextStyle(
+                      color: AppColors.inkMuted,
+                      height: 1.45,
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
       ],
@@ -572,6 +586,10 @@ class _ImagePlaceholder extends StatelessWidget {
 String _date(String isoDate) => isoDate.length >= 10
     ? isoDate.substring(0, 10).replaceAll('-', '.')
     : isoDate;
+
+/// 서버가 주는 밀리초 활동 시간을 분 단위 문구로 바꾼다. 값이 없으면 표시하지 않는다.
+String? _minutes(int? durationMs) =>
+    durationMs == null ? null : '${(durationMs / 60000).round()}분';
 
 String _emotionLabel(String emotion) => switch (emotion) {
   'HAPPY' || 'JOY' => '기쁨',
