@@ -181,6 +181,27 @@ class DrawingCompletionIntegrationTest extends IntegrationTestSupport {
         .containsEntry("completed_at", null);
   }
 
+  @Test
+  void rejectsCompletionWithoutReportAndKeepsReflectionState() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/{drawingSessionId}/complete", SESSION_ID)
+                .header("Idempotency-Key", "reportless-completion-key")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"conversationSkipped\":false,\"requestReport\":false}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("DRAWING_400_012"));
+
+    assertThat(count("analyses")).isZero();
+    assertThat(count("reports")).isZero();
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT session_status, current_stage FROM drawing_sessions WHERE id = ?",
+                SESSION_ID))
+        .containsEntry("session_status", "IN_PROGRESS")
+        .containsEntry("current_stage", "REFLECTION");
+  }
+
   private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder
       completionRequest(String idempotencyKey) {
     return post("/api/v1/drawing-sessions/{drawingSessionId}/complete", SESSION_ID)
