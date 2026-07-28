@@ -114,7 +114,7 @@ void main() {
     expect(controller.status, DrawingDraftRestoreStatus.loadingImage);
   });
 
-  test('복구 뒤 event는 이어지고 batch는 Draft와 독립적으로 시작한다', () async {
+  test('복구 뒤 event와 batch 시퀀스를 모두 이어받는다', () async {
     final repository = _DraftRepository();
     final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
     final controller = DrawingDraftRestoreController(
@@ -131,7 +131,9 @@ void main() {
 
     expect(events.first.seq, 1106);
     expect(events.last.seq, 1107);
-    expect(repository.lastBatch?.batchSequence, 1);
+    // batchSequence도 Draft의 lastEventSequence(1105) 뒤인 1106부터 시작해야 이미
+    // 저장된 batchSequence=1과 충돌(DRAWING_409_019)하지 않는다.
+    expect(repository.lastBatch?.batchSequence, 1106);
     expect(repository.lastBatch?.firstEventSequence, events.last.seq);
     expect(repository.lastBatch?.lastEventSequence, events.last.seq);
     expect(sync.journal.events, hasLength(2));
