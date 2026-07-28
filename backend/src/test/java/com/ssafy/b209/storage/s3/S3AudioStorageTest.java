@@ -86,6 +86,29 @@ class S3AudioStorageTest {
   }
 
   @Test
+  void promotesTtsAudioUnderDedicatedCachePrefix() {
+    LocalAudioStorage staging =
+        new LocalAudioStorage(
+            new AudioStorageProperties(tempDir.resolve("tts"), 20 * 1024 * 1024),
+            Clock.fixed(Instant.parse("2026-07-25T00:00:00Z"), ZoneOffset.UTC));
+    S3AudioStorage ttsStorage =
+        new S3AudioStorage(s3Client, properties(), properties().ttsPrefix(), staging);
+    when(s3Client.putObject(any(PutObjectRequest.class), any(RequestBody.class)))
+        .thenReturn(PutObjectResponse.builder().build());
+
+    StoredAudio stored =
+        ttsStorage.promote(
+            ttsStorage.stage(
+                new StoreAudioCommand(
+                    new ByteArrayInputStream(WAV), WAV.length, "audio/wav", "tts.wav")));
+
+    ArgumentCaptor<PutObjectRequest> requestCaptor =
+        ArgumentCaptor.forClass(PutObjectRequest.class);
+    verify(s3Client).putObject(requestCaptor.capture(), any(RequestBody.class));
+    assertThat(requestCaptor.getValue().key()).isEqualTo("tts-cache/" + stored.storageKey());
+  }
+
+  @Test
   void readsS3AudioAsAClosableStream() throws Exception {
     when(s3Client.getObject(any(GetObjectRequest.class)))
         .thenReturn(
@@ -153,6 +176,7 @@ class S3AudioStorageTest {
         "secret",
         "images",
         "audio",
+        "tts-cache",
         true);
   }
 

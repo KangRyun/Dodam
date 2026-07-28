@@ -90,6 +90,7 @@ app:
       secret-key: ${MINIO_BE_PASSWORD:}
       image-prefix: ${S3_IMAGE_PREFIX:images}
       audio-prefix: ${S3_AUDIO_PREFIX:audio}
+      tts-prefix: ${S3_TTS_PREFIX:tts-cache}
       path-style-access-enabled: ${S3_PATH_STYLE_ACCESS_ENABLED:true}
     image:
       root: ${LOCAL_IMAGE_STORAGE_ROOT:./storage/images}
