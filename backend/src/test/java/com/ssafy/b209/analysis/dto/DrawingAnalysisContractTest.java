@@ -24,6 +24,8 @@ class DrawingAnalysisContractTest {
             100L,
             200L,
             DrawingAnalysisScope.FINAL,
+            DrawingAnalysisActivityType.HTP,
+            DrawingAnalysisSubject.HOUSE,
             "drawings/example.png",
             "image/png",
             1200,
@@ -36,6 +38,8 @@ class DrawingAnalysisContractTest {
             100L,
             200L,
             DrawingAnalysisScope.FINAL,
+            DrawingAnalysisActivityType.ART_DIARY,
+            null,
             "../private.png",
             "image/gif",
             null,
@@ -44,6 +48,16 @@ class DrawingAnalysisContractTest {
 
     assertThat(validator.validate(valid)).isEmpty();
     assertThat(validator.validate(unsafe)).isNotEmpty();
+  }
+
+  @Test
+  void rejectsActivityAndSubjectMismatch() {
+    DrawingAnalysisClientCommand htpWithoutSubject = command(DrawingAnalysisActivityType.HTP, null);
+    DrawingAnalysisClientCommand artDiaryWithSubject =
+        command(DrawingAnalysisActivityType.ART_DIARY, DrawingAnalysisSubject.PERSON);
+
+    assertThat(validator.validate(htpWithoutSubject)).isNotEmpty();
+    assertThat(validator.validate(artDiaryWithSubject)).isNotEmpty();
   }
 
   @Test
@@ -89,5 +103,22 @@ class DrawingAnalysisContractTest {
                 BigDecimal.ZERO, BigDecimal.ZERO, new BigDecimal("0.3"), new BigDecimal("0.4"))));
 
     assertThat(response.detections()).isEmpty();
+  }
+
+  private DrawingAnalysisClientCommand command(
+      DrawingAnalysisActivityType activityType, DrawingAnalysisSubject drawingSubject) {
+    return new DrawingAnalysisClientCommand(
+        "request-1",
+        701L,
+        100L,
+        200L,
+        DrawingAnalysisScope.FINAL,
+        activityType,
+        drawingSubject,
+        "drawings/example.png",
+        "image/png",
+        1200,
+        800,
+        "a".repeat(64));
   }
 }

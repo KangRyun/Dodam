@@ -380,7 +380,8 @@ def internal_health():
     """§19.1 AI-05 · §19.8. AI 서버와 구성요소별 모델 준비 상태.
 
     준비 여부 판정 근거:
-    - objectDetection: YOLO 가중치 존재 + checksum 무결성(603). 손상·부재면 NOT_READY.
+    - objectDetection: HTP·그림일기 YOLO 가중치 존재 + checksum 무결성. 하나라도
+      손상·부재면 출시 대상 활동 전체가 준비되지 않은 것으로 보고 NOT_READY.
       가중치는 프로세스 동안 불변이라 첫 계산을 캐시해 poll마다 재해시하지 않는다(604).
     - vision·language·stt·tts: GMS 키 설정 여부. 원격 모델이라 실제 호출로 확인하면
       health 조회마다 비용이 발생하므로 설정 유무를 대리 지표로 쓴다.
@@ -393,6 +394,7 @@ def internal_health():
     from datetime import datetime, timezone
 
     gms_ready = "READY" if config.GMS_KEY else "NOT_READY"
+    detection_readiness = yolo_client.model_readiness()
 
     def ready(flag: bool) -> str:
         return "READY" if flag else "NOT_READY"
@@ -400,7 +402,9 @@ def internal_health():
     return {
         "status": "UP",
         "models": {
-            "objectDetection": ready(yolo_client.model_readiness().get("htp", False)),
+            "objectDetection": ready(
+                all(detection_readiness.get(key, False) for key in ("htp", "sketch"))
+            ),
             "vision": gms_ready,
             "language": gms_ready,
             "stt": gms_ready,

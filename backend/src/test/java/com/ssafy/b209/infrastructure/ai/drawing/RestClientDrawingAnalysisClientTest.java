@@ -2,12 +2,15 @@ package com.ssafy.b209.infrastructure.ai.drawing;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisClientCommand;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisSubject;
 import jakarta.validation.Validation;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
@@ -43,6 +46,8 @@ class RestClientDrawingAnalysisClientTest {
   void acceptsCanonicalSuccessResponse() {
     server
         .expect(requestTo(ENDPOINT_URL))
+        .andExpect(jsonPath("$.activityType").value("HTP"))
+        .andExpect(jsonPath("$.drawingSubject").value("HOUSE"))
         .andRespond(withSuccess(successResponse(701L), MediaType.APPLICATION_JSON));
 
     var response = client.analyze(validCommand());
@@ -173,6 +178,8 @@ class RestClientDrawingAnalysisClientTest {
         100L,
         200L,
         DrawingAnalysisScope.FINAL,
+        DrawingAnalysisActivityType.HTP,
+        DrawingAnalysisSubject.HOUSE,
         "drawings/example.png",
         "image/png",
         null,

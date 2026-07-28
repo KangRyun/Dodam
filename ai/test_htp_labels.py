@@ -108,6 +108,22 @@ class SummarizeTest(unittest.TestCase):
 
 
 class SuppressCrossSubjectPartsTest(unittest.TestCase):
+    def test_uses_persisted_subject_even_without_whole_detection(self):
+        kept = htp_labels.suppress_for_subject(
+            [
+                _FakeDetection("수관", 0.88),
+                _FakeDetection("눈", 0.81),
+                _FakeDetection("구름", 0.70),
+            ],
+            htp_labels.GROUP_TREE,
+        )
+
+        self.assertEqual([d.label for d in kept], ["수관", "구름"])
+
+    def test_rejects_unknown_expected_subject(self):
+        with self.assertRaises(ValueError):
+            htp_labels.suppress_for_subject([], "SCENERY")
+
     def test_drops_other_subject_parts_when_a_subject_is_identified(self):
         # 실측에서 나온 형태: 나무 그림에 사람 부위가 높은 신뢰도로 섞여 들어온다.
         kept = htp_labels.suppress_cross_subject_parts(

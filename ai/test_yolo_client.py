@@ -122,6 +122,27 @@ class ModelRegistryTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             yolo_client._get_model("does-not-exist")
 
+    def test_detect_uses_requested_model_key(self):
+        result = mock.Mock()
+        result.boxes.data.tolist.return_value = []
+        result.orig_shape = (100, 100)
+        result.names = {}
+        result.plot.return_value = object()
+        model = mock.Mock()
+        model.predict.return_value = [result]
+
+        with (
+            mock.patch.object(yolo_client, "_get_model", return_value=model) as get_model,
+            mock.patch.object(yolo_client, "_encode_png", return_value=b"png"),
+        ):
+            detections, annotated = yolo_client.detect_and_annotate(
+                "/image.png", model_key="sketch"
+            )
+
+        get_model.assert_called_once_with("sketch")
+        self.assertEqual(detections, [])
+        self.assertEqual(annotated, b"png")
+
 
 class ModelReadinessTest(unittest.TestCase):
     """health용 준비 여부 — 예외 없이 boolean, 존재+checksum 반영, 캐시."""

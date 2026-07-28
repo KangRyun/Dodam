@@ -43,6 +43,7 @@ def _det(label: str, x: float, y: float, w: float, h: float, conf: float = 0.9):
 SPEC_REQUEST = {
     "analysisId": 701,
     "drawingSessionId": 100,
+    "activityType": "ART_DIARY",
     "analysisType": "FINAL",
     "triggerReason": "ACTIVITY_COMPLETE",
     "childContext": {
@@ -115,6 +116,25 @@ class RequestContractTest(unittest.TestCase):
                     contracts.AnalysisRequest.model_validate(
                         {**SPEC_REQUEST, "analysisType": bad}
                     )
+
+    def test_htp_requires_subject_and_art_diary_rejects_subject(self):
+        htp = contracts.AnalysisRequest.model_validate(
+            {**SPEC_REQUEST, "activityType": "HTP", "drawingSubject": "TREE"}
+        )
+        self.assertEqual(htp.drawing_subject, "TREE")
+
+        with self.assertRaises(Exception):
+            contracts.AnalysisRequest.model_validate(
+                {**SPEC_REQUEST, "activityType": "HTP"}
+            )
+        with self.assertRaises(Exception):
+            contracts.AnalysisRequest.model_validate(
+                {
+                    **SPEC_REQUEST,
+                    "activityType": "ART_DIARY",
+                    "drawingSubject": "PERSON",
+                }
+            )
 
     def test_child_utterance_not_in_repr(self):
         """아이 발화·signedUrl은 repr에 실리지 않는다(로그 유출 차단, 가드레일)."""
@@ -348,6 +368,18 @@ class InternalHealthTest(unittest.TestCase):
         self.assertNotIn(config.YOLO_MODEL_PATH, text)
         self.assertNotIn("/", text.split('"timestamp"')[0])
 
+    def test_object_detection_is_not_ready_when_one_activity_model_is_missing(self):
+        import main
+
+        with mock.patch.object(
+            main.yolo_client,
+            "model_readiness",
+            return_value={"htp": True, "sketch": False},
+        ):
+            payload = main.internal_health()
+
+        self.assertEqual(payload["models"]["objectDetection"], "NOT_READY")
+
 
 class DetectOrDegradeTest(unittest.TestCase):
     """604 fallback — 탐지 실패 시 502 대신 빈 탐지 + 경고로 degrade한다."""
@@ -355,12 +387,15 @@ class DetectOrDegradeTest(unittest.TestCase):
     def test_returns_detection_result_on_success(self):
         with mock.patch.object(
             svc.yolo_client, "detect_and_annotate", return_value=(["d"], b"png")
-        ):
+        ) as detector:
             warnings: list[str] = []
-            detections, annotated = svc._detect_or_degrade("/x.png", b"orig", warnings)
+            detections, annotated = svc._detect_or_degrade(
+                "/x.png", b"orig", warnings, model_key="sketch"
+            )
         self.assertEqual(detections, ["d"])
         self.assertEqual(annotated, b"png")
         self.assertEqual(warnings, [])
+        detector.assert_called_once_with("/x.png", model_key="sketch")
 
     def test_degrades_to_empty_with_warning_on_failure(self):
         with mock.patch.object(
@@ -369,10 +404,42 @@ class DetectOrDegradeTest(unittest.TestCase):
             side_effect=RuntimeError("가중치 무결성 검증 실패"),
         ):
             warnings: list[str] = []
-            detections, annotated = svc._detect_or_degrade("/x.png", b"orig-bytes", warnings)
+            detections, annotated = svc._detect_or_degrade(
+                "/x.png", b"orig-bytes", warnings, model_key="htp"
+            )
         self.assertEqual(detections, [])
         self.assertEqual(annotated, b"orig-bytes")  # 원본 이미지로 진행
         self.assertIn("OBJECT_DETECTION_UNAVAILABLE", warnings)
+
+    def test_activity_type_selects_model_key(self):
+        self.assertEqual(svc._model_key_for("HTP"), "htp")
+        self.assertEqual(svc._model_key_for("ART_DIARY"), "sketch")
+
+
+class ActivityDetectionFilterTest(unittest.TestCase):
+    def test_htp_uses_persisted_subject_and_reports_missing_whole(self):
+        warnings: list[str] = []
+        kept = svc._filter_detections_for_activity(
+            "HTP",
+            "TREE",
+            [_det("수관", 0, 0, 0.2, 0.2), _det("눈", 0, 0, 0.1, 0.1)],
+            warnings,
+        )
+
+        self.assertEqual([d.label for d in kept], ["수관"])
+        self.assertIn("CROSS_SUBJECT_PARTS_SUPPRESSED", warnings)
+        self.assertIn("HTP_SUBJECT_NOT_DETECTED", warnings)
+
+    def test_art_diary_does_not_apply_htp_filter(self):
+        detections = [_det("집전체", 0, 0, 0.2, 0.2), _det("눈", 0, 0, 0.1, 0.1)]
+        warnings: list[str] = []
+
+        kept = svc._filter_detections_for_activity(
+            "ART_DIARY", None, detections, warnings
+        )
+
+        self.assertEqual(kept, detections)
+        self.assertEqual(warnings, [])
 
 
 if __name__ == "__main__":

@@ -202,6 +202,31 @@ def suppress_cross_subject_parts(detections: Iterable[_DetectionLike]) -> list[_
     ]
 
 
+def suppress_for_subject(
+    detections: Iterable[_DetectionLike], expected_group: str
+) -> list[_DetectionLike]:
+    """저장된 HTP 주제와 다른 HTP 그룹의 탐지를 제거한다.
+
+    주제 전체 객체를 모델이 놓쳐도 BE가 전달한 단계 주제는 확정값이므로 해당 주제 부위와
+    배경·UNKNOWN은 유지한다. 다른 HTP 주제의 전체와 부위는 교차 주제 오탐으로 제거한다.
+
+    Args:
+        detections: HTP 모델의 원시 탐지 목록.
+        expected_group: ``HOUSE``, ``TREE``, ``PERSON`` 중 저장된 단계 주제.
+
+    Raises:
+        ValueError: HTP 주제가 아닌 값이 전달된 경우.
+    """
+    if expected_group not in SUBJECT_GROUPS:
+        raise ValueError(f"지원하지 않는 HTP 주제: {expected_group}")
+    return [
+        det
+        for det in detections
+        if spec_of(det.label).group
+        in (expected_group, GROUP_SCENERY, GROUP_UNKNOWN)
+    ]
+
+
 @dataclass(frozen=True)
 class GroupSummary:
     """한 그룹(집/나무/사람/배경)의 탐지 요약."""
