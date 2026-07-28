@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../app/router/app_router.dart';
+import '../../../../app/widgets/app_failure_view.dart';
 import '../../../../core/network/network.dart';
 import '../../../../design_system/design_system.dart';
 import '../../data/dto/report_dtos.dart';
@@ -33,6 +34,7 @@ class ReportScreen extends StatefulWidget {
 class _ReportScreenState extends State<ReportScreen> {
   _ReportViewStatus _status = _ReportViewStatus.loading;
   ReportDetailDto? _report;
+  Object? _failure;
 
   @override
   void initState() {
@@ -46,7 +48,10 @@ class _ReportScreenState extends State<ReportScreen> {
       setState(() => _status = _ReportViewStatus.invalidId);
       return;
     }
-    setState(() => _status = _ReportViewStatus.loading);
+    setState(() {
+      _status = _ReportViewStatus.loading;
+      _failure = null;
+    });
     try {
       final report = await widget.repository.getReport(reportId);
       if (!mounted) return;
@@ -68,13 +73,19 @@ class _ReportScreenState extends State<ReportScreen> {
       });
     } on ApiResponseFailure catch (failure) {
       if (!mounted) return;
-      setState(
-        () => _status = failure.statusCode == 404
+      setState(() {
+        _failure = failure;
+        _status = failure.statusCode == 404
             ? _ReportViewStatus.empty
-            : _ReportViewStatus.error,
-      );
-    } on Object {
-      if (mounted) setState(() => _status = _ReportViewStatus.error);
+            : _ReportViewStatus.error;
+      });
+    } on Object catch (error) {
+      if (mounted) {
+        setState(() {
+          _failure = error;
+          _status = _ReportViewStatus.error;
+        });
+      }
     }
   }
 
@@ -108,7 +119,11 @@ class _ReportScreenState extends State<ReportScreen> {
     ),
     _ReportViewStatus.error => _ReportStateWithHome(
       key: const ValueKey('report-error'),
-      child: AppRetryView(title: '관찰 리포트를 불러오지 못했어요', onRetry: _load),
+      child: AppFailureView(
+        title: '관찰 리포트를 불러오지 못했어요',
+        failure: _failure,
+        onRetry: _load,
+      ),
     ),
     _ReportViewStatus.empty => const _ReportStateWithHome(
       key: ValueKey('report-empty'),

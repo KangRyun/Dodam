@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../app/state/guardian_child_controller.dart';
+import '../../../../app/widgets/app_failure_view.dart';
 import '../../../../app/widgets/app_placeholder_scaffold.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../child/data/dto/child_dtos.dart';
@@ -38,10 +39,10 @@ class GuardianHomeScreen extends StatelessWidget {
       key: ValueKey('child-list-loading'),
       message: '아이 정보를 불러오고 있어요',
     ),
-    ChildListStatus.error => AppRetryView(
+    ChildListStatus.error => AppFailureView(
       key: const ValueKey('child-list-error'),
       title: '아이 정보를 불러오지 못했어요',
-      message: '잠시 후 다시 시도해 주세요.',
+      failure: controller.listError,
       onRetry: controller.loadChildren,
     ),
     ChildListStatus.empty => AppEmptyView(
@@ -174,7 +175,9 @@ class ChildSelectScreen extends StatelessWidget {
         builder: (context, _) => switch (controller.status) {
           ChildListStatus.idle || ChildListStatus.loading =>
             const AppLoadingView(message: '아이 정보를 불러오고 있어요'),
-          ChildListStatus.error => AppRetryView(
+          ChildListStatus.error => AppFailureView(
+            title: '아이 정보를 불러오지 못했어요',
+            failure: controller.listError,
             onRetry: controller.loadChildren,
           ),
           ChildListStatus.empty => const AppEmptyView(
