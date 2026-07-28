@@ -21,10 +21,13 @@ resources:
   - mysql.yaml
   - redis.yaml
   - minio.yaml
+  - mongodb.yaml            # S15P11B209-364 — 스트로크·대화 로그 (근거: docs/adr/0001-mongodb-adoption.md)
+  - mongodb-initdb.yaml     #   최초 기동 시 앱 계정 생성 (데이터 디렉터리가 빌 때만 1회 실행)
   - backend.yaml
   - ai.yaml
   - gateway.yaml
   - jenkins-external.yaml
+  - jenkins-deployer-rbac.yaml   # S15P11B209-359 — 배포 전용 SA(네임스페이스 한정, Secret 읽기 없음)
   - cronjobs.yaml
 
 commonLabels:

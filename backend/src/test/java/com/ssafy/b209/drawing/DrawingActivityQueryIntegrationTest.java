@@ -7,12 +7,15 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ssafy.b209.auth.token.AuthenticatedUser;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Base64;
 import java.util.List;
+import javax.imageio.ImageIO;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -58,10 +61,20 @@ class DrawingActivityQueryIntegrationTest {
   private static final long COMPLETED_SESSION_ID = 11L;
   private static final long DELETED_SESSION_ID = 12L;
   private static final long OTHER_CHILD_SESSION_ID = 13L;
-  private static final byte[] PNG =
-      Base64.getDecoder()
-          .decode(
-              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+  private static final byte[] PNG = pngBytes(320, 320);
+
+  private static byte[] pngBytes(int width, int height) {
+    BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+    try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+      if (!ImageIO.write(image, "png", output)) {
+        throw new IllegalStateException("PNG 인코딩에 실패했습니다.");
+      }
+      return output.toByteArray();
+    } catch (IOException exception) {
+      throw new UncheckedIOException(exception);
+    }
+  }
+
   private static final Path STORAGE_ROOT = createStorageRoot();
 
   @Container @ServiceConnection

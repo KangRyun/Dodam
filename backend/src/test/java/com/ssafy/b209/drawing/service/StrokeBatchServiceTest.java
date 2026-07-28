@@ -32,6 +32,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -120,6 +121,34 @@ class StrokeBatchServiceTest {
         .isInstanceOf(BusinessException.class)
         .extracting("errorCode")
         .isEqualTo(DrawingErrorCode.STROKE_BATCH_INVALID);
+    verifyNoInteractions(currentUserResolver, drawingSessionRepository, strokeBatchRepository);
+  }
+
+  @Test
+  void rejectsMoreThanTwentyThousandPointsBeforeAuthentication() {
+    StrokePointRequest point =
+        new StrokePointRequest(BigDecimal.valueOf(0.18), BigDecimal.valueOf(0.42), 0, null);
+    SaveStrokeBatchRequest oversized =
+        new SaveStrokeBatchRequest(
+            3,
+            101,
+            101,
+            OffsetDateTime.parse("2026-07-21T11:32:10.120+09:00"),
+            List.of(
+                new StrokeEventRequest(
+                    101,
+                    "STROKE",
+                    "PEN",
+                    "#FFCC00",
+                    BigDecimal.valueOf(8),
+                    null,
+                    Collections.nCopies(20_001, point))),
+            new StrokeMetricsRequest(0, 0, 0, 0));
+
+    assertThatThrownBy(() -> service.save(100L, oversized))
+        .isInstanceOf(BusinessException.class)
+        .extracting("errorCode")
+        .isEqualTo(DrawingErrorCode.STROKE_BATCH_POINT_LIMIT_EXCEEDED);
     verifyNoInteractions(currentUserResolver, drawingSessionRepository, strokeBatchRepository);
   }
 
