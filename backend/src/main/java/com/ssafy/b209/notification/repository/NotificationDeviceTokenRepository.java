@@ -1,6 +1,7 @@
 package com.ssafy.b209.notification.repository;
 
 import com.ssafy.b209.notification.domain.NotificationDeviceToken;
+import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 
@@ -24,4 +25,14 @@ public interface NotificationDeviceTokenRepository
    * @return 존재하면 해당 기기 Token
    */
   Optional<NotificationDeviceToken> findByTokenHash(String tokenHash);
+
+  /**
+   * 한 사용자의 활성 기기 Token을 모두 찾는다. 발송 대상 선정에 사용한다.
+   *
+   * <p>{@code (user_id, is_active)} 인덱스를 사용하며 비활성 기기는 제외한다.
+   *
+   * @param userId 소유 사용자 ID
+   * @return 활성 상태의 기기 Token 목록이며 없으면 빈 목록
+   */
+  List<NotificationDeviceToken> findByUserIdAndActiveTrue(Long userId);
 }
