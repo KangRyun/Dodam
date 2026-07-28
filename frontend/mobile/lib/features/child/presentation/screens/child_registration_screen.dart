@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../app/state/guardian_child_controller.dart';
 import '../../../../design_system/design_system.dart';
+import '../../data/dto/child_consent_dtos.dart';
 import '../../data/dto/child_dtos.dart';
 
 class ChildRegistrationScreen extends StatefulWidget {
@@ -21,6 +22,9 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   String _preferredCharacter = 'BEAR';
   String _questionDifficulty = 'PRESCHOOL';
   bool _submitted = false;
+
+  /// 아동 대상 약관의 동의 여부. 기본값은 미동의이며 사용자가 직접 켜야 한다.
+  final Map<int, bool> _consentAgreed = {};
 
   static const _characters = [
     ('RABBIT', '🐰'),
@@ -47,6 +51,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   void initState() {
     super.initState();
     widget.controller.resetRegistration();
+    widget.controller.loadChildConsentTerms();
   }
 
   @override
@@ -66,6 +71,25 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   String? get _birthDateError =>
       _submitted && _birthDate == null ? '생년월일을 선택해 주세요.' : null;
 
+  List<ConsentTermDto> get _consentTerms => widget.controller.childConsentTerms;
+
+  /// 서버가 필수로 표시한 약관 중 미동의가 있으면 등록을 막는다.
+  bool get _hasUnagreedRequiredTerm => _consentTerms.any(
+    (term) => term.required && !(_consentAgreed[term.termId] ?? false),
+  );
+
+  String? get _consentError =>
+      _submitted && _hasUnagreedRequiredTerm ? '필수 항목에 동의해 주세요.' : null;
+
+  /// 체크하지 않은 항목도 WITHDRAW로 함께 보내 "묻고 거부함"을 기록한다.
+  List<ConsentAgreementDto> get _consentAgreements => _consentTerms
+      .map(
+        (term) => (_consentAgreed[term.termId] ?? false)
+            ? ConsentAgreementDto.agree(term.termId)
+            : ConsentAgreementDto.withdraw(term.termId),
+      )
+      .toList(growable: false);
+
   Future<void> _pickBirthDate() async {
     final now = DateTime.now();
     final selected = await showDatePicker(
@@ -82,7 +106,11 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
 
   Future<void> _submit() async {
     setState(() => _submitted = true);
-    if (_nicknameError != null || _birthDateError != null) return;
+    if (_nicknameError != null ||
+        _birthDateError != null ||
+        _consentError != null) {
+      return;
+    }
 
     final birthDate = _birthDate!;
     final succeeded = await widget.controller.registerChild(
@@ -97,9 +125,18 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
         questionDifficulty: _questionDifficulty,
         responseModes: const ['VOICE'],
       ),
+      consentAgreements: _consentAgreements,
     );
     if (!mounted) return;
     if (succeeded) {
+      // 아동은 등록됐지만 동의 기록이 실패하면 음성 답변이 거절되므로 그대로 알린다.
+      if (widget.controller.consentRecordError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('아이는 등록했지만 동의 저장에 실패했어요. 설정에서 다시 동의해 주세요.'),
+          ),
+        );
+      }
       Navigator.of(context).pop();
       return;
     }
@@ -189,6 +226,16 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                     ),
                     const SizedBox(height: AppSpacing.sm),
                   ],
+                  if (_consentTerms.isNotEmpty) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    _ConsentSection(
+                      terms: _consentTerms,
+                      agreed: _consentAgreed,
+                      errorText: _consentError,
+                      onChanged: (termId, value) =>
+                          setState(() => _consentAgreed[termId] = value),
+                    ),
+                  ],
                   const SizedBox(height: AppSpacing.lg),
                   AppButton(
                     key: const ValueKey('submit-child-registration'),
@@ -205,6 +252,67 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
         ),
       ),
     ),
+  );
+}
+
+/// 아동 데이터 사용 동의 섹션.
+///
+/// 서버가 발행한 약관을 그대로 보여주고 필수/선택 표시도 서버 값을 따른다. 기본값은
+/// 전부 미동의이며, 사용자가 켜지 않은 항목은 동의로 기록되지 않는다(가드레일 9절).
+class _ConsentSection extends StatelessWidget {
+  const _ConsentSection({
+    required this.terms,
+    required this.agreed,
+    required this.errorText,
+    required this.onChanged,
+  });
+
+  final List<ConsentTermDto> terms;
+  final Map<int, bool> agreed;
+  final String? errorText;
+  final void Function(int termId, bool value) onChanged;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text(
+        '아이 데이터 사용 동의',
+        style: TextStyle(
+          color: AppColors.inkMuted,
+          fontSize: 15,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      const SizedBox(height: AppSpacing.xs),
+      const Text(
+        '음성으로 답하기는 음성 처리 동의가 있어야 사용할 수 있어요. '
+        '동의하지 않으면 아이는 선택형 답변으로 대화해요.',
+        style: TextStyle(color: AppColors.inkMuted, fontSize: 13),
+      ),
+      for (final term in terms)
+        CheckboxListTile(
+          key: ValueKey('child-consent-${term.termCode}'),
+          value: agreed[term.termId] ?? false,
+          onChanged: (value) => onChanged(term.termId, value ?? false),
+          controlAffinity: ListTileControlAffinity.leading,
+          contentPadding: EdgeInsets.zero,
+          title: Text(
+            term.required ? '[필수] ${term.title}' : '[선택] ${term.title}',
+            style: const TextStyle(color: AppColors.ink, fontSize: 15),
+          ),
+        ),
+      if (errorText != null)
+        Text(
+          errorText!,
+          key: const ValueKey('child-consent-error'),
+          style: const TextStyle(
+            color: AppColors.error,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+    ],
   );
 }
 

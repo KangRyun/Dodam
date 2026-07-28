@@ -1,6 +1,9 @@
 import 'package:flutter/foundation.dart';
 
+import '../../features/child/data/dto/child_consent_dtos.dart';
 import '../../features/child/data/dto/child_dtos.dart';
+import '../../features/child/data/repositories/mock_child_consent_repository.dart';
+import '../../features/child/domain/repositories/child_consent_repository.dart';
 import '../../features/child/domain/repositories/child_repository.dart';
 
 enum ChildListStatus { idle, loading, success, empty, error }
@@ -8,15 +11,21 @@ enum ChildListStatus { idle, loading, success, empty, error }
 enum ChildRegistrationStatus { idle, submitting, success, error }
 
 final class GuardianChildController extends ChangeNotifier {
-  GuardianChildController(this._repository);
+  GuardianChildController(
+    this._repository, [
+    this._consentRepository = const MockChildConsentRepository(),
+  ]);
 
   final ChildRepository _repository;
+  final ChildConsentRepository _consentRepository;
   ChildListStatus _status = ChildListStatus.idle;
   List<ChildSummaryDto> _children = const [];
   ChildSummaryDto? _selectedChild;
   ChildRegistrationStatus _registrationStatus = ChildRegistrationStatus.idle;
   Object? _registrationError;
   Object? _listError;
+  List<ConsentTermDto> _childConsentTerms = const [];
+  Object? _consentRecordError;
 
   ChildListStatus get status => _status;
 
@@ -27,6 +36,25 @@ final class GuardianChildController extends ChangeNotifier {
   int? get selectedChildId => _selectedChild?.childId;
   ChildRegistrationStatus get registrationStatus => _registrationStatus;
   Object? get registrationError => _registrationError;
+
+  /// 아동 등록 화면이 보여줄 아동 대상 약관. 조회 실패나 미지원 환경에서는 빈 목록이다.
+  List<ConsentTermDto> get childConsentTerms => _childConsentTerms;
+
+  /// 아동은 등록됐지만 동의 이력 기록이 실패한 경우의 원인.
+  ///
+  /// 이 값이 있으면 아동 데이터 동의가 비어 있어 음성 답변이 거절된다. 화면은 재동의를
+  /// 안내해야 한다.
+  Object? get consentRecordError => _consentRecordError;
+
+  /// 아동 대상 약관을 조회한다. 실패하면 빈 목록으로 두어 등록 자체를 막지 않는다.
+  Future<void> loadChildConsentTerms() async {
+    try {
+      _childConsentTerms = await _consentRepository.getChildTerms();
+    } on Object catch (_) {
+      _childConsentTerms = const [];
+    }
+    notifyListeners();
+  }
 
   Future<void> loadChildren() async {
     _status = ChildListStatus.loading;
@@ -60,15 +88,31 @@ final class GuardianChildController extends ChangeNotifier {
     notifyListeners();
   }
 
-  // 아동 등록 후 최신 목록을 다시 조회하고 등록한 아동을 선택
-  Future<bool> registerChild(CreateChildRequestDto request) async {
+  // 아동 등록 후 아동 대상 동의를 기록하고 최신 목록을 다시 조회해 등록한 아동을 선택
+  Future<bool> registerChild(
+    CreateChildRequestDto request, {
+    List<ConsentAgreementDto> consentAgreements = const [],
+  }) async {
     if (_registrationStatus == ChildRegistrationStatus.submitting) return false;
     _registrationStatus = ChildRegistrationStatus.submitting;
     _registrationError = null;
+    _consentRecordError = null;
     notifyListeners();
 
     try {
       final created = await _repository.createChild(request);
+      // 동의 기록 실패로 등록을 되돌리지 않는다. 아동 데이터를 지우는 편이 더 위험하고,
+      // 동의는 설정에서 다시 기록할 수 있다. 대신 원인을 남겨 화면이 안내하게 한다.
+      if (consentAgreements.isNotEmpty) {
+        try {
+          await _consentRepository.submitChildConsents(
+            childId: created.childId,
+            agreements: consentAgreements,
+          );
+        } on Object catch (error) {
+          _consentRecordError = error;
+        }
+      }
       await loadChildren();
       if (_status == ChildListStatus.error) {
         throw StateError('아동 목록을 갱신하지 못했습니다.');
@@ -90,11 +134,13 @@ final class GuardianChildController extends ChangeNotifier {
 
   void resetRegistration() {
     if (_registrationStatus == ChildRegistrationStatus.idle &&
-        _registrationError == null) {
+        _registrationError == null &&
+        _consentRecordError == null) {
       return;
     }
     _registrationStatus = ChildRegistrationStatus.idle;
     _registrationError = null;
+    _consentRecordError = null;
     notifyListeners();
   }
 
@@ -113,6 +159,8 @@ final class GuardianChildController extends ChangeNotifier {
     _listError = null;
     _registrationStatus = ChildRegistrationStatus.idle;
     _registrationError = null;
+    _consentRecordError = null;
+    _childConsentTerms = const [];
     notifyListeners();
   }
 

@@ -3,6 +3,8 @@ import 'dart:io';
 
 import 'package:dodam/core/config/api_environment.dart';
 import 'package:dodam/core/network/api_client.dart';
+import 'package:dodam/core/network/api_error.dart';
+import 'package:dodam/core/network/api_failure.dart';
 import 'package:dodam/features/conversation/conversation.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -73,6 +75,57 @@ void main() {
     expect(repository.requests[0], same(repository.requests[1]));
   });
 
+  test('음성 처리 동의가 없으면 재시도하지 않고 동의 필요 상태로 알린다', () async {
+    final repository = _FakeVoiceAnswerRepository(
+      error: const ApiResponseFailure(
+        statusCode: 403,
+        error: ApiError(
+          code: 'VOICE_CONSENT_REQUIRED',
+          message: '음성 처리 동의가 필요합니다.',
+        ),
+      ),
+    );
+    final controller = VoiceAnswerUploadController(
+      repository,
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'consent-key',
+    );
+    addTearDown(controller.dispose);
+
+    expect(
+      await controller.submit(questionMessageId: 10, recording: _recording),
+      isFalse,
+    );
+    expect(controller.status, VoiceAnswerUploadStatus.consentRequired);
+    // 재전송해도 동의가 생기지 않으므로 보류 요청을 남기지 않는다.
+    expect(await controller.retry(), isFalse);
+    expect(repository.callCount, 1);
+  });
+
+  test('동의 외 403은 일반 실패로 두어 재시도를 허용한다', () async {
+    final repository = _FakeVoiceAnswerRepository(
+      error: const ApiResponseFailure(
+        statusCode: 403,
+        error: ApiError(
+          code: 'CONVERSATION_ACCESS_DENIED',
+          message: '접근 권한이 없습니다.',
+        ),
+      ),
+    );
+    final controller = VoiceAnswerUploadController(
+      repository,
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'denied-key',
+    );
+    addTearDown(controller.dispose);
+
+    expect(
+      await controller.submit(questionMessageId: 10, recording: _recording),
+      isFalse,
+    );
+    expect(controller.status, VoiceAnswerUploadStatus.failure);
+  });
+
   test('전송 중 중복 업로드를 차단한다', () async {
     final completer = Completer<VoiceAnswerUploadResult>();
     final repository = _FakeVoiceAnswerRepository(result: completer.future);
@@ -102,6 +155,13 @@ void main() {
     expect(repository.callCount, 1);
   });
 }
+
+final _recording = VoiceRecording(
+  filePath: '/tmp/answer.m4a',
+  duration: const Duration(seconds: 3),
+  startedAt: DateTime.parse('2026-07-24T01:00:00Z'),
+  endedAt: DateTime.parse('2026-07-24T01:00:03Z'),
+);
 
 const _result = VoiceAnswerUploadResult(
   messageId: 30,
@@ -139,10 +199,11 @@ final class _VoiceUploadInterceptor extends Interceptor {
 }
 
 final class _FakeVoiceAnswerRepository implements VoiceAnswerRepository {
-  _FakeVoiceAnswerRepository({this.failOnce = false, this.result});
+  _FakeVoiceAnswerRepository({this.failOnce = false, this.result, this.error});
 
   final bool failOnce;
   final Future<VoiceAnswerUploadResult>? result;
+  final Object? error;
   int callCount = 0;
   final List<String> keys = [];
   final List<VoiceAnswerUploadRequest> requests = [];
@@ -156,6 +217,7 @@ final class _FakeVoiceAnswerRepository implements VoiceAnswerRepository {
     callCount++;
     keys.add(idempotencyKey);
     requests.add(request);
+    if (error != null) throw error!;
     if (failOnce && callCount == 1) throw Exception('temporary failure');
     return result ?? _result;
   }
