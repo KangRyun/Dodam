@@ -14,6 +14,7 @@ import '../../features/history/presentation/screens/history_screens.dart';
 import '../../features/report/presentation/screens/report_screen.dart';
 import '../../features/report/presentation/screens/report_list_screen.dart';
 import '../../features/report/domain/repositories/report_repository.dart';
+import '../../features/settings/presentation/screens/settings_main_screen.dart';
 import '../state/guardian_child_controller.dart';
 import '../widgets/app_placeholder_scaffold.dart';
 import '../widgets/guardian_shell.dart';
@@ -163,13 +164,17 @@ abstract final class AppRouter {
               selectedIcon: Icons.settings_rounded,
               label: '설정',
             ),
-            // 설정 메인 화면(S15P11B209-454)이 완성되면 이 자리에 주입한다.
             builder:
                 settingsTabBuilder ??
-                (_) => const _TabPreparingScreen(
-                  title: '설정',
-                  description: '설정 화면은 준비 중이에요. 동의·알림·데이터 설정이 이곳에 모일 예정이에요.',
-                ),
+                (_) => authRestoreSession != null && authSignOut != null
+                    ? SettingsMainScreen(
+                        loadSession: authRestoreSession,
+                        onSignOut: authSignOut,
+                      )
+                    : const _TabPreparingScreen(
+                        title: '설정',
+                        description: '로그인 정보를 확인한 뒤 설정을 이용할 수 있어요.',
+                      ),
           ),
         ],
       ),
@@ -206,11 +211,12 @@ abstract final class AppRouter {
         title: '알림',
         description: '알림함은 준비 중이에요. 곧 이곳에서 분석 완료·리포트 소식을 확인할 수 있어요.',
       ),
-      ['guardian', 'settings'] => const AppPlaceholderScaffold(
-        // USER-01 GET /users/me · USER-04 PATCH /users/me/notification-settings
-        title: '설정',
-        description: '설정 화면은 준비 중이에요. 동의·알림·데이터 설정이 이곳에 모일 예정이에요.',
-      ),
+      ['guardian', 'settings']
+          when authRestoreSession != null && authSignOut != null =>
+        SettingsMainScreen(
+          loadSession: authRestoreSession,
+          onSignOut: authSignOut,
+        ),
       // 커뮤니티는 웹 전용(CLAUDE.md 6절). 웹 커뮤니티 URL과 webview_flutter가
       // 준비되면 이 자리표시자를 WebView 화면으로 교체한다. COMM-01 GET /posts.
       ['guardian', 'community'] => const AppPlaceholderScaffold(
