@@ -17,7 +17,7 @@ import '../../features/report/domain/repositories/report_repository.dart';
 import '../../features/settings/presentation/screens/settings_main_screen.dart';
 import '../state/guardian_child_controller.dart';
 import '../widgets/app_placeholder_scaffold.dart';
-import '../widgets/guardian_shell.dart';
+import '../widgets/guardian_sidebar_shell.dart';
 import 'app_navigation.dart';
 import 'app_routes.dart';
 
@@ -46,32 +46,6 @@ abstract final class AppRouter {
   }) {
     final location = settings.name ?? AppRoutes.guardianHome;
     final segments = Uri.tryParse(location)?.pathSegments ?? const <String>[];
-
-    // 탭 안에서 다른 화면으로 이동할 때도 앱 전체와 같은 주입값을 그대로 쓴다.
-    // `insideShell: true`를 주는 이유는 탭 안에서 보호자 홈을 열었을 때 셸이
-    // 또 생기지 않게 하기 위함이다(탭 속의 탭 방지).
-    Route<void> tabRouteFactory(RouteSettings tabSettings) => onGenerateRoute(
-      tabSettings,
-      childController: childController,
-      notificationsTabBuilder: notificationsTabBuilder,
-      settingsTabBuilder: settingsTabBuilder,
-      authSignIn: authSignIn,
-      authCompleteOnboarding: authCompleteOnboarding,
-      authSignOut: authSignOut,
-      authRestoreSession: authRestoreSession,
-      activityRepository: activityRepository,
-      drawingRepository: drawingRepository,
-      reportRepository: reportRepository,
-      drawingCompletionSnapshotProvider: drawingCompletionSnapshotProvider,
-      conversationRepository: conversationRepository,
-      conversationEndRepository: conversationEndRepository,
-      voiceAnswerRepository: voiceAnswerRepository,
-      sttResultRepository: sttResultRepository,
-      conversationAnswerRepository: conversationAnswerRepository,
-      conversationId: conversationId,
-      basisAnalysisId: basisAnalysisId,
-      insideShell: true,
-    );
 
     final screen = switch (segments) {
       ['auth', 'bootstrap'] when authRestoreSession != null =>
@@ -112,28 +86,21 @@ abstract final class AppRouter {
           },
         ),
       ['expert', 'profile'] => const ExpertProfileEntryScreen(),
-      // 셸 밖에서 부르면 하단 탭을 갖춘 보호자 모드 전체를, 탭 안에서 부르면
-      // 홈 화면 자체를 연다.
-      ['guardian', 'home'] when childController != null && insideShell =>
-        _guardianHome(childController, authSignOut, reportRepository),
-      ['guardian', 'home'] when childController != null => GuardianShell(
-        routeFactory: tabRouteFactory,
-        tabs: [
-          GuardianShellTab(
-            item: const AppBottomTabItem(
-              icon: Icons.home_outlined,
-              selectedIcon: Icons.home_rounded,
-              label: '홈',
-            ),
-            builder: (_) =>
-                _guardianHome(childController, authSignOut, reportRepository),
+      // 태블릿 보호자 모드: 좌측 사이드바 셸. 홈은 대시보드, 기록/알림/설정은
+      // 각 담당 화면(없으면 자리표시자), 커뮤니티는 웹 전용이라 자리표시자.
+      ['guardian', 'home'] when childController != null => GuardianSidebarShell(
+        onSwitchProfile: goProfileSelection,
+        destinations: [
+          GuardianNavItem(
+            icon: Icons.home_outlined,
+            selectedIcon: Icons.home_rounded,
+            label: '홈',
+            builder: (_) => _guardianHome(childController, activityRepository),
           ),
-          GuardianShellTab(
-            item: const AppBottomTabItem(
-              icon: Icons.article_outlined,
-              selectedIcon: Icons.article_rounded,
-              label: '기록',
-            ),
+          GuardianNavItem(
+            icon: Icons.article_outlined,
+            selectedIcon: Icons.article_rounded,
+            label: '기록',
             builder: (_) => activityRepository == null
                 ? const _TabPreparingScreen(
                     title: '활동 기록',
@@ -144,13 +111,19 @@ abstract final class AppRouter {
                     repository: activityRepository,
                   ),
           ),
-          GuardianShellTab(
-            item: const AppBottomTabItem(
-              icon: Icons.notifications_none_rounded,
-              selectedIcon: Icons.notifications_rounded,
-              label: '알림',
+          GuardianNavItem(
+            icon: Icons.forum_outlined,
+            selectedIcon: Icons.forum_rounded,
+            label: '커뮤니티',
+            builder: (_) => const _TabPreparingScreen(
+              title: '커뮤니티',
+              description: '커뮤니티는 웹에서 제공돼요. 웹 연결(웹뷰)이 준비되면 이곳에서 열려요.',
             ),
-            // 알림함 화면(S15P11B209-499)이 완성되면 이 자리에 주입한다.
+          ),
+          GuardianNavItem(
+            icon: Icons.notifications_none_rounded,
+            selectedIcon: Icons.notifications_rounded,
+            label: '알림',
             builder:
                 notificationsTabBuilder ??
                 (_) => const _TabPreparingScreen(
@@ -158,12 +131,10 @@ abstract final class AppRouter {
                   description: '알림함은 준비 중이에요. 곧 이곳에서 새 소식을 확인할 수 있어요.',
                 ),
           ),
-          GuardianShellTab(
-            item: const AppBottomTabItem(
-              icon: Icons.settings_outlined,
-              selectedIcon: Icons.settings_rounded,
-              label: '설정',
-            ),
+          GuardianNavItem(
+            icon: Icons.settings_outlined,
+            selectedIcon: Icons.settings_rounded,
+            label: '설정',
             builder:
                 settingsTabBuilder ??
                 (_) => authRestoreSession != null && authSignOut != null
@@ -323,14 +294,10 @@ abstract final class AppRouter {
 
   static Widget _guardianHome(
     GuardianChildController controller,
-    AuthSignOut? authSignOut,
-    ReportRepository? reportRepository,
+    ActivityRepository? activityRepository,
   ) => GuardianHomeScreen(
     controller: controller,
-    reportRepository: reportRepository,
-    actions: authSignOut == null
-        ? const []
-        : [LogoutActionButton(onSignOut: authSignOut, onSignedOut: goLogin)],
+    activityRepository: activityRepository,
   );
 
   static bool _hasChildContext(
