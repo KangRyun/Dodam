@@ -8,6 +8,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * 신규 사용자가 최초 정보를 등록하고 Onboarding을 완료하는 요청이다.
@@ -28,8 +29,11 @@ public record OnboardingRequest(
     @Size(max = 255) String profileImageFileId,
     @NotNull @Valid List<ConsentAgreementRequest> consents) {
 
-  /** 동의 결과 목록을 외부에서 변경할 수 없도록 복사한다. */
+  /** 연락 이메일을 저장 형식으로 정규화하고 동의 결과 목록을 변경 불가능하게 복사한다. */
   public OnboardingRequest {
+    if (email != null) {
+      email = email.trim().toLowerCase(Locale.ROOT);
+    }
     if (consents != null) {
       consents = List.copyOf(consents);
     }

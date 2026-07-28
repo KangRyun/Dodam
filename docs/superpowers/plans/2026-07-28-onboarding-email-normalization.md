@@ -135,4 +135,3 @@ Expected: 모든 명령 exit code 0, `build/docs/javadoc/index.html` 생성
 ```text
 git commit -m "feat(user): [S15P11B209-531] 온보딩 이메일 정규화"
 ```
-

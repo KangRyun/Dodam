@@ -37,4 +37,3 @@
 - `spotlessCheck`
 - 전체 Backend 테스트
 - Javadoc 생성
-
