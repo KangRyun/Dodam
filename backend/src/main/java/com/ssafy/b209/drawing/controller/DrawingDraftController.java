@@ -86,6 +86,10 @@ public class DrawingDraftController {
         description = "이미지 크기 제한 초과",
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "422",
+        description = "IMAGE_DIMENSION_INVALID(STORAGE_422_001): 이미지 픽셀 크기 범위 위반",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "500",
         description = "파일 또는 Metadata 저장 오류",
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))

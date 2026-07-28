@@ -54,8 +54,8 @@ class LocalImageStorageTest {
         .isEqualTo("2026/07/22/11111111-1111-4111-8111-111111111111.png");
     assertThat(stored.storedFileName()).isEqualTo(FIRST_UUID + ".png");
     assertThat(stored.contentType()).isEqualTo("image/png");
-    assertThat(stored.widthPx()).isEqualTo(2);
-    assertThat(stored.heightPx()).isEqualTo(3);
+    assertThat(stored.widthPx()).isEqualTo(320);
+    assertThat(stored.heightPx()).isEqualTo(320);
     assertThat(Path.of(stored.storageKey())).isRelative();
     assertThat(stored.storageKey()).doesNotContain("\\").doesNotContain(root.toString());
     byte[] sanitized = Files.readAllBytes(resolveStorageKey(root, stored.storageKey()));
@@ -65,7 +65,11 @@ class LocalImageStorageTest {
   }
 
   private static byte[] imageBytes(String format) {
-    BufferedImage image = new BufferedImage(2, 3, BufferedImage.TYPE_INT_RGB);
+    return imageBytes(format, 320, 320);
+  }
+
+  private static byte[] imageBytes(String format, int width, int height) {
+    BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
     try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
       if (!ImageIO.write(image, format, output)) {
         throw new IllegalStateException("Test image writer is unavailable: " + format);
@@ -77,10 +81,10 @@ class LocalImageStorageTest {
   }
 
   private static byte[] jpegWithExifOrientationAndGps() {
-    BufferedImage image = new BufferedImage(20, 30, BufferedImage.TYPE_INT_RGB);
+    BufferedImage image = new BufferedImage(320, 480, BufferedImage.TYPE_INT_RGB);
     for (int y = 0; y < image.getHeight(); y++) {
       for (int x = 0; x < image.getWidth(); x++) {
-        image.setRGB(x, y, x < 10 && y < 10 ? 0x00FF0000 : 0x000000FF);
+        image.setRGB(x, y, x < 160 && y < 160 ? 0x00FF0000 : 0x000000FF);
       }
     }
     byte[] jpeg = writeImage(image, "jpeg");
@@ -301,7 +305,7 @@ class LocalImageStorageTest {
   @Test
   void storesJpegUsingNormalizedMimeAndExtension() throws IOException {
     Path root = tempDir.resolve("images");
-    LocalImageStorage storage = storage(root, 1024, () -> FIRST_UUID);
+    LocalImageStorage storage = storage(root, 16 * 1024, () -> FIRST_UUID);
 
     StoredImage stored = storage.store(command(JPEG, "image/jpg", "drawing.JPEG"));
 
@@ -324,11 +328,11 @@ class LocalImageStorageTest {
     byte[] sanitized = Files.readAllBytes(resolveStorageKey(root, stored.storageKey()));
     BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(sanitized));
     assertThat(hasJpegExifSegment(sanitized)).isFalse();
-    assertThat(stored.widthPx()).isEqualTo(30);
-    assertThat(stored.heightPx()).isEqualTo(20);
-    assertThat(decoded.getWidth()).isEqualTo(30);
-    assertThat(decoded.getHeight()).isEqualTo(20);
-    assertThat(isRedDominant(decoded.getRGB(27, 2))).isTrue();
+    assertThat(stored.widthPx()).isEqualTo(480);
+    assertThat(stored.heightPx()).isEqualTo(320);
+    assertThat(decoded.getWidth()).isEqualTo(480);
+    assertThat(decoded.getHeight()).isEqualTo(320);
+    assertThat(isRedDominant(decoded.getRGB(470, 10))).isTrue();
     assertThat(stored.size()).isEqualTo(sanitized.length);
     assertThat(stored.checksumSha256()).isEqualTo(sha256(sanitized));
   }
@@ -343,8 +347,8 @@ class LocalImageStorageTest {
 
     byte[] sanitized = Files.readAllBytes(resolveStorageKey(root, stored.storageKey()));
     assertThat(hasPngMetadataChunk(sanitized)).isFalse();
-    assertThat(stored.widthPx()).isEqualTo(2);
-    assertThat(stored.heightPx()).isEqualTo(3);
+    assertThat(stored.widthPx()).isEqualTo(320);
+    assertThat(stored.heightPx()).isEqualTo(320);
     assertThat(stored.size()).isEqualTo(sanitized.length);
     assertThat(stored.checksumSha256()).isEqualTo(sha256(sanitized));
   }
@@ -358,6 +362,21 @@ class LocalImageStorageTest {
 
     assertThat(stored.storageKey()).doesNotContain("..").doesNotContain("outside");
     assertThat(tempDir.resolve("outside.png")).doesNotExist();
+  }
+
+  @Test
+  void rejectsImageBelowMinimumDimensionBeforePublishing() throws IOException {
+    Path root = tempDir.resolve("images");
+    byte[] undersized = imageBytes("png", 319, 320);
+    LocalImageStorage storage = storage(root, 1024 * 1024, () -> FIRST_UUID);
+
+    assertBusinessError(
+        () -> storage.store(command(undersized, "image/png", "small.png")),
+        ImageStorageErrorCode.IMAGE_DIMENSION_INVALID);
+
+    try (Stream<Path> paths = Files.walk(root)) {
+      assertThat(paths.filter(Files::isRegularFile)).isEmpty();
+    }
   }
 
   @Test

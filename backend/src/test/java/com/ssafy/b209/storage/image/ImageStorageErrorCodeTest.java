@@ -30,6 +30,11 @@ class ImageStorageErrorCodeTest {
             ImageStorageErrorCode.IMAGE_FILE_TOO_LARGE,
                 new ErrorContract(
                     HttpStatus.PAYLOAD_TOO_LARGE, "STORAGE_413_001", "이미지 파일 크기가 허용 범위를 초과했습니다."),
+            ImageStorageErrorCode.IMAGE_DIMENSION_INVALID,
+                new ErrorContract(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "STORAGE_422_001",
+                    "이미지 픽셀 크기가 허용 범위를 벗어났습니다."),
             ImageStorageErrorCode.IMAGE_STORAGE_FAILED,
                 new ErrorContract(
                     HttpStatus.INTERNAL_SERVER_ERROR, "STORAGE_500_001", "이미지 저장 중 오류가 발생했습니다."));

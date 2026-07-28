@@ -163,7 +163,7 @@ class S3ImageStorageTest {
   }
 
   private static byte[] imageBytes() {
-    BufferedImage image = new BufferedImage(2, 3, BufferedImage.TYPE_INT_RGB);
+    BufferedImage image = new BufferedImage(320, 320, BufferedImage.TYPE_INT_RGB);
     try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
       if (!ImageIO.write(image, "png", output)) {
         throw new IllegalStateException("PNG writer is unavailable");
