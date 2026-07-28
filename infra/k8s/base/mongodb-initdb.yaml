@@ -43,3 +43,51 @@ data:
     });
 
     print(`✅ 앱 계정 생성: ${appUser} (readWrite on ${dbName})`);
+
+  02-indexes.js: |
+    // 인덱스 + TTL (S15P11B209-634)
+    //
+    // ★ TTL 인덱스가 이 프로젝트에서 갖는 의미
+    //   "보관 기간이 지나면 자동 삭제"(가드레일 9절)를 **DB 가 강제**하게 만드는 장치다.
+    //   앱 코드나 크론에 맡기면 "삭제 잡이 안 돌았는데 아무도 몰랐다"가 가능해진다.
+    //   mongod 가 60초마다 백그라운드로 만료 문서를 지운다 — 앱이 빠져도 계속 동작한다.
+    //
+    // ⚠️ expireAfterSeconds: 0 + 문서의 expireAt 필드 조합으로 쓴다.
+    //   "필드에 적힌 시각이 지나면 삭제"라는 뜻이다. 보관 기간이 데이터 종류마다 다르고
+    //   동의 철회 시 앞당겨야 할 수도 있어, 기간을 인덱스에 박지 않고 **문서마다** 들고 간다.
+    //   (expireAfterSeconds 에 기간을 박으면 정책이 바뀔 때 인덱스를 다시 만들어야 한다.)
+    //
+    // ⚠️ TTL 은 "언젠가 지운다"이지 즉시가 아니다(최대 60초 + 부하에 따라 더).
+    //   동의 철회·회원 탈퇴는 TTL 을 기다리지 않고 deleteMany({ childId }) 를 즉시 실행한다
+    //   — 그래서 childId 인덱스가 필요하다. 없으면 전체 스캔이 된다.
+    const dbName = process.env.MONGO_INITDB_DATABASE;
+    db = db.getSiblingDB(dbName);
+
+    // ── strokes: 배치 1건 = 문서 1개 (좌표=문서 금지 — ADR 0001)
+    db.createCollection('strokes');
+    db.strokes.createIndex(
+      { sessionId: 1, batchSeq: 1 },
+      { unique: true, name: 'session_batch_unique' },
+    );
+    // unique 인 이유: 네트워크가 불안정한 태블릿에서 같은 배치를 다시 보내는 건 정상 동작이다.
+    //   재전송을 앱이 아니라 DB 제약으로 막아, 중복 저장이 구조적으로 불가능하게 한다.
+
+    db.strokes.createIndex({ childId: 1 }, { name: 'child_lookup' });
+    db.strokes.createIndex(
+      { expireAt: 1 },
+      { expireAfterSeconds: 0, name: 'ttl_expire_at' },
+    );
+
+    // ── conversation_events: 대화 로그 원문
+    //   ⚠️ 이 컬렉션이 대화 원문의 **단일 소스**인지는 아직 미확정이다(365 에서 BE 와 협의).
+    //     MySQL conversation_messages 와 이중 저장하면 어느 쪽이 진실인지 모호해진다.
+    //     확정 전까지 앱이 양쪽에 쓰지 않도록 할 것(ADR 0001 §결과).
+    db.createCollection('conversation_events');
+    db.conversation_events.createIndex({ sessionId: 1, seq: 1 }, { name: 'session_seq' });
+    db.conversation_events.createIndex({ childId: 1 }, { name: 'child_lookup' });
+    db.conversation_events.createIndex(
+      { expireAt: 1 },
+      { expireAfterSeconds: 0, name: 'ttl_expire_at' },
+    );
+
+    print('✅ 인덱스 생성 완료 (strokes 3 · conversation_events 3, TTL 포함)');
