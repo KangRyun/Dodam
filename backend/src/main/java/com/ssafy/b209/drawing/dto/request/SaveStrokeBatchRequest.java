@@ -16,7 +16,7 @@ import java.util.List;
  * @param firstEventSequence 첫 이벤트 순번
  * @param lastEventSequence 마지막 이벤트 순번
  * @param clientCreatedAt 클라이언트가 배치를 만든 시각
- * @param events 최대 500개의 순서화된 이벤트
+ * @param events 최대 500개이며 전체 좌표가 20,000개를 넘지 않는 순서화된 이벤트
  * @param metrics 현재 배치에서 증가한 행동 지표
  */
 public record SaveStrokeBatchRequest(

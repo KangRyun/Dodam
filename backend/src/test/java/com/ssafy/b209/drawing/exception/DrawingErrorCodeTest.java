@@ -125,7 +125,11 @@ class DrawingErrorCodeTest {
     expected.put(
         DrawingErrorCode.STROKE_BATCH_PAYLOAD_TOO_LARGE,
         new ErrorContract(
-            HttpStatus.PAYLOAD_TOO_LARGE, "DRAWING_413_001", "그림 과정 데이터 크기가 제한을 초과했습니다."));
+            HttpStatus.PAYLOAD_TOO_LARGE, "DRAWING_413_001", "그림 과정 데이터가 1 MiB 제한을 초과했습니다."));
+    expected.put(
+        DrawingErrorCode.STROKE_BATCH_POINT_LIMIT_EXCEEDED,
+        new ErrorContract(
+            HttpStatus.PAYLOAD_TOO_LARGE, "DRAWING_413_002", "그림 과정 좌표가 20,000개 제한을 초과했습니다."));
     expected.put(
         DrawingErrorCode.STROKE_BATCH_NOT_ALLOWED,
         new ErrorContract(
@@ -134,6 +138,10 @@ class DrawingErrorCodeTest {
         DrawingErrorCode.STROKE_BATCH_CONFLICT,
         new ErrorContract(
             HttpStatus.CONFLICT, "DRAWING_409_019", "같은 순번의 다른 그림 과정 데이터가 이미 저장되었습니다."));
+    expected.put(
+        DrawingErrorCode.HTP_AGGREGATE_COMPLETION_REQUIRED,
+        new ErrorContract(
+            HttpStatus.CONFLICT, "DRAWING_409_020", "HTP 활동은 HTP 종합 완료 API를 사용해야 합니다."));
     expected.put(
         DrawingErrorCode.DRAWING_DELETION_CONFIRMATION_MISMATCH,
         new ErrorContract(HttpStatus.BAD_REQUEST, "DRAWING_400_011", "그림 활동 삭제 확인 값이 올바르지 않습니다."));
