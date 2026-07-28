@@ -1,0 +1,10 @@
+# 생성물 — tools/make-png.mjs 로 언제든 동일하게 재생성된다(고정 시드).
+assets/
+
+# 측정 결과 — 확정된 것만 docs/성능/ 아래에 정리해 커밋한다.
+results/
+
+# ⚠️ 자격증명. 실수로라도 올라가면 안 된다.
+*.token
+.env
+token.txt

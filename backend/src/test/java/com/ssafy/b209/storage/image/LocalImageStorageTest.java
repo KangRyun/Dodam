@@ -21,9 +21,11 @@ import java.time.ZoneOffset;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HexFormat;
+import java.util.Set;
 import java.util.UUID;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
+import java.util.zip.CRC32;
 import javax.imageio.ImageIO;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -52,13 +54,14 @@ class LocalImageStorageTest {
         .isEqualTo("2026/07/22/11111111-1111-4111-8111-111111111111.png");
     assertThat(stored.storedFileName()).isEqualTo(FIRST_UUID + ".png");
     assertThat(stored.contentType()).isEqualTo("image/png");
-    assertThat(stored.size()).isEqualTo(PNG.length);
-    assertThat(stored.checksumSha256()).isEqualTo(sha256(PNG));
     assertThat(stored.widthPx()).isEqualTo(2);
     assertThat(stored.heightPx()).isEqualTo(3);
     assertThat(Path.of(stored.storageKey())).isRelative();
     assertThat(stored.storageKey()).doesNotContain("\\").doesNotContain(root.toString());
-    assertThat(Files.readAllBytes(resolveStorageKey(root, stored.storageKey()))).isEqualTo(PNG);
+    byte[] sanitized = Files.readAllBytes(resolveStorageKey(root, stored.storageKey()));
+    assertThat(stored.size()).isEqualTo(sanitized.length);
+    assertThat(stored.checksumSha256()).isEqualTo(sha256(sanitized));
+    assertThat(ImageIO.read(new ByteArrayInputStream(sanitized))).isNotNull();
   }
 
   private static byte[] imageBytes(String format) {
@@ -71,6 +74,136 @@ class LocalImageStorageTest {
     } catch (IOException exception) {
       throw new IllegalStateException("Failed to create a test image", exception);
     }
+  }
+
+  private static byte[] jpegWithExifOrientationAndGps() {
+    BufferedImage image = new BufferedImage(20, 30, BufferedImage.TYPE_INT_RGB);
+    for (int y = 0; y < image.getHeight(); y++) {
+      for (int x = 0; x < image.getWidth(); x++) {
+        image.setRGB(x, y, x < 10 && y < 10 ? 0x00FF0000 : 0x000000FF);
+      }
+    }
+    byte[] jpeg = writeImage(image, "jpeg");
+    byte[] exif =
+        bytes(
+            0x45, 0x78, 0x69, 0x66, 0x00, 0x00, 0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00,
+            0x02, 0x00, 0x12, 0x01, 0x03, 0x00, 0x01, 0x00, 0x00, 0x00, 0x06, 0x00, 0x00, 0x00,
+            0x25, 0x88, 0x04, 0x00, 0x01, 0x00, 0x00, 0x00, 0x26, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x02, 0x00, 0x02, 0x00, 0x00, 0x00, 0x4E, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00);
+    int segmentLength = exif.length + 2;
+    byte[] result = new byte[jpeg.length + exif.length + 4];
+    result[0] = (byte) 0xFF;
+    result[1] = (byte) 0xD8;
+    result[2] = (byte) 0xFF;
+    result[3] = (byte) 0xE1;
+    result[4] = (byte) (segmentLength >>> 8);
+    result[5] = (byte) segmentLength;
+    System.arraycopy(exif, 0, result, 6, exif.length);
+    System.arraycopy(jpeg, 2, result, 6 + exif.length, jpeg.length - 2);
+    return result;
+  }
+
+  private static byte[] pngWithTextChunk(String keyword, String value) {
+    int iendOffset = findPngChunkOffset(PNG, "IEND");
+    byte[] data = (keyword + "\0" + value).getBytes(StandardCharsets.ISO_8859_1);
+    byte[] type = "tEXt".getBytes(StandardCharsets.US_ASCII);
+    CRC32 crc = new CRC32();
+    crc.update(type);
+    crc.update(data);
+    byte[] chunk = new byte[12 + data.length];
+    writeInt(chunk, 0, data.length);
+    System.arraycopy(type, 0, chunk, 4, type.length);
+    System.arraycopy(data, 0, chunk, 8, data.length);
+    writeInt(chunk, 8 + data.length, (int) crc.getValue());
+    byte[] result = new byte[PNG.length + chunk.length];
+    System.arraycopy(PNG, 0, result, 0, iendOffset);
+    System.arraycopy(chunk, 0, result, iendOffset, chunk.length);
+    System.arraycopy(PNG, iendOffset, result, iendOffset + chunk.length, PNG.length - iendOffset);
+    return result;
+  }
+
+  private static byte[] writeImage(BufferedImage image, String format) {
+    try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+      if (!ImageIO.write(image, format, output)) {
+        throw new IllegalStateException("Test image writer is unavailable: " + format);
+      }
+      return output.toByteArray();
+    } catch (IOException exception) {
+      throw new IllegalStateException("Failed to create a test image", exception);
+    }
+  }
+
+  private static boolean hasJpegExifSegment(byte[] jpeg) {
+    for (int index = 2; index + 10 <= jpeg.length; ) {
+      if ((jpeg[index] & 0xFF) != 0xFF) {
+        return false;
+      }
+      int marker = jpeg[index + 1] & 0xFF;
+      if (marker == 0xDA || marker == 0xD9) {
+        return false;
+      }
+      int length = ((jpeg[index + 2] & 0xFF) << 8) | (jpeg[index + 3] & 0xFF);
+      if (marker == 0xE1
+          && length >= 8
+          && jpeg[index + 4] == 'E'
+          && jpeg[index + 5] == 'x'
+          && jpeg[index + 6] == 'i'
+          && jpeg[index + 7] == 'f') {
+        return true;
+      }
+      index += length + 2;
+    }
+    return false;
+  }
+
+  private static boolean hasPngMetadataChunk(byte[] png) {
+    int offset = 8;
+    while (offset + 12 <= png.length) {
+      int length = readInt(png, offset);
+      String type = new String(png, offset + 4, 4, StandardCharsets.US_ASCII);
+      if (Set.of("tEXt", "zTXt", "iTXt", "eXIf").contains(type)) {
+        return true;
+      }
+      if ("IEND".equals(type)) {
+        return false;
+      }
+      offset += 12 + length;
+    }
+    return false;
+  }
+
+  private static int findPngChunkOffset(byte[] png, String expectedType) {
+    int offset = 8;
+    while (offset + 12 <= png.length) {
+      int length = readInt(png, offset);
+      String type = new String(png, offset + 4, 4, StandardCharsets.US_ASCII);
+      if (expectedType.equals(type)) {
+        return offset;
+      }
+      offset += 12 + length;
+    }
+    throw new IllegalArgumentException("PNG chunk not found: " + expectedType);
+  }
+
+  private static int readInt(byte[] bytes, int offset) {
+    return ((bytes[offset] & 0xFF) << 24)
+        | ((bytes[offset + 1] & 0xFF) << 16)
+        | ((bytes[offset + 2] & 0xFF) << 8)
+        | (bytes[offset + 3] & 0xFF);
+  }
+
+  private static void writeInt(byte[] bytes, int offset, int value) {
+    bytes[offset] = (byte) (value >>> 24);
+    bytes[offset + 1] = (byte) (value >>> 16);
+    bytes[offset + 2] = (byte) (value >>> 8);
+    bytes[offset + 3] = (byte) value;
+  }
+
+  private static boolean isRedDominant(int rgb) {
+    int red = (rgb >>> 16) & 0xFF;
+    int blue = rgb & 0xFF;
+    return red > blue + 40;
   }
 
   @Test
@@ -167,15 +300,53 @@ class LocalImageStorageTest {
 
   @Test
   void storesJpegUsingNormalizedMimeAndExtension() throws IOException {
-    LocalImageStorage storage = storage(tempDir.resolve("images"), 1024, () -> FIRST_UUID);
+    Path root = tempDir.resolve("images");
+    LocalImageStorage storage = storage(root, 1024, () -> FIRST_UUID);
 
     StoredImage stored = storage.store(command(JPEG, "image/jpg", "drawing.JPEG"));
 
     assertThat(stored.contentType()).isEqualTo("image/jpeg");
     assertThat(stored.storedFileName()).endsWith(".jpg");
-    assertThat(
-            Files.readAllBytes(resolveStorageKey(tempDir.resolve("images"), stored.storageKey())))
-        .isEqualTo(JPEG);
+    byte[] sanitized = Files.readAllBytes(resolveStorageKey(root, stored.storageKey()));
+    assertThat(stored.size()).isEqualTo(sanitized.length);
+    assertThat(stored.checksumSha256()).isEqualTo(sha256(sanitized));
+    assertThat(ImageIO.read(new ByteArrayInputStream(sanitized))).isNotNull();
+  }
+
+  @Test
+  void removesExifMetadataAndAppliesOrientationBeforeStoringJpeg() throws IOException {
+    Path root = tempDir.resolve("images");
+    byte[] original = jpegWithExifOrientationAndGps();
+    LocalImageStorage storage = storage(root, 1024 * 1024, () -> FIRST_UUID);
+
+    StoredImage stored = storage.store(command(original, "image/jpeg", "drawing.jpg"));
+
+    byte[] sanitized = Files.readAllBytes(resolveStorageKey(root, stored.storageKey()));
+    BufferedImage decoded = ImageIO.read(new ByteArrayInputStream(sanitized));
+    assertThat(hasJpegExifSegment(sanitized)).isFalse();
+    assertThat(stored.widthPx()).isEqualTo(30);
+    assertThat(stored.heightPx()).isEqualTo(20);
+    assertThat(decoded.getWidth()).isEqualTo(30);
+    assertThat(decoded.getHeight()).isEqualTo(20);
+    assertThat(isRedDominant(decoded.getRGB(27, 2))).isTrue();
+    assertThat(stored.size()).isEqualTo(sanitized.length);
+    assertThat(stored.checksumSha256()).isEqualTo(sha256(sanitized));
+  }
+
+  @Test
+  void removesTextMetadataBeforeStoringPng() throws IOException {
+    Path root = tempDir.resolve("images");
+    byte[] original = pngWithTextChunk("GPS", "37.5665,126.9780");
+    LocalImageStorage storage = storage(root, 1024 * 1024, () -> FIRST_UUID);
+
+    StoredImage stored = storage.store(command(original, "image/png", "drawing.png"));
+
+    byte[] sanitized = Files.readAllBytes(resolveStorageKey(root, stored.storageKey()));
+    assertThat(hasPngMetadataChunk(sanitized)).isFalse();
+    assertThat(stored.widthPx()).isEqualTo(2);
+    assertThat(stored.heightPx()).isEqualTo(3);
+    assertThat(stored.size()).isEqualTo(sanitized.length);
+    assertThat(stored.checksumSha256()).isEqualTo(sha256(sanitized));
   }
 
   @Test

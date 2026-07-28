@@ -138,16 +138,17 @@ public final class LocalImageStorage implements ImageStorage {
         copied = copyToTemporaryFile(inputStream, temporaryFile);
         validateCopiedImage(command.size(), copied, declaredFormat);
       }
-      ImageDimensions dimensions = readImageDimensions(temporaryFile);
+      ImageMetadataSanitizer.sanitize(temporaryFile, declaredFormat.imageIoFormatName);
+      StoredFileMetadata metadata = readStoredFileMetadata(temporaryFile);
       return moveToFinalFile(
           temporaryFile,
           root,
           targetDirectory,
           date,
           declaredFormat,
-          copied.size(),
-          copied.checksumSha256(),
-          dimensions);
+          metadata.size(),
+          metadata.checksumSha256(),
+          metadata.dimensions());
     } catch (BusinessException exception) {
       throw exception;
     } catch (IOException | SecurityException exception) {
@@ -273,7 +274,6 @@ public final class LocalImageStorage implements ImageStorage {
     byte[] header = new byte[HEADER_SIZE];
     int headerLength = 0;
     long total = 0;
-    MessageDigest checksum = sha256Digest();
 
     try (OutputStream outputStream =
         Files.newOutputStream(temporaryFile, StandardOpenOption.WRITE)) {
@@ -291,11 +291,10 @@ public final class LocalImageStorage implements ImageStorage {
           headerLength += headerBytes;
         }
         outputStream.write(buffer, 0, read);
-        checksum.update(buffer, 0, read);
         total += read;
       }
     }
-    return new CopyResult(header, headerLength, total, HexFormat.of().formatHex(checksum.digest()));
+    return new CopyResult(header, headerLength, total);
   }
 
   private void validateCopiedImage(
@@ -395,6 +394,28 @@ public final class LocalImageStorage implements ImageStorage {
     }
   }
 
+  private StoredFileMetadata readStoredFileMetadata(Path imageFile) throws IOException {
+    long size = Files.size(imageFile);
+    if (size <= 0) {
+      throw new BusinessException(ImageStorageErrorCode.INVALID_IMAGE_FILE);
+    }
+    if (size > maxSize) {
+      throw new BusinessException(ImageStorageErrorCode.IMAGE_FILE_TOO_LARGE);
+    }
+    MessageDigest checksum = sha256Digest();
+    try (InputStream input = Files.newInputStream(imageFile, StandardOpenOption.READ)) {
+      byte[] buffer = new byte[BUFFER_SIZE];
+      int read;
+      while ((read = input.read(buffer)) != -1) {
+        if (read > 0) {
+          checksum.update(buffer, 0, read);
+        }
+      }
+    }
+    return new StoredFileMetadata(
+        size, HexFormat.of().formatHex(checksum.digest()), readImageDimensions(imageFile));
+  }
+
   private void validateInsideRoot(Path root, Path candidate) {
     if (!candidate.isAbsolute() || !candidate.normalize().startsWith(root)) {
       throw new BusinessException(ImageStorageErrorCode.INVALID_STORAGE_PATH);
@@ -460,21 +481,29 @@ public final class LocalImageStorage implements ImageStorage {
     }
   }
 
-  private record CopyResult(byte[] header, int headerLength, long size, String checksumSha256) {}
+  private record CopyResult(byte[] header, int headerLength, long size) {}
 
   private record ImageDimensions(int widthPx, int heightPx) {}
 
+  private record StoredFileMetadata(long size, String checksumSha256, ImageDimensions dimensions) {}
+
   private enum ImageFormat {
-    PNG("image/png", "png", Set.of("png")),
-    JPEG("image/jpeg", "jpg", Set.of("jpg", "jpeg"));
+    PNG("image/png", "png", "png", Set.of("png")),
+    JPEG("image/jpeg", "jpg", "jpeg", Set.of("jpg", "jpeg"));
 
     private final String contentType;
     private final String extension;
+    private final String imageIoFormatName;
     private final Set<String> acceptedExtensions;
 
-    ImageFormat(String contentType, String extension, Set<String> acceptedExtensions) {
+    ImageFormat(
+        String contentType,
+        String extension,
+        String imageIoFormatName,
+        Set<String> acceptedExtensions) {
       this.contentType = contentType;
       this.extension = extension;
+      this.imageIoFormatName = imageIoFormatName;
       this.acceptedExtensions = acceptedExtensions;
     }
 
