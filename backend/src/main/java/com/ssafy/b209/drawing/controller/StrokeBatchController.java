@@ -69,7 +69,7 @@ public class StrokeBatchController {
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "413",
-        description = "압축 전 payload 크기 제한 초과",
+        description = "압축 전 JSON 1 MiB 또는 좌표 20,000개 제한 초과",
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
   })
   @PostMapping

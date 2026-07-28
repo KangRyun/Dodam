@@ -4,6 +4,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -37,6 +38,7 @@ import com.ssafy.b209.drawing.service.DrawingSessionService;
 import com.ssafy.b209.drawing.service.StrokeBatchSaveResult;
 import com.ssafy.b209.drawing.service.StrokeBatchService;
 import com.ssafy.b209.global.exception.BusinessException;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -105,6 +107,24 @@ class DrawingSessionControllerTest {
                 .content(validStrokeBatch().replace("\"x\":0.18", "\"x\":1.18")))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
+  @Test
+  void rejectsStrokeBatchHttpBodyOverOneMebibyteBeforeDeserialization() throws Exception {
+    String valid = validStrokeBatch();
+    int paddingLength = 1024 * 1024 + 1 - valid.getBytes(StandardCharsets.UTF_8).length;
+    String oversized = valid + " ".repeat(paddingLength);
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/100/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(oversized))
+        .andExpect(status().isPayloadTooLarge())
+        .andExpect(jsonPath("$.code").value("DRAWING_413_001"))
+        .andExpect(jsonPath("$.message").value("그림 과정 데이터가 1 MiB 제한을 초과했습니다."));
+
+    verifyNoInteractions(strokeBatchService);
   }
 
   @Test

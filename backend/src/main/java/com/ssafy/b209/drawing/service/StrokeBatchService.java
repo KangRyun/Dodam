@@ -35,6 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class StrokeBatchService {
 
   private static final int MAX_PAYLOAD_BYTES = 1024 * 1024;
+  private static final int MAX_POINTS_PER_BATCH = 20_000;
 
   private final DrawingSessionRepository drawingSessionRepository;
   private final StrokeBatchRepository strokeBatchRepository;
@@ -79,6 +80,7 @@ public class StrokeBatchService {
   @Transactional
   public StrokeBatchSaveResult save(Long drawingSessionId, SaveStrokeBatchRequest request) {
     validateSequences(request);
+    validatePointCount(request);
     byte[] payload = serialize(request);
     if (payload.length > MAX_PAYLOAD_BYTES) {
       throw new BusinessException(DrawingErrorCode.STROKE_BATCH_PAYLOAD_TOO_LARGE);
@@ -111,6 +113,16 @@ public class StrokeBatchService {
       return new StrokeBatchSaveResult(toResponse(strokeBatchRepository.saveAndFlush(batch)), true);
     } catch (DataIntegrityViolationException exception) {
       throw new BusinessException(DrawingErrorCode.STROKE_BATCH_CONFLICT, exception);
+    }
+  }
+
+  private void validatePointCount(SaveStrokeBatchRequest request) {
+    int pointCount = 0;
+    for (StrokeEventRequest event : request.events()) {
+      pointCount += event.points().size();
+      if (pointCount > MAX_POINTS_PER_BATCH) {
+        throw new BusinessException(DrawingErrorCode.STROKE_BATCH_POINT_LIMIT_EXCEEDED);
+      }
     }
   }
 

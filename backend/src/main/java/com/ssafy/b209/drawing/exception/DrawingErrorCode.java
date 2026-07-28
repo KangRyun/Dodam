@@ -92,7 +92,10 @@ public enum DrawingErrorCode implements ErrorCode {
   STROKE_BATCH_INVALID(HttpStatus.BAD_REQUEST, "DRAWING_400_010", "그림 과정 데이터가 올바르지 않습니다."),
   /** 압축 전 Stroke payload가 허용 크기를 초과한 경우다. */
   STROKE_BATCH_PAYLOAD_TOO_LARGE(
-      HttpStatus.PAYLOAD_TOO_LARGE, "DRAWING_413_001", "그림 과정 데이터 크기가 제한을 초과했습니다."),
+      HttpStatus.PAYLOAD_TOO_LARGE, "DRAWING_413_001", "그림 과정 데이터가 1 MiB 제한을 초과했습니다."),
+  /** Stroke 배치 하나의 좌표 행 수가 저장 안전 상한을 초과한 경우다. */
+  STROKE_BATCH_POINT_LIMIT_EXCEEDED(
+      HttpStatus.PAYLOAD_TOO_LARGE, "DRAWING_413_002", "그림 과정 좌표가 20,000개 제한을 초과했습니다."),
   /** 현재 세션 상태 또는 입력 방식에서 Stroke를 저장할 수 없는 경우다. */
   STROKE_BATCH_NOT_ALLOWED(
       HttpStatus.CONFLICT, "DRAWING_409_018", "현재 상태에서는 그림 과정 데이터를 저장할 수 없습니다."),
