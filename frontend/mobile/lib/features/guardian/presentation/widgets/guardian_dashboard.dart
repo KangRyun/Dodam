@@ -654,6 +654,7 @@ class _RecentActivityCard extends StatelessWidget {
               ),
             ),
             InkWell(
+              key: const ValueKey('activity-history-entry'),
               onTap: () =>
                   AppNavigation.pushNamed(context, AppRoutes.activityHistory),
               child: const Row(
