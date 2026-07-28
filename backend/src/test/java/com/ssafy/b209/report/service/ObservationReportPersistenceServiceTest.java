@@ -58,6 +58,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 @ExtendWith(MockitoExtension.class)
 class ObservationReportPersistenceServiceTest {
@@ -83,6 +84,7 @@ class ObservationReportPersistenceServiceTest {
   @Mock private ConversationSessionRepository conversationSessionRepository;
   @Mock private ConversationMessageRepository conversationMessageRepository;
   @Mock private DrawingSessionEmotionRepository emotionRepository;
+  @Mock private ApplicationEventPublisher eventPublisher;
 
   @Captor private ArgumentCaptor<AnalysisObservationResult> observationCaptor;
   @Captor private ArgumentCaptor<AnalysisConversationSummary> conversationCaptor;
@@ -110,6 +112,7 @@ class ObservationReportPersistenceServiceTest {
             conversationSessionRepository,
             conversationMessageRepository,
             emotionRepository,
+            eventPublisher,
             CLOCK);
   }
 
@@ -164,6 +167,21 @@ class ObservationReportPersistenceServiceTest {
     assertThat(keyConversationsCaptor.getValue())
         .extracting(ReportKeyConversation::getDisplayOrder)
         .containsExactly(0, 1);
+
+    verify(eventPublisher).publishEvent(new AnalysisCompletedEvent(REPORT_ID));
+  }
+
+  @Test
+  void completeDoesNotPublishAnalysisCompletedWhenReportAlreadyCompleted() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    report.complete(false, "이미 완료", LocalDateTime.now(CLOCK));
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.complete(emptyConversationContext(), validResult());
+
+    verify(eventPublisher, never()).publishEvent(any());
   }
 
   @Test
