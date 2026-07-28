@@ -1,0 +1,101 @@
+# 도담(dodam) 메모리 압박 알림 규칙 (S15P11B209-356)
+#
+# 배경: 2026-07-28 k3s 세팅 중 호스트 메모리가 고갈돼 EC2 가 응답 불능이 됐다.
+#   당시 Prometheus·Grafana 는 정상 수집 중이었지만 **아무도 보고 있지 않았고, 규칙도 없었다.**
+#   지표가 있는 것과 경보가 오는 것은 다르다 — 이 파일이 그 간극을 메운다.
+#
+# ⚠️ 현재 Alertmanager 가 없다. 이 규칙들은 발동해도 알림을 "보내지" 않는다.
+#    확인 경로: Prometheus UI(SSH 터널 → http://localhost:9091/alerts) 또는 Grafana 패널.
+#    → 무거운 작업(k3s·빌드·부하테스트) 전후에는 사람이 직접 이 화면을 본다.
+#    Alertmanager + Mattermost 연동은 별도 이슈(k3s 컷오버 이후 정식 도입 예정).
+
+groups:
+  - name: host-memory
+    interval: 30s
+    rules:
+      # ── 호스트 가용 메모리 ─────────────────────────────────────────────────
+      # MemAvailable 을 쓴다(MemFree 아님). MemFree 는 페이지 캐시를 제외해 항상 작게 보여
+      # "메모리가 없다"는 오탐을 만든다. 실제로 회수 가능한 양은 MemAvailable 이다.
+      - alert: HostMemoryAvailableLow
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.15
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "호스트 가용 메모리 15% 미만 ({{ $value | humanizePercentage }})"
+          description: >-
+            무거운 작업을 새로 시작하지 말 것. 원인 확인:
+            docker stats --no-stream / ps aux --sort=-rss | head
+
+      # 여기까지 오면 이미 07-28 사고 직전 구간이다.
+      # earlyoom 이 켜져 있으면 이 근처(10%/5%)에서 프로세스를 죽여 호스트를 살린다.
+      - alert: HostMemoryAvailableCritical
+        expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.08
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "🔴 호스트 가용 메모리 8% 미만 — 응답 불능 직전 구간"
+          description: >-
+            2026-07-28 과 같은 경로다(thrash → SSH 불가 → 재부팅). 즉시 가장 큰 소비자를 정리할 것.
+            earlyoom 이 켜져 있다면 곧 프로세스 하나가 죽고 호스트는 살아남는다.
+
+      # ── 스왑 ──────────────────────────────────────────────────────────────
+      # 스왑이 EBS(네트워크 디스크) 위라, 스왑을 많이 쓴다 = 이미 느려졌다는 뜻이다.
+      # "아직 여유가 있다"가 아니라 "이미 압박 중"으로 읽어야 한다.
+      - alert: HostSwapUsageHigh
+        expr: >-
+          node_memory_SwapTotal_bytes > 0
+          and (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes)
+              / node_memory_SwapTotal_bytes > 0.5
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "스왑 사용 50% 초과 ({{ $value | humanizePercentage }})"
+          description: >-
+            스왑은 EBS 위라 여기까지 오면 응답시간이 이미 무너져 있다.
+            k3s 설치·빌드·부하테스트를 시작하지 말 것.
+
+      # setup-swap.sh 미실행 감지 — "설정했다고 생각했는데 안 돼 있는" 상태를 지표로 잡는다.
+      - alert: HostSwapUndersized
+        expr: node_memory_SwapTotal_bytes < 15e9
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "스왑이 권장치(16GB) 미만 — 방어 미적용"
+          description: "sudo bash infra/scripts/setup-swap.sh 를 아직 돌리지 않았다."
+
+  - name: container-memory
+    interval: 30s
+    rules:
+      # ── 컨테이너가 자기 상한에 근접 ────────────────────────────────────────
+      # 상한에 닿으면 그 컨테이너만 OOM-kill 된다(호스트는 산다). 그래도 서비스는 끊기므로
+      # 죽기 전에 알아야 한다. 상한이 0(무제한)인 컨테이너는 분모가 0이라 자동 제외된다.
+      - alert: ContainerMemoryNearLimit
+        expr: >-
+          container_spec_memory_limit_bytes{name!=""} > 0
+          and container_memory_working_set_bytes{name!=""}
+              / container_spec_memory_limit_bytes{name!=""} > 0.9
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.name }} 메모리 상한의 90% 초과"
+          description: >-
+            곧 OOM-kill 된다. 상한을 올릴지(infra/docker-compose.yml 의 mem_limit)
+            누수인지 판단할 것. JVM 컨테이너라면 MaxRAMPercentage 와 짝이 맞는지 먼저 본다.
+
+      # ── 상한 없는 컨테이너 ────────────────────────────────────────────────
+      # 07-28 사고의 조건 그 자체. 하나라도 무제한이면 그 하나가 호스트를 끌고 갈 수 있다.
+      - alert: ContainerWithoutMemoryLimit
+        expr: container_spec_memory_limit_bytes{name=~"dodam-.*"} == 0
+        for: 15m
+        labels:
+          severity: info
+        annotations:
+          summary: "{{ $labels.name }} 에 메모리 상한이 없다"
+          description: >-
+            infra/docker-compose.yml 의 mem_limit 을 반영해 재생성하거나,
+            즉시 적용: docker update --memory <크기> --memory-swap <크기> {{ $labels.name }}

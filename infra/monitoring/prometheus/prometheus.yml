@@ -7,6 +7,13 @@ global:
   scrape_interval: 15s        # 수집 주기 — 대시보드 용도로 충분(과투자 금지, k3s 이전 시 재평가)
   evaluation_interval: 15s
 
+# 경보 규칙 (S15P11B209-356 — 2026-07-28 호스트 OOM 사고 대응)
+#   ⚠️ Alertmanager 가 아직 없다 → 발동해도 알림은 나가지 않고 Prometheus UI(/alerts)에만 뜬다.
+#      "규칙이 있다"와 "알림이 온다"는 다르다 — 이 스택의 현재 상태는 전자까지다.
+#   규칙 수정 후 반영: docker kill -s HUP dodam-prometheus  (재시작 불필요, TSDB 유지)
+rule_files:
+  - /etc/prometheus/rules/*.yml
+
 scrape_configs:
   # Spring Boot backend — management 포트 9404, micrometer prometheus 레지스트리.
   #   (2026-07-23 내부망 무인증 200 실측 — 9404는 호스트 미개방·내부망 전용이라 무인증 허용.
