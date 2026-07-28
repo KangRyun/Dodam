@@ -12,6 +12,7 @@ import '../../features/conversation/conversation.dart';
 import '../../features/guardian/presentation/screens/guardian_screens.dart';
 import '../../features/history/presentation/screens/history_screens.dart';
 import '../../features/report/presentation/screens/report_screen.dart';
+import '../../features/report/presentation/screens/report_list_screen.dart';
 import '../../features/report/domain/repositories/report_repository.dart';
 import '../state/guardian_child_controller.dart';
 import '../widgets/app_placeholder_scaffold.dart';
@@ -113,7 +114,7 @@ abstract final class AppRouter {
       // 셸 밖에서 부르면 하단 탭을 갖춘 보호자 모드 전체를, 탭 안에서 부르면
       // 홈 화면 자체를 연다.
       ['guardian', 'home'] when childController != null && insideShell =>
-        _guardianHome(childController, authSignOut),
+        _guardianHome(childController, authSignOut, reportRepository),
       ['guardian', 'home'] when childController != null => GuardianShell(
         routeFactory: tabRouteFactory,
         tabs: [
@@ -123,7 +124,8 @@ abstract final class AppRouter {
               selectedIcon: Icons.home_rounded,
               label: '홈',
             ),
-            builder: (_) => _guardianHome(childController, authSignOut),
+            builder: (_) =>
+                _guardianHome(childController, authSignOut, reportRepository),
           ),
           GuardianShellTab(
             item: const AppBottomTabItem(
@@ -188,6 +190,12 @@ abstract final class AppRouter {
         ActivityDetailScreen(
           activityId: activityId,
           repository: activityRepository,
+        ),
+      ['guardian', 'reports']
+          when childController != null && reportRepository != null =>
+        ReportListScreen(
+          childController: childController,
+          repository: reportRepository,
         ),
       ['guardian', 'reports', final reportId] when reportRepository != null =>
         ReportScreen(reportId: reportId, repository: reportRepository),
@@ -300,6 +308,7 @@ abstract final class AppRouter {
       ['guardian', 'home'] => const ChildContextGuardScreen(),
       ['guardian', 'children', 'select'] => const ChildContextGuardScreen(),
       ['guardian', 'children', 'register'] => const ChildContextGuardScreen(),
+      ['guardian', 'reports'] => const ChildContextGuardScreen(),
       _ => UnknownRouteScreen(location: location),
     };
 
@@ -309,8 +318,10 @@ abstract final class AppRouter {
   static Widget _guardianHome(
     GuardianChildController controller,
     AuthSignOut? authSignOut,
+    ReportRepository? reportRepository,
   ) => GuardianHomeScreen(
     controller: controller,
+    reportRepository: reportRepository,
     actions: authSignOut == null
         ? const []
         : [LogoutActionButton(onSignOut: authSignOut, onSignedOut: goLogin)],

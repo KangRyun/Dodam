@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../../app/router/app_navigation.dart';
@@ -8,15 +10,19 @@ import '../../../../app/widgets/app_failure_view.dart';
 import '../../../../app/widgets/app_placeholder_scaffold.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../child/data/dto/child_dtos.dart';
+import '../../../report/data/dto/report_dtos.dart';
+import '../../../report/domain/repositories/report_repository.dart';
 
 class GuardianHomeScreen extends StatelessWidget {
   const GuardianHomeScreen({
     required this.controller,
+    this.reportRepository,
     this.actions = const [],
     super.key,
   });
 
   final GuardianChildController controller;
+  final ReportRepository? reportRepository;
   final List<Widget> actions;
 
   @override
@@ -53,13 +59,20 @@ class GuardianHomeScreen extends StatelessWidget {
       actionLabel: '아이 등록하기',
       onAction: () => AppNavigation.pushNamed(context, AppRoutes.childRegister),
     ),
-    ChildListStatus.success => _GuardianHomeContent(controller: controller),
+    ChildListStatus.success => _GuardianHomeContent(
+      controller: controller,
+      reportRepository: reportRepository,
+    ),
   };
 }
 
 class _GuardianHomeContent extends StatelessWidget {
-  const _GuardianHomeContent({required this.controller});
+  const _GuardianHomeContent({
+    required this.controller,
+    required this.reportRepository,
+  });
   final GuardianChildController controller;
+  final ReportRepository? reportRepository;
 
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
@@ -112,6 +125,13 @@ class _GuardianHomeContent extends StatelessWidget {
               },
             ),
             const SizedBox(height: AppSpacing.lg),
+            if (reportRepository case final repository?) ...[
+              _GuardianReportPreview(
+                controller: controller,
+                repository: repository,
+              ),
+              const SizedBox(height: AppSpacing.lg),
+            ],
             AppButton(
               key: const ValueKey('start-child-mode'),
               label: '그림 활동 시작하기',
@@ -145,11 +165,10 @@ class _GuardianHomeContent extends StatelessWidget {
               variant: AppButtonVariant.secondary,
               onPressed: controller.selectedChild == null
                   ? null
-                  : () =>
-                        AppNavigation.pushNamed(
-                          context,
-                          AppRoutes.activityHistory,
-                        ),
+                  : () => AppNavigation.pushNamed(
+                      context,
+                      AppRoutes.activityHistory,
+                    ),
             ),
             const SizedBox(height: AppSpacing.sm),
             AppButton(
@@ -163,6 +182,202 @@ class _GuardianHomeContent extends StatelessWidget {
       ),
     ),
   );
+}
+
+class _GuardianReportPreview extends StatefulWidget {
+  const _GuardianReportPreview({
+    required this.controller,
+    required this.repository,
+  });
+
+  final GuardianChildController controller;
+  final ReportRepository repository;
+
+  @override
+  State<_GuardianReportPreview> createState() => _GuardianReportPreviewState();
+}
+
+class _GuardianReportPreviewState extends State<_GuardianReportPreview> {
+  ReportSummaryDto? _latest;
+  Object? _failure;
+  bool _loading = true;
+  int? _loadedChildId;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.controller.addListener(_onChildChanged);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void dispose() {
+    widget.controller.removeListener(_onChildChanged);
+    super.dispose();
+  }
+
+  void _onChildChanged() {
+    if (_loadedChildId == widget.controller.selectedChildId) return;
+    unawaited(_load());
+  }
+
+  Future<void> _load() async {
+    final childId = widget.controller.selectedChildId;
+    _loadedChildId = childId;
+    if (childId == null) {
+      setState(() {
+        _latest = null;
+        _failure = null;
+        _loading = false;
+      });
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _failure = null;
+    });
+    try {
+      final page = await widget.repository.getReports(
+        childId,
+        filter: const ReportFilterDto(size: 1),
+      );
+      if (!mounted || childId != widget.controller.selectedChildId) return;
+      setState(() {
+        _latest = page.content.firstOrNull;
+        _loading = false;
+      });
+    } on Object catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _failure = error;
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const ValueKey('guardian-report-preview'),
+    padding: const EdgeInsets.all(AppSpacing.lg),
+    decoration: BoxDecoration(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(AppRadius.lg),
+      border: Border.all(color: AppColors.outline),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            const Expanded(
+              child: Text(
+                'AI 관찰 리포트',
+                style: TextStyle(
+                  color: AppColors.ink,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+            ),
+            TextButton(
+              key: const ValueKey('guardian-report-all'),
+              onPressed: widget.controller.selectedChildId == null
+                  ? null
+                  : () =>
+                        AppNavigation.pushNamed(context, AppRoutes.reportList),
+              child: const Text('전체'),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        if (_loading)
+          const LinearProgressIndicator()
+        else if (_failure != null)
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  '리포트를 불러오지 못했어요.',
+                  style: TextStyle(color: AppColors.inkMuted),
+                ),
+              ),
+              TextButton(onPressed: _load, child: const Text('다시 시도')),
+            ],
+          )
+        else if (_latest == null)
+          const Text(
+            '활동을 완료하면 AI 분석 후 관찰 리포트가 표시돼요.',
+            style: TextStyle(color: AppColors.inkMuted),
+          )
+        else
+          _GuardianLatestReport(report: _latest!, onRefresh: _load),
+      ],
+    ),
+  );
+}
+
+class _GuardianLatestReport extends StatelessWidget {
+  const _GuardianLatestReport({required this.report, required this.onRefresh});
+
+  final ReportSummaryDto report;
+  final Future<void> Function() onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final completed = report.reportStatus == 'COMPLETED';
+    final statusText = switch (report.reportStatus) {
+      'COMPLETED' => '리포트 완료',
+      'FAILED' => '다시 확인 필요',
+      _ => '분석 중',
+    };
+    return Material(
+      color: AppColors.leafSoft,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      child: InkWell(
+        key: ValueKey('guardian-latest-report-${report.reportId}'),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        onTap: completed
+            ? () => AppNavigation.pushNamed(
+                context,
+                AppRoutes.report(report.reportId.toString()),
+              )
+            : onRefresh,
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          child: Row(
+            children: [
+              const Icon(
+                Icons.description_outlined,
+                color: AppColors.leaf,
+                size: 32,
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      report.title ?? report.drawingTypeName,
+                      style: const TextStyle(
+                        color: AppColors.ink,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Text(
+                      '${report.drawingTypeName} · $statusText',
+                      style: const TextStyle(color: AppColors.inkMuted),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(completed ? Icons.chevron_right_rounded : Icons.refresh),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class ChildSelectScreen extends StatelessWidget {

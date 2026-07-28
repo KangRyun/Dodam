@@ -3,12 +3,43 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 import 'package:dodam/core/network/network.dart';
+import 'package:dodam/features/report/data/dto/report_dtos.dart';
 import 'package:dodam/features/report/data/repositories/remote_report_repository.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// REPORT-02 `GET /api/v1/reports/{reportId}` 연동 계약 테스트.
 /// 실제 네트워크 없이 [HttpClientAdapter]를 갈아끼워 검증한다.
 void main() {
+  test('목록 조회는 REPORT-01 필터와 페이지 계약을 전달한다', () async {
+    final adapter = _StubAdapter(_okResponse(_reportPageData()));
+    final repository = RemoteReportRepository(_client(adapter));
+
+    final page = await repository.getReports(
+      3,
+      filter: const ReportFilterDto(
+        from: '2026-07-01',
+        to: '2026-07-31',
+        drawingTypeCode: 'ART_DIARY',
+        reportStatus: 'COMPLETED',
+        page: 1,
+        size: 5,
+      ),
+    );
+
+    final request = adapter.requests.single;
+    expect(request.uri.path, '/api/v1/children/3/reports');
+    expect(request.queryParameters, {
+      'from': '2026-07-01',
+      'to': '2026-07-31',
+      'drawingTypeCode': 'ART_DIARY',
+      'reportStatus': 'COMPLETED',
+      'page': 1,
+      'size': 5,
+    });
+    expect(page.content.single.drawingTypeCode, 'ART_DIARY');
+    expect(page.content.single.activityDate, DateTime(2026, 7, 22));
+  });
+
   test('상세 조회는 공개 API 경로로 인증 헤더와 함께 요청한다', () async {
     final adapter = _StubAdapter(_okResponse(_detailData()));
     final repository = RemoteReportRepository(_client(adapter));
@@ -217,6 +248,31 @@ Map<String, dynamic> _detailData() => {
   'limitations': ['이 리포트는 진단이 아닙니다'],
   'expertReview': {'status': 'NOT_REQUESTED', 'available': false},
   'createdAt': '2026-07-21T02:06:00',
+};
+
+Map<String, dynamic> _reportPageData() => {
+  'content': [
+    {
+      'reportId': 501,
+      'reportVersion': 2,
+      'drawingSessionId': 120,
+      'drawingType': {'drawingTypeId': 7, 'code': 'ART_DIARY', 'name': '그림 일기'},
+      'title': '오늘의 그림',
+      'thumbnailUrl': '/api/v1/drawing-assets/30/file',
+      'activityDate': '2026-07-22',
+      'durationMs': 300000,
+      'selectedEmotions': ['HAPPY'],
+      'reportStatus': 'COMPLETED',
+      'expertReviewAvailable': false,
+    },
+  ],
+  'page': 1,
+  'size': 5,
+  'totalElements': 6,
+  'totalPages': 2,
+  'first': false,
+  'last': true,
+  'hasNext': false,
 };
 
 ResponseBody _okResponse(Map<String, dynamic> data) => _json(200, {
