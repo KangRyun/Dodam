@@ -29,78 +29,76 @@ class ProfileSelectionScreen extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: _ProfileColors.cream,
     body: SafeArea(
-      child: AnimatedBuilder(
-        animation: controller,
-        builder: (context, _) => Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.fromLTRB(
-              AppSpacing.xxl,
-              AppSpacing.xs,
-              AppSpacing.xxl,
-              AppSpacing.md,
-            ),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1180),
-              child: Column(
-                children: [
-                  _ProfileHeader(action: headerAction),
-                  const SizedBox(height: AppSpacing.xl),
-                  _GuardianSection(
-                    onSelected: () => onGuardianSelected(context),
+      child: Stack(
+        children: [
+          AnimatedBuilder(
+            animation: controller,
+            builder: (context, _) => Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.xxl,
+                  AppSpacing.xs,
+                  AppSpacing.xxl,
+                  AppSpacing.md,
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1180),
+                  child: Column(
+                    children: [
+                      const _ProfileHeader(),
+                      const SizedBox(height: AppSpacing.xl),
+                      _GuardianSection(
+                        onSelected: () => onGuardianSelected(context),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      _ChildrenSection(
+                        controller: controller,
+                        onChildSelected: (child) =>
+                            onChildSelected(context, child),
+                        onAddChild: onAddChild == null
+                            ? null
+                            : () => onAddChild!(context),
+                        onEditProfiles: onEditProfiles == null
+                            ? null
+                            : () => onEditProfiles!(context),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: AppSpacing.lg),
-                  _ChildrenSection(
-                    controller: controller,
-                    onChildSelected: (child) => onChildSelected(context, child),
-                    onAddChild: onAddChild == null
-                        ? null
-                        : () => onAddChild!(context),
-                    onEditProfiles: onEditProfiles == null
-                        ? null
-                        : () => onEditProfiles!(context),
-                  ),
-                ],
+                ),
               ),
             ),
           ),
-        ),
+          if (headerAction != null)
+            Positioned(top: 0, right: 0, child: headerAction!),
+        ],
       ),
     ),
   );
 }
 
 class _ProfileHeader extends StatelessWidget {
-  const _ProfileHeader({this.action});
-
-  final Widget? action;
+  const _ProfileHeader();
 
   @override
-  Widget build(BuildContext context) => SizedBox(
+  Widget build(BuildContext context) => const SizedBox(
     width: double.infinity,
-    child: Stack(
-      alignment: Alignment.center,
+    child: Column(
       children: [
-        const Column(
-          children: [
-            Text(
-              '누가 도담을 이용하나요?',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: AppColors.ink,
-                fontSize: 32,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            SizedBox(height: AppSpacing.sm),
-            Text(
-              '이용할 프로필을 선택해 주세요.',
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.inkMuted, fontSize: 18),
-            ),
-          ],
+        Text(
+          '누가 도담을 이용하나요?',
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: AppColors.ink,
+            fontSize: 32,
+            fontWeight: FontWeight.w800,
+          ),
         ),
-        if (action != null)
-          Positioned(right: 0, top: 0, bottom: 0, child: action!),
+        SizedBox(height: AppSpacing.sm),
+        Text(
+          '이용할 프로필을 선택해 주세요.',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: AppColors.inkMuted, fontSize: 18),
+        ),
       ],
     ),
   );
