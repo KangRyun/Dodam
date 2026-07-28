@@ -112,6 +112,13 @@ QUESTION_LLM_TIMEOUT_SEC = float(os.environ.get("QUESTION_LLM_TIMEOUT_SEC", "4.0
 QUESTION_LLM_MAX_RETRIES = int(os.environ.get("QUESTION_LLM_MAX_RETRIES", "2"))
 QUESTION_LLM_BACKOFF_BASE_SEC = float(os.environ.get("QUESTION_LLM_BACKOFF_BASE_SEC", "0.5"))
 
+# ⚠️ 임시(출시 전 제거: S15P11B209-689) — 안전 파이프라인 검증용 원문 디버그 로그 스위치.
+# 정확히 "true"일 때만 차단된 원문(아이 발화·질문)을 로그로 남긴다. 기본은 꺼짐(운영 유출 방지).
+# AI_INTERNAL_AUTH_DISABLED와 같은 '명시적 opt-in' 규약 — 배포 환경엔 이 변수를 절대 주입하지 않는다.
+SAFETY_DEBUG_LOG_RAW = (
+    os.environ.get("SAFETY_DEBUG_LOG_RAW", "").strip().lower() == "true"
+)
+
 
 def require_gms_key() -> str:
     """GMS_KEY가 없으면 즉시 명확히 실패시킨다(원인이 빨리 드러나게)."""

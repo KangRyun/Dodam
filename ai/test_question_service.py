@@ -14,6 +14,7 @@ import types
 import unittest
 from unittest import mock
 
+import child_screen_guard
 import llm_client
 import question_safety
 import question_service
@@ -199,6 +200,73 @@ class SafetyPipelineTest(unittest.TestCase):
             with self.assertRaises(question_service.UpstreamError) as ctx:
                 question_service.generate(_request(), "req-1")
         self.assertEqual(ctx.exception.error_code, "AI_EMPTY_COMPLETION")
+
+    def test_risk_notice_question_blocked(self):
+        # 보호자용 위기 경고 문구가 질문에 섞이면 아이 화면에 못 나가게 차단(S15P11B209-597).
+        capture: dict = {}
+        client = _mock_client(capture, reply="위험이 감지되어 보호자에게 알렸어. 지금 기분은 어때?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            with self.assertRaises(question_service.SafetyBlockedError) as ctx:
+                question_service.generate(_request(), "req-1")
+        self.assertEqual(
+            ctx.exception.block_reason_code, question_safety.CHILD_UNSAFE_NOTICE
+        )
+
+
+class ChildScreenSafeConstantsTest(unittest.TestCase):
+    """아이 화면에 그대로 나가는 서버 상수(위기 안전 질문·선택 칩)에 위험 문구가 없어야 한다
+    (S15P11B209-597 회귀 방어 — 누군가 상수를 위험 문구로 바꾸면 즉시 실패)."""
+
+    def test_crisis_safe_question_has_no_risk_notice(self):
+        self.assertFalse(
+            child_screen_guard.contains_child_unsafe(
+                question_service.CRISIS_SAFE_QUESTION
+            )
+        )
+
+    def test_all_option_chip_labels_have_no_risk_notice(self):
+        chips = [
+            opt
+            for options in question_service._OPTIONS_BY_PURPOSE.values()
+            for opt in options
+        ]
+        chips += list(question_service._CRISIS_SAFE_OPTIONS)
+        for opt in chips:
+            with self.subTest(label=opt.label):
+                self.assertFalse(child_screen_guard.contains_child_unsafe(opt.label))
+
+
+class DebugRawLogTest(unittest.TestCase):
+    """임시 검증용 원문 디버그 로그 게이팅 (S15P11B209-689, 출시 전 제거 대상).
+
+    기본(플래그 꺼짐)에서는 원문이 절대 로그에 새지 않아야 하고, 명시적으로 켰을 때만
+    [SAFETY-DEBUG-REMOVE] 로그로 원문이 남는다.
+    """
+
+    RAW = "이 그림은 불안을 의미하니?"  # 진단 표현 → 차단 유발
+
+    def _run_blocked(self):
+        capture: dict = {}
+        client = _mock_client(capture, reply=self.RAW)
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            with self.assertRaises(question_service.SafetyBlockedError):
+                question_service.generate(_request(), "req-dbg")
+
+    def test_raw_not_logged_when_flag_off(self):
+        with mock.patch.object(question_service.config, "SAFETY_DEBUG_LOG_RAW", False):
+            with self.assertLogs("question_service", level="WARNING") as logs:
+                self._run_blocked()
+        joined = "\n".join(logs.output)
+        self.assertNotIn("[SAFETY-DEBUG-REMOVE]", joined)
+        self.assertNotIn(self.RAW, joined)  # 원문이 어떤 로그에도 새지 않는다
+
+    def test_raw_logged_only_when_flag_on(self):
+        with mock.patch.object(question_service.config, "SAFETY_DEBUG_LOG_RAW", True):
+            with self.assertLogs("question_service", level="WARNING") as logs:
+                self._run_blocked()
+        joined = "\n".join(logs.output)
+        self.assertIn("[SAFETY-DEBUG-REMOVE]", joined)
+        self.assertIn(self.RAW, joined)  # 켰을 때만 원문 확인 가능
 
 
 class PurposeTargetChipConsistencyTest(unittest.TestCase):
