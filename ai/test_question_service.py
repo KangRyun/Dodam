@@ -236,6 +236,39 @@ class ChildScreenSafeConstantsTest(unittest.TestCase):
                 self.assertFalse(child_screen_guard.contains_child_unsafe(opt.label))
 
 
+class DebugRawLogTest(unittest.TestCase):
+    """임시 검증용 원문 디버그 로그 게이팅 (S15P11B209-689, 출시 전 제거 대상).
+
+    기본(플래그 꺼짐)에서는 원문이 절대 로그에 새지 않아야 하고, 명시적으로 켰을 때만
+    [SAFETY-DEBUG-REMOVE] 로그로 원문이 남는다.
+    """
+
+    RAW = "이 그림은 불안을 의미하니?"  # 진단 표현 → 차단 유발
+
+    def _run_blocked(self):
+        capture: dict = {}
+        client = _mock_client(capture, reply=self.RAW)
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            with self.assertRaises(question_service.SafetyBlockedError):
+                question_service.generate(_request(), "req-dbg")
+
+    def test_raw_not_logged_when_flag_off(self):
+        with mock.patch.object(question_service.config, "SAFETY_DEBUG_LOG_RAW", False):
+            with self.assertLogs("question_service", level="WARNING") as logs:
+                self._run_blocked()
+        joined = "\n".join(logs.output)
+        self.assertNotIn("[SAFETY-DEBUG-REMOVE]", joined)
+        self.assertNotIn(self.RAW, joined)  # 원문이 어떤 로그에도 새지 않는다
+
+    def test_raw_logged_only_when_flag_on(self):
+        with mock.patch.object(question_service.config, "SAFETY_DEBUG_LOG_RAW", True):
+            with self.assertLogs("question_service", level="WARNING") as logs:
+                self._run_blocked()
+        joined = "\n".join(logs.output)
+        self.assertIn("[SAFETY-DEBUG-REMOVE]", joined)
+        self.assertIn(self.RAW, joined)  # 켰을 때만 원문 확인 가능
+
+
 class PurposeTargetChipConsistencyTest(unittest.TestCase):
     """목적·대상 객체·선택 Chip 정합성 (S15P11B209-594)."""
 
