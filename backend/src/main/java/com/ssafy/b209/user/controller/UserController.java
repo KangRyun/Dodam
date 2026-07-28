@@ -6,8 +6,10 @@ import com.ssafy.b209.global.response.ApiResponse;
 import com.ssafy.b209.user.dto.request.DeleteUserRequest;
 import com.ssafy.b209.user.dto.request.OnboardingRequest;
 import com.ssafy.b209.user.dto.request.UpdateUserRequest;
+import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
 import com.ssafy.b209.user.service.UserDeletionService;
+import com.ssafy.b209.user.service.UserNotificationSettingsReader;
 import com.ssafy.b209.user.service.UserOnboardingService;
 import com.ssafy.b209.user.service.UserQueryService;
 import com.ssafy.b209.user.service.UserUpdateService;
@@ -49,6 +51,7 @@ public class UserController {
   private final UserQueryService queryService;
   private final UserUpdateService updateService;
   private final UserDeletionService deletionService;
+  private final UserNotificationSettingsReader notificationSettingsReader;
 
   /**
    * 사용자 식별 경계와 조회·Onboarding·수정 서비스를 사용하는 Controller를 생성한다.
@@ -58,18 +61,21 @@ public class UserController {
    * @param queryService 사용자 본인 정보 조회 Use Case
    * @param updateService 사용자 본인 정보 수정 Use Case
    * @param deletionService 사용자 계정 즉시 삭제 Use Case
+   * @param notificationSettingsReader 알림 수신 설정 조회 Use Case
    */
   public UserController(
       CurrentAuthenticatedUserResolver currentUserResolver,
       UserOnboardingService onboardingService,
       UserQueryService queryService,
       UserUpdateService updateService,
-      UserDeletionService deletionService) {
+      UserDeletionService deletionService,
+      UserNotificationSettingsReader notificationSettingsReader) {
     this.currentUserResolver = currentUserResolver;
     this.onboardingService = onboardingService;
     this.queryService = queryService;
     this.updateService = updateService;
     this.deletionService = deletionService;
+    this.notificationSettingsReader = notificationSettingsReader;
   }
 
   /**
@@ -174,6 +180,34 @@ public class UserController {
   public ResponseEntity<ApiResponse<UserResponse>> getMe() {
     return ResponseEntity.ok(
         ApiResponse.ok(queryService.getMe(currentUserResolver.requireUserId())));
+  }
+
+  /**
+   * 인증 사용자의 알림 수신 설정을 조회한다.
+   *
+   * <p>조회만 수행하며 설정을 변경하지 않는다. 저장된 설정 행이 없는 사용자에게는 컬럼 DEFAULT와 동일한 기본값을 반환하므로 항상 HTTP 200이다.
+   * Authorization Bearer Access Token의 사용자 ID를 대상으로 한다.
+   *
+   * @return HTTP 200과 알림 수신 설정 공통 응답
+   */
+  @Operation(
+      summary = "알림 설정 조회",
+      description =
+          "인증 사용자의 알림 수신 설정을 조회합니다. 저장된 설정이 없으면 기본값을 반환하므로 항상 200으로 응답합니다. "
+              + "Authorization Bearer Access Token의 사용자 ID를 대상으로 합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "알림 설정 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping("/me/notification-settings")
+  public ResponseEntity<ApiResponse<NotificationSettingsResponse>> getMyNotificationSettings() {
+    return ResponseEntity.ok(
+        ApiResponse.ok(notificationSettingsReader.read(currentUserResolver.requireUserId())));
   }
 
   /**
