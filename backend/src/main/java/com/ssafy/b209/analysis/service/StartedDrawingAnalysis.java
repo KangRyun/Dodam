@@ -1,6 +1,8 @@
 package com.ssafy.b209.analysis.service;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisSubject;
 import java.time.LocalDateTime;
 
 /**
@@ -11,6 +13,8 @@ import java.time.LocalDateTime;
  * @param drawingAssetId 분석 대상 그림 파일 식별자
  * @param requestId 서버가 생성한 Client 요청 UUID
  * @param analysisScope 중간 또는 최종 분석 범위
+ * @param activityType 저장된 그림 유형에서 확정한 AI 활동 유형
+ * @param drawingSubject 저장된 HTP 단계 주제이며 그림일기는 {@code null}
  * @param storageKey 내부 이미지 저장소 상대 Key
  * @param contentType 검증된 이미지 MIME Type
  * @param widthPx 원본 이미지 너비
@@ -24,6 +28,8 @@ public record StartedDrawingAnalysis(
     Long drawingAssetId,
     String requestId,
     DrawingAnalysisScope analysisScope,
+    DrawingAnalysisActivityType activityType,
+    DrawingAnalysisSubject drawingSubject,
     String storageKey,
     String contentType,
     Integer widthPx,

@@ -12,8 +12,10 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisResponse;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisRetryReason;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisSubject;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.dto.RetryDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
@@ -139,6 +141,8 @@ class DrawingAnalysisServiceTest {
                 ASSET_ID,
                 idempotencyKey,
                 com.ssafy.b209.analysis.domain.DrawingAnalysisScope.FINAL,
+                DrawingAnalysisActivityType.HTP,
+                DrawingAnalysisSubject.HOUSE,
                 "drawing/final.png",
                 "image/png",
                 1200,
@@ -283,6 +287,8 @@ class DrawingAnalysisServiceTest {
                 ASSET_ID,
                 REQUEST_ID.toString(),
                 com.ssafy.b209.analysis.domain.DrawingAnalysisScope.FINAL,
+                DrawingAnalysisActivityType.HTP,
+                DrawingAnalysisSubject.HOUSE,
                 "drawing/final.png",
                 "image/png",
                 null,
@@ -319,6 +325,8 @@ class DrawingAnalysisServiceTest {
                 ASSET_ID,
                 REQUEST_ID.toString(),
                 com.ssafy.b209.analysis.domain.DrawingAnalysisScope.FINAL,
+                DrawingAnalysisActivityType.HTP,
+                DrawingAnalysisSubject.HOUSE,
                 "drawing/final.png",
                 "image/png",
                 null,

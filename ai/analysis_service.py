@@ -312,8 +312,40 @@ def _to_detected_objects(
 
 
 # ── 진입점 ──────────────────────────────────────────────────────
+def _model_key_for(activity_type: contracts.ActivityType) -> str:
+    """확정된 활동 유형을 YOLO 모델 Registry Key로 변환한다."""
+    return {"HTP": "htp", "ART_DIARY": "sketch"}[activity_type]
+
+
+def _filter_detections_for_activity(
+    activity_type: contracts.ActivityType,
+    drawing_subject: contracts.DrawingSubject | None,
+    detections: list,
+    warnings: list[str],
+) -> list:
+    """HTP 단계 주제에 맞게 탐지를 제한하고 기대 주제 미탐지를 표시한다."""
+    if activity_type == "ART_DIARY":
+        return detections
+    if drawing_subject is None:
+        raise ValueError("HTP analysis requires drawingSubject")
+
+    kept = htp_labels.suppress_for_subject(detections, drawing_subject)
+    if len(kept) != len(detections):
+        warnings.append("CROSS_SUBJECT_PARTS_SUPPRESSED")
+    summary = htp_labels.summarize(kept)
+    group = summary.groups.get(drawing_subject)
+    if group is None or not group.whole_detected:
+        warnings.append("HTP_SUBJECT_NOT_DETECTED")
+    return kept
+
+
 def _detect_or_degrade(
-    image_path: str, image_bytes: bytes, warnings: list[str], analysis_id: str = ""
+    image_path: str,
+    image_bytes: bytes,
+    warnings: list[str],
+    analysis_id: str = "",
+    *,
+    model_key: str,
 ) -> tuple[list, bytes]:
     """객체 탐지를 시도하되 실패하면 탐지 없이 진행할 수 있게 degrade한다(S15P11B209-604).
 
@@ -326,7 +358,7 @@ def _detect_or_degrade(
         (탐지 목록, VLM 서술에 쓸 이미지 bytes). 실패 시 ([], 원본 image_bytes).
     """
     try:
-        return yolo_client.detect_and_annotate(image_path)
+        return yolo_client.detect_and_annotate(image_path, model_key=model_key)
     except RuntimeError as error:
         logger.error(
             "객체 탐지 실패 — 탐지 없이 진행(fallback): analysisId=%s type=%s",
@@ -352,6 +384,7 @@ def analyze(req: contracts.AnalysisRequest, request_id: str = "") -> contracts.A
     warnings: list[str] = []
 
     image_bytes = _fetch_drawing(req.drawing)
+    model_key = _model_key_for(req.activity_type)
 
     # YOLO는 파일 경로를 받는다 — 임시 파일은 블록을 벗어나면 삭제된다(원본 잔존 방지).
     suffix = ".png" if "png" in (req.drawing.mime_type or "") else ".jpg"
@@ -359,15 +392,17 @@ def analyze(req: contracts.AnalysisRequest, request_id: str = "") -> contracts.A
         temp.write(image_bytes)
         temp.flush()
         detections, annotated_png = _detect_or_degrade(
-            temp.name, image_bytes, warnings, req.analysis_id
+            temp.name,
+            image_bytes,
+            warnings,
+            req.analysis_id,
+            model_key=model_key,
         )
 
-    # 교차 주제 오탐 제거(S15P11B209-376) — 나무 그림에 잡힌 PERSON_EYE 같은 것.
-    # 신뢰도 임계값으로는 거를 수 없어 별도 규칙이 필요하다. 억제된 개수는 숨기지 않는다.
-    kept = htp_labels.suppress_cross_subject_parts(detections)
-    if len(kept) != len(detections):
-        warnings.append("CROSS_SUBJECT_PARTS_SUPPRESSED")
-    detections = kept
+    # HTP 단계 주제는 영속화된 확정값이다. 전체 객체가 미탐지여도 다른 HTP 그룹은 제거한다.
+    detections = _filter_detections_for_activity(
+        req.activity_type, req.drawing_subject, detections, warnings
+    )
 
     detected_objects, detection_warnings = _to_detected_objects(detections)
     warnings.extend(detection_warnings)
@@ -431,7 +466,12 @@ def analyze(req: contracts.AnalysisRequest, request_id: str = "") -> contracts.A
 
     model_info = contracts.ModelInfo(
         object_detection=contracts.ModelRef(
-            name="yolo-htp", version=Path(config.YOLO_MODEL_PATH).name
+            name=f"yolo-{model_key}",
+            version=Path(
+                config.YOLO_MODEL_PATH
+                if model_key == "htp"
+                else config.SKETCH_MODEL_PATH
+            ).name,
         ),
         # GMS 모델은 빌드 버전을 노출하지 않으므로 파이프라인 버전을 기록해 재현 가능하게 한다.
         vision=contracts.ModelRef(name=config.VLM_MODEL, version=config.PIPELINE_VERSION),

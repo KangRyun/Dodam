@@ -60,7 +60,7 @@ class DrawingAnalysisIntegrationTest extends IntegrationTestSupport {
         "INSERT INTO drawing_types "
             + "(id, code, name, activity_category, selectable_by, recommended_age_min, "
             + "recommended_age_max, is_active, display_order) "
-            + "VALUES (1, 'ANALYSIS_DRAWING', 'Analysis Drawing', 'GENERAL', 'BOTH', "
+            + "VALUES (1, 'ART_DIARY', '그림 일기', 'GENERAL', 'BOTH', "
             + "3, 12, TRUE, 1)");
     jdbcTemplate.update(
         "INSERT INTO drawing_sessions "

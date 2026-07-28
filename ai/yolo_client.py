@@ -40,8 +40,7 @@ def _model_registry() -> dict[str, tuple[str, str]]:
     """모델 키 → (가중치 경로, 기대 sha256). config에서 조립한다.
 
     HTP(집-나무-사람)와 그림일기(자유 그림)는 가중치가 다르다. 키로 구분해 각각
-    로드·검증한다. 그림일기(sketch) 모델은 현재 등록·검증만 하며, 분석 파이프라인
-    라우팅은 후속 계약과 함께 붙인다.
+    로드·검증하고 종합 분석 요청의 활동 유형에 따라 선택한다.
     """
     return {
         "htp": (config.YOLO_MODEL_PATH, config.YOLO_MODEL_SHA256),
@@ -188,7 +187,7 @@ def _encode_png(bgr_ndarray) -> bytes:
 
 
 def detect_and_annotate(
-    image_path: str, *, conf: float | None = None
+    image_path: str, *, model_key: str = "htp", conf: float | None = None
 ) -> tuple[list[Detection], bytes]:
     """이미지 → (탐지 목록, bbox가 그려진 PNG bytes).
 
@@ -196,17 +195,18 @@ def detect_and_annotate(
 
     Args:
         image_path: 분석할 이미지 파일 경로.
+        model_key: 활동 유형에 따라 선택한 모델 Registry Key.
         conf: 신뢰도 하한. 미지정 시 config.YOLO_CONF_THRESHOLD.
 
     Raises:
         RuntimeError: 가중치 부재·인코딩 실패 시.
     """
     threshold = config.YOLO_CONF_THRESHOLD if conf is None else conf
-    model = _get_model()
+    model = _get_model(model_key)
     result = model.predict(str(image_path), conf=threshold, verbose=False)[0]
     detections = _parse_result(result)
     annotated_png = _encode_png(result.plot())  # BGR ndarray → PNG bytes
-    logger.info("YOLO 탐지 %d건", len(detections))
+    logger.info("YOLO 탐지 %d건(model=%s)", len(detections), model_key)
     return detections, annotated_png
 
 

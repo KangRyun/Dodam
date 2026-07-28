@@ -58,8 +58,7 @@ YOLO_MODEL_SHA256 = os.environ.get(
     "2b901729ace2a7199382771770f0a38491f9981713f9453fb0b11b7258c5f5e0",
 )
 
-# 그림일기(자유 그림) 객체탐지 모델 — HTP와 별도 가중치. 현재는 등록·checksum 검증만 하고
-# 분석 파이프라인 라우팅(활동 유형별 모델 선택)은 후속 계약과 함께 붙인다(603 스코프 밖).
+# 그림일기(자유 그림) 객체탐지 모델 — HTP와 별도 가중치이며 ART_DIARY 분석에서 선택한다.
 SKETCH_MODEL_PATH = os.environ.get(
     "SKETCH_MODEL_PATH",
     str(Path(__file__).parent / "models" / "htp_yolo" / "sketch_base.pt"),

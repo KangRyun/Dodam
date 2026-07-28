@@ -11,6 +11,7 @@ import static org.mockito.Mockito.verify;
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
 import com.ssafy.b209.analysis.repository.AnalysisResultJdbcRepository;
@@ -47,6 +48,7 @@ class DrawingAnalysisPersistenceServiceTest {
   @Mock private DrawingAssetRepository drawingAssetRepository;
   @Mock private DrawingAnalysisRepository drawingAnalysisRepository;
   @Mock private AnalysisResultJdbcRepository analysisResultJdbcRepository;
+  @Mock private DrawingAnalysisActivityContextResolver activityContextResolver;
   @Mock private DrawingSession session;
   @Mock private DrawingAsset asset;
 
@@ -59,7 +61,8 @@ class DrawingAnalysisPersistenceServiceTest {
             drawingSessionRepository,
             drawingAssetRepository,
             drawingAnalysisRepository,
-            analysisResultJdbcRepository);
+            analysisResultJdbcRepository,
+            activityContextResolver);
   }
 
   @Test
@@ -200,6 +203,9 @@ class DrawingAnalysisPersistenceServiceTest {
     given(drawingSessionRepository.findNotDeletedByIdForUpdate(SESSION_ID))
         .willReturn(Optional.of(session));
     given(session.isAnalysisRequestable()).willReturn(true);
+    given(activityContextResolver.resolve(session))
+        .willReturn(
+            new DrawingAnalysisActivityContext(DrawingAnalysisActivityType.ART_DIARY, null));
     given(drawingAssetRepository.findById(ASSET_ID)).willReturn(Optional.empty());
 
     assertError(
@@ -330,6 +336,9 @@ class DrawingAnalysisPersistenceServiceTest {
         .willReturn(Optional.of(session));
     given(session.getId()).willReturn(SESSION_ID);
     given(session.isAnalysisRequestable()).willReturn(true);
+    given(activityContextResolver.resolve(session))
+        .willReturn(
+            new DrawingAnalysisActivityContext(DrawingAnalysisActivityType.ART_DIARY, null));
     given(drawingAssetRepository.findById(ASSET_ID)).willReturn(Optional.of(asset));
     given(asset.getDrawingSession()).willReturn(session);
     given(asset.getAssetType()).willReturn(DrawingAssetType.FINAL);

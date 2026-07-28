@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisClientCommand;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisSubject;
 import com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse;
 import jakarta.validation.Validation;
 import org.junit.jupiter.api.Test;
@@ -50,7 +52,18 @@ class MockDrawingAnalysisClientTest {
   void rejectsInvalidCommand() {
     DrawingAnalysisClientCommand invalid =
         new DrawingAnalysisClientCommand(
-            " ", null, 0L, 0L, null, "C:/private/image.png", "image/gif", null, null, null);
+            " ",
+            null,
+            0L,
+            0L,
+            null,
+            DrawingAnalysisActivityType.HTP,
+            null,
+            "C:/private/image.png",
+            "image/gif",
+            null,
+            null,
+            null);
 
     assertThatThrownBy(() -> client.analyze(invalid))
         .isInstanceOfSatisfying(
@@ -67,6 +80,8 @@ class MockDrawingAnalysisClientTest {
         100L,
         200L,
         DrawingAnalysisScope.FINAL,
+        DrawingAnalysisActivityType.HTP,
+        DrawingAnalysisSubject.HOUSE,
         "drawings/example.png",
         "image/png",
         null,

@@ -1,7 +1,10 @@
 package com.ssafy.b209.infrastructure.ai.drawing.contract;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisSubject;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
@@ -15,6 +18,8 @@ import java.util.List;
  *
  * @param analysisId Spring Boot가 먼저 생성한 분석 식별자
  * @param drawingSessionId 분석 대상 그림 활동 세션 식별자
+ * @param activityType 분석 모델을 선택하는 활동 유형
+ * @param drawingSubject HTP 단계 주제이며 그림일기는 {@code null}
  * @param analysisType 중간 또는 최종 분석 범위
  * @param triggerReason 분석 실행 사유
  * @param childContext 개인정보를 제외한 아동 분석 맥락
@@ -28,6 +33,8 @@ import java.util.List;
 public record AiDrawingAnalysisRequest(
     @NotNull @Positive Long analysisId,
     @NotNull @Positive Long drawingSessionId,
+    @NotNull DrawingAnalysisActivityType activityType,
+    DrawingAnalysisSubject drawingSubject,
     @NotNull AnalysisType analysisType,
     TriggerReason triggerReason,
     @Valid ChildContext childContext,
@@ -42,14 +49,44 @@ public record AiDrawingAnalysisRequest(
    *
    * @param analysisId 분석 식별자
    * @param drawingSessionId 그림 활동 세션 식별자
+   * @param activityType 분석 모델을 선택하는 활동 유형
+   * @param drawingSubject HTP 단계 주제이며 그림일기는 {@code null}
    * @param analysisType 분석 범위
    * @param drawing 그림 접근 정보
    * @return 선택 입력을 포함하지 않는 분석 요청
    */
   public static AiDrawingAnalysisRequest minimum(
-      Long analysisId, Long drawingSessionId, AnalysisType analysisType, DrawingInput drawing) {
+      Long analysisId,
+      Long drawingSessionId,
+      DrawingAnalysisActivityType activityType,
+      DrawingAnalysisSubject drawingSubject,
+      AnalysisType analysisType,
+      DrawingInput drawing) {
     return new AiDrawingAnalysisRequest(
-        analysisId, drawingSessionId, analysisType, null, null, drawing, null, null, null, null);
+        analysisId,
+        drawingSessionId,
+        activityType,
+        drawingSubject,
+        analysisType,
+        null,
+        null,
+        drawing,
+        null,
+        null,
+        null,
+        null);
+  }
+
+  /**
+   * 활동 유형과 HTP 주제 조합이 AI 계약과 일치하는지 확인한다.
+   *
+   * @return HTP에는 주제가 있고 그림일기에는 주제가 없으면 {@code true}
+   */
+  @AssertTrue(message = "activityType and drawingSubject must match")
+  public boolean isActivityContextValid() {
+    return activityType == DrawingAnalysisActivityType.HTP
+        ? drawingSubject != null
+        : drawingSubject == null;
   }
 
   /** AI가 수행할 분석 범위다. */

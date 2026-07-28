@@ -111,6 +111,8 @@ public final class RestClientDrawingAnalysisClient implements DrawingAnalysisCli
         AiDrawingAnalysisRequest.minimum(
             command.analysisId(),
             command.drawingSessionId(),
+            command.activityType(),
+            command.drawingSubject(),
             analysisType,
             new AiDrawingAnalysisRequest.DrawingInput(
                 command.drawingAssetId(),
