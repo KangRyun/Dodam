@@ -153,32 +153,43 @@ final class DrawingSessionDto {
     this.conversationId,
     this.reportId,
   });
-  factory DrawingSessionDto.fromJson(Map<String, dynamic> json) =>
-      DrawingSessionDto(
-        drawingSessionId: json['drawingSessionId'] as int,
-        childId: json['childId'] as int,
-        drawingType: DrawingTypeSummaryDto.fromJson(_map(json['drawingType'])),
-        inputMethod: json['inputMethod'] as String,
-        title: json['title'] as String?,
-        sessionStatus: json['sessionStatus'] as String,
-        currentStage: json['currentStage'] as String,
-        selectedEmotions: (json['selectedEmotions'] as List?)?.cast<String>(),
-        expressedEmotionText: json['expressedEmotionText'] as String?,
-        startedAt: json['startedAt'] as String,
-        completedAt: json['completedAt'] as String?,
-        conversation: json['conversation'] == null
-            ? null
-            : _map(json['conversation']),
-        latestAnalysis: json['latestAnalysis'] == null
-            ? null
-            : _map(json['latestAnalysis']),
-        conversationId: json['conversationId'] as int?,
-        reportId: json['reportId'] as int?,
-        assets: (json['assets'] as List? ?? const [])
-            .map((item) => DrawingAssetDto.fromJson(_map(item)))
-            .toList(growable: false),
-        guideText: json['guideText'] as String?,
+  factory DrawingSessionDto.fromCreateJson(Map<String, dynamic> json) =>
+      DrawingSessionDto._fromJson(json, childId: json['childId'] as int);
+
+  factory DrawingSessionDto.fromDetailJson(Map<String, dynamic> json) =>
+      DrawingSessionDto._fromJson(
+        json,
+        childId: _map(json['child'])['childId'] as int,
       );
+
+  static DrawingSessionDto _fromJson(
+    Map<String, dynamic> json, {
+    required int childId,
+  }) => DrawingSessionDto(
+    drawingSessionId: json['drawingSessionId'] as int,
+    childId: childId,
+    drawingType: DrawingTypeSummaryDto.fromJson(_map(json['drawingType'])),
+    inputMethod: json['inputMethod'] as String,
+    title: json['title'] as String?,
+    sessionStatus: json['sessionStatus'] as String,
+    currentStage: json['currentStage'] as String,
+    selectedEmotions: (json['selectedEmotions'] as List?)?.cast<String>(),
+    expressedEmotionText: json['expressedEmotionText'] as String?,
+    startedAt: json['startedAt'] as String,
+    completedAt: json['completedAt'] as String?,
+    conversation: json['conversation'] == null
+        ? null
+        : _map(json['conversation']),
+    latestAnalysis: json['latestAnalysis'] == null
+        ? null
+        : _map(json['latestAnalysis']),
+    conversationId: json['conversationId'] as int?,
+    reportId: json['reportId'] as int?,
+    assets: (json['assets'] as List? ?? const [])
+        .map((item) => DrawingAssetDto.fromJson(_map(item)))
+        .toList(growable: false),
+    guideText: json['guideText'] as String?,
+  );
   final int drawingSessionId, childId;
   final DrawingTypeSummaryDto drawingType;
   final String inputMethod, sessionStatus, currentStage, startedAt;

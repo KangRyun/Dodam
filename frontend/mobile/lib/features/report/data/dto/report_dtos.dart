@@ -5,12 +5,21 @@ Map<String, dynamic> _map(Object? value) =>
     Map<String, dynamic>.from(value! as Map);
 
 final class ReportFilterDto {
-  const ReportFilterDto({this.from, this.to, this.page = 0, this.size = 20});
-  final String? from, to;
+  const ReportFilterDto({
+    this.from,
+    this.to,
+    this.drawingTypeCode,
+    this.reportStatus,
+    this.page = 0,
+    this.size = 20,
+  });
+  final String? from, to, drawingTypeCode, reportStatus;
   final int page, size;
   Map<String, dynamic> toQueryParameters() => {
     if (from != null) 'from': from,
     if (to != null) 'to': to,
+    if (drawingTypeCode != null) 'drawingTypeCode': drawingTypeCode,
+    if (reportStatus != null) 'reportStatus': reportStatus,
     'page': page,
     'size': size,
   };
@@ -23,33 +32,40 @@ final class ReportSummaryDto {
     required this.reportVersion,
     required this.reportStatus,
     required this.title,
-    required this.drawingType,
-    required this.inputMethod,
+    required this.drawingTypeId,
+    required this.drawingTypeCode,
+    required this.drawingTypeName,
     required this.selectedEmotions,
     required this.thumbnailUrl,
-    required this.isExpertReviewRecommended,
-    required this.createdAt,
+    required this.activityDate,
+    required this.durationMs,
+    required this.expertReviewAvailable,
   });
-  factory ReportSummaryDto.fromJson(Map<String, dynamic> json) =>
-      ReportSummaryDto(
-        reportId: json['reportId'] as int,
-        drawingSessionId: json['drawingSessionId'] as int,
-        reportVersion: json['reportVersion'] as int,
-        reportStatus: json['reportStatus'] as String,
-        title: json['title'] as String?,
-        drawingType: _map(json['drawingType']),
-        inputMethod: json['inputMethod'] as String,
-        selectedEmotions: List<String>.from(json['selectedEmotions'] as List),
-        thumbnailUrl: json['thumbnailUrl'] as String?,
-        isExpertReviewRecommended: json['isExpertReviewRecommended'] as bool,
-        createdAt: json['createdAt'] as String,
-      );
+  factory ReportSummaryDto.fromJson(Map<String, dynamic> json) {
+    final drawingType = _map(json['drawingType']);
+    return ReportSummaryDto(
+      reportId: json['reportId'] as int,
+      drawingSessionId: json['drawingSessionId'] as int,
+      reportVersion: json['reportVersion'] as int,
+      reportStatus: json['reportStatus'] as String,
+      title: json['title'] as String?,
+      drawingTypeId: (drawingType['drawingTypeId'] as num?)?.toInt(),
+      drawingTypeCode: drawingType['code'] as String,
+      drawingTypeName: drawingType['name'] as String,
+      selectedEmotions: List<String>.from(json['selectedEmotions'] as List),
+      thumbnailUrl: json['thumbnailUrl'] as String?,
+      activityDate: DateTime.tryParse(json['activityDate'] as String? ?? ''),
+      durationMs: (json['durationMs'] as num?)?.toInt(),
+      expertReviewAvailable: json['expertReviewAvailable'] as bool? ?? false,
+    );
+  }
   final int reportId, drawingSessionId, reportVersion;
-  final String reportStatus, inputMethod, createdAt;
+  final int? drawingTypeId, durationMs;
+  final String reportStatus, drawingTypeCode, drawingTypeName;
   final String? title, thumbnailUrl;
-  final Map<String, dynamic> drawingType;
+  final DateTime? activityDate;
   final List<String> selectedEmotions;
-  final bool isExpertReviewRecommended;
+  final bool expertReviewAvailable;
 }
 
 List<String> _stringList(Object? value) => value is List

@@ -1,6 +1,7 @@
 package com.ssafy.b209.drawing.htp.repository;
 
 import com.ssafy.b209.drawing.htp.domain.HtpAssessment;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
 import jakarta.persistence.LockModeType;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -10,6 +11,18 @@ import org.springframework.data.repository.query.Param;
 
 /** HTP 묶음과 단계·그림 세션 연결을 함께 조회하는 저장소다. */
 public interface HtpAssessmentRepository extends JpaRepository<HtpAssessment, Long> {
+
+  /**
+   * 그림 세션에 연결된 HTP 단계를 조회한다.
+   *
+   * @param drawingSessionId 그림 세션 식별자
+   * @return 연결된 단계, 일반 활동 세션이거나 잘못된 연결이면 빈 값
+   */
+  @Query(
+      "select step from HtpAssessmentStep step "
+          + "where step.drawingSession.id = :drawingSessionId")
+  Optional<HtpAssessmentStep> findStepByDrawingSessionId(
+      @Param("drawingSessionId") Long drawingSessionId);
 
   /**
    * 시작 요청의 멱등 키로 기존 HTP 활동을 조회한다.

@@ -3,6 +3,8 @@ package com.ssafy.b209.infrastructure.ai.drawing;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisSubject;
 import com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisRequest;
 import com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse;
 import jakarta.validation.Validation;
@@ -21,6 +23,8 @@ class AiDrawingAnalysisContractTest {
         AiDrawingAnalysisRequest.minimum(
             701L,
             100L,
+            DrawingAnalysisActivityType.HTP,
+            DrawingAnalysisSubject.HOUSE,
             AiDrawingAnalysisRequest.AnalysisType.FINAL,
             new AiDrawingAnalysisRequest.DrawingInput(
                 200L, "https://signed.example/drawing", "image/png", 1200, 800, "a".repeat(64)));
@@ -30,6 +34,8 @@ class AiDrawingAnalysisContractTest {
     assertThat(json)
         .contains("\"analysisId\":701")
         .contains("\"drawingSessionId\":100")
+        .contains("\"activityType\":\"HTP\"")
+        .contains("\"drawingSubject\":\"HOUSE\"")
         .contains("\"analysisType\":\"FINAL\"")
         .contains("\"signedUrl\":\"https://signed.example/drawing\"")
         .doesNotContain("requestId", "storageKey");

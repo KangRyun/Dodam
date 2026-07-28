@@ -1,0 +1,238 @@
+import 'package:dodam/app/app.dart';
+import 'package:dodam/app/state/guardian_child_controller.dart';
+import 'package:dodam/core/network/api_page.dart';
+import 'package:dodam/features/child/data/dto/child_dtos.dart';
+import 'package:dodam/features/child/domain/repositories/child_repository.dart';
+import 'package:dodam/features/report/data/dto/report_dtos.dart';
+import 'package:dodam/features/report/domain/repositories/report_repository.dart';
+import 'package:dodam/features/report/presentation/screens/report_list_screen.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  testWidgets('보호자 홈의 최신 리포트와 전체 목록을 연결한다', (tester) async {
+    final repository = _ReportRepository();
+    await tester.pumpWidget(
+      DodamApp(
+        childRepository: const _ChildRepository(),
+        reportRepository: repository,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('child-3')));
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('guardian-latest-report-501')),
+      findsOneWidget,
+    );
+
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('guardian-report-all')),
+    );
+    await tester.tap(find.byKey(const ValueKey('guardian-report-all')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('report-list')), findsOneWidget);
+  });
+
+  testWidgets('완료·생성 중·실패 리포트를 상태별로 표시한다', (tester) async {
+    final controller = GuardianChildController(const _ChildRepository());
+    await controller.loadChildren();
+    controller.selectChild(controller.children.single);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReportListScreen(
+          childController: controller,
+          repository: _ReportRepository(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('report-list')), findsOneWidget);
+    expect(find.byKey(const ValueKey('report-card-501')), findsOneWidget);
+    expect(find.text('리포트 완료'), findsOneWidget);
+    expect(find.text('분석 중'), findsOneWidget);
+    expect(find.text('다시 확인 필요'), findsOneWidget);
+  });
+
+  testWidgets('목록 조회 실패 후 다시 시도할 수 있다', (tester) async {
+    final controller = GuardianChildController(const _ChildRepository());
+    await controller.loadChildren();
+    controller.selectChild(controller.children.single);
+    final repository = _ReportRepository(error: StateError('network'));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReportListScreen(
+          childController: controller,
+          repository: repository,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('report-list-error')), findsOneWidget);
+
+    repository.error = null;
+    await tester.tap(find.text('다시 시도'));
+    await tester.pumpAndSettle();
+
+    expect(repository.calls, 2);
+    expect(find.byKey(const ValueKey('report-list')), findsOneWidget);
+  });
+
+  test('REPORT-01 최신 목록 계약을 파싱한다', () {
+    final report = ReportSummaryDto.fromJson(const {
+      'reportId': 501,
+      'reportVersion': 2,
+      'drawingSessionId': 120,
+      'drawingType': {'drawingTypeId': 7, 'code': 'ART_DIARY', 'name': '그림 일기'},
+      'title': '오늘의 그림',
+      'thumbnailUrl': '/api/v1/drawing-assets/30/file',
+      'activityDate': '2026-07-22',
+      'durationMs': 300000,
+      'selectedEmotions': ['HAPPY'],
+      'reportStatus': 'COMPLETED',
+      'expertReviewAvailable': false,
+    });
+
+    expect(report.drawingTypeCode, 'ART_DIARY');
+    expect(report.activityDate, DateTime(2026, 7, 22));
+    expect(report.durationMs, 300000);
+    expect(report.expertReviewAvailable, isFalse);
+  });
+}
+
+final class _ReportRepository implements ReportRepository {
+  _ReportRepository({this.error});
+
+  Object? error;
+  int calls = 0;
+
+  @override
+  Future<ApiPage<ReportSummaryDto>> getReports(
+    int childId, {
+    ReportFilterDto filter = const ReportFilterDto(),
+  }) async {
+    calls += 1;
+    if (error case final error?) throw error;
+    return ApiPage(
+      content: const [
+        ReportSummaryDto(
+          reportId: 501,
+          drawingSessionId: 120,
+          reportVersion: 1,
+          reportStatus: 'COMPLETED',
+          title: '우리 가족',
+          drawingTypeId: 7,
+          drawingTypeCode: 'ART_DIARY',
+          drawingTypeName: '그림 일기',
+          selectedEmotions: ['HAPPY'],
+          thumbnailUrl: null,
+          activityDate: null,
+          durationMs: 300000,
+          expertReviewAvailable: false,
+        ),
+        ReportSummaryDto(
+          reportId: 502,
+          drawingSessionId: 121,
+          reportVersion: 1,
+          reportStatus: 'GENERATING',
+          title: '나무 그림',
+          drawingTypeId: 8,
+          drawingTypeCode: 'HTP_TREE',
+          drawingTypeName: 'HTP 검사',
+          selectedEmotions: [],
+          thumbnailUrl: null,
+          activityDate: null,
+          durationMs: null,
+          expertReviewAvailable: false,
+        ),
+        ReportSummaryDto(
+          reportId: 503,
+          drawingSessionId: 122,
+          reportVersion: 1,
+          reportStatus: 'FAILED',
+          title: '집 그림',
+          drawingTypeId: 9,
+          drawingTypeCode: 'HTP_HOUSE',
+          drawingTypeName: 'HTP 검사',
+          selectedEmotions: [],
+          thumbnailUrl: null,
+          activityDate: null,
+          durationMs: null,
+          expertReviewAvailable: false,
+        ),
+      ],
+      page: 0,
+      size: 20,
+      totalElements: 3,
+      totalPages: 1,
+      hasNext: false,
+    );
+  }
+
+  @override
+  Future<ReportDetailDto> getReport(int reportId) => throw UnimplementedError();
+
+  @override
+  Future<AnalysisStatusDto> getAnalysisStatus(int analysisId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<AnalysisRetryResponseDto> retryAnalysis(
+    int analysisId, {
+    required String idempotencyKey,
+  }) => throw UnimplementedError();
+}
+
+final class _ChildRepository implements ChildRepository {
+  const _ChildRepository();
+
+  @override
+  Future<List<ChildSummaryDto>> getChildren() async => const [_child];
+
+  @override
+  Future<ChildDetailDto> createChild(CreateChildRequestDto request) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> deleteChild(int childId, {bool cascade = true}) =>
+      throw UnimplementedError();
+
+  @override
+  Future<ChildDetailDto> getChild(int childId) => throw UnimplementedError();
+
+  @override
+  Future<TutorialProgressDto> getTutorialProgress(int childId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<ChildDetailDto> updateChild(
+    int childId,
+    UpdateChildRequestDto request,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<TutorialProgressDto> updateTutorialProgress(
+    int childId,
+    UpdateTutorialRequestDto request,
+  ) => throw UnimplementedError();
+}
+
+const _child = ChildSummaryDto(
+  childId: 3,
+  nickname: '도담이',
+  birthDate: '2020-01-01',
+  age: 6,
+  profileImageUrl: null,
+  preferredCharacter: null,
+  questionDifficulty: 'EASY',
+  tutorialStatus: 'COMPLETED',
+  relationshipType: 'PARENT',
+  recentActivity: ChildRecentActivityDto(
+    lastActivityAt: '2026-07-22T04:00:00Z',
+    totalActivityCount: 3,
+  ),
+);

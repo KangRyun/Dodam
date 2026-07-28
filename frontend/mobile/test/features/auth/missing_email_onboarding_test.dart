@@ -8,20 +8,26 @@ void main() {
   group('MissingEmailOnboardingFlow', () {
     const flow = MissingEmailOnboardingFlow();
 
-    test('이메일이 없으면 추가 입력 단계로 이동한다', () {
+    test('백엔드가 이메일 추가 입력을 요구하면 입력 단계로 이동한다', () {
       expect(
-        flow.resolve(_user(email: null)),
+        flow.resolve(_user(email: null, emailRequired: true)),
         MissingEmailOnboardingStep.emailInput,
       );
       expect(
-        flow.resolve(_user(email: '   ')),
+        flow.resolve(_user(email: 'provider@email.test', emailRequired: true)),
         MissingEmailOnboardingStep.emailInput,
       );
     });
 
-    test('이메일이 있으면 추가 입력 단계를 건너뛴다', () {
+    test('백엔드가 이메일 추가 입력을 요구하지 않으면 입력 단계를 건너뛴다', () {
       expect(
-        flow.resolve(_user(email: 'guardian@example.com')),
+        flow.resolve(
+          _user(email: 'guardian@example.com', emailRequired: false),
+        ),
+        MissingEmailOnboardingStep.next,
+      );
+      expect(
+        flow.resolve(_user(email: null, emailRequired: false)),
         MissingEmailOnboardingStep.next,
       );
     });
@@ -120,11 +126,15 @@ Future<void> _tapNext(WidgetTester tester) async {
   );
 }
 
-AuthenticatedUser _user({required String? email}) => AuthenticatedUser(
+AuthenticatedUser _user({
+  required String? email,
+  required bool emailRequired,
+}) => AuthenticatedUser(
   id: 'user-1',
   provider: AuthProvider.naver,
   providerUserId: 'naver-user-1',
   role: UserRole.guardian,
   onboardingCompleted: false,
+  emailRequired: emailRequired,
   email: email,
 );

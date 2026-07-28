@@ -38,6 +38,7 @@ public class DrawingAnalysisPersistenceService {
   private final DrawingAssetRepository drawingAssetRepository;
   private final DrawingAnalysisRepository drawingAnalysisRepository;
   private final AnalysisResultJdbcRepository analysisResultJdbcRepository;
+  private final DrawingAnalysisActivityContextResolver activityContextResolver;
 
   /**
    * 분석 저장에 필요한 Repository를 주입받는다.
@@ -46,16 +47,19 @@ public class DrawingAnalysisPersistenceService {
    * @param drawingAssetRepository 분석 대상 그림 파일 저장소
    * @param drawingAnalysisRepository 분석 실행 저장소
    * @param analysisResultJdbcRepository 정규화된 종합 분석 보조 결과 저장소
+   * @param activityContextResolver 저장된 세션과 HTP 단계에서 AI 활동 맥락을 확정하는 Resolver
    */
   public DrawingAnalysisPersistenceService(
       DrawingSessionRepository drawingSessionRepository,
       DrawingAssetRepository drawingAssetRepository,
       DrawingAnalysisRepository drawingAnalysisRepository,
-      AnalysisResultJdbcRepository analysisResultJdbcRepository) {
+      AnalysisResultJdbcRepository analysisResultJdbcRepository,
+      DrawingAnalysisActivityContextResolver activityContextResolver) {
     this.drawingSessionRepository = drawingSessionRepository;
     this.drawingAssetRepository = drawingAssetRepository;
     this.drawingAnalysisRepository = drawingAnalysisRepository;
     this.analysisResultJdbcRepository = analysisResultJdbcRepository;
+    this.activityContextResolver = activityContextResolver;
   }
 
   /**
@@ -114,6 +118,7 @@ public class DrawingAnalysisPersistenceService {
     if (!session.isAnalysisRequestable()) {
       throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
     }
+    DrawingAnalysisActivityContext activityContext = activityContextResolver.resolve(session);
 
     DrawingAsset asset =
         drawingAssetRepository
@@ -143,6 +148,8 @@ public class DrawingAnalysisPersistenceService {
           asset.getId() == null ? drawingAssetId : asset.getId(),
           requestId,
           scope,
+          activityContext.activityType(),
+          activityContext.drawingSubject(),
           asset.getStorageKey(),
           asset.getMimeType(),
           asset.getWidthPx(),
@@ -223,6 +230,7 @@ public class DrawingAnalysisPersistenceService {
         drawingSessionRepository
             .findNotDeletedByIdForUpdate(source.getDrawingSession().getId())
             .orElseThrow(() -> new BusinessException(DrawingErrorCode.DRAWING_SESSION_NOT_FOUND));
+    DrawingAnalysisActivityContext activityContext = activityContextResolver.resolve(session);
     DrawingAsset asset =
         useLatestInputs
             ? drawingAssetRepository
@@ -244,6 +252,8 @@ public class DrawingAnalysisPersistenceService {
           asset.getId(),
           requestId,
           source.getScope(),
+          activityContext.activityType(),
+          activityContext.drawingSubject(),
           asset.getStorageKey(),
           asset.getMimeType(),
           asset.getWidthPx(),

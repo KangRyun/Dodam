@@ -11,12 +11,12 @@ final class MockReportRepository implements ReportRepository {
     'reportVersion': 1,
     'reportStatus': 'COMPLETED',
     'title': '우리 가족',
-    'drawingType': {'code': 'ART_DIARY', 'name': '그림일기'},
-    'inputMethod': 'CANVAS',
+    'drawingType': {'drawingTypeId': 7, 'code': 'ART_DIARY', 'name': '그림일기'},
     'selectedEmotions': ['JOY', 'UNSURE'],
     'thumbnailUrl': 'https://storage.i15b209.example/previews/ds120-v1.png',
-    'isExpertReviewRecommended': false,
-    'createdAt': '2026-07-20T10:12:00Z',
+    'activityDate': '2026-07-20',
+    'durationMs': 1380000,
+    'expertReviewAvailable': false,
   };
 
   /// REPORT-02 보호자 공개 계약(§13.4)과 같은 모양의 개발용 표본.

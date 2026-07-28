@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:dodam/app/router/app_routes.dart';
 import 'package:dodam/core/config/api_environment.dart';
 import 'package:dodam/core/network/api_client.dart';
+import 'package:dodam/core/network/api_error.dart';
+import 'package:dodam/core/network/api_failure.dart';
 import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
 import 'package:dodam/features/conversation/conversation.dart';
@@ -191,16 +193,25 @@ void main() {
   });
 
   testWidgets('완료 성공 시 감정 선택 화면으로 이동한다', (tester) async {
-    await _pumpDrawing(tester, repository: const MockDrawingRepository());
-    await _drawStroke(tester);
+    final logs = await _captureDebugPrint(() async {
+      await _pumpDrawing(tester, repository: const MockDrawingRepository());
+      await _drawStroke(tester);
 
-    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('다 그렸어요'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('다 그렸어요'));
+      await tester.pumpAndSettle();
+    });
 
     expect(find.text('내 마음 고르기'), findsOneWidget);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
+    expect(
+      logs,
+      contains(
+        '[DRAWING_COMPLETE] success '
+        'currentStage=CONVERSING nextAction=SELECT_EMOTION',
+      ),
+    );
   });
 
   testWidgets('생성된 대화를 종료하기 전에는 감정 선택 화면으로 이동하지 않는다', (tester) async {
@@ -224,6 +235,38 @@ void main() {
     expect(repository.completeCalls, 0);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
     expect(find.text('대화를 먼저 마친 뒤 그림 활동을 완료해 주세요.'), findsOneWidget);
+  });
+
+  testWidgets('그림 단계 완료 후 대화를 열고 회고로 바로 넘어가지 않는다', (tester) async {
+    final repository = _CompletionRepository();
+    await _pumpDrawing(
+      tester,
+      repository: repository,
+      conversationRepository: const MockConversationRepository(
+        delay: Duration.zero,
+      ),
+    );
+    await _drawStroke(tester);
+
+    await tester.ensureVisible(find.byKey(const ValueKey('drawing-complete')));
+    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다 그렸어요'));
+    // 대화가 열리면 질문 노출 타이머가 계속 돌아 pumpAndSettle이 끝나지 않는다.
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(repository.completeCalls, 1);
+    // 대화 단계에 머무르므로 회고 화면으로 넘어가지 않는다.
+    expect(find.text('내 마음 고르기'), findsNothing);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+    // 그림 단계는 끝났으므로 완료 요청이 다시 나가지 않는다.
+    await tester.tap(
+      find.byKey(const ValueKey('drawing-complete')),
+      warnIfMissed: false,
+    );
+    await tester.pump();
+    expect(repository.completeCalls, 1);
   });
 
   testWidgets('0ms 완료도 Backend 최소 duration인 1ms를 전송한다', (tester) async {
@@ -286,55 +329,167 @@ void main() {
     final repository = _CompletionRepository(
       completionResponse: _unexpectedStageResponse,
     );
-    await _pumpDrawing(tester, repository: repository);
-    await _drawStroke(tester);
+    final logs = await _captureDebugPrint(() async {
+      await _pumpDrawing(tester, repository: repository);
+      await _drawStroke(tester);
 
-    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('다 그렸어요'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('다 그렸어요'));
+      await tester.pumpAndSettle();
+    });
 
     expect(repository.completeCalls, 1);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
     expect(find.textContaining('그림은 그대로'), findsOneWidget);
     expect(find.text('내 마음 고르기'), findsNothing);
+    expect(
+      logs.singleWhere((line) => line.contains('contract_mismatch')),
+      allOf(
+        contains('currentStage=ANALYZING'),
+        contains('nextAction=SELECT_EMOTION'),
+        contains('exceptionType=StateError'),
+      ),
+    );
   });
 
-  testWidgets('완료 응답 nextAction이 다르면 Canvas를 유지하고 이동하지 않는다', (tester) async {
+  // 명세 §10.8은 nextAction으로 감정 선택을 가리키지만 정본 활동 흐름 §23.1은 대화
+  // 뒤에 회고를 둔다. 그래서 다음 화면은 nextAction이 아니라 currentStage로 정한다.
+  testWidgets('완료 응답 nextAction이 달라도 stage가 CONVERSING이면 다음 단계로 넘어간다', (
+    tester,
+  ) async {
     final repository = _CompletionRepository(
       completionResponse: _unexpectedNextActionResponse,
     );
-    await _pumpDrawing(tester, repository: repository);
-    await _drawStroke(tester);
+    final logs = await _captureDebugPrint(() async {
+      await _pumpDrawing(tester, repository: repository);
+      await _drawStroke(tester);
 
-    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('다 그렸어요'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('다 그렸어요'));
+      await tester.pumpAndSettle();
+    });
 
     expect(repository.completeCalls, 1);
-    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
-    expect(find.textContaining('그림은 그대로'), findsOneWidget);
-    expect(find.text('내 마음 고르기'), findsNothing);
+    expect(find.textContaining('그림은 그대로'), findsNothing);
+    // 대화 저장소가 없는 구성이므로 대화를 열지 못하고 회고 화면으로 넘어간다.
+    expect(find.text('내 마음 고르기'), findsOneWidget);
+    expect(
+      logs,
+      contains(
+        '[DRAWING_COMPLETE] success currentStage=CONVERSING '
+        'nextAction=POLL_ANALYSIS',
+      ),
+    );
   });
 
   testWidgets('완료 실패 시 Canvas와 Stroke를 유지하고 이동하지 않는다', (tester) async {
-    await _pumpDrawing(
-      tester,
-      repository: const MockDrawingRepository(
-        completionScenario: MockCompletionScenario.failure,
-      ),
-    );
-    await _drawStroke(tester);
+    final logs = await _captureDebugPrint(() async {
+      await _pumpDrawing(
+        tester,
+        repository: const MockDrawingRepository(
+          completionScenario: MockCompletionScenario.failure,
+        ),
+      );
+      await _drawStroke(tester);
 
-    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('다 그렸어요'));
-    await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('다 그렸어요'));
+      await tester.pumpAndSettle();
+    });
 
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
     expect(find.textContaining('그림은 그대로'), findsOneWidget);
     expect(find.text('내 마음 고르기'), findsNothing);
+    expect(
+      logs.singleWhere((line) => line.contains('request_transport_failure')),
+      allOf(
+        contains('transportType=connection'),
+        contains('exceptionType=ApiTransportFailure'),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Canvas PNG가 null이면 캡처 실패를 구분하고 완료 예외를 삼킨다', (tester) async {
+    final logs = await _captureDebugPrint(() async {
+      await _pumpDrawing(
+        tester,
+        repository: const MockDrawingRepository(),
+        completionSnapshotProvider: () async => null,
+      );
+      await _drawStroke(tester);
+
+      await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('다 그렸어요'));
+      await tester.pumpAndSettle();
+    });
+
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+    expect(find.textContaining('그림은 그대로'), findsOneWidget);
+    expect(
+      logs.singleWhere((line) => line.contains('canvas_capture_failure')),
+      allOf(contains('kind=null'), contains('exceptionType=StateError')),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('HTTP 실패는 status와 Backend 오류 계약만 안전하게 기록한다', (tester) async {
+    final repository = _CompletionRepository(
+      completionError: const ApiResponseFailure(
+        statusCode: 409,
+        error: ApiError(
+          code: 'DRAWING_409_001',
+          message: '현재 단계에서는 그림을 완료할 수 없습니다.',
+        ),
+      ),
+    );
+    final logs = await _captureDebugPrint(() async {
+      await _pumpDrawing(tester, repository: repository);
+      await _drawStroke(tester);
+
+      await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('다 그렸어요'));
+      await tester.pumpAndSettle();
+    });
+
+    expect(
+      logs.singleWhere((line) => line.contains('http_failure')),
+      allOf(
+        contains('status=409'),
+        contains('code=DRAWING_409_001'),
+        contains('message=현재 단계에서는 그림을 완료할 수 없습니다.'),
+        contains('exceptionType=ApiResponseFailure'),
+      ),
+    );
+    expect(find.textContaining('그림은 그대로'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('성공 응답 DTO 파싱 예외는 요청 전송 실패와 구분한다', (tester) async {
+    final repository = _CompletionRepository(
+      completionError: const FormatException('invalid response fixture'),
+    );
+    final logs = await _captureDebugPrint(() async {
+      await _pumpDrawing(tester, repository: repository);
+      await _drawStroke(tester);
+
+      await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('다 그렸어요'));
+      await tester.pumpAndSettle();
+    });
+
+    expect(
+      logs.singleWhere((line) => line.contains('response_parse_failure')),
+      contains('exceptionType=FormatException'),
+    );
+    expect(find.textContaining('그림은 그대로'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('sessionId가 없으면 완료 API를 호출하지 않는다', (tester) async {
@@ -490,6 +645,48 @@ void main() {
     expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
     expect(find.text('이제 보호자에게 기기를 건네주세요.'), findsOneWidget);
     expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
+  });
+
+  testWidgets('다 했어요는 상세 조회 후 End, Reflection, Complete를 순서대로 호출한다', (
+    tester,
+  ) async {
+    final calls = <String>[];
+    final repository = _CompletionRepository(
+      calls: calls,
+      existingConversationId: 20,
+    );
+    final conversationEndRepository = _CompletionConversationEndRepository(
+      calls,
+    );
+    final keys = ['conversation-key', 'activity-key'].iterator;
+    final controller = DrawingActivityCompletionController(
+      drawingRepository: repository,
+      sessionId: 42,
+      conversationId: null,
+      conversationAlreadyEnded: false,
+      conversationEndRepository: conversationEndRepository,
+      idempotencyKeyProvider: () {
+        keys.moveNext();
+        return keys.current;
+      },
+    );
+    await _pumpEmotion(
+      tester,
+      repository: repository,
+      sessionId: 42,
+      activityCompletionController: controller,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('emotion-submit')));
+    await tester.pumpAndSettle();
+
+    expect(calls.take(4), ['detail', 'end', 'reflection', 'complete']);
+    expect(conversationEndRepository.conversationId, 20);
+    expect(repository.lastActivityRequest?.conversationSkipped, isFalse);
+    expect(repository.lastActivityRequest?.requestReport, isTrue);
+    expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
   });
 
   testWidgets('보호자 확인을 취소하면 아동 완료 안내 화면을 유지한다', (tester) async {
@@ -784,6 +981,7 @@ Future<void> _pumpDrawing(
   DrawingSyncCoordinator? syncCoordinator,
   int? conversationId,
   ConversationRepository? conversationRepository,
+  Future<BinaryUploadDto?> Function()? completionSnapshotProvider,
 }) async {
   tester.view.physicalSize = const Size(1200, 800);
   tester.view.devicePixelRatio = 1;
@@ -802,7 +1000,8 @@ Future<void> _pumpDrawing(
         syncCoordinator: syncCoordinator,
         conversationId: conversationId,
         conversationRepository: conversationRepository,
-        completionSnapshotProvider: () async => _png,
+        completionSnapshotProvider:
+            completionSnapshotProvider ?? () async => _png,
       ),
     ),
   );
@@ -811,6 +1010,20 @@ Future<void> _pumpDrawing(
     await tester.tap(find.byKey(const ValueKey('draft-start-new')));
     await tester.pump();
   }
+}
+
+Future<List<String>> _captureDebugPrint(Future<void> Function() action) async {
+  final logs = <String>[];
+  final originalDebugPrint = debugPrint;
+  debugPrint = (message, {wrapWidth}) {
+    if (message != null) logs.add(message);
+  };
+  try {
+    await action();
+  } finally {
+    debugPrint = originalDebugPrint;
+  }
+  return logs;
 }
 
 Future<void> _pumpEmotion(
@@ -956,6 +1169,8 @@ final class _CompletionRepository implements DrawingRepository {
     List<String> sessionStatuses = const ['COMPLETED'],
     List<Object> sessionFailures = const [],
     this.sessionCompleter,
+    this.calls,
+    this.existingConversationId,
   }) : _sessionStatuses = List.of(sessionStatuses),
        _sessionFailures = List.of(sessionFailures);
 
@@ -970,6 +1185,8 @@ final class _CompletionRepository implements DrawingRepository {
   Object? reflectionError;
   final Completer<void>? reflectionCompleter;
   final Completer<DrawingSessionDto>? sessionCompleter;
+  final List<String>? calls;
+  final int? existingConversationId;
   SaveDrawingReflectionRequestDto? lastReflection;
   int activityCompletionCalls = 0;
   CompleteActivityRequestDto? lastActivityRequest;
@@ -996,6 +1213,7 @@ final class _CompletionRepository implements DrawingRepository {
     int sessionId,
     SaveDrawingReflectionRequestDto request,
   ) async {
+    calls?.add('reflection');
     reflectionCalls += 1;
     lastReflection = request;
     if (reflectionError case final error?) throw error;
@@ -1008,6 +1226,7 @@ final class _CompletionRepository implements DrawingRepository {
     required CompleteActivityRequestDto request,
     required String idempotencyKey,
   }) async {
+    calls?.add('complete');
     activityCompleteCalls += 1;
     activityCompletionCalls += 1;
     lastActivityRequest = request;
@@ -1048,9 +1267,18 @@ final class _CompletionRepository implements DrawingRepository {
   Future<void> deleteDraft(int sessionId) => throw UnimplementedError();
   @override
   Future<DrawingSessionDto> getSession(int sessionId) async {
+    calls?.add('detail');
     sessionStatusCalls += 1;
     if (_sessionFailures.isNotEmpty) throw _sessionFailures.removeAt(0);
     if (sessionCompleter case final completer?) return completer.future;
+    if (sessionStatusCalls == 1 && existingConversationId != null) {
+      return _sessionDto(
+        sessionId: sessionId,
+        status: 'IN_PROGRESS',
+        currentStage: 'CONVERSING',
+        conversationId: existingConversationId,
+      );
+    }
     final status = _sessionStatuses.length > 1
         ? _sessionStatuses.removeAt(0)
         : _sessionStatuses.single;
@@ -1079,22 +1307,52 @@ final class _CompletionRepository implements DrawingRepository {
 DrawingSessionDto _sessionDto({
   required int sessionId,
   required String status,
-}) => DrawingSessionDto.fromJson({
+  String? currentStage,
+  int? conversationId,
+}) => DrawingSessionDto.fromDetailJson({
   'drawingSessionId': sessionId,
-  'childId': 3,
+  'child': {'childId': 3, 'nickname': '도담'},
   'drawingType': {'drawingTypeId': 1, 'code': 'HTP', 'name': '집-나무-사람'},
   'inputMethod': 'TOUCH',
   'title': null,
   'sessionStatus': status,
-  'currentStage': status == 'COMPLETED' ? 'COMPLETED' : 'REPORTING',
+  'currentStage':
+      currentStage ?? (status == 'COMPLETED' ? 'COMPLETED' : 'REPORTING'),
   'selectedEmotions': const <String>[],
   'expressedEmotionText': null,
   'startedAt': '2026-07-26T10:00:00Z',
   'completedAt': status == 'COMPLETED' ? '2026-07-26T10:10:00Z' : null,
   'conversation': null,
+  'conversationId': conversationId,
   'latestAnalysis': null,
   'assets': const <Map<String, dynamic>>[],
 });
+
+final class _CompletionConversationEndRepository
+    implements ConversationEndRepository {
+  _CompletionConversationEndRepository(this.calls);
+
+  final List<String> calls;
+  int? conversationId;
+
+  @override
+  Future<ConversationEndResult> endConversation({
+    required int conversationId,
+    required ConversationEndRequest request,
+    required String idempotencyKey,
+  }) async {
+    calls.add('end');
+    this.conversationId = conversationId;
+    return ConversationEndResult(
+      conversationId: conversationId,
+      conversationStatus: 'COMPLETED',
+      completed: true,
+      completionReason: request.reason.apiValue,
+      completedAt: '2026-07-28T10:00:00+09:00',
+      nextStage: 'REFLECTION',
+    );
+  }
+}
 
 final class _CompletionNavigationObserver extends NavigatorObserver {
   int activityCompleteReplacements = 0;

@@ -97,11 +97,25 @@ diff /tmp/local.txt /tmp/remote.txt && echo "일치"
 
 ### D~E. 스위치 + 백엔드만 재생성
 
+⚠️ **디스크 `.env` 만 고치면 다음 배포에서 원복된다.** 배포 정본은 **Jenkins Credential
+`dodam-env`** 이고, 파이프라인이 `docker compose --env-file <dodam-env>` 로 주입한다.
+디스크 `infra/.env` 는 수동 배포에서만 쓰이는 사본이다(`infra/.env.example` 머리말 참조).
+
+**반드시 둘 다 바꾼다:**
+
+1. **Jenkins Credential `dodam-env`** 의 `STORAGE_MODE=s3` — Jenkins UI 에서 수정
+2. 디스크 `infra/.env` — 수동 배포·즉시 반영용
+
 ```bash
 cp infra/.env infra/.env.bak-$(date +%Y%m%d-%H%M)
 sed -i 's/^STORAGE_MODE=local$/STORAGE_MODE=s3/' infra/.env
 cd infra && docker compose up -d backend
 ```
+
+> 2026-07-28: 디스크 `.env` 만 고치고 끝냈다가, 그날 develop 머지로 Jenkins 배포가 돌면서
+> `STORAGE_MODE=local` 로 되돌아갔다. 그 사이 저장된 파일 8개가 MinIO 가 아닌 로컬 볼륨에만
+> 쌓였고, 백업은 그 파일들을 담지 못했다. **컨테이너의 실제 환경변수로 확인할 것**:
+> `docker exec dodam-backend printenv | grep STORAGE_MODE`
 
 ### F. 검증
 

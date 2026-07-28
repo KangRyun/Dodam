@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -287,6 +287,8 @@ class ObservationGenerationResult(_CamelModel):
 #   unusedInputs/warnings로 '못 했음'을 명시한다.
 
 AnalysisType = Literal["INTERMEDIATE", "FINAL"]
+ActivityType = Literal["HTP", "ART_DIARY"]
+DrawingSubject = Literal["HOUSE", "TREE", "PERSON"]
 
 # §4 AnalysisTriggerReason 전체 값.
 TriggerReason = Literal[
@@ -380,6 +382,8 @@ class AnalysisRequest(_CamelModel):
 
     analysis_id: int
     drawing_session_id: int
+    activity_type: ActivityType
+    drawing_subject: DrawingSubject | None = None
     analysis_type: AnalysisType
     trigger_reason: TriggerReason | None = None
     child_context: ChildContext | None = None
@@ -388,6 +392,15 @@ class AnalysisRequest(_CamelModel):
     conversation: ConversationInput | None = None
     reflection: ReflectionInput | None = None
     rag: RagInput | None = None
+
+    @model_validator(mode="after")
+    def validate_activity_context(self) -> "AnalysisRequest":
+        """HTP 주제 유무가 활동 유형과 일치하는지 검증한다."""
+        if self.activity_type == "HTP" and self.drawing_subject is None:
+            raise ValueError("HTP analysis requires drawingSubject")
+        if self.activity_type == "ART_DIARY" and self.drawing_subject is not None:
+            raise ValueError("ART_DIARY analysis must not include drawingSubject")
+        return self
 
 
 # ── 응답 (§19.4) ────────────────────────────────────────────────

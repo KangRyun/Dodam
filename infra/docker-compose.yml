@@ -85,10 +85,25 @@ services:
     container_name: dodam-minio
     restart: unless-stopped
 
+    # reason: 공용 15GB EC2 — 저장소가 앱 메모리를 침범하지 않게 상한을 둔다
+    #   (docs/database/저장소-아키텍처.md §2 "limits 없는 파드 금지").
+    #   MinIO는 객체 캐시로 여유 메모리를 계속 흡수하는 성격이라 상한이 특히 필요하다.
+    #   실측 사용량 약 225MB(2026-07-28, 객체 40개) → 1g 는 충분한 여유.
+    #   ⚠️ 이 값이 적용되려면 컨테이너 재생성이 필요하다(재시작만으로는 안 바뀐다).
+    mem_limit: 1g
+    cpus: 1.0
+
     # 프로비저닝 전용 관리자(root) — 앱은 이 계정으로 접속하지 않음. 값은 .env에서 주입(이 파일엔 값 없음).
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      # Prometheus 메트릭 무인증 허용 (S15P11B209-369).
+      #   reason: 기본값(jwt)이면 /minio/v2/metrics/* 가 403 — 실측 확인(2026-07-28).
+      #   토큰 방식은 만료·재발급 운영 부담이 있어, backend 9404 와 동일한 전제를 적용한다:
+      #   "호스트 미개방 + nginx 미프록시 = 내부망 전용이므로 무인증 허용".
+      #   ⚠️ 이 전제는 9000 을 외부로 노출하는 순간 깨진다 — ports 를 열지 말 것.
+      #   S3 API 자체의 인증에는 영향이 없다(메트릭 경로만 공개).
+      MINIO_PROMETHEUS_AUTH_TYPE: public
 
     # 9000=S3 API, 9001=콘솔. 데이터는 /data(네임드 볼륨).
     command: server /data --console-address ":9001"

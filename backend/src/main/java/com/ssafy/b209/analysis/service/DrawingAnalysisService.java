@@ -184,6 +184,8 @@ public class DrawingAnalysisService {
             started.drawingSessionId(),
             started.drawingAssetId(),
             started.analysisScope(),
+            started.activityType(),
+            started.drawingSubject(),
             started.storageKey(),
             started.contentType(),
             started.widthPx(),

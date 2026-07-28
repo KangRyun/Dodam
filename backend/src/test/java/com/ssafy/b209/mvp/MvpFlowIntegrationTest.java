@@ -112,7 +112,7 @@ class MvpFlowIntegrationTest {
         "INSERT INTO drawing_types "
             + "(id, code, name, activity_category, selectable_by, recommended_age_min, "
             + "recommended_age_max, is_active, display_order) "
-            + "VALUES (1, 'FREE_DRAWING', 'Free Drawing', 'GENERAL', 'BOTH', 3, 12, TRUE, 1)");
+            + "VALUES (1, 'ART_DIARY', '그림 일기', 'GENERAL', 'BOTH', 3, 12, TRUE, 1)");
     // 보호자 본인 대상 필수 약관은 아동 동의 이력을 남기지 않으므로 아동 대화 인가를 막지 않아야 한다.
     jdbcTemplate.update(
         "INSERT INTO consent_terms "

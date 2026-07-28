@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
+import '../../../../core/network/api_failure.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../drawing/application/activity_completion_controller.dart';
 import '../../../drawing/application/drawing_object_detection_controller.dart';
@@ -18,6 +20,61 @@ import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 import '../../../conversation/conversation.dart';
+
+enum _DrawingCompletePhase { canvasCapture, request, contractValidation }
+
+void _debugDrawingCompleteFailure({
+  required _DrawingCompletePhase phase,
+  required Object error,
+  required bool snapshotWasNull,
+  required DrawingStageCompleteResponseDto? response,
+}) {
+  if (!kDebugMode) return;
+  final exceptionType = error.runtimeType;
+  switch (phase) {
+    case _DrawingCompletePhase.canvasCapture:
+      debugPrint(
+        '[DRAWING_COMPLETE] canvas_capture_failure '
+        'kind=${snapshotWasNull ? 'null' : 'exception'} '
+        'exceptionType=$exceptionType',
+      );
+    case _DrawingCompletePhase.request:
+      switch (error) {
+        case ApiTransportFailure(:final type):
+          debugPrint(
+            '[DRAWING_COMPLETE] request_transport_failure '
+            'transportType=${type.name} exceptionType=$exceptionType',
+          );
+        case ApiResponseFailure(:final statusCode, :final error):
+          debugPrint(
+            '[DRAWING_COMPLETE] http_failure '
+            'status=${statusCode ?? 'unknown'} '
+            'code=${error?.code ?? 'unknown'} '
+            'message=${_safeDrawingCompleteMessage(error?.message)} '
+            'exceptionType=$exceptionType',
+          );
+        default:
+          debugPrint(
+            '[DRAWING_COMPLETE] response_parse_failure '
+            'exceptionType=$exceptionType',
+          );
+      }
+    case _DrawingCompletePhase.contractValidation:
+      debugPrint(
+        '[DRAWING_COMPLETE] contract_mismatch '
+        'currentStage=${response?.currentStage ?? 'unknown'} '
+        'nextAction=${response?.nextAction ?? 'unknown'} '
+        'exceptionType=$exceptionType',
+      );
+  }
+}
+
+String _safeDrawingCompleteMessage(String? message) {
+  if (message == null) return 'unknown';
+  final singleLine = message.replaceAll(RegExp(r'[\r\n]+'), ' ').trim();
+  if (singleLine.length <= 200) return singleLine;
+  return '${singleLine.substring(0, 200)}…';
+}
 
 String _createIdempotencyKey() {
   final random = Random.secure();
@@ -117,8 +174,21 @@ class _DrawingScreenState extends State<DrawingScreen> {
   VoiceAnswerUploadController? _voiceAnswerUploadController;
   SttResultController? _sttResultController;
   bool _conversationSetupStarted = false;
+
+  /// 그림 단계 완료(`drawing-complete`)가 접수된 뒤 켜진다.
+  ///
+  /// 이 뒤로 세션은 `CONVERSING`이므로 캔버스 저장은 막히고 대화만 진행한다.
+  bool _drawingStageFinished = false;
+  bool _movedToReflection = false;
   int? _activeConversationId;
   int? _lastQuestionMessageId;
+
+  /// 캔버스 입력이 막힌 상태인지 나타낸다.
+  ///
+  /// 대화 단계 세션으로 복귀했거나(S15P11B209-664) 이번 화면에서 그림 단계를
+  /// 마친 경우(S15P11B209-680) 서버가 초안·획 저장을 받지 않으므로 그리기를 막고
+  /// 대화만 진행한다.
+  bool get _canvasLocked => widget.resumeConversation || _drawingStageFinished;
 
   @override
   void initState() {
@@ -377,7 +447,13 @@ class _DrawingScreenState extends State<DrawingScreen> {
   }
 
   void _handleConversationEndChanged() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    setState(() {});
+    // 그림 단계가 끝난 뒤 대화까지 마쳤으면 감정 회고 단계로 넘어간다(명세 §23.1).
+    if (_drawingStageFinished &&
+        _conversationEndController?.completed == true) {
+      _goToEmotionSelect();
+    }
   }
 
   void _handleVoiceRecordingChanged() {
@@ -573,7 +649,11 @@ class _DrawingScreenState extends State<DrawingScreen> {
   }
 
   Future<void> _confirmAndComplete() async {
-    if (_isCompleting || _activeStroke != null || _completedStrokes.isEmpty) {
+    // 그림 단계는 한 번만 완료한다. 재요청은 서버가 거부한다.
+    if (_canvasLocked ||
+        _isCompleting ||
+        _activeStroke != null ||
+        _completedStrokes.isEmpty) {
       return;
     }
     final confirmed = await showAppConfirmDialog(
@@ -606,12 +686,16 @@ class _DrawingScreenState extends State<DrawingScreen> {
       return;
     }
     setState(() => _isCompleting = true);
+    var completionPhase = _DrawingCompletePhase.canvasCapture;
+    var snapshotWasNull = false;
+    DrawingStageCompleteResponseDto? completionResponse;
     try {
       // TODO(API): Define the authoritative pending-batch/Draft flush order
       // before coordinating a forced flush here.
       final snapshot =
           _pendingCompletionImage ??
           await (widget.completionSnapshotProvider ?? _captureCanvasSnapshot)();
+      snapshotWasNull = snapshot == null;
       if (snapshot == null) throw StateError('Final snapshot unavailable');
       final metadata =
           _pendingCompletionMetadata ??
@@ -629,35 +713,42 @@ class _DrawingScreenState extends State<DrawingScreen> {
       _pendingCompletionImage = snapshot;
       _pendingCompletionMetadata = metadata;
       _pendingCompletionKey = idempotencyKey;
-      final response = await repository.completeDrawingStage(
+      completionPhase = _DrawingCompletePhase.request;
+      completionResponse = await repository.completeDrawingStage(
         sessionId,
         finalImage: snapshot,
         metadata: metadata,
         idempotencyKey: idempotencyKey,
       );
-      if (response.currentStage != 'CONVERSING' ||
-          response.nextAction != 'SELECT_EMOTION') {
+      // 서버가 `CONVERSING`으로 올려주면 대화 단계가 열린다. `nextAction`은 판단
+      // 근거로 쓰지 않는다 — 명세 §10.8은 감정 선택을 가리키지만 정본 활동 흐름
+      // §23.1은 대화(14~18) 뒤에 회고(19)를 두므로 단계로만 분기한다.
+      completionPhase = _DrawingCompletePhase.contractValidation;
+      if (completionResponse.currentStage != 'CONVERSING') {
         throw StateError('Unexpected drawing completion result');
+      }
+      if (kDebugMode) {
+        debugPrint(
+          '[DRAWING_COMPLETE] success '
+          'currentStage=${completionResponse.currentStage} '
+          'nextAction=${completionResponse.nextAction}',
+        );
       }
       if (!mounted) return;
       _invalidatePendingCompletion();
-      Navigator.of(context).pushReplacementNamed(
-        AppRoutes.emotionSelect(widget.childId),
-        arguments: EmotionSelectRouteArguments(
-          sessionId: sessionId,
-          repository: repository,
-          conversationId: _activeConversationId,
-          conversationAlreadyEnded:
-              _conversationEndController?.completed == true,
-          conversationEndRepository: widget.conversationEndRepository,
-          conversationEndIdempotencyKey:
-              _conversationEndController?.requestIdempotencyKey,
-          conversationEndRequest: _conversationEndController?.requestSnapshot,
-          lastQuestionMessageId: _lastQuestionMessageId,
-          idempotencyKeyProvider: widget.idempotencyKeyProvider,
-        ),
+      // 이 뒤로 캔버스 저장은 서버가 받지 않으므로 자동 저장을 멈춘다.
+      _syncCoordinator.stop();
+      setState(() => _drawingStageFinished = true);
+      await _startConversationAfterDrawing(
+        completionResponse.analysis.analysisId,
       );
-    } on Object {
+    } on Object catch (error) {
+      _debugDrawingCompleteFailure(
+        phase: completionPhase,
+        error: error,
+        snapshotWasNull: snapshotWasNull,
+        response: completionResponse,
+      );
       if (mounted) {
         showAppMessage(
           context,
@@ -668,6 +759,49 @@ class _DrawingScreenState extends State<DrawingScreen> {
     } finally {
       if (mounted) setState(() => _isCompleting = false);
     }
+  }
+
+  /// 그림 단계 완료 직후 대화를 시작하고 첫 질문을 불러온다.
+  ///
+  /// 대화를 열지 못하면(대화 저장소 미주입·서버 거부) 흐름이 멈추지 않도록 기존
+  /// 동작대로 감정 회고 화면으로 넘긴다.
+  Future<void> _startConversationAfterDrawing(int analysisId) async {
+    if (widget.conversationRepository == null) {
+      _goToEmotionSelect();
+      return;
+    }
+    await _ensureConversationStarted(analysisId);
+    if (!mounted) return;
+    final questionController = _questionController;
+    if (questionController == null) {
+      _goToEmotionSelect();
+      return;
+    }
+    await questionController.loadForAnalysis(analysisId);
+  }
+
+  /// 감정 회고 화면으로 한 번만 이동한다.
+  void _goToEmotionSelect() {
+    if (_movedToReflection || !mounted) return;
+    final sessionId = widget.sessionId;
+    final repository = widget.drawingRepository;
+    if (sessionId == null || repository == null) return;
+    _movedToReflection = true;
+    Navigator.of(context).pushReplacementNamed(
+      AppRoutes.emotionSelect(widget.childId),
+      arguments: EmotionSelectRouteArguments(
+        sessionId: sessionId,
+        repository: repository,
+        conversationId: _activeConversationId,
+        conversationAlreadyEnded: _conversationEndController?.completed == true,
+        conversationEndRepository: widget.conversationEndRepository,
+        conversationEndIdempotencyKey:
+            _conversationEndController?.requestIdempotencyKey,
+        conversationEndRequest: _conversationEndController?.requestSnapshot,
+        lastQuestionMessageId: _lastQuestionMessageId,
+        idempotencyKeyProvider: widget.idempotencyKeyProvider,
+      ),
+    );
   }
 
   void _invalidatePendingCompletion() {
@@ -718,10 +852,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
             onPointerMove: _extendStroke,
             onPointerUp: _endStroke,
             backgroundImage: _draftRestoreController.backgroundImage,
-            inputEnabled: !widget.resumeConversation &&
-                _draftRestoreController.canDraw,
-            showRestoreOverlay: !widget.resumeConversation &&
-                !_draftRestoreController.canDraw,
+            inputEnabled: !_canvasLocked && _draftRestoreController.canDraw,
+            showRestoreOverlay:
+                !_canvasLocked && !_draftRestoreController.canDraw,
             onBackgroundLoaded: _draftRestoreController.markImageLoaded,
             onBackgroundError: _draftRestoreController.markImageFailed,
             restoreStatus: _draftRestoreController.status,
@@ -733,8 +866,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
             showQuestion:
                 _questionDisplayController.isVisible &&
                 _activePointer == null &&
-                (widget.resumeConversation ||
-                    _draftRestoreController.canDraw),
+                (_canvasLocked || _draftRestoreController.canDraw),
             selectedQuestionOptionId:
                 _questionSelectionController.selectedOptionId,
             onQuestionOptionSelected: (optionId) {
@@ -771,6 +903,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
             onColorChanged: (color) => setState(() => _color = color),
             onThicknessChanged: (value) => setState(() => _thickness = value),
             canComplete:
+                !_canvasLocked &&
                 !_isCompleting &&
                 _activeStroke == null &&
                 _completedStrokes.isNotEmpty,
@@ -867,7 +1000,9 @@ class _CanvasPanel extends StatelessWidget {
   final ImageProvider<Object>? backgroundImage;
   final bool inputEnabled;
 
-  /// 초안 복원 안내를 덮어 띄울지 여부다. 대화 복귀 모드에서는 띄우지 않는다.
+  /// 초안 복원 안내를 덮어 띄울지 여부다.
+  ///
+  /// 대화 복귀 모드이거나 그림 단계가 끝난 뒤에는 띄우지 않는다.
   final bool showRestoreOverlay;
   final VoidCallback onBackgroundLoaded;
   final VoidCallback onBackgroundError;

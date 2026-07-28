@@ -67,7 +67,7 @@ void main() {
 
   group('Drawing contract', () {
     test('parses a DrawingSession response', () {
-      final session = DrawingSessionDto.fromJson(const {
+      final session = DrawingSessionDto.fromCreateJson(const {
         'drawingSessionId': 42,
         'childId': 3,
         'drawingType': {

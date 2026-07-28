@@ -384,6 +384,17 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
       lastEventSequence == null ||
       journal.resumeEventSequence(lastEventSequence + 1);
 
+  /// Draft 복원 시 획 배치 시퀀스를 서버에 이미 저장된 배치들 뒤로 옮긴다.
+  ///
+  /// 배치 시퀀스는 배치마다 1씩 증가하고 배치당 이벤트가 1개 이상이므로, 지금까지의
+  /// 배치 수는 항상 `lastEventSequence` 이하다. 따라서 `lastEventSequence + 1`부터
+  /// 시작하면 서버에 저장된 어떤 배치 번호와도 겹치지 않아 이어그리기 후 첫 배치가
+  /// 재사용 충돌(DRAWING_409_019)로 실패하지 않는다. 서버는 배치 시퀀스의 갭을
+  /// 허용하므로(유일성·checksum만 검사) 번호를 건너뛰어도 안전하다.
+  bool resumeBatchSequenceFromDraft(int? lastEventSequence) =>
+      lastEventSequence == null ||
+      batchQueue.resumeBatchSequence(lastEventSequence + 1);
+
   DrawingSaveStatus get saveStatus {
     if (_draftStatus == DrawingSaveStatus.failed || batchQueue.hasFailure) {
       return DrawingSaveStatus.failed;
@@ -410,6 +421,17 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
         (_) => unawaited(saveDraftNow()),
       );
     }
+  }
+
+  /// 자동 저장과 주기 전송을 멈춘다.
+  ///
+  /// 그림 단계가 끝난 뒤에는 서버가 초안·획 저장을 받지 않으므로(409) 타이머를
+  /// 남겨두면 실패만 반복한다.
+  void stop() {
+    _flushTimer?.cancel();
+    _flushTimer = null;
+    _autosaveTimer?.cancel();
+    _autosaveTimer = null;
   }
 
   List<StrokeEventDto> recordStroke(DrawingStroke stroke, Size canvasSize) {

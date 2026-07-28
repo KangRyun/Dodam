@@ -70,6 +70,11 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
       syncCoordinator.resumeEventSequenceFromDraft(
         result.canvasState.lastEventSequence,
       );
+      // 이벤트 시퀀스뿐 아니라 획 배치 시퀀스도 복원해야 이어그리기 첫 배치가
+      // 이미 저장된 batchSequence=1과 충돌(DRAWING_409_019)하지 않는다.
+      syncCoordinator.resumeBatchSequenceFromDraft(
+        result.canvasState.lastEventSequence,
+      );
       _setStatus(DrawingDraftRestoreStatus.found);
     } on ApiResponseFailure catch (failure) {
       if (failure.error?.code == 'DRAWING_404_004') {

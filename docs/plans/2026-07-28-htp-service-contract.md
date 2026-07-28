@@ -248,9 +248,7 @@ HTP 전용 테이블을 다음처럼 둔다.
 
 1. `HTP` 기준 데이터와 HTP 묶음·단계 Flyway Migration 추가
 2. HTP 묶음 API와 상태 전이 구현
-3. `DrawingAnalysisClientCommand`, `AiDrawingAnalysisRequest`, AI `AnalysisRequest`에 `activityType`, `drawingSubject` 추가
-4. AI 파이프라인에서 `drawingSubject` 기반 모델 라우팅·품질 검증 적용
-5. 세 단계 저장 분석 결과 집계와 단일 리포트 연결
-6. HTP API·AI 계약·DB 제약·재개·멱등성 통합 테스트
+3. 세 단계 저장 분석 결과 집계와 단일 리포트 연결
+4. HTP API·AI 계약·DB 제약·재개·멱등성 통합 테스트
 
 위 여섯 항목이 모두 배포되기 전에는 `HTP` 유형을 활성화하지 않는다.
