@@ -285,6 +285,28 @@ public class DrawingSession {
   }
 
   /**
+   * HTP 묶음 안의 한 그림 세션을 개별 리포트 생성 없이 완료한다.
+   *
+   * <p>HTP는 HOUSE, TREE, PERSON 세 결과를 모두 모은 뒤 하나의 리포트를 생성하므로 일반 활동의 REPORTING 단계를 거치지 않는다. 대화 종료 후
+   * REFLECTION 단계에 도달한 HTP 세션에서만 HTP Application Service가 호출해야 한다.
+   *
+   * @param completedAt 서버가 결정한 UTC 기준 단계 완료 시각
+   * @throws NullPointerException {@code completedAt}이 {@code null}인 경우
+   * @throws IllegalStateException 삭제됐거나 진행 중이 아니거나 REFLECTION 단계가 아닌 경우
+   */
+  public void completeHtpStep(LocalDateTime completedAt) {
+    Objects.requireNonNull(completedAt, "completedAt must not be null");
+    if (deletedAt != null
+        || sessionStatus != DrawingSessionStatus.IN_PROGRESS
+        || currentStage != DrawingStage.REFLECTION) {
+      throw new IllegalStateException("감정 회고 단계의 진행 중인 HTP 세션만 완료할 수 있습니다.");
+    }
+    sessionStatus = DrawingSessionStatus.COMPLETED;
+    currentStage = DrawingStage.COMPLETED;
+    this.completedAt = completedAt;
+  }
+
+  /**
    * 최종 분석 또는 리포트 생성에 실패한 활동을 실패 상태로 전이한다.
    *
    * <p>완료 시각은 기록하지 않고 REPORTING 단계를 유지해 실패 지점을 나타낸다. 세션 상태가 {@link DrawingSessionStatus#FAILED}로

@@ -191,6 +191,24 @@ abstract final class AppRouter {
         ),
       ['guardian', 'reports', final reportId] when reportRepository != null =>
         ReportScreen(reportId: reportId, repository: reportRepository),
+      // 아래 세 경로는 전용 화면(알림 S15P11B209-499 · 설정 S15P11B209-454)이
+      // 완성되기 전까지 자리표시자로만 매핑해 둔다. 담당 화면이 붙으면 이 arm만 교체한다.
+      ['guardian', 'notifications'] => const AppPlaceholderScaffold(
+        // NOTI-03 GET /notifications
+        title: '알림',
+        description: '알림함은 준비 중이에요. 곧 이곳에서 분석 완료·리포트 소식을 확인할 수 있어요.',
+      ),
+      ['guardian', 'settings'] => const AppPlaceholderScaffold(
+        // USER-01 GET /users/me · USER-04 PATCH /users/me/notification-settings
+        title: '설정',
+        description: '설정 화면은 준비 중이에요. 동의·알림·데이터 설정이 이곳에 모일 예정이에요.',
+      ),
+      // 커뮤니티는 웹 전용(CLAUDE.md 6절). 웹 커뮤니티 URL과 webview_flutter가
+      // 준비되면 이 자리표시자를 WebView 화면으로 교체한다. COMM-01 GET /posts.
+      ['guardian', 'community'] => const AppPlaceholderScaffold(
+        title: '커뮤니티',
+        description: '커뮤니티는 웹에서 제공돼요. 웹 커뮤니티 연결이 준비되면 이곳에서 바로 열려요.',
+      ),
       ['child', final childId, 'home']
           when _hasChildContext(childController, childId) &&
               drawingRepository != null =>
@@ -217,6 +235,8 @@ abstract final class AppRouter {
           conversationAnswerRepository: conversationAnswerRepository,
           conversationId: conversationId,
           basisAnalysisId: basisAnalysisId,
+          resumeConversation:
+              (settings.arguments! as DrawingRouteArguments).resumeConversation,
         ),
       ['child', final childId, 'activity', 'emotions']
           when _hasChildContext(childController, childId) =>
@@ -341,11 +361,15 @@ final class DrawingRouteArguments {
     required this.sessionId,
     required this.repository,
     this.completionSnapshotProvider,
+    this.resumeConversation = false,
   });
 
   final int sessionId;
   final DrawingRepository repository;
   final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
+
+  /// 그림 단계를 지난 세션으로 들어올 때 대화를 즉시 이어받게 한다.
+  final bool resumeConversation;
 }
 
 class ChildContextGuardScreen extends StatelessWidget {

@@ -18,49 +18,65 @@ final class MockReportRepository implements ReportRepository {
     'isExpertReviewRecommended': false,
     'createdAt': '2026-07-20T10:12:00Z',
   };
+
+  /// REPORT-02 보호자 공개 계약(§13.4)과 같은 모양의 개발용 표본.
+  /// 서버는 공통 봉투로 감싸 보내지만, DTO가 봉투 없는 본문도 받으므로
+  /// 여기서는 `data` 페이로드만 담는다.
   static const _detail = {
     'reportId': 501,
-    'drawingSessionId': 120,
-    'analysisId': 88,
     'reportVersion': 1,
     'reportStatus': 'COMPLETED',
-    'activitySummary': {
+    'drawingSession': {
+      'drawingSessionId': 120,
+      'childId': 3,
+      'drawingTypeCode': 'ART_DIARY',
+      'drawingTypeName': '그림일기',
       'title': '우리 가족',
-      'drawingType': {'code': 'ART_DIARY', 'name': '그림일기'},
       'inputMethod': 'CANVAS',
-      'startedAt': '2026-07-20T09:40:00Z',
-      'completedAt': '2026-07-20T10:03:00Z',
-      'durationMinutes': 23,
+      'startedAt': '2026-07-20T09:40:00',
+      'completedAt': '2026-07-20T10:03:00',
+      'durationMs': 1380000,
+    },
+    'drawing': {
+      'finalImageUrl': 'https://storage.i15b209.example/final/ds120-v2.png',
+      'thumbnailUrl': 'https://storage.i15b209.example/previews/ds120-v1.png',
+    },
+    'childExpression': {
       'selectedEmotions': ['JOY', 'UNSURE'],
+      'expressedEmotionText': '동생이랑 놀아서 좋았어요',
+      'representativeUtterances': [
+        {
+          'messageId': 804,
+          'text': '우리 동생이야. 같이 노는 거야.',
+          'source': 'STT',
+          'sttNeedsConfirmation': false,
+        },
+        {
+          'messageId': 805,
+          'text': '해도 같이 그렸어.',
+          'source': 'TEXT',
+          'sttNeedsConfirmation': false,
+        },
+      ],
     },
-    'drawingImageUrl': 'https://storage.i15b209.example/final/ds120-v2.png',
-    'observedFeatures': [
-      {
-        'label': '가족을 화면 가운데에 크게 그렸어요',
-        'description': '네 명의 인물을 캔버스 중앙에 배치하고 따뜻한 색을 주로 사용했어요.',
-        'evidenceRef': 'OBJ_PERSON_1',
-      },
-    ],
-    'keyConversations': [
-      {
-        'question': '이 사람은 누구야?',
-        'answer': '우리 동생이야. 같이 노는 거야.',
-        'answerType': 'VOICE',
-      },
-    ],
-    'evidence': {
-      'drawingRefs': ['OBJ_PERSON_1', 'OBJ_SUN_1'],
-      'conversationRefs': [3021],
+    'activityFacts': {
+      'detectedObjects': ['사람', '집', '해'],
+      'drawingDurationMs': 1320000,
+      'pauseCount': 4,
+      'eraseCount': 2,
+      'pressureAvailable': false,
+      'notes': ['멈춤 4회 관찰'],
     },
-    'followUp': {
-      'attentionPoints': ['동생 이야기를 할 때 목소리가 작아지는 모습이 있었어요.'],
-      'guidance': '그림을 함께 보며 열린 질문으로 시작해 보세요.',
+    'conversationSummary': {
+      'questionCount': 5,
+      'answeredCount': 4,
+      'skippedCount': 1,
+      'summary': '가족과 함께 있는 장면을 이야기하며 편안하게 대화했어요.',
     },
-    'guardianQuestions': ['오늘 그린 그림에서 제일 좋아하는 부분은 어디야?'],
-    'isExpertReviewRecommended': false,
-    'limitationsText': '이 리포트는 의료적·심리학적 진단이 아니며, 아이와의 대화를 돕기 위한 관찰 참고 자료입니다.',
-    'modelVersion': 'dodam-report-v1.2',
-    'createdAt': '2026-07-20T10:12:00Z',
+    'guardianConversationGuide': ['오늘 그린 그림에서 제일 좋아하는 부분은 어디야?'],
+    'limitations': ['이 리포트는 의료적·심리학적 진단이 아니며, 아이와의 대화를 돕기 위한 관찰 참고 자료입니다.'],
+    'expertReview': {'status': 'NOT_REQUESTED', 'available': false},
+    'createdAt': '2026-07-20T10:12:00',
   };
   @override
   Future<ApiPage<ReportSummaryDto>> getReports(

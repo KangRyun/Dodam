@@ -14,10 +14,29 @@ void main() {
       now: () => DateTime.utc(2026, 7, 26, 1),
     );
 
-    final sessionId = await controller.resolveSession(childId: 3);
+    final resolution = await controller.resolveSession(childId: 3);
 
-    expect(sessionId, 81);
+    expect(resolution.sessionId, 81);
+    expect(resolution.currentStage, 'DRAWING');
+    expect(resolution.isDrawingStage, isTrue);
     expect(repository.getDrawingTypesCalls, 0);
+    expect(repository.createCalls, 0);
+  });
+
+  test('활성 세션이 대화 단계면 그림 단계가 아님을 알린다', () async {
+    final repository = _SessionStartRepository(
+      activeSessions: [_activeSession(84, currentStage: 'CONVERSING')],
+    );
+    final controller = DrawingSessionStartController(
+      repository: repository,
+      now: () => DateTime.utc(2026, 7, 26, 1),
+    );
+
+    final resolution = await controller.resolveSession(childId: 3);
+
+    expect(resolution.sessionId, 84);
+    expect(resolution.currentStage, 'CONVERSING');
+    expect(resolution.isDrawingStage, isFalse);
     expect(repository.createCalls, 0);
   });
 
@@ -31,9 +50,10 @@ void main() {
       now: () => DateTime.utc(2026, 7, 26, 1),
     );
 
-    final sessionId = await controller.resolveSession(childId: 3);
+    final resolution = await controller.resolveSession(childId: 3);
 
-    expect(sessionId, 82);
+    expect(resolution.sessionId, 82);
+    expect(resolution.isDrawingStage, isTrue);
     expect(repository.getDrawingTypesCalls, 1);
     expect(repository.createCalls, 1);
     expect(repository.createRequest?.drawingTypeId, 11);
@@ -53,9 +73,9 @@ void main() {
       now: () => DateTime.utc(2026, 7, 26, 1),
     );
 
-    final sessionId = await controller.resolveSession(childId: 3);
+    final resolution = await controller.resolveSession(childId: 3);
 
-    expect(sessionId, 83);
+    expect(resolution.sessionId, 83);
     expect(repository.getActiveSessionCalls, 2);
     expect(repository.createCalls, 1);
   });
@@ -114,7 +134,10 @@ final _activeSessionExistsFailure = ApiResponseFailure(
   ),
 );
 
-ActiveDrawingSessionDto _activeSession(int id) => ActiveDrawingSessionDto(
+ActiveDrawingSessionDto _activeSession(
+  int id, {
+  String currentStage = 'DRAWING',
+}) => ActiveDrawingSessionDto(
   drawingSessionId: id,
   childId: 3,
   drawingType: const DrawingTypeSummaryDto(
@@ -123,8 +146,8 @@ ActiveDrawingSessionDto _activeSession(int id) => ActiveDrawingSessionDto(
     name: '자유 그리기',
   ),
   inputMethod: 'CANVAS',
-  sessionStatus: 'DRAWING',
-  currentStage: 'DRAWING',
+  sessionStatus: 'IN_PROGRESS',
+  currentStage: currentStage,
   startedAt: '2026-07-26T01:00:00Z',
   latestDraft: null,
 );

@@ -267,6 +267,60 @@ class DefinitiveDiagnosisQuarantineTest(unittest.TestCase):
         self.assertTrue(result.observation_draft.expert_review_required)
 
 
+class OverinferenceQuarantineTest(unittest.TestCase):
+    """감정·성격 과잉 추론 격리 — 전문가 검토 + EXPERT_ONLY 강등 (S15P11B209-592)."""
+
+    def _generate(self, **overrides):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(
+            _llm_json(**overrides)
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            return report_client.generate(_sample_request(), model="m")
+
+    def test_guardian_feature_with_trait_labeling_downgraded_to_expert_only(self):
+        result = self._generate(
+            features=[
+                {
+                    "featureCode": "X",
+                    "title": "성격 관찰",
+                    "description": "공격적인 성향이 있어요.",  # 고정 특질 규정
+                    "evidenceSummary": "e",
+                    "visibilityScope": "REVIEWED_GUARDIAN",
+                }
+            ]
+        )
+        self.assertEqual(
+            result.observation_draft.features[0].visibility_scope, "EXPERT_ONLY"
+        )
+        self.assertTrue(result.observation_draft.expert_review_required)
+
+    def test_overinference_in_overall_summary_forces_expert_review(self):
+        result = self._generate(
+            expertReviewRequired=False,
+            overallSummary="정서적으로 불안한 아이입니다.",  # 정체성 규정
+        )
+        self.assertTrue(result.observation_draft.expert_review_required)
+
+    def test_behavioral_observation_stays_guardian_visible(self):
+        result = self._generate(
+            expertReviewRequired=False,
+            features=[
+                {
+                    "featureCode": "X",
+                    "title": "활동 관찰",
+                    "description": "조심스러운 모습을 보였어요.",  # 행동 관찰
+                    "evidenceSummary": "e",
+                    "visibilityScope": "REVIEWED_GUARDIAN",
+                }
+            ],
+        )
+        self.assertEqual(
+            result.observation_draft.features[0].visibility_scope, "REVIEWED_GUARDIAN"
+        )
+        self.assertFalse(result.observation_draft.expert_review_required)
+
+
 class EmotionSourceTest(unittest.TestCase):
     def test_selected(self):
         req = _sample_request(selected_emotions=["JOY"], expressed_emotion_text=None)

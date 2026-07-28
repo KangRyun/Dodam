@@ -44,6 +44,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -74,6 +75,7 @@ public class ObservationReportPersistenceService {
   private final ConversationSessionRepository conversationSessionRepository;
   private final ConversationMessageRepository conversationMessageRepository;
   private final DrawingSessionEmotionRepository emotionRepository;
+  private final ApplicationEventPublisher eventPublisher;
   private final Clock clock;
 
   /**
@@ -92,6 +94,7 @@ public class ObservationReportPersistenceService {
    * @param conversationSessionRepository 대화 세션 저장소
    * @param conversationMessageRepository 대화 메시지 집계 저장소
    * @param emotionRepository 그림 활동 선택 감정 저장소
+   * @param eventPublisher 완료 커밋 후 분석 완료 알림을 요청할 이벤트 발행기
    * @param clock 저장 시각을 제공하는 UTC 시계
    */
   public ObservationReportPersistenceService(
@@ -108,6 +111,7 @@ public class ObservationReportPersistenceService {
       ConversationSessionRepository conversationSessionRepository,
       ConversationMessageRepository conversationMessageRepository,
       DrawingSessionEmotionRepository emotionRepository,
+      ApplicationEventPublisher eventPublisher,
       Clock clock) {
     this.analysisRepository = analysisRepository;
     this.reportRepository = reportRepository;
@@ -122,6 +126,7 @@ public class ObservationReportPersistenceService {
     this.conversationSessionRepository = conversationSessionRepository;
     this.conversationMessageRepository = conversationMessageRepository;
     this.emotionRepository = emotionRepository;
+    this.eventPublisher = eventPublisher;
     this.clock = clock;
   }
 
@@ -297,6 +302,7 @@ public class ObservationReportPersistenceService {
 
       report.complete(draft.expertReviewRequired(), result.limitationsText(), now);
       analysis.getDrawingSession().completeReporting(now);
+      eventPublisher.publishEvent(new AnalysisCompletedEvent(context.reportId()));
     } catch (DataIntegrityViolationException exception) {
       throw new BusinessException(
           MockObservationReportErrorCode.REPORT_STORAGE_CONFLICT, exception);

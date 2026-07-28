@@ -113,7 +113,7 @@ public class DrawingSessionService {
             .orElseThrow(() -> new BusinessException(DrawingErrorCode.DRAWING_TYPE_NOT_FOUND));
 
     int age = child.ageOn(LocalDate.now(clock));
-    if (!drawingType.isAvailableForAge(age)) {
+    if ("HTP".equals(drawingType.getCode()) || !drawingType.isAvailableForAge(age)) {
       throw new BusinessException(DrawingErrorCode.DRAWING_TYPE_NOT_AVAILABLE);
     }
     if (drawingSessionRepository.findActiveByChildId(child.getId()).isPresent()) {
