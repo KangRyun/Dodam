@@ -24,14 +24,17 @@ import com.ssafy.b209.conversation.service.ConversationQuestionIdempotencyStore;
 import com.ssafy.b209.conversation.service.ConversationStartIdempotencyStore;
 import com.ssafy.b209.conversation.service.VoiceAnswerIdempotencyStore;
 import com.ssafy.b209.infrastructure.ai.AiQuestionClient;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
+import javax.imageio.ImageIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -76,10 +79,20 @@ class MvpFlowIntegrationTest {
 
   private static final String DEVICE_ID = "mvp-device-001";
   private static final String PROVIDER_SUBJECT = "kakao-mvp-user";
-  private static final byte[] PNG =
-      Base64.getDecoder()
-          .decode(
-              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
+  private static final byte[] PNG = pngBytes(320, 320);
+
+  private static byte[] pngBytes(int width, int height) {
+    BufferedImage image = new BufferedImage(width, height, BufferedImage.TYPE_INT_RGB);
+    try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+      if (!ImageIO.write(image, "png", output)) {
+        throw new IllegalStateException("PNG 인코딩에 실패했습니다.");
+      }
+      return output.toByteArray();
+    } catch (IOException exception) {
+      throw new UncheckedIOException(exception);
+    }
+  }
+
   private static final Path STORAGE_ROOT = createStorageRoot();
 
   @Container @ServiceConnection
