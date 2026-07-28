@@ -8,7 +8,7 @@ import 'package:dodam/features/conversation/data/repositories/remote_conversatio
 import 'package:dodam/features/conversation/data/repositories/remote_conversation_repository.dart';
 import 'package:dodam/features/drawing/data/repositories/mock_drawing_repository.dart';
 import 'package:dodam/features/drawing/data/repositories/remote_drawing_repository.dart';
-import 'package:dodam/features/report/data/repositories/mock_report_repository.dart';
+import 'package:dodam/features/report/data/repositories/remote_report_repository.dart';
 import 'package:dodam/main.dart' as app_main;
 import 'package:flutter_test/flutter_test.dart';
 
@@ -30,10 +30,10 @@ void main() {
       isA<RemoteConversationAnswerRepository>(),
     );
     expect(app.drawingRepository, isA<RemoteDrawingRepository>());
-    // Activity·report keep mock defaults until their backend APIs exist
+    expect(app.reportRepository, isA<RemoteReportRepository>());
+    // Activity keeps the mock default until its backend API exists
     // (S15P11B209-384 contract check).
     expect(app.activityRepository, isA<MockActivityRepository>());
-    expect(app.reportRepository, isA<MockReportRepository>());
     expect(app.authRepository, isA<RemoteAuthRepository>());
   });
 

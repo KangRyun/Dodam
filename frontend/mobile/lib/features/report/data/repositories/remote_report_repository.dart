@@ -17,15 +17,23 @@ final class RemoteReportRepository implements ReportRepository {
       'children/$childId/reports',
       queryParameters: filter.toQueryParameters(),
     );
-    return ApiPage.fromJson(response.data!, ReportSummaryDto.fromJson);
+    return ApiPage.fromJson(
+      envelopeObject(response.data),
+      ReportSummaryDto.fromJson,
+    );
   }
 
+  /// REPORT-02 `GET /reports/{reportId}`.
+  ///
+  /// 성공 응답은 공통 봉투 `{success, code, message, data}`로 오므로
+  /// `data`를 벗겨 DTO에 넘긴다. 401/403/404는 [ApiClient]가
+  /// [ApiResponseFailure]로 변환해 그대로 올려보낸다.
   @override
   Future<ReportDetailDto> getReport(int reportId) async {
     final response = await _apiClient.get<Map<String, dynamic>>(
       'reports/$reportId',
     );
-    return ReportDetailDto.fromJson(response.data!);
+    return ReportDetailDto.fromJson(envelopeObject(response.data));
   }
 
   @override
@@ -33,7 +41,7 @@ final class RemoteReportRepository implements ReportRepository {
     final response = await _apiClient.get<Map<String, dynamic>>(
       'analyses/$analysisId',
     );
-    return AnalysisStatusDto.fromJson(response.data!);
+    return AnalysisStatusDto.fromJson(envelopeObject(response.data));
   }
 
   @override
@@ -45,6 +53,6 @@ final class RemoteReportRepository implements ReportRepository {
       'analyses/$analysisId/retry',
       options: Options(headers: {'Idempotency-Key': idempotencyKey}),
     );
-    return AnalysisAcceptedDto.fromJson(response.data!);
+    return AnalysisAcceptedDto.fromJson(envelopeObject(response.data));
   }
 }
