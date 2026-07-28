@@ -15,6 +15,7 @@ import unittest
 from unittest import mock
 
 import child_screen_guard
+import crisis_guidance
 import llm_client
 import question_safety
 import question_service
@@ -426,6 +427,18 @@ class CrisisSafeResponseTest(unittest.TestCase):
             ]
         )
         self.assertIsNone(question_service._detect_crisis(req))
+
+    def test_guardian_crisis_guidance_signal_is_logged(self):
+        # 위기 감지 시 보호자 안내(심각도·사유)가 서버 신호로 남는다 — 원문 없이 (S15P11B209-598).
+        # 임시 원문 디버그 로그(689)는 꺼둬 이 검증이 그 영향을 받지 않게 한다.
+        req = _request(recent_messages=[self._child("나 그냥 죽고 싶어.")])
+        with mock.patch.object(question_service.config, "SAFETY_DEBUG_LOG_RAW", False):
+            _resp, _client, logs = self._generate(req)
+        joined = "\n".join(logs.output)
+        self.assertIn("보호자 위기 안내 준비", joined)
+        self.assertIn(crisis_guidance.SEVERITY_HIGH, joined)
+        # 안내 신호에도 아이 발화 원문은 남기지 않는다.
+        self.assertNotIn("죽고 싶어", joined)
 
 
 if __name__ == "__main__":

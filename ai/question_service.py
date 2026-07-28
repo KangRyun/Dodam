@@ -31,6 +31,7 @@ from openai import APIConnectionError, APIStatusError, OpenAIError
 
 import config
 import crisis_detection
+import crisis_guidance
 import llm_client
 import question_safety
 from gms import get_client
@@ -436,7 +437,6 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
     # 위기 신호(자해·학대·위기 의도)는 대화를 끊지 않고 안전·지지형 응답으로 이어간다
     # (S15P11B209-593). 아이에게 dead-end(422)를 주는 대신, 위기를 캐묻지 않는 결정적
     # 안전 응답을 돌려주고 위기 사실은 서버 경보 로그(사유 코드)로 남긴다.
-    # 보호자 실시간 알림의 정식 배선은 후속(S15P11B209-598)에서 계약 확장과 함께 붙인다.
     crisis_reason = _detect_crisis(req)
     if crisis_reason:
         # ⚠️ 아이 발화 원문은 남기지 않는다 — 사유 코드·request_id만.
@@ -445,6 +445,17 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
             crisis_reason,
             request_id,
         )
+        # 같은 위기라도 보호자에게는 제대로 된 안내를 전한다(S15P11B209-598). 문구 생성 규칙은
+        # crisis_guidance가 검토된 템플릿으로 만든다. 보호자에게 '띄우는' BE 배선(알림/화면 필드)은
+        # 계약 확장이 필요한 공동 후속이라, 지금은 안내 준비 사실만 서버 신호로 남긴다(원문 없음).
+        alert = crisis_guidance.guidance_for(crisis_reason)
+        if alert is not None:
+            logger.warning(
+                "보호자 위기 안내 준비: severity=%s reason=%s request_id=%s",
+                alert.severity,
+                alert.reason_code,
+                request_id,
+            )
         # ⚠️ 임시 검증용(출시 전 제거: S15P11B209-689) — 어떤 발화가 위기로 걸렸는지 원문 확인.
         child_texts = [
             m.text
