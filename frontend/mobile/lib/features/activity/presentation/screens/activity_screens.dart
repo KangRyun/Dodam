@@ -393,8 +393,13 @@ class _DrawingScreenState extends State<DrawingScreen> {
   void _handleConversationEndChanged() {
     if (!mounted) return;
     setState(() {});
-    // 그림 단계가 끝난 뒤 대화까지 마쳤으면 감정 회고 단계로 넘어간다(명세 §23.1).
-    if (_drawingStageFinished &&
+    // 대화까지 마쳤으면 감정 회고 단계로 넘어간다(명세 §23.1).
+    //
+    // 이번 세션에서 그림을 완료한 경우(_drawingStageFinished)뿐 아니라, 진행 중이던
+    // 대화 세션을 이어받아 들어온 경우(resumeConversation)에도 이동해야 한다. 복귀
+    // 모드에서는 캔버스와 완료 버튼이 잠겨 있어, 이동하지 않으면 대화 종료 후 앞으로
+    // 나아갈 방법이 없어 교착된다.
+    if ((_drawingStageFinished || widget.resumeConversation) &&
         _conversationEndController?.completed == true) {
       _goToEmotionSelect();
     }
