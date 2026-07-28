@@ -131,6 +131,48 @@ class ReportListQueryServiceTest {
   }
 
   @Test
+  void usesLatestFinalImageWhenThumbnailAssetIsAbsent() {
+    PageRequest pageable = PageRequest.of(0, 20);
+    DrawingType drawingType = mock(DrawingType.class);
+    given(drawingType.getId()).willReturn(7L);
+    given(drawingType.getCode()).willReturn("ART_DIARY");
+    given(drawingType.getName()).willReturn("그림 일기");
+
+    DrawingSession session = mock(DrawingSession.class);
+    given(session.getId()).willReturn(10L);
+    given(session.getDrawingType()).willReturn(drawingType);
+    given(session.getStartedAt()).willReturn(LocalDateTime.parse("2026-07-22T04:00:00"));
+
+    Report report = mock(Report.class);
+    given(report.getId()).willReturn(50L);
+    given(report.getDrawingSession()).willReturn(session);
+    given(report.getStatus()).willReturn(ReportStatus.COMPLETED);
+
+    DrawingAsset finalAsset = mock(DrawingAsset.class);
+    given(finalAsset.getId()).willReturn(31L);
+    given(finalAsset.getDrawingSession()).willReturn(session);
+
+    given(currentUserResolver.requireUserId()).willReturn(99L);
+    given(reportRepository.findVisiblePage(3L, null, null, null, null, pageable))
+        .willReturn(new PageImpl<>(List.of(report), pageable, 1));
+    given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    List.of(10L), DrawingAssetType.THUMBNAIL))
+        .willReturn(List.of());
+    given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    List.of(10L), DrawingAssetType.FINAL))
+        .willReturn(List.of(finalAsset));
+
+    ReportListPageResponse response = service.getReports(3L, null, null, null, null, pageable);
+
+    assertThat(response.content().getFirst().thumbnailUrl())
+        .isEqualTo("/api/v1/drawing-assets/31/file");
+  }
+
+  @Test
   void returnsEmptyPageWithoutAssetOrEmotionQueries() {
     PageRequest pageable = PageRequest.of(0, 20);
     given(currentUserResolver.requireUserId()).willReturn(99L);

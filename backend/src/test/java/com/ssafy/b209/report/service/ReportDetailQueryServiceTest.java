@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessRepository;
+import com.ssafy.b209.drawing.service.DrawingAssetFileUrlFactory;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.ReportActivityNoteView;
 import com.ssafy.b209.report.domain.ReportActivitySummaryView;
@@ -88,7 +89,8 @@ class ReportDetailQueryServiceTest {
             keyConversationRepository,
             followUpGuideRepository,
             conversationSummaryRepository,
-            detectedObjectRepository);
+            detectedObjectRepository,
+            new DrawingAssetFileUrlFactory());
   }
 
   @Test
@@ -136,10 +138,7 @@ class ReportDetailQueryServiceTest {
         .thenReturn(Optional.of(drawingType("HOUSE_TREE_PERSON", "집-나무-사람")));
     when(assetRepository.findByDrawingSessionIdAndAssetTypeInOrderByAssetVersionAsc(any(), any()))
         .thenReturn(
-            List.of(
-                asset("FINAL", 1, "https://cdn.example/final-v1.png"),
-                asset("FINAL", 2, "https://cdn.example/final-v2.png"),
-                asset("THUMBNAIL", 1, "https://cdn.example/thumb.png")));
+            List.of(asset(11L, "FINAL", 1), asset(12L, "FINAL", 2), asset(13L, "THUMBNAIL", 1)));
     when(emotionRepository.findByDrawingSessionIdOrderBySelectionOrderAsc(SESSION_ID))
         .thenReturn(List.of(emotion("HAPPY", (short) 0), emotion("CALM", (short) 1)));
     when(activitySummaryRepository.findById(REPORT_ID)).thenReturn(Optional.of(activitySummary()));
@@ -162,8 +161,8 @@ class ReportDetailQueryServiceTest {
     assertThat(response.drawingSession().drawingTypeCode()).isEqualTo("HOUSE_TREE_PERSON");
     assertThat(response.drawingSession().drawingTypeName()).isEqualTo("집-나무-사람");
     assertThat(response.drawingSession().durationMs()).isEqualTo(300000L);
-    assertThat(response.drawing().finalImageUrl()).isEqualTo("https://cdn.example/final-v2.png");
-    assertThat(response.drawing().thumbnailUrl()).isEqualTo("https://cdn.example/thumb.png");
+    assertThat(response.drawing().finalImageUrl()).isEqualTo("/api/v1/drawing-assets/12/file");
+    assertThat(response.drawing().thumbnailUrl()).isEqualTo("/api/v1/drawing-assets/13/file");
     assertThat(response.childExpression().selectedEmotions()).containsExactly("HAPPY", "CALM");
     assertThat(response.childExpression().expressedEmotionText()).isEqualTo("행복한 하루였어요");
     assertThat(response.childExpression().representativeUtterances()).hasSize(2);
@@ -214,6 +213,22 @@ class ReportDetailQueryServiceTest {
     assertThat(response.expertReview().status()).isEqualTo("NOT_REQUESTED");
   }
 
+  @Test
+  void usesFinalImageUrlAsThumbnailFallback() {
+    when(reportRepository.findById(REPORT_ID))
+        .thenReturn(Optional.of(report(ReportStatus.COMPLETED, null)));
+    when(guardianAccessRepository.hasDrawingSessionAccess(GUARDIAN_ID, SESSION_ID))
+        .thenReturn(true);
+    when(drawingSessionRepository.findById(SESSION_ID)).thenReturn(Optional.of(session()));
+    when(assetRepository.findByDrawingSessionIdAndAssetTypeInOrderByAssetVersionAsc(any(), any()))
+        .thenReturn(List.of(asset(12L, "FINAL", 2)));
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.drawing().finalImageUrl()).isEqualTo("/api/v1/drawing-assets/12/file");
+    assertThat(response.drawing().thumbnailUrl()).isEqualTo("/api/v1/drawing-assets/12/file");
+  }
+
   private ReportDetailView report(ReportStatus status, String limitationsText) {
     ReportDetailView report = instantiate(ReportDetailView.class);
     ReflectionTestUtils.setField(report, "id", REPORT_ID);
@@ -247,12 +262,12 @@ class ReportDetailQueryServiceTest {
     return type;
   }
 
-  private ReportDrawingAssetView asset(String assetType, int version, String url) {
+  private ReportDrawingAssetView asset(Long id, String assetType, int version) {
     ReportDrawingAssetView asset = instantiate(ReportDrawingAssetView.class);
+    ReflectionTestUtils.setField(asset, "id", id);
     ReflectionTestUtils.setField(asset, "drawingSessionId", SESSION_ID);
     ReflectionTestUtils.setField(asset, "assetType", assetType);
     ReflectionTestUtils.setField(asset, "assetVersion", version);
-    ReflectionTestUtils.setField(asset, "fileUrl", url);
     return asset;
   }
 

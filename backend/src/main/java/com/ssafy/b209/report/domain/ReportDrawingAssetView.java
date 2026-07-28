@@ -8,7 +8,7 @@ import jakarta.persistence.Table;
 /**
  * REPORT-02 보호자용 리포트 상세 조회 전용으로 {@code drawing_assets} 한 행을 읽는 읽기 모델이다.
  *
- * <p>최종 이미지·썸네일의 공개 URL만 읽으며, 절대 경로나 저장 Key는 응답에 노출하지 않는다.
+ * <p>최종 이미지·썸네일의 식별 정보만 읽으며, 절대 경로나 Storage Key는 응답에 노출하지 않는다.
  */
 @Entity
 @Table(name = "drawing_assets")
@@ -24,9 +24,6 @@ public class ReportDrawingAssetView {
 
   @Column(name = "asset_version", nullable = false)
   private int assetVersion;
-
-  @Column(name = "file_url")
-  private String fileUrl;
 
   protected ReportDrawingAssetView() {}
 
@@ -56,12 +53,5 @@ public class ReportDrawingAssetView {
    */
   public int getAssetVersion() {
     return assetVersion;
-  }
-
-  /**
-   * @return 공개 파일 URL이며 없으면 {@code null}
-   */
-  public String getFileUrl() {
-    return fileUrl;
   }
 }
