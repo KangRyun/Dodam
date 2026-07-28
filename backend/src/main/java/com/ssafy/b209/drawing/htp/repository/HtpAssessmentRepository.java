@@ -25,6 +25,21 @@ public interface HtpAssessmentRepository extends JpaRepository<HtpAssessment, Lo
       @Param("drawingSessionId") Long drawingSessionId);
 
   /**
+   * 리포트 생성 결과와 HTP 묶음 상태를 같은 Transaction에서 변경하도록 세션 기준 쓰기 잠금 조회한다.
+   *
+   * @param drawingSessionId HTP 단계 그림 세션 식별자
+   * @return 해당 단계를 포함한 HTP 활동, 일반 그림 세션이면 빈 값
+   */
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query(
+      "select distinct assessment from HtpAssessment assessment "
+          + "join fetch assessment.steps step "
+          + "join fetch step.drawingSession "
+          + "where step.drawingSession.id = :drawingSessionId")
+  Optional<HtpAssessment> findByStepDrawingSessionIdForUpdate(
+      @Param("drawingSessionId") Long drawingSessionId);
+
+  /**
    * 시작 요청의 멱등 키로 기존 HTP 활동을 조회한다.
    *
    * @param idempotencyKey HTP 시작 요청의 {@code Idempotency-Key}
@@ -59,8 +74,9 @@ public interface HtpAssessmentRepository extends JpaRepository<HtpAssessment, Lo
           + "join fetch assessment.steps step "
           + "join fetch step.drawingSession "
           + "where assessment.child.id = :childId "
-          + "and assessment.status = "
-          + "com.ssafy.b209.drawing.htp.domain.HtpAssessmentStatus.IN_PROGRESS")
+          + "and assessment.status in ("
+          + "com.ssafy.b209.drawing.htp.domain.HtpAssessmentStatus.IN_PROGRESS, "
+          + "com.ssafy.b209.drawing.htp.domain.HtpAssessmentStatus.ANALYZING)")
   Optional<HtpAssessment> findActiveByChildIdForUpdate(@Param("childId") Long childId);
 
   /**

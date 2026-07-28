@@ -6,19 +6,27 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
+import com.ssafy.b209.drawing.domain.DrawingEmotionCode;
 import com.ssafy.b209.drawing.domain.DrawingSessionStatus;
 import com.ssafy.b209.drawing.domain.DrawingStage;
+import com.ssafy.b209.drawing.dto.request.SaveDrawingReflectionRequest;
+import com.ssafy.b209.drawing.dto.response.DrawingReflectionResponse;
 import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStatus;
 import com.ssafy.b209.drawing.htp.domain.HtpDrawingSubject;
 import com.ssafy.b209.drawing.htp.dto.HtpAssessmentResponse;
 import com.ssafy.b209.drawing.htp.dto.HtpAssessmentStepResponse;
+import com.ssafy.b209.drawing.htp.dto.HtpCompletionResponse;
 import com.ssafy.b209.drawing.htp.dto.StartHtpAssessmentRequest;
 import com.ssafy.b209.drawing.htp.service.HtpAssessmentService;
+import com.ssafy.b209.report.domain.ReportStatus;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -107,6 +115,49 @@ class HtpAssessmentControllerTest {
         .perform(post("/api/v1/htp-assessments/200/abandon").header("Idempotency-Key", KEY))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.status").value("ABANDONED"));
+  }
+
+  @Test
+  void acceptsSingleAggregateReportGeneration() throws Exception {
+    given(htpAssessmentService.complete(200L, KEY))
+        .willReturn(
+            new HtpCompletionResponse(
+                200L,
+                HtpAssessmentStatus.ANALYZING,
+                900L,
+                DrawingAnalysisState.PENDING,
+                901L,
+                ReportStatus.GENERATING));
+
+    mockMvc
+        .perform(post("/api/v1/htp-assessments/200/complete").header("Idempotency-Key", KEY))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.data.status").value("ANALYZING"))
+        .andExpect(jsonPath("$.data.analysisId").value(900))
+        .andExpect(jsonPath("$.data.reportId").value(901));
+  }
+
+  @Test
+  void savesOneActivityReflectionForPersonStep() throws Exception {
+    given(htpAssessmentService.saveReflection(eq(200L), any(SaveDrawingReflectionRequest.class)))
+        .willReturn(
+            new DrawingReflectionResponse(
+                102L, DrawingStage.REFLECTION, List.of(DrawingEmotionCode.HAPPY), false));
+
+    mockMvc
+        .perform(
+            put("/api/v1/htp-assessments/200/reflection")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "selectedEmotions": ["HAPPY"],
+                      "skipped": false
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.drawingSessionId").value(102))
+        .andExpect(jsonPath("$.data.selectedEmotions[0]").value("HAPPY"));
   }
 
   private HtpAssessmentResponse response(
