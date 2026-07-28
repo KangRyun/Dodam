@@ -758,7 +758,7 @@ Header `Idempotency-Key` 필수.
 {
   "batchSequence": 3,
   "firstEventSequence": 101,
-  "lastEventSequence": 150,
+  "lastEventSequence": 101,
   "clientCreatedAt": "2026-07-21T11:32:10.120+09:00",
   "events": [
     {
@@ -788,6 +788,14 @@ Header `Idempotency-Key` 필수.
 - `x`, `y`는 캔버스 크기와 무관한 `0~1` 정규화 좌표이다.
 - `t`는 이벤트 시작 기준 경과 ms이다.
 - 필압 미지원 기기는 `pressure:null`; `0`으로 보내지 않는다.
+- Flutter의 `STROKE_START`부터 `STROKE_END`까지는 하나의 `STROKE` 이벤트로 집약하고,
+  `sequence`는 원본 `STROKE_END`의 순번을 사용한다.
+- `firstEventSequence`와 `lastEventSequence`는 원본 journal 범위가 아니라 실제 전송한
+  `events`의 첫 번째·마지막 `sequence`와 같아야 한다. 집약 과정에서 발생한 순번 간격은 허용한다.
+- `UNDO`, `REDO`, `ERASE`는 독립 이벤트로 전송하며 `points`는 빈 배열을 허용한다.
+  해당 이벤트를 보낸 배치의 `undoCountDelta`, `redoCountDelta`, `eraseCountDelta`도 함께 증가시킨다.
+- Draft의 `lastEventSequence`는 Stroke뿐 아니라 `UNDO`, `REDO`, `ERASE`를 포함한 마지막
+  journal 이벤트 순번을 사용한다.
 - 이벤트 최대 500개, 압축 전 JSON 최대 1 MiB이다.
 - 이미 저장된 `batchSequence`와 payload checksum이 같으면 기존 결과를 반환하고, 다르면 `409 STROKE_BATCH_CONFLICT`이다.
 - 응답: `batchId`, `batchSequence`, `acceptedEventCount`, `lastEventSequence`, `receivedAt`.
