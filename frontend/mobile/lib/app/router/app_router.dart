@@ -15,12 +15,16 @@ import '../../features/report/presentation/screens/report_screen.dart';
 import '../../features/report/domain/repositories/report_repository.dart';
 import '../state/guardian_child_controller.dart';
 import '../widgets/app_placeholder_scaffold.dart';
+import '../widgets/guardian_shell.dart';
+import 'app_navigation.dart';
 import 'app_routes.dart';
 
 abstract final class AppRouter {
   static Route<void> onGenerateRoute(
     RouteSettings settings, {
     GuardianChildController? childController,
+    WidgetBuilder? notificationsTabBuilder,
+    WidgetBuilder? settingsTabBuilder,
     AuthProviderSignIn? authSignIn,
     AuthOnboardingComplete? authCompleteOnboarding,
     AuthSignOut? authSignOut,
@@ -36,9 +40,36 @@ abstract final class AppRouter {
     ConversationAnswerRepository? conversationAnswerRepository,
     int? conversationId,
     int? basisAnalysisId,
+    bool insideShell = false,
   }) {
     final location = settings.name ?? AppRoutes.guardianHome;
     final segments = Uri.tryParse(location)?.pathSegments ?? const <String>[];
+
+    // 탭 안에서 다른 화면으로 이동할 때도 앱 전체와 같은 주입값을 그대로 쓴다.
+    // `insideShell: true`를 주는 이유는 탭 안에서 보호자 홈을 열었을 때 셸이
+    // 또 생기지 않게 하기 위함이다(탭 속의 탭 방지).
+    Route<void> tabRouteFactory(RouteSettings tabSettings) => onGenerateRoute(
+      tabSettings,
+      childController: childController,
+      notificationsTabBuilder: notificationsTabBuilder,
+      settingsTabBuilder: settingsTabBuilder,
+      authSignIn: authSignIn,
+      authCompleteOnboarding: authCompleteOnboarding,
+      authSignOut: authSignOut,
+      authRestoreSession: authRestoreSession,
+      activityRepository: activityRepository,
+      drawingRepository: drawingRepository,
+      reportRepository: reportRepository,
+      drawingCompletionSnapshotProvider: drawingCompletionSnapshotProvider,
+      conversationRepository: conversationRepository,
+      conversationEndRepository: conversationEndRepository,
+      voiceAnswerRepository: voiceAnswerRepository,
+      sttResultRepository: sttResultRepository,
+      conversationAnswerRepository: conversationAnswerRepository,
+      conversationId: conversationId,
+      basisAnalysisId: basisAnalysisId,
+      insideShell: true,
+    );
 
     final screen = switch (segments) {
       ['auth', 'bootstrap'] when authRestoreSession != null =>
@@ -67,28 +98,78 @@ abstract final class AppRouter {
                   onSignedOut: goLogin,
                 ),
           onAddChild: (context) =>
-              Navigator.of(context).pushNamed(AppRoutes.childRegister),
+              AppNavigation.pushNamed(context, AppRoutes.childRegister),
           onEditProfiles: (context) =>
               showAppMessage(context, message: '프로필 수정·삭제 화면은 준비 중이에요.'),
           onChildSelected: (context, child) {
             childController.selectChild(child);
-            Navigator.of(context).pushNamedAndRemoveUntil(
+            AppNavigation.resetTo(
+              context,
               AppRoutes.childModeHome(child.childId.toString()),
-              (route) => false,
             );
           },
         ),
       ['expert', 'profile'] => const ExpertProfileEntryScreen(),
-      ['guardian', 'home'] when childController != null => GuardianHomeScreen(
-        controller: childController,
-        actions: authSignOut == null
-            ? const []
-            : [
-                LogoutActionButton(
-                  onSignOut: authSignOut,
-                  onSignedOut: goLogin,
+      // 셸 밖에서 부르면 하단 탭을 갖춘 보호자 모드 전체를, 탭 안에서 부르면
+      // 홈 화면 자체를 연다.
+      ['guardian', 'home'] when childController != null && insideShell =>
+        _guardianHome(childController, authSignOut),
+      ['guardian', 'home'] when childController != null => GuardianShell(
+        routeFactory: tabRouteFactory,
+        tabs: [
+          GuardianShellTab(
+            item: const AppBottomTabItem(
+              icon: Icons.home_outlined,
+              selectedIcon: Icons.home_rounded,
+              label: '홈',
+            ),
+            builder: (_) => _guardianHome(childController, authSignOut),
+          ),
+          GuardianShellTab(
+            item: const AppBottomTabItem(
+              icon: Icons.article_outlined,
+              selectedIcon: Icons.article_rounded,
+              label: '기록',
+            ),
+            builder: (_) => activityRepository == null
+                ? const _TabPreparingScreen(
+                    title: '활동 기록',
+                    description: '활동 기록을 불러올 준비가 아직 되지 않았어요.',
+                  )
+                : ActivityHistoryScreen(
+                    childController: childController,
+                    repository: activityRepository,
+                  ),
+          ),
+          GuardianShellTab(
+            item: const AppBottomTabItem(
+              icon: Icons.notifications_none_rounded,
+              selectedIcon: Icons.notifications_rounded,
+              label: '알림',
+            ),
+            // 알림함 화면(S15P11B209-499)이 완성되면 이 자리에 주입한다.
+            builder:
+                notificationsTabBuilder ??
+                (_) => const _TabPreparingScreen(
+                  title: '알림',
+                  description: '알림함은 준비 중이에요. 곧 이곳에서 새 소식을 확인할 수 있어요.',
                 ),
-              ],
+          ),
+          GuardianShellTab(
+            item: const AppBottomTabItem(
+              icon: Icons.settings_outlined,
+              selectedIcon: Icons.settings_rounded,
+              label: '설정',
+            ),
+            // 설정 메인 화면(S15P11B209-454)이 완성되면 이 자리에 주입한다.
+            builder:
+                settingsTabBuilder ??
+                (_) => const _TabPreparingScreen(
+                  title: '설정',
+                  description: '설정 화면은 준비 중이에요. 동의·알림·데이터 설정이 이곳에 모일 예정이에요.',
+                ),
+          ),
+        ],
       ),
       ['guardian', 'children', 'select'] when childController != null =>
         ChildSelectScreen(controller: childController),
@@ -205,6 +286,16 @@ abstract final class AppRouter {
     return MaterialPageRoute<void>(settings: settings, builder: (_) => screen);
   }
 
+  static Widget _guardianHome(
+    GuardianChildController controller,
+    AuthSignOut? authSignOut,
+  ) => GuardianHomeScreen(
+    controller: controller,
+    actions: authSignOut == null
+        ? const []
+        : [LogoutActionButton(onSignOut: authSignOut, onSignedOut: goLogin)],
+  );
+
   static bool _hasChildContext(
     GuardianChildController? controller,
     String childId,
@@ -213,29 +304,36 @@ abstract final class AppRouter {
     return parsedId != null && controller?.hasSelectedChild(parsedId) == true;
   }
 
-  static void goGuardianHome(BuildContext context) {
-    Navigator.of(
-      context,
-    ).pushNamedAndRemoveUntil(AppRoutes.guardianHome, (route) => false);
-  }
+  // 아래 이동들은 "여기서 다시 시작"이라 앱 최상단 스택을 갈아끼운다.
+  // 탭 안에서 불러도 탭 하나만 바뀌는 일이 없도록 최상단 Navigator를 쓴다.
+  static void goGuardianHome(BuildContext context) =>
+      AppNavigation.resetTo(context, AppRoutes.guardianHome);
 
-  static void goProfileSelection(BuildContext context) {
-    Navigator.of(
-      context,
-    ).pushNamedAndRemoveUntil(AppRoutes.profileSelection, (route) => false);
-  }
+  static void goProfileSelection(BuildContext context) =>
+      AppNavigation.resetTo(context, AppRoutes.profileSelection);
 
-  static void goExpertProfile(BuildContext context) {
-    Navigator.of(
-      context,
-    ).pushNamedAndRemoveUntil(AppRoutes.expertProfile, (route) => false);
-  }
+  static void goExpertProfile(BuildContext context) =>
+      AppNavigation.resetTo(context, AppRoutes.expertProfile);
 
-  static void goLogin(BuildContext context) {
-    Navigator.of(
-      context,
-    ).pushNamedAndRemoveUntil(AppRoutes.login, (route) => false);
-  }
+  static void goLogin(BuildContext context) =>
+      AppNavigation.resetTo(context, AppRoutes.login);
+}
+
+/// 담당 화면이 아직 붙지 않은 탭에 세우는 자리표시자.
+///
+/// 탭의 뿌리이므로 뒤로 갈 곳이 없다 — 뒤로가기 버튼을 숨긴다.
+class _TabPreparingScreen extends StatelessWidget {
+  const _TabPreparingScreen({required this.title, required this.description});
+
+  final String title;
+  final String description;
+
+  @override
+  Widget build(BuildContext context) => AppPlaceholderScaffold(
+    title: title,
+    description: description,
+    canPop: false,
+  );
 }
 
 final class DrawingRouteArguments {
