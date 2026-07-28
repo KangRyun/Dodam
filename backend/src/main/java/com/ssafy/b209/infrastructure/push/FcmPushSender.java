@@ -9,7 +9,7 @@ import com.ssafy.b209.notification.push.PushSendOutcome;
 import com.ssafy.b209.notification.push.PushSender;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.annotation.Conditional;
 import org.springframework.stereotype.Component;
 
 /**
@@ -20,7 +20,7 @@ import org.springframework.stereotype.Component;
  * 로그로 남기며 Token·본문은 남기지 않는다(§5.4).
  */
 @Component
-@ConditionalOnProperty(prefix = "app.push.fcm", name = "enabled", havingValue = "true")
+@Conditional(FcmAvailableCondition.class)
 public class FcmPushSender implements PushSender {
 
   private static final Logger log = LoggerFactory.getLogger(FcmPushSender.class);
