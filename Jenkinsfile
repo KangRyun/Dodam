@@ -76,6 +76,13 @@ pipeline {
       defaultValue: false,
       description: 'Android 릴리스 AAB 를 빌드한다 (Jenkins Credentials 3종 필요 — S15P11B209-623)'
     )
+    // 앱 테스트는 기본적으로 frontend/mobile 변경 시에만 돈다. 이 값을 켜면 변경과 무관하게 실행한다
+    //   (빌더 이미지 재빌드 후 회귀 확인 등 — S15P11B209-642).
+    booleanParam(
+      name: 'FORCE_APP_TESTS',
+      defaultValue: false,
+      description: 'frontend/mobile 변경이 없어도 Flutter 앱 테스트를 실행한다 (S15P11B209-642)'
+    )
   }
 
   environment {
@@ -179,6 +186,26 @@ pipeline {
         always {
           junit testResults: 'backend/build/test-results/test/*.xml', allowEmptyResults: true
         }
+      }
+    }
+
+    stage('Test — app (flutter)') {
+      // 앱 코드가 바뀐 빌드에서만 돈다 (S15P11B209-642).
+      //   reason: 빌더 이미지가 5GB 이고 테스트에 1~2분이 든다. 백엔드만 고친 푸시마다
+      //   앱 테스트를 도는 건 낭비다. FORCE_APP_TESTS 로 언제든 강제 실행할 수 있다.
+      //   ⚠️ Multibranch 는 첫 빌드에 changeset 이 비어 있을 수 있다(비교 대상 이전 빌드 없음).
+      //      그 경우 스킵되는 게 정상이고, 다음 빌드부터 정상 판정된다.
+      when {
+        anyOf {
+          changeset 'frontend/mobile/**'
+          expression { params.FORCE_APP_TESTS }
+        }
+      }
+      steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }
+        // 실행 실체는 infra/mobile/ci-test.sh — 호스트에서도 같은 명령으로 재현된다.
+        //   bind mount 를 쓰지 않는 이유(DooD 경로 함정)는 스크립트 주석 참조.
+        sh 'infra/mobile/ci-test.sh'
       }
     }
 
