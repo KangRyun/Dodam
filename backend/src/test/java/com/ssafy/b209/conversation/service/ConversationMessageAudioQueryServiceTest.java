@@ -10,14 +10,14 @@ import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.domain.ConversationStartDrawingSession;
 import com.ssafy.b209.conversation.exception.ConversationMessageAudioErrorCode;
 import com.ssafy.b209.conversation.exception.ConversationMessageStatusErrorCode;
-import com.ssafy.b209.conversation.exception.SttProcessingErrorCode;
 import com.ssafy.b209.conversation.repository.ConversationHistoryMessageRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartDrawingSessionRepository;
 import com.ssafy.b209.conversation.repository.VoiceAnswerAuthorizationRepository;
 import com.ssafy.b209.global.exception.BusinessException;
-import com.ssafy.b209.storage.audio.OpenedAudio;
-import com.ssafy.b209.storage.audio.StoredAudioReader;
+import com.ssafy.b209.storage.audio.AudioStorage;
+import com.ssafy.b209.storage.audio.AudioStorageErrorCode;
+import com.ssafy.b209.storage.audio.StoredAudioContent;
 import java.io.ByteArrayInputStream;
 import java.lang.reflect.Constructor;
 import java.nio.charset.StandardCharsets;
@@ -40,7 +40,8 @@ class ConversationMessageAudioQueryServiceTest {
   @Mock private ConversationSessionRepository conversationSessionRepository;
   @Mock private ConversationStartDrawingSessionRepository drawingSessionRepository;
   @Mock private VoiceAnswerAuthorizationRepository authorizationRepository;
-  @Mock private StoredAudioReader audioReader;
+  @Mock private AudioStorage audioStorage;
+  @Mock private AudioStorage ttsAudioStorage;
 
   private ConversationMessageAudioQueryService service;
 
@@ -52,7 +53,8 @@ class ConversationMessageAudioQueryServiceTest {
             conversationSessionRepository,
             drawingSessionRepository,
             authorizationRepository,
-            audioReader);
+            audioStorage,
+            ttsAudioStorage);
   }
 
   @Test
@@ -64,7 +66,8 @@ class ConversationMessageAudioQueryServiceTest {
         .extracting("errorCode")
         .isEqualTo(ConversationMessageStatusErrorCode.CONVERSATION_MESSAGE_NOT_FOUND);
 
-    verifyNoInteractions(conversationSessionRepository, authorizationRepository, audioReader);
+    verifyNoInteractions(
+        conversationSessionRepository, authorizationRepository, audioStorage, ttsAudioStorage);
   }
 
   @Test
@@ -80,7 +83,7 @@ class ConversationMessageAudioQueryServiceTest {
         .extracting("errorCode")
         .isEqualTo(ConversationMessageStatusErrorCode.CONVERSATION_ACCESS_DENIED);
 
-    verifyNoInteractions(audioReader);
+    verifyNoInteractions(audioStorage, ttsAudioStorage);
   }
 
   @Test
@@ -94,7 +97,7 @@ class ConversationMessageAudioQueryServiceTest {
         .extracting("errorCode")
         .isEqualTo(ConversationMessageAudioErrorCode.CONVERSATION_AUDIO_NOT_AVAILABLE);
 
-    verifyNoInteractions(audioReader);
+    verifyNoInteractions(audioStorage, ttsAudioStorage);
   }
 
   @Test
@@ -108,7 +111,7 @@ class ConversationMessageAudioQueryServiceTest {
         .extracting("errorCode")
         .isEqualTo(ConversationMessageAudioErrorCode.CONVERSATION_AUDIO_NOT_AVAILABLE);
 
-    verifyNoInteractions(audioReader);
+    verifyNoInteractions(audioStorage, ttsAudioStorage);
   }
 
   @Test
@@ -116,8 +119,8 @@ class ConversationMessageAudioQueryServiceTest {
     authorizeChild();
     when(messageRepository.findById(804L))
         .thenReturn(Optional.of(voiceMessage("VOICE_ANSWER", STORAGE_KEY)));
-    when(audioReader.open(STORAGE_KEY))
-        .thenThrow(new BusinessException(SttProcessingErrorCode.STT_AUDIO_NOT_AVAILABLE));
+    when(audioStorage.read(STORAGE_KEY))
+        .thenThrow(new BusinessException(AudioStorageErrorCode.AUDIO_NOT_FOUND));
 
     assertThatThrownBy(() -> service.getPlayableAudio(10L, 804L))
         .isInstanceOf(BusinessException.class)
@@ -131,8 +134,10 @@ class ConversationMessageAudioQueryServiceTest {
     byte[] audioBytes = "webm-bytes".getBytes(StandardCharsets.UTF_8);
     when(messageRepository.findById(804L))
         .thenReturn(Optional.of(voiceMessage("VOICE_ANSWER", STORAGE_KEY)));
-    when(audioReader.open(STORAGE_KEY))
-        .thenReturn(new OpenedAudio(new ByteArrayInputStream(audioBytes), "voice.webm"));
+    when(audioStorage.read(STORAGE_KEY))
+        .thenReturn(
+            new StoredAudioContent(
+                new ByteArrayInputStream(audioBytes), "audio/webm", audioBytes.length));
 
     VoiceAnswerAudioResource resource = service.getPlayableAudio(10L, 804L);
 
@@ -147,8 +152,31 @@ class ConversationMessageAudioQueryServiceTest {
     byte[] audioBytes = "mp3-bytes".getBytes(StandardCharsets.UTF_8);
     when(messageRepository.findById(804L))
         .thenReturn(Optional.of(voiceMessage("QUESTION", "2026/07/24/2f0b8f5e-tts.mp3")));
-    when(audioReader.open("2026/07/24/2f0b8f5e-tts.mp3"))
-        .thenReturn(new OpenedAudio(new ByteArrayInputStream(audioBytes), "audio.mp3"));
+    when(ttsAudioStorage.read("2026/07/24/2f0b8f5e-tts.mp3"))
+        .thenReturn(
+            new StoredAudioContent(
+                new ByteArrayInputStream(audioBytes), "audio/mpeg", audioBytes.length));
+
+    VoiceAnswerAudioResource resource = service.getPlayableAudio(10L, 804L);
+
+    assertThat(resource.contentType()).isEqualTo("audio/mpeg");
+    assertThat(resource.audio().inputStream().readAllBytes()).isEqualTo(audioBytes);
+    verifyNoInteractions(audioStorage);
+  }
+
+  @Test
+  void fallsBackToLegacyAudioPrefixForExistingQuestionTts() throws Exception {
+    authorizeChild();
+    String ttsKey = "2026/07/24/legacy-tts.mp3";
+    byte[] audioBytes = "legacy-mp3".getBytes(StandardCharsets.UTF_8);
+    when(messageRepository.findById(804L))
+        .thenReturn(Optional.of(voiceMessage("QUESTION", ttsKey)));
+    when(ttsAudioStorage.read(ttsKey))
+        .thenThrow(new BusinessException(AudioStorageErrorCode.AUDIO_NOT_FOUND));
+    when(audioStorage.read(ttsKey))
+        .thenReturn(
+            new StoredAudioContent(
+                new ByteArrayInputStream(audioBytes), "audio/mpeg", audioBytes.length));
 
     VoiceAnswerAudioResource resource = service.getPlayableAudio(10L, 804L);
 

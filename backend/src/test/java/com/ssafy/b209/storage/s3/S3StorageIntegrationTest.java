@@ -72,7 +72,15 @@ class S3StorageIntegrationTest {
     URI endpoint = URI.create("http://" + MINIO.getHost() + ":" + MINIO.getMappedPort(9000));
     properties =
         new S3StorageProperties(
-            endpoint, "ap-northeast-2", BUCKET, ACCESS_KEY, SECRET_KEY, "images", "audio", true);
+            endpoint,
+            "ap-northeast-2",
+            BUCKET,
+            ACCESS_KEY,
+            SECRET_KEY,
+            "images",
+            "audio",
+            "tts-cache",
+            true);
     s3Client =
         S3Client.builder()
             .endpointOverride(endpoint)
