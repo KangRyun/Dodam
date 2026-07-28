@@ -81,7 +81,10 @@ sudo infra/scripts/minio-restore.sh /var/backups/dodam/minio-2026-07-26-0430.tar
 
 ```bash
 # 1) 최신 백업 확인
-sudo ls -lt /var/backups/dodam/minio-*.tar.gz.enc | head -3
+#    ⚠️ glob(*)은 sudo 이전에 "현재 사용자" shell 이 확장한다. 백업 디렉토리는 700 root 라
+#       일반 계정이 읽지 못해 zsh 에서 `no matches found` 로 실패한다(파일이 없어서가 아니다).
+#       그래서 확장을 root 쪽으로 넘긴다.
+sudo sh -c 'ls -lt /var/backups/dodam/minio-*.tar.gz.enc | head -3'
 
 # 2) 드릴 — 운영 버킷은 건드리지 않는다
 sudo /home/kr/S15P11B209/infra/scripts/minio-restore.sh --dry-run \
