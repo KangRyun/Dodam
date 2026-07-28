@@ -499,9 +499,9 @@ final class _RecordingDrawingRepository implements DrawingRepository {
   Future<DrawingSessionDto> getSession(int sessionId) async {
     calls.add('status');
     statusCallCount += 1;
-    return DrawingSessionDto.fromJson({
+    return DrawingSessionDto.fromDetailJson({
       'drawingSessionId': sessionId,
-      'childId': 3,
+      'child': {'childId': 3, 'nickname': '도담'},
       'drawingType': {'drawingTypeId': 1, 'code': 'HTP', 'name': '집-나무-사람'},
       'inputMethod': 'TOUCH',
       'title': null,

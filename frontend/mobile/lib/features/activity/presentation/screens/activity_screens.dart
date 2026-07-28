@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:math';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
+import '../../../../core/network/api_failure.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../drawing/application/activity_completion_controller.dart';
 import '../../../drawing/application/drawing_object_detection_controller.dart';
@@ -18,6 +20,61 @@ import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 import '../../../conversation/conversation.dart';
+
+enum _DrawingCompletePhase { canvasCapture, request, contractValidation }
+
+void _debugDrawingCompleteFailure({
+  required _DrawingCompletePhase phase,
+  required Object error,
+  required bool snapshotWasNull,
+  required DrawingStageCompleteResponseDto? response,
+}) {
+  if (!kDebugMode) return;
+  final exceptionType = error.runtimeType;
+  switch (phase) {
+    case _DrawingCompletePhase.canvasCapture:
+      debugPrint(
+        '[DRAWING_COMPLETE] canvas_capture_failure '
+        'kind=${snapshotWasNull ? 'null' : 'exception'} '
+        'exceptionType=$exceptionType',
+      );
+    case _DrawingCompletePhase.request:
+      switch (error) {
+        case ApiTransportFailure(:final type):
+          debugPrint(
+            '[DRAWING_COMPLETE] request_transport_failure '
+            'transportType=${type.name} exceptionType=$exceptionType',
+          );
+        case ApiResponseFailure(:final statusCode, :final error):
+          debugPrint(
+            '[DRAWING_COMPLETE] http_failure '
+            'status=${statusCode ?? 'unknown'} '
+            'code=${error?.code ?? 'unknown'} '
+            'message=${_safeDrawingCompleteMessage(error?.message)} '
+            'exceptionType=$exceptionType',
+          );
+        default:
+          debugPrint(
+            '[DRAWING_COMPLETE] response_parse_failure '
+            'exceptionType=$exceptionType',
+          );
+      }
+    case _DrawingCompletePhase.contractValidation:
+      debugPrint(
+        '[DRAWING_COMPLETE] contract_mismatch '
+        'currentStage=${response?.currentStage ?? 'unknown'} '
+        'nextAction=${response?.nextAction ?? 'unknown'} '
+        'exceptionType=$exceptionType',
+      );
+  }
+}
+
+String _safeDrawingCompleteMessage(String? message) {
+  if (message == null) return 'unknown';
+  final singleLine = message.replaceAll(RegExp(r'[\r\n]+'), ' ').trim();
+  if (singleLine.length <= 200) return singleLine;
+  return '${singleLine.substring(0, 200)}…';
+}
 
 String _createIdempotencyKey() {
   final random = Random.secure();
@@ -131,8 +188,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   /// 대화 단계 세션으로 복귀했거나(S15P11B209-664) 이번 화면에서 그림 단계를
   /// 마친 경우(S15P11B209-680) 서버가 초안·획 저장을 받지 않으므로 그리기를 막고
   /// 대화만 진행한다.
-  bool get _canvasLocked =>
-      widget.resumeConversation || _drawingStageFinished;
+  bool get _canvasLocked => widget.resumeConversation || _drawingStageFinished;
 
   @override
   void initState() {
@@ -630,12 +686,16 @@ class _DrawingScreenState extends State<DrawingScreen> {
       return;
     }
     setState(() => _isCompleting = true);
+    var completionPhase = _DrawingCompletePhase.canvasCapture;
+    var snapshotWasNull = false;
+    DrawingStageCompleteResponseDto? completionResponse;
     try {
       // TODO(API): Define the authoritative pending-batch/Draft flush order
       // before coordinating a forced flush here.
       final snapshot =
           _pendingCompletionImage ??
           await (widget.completionSnapshotProvider ?? _captureCanvasSnapshot)();
+      snapshotWasNull = snapshot == null;
       if (snapshot == null) throw StateError('Final snapshot unavailable');
       final metadata =
           _pendingCompletionMetadata ??
@@ -653,7 +713,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
       _pendingCompletionImage = snapshot;
       _pendingCompletionMetadata = metadata;
       _pendingCompletionKey = idempotencyKey;
-      final response = await repository.completeDrawingStage(
+      completionPhase = _DrawingCompletePhase.request;
+      completionResponse = await repository.completeDrawingStage(
         sessionId,
         finalImage: snapshot,
         metadata: metadata,
@@ -662,16 +723,32 @@ class _DrawingScreenState extends State<DrawingScreen> {
       // 서버가 `CONVERSING`으로 올려주면 대화 단계가 열린다. `nextAction`은 판단
       // 근거로 쓰지 않는다 — 명세 §10.8은 감정 선택을 가리키지만 정본 활동 흐름
       // §23.1은 대화(14~18) 뒤에 회고(19)를 두므로 단계로만 분기한다.
-      if (response.currentStage != 'CONVERSING') {
+      completionPhase = _DrawingCompletePhase.contractValidation;
+      if (completionResponse.currentStage != 'CONVERSING') {
         throw StateError('Unexpected drawing completion result');
+      }
+      if (kDebugMode) {
+        debugPrint(
+          '[DRAWING_COMPLETE] success '
+          'currentStage=${completionResponse.currentStage} '
+          'nextAction=${completionResponse.nextAction}',
+        );
       }
       if (!mounted) return;
       _invalidatePendingCompletion();
       // 이 뒤로 캔버스 저장은 서버가 받지 않으므로 자동 저장을 멈춘다.
       _syncCoordinator.stop();
       setState(() => _drawingStageFinished = true);
-      await _startConversationAfterDrawing(response.analysis.analysisId);
-    } on Object {
+      await _startConversationAfterDrawing(
+        completionResponse.analysis.analysisId,
+      );
+    } on Object catch (error) {
+      _debugDrawingCompleteFailure(
+        phase: completionPhase,
+        error: error,
+        snapshotWasNull: snapshotWasNull,
+        response: completionResponse,
+      );
       if (mounted) {
         showAppMessage(
           context,
@@ -716,8 +793,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
         sessionId: sessionId,
         repository: repository,
         conversationId: _activeConversationId,
-        conversationAlreadyEnded:
-            _conversationEndController?.completed == true,
+        conversationAlreadyEnded: _conversationEndController?.completed == true,
         conversationEndRepository: widget.conversationEndRepository,
         conversationEndIdempotencyKey:
             _conversationEndController?.requestIdempotencyKey,
