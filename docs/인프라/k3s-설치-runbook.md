@@ -114,6 +114,21 @@ sudo bash infra/scripts/setup-swap.sh    # 스왑 16GB + 커널 튜닝 + earlyoo
 
 무엇을 되돌려야 하는지 모르면 롤백도 못 합니다.
 
+**스크립트로 한 번에** (S15P11B209-358 — 아래 수동 절차를 자동화한 것):
+
+```bash
+infra/scripts/k3s-baseline.sh capture before
+```
+
+서비스 e2e 4종 · 컨테이너 목록/상태 · 리슨 포트 · 메모리를 파일로 굳혀 둡니다.
+`iptables` 스냅샷만 sudo가 필요해, 없으면 그 항목만 건너뛰고 나머지는 그대로 캡처합니다
+(같이 받으려면 `sudo iptables-save > ~/.local/state/dodam/k3s-baseline/before/iptables.rules`).
+
+설치 후에는 `capture after` → `compare`로 **기계가 대조**합니다(4단계 참조).
+눈으로 비교하면 "컨테이너 하나가 조용히 재시작됐다" 같은 걸 놓칩니다.
+
+<details><summary>수동으로 하려면 (스크립트가 하는 일)</summary>
+
 ```bash
 cd ~/S15P11B209
 
@@ -131,6 +146,10 @@ wc -l /tmp/before-k3s-*.rules
 
 **기대:** `landing 200` · `ai 200` · `api-401 401`. — 2026-07-28 실측으로 확인한 값입니다.
 401이 정상입니다 — 토큰 없이 보호 경로를 부른 것이니 인가가 살아 있다는 뜻입니다.
+
+</details>
+
+> 2026-07-29 실측 기준선: `landing 200 · ai 200 · api 401 · legal 200` · 컨테이너 12개 · 가용 8.5GB
 
 ---
 
@@ -262,6 +281,21 @@ kubectl describe node "$(hostname)" | sed -n '/Conditions/,/Addresses/p'
 
 **이 단계가 356의 진짜 완료 조건입니다.** k3s가 뜬 것은 성공이 아닙니다.
 
+**스크립트로 판정** (S15P11B209-358):
+
+```bash
+infra/scripts/k3s-baseline.sh capture after
+infra/scripts/k3s-baseline.sh compare      # 종료코드 0 = 통과, 1 = 롤백
+```
+
+판정 기준(하나라도 어긋나면 실패):
+- **서비스 e2e 4종이 0단계와 완전히 동일** ← 이게 틀리면 나머지는 볼 것도 없이 롤백
+- 컨테이너 목록·상태 동일 (사라짐·죽음·재시작 전부 검출)
+- 사라진 포트 없음 (새로 열린 6443·10250은 정상)
+- `DOCKER` 체인 유지 (iptables 스냅샷을 sudo로 받아둔 경우)
+
+<details><summary>수동으로 확인하려면</summary>
+
 ```bash
 # 0단계와 똑같은 3줄 — 값이 같아야 한다
 curl -s -o /dev/null -w 'landing  %{http_code}\n' https://i15b209.p.ssafy.io/
@@ -292,6 +326,8 @@ diff /tmp/before-k3s-iptables.rules /tmp/after-k3s-iptables.rules | grep '^<' | 
 - `diff | grep '^<'` 에 `DOCKER` 계열 규칙이 **사라진 것**으로 찍히면 → **위험 신호, 즉시 롤백**
   (규칙이 **추가**된 것은 정상입니다. 없어진 게 문제입니다)
 - 하나라도 어긋나면 다음 단계로 가지 말고 **롤백**합니다
+
+</details>
 
 ---
 
