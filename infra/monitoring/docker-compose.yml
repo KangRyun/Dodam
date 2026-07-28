@@ -36,6 +36,10 @@ services:
       #   (2026-07-22 nginx 빈 conf 사고는 Jenkins가 다른 경로에서 돌린 케이스 — 이 스택은 수동 기동 전용이라 다름.
       #    k3s 이전 시 ConfigMap으로 대체 예정이라 이미지 bake는 과투자로 판단)
       - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # 경보 규칙 디렉터리 (S15P11B209-356) — prometheus.yml 의 rule_files 가 여기를 읽는다.
+      #   디렉터리째 마운트하는 이유: 규칙 파일이 늘어도 compose 를 다시 고치지 않게 하려고.
+      #   ⚠️ 규칙만 바꿨다면 재생성 대신 `docker kill -s HUP dodam-prometheus` 로 리로드한다.
+      - ./prometheus/rules:/etc/prometheus/rules:ro
       - prometheus-data:/prometheus   # TSDB 영속화 — 컨테이너 재생성에도 메트릭 유지
     ports:
       # ⚠️ 루프백 전용 바인딩 — 외부 개방 금지, 접근은 SSH 터널(README).
