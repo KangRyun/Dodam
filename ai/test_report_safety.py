@@ -1,8 +1,9 @@
-"""report_safety 단위 테스트 — 단정적 진단은 차단, 경향성 우려 소견은 허용 (S15P11B209-591).
+"""report_safety 단위 테스트 — 격리 대상은 차단, 경향성 우려 소견은 허용.
 
 리포트 경로의 완화 기준을 회귀로 고정한다:
-- 임상 장애·질환명, 진단 단정, 확정 부사+부정 해석, 확정적 그림 해석 → 차단(패턴 매칭).
-- "~일 수 있어요/보여요/경향/듯" 같은 여지 표현 → 통과.
+- 단정적 진단(S15P11B209-591): 임상 장애·질환명, 진단 단정, 확정 부사+부정 해석, 확정적 그림 해석 → 차단.
+- 감정·성격 과잉 추론(S15P11B209-592): 성향·기질·정체성을 고정 특질로 규정, 심리 속성 단정 → 차단.
+- "~일 수 있어요/보여요/경향/듯" 같은 여지 표현과 "~한 모습을 보였어요" 행동 관찰 → 통과.
 (아동 대면 대화 answer_check는 이보다 엄격 — 진단성 표현 자체를 전부 막는다.)
 """
 
@@ -58,6 +59,87 @@ class AllowsHedgedConcernTest(unittest.TestCase):
                     report_safety.has_definitive_diagnosis(text),
                     f"여지 표현을 과잉 차단했습니다: {text}",
                 )
+
+
+class BlocksOverinferenceTest(unittest.TestCase):
+    """감정·성격을 고정 특질로 규정하는 과잉 추론은 탐지돼야 한다 (S15P11B209-592)."""
+
+    OVERINFERENCE = [
+        "이 아이는 소심합니다.",                     # 특질 단정
+        "성격이 내성적이에요.",                       # 특질 단정
+        "공격적인 성향이 있어요.",                    # 성향 규정(591이 놓치는 종결)
+        "예민한 기질입니다.",                         # 기질 규정
+        "정서적으로 불안한 아이입니다.",              # 정체성 규정(591이 놓치는 형태)
+        "소심한 아이예요.",                           # 정체성 규정
+        "자존감이 낮습니다.",                         # 심리 속성 단정
+        "공감 능력이 부족해요.",                      # 심리 속성 단정
+        "애정 결핍이 느껴집니다.",                    # 심리 속성 용어
+    ]
+
+    def test_all_overinference_expressions_are_detected(self):
+        for text in self.OVERINFERENCE:
+            with self.subTest(text=text):
+                self.assertTrue(
+                    report_safety.has_overinference(text),
+                    f"과잉 추론 표현을 놓쳤습니다: {text}",
+                )
+
+
+class AllowsObservationTest(unittest.TestCase):
+    """행동 관찰·여지 표현은 과잉 추론으로 잡지 않는다 — 대화·긍정 관찰을 끊으면 해롭다."""
+
+    SAFE = [
+        "소심한 편일 수 있어요.",                     # 여지
+        "내성적인 경향이 보여요.",                    # 여지
+        "조금 산만해 보였어요.",                      # 여지(행동)
+        "조심스러운 모습을 보였어요.",                # 행동 관찰
+        "밝고 활발한 모습이 인상적이에요.",           # 긍정 관찰
+        "외로움을 느끼는 경향이 보일 수 있어요.",     # 여지
+        "자신감 있게 색을 칠했어요.",                 # 행동 관찰
+        "가족을 함께 그린 점이 따뜻하게 느껴져요.",   # 긍정 관찰
+    ]
+
+    def test_observations_and_hedges_pass(self):
+        for text in self.SAFE:
+            with self.subTest(text=text):
+                self.assertFalse(
+                    report_safety.has_overinference(text),
+                    f"관찰·여지 표현을 과잉 차단했습니다: {text}",
+                )
+
+
+class FindOverinferenceTest(unittest.TestCase):
+    def test_returns_patterns_not_raw_text(self):
+        patterns = report_safety.find_overinference("예민한 기질입니다.")
+        self.assertTrue(patterns)
+        for pattern in patterns:
+            self.assertIn(pattern, report_safety._OVERINFERENCE_PATTERNS)
+
+    def test_empty_text_has_no_match(self):
+        self.assertEqual(report_safety.find_overinference(""), [])
+        self.assertEqual(report_safety.find_overinference("   "), [])
+
+
+class UnsafeExpressionTest(unittest.TestCase):
+    """격리 대상 결합 판정 — 진단 단정(591)과 과잉 추론(592)을 함께 잡는다."""
+
+    def test_detects_diagnosis(self):
+        self.assertTrue(report_safety.has_unsafe_expression("우울증입니다."))
+
+    def test_detects_overinference(self):
+        self.assertTrue(report_safety.has_unsafe_expression("공격적인 성향이 있어요."))
+
+    def test_passes_hedged_and_positive(self):
+        self.assertFalse(
+            report_safety.has_unsafe_expression(
+                "즐거워 보여요.", "소심한 편일 수 있어요."
+            )
+        )
+
+    def test_scans_multiple_texts(self):
+        self.assertTrue(
+            report_safety.has_unsafe_expression("괜찮은 그림이에요.", "자존감이 낮습니다.")
+        )
 
 
 class FindDefinitiveDiagnosisTest(unittest.TestCase):
