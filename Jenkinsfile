@@ -61,7 +61,21 @@ pipeline {
   options {
     timestamps()                       // 로그에 시각 표기
     disableConcurrentBuilds()          // 동일 파이프라인 동시 실행 금지(배포 충돌 예방)
-    timeout(time: 30, unit: 'MINUTES') // 무한 매달림 방지
+    // 30분 → 60분 (S15P11B209-623): AAB 스테이지는 gradle 캐시가 빈 첫 회에 10~20분이 든다.
+    //   백엔드 테스트(약 10분)와 합치면 30분을 넘겨 "타임아웃으로 죽었는데 원인은 안 보이는" 빌드가 된다.
+    //   AAB 를 요청하지 않은 빌드는 예전과 똑같이 끝나므로 실질 영향은 없다.
+    timeout(time: 60, unit: 'MINUTES') // 무한 매달림 방지
+  }
+
+  parameters {
+    // 기본 false — 매 푸시마다 AAB 를 굽는 건 낭비다(수 분 + 디스크). 필요할 때만 켜서 돌린다.
+    // ※ Multibranch 잡은 이 블록을 **한 번 실행한 뒤에야** 파라미터를 인식한다.
+    //    이 커밋 후 첫 빌드에는 체크박스가 안 보이는 게 정상이고, 그 다음 빌드부터 나온다.
+    booleanParam(
+      name: 'BUILD_ANDROID_AAB',
+      defaultValue: false,
+      description: 'Android 릴리스 AAB 를 빌드한다 (Jenkins Credentials 3종 필요 — S15P11B209-623)'
+    )
   }
 
   environment {
@@ -243,6 +257,46 @@ pipeline {
           if [ "$ok" != "true" ]; then echo "  ✗ 게이트웨이 e2e 실패(재시도 소진)"; exit 1; fi
           echo "✅ 전체 서비스 healthy + 게이트웨이 라우팅 정상"
         '''
+      }
+    }
+
+    stage('Build — android AAB') {
+      when { expression { params.BUILD_ANDROID_AAB } }   // 요청했을 때만. 기본은 건너뛴다.
+      steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }
+        // 배포(Deploy·Healthcheck) 뒤에 둔 이유: AAB 는 서버 배포와 무관한데 앞에 두면
+        //   빌드가 수 분 길어지는 만큼 배포가 늦어진다. 여기서 실패해도 이미 배포는 끝나 있다.
+        //
+        // ⚠️ 서명 자재 3종은 전부 Credentials(secret file)다. 저장소엔 절대 두지 않는다.
+        //   - dodam-android-keystore       : 업로드 keystore(.jks)
+        //   - dodam-android-key-properties : storeFile·storePassword·keyAlias·keyPassword
+        //   - dodam-mobile-oauth-env       : KAKAO_NATIVE_APP_KEY 등 5개 (KEY=VALUE)
+        //   ※ storeFile 값은 컨테이너 안 경로 `upload-keystore.jks` 여야 한다
+        //     (build-aab.sh 가 /src/android/ 로 넣는다). 호스트 경로를 적으면 못 찾는다.
+        withCredentials([
+          file(credentialsId: 'dodam-android-keystore',       variable: 'ANDROID_KEYSTORE'),
+          file(credentialsId: 'dodam-android-key-properties', variable: 'ANDROID_KEY_PROPS'),
+          file(credentialsId: 'dodam-mobile-oauth-env',       variable: 'MOBILE_OAUTH_ENV')
+        ]) {
+          // build-aab.sh 는 bind mount 를 쓰지 않는다(DooD 경로 함정 회피 — 스크립트 주석 참조).
+          // BUILD_NUMBER 를 versionCode 로 넘겨 Play 업로드 시 버전 충돌을 막는다.
+          sh '''
+            KEYSTORE_FILE="$ANDROID_KEYSTORE" \
+            KEY_PROPERTIES_FILE="$ANDROID_KEY_PROPS" \
+            OAUTH_ENV_FILE="$MOBILE_OAUTH_ENV" \
+            REQUIRE_RELEASE_SIGNING=true \
+            BUILD_NUMBER="$BUILD_NUMBER" \
+            infra/mobile/build-aab.sh
+          '''
+        }
+      }
+      post {
+        success {
+          // AAB 는 Play 에 올릴 산출물이라 빌드 이력에 남긴다. 서명 리포트도 함께 보관해
+          // "어느 키로 서명됐는지"를 나중에 확인할 수 있게 한다(비밀번호는 들어 있지 않다).
+          archiveArtifacts artifacts: 'build-artifacts/app-release.aab, build-artifacts/signing-report.txt',
+                           fingerprint: true, allowEmptyArchive: false
+        }
       }
     }
   }
