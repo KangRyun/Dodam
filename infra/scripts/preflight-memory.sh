@@ -92,6 +92,25 @@ else
   WARNED=1
 fi
 
+# ── 4-b. memory-guard 설치·최신 여부 ─────────────────────────────────────────
+# 크론이 도는 것은 ~/bin 의 **복사본**이다(git 작업 트리에서 직접 돌리면 브랜치 전환 때
+# 내용이 바뀌거나 사라진다). 복사본이 낡는 것을 여기서 잡는다 —
+# "설치는 돼 있는데 옛날 버전이 돌고 있는" 상태가 이 저장소의 단골 실패 양상이다.
+GUARD_REPO="$(dirname "$(readlink -f "$0")")/memory-guard.sh"
+GUARD_INSTALLED="$HOME/bin/dodam-memory-guard.sh"
+if [ -x "$GUARD_INSTALLED" ] && crontab -l 2>/dev/null | grep -q dodam-memory-guard; then
+  if [ -f "$GUARD_REPO" ] && ! cmp -s "$GUARD_REPO" "$GUARD_INSTALLED"; then
+    warn "memory-guard 설치본이 저장소 버전과 다르다 — infra/scripts/memory-guard.sh --install"
+    WARNED=1
+  else
+    ok "memory-guard 설치·등록됨 (매분 감시 · WARN 알림 / CRIT 시 빌드부터 정지)"
+  fi
+else
+  warn "memory-guard 미설치 — 메모리가 마를 때 알림도, 자동 정지도 없다"
+  warn "  infra/scripts/memory-guard.sh --install"
+  WARNED=1
+fi
+
 # ── 5. 무제한 컨테이너 ────────────────────────────────────────────────────────
 # 상한 없는 컨테이너 하나가 호스트 전체를 끌고 갈 수 있다.
 if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
