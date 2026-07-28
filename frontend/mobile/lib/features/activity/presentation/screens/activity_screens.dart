@@ -677,6 +677,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
                 ? _undoLastStroke
                 : null,
             icon: const Icon(Icons.undo_rounded),
+            style: IconButton.styleFrom(
+              minimumSize: const Size.square(AppSizes.iconButton),
+            ),
           ),
         ),
       ],
@@ -1251,6 +1254,9 @@ class _SaveStatusIndicator extends StatelessWidget {
               tooltip: '저장 다시 시도',
               onPressed: onRetry,
               icon: const Icon(Icons.refresh_rounded),
+              style: IconButton.styleFrom(
+                minimumSize: const Size.square(AppSizes.iconButton),
+              ),
             ),
         ],
       ),
@@ -1268,12 +1274,15 @@ class _ToolHeading extends StatelessWidget {
     children: [
       Icon(icon, color: AppColors.inkMuted, size: 20),
       const SizedBox(width: AppSpacing.xs),
-      Text(
-        label,
-        style: const TextStyle(
-          color: AppColors.ink,
-          fontSize: 17,
-          fontWeight: FontWeight.w800,
+      Flexible(
+        child: Text(
+          label,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: AppColors.ink,
+            fontSize: 17,
+            fontWeight: FontWeight.w800,
+          ),
         ),
       ),
     ],
