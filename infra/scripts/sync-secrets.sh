@@ -43,6 +43,14 @@ REQUIRED_KEYS=(
   MINIO_BE_PASSWORD
   GMS_KEY
   GMS_BASE_URL
+  # MongoDB (S15P11B209-634) — MinIO 와 동일 원칙: 관리 계정과 앱 계정을 분리한다.
+  #   root 는 백업·인덱스 관리용, 앱은 해당 DB 에만 readWrite.
+  #   ⚠️ 이 키들이 없으면 mongodb 파드의 init 스크립트가 fail-fast 로 죽는다(조용한 반쪽 성공 방지).
+  MONGO_ROOT_USERNAME
+  MONGO_ROOT_PASSWORD
+  MONGO_DATABASE
+  MONGO_APP_USERNAME
+  MONGO_APP_PASSWORD
 )
 
 ENV_FILE="${1:-}"
