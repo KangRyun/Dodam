@@ -184,6 +184,25 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                                             child: const Text('다시 보내기'),
                                           ),
                                         ],
+                                        // 동의 부재는 아이 화면에 어른 문구를 노출하지 않고
+                                        // 선택형 답변으로 자연스럽게 유도한다(가드레일 9절).
+                                        if (voiceAnswerUploadStatus ==
+                                            VoiceAnswerUploadStatus
+                                                .consentRequired) ...[
+                                          const SizedBox(height: AppSpacing.xs),
+                                          const Text(
+                                            '목소리로 답하기는 지금 쓸 수 없어요.\n'
+                                            '아래에서 골라서 답해 볼까요?',
+                                            key: ValueKey(
+                                              'voice-answer-consent-required',
+                                            ),
+                                            textAlign: TextAlign.center,
+                                            style: TextStyle(
+                                              color: AppColors.inkMuted,
+                                              fontWeight: FontWeight.w700,
+                                            ),
+                                          ),
+                                        ],
                                       ],
                                       const SizedBox(height: AppSpacing.sm),
                                       AnimatedSwitcher(
