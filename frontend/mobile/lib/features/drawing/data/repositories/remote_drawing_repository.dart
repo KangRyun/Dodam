@@ -90,7 +90,7 @@ final class RemoteDrawingRepository implements DrawingRepository {
       data: request.toJson(),
       options: Options(headers: {'Idempotency-Key': _idempotencyKey()}),
     );
-    return DrawingSessionDto.fromJson(envelopeObject(response.data));
+    return DrawingSessionDto.fromCreateJson(envelopeObject(response.data));
   }
 
   @override
@@ -98,7 +98,7 @@ final class RemoteDrawingRepository implements DrawingRepository {
     final response = await _apiClient.get<Map<String, dynamic>>(
       'drawing-sessions/$sessionId',
     );
-    return DrawingSessionDto.fromJson(envelopeObject(response.data));
+    return DrawingSessionDto.fromDetailJson(envelopeObject(response.data));
   }
 
   @override

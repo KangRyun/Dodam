@@ -90,7 +90,32 @@ void main() {
       ),
     );
     expect(session.drawingSessionId, 42);
+    expect(session.childId, 3);
     expect(session.drawingType.code, 'FREE_DRAWING');
+  });
+
+  test('그림 세션 상세는 중첩 child와 완료 흐름 상태를 역직렬화한다', () async {
+    final interceptor = _SessionDetailInterceptor();
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        interceptors: [interceptor],
+      ),
+    );
+
+    final session = await repository.getSession(42);
+
+    final request = interceptor.requests.single;
+    expect(request.method, 'GET');
+    expect(request.uri.path, '/api/v1/drawing-sessions/42');
+    expect(session.drawingSessionId, 42);
+    expect(session.childId, 3);
+    expect(session.sessionStatus, 'IN_PROGRESS');
+    expect(session.currentStage, 'CONVERSING');
+    expect(session.conversationId, 81);
+    expect(session.reportId, isNull);
+    expect(session.selectedEmotions, ['HAPPY']);
+    expect(session.latestAnalysis?['drawingAnalysisId'], 300);
   });
 
   test('Draft 저장은 JSON MIME multipart와 공통 응답 봉투를 처리한다', () async {
@@ -484,6 +509,64 @@ final class _DraftInterceptor extends Interceptor {
               'lastEventSequence': 17,
               'clientSavedAt': '2026-07-25T08:00:00Z',
             },
+          },
+        },
+      ),
+    );
+  }
+}
+
+final class _SessionDetailInterceptor extends Interceptor {
+  final List<RequestOptions> requests = [];
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    requests.add(options);
+    handler.resolve(
+      Response<Map<String, dynamic>>(
+        requestOptions: options,
+        statusCode: 200,
+        data: const {
+          'success': true,
+          'code': 'COMMON_200',
+          'message': '요청에 성공했습니다.',
+          'data': {
+            'drawingSessionId': 42,
+            'child': {'childId': 3, 'nickname': '도담'},
+            'drawingType': {
+              'drawingTypeId': 11,
+              'code': 'FREE_DRAWING',
+              'name': '자유 그리기',
+            },
+            'inputMethod': 'CANVAS',
+            'title': '우리 가족',
+            'selectedEmotions': ['HAPPY'],
+            'sessionStatus': 'IN_PROGRESS',
+            'currentStage': 'CONVERSING',
+            'latestAsset': {
+              'drawingAssetId': 200,
+              'assetType': 'FINAL',
+              'assetVersion': 1,
+              'mimeType': 'image/png',
+              'fileSizeBytes': 4096,
+              'widthPx': 1920,
+              'heightPx': 1080,
+              'capturedAt': '2026-07-25T08:05:00Z',
+              'createdAt': '2026-07-25T08:05:01Z',
+            },
+            'latestAnalysis': {
+              'drawingAnalysisId': 300,
+              'analysisScope': 'INTERMEDIATE',
+              'analysisType': 'OBJECT_DETECTION',
+              'analysisStatus': 'SUCCEEDED',
+              'requestedAt': '2026-07-25T08:05:02Z',
+              'completedAt': '2026-07-25T08:05:03Z',
+            },
+            'conversationId': 81,
+            'reportId': null,
+            'startedAt': '2026-07-25T08:00:00Z',
+            'completedAt': null,
+            'recoverableDraft': true,
           },
         },
       ),
