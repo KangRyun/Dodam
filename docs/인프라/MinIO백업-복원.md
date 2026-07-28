@@ -32,12 +32,34 @@ MySQL 백업이 이미 구성돼 있으면 1·2는 갖춰져 있음(공용).
 
 ```
 # /etc/cron.d/dodam-backup  (root)
-0  4 * * *  root  /경로/infra/scripts/mysql-backup.sh  >> /var/log/dodam-backup.log 2>&1
-30 4 * * *  root  /경로/infra/scripts/minio-backup.sh  >> /var/log/dodam-backup.log 2>&1
+0  4    * * *  root  /경로/infra/scripts/mysql-backup.sh  >> /var/log/dodam-backup.log 2>&1
+30 */6  * * *  root  /경로/infra/scripts/minio-backup.sh  >> /var/log/dodam-backup.log 2>&1
 ```
-- MinIO는 MySQL과 **시차(04:30)** — 동시 I/O·CPU 경합 회피.
+- MinIO는 MySQL과 **시차(:30)** — 동시 I/O·CPU 경합 회피.
+- **6시간 주기(00:30·06:30·12:30·18:30)** — 하루 1회면 최대 24시간의 백업 공백이 생긴다.
+  2026-07-28 하루에만 파일이 30 → 70개로 늘었다. 낮에 디스크가 나가면 그날 그린 그림이
+  전부 사라진다. 데이터가 작아(수백 KB) 주기를 올려도 부담이 거의 없다.
 - 수동 1회: `sudo infra/scripts/minio-backup.sh`
-- 성공 로그: `[minio-backup] OK bucket=dodam file=... size=... retention=14d exclude=tts-cache/*`
+- 성공 로그: `[minio-backup] OK bucket=dodam file=... objects=70 size=228K retention=14d exclude=tts-cache/*`
+
+### ⚠️ 로그의 `OK` 를 그대로 믿지 말 것
+
+2026-07-27·28 백업이 **이틀 연속 `OK size=4.0K` 로 성공 기록**을 남겼지만 실제로는
+**내용이 빈 백업**이었다(당시 버킷이 비어 있었음). 종료 코드도 0이었고, 크기가 4.0K 로
+고정이라 오히려 *안정적*으로 보였다.
+
+그래서 로그에 **`objects=`(담긴 객체 수)** 를 함께 남긴다. 확인 기준은 두 가지다.
+
+| 볼 것 | 정상 판정 |
+|---|---|
+| `objects=` | DB `drawing_assets` 개수와 일치하거나 그 이상 |
+| `objects=0` | `WARN` 이 함께 출력된다 — 버킷·자격증명·프리픽스를 확인할 것 |
+
+```bash
+# 대조용 — DB 가 기억하는 파일 수
+docker exec dodam-mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N \
+  -e "SELECT COUNT(*) FROM drawing_assets;" b209'
+```
 
 ## 복원
 
@@ -54,8 +76,31 @@ sudo infra/scripts/minio-restore.sh /var/backups/dodam/minio-2026-07-26-0430.tar
 
 ## 월 1회 복구 드릴 (권장)
 
-최신 백업으로 `--dry-run` 실행해 "복원 가능한 파일인지" 확인 → 결과를 팀 로그에 기록.
 백업이 존재하는 것과 **복원되는 것**은 다르다 — 드릴로만 보장된다.
+그리고 "복호화가 되는 것"과 **"쓸모 있는 내용이 담긴 것"** 도 다르다.
+
+```bash
+# 1) 최신 백업 확인
+#    ⚠️ glob(*)은 sudo 이전에 "현재 사용자" shell 이 확장한다. 백업 디렉토리는 700 root 라
+#       일반 계정이 읽지 못해 zsh 에서 `no matches found` 로 실패한다(파일이 없어서가 아니다).
+#       그래서 확장을 root 쪽으로 넘긴다.
+sudo sh -c 'ls -lt /var/backups/dodam/minio-*.tar.gz.enc | head -3'
+
+# 2) 드릴 — 운영 버킷은 건드리지 않는다
+sudo /home/kr/S15P11B209/infra/scripts/minio-restore.sh --dry-run \
+  /var/backups/dodam/minio-<날짜>-<시각>.tar.gz.enc
+
+# 3) 대조 — 담긴 개수가 DB·현재 버킷과 맞는지
+docker exec dodam-mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N \
+  -e "SELECT COUNT(*) FROM drawing_assets;" b209'
+```
+
+드릴 출력에 `objects=` 와 프리픽스별 개수가 나온다. **세 숫자(백업·버킷·DB)가 맞아야 통과**다.
+개수가 맞아도 내용이 다를 수 있으므로, 더 강한 검증이 필요하면
+`docs/인프라/MinIO-운영.md` §5 의 sha256 전수 대조를 쓴다
+(`drawing_assets.checksum_sha256` 이 전 행에 채워져 있어 별도 기준이 필요 없다).
+
+결과는 팀 로그에 기록한다 — 언제 드릴했고 몇 개였는지가 다음 드릴의 비교 기준이 된다.
 
 ## ⚠️ 첫 실행 시 검증 필요 (리눅스 세션서 미검증 항목)
 

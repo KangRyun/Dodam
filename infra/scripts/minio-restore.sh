@@ -70,8 +70,19 @@ if ! openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -iter 200000 -pass "file:${P
 fi
 
 if [[ ${DRY_RUN} -eq 1 ]]; then
-  echo "[minio-restore] DRY-RUN OK: 복호화·해제 정상. 담긴 프리픽스:"
-  find "${STAGE}" -maxdepth 1 -mindepth 1 -type d -printf '  - %f/\n' 2>/dev/null || true
+  # 프리픽스 목록만으로는 "빈 백업"을 구분하지 못한다 — 프리픽스별 객체 수를 함께 낸다.
+  #   reason: 복원 드릴의 목적은 "복호화가 되는가"가 아니라 "이 백업으로 되살릴 수 있는가"다.
+  #   담긴 개수를 DB(drawing_assets)나 현재 버킷과 대조해야 판정이 끝난다(S15P11B209-374).
+  TOTAL="$(find "${STAGE}" -type f | wc -l)"
+  echo "[minio-restore] DRY-RUN OK: 복호화·해제 정상. objects=${TOTAL}"
+  echo "  프리픽스별 객체 수:"
+  find "${STAGE}" -maxdepth 1 -mindepth 1 -type d -printf '%f\n' 2>/dev/null | sort | while read -r prefix; do
+    printf '  - %-14s %s\n' "${prefix}/" "$(find "${STAGE}/${prefix}" -type f | wc -l)"
+  done
+  if [[ "${TOTAL}" -eq 0 ]]; then
+    echo "[minio-restore] WARN: 담긴 객체가 없습니다 — 이 백업으로는 아무것도 복원되지 않습니다." >&2
+  fi
+  echo "  대조: 현재 버킷·DB 객체 수와 비교해 누락이 없는지 확인하세요."
   echo "  (실복원: --dry-run 없이 재실행)"
   exit 0
 fi

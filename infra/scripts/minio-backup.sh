@@ -117,6 +117,19 @@ if ! docker run --rm --network "${NET}" --env-file "${TMP_ENV}" \
   exit 6
 fi
 
+# ── 담긴 객체 수 확인 (S15P11B209-374) ───────────────────────────────────────
+# reason: 크기만 남기면 "성공했지만 내용이 빈" 백업을 알아챌 수 없다.
+#   2026-07-27·28 백업이 이틀 연속 `OK size=4.0K`(빈 tar) 로 성공 기록을 남겼는데,
+#   당시 버킷이 비어 있었다는 사실을 아무도 몰랐다. 크기가 4.0K 로 "고정"이라
+#   오히려 안정적으로 보였다. 개수를 함께 남기면 한눈에 드러난다.
+OBJECTS="$(find "${STAGE}" -type f | wc -l)"
+if [[ "${OBJECTS}" -eq 0 ]]; then
+  # 백업 파일 자체는 정상 생성되므로 실패(exit≠0)로 다루지 않는다. 다만 조용히 넘기지 않는다.
+  #   버킷이 실제로 비어 있는 초기 구축 시점에는 정상이지만, 운영 중이라면 이상 신호다.
+  echo "[minio-backup] WARN bucket=${BUCKET} objects=0 — 내용이 빈 백업입니다." \
+       "버킷이 실제로 비었는지, 자격증명·프리픽스가 어긋나지 않았는지 확인하세요." >&2
+fi
+
 # tar → gzip → AES-256-CBC 암호화 (mysql-backup.sh 와 동일 파라미터로 복원 호환 고정)
 #   openssl -pbkdf2 -md sha256 -iter 200000: 버전 기본값 의존 금지(복원 파라미터와 반드시 일치).
 if ! tar -C "${STAGE}" -czf - . \
@@ -133,4 +146,4 @@ find "${BACKUP_DIR}" -maxdepth 1 -type f -name "minio-*.tar.gz.enc" -mtime "+${R
 
 # ── 결과 로그 한 줄 (민감정보 없음 — 파일명·크기·소요만) ──────────────────────
 SIZE="$(du -h "${OUT}" | cut -f1)"
-echo "[minio-backup] OK bucket=${BUCKET} file=${OUT} size=${SIZE} elapsed=${SECONDS}s retention=${RETENTION_DAYS}d exclude=${EXCLUDE}"
+echo "[minio-backup] OK bucket=${BUCKET} file=${OUT} objects=${OBJECTS} size=${SIZE} elapsed=${SECONDS}s retention=${RETENTION_DAYS}d exclude=${EXCLUDE}"
