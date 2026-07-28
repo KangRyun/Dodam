@@ -52,150 +52,246 @@ final class ReportSummaryDto {
   final bool isExpertReviewRecommended;
 }
 
-final class ReportActivitySummaryDto {
-  const ReportActivitySummaryDto({
+List<String> _stringList(Object? value) => value is List
+    ? value.whereType<String>().toList(growable: false)
+    : const [];
+
+/// `data.drawingSession` — 리포트가 가리키는 그림 활동 세션.
+///
+/// 세션이 없으면 서버가 404를 주므로 상세 응답에서는 객체 자체가 비지 않지만,
+/// 진행 중(GENERATING) 응답의 부분 데이터를 견디도록 모든 값을 nullable로 둔다.
+final class ReportDrawingSessionDto {
+  const ReportDrawingSessionDto({
+    required this.drawingSessionId,
+    required this.childId,
+    required this.drawingTypeCode,
+    required this.drawingTypeName,
     required this.title,
-    required this.drawingType,
     required this.inputMethod,
     required this.startedAt,
     required this.completedAt,
-    required this.durationMinutes,
-    required this.selectedEmotions,
+    required this.durationMs,
   });
-  factory ReportActivitySummaryDto.fromJson(Map<String, dynamic> json) =>
-      ReportActivitySummaryDto(
+  factory ReportDrawingSessionDto.fromJson(Map<String, dynamic> json) =>
+      ReportDrawingSessionDto(
+        drawingSessionId: (json['drawingSessionId'] as num?)?.toInt(),
+        childId: (json['childId'] as num?)?.toInt(),
+        drawingTypeCode: json['drawingTypeCode'] as String?,
+        drawingTypeName: json['drawingTypeName'] as String?,
         title: json['title'] as String?,
-        drawingType: _map(json['drawingType']),
-        inputMethod: json['inputMethod'] as String,
-        startedAt: json['startedAt'] as String,
-        completedAt: json['completedAt'] as String,
-        durationMinutes: json['durationMinutes'] as int,
-        selectedEmotions: List<String>.from(json['selectedEmotions'] as List),
+        inputMethod: json['inputMethod'] as String?,
+        startedAt: json['startedAt'] as String?,
+        completedAt: json['completedAt'] as String?,
+        durationMs: (json['durationMs'] as num?)?.toInt(),
       );
-  final String? title;
-  final Map<String, dynamic> drawingType;
-  final String inputMethod, startedAt, completedAt;
-  final int durationMinutes;
+  final int? drawingSessionId, childId, durationMs;
+  final String? drawingTypeCode,
+      drawingTypeName,
+      title,
+      inputMethod,
+      startedAt,
+      completedAt;
+}
+
+/// `data.drawing` — 완성 그림 이미지 URL.
+final class ReportDrawingDto {
+  const ReportDrawingDto({
+    required this.finalImageUrl,
+    required this.thumbnailUrl,
+  });
+  factory ReportDrawingDto.fromJson(Map<String, dynamic> json) =>
+      ReportDrawingDto(
+        finalImageUrl: json['finalImageUrl'] as String?,
+        thumbnailUrl: json['thumbnailUrl'] as String?,
+      );
+  final String? finalImageUrl, thumbnailUrl;
+}
+
+/// `data.childExpression.representativeUtterances[]` 항목.
+///
+/// `messageId`와 `text`는 원본 메시지가 없으면 null이다. `source`는 서버가
+/// `STT`(음성 답변) 또는 `TEXT`로만 채우며, 값이 비면 계약 기본값 `TEXT`를 쓴다.
+final class ReportUtteranceDto {
+  const ReportUtteranceDto({
+    required this.messageId,
+    required this.text,
+    required this.source,
+    required this.sttNeedsConfirmation,
+  });
+  factory ReportUtteranceDto.fromJson(Map<String, dynamic> json) =>
+      ReportUtteranceDto(
+        messageId: (json['messageId'] as num?)?.toInt(),
+        text: json['text'] as String?,
+        source: json['source'] as String? ?? 'TEXT',
+        sttNeedsConfirmation: json['sttNeedsConfirmation'] as bool? ?? false,
+      );
+  final int? messageId;
+  final String? text;
+  final String source;
+  final bool sttNeedsConfirmation;
+}
+
+/// `data.childExpression` — 아이가 고른 감정과 대표 발화.
+final class ReportChildExpressionDto {
+  const ReportChildExpressionDto({
+    required this.selectedEmotions,
+    required this.expressedEmotionText,
+    required this.representativeUtterances,
+  });
+  factory ReportChildExpressionDto.fromJson(Map<String, dynamic> json) =>
+      ReportChildExpressionDto(
+        selectedEmotions: _stringList(json['selectedEmotions']),
+        expressedEmotionText: json['expressedEmotionText'] as String?,
+        representativeUtterances:
+            (json['representativeUtterances'] as List? ?? const [])
+                .map((item) => ReportUtteranceDto.fromJson(_map(item)))
+                .toList(growable: false),
+      );
   final List<String> selectedEmotions;
+  final String? expressedEmotionText;
+  final List<ReportUtteranceDto> representativeUtterances;
+
+  bool get isEmpty =>
+      selectedEmotions.isEmpty &&
+      expressedEmotionText == null &&
+      representativeUtterances.isEmpty;
 }
 
-final class ObservedFeatureDto {
-  const ObservedFeatureDto({
-    required this.label,
-    required this.description,
-    required this.evidenceRef,
+/// `data.activityFacts` — 해석 없이 관찰된 활동 기록.
+final class ReportActivityFactsDto {
+  const ReportActivityFactsDto({
+    required this.detectedObjects,
+    required this.drawingDurationMs,
+    required this.pauseCount,
+    required this.eraseCount,
+    required this.pressureAvailable,
+    required this.notes,
   });
-  factory ObservedFeatureDto.fromJson(Map<String, dynamic> json) =>
-      ObservedFeatureDto(
-        label: json['label'] as String,
-        description: json['description'] as String,
-        evidenceRef: json['evidenceRef'] as String,
+  factory ReportActivityFactsDto.fromJson(Map<String, dynamic> json) =>
+      ReportActivityFactsDto(
+        detectedObjects: _stringList(json['detectedObjects']),
+        drawingDurationMs: (json['drawingDurationMs'] as num?)?.toInt(),
+        pauseCount: (json['pauseCount'] as num?)?.toInt(),
+        eraseCount: (json['eraseCount'] as num?)?.toInt(),
+        pressureAvailable: json['pressureAvailable'] as bool? ?? false,
+        notes: _stringList(json['notes']),
       );
-  final String label, description, evidenceRef;
+  final List<String> detectedObjects, notes;
+  final int? drawingDurationMs, pauseCount, eraseCount;
+  final bool pressureAvailable;
+
+  bool get isEmpty =>
+      detectedObjects.isEmpty &&
+      notes.isEmpty &&
+      pauseCount == null &&
+      eraseCount == null;
 }
 
-final class KeyConversationDto {
-  const KeyConversationDto({
-    required this.question,
-    required this.answer,
-    required this.answerType,
+/// `data.conversationSummary` — 대화 진행 수치와 요약문.
+final class ReportConversationSummaryDto {
+  const ReportConversationSummaryDto({
+    required this.questionCount,
+    required this.answeredCount,
+    required this.skippedCount,
+    required this.summary,
   });
-  factory KeyConversationDto.fromJson(Map<String, dynamic> json) =>
-      KeyConversationDto(
-        question: json['question'] as String,
-        answer: json['answer'] as String,
-        answerType: json['answerType'] as String,
+  factory ReportConversationSummaryDto.fromJson(Map<String, dynamic> json) =>
+      ReportConversationSummaryDto(
+        questionCount: (json['questionCount'] as num?)?.toInt(),
+        answeredCount: (json['answeredCount'] as num?)?.toInt(),
+        skippedCount: (json['skippedCount'] as num?)?.toInt(),
+        summary: json['summary'] as String?,
       );
-  final String question, answer, answerType;
+  final int? questionCount, answeredCount, skippedCount;
+  final String? summary;
+
+  bool get isEmpty =>
+      questionCount == null &&
+      answeredCount == null &&
+      skippedCount == null &&
+      summary == null;
 }
 
-final class ReportEvidenceDto {
-  const ReportEvidenceDto({
-    required this.drawingRefs,
-    required this.conversationRefs,
-  });
-  factory ReportEvidenceDto.fromJson(Map<String, dynamic> json) =>
-      ReportEvidenceDto(
-        drawingRefs: List<String>.from(json['drawingRefs'] as List),
-        conversationRefs: List<int>.from(json['conversationRefs'] as List),
+/// `data.expertReview` — 전문가 검토 워크플로 상태.
+final class ReportExpertReviewDto {
+  const ReportExpertReviewDto({required this.status, required this.available});
+  factory ReportExpertReviewDto.fromJson(Map<String, dynamic> json) =>
+      ReportExpertReviewDto(
+        status: json['status'] as String?,
+        available: json['available'] as bool? ?? false,
       );
-  final List<String> drawingRefs;
-  final List<int> conversationRefs;
+  final String? status;
+  final bool available;
 }
 
-final class ReportFollowUpDto {
-  const ReportFollowUpDto({
-    required this.attentionPoints,
-    required this.guidance,
-  });
-  factory ReportFollowUpDto.fromJson(Map<String, dynamic> json) =>
-      ReportFollowUpDto(
-        attentionPoints: List<String>.from(json['attentionPoints'] as List),
-        guidance: json['guidance'] as String,
-      );
-  final List<String> attentionPoints;
-  final String guidance;
-}
-
-/// DTO follows the current public API example. JSON section schema is pending final team agreement.
+/// REPORT-02 `GET /reports/{reportId}`의 `data` 페이로드.
+///
+/// 보호자 공개 계약(`docs/api/report-detail-guardian-contract.md` §2)만 담는다.
+/// 서버가 내려주지 않는 값(analysisId·modelVersion·observedFeatures 등)은
+/// 화면에서 지어내지 않도록 DTO에도 두지 않는다.
 final class ReportDetailDto {
   const ReportDetailDto({
     required this.reportId,
-    required this.drawingSessionId,
-    required this.analysisId,
     required this.reportVersion,
     required this.reportStatus,
-    required this.activitySummary,
-    required this.drawingImageUrl,
-    required this.observedFeatures,
-    required this.keyConversations,
-    required this.evidence,
-    required this.followUp,
-    required this.guardianQuestions,
-    required this.isExpertReviewRecommended,
-    required this.limitationsText,
-    required this.modelVersion,
+    required this.drawingSession,
+    required this.drawing,
+    required this.childExpression,
+    required this.activityFacts,
+    required this.conversationSummary,
+    required this.guardianConversationGuide,
+    required this.limitations,
+    required this.expertReview,
     required this.createdAt,
   });
   factory ReportDetailDto.fromJson(Map<String, dynamic> json) =>
       ReportDetailDto(
-        reportId: json['reportId'] as int,
-        drawingSessionId: json['drawingSessionId'] as int,
-        analysisId: json['analysisId'] as int,
-        reportVersion: json['reportVersion'] as int,
-        reportStatus: json['reportStatus'] as String,
-        activitySummary: json['activitySummary'] == null
-            ? null
-            : ReportActivitySummaryDto.fromJson(_map(json['activitySummary'])),
-        drawingImageUrl: json['drawingImageUrl'] as String?,
-        observedFeatures: (json['observedFeatures'] as List?)
-            ?.map((item) => ObservedFeatureDto.fromJson(_map(item)))
-            .toList(growable: false),
-        keyConversations: (json['keyConversations'] as List?)
-            ?.map((item) => KeyConversationDto.fromJson(_map(item)))
-            .toList(growable: false),
-        evidence: json['evidence'] == null
-            ? null
-            : ReportEvidenceDto.fromJson(_map(json['evidence'])),
-        followUp: json['followUp'] == null
-            ? null
-            : ReportFollowUpDto.fromJson(_map(json['followUp'])),
-        guardianQuestions: (json['guardianQuestions'] as List?)?.cast<String>(),
-        isExpertReviewRecommended: json['isExpertReviewRecommended'] as bool?,
-        limitationsText: json['limitationsText'] as String,
-        modelVersion: json['modelVersion'] as String?,
-        createdAt: json['createdAt'] as String,
+        reportId: (json['reportId'] as num).toInt(),
+        reportVersion: (json['reportVersion'] as num?)?.toInt() ?? 0,
+        reportStatus: json['reportStatus'] as String? ?? 'GENERATING',
+        drawingSession: json['drawingSession'] is Map
+            ? ReportDrawingSessionDto.fromJson(_map(json['drawingSession']))
+            : null,
+        drawing: json['drawing'] is Map
+            ? ReportDrawingDto.fromJson(_map(json['drawing']))
+            : null,
+        childExpression: json['childExpression'] is Map
+            ? ReportChildExpressionDto.fromJson(_map(json['childExpression']))
+            : null,
+        activityFacts: json['activityFacts'] is Map
+            ? ReportActivityFactsDto.fromJson(_map(json['activityFacts']))
+            : null,
+        conversationSummary: json['conversationSummary'] is Map
+            ? ReportConversationSummaryDto.fromJson(
+                _map(json['conversationSummary']),
+              )
+            : null,
+        guardianConversationGuide: _stringList(
+          json['guardianConversationGuide'],
+        ),
+        limitations: _stringList(json['limitations']),
+        expertReview: json['expertReview'] is Map
+            ? ReportExpertReviewDto.fromJson(_map(json['expertReview']))
+            : null,
+        createdAt: json['createdAt'] as String?,
       );
-  final int reportId, drawingSessionId, analysisId, reportVersion;
-  final String reportStatus, limitationsText, createdAt;
-  final ReportActivitySummaryDto? activitySummary;
-  final String? drawingImageUrl, modelVersion;
-  final List<ObservedFeatureDto>? observedFeatures;
-  final List<KeyConversationDto>? keyConversations;
-  final ReportEvidenceDto? evidence;
-  final ReportFollowUpDto? followUp;
-  final List<String>? guardianQuestions;
-  final bool? isExpertReviewRecommended;
+  final int reportId, reportVersion;
+  final String reportStatus;
+  final ReportDrawingSessionDto? drawingSession;
+  final ReportDrawingDto? drawing;
+  final ReportChildExpressionDto? childExpression;
+  final ReportActivityFactsDto? activityFacts;
+  final ReportConversationSummaryDto? conversationSummary;
+  final List<String> guardianConversationGuide, limitations;
+  final ReportExpertReviewDto? expertReview;
+  final String? createdAt;
+
+  /// 관찰 섹션이 하나도 없어 "표시할 기록 없음"을 보여줘야 하는 상태.
+  bool get hasNoObservations =>
+      (childExpression?.isEmpty ?? true) &&
+      (activityFacts?.isEmpty ?? true) &&
+      (conversationSummary?.isEmpty ?? true) &&
+      guardianConversationGuide.isEmpty;
 }
 
 final class AnalysisObservationDto {
