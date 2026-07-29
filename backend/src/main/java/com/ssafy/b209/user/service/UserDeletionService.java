@@ -1,6 +1,8 @@
 package com.ssafy.b209.user.service;
 
 import com.ssafy.b209.auth.repository.UserRepository;
+import com.ssafy.b209.child.repository.ChildDeletionRepository;
+import com.ssafy.b209.child.service.ChildDeletionService;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.user.dto.request.DeleteUserRequest;
 import com.ssafy.b209.user.exception.UserErrorCode;
@@ -8,10 +10,23 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 인증 사용자의 계정 식별정보를 즉시 삭제하는 회원 탈퇴 Use Case다.
+ * 인증 사용자의 계정과 그가 혼자 보유한 아동 데이터를 삭제하는 회원 탈퇴 Use Case다.
  *
- * <p>사용자 FK의 CASCADE·SET NULL 정책에 따라 인증 계정과 개인 설정은 함께 제거하고, 감사·활동 기록의 사용자 참조는 비식별화한다. 아동 및 활동 데이터
- * 삭제는 별도 API 정책으로 분리한다.
+ * <p><b>2026-07-30 변경 (S15P11B209-728)</b>: 이전에는 {@code users} 행만 지웠다. 그런데 {@code children}에는
+ * {@code users}로 향하는 FK가 없어(연결이 {@code guardian_child_relations} 경유), 탈퇴하면 <b>관계만</b> 끊기고 아동
+ * 프로필·그림·음성·대화가 소유자 없이 남았다. 고아 상태라 이후 누구도 삭제를 요청할 수 없어, CLAUDE.md 9절의 "회원 탈퇴 시 아동 데이터 함께 삭제" 원칙과
+ * 어긋났다.
+ *
+ * <p>탈퇴 시 데이터 처리는 다음과 같다.
+ *
+ * <ul>
+ *   <li><b>단독 보유 아동과 그 그림·음성·대화</b> — 소프트 삭제 + 스토리지 삭제 큐 적재. 개별 삭제 API와 같은 경로를 재사용한다
+ *   <li><b>공동 보유 아동</b> — 관계만 해제(CASCADE). 다른 보호자의 데이터를 지울 수는 없다
+ *   <li><b>인증 계정·토큰·알림·좋아요</b> — FK CASCADE로 함께 삭제
+ *   <li><b>커뮤니티 글·댓글·감사 로그</b> — SET NULL로 비식별화. 대화 맥락은 남기되 작성자를 지운다
+ *   <li><b>전문가 프로필</b> — 삭제(팔로우·전문분야·자격증빙 CASCADE). 미술 활동 자료는 작성자만 끊고 남긴다
+ *   <li><b>동의 증빙</b> — 보존. 법적 보존 대상이다(가드레일 9절)
+ * </ul>
  */
 @Service
 public class UserDeletionService {
@@ -19,18 +34,32 @@ public class UserDeletionService {
   private static final String CONFIRMATION = "DELETE";
 
   private final UserRepository userRepository;
+  private final ChildDeletionService childDeletionService;
+  private final ChildDeletionRepository childDeletionRepository;
 
   /**
    * 회원 탈퇴 서비스를 구성한다.
    *
    * @param userRepository 사용자 존재 확인과 hard delete를 수행할 저장소
+   * @param childDeletionService 아동 삭제 정책(소프트 삭제 + 스토리지 큐)을 가진 서비스
+   * @param childDeletionRepository 전문가 프로필 삭제용 저장소
    */
-  public UserDeletionService(UserRepository userRepository) {
+  public UserDeletionService(
+      UserRepository userRepository,
+      ChildDeletionService childDeletionService,
+      ChildDeletionRepository childDeletionRepository) {
     this.userRepository = userRepository;
+    this.childDeletionService = childDeletionService;
+    this.childDeletionRepository = childDeletionRepository;
   }
 
   /**
-   * 확인 문자열을 검증하고 인증 사용자를 즉시 삭제한다.
+   * 확인 문자열을 검증하고, 아동 데이터를 먼저 정리한 뒤 사용자를 삭제한다.
+   *
+   * <p><b>아동 삭제가 먼저다.</b> 사용자를 먼저 지우면 {@code guardian_child_relations}가 CASCADE로 사라져 "이 보호자의 아동"을
+   * 더는 찾을 수 없다. 순서가 바뀌면 오류 없이 조용히 아무것도 지우지 못한다.
+   *
+   * <p>같은 트랜잭션에서 처리한다 — 아동만 삭제되고 사용자가 남거나 그 반대가 되면 복구가 어렵다.
    *
    * @param userId Access Token으로 인증된 사용자 ID
    * @param request 탈퇴 확인 요청
@@ -44,6 +73,11 @@ public class UserDeletionService {
     if (!userRepository.existsById(userId)) {
       throw new BusinessException(UserErrorCode.USER_NOT_FOUND);
     }
+    childDeletionService.deleteAllSolelyOwnedBy(userId);
+    // expert_profiles.user_id 가 ON DELETE RESTRICT 다. 남겨둔 채 사용자를 지우면 제약 위반이 500 으로 샌다.
+    //   전문가도 탈퇴할 수 있어야 한다는 결정(2026-07-30)에 따라 프로필을 먼저 지운다.
+    //   팔로우·전문분야·자격증빙은 CASCADE 로 함께 지워지고, 미술 활동 자료는 V22 의 SET NULL 로 남는다.
+    childDeletionRepository.deleteExpertProfile(userId);
     userRepository.deleteById(userId);
   }
 }
