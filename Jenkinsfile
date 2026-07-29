@@ -39,7 +39,11 @@ def notifyMattermost(String emoji, String title) {
     withCredentials([string(credentialsId: 'mattermost-webhook', variable: 'MM_WEBHOOK')]) {
       def branch   = env.BRANCH_NAME ?: '?'
       def duration = (currentBuild.durationString ?: '').replace(' and counting', '')
-      def deployed = (branch == 'develop' && emoji == '✅') ? ' · 🚀 서버 배포됨' : ''
+      // 프리즈 중에는 "배포됨"이라고 쓰면 안 된다 — 알림만 보고 배포된 줄 아는 게 가장 위험하다.
+      def deployed = ''
+      if (branch == 'develop' && emoji == '✅') {
+        deployed = (env.DEPLOY_FROZEN == 'true') ? ' · ⏸️ 배포 프리즈(미배포)' : ' · 🚀 서버 배포됨'
+      }
       // 빌드 링크 — Jenkins가 https://…/jenkins/ 로 공개(S15P11B209-319)되며 클릭 가능해짐.
       //   BUILD_URL은 Manage Jenkins의 "Jenkins URL" 설정 기반으로 생성됨(로그인 필요).
       def link = env.BUILD_URL ? " · [빌드 보기](${env.BUILD_URL})" : ''
@@ -87,6 +91,13 @@ pipeline {
 
   environment {
     COMPOSE_FILE = 'infra/docker-compose.yml'   // 앱 스택 compose (Jenkins 자체 compose와 다름)
+    // 배포 프리즈 플래그 — 이 파일이 있으면 develop 빌드도 배포하지 않는다(S15P11B209-358).
+    //   왜 파라미터가 아니라 파일인가: Multibranch 는 새 파라미터를 "한 번 돌린 뒤"에야 인식한다
+    //   (위 parameters 주석 참조). 정작 막아야 할 다음 빌드에 안 먹으므로 프리즈 용도로는 못 쓴다.
+    //   파일은 런타임에 읽으므로 즉시 적용된다. JENKINS_HOME 은 영속 볼륨이라 재시작해도 남는다.
+    //   설정: docker exec dodam-jenkins touch /var/jenkins_home/DEPLOY_FREEZE
+    //   해제: docker exec dodam-jenkins rm  /var/jenkins_home/DEPLOY_FREEZE
+    DEPLOY_FREEZE_FLAG = '/var/jenkins_home/DEPLOY_FREEZE'
   }
 
   stages {
@@ -236,8 +247,35 @@ pipeline {
       }
     }
 
+    stage('배포 프리즈 안내') {
+      // 프리즈 중이라는 사실을 로그와 알림에 남긴다. 조용히 건너뛰면 "성공"만 보고
+      // 배포된 줄 안다 — 거짓 초록불이 빨간불보다 위험하다.
+      when {
+        branch 'develop'
+        expression { fileExists(env.DEPLOY_FREEZE_FLAG) }
+      }
+      steps {
+        script {
+          env.DEPLOY_FROZEN = 'true'
+          // 사유 읽기는 실패해도 빌드를 죽이지 않는다 — 플래그가 root 600 으로 만들어지면
+          // readFile 이 예외를 던진다. 배포를 멈추려는 장치가 빌드 전체를 깨면 본말전도다.
+          def reason = ''
+          try {
+            reason = '\n' + readFile(env.DEPLOY_FREEZE_FLAG).trim()
+          } catch (err) {
+            reason = "\n(사유 파일을 읽지 못함: ${err.message})"
+          }
+          echo "⏸️ 배포 프리즈 — 이 빌드는 배포·헬스체크를 건너뛴다.${reason}"
+        }
+      }
+    }
+
     stage('Deploy (develop only)') {
-      when { branch 'develop' }        // develop 브랜치에서만 배포 (그 외는 여기까지 = 빌드·테스트만)
+      // develop 브랜치에서만 배포 (그 외는 여기까지 = 빌드·테스트만)
+      when {
+        branch 'develop'
+        expression { !fileExists(env.DEPLOY_FREEZE_FLAG) }
+      }
       steps {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
         // 시크릿 .env 를 Credentials(secret file)에서 워크스페이스 밖 임시경로로 주입 → compose up.
@@ -251,7 +289,12 @@ pipeline {
     }
 
     stage('Healthcheck') {
-      when { branch 'develop' }
+      // 프리즈 시 같이 막는다 — 배포를 건너뛴 채 헬스체크만 돌면 "직전 배포"가 건강하다는
+      // 뜻일 뿐인데 이번 빌드가 검증된 것처럼 초록불이 뜬다.
+      when {
+        branch 'develop'
+        expression { !fileExists(env.DEPLOY_FREEZE_FLAG) }
+      }
       steps {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
         // 배포 직후 컨테이너 health가 healthy 될 때까지 대기 — 안 되면 실패로 즉시 인지(190 롤백 트리거 지점).
