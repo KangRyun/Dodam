@@ -49,7 +49,8 @@ die() { printf '\n❌ %s\n' "$*" >&2; exit 1; }
 #   이 컨테이너에 상한이 없었고 Jenkins 도 같이 떠 있었다. 눈으로 판단하지 말고 관문을 통과시킨다.
 #   SKIP_PREFLIGHT=1 로 건너뛸 수 있게 둔 이유: 관문 자체가 고장 났을 때 빌드까지 막히면 안 된다.
 if [ "${SKIP_PREFLIGHT:-0}" != "1" ] && [ -x "$REPO_ROOT/infra/scripts/preflight-memory.sh" ]; then
-  "$REPO_ROOT/infra/scripts/preflight-memory.sh" --need 7168 \
+  # --in-ci 이유는 infra/mobile/ci-test.sh 의 같은 자리 주석 참조(S15P11B209-642).
+  "$REPO_ROOT/infra/scripts/preflight-memory.sh" --need 7168 --in-ci \
     || die "메모리 사전 점검 실패 — 위 이유를 해소하고 다시 실행할 것.
    (관문을 무시하려면 SKIP_PREFLIGHT=1, 단 07-28 사고와 같은 경로다)"
 fi
