@@ -26,7 +26,15 @@ resources:
   - backend.yaml
   - ai.yaml
   - gateway.yaml
-  - jenkins-external.yaml
+  # ⚠️ jenkins-external.yaml 은 **일부러 뺐다** (S15P11B209-360).
+  #   commonLabels 가 Service 의 selector 에도 라벨을 주입하는데, 이 Service 는 selector 가
+  #   없어야만 수동 Endpoints 가 유지된다. selector 가 붙는 순간 엔드포인트 컨트롤러가
+  #   파드 IP 로 덮어써 /jenkins/ 가 502 가 된다(2026-07-30 실제 발생).
+  #   patches 로 지우려 했으나 **kustomize 는 패치를 먼저 적용하고 commonLabels 를 나중에
+  #   주입**해 순서를 이길 수 없었다. commonLabels 를 걷어내는 것도 불가 — 이미 떠 있는
+  #   Deployment 의 spec.selector 는 불변 필드라 워크로드 재생성을 강제한다.
+  #   → 이 한 파일만 kustomize 밖에서 직접 적용한다(Secret 과 같은 취급):
+  #       kubectl apply -f infra/k8s/base/jenkins-external.yaml
   - jenkins-deployer-rbac.yaml   # S15P11B209-359 — 배포 전용 SA(네임스페이스 한정, Secret 읽기 없음)
   - cronjobs.yaml
   # S15P11B209-361 — 모니터링 재배치. cAdvisor 컨테이너는 없다(kubelet 내장분을 긁는다).
