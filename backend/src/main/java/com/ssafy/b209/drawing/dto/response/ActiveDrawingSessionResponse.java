@@ -17,6 +17,7 @@ import java.time.Instant;
  * @param inputMethod 그림 입력 방식
  * @param sessionStatus 현재 세션 처리 상태
  * @param currentStage 현재 진행 단계
+ * @param activityContext 일반 또는 HTP 묶음 재개 문맥
  * @param startedAt 서버가 기록한 세션 시작 시각
  * @param latestDraft 가장 최근 자동 저장 초안, 저장된 초안이 없으면 {@code null}
  */
@@ -27,5 +28,6 @@ public record ActiveDrawingSessionResponse(
     DrawingInputMethod inputMethod,
     DrawingSessionStatus sessionStatus,
     DrawingStage currentStage,
+    DrawingActivityContextResponse activityContext,
     @JsonFormat(shape = JsonFormat.Shape.STRING) Instant startedAt,
     LatestDrawingDraftResponse latestDraft) {}

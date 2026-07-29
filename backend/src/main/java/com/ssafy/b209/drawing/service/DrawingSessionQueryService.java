@@ -13,6 +13,7 @@ import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.domain.DrawingSessionEmotion;
 import com.ssafy.b209.drawing.domain.DrawingType;
 import com.ssafy.b209.drawing.dto.response.ActiveDrawingSessionResponse;
+import com.ssafy.b209.drawing.dto.response.DrawingActivityContextResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingSessionAnalysisSummaryResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingSessionAssetSummaryResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingSessionChildSummaryResponse;
@@ -20,6 +21,8 @@ import com.ssafy.b209.drawing.dto.response.DrawingSessionDetailResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingTypeSummaryResponse;
 import com.ssafy.b209.drawing.dto.response.LatestDrawingDraftResponse;
 import com.ssafy.b209.drawing.exception.DrawingErrorCode;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
+import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
 import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
@@ -44,6 +47,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class DrawingSessionQueryService {
 
   private final DrawingSessionRepository drawingSessionRepository;
+  private final HtpAssessmentRepository htpAssessmentRepository;
   private final DrawingAssetRepository drawingAssetRepository;
   private final DrawingSessionEmotionRepository drawingSessionEmotionRepository;
   private final DrawingAnalysisRepository drawingAnalysisRepository;
@@ -57,6 +61,7 @@ public class DrawingSessionQueryService {
    * 그림 활동 상태와 연관 리소스 Metadata 조회에 사용할 저장소를 구성한다.
    *
    * @param drawingSessionRepository 세션 조회 저장소
+   * @param htpAssessmentRepository HTP 묶음과 현재 단계 조회 저장소
    * @param drawingAssetRepository 그림 파일 Metadata 조회 저장소
    * @param drawingSessionEmotionRepository 선택 감정 조회 저장소
    * @param drawingAnalysisRepository 분석 실행 조회 저장소
@@ -68,6 +73,7 @@ public class DrawingSessionQueryService {
    */
   public DrawingSessionQueryService(
       DrawingSessionRepository drawingSessionRepository,
+      HtpAssessmentRepository htpAssessmentRepository,
       DrawingAssetRepository drawingAssetRepository,
       DrawingSessionEmotionRepository drawingSessionEmotionRepository,
       DrawingAnalysisRepository drawingAnalysisRepository,
@@ -77,6 +83,7 @@ public class DrawingSessionQueryService {
       GuardianResourceAccessValidator accessValidator,
       DrawingAssetFileUrlFactory drawingAssetFileUrlFactory) {
     this.drawingSessionRepository = drawingSessionRepository;
+    this.htpAssessmentRepository = htpAssessmentRepository;
     this.drawingAssetRepository = drawingAssetRepository;
     this.drawingSessionEmotionRepository = drawingSessionEmotionRepository;
     this.drawingAnalysisRepository = drawingAnalysisRepository;
@@ -156,14 +163,18 @@ public class DrawingSessionQueryService {
     Long guardianUserId = currentUserResolver.requireUserId();
     accessValidator.requireChildAccess(guardianUserId, childId);
     List<DrawingSession> sessions = drawingSessionRepository.findActiveSessionsByChildId(childId);
-    if (sessions.isEmpty()) {
-      throw new BusinessException(DrawingErrorCode.ACTIVE_DRAWING_SESSION_NOT_FOUND);
-    }
     if (sessions.size() > 1) {
       throw new BusinessException(DrawingErrorCode.MULTIPLE_ACTIVE_DRAWING_SESSIONS);
     }
 
-    DrawingSession session = sessions.getFirst();
+    DrawingSession session =
+        sessions.isEmpty()
+            ? htpAssessmentRepository
+                .findActiveByChildId(childId)
+                .map(assessment -> assessment.getCurrentStep().getDrawingSession())
+                .orElseThrow(
+                    () -> new BusinessException(DrawingErrorCode.ACTIVE_DRAWING_SESSION_NOT_FOUND))
+            : sessions.getFirst();
     LatestDrawingDraftResponse latestDraft =
         drawingAssetRepository
             .findLatestDraft(session.getId())
@@ -176,8 +187,26 @@ public class DrawingSessionQueryService {
         session.getInputMethod(),
         session.getSessionStatus(),
         session.getCurrentStage(),
+        toActivityContext(session),
         session.getStartedAt().toInstant(ZoneOffset.UTC),
         latestDraft);
+  }
+
+  private DrawingActivityContextResponse toActivityContext(DrawingSession session) {
+    if (!"HTP".equals(session.getDrawingType().getCode())) {
+      return DrawingActivityContextResponse.general();
+    }
+    HtpAssessmentStep step =
+        htpAssessmentRepository
+            .findStepByDrawingSessionId(session.getId())
+            .orElseThrow(
+                () -> new BusinessException(DrawingErrorCode.MULTIPLE_ACTIVE_DRAWING_SESSIONS));
+    return new DrawingActivityContextResponse(
+        "HTP",
+        step.getAssessment().getId(),
+        step.getAssessment().getStatus(),
+        step.getStepOrder(),
+        step.getDrawingSubject());
   }
 
   /**

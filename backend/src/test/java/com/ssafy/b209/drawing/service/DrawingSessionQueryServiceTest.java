@@ -28,6 +28,11 @@ import com.ssafy.b209.drawing.domain.DrawingType;
 import com.ssafy.b209.drawing.dto.response.ActiveDrawingSessionResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingSessionDetailResponse;
 import com.ssafy.b209.drawing.exception.DrawingErrorCode;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessment;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStatus;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
+import com.ssafy.b209.drawing.htp.domain.HtpDrawingSubject;
+import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
 import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
@@ -55,6 +60,7 @@ class DrawingSessionQueryServiceTest {
   private static final LocalDateTime SAVED_AT = LocalDateTime.of(2026, 7, 22, 4, 5, 1);
 
   @Mock private DrawingSessionRepository drawingSessionRepository;
+  @Mock private HtpAssessmentRepository htpAssessmentRepository;
   @Mock private DrawingAssetRepository drawingAssetRepository;
   @Mock private DrawingSessionEmotionRepository drawingSessionEmotionRepository;
   @Mock private DrawingAnalysisRepository drawingAnalysisRepository;
@@ -68,6 +74,8 @@ class DrawingSessionQueryServiceTest {
   @Mock private DrawingSessionEmotion emotion;
   @Mock private ConversationSession conversation;
   @Mock private Report report;
+  @Mock private HtpAssessment htpAssessment;
+  @Mock private HtpAssessmentStep htpStep;
   @Mock private Child child;
   @Mock private DrawingType drawingType;
   @Mock private CurrentAuthenticatedUserResolver currentUserResolver;
@@ -80,6 +88,7 @@ class DrawingSessionQueryServiceTest {
     service =
         new DrawingSessionQueryService(
             drawingSessionRepository,
+            htpAssessmentRepository,
             drawingAssetRepository,
             drawingSessionEmotionRepository,
             drawingAnalysisRepository,
@@ -258,6 +267,7 @@ class DrawingSessionQueryServiceTest {
     assertThat(response.sessionStatus()).isEqualTo(DrawingSessionStatus.IN_PROGRESS);
     assertThat(response.currentStage()).isEqualTo(DrawingStage.DRAWING);
     assertThat(response.startedAt()).isEqualTo(STARTED_AT.toInstant(ZoneOffset.UTC));
+    assertThat(response.activityContext().activityKind()).isEqualTo("GENERAL");
     assertThat(response.latestDraft().drawingAssetId()).isEqualTo(20L);
     assertThat(response.latestDraft().assetVersion()).isEqualTo(4);
     assertThat(response.latestDraft().lastEventSequence()).isEqualTo(31L);
@@ -265,6 +275,74 @@ class DrawingSessionQueryServiceTest {
         .isEqualTo(CLIENT_SAVED_AT.toInstant(ZoneOffset.UTC));
     assertThat(response.latestDraft().savedAt()).isEqualTo(SAVED_AT.toInstant(ZoneOffset.UTC));
     assertThat(response.latestDraft().previewUrl()).isEqualTo("/api/v1/drawing-assets/20/file");
+  }
+
+  @Test
+  void returnsTheCompletedPersonStepWhileTheHtpActivityAwaitsReflection() {
+    given(drawingSessionRepository.findActiveSessionsByChildId(CHILD_ID))
+        .willReturn(new java.util.ArrayList<>());
+    given(htpAssessmentRepository.findActiveByChildId(CHILD_ID))
+        .willReturn(Optional.of(htpAssessment));
+    given(htpAssessment.getCurrentStep()).willReturn(htpStep);
+    given(htpStep.getDrawingSession()).willReturn(session);
+    given(session.getId()).willReturn(SESSION_ID);
+    given(session.getChild()).willReturn(child);
+    given(child.getId()).willReturn(CHILD_ID);
+    given(session.getDrawingType()).willReturn(drawingType);
+    given(drawingType.getId()).willReturn(7L);
+    given(drawingType.getCode()).willReturn("HTP");
+    given(drawingType.getName()).willReturn("집·나무·사람 그림");
+    given(session.getInputMethod()).willReturn(DrawingInputMethod.CANVAS);
+    given(session.getSessionStatus()).willReturn(DrawingSessionStatus.COMPLETED);
+    given(session.getCurrentStage()).willReturn(DrawingStage.COMPLETED);
+    given(session.getStartedAt()).willReturn(STARTED_AT);
+    given(htpAssessmentRepository.findStepByDrawingSessionId(SESSION_ID))
+        .willReturn(Optional.of(htpStep));
+    given(htpStep.getAssessment()).willReturn(htpAssessment);
+    given(htpAssessment.getId()).willReturn(70L);
+    given(htpAssessment.getStatus()).willReturn(HtpAssessmentStatus.IN_PROGRESS);
+    given(htpStep.getStepOrder()).willReturn(3);
+    given(htpStep.getDrawingSubject()).willReturn(HtpDrawingSubject.PERSON);
+    given(drawingAssetRepository.findLatestDraft(SESSION_ID)).willReturn(Optional.empty());
+
+    ActiveDrawingSessionResponse response = service.getActiveDrawingSession(CHILD_ID);
+
+    assertThat(response.currentStage()).isEqualTo(DrawingStage.COMPLETED);
+    assertThat(response.activityContext().htpAssessmentId()).isEqualTo(70L);
+    assertThat(response.activityContext().stepOrder()).isEqualTo(3);
+    assertThat(response.activityContext().drawingSubject()).isEqualTo(HtpDrawingSubject.PERSON);
+  }
+
+  @Test
+  void includesHtpAssessmentAndSubjectInTheActiveSessionContext() {
+    given(drawingSessionRepository.findActiveSessionsByChildId(CHILD_ID))
+        .willReturn(List.of(session));
+    given(session.getId()).willReturn(SESSION_ID);
+    given(session.getChild()).willReturn(child);
+    given(child.getId()).willReturn(CHILD_ID);
+    given(session.getDrawingType()).willReturn(drawingType);
+    given(drawingType.getId()).willReturn(7L);
+    given(drawingType.getCode()).willReturn("HTP");
+    given(drawingType.getName()).willReturn("집·나무·사람 그림");
+    given(session.getInputMethod()).willReturn(DrawingInputMethod.CANVAS);
+    given(session.getSessionStatus()).willReturn(DrawingSessionStatus.IN_PROGRESS);
+    given(session.getCurrentStage()).willReturn(DrawingStage.DRAWING);
+    given(session.getStartedAt()).willReturn(STARTED_AT);
+    given(drawingAssetRepository.findLatestDraft(SESSION_ID)).willReturn(Optional.empty());
+    given(htpAssessmentRepository.findStepByDrawingSessionId(SESSION_ID))
+        .willReturn(Optional.of(htpStep));
+    given(htpStep.getAssessment()).willReturn(htpAssessment);
+    given(htpAssessment.getId()).willReturn(41L);
+    given(htpAssessment.getStatus()).willReturn(HtpAssessmentStatus.IN_PROGRESS);
+    given(htpStep.getStepOrder()).willReturn(2);
+    given(htpStep.getDrawingSubject()).willReturn(HtpDrawingSubject.TREE);
+
+    ActiveDrawingSessionResponse response = service.getActiveDrawingSession(CHILD_ID);
+
+    assertThat(response.activityContext().activityKind()).isEqualTo("HTP");
+    assertThat(response.activityContext().htpAssessmentId()).isEqualTo(41L);
+    assertThat(response.activityContext().stepOrder()).isEqualTo(2);
+    assertThat(response.activityContext().drawingSubject()).isEqualTo(HtpDrawingSubject.TREE);
   }
 
   @Test

@@ -158,15 +158,25 @@ public class HtpAssessmentService {
     HtpAssessment activeAssessment =
         htpAssessmentRepository.findActiveByChildIdForUpdate(child.getId()).orElse(null);
     if (activeAssessment != null) {
-      if (activeAssessment.getStatus() == HtpAssessmentStatus.ANALYZING
+      if (request.replaceActive()
+          && activeAssessment.getStatus() == HtpAssessmentStatus.IN_PROGRESS) {
+        abandonActiveAssessment(activeAssessment, startedAt);
+        htpAssessmentRepository.flush();
+      } else if (activeAssessment.getStatus() == HtpAssessmentStatus.ANALYZING
           || startedAt.isBefore(activeAssessment.getExpiresAt())) {
         throw new BusinessException(HtpErrorCode.ACTIVE_ACTIVITY_EXISTS);
+      } else {
+        expire(activeAssessment, startedAt);
+        htpAssessmentRepository.flush();
       }
-      expire(activeAssessment, startedAt);
-      htpAssessmentRepository.flush();
     }
-    if (drawingSessionRepository.findActiveByChildId(child.getId()).isPresent()) {
-      throw new BusinessException(HtpErrorCode.ACTIVE_ACTIVITY_EXISTS);
+    DrawingSession activeSession =
+        drawingSessionRepository.findActiveByChildId(child.getId()).orElse(null);
+    if (activeSession != null) {
+      if (!request.replaceActive()) {
+        throw new BusinessException(HtpErrorCode.ACTIVE_ACTIVITY_EXISTS);
+      }
+      activeSession.abandon(startedAt);
     }
 
     DrawingSession houseSession =
@@ -176,6 +186,14 @@ public class HtpAssessmentService {
         HtpAssessment.start(
             child, htpType, houseSession, startedAt, startedAt.plus(HTP_VALIDITY), idempotencyKey);
     return toResponse(htpAssessmentRepository.saveAndFlush(assessment));
+  }
+
+  private void abandonActiveAssessment(HtpAssessment activeAssessment, LocalDateTime abandonedAt) {
+    DrawingSession currentSession = activeAssessment.getCurrentStep().getDrawingSession();
+    if (currentSession.getSessionStatus() == DrawingSessionStatus.IN_PROGRESS) {
+      currentSession.abandon(abandonedAt);
+    }
+    activeAssessment.abandon(abandonedAt);
   }
 
   /**

@@ -89,11 +89,14 @@ class DrawingSessionHistoryRepositoryTest {
         saveSession(child, house, LocalDateTime.of(2026, 7, 3, 8, 0), "hist-k4");
     DrawingSession softDeleted =
         saveSession(child, house, LocalDateTime.of(2026, 7, 4, 8, 0), "hist-k5");
+    DrawingSession abandoned =
+        saveSession(child, tree, LocalDateTime.of(2026, 7, 6, 8, 0), "hist-k6");
 
     entityManager.flush();
     setStatus(completedHouse.getId(), "COMPLETED", LocalDateTime.of(2026, 7, 1, 10, 30));
     setStatus(failedHouse.getId(), "FAILED", null);
     setStatus(deletedStatus.getId(), "DELETED", null);
+    setStatus(abandoned.getId(), "ABANDONED", LocalDateTime.of(2026, 7, 6, 8, 30));
     softDelete(softDeleted.getId(), LocalDateTime.of(2026, 7, 4, 9, 0));
     entityManager.clear();
   }

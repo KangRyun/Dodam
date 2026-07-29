@@ -340,6 +340,24 @@ public class DrawingSession {
   }
 
   /**
+   * 진행 중인 활동의 재개를 종료하고 포기 상태로 전환한다.
+   *
+   * <p>사용자의 명시적 삭제와 달리 {@code deletedAt}을 기록하지 않아 그림·획·대화 자료를 보존한다. 현재 단계는 중단 지점을 감사할 수 있도록 유지한다.
+   *
+   * @param abandonedAt 서버가 결정한 포기 시각
+   * @throws NullPointerException {@code abandonedAt}이 {@code null}인 경우
+   * @throws IllegalStateException 진행 중인 세션이 아닌 경우
+   */
+  public void abandon(LocalDateTime abandonedAt) {
+    Objects.requireNonNull(abandonedAt, "abandonedAt must not be null");
+    if (deletedAt != null || sessionStatus != DrawingSessionStatus.IN_PROGRESS) {
+      throw new IllegalStateException("진행 중인 그림 활동만 포기할 수 있습니다.");
+    }
+    sessionStatus = DrawingSessionStatus.ABANDONED;
+    completedAt = abandonedAt;
+  }
+
+  /**
    * 그림 활동을 삭제 상태로 전환하고 삭제 시각을 기록한다.
    *
    * <p>현재 단계와 완료 시각은 감사 및 운영 기록을 위해 유지한다.

@@ -321,6 +321,7 @@ class DrawingSessionControllerTest {
         DrawingInputMethod.CANVAS,
         DrawingSessionStatus.IN_PROGRESS,
         DrawingStage.DRAWING,
+        com.ssafy.b209.drawing.dto.response.DrawingActivityContextResponse.general(),
         Instant.parse("2026-07-21T02:30:00Z"),
         latestDraft);
   }

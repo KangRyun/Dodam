@@ -6,6 +6,7 @@ import '../../../../app/router/app_navigation.dart';
 import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../design_system/design_system.dart';
+import '../../../activity/presentation/screens/activity_screens.dart';
 import '../../../child/data/dto/child_dtos.dart';
 import '../../../drawing/application/drawing_session_start_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
@@ -14,13 +15,14 @@ import '../widgets/activity_guide_dialog.dart';
 
 enum _ActivityLoadStatus { loading, loaded, empty, error }
 
-enum _DrawingStartChoice { resume, startNew, delete }
+enum _DrawingStartChoice { resume, startNew }
 
 /// 그림 유형 코드별 카드·안내 팝업 아이콘/강조색.
 ///
 /// 백엔드가 새 activityType(예: 462 HTP)을 추가해도 이 표에 항목만 더하면
 /// 되고, 목록에 없는 코드는 기본값(팔레트 아이콘·leaf색)으로 표시한다.
 (IconData, Color) _visualForDrawingType(String code) => switch (code) {
+  'HTP' => (Icons.home_work_rounded, AppColors.leaf),
   'ART_DIARY' => (Icons.menu_book_rounded, AppColors.tangerine),
   _ => (Icons.palette_rounded, AppColors.leaf),
 };
@@ -79,9 +81,13 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         childId: widget.child.childId,
       );
       if (!mounted) return;
-      final sorted = [
-        ...page.content,
-      ]..sort((left, right) => left.displayOrder.compareTo(right.displayOrder));
+      final sorted =
+          page.content
+              .where((type) => type.code == 'HTP' || type.code == 'ART_DIARY')
+              .toList()
+            ..sort(
+              (left, right) => left.displayOrder.compareTo(right.displayOrder),
+            );
       setState(() {
         _drawingTypes = sorted;
         _status = sorted.isEmpty
@@ -169,31 +175,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
                       ),
                     ),
                     child: const Text(
-                      '새로 그리기',
-                      style: TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 58,
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(
-                      dialogContext,
-                    ).pop(_DrawingStartChoice.delete),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.error,
-                      side: const BorderSide(color: AppColors.errorSoft),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    child: const Text(
-                      '삭제하기',
+                      '새로운 활동 선택',
                       style: TextStyle(
                         fontSize: 19,
                         fontWeight: FontWeight.w700,
@@ -226,30 +208,41 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       setState(() => _checkingActiveSession = false);
 
       DrawingSessionResolution? resolution;
-      if (activeSession != null && controller.hasSavedDrawing(activeSession)) {
-        // 진행 중인 활동이 있으면 461/463/464의 새 활동 안내보다 먼저
-        // "이어 그리기/새로 그리기/삭제하기"를 물어 develop의 기존 동작을
-        // 그대로 지킨다.
+      if (activeSession != null) {
         final choice = await _showDrawingStartDialog();
         if (choice == null || !mounted) return;
-        if (choice == _DrawingStartChoice.delete) {
-          await controller.discardActiveSession(activeSession.drawingSessionId);
-          if (mounted) {
-            showAppMessage(context, message: '그리던 그림을 삭제했어요.');
-          }
+        if (choice == _DrawingStartChoice.startNew) {
+          await AppNavigation.pushNamed(
+            context,
+            AppRoutes.drawingActivitySelection(widget.child.childId.toString()),
+            arguments: const DrawingActivitySelectionRouteArguments(
+              replaceActive: true,
+            ),
+          );
           return;
         }
-        resolution = choice == _DrawingStartChoice.resume
-            ? controller.resume(activeSession)
-            : await controller.replaceActiveSession(
-                childId: widget.child.childId,
-                activeSessionId: activeSession.drawingSessionId,
-                drawingTypeId: type.drawingTypeId,
-              );
-      } else if (activeSession != null) {
         resolution = controller.resume(activeSession);
+        if (resolution.activityContext.isHtp &&
+            resolution.currentStage == 'COMPLETED') {
+          await AppNavigation.pushNamed(
+            context,
+            AppRoutes.emotionSelect(widget.child.childId.toString()),
+            arguments: EmotionSelectRouteArguments(
+              sessionId: resolution.sessionId,
+              repository: widget.drawingRepository,
+              conversationId: null,
+              conversationAlreadyEnded: true,
+              conversationEndRepository: null,
+              conversationEndIdempotencyKey: null,
+              conversationEndRequest: null,
+              lastQuestionMessageId: null,
+              idempotencyKeyProvider: null,
+              activityContext: resolution.activityContext,
+            ),
+          );
+          return;
+        }
       } else {
-        if (!mounted) return;
         final (icon, accentColor) = _visualForDrawingType(type.code);
         resolution = await showActivityGuideDialog<DrawingSessionResolution>(
           context: context,
@@ -257,10 +250,12 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
           description: _descriptionForDrawingType(type),
           icon: icon,
           accentColor: accentColor,
-          onStart: () => controller.createNewSession(
-            childId: widget.child.childId,
-            drawingTypeId: type.drawingTypeId,
-          ),
+          onStart: () => type.code == 'HTP'
+              ? controller.createHtpAssessment(childId: widget.child.childId)
+              : controller.createSelectedSession(
+                  childId: widget.child.childId,
+                  drawingTypeId: type.drawingTypeId,
+                ),
         );
       }
       if (resolution == null || !mounted) return;
@@ -271,8 +266,8 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
           sessionId: resolution.sessionId,
           repository: widget.drawingRepository,
           completionSnapshotProvider: widget.completionSnapshotProvider,
-          // 그림 단계를 지난 세션은 저장·탐지가 막혀 있어 대화를 바로 이어받는다.
           resumeConversation: !resolution.isDrawingStage,
+          activityContext: resolution.activityContext,
         ),
       );
     } on Object {

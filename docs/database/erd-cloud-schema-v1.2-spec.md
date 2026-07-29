@@ -654,7 +654,7 @@ Refresh Token은 MySQL 테이블에 저장하지 않는다. Redis에서 로그�
 
 - `ck_drawing_sessions_current_stage`: `(`current_stage` in (_utf8mb4\'DRAWING\',_utf8mb4\'ANALYZING\',_utf8mb4\'CONVERSING\',_utf8mb4\'REFLECTION\',_utf8mb4\'REPORTING\',_utf8mb4\'COMPLETED\'))`
 - `ck_drawing_sessions_input_method`: `(`input_method` in (_utf8mb4\'CANVAS\',_utf8mb4\'UPLOAD\'))`
-- `ck_drawing_sessions_session_status`: `(`session_status` in (_utf8mb4\'IN_PROGRESS\',_utf8mb4\'COMPLETED\',_utf8mb4\'FAILED\',_utf8mb4\'DELETED\'))`
+- `ck_drawing_sessions_session_status`: `(`session_status` in (_utf8mb4\'IN_PROGRESS\',_utf8mb4\'COMPLETED\',_utf8mb4\'FAILED\',_utf8mb4\'ABANDONED\',_utf8mb4\'DELETED\'))`
 
 ### 그림 활동 선택 감정 (`drawing_session_emotions`)
 

@@ -43,9 +43,9 @@ const _artDiary = DrawingTypeDto(
 
 const _secondType = DrawingTypeDto(
   drawingTypeId: 9,
-  code: 'FREE_DRAWING',
-  name: '자유 그리기',
-  activityCategory: 'GENERAL',
+  code: 'HTP',
+  name: '집·나무·사람 그림',
+  activityCategory: 'ASSESSMENT',
   selectableBy: 'BOTH',
   recommendedAgeMin: null,
   recommendedAgeMax: null,
@@ -83,7 +83,7 @@ void main() {
     expect(find.byKey(const ValueKey('activity-5')), findsOneWidget);
     expect(find.byKey(const ValueKey('activity-9')), findsOneWidget);
     expect(find.text('그림일기'), findsOneWidget);
-    expect(find.text('자유 그리기'), findsOneWidget);
+    expect(find.text('집·나무·사람 그림'), findsOneWidget);
     // 활동 유형과 무관한 기존 "지난 그림 보기" 카드는 그대로 유지된다.
     expect(find.text('지난 그림 보기'), findsOneWidget);
   });
@@ -162,7 +162,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('activity-guide-start')), findsOneWidget);
-    expect(find.text('자유 그리기'), findsWidgets);
+    expect(find.text('집·나무·사람 그림'), findsWidgets);
     // guideText가 없는 유형은 아동 친화적인 임시 문구로 대체된다.
     expect(find.text('그리고 싶은 것을 자유롭게 그려 보자!'), findsWidgets);
   });
@@ -326,7 +326,7 @@ void main() {
     expect(find.text('drawing-session-321-resume-true'), findsOneWidget);
   });
 
-  testWidgets('저장된 초안이 없는 그림 단계 활성 세션은 팝업 없이 바로 재개한다', (tester) async {
+  testWidgets('저장된 초안이 없는 활성 세션도 재개와 새 활동을 선택한다', (tester) async {
     final repository = _FakeDrawingRepository(
       drawingTypes: const [_artDiary],
       activeSession: const ActiveDrawingSessionDto(
@@ -353,8 +353,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('activity-guide-start')), findsNothing);
-    expect(find.text('이어 그리기'), findsNothing);
+    expect(find.text('이어 그리기'), findsOneWidget);
     expect(repository.createCalls, 0);
+
+    await tester.tap(find.text('이어 그리기'));
+    await tester.pumpAndSettle();
+
     expect(find.text('drawing-session-555-resume-false'), findsOneWidget);
   });
 

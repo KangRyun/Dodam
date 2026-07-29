@@ -15,6 +15,7 @@ import java.time.OffsetDateTime;
  * @param inputMethod 그림 입력 방식
  * @param clientStartedAt 클라이언트가 관찰한 시작 시각
  * @param canvas 선택적으로 전달하는 캔버스 설정
+ * @param replaceActive 기존 진행 활동을 포기 처리하고 새 활동으로 교체할지 여부
  */
 public record CreateDrawingSessionRequest(
     @Schema(description = "그림 활동을 시작할 아동 식별자", example = "1") @NotNull @Positive Long childId,
@@ -24,4 +25,25 @@ public record CreateDrawingSessionRequest(
         @NotNull
         @JsonFormat(shape = JsonFormat.Shape.STRING)
         OffsetDateTime clientStartedAt,
-    CanvasConfigurationRequest canvas) {}
+    CanvasConfigurationRequest canvas,
+    @Schema(description = "기존 진행 활동을 포기하고 새 활동을 시작할지 여부", defaultValue = "false")
+        boolean replaceActive) {
+
+  /**
+   * 기존 호출부와 호환되는 기본 생성자다.
+   *
+   * @param childId 그림 활동을 시작할 아동 식별자
+   * @param drawingTypeId 선택한 그림 활동 유형 식별자
+   * @param inputMethod 그림 입력 방식
+   * @param clientStartedAt 클라이언트가 관찰한 시작 시각
+   * @param canvas 선택적으로 전달하는 캔버스 설정
+   */
+  public CreateDrawingSessionRequest(
+      Long childId,
+      Long drawingTypeId,
+      DrawingInputMethod inputMethod,
+      OffsetDateTime clientStartedAt,
+      CanvasConfigurationRequest canvas) {
+    this(childId, drawingTypeId, inputMethod, clientStartedAt, canvas, false);
+  }
+}

@@ -58,7 +58,10 @@ String _idempotencyKey() {
 }
 
 final class RemoteDrawingRepository
-    implements DrawingRepository, DrawingSessionDiscarder {
+    implements
+        DrawingRepository,
+        HtpDrawingRepository,
+        DrawingSessionDiscarder {
   const RemoteDrawingRepository(this._apiClient);
   final ApiClient _apiClient;
 
@@ -92,6 +95,54 @@ final class RemoteDrawingRepository
       options: Options(headers: {'Idempotency-Key': _idempotencyKey()}),
     );
     return DrawingSessionDto.fromCreateJson(envelopeObject(response.data));
+  }
+
+  @override
+  Future<HtpAssessmentDto> startHtpAssessment(
+    StartHtpAssessmentRequestDto request,
+  ) async {
+    final response = await _apiClient.post<Map<String, dynamic>>(
+      'htp-assessments',
+      data: request.toJson(),
+      options: Options(headers: {'Idempotency-Key': _idempotencyKey()}),
+    );
+    return HtpAssessmentDto.fromJson(envelopeObject(response.data));
+  }
+
+  @override
+  Future<HtpAssessmentDto> getHtpAssessment(int assessmentId) async {
+    final response = await _apiClient.get<Map<String, dynamic>>(
+      'htp-assessments/$assessmentId',
+    );
+    return HtpAssessmentDto.fromJson(envelopeObject(response.data));
+  }
+
+  @override
+  Future<HtpAssessmentDto> moveToNextHtpStep(int assessmentId) async {
+    final response = await _apiClient.post<Map<String, dynamic>>(
+      'htp-assessments/$assessmentId/steps/next',
+      options: Options(headers: {'Idempotency-Key': _idempotencyKey()}),
+    );
+    return HtpAssessmentDto.fromJson(envelopeObject(response.data));
+  }
+
+  @override
+  Future<void> saveHtpReflection(
+    int assessmentId,
+    SaveDrawingReflectionRequestDto request,
+  ) async {
+    await _apiClient.put<void>(
+      'htp-assessments/$assessmentId/reflection',
+      data: request.toJson(),
+    );
+  }
+
+  @override
+  Future<void> completeHtpAssessment(int assessmentId) async {
+    await _apiClient.post<void>(
+      'htp-assessments/$assessmentId/complete',
+      options: Options(headers: {'Idempotency-Key': _idempotencyKey()}),
+    );
   }
 
   @override

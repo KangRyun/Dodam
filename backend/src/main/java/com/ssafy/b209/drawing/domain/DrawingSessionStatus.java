@@ -8,6 +8,8 @@ public enum DrawingSessionStatus {
   COMPLETED,
   /** 처리 오류로 그림 활동을 완료하지 못한 상태다. */
   FAILED,
+  /** 새 활동 시작으로 재개가 종료됐지만 운영 기록과 원본 자료는 보존하는 상태다. */
+  ABANDONED,
   /** 그림 활동이 삭제 처리된 상태다. */
   DELETED
 }
