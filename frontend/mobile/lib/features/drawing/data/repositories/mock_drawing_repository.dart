@@ -15,6 +15,7 @@ final class MockDrawingRepository
     implements
         DrawingRepository,
         HtpDrawingRepository,
+        UploadedDrawingCompletionRepository,
         DrawingSessionDiscarder {
   const MockDrawingRepository({
     this.draftScenario = MockDraftScenario.found,
@@ -113,17 +114,19 @@ final class MockDrawingRepository
       HtpAssessmentDto.fromJson(_htpAssessment);
 
   @override
-  Future<HtpAssessmentDto> moveToNextHtpStep(int assessmentId) async =>
-      HtpAssessmentDto.fromJson({
-        ..._htpAssessment,
-        'currentStep': {
-          'stepOrder': 2,
-          'drawingSubject': 'TREE',
-          'drawingSessionId': 43,
-          'sessionStatus': 'IN_PROGRESS',
-          'currentStage': 'DRAWING',
-        },
-      });
+  Future<HtpAssessmentDto> moveToNextHtpStep(
+    int assessmentId, {
+    required String inputMethod,
+  }) async => HtpAssessmentDto.fromJson({
+    ..._htpAssessment,
+    'currentStep': {
+      'stepOrder': 2,
+      'drawingSubject': 'TREE',
+      'drawingSessionId': 43,
+      'sessionStatus': 'IN_PROGRESS',
+      'currentStage': 'DRAWING',
+    },
+  });
 
   @override
   Future<void> saveHtpReflection(
@@ -252,12 +255,40 @@ final class MockDrawingRepository
   Future<DrawingUploadResponseDto> uploadDrawing(
     int sessionId,
     BinaryUploadDto image, {
-    String? objectCode,
+    required UploadDrawingImageMetadataDto metadata,
+    required String idempotencyKey,
   }) async => DrawingUploadResponseDto.fromJson({
-    'drawingSessionId': 43,
-    'objectCode': 'TREE',
-    'originalAsset': {..._asset, 'assetId': 130, 'assetType': 'ORIGINAL'},
-    'correctedAsset': {..._asset, 'assetId': 131, 'assetType': 'CORRECTED'},
+    'drawingSessionId': sessionId,
+    'drawingAssetId': 130,
+    'assetType': 'UPLOADED',
+    'drawingSubject': 'HOUSE',
+    'currentStage': 'DRAWING',
+    'previewUrl': '/api/v1/drawing-assets/130/file',
+    'mimeType': image.mimeType,
+    'fileSizeBytes': image.bytes.length,
+    'widthPx': 1200,
+    'heightPx': 800,
+    'capturedAt': '2026-07-29T01:00:00Z',
+    'uploadedAt': '2026-07-29T01:00:01Z',
+    'qualityWarnings': const <String>[],
+  });
+
+  @override
+  Future<DrawingStageCompleteResponseDto> completeUploadedDrawingStage(
+    int sessionId, {
+    required DrawingCompleteMetadataDto metadata,
+    required String idempotencyKey,
+  }) async => DrawingStageCompleteResponseDto.fromJson({
+    'drawingSessionId': sessionId,
+    'finalAssetId': metadata.sourceAssetId,
+    'sessionStatus': 'IN_PROGRESS',
+    'currentStage': 'CONVERSING',
+    'analysis': {
+      'analysisId': 15901,
+      'analysisType': 'OBJECT_DETECTION',
+      'status': 'SUCCEEDED',
+    },
+    'nextAction': 'SELECT_EMOTION',
   });
   @override
   Future<ObjectDetectionResponseDto> requestObjectDetection(

@@ -13,6 +13,7 @@ import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingAssetType;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.domain.DrawingSessionStatus;
 import com.ssafy.b209.drawing.domain.DrawingType;
@@ -43,6 +44,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -203,12 +205,26 @@ public class HtpAssessmentService {
    *
    * @param assessmentId HTP 활동 식별자
    * @param idempotencyKey 단계 변경 요청의 {@code Idempotency-Key}
+   * @param nextInputMethod 다음 TREE 또는 PERSON 단계에서 사용할 그림 입력 방식
    * @return 다음 단계 또는 세 그림 완료 상태
    */
-  public HtpAssessmentResponse nextStep(Long assessmentId, String idempotencyKey) {
+  public HtpAssessmentResponse nextStep(
+      Long assessmentId, String idempotencyKey, DrawingInputMethod nextInputMethod) {
     validateIdempotencyKey(idempotencyKey);
+    if (nextInputMethod == null) {
+      throw new BusinessException(HtpErrorCode.HTP_TRANSITION_NOT_ALLOWED);
+    }
     HtpAssessment assessment = findAuthorizedForUpdate(assessmentId);
-    if (assessment.getSteps().stream().anyMatch(step -> step.hasProcessed(idempotencyKey))) {
+    Optional<HtpAssessmentStep> processedStep =
+        assessment.getSteps().stream()
+            .filter(step -> step.hasProcessed(idempotencyKey))
+            .findFirst();
+    if (processedStep.isPresent()) {
+      HtpAssessmentStep replayed = processedStep.get();
+      if (replayed.getDrawingSubject() != HtpDrawingSubject.PERSON
+          && replayed.getDrawingSession().getInputMethod() != nextInputMethod) {
+        throw new BusinessException(HtpErrorCode.IDEMPOTENCY_KEY_CONFLICT);
+      }
       return toResponse(assessment);
     }
     if (assessment.getStatus() != HtpAssessmentStatus.IN_PROGRESS
@@ -237,7 +253,7 @@ public class HtpAssessmentService {
             DrawingSession.start(
                 assessment.getChild(),
                 assessment.getDrawingType(),
-                currentSession.getInputMethod(),
+                nextInputMethod,
                 now(),
                 idempotencyKey));
     try {

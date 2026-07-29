@@ -4,6 +4,7 @@ import com.ssafy.b209.drawing.dto.request.SaveDrawingReflectionRequest;
 import com.ssafy.b209.drawing.dto.response.DrawingReflectionResponse;
 import com.ssafy.b209.drawing.htp.dto.HtpAssessmentResponse;
 import com.ssafy.b209.drawing.htp.dto.HtpCompletionResponse;
+import com.ssafy.b209.drawing.htp.dto.NextHtpStepRequest;
 import com.ssafy.b209.drawing.htp.dto.StartHtpAssessmentRequest;
 import com.ssafy.b209.drawing.htp.service.HtpAssessmentService;
 import com.ssafy.b209.global.response.ApiErrorResponse;
@@ -95,15 +96,18 @@ public class HtpAssessmentController {
    *
    * @param assessmentId HTP 활동 식별자
    * @param idempotencyKey 단계 변경 요청을 식별하는 멱등 키
+   * @param request 다음 단계에서 사용할 그림 입력 방식
    * @return HTTP 200과 다음 단계 또는 세 단계 완료 상태
    */
   @Operation(summary = "HTP 다음 단계", description = "현재 대화가 끝난 경우 현재 세션을 완료하고 다음 주제 세션을 생성합니다.")
   @PostMapping("/{assessmentId}/steps/next")
   public ResponseEntity<ApiResponse<HtpAssessmentResponse>> nextStep(
       @PathVariable @Positive Long assessmentId,
-      @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey) {
+      @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+      @Valid @RequestBody NextHtpStepRequest request) {
     return ResponseEntity.ok(
-        ApiResponse.ok(htpAssessmentService.nextStep(assessmentId, idempotencyKey)));
+        ApiResponse.ok(
+            htpAssessmentService.nextStep(assessmentId, idempotencyKey, request.inputMethod())));
   }
 
   /**

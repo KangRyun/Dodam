@@ -46,7 +46,8 @@ abstract interface class DrawingRepository {
   Future<DrawingUploadResponseDto> uploadDrawing(
     int sessionId,
     BinaryUploadDto image, {
-    String? objectCode,
+    required UploadDrawingImageMetadataDto metadata,
+    required String idempotencyKey,
   });
   Future<ObjectDetectionResponseDto> requestObjectDetection(
     int sessionId,
@@ -54,12 +55,23 @@ abstract interface class DrawingRepository {
   );
 }
 
+abstract interface class UploadedDrawingCompletionRepository {
+  Future<DrawingStageCompleteResponseDto> completeUploadedDrawingStage(
+    int sessionId, {
+    required DrawingCompleteMetadataDto metadata,
+    required String idempotencyKey,
+  });
+}
+
 abstract interface class HtpDrawingRepository {
   Future<HtpAssessmentDto> startHtpAssessment(
     StartHtpAssessmentRequestDto request,
   );
   Future<HtpAssessmentDto> getHtpAssessment(int assessmentId);
-  Future<HtpAssessmentDto> moveToNextHtpStep(int assessmentId);
+  Future<HtpAssessmentDto> moveToNextHtpStep(
+    int assessmentId, {
+    required String inputMethod,
+  });
   Future<void> saveHtpReflection(
     int assessmentId,
     SaveDrawingReflectionRequestDto request,
