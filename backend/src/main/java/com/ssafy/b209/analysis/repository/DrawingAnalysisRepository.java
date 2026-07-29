@@ -87,6 +87,24 @@ public interface DrawingAnalysisRepository extends JpaRepository<DrawingAnalysis
       @Param("drawingAnalysisId") Long drawingAnalysisId);
 
   /**
+   * 분석 식별자로 삭제되지 않은 Session, Asset과 Detection을 함께 조회한다.
+   *
+   * <p>조회 후 연결 보호자 권한을 검증할 수 있도록 Session 관계를 초기화한다.
+   *
+   * @param analysisId 분석 실행 식별자
+   * @return Session·Asset·Detection이 초기화된 분석, 존재하지 않으면 빈 값
+   */
+  @Query(
+      "select distinct a from DrawingAnalysis a "
+          + "join fetch a.drawingSession s "
+          + "left join fetch a.drawingAsset asset "
+          + "left join fetch asset.drawingSession "
+          + "left join fetch a.detections d "
+          + "where a.id = :analysisId and s.deletedAt is null "
+          + "order by d.displayOrder asc, d.id asc")
+  Optional<DrawingAnalysis> findDetailByAnalysisId(@Param("analysisId") Long analysisId);
+
+  /**
    * 동일 그림과 작업 유형에 처리 중이거나 성공한 분석이 존재하는지 확인한다.
    *
    * @param drawingAssetId 그림 파일 식별자

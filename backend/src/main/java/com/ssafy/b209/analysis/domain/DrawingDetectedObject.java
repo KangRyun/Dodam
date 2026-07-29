@@ -211,6 +211,13 @@ public class DrawingDetectedObject {
   }
 
   /**
+   * @return 저장된 탐지 객체 식별자
+   */
+  public Long getId() {
+    return id;
+  }
+
+  /**
    * @return 객체 식별 Label
    */
   public String getLabel() {

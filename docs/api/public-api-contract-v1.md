@@ -127,7 +127,8 @@ Spring Boot와 AI 서버 사이의 `/internal/v1/**`는 이 문서의 범위가 
 | POST | `/api/v1/drawing-sessions/{drawingSessionId}/snapshots` | multipart | 구현 | 불일치 | Flutter는 `/upload` 호출 |
 | POST | `/api/v1/drawing-sessions/{drawingSessionId}/analyses` | JSON | 구현 | 연동 | Draft 객체 탐지 또는 Final 분석 |
 | GET | `/api/v1/drawing-sessions/{drawingSessionId}/analyses` | Bearer | 구현 | 미연동 | 분석 이력 |
-| GET | `/api/v1/drawing-sessions/{drawingSessionId}/analyses/{drawingAnalysisId}` | Bearer | 구현 | 불일치 | Flutter는 `/analyses/{analysisId}` 호출 |
+| GET | `/api/v1/drawing-sessions/{drawingSessionId}/analyses/{drawingAnalysisId}` | Bearer | 구현 | 기존 호환 | 기존 그림 화면용 세션 하위 상세 |
+| GET | `/api/v1/analyses/{analysisId}` | Bearer | 구현 | 연동 | 정본 분석 상태 폴링·결과 조회 |
 | POST | `/api/v1/analyses/{analysisId}/retry` | JSON | 구현 | 연동 | 실패 분석 재시도, Client 멱등 Header 미적용 |
 
 ## 6. 대화 API
@@ -174,7 +175,6 @@ Controller가 없다. 이번 이슈에서 호환 Endpoint를 추가하지 않는
 | `GET /api/v1/activities/{activityId}` | `GET /api/v1/drawing-sessions/{drawingSessionId}` | Flutter 상세 경로 정합화 |
 | `DELETE /api/v1/activities/{activityId}` | `DELETE /api/v1/drawing-sessions/{drawingSessionId}` | Flutter 삭제 Body 포함 정합화 |
 | `POST /api/v1/drawing-sessions/{id}/upload` | `POST /api/v1/drawing-sessions/{id}/snapshots` | Snapshot 계약으로 정합화 |
-| `GET /api/v1/analyses/{analysisId}` | 세션 하위 분석 상세 URI만 구현 | Flutter가 `drawingSessionId`를 함께 사용 |
 | `GET/PATCH /api/v1/children/{childId}/tutorial` | 미구현 | Tutorial Backend Jira |
 | `GET /api/v1/children/{childId}/reports` | 미구현 | Report 조회 Backend Jira |
 | `GET /api/v1/reports/{reportId}` | 미구현 | Report 조회 Backend Jira |

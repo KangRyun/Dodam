@@ -994,11 +994,13 @@ Header `Idempotency-Key` 필수.
 {
   "analysisId": 700,
   "analysisType": "INTERMEDIATE",
-  "status": "PROCESSING",
-  "progress": 45,
-  "stage": "OBJECT_DETECTION",
-  "pollAfterMs": 1000,
-  "startedAt": "2026-07-21T02:35:00Z"
+  "analysisTaskType": "OBJECT_DETECTION",
+  "analysisStatus": "PROCESSING",
+  "requestedAt": "2026-07-21T02:35:00Z",
+  "completedAt": null,
+  "detectedObjects": [],
+  "errorCode": null,
+  "message": null
 }
 ```
 
@@ -1010,19 +1012,27 @@ Header `Idempotency-Key` 필수.
 {
   "analysisId": 701,
   "analysisType": "FINAL",
-  "status": "SUCCESS",
+  "analysisTaskType": "ACTIVITY_REPORT",
+  "analysisStatus": "SUCCESS",
   "detectedObjects": [
     {
       "detectedObjectId": 1,
       "objectCode": "PERSON",
       "objectName": "사람",
+      "confidence": 0.95,
       "boundingBox": { "x": 0.15, "y": 0.20, "width": 0.25, "height": 0.50 }
     }
   ],
-  "limitations": ["필압을 지원하지 않는 기기에서 그려 필압 데이터가 없습니다."],
-  "completedAt": "2026-07-21T02:35:04Z"
+  "completedAt": "2026-07-21T02:35:04Z",
+  "errorCode": null,
+  "message": null
 }
 ```
+
+`analysisStatus`는 `PENDING`, `PROCESSING`, `PARTIAL_SUCCESS`, `SUCCESS`, `FAILED` 중 하나다.
+`FAILED`도 폴링이 완료된 정상 조회 결과이므로 HTTP 200으로 반환하며, 내부 오류 상세 대신 안전한
+`errorCode`와 `message`만 제공한다. 기존 세션 하위 분석 상세 API의 `SUCCEEDED` 상태는 호환을 위해
+유지하며 이 정본 URI에서는 사용하지 않는다.
 
 보호자 응답에는 진단형 감정 추정, 질환 가능성, raw risk score, 문헌을 개별 아동에게 적용한 AI 해석 초안을 포함하지 않는다.
 

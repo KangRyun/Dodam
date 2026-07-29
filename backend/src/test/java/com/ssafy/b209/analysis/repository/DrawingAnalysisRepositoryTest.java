@@ -120,6 +120,13 @@ class DrawingAnalysisRepositoryTest {
     assertThat(found.getDetections())
         .extracting(DrawingDetectedObject::getLabel)
         .containsExactly("FIRST", "SECOND", "THIRD");
+
+    DrawingAnalysis canonicalFound =
+        drawingAnalysisRepository.findDetailByAnalysisId(analysis.getId()).orElseThrow();
+    assertThat(canonicalFound.getDrawingSession().getId()).isEqualTo(session.getId());
+    assertThat(canonicalFound.getDetections())
+        .extracting(DrawingDetectedObject::getLabel)
+        .containsExactly("FIRST", "SECOND", "THIRD");
   }
 
   @Test
@@ -143,6 +150,7 @@ class DrawingAnalysisRepositoryTest {
 
     assertThat(drawingAnalysisRepository.findDetailBySessionIdAndAnalysisId(sessionId, analysisId))
         .isEmpty();
+    assertThat(drawingAnalysisRepository.findDetailByAnalysisId(analysisId)).isEmpty();
   }
 
   private DrawingDetectedObject detection(String label, int displayOrder) {

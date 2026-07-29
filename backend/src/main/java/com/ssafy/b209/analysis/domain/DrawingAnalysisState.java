@@ -8,7 +8,7 @@ public enum DrawingAnalysisState {
   PROCESSING,
   /** 일부 분석 단계만 성공한 기존 상태다. */
   PARTIAL_SUCCESS,
-  /** 분석 결과 저장까지 완료된 상태다. 외부 API에서는 {@code SUCCEEDED}로 변환한다. */
+  /** 분석 결과 저장까지 완료된 상태다. 기존 세션 하위 API에서만 {@code SUCCEEDED}로 변환한다. */
   SUCCESS,
   /** Client 호출 또는 결과 저장을 완료하지 못한 상태다. */
   FAILED
