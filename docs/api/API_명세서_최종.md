@@ -1290,6 +1290,25 @@ AI 초안과 전문가 의견을 같은 필드에 덮어쓰지 않는다. `repor
 
 부적절한 리포트 신고는 공통 신고 API `POST /complaints`를 사용한다.
 
+REPORT-04는 `Idempotency-Key` Header를 필수로 받고 HTTP 202로 내보내기 상태를 반환한다.
+보호자용 리포트가 `COMPLETED`가 아니면 `REPORT_EXPORT_409_001`로 거부한다. 현재 PDF는
+보호자 안전 필드만 포함하는 확정 리포트 버전에서 즉시 생성할 수 있으므로 상태는
+`COMPLETED`이며, 동일 리포트의 `reportId`를 안정적인 `exportId`로 사용한다.
+
+```json
+{
+  "reportId": 900,
+  "exportId": 900,
+  "status": "COMPLETED",
+  "downloadUrl": "/api/v1/reports/900/exports/900/file"
+}
+```
+
+REPORT-05의 `downloadUrl`은 presigned URL이 아니라 JWT 인증이 필요한 Backend proxy URI다.
+`GET /reports/{reportId}/exports/{exportId}/file`은 `application/pdf`와 attachment
+`Content-Disposition`으로 파일을 반환한다. 모든 상태 조회와 파일 조회에서 보호자-아동
+연결 관계를 다시 검증하며 URL 자체의 만료 시각은 없지만 유효한 인증 없이는 사용할 수 없다.
+
 ### 13.3 리포트 목록 Query
 
 | 필드 | 타입 | 설명 |
