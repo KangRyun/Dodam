@@ -18,7 +18,10 @@ final class RemoteActivityRepository implements ActivityRepository {
       'children/$childId/drawing-sessions',
       queryParameters: filter.toQueryParameters(),
     );
-    return ApiPage.fromJson(response.data!, ActivitySummaryDto.fromJson);
+    return ApiPage.fromJson(
+      envelopeObject(response.data),
+      ActivitySummaryDto.fromJson,
+    );
   }
 
   @override
@@ -26,7 +29,7 @@ final class RemoteActivityRepository implements ActivityRepository {
     final response = await _apiClient.get<Map<String, dynamic>>(
       'drawing-sessions/$activityId',
     );
-    return ActivityDetailDto.fromJson(response.data!);
+    return ActivityDetailDto.fromJson(envelopeObject(response.data));
   }
 
   @override

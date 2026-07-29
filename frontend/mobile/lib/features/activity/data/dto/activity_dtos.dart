@@ -17,8 +17,9 @@ final class ActivityFilterDto {
   Map<String, dynamic> toQueryParameters() => {
     if (from != null) 'from': from,
     if (to != null) 'to': to,
-    if (drawingType != null) 'drawingType': drawingType,
-    if (status != null) 'status': status,
+    // 백엔드(HISTORY-01)는 drawingTypeCode·sessionStatus 파라미터명을 쓴다.
+    if (drawingType != null) 'drawingTypeCode': drawingType,
+    if (status != null) 'sessionStatus': status,
     'page': page,
     'size': size,
   };

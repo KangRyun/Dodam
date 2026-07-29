@@ -8,52 +8,38 @@ import 'package:dodam/features/activity/data/dto/activity_dtos.dart';
 import 'package:dodam/features/activity/domain/repositories/activity_repository.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
 import 'package:dodam/features/child/domain/repositories/child_repository.dart';
-import 'package:dodam/features/history/presentation/screens/history_screens.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('Guardian Home에서 선택 아동의 Activity History로 진입한다', (tester) async {
+  testWidgets('Guardian Home에서 선택 아동의 활동 기록으로 진입한다', (tester) async {
     final repository = _ActivityRepository();
     await _openHistory(tester, repository);
 
     expect(repository.calls, 1);
     expect(repository.lastChildId, 3);
-    expect(find.text('활동 이력'), findsWidgets);
+    expect(find.text('활동 기록'), findsWidgets);
     expect(find.byKey(const ValueKey('activity-120')), findsOneWidget);
-    expect(find.text('우리 가족'), findsWidgets);
+    expect(find.byKey(const ValueKey('activity-121')), findsOneWidget);
+    // 첫 활동이 자동 선택되어 우측 프리뷰에 나온다.
     expect(
-      find.byKey(const ValueKey('activity-history-summary')),
+      find.descendant(
+        of: find.byKey(const ValueKey('activity-history-summary')),
+        matching: find.text('우리 가족'),
+      ),
       findsOneWidget,
     );
 
+    // 카드를 누르면 화면 이동 없이 우측 프리뷰가 그 활동으로 바뀐다.
     await tester.tap(find.byKey(const ValueKey('activity-121')));
     await tester.pump();
-    expect(find.text('비 오는 날'), findsWidgets);
-    final selectedCard = tester.widget<Semantics>(
-      find
-          .descendant(
-            of: find.byKey(const ValueKey('activity-121')),
-            matching: find.byType(Semantics),
-          )
-          .first,
-    );
-    expect(selectedCard.properties.selected, isTrue);
-
-    await tester.ensureVisible(
-      find.byKey(const ValueKey('activity-detail-cta')),
-    );
-    await tester.tap(find.byKey(const ValueKey('activity-detail-cta')));
-    await tester.pumpAndSettle();
     expect(
-      tester
-          .widget<ActivityDetailScreen>(find.byType(ActivityDetailScreen))
-          .activityId,
-      '121',
+      find.descendant(
+        of: find.byKey(const ValueKey('activity-history-summary')),
+        matching: find.text('비 오는 날'),
+      ),
+      findsOneWidget,
     );
-
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('activity-history-list')), findsOneWidget);
   });
 

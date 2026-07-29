@@ -116,6 +116,7 @@ abstract final class AppRouter {
                 : ActivityHistoryScreen(
                     childController: childController,
                     repository: activityRepository,
+                    embedded: true,
                   ),
           ),
           GuardianNavItem(
