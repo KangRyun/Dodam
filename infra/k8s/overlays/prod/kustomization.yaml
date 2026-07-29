@@ -35,3 +35,5 @@ images:
 
 patches:
   - path: gateway-hostport.yaml
+  # prod 전용 AI 연동 모드(그림분석·관찰·TTS)를 실 AI(http)로 올린다. base 는 mock 유지.
+  - path: configmap-ai-modes.yaml

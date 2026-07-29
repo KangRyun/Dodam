@@ -1,0 +1,21 @@
+# prod 전용 AI 연동 모드 — S15P11B209-360 컷오버(compose→k3s) 후속.
+#
+# 왜 필요한가: base configmap(dodam-config)은 compose 의 `:-` 기본값을 미러링해
+#   AI 모드가 mock 이다(스테이징 관례). compose 시절 운영은 서버 `.env`(AI_*_MODE=http)
+#   로 실 AI 를 켰는데, 그 http 값이 k3s 경로엔 이관되지 않아 컷오버 후 그림분석·관찰·TTS 가
+#   전부 mock(실 AI 미호출)로 회귀한다(2026-07-30 실측: TTS 무음 = MockAiTtsClient).
+#   → prod overlay 에서만 실 AI(http)로 올린다. base·staging 은 mock 유지.
+#
+# 전략적 병합 패치: dodam-config.data 에 아래 키만 덮어쓴다(다른 키 불변).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dodam-config
+  namespace: dodam
+data:
+  AI_DRAWING_ANALYSIS_MODE: "http"
+  AI_OBSERVATION_MODE: "http"
+  # 질문 TTS — base 에 아예 없어 앱 기본(mock)로 떨어졌다. http 로 켜고 base-url 을
+  #   내부망 DNS(ai)로 준다(앱 기본값 localhost 는 컨테이너 안에선 backend 자신 = 도달 불가).
+  AI_TTS_MODE: "http"
+  AI_TTS_BASE_URL: "http://ai:8000"
