@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
 import '../../../../core/network/api_page.dart';
 import '../../domain/repositories/activity_repository.dart';
 import '../dto/activity_dtos.dart';
@@ -66,4 +69,10 @@ final class MockActivityRepository implements ActivityRepository {
       });
   @override
   Future<void> deleteActivity(int activityId) async {}
+
+  @override
+  Future<Uint8List> downloadImage(String url) async => base64Decode(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1Pe'
+    'AAAADElEQVR42mP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+  );
 }
