@@ -30,8 +30,12 @@ RUN if ! getent group "${DOCKER_GID}" >/dev/null; then groupadd -g "${DOCKER_GID
 # 3) kubectl — compose→k8s 배포 전환용 (S15P11B209-359)
 #    ⚠️ 버전 고정. `stable.txt` 로 받으면 같은 Dockerfile 이 시점마다 다른 이미지를 만든다.
 #    k8s 는 kubectl 과 서버 버전이 마이너 ±1 까지 호환된다 — k3s 를 올릴 때 이 값도 함께 본다.
-#    (k3s v1.31.x 대상. 설치한 k3s 버전과 2 마이너 이상 벌어지면 명령이 조용히 실패할 수 있다)
-ARG KUBECTL_VERSION=v1.31.4
+#
+#    실제로 벌어져 있었다(2026-07-29 확인): 이 값이 v1.31.4 인데 설치된 k3s 서버는
+#    **v1.34.9+k3s1** 이라 3 마이너 차이였다. 지원 스큐 밖이라 조용히 실패할 수 있는 조합이다.
+#    서버 마이너에 맞춘다 — k3s 를 올릴 때 이 줄을 같이 올리는 것이 규칙이다.
+#    확인법: kubectl version -o json 의 serverVersion.gitVersion
+ARG KUBECTL_VERSION=v1.34.9
 RUN curl -fsSLo /usr/local/bin/kubectl \
       "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/$(dpkg --print-architecture)/kubectl" \
  && chmod 0755 /usr/local/bin/kubectl \
