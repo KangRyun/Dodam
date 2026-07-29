@@ -444,6 +444,112 @@ backend actuator UP(9404) · jdbc:mysql://mysql:3306   ← Service 이름 접속
 
 ---
 
+### 7단계 — 파이프라인 kubectl 전환 (2026-07-29 실측 · S15P11B209-359)
+
+Jenkins 가 `kubectl` 로 k3s 에 배포할 수 있는지 **컷오버 전에** 증명하는 단계입니다.
+운영 배포(compose)는 그대로 두고, 파라미터 `DEPLOY_K8S_STAGING` 을 켰을 때만 도는
+별도 스테이지로 검증합니다.
+
+> ⚠️ **이 단계에서 막힌 벽이 6개였고, 그중 4개는 "이미 완료"로 적혀 있던 항목 뒤에
+> 숨어 있었습니다.** 360 컷오버에서 그대로 재발할 수 있으니 아래 전제조건을 먼저 확인하세요.
+
+#### 전제조건 (하나라도 빠지면 배포 스테이지가 죽습니다)
+
+| # | 확인할 것 | 확인 명령 | 빠졌을 때 증상 |
+| --- | --- | --- | --- |
+| 1 | **Jenkins 이미지에 kubectl 이 실제로 들어 있는가** | `docker exec dodam-jenkins kubectl version --client` | `kubectl: not found` (exit 127) |
+| 2 | **kubectl 버전이 서버와 ±1 마이너 이내인가** | `kubectl version -o json` 의 `serverVersion` 과 대조 | 조용한 오동작 |
+| 3 | **UFW 가 컨테이너→호스트 6443 을 허용하는가** | `docker exec dodam-jenkins sh -c 'timeout 5 bash -c "</dev/tcp/<노드IP>/6443"'` | `i/o timeout` (연결 거부 아님) |
+| 4 | **`dodam-kubeconfig` 크리덴셜이 등록돼 있는가** | Jenkins → Credentials 목록 | 스테이지 시작과 동시에 실패 |
+
+**1번이 가장 함정입니다.** `infra/jenkins/Dockerfile` 에 kubectl 설치 줄을 넣어도
+**이미지를 다시 굽지 않으면 컨테이너에는 없습니다.** 2026-07-29 실제로 Dockerfile 은
+07-29 01:57 에 갱신됐는데 실행 중 이미지는 07-24 02:47 산이었습니다.
+
+```bash
+# 이미지 재빌드 + 컨테이너 재생성 (Jenkins 가 재시작되므로 빌드가 없는 때에)
+docker compose -f infra/jenkins/docker-compose.yml build jenkins
+docker compose -f infra/jenkins/docker-compose.yml up -d jenkins
+docker exec dodam-jenkins kubectl version --client   # v1.34.x 확인
+```
+
+**3번 UFW** — 도커가 방화벽을 우회해 주는 것은 **publish 된 포트**뿐입니다.
+컨테이너에서 **호스트 자신의 포트**로 가는 트래픽은 INPUT 체인을 그대로 타므로
+UFW 가 막습니다. k3s API 가 `*:6443` 으로 열려 있어도 호스트에서만 닿고 컨테이너에서는
+`i/o timeout` 이 납니다(연결 거부가 아니라 타임아웃인 것이 방화벽의 지문입니다).
+
+```bash
+# Jenkins 가 물린 두 네트워크에서만 허용
+sudo ufw allow from 172.19.0.0/16 to any port 6443 proto tcp comment 'jenkins→k3s API (S15P11B209-359)'
+sudo ufw allow from 172.18.0.0/16 to any port 6443 proto tcp comment 'jenkins→k3s API (S15P11B209-359)'
+```
+
+> 서버를 다시 세우면 이 규칙은 사라집니다. 360 컷오버 이후에는 **모든 배포가 이 경로**를
+> 지나므로, 규칙이 없으면 배포가 통째로 멈춥니다.
+
+**4번 kubeconfig 발급** — `infra/scripts/issue-deployer-kubeconfig.sh` 를 쓰되,
+k3s 가 설치한 `kubectl` 은 `KUBECONFIG` 가 없으면 root 전용 `/etc/rancher/k3s/k3s.yaml`
+을 봅니다. 일반 사용자로 실행하려면 읽을 수 있는 kubeconfig 를 지정하세요.
+
+```bash
+KUBECONFIG=~/.kube/config infra/scripts/issue-deployer-kubeconfig.sh
+# → ./jenkins-deployer.kubeconfig (600) 생성
+# → Jenkins Credentials(Secret file, ID: dodam-kubeconfig)로 업로드 후
+shred -u ./jenkins-deployer.kubeconfig
+```
+
+발급 스크립트는 **API 주소가 루프백이면 노드 IP 로 바꿔 넣습니다.** Jenkins 컨테이너의
+`127.0.0.1` 은 자기 자신이라 그대로 두면 닿지 않기 때문입니다.
+
+#### 이미지 전달 — containerd 는 도커 저장소를 못 봅니다
+
+같은 호스트에 있어도 `dodam-backend:local` 은 containerd 입장에서 존재하지 않습니다.
+`infra/scripts/push-staging-images.sh` 가 로컬 레지스트리를 경유시킵니다.
+
+> 이 스크립트의 **조회**(레지스트리 확인·태그 검증)는 호스트에서는 curl 로, 컨테이너
+> 안에서는 `--network host` 일회용 컨테이너로 수행합니다. 레지스트리가 호스트 루프백에만
+> 붙어 있기 때문입니다. 반면 `docker push` 는 **데몬**이 수행하므로 주소를 바꿀 필요가
+> 없습니다 — 푸시 주소는 처음부터 옳았고 조회만 우회가 필요했습니다.
+
+#### 검증 결과 (2026-07-29 빌드 25)
+
+```
+✅ dodam-backend:c87505da        ← 레지스트리 태그 재확인
+✅ dodam-nginx:c87505da
+deployment.apps/backend image updated
+deployment.apps/gateway image updated
+   ✅ backend readyReplicas=1
+   ✅ gateway readyReplicas=1
+```
+
+```bash
+$ kubectl -n dodam get deploy backend gateway \
+    -o custom-columns='NAME:.metadata.name,READY:.status.readyReplicas,IMAGE:.spec.template.spec.containers[0].image'
+NAME      READY   IMAGE
+backend   1       127.0.0.1:5000/dodam-backend:c87505da
+gateway   1       127.0.0.1:5000/dodam-nginx:c87505da
+```
+
+#### ⚠️ 검증에 쓰면 안 되는 신호 — NodePort
+
+**NodePort 를 찔러 "스테이징이 살아 있다"고 판단하지 마세요.** 이 호스트에서는 구분이
+되지 않습니다. k3s 를 완전히 정지(파드 0)시킨 상태에서 실측한 결과입니다.
+
+```
+30080 → 301 (→ https://127.0.0.1/)     ← 운영 nginx 가 응답
+30443 → 200                             ← 운영 nginx 가 응답
+31234 → 연결 거부                        ← 대조군
+```
+
+대신 클러스터 안의 신호를 쓰세요. gateway 에는 `readinessProbe(GET / :80)` 가 있으므로
+**Ready = nginx 가 실제로 응답 중**입니다.
+
+> `kubectl rollout status` 만으로도 부족합니다 — **replicas 0 인 워크로드에서 즉시 성공**합니다.
+> staging-min 은 ai·mongodb 를 의도적으로 0 으로 두므로, 실수로 backend 가 0 이 돼도
+> "롤아웃 성공"으로 읽힙니다. `readyReplicas >= 1` 을 따로 확인하세요.
+
+---
+
 ## 유지 관리 — 레지스트리 디스크
 
 커밋 SHA마다 태그가 쌓입니다. 방치하면 디스크를 채웁니다.
@@ -467,7 +573,8 @@ docker exec dodam-registry registry garbage-collect \
 - 앱 매니페스트(Deployment/Service/ConfigMap/Secret) — **357** ✅ 작성 완료
 - 스테이징 검증(compose와 병행 기동) — **358** ✅ 축소 스테이징 완료(6단계).
   남은 것: ai·mongodb 를 실제로 띄우는 전체 스테이징, backend replicas 2 롤링
-- Jenkins `docker compose up` → `kubectl apply` 전환 — **359**
+- Jenkins `docker compose up` → `kubectl` 전환 — **359** ✅ 스테이징 선검증 완료(7단계).
+  운영 배포 경로는 컷오버(360)에서 바꿉니다
 - 80/443 전환(ServiceLB 재활성 또는 nginx→NodePort) — **360**
 - Prometheus/Grafana 재배치 — **361**
 
