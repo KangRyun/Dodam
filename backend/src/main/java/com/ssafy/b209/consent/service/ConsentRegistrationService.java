@@ -18,8 +18,6 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -73,7 +71,7 @@ public class ConsentRegistrationService {
     List<ConsentTerm> terms = referencedTerms(requestedActions);
     LocalDateTime now = LocalDateTime.now(clock);
     validateReferencedTerms(terms, request.childId(), now);
-    validateRequiredTerms(requestedActions, request.childId(), now);
+    validateRequiredTerms(actorUserId, requestedActions, request.childId(), now);
     List<ConsentRecord> records =
         records(actorUserId, request.childId(), requestedActions, terms, ipAddress, userAgent, now);
     recordRepository.saveAll(records);
@@ -174,22 +172,47 @@ public class ConsentRegistrationService {
   }
 
   private void validateRequiredTerms(
-      Map<Long, ConsentAction> requestedActions, Long childId, LocalDateTime now) {
-    Set<ConsentTargetScope> applicableScopes =
-        childId == null
-            ? Set.of(ConsentTargetScope.USER)
-            : Set.of(ConsentTargetScope.USER, ConsentTargetScope.CHILD);
-    Set<Long> requiredTermIds =
+      Long actorUserId,
+      Map<Long, ConsentAction> requestedActions,
+      Long childId,
+      LocalDateTime now) {
+    List<ConsentTerm> activeRequiredTerms =
         termRepository.findAllByActiveTrue().stream()
             .filter(term -> term.isEffectiveAt(now))
             .filter(ConsentTerm::isRequired)
-            .filter(term -> applicableScopes.contains(term.getTargetScope()))
-            .map(ConsentTerm::getId)
-            .collect(Collectors.toSet());
+            .toList();
+    if (childId != null) {
+      requireChildScopeAgreedInRequest(activeRequiredTerms, requestedActions);
+      requireUserScopeAgreedByActorHistory(actorUserId, now);
+    } else {
+      requireUserScopeAgreedInRequest(activeRequiredTerms, requestedActions);
+    }
+  }
+
+  private void requireChildScopeAgreedInRequest(
+      List<ConsentTerm> activeRequiredTerms, Map<Long, ConsentAction> requestedActions) {
     boolean satisfied =
-        requiredTermIds.stream()
-            .allMatch(termId -> requestedActions.get(termId) == ConsentAction.AGREE);
+        activeRequiredTerms.stream()
+            .filter(term -> term.getTargetScope() == ConsentTargetScope.CHILD)
+            .allMatch(term -> requestedActions.get(term.getId()) == ConsentAction.AGREE);
     if (!satisfied) {
+      throw new BusinessException(ConsentErrorCode.REQUIRED_CONSENT_MISSING);
+    }
+  }
+
+  private void requireUserScopeAgreedInRequest(
+      List<ConsentTerm> activeRequiredTerms, Map<Long, ConsentAction> requestedActions) {
+    boolean satisfied =
+        activeRequiredTerms.stream()
+            .filter(term -> term.getTargetScope() == ConsentTargetScope.USER)
+            .allMatch(term -> requestedActions.get(term.getId()) == ConsentAction.AGREE);
+    if (!satisfied) {
+      throw new BusinessException(ConsentErrorCode.REQUIRED_CONSENT_MISSING);
+    }
+  }
+
+  private void requireUserScopeAgreedByActorHistory(Long actorUserId, LocalDateTime now) {
+    if (!authorizationRepository.hasRequiredUserConsents(actorUserId, now)) {
       throw new BusinessException(ConsentErrorCode.REQUIRED_CONSENT_MISSING);
     }
   }
