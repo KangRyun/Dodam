@@ -45,22 +45,24 @@ final class DrawingSessionStartController {
 
   Future<DrawingSessionResolution> resolveSession({
     required int childId,
+    int? drawingTypeId,
   }) async {
     final activeSession = await findActiveSession(childId: childId);
     if (activeSession != null) {
       return resume(activeSession);
     }
 
-    return createNewSession(childId: childId);
+    return createNewSession(childId: childId, drawingTypeId: drawingTypeId);
   }
 
   /// 기존 활동을 폐기한 뒤 새 그림 세션을 만든다.
   Future<DrawingSessionResolution> replaceActiveSession({
     required int childId,
     required int activeSessionId,
+    int? drawingTypeId,
   }) async {
     await discardActiveSession(activeSessionId);
-    return createNewSession(childId: childId);
+    return createNewSession(childId: childId, drawingTypeId: drawingTypeId);
   }
 
   /// 임시 그림만 삭제하고 현재 화면에 머문다.
@@ -74,6 +76,7 @@ final class DrawingSessionStartController {
 
   Future<DrawingSessionResolution> createNewSession({
     required int childId,
+    int? drawingTypeId,
   }) async {
     final drawingTypes = await repository.getDrawingTypes(childId: childId);
     if (drawingTypes.content.isEmpty) {
@@ -81,12 +84,20 @@ final class DrawingSessionStartController {
     }
     final sortedTypes = [...drawingTypes.content]
       ..sort((left, right) => left.displayOrder.compareTo(right.displayOrder));
+    // 홈 카드에서 고른 활동 유형을 우선 사용하고, 지정되지 않았거나 더 이상
+    // 선택 가능한 목록에 없으면 첫 번째 유형으로 되돌아간다.
+    final resolvedTypeId = sortedTypes
+        .firstWhere(
+          (type) => type.drawingTypeId == drawingTypeId,
+          orElse: () => sortedTypes.first,
+        )
+        .drawingTypeId;
 
     try {
       final session = await repository.createSession(
         CreateDrawingSessionRequestDto(
           childId: childId,
-          drawingTypeId: sortedTypes.first.drawingTypeId,
+          drawingTypeId: resolvedTypeId,
           inputMethod: 'CANVAS',
           clientStartedAt: _now().toUtc().toIso8601String(),
         ),
