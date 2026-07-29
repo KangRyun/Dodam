@@ -15,8 +15,8 @@ import org.springframework.stereotype.Component;
  *
  * <h2>왜 {@code DOWN}을 반환하지 않는가</h2>
  *
- * 푸시는 부가 기능이다. 여기서 {@code DOWN}을 내면 애플리케이션 전체 health 가 내려가고, 그것은 컨테이너 헬스체크 실패 → 게이트웨이 기동 차단 → 서비스 전면
- * 중단으로 이어진다. 2026-07-28 장애가 정확히 그 연쇄였다. 부가 기능의 문제를 핵심 가용성 신호에 섞지 않는다.
+ * 푸시는 부가 기능이다. 여기서 {@code DOWN}을 내면 애플리케이션 전체 health 가 내려가고, 그것은 컨테이너 헬스체크 실패 → 게이트웨이 기동 차단 → 서비스
+ * 전면 중단으로 이어진다. 2026-07-28 장애가 정확히 그 연쇄였다. 부가 기능의 문제를 핵심 가용성 신호에 섞지 않는다.
  *
  * <h2>그러면 어떻게 알아채는가</h2>
  *
@@ -63,8 +63,7 @@ public class PushHealthIndicator implements HealthIndicator {
             .withDetail("sending", pushSender.isEnabled())
             .withDetail("degraded", isDegraded());
     if (isDegraded()) {
-      builder.withDetail(
-          "reason", FcmCredentials.inspect(properties.credentialsPath()).reason());
+      builder.withDetail("reason", FcmCredentials.inspect(properties.credentialsPath()).reason());
     }
     return builder.build();
   }

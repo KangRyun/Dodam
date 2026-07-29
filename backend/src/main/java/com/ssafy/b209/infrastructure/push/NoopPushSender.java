@@ -49,8 +49,7 @@ public class NoopPushSender implements PushSender {
     }
     FcmCredentials.Availability availability = FcmCredentials.inspect(properties.credentialsPath());
     log.error(
-        "FCM 발송이 켜져 있으나 자격증명을 쓸 수 없어 발송을 비활성화한 채 기동합니다. "
-            + "푸시는 전송되지 않습니다. path={} reason={}",
+        "FCM 발송이 켜져 있으나 자격증명을 쓸 수 없어 발송을 비활성화한 채 기동합니다. " + "푸시는 전송되지 않습니다. path={} reason={}",
         properties.credentialsPath(),
         availability.reason());
   }

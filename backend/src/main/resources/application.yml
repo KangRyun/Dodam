@@ -116,6 +116,15 @@ app:
       interval: ${STT_RECOVERY_INTERVAL:60s}
       minimum-age: ${STT_RECOVERY_MINIMUM_AGE:2m}
       batch-size: ${STT_RECOVERY_BATCH_SIZE:20}
+  notification:
+    retention:
+      # 보관 만료 임박 알림 발송 스위치. 보관 정책(564/565) 확정 전까지 false로 두어 임시 기준일로 오발송하지 않게 한다.
+      enabled: ${NOTIFICATION_RETENTION_ENABLED:false}
+      interval: ${NOTIFICATION_RETENTION_INTERVAL:1h}
+      # 보관 기간(일)과 만료 며칠 전 안내할지. 보관 정책 확정 전 임시 기준값이다.
+      retention-days: ${NOTIFICATION_RETENTION_DAYS:180}
+      notice-days-before: ${NOTIFICATION_RETENTION_NOTICE_DAYS_BEFORE:30}
+      batch-size: ${NOTIFICATION_RETENTION_BATCH_SIZE:100}
   idempotency:
     conversation:
       processing-ttl: ${CONVERSATION_IDEMPOTENCY_PROCESSING_TTL:30s}
