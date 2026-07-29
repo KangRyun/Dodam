@@ -42,6 +42,7 @@ class DodamApp extends StatefulWidget {
     this.voiceAnswerRepository,
     this.sttResultRepository,
     this.conversationAnswerRepository,
+    this.questionSkipRepository,
     this.conversationId,
     this.basisAnalysisId,
     this.pushSetup,
@@ -65,6 +66,9 @@ class DodamApp extends StatefulWidget {
   final VoiceAnswerRepository? voiceAnswerRepository;
   final SttResultRepository? sttResultRepository;
   final ConversationAnswerRepository? conversationAnswerRepository;
+
+  /// 질문 건너뛰기 기록 경계. 주지 않으면 화면이 Mock으로 폴백한다.
+  final QuestionSkipRepository? questionSkipRepository;
   final int? conversationId;
   final int? basisAnalysisId;
 
@@ -289,6 +293,7 @@ class _DodamAppState extends State<DodamApp> {
       voiceAnswerRepository: widget.voiceAnswerRepository,
       sttResultRepository: widget.sttResultRepository,
       conversationAnswerRepository: widget.conversationAnswerRepository,
+      questionSkipRepository: widget.questionSkipRepository,
       conversationId: widget.conversationId,
       basisAnalysisId: widget.basisAnalysisId,
     ),
