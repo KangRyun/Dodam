@@ -67,6 +67,11 @@ class RecentMessage(_CamelModel):
 Difficulty = Literal["PRESCHOOL", "LOWER_ELEMENTARY", "UPPER_ELEMENTARY", "SUPPORT"]
 ResponseMode = Literal["VOICE", "OPTION"]
 
+# HTP/그림일기 활동 맥락 — 질문 경로(QuestionRequest)와 분석 경로(AnalysisRequest)가 함께 쓴다.
+# BE enum(DrawingAnalysisActivityType · DrawingAnalysisSubject)과 이름을 정확히 맞춘다.
+ActivityType = Literal["HTP", "ART_DIARY"]
+DrawingSubject = Literal["HOUSE", "TREE", "PERSON"]
+
 
 class QuestionRequest(_CamelModel):
     """BE AiQuestionRequest와 1:1 대응하는 질문 생성 요청."""
@@ -82,6 +87,28 @@ class QuestionRequest(_CamelModel):
     detected_objects: list[DetectedObject] = Field(default_factory=list)
     recent_messages: list[RecentMessage] = Field(default_factory=list)
     safety_rule_version: str
+    # ── HTP 주제 맥락 (S15P11B209-712) ──────────────────────────
+    # 질문 경로도 '지금 무슨 HTP 단계(주제)인지'를 받아야 주제를 벗어난 질문을 막을 수 있다
+    # (버그 S15P11B209-709 원인 3). 주제는 BE가 세션→HTP 단계로 서버에서 확정해 넘긴다.
+    # 롤아웃 안전: 구 BE가 아직 안 보내도 요청이 깨지지 않게 optional·기본값을 둔다
+    # (basis_analysis_id와 같은 방식). 실제 프롬프트 반영은 후속 S15P11B209-713이 한다.
+    activity_type: ActivityType | None = None
+    drawing_subject: DrawingSubject | None = None
+    # 이 대화에서 이미 질문한 대상 objectCode 목록(반복 질문 방지용). 713이 프롬프트에서 소비한다.
+    asked_object_codes: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_activity_context(self) -> "QuestionRequest":
+        """활동 유형이 주어졌으면 주제 유무가 유형과 일치하는지 검증한다.
+
+        분석 경로(AnalysisRequest.validate_activity_context)와 같은 규칙이되, 질문 경로는
+        롤아웃 중 activity_type이 아직 없을 수 있어(구 BE) 유형이 주어졌을 때만 검사한다.
+        """
+        if self.activity_type == "HTP" and self.drawing_subject is None:
+            raise ValueError("HTP question requires drawingSubject")
+        if self.activity_type == "ART_DIARY" and self.drawing_subject is not None:
+            raise ValueError("ART_DIARY question must not include drawingSubject")
+        return self
 
 
 # ── 응답 (BE AiQuestionResponse) ────────────────────────────────
@@ -287,8 +314,7 @@ class ObservationGenerationResult(_CamelModel):
 #   unusedInputs/warnings로 '못 했음'을 명시한다.
 
 AnalysisType = Literal["INTERMEDIATE", "FINAL"]
-ActivityType = Literal["HTP", "ART_DIARY"]
-DrawingSubject = Literal["HOUSE", "TREE", "PERSON"]
+# ActivityType · DrawingSubject 는 질문 경로와 공용이라 위(QuestionRequest 앞)에서 정의한다.
 
 # §4 AnalysisTriggerReason 전체 값.
 TriggerReason = Literal[
