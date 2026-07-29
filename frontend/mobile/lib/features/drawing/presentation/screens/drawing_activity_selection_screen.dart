@@ -78,6 +78,7 @@ class _DrawingActivitySelectionScreenState
           sessionId: resolution.sessionId,
           repository: widget.repository,
           completionSnapshotProvider: widget.completionSnapshotProvider,
+          startFresh: true,
           activityContext: resolution.activityContext,
         ),
       );

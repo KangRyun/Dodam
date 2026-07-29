@@ -113,6 +113,7 @@ class DrawingScreen extends StatefulWidget {
     this.basisAnalysisId,
     this.resumeConversation = false,
     this.autoRestoreDraft = false,
+    this.startFresh = false,
     this.activityContext = const DrawingActivityContextDto.general(),
     super.key,
   });
@@ -144,6 +145,9 @@ class DrawingScreen extends StatefulWidget {
 
   /// 활동 진입 화면에서 이어 그리기를 선택했으면 Draft를 바로 불러온다.
   final bool autoRestoreDraft;
+
+  /// 주제 선택 뒤 생성한 새 활동이면 Draft 선택창 없이 빈 캔버스를 연다.
+  final bool startFresh;
   final DrawingActivityContextDto activityContext;
 
   @override
@@ -270,9 +274,13 @@ class _DrawingScreenState extends State<DrawingScreen> {
         return;
       }
       _syncCoordinator.start(snapshotProvider: _captureCanvasSnapshot);
-      unawaited(
-        _draftRestoreController.load(autoRestore: widget.autoRestoreDraft),
-      );
+      if (widget.startFresh) {
+        _draftRestoreController.startNewDrawing();
+      } else {
+        unawaited(
+          _draftRestoreController.load(autoRestore: widget.autoRestoreDraft),
+        );
+      }
     });
   }
 
@@ -868,6 +876,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
           repository: repository,
           completionSnapshotProvider: widget.completionSnapshotProvider,
           resumeConversation: !resolution.isDrawingStage,
+          startFresh: true,
           activityContext: resolution.activityContext,
         ),
       );
@@ -949,6 +958,12 @@ class _DrawingScreenState extends State<DrawingScreen> {
       top: false,
       child: LayoutBuilder(
         builder: (context, constraints) {
+          final restoreStatus = _draftRestoreController.status;
+          final autoRestoreInProgress =
+              widget.autoRestoreDraft &&
+              (restoreStatus == DrawingDraftRestoreStatus.loading ||
+                  restoreStatus == DrawingDraftRestoreStatus.found ||
+                  restoreStatus == DrawingDraftRestoreStatus.loadingImage);
           final canvas = _CanvasPanel(
             repaintBoundaryKey: _canvasBoundaryKey,
             strokes: _visibleStrokes,
@@ -958,10 +973,12 @@ class _DrawingScreenState extends State<DrawingScreen> {
             backgroundImage: _draftRestoreController.backgroundImage,
             inputEnabled: !_canvasLocked && _draftRestoreController.canDraw,
             showRestoreOverlay:
-                !_canvasLocked && !_draftRestoreController.canDraw,
+                !_canvasLocked &&
+                !_draftRestoreController.canDraw &&
+                !autoRestoreInProgress,
             onBackgroundLoaded: _draftRestoreController.markImageLoaded,
             onBackgroundError: _draftRestoreController.markImageFailed,
-            restoreStatus: _draftRestoreController.status,
+            restoreStatus: restoreStatus,
             onContinue: _draftRestoreController.continueDrawing,
             onStartNew: _draftRestoreController.startNewDrawing,
             onRetryQuery: () => unawaited(_draftRestoreController.load()),
