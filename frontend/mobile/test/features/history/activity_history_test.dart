@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:dodam/app/app.dart';
 import 'package:dodam/app/router/app_routes.dart';
@@ -59,7 +60,7 @@ void main() {
   testWidgets('목록 Loading 상태를 표시한다', (tester) async {
     final pending = Completer<ApiPage<ActivitySummaryDto>>();
     final repository = _ActivityRepository(pending: pending);
-    await _openHistory(tester, repository, settleAfterNavigation: false);
+    await _openHistoryDirect(tester, repository, settle: false);
     await tester.pump();
 
     expect(
@@ -71,7 +72,7 @@ void main() {
   });
 
   testWidgets('목록 Empty 상태를 표시한다', (tester) async {
-    await _openHistory(tester, _ActivityRepository(activities: const []));
+    await _openHistoryDirect(tester, _ActivityRepository(activities: const []));
     expect(
       find.byKey(const ValueKey('activity-history-empty')),
       findsOneWidget,
@@ -80,7 +81,7 @@ void main() {
 
   testWidgets('목록 Error에서 Retry할 수 있다', (tester) async {
     final repository = _ActivityRepository(error: StateError('network'));
-    await _openHistory(tester, repository);
+    await _openHistoryDirect(tester, repository);
     expect(
       find.byKey(const ValueKey('activity-history-error')),
       findsOneWidget,
@@ -98,7 +99,7 @@ void main() {
 
   testWidgets('지원되는 기간과 Drawing Type 필터만 Repository에 전달한다', (tester) async {
     final repository = _ActivityRepository();
-    await _openHistory(tester, repository);
+    await _openHistoryDirect(tester, repository);
 
     await tester.tap(find.text('전체 기간'));
     await tester.pumpAndSettle();
@@ -116,10 +117,10 @@ void main() {
     expect(repository.lastFilter?.drawingType, 'FREE_DRAWING');
   });
 
+  // 개편 홈은 아이가 있으면 목록 조회가 첫 아이를 자동 선택하므로, "선택 없음"은
+  // 곧 아이가 하나도 없는 경우다. 빈 목록으로 그 상태를 만든다.
   testWidgets('선택된 childId가 없으면 가짜 조회 없이 안내한다', (tester) async {
     final repository = _ActivityRepository();
-    // 개편 홈은 아이가 있으면 첫 아이를 자동 선택하므로, "선택 없음"은 곧 아이가
-    // 하나도 없는 경우다. 빈 목록으로 그 상태를 만든다.
     await tester.pumpWidget(
       DodamApp(
         childRepository: const _ChildRepository(children: []),
@@ -143,15 +144,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     // 보호자 홈은 태블릿 전용 레이아웃이라 작은 화면에선 홈을 거치지 않고 이력 화면을
     // 직접 띄워 이력 화면의 반응형만 검증한다(홈은 첫 아이를 자동 선택).
-    final repository = _ActivityRepository();
-    await tester.pumpWidget(
-      DodamApp(
-        childRepository: const _ChildRepository(),
-        activityRepository: repository,
-        initialRoute: AppRoutes.activityHistory,
-      ),
-    );
-    await tester.pumpAndSettle();
+    await _openHistoryDirect(tester, _ActivityRepository());
     await tester.pump(const Duration(seconds: 1));
 
     expect(tester.takeException(), isNull);
@@ -174,11 +167,12 @@ void main() {
   });
 }
 
+/// 보호자 홈을 거쳐 활동 이력으로 들어간다. 홈에서의 이동 자체를 보는
+/// 테스트만 쓴다.
 Future<void> _openHistory(
   WidgetTester tester,
-  _ActivityRepository repository, {
-  bool settleAfterNavigation = true,
-}) async {
+  _ActivityRepository repository,
+) async {
   await tester.pumpWidget(
     DodamApp(
       childRepository: const _ChildRepository(),
@@ -188,16 +182,35 @@ Future<void> _openHistory(
   await tester.pumpAndSettle();
   await tester.tap(find.byKey(const ValueKey('child-3')));
   await tester.pump();
-  final entry = find.byKey(const ValueKey('activity-history-entry'));
+  // 개편된 보호자 홈은 최근 활동·마음 달력용으로 같은 레포에 활동을 미리 조회한다.
+  // 이력 화면의 조회만 세도록 진입 직전에 카운터를 초기화한다.
+  repository.reset();
+  // 예전 '활동 이력 보기' 버튼은 대시보드 개편으로 사라졌다. 지금은 "최근 활동"
+  // 카드의 "전체"가 같은 화면으로 보낸다.
+  final entry = find.ancestor(
+    of: find.text('전체'),
+    matching: find.byType(InkWell),
+  );
   await tester.ensureVisible(entry);
-  // 개편된 보호자 홈은 최근 활동·마음 달력용으로 활동을 미리 조회한다. 이력 화면의
-  // 조회만 세도록 진입 직전에 카운터를 초기화한다.
-  repository
-    ..calls = 0
-    ..lastChildId = null
-    ..lastFilter = null;
   await tester.tap(entry);
-  if (settleAfterNavigation) {
+  await tester.pumpAndSettle();
+}
+
+/// 활동 이력 화면만 보는 테스트용. 보호자 홈을 거치지 않아 대시보드가 같은
+/// 레포에 넣는 조회가 섞이지 않는다. 아이는 목록을 불러온 뒤 자동 선택된다.
+Future<void> _openHistoryDirect(
+  WidgetTester tester,
+  _ActivityRepository repository, {
+  bool settle = true,
+}) async {
+  await tester.pumpWidget(
+    DodamApp(
+      childRepository: const _ChildRepository(),
+      activityRepository: repository,
+      initialRoute: AppRoutes.activityHistory,
+    ),
+  );
+  if (settle) {
     await tester.pumpAndSettle();
   } else {
     await tester.pump();
@@ -218,6 +231,13 @@ final class _ActivityRepository implements ActivityRepository {
   int? lastChildId;
   ActivityFilterDto? lastFilter;
 
+  /// 보호자 홈 대시보드가 넣은 조회 기록을 지운다.
+  void reset() {
+    calls = 0;
+    lastChildId = null;
+    lastFilter = null;
+  }
+
   @override
   Future<ApiPage<ActivitySummaryDto>> getActivities(
     int childId, {
@@ -236,6 +256,10 @@ final class _ActivityRepository implements ActivityRepository {
   @override
   Future<ActivityDetailDto> getActivity(int activityId) =>
       throw UnimplementedError();
+
+  @override
+  Future<Uint8List> downloadImage(String url) =>
+      throw StateError('image fetch failed');
 }
 
 ApiPage<ActivitySummaryDto> _page(List<ActivitySummaryDto> activities) =>

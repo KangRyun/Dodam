@@ -207,10 +207,14 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
             activities: _activities,
             selectedActivityId: _selectedActivityId,
             embedded: embedded,
+            repository: widget.repository,
             onSelected: (activityId) =>
                 setState(() => _selectedActivityId = activityId),
           );
-          final summary = _ActivitySummary(activity: _selectedActivity);
+          final summary = _ActivitySummary(
+            activity: _selectedActivity,
+            repository: widget.repository,
+          );
           if (constraints.maxWidth < 760) {
             return ListView(
               key: const ValueKey('activity-history-small-layout'),
@@ -495,11 +499,13 @@ class _ActivityList extends StatelessWidget {
     required this.activities,
     required this.selectedActivityId,
     required this.onSelected,
+    required this.repository,
     this.embedded = false,
   });
   final List<ActivitySummaryDto> activities;
   final int? selectedActivityId;
   final ValueChanged<int> onSelected;
+  final ActivityRepository repository;
   final bool embedded;
   @override
   Widget build(BuildContext context) => ListView.separated(
@@ -517,15 +523,20 @@ class _ActivityList extends StatelessWidget {
             '${_date(activity.completedAt ?? activity.startedAt)} · ${activity.drawingType.name}',
         isSelected: activity.activityId == selectedActivityId,
         onTap: () => onSelected(activity.activityId),
-        leading: _Thumbnail(url: activity.thumbnailUrl, size: 72),
+        leading: _Thumbnail(
+          url: activity.thumbnailUrl,
+          repository: repository,
+          size: 72,
+        ),
       );
     },
   );
 }
 
 class _ActivitySummary extends StatelessWidget {
-  const _ActivitySummary({required this.activity});
+  const _ActivitySummary({required this.activity, required this.repository});
   final ActivitySummaryDto? activity;
+  final ActivityRepository repository;
   @override
   Widget build(BuildContext context) {
     final activity = this.activity;
@@ -546,7 +557,10 @@ class _ActivitySummary extends StatelessWidget {
           children: [
             AspectRatio(
               aspectRatio: 16 / 10,
-              child: _Thumbnail(url: activity.thumbnailUrl),
+              child: _Thumbnail(
+                url: activity.thumbnailUrl,
+                repository: repository,
+              ),
             ),
             const SizedBox(height: AppSpacing.lg),
             Text(
@@ -613,24 +627,23 @@ class _SummaryLine extends StatelessWidget {
 }
 
 class _Thumbnail extends StatelessWidget {
-  const _Thumbnail({required this.url, this.size});
+  const _Thumbnail({required this.url, required this.repository, this.size});
   final String? url;
+  final ActivityRepository repository;
   final double? size;
   @override
   Widget build(BuildContext context) {
-    final placeholder = Container(
-      key: const ValueKey('activity-thumbnail-placeholder'),
-      color: AppColors.surfaceSoft,
-      alignment: Alignment.center,
-      child: const Icon(Icons.image_outlined, color: AppColors.inkMuted),
+    final image = AuthenticatedImage(
+      url: url,
+      fetcher: repository.downloadImage,
+      fit: BoxFit.cover,
+      placeholderBuilder: (_) => Container(
+        key: const ValueKey('activity-thumbnail-placeholder'),
+        color: AppColors.surfaceSoft,
+        alignment: Alignment.center,
+        child: const Icon(Icons.image_outlined, color: AppColors.inkMuted),
+      ),
     );
-    final image = url == null
-        ? placeholder
-        : Image.network(
-            url!,
-            fit: BoxFit.cover,
-            errorBuilder: (_, _, _) => placeholder,
-          );
     return ClipRRect(
       borderRadius: BorderRadius.circular(AppRadius.sm),
       child: size == null
@@ -731,18 +744,25 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
       title: '활동 상세 정보가 없어요',
       message: '이력 목록으로 돌아가 다른 활동을 선택해 주세요.',
     ),
-    _DetailStatus.success => _ActivityDetailContent(activity: _activity!),
+    _DetailStatus.success => _ActivityDetailContent(
+      activity: _activity!,
+      repository: widget.repository,
+    ),
   };
 }
 
 class _ActivityDetailContent extends StatelessWidget {
-  const _ActivityDetailContent({required this.activity});
+  const _ActivityDetailContent({
+    required this.activity,
+    required this.repository,
+  });
   final ActivityDetailDto activity;
+  final ActivityRepository repository;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
-      final left = _ActivityArtwork(activity: activity);
+      final left = _ActivityArtwork(activity: activity, repository: repository);
       final right = _ActivityInformation(activity: activity);
       return SingleChildScrollView(
         key: ValueKey(
@@ -774,8 +794,9 @@ class _ActivityDetailContent extends StatelessWidget {
 }
 
 class _ActivityArtwork extends StatelessWidget {
-  const _ActivityArtwork({required this.activity});
+  const _ActivityArtwork({required this.activity, required this.repository});
   final ActivityDetailDto activity;
+  final ActivityRepository repository;
 
   ActivityAssetDto? get _asset {
     for (final asset in activity.assets.reversed) {
@@ -819,13 +840,12 @@ class _ActivityArtwork extends StatelessWidget {
             border: Border.all(color: AppColors.outline),
           ),
           clipBehavior: Clip.antiAlias,
-          child: _asset == null
-              ? const _DetailImagePlaceholder()
-              : Image.network(
-                  _asset!.fileUrl,
-                  fit: BoxFit.contain,
-                  errorBuilder: (_, _, _) => const _DetailImagePlaceholder(),
-                ),
+          child: AuthenticatedImage(
+            url: _asset?.fileUrl,
+            fetcher: repository.downloadImage,
+            fit: BoxFit.contain,
+            placeholderBuilder: (_) => const _DetailImagePlaceholder(),
+          ),
         ),
       ),
     ],

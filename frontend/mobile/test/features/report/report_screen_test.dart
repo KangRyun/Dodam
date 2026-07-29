@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:dodam/app/app.dart';
 import 'package:dodam/app/router/app_routes.dart';
@@ -421,6 +422,9 @@ final class _ActivityRepository implements ActivityRepository {
 
   @override
   Future<void> deleteActivity(int activityId) => throw UnimplementedError();
+
+  @override
+  Future<Uint8List> downloadImage(String url) => throw UnimplementedError();
 }
 
 const _emptyExpression = ReportChildExpressionDto(
