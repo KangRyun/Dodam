@@ -10,6 +10,14 @@ import org.springframework.data.jpa.repository.JpaRepository;
 public interface DrawingAssetRepository extends JpaRepository<DrawingAsset, Long> {
 
   /**
+   * HTP 원본 이미지 업로드의 멱등 키로 저장 결과를 조회한다.
+   *
+   * @param uploadIdempotencyKey 업로드 요청의 {@code Idempotency-Key}
+   * @return 같은 키로 저장된 파일, 없으면 빈 값
+   */
+  Optional<DrawingAsset> findByUploadIdempotencyKey(String uploadIdempotencyKey);
+
+  /**
    * 세션에서 가장 최근 생성된 그림 파일 Metadata를 조회한다.
    *
    * @param drawingSessionId 그림 활동 세션 식별자

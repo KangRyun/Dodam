@@ -11,6 +11,7 @@ import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingAssetType;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.dto.request.CompleteDrawingStageRequest;
 import com.ssafy.b209.drawing.dto.request.UploadDrawingSnapshotRequest;
 import com.ssafy.b209.drawing.dto.response.CompleteDrawingStageResponse;
@@ -98,7 +99,7 @@ public class DrawingStageCompletionService {
         request.sourceAssetId() == null
             ? findExistingFinalAsset(drawingSessionId)
                 .orElseGet(() -> storeFinalImage(drawingSessionId, finalImage, request))
-            : requireReusableFinalAsset(drawingSessionId, request.sourceAssetId());
+            : requireReusableSourceAsset(drawingSessionId, request.sourceAssetId());
     CreateDrawingAnalysisRequest analysisRequest =
         new CreateDrawingAnalysisRequest(finalAssetId, DrawingAnalysisType.OBJECT_DETECTION);
     try {
@@ -133,13 +134,17 @@ public class DrawingStageCompletionService {
     return stored.drawingAssetId();
   }
 
-  private Long requireReusableFinalAsset(Long drawingSessionId, Long sourceAssetId) {
+  private Long requireReusableSourceAsset(Long drawingSessionId, Long sourceAssetId) {
     DrawingAsset asset =
         drawingAssetRepository
             .findById(sourceAssetId)
             .orElseThrow(() -> new BusinessException(DrawingErrorCode.FINAL_ASSET_REQUIRED));
+    boolean reusableFinal = asset.getAssetType() == DrawingAssetType.FINAL;
+    boolean reusableUpload =
+        asset.getAssetType() == DrawingAssetType.UPLOADED
+            && asset.getDrawingSession().getInputMethod() == DrawingInputMethod.UPLOAD;
     if (!Objects.equals(asset.getDrawingSession().getId(), drawingSessionId)
-        || asset.getAssetType() != DrawingAssetType.FINAL) {
+        || !reusableFinal && !reusableUpload) {
       throw new BusinessException(DrawingErrorCode.FINAL_ASSET_REQUIRED);
     }
     return asset.getId();

@@ -8,8 +8,8 @@ import jakarta.persistence.Table;
 /**
  * 질문 메시지의 건너뜀 표시만 읽고 갱신하는 CONV-08 전용 Entity다.
  *
- * <p>질문 생성 책임을 가진 {@link ConversationMessage}의 매핑을 바꾸지 않기 위해 같은 {@code conversation_messages} 테이블을 별도
- * 경계로 매핑한다({@link QuestionTtsMessage}와 동일한 방식).
+ * <p>질문 생성 책임을 가진 {@link ConversationMessage}의 매핑을 바꾸지 않기 위해 같은 {@code conversation_messages} 테이블을
+ * 별도 경계로 매핑한다({@link QuestionTtsMessage}와 동일한 방식).
  */
 @Entity
 @Table(name = "conversation_messages")

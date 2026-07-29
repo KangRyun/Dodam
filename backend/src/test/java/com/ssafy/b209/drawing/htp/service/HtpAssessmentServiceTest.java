@@ -298,7 +298,8 @@ class HtpAssessmentServiceTest {
               return session;
             });
 
-    HtpAssessmentResponse response = service.nextStep(200L, "htp-tree-key");
+    HtpAssessmentResponse response =
+        service.nextStep(200L, "htp-tree-key", DrawingInputMethod.UPLOAD);
 
     assertThat(houseSession.getSessionStatus()).isEqualTo(DrawingSessionStatus.COMPLETED);
     assertThat(response.currentStep().stepOrder()).isEqualTo(2);
@@ -330,7 +331,7 @@ class HtpAssessmentServiceTest {
     given(conversationSessionRepository.findByDrawingSessionId(100L))
         .willReturn(Optional.of(conversation));
 
-    assertThatThrownBy(() -> service.nextStep(200L, "htp-tree-key"))
+    assertThatThrownBy(() -> service.nextStep(200L, "htp-tree-key", DrawingInputMethod.CANVAS))
         .isInstanceOf(BusinessException.class);
   }
 
@@ -364,8 +365,10 @@ class HtpAssessmentServiceTest {
     given(conversationSessionRepository.findByDrawingSessionId(102L))
         .willReturn(Optional.of(conversation));
 
-    HtpAssessmentResponse first = service.nextStep(200L, "htp-finish-key");
-    HtpAssessmentResponse replay = service.nextStep(200L, "htp-finish-key");
+    HtpAssessmentResponse first =
+        service.nextStep(200L, "htp-finish-key", DrawingInputMethod.CANVAS);
+    HtpAssessmentResponse replay =
+        service.nextStep(200L, "htp-finish-key", DrawingInputMethod.CANVAS);
 
     assertThat(first.allStepsCompleted()).isTrue();
     assertThat(replay.allStepsCompleted()).isTrue();

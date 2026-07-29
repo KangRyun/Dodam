@@ -77,9 +77,8 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(repository.createCalls, 1);
-      expect(repository.createRequest?.inputMethod, 'CANVAS');
-      expect(repository.createRequest?.childId, 7);
-      expect(repository.createRequest?.drawingTypeId, 5);
+      expect(repository.startHtpRequest?.inputMethod, 'CANVAS');
+      expect(repository.startHtpRequest?.childId, 7);
       expect(popped?.sessionId, 900);
       expect(repository.uploadCalls, 0);
     });
@@ -423,9 +422,9 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
       await tester.pumpAndSettle();
 
-      expect(repository.createRequest?.inputMethod, 'UPLOAD');
+      expect(repository.startHtpRequest?.inputMethod, 'UPLOAD');
       expect(repository.uploadCalls, 1);
-      expect(repository.getSessionCalls, 1);
+      expect(repository.getSessionCalls, 0);
       expect(popped?.sessionId, 900);
       expect(popped?.currentStage, 'CONVERSING');
       expect(popped?.isDrawingStage, isFalse);
@@ -626,7 +625,11 @@ final class _FakePhotoPickerAdapter implements PhotoPickerAdapter {
 }
 
 final class _FakeDrawingRepository
-    implements DrawingRepository, DrawingSessionDiscarder {
+    implements
+        DrawingRepository,
+        HtpDrawingRepository,
+        UploadedDrawingCompletionRepository,
+        DrawingSessionDiscarder {
   _FakeDrawingRepository({
     List<bool>? createFailures,
     this.uploadFailures = const [],
@@ -644,6 +647,33 @@ final class _FakeDrawingRepository
   int getSessionCalls = 0;
   final List<int> deletedSessionIds = [];
   CreateDrawingSessionRequestDto? createRequest;
+  StartHtpAssessmentRequestDto? startHtpRequest;
+
+  @override
+  Future<HtpAssessmentDto> startHtpAssessment(
+    StartHtpAssessmentRequestDto request,
+  ) async {
+    startHtpRequest = request;
+    final shouldFail =
+        createCalls < createFailures.length && createFailures[createCalls];
+    createCalls += 1;
+    if (shouldFail) {
+      throw const ApiTransportFailure(type: ApiTransportFailureType.connection);
+    }
+    return const HtpAssessmentDto(
+      htpAssessmentId: 91,
+      status: 'IN_PROGRESS',
+      expiresAt: '2026-07-30T01:00:00Z',
+      currentStep: HtpAssessmentStepDto(
+        stepOrder: 1,
+        drawingSubject: 'HOUSE',
+        drawingSessionId: createdSessionId,
+        sessionStatus: 'IN_PROGRESS',
+        currentStage: 'DRAWING',
+      ),
+      allStepsCompleted: false,
+    );
+  }
 
   @override
   Future<ApiPage<DrawingTypeDto>> getDrawingTypes({
@@ -708,7 +738,8 @@ final class _FakeDrawingRepository
   Future<DrawingUploadResponseDto> uploadDrawing(
     int sessionId,
     BinaryUploadDto image, {
-    String? objectCode,
+    required UploadDrawingImageMetadataDto metadata,
+    required String idempotencyKey,
   }) async {
     final index = uploadCalls;
     uploadCalls += 1;
@@ -718,23 +749,38 @@ final class _FakeDrawingRepository
     }
     return DrawingUploadResponseDto.fromJson({
       'drawingSessionId': sessionId,
-      'objectCode': null,
-      'originalAsset': {
-        'assetId': 1,
-        'assetType': 'ORIGINAL',
-        'assetVersion': 1,
-        'fileUrl': '/api/v1/drawing-assets/1/file',
-        'mimeType': 'image/png',
-      },
-      'correctedAsset': {
-        'assetId': 2,
-        'assetType': 'CORRECTED',
-        'assetVersion': 1,
-        'fileUrl': '/api/v1/drawing-assets/2/file',
-        'mimeType': 'image/png',
-      },
+      'drawingAssetId': 1,
+      'assetType': 'UPLOADED',
+      'drawingSubject': 'HOUSE',
+      'currentStage': 'DRAWING',
+      'previewUrl': '/api/v1/drawing-assets/1/file',
+      'mimeType': 'image/png',
+      'fileSizeBytes': 100,
+      'widthPx': 100,
+      'heightPx': 100,
+      'capturedAt': '2026-07-29T01:00:00Z',
+      'uploadedAt': '2026-07-29T01:00:01Z',
+      'qualityWarnings': const <String>[],
     });
   }
+
+  @override
+  Future<DrawingStageCompleteResponseDto> completeUploadedDrawingStage(
+    int sessionId, {
+    required DrawingCompleteMetadataDto metadata,
+    required String idempotencyKey,
+  }) async => DrawingStageCompleteResponseDto.fromJson({
+    'drawingSessionId': sessionId,
+    'finalAssetId': metadata.sourceAssetId,
+    'sessionStatus': 'IN_PROGRESS',
+    'currentStage': 'CONVERSING',
+    'analysis': {
+      'analysisId': 10,
+      'analysisType': 'OBJECT_DETECTION',
+      'status': 'SUCCEEDED',
+    },
+    'nextAction': 'SELECT_EMOTION',
+  });
 
   @override
   Future<DrawingSessionDto> getSession(int sessionId) async {
