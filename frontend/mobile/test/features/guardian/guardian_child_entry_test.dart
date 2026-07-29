@@ -140,13 +140,11 @@ void main() {
     await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
     await tester.pumpAndSettle();
 
-    // 463·464·466: 카드 탭 → 안내 팝업 → 시작하기 → 입력 방식(캔버스) 순서로
+    // 그림일기는 CANVAS 전용이므로 카드 탭 → 안내 팝업 → 시작하기 직후
     // Drawing에 진입한다.
     await _tapAfterScroll(tester, const ValueKey('activity-5'));
     await tester.pumpAndSettle();
     await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
-    await tester.pumpAndSettle();
-    await _tapAfterScroll(tester, const ValueKey('input-method-canvas'));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
@@ -184,7 +182,7 @@ void main() {
 
     expect(find.text('그리던 그림이 있어요'), findsOneWidget);
     expect(find.text('이어 그리기'), findsOneWidget);
-    expect(find.text('새로운 활동 선택'), findsOneWidget);
+    expect(find.text('새로 그리기'), findsOneWidget);
 
     await tester.tap(find.text('이어 그리기'));
     await _pumpUntil(tester, find.byKey(const ValueKey('drawing-canvas')));
@@ -194,7 +192,7 @@ void main() {
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
   });
 
-  testWidgets('새로운 활동 선택은 기존 활동을 삭제하지 않고 교체 옵션으로 생성한다', (tester) async {
+  testWidgets('새로 그리기는 선택한 활동을 교체 옵션으로 바로 생성한다', (tester) async {
     final drawingRepository = _TrackingDrawingRepository(
       activeSessionId: 812,
       activeHasDraft: true,
@@ -203,19 +201,16 @@ void main() {
 
     await _tapAfterScroll(tester, const ValueKey('activity-77'));
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('새로운 활동 선택'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('어떤 활동을 해볼까요?'), findsOneWidget);
-    await tester.tap(find.text('그림일기'));
-    await tester.pump();
-    await tester.tap(find.text('다음'));
+    await tester.tap(find.text('새로 그리기'));
     await tester.pumpAndSettle();
 
     expect(drawingRepository.deletedSessionIds, isEmpty);
     expect(drawingRepository.createCalls, 1);
+    expect(drawingRepository.createRequest?.drawingTypeId, 77);
+    expect(drawingRepository.createRequest?.inputMethod, 'CANVAS');
     expect(drawingRepository.createRequest?.replaceActive, isTrue);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+    expect(find.text('어떤 활동을 해볼까요?'), findsNothing);
   });
 
   testWidgets('실제 앱 진입 흐름에서 생성한 세션으로 완료부터 보호자 홈까지 이어진다', (tester) async {
@@ -236,8 +231,6 @@ void main() {
     await _tapAfterScroll(tester, const ValueKey('activity-77'));
     await tester.pumpAndSettle();
     await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
-    await tester.pumpAndSettle();
-    await _tapAfterScroll(tester, const ValueKey('input-method-canvas'));
     await tester.pumpAndSettle();
 
     expect(drawingRepository.getTypesChildId, 3);
@@ -301,27 +294,19 @@ void main() {
     await tester.pumpAndSettle();
     await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
     await tester.pumpAndSettle();
-    await _tapAfterScroll(tester, const ValueKey('input-method-canvas'));
-    await tester.pumpAndSettle();
-
-    // 466: 실패는 입력 방식 화면 안에서 오류·재시도로 처리하고, Drawing으로는
-    // 이동하지 않는다. 취소하면 홈에는 카드가 그대로 남아 있다.
+    // 실패는 활동 안내 팝업 안에서 오류·재시도로 처리하고 Drawing으로는
+    // 이동하지 않는다.
     expect(drawingRepository.createCalls, 1);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
-    expect(
-      find.byKey(const ValueKey('input-method-canvas-error')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const ValueKey('input-method-canvas')), findsOneWidget);
+    expect(find.byKey(const ValueKey('activity-guide-error')), findsOneWidget);
 
-    // "다시 시도" 삼아 캔버스 카드를 다시 눌러도 재요청은 정상적으로 나간다.
-    await _tapAfterScroll(tester, const ValueKey('input-method-canvas'));
+    await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
     await tester.pumpAndSettle();
 
     expect(drawingRepository.createCalls, 2);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
 
-    await _tapAfterScroll(tester, const ValueKey('input-method-cancel'));
+    await _tapAfterScroll(tester, const ValueKey('activity-guide-cancel'));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('activity-77')), findsOneWidget);
@@ -334,10 +319,7 @@ void main() {
 
     await _tapAfterScroll(tester, const ValueKey('activity-77'));
     await tester.pumpAndSettle();
-    await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
-    await tester.pumpAndSettle();
-
-    final startButton = find.byKey(const ValueKey('input-method-canvas'));
+    final startButton = find.byKey(const ValueKey('activity-guide-start'));
     await tester.tap(startButton);
     await tester.pump();
     await tester.tap(startButton, warnIfMissed: false);

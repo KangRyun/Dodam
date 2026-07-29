@@ -175,7 +175,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
                       ),
                     ),
                     child: const Text(
-                      '새로운 활동 선택',
+                      '새로 그리기',
                       style: TextStyle(
                         fontSize: 19,
                         fontWeight: FontWeight.w700,
@@ -212,82 +212,45 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         final choice = await _showDrawingStartDialog();
         if (choice == null || !mounted) return;
         if (choice == _DrawingStartChoice.startNew) {
-          await AppNavigation.pushNamed(
-            context,
-            AppRoutes.drawingActivitySelection(widget.child.childId.toString()),
-            arguments: const DrawingActivitySelectionRouteArguments(
-              replaceActive: true,
-            ),
+          resolution = await _createSelectedActivity(
+            controller: controller,
+            type: type,
+            replaceActive: true,
           );
-          return;
-        }
-        resolution = controller.resume(activeSession);
-        if (resolution.activityContext.isHtp &&
-            resolution.currentStage == 'COMPLETED') {
-          await AppNavigation.pushNamed(
-            context,
-            AppRoutes.emotionSelect(widget.child.childId.toString()),
-            arguments: EmotionSelectRouteArguments(
-              sessionId: resolution.sessionId,
-              repository: widget.drawingRepository,
-              conversationId: null,
-              conversationAlreadyEnded: true,
-              conversationEndRepository: null,
-              conversationEndIdempotencyKey: null,
-              conversationEndRequest: null,
-              lastQuestionMessageId: null,
-              idempotencyKeyProvider: null,
-              activityContext: resolution.activityContext,
-            ),
-          );
-          return;
+        } else {
+          resolution = controller.resume(activeSession);
+          if (resolution.activityContext.isHtp &&
+              resolution.currentStage == 'COMPLETED') {
+            await AppNavigation.pushNamed(
+              context,
+              AppRoutes.emotionSelect(widget.child.childId.toString()),
+              arguments: EmotionSelectRouteArguments(
+                sessionId: resolution.sessionId,
+                repository: widget.drawingRepository,
+                conversationId: null,
+                conversationAlreadyEnded: true,
+                conversationEndRepository: null,
+                conversationEndIdempotencyKey: null,
+                conversationEndRequest: null,
+                lastQuestionMessageId: null,
+                idempotencyKeyProvider: null,
+                activityContext: resolution.activityContext,
+              ),
+            );
+            return;
+          }
         }
       } else {
         final (icon, accentColor) = _visualForDrawingType(type.code);
-        if (type.code == 'HTP') {
-          // HTP는 집·나무·사람을 정해진 순서로 그리는 구조화된 검사라 입력
-          // 방식을 고르게 하지 않고, 안내 팝업에서 바로 활동을 만든다(462).
-          resolution = await showActivityGuideDialog<DrawingSessionResolution>(
-            context: context,
-            title: type.name,
-            description: _descriptionForDrawingType(type),
-            icon: icon,
-            accentColor: accentColor,
-            onStart: () =>
-                controller.createHtpAssessment(childId: widget.child.childId),
-          );
-        } else {
-          // 461/463/464의 안내 팝업은 세션을 만들지 않고 "시작하기" 확인만
-          // 맡는다 — 캔버스/사진 중 무엇으로 시작할지는 다음 화면(466)에서
-          // 고르고, 세션도 그 화면이 고른 inputMethod로 만든다.
-          final confirmed = await showActivityGuideDialog<bool>(
-            context: context,
-            title: type.name,
-            description: _descriptionForDrawingType(type),
-            icon: icon,
-            accentColor: accentColor,
-            onStart: () async => true,
-          );
-          if (confirmed != true || !mounted) return;
-          // AppRouter.onGenerateRoute는 항상 Route<void>를 반환하므로(다른
-          // Route 인자 클래스들과 동일한 관례) pushNamed에 구체 타입 인자를
-          // 주면 내부 캐스팅이 실패한다 — 기존 관례대로 타입 인자 없이 호출한
-          // 뒤 팝된 값을 캐스팅한다.
-          final navResult = await AppNavigation.pushNamed(
-            context,
-            AppRoutes.drawingInputMethod(widget.child.childId.toString()),
-            arguments: InputMethodSelectRouteArguments(
-              childId: widget.child.childId,
-              drawingTypeId: type.drawingTypeId,
-              title: type.name,
-              description: _descriptionForDrawingType(type),
-              icon: icon,
-              accentColor: accentColor,
-              repository: widget.drawingRepository,
-            ),
-          );
-          resolution = navResult as DrawingSessionResolution?;
-        }
+        resolution = await showActivityGuideDialog<DrawingSessionResolution>(
+          context: context,
+          title: type.name,
+          description: _descriptionForDrawingType(type),
+          icon: icon,
+          accentColor: accentColor,
+          onStart: () =>
+              _createSelectedActivity(controller: controller, type: type),
+        );
       }
       if (resolution == null || !mounted) return;
       await AppNavigation.pushNamed(
@@ -318,6 +281,22 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       }
     }
   }
+
+  Future<DrawingSessionResolution> _createSelectedActivity({
+    required DrawingSessionStartController controller,
+    required DrawingTypeDto type,
+    bool replaceActive = false,
+  }) => type.code == 'HTP'
+      ? controller.createHtpAssessment(
+          childId: widget.child.childId,
+          replaceActive: replaceActive,
+        )
+      : controller.createSelectedSession(
+          childId: widget.child.childId,
+          drawingTypeId: type.drawingTypeId,
+          replaceActive: replaceActive,
+          inputMethod: 'CANVAS',
+        );
 
   Widget _buildActivitySection() {
     switch (_status) {
