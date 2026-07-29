@@ -48,6 +48,14 @@ spec:
     metadata:
       labels: { app: backend }
     spec:
+      # ⚠️ 끄지 않으면 파드가 아예 기동하지 못한다(2026-07-29 스테이징 실측).
+      #   kubelet 은 SA 토큰을 /var/run/secrets/kubernetes.io/serviceaccount 에 마운트하는데,
+      #   /var/run 은 /run 심링크이고 아래 fcm 볼륨이 /run/secrets 를 **읽기 전용**으로 덮는다.
+      #   그 안에 kubernetes.io 디렉터리를 만들려다 read-only 로 실패 → CrashLoopBackOff.
+      #   compose 에는 SA 토큰이 없어 드러나지 않던 충돌이다.
+      #   끄는 것이 옳은 이유: backend 는 k8s API 를 호출하지 않는다. 토큰을 들고 있을
+      #   이유가 없으므로 최소권한에도 부합한다(가드레일 9절).
+      automountServiceAccountToken: false
       # 종료 신호를 받은 파드가 처리 중이던 요청을 마칠 시간.
       terminationGracePeriodSeconds: 30
       containers:
