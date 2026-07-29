@@ -112,6 +112,14 @@ QUESTION_LLM_TIMEOUT_SEC = float(os.environ.get("QUESTION_LLM_TIMEOUT_SEC", "4.0
 QUESTION_LLM_MAX_RETRIES = int(os.environ.get("QUESTION_LLM_MAX_RETRIES", "2"))
 QUESTION_LLM_BACKOFF_BASE_SEC = float(os.environ.get("QUESTION_LLM_BACKOFF_BASE_SEC", "0.5"))
 
+# 질문 프롬프트에 넣는 그림 서술(VLM)의 길이 상한 (S15P11B209-704).
+# VLM 프롬프트가 2~4문장을 지시하므로 정상 범위는 그대로 통과한다. 이 값은 모델이
+# 길게 답해 프롬프트의 다른 지시가 묻히는 경우만 막는 안전판이다.
+# reason: 상한을 두지 않으면 장문 서술이 [그림 분석 결과] 절을 압도해 질문이 산만해진다.
+QUESTION_DESCRIPTION_MAX_CHARS = int(
+    os.environ.get("QUESTION_DESCRIPTION_MAX_CHARS", "300")
+)
+
 # ⚠️ 임시(출시 전 제거: S15P11B209-689) — 안전 파이프라인 검증용 원문 디버그 로그 스위치.
 # 정확히 "true"일 때만 차단된 원문(아이 발화·질문)을 로그로 남긴다. 기본은 꺼짐(운영 유출 방지).
 # AI_INTERNAL_AUTH_DISABLED와 같은 '명시적 opt-in' 규약 — 배포 환경엔 이 변수를 절대 주입하지 않는다.

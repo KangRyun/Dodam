@@ -1,5 +1,6 @@
 package com.ssafy.b209.conversation.service;
 
+import com.ssafy.b209.analysis.repository.AnalysisObservationResultRepository;
 import com.ssafy.b209.conversation.domain.AiQuestionTemplate;
 import com.ssafy.b209.conversation.domain.AiQuestionTemplateOption;
 import com.ssafy.b209.conversation.domain.ConversationSession;
@@ -36,6 +37,8 @@ public class ConversationQuestionService {
   private final AiQuestionTemplateOptionRepository questionTemplateOptionRepository;
   private final AiQuestionClient aiQuestionClient;
   private final QuestionPersistenceService questionPersistenceService;
+  // 그림 서술(VLM) 조회용 — 질문 생성 입력을 채운다(S15P11B209-704).
+  private final AnalysisObservationResultRepository observationResultRepository;
 
   /**
    * AI 질문 생성·폴백·저장 흐름의 의존성을 생성한다.
@@ -45,18 +48,21 @@ public class ConversationQuestionService {
    * @param questionTemplateOptionRepository 폴백 선택지 Snapshot 조회 경계
    * @param aiQuestionClient 최신 내부 AI 계약 호출 경계
    * @param questionPersistenceService 세션 잠금 기반 원자 저장 경계
+   * @param observationResultRepository 그림 서술(VLM) 조회 경계 (S15P11B209-704)
    */
   public ConversationQuestionService(
       ConversationSessionRepository conversationSessionRepository,
       AiQuestionTemplateRepository questionTemplateRepository,
       AiQuestionTemplateOptionRepository questionTemplateOptionRepository,
       AiQuestionClient aiQuestionClient,
-      QuestionPersistenceService questionPersistenceService) {
+      QuestionPersistenceService questionPersistenceService,
+      AnalysisObservationResultRepository observationResultRepository) {
     this.conversationSessionRepository = conversationSessionRepository;
     this.questionTemplateRepository = questionTemplateRepository;
     this.questionTemplateOptionRepository = questionTemplateOptionRepository;
     this.aiQuestionClient = aiQuestionClient;
     this.questionPersistenceService = questionPersistenceService;
+    this.observationResultRepository = observationResultRepository;
   }
 
   /**
@@ -134,8 +140,32 @@ public class ConversationQuestionService {
         session.getQuestionCount(),
         session.getMaxQuestionCount(),
         List.copyOf(command.detectedObjects()),
+        drawingDescriptionOf(command.basisAnalysisId()),
         List.copyOf(command.recentMessages()),
         command.safetyRuleVersion());
+  }
+
+  /**
+   * 근거 분석에 저장된 그림 서술(VLM)을 찾아 질문 생성 입력에 실어준다(S15P11B209-704).
+   *
+   * <p>객체 이름 목록만으로는 색·표정·구도를 근거로 한 질문이 나오지 않는다. 서술은 분석 시점에 이미
+   * 만들어져 저장돼 있으므로 여기서는 조회만 한다.
+   *
+   * <p>⚠️ 서술이 없어도 질문 생성은 계속한다. 분석 전 첫 질문, 서술 생성 실패(VLM 오류), 구버전 데이터가
+   * 모두 정상 경로다 — 이때 AI는 기존 객체 기반 질문으로 동작한다. 여기서 예외를 던지면 그림 서술이라는
+   * 보조 정보 때문에 대화 자체가 끊긴다.
+   *
+   * @param basisAnalysisId 근거 분석 식별자. {@code null}이면 조회하지 않는다
+   * @return 서술 문자열. 없으면 {@code null}
+   */
+  private String drawingDescriptionOf(Long basisAnalysisId) {
+    if (basisAnalysisId == null) {
+      return null;
+    }
+    return observationResultRepository
+        .findLatestOverallSummary(basisAnalysisId)
+        .filter(summary -> !summary.isBlank())
+        .orElse(null);
   }
 
   private GeneratedQuestion saveFallback(

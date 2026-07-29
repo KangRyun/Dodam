@@ -10,6 +10,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import com.ssafy.b209.analysis.repository.AnalysisObservationResultRepository;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.conversation.domain.AiQuestionTemplate;
 import com.ssafy.b209.conversation.domain.AiQuestionTemplateOption;
@@ -46,6 +47,7 @@ class ConversationQuestionServiceTest {
   @Mock private AiQuestionTemplateOptionRepository questionTemplateOptionRepository;
   @Mock private AiQuestionClient aiQuestionClient;
   @Mock private QuestionPersistenceService questionPersistenceService;
+  @Mock private AnalysisObservationResultRepository observationResultRepository;
 
   private ConversationQuestionService service;
   private ConversationSession session;
@@ -58,7 +60,8 @@ class ConversationQuestionServiceTest {
             questionTemplateRepository,
             questionTemplateOptionRepository,
             aiQuestionClient,
-            questionPersistenceService);
+            questionPersistenceService,
+            observationResultRepository);
     session = mock(ConversationSession.class);
     lenient().when(session.getDrawingSessionId()).thenReturn(9L);
     lenient().when(session.getDifficulty()).thenReturn(QuestionDifficulty.LOWER_ELEMENTARY);
@@ -93,6 +96,59 @@ class ConversationQuestionServiceTest {
     assertThat(candidateCaptor.getValue().fallbackUsed()).isFalse();
     assertThatThrownBy(() -> candidateCaptor.getValue().options().add(new QuestionOption("X", "X")))
         .isInstanceOf(UnsupportedOperationException.class);
+  }
+
+  // ── 그림 서술(VLM) 전달 — S15P11B209-704 ──────────────────────────────
+  @Test
+  void carriesStoredDrawingDescriptionIntoTheAiRequest() {
+    given(observationResultRepository.findLatestOverallSummary(77L))
+        .willReturn(Optional.of("하늘을 검게 칠했고 사람이 활짝 웃고 있어요."));
+    given(aiQuestionClient.generate(any(), any())).willReturn(validResponse());
+    given(questionPersistenceService.save(eq(1L), any()))
+        .willReturn(new GeneratedQuestion(21L, "무엇을 그리고 있니?", false));
+
+    service.generateQuestion(
+        command(List.of(ResponseMode.VOICE, ResponseMode.OPTION), 77L));
+
+    ArgumentCaptor<com.ssafy.b209.conversation.dto.AiQuestionRequest> captor =
+        ArgumentCaptor.forClass(com.ssafy.b209.conversation.dto.AiQuestionRequest.class);
+    verify(aiQuestionClient).generate(captor.capture(), any());
+    assertThat(captor.getValue().drawingDescription())
+        .isEqualTo("하늘을 검게 칠했고 사람이 활짝 웃고 있어요.");
+  }
+
+  @Test
+  void doesNotLookUpDescriptionWhenThereIsNoBasisAnalysis() {
+    given(aiQuestionClient.generate(any(), any())).willReturn(validResponse());
+    given(questionPersistenceService.save(eq(1L), any()))
+        .willReturn(new GeneratedQuestion(21L, "무엇을 그리고 있니?", false));
+
+    service.generateQuestion(command(List.of(ResponseMode.VOICE, ResponseMode.OPTION)));
+
+    // 분석 전 첫 질문은 근거 분석이 없다 — 조회 자체를 하지 않아야 한다.
+    verify(observationResultRepository, never()).findLatestOverallSummary(any());
+    ArgumentCaptor<com.ssafy.b209.conversation.dto.AiQuestionRequest> captor =
+        ArgumentCaptor.forClass(com.ssafy.b209.conversation.dto.AiQuestionRequest.class);
+    verify(aiQuestionClient).generate(captor.capture(), any());
+    assertThat(captor.getValue().drawingDescription()).isNull();
+  }
+
+  @Test
+  void keepsGeneratingWhenTheDescriptionIsMissingOrBlank() {
+    // VLM 서술 실패·구버전 데이터가 모두 정상 경로다. 보조 정보 때문에 대화가 끊기면 안 된다.
+    given(observationResultRepository.findLatestOverallSummary(77L))
+        .willReturn(Optional.of("   "));
+    given(aiQuestionClient.generate(any(), any())).willReturn(validResponse());
+    given(questionPersistenceService.save(eq(1L), any()))
+        .willReturn(new GeneratedQuestion(21L, "무엇을 그리고 있니?", false));
+
+    service.generateQuestion(
+        command(List.of(ResponseMode.VOICE, ResponseMode.OPTION), 77L));
+
+    ArgumentCaptor<com.ssafy.b209.conversation.dto.AiQuestionRequest> captor =
+        ArgumentCaptor.forClass(com.ssafy.b209.conversation.dto.AiQuestionRequest.class);
+    verify(aiQuestionClient).generate(captor.capture(), any());
+    assertThat(captor.getValue().drawingDescription()).isNull(); // 공백은 없는 것으로
   }
 
   @Test
@@ -239,10 +295,15 @@ class ConversationQuestionServiceTest {
   }
 
   private GenerateQuestionCommand command(List<ResponseMode> responseModes) {
+    return command(responseModes, null);
+  }
+
+  private GenerateQuestionCommand command(
+      List<ResponseMode> responseModes, Long basisAnalysisId) {
     return new GenerateQuestionCommand(
         1L,
         9L,
-        null,
+        basisAnalysisId,
         8,
         responseModes,
         List.of(new DetectedObject("TREE", "나무", 0.9, new BoundingBox(0.1, 0.2, 0.3, 0.4))),

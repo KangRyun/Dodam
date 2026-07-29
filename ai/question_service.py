@@ -120,11 +120,44 @@ def _difficulty_guidance(req: QuestionRequest) -> str:
     )
 
 
-def _drawing_analysis_text(req: QuestionRequest) -> str | None:
-    """탐지 객체를 첫 질문 프롬프트의 {drawing_analysis} 재료(쉼표 목록)로 만든다."""
-    if not req.detected_objects:
+def _truncate_description(text: str | None) -> str | None:
+    """그림 서술을 프롬프트에 넣기 전 길이 상한으로 자른다(S15P11B209-704).
+
+    VLM 프롬프트가 2~4문장을 지시하므로 정상 범위는 손대지 않는다. 모델이 길게 답해
+    [그림 분석 결과] 절이 다른 지시를 압도하는 경우만 막는다. 잘린 사실은 말줄임표로
+    남긴다 — 잘랐다는 것을 숨기면 "왜 뒷부분을 안 봤지"를 나중에 추적할 수 없다.
+    """
+    if not text:
         return None
-    return ", ".join(o.object_name or o.object_code for o in req.detected_objects)
+    stripped = text.strip()
+    if not stripped:
+        return None
+    limit = config.QUESTION_DESCRIPTION_MAX_CHARS
+    if len(stripped) <= limit:
+        return stripped
+    return stripped[:limit].rstrip() + "…"
+
+
+def _drawing_analysis_text(req: QuestionRequest) -> str | None:
+    """첫 질문 프롬프트의 {drawing_analysis} 재료를 만든다.
+
+    그림 서술(VLM)이 있으면 서술을 먼저, 탐지 객체 목록을 뒤에 붙인다(S15P11B209-704).
+
+    reason: 객체 이름만으로는 "왜 하늘을 검게 칠했어?"·"사람이 웃고 있네" 같은
+      색·표정·구도 기반 질문이 나올 수 없다. 그 정보는 VLM 서술에만 있다.
+      둘을 함께 주는 이유는 서술이 놓친 객체를 목록이 보완하고, 목록이 설명하지 못하는
+      맥락을 서술이 채우기 때문이다.
+    ⚠️ 서술이 없으면(BE 미전달·분석 실패) 기존 객체 목록 동작을 그대로 유지한다.
+    """
+    description = _truncate_description(req.drawing_description)
+    objects = (
+        ", ".join(o.object_name or o.object_code for o in req.detected_objects)
+        if req.detected_objects
+        else None
+    )
+    if description and objects:
+        return f"{description}\n(그림에서 찾은 것: {objects})"
+    return description or objects
 
 
 def _format_objects_for_log(req: QuestionRequest) -> str:
@@ -133,11 +166,18 @@ def _format_objects_for_log(req: QuestionRequest) -> str:
     `_drawing_analysis_text`와 같은 값을 남긴다 — 이 줄이 "LLM이 무엇을 보고 질문했는가"에
     대한 유일한 확정 증거다. 상세 로그가 꺼져 있으면 개수만 남긴다(아동 그림 내용 보호).
     """
-    if not req.detected_objects:
+    material = _drawing_analysis_text(req)
+    if material is None:
         return "(없음)"
     if not config.DETECTION_LOG_DETAIL:
-        return f"{len(req.detected_objects)}건"
-    return _drawing_analysis_text(req) or "(없음)"
+        # ⚠️ 서술은 객체 이름보다 훨씬 구체적인 아동 그림 내용이다(색·표정·구도).
+        #   상세 로그가 꺼져 있으면 **내용은 남기지 않되**, 서술이 들어갔다는 사실은 남긴다.
+        #   그래야 "LLM이 무엇을 보고 질문했는가"를 나중에 내용 없이도 구분할 수 있다.
+        parts = [f"{len(req.detected_objects)}건"] if req.detected_objects else []
+        if _truncate_description(req.drawing_description):
+            parts.append("서술있음")
+        return "+".join(parts) if parts else "(없음)"
+    return material
 
 
 def _format_target_for_log(target: DetectedObject | None) -> str:
