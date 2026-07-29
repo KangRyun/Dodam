@@ -317,6 +317,19 @@ def _model_key_for(activity_type: contracts.ActivityType) -> str:
     return {"HTP": "htp", "ART_DIARY": "sketch"}[activity_type]
 
 
+def _format_detections_for_log(detections: list) -> str:
+    """탐지 목록을 로그 한 줄로 만든다(S15P11B209-710).
+
+    상세 로그가 꺼져 있으면 개수만 남긴다 — 라벨은 아동 그림 내용을 서술하므로
+    운영 기본값에서는 남기지 않는다(가드레일). bbox·이미지는 어느 모드에서도 남기지 않는다.
+    """
+    if not detections:
+        return "(없음)"
+    if not config.DETECTION_LOG_DETAIL:
+        return f"{len(detections)}건"
+    return " ".join(f"{d.label}({d.confidence:.2f})" for d in detections)
+
+
 def _filter_detections_for_activity(
     activity_type: contracts.ActivityType,
     drawing_subject: contracts.DrawingSubject | None,
@@ -399,9 +412,33 @@ def analyze(req: contracts.AnalysisRequest, request_id: str = "") -> contracts.A
             model_key=model_key,
         )
 
+    # 필터 '전' 원시 탐지 — 주제 필터가 무엇을 지웠는지 판별하려면 이 줄이 있어야 한다.
+    logger.info(
+        "[탐지] analysisId=%s activity=%s subject=%s model=%s raw=%d | %s",
+        req.analysis_id,
+        req.activity_type,
+        req.drawing_subject or "-",
+        model_key,
+        len(detections),
+        _format_detections_for_log(detections),
+    )
+
     # HTP 단계 주제는 영속화된 확정값이다. 전체 객체가 미탐지여도 다른 HTP 그룹은 제거한다.
+    raw_count = len(detections)
+    warnings_before = len(warnings)
     detections = _filter_detections_for_activity(
         req.activity_type, req.drawing_subject, detections, warnings
+    )
+    # 필터 '후' — 남은 목록과 이번 필터가 새로 붙인 경고만 보여준다.
+    # SCENERY는 의도적으로 남으므로(집 그림의 배경 나무 등) 여기서 그 사실이 드러난다.
+    logger.info(
+        "[필터] analysisId=%s kept=%d/%d removed=%d warnings=%s | %s",
+        req.analysis_id,
+        len(detections),
+        raw_count,
+        raw_count - len(detections),
+        warnings[warnings_before:] or "-",
+        _format_detections_for_log(detections),
     )
 
     detected_objects, detection_warnings = _to_detected_objects(detections)

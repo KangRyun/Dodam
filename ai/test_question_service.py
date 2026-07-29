@@ -158,6 +158,47 @@ class GenerateTest(unittest.TestCase):
         self.assertIsNone(resp.options)
 
 
+class QuestionInputLogTest(unittest.TestCase):
+    """질문 재료 진단 로그 (S15P11B209-710).
+
+    "LLM이 무엇을 보고 질문했는가"를 남긴다 — S15P11B209-709 계열 버그의 확정 증거다.
+    생성된 질문 원문은 어느 모드에서도 남기지 않는다(가드레일).
+    """
+
+    REPLY = "이 집은 어떤 집이야?"
+
+    def _generate_capturing_logs(self, detail: bool):
+        client = _mock_client({}, reply=self.REPLY)
+        with mock.patch.object(question_service.config, "DETECTION_LOG_DETAIL", detail):
+            with mock.patch.object(
+                question_service, "get_client", return_value=client
+            ):
+                with self.assertLogs("question_service", level="INFO") as logs:
+                    question_service.generate(_request(), "req-log")
+        return "\n".join(logs.output)
+
+    def test_logs_purpose_target_and_prompt_objects(self):
+        joined = self._generate_capturing_logs(detail=True)
+        self.assertIn("[질문]", joined)
+        self.assertIn("request_id=req-log", joined)
+        self.assertIn("drawingSessionId=2", joined)
+        self.assertIn("purpose=OBJECT_DESCRIPTION", joined)
+        # 프롬프트에 실제로 들어간 이름이 그대로 보여야 원인 추적이 된다
+        self.assertIn("집전체", joined)
+
+    def test_only_counts_when_flag_off(self):
+        joined = self._generate_capturing_logs(detail=False)
+        self.assertIn("[질문]", joined)
+        self.assertIn("purpose=OBJECT_DESCRIPTION", joined)
+        self.assertIn("HOUSE", joined)  # 객체 코드는 내부 Enum이라 남긴다
+        self.assertNotIn("집전체", joined)  # 그림 내용은 남기지 않는다
+
+    def test_never_logs_generated_question_text(self):
+        for detail in (False, True):
+            joined = self._generate_capturing_logs(detail=detail)
+            self.assertNotIn(self.REPLY, joined)
+
+
 class SafetyPipelineTest(unittest.TestCase):
     """생성 질문 안전 판정 파이프라인 (S15P11B209-596)."""
 

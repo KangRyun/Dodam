@@ -119,6 +119,15 @@ SAFETY_DEBUG_LOG_RAW = (
     os.environ.get("SAFETY_DEBUG_LOG_RAW", "").strip().lower() == "true"
 )
 
+# 탐지 진단 로그 상세도(S15P11B209-710). 정확히 "true"일 때만 라벨·신뢰도까지 남긴다.
+#   기본(꺼짐)은 개수·주제·warnings 요약만 남긴다 — 탐지 라벨은 아동 그림 내용을 서술하므로
+#   운영에서는 필요할 때만 켠다. 이미지 원본·경로·아이 발화는 어느 모드에서도 남기지 않는다.
+#   reason: S15P11B209-709를 조사할 때 탐지 결과를 볼 수 없어 학습 라벨을 역집계해야 했다.
+#     "무엇이 탐지됐고 그중 무엇이 프롬프트에 들어갔는가"가 이 계열 버그의 유일한 확정 증거다.
+DETECTION_LOG_DETAIL = (
+    os.environ.get("DETECTION_LOG_DETAIL", "").strip().lower() == "true"
+)
+
 
 def require_gms_key() -> str:
     """GMS_KEY가 없으면 즉시 명확히 실패시킨다(원인이 빨리 드러나게)."""
