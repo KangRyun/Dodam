@@ -434,6 +434,26 @@ class FollowUpAndDisclaimerTest(unittest.TestCase):
             result.observation_draft.follow_up_question, "이 집에는 누가 살아?"
         )
 
+    def test_object_follow_up_extracts_question_text(self):
+        # 모델이 스키마를 벗어나 객체로 줘도 questionText만 싣는다(dict가 통째로 문자열화되면 안 됨).
+        result = self._generate(
+            followUpQuestion={
+                "questionText": "그림 속 집은 어떤 곳이야?",
+                "questionPurpose": "상상력 자극",
+            }
+        )
+        self.assertEqual(
+            result.observation_draft.follow_up_question, "그림 속 집은 어떤 곳이야?"
+        )
+        self.assertNotIn("questionPurpose", result.observation_draft.follow_up_question)
+
+    def test_object_follow_up_without_question_text_falls_back(self):
+        result = self._generate(followUpQuestion={"questionPurpose": "목적만 있음"})
+        self.assertEqual(
+            result.observation_draft.follow_up_question,
+            report_client.DEFAULT_FOLLOW_UP_QUESTION,
+        )
+
     def test_disclaimer_and_limitations_always_present(self):
         # 한계 고지·면책 문구는 LLM이 무엇을 주든 서버가 상수로 항상 보장한다.
         result = self._generate(overallSummary="")
