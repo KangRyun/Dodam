@@ -1330,14 +1330,21 @@ class _DrawingSidePanel extends StatelessWidget {
           const SizedBox(height: AppSpacing.lg),
           const _ToolHeading(icon: Icons.line_weight_rounded, label: '굵기'),
           const SizedBox(height: AppSpacing.xs),
-          SegmentedButton<double>(
-            segments: [
-              for (final (label, value) in _thicknesses)
-                ButtonSegment(value: value, label: Text(label)),
-            ],
-            selected: {selectedThickness},
-            showSelectedIcon: true,
-            onSelectionChanged: (values) => onThicknessChanged(values.first),
+          LayoutBuilder(
+            builder: (context, constraints) => Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xs,
+              alignment: WrapAlignment.center,
+              children: [
+                for (final (label, value) in _thicknesses)
+                  _ThicknessChoice(
+                    key: ValueKey('drawing-thickness-$label'),
+                    label: label,
+                    selected: selectedThickness == value,
+                    onTap: () => onThicknessChanged(value),
+                  ),
+              ],
+            ),
           ),
           const SizedBox(height: AppSpacing.lg),
           if (questionController case final controller?)
@@ -1433,6 +1440,78 @@ class _SaveStatusIndicator extends StatelessWidget {
       ),
     );
   }
+}
+
+class _ThicknessChoice extends StatelessWidget {
+  const _ThicknessChoice({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    super.key,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    selected: selected,
+    label: '$label 굵기',
+    child: Tooltip(
+      message: '$label 선 굵기',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 150),
+          constraints: const BoxConstraints(
+            minWidth: AppSizes.minTouchTarget,
+            minHeight: AppSizes.minTouchTarget,
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
+          decoration: BoxDecoration(
+            color: selected ? AppColors.leafSoft : AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(
+              color: selected ? AppColors.leaf : AppColors.outline,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.line_weight_rounded,
+                size: 18,
+                color: selected ? AppColors.leaf : AppColors.inkMuted,
+              ),
+              const SizedBox(width: AppSpacing.xs),
+              Text(
+                label,
+                style: TextStyle(
+                  color: selected ? AppColors.ink : AppColors.inkMuted,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              if (selected) ...[
+                const SizedBox(width: AppSpacing.xs),
+                const Icon(
+                  Icons.check_circle_rounded,
+                  size: 18,
+                  color: AppColors.leaf,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
 }
 
 class _ToolHeading extends StatelessWidget {

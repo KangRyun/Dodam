@@ -4,11 +4,19 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('그림 도구 패널 접근성', () {
-    testWidgets('색상 스와치와 실행취소 버튼은 48×48 이상의 터치 영역을 가진다', (tester) async {
+    testWidgets('색상·굵기 선택과 실행취소 버튼은 48×48 이상의 터치 영역을 가진다', (tester) async {
       await _pumpDrawing(tester);
 
       for (final name in ['검정', '빨강', '파랑', '노랑']) {
         final size = tester.getSize(find.byKey(ValueKey('color-$name')));
+        expect(size.width, greaterThanOrEqualTo(48));
+        expect(size.height, greaterThanOrEqualTo(48));
+      }
+
+      for (final label in ['얇게', '보통', '굵게']) {
+        final size = tester.getSize(
+          find.byKey(ValueKey('drawing-thickness-$label')),
+        );
         expect(size.width, greaterThanOrEqualTo(48));
         expect(size.height, greaterThanOrEqualTo(48));
       }
@@ -20,7 +28,7 @@ void main() {
       expect(undoSize.height, greaterThanOrEqualTo(48));
     });
 
-    testWidgets('펜·지우개·색상 선택 요소는 Semantics 라벨을 제공한다', (tester) async {
+    testWidgets('펜·지우개·색상·굵기 선택 요소는 Semantics 라벨을 제공한다', (tester) async {
       final handle = tester.ensureSemantics();
       await _pumpDrawing(tester);
 
@@ -30,6 +38,9 @@ void main() {
       expect(find.bySemanticsLabel('빨강 색상'), findsOneWidget);
       expect(find.bySemanticsLabel('파랑 색상'), findsOneWidget);
       expect(find.bySemanticsLabel('노랑 색상'), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('^얇게 굵기')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('^보통 굵기')), findsOneWidget);
+      expect(find.bySemanticsLabel(RegExp('^굵게 굵기')), findsOneWidget);
 
       handle.dispose();
     });
