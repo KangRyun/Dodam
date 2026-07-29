@@ -244,6 +244,11 @@ final class _ActivityRepository implements ActivityRepository {
       throw UnimplementedError();
 
   @override
+  Future<List<ActivityConversationMessageDto>> getConversationMessages(
+    int conversationId,
+  ) => throw UnimplementedError();
+
+  @override
   Future<Uint8List> downloadImage(String url) =>
       throw StateError('image fetch failed');
 }
