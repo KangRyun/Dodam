@@ -36,8 +36,22 @@ ok()  { printf '   ✅ %s\n' "$*"; }
 
 command -v kubectl >/dev/null 2>&1 || die "kubectl 이 없다 — k3s 설치(356) 후에 실행할 것."
 
+# ── 클러스터에 닿는가 (SA 확인보다 **먼저**) ─────────────────────────────────
+# ★ 이 검사를 건너뛰면 "접근 실패"가 "SA 가 없다"로 둔갑한다. 2026-07-29 실제로 겪었다:
+#   k3s 가 깐 /usr/local/bin/kubectl 은 KUBECONFIG 가 없으면 **root 전용**
+#   /etc/rancher/k3s/k3s.yaml 을 본다. 일반 사용자로 실행하면 권한 오류가 나는데
+#   `get serviceaccount ... 2>/dev/null` 이 그걸 삼켜, 멀쩡히 있는 SA 를 없다고 보고했다.
+#   원인과 다른 진단을 내놓는 오류 메시지는 없는 것보다 나쁘다.
+if ! api_err="$(kubectl get --raw /version 2>&1 >/dev/null)"; then
+  die "클러스터에 닿지 않는다 — SA 존재 여부는 아직 알 수 없다.
+   원인: ${api_err}
+   → 흔한 경우 1: KUBECONFIG 미지정. k3s 의 kubectl 은 root 전용 파일을 기본으로 본다.
+        예) KUBECONFIG=~/.kube/config $0
+   → 흔한 경우 2: k3s 정지. systemctl is-active k3s 로 확인할 것."
+fi
+
 kubectl -n "$NAMESPACE" get serviceaccount "$SA" >/dev/null 2>&1 \
-  || die "ServiceAccount ${NAMESPACE}/${SA} 가 없다.
+  || die "ServiceAccount ${NAMESPACE}/${SA} 가 없다. (클러스터 접근은 정상이다)
    먼저 매니페스트를 적용할 것: kubectl apply -k infra/k8s/overlays/staging"
 
 # ── API 서버 주소 ────────────────────────────────────────────────────────────
