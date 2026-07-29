@@ -8,6 +8,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -19,6 +20,7 @@ import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClient;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClientException;
 import com.ssafy.b209.support.IntegrationTestSupport;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -28,6 +30,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
@@ -270,6 +273,45 @@ class DrawingAnalysisIntegrationTest extends IntegrationTestSupport {
   }
 
   @Test
+  void completesDrawingWithStoredFallbackWhenAiTimesOut() throws Exception {
+    given(drawingAnalysisClient.analyze(any()))
+        .willThrow(new DrawingAnalysisClientException(DrawingAnalysisClientException.Type.TIMEOUT));
+
+    mockMvc
+        .perform(drawingCompletionRequest("drawing-timeout-fallback-0001"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.drawingSessionId").value(10))
+        .andExpect(jsonPath("$.data.finalAssetId").value(20))
+        .andExpect(jsonPath("$.data.sessionStatus").value("IN_PROGRESS"))
+        .andExpect(jsonPath("$.data.currentStage").value("CONVERSING"))
+        .andExpect(jsonPath("$.data.analysis.status").value("FAILED"))
+        .andExpect(jsonPath("$.data.nextAction").value("SELECT_EMOTION"));
+
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT analysis_status, error_code FROM analyses WHERE drawing_asset_id = 20"))
+        .containsEntry("analysis_status", "FAILED")
+        .containsEntry("error_code", "TIMEOUT");
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT session_status, current_stage FROM drawing_sessions WHERE id = 10"))
+        .containsEntry("session_status", "IN_PROGRESS")
+        .containsEntry("current_stage", "CONVERSING");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM drawing_assets "
+                    + "WHERE drawing_session_id = 10 AND asset_type = 'FINAL'",
+                Integer.class))
+        .isEqualTo(1);
+
+    mockMvc
+        .perform(drawingCompletionRequest("drawing-timeout-fallback-0001"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.analysis.status").value("FAILED"));
+    verify(drawingAnalysisClient, times(1)).analyze(any());
+  }
+
+  @Test
   void retriesAFailedAnalysisWithTheLatestMatchingAssetAndLinksItsSource() throws Exception {
     given(drawingAnalysisClient.analyze(any()))
         .willThrow(new DrawingAnalysisClientException(DrawingAnalysisClientException.Type.TIMEOUT));
@@ -395,6 +437,26 @@ class DrawingAnalysisIntegrationTest extends IntegrationTestSupport {
             {"drawingAssetId":%d,"analysisType":"%s"}
             """
                 .formatted(drawingAssetId, analysisType));
+  }
+
+  private org.springframework.test.web.servlet.RequestBuilder drawingCompletionRequest(
+      String idempotencyKey) {
+    MockMultipartFile metadata =
+        new MockMultipartFile(
+            "metadata",
+            "metadata.json",
+            MediaType.APPLICATION_JSON_VALUE,
+            """
+            {
+              "sourceAssetId":20,
+              "drawingDurationMs":120000,
+              "clientCompletedAt":"2026-07-29T10:00:00+09:00"
+            }
+            """
+                .getBytes(StandardCharsets.UTF_8));
+    return multipart("/api/v1/drawing-sessions/{drawingSessionId}/drawing-complete", 10)
+        .file(metadata)
+        .header("Idempotency-Key", idempotencyKey);
   }
 
   private com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse
