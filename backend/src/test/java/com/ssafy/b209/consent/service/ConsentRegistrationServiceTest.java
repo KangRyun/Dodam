@@ -68,6 +68,7 @@ class ConsentRegistrationServiceTest {
             agreement(2L, ConsentAction.AGREE),
             agreement(3L, ConsentAction.WITHDRAW));
     when(authorizationRepository.hasGuardianChildRelation(41L, 7L)).thenReturn(true);
+    when(authorizationRepository.hasRequiredUserConsents(41L, NOW)).thenReturn(true);
     when(termRepository.findAllById(org.mockito.ArgumentMatchers.anySet()))
         .thenReturn(List.of(userRequired, childRequired, childOptional));
     when(termRepository.findAllByActiveTrue())
@@ -89,6 +90,50 @@ class ConsentRegistrationServiceTest {
             captor.getValue().stream()
                 .map(record -> ReflectionTestUtils.getField(record, "subjectReferenceHash")))
         .allSatisfy(hash -> assertThat(hash.toString()).hasSize(64));
+  }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void registersChildConsentWithoutRequiringUserTermInRequestWhenGuardianAlreadyAgreed() {
+    ConsentTerm userRequired = term(1L, ConsentTargetScope.USER, true, true);
+    ConsentTerm childRequired = term(2L, ConsentTargetScope.CHILD, true, true);
+    CreateConsentRequest request = request(7L, agreement(2L, ConsentAction.AGREE));
+    when(authorizationRepository.hasGuardianChildRelation(41L, 7L)).thenReturn(true);
+    when(authorizationRepository.hasRequiredUserConsents(41L, NOW)).thenReturn(true);
+    when(termRepository.findAllById(org.mockito.ArgumentMatchers.anySet()))
+        .thenReturn(List.of(childRequired));
+    when(termRepository.findAllByActiveTrue()).thenReturn(List.of(userRequired, childRequired));
+
+    ConsentRegistrationResponse response =
+        service.register(41L, request, "127.0.0.1", "test-agent");
+
+    assertThat(response.childId()).isEqualTo(7L);
+    assertThat(response.recordedCount()).isEqualTo(1);
+    assertThat(response.requiredConsentsSatisfied()).isTrue();
+    ArgumentCaptor<List<ConsentRecord>> captor = ArgumentCaptor.forClass(List.class);
+    verify(recordRepository).saveAll(captor.capture());
+    assertThat(captor.getValue()).hasSize(1);
+  }
+
+  @Test
+  void rejectsChildConsentWhenGuardianHasNotAgreedRequiredUserTerm() {
+    ConsentTerm userRequired = term(1L, ConsentTargetScope.USER, true, true);
+    ConsentTerm childRequired = term(2L, ConsentTargetScope.CHILD, true, true);
+    CreateConsentRequest request = request(7L, agreement(2L, ConsentAction.AGREE));
+    when(authorizationRepository.hasGuardianChildRelation(41L, 7L)).thenReturn(true);
+    when(authorizationRepository.hasRequiredUserConsents(41L, NOW)).thenReturn(false);
+    when(termRepository.findAllById(org.mockito.ArgumentMatchers.anySet()))
+        .thenReturn(List.of(childRequired));
+    when(termRepository.findAllByActiveTrue()).thenReturn(List.of(userRequired, childRequired));
+
+    assertThatThrownBy(() -> service.register(41L, request, null, null))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception ->
+                assertThat(exception.getErrorCode())
+                    .isEqualTo(ConsentErrorCode.REQUIRED_CONSENT_MISSING));
+
+    verify(recordRepository, never()).saveAll(anyList());
   }
 
   @Test

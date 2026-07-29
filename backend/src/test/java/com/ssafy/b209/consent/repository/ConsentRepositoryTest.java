@@ -66,6 +66,82 @@ class ConsentRepositoryTest {
   }
 
   @Test
+  void confirmsRequiredUserConsentsFromActorLatestAgreeHistory() {
+    LocalDateTime now = LocalDateTime.of(2026, 7, 23, 0, 0);
+    ConsentTerm userRequired =
+        termRepository.saveAndFlush(
+            ConsentTerm.define(
+                "SERVICE_TOS",
+                ConsentTargetScope.USER,
+                true,
+                "1.0",
+                "서비스 이용약관",
+                null,
+                now.minusDays(1),
+                true,
+                now.minusDays(2)));
+    termRepository.saveAndFlush(
+        ConsentTerm.define(
+            "CHILD_PERSONAL_INFO",
+            ConsentTargetScope.CHILD,
+            true,
+            "1.0",
+            "아동 개인정보",
+            null,
+            now.minusDays(1),
+            true,
+            now.minusDays(2)));
+
+    assertThat(authorizationRepository.hasRequiredUserConsents(41L, now)).isFalse();
+
+    recordRepository.saveAndFlush(
+        ConsentRecord.record(
+            userRequired, 41L, null, "a".repeat(64), ConsentAction.AGREE, null, null, now));
+
+    assertThat(authorizationRepository.hasRequiredUserConsents(41L, now)).isTrue();
+    assertThat(authorizationRepository.hasRequiredUserConsents(42L, now)).isFalse();
+  }
+
+  @Test
+  void treatsLatestUserWithdrawAsUnsatisfiedRequiredConsent() {
+    LocalDateTime now = LocalDateTime.of(2026, 7, 23, 0, 0);
+    ConsentTerm userRequired =
+        termRepository.saveAndFlush(
+            ConsentTerm.define(
+                "SERVICE_TOS",
+                ConsentTargetScope.USER,
+                true,
+                "1.0",
+                "서비스 이용약관",
+                null,
+                now.minusDays(1),
+                true,
+                now.minusDays(2)));
+    recordRepository.saveAndFlush(
+        ConsentRecord.record(
+            userRequired,
+            41L,
+            null,
+            "a".repeat(64),
+            ConsentAction.AGREE,
+            null,
+            null,
+            now.minusHours(2)));
+    recordRepository.saveAndFlush(
+        ConsentRecord.record(
+            userRequired,
+            41L,
+            null,
+            "a".repeat(64),
+            ConsentAction.WITHDRAW,
+            null,
+            null,
+            now.minusHours(1)));
+
+    assertThat(authorizationRepository.hasRequiredUserConsents(41L, now)).isFalse();
+  }
+
+  @Test
   void checksGuardianChildRelationWithoutExposingChildData() {
     jdbcTemplate.update(
         "insert into guardian_child_relations (guardian_user_id, child_id) values (?, ?)", 41L, 7L);
