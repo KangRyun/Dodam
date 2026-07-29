@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 
@@ -12,6 +13,19 @@ import '../../domain/photo_picker_adapter.dart';
 import '../../domain/repositories/drawing_repository.dart';
 
 enum _Step { methodChoice, photoSource, preview }
+
+String _createIdempotencyKey() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  final hex = bytes
+      .map((value) => value.toRadixString(16).padLeft(2, '0'))
+      .join();
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+      '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+      '${hex.substring(20)}';
+}
 
 /// S15P11B209-466~476: 새 활동을 "캔버스에 직접 그리기"로 시작할지 "사진으로
 /// 시작하기"로 시작할지 고르는 화면.
@@ -33,11 +47,20 @@ class InputMethodSelectScreen extends StatefulWidget {
     required this.repository,
     this.replaceActive = false,
     this.htpAssessmentId,
+    this.existingDrawingSessionId,
+    this.restoredActivityContext,
+    this.htpPhotoUploadEnabled = false,
+    this.idempotencyKeyProvider,
     PhotoPickerAdapter? photoPickerAdapter,
     this.dimensionReader = readPhotoDimensions,
     this.now,
     super.key,
-  }) : photoPickerAdapter = photoPickerAdapter ?? ImagePickerPhotoAdapter();
+  }) : assert(
+         existingDrawingSessionId == null || htpAssessmentId == null,
+         '복원 모드(existingDrawingSessionId)와 전환 모드(htpAssessmentId)는 '
+         '동시에 켤 수 없다.',
+       ),
+       photoPickerAdapter = photoPickerAdapter ?? ImagePickerPhotoAdapter();
 
   final int childId;
   final int drawingTypeId;
@@ -48,6 +71,20 @@ class InputMethodSelectScreen extends StatefulWidget {
   final DrawingRepository repository;
   final bool replaceActive;
   final int? htpAssessmentId;
+
+  /// 이미 만들어진 UPLOAD 세션을 복원한다(사진을 아직 찍지 않은 채 앱이
+  /// 종료된 경우). 켜져 있으면 방식 선택 없이 사진 촬영 단계로 바로
+  /// 들어가고, 취소해도 이 세션을 삭제하지 않으며, 완료 시 새 세션을
+  /// 만들지 않고 이 세션 그대로 업로드·완료한다.
+  final int? existingDrawingSessionId;
+
+  /// 복원 모드에서 되돌려줄 `activityContext`(서버 재조회 없이 재진입
+  /// 시점에 이미 알고 있는 값을 그대로 사용한다).
+  final DrawingActivityContextDto? restoredActivityContext;
+
+  /// 사진으로 시작하기 옵션을 노출할지 여부(S15P11B209-702, 기본 꺼짐).
+  final bool htpPhotoUploadEnabled;
+  final String Function()? idempotencyKeyProvider;
   final PhotoPickerAdapter photoPickerAdapter;
   final PhotoDimensionReader dimensionReader;
   final DateTime Function()? now;
@@ -64,7 +101,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
         now: widget.now,
       );
 
-  _Step _step = _Step.methodChoice;
+  late _Step _step;
 
   /// 세션 생성·업로드 등 되돌릴 수 없는 요청이 진행 중일 때만 켜진다.
   /// 켜져 있는 동안 모든 선택 버튼을 잠가 중복 탭·중복 세션 생성을 막는다.
@@ -76,12 +113,44 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
 
   /// 사진 경로에서만 지연 생성된다 — 유효한 사진이 확보되기 전에는 세션을
   /// 만들지 않는다. 한 번 만들어지면 재시도·다른 사진 재선택에도 그대로
-  /// 재사용해 세션이 여러 개 남지 않게 한다.
+  /// 재사용해 세션이 여러 개 남지 않게 한다. 복원 모드에서는 기존 세션으로
+  /// 미리 채워져 있어 새 세션을 만들지 않는다.
   int? _sessionId;
   DrawingSessionResolution? _sessionResolution;
   String? _uploadIdempotencyKey;
   String? _completionIdempotencyKey;
+  String? _advanceIdempotencyKey;
+  String? _advanceInputMethod;
   late final DateTime _flowStartedAt = widget.now?.call() ?? DateTime.now();
+
+  /// 이 화면이 새 세션을 만들었는지(복원 모드가 아니면 참). 복원한 세션은
+  /// 취소해도 삭제하지 않는다.
+  bool get _ownsSession => widget.existingDrawingSessionId == null;
+
+  @override
+  void initState() {
+    super.initState();
+    final existingSessionId = widget.existingDrawingSessionId;
+    if (existingSessionId != null) {
+      _step = _Step.photoSource;
+      _sessionId = existingSessionId;
+      _sessionResolution = DrawingSessionResolution(
+        sessionId: existingSessionId,
+        currentStage: 'DRAWING',
+        activityContext:
+            widget.restoredActivityContext ??
+            const DrawingActivityContextDto.general(),
+        inputMethod: 'UPLOAD',
+      );
+      final now = widget.now?.call() ?? DateTime.now();
+      _uploadIdempotencyKey =
+          'htp-upload-$existingSessionId-${now.microsecondsSinceEpoch}';
+      _completionIdempotencyKey =
+          'htp-complete-$existingSessionId-${now.microsecondsSinceEpoch}';
+    } else {
+      _step = _Step.methodChoice;
+    }
+  }
 
   Future<void> _handleCanvasChoice() async {
     if (_busy) return;
@@ -239,6 +308,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
           sessionId: completed.drawingSessionId,
           currentStage: completed.currentStage,
           activityContext: initial.activityContext,
+          inputMethod: 'UPLOAD',
         ),
       );
     } on Object catch (error) {
@@ -252,7 +322,9 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
   Future<void> _cancel() async {
     if (_busy) return;
     final sessionId = _sessionId;
-    if (sessionId != null && widget.repository is DrawingSessionDiscarder) {
+    if (_ownsSession &&
+        sessionId != null &&
+        widget.repository is DrawingSessionDiscarder) {
       try {
         await (widget.repository as DrawingSessionDiscarder).deleteSession(
           sessionId,
@@ -279,12 +351,24 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     if (widget.repository is! HtpDrawingRepository) {
       throw UnsupportedError('HTP activity is unavailable.');
     }
+    // 같은 방식 재시도는 같은 Key를, 다른 방식으로 바꾸면 새 Key를 쓴다.
+    if (_advanceInputMethod != inputMethod) {
+      _advanceInputMethod = inputMethod;
+      _advanceIdempotencyKey = null;
+    }
+    final idempotencyKey = _advanceIdempotencyKey ??=
+        widget.idempotencyKeyProvider?.call() ?? _createIdempotencyKey();
     final assessment = await (widget.repository as HtpDrawingRepository)
-        .moveToNextHtpStep(assessmentId, inputMethod: inputMethod);
+        .moveToNextHtpStep(
+          assessmentId,
+          inputMethod: inputMethod,
+          idempotencyKey: idempotencyKey,
+        );
     final step = assessment.currentStep;
     return DrawingSessionResolution(
       sessionId: step.drawingSessionId,
       currentStage: step.currentStage,
+      inputMethod: inputMethod,
       activityContext: DrawingActivityContextDto(
         activityKind: 'HTP',
         htpAssessmentId: assessment.htpAssessmentId,
@@ -389,9 +473,13 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
                   key: const ValueKey('input-method-photo'),
                   icon: Icons.photo_camera_rounded,
                   title: '사진으로 시작하기',
-                  description: '그려둔 그림을 사진으로 담아요',
+                  description: widget.htpPhotoUploadEnabled
+                      ? '그려둔 그림을 사진으로 담아요'
+                      : '곧 만나요',
                   color: AppColors.tangerine,
-                  onTap: _busy ? null : _choosePhotoMethod,
+                  onTap: !widget.htpPhotoUploadEnabled || _busy
+                      ? null
+                      : _choosePhotoMethod,
                 ),
               ),
             ],
@@ -469,15 +557,19 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
       Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Expanded(
-            child: AppButton(
-              key: const ValueKey('input-method-back'),
-              label: '뒤로',
-              variant: AppButtonVariant.secondary,
-              onPressed: _busy ? null : _backToMethodChoice,
+          // 복원 모드는 이미 UPLOAD로 확정된 세션이라 방식 선택으로 되돌아갈
+          // 수 없다 — "뒤로"를 누르면 새 HTP 활동을 또 만들게 된다.
+          if (_ownsSession) ...[
+            Expanded(
+              child: AppButton(
+                key: const ValueKey('input-method-back'),
+                label: '뒤로',
+                variant: AppButtonVariant.secondary,
+                onPressed: _busy ? null : _backToMethodChoice,
+              ),
             ),
-          ),
-          const SizedBox(width: AppSpacing.sm),
+            const SizedBox(width: AppSpacing.sm),
+          ],
           Expanded(
             child: AppButton(
               key: const ValueKey('input-method-cancel'),

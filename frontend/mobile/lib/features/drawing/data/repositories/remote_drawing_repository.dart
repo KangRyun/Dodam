@@ -123,11 +123,12 @@ final class RemoteDrawingRepository
   Future<HtpAssessmentDto> moveToNextHtpStep(
     int assessmentId, {
     required String inputMethod,
+    required String idempotencyKey,
   }) async {
     final response = await _apiClient.post<Map<String, dynamic>>(
       'htp-assessments/$assessmentId/steps/next',
       data: {'inputMethod': inputMethod},
-      options: Options(headers: {'Idempotency-Key': _idempotencyKey()}),
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
     );
     return HtpAssessmentDto.fromJson(envelopeObject(response.data));
   }
@@ -144,10 +145,13 @@ final class RemoteDrawingRepository
   }
 
   @override
-  Future<void> completeHtpAssessment(int assessmentId) async {
+  Future<void> completeHtpAssessment(
+    int assessmentId, {
+    required String idempotencyKey,
+  }) async {
     await _apiClient.post<void>(
       'htp-assessments/$assessmentId/complete',
-      options: Options(headers: {'Idempotency-Key': _idempotencyKey()}),
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
     );
   }
 

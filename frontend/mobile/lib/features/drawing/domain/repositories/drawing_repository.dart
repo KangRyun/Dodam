@@ -71,12 +71,16 @@ abstract interface class HtpDrawingRepository {
   Future<HtpAssessmentDto> moveToNextHtpStep(
     int assessmentId, {
     required String inputMethod,
+    required String idempotencyKey,
   });
   Future<void> saveHtpReflection(
     int assessmentId,
     SaveDrawingReflectionRequestDto request,
   );
-  Future<void> completeHtpAssessment(int assessmentId);
+  Future<void> completeHtpAssessment(
+    int assessmentId, {
+    required String idempotencyKey,
+  });
 }
 
 /// 진행 중인 활동을 폐기하고 새 활동을 시작할 때 사용하는 선택 계약.

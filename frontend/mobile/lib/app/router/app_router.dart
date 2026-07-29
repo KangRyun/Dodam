@@ -58,6 +58,7 @@ abstract final class AppRouter {
     int? conversationId,
     int? basisAnalysisId,
     bool insideShell = false,
+    bool htpPhotoUploadEnabled = false,
   }) {
     final location = settings.name ?? AppRoutes.guardianHome;
     final segments = Uri.tryParse(location)?.pathSegments ?? const <String>[];
@@ -231,6 +232,7 @@ abstract final class AppRouter {
           child: childController!.selectedChild!,
           drawingRepository: drawingRepository,
           completionSnapshotProvider: drawingCompletionSnapshotProvider,
+          htpPhotoUploadEnabled: htpPhotoUploadEnabled,
         ),
       ['child', final childId, 'activity', 'select']
           when _hasChildContext(childController, childId) &&
@@ -290,6 +292,8 @@ abstract final class AppRouter {
           startFresh: (settings.arguments! as DrawingRouteArguments).startFresh,
           activityContext:
               (settings.arguments! as DrawingRouteArguments).activityContext,
+          inputMethod:
+              (settings.arguments! as DrawingRouteArguments).inputMethod,
         ),
       ['child', final childId, 'activity', 'emotions']
           when _hasChildContext(childController, childId) =>
@@ -338,6 +342,9 @@ abstract final class AppRouter {
               ? (settings.arguments! as EmotionSelectRouteArguments)
                     .activityContext
               : const DrawingActivityContextDto.general(),
+          inputMethod: settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments).inputMethod
+              : null,
         ),
       ['child', final childId, 'activity', 'complete']
           when _hasChildContext(childController, childId) =>
@@ -442,11 +449,15 @@ final class DrawingRouteArguments {
     this.autoRestoreDraft = false,
     this.startFresh = false,
     this.activityContext = const DrawingActivityContextDto.general(),
+    this.inputMethod,
   });
 
   final int sessionId;
   final DrawingRepository repository;
   final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
+
+  /// 이 세션이 실제로 쓰는 입력 방식(`CANVAS`|`UPLOAD`).
+  final String? inputMethod;
 
   /// 그림 단계를 지난 세션으로 들어올 때 대화를 즉시 이어받게 한다.
   final bool resumeConversation;

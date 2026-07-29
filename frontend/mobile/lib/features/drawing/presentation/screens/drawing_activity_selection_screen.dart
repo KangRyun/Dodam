@@ -80,6 +80,7 @@ class _DrawingActivitySelectionScreenState
           completionSnapshotProvider: widget.completionSnapshotProvider,
           startFresh: true,
           activityContext: resolution.activityContext,
+          inputMethod: resolution.inputMethod,
         ),
       );
     } on Object {
