@@ -87,6 +87,14 @@ pipeline {
       defaultValue: false,
       description: 'frontend/mobile 변경이 없어도 Flutter 앱 테스트를 실행한다 (S15P11B209-642)'
     )
+    // k3s 스테이징 선검증 (S15P11B209-359). 기본 false — 운영 배포(compose)와 무관하게 별도로 켠다.
+    //   ⚠️ 이 스테이지는 **운영을 건드리지 않는다.** 같은 호스트의 k3s `dodam` 네임스페이스에만
+    //      배포하며, 운영 트래픽은 계속 compose 스택이 받는다. 컷오버는 S15P11B209-360 의 일이다.
+    booleanParam(
+      name: 'DEPLOY_K8S_STAGING',
+      defaultValue: false,
+      description: 'k3s 스테이징에 kubectl 로 배포해 컷오버 전 선검증한다 (S15P11B209-359)'
+    )
   }
 
   environment {
@@ -326,6 +334,70 @@ pipeline {
           done
           if [ "$ok" != "true" ]; then echo "  ✗ 게이트웨이 e2e 실패(재시도 소진)"; exit 1; fi
           echo "✅ 전체 서비스 healthy + 게이트웨이 라우팅 정상"
+        '''
+      }
+    }
+
+    stage('Deploy — k3s staging (선검증)') {
+      // S15P11B209-359. 컷오버(360) 전에 "파이프라인이 kubectl 로 배포할 수 있는가"만 증명한다.
+      //
+      // ⚠️ 운영과 분리돼 있다: 위 Deploy 스테이지(compose)가 여전히 서비스를 배포하고,
+      //    이 스테이지는 같은 호스트 k3s 의 `dodam` 네임스페이스에만 손댄다. 실패해도
+      //    운영은 이미 배포·헬스체크를 마친 뒤다.
+      //
+      // 프리즈와의 관계: 프리즈는 "운영에 배포하지 마라"는 뜻이므로 여기에도 건다.
+      //    멈춰야 할 때 절반만 멈추면 프리즈의 의미가 없다.
+      when {
+        branch 'develop'
+        expression { params.DEPLOY_K8S_STAGING }
+        expression { !fileExists(env.DEPLOY_FREEZE_FLAG) }
+      }
+      steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }
+        // kubeconfig 는 cluster-admin 이 아니라 네임스페이스 한정 ServiceAccount 토큰이다.
+        //   발급: infra/scripts/issue-deployer-kubeconfig.sh → Jenkins Credentials(Secret file)
+        //   ⚠️ 토큰에 만료가 있다(기본 90일). 만료되면 아래가 401 로 죽는다 — 재발급할 것.
+        withCredentials([file(credentialsId: 'dodam-kubeconfig', variable: 'DEPLOYER_KUBECONFIG')]) {
+          sh '''
+            set -e
+            export KUBECONFIG="$DEPLOYER_KUBECONFIG"
+
+            # containerd 는 도커 이미지 저장소를 보지 못한다(356). 레지스트리를 거쳐 넘긴다.
+            infra/scripts/push-staging-images.sh --tag "$IMAGE_TAG"
+
+            # set image 만 한다 — 생성·삭제 권한은 애초에 RBAC 에 없다(jenkins-deployer-rbac.yaml).
+            #   워크로드 생성은 사람이 kubectl apply -k 로 한다. 파이프라인은 이미지만 바꾼다.
+            kubectl -n dodam set image deployment/backend backend=127.0.0.1:5000/dodam-backend:"$IMAGE_TAG"
+            kubectl -n dodam set image deployment/gateway nginx=127.0.0.1:5000/dodam-nginx:"$IMAGE_TAG"
+
+            # rollout status 가 이 스테이지의 실질 헬스체크다. 실패하면 0 이 아닌 코드로 죽는다.
+            #   --timeout 없이 두면 파드가 안 뜰 때 스테이지 타임아웃까지 매달린다.
+            kubectl -n dodam rollout status deployment/backend --timeout=300s
+            kubectl -n dodam rollout status deployment/gateway --timeout=300s
+
+            echo "✅ k3s 스테이징 롤아웃 완료 (태그: $IMAGE_TAG)"
+          '''
+        }
+        // 게이트웨이 e2e — 롤아웃 성공은 "파드가 떴다"까지만 말해준다(07-22 빈 conf 사고의 교훈).
+        //   ⚠️ NodePort 는 **호스트**의 30080 이다. Jenkins 컨테이너 안의 127.0.0.1 이 아니다.
+        //      --network host 로 붙은 일회용 컨테이너에서 확인한다(호스트 docker.sock 활용).
+        //      이미지는 방금 빌드한 dodam-nginx:local 을 쓴다 — 외부 pull 이 필요 없다.
+        sh '''
+          set -e
+          echo "게이트웨이 e2e 확인: NodePort 30080"
+          ok=false
+          for i in $(seq 1 10); do
+            if docker run --rm --network host dodam-nginx:local \\
+                 wget -q -O /dev/null -T 5 http://127.0.0.1:30080/ 2>/dev/null; then
+              ok=true; break
+            fi
+            sleep 3
+          done
+          if [ "$ok" != "true" ]; then
+            echo "  ✗ NodePort e2e 실패 — 파드는 떴지만 게이트웨이가 응답하지 않는다"
+            exit 1
+          fi
+          echo "✅ k3s 스테이징 게이트웨이 응답 정상"
         '''
       }
     }
