@@ -154,8 +154,10 @@ void main() {
     final drawingRepository = _TrackingDrawingRepository(activeSessionId: 812);
     await _pumpChildHome(tester, drawingRepository);
 
-    await _tapAfterScroll(tester, const ValueKey('activity-77'));
-    await tester.pump(const Duration(milliseconds: 400));
+    // 진입 시 활성 세션이 있으면 활동 카드 탭 없이도 '이어/새로' 선택
+    // 다이얼로그가 자동으로 뜬다(_resolveEntry).
+    await _pumpUntil(tester, find.text('이어 그리기'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('이어 그리기'));
     await _pumpUntil(tester, find.byKey(const ValueKey('drawing-canvas')));
 
@@ -175,10 +177,11 @@ void main() {
     );
     await _pumpChildHome(tester, drawingRepository);
 
-    // 임시 저장본이 있으면 461/463/464의 새 활동 안내보다 먼저 이어
-    // 그리기 선택 다이얼로그를 보여준다.
-    await _tapAfterScroll(tester, const ValueKey('activity-77'));
-    await tester.pump(const Duration(milliseconds: 400));
+    // 진입 시 활성 세션(임시 저장본)이 있으면 활동 카드 탭 없이도 '이어/새로'
+    // 선택 다이얼로그가 자동으로 뜬다(_resolveEntry). 다이얼로그 등장 애니메이션이
+    // 끝나 버튼이 탭 가능해질 때까지 기다린다.
+    await _pumpUntil(tester, find.text('이어 그리기'));
+    await tester.pumpAndSettle();
 
     expect(find.text('그리던 그림이 있어요'), findsOneWidget);
     expect(find.text('이어 그리기'), findsOneWidget);
@@ -199,10 +202,19 @@ void main() {
     );
     await _pumpChildHome(tester, drawingRepository);
 
-    await _tapAfterScroll(tester, const ValueKey('activity-77'));
-    await tester.pump(const Duration(milliseconds: 400));
+    // 진입 시 자동으로 뜨는 '이어/새로' 다이얼로그에서 '새로 그리기'를 고르면
+    // 기존 세션을 교체하도록 표시하고 다이얼로그를 닫는다. 이후 활동 카드를 탭해
+    // 새 세션을 만든다.
+    await _pumpUntil(tester, find.text('새로 그리기'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('새로 그리기'));
     await tester.pumpAndSettle();
+    await _tapAfterScroll(tester, const ValueKey('activity-77'));
+    await tester.pumpAndSettle();
+    if (find.byKey(const ValueKey('activity-guide-start')).evaluate().isNotEmpty) {
+      await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
+    }
+    await _pumpUntil(tester, find.byKey(const ValueKey('drawing-canvas')));
 
     expect(drawingRepository.deletedSessionIds, isEmpty);
     expect(drawingRepository.createCalls, 1);
