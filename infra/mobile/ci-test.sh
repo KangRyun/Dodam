@@ -36,8 +36,12 @@ die() { printf '\n❌ %s\n' "$*" >&2; exit 1; }
 # ── 메모리 관문 (S15P11B209-356) ──────────────────────────────────────────────
 # 앱 테스트는 Dart VM 여러 개를 띄워 수 GB 를 쓴다. 07-28 호스트 OOM 과 같은 부하 계열이라
 # 시작 전에 관문을 통과시킨다. SKIP_PREFLIGHT=1 은 관문 자체가 고장 났을 때의 탈출구다.
+# --in-ci: 이 스크립트는 Jenkins 빌드 **안에서** 돈다. 그게 없으면 preflight 가
+#   자기 파이프라인의 testcontainers 를 "다른 빌드"로 보고 막아버린다(S15P11B209-642 —
+#   팀원이 동시에 푸시하기만 하면 이 스테이지가 상시 실패했다).
+#   RAM 검사는 그대로 유효하다 — 자기참조인 항목만 정보로 낮춘다.
 if [ "${SKIP_PREFLIGHT:-0}" != "1" ] && [ -x "$REPO_ROOT/infra/scripts/preflight-memory.sh" ]; then
-  "$REPO_ROOT/infra/scripts/preflight-memory.sh" --need 4096 \
+  "$REPO_ROOT/infra/scripts/preflight-memory.sh" --need 4096 --in-ci \
     || die "메모리 사전 점검 실패 — 위 이유를 해소하고 다시 실행할 것."
 fi
 

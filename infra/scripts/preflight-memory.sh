@@ -21,22 +21,43 @@ set -uo pipefail
 
 NEED_MB=4096
 QUIET=0
+IN_CI=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --need)  NEED_MB="$2"; shift 2 ;;
     --quiet) QUIET=1; shift ;;
-    -h|--help) sed -n '2,25p' "$0"; exit 0 ;;
+    # CI 파이프라인 **안에서** 부를 때. 자기 자신을 "다른 빌드"로 오인하는 것을 막는다.
+    #   (S15P11B209-642 — 앱 테스트 스테이지가 이것 때문에 상시 실패했다)
+    --in-ci) IN_CI=1; shift ;;
+    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
     *) echo "알 수 없는 인자: $1" >&2; exit 2 ;;
   esac
 done
+# 환경변수로도 켤 수 있게 — Jenkins 는 BUILD_ID 를 항상 준다.
+[ -n "${PREFLIGHT_IN_CI:-}" ] && IN_CI=1
 
 say()   { [ "$QUIET" = "1" ] || printf '%s\n' "$*"; }
 ok()    { [ "$QUIET" = "1" ] || printf '   ✅ %s\n' "$*"; }
+info()  { [ "$QUIET" = "1" ] || printf '   ·  %s\n' "$*"; }
 warn()  { printf '   ⚠️  %s\n' "$*" >&2; }
 block() { printf '   ⛔ %s\n' "$*" >&2; }
 
 BLOCKED=0
 WARNED=0
+
+# ── 실행 위치 판별 ────────────────────────────────────────────────────────────
+# 이 스크립트는 **호스트에서 사람이 돌리는 것**을 전제로 만들어졌다. 그런데 CI 가
+# Jenkins 컨테이너 안에서 부르면 systemd·crontab·$HOME 이 전부 다른 세계다.
+#   - /proc/meminfo 는 네임스페이스가 안 나뉘어 **메모리 숫자는 진짜**다.
+#   - 반면 `systemctl is-active earlyoom` 은 systemd 자체가 없어 무조건 실패하고,
+#     $HOME/bin 도 /var/jenkins_home/bin 이라 memory-guard 를 못 찾는다.
+# → 그대로 두면 방어가 멀쩡한데 "없다"고 보고한다. 거짓 초록불의 정반대지만
+#   위험은 같다: 매 빌드마다 뜨는 경고는 사람에게 "무시하는 법"을 가르친다.
+#   진짜로 earlyoom 이 죽은 날에도 똑같이 보이게 된다.
+IN_CONTAINER=0
+if [ -f /.dockerenv ] || ! command -v systemctl >/dev/null 2>&1; then
+  IN_CONTAINER=1
+fi
 
 MEM_TOTAL_MB=$(awk '/MemTotal/{print int($2/1024)}' /proc/meminfo)
 MEM_AVAIL_MB=$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)
@@ -86,6 +107,9 @@ fi
 #   대신 문구를 강하게 남긴다.
 if systemctl is-active --quiet earlyoom 2>/dev/null; then
   ok "earlyoom 실행중 — 고갈 시 호스트 대신 프로세스가 죽는다"
+elif [ "$IN_CONTAINER" = "1" ]; then
+  # "없다"가 아니라 "모른다". 둘을 섞으면 진짜 사고를 못 알아본다.
+  info "earlyoom 확인 불가 (컨테이너 안 — systemd 미접근). 호스트에서 확인할 것"
 else
   warn "earlyoom 이 없다 — 메모리가 마르면 호스트가 응답 불능이 될 수 있다(07-28 사고 재현)"
   warn "  sudo bash infra/scripts/setup-swap.sh"
@@ -105,6 +129,9 @@ if [ -x "$GUARD_INSTALLED" ] && crontab -l 2>/dev/null | grep -q dodam-memory-gu
   else
     ok "memory-guard 설치·등록됨 (매분 감시 · WARN 알림 / CRIT 시 빌드부터 정지)"
   fi
+elif [ "$IN_CONTAINER" = "1" ]; then
+  # $HOME 이 /var/jenkins_home 이고 crontab 도 컨테이너 것이라 판정 자체가 성립하지 않는다.
+  info "memory-guard 확인 불가 (컨테이너 안 — 호스트 \$HOME·crontab 미접근)"
 else
   warn "memory-guard 미설치 — 메모리가 마를 때 알림도, 자동 정지도 없다"
   warn "  infra/scripts/memory-guard.sh --install"
@@ -132,9 +159,19 @@ if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
   # 빌드는 단독으로 4.5GB 를 쓴다(07-28 실측). 빌드와 k3s 를 겹치면 이번 사고가 재현된다.
   # 컨테이너 이름이 무작위라 이미지로 판별한다.
   if docker ps --format '{{.Image}}' | grep -q 'testcontainers'; then
-    block "Jenkins 빌드가 진행중이다 (testcontainers 실행중) — 빌드는 단독 4.5GB 를 쓴다"
-    block "  → 빌드가 끝난 뒤 다시 실행할 것: docker ps --format '{{.Image}}' | grep testcontainers"
-    BLOCKED=1
+    if [ "$IN_CI" = "1" ]; then
+      # ★ 자기참조 방지 (S15P11B209-642).
+      #   이 검사는 "사람이 호스트에서 무거운 작업을 시작하기 전"을 위한 것이다.
+      #   그런데 CI 스테이지가 빌드 **안에서** 부르면 "빌드가 돌고 있다"는 항상 참이고,
+      #   "빌드가 끝난 뒤 다시 실행할 것"은 CI 에서 실행 불가능한 지시다.
+      #   결과: 팀원이 동시에 푸시하기만 하면 앱 테스트 스테이지가 상시 실패했다.
+      #   여기서는 사실만 알리고 막지 않는다 — RAM 검사(1번)는 그대로 유효하다.
+      info "빌드 컨테이너 실행중 (CI 모드 — 자기 자신일 수 있어 차단하지 않음)"
+    else
+      block "Jenkins 빌드가 진행중이다 (testcontainers 실행중) — 빌드는 단독 4.5GB 를 쓴다"
+      block "  → 빌드가 끝난 뒤 다시 실행할 것: docker ps --format '{{.Image}}' | grep testcontainers"
+      BLOCKED=1
+    fi
   else
     ok "Jenkins 빌드 미진행"
   fi
