@@ -24,7 +24,12 @@
 //      검증한다고 믿으면서 운영을 재게 된다.
 //   → 클러스터 안에서 Service 를 직접 친다:  BASE_URL=http://gateway
 //
-//   k6 run -e BASE_URL=http://gateway -e STACK=k3s -e ISSUE=S15P11B209-362 \
+//   ⚠️ BASE_URL 은 **https** 로 준다. http 로 주면 게이트웨이가 301 로 https 에 넘기는데,
+//      그 리다이렉트 응답까지 요청 1건으로 세면서 expecting(401) 과 어긋나 실패로 잡힌다.
+//      (2026-07-29 실측: 반복당 2요청이 되어 http_req_failed 가 50% 로 부풀었다.
+//       체크 성공률은 99.4% 였다 — 지표 두 개가 서로 다른 말을 하는 상태였다.)
+//
+//   k6 run -e BASE_URL=https://gateway -e STACK=k3s -e ISSUE=S15P11B209-362 \
 //          -e VUS=5 -e HOLD=2m scenarios/05-rolling-smoke.js
 //
 //   돌고 있는 동안 다른 창에서:
@@ -36,6 +41,15 @@ import { BASE_URL, RUN_TAGS, TIER } from '../lib/config.js';
 import { checkOk, expecting } from '../lib/checks.js';
 
 export const options = {
+  // ⚠️ 클러스터 안에서는 TLS 검증을 끈다. 끄는 이유가 "귀찮아서"가 아니다 —
+  //   구조적으로 통과할 수 없다. 게이트웨이는 http 를 https 로 301 리다이렉트하는데,
+  //   인증서는 공개 도메인(i15b209.p.ssafy.io)용이고 여기서는 Service 이름(gateway)으로
+  //   부른다. 이름이 다르니 검증은 반드시 실패한다.
+  //   (2026-07-29 첫 실행에서 1790건 전부 이 이유로 죽었다. 그 결과는 "무중단 실패"처럼
+  //    보였지만 실제로는 **백엔드까지 가보지도 못한** 것이었다 — 원인을 오해하기 쉬운 형태다.)
+  //   이 시나리오는 TLS 를 검증하는 게 목적이 아니다. 그건 외부에서 공개 도메인으로
+  //   치는 01-gateway.js 의 몫이다.
+  insecureSkipTLSVerify: true,
   scenarios: {
     // constant-vus — 램프업 없이 일정 부하를 유지한다. 롤링이 어느 시점에 일어나도
     // 같은 조건에서 측정되게 하려는 것이다(램프업 중에 롤링이 겹치면 해석이 흐려진다).
