@@ -470,7 +470,11 @@ pipeline {
       script { notifyMattermost('✅', '빌드 성공') }
     }
     failure {
-      echo "❌ 실패 — 미배포이거나 헬스체크 실패. 콘솔 로그 확인 후 대응."
+      // ⚠️ "미배포"라고 단정하지 않는다. Deploy·Healthcheck 뒤에도 스테이지가 있어
+      //    (k3s 선검증 · AAB), 배포가 멀쩡히 끝난 뒤 실패하는 경우가 실제로 잦다.
+      //    2026-07-29 빌드 15·16·18 이 모두 그랬는데 로그는 "미배포"라고 말했다 —
+      //    사실과 다른 안내는 사람을 엉뚱한 곳부터 뒤지게 만든다.
+      echo "❌ 실패 — 실패 지점: ${env.CURRENT_STAGE ?: '?'} · 배포 여부는 위 Deploy/Healthcheck 스테이지 결과로 판단할 것."
       script { notifyMattermost('❌', '빌드 실패') }
     }
     always  {
