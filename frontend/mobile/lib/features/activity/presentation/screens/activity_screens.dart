@@ -107,6 +107,8 @@ class DrawingScreen extends StatefulWidget {
     this.conversationAnswerRepository,
     this.questionSkipRepository,
     this.conversationEndRepository,
+    this.questionTtsRepository,
+    this.questionAudioPlayerFactory,
     this.voiceAnswerRepository,
     this.sttResultRepository,
     this.conversationId,
@@ -130,6 +132,8 @@ class DrawingScreen extends StatefulWidget {
   final ConversationAnswerRepository? conversationAnswerRepository;
   final QuestionSkipRepository? questionSkipRepository;
   final ConversationEndRepository? conversationEndRepository;
+  final QuestionTtsRepository? questionTtsRepository;
+  final QuestionAudioPlayerFactory? questionAudioPlayerFactory;
   final VoiceAnswerRepository? voiceAnswerRepository;
   final SttResultRepository? sttResultRepository;
   final int? conversationId;
@@ -146,7 +150,8 @@ class DrawingScreen extends StatefulWidget {
   State<DrawingScreen> createState() => _DrawingScreenState();
 }
 
-class _DrawingScreenState extends State<DrawingScreen> {
+class _DrawingScreenState extends State<DrawingScreen>
+    with WidgetsBindingObserver {
   static const _thin = 4.0;
   static const _regular = 8.0;
   static const _thick = 14.0;
@@ -174,6 +179,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   OptionAnswerSubmissionController? _answerSubmissionController;
   QuestionSkipController? _questionSkipController;
   ConversationEndController? _conversationEndController;
+  AiQuestionTtsController? _questionTtsController;
   VoiceRecordingController? _voiceRecordingController;
   VoiceAnswerUploadController? _voiceAnswerUploadController;
   SttResultController? _sttResultController;
@@ -210,6 +216,15 @@ class _DrawingScreenState extends State<DrawingScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    final ttsRepository = widget.questionTtsRepository;
+    final playerFactory = widget.questionAudioPlayerFactory;
+    if (ttsRepository != null && playerFactory != null) {
+      _questionTtsController = AiQuestionTtsController(
+        ttsRepository,
+        playerFactory(),
+      );
+    }
     _questionDisplayController = AiQuestionDisplayController()
       ..addListener(_handleQuestionDisplayChanged);
     _questionSelectionController = AiQuestionSelectionController()
@@ -282,6 +297,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _syncCoordinator.removeListener(_handleSyncChanged);
     _draftRestoreController.removeListener(_handleDraftRestoreChanged);
     if (_ownsDraftRestoreController) _draftRestoreController.dispose();
@@ -304,6 +320,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     _questionSkipController?.dispose();
     _conversationEndController?.removeListener(_handleConversationEndChanged);
     _conversationEndController?.dispose();
+    _questionTtsController?.dispose();
     _voiceRecordingController?.removeListener(_handleVoiceRecordingChanged);
     _voiceRecordingController?.dispose();
     _voiceAnswerUploadController?.removeListener(
@@ -313,6 +330,16 @@ class _DrawingScreenState extends State<DrawingScreen> {
     _sttResultController?.removeListener(_handleSttResultChanged);
     _sttResultController?.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached ||
+        state == AppLifecycleState.hidden) {
+      unawaited(_questionTtsController?.stop());
+    }
   }
 
   void _handleSyncChanged() {
@@ -403,6 +430,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
     _voiceRecordingController = VoiceRecordingController(
       DeviceVoiceRecorder(),
       permissionService: DeviceMicrophonePermissionService(),
+      beforeStart: () async {
+        await _questionTtsController?.stop();
+      },
     )..addListener(_handleVoiceRecordingChanged);
     if (widget.voiceAnswerRepository case final repository?) {
       _voiceAnswerUploadController = VoiceAnswerUploadController(
@@ -434,15 +464,11 @@ class _DrawingScreenState extends State<DrawingScreen> {
       if (!mounted) return;
       final accepted = _questionDisplayController.receive(question);
       if (accepted) {
-        _questionSelectionController.beginQuestion(
-          question,
-          scheduleReveal: false,
-        );
+        _questionSelectionController.beginQuestion(question);
         _answerSubmissionController?.beginQuestion();
         _questionSkipController?.beginQuestion();
         _voiceAnswerUploadController?.beginQuestion();
-        // 질문이 표시되면 선택지보다 먼저 음성 답변 수집 시작
-        unawaited(_voiceRecordingController?.start());
+        unawaited(_questionTtsController?.playQuestion(question));
       }
     });
   }
@@ -536,6 +562,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final valid = _questionSelectionController.select(question, optionId);
     final controller = _answerSubmissionController;
     if (!valid || controller == null) return;
+    await _questionTtsController?.stop();
     await _voiceRecordingController?.cancel();
     // BE 답변 계약이 선택 시점 스냅샷(type·value·label)을 요구해 객체째 전달
     final option = question.options.firstWhere(
@@ -552,6 +579,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final question = _questionDisplayController.visibleQuestion;
     final controller = _questionSkipController;
     if (question == null || controller == null) return;
+    await _questionTtsController?.stop();
     await _voiceRecordingController?.cancel();
     final skipped = await controller.submit(
       questionMessageId: question.messageId,
@@ -575,6 +603,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
+    await _questionTtsController?.stop();
     await _voiceRecordingController?.cancel();
     final ended = await controller.submit(
       lastQuestionMessageId: _lastQuestionMessageId,
@@ -884,6 +913,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     final repository = widget.drawingRepository;
     if (sessionId == null || repository == null) return;
     _movedToReflection = true;
+    unawaited(_questionTtsController?.stop());
     Navigator.of(context).pushReplacementNamed(
       AppRoutes.emotionSelect(widget.childId),
       arguments: EmotionSelectRouteArguments(
@@ -914,12 +944,17 @@ class _DrawingScreenState extends State<DrawingScreen> {
     return List.unmodifiable(strokes);
   }
 
+  Future<void> _stopTtsAndPop() async {
+    await _questionTtsController?.stop();
+    if (mounted) Navigator.of(context).pop();
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: AppColors.childCanvas,
     appBar: AppTopBar(
       title: _activityTitle,
-      onBack: () => Navigator.of(context).pop(),
+      onBack: () => unawaited(_stopTtsAndPop()),
       actions: [
         Padding(
           padding: const EdgeInsets.only(right: AppSpacing.md),

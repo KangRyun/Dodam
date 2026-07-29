@@ -91,6 +91,8 @@ DodamApp createDefaultApp({
     consentRepository: RemoteConsentRepository(apiClient),
     conversationRepository: RemoteConversationRepository(apiClient),
     conversationEndRepository: RemoteConversationEndRepository(apiClient),
+    questionTtsRepository: RemoteQuestionTtsRepository(apiClient),
+    questionAudioPlayerFactory: DeviceQuestionAudioPlayer.new,
     conversationAnswerRepository: RemoteConversationAnswerRepository(apiClient),
     questionSkipRepository: RemoteQuestionSkipRepository(apiClient),
     // 백엔드 미연결 개발 환경에서만 목 그림 세션 사용
