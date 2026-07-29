@@ -349,12 +349,22 @@ pipeline {
           file(credentialsId: 'dodam-mobile-oauth-env',       variable: 'MOBILE_OAUTH_ENV')
         ]) {
           // build-aab.sh 는 bind mount 를 쓰지 않는다(DooD 경로 함정 회피 — 스크립트 주석 참조).
-          // BUILD_NUMBER 를 versionCode 로 넘겨 Play 업로드 시 버전 충돌을 막는다.
           sh '''
+            set -e
+            # ⚠️ Jenkins 는 BUILD_NUMBER(= 잡 빌드 카운터)를 셸 환경에 자동으로 주입한다.
+            #   그대로 두면 build-aab.sh 가 그 값을 versionCode 로 쓴다. 그런데 이 카운터는
+            #   저장소가 아니라 **잡에 딸린 상태**라, 잡이 지워지면 1 부터 다시 시작한다.
+            #   2026-07-29 실제로 그 일이 있었다(123+ → 1). Play 는 versionCode 가 뒤로 구르면
+            #   그 앱의 업로드를 영구히 거부한다 — 그래서 저장소 기준 값으로 덮어써서 넘긴다.
+            #   (S15P11B209-629 · 산출 근거는 infra/mobile/app-version.sh 헤더)
+            BUILD_NAME="$(infra/mobile/app-version.sh --build-name)"
+            BUILD_NUMBER="$(infra/mobile/app-version.sh --build-number)"
+            echo "앱 버전: versionName=${BUILD_NAME} · versionCode=${BUILD_NUMBER}"
             KEYSTORE_FILE="$ANDROID_KEYSTORE" \
             KEY_PROPERTIES_FILE="$ANDROID_KEY_PROPS" \
             OAUTH_ENV_FILE="$MOBILE_OAUTH_ENV" \
             REQUIRE_RELEASE_SIGNING=true \
+            BUILD_NAME="$BUILD_NAME" \
             BUILD_NUMBER="$BUILD_NUMBER" \
             infra/mobile/build-aab.sh
           '''
