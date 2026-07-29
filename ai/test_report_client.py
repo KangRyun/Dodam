@@ -18,10 +18,13 @@ import internal_contracts as contracts
 import report_client
 
 
-def _fake_response(text: str):
+def _fake_response(text: str, *, model: str | None = None):
     message = types.SimpleNamespace(content=text)
     choice = types.SimpleNamespace(message=message)
-    return types.SimpleNamespace(choices=[choice])
+    resp = types.SimpleNamespace(choices=[choice])
+    if model is not None:
+        resp.model = model  # GMS가 실제 서빙한 모델 ID
+    return resp
 
 
 def _llm_json(**overrides) -> str:
@@ -102,7 +105,8 @@ class GenerateTest(unittest.TestCase):
         # 서버가 고정으로 채우는 필드
         self.assertEqual(result.request_id, "req-1")  # 요청 에코
         self.assertEqual(result.model_name, "test-model")
-        self.assertEqual(result.model_version, report_client.PROMPT_VERSION)
+        # model_version은 프롬프트+파이프라인 복합 버전(S15P11B209-602).
+        self.assertEqual(result.model_version, report_client._generation_version())
         self.assertIsNone(result.confidence)
         self.assertEqual(result.observation_draft.status, "AI_DRAFT")
         self.assertEqual(result.observation_draft.disclaimer, report_client.DISCLAIMER)
@@ -365,6 +369,37 @@ class UngroundedInterpretationTest(unittest.TestCase):
         self.assertEqual(
             result.observation_draft.features[0].visibility_scope, "REVIEWED_GUARDIAN"
         )
+
+
+class VersionRecordingTest(unittest.TestCase):
+    """리포트 model·prompt·pipelineVersion 저장 (S15P11B209-602)."""
+
+    def test_model_version_carries_prompt_and_pipeline(self):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(_llm_json())
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(_sample_request(), model="m")
+        # 재현성 3종: model_name(모델) + model_version(프롬프트·파이프라인)
+        self.assertIn(f"pipeline={report_client.config.PIPELINE_VERSION}", result.model_version)
+        self.assertIn("prompt=", result.model_version)
+        self.assertIn(report_client.PROMPT_VERSION, result.model_version)
+
+    def test_model_name_records_actual_served_model(self):
+        # GMS가 실제 서빙한 모델 ID를 기록한다(요청 모델명이 아니라).
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(
+            _llm_json(), model="gpt-4o-mini-2024-07-18"
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(_sample_request(), model="gpt-4o-mini")
+        self.assertEqual(result.model_name, "gpt-4o-mini-2024-07-18")
+
+    def test_model_name_falls_back_to_requested_when_unknown(self):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(_llm_json())
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(_sample_request(), model="req-model")
+        self.assertEqual(result.model_name, "req-model")
 
 
 class FollowUpAndDisclaimerTest(unittest.TestCase):
