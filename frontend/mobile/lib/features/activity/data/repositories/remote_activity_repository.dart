@@ -15,7 +15,7 @@ final class RemoteActivityRepository implements ActivityRepository {
     ActivityFilterDto filter = const ActivityFilterDto(),
   }) async {
     final response = await _apiClient.get<Map<String, dynamic>>(
-      'children/$childId/activities',
+      'children/$childId/drawing-sessions',
       queryParameters: filter.toQueryParameters(),
     );
     return ApiPage.fromJson(response.data!, ActivitySummaryDto.fromJson);
@@ -24,14 +24,14 @@ final class RemoteActivityRepository implements ActivityRepository {
   @override
   Future<ActivityDetailDto> getActivity(int activityId) async {
     final response = await _apiClient.get<Map<String, dynamic>>(
-      'activities/$activityId',
+      'drawing-sessions/$activityId',
     );
     return ActivityDetailDto.fromJson(response.data!);
   }
 
   @override
   Future<void> deleteActivity(int activityId) async =>
-      _apiClient.delete<void>('activities/$activityId');
+      _apiClient.delete<void>('drawing-sessions/$activityId');
 
   @override
   Future<Uint8List> downloadImage(String url) async {

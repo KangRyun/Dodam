@@ -67,7 +67,9 @@ final class ActivitySummaryDto {
   });
   factory ActivitySummaryDto.fromJson(Map<String, dynamic> json) =>
       ActivitySummaryDto(
-        activityId: json['activityId'] as int,
+        // 백엔드 활동 기록 목록(HISTORY-01)은 drawingSessionId를 준다. 레거시 목·테스트는
+        // activityId를 쓰므로 둘 다 받는다.
+        activityId: (json['drawingSessionId'] ?? json['activityId']) as int,
         title: json['title'] as String?,
         drawingType: ActivityDrawingTypeDto.fromJson(_map(json['drawingType'])),
         inputMethod: json['inputMethod'] as String,
@@ -75,9 +77,7 @@ final class ActivitySummaryDto {
         selectedEmotions: List<String>.from(json['selectedEmotions'] as List),
         thumbnailUrl: json['thumbnailUrl'] as String?,
         analysisStatus: json['analysisStatus'] as String?,
-        report: json['report'] == null
-            ? null
-            : ActivityReportSummaryDto.fromJson(_map(json['report'])),
+        report: _summaryReportFromJson(json),
         startedAt: json['startedAt'] as String,
         completedAt: json['completedAt'] as String?,
       );
@@ -87,6 +87,22 @@ final class ActivitySummaryDto {
   final String inputMethod, sessionStatus, startedAt;
   final List<String> selectedEmotions;
   final ActivityReportSummaryDto? report;
+}
+
+/// 목록 항목의 리포트 요약을 만든다.
+///
+/// 백엔드(HISTORY-01)는 평면 `reportId`/`reportStatus`로, 레거시 목·테스트는 중첩
+/// `report{}`로 준다. 둘 다 받아 없으면 null.
+ActivityReportSummaryDto? _summaryReportFromJson(Map<String, dynamic> json) {
+  final nested = json['report'];
+  if (nested != null) return ActivityReportSummaryDto.fromJson(_map(nested));
+  final reportId = json['reportId'];
+  final reportStatus = json['reportStatus'];
+  if (reportId == null || reportStatus == null) return null;
+  return ActivityReportSummaryDto(
+    reportId: reportId as int,
+    reportStatus: reportStatus as String,
+  );
 }
 
 final class ActivityAssetDto {
