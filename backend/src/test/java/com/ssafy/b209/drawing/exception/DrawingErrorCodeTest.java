@@ -150,6 +150,52 @@ class DrawingErrorCodeTest {
         new ErrorContract(
             HttpStatus.BAD_REQUEST, "DRAWING_400_012", "활동 완료 시 관찰 리포트 생성을 요청해야 합니다."));
 
+    // ── HTP 원본 이미지 업로드 (S15P11B209-466) ────────────────────────────────
+    // 계약 정본: docs/api/htp-image-upload-contract.md
+    // ⚠️ 이 7종은 code 문자열이 기존 `DRAWING_<status>_<seq>` 규약이 아니라 enum 이름을
+    //    그대로 쓴다. 계약 문서에도 그렇게 명시돼 있어 여기서는 실제 값에 맞춘다.
+    //    규약을 통일할지는 API 계약 소유자가 판단할 사안이다(별도 과제).
+    expected.put(
+        DrawingErrorCode.DRAWING_UPLOAD_FILE_REQUIRED,
+        new ErrorContract(
+            HttpStatus.BAD_REQUEST, "DRAWING_UPLOAD_FILE_REQUIRED", "업로드할 원본 이미지가 필요합니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_UPLOAD_METADATA_INVALID,
+        new ErrorContract(
+            HttpStatus.BAD_REQUEST,
+            "DRAWING_UPLOAD_METADATA_INVALID",
+            "이미지 업로드 정보가 올바르지 않습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_UPLOAD_NOT_SUPPORTED,
+        new ErrorContract(
+            HttpStatus.BAD_REQUEST,
+            "DRAWING_UPLOAD_NOT_SUPPORTED",
+            "이 그림 활동은 사진 업로드를 지원하지 않습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_UPLOAD_NOT_ALLOWED,
+        new ErrorContract(
+            HttpStatus.CONFLICT,
+            "DRAWING_UPLOAD_NOT_ALLOWED",
+            "현재 상태에서는 원본 이미지를 업로드할 수 없습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_UPLOAD_ALREADY_EXISTS,
+        new ErrorContract(
+            HttpStatus.CONFLICT,
+            "DRAWING_UPLOAD_ALREADY_EXISTS",
+            "이 그림 단계에는 원본 이미지가 이미 존재합니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_UPLOAD_IDEMPOTENCY_CONFLICT,
+        new ErrorContract(
+            HttpStatus.CONFLICT,
+            "DRAWING_UPLOAD_IDEMPOTENCY_CONFLICT",
+            "동일한 Idempotency-Key가 다른 이미지 업로드 요청에 사용되었습니다."));
+    expected.put(
+        DrawingErrorCode.DRAWING_UPLOAD_FAILED,
+        new ErrorContract(
+            HttpStatus.INTERNAL_SERVER_ERROR,
+            "DRAWING_UPLOAD_FAILED",
+            "원본 이미지 저장 중 오류가 발생했습니다."));
+
     assertThat(DrawingErrorCode.values()).containsExactlyInAnyOrderElementsOf(expected.keySet());
     expected.forEach(
         (errorCode, contract) -> {
