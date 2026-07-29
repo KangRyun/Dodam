@@ -62,17 +62,67 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   /// 함께 방지한다.
   int? _startingDrawingTypeId;
 
-  /// 활성 세션 유무를 확인하는 짧은 네트워크 대기 동안만 켜진다.
-  ///
-  /// 안내 팝업이나 이어 그리기 다이얼로그가 뜨면 그 안의 버튼이 로딩을
-  /// 대신 표시하므로, 그 뒤로는 카드에서 계속 스피너를 돌리지 않는다
-  /// (그렇지 않으면 팝업이 열려 있는 동안 카드가 영원히 로딩 상태로 남는다).
+  /// 화면 진입 시 진행 중 활동을 한 번만 확인해 팝업 중복 생성을 막는다.
   bool _checkingActiveSession = false;
+  bool _entryResolved = false;
+  bool _replaceActiveOnSelection = false;
 
   @override
   void initState() {
     super.initState();
     unawaited(_loadDrawingTypes());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_resolveEntry());
+    });
+  }
+
+  Future<void> _resolveEntry() async {
+    if (_checkingActiveSession || _entryResolved) return;
+    setState(() => _checkingActiveSession = true);
+    try {
+      final controller = DrawingSessionStartController(
+        repository: widget.drawingRepository,
+      );
+      final activeSession = await controller.findActiveSession(
+        childId: widget.child.childId,
+      );
+      if (!mounted) return;
+      if (activeSession == null) {
+        setState(() => _entryResolved = true);
+        return;
+      }
+
+      // 팝업 뒤 화면은 정적인 활동 목록으로 유지해 불필요한 로딩 애니메이션을
+      // 계속 실행하지 않는다. 팝업이 입력을 막으므로 활동 중복 시작은 발생하지 않는다.
+      setState(() => _entryResolved = true);
+      final choice = await _showDrawingStartDialog();
+      if (!mounted) return;
+      if (choice == _DrawingStartChoice.startNew) {
+        setState(() {
+          _replaceActiveOnSelection = true;
+          _entryResolved = true;
+        });
+        return;
+      }
+      if (choice == _DrawingStartChoice.resume) {
+        await _openResolution(
+          controller.resume(activeSession),
+          autoRestoreDraft: true,
+        );
+      }
+    } on Object {
+      if (mounted) {
+        showAppMessage(
+          context,
+          message: '진행 중인 활동을 확인하지 못했어요. 다시 시도해 주세요.',
+          type: AppMessageType.error,
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _checkingActiveSession = false);
+      }
+    }
   }
 
   Future<void> _loadDrawingTypes() async {
@@ -103,88 +153,92 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   Future<_DrawingStartChoice?> _showDrawingStartDialog() {
     return showDialog<_DrawingStartChoice>(
       context: context,
-      builder: (dialogContext) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(32, 30, 32, 28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 88,
-                  height: 88,
-                  decoration: const BoxDecoration(
-                    color: AppColors.childCanvas,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: const Text('✏️', style: TextStyle(fontSize: 42)),
-                ),
-                const SizedBox(height: 22),
-                Text(
-                  '그리던 그림이 있어요',
-                  style: Theme.of(dialogContext).textTheme.headlineSmall
-                      ?.copyWith(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  '그림을 그리다 멈췄어요.\n이어서 그릴까요?',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(dialogContext).textTheme.bodyLarge?.copyWith(
-                    color: AppColors.inkMuted,
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 28),
-                SizedBox(
-                  width: double.infinity,
-                  height: 58,
-                  child: FilledButton(
-                    onPressed: () => Navigator.of(
-                      dialogContext,
-                    ).pop(_DrawingStartChoice.resume),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.leaf,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
+      barrierDismissible: false,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(28),
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(32, 30, 32, 28),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 88,
+                    height: 88,
+                    decoration: const BoxDecoration(
+                      color: AppColors.childCanvas,
+                      shape: BoxShape.circle,
                     ),
-                    child: const Text(
-                      '이어 그리기',
-                      style: TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
+                    alignment: Alignment.center,
+                    child: const Text('✏️', style: TextStyle(fontSize: 42)),
                   ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 58,
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(
-                      dialogContext,
-                    ).pop(_DrawingStartChoice.startNew),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.ink,
-                      side: const BorderSide(color: AppColors.outline),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
+                  const SizedBox(height: 22),
+                  Text(
+                    '그리던 그림이 있어요',
+                    style: Theme.of(dialogContext).textTheme.headlineSmall
+                        ?.copyWith(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    '그림을 그리다 멈췄어요.\n이어서 그릴까요?',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(dialogContext).textTheme.bodyLarge
+                        ?.copyWith(color: AppColors.inkMuted, height: 1.45),
+                  ),
+                  const SizedBox(height: 28),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 58,
+                    child: FilledButton(
+                      onPressed: () => Navigator.of(
+                        dialogContext,
+                      ).pop(_DrawingStartChoice.resume),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: AppColors.leaf,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
                       ),
-                    ),
-                    child: const Text(
-                      '새로 그리기',
-                      style: TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w700,
+                      child: const Text(
+                        '이어 그리기',
+                        style: TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 58,
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(
+                        dialogContext,
+                      ).pop(_DrawingStartChoice.startNew),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.ink,
+                        side: const BorderSide(color: AppColors.outline),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                      ),
+                      child: const Text(
+                        '새로 그리기',
+                        style: TextStyle(
+                          fontSize: 19,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         ),
@@ -193,82 +247,32 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   }
 
   Future<void> _selectActivity(DrawingTypeDto type) async {
-    if (_startingDrawingTypeId != null) return;
+    if (_startingDrawingTypeId != null || !_entryResolved) return;
     setState(() {
       _startingDrawingTypeId = type.drawingTypeId;
-      _checkingActiveSession = true;
     });
     try {
       final controller = DrawingSessionStartController(
         repository: widget.drawingRepository,
       );
-      final activeSession = await controller.findActiveSession(
-        childId: widget.child.childId,
-      );
-      if (!mounted) return;
-      setState(() => _checkingActiveSession = false);
-
-      DrawingSessionResolution? resolution;
-      if (activeSession != null) {
-        final choice = await _showDrawingStartDialog();
-        if (choice == null || !mounted) return;
-        if (choice == _DrawingStartChoice.startNew) {
-          resolution = await _createSelectedActivity(
-            controller: controller,
-            type: type,
-            replaceActive: true,
-          );
-        } else {
-          resolution = controller.resume(activeSession);
-          if (resolution.activityContext.isHtp &&
-              resolution.currentStage == 'COMPLETED') {
-            await AppNavigation.pushNamed(
-              context,
-              AppRoutes.emotionSelect(widget.child.childId.toString()),
-              arguments: EmotionSelectRouteArguments(
-                sessionId: resolution.sessionId,
-                repository: widget.drawingRepository,
-                conversationId: null,
-                conversationAlreadyEnded: true,
-                conversationEndRepository: null,
-                conversationEndIdempotencyKey: null,
-                conversationEndRequest: null,
-                lastQuestionMessageId: null,
-                idempotencyKeyProvider: null,
-                activityContext: resolution.activityContext,
-              ),
-            );
-            return;
-          }
-        }
-      } else {
-        final (icon, accentColor) = _visualForDrawingType(type.code);
-        resolution = await showActivityGuideDialog<DrawingSessionResolution?>(
-          context: context,
-          title: type.name,
-          description: _descriptionForDrawingType(type),
-          icon: icon,
-          accentColor: accentColor,
-          onStart: () => _startGuidedActivity(
-            controller: controller,
-            type: type,
+      final (icon, accentColor) = _visualForDrawingType(type.code);
+      final resolution =
+          await showActivityGuideDialog<DrawingSessionResolution?>(
+            context: context,
+            title: type.name,
+            description: _descriptionForDrawingType(type),
             icon: icon,
             accentColor: accentColor,
-          ),
-        );
-      }
+            onStart: () => _startGuidedActivity(
+              controller: controller,
+              type: type,
+              icon: icon,
+              accentColor: accentColor,
+              replaceActive: _replaceActiveOnSelection,
+            ),
+          );
       if (resolution == null || !mounted) return;
-      await AppNavigation.pushNamed(
-        context,
-        AppRoutes.drawing(widget.child.childId.toString()),
-        arguments: DrawingRouteArguments(
-          sessionId: resolution.sessionId,
-          repository: widget.drawingRepository,
-          completionSnapshotProvider: widget.completionSnapshotProvider,
-          resumeConversation: !resolution.isDrawingStage,
-          activityContext: resolution.activityContext,
-        ),
-      );
+      await _openResolution(resolution);
     } on Object {
       if (mounted) {
         showAppMessage(
@@ -281,7 +285,6 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       if (mounted) {
         setState(() {
           _startingDrawingTypeId = null;
-          _checkingActiveSession = false;
         });
       }
     }
@@ -308,9 +311,14 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     required DrawingTypeDto type,
     required IconData icon,
     required Color accentColor,
+    required bool replaceActive,
   }) {
     if (type.code != 'HTP') {
-      return _createSelectedActivity(controller: controller, type: type);
+      return _createSelectedActivity(
+        controller: controller,
+        type: type,
+        replaceActive: replaceActive,
+      );
     }
     return Navigator.of(context).push<DrawingSessionResolution>(
       MaterialPageRoute(
@@ -322,7 +330,46 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
           icon: icon,
           accentColor: accentColor,
           repository: widget.drawingRepository,
+          replaceActive: replaceActive,
         ),
+      ),
+    );
+  }
+
+  Future<void> _openResolution(
+    DrawingSessionResolution resolution, {
+    bool autoRestoreDraft = false,
+  }) async {
+    if (resolution.activityContext.isHtp &&
+        resolution.currentStage == 'COMPLETED') {
+      await AppNavigation.pushNamed(
+        context,
+        AppRoutes.emotionSelect(widget.child.childId.toString()),
+        arguments: EmotionSelectRouteArguments(
+          sessionId: resolution.sessionId,
+          repository: widget.drawingRepository,
+          conversationId: null,
+          conversationAlreadyEnded: true,
+          conversationEndRepository: null,
+          conversationEndIdempotencyKey: null,
+          conversationEndRequest: null,
+          lastQuestionMessageId: null,
+          idempotencyKeyProvider: null,
+          activityContext: resolution.activityContext,
+        ),
+      );
+      return;
+    }
+    await AppNavigation.pushNamed(
+      context,
+      AppRoutes.drawing(widget.child.childId.toString()),
+      arguments: DrawingRouteArguments(
+        sessionId: resolution.sessionId,
+        repository: widget.drawingRepository,
+        completionSnapshotProvider: widget.completionSnapshotProvider,
+        resumeConversation: !resolution.isDrawingStage,
+        autoRestoreDraft: autoRestoreDraft,
+        activityContext: resolution.activityContext,
       ),
     );
   }
@@ -357,6 +404,15 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
           ),
         );
       case _ActivityLoadStatus.loaded:
+        if (!_entryResolved) {
+          return const Padding(
+            padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
+            child: AppLoadingView(
+              message: '그리던 활동이 있는지 확인하고 있어요',
+              childFriendly: true,
+            ),
+          );
+        }
         return LayoutBuilder(
           builder: (context, constraints) {
             final narrow = constraints.maxWidth < 700;
@@ -383,11 +439,8 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
                       title: type.name,
                       description: _descriptionForDrawingType(type),
                       color: _visualForDrawingType(type.code).$2,
-                      // 활성 세션 확인 중일 때만 스피너를 보여준다. 그 뒤로는
-                      // 안내 팝업이나 이어 그리기 다이얼로그가 로딩을 맡는다.
-                      isLoading:
-                          _checkingActiveSession &&
-                          _startingDrawingTypeId == type.drawingTypeId,
+                      // 안내 팝업이 열린 동안 카드 뒤에서 무한 로딩을 돌리지 않는다.
+                      isLoading: false,
                       onTap: _startingDrawingTypeId == null
                           ? () => unawaited(_selectActivity(type))
                           : null,

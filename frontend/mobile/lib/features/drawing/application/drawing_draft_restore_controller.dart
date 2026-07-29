@@ -54,7 +54,7 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
     _ => false,
   };
 
-  Future<void> load() async {
+  Future<void> load({bool autoRestore = false}) async {
     final id = sessionId;
     final dataSource = repository;
     if (id == null || dataSource == null) return;
@@ -76,6 +76,7 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
         result.canvasState.lastEventSequence,
       );
       _setStatus(DrawingDraftRestoreStatus.found);
+      if (autoRestore) await continueDrawing();
     } on ApiResponseFailure catch (failure) {
       if (failure.error?.code == 'DRAWING_404_004') {
         _draft = null;

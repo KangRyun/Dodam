@@ -47,12 +47,21 @@
 | `currentQuestionCount`, `maxQuestionCount` | 0 이상의 integer, 전자는 후자 이하여야 한다. 질문 여유가 없으면 AI를 호출하지 않는다. |
 | `detectedObjects` | 빈 배열 가능. 항목은 `objectCode`, `objectName`, `confidence`, `boundingBox`를 가진다. |
 | `drawingDescription` | string 또는 `null`. 분석에서 만든 2~4문장 한국어 그림 서술(VLM). BE가 `basisAnalysisId`로 `analysis_observation_results.overall_summary`를 찾아 채운다. **선택 필드** — 없으면 AI는 `detectedObjects`만으로 기존과 동일하게 동작한다. |
-| `recentMessages` | 빈 배열 가능. 항목은 `messageId`, `senderType`, `messageType`, `text`를 가진다. `text`는 최소 문맥만 보내며 로그·오류 응답에 포함하지 않는다. |
+| `recentMessages` | 빈 배열 가능. 항목은 `messageId`, `senderType`, `messageType`, `text`, 선택형 답변에만 쓰는 선택 필드 `selectedOptionCodes`를 가진다. `text`는 최소 문맥만 보내며 로그·오류 응답에 포함하지 않는다. |
 | `safetyRuleVersion` | 필수 string 식별자. 프롬프트 본문은 포함하지 않는다. |
 
 `boundingBox`는 `{x, y, width, height}`이며 각 값은 0~1이고 `x + width ≤ 1`, `y + height ≤ 1`이어야 한다.
 
-### 2-1. `drawingDescription` 취급 규칙 (S15P11B209-704)
+### 2-1. 선택형 답변 문맥 (`selectedOptionCodes`)
+
+선택형 답변 문맥은 다음 규칙을 따른다.
+
+- `messageType=OPTION_ANSWER`이면 `selectedOptionCodes`에 선택 순서대로 옵션 `code`를 전달한다.
+- 같은 메시지의 `text`에는 선택 당시 저장한 Label을 전달한다. 복수 선택은 `, `로 연결하고 `directText`가 있으면 ` / ` 뒤에 보존한다.
+- 음성 답변의 `text`는 기존처럼 `sttText`를 우선하며 `selectedOptionCodes`는 `null`이다.
+- 구버전 AI 호환을 위해 `selectedOptionCodes`는 선택 필드이며, 누락 시 기존 `text` 기반 처리를 유지한다.
+
+### 2-2. `drawingDescription` 취급 규칙 (S15P11B209-704)
 
 객체 이름 목록만으로는 색·표정·구도·크기 관계를 물을 수 없어 그림 서술을 함께 보낸다.
 서술은 분석 시점에 이미 만들어져 저장돼 있으므로 BE는 조회만 하고, 새로 생성하지 않는다.

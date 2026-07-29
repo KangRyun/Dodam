@@ -192,27 +192,19 @@ class DrawingErrorCodeTest {
     expected.put(
         DrawingErrorCode.DRAWING_UPLOAD_METADATA_INVALID,
         new ErrorContract(
-            HttpStatus.BAD_REQUEST,
-            "DRAWING_UPLOAD_METADATA_INVALID",
-            "이미지 업로드 정보가 올바르지 않습니다."));
+            HttpStatus.BAD_REQUEST, "DRAWING_UPLOAD_METADATA_INVALID", "이미지 업로드 정보가 올바르지 않습니다."));
     expected.put(
         DrawingErrorCode.DRAWING_UPLOAD_NOT_SUPPORTED,
         new ErrorContract(
-            HttpStatus.BAD_REQUEST,
-            "DRAWING_UPLOAD_NOT_SUPPORTED",
-            "이 그림 활동은 사진 업로드를 지원하지 않습니다."));
+            HttpStatus.BAD_REQUEST, "DRAWING_UPLOAD_NOT_SUPPORTED", "이 그림 활동은 사진 업로드를 지원하지 않습니다."));
     expected.put(
         DrawingErrorCode.DRAWING_UPLOAD_NOT_ALLOWED,
         new ErrorContract(
-            HttpStatus.CONFLICT,
-            "DRAWING_UPLOAD_NOT_ALLOWED",
-            "현재 상태에서는 원본 이미지를 업로드할 수 없습니다."));
+            HttpStatus.CONFLICT, "DRAWING_UPLOAD_NOT_ALLOWED", "현재 상태에서는 원본 이미지를 업로드할 수 없습니다."));
     expected.put(
         DrawingErrorCode.DRAWING_UPLOAD_ALREADY_EXISTS,
         new ErrorContract(
-            HttpStatus.CONFLICT,
-            "DRAWING_UPLOAD_ALREADY_EXISTS",
-            "이 그림 단계에는 원본 이미지가 이미 존재합니다."));
+            HttpStatus.CONFLICT, "DRAWING_UPLOAD_ALREADY_EXISTS", "이 그림 단계에는 원본 이미지가 이미 존재합니다."));
     expected.put(
         DrawingErrorCode.DRAWING_UPLOAD_IDEMPOTENCY_CONFLICT,
         new ErrorContract(
@@ -222,9 +214,7 @@ class DrawingErrorCodeTest {
     expected.put(
         DrawingErrorCode.DRAWING_UPLOAD_FAILED,
         new ErrorContract(
-            HttpStatus.INTERNAL_SERVER_ERROR,
-            "DRAWING_UPLOAD_FAILED",
-            "원본 이미지 저장 중 오류가 발생했습니다."));
+            HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_UPLOAD_FAILED", "원본 이미지 저장 중 오류가 발생했습니다."));
 
     assertThat(DrawingErrorCode.values()).containsExactlyInAnyOrderElementsOf(expected.keySet());
     expected.forEach(
