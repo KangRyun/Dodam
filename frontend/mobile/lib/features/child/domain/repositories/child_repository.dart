@@ -8,7 +8,7 @@ abstract interface class ChildRepository {
     int childId,
     UpdateChildRequestDto request,
   );
-  Future<void> deleteChild(int childId, {bool cascade = true});
+  Future<void> deleteChild(int childId);
   Future<TutorialProgressDto> getTutorialProgress(int childId);
   Future<TutorialProgressDto> updateTutorialProgress(
     int childId,

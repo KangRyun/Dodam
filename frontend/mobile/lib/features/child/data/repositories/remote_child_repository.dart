@@ -44,10 +44,10 @@ final class RemoteChildRepository implements ChildRepository {
   }
 
   @override
-  Future<void> deleteChild(int childId, {bool cascade = true}) async {
+  Future<void> deleteChild(int childId) async {
     await _apiClient.delete<void>(
       'children/$childId',
-      queryParameters: {'cascade': cascade},
+      data: const {'confirmation': 'DELETE'},
     );
   }
 

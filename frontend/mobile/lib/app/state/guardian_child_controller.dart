@@ -132,6 +132,53 @@ final class GuardianChildController extends ChangeNotifier {
     }
   }
 
+  // 아동 정보 수정 후 목록과 현재 선택 상태를 서버 응답 기준으로 갱신
+  Future<bool> updateChild(int childId, UpdateChildRequestDto request) async {
+    if (_registrationStatus == ChildRegistrationStatus.submitting) return false;
+    _registrationStatus = ChildRegistrationStatus.submitting;
+    _registrationError = null;
+    notifyListeners();
+    try {
+      await _repository.updateChild(childId, request);
+      await loadChildren();
+      if (_status == ChildListStatus.error) {
+        throw StateError('아동 목록을 갱신하지 못했습니다.');
+      }
+      _registrationStatus = ChildRegistrationStatus.success;
+      notifyListeners();
+      return true;
+    } on Object catch (error) {
+      _registrationError = error;
+      _registrationStatus = ChildRegistrationStatus.error;
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // 삭제 완료 후 제거된 아동의 선택 상태를 비우고 최신 목록을 조회
+  Future<bool> deleteChild(int childId) async {
+    if (_registrationStatus == ChildRegistrationStatus.submitting) return false;
+    _registrationStatus = ChildRegistrationStatus.submitting;
+    _registrationError = null;
+    notifyListeners();
+    try {
+      await _repository.deleteChild(childId);
+      if (_selectedChild?.childId == childId) _selectedChild = null;
+      await loadChildren();
+      if (_status == ChildListStatus.error) {
+        throw StateError('아동 목록을 갱신하지 못했습니다.');
+      }
+      _registrationStatus = ChildRegistrationStatus.success;
+      notifyListeners();
+      return true;
+    } on Object catch (error) {
+      _registrationError = error;
+      _registrationStatus = ChildRegistrationStatus.error;
+      notifyListeners();
+      return false;
+    }
+  }
+
   void resetRegistration() {
     if (_registrationStatus == ChildRegistrationStatus.idle &&
         _registrationError == null &&
