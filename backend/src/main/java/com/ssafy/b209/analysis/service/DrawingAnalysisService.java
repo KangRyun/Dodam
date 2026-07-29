@@ -4,6 +4,7 @@ import com.ssafy.b209.analysis.dto.BoundingBoxResponse;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisClientCommand;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisDetailResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisModelResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
@@ -23,6 +24,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Supplier;
 import org.slf4j.Logger;
@@ -39,6 +41,8 @@ import org.springframework.stereotype.Service;
 public class DrawingAnalysisService {
 
   private static final Logger log = LoggerFactory.getLogger(DrawingAnalysisService.class);
+  private static final int IDEMPOTENCY_KEY_MIN_LENGTH = 8;
+  private static final int IDEMPOTENCY_KEY_MAX_LENGTH = 100;
 
   private final DrawingAnalysisPersistenceService persistenceService;
   private final DrawingAnalysisClient drawingAnalysisClient;
@@ -46,6 +50,7 @@ public class DrawingAnalysisService {
   private final Clock clock;
   private final CurrentAuthenticatedUserResolver currentUserResolver;
   private final GuardianResourceAccessValidator accessValidator;
+  private final DrawingAnalysisQueryService queryService;
   private final Supplier<UUID> requestIdSupplier;
 
   /**
@@ -57,6 +62,7 @@ public class DrawingAnalysisService {
    * @param clock 요청 및 실패 시각을 생성하는 UTC 시계
    * @param currentUserResolver Access Token에서 현재 사용자 ID를 제공하는 Resolver
    * @param accessValidator 보호자와 그림 활동의 연결 관계를 검증하는 Validator
+   * @param queryService 저장된 멱등 재시도 결과를 공개 응답으로 변환하는 조회 서비스
    */
   @Autowired
   public DrawingAnalysisService(
@@ -65,7 +71,8 @@ public class DrawingAnalysisService {
       Validator validator,
       Clock clock,
       CurrentAuthenticatedUserResolver currentUserResolver,
-      GuardianResourceAccessValidator accessValidator) {
+      GuardianResourceAccessValidator accessValidator,
+      DrawingAnalysisQueryService queryService) {
     this(
         persistenceService,
         drawingAnalysisClient,
@@ -73,6 +80,7 @@ public class DrawingAnalysisService {
         clock,
         currentUserResolver,
         accessValidator,
+        queryService,
         UUID::randomUUID);
   }
 
@@ -83,6 +91,7 @@ public class DrawingAnalysisService {
       Clock clock,
       CurrentAuthenticatedUserResolver currentUserResolver,
       GuardianResourceAccessValidator accessValidator,
+      DrawingAnalysisQueryService queryService,
       Supplier<UUID> requestIdSupplier) {
     this.persistenceService = Objects.requireNonNull(persistenceService);
     this.drawingAnalysisClient = Objects.requireNonNull(drawingAnalysisClient);
@@ -90,6 +99,7 @@ public class DrawingAnalysisService {
     this.clock = Objects.requireNonNull(clock);
     this.currentUserResolver = Objects.requireNonNull(currentUserResolver);
     this.accessValidator = Objects.requireNonNull(accessValidator);
+    this.queryService = Objects.requireNonNull(queryService);
     this.requestIdSupplier = Objects.requireNonNull(requestIdSupplier);
   }
 
@@ -157,23 +167,83 @@ public class DrawingAnalysisService {
    *
    * @param analysisId 실패한 원본 분석 식별자
    * @param request 재시도 사유와 입력 선택 정책
+   * @param idempotencyKey 같은 요청의 중복 분석 실행을 막는 식별자
    * @return 새로 생성되고 저장된 분석 결과
    * @throws BusinessException 원본 접근·상태 검증, Client 호출 또는 결과 저장에 실패한 경우
    */
   public CreateDrawingAnalysisResponse retryAnalysis(
-      Long analysisId, RetryDrawingAnalysisRequest request) {
+      Long analysisId, RetryDrawingAnalysisRequest request, String idempotencyKey) {
+    validateIdempotencyKey(idempotencyKey);
     Long guardianUserId = currentUserResolver.requireUserId();
     RetryDrawingAnalysisSource source = persistenceService.findRetrySource(analysisId);
     accessValidator.requireDrawingSessionAccess(guardianUserId, source.drawingSessionId());
-    String requestId = requestIdSupplier.get().toString();
+    Optional<DrawingAnalysisRequestSummary> existing =
+        persistenceService.findByRequestId(idempotencyKey);
+    if (existing.isPresent()) {
+      return idempotentRetryResponse(analysisId, existing.get());
+    }
     Instant requestedInstant = clock.instant();
-    StartedDrawingAnalysis started =
-        persistenceService.startRetry(
-            analysisId,
-            request.useLatestInputs(),
-            requestId,
-            LocalDateTime.ofInstant(requestedInstant, ZoneOffset.UTC));
+    StartedDrawingAnalysis started;
+    try {
+      started =
+          persistenceService.startRetry(
+              analysisId,
+              request.useLatestInputs(),
+              idempotencyKey,
+              LocalDateTime.ofInstant(requestedInstant, ZoneOffset.UTC));
+    } catch (BusinessException exception) {
+      if (exception.getErrorCode() != DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RETRY_NOT_ALLOWED) {
+        throw exception;
+      }
+      Optional<DrawingAnalysisRequestSummary> concurrentRetry =
+          persistenceService.findByRequestId(idempotencyKey);
+      if (concurrentRetry.isEmpty()) {
+        throw exception;
+      }
+      return idempotentRetryResponse(analysisId, concurrentRetry.get());
+    }
     return executeAnalysis(started, DrawingAnalysisType.OBJECT_DETECTION, requestedInstant);
+  }
+
+  private CreateDrawingAnalysisResponse idempotentRetryResponse(
+      Long requestedSourceAnalysisId, DrawingAnalysisRequestSummary summary) {
+    if (!Objects.equals(summary.retryOfAnalysisId(), requestedSourceAnalysisId)
+        || summary.taskType() != DrawingAnalysisType.OBJECT_DETECTION) {
+      throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_IDEMPOTENCY_CONFLICT);
+    }
+    if (summary.state() == com.ssafy.b209.analysis.domain.DrawingAnalysisState.PROCESSING
+        || summary.state() == com.ssafy.b209.analysis.domain.DrawingAnalysisState.PENDING) {
+      throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_ALREADY_EXISTS);
+    }
+    if (summary.state() == com.ssafy.b209.analysis.domain.DrawingAnalysisState.FAILED) {
+      throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_REQUEST_FAILED);
+    }
+    DrawingAnalysisDetailResponse stored =
+        queryService.getDrawingAnalysis(summary.drawingSessionId(), summary.analysisId());
+    return new CreateDrawingAnalysisResponse(
+        stored.drawingAnalysisId(),
+        stored.drawingSessionId(),
+        stored.drawingAssetId(),
+        stored.requestId(),
+        stored.analysisType(),
+        stored.status(),
+        stored.model(),
+        stored.detections(),
+        stored.requestedAt(),
+        stored.processedAt());
+  }
+
+  private void validateIdempotencyKey(String idempotencyKey) {
+    if (idempotencyKey == null || idempotencyKey.isBlank()) {
+      throw new BusinessException(
+          DrawingAnalysisErrorCode.DRAWING_ANALYSIS_IDEMPOTENCY_KEY_REQUIRED);
+    }
+    if (idempotencyKey.length() < IDEMPOTENCY_KEY_MIN_LENGTH
+        || idempotencyKey.length() > IDEMPOTENCY_KEY_MAX_LENGTH
+        || idempotencyKey.chars().anyMatch(Character::isISOControl)) {
+      throw new BusinessException(
+          DrawingAnalysisErrorCode.DRAWING_ANALYSIS_IDEMPOTENCY_KEY_INVALID);
+    }
   }
 
   private CreateDrawingAnalysisResponse executeAnalysis(

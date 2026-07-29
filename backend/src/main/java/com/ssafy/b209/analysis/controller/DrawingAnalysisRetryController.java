@@ -7,6 +7,7 @@ import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.ApiResponse;
 import com.ssafy.b209.global.response.CommonSuccessCode;
 import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
 import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -19,6 +20,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -49,6 +51,7 @@ public class DrawingAnalysisRetryController {
    *
    * @param analysisId 실패한 원본 분석 식별자
    * @param request 재시도 사유와 입력 선택 정책
+   * @param idempotencyKey 같은 재시도 요청의 중복 실행을 방지하는 식별자
    * @return HTTP 201, 생성된 분석 Location과 공통 성공 응답
    */
   @Operation(
@@ -80,9 +83,12 @@ public class DrawingAnalysisRetryController {
   @PostMapping("/{analysisId}/retry")
   public ResponseEntity<ApiResponse<CreateDrawingAnalysisResponse>> retryAnalysis(
       @PathVariable @Positive Long analysisId,
-      @Valid @RequestBody RetryDrawingAnalysisRequest request) {
+      @Valid @RequestBody RetryDrawingAnalysisRequest request,
+      @Parameter(description = "재시도 요청을 식별하는 멱등 Key", required = true)
+          @RequestHeader(value = "Idempotency-Key", required = false)
+          String idempotencyKey) {
     CreateDrawingAnalysisResponse response =
-        drawingAnalysisService.retryAnalysis(analysisId, request);
+        drawingAnalysisService.retryAnalysis(analysisId, request, idempotencyKey);
     URI location =
         URI.create(
             "/api/v1/drawing-sessions/"

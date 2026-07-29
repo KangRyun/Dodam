@@ -92,6 +92,7 @@ GET /api/v1/drawing-sessions/{drawingSessionId}/analyses/{drawingAnalysisId}
 
 ```http
 POST /api/v1/analyses/{analysisId}/retry
+Idempotency-Key: analysis-retry-550e8400
 ```
 
 ```json
@@ -104,6 +105,11 @@ POST /api/v1/analyses/{analysisId}/retry
 FAILED 분석만 재시도할 수 있다. 원본 행을 다시 PROCESSING으로 변경하지 않고 새 분석 행을 생성해
 `retry_of_analysis_id`로 원본과 연결하며 `trigger_reason=RETRY`를 기록한다. `useLatestInputs=false`는
 원본 그림을, `true`는 같은 Session·Asset 유형의 가장 높은 버전을 선택한다.
+
+`Idempotency-Key` Header는 8~100자의 값으로 필수다. 같은 Key와 같은 원본 분석으로 재호출하면
+최초 재시도 결과를 반환하고 AI Client를 다시 호출하지 않는다. 같은 Key를 다른 원본 분석에
+사용하면 `ANALYSIS_409_004`로 거부한다. 재시도 이력은 원본에서 한 갈래로만 이어지며 최초 분석
+이후 최대 3회까지 허용한다. 네 번째 재시도는 `ANALYSIS_409_005`로 거부한다.
 
 재시도도 현재 공개 분석 요청과 동일한 동기식 AI Client 경계를 사용한다. 성공 응답은 HTTP 201이며
 `Location`은 현재 저장 결과 조회 URI인

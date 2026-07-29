@@ -1057,6 +1057,10 @@ Header `Idempotency-Key` 필수.
 
 ### 11.5 재시도
 
+`POST /api/v1/analyses/{analysisId}/retry`는 `Idempotency-Key` Header를 필수로 받는다.
+같은 Key와 같은 원본 분석의 재호출은 최초 결과를 반환하며 다른 원본 분석에 같은 Key를 사용하면
+`ANALYSIS_409_004`로 거부한다.
+
 ```json
 {
   "reason": "USER_REQUEST",
@@ -1065,7 +1069,8 @@ Header `Idempotency-Key` 필수.
 ```
 
 - 원본 분석 ID는 `retryOfAnalysisId`에 저장한다.
-- 성공한 최종 분석의 무제한 재시도는 금지한다.
+- 실패 분석의 재시도 이력은 선형으로 유지하며 최초 분석 이후 최대 3회까지만 허용한다.
+- 네 번째 재시도는 `ANALYSIS_409_005`로 거부하고 성공한 최종 분석은 재시도하지 않는다.
 - 재시도가 새 리포트를 만들면 `reportVersion`을 증가시키고 이전 버전을 감사 목적으로 유지한다.
 
 ### 11.6 오류

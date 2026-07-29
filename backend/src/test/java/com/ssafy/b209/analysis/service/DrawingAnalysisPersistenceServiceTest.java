@@ -331,6 +331,64 @@ class DrawingAnalysisPersistenceServiceTest {
     verify(drawingAnalysisRepository, never()).saveAndFlush(any());
   }
 
+  @Test
+  void rejectsASecondRetryBranchFromTheSameSource() {
+    DrawingAnalysis source = failedAnalysis(ANALYSIS_ID, null);
+    given(drawingAnalysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(source));
+    given(drawingAnalysisRepository.existsByRetryOfAnalysisId(ANALYSIS_ID)).willReturn(true);
+
+    assertError(
+        () -> service.startRetry(ANALYSIS_ID, false, "analysis-retry-key-0002", PROCESSED_AT),
+        DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RETRY_NOT_ALLOWED);
+
+    verify(drawingAnalysisRepository, never()).saveAndFlush(any());
+  }
+
+  @Test
+  void rejectsTheFourthRetryInAnAnalysisChain() {
+    DrawingAnalysis original = failedAnalysis(ANALYSIS_ID, null);
+    DrawingAnalysis firstRetry = failedAnalysis(31L, original);
+    DrawingAnalysis secondRetry = failedAnalysis(32L, firstRetry);
+    DrawingAnalysis thirdRetry = failedAnalysis(33L, secondRetry);
+    given(drawingAnalysisRepository.findByIdForUpdate(33L)).willReturn(Optional.of(thirdRetry));
+
+    assertError(
+        () -> service.startRetry(33L, false, "analysis-retry-key-0004", PROCESSED_AT),
+        DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RETRY_LIMIT_EXCEEDED);
+
+    verify(drawingAnalysisRepository, never()).saveAndFlush(any());
+  }
+
+  @Test
+  void allowsTheThirdRetryInAnAnalysisChain() {
+    DrawingAnalysis original = failedAnalysis(ANALYSIS_ID, null);
+    DrawingAnalysis firstRetry = failedAnalysis(31L, original);
+    DrawingAnalysis secondRetry = failedAnalysis(32L, firstRetry);
+    given(drawingAnalysisRepository.findByIdForUpdate(32L)).willReturn(Optional.of(secondRetry));
+    given(drawingSessionRepository.findNotDeletedByIdForUpdate(SESSION_ID))
+        .willReturn(Optional.of(session));
+    given(session.getId()).willReturn(SESSION_ID);
+    given(activityContextResolver.resolve(session))
+        .willReturn(
+            new DrawingAnalysisActivityContext(DrawingAnalysisActivityType.ART_DIARY, null));
+    given(asset.getId()).willReturn(ASSET_ID);
+    given(asset.getStorageKey()).willReturn("drawing/final.png");
+    given(asset.getMimeType()).willReturn("image/png");
+    given(drawingAnalysisRepository.saveAndFlush(any(DrawingAnalysis.class)))
+        .willAnswer(
+            invocation -> {
+              DrawingAnalysis analysis = invocation.getArgument(0);
+              ReflectionTestUtils.setField(analysis, "id", 33L);
+              return analysis;
+            });
+
+    StartedDrawingAnalysis started =
+        service.startRetry(32L, false, "analysis-retry-key-0003", PROCESSED_AT);
+
+    assertThat(started.analysisId()).isEqualTo(33L);
+    assertThat(started.requestId()).isEqualTo("analysis-retry-key-0003");
+  }
+
   private void givenValidTarget() {
     given(drawingSessionRepository.findNotDeletedByIdForUpdate(SESSION_ID))
         .willReturn(Optional.of(session));
@@ -354,6 +412,23 @@ class DrawingAnalysisPersistenceServiceTest {
             "550e8400-e29b-41d4-a716-446655440000",
             REQUESTED_AT);
     ReflectionTestUtils.setField(analysis, "id", ANALYSIS_ID);
+    return analysis;
+  }
+
+  private DrawingAnalysis failedAnalysis(Long id, DrawingAnalysis retrySource) {
+    DrawingAnalysis analysis =
+        retrySource == null
+            ? DrawingAnalysis.processing(
+                session,
+                asset,
+                DrawingAnalysisScope.FINAL,
+                DrawingAnalysisType.OBJECT_DETECTION,
+                "analysis-request-" + id,
+                REQUESTED_AT)
+            : DrawingAnalysis.processingRetry(
+                retrySource, asset, "analysis-request-" + id, REQUESTED_AT);
+    ReflectionTestUtils.setField(analysis, "id", id);
+    analysis.fail("TIMEOUT", "분석 요청 시간이 초과됐습니다.", PROCESSED_AT);
     return analysis;
   }
 

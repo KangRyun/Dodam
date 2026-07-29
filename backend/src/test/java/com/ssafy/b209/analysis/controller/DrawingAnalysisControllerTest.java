@@ -2,6 +2,7 @@ package com.ssafy.b209.analysis.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -124,16 +125,20 @@ class DrawingAnalysisControllerTest {
 
   @Test
   void retriesAFailedAnalysisByItsIdentifier() throws Exception {
-    given(drawingAnalysisService.retryAnalysis(eq(30L), any())).willReturn(response());
+    given(drawingAnalysisService.retryAnalysis(eq(30L), any(), eq("analysis-retry-key-0001")))
+        .willReturn(response());
 
     mockMvc
         .perform(
             post("/api/v1/analyses/{analysisId}/retry", 30L)
+                .header("Idempotency-Key", "analysis-retry-key-0001")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"reason\":\"USER_REQUEST\",\"useLatestInputs\":true}"))
         .andExpect(status().isCreated())
         .andExpect(header().string("Location", "/api/v1/drawing-sessions/10/analyses/30"))
         .andExpect(jsonPath("$.data.status").value("SUCCEEDED"));
+
+    verify(drawingAnalysisService).retryAnalysis(eq(30L), any(), eq("analysis-retry-key-0001"));
   }
 
   @Test
@@ -145,6 +150,22 @@ class DrawingAnalysisControllerTest {
                 .content("{\"useLatestInputs\":true}"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
+  @Test
+  void rejectsRetryWithoutAnIdempotencyKey() throws Exception {
+    given(drawingAnalysisService.retryAnalysis(eq(30L), any(), isNull()))
+        .willThrow(
+            new BusinessException(
+                DrawingAnalysisErrorCode.DRAWING_ANALYSIS_IDEMPOTENCY_KEY_REQUIRED));
+
+    mockMvc
+        .perform(
+            post("/api/v1/analyses/{analysisId}/retry", 30L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"USER_REQUEST\",\"useLatestInputs\":true}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("ANALYSIS_400_001"));
   }
 
   @Test
