@@ -568,6 +568,10 @@ class _ReportButton extends StatelessWidget {
             color: hasNew ? DodamHome.pointSoft : DodamHome.surface,
             borderRadius: BorderRadius.circular(13),
             child: InkWell(
+              // 리포트가 있을 때만 키를 단다 — 키의 존재가 곧 "진입 가능"을 뜻하도록.
+              key: reportId == null
+                  ? null
+                  : ValueKey('guardian-latest-report-$reportId'),
               borderRadius: BorderRadius.circular(13),
               onTap: reportId == null
                   ? null

@@ -10,29 +10,24 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('보호자 홈의 최신 리포트와 전체 목록을 연결한다', (tester) async {
-    final repository = _ReportRepository();
+  // 홈에서 '전체 리포트 목록'으로 가는 진입점은 보호자 홈 개편(S15P11B209-690)
+  // 이후 두지 않기로 확정했다. 홈이 책임지는 것은 최신 리포트 진입점 하나뿐이다.
+  testWidgets('보호자 홈은 최신 리포트로 가는 진입점을 제공한다', (tester) async {
     await tester.pumpWidget(
       DodamApp(
         childRepository: const _ChildRepository(),
-        reportRepository: repository,
+        reportRepository: _ReportRepository(),
       ),
     );
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('child-3')));
     await tester.pumpAndSettle();
-    expect(
-      find.byKey(const ValueKey('guardian-latest-report-501')),
-      findsOneWidget,
-    );
 
-    await tester.ensureVisible(
-      find.byKey(const ValueKey('guardian-report-all')),
-    );
-    await tester.tap(find.byKey(const ValueKey('guardian-report-all')));
-    await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('report-list')), findsOneWidget);
+    final entry = find.byKey(const ValueKey('guardian-latest-report-501'));
+    expect(entry, findsOneWidget);
+    // 존재만으로는 부족하다 — 실제로 눌러서 넘어갈 수 있어야 한다.
+    expect(tester.widget<InkWell>(entry).onTap, isNotNull);
   });
 
   testWidgets('완료·생성 중·실패 리포트를 상태별로 표시한다', (tester) async {
