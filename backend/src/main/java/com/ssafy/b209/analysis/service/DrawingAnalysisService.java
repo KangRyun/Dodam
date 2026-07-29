@@ -183,12 +183,25 @@ public class DrawingAnalysisService {
       return idempotentRetryResponse(analysisId, existing.get());
     }
     Instant requestedInstant = clock.instant();
-    StartedDrawingAnalysis started =
-        persistenceService.startRetry(
-            analysisId,
-            request.useLatestInputs(),
-            idempotencyKey,
-            LocalDateTime.ofInstant(requestedInstant, ZoneOffset.UTC));
+    StartedDrawingAnalysis started;
+    try {
+      started =
+          persistenceService.startRetry(
+              analysisId,
+              request.useLatestInputs(),
+              idempotencyKey,
+              LocalDateTime.ofInstant(requestedInstant, ZoneOffset.UTC));
+    } catch (BusinessException exception) {
+      if (exception.getErrorCode() != DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RETRY_NOT_ALLOWED) {
+        throw exception;
+      }
+      Optional<DrawingAnalysisRequestSummary> concurrentRetry =
+          persistenceService.findByRequestId(idempotencyKey);
+      if (concurrentRetry.isEmpty()) {
+        throw exception;
+      }
+      return idempotentRetryResponse(analysisId, concurrentRetry.get());
+    }
     return executeAnalysis(started, DrawingAnalysisType.OBJECT_DETECTION, requestedInstant);
   }
 

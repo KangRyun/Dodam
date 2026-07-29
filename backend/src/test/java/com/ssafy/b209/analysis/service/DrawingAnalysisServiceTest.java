@@ -364,6 +364,58 @@ class DrawingAnalysisServiceTest {
   }
 
   @Test
+  void returnsTheStoredResultWhenTheSameRetryWinsTheSourceLockFirst() {
+    String idempotencyKey = "analysis-retry-key-0001";
+    DrawingAnalysisRequestSummary completedRetry =
+        new DrawingAnalysisRequestSummary(
+            31L,
+            SESSION_ID,
+            ASSET_ID,
+            DrawingAnalysisType.OBJECT_DETECTION,
+            com.ssafy.b209.analysis.domain.DrawingAnalysisState.SUCCESS,
+            com.ssafy.b209.drawing.domain.DrawingSessionStatus.IN_PROGRESS,
+            com.ssafy.b209.drawing.domain.DrawingStage.REFLECTION,
+            ANALYSIS_ID);
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    given(persistenceService.findRetrySource(ANALYSIS_ID))
+        .willReturn(new RetryDrawingAnalysisSource(ANALYSIS_ID, SESSION_ID));
+    given(persistenceService.findByRequestId(idempotencyKey))
+        .willReturn(java.util.Optional.empty(), java.util.Optional.of(completedRetry));
+    given(
+            persistenceService.startRetry(
+                ANALYSIS_ID,
+                true,
+                idempotencyKey,
+                LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC)))
+        .willThrow(
+            new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RETRY_NOT_ALLOWED));
+    given(queryService.getDrawingAnalysis(SESSION_ID, 31L))
+        .willReturn(
+            new DrawingAnalysisDetailResponse(
+                31L,
+                SESSION_ID,
+                ASSET_ID,
+                idempotencyKey,
+                DrawingAnalysisType.OBJECT_DETECTION,
+                DrawingAnalysisStatus.SUCCEEDED,
+                new com.ssafy.b209.analysis.dto.DrawingAnalysisModelResponse("model", "1.0"),
+                List.of(),
+                REQUESTED_AT,
+                PROCESSED_AT,
+                null));
+
+    CreateDrawingAnalysisResponse response =
+        service.retryAnalysis(
+            ANALYSIS_ID,
+            new RetryDrawingAnalysisRequest(DrawingAnalysisRetryReason.USER_REQUEST, true),
+            idempotencyKey);
+
+    assertThat(response.drawingAnalysisId()).isEqualTo(31L);
+    assertThat(response.requestId()).isEqualTo(idempotencyKey);
+    verifyNoInteractions(drawingAnalysisClient);
+  }
+
+  @Test
   void rejectsAnIdempotencyKeyUsedForAnotherRetrySource() {
     String idempotencyKey = "analysis-retry-key-0001";
     given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
