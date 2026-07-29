@@ -7,6 +7,26 @@ import 'package:dodam/features/conversation/conversation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('TTS 응답의 nullable 메타데이터를 계약대로 파싱한다', () {
+    final cacheHit = QuestionTtsResponse.fromJson({
+      'audioUrl': '/api/v1/conversation-messages/803/audio',
+      'expiresAt': null,
+      'durationMs': null,
+      'subtitle': '질문',
+    });
+    final newlyCreated = QuestionTtsResponse.fromJson({
+      'audioUrl': '/api/v1/conversation-messages/803/audio',
+      'expiresAt': null,
+      'durationMs': 1040,
+      'subtitle': '질문',
+    });
+
+    expect(cacheHit.expiresAt, isNull);
+    expect(cacheHit.durationMs, isNull);
+    expect(newlyCreated.expiresAt, isNull);
+    expect(newlyCreated.durationMs, 1040);
+  });
+
   test('TTS POST 후 인증 프록시에서 audio/mpeg bytes를 내려받는다', () async {
     final adapter = _TtsAdapter();
     final repository = RemoteQuestionTtsRepository(_client(adapter));
@@ -27,6 +47,30 @@ void main() {
     expect(get.responseType, ResponseType.bytes);
     expect(audio.bytes, Uint8List.fromList([1, 2, 3, 4]));
     expect(audio.mimeType, 'audio/mpeg');
+  });
+
+  test('cache hit의 nullable 메타데이터와 무관하게 다운로드 후 재생한다', () async {
+    final adapter = _TtsAdapter(durationMs: null);
+    final repository = RemoteQuestionTtsRepository(_client(adapter));
+    final player = _RecordingQuestionAudioPlayer();
+    final controller = AiQuestionTtsController(repository, player);
+
+    await controller.playQuestion(
+      AiQuestion(
+        messageId: 803,
+        conversationId: 10,
+        sequence: 1,
+        text: '무엇이 보이니?',
+        options: const [],
+        ttsAvailable: true,
+        createdAt: DateTime.utc(2026, 7, 29),
+      ),
+    );
+
+    expect(adapter.requests.map((request) => request.method), ['POST', 'GET']);
+    expect(player.playCount, 1);
+    expect(player.bytes, Uint8List.fromList([1, 2, 3, 4]));
+    expect(controller.status, AiQuestionTtsStatus.playing);
   });
 
   for (final invalidUrl in [
@@ -120,12 +164,14 @@ final class _TtsAdapter implements HttpClientAdapter {
     this.statusCode = 200,
     this.audioStatusCode = 200,
     this.transportFailure = false,
+    this.durationMs = 1040,
   });
 
   final String audioUrl;
   final int statusCode;
   final int audioStatusCode;
   final bool transportFailure;
+  final int? durationMs;
   final List<RequestOptions> requests = [];
 
   @override
@@ -155,7 +201,7 @@ final class _TtsAdapter implements HttpClientAdapter {
         '{"success":true,"data":{'
         '"audioUrl":"$audioUrl",'
         '"expiresAt":null,'
-        '"durationMs":1040,'
+        '"durationMs":${durationMs ?? 'null'},'
         '"subtitle":"질문"}}',
         200,
         headers: {
@@ -184,4 +230,21 @@ final class _TtsAdapter implements HttpClientAdapter {
 
   @override
   void close({bool force = false}) {}
+}
+
+final class _RecordingQuestionAudioPlayer implements QuestionAudioPlayer {
+  int playCount = 0;
+  Uint8List? bytes;
+
+  @override
+  Future<void> play(Uint8List bytes, {required String mimeType}) async {
+    playCount += 1;
+    this.bytes = bytes;
+  }
+
+  @override
+  Future<void> stop() async {}
+
+  @override
+  Future<void> dispose() async {}
 }
