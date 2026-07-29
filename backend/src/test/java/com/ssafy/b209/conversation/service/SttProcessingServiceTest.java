@@ -17,9 +17,11 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 /** 289 오케스트레이터가 상태에 따라 중복 AI 호출을 막고 결과 저장을 위임하는지 검증한다. */
-@ExtendWith(MockitoExtension.class)
+@ExtendWith({MockitoExtension.class, OutputCaptureExtension.class})
 class SttProcessingServiceTest {
   private static final long MESSAGE_ID = 71L;
 
@@ -97,6 +99,48 @@ class SttProcessingServiceTest {
     assertThat(result.status()).isEqualTo(SttProcessingResult.Status.FAILED);
     assertThat(result.text()).isNull();
     verify(persistenceService).completeFailure(MESSAGE_ID, false);
+  }
+
+  @Test
+  void logsFailureTypeAndMessageIdWithoutSensitiveDataWhenAiCallFails(CapturedOutput output) {
+    given(persistenceService.claim(MESSAGE_ID))
+        .willReturn(claim(SttClaimResult.Action.CLAIMED, "PENDING", null, null, false));
+    given(aiSttClient.transcribe(any()))
+        .willThrow(new AiSttClientException(AiSttClientException.Type.INVALID_REQUEST));
+    given(persistenceService.completeFailure(MESSAGE_ID, false))
+        .willReturn(
+            new SttProcessingResult(
+                MESSAGE_ID, SttProcessingResult.Status.FAILED, null, null, false));
+
+    SttProcessingResult result = service.process(MESSAGE_ID);
+
+    assertThat(result.status()).isEqualTo(SttProcessingResult.Status.FAILED);
+    verify(persistenceService).completeFailure(MESSAGE_ID, false);
+    assertThat(output)
+        .contains("WARN")
+        .contains("type=INVALID_REQUEST")
+        .contains("messageId=" + MESSAGE_ID);
+    assertThat(output).doesNotContain("2026/07/23/voice.wav");
+  }
+
+  @Test
+  void logsExceptionClassNameForNonAiSttRuntimeFailure(CapturedOutput output) {
+    given(persistenceService.claim(MESSAGE_ID))
+        .willReturn(claim(SttClaimResult.Action.CLAIMED, "PENDING", null, null, false));
+    given(aiSttClient.transcribe(any())).willThrow(new IllegalStateException("boom"));
+    given(persistenceService.completeFailure(MESSAGE_ID, false))
+        .willReturn(
+            new SttProcessingResult(
+                MESSAGE_ID, SttProcessingResult.Status.FAILED, null, null, false));
+
+    SttProcessingResult result = service.process(MESSAGE_ID);
+
+    assertThat(result.status()).isEqualTo(SttProcessingResult.Status.FAILED);
+    assertThat(output)
+        .contains("WARN")
+        .contains("exception=IllegalStateException")
+        .contains("messageId=" + MESSAGE_ID);
+    assertThat(output).doesNotContain("boom");
   }
 
   private SttClaimResult claim(

@@ -1,11 +1,14 @@
 package com.ssafy.b209.conversation.service;
 
 import com.ssafy.b209.infrastructure.ai.AiSttClient;
+import com.ssafy.b209.infrastructure.ai.AiSttClientException;
 import com.ssafy.b209.infrastructure.ai.AiSttRequest;
 import com.ssafy.b209.infrastructure.ai.AiSttResponse;
 import com.ssafy.b209.storage.audio.OpenedAudio;
 import com.ssafy.b209.storage.audio.StoredAudioReader;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -15,6 +18,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class SttProcessingService {
+  private static final Logger log = LoggerFactory.getLogger(SttProcessingService.class);
+
   private final SttProcessingPersistenceService persistenceService;
   private final StoredAudioReader audioReader;
   private final AiSttClient aiSttClient;
@@ -64,8 +69,23 @@ public class SttProcessingService {
           response.confidence(),
           claim.needsGuardianConfirmation());
     } catch (RuntimeException exception) {
+      logFailure(claim.messageId(), exception);
       return persistenceService.completeFailure(
           claim.messageId(), claim.needsGuardianConfirmation());
+    }
+  }
+
+  /**
+   * STT 실패 원인을 비민감 메타만으로 남긴다.
+   *
+   * <p>STT 원문·오디오·토큰·요청 ID나 예외 cause(내부 응답 본문이 담길 수 있음)는 남기지 않고, 오류 타입 또는 예외 클래스명과 messageId만 기록한다.
+   */
+  private void logFailure(Long messageId, RuntimeException exception) {
+    if (exception instanceof AiSttClientException aiSttClientException) {
+      log.warn("STT 처리 실패 messageId={} type={}", messageId, aiSttClientException.getType());
+    } else {
+      log.warn(
+          "STT 처리 실패 messageId={} exception={}", messageId, exception.getClass().getSimpleName());
     }
   }
 

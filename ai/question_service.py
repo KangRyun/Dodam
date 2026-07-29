@@ -512,14 +512,16 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
 
     # 생성된 질문 원문은 남기지 않는다(가드레일). 대신 "어떤 재료로 만들었는가"를 남겨
     # 분석 로그의 [필터] 줄과 drawingSessionId로 이어붙일 수 있게 한다.
-    # ⚠️ activityType·drawingSubject는 아직 요청 계약에 없다(S15P11B209-712에서 추가) —
-    #    그때 이 줄에도 함께 실어 어느 HTP 단계였는지 로그만으로 판별되게 한다.
+    # activityType·drawingSubject를 함께 남겨 어느 HTP 단계였는지 로그만으로 판별한다
+    # (S15P11B209-712). 값이 없으면(그림일기·주제 미전달 요청) "-"로 남긴다.
     logger.info(
         "[질문] request_id=%s drawingSessionId=%s basisAnalysisId=%s "
-        "purpose=%s target=%s | %s",
+        "activityType=%s drawingSubject=%s purpose=%s target=%s | %s",
         request_id,
         req.drawing_session_id,
         req.basis_analysis_id if req.basis_analysis_id is not None else "-",
+        req.activity_type or "-",
+        req.drawing_subject or "-",
         purpose,
         _format_target_for_log(target),
         _format_objects_for_log(req),

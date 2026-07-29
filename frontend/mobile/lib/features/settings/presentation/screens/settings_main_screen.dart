@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../../app/router/app_navigation.dart';
 import '../../../../app/router/app_router.dart';
+import '../../../../app/router/app_routes.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../auth/auth.dart';
 
@@ -127,8 +129,11 @@ class _SettingsContent extends StatelessWidget {
                     _SettingsTile(
                       icon: Icons.fact_check_outlined,
                       title: '동의 관리',
-                      subtitle: '동의 현황 · 변경 이력 · 철회',
-                      onTap: () => onItemSelected('동의 관리'),
+                      subtitle: '동의 현황 · 변경 · 철회',
+                      onTap: () => AppNavigation.pushNamed(
+                        context,
+                        AppRoutes.settingsConsents,
+                      ),
                     ),
                     _SettingsTile(
                       icon: Icons.notifications_none_rounded,

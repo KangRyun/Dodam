@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Iterable, Protocol
 
 logger = logging.getLogger(__name__)
@@ -49,12 +49,16 @@ class LabelSpec:
     """한국어 클래스 하나에 대한 다운스트림 계약값."""
 
     contract_label: str  # UPPER_SNAKE_CASE. 계약 detections[].label 에 그대로 들어간다.
+    display_name: str  # 사람이 읽는 이름. 프롬프트·보호자 리포트에 그대로 나간다.
     group: str
     is_whole: bool  # '집전체'처럼 주제 전체를 감싸는 박스인지(부위와 구분)
 
 
-def _spec(label: str, group: str, *, whole: bool = False) -> LabelSpec:
-    return LabelSpec(contract_label=label, group=group, is_whole=whole)
+def _spec(label: str, group: str, *, display: str = "", whole: bool = False) -> LabelSpec:
+    """표시명을 비우면 아래에서 한국어 클래스명을 그대로 표시명으로 채운다."""
+    return LabelSpec(
+        contract_label=label, display_name=display, group=group, is_whole=whole
+    )
 
 
 # ── 47클래스 매핑 ───────────────────────────────────────────────
@@ -63,28 +67,33 @@ def _spec(label: str, group: str, *, whole: bool = False) -> LabelSpec:
 #      불일치는 아래 verify_against_model_names()가 기동/스모크 시점에 잡는다.
 _SPEC_BY_CLASS: dict[str, LabelSpec] = {
     # ── 나무 계열 ──
-    "가지": _spec("TREE_BRANCH", GROUP_TREE),
+    # '가지'만 쓰면 채소로 읽힌다 — 표시명은 '나뭇가지'.
+    "가지": _spec("TREE_BRANCH", GROUP_TREE, display="나뭇가지"),
     # '기둥'은 집 기둥이 아니라 나무 줄기(trunk)다 — 학습 라벨에서 나무 그림에만 180건
     # 나오고 집 그림엔 0건(stageB_htp/train, 2026-07-24 실측).
-    "기둥": _spec("TREE_TRUNK", GROUP_TREE),
+    # ⚠️ 표시명이 '기둥'이면 LLM이 집으로 읽는다 — 나무 단계에서 "이 집은 뭐야?"가 나온
+    #    직접 원인이다(S15P11B209-709 원인 2). 표시명은 반드시 '나무 줄기'.
+    "기둥": _spec("TREE_TRUNK", GROUP_TREE, display="나무 줄기"),
     # '나무'(id 8) vs '나무전체'(id 9): 전자는 배경 나무, 후자가 나무 그림의 주제다 —
     # '나무'는 집 그림에만 218건·나무 그림엔 0건으로 정반대 분포(같은 실측).
-    "나무전체": _spec("TREE", GROUP_TREE, whole=True),
+    "나무전체": _spec("TREE", GROUP_TREE, display="나무", whole=True),
     "나뭇잎": _spec("TREE_LEAF", GROUP_TREE),
     "뿌리": _spec("TREE_ROOT", GROUP_TREE),
-    "수관": _spec("TREE_CROWN", GROUP_TREE),
+    # '수관'은 아동 대화에 쓸 수 없는 한자어다.
+    "수관": _spec("TREE_CROWN", GROUP_TREE, display="잎이 우거진 부분"),
     "열매": _spec("TREE_FRUIT", GROUP_TREE),
     # ── 집 계열 ──
     "굴뚝": _spec("HOUSE_CHIMNEY", GROUP_HOUSE),
     "문": _spec("HOUSE_DOOR", GROUP_HOUSE),
     "연기": _spec("HOUSE_SMOKE", GROUP_HOUSE),  # 굴뚝 연기 — 집 요소로 함께 본다
     "지붕": _spec("HOUSE_ROOF", GROUP_HOUSE),
-    "집벽": _spec("HOUSE_WALL", GROUP_HOUSE),
-    "집전체": _spec("HOUSE", GROUP_HOUSE, whole=True),
+    "집벽": _spec("HOUSE_WALL", GROUP_HOUSE, display="집 벽"),
+    "집전체": _spec("HOUSE", GROUP_HOUSE, display="집", whole=True),
     "창문": _spec("HOUSE_WINDOW", GROUP_HOUSE),
     # ── 사람 계열 ──
     "귀": _spec("PERSON_EAR", GROUP_PERSON),
-    "남자구두": _spec("PERSON_DRESS_SHOES_MENS", GROUP_PERSON),
+    # 구두 두 종은 계약 코드로만 구분한다 — 아이에게 "남자구두"라고 되묻지 않도록 표시명은 '구두'.
+    "남자구두": _spec("PERSON_DRESS_SHOES_MENS", GROUP_PERSON, display="구두"),
     "눈": _spec("PERSON_EYE", GROUP_PERSON),
     "다리": _spec("PERSON_LEG", GROUP_PERSON),
     "단추": _spec("PERSON_BUTTON", GROUP_PERSON),
@@ -92,11 +101,11 @@ _SPEC_BY_CLASS: dict[str, LabelSpec] = {
     "머리카락": _spec("PERSON_HAIR", GROUP_PERSON),
     "목": _spec("PERSON_NECK", GROUP_PERSON),
     "발": _spec("PERSON_FOOT", GROUP_PERSON),
-    "사람전체": _spec("PERSON", GROUP_PERSON, whole=True),
-    "상체": _spec("PERSON_UPPER_BODY", GROUP_PERSON),
+    "사람전체": _spec("PERSON", GROUP_PERSON, display="사람", whole=True),
+    "상체": _spec("PERSON_UPPER_BODY", GROUP_PERSON, display="몸통"),
     "손": _spec("PERSON_HAND", GROUP_PERSON),
     "얼굴": _spec("PERSON_FACE", GROUP_PERSON),
-    "여자구두": _spec("PERSON_DRESS_SHOES_WOMENS", GROUP_PERSON),
+    "여자구두": _spec("PERSON_DRESS_SHOES_WOMENS", GROUP_PERSON, display="구두"),
     "운동화": _spec("PERSON_SNEAKERS", GROUP_PERSON),
     "입": _spec("PERSON_MOUTH", GROUP_PERSON),
     "주머니": _spec("PERSON_POCKET", GROUP_PERSON),
@@ -107,7 +116,9 @@ _SPEC_BY_CLASS: dict[str, LabelSpec] = {
     "그네": _spec("SWING", GROUP_SCENERY),
     "길": _spec("PATH", GROUP_SCENERY),
     "꽃": _spec("FLOWER", GROUP_SCENERY),
-    "나무": _spec("SCENERY_TREE", GROUP_SCENERY),
+    # 주제 나무(TREE)와 표시명이 겹치면 LLM이 둘을 구분하지 못한다 — 집 단계에서
+    # 배경 나무를 주제로 착각해 "이 나무는 뭐야?"가 나온 경로다(S15P11B209-709 원인 1).
+    "나무": _spec("SCENERY_TREE", GROUP_SCENERY, display="옆에 있는 나무"),
     "다람쥐": _spec("SQUIRREL", GROUP_SCENERY),
     "달": _spec("MOON", GROUP_SCENERY),
     "별": _spec("STAR", GROUP_SCENERY),
@@ -119,10 +130,17 @@ _SPEC_BY_CLASS: dict[str, LabelSpec] = {
     "태양": _spec("SUN", GROUP_SCENERY),
 }
 
+# 표시명을 따로 적지 않은 클래스는 한국어 클래스명이 곧 자연어다(눈·코·지붕·창문 …).
+# 위 표에는 '그대로 쓰면 안 되는 것'만 명시한다 — 표가 짧아야 검토가 된다.
+_SPEC_BY_CLASS = {
+    name: spec if spec.display_name else replace(spec, display_name=name)
+    for name, spec in _SPEC_BY_CLASS.items()
+}
+
 #: 알 수 없는 클래스에 쓰는 폴백. 계약이 label을 "비어 있지 않은 문자열"로 요구하므로
 #: 빈 값·한국어 원문을 흘리지 않고 이 값으로 접는다(원인은 warning 로그로 남는다).
 UNKNOWN_LABEL = "UNKNOWN"
-_UNKNOWN_SPEC = _spec(UNKNOWN_LABEL, GROUP_UNKNOWN)
+_UNKNOWN_SPEC = _spec(UNKNOWN_LABEL, GROUP_UNKNOWN, display="알 수 없는 것")
 
 
 def spec_of(class_name: str) -> LabelSpec:
@@ -141,6 +159,16 @@ def spec_of(class_name: str) -> LabelSpec:
 def to_contract_label(class_name: str) -> str:
     """한국어 클래스명 → 계약 라벨(UPPER_SNAKE_CASE)."""
     return spec_of(class_name).contract_label
+
+
+def display_name_of(class_name: str) -> str:
+    """한국어 클래스명 → 사람이 읽는 표시명.
+
+    프롬프트·보호자 리포트에 나가는 값이다. 계약 코드(contract_label)와 분리한 이유는
+    '기둥'(TREE_TRUNK)처럼 내부 클래스명을 그대로 흘리면 LLM이 다른 뜻으로 읽기 때문이다
+    (S15P11B209-709).
+    """
+    return spec_of(class_name).display_name
 
 
 def group_of(class_name: str) -> str:

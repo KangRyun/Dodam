@@ -27,6 +27,7 @@ import httpx
 import config
 import htp_labels
 import internal_contracts as contracts
+import sketch_labels
 import vlm_client
 import yolo_client
 
@@ -281,27 +282,49 @@ def _conversation_summary(
     return summary, unused, warnings
 
 
+# ── 클래스 라벨 표 선택 ─────────────────────────────────────────
+#   두 가중치는 클래스 집합이 완전히 다르다(HTP 한국어 47종 / 그림일기 영어 100종).
+#   모델 Registry Key와 짝을 맞춰 각자의 표를 쓴다 — 한쪽 표로 양쪽을 조회하면
+#   맞지 않는 쪽이 통째로 UNKNOWN이 된다(그림일기에서 실제로 그랬다, S15P11B209-711).
+_LABELS_BY_MODEL = {"htp": htp_labels, "sketch": sketch_labels}
+
+
+def _labels_for(model_key: str):
+    """모델 Registry Key → 클래스 라벨 표 모듈."""
+    try:
+        return _LABELS_BY_MODEL[model_key]
+    except KeyError:  # pragma: no cover - _model_key_for가 걸러 준다
+        raise ValueError(f"알 수 없는 모델 키: {model_key!r}") from None
+
+
 # ── 객체 탐지 변환 ──────────────────────────────────────────────
 def _to_detected_objects(
     detections: list,
+    labels,
 ) -> tuple[list[contracts.AnalysisDetectedObject], list[str]]:
     """yolo_client.Detection → §19.4 detectedObjects[].
 
-    objectCode는 htp_labels(S15P11B209-376)의 47클래스 계약 표를 그대로 쓴다 —
-    여기서 따로 매핑을 두면 두 표가 갈라져 BE에 서로 다른 라벨이 저장된다.
+    objectCode는 해당 모델의 계약 표를 그대로 쓴다 — 여기서 따로 매핑을 두면 두 표가
+    갈라져 BE에 서로 다른 라벨이 저장된다.
+    objectName은 내부 클래스명이 아니라 **표시명**이다. 이 값이 질문 LLM 프롬프트와
+    보호자 리포트에 그대로 나가므로, '기둥'(TREE_TRUNK) 같은 내부 용어를 흘리면
+    LLM이 다른 뜻으로 읽는다(S15P11B209-709 원인 2).
     UNKNOWN이 섞이면 가중치 클래스 집합과 표가 어긋났다는 신호라 경고로 드러낸다.
     """
     warnings: list[str] = []
     objects: list[contracts.AnalysisDetectedObject] = []
     for index, detection in enumerate(detections):
-        code = htp_labels.to_contract_label(detection.label)
-        if code == htp_labels.UNKNOWN_LABEL and "OBJECT_CODE_UNMAPPED" not in warnings:
+        spec = labels.spec_of(detection.label)
+        if (
+            spec.contract_label == labels.UNKNOWN_LABEL
+            and "OBJECT_CODE_UNMAPPED" not in warnings
+        ):
             warnings.append("OBJECT_CODE_UNMAPPED")
         x, y, width, height = detection.bbox_norm_xywh
         objects.append(
             contracts.AnalysisDetectedObject(
-                object_code=code,
-                object_name=detection.label,
+                object_code=spec.contract_label,
+                object_name=spec.display_name,
                 confidence=detection.confidence,
                 bounding_box=contracts.BoundingBox(x=x, y=y, width=width, height=height),
                 area_ratio=round(max(0.0, width) * max(0.0, height), 6),
@@ -441,7 +464,8 @@ def analyze(req: contracts.AnalysisRequest, request_id: str = "") -> contracts.A
         _format_detections_for_log(detections),
     )
 
-    detected_objects, detection_warnings = _to_detected_objects(detections)
+    labels = _labels_for(model_key)
+    detected_objects, detection_warnings = _to_detected_objects(detections, labels)
     warnings.extend(detection_warnings)
 
     visual_features, visual_warnings = _visual_features(image_bytes, detections)
@@ -463,7 +487,9 @@ def analyze(req: contracts.AnalysisRequest, request_id: str = "") -> contracts.A
     #    남아 서술에 섞일 수 있다 — CROSS_SUBJECT_PARTS_SUPPRESSED 경고로 드러낸다.
     #    억제 후 재렌더링은 추론을 한 번 더 돌려야 해서 후속 과제로 둔다.
     try:
-        description = vlm_client.describe(annotated_png, detections)
+        description = vlm_client.describe(
+            annotated_png, detections, display_name_of=labels.display_name_of
+        )
     except RuntimeError as e:
         logger.error(
             "그림 서술 실패: analysisId=%s type=%s", req.analysis_id, type(e).__name__

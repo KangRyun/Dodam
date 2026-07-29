@@ -93,8 +93,12 @@ def _encode_for_upload(png: bytes) -> tuple[str, str]:
     return "image/jpeg", encoded
 
 
-def _format_detections(detections) -> str:
-    """탐지 목록을 프롬프트에 넣을 한국어 텍스트로. 없으면 안내 문구."""
+def _format_detections(detections, display_name_of=None) -> str:
+    """탐지 목록을 프롬프트에 넣을 한국어 텍스트로. 없으면 안내 문구.
+
+    display_name_of를 주면 내부 클래스명 대신 표시명을 쓴다(S15P11B209-711).
+    '기둥'(TREE_TRUNK)처럼 내부 용어를 그대로 넣으면 서술이 다른 뜻으로 흐른다.
+    """
     if not detections:
         return "(탐지된 객체가 없어요)"
     lines = []
@@ -102,17 +106,26 @@ def _format_detections(detections) -> str:
         x, y, w, h = d.bbox_norm_xywh
         position = _position_hint(x + w / 2, y + h / 2)
         size = _size_hint(w * h)
-        lines.append(f"- {d.label} (신뢰도 {d.confidence:.2f}, {position}, {size})")
+        name = display_name_of(d.label) if display_name_of else d.label
+        lines.append(f"- {name} (신뢰도 {d.confidence:.2f}, {position}, {size})")
     return "\n".join(lines)
 
 
-def describe(annotated_png: bytes, detections, *, model: str | None = None) -> str:
+def describe(
+    annotated_png: bytes,
+    detections,
+    *,
+    model: str | None = None,
+    display_name_of=None,
+) -> str:
     """주석 이미지 + 탐지 목록 → 한국어 관찰 서술.
 
     Args:
         annotated_png: bbox가 그려진 PNG bytes(yolo_client.detect_and_annotate 산출물).
         detections: list[Detection]. 프롬프트에 텍스트로도 함께 제공된다.
         model: 미지정 시 config.VLM_MODEL.
+        display_name_of: 클래스명 → 표시명 변환 함수. 활동 유형에 맞는 라벨 표의 것을
+            넘긴다. 없으면 클래스명을 그대로 쓴다(하위 호환).
 
     Returns:
         한국어 서술 문자열(빈 응답이면 "").
@@ -123,7 +136,9 @@ def describe(annotated_png: bytes, detections, *, model: str | None = None) -> s
     used_model = model or config.VLM_MODEL
     mime, image_b64 = _encode_for_upload(annotated_png)
     data_url = f"data:{mime};base64,{image_b64}"
-    system = _load("drawing_description").format(detections=_format_detections(detections))
+    system = _load("drawing_description").format(
+        detections=_format_detections(detections, display_name_of)
+    )
     messages = [
         {"role": "system", "content": system},
         {

@@ -227,17 +227,21 @@ class DetectedObjectTest(unittest.TestCase):
 
     def test_uses_contract_labels(self):
         objects, warnings = svc._to_detected_objects(
-            [_det("사람전체", 0.15, 0.20, 0.25, 0.50), _det("지붕", 0.1, 0.1, 0.2, 0.2)]
+            [_det("사람전체", 0.15, 0.20, 0.25, 0.50), _det("지붕", 0.1, 0.1, 0.2, 0.2)],
+            svc.htp_labels,
         )
         self.assertEqual([o.object_code for o in objects], ["PERSON", "HOUSE_ROOF"])
-        self.assertEqual([o.object_name for o in objects], ["사람전체", "지붕"])
+        # objectName은 내부 클래스명이 아니라 표시명이다(S15P11B209-711).
+        self.assertEqual([o.object_name for o in objects], ["사람", "지붕"])
         self.assertEqual([o.detection_order for o in objects], [1, 2])
         self.assertAlmostEqual(objects[0].area_ratio, 0.125)
         self.assertNotIn("OBJECT_CODE_UNMAPPED", warnings)
 
     def test_unmapped_label_is_surfaced(self):
         """표에 없는 클래스명은 조용히 통과시키지 않고 경고로 드러낸다."""
-        objects, warnings = svc._to_detected_objects([_det("표에없는이름", 0, 0, 0.1, 0.1)])
+        objects, warnings = svc._to_detected_objects(
+            [_det("표에없는이름", 0, 0, 0.1, 0.1)], svc.htp_labels
+        )
         self.assertEqual(objects[0].object_code, "UNKNOWN")
         self.assertIn("OBJECT_CODE_UNMAPPED", warnings)
 
@@ -440,6 +444,39 @@ class ActivityDetectionFilterTest(unittest.TestCase):
 
         self.assertEqual(kept, detections)
         self.assertEqual(warnings, [])
+
+
+class DetectedObjectMappingTest(unittest.TestCase):
+    """활동 유형별 라벨 표 선택과 표시명 (S15P11B209-711)."""
+
+    def test_model_key_selects_the_matching_label_table(self):
+        self.assertIs(svc._labels_for("htp"), svc.htp_labels)
+        self.assertIs(svc._labels_for("sketch"), svc.sketch_labels)
+
+    def test_htp_object_name_is_the_display_name(self):
+        objects, warnings = svc._to_detected_objects(
+            [_det("기둥", 0, 0, 0.1, 0.4)], svc.htp_labels
+        )
+        self.assertEqual(objects[0].object_code, "TREE_TRUNK")  # 계약 코드는 그대로
+        self.assertEqual(objects[0].object_name, "나무 줄기")  # 프롬프트로 나가는 값
+        self.assertEqual(warnings, [])
+
+    def test_art_diary_classes_are_no_longer_unknown(self):
+        # 영어 클래스를 HTP 표로 조회해 전부 UNKNOWN이 되던 문제(711 작업 2).
+        objects, warnings = svc._to_detected_objects(
+            [_det("house", 0, 0, 0.4, 0.4), _det("tree", 0.5, 0, 0.2, 0.5)],
+            svc.sketch_labels,
+        )
+        self.assertEqual([o.object_code for o in objects], ["HOUSE", "TREE"])
+        self.assertEqual([o.object_name for o in objects], ["집", "나무"])
+        self.assertNotIn("OBJECT_CODE_UNMAPPED", warnings)
+
+    def test_unmapped_class_is_still_surfaced(self):
+        objects, warnings = svc._to_detected_objects(
+            [_det("존재하지않는클래스", 0, 0, 0.1, 0.1)], svc.htp_labels
+        )
+        self.assertEqual(objects[0].object_code, "UNKNOWN")
+        self.assertIn("OBJECT_CODE_UNMAPPED", warnings)
 
 
 class DetectionLogTest(unittest.TestCase):

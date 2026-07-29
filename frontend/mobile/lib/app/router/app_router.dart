@@ -19,6 +19,8 @@ import '../../features/notification/presentation/screens/notification_list_scree
 import '../../features/report/presentation/screens/report_screen.dart';
 import '../../features/report/presentation/screens/report_list_screen.dart';
 import '../../features/report/domain/repositories/report_repository.dart';
+import '../../features/consent/domain/repositories/consent_repository.dart';
+import '../../features/consent/presentation/screens/consent_management_screen.dart';
 import '../../features/settings/presentation/screens/settings_main_screen.dart';
 import '../state/guardian_child_controller.dart';
 import '../widgets/app_placeholder_scaffold.dart';
@@ -41,6 +43,7 @@ abstract final class AppRouter {
     DrawingRepository? drawingRepository,
     ReportRepository? reportRepository,
     NotificationInboxRepository? notificationInboxRepository,
+    ConsentRepository? consentRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
     ConversationRepository? conversationRepository,
     ConversationEndRepository? conversationEndRepository,
@@ -208,6 +211,12 @@ abstract final class AppRouter {
         user: authCurrentUser?.call(),
         onSignOut: authSignOut,
       ),
+      ['guardian', 'settings', 'consents']
+          when consentRepository != null && childController != null =>
+        ConsentManagementScreen(
+          repository: consentRepository,
+          children: childController.children,
+        ),
       // 커뮤니티는 웹 전용(CLAUDE.md 6절). 웹 커뮤니티 URL과 webview_flutter가
       // 준비되면 이 자리표시자를 WebView 화면으로 교체한다. COMM-01 GET /posts.
       ['guardian', 'community'] => const AppPlaceholderScaffold(
