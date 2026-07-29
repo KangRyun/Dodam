@@ -31,7 +31,8 @@ class UserDeletionServiceTest {
 
   @BeforeEach
   void setUp() {
-    service = new UserDeletionService(userRepository, childDeletionService, childDeletionRepository);
+    service =
+        new UserDeletionService(userRepository, childDeletionService, childDeletionRepository);
   }
 
   @Test
@@ -60,8 +61,8 @@ class UserDeletionServiceTest {
   /**
    * ★ 순서가 이 기능의 핵심이다.
    *
-   * <p>사용자를 먼저 지우면 {@code guardian_child_relations}가 CASCADE로 사라져 "이 보호자의 아동"을 더는 찾을 수 없다.
-   * 그러면 오류 없이 <b>조용히 아무것도 지우지 못한다.</b> 순서를 뒤집는 리팩터링을 이 테스트가 막는다.
+   * <p>사용자를 먼저 지우면 {@code guardian_child_relations}가 CASCADE로 사라져 "이 보호자의 아동"을 더는 찾을 수 없다. 그러면 오류
+   * 없이 <b>조용히 아무것도 지우지 못한다.</b> 순서를 뒤집는 리팩터링을 이 테스트가 막는다.
    */
   @Test
   void deletesChildDataBeforeRemovingUser() {
@@ -75,24 +76,20 @@ class UserDeletionServiceTest {
   }
 
   /**
-   * {@code expert_profiles.users_id}가 {@code ON DELETE RESTRICT}라, 확인하지 않고 지우면 DB 제약 위반이 500으로
-   * 새어 나간다. 원인을 알 수 있는 4xx로 바꾼다.
+   * 전문가도 탈퇴할 수 있어야 한다는 결정(2026-07-30)에 따른 검증.
+   *
+   * <p>{@code expert_profiles.user_id}가 {@code ON DELETE RESTRICT}라, 남겨둔 채 사용자를 지우면 DB 제약 위반이 500으로
+   * 샌다. 사용자보다 <b>먼저</b> 지워야 한다.
    */
   @Test
-  void blocksWithdrawalWhenExpertProfileExists() {
+  void deletesExpertProfileBeforeRemovingUser() {
     when(userRepository.existsById(51L)).thenReturn(true);
-    when(childDeletionRepository.hasExpertProfile(51L)).thenReturn(true);
 
-    assertThatThrownBy(() -> service.delete(51L, new DeleteUserRequest("DELETE")))
-        .isInstanceOfSatisfying(
-            BusinessException.class,
-            exception ->
-                assertThat(exception.getErrorCode())
-                    .isEqualTo(UserErrorCode.WITHDRAWAL_BLOCKED_BY_EXPERT_PROFILE));
+    service.delete(51L, new DeleteUserRequest("DELETE"));
 
-    // 막혔으면 아무것도 지우지 않아야 한다 — 아동만 지워지고 계정이 남는 최악을 방지한다.
-    verify(childDeletionService, never()).deleteAllSolelyOwnedBy(51L);
-    verify(userRepository, never()).deleteById(51L);
+    InOrder order = inOrder(childDeletionRepository, userRepository);
+    order.verify(childDeletionRepository).deleteExpertProfile(51L);
+    order.verify(userRepository).deleteById(51L);
   }
 
   @Test

@@ -1,6 +1,7 @@
 package com.ssafy.b209.child.repository;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
 
@@ -121,15 +122,15 @@ public class ChildDeletionRepository {
   /**
    * 보호자가 <b>혼자</b> 보유한 아동 ID를 모두 찾는다 (S15P11B209-728).
    *
-   * <p>회원 탈퇴 시 쓴다. 공동 보호자가 있는 아동은 제외한다 — 한 사람이 나간다고 다른 보호자의 아동 데이터를 지울 수는 없다.
-   * 그런 아동은 {@code guardian_child_relations}의 CASCADE로 <b>관계만</b> 끊기고 레코드는 남는 것이 옳다.
+   * <p>회원 탈퇴 시 쓴다. 공동 보호자가 있는 아동은 제외한다 — 한 사람이 나간다고 다른 보호자의 아동 데이터를 지울 수는 없다. 그런 아동은 {@code
+   * guardian_child_relations}의 CASCADE로 <b>관계만</b> 끊기고 레코드는 남는 것이 옳다.
    *
    * <p>이미 삭제된 아동({@code profile_status = 'DELETED'})은 제외한다. 다시 큐에 넣으면 스토리지 삭제 작업이 중복된다.
    *
    * @param guardianUserId 탈퇴하는 보호자 사용자 ID
    * @return 이 보호자만 보유한 활성 아동 ID 목록. 없으면 빈 목록
    */
-  public java.util.List<Long> findSolelyOwnedChildIds(long guardianUserId) {
+  public List<Long> findSolelyOwnedChildIds(long guardianUserId) {
     return jdbcTemplate.queryForList(
         """
         select child.id
@@ -147,23 +148,23 @@ public class ChildDeletionRepository {
   }
 
   /**
-   * 사용자에게 전문가 프로필이 있는지 확인한다 (S15P11B209-728).
+   * 탈퇴하는 사용자의 전문가 프로필을 삭제한다 (S15P11B209-728).
    *
-   * <p>{@code expert_profiles.user_id}가 {@code ON DELETE RESTRICT}라, 있는 채로 사용자를 지우면 DB 제약 위반이
-   * 500으로 새어 나간다. 삭제 전에 확인해 원인을 알 수 있는 오류로 바꾼다.
+   * <p>{@code expert_profiles.user_id}가 {@code ON DELETE RESTRICT}라, 남겨둔 채 사용자를 지우면 DB 제약 위반이 500으로
+   * 새어 나간다. 사용자보다 <b>먼저</b> 지운다.
    *
-   * <p>⚠️ 컬럼명은 {@code user_id}다. V1 스키마에서는 {@code users_id}였으나 <b>V3에서 이름이 바뀌었다</b>
-   * ({@code RENAME COLUMN users_id TO user_id}). V1만 보고 쓰면 {@code BadSqlGrammarException}이 나고,
-   * 탈퇴 API가 500으로 죽는다 — 2026-07-30 실제로 그렇게 한 번 틀렸다. 스키마는 <b>마이그레이션 체인의 최종
-   * 상태</b>를 봐야 한다.
+   * <p>딸려 나가는 것(전부 {@code ON DELETE CASCADE}): 전문가 팔로우 · 전문 분야 · 자격 증빙과 그 첨부 파일. 미술 활동 자료({@code
+   * activity_templates})는 <b>남는다</b> — V22 에서 {@code ON DELETE SET NULL}로 바꿔, 자료는 보존하고 작성자 참조만 끊는다.
+   * 보호자에게 제공되는 콘텐츠라 작성자가 떠났다고 사라지면 안 된다.
    *
-   * @param userId 확인할 사용자 ID
-   * @return 전문가 프로필이 있으면 {@code true}
+   * <p>⚠️ 컬럼명은 {@code user_id}다. V1 스키마에서는 {@code users_id}였으나 <b>V3에서 이름이 바뀌었다</b> ({@code RENAME
+   * COLUMN users_id TO user_id}). V1만 보고 쓰면 {@code BadSqlGrammarException}이 나고, 탈퇴 API가 500으로 죽는다 —
+   * 2026-07-30 실제로 그렇게 한 번 틀렸다. 스키마는 <b>마이그레이션 체인의 최종 상태</b>를 봐야 한다.
+   *
+   * @param userId 탈퇴하는 사용자 ID
+   * @return 삭제한 프로필 수(0 또는 1). 전문가가 아니면 0
    */
-  public boolean hasExpertProfile(long userId) {
-    Integer count =
-        jdbcTemplate.queryForObject(
-            "select count(*) from expert_profiles where user_id = ?", Integer.class, userId);
-    return count != null && count > 0;
+  public int deleteExpertProfile(long userId) {
+    return jdbcTemplate.update("delete from expert_profiles where user_id = ?", userId);
   }
 }

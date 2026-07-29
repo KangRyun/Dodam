@@ -69,6 +69,10 @@ class UserAccountAndConsentIntegrationTest {
     jdbcTemplate.update("DELETE FROM guardian_child_relations");
     jdbcTemplate.update("DELETE FROM child_response_modes");
     jdbcTemplate.update("DELETE FROM children");
+    // 전문가 탈퇴 테스트 잔재 정리. activity_templates → expert_profiles → users 순서를 지켜야 한다
+    //   (FK 방향의 역순). 어긋나면 RESTRICT 에 걸려 다음 테스트의 setUp 이 통째로 실패한다.
+    jdbcTemplate.update("DELETE FROM activity_templates");
+    jdbcTemplate.update("DELETE FROM expert_profiles");
     jdbcTemplate.update("DELETE FROM users");
     jdbcTemplate.update(
         "INSERT INTO users "
@@ -267,13 +271,13 @@ class UserAccountAndConsentIntegrationTest {
   /**
    * S15P11B209-728 — 탈퇴가 단독 보유 아동을 함께 정리하는지 실 DB로 확인한다.
    *
-   * <p>이 테스트는 원래 {@code deletesAccountWithIdentityRowsAndKeepsChildData}였다. 즉 <b>아동 데이터를 남기는
-   * 것이 의도된 동작</b>으로 단언하고 있었다. 그런데 그 상태에서는 아동 프로필·그림·음성이 보호자와 끊긴 채 남아
-   * 이후 누구도 삭제를 요청할 수 없었고, CLAUDE.md 9절("회원 탈퇴 시 아동 데이터 함께 삭제")과 어긋났다.
+   * <p>이 테스트는 원래 {@code deletesAccountWithIdentityRowsAndKeepsChildData}였다. 즉 <b>아동 데이터를 남기는 것이 의도된
+   * 동작</b>으로 단언하고 있었다. 그런데 그 상태에서는 아동 프로필·그림·음성이 보호자와 끊긴 채 남아 이후 누구도 삭제를 요청할 수 없었고, CLAUDE.md
+   * 9절("회원 탈퇴 시 아동 데이터 함께 삭제")과 어긋났다.
    *
-   * <p>아동 행 자체는 <b>남는 것이 맞다</b> — 개별 삭제 API와 같은 소프트 삭제 정책이라, 행을 지우는 대신
-   * {@code profile_status='DELETED'}로 표시하고 스토리지 삭제를 큐에 넣는다. 그래서 "행이 있다"만 보는 검증은
-   * 삭제 여부를 구분하지 못한다 — 상태까지 봐야 한다.
+   * <p>아동 행 자체는 <b>남는 것이 맞다</b> — 개별 삭제 API와 같은 소프트 삭제 정책이라, 행을 지우는 대신 {@code
+   * profile_status='DELETED'}로 표시하고 스토리지 삭제를 큐에 넣는다. 그래서 "행이 있다"만 보는 검증은 삭제 여부를 구분하지 못한다 — 상태까지 봐야
+   * 한다.
    */
   @Test
   void deletesAccountAndSoftDeletesSolelyOwnedChild() throws Exception {
@@ -327,6 +331,43 @@ class UserAccountAndConsentIntegrationTest {
         .isEqualTo(1);
     // 동의 이력은 행위자만 비식별화한다(법적 보존 대상).
     assertThat(count("SELECT COUNT(*) FROM consent_records WHERE actor_user_id IS NULL"))
+        .isEqualTo(1);
+  }
+
+  /**
+   * S15P11B209-728 — 전문가도 탈퇴할 수 있어야 한다(2026-07-30 결정).
+   *
+   * <p>{@code expert_profiles.user_id}가 {@code ON DELETE RESTRICT}라, 전문가 프로필을 남겨둔 채 사용자를 지우면 DB 제약
+   * 위반이 500으로 샌다. 탈퇴 처리에서 프로필을 먼저 지워 경로를 연다.
+   *
+   * <p>이 테스트는 <b>V22 마이그레이션도 함께 검증</b>한다. 미술 활동 자료가 {@code ON DELETE SET NULL}로 바뀌지 않았다면 프로필 삭제가 그
+   * FK에 걸려 여전히 500이 난다.
+   */
+  @Test
+  void allowsWithdrawalForExpertAndKeepsAuthoredMaterial() throws Exception {
+    jdbcTemplate.update(
+        "INSERT INTO expert_profiles (id, user_id, display_name, career_years, verification_status) "
+            + "VALUES (900, ?, '김상담', 5, 'VERIFIED')",
+        USER_ID);
+    jdbcTemplate.update(
+        "INSERT INTO activity_templates "
+            + "(id, expert_profile_id, title, content, age_group, activity_type) "
+            + "VALUES (900, 900, '자료 제목', '자료 내용', 'AGE_5_7', 'DRAWING')");
+
+    mockMvc
+        .perform(
+            delete("/api/v1/users/me")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DELETE\"}"))
+        .andExpect(status().isNoContent());
+
+    assertThat(count("SELECT COUNT(*) FROM users WHERE id = " + USER_ID)).isZero();
+    assertThat(count("SELECT COUNT(*) FROM expert_profiles WHERE id = 900")).isZero();
+    // 미술 자료는 남고 작성자만 끊긴다 — 보호자에게 제공되는 콘텐츠이기 때문이다.
+    assertThat(count("SELECT COUNT(*) FROM activity_templates WHERE id = 900")).isEqualTo(1);
+    assertThat(
+            count(
+                "SELECT COUNT(*) FROM activity_templates WHERE id = 900 AND expert_profile_id IS NULL"))
         .isEqualTo(1);
   }
 
