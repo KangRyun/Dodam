@@ -65,9 +65,7 @@ public class AiIntegrationModeReporter {
    * @return 셋 중 하나라도 mock이면 {@code true}
    */
   public boolean hasMock() {
-    return MOCK.equals(drawingAnalysisMode)
-        || MOCK.equals(observationMode)
-        || MOCK.equals(ttsMode);
+    return MOCK.equals(drawingAnalysisMode) || MOCK.equals(observationMode) || MOCK.equals(ttsMode);
   }
 
   private static String normalize(String mode) {
