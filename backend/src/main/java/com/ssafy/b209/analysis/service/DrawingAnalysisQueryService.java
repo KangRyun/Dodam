@@ -2,6 +2,9 @@ package com.ssafy.b209.analysis.service;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
+import com.ssafy.b209.analysis.dto.AnalysisBoundingBoxResponse;
+import com.ssafy.b209.analysis.dto.AnalysisDetectedObjectResponse;
+import com.ssafy.b209.analysis.dto.AnalysisStatusResponse;
 import com.ssafy.b209.analysis.dto.BoundingBoxResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisDetailResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisFailureResponse;
@@ -82,6 +85,35 @@ public class DrawingAnalysisQueryService {
   }
 
   /**
+   * 분석 식별자로 현재 상태와 보호자에게 공개 가능한 결과를 조회한다.
+   *
+   * <p>분석에서 Session을 역참조한 뒤 연결 보호자 권한을 검증한다. 기존 세션 하위 조회와 달리 DB의 {@code SUCCESS}와 {@code
+   * PARTIAL_SUCCESS}를 구분해 그대로 반환한다.
+   *
+   * @param analysisId 분석 실행 식별자
+   * @return 정본 공개 계약에 맞게 조립한 분석 상태 응답
+   * @throws BusinessException 분석이 없거나 접근 권한 또는 저장 결과 정합성 검증에 실패한 경우
+   */
+  @Transactional(readOnly = true)
+  public AnalysisStatusResponse getAnalysisStatus(Long analysisId) {
+    DrawingAnalysis analysis =
+        drawingAnalysisRepository
+            .findDetailByAnalysisId(analysisId)
+            .orElseThrow(
+                () -> new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_FOUND));
+    Long guardianUserId = currentUserResolver.requireUserId();
+    accessValidator.requireDrawingSessionAccess(
+        guardianUserId, analysis.getDrawingSession().getId());
+    validateCommonFields(analysis);
+
+    return switch (analysis.getState()) {
+      case PENDING, PROCESSING -> canonicalInProgressResponse(analysis);
+      case SUCCESS, PARTIAL_SUCCESS -> canonicalSuccessResponse(analysis);
+      case FAILED -> canonicalFailureResponse(analysis);
+    };
+  }
+
+  /**
    * 요청한 세션의 그림 분석 이력을 요청 시각 역순으로 조회한다.
    *
    * <p>객체 탐지 결과는 포함하지 않고 상태 요약만 반환하며 조회 과정에서 상태를 변경하지 않는다.
@@ -154,6 +186,100 @@ public class DrawingAnalysisQueryService {
         List.of(),
         toInstant(analysis.getCompletedAt()),
         new DrawingAnalysisFailureResponse(FAILURE_CODE, FAILURE_MESSAGE));
+  }
+
+  private AnalysisStatusResponse canonicalInProgressResponse(DrawingAnalysis analysis) {
+    if (hasModel(analysis)
+        || hasFailure(analysis)
+        || analysis.getCompletedAt() != null
+        || !analysis.getDetections().isEmpty()) {
+      throw inconsistent();
+    }
+    return canonicalResponse(analysis, List.of(), null, null);
+  }
+
+  private AnalysisStatusResponse canonicalSuccessResponse(DrawingAnalysis analysis) {
+    if (!hasCompleteModel(analysis) || hasFailure(analysis) || analysis.getCompletedAt() == null) {
+      throw inconsistent();
+    }
+    return canonicalResponse(
+        analysis,
+        analysis.getDetections().stream()
+            .map(detection -> canonicalDetection(analysis, detection))
+            .toList(),
+        null,
+        null);
+  }
+
+  private AnalysisStatusResponse canonicalFailureResponse(DrawingAnalysis analysis) {
+    if (hasModel(analysis)
+        || !hasCompleteFailure(analysis)
+        || analysis.getCompletedAt() == null
+        || !analysis.getDetections().isEmpty()) {
+      throw inconsistent();
+    }
+    return canonicalResponse(analysis, List.of(), FAILURE_CODE, FAILURE_MESSAGE);
+  }
+
+  private AnalysisStatusResponse canonicalResponse(
+      DrawingAnalysis analysis,
+      List<AnalysisDetectedObjectResponse> detectedObjects,
+      String errorCode,
+      String message) {
+    return new AnalysisStatusResponse(
+        analysis.getId(),
+        analysis.getDrawingSession().getId(),
+        analysis.getDrawingAsset().getId(),
+        analysis.getScope(),
+        analysis.getTaskType(),
+        analysis.getState(),
+        analysis.getConfidence(),
+        analysis.getModelName(),
+        analysis.getModelVersion(),
+        toInstant(analysis.getRequestedAt()),
+        analysis.getCompletedAt() == null ? null : toInstant(analysis.getCompletedAt()),
+        detectedObjects,
+        errorCode,
+        message);
+  }
+
+  private AnalysisDetectedObjectResponse canonicalDetection(
+      DrawingAnalysis analysis, DrawingDetectedObject detection) {
+    DrawingAssetDimensions dimensions =
+        new DrawingAssetDimensions(
+            analysis.getDrawingAsset().getWidthPx(), analysis.getDrawingAsset().getHeightPx());
+    return new AnalysisDetectedObjectResponse(
+        detection.getId(),
+        detection.getLabel(),
+        detection.getObjectName(),
+        detection.getConfidence(),
+        normalizedBoundingBox(detection, dimensions));
+  }
+
+  private AnalysisBoundingBoxResponse normalizedBoundingBox(
+      DrawingDetectedObject detection, DrawingAssetDimensions dimensions) {
+    if (detection.getCoordinateSpace()
+        == com.ssafy.b209.analysis.domain.DrawingCoordinateSpace.NORMALIZED) {
+      return new AnalysisBoundingBoxResponse(
+          detection.getX(), detection.getY(), detection.getWidth(), detection.getHeight());
+    }
+    if (!dimensions.isAvailable()) {
+      throw inconsistent();
+    }
+    BigDecimal imageWidth = BigDecimal.valueOf(dimensions.widthPx());
+    BigDecimal imageHeight = BigDecimal.valueOf(dimensions.heightPx());
+    return new AnalysisBoundingBoxResponse(
+        detection.getX().divide(imageWidth, 6, java.math.RoundingMode.HALF_UP),
+        detection.getY().divide(imageHeight, 6, java.math.RoundingMode.HALF_UP),
+        detection.getWidth().divide(imageWidth, 6, java.math.RoundingMode.HALF_UP),
+        detection.getHeight().divide(imageHeight, 6, java.math.RoundingMode.HALF_UP));
+  }
+
+  private record DrawingAssetDimensions(Integer widthPx, Integer heightPx) {
+
+    private boolean isAvailable() {
+      return widthPx != null && widthPx > 0 && heightPx != null && heightPx > 0;
+    }
   }
 
   private DrawingAnalysisDetailResponse response(

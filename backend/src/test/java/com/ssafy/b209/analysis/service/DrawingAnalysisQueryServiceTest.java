@@ -11,6 +11,7 @@ import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
 import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
+import com.ssafy.b209.analysis.dto.AnalysisStatusResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisDetailResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
@@ -227,6 +228,68 @@ class DrawingAnalysisQueryServiceTest {
     assertError(
         () -> service.getDrawingAnalysis(SESSION_ID, ANALYSIS_ID),
         DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RESULT_INCONSISTENT);
+  }
+
+  @Test
+  void returnsCanonicalSuccessAndNormalizesLegacyPixelCoordinates() {
+    DrawingAnalysis analysis = analysis(DrawingAnalysisState.PROCESSING);
+    DrawingDetectedObject detectedObject = detection("HOUSE", 0);
+    ReflectionTestUtils.setField(detectedObject, "id", 40L);
+    analysis.succeed("mock-drawing-detector", "1.0", List.of(detectedObject), PROCESSED_AT);
+    given(asset.getWidthPx()).willReturn(1000);
+    given(asset.getHeightPx()).willReturn(800);
+    given(drawingAnalysisRepository.findDetailByAnalysisId(ANALYSIS_ID))
+        .willReturn(Optional.of(analysis));
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+
+    AnalysisStatusResponse response = service.getAnalysisStatus(ANALYSIS_ID);
+
+    assertThat(response.analysisId()).isEqualTo(ANALYSIS_ID);
+    assertThat(response.analysisType()).isEqualTo(DrawingAnalysisScope.FINAL);
+    assertThat(response.analysisTaskType()).isEqualTo(DrawingAnalysisType.OBJECT_DETECTION);
+    assertThat(response.analysisStatus()).isEqualTo(DrawingAnalysisState.SUCCESS);
+    assertThat(response.detectedObjects()).hasSize(1);
+    assertThat(response.detectedObjects().getFirst().detectedObjectId()).isEqualTo(40L);
+    assertThat(response.detectedObjects().getFirst().boundingBox().x())
+        .isEqualByComparingTo("0.120000");
+    assertThat(response.detectedObjects().getFirst().boundingBox().height())
+        .isEqualByComparingTo("0.650000");
+  }
+
+  @Test
+  void preservesPartialSuccessInCanonicalStatusResponse() {
+    DrawingAnalysis analysis = analysis(DrawingAnalysisState.PROCESSING);
+    analysis.complete(
+        DrawingAnalysisState.PARTIAL_SUCCESS,
+        "mock-drawing-detector",
+        "1.0",
+        List.of(),
+        PROCESSED_AT);
+    given(drawingAnalysisRepository.findDetailByAnalysisId(ANALYSIS_ID))
+        .willReturn(Optional.of(analysis));
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+
+    AnalysisStatusResponse response = service.getAnalysisStatus(ANALYSIS_ID);
+
+    assertThat(response.analysisStatus()).isEqualTo(DrawingAnalysisState.PARTIAL_SUCCESS);
+  }
+
+  @Test
+  void validatesCanonicalAnalysisAccessUsingItsSession() {
+    DrawingAnalysis analysis = mock(DrawingAnalysis.class);
+    given(analysis.getDrawingSession()).willReturn(session);
+    given(session.getId()).willReturn(SESSION_ID);
+    given(drawingAnalysisRepository.findDetailByAnalysisId(ANALYSIS_ID))
+        .willReturn(Optional.of(analysis));
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    willThrow(
+            new BusinessException(
+                com.ssafy.b209.drawing.exception.DrawingErrorCode.DRAWING_SESSION_NOT_FOUND))
+        .given(accessValidator)
+        .requireDrawingSessionAccess(GUARDIAN_USER_ID, SESSION_ID);
+
+    assertThatThrownBy(() -> service.getAnalysisStatus(ANALYSIS_ID))
+        .isInstanceOf(BusinessException.class);
   }
 
   @Test

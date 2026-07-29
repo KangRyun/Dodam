@@ -27,7 +27,7 @@ import java.util.Objects;
 /**
  * 그림 파일에 대한 단일 AI 분석 실행의 상태와 저장된 객체 탐지 결과를 관리한다.
  *
- * <p>기존 DB 상태 {@code SUCCESS}를 유지하며 외부 계약의 {@code SUCCEEDED} 변환은 Application Service에서 담당한다.
+ * <p>기존 세션 하위 조회의 {@code SUCCEEDED} 호환 변환과 정본 상태 조회의 DB 상태 보존은 Application Service에서 각각 담당한다.
  */
 @Entity
 @Table(name = "analyses")
