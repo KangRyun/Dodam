@@ -76,6 +76,37 @@ void main() {
 
     expect(controller.childConsentTerms, isEmpty);
   });
+
+  test('아동 수정 후 최신 목록을 다시 조회한다', () async {
+    final repository = _FakeChildRepository();
+    final controller = GuardianChildController(repository);
+    addTearDown(controller.dispose);
+
+    final updated = await controller.updateChild(
+      77,
+      const UpdateChildRequestDto(
+        nickname: '민지 수정',
+        preferredCharacter: 'FOX',
+        questionDifficulty: 'LOWER_ELEMENTARY',
+      ),
+    );
+
+    expect(updated, isTrue);
+    expect(repository.updatedChildIds, [77]);
+    expect(repository.getChildrenCallCount, 1);
+  });
+
+  test('아동 삭제 후 최신 목록을 다시 조회한다', () async {
+    final repository = _FakeChildRepository();
+    final controller = GuardianChildController(repository);
+    addTearDown(controller.dispose);
+
+    final deleted = await controller.deleteChild(77);
+
+    expect(deleted, isTrue);
+    expect(repository.deletedChildIds, [77]);
+    expect(repository.getChildrenCallCount, 1);
+  });
 }
 
 const _request = CreateChildRequestDto(
@@ -121,12 +152,19 @@ final class _FakeChildConsentRepository implements ChildConsentRepository {
 }
 
 final class _FakeChildRepository implements ChildRepository {
+  final List<int> updatedChildIds = [];
+  final List<int> deletedChildIds = [];
+  int getChildrenCallCount = 0;
+
   @override
   Future<ChildDetailDto> createChild(CreateChildRequestDto request) async =>
       _detail;
 
   @override
-  Future<List<ChildSummaryDto>> getChildren() async => const [_summary];
+  Future<List<ChildSummaryDto>> getChildren() async {
+    getChildrenCallCount += 1;
+    return const [_summary];
+  }
 
   @override
   Future<ChildDetailDto> getChild(int childId) async => _detail;
@@ -135,10 +173,15 @@ final class _FakeChildRepository implements ChildRepository {
   Future<ChildDetailDto> updateChild(
     int childId,
     UpdateChildRequestDto request,
-  ) async => _detail;
+  ) async {
+    updatedChildIds.add(childId);
+    return _detail;
+  }
 
   @override
-  Future<void> deleteChild(int childId, {bool cascade = true}) async {}
+  Future<void> deleteChild(int childId) async {
+    deletedChildIds.add(childId);
+  }
 
   @override
   Future<TutorialProgressDto> getTutorialProgress(int childId) =>

@@ -42,7 +42,7 @@ final class MockChildRepository implements ChildRepository {
   ) async =>
       ChildDetailDto.fromJson({..._child, 'updatedAt': '2026-07-21T09:31:00Z'});
   @override
-  Future<void> deleteChild(int childId, {bool cascade = true}) async {}
+  Future<void> deleteChild(int childId) async {}
   @override
   Future<TutorialProgressDto> getTutorialProgress(int childId) async =>
       TutorialProgressDto.fromJson(const {

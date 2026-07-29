@@ -5,6 +5,7 @@ import '../../features/activity/domain/repositories/activity_repository.dart';
 import '../../features/activity/presentation/screens/activity_screens.dart';
 import '../../features/auth/auth.dart';
 import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
+import '../../features/child/data/dto/child_dtos.dart';
 import '../../features/child/presentation/screens/child_registration_screen.dart';
 import '../../features/drawing/data/dto/drawing_dtos.dart';
 import '../../features/drawing/domain/repositories/drawing_repository.dart';
@@ -82,8 +83,11 @@ abstract final class AppRouter {
                 ),
           onAddChild: (context) =>
               AppNavigation.pushNamed(context, AppRoutes.childRegister),
-          onEditProfiles: (context) =>
-              showAppMessage(context, message: '프로필 수정·삭제 화면은 준비 중이에요.'),
+          onEditChild: (context, child) => AppNavigation.pushNamed(
+            context,
+            AppRoutes.childEdit(child.childId.toString()),
+            arguments: child,
+          ),
           onChildSelected: (context, child) {
             childController.selectChild(child);
             AppNavigation.resetTo(
@@ -165,6 +169,17 @@ abstract final class AppRouter {
         ChildSelectScreen(controller: childController),
       ['guardian', 'children', 'register'] when childController != null =>
         ChildRegistrationScreen(controller: childController),
+      ['guardian', 'children', final childId, 'edit']
+          when childController != null =>
+        ChildRegistrationScreen(
+          controller: childController,
+          child: settings.arguments is ChildSummaryDto
+              ? settings.arguments! as ChildSummaryDto
+              : childController.children.cast<ChildSummaryDto?>().firstWhere(
+                  (child) => child?.childId.toString() == childId,
+                  orElse: () => null,
+                ),
+        ),
       ['guardian', 'activities']
           when childController != null && activityRepository != null =>
         ActivityHistoryScreen(
@@ -327,6 +342,7 @@ abstract final class AppRouter {
       ['guardian', 'home'] => const ChildContextGuardScreen(),
       ['guardian', 'children', 'select'] => const ChildContextGuardScreen(),
       ['guardian', 'children', 'register'] => const ChildContextGuardScreen(),
+      ['guardian', 'children', _, 'edit'] => const ChildContextGuardScreen(),
       ['guardian', 'reports'] => const ChildContextGuardScreen(),
       _ => UnknownRouteScreen(location: location),
     };

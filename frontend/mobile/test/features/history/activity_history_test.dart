@@ -287,8 +287,7 @@ final class _ChildRepository implements ChildRepository {
   Future<ChildDetailDto> createChild(CreateChildRequestDto request) =>
       throw UnimplementedError();
   @override
-  Future<void> deleteChild(int childId, {bool cascade = true}) =>
-      throw UnimplementedError();
+  Future<void> deleteChild(int childId) => throw UnimplementedError();
   @override
   Future<ChildDetailDto> getChild(int childId) => throw UnimplementedError();
   @override

@@ -8,13 +8,14 @@ import '../../../child/data/dto/child_dtos.dart';
 typedef ChildProfileSelected =
     void Function(BuildContext context, ChildSummaryDto child);
 
-class ProfileSelectionScreen extends StatelessWidget {
+class ProfileSelectionScreen extends StatefulWidget {
   const ProfileSelectionScreen({
     required this.controller,
     required this.onGuardianSelected,
     required this.onChildSelected,
     this.onAddChild,
     this.onEditProfiles,
+    this.onEditChild,
     this.headerAction,
     super.key,
   });
@@ -24,7 +25,15 @@ class ProfileSelectionScreen extends StatelessWidget {
   final ChildProfileSelected onChildSelected;
   final ValueChanged<BuildContext>? onAddChild;
   final ValueChanged<BuildContext>? onEditProfiles;
+  final ChildProfileSelected? onEditChild;
   final Widget? headerAction;
+
+  @override
+  State<ProfileSelectionScreen> createState() => _ProfileSelectionScreenState();
+}
+
+class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
+  bool _isEditingProfiles = false;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -33,7 +42,7 @@ class ProfileSelectionScreen extends StatelessWidget {
       child: Stack(
         children: [
           AnimatedBuilder(
-            animation: controller,
+            animation: widget.controller,
             builder: (context, _) => Center(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(
@@ -49,19 +58,26 @@ class ProfileSelectionScreen extends StatelessWidget {
                       const _ProfileHeader(),
                       const SizedBox(height: AppSpacing.xl),
                       _GuardianSection(
-                        onSelected: () => onGuardianSelected(context),
+                        onSelected: () => widget.onGuardianSelected(context),
                       ),
                       const SizedBox(height: AppSpacing.lg),
                       _ChildrenSection(
-                        controller: controller,
+                        controller: widget.controller,
+                        isEditing: _isEditingProfiles,
                         onChildSelected: (child) =>
-                            onChildSelected(context, child),
-                        onAddChild: onAddChild == null
+                            _isEditingProfiles && widget.onEditChild != null
+                            ? widget.onEditChild!(context, child)
+                            : widget.onChildSelected(context, child),
+                        onAddChild: widget.onAddChild == null
                             ? null
-                            : () => onAddChild!(context),
-                        onEditProfiles: onEditProfiles == null
-                            ? null
-                            : () => onEditProfiles!(context),
+                            : () => widget.onAddChild!(context),
+                        onEditProfiles: widget.onEditChild == null
+                            ? (widget.onEditProfiles == null
+                                  ? null
+                                  : () => widget.onEditProfiles!(context))
+                            : () => setState(
+                                () => _isEditingProfiles = !_isEditingProfiles,
+                              ),
                       ),
                     ],
                   ),
@@ -69,8 +85,8 @@ class ProfileSelectionScreen extends StatelessWidget {
               ),
             ),
           ),
-          if (headerAction != null)
-            Positioned(top: 0, right: 0, child: headerAction!),
+          if (widget.headerAction != null)
+            Positioned(top: 0, right: 0, child: widget.headerAction!),
         ],
       ),
     ),
@@ -167,12 +183,14 @@ class _ChildrenSection extends StatelessWidget {
   const _ChildrenSection({
     required this.controller,
     required this.onChildSelected,
+    required this.isEditing,
     this.onAddChild,
     this.onEditProfiles,
   });
 
   final GuardianChildController controller;
   final ValueChanged<ChildSummaryDto> onChildSelected;
+  final bool isEditing;
   final VoidCallback? onAddChild;
   final VoidCallback? onEditProfiles;
 
@@ -184,18 +202,31 @@ class _ChildrenSection extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Expanded(
-              child: _SectionTitle(
-                icon: Icons.child_care_rounded,
-                label: '아동 프로필',
-                color: _ProfileColors.orange,
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _SectionTitle(
+                    icon: Icons.child_care_rounded,
+                    label: '아동 프로필',
+                    color: _ProfileColors.orange,
+                  ),
+                  if (isEditing)
+                    const Padding(
+                      padding: EdgeInsets.only(top: AppSpacing.xs),
+                      child: Text(
+                        '수정하거나 삭제할 아이를 선택해 주세요.',
+                        style: TextStyle(color: AppColors.inkMuted),
+                      ),
+                    ),
+                ],
               ),
             ),
             OutlinedButton.icon(
               key: const ValueKey('edit-child-profiles'),
               onPressed: onEditProfiles,
               icon: const Icon(Icons.edit_outlined, size: 18),
-              label: const Text('프로필 편집'),
+              label: Text(isEditing ? '편집 완료' : '프로필 편집'),
               style: OutlinedButton.styleFrom(
                 foregroundColor: _ProfileColors.orange,
                 side: const BorderSide(color: _ProfileColors.orange),

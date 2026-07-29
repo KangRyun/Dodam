@@ -6,9 +6,14 @@ import '../../data/dto/child_consent_dtos.dart';
 import '../../data/dto/child_dtos.dart';
 
 class ChildRegistrationScreen extends StatefulWidget {
-  const ChildRegistrationScreen({required this.controller, super.key});
+  const ChildRegistrationScreen({
+    required this.controller,
+    this.child,
+    super.key,
+  });
 
   final GuardianChildController controller;
+  final ChildSummaryDto? child;
 
   @override
   State<ChildRegistrationScreen> createState() =>
@@ -22,6 +27,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   String _preferredCharacter = 'BEAR';
   String _questionDifficulty = 'PRESCHOOL';
   bool _submitted = false;
+  bool get _isEditing => widget.child != null;
 
   /// 아동 대상 약관의 동의 여부. 기본값은 미동의이며 사용자가 직접 켜야 한다.
   final Map<int, bool> _consentAgreed = {};
@@ -50,8 +56,16 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   @override
   void initState() {
     super.initState();
+    final child = widget.child;
+    if (child != null) {
+      _nicknameController.text = child.nickname;
+      _birthDate = DateTime.tryParse(child.birthDate);
+      _relationshipType = child.relationshipType;
+      _preferredCharacter = child.preferredCharacter ?? 'BEAR';
+      _questionDifficulty = child.questionDifficulty;
+    }
     widget.controller.resetRegistration();
-    widget.controller.loadChildConsentTerms();
+    if (!_isEditing) widget.controller.loadChildConsentTerms();
   }
 
   @override
@@ -112,25 +126,34 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
       return;
     }
 
-    final birthDate = _birthDate!;
-    final succeeded = await widget.controller.registerChild(
-      CreateChildRequestDto(
-        nickname: _nicknameController.text.trim(),
-        birthDate:
-            '${birthDate.year.toString().padLeft(4, '0')}-'
-            '${birthDate.month.toString().padLeft(2, '0')}-'
-            '${birthDate.day.toString().padLeft(2, '0')}',
-        relationshipType: _relationshipType,
-        preferredCharacter: _preferredCharacter,
-        questionDifficulty: _questionDifficulty,
-        responseModes: const ['VOICE'],
-      ),
-      consentAgreements: _consentAgreements,
-    );
+    final succeeded = _isEditing
+        ? await widget.controller.updateChild(
+            widget.child!.childId,
+            UpdateChildRequestDto(
+              nickname: _nicknameController.text.trim(),
+              preferredCharacter: _preferredCharacter,
+              questionDifficulty: _questionDifficulty,
+              responseModes: const ['VOICE'],
+            ),
+          )
+        : await widget.controller.registerChild(
+            CreateChildRequestDto(
+              nickname: _nicknameController.text.trim(),
+              birthDate:
+                  '${_birthDate!.year.toString().padLeft(4, '0')}-'
+                  '${_birthDate!.month.toString().padLeft(2, '0')}-'
+                  '${_birthDate!.day.toString().padLeft(2, '0')}',
+              relationshipType: _relationshipType,
+              preferredCharacter: _preferredCharacter,
+              questionDifficulty: _questionDifficulty,
+              responseModes: const ['VOICE'],
+            ),
+            consentAgreements: _consentAgreements,
+          );
     if (!mounted) return;
     if (succeeded) {
       // 아동은 등록됐지만 동의 기록이 실패하면 음성 답변이 거절되므로 그대로 알린다.
-      if (widget.controller.consentRecordError != null) {
+      if (!_isEditing && widget.controller.consentRecordError != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('아이는 등록했지만 동의 저장에 실패했어요. 설정에서 다시 동의해 주세요.'),
@@ -141,7 +164,46 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
       return;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('아이 등록에 실패했어요. 잠시 후 다시 시도해 주세요.')),
+      SnackBar(
+        content: Text(
+          _isEditing
+              ? '아이 정보를 수정하지 못했어요. 잠시 후 다시 시도해 주세요.'
+              : '아이 등록에 실패했어요. 잠시 후 다시 시도해 주세요.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _delete() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('아이 프로필을 삭제할까요?'),
+        content: const Text('그림과 대화, 활동 기록도 함께 삭제되며 되돌릴 수 없어요.'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    final succeeded = await widget.controller.deleteChild(
+      widget.child!.childId,
+    );
+    if (!mounted) return;
+    if (succeeded) {
+      Navigator.of(context).pop();
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('아이 프로필을 삭제하지 못했어요. 다시 시도해 주세요.')),
     );
   }
 
@@ -149,7 +211,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: AppColors.canvas,
     appBar: AppTopBar(
-      title: '아이 등록',
+      title: _isEditing ? '아이 프로필 편집' : '아이 등록',
       onBack: () => Navigator.of(context).maybePop(),
     ),
     body: SafeArea(
@@ -181,30 +243,32 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                     textInputAction: TextInputAction.next,
                   ),
                   const SizedBox(height: AppSpacing.md),
-                  _BirthDateField(
-                    value: _birthDate,
-                    errorText: _birthDateError,
-                    onTap: _pickBirthDate,
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  DropdownButtonFormField<String>(
-                    key: const ValueKey('guardian-relationship'),
-                    initialValue: _relationshipType,
-                    decoration: const InputDecoration(labelText: '아이와의 관계 *'),
-                    items: _relationships.entries
-                        .map(
-                          (entry) => DropdownMenuItem(
-                            value: entry.key,
-                            child: Text(entry.value),
-                          ),
-                        )
-                        .toList(growable: false),
-                    onChanged: (value) {
-                      if (value != null) {
-                        setState(() => _relationshipType = value);
-                      }
-                    },
-                  ),
+                  if (!_isEditing) ...[
+                    _BirthDateField(
+                      value: _birthDate,
+                      errorText: _birthDateError,
+                      onTap: _pickBirthDate,
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                    DropdownButtonFormField<String>(
+                      key: const ValueKey('guardian-relationship'),
+                      initialValue: _relationshipType,
+                      decoration: const InputDecoration(labelText: '아이와의 관계 *'),
+                      items: _relationships.entries
+                          .map(
+                            (entry) => DropdownMenuItem(
+                              value: entry.key,
+                              child: Text(entry.value),
+                            ),
+                          )
+                          .toList(growable: false),
+                      onChanged: (value) {
+                        if (value != null) {
+                          setState(() => _relationshipType = value);
+                        }
+                      },
+                    ),
+                  ],
                   const SizedBox(height: AppSpacing.xl),
                   const Text(
                     '질문 난이도',
@@ -226,7 +290,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                     ),
                     const SizedBox(height: AppSpacing.sm),
                   ],
-                  if (_consentTerms.isNotEmpty) ...[
+                  if (!_isEditing && _consentTerms.isNotEmpty) ...[
                     const SizedBox(height: AppSpacing.md),
                     _ConsentSection(
                       terms: _consentTerms,
@@ -239,12 +303,21 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                   const SizedBox(height: AppSpacing.lg),
                   AppButton(
                     key: const ValueKey('submit-child-registration'),
-                    label: '등록하기',
+                    label: _isEditing ? '저장하기' : '등록하기',
                     isLoading:
                         widget.controller.registrationStatus ==
                         ChildRegistrationStatus.submitting,
                     onPressed: _submit,
                   ),
+                  if (_isEditing) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    AppButton(
+                      key: const ValueKey('delete-child-profile'),
+                      label: '아이 프로필 삭제',
+                      variant: AppButtonVariant.danger,
+                      onPressed: _delete,
+                    ),
+                  ],
                 ],
               ),
             ),

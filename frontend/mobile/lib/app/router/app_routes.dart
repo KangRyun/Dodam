@@ -6,6 +6,8 @@ abstract final class AppRoutes {
   static const String guardianHome = '/guardian/home';
   static const String childSelect = '/guardian/children/select';
   static const String childRegister = '/guardian/children/register';
+  static String childEdit(String childId) =>
+      '/guardian/children/${Uri.encodeComponent(childId)}/edit';
   static const String activityHistory = '/guardian/activities';
   static const String reportList = '/guardian/reports';
 
