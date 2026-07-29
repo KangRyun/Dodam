@@ -126,7 +126,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('봄이, 오늘은 무엇을 그려 볼까?'), findsOneWidget);
-    expect(find.byKey(const ValueKey('draw-action')), findsOneWidget);
+    // 461: 지원하는 그림 유형(기본 Mock은 그림일기)마다 카드가 뜬다.
+    expect(find.byKey(const ValueKey('activity-5')), findsOneWidget);
   });
 
   testWidgets('선택된 아동의 그림 활동 시작 버튼은 Drawing placeholder로 연결된다', (tester) async {
@@ -139,7 +140,10 @@ void main() {
     await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
     await tester.pumpAndSettle();
 
-    await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    // 463·464: 카드 탭 → 안내 팝업 → 시작하기 순서로 Drawing에 진입한다.
+    await _tapAfterScroll(tester, const ValueKey('activity-5'));
+    await tester.pumpAndSettle();
+    await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
     await tester.pumpAndSettle();
 
     expect(find.text('그림 활동'), findsWidgets);
@@ -149,11 +153,17 @@ void main() {
     final drawingRepository = _TrackingDrawingRepository(activeSessionId: 812);
     await _pumpChildHome(tester, drawingRepository);
 
-    await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    // 저장된 초안이 없는 그림 단계 활성 세션은 안내 팝업 없이 카드 한 번
+    // 탭으로 바로 재개한다.
+    await _tapAfterScroll(tester, const ValueKey('activity-77'));
     await tester.pumpAndSettle();
 
     expect(drawingRepository.createCalls, 0);
-    expect(drawingRepository.getTypesChildId, isNull);
+    // 461 카드 목록을 채우려고 홈이 이미 그림 유형을 한 번 조회했다(활성 세션
+    // 존재 여부와 무관). resolveSession 내부는 활성 세션이 있으면 이 조회를
+    // 다시 하지 않는다 — 그건 drawing_session_start_controller_test.dart가
+    // 별도로 검증한다.
+    expect(drawingRepository.getTypesChildId, 3);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
   });
 
@@ -164,7 +174,9 @@ void main() {
     );
     await _pumpChildHome(tester, drawingRepository);
 
-    await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    // 임시 저장본이 있으면 461/463/464의 새 활동 안내보다 먼저 이어
+    // 그리기 선택 다이얼로그를 보여준다.
+    await _tapAfterScroll(tester, const ValueKey('activity-77'));
     await tester.pump(const Duration(milliseconds: 400));
 
     expect(find.text('그리던 그림이 있어요'), findsOneWidget);
@@ -186,7 +198,7 @@ void main() {
     );
     await _pumpChildHome(tester, drawingRepository);
 
-    await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    await _tapAfterScroll(tester, const ValueKey('activity-77'));
     await tester.pump(const Duration(milliseconds: 400));
     await tester.tap(find.text('새로 그리기'));
     await tester.pumpAndSettle();
@@ -211,7 +223,9 @@ void main() {
     await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
     await tester.pumpAndSettle();
 
-    await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    await _tapAfterScroll(tester, const ValueKey('activity-77'));
+    await tester.pumpAndSettle();
+    await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
     await tester.pumpAndSettle();
 
     expect(drawingRepository.getTypesChildId, 3);
@@ -271,13 +285,29 @@ void main() {
     );
     await _pumpChildHome(tester, drawingRepository);
 
-    await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    await _tapAfterScroll(tester, const ValueKey('activity-77'));
+    await tester.pumpAndSettle();
+    await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
     await tester.pumpAndSettle();
 
+    // 464: 실패는 안내 팝업 안에서 오류·재시도로 처리하고, Drawing으로는
+    // 이동하지 않는다. 취소하면 홈에는 카드가 그대로 남아 있다.
     expect(drawingRepository.createCalls, 1);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
-    expect(find.textContaining('그림 활동을 시작하지 못했어요'), findsOneWidget);
-    expect(find.byKey(const ValueKey('draw-action')), findsOneWidget);
+    expect(find.byKey(const ValueKey('activity-guide-error')), findsOneWidget);
+    expect(find.byKey(const ValueKey('activity-guide-start')), findsOneWidget);
+
+    // "다시 시도"를 눌러도 재요청은 정상적으로 다시 나간다.
+    await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
+    await tester.pumpAndSettle();
+
+    expect(drawingRepository.createCalls, 2);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
+
+    await _tapAfterScroll(tester, const ValueKey('activity-guide-cancel'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('activity-77')), findsOneWidget);
   });
 
   testWidgets('활동 시작 연속 탭은 DrawingSession을 중복 생성하지 않는다', (tester) async {
@@ -285,10 +315,13 @@ void main() {
     final drawingRepository = _TrackingDrawingRepository(pending: pending);
     await _pumpChildHome(tester, drawingRepository);
 
-    final action = find.byKey(const ValueKey('draw-action'));
-    await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    await _tapAfterScroll(tester, const ValueKey('activity-77'));
+    await tester.pumpAndSettle();
+
+    final startButton = find.byKey(const ValueKey('activity-guide-start'));
+    await tester.tap(startButton);
     await tester.pump();
-    await tester.tap(action);
+    await tester.tap(startButton);
     await tester.pump();
 
     expect(drawingRepository.createCalls, 1);
