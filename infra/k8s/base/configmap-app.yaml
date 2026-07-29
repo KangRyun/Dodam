@@ -64,6 +64,13 @@ data:
   TTS_MODEL: "gpt-4o-mini-tts"
   TTS_VOICE: "fable"
   YOLO_MODEL_PATH: "/models/htp_yolo/htp_best.pt"
+  # ⚠️ 두 경로는 **짝**이다. 하나만 넣으면 sketch 쪽이 앱 상대경로 기본값으로 떨어져
+  #   verify_all_models() 가 "가중치를 찾을 수 없어요: sketch" 로 죽고,
+  #   objectDetection 이 NOT_READY 가 된다(= 그림 분석 전체가 동작하지 않는다).
+  #   2026-07-29 컷오버에서 실제로 이 상태로 운영에 올라갔다. 스테이징은 ai 를
+  #   replicas 0 으로 뒀기 때문에 **한 번도 드러나지 않았다** — 띄우지 않은 워크로드의
+  #   설정은 검증된 적이 없다는 뜻이다.
+  SKETCH_MODEL_PATH: "/models/htp_yolo/sketch_base.pt"
 
   # ── 푸시 ────────────────────────────────────────────────────────────
   APP_PUSH_FCM_CREDENTIALS_PATH: "/run/secrets/fcm-service-account.json"
