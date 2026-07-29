@@ -60,6 +60,7 @@ class RecentMessage(_CamelModel):
     sender_type: str
     message_type: str
     text: str | None = Field(default=None, repr=False)
+    selected_option_codes: list[str] | None = None
 
 
 # BE enum과 이름을 일치시킨다: QuestionDifficulty · ResponseMode.

@@ -75,6 +75,28 @@ def _request(**overrides) -> QuestionRequest:
 
 
 class BuildMessagesTest(unittest.TestCase):
+    def test_recent_message_accepts_optional_selected_option_codes(self):
+        selected = RecentMessage.model_validate(
+            {
+                "messageId": 102,
+                "senderType": "CHILD",
+                "messageType": "OPTION_ANSWER",
+                "text": "음, 아니야",
+                "selectedOptionCodes": ["CHIP_NO"],
+            }
+        )
+        legacy = RecentMessage.model_validate(
+            {
+                "messageId": 101,
+                "senderType": "CHILD",
+                "messageType": "VOICE_ANSWER",
+                "text": "강아지야",
+            }
+        )
+
+        self.assertEqual(selected.selected_option_codes, ["CHIP_NO"])
+        self.assertIsNone(legacy.selected_option_codes)
+
     def test_first_question_uses_detected_objects_context(self):
         system = question_service._build_messages(_request())[0]["content"]
         self.assertIn("집전체", system)  # 탐지 객체가 그림 분석 근거로 들어감
