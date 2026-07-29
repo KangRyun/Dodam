@@ -437,7 +437,8 @@ final class _DraftRepository implements DrawingRepository {
   Future<DrawingUploadResponseDto> uploadDrawing(
     int sessionId,
     BinaryUploadDto image, {
-    String? objectCode,
+    required UploadDrawingImageMetadataDto metadata,
+    required String idempotencyKey,
   }) => throw UnimplementedError();
 }
 

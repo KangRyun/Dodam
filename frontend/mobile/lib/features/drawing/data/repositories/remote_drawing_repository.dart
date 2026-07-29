@@ -30,14 +30,15 @@ FormData buildDraftFormData(
 });
 
 FormData buildDrawingCompleteFormData(
-  BinaryUploadDto finalImage,
+  BinaryUploadDto? finalImage,
   DrawingCompleteMetadataDto metadata,
 ) => FormData.fromMap({
-  'finalImage': MultipartFile.fromBytes(
-    finalImage.bytes,
-    filename: 'drawing.png',
-    contentType: DioMediaType.parse('image/png'),
-  ),
+  if (finalImage != null)
+    'finalImage': MultipartFile.fromBytes(
+      finalImage.bytes,
+      filename: 'drawing.png',
+      contentType: DioMediaType.parse('image/png'),
+    ),
   'metadata': MultipartFile.fromBytes(
     utf8.encode(jsonEncode(metadata.toJson())),
     filename: 'metadata.json',
@@ -61,6 +62,7 @@ final class RemoteDrawingRepository
     implements
         DrawingRepository,
         HtpDrawingRepository,
+        UploadedDrawingCompletionRepository,
         DrawingSessionDiscarder {
   const RemoteDrawingRepository(this._apiClient);
   final ApiClient _apiClient;
@@ -118,9 +120,13 @@ final class RemoteDrawingRepository
   }
 
   @override
-  Future<HtpAssessmentDto> moveToNextHtpStep(int assessmentId) async {
+  Future<HtpAssessmentDto> moveToNextHtpStep(
+    int assessmentId, {
+    required String inputMethod,
+  }) async {
     final response = await _apiClient.post<Map<String, dynamic>>(
       'htp-assessments/$assessmentId/steps/next',
+      data: {'inputMethod': inputMethod},
       options: Options(headers: {'Idempotency-Key': _idempotencyKey()}),
     );
     return HtpAssessmentDto.fromJson(envelopeObject(response.data));
@@ -257,6 +263,22 @@ final class RemoteDrawingRepository
   }
 
   @override
+  Future<DrawingStageCompleteResponseDto> completeUploadedDrawingStage(
+    int sessionId, {
+    required DrawingCompleteMetadataDto metadata,
+    required String idempotencyKey,
+  }) async {
+    final response = await _apiClient.post<Map<String, dynamic>>(
+      'drawing-sessions/$sessionId/drawing-complete',
+      data: buildDrawingCompleteFormData(null, metadata),
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+    );
+    return DrawingStageCompleteResponseDto.fromJson(
+      envelopeObject(response.data),
+    );
+  }
+
+  @override
   Future<void> saveReflection(
     int sessionId,
     SaveDrawingReflectionRequestDto request,
@@ -290,7 +312,8 @@ final class RemoteDrawingRepository
   Future<DrawingUploadResponseDto> uploadDrawing(
     int sessionId,
     BinaryUploadDto image, {
-    String? objectCode,
+    required UploadDrawingImageMetadataDto metadata,
+    required String idempotencyKey,
   }) async {
     final response = await _apiClient.post<Map<String, dynamic>>(
       'drawing-sessions/$sessionId/upload',
@@ -300,8 +323,13 @@ final class RemoteDrawingRepository
           filename: image.fileName,
           contentType: DioMediaType.parse(image.mimeType),
         ),
-        'objectCode': ?objectCode,
+        'metadata': MultipartFile.fromBytes(
+          utf8.encode(jsonEncode(metadata.toJson())),
+          filename: 'metadata.json',
+          contentType: DioMediaType.parse('application/json'),
+        ),
       }),
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
     );
     return DrawingUploadResponseDto.fromJson(envelopeObject(response.data));
   }

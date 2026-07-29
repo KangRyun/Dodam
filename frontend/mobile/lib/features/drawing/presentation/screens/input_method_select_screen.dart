@@ -31,6 +31,8 @@ class InputMethodSelectScreen extends StatefulWidget {
     required this.icon,
     required this.accentColor,
     required this.repository,
+    this.replaceActive = false,
+    this.htpAssessmentId,
     PhotoPickerAdapter? photoPickerAdapter,
     this.dimensionReader = readPhotoDimensions,
     this.now,
@@ -44,6 +46,8 @@ class InputMethodSelectScreen extends StatefulWidget {
   final IconData icon;
   final Color accentColor;
   final DrawingRepository repository;
+  final bool replaceActive;
+  final int? htpAssessmentId;
   final PhotoPickerAdapter photoPickerAdapter;
   final PhotoDimensionReader dimensionReader;
   final DateTime Function()? now;
@@ -74,6 +78,10 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
   /// 만들지 않는다. 한 번 만들어지면 재시도·다른 사진 재선택에도 그대로
   /// 재사용해 세션이 여러 개 남지 않게 한다.
   int? _sessionId;
+  DrawingSessionResolution? _sessionResolution;
+  String? _uploadIdempotencyKey;
+  String? _completionIdempotencyKey;
+  late final DateTime _flowStartedAt = widget.now?.call() ?? DateTime.now();
 
   Future<void> _handleCanvasChoice() async {
     if (_busy) return;
@@ -82,10 +90,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
       _canvasError = false;
     });
     try {
-      final resolution = await _controller.createNewSession(
-        childId: widget.childId,
-        drawingTypeId: widget.drawingTypeId,
-      );
+      final resolution = await _createHtpResolution('CANVAS');
       if (!mounted) return;
       Navigator.of(context).pop(resolution);
     } on Object {
@@ -178,36 +183,62 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
       var sessionId = _sessionId;
       if (sessionId == null) {
         final now = widget.now?.call() ?? DateTime.now();
-        final session = await widget.repository.createSession(
-          CreateDrawingSessionRequestDto(
-            childId: widget.childId,
-            drawingTypeId: widget.drawingTypeId,
-            inputMethod: 'UPLOAD',
-            clientStartedAt: now.toUtc().toIso8601String(),
-          ),
-        );
-        sessionId = session.drawingSessionId;
+        final resolution = await _createHtpResolution('UPLOAD');
+        sessionId = resolution.sessionId;
         if (!mounted) return;
-        setState(() => _sessionId = sessionId);
+        setState(() {
+          _sessionId = sessionId;
+          _sessionResolution = resolution;
+          _uploadIdempotencyKey =
+              'htp-upload-$sessionId-${now.microsecondsSinceEpoch}';
+          _completionIdempotencyKey =
+              'htp-complete-$sessionId-${now.microsecondsSinceEpoch}';
+        });
       }
 
-      await widget.repository.uploadDrawing(
+      final uploaded = await widget.repository.uploadDrawing(
         sessionId,
         BinaryUploadDto(
           bytes: validated.photo.bytes,
           fileName: validated.photo.fileName,
           mimeType: validated.mimeType,
         ),
+        metadata: UploadDrawingImageMetadataDto(
+          clientCapturedAt: (widget.now?.call() ?? DateTime.now())
+              .toUtc()
+              .toIso8601String(),
+          rotationDegrees: 0,
+          cropApplied: false,
+        ),
+        idempotencyKey: _uploadIdempotencyKey!,
       );
 
-      // 업로드 응답에는 진행 단계가 없어, 이후 화면 이동을 위해 최신 세션
-      // 상태를 다시 조회한다(currentStage를 임의로 가정하지 않는다).
-      final refreshed = await widget.repository.getSession(sessionId);
+      if (widget.repository is! UploadedDrawingCompletionRepository) {
+        throw UnsupportedError('Uploaded drawing completion is unavailable.');
+      }
+      final completed =
+          await (widget.repository as UploadedDrawingCompletionRepository)
+              .completeUploadedDrawingStage(
+                sessionId,
+                metadata: DrawingCompleteMetadataDto(
+                  sourceAssetId: uploaded.drawingAssetId,
+                  drawingDurationMs: (widget.now?.call() ?? DateTime.now())
+                      .difference(_flowStartedAt)
+                      .inMilliseconds
+                      .clamp(1, 1 << 31),
+                  clientCompletedAt: (widget.now?.call() ?? DateTime.now())
+                      .toUtc()
+                      .toIso8601String(),
+                ),
+                idempotencyKey: _completionIdempotencyKey!,
+              );
       if (!mounted) return;
+      final initial = _sessionResolution!;
       Navigator.of(context).pop(
         DrawingSessionResolution(
-          sessionId: refreshed.drawingSessionId,
-          currentStage: refreshed.currentStage,
+          sessionId: completed.drawingSessionId,
+          currentStage: completed.currentStage,
+          activityContext: initial.activityContext,
         ),
       );
     } on Object catch (error) {
@@ -232,6 +263,36 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     }
     if (!mounted) return;
     Navigator.of(context).pop();
+  }
+
+  Future<DrawingSessionResolution> _createHtpResolution(
+    String inputMethod,
+  ) async {
+    final assessmentId = widget.htpAssessmentId;
+    if (assessmentId == null) {
+      return _controller.createHtpAssessment(
+        childId: widget.childId,
+        replaceActive: widget.replaceActive,
+        inputMethod: inputMethod,
+      );
+    }
+    if (widget.repository is! HtpDrawingRepository) {
+      throw UnsupportedError('HTP activity is unavailable.');
+    }
+    final assessment = await (widget.repository as HtpDrawingRepository)
+        .moveToNextHtpStep(assessmentId, inputMethod: inputMethod);
+    final step = assessment.currentStep;
+    return DrawingSessionResolution(
+      sessionId: step.drawingSessionId,
+      currentStage: step.currentStage,
+      activityContext: DrawingActivityContextDto(
+        activityKind: 'HTP',
+        htpAssessmentId: assessment.htpAssessmentId,
+        htpStatus: assessment.status,
+        stepOrder: step.stepOrder,
+        drawingSubject: step.drawingSubject,
+      ),
+    );
   }
 
   @override

@@ -11,6 +11,7 @@ import '../../../child/data/dto/child_dtos.dart';
 import '../../../drawing/application/drawing_session_start_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
+import '../../../drawing/presentation/screens/input_method_select_screen.dart';
 import '../widgets/activity_guide_dialog.dart';
 
 enum _ActivityLoadStatus { loading, loaded, empty, error }
@@ -242,14 +243,18 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         }
       } else {
         final (icon, accentColor) = _visualForDrawingType(type.code);
-        resolution = await showActivityGuideDialog<DrawingSessionResolution>(
+        resolution = await showActivityGuideDialog<DrawingSessionResolution?>(
           context: context,
           title: type.name,
           description: _descriptionForDrawingType(type),
           icon: icon,
           accentColor: accentColor,
-          onStart: () =>
-              _createSelectedActivity(controller: controller, type: type),
+          onStart: () => _startGuidedActivity(
+            controller: controller,
+            type: type,
+            icon: icon,
+            accentColor: accentColor,
+          ),
         );
       }
       if (resolution == null || !mounted) return;
@@ -297,6 +302,30 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
           replaceActive: replaceActive,
           inputMethod: 'CANVAS',
         );
+
+  Future<DrawingSessionResolution?> _startGuidedActivity({
+    required DrawingSessionStartController controller,
+    required DrawingTypeDto type,
+    required IconData icon,
+    required Color accentColor,
+  }) {
+    if (type.code != 'HTP') {
+      return _createSelectedActivity(controller: controller, type: type);
+    }
+    return Navigator.of(context).push<DrawingSessionResolution>(
+      MaterialPageRoute(
+        builder: (_) => InputMethodSelectScreen(
+          childId: widget.child.childId,
+          drawingTypeId: type.drawingTypeId,
+          title: type.name,
+          description: _descriptionForDrawingType(type),
+          icon: icon,
+          accentColor: accentColor,
+          repository: widget.drawingRepository,
+        ),
+      ),
+    );
+  }
 
   Widget _buildActivitySection() {
     switch (_status) {

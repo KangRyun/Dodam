@@ -49,7 +49,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("20");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("21");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(69);
     assertThat(tableExists("refresh_tokens")).isFalse();
@@ -316,6 +316,13 @@ class DatabaseMigrationIntegrationTest {
     assertThat(generatedColumnContains("drawing_assets", "final_drawing_session_id", "FINAL"))
         .isTrue();
     assertThat(indexExists("drawing_assets", "uk_drawing_assets_final_session", true)).isTrue();
+    assertThat(columnExists("drawing_assets", "upload_idempotency_key")).isTrue();
+    assertThat(columnExists("drawing_assets", "upload_fingerprint")).isTrue();
+    assertThat(columnExists("drawing_assets", "upload_rotation_degrees")).isTrue();
+    assertThat(columnExists("drawing_assets", "upload_crop_applied")).isTrue();
+    assertThat(generatedColumnContains("drawing_assets", "uploaded_drawing_session_id", "UPLOADED"))
+        .isTrue();
+    assertThat(indexExists("drawing_assets", "uk_drawing_assets_uploaded_session", true)).isTrue();
   }
 
   @Test

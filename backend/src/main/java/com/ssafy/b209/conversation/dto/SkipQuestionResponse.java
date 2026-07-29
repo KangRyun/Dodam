@@ -3,8 +3,8 @@ package com.ssafy.b209.conversation.dto;
 /**
  * 질문 건너뛰기 처리 결과다.
  *
- * <p>그림 활동 단계는 이 API로 바뀌지 않는다(§12.8의 {@code returnToDrawing}은 미지원). 화면은 {@code skipped}로 다음 질문
- * 요청 여부를 판단한다.
+ * <p>그림 활동 단계는 이 API로 바뀌지 않는다(§12.8의 {@code returnToDrawing}은 미지원). 화면은 {@code skipped}로 다음 질문 요청
+ * 여부를 판단한다.
  *
  * @param conversationId 대화 세션 식별자
  * @param questionMessageId 건너뛴 질문 메시지 식별자

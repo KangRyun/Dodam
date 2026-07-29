@@ -599,6 +599,24 @@ final class DrawingCompleteMetadataDto {
   };
 }
 
+final class UploadDrawingImageMetadataDto {
+  const UploadDrawingImageMetadataDto({
+    required this.clientCapturedAt,
+    required this.rotationDegrees,
+    required this.cropApplied,
+  });
+
+  final String? clientCapturedAt;
+  final int rotationDegrees;
+  final bool cropApplied;
+
+  Map<String, dynamic> toJson() => {
+    if (clientCapturedAt != null) 'clientCapturedAt': clientCapturedAt,
+    'rotationDegrees': rotationDegrees,
+    'cropApplied': cropApplied,
+  };
+}
+
 final class DrawingStageAnalysisDto {
   const DrawingStageAnalysisDto({
     required this.analysisId,
@@ -722,20 +740,45 @@ final class DrawingCompletionResponseDto {
 final class DrawingUploadResponseDto {
   const DrawingUploadResponseDto({
     required this.drawingSessionId,
-    required this.objectCode,
-    required this.originalAsset,
-    required this.correctedAsset,
+    required this.drawingAssetId,
+    required this.assetType,
+    required this.drawingSubject,
+    required this.currentStage,
+    required this.previewUrl,
+    required this.mimeType,
+    required this.fileSizeBytes,
+    required this.widthPx,
+    required this.heightPx,
+    required this.capturedAt,
+    required this.uploadedAt,
+    required this.qualityWarnings,
   });
   factory DrawingUploadResponseDto.fromJson(Map<String, dynamic> json) =>
       DrawingUploadResponseDto(
         drawingSessionId: json['drawingSessionId'] as int,
-        objectCode: json['objectCode'] as String?,
-        originalAsset: DrawingAssetDto.fromJson(_map(json['originalAsset'])),
-        correctedAsset: DrawingAssetDto.fromJson(_map(json['correctedAsset'])),
+        drawingAssetId: json['drawingAssetId'] as int,
+        assetType: json['assetType'] as String,
+        drawingSubject: json['drawingSubject'] as String,
+        currentStage: json['currentStage'] as String,
+        previewUrl: json['previewUrl'] as String,
+        mimeType: json['mimeType'] as String,
+        fileSizeBytes: json['fileSizeBytes'] as int,
+        widthPx: json['widthPx'] as int,
+        heightPx: json['heightPx'] as int,
+        capturedAt: json['capturedAt'] as String,
+        uploadedAt: json['uploadedAt'] as String,
+        qualityWarnings: (json['qualityWarnings'] as List<dynamic>)
+            .cast<String>(),
       );
-  final int drawingSessionId;
-  final String? objectCode;
-  final DrawingAssetDto originalAsset, correctedAsset;
+  final int drawingSessionId, drawingAssetId, fileSizeBytes, widthPx, heightPx;
+  final String assetType,
+      drawingSubject,
+      currentStage,
+      previewUrl,
+      mimeType,
+      capturedAt,
+      uploadedAt;
+  final List<String> qualityWarnings;
 }
 
 final class ObjectDetectionRequestDto {

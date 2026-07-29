@@ -17,6 +17,8 @@ import '../../../drawing/application/drawing_sync_coordinator.dart';
 import '../../../drawing/application/drawing_draft_restore_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
+import '../../../drawing/application/drawing_session_start_controller.dart';
+import '../../../drawing/presentation/screens/input_method_select_screen.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 import '../../../conversation/conversation.dart';
@@ -816,27 +818,51 @@ class _DrawingScreenState extends State<DrawingScreen> {
     if (_movedToReflection || !mounted) return;
     _movedToReflection = true;
     try {
-      final assessment = await htpRepository.moveToNextHtpStep(assessmentId);
-      if (!mounted) return;
-      if (assessment.allStepsCompleted) {
-        _movedToReflection = false;
-        _goToEmotionSelect();
+      if (activityContext.drawingSubject == 'PERSON') {
+        final assessment = await htpRepository.moveToNextHtpStep(
+          assessmentId,
+          inputMethod: 'CANVAS',
+        );
+        if (!mounted) return;
+        if (assessment.allStepsCompleted) {
+          _movedToReflection = false;
+          _goToEmotionSelect();
+        }
         return;
       }
-      final step = assessment.currentStep;
+      final nextSubject = activityContext.drawingSubject == 'HOUSE'
+          ? '나무'
+          : '사람';
+      final resolution = await Navigator.of(context)
+          .push<DrawingSessionResolution>(
+            MaterialPageRoute(
+              builder: (_) => InputMethodSelectScreen(
+                childId: int.parse(widget.childId),
+                drawingTypeId: 0,
+                title: '$nextSubject 그리기',
+                description: '$nextSubject 그림을 어떻게 준비할까?',
+                icon: activityContext.drawingSubject == 'HOUSE'
+                    ? Icons.park_rounded
+                    : Icons.person_rounded,
+                accentColor: AppColors.leaf,
+                repository: repository,
+                htpAssessmentId: assessmentId,
+              ),
+            ),
+          );
+      if (!mounted) return;
+      if (resolution == null) {
+        _movedToReflection = false;
+        return;
+      }
       await Navigator.of(context).pushReplacementNamed(
         AppRoutes.drawing(widget.childId),
         arguments: DrawingRouteArguments(
-          sessionId: step.drawingSessionId,
+          sessionId: resolution.sessionId,
           repository: repository,
           completionSnapshotProvider: widget.completionSnapshotProvider,
-          activityContext: DrawingActivityContextDto(
-            activityKind: 'HTP',
-            htpAssessmentId: assessment.htpAssessmentId,
-            htpStatus: assessment.status,
-            stepOrder: step.stepOrder,
-            drawingSubject: step.drawingSubject,
-          ),
+          resumeConversation: !resolution.isDrawingStage,
+          activityContext: resolution.activityContext,
         ),
       );
     } on Object {

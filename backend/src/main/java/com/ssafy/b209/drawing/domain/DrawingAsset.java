@@ -60,6 +60,18 @@ public class DrawingAsset {
   @Column(name = "checksum_sha256", nullable = false, columnDefinition = "CHAR(64)")
   private String checksumSha256;
 
+  @Column(name = "upload_idempotency_key", length = 100, unique = true)
+  private String uploadIdempotencyKey;
+
+  @Column(name = "upload_fingerprint", columnDefinition = "CHAR(64)")
+  private String uploadFingerprint;
+
+  @Column(name = "upload_rotation_degrees")
+  private Integer uploadRotationDegrees;
+
+  @Column(name = "upload_crop_applied")
+  private Boolean uploadCropApplied;
+
   @Column(name = "last_event_sequence")
   private Long lastEventSequence;
 
@@ -100,6 +112,10 @@ public class DrawingAsset {
     this.widthPx = requirePositiveDimensionOrNull(widthPx, "widthPx");
     this.heightPx = requirePositiveDimensionOrNull(heightPx, "heightPx");
     this.checksumSha256 = checksumSha256;
+    this.uploadIdempotencyKey = null;
+    this.uploadFingerprint = null;
+    this.uploadRotationDegrees = null;
+    this.uploadCropApplied = null;
     this.lastEventSequence = null;
     this.objectCode = null;
     this.capturedAt = capturedAt;
@@ -154,6 +170,59 @@ public class DrawingAsset {
         Objects.requireNonNull(checksumSha256, "checksumSha256 must not be null"),
         Objects.requireNonNull(capturedAt, "capturedAt must not be null"),
         Objects.requireNonNull(createdAt, "createdAt must not be null"));
+  }
+
+  /**
+   * HTP 단계에서 기존 이미지로 시작하기 위해 검증·정규화한 원본 파일 Metadata를 생성한다.
+   *
+   * @param drawingSession UPLOAD 방식으로 생성된 HTP 단계 세션
+   * @param storageKey 이미지 저장소 내부 상대 Key
+   * @param mimeType 파일 Signature로 검증한 MIME Type
+   * @param fileSizeBytes 정규화 후 파일 크기
+   * @param widthPx 이미지 Header에서 확인한 너비
+   * @param heightPx 이미지 Header에서 확인한 높이
+   * @param checksumSha256 저장 Byte의 SHA-256
+   * @param capturedAt 클라이언트 촬영 시각 또는 서버 수신 시각
+   * @param createdAt 서버 저장 완료 시각
+   * @param idempotencyKey 업로드 요청을 식별하는 멱등 키
+   * @param fingerprint 이미지와 정규화 Metadata를 결합한 요청 지문
+   * @param rotationDegrees 클라이언트가 적용한 회전 각도
+   * @param cropApplied 클라이언트 자르기 적용 여부
+   * @return 영속화 전 UPLOADED 그림 파일 Metadata
+   */
+  public static DrawingAsset uploaded(
+      DrawingSession drawingSession,
+      String storageKey,
+      String mimeType,
+      long fileSizeBytes,
+      Integer widthPx,
+      Integer heightPx,
+      String checksumSha256,
+      LocalDateTime capturedAt,
+      LocalDateTime createdAt,
+      String idempotencyKey,
+      String fingerprint,
+      int rotationDegrees,
+      boolean cropApplied) {
+    DrawingAsset asset =
+        new DrawingAsset(
+            Objects.requireNonNull(drawingSession, "drawingSession must not be null"),
+            DrawingAssetType.UPLOADED,
+            1,
+            Objects.requireNonNull(storageKey, "storageKey must not be null"),
+            Objects.requireNonNull(mimeType, "mimeType must not be null"),
+            fileSizeBytes,
+            widthPx,
+            heightPx,
+            Objects.requireNonNull(checksumSha256, "checksumSha256 must not be null"),
+            Objects.requireNonNull(capturedAt, "capturedAt must not be null"),
+            Objects.requireNonNull(createdAt, "createdAt must not be null"));
+    asset.uploadIdempotencyKey =
+        Objects.requireNonNull(idempotencyKey, "idempotencyKey must not be null");
+    asset.uploadFingerprint = Objects.requireNonNull(fingerprint, "fingerprint must not be null");
+    asset.uploadRotationDegrees = rotationDegrees;
+    asset.uploadCropApplied = cropApplied;
+    return asset;
   }
 
   /**
@@ -373,6 +442,24 @@ public class DrawingAsset {
    */
   public String getChecksumSha256() {
     return checksumSha256;
+  }
+
+  /**
+   * 원본 이미지 업로드 요청의 재시도 판정 Key를 제공한다.
+   *
+   * @return UPLOADED 파일의 멱등 키이며 다른 유형이면 {@code null}
+   */
+  public String getUploadIdempotencyKey() {
+    return uploadIdempotencyKey;
+  }
+
+  /**
+   * 같은 멱등 키가 동일한 이미지와 Metadata에 사용됐는지 확인하는 요청 지문을 제공한다.
+   *
+   * @return UPLOADED 파일의 요청 지문이며 다른 유형이면 {@code null}
+   */
+  public String getUploadFingerprint() {
+    return uploadFingerprint;
   }
 
   /**

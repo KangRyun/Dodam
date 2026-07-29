@@ -30,7 +30,7 @@ HTP는 심리 진단이나 검사 결과를 제공하지 않는다. 집·나무�
 
 활성 활동이 있어도 사용자는 방금 누른 활동을 새로 시작할 수 있다. 팝업 뒤에 활동 선택 화면을 다시 열지 않으며, 새로 그리기를 확정하는 순간 기존 활동은 더 이상 재개할 수 없고 새 활동만 진행 중 상태가 된다.
 
-그림일기는 `CANVAS` 전용이다. `새로 그리기`는 사용자가 직접 그리겠다는 의사를 확정한 동작이므로 HTP도 `CANVAS`로 즉시 시작한다. HTP 사진 업로드는 별도의 입력 방식 진입점과 `/drawing-sessions/{id}/upload` 계약이 배포된 뒤 제공한다.
+그림일기는 `CANVAS` 전용이다. HTP는 HOUSE, TREE, PERSON 각 단계 시작 전에 `CANVAS`와 `UPLOAD` 중 입력 방식을 선택한다. 진행 중 활동 팝업의 `새로 그리기`는 사용자가 직접 그리겠다는 의사를 확정한 빠른 진입 동작이므로 새 활동을 `CANVAS`로 즉시 시작한다.
 
 ## 3. 활동 유형
 
@@ -149,6 +149,11 @@ Content-Type: application/json
 
 응답의 `currentStep.drawingSubject`와 `drawingSessionId`가 현재 단계의 정본이다. Flutter가 주제나 다음 세션 식별자를 생성하지 않는다.
 
+`inputMethod`는 HOUSE 단계에서 선택한 입력 방식이다. `UPLOAD`를 선택하면 생성된 세션에
+`POST /api/v1/drawing-sessions/{drawingSessionId}/upload`를 호출하고, 반환된
+`drawingAssetId`를 `drawing-complete.metadata.sourceAssetId`로 전달한다. 상세 multipart와
+오류 계약은 [HTP 사진 업로드 계약](./htp-image-upload-contract.md)을 따른다.
+
 ## 6. 포기 상태
 
 `drawing_sessions.session_status`에 `ABANDONED`를 추가한다.
@@ -181,7 +186,18 @@ HTP 순서는 다음 세 단계로 고정한다.
 - 화면 상단에 완료·진행 중·대기 중 상태를 표시한다.
 - 그림을 그리는 동안 질문하지 않는다.
 - 각 그림 완료 후 해당 그림에 관한 대화를 진행한다.
-- 현재 단계의 대화가 끝나야 `/htp-assessments/{id}/steps/next`를 호출한다.
+- 현재 단계의 대화가 끝나면 다음 단계의 입력 방식을 선택한 뒤
+  `/htp-assessments/{id}/steps/next`를 호출한다.
+
+```json
+{
+  "inputMethod": "CANVAS"
+}
+```
+
+- `inputMethod`는 다음 TREE 또는 PERSON 세션에만 적용하며 `CANVAS`, `UPLOAD`를 허용한다.
+- 사진 업로드는 JPEG·PNG만 허용하고, 서버가 실제 이미지의 크기와 형식을 검증한다.
+- `UPLOAD` 단계는 업로드 응답의 `drawingAssetId`로 완료하며 별도 `finalImage`를 보내지 않는다.
 - 세 그림을 모두 마친 뒤 활동 단위 감정을 한 번 저장한다.
 - 최종 완료는 `/htp-assessments/{id}/complete`로 단일 종합 리포트를 접수한다.
 
@@ -201,6 +217,8 @@ HTP 순서는 다음 세 단계로 고정한다.
 - 활성 활동이 없을 때 HTP·그림일기 유형을 조회하고 선택할 수 있다.
 - 그림일기 선택 시 선택한 `drawingTypeId`로 세션을 만든다.
 - HTP 선택 시 HOUSE 단계부터 시작하고 TREE, PERSON 순서를 건너뛰지 않는다.
+- HTP 각 단계에서 Canvas 그리기 또는 사진 업로드를 독립적으로 선택할 수 있다.
+- 사진 업로드 완료 시 서버가 반환한 `sourceAssetId`로 해당 단계의 분석을 요청한다.
 - 활성 활동이 있으면 이어 그리기와 새로 그리기를 모두 제공한다.
 - 이어 그리기는 기존 `drawingSessionId`, Draft, `currentStage`를 유지한다.
 - 새로 그리기는 선택한 카드 정보를 유지해 중간 활동 선택 화면 없이 새 Canvas로 이동한다.

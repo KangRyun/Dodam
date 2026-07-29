@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
 import com.ssafy.b209.drawing.domain.DrawingEmotionCode;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.domain.DrawingSessionStatus;
 import com.ssafy.b209.drawing.domain.DrawingStage;
 import com.ssafy.b209.drawing.dto.request.SaveDrawingReflectionRequest;
@@ -84,15 +85,19 @@ class HtpAssessmentControllerTest {
 
   @Test
   void completesCurrentStepAndReturnsNextSubject() throws Exception {
-    given(htpAssessmentService.nextStep(200L, KEY))
+    given(htpAssessmentService.nextStep(200L, KEY, DrawingInputMethod.UPLOAD))
         .willReturn(response(HtpDrawingSubject.PERSON, 3, 102L, false));
 
     mockMvc
-        .perform(post("/api/v1/htp-assessments/200/steps/next").header("Idempotency-Key", KEY))
+        .perform(
+            post("/api/v1/htp-assessments/200/steps/next")
+                .header("Idempotency-Key", KEY)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"inputMethod\":\"UPLOAD\"}"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.currentStep.drawingSubject").value("PERSON"));
 
-    verify(htpAssessmentService).nextStep(200L, KEY);
+    verify(htpAssessmentService).nextStep(200L, KEY, DrawingInputMethod.UPLOAD);
   }
 
   @Test

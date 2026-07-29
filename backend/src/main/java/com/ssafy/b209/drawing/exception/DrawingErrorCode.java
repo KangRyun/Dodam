@@ -109,7 +109,30 @@ public enum DrawingErrorCode implements ErrorCode {
       HttpStatus.BAD_REQUEST, "DRAWING_400_011", "그림 활동 삭제 확인 값이 올바르지 않습니다."),
   /** 리포트 생성 없이 활동 완료를 요청한 경우다. */
   REPORT_REQUEST_REQUIRED(
-      HttpStatus.BAD_REQUEST, "DRAWING_400_012", "활동 완료 시 관찰 리포트 생성을 요청해야 합니다.");
+      HttpStatus.BAD_REQUEST, "DRAWING_400_012", "활동 완료 시 관찰 리포트 생성을 요청해야 합니다."),
+  /** HTP 원본 이미지 파일이 누락된 경우다. */
+  DRAWING_UPLOAD_FILE_REQUIRED(
+      HttpStatus.BAD_REQUEST, "DRAWING_UPLOAD_FILE_REQUIRED", "업로드할 원본 이미지가 필요합니다."),
+  /** HTP 원본 이미지 Metadata가 유효하지 않은 경우다. */
+  DRAWING_UPLOAD_METADATA_INVALID(
+      HttpStatus.BAD_REQUEST, "DRAWING_UPLOAD_METADATA_INVALID", "이미지 업로드 정보가 올바르지 않습니다."),
+  /** HTP가 아니거나 Canvas 방식 세션에 사진 업로드를 요청한 경우다. */
+  DRAWING_UPLOAD_NOT_SUPPORTED(
+      HttpStatus.BAD_REQUEST, "DRAWING_UPLOAD_NOT_SUPPORTED", "이 그림 활동은 사진 업로드를 지원하지 않습니다."),
+  /** 세션 상태 또는 단계가 사진 업로드를 허용하지 않는 경우다. */
+  DRAWING_UPLOAD_NOT_ALLOWED(
+      HttpStatus.CONFLICT, "DRAWING_UPLOAD_NOT_ALLOWED", "현재 상태에서는 원본 이미지를 업로드할 수 없습니다."),
+  /** 세션에 원본 이미지가 이미 저장된 경우다. */
+  DRAWING_UPLOAD_ALREADY_EXISTS(
+      HttpStatus.CONFLICT, "DRAWING_UPLOAD_ALREADY_EXISTS", "이 그림 단계에는 원본 이미지가 이미 존재합니다."),
+  /** 같은 멱등 키가 다른 이미지 또는 Metadata에 사용된 경우다. */
+  DRAWING_UPLOAD_IDEMPOTENCY_CONFLICT(
+      HttpStatus.CONFLICT,
+      "DRAWING_UPLOAD_IDEMPOTENCY_CONFLICT",
+      "동일한 Idempotency-Key가 다른 이미지 업로드 요청에 사용되었습니다."),
+  /** 원본 이미지 파일 또는 Metadata 저장에 실패한 경우다. */
+  DRAWING_UPLOAD_FAILED(
+      HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_UPLOAD_FAILED", "원본 이미지 저장 중 오류가 발생했습니다.");
 
   private final HttpStatus httpStatus;
   private final String code;

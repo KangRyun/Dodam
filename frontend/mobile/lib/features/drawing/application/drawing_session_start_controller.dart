@@ -90,6 +90,7 @@ final class DrawingSessionStartController {
   Future<DrawingSessionResolution> createHtpAssessment({
     required int childId,
     bool replaceActive = false,
+    String inputMethod = 'CANVAS',
   }) async {
     if (repository is! HtpDrawingRepository) {
       throw UnsupportedError('HTP activity is unavailable.');
@@ -98,7 +99,7 @@ final class DrawingSessionStartController {
     final assessment = await htpRepository.startHtpAssessment(
       StartHtpAssessmentRequestDto(
         childId: childId,
-        inputMethod: 'CANVAS',
+        inputMethod: inputMethod,
         clientStartedAt: _now().toUtc().toIso8601String(),
         replaceActive: replaceActive,
       ),

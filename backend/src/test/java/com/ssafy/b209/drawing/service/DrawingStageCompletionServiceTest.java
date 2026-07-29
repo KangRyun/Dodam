@@ -21,6 +21,8 @@ import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingAssetType;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
+import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.domain.DrawingSessionStatus;
 import com.ssafy.b209.drawing.domain.DrawingStage;
 import com.ssafy.b209.drawing.dto.request.CompleteDrawingStageRequest;
@@ -127,6 +129,28 @@ class DrawingStageCompletionServiceTest {
             SESSION_ID,
             new CreateDrawingAnalysisRequest(ASSET_ID, DrawingAnalysisType.OBJECT_DETECTION),
             KEY);
+  }
+
+  @Test
+  void reusesUploadedAssetForUploadSessionCompletion() {
+    DrawingAsset uploaded = org.mockito.Mockito.mock(DrawingAsset.class);
+    DrawingSession session = org.mockito.Mockito.mock(DrawingSession.class);
+    CompleteDrawingStageRequest request =
+        new CompleteDrawingStageRequest(
+            ASSET_ID, null, 120_000L, OffsetDateTime.of(2026, 7, 25, 10, 0, 0, 0, ZoneOffset.UTC));
+    given(uploaded.getId()).willReturn(ASSET_ID);
+    given(uploaded.getAssetType()).willReturn(DrawingAssetType.UPLOADED);
+    given(uploaded.getDrawingSession()).willReturn(session);
+    given(session.getId()).willReturn(SESSION_ID);
+    given(session.getInputMethod()).willReturn(DrawingInputMethod.UPLOAD);
+    given(drawingAssetRepository.findById(ASSET_ID)).willReturn(Optional.of(uploaded));
+    given(analysisPersistenceService.findByRequestId(KEY))
+        .willReturn(Optional.empty(), Optional.of(succeededSummary()));
+
+    CompleteDrawingStageResponse response = service.complete(SESSION_ID, KEY, null, request);
+
+    assertThat(response.finalAssetId()).isEqualTo(ASSET_ID);
+    verify(drawingSnapshotService, never()).upload(any(), any(), any());
   }
 
   @Test

@@ -441,16 +441,22 @@ void main() {
         fileName: 'photo.png',
         mimeType: 'image/png',
       ),
-      objectCode: 'TREE',
+      metadata: const UploadDrawingImageMetadataDto(
+        clientCapturedAt: '2026-07-29T01:00:00Z',
+        rotationDegrees: 0,
+        cropApplied: true,
+      ),
+      idempotencyKey: 'htp-upload-key-0001',
     );
 
     final request = interceptor.requests.single;
     expect(request.method, 'POST');
     expect(request.uri.path, '/api/v1/drawing-sessions/42/upload');
     expect(result.drawingSessionId, 42);
-    expect(result.objectCode, 'TREE');
-    expect(result.originalAsset.assetId, 130);
-    expect(result.correctedAsset.assetId, 131);
+    expect(request.headers['Idempotency-Key'], 'htp-upload-key-0001');
+    expect(result.drawingSubject, 'TREE');
+    expect(result.drawingAssetId, 130);
+    expect(result.previewUrl, '/api/v1/drawing-assets/130/file');
   });
 
   test('사진 업로드 검증 실패는 오류 코드를 그대로 전달한다', () async {
@@ -474,6 +480,12 @@ void main() {
           fileName: 'photo.png',
           mimeType: 'image/png',
         ),
+        metadata: const UploadDrawingImageMetadataDto(
+          clientCapturedAt: null,
+          rotationDegrees: 0,
+          cropApplied: false,
+        ),
+        idempotencyKey: 'htp-upload-key-0002',
       ),
       throwsA(
         isA<ApiResponseFailure>().having(
@@ -545,10 +557,10 @@ final class _DraftInterceptor extends Interceptor {
     handler.resolve(
       Response<Map<String, dynamic>>(
         requestOptions: options,
-        statusCode: 200,
+        statusCode: 201,
         data: const {
           'success': true,
-          'code': 'COMMON_200',
+          'code': 'COMMON_201',
           'message': '요청에 성공했습니다.',
           'data': {
             'drawingAssetId': 140,
@@ -859,27 +871,18 @@ final class _UploadInterceptor extends Interceptor {
           'message': '요청에 성공했습니다.',
           'data': {
             'drawingSessionId': 42,
-            'objectCode': 'TREE',
-            'originalAsset': {
-              'assetId': 130,
-              'assetType': 'ORIGINAL',
-              'assetVersion': 1,
-              'fileUrl': '/api/v1/drawing-assets/130/file',
-              'mimeType': 'image/png',
-              'fileSizeBytes': 4096,
-              'widthPx': 1024,
-              'heightPx': 768,
-            },
-            'correctedAsset': {
-              'assetId': 131,
-              'assetType': 'CORRECTED',
-              'assetVersion': 1,
-              'fileUrl': '/api/v1/drawing-assets/131/file',
-              'mimeType': 'image/png',
-              'fileSizeBytes': 4096,
-              'widthPx': 1024,
-              'heightPx': 768,
-            },
+            'drawingAssetId': 130,
+            'assetType': 'UPLOADED',
+            'drawingSubject': 'TREE',
+            'currentStage': 'DRAWING',
+            'previewUrl': '/api/v1/drawing-assets/130/file',
+            'mimeType': 'image/png',
+            'fileSizeBytes': 4096,
+            'widthPx': 1024,
+            'heightPx': 768,
+            'capturedAt': '2026-07-29T01:00:00Z',
+            'uploadedAt': '2026-07-29T01:00:01Z',
+            'qualityWarnings': <String>[],
           },
         },
       ),
