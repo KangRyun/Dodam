@@ -10,6 +10,7 @@ class ConsentTermDto {
     required this.required,
     required this.version,
     this.contentUrl,
+    this.contentHtml,
   });
 
   factory ConsentTermDto.fromJson(Map<String, dynamic> json) => ConsentTermDto(
@@ -19,6 +20,7 @@ class ConsentTermDto {
     required: json['required'] as bool? ?? false,
     version: json['version'] as String? ?? '',
     contentUrl: json['contentUrl'] as String?,
+    contentHtml: json['contentHtml'] as String?,
   );
 
   final int termId;
@@ -29,6 +31,9 @@ class ConsentTermDto {
   final bool required;
   final String version;
   final String? contentUrl;
+
+  /// 약관 본문(HTML). 상세 보기에 사용한다.
+  final String? contentHtml;
 }
 
 /// 약관 하나에 대한 동의 의사.
