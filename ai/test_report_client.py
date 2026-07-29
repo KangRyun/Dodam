@@ -367,6 +367,47 @@ class UngroundedInterpretationTest(unittest.TestCase):
         )
 
 
+class FollowUpAndDisclaimerTest(unittest.TestCase):
+    """진단 표현 제거·한계 고지·후속 질문 생성 보장 (S15P11B209-601)."""
+
+    def _generate(self, **overrides):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(
+            _llm_json(**overrides)
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            return report_client.generate(_sample_request(), model="m")
+
+    def test_empty_follow_up_is_filled_with_safe_default(self):
+        result = self._generate(followUpQuestion="   ")
+        self.assertEqual(
+            result.observation_draft.follow_up_question,
+            report_client.DEFAULT_FOLLOW_UP_QUESTION,
+        )
+
+    def test_diagnostic_follow_up_is_replaced_with_safe_default(self):
+        # 후속 질문에 진단성 표현이 섞이면 보호자에게 그대로 내보내지 않고 안전 기본값으로 대체.
+        result = self._generate(followUpQuestion="아이가 우울증이 있는지 물어보세요.")
+        self.assertEqual(
+            result.observation_draft.follow_up_question,
+            report_client.DEFAULT_FOLLOW_UP_QUESTION,
+        )
+
+    def test_normal_follow_up_is_kept(self):
+        result = self._generate(followUpQuestion="이 집에는 누가 살아?")
+        self.assertEqual(
+            result.observation_draft.follow_up_question, "이 집에는 누가 살아?"
+        )
+
+    def test_disclaimer_and_limitations_always_present(self):
+        # 한계 고지·면책 문구는 LLM이 무엇을 주든 서버가 상수로 항상 보장한다.
+        result = self._generate(overallSummary="")
+        self.assertEqual(result.observation_draft.disclaimer, report_client.DISCLAIMER)
+        self.assertEqual(result.limitations_text, report_client.LIMITATIONS)
+        self.assertTrue(result.observation_draft.disclaimer.strip())
+        self.assertTrue(result.limitations_text.strip())
+
+
 class EmotionSourceTest(unittest.TestCase):
     def test_selected(self):
         req = _sample_request(selected_emotions=["JOY"], expressed_emotion_text=None)

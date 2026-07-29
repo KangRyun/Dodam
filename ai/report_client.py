@@ -47,6 +47,10 @@ LIMITATIONS = (
 # 대표 발화가 비어 있을 때의 중립 기본값(진단·해석 없는 무난한 문장).
 DEFAULT_UTTERANCE = "재미있었어요."
 
+# 후속 질문이 비었거나 진단성 표현이 섞였을 때 대체할 안전 기본값(S15P11B209-601).
+# 보호자가 아이에게 그대로 건네도 무해한, 진단이 아닌 '집에서 나눌 대화'용 질문.
+DEFAULT_FOLLOW_UP_QUESTION = "오늘 그림에서 어떤 부분이 제일 마음에 들었어?"
+
 _VALID_SCOPES = {"EXPERT_ONLY", "REVIEWED_GUARDIAN"}
 
 
@@ -216,6 +220,18 @@ def _feature(item: dict) -> contracts.ObservedFeatureDraft:
     )
 
 
+def _safe_follow_up(raw: str) -> str:
+    """보호자용 후속 질문을 안전하게 보장한다(S15P11B209-601).
+
+    비어 있거나 단정 진단·과잉 추론 표현이 섞이면 안전한 기본 질문으로 대체한다. 후속 질문은
+    보호자가 아이에게 그대로 건네는 문장이라, 진단성 표현을 그대로 내보내면 안 된다(제거).
+    """
+    text = (raw or "").strip()
+    if not text or report_safety.has_unsafe_expression(text):
+        return DEFAULT_FOLLOW_UP_QUESTION
+    return text
+
+
 def _assemble(
     req: contracts.ObservationGenerationRequest, data: dict, model: str
 ) -> contracts.ObservationGenerationResult:
@@ -245,7 +261,8 @@ def _assemble(
         attention_points=str(data.get("attentionPoints", "")),
         evidence_summary=str(data.get("evidenceSummary", "")),
         guardian_guidance=str(data.get("guardianGuidance", "")),
-        follow_up_question=str(data.get("followUpQuestion", "")),
+        # 후속 질문은 비었거나 진단성 표현이 섞이면 안전 기본값으로 대체·보장한다(S15P11B209-601).
+        follow_up_question=_safe_follow_up(str(data.get("followUpQuestion", ""))),
         expert_review_required=bool(data.get("expertReviewRequired", False))
         or needs_expert_review,
         disclaimer=DISCLAIMER,
