@@ -114,6 +114,25 @@ void main() {
     expect(controller.status, DrawingDraftRestoreStatus.loadingImage);
   });
 
+  test('진입 화면에서 이어 그리기를 선택하면 Draft를 다시 묻지 않고 자동 복원한다', () async {
+    final repository = _DraftRepository();
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    final controller = DrawingDraftRestoreController(
+      sessionId: 42,
+      repository: repository,
+      syncCoordinator: sync,
+    );
+    addTearDown(sync.dispose);
+    addTearDown(controller.dispose);
+
+    await controller.load(autoRestore: true);
+
+    expect(repository.getDraftCalls, 1);
+    expect(repository.downloadDraftPreviewCalls, 1);
+    expect(controller.backgroundImage, isA<MemoryImage>());
+    expect(controller.status, DrawingDraftRestoreStatus.loadingImage);
+  });
+
   test('복구 뒤 event와 batch 시퀀스를 모두 이어받는다', () async {
     final repository = _DraftRepository();
     final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
@@ -258,6 +277,7 @@ Future<DrawingDraftRestoreController> _pumpScreen(
   WidgetTester tester, {
   required _DraftRepository repository,
   required DrawingSyncCoordinator sync,
+  bool autoRestoreDraft = false,
 }) async {
   tester.view.physicalSize = const Size(1200, 800);
   tester.view.devicePixelRatio = 1;
@@ -278,6 +298,7 @@ Future<DrawingDraftRestoreController> _pumpScreen(
         drawingRepository: repository,
         syncCoordinator: sync,
         draftRestoreController: restore,
+        autoRestoreDraft: autoRestoreDraft,
       ),
     ),
   );
