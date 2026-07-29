@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 
@@ -36,17 +37,78 @@ String _descriptionForDrawingType(DrawingTypeDto type) {
   return '그리고 싶은 것을 자유롭게 그려 보자!';
 }
 
+String _createIdempotencyKey() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  final hex = bytes
+      .map((value) => value.toRadixString(16).padLeft(2, '0'))
+      .join();
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+      '${hex.substring(12, 16)}-${hex.substring(16, 20)}-'
+      '${hex.substring(20)}';
+}
+
+String _htpSubjectTitle(String? subject) => switch (subject) {
+  'HOUSE' => '집 그리기',
+  'TREE' => '나무 그리기',
+  'PERSON' => '사람 그리기',
+  _ => 'HTP 그림',
+};
+
+String _nextHtpSubjectTitle(String? currentSubject) => switch (currentSubject) {
+  'HOUSE' => '나무 그리기',
+  'TREE' => '사람 그리기',
+  _ => 'HTP 그림',
+};
+
+/// HOUSE·TREE 대화가 끝나 세션이 REFLECTION에 머문 상태인지.
+///
+/// 이 상태는 `steps/next`를 아직 부르지 않았다는 뜻이므로, 재진입 시
+/// Canvas나 끝난 대화가 아니라 다음 주제 입력 방식 선택으로 복원해야 한다.
+bool _isAwaitingNextHtpSubject(DrawingSessionResolution resolution) {
+  final activity = resolution.activityContext;
+  if (!activity.isHtp || resolution.currentStage != 'REFLECTION') return false;
+  return activity.drawingSubject == 'HOUSE' ||
+      activity.drawingSubject == 'TREE';
+}
+
+/// PERSON `steps/next`까지 끝나 세션이 COMPLETED가 된 상태인지.
+///
+/// Reflection과 주제 전환이 모두 끝났다는 뜻이므로 남은 일은 Assessment
+/// Complete뿐이다. 다른 HTP COMPLETED와 섞이지 않도록 주제가 PERSON인지도
+/// 함께 확인한다.
+bool _isHtpPersonCompletedSession(DrawingSessionResolution resolution) {
+  final activity = resolution.activityContext;
+  return activity.isHtp &&
+      activity.drawingSubject == 'PERSON' &&
+      resolution.currentStage == 'COMPLETED';
+}
+
+/// Backend가 `complete` 재호출을 허용하는 상태인지.
+///
+/// 서비스는 `IN_PROGRESS`·`FAILED`에서만 완료를 접수하고, 이미 `ANALYZING`·
+/// `COMPLETED`면 새 Idempotency-Key에 충돌 오류를 던진다. 앱을 다시 켜면
+/// 원래 Key를 알 수 없으므로 이 상태 판정으로만 호출 여부를 정한다.
+bool _htpCompletionCallable(String? htpStatus) =>
+    htpStatus == 'IN_PROGRESS' || htpStatus == 'FAILED';
+
 class ChildModeHomeScreen extends StatefulWidget {
   const ChildModeHomeScreen({
     required this.child,
     required this.drawingRepository,
     this.completionSnapshotProvider,
+    this.htpPhotoUploadEnabled = false,
     super.key,
   });
 
   final ChildSummaryDto child;
   final DrawingRepository drawingRepository;
   final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
+
+  /// HTP 사진으로 시작하기 옵션 노출 여부(S15P11B209-702, 기본 꺼짐).
+  final bool htpPhotoUploadEnabled;
 
   @override
   State<ChildModeHomeScreen> createState() => _ChildModeHomeScreenState();
@@ -331,6 +393,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
           accentColor: accentColor,
           repository: widget.drawingRepository,
           replaceActive: replaceActive,
+          htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
         ),
       ),
     );
@@ -341,6 +404,25 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     bool autoRestoreDraft = false,
     bool startFresh = false,
   }) async {
+    if (_isHtpPersonCompletedSession(resolution)) {
+      // PERSON steps/next는 이미 성공해 세션이 COMPLETED다. Reflection도
+      // steps/next도 다시 부르지 않고, 남은 Assessment Complete만 복구한다.
+      await _recoverHtpAssessmentCompletion(resolution);
+      return;
+    }
+    if (resolution.isUploadInput && resolution.isDrawingStage) {
+      // 사진을 아직 찍지 않은 UPLOAD 세션 — Canvas로 열지 않고 사진 촬영
+      // 단계를 그대로 복원한다. 새 세션·새 HTP 활동을 만들지 않는다.
+      await _restoreUploadInput(resolution);
+      return;
+    }
+    if (_isAwaitingNextHtpSubject(resolution)) {
+      // Conversation End가 세션을 REFLECTION으로 올린 뒤 아직 steps/next를
+      // 부르지 않은 상태 — 감정 화면도 Canvas도 아니라 다음 주제 입력 방식
+      // 선택으로 복원한다. 사용자가 고르기 전에는 steps/next가 나가지 않는다.
+      await _restoreNextHtpSubjectInputMethod(resolution);
+      return;
+    }
     if (resolution.activityContext.isHtp &&
         resolution.currentStage == 'COMPLETED') {
       await AppNavigation.pushNamed(
@@ -357,6 +439,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
           lastQuestionMessageId: null,
           idempotencyKeyProvider: null,
           activityContext: resolution.activityContext,
+          inputMethod: resolution.inputMethod,
         ),
       );
       return;
@@ -372,6 +455,90 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         autoRestoreDraft: autoRestoreDraft,
         startFresh: startFresh,
         activityContext: resolution.activityContext,
+        inputMethod: resolution.inputMethod,
+      ),
+    );
+  }
+
+  /// 이미 만든 UPLOAD 세션을 복원해 사진 촬영 단계로 바로 들어간다.
+  Future<void> _restoreUploadInput(DrawingSessionResolution resolution) async {
+    final (icon, accentColor) = _visualForDrawingType(
+      resolution.activityContext.isHtp ? 'HTP' : 'ART_DIARY',
+    );
+    final advanced = await Navigator.of(context).push<DrawingSessionResolution>(
+      MaterialPageRoute(
+        builder: (_) => InputMethodSelectScreen(
+          childId: widget.child.childId,
+          drawingTypeId: 0,
+          title: _htpSubjectTitle(resolution.activityContext.drawingSubject),
+          description: '아까 찍던 사진을 마저 올려볼까?',
+          icon: icon,
+          accentColor: accentColor,
+          repository: widget.drawingRepository,
+          existingDrawingSessionId: resolution.sessionId,
+          restoredActivityContext: resolution.activityContext,
+          htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
+        ),
+      ),
+    );
+    if (advanced == null || !mounted) return;
+    await _openResolution(advanced);
+  }
+
+  /// HOUSE·TREE REFLECTION 재진입 — 다음 주제 입력 방식 선택을 복원한다.
+  Future<void> _restoreNextHtpSubjectInputMethod(
+    DrawingSessionResolution resolution,
+  ) async {
+    final assessmentId = resolution.activityContext.htpAssessmentId;
+    if (assessmentId == null) return;
+    final (icon, accentColor) = _visualForDrawingType('HTP');
+    final advanced = await Navigator.of(context).push<DrawingSessionResolution>(
+      MaterialPageRoute(
+        builder: (_) => InputMethodSelectScreen(
+          childId: widget.child.childId,
+          drawingTypeId: 0,
+          title: _nextHtpSubjectTitle(
+            resolution.activityContext.drawingSubject,
+          ),
+          description: '이번에는 어떻게 그릴까?',
+          icon: icon,
+          accentColor: accentColor,
+          repository: widget.drawingRepository,
+          htpAssessmentId: assessmentId,
+          htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
+        ),
+      ),
+    );
+    if (advanced == null || !mounted) return;
+    await _openResolution(advanced, startFresh: true);
+  }
+
+  /// PERSON 완료 직후 앱이 종료된 경우 남은 Assessment Complete만 복구한다.
+  ///
+  /// Reflection과 `steps/next`는 이미 끝나 있으므로 다시 부르지 않고,
+  /// `steps/next`용 새 Key도 만들지 않는다. 완료 호출은 서버가 접수 가능한
+  /// 상태(`IN_PROGRESS`·`FAILED`)일 때만 보내고, 이미 `ANALYZING`·
+  /// `COMPLETED`면 호출 없이 결과 화면으로 보낸다.
+  Future<void> _recoverHtpAssessmentCompletion(
+    DrawingSessionResolution resolution,
+  ) async {
+    final assessmentId = resolution.activityContext.htpAssessmentId;
+    final repository = widget.drawingRepository;
+    if (assessmentId != null &&
+        repository is HtpDrawingRepository &&
+        _htpCompletionCallable(resolution.activityContext.htpStatus)) {
+      await (repository as HtpDrawingRepository).completeHtpAssessment(
+        assessmentId,
+        idempotencyKey: _createIdempotencyKey(),
+      );
+    }
+    if (!mounted) return;
+    await AppNavigation.pushNamed(
+      context,
+      AppRoutes.activityComplete(widget.child.childId.toString()),
+      arguments: ActivityCompleteRouteArguments(
+        sessionId: resolution.sessionId,
+        repository: widget.drawingRepository,
       ),
     );
   }

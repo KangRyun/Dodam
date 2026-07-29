@@ -117,6 +117,7 @@ final class MockDrawingRepository
   Future<HtpAssessmentDto> moveToNextHtpStep(
     int assessmentId, {
     required String inputMethod,
+    required String idempotencyKey,
   }) async => HtpAssessmentDto.fromJson({
     ..._htpAssessment,
     'currentStep': {
@@ -135,7 +136,10 @@ final class MockDrawingRepository
   ) async {}
 
   @override
-  Future<void> completeHtpAssessment(int assessmentId) async {}
+  Future<void> completeHtpAssessment(
+    int assessmentId, {
+    required String idempotencyKey,
+  }) async {}
   @override
   Future<DrawingSessionDto> getSession(int sessionId) async =>
       DrawingSessionDto.fromDetailJson({

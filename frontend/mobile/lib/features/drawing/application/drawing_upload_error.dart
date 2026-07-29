@@ -75,9 +75,25 @@ DrawingUploadErrorPresentation presentationForValidationError(
       message: 'JPEG·PNG·WEBP 형식의 사진만 사용할 수 있어요. 다른 사진을 선택해 주세요.',
       canRetry: false,
     ),
+  PhotoValidationErrorType.signatureMismatch =>
+    const DrawingUploadErrorPresentation(
+      icon: Icons.rule_rounded,
+      message: '사진 형식을 확인할 수 없어요. 다른 사진을 선택해 주세요.',
+      canRetry: false,
+    ),
   PhotoValidationErrorType.tooLarge => const DrawingUploadErrorPresentation(
     icon: Icons.sd_card_rounded,
     message: '사진 용량이 너무 커요(최대 10MB). 다른 사진을 선택해 주세요.',
+    canRetry: false,
+  ),
+  PhotoValidationErrorType.edgeTooSmall => const DrawingUploadErrorPresentation(
+    icon: Icons.zoom_in_rounded,
+    message: '사진이 너무 작아요. 그림이 크게 보이도록 다시 찍어 주세요.',
+    canRetry: false,
+  ),
+  PhotoValidationErrorType.edgeTooLarge => const DrawingUploadErrorPresentation(
+    icon: Icons.zoom_out_rounded,
+    message: '사진이 너무 커요. 다른 사진을 선택해 주세요.',
     canRetry: false,
   ),
   PhotoValidationErrorType.undecodable => const DrawingUploadErrorPresentation(

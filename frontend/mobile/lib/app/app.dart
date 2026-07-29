@@ -53,6 +53,7 @@ class DodamApp extends StatefulWidget {
     this.basisAnalysisId,
     this.pushSetup,
     this.notificationInboxRepository,
+    this.htpPhotoUploadEnabled = false,
     this.initialRoute = AppRoutes.guardianHome,
     super.key,
   });
@@ -84,6 +85,9 @@ class DodamApp extends StatefulWidget {
   /// 푸시 구성 요소다. 주지 않으면 푸시 기능이 꺼진 채로 동작한다.
   final PushSetup? pushSetup;
   final NotificationInboxRepository? notificationInboxRepository;
+
+  /// HTP 사진으로 시작하기 옵션 노출 여부(S15P11B209-702, 기본 꺼짐).
+  final bool htpPhotoUploadEnabled;
   final String initialRoute;
 
   @override
@@ -317,6 +321,7 @@ class _DodamAppState extends State<DodamApp> {
       questionSkipRepository: widget.questionSkipRepository,
       conversationId: widget.conversationId,
       basisAnalysisId: widget.basisAnalysisId,
+      htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
     ),
   );
 }

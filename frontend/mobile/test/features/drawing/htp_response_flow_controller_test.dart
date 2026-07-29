@@ -4,22 +4,26 @@ import 'package:dodam/features/drawing/domain/repositories/drawing_repository.da
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('집 대화 완료 후 CANVAS 방식의 나무 세션을 반환한다', () async {
+  test('집 대화 완료 후 지금 세션과 같은 입력 방식으로 나무 세션을 반환한다', () async {
     final repository = _HtpRepository(
       response: _assessment(stepOrder: 2, subject: 'TREE', sessionId: 43),
     );
 
     final result = await HtpResponseFlowController(
       repository,
-    ).moveToNextCanvas(91);
+    ).moveToNextStep(91, inputMethod: 'UPLOAD', idempotencyKey: 'key-1');
 
     expect(repository.assessmentId, 91);
-    expect(repository.inputMethod, 'CANVAS');
+    // 하드코딩된 CANVAS가 아니라 호출부가 넘긴 값을 그대로 서버에 전달한다.
+    expect(repository.inputMethod, 'UPLOAD');
+    expect(repository.idempotencyKey, 'key-1');
     expect(result.allStepsCompleted, isFalse);
     expect(result.nextSession?.sessionId, 43);
     expect(result.nextSession?.currentStage, 'DRAWING');
     expect(result.nextSession?.activityContext.drawingSubject, 'TREE');
     expect(result.nextSession?.activityContext.stepOrder, 2);
+    // 다음 세션도 같은 입력 방식을 이어 쓴다.
+    expect(result.nextSession?.inputMethod, 'UPLOAD');
   });
 
   test('사람 대화 완료 후 모든 단계 완료 결과를 반환한다', () async {
@@ -34,9 +38,10 @@ void main() {
 
     final result = await HtpResponseFlowController(
       repository,
-    ).moveToNextCanvas(91);
+    ).moveToNextStep(91, inputMethod: 'CANVAS', idempotencyKey: 'key-2');
 
     expect(repository.inputMethod, 'CANVAS');
+    expect(repository.idempotencyKey, 'key-2');
     expect(result.allStepsCompleted, isTrue);
     expect(result.nextSession, isNull);
   });
@@ -67,20 +72,25 @@ final class _HtpRepository implements HtpDrawingRepository {
   final HtpAssessmentDto response;
   int? assessmentId;
   String? inputMethod;
+  String? idempotencyKey;
 
   @override
   Future<HtpAssessmentDto> moveToNextHtpStep(
     int assessmentId, {
     required String inputMethod,
+    required String idempotencyKey,
   }) async {
     this.assessmentId = assessmentId;
     this.inputMethod = inputMethod;
+    this.idempotencyKey = idempotencyKey;
     return response;
   }
 
   @override
-  Future<void> completeHtpAssessment(int assessmentId) =>
-      throw UnimplementedError();
+  Future<void> completeHtpAssessment(
+    int assessmentId, {
+    required String idempotencyKey,
+  }) => throw UnimplementedError();
 
   @override
   Future<HtpAssessmentDto> getHtpAssessment(int assessmentId) =>

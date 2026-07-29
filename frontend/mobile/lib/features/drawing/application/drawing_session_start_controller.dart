@@ -13,14 +13,25 @@ final class DrawingSessionResolution {
     required this.sessionId,
     required this.currentStage,
     this.activityContext = const DrawingActivityContextDto.general(),
+    this.inputMethod,
   });
 
   final int sessionId;
   final String currentStage;
   final DrawingActivityContextDto activityContext;
 
+  /// 이 세션이 실제로 사용 중인 입력 방식(`CANVAS`|`UPLOAD`).
+  ///
+  /// HTP 주제 전환에서 다음 단계로 그대로 이어 쓰기 위해 세션 단위로 들고
+  /// 다닌다(`DrawingActivityContextDto`는 서버 `activityContext` JSON을 그대로
+  /// 반영하는 자리라 여기에 새 필드를 얹지 않는다).
+  final String? inputMethod;
+
   /// 그림 저장·획 전송이 허용되는 단계인지 나타낸다.
   bool get isDrawingStage => currentStage == 'DRAWING';
+
+  /// 이 세션이 사진 업로드 방식인지 나타낸다.
+  bool get isUploadInput => inputMethod == 'UPLOAD';
 }
 
 final class DrawingSessionStartController {
@@ -44,6 +55,7 @@ final class DrawingSessionStartController {
         sessionId: session.drawingSessionId,
         currentStage: session.currentStage,
         activityContext: session.activityContext,
+        inputMethod: session.inputMethod,
       );
 
   Future<DrawingSessionResolution> resolveSession({
@@ -83,6 +95,7 @@ final class DrawingSessionStartController {
     return DrawingSessionResolution(
       sessionId: session.drawingSessionId,
       currentStage: session.currentStage,
+      inputMethod: inputMethod,
     );
   }
 
@@ -115,6 +128,7 @@ final class DrawingSessionStartController {
         stepOrder: step.stepOrder,
         drawingSubject: step.drawingSubject,
       ),
+      inputMethod: inputMethod,
     );
   }
 
@@ -160,6 +174,8 @@ final class DrawingSessionStartController {
       return DrawingSessionResolution(
         sessionId: racedSession.drawingSessionId,
         currentStage: racedSession.currentStage,
+        activityContext: racedSession.activityContext,
+        inputMethod: racedSession.inputMethod,
       );
     }
   }

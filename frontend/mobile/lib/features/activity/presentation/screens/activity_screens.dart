@@ -116,11 +116,16 @@ class DrawingScreen extends StatefulWidget {
     this.autoRestoreDraft = false,
     this.startFresh = false,
     this.activityContext = const DrawingActivityContextDto.general(),
+    this.inputMethod,
     super.key,
   });
 
   final String childId;
   final int? sessionId;
+
+  /// 이 세션이 실제로 쓰는 입력 방식(`CANVAS`|`UPLOAD`). HTP 주제 전환에서 다음
+  /// 세션에 그대로 이어 쓰기 위해 들고 다닌다.
+  final String? inputMethod;
   final DrawingRepository? drawingRepository;
   final DrawingSyncPolicy syncPolicy;
   final DrawingSyncCoordinator? syncCoordinator;
@@ -214,6 +219,10 @@ class _DrawingScreenState extends State<DrawingScreen>
   int? _lastFollowUpAnswerMessageId;
   int? _activeConversationId;
   int? _lastQuestionMessageId;
+
+  /// HOUSE·TREE 다음 주제 전환(`steps/next`) Key. 실패 후 재시도는 이 Key를
+  /// 그대로 재사용한다 — 새로 만들지 않는다.
+  String? _htpAdvanceIdempotencyKey;
 
   /// 캔버스 입력이 막힌 상태인지 나타낸다.
   ///
@@ -933,6 +942,13 @@ class _DrawingScreenState extends State<DrawingScreen>
     await questionController.loadForAnalysis(analysisId);
   }
 
+  /// 대화가 끝난 뒤 활동·주제에 맞는 다음 화면으로 넘어간다.
+  ///
+  /// HTP HOUSE·TREE는 `steps/next`로 다음 주제 세션을 바로 연다. PERSON은
+  /// `steps/next`를 여기서 부르지 않는다 — 백엔드가 Reflection을 PERSON 세션이
+  /// 아직 `REFLECTION` 단계일 때만 받고 `steps/next`가 그 세션을 `COMPLETED`로
+  /// 바꾸면 이후 Reflection 저장을 거절하므로, PERSON은 감정 선택 화면에서
+  /// Reflection을 먼저 저장한 뒤 그 화면이 `steps/next`를 부른다.
   Future<void> _continueAfterConversation() async {
     final activityContext = widget.activityContext;
     final assessmentId = activityContext.htpAssessmentId;
@@ -945,20 +961,25 @@ class _DrawingScreenState extends State<DrawingScreen>
       _goToEmotionSelect();
       return;
     }
+    if (activityContext.drawingSubject == 'PERSON') {
+      _goToEmotionSelect();
+      return;
+    }
     final htpRepository = repository as HtpDrawingRepository;
     if (_movedToReflection || !mounted) return;
     _movedToReflection = true;
     try {
-      // 주제별 대화 완료 후 다음 HTP CANVAS 세션을 생성
-      final result = await HtpResponseFlowController(
-        htpRepository,
-      ).moveToNextCanvas(assessmentId);
+      // 주제별 대화 완료 후 다음 HTP 세션을 생성 — 지금 주제가 쓴 입력 방식을
+      // 그대로 이어 쓴다(하드코딩된 CANVAS 아님).
+      final idempotencyKey = _htpAdvanceIdempotencyKey ??=
+          widget.idempotencyKeyProvider?.call() ?? _createIdempotencyKey();
+      final result = await HtpResponseFlowController(htpRepository)
+          .moveToNextStep(
+            assessmentId,
+            inputMethod: widget.inputMethod ?? 'CANVAS',
+            idempotencyKey: idempotencyKey,
+          );
       if (!mounted) return;
-      if (result.allStepsCompleted) {
-        _movedToReflection = false;
-        _goToEmotionSelect();
-        return;
-      }
       final resolution = result.nextSession;
       if (resolution == null) {
         throw StateError('Next HTP drawing session is missing.');
@@ -972,6 +993,7 @@ class _DrawingScreenState extends State<DrawingScreen>
           resumeConversation: !resolution.isDrawingStage,
           startFresh: true,
           activityContext: resolution.activityContext,
+          inputMethod: resolution.inputMethod,
         ),
       );
     } on Object {
@@ -1008,6 +1030,7 @@ class _DrawingScreenState extends State<DrawingScreen>
         lastQuestionMessageId: _lastQuestionMessageId,
         idempotencyKeyProvider: widget.idempotencyKeyProvider,
         activityContext: widget.activityContext,
+        inputMethod: widget.inputMethod,
       ),
     );
   }
@@ -1881,6 +1904,7 @@ final class EmotionSelectRouteArguments {
     required this.lastQuestionMessageId,
     required this.idempotencyKeyProvider,
     required this.activityContext,
+    this.inputMethod,
   });
 
   final int? sessionId;
@@ -1892,6 +1916,7 @@ final class EmotionSelectRouteArguments {
   final ConversationEndRequest? conversationEndRequest;
   final String Function()? idempotencyKeyProvider;
   final DrawingActivityContextDto activityContext;
+  final String? inputMethod;
 }
 
 class EmotionSelectScreen extends StatefulWidget {
@@ -1908,6 +1933,7 @@ class EmotionSelectScreen extends StatefulWidget {
     this.idempotencyKeyProvider,
     this.activityCompletionController,
     this.activityContext = const DrawingActivityContextDto.general(),
+    this.inputMethod,
     super.key,
   });
 
@@ -1922,6 +1948,12 @@ class EmotionSelectScreen extends StatefulWidget {
   final String Function()? idempotencyKeyProvider;
   final DrawingActivityCompletionController? activityCompletionController;
   final DrawingActivityContextDto activityContext;
+
+  /// 이 PERSON 세션이 실제로 쓰는 입력 방식. `steps/next` 호출에 그대로 넘긴다
+  /// (백엔드는 PERSON 전환에서 이 값을 상태 전이에 쓰지 않지만, 재생 검증에서
+  /// PERSON은 예외로 건너뛰므로 값 자체는 임의로 바뀌어도 안전하다 — 그래도
+  /// 세션 실제 값을 보내는 것이 원칙에 맞다).
+  final String? inputMethod;
 
   @override
   State<EmotionSelectScreen> createState() => _EmotionSelectScreenState();
@@ -1942,6 +1974,18 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
   DrawingActivityCompletionController? _activityCompletionController;
   late final bool _ownsActivityCompletionController;
   bool _isSubmitting = false;
+
+  /// PERSON `steps/next` Key. 재시도는 이 Key를 재사용한다 — 새로 만들지 않는다.
+  String? _htpPersonStepKey;
+
+  /// `steps/next`가 이미 성공했다면 그 결과를 들고 있어 재시도 때 다시 부르지
+  /// 않는다(`allStepsCompleted=false` 응답이어도 마찬가지 — 그 결과 자체를
+  /// 캐시해 재호출을 막는다).
+  HtpResponseFlowResult? _htpPersonAdvanceResult;
+
+  /// PERSON `complete` Key. `steps/next` 성공 후 `complete`만 재시도할 때
+  /// 재사용한다.
+  String? _htpCompleteKey;
 
   bool get _reflectionInputLocked =>
       _activityCompletionController?.reflectionInputLocked == true;
@@ -2027,8 +2071,35 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
           throw UnsupportedError('HTP activity is unavailable.');
         }
         final htpRepository = repository as HtpDrawingRepository;
-        await htpRepository.saveHtpReflection(assessmentId, reflection);
-        await htpRepository.completeHtpAssessment(assessmentId);
+        var advanced = _htpPersonAdvanceResult;
+        if (advanced == null) {
+          // steps/next가 아직 성공하지 않았다 — PERSON 세션이 REFLECTION
+          // 단계일 때만 Reflection을 저장할 수 있으므로 steps/next보다
+          // 먼저 호출한다(PUT이라 재시도해도 안전하다).
+          await htpRepository.saveHtpReflection(assessmentId, reflection);
+          if (!mounted) return;
+          advanced = await HtpResponseFlowController(htpRepository)
+              .moveToNextStep(
+                assessmentId,
+                inputMethod: widget.inputMethod ?? 'CANVAS',
+                idempotencyKey: _htpPersonStepKey ??=
+                    widget.idempotencyKeyProvider?.call() ??
+                    _createIdempotencyKey(),
+              );
+          if (!mounted) return;
+          _htpPersonAdvanceResult = advanced;
+        }
+        if (!advanced.allStepsCompleted) {
+          // PERSON은 항상 allStepsCompleted=true를 반환해야 한다. 캐시된
+          // 결과를 그대로 두어 재시도가 steps/next를 다시 부르거나 새 Key를
+          // 만들지 않게 한다.
+          throw StateError('HTP assessment did not complete as expected.');
+        }
+        await htpRepository.completeHtpAssessment(
+          assessmentId,
+          idempotencyKey: _htpCompleteKey ??=
+              widget.idempotencyKeyProvider?.call() ?? _createIdempotencyKey(),
+        );
         if (!mounted) return;
         Navigator.of(context).pushReplacementNamed(
           AppRoutes.activityComplete(widget.childId),

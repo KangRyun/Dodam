@@ -82,8 +82,15 @@ DodamApp createDefaultApp({
     'USE_MOCK_DRAWING',
     defaultValue: false,
   );
+  // S15P11B209-702: 백엔드 사진 업로드 API가 검증되기 전까지 기본 꺼짐.
+  // 실기기 확인은 flutter run --dart-define=HTP_PHOTO_UPLOAD_ENABLED=true 로 켠다.
+  const htpPhotoUploadEnabled = bool.fromEnvironment(
+    'HTP_PHOTO_UPLOAD_ENABLED',
+    defaultValue: false,
+  );
 
   return DodamApp(
+    htpPhotoUploadEnabled: htpPhotoUploadEnabled,
     authRepository: authRepository,
     activityRepository: RemoteActivityRepository(apiClient),
     childRepository: RemoteChildRepository(apiClient),

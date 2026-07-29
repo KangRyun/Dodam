@@ -17,16 +17,25 @@ final class HtpResponseFlowResult {
   final DrawingSessionResolution? nextSession;
 }
 
-// HTP 주제별 대화 완료 후 다음 CANVAS 세션을 준비
+// HTP 주제별 대화 완료 후 다음 그림 세션을 준비
 final class HtpResponseFlowController {
   const HtpResponseFlowController(this._repository);
 
   final HtpDrawingRepository _repository;
 
-  Future<HtpResponseFlowResult> moveToNextCanvas(int assessmentId) async {
+  /// 현재 끝난 주제와 같은 입력 방식(`inputMethod`)으로 다음 주제 세션을 연다.
+  ///
+  /// `idempotencyKey`는 호출부가 소유한다 — 같은 전환 재시도는 같은 Key를,
+  /// 새로운 전환은 새 Key를 넘겨야 한다.
+  Future<HtpResponseFlowResult> moveToNextStep(
+    int assessmentId, {
+    required String inputMethod,
+    required String idempotencyKey,
+  }) async {
     final assessment = await _repository.moveToNextHtpStep(
       assessmentId,
-      inputMethod: 'CANVAS',
+      inputMethod: inputMethod,
+      idempotencyKey: idempotencyKey,
     );
     if (assessment.allStepsCompleted) {
       return const HtpResponseFlowResult.completed();
@@ -44,6 +53,7 @@ final class HtpResponseFlowController {
           stepOrder: step.stepOrder,
           drawingSubject: step.drawingSubject,
         ),
+        inputMethod: inputMethod,
       ),
     );
   }

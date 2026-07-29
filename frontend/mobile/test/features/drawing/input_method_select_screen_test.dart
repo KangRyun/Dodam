@@ -42,6 +42,10 @@ void main() {
     required DrawingRepository repository,
     PhotoPickerAdapter? photoPickerAdapter,
     PhotoDimensionReader? dimensionReader,
+    int? htpAssessmentId,
+    int? existingDrawingSessionId,
+    DrawingActivityContextDto? restoredActivityContext,
+    bool htpPhotoUploadEnabled = true,
   }) => InputMethodSelectScreen(
     childId: 7,
     drawingTypeId: 5,
@@ -50,8 +54,16 @@ void main() {
     icon: Icons.menu_book_rounded,
     accentColor: Colors.orange,
     repository: repository,
+    htpAssessmentId: htpAssessmentId,
+    existingDrawingSessionId: existingDrawingSessionId,
+    restoredActivityContext: restoredActivityContext,
+    // 기존 테스트는 대부분 사진 흐름을 검증하므로 기본으로 켜두고,
+    // 기본값(꺼짐) 자체를 확인하는 테스트만 명시적으로 false를 넘긴다.
+    htpPhotoUploadEnabled: htpPhotoUploadEnabled,
     photoPickerAdapter: photoPickerAdapter ?? _FakePhotoPickerAdapter(),
-    dimensionReader: dimensionReader ?? ((_) async => (100, 100)),
+    // 320~8192px 검증 범위 안의 값으로 기본값을 잡아, 크기 자체를 검증하는
+    // 테스트가 아닌 한 통과하게 한다.
+    dimensionReader: dimensionReader ?? ((_) async => (400, 400)),
     now: () => DateTime.utc(2026, 7, 29, 1),
   );
 
@@ -110,6 +122,175 @@ void main() {
     });
   });
 
+  group('capability flag (HTP_PHOTO_UPLOAD_ENABLED)', () {
+    testWidgets('꺼져 있으면 사진 경로로 들어갈 수 없고 업로드·세션 생성이 0회다', (tester) async {
+      final adapter = _FakePhotoPickerAdapter();
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(
+          repository: repository,
+          photoPickerAdapter: adapter,
+          htpPhotoUploadEnabled: false,
+        ),
+      );
+
+      // 카드 자체는 안내를 위해 남지만 비활성 상태다.
+      expect(find.byKey(const ValueKey('input-method-photo')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('input-method-photo')));
+      await tester.pumpAndSettle();
+
+      // 사진 선택 단계로 넘어가지 않는다.
+      expect(find.byKey(const ValueKey('input-method-camera')), findsNothing);
+      expect(find.byKey(const ValueKey('input-method-gallery')), findsNothing);
+      expect(adapter.cameraCalls, 0);
+      expect(adapter.galleryCalls, 0);
+      expect(repository.uploadCalls, 0);
+      expect(repository.createCalls, 0);
+    });
+
+    testWidgets('꺼져 있어도 캔버스 흐름은 그대로 동작한다', (tester) async {
+      final repository = _FakeDrawingRepository();
+      DrawingSessionResolution? popped;
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, htpPhotoUploadEnabled: false),
+        onPopped: (value) => popped = value,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
+      await tester.pumpAndSettle();
+
+      expect(repository.startHtpRequest?.inputMethod, 'CANVAS');
+      expect(popped?.sessionId, 900);
+      expect(repository.uploadCalls, 0);
+    });
+
+    testWidgets('켜져 있으면 사진 선택 흐름에 접근할 수 있다', (tester) async {
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, htpPhotoUploadEnabled: true),
+      );
+      await tester.tap(find.byKey(const ValueKey('input-method-photo')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const ValueKey('input-method-camera')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('input-method-gallery')),
+        findsOneWidget,
+      );
+    });
+  });
+
+  group('주제 전환 Idempotency-Key', () {
+    testWidgets('같은 방식으로 재시도하면 steps/next에 같은 Key를 보낸다', (tester) async {
+      final repository = _FakeDrawingRepository()
+        ..nextStepFailures = const [true, false];
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, htpAssessmentId: 91),
+      );
+
+      // 1차 시도 — 실패.
+      await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
+      await tester.pumpAndSettle();
+      expect(repository.nextStepCalls, 1);
+      expect(
+        find.byKey(const ValueKey('input-method-canvas-error')),
+        findsOneWidget,
+      );
+
+      // 같은 방식으로 재시도 — 같은 논리 요청이므로 Key를 재사용한다.
+      await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
+      await tester.pumpAndSettle();
+
+      expect(repository.nextStepCalls, 2);
+      expect(repository.nextStepKeys.first, repository.nextStepKeys.last);
+      expect(repository.nextStepInputMethods, ['CANVAS', 'CANVAS']);
+      // 전환에서는 새 HTP 활동을 만들지 않는다.
+      expect(repository.createCalls, 0);
+    });
+
+    testWidgets('입력 방식을 바꾸면 새 Key를 쓴다', (tester) async {
+      final photo = PickedPhoto(
+        bytes: _tinyPngBytes,
+        fileName: 'photo.png',
+        mimeType: 'image/png',
+      );
+      final repository = _FakeDrawingRepository()
+        ..nextStepFailures = const [true];
+      final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
+
+      await pumpScreen(
+        tester,
+        buildScreen(
+          repository: repository,
+          photoPickerAdapter: adapter,
+          htpAssessmentId: 91,
+        ),
+      );
+
+      // CANVAS로 시도했다가 실패.
+      await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
+      await tester.pumpAndSettle();
+      expect(repository.nextStepInputMethods, ['CANVAS']);
+
+      // 방식을 UPLOAD로 바꿔 진행하면 다른 논리 요청이므로 새 Key여야 한다.
+      await tester.tap(find.byKey(const ValueKey('input-method-photo')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(repository.nextStepInputMethods, ['CANVAS', 'UPLOAD']);
+      expect(
+        repository.nextStepKeys.first,
+        isNot(repository.nextStepKeys.last),
+      );
+    });
+
+    testWidgets('업로드 재시도는 같은 업로드·완료 Key를 재사용한다', (tester) async {
+      final photo = PickedPhoto(
+        bytes: _tinyPngBytes,
+        fileName: 'photo.png',
+        mimeType: 'image/png',
+      );
+      final repository = _FakeDrawingRepository(
+        uploadFailures: [
+          const ApiTransportFailure(type: ApiTransportFailureType.connection),
+          null,
+        ],
+      );
+      final adapter = _FakePhotoPickerAdapter(galleryResults: [photo, photo]);
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await tester.tap(find.byKey(const ValueKey('input-method-photo')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(repository.uploadCalls, 2);
+      // 같은 사진 재시도는 같은 Key로 나가야 서버가 중복 저장하지 않는다.
+      expect(repository.uploadKeys.first, repository.uploadKeys.last);
+      // 세션도 한 번만 만든다.
+      expect(repository.createCalls, 1);
+    });
+  });
+
   group('취소', () {
     testWidgets('입력 방식 화면에서 바로 취소하면 세션을 만들지 않고 null을 pop한다', (tester) async {
       final repository = _FakeDrawingRepository();
@@ -138,8 +319,8 @@ void main() {
     testWidgets('카메라로 촬영하면 시스템 카메라 위임 어댑터가 호출되고 미리보기로 넘어간다', (tester) async {
       final photo = PickedPhoto(
         bytes: _tinyPngBytes,
-        fileName: 'photo.jpg',
-        mimeType: 'image/jpeg',
+        fileName: 'photo.png',
+        mimeType: 'image/png',
       );
       final adapter = _FakePhotoPickerAdapter(cameraResults: [photo]);
       final repository = _FakeDrawingRepository();
@@ -645,9 +826,45 @@ final class _FakeDrawingRepository
   int createCalls = 0;
   int uploadCalls = 0;
   int getSessionCalls = 0;
+  int nextStepCalls = 0;
   final List<int> deletedSessionIds = [];
+  final List<String> nextStepKeys = [];
+  final List<String> nextStepInputMethods = [];
+  final List<String> uploadKeys = [];
+  final List<String> completionKeys = [];
   CreateDrawingSessionRequestDto? createRequest;
   StartHtpAssessmentRequestDto? startHtpRequest;
+
+  /// 다음 주제 전환. 실패 목록으로 재시도 시나리오를 만든다.
+  List<bool> nextStepFailures = const [];
+
+  @override
+  Future<HtpAssessmentDto> moveToNextHtpStep(
+    int assessmentId, {
+    required String inputMethod,
+    required String idempotencyKey,
+  }) async {
+    final index = nextStepCalls;
+    nextStepCalls += 1;
+    nextStepKeys.add(idempotencyKey);
+    nextStepInputMethods.add(inputMethod);
+    if (index < nextStepFailures.length && nextStepFailures[index]) {
+      throw const ApiTransportFailure(type: ApiTransportFailureType.connection);
+    }
+    return HtpAssessmentDto(
+      htpAssessmentId: assessmentId,
+      status: 'IN_PROGRESS',
+      expiresAt: '2026-07-30T01:00:00Z',
+      currentStep: const HtpAssessmentStepDto(
+        stepOrder: 2,
+        drawingSubject: 'TREE',
+        drawingSessionId: 902,
+        sessionStatus: 'IN_PROGRESS',
+        currentStage: 'DRAWING',
+      ),
+      allStepsCompleted: false,
+    );
+  }
 
   @override
   Future<HtpAssessmentDto> startHtpAssessment(
@@ -743,6 +960,7 @@ final class _FakeDrawingRepository
   }) async {
     final index = uploadCalls;
     uploadCalls += 1;
+    uploadKeys.add(idempotencyKey);
     if (index < uploadFailures.length) {
       final failure = uploadFailures[index];
       if (failure != null) throw failure;
@@ -769,18 +987,21 @@ final class _FakeDrawingRepository
     int sessionId, {
     required DrawingCompleteMetadataDto metadata,
     required String idempotencyKey,
-  }) async => DrawingStageCompleteResponseDto.fromJson({
-    'drawingSessionId': sessionId,
-    'finalAssetId': metadata.sourceAssetId,
-    'sessionStatus': 'IN_PROGRESS',
-    'currentStage': 'CONVERSING',
-    'analysis': {
-      'analysisId': 10,
-      'analysisType': 'OBJECT_DETECTION',
-      'status': 'SUCCEEDED',
-    },
-    'nextAction': 'SELECT_EMOTION',
-  });
+  }) async {
+    completionKeys.add(idempotencyKey);
+    return DrawingStageCompleteResponseDto.fromJson({
+      'drawingSessionId': sessionId,
+      'finalAssetId': metadata.sourceAssetId,
+      'sessionStatus': 'IN_PROGRESS',
+      'currentStage': 'CONVERSING',
+      'analysis': {
+        'analysisId': 10,
+        'analysisType': 'OBJECT_DETECTION',
+        'status': 'SUCCEEDED',
+      },
+      'nextAction': 'SELECT_EMOTION',
+    });
+  }
 
   @override
   Future<DrawingSessionDto> getSession(int sessionId) async {

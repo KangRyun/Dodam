@@ -8,13 +8,58 @@ import '../domain/photo_picker_adapter.dart';
 /// 여기서는 업로드 전에 걸러낼 수 있는 형식·크기·디코딩 가능 여부만 본다.
 const int kMaxPhotoUploadBytes = 10 * 1024 * 1024;
 
+/// 그림 전체가 알아볼 수 있게 나오는지 가늠하는 최소·최대 변 길이(px).
+const int kMinPhotoEdgePx = 320;
+const int kMaxPhotoEdgePx = 8192;
+
 const Set<String> kSupportedPhotoMimeTypes = {
   'image/jpeg',
   'image/png',
   'image/webp',
 };
 
-enum PhotoValidationErrorType { unsupportedFormat, tooLarge, undecodable }
+enum PhotoValidationErrorType {
+  unsupportedFormat,
+  signatureMismatch,
+  tooLarge,
+  edgeTooSmall,
+  edgeTooLarge,
+  undecodable,
+}
+
+/// 확장자·MIME 힌트가 아니라 파일 앞머리 바이트로 실제 형식을 확인한다.
+/// 이름만 바꾼 파일이 잘못된 형식으로 통과하는 것을 막는다.
+bool _matchesSignature(Uint8List bytes, String mimeType) {
+  bool startsWith(List<int> signature) {
+    if (bytes.length < signature.length) return false;
+    for (var i = 0; i < signature.length; i++) {
+      if (bytes[i] != signature[i]) return false;
+    }
+    return true;
+  }
+
+  return switch (mimeType) {
+    'image/jpeg' => startsWith(const [0xFF, 0xD8, 0xFF]),
+    'image/png' => startsWith(const [
+      0x89,
+      0x50,
+      0x4E,
+      0x47,
+      0x0D,
+      0x0A,
+      0x1A,
+      0x0A,
+    ]),
+    'image/webp' =>
+      bytes.length >= 12 &&
+          startsWith(const [0x52, 0x49, 0x46, 0x46]) &&
+          bytes[8] == 0x57 &&
+          bytes[9] == 0x45 &&
+          bytes[10] == 0x42 &&
+          bytes[11] == 0x50,
+    _ => false,
+  };
+}
 
 final class ValidatedPhoto {
   const ValidatedPhoto({
@@ -76,6 +121,11 @@ Future<PhotoValidationResult> validatePickedPhoto(
       PhotoValidationErrorType.unsupportedFormat,
     );
   }
+  if (!_matchesSignature(photo.bytes, mimeType)) {
+    return const PhotoValidationFailed(
+      PhotoValidationErrorType.signatureMismatch,
+    );
+  }
   if (photo.bytes.lengthInBytes > kMaxPhotoUploadBytes) {
     return const PhotoValidationFailed(PhotoValidationErrorType.tooLarge);
   }
@@ -83,6 +133,12 @@ Future<PhotoValidationResult> validatePickedPhoto(
     final (width, height) = await dimensionReader(photo.bytes);
     if (width <= 0 || height <= 0) {
       return const PhotoValidationFailed(PhotoValidationErrorType.undecodable);
+    }
+    if (width < kMinPhotoEdgePx || height < kMinPhotoEdgePx) {
+      return const PhotoValidationFailed(PhotoValidationErrorType.edgeTooSmall);
+    }
+    if (width > kMaxPhotoEdgePx || height > kMaxPhotoEdgePx) {
+      return const PhotoValidationFailed(PhotoValidationErrorType.edgeTooLarge);
     }
     return PhotoValidationOk(
       ValidatedPhoto(
