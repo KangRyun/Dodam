@@ -442,5 +442,39 @@ class ActivityDetectionFilterTest(unittest.TestCase):
         self.assertEqual(warnings, [])
 
 
+class DetectionLogTest(unittest.TestCase):
+    """탐지 진단 로그 게이팅 (S15P11B209-710).
+
+    기본(플래그 꺼짐)에서는 개수만 남기고, 명시적으로 켰을 때만 라벨·신뢰도가 남는다.
+    어느 모드에서도 bbox 좌표·이미지 경로는 남지 않아야 한다(가드레일).
+    """
+
+    DETECTIONS = [
+        _det("집전체", 0.1, 0.1, 0.4, 0.4, conf=0.91),
+        _det("나무", 0, 0, 0.1, 0.1, conf=0.34),  # 집 그림에 남는 배경 나무(709 원인 1)
+    ]
+
+    def test_empty_detections(self):
+        self.assertEqual(svc._format_detections_for_log([]), "(없음)")
+
+    def test_only_count_when_flag_off(self):
+        with mock.patch.object(svc.config, "DETECTION_LOG_DETAIL", False):
+            line = svc._format_detections_for_log(self.DETECTIONS)
+        self.assertEqual(line, "2건")
+        self.assertNotIn("집전체", line)  # 그림 내용이 운영 기본값으로 새지 않는다
+
+    def test_labels_logged_only_when_flag_on(self):
+        with mock.patch.object(svc.config, "DETECTION_LOG_DETAIL", True):
+            line = svc._format_detections_for_log(self.DETECTIONS)
+        self.assertIn("집전체(0.91)", line)
+        self.assertIn("나무(0.34)", line)  # 집 그림에 남은 배경 나무가 드러난다(709)
+
+    def test_never_logs_bbox_in_either_mode(self):
+        for detail in (False, True):
+            with mock.patch.object(svc.config, "DETECTION_LOG_DETAIL", detail):
+                line = svc._format_detections_for_log(self.DETECTIONS)
+            self.assertNotIn("0.4", line)  # bbox 폭·높이가 섞이지 않는다
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -127,6 +127,28 @@ def _drawing_analysis_text(req: QuestionRequest) -> str | None:
     return ", ".join(o.object_name or o.object_code for o in req.detected_objects)
 
 
+def _format_objects_for_log(req: QuestionRequest) -> str:
+    """프롬프트에 실제로 들어간 객체 문자열(S15P11B209-710).
+
+    `_drawing_analysis_text`와 같은 값을 남긴다 — 이 줄이 "LLM이 무엇을 보고 질문했는가"에
+    대한 유일한 확정 증거다. 상세 로그가 꺼져 있으면 개수만 남긴다(아동 그림 내용 보호).
+    """
+    if not req.detected_objects:
+        return "(없음)"
+    if not config.DETECTION_LOG_DETAIL:
+        return f"{len(req.detected_objects)}건"
+    return _drawing_analysis_text(req) or "(없음)"
+
+
+def _format_target_for_log(target: DetectedObject | None) -> str:
+    """대상 객체를 로그 한 조각으로. 코드는 내부 Enum이라 상세 여부와 무관하게 남긴다."""
+    if target is None:
+        return "-"
+    if not config.DETECTION_LOG_DETAIL:
+        return target.object_code
+    return f"{target.object_name or target.object_code}({target.confidence:.2f})"
+
+
 def _last_child_index(req: QuestionRequest) -> int | None:
     """가장 최근 아이 발화(텍스트 있는 것)의 인덱스. 없으면 None(=첫 질문)."""
     for index in range(len(req.recent_messages) - 1, -1, -1):
@@ -487,6 +509,21 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
     if not _is_consistent(purpose, target, options, option_allowed):
         # 정합성이 깨진 조합은 아동 화면에 내보내지 않는다 → 실패로 돌려 BE 폴백에 맡긴다.
         raise UpstreamError("AI_INCONSISTENT_RESPONSE", "Consistency")
+
+    # 생성된 질문 원문은 남기지 않는다(가드레일). 대신 "어떤 재료로 만들었는가"를 남겨
+    # 분석 로그의 [필터] 줄과 drawingSessionId로 이어붙일 수 있게 한다.
+    # ⚠️ activityType·drawingSubject는 아직 요청 계약에 없다(S15P11B209-712에서 추가) —
+    #    그때 이 줄에도 함께 실어 어느 HTP 단계였는지 로그만으로 판별되게 한다.
+    logger.info(
+        "[질문] request_id=%s drawingSessionId=%s basisAnalysisId=%s "
+        "purpose=%s target=%s | %s",
+        request_id,
+        req.drawing_session_id,
+        req.basis_analysis_id if req.basis_analysis_id is not None else "-",
+        purpose,
+        _format_target_for_log(target),
+        _format_objects_for_log(req),
+    )
 
     return QuestionResponse(
         question_text=text,
