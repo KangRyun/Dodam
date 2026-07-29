@@ -385,6 +385,65 @@ docker compose -f infra/jenkins/docker-compose.yml stop registry
 
 ---
 
+### 6단계 — 축소 스테이징 실배포 (2026-07-29 실측)
+
+`infra/k8s/overlays/staging-min` 을 실제로 올려 **매니페스트가 도는가**를 확인했습니다.
+운영 80/443 을 건드리지 않도록 NodePort 30080/30443 을 씁니다.
+
+```bash
+infra/scripts/preflight-memory.sh --need 3072      # 통과 못 하면 여기서 멈춘다
+infra/scripts/sync-secrets.sh infra/.env --dry-run # 필수 키 게이트
+infra/scripts/sync-secrets.sh infra/.env
+kubectl apply -k infra/k8s/overlays/staging-min
+kubectl -n dodam get pods
+```
+
+**결과: 컷오버였다면 운영이 기동조차 못 했을 결함 3건을 잡았습니다.**
+
+| 증상 | 원인 | 조치 |
+|---|---|---|
+| backend CrashLoopBackOff (OCI `read-only file system`) | FCM 시크릿이 `/run/secrets` 를 읽기전용으로 덮는데 kubelet 이 그 안에 SA 토큰 디렉터리를 만들려 함. compose 엔 SA 토큰이 없어 안 드러남 | `automountServiceAccountToken: false` (backend 는 k8s API 미사용 — 최소권한에도 부합) |
+| backend `Failed to configure a DataSource` | **`application-prod.yml` 이 존재하지 않는다.** DataSource·JPA·Flyway 는 `application-local.yml` 에만 있고 운영도 `local` 로 돈다(`infra/.env`) | ConfigMap `SPRING_PROFILES_ACTIVE` → `local`. 📌 prod 프로파일 신설은 BE 별도 과제 |
+| gateway CrashLoopBackOff (`cannot load certificate`) | `letsencrypt` PVC 가 빈 새 볼륨 | 아래 인증서 이관 |
+
+#### ★ 인증서 이관 — 360 컷오버의 필수 단계 (sudo 불필요)
+
+`live/*.pem` 은 `../../archive/` 를 가리키는 **상대 심링크**입니다.
+**`live/` 만 복사하면 깨진 링크만 남습니다** — `/etc/letsencrypt` 트리를 통째로 옮겨야 합니다.
+
+```bash
+# PVC 를 마운트한 임시 파드를 띄운다(gateway 는 죽어 있어 exec 불가)
+kubectl -n dodam run cert-mover --image=busybox:1.36 --restart=Never \
+  --overrides='{"spec":{"automountServiceAccountToken":false,"containers":[{"name":"shell","image":"busybox:1.36","command":["sh","-c","sleep 600"],"volumeMounts":[{"name":"letsencrypt","mountPath":"/etc/letsencrypt"}]}],"volumes":[{"name":"letsencrypt","persistentVolumeClaim":{"claimName":"letsencrypt"}}]}}'
+kubectl -n dodam wait --for=condition=Ready pod/cert-mover --timeout=90s
+
+# docker exec 는 컨테이너 안에서 root라 호스트 sudo 없이 인증서를 읽는다
+docker exec dodam-nginx tar cf - -C /etc letsencrypt \
+  | kubectl -n dodam exec -i cert-mover -- tar xf - -C /etc
+
+# ★ 검증은 "파일이 있다"가 아니라 "심링크 역참조가 읽힌다"로 한다
+kubectl -n dodam exec cert-mover -- sh -c \
+  'wc -c < /etc/letsencrypt/live/i15b209.p.ssafy.io/fullchain.pem'   # 4825 정도면 정상
+kubectl -n dodam delete pod cert-mover
+
+kubectl -n dodam rollout restart deployment/gateway
+```
+
+> ⚠️ TLS 개인키를 다루는 작업입니다. 값을 출력하지 말고 서버 밖으로 내보내지 마세요(가드레일 9절).
+
+**검증 (2026-07-29 실측):**
+
+```
+k8s   :30080 → 301 · :30443 landing 200 · api 401
+운영  landing 200 · api 401 · ai 200 · legal 200      ← 무영향
+backend actuator UP(9404) · jdbc:mysql://mysql:3306   ← Service 이름 접속 확인(357 목표)
+```
+
+> 스왑이 1507→2336MB 로 늘었습니다. 두 스택 동시 가동의 실제 비용이고 360 에서 compose 를
+> 내리면 회수됩니다.
+
+---
+
 ## 유지 관리 — 레지스트리 디스크
 
 커밋 SHA마다 태그가 쌓입니다. 방치하면 디스크를 채웁니다.
@@ -405,8 +464,9 @@ docker exec dodam-registry registry garbage-collect \
 
 이 runbook은 **설치까지**입니다. 아래는 후속 이슈 소관입니다.
 
-- 앱 매니페스트(Deployment/Service/ConfigMap/Secret) — **357**
-- 스테이징 검증(compose와 병행 기동) — **358**
+- 앱 매니페스트(Deployment/Service/ConfigMap/Secret) — **357** ✅ 작성 완료
+- 스테이징 검증(compose와 병행 기동) — **358** ✅ 축소 스테이징 완료(6단계).
+  남은 것: ai·mongodb 를 실제로 띄우는 전체 스테이징, backend replicas 2 롤링
 - Jenkins `docker compose up` → `kubectl apply` 전환 — **359**
 - 80/443 전환(ServiceLB 재활성 또는 nginx→NodePort) — **360**
 - Prometheus/Grafana 재배치 — **361**

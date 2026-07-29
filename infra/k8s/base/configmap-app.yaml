@@ -25,7 +25,19 @@ data:
   S3_ENDPOINT: "http://minio:9000"
 
   # ── 앱 동작 모드 ────────────────────────────────────────────────────
-  SPRING_PROFILES_ACTIVE: "prod"
+  # ⚠️ "prod" 가 아니라 "local" 이다. 오타가 아니라 현실이다(2026-07-29 실측).
+  #   `application-prod.yml` 은 **존재하지 않는다.** DataSource·JPA·Flyway 설정은
+  #   전부 `application-local.yml` 에만 있고, compose 는 SPRING_PROFILES_ACTIVE:-local
+  #   기본값으로 운영을 돌리고 있다(infra/.env 에도 local 로 명시).
+  #   여기에 "prod" 를 두면 Spring 이 DataSource URL 을 찾지 못해 기동에 실패한다
+  #   — 스테이징에서 실제로 CrashLoopBackOff 로 확인했다.
+  #
+  # 📌 갚아야 할 빚: 운영을 local 프로파일로 돌리는 것은 정상이 아니다.
+  #   application-local.yml 의 cors.allowed-origins 가 localhost:3000 뿐인 것도
+  #   같은 부작용이다. 제대로 된 prod 프로파일 신설은 BE 소관의 별도 과제.
+  #   그전까지는 **실제로 도는 값**을 여기 적는다 — 매니페스트가 거짓말하면
+  #   컷오버(360) 때 운영이 기동조차 못 한다.
+  SPRING_PROFILES_ACTIVE: "local"
   AI_DRAWING_ANALYSIS_MODE: "mock"
   AI_OBSERVATION_MODE: "mock"
   AI_IMAGE_ACCESS_TOKEN_TTL: "60s"
