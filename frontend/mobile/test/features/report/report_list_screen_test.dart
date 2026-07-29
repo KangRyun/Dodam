@@ -1,11 +1,16 @@
+import 'dart:typed_data';
+
 import 'package:dodam/app/app.dart';
 import 'package:dodam/app/state/guardian_child_controller.dart';
 import 'package:dodam/core/network/api_page.dart';
+import 'package:dodam/features/activity/data/dto/activity_dtos.dart';
+import 'package:dodam/features/activity/domain/repositories/activity_repository.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
 import 'package:dodam/features/child/domain/repositories/child_repository.dart';
 import 'package:dodam/features/report/data/dto/report_dtos.dart';
 import 'package:dodam/features/report/domain/repositories/report_repository.dart';
 import 'package:dodam/features/report/presentation/screens/report_list_screen.dart';
+import 'package:dodam/features/report/presentation/screens/report_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -28,6 +33,43 @@ void main() {
     expect(entry, findsOneWidget);
     // 존재만으로는 부족하다 — 실제로 눌러서 넘어갈 수 있어야 한다.
     expect(tester.widget<InkWell>(entry).onTap, isNotNull);
+
+    // 눌렀을 때 "그 리포트 1장의 단일 상세(ReportScreen, id 501)"로 이동해야 한다.
+    // 전체 목록(ReportListScreen)이 아니어야 한다.
+    await tester.tap(entry);
+    await tester.pumpAndSettle();
+    expect(
+      tester.widget<ReportScreen>(find.byType(ReportScreen)).reportId,
+      '501',
+    );
+    expect(find.byType(ReportListScreen), findsNothing);
+  });
+
+  testWidgets('완료된 리포트가 없으면 최신 리포트 진입점이 비활성이다', (tester) async {
+    // 최근 활동에 완료 리포트가 없으면 진입점 key가 아예 없어(진입 불가)
+    // "키 존재 = 진입 가능"이 성립하고, 버튼은 눌리지 않는다.
+    await tester.pumpWidget(
+      DodamApp(
+        childRepository: const _ChildRepository(),
+        activityRepository: _NoReportActivityRepository(),
+        reportRepository: _ReportRepository(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('child-3')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('guardian-latest-report-501')),
+      findsNothing,
+    );
+    final button = find.ancestor(
+      of: find.text('최신 리포트 보기'),
+      matching: find.byType(InkWell),
+    );
+    expect(button, findsOneWidget);
+    expect(tester.widget<InkWell>(button).onTap, isNull);
   });
 
   testWidgets('완료·생성 중·실패 리포트를 상태별로 표시한다', (tester) async {
@@ -180,6 +222,46 @@ final class _ReportRepository implements ReportRepository {
     int analysisId, {
     required String idempotencyKey,
   }) => throw UnimplementedError();
+}
+
+/// 최근 활동은 있지만 완료 리포트가 없는 상태(진입점 비활성 검증용).
+final class _NoReportActivityRepository implements ActivityRepository {
+  @override
+  Future<ApiPage<ActivitySummaryDto>> getActivities(
+    int childId, {
+    ActivityFilterDto filter = const ActivityFilterDto(),
+  }) async => ApiPage(
+    content: const [
+      ActivitySummaryDto(
+        activityId: 120,
+        title: '우리 가족',
+        drawingType: ActivityDrawingTypeDto(code: 'ART_DIARY', name: '그림일기'),
+        inputMethod: 'CANVAS',
+        sessionStatus: 'COMPLETED',
+        selectedEmotions: ['HAPPY'],
+        thumbnailUrl: null,
+        analysisStatus: 'COMPLETED',
+        report: null,
+        startedAt: '2026-07-20T09:40:00Z',
+        completedAt: '2026-07-20T10:03:00Z',
+      ),
+    ],
+    page: 0,
+    size: 20,
+    totalElements: 1,
+    totalPages: 1,
+    hasNext: false,
+  );
+
+  @override
+  Future<void> deleteActivity(int activityId) async {}
+
+  @override
+  Future<ActivityDetailDto> getActivity(int activityId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<Uint8List> downloadImage(String url) => throw UnimplementedError();
 }
 
 final class _ChildRepository implements ChildRepository {
