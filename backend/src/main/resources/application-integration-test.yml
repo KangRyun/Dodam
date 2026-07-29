@@ -23,6 +23,17 @@ app:
   auth:
     filter:
       legacy-header-enabled: true
+  # 테스트는 AI 서버로 나가지 않는다. 운영 기본값(application.yml)이 http로 바뀐 뒤(722) 이 프로필이
+  # 값을 고정하지 않으면 배포 기본값을 그대로 상속해 HTTP Client가 생성되고, AI_INTERNAL_TOKEN이 없는
+  # CI에서는 생성자 검증에 걸려 Spring Context 부팅 자체가 깨진다(2026-07-29 develop 빌드 202건 실패).
+  # 환경변수 override를 두지 않는 이유: 테스트 결과가 실행 환경의 env에 따라 달라지면 안 된다.
+  ai:
+    drawing-analysis:
+      mode: mock
+    observation:
+      mode: mock
+    tts:
+      mode: mock
   cors:
     allowed-origins: []
   # 업로드 직후 배경 Thread가 상태를 전이시키면 PENDING 경계를 검증하는 테스트가 흔들린다.

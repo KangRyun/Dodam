@@ -22,6 +22,15 @@ app:
   auth:
     filter:
       legacy-header-enabled: true
+  # 슬라이스·컨텍스트 테스트도 AI 서버로 나가지 않는다. 고정하지 않으면 운영 기본값 http를 상속한다.
+  # 근거는 application-integration-test.yml의 같은 블록 주석 참고(722 회귀).
+  ai:
+    drawing-analysis:
+      mode: mock
+    observation:
+      mode: mock
+    tts:
+      mode: mock
   cors:
     allowed-origins:
       - http://localhost:3000
