@@ -25,7 +25,7 @@ import java.util.List;
  * @param requestedAt 분석 요청 UTC 시각
  * @param completedAt 성공 또는 실패 처리 UTC 시각
  * @param detectedObjects 보호자에게 공개 가능한 객체 탐지 결과
- * @param errorCode 실패 시 안전하게 변환한 오류 코드
+ * @param failureCode 실패 시 안전하게 변환한 오류 코드
  * @param message 실패 시 사용자에게 표시할 수 있는 오류 메시지
  */
 public record AnalysisStatusResponse(
@@ -41,7 +41,7 @@ public record AnalysisStatusResponse(
     @JsonFormat(shape = JsonFormat.Shape.STRING) Instant requestedAt,
     @JsonFormat(shape = JsonFormat.Shape.STRING) Instant completedAt,
     List<AnalysisDetectedObjectResponse> detectedObjects,
-    String errorCode,
+    String failureCode,
     String message) {
 
   /** 응답 생성 후 외부 목록 변경의 영향을 받지 않도록 객체 탐지 목록을 복사한다. */

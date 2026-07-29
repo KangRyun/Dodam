@@ -224,7 +224,7 @@ public class DrawingAnalysisQueryService {
   private AnalysisStatusResponse canonicalResponse(
       DrawingAnalysis analysis,
       List<AnalysisDetectedObjectResponse> detectedObjects,
-      String errorCode,
+      String failureCode,
       String message) {
     return new AnalysisStatusResponse(
         analysis.getId(),
@@ -239,7 +239,7 @@ public class DrawingAnalysisQueryService {
         toInstant(analysis.getRequestedAt()),
         analysis.getCompletedAt() == null ? null : toInstant(analysis.getCompletedAt()),
         detectedObjects,
-        errorCode,
+        failureCode,
         message);
   }
 

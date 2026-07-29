@@ -72,7 +72,7 @@ class AnalysisStatusControllerTest {
         .andExpect(jsonPath("$.data.detectedObjects[0].objectCode").value("PERSON"))
         .andExpect(jsonPath("$.data.detectedObjects[0].objectName").value("사람"))
         .andExpect(jsonPath("$.data.detectedObjects[0].boundingBox.x").value(0.1))
-        .andExpect(jsonPath("$.data.errorCode").isEmpty())
+        .andExpect(jsonPath("$.data.failureCode").isEmpty())
         .andExpect(jsonPath("$.data.message").isEmpty());
   }
 
