@@ -58,7 +58,7 @@ void main() {
     );
   });
 
-  test('새로 그리기는 기존 세션을 삭제한 뒤 새 세션을 생성한다', () async {
+  test('새 활동은 기존 세션을 삭제하지 않고 서버의 원자적 교체 옵션으로 생성한다', () async {
     final repository = _SessionStartRepository(
       activeSessions: const [null],
       createdSessionId: 91,
@@ -68,15 +68,36 @@ void main() {
       now: () => DateTime.utc(2026, 7, 29, 1),
     );
 
-    final resolution = await controller.replaceActiveSession(
+    final resolution = await controller.createSelectedSession(
       childId: 3,
-      activeSessionId: 81,
+      drawingTypeId: 11,
+      replaceActive: true,
     );
 
-    expect(repository.deletedSessionIds, [81]);
+    expect(repository.deletedSessionIds, isEmpty);
     expect(repository.createCalls, 1);
+    expect(repository.createRequest?.replaceActive, isTrue);
     expect(resolution.sessionId, 91);
     expect(resolution.isDrawingStage, isTrue);
+  });
+
+  test('HTP 선택은 HOUSE 세션과 활동 컨텍스트를 함께 반환한다', () async {
+    final repository = _SessionStartRepository(activeSessions: const [null]);
+    final controller = DrawingSessionStartController(
+      repository: repository,
+      now: () => DateTime.utc(2026, 7, 29, 1),
+    );
+
+    final resolution = await controller.createHtpAssessment(
+      childId: 3,
+      replaceActive: true,
+    );
+
+    expect(repository.startHtpRequest?.replaceActive, isTrue);
+    expect(resolution.sessionId, 201);
+    expect(resolution.activityContext.isHtp, isTrue);
+    expect(resolution.activityContext.stepOrder, 1);
+    expect(resolution.activityContext.drawingSubject, 'HOUSE');
   });
 
   test('활성 그림 세션이 없으면 첫 번째 그림 유형으로 새 세션을 만든다', () async {
@@ -200,7 +221,10 @@ ActiveDrawingSessionDto _activeSession(
 );
 
 final class _SessionStartRepository
-    implements DrawingRepository, DrawingSessionDiscarder {
+    implements
+        DrawingRepository,
+        HtpDrawingRepository,
+        DrawingSessionDiscarder {
   _SessionStartRepository({
     required this.activeSessions,
     this.createdSessionId = 82,
@@ -240,6 +264,27 @@ final class _SessionStartRepository
   int createCalls = 0;
   final List<int> deletedSessionIds = [];
   CreateDrawingSessionRequestDto? createRequest;
+  StartHtpAssessmentRequestDto? startHtpRequest;
+
+  @override
+  Future<HtpAssessmentDto> startHtpAssessment(
+    StartHtpAssessmentRequestDto request,
+  ) async {
+    startHtpRequest = request;
+    return const HtpAssessmentDto(
+      htpAssessmentId: 91,
+      status: 'IN_PROGRESS',
+      expiresAt: '2026-07-30T01:00:00Z',
+      currentStep: HtpAssessmentStepDto(
+        stepOrder: 1,
+        drawingSubject: 'HOUSE',
+        drawingSessionId: 201,
+        sessionStatus: 'IN_PROGRESS',
+        currentStage: 'DRAWING',
+      ),
+      allStepsCompleted: false,
+    );
+  }
 
   @override
   Future<void> deleteSession(int sessionId) async {

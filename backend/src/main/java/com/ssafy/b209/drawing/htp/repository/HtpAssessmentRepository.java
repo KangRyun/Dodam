@@ -80,6 +80,24 @@ public interface HtpAssessmentRepository extends JpaRepository<HtpAssessment, Lo
   Optional<HtpAssessment> findActiveByChildIdForUpdate(@Param("childId") Long childId);
 
   /**
+   * 화면 재개에 사용할 아동의 진행 중 HTP 활동과 모든 단계를 조회한다.
+   *
+   * <p>PERSON 대화가 끝난 직후에는 현재 Drawing Session이 이미 완료 상태이므로 일반 활성 세션 조회만으로는 감정 단계에 복귀할 수 없다.
+   *
+   * @param childId HTP 활동을 수행하는 아동 식별자
+   * @return 진행 또는 분석 중인 HTP 활동, 없으면 빈 값
+   */
+  @Query(
+      "select distinct assessment from HtpAssessment assessment "
+          + "join fetch assessment.steps step "
+          + "join fetch step.drawingSession "
+          + "where assessment.child.id = :childId "
+          + "and assessment.status in ("
+          + "com.ssafy.b209.drawing.htp.domain.HtpAssessmentStatus.IN_PROGRESS, "
+          + "com.ssafy.b209.drawing.htp.domain.HtpAssessmentStatus.ANALYZING)")
+  Optional<HtpAssessment> findActiveByChildId(@Param("childId") Long childId);
+
+  /**
    * 접근 검증과 응답 조립에 필요한 아동·유형·단계·그림 세션을 함께 조회한다.
    *
    * @param id HTP 활동 식별자

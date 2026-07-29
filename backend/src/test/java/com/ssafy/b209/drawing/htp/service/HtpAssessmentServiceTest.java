@@ -150,6 +150,51 @@ class HtpAssessmentServiceTest {
   }
 
   @Test
+  void replacesAnActiveGeneralDrawingWithAHouseStep() {
+    DrawingSession activeGeneral =
+        DrawingSession.start(
+            child,
+            DrawingTypeFixture.create(
+                7L, "ART_DIARY", "그림일기", DrawingTypeSelectableBy.GUARDIAN, 4, 12, true),
+            DrawingInputMethod.CANVAS,
+            SERVER_TIME.minusMinutes(20),
+            "old-general-key");
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_ID);
+    given(childRepository.findNotDeletedByIdForUpdate(1L)).willReturn(Optional.of(child));
+    given(drawingTypeRepository.findByCode("HTP")).willReturn(Optional.of(htpType));
+    given(htpAssessmentRepository.findActiveByChildIdForUpdate(1L)).willReturn(Optional.empty());
+    given(drawingSessionRepository.findActiveByChildId(1L)).willReturn(Optional.of(activeGeneral));
+    given(drawingSessionRepository.save(any(DrawingSession.class)))
+        .willAnswer(
+            invocation -> {
+              DrawingSession session = invocation.getArgument(0);
+              ReflectionTestUtils.setField(session, "id", 100L);
+              return session;
+            });
+    given(htpAssessmentRepository.saveAndFlush(any(HtpAssessment.class)))
+        .willAnswer(
+            invocation -> {
+              HtpAssessment assessment = invocation.getArgument(0);
+              ReflectionTestUtils.setField(assessment, "id", 200L);
+              return assessment;
+            });
+
+    HtpAssessmentResponse response =
+        service.start(
+            "replace-start-key",
+            new StartHtpAssessmentRequest(
+                1L,
+                DrawingInputMethod.CANVAS,
+                OffsetDateTime.parse("2026-07-28T10:00:00+09:00"),
+                null,
+                true));
+
+    assertThat(response.currentStep().drawingSubject()).isEqualTo(HtpDrawingSubject.HOUSE);
+    assertThat(activeGeneral.getSessionStatus()).isEqualTo(DrawingSessionStatus.ABANDONED);
+    assertThat(activeGeneral.getDeletedAt()).isNull();
+  }
+
+  @Test
   void replaysConcurrentStartAfterAcquiringTheChildLock() {
     DrawingSession houseSession = persistedSession(100L, "htp-start-key");
     HtpAssessment existing =

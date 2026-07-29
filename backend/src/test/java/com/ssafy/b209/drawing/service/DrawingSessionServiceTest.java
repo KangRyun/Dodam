@@ -29,6 +29,7 @@ import com.ssafy.b209.drawing.dto.request.CanvasConfigurationRequest;
 import com.ssafy.b209.drawing.dto.request.CreateDrawingSessionRequest;
 import com.ssafy.b209.drawing.dto.response.CreateDrawingSessionResponse;
 import com.ssafy.b209.drawing.exception.DrawingErrorCode;
+import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.drawing.repository.DrawingTypeRepository;
 import com.ssafy.b209.global.exception.BusinessException;
@@ -59,6 +60,7 @@ class DrawingSessionServiceTest {
   @Mock private ChildRepository childRepository;
   @Mock private DrawingTypeRepository drawingTypeRepository;
   @Mock private DrawingSessionRepository drawingSessionRepository;
+  @Mock private HtpAssessmentRepository htpAssessmentRepository;
   @Mock private CurrentAuthenticatedUserResolver currentUserResolver;
   @Mock private GuardianResourceAccessValidator accessValidator;
 
@@ -73,6 +75,7 @@ class DrawingSessionServiceTest {
             childRepository,
             drawingTypeRepository,
             drawingSessionRepository,
+            htpAssessmentRepository,
             currentUserResolver,
             accessValidator,
             Clock.fixed(NOW, ZoneOffset.UTC));
@@ -272,6 +275,30 @@ class DrawingSessionServiceTest {
   }
 
   @Test
+  void replacesTheActiveSessionByAbandoningItWithoutDeletingIt() {
+    DrawingSession activeSession = persistedSession(CANVAS, "previous-key", 77L);
+    given(drawingSessionRepository.findByIdempotencyKeyForUpdate(KEY)).willReturn(Optional.empty());
+    given(childRepository.findNotDeletedByIdForUpdate(1L)).willReturn(Optional.of(child));
+    given(drawingTypeRepository.findById(2L)).willReturn(Optional.of(drawingType));
+    given(htpAssessmentRepository.findActiveByChildIdForUpdate(1L)).willReturn(Optional.empty());
+    given(drawingSessionRepository.findActiveByChildId(1L)).willReturn(Optional.of(activeSession));
+    given(drawingSessionRepository.saveAndFlush(any()))
+        .willAnswer(
+            invocation -> {
+              DrawingSession session = invocation.getArgument(0);
+              ReflectionTestUtils.setField(session, "id", 100L);
+              return session;
+            });
+
+    CreateDrawingSessionResponse response =
+        service.createDrawingSession(KEY, request(CANVAS, true));
+
+    assertThat(response.drawingSessionId()).isEqualTo(100L);
+    assertThat(activeSession.getSessionStatus()).isEqualTo(DrawingSessionStatus.ABANDONED);
+    assertThat(activeSession.getDeletedAt()).isNull();
+  }
+
+  @Test
   void mapsUnclassifiedDatabaseConflictToSafeDomainError() {
     given(drawingSessionRepository.findByIdempotencyKeyForUpdate(KEY)).willReturn(Optional.empty());
     given(childRepository.findNotDeletedByIdForUpdate(1L)).willReturn(Optional.of(child));
@@ -331,12 +358,18 @@ class DrawingSessionServiceTest {
   }
 
   private CreateDrawingSessionRequest request(DrawingInputMethod inputMethod) {
+    return request(inputMethod, false);
+  }
+
+  private CreateDrawingSessionRequest request(
+      DrawingInputMethod inputMethod, boolean replaceActive) {
     return new CreateDrawingSessionRequest(
         1L,
         2L,
         inputMethod,
         OffsetDateTime.parse("2026-07-21T11:30:00+09:00"),
-        inputMethod == CANVAS ? validCanvas() : null);
+        inputMethod == CANVAS ? validCanvas() : null,
+        replaceActive);
   }
 
   private CanvasConfigurationRequest validCanvas() {
@@ -358,7 +391,7 @@ class DrawingSessionServiceTest {
 
   private CreateDrawingSessionRequest requestWithCanvas(CanvasConfigurationRequest canvas) {
     return new CreateDrawingSessionRequest(
-        1L, 2L, CANVAS, OffsetDateTime.parse("2026-07-21T11:30:00+09:00"), canvas);
+        1L, 2L, CANVAS, OffsetDateTime.parse("2026-07-21T11:30:00+09:00"), canvas, false);
   }
 
   private void assertInvalidCanvas(CanvasConfigurationRequest canvas) {

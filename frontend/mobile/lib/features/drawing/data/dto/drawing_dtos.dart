@@ -71,6 +71,7 @@ final class CreateDrawingSessionRequestDto {
     this.canvasWidth,
     this.canvasHeight,
     this.canvasBackgroundColor,
+    this.replaceActive = false,
   });
   final int childId, drawingTypeId;
   final String inputMethod;
@@ -78,12 +79,14 @@ final class CreateDrawingSessionRequestDto {
   final String? selectionActor;
   final int? canvasWidth, canvasHeight;
   final String? canvasBackgroundColor;
+  final bool replaceActive;
   Map<String, dynamic> toJson() => {
     'childId': childId,
     'drawingTypeId': drawingTypeId,
     'inputMethod': inputMethod,
     'clientStartedAt': clientStartedAt,
     if (selectionActor != null) 'selectionActor': selectionActor,
+    if (replaceActive) 'replaceActive': true,
     if (canvasWidth != null &&
         canvasHeight != null &&
         canvasBackgroundColor != null)
@@ -210,6 +213,7 @@ final class ActiveDrawingSessionDto {
     required this.currentStage,
     required this.startedAt,
     required this.latestDraft,
+    this.activityContext = const DrawingActivityContextDto.general(),
   });
 
   factory ActiveDrawingSessionDto.fromJson(Map<String, dynamic> json) =>
@@ -224,12 +228,114 @@ final class ActiveDrawingSessionDto {
         latestDraft: json['latestDraft'] == null
             ? null
             : ActiveDrawingDraftDto.fromJson(_map(json['latestDraft'])),
+        activityContext: json['activityContext'] == null
+            ? const DrawingActivityContextDto.general()
+            : DrawingActivityContextDto.fromJson(_map(json['activityContext'])),
       );
 
   final int drawingSessionId, childId;
   final DrawingTypeSummaryDto drawingType;
   final String inputMethod, sessionStatus, currentStage, startedAt;
   final ActiveDrawingDraftDto? latestDraft;
+  final DrawingActivityContextDto activityContext;
+}
+
+final class DrawingActivityContextDto {
+  const DrawingActivityContextDto({
+    required this.activityKind,
+    this.htpAssessmentId,
+    this.htpStatus,
+    this.stepOrder,
+    this.drawingSubject,
+  });
+
+  const DrawingActivityContextDto.general()
+    : activityKind = 'GENERAL',
+      htpAssessmentId = null,
+      htpStatus = null,
+      stepOrder = null,
+      drawingSubject = null;
+
+  factory DrawingActivityContextDto.fromJson(Map<String, dynamic> json) =>
+      DrawingActivityContextDto(
+        activityKind: json['activityKind'] as String,
+        htpAssessmentId: json['htpAssessmentId'] as int?,
+        htpStatus: json['htpStatus'] as String?,
+        stepOrder: json['stepOrder'] as int?,
+        drawingSubject: json['drawingSubject'] as String?,
+      );
+
+  final String activityKind;
+  final int? htpAssessmentId, stepOrder;
+  final String? htpStatus, drawingSubject;
+
+  bool get isHtp => activityKind == 'HTP' && htpAssessmentId != null;
+}
+
+final class StartHtpAssessmentRequestDto {
+  const StartHtpAssessmentRequestDto({
+    required this.childId,
+    required this.inputMethod,
+    required this.clientStartedAt,
+    this.replaceActive = false,
+  });
+
+  final int childId;
+  final String inputMethod, clientStartedAt;
+  final bool replaceActive;
+
+  Map<String, dynamic> toJson() => {
+    'childId': childId,
+    'inputMethod': inputMethod,
+    'clientStartedAt': clientStartedAt,
+    'replaceActive': replaceActive,
+  };
+}
+
+final class HtpAssessmentStepDto {
+  const HtpAssessmentStepDto({
+    required this.stepOrder,
+    required this.drawingSubject,
+    required this.drawingSessionId,
+    required this.sessionStatus,
+    required this.currentStage,
+  });
+
+  factory HtpAssessmentStepDto.fromJson(Map<String, dynamic> json) =>
+      HtpAssessmentStepDto(
+        stepOrder: json['stepOrder'] as int,
+        drawingSubject: json['drawingSubject'] as String,
+        drawingSessionId: json['drawingSessionId'] as int,
+        sessionStatus: json['sessionStatus'] as String,
+        currentStage: json['currentStage'] as String,
+      );
+
+  final int stepOrder, drawingSessionId;
+  final String drawingSubject, sessionStatus, currentStage;
+}
+
+final class HtpAssessmentDto {
+  const HtpAssessmentDto({
+    required this.htpAssessmentId,
+    required this.status,
+    required this.expiresAt,
+    required this.currentStep,
+    required this.allStepsCompleted,
+  });
+
+  factory HtpAssessmentDto.fromJson(Map<String, dynamic> json) =>
+      HtpAssessmentDto(
+        htpAssessmentId: json['htpAssessmentId'] as int,
+        status: json['status'] as String,
+        expiresAt: json['expiresAt'] as String,
+        currentStep: HtpAssessmentStepDto.fromJson(_map(json['currentStep'])),
+        allStepsCompleted: json['allStepsCompleted'] as bool,
+      );
+
+  final int htpAssessmentId;
+  final String status, expiresAt;
+  final HtpAssessmentStepDto currentStep;
+  final bool allStepsCompleted;
 }
 
 final class ActiveDrawingDraftDto {

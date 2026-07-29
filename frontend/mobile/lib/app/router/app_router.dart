@@ -8,6 +8,7 @@ import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
 import '../../features/child/presentation/screens/child_registration_screen.dart';
 import '../../features/drawing/data/dto/drawing_dtos.dart';
 import '../../features/drawing/domain/repositories/drawing_repository.dart';
+import '../../features/drawing/presentation/screens/drawing_activity_selection_screen.dart';
 import '../../features/conversation/conversation.dart';
 import '../../features/guardian/presentation/screens/guardian_screens.dart';
 import '../../features/history/presentation/screens/history_screens.dart';
@@ -203,6 +204,18 @@ abstract final class AppRouter {
           drawingRepository: drawingRepository,
           completionSnapshotProvider: drawingCompletionSnapshotProvider,
         ),
+      ['child', final childId, 'activity', 'select']
+          when _hasChildContext(childController, childId) &&
+              drawingRepository != null &&
+              settings.arguments is DrawingActivitySelectionRouteArguments =>
+        DrawingActivitySelectionScreen(
+          childId: int.parse(childId),
+          repository: drawingRepository,
+          replaceActive:
+              (settings.arguments! as DrawingActivitySelectionRouteArguments)
+                  .replaceActive,
+          completionSnapshotProvider: drawingCompletionSnapshotProvider,
+        ),
       ['child', final childId, 'activity', 'drawing']
           when _hasChildContext(childController, childId) &&
               settings.arguments is DrawingRouteArguments =>
@@ -223,6 +236,8 @@ abstract final class AppRouter {
           basisAnalysisId: basisAnalysisId,
           resumeConversation:
               (settings.arguments! as DrawingRouteArguments).resumeConversation,
+          activityContext:
+              (settings.arguments! as DrawingRouteArguments).activityContext,
         ),
       ['child', final childId, 'activity', 'emotions']
           when _hasChildContext(childController, childId) =>
@@ -267,6 +282,10 @@ abstract final class AppRouter {
               ? (settings.arguments! as EmotionSelectRouteArguments)
                     .idempotencyKeyProvider
               : null,
+          activityContext: settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .activityContext
+              : const DrawingActivityContextDto.general(),
         ),
       ['child', final childId, 'activity', 'complete']
           when _hasChildContext(childController, childId) =>
@@ -347,6 +366,7 @@ final class DrawingRouteArguments {
     required this.repository,
     this.completionSnapshotProvider,
     this.resumeConversation = false,
+    this.activityContext = const DrawingActivityContextDto.general(),
   });
 
   final int sessionId;
@@ -355,6 +375,13 @@ final class DrawingRouteArguments {
 
   /// 그림 단계를 지난 세션으로 들어올 때 대화를 즉시 이어받게 한다.
   final bool resumeConversation;
+  final DrawingActivityContextDto activityContext;
+}
+
+final class DrawingActivitySelectionRouteArguments {
+  const DrawingActivitySelectionRouteArguments({this.replaceActive = false});
+
+  final bool replaceActive;
 }
 
 class ChildContextGuardScreen extends StatelessWidget {

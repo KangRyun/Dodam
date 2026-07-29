@@ -54,6 +54,19 @@ abstract interface class DrawingRepository {
   );
 }
 
+abstract interface class HtpDrawingRepository {
+  Future<HtpAssessmentDto> startHtpAssessment(
+    StartHtpAssessmentRequestDto request,
+  );
+  Future<HtpAssessmentDto> getHtpAssessment(int assessmentId);
+  Future<HtpAssessmentDto> moveToNextHtpStep(int assessmentId);
+  Future<void> saveHtpReflection(
+    int assessmentId,
+    SaveDrawingReflectionRequestDto request,
+  );
+  Future<void> completeHtpAssessment(int assessmentId);
+}
+
 /// 진행 중인 활동을 폐기하고 새 활동을 시작할 때 사용하는 선택 계약.
 abstract interface class DrawingSessionDiscarder {
   Future<void> deleteSession(int sessionId);

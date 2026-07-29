@@ -12,7 +12,10 @@ enum MockCompletionScenario { success, failure }
 enum MockReflectionScenario { success, failure }
 
 final class MockDrawingRepository
-    implements DrawingRepository, DrawingSessionDiscarder {
+    implements
+        DrawingRepository,
+        HtpDrawingRepository,
+        DrawingSessionDiscarder {
   const MockDrawingRepository({
     this.draftScenario = MockDraftScenario.found,
     this.completionScenario = MockCompletionScenario.success,
@@ -32,6 +35,17 @@ final class MockDrawingRepository
     'recommendedAgeMax': 12,
     'guideText': '오늘 있었던 일을 그림으로 그려 볼까?',
     'displayOrder': 1,
+  };
+  static const _htpType = {
+    'drawingTypeId': 6,
+    'code': 'HTP',
+    'name': '집·나무·사람 그림',
+    'activityCategory': 'ASSESSMENT',
+    'selectableBy': 'GUARDIAN',
+    'recommendedAgeMin': 4,
+    'recommendedAgeMax': 12,
+    'guideText': '집, 나무, 사람을 차례로 그려 볼까요?',
+    'displayOrder': 2,
   };
   static const _asset = {
     'assetId': 120,
@@ -69,10 +83,13 @@ final class MockDrawingRepository
     String? category,
     bool activeOnly = true,
   }) async => ApiPage(
-    content: [DrawingTypeDto.fromJson(_type)],
+    content: [
+      DrawingTypeDto.fromJson(_type),
+      DrawingTypeDto.fromJson(_htpType),
+    ],
     page: 0,
-    size: 100,
-    totalElements: 1,
+    size: 2,
+    totalElements: 2,
     totalPages: 1,
     hasNext: false,
   );
@@ -85,6 +102,37 @@ final class MockDrawingRepository
     'currentStage': 'DRAWING',
     'guideText': _type['guideText'],
   });
+
+  @override
+  Future<HtpAssessmentDto> startHtpAssessment(
+    StartHtpAssessmentRequestDto request,
+  ) async => HtpAssessmentDto.fromJson(_htpAssessment);
+
+  @override
+  Future<HtpAssessmentDto> getHtpAssessment(int assessmentId) async =>
+      HtpAssessmentDto.fromJson(_htpAssessment);
+
+  @override
+  Future<HtpAssessmentDto> moveToNextHtpStep(int assessmentId) async =>
+      HtpAssessmentDto.fromJson({
+        ..._htpAssessment,
+        'currentStep': {
+          'stepOrder': 2,
+          'drawingSubject': 'TREE',
+          'drawingSessionId': 43,
+          'sessionStatus': 'IN_PROGRESS',
+          'currentStage': 'DRAWING',
+        },
+      });
+
+  @override
+  Future<void> saveHtpReflection(
+    int assessmentId,
+    SaveDrawingReflectionRequestDto request,
+  ) async {}
+
+  @override
+  Future<void> completeHtpAssessment(int assessmentId) async {}
   @override
   Future<DrawingSessionDto> getSession(int sessionId) async =>
       DrawingSessionDto.fromDetailJson({
@@ -233,4 +281,18 @@ final class MockDrawingRepository
     'requestedAt': '2026-07-21T09:41:12Z',
     'processedAt': '2026-07-21T09:41:13Z',
   });
+
+  static const _htpAssessment = {
+    'htpAssessmentId': 7,
+    'status': 'IN_PROGRESS',
+    'expiresAt': '2026-07-30T09:30:00Z',
+    'currentStep': {
+      'stepOrder': 1,
+      'drawingSubject': 'HOUSE',
+      'drawingSessionId': 42,
+      'sessionStatus': 'IN_PROGRESS',
+      'currentStage': 'DRAWING',
+    },
+    'allStepsCompleted': false,
+  };
 }

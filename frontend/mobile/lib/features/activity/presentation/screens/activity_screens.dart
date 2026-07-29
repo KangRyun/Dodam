@@ -110,6 +110,7 @@ class DrawingScreen extends StatefulWidget {
     this.conversationId,
     this.basisAnalysisId,
     this.resumeConversation = false,
+    this.activityContext = const DrawingActivityContextDto.general(),
     super.key,
   });
 
@@ -137,6 +138,7 @@ class DrawingScreen extends StatefulWidget {
   /// 서버는 `IN_PROGRESS` + `DRAWING` 단계에서만 초안·획 저장을 허용하므로
   /// 대화·회고 단계로 복귀할 때는 저장과 객체 탐지를 시작하지 않는다.
   final bool resumeConversation;
+  final DrawingActivityContextDto activityContext;
 
   @override
   State<DrawingScreen> createState() => _DrawingScreenState();
@@ -179,6 +181,19 @@ class _DrawingScreenState extends State<DrawingScreen> {
   ///
   /// 이 뒤로 세션은 `CONVERSING`이므로 캔버스 저장은 막히고 대화만 진행한다.
   bool _drawingStageFinished = false;
+
+  String get _activityTitle {
+    final activity = widget.activityContext;
+    if (!activity.isHtp) return '그림 활동';
+    final subject = switch (activity.drawingSubject) {
+      'HOUSE' => '집 그리기',
+      'TREE' => '나무 그리기',
+      'PERSON' => '사람 그리기',
+      _ => 'HTP 그림',
+    };
+    return '${activity.stepOrder ?? 1}단계 · $subject';
+  }
+
   bool _movedToReflection = false;
   int? _activeConversationId;
   int? _lastQuestionMessageId;
@@ -457,7 +472,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
     // 나아갈 방법이 없어 교착된다.
     if ((_drawingStageFinished || widget.resumeConversation) &&
         _conversationEndController?.completed == true) {
-      _goToEmotionSelect();
+      unawaited(_continueAfterConversation());
     }
   }
 
@@ -772,17 +787,68 @@ class _DrawingScreenState extends State<DrawingScreen> {
   /// 동작대로 감정 회고 화면으로 넘긴다.
   Future<void> _startConversationAfterDrawing(int analysisId) async {
     if (widget.conversationRepository == null) {
-      _goToEmotionSelect();
+      await _continueAfterConversation();
       return;
     }
     await _ensureConversationStarted(analysisId);
     if (!mounted) return;
     final questionController = _questionController;
     if (questionController == null) {
-      _goToEmotionSelect();
+      await _continueAfterConversation();
       return;
     }
     await questionController.loadForAnalysis(analysisId);
+  }
+
+  Future<void> _continueAfterConversation() async {
+    final activityContext = widget.activityContext;
+    final assessmentId = activityContext.htpAssessmentId;
+    final repository = widget.drawingRepository;
+    if (!activityContext.isHtp || assessmentId == null || repository == null) {
+      _goToEmotionSelect();
+      return;
+    }
+    if (repository is! HtpDrawingRepository) {
+      _goToEmotionSelect();
+      return;
+    }
+    final htpRepository = repository as HtpDrawingRepository;
+    if (_movedToReflection || !mounted) return;
+    _movedToReflection = true;
+    try {
+      final assessment = await htpRepository.moveToNextHtpStep(assessmentId);
+      if (!mounted) return;
+      if (assessment.allStepsCompleted) {
+        _movedToReflection = false;
+        _goToEmotionSelect();
+        return;
+      }
+      final step = assessment.currentStep;
+      await Navigator.of(context).pushReplacementNamed(
+        AppRoutes.drawing(widget.childId),
+        arguments: DrawingRouteArguments(
+          sessionId: step.drawingSessionId,
+          repository: repository,
+          completionSnapshotProvider: widget.completionSnapshotProvider,
+          activityContext: DrawingActivityContextDto(
+            activityKind: 'HTP',
+            htpAssessmentId: assessment.htpAssessmentId,
+            htpStatus: assessment.status,
+            stepOrder: step.stepOrder,
+            drawingSubject: step.drawingSubject,
+          ),
+        ),
+      );
+    } on Object {
+      _movedToReflection = false;
+      if (mounted) {
+        showAppMessage(
+          context,
+          message: '다음 그림을 준비하지 못했어요. 다시 시도해 주세요.',
+          type: AppMessageType.error,
+        );
+      }
+    }
   }
 
   /// 감정 회고 화면으로 한 번만 이동한다.
@@ -805,6 +871,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
         conversationEndRequest: _conversationEndController?.requestSnapshot,
         lastQuestionMessageId: _lastQuestionMessageId,
         idempotencyKeyProvider: widget.idempotencyKeyProvider,
+        activityContext: widget.activityContext,
       ),
     );
   }
@@ -825,7 +892,7 @@ class _DrawingScreenState extends State<DrawingScreen> {
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: AppColors.childCanvas,
     appBar: AppTopBar(
-      title: '그림 활동',
+      title: _activityTitle,
       onBack: () => Navigator.of(context).pop(),
       actions: [
         Padding(
@@ -1585,6 +1652,7 @@ final class EmotionSelectRouteArguments {
     required this.conversationEndRequest,
     required this.lastQuestionMessageId,
     required this.idempotencyKeyProvider,
+    required this.activityContext,
   });
 
   final int? sessionId;
@@ -1595,6 +1663,7 @@ final class EmotionSelectRouteArguments {
   final String? conversationEndIdempotencyKey;
   final ConversationEndRequest? conversationEndRequest;
   final String Function()? idempotencyKeyProvider;
+  final DrawingActivityContextDto activityContext;
 }
 
 class EmotionSelectScreen extends StatefulWidget {
@@ -1610,6 +1679,7 @@ class EmotionSelectScreen extends StatefulWidget {
     this.lastQuestionMessageId,
     this.idempotencyKeyProvider,
     this.activityCompletionController,
+    this.activityContext = const DrawingActivityContextDto.general(),
     super.key,
   });
 
@@ -1623,6 +1693,7 @@ class EmotionSelectScreen extends StatefulWidget {
   final ConversationEndRequest? conversationEndRequest;
   final String Function()? idempotencyKeyProvider;
   final DrawingActivityCompletionController? activityCompletionController;
+  final DrawingActivityContextDto activityContext;
 
   @override
   State<EmotionSelectScreen> createState() => _EmotionSelectScreenState();
@@ -1702,26 +1773,46 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
     final sessionId = widget.sessionId;
     final repository = widget.drawingRepository;
     final completionController = _activityCompletionController;
-    if (sessionId == null ||
-        repository == null ||
-        completionController == null) {
+    if (sessionId == null || repository == null) {
+      showAppMessage(context, message: '아직 마음을 저장할 수 없어요. 잠시 후 다시 해 주세요.');
+      return;
+    }
+    if (!widget.activityContext.isHtp && completionController == null) {
       showAppMessage(context, message: '아직 마음을 저장할 수 없어요. 잠시 후 다시 해 주세요.');
       return;
     }
     if (!skipped && _selectedEmotions.isEmpty) return;
     setState(() => _isSubmitting = true);
     final rawTitle = _titleController.text;
+    final reflection = SaveDrawingReflectionRequestDto(
+      title: rawTitle.isEmpty ? null : rawTitle,
+      selectedEmotions: skipped
+          ? const []
+          : List.unmodifiable(_selectedEmotions),
+      expressedEmotionText: null,
+      skipped: skipped,
+    );
     try {
-      final completed = await completionController.submit(
-        reflection: SaveDrawingReflectionRequestDto(
-          title: rawTitle.isEmpty ? null : rawTitle,
-          selectedEmotions: skipped
-              ? const []
-              : List.unmodifiable(_selectedEmotions),
-          // TODO(REFLECTION): Add direct-expression UI when its UX is agreed.
-          expressedEmotionText: null,
-          skipped: skipped,
-        ),
+      final assessmentId = widget.activityContext.htpAssessmentId;
+      if (widget.activityContext.isHtp && assessmentId != null) {
+        if (repository is! HtpDrawingRepository) {
+          throw UnsupportedError('HTP activity is unavailable.');
+        }
+        final htpRepository = repository as HtpDrawingRepository;
+        await htpRepository.saveHtpReflection(assessmentId, reflection);
+        await htpRepository.completeHtpAssessment(assessmentId);
+        if (!mounted) return;
+        Navigator.of(context).pushReplacementNamed(
+          AppRoutes.activityComplete(widget.childId),
+          arguments: ActivityCompleteRouteArguments(
+            sessionId: sessionId,
+            repository: repository,
+          ),
+        );
+        return;
+      }
+      final completed = await completionController!.submit(
+        reflection: reflection,
         lastQuestionMessageId: widget.lastQuestionMessageId,
       );
       if (!completed) {
@@ -1739,7 +1830,7 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
     } on Object {
       if (mounted) {
         final reflectionFailed =
-            completionController.failedStep ==
+            completionController?.failedStep ==
             DrawingActivityCompletionStatus.savingReflection;
         showAppMessage(
           context,

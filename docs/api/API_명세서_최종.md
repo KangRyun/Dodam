@@ -273,7 +273,7 @@ Query 기본값은 `page=0`, `size=20`이며 `size`는 `1~100`이다.
 | `DrawingCategory` | `ASSESSMENT`, `GENERAL` |
 | `SelectableBy` | `GUARDIAN`, `CHILD`, `BOTH` |
 | `InputMethod` | `CANVAS`, `UPLOAD` |
-| `DrawingSessionStatus` | `IN_PROGRESS`, `COMPLETED`, `FAILED`, `DELETED` |
+| `DrawingSessionStatus` | `IN_PROGRESS`, `COMPLETED`, `FAILED`, `ABANDONED`, `DELETED` |
 | `DrawingStage` | `DRAWING`, `ANALYZING`, `CONVERSING`, `REFLECTION`, `REPORTING`, `COMPLETED` |
 | `AssetType` | `DRAFT`, `INTERMEDIATE`, `FINAL`, `UPLOADED`, `THUMBNAIL`, `TIMELAPSE` |
 | `AnalysisType` | `INTERMEDIATE`, `FINAL` |

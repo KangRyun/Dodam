@@ -769,7 +769,7 @@ CREATE TABLE `drawing_sessions` (
   CONSTRAINT `fk_drawing_sessions_started_by_user_id` FOREIGN KEY (`started_by_user_id`) REFERENCES `users` (`id`) ON DELETE SET NULL,
   CONSTRAINT `ck_drawing_sessions_current_stage` CHECK ((`current_stage` in (_utf8mb4'DRAWING',_utf8mb4'ANALYZING',_utf8mb4'CONVERSING',_utf8mb4'REFLECTION',_utf8mb4'REPORTING',_utf8mb4'COMPLETED'))),
   CONSTRAINT `ck_drawing_sessions_input_method` CHECK ((`input_method` in (_utf8mb4'CANVAS',_utf8mb4'UPLOAD'))),
-  CONSTRAINT `ck_drawing_sessions_session_status` CHECK ((`session_status` in (_utf8mb4'IN_PROGRESS',_utf8mb4'COMPLETED',_utf8mb4'FAILED',_utf8mb4'DELETED')))
+  CONSTRAINT `ck_drawing_sessions_session_status` CHECK ((`session_status` in (_utf8mb4'IN_PROGRESS',_utf8mb4'COMPLETED',_utf8mb4'FAILED',_utf8mb4'ABANDONED',_utf8mb4'DELETED')))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='그림 활동 세션';
 /*!40101 SET character_set_client = @saved_cs_client */;
 /*!40101 SET @saved_cs_client     = @@character_set_client */;

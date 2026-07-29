@@ -24,6 +24,9 @@ abstract final class AppRoutes {
   static String drawing(String childId) =>
       '/child/${Uri.encodeComponent(childId)}/activity/drawing';
 
+  static String drawingActivitySelection(String childId) =>
+      '/child/${Uri.encodeComponent(childId)}/activity/select';
+
   static String emotionSelect(String childId) =>
       '/child/${Uri.encodeComponent(childId)}/activity/emotions';
 

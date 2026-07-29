@@ -4,12 +4,13 @@ import '../../../../app/router/app_navigation.dart';
 import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../design_system/design_system.dart';
+import '../../../activity/presentation/screens/activity_screens.dart';
 import '../../../child/data/dto/child_dtos.dart';
 import '../../../drawing/application/drawing_session_start_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
 
-enum _DrawingStartChoice { resume, startNew, delete }
+enum _DrawingStartChoice { resume, startNew }
 
 class ChildModeHomeScreen extends StatefulWidget {
   const ChildModeHomeScreen({
@@ -106,31 +107,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
                       ),
                     ),
                     child: const Text(
-                      '새로 그리기',
-                      style: TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  width: double.infinity,
-                  height: 58,
-                  child: OutlinedButton(
-                    onPressed: () => Navigator.of(
-                      dialogContext,
-                    ).pop(_DrawingStartChoice.delete),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: AppColors.error,
-                      side: const BorderSide(color: AppColors.errorSoft),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    child: const Text(
-                      '삭제하기',
+                      '새로운 활동 선택',
                       style: TextStyle(
                         fontSize: 19,
                         fontWeight: FontWeight.w700,
@@ -156,41 +133,60 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       final activeSession = await controller.findActiveSession(
         childId: widget.child.childId,
       );
-      DrawingSessionResolution resolution;
-      if (activeSession != null && controller.hasSavedDrawing(activeSession)) {
+      if (activeSession != null) {
         if (!mounted) return;
         final choice = await _showDrawingStartDialog();
         if (choice == null || !mounted) return;
-        if (choice == _DrawingStartChoice.delete) {
-          await controller.discardActiveSession(activeSession.drawingSessionId);
-          if (mounted) {
-            showAppMessage(context, message: '그리던 그림을 삭제했어요.');
-          }
+        if (choice == _DrawingStartChoice.startNew) {
+          await AppNavigation.pushNamed(
+            context,
+            AppRoutes.drawingActivitySelection(widget.child.childId.toString()),
+            arguments: const DrawingActivitySelectionRouteArguments(
+              replaceActive: true,
+            ),
+          );
           return;
         }
-        resolution = choice == _DrawingStartChoice.resume
-            ? controller.resume(activeSession)
-            : await controller.replaceActiveSession(
-                childId: widget.child.childId,
-                activeSessionId: activeSession.drawingSessionId,
-              );
-      } else if (activeSession != null) {
-        resolution = controller.resume(activeSession);
-      } else {
-        resolution = await controller.createNewSession(
-          childId: widget.child.childId,
+        final resolution = controller.resume(activeSession);
+        if (resolution.activityContext.isHtp &&
+            resolution.currentStage == 'COMPLETED') {
+          await AppNavigation.pushNamed(
+            context,
+            AppRoutes.emotionSelect(widget.child.childId.toString()),
+            arguments: EmotionSelectRouteArguments(
+              sessionId: resolution.sessionId,
+              repository: widget.drawingRepository,
+              conversationId: null,
+              conversationAlreadyEnded: true,
+              conversationEndRepository: null,
+              conversationEndIdempotencyKey: null,
+              conversationEndRequest: null,
+              lastQuestionMessageId: null,
+              idempotencyKeyProvider: null,
+              activityContext: resolution.activityContext,
+            ),
+          );
+          return;
+        }
+        await AppNavigation.pushNamed(
+          context,
+          AppRoutes.drawing(widget.child.childId.toString()),
+          arguments: DrawingRouteArguments(
+            sessionId: resolution.sessionId,
+            repository: widget.drawingRepository,
+            completionSnapshotProvider: widget.completionSnapshotProvider,
+            resumeConversation: !resolution.isDrawingStage,
+            activityContext: resolution.activityContext,
+          ),
         );
+        return;
       }
       if (!mounted) return;
       await AppNavigation.pushNamed(
         context,
-        AppRoutes.drawing(widget.child.childId.toString()),
-        arguments: DrawingRouteArguments(
-          sessionId: resolution.sessionId,
-          repository: widget.drawingRepository,
-          completionSnapshotProvider: widget.completionSnapshotProvider,
-          // 그림 단계를 지난 세션은 저장·탐지가 막혀 있어 대화를 바로 이어받는다.
-          resumeConversation: !resolution.isDrawingStage,
+        AppRoutes.drawingActivitySelection(widget.child.childId.toString()),
+        arguments: const DrawingActivitySelectionRouteArguments(
+          replaceActive: false,
         ),
       );
     } on Object {

@@ -15,6 +15,7 @@ import java.time.OffsetDateTime;
  * @param inputMethod 첫 단계와 후속 단계에 공통 적용할 그림 입력 방식
  * @param clientStartedAt 클라이언트가 관찰한 시작 시각
  * @param canvas 선택적으로 전달하는 캔버스 설정
+ * @param replaceActive 기존 진행 활동을 포기 처리하고 HTP로 교체할지 여부
  */
 public record StartHtpAssessmentRequest(
     @Schema(description = "HTP 활동을 수행할 아동 식별자", example = "1") @NotNull @Positive Long childId,
@@ -23,4 +24,23 @@ public record StartHtpAssessmentRequest(
         @NotNull
         @JsonFormat(shape = JsonFormat.Shape.STRING)
         OffsetDateTime clientStartedAt,
-    CanvasConfigurationRequest canvas) {}
+    CanvasConfigurationRequest canvas,
+    @Schema(description = "기존 진행 활동을 포기하고 HTP를 시작할지 여부", defaultValue = "false")
+        boolean replaceActive) {
+
+  /**
+   * 기존 호출부와 호환되는 기본 생성자다.
+   *
+   * @param childId HTP 활동을 수행할 아동 식별자
+   * @param inputMethod 그림 입력 방식
+   * @param clientStartedAt 클라이언트가 관찰한 시작 시각
+   * @param canvas 선택적으로 전달하는 캔버스 설정
+   */
+  public StartHtpAssessmentRequest(
+      Long childId,
+      DrawingInputMethod inputMethod,
+      OffsetDateTime clientStartedAt,
+      CanvasConfigurationRequest canvas) {
+    this(childId, inputMethod, clientStartedAt, canvas, false);
+  }
+}

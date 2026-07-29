@@ -12,10 +12,12 @@ final class DrawingSessionResolution {
   const DrawingSessionResolution({
     required this.sessionId,
     required this.currentStage,
+    this.activityContext = const DrawingActivityContextDto.general(),
   });
 
   final int sessionId;
   final String currentStage;
+  final DrawingActivityContextDto activityContext;
 
   /// 그림 저장·획 전송이 허용되는 단계인지 나타낸다.
   bool get isDrawingStage => currentStage == 'DRAWING';
@@ -41,6 +43,7 @@ final class DrawingSessionStartController {
       DrawingSessionResolution(
         sessionId: session.drawingSessionId,
         currentStage: session.currentStage,
+        activityContext: session.activityContext,
       );
 
   Future<DrawingSessionResolution> resolveSession({
@@ -54,13 +57,59 @@ final class DrawingSessionStartController {
     return createNewSession(childId: childId);
   }
 
-  /// 기존 활동을 폐기한 뒤 새 그림 세션을 만든다.
-  Future<DrawingSessionResolution> replaceActiveSession({
+  /// 보호자가 선택한 일반 활동의 그림 세션을 생성한다.
+  ///
+  /// `replaceActive`가 참이면 서버가 기존 활동을 `ABANDONED`로 전환하고 새 세션을
+  /// 같은 트랜잭션에서 생성한다. 기존 파일과 분석 결과를 물리 삭제하지 않는다.
+  Future<DrawingSessionResolution> createSelectedSession({
     required int childId,
-    required int activeSessionId,
+    required int drawingTypeId,
+    bool replaceActive = false,
   }) async {
-    await discardActiveSession(activeSessionId);
-    return createNewSession(childId: childId);
+    final session = await repository.createSession(
+      CreateDrawingSessionRequestDto(
+        childId: childId,
+        drawingTypeId: drawingTypeId,
+        inputMethod: 'CANVAS',
+        clientStartedAt: _now().toUtc().toIso8601String(),
+        replaceActive: replaceActive,
+      ),
+    );
+    return DrawingSessionResolution(
+      sessionId: session.drawingSessionId,
+      currentStage: session.currentStage,
+    );
+  }
+
+  /// HTP 활동 묶음과 첫 HOUSE 그림 세션을 생성한다.
+  Future<DrawingSessionResolution> createHtpAssessment({
+    required int childId,
+    bool replaceActive = false,
+  }) async {
+    if (repository is! HtpDrawingRepository) {
+      throw UnsupportedError('HTP activity is unavailable.');
+    }
+    final htpRepository = repository as HtpDrawingRepository;
+    final assessment = await htpRepository.startHtpAssessment(
+      StartHtpAssessmentRequestDto(
+        childId: childId,
+        inputMethod: 'CANVAS',
+        clientStartedAt: _now().toUtc().toIso8601String(),
+        replaceActive: replaceActive,
+      ),
+    );
+    final step = assessment.currentStep;
+    return DrawingSessionResolution(
+      sessionId: step.drawingSessionId,
+      currentStage: step.currentStage,
+      activityContext: DrawingActivityContextDto(
+        activityKind: 'HTP',
+        htpAssessmentId: assessment.htpAssessmentId,
+        htpStatus: assessment.status,
+        stepOrder: step.stepOrder,
+        drawingSubject: step.drawingSubject,
+      ),
+    );
   }
 
   /// 임시 그림만 삭제하고 현재 화면에 머문다.
@@ -83,17 +132,9 @@ final class DrawingSessionStartController {
       ..sort((left, right) => left.displayOrder.compareTo(right.displayOrder));
 
     try {
-      final session = await repository.createSession(
-        CreateDrawingSessionRequestDto(
-          childId: childId,
-          drawingTypeId: sortedTypes.first.drawingTypeId,
-          inputMethod: 'CANVAS',
-          clientStartedAt: _now().toUtc().toIso8601String(),
-        ),
-      );
-      return DrawingSessionResolution(
-        sessionId: session.drawingSessionId,
-        currentStage: session.currentStage,
+      return await createSelectedSession(
+        childId: childId,
+        drawingTypeId: sortedTypes.first.drawingTypeId,
       );
     } on ApiResponseFailure catch (failure) {
       if (failure.error?.code != 'DRAWING_409_001') rethrow;

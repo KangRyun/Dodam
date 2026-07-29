@@ -115,6 +115,18 @@ class DrawingSessionDomainTest {
   }
 
   @Test
+  void abandonsAnInProgressSessionWithoutDeletingStoredData() {
+    DrawingSession session = session();
+    LocalDateTime abandonedAt = LocalDateTime.of(2026, 7, 21, 11, 10);
+
+    session.abandon(abandonedAt);
+
+    assertThat(session.getSessionStatus()).isEqualTo(DrawingSessionStatus.ABANDONED);
+    assertThat(session.getCompletedAt()).isEqualTo(abandonedAt);
+    assertThat(session.getDeletedAt()).isNull();
+  }
+
+  @Test
   void drawingAnalysisTransitionRejectsAnUnexpectedStage() {
     DrawingSession session = session();
 

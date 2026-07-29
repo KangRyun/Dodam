@@ -129,7 +129,7 @@ void main() {
     expect(find.byKey(const ValueKey('draw-action')), findsOneWidget);
   });
 
-  testWidgets('선택된 아동의 그림 활동 시작 버튼은 Drawing placeholder로 연결된다', (tester) async {
+  testWidgets('선택된 아동의 그림 활동 시작 버튼은 활동 선택 화면으로 연결된다', (tester) async {
     await tester.pumpWidget(
       DodamApp(childRepository: _FakeChildRepository(children: _children)),
     );
@@ -142,7 +142,8 @@ void main() {
     await _tapAfterScroll(tester, const ValueKey('draw-action'));
     await tester.pumpAndSettle();
 
-    expect(find.text('그림 활동'), findsWidgets);
+    expect(find.text('어떤 활동을 해볼까요?'), findsOneWidget);
+    expect(find.text('그림일기'), findsOneWidget);
   });
 
   testWidgets('활성 그림 세션이 있으면 새로 만들지 않고 기존 sessionId로 재개한다', (tester) async {
@@ -150,7 +151,9 @@ void main() {
     await _pumpChildHome(tester, drawingRepository);
 
     await _tapAfterScroll(tester, const ValueKey('draw-action'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('이어 그리기'));
+    await _pumpUntil(tester, find.byKey(const ValueKey('drawing-canvas')));
 
     expect(drawingRepository.createCalls, 0);
     expect(drawingRepository.getTypesChildId, isNull);
@@ -169,17 +172,17 @@ void main() {
 
     expect(find.text('그리던 그림이 있어요'), findsOneWidget);
     expect(find.text('이어 그리기'), findsOneWidget);
-    expect(find.text('새로 그리기'), findsOneWidget);
+    expect(find.text('새로운 활동 선택'), findsOneWidget);
 
     await tester.tap(find.text('이어 그리기'));
-    await tester.pumpAndSettle();
+    await _pumpUntil(tester, find.byKey(const ValueKey('drawing-canvas')));
 
     expect(drawingRepository.deletedSessionIds, isEmpty);
     expect(drawingRepository.createCalls, 0);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
   });
 
-  testWidgets('새로 그리기는 저장된 활동을 삭제하고 새 세션을 만든다', (tester) async {
+  testWidgets('새로운 활동 선택은 기존 활동을 삭제하지 않고 교체 옵션으로 생성한다', (tester) async {
     final drawingRepository = _TrackingDrawingRepository(
       activeSessionId: 812,
       activeHasDraft: true,
@@ -188,11 +191,18 @@ void main() {
 
     await _tapAfterScroll(tester, const ValueKey('draw-action'));
     await tester.pump(const Duration(milliseconds: 400));
-    await tester.tap(find.text('새로 그리기'));
+    await tester.tap(find.text('새로운 활동 선택'));
     await tester.pumpAndSettle();
 
-    expect(drawingRepository.deletedSessionIds, [812]);
+    expect(find.text('어떤 활동을 해볼까요?'), findsOneWidget);
+    await tester.tap(find.text('그림일기'));
+    await tester.pump();
+    await tester.tap(find.text('다음'));
+    await tester.pumpAndSettle();
+
+    expect(drawingRepository.deletedSessionIds, isEmpty);
     expect(drawingRepository.createCalls, 1);
+    expect(drawingRepository.createRequest?.replaceActive, isTrue);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
   });
 
@@ -212,6 +222,10 @@ void main() {
     await tester.pumpAndSettle();
 
     await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('그림일기'));
+    await tester.pump();
+    await tester.tap(find.text('다음'));
     await tester.pumpAndSettle();
 
     expect(drawingRepository.getTypesChildId, 3);
@@ -273,11 +287,15 @@ void main() {
 
     await _tapAfterScroll(tester, const ValueKey('draw-action'));
     await tester.pumpAndSettle();
+    await tester.tap(find.text('그림일기'));
+    await tester.pump();
+    await tester.tap(find.text('다음'));
+    await tester.pumpAndSettle();
 
     expect(drawingRepository.createCalls, 1);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
-    expect(find.textContaining('그림 활동을 시작하지 못했어요'), findsOneWidget);
-    expect(find.byKey(const ValueKey('draw-action')), findsOneWidget);
+    expect(find.textContaining('활동을 시작하지 못했어요'), findsOneWidget);
+    expect(find.text('어떤 활동을 해볼까요?'), findsOneWidget);
   });
 
   testWidgets('활동 시작 연속 탭은 DrawingSession을 중복 생성하지 않는다', (tester) async {
@@ -285,14 +303,15 @@ void main() {
     final drawingRepository = _TrackingDrawingRepository(pending: pending);
     await _pumpChildHome(tester, drawingRepository);
 
-    final action = find.byKey(const ValueKey('draw-action'));
     await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('그림일기'));
     await tester.pump();
-    await tester.tap(action);
+    await tester.tap(find.text('다음'));
     await tester.pump();
 
     expect(drawingRepository.createCalls, 1);
-    expect(find.byType(CircularProgressIndicator), findsWidgets);
+    expect(find.text('준비하고 있어요…'), findsOneWidget);
     pending.complete(drawingRepository.session());
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
@@ -492,13 +511,13 @@ final class _TrackingDrawingRepository
       content: [
         DrawingTypeDto(
           drawingTypeId: 77,
-          code: 'FREE',
-          name: '자유화',
+          code: 'ART_DIARY',
+          name: '그림일기',
           activityCategory: 'GENERAL',
           selectableBy: 'GUARDIAN_OR_CHILD',
           recommendedAgeMin: null,
           recommendedAgeMax: null,
-          guideText: '자유롭게 그려 보세요.',
+          guideText: '오늘 있었던 일을 그림으로 그려 보세요.',
           displayOrder: 1,
         ),
       ],
