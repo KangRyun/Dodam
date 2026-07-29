@@ -7,6 +7,7 @@ import '../../features/auth/auth.dart';
 import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
 import '../../features/child/data/dto/child_dtos.dart';
 import '../../features/child/presentation/screens/child_registration_screen.dart';
+import '../../features/community/presentation/screens/community_webview_screen.dart';
 import '../../features/drawing/data/dto/drawing_dtos.dart';
 import '../../features/drawing/domain/repositories/drawing_repository.dart';
 import '../../features/drawing/presentation/screens/drawing_activity_selection_screen.dart';
@@ -39,6 +40,7 @@ abstract final class AppRouter {
     AuthSignOut? authSignOut,
     AuthSessionRestore? authRestoreSession,
     AuthenticatedUser? Function()? authCurrentUser,
+    Future<String?> Function()? communityAccessToken,
     ActivityRepository? activityRepository,
     DrawingRepository? drawingRepository,
     ReportRepository? reportRepository,
@@ -130,10 +132,8 @@ abstract final class AppRouter {
             icon: Icons.forum_outlined,
             selectedIcon: Icons.forum_rounded,
             label: '커뮤니티',
-            builder: (_) => const _TabPreparingScreen(
-              title: '커뮤니티',
-              description: '커뮤니티는 웹에서 제공돼요. 웹 연결(웹뷰)이 준비되면 이곳에서 열려요.',
-            ),
+            builder: (_) =>
+                CommunityWebView(accessTokenProvider: communityAccessToken),
           ),
           GuardianNavItem(
             icon: Icons.notifications_none_rounded,
@@ -217,11 +217,10 @@ abstract final class AppRouter {
           repository: consentRepository,
           children: childController.children,
         ),
-      // 커뮤니티는 웹 전용(CLAUDE.md 6절). 웹 커뮤니티 URL과 webview_flutter가
-      // 준비되면 이 자리표시자를 WebView 화면으로 교체한다. COMM-01 GET /posts.
-      ['guardian', 'community'] => const AppPlaceholderScaffold(
-        title: '커뮤니티',
-        description: '커뮤니티는 웹에서 제공돼요. 웹 커뮤니티 연결이 준비되면 이곳에서 바로 열려요.',
+      // 커뮤니티는 웹 전용(CLAUDE.md 6절). 웹앱을 웹뷰로 띄우고 로그인 토큰을
+      // localStorage에 주입한다. URL은 COMMUNITY_WEB_URL dart-define로 교체 가능.
+      ['guardian', 'community'] => CommunityWebViewScreen(
+        accessTokenProvider: communityAccessToken,
       ),
       ['child', final childId, 'home']
           when _hasChildContext(childController, childId) &&

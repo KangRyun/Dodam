@@ -2,6 +2,7 @@ import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
 
+import '../core/network/auth/access_token_provider.dart';
 import '../core/network/auth/token_refresher.dart';
 import '../design_system/design_system.dart';
 import '../features/auth/auth.dart';
@@ -286,6 +287,15 @@ class _DodamAppState extends State<DodamApp> {
       authSignOut: _signOut,
       authRestoreSession: _restoreSession,
       authCurrentUser: () => _currentSession?.user,
+      // 커뮤니티 웹뷰에 주입할 로그인 토큰. 원격 인증일 때만 값이 있고,
+      // Mock 인증에서는 null이라 토큰 없이 웹앱을 로드한다.
+      communityAccessToken: () async {
+        final repository = _authRepository;
+        if (repository is AccessTokenProvider) {
+          return (repository as AccessTokenProvider).readAccessToken();
+        }
+        return null;
+      },
       activityRepository: widget.activityRepository,
       drawingRepository: widget.drawingRepository,
       reportRepository: widget.reportRepository,
