@@ -187,8 +187,11 @@ def _scope(value) -> str:
 def _feature(item: dict) -> contracts.ObservedFeatureDraft:
     """LLM이 만든 특징 dict 하나를 계약 모델로. 누락 필드는 빈 문자열로 채운다.
 
-    단정적 진단(S15P11B209-591)이나 감정·성격 과잉 추론(S15P11B209-592)이 든 보호자 노출
-    feature는 EXPERT_ONLY로 강등해 전문가 검토로 격리한다 — 경향성 우려 소견은 그대로 통과한다.
+    두 가지를 보호자 노출 전에 규칙으로 걸러 EXPERT_ONLY로 강등한다:
+    - 단정적 진단(591)·감정/성격 과잉 추론(592) 표현 → 격리.
+    - '근거 없는 해석'(S15P11B209-600): description(AI 해석)이 있는데 evidenceSummary(관찰 사실)가
+      비어 있으면, 사실에 근거하지 않은 억측이라 보호자에게 사실처럼 보이면 안 된다 → 격리.
+    경향성 우려 소견·근거 있는 해석은 그대로 통과한다.
     """
     title = str(item.get("title", ""))
     description = str(item.get("description", ""))
@@ -199,6 +202,10 @@ def _feature(item: dict) -> contracts.ObservedFeatureDraft:
     ):
         # ⚠️ 원문은 로그로 남기지 않는다 — 격리 사실만.
         logger.warning("리포트 feature 과도 규정·단정 표현 격리 — EXPERT_ONLY 강등")
+        scope = "EXPERT_ONLY"
+    elif scope != "EXPERT_ONLY" and description.strip() and not evidence.strip():
+        # 해석은 있는데 관찰 근거가 없다 — 사실/해석 분리 원칙 위반이라 보호자 노출 불가.
+        logger.warning("리포트 feature 해석에 관찰 근거 없음 — EXPERT_ONLY 강등")
         scope = "EXPERT_ONLY"
     return contracts.ObservedFeatureDraft(
         feature_code=str(item.get("featureCode", "")),

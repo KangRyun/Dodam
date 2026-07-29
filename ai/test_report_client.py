@@ -321,6 +321,52 @@ class OverinferenceQuarantineTest(unittest.TestCase):
         self.assertFalse(result.observation_draft.expert_review_required)
 
 
+class UngroundedInterpretationTest(unittest.TestCase):
+    """관찰 사실 ↔ AI 해석 분리 — 근거 없는 해석은 보호자 노출 불가 (S15P11B209-600)."""
+
+    def _generate(self, **overrides):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(
+            _llm_json(**overrides)
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            return report_client.generate(_sample_request(), model="m")
+
+    def test_interpretation_without_evidence_downgraded_to_expert_only(self):
+        # description(해석)은 있는데 evidenceSummary(근거)가 비면 억측 → 격리.
+        result = self._generate(
+            features=[
+                {
+                    "featureCode": "X",
+                    "title": "정서 관찰",
+                    "description": "마음이 편안해 보여요.",  # 해석
+                    "evidenceSummary": "   ",  # 근거 없음(공백)
+                    "visibilityScope": "REVIEWED_GUARDIAN",
+                }
+            ]
+        )
+        self.assertEqual(
+            result.observation_draft.features[0].visibility_scope, "EXPERT_ONLY"
+        )
+
+    def test_interpretation_with_evidence_stays_guardian_visible(self):
+        # 근거가 있으면 그대로 보호자에게 보인다(정상 경로).
+        result = self._generate(
+            features=[
+                {
+                    "featureCode": "X",
+                    "title": "정서 관찰",
+                    "description": "즐겁게 그린 것으로 보여요.",  # 해석
+                    "evidenceSummary": "밝은 색을 많이 썼고 지우기가 적었어요.",  # 관찰 사실 근거
+                    "visibilityScope": "REVIEWED_GUARDIAN",
+                }
+            ]
+        )
+        self.assertEqual(
+            result.observation_draft.features[0].visibility_scope, "REVIEWED_GUARDIAN"
+        )
+
+
 class EmotionSourceTest(unittest.TestCase):
     def test_selected(self):
         req = _sample_request(selected_emotions=["JOY"], expressed_emotion_text=None)
