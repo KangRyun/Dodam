@@ -15,10 +15,9 @@ import '../../../drawing/application/drawing_object_detection_controller.dart';
 import '../../../drawing/application/drawing_activity_completion_controller.dart';
 import '../../../drawing/application/drawing_sync_coordinator.dart';
 import '../../../drawing/application/drawing_draft_restore_controller.dart';
+import '../../../drawing/application/htp_response_flow_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
-import '../../../drawing/application/drawing_session_start_controller.dart';
-import '../../../drawing/presentation/screens/input_method_select_screen.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 import '../../../conversation/conversation.dart';
@@ -211,6 +210,8 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   bool _movedToReflection = false;
+  bool _automaticConversationEndStarted = false;
+  int? _lastFollowUpAnswerMessageId;
   int? _activeConversationId;
   int? _lastQuestionMessageId;
 
@@ -252,9 +253,10 @@ class _DrawingScreenState extends State<DrawingScreen>
     final drawingRepository = widget.drawingRepository;
     if (_objectDetectionController == null &&
         !widget.resumeConversation &&
+        !widget.activityContext.isHtp &&
         sessionId != null &&
         drawingRepository != null) {
-      // 그림판은 입력 시점만 전달하고 탐지 상태와 최신 결과 검증은 별도 관리
+      // 그림일기만 입력 중 자동 저장과 객체 탐지를 연결
       _objectDetectionController = DrawingObjectDetectionController(
         saveDraft: _syncCoordinator.saveDraftNow,
         requestDetection: (request) =>
@@ -362,6 +364,8 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _handleObjectDetectionChanged() {
+    // HTP는 주제별 그림 완료 응답의 분석 결과로만 대화를 시작
+    if (widget.activityContext.isHtp) return;
     final detectionController = _objectDetectionController;
     final result = detectionController?.validResult;
     if (detectionController?.status != DrawingObjectDetectionStatus.succeeded ||
@@ -373,9 +377,11 @@ class _DrawingScreenState extends State<DrawingScreen>
     if (questionController == null) {
       // 아직 대화가 없으면 탐지 분석 ID로 대화를 생성한 뒤 질문을 요청한다.
       unawaited(
-        _ensureConversationStarted(result.drawingAnalysisId).then(
-          (_) => _questionController?.loadForAnalysis(result.drawingAnalysisId),
-        ),
+        _ensureConversationStarted(result.drawingAnalysisId).then((started) {
+          if (started) {
+            _questionController?.loadForAnalysis(result.drawingAnalysisId);
+          }
+        }),
       );
       return;
     }
@@ -387,11 +393,12 @@ class _DrawingScreenState extends State<DrawingScreen>
   ///
   /// 명세 §12.2: `POST /drawing-sessions/{id}/conversations`로 대화를 만들고
   /// 반환된 conversationId로 이후 질문·답변 흐름을 연결한다(S15P11B209-246).
-  Future<void> _ensureConversationStarted(int? analysisId) async {
-    if (_conversationSetupStarted) return;
+  Future<bool> _ensureConversationStarted(int? analysisId) async {
+    if (_questionController != null) return true;
+    if (_conversationSetupStarted) return false;
     final conversationRepository = widget.conversationRepository;
     final sessionId = widget.sessionId;
-    if (conversationRepository == null || sessionId == null) return;
+    if (conversationRepository == null || sessionId == null) return false;
     _conversationSetupStarted = true;
     try {
       final conversationId = await conversationRepository.startConversation(
@@ -400,11 +407,13 @@ class _DrawingScreenState extends State<DrawingScreen>
         idempotencyKey:
             (widget.idempotencyKeyProvider ?? _createIdempotencyKey)(),
       );
-      if (!mounted) return;
+      if (!mounted) return false;
       setState(() => _setupConversationControllers(conversationId));
+      return _questionController != null;
     } on Object {
       // 실패 시 다음 탐지 성공에서 재시도할 수 있도록 플래그를 되돌린다.
       _conversationSetupStarted = false;
+      return false;
     }
   }
 
@@ -462,6 +471,14 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _handleQuestionChanged() {
+    final questionController = _questionController;
+    if (questionController?.status == AiQuestionStatus.conversationComplete) {
+      final reason = questionController?.completionReason;
+      if (reason != null && !_automaticConversationEndStarted) {
+        unawaited(_completeConversationAutomatically(reason));
+      }
+      return;
+    }
     final question = _questionController?.question;
     if (!mounted ||
         _conversationEndController?.completed == true ||
@@ -560,6 +577,14 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _handleSttResultChanged() {
+    final controller = _sttResultController;
+    final answerMessageId = controller?.messageId;
+    if (controller?.status == SttResultStatus.success &&
+        answerMessageId != null &&
+        _lastFollowUpAnswerMessageId != answerMessageId) {
+      _lastFollowUpAnswerMessageId = answerMessageId;
+      unawaited(_requestFollowingQuestion(answerMessageId));
+    }
     if (mounted) setState(() {});
   }
 
@@ -583,7 +608,10 @@ class _DrawingScreenState extends State<DrawingScreen>
       questionMessageId: question.messageId,
       option: option,
     );
-    if (submitted) _questionDisplayController.dismiss();
+    if (submitted) {
+      _questionDisplayController.dismiss();
+      await _requestFollowingQuestion(controller.answerMessageId);
+    }
   }
 
   Future<void> _skipQuestion() async {
@@ -595,7 +623,53 @@ class _DrawingScreenState extends State<DrawingScreen>
     final skipped = await controller.submit(
       questionMessageId: question.messageId,
     );
-    if (skipped) _questionDisplayController.dismiss();
+    if (skipped) {
+      _questionDisplayController.dismiss();
+      await _requestFollowingQuestion(null);
+    }
+  }
+
+  /// 저장된 응답을 문맥으로 전달해 같은 그림의 다음 질문을 요청한다.
+  Future<void> _requestFollowingQuestion(int? previousAnswerMessageId) async {
+    if (!mounted ||
+        _conversationEndController?.completed == true ||
+        _automaticConversationEndStarted) {
+      return;
+    }
+    await _questionController?.loadNext(
+      previousAnswerMessageId: previousAnswerMessageId,
+    );
+  }
+
+  /// 질문 제한 또는 질문 없음은 오류 화면 대신 정상 대화 종료로 처리한다.
+  Future<void> _completeConversationAutomatically(
+    ConversationCompletionReason reason,
+  ) async {
+    final controller = _conversationEndController;
+    if (controller == null ||
+        controller.completed ||
+        _automaticConversationEndStarted) {
+      return;
+    }
+    _automaticConversationEndStarted = true;
+    await _questionTtsController?.stop();
+    await _voiceRecordingController?.cancel();
+    final ended = await controller.submit(
+      lastQuestionMessageId: _lastQuestionMessageId,
+      reason: reason,
+    );
+    if (ended) {
+      _questionDisplayController.dismiss();
+    } else {
+      _automaticConversationEndStarted = false;
+      if (mounted) {
+        showAppMessage(
+          context,
+          message: '대화를 마무리하지 못했어요. 다시 시도해 주세요.',
+          type: AppMessageType.error,
+        );
+      }
+    }
   }
 
   Future<void> _confirmAndEndConversation() async {
@@ -825,18 +899,35 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   /// 그림 단계 완료 직후 대화를 시작하고 첫 질문을 불러온다.
   ///
-  /// 대화를 열지 못하면(대화 저장소 미주입·서버 거부) 흐름이 멈추지 않도록 기존
-  /// 동작대로 감정 회고 화면으로 넘긴다.
+  /// HTP도 그림일기도 대화가 실제로 열린 뒤에만 질문을 요청한다.
   Future<void> _startConversationAfterDrawing(int analysisId) async {
     if (widget.conversationRepository == null) {
-      await _continueAfterConversation();
+      if (!widget.activityContext.isHtp) {
+        await _continueAfterConversation();
+        return;
+      }
+      if (mounted) {
+        showAppMessage(
+          context,
+          message: '대화를 시작하지 못했어요. 잠시 후 다시 들어와 주세요.',
+          type: AppMessageType.error,
+        );
+      }
       return;
     }
-    await _ensureConversationStarted(analysisId);
+    final started = await _ensureConversationStarted(analysisId);
     if (!mounted) return;
     final questionController = _questionController;
-    if (questionController == null) {
-      await _continueAfterConversation();
+    if (!started || questionController == null) {
+      if (!widget.activityContext.isHtp) {
+        await _continueAfterConversation();
+        return;
+      }
+      showAppMessage(
+        context,
+        message: '대화를 시작하지 못했어요. 잠시 후 다시 들어와 주세요.',
+        type: AppMessageType.error,
+      );
       return;
     }
     await questionController.loadForAnalysis(analysisId);
@@ -858,42 +949,19 @@ class _DrawingScreenState extends State<DrawingScreen>
     if (_movedToReflection || !mounted) return;
     _movedToReflection = true;
     try {
-      if (activityContext.drawingSubject == 'PERSON') {
-        final assessment = await htpRepository.moveToNextHtpStep(
-          assessmentId,
-          inputMethod: 'CANVAS',
-        );
-        if (!mounted) return;
-        if (assessment.allStepsCompleted) {
-          _movedToReflection = false;
-          _goToEmotionSelect();
-        }
+      // 주제별 대화 완료 후 다음 HTP CANVAS 세션을 생성
+      final result = await HtpResponseFlowController(
+        htpRepository,
+      ).moveToNextCanvas(assessmentId);
+      if (!mounted) return;
+      if (result.allStepsCompleted) {
+        _movedToReflection = false;
+        _goToEmotionSelect();
         return;
       }
-      final nextSubject = activityContext.drawingSubject == 'HOUSE'
-          ? '나무'
-          : '사람';
-      final resolution = await Navigator.of(context)
-          .push<DrawingSessionResolution>(
-            MaterialPageRoute(
-              builder: (_) => InputMethodSelectScreen(
-                childId: int.parse(widget.childId),
-                drawingTypeId: 0,
-                title: '$nextSubject 그리기',
-                description: '$nextSubject 그림을 어떻게 준비할까?',
-                icon: activityContext.drawingSubject == 'HOUSE'
-                    ? Icons.park_rounded
-                    : Icons.person_rounded,
-                accentColor: AppColors.leaf,
-                repository: repository,
-                htpAssessmentId: assessmentId,
-              ),
-            ),
-          );
-      if (!mounted) return;
+      final resolution = result.nextSession;
       if (resolution == null) {
-        _movedToReflection = false;
-        return;
+        throw StateError('Next HTP drawing session is missing.');
       }
       await Navigator.of(context).pushReplacementNamed(
         AppRoutes.drawing(widget.childId),

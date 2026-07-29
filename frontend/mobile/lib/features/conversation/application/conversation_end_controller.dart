@@ -25,12 +25,15 @@ final class ConversationEndController extends ChangeNotifier {
   String? get requestIdempotencyKey => _pendingIdempotencyKey;
   ConversationEndRequest? get requestSnapshot => _pendingRequest;
 
-  Future<bool> submit({required int? lastQuestionMessageId}) async {
+  Future<bool> submit({
+    required int? lastQuestionMessageId,
+    ConversationCompletionReason reason = ConversationEndReason.childRequest,
+  }) async {
     if (status == ConversationEndStatus.submitting || completed) return false;
     status = ConversationEndStatus.submitting;
     _pendingIdempotencyKey ??= idempotencyKeyProvider();
     _pendingRequest ??= ConversationEndRequest(
-      reason: ConversationEndReason.childRequest,
+      reason: reason,
       lastQuestionMessageId: lastQuestionMessageId,
     );
     notifyListeners();

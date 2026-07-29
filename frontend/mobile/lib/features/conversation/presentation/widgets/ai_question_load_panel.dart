@@ -91,10 +91,9 @@ final class _AiQuestionLoadPanelState extends State<AiQuestionLoadPanel> {
             label: const Text('다시 불러오기'),
           ),
         ),
-        // 성공 응답은 캔버스의 캐릭터 말풍선에서 표시
-        AiQuestionStatus.success => const SizedBox.shrink(
-          key: ValueKey('ai-question-ready'),
-        ),
+        // 성공 질문은 말풍선에서, 정상 대화 종료는 다음 화면에서 표시
+        AiQuestionStatus.success || AiQuestionStatus.conversationComplete =>
+          const SizedBox.shrink(key: ValueKey('ai-question-ready')),
       },
     );
   }
