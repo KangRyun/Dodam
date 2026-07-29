@@ -1,0 +1,111 @@
+# Grafana — k3s 재배치 (S15P11B209-361)
+#
+# ★ Service 이름이 `dodam-grafana` 인 것은 우연이 아니다.
+#   base/gateway.yaml 의 `/grafana/` 블록이 이미
+#   `http://dodam-grafana.dodam.svc.cluster.local:3000` 을 가리키고 있고,
+#   그 주석에 "dodam-grafana 는 S15P11B209-361 에서 붙인다"고 적혀 있다.
+#   이름을 바꾸면 게이트웨이가 502 를 계속 낸다.
+#
+#   다행히 gateway 는 변수+resolver 패턴이라 이 Service 가 없어도 nginx 자체는 뜬다
+#   (고정 proxy_pass 였다면 게이트웨이 전체가 기동 실패했을 것이다).
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-provisioning
+  namespace: dodam
+data:
+  datasources.yaml: |
+    # compose 판과 uid 를 동일하게 유지한다 — 대시보드 JSON 이 datasource 를 uid 로 참조하므로,
+    # 여기서 uid 가 바뀌면 옮겨온 대시보드가 전부 "데이터소스 없음"이 된다.
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        uid: dodam-prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090   # 같은 네임스페이스의 Service DNS
+        isDefault: true
+        editable: false               # 변경은 이 파일 수정 + 롤아웃으로만
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: dodam
+        orgId: 1
+        folder: dodam
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dodam-grafana
+  namespace: dodam
+spec:
+  replicas: 1
+  # SQLite(grafana.db)를 PVC 에 두므로 두 파드가 동시에 붙으면 안 된다.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: dodam-grafana } }
+  template:
+    metadata:
+      labels: { app: dodam-grafana }
+    spec:
+      securityContext:
+        # 이미지가 uid 472 로 돈다. PVC 초기 소유자는 root 라, fsGroup 이 없으면
+        # grafana.db 를 만들지 못하고 기동 직후 죽는다.
+        fsGroup: 472
+      automountServiceAccountToken: false   # k8s API 를 부르지 않는다
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.6.0     # compose 판과 같은 고정 버전
+          env:
+            # 값은 dodam-secrets 에만 있다(sync-secrets.sh 가 infra/.env 에서 만든다).
+            #   ⚠️ 키가 없으면 파드가 뜨지 않는다 — optional 을 붙이지 않았다.
+            #   compose 판의 `${GRAFANA_ADMIN_PASSWORD:?}` fail-fast 와 같은 뜻이다:
+            #   기본 비번(admin/admin)으로 조용히 뜨는 최악을 기동 차단으로 막는다.
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: dodam-secrets, key: GRAFANA_ADMIN_PASSWORD }
+            - { name: GF_AUTH_ANONYMOUS_ENABLED, value: "false" }   # 메트릭에도 내부 구조가 드러난다
+            - { name: GF_USERS_ALLOW_SIGN_UP,    value: "false" }
+            # nginx 가 /grafana/ 접두를 유지한 채 프록시하므로 Grafana 가 하위 경로를 알아야
+            # 리다이렉트·정적 자원 경로가 깨지지 않는다(S15P11B209-366 과 동일).
+            - { name: GF_SERVER_ROOT_URL,           value: "https://i15b209.p.ssafy.io/grafana/" }
+            - { name: GF_SERVER_SERVE_FROM_SUB_PATH, value: "true" }
+          ports:
+            - { name: http, containerPort: 3000 }
+          volumeMounts:
+            - { name: data,         mountPath: /var/lib/grafana }
+            - { name: provisioning, mountPath: /etc/grafana/provisioning/datasources/datasources.yaml, subPath: datasources.yaml }
+            - { name: provisioning, mountPath: /etc/grafana/provisioning/dashboards/dashboards.yaml,  subPath: dashboards.yaml }
+          readinessProbe:
+            # ⚠️ /api/health 를 쓴다. `/` 는 로그인 리다이렉트라 프로브가 무엇을 본 것인지 모호해진다.
+            httpGet: { path: /api/health, port: 3000 }
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            periodSeconds: 20
+            failureThreshold: 5
+          resources:
+            # 실측 80MiB(compose 판, 같은 이미지·같은 대시보드 수).
+            #   상한 256Mi 는 실측의 3배로 적정 — compose 값을 그대로 유지한다.
+            requests: { memory: 64Mi, cpu: 50m }
+            limits:   { memory: 256Mi, cpu: 500m }
+      volumes:
+        - { name: data,         persistentVolumeClaim: { claimName: grafana-data } }
+        - { name: provisioning, configMap: { name: grafana-provisioning } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dodam-grafana        # ★ gateway.yaml 의 /grafana/ upstream 과 반드시 일치
+  namespace: dodam
+spec:
+  type: ClusterIP
+  selector: { app: dodam-grafana }
+  ports:
+    - { name: http, port: 3000, targetPort: 3000 }
