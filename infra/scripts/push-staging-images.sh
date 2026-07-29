@@ -34,12 +34,34 @@ done
 IMAGES=(dodam-backend dodam-nginx)
 [ "$WITH_AI" = "1" ] && IMAGES+=(dodam-ai)
 
+# ── 레지스트리 HTTP 조회 ───────────────────────────────────────────────────
+# ★ 여기가 이 스크립트에서 제일 헷갈리는 지점이다.
+#   레지스트리는 **호스트 루프백에만** 붙어 있다(127.0.0.1:5000 → HostIp=127.0.0.1).
+#   - 호스트에서 실행하면 curl 로 그냥 닿는다.
+#   - Jenkins 컨테이너 안에서는 127.0.0.1 이 **자기 자신**이라 닿지 않는다.
+#     (2026-07-29 빌드 18 이 정확히 이걸로 죽었다 — 같은 함정을 NodePort 주석에
+#      적어놓고 이 조회에서 다시 밟았다)
+#
+#   반면 `docker push` 는 클라이언트가 아니라 **데몬**이 수행한다. 데몬은 호스트에
+#   있으므로 127.0.0.1:5000 을 제대로 해석한다 → push 주소는 바꿀 필요가 없다.
+#   조회만 호스트 네트워크로 우회하면 된다.
+PROBE_IMAGE="${PROBE_IMAGE:-dodam-nginx:local}"
+registry_get() {
+  # 1) 호스트에서 실행된 경우
+  curl -fsS -m 5 "http://${REGISTRY}$1" 2>/dev/null && return 0
+  # 2) 컨테이너 안인 경우 — 호스트 네트워크에 붙인 일회용 컨테이너로 조회
+  docker run --rm --network host "$PROBE_IMAGE" \
+    wget -q -O - -T 5 "http://${REGISTRY}$1" 2>/dev/null
+}
+
 # ── 1. 레지스트리가 살아 있는가 ────────────────────────────────────────────
 # reason: 죽어 있으면 push 가 한참 재시도하다 죽는다. 앞에서 끊고 이유를 말해준다.
 log "레지스트리 확인: $REGISTRY"
-curl -fsS -m 5 "http://${REGISTRY}/v2/" >/dev/null 2>&1 \
+registry_get "/v2/" >/dev/null 2>&1 \
   || die "레지스트리에 닿지 않는다: http://${REGISTRY}/v2/
-   → docker ps | grep dodam-registry 로 기동 여부 확인 (S15P11B209-356)"
+   호스트·컨테이너 두 경로 모두 실패했다.
+   → 기동 확인: docker ps | grep dodam-registry (S15P11B209-356)
+   → 컨테이너에서 실행 중이라면 조회용 이미지도 확인: ${PROBE_IMAGE}"
 
 # ── 2. 원본 이미지가 있는가 ────────────────────────────────────────────────
 for img in "${IMAGES[@]}"; do
@@ -61,7 +83,7 @@ done
 log "레지스트리 태그 확인"
 fail=0
 for img in "${IMAGES[@]}"; do
-  if curl -fsS -m 5 "http://${REGISTRY}/v2/${img}/tags/list" | grep -q "\"${TAG}\""; then
+  if registry_get "/v2/${img}/tags/list" | grep -q "\"${TAG}\""; then
     printf '   ✅ %s:%s\n' "$img" "$TAG"
   else
     printf '   ❌ %s:%s — 레지스트리에서 확인되지 않는다\n' "$img" "$TAG"
