@@ -142,18 +142,19 @@ public class ConversationQuestionService {
         List.copyOf(command.detectedObjects()),
         drawingDescriptionOf(command.basisAnalysisId()),
         List.copyOf(command.recentMessages()),
-        command.safetyRuleVersion());
+        command.safetyRuleVersion(),
+        command.activityType(),
+        command.drawingSubject(),
+        command.askedObjectCodes());
   }
 
   /**
    * 근거 분석에 저장된 그림 서술(VLM)을 찾아 질문 생성 입력에 실어준다(S15P11B209-704).
    *
-   * <p>객체 이름 목록만으로는 색·표정·구도를 근거로 한 질문이 나오지 않는다. 서술은 분석 시점에 이미
-   * 만들어져 저장돼 있으므로 여기서는 조회만 한다.
+   * <p>객체 이름 목록만으로는 색·표정·구도를 근거로 한 질문이 나오지 않는다. 서술은 분석 시점에 이미 만들어져 저장돼 있으므로 여기서는 조회만 한다.
    *
-   * <p>⚠️ 서술이 없어도 질문 생성은 계속한다. 분석 전 첫 질문, 서술 생성 실패(VLM 오류), 구버전 데이터가
-   * 모두 정상 경로다 — 이때 AI는 기존 객체 기반 질문으로 동작한다. 여기서 예외를 던지면 그림 서술이라는
-   * 보조 정보 때문에 대화 자체가 끊긴다.
+   * <p>⚠️ 서술이 없어도 질문 생성은 계속한다. 분석 전 첫 질문, 서술 생성 실패(VLM 오류), 구버전 데이터가 모두 정상 경로다 — 이때 AI는 기존 객체 기반
+   * 질문으로 동작한다. 여기서 예외를 던지면 그림 서술이라는 보조 정보 때문에 대화 자체가 끊긴다.
    *
    * @param basisAnalysisId 근거 분석 식별자. {@code null}이면 조회하지 않는다
    * @return 서술 문자열. 없으면 {@code null}

@@ -1,8 +1,10 @@
 package com.ssafy.b209.infrastructure.ai;
 
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.jsonPath;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
+import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
@@ -38,6 +40,32 @@ class RestClientAiQuestionClientTest {
             exception ->
                 org.assertj.core.api.Assertions.assertThat(exception.getType())
                     .isEqualTo(AiQuestionClientException.Type.SAFETY_POLICY_BLOCKED));
+    server.verify();
+  }
+
+  @Test
+  void serializesResolvedSubjectContextFieldsInCamelCase() {
+    RestClient.Builder builder = RestClient.builder().baseUrl("http://ai.test");
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    server
+        .expect(requestTo("http://ai.test/internal/ai/v1/conversations/question"))
+        .andExpect(jsonPath("$.activityType").value("HTP"))
+        .andExpect(jsonPath("$.drawingSubject").value("HOUSE"))
+        .andExpect(jsonPath("$.askedObjectCodes[0]").value("TREE"))
+        .andExpect(jsonPath("$.askedObjectCodes[1]").value("SUN"))
+        .andRespond(
+            withSuccess(
+                "{\"questionText\":\"q\",\"questionPurpose\":\"OBJECT_DESCRIPTION\","
+                    + "\"options\":null,\"targetObject\":null,\"fallbackUsed\":false,"
+                    + "\"safetyResult\":{\"status\":\"PASSED\",\"ruleVersion\":\"safety-2026-07\","
+                    + "\"blockReasonCode\":null},\"modelName\":\"m\",\"modelVersion\":\"v\","
+                    + "\"promptVersion\":\"p\",\"processingTimeMs\":1}",
+                org.springframework.http.MediaType.APPLICATION_JSON));
+
+    RestClientAiQuestionClient client =
+        new RestClientAiQuestionClient(builder.build(), "token", new ObjectMapper());
+
+    client.generate(subjectContextRequest(), "request-1");
     server.verify();
   }
 
@@ -146,6 +174,28 @@ class RestClientAiQuestionClientTest {
         java.util.List.of(),
         null, // drawingDescription — 선택 필드(S15P11B209-704)
         java.util.List.of(),
-        "safety-2026-07");
+        "safety-2026-07",
+        null,
+        null,
+        java.util.List.of());
+  }
+
+  private AiQuestionRequest subjectContextRequest() {
+    return new AiQuestionRequest(
+        1L,
+        9L,
+        null,
+        8,
+        QuestionDifficulty.LOWER_ELEMENTARY,
+        java.util.List.of(com.ssafy.b209.conversation.domain.ResponseMode.VOICE),
+        0,
+        10,
+        java.util.List.of(),
+        null,
+        java.util.List.of(),
+        "safety-2026-07",
+        "HTP",
+        "HOUSE",
+        java.util.List.of("TREE", "SUN"));
   }
 }
