@@ -424,6 +424,66 @@ void main() {
       throwsStateError,
     );
   });
+
+  test('사진 업로드는 공통 응답 봉투의 data를 역직렬화한다', () async {
+    final interceptor = _UploadInterceptor();
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        interceptors: [interceptor],
+      ),
+    );
+
+    final result = await repository.uploadDrawing(
+      42,
+      const BinaryUploadDto(
+        bytes: [137, 80, 78, 71],
+        fileName: 'photo.png',
+        mimeType: 'image/png',
+      ),
+      objectCode: 'TREE',
+    );
+
+    final request = interceptor.requests.single;
+    expect(request.method, 'POST');
+    expect(request.uri.path, '/api/v1/drawing-sessions/42/upload');
+    expect(result.drawingSessionId, 42);
+    expect(result.objectCode, 'TREE');
+    expect(result.originalAsset.assetId, 130);
+    expect(result.correctedAsset.assetId, 131);
+  });
+
+  test('사진 업로드 검증 실패는 오류 코드를 그대로 전달한다', () async {
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        interceptors: [
+          _UploadInterceptor(
+            errorStatusCode: 422,
+            errorCode: 'IMAGE_TOO_BLURRY',
+          ),
+        ],
+      ),
+    );
+
+    await expectLater(
+      repository.uploadDrawing(
+        42,
+        const BinaryUploadDto(
+          bytes: [137, 80, 78, 71],
+          fileName: 'photo.png',
+          mimeType: 'image/png',
+        ),
+      ),
+      throwsA(
+        isA<ApiResponseFailure>().having(
+          (failure) => failure.error?.code,
+          'code',
+          'IMAGE_TOO_BLURRY',
+        ),
+      ),
+    );
+  });
 }
 
 const _strokeRequest = StrokeBatchRequestDto(
@@ -752,6 +812,74 @@ final class _ActivityCompletionInterceptor extends Interceptor {
             'analysisStatus': 'PENDING',
             'reportId': 901,
             'reportStatus': 'GENERATING',
+          },
+        },
+      ),
+    );
+  }
+}
+
+final class _UploadInterceptor extends Interceptor {
+  _UploadInterceptor({this.errorStatusCode, this.errorCode});
+
+  final int? errorStatusCode;
+  final String? errorCode;
+  final List<RequestOptions> requests = [];
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    requests.add(options);
+    final failureStatus = errorStatusCode;
+    if (failureStatus != null) {
+      handler.reject(
+        DioException(
+          requestOptions: options,
+          response: Response<Map<String, dynamic>>(
+            requestOptions: options,
+            statusCode: failureStatus,
+            data: {
+              'success': false,
+              'code': errorCode,
+              'message': '사진 업로드 요청 실패',
+            },
+          ),
+          type: DioExceptionType.badResponse,
+        ),
+      );
+      return;
+    }
+
+    handler.resolve(
+      Response<Map<String, dynamic>>(
+        requestOptions: options,
+        statusCode: 200,
+        data: const {
+          'success': true,
+          'code': 'COMMON_200',
+          'message': '요청에 성공했습니다.',
+          'data': {
+            'drawingSessionId': 42,
+            'objectCode': 'TREE',
+            'originalAsset': {
+              'assetId': 130,
+              'assetType': 'ORIGINAL',
+              'assetVersion': 1,
+              'fileUrl': '/api/v1/drawing-assets/130/file',
+              'mimeType': 'image/png',
+              'fileSizeBytes': 4096,
+              'widthPx': 1024,
+              'heightPx': 768,
+            },
+            'correctedAsset': {
+              'assetId': 131,
+              'assetType': 'CORRECTED',
+              'assetVersion': 1,
+              'fileUrl': '/api/v1/drawing-assets/131/file',
+              'mimeType': 'image/png',
+              'fileSizeBytes': 4096,
+              'widthPx': 1024,
+              'heightPx': 768,
+            },
           },
         },
       ),

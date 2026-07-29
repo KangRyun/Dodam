@@ -9,6 +9,7 @@ import '../../features/child/presentation/screens/child_registration_screen.dart
 import '../../features/drawing/data/dto/drawing_dtos.dart';
 import '../../features/drawing/domain/repositories/drawing_repository.dart';
 import '../../features/drawing/presentation/screens/drawing_activity_selection_screen.dart';
+import '../../features/drawing/presentation/screens/input_method_select_screen.dart';
 import '../../features/conversation/conversation.dart';
 import '../../features/guardian/presentation/screens/guardian_screens.dart';
 import '../../features/history/presentation/screens/history_screens.dart';
@@ -216,6 +217,24 @@ abstract final class AppRouter {
                   .replaceActive,
           completionSnapshotProvider: drawingCompletionSnapshotProvider,
         ),
+      ['child', final childId, 'activity', 'input-method']
+          when _hasChildContext(childController, childId) &&
+              settings.arguments is InputMethodSelectRouteArguments =>
+        InputMethodSelectScreen(
+          childId:
+              (settings.arguments! as InputMethodSelectRouteArguments).childId,
+          drawingTypeId:
+              (settings.arguments! as InputMethodSelectRouteArguments)
+                  .drawingTypeId,
+          title: (settings.arguments! as InputMethodSelectRouteArguments).title,
+          description: (settings.arguments! as InputMethodSelectRouteArguments)
+              .description,
+          icon: (settings.arguments! as InputMethodSelectRouteArguments).icon,
+          accentColor: (settings.arguments! as InputMethodSelectRouteArguments)
+              .accentColor,
+          repository: (settings.arguments! as InputMethodSelectRouteArguments)
+              .repository,
+        ),
       ['child', final childId, 'activity', 'drawing']
           when _hasChildContext(childController, childId) &&
               settings.arguments is DrawingRouteArguments =>
@@ -358,6 +377,26 @@ class _TabPreparingScreen extends StatelessWidget {
     description: description,
     canPop: false,
   );
+}
+
+final class InputMethodSelectRouteArguments {
+  const InputMethodSelectRouteArguments({
+    required this.childId,
+    required this.drawingTypeId,
+    required this.title,
+    required this.description,
+    required this.icon,
+    required this.accentColor,
+    required this.repository,
+  });
+
+  final int childId;
+  final int drawingTypeId;
+  final String title;
+  final String description;
+  final IconData icon;
+  final Color accentColor;
+  final DrawingRepository repository;
 }
 
 final class DrawingRouteArguments {

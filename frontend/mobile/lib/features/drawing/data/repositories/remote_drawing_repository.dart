@@ -303,7 +303,7 @@ final class RemoteDrawingRepository
         'objectCode': ?objectCode,
       }),
     );
-    return DrawingUploadResponseDto.fromJson(response.data!);
+    return DrawingUploadResponseDto.fromJson(envelopeObject(response.data));
   }
 
   @override

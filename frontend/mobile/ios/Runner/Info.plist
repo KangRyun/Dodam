@@ -65,6 +65,13 @@
 	<string>$(NAVER_URL_SCHEME)</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>아이의 음성 답변을 녹음하려면 마이크 권한이 필요해요.</string>
+	<!-- 사진으로 그림 활동을 시작할 때 시스템 카메라 앱을 사용하기 위해 필요 (S15P11B209-466) -->
+	<key>NSCameraUsageDescription</key>
+	<string>그린 그림을 사진으로 담으려면 카메라 권한이 필요해요.</string>
+	<!-- image_picker가 App Store 정책상 요구하는 키. requestFullMetadata:false로 호출해
+	     실제로는 사용자가 고른 사진에만 접근하고 전체 앨범 권한은 요청하지 않는다. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>앨범에서 사진을 골라 그림 활동을 시작하려면 사진 접근 권한이 필요해요.</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>LSApplicationQueriesSchemes</key>

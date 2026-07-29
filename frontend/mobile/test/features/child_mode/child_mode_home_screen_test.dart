@@ -10,6 +10,7 @@ import 'package:dodam/features/child_mode/presentation/widgets/activity_guide_di
 import 'package:dodam/features/drawing/application/drawing_session_start_controller.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/drawing/domain/repositories/drawing_repository.dart';
+import 'package:dodam/features/drawing/presentation/screens/input_method_select_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -56,6 +57,21 @@ const _secondType = DrawingTypeDto(
 Widget _wrap(Widget home) => MaterialApp(
   home: home,
   onGenerateRoute: (settings) {
+    if (settings.name == AppRoutes.drawingInputMethod('7')) {
+      final arguments = settings.arguments! as InputMethodSelectRouteArguments;
+      return MaterialPageRoute<DrawingSessionResolution>(
+        settings: settings,
+        builder: (_) => InputMethodSelectScreen(
+          childId: arguments.childId,
+          drawingTypeId: arguments.drawingTypeId,
+          title: arguments.title,
+          description: arguments.description,
+          icon: arguments.icon,
+          accentColor: arguments.accentColor,
+          repository: arguments.repository,
+        ),
+      );
+    }
     if (settings.name != AppRoutes.drawing('7')) return null;
     final arguments = settings.arguments! as DrawingRouteArguments;
     return MaterialPageRoute<void>(
@@ -223,7 +239,25 @@ void main() {
     expect(repository.createCalls, 0);
   });
 
-  testWidgets('시작하기를 누르면 올바른 childId·drawingTypeId로 세션을 만들고 한 번만 이동한다', (
+  testWidgets('시작하기를 누르면 입력 방식 선택 화면으로 이동하고 세션은 아직 만들지 않는다', (tester) async {
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+
+    await tester.pumpWidget(
+      _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activity-5')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('input-method-canvas')), findsOneWidget);
+    expect(find.byKey(const ValueKey('input-method-photo')), findsOneWidget);
+    expect(repository.createCalls, 0);
+  });
+
+  testWidgets('입력 방식에서 캔버스를 고르면 올바른 childId·drawingTypeId로 세션을 만들고 한 번만 이동한다', (
     tester,
   ) async {
     final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
@@ -234,17 +268,20 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('activity-5')));
     await tester.pumpAndSettle();
-
     await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
     await tester.pumpAndSettle();
 
     expect(repository.createCalls, 1);
     expect(repository.lastCreateRequest?.childId, 7);
     expect(repository.lastCreateRequest?.drawingTypeId, 5);
+    expect(repository.lastCreateRequest?.inputMethod, 'CANVAS');
     expect(find.text('drawing-session-900-resume-false'), findsOneWidget);
   });
 
-  testWidgets('연속으로 두 번 탭해도 세션 생성과 이동은 한 번만 일어난다', (tester) async {
+  testWidgets('캔버스 카드를 연속으로 두 번 탭해도 세션 생성과 이동은 한 번만 일어난다', (tester) async {
     final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
 
     await tester.pumpWidget(
@@ -253,16 +290,23 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('activity-5')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
+    await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
-    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
+    await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
+    // 첫 탭의 로딩 애니메이션 프레임 중이라 두 번째 탭이 히트테스트를 놓칠
+    // 수 있다 — 중복 탭 자체는 onPressed가 null이 되는 로직이 막는다.
+    await tester.tap(
+      find.byKey(const ValueKey('input-method-canvas')),
+      warnIfMissed: false,
+    );
     await tester.pumpAndSettle();
 
     expect(repository.createCalls, 1);
     expect(find.text('drawing-session-900-resume-false'), findsOneWidget);
   });
 
-  testWidgets('시작 실패 시 오류와 재시도를 보여주고 재시도하면 이동한다', (tester) async {
+  testWidgets('캔버스 시작 실패 시 오류와 재시도를 보여주고 재시도하면 이동한다', (tester) async {
     final repository = _FakeDrawingRepository(
       drawingTypes: const [_artDiary],
       failCreateOnce: true,
@@ -274,19 +318,62 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('activity-5')));
     await tester.pumpAndSettle();
-
     await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('activity-guide-error')), findsOneWidget);
-    expect(find.text('다시 시도'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('input-method-canvas-error')),
+      findsOneWidget,
+    );
     expect(repository.createCalls, 1);
 
-    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
+    await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
     await tester.pumpAndSettle();
 
     expect(repository.createCalls, 2);
     expect(find.text('drawing-session-900-resume-false'), findsOneWidget);
+  });
+
+  testWidgets('입력 방식에서 취소하면 세션을 만들지 않고 홈에 남는다', (tester) async {
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+
+    await tester.pumpWidget(
+      _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activity-5')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('input-method-cancel')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('activity-5')), findsOneWidget);
+    expect(repository.createCalls, 0);
+  });
+
+  testWidgets('입력 방식에서 사진으로 시작하기를 고르면 카메라·앨범 선택 화면이 나온다', (tester) async {
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+
+    await tester.pumpWidget(
+      _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activity-5')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('input-method-photo')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('input-method-camera')), findsOneWidget);
+    expect(find.byKey(const ValueKey('input-method-gallery')), findsOneWidget);
+    expect(repository.createCalls, 0);
   });
 
   testWidgets('기존 활성 세션이 있으면 그대로 재개하고 새 세션을 만들지 않는다', (tester) async {
