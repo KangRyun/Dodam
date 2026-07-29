@@ -144,6 +144,7 @@ class RestClientAiQuestionClientTest {
         0,
         10,
         java.util.List.of(),
+        null, // drawingDescription — 선택 필드(S15P11B209-704)
         java.util.List.of(),
         "safety-2026-07");
   }

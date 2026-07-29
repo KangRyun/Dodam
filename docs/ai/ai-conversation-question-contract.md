@@ -34,7 +34,8 @@
 
 ## 2. 요청 계약
 
-모든 최상위 필드는 필수이며, `basisAnalysisId`만 성공한 객체 탐지 분석이 없을 때 `null`일 수 있다.
+모든 최상위 필드는 필수이며, `basisAnalysisId`와 `drawingDescription`만 `null`일 수 있다
+(각각 성공한 객체 탐지 분석이 없을 때, 그림 서술이 없을 때).
 
 | 필드 | 타입·규칙 |
 | --- | --- |
@@ -45,10 +46,29 @@
 | `allowedResponseModes` | 중복 없는 비어 있지 않은 `VOICE`/`OPTION` 배열 |
 | `currentQuestionCount`, `maxQuestionCount` | 0 이상의 integer, 전자는 후자 이하여야 한다. 질문 여유가 없으면 AI를 호출하지 않는다. |
 | `detectedObjects` | 빈 배열 가능. 항목은 `objectCode`, `objectName`, `confidence`, `boundingBox`를 가진다. |
+| `drawingDescription` | string 또는 `null`. 분석에서 만든 2~4문장 한국어 그림 서술(VLM). BE가 `basisAnalysisId`로 `analysis_observation_results.overall_summary`를 찾아 채운다. **선택 필드** — 없으면 AI는 `detectedObjects`만으로 기존과 동일하게 동작한다. |
 | `recentMessages` | 빈 배열 가능. 항목은 `messageId`, `senderType`, `messageType`, `text`를 가진다. `text`는 최소 문맥만 보내며 로그·오류 응답에 포함하지 않는다. |
 | `safetyRuleVersion` | 필수 string 식별자. 프롬프트 본문은 포함하지 않는다. |
 
 `boundingBox`는 `{x, y, width, height}`이며 각 값은 0~1이고 `x + width ≤ 1`, `y + height ≤ 1`이어야 한다.
+
+### 2-1. `drawingDescription` 취급 규칙 (S15P11B209-704)
+
+객체 이름 목록만으로는 색·표정·구도·크기 관계를 물을 수 없어 그림 서술을 함께 보낸다.
+서술은 분석 시점에 이미 만들어져 저장돼 있으므로 BE는 조회만 하고, 새로 생성하지 않는다.
+
+- **길이**: AI가 프롬프트에 넣기 전 300자(`QUESTION_DESCRIPTION_MAX_CHARS`)로 자르고 말줄임표를 남긴다.
+  VLM 프롬프트가 2~4문장을 지시하므로 정상 범위는 그대로 통과한다.
+- **프롬프트에서의 지위**: 서술은 **참고 자료이지 인용문이 아니다.** 질문 프롬프트에
+  "그대로 읽어주지 말 것"·"아이 마음을 단정하지 말 것"을 명시한다. 이 지시가 없으면
+  서술 문장이 아이에게 그대로 나가고, 진단형 표현이 섞여 있으면 아이가 그것을 듣는다
+  (CLAUDE.md 9절).
+- **로그**: `DETECTION_LOG_DETAIL`이 꺼져 있으면 서술 내용은 남기지 않고 존재 사실만
+  `서술있음`으로 남긴다. 서술은 객체 이름보다 훨씬 구체적인 아동 그림 내용이다.
+- **노출 금지**: 출처인 `observationDraft`는 전문가 검토 전 초안이라 보호자에게 그대로
+  노출하지 않는다. LLM 입력으로만 쓴다.
+- **없을 때**: 분석 전 첫 질문, VLM 실패, 구버전 데이터가 모두 정상 경로다. BE는 예외를
+  던지지 않고 `null`로 보낸다 — 보조 정보 때문에 대화가 끊기면 안 된다.
 
 ## 3. 성공 응답 계약
 
