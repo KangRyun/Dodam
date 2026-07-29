@@ -372,7 +372,11 @@ services:
       # YOLO 가중치 경로 — 이미지에 굽지 않고 볼륨으로 주입한다.
       #   reason: .gitignore가 *.pt를 막아 Jenkins 체크아웃엔 파일이 없다.
       #           이미지에 구우면 로컬 빌드만 성공하고 CI 빌드는 가중치 없는 이미지를 만든다.
-      YOLO_MODEL_PATH: /models/htp_yolo/htp_best.pt
+      #   ⚠️ 모델 2종을 모두 주입해야 한다(S15P11B209-721). config.py 기본값은 컨테이너
+      #      상대경로(/app/models/...)라 볼륨 /models 와 어긋나고, health 의 objectDetection 은
+      #      "HTP·그림일기 가중치 둘 다 존재 + checksum" 으로 판정하므로 하나만 빠져도 NOT_READY 다.
+      YOLO_MODEL_PATH: /models/htp_yolo/htp_best.pt        # HTP(집·나무·사람)
+      SKETCH_MODEL_PATH: /models/htp_yolo/sketch_base.pt   # 그림일기(자유 그림)
       
     # 학습 산출물(가중치) — apk-dist와 같은 방식(docker cp 업로드, git 비추적).
     #   :ro — 추론만 하므로 컨테이너에 쓰기 권한을 주지 않는다(최소권한).
