@@ -70,7 +70,9 @@ public class QuestionSkipController {
    * @return HTTP 200과 건너뜀 결과
    * @throws BusinessException Header 형식, 권한, 대화 상태 또는 질문 검증에 실패한 경우
    */
-  @Operation(summary = "질문 건너뛰기", description = "진행 중 대화의 AI 질문을 건너뜀으로 표시합니다. 질문 수와 대화 상태는 바뀌지 않습니다.")
+  @Operation(
+      summary = "질문 건너뛰기",
+      description = "진행 중 대화의 AI 질문을 건너뜀으로 표시합니다. 질문 수와 대화 상태는 바뀌지 않습니다.")
   @ApiResponses({
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "200",
