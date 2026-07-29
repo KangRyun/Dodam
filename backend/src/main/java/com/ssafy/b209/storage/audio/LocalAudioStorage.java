@@ -328,39 +328,62 @@ public final class LocalAudioStorage implements AudioStorage {
   private long mp4Duration(byte[] data) {
     int cursor = 0;
     while (cursor + 8 <= data.length) {
-      long size = uint32Be(data, cursor);
-      if (size < 8 || size > data.length - cursor) return -1;
-      String type = new String(data, cursor + 4, 4, java.nio.charset.StandardCharsets.US_ASCII);
-      if ("moov".equals(type)) return findMvhdDuration(data, cursor + 8, (int) size - 8);
-      cursor += (int) size;
+      Mp4Box box = readBox(data, cursor, data.length);
+      if (box == null) return -1;
+      if ("moov".equals(box.type())) {
+        return findMvhdDuration(data, cursor + box.headerSize(), cursor + (int) box.totalSize());
+      }
+      cursor += (int) box.totalSize();
     }
     return -1;
   }
 
-  private long findMvhdDuration(byte[] data, int start, int length) {
-    int end = start + length;
+  private long findMvhdDuration(byte[] data, int start, int end) {
     for (int cursor = start; cursor + 8 <= end; ) {
-      long size = uint32Be(data, cursor);
-      if (size < 8 || size > end - cursor) return -1;
-      String type = new String(data, cursor + 4, 4, java.nio.charset.StandardCharsets.US_ASCII);
-      if ("mvhd".equals(type)) {
-        int payload = cursor + 8;
+      Mp4Box box = readBox(data, cursor, end);
+      if (box == null) return -1;
+      if ("mvhd".equals(box.type())) {
+        int payload = cursor + box.headerSize();
+        int boxEnd = cursor + (int) box.totalSize();
+        if (payload >= boxEnd) return -1;
         int version = data[payload] & 0xFF;
-        if (version == 0 && payload + 20 <= cursor + size) {
+        if (version == 0 && payload + 20 <= boxEnd) {
           long timeScale = uint32Be(data, payload + 12);
           long duration = uint32Be(data, payload + 16);
           return timeScale <= 0 || duration <= 0 ? -1 : duration * 1000 / timeScale;
         }
-        if (version == 1 && payload + 32 <= cursor + size) {
+        if (version == 1 && payload + 32 <= boxEnd) {
           long timeScale = uint32Be(data, payload + 20);
           long duration = uint64Be(data, payload + 24);
           return timeScale <= 0 || duration <= 0 ? -1 : duration * 1000 / timeScale;
         }
         return -1;
       }
-      cursor += (int) size;
+      cursor += (int) box.totalSize();
     }
     return -1;
+  }
+
+  private Mp4Box readBox(byte[] data, int cursor, int end) {
+    if (cursor + 8 > end) return null;
+    long size = uint32Be(data, cursor);
+    String type = new String(data, cursor + 4, 4, java.nio.charset.StandardCharsets.US_ASCII);
+    long totalSize;
+    int headerSize;
+    if (size == 1) {
+      if (cursor + 16 > end) return null;
+      long largesize = uint64Be(data, cursor + 8);
+      totalSize = largesize;
+      headerSize = 16;
+    } else if (size == 0) {
+      totalSize = (long) end - cursor;
+      headerSize = 8;
+    } else {
+      totalSize = size;
+      headerSize = 8;
+    }
+    if (totalSize < headerSize || totalSize > end - cursor) return null;
+    return new Mp4Box(type, totalSize, headerSize);
   }
 
   private long webmDuration(byte[] data) {
@@ -537,6 +560,8 @@ public final class LocalAudioStorage implements AudioStorage {
   }
 
   private record CopyResult(byte[] header, int headerLength, long size, String checksumSha256) {}
+
+  private record Mp4Box(String type, long totalSize, int headerSize) {}
 
   private record Vint(int length, long value) {}
 }
