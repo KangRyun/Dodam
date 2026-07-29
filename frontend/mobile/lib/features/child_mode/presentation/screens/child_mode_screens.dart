@@ -272,7 +272,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
             ),
           );
       if (resolution == null || !mounted) return;
-      await _openResolution(resolution);
+      await _openResolution(resolution, startFresh: true);
     } on Object {
       if (mounted) {
         showAppMessage(
@@ -339,6 +339,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   Future<void> _openResolution(
     DrawingSessionResolution resolution, {
     bool autoRestoreDraft = false,
+    bool startFresh = false,
   }) async {
     if (resolution.activityContext.isHtp &&
         resolution.currentStage == 'COMPLETED') {
@@ -369,6 +370,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         completionSnapshotProvider: widget.completionSnapshotProvider,
         resumeConversation: !resolution.isDrawingStage,
         autoRestoreDraft: autoRestoreDraft,
+        startFresh: startFresh,
         activityContext: resolution.activityContext,
       ),
     );

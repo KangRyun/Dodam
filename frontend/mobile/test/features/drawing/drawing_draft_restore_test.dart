@@ -236,6 +236,43 @@ void main() {
     sync.dispose();
   });
 
+  testWidgets('앞 화면에서 이어 그리기를 선택하면 캔버스 선택창을 다시 표시하지 않는다', (tester) async {
+    final repository = _DraftRepository();
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    await _pumpScreen(
+      tester,
+      repository: repository,
+      sync: sync,
+      autoRestoreDraft: true,
+    );
+
+    expect(find.text('그리던 그림이 있어요'), findsNothing);
+    expect(find.text('이어서 그리기'), findsNothing);
+    expect(repository.downloadDraftPreviewCalls, 1);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    sync.dispose();
+  });
+
+  testWidgets('주제 선택 뒤 새 활동은 Draft를 조회하지 않고 빈 캔버스를 연다', (tester) async {
+    final repository = _DraftRepository();
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    await _pumpScreen(
+      tester,
+      repository: repository,
+      sync: sync,
+      startFresh: true,
+    );
+
+    expect(repository.getDraftCalls, 0);
+    expect(find.text('그리던 그림이 있어요'), findsNothing);
+    expect(find.byKey(const ValueKey('draft-background-image')), findsNothing);
+    expect(_canvas(tester).strokes, isEmpty);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    sync.dispose();
+  });
+
   testWidgets('복구 배경과 새 Stroke는 같은 snapshot 경계 안에서 저장된다', (tester) async {
     final repository = _DraftRepository();
     final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
@@ -278,6 +315,7 @@ Future<DrawingDraftRestoreController> _pumpScreen(
   required _DraftRepository repository,
   required DrawingSyncCoordinator sync,
   bool autoRestoreDraft = false,
+  bool startFresh = false,
 }) async {
   tester.view.physicalSize = const Size(1200, 800);
   tester.view.devicePixelRatio = 1;
@@ -299,6 +337,7 @@ Future<DrawingDraftRestoreController> _pumpScreen(
         syncCoordinator: sync,
         draftRestoreController: restore,
         autoRestoreDraft: autoRestoreDraft,
+        startFresh: startFresh,
       ),
     ),
   );

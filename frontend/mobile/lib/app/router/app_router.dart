@@ -284,6 +284,7 @@ abstract final class AppRouter {
               (settings.arguments! as DrawingRouteArguments).resumeConversation,
           autoRestoreDraft:
               (settings.arguments! as DrawingRouteArguments).autoRestoreDraft,
+          startFresh: (settings.arguments! as DrawingRouteArguments).startFresh,
           activityContext:
               (settings.arguments! as DrawingRouteArguments).activityContext,
         ),
@@ -436,6 +437,7 @@ final class DrawingRouteArguments {
     this.completionSnapshotProvider,
     this.resumeConversation = false,
     this.autoRestoreDraft = false,
+    this.startFresh = false,
     this.activityContext = const DrawingActivityContextDto.general(),
   });
 
@@ -448,6 +450,9 @@ final class DrawingRouteArguments {
 
   /// 진입 전 이어 그리기를 확인한 경우 캔버스에서 같은 선택을 다시 묻지 않는다.
   final bool autoRestoreDraft;
+
+  /// 주제 선택 뒤 생성한 새 활동은 Draft 확인 없이 빈 캔버스를 연다.
+  final bool startFresh;
   final DrawingActivityContextDto activityContext;
 }
 

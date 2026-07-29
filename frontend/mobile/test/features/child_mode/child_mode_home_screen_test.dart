@@ -81,7 +81,7 @@ Widget _wrap(Widget home) => MaterialApp(
           children: [
             Text(
               'drawing-session-${arguments.sessionId}-resume-${arguments.resumeConversation}'
-              '-auto-${arguments.autoRestoreDraft}',
+              '-auto-${arguments.autoRestoreDraft}-fresh-${arguments.startFresh}',
             ),
             TextButton(
               key: const ValueKey('leave-drawing'),
@@ -267,7 +267,7 @@ void main() {
     expect(repository.lastCreateRequest?.drawingTypeId, 5);
     expect(repository.lastCreateRequest?.inputMethod, 'CANVAS');
     expect(
-      find.text('drawing-session-900-resume-false-auto-false'),
+      find.text('drawing-session-900-resume-false-auto-false-fresh-true'),
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('input-method-photo')), findsNothing);
@@ -305,7 +305,7 @@ void main() {
 
     expect(repository.createCalls, 0);
     expect(
-      find.text('drawing-session-321-resume-true-auto-true'),
+      find.text('drawing-session-321-resume-true-auto-true-fresh-false'),
       findsOneWidget,
     );
 
@@ -349,7 +349,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(
-      find.text('drawing-session-555-resume-false-auto-true'),
+      find.text('drawing-session-555-resume-false-auto-true-fresh-false'),
       findsOneWidget,
     );
   });
@@ -394,7 +394,7 @@ void main() {
     expect(repository.lastCreateRequest?.inputMethod, 'CANVAS');
     expect(repository.lastCreateRequest?.replaceActive, isTrue);
     expect(
-      find.text('drawing-session-900-resume-false-auto-false'),
+      find.text('drawing-session-900-resume-false-auto-false-fresh-true'),
       findsOneWidget,
     );
   });
@@ -436,7 +436,7 @@ void main() {
     expect(repository.lastHtpRequest?.inputMethod, 'CANVAS');
     expect(repository.lastHtpRequest?.replaceActive, isTrue);
     expect(
-      find.text('drawing-session-901-resume-false-auto-false'),
+      find.text('drawing-session-901-resume-false-auto-false-fresh-true'),
       findsOneWidget,
     );
   });
