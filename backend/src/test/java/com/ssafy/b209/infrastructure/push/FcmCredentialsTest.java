@@ -7,9 +7,9 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.condition.DisabledOnOs;
 import org.junit.jupiter.api.condition.OS;
+import org.junit.jupiter.api.io.TempDir;
 
 class FcmCredentialsTest {
 
@@ -17,7 +17,8 @@ class FcmCredentialsTest {
 
   @Test
   void 내용이_있는_읽을_수_있는_파일은_사용_가능하다() throws IOException {
-    Path credentials = Files.writeString(tempDir.resolve("sa.json"), "{\"type\":\"service_account\"}");
+    Path credentials =
+        Files.writeString(tempDir.resolve("sa.json"), "{\"type\":\"service_account\"}");
 
     FcmCredentials.Availability availability = FcmCredentials.inspect(credentials.toString());
 
