@@ -33,3 +33,15 @@ app:
     allowed-origins:
       - http://localhost:3000
       - http://127.0.0.1:3000
+
+  # AI 서버 없이 BE·FE를 돌리기 위한 mock 연동 (S15P11B209-722).
+  #   기본값을 http 로 뒤집었으므로(운영에서 조용히 가짜로 도는 사고 방지) 로컬 편의는
+  #   여기서 명시적으로 켠다. "빼먹으면 mock" 이 아니라 "원하면 mock" 이 안전한 방향이다.
+  #   실제 AI 서버를 로컬에서 붙여볼 때는 환경변수로 개별 덮어쓰기(AI_TTS_MODE=http 등).
+  ai:
+    drawing-analysis:
+      mode: ${AI_DRAWING_ANALYSIS_MODE:mock}
+    observation:
+      mode: ${AI_OBSERVATION_MODE:mock}
+    tts:
+      mode: ${AI_TTS_MODE:mock}
