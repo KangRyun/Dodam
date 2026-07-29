@@ -17,6 +17,7 @@ export 'data/repositories/mock_conversation_repository.dart';
 export 'data/repositories/mock_question_skip_repository.dart';
 export 'data/repositories/remote_conversation_answer_repository.dart';
 export 'data/repositories/remote_conversation_end_repository.dart';
+export 'data/repositories/remote_question_skip_repository.dart';
 export 'data/repositories/remote_conversation_repository.dart';
 export 'domain/models/ai_question.dart';
 export 'domain/models/conversation_end.dart';

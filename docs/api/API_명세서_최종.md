@@ -1251,6 +1251,13 @@ Query: `drawingTypeCode?`, `difficulty?`, `reason=STT_FAILED|AI_FAILED|TIMEOUT`,
 
 `returnToDrawing=true`이면 세션의 `currentStage=DRAWING`, 아니면 대화 상태를 유지한다.
 
+건너뛰기 as-built(2026-07-29 · `S15P11B209-699`): `Idempotency-Key` Header는 필수이며 같은 키·같은 Body 재전송은
+최초 응답을 재생한다. 저장은 `conversation_messages.is_skipped=TRUE` 하나이며 질문 수·대화 상태·그림 단계는 바뀌지 않는다.
+응답은 `conversationId`, `questionMessageId`, `skipped`, `alreadySkipped`, `skippedQuestionCount`, `conversationStatus`다.
+이미 건너뛴 질문의 재요청은 오류가 아니라 같은 결과를 반환한다. `reason`은 저장 컬럼이 없어 이력으로 남지 않는 관측 정보다.
+**`returnToDrawing=true`는 아직 지원하지 않고 `409 QUESTION_SKIP_RETURN_TO_DRAWING_UNSUPPORTED`로 거절한다** —
+대화에서 그림 단계로의 역방향 전이는 이어그리기 저장 경로(`S15P11B209-682`)와 함께 다뤄야 한다.
+
 대화 종료 요청:
 
 ```json
@@ -1270,7 +1277,7 @@ Query: `page=0`, `size=50`, `afterSequence?`. 응답은 sequence 오름차순이
 
 ### 12.10 오류
 
-`CONVERSATION_NOT_FOUND`, `ACTIVE_CONVERSATION_EXISTS`, `QUESTION_LIMIT_REACHED`, `QUESTION_MESSAGE_NOT_FOUND`, `ANSWER_ALREADY_SUBMITTED`, `OPTION_NOT_ALLOWED`, `STT_FAILED`, `TTS_FAILED`, `VOICE_CONSENT_REQUIRED`, `CONVERSATION_ALREADY_COMPLETED`.
+`CONVERSATION_NOT_FOUND`, `ACTIVE_CONVERSATION_EXISTS`, `QUESTION_LIMIT_REACHED`, `QUESTION_MESSAGE_NOT_FOUND`, `ANSWER_ALREADY_SUBMITTED`, `OPTION_NOT_ALLOWED`, `STT_FAILED`, `TTS_FAILED`, `VOICE_CONSENT_REQUIRED`, `CONVERSATION_ALREADY_COMPLETED`, `CONVERSATION_NOT_CONVERSING`, `QUESTION_SKIP_RETURN_TO_DRAWING_UNSUPPORTED`, `QUESTION_SKIP_CONFLICT`.
 
 ---
 

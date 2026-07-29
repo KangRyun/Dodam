@@ -220,6 +220,16 @@ def _feature(item: dict) -> contracts.ObservedFeatureDraft:
     )
 
 
+def _generation_version() -> str:
+    """리포트 재현성 버전 태그 — 프롬프트·파이프라인 버전을 함께 기록한다(S15P11B209-602).
+
+    ObservationGenerationResult 계약엔 prompt/pipeline 전용 필드가 없어(BE 소유), model_version
+    문자열에 둘을 함께 실어 재현·재분석에 필요한 버전을 모두 남긴다(모델 ID는 model_name).
+    형식: "pipeline=<파이프라인>;prompt=<리포트 프롬프트 버전>". 전용 필드 분리는 BE 계약 확장 후속.
+    """
+    return f"pipeline={config.PIPELINE_VERSION};prompt={PROMPT_VERSION}"
+
+
 def _safe_follow_up(raw: str) -> str:
     """보호자용 후속 질문을 안전하게 보장한다(S15P11B209-601).
 
@@ -277,8 +287,9 @@ def _assemble(
     )
     return contracts.ObservationGenerationResult(
         request_id=req.request_id,
+        # 재현성(S15P11B209-602): model_name=실제 서빙 모델, model_version=프롬프트+파이프라인 버전.
         model_name=model,
-        model_version=PROMPT_VERSION,
+        model_version=_generation_version(),
         confidence=None,  # LLM 서술엔 보정된 신뢰도가 없다 — 지어내지 않고 None.
         observation_draft=observation,
         conversation_summary=conversation_summary,
@@ -343,7 +354,9 @@ def generate(
         raise RuntimeError("리포트 생성에 실패했어요(GMS).") from e
 
     data = _extract_json(resp.choices[0].message.content or "")
-    return _assemble(req, data, used_model)
+    # 재현성: GMS가 실제 서빙한 모델 ID를 기록한다(예: gpt-4o-mini-2024-07-18). 없으면 요청 모델명.
+    served_model = getattr(resp, "model", "") or used_model
+    return _assemble(req, data, served_model)
 
 
 if __name__ == "__main__":

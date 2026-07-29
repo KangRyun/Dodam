@@ -175,7 +175,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
                       ),
                     ),
                     child: const Text(
-                      '새로운 활동 선택',
+                      '새로 그리기',
                       style: TextStyle(
                         fontSize: 19,
                         fontWeight: FontWeight.w700,
@@ -212,35 +212,33 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         final choice = await _showDrawingStartDialog();
         if (choice == null || !mounted) return;
         if (choice == _DrawingStartChoice.startNew) {
-          await AppNavigation.pushNamed(
-            context,
-            AppRoutes.drawingActivitySelection(widget.child.childId.toString()),
-            arguments: const DrawingActivitySelectionRouteArguments(
-              replaceActive: true,
-            ),
+          resolution = await _createSelectedActivity(
+            controller: controller,
+            type: type,
+            replaceActive: true,
           );
-          return;
-        }
-        resolution = controller.resume(activeSession);
-        if (resolution.activityContext.isHtp &&
-            resolution.currentStage == 'COMPLETED') {
-          await AppNavigation.pushNamed(
-            context,
-            AppRoutes.emotionSelect(widget.child.childId.toString()),
-            arguments: EmotionSelectRouteArguments(
-              sessionId: resolution.sessionId,
-              repository: widget.drawingRepository,
-              conversationId: null,
-              conversationAlreadyEnded: true,
-              conversationEndRepository: null,
-              conversationEndIdempotencyKey: null,
-              conversationEndRequest: null,
-              lastQuestionMessageId: null,
-              idempotencyKeyProvider: null,
-              activityContext: resolution.activityContext,
-            ),
-          );
-          return;
+        } else {
+          resolution = controller.resume(activeSession);
+          if (resolution.activityContext.isHtp &&
+              resolution.currentStage == 'COMPLETED') {
+            await AppNavigation.pushNamed(
+              context,
+              AppRoutes.emotionSelect(widget.child.childId.toString()),
+              arguments: EmotionSelectRouteArguments(
+                sessionId: resolution.sessionId,
+                repository: widget.drawingRepository,
+                conversationId: null,
+                conversationAlreadyEnded: true,
+                conversationEndRepository: null,
+                conversationEndIdempotencyKey: null,
+                conversationEndRequest: null,
+                lastQuestionMessageId: null,
+                idempotencyKeyProvider: null,
+                activityContext: resolution.activityContext,
+              ),
+            );
+            return;
+          }
         }
       } else {
         final (icon, accentColor) = _visualForDrawingType(type.code);
@@ -250,12 +248,8 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
           description: _descriptionForDrawingType(type),
           icon: icon,
           accentColor: accentColor,
-          onStart: () => type.code == 'HTP'
-              ? controller.createHtpAssessment(childId: widget.child.childId)
-              : controller.createSelectedSession(
-                  childId: widget.child.childId,
-                  drawingTypeId: type.drawingTypeId,
-                ),
+          onStart: () =>
+              _createSelectedActivity(controller: controller, type: type),
         );
       }
       if (resolution == null || !mounted) return;
@@ -287,6 +281,22 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       }
     }
   }
+
+  Future<DrawingSessionResolution> _createSelectedActivity({
+    required DrawingSessionStartController controller,
+    required DrawingTypeDto type,
+    bool replaceActive = false,
+  }) => type.code == 'HTP'
+      ? controller.createHtpAssessment(
+          childId: widget.child.childId,
+          replaceActive: replaceActive,
+        )
+      : controller.createSelectedSession(
+          childId: widget.child.childId,
+          drawingTypeId: type.drawingTypeId,
+          replaceActive: replaceActive,
+          inputMethod: 'CANVAS',
+        );
 
   Widget _buildActivitySection() {
     switch (_status) {

@@ -183,6 +183,22 @@ void main() {
     expect(repository.createCalls, 0);
   });
 
+  test('사진으로 시작하기는 inputMethod UPLOAD로 세션을 만든다', () async {
+    final repository = _SessionStartRepository(activeSessions: [null]);
+    final controller = DrawingSessionStartController(
+      repository: repository,
+      now: () => DateTime.utc(2026, 7, 26, 1),
+    );
+
+    final resolution = await controller.createNewSession(
+      childId: 3,
+      inputMethod: 'UPLOAD',
+    );
+
+    expect(resolution.sessionId, 82);
+    expect(repository.createRequest?.inputMethod, 'UPLOAD');
+  });
+
   test('활성 세션이 없으면 홈에서 지정한 그림 유형으로 세션을 만든다', () async {
     final repository = _SessionStartRepository(activeSessions: [null]);
     final controller = DrawingSessionStartController(

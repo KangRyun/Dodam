@@ -10,6 +10,7 @@ import 'package:dodam/features/child_mode/presentation/widgets/activity_guide_di
 import 'package:dodam/features/drawing/application/drawing_session_start_controller.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/drawing/domain/repositories/drawing_repository.dart';
+import 'package:dodam/features/drawing/presentation/screens/input_method_select_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -56,6 +57,21 @@ const _secondType = DrawingTypeDto(
 Widget _wrap(Widget home) => MaterialApp(
   home: home,
   onGenerateRoute: (settings) {
+    if (settings.name == AppRoutes.drawingInputMethod('7')) {
+      final arguments = settings.arguments! as InputMethodSelectRouteArguments;
+      return MaterialPageRoute<DrawingSessionResolution>(
+        settings: settings,
+        builder: (_) => InputMethodSelectScreen(
+          childId: arguments.childId,
+          drawingTypeId: arguments.drawingTypeId,
+          title: arguments.title,
+          description: arguments.description,
+          icon: arguments.icon,
+          accentColor: arguments.accentColor,
+          repository: arguments.repository,
+        ),
+      );
+    }
     if (settings.name != AppRoutes.drawing('7')) return null;
     final arguments = settings.arguments! as DrawingRouteArguments;
     return MaterialPageRoute<void>(
@@ -223,9 +239,7 @@ void main() {
     expect(repository.createCalls, 0);
   });
 
-  testWidgets('시작하기를 누르면 올바른 childId·drawingTypeId로 세션을 만들고 한 번만 이동한다', (
-    tester,
-  ) async {
+  testWidgets('그림일기 시작하기는 CANVAS 세션을 만들고 바로 이동한다', (tester) async {
     final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
 
     await tester.pumpWidget(
@@ -241,52 +255,9 @@ void main() {
     expect(repository.createCalls, 1);
     expect(repository.lastCreateRequest?.childId, 7);
     expect(repository.lastCreateRequest?.drawingTypeId, 5);
+    expect(repository.lastCreateRequest?.inputMethod, 'CANVAS');
     expect(find.text('drawing-session-900-resume-false'), findsOneWidget);
-  });
-
-  testWidgets('연속으로 두 번 탭해도 세션 생성과 이동은 한 번만 일어난다', (tester) async {
-    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
-
-    await tester.pumpWidget(
-      _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('activity-5')));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
-    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
-    await tester.pumpAndSettle();
-
-    expect(repository.createCalls, 1);
-    expect(find.text('drawing-session-900-resume-false'), findsOneWidget);
-  });
-
-  testWidgets('시작 실패 시 오류와 재시도를 보여주고 재시도하면 이동한다', (tester) async {
-    final repository = _FakeDrawingRepository(
-      drawingTypes: const [_artDiary],
-      failCreateOnce: true,
-    );
-
-    await tester.pumpWidget(
-      _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('activity-5')));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const ValueKey('activity-guide-error')), findsOneWidget);
-    expect(find.text('다시 시도'), findsOneWidget);
-    expect(repository.createCalls, 1);
-
-    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
-    await tester.pumpAndSettle();
-
-    expect(repository.createCalls, 2);
-    expect(find.text('drawing-session-900-resume-false'), findsOneWidget);
+    expect(find.byKey(const ValueKey('input-method-photo')), findsNothing);
   });
 
   testWidgets('기존 활성 세션이 있으면 그대로 재개하고 새 세션을 만들지 않는다', (tester) async {
@@ -362,6 +333,83 @@ void main() {
     expect(find.text('drawing-session-555-resume-false'), findsOneWidget);
   });
 
+  testWidgets('그림일기에서 새로 그리기를 고르면 활동을 다시 고르지 않고 새 캔버스로 이동한다', (tester) async {
+    final repository = _FakeDrawingRepository(
+      drawingTypes: const [_artDiary, _secondType],
+      activeSession: const ActiveDrawingSessionDto(
+        drawingSessionId: 555,
+        childId: 7,
+        drawingType: DrawingTypeSummaryDto(
+          drawingTypeId: 9,
+          code: 'HTP',
+          name: '집·나무·사람 그림',
+        ),
+        inputMethod: 'CANVAS',
+        sessionStatus: 'IN_PROGRESS',
+        currentStage: 'DRAWING',
+        startedAt: '2026-07-26T01:00:00Z',
+        latestDraft: null,
+      ),
+    );
+
+    await tester.pumpWidget(
+      _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activity-5')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('새로 그리기'), findsOneWidget);
+    await tester.tap(find.text('새로 그리기'));
+    await tester.pumpAndSettle();
+
+    expect(repository.createCalls, 1);
+    expect(
+      repository.lastCreateRequest?.drawingTypeId,
+      _artDiary.drawingTypeId,
+    );
+    expect(repository.lastCreateRequest?.inputMethod, 'CANVAS');
+    expect(repository.lastCreateRequest?.replaceActive, isTrue);
+    expect(find.text('drawing-session-900-resume-false'), findsOneWidget);
+    expect(find.text('어떤 활동을 해볼까요?'), findsNothing);
+  });
+
+  testWidgets('HTP에서 새로 그리기를 고르면 HOUSE 캔버스로 바로 이동한다', (tester) async {
+    final repository = _FakeDrawingRepository(
+      drawingTypes: const [_artDiary, _secondType],
+      activeSession: const ActiveDrawingSessionDto(
+        drawingSessionId: 555,
+        childId: 7,
+        drawingType: DrawingTypeSummaryDto(
+          drawingTypeId: 5,
+          code: 'ART_DIARY',
+          name: '그림일기',
+        ),
+        inputMethod: 'CANVAS',
+        sessionStatus: 'IN_PROGRESS',
+        currentStage: 'DRAWING',
+        startedAt: '2026-07-26T01:00:00Z',
+        latestDraft: null,
+      ),
+    );
+
+    await tester.pumpWidget(
+      _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
+    );
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const ValueKey('activity-9')));
+    await tester.tap(find.byKey(const ValueKey('activity-9')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('새로 그리기'));
+    await tester.pumpAndSettle();
+
+    expect(repository.htpStartCalls, 1);
+    expect(repository.lastHtpRequest?.inputMethod, 'CANVAS');
+    expect(repository.lastHtpRequest?.replaceActive, isTrue);
+    expect(find.text('drawing-session-901-resume-false'), findsOneWidget);
+    expect(find.text('어떤 활동을 해볼까요?'), findsNothing);
+  });
+
   testWidgets('좁은 화면과 2배 텍스트에서도 오버플로가 없다', (tester) async {
     await tester.binding.setSurfaceSize(const Size(320, 640));
     addTearDown(() => tester.binding.setSurfaceSize(null));
@@ -430,13 +478,13 @@ void main() {
   });
 }
 
-final class _FakeDrawingRepository implements DrawingRepository {
+final class _FakeDrawingRepository
+    implements DrawingRepository, HtpDrawingRepository {
   _FakeDrawingRepository({
     this.drawingTypes = const [],
     this.activeSession,
     this.getTypesFailure,
     this.failGetTypesOnce = false,
-    this.failCreateOnce = false,
     this.typesCompleter,
   });
 
@@ -444,13 +492,14 @@ final class _FakeDrawingRepository implements DrawingRepository {
   final ActiveDrawingSessionDto? activeSession;
   final Object? getTypesFailure;
   bool failGetTypesOnce;
-  bool failCreateOnce;
   final Completer<ApiPage<DrawingTypeDto>>? typesCompleter;
 
   int getDrawingTypesCalls = 0;
   int getActiveSessionCalls = 0;
   int createCalls = 0;
+  int htpStartCalls = 0;
   CreateDrawingSessionRequestDto? lastCreateRequest;
+  StartHtpAssessmentRequestDto? lastHtpRequest;
 
   @override
   Future<ApiPage<DrawingTypeDto>> getDrawingTypes({
@@ -486,10 +535,6 @@ final class _FakeDrawingRepository implements DrawingRepository {
   ) async {
     createCalls += 1;
     lastCreateRequest = request;
-    if (failCreateOnce) {
-      failCreateOnce = false;
-      throw const ApiTransportFailure(type: ApiTransportFailureType.connection);
-    }
     return DrawingSessionDto.fromCreateJson({
       'drawingSessionId': 900,
       'childId': request.childId,
@@ -510,6 +555,27 @@ final class _FakeDrawingRepository implements DrawingRepository {
       'latestAnalysis': null,
       'assets': [],
     });
+  }
+
+  @override
+  Future<HtpAssessmentDto> startHtpAssessment(
+    StartHtpAssessmentRequestDto request,
+  ) async {
+    htpStartCalls += 1;
+    lastHtpRequest = request;
+    return const HtpAssessmentDto(
+      htpAssessmentId: 91,
+      status: 'IN_PROGRESS',
+      expiresAt: '2026-07-30T01:00:00Z',
+      currentStep: HtpAssessmentStepDto(
+        stepOrder: 1,
+        drawingSubject: 'HOUSE',
+        drawingSessionId: 901,
+        sessionStatus: 'IN_PROGRESS',
+        currentStage: 'DRAWING',
+      ),
+      allStepsCompleted: false,
+    );
   }
 
   @override
