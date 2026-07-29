@@ -6,7 +6,9 @@ import '../data/dto/drawing_dtos.dart';
 
 typedef DraftSaveForDetection = Future<DraftSaveResponseDto?> Function();
 typedef ObjectDetectionRequester =
-    Future<ObjectDetectionResponseDto> Function(int drawingAssetId);
+    Future<ObjectDetectionResponseDto> Function(
+      ObjectDetectionRequestDto request,
+    );
 
 enum DrawingObjectDetectionStatus {
   idle,
@@ -91,7 +93,12 @@ final class DrawingObjectDetectionController extends ChangeNotifier {
     _requestedAssetIds.add(assetId);
     _setStatus(DrawingObjectDetectionStatus.requesting);
     try {
-      final result = await requestDetection(assetId);
+      final result = await requestDetection(
+        ObjectDetectionRequestDto(
+          drawingAssetId: assetId,
+          triggerReason: ObjectDetectionTriggerReason.pause,
+        ),
+      );
       if (generation != _inputGeneration) return;
       if (result.drawingAssetId != _latestDrawingAssetId) {
         _handleFailure(generation, StateError('STALE_ANALYSIS_RESULT'));

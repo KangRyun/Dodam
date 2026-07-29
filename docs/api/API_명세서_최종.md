@@ -966,6 +966,11 @@ Header `Idempotency-Key` 필수.
 }
 ```
 
+`triggerReason`은 공개 API에서 `PAUSE`, `USER_REQUEST`만 허용한다. 마지막 입력 후 3초 무입력
+자동 분석은 `PAUSE`를 사용하며, 생략하면 기존 Client 호환을 위해 `USER_REQUEST`로 처리한다.
+그림 단계 완료·활동 완료·재시도는 Backend가 각각 `DRAWING_COMPLETE`·`ACTIVITY_COMPLETE`·
+`RETRY`로 기록한다.
+
 #### 요청 제어
 
 - `INTERMEDIATE`: 최근 성공 분석 후 기본 5초 이내 재요청을 제한한다.

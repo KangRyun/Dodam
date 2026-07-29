@@ -781,14 +781,28 @@ final class DrawingUploadResponseDto {
   final List<String> qualityWarnings;
 }
 
+enum ObjectDetectionTriggerReason {
+  pause('PAUSE'),
+  userRequest('USER_REQUEST');
+
+  const ObjectDetectionTriggerReason(this.wireValue);
+
+  final String wireValue;
+}
+
 final class ObjectDetectionRequestDto {
-  const ObjectDetectionRequestDto({required this.drawingAssetId});
+  const ObjectDetectionRequestDto({
+    required this.drawingAssetId,
+    this.triggerReason = ObjectDetectionTriggerReason.userRequest,
+  });
 
   final int drawingAssetId;
+  final ObjectDetectionTriggerReason triggerReason;
 
   Map<String, dynamic> toJson() => {
     'drawingAssetId': drawingAssetId,
     'analysisType': 'OBJECT_DETECTION',
+    'triggerReason': triggerReason.wireValue,
   };
 }
 

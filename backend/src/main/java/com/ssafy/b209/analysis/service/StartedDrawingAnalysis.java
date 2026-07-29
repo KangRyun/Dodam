@@ -1,6 +1,7 @@
 package com.ssafy.b209.analysis.service;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisTriggerReason;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisSubject;
 import java.time.LocalDateTime;
@@ -15,6 +16,7 @@ import java.time.LocalDateTime;
  * @param analysisScope 중간 또는 최종 분석 범위
  * @param activityType 저장된 그림 유형에서 확정한 AI 활동 유형
  * @param drawingSubject 저장된 HTP 단계 주제이며 그림일기는 {@code null}
+ * @param triggerReason 저장된 분석 실행 사유
  * @param storageKey 내부 이미지 저장소 상대 Key
  * @param contentType 검증된 이미지 MIME Type
  * @param widthPx 원본 이미지 너비
@@ -30,9 +32,43 @@ public record StartedDrawingAnalysis(
     DrawingAnalysisScope analysisScope,
     DrawingAnalysisActivityType activityType,
     DrawingAnalysisSubject drawingSubject,
+    DrawingAnalysisTriggerReason triggerReason,
     String storageKey,
     String contentType,
     Integer widthPx,
     Integer heightPx,
     String checksumSha256,
-    LocalDateTime requestedAt) {}
+    LocalDateTime requestedAt) {
+
+  /** 실행 사유가 추가되기 전 내부 테스트와 호출을 호환한다. */
+  public StartedDrawingAnalysis(
+      Long analysisId,
+      Long drawingSessionId,
+      Long drawingAssetId,
+      String requestId,
+      DrawingAnalysisScope analysisScope,
+      DrawingAnalysisActivityType activityType,
+      DrawingAnalysisSubject drawingSubject,
+      String storageKey,
+      String contentType,
+      Integer widthPx,
+      Integer heightPx,
+      String checksumSha256,
+      LocalDateTime requestedAt) {
+    this(
+        analysisId,
+        drawingSessionId,
+        drawingAssetId,
+        requestId,
+        analysisScope,
+        activityType,
+        drawingSubject,
+        DrawingAnalysisTriggerReason.USER_REQUEST,
+        storageKey,
+        contentType,
+        widthPx,
+        heightPx,
+        checksumSha256,
+        requestedAt);
+  }
+}

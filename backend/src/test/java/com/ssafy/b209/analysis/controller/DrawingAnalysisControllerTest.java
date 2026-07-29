@@ -3,12 +3,14 @@ package com.ssafy.b209.analysis.controller;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
 import com.ssafy.b209.analysis.dto.BoundingBoxResponse;
@@ -28,9 +30,11 @@ import com.ssafy.b209.global.exception.BusinessException;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.List;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
 import org.springframework.http.MediaType;
@@ -93,6 +97,32 @@ class DrawingAnalysisControllerTest {
   }
 
   @Test
+  void preservesPauseTriggerReasonAtTheServiceBoundary() throws Exception {
+    given(drawingAnalysisService.requestAnalysis(eq(10L), any(CreateDrawingAnalysisRequest.class)))
+        .willReturn(response());
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/{drawingSessionId}/analyses", 10L)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "drawingAssetId": 20,
+                      "analysisType": "OBJECT_DETECTION",
+                      "triggerReason": "PAUSE"
+                    }
+                    """))
+        .andExpect(status().isCreated());
+
+    ArgumentCaptor<CreateDrawingAnalysisRequest> requestCaptor =
+        ArgumentCaptor.forClass(CreateDrawingAnalysisRequest.class);
+    verify(drawingAnalysisService).requestAnalysis(eq(10L), requestCaptor.capture());
+    String serialized = new ObjectMapper().writeValueAsString(requestCaptor.getValue());
+    Assertions.assertThat(serialized).contains("\"triggerReason\":\"PAUSE\"");
+  }
+
+  @Test
   void retriesAFailedAnalysisByItsIdentifier() throws Exception {
     given(drawingAnalysisService.retryAnalysis(eq(30L), any())).willReturn(response());
 
@@ -140,6 +170,24 @@ class DrawingAnalysisControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"drawingAssetId\":20,\"analysisType\":\"UNKNOWN\"}"))
         .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void rejectsTriggerReasonsThatAreNotExposedByThePublicApi() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/{drawingSessionId}/analyses", 10)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "drawingAssetId": 20,
+                      "analysisType": "OBJECT_DETECTION",
+                      "triggerReason": "INTERVAL"
+                    }
+                    """))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
   }
 
   @Test

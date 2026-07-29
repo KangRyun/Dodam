@@ -10,6 +10,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisTriggerReason;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
@@ -92,7 +93,10 @@ class DrawingStageCompletionServiceTest {
     verify(drawingAnalysisService)
         .requestAnalysis(
             SESSION_ID,
-            new CreateDrawingAnalysisRequest(ASSET_ID, DrawingAnalysisType.OBJECT_DETECTION),
+            new CreateDrawingAnalysisRequest(
+                ASSET_ID,
+                DrawingAnalysisType.OBJECT_DETECTION,
+                DrawingAnalysisTriggerReason.DRAWING_COMPLETE),
             KEY);
   }
 
@@ -127,7 +131,10 @@ class DrawingStageCompletionServiceTest {
     verify(drawingAnalysisService)
         .requestAnalysis(
             SESSION_ID,
-            new CreateDrawingAnalysisRequest(ASSET_ID, DrawingAnalysisType.OBJECT_DETECTION),
+            new CreateDrawingAnalysisRequest(
+                ASSET_ID,
+                DrawingAnalysisType.OBJECT_DETECTION,
+                DrawingAnalysisTriggerReason.DRAWING_COMPLETE),
             KEY);
   }
 
@@ -181,7 +188,10 @@ class DrawingStageCompletionServiceTest {
         .given(drawingAnalysisService)
         .requestAnalysis(
             SESSION_ID,
-            new CreateDrawingAnalysisRequest(ASSET_ID, DrawingAnalysisType.OBJECT_DETECTION),
+            new CreateDrawingAnalysisRequest(
+                ASSET_ID,
+                DrawingAnalysisType.OBJECT_DETECTION,
+                DrawingAnalysisTriggerReason.DRAWING_COMPLETE),
             KEY);
 
     CompleteDrawingStageResponse response =

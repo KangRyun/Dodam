@@ -11,12 +11,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssafy.b209.auth.token.AuthenticatedUser;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClient;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClientException;
 import com.ssafy.b209.support.IntegrationTestSupport;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -113,6 +115,10 @@ class DrawingAnalysisIntegrationTest extends IntegrationTestSupport {
         .isEqualTo("OBJECT_DETECTION");
     assertThat(
             jdbcTemplate.queryForObject(
+                "SELECT trigger_reason FROM analyses WHERE drawing_asset_id = 20", String.class))
+        .isEqualTo("USER_REQUEST");
+    assertThat(
+            jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM analysis_detected_objects", Integer.class))
         .isEqualTo(2);
     assertThat(
@@ -178,6 +184,40 @@ class DrawingAnalysisIntegrationTest extends IntegrationTestSupport {
             jdbcTemplate.queryForObject(
                 "SELECT analysis_type FROM analyses WHERE drawing_asset_id = 21", String.class))
         .isEqualTo("INTERMEDIATE");
+  }
+
+  @Test
+  void storesAndForwardsPauseTriggerReason() throws Exception {
+    AtomicReference<String> serializedCommand = new AtomicReference<>();
+    given(drawingAnalysisClient.analyze(any()))
+        .willAnswer(
+            invocation -> {
+              Object command = invocation.getArgument(0);
+              serializedCommand.set(new ObjectMapper().writeValueAsString(command));
+              com.ssafy.b209.analysis.dto.DrawingAnalysisClientCommand request =
+                  invocation.getArgument(0);
+              return successResponse(request.analysisId());
+            });
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/{drawingSessionId}/analyses", 10)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "drawingAssetId": 21,
+                      "analysisType": "OBJECT_DETECTION",
+                      "triggerReason": "PAUSE"
+                    }
+                    """))
+        .andExpect(status().isCreated());
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT trigger_reason FROM analyses WHERE drawing_asset_id = 21", String.class))
+        .isEqualTo("PAUSE");
+    assertThat(serializedCommand.get()).contains("\"triggerReason\":\"PAUSE\"");
   }
 
   @Test

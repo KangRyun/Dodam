@@ -242,11 +242,8 @@ class _DrawingScreenState extends State<DrawingScreen> {
       // 그림판은 입력 시점만 전달하고 탐지 상태와 최신 결과 검증은 별도 관리
       _objectDetectionController = DrawingObjectDetectionController(
         saveDraft: _syncCoordinator.saveDraftNow,
-        requestDetection: (drawingAssetId) =>
-            drawingRepository.requestObjectDetection(
-              sessionId,
-              ObjectDetectionRequestDto(drawingAssetId: drawingAssetId),
-            ),
+        requestDetection: (request) =>
+            drawingRepository.requestObjectDetection(sessionId, request),
       );
     }
     _objectDetectionController?.addListener(_handleObjectDetectionChanged);

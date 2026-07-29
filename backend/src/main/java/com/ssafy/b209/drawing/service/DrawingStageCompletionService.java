@@ -1,6 +1,7 @@
 package com.ssafy.b209.drawing.service;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisTriggerReason;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
@@ -101,7 +102,10 @@ public class DrawingStageCompletionService {
                 .orElseGet(() -> storeFinalImage(drawingSessionId, finalImage, request))
             : requireReusableSourceAsset(drawingSessionId, request.sourceAssetId());
     CreateDrawingAnalysisRequest analysisRequest =
-        new CreateDrawingAnalysisRequest(finalAssetId, DrawingAnalysisType.OBJECT_DETECTION);
+        new CreateDrawingAnalysisRequest(
+            finalAssetId,
+            DrawingAnalysisType.OBJECT_DETECTION,
+            DrawingAnalysisTriggerReason.DRAWING_COMPLETE);
     try {
       drawingAnalysisService.requestAnalysis(drawingSessionId, analysisRequest, idempotencyKey);
     } catch (BusinessException exception) {
