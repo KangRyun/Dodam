@@ -1,0 +1,247 @@
+# Prometheus — k3s 재배치 (S15P11B209-361)
+#
+# compose 판(infra/monitoring/)을 옮긴 것이다. 이력은 잇지 않는다(이슈: "이력 단절 허용").
+#
+# ⚠️ 스크레이프 대상이 두 종류로 갈린다
+#   ① 앱 메트릭(backend·ai·minio) — Service DNS 로 그대로. compose 판과 job 이름·경로가 같다
+#   ② 컨테이너/노드 메트릭 — **cAdvisor 컨테이너를 더 두지 않는다.** kubelet 이 내장 cAdvisor 를
+#      이미 노출하므로 그걸 긁는다. compose 의 dodam-cadvisor 는 컷오버 때 함께 폐기한다
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: dodam
+---
+# kubelet 의 cAdvisor 를 긁으려면 노드 프록시 권한이 필요하다.
+#   ClusterRole 인 이유: node 는 네임스페이스가 없는 리소스다(Role 로는 잡히지 않는다).
+#   읽기 전용만 준다 — Secret 은 포함하지 않는다(가드레일 9절: 최소권한).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dodam-prometheus
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/metrics", "nodes/proxy", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dodam-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: dodam
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dodam-prometheus
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: dodam
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s        # compose 판과 동일 — 대시보드 용도로 충분
+
+    rule_files:
+      - /etc/prometheus/rules/*.yml
+
+    scrape_configs:
+      # ── ① 앱 메트릭 — Service DNS ────────────────────────────────────────
+      #   같은 네임스페이스라 짧은 이름으로 해석된다. compose 판과 job 이름을 맞춰
+      #   기존 대시보드 쿼리가 그대로 살아 있게 한다.
+      - job_name: backend
+        metrics_path: /actuator/prometheus   # ⚠️ 8080 아니라 9404 — 8080 은 의도적으로 404
+        static_configs:
+          - targets: ["backend:9404"]
+
+      - job_name: ai
+        metrics_path: /metrics
+        static_configs:
+          - targets: ["ai:8000"]
+
+      - job_name: minio
+        metrics_path: /minio/v2/metrics/cluster
+        static_configs:
+          - targets: ["minio:9000"]
+
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+
+      # ── ② 노드·컨테이너 메트릭 ───────────────────────────────────────────
+      - job_name: node-exporter
+        static_configs:
+          - targets: ["node-exporter:9100"]
+
+      - job_name: kube-state-metrics
+        static_configs:
+          - targets: ["kube-state-metrics:8080"]
+
+      # kubelet 내장 cAdvisor. API 서버를 프록시로 거친다 —
+      #   kubelet(10250)을 직접 치면 인증서·포트 접근 문제를 따로 풀어야 한다.
+      - job_name: kubelet-cadvisor
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: dodam
+data:
+  memory.yml: |
+    # 메모리 압박 알림 — k8s 판 (S15P11B209-361)
+    #
+    # ★ compose 판을 그대로 옮기면 안 된다. container-memory 규칙이 **도커 cAdvisor 의
+    #   `name` 라벨**(`{name=~"dodam-.*"}`)에 걸려 있는데, kubelet 의 cAdvisor 는
+    #   `pod`·`container`·`namespace` 라벨을 쓴다. 그대로 옮기면 규칙은 살아 있는데
+    #   **영원히 발동하지 않는다** — 지표가 있는 것과 경보가 오는 것은 다르다.
+    #
+    # host-memory 그룹은 node-exporter 기반이라 라벨이 같다 — 그대로 옮긴다.
+    groups:
+      - name: host-memory
+        interval: 30s
+        rules:
+          - alert: HostMemoryAvailableLow
+            expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.15
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "호스트 가용 메모리 15% 미만 ({{ $value | humanizePercentage }})"
+              description: "무거운 작업을 새로 시작하지 말 것. docker stats / ps aux --sort=-rss | head"
+
+          - alert: HostMemoryAvailableCritical
+            expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.08
+            for: 2m
+            labels: { severity: critical }
+            annotations:
+              summary: "🔴 호스트 가용 메모리 8% 미만 — 응답 불능 직전 구간"
+              description: "2026-07-28 과 같은 경로다(thrash → SSH 불가 → 재부팅). 즉시 정리할 것."
+
+          - alert: HostSwapUsageHigh
+            expr: >-
+              node_memory_SwapTotal_bytes > 0
+              and (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes)
+                  / node_memory_SwapTotal_bytes > 0.5
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "스왑 사용 50% 초과 ({{ $value | humanizePercentage }})"
+              description: "스왑은 EBS 위라 여기까지 오면 응답시간이 이미 무너져 있다."
+
+      - name: container-memory
+        interval: 30s
+        rules:
+          # 라벨을 k8s 기준으로 다시 썼다. `container!=""` 로 파드 단위 합계 시계열(container 라벨이
+          # 빈 것)을 제외한다 — 넣으면 같은 사건을 두 번 센다.
+          - alert: ContainerMemoryNearLimit
+            expr: >-
+              container_spec_memory_limit_bytes{namespace="dodam",container!=""} > 0
+              and container_memory_working_set_bytes{namespace="dodam",container!=""}
+                  / container_spec_memory_limit_bytes{namespace="dodam",container!=""} > 0.9
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.pod }}/{{ $labels.container }} 메모리 상한의 90% 초과"
+              description: >-
+                곧 OOMKilled 된다. 매니페스트의 resources.limits.memory 를 올릴지 누수인지
+                판단할 것. JVM 이라면 MaxRAMPercentage 와 짝이 맞는지 먼저 본다.
+
+          # compose 판의 "상한 없는 컨테이너" 대응. k8s 에서는 kube-state-metrics 로 본다 —
+          # cAdvisor 만으로는 "상한이 없다"와 "지표가 아직 안 왔다"를 구분하지 못한다.
+          - alert: ContainerWithoutMemoryLimit
+            expr: >-
+              count by (namespace, pod, container) (
+                kube_pod_container_info{namespace="dodam"}
+              ) unless count by (namespace, pod, container) (
+                kube_pod_container_resource_limits{namespace="dodam", resource="memory"}
+              )
+            for: 15m
+            labels: { severity: info }
+            annotations:
+              summary: "{{ $labels.pod }}/{{ $labels.container }} 에 메모리 상한이 없다"
+              description: "07-28 사고의 조건 그 자체다. 매니페스트에 resources.limits.memory 를 넣을 것."
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: dodam
+spec:
+  replicas: 1
+  # TSDB 는 여러 파드가 같은 볼륨을 쓰면 깨진다. 새 파드를 띄우기 전에 옛 파드를 반드시 내린다.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: prometheus } }
+  template:
+    metadata:
+      labels: { app: prometheus }
+    spec:
+      serviceAccountName: prometheus   # kubelet cAdvisor 스크레이프용 토큰이 필요하다
+      securityContext:
+        # 이미지가 nobody(65534)로 도는데, PVC 초기 소유자는 root 다.
+        # fsGroup 을 주지 않으면 TSDB 디렉터리에 쓰지 못해 기동 직후 죽는다.
+        fsGroup: 65534
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.5.0   # compose 판과 같은 고정 버전 — latest 금지
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=15d
+            - --web.enable-lifecycle          # 규칙 변경 시 재기동 대신 POST /-/reload
+          ports:
+            - { name: http, containerPort: 9090 }
+          volumeMounts:
+            - { name: config, mountPath: /etc/prometheus/prometheus.yml, subPath: prometheus.yml }
+            - { name: rules,  mountPath: /etc/prometheus/rules }
+            - { name: data,   mountPath: /prometheus }
+          readinessProbe:
+            httpGet: { path: /-/ready, port: 9090 }
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /-/healthy, port: 9090 }
+            periodSeconds: 20
+            failureThreshold: 5
+          resources:
+            requests: { memory: 256Mi, cpu: 100m }
+            limits:   { memory: 700Mi, cpu: 1000m }   # compose mem_limit 700m 과 동일
+      volumes:
+        - { name: config, configMap: { name: prometheus-config } }
+        - { name: rules,  configMap: { name: prometheus-rules } }
+        - { name: data,   persistentVolumeClaim: { claimName: prometheus-data } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: dodam
+spec:
+  # ClusterIP 유지 — 외부 노출면은 80/443(nginx)뿐이라는 원칙 그대로다.
+  #   사람이 볼 때는 kubectl port-forward 로 접근한다(NodePort 를 열지 않는다).
+  type: ClusterIP
+  selector: { app: prometheus }
+  ports:
+    - { name: http, port: 9090, targetPort: 9090 }

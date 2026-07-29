@@ -29,6 +29,10 @@ resources:
   - jenkins-external.yaml
   - jenkins-deployer-rbac.yaml   # S15P11B209-359 — 배포 전용 SA(네임스페이스 한정, Secret 읽기 없음)
   - cronjobs.yaml
+  # S15P11B209-361 — 모니터링 재배치. cAdvisor 컨테이너는 없다(kubelet 내장분을 긁는다).
+  - monitoring-prometheus.yaml
+  - monitoring-exporters.yaml
+  - monitoring-grafana.yaml
 
 commonLabels:
   app.kubernetes.io/part-of: dodam
