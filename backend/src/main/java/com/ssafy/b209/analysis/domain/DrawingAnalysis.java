@@ -107,6 +107,7 @@ public class DrawingAnalysis {
       DrawingAnalysisScope scope,
       DrawingAnalysisType taskType,
       String requestId,
+      DrawingAnalysisTriggerReason triggerReason,
       LocalDateTime requestedAt) {
     this.drawingSession = Objects.requireNonNull(drawingSession, "drawingSession must not be null");
     this.drawingAsset = Objects.requireNonNull(drawingAsset, "drawingAsset must not be null");
@@ -114,7 +115,8 @@ public class DrawingAnalysis {
     this.taskType = Objects.requireNonNull(taskType, "taskType must not be null");
     this.requestId = requireText(requestId, "requestId");
     this.state = DrawingAnalysisState.PROCESSING;
-    this.triggerReason = "USER_REQUEST";
+    this.triggerReason =
+        Objects.requireNonNull(triggerReason, "triggerReason must not be null").name();
     this.requestedAt = Objects.requireNonNull(requestedAt, "requestedAt must not be null");
     this.startedAt = requestedAt;
     this.createdAt = requestedAt;
@@ -139,7 +141,37 @@ public class DrawingAnalysis {
       String requestId,
       LocalDateTime requestedAt) {
     return new DrawingAnalysis(
-        drawingSession, drawingAsset, scope, taskType, requestId, requestedAt);
+        drawingSession,
+        drawingAsset,
+        scope,
+        taskType,
+        requestId,
+        DrawingAnalysisTriggerReason.USER_REQUEST,
+        requestedAt);
+  }
+
+  /**
+   * 요청에서 확정한 실행 사유와 함께 즉시 수행할 분석을 생성한다.
+   *
+   * @param drawingSession 분석 대상 그림 세션
+   * @param drawingAsset 분석 대상 그림 파일
+   * @param scope 중간 또는 최종 분석 범위
+   * @param taskType 수행할 분석 작업 유형
+   * @param requestId 요청 추적 식별자
+   * @param triggerReason 분석을 시작한 실제 계기
+   * @param requestedAt 서버가 요청을 시작한 UTC 시각
+   * @return 처리 중인 분석
+   */
+  public static DrawingAnalysis processing(
+      DrawingSession drawingSession,
+      DrawingAsset drawingAsset,
+      DrawingAnalysisScope scope,
+      DrawingAnalysisType taskType,
+      String requestId,
+      DrawingAnalysisTriggerReason triggerReason,
+      LocalDateTime requestedAt) {
+    return new DrawingAnalysis(
+        drawingSession, drawingAsset, scope, taskType, requestId, triggerReason, requestedAt);
   }
 
   /**
@@ -164,6 +196,7 @@ public class DrawingAnalysis {
             source.scope,
             source.taskType,
             requestId,
+            DrawingAnalysisTriggerReason.RETRY,
             requestedAt);
     retry.retryOfAnalysis = source;
     retry.triggerReason = "RETRY";
@@ -408,6 +441,13 @@ public class DrawingAnalysis {
    */
   public DrawingAnalysisState getState() {
     return state;
+  }
+
+  /**
+   * @return 분석 실행을 시작한 실제 계기
+   */
+  public DrawingAnalysisTriggerReason getTriggerReason() {
+    return DrawingAnalysisTriggerReason.valueOf(triggerReason);
   }
 
   /**

@@ -127,6 +127,11 @@ FAILED 분석만 재시도할 수 있다. 원본 행을 다시 PROCESSING으로 
 추가 변경이 없을 때 분석을 요청하는 debounce는 프론트엔드가 담당하며, Backend는 지연 실행용
 Scheduler나 Timer를 생성하지 않는다.
 
+공개 분석 요청의 `triggerReason`은 `PAUSE`, `USER_REQUEST`만 허용한다. 3초 무입력 자동 분석은
+`PAUSE`를 전달하고, 필드를 생략한 기존 Client 요청은 `USER_REQUEST`로 저장한다. 그림 단계 완료,
+활동 완료, 재시도 흐름은 Backend가 각각 `DRAWING_COMPLETE`, `ACTIVITY_COMPLETE`, `RETRY`로
+확정하며, 저장한 값을 내부 AI 분석 요청에도 동일하게 전달한다.
+
 ## 요청
 
 ```json

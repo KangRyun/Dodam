@@ -48,6 +48,7 @@ class RestClientDrawingAnalysisClientTest {
         .expect(requestTo(ENDPOINT_URL))
         .andExpect(jsonPath("$.activityType").value("HTP"))
         .andExpect(jsonPath("$.drawingSubject").value("HOUSE"))
+        .andExpect(jsonPath("$.triggerReason").value("USER_REQUEST"))
         .andRespond(withSuccess(successResponse(701L), MediaType.APPLICATION_JSON));
 
     var response = client.analyze(validCommand());

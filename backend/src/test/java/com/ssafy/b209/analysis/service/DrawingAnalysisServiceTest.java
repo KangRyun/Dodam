@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisTriggerReason;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
@@ -133,6 +134,7 @@ class DrawingAnalysisServiceTest {
                 ASSET_ID,
                 DrawingAnalysisType.OBJECT_DETECTION,
                 idempotencyKey,
+                DrawingAnalysisTriggerReason.USER_REQUEST,
                 LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC)))
         .willReturn(
             new StartedDrawingAnalysis(
@@ -166,6 +168,7 @@ class DrawingAnalysisServiceTest {
             ASSET_ID,
             DrawingAnalysisType.OBJECT_DETECTION,
             idempotencyKey,
+            DrawingAnalysisTriggerReason.USER_REQUEST,
             LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC));
   }
 
@@ -317,6 +320,7 @@ class DrawingAnalysisServiceTest {
                 ASSET_ID,
                 DrawingAnalysisType.OBJECT_DETECTION,
                 REQUEST_ID.toString(),
+                DrawingAnalysisTriggerReason.USER_REQUEST,
                 LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC)))
         .willReturn(
             new StartedDrawingAnalysis(

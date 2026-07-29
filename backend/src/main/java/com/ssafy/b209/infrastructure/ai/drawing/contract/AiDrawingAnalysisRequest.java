@@ -62,13 +62,37 @@ public record AiDrawingAnalysisRequest(
       DrawingAnalysisSubject drawingSubject,
       AnalysisType analysisType,
       DrawingInput drawing) {
+    return minimum(
+        analysisId, drawingSessionId, activityType, drawingSubject, analysisType, null, drawing);
+  }
+
+  /**
+   * 저장된 분석 실행 사유를 포함한 최소 정본 요청을 생성한다.
+   *
+   * @param analysisId 분석 식별자
+   * @param drawingSessionId 그림 세션 식별자
+   * @param activityType 분석 활동 유형
+   * @param drawingSubject HTP 주제이며 그림일기는 {@code null}
+   * @param analysisType 분석 범위
+   * @param triggerReason 분석을 시작한 실제 계기
+   * @param drawing 그림 접근 정보
+   * @return 선택 입력을 제외한 정본 분석 요청
+   */
+  public static AiDrawingAnalysisRequest minimum(
+      Long analysisId,
+      Long drawingSessionId,
+      DrawingAnalysisActivityType activityType,
+      DrawingAnalysisSubject drawingSubject,
+      AnalysisType analysisType,
+      TriggerReason triggerReason,
+      DrawingInput drawing) {
     return new AiDrawingAnalysisRequest(
         analysisId,
         drawingSessionId,
         activityType,
         drawingSubject,
         analysisType,
-        null,
+        triggerReason,
         null,
         drawing,
         null,

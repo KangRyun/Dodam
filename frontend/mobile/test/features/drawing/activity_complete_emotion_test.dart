@@ -84,6 +84,7 @@ void main() {
     expect(request.data, {
       'drawingAssetId': 140,
       'analysisType': 'OBJECT_DETECTION',
+      'triggerReason': 'USER_REQUEST',
     });
     expect(result.drawingAssetId, 140);
     expect(result.status, 'SUCCEEDED');

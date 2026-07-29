@@ -7,16 +7,16 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('마지막 입력 후 debounce가 끝나면 최신 DRAFT를 저장하고 탐지를 요청한다', () async {
     var saveCalls = 0;
-    final requestedAssetIds = <int>[];
+    final requests = <Object>[];
     final controller = DrawingObjectDetectionController(
       debounceDuration: const Duration(milliseconds: 10),
       saveDraft: () async {
         saveCalls += 1;
         return _draft(120);
       },
-      requestDetection: (assetId) async {
-        requestedAssetIds.add(assetId);
-        return _detection(assetId);
+      requestDetection: (request) async {
+        requests.add(request);
+        return _detection(request.drawingAssetId);
       },
     );
     addTearDown(controller.dispose);
@@ -26,7 +26,11 @@ void main() {
     await Future<void>.delayed(const Duration(milliseconds: 30));
 
     expect(saveCalls, 1);
-    expect(requestedAssetIds, [120]);
+    expect(requests.single, isA<ObjectDetectionRequestDto>());
+    expect(
+      (requests.single as ObjectDetectionRequestDto).toJson(),
+      containsPair('triggerReason', 'PAUSE'),
+    );
     expect(controller.status, DrawingObjectDetectionStatus.succeeded);
     expect(controller.validResult?.drawingAssetId, 120);
   });
@@ -58,9 +62,9 @@ void main() {
     final controller = DrawingObjectDetectionController(
       debounceDuration: const Duration(milliseconds: 5),
       saveDraft: () async => _draft(120),
-      requestDetection: (assetId) async {
+      requestDetection: (request) async {
         requestCalls += 1;
-        return _detection(assetId);
+        return _detection(request.drawingAssetId);
       },
     );
     addTearDown(controller.dispose);
@@ -84,7 +88,7 @@ void main() {
         saveCalls += 1;
         return _draft(120 + saveCalls);
       },
-      requestDetection: (assetId) async => _detection(assetId),
+      requestDetection: (request) async => _detection(request.drawingAssetId),
     );
     addTearDown(controller.dispose);
 

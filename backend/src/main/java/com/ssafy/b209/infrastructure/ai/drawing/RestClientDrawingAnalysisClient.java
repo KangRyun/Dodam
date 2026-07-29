@@ -114,6 +114,7 @@ public final class RestClientDrawingAnalysisClient implements DrawingAnalysisCli
             command.activityType(),
             command.drawingSubject(),
             analysisType,
+            AiDrawingAnalysisRequest.TriggerReason.valueOf(command.triggerReason().name()),
             new AiDrawingAnalysisRequest.DrawingInput(
                 command.drawingAssetId(),
                 signedUrl.toString(),

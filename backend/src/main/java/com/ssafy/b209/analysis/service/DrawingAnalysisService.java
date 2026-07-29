@@ -139,12 +139,14 @@ public class DrawingAnalysisService {
                 request.drawingAssetId(),
                 request.analysisType(),
                 requestId,
+                request.triggerReason(),
                 requestedAt)
             : persistenceService.start(
                 drawingSessionId,
                 request.drawingAssetId(),
                 request.analysisType(),
                 requestId,
+                request.triggerReason(),
                 requestedAt);
 
     return executeAnalysis(started, request.analysisType(), requestedInstant);
@@ -186,6 +188,7 @@ public class DrawingAnalysisService {
             started.analysisScope(),
             started.activityType(),
             started.drawingSubject(),
+            started.triggerReason(),
             started.storageKey(),
             started.contentType(),
             started.widthPx(),

@@ -3,6 +3,7 @@ package com.ssafy.b209.analysis.service;
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
+import com.ssafy.b209.analysis.domain.DrawingAnalysisTriggerReason;
 import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
@@ -80,7 +81,37 @@ public class DrawingAnalysisPersistenceService {
       DrawingAnalysisType taskType,
       String requestId,
       LocalDateTime requestedAt) {
-    return start(drawingSessionId, drawingAssetId, taskType, requestId, requestedAt, false);
+    return start(
+        drawingSessionId,
+        drawingAssetId,
+        taskType,
+        requestId,
+        DrawingAnalysisTriggerReason.USER_REQUEST,
+        requestedAt,
+        false);
+  }
+
+  /**
+   * 공개 API에서 확정한 실행 사유로 처리 중인 분석을 저장한다.
+   *
+   * @param drawingSessionId 분석 대상 그림 세션 식별자
+   * @param drawingAssetId 분석 대상 그림 파일 식별자
+   * @param taskType 수행할 분석 유형
+   * @param requestId 요청 추적 식별자
+   * @param triggerReason 분석을 시작한 실제 계기
+   * @param requestedAt 서버가 요청을 시작한 UTC 시각
+   * @return AI Client 호출에 필요한 저장 결과
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public StartedDrawingAnalysis start(
+      Long drawingSessionId,
+      Long drawingAssetId,
+      DrawingAnalysisType taskType,
+      String requestId,
+      DrawingAnalysisTriggerReason triggerReason,
+      LocalDateTime requestedAt) {
+    return start(
+        drawingSessionId, drawingAssetId, taskType, requestId, triggerReason, requestedAt, false);
   }
 
   /**
@@ -101,7 +132,37 @@ public class DrawingAnalysisPersistenceService {
       DrawingAnalysisType taskType,
       String requestId,
       LocalDateTime requestedAt) {
-    return start(drawingSessionId, drawingAssetId, taskType, requestId, requestedAt, true);
+    return start(
+        drawingSessionId,
+        drawingAssetId,
+        taskType,
+        requestId,
+        DrawingAnalysisTriggerReason.USER_REQUEST,
+        requestedAt,
+        true);
+  }
+
+  /**
+   * 그림 단계 완료 요청의 실행 사유와 함께 FINAL 분석을 저장한다.
+   *
+   * @param drawingSessionId 분석 대상 그림 세션 식별자
+   * @param drawingAssetId 분석 대상 FINAL 파일 식별자
+   * @param taskType 수행할 분석 유형
+   * @param requestId 완료 요청의 멱등 식별자
+   * @param triggerReason 분석을 시작한 실제 계기
+   * @param requestedAt 서버가 요청을 시작한 UTC 시각
+   * @return AI Client 호출에 필요한 저장 결과
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public StartedDrawingAnalysis startForDrawingCompletion(
+      Long drawingSessionId,
+      Long drawingAssetId,
+      DrawingAnalysisType taskType,
+      String requestId,
+      DrawingAnalysisTriggerReason triggerReason,
+      LocalDateTime requestedAt) {
+    return start(
+        drawingSessionId, drawingAssetId, taskType, requestId, triggerReason, requestedAt, true);
   }
 
   private StartedDrawingAnalysis start(
@@ -109,6 +170,7 @@ public class DrawingAnalysisPersistenceService {
       Long drawingAssetId,
       DrawingAnalysisType taskType,
       String requestId,
+      DrawingAnalysisTriggerReason triggerReason,
       LocalDateTime requestedAt,
       boolean drawingStageCompletion) {
     DrawingSession session =
@@ -136,7 +198,8 @@ public class DrawingAnalysisPersistenceService {
     }
 
     DrawingAnalysis analysis =
-        DrawingAnalysis.processing(session, asset, scope, taskType, requestId, requestedAt);
+        DrawingAnalysis.processing(
+            session, asset, scope, taskType, requestId, triggerReason, requestedAt);
     try {
       DrawingAnalysis saved = drawingAnalysisRepository.saveAndFlush(analysis);
       if (drawingStageCompletion && scope == DrawingAnalysisScope.FINAL) {
@@ -150,6 +213,7 @@ public class DrawingAnalysisPersistenceService {
           scope,
           activityContext.activityType(),
           activityContext.drawingSubject(),
+          saved.getTriggerReason(),
           asset.getStorageKey(),
           asset.getMimeType(),
           asset.getWidthPx(),
@@ -254,6 +318,7 @@ public class DrawingAnalysisPersistenceService {
           source.getScope(),
           activityContext.activityType(),
           activityContext.drawingSubject(),
+          saved.getTriggerReason(),
           asset.getStorageKey(),
           asset.getMimeType(),
           asset.getWidthPx(),
