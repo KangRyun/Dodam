@@ -61,6 +61,23 @@ spec:
       containers:
         - name: backend
           image: dodam-backend       # 태그는 overlay 의 images 트랜스포머가 채운다
+          # ★ 무중단의 나머지 절반 (S15P11B209-362, 2026-07-29 실측으로 추가).
+          #   maxUnavailable: 0 은 **용량**을 보장하지만 종료 경쟁은 막지 못한다.
+          #   파드가 삭제되면 두 가지가 **순서 보장 없이 동시에** 일어난다:
+          #     ① kubelet 이 SIGTERM → 앱이 종료 시작
+          #     ② 엔드포인트 컨트롤러가 Service 에서 제거 → kube-proxy 가 iptables 갱신
+          #   ①이 먼저 끝나면 아직 라우팅이 살아 있는 채로 앱이 죽고, 그리로 간 요청은
+          #   응답을 못 받아 **매달린다**(에러가 아니라 무응답이라 더 나쁘다).
+          #
+          #   실측(k6 5VU·90s, 롤링 병행): preStop 없이 550건 중 3건이 60초 타임아웃까지
+          #   매달렸다. nginx 의 proxy_read_timeout 이 120s 라 그때까지 버틴다.
+          #
+          #   8초인 이유: 엔드포인트 전파는 보통 1~2초면 끝난다. 4배 여유를 두되
+          #   terminationGracePeriodSeconds(30) 안에 충분히 들어가는 값이다.
+          #   ⚠️ 이 값이 grace period 를 넘으면 preStop 도중에 SIGKILL 되어 역효과가 난다.
+          lifecycle:
+            preStop:
+              exec: { command: ["sh", "-c", "sleep 8"] }
           envFrom:
             # 비밀 아닌 값 전부. 키 이름이 compose 환경변수와 같아 앱 코드는 그대로다.
             - configMapRef: { name: dodam-config }
