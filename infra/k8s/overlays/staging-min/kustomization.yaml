@@ -1,0 +1,83 @@
+# 축소 스테이징 overlay — S15P11B209-358 1차 검증용
+#
+# ★ 존재 이유: staging overlay 를 한 번에 다 올리기 전에 **"매니페스트가 실제로 도는가"**
+#   부터 확인한다. 위험을 잘게 나누는 것이 목적이지, 자원이 모자라서가 아니다
+#   (실측: base 전체 requests 합 약 2.1GB ≤ allocatable 5.6GB — 스케줄 자체는 여유).
+#
+#   여기서 확인하는 것:
+#     - 로컬 레지스트리(356)에서 containerd 가 앱 이미지를 당겨오는가
+#     - Secret 주입(sync-secrets.sh)이 워크로드에 실제로 먹는가
+#     - backend 가 k8s Service 이름(mysql·redis·minio)으로 붙는가
+#     - gateway(nginx)가 NodePort 로 응답하는가
+#
+# ⚠️ 운영 80/443 은 건드리지 않는다. compose 스택이 서비스하는 동안 옆에서 돈다.
+#      검증: curl -I http://127.0.0.1:30080/
+#
+# 뺀 것과 이유:
+#   ai        → replicas 0. **Service 는 남긴다.** gateway 의 `proxy_pass http://ai:8000/`
+#               는 고정 이름이라 DNS 가 안 풀리면 nginx 자체가 기동에 실패한다.
+#               이미지도 2.36GB 라 1차 검증에서 굳이 push 할 이유가 없다.
+#   mongodb   → replicas 0. 같은 이유로 Service 만 남긴다. backend 설정(configmap-app)에
+#               Mongo 접속 키가 없어 기동에 필요하지 않다.
+#   certbot   → suspend. 새 PVC 라 갱신할 인증서가 없어 실피해는 없지만, 일회성 검증
+#               환경에서 인증서 자동화가 도는 것 자체가 사고 소재다.
+#   db-backup·mongo-backup → base 에서 이미 suspend: true (근거는 cronjobs.yaml 주석)
+#
+# 남긴 것: mysql · redis · minio · backend · gateway
+#   backend 는 이 셋이 없으면 기동하지 못한다(DB_HOST=mysql · REDIS_HOST=redis ·
+#   S3_ENDPOINT=http://minio:9000). "backend 만 띄우기"는 성립하지 않는다.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dodam
+
+resources:
+  - ../../base
+
+images:
+  # 356 에서 세운 로컬 레지스트리. push 는 infra/scripts/push-staging-images.sh 참조.
+  - name: dodam-backend
+    newName: 127.0.0.1:5000/dodam-backend
+    newTag: staging
+  - name: dodam-nginx
+    newName: 127.0.0.1:5000/dodam-nginx
+    newTag: staging
+  # ai 는 replicas 0 이라 pull 되지 않지만, 태그를 비워두면 `dodam-ai:latest` 를
+  # 찾다가 나중에 replicas 를 올리는 순간 조용히 실패한다. 지금 맞춰 둔다.
+  - name: dodam-ai
+    newName: 127.0.0.1:5000/dodam-ai
+    newTag: staging
+
+patches:
+  - path: gateway-nodeport.yaml
+  - path: backend-single-replica.yaml
+
+  # ── ai: Service 는 유지, 파드는 0 ────────────────────────────────────────────
+  - target: { kind: Deployment, name: ai }
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: ai
+      spec:
+        replicas: 0
+
+  # ── mongodb: Service 는 유지, 파드는 0 ───────────────────────────────────────
+  - target: { kind: StatefulSet, name: mongodb }
+    patch: |
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: mongodb
+      spec:
+        replicas: 0
+
+  # ── certbot-renew: 검증 환경에서는 돌리지 않는다 ─────────────────────────────
+  - target: { kind: CronJob, name: certbot-renew }
+    patch: |
+      apiVersion: batch/v1
+      kind: CronJob
+      metadata:
+        name: certbot-renew
+      spec:
+        suspend: true
