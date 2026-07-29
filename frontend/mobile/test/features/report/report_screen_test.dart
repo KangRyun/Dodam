@@ -305,6 +305,24 @@ void main() {
     expect(find.text('우리 가족'), findsOneWidget);
   });
 
+  testWidgets('비진단 안내는 작은 화면과 큰 글자에서도 읽을 수 있다', (tester) async {
+    final handle = tester.ensureSemantics();
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await _openReport(tester, _ReportRepository(), textScale: 2.0);
+    final notice = find.byKey(const ValueKey('report-non-diagnostic-notice'));
+    await tester.ensureVisible(notice);
+    await tester.pump();
+
+    expect(notice, findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp('진단이 아닌 관찰 참고 자료')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    handle.dispose();
+  });
+
   testWidgets('작은 화면에서도 단일 스크롤로 overflow가 없다', (tester) async {
     tester.view.physicalSize = const Size(500, 560);
     tester.view.devicePixelRatio = 1;
