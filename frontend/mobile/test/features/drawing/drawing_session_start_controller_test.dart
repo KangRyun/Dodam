@@ -40,6 +40,45 @@ void main() {
     expect(repository.createCalls, 0);
   });
 
+  test('임시 저장본이나 그림 완료 단계가 있을 때만 선택 팝업 대상이다', () {
+    final controller = DrawingSessionStartController(
+      repository: _SessionStartRepository(activeSessions: const [null]),
+    );
+
+    expect(controller.hasSavedDrawing(_activeSession(81)), isFalse);
+    expect(
+      controller.hasSavedDrawing(_activeSession(82, hasDraft: true)),
+      isTrue,
+    );
+    expect(
+      controller.hasSavedDrawing(
+        _activeSession(83, currentStage: 'CONVERSING'),
+      ),
+      isTrue,
+    );
+  });
+
+  test('새로 그리기는 기존 세션을 삭제한 뒤 새 세션을 생성한다', () async {
+    final repository = _SessionStartRepository(
+      activeSessions: const [null],
+      createdSessionId: 91,
+    );
+    final controller = DrawingSessionStartController(
+      repository: repository,
+      now: () => DateTime.utc(2026, 7, 29, 1),
+    );
+
+    final resolution = await controller.replaceActiveSession(
+      childId: 3,
+      activeSessionId: 81,
+    );
+
+    expect(repository.deletedSessionIds, [81]);
+    expect(repository.createCalls, 1);
+    expect(resolution.sessionId, 91);
+    expect(resolution.isDrawingStage, isTrue);
+  });
+
   test('활성 그림 세션이 없으면 첫 번째 그림 유형으로 새 세션을 만든다', () async {
     final repository = _SessionStartRepository(
       activeSessions: [null],
@@ -137,6 +176,7 @@ final _activeSessionExistsFailure = ApiResponseFailure(
 ActiveDrawingSessionDto _activeSession(
   int id, {
   String currentStage = 'DRAWING',
+  bool hasDraft = false,
 }) => ActiveDrawingSessionDto(
   drawingSessionId: id,
   childId: 3,
@@ -149,10 +189,18 @@ ActiveDrawingSessionDto _activeSession(
   sessionStatus: 'IN_PROGRESS',
   currentStage: currentStage,
   startedAt: '2026-07-26T01:00:00Z',
-  latestDraft: null,
+  latestDraft: hasDraft
+      ? const ActiveDrawingDraftDto(
+          drawingAssetId: 301,
+          assetVersion: 2,
+          lastEventSequence: 18,
+          savedAt: '2026-07-29T01:00:00Z',
+        )
+      : null,
 );
 
-final class _SessionStartRepository implements DrawingRepository {
+final class _SessionStartRepository
+    implements DrawingRepository, DrawingSessionDiscarder {
   _SessionStartRepository({
     required this.activeSessions,
     this.createdSessionId = 82,
@@ -190,7 +238,13 @@ final class _SessionStartRepository implements DrawingRepository {
   int getActiveSessionCalls = 0;
   int getDrawingTypesCalls = 0;
   int createCalls = 0;
+  final List<int> deletedSessionIds = [];
   CreateDrawingSessionRequestDto? createRequest;
+
+  @override
+  Future<void> deleteSession(int sessionId) async {
+    deletedSessionIds.add(sessionId);
+  }
 
   @override
   Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async =>

@@ -157,6 +157,45 @@ void main() {
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
   });
 
+  testWidgets('임시 저장 그림이 있으면 이어 그리기와 새로 그리기를 선택한다', (tester) async {
+    final drawingRepository = _TrackingDrawingRepository(
+      activeSessionId: 812,
+      activeHasDraft: true,
+    );
+    await _pumpChildHome(tester, drawingRepository);
+
+    await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    await tester.pump(const Duration(milliseconds: 400));
+
+    expect(find.text('그리던 그림이 있어요'), findsOneWidget);
+    expect(find.text('이어 그리기'), findsOneWidget);
+    expect(find.text('새로 그리기'), findsOneWidget);
+
+    await tester.tap(find.text('이어 그리기'));
+    await tester.pumpAndSettle();
+
+    expect(drawingRepository.deletedSessionIds, isEmpty);
+    expect(drawingRepository.createCalls, 0);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+  });
+
+  testWidgets('새로 그리기는 저장된 활동을 삭제하고 새 세션을 만든다', (tester) async {
+    final drawingRepository = _TrackingDrawingRepository(
+      activeSessionId: 812,
+      activeHasDraft: true,
+    );
+    await _pumpChildHome(tester, drawingRepository);
+
+    await _tapAfterScroll(tester, const ValueKey('draw-action'));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.tap(find.text('새로 그리기'));
+    await tester.pumpAndSettle();
+
+    expect(drawingRepository.deletedSessionIds, [812]);
+    expect(drawingRepository.createCalls, 1);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+  });
+
   testWidgets('실제 앱 진입 흐름에서 생성한 세션으로 완료부터 보호자 홈까지 이어진다', (tester) async {
     final drawingRepository = _TrackingDrawingRepository(sessionId: 731);
     await tester.pumpWidget(
@@ -402,16 +441,19 @@ final class _FakeChildRepository implements ChildRepository {
   ) => throw UnimplementedError();
 }
 
-final class _TrackingDrawingRepository implements DrawingRepository {
+final class _TrackingDrawingRepository
+    implements DrawingRepository, DrawingSessionDiscarder {
   _TrackingDrawingRepository({
     this.sessionId = 731,
     this.activeSessionId,
+    this.activeHasDraft = false,
     this.createError,
     this.pending,
   });
 
   final int sessionId;
   final int? activeSessionId;
+  final bool activeHasDraft;
   final Object? createError;
   final Completer<DrawingSessionDto>? pending;
   int createCalls = 0;
@@ -419,6 +461,7 @@ final class _TrackingDrawingRepository implements DrawingRepository {
   int? completeSessionId;
   int? reflectionSessionId;
   bool activityCompletionAccepted = false;
+  final List<int> deletedSessionIds = [];
   CreateDrawingSessionRequestDto? createRequest;
 
   DrawingSessionDto session() => DrawingSessionDto.fromCreateJson({
@@ -495,7 +538,14 @@ final class _TrackingDrawingRepository implements DrawingRepository {
       sessionStatus: 'DRAWING',
       currentStage: 'DRAWING',
       startedAt: '2026-07-22T00:00:00Z',
-      latestDraft: null,
+      latestDraft: activeHasDraft
+          ? const ActiveDrawingDraftDto(
+              drawingAssetId: 301,
+              assetVersion: 2,
+              lastEventSequence: 18,
+              savedAt: '2026-07-29T01:00:00Z',
+            )
+          : null,
     );
   }
 
@@ -576,6 +626,11 @@ final class _TrackingDrawingRepository implements DrawingRepository {
 
   @override
   Future<void> deleteDraft(int sessionId) async {}
+  @override
+  Future<void> deleteSession(int sessionId) async {
+    deletedSessionIds.add(sessionId);
+  }
+
   @override
   Future<DrawingSessionDto> getSession(int sessionId) async => session();
   @override

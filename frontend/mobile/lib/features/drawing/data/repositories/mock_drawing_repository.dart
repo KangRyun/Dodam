@@ -11,7 +11,8 @@ enum MockCompletionScenario { success, failure }
 
 enum MockReflectionScenario { success, failure }
 
-final class MockDrawingRepository implements DrawingRepository {
+final class MockDrawingRepository
+    implements DrawingRepository, DrawingSessionDiscarder {
   const MockDrawingRepository({
     this.draftScenario = MockDraftScenario.found,
     this.completionScenario = MockCompletionScenario.success,
@@ -147,6 +148,9 @@ final class MockDrawingRepository implements DrawingRepository {
 
   @override
   Future<void> deleteDraft(int sessionId) async {}
+
+  @override
+  Future<void> deleteSession(int sessionId) async {}
   @override
   Future<DrawingStageCompleteResponseDto> completeDrawingStage(
     int sessionId, {

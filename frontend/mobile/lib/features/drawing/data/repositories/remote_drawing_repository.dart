@@ -57,7 +57,8 @@ String _idempotencyKey() {
       '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
 }
 
-final class RemoteDrawingRepository implements DrawingRepository {
+final class RemoteDrawingRepository
+    implements DrawingRepository, DrawingSessionDiscarder {
   const RemoteDrawingRepository(this._apiClient);
   final ApiClient _apiClient;
 
@@ -177,6 +178,14 @@ final class RemoteDrawingRepository implements DrawingRepository {
   @override
   Future<void> deleteDraft(int sessionId) async {
     await _apiClient.delete<void>('drawing-sessions/$sessionId/draft');
+  }
+
+  @override
+  Future<void> deleteSession(int sessionId) async {
+    await _apiClient.delete<void>(
+      'drawing-sessions/$sessionId',
+      data: const {'confirmation': 'DELETE'},
+    );
   }
 
   @override
