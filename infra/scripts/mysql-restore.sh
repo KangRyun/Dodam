@@ -27,11 +27,16 @@ if [[ "${1:-}" == "--dry-run" ]]; then
   shift
 fi
 if [[ $# -lt 1 ]]; then
-  echo "사용법: $0 [--dry-run] <백업파일(.sql.gz.enc)> [컨테이너명(기본: dodam-mysql)]" >&2
+  echo "사용법: $0 [--dry-run] <백업파일(.sql.gz.enc)> [워크로드(기본: statefulset/mysql)]" >&2
   exit 2
 fi
 BACKUP_FILE="$1"
-CONTAINER="${2:-dodam-mysql}"
+# S15P11B209-732 — 대상이 Docker 컨테이너에서 k3s 워크로드로 바뀌었다.
+#   staging 복원 드릴을 하려면 두 번째 인자로 다른 워크로드를 넘긴다.
+WORKLOAD="${2:-statefulset/mysql}"
+NAMESPACE="${NAMESPACE:-dodam}"
+KUBECTL="${KUBECTL:-/usr/local/bin/kubectl}"
+export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 
 # ── 사전 검증 ────────────────────────────────────────────────────────────────
 # 1) root 확인 — 패스프레이즈(root 600)·백업 파일(root 600)을 읽어야 하므로
@@ -71,21 +76,31 @@ if [[ ${DRY_RUN} -eq 1 ]]; then
   fi
 fi
 
-# ── 실제 복원 경로: 컨테이너 확인 → 사용자 확인 → 복원 ─────────────────────
-# 4) 컨테이너 기동 확인
-if ! docker inspect -f '{{.State.Running}}' "${CONTAINER}" 2>/dev/null | grep -q true; then
-  echo "[mysql-restore] FAIL: 컨테이너 ${CONTAINER} 가 실행 중이 아닙니다" >&2
+# ── 실제 복원 경로: 파드 준비 확인 → 사용자 확인 → 복원 ────────────────────
+# 4) 클러스터 접근 → 대상 워크로드 준비 확인
+#    접근성을 먼저 본다 — 리소스 조회부터 하면 kubeconfig 문제가 "대상이 없다"로 잘못 보인다.
+if [[ ! -x "${KUBECTL}" ]]; then
+  echo "[mysql-restore] FAIL: kubectl 을 실행할 수 없습니다: ${KUBECTL}" >&2
+  exit 5
+fi
+if ! "${KUBECTL}" get --raw /version >/dev/null 2>&1; then
+  echo "[mysql-restore] FAIL: k3s API 에 접근할 수 없습니다 (KUBECONFIG=${KUBECONFIG})" >&2
+  exit 5
+fi
+READY="$("${KUBECTL}" -n "${NAMESPACE}" get "${WORKLOAD}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
+if [[ "${READY:-0}" -lt 1 ]]; then
+  echo "[mysql-restore] FAIL: ${NAMESPACE}/${WORKLOAD} 에 준비된 파드가 없습니다 (readyReplicas=${READY:-0})" >&2
   exit 5
 fi
 
-# 5) 확인 프롬프트 — 컨테이너명을 그대로 입력해야만 진행
+# 5) 확인 프롬프트 — 대상 이름을 그대로 입력해야만 진행
 # reason: 복원은 되돌릴 수 없는 덮어쓰기다. y/n 한 글자보다 "대상 이름을 직접 타이핑"이
 #         오타·습관성 엔터로 인한 사고를 막는 데 훨씬 안전하다 (대상 오인 방지 겸용).
-echo "⚠️  ${CONTAINER} 의 DB를 아래 백업으로 덮어씁니다. 이후 데이터는 사라집니다."
+echo "⚠️  ${NAMESPACE}/${WORKLOAD} 의 DB를 아래 백업으로 덮어씁니다. 이후 데이터는 사라집니다."
 echo "    백업 파일: ${BACKUP_FILE}"
-printf '정말 복원하려면 컨테이너명(%s)을 입력하세요: ' "${CONTAINER}"
+printf '정말 복원하려면 워크로드명(%s)을 입력하세요: ' "${WORKLOAD}"
 read -r CONFIRM
-if [[ "${CONFIRM}" != "${CONTAINER}" ]]; then
+if [[ "${CONFIRM}" != "${WORKLOAD}" ]]; then
   echo "[mysql-restore] 취소됨 (입력 불일치)"
   exit 2
 fi
@@ -95,9 +110,13 @@ fi
 #         DB명을 지정하지 않고 mysql 클라이언트에 그대로 흘려보낸다.
 #         MYSQL_PWD는 컨테이너 안 env 재사용 — 비밀번호가 스크립트·프로세스 목록에 안 남음.
 SECONDS=0
+# ★ -i 는 반드시 있어야 한다. 여기서는 덤프를 컨테이너 stdin 으로 "밀어넣는다".
+#   백업 쪽(kubectl exec)은 받아오기만 해서 -i 가 필요 없지만, 복원은 반대 방향이다.
+#   빠뜨리면 stdin 이 전달되지 않아 아무것도 복원하지 않고 조용히 성공한다.
+#   -t 는 절대 붙이지 않는다 — TTY 가 개행을 CRLF 로 바꿔 SQL 스트림을 망가뜨린다.
 openssl enc -d -aes-256-cbc -pbkdf2 -md sha256 -iter 200000 -pass "file:${PASS_FILE}" -in "${BACKUP_FILE}" \
   | gunzip \
-  | docker exec -i "${CONTAINER}" sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot'
+  | "${KUBECTL}" -n "${NAMESPACE}" exec -i "${WORKLOAD}" -- sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysql -uroot'
 
-echo "[mysql-restore] OK container=${CONTAINER} file=${BACKUP_FILE} elapsed=${SECONDS}s"
-echo "  후속 확인 제안: docker exec ${CONTAINER} sh -c 'MYSQL_PWD=\"\$MYSQL_ROOT_PASSWORD\" mysql -uroot -e \"SHOW TABLES IN b209;\"'"
+echo "[mysql-restore] OK workload=${NAMESPACE}/${WORKLOAD} file=${BACKUP_FILE} elapsed=${SECONDS}s"
+echo "  후속 확인 제안: ${KUBECTL} -n ${NAMESPACE} exec ${WORKLOAD} -- sh -c 'MYSQL_PWD=\"\$MYSQL_ROOT_PASSWORD\" mysql -uroot -e \"SHOW TABLES IN b209;\"'"

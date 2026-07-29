@@ -20,15 +20,24 @@
 # ============================================================================
 set -euo pipefail
 
-MINIO_CONTAINER="dodam-minio"
+# S15P11B209-732 — 대상이 Docker 컨테이너에서 k3s 워크로드로 바뀌었다.
+#   MinIO Service 는 ClusterIP 전용이라 호스트에서 직접 못 닿는다.
+#   복원이 도는 동안만 port-forward 로 루프백에 붙였다가 닫는다(minio-backup.sh 와 동일 방식).
+NAMESPACE="dodam"
+WORKLOAD="statefulset/minio"
+SERVICE="svc/minio"
 MC_IMAGE="minio/mc:RELEASE.2025-04-16T18-13-26Z"
-NET="dodam_dodam-net"                       # compose 프로젝트(dodam)_네트워크(dodam-net) — 접두 필수
 BUCKET="dodam"
 PASS_FILE="/etc/dodam/backup-passphrase"    # 백업 때와 동일한 패스프레이즈 (root 600)
+KUBECTL="${KUBECTL:-/usr/local/bin/kubectl}"
+export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+PF_PORT="${PF_PORT:-19001}"                 # 백업(19000)과 다른 포트 — 동시 실행 시 충돌 방지
+PF_PID=""
 STAGE=""; TMP_ENV=""
 
 cleanup() {
   local code=$?
+  [[ -n "${PF_PID}"  ]] && kill "${PF_PID}"    2>/dev/null || true
   [[ -n "${STAGE}"   ]] && rm -rf "${STAGE}"   2>/dev/null || true
   [[ -n "${TMP_ENV}" ]] && rm -f  "${TMP_ENV}" 2>/dev/null || true
   exit "${code}"
@@ -88,8 +97,17 @@ if [[ ${DRY_RUN} -eq 1 ]]; then
 fi
 
 # ── 실복원: 확인 프롬프트 → mc mirror(스테이지 → 버킷, 비파괴 overwrite) ──────
-if ! docker inspect -f '{{.State.Running}}' "${MINIO_CONTAINER}" 2>/dev/null | grep -q true; then
-  echo "[minio-restore] FAIL: 컨테이너 ${MINIO_CONTAINER} 가 실행 중이 아닙니다" >&2
+if [[ ! -x "${KUBECTL}" ]]; then
+  echo "[minio-restore] FAIL: kubectl 을 실행할 수 없습니다: ${KUBECTL}" >&2
+  exit 5
+fi
+if ! "${KUBECTL}" get --raw /version >/dev/null 2>&1; then
+  echo "[minio-restore] FAIL: k3s API 에 접근할 수 없습니다 (KUBECONFIG=${KUBECONFIG})" >&2
+  exit 5
+fi
+READY="$("${KUBECTL}" -n "${NAMESPACE}" get "${WORKLOAD}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
+if [[ "${READY:-0}" -lt 1 ]]; then
+  echo "[minio-restore] FAIL: ${NAMESPACE}/${WORKLOAD} 에 준비된 파드가 없습니다 (readyReplicas=${READY:-0})" >&2
   exit 5
 fi
 echo "⚠️  버킷 '${BUCKET}' 에 백업 파일을 되돌려 덮어씁니다(비파괴 — 신규 객체·tts-cache 유지)."
@@ -99,15 +117,30 @@ if [[ "${CONFIRM}" != "RESTORE" ]]; then
   exit 0
 fi
 
-MINIO_USER="$(docker exec "${MINIO_CONTAINER}" printenv MINIO_ROOT_USER)"
-MINIO_PASS="$(docker exec "${MINIO_CONTAINER}" printenv MINIO_ROOT_PASSWORD)"
+MINIO_USER="$("${KUBECTL}" -n "${NAMESPACE}" exec "${WORKLOAD}" -- printenv MINIO_ROOT_USER)"
+MINIO_PASS="$("${KUBECTL}" -n "${NAMESPACE}" exec "${WORKLOAD}" -- printenv MINIO_ROOT_PASSWORD)"
 TMP_ENV="$(mktemp)"; chmod 600 "${TMP_ENV}"
 { printf 'MINIO_ROOT_USER=%s\n' "${MINIO_USER}"
   printf 'MINIO_ROOT_PASSWORD=%s\n' "${MINIO_PASS}"; } > "${TMP_ENV}"
 
-if ! docker run --rm --network "${NET}" --env-file "${TMP_ENV}" \
+# 복원 동안만 MinIO 를 루프백에 노출한다.
+"${KUBECTL}" -n "${NAMESPACE}" port-forward "${SERVICE}" "${PF_PORT}:9000" >/dev/null 2>&1 &
+PF_PID=$!
+PF_OK=0
+for _ in $(seq 1 30); do
+  if curl -sf -m 2 "http://127.0.0.1:${PF_PORT}/minio/health/live" >/dev/null 2>&1; then PF_OK=1; break; fi
+  kill -0 "${PF_PID}" 2>/dev/null || break
+  sleep 1
+done
+if [[ "${PF_OK}" -ne 1 ]]; then
+  echo "[minio-restore] FAIL: port-forward 로 MinIO(127.0.0.1:${PF_PORT}) 에 닿지 못했습니다" >&2
+  exit 5
+fi
+
+# --network host: port-forward 가 호스트 루프백에 있으므로 mc 도 같은 네임스페이스를 써야 한다.
+if ! docker run --rm --network host --env-file "${TMP_ENV}" \
       -v "${STAGE}:/restore:ro" --entrypoint /bin/sh "${MC_IMAGE}" -c \
-      'mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 \
+      'mc alias set local http://127.0.0.1:'"${PF_PORT}"' "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 \
         && mc mirror --quiet --overwrite /restore local/'"${BUCKET}"; then
   echo "[minio-restore] FAIL: mc mirror 복원 실패" >&2
   exit 6

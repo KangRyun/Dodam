@@ -23,12 +23,25 @@
 set -euo pipefail
 
 # ── 설정 (값 변경 시 docs/인프라/MinIO백업-복원.md 도 함께 갱신) ──────────────
-MINIO_CONTAINER="dodam-minio"               # 대상 MinIO 컨테이너 (내부망 minio:9000)
+NAMESPACE="dodam"                           # k3s 네임스페이스
+WORKLOAD="statefulset/minio"                # 대상 MinIO 워크로드 (준비 확인·자격증명 조회용)
+SERVICE="svc/minio"                         # port-forward 대상 Service (ClusterIP:9000)
 MC_IMAGE="minio/mc:RELEASE.2025-04-16T18-13-26Z"  # mc CLI (latest 금지 — init 과 동일 태그)
-NET="dodam_dodam-net"                       # 실제 도커 네트워크 = compose 프로젝트(dodam)_네트워크(dodam-net).
-                                            #   compose 의 'name: dodam' 이 고정이라 이 이름은 안정적이다.
-                                            #   ⚠️ 'dodam-net'(접두 없음)은 존재하지 않는다 — docker run 이 실패한다.
 BUCKET="dodam"                              # 백업 대상 버킷
+
+# cron 의 PATH 는 최소(/usr/bin:/bin)라 /usr/local/bin 이 없다. 절대경로로 고정한다.
+KUBECTL="${KUBECTL:-/usr/local/bin/kubectl}"
+# root cron 에는 KUBECONFIG 가 없다. k3s 기본 경로를 명시한다(root 전용 600 파일).
+export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
+
+# ★ mc 를 어떻게 MinIO 에 닿게 하는가 (S15P11B209-732)
+#   MinIO Service 는 ClusterIP 전용이라 호스트에서 직접 못 닿는다(NodePort·hostPort 없음).
+#   그렇다고 노출을 상설로 열면 아동 이미지 저장소가 호스트 포트에 늘 떠 있게 된다.
+#   → 백업이 도는 동안만 port-forward 로 루프백에 붙였다가 끝나면 닫는다.
+#   mc 자체는 여전히 Docker 로 돌린다 — MinIO 이미지에는 mc 가 있지만 tar·gzip 이 없어
+#   파드 안에서 묶어 내보낼 수가 없다(07-29 MinIO 이관 때 확인된 제약).
+PF_PORT="${PF_PORT:-19000}"                 # 9000 대신 19000 — 상설 서비스 포트와 겹치지 않게
+PF_PID=""
 EXCLUDE="tts-cache/*"                       # 재생성 가능 파생물 → 백업 제외(설계 §1)
 BACKUP_DIR="/var/backups/dodam"             # 백업 저장 위치 (root 700, mysql 과 공용)
 PASS_FILE="/etc/dodam/backup-passphrase"    # 암호화 패스프레이즈 (root 600, mysql 과 공용)
@@ -45,6 +58,9 @@ SECONDS=0
 #         깨진 부분 백업(.part)이 정상으로 오인되면 복구 시나리오가 무너진다.
 cleanup() {
   local code=$?
+  # port-forward 는 백그라운드 프로세스라 스크립트가 어떻게 끝나든 반드시 죽인다.
+  #   남으면 다음 실행이 같은 포트를 못 잡고, 아동 이미지 저장소가 루프백에 계속 열려 있게 된다.
+  [[ -n "${PF_PID}" ]] && kill "${PF_PID}" 2>/dev/null || true
   [[ -n "${TMP_ENV}" ]] && rm -f "${TMP_ENV}" 2>/dev/null || true
   rm -rf "${STAGE}" 2>/dev/null || true
   rm -f "${OUT}.part" 2>/dev/null || true
@@ -84,9 +100,20 @@ if [[ "$(stat -c '%u %a' "${BACKUP_DIR}")" != "0 700" ]]; then
   exit 4
 fi
 
-# 4) minio 컨테이너 기동 확인 — 죽어 있으면 mirror 불가
-if ! docker inspect -f '{{.State.Running}}' "${MINIO_CONTAINER}" 2>/dev/null | grep -q true; then
-  echo "[minio-backup] FAIL: 컨테이너 ${MINIO_CONTAINER} 가 실행 중이 아닙니다" >&2
+# 4) 클러스터 접근 → MinIO 파드 준비 순으로 확인
+# ★ 순서가 중요하다. 리소스 조회부터 하면 kubeconfig·권한 문제가 "MinIO 가 없다"로
+#   잘못 보고된다 — 07-29 deployer kubeconfig 진단에서 실제로 겪은 오진.
+if [[ ! -x "${KUBECTL}" ]]; then
+  echo "[minio-backup] FAIL: kubectl 을 실행할 수 없습니다: ${KUBECTL}" >&2
+  exit 5
+fi
+if ! "${KUBECTL}" get --raw /version >/dev/null 2>&1; then
+  echo "[minio-backup] FAIL: k3s API 에 접근할 수 없습니다 (KUBECONFIG=${KUBECONFIG})" >&2
+  exit 5
+fi
+READY="$("${KUBECTL}" -n "${NAMESPACE}" get "${WORKLOAD}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
+if [[ "${READY:-0}" -lt 1 ]]; then
+  echo "[minio-backup] FAIL: ${NAMESPACE}/${WORKLOAD} 에 준비된 파드가 없습니다 (readyReplicas=${READY:-0})" >&2
   exit 5
 fi
 
@@ -95,8 +122,8 @@ umask 077   # 생성 파일 root 전용(600)
 
 # 자격증명은 실행 중 minio 컨테이너의 env(root 계정)에서 읽는다 — .env 파싱·평문 노출 회피.
 #   reason: mysql-backup.sh 가 컨테이너 안 $MYSQL_ROOT_PASSWORD 를 쓰는 것과 동일 원칙.
-MINIO_USER="$(docker exec "${MINIO_CONTAINER}" printenv MINIO_ROOT_USER)"
-MINIO_PASS="$(docker exec "${MINIO_CONTAINER}" printenv MINIO_ROOT_PASSWORD)"
+MINIO_USER="$("${KUBECTL}" -n "${NAMESPACE}" exec "${WORKLOAD}" -- printenv MINIO_ROOT_USER)"
+MINIO_PASS="$("${KUBECTL}" -n "${NAMESPACE}" exec "${WORKLOAD}" -- printenv MINIO_ROOT_PASSWORD)"
 
 # mc 컨테이너에 자격증명을 argv 아닌 env-file 로 전달(프로세스 목록 비노출). 파일은 600·즉시 삭제.
 #   alias set 은 URL 이 아닌 "분리 인자"로 넘겨 비밀번호 특수문자(@:/) 인코딩 문제를 원천 차단.
@@ -106,12 +133,34 @@ TMP_ENV="$(mktemp)"; chmod 600 "${TMP_ENV}"
 
 install -d -m 700 "${STAGE}"
 
+# ── MinIO 를 백업 동안만 루프백에 노출 ───────────────────────────────────────
+"${KUBECTL}" -n "${NAMESPACE}" port-forward "${SERVICE}" "${PF_PORT}:9000" >/dev/null 2>&1 &
+PF_PID=$!
+# ★ 프로세스가 떴다고 포트가 열린 게 아니다. 실제로 응답할 때까지 기다린다.
+#   "존재한다"와 "동작한다"를 따로 확인한다 — 이 저장소가 반복해서 데인 지점이다.
+PF_OK=0
+for _ in $(seq 1 30); do
+  if curl -sf -m 2 "http://127.0.0.1:${PF_PORT}/minio/health/live" >/dev/null 2>&1; then
+    PF_OK=1; break
+  fi
+  # 포워더가 이미 죽었으면 30초를 기다릴 이유가 없다(포트 충돌 등)
+  kill -0 "${PF_PID}" 2>/dev/null || break
+  sleep 1
+done
+if [[ "${PF_OK}" -ne 1 ]]; then
+  echo "[minio-backup] FAIL: port-forward 로 MinIO(127.0.0.1:${PF_PORT}) 에 닿지 못했습니다" >&2
+  exit 5
+fi
+
 # mc mirror: 버킷 dodam → 스테이지(빈 디렉토리). tts-cache 제외.
 #   ⚠️ 첫 실행 검증(리눅스서 미검증): --exclude 패턴("tts-cache/*")이 실제로 해당 프리픽스를
 #      건너뛰는지 · mc 이미지 태그 실존 여부. 최초 드릴에서 스테이지에 tts-cache 없음 확인할 것.
-if ! docker run --rm --network "${NET}" --env-file "${TMP_ENV}" \
+# --network host reason: port-forward 가 호스트 루프백에 붙어 있으므로 mc 컨테이너도
+#   같은 네트워크 네임스페이스를 써야 127.0.0.1 이 "호스트의 127.0.0.1"이 된다.
+#   기본 브리지 네트워크였다면 컨테이너의 127.0.0.1 은 자기 자신이라 닿지 않는다.
+if ! docker run --rm --network host --env-file "${TMP_ENV}" \
       -v "${STAGE}:/backup" --entrypoint /bin/sh "${MC_IMAGE}" -c \
-      'mc alias set local http://minio:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 \
+      'mc alias set local http://127.0.0.1:'"${PF_PORT}"' "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 \
         && mc mirror --quiet --overwrite local/'"${BUCKET}"' /backup --exclude "'"${EXCLUDE}"'"'; then
   echo "[minio-backup] FAIL bucket=${BUCKET} exit=6 elapsed=${SECONDS}s (mc mirror 실패)" >&2
   exit 6

@@ -5,23 +5,42 @@
 # ⚠️ 백업 파일 = 아동 민감정보(그림·대화·리포트 원본 데이터) — 복사·전송 금지.
 #    서버 밖으로 반출하지 않는다. 열람·복원은 Infra 담당만. (CLAUDE.md 9절 가드레일)
 #
-# 무엇을: dodam-mysql 컨테이너의 b209 DB를 mysqldump → gzip → AES-256 암호화하여
+# 무엇을: k3s 의 mysql StatefulSet 에서 b209 DB를 mysqldump → gzip → AES-256 암호화하여
 #         /var/backups/dodam/ 에 저장하고, 14일 초과분을 삭제한다.
 # 왜:     k3s 컷오버(Day 6) 안전망 + 가드레일 9절(데이터 수명주기·복구력) 대응.
 #         8.0→8.4 업그레이드가 비가역이었듯, 유일한 롤백 수단은 dump 복원뿐.
 #
+# ⚠️ 2026-07-30 (S15P11B209-732) — 대상을 Docker 컨테이너에서 k3s 파드로 옮겼다.
+#    360 컷오버로 MySQL 이 k3s 로 넘어갔는데 이 스크립트는 `docker exec dodam-mysql` 을
+#    보고 있었다. 옛 compose 컨테이너가 07-29 23:55 에 정지하면서 04:00 실행부터
+#    exit 5 로 실패할 상태였다.
+#
+#    ★ dodam-mysql 컨테이너를 "다시 켜서" 고치면 안 된다. 그 컨테이너에는 컷오버
+#      이전 데이터가 들어 있어, 암호화되고 크기도 정상이고 보관 정책도 도는데
+#      내용만 틀린 백업이 매일 쌓인다. 복원해야 하는 날에야 안다.
+#      백업 대상은 "지금 서비스가 쓰는 데이터"여야 한다.
+#
 # 실행 주체: root (cron: 0 4 * * * — KST 새벽 4시, docs/인프라/DB백업-복원.md 참조)
 # reason: 패스프레이즈 파일이 root:root 600이라 root만 읽을 수 있게 하여
 #         일반 계정 탈취 시에도 백업 복호화가 불가능하도록 함.
+#         root 는 /etc/rancher/k3s/k3s.yaml 도 읽을 수 있어 kubectl 접근에 추가 설정이 없다.
 #
 # 종료 코드 (cron 메일/후속 알림 연동 대비 — 실패 지점을 코드로 구분):
 #   0 성공 / 2 root 아님 / 3 패스프레이즈 파일 문제 / 4 백업 디렉토리 문제
-#   5 컨테이너 미기동 / 6 덤프·암호화 파이프라인 실패
+#   5 MySQL 파드 미준비(또는 클러스터 접근 불가) / 6 덤프·암호화 파이프라인 실패
 # ============================================================================
 set -euo pipefail
 
 # ── 설정 (값 변경 시 docs/인프라/DB백업-복원.md 도 함께 갱신) ────────────────
-CONTAINER="dodam-mysql"                     # 대상 MySQL 컨테이너
+NAMESPACE="dodam"                           # k3s 네임스페이스
+WORKLOAD="statefulset/mysql"                # 대상 MySQL 워크로드 (파드명 mysql-0 은 직접 쓰지 않는다 —
+                                            #   파드가 재생성돼도 이름이 안 바뀌지만, 워크로드로 지정하면
+                                            #   kubectl 이 알아서 준비된 파드를 고른다)
+# cron 의 PATH 는 최소(/usr/bin:/bin)라 /usr/local/bin 이 없다. 절대경로로 고정한다.
+#   이걸 빠뜨리면 "kubectl: command not found" 로 exit 127 이 나고, 종료코드 표(2~6)와 어긋난다.
+KUBECTL="${KUBECTL:-/usr/local/bin/kubectl}"
+# root cron 에는 KUBECONFIG 가 없다. k3s 기본 경로를 명시한다(root 만 읽을 수 있는 600 파일).
+export KUBECONFIG="${KUBECONFIG:-/etc/rancher/k3s/k3s.yaml}"
 DB_NAME="b209"                              # 백업 대상 DB
 BACKUP_DIR="/var/backups/dodam"             # 백업 저장 위치 (root 700)
 PASS_FILE="/etc/dodam/backup-passphrase"    # 암호화 패스프레이즈 (root 600, git 외부)
@@ -81,9 +100,23 @@ if [[ "${DIR_STAT}" != "0 700" ]]; then
   exit 4
 fi
 
-# 4) 컨테이너 기동 확인 — 죽어 있으면 덤프 자체가 불가능하므로 먼저 명확히 알린다
-if ! docker inspect -f '{{.State.Running}}' "${CONTAINER}" 2>/dev/null | grep -q true; then
-  echo "[mysql-backup] FAIL: 컨테이너 ${CONTAINER} 가 실행 중이 아닙니다" >&2
+# 4) 클러스터 접근 → MySQL 파드 준비 순으로 확인
+# ★ 순서가 중요하다. "접근 가능한가"를 먼저 본다.
+#   리소스 조회부터 하면 kubeconfig·권한 문제가 "MySQL 이 없다"로 잘못 보고된다
+#   — 07-29 deployer kubeconfig 진단에서 실제로 겪은 오진(권한 거부를 SA 부재로 읽었다).
+if [[ ! -x "${KUBECTL}" ]]; then
+  echo "[mysql-backup] FAIL: kubectl 을 실행할 수 없습니다: ${KUBECTL}" >&2
+  exit 5
+fi
+if ! "${KUBECTL}" get --raw /version >/dev/null 2>&1; then
+  echo "[mysql-backup] FAIL: k3s API 에 접근할 수 없습니다 (KUBECONFIG=${KUBECONFIG})" >&2
+  exit 5
+fi
+# readyReplicas 로 판정한다 — 파드가 Running 이어도 Ready 가 아니면 mysqld 는 아직
+#   연결을 받지 않는다. "존재한다"와 "동작한다"는 다르다(이 저장소가 반복해 데인 지점).
+READY="$("${KUBECTL}" -n "${NAMESPACE}" get "${WORKLOAD}" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
+if [[ "${READY:-0}" -lt 1 ]]; then
+  echo "[mysql-backup] FAIL: ${NAMESPACE}/${WORKLOAD} 에 준비된 파드가 없습니다 (readyReplicas=${READY:-0})" >&2
   exit 5
 fi
 
@@ -104,7 +137,12 @@ umask 077   # reason: 생성되는 백업 파일을 root 전용(600)으로 — �
 #   조건문 안에서는 ERR trap·set -e가 발동하지 않으므로 정리·로그·정규화(6)를 직접 수행.
 # openssl -md sha256 -iter 200000 reason: 버전 기본값 의존 금지 — 몇 년 뒤 openssl이
 #   기본 해시/반복수를 바꿔도 복원(restore.sh의 동일 파라미터)이 깨지지 않게 명시 고정(R-353-2).
-if ! docker exec "${CONTAINER}" sh -c \
+# kubectl exec reason:
+#   -t(TTY)를 절대 붙이지 않는다 — TTY 를 붙이면 개행이 CRLF 로 변환돼 gzip 스트림이 깨진다.
+#     화면에 찍는 명령이 아니라 바이너리를 파이프로 넘기는 명령이다.
+#   -i(stdin)도 필요 없다 — 컨테이너로 넣어줄 입력이 없고, 받아오기만 한다.
+#   MYSQL_ROOT_PASSWORD 는 파드 env 에 이미 있다(Secret 주입). 호스트로 꺼내지 않는다.
+if ! "${KUBECTL}" -n "${NAMESPACE}" exec "${WORKLOAD}" -- sh -c \
   'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" exec mysqldump -uroot --single-transaction --routines --triggers --databases '"${DB_NAME}" \
   | gzip \
   | openssl enc -aes-256-cbc -pbkdf2 -md sha256 -iter 200000 -pass "file:${PASS_FILE}" -out "${OUT}.part"; then

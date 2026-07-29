@@ -1,6 +1,7 @@
 # DB 백업·복원 운영 규정 (S15P11B209-353)
 
-> 대상: `dodam-mysql` 컨테이너(MySQL 8.4.10) · DB `b209` · EC2 `i15b209.p.ssafy.io`
+> 대상: k3s `dodam/statefulset/mysql`(MySQL 8.4.10) · DB `b209` · EC2 `i15b209.p.ssafy.io`
+> ⚠️ 2026-07-30(S15P11B209-732)부터 대상이 Docker 컨테이너가 아니라 k3s 워크로드다.
 > 스크립트: `infra/scripts/mysql-backup.sh` · `infra/scripts/mysql-restore.sh`
 > ⚠️ **백업 파일 = 아동 민감정보. 복사·전송 금지.** (CLAUDE.md 9절 가드레일)
 
@@ -86,13 +87,13 @@ sudo ls -lh /var/backups/dodam/
 # 2) (권장) 복원 직전, 현재 상태도 한 번 백업 — 복원 자체를 되돌릴 수단 확보
 sudo /home/kr/S15P11B209/infra/scripts/mysql-backup.sh
 
-# 3) 복원 — 확인 프롬프트에서 컨테이너명(dodam-mysql)을 직접 입력해야 진행됨
+# 3) 복원 — 확인 프롬프트에서 워크로드명(statefulset/mysql)을 직접 입력해야 진행됨
 sudo /home/kr/S15P11B209/infra/scripts/mysql-restore.sh /var/backups/dodam/b209-<날짜>.sql.gz.enc
-# 다른 컨테이너(스테이징 등)로 복원하려면 두 번째 인자로 컨테이너명 지정:
-# sudo .../mysql-restore.sh <파일> dodam-mysql-staging
+# 다른 대상(스테이징 등)으로 복원하려면 두 번째 인자로 워크로드 지정:
+# sudo .../mysql-restore.sh <파일> statefulset/mysql-staging
 
 # 4) 복원 확인
-docker exec dodam-mysql sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -e "SHOW TABLES IN b209;"'
+/usr/local/bin/kubectl -n dodam exec statefulset/mysql -- sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -e "SHOW TABLES IN b209;"'
 # + backend 헬스체크·로그인 등 스모크 테스트
 ```
 
