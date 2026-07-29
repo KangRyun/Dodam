@@ -9,6 +9,8 @@ import '../../../drawing/application/drawing_session_start_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
 
+enum _DrawingStartChoice { resume, startNew, delete }
+
 class ChildModeHomeScreen extends StatefulWidget {
   const ChildModeHomeScreen({
     required this.child,
@@ -28,13 +30,157 @@ class ChildModeHomeScreen extends StatefulWidget {
 class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   bool _isStartingDrawing = false;
 
+  Future<_DrawingStartChoice?> _showDrawingStartDialog() {
+    return showDialog<_DrawingStartChoice>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(32, 30, 32, 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 88,
+                  height: 88,
+                  decoration: const BoxDecoration(
+                    color: AppColors.childCanvas,
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: const Text('✏️', style: TextStyle(fontSize: 42)),
+                ),
+                const SizedBox(height: 22),
+                Text(
+                  '그리던 그림이 있어요',
+                  style: Theme.of(dialogContext).textTheme.headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  '그림을 그리다 멈췄어요.\n이어서 그릴까요?',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(dialogContext).textTheme.bodyLarge?.copyWith(
+                    color: AppColors.inkMuted,
+                    height: 1.45,
+                  ),
+                ),
+                const SizedBox(height: 28),
+                SizedBox(
+                  width: double.infinity,
+                  height: 58,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(
+                      dialogContext,
+                    ).pop(_DrawingStartChoice.resume),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.leaf,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: const Text(
+                      '이어 그리기',
+                      style: TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 58,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(
+                      dialogContext,
+                    ).pop(_DrawingStartChoice.startNew),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.ink,
+                      side: const BorderSide(color: AppColors.outline),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: const Text(
+                      '새로 그리기',
+                      style: TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 58,
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.of(
+                      dialogContext,
+                    ).pop(_DrawingStartChoice.delete),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.error,
+                      side: const BorderSide(color: AppColors.errorSoft),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: const Text(
+                      '삭제하기',
+                      style: TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _startDrawing() async {
     if (_isStartingDrawing) return;
     setState(() => _isStartingDrawing = true);
     try {
-      final resolution = await DrawingSessionStartController(
+      final controller = DrawingSessionStartController(
         repository: widget.drawingRepository,
-      ).resolveSession(childId: widget.child.childId);
+      );
+      final activeSession = await controller.findActiveSession(
+        childId: widget.child.childId,
+      );
+      DrawingSessionResolution resolution;
+      if (activeSession != null && controller.hasSavedDrawing(activeSession)) {
+        if (!mounted) return;
+        final choice = await _showDrawingStartDialog();
+        if (choice == null || !mounted) return;
+        if (choice == _DrawingStartChoice.delete) {
+          await controller.discardActiveSession(activeSession.drawingSessionId);
+          if (mounted) {
+            showAppMessage(context, message: '그리던 그림을 삭제했어요.');
+          }
+          return;
+        }
+        resolution = choice == _DrawingStartChoice.resume
+            ? controller.resume(activeSession)
+            : await controller.replaceActiveSession(
+                childId: widget.child.childId,
+                activeSessionId: activeSession.drawingSessionId,
+              );
+      } else if (activeSession != null) {
+        resolution = controller.resume(activeSession);
+      } else {
+        resolution = await controller.createNewSession(
+          childId: widget.child.childId,
+        );
+      }
       if (!mounted) return;
       await AppNavigation.pushNamed(
         context,

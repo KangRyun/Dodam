@@ -30,17 +30,51 @@ final class DrawingSessionStartController {
   final DrawingRepository repository;
   final DrawingSessionStartClock _now;
 
+  Future<ActiveDrawingSessionDto?> findActiveSession({required int childId}) =>
+      repository.getActiveSession(childId);
+
+  /// 임시 저장본이나 그림 완료 결과가 있으면 사용자에게 시작 방식을 묻는다.
+  bool hasSavedDrawing(ActiveDrawingSessionDto session) =>
+      session.latestDraft != null || session.currentStage != 'DRAWING';
+
+  DrawingSessionResolution resume(ActiveDrawingSessionDto session) =>
+      DrawingSessionResolution(
+        sessionId: session.drawingSessionId,
+        currentStage: session.currentStage,
+      );
+
   Future<DrawingSessionResolution> resolveSession({
     required int childId,
   }) async {
-    final activeSession = await repository.getActiveSession(childId);
+    final activeSession = await findActiveSession(childId: childId);
     if (activeSession != null) {
-      return DrawingSessionResolution(
-        sessionId: activeSession.drawingSessionId,
-        currentStage: activeSession.currentStage,
-      );
+      return resume(activeSession);
     }
 
+    return createNewSession(childId: childId);
+  }
+
+  /// 기존 활동을 폐기한 뒤 새 그림 세션을 만든다.
+  Future<DrawingSessionResolution> replaceActiveSession({
+    required int childId,
+    required int activeSessionId,
+  }) async {
+    await discardActiveSession(activeSessionId);
+    return createNewSession(childId: childId);
+  }
+
+  /// 임시 그림만 삭제하고 현재 화면에 머문다.
+  Future<void> discardActiveSession(int activeSessionId) async {
+    if (repository is! DrawingSessionDiscarder) {
+      throw UnsupportedError('Drawing session deletion is unavailable.');
+    }
+    final discarder = repository as DrawingSessionDiscarder;
+    await discarder.deleteSession(activeSessionId);
+  }
+
+  Future<DrawingSessionResolution> createNewSession({
+    required int childId,
+  }) async {
     final drawingTypes = await repository.getDrawingTypes(childId: childId);
     if (drawingTypes.content.isEmpty) {
       throw StateError('No selectable drawing type is available.');

@@ -53,3 +53,8 @@ abstract interface class DrawingRepository {
     ObjectDetectionRequestDto request,
   );
 }
+
+/// 진행 중인 활동을 폐기하고 새 활동을 시작할 때 사용하는 선택 계약.
+abstract interface class DrawingSessionDiscarder {
+  Future<void> deleteSession(int sessionId);
+}
