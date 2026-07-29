@@ -19,6 +19,8 @@ import crisis_guidance
 import llm_client
 import question_safety
 import question_service
+from pydantic import ValidationError
+
 from internal_contracts import (
     BoundingBox,
     DetectedObject,
@@ -480,6 +482,89 @@ class CrisisSafeResponseTest(unittest.TestCase):
         self.assertIn(crisis_guidance.SEVERITY_HIGH, joined)
         # 안내 신호에도 아이 발화 원문은 남기지 않는다.
         self.assertNotIn("죽고 싶어", joined)
+
+
+class SubjectContextContractTest(unittest.TestCase):
+    """질문 요청 계약의 HTP 주제 맥락 필드 (S15P11B209-712).
+
+    activityType·drawingSubject·askedObjectCodes를 수용하고, 활동 유형이 주어지면
+    분석 경로와 같은 정합성 규칙을 적용한다. 실제 프롬프트 반영은 후속 713 몫이다.
+    """
+
+    def test_defaults_when_omitted(self):
+        # 롤아웃 안전: 구 BE가 새 필드를 안 보내도 요청이 깨지지 않고 기본값을 쓴다.
+        req = _request()
+        self.assertIsNone(req.activity_type)
+        self.assertIsNone(req.drawing_subject)
+        self.assertEqual(req.asked_object_codes, [])
+
+    def test_accepts_camelcase_aliases_from_be(self):
+        # BE(Jackson) camelCase JSON을 그대로 수용해야 한다.
+        req = QuestionRequest.model_validate(
+            {
+                "conversationId": 1,
+                "drawingSessionId": 2,
+                "childAge": 6,
+                "difficulty": "PRESCHOOL",
+                "allowedResponseModes": ["VOICE"],
+                "currentQuestionCount": 0,
+                "maxQuestionCount": 5,
+                "safetyRuleVersion": "safety-2026-07",
+                "activityType": "HTP",
+                "drawingSubject": "TREE",
+                "askedObjectCodes": ["TREE_TRUNK", "TREE_CROWN"],
+            }
+        )
+        self.assertEqual(req.activity_type, "HTP")
+        self.assertEqual(req.drawing_subject, "TREE")
+        self.assertEqual(req.asked_object_codes, ["TREE_TRUNK", "TREE_CROWN"])
+
+    def test_htp_with_subject_is_valid(self):
+        req = _request(activity_type="HTP", drawing_subject="HOUSE")
+        self.assertEqual(req.drawing_subject, "HOUSE")
+
+    def test_htp_without_subject_is_rejected(self):
+        # 분석 경로(AnalysisRequest)와 같은 규칙 — HTP인데 주제가 없으면 계약 위반.
+        with self.assertRaises(ValidationError):
+            _request(activity_type="HTP")
+
+    def test_art_diary_with_subject_is_rejected(self):
+        with self.assertRaises(ValidationError):
+            _request(activity_type="ART_DIARY", drawing_subject="HOUSE")
+
+    def test_art_diary_without_subject_is_valid(self):
+        req = _request(activity_type="ART_DIARY")
+        self.assertIsNone(req.drawing_subject)
+
+    def test_absent_activity_type_skips_consistency_check(self):
+        # activity_type이 없으면(구 BE) 주제 유무를 검사하지 않는다 — 롤아웃 호환.
+        req = _request(drawing_subject=None)
+        self.assertIsNone(req.activity_type)
+
+    def test_unknown_subject_is_rejected(self):
+        with self.assertRaises(ValidationError):
+            _request(activity_type="HTP", drawing_subject="CASTLE")
+
+
+class SubjectContextLogTest(unittest.TestCase):
+    """진단 로그에 activityType·drawingSubject가 실리는지 (S15P11B209-712)."""
+
+    def _logs_for(self, **overrides):
+        client = _mock_client({}, reply="이 나무는 어떤 나무야?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            with self.assertLogs("question_service", level="INFO") as logs:
+                question_service.generate(_request(**overrides), "req-subj")
+        return "\n".join(logs.output)
+
+    def test_logs_activity_type_and_subject_when_present(self):
+        joined = self._logs_for(activity_type="HTP", drawing_subject="TREE")
+        self.assertIn("activityType=HTP", joined)
+        self.assertIn("drawingSubject=TREE", joined)
+
+    def test_logs_dash_when_subject_absent(self):
+        joined = self._logs_for()
+        self.assertIn("activityType=-", joined)
+        self.assertIn("drawingSubject=-", joined)
 
 
 if __name__ == "__main__":
