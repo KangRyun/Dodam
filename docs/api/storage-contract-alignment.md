@@ -59,6 +59,19 @@
 
 픽셀 검증 부재의 실제 영향: 1×1 PNG나 20000×20000 이미지가 업로드를 통과하며, `drawing_assets.width_px/height_px`에 그대로 기록된다. 객체 탐지·분석이 이 값을 좌표 기준으로 사용하므로(§10.6) 분석 입력이 오염된다.
 
+### 2-1. 저장소 모드에 따라 갈라져야 하는 경계 전수 점검 (2026-07-29 추가)
+
+이 문서의 최초 점검은 `ImageStorage`·`AudioStorage`만 봤고 **별 인터페이스로 존재하는 읽기 경계를 놓쳤다.** 그 결과 `STORAGE_MODE=s3`에서 STT가 전부 실패했다(S15P11B209-723 — 업로드는 201인데 STT만 즉시 FAILED, AI 서버에 요청 0건 도달).
+
+| 경계 | 모드 분기 | 상태 |
+| --- | --- | --- |
+| `ImageStorage` | `ImageStorageConfig`(local) / `S3StorageConfig`(s3) | ✅ 정상 |
+| `AudioStorage` | `AudioStorageConfig`(local) / `S3StorageConfig`(s3) | ✅ 정상 |
+| `AudioStorage("ttsAudioStorage")` | s3 전용 프리픽스 분리 | ✅ 정상(S15P11B209-668) |
+| **`StoredAudioReader`** (내부 STT 전용 읽기) | **분기 없음 — `@Component`로 로컬 구현만 등록** | ❌ **723에서 수정** |
+
+**점검 규칙**: 저장 위치를 아는 경계를 새로 만들 때는 `@Component`로 무조건 등록하지 않는다. 모드별 Config에 등록하거나 `@ConditionalOnProperty(prefix = "app.storage", name = "mode", ...)`를 붙인다. 무조건 등록은 s3 모드에서 **조용히 로컬을 읽어** 쓰기는 성공하고 읽기만 실패하는, 원인 추적이 어려운 형태로 나타난다.
+
 ## 3. 파일 조회 계약 (as-built · 명세 §3.8 대체)
 
 ### 3.1 엔드포인트
