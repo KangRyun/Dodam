@@ -182,6 +182,57 @@ void main() {
     );
     expect(repository.createCalls, 0);
   });
+
+  test('활성 세션이 없으면 홈에서 지정한 그림 유형으로 세션을 만든다', () async {
+    final repository = _SessionStartRepository(activeSessions: [null]);
+    final controller = DrawingSessionStartController(
+      repository: repository,
+      now: () => DateTime.utc(2026, 7, 26, 1),
+    );
+
+    final resolution = await controller.resolveSession(
+      childId: 3,
+      drawingTypeId: 12,
+    );
+
+    expect(resolution.sessionId, 82);
+    expect(repository.createRequest?.drawingTypeId, 12);
+  });
+
+  test('지정한 그림 유형이 목록에 없으면 첫 번째 유형으로 되돌아간다', () async {
+    final repository = _SessionStartRepository(activeSessions: [null]);
+    final controller = DrawingSessionStartController(
+      repository: repository,
+      now: () => DateTime.utc(2026, 7, 26, 1),
+    );
+
+    final resolution = await controller.resolveSession(
+      childId: 3,
+      drawingTypeId: 999,
+    );
+
+    expect(resolution.sessionId, 82);
+    expect(repository.createRequest?.drawingTypeId, 11);
+  });
+
+  test('지정한 그림 유형이 있어도 활성 세션을 먼저 재개한다', () async {
+    final repository = _SessionStartRepository(
+      activeSessions: [_activeSession(81)],
+    );
+    final controller = DrawingSessionStartController(
+      repository: repository,
+      now: () => DateTime.utc(2026, 7, 26, 1),
+    );
+
+    final resolution = await controller.resolveSession(
+      childId: 3,
+      drawingTypeId: 12,
+    );
+
+    expect(resolution.sessionId, 81);
+    expect(repository.createCalls, 0);
+    expect(repository.getDrawingTypesCalls, 0);
+  });
 }
 
 final _activeSessionExistsFailure = ApiResponseFailure(

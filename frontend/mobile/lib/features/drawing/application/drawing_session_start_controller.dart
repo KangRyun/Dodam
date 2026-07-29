@@ -48,13 +48,14 @@ final class DrawingSessionStartController {
 
   Future<DrawingSessionResolution> resolveSession({
     required int childId,
+    int? drawingTypeId,
   }) async {
     final activeSession = await findActiveSession(childId: childId);
     if (activeSession != null) {
       return resume(activeSession);
     }
 
-    return createNewSession(childId: childId);
+    return createNewSession(childId: childId, drawingTypeId: drawingTypeId);
   }
 
   /// 보호자가 선택한 일반 활동의 그림 세션을 생성한다.
@@ -123,6 +124,7 @@ final class DrawingSessionStartController {
 
   Future<DrawingSessionResolution> createNewSession({
     required int childId,
+    int? drawingTypeId,
   }) async {
     final drawingTypes = await repository.getDrawingTypes(childId: childId);
     if (drawingTypes.content.isEmpty) {
@@ -130,11 +132,19 @@ final class DrawingSessionStartController {
     }
     final sortedTypes = [...drawingTypes.content]
       ..sort((left, right) => left.displayOrder.compareTo(right.displayOrder));
+    // 홈 카드에서 고른 활동 유형을 우선 사용하고, 지정되지 않았거나 더 이상
+    // 선택 가능한 목록에 없으면 첫 번째 유형으로 되돌아간다.
+    final resolvedTypeId = sortedTypes
+        .firstWhere(
+          (type) => type.drawingTypeId == drawingTypeId,
+          orElse: () => sortedTypes.first,
+        )
+        .drawingTypeId;
 
     try {
       return await createSelectedSession(
         childId: childId,
-        drawingTypeId: sortedTypes.first.drawingTypeId,
+        drawingTypeId: resolvedTypeId,
       );
     } on ApiResponseFailure catch (failure) {
       if (failure.error?.code != 'DRAWING_409_001') rethrow;
