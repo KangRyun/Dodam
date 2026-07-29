@@ -39,8 +39,9 @@ spec:
             - { name: sys,    mountPath: /host/sys,  readOnly: true }
             - { name: rootfs, mountPath: /rootfs,    readOnly: true }
           resources:
-            requests: { memory: 32Mi, cpu: 20m }
-            limits:   { memory: 64Mi, cpu: 200m }   # compose mem_limit 64m 과 동일
+            # 실측 16MiB(compose 판). 상한 64Mi 는 실측의 4배로 충분하다.
+            requests: { memory: 24Mi, cpu: 20m }
+            limits:   { memory: 64Mi, cpu: 200m }
       volumes:
         - { name: proc,   hostPath: { path: /proc } }
         - { name: sys,    hostPath: { path: /sys } }
@@ -129,8 +130,9 @@ spec:
             periodSeconds: 20
             failureThreshold: 5
           resources:
-            requests: { memory: 48Mi, cpu: 20m }
-            limits:   { memory: 128Mi, cpu: 200m }
+            # 오브젝트 수가 적은 단일 노드 클러스터다(파드 10개 안팎). 통상 40MiB 수준.
+            requests: { memory: 32Mi, cpu: 20m }
+            limits:   { memory: 96Mi, cpu: 200m }
 ---
 apiVersion: v1
 kind: Service

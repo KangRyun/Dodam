@@ -226,8 +226,17 @@ spec:
             periodSeconds: 20
             failureThreshold: 5
           resources:
-            requests: { memory: 256Mi, cpu: 100m }
-            limits:   { memory: 700Mi, cpu: 1000m }   # compose mem_limit 700m 과 동일
+            # 실측 기반(2026-07-29). compose 판 prometheus 가 같은 이미지·같은 job 구성으로
+            #   **58MiB** 를 쓰고 있었다. compose 의 700m 을 그대로 베끼면 상한을 예약처럼
+            #   다루는 실수가 된다(preflight 4096→2048 정정과 같은 건).
+            # request 128Mi : 실측의 2배 남짓. 스케줄링에 잡히는 값이라 과하게 잡지 않는다.
+            # limit 768Mi   : ⚠️ 여기만 여유를 크게 뒀다. k8s 로 오면서 스크레이프 대상에
+            #   kubelet cAdvisor 와 kube-state-metrics 가 붙는데, 둘 다 시계열 수가 많아
+            #   compose 판보다 메모리가 몇 배로 뛸 수 있다. 실제 증가폭을 관측하기 전까지는
+            #   조여서 OOMKill 을 만드는 것보다 넉넉히 두고 지켜보는 쪽이 낫다.
+            #   관측 후 재조정할 것 — ContainerMemoryNearLimit 이 90% 구간에서 먼저 알린다.
+            requests: { memory: 128Mi, cpu: 100m }
+            limits:   { memory: 768Mi, cpu: 1000m }
       volumes:
         - { name: config, configMap: { name: prometheus-config } }
         - { name: rules,  configMap: { name: prometheus-rules } }
