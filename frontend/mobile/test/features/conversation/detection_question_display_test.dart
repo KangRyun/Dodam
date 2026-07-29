@@ -41,6 +41,48 @@ void main() {
     expect(repository.requestedAnalysisIds, [7001]);
     expect(find.text('이 집에는 누가 살고 있어?'), findsOneWidget);
   });
+
+  testWidgets('HTP 그리기 중 객체 탐지 성공은 질문을 시작하지 않는다', (tester) async {
+    final repository = _ConversationRepository();
+    final detectionController = DrawingObjectDetectionController(
+      debounceDuration: const Duration(milliseconds: 1),
+      saveDraft: () async => const DraftSaveResponseDto(
+        drawingAssetId: 120,
+        assetVersion: 1,
+        lastEventSequence: 1,
+        savedAt: '2026-07-24T00:00:00Z',
+        expiresAt: null,
+      ),
+      requestDetection: (_) async => _detection,
+    );
+    addTearDown(detectionController.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: DrawingScreen(
+          childId: '1',
+          objectDetectionController: detectionController,
+          conversationRepository: repository,
+          conversationId: 8001,
+          activityContext: const DrawingActivityContextDto(
+            activityKind: 'HTP',
+            htpAssessmentId: 91,
+            htpStatus: 'IN_PROGRESS',
+            stepOrder: 1,
+            drawingSubject: 'HOUSE',
+          ),
+        ),
+      ),
+    );
+
+    detectionController.onDrawingInputStarted();
+    detectionController.onDrawingInputEnded();
+    await tester.pump(const Duration(milliseconds: 2));
+    await tester.pump();
+
+    expect(repository.requestedAnalysisIds, isEmpty);
+    expect(find.text('이 집에는 누가 살고 있어?'), findsNothing);
+  });
 }
 
 final class _ConversationRepository implements ConversationRepository {

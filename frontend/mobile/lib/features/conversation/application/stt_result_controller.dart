@@ -24,12 +24,14 @@ final class SttResultController extends ChangeNotifier {
 
   SttResultStatus status = SttResultStatus.idle;
   String? text;
+  int? messageId;
   int _generation = 0;
 
   Future<void> watch({required int messageId, required int sequence}) async {
     final generation = ++_generation;
     status = SttResultStatus.polling;
     text = null;
+    this.messageId = messageId;
     notifyListeners();
     for (var attempt = 0; attempt < maxAttempts; attempt++) {
       if (generation != _generation) return;
@@ -70,6 +72,7 @@ final class SttResultController extends ChangeNotifier {
     _generation++;
     status = SttResultStatus.idle;
     text = null;
+    messageId = null;
     notifyListeners();
   }
 

@@ -31,6 +31,37 @@ void main() {
     expect(repository.idempotencyKeys, ['end-key-1']);
   });
 
+  test('질문 없음 자동 종료 사유를 종료 API에 전달한다', () async {
+    final repository = _RecordingEndRepository(
+      result: Future.value(
+        const ConversationEndResult(
+          conversationId: 20,
+          conversationStatus: 'COMPLETED',
+          completed: true,
+          completionReason: 'NO_MORE_QUESTION',
+          completedAt: '2026-07-29T12:00:00',
+          nextStage: 'REFLECTION',
+        ),
+      ),
+    );
+    final controller = ConversationEndController(
+      repository,
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'end-key-1',
+    );
+
+    final ended = await controller.submit(
+      lastQuestionMessageId: 10,
+      reason: ConversationCompletionReason.noMoreQuestion,
+    );
+
+    expect(ended, isTrue);
+    expect(repository.request?.toJson(), {
+      'reason': 'NO_MORE_QUESTION',
+      'lastQuestionMessageId': 10,
+    });
+  });
+
   test('응답 유실 후 다시 요청하면 같은 멱등성 키와 Body로 재시도한다', () async {
     final repository = _RecordingEndRepository(
       firstFailure: const ApiTransportFailure(
