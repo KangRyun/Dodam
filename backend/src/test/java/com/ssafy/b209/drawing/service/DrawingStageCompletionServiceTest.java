@@ -170,7 +170,8 @@ class DrawingStageCompletionServiceTest {
             DrawingAnalysisType.OBJECT_DETECTION,
             DrawingAnalysisState.SUCCESS,
             DrawingSessionStatus.IN_PROGRESS,
-            DrawingStage.CONVERSING);
+            DrawingStage.CONVERSING,
+            null);
     given(analysisPersistenceService.findByRequestId(KEY)).willReturn(Optional.of(otherSession));
 
     assertError(
@@ -251,7 +252,8 @@ class DrawingStageCompletionServiceTest {
         DrawingAnalysisType.OBJECT_DETECTION,
         state,
         DrawingSessionStatus.IN_PROGRESS,
-        DrawingStage.CONVERSING);
+        DrawingStage.CONVERSING,
+        null);
   }
 
   private void assertError(Runnable invocation, DrawingErrorCode expectedCode) {

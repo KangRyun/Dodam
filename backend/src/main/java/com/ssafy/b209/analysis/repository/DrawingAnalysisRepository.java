@@ -65,6 +65,14 @@ public interface DrawingAnalysisRepository extends JpaRepository<DrawingAnalysis
   Optional<DrawingAnalysis> findByRequestId(String requestId);
 
   /**
+   * 지정한 실패 분석에서 이미 재시도 이력이 분기됐는지 확인한다.
+   *
+   * @param retryOfAnalysisId 재시도 원본 분석 식별자
+   * @return 원본을 직접 참조하는 재시도 이력이 있으면 {@code true}
+   */
+  boolean existsByRetryOfAnalysisId(Long retryOfAnalysisId);
+
+  /**
    * 삭제되지 않은 Session에 속한 분석과 공개 응답에 필요한 Asset·Detection을 함께 조회한다.
    *
    * <p>Session ID와 Analysis ID를 동시에 조건으로 사용해 다른 Session의 분석 존재 여부를 노출하지 않는다.

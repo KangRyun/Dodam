@@ -35,6 +35,8 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class DrawingAnalysisPersistenceService {
 
+  private static final int MAX_RETRY_ATTEMPTS = 3;
+
   private final DrawingSessionRepository drawingSessionRepository;
   private final DrawingAssetRepository drawingAssetRepository;
   private final DrawingAnalysisRepository drawingAnalysisRepository;
@@ -262,7 +264,10 @@ public class DrawingAnalysisPersistenceService {
                     analysis.getTaskType(),
                     analysis.getState(),
                     analysis.getDrawingSession().getSessionStatus(),
-                    analysis.getDrawingSession().getCurrentStage()));
+                    analysis.getDrawingSession().getCurrentStage(),
+                    analysis.getRetryOfAnalysis() == null
+                        ? null
+                        : analysis.getRetryOfAnalysis().getId()));
   }
 
   /**
@@ -289,6 +294,7 @@ public class DrawingAnalysisPersistenceService {
         || source.getScope() == null) {
       throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RETRY_NOT_ALLOWED);
     }
+    validateRetryPolicy(source);
 
     DrawingSession session =
         drawingSessionRepository
@@ -328,6 +334,21 @@ public class DrawingAnalysisPersistenceService {
     } catch (DataIntegrityViolationException exception) {
       throw new BusinessException(
           DrawingAnalysisErrorCode.DRAWING_ANALYSIS_ALREADY_EXISTS, exception);
+    }
+  }
+
+  private void validateRetryPolicy(DrawingAnalysis source) {
+    int retryAttempts = 0;
+    DrawingAnalysis current = source;
+    while (current.getRetryOfAnalysis() != null) {
+      retryAttempts++;
+      if (retryAttempts >= MAX_RETRY_ATTEMPTS) {
+        throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RETRY_LIMIT_EXCEEDED);
+      }
+      current = current.getRetryOfAnalysis();
+    }
+    if (drawingAnalysisRepository.existsByRetryOfAnalysisId(source.getId())) {
+      throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RETRY_NOT_ALLOWED);
     }
   }
 

@@ -5,6 +5,12 @@ import org.springframework.http.HttpStatus;
 
 /** 그림 분석 요청, 결과 저장과 조회 과정에서 외부에 반환할 안전한 오류 코드를 정의한다. */
 public enum DrawingAnalysisErrorCode implements ErrorCode {
+  /** 분석 재시도의 Idempotency-Key Header가 누락된 경우다. */
+  DRAWING_ANALYSIS_IDEMPOTENCY_KEY_REQUIRED(
+      HttpStatus.BAD_REQUEST, "ANALYSIS_400_001", "Idempotency-Key가 필요합니다."),
+  /** 분석 재시도의 Idempotency-Key가 허용 길이 또는 문자 규칙을 위반한 경우다. */
+  DRAWING_ANALYSIS_IDEMPOTENCY_KEY_INVALID(
+      HttpStatus.BAD_REQUEST, "ANALYSIS_400_002", "Idempotency-Key 형식이 올바르지 않습니다."),
   /** 분석 대상 그림 파일을 찾을 수 없는 경우다. */
   DRAWING_ANALYSIS_TARGET_NOT_FOUND(HttpStatus.NOT_FOUND, "ANALYSIS_404_001", "분석할 그림을 찾을 수 없습니다."),
   /** 세션 상태, 그림 소속 또는 스냅샷 유형이 분석을 허용하지 않는 경우다. */
@@ -15,6 +21,12 @@ public enum DrawingAnalysisErrorCode implements ErrorCode {
   /** 원본 분석 상태가 실패가 아니어서 재시도할 수 없는 경우다. */
   DRAWING_ANALYSIS_RETRY_NOT_ALLOWED(
       HttpStatus.CONFLICT, "ANALYSIS_409_003", "현재 상태에서는 그림 분석을 재시도할 수 없습니다."),
+  /** 같은 Idempotency-Key가 다른 분석 재시도에 사용된 경우다. */
+  DRAWING_ANALYSIS_IDEMPOTENCY_CONFLICT(
+      HttpStatus.CONFLICT, "ANALYSIS_409_004", "동일한 Idempotency-Key가 다른 재시도 요청에 사용되었습니다."),
+  /** 하나의 분석 이력에서 허용하는 재시도 횟수를 모두 사용한 경우다. */
+  DRAWING_ANALYSIS_RETRY_LIMIT_EXCEEDED(
+      HttpStatus.CONFLICT, "ANALYSIS_409_005", "그림 분석 재시도 가능 횟수를 초과했습니다."),
   /** AI Client가 분석 요청을 완료하지 못한 경우다. */
   DRAWING_ANALYSIS_REQUEST_FAILED(
       HttpStatus.BAD_GATEWAY, "ANALYSIS_502_001", "그림 분석 요청을 완료하지 못했습니다."),

@@ -15,6 +15,7 @@ import com.ssafy.b209.drawing.domain.DrawingStage;
  * @param state DB에 저장된 분석 상태
  * @param sessionStatus 그림 활동 세션 처리 상태
  * @param currentStage 그림 활동의 현재 단계
+ * @param retryOfAnalysisId 최초 요청이면 {@code null}, 재시도이면 직접 참조하는 원본 분석 식별자
  */
 public record DrawingAnalysisRequestSummary(
     Long analysisId,
@@ -23,4 +24,5 @@ public record DrawingAnalysisRequestSummary(
     DrawingAnalysisType taskType,
     DrawingAnalysisState state,
     DrawingSessionStatus sessionStatus,
-    DrawingStage currentStage) {}
+    DrawingStage currentStage,
+    Long retryOfAnalysisId) {}

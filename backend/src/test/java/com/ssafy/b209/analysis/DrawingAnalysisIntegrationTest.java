@@ -4,6 +4,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.reset;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -294,11 +296,24 @@ class DrawingAnalysisIntegrationTest extends IntegrationTestSupport {
     mockMvc
         .perform(
             post("/api/v1/analyses/{analysisId}/retry", failedAnalysisId)
+                .header("Idempotency-Key", "analysis-retry-integration-0001")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"reason\":\"USER_REQUEST\",\"useLatestInputs\":true}"))
         .andExpect(status().isCreated())
         .andExpect(jsonPath("$.data.drawingAssetId").value(22))
+        .andExpect(jsonPath("$.data.requestId").value("analysis-retry-integration-0001"))
         .andExpect(jsonPath("$.data.status").value("SUCCEEDED"));
+
+    mockMvc
+        .perform(
+            post("/api/v1/analyses/{analysisId}/retry", failedAnalysisId)
+                .header("Idempotency-Key", "analysis-retry-integration-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"reason\":\"USER_REQUEST\",\"useLatestInputs\":true}"))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.drawingAssetId").value(22))
+        .andExpect(jsonPath("$.data.requestId").value("analysis-retry-integration-0001"));
+    verify(drawingAnalysisClient, times(1)).analyze(any());
 
     assertThat(
             jdbcTemplate.queryForMap(
@@ -308,6 +323,12 @@ class DrawingAnalysisIntegrationTest extends IntegrationTestSupport {
         .containsEntry("retry_of_analysis_id", failedAnalysisId)
         .containsEntry("trigger_reason", "RETRY")
         .containsEntry("drawing_asset_id", 22L);
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM analyses WHERE retry_of_analysis_id = ?",
+                Integer.class,
+                failedAnalysisId))
+        .isEqualTo(1);
   }
 
   @Test

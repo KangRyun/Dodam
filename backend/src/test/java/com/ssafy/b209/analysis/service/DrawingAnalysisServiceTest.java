@@ -14,6 +14,7 @@ import com.ssafy.b209.analysis.domain.DrawingAnalysisTriggerReason;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.dto.CreateDrawingAnalysisResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisDetailResponse;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisRetryReason;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisSubject;
@@ -54,6 +55,7 @@ class DrawingAnalysisServiceTest {
   private static final UUID REQUEST_ID = UUID.fromString("550e8400-e29b-41d4-a716-446655440000");
 
   @Mock private DrawingAnalysisPersistenceService persistenceService;
+  @Mock private DrawingAnalysisQueryService queryService;
   @Mock private DrawingAnalysisClient drawingAnalysisClient;
   @Mock private CurrentAuthenticatedUserResolver currentUserResolver;
   @Mock private GuardianResourceAccessValidator accessValidator;
@@ -71,6 +73,7 @@ class DrawingAnalysisServiceTest {
             Clock.fixed(REQUESTED_AT, ZoneOffset.UTC),
             currentUserResolver,
             accessValidator,
+            queryService,
             () -> REQUEST_ID);
   }
 
@@ -281,14 +284,14 @@ class DrawingAnalysisServiceTest {
             persistenceService.startRetry(
                 ANALYSIS_ID,
                 true,
-                REQUEST_ID.toString(),
+                "analysis-retry-key-0001",
                 LocalDateTime.ofInstant(REQUESTED_AT, ZoneOffset.UTC)))
         .willReturn(
             new StartedDrawingAnalysis(
                 31L,
                 SESSION_ID,
                 ASSET_ID,
-                REQUEST_ID.toString(),
+                "analysis-retry-key-0001",
                 com.ssafy.b209.analysis.domain.DrawingAnalysisScope.FINAL,
                 DrawingAnalysisActivityType.HTP,
                 DrawingAnalysisSubject.HOUSE,
@@ -305,12 +308,109 @@ class DrawingAnalysisServiceTest {
     CreateDrawingAnalysisResponse response =
         service.retryAnalysis(
             ANALYSIS_ID,
-            new RetryDrawingAnalysisRequest(DrawingAnalysisRetryReason.USER_REQUEST, true));
+            new RetryDrawingAnalysisRequest(DrawingAnalysisRetryReason.USER_REQUEST, true),
+            "analysis-retry-key-0001");
 
     verify(accessValidator).requireDrawingSessionAccess(GUARDIAN_USER_ID, SESSION_ID);
     assertThat(response.drawingAnalysisId()).isEqualTo(31L);
     assertThat(response.drawingSessionId()).isEqualTo(SESSION_ID);
     assertThat(response.status()).isEqualTo(DrawingAnalysisStatus.SUCCEEDED);
+  }
+
+  @Test
+  void returnsTheStoredResultForTheSameRetryIdempotencyKey() {
+    String idempotencyKey = "analysis-retry-key-0001";
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    given(persistenceService.findRetrySource(ANALYSIS_ID))
+        .willReturn(new RetryDrawingAnalysisSource(ANALYSIS_ID, SESSION_ID));
+    given(persistenceService.findByRequestId(idempotencyKey))
+        .willReturn(
+            java.util.Optional.of(
+                new DrawingAnalysisRequestSummary(
+                    31L,
+                    SESSION_ID,
+                    ASSET_ID,
+                    DrawingAnalysisType.OBJECT_DETECTION,
+                    com.ssafy.b209.analysis.domain.DrawingAnalysisState.SUCCESS,
+                    com.ssafy.b209.drawing.domain.DrawingSessionStatus.IN_PROGRESS,
+                    com.ssafy.b209.drawing.domain.DrawingStage.REFLECTION,
+                    ANALYSIS_ID)));
+    given(queryService.getDrawingAnalysis(SESSION_ID, 31L))
+        .willReturn(
+            new DrawingAnalysisDetailResponse(
+                31L,
+                SESSION_ID,
+                ASSET_ID,
+                idempotencyKey,
+                DrawingAnalysisType.OBJECT_DETECTION,
+                DrawingAnalysisStatus.SUCCEEDED,
+                new com.ssafy.b209.analysis.dto.DrawingAnalysisModelResponse("model", "1.0"),
+                List.of(),
+                REQUESTED_AT,
+                PROCESSED_AT,
+                null));
+
+    CreateDrawingAnalysisResponse response =
+        service.retryAnalysis(
+            ANALYSIS_ID,
+            new RetryDrawingAnalysisRequest(DrawingAnalysisRetryReason.USER_REQUEST, true),
+            idempotencyKey);
+
+    assertThat(response.drawingAnalysisId()).isEqualTo(31L);
+    assertThat(response.requestId()).isEqualTo(idempotencyKey);
+    verifyNoInteractions(drawingAnalysisClient);
+    verify(persistenceService, org.mockito.Mockito.never())
+        .startRetry(any(), any(Boolean.class), any(), any());
+  }
+
+  @Test
+  void rejectsAnIdempotencyKeyUsedForAnotherRetrySource() {
+    String idempotencyKey = "analysis-retry-key-0001";
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    given(persistenceService.findRetrySource(ANALYSIS_ID))
+        .willReturn(new RetryDrawingAnalysisSource(ANALYSIS_ID, SESSION_ID));
+    given(persistenceService.findByRequestId(idempotencyKey))
+        .willReturn(
+            java.util.Optional.of(
+                new DrawingAnalysisRequestSummary(
+                    31L,
+                    SESSION_ID,
+                    ASSET_ID,
+                    DrawingAnalysisType.OBJECT_DETECTION,
+                    com.ssafy.b209.analysis.domain.DrawingAnalysisState.SUCCESS,
+                    com.ssafy.b209.drawing.domain.DrawingSessionStatus.IN_PROGRESS,
+                    com.ssafy.b209.drawing.domain.DrawingStage.REFLECTION,
+                    999L)));
+
+    assertError(
+        () ->
+            service.retryAnalysis(
+                ANALYSIS_ID,
+                new RetryDrawingAnalysisRequest(DrawingAnalysisRetryReason.USER_REQUEST, true),
+                idempotencyKey),
+        DrawingAnalysisErrorCode.DRAWING_ANALYSIS_IDEMPOTENCY_CONFLICT);
+
+    verifyNoInteractions(drawingAnalysisClient, queryService);
+  }
+
+  @Test
+  void rejectsMissingAndMalformedRetryIdempotencyKeys() {
+    RetryDrawingAnalysisRequest request =
+        new RetryDrawingAnalysisRequest(DrawingAnalysisRetryReason.USER_REQUEST, true);
+
+    assertError(
+        () -> service.retryAnalysis(ANALYSIS_ID, request, null),
+        DrawingAnalysisErrorCode.DRAWING_ANALYSIS_IDEMPOTENCY_KEY_REQUIRED);
+    assertError(
+        () -> service.retryAnalysis(ANALYSIS_ID, request, "short"),
+        DrawingAnalysisErrorCode.DRAWING_ANALYSIS_IDEMPOTENCY_KEY_INVALID);
+
+    verifyNoInteractions(
+        persistenceService,
+        drawingAnalysisClient,
+        currentUserResolver,
+        accessValidator,
+        queryService);
   }
 
   private void givenStartedAnalysis() {
