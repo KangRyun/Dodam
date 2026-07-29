@@ -28,6 +28,7 @@ final class VoiceRecordingController extends ChangeNotifier {
     this.maximumDuration = const Duration(minutes: 1),
     this.amplitudeSampleInterval = const Duration(milliseconds: 200),
     this.speechThreshold = -35,
+    this.beforeStart,
   });
 
   final VoiceRecorder _recorder;
@@ -37,6 +38,7 @@ final class VoiceRecordingController extends ChangeNotifier {
   final Duration maximumDuration;
   final Duration amplitudeSampleInterval;
   final double speechThreshold;
+  final Future<void> Function()? beforeStart;
   final Stopwatch _stopwatch = Stopwatch();
   Timer? _ticker;
   Timer? _amplitudeTimer;
@@ -75,6 +77,12 @@ final class VoiceRecordingController extends ChangeNotifier {
 
     _status = VoiceRecordingStatus.starting;
     notifyListeners();
+    try {
+      await beforeStart?.call();
+    } on Object {
+      // TTS 중단 실패가 아이의 녹음 시작까지 막아서는 안 된다.
+    }
+    if (_status != VoiceRecordingStatus.starting) return false;
     final permissionStatus = await permissionService?.request();
     if (permissionStatus == MicrophonePermissionStatus.denied) {
       _status = VoiceRecordingStatus.permissionDenied;

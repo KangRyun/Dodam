@@ -43,6 +43,8 @@ class DodamApp extends StatefulWidget {
     this.authRepository,
     this.conversationRepository = const MockConversationRepository(),
     this.conversationEndRepository = const MockConversationEndRepository(),
+    this.questionTtsRepository,
+    this.questionAudioPlayerFactory,
     this.voiceAnswerRepository,
     this.sttResultRepository,
     this.conversationAnswerRepository,
@@ -68,6 +70,8 @@ class DodamApp extends StatefulWidget {
   final AuthRepository? authRepository;
   final ConversationRepository? conversationRepository;
   final ConversationEndRepository? conversationEndRepository;
+  final QuestionTtsRepository? questionTtsRepository;
+  final QuestionAudioPlayerFactory? questionAudioPlayerFactory;
   final VoiceAnswerRepository? voiceAnswerRepository;
   final SttResultRepository? sttResultRepository;
   final ConversationAnswerRepository? conversationAnswerRepository;
@@ -305,6 +309,8 @@ class _DodamAppState extends State<DodamApp> {
           widget.drawingCompletionSnapshotProvider,
       conversationRepository: widget.conversationRepository,
       conversationEndRepository: widget.conversationEndRepository,
+      questionTtsRepository: widget.questionTtsRepository,
+      questionAudioPlayerFactory: widget.questionAudioPlayerFactory,
       voiceAnswerRepository: widget.voiceAnswerRepository,
       sttResultRepository: widget.sttResultRepository,
       conversationAnswerRepository: widget.conversationAnswerRepository,

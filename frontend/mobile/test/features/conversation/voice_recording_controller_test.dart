@@ -3,6 +3,31 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  test('녹음 시작 전에 TTS 중단 경계를 기다린다', () async {
+    final events = <String>[];
+    final recorder = _FakeVoiceRecorder(onStart: () => events.add('record'));
+    final controller = VoiceRecordingController(
+      recorder,
+      beforeStart: () async => events.add('tts-stop'),
+    );
+
+    await controller.start();
+
+    expect(events, ['tts-stop', 'record']);
+  });
+
+  test('TTS 중단 실패는 녹음 시작을 막지 않는다', () async {
+    final recorder = _FakeVoiceRecorder();
+    final controller = VoiceRecordingController(
+      recorder,
+      beforeStart: () async => throw StateError('stop failed'),
+    );
+
+    expect(await controller.start(), isTrue);
+    expect(recorder.startCount, 1);
+    expect(controller.status, VoiceRecordingStatus.recording);
+  });
+
   test('녹음 시작과 종료 후 로컬 파일 정보를 보관한다', () async {
     final recorder = _FakeVoiceRecorder();
     final controller = VoiceRecordingController(recorder);
@@ -264,12 +289,14 @@ final class _FakeVoiceRecorder implements VoiceRecorder {
     List<double>? amplitudes,
     this.failOnStart = false,
     this.failOnStop = false,
+    this.onStart,
   }) : _amplitudes = amplitudes ?? [];
 
   final double amplitude;
   final List<double> _amplitudes;
   final bool failOnStart;
   final bool failOnStop;
+  final VoidCallback? onStart;
   int startCount = 0;
   int stopCount = 0;
   int cancelCount = 0;
@@ -277,6 +304,7 @@ final class _FakeVoiceRecorder implements VoiceRecorder {
   @override
   Future<void> start() async {
     startCount += 1;
+    onStart?.call();
     if (failOnStart) throw StateError('start failed');
   }
 
