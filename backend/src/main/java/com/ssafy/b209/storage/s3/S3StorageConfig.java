@@ -3,6 +3,8 @@ package com.ssafy.b209.storage.s3;
 import com.ssafy.b209.storage.audio.AudioStorage;
 import com.ssafy.b209.storage.audio.AudioStorageProperties;
 import com.ssafy.b209.storage.audio.LocalAudioStorage;
+import com.ssafy.b209.storage.audio.StorageDelegatingStoredAudioReader;
+import com.ssafy.b209.storage.audio.StoredAudioReader;
 import com.ssafy.b209.storage.image.ImageStorage;
 import com.ssafy.b209.storage.image.ImageStorageProperties;
 import com.ssafy.b209.storage.image.LocalImageStorage;
@@ -113,5 +115,22 @@ public class S3StorageConfig {
         s3Properties,
         s3Properties.ttsPrefix(),
         new LocalAudioStorage(audioProperties, clock));
+  }
+
+  /**
+   * 내부 STT 요청이 S3에 보관된 아동 음성을 읽도록 Reader를 등록한다(S15P11B209-723).
+   *
+   * <p>이 빈이 없으면 s3 모드에서도 {@code LocalStoredAudioReader}가 등록돼 로컬 Root를 뒤진다. 파일은 MinIO에 있으므로 업로드는
+   * 201로 성공하는데 STT만 {@code STT_AUDIO_NOT_AVAILABLE}로 전부 실패한다(2026-07-29 운영 실측 — AI 서버에 STT 요청이 0건
+   * 도달).
+   *
+   * <p>TTS 캐시가 아니라 아동 음성 답변을 읽어야 하므로 {@link Primary} 음성 Storage를 주입받는다.
+   *
+   * @param audioStorage s3 모드의 기본 음성 Storage(아동 음성 프리픽스)
+   * @return 저장에 쓴 경계로 읽는 Reader
+   */
+  @Bean
+  public StoredAudioReader storedAudioReader(AudioStorage audioStorage) {
+    return new StorageDelegatingStoredAudioReader(audioStorage);
   }
 }
