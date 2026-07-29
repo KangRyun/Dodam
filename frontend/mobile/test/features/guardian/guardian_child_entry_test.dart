@@ -140,10 +140,13 @@ void main() {
     await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
     await tester.pumpAndSettle();
 
-    // 463·464: 카드 탭 → 안내 팝업 → 시작하기 순서로 Drawing에 진입한다.
+    // 463·464·466: 카드 탭 → 안내 팝업 → 시작하기 → 입력 방식(캔버스) 순서로
+    // Drawing에 진입한다.
     await _tapAfterScroll(tester, const ValueKey('activity-5'));
     await tester.pumpAndSettle();
     await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
+    await tester.pumpAndSettle();
+    await _tapAfterScroll(tester, const ValueKey('input-method-canvas'));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
@@ -234,6 +237,8 @@ void main() {
     await tester.pumpAndSettle();
     await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
     await tester.pumpAndSettle();
+    await _tapAfterScroll(tester, const ValueKey('input-method-canvas'));
+    await tester.pumpAndSettle();
 
     expect(drawingRepository.getTypesChildId, 3);
     expect(drawingRepository.createCalls, 1);
@@ -296,22 +301,27 @@ void main() {
     await tester.pumpAndSettle();
     await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
     await tester.pumpAndSettle();
+    await _tapAfterScroll(tester, const ValueKey('input-method-canvas'));
+    await tester.pumpAndSettle();
 
-    // 464: 실패는 안내 팝업 안에서 오류·재시도로 처리하고, Drawing으로는
+    // 466: 실패는 입력 방식 화면 안에서 오류·재시도로 처리하고, Drawing으로는
     // 이동하지 않는다. 취소하면 홈에는 카드가 그대로 남아 있다.
     expect(drawingRepository.createCalls, 1);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
-    expect(find.byKey(const ValueKey('activity-guide-error')), findsOneWidget);
-    expect(find.byKey(const ValueKey('activity-guide-start')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('input-method-canvas-error')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('input-method-canvas')), findsOneWidget);
 
-    // "다시 시도"를 눌러도 재요청은 정상적으로 다시 나간다.
-    await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
+    // "다시 시도" 삼아 캔버스 카드를 다시 눌러도 재요청은 정상적으로 나간다.
+    await _tapAfterScroll(tester, const ValueKey('input-method-canvas'));
     await tester.pumpAndSettle();
 
     expect(drawingRepository.createCalls, 2);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
 
-    await _tapAfterScroll(tester, const ValueKey('activity-guide-cancel'));
+    await _tapAfterScroll(tester, const ValueKey('input-method-cancel'));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('activity-77')), findsOneWidget);
@@ -324,11 +334,13 @@ void main() {
 
     await _tapAfterScroll(tester, const ValueKey('activity-77'));
     await tester.pumpAndSettle();
+    await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
+    await tester.pumpAndSettle();
 
-    final startButton = find.byKey(const ValueKey('activity-guide-start'));
+    final startButton = find.byKey(const ValueKey('input-method-canvas'));
     await tester.tap(startButton);
     await tester.pump();
-    await tester.tap(startButton);
+    await tester.tap(startButton, warnIfMissed: false);
     await tester.pump();
 
     expect(drawingRepository.createCalls, 1);

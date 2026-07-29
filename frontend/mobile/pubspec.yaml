@@ -44,6 +44,7 @@ dependencies:
   flutter_naver_login:
     path: packages/flutter_naver_login
   flutter_svg: ^2.3.0
+  image_picker: ^1.2.3
   firebase_core: ^4.12.1
   firebase_messaging: ^16.4.3
   flutter_local_notifications: ^22.2.0

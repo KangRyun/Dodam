@@ -62,16 +62,20 @@ final class DrawingSessionStartController {
   ///
   /// `replaceActive`가 참이면 서버가 기존 활동을 `ABANDONED`로 전환하고 새 세션을
   /// 같은 트랜잭션에서 생성한다. 기존 파일과 분석 결과를 물리 삭제하지 않는다.
+  ///
+  /// `inputMethod`는 캔버스로 직접 그리기(`CANVAS`)와 사진으로 시작하기
+  /// (`UPLOAD`, S15P11B209-466)를 구분한다.
   Future<DrawingSessionResolution> createSelectedSession({
     required int childId,
     required int drawingTypeId,
     bool replaceActive = false,
+    String inputMethod = 'CANVAS',
   }) async {
     final session = await repository.createSession(
       CreateDrawingSessionRequestDto(
         childId: childId,
         drawingTypeId: drawingTypeId,
-        inputMethod: 'CANVAS',
+        inputMethod: inputMethod,
         clientStartedAt: _now().toUtc().toIso8601String(),
         replaceActive: replaceActive,
       ),
@@ -125,6 +129,7 @@ final class DrawingSessionStartController {
   Future<DrawingSessionResolution> createNewSession({
     required int childId,
     int? drawingTypeId,
+    String inputMethod = 'CANVAS',
   }) async {
     final drawingTypes = await repository.getDrawingTypes(childId: childId);
     if (drawingTypes.content.isEmpty) {
@@ -145,6 +150,7 @@ final class DrawingSessionStartController {
       return await createSelectedSession(
         childId: childId,
         drawingTypeId: resolvedTypeId,
+        inputMethod: inputMethod,
       );
     } on ApiResponseFailure catch (failure) {
       if (failure.error?.code != 'DRAWING_409_001') rethrow;
