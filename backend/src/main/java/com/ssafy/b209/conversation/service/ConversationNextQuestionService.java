@@ -8,7 +8,9 @@ import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.child.repository.ChildRepository;
 import com.ssafy.b209.conversation.domain.ConversationHistoryMessage;
+import com.ssafy.b209.conversation.domain.ConversationHistoryOption;
 import com.ssafy.b209.conversation.domain.ConversationMessage;
+import com.ssafy.b209.conversation.domain.ConversationMessageSelectedOption;
 import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.domain.ResponseMode;
 import com.ssafy.b209.conversation.dto.BoundingBox;
@@ -26,7 +28,9 @@ import com.ssafy.b209.conversation.dto.RecentMessage;
 import com.ssafy.b209.conversation.exception.ConversationErrorCode;
 import com.ssafy.b209.conversation.exception.ConversationStartErrorCode;
 import com.ssafy.b209.conversation.repository.ConversationHistoryMessageRepository;
+import com.ssafy.b209.conversation.repository.ConversationHistoryOptionRepository;
 import com.ssafy.b209.conversation.repository.ConversationMessageRepository;
+import com.ssafy.b209.conversation.repository.ConversationMessageSelectedOptionRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartAuthorizationRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartDrawingSessionRepository;
@@ -35,7 +39,9 @@ import java.time.Clock;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
@@ -47,6 +53,8 @@ public class ConversationNextQuestionService {
   private final ConversationSessionRepository conversationSessionRepository;
   private final ConversationMessageRepository conversationMessageRepository;
   private final ConversationHistoryMessageRepository conversationHistoryMessageRepository;
+  private final ConversationHistoryOptionRepository conversationHistoryOptionRepository;
+  private final ConversationMessageSelectedOptionRepository selectedOptionRepository;
   private final ConversationStartDrawingSessionRepository drawingSessionRepository;
   private final ConversationStartAuthorizationRepository authorizationRepository;
   private final ChildRepository childRepository;
@@ -60,6 +68,8 @@ public class ConversationNextQuestionService {
    * @param conversationSessionRepository 대화 세션 조회 경계
    * @param conversationMessageRepository 이전 답변 검증 경계
    * @param conversationHistoryMessageRepository AI 문맥용 최근 대화 조회 경계
+   * @param conversationHistoryOptionRepository 선택 답변의 옵션 Code 조회 경계
+   * @param selectedOptionRepository 선택 답변의 Label과 선택 순서 조회 경계
    * @param drawingSessionRepository 그림 활동-아동 연결 조회 경계
    * @param authorizationRepository 보호자 관계·필수 동의 검증 경계
    * @param childRepository AI 최소 아동 문맥 조회 경계
@@ -71,6 +81,8 @@ public class ConversationNextQuestionService {
       ConversationSessionRepository conversationSessionRepository,
       ConversationMessageRepository conversationMessageRepository,
       ConversationHistoryMessageRepository conversationHistoryMessageRepository,
+      ConversationHistoryOptionRepository conversationHistoryOptionRepository,
+      ConversationMessageSelectedOptionRepository selectedOptionRepository,
       ConversationStartDrawingSessionRepository drawingSessionRepository,
       ConversationStartAuthorizationRepository authorizationRepository,
       ChildRepository childRepository,
@@ -80,6 +92,8 @@ public class ConversationNextQuestionService {
     this.conversationSessionRepository = conversationSessionRepository;
     this.conversationMessageRepository = conversationMessageRepository;
     this.conversationHistoryMessageRepository = conversationHistoryMessageRepository;
+    this.conversationHistoryOptionRepository = conversationHistoryOptionRepository;
+    this.selectedOptionRepository = selectedOptionRepository;
     this.drawingSessionRepository = drawingSessionRepository;
     this.authorizationRepository = authorizationRepository;
     this.childRepository = childRepository;
@@ -152,26 +166,101 @@ public class ConversationNextQuestionService {
     List<ConversationHistoryMessage> recent =
         conversationHistoryMessageRepository.findRecentContextMessages(
             conversationId, PageRequest.of(0, RECENT_MESSAGE_LIMIT));
+    Map<Long, SelectedOptionContext> selectedOptionsByAnswer = loadSelectedOptionContexts(recent);
     List<RecentMessage> ordered = new ArrayList<>(recent.size());
     for (int index = recent.size() - 1; index >= 0; index--) {
       ConversationHistoryMessage message = recent.get(index);
+      SelectedOptionContext selectedOptions = selectedOptionsByAnswer.get(message.getId());
       ordered.add(
           new RecentMessage(
               message.getId(),
               message.getSenderType(),
               message.getMessageType(),
-              resolveContextText(message)));
+              resolveContextText(message, selectedOptions),
+              selectedOptions == null ? null : selectedOptions.codes()));
     }
     return List.copyOf(ordered);
   }
 
-  private String resolveContextText(ConversationHistoryMessage message) {
+  private String resolveContextText(
+      ConversationHistoryMessage message, SelectedOptionContext selectedOptions) {
     String sttText = message.getSttText();
     if (sttText != null && !sttText.isBlank()) {
       return sttText;
     }
+    if (selectedOptions != null && !selectedOptions.labels().isEmpty()) {
+      String selectedLabels = String.join(", ", selectedOptions.labels());
+      String directText = message.getRawText();
+      return directText == null || directText.isBlank()
+          ? selectedLabels
+          : selectedLabels + " / " + directText;
+    }
     return message.getRawText();
   }
+
+  private Map<Long, SelectedOptionContext> loadSelectedOptionContexts(
+      List<ConversationHistoryMessage> messages) {
+    List<Long> answerMessageIds = new ArrayList<>();
+    for (ConversationHistoryMessage message : messages) {
+      if (message.isOptionAnswer()) {
+        answerMessageIds.add(message.getId());
+      }
+    }
+    if (answerMessageIds.isEmpty()) {
+      return Map.of();
+    }
+
+    List<ConversationMessageSelectedOption> selections =
+        selectedOptionRepository.findByAnswerMessageIdInOrderByAnswerMessageIdAscSelectionOrderAsc(
+            answerMessageIds);
+    Map<Long, ConversationHistoryOption> optionById = loadSelectedOptionsById(selections);
+    Map<Long, List<String>> codesByAnswer = new LinkedHashMap<>();
+    Map<Long, List<String>> labelsByAnswer = new LinkedHashMap<>();
+    for (ConversationMessageSelectedOption selection : selections) {
+      ConversationHistoryOption option = optionById.get(selection.getMessageOptionId());
+      if (option == null) {
+        continue;
+      }
+      codesByAnswer
+          .computeIfAbsent(selection.getAnswerMessageId(), ignored -> new ArrayList<>())
+          .add(option.getOptionKey());
+      labelsByAnswer
+          .computeIfAbsent(selection.getAnswerMessageId(), ignored -> new ArrayList<>())
+          .add(selection.getLabelSnapshot());
+    }
+
+    Map<Long, SelectedOptionContext> contexts = new LinkedHashMap<>();
+    for (Long answerMessageId : answerMessageIds) {
+      List<String> codes = codesByAnswer.get(answerMessageId);
+      if (codes != null && !codes.isEmpty()) {
+        contexts.put(
+            answerMessageId,
+            new SelectedOptionContext(
+                List.copyOf(codes),
+                List.copyOf(labelsByAnswer.getOrDefault(answerMessageId, List.of()))));
+      }
+    }
+    return Map.copyOf(contexts);
+  }
+
+  private Map<Long, ConversationHistoryOption> loadSelectedOptionsById(
+      List<ConversationMessageSelectedOption> selections) {
+    List<Long> optionIds = new ArrayList<>(selections.size());
+    for (ConversationMessageSelectedOption selection : selections) {
+      optionIds.add(selection.getMessageOptionId());
+    }
+    if (optionIds.isEmpty()) {
+      return Map.of();
+    }
+    Map<Long, ConversationHistoryOption> optionById = new LinkedHashMap<>();
+    for (ConversationHistoryOption option :
+        conversationHistoryOptionRepository.findByIdIn(optionIds)) {
+      optionById.put(option.getId(), option);
+    }
+    return Map.copyOf(optionById);
+  }
+
+  private record SelectedOptionContext(List<String> codes, List<String> labels) {}
 
   /**
    * 그림 분석 근거가 있으면 탐지 객체를 AI 요청 문맥으로 조립한다.

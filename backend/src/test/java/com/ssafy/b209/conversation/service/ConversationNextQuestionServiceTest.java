@@ -16,7 +16,9 @@ import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.child.repository.ChildRepository;
 import com.ssafy.b209.conversation.domain.ConversationHistoryMessage;
+import com.ssafy.b209.conversation.domain.ConversationHistoryOption;
 import com.ssafy.b209.conversation.domain.ConversationMessage;
+import com.ssafy.b209.conversation.domain.ConversationMessageSelectedOption;
 import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.domain.ConversationStartDrawingSession;
 import com.ssafy.b209.conversation.domain.ResponseMode;
@@ -31,7 +33,9 @@ import com.ssafy.b209.conversation.dto.RecentMessage;
 import com.ssafy.b209.conversation.exception.ConversationErrorCode;
 import com.ssafy.b209.conversation.exception.ConversationStartErrorCode;
 import com.ssafy.b209.conversation.repository.ConversationHistoryMessageRepository;
+import com.ssafy.b209.conversation.repository.ConversationHistoryOptionRepository;
 import com.ssafy.b209.conversation.repository.ConversationMessageRepository;
+import com.ssafy.b209.conversation.repository.ConversationMessageSelectedOptionRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartAuthorizationRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartDrawingSessionRepository;
@@ -56,6 +60,11 @@ class ConversationNextQuestionServiceTest {
   @Mock private ConversationSessionRepository conversationSessionRepository;
   @Mock private ConversationMessageRepository conversationMessageRepository;
   @Mock private ConversationHistoryMessageRepository conversationHistoryMessageRepository;
+  @Mock private ConversationHistoryOptionRepository conversationHistoryOptionRepository;
+
+  @Mock
+  private ConversationMessageSelectedOptionRepository conversationMessageSelectedOptionRepository;
+
   @Mock private ConversationStartDrawingSessionRepository drawingSessionRepository;
   @Mock private ConversationStartAuthorizationRepository authorizationRepository;
   @Mock private ChildRepository childRepository;
@@ -74,6 +83,8 @@ class ConversationNextQuestionServiceTest {
             conversationSessionRepository,
             conversationMessageRepository,
             conversationHistoryMessageRepository,
+            conversationHistoryOptionRepository,
+            conversationMessageSelectedOptionRepository,
             drawingSessionRepository,
             authorizationRepository,
             childRepository,
@@ -145,6 +156,46 @@ class ConversationNextQuestionServiceTest {
     verify(conversationHistoryMessageRepository)
         .findRecentContextMessages(org.mockito.ArgumentMatchers.eq(11L), pageableCaptor.capture());
     assertThat(pageableCaptor.getValue().getPageSize()).isEqualTo(10);
+  }
+
+  @Test
+  void includesSelectedOptionCodesAndLabelsInRecentMessageContext() {
+    stubAuthorizedConversation(false, true, true);
+    stubChildContext();
+    ConversationHistoryMessage optionAnswer =
+        historyMessage(102L, "CHILD", "OPTION_ANSWER", "고양이 같아", null);
+    ConversationMessageSelectedOption selectedOption =
+        org.mockito.Mockito.mock(ConversationMessageSelectedOption.class);
+    ConversationHistoryOption option = org.mockito.Mockito.mock(ConversationHistoryOption.class);
+    given(
+            conversationHistoryMessageRepository.findRecentContextMessages(
+                org.mockito.ArgumentMatchers.eq(11L),
+                org.mockito.ArgumentMatchers.any(Pageable.class)))
+        .willReturn(List.of(optionAnswer));
+    given(
+            conversationMessageSelectedOptionRepository
+                .findByAnswerMessageIdInOrderByAnswerMessageIdAscSelectionOrderAsc(List.of(102L)))
+        .willReturn(List.of(selectedOption));
+    given(selectedOption.getAnswerMessageId()).willReturn(102L);
+    given(selectedOption.getMessageOptionId()).willReturn(501L);
+    given(selectedOption.getLabelSnapshot()).willReturn("음, 아니야");
+    given(conversationHistoryOptionRepository.findByIdIn(List.of(501L)))
+        .willReturn(List.of(option));
+    given(option.getId()).willReturn(501L);
+    given(option.getOptionKey()).willReturn("CHIP_NO");
+    given(questionService.generateQuestion(any()))
+        .willReturn(new GeneratedQuestion(904L, "그럼 무엇처럼 보여?", false, 3, List.of(), null));
+
+    service.generate(
+        3L, 11L, new NextQuestionRequest(700L, null, List.of(PreferredResponseMode.EMOJI)));
+
+    ArgumentCaptor<GenerateQuestionCommand> commandCaptor =
+        ArgumentCaptor.forClass(GenerateQuestionCommand.class);
+    verify(questionService).generateQuestion(commandCaptor.capture());
+    assertThat(commandCaptor.getValue().recentMessages())
+        .containsExactly(
+            new RecentMessage(
+                102L, "CHILD", "OPTION_ANSWER", "음, 아니야 / 고양이 같아", List.of("CHIP_NO")));
   }
 
   @Test
@@ -346,6 +397,7 @@ class ConversationNextQuestionServiceTest {
     lenient().when(message.getMessageType()).thenReturn(messageType);
     lenient().when(message.getRawText()).thenReturn(rawText);
     lenient().when(message.getSttText()).thenReturn(sttText);
+    lenient().when(message.isOptionAnswer()).thenReturn("OPTION_ANSWER".equals(messageType));
     return message;
   }
 
