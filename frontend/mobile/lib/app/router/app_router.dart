@@ -273,6 +273,8 @@ abstract final class AppRouter {
           basisAnalysisId: basisAnalysisId,
           resumeConversation:
               (settings.arguments! as DrawingRouteArguments).resumeConversation,
+          autoRestoreDraft:
+              (settings.arguments! as DrawingRouteArguments).autoRestoreDraft,
           activityContext:
               (settings.arguments! as DrawingRouteArguments).activityContext,
         ),
@@ -424,6 +426,7 @@ final class DrawingRouteArguments {
     required this.repository,
     this.completionSnapshotProvider,
     this.resumeConversation = false,
+    this.autoRestoreDraft = false,
     this.activityContext = const DrawingActivityContextDto.general(),
   });
 
@@ -433,6 +436,9 @@ final class DrawingRouteArguments {
 
   /// 그림 단계를 지난 세션으로 들어올 때 대화를 즉시 이어받게 한다.
   final bool resumeConversation;
+
+  /// 진입 전 이어 그리기를 확인한 경우 캔버스에서 같은 선택을 다시 묻지 않는다.
+  final bool autoRestoreDraft;
   final DrawingActivityContextDto activityContext;
 }
 

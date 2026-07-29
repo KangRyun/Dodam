@@ -76,9 +76,19 @@ Widget _wrap(Widget home) => MaterialApp(
     final arguments = settings.arguments! as DrawingRouteArguments;
     return MaterialPageRoute<void>(
       settings: settings,
-      builder: (_) => Scaffold(
-        body: Text(
-          'drawing-session-${arguments.sessionId}-resume-${arguments.resumeConversation}',
+      builder: (routeContext) => Scaffold(
+        body: Column(
+          children: [
+            Text(
+              'drawing-session-${arguments.sessionId}-resume-${arguments.resumeConversation}'
+              '-auto-${arguments.autoRestoreDraft}',
+            ),
+            TextButton(
+              key: const ValueKey('leave-drawing'),
+              onPressed: () => Navigator.of(routeContext).pop(),
+              child: const Text('나가기'),
+            ),
+          ],
         ),
       ),
     );
@@ -256,7 +266,10 @@ void main() {
     expect(repository.lastCreateRequest?.childId, 7);
     expect(repository.lastCreateRequest?.drawingTypeId, 5);
     expect(repository.lastCreateRequest?.inputMethod, 'CANVAS');
-    expect(find.text('drawing-session-900-resume-false'), findsOneWidget);
+    expect(
+      find.text('drawing-session-900-resume-false-auto-false'),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('input-method-photo')), findsNothing);
   });
 
@@ -283,18 +296,25 @@ void main() {
       _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('activity-5')));
-    await tester.pumpAndSettle();
 
-    // 대화 단계까지 넘어간 활성 세션은 "이어 그리기" 선택 다이얼로그를
-    // 먼저 띄운다(461/463/464의 새 활동 안내 팝업보다 우선).
+    // 진행 중 활동 확인은 활동 종류를 선택하기 전에 한 번만 수행한다.
     expect(find.byKey(const ValueKey('activity-guide-start')), findsNothing);
     expect(find.text('이어 그리기'), findsOneWidget);
     await tester.tap(find.text('이어 그리기'));
     await tester.pumpAndSettle();
 
     expect(repository.createCalls, 0);
-    expect(find.text('drawing-session-321-resume-true'), findsOneWidget);
+    expect(
+      find.text('drawing-session-321-resume-true-auto-true'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('leave-drawing')));
+    await tester.pumpAndSettle();
+
+    // 같은 화면으로 돌아와도 이미 처리한 진입 팝업은 다시 열지 않는다.
+    expect(find.text('이어 그리기'), findsNothing);
+    expect(find.text('새로 그리기'), findsNothing);
   });
 
   testWidgets('저장된 초안이 없는 활성 세션도 재개와 새 활동을 선택한다', (tester) async {
@@ -320,8 +340,6 @@ void main() {
       _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('activity-5')));
-    await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('activity-guide-start')), findsNothing);
     expect(find.text('이어 그리기'), findsOneWidget);
@@ -330,10 +348,13 @@ void main() {
     await tester.tap(find.text('이어 그리기'));
     await tester.pumpAndSettle();
 
-    expect(find.text('drawing-session-555-resume-false'), findsOneWidget);
+    expect(
+      find.text('drawing-session-555-resume-false-auto-true'),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('그림일기에서 새로 그리기를 고르면 활동을 다시 고르지 않고 새 캔버스로 이동한다', (tester) async {
+  testWidgets('새로 그리기를 고른 뒤 그림일기를 선택하면 새 캔버스로 이동한다', (tester) async {
     final repository = _FakeDrawingRepository(
       drawingTypes: const [_artDiary, _secondType],
       activeSession: const ActiveDrawingSessionDto(
@@ -356,11 +377,13 @@ void main() {
       _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('activity-5')));
-    await tester.pumpAndSettle();
 
     expect(find.text('새로 그리기'), findsOneWidget);
     await tester.tap(find.text('새로 그리기'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activity-5')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
     await tester.pumpAndSettle();
 
     expect(repository.createCalls, 1);
@@ -370,11 +393,13 @@ void main() {
     );
     expect(repository.lastCreateRequest?.inputMethod, 'CANVAS');
     expect(repository.lastCreateRequest?.replaceActive, isTrue);
-    expect(find.text('drawing-session-900-resume-false'), findsOneWidget);
-    expect(find.text('어떤 활동을 해볼까요?'), findsNothing);
+    expect(
+      find.text('drawing-session-900-resume-false-auto-false'),
+      findsOneWidget,
+    );
   });
 
-  testWidgets('HTP에서 새로 그리기를 고르면 HOUSE 캔버스로 바로 이동한다', (tester) async {
+  testWidgets('새로 그리기를 고른 뒤 HTP와 캔버스를 선택하면 HOUSE 캔버스로 이동한다', (tester) async {
     final repository = _FakeDrawingRepository(
       drawingTypes: const [_artDiary, _secondType],
       activeSession: const ActiveDrawingSessionDto(
@@ -397,17 +422,23 @@ void main() {
       _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.text('새로 그리기'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(find.byKey(const ValueKey('activity-9')));
     await tester.tap(find.byKey(const ValueKey('activity-9')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('새로 그리기'));
+    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
     await tester.pumpAndSettle();
 
     expect(repository.htpStartCalls, 1);
     expect(repository.lastHtpRequest?.inputMethod, 'CANVAS');
     expect(repository.lastHtpRequest?.replaceActive, isTrue);
-    expect(find.text('drawing-session-901-resume-false'), findsOneWidget);
-    expect(find.text('어떤 활동을 해볼까요?'), findsNothing);
+    expect(
+      find.text('drawing-session-901-resume-false-auto-false'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('좁은 화면과 2배 텍스트에서도 오버플로가 없다', (tester) async {

@@ -112,6 +112,7 @@ class DrawingScreen extends StatefulWidget {
     this.conversationId,
     this.basisAnalysisId,
     this.resumeConversation = false,
+    this.autoRestoreDraft = false,
     this.activityContext = const DrawingActivityContextDto.general(),
     super.key,
   });
@@ -140,6 +141,9 @@ class DrawingScreen extends StatefulWidget {
   /// 서버는 `IN_PROGRESS` + `DRAWING` 단계에서만 초안·획 저장을 허용하므로
   /// 대화·회고 단계로 복귀할 때는 저장과 객체 탐지를 시작하지 않는다.
   final bool resumeConversation;
+
+  /// 활동 진입 화면에서 이어 그리기를 선택했으면 Draft를 바로 불러온다.
+  final bool autoRestoreDraft;
   final DrawingActivityContextDto activityContext;
 
   @override
@@ -266,7 +270,9 @@ class _DrawingScreenState extends State<DrawingScreen> {
         return;
       }
       _syncCoordinator.start(snapshotProvider: _captureCanvasSnapshot);
-      unawaited(_draftRestoreController.load());
+      unawaited(
+        _draftRestoreController.load(autoRestore: widget.autoRestoreDraft),
+      );
     });
   }
 
