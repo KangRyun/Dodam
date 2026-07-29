@@ -87,14 +87,8 @@ pipeline {
       defaultValue: false,
       description: 'frontend/mobile 변경이 없어도 Flutter 앱 테스트를 실행한다 (S15P11B209-642)'
     )
-    // k3s 스테이징 선검증 (S15P11B209-359). 기본 false — 운영 배포(compose)와 무관하게 별도로 켠다.
-    //   ⚠️ 이 스테이지는 **운영을 건드리지 않는다.** 같은 호스트의 k3s `dodam` 네임스페이스에만
-    //      배포하며, 운영 트래픽은 계속 compose 스택이 받는다. 컷오버는 S15P11B209-360 의 일이다.
-    booleanParam(
-      name: 'DEPLOY_K8S_STAGING',
-      defaultValue: false,
-      description: 'k3s 스테이징에 kubectl 로 배포해 컷오버 전 선검증한다 (S15P11B209-359)'
-    )
+    // ※ DEPLOY_K8S_STAGING(359)은 제거했다. 컷오버(360) 후 운영 배포 자체가 k3s 로 가므로
+    //   "스테이징에만 따로 배포"라는 개념이 사라졌다 — 같은 네임스페이스를 두 번 배포하게 된다.
   }
 
   environment {
@@ -286,12 +280,35 @@ pipeline {
       }
       steps {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
-        // 시크릿 .env 를 Credentials(secret file)에서 워크스페이스 밖 임시경로로 주입 → compose up.
-        // 같은 호스트라 방금 빌드한 :local 이미지를 그대로 사용(push/pull 불필요).
-        // nginx conf 는 이미지에 bake(infra/nginx/Dockerfile) — conf 변경 시 이미지가 바뀌므로
-        // up -d 가 컨테이너를 재생성해 자동 반영된다(bind 마운트 경로 사고 방지, 2026-07-22 교훈).
-        withCredentials([file(credentialsId: 'dodam-env', variable: 'ENV_FILE')]) {
-          sh 'docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" up -d'
+        // ★ 2026-07-29 컷오버(S15P11B209-360) 이후 배포 대상이 compose → k3s 로 바뀌었다.
+        //   이전 구현은 `docker compose up -d` 였다. 그대로 두면 compose nginx 가 다시 떠서
+        //   k8s gateway 와 호스트 80/443 을 두고 충돌한다 — 배포가 곧 장애가 된다.
+        //
+        //   kubeconfig 는 cluster-admin 이 아니라 네임스페이스 한정 ServiceAccount 다.
+        //   생성·삭제 권한이 없어 `set image` 와 rollout 조회만 할 수 있다(359).
+        //   워크로드 생성은 사람이 `kubectl apply -k` 로 한다.
+        withCredentials([file(credentialsId: 'dodam-kubeconfig', variable: 'DEPLOYER_KUBECONFIG')]) {
+          sh '''
+            set -e
+            export KUBECONFIG="$DEPLOYER_KUBECONFIG"
+
+            # containerd 는 도커 이미지 저장소를 보지 못한다 → 로컬 레지스트리를 경유한다.
+            #   :prod 도 함께 갱신하는 이유: 매니페스트가 :prod 를 가리키므로, 갱신하지 않으면
+            #   나중에 누가 `kubectl apply -k overlays/prod` 를 돌렸을 때 **옛 이미지로
+            #   조용히 되돌아간다.** SHA 태그는 추적용, :prod 는 매니페스트 기본값용이다.
+            infra/scripts/push-staging-images.sh --tag "$IMAGE_TAG" --with-ai
+            infra/scripts/push-staging-images.sh --tag prod         --with-ai
+
+            # 컨테이너 이름은 Deployment 이름과 다를 수 있다 — gateway 의 컨테이너는 nginx 다.
+            kubectl -n dodam set image deployment/backend backend=127.0.0.1:5000/dodam-backend:"$IMAGE_TAG"
+            kubectl -n dodam set image deployment/gateway nginx=127.0.0.1:5000/dodam-nginx:"$IMAGE_TAG"
+            kubectl -n dodam set image deployment/ai      ai=127.0.0.1:5000/dodam-ai:"$IMAGE_TAG"
+
+            # backend 는 replicas 2 + maxUnavailable 0 + preStop 8s 로 무중단이다(362 실증).
+            kubectl -n dodam rollout status deployment/backend --timeout=300s
+            kubectl -n dodam rollout status deployment/gateway --timeout=300s
+            kubectl -n dodam rollout status deployment/ai      --timeout=300s
+          '''
         }
       }
     }
@@ -305,111 +322,51 @@ pipeline {
       }
       steps {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
-        // 배포 직후 컨테이너 health가 healthy 될 때까지 대기 — 안 되면 실패로 즉시 인지(190 롤백 트리거 지점).
-        sh '''
-          set -e
-          for svc in dodam-mysql dodam-backend dodam-ai; do
-            echo "헬스 대기: $svc"
-            ok=false
-            for i in $(seq 1 30); do
-              status=$(docker inspect -f '{{.State.Health.Status}}' "$svc" 2>/dev/null || echo missing)
-              if [ "$status" = "healthy" ]; then echo "  → $svc healthy"; ok=true; break; fi
-              sleep 5
-            done
-            if [ "$ok" != "true" ]; then echo "  ✗ $svc 헬스체크 실패(마지막 상태: $status)"; exit 1; fi
-          done
-          # 게이트웨이 e2e — 컨테이너 health만으론 nginx 라우팅 고장(빈 conf 등)을 못 잡는다(2026-07-22 사고).
-          # nginx 안에서 자기 자신을 거쳐 ai까지: 외부 진입 경로 전체를 실검증.
-          # ⚠️ 주소는 반드시 127.0.0.1 — 컨테이너 안 'localhost'는 ::1(IPv6)로 먼저 풀리는데
-          #    우리 nginx는 IPv4(0.0.0.0:80)만 리슨하고 busybox wget은 IPv4 폴백이 없어
-          #    항상 refused 난다(이걸로 오탐 2회: 처음엔 기동 레이스로 오진했음).
-          #    재시도 루프는 기동 직후 리슨 대기용으로 유지. 에러 출력은 숨기지 않는다(진단 가능하게).
-          echo "게이트웨이 e2e 확인: nginx → https /ai/health"
-          # https 전환(S15P11B209-301) 후 80은 리다이렉트 전용 → e2e는 443(TLS)을 직접 친다.
-          # --no-check-certificate: 인증서는 도메인용인데 체크는 127.0.0.1(IP)로 접속하므로 검증 생략.
-          ok=false
-          for i in $(seq 1 10); do
-            if docker exec dodam-nginx wget --no-check-certificate -q -O /dev/null -T 5 https://127.0.0.1/ai/health; then ok=true; break; fi
-            sleep 2
-          done
-          if [ "$ok" != "true" ]; then echo "  ✗ 게이트웨이 e2e 실패(재시도 소진)"; exit 1; fi
-          echo "✅ 전체 서비스 healthy + 게이트웨이 라우팅 정상"
-        '''
-      }
-    }
-
-    stage('Deploy — k3s staging (선검증)') {
-      // S15P11B209-359. 컷오버(360) 전에 "파이프라인이 kubectl 로 배포할 수 있는가"만 증명한다.
-      //
-      // ⚠️ 운영과 분리돼 있다: 위 Deploy 스테이지(compose)가 여전히 서비스를 배포하고,
-      //    이 스테이지는 같은 호스트 k3s 의 `dodam` 네임스페이스에만 손댄다. 실패해도
-      //    운영은 이미 배포·헬스체크를 마친 뒤다.
-      //
-      // 프리즈와의 관계: 프리즈는 "운영에 배포하지 마라"는 뜻이므로 여기에도 건다.
-      //    멈춰야 할 때 절반만 멈추면 프리즈의 의미가 없다.
-      when {
-        branch 'develop'
-        expression { params.DEPLOY_K8S_STAGING }
-        expression { !fileExists(env.DEPLOY_FREEZE_FLAG) }
-      }
-      steps {
-        script { env.CURRENT_STAGE = env.STAGE_NAME }
-        // kubeconfig 는 cluster-admin 이 아니라 네임스페이스 한정 ServiceAccount 토큰이다.
-        //   발급: infra/scripts/issue-deployer-kubeconfig.sh → Jenkins Credentials(Secret file)
-        //   ⚠️ 토큰에 만료가 있다(기본 90일). 만료되면 아래가 401 로 죽는다 — 재발급할 것.
-        withCredentials([file(credentialsId: 'dodam-kubeconfig', variable: 'DEPLOYER_KUBECONFIG')]) {
-          sh '''
-            set -e
-            export KUBECONFIG="$DEPLOYER_KUBECONFIG"
-
-            # containerd 는 도커 이미지 저장소를 보지 못한다(356). 레지스트리를 거쳐 넘긴다.
-            infra/scripts/push-staging-images.sh --tag "$IMAGE_TAG"
-
-            # set image 만 한다 — 생성·삭제 권한은 애초에 RBAC 에 없다(jenkins-deployer-rbac.yaml).
-            #   워크로드 생성은 사람이 kubectl apply -k 로 한다. 파이프라인은 이미지만 바꾼다.
-            kubectl -n dodam set image deployment/backend backend=127.0.0.1:5000/dodam-backend:"$IMAGE_TAG"
-            kubectl -n dodam set image deployment/gateway nginx=127.0.0.1:5000/dodam-nginx:"$IMAGE_TAG"
-
-            # rollout status 가 이 스테이지의 실질 헬스체크다. 실패하면 0 이 아닌 코드로 죽는다.
-            #   --timeout 없이 두면 파드가 안 뜰 때 스테이지 타임아웃까지 매달린다.
-            kubectl -n dodam rollout status deployment/backend --timeout=300s
-            kubectl -n dodam rollout status deployment/gateway --timeout=300s
-
-            echo "✅ k3s 스테이징 롤아웃 완료 (태그: $IMAGE_TAG)"
-          '''
-        }
-        // ── 파드가 실제로 Ready 인가 ────────────────────────────────────────────
-        // ★ NodePort(30080/30443)를 찔러 확인하지 **않는다.** 이 호스트에서는 그 검사가
-        //   스테이징과 운영을 구분하지 못한다 — 2026-07-29 실측:
-        //     k3s 를 완전히 정지(파드 0)한 상태에서도 30080 → 301, 30443 → 200 이 나왔다.
-        //     (대조군 31234·39999 는 연결 거부. 즉 우연이 아니라 운영 nginx 가 받고 있다)
-        //   스테이징 게이트웨이가 죽어도 통과할 수 있는 검사는 없느니만 못하다.
-        //
-        // 대신 클러스터 안의 신호를 쓴다. gateway 에는 readinessProbe(GET / :80)가 있으므로
-        //   **Ready = nginx 가 실제로 응답한다**는 뜻이다. 파드 바깥에서 흉내 낼 필요가 없다.
-        //
-        // ⚠️ rollout status 만으로는 부족하다 — replicas 0 인 워크로드에서 **즉시 성공**한다.
-        //    staging-min 은 ai·mongodb 를 의도적으로 0 으로 두므로, 실수로 backend 가 0 이 돼도
-        //    "롤아웃 성공"으로 읽힌다. readyReplicas >= 1 을 따로 못 박는다.
+        // ── ① 파드가 실제로 Ready 인가 ────────────────────────────────────────
+        // ⚠️ rollout status 만으로는 부족하다 — **replicas 0 인 워크로드에서 즉시 성공**한다.
+        //    "롤아웃 성공"과 "떠 있는 파드가 있다"는 다른 말이다(S15P11B209-359 교훈).
         withCredentials([file(credentialsId: 'dodam-kubeconfig', variable: 'DEPLOYER_KUBECONFIG')]) {
           sh '''
             set -e
             export KUBECONFIG="$DEPLOYER_KUBECONFIG"
             fail=0
-            for d in backend gateway; do
+            for d in backend gateway ai; do
               ready="$(kubectl -n dodam get deployment "$d" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
               ready="${ready:-0}"
               if [ "$ready" -ge 1 ]; then
-                echo "   ✅ $d readyReplicas=$ready (readinessProbe 통과 = 실제 응답 중)"
+                echo "   ✅ $d readyReplicas=$ready"
               else
                 echo "   ❌ $d readyReplicas=$ready — 롤아웃은 끝났다지만 Ready 인 파드가 없다"
                 fail=1
               fi
             done
             [ "$fail" = "0" ] || exit 1
-            echo "✅ k3s 스테이징 워크로드 Ready 확인"
           '''
         }
+        // ── ② 공개 도메인 e2e ────────────────────────────────────────────────
+        // 컷오버 전에는 nginx 컨테이너 안에서 127.0.0.1 을 쳤다. 이제는 **사용자가 실제로
+        // 지나는 경로**(DNS → 공개 IP → hostPort → gateway 파드 → backend/ai)를 통째로 친다.
+        //   ⚠️ NodePort(30080/30443)로 검증하지 않는다. 이 호스트에서는 k3s 가 꺼져 있어도
+        //      응답이 오기 때문에 스테이징과 운영을 구분하지 못한다(2026-07-29 실측).
+        sh '''
+          set -e
+          base=https://i15b209.p.ssafy.io
+          check() {   # $1=경로  $2=기대코드
+            for i in $(seq 1 10); do
+              code=$(curl -s -o /dev/null -w '%{http_code}' -m 10 "$base$1" || echo 000)
+              [ "$code" = "$2" ] && { echo "   ✅ $1 → $code"; return 0; }
+              sleep 3
+            done
+            echo "   ❌ $1 → $code (기대 $2)"; return 1
+          }
+          fail=0
+          check /                 200 || fail=1
+          check /ai/health        200 || fail=1
+          check /api/v1/children  401 || fail=1   # 무토큰 차단 = 인증이 살아 있다는 뜻
+          check /legal/privacy/   200 || fail=1
+          [ "$fail" = "0" ] || { echo "  ✗ 공개 e2e 실패 — 롤백 판단 지점"; exit 1; }
+          echo "✅ k3s 배포 정상 + 공개 경로 e2e 통과"
+        '''
       }
     }
 
