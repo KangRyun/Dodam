@@ -230,13 +230,18 @@ def _generation_version() -> str:
     return f"pipeline={config.PIPELINE_VERSION};prompt={PROMPT_VERSION}"
 
 
-def _safe_follow_up(raw: str) -> str:
+def _safe_follow_up(raw) -> str:
     """보호자용 후속 질문을 안전하게 보장한다(S15P11B209-601).
 
     비어 있거나 단정 진단·과잉 추론 표현이 섞이면 안전한 기본 질문으로 대체한다. 후속 질문은
     보호자가 아이에게 그대로 건네는 문장이라, 진단성 표현을 그대로 내보내면 안 된다(제거).
+
+    모델이 스키마(문자열)를 벗어나 {questionText, questionPurpose} 객체로 주는 경우가 있어,
+    dict면 questionText만 뽑아낸다 — 안 그러면 dict가 통째로 문자열화돼 화면에 새어 나간다.
     """
-    text = (raw or "").strip()
+    if isinstance(raw, dict):
+        raw = raw.get("questionText", "")
+    text = str(raw or "").strip()
     if not text or report_safety.has_unsafe_expression(text):
         return DEFAULT_FOLLOW_UP_QUESTION
     return text
@@ -272,7 +277,8 @@ def _assemble(
         evidence_summary=str(data.get("evidenceSummary", "")),
         guardian_guidance=str(data.get("guardianGuidance", "")),
         # 후속 질문은 비었거나 진단성 표현이 섞이면 안전 기본값으로 대체·보장한다(S15P11B209-601).
-        follow_up_question=_safe_follow_up(str(data.get("followUpQuestion", ""))),
+        # raw를 그대로 넘긴다 — 객체({questionText,...})로 와도 _safe_follow_up이 questionText를 뽑는다.
+        follow_up_question=_safe_follow_up(data.get("followUpQuestion", "")),
         expert_review_required=bool(data.get("expertReviewRequired", False))
         or needs_expert_review,
         disclaimer=DISCLAIMER,
