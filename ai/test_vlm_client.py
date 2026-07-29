@@ -123,6 +123,22 @@ class FormatHintTest(unittest.TestCase):
     def test_empty(self):
         self.assertEqual(vlm_client._format_detections([]), "(탐지된 객체가 없어요)")
 
+    def test_uses_display_name_when_resolver_given(self):
+        # 서술 프롬프트에도 내부 클래스명이 아니라 표시명이 들어가야 한다(S15P11B209-711).
+        import htp_labels
+
+        detections = [
+            Detection(
+                label="기둥",
+                confidence=0.8,
+                bbox_xyxy=(0.0, 0.0, 1.0, 1.0),
+                bbox_norm_xywh=(0.4, 0.3, 0.1, 0.4),
+            )
+        ]
+        text = vlm_client._format_detections(detections, htp_labels.display_name_of)
+        self.assertIn("나무 줄기", text)
+        self.assertNotIn("기둥", text)
+
 
 if __name__ == "__main__":
     unittest.main()

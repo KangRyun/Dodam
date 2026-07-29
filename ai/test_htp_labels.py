@@ -168,5 +168,51 @@ class SuppressCrossSubjectPartsTest(unittest.TestCase):
         self.assertEqual(htp_labels.suppress_cross_subject_parts([]), [])
 
 
+class DisplayNameTest(unittest.TestCase):
+    """표시명 분리 (S15P11B209-711).
+
+    표시명은 프롬프트·보호자 리포트에 그대로 나간다 — 내부 클래스명이 새면
+    LLM이 다른 뜻으로 읽는다(S15P11B209-709).
+    """
+
+    def test_every_class_has_a_display_name(self):
+        blank = [
+            name
+            for name, spec in htp_labels._SPEC_BY_CLASS.items()
+            if not spec.display_name.strip()
+        ]
+        self.assertEqual(blank, [])
+
+    def test_trunk_is_not_read_as_a_building_pillar(self):
+        # 709의 직접 원인 — '기둥'이 그대로 나가면 LLM이 집으로 읽는다.
+        self.assertEqual(htp_labels.display_name_of("기둥"), "나무 줄기")
+
+    def test_whole_subjects_drop_the_internal_suffix(self):
+        self.assertEqual(htp_labels.display_name_of("집전체"), "집")
+        self.assertEqual(htp_labels.display_name_of("나무전체"), "나무")
+        self.assertEqual(htp_labels.display_name_of("사람전체"), "사람")
+
+    def test_background_tree_is_distinguishable_from_subject_tree(self):
+        # 둘 다 "나무"면 집 단계에서 배경 나무를 주제로 착각한다(709 원인 1).
+        self.assertNotEqual(
+            htp_labels.display_name_of("나무"), htp_labels.display_name_of("나무전체")
+        )
+
+    def test_plain_class_names_pass_through(self):
+        # 표에 표시명을 적지 않은 것은 클래스명이 곧 자연어다.
+        self.assertEqual(htp_labels.display_name_of("지붕"), "지붕")
+        self.assertEqual(htp_labels.display_name_of("창문"), "창문")
+
+    def test_contract_labels_are_unchanged_by_display_names(self):
+        # 표시명은 사람이 읽는 값일 뿐 — BE 저장·집계 키는 그대로여야 한다.
+        self.assertEqual(htp_labels.to_contract_label("기둥"), "TREE_TRUNK")
+        self.assertEqual(htp_labels.to_contract_label("집전체"), "HOUSE")
+
+    def test_unknown_class_does_not_leak_raw_name(self):
+        spec = htp_labels.spec_of("존재하지않는클래스")
+        self.assertEqual(spec.contract_label, htp_labels.UNKNOWN_LABEL)
+        self.assertNotIn("존재하지않는클래스", spec.display_name)
+
+
 if __name__ == "__main__":
     unittest.main()
