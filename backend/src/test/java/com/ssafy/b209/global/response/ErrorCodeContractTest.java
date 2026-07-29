@@ -22,6 +22,7 @@ import com.ssafy.b209.drawing.exception.DrawingErrorCode;
 import com.ssafy.b209.infrastructure.ai.image.AiImageAccessErrorCode;
 import com.ssafy.b209.notification.exception.NotificationErrorCode;
 import com.ssafy.b209.report.exception.MockObservationReportErrorCode;
+import com.ssafy.b209.report.exception.ReportExportErrorCode;
 import com.ssafy.b209.storage.audio.AudioStorageErrorCode;
 import com.ssafy.b209.storage.image.ImageStorageErrorCode;
 import com.ssafy.b209.user.exception.UserErrorCode;
@@ -102,6 +103,7 @@ class ErrorCodeContractTest {
     Collections.addAll(errorCodes, CommunityPostDetailErrorCode.values());
     Collections.addAll(errorCodes, NotificationErrorCode.values());
     Collections.addAll(errorCodes, MockObservationReportErrorCode.values());
+    Collections.addAll(errorCodes, ReportExportErrorCode.values());
     Collections.addAll(errorCodes, ImageStorageErrorCode.values());
     Collections.addAll(errorCodes, AudioStorageErrorCode.values());
     Collections.addAll(errorCodes, AiImageAccessErrorCode.values());
