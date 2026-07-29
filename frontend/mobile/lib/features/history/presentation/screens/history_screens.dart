@@ -8,6 +8,7 @@ import '../../../../app/state/guardian_child_controller.dart';
 import '../../../../app/widgets/app_failure_view.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../activity/data/dto/activity_dtos.dart';
+import '../../../activity/domain/models/activity_conversation_turn.dart';
 import '../../../activity/domain/repositories/activity_repository.dart';
 import '../../../child/data/dto/child_dtos.dart';
 
@@ -928,7 +929,10 @@ class _ActivityDetailContent extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final left = _ActivityArtwork(activity: activity, repository: repository);
-      final right = _ActivityInformation(activity: activity);
+      final right = _ActivityInformation(
+        activity: activity,
+        repository: repository,
+      );
       return SingleChildScrollView(
         key: ValueKey(
           constraints.maxWidth >= 900
@@ -962,13 +966,6 @@ class _ActivityArtwork extends StatelessWidget {
   const _ActivityArtwork({required this.activity, required this.repository});
   final ActivityDetailDto activity;
   final ActivityRepository repository;
-
-  ActivityAssetDto? get _asset {
-    for (final asset in activity.assets.reversed) {
-      if (asset.assetType == 'FINAL') return asset;
-    }
-    return activity.assets.lastOrNull;
-  }
 
   @override
   Widget build(BuildContext context) => Column(
@@ -1006,7 +1003,7 @@ class _ActivityArtwork extends StatelessWidget {
           ),
           clipBehavior: Clip.antiAlias,
           child: AuthenticatedImage(
-            url: _asset?.fileUrl,
+            url: activity.latestAsset?.fileUrl,
             fetcher: repository.downloadImage,
             fit: BoxFit.contain,
             placeholderBuilder: (_) => const _DetailImagePlaceholder(),
@@ -1018,8 +1015,12 @@ class _ActivityArtwork extends StatelessWidget {
 }
 
 class _ActivityInformation extends StatelessWidget {
-  const _ActivityInformation({required this.activity});
+  const _ActivityInformation({
+    required this.activity,
+    required this.repository,
+  });
   final ActivityDetailDto activity;
+  final ActivityRepository repository;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -1057,35 +1058,19 @@ class _ActivityInformation extends StatelessWidget {
                   Chip(label: Text(_emotionLabel(emotion))),
               ],
             ),
-          if (activity.expressedEmotionText case final text?) ...[
-            const SizedBox(height: AppSpacing.md),
-            Text('“$text”', style: const TextStyle(color: AppColors.ink)),
-          ],
         ],
       ),
       const SizedBox(height: AppSpacing.md),
-      _DetailSection(
-        title: '대화 정보',
-        key: const ValueKey('activity-detail-conversation'),
-        children: [
-          if (activity.conversation case final conversation?) ...[
-            _DetailLine(label: '대화 상태', value: conversation.conversationStatus),
-            _DetailLine(label: '질문 수', value: '${conversation.questionCount}개'),
-            if (conversation.completedAt case final completedAt?)
-              _DetailLine(label: '대화 완료', value: _dateTime(completedAt)),
-          ] else
-            const Text(
-              '이 활동에서 제공된 대화 정보가 없어요.',
-              style: TextStyle(color: AppColors.inkMuted),
-            ),
-        ],
+      _ConversationSection(
+        conversationId: activity.conversationId,
+        repository: repository,
       ),
       const SizedBox(height: AppSpacing.md),
       _DetailSection(
         title: '분석과 관찰 요약',
         key: const ValueKey('activity-detail-analysis'),
         children: [
-          if (activity.analysis case final analysis?)
+          if (activity.latestAnalysis case final analysis?)
             _DetailLine(label: '분석 상태', value: analysis.analysisStatus)
           else
             const Text(
@@ -1094,19 +1079,420 @@ class _ActivityInformation extends StatelessWidget {
             ),
         ],
       ),
-      if (activity.report case final report?) ...[
+      if (activity.reportId case final reportId?) ...[
         const SizedBox(height: AppSpacing.md),
         AppButton(
           key: const ValueKey('activity-report-cta'),
           label: '관찰 리포트 보기',
           onPressed: () => AppNavigation.pushNamed(
             context,
-            AppRoutes.report(report.reportId.toString()),
+            AppRoutes.report(reportId.toString()),
           ),
         ),
       ],
     ],
   );
+}
+
+// ── 그림 · AI 질문 · 아동 답변 상세 ────────────────────────────────────
+
+/// 활동에 연결된 대화의 질문과 아동 답변을 순서대로 보여준다.
+///
+/// 활동 상세 조회와 따로 불러오고 따로 실패한다. 대화를 불러오지 못해도
+/// 그림과 활동 기본 정보는 그대로 남고, 이 영역만 재시도할 수 있다.
+class _ConversationSection extends StatefulWidget {
+  const _ConversationSection({
+    required this.conversationId,
+    required this.repository,
+  });
+
+  final int? conversationId;
+  final ActivityRepository repository;
+
+  @override
+  State<_ConversationSection> createState() => _ConversationSectionState();
+}
+
+enum _ConversationStatus { loading, success, empty, error, none }
+
+class _ConversationSectionState extends State<_ConversationSection> {
+  _ConversationStatus _status = _ConversationStatus.loading;
+  List<ActivityConversationTurn> _turns = const [];
+  Object? _failure;
+
+  /// 조회를 시작한 순서표. 활동을 바꿔 다시 부르면 값이 올라가므로, 늦게
+  /// 도착한 지난 응답이 새 화면을 덮어쓰지 못한다.
+  int _loadToken = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void didUpdateWidget(_ConversationSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.conversationId != widget.conversationId ||
+        oldWidget.repository != widget.repository) {
+      unawaited(_load());
+    }
+  }
+
+  Future<void> _load() async {
+    final conversationId = widget.conversationId;
+    final token = ++_loadToken;
+    if (conversationId == null) {
+      // 대화가 없는 활동이다 — 메시지 API를 부르지 않는다.
+      if (mounted) {
+        setState(() {
+          _status = _ConversationStatus.none;
+          _turns = const [];
+          _failure = null;
+        });
+      }
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _status = _ConversationStatus.loading;
+      _failure = null;
+    });
+    try {
+      final messages = await widget.repository.getConversationMessages(
+        conversationId,
+      );
+      if (!mounted || token != _loadToken) return;
+      final turns = ActivityConversationTurn.group(messages);
+      setState(() {
+        _turns = turns;
+        _status = turns.isEmpty
+            ? _ConversationStatus.empty
+            : _ConversationStatus.success;
+      });
+    } on Object catch (error) {
+      if (!mounted || token != _loadToken) return;
+      setState(() {
+        _failure = error;
+        _status = _ConversationStatus.error;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => _DetailSection(
+    title: '그림에 대한 대화',
+    key: const ValueKey('activity-detail-conversation'),
+    children: [_body()],
+  );
+
+  Widget _body() => switch (_status) {
+    _ConversationStatus.none => const Text(
+      key: ValueKey('activity-detail-conversation-none'),
+      '이 활동에서 제공된 대화 정보가 없어요.',
+      style: TextStyle(color: AppColors.inkMuted),
+    ),
+    _ConversationStatus.loading => const Padding(
+      key: ValueKey('activity-detail-conversation-loading'),
+      padding: EdgeInsets.symmetric(vertical: AppSpacing.lg),
+      child: AppLoadingView(message: '대화를 불러오고 있어요'),
+    ),
+    _ConversationStatus.empty => const Padding(
+      key: ValueKey('activity-detail-conversation-empty'),
+      padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+      child: AppEmptyView(
+        title: '아직 주고받은 대화가 없어요',
+        message: '아이가 질문에 답하면 이곳에서 확인할 수 있어요.',
+      ),
+    ),
+    _ConversationStatus.error => Padding(
+      key: const ValueKey('activity-detail-conversation-error'),
+      padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+      child: AppFailureView(
+        title: '대화를 불러오지 못했어요',
+        failure: _failure,
+        onRetry: _load,
+      ),
+    ),
+    _ConversationStatus.success => Column(
+      key: const ValueKey('activity-detail-conversation-turns'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final (index, turn) in _turns.indexed) ...[
+          if (index > 0) const SizedBox(height: AppSpacing.md),
+          _ConversationTurnView(turn: turn, index: index),
+        ],
+      ],
+    ),
+  };
+}
+
+class _ConversationTurnView extends StatelessWidget {
+  const _ConversationTurnView({required this.turn, required this.index});
+
+  final ActivityConversationTurn turn;
+  final int index;
+
+  @override
+  Widget build(BuildContext context) {
+    final question = turn.question;
+    final firstAnswerId = turn.answers.isEmpty
+        ? null
+        : turn.answers.first.messageId;
+    final turnKey = switch ((question?.messageId, firstAnswerId)) {
+      (final questionId?, _) => 'conversation-turn-$questionId',
+      (_, final answerId?) => 'conversation-turn-orphan-$answerId',
+      _ => 'conversation-turn-empty-$index',
+    };
+    return Container(
+      key: ValueKey(turnKey),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceSoft,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.outline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (question != null) _QuestionView(question: question),
+          if (question != null && turn.answers.isNotEmpty)
+            const SizedBox(height: AppSpacing.sm),
+          for (final (index, answer) in turn.answers.indexed) ...[
+            if (index > 0) const SizedBox(height: AppSpacing.xs),
+            _AnswerView(answer: answer),
+          ],
+          if (question != null && turn.hasNoAnswer) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _AnswerBubble(
+              label: '아이 답변',
+              body: question.isSkipped ? '이 질문은 건너뛰었어요.' : '아직 답변이 없어요.',
+              muted: true,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _QuestionView extends StatelessWidget {
+  const _QuestionView({required this.question});
+  final ActivityConversationMessageDto question;
+
+  @override
+  Widget build(BuildContext context) {
+    final text = question.rawText;
+    final target = question.targetObject?.objectName;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _MessageHeader(
+          createdAt: question.createdAt,
+          badges: [
+            const _Pill(
+              label: '도담이 질문',
+              fg: AppColors.leaf,
+              bg: AppColors.leafSoft,
+            ),
+            if (question.isSkipped)
+              const _Pill(
+                label: '건너뛴 질문',
+                fg: AppColors.warning,
+                bg: AppColors.warningSoft,
+              ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Semantics(
+          label: 'AI 질문. ${text ?? '질문 내용을 표시할 수 없어요.'}',
+          child: ExcludeSemantics(
+            child: Text(
+              text ?? '질문 내용을 표시할 수 없어요.',
+              style: TextStyle(
+                color: text == null ? AppColors.inkMuted : AppColors.ink,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ),
+        if (target != null) ...[
+          const SizedBox(height: AppSpacing.xxs),
+          Text(
+            '그림 속 “$target”에 대해 물었어요',
+            style: const TextStyle(color: AppColors.inkMuted, fontSize: 12),
+          ),
+        ],
+        if (question.options.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Semantics(
+            label:
+                '질문 선택지. '
+                '${question.options.map((option) => option.label).join(', ')}',
+            child: ExcludeSemantics(
+              child: Wrap(
+                spacing: AppSpacing.xxs,
+                runSpacing: AppSpacing.xxs,
+                children: [
+                  for (final option in question.options)
+                    _Pill(
+                      label: option.emoji == null
+                          ? option.label
+                          : '${option.emoji} ${option.label}',
+                      fg: AppColors.inkMuted,
+                      bg: AppColors.surface,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _AnswerView extends StatelessWidget {
+  const _AnswerView({required this.answer});
+  final ActivityConversationMessageDto answer;
+
+  @override
+  Widget build(BuildContext context) {
+    final (body, muted) = _answerBody(answer);
+    return _AnswerBubble(
+      label: '아이 답변',
+      body: body,
+      muted: muted,
+      createdAt: answer.createdAt,
+    );
+  }
+}
+
+/// 배지 묶음과 오른쪽 시각으로 이루어진 메시지 머리글.
+///
+/// 배지를 [Wrap]에 담아 [Expanded]로 감싼다. 글자 확대(textScale)에서 배지가
+/// 커지면 줄을 접어 내려가고 시각은 오른쪽에 남는다 — 한 줄 [Row]로 두면
+/// 확대 시 오른쪽으로 넘친다.
+class _MessageHeader extends StatelessWidget {
+  const _MessageHeader({required this.badges, this.createdAt});
+  final List<Widget> badges;
+  final String? createdAt;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    crossAxisAlignment: CrossAxisAlignment.center,
+    children: [
+      Expanded(
+        child: Wrap(
+          spacing: AppSpacing.xxs,
+          runSpacing: AppSpacing.xxs,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: badges,
+        ),
+      ),
+      if (createdAt case final createdAt?) ...[
+        const SizedBox(width: AppSpacing.xxs),
+        Text(
+          _time(createdAt),
+          style: const TextStyle(color: AppColors.inkMuted, fontSize: 11.5),
+        ),
+      ],
+    ],
+  );
+}
+
+class _AnswerBubble extends StatelessWidget {
+  const _AnswerBubble({
+    required this.label,
+    required this.body,
+    required this.muted,
+    this.createdAt,
+  });
+  final String label, body;
+  final bool muted;
+  final String? createdAt;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: '$label. $body',
+    child: ExcludeSemantics(
+      child: Container(
+        padding: const EdgeInsets.all(AppSpacing.sm),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.sm),
+          border: Border.all(color: AppColors.outline),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _MessageHeader(
+              createdAt: createdAt,
+              badges: [
+                _Pill(
+                  label: label,
+                  fg: AppColors.lavender,
+                  bg: AppColors.lavenderSoft,
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.xxs),
+            Text(
+              body,
+              style: TextStyle(
+                color: muted ? AppColors.inkMuted : AppColors.ink,
+                height: 1.4,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+/// 답변 메시지 하나를 보호자가 읽을 문장과 "내용 없음" 여부로 바꾼다.
+///
+/// 알 수 없는 메시지 유형이 와도 담긴 Text를 최선으로 보여주고, 그것마저
+/// 없으면 안내 문구로 대체한다. 대화 전체가 실패하지 않는 것이 우선이다.
+(String, bool) _answerBody(ActivityConversationMessageDto answer) {
+  if (answer.isSkipped) return ('이 질문은 건너뛰었어요.', true);
+  return switch (answer.messageType) {
+    'ANSWER_OPTION' => _optionAnswerBody(answer),
+    'ANSWER_VOICE' => _voiceAnswerBody(answer),
+    _ => switch (answer.sttText ?? answer.rawText) {
+      final text? when text.isNotEmpty => (text, false),
+      _ => ('답변 내용이 저장되지 않았어요.', true),
+    },
+  };
+}
+
+(String, bool) _optionAnswerBody(ActivityConversationMessageDto answer) {
+  final selected = answer.selectedResponse;
+  final labels = [
+    for (final option in selected?.selectedOptions ?? const [])
+      option.labelSnapshot,
+  ]..removeWhere((label) => label.isEmpty);
+  final directText = selected?.directText ?? answer.rawText;
+  final parts = [
+    if (labels.isNotEmpty) labels.join(', '),
+    if (directText != null && directText.isNotEmpty) '“$directText”',
+  ];
+  return parts.isEmpty
+      ? ('답변 내용이 저장되지 않았어요.', true)
+      : (parts.join('\n'), false);
+}
+
+(String, bool) _voiceAnswerBody(ActivityConversationMessageDto answer) {
+  final text = answer.sttText;
+  if (text != null && text.isNotEmpty) return (text, false);
+  return switch (answer.speechStatus) {
+    'PENDING' || 'PROCESSING' => ('목소리를 글로 바꾸고 있어요.', true),
+    'FAILED' => ('목소리를 글로 바꾸지 못했어요. 녹음한 답변은 안전하게 보관했어요.', true),
+    _ => ('답변 내용이 저장되지 않았어요.', true),
+  };
 }
 
 class _DetailCard extends StatelessWidget {
@@ -1204,6 +1590,15 @@ String _dateTime(String isoDate) {
   String two(int value) => value.toString().padLeft(2, '0');
   return '${parsed.year}.${two(parsed.month)}.${two(parsed.day)} '
       '${two(parsed.hour)}:${two(parsed.minute)}';
+}
+
+/// 메시지 순서를 읽기 쉽게 보여주는 시:분. 서버 `createdAt`은 대화 내역에서
+/// Offset 없는 LocalDateTime으로 오므로 그대로 읽고 변환하지 않는다.
+String _time(String isoDateTime) {
+  final parsed = DateTime.tryParse(isoDateTime);
+  if (parsed == null) return isoDateTime;
+  String two(int value) => value.toString().padLeft(2, '0');
+  return '${two(parsed.hour)}:${two(parsed.minute)}';
 }
 
 String _emotionLabel(String emotion) => switch (emotion) {

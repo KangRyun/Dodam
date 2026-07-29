@@ -410,6 +410,7 @@ final class _ActivityRepository implements ActivityRepository {
       ActivityDetailDto(
         activityId: activityId,
         childId: 3,
+        childNickname: '도담이',
         title: '우리 가족',
         drawingType: const ActivityDrawingTypeDto(
           code: 'ART_DIARY',
@@ -419,17 +420,12 @@ final class _ActivityRepository implements ActivityRepository {
         sessionStatus: 'COMPLETED',
         currentStage: 'COMPLETED',
         selectedEmotions: const ['JOY'],
-        expressedEmotionText: null,
         startedAt: '2026-07-20T09:40:00Z',
         completedAt: '2026-07-20T10:03:00Z',
-        assets: const [],
-        conversation: null,
-        analysis: null,
-        report: const ActivityReportSummaryDto(
-          reportId: 777,
-          reportStatus: 'COMPLETED',
-          reportVersion: 1,
-        ),
+        latestAsset: null,
+        latestAnalysis: null,
+        conversationId: null,
+        reportId: 777,
       );
 
   @override
@@ -440,6 +436,11 @@ final class _ActivityRepository implements ActivityRepository {
 
   @override
   Future<void> deleteActivity(int activityId) => throw UnimplementedError();
+
+  @override
+  Future<List<ActivityConversationMessageDto>> getConversationMessages(
+    int conversationId,
+  ) => throw UnimplementedError();
 
   @override
   Future<Uint8List> downloadImage(String url) => throw UnimplementedError();

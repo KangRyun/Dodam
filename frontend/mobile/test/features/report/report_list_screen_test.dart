@@ -261,6 +261,11 @@ final class _NoReportActivityRepository implements ActivityRepository {
       throw UnimplementedError();
 
   @override
+  Future<List<ActivityConversationMessageDto>> getConversationMessages(
+    int conversationId,
+  ) => throw UnimplementedError();
+
+  @override
   Future<Uint8List> downloadImage(String url) => throw UnimplementedError();
 }
 
