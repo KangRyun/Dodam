@@ -132,13 +132,24 @@ spec:
           ports:
             - { name: http,     containerPort: 8080 }
             - { name: telemetry, containerPort: 8081 }
+          # ⚠️ KSM v2.14 는 헬스 엔드포인트를 **두 포트에 나눠** 놓았다. 직관에 반한다 —
+          #   실측(2026-07-30, 파드에 직접 요청):
+          #                 8080(메인)   8081(텔레메트리)
+          #       /livez       200            404
+          #       /healthz     200            404
+          #       /readyz      404            200
+          #   즉 readiness 는 8081, **liveness 는 8080** 이다. 처음엔 둘 다 8081 에 붙였고
+          #   liveness 만 404 를 받아 20초마다 재시작됐다(재시작 11회). k8s 프로브는 404 를
+          #   실패로 세므로, "Running 인데 주기적으로 죽는" 눈에 잘 안 띄는 형태가 된다.
           readinessProbe:
             httpGet: { path: /readyz, port: 8081 }
             periodSeconds: 10
+            timeoutSeconds: 5
             failureThreshold: 3
           livenessProbe:
-            httpGet: { path: /healthz, port: 8081 }
+            httpGet: { path: /livez, port: 8080 }
             periodSeconds: 20
+            timeoutSeconds: 5     # 기본 1초는 짧다(mongodb 에서 같은 함정을 겪었다)
             failureThreshold: 5
           resources:
             # 오브젝트 수가 적은 단일 노드 클러스터다(파드 10개 안팎). 통상 40MiB 수준.
