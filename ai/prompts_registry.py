@@ -23,8 +23,10 @@ PROMPT_DIR = Path(__file__).parent / "prompts"
 # 프롬프트 파일별 의미 버전(semver). 프롬프트를 의미 있게 바꾸면 여기 값을 올린다.
 # ⚠️ 키를 추가/삭제하면 verify_prompt_files()가 파일과의 불일치를 잡는다.
 _PROMPT_SEMVER: dict[str, str] = {
-    "first_question": "1.1.0",
-    "conversations": "1.1.0",
+    # S15P11B209-704: 그림 서술(VLM)을 {drawing_analysis} 재료로 받기 시작.
+    #   서술을 그대로 인용하지 말 것·단정 표현 금지·색/표정/구도 질문 허용 규칙 추가.
+    "first_question": "1.2.0",
+    "conversations": "1.2.0",
     "guardrails": "1.0.0",
     "drawing_description": "1.0.0",
     "report": "1.2.0",  # S15P11B209-601: 진단 표현 금지 강화·한계 고지·후속 질문 목적 명시

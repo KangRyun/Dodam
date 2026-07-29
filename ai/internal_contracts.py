@@ -80,6 +80,12 @@ class QuestionRequest(_CamelModel):
     current_question_count: int
     max_question_count: int
     detected_objects: list[DetectedObject] = Field(default_factory=list)
+    # 그림 서술(VLM) — 분석에서 만든 2~4문장 한국어 관찰 서술(S15P11B209-704).
+    #   출처: AnalysisResponse.observationDraft.overallSummary
+    #        (BE 저장 위치: analysis_observation_results.overall_summary)
+    #   왜 필요한가: 객체 이름 목록만으로는 색·표정·구도·크기 관계를 물을 수 없다.
+    #   ⚠️ 선택 필드다. BE 가 보내지 않으면 기존 객체 기반 질문으로 그대로 동작한다.
+    drawing_description: str | None = None
     recent_messages: list[RecentMessage] = Field(default_factory=list)
     safety_rule_version: str
 

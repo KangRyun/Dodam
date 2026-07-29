@@ -15,6 +15,7 @@ import unittest
 from unittest import mock
 
 import child_screen_guard
+import config
 import crisis_guidance
 import llm_client
 import question_safety
@@ -94,6 +95,68 @@ class BuildMessagesTest(unittest.TestCase):
         self.assertIn(rule["length"], system)
         self.assertIn(rule["vocabulary"], system)
         self.assertIn(rule["tone"], system)
+
+    # ── 그림 서술(VLM) 전달 — S15P11B209-704 ──────────────────────────────
+    def test_drawing_description_reaches_the_prompt(self):
+        """서술이 있으면 프롬프트에 들어간다. 색·표정 질문이 가능해지는 근거다."""
+        system = question_service._build_messages(
+            _request(drawing_description="하늘을 검게 칠했고 사람이 활짝 웃고 있어요.")
+        )[0]["content"]
+        self.assertIn("하늘을 검게 칠했고", system)
+        self.assertIn("활짝 웃고", system)
+
+    def test_description_and_objects_are_both_kept(self):
+        """서술이 객체 목록을 대체하지 않는다 — 서로 보완한다."""
+        system = question_service._build_messages(
+            _request(drawing_description="큰 집 옆에 나무가 있어요.")
+        )[0]["content"]
+        self.assertIn("큰 집 옆에", system)
+        self.assertIn("집전체", system)  # 탐지 객체도 그대로 남는다
+
+    def test_missing_description_keeps_object_only_behaviour(self):
+        """BE가 서술을 안 보내면(분석 실패·구버전) 기존 동작 그대로."""
+        system = question_service._build_messages(_request(drawing_description=None))[0][
+            "content"
+        ]
+        self.assertIn("집전체", system)
+
+    def test_no_description_and_no_objects_falls_back_to_placeholder(self):
+        system = question_service._build_messages(
+            _request(detected_objects=[], drawing_description=None)
+        )[0]["content"]
+        self.assertIn(llm_client.NO_ANALYSIS, system)
+
+    def test_blank_description_is_treated_as_absent(self):
+        """공백만 있는 서술이 빈 [그림 분석 결과] 절을 만들지 않게 한다."""
+        self.assertIsNone(question_service._truncate_description("   "))
+        self.assertIsNone(question_service._truncate_description(""))
+
+    def test_long_description_is_truncated_with_ellipsis(self):
+        """상한 초과 시 자르고, 잘랐다는 사실을 말줄임표로 남긴다."""
+        limit = config.QUESTION_DESCRIPTION_MAX_CHARS
+        cut = question_service._truncate_description("가" * (limit + 50))
+        self.assertEqual(len(cut), limit + 1)  # 본문 limit + 말줄임표 1
+        self.assertTrue(cut.endswith("…"))
+
+    def test_prompt_forbids_quoting_the_description_verbatim(self):
+        """서술을 그대로 읽어주지 말라는 지시가 프롬프트에 있어야 한다.
+
+        이게 빠지면 VLM 서술 문장이 아이에게 그대로 나간다 — 진단형 표현이 섞여
+        있으면 아이가 그것을 듣게 된다(CLAUDE.md 9절).
+        """
+        system = question_service._build_messages(
+            _request(drawing_description="집이 있어요.")
+        )[0]["content"]
+        self.assertIn("참고 자료", system)
+        self.assertIn("그대로", system)
+
+    def test_description_detail_is_not_logged_when_detail_off(self):
+        """상세 로그가 꺼져 있으면 서술 내용은 남기지 않되 존재 사실은 남긴다."""
+        req = _request(drawing_description="아이가 검은 하늘을 그렸어요.")
+        with mock.patch.object(config, "DETECTION_LOG_DETAIL", False):
+            line = question_service._format_objects_for_log(req)
+        self.assertNotIn("검은 하늘", line)
+        self.assertIn("서술있음", line)
 
     def test_each_difficulty_injects_its_own_rules(self):
         for difficulty, rule in question_service._DIFFICULTY_RULES.items():
