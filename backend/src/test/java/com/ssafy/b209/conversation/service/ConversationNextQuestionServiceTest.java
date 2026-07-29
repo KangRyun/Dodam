@@ -12,7 +12,12 @@ import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
 import com.ssafy.b209.analysis.domain.DrawingCoordinateSpace;
 import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
+import com.ssafy.b209.analysis.dto.DrawingAnalysisSubject;
+import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
+import com.ssafy.b209.analysis.service.DrawingAnalysisActivityContext;
+import com.ssafy.b209.analysis.service.DrawingAnalysisActivityContextResolver;
 import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.child.repository.ChildRepository;
 import com.ssafy.b209.conversation.domain.ConversationHistoryMessage;
@@ -36,9 +41,12 @@ import com.ssafy.b209.conversation.repository.ConversationHistoryMessageReposito
 import com.ssafy.b209.conversation.repository.ConversationHistoryOptionRepository;
 import com.ssafy.b209.conversation.repository.ConversationMessageRepository;
 import com.ssafy.b209.conversation.repository.ConversationMessageSelectedOptionRepository;
+import com.ssafy.b209.conversation.repository.ConversationMessageTargetRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartAuthorizationRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartDrawingSessionRepository;
+import com.ssafy.b209.drawing.domain.DrawingSession;
+import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
 import java.time.Instant;
@@ -66,12 +74,16 @@ class ConversationNextQuestionServiceTest {
   private ConversationMessageSelectedOptionRepository conversationMessageSelectedOptionRepository;
 
   @Mock private ConversationStartDrawingSessionRepository drawingSessionRepository;
+  @Mock private ConversationMessageTargetRepository conversationMessageTargetRepository;
+  @Mock private DrawingSessionRepository drawingSessionDetailRepository;
+  @Mock private DrawingAnalysisActivityContextResolver activityContextResolver;
   @Mock private ConversationStartAuthorizationRepository authorizationRepository;
   @Mock private ChildRepository childRepository;
   @Mock private DrawingAnalysisRepository drawingAnalysisRepository;
   @Mock private ConversationQuestionService questionService;
   @Mock private ConversationSession session;
   @Mock private ConversationStartDrawingSession drawingSession;
+  @Mock private DrawingSession drawingSessionDetail;
   @Mock private Child child;
 
   private ConversationNextQuestionService service;
@@ -86,6 +98,9 @@ class ConversationNextQuestionServiceTest {
             conversationHistoryOptionRepository,
             conversationMessageSelectedOptionRepository,
             drawingSessionRepository,
+            conversationMessageTargetRepository,
+            drawingSessionDetailRepository,
+            activityContextResolver,
             authorizationRepository,
             childRepository,
             drawingAnalysisRepository,
@@ -253,6 +268,62 @@ class ConversationNextQuestionServiceTest {
             new DetectedObject("HOUSE", "집", 0.93, new BoundingBox(0.1, 0.2, 0.3, 0.4)));
   }
 
+  // ── HTP 주제·기질문 대상 조립 — S15P11B209-712 ─────────────────────────
+  @Test
+  void resolvesActivityTypeAndSubjectFromDrawingSession() {
+    stubAuthorizedConversation(false, true, true);
+    stubChildContext();
+    given(questionService.generateQuestion(any()))
+        .willReturn(new GeneratedQuestion(910L, "집에는 누가 사니?", false, 1, List.of(), null));
+
+    service.generate(
+        3L, 11L, new NextQuestionRequest(700L, null, List.of(PreferredResponseMode.VOICE)));
+
+    ArgumentCaptor<GenerateQuestionCommand> commandCaptor =
+        ArgumentCaptor.forClass(GenerateQuestionCommand.class);
+    verify(questionService).generateQuestion(commandCaptor.capture());
+    assertThat(commandCaptor.getValue().activityType()).isEqualTo("HTP");
+    assertThat(commandCaptor.getValue().drawingSubject()).isEqualTo("HOUSE");
+  }
+
+  @Test
+  void fallsBackToNullSubjectWhenResolverRejectsSession() {
+    stubAuthorizedConversation(false, true, true);
+    stubChildContext();
+    given(activityContextResolver.resolve(drawingSessionDetail))
+        .willThrow(new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED));
+    given(questionService.generateQuestion(any()))
+        .willReturn(new GeneratedQuestion(911L, "무엇을 그리고 있니?", false, 1, List.of(), null));
+
+    service.generate(
+        3L, 11L, new NextQuestionRequest(700L, null, List.of(PreferredResponseMode.VOICE)));
+
+    // 주제 확정 실패는 대화를 끊지 않는다 — 두 값은 null로 두고 계속 진행한다.
+    ArgumentCaptor<GenerateQuestionCommand> commandCaptor =
+        ArgumentCaptor.forClass(GenerateQuestionCommand.class);
+    verify(questionService).generateQuestion(commandCaptor.capture());
+    assertThat(commandCaptor.getValue().activityType()).isNull();
+    assertThat(commandCaptor.getValue().drawingSubject()).isNull();
+  }
+
+  @Test
+  void collectsAskedObjectCodesFromWholeConversation() {
+    stubAuthorizedConversation(false, true, true);
+    stubChildContext();
+    given(conversationMessageTargetRepository.findAskedObjectCodes(11L))
+        .willReturn(List.of("TREE", "SUN"));
+    given(questionService.generateQuestion(any()))
+        .willReturn(new GeneratedQuestion(912L, "해는 어디에 있니?", false, 2, List.of(), null));
+
+    service.generate(
+        3L, 11L, new NextQuestionRequest(700L, null, List.of(PreferredResponseMode.VOICE)));
+
+    ArgumentCaptor<GenerateQuestionCommand> commandCaptor =
+        ArgumentCaptor.forClass(GenerateQuestionCommand.class);
+    verify(questionService).generateQuestion(commandCaptor.capture());
+    assertThat(commandCaptor.getValue().askedObjectCodes()).containsExactly("TREE", "SUN");
+  }
+
   @Test
   void rejectsGuardianWithoutChildRelation() {
     given(conversationSessionRepository.findById(11L)).willReturn(Optional.of(session));
@@ -387,6 +458,17 @@ class ConversationNextQuestionServiceTest {
   private void stubChildContext() {
     given(childRepository.findById(7L)).willReturn(Optional.of(child));
     given(child.ageOn(any(LocalDate.class))).willReturn(8);
+    lenient()
+        .when(drawingSessionDetailRepository.findDetailById(101L))
+        .thenReturn(Optional.of(drawingSessionDetail));
+    lenient()
+        .when(activityContextResolver.resolve(drawingSessionDetail))
+        .thenReturn(
+            new DrawingAnalysisActivityContext(
+                DrawingAnalysisActivityType.HTP, DrawingAnalysisSubject.HOUSE));
+    lenient()
+        .when(conversationMessageTargetRepository.findAskedObjectCodes(11L))
+        .thenReturn(List.of());
   }
 
   private ConversationHistoryMessage historyMessage(

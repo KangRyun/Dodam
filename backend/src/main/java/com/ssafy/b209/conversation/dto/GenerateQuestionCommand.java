@@ -13,10 +13,15 @@ public record GenerateQuestionCommand(
     List<DetectedObject> detectedObjects,
     List<RecentMessage> recentMessages,
     String safetyRuleVersion,
-    Long previousAnswerMessageId) {
+    Long previousAnswerMessageId,
+    String activityType,
+    String drawingSubject,
+    List<String> askedObjectCodes) {
 
   /**
    * 이전 내부 호출과 호환되는 질문 생성 명령을 생성한다.
+   *
+   * <p>활동 유형·HTP 주제·기질문 대상 Code는 각각 {@code null}, {@code null}, 빈 리스트로 채워 구 호출부를 그대로 보존한다.
    *
    * @param conversationId 대화 세션 식별자
    * @param drawingSessionId 그림 활동 세션 식별자
@@ -45,6 +50,9 @@ public record GenerateQuestionCommand(
         detectedObjects,
         recentMessages,
         safetyRuleVersion,
-        null);
+        null,
+        null,
+        null,
+        List.of());
   }
 }

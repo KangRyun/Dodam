@@ -5,6 +5,8 @@ import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
 import com.ssafy.b209.analysis.domain.DrawingCoordinateSpace;
 import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
+import com.ssafy.b209.analysis.service.DrawingAnalysisActivityContext;
+import com.ssafy.b209.analysis.service.DrawingAnalysisActivityContextResolver;
 import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.child.repository.ChildRepository;
 import com.ssafy.b209.conversation.domain.ConversationHistoryMessage;
@@ -31,9 +33,12 @@ import com.ssafy.b209.conversation.repository.ConversationHistoryMessageReposito
 import com.ssafy.b209.conversation.repository.ConversationHistoryOptionRepository;
 import com.ssafy.b209.conversation.repository.ConversationMessageRepository;
 import com.ssafy.b209.conversation.repository.ConversationMessageSelectedOptionRepository;
+import com.ssafy.b209.conversation.repository.ConversationMessageTargetRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartAuthorizationRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartDrawingSessionRepository;
+import com.ssafy.b209.drawing.domain.DrawingSession;
+import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
 import java.time.LocalDate;
@@ -42,12 +47,15 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 
 /** 공개 다음 질문 요청의 권한·DTO 변환을 내부 AI 질문 생성 흐름에 연결한다. */
 @Service
 public class ConversationNextQuestionService {
+  private static final Logger log = LoggerFactory.getLogger(ConversationNextQuestionService.class);
   private static final String SAFETY_RULE_VERSION = "safety-2026-07";
   private static final int RECENT_MESSAGE_LIMIT = 10;
   private final ConversationSessionRepository conversationSessionRepository;
@@ -56,6 +64,9 @@ public class ConversationNextQuestionService {
   private final ConversationHistoryOptionRepository conversationHistoryOptionRepository;
   private final ConversationMessageSelectedOptionRepository selectedOptionRepository;
   private final ConversationStartDrawingSessionRepository drawingSessionRepository;
+  private final ConversationMessageTargetRepository conversationMessageTargetRepository;
+  private final DrawingSessionRepository drawingSessionDetailRepository;
+  private final DrawingAnalysisActivityContextResolver activityContextResolver;
   private final ConversationStartAuthorizationRepository authorizationRepository;
   private final ChildRepository childRepository;
   private final DrawingAnalysisRepository drawingAnalysisRepository;
@@ -71,6 +82,9 @@ public class ConversationNextQuestionService {
    * @param conversationHistoryOptionRepository 선택 답변의 옵션 Code 조회 경계
    * @param selectedOptionRepository 선택 답변의 Label과 선택 순서 조회 경계
    * @param drawingSessionRepository 그림 활동-아동 연결 조회 경계
+   * @param conversationMessageTargetRepository 대화에서 이미 질문한 대상 객체 Code 조회 경계
+   * @param drawingSessionDetailRepository 활동 유형·주제 확정을 위한 그림 세션 상세 조회 경계
+   * @param activityContextResolver 저장된 세션에서 활동 유형·HTP 주제를 확정하는 경계
    * @param authorizationRepository 보호자 관계·필수 동의 검증 경계
    * @param childRepository AI 최소 아동 문맥 조회 경계
    * @param drawingAnalysisRepository 분석 근거와 정규화 객체 조회 경계
@@ -84,6 +98,9 @@ public class ConversationNextQuestionService {
       ConversationHistoryOptionRepository conversationHistoryOptionRepository,
       ConversationMessageSelectedOptionRepository selectedOptionRepository,
       ConversationStartDrawingSessionRepository drawingSessionRepository,
+      ConversationMessageTargetRepository conversationMessageTargetRepository,
+      DrawingSessionRepository drawingSessionDetailRepository,
+      DrawingAnalysisActivityContextResolver activityContextResolver,
       ConversationStartAuthorizationRepository authorizationRepository,
       ChildRepository childRepository,
       DrawingAnalysisRepository drawingAnalysisRepository,
@@ -95,6 +112,9 @@ public class ConversationNextQuestionService {
     this.conversationHistoryOptionRepository = conversationHistoryOptionRepository;
     this.selectedOptionRepository = selectedOptionRepository;
     this.drawingSessionRepository = drawingSessionRepository;
+    this.conversationMessageTargetRepository = conversationMessageTargetRepository;
+    this.drawingSessionDetailRepository = drawingSessionDetailRepository;
+    this.activityContextResolver = activityContextResolver;
     this.authorizationRepository = authorizationRepository;
     this.childRepository = childRepository;
     this.drawingAnalysisRepository = drawingAnalysisRepository;
@@ -138,6 +158,9 @@ public class ConversationNextQuestionService {
             .orElseThrow(
                 () -> new BusinessException(ConversationErrorCode.CONVERSATION_SESSION_NOT_FOUND));
     List<ResponseMode> modes = toInternalModes(request.preferredResponseModes());
+    ActivityContext activityContext = resolveActivityContext(session.getDrawingSessionId());
+    List<String> askedObjectCodes =
+        conversationMessageTargetRepository.findAskedObjectCodes(conversationId);
     GeneratedQuestion generated =
         questionService.generateQuestion(
             new GenerateQuestionCommand(
@@ -149,9 +172,40 @@ public class ConversationNextQuestionService {
                 assembleDetectedObjects(session.getDrawingSessionId(), request.basisAnalysisId()),
                 assembleRecentMessages(conversationId),
                 SAFETY_RULE_VERSION,
-                request.previousAnswerMessageId()));
+                request.previousAnswerMessageId(),
+                activityContext.activityType(),
+                activityContext.drawingSubject(),
+                askedObjectCodes));
     return toResponse(conversationId, generated, modes.contains(ResponseMode.VOICE));
   }
+
+  /**
+   * 저장된 그림 세션 관계에서 AI에 전달할 활동 유형과 HTP 주제를 확정한다.
+   *
+   * <p>주제 확정에 실패하면({@link DrawingAnalysisActivityContextResolver}가 {@link BusinessException}을 던지면)
+   * 대화를 끊지 않고 두 값을 {@code null}로 둔다. 정상 데이터에서는 발생하지 않는 경로이므로 세션 식별자만 남겨 경고한다.
+   *
+   * @param drawingSessionId 현재 대화가 속한 그림 활동 식별자
+   * @return {@code enum.name()} 문자열로 담은 활동 유형·주제, 확정 실패 시 두 값 모두 {@code null}
+   */
+  private ActivityContext resolveActivityContext(Long drawingSessionId) {
+    DrawingSession drawingSession =
+        drawingSessionDetailRepository
+            .findDetailById(drawingSessionId)
+            .orElseThrow(
+                () -> new BusinessException(ConversationErrorCode.CONVERSATION_SESSION_NOT_FOUND));
+    try {
+      DrawingAnalysisActivityContext context = activityContextResolver.resolve(drawingSession);
+      return new ActivityContext(
+          context.activityType().name(),
+          context.drawingSubject() == null ? null : context.drawingSubject().name());
+    } catch (BusinessException exception) {
+      log.warn("Failed to resolve drawing subject context. drawingSessionId={}", drawingSessionId);
+      return new ActivityContext(null, null);
+    }
+  }
+
+  private record ActivityContext(String activityType, String drawingSubject) {}
 
   /**
    * 세션의 최근 질문·답변을 AI 요청용 최소 문맥으로 조립한다.
