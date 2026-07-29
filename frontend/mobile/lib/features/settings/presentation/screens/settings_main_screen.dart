@@ -341,6 +341,7 @@ class _AccountActions extends StatelessWidget {
     child: Column(
       children: [
         ListTile(
+          key: const ValueKey('settings-logout-action'),
           minTileHeight: 64,
           title: Text('로그아웃', style: AppTypography.bodyStrong),
           trailing: isSigningOut

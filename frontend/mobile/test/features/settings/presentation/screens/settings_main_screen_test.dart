@@ -40,4 +40,50 @@ void main() {
     expect(find.text('아이 관리'), findsNothing);
     expect(find.text('전문가 인증'), findsNothing);
   });
+
+  testWidgets('설정 로그아웃을 취소하면 세션 초기화를 요청하지 않는다', (tester) async {
+    var signOutCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsMainScreen(
+          user: session.user,
+          onSignOut: () async => signOutCount += 1,
+        ),
+      ),
+    );
+
+    final logoutAction = find.byKey(const ValueKey('settings-logout-action'));
+    await tester.ensureVisible(logoutAction);
+    await tester.tap(logoutAction);
+    await tester.pumpAndSettle();
+    expect(find.text('로그아웃할까요?'), findsOneWidget);
+
+    await tester.tap(find.text('취소'));
+    await tester.pumpAndSettle();
+
+    expect(signOutCount, 0);
+  });
+
+  testWidgets('설정 로그아웃을 확인하면 세션 초기화를 요청하고 로그인 화면으로 이동한다', (tester) async {
+    var signOutCount = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        routes: {'/auth/login': (_) => const Scaffold(body: Text('소셜 로그인'))},
+        home: SettingsMainScreen(
+          user: session.user,
+          onSignOut: () async => signOutCount += 1,
+        ),
+      ),
+    );
+
+    final logoutAction = find.byKey(const ValueKey('settings-logout-action'));
+    await tester.ensureVisible(logoutAction);
+    await tester.tap(logoutAction);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('로그아웃').last);
+    await tester.pumpAndSettle();
+
+    expect(signOutCount, 1);
+    expect(find.text('소셜 로그인'), findsOneWidget);
+  });
 }

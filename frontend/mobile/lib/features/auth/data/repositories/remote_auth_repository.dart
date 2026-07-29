@@ -184,8 +184,23 @@ final class RemoteAuthRepository
 
   @override
   Future<void> signOut() async {
-    _currentSession = null;
-    await _sessionStore.clear();
+    final session = _currentSession ?? await _sessionStore.read();
+    try {
+      if (session != null) {
+        await _apiClient().post<void>(
+          'auth/logout',
+          data: {
+            'refreshToken': session.tokens.refreshToken,
+            'deviceId': await _deviceIdProvider.getDeviceId(),
+          },
+        );
+      }
+    } on Object {
+      // 네트워크 장애가 있어도 기기에 남은 인증 정보는 반드시 제거한다.
+    } finally {
+      _currentSession = null;
+      await _sessionStore.clear();
+    }
   }
 
   Future<AuthSession> _saveSession(AuthSession session) async {

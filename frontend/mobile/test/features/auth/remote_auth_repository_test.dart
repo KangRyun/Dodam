@@ -288,6 +288,70 @@ void main() {
     expect(await repository.refreshAccessToken(), isFalse);
     expect(await store.read(), isNull);
   });
+
+  test('로그아웃 API에 현재 Refresh Token과 deviceId를 보내고 세션을 제거한다', () async {
+    final adapter = _QueuedResponseAdapter([
+      _successResponse(),
+      _emptySuccessResponse(),
+    ]);
+    final store = InMemoryAuthSessionStore();
+    late final ApiClient apiClient;
+    final repository = RemoteAuthRepository(
+      apiClient: () => apiClient,
+      deviceIdProvider: const _FixedDeviceIdProvider('install-001'),
+      sessionStore: store,
+    );
+    apiClient = ApiClient(
+      environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+      httpClientAdapter: adapter,
+    );
+    await repository.signIn(credential);
+
+    await repository.signOut();
+
+    expect(adapter.requests.last.path, 'auth/logout');
+    expect(adapter.requests.last.data, {
+      'refreshToken': 'service-refresh-token',
+      'deviceId': 'install-001',
+    });
+    expect(await repository.readAccessToken(), isNull);
+    expect(await store.read(), isNull);
+  });
+
+  test('로그아웃 API가 실패해도 기기의 인증 세션을 제거한다', () async {
+    final adapter = _QueuedResponseAdapter([
+      _successResponse(),
+      ResponseBody.fromString(
+        jsonEncode({
+          'success': false,
+          'code': 'COMMON_503',
+          'message': '인증 세션 저장소를 사용할 수 없습니다.',
+          'data': null,
+        }),
+        503,
+        headers: {
+          Headers.contentTypeHeader: [Headers.jsonContentType],
+        },
+      ),
+    ]);
+    final store = InMemoryAuthSessionStore();
+    late final ApiClient apiClient;
+    final repository = RemoteAuthRepository(
+      apiClient: () => apiClient,
+      deviceIdProvider: const _FixedDeviceIdProvider('install-001'),
+      sessionStore: store,
+    );
+    apiClient = ApiClient(
+      environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+      httpClientAdapter: adapter,
+    );
+    await repository.signIn(credential);
+
+    await repository.signOut();
+
+    expect(await repository.readAccessToken(), isNull);
+    expect(await store.read(), isNull);
+  });
 }
 
 ResponseBody _successResponse({
@@ -317,6 +381,19 @@ ResponseBody _successResponse({
             'onboardingCompleted': true,
           },
     },
+  }),
+  200,
+  headers: {
+    Headers.contentTypeHeader: [Headers.jsonContentType],
+  },
+);
+
+ResponseBody _emptySuccessResponse() => ResponseBody.fromString(
+  jsonEncode({
+    'success': true,
+    'code': 'COMMON_200',
+    'message': '요청이 성공했습니다.',
+    'data': null,
   }),
   200,
   headers: {
