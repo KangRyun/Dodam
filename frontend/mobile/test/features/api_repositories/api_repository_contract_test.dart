@@ -197,6 +197,37 @@ void main() {
       expect(detail.activityId, 120);
       expect(detail.assets, isEmpty);
     });
+    test('parses backend HISTORY-01 shape (drawingSessionId, 평면 report)', () {
+      // 실백엔드 활동 기록 목록은 drawingSessionId와 평면 reportId/reportStatus를
+      // 준다(중첩 report{} 아님). 매핑이 이 형태를 올바로 읽어야 한다.
+      final page = ApiPage.fromJson({
+        'content': [
+          {
+            'drawingSessionId': 120,
+            'title': '우리 집 그리기',
+            'drawingType': {'code': 'HTP_HOUSE', 'name': 'HTP 집'},
+            'inputMethod': 'CANVAS',
+            'sessionStatus': 'COMPLETED',
+            'currentStage': 'COMPLETED',
+            'selectedEmotions': ['HAPPY'],
+            'analysisStatus': 'COMPLETED',
+            'reportId': 501,
+            'reportStatus': 'COMPLETED',
+            'startedAt': '2026-07-21T08:10:00Z',
+            'completedAt': '2026-07-21T08:22:00Z',
+          },
+        ],
+        'page': 0,
+        'size': 20,
+        'totalElements': 1,
+        'totalPages': 1,
+        'hasNext': false,
+      }, ActivitySummaryDto.fromJson);
+      final item = page.content.single;
+      expect(item.activityId, 120);
+      expect(item.report?.reportId, 501);
+      expect(item.report?.reportStatus, 'COMPLETED');
+    });
   });
 
   group('Report and analysis contract', () {

@@ -15,15 +15,25 @@ enum _HistoryStatus { loading, success, empty, error, noChild }
 
 enum _PeriodFilter { all, recent30Days }
 
+enum _StatusFilter { all, done, analyzing, failed }
+
+enum _CardStatus { done, analyzing, failed, draft }
+
+/// 활동 기록 목록·상세 화면(시안). 좌측 목록+필터, 우측 선택 활동 프리뷰.
+///
+/// 사이드바 '기록' 탭에선 [embedded]로 자체 헤더/뒤로가기 없이 콘텐츠만 그려
+/// 셸 크롬과 겹치지 않는다. 단독 라우트에선 Scaffold와 뒤로가기를 제공한다.
 class ActivityHistoryScreen extends StatefulWidget {
   const ActivityHistoryScreen({
     required this.childController,
     required this.repository,
+    this.embedded = false,
     super.key,
   });
 
   final GuardianChildController childController;
   final ActivityRepository repository;
+  final bool embedded;
 
   @override
   State<ActivityHistoryScreen> createState() => _ActivityHistoryScreenState();
@@ -37,23 +47,31 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
   int? _selectedActivityId;
   String? _drawingType;
   _PeriodFilter _period = _PeriodFilter.all;
-
-  ActivitySummaryDto? get _selectedActivity {
-    for (final activity in _activities) {
-      if (activity.activityId == _selectedActivityId) return activity;
-    }
-    return null;
-  }
+  _StatusFilter _statusFilter = _StatusFilter.all;
 
   /// 마지막으로 불러온 아동. 컨트롤러는 여러 이유로 알림을 보내므로,
   /// 대상 아동이 실제로 바뀐 경우에만 다시 조회한다.
   int? _loadedChildId;
 
+  /// 상태 필터(클라이언트)를 적용한 보이는 목록.
+  List<ActivitySummaryDto> get _visible => _statusFilter == _StatusFilter.all
+      ? _activities
+      : _activities
+            .where((a) => _cardStatus(a) == _cardStatusOf(_statusFilter))
+            .toList(growable: false);
+
+  ActivitySummaryDto? get _selectedActivity {
+    final visible = _visible;
+    for (final activity in visible) {
+      if (activity.activityId == _selectedActivityId) return activity;
+    }
+    return visible.firstOrNull;
+  }
+
   @override
   void initState() {
     super.initState();
-    // 하단 탭의 뿌리로 살아 있는 동안 보호자가 아이를 바꿀 수 있다.
-    // 한 번만 불러오고 말면 그 화면은 옛 아이의 기록에 굳는다.
+    // 탭의 뿌리로 살아 있는 동안 보호자가 아이를 바꿀 수 있다.
     widget.childController.addListener(_onChildChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
@@ -89,12 +107,12 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
       final response = await widget.repository.getActivities(
         childId,
         filter: ActivityFilterDto(
+          // HISTORY-01 from/to는 date(yyyy-MM-dd) — datetime을 보내면 서버가
+          // 필터를 적용하지 못한다.
           from: _period == _PeriodFilter.recent30Days
-              ? now.subtract(const Duration(days: 30)).toIso8601String()
+              ? _isoDate(now.subtract(const Duration(days: 30)))
               : null,
-          to: _period == _PeriodFilter.recent30Days
-              ? now.toIso8601String()
-              : null,
+          to: _period == _PeriodFilter.recent30Days ? _isoDate(now) : null,
           drawingType: _drawingType,
         ),
       );
@@ -135,41 +153,93 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
     if (child == null) return;
     widget.childController.selectChild(child);
     _drawingType = null;
+    _statusFilter = _StatusFilter.all;
     _selectedActivityId = null;
     await _load();
   }
 
+  void _openReport(ActivitySummaryDto activity) {
+    final report = activity.report;
+    if (report == null) return;
+    AppNavigation.pushNamed(
+      context,
+      AppRoutes.report(report.reportId.toString()),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: AppColors.canvas,
-    appBar: AppTopBar(
-      title: '활동 이력',
-      onBack: () => Navigator.of(context).maybePop(),
+  Widget build(BuildContext context) {
+    final content = SafeArea(top: false, child: _content(context));
+    return widget.embedded
+        ? ColoredBox(color: AppColors.canvas, child: content)
+        : Scaffold(backgroundColor: AppColors.canvas, body: content);
+  }
+
+  Widget _content(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(
+      AppSpacing.lg,
+      AppSpacing.md,
+      AppSpacing.lg,
+      AppSpacing.lg,
     ),
-    body: SafeArea(
-      top: false,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final body = _buildBody();
-          if (constraints.maxWidth < 900) {
-            return Column(
-              children: [
-                _HistoryNavigation(compact: true),
-                Expanded(child: body),
-              ],
-            );
-          }
-          return Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const SizedBox(width: 220, child: _HistoryNavigation()),
-              const VerticalDivider(width: 1),
-              Expanded(child: body),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            if (!widget.embedded) ...[
+              IconButton(
+                key: const ValueKey('activity-history-back'),
+                onPressed: () => Navigator.of(context).maybePop(),
+                icon: const Icon(Icons.arrow_back_rounded),
+                color: AppColors.ink,
+              ),
+              const SizedBox(width: AppSpacing.xs),
             ],
-          );
-        },
-      ),
+            const Expanded(
+              child: Text(
+                '활동 기록',
+                style: TextStyle(
+                  color: AppColors.ink,
+                  fontSize: 24,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.md),
+        if (_status != _HistoryStatus.noChild &&
+            _status != _HistoryStatus.loading)
+          _buildFilters(),
+        if (_status != _HistoryStatus.noChild &&
+            _status != _HistoryStatus.loading)
+          const SizedBox(height: AppSpacing.md),
+        Expanded(child: _buildBody()),
+      ],
     ),
+  );
+
+  Widget _buildFilters() => _ActivityFilters(
+    children: widget.childController.children,
+    selectedChildId: widget.childController.selectedChildId,
+    period: _period,
+    drawingType: _drawingType,
+    drawingTypes: _knownTypes,
+    statusFilter: _statusFilter,
+    onChildChanged: _selectChild,
+    onPeriodChanged: (value) {
+      setState(() => _period = value);
+      _load();
+    },
+    onDrawingTypeChanged: (value) {
+      setState(() => _drawingType = value);
+      _load();
+    },
+    onStatusChanged: (value) => setState(() {
+      _statusFilter = value;
+      _selectedActivityId = _selectedActivity?.activityId;
+    }),
   );
 
   Widget _buildBody() => switch (_status) {
@@ -180,221 +250,70 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
     _HistoryStatus.noChild => const AppEmptyView(
       key: ValueKey('activity-history-no-child'),
       title: '확인할 아이를 먼저 선택해 주세요',
-      message: '보호자 홈에서 아이를 선택하면 활동 이력을 볼 수 있어요.',
+      message: '보호자 홈에서 아이를 선택하면 활동 기록을 볼 수 있어요.',
     ),
-    _HistoryStatus.empty => _HistoryContent(
-      filter: _buildFilter(),
-      content: const AppEmptyView(
-        key: ValueKey('activity-history-empty'),
-        title: '아직 활동 기록이 없어요',
-        message: '그림 활동을 마치면 이곳에서 기록을 확인할 수 있어요.',
-      ),
+    _HistoryStatus.empty => const AppEmptyView(
+      key: ValueKey('activity-history-empty'),
+      title: '아직 활동 기록이 없어요',
+      message: '그림 활동을 마치면 이곳에서 기록을 확인할 수 있어요.',
     ),
-    _HistoryStatus.error => _HistoryContent(
-      filter: _buildFilter(),
-      content: AppFailureView(
-        key: const ValueKey('activity-history-error'),
-        title: '활동 기록을 불러오지 못했어요',
-        failure: _failure,
-        onRetry: _load,
-      ),
+    _HistoryStatus.error => AppFailureView(
+      key: const ValueKey('activity-history-error'),
+      title: '활동 기록을 불러오지 못했어요',
+      failure: _failure,
+      onRetry: _load,
     ),
-    _HistoryStatus.success => _HistoryContent(
-      filter: _buildFilter(),
-      content: LayoutBuilder(
-        builder: (context, constraints) {
-          Widget list({bool embedded = false}) => _ActivityList(
-            activities: _activities,
-            selectedActivityId: _selectedActivityId,
-            embedded: embedded,
-            repository: widget.repository,
-            onSelected: (activityId) =>
-                setState(() => _selectedActivityId = activityId),
+    _HistoryStatus.success => LayoutBuilder(
+      builder: (context, constraints) {
+        Widget list({bool scrollable = true}) => _ActivityListView(
+          activities: _visible,
+          selectedActivityId: _selectedActivity?.activityId,
+          repository: widget.repository,
+          scrollable: scrollable,
+          onSelected: (activityId) =>
+              setState(() => _selectedActivityId = activityId),
+          onReport: _openReport,
+        );
+        final preview = _PreviewPane(
+          activity: _selectedActivity,
+          repository: widget.repository,
+          onReport: _openReport,
+        );
+        if (constraints.maxWidth < 760) {
+          return ListView(
+            key: const ValueKey('activity-history-small-layout'),
+            children: [
+              list(scrollable: false),
+              const SizedBox(height: AppSpacing.sm),
+              const _DeleteNotice(),
+              const SizedBox(height: AppSpacing.lg),
+              preview,
+            ],
           );
-          final summary = _ActivitySummary(
-            activity: _selectedActivity,
-            repository: widget.repository,
-          );
-          if (constraints.maxWidth < 760) {
-            return ListView(
-              key: const ValueKey('activity-history-small-layout'),
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              children: [
-                list(embedded: true),
-                const SizedBox(height: AppSpacing.lg),
-                summary,
-              ],
-            );
-          }
-          return Padding(
-            padding: const EdgeInsets.all(AppSpacing.lg),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(flex: 5, child: list()),
-                const SizedBox(width: AppSpacing.lg),
-                Expanded(flex: 4, child: summary),
-              ],
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              flex: 5,
+              child: Column(
+                children: [
+                  Expanded(child: list()),
+                  const SizedBox(height: AppSpacing.sm),
+                  const _DeleteNotice(),
+                ],
+              ),
             ),
-          );
-        },
-      ),
+            const SizedBox(width: AppSpacing.lg),
+            Expanded(flex: 4, child: preview),
+          ],
+        );
+      },
     ),
   };
-
-  Widget _buildFilter() => _ActivityFilters(
-    children: widget.childController.children,
-    selectedChildId: widget.childController.selectedChildId,
-    period: _period,
-    drawingType: _drawingType,
-    drawingTypes: _knownTypes,
-    onChildChanged: _selectChild,
-    onPeriodChanged: (value) {
-      setState(() => _period = value);
-      _load();
-    },
-    onDrawingTypeChanged: (value) {
-      setState(() => _drawingType = value);
-      _load();
-    },
-  );
 }
 
-class _HistoryContent extends StatelessWidget {
-  const _HistoryContent({required this.filter, required this.content});
-  final Widget filter, content;
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Padding(
-        padding: const EdgeInsets.fromLTRB(
-          AppSpacing.lg,
-          AppSpacing.lg,
-          AppSpacing.lg,
-          0,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '아이의 지난 활동을 살펴보세요',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                color: AppColors.ink,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            const Text(
-              '그림 활동을 선택하면 간단한 내용을 미리 확인할 수 있어요.',
-              style: TextStyle(color: AppColors.inkMuted),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            filter,
-          ],
-        ),
-      ),
-      const SizedBox(height: AppSpacing.sm),
-      Expanded(child: content),
-    ],
-  );
-}
-
-class _HistoryNavigation extends StatelessWidget {
-  const _HistoryNavigation({this.compact = false});
-  final bool compact;
-  @override
-  Widget build(BuildContext context) => Container(
-    color: AppColors.surface,
-    padding: const EdgeInsets.all(AppSpacing.md),
-    child: compact
-        ? Row(
-            children: [
-              Expanded(
-                child: _NavButton(
-                  icon: Icons.home_outlined,
-                  label: '보호자 홈',
-                  onTap: () => Navigator.of(context).pop(),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              const Expanded(
-                child: _NavButton(
-                  icon: Icons.history_rounded,
-                  label: '활동 이력',
-                  selected: true,
-                ),
-              ),
-            ],
-          )
-        : Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                '도담',
-                style: TextStyle(
-                  color: AppColors.ink,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xl),
-              _NavButton(
-                icon: Icons.home_outlined,
-                label: '보호자 홈',
-                onTap: () => Navigator.of(context).pop(),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              const _NavButton(
-                icon: Icons.history_rounded,
-                label: '활동 이력',
-                selected: true,
-              ),
-            ],
-          ),
-  );
-}
-
-class _NavButton extends StatelessWidget {
-  const _NavButton({
-    required this.icon,
-    required this.label,
-    this.selected = false,
-    this.onTap,
-  });
-  final IconData icon;
-  final String label;
-  final bool selected;
-  final VoidCallback? onTap;
-  @override
-  Widget build(BuildContext context) => Material(
-    color: selected ? AppColors.leafSoft : Colors.transparent,
-    borderRadius: BorderRadius.circular(AppRadius.md),
-    child: InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(AppRadius.md),
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.sm),
-        child: Row(
-          children: [
-            Icon(icon, color: selected ? AppColors.leaf : AppColors.inkMuted),
-            const SizedBox(width: AppSpacing.xs),
-            Expanded(
-              child: Text(
-                label,
-                style: TextStyle(
-                  color: selected ? AppColors.leaf : AppColors.ink,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-}
-
+// ── 필터 ─────────────────────────────────────────────────────────────
 class _ActivityFilters extends StatelessWidget {
   const _ActivityFilters({
     required this.children,
@@ -402,18 +321,22 @@ class _ActivityFilters extends StatelessWidget {
     required this.period,
     required this.drawingType,
     required this.drawingTypes,
+    required this.statusFilter,
     required this.onChildChanged,
     required this.onPeriodChanged,
     required this.onDrawingTypeChanged,
+    required this.onStatusChanged,
   });
   final List<ChildSummaryDto> children;
   final int? selectedChildId;
   final _PeriodFilter period;
   final String? drawingType;
   final List<ActivityDrawingTypeDto> drawingTypes;
+  final _StatusFilter statusFilter;
   final ValueChanged<int> onChildChanged;
   final ValueChanged<_PeriodFilter> onPeriodChanged;
   final ValueChanged<String?> onDrawingTypeChanged;
+  final ValueChanged<_StatusFilter> onStatusChanged;
 
   @override
   Widget build(BuildContext context) => Wrap(
@@ -444,13 +367,27 @@ class _ActivityFilters extends StatelessWidget {
       ),
       _FilterDropdown<String?>(
         key: const ValueKey('activity-type-filter'),
-        label: '활동 종류',
+        label: '유형',
         value: drawingType,
         items: [
           const (null, '전체 활동'),
           for (final type in drawingTypes) (type.code, type.name),
         ],
         onChanged: onDrawingTypeChanged,
+      ),
+      _FilterDropdown<_StatusFilter>(
+        key: const ValueKey('activity-status-filter'),
+        label: '상태',
+        value: statusFilter,
+        items: const [
+          (_StatusFilter.all, '전체 상태'),
+          (_StatusFilter.done, '분석 완료'),
+          (_StatusFilter.analyzing, '분석 중'),
+          (_StatusFilter.failed, '분석 실패'),
+        ],
+        onChanged: (value) {
+          if (value != null) onStatusChanged(value);
+        },
       ),
     ],
   );
@@ -470,9 +407,10 @@ class _FilterDropdown<T> extends StatelessWidget {
   final ValueChanged<T?> onChanged;
   @override
   Widget build(BuildContext context) => SizedBox(
-    width: 190,
+    width: 168,
     child: DropdownButtonFormField<T>(
       initialValue: value,
+      isExpanded: true,
       decoration: InputDecoration(
         labelText: label,
         filled: true,
@@ -494,55 +432,208 @@ class _FilterDropdown<T> extends StatelessWidget {
   );
 }
 
-class _ActivityList extends StatelessWidget {
-  const _ActivityList({
+// ── 목록 ─────────────────────────────────────────────────────────────
+class _ActivityListView extends StatelessWidget {
+  const _ActivityListView({
     required this.activities,
     required this.selectedActivityId,
-    required this.onSelected,
     required this.repository,
-    this.embedded = false,
+    required this.onSelected,
+    required this.onReport,
+    this.scrollable = true,
   });
   final List<ActivitySummaryDto> activities;
   final int? selectedActivityId;
-  final ValueChanged<int> onSelected;
   final ActivityRepository repository;
-  final bool embedded;
+  final ValueChanged<int> onSelected;
+  final ValueChanged<ActivitySummaryDto> onReport;
+  final bool scrollable;
+
   @override
-  Widget build(BuildContext context) => ListView.separated(
-    key: const ValueKey('activity-history-list'),
-    shrinkWrap: embedded,
-    physics: embedded ? const NeverScrollableScrollPhysics() : null,
-    itemCount: activities.length,
-    separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
-    itemBuilder: (context, index) {
-      final activity = activities[index];
-      return AppChoiceCard(
-        key: ValueKey('activity-${activity.activityId}'),
-        label: activity.title ?? activity.drawingType.name,
-        description:
-            '${_date(activity.completedAt ?? activity.startedAt)} · ${activity.drawingType.name}',
-        isSelected: activity.activityId == selectedActivityId,
-        onTap: () => onSelected(activity.activityId),
-        leading: _Thumbnail(
-          url: activity.thumbnailUrl,
-          repository: repository,
-          size: 72,
-        ),
+  Widget build(BuildContext context) {
+    if (activities.isEmpty) {
+      return const AppEmptyView(
+        key: ValueKey('activity-history-filtered-empty'),
+        title: '조건에 맞는 활동이 없어요',
+        message: '필터를 바꿔 다시 확인해 보세요.',
       );
-    },
-  );
+    }
+    return ListView.separated(
+      key: const ValueKey('activity-history-list'),
+      shrinkWrap: !scrollable,
+      physics: scrollable ? null : const NeverScrollableScrollPhysics(),
+      padding: EdgeInsets.zero,
+      itemCount: activities.length,
+      separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
+      itemBuilder: (context, index) {
+        final activity = activities[index];
+        return _ActivityCard(
+          activity: activity,
+          selected: activity.activityId == selectedActivityId,
+          repository: repository,
+          onTap: () => onSelected(activity.activityId),
+          onReport: () => onReport(activity),
+        );
+      },
+    );
+  }
 }
 
-class _ActivitySummary extends StatelessWidget {
-  const _ActivitySummary({required this.activity, required this.repository});
+class _ActivityCard extends StatelessWidget {
+  const _ActivityCard({
+    required this.activity,
+    required this.selected,
+    required this.repository,
+    required this.onTap,
+    required this.onReport,
+  });
+  final ActivitySummaryDto activity;
+  final bool selected;
+  final ActivityRepository repository;
+  final VoidCallback onTap;
+  final VoidCallback onReport;
+
+  @override
+  Widget build(BuildContext context) {
+    final status = _cardStatus(activity);
+    return Material(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(AppRadius.lg),
+      child: InkWell(
+        key: ValueKey('activity-${activity.activityId}'),
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        child: Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+            border: Border.all(
+              color: selected ? AppColors.leaf : AppColors.outline,
+              width: selected ? 2 : 1,
+            ),
+          ),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              _Thumbnail(
+                url: activity.thumbnailUrl,
+                repository: repository,
+                size: 56,
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      activity.title ?? activity.drawingType.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 15,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${_date(activity.completedAt ?? activity.startedAt)} · '
+                      '${_inputLabel(activity.inputMethod)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.inkMuted,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    Wrap(
+                      spacing: AppSpacing.xs,
+                      runSpacing: AppSpacing.xs,
+                      children: [
+                        _StatusBadge(status: status),
+                        _TypeBadge(name: activity.drawingType.name),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              _CardAction(
+                status: status,
+                reportReady: _reportReady(activity),
+                onReport: onReport,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _CardAction extends StatelessWidget {
+  const _CardAction({
+    required this.status,
+    required this.reportReady,
+    required this.onReport,
+  });
+  final _CardStatus status;
+  final bool reportReady;
+  final VoidCallback onReport;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, onTap) = switch (status) {
+      _CardStatus.done => ('관찰 리포트 보기', reportReady ? onReport : null),
+      _CardStatus.analyzing => ('관찰 리포트 보기', null),
+      _CardStatus.failed => (
+        '재분석 요청',
+        () => _snack(context, '재분석 요청은 준비 중이에요.'),
+      ),
+      _CardStatus.draft => (
+        '이어 그리기',
+        () => _snack(context, '이어 그리기는 준비 중이에요.'),
+      ),
+    };
+    final enabled = onTap != null;
+    return TextButton(
+      onPressed: onTap,
+      style: TextButton.styleFrom(
+        foregroundColor: enabled ? AppColors.leaf : AppColors.inkMuted,
+        backgroundColor: AppColors.surfaceSoft,
+        disabledForegroundColor: AppColors.inkMuted,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          side: BorderSide(color: AppColors.outline),
+        ),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+      ),
+    );
+  }
+}
+
+// ── 우측 프리뷰(그림 + 관찰 리포트 보기) ─────────────────────────────
+class _PreviewPane extends StatelessWidget {
+  const _PreviewPane({
+    required this.activity,
+    required this.repository,
+    required this.onReport,
+  });
   final ActivitySummaryDto? activity;
   final ActivityRepository repository;
+  final ValueChanged<ActivitySummaryDto> onReport;
+
   @override
   Widget build(BuildContext context) {
     final activity = this.activity;
-    if (activity == null) {
-      return const AppEmptyView(title: '활동을 선택해 주세요');
-    }
     return Container(
       key: const ValueKey('activity-history-summary'),
       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -551,92 +642,123 @@ class _ActivitySummary extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(color: AppColors.outline),
       ),
-      child: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            AspectRatio(
-              aspectRatio: 16 / 10,
-              child: _Thumbnail(
-                url: activity.thumbnailUrl,
-                repository: repository,
-              ),
+      child: activity == null
+          ? const AppEmptyView(title: '활동을 선택해 주세요')
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  activity.title ?? activity.drawingType.name,
+                  style: const TextStyle(
+                    color: AppColors.ink,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+                AspectRatio(
+                  aspectRatio: 4 / 3,
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: AppColors.surfaceSoft,
+                      borderRadius: BorderRadius.circular(AppRadius.lg),
+                      border: Border.all(color: AppColors.outline),
+                    ),
+                    child: _Thumbnail(
+                      url: activity.thumbnailUrl,
+                      repository: repository,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                AppButton(
+                  key: const ValueKey('activity-report-cta'),
+                  label: '관찰 리포트 보기',
+                  onPressed: _reportReady(activity)
+                      ? () => onReport(activity)
+                      : null,
+                ),
+              ],
             ),
-            const SizedBox(height: AppSpacing.lg),
-            Text(
-              activity.title ?? activity.drawingType.name,
-              style: const TextStyle(
-                color: AppColors.ink,
-                fontSize: 24,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            _SummaryLine(
-              label: '활동 날짜',
-              value: _date(activity.completedAt ?? activity.startedAt),
-            ),
-            _SummaryLine(label: '활동 종류', value: activity.drawingType.name),
-            _SummaryLine(label: '진행 상태', value: activity.sessionStatus),
-            if (activity.selectedEmotions.isNotEmpty)
-              _SummaryLine(
-                label: '선택한 감정',
-                value: activity.selectedEmotions.join(', '),
-              ),
-            const SizedBox(height: AppSpacing.lg),
-            AppButton(
-              key: const ValueKey('activity-detail-cta'),
-              label: '자세히 보기',
-              onPressed: () => AppNavigation.pushNamed(
-                context,
-                AppRoutes.activityDetail(activity.activityId.toString()),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
 
-class _SummaryLine extends StatelessWidget {
-  const _SummaryLine({required this.label, required this.value});
-  final String label, value;
+class _DeleteNotice extends StatelessWidget {
+  const _DeleteNotice();
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        SizedBox(
-          width: 88,
-          child: Text(label, style: const TextStyle(color: AppColors.inkMuted)),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: const TextStyle(
-              color: AppColors.ink,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ),
-      ],
+  Widget build(BuildContext context) => const Text(
+    '기록 삭제 시 연결된 대화·분석·리포트가 함께 지워져요.',
+    textAlign: TextAlign.center,
+    style: TextStyle(color: AppColors.inkMuted, fontSize: 12),
+  );
+}
+
+// ── 배지 ─────────────────────────────────────────────────────────────
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({required this.status});
+  final _CardStatus status;
+  @override
+  Widget build(BuildContext context) {
+    final (label, fg, bg) = switch (status) {
+      _CardStatus.done => ('분석 완료', AppColors.success, AppColors.successSoft),
+      _CardStatus.analyzing => (
+        '분석 중',
+        AppColors.lavender,
+        AppColors.lavenderSoft,
+      ),
+      _CardStatus.failed => ('분석 실패', AppColors.error, AppColors.errorSoft),
+      _CardStatus.draft => ('임시 저장', AppColors.warning, AppColors.warningSoft),
+    };
+    return _Pill(label: label, fg: fg, bg: bg);
+  }
+}
+
+class _TypeBadge extends StatelessWidget {
+  const _TypeBadge({required this.name});
+  final String name;
+  @override
+  Widget build(BuildContext context) =>
+      _Pill(label: name, fg: AppColors.inkMuted, bg: AppColors.surfaceSoft);
+}
+
+class _Pill extends StatelessWidget {
+  const _Pill({required this.label, required this.fg, required this.bg});
+  final String label;
+  final Color fg, bg;
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+    decoration: BoxDecoration(
+      color: bg,
+      borderRadius: BorderRadius.circular(999),
+    ),
+    child: Text(
+      label,
+      style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.w800),
     ),
   );
 }
 
 class _Thumbnail extends StatelessWidget {
-  const _Thumbnail({required this.url, required this.repository, this.size});
+  const _Thumbnail({
+    required this.url,
+    required this.repository,
+    this.size,
+    this.fit = BoxFit.cover,
+  });
   final String? url;
   final ActivityRepository repository;
   final double? size;
+  final BoxFit fit;
   @override
   Widget build(BuildContext context) {
     final image = AuthenticatedImage(
       url: url,
       fetcher: repository.downloadImage,
-      fit: BoxFit.cover,
+      fit: fit,
       placeholderBuilder: (_) => Container(
         key: const ValueKey('activity-thumbnail-placeholder'),
         color: AppColors.surfaceSoft,
@@ -653,9 +775,52 @@ class _Thumbnail extends StatelessWidget {
   }
 }
 
+void _snack(BuildContext context, String message) {
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(message)));
+}
+
+/// 관찰 리포트로 진입 가능한지(완료된 리포트가 있는지).
+bool _reportReady(ActivitySummaryDto activity) {
+  final report = activity.report;
+  return report != null && report.reportStatus == 'COMPLETED';
+}
+
+_CardStatus _cardStatus(ActivitySummaryDto activity) {
+  if (activity.sessionStatus == 'DRAFT') return _CardStatus.draft;
+  final reportStatus = activity.report?.reportStatus;
+  if (activity.analysisStatus == 'FAILED' || reportStatus == 'FAILED') {
+    return _CardStatus.failed;
+  }
+  if (reportStatus == 'COMPLETED' ||
+      activity.analysisStatus == 'COMPLETED' ||
+      activity.analysisStatus == 'SUCCESS') {
+    return _CardStatus.done;
+  }
+  return _CardStatus.analyzing;
+}
+
+_CardStatus _cardStatusOf(_StatusFilter filter) => switch (filter) {
+  _StatusFilter.done => _CardStatus.done,
+  _StatusFilter.analyzing => _CardStatus.analyzing,
+  _StatusFilter.failed => _CardStatus.failed,
+  _StatusFilter.all => _CardStatus.done,
+};
+
+String _inputLabel(String inputMethod) => switch (inputMethod) {
+  'CANVAS' => '캔버스',
+  'UPLOAD' || 'PHOTO' || 'IMAGE' => '사진 업로드',
+  'AUTO_SAVE' || 'DRAFT' => '자동 임시 저장',
+  _ => inputMethod,
+};
+
 String _date(String isoDate) => isoDate.length >= 10
     ? isoDate.substring(0, 10).replaceAll('-', '.')
     : isoDate;
+
+/// yyyy-MM-dd (HISTORY-01 from/to 파라미터용 date).
+String _isoDate(DateTime value) => value.toIso8601String().substring(0, 10);
 
 enum _DetailStatus { loading, success, empty, error, invalidId }
 
