@@ -63,12 +63,21 @@ capture() {
 
   # ── 4. iptables — sudo 필요. Docker 체인이 살아있는지 판정용.
   #    k3s(kube-proxy·flannel)가 규칙을 넣으면서 DOCKER 체인 순서를 망가뜨리는 것이 runbook 위험 1번.
-  if sudo -n iptables-save > "$d/iptables.rules" 2>/dev/null; then
+  #    ⚠️ 임시파일에 먼저 받고 성공했을 때만 옮긴다. 곧바로 "$d/iptables.rules" 로
+  #    리다이렉트하면 sudo 가 실패해도 셸이 파일을 먼저 비우고, 이어지는 rm 이
+  #    **사용자가 직접 sudo 로 받아둔 스냅샷까지 지운다**(재캡처 때마다 소실).
+  if sudo -n iptables-save > "$d/iptables.rules.tmp" 2>/dev/null; then
+    mv -f "$d/iptables.rules.tmp" "$d/iptables.rules"
     printf '     iptables 규칙 %s줄\n' "$(wc -l < "$d/iptables.rules")"
   else
-    rm -f "$d/iptables.rules"
-    warn "iptables 스냅샷 생략 (sudo 필요) — 직접 받으려면:"
-    printf '        sudo iptables-save > %s/iptables.rules\n' "$d"
+    rm -f "$d/iptables.rules.tmp"
+    if [ -f "$d/iptables.rules" ]; then
+      printf '     iptables 규칙 %s줄 (기존 스냅샷 보존 — sudo 없어 갱신은 못 함)\n' \
+        "$(wc -l < "$d/iptables.rules")"
+    else
+      warn "iptables 스냅샷 생략 (sudo 필요) — 직접 받으려면:"
+      printf '        sudo iptables-save > %s/iptables.rules\n' "$d"
+    fi
   fi
 
   # ── 5. 메모리 — k3s 가 얼마나 먹었는지 사후 확인용(예산 재계산 근거).
@@ -97,12 +106,22 @@ compare() {
     fail=1
   fi
 
-  # ── 2. 컨테이너
-  if diff -q "$b/containers.txt" "$a/containers.txt" >/dev/null; then
-    ok "컨테이너 목록·상태 동일 ($(wc -l < "$a/containers.txt")개)"
+  # ── 2. 컨테이너 — 포트와 같은 원칙이다: **늘어난 건 정상, 없어진 게 사고다.**
+  #    ⚠️ runbook 순서상 기준선은 0단계, 레지스트리 기동은 1단계다. 정상적으로 따라가면
+  #    4단계 대조에서 컨테이너가 반드시 하나 는다. 이걸 실패로 보면 아무 문제 없는
+  #    사람에게 "롤백 — k3s-uninstall.sh 실행" 을 안내하게 된다(2026-07-29 실제 발생).
+  #    상태가 바뀐 경우(재시작 등)는 같은 이름이 '<' 쪽에도 찍히므로 그대로 잡힌다.
+  local vanished appeared
+  vanished=$(diff "$b/containers.txt" "$a/containers.txt" | grep '^<' | sed 's/^< //')
+  appeared=$(diff "$b/containers.txt" "$a/containers.txt" | grep '^>' | sed 's/^> //')
+  if [ -z "$vanished" ]; then
+    ok "사라지거나 상태가 바뀐 컨테이너 없음 ($(wc -l < "$b/containers.txt")개 유지)"
+    [ -n "$appeared" ] && printf '     새로 뜬 컨테이너(정상일 수 있음): %s\n' \
+      "$(printf '%s' "$appeared" | cut -f1 | tr '\n' ' ')"
   else
-    bad "컨테이너가 변했다 (사라짐/죽음/재시작)"
-    diff "$b/containers.txt" "$a/containers.txt" | sed 's/^/     /'
+    bad "컨테이너가 사라졌거나 상태가 바뀌었다"
+    printf '%s\n' "$vanished" | sed 's/^/     ✗ /'
+    [ -n "$appeared" ] && printf '%s\n' "$appeared" | sed 's/^/     + /'
     fail=1
   fi
 
