@@ -27,7 +27,7 @@ _PROMPT_SEMVER: dict[str, str] = {
     "conversations": "1.1.0",
     "guardrails": "1.0.0",
     "drawing_description": "1.0.0",
-    "report": "1.1.0",  # S15P11B209-600: 관찰 사실 ↔ AI 해석 근거 분리 규칙 추가
+    "report": "1.2.0",  # S15P11B209-601: 진단 표현 금지 강화·한계 고지·후속 질문 목적 명시
 }
 
 _UNKNOWN_SEMVER = "0.0.0"
