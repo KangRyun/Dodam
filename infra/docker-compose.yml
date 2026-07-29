@@ -253,6 +253,13 @@ services:
       #   base-url 앱 기본값이 localhost(컨테이너 안에선 backend 자신 = 도달 불가)라 내부망 DNS로 교정.
       AI_OBSERVATION_MODE: ${AI_OBSERVATION_MODE:-mock}
       AI_OBSERVATION_BASE_URL: ${AI_OBSERVATION_BASE_URL:-http://ai:8000}
+      # 질문 TTS 클라이언트(app.ai.tts) — 위 그림 분석·관찰과 같은 passthrough.
+      #   이 줄이 없어 컨테이너에 AI_TTS_MODE가 전달되지 않았고, TTS만 mock(무음 mp3)으로 동작했다
+      #   (2026-07-29 실기기 확인: 질문 음성이 무음 · MockAiTtsClient가 텍스트 길이 비례 무음 프레임 반환).
+      #   GMS TTS(gpt-4o-mini-tts) 실호출은 확인됨 → 기본값 http. base-url 앱 기본값 localhost는
+      #   컨테이너 안에선 backend 자신(도달 불가)이라 내부망 DNS(ai)로 교정한다.
+      AI_TTS_MODE: ${AI_TTS_MODE:-http}
+      AI_TTS_BASE_URL: ${AI_TTS_BASE_URL:-http://ai:8000}
       # AI가 LocalImageStorage 원본을 가져갈 일회성 내부 URL. 외부 도메인이나 nginx를 사용하지 않는다.
       AI_IMAGE_ACCESS_BASE_URL: ${AI_IMAGE_ACCESS_BASE_URL:-http://backend:8080}
       AI_IMAGE_ACCESS_TOKEN_TTL: ${AI_IMAGE_ACCESS_TOKEN_TTL:-60s}
