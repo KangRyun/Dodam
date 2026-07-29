@@ -92,6 +92,14 @@ spec:
             exec: { command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"] }
             periodSeconds: 5
             failureThreshold: 30       # 최대 150초
+            # ★ timeoutSeconds 를 반드시 준다 (2026-07-30 컷오버에서 CrashLoopBackOff 로 발견).
+            #   기본값은 **1초**다. mongosh 는 Node.js CLI 라 프로세스 기동만으로 1초를 넘겨,
+            #   서버는 멀쩡한데 프로브가 매번 잘린다:
+            #     Startup probe failed: command timed out ... timed out after 1s
+            #   30회 실패(150초) 후 컨테이너가 죽고 다시 뜨기를 반복했다(재시작 9회).
+            #   ⚠️ 아래 readiness·liveness 에는 timeoutSeconds 가 있는데 여기만 빠져 있었다.
+            #   staging-min 이 mongodb 를 replicas 0 으로 두는 바람에 **한 번도 드러나지 않았다.**
+            timeoutSeconds: 10
           readinessProbe:
             exec: { command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"] }
             periodSeconds: 10
