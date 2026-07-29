@@ -378,27 +378,38 @@ pipeline {
             echo "✅ k3s 스테이징 롤아웃 완료 (태그: $IMAGE_TAG)"
           '''
         }
-        // 게이트웨이 e2e — 롤아웃 성공은 "파드가 떴다"까지만 말해준다(07-22 빈 conf 사고의 교훈).
-        //   ⚠️ NodePort 는 **호스트**의 30080 이다. Jenkins 컨테이너 안의 127.0.0.1 이 아니다.
-        //      --network host 로 붙은 일회용 컨테이너에서 확인한다(호스트 docker.sock 활용).
-        //      이미지는 방금 빌드한 dodam-nginx:local 을 쓴다 — 외부 pull 이 필요 없다.
-        sh '''
-          set -e
-          echo "게이트웨이 e2e 확인: NodePort 30080"
-          ok=false
-          for i in $(seq 1 10); do
-            if docker run --rm --network host dodam-nginx:local \\
-                 wget -q -O /dev/null -T 5 http://127.0.0.1:30080/ 2>/dev/null; then
-              ok=true; break
-            fi
-            sleep 3
-          done
-          if [ "$ok" != "true" ]; then
-            echo "  ✗ NodePort e2e 실패 — 파드는 떴지만 게이트웨이가 응답하지 않는다"
-            exit 1
-          fi
-          echo "✅ k3s 스테이징 게이트웨이 응답 정상"
-        '''
+        // ── 파드가 실제로 Ready 인가 ────────────────────────────────────────────
+        // ★ NodePort(30080/30443)를 찔러 확인하지 **않는다.** 이 호스트에서는 그 검사가
+        //   스테이징과 운영을 구분하지 못한다 — 2026-07-29 실측:
+        //     k3s 를 완전히 정지(파드 0)한 상태에서도 30080 → 301, 30443 → 200 이 나왔다.
+        //     (대조군 31234·39999 는 연결 거부. 즉 우연이 아니라 운영 nginx 가 받고 있다)
+        //   스테이징 게이트웨이가 죽어도 통과할 수 있는 검사는 없느니만 못하다.
+        //
+        // 대신 클러스터 안의 신호를 쓴다. gateway 에는 readinessProbe(GET / :80)가 있으므로
+        //   **Ready = nginx 가 실제로 응답한다**는 뜻이다. 파드 바깥에서 흉내 낼 필요가 없다.
+        //
+        // ⚠️ rollout status 만으로는 부족하다 — replicas 0 인 워크로드에서 **즉시 성공**한다.
+        //    staging-min 은 ai·mongodb 를 의도적으로 0 으로 두므로, 실수로 backend 가 0 이 돼도
+        //    "롤아웃 성공"으로 읽힌다. readyReplicas >= 1 을 따로 못 박는다.
+        withCredentials([file(credentialsId: 'dodam-kubeconfig', variable: 'DEPLOYER_KUBECONFIG')]) {
+          sh '''
+            set -e
+            export KUBECONFIG="$DEPLOYER_KUBECONFIG"
+            fail=0
+            for d in backend gateway; do
+              ready="$(kubectl -n dodam get deployment "$d" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
+              ready="${ready:-0}"
+              if [ "$ready" -ge 1 ]; then
+                echo "   ✅ $d readyReplicas=$ready (readinessProbe 통과 = 실제 응답 중)"
+              else
+                echo "   ❌ $d readyReplicas=$ready — 롤아웃은 끝났다지만 Ready 인 파드가 없다"
+                fail=1
+              fi
+            done
+            [ "$fail" = "0" ] || exit 1
+            echo "✅ k3s 스테이징 워크로드 Ready 확인"
+          '''
+        }
       }
     }
 
