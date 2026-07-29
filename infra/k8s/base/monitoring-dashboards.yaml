@@ -1,0 +1,164 @@
+# Grafana 대시보드 (S15P11B209-729)
+#
+# ★ 커뮤니티 대시보드(node-exporter 1860 등)를 쓰지 않았다.
+#   · JSON 이 100KB 급이라 저장소가 무거워지고 diff 가 읽히지 않는다
+#   · 패널 대부분이 이 서버와 무관하다(다중 노드·클러스터 전제)
+#   → 우리 **경보 규칙과 짝이 맞는 패널만** 손으로 짰다. 규칙이 발동했을 때
+#     "무엇을 봐야 하는가"가 그대로 화면에 있는 것이 목적이다.
+#
+# 쿼리에 쓴 지표는 전부 2026-07-30 실측으로 존재를 확인했다(총 942개 중).
+# datasource uid 는 `dodam-prometheus` — provisioning 과 동일해야 재생성 후에도 안 깨진다.
+#
+# ⚠️ ConfigMap 하나가 1MB 를 넘으면 apply 가 실패한다. 대시보드를 늘릴 때는
+#    파일을 나누고 여기에 volume 을 추가할 것.
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: dodam
+data:
+  # ── ① 호스트 — 07-28·07-29 서버를 두 번 무너뜨린 것이 메모리다 ────────────
+  dodam-host.json: |
+    {
+      "uid": "dodam-host",
+      "title": "도담 · 호스트",
+      "tags": ["dodam"],
+      "timezone": "browser",
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        {
+          "type": "timeseries", "title": "가용 메모리 비율 (경보: 15% / 8%)",
+          "description": "HostMemoryAvailableLow(<15%) · HostMemoryAvailableCritical(<8%) 규칙과 같은 식이다. MemFree 가 아니라 MemAvailable 을 쓴다 — MemFree 는 페이지 캐시를 빼고 세서 늘 낮게 보인다.",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit", "min": 0, "max": 1,
+              "thresholds": { "mode": "absolute", "steps": [
+                { "color": "red", "value": null },
+                { "color": "orange", "value": 0.08 },
+                { "color": "green", "value": 0.15 }
+              ] }
+            }
+          },
+          "targets": [ {
+            "datasource": { "type": "prometheus", "uid": "dodam-prometheus" },
+            "expr": "node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes",
+            "legendFormat": "가용 비율"
+          } ]
+        },
+        {
+          "type": "timeseries", "title": "스왑 사용률 (경보: 50%)",
+          "description": "스왑이 EBS(네트워크 디스크) 위라, 많이 쓴다 = 이미 느려졌다는 뜻이다. '아직 여유 있다'가 아니라 '이미 압박 중'으로 읽는다.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+          "targets": [ {
+            "datasource": { "type": "prometheus", "uid": "dodam-prometheus" },
+            "expr": "(node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes) / node_memory_SwapTotal_bytes",
+            "legendFormat": "스왑 사용률"
+          } ]
+        },
+        {
+          "type": "timeseries", "title": "CPU 사용률",
+          "gridPos": { "h": 7, "w": 12, "x": 0, "y": 8 },
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } },
+          "targets": [ {
+            "datasource": { "type": "prometheus", "uid": "dodam-prometheus" },
+            "expr": "1 - avg(rate(node_cpu_seconds_total{mode=\"idle\"}[5m]))",
+            "legendFormat": "사용률"
+          } ]
+        },
+        {
+          "type": "timeseries", "title": "디스크 여유 (루트)",
+          "description": "레지스트리에 SHA 태그가 쌓이면 여기가 먼저 준다(S15P11B209-391 이미지 보존정책 참조).",
+          "gridPos": { "h": 7, "w": 12, "x": 12, "y": 8 },
+          "fieldConfig": { "defaults": { "unit": "bytes" } },
+          "targets": [ {
+            "datasource": { "type": "prometheus", "uid": "dodam-prometheus" },
+            "expr": "node_filesystem_avail_bytes{mountpoint=\"/\"}",
+            "legendFormat": "{{mountpoint}}"
+          } ]
+        }
+      ]
+    }
+
+  # ── ② 앱 — 파드 메모리(상한 대비) · backend JVM · AI ────────────────────
+  dodam-app.json: |
+    {
+      "uid": "dodam-app",
+      "title": "도담 · 앱",
+      "tags": ["dodam"],
+      "timezone": "browser",
+      "refresh": "30s",
+      "time": { "from": "now-6h", "to": "now" },
+      "panels": [
+        {
+          "type": "timeseries", "title": "파드 메모리 / 상한 (경보: 90%)",
+          "description": "ContainerMemoryNearLimit 규칙과 같은 식이다. container!=\"\" 로 파드 단위 합계 시계열을 제외한다 — 넣으면 같은 사건을 두 번 센다.",
+          "gridPos": { "h": 9, "w": 24, "x": 0, "y": 0 },
+          "fieldConfig": {
+            "defaults": {
+              "unit": "percentunit", "min": 0, "max": 1.2,
+              "thresholds": { "mode": "absolute", "steps": [
+                { "color": "green", "value": null },
+                { "color": "orange", "value": 0.9 }
+              ] }
+            }
+          },
+          "targets": [ {
+            "datasource": { "type": "prometheus", "uid": "dodam-prometheus" },
+            "expr": "container_memory_working_set_bytes{namespace=\"dodam\",container!=\"\"} / container_spec_memory_limit_bytes{namespace=\"dodam\",container!=\"\"}",
+            "legendFormat": "{{pod}} / {{container}}"
+          } ]
+        },
+        {
+          "type": "timeseries", "title": "backend · JVM 힙",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 9 },
+          "fieldConfig": { "defaults": { "unit": "bytes" } },
+          "targets": [ {
+            "datasource": { "type": "prometheus", "uid": "dodam-prometheus" },
+            "expr": "sum by (instance) (jvm_memory_used_bytes{job=\"backend\",area=\"heap\"})",
+            "legendFormat": "{{instance}}"
+          } ]
+        },
+        {
+          "type": "timeseries", "title": "backend · HTTP 요청률 (상태별)",
+          "description": "5xx 가 튀면 배포 직후인지 먼저 본다. 롤링은 무중단이어야 한다(S15P11B209-362 실증).",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 9 },
+          "fieldConfig": { "defaults": { "unit": "reqps" } },
+          "targets": [ {
+            "datasource": { "type": "prometheus", "uid": "dodam-prometheus" },
+            "expr": "sum by (status) (rate(http_server_requests_seconds_count{job=\"backend\"}[5m]))",
+            "legendFormat": "{{status}}"
+          } ]
+        },
+        {
+          "type": "timeseries", "title": "backend · 응답시간 p95",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 17 },
+          "fieldConfig": { "defaults": { "unit": "s" } },
+          "targets": [ {
+            "datasource": { "type": "prometheus", "uid": "dodam-prometheus" },
+            "expr": "histogram_quantile(0.95, sum by (le, uri) (rate(http_server_requests_seconds_bucket{job=\"backend\"}[5m])))",
+            "legendFormat": "{{uri}}"
+          } ]
+        },
+        {
+          "type": "timeseries", "title": "AI · 요청률·지연 p95",
+          "description": "FastAPI(prometheus-fastapi-instrumentator) 지표다. 지연이 길어지면 GMS(LLM·STT·TTS) 왕복을 의심한다.",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 17 },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "dodam-prometheus" },
+              "expr": "sum(rate(http_request_duration_seconds_count{job=\"ai\"}[5m]))",
+              "legendFormat": "요청/초"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "dodam-prometheus" },
+              "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"ai\"}[5m])))",
+              "legendFormat": "p95(초)"
+            }
+          ]
+        }
+      ]
+    }

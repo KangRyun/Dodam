@@ -41,6 +41,7 @@ resources:
   - monitoring-prometheus.yaml
   - monitoring-exporters.yaml
   - monitoring-grafana.yaml
+  - monitoring-dashboards.yaml   # S15P11B209-729 — 손으로 짠 경량 대시보드 2종
 
 commonLabels:
   app.kubernetes.io/part-of: dodam
