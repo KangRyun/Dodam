@@ -66,4 +66,36 @@ public class ChildDeletionService {
     childDeletionRepository.markDeleted(childId, deletedAt);
     childDeletionRepository.scheduleStorageDeletions(childId);
   }
+
+  /**
+   * 탈퇴하는 보호자가 혼자 보유한 아동을 모두 삭제한다 (S15P11B209-728).
+   *
+   * <p><b>왜 필요한가</b>: {@code children} 테이블에는 {@code users}로 향하는 FK가 없다. 보호자-아동 연결이
+   * {@code guardian_child_relations}를 경유하므로, 사용자를 지우면 그 <b>관계만</b> CASCADE로 사라지고 아동 프로필과
+   * 그림·음성·대화는 <b>소유자만 끊긴 채 남는다.</b> 고아 상태라 이후 누구도 삭제를 요청할 수 없다. CLAUDE.md 9절의
+   * "회원 탈퇴 시 아동 데이터 함께 삭제" 원칙과 어긋나므로 탈퇴 경로에서 명시적으로 처리한다.
+   *
+   * <p><b>왜 개별 삭제 API를 재사용하나</b>: 삭제 정책(소프트 삭제 + 스토리지 삭제 큐 적재)이 이미 여기 있다. 탈퇴용으로
+   * 따로 구현하면 두 경로가 갈라져 한쪽만 고쳐지는 사고가 난다.
+   *
+   * <p><b>공동 보호자가 있는 아동은 건드리지 않는다.</b> 한 사람이 나간다고 다른 보호자의 아동 데이터를 지울 수는 없다.
+   * 그 아동은 관계만 끊기고 남는 것이 옳다.
+   *
+   * <p>확인 문자열 검증은 하지 않는다 — 호출자(회원 탈퇴)가 이미 검증했고, 여기서 또 요구하면 탈퇴 요청에 아동 수만큼
+   * 확인값을 받아야 하는 이상한 계약이 된다.
+   *
+   * @param guardianUserId 탈퇴하는 보호자 사용자 ID
+   * @return 삭제 처리한 아동 수 (로그·테스트 확인용)
+   */
+  @Transactional
+  public int deleteAllSolelyOwnedBy(Long guardianUserId) {
+    LocalDateTime deletedAt = LocalDateTime.now(clock);
+    int deleted = 0;
+    for (Long childId : childDeletionRepository.findSolelyOwnedChildIds(guardianUserId)) {
+      childDeletionRepository.markDeleted(childId, deletedAt);
+      childDeletionRepository.scheduleStorageDeletions(childId);
+      deleted++;
+    }
+    return deleted;
+  }
 }

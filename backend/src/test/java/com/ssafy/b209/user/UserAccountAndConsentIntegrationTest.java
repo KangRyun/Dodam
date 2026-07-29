@@ -264,8 +264,19 @@ class UserAccountAndConsentIntegrationTest {
 
   // ---------------------------------------------------------------- 315·327 회원 탈퇴
 
+  /**
+   * S15P11B209-728 — 탈퇴가 단독 보유 아동을 함께 정리하는지 실 DB로 확인한다.
+   *
+   * <p>이 테스트는 원래 {@code deletesAccountWithIdentityRowsAndKeepsChildData}였다. 즉 <b>아동 데이터를 남기는
+   * 것이 의도된 동작</b>으로 단언하고 있었다. 그런데 그 상태에서는 아동 프로필·그림·음성이 보호자와 끊긴 채 남아
+   * 이후 누구도 삭제를 요청할 수 없었고, CLAUDE.md 9절("회원 탈퇴 시 아동 데이터 함께 삭제")과 어긋났다.
+   *
+   * <p>아동 행 자체는 <b>남는 것이 맞다</b> — 개별 삭제 API와 같은 소프트 삭제 정책이라, 행을 지우는 대신
+   * {@code profile_status='DELETED'}로 표시하고 스토리지 삭제를 큐에 넣는다. 그래서 "행이 있다"만 보는 검증은
+   * 삭제 여부를 구분하지 못한다 — 상태까지 봐야 한다.
+   */
   @Test
-  void deletesAccountWithIdentityRowsAndKeepsChildData() throws Exception {
+  void deletesAccountAndSoftDeletesSolelyOwnedChild() throws Exception {
     jdbcTemplate.update(
         "INSERT INTO auth_accounts (user_id, provider, provider_subject) "
             + "VALUES (?, 'KAKAO', 'kakao-42-subject')",
@@ -298,8 +309,23 @@ class UserAccountAndConsentIntegrationTest {
                 "SELECT COUNT(*) FROM guardian_child_relations WHERE guardian_user_id = "
                     + USER_ID))
         .isZero();
-    // 아동·활동 데이터 삭제는 별도 정책이며 동의 이력은 행위자만 비식별화한다.
+    // 아동 행은 남는다 — 소프트 삭제이기 때문이다. 행 존재만 보면 삭제 여부를 구분하지 못한다.
     assertThat(count("SELECT COUNT(*) FROM children WHERE id = " + CHILD_ID)).isEqualTo(1);
+    // ★ 실제 판정은 상태다. 단독 보유 아동이므로 DELETED 로 표시되고 삭제 시각이 찍혀야 한다.
+    assertThat(
+            count(
+                "SELECT COUNT(*) FROM children WHERE id = "
+                    + CHILD_ID
+                    + " AND profile_status = 'DELETED' AND deleted_at IS NOT NULL"))
+        .isEqualTo(1);
+    // 공동 보호자가 없는 아동만 대상이다. 다른 보호자에게 걸린 아동은 건드리지 않는다.
+    assertThat(
+            count(
+                "SELECT COUNT(*) FROM children WHERE id = "
+                    + OTHER_CHILD_ID
+                    + " AND profile_status = 'ACTIVE'"))
+        .isEqualTo(1);
+    // 동의 이력은 행위자만 비식별화한다(법적 보존 대상).
     assertThat(count("SELECT COUNT(*) FROM consent_records WHERE actor_user_id IS NULL"))
         .isEqualTo(1);
   }

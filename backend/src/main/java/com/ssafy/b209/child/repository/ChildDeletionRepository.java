@@ -117,4 +117,53 @@ public class ChildDeletionRepository {
         childId,
         childId);
   }
+
+  /**
+   * 보호자가 <b>혼자</b> 보유한 아동 ID를 모두 찾는다 (S15P11B209-728).
+   *
+   * <p>회원 탈퇴 시 쓴다. 공동 보호자가 있는 아동은 제외한다 — 한 사람이 나간다고 다른 보호자의 아동 데이터를 지울 수는 없다.
+   * 그런 아동은 {@code guardian_child_relations}의 CASCADE로 <b>관계만</b> 끊기고 레코드는 남는 것이 옳다.
+   *
+   * <p>이미 삭제된 아동({@code profile_status = 'DELETED'})은 제외한다. 다시 큐에 넣으면 스토리지 삭제 작업이 중복된다.
+   *
+   * @param guardianUserId 탈퇴하는 보호자 사용자 ID
+   * @return 이 보호자만 보유한 활성 아동 ID 목록. 없으면 빈 목록
+   */
+  public java.util.List<Long> findSolelyOwnedChildIds(long guardianUserId) {
+    return jdbcTemplate.queryForList(
+        """
+        select child.id
+          from children child
+          join guardian_child_relations relation on relation.child_id = child.id
+         where relation.guardian_user_id = ?
+           and child.profile_status = 'ACTIVE'
+           and child.deleted_at is null
+           and (select count(*)
+                  from guardian_child_relations other
+                 where other.child_id = child.id) = 1
+        """,
+        Long.class,
+        guardianUserId);
+  }
+
+  /**
+   * 사용자에게 전문가 프로필이 있는지 확인한다 (S15P11B209-728).
+   *
+   * <p>{@code expert_profiles.user_id}가 {@code ON DELETE RESTRICT}라, 있는 채로 사용자를 지우면 DB 제약 위반이
+   * 500으로 새어 나간다. 삭제 전에 확인해 원인을 알 수 있는 오류로 바꾼다.
+   *
+   * <p>⚠️ 컬럼명은 {@code user_id}다. V1 스키마에서는 {@code users_id}였으나 <b>V3에서 이름이 바뀌었다</b>
+   * ({@code RENAME COLUMN users_id TO user_id}). V1만 보고 쓰면 {@code BadSqlGrammarException}이 나고,
+   * 탈퇴 API가 500으로 죽는다 — 2026-07-30 실제로 그렇게 한 번 틀렸다. 스키마는 <b>마이그레이션 체인의 최종
+   * 상태</b>를 봐야 한다.
+   *
+   * @param userId 확인할 사용자 ID
+   * @return 전문가 프로필이 있으면 {@code true}
+   */
+  public boolean hasExpertProfile(long userId) {
+    Integer count =
+        jdbcTemplate.queryForObject(
+            "select count(*) from expert_profiles where user_id = ?", Integer.class, userId);
+    return count != null && count > 0;
+  }
 }
