@@ -37,8 +37,13 @@ KEY_PROPERTIES_FILE="${KEY_PROPERTIES_FILE:-}"
 OAUTH_ENV_FILE="${OAUTH_ENV_FILE:-}"
 REQUIRE_RELEASE_SIGNING="${REQUIRE_RELEASE_SIGNING:-true}"
 
-BUILD_NAME="${BUILD_NAME:-}"
-BUILD_NUMBER="${BUILD_NUMBER:-}"
+# 버전·빌드번호 (S15P11B209-629)
+#   지정하지 않으면 app-version.sh 가 산출한다 — pubspec 의 version(이름) + 커밋 수(번호).
+#   호출부(Jenkins·호스트)가 각자 다른 값을 넘겨 versionCode 가 어긋나는 걸 막으려고
+#   산출을 한 곳에 모았다. 이유·사고 이력은 app-version.sh 헤더 참조.
+#   명시적으로 넘긴 값은 그대로 존중한다(핫픽스로 번호를 손으로 올려야 할 때가 있다).
+BUILD_NAME="${BUILD_NAME:-$("$REPO_ROOT/infra/mobile/app-version.sh" --build-name)}"
+BUILD_NUMBER="${BUILD_NUMBER:-$("$REPO_ROOT/infra/mobile/app-version.sh" --build-number)}"
 
 log() { printf '\n\033[1m▸ %s\033[0m\n' "$*"; }
 die() { printf '\n❌ %s\n' "$*" >&2; exit 1; }
