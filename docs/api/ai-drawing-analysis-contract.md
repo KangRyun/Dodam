@@ -211,6 +211,24 @@ Scheduler나 Timer를 생성하지 않는다.
 
 `error`에는 호출자가 분기할 수 있는 코드와 안전한 메시지만 포함한다. Stack Trace, 서버 경로, 내부 Exception 클래스와 Token은 포함하지 않는다.
 
+## AI 장애 Fallback 정책
+
+AI 서버 Timeout, 연결 실패, 5xx 응답 또는 계약에 맞지 않는 응답은 성공 분석으로 간주하지 않는다.
+Backend는 분석을 `FAILED`로 저장하고 호출 유형에 따라 다음과 같이 응답한다.
+
+| 호출 유형 | 처리 |
+| --- | --- |
+| 공개 분석 요청 | 실패 이력을 저장한 뒤 안전한 `502` 오류를 반환한다. 저장 결과 조회는 `200 OK`와 `status=FAILED`를 반환한다. |
+| 그림 단계 완료 | 저장한 FINAL 그림과 실패 이력을 유지하고 `currentStage=CONVERSING`으로 전이한 뒤 `200 OK`를 반환한다. 응답의 `analysis.status`는 `FAILED`이며 후속 대화는 활성화된 Fallback 질문 템플릿을 사용한다. |
+| 명시적 재시도 | `POST /api/v1/analyses/{analysisId}/retry`에서만 수행하며 자동 Retry는 하지 않는다. |
+
+그림 단계 완료 요청을 동일한 `Idempotency-Key`로 다시 호출하면 저장된 동일 결과를 반환하고 AI 서버를
+다시 호출하지 않는다. AI 실패 이력 자체를 저장하지 못한 경우에는 정상 Fallback 응답으로 숨기지 않고
+안전한 서버 오류를 반환한다.
+
+동기식 AI Client에는 자동 Retry, Circuit Breaker 또는 실행 중 Mock 전환을 적용하지 않는다. 장애 시
+Fallback은 Application Service가 저장된 실패 상태를 기준으로 수행한다.
+
 ## 응답 필드와 상태
 
 | 필드 | 규칙 |
@@ -243,7 +261,9 @@ Scheduler나 Timer를 생성하지 않는다.
 - `S15P11B209-146`: 외부 호출 없는 Mock 분석 결과
 - `S15P11B209-147`: 분석 결과 저장 Application Service와 DB 연동
 
-현재 계약은 자동 Retry, Circuit Breaker, Message Queue, 그림 활동 상태 변경, 대화·감정·리포트 생성을 포함하지 않는다.
+자동 Retry, Circuit Breaker와 Message Queue는 현재 범위에 포함하지 않는다. 그림 단계 완료의
+저장 기반 Fallback과 `CONVERSING` 전이는 위 정책을 따르며, 감정·리포트 생성은 각 도메인 계약에서
+별도로 처리한다.
 
 ## Spring Boot AI Client
 
@@ -261,7 +281,8 @@ public interface DrawingAnalysisClient {
 - Request/Response: 정본 §19.3의 JSON 요청과 §19.4 응답
 - 인증 Header: `X-Internal-Token` 필수
 - 상관관계 Header: `X-Request-Id`
-- 자동 Retry, Circuit Breaker, Fallback: 구현하지 않음
+- 자동 Retry, Circuit Breaker, 실행 중 Mock 전환: Client 계층에는 구현하지 않음
+- 저장 기반 Fallback: 그림 단계 완료 Application Service에서 `FAILED` 분석을 기준으로 처리
 
 ### 설정 환경 변수
 
