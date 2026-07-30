@@ -197,6 +197,8 @@ Refresh Token은 MySQL 테이블에 저장하지 않는다. Redis에서 로그�
 | 선호 캐릭터 | `preferred_character` | `varchar(50)` | Y | `-` | - | 선호 캐릭터 |
 | 질문 난이도 | `question_difficulty` | `varchar(30)` | N | `PRESCHOOL` | - | 질문 난이도 |
 | 튜토리얼 상태 | `tutorial_status` | `varchar(20)` | N | `NOT_STARTED` | - | 튜토리얼 상태 |
+| 튜토리얼 마지막 단계 | `tutorial_last_step` | `varchar(50)` | Y | `-` | - | 이어보기 시 복원할 마지막 Tutorial 단계 |
+| 튜토리얼 완료 일시 | `tutorial_completed_at` | `datetime(6)` | Y | `-` | - | Tutorial 완료 또는 건너뛰기 일시 |
 | 프로필 상태 | `profile_status` | `varchar(20)` | N | `ACTIVE` | - | 프로필 상태 |
 | 생성 일시 | `created_at` | `datetime(6)` | N | `CURRENT_TIMESTAMP(6)` | DEFAULT_GENERATED | 생성 일시 |
 | 수정 일시 | `updated_at` | `datetime(6)` | N | `CURRENT_TIMESTAMP(6)` | DEFAULT_GENERATED on update CURRENT_TIMESTAMP(6) | 수정 일시 |

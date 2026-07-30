@@ -369,6 +369,8 @@ CREATE TABLE `children` (
   `preferred_character` varchar(50) DEFAULT NULL COMMENT '선호 캐릭터',
   `question_difficulty` varchar(30) NOT NULL DEFAULT 'PRESCHOOL' COMMENT '질문 난이도',
   `tutorial_status` varchar(20) NOT NULL DEFAULT 'NOT_STARTED' COMMENT '튜토리얼 상태',
+  `tutorial_last_step` varchar(50) DEFAULT NULL COMMENT 'Tutorial 마지막 진행 단계',
+  `tutorial_completed_at` datetime(6) DEFAULT NULL COMMENT 'Tutorial 완료 또는 건너뛰기 일시',
   `profile_status` varchar(20) NOT NULL DEFAULT 'ACTIVE' COMMENT '프로필 상태',
   `created_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) COMMENT '생성 일시',
   `updated_at` datetime(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6) COMMENT '수정 일시',

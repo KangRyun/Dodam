@@ -23,6 +23,7 @@ import com.ssafy.b209.child.dto.request.DeleteChildRequest;
 import com.ssafy.b209.child.dto.response.ChildDetailResponse;
 import com.ssafy.b209.child.dto.response.ChildRegistrationResponse;
 import com.ssafy.b209.child.dto.response.ChildSummaryResponse;
+import com.ssafy.b209.child.dto.response.ChildTutorialProgressResponse;
 import com.ssafy.b209.child.exception.ChildErrorCode;
 import com.ssafy.b209.child.service.ChildDeletionService;
 import com.ssafy.b209.child.service.ChildQueryService;
@@ -72,6 +73,58 @@ class ChildControllerTest {
         .andExpect(jsonPath("$.data.questionDifficulty").value("LOWER_ELEMENTARY"))
         .andExpect(jsonPath("$.data.responseModes[0]").value("VOICE"))
         .andExpect(jsonPath("$.data.relationshipType").value("MOTHER"));
+  }
+
+  @Test
+  void returnsTheConnectedChildTutorialProgress() throws Exception {
+    given(guardianResolver.resolve("Bearer access-token", "10")).willReturn(10L);
+    given(childQueryService.getTutorialProgress(10L, 3L))
+        .willReturn(
+            new ChildTutorialProgressResponse(
+                3L,
+                ChildTutorialStatus.IN_PROGRESS,
+                "DRAWING_GUIDE",
+                null,
+                Instant.parse("2026-07-30T01:02:03Z")));
+
+    mockMvc
+        .perform(
+            get("/api/v1/children/3/tutorial")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.childId").value(3))
+        .andExpect(jsonPath("$.data.tutorialStatus").value("IN_PROGRESS"))
+        .andExpect(jsonPath("$.data.lastStep").value("DRAWING_GUIDE"))
+        .andExpect(jsonPath("$.data.completedAt").doesNotExist())
+        .andExpect(jsonPath("$.data.updatedAt").value("2026-07-30T01:02:03Z"));
+  }
+
+  @Test
+  void rejectsANonPositiveChildIdForTutorialProgress() throws Exception {
+    mockMvc
+        .perform(
+            get("/api/v1/children/0/tutorial")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+
+    verify(childQueryService, never()).getTutorialProgress(any(), any());
+  }
+
+  @Test
+  void requiresAuthenticationForTutorialProgress() throws Exception {
+    given(guardianResolver.resolve(null, null))
+        .willThrow(new BusinessException(ConversationStartErrorCode.UNAUTHORIZED));
+
+    mockMvc
+        .perform(get("/api/v1/children/3/tutorial"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
+
+    verify(childQueryService, never()).getTutorialProgress(any(), any());
   }
 
   @Test
