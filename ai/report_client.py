@@ -135,6 +135,49 @@ def _format_behavior(behavior: DrawingBehaviorMetrics | None) -> str:
     return "\n".join(lines) + "\n\n"
 
 
+# 주제 코드 → 한국어 라벨. question_service._SUBJECT_KO와 같은 어휘 — 어긋나면 질문과
+# 리포트가 같은 그림을 다른 이름으로 부른다.
+_SUBJECT_KO = {"HOUSE": "집", "TREE": "나무", "PERSON": "사람"}
+
+
+def _subject_label(subject: str | None) -> str:
+    """주제 라벨. HTP는 '집 그림'·'나무 그림'·'사람 그림', 그림일기(None)는 '그림'."""
+    name = _SUBJECT_KO.get(subject or "")
+    return f"{name} 그림" if name else "그림"
+
+
+def _format_subject_blocks(req: contracts.ObservationGenerationRequest) -> str:
+    """주제별 [OO 관찰]·[OO 문답] 블록 (S15P11B209-740).
+
+    HTP는 집·나무·사람 각 그림의 VLM 서술과 그 그림에서 나눈 문답이 블록으로 실린다.
+    문답의 아이 답변은 '관찰된 사실' 근거로만 쓰이도록 프롬프트(report.txt)가 강제한다.
+    탐지 요소 코드는 서술 검증 참고용 — 리포트 문장에 코드 원문 노출 금지(프롬프트 규칙).
+    """
+    parts: list[str] = []
+    for summary in req.subject_summaries:
+        label = _subject_label(summary.drawing_subject)
+        description = (summary.drawing_description or "").strip() or (
+            "(관찰 서술이 제공되지 않았어요)"
+        )
+        lines = [f"[{label} 관찰]", description]
+        if summary.detected_object_codes:
+            lines.append(
+                "- 탐지된 요소 코드(참고용): " + ", ".join(summary.detected_object_codes)
+            )
+        parts.append("\n".join(lines))
+        if summary.qa_pairs:
+            qa_lines = [f"[{label} 문답]"]
+            for qa in summary.qa_pairs:
+                # SKIPPED는 '아이가 스스로 넘겼다'는 관찰 사실이라 무응답과 구분해 표기한다.
+                if (qa.answer_type or "").upper() == "SKIPPED":
+                    answer = "(건너뛴 질문)"
+                else:
+                    answer = (qa.answer_text or "").strip() or "(답하지 않았어요)"
+                qa_lines.append(f"- 질문: {qa.question}\n  답변: {answer}")
+            parts.append("\n".join(qa_lines))
+    return "\n\n".join(parts) + "\n\n"
+
+
 def _format_activity(
     req: contracts.ObservationGenerationRequest,
     drawing_description: str | None,
@@ -145,12 +188,20 @@ def _format_activity(
     drawing_description 은 vlm_client.describe 산출물(그림 사실 묘사)이며, 있으면
     관찰 특징·요약의 근거가 된다. 없으면 그림 특징은 언급하지 않도록 안내 문구를 넣는다.
     behavior 는 소요시간·필압 등 형식적 지표이며, 있으면 관찰 보조 근거로 반영된다.
+
+    subject_summaries(740)가 있으면 단일 [그림 관찰 서술] 대신 주제별 블록을 쓴다 —
+    drawing_description(레거시 draft 경로 인자)과 동시에 오면 주제별 블록이 우선한다.
     """
     emotions = ", ".join(req.selected_emotions) if req.selected_emotions else "없음"
-    description = (drawing_description or "").strip() or "(그림 관찰 서술이 제공되지 않았어요)"
+    if req.subject_summaries:
+        observation_block = _format_subject_blocks(req)
+    else:
+        description = (drawing_description or "").strip() or (
+            "(그림 관찰 서술이 제공되지 않았어요)"
+        )
+        observation_block = f"[그림 관찰 서술]\n{description}\n\n"
     return (
-        "[그림 관찰 서술]\n"
-        f"{description}\n\n"
+        f"{observation_block}"
         f"{_format_behavior(behavior)}"
         "[활동 데이터]\n"
         f"- 질문 난이도: {req.question_difficulty or '정보 없음'}\n"

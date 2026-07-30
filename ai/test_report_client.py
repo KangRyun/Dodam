@@ -491,5 +491,167 @@ class ExtractJsonTest(unittest.TestCase):
             report_client._extract_json("여기엔 JSON이 없어요")
 
 
+class SubjectSummariesTest(unittest.TestCase):
+    """주제별 그림 서술·문답 프롬프트 반영 (S15P11B209-740).
+
+    HTP 3주제가 각각 [OO 그림 관찰]·[OO 그림 문답] 블록으로 실리고, 없으면 기존
+    단일 [그림 관찰 서술] 경로가 그대로인지(롤아웃 호환) 검증한다.
+    """
+
+    def _capture_user_msg(self, req, **generate_kwargs) -> str:
+        captured = {}
+
+        def fake_create(*, model, messages, **_kwargs):
+            captured["messages"] = messages
+            return _fake_response(_llm_json())
+
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = fake_create
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            report_client.generate(req, model="m", **generate_kwargs)
+        return captured["messages"][1]["content"]
+
+    @staticmethod
+    def _htp_summaries() -> list[contracts.SubjectSummary]:
+        return [
+            contracts.SubjectSummary(
+                drawing_subject="HOUSE",
+                drawing_description="가운데에 집이 크게 그려져 있어요.",
+                detected_object_codes=["HOUSE", "HOUSE_DOOR"],
+                qa_pairs=[
+                    contracts.SubjectQaPair(
+                        question="이 집에는 누가 살아?",
+                        answer_text="엄마랑 나!",
+                        answer_type="VOICE",
+                    ),
+                    contracts.SubjectQaPair(
+                        question="집 앞에는 뭐가 있어?",
+                        answer_text=None,
+                        answer_type=None,  # SKIPPED 아님 — 단순 무응답
+                    ),
+                ],
+            ),
+            contracts.SubjectSummary(
+                drawing_subject="TREE",
+                drawing_description="나무에 열매가 세 개 달려 있어요.",
+                qa_pairs=[
+                    contracts.SubjectQaPair(
+                        question="이 나무는 어디에 있어?",
+                        answer_text=None,
+                        answer_type="SKIPPED",
+                    )
+                ],
+            ),
+            contracts.SubjectSummary(
+                drawing_subject="PERSON",
+                drawing_description="사람 두 명이 손을 잡고 있어요.",
+            ),
+        ]
+
+    def test_subject_blocks_rendered_per_subject(self):
+        req = _sample_request(subject_summaries=self._htp_summaries())
+        user_msg = self._capture_user_msg(req)
+
+        for label in ("[집 그림 관찰]", "[나무 그림 관찰]", "[사람 그림 관찰]"):
+            self.assertIn(label, user_msg)
+        self.assertIn("[집 그림 문답]", user_msg)
+        self.assertIn("이 집에는 누가 살아?", user_msg)
+        self.assertIn("엄마랑 나!", user_msg)
+        self.assertIn("HOUSE_DOOR", user_msg)  # 참고용 요소 코드
+        # 주제별 블록이 실리면 레거시 단일 블록은 없다.
+        self.assertNotIn("[그림 관찰 서술]", user_msg)
+        # 문답 없는 주제(사람)는 문답 블록도 없다.
+        self.assertNotIn("[사람 그림 문답]", user_msg)
+
+    def test_subject_blocks_take_priority_over_legacy_description(self):
+        req = _sample_request(subject_summaries=self._htp_summaries())
+        user_msg = self._capture_user_msg(
+            req, drawing_description="레거시 단일 서술입니다."
+        )
+        self.assertNotIn("레거시 단일 서술입니다.", user_msg)
+        self.assertIn("[집 그림 관찰]", user_msg)
+
+    def test_art_diary_none_subject_uses_generic_label(self):
+        req = _sample_request(
+            subject_summaries=[
+                contracts.SubjectSummary(
+                    drawing_subject=None,
+                    drawing_description="공룡이 풍선을 들고 있어요.",
+                    qa_pairs=[
+                        contracts.SubjectQaPair(question="공룡은 기분이 어때?")
+                    ],
+                )
+            ]
+        )
+        user_msg = self._capture_user_msg(req)
+        self.assertIn("[그림 관찰]", user_msg)
+        self.assertIn("[그림 문답]", user_msg)
+        # '그림 그림' 같은 라벨 중복이 없어야 한다.
+        self.assertNotIn("그림 그림", user_msg)
+
+    def test_skipped_question_rendered_distinctly_from_unanswered(self):
+        req = _sample_request(subject_summaries=self._htp_summaries())
+        user_msg = self._capture_user_msg(req)
+        # SKIPPED(나무 문답)는 '건너뜀'으로, 타입 없는 무응답(집 두 번째 문답)은 별도 표기.
+        self.assertIn("(건너뛴 질문)", user_msg)
+        self.assertIn("(답하지 않았어요)", user_msg)
+
+    def test_empty_subject_summaries_keeps_legacy_block(self):
+        req = _sample_request(subject_summaries=[])
+        user_msg = self._capture_user_msg(
+            req, drawing_description="가운데에 집이 크게."
+        )
+        self.assertIn("[그림 관찰 서술]", user_msg)
+        self.assertIn("가운데에 집이 크게.", user_msg)
+
+    def test_answer_text_hidden_from_repr(self):
+        qa = contracts.SubjectQaPair(question="누가 살아?", answer_text="비밀 발화")
+        self.assertNotIn("비밀 발화", repr(qa))
+        req = _sample_request(
+            subject_summaries=[
+                contracts.SubjectSummary(drawing_subject="HOUSE", qa_pairs=[qa])
+            ]
+        )
+        self.assertNotIn("비밀 발화", repr(req))
+
+    def test_camelcase_json_parses_like_be_payload(self):
+        # BE(Jackson)가 보내는 camelCase JSON이 그대로 파싱되는지 — 계약 왕복 검증.
+        payload = {
+            "requestId": "req-9",
+            "analysisId": 1,
+            "drawingSessionId": 2,
+            "analysisType": "FINAL",
+            "subjectSummaries": [
+                {
+                    "drawingSubject": "TREE",
+                    "drawingDescription": "나무 한 그루",
+                    "detectedObjectCodes": ["TREE"],
+                    "qaPairs": [
+                        {
+                            "question": "무슨 나무야?",
+                            "answerText": "사과나무",
+                            "answerType": "OPTION",
+                        }
+                    ],
+                }
+            ],
+        }
+        req = contracts.ObservationGenerationRequest.model_validate(payload)
+        self.assertEqual(len(req.subject_summaries), 1)
+        self.assertEqual(req.subject_summaries[0].drawing_subject, "TREE")
+        self.assertEqual(req.subject_summaries[0].qa_pairs[0].answer_text, "사과나무")
+
+    def test_old_be_payload_without_subject_summaries_still_parses(self):
+        # 롤아웃 호환: 구 BE 요청(필드 부재)이 깨지지 않는다.
+        payload = {
+            "requestId": "req-8",
+            "analysisId": 1,
+            "drawingSessionId": 2,
+            "analysisType": "FINAL",
+        }
+        req = contracts.ObservationGenerationRequest.model_validate(payload)
+        self.assertEqual(req.subject_summaries, [])
+
+
 if __name__ == "__main__":
     unittest.main()
