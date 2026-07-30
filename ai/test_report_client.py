@@ -761,9 +761,101 @@ class RagInjectionTest(unittest.TestCase):
         # 서술·객체·감정이 전부 없으면 임베딩 호출 자체를 하지 않는다.
         req = _sample_request(selected_emotions=[], subject_summaries=[])
         with mock.patch.object(report_client, "retrieve") as retrieve_spy:
-            chunks = report_client._search_rag(req, None)
+            chunks, reason = report_client._search_rag(req, None)
         self.assertEqual(chunks, [])
+        self.assertEqual(reason, "RAG_NO_QUERY")
         retrieve_spy.assert_not_called()
+
+
+class RagSkippedReasonTest(unittest.TestCase):
+    """근거를 싣지 못한 사유 코드 (S15P11B209-615) — 실패 종류별 표기와 응답 반영."""
+
+    def _req_with_material(self):
+        return _sample_request(
+            subject_summaries=[
+                contracts.SubjectSummary(
+                    drawing_subject="HOUSE", drawing_description="집이 크게."
+                )
+            ]
+        )
+
+    def test_no_index_maps_to_rag_no_index(self):
+        from rag import RagUnavailableError
+
+        with mock.patch.object(
+            report_client,
+            "retrieve",
+            side_effect=RagUnavailableError("미배포", reason="NO_INDEX"),
+        ):
+            chunks, reason = report_client._search_rag(self._req_with_material(), None)
+        self.assertEqual((chunks, reason), ([], "RAG_NO_INDEX"))
+
+    def test_search_failure_maps_to_rag_unavailable(self):
+        from rag import RagUnavailableError
+
+        with mock.patch.object(
+            report_client,
+            "retrieve",
+            side_effect=RagUnavailableError("GMS 실패", reason="SEARCH_FAILED"),
+        ):
+            chunks, reason = report_client._search_rag(self._req_with_material(), None)
+        self.assertEqual((chunks, reason), ([], "RAG_UNAVAILABLE"))
+
+    def test_empty_results_map_to_low_score(self):
+        with mock.patch.object(report_client, "retrieve", return_value=[]):
+            chunks, reason = report_client._search_rag(self._req_with_material(), None)
+        self.assertEqual((chunks, reason), ([], "RAG_LOW_SCORE"))
+
+    def test_success_has_no_reason(self):
+        from rag import Chunk
+
+        chunk = Chunk(
+            chunk_id="s#0", source_id="s", title="제목", text="본문", score=0.9
+        )
+        with mock.patch.object(report_client, "retrieve", return_value=[chunk]):
+            chunks, reason = report_client._search_rag(self._req_with_material(), None)
+        self.assertEqual(len(chunks), 1)
+        self.assertIsNone(reason)
+
+    def test_reason_lands_in_response(self):
+        # 사유가 응답(ragSkippedReason)까지 흐르는지 — 미배포 시나리오로 종단 확인.
+        from rag import RagUnavailableError
+
+        def fake_create(*, model, messages, **_kwargs):
+            return _fake_response(_llm_json())
+
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = fake_create
+        with mock.patch.object(
+            report_client,
+            "retrieve",
+            side_effect=RagUnavailableError("미배포", reason="NO_INDEX"),
+        ), mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(self._req_with_material(), model="m")
+        self.assertEqual(result.rag_skipped_reason, "RAG_NO_INDEX")
+        self.assertEqual(result.rag_references, [])
+        self.assertIsNone(result.knowledge_base_version)
+
+    def test_success_response_has_null_reason(self):
+        from rag import Chunk
+
+        chunk = Chunk(
+            chunk_id="s#0", source_id="s", title="제목", text="본문", score=0.9
+        )
+
+        def fake_create(*, model, messages, **_kwargs):
+            return _fake_response(_llm_json())
+
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = fake_create
+        with mock.patch.object(
+            report_client, "retrieve", return_value=[chunk]
+        ), mock.patch.object(
+            report_client, "rag_knowledge_base_version", return_value="kb-2026.07-1"
+        ), mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(self._req_with_material(), model="m")
+        self.assertIsNone(result.rag_skipped_reason)
+        self.assertEqual(len(result.rag_references), 1)
 
 
 if __name__ == "__main__":

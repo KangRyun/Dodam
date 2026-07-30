@@ -24,6 +24,7 @@ import logging
 from dataclasses import dataclass
 
 from openai import OpenAIError
+from prometheus_client import Counter as PrometheusCounter
 
 import config
 import internal_contracts as contracts
@@ -252,23 +253,46 @@ def _build_rag_query(
     return "\n".join(parts).strip()
 
 
+# RAG 검색 결과 카운터 (S15P11B209-615). outcome: used | no_index | unavailable |
+#   low_score | no_query. "성공/실패/저점수 비율"을 운영에서 볼 수 있게 한다 —
+#   저점수 비율이 높으면 코퍼스가 얇거나 임계값(RAG_SCORE_THRESHOLD)이 높은 것.
+_RAG_SEARCH_COUNTER = PrometheusCounter(
+    "dodam_rag_search_total",
+    "관찰 리포트 RAG 검색 결과 (outcome별 누적)",
+    labelnames=("outcome",),
+)
+
+
 def _search_rag(
     req: contracts.ObservationGenerationRequest, drawing_description: str | None
-) -> list[Chunk]:
-    """근거 청크 검색. 실패는 '차단'이 아니라 '기능 저하'다(548 폴백 정책과 정합).
+) -> tuple[list[Chunk], str | None]:
+    """근거 청크 검색 → (청크 목록, 건너뛴 사유 코드).
 
-    - 인덱스 미배포·임베딩 실패(RagUnavailableError) → 빈 목록으로 진행(로그는 유형만).
-    - 질의 재료가 아예 없으면 검색하지 않는다(임베딩 호출 낭비 + 무의미 질의).
-    사유 코드 표기·메트릭은 후속 615가 이 경계 위에 얹는다.
+    실패는 '차단'이 아니라 '기능 저하'다(548 폴백 정책과 정합) — 어떤 사유든
+    리포트 생성은 계속되고, 사유는 응답(ragSkippedReason)과 메트릭에만 남는다.
+
+    - RAG_NO_QUERY: 관찰 재료(서술·객체)가 없어 검색을 시도하지 않음
+    - RAG_NO_INDEX: 인덱스 미배포(운영상 정상일 수 있는 상태)
+    - RAG_UNAVAILABLE: 임베딩 호출 실패 등 검색 장애
+    - RAG_LOW_SCORE: 검색은 됐지만 전부 임계값 미달 — 억지 근거를 싣지 않음
     """
     query = _build_rag_query(req, drawing_description)
     if not query:
-        return []
+        _RAG_SEARCH_COUNTER.labels(outcome="no_query").inc()
+        return [], "RAG_NO_QUERY"
     try:
-        return retrieve(query)
+        chunks = retrieve(query)
     except RagUnavailableError as e:
-        logger.info("RAG 근거 없이 리포트 생성 — %s", e)
-        return []
+        reason = "RAG_NO_INDEX" if e.reason == "NO_INDEX" else "RAG_UNAVAILABLE"
+        _RAG_SEARCH_COUNTER.labels(outcome=reason.removeprefix("RAG_").lower()).inc()
+        logger.info("RAG 근거 없이 리포트 생성 — reason=%s", reason)
+        return [], reason
+    if not chunks:
+        _RAG_SEARCH_COUNTER.labels(outcome="low_score").inc()
+        logger.info("RAG 근거 없이 리포트 생성 — reason=RAG_LOW_SCORE")
+        return [], "RAG_LOW_SCORE"
+    _RAG_SEARCH_COUNTER.labels(outcome="used").inc()
+    return chunks, None
 
 
 def _format_rag_block(chunks: list[Chunk]) -> str:
@@ -382,6 +406,7 @@ def _assemble(
     data: dict,
     model: str,
     rag_chunks: list[Chunk] | None = None,
+    rag_skipped_reason: str | None = None,
 ) -> contracts.ObservationGenerationResult:
     """LLM 정성 결과(data) + 서버 고정 필드를 합쳐 계약 결과를 만든다.
 
@@ -460,6 +485,7 @@ def _assemble(
         knowledge_base_version=(
             rag_knowledge_base_version() if rag_chunks else None
         ),
+        rag_skipped_reason=rag_skipped_reason,
     )
 
 
@@ -487,7 +513,8 @@ def generate(
     """
     used_model = model or config.LLM_MODEL
     # RAG 근거 검색(614) — 실패해도 리포트는 생성한다(기능 저하, 차단 아님).
-    rag_chunks = _search_rag(req, drawing_description)
+    # 근거를 싣지 못한 사유(615)는 응답·메트릭으로만 남긴다.
+    rag_chunks, rag_skipped_reason = _search_rag(req, drawing_description)
     messages = [
         {"role": "system", "content": _system_prompt()},
         {
@@ -510,7 +537,7 @@ def generate(
     data = _extract_json(resp.choices[0].message.content or "")
     # 재현성: GMS가 실제 서빙한 모델 ID를 기록한다(예: gpt-4o-mini-2024-07-18). 없으면 요청 모델명.
     served_model = getattr(resp, "model", "") or used_model
-    return _assemble(req, data, served_model, rag_chunks)
+    return _assemble(req, data, served_model, rag_chunks, rag_skipped_reason)
 
 
 if __name__ == "__main__":
