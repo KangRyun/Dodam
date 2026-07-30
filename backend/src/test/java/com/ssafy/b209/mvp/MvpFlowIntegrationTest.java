@@ -59,12 +59,12 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * 핵심 MVP 그리기 루프를 하나의 엔드투엔드 happy-path로 관통하는 통합 테스트다.
  *
  * <p>실제 OAuth 로그인으로 JWT를 발급받아 이후 모든 요청을 Bearer 인증으로 수행하고, 각 단계가 발급한 실제 식별자를 다음 단계 입력으로 이어 붙인다. 아동
- * 등록 → 그림 세션 생성 → 스트로크 배치 → 최종 스냅샷 업로드 → 그림 분석 요청·조회 → 대화 시작·질문·선택형 답변·내역 조회 → 회고 저장 → 완료 접수(202) →
- * 세션 상세로 리포트 식별자와 COMPLETED 단계를 확인한다.
+ * 등록 → 그림 유형 조회 → 그림 세션 생성 → 스트로크 배치·Draft 저장 → 중간 분석 → 그림 단계 완료·FINAL 분석 → 대화 시작·질문·선택형 답변·종료 → 회고
+ * 저장 → 완료 접수(202) → 세션 상세 조회를 실제 Flutter Remote Repository 계약과 같은 URI·Header·Payload로 수행한다.
  *
- * <p>백엔드에 HTTP 전이가 없는 두 지점(그림 단계 DRAWING→ANALYZING, 대화 상태 CONVERSING→COMPLETED)은 단면 통합 테스트 관례대로
- * jdbcTemplate로 직접 전이한다. 리포트 생성은 완료 접수 커밋 이후 동기 {@code @TransactionalEventListener(AFTER_COMMIT)}로
- * 수행되므로 완료 요청 직후 DB 상태를 검증할 수 있다. 따라서 이 테스트는 롤백 트랜잭션을 사용하지 않는다.
+ * <p>상태 전이를 DB에서 직접 보정하지 않고 공개 API만 사용한다. 리포트 생성은 완료 접수 커밋 이후 동기
+ * {@code @TransactionalEventListener(AFTER_COMMIT)}로 수행되므로 완료 요청 직후 DB 상태를 검증할 수 있다. 따라서 이 테스트는 롤백
+ * 트랜잭션을 사용하지 않는다.
  */
 @Testcontainers
 @SpringBootTest
@@ -140,6 +140,8 @@ class MvpFlowIntegrationTest {
         .willAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
     given(questionIdempotencyStore.execute(any(), any(), any(), any(), any()))
         .willAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
+    given(questionIdempotencyStore.execute(any(), any(), any(), any(), any(), any()))
+        .willAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
     given(voiceAnswerIdempotencyStore.execute(any(), any(), any(), any(), any()))
         .willAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
   }
@@ -156,40 +158,38 @@ class MvpFlowIntegrationTest {
     // 2) 아동을 등록하고 이후 단계에서 사용할 childId를 이어받는다.
     long childId = registerChild(accessToken);
 
-    // 3) 그림 세션을 생성한다(DRAWING 단계로 시작).
-    long drawingSessionId = createDrawingSession(accessToken, childId);
+    // 3) Flutter가 조회한 그림 유형 식별자로 세션을 생성한다(DRAWING 단계로 시작).
+    long drawingTypeId = findDrawingTypeId(accessToken, childId);
+    long drawingSessionId = createDrawingSession(accessToken, childId, drawingTypeId);
 
-    // 4) 스트로크 배치와 최종 스냅샷을 업로드한다(DRAWING 단계 유지).
+    // 4) 스트로크 배치와 Draft를 저장하고 Draft 식별자로 중간 객체 탐지를 요청한다.
     submitStrokeBatch(accessToken, drawingSessionId);
-    long finalAssetId = uploadFinalSnapshot(accessToken, drawingSessionId);
+    long draftAssetId = saveDraft(accessToken, drawingSessionId);
+    long intermediateAnalysisId =
+        requestAnalysis(accessToken, drawingSessionId, draftAssetId, "PAUSE");
+    getAnalysis(accessToken, drawingSessionId, intermediateAnalysisId);
 
-    // 5) 최종 그림 분석을 요청하고 저장된 결과를 조회한다.
-    long analysisId = requestAnalysis(accessToken, drawingSessionId, finalAssetId);
-    getAnalysis(accessToken, drawingSessionId, analysisId);
-
-    // 브리지: DRAWING→ANALYZING HTTP 전이가 백엔드에 없어 대화 시작 사전 조건을 직접 맞춘다.
-    jdbcTemplate.update(
-        "UPDATE drawing_sessions SET current_stage = 'ANALYZING' WHERE id = ?", drawingSessionId);
+    // 5) 그림 단계 완료 API가 FINAL 저장과 대화 준비용 분석·상태 전이를 함께 수행한다.
+    long finalAnalysisId = completeDrawingStage(accessToken, drawingSessionId);
+    getAnalysis(accessToken, drawingSessionId, finalAnalysisId);
 
     // 6) 대화 세션을 시작하고 다음 질문·선택형 답변·내역을 관통한다.
-    long conversationId = startConversation(accessToken, drawingSessionId, analysisId);
-    long questionMessageId = requestNextQuestion(accessToken, conversationId, analysisId);
+    long conversationId = startConversation(accessToken, drawingSessionId, finalAnalysisId);
+    long questionMessageId = requestNextQuestion(accessToken, conversationId, finalAnalysisId);
     submitOptionAnswer(accessToken, conversationId, questionMessageId);
     assertMessageHistory(accessToken, conversationId);
 
-    // 브리지: CONVERSING→COMPLETED 대화 상태 전이 HTTP가 없어 완료 사전 조건을 직접 맞춘다.
-    jdbcTemplate.update(
-        "UPDATE conversation_sessions SET conversation_status = 'COMPLETED' WHERE id = ?",
-        conversationId);
+    // 7) 대화 종료 API가 대화와 그림 세션을 각각 COMPLETED·REFLECTION으로 전이한다.
+    endConversation(accessToken, conversationId, questionMessageId);
 
-    // 7) 회고를 저장한다(CONVERSING→REFLECTION 단계 전이).
+    // 8) 제목과 감정을 저장한다.
     saveReflection(accessToken, drawingSessionId);
 
-    // 8) 완료를 접수하면 커밋 후 동기 리포트 생성으로 세션이 COMPLETED로 전이된다.
+    // 9) 완료를 접수하면 커밋 후 동기 리포트 생성으로 세션이 COMPLETED로 전이된다.
     completeDrawingSession(accessToken, drawingSessionId);
     assertReportGeneratedAndSessionCompleted(drawingSessionId);
 
-    // 9) 세션 상세에서 리포트 식별자와 COMPLETED 단계를 확인한다.
+    // 10) 세션 상세에서 리포트 식별자와 COMPLETED 단계를 확인한다.
     long reportId =
         jdbcTemplate.queryForObject(
             "SELECT id FROM reports WHERE drawing_session_id = ?", Long.class, drawingSessionId);
@@ -246,7 +246,24 @@ class MvpFlowIntegrationTest {
     return objectMapper.readTree(body).at("/data/childId").asLong();
   }
 
-  private long createDrawingSession(String accessToken, long childId) throws Exception {
+  private long findDrawingTypeId(String accessToken, long childId) throws Exception {
+    String body =
+        mockMvc
+            .perform(
+                get("/api/v1/drawing-types")
+                    .with(bearer(accessToken))
+                    .queryParam("childId", String.valueOf(childId))
+                    .queryParam("activeOnly", "true"))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.content[0].code").value("ART_DIARY"))
+            .andReturn()
+            .getResponse()
+            .getContentAsString(StandardCharsets.UTF_8);
+    return objectMapper.readTree(body).at("/data/content/0/drawingTypeId").asLong();
+  }
+
+  private long createDrawingSession(String accessToken, long childId, long drawingTypeId)
+      throws Exception {
     String body =
         mockMvc
             .perform(
@@ -258,13 +275,12 @@ class MvpFlowIntegrationTest {
                         """
                         {
                           "childId": %d,
-                          "drawingTypeId": 1,
+                          "drawingTypeId": %d,
                           "inputMethod": "CANVAS",
-                          "clientStartedAt": "2026-07-21T11:30:00+09:00",
-                          "canvas": {"width": 1920, "height": 1080, "backgroundColor": "#FFFFFF"}
+                          "clientStartedAt": "2026-07-21T11:30:00+09:00"
                         }
                         """
-                            .formatted(childId)))
+                            .formatted(childId, drawingTypeId)))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.sessionStatus").value("IN_PROGRESS"))
             .andExpect(jsonPath("$.data.currentStage").value("DRAWING"))
@@ -306,34 +322,41 @@ class MvpFlowIntegrationTest {
         .andExpect(status().isCreated());
   }
 
-  private long uploadFinalSnapshot(String accessToken, long drawingSessionId) throws Exception {
-    MockMultipartFile file = new MockMultipartFile("file", "drawing.png", "image/png", PNG);
-    MockMultipartFile metadata =
+  private long saveDraft(String accessToken, long drawingSessionId) throws Exception {
+    MockMultipartFile preview = new MockMultipartFile("preview", "drawing.png", "image/png", PNG);
+    MockMultipartFile canvasState =
         new MockMultipartFile(
-            "metadata",
-            "metadata.json",
+            "canvasState",
+            "canvas-state.json",
             MediaType.APPLICATION_JSON_VALUE,
             """
-            {"assetType":"FINAL","assetVersion":1,"capturedAt":"2026-07-21T11:40:00+09:00"}
+            {"lastEventSequence":1,"clientSavedAt":"2026-07-21T11:39:00+09:00"}
             """
                 .getBytes(StandardCharsets.UTF_8));
     String body =
         mockMvc
             .perform(
-                multipart("/api/v1/drawing-sessions/{drawingSessionId}/snapshots", drawingSessionId)
-                    .file(file)
-                    .file(metadata)
+                multipart("/api/v1/drawing-sessions/{drawingSessionId}/draft", drawingSessionId)
+                    .file(preview)
+                    .file(canvasState)
+                    .with(
+                        request -> {
+                          request.setMethod("PUT");
+                          return request;
+                        })
                     .with(bearer(accessToken)))
-            .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.assetType").value("FINAL"))
-            .andExpect(jsonPath("$.data.storageKey").doesNotExist())
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.assetType").value("DRAFT"))
+            .andExpect(jsonPath("$.data.lastEventSequence").value(1))
+            .andExpect(jsonPath("$.data.previewUrl").isNotEmpty())
             .andReturn()
             .getResponse()
             .getContentAsString(StandardCharsets.UTF_8);
     return objectMapper.readTree(body).at("/data/drawingAssetId").asLong();
   }
 
-  private long requestAnalysis(String accessToken, long drawingSessionId, long finalAssetId)
+  private long requestAnalysis(
+      String accessToken, long drawingSessionId, long drawingAssetId, String triggerReason)
       throws Exception {
     String body =
         mockMvc
@@ -343,17 +366,57 @@ class MvpFlowIntegrationTest {
                     .contentType(MediaType.APPLICATION_JSON)
                     .content(
                         """
-                        {"drawingAssetId":%d,"analysisType":"OBJECT_DETECTION"}
+                        {
+                          "drawingAssetId":%d,
+                          "analysisType":"OBJECT_DETECTION",
+                          "triggerReason":"%s"
+                        }
                         """
-                            .formatted(finalAssetId)))
+                            .formatted(drawingAssetId, triggerReason)))
             .andExpect(status().isCreated())
-            .andExpect(jsonPath("$.data.drawingAssetId").value((int) finalAssetId))
+            .andExpect(jsonPath("$.data.drawingAssetId").value((int) drawingAssetId))
             .andReturn()
             .getResponse()
             .getContentAsString(StandardCharsets.UTF_8);
     long analysisId = objectMapper.readTree(body).at("/data/drawingAnalysisId").asLong();
     assertThat(analysisId).isPositive();
     return analysisId;
+  }
+
+  private long completeDrawingStage(String accessToken, long drawingSessionId) throws Exception {
+    MockMultipartFile finalImage =
+        new MockMultipartFile("finalImage", "drawing.png", "image/png", PNG);
+    MockMultipartFile metadata =
+        new MockMultipartFile(
+            "metadata",
+            "metadata.json",
+            MediaType.APPLICATION_JSON_VALUE,
+            """
+            {
+              "lastEventSequence":1,
+              "drawingDurationMs":600000,
+              "clientCompletedAt":"2026-07-21T11:40:00+09:00"
+            }
+            """
+                .getBytes(StandardCharsets.UTF_8));
+    String body =
+        mockMvc
+            .perform(
+                multipart(
+                        "/api/v1/drawing-sessions/{drawingSessionId}/drawing-complete",
+                        drawingSessionId)
+                    .file(finalImage)
+                    .file(metadata)
+                    .header("Idempotency-Key", "mvp-drawing-complete-key")
+                    .with(bearer(accessToken)))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.finalAssetId").isNumber())
+            .andExpect(jsonPath("$.data.currentStage").value("CONVERSING"))
+            .andExpect(jsonPath("$.data.analysis.status").value("SUCCEEDED"))
+            .andReturn()
+            .getResponse()
+            .getContentAsString(StandardCharsets.UTF_8);
+    return objectMapper.readTree(body).at("/data/analysis/analysisId").asLong();
   }
 
   private void getAnalysis(String accessToken, long drawingSessionId, long analysisId)
@@ -461,6 +524,27 @@ class MvpFlowIntegrationTest {
         .andExpect(jsonPath("$.data.content[0].messageType").value("QUESTION"))
         .andExpect(jsonPath("$.data.content[1].senderType").value("CHILD"))
         .andExpect(jsonPath("$.data.content[1].messageType").value("ANSWER_OPTION"));
+  }
+
+  private void endConversation(String accessToken, long conversationId, long lastQuestionMessageId)
+      throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/conversations/{conversationId}/end", conversationId)
+                .with(bearer(accessToken))
+                .header("Idempotency-Key", "mvp-conversation-end-key")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "reason": "NO_MORE_QUESTION",
+                      "lastQuestionMessageId": %d
+                    }
+                    """
+                        .formatted(lastQuestionMessageId)))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.conversationStatus").value("COMPLETED"))
+        .andExpect(jsonPath("$.data.nextStage").value("REFLECTION"));
   }
 
   private void saveReflection(String accessToken, long drawingSessionId) throws Exception {
