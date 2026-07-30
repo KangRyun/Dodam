@@ -107,6 +107,23 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
     }
   }
 
+  /// 대화 단계에서 완성 그림을 배경으로만 복원한다.
+  ///
+  /// 입력 가능 여부는 화면의 단계 잠금이 결정하며 이 메서드는 파일 조회만 맡는다.
+  Future<void> loadReadOnlyImage(String fileUrl) async {
+    final dataSource = repository;
+    if (fileUrl.isEmpty || dataSource == null) return;
+    _setStatus(DrawingDraftRestoreStatus.loadingImage);
+    try {
+      final bytes = await dataSource.downloadDraftPreview(fileUrl);
+      _backgroundImage = _imageProviderFactory(bytes);
+      notifyListeners();
+    } on Object {
+      _backgroundImage = null;
+      _setStatus(DrawingDraftRestoreStatus.imageFailed);
+    }
+  }
+
   void markImageLoaded() {
     if (_status == DrawingDraftRestoreStatus.loadingImage) {
       _setStatus(DrawingDraftRestoreStatus.restored);

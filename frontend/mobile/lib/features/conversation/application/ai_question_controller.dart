@@ -58,6 +58,18 @@ final class AiQuestionController extends ChangeNotifier {
         endpoint: ConversationRequestEndpoint.nextQuestion,
       );
 
+  /// 서버에 저장된 미응답 질문을 새 질문 생성 요청 없이 화면에 복원한다.
+  void restore(AiQuestion restoredQuestion) {
+    if (_disposed || restoredQuestion.conversationId != conversationId) return;
+    _generation += 1;
+    question = restoredQuestion;
+    status = AiQuestionStatus.success;
+    error = null;
+    completionReason = null;
+    conversationAlreadyEnded = false;
+    notifyListeners();
+  }
+
   Future<void> load() => _load(
     _requestBasisAnalysisId ?? basisAnalysisId,
     previousAnswerMessageId: _requestPreviousAnswerMessageId,

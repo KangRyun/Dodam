@@ -22,6 +22,8 @@ import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 import '../../../conversation/conversation.dart';
+import '../../domain/models/activity_conversation_turn.dart';
+import '../../domain/repositories/activity_repository.dart';
 
 enum _DrawingCompletePhase { canvasCapture, request, contractValidation }
 
@@ -114,6 +116,7 @@ class DrawingScreen extends StatefulWidget {
     this.voiceNoSpeechTimeout = const Duration(seconds: 3),
     this.voiceAnswerRepository,
     this.sttResultRepository,
+    this.activityRepository,
     this.conversationId,
     this.basisAnalysisId,
     this.resumeConversation = false,
@@ -149,6 +152,7 @@ class DrawingScreen extends StatefulWidget {
   final Duration voiceNoSpeechTimeout;
   final VoiceAnswerRepository? voiceAnswerRepository;
   final SttResultRepository? sttResultRepository;
+  final ActivityRepository? activityRepository;
   final int? conversationId;
   final int? basisAnalysisId;
 
@@ -261,6 +265,10 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 대화만 진행한다.
   bool get _canvasLocked => widget.resumeConversation || _drawingStageFinished;
 
+  /// 새 획 또는 복원된 Draft 배경이 있으면 완료 가능한 그림으로 본다.
+  bool get _hasDrawingContent =>
+      _completedStrokes.isNotEmpty || _draftRestoreController.draft != null;
+
   @override
   void initState() {
     super.initState();
@@ -322,7 +330,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (widget.resumeConversation) {
-        // 그림 단계가 끝난 세션이므로 저장·탐지 없이 대화만 이어받는다.
+        // HTP 대화 복귀는 완성 그림을 잠근 배경으로 보여주고 마지막 질문을 복원한다.
         unawaited(_resumeConversation());
         return;
       }
@@ -333,8 +341,71 @@ class _DrawingScreenState extends State<DrawingScreen>
         unawaited(
           _draftRestoreController.load(autoRestore: widget.autoRestoreDraft),
         );
+        if (widget.autoRestoreDraft && !widget.activityContext.isHtp) {
+          // 그림일기 이어하기는 캔버스 편집을 유지하면서 미응답 질문만 복원한다.
+          unawaited(_restoreArtDiaryQuestion());
+        }
       }
     });
+  }
+
+  /// 그림일기의 기존 대화가 있을 때 마지막 미응답 질문을 새로 생성하지 않고 복원한다.
+  Future<void> _restoreArtDiaryQuestion() async {
+    final sessionId = widget.sessionId;
+    final drawingRepository = widget.drawingRepository;
+    final activityRepository = widget.activityRepository;
+    if (sessionId == null ||
+        drawingRepository == null ||
+        activityRepository == null ||
+        widget.conversationRepository == null) {
+      return;
+    }
+    try {
+      final session = await drawingRepository.getSession(sessionId);
+      final conversationId = session.conversationId;
+      if (!mounted || conversationId == null) return;
+      final messages = await activityRepository.getConversationMessages(
+        conversationId,
+      );
+      if (!mounted) return;
+      final turns = ActivityConversationTurn.group(messages);
+      ActivityConversationTurn? pendingTurn;
+      for (final turn in turns.reversed) {
+        if (turn.question != null &&
+            turn.hasNoAnswer &&
+            !turn.question!.isSkipped) {
+          pendingTurn = turn;
+          break;
+        }
+      }
+      final message = pendingTurn?.question;
+      if (message == null) return;
+      _setupConversationControllers(conversationId);
+      _questionController?.restore(
+        AiQuestion(
+          messageId: message.messageId,
+          conversationId: conversationId,
+          sequence: message.sequence,
+          text: message.rawText ?? '',
+          options: [
+            for (final option in message.options)
+              AiQuestionOption(
+                optionId: option.optionId,
+                type: option.type,
+                label: option.label,
+                value: option.value,
+                emoji: option.emoji,
+              ),
+          ],
+          // 대화 내역 API에는 TTS 가능 여부가 없으므로 AI 질문은 음성 조회를 시도한다.
+          ttsAvailable: true,
+          createdAt:
+              DateTime.tryParse(message.createdAt ?? '') ?? DateTime.now(),
+        ),
+      );
+    } on Object {
+      // 질문 복원 실패가 Draft 캔버스 복원과 이어 그리기를 막지 않게 한다.
+    }
   }
 
   /// 진행 중 대화를 이어받아 질문을 다시 불러온다.
@@ -342,6 +413,27 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 대화 생성 요청은 이미 대화가 있으면 `ACTIVE_CONVERSATION_EXISTS`(409)로
   /// 기존 `conversationId`를 돌려주므로 분석 ID 없이도 복귀할 수 있다.
   Future<void> _resumeConversation() async {
+    await Future.wait([
+      _restoreConversationBackground(),
+      _restoreConversationQuestion(),
+    ]);
+  }
+
+  Future<void> _restoreConversationBackground() async {
+    final sessionId = widget.sessionId;
+    final repository = widget.drawingRepository;
+    if (sessionId == null || repository == null) return;
+    try {
+      final session = await repository.getSession(sessionId);
+      final latestAsset = session.latestAsset;
+      if (latestAsset == null) return;
+      await _draftRestoreController.loadReadOnlyImage(latestAsset.fileUrl);
+    } on Object {
+      // 그림 조회 실패가 질문 복원까지 막지 않게 서로 독립적으로 처리한다.
+    }
+  }
+
+  Future<void> _restoreConversationQuestion() async {
     await _ensureConversationStarted(null);
     if (!mounted) return;
     await _questionController?.load();
@@ -947,7 +1039,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     if (_canvasLocked ||
         _isCompleting ||
         _activeStroke != null ||
-        _completedStrokes.isEmpty) {
+        !_hasDrawingContent) {
       return;
     }
     final confirmed = await showAppConfirmDialog(
@@ -1304,9 +1396,8 @@ class _DrawingScreenState extends State<DrawingScreen>
             backgroundImage: _draftRestoreController.backgroundImage,
             inputEnabled: !_canvasLocked && _draftRestoreController.canDraw,
             showRestoreOverlay:
-                !_canvasLocked &&
-                !_draftRestoreController.canDraw &&
-                !autoRestoreInProgress,
+                !_canvasLocked && !_draftRestoreController.canDraw,
+            autoRestoreInProgress: autoRestoreInProgress,
             onBackgroundLoaded: _draftRestoreController.markImageLoaded,
             onBackgroundError: _draftRestoreController.markImageFailed,
             restoreStatus: restoreStatus,
@@ -1373,7 +1464,7 @@ class _DrawingScreenState extends State<DrawingScreen>
                 !_canvasLocked &&
                 !_isCompleting &&
                 _activeStroke == null &&
-                _completedStrokes.isNotEmpty,
+                _hasDrawingContent,
             isCompleting: _isCompleting,
             onComplete: () => unawaited(_confirmAndComplete()),
             saveStatus: _syncCoordinator.saveStatus,
@@ -1442,6 +1533,7 @@ class _CanvasPanel extends StatelessWidget {
     required this.backgroundImage,
     required this.inputEnabled,
     required this.showRestoreOverlay,
+    required this.autoRestoreInProgress,
     required this.onBackgroundLoaded,
     required this.onBackgroundError,
     required this.restoreStatus,
@@ -1482,6 +1574,7 @@ class _CanvasPanel extends StatelessWidget {
   ///
   /// 대화 복귀 모드이거나 그림 단계가 끝난 뒤에는 띄우지 않는다.
   final bool showRestoreOverlay;
+  final bool autoRestoreInProgress;
   final VoidCallback onBackgroundLoaded;
   final VoidCallback onBackgroundError;
   final DrawingDraftRestoreStatus restoreStatus;
@@ -1582,6 +1675,7 @@ class _CanvasPanel extends StatelessWidget {
             if (showRestoreOverlay)
               _DraftRestoreOverlay(
                 status: restoreStatus,
+                autoRestoreInProgress: autoRestoreInProgress,
                 onContinue: onContinue,
                 onStartNew: onStartNew,
                 onRetryQuery: onRetryQuery,
@@ -1597,6 +1691,7 @@ class _CanvasPanel extends StatelessWidget {
 class _DraftRestoreOverlay extends StatelessWidget {
   const _DraftRestoreOverlay({
     required this.status,
+    required this.autoRestoreInProgress,
     required this.onContinue,
     required this.onStartNew,
     required this.onRetryQuery,
@@ -1604,6 +1699,7 @@ class _DraftRestoreOverlay extends StatelessWidget {
   });
 
   final DrawingDraftRestoreStatus status;
+  final bool autoRestoreInProgress;
   final VoidCallback onContinue;
   final VoidCallback onStartNew;
   final VoidCallback onRetryQuery;
@@ -1613,7 +1709,8 @@ class _DraftRestoreOverlay extends StatelessWidget {
   Widget build(BuildContext context) {
     final loading =
         status == DrawingDraftRestoreStatus.loading ||
-        status == DrawingDraftRestoreStatus.loadingImage;
+        status == DrawingDraftRestoreStatus.loadingImage ||
+        (autoRestoreInProgress && status == DrawingDraftRestoreStatus.found);
     final imageFailure = status == DrawingDraftRestoreStatus.imageFailed;
     final queryFailure = status == DrawingDraftRestoreStatus.queryFailed;
     final title = switch (status) {
@@ -1641,8 +1738,22 @@ class _DraftRestoreOverlay extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (loading) const CircularProgressIndicator(),
-                  if (loading) const SizedBox(height: AppSpacing.md),
+                  if (loading) ...[
+                    Image.asset(
+                      'assets/characters/dodam_resume_loading.png',
+                      key: const ValueKey('draft-restore-loading-character'),
+                      width: 150,
+                      height: 120,
+                      fit: BoxFit.contain,
+                    ),
+                    const SizedBox(height: AppSpacing.sm),
+                    const SizedBox(
+                      width: 28,
+                      height: 28,
+                      child: CircularProgressIndicator(strokeWidth: 3),
+                    ),
+                    const SizedBox(height: AppSpacing.md),
+                  ],
                   Text(
                     title,
                     textAlign: TextAlign.center,

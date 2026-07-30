@@ -117,6 +117,12 @@ void main() {
     expect(session.reportId, isNull);
     expect(session.selectedEmotions, ['HAPPY']);
     expect(session.latestAnalysis?['drawingAnalysisId'], 300);
+    expect(session.latestAsset?.drawingAssetId, 200);
+    expect(session.latestAsset?.assetType, 'FINAL');
+    expect(
+      session.latestAsset?.fileUrl,
+      '/api/v1/drawing-assets/200/file',
+    );
   });
 
   test('Draft 저장은 JSON MIME multipart와 공통 응답 봉투를 처리한다', () async {

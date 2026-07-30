@@ -136,6 +136,41 @@ final class DrawingAssetDto {
   final String? checksumSha256, expiresAt, createdAt;
 }
 
+/// 세션 상세가 반환하는 최신 그림 자산 요약.
+///
+/// 상세 응답은 파일 URL 대신 식별자를 반환하므로 인증 파일 조회 경로를 조합한다.
+final class DrawingSessionAssetSummaryDto {
+  const DrawingSessionAssetSummaryDto({
+    required this.drawingAssetId,
+    required this.assetType,
+    required this.assetVersion,
+    required this.mimeType,
+    this.widthPx,
+    this.heightPx,
+    this.capturedAt,
+    this.createdAt,
+  });
+
+  factory DrawingSessionAssetSummaryDto.fromJson(Map<String, dynamic> json) =>
+      DrawingSessionAssetSummaryDto(
+        drawingAssetId: json['drawingAssetId'] as int,
+        assetType: json['assetType'] as String,
+        assetVersion: json['assetVersion'] as int,
+        mimeType: json['mimeType'] as String,
+        widthPx: json['widthPx'] as int?,
+        heightPx: json['heightPx'] as int?,
+        capturedAt: json['capturedAt'] as String?,
+        createdAt: json['createdAt'] as String?,
+      );
+
+  final int drawingAssetId, assetVersion;
+  final int? widthPx, heightPx;
+  final String assetType, mimeType;
+  final String? capturedAt, createdAt;
+
+  String get fileUrl => '/api/v1/drawing-assets/$drawingAssetId/file';
+}
+
 final class DrawingSessionDto {
   const DrawingSessionDto({
     required this.drawingSessionId,
@@ -152,6 +187,7 @@ final class DrawingSessionDto {
     required this.conversation,
     required this.latestAnalysis,
     required this.assets,
+    this.latestAsset,
     this.guideText,
     this.conversationId,
     this.reportId,
@@ -186,6 +222,9 @@ final class DrawingSessionDto {
     latestAnalysis: json['latestAnalysis'] == null
         ? null
         : _map(json['latestAnalysis']),
+    latestAsset: json['latestAsset'] == null
+        ? null
+        : DrawingSessionAssetSummaryDto.fromJson(_map(json['latestAsset'])),
     conversationId: json['conversationId'] as int?,
     reportId: json['reportId'] as int?,
     assets: (json['assets'] as List? ?? const [])
@@ -201,6 +240,7 @@ final class DrawingSessionDto {
   final List<String>? selectedEmotions;
   final Map<String, dynamic>? conversation, latestAnalysis;
   final List<DrawingAssetDto> assets;
+  final DrawingSessionAssetSummaryDto? latestAsset;
 }
 
 final class ActiveDrawingSessionDto {
