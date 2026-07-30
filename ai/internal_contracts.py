@@ -202,7 +202,35 @@ class QuestionResponse(_CamelModel):
 # 현재 활성 구현은 MockAiObservationClient(고정 fixture)다.
 # ⚠️ 계약 소유자는 BE. 실제 HTTP 배선(app.ai.observation.mode=http)은 후속 이슈가
 #    같은 AiObservationClient 경계 뒤에 붙인다 — 이 AI 서버는 draft 경로로 같은 결과 형태만 제공.
-# ⚠️ 요청엔 그림 서술·대화 원문·탐지 객체가 없다(개인정보 최소화 계약) — 임의로 추가하지 말 것.
+# ⚠️ 개인정보 최소화 계약 — 식별 정보(실명·생년월일 등)는 없다. 임의 추가 금지.
+#    그림 서술·문답은 S15P11B209-740에서 합의 확장(subjectSummaries) — 리포트가 그림·문답
+#    내용을 근거로 쓸 수 있게 한다. 정본: docs/ai/ai-observation-report-contract.md
+
+
+class SubjectQaPair(_CamelModel):
+    """주제별 문답 한 쌍 (S15P11B209-740).
+
+    answer_text는 아이 발화(STT 텍스트·선택 칩 라벨)라 repr에서 감춘다(로그 유출 방지).
+    answer_type은 BE 어휘(VOICE·OPTION·SKIPPED 등). AI는 SKIPPED만 "(건너뛴 질문)"으로
+    구분 표기하고(아이가 스스로 넘긴 관찰 사실 — 무응답과 다르다) 그 외 값은 해석하지 않는다.
+    """
+
+    question: str
+    answer_text: str | None = Field(default=None, repr=False)
+    answer_type: str | None = None
+
+
+class SubjectSummary(_CamelModel):
+    """주제(집/나무/사람 또는 그림일기 단일 그림) 하나의 관찰 서술·문답 묶음 (S15P11B209-740).
+
+    drawing_description은 해당 그림의 VLM 관찰 서술(analysis_observation_results.overall_summary).
+    detected_object_codes는 내부 코드 — 프롬프트 참고용이며 리포트 문장에 원문 노출 금지.
+    """
+
+    drawing_subject: DrawingSubject | None = None  # 그림일기는 None
+    drawing_description: str = ""
+    detected_object_codes: list[str] = Field(default_factory=list)
+    qa_pairs: list[SubjectQaPair] = Field(default_factory=list)
 
 
 class ObservationGenerationRequest(_CamelModel):
@@ -224,6 +252,9 @@ class ObservationGenerationRequest(_CamelModel):
     selected_emotions: list[str] = Field(default_factory=list)
     expressed_emotion_text: str | None = Field(default=None, repr=False)
     representative_utterance: str | None = Field(default=None, repr=False)
+    # 주제별 그림 서술·문답 (S15P11B209-740). HTP=최대 3건(집·나무·사람), 그림일기=1건.
+    #   롤아웃 안전: 구 BE가 안 보내도 기존 동작 유지 — 기본 빈 목록(QuestionRequest.activity_type 패턴).
+    subject_summaries: list[SubjectSummary] = Field(default_factory=list)
 
 
 class ObservedFeatureDraft(_CamelModel):
