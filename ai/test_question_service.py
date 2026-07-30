@@ -755,5 +755,115 @@ class SubjectPromptAndTargetTest(unittest.TestCase):
         self.assertNotIn("다시 묻지 말", without_asked)
 
 
+class NegationCandidateReaskTest(unittest.TestCase):
+    """탐지 부정 시 후보 칩 재질문 (S15P11B209-718)."""
+
+    def _chip(self, *codes, text="음, 아니야"):
+        return RecentMessage(
+            sender_type="CHILD",
+            message_type="OPTION_ANSWER",
+            text=text,
+            selected_option_codes=list(codes),
+        )
+
+    def _ai_q(self, text="이 집엔 누가 살아?"):
+        return RecentMessage(sender_type="AI", message_type="QUESTION", text=text)
+
+    def _generate(self, req, *, reply="그럼 이건 뭐야?"):
+        capture: dict = {}
+        client = _mock_client(capture, reply=reply)
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-718")
+        return resp, capture
+
+    def _req(self, **overrides):
+        base = {
+            "allowed_response_modes": ["OPTION"],
+            "detected_objects": [
+                _detected("HOUSE", "집", 0.95),
+                _detected("TREE", "나무", 0.80),
+                _detected("PERSON", "사람", 0.70),
+                _detected("SUN", "해", 0.60),
+            ],
+            "asked_object_codes": ["HOUSE"],  # 방금 부정당한 대상
+            "recent_messages": [self._ai_q(), self._chip("CHIP_NO")],
+        }
+        base.update(overrides)
+        return _request(**base)
+
+    def test_negation_offers_three_candidates_plus_escape(self):
+        resp, _ = self._generate(self._req())
+        self.assertEqual(resp.question_purpose, "FOLLOW_UP")
+        self.assertIsNone(resp.target_object)
+        self.assertEqual(
+            [o.code for o in resp.options], ["CAND_1", "CAND_2", "CAND_3", "CAND_NONE"]
+        )
+
+    def test_candidates_exclude_asked_and_use_display_labels(self):
+        resp, _ = self._generate(self._req())
+        labels = [o.label for o in resp.options]
+        self.assertNotIn("집", labels)  # 부정당한(asked) 대상은 후보에서 제외
+        self.assertEqual(labels[:3], ["나무", "사람", "해"])  # 신뢰도 순 표시명
+        self.assertEqual(labels[-1], "이 중에 없어")
+        for label in labels:  # 내부 코드·영문이 라벨로 새지 않는다
+            self.assertNotRegex(label, r"[A-Za-z_]{3,}")
+
+    def test_escape_chip_returns_to_open_question(self):
+        req = self._req(
+            recent_messages=[self._ai_q("그럼 이건 뭐야?"), self._chip("CAND_NONE")]
+        )
+        resp, _ = self._generate(req, reply="그럼 어떤 그림이야?")
+        self.assertEqual(resp.question_purpose, "DRAWING_CONTEXT")
+        self.assertIsNone(resp.target_object)
+        self.assertFalse(any(o.code.startswith("CAND_") for o in (resp.options or [])))
+
+    def test_repeated_negation_switches_to_open_question(self):
+        req = self._req(
+            recent_messages=[
+                self._ai_q(),
+                self._chip("CHIP_NO"),
+                self._ai_q("그럼 이건 뭐야?"),
+                self._chip("CHIP_NO"),
+            ]
+        )
+        resp, _ = self._generate(req, reply="그럼 어떤 그림이야?")
+        self.assertEqual(resp.question_purpose, "DRAWING_CONTEXT")
+        self.assertFalse(any(o.code.startswith("CAND_") for o in (resp.options or [])))
+
+    def test_voice_only_negation_has_no_candidate_chips(self):
+        resp, _ = self._generate(
+            self._req(allowed_response_modes=["VOICE"]), reply="그럼 어떤 그림이야?"
+        )
+        self.assertIsNone(resp.options)
+        self.assertEqual(resp.question_purpose, "DRAWING_CONTEXT")
+
+    def test_negation_without_candidates_falls_back_open(self):
+        resp, _ = self._generate(
+            self._req(detected_objects=[], asked_object_codes=[]),
+            reply="그럼 어떤 그림이야?",
+        )
+        self.assertEqual(resp.question_purpose, "DRAWING_CONTEXT")
+        self.assertFalse(any(o.code.startswith("CAND_") for o in (resp.options or [])))
+
+    def test_reask_hint_present_in_prompt(self):
+        _, capture = self._generate(self._req())
+        self.assertIn("그럼 이건 뭐야", capture["system"])
+
+    def test_normal_turn_without_negation_is_unaffected(self):
+        # selectedOptionCodes가 없는 평범한 답변은 후보 칩 경로를 타지 않는다.
+        req = self._req(
+            recent_messages=[
+                self._ai_q(),
+                RecentMessage(
+                    sender_type="CHILD", message_type="VOICE_ANSWER", text="엄마랑 살아"
+                ),
+            ],
+            asked_object_codes=[],
+        )
+        resp, _ = self._generate(req, reply="엄마랑 뭐 하고 놀아?")
+        self.assertEqual(resp.question_purpose, "FOLLOW_UP")
+        self.assertFalse(any(o.code.startswith("CAND_") for o in (resp.options or [])))
+
+
 if __name__ == "__main__":
     unittest.main()
