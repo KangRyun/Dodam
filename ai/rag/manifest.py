@@ -15,7 +15,9 @@ from pathlib import Path
 
 # 정책 §2 채택 기준과 1:1. 여기 없는 값은 전부 거부한다(허용 목록 방식 —
 # 거부 목록이면 새 라이선스 표기가 조용히 통과한다).
-ALLOWED_LICENSES = {"KOGL-1", "PD", "CC0", "CC-BY"}
+# INTERNAL(§4b): 팀 자체 저작물 — 1차 후보 전원 탈락(4유형·NC·권리불명) 후 도입한
+# 주 코퍼스 트랙. 저작권을 팀이 보유하므로 발췌·임베딩·재배포 제약이 없다.
+ALLOWED_LICENSES = {"KOGL-1", "PD", "CC0", "CC-BY", "INTERNAL"}
 
 
 class ManifestError(ValueError):
