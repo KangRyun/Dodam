@@ -85,6 +85,11 @@ bool blocksConversationAction(Object? failure) =>
     failure is ApiResponseFailure &&
     const {401, 403, 404, 422}.contains(failure.statusCode);
 
+/// 서버에서 이미 종료된 대화임을 명시한 응답인지.
+bool isConversationAlreadyCompleted(Object? failure) =>
+    failure is ApiResponseFailure &&
+    failure.error?.code == 'CONVERSATION_ALREADY_COMPLETED';
+
 bool _isCancelled(Object? failure) =>
     failure is ApiTransportFailure &&
     failure.type == ApiTransportFailureType.cancelled;

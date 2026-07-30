@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../domain/models/question_skip.dart';
 import '../domain/repositories/question_skip_repository.dart';
+import 'conversation_failure_log.dart';
 import 'conversation_retry_policy.dart';
 
 enum QuestionSkipStatus { idle, submitting, success, failure }
@@ -70,6 +71,7 @@ final class QuestionSkipController extends ChangeNotifier {
       return true;
     } catch (caught) {
       if (!_isCurrent(generation, questionMessageId)) return false;
+      debugConversationFailure(operation: 'question_skip', error: caught);
       error = caught;
       status = QuestionSkipStatus.failure;
       // 저장 전 거절이 확정된 실패는 Key를 버린다 — 같은 Key 재시도는 무의미하다.

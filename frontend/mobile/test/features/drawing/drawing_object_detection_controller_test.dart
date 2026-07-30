@@ -118,6 +118,22 @@ void main() {
     expect(controller.status, DrawingObjectDetectionStatus.failed);
     expect(controller.validResult, isNull);
   });
+
+  test('dispose 뒤 도착한 객체 탐지 응답은 상태를 갱신하지 않는다', () async {
+    final detection = Completer<ObjectDetectionResponseDto>();
+    final controller = DrawingObjectDetectionController(
+      debounceDuration: Duration.zero,
+      saveDraft: () async => _draft(120),
+      requestDetection: (_) => detection.future,
+    );
+
+    controller.onDrawingInputEnded();
+    await Future<void>.delayed(Duration.zero);
+    controller.dispose();
+    detection.complete(_detection(120));
+
+    await expectLater(Future<void>.delayed(Duration.zero), completes);
+  });
 }
 
 DraftSaveResponseDto _draft(int assetId) => DraftSaveResponseDto(

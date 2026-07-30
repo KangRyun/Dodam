@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import '../domain/models/ai_question.dart';
 import '../domain/models/option_answer.dart';
 import '../domain/repositories/conversation_answer_repository.dart';
+import 'conversation_failure_log.dart';
 import 'conversation_retry_policy.dart';
 
 enum OptionAnswerSubmissionStatus { idle, submitting, success, failure }
@@ -44,6 +45,7 @@ final class OptionAnswerSubmissionController extends ChangeNotifier {
   String? selectedOptionId;
   int? answerMessageId;
   Object? error;
+  bool conversationAlreadyEnded = false;
 
   _PendingOptionAnswer? _pending;
   int _generation = 0;
@@ -149,6 +151,14 @@ final class OptionAnswerSubmissionController extends ChangeNotifier {
       return true;
     } catch (caught) {
       if (!_isCurrent(generation, questionMessageId)) return false;
+      debugConversationFailure(operation: 'option_answer', error: caught);
+      if (isConversationAlreadyCompleted(caught)) {
+        conversationAlreadyEnded = true;
+        status = OptionAnswerSubmissionStatus.success;
+        _pending = null;
+        notifyListeners();
+        return true;
+      }
       error = caught;
       status = OptionAnswerSubmissionStatus.failure;
       // 저장 전 거절이 확정된 실패는 snapshot을 버려 새 선택을 허용한다.
@@ -173,6 +183,7 @@ final class OptionAnswerSubmissionController extends ChangeNotifier {
     selectedOptionId = null;
     answerMessageId = null;
     error = null;
+    conversationAlreadyEnded = false;
     notifyListeners();
   }
 

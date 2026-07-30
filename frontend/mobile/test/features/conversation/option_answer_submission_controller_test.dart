@@ -1,5 +1,7 @@
 import 'dart:async';
 
+import 'package:dodam/core/network/api_error.dart';
+import 'package:dodam/core/network/api_failure.dart';
 import 'package:dodam/features/conversation/conversation.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -104,6 +106,32 @@ void main() {
     expect(repository.idempotencyKeys, ['stable-key', 'stable-key']);
   });
 
+  test('이미 종료된 대화 응답은 잔여 질문을 닫을 수 있도록 정상 처리한다', () async {
+    final controller = OptionAnswerSubmissionController(
+      _RecordingAnswerRepository(
+        failure: const ApiResponseFailure(
+          statusCode: 409,
+          error: ApiError(
+            code: 'CONVERSATION_ALREADY_COMPLETED',
+            message: '이미 종료된 대화입니다.',
+          ),
+        ),
+      ),
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'answer-key',
+    );
+
+    final submitted = await controller.submit(
+      questionMessageId: 10,
+      option: _option('1'),
+    );
+
+    expect(submitted, isTrue);
+    expect(controller.status, OptionAnswerSubmissionStatus.success);
+    expect(controller.conversationAlreadyEnded, isTrue);
+    expect(controller.error, isNull);
+  });
+
   test('제출 중 연속 선택은 중복 요청하지 않는다', () async {
     final completer = Completer<OptionAnswerResult>();
     final repository = _RecordingAnswerRepository(result: completer.future);
@@ -167,9 +195,14 @@ void main() {
 }
 
 final class _RecordingAnswerRepository implements ConversationAnswerRepository {
-  _RecordingAnswerRepository({this.failOnce = false, this.result});
+  _RecordingAnswerRepository({
+    this.failOnce = false,
+    this.failure,
+    this.result,
+  });
 
   final bool failOnce;
+  final Object? failure;
   final Future<OptionAnswerResult>? result;
   int callCount = 0;
   int? conversationId;
@@ -186,6 +219,7 @@ final class _RecordingAnswerRepository implements ConversationAnswerRepository {
     this.conversationId = conversationId;
     this.request = request;
     idempotencyKeys.add(idempotencyKey);
+    if (failure != null) throw failure!;
     if (failOnce && callCount == 1) throw Exception('temporary failure');
     return result ?? const OptionAnswerResult(answerMessageId: 30);
   }
