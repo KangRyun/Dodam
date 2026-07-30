@@ -5,6 +5,7 @@ import java.math.BigDecimal;
 import java.sql.PreparedStatement;
 import java.sql.Statement;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Map;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.support.GeneratedKeyHolder;
@@ -50,6 +51,34 @@ public class AnalysisResultJdbcRepository {
     saveUnusedInputs(analysisId, response, occurredAt);
     saveWarnings(analysisId, response);
     saveEvidenceReferences(analysisId, response);
+  }
+
+  /**
+   * 분석 입력에서 제외한 자료를 기존 이력에 덧붙인다.
+   *
+   * <p>{@link #replace(Long, AiDrawingAnalysisResponse, LocalDateTime)}와 달리 기존 행을 지우지 않는다. AI 응답이
+   * 아니라 서버가 확정한 제외 사유를 남기는 경계이며, 호출 Service의 Transaction에 참여한다.
+   *
+   * @param analysisId 제외 이력을 소유하는 분석 식별자
+   * @param inputs 제외한 입력 목록이며 비어 있으면 아무 행도 저장하지 않는다
+   * @param occurredAt 제외를 확정한 UTC 시각
+   */
+  public void appendUnusedInputs(
+      Long analysisId, List<UnusedAnalysisInput> inputs, LocalDateTime occurredAt) {
+    for (UnusedAnalysisInput input : inputs) {
+      jdbcTemplate.update(
+          "INSERT INTO analysis_unused_inputs "
+              + "(analysis_id, source_type, source_id, input_name, excluded_reason_code, "
+              + "excluded_reason_detail, retryable, occurred_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+          analysisId,
+          input.sourceType(),
+          input.sourceId(),
+          input.inputName(),
+          input.reasonCode(),
+          input.reasonDetail(),
+          input.retryable(),
+          occurredAt);
+    }
   }
 
   private void deleteExisting(Long analysisId) {

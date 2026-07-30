@@ -5,9 +5,24 @@ import com.ssafy.b209.drawing.domain.DrawingAssetType;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 /** 그림 파일 Metadata의 저장과 세션 내 중복 여부 조회를 담당한다. */
 public interface DrawingAssetRepository extends JpaRepository<DrawingAsset, Long> {
+
+  /**
+   * 그림 파일과 소유 세션을 한 번의 조회로 함께 읽는다.
+   *
+   * <p>Transaction 밖에서 세션의 입력 방식 같은 연관 값을 읽어야 하는 Use Case를 위한 경계다. 지연 로딩 Proxy를 반환하지 않으므로 조회 이후에도
+   * 세션 속성을 안전하게 사용할 수 있다.
+   *
+   * @param id 그림 파일 식별자
+   * @return 세션을 함께 로딩한 그림 파일, 없으면 빈 값
+   */
+  @Query(
+      "select asset from DrawingAsset asset join fetch asset.drawingSession where asset.id = :id")
+  Optional<DrawingAsset> findWithDrawingSessionById(@Param("id") Long id);
 
   /**
    * HTP 원본 이미지 업로드의 멱등 키로 저장 결과를 조회한다.

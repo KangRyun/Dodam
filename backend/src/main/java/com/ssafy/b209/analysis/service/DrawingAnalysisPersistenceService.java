@@ -13,6 +13,7 @@ import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingAssetType;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.exception.DrawingErrorCode;
 import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
@@ -200,7 +201,9 @@ public class DrawingAnalysisPersistenceService {
     if (!Objects.equals(asset.getDrawingSession().getId(), session.getId())) {
       throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
     }
-    DrawingAnalysisScope scope = resolveScope(asset.getAssetType(), taskType);
+    DrawingAnalysisScope scope =
+        resolveScope(
+            asset.getAssetType(), taskType, drawingStageCompletion, session.getInputMethod());
     if (drawingAnalysisRepository.existsActiveByAssetAndTaskType(drawingAssetId, taskType)) {
       throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_ALREADY_EXISTS);
     }
@@ -438,14 +441,29 @@ public class DrawingAnalysisPersistenceService {
                     DrawingAnalysisErrorCode.DRAWING_ANALYSIS_RESULT_SAVE_FAILED));
   }
 
+  /**
+   * 분석 대상 파일 유형으로 저장할 분석 범위를 확정한다.
+   *
+   * <p>공개 분석 요청은 {@code DRAFT}와 {@code FINAL}만 허용한다. 사진 업로드로 시작한 그림은 최종 그림을 다시 저장하지 않고 업로드 원본이
+   * 결과물이므로, 그림 단계 완료 경로에서만 {@code UPLOADED} 원본을 {@code FINAL} 범위 분석의 대상으로 받아들인다.
+   */
   private DrawingAnalysisScope resolveScope(
-      DrawingAssetType assetType, DrawingAnalysisType taskType) {
+      DrawingAssetType assetType,
+      DrawingAnalysisType taskType,
+      boolean drawingStageCompletion,
+      DrawingInputMethod inputMethod) {
     if (taskType != DrawingAnalysisType.OBJECT_DETECTION) {
       throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
     }
     return switch (assetType) {
       case DRAFT -> DrawingAnalysisScope.INTERMEDIATE;
       case FINAL -> DrawingAnalysisScope.FINAL;
+      case UPLOADED -> {
+        if (!drawingStageCompletion || inputMethod != DrawingInputMethod.UPLOAD) {
+          throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
+        }
+        yield DrawingAnalysisScope.FINAL;
+      }
       default -> throw new BusinessException(DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
     };
   }

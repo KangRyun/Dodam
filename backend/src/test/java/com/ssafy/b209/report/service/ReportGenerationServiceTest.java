@@ -13,10 +13,9 @@ import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessRepository;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
-import com.ssafy.b209.drawing.domain.DrawingAssetType;
 import com.ssafy.b209.drawing.domain.DrawingSession;
-import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
+import com.ssafy.b209.drawing.service.StageFinalImageFinder;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportStatus;
@@ -32,6 +31,7 @@ import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -50,12 +50,13 @@ class ReportGenerationServiceTest {
   @Mock private GuardianResourceAccessRepository accessRepository;
   @Mock private ReportRepository reportRepository;
   @Mock private DrawingSessionRepository sessionRepository;
-  @Mock private DrawingAssetRepository assetRepository;
+  @Mock private StageFinalImageFinder stageFinalImageFinder;
   @Mock private DrawingAnalysisRepository analysisRepository;
   @Mock private ApplicationEventPublisher eventPublisher;
   @Mock private DrawingSession session;
   @Mock private DrawingAsset originalAsset;
   @Mock private DrawingAsset latestAsset;
+  @Mock private DrawingAsset uploadedPhoto;
 
   private ReportGenerationService service;
   private DrawingAnalysis sourceAnalysis;
@@ -68,7 +69,7 @@ class ReportGenerationServiceTest {
             accessRepository,
             reportRepository,
             sessionRepository,
-            assetRepository,
+            stageFinalImageFinder,
             analysisRepository,
             eventPublisher,
             Clock.fixed(Instant.parse("2026-07-23T10:32:00Z"), ZoneOffset.UTC));
@@ -122,6 +123,38 @@ class ReportGenerationServiceTest {
     assertThat(response.reportVersion()).isEqualTo(2);
     assertThat(response.reportStatus()).isEqualTo(ReportStatus.GENERATING);
     assertThat(response.retryable()).isFalse();
+  }
+
+  @Test
+  void regeneratesWithTheStageFinalImageResolvedForTheSession() {
+    prepareNewRegeneration(uploadedPhoto);
+
+    service.regenerate(GUARDIAN_ID, SOURCE_REPORT_ID, IDEMPOTENCY_KEY);
+
+    ArgumentCaptor<DrawingAnalysis> captor = ArgumentCaptor.captor();
+    verify(analysisRepository).saveAndFlush(captor.capture());
+    assertThat(captor.getValue().getDrawingAsset()).isSameAs(uploadedPhoto);
+  }
+
+  @Test
+  void rejectsRegenerationWhenTheSessionHasNoStageFinalImage() {
+    given(reportRepository.findByIdForUpdate(SOURCE_REPORT_ID))
+        .willReturn(Optional.of(sourceReport));
+    given(analysisRepository.findByRequestId(IDEMPOTENCY_KEY)).willReturn(Optional.empty());
+    given(reportRepository.findFirstByDrawingSessionIdOrderByReportVersionDescIdDesc(SESSION_ID))
+        .willReturn(Optional.of(sourceReport));
+    given(sessionRepository.findNotDeletedByIdForUpdate(SESSION_ID))
+        .willReturn(Optional.of(session));
+    given(stageFinalImageFinder.find(session)).willReturn(Optional.empty());
+
+    assertThatThrownBy(() -> service.regenerate(GUARDIAN_ID, SOURCE_REPORT_ID, IDEMPOTENCY_KEY))
+        .isInstanceOf(BusinessException.class)
+        .satisfies(
+            exception ->
+                assertThat(((BusinessException) exception).getErrorCode())
+                    .isEqualTo(ReportGenerationErrorCode.FINAL_ASSET_REQUIRED));
+
+    verify(analysisRepository, never()).saveAndFlush(any());
   }
 
   @Test
@@ -237,6 +270,10 @@ class ReportGenerationServiceTest {
   }
 
   private void prepareNewRegeneration() {
+    prepareNewRegeneration(latestAsset);
+  }
+
+  private void prepareNewRegeneration(DrawingAsset stageFinalImage) {
     given(reportRepository.findByIdForUpdate(SOURCE_REPORT_ID))
         .willReturn(Optional.of(sourceReport));
     given(analysisRepository.findByRequestId(IDEMPOTENCY_KEY)).willReturn(Optional.empty());
@@ -244,10 +281,7 @@ class ReportGenerationServiceTest {
         .willReturn(Optional.of(sourceReport));
     given(sessionRepository.findNotDeletedByIdForUpdate(SESSION_ID))
         .willReturn(Optional.of(session));
-    given(
-            assetRepository.findFirstByDrawingSessionIdAndAssetTypeOrderByAssetVersionDesc(
-                SESSION_ID, DrawingAssetType.FINAL))
-        .willReturn(Optional.of(latestAsset));
+    given(stageFinalImageFinder.find(session)).willReturn(Optional.of(stageFinalImage));
     given(analysisRepository.saveAndFlush(any(DrawingAnalysis.class)))
         .willAnswer(
             invocation -> {

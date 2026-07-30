@@ -238,11 +238,14 @@ public class DrawingAnalysis {
   /**
    * 실패한 최종 분석을 원본으로 연결한 리포트 재생성용 분석 요청을 만든다.
    *
-   * <p>원본 분석의 Drawing Session과 작업 유형을 유지하면서 최신 FINAL Asset을 사용할 수 있게 한다. 원본 결과는 변경하지 않고 {@code
+   * <p>원본 분석의 Drawing Session과 작업 유형을 유지하면서 세션의 최신 최종 그림을 사용할 수 있게 한다. 원본 결과는 변경하지 않고 {@code
    * retry_of_analysis_id} 관계로 재시도 이력을 보존한다.
    *
+   * <p>원본은 Report의 지연 로딩 연관에서 넘어올 수 있으므로 Field가 아니라 Getter로 읽는다. 초기화되지 않은 Proxy의 Field는 비어 있어 재시도
+   * 자격 검증이 잘못 실패한다.
+   *
    * @param source 실패한 원본 최종 분석
-   * @param drawingAsset 재생성에 사용할 FINAL Asset
+   * @param drawingAsset 재생성에 사용할 최종 그림 Asset
    * @param idempotencyKey 재생성 요청을 식별하는 멱등 키
    * @param requestedAt 서버가 재생성을 접수한 UTC 시각
    * @return {@link DrawingAnalysisState#PENDING} 상태의 새 최종 분석
@@ -254,13 +257,18 @@ public class DrawingAnalysis {
       String idempotencyKey,
       LocalDateTime requestedAt) {
     Objects.requireNonNull(source, "source must not be null");
-    if (source.state != DrawingAnalysisState.FAILED
-        || source.scope != DrawingAnalysisScope.FINAL
-        || source.taskType != DrawingAnalysisType.ACTIVITY_REPORT) {
+    if (source.getState() != DrawingAnalysisState.FAILED
+        || source.getScope() != DrawingAnalysisScope.FINAL
+        || source.getTaskType() != DrawingAnalysisType.ACTIVITY_REPORT) {
       throw new IllegalArgumentException("source must be a failed final activity report analysis");
     }
     DrawingAnalysis retry =
-        pending(source.drawingSession, drawingAsset, source.taskType, idempotencyKey, requestedAt);
+        pending(
+            source.getDrawingSession(),
+            drawingAsset,
+            source.getTaskType(),
+            idempotencyKey,
+            requestedAt);
     retry.retryOfAnalysis = source;
     retry.triggerReason = "RETRY";
     return retry;

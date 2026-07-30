@@ -4,7 +4,9 @@ import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
+import com.ssafy.b209.analysis.repository.AnalysisResultJdbcRepository;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
+import com.ssafy.b209.analysis.repository.UnusedAnalysisInput;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.child.domain.Child;
@@ -12,7 +14,6 @@ import com.ssafy.b209.child.repository.ChildRepository;
 import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
-import com.ssafy.b209.drawing.domain.DrawingAssetType;
 import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.domain.DrawingSessionStatus;
@@ -29,10 +30,10 @@ import com.ssafy.b209.drawing.htp.dto.HtpCompletionResponse;
 import com.ssafy.b209.drawing.htp.dto.StartHtpAssessmentRequest;
 import com.ssafy.b209.drawing.htp.exception.HtpErrorCode;
 import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
-import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.drawing.repository.DrawingTypeRepository;
 import com.ssafy.b209.drawing.service.DrawingReflectionService;
+import com.ssafy.b209.drawing.service.StageFinalImageFinder;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.repository.ReportRepository;
@@ -45,7 +46,7 @@ import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.context.ApplicationEventPublisher;
@@ -68,14 +69,19 @@ public class HtpAssessmentService {
   private static final int IDEMPOTENCY_KEY_MIN_LENGTH = 8;
   private static final int IDEMPOTENCY_KEY_MAX_LENGTH = 100;
   private static final Pattern CONTROL_CHARACTER = Pattern.compile("\\p{Cntrl}");
+  private static final String UNUSED_INPUT_SOURCE_TYPE = "DRAWING_SESSION";
+  private static final String UNUSED_INPUT_REASON_CODE = "OBJECT_DETECTION_UNAVAILABLE";
+  private static final String UNUSED_INPUT_REASON_DETAIL =
+      "해당 단계의 최종 객체 탐지 결과가 없어 종합 리포트 입력에서 제외했습니다.";
 
   private final ChildRepository childRepository;
   private final DrawingTypeRepository drawingTypeRepository;
   private final DrawingSessionRepository drawingSessionRepository;
   private final HtpAssessmentRepository htpAssessmentRepository;
   private final ConversationSessionRepository conversationSessionRepository;
-  private final DrawingAssetRepository drawingAssetRepository;
+  private final StageFinalImageFinder stageFinalImageFinder;
   private final DrawingAnalysisRepository drawingAnalysisRepository;
+  private final AnalysisResultJdbcRepository analysisResultJdbcRepository;
   private final ReportRepository reportRepository;
   private final ApplicationEventPublisher eventPublisher;
   private final DrawingReflectionService drawingReflectionService;
@@ -91,6 +97,12 @@ public class HtpAssessmentService {
    * @param drawingSessionRepository 단계별 그림 세션 저장소
    * @param htpAssessmentRepository HTP 묶음 저장소
    * @param conversationSessionRepository 단계별 대화 완료 조회 저장소
+   * @param stageFinalImageFinder 단계별 최종 그림을 확정하는 경계
+   * @param drawingAnalysisRepository 단계별 객체 탐지와 리포트 분석 저장소
+   * @param analysisResultJdbcRepository 종합 리포트 입력에서 제외한 단계를 기록하는 저장소
+   * @param reportRepository HTP 단일 리포트 저장소
+   * @param eventPublisher 리포트 생성 요청 이벤트 발행기
+   * @param drawingReflectionService 활동 단위 감정 저장 서비스
    * @param currentUserResolver 현재 보호자 식별자 Resolver
    * @param accessValidator 보호자와 아동의 연결 관계 Validator
    * @param clock 만료와 상태 전이 시각을 결정하는 서버 시계
@@ -101,8 +113,9 @@ public class HtpAssessmentService {
       DrawingSessionRepository drawingSessionRepository,
       HtpAssessmentRepository htpAssessmentRepository,
       ConversationSessionRepository conversationSessionRepository,
-      DrawingAssetRepository drawingAssetRepository,
+      StageFinalImageFinder stageFinalImageFinder,
       DrawingAnalysisRepository drawingAnalysisRepository,
+      AnalysisResultJdbcRepository analysisResultJdbcRepository,
       ReportRepository reportRepository,
       ApplicationEventPublisher eventPublisher,
       DrawingReflectionService drawingReflectionService,
@@ -114,8 +127,9 @@ public class HtpAssessmentService {
     this.drawingSessionRepository = drawingSessionRepository;
     this.htpAssessmentRepository = htpAssessmentRepository;
     this.conversationSessionRepository = conversationSessionRepository;
-    this.drawingAssetRepository = drawingAssetRepository;
+    this.stageFinalImageFinder = stageFinalImageFinder;
     this.drawingAnalysisRepository = drawingAnalysisRepository;
+    this.analysisResultJdbcRepository = analysisResultJdbcRepository;
     this.reportRepository = reportRepository;
     this.eventPublisher = eventPublisher;
     this.drawingReflectionService = drawingReflectionService;
@@ -292,13 +306,18 @@ public class HtpAssessmentService {
   /**
    * HOUSE, TREE, PERSON 결과를 검증하고 HTP 묶음의 단일 리포트 생성을 접수한다.
    *
-   * <p>주제별 그림 세션에는 리포트를 생성하지 않는다. PERSON 세션의 FINAL 파일은 기존 리포트 파이프라인을 실행하기 위한 대표 파일로만 사용하고, 리포트 입력의
+   * <p>주제별 그림 세션에는 리포트를 생성하지 않는다. PERSON 세션의 최종 그림은 기존 리포트 파이프라인을 실행하기 위한 대표 파일로만 사용하고, 리포트 입력의
    * 대화·감정 집계는 HTP 묶음의 세 세션을 기준으로 구성한다.
+   *
+   * <p>완료 조건은 아동이 실제로 수행한 결과인 세 단계 구성, 단계 세션 완료, 단계별 최종 그림, 단계별 대화 완료다. AI 객체 탐지 성공은 요구하지 않는다. 탐지가
+   * 실패했거나 없는 단계는 완료를 막지 않고 리포트 분석의 제외 입력으로 기록해 응답에도 함께 반환한다.
+   *
+   * <p>단계별 최종 그림은 {@link StageFinalImageFinder}가 확정하므로 사진 업로드 단계는 업로드한 원본이 최종 그림이 된다.
    *
    * @param assessmentId 완료할 HTP 활동 식별자
    * @param idempotencyKey 완료 요청을 식별하는 {@code Idempotency-Key}
-   * @return 비동기 종합 리포트 작업의 접수 상태
-   * @throws BusinessException 세 단계 결과가 준비되지 않았거나 다른 완료 요청과 충돌한 경우
+   * @return 비동기 종합 리포트 작업의 접수 상태와 탐지 결과가 없는 주제 목록
+   * @throws BusinessException 단계 구성·세션 완료·최종 그림·대화 완료 중 하나가 준비되지 않았거나 다른 완료 요청과 충돌한 경우
    */
   public HtpCompletionResponse complete(Long assessmentId, String idempotencyKey) {
     validateIdempotencyKey(idempotencyKey);
@@ -315,57 +334,38 @@ public class HtpAssessmentService {
     if (steps.size() != 3
         || steps.get(0).getDrawingSubject() != HtpDrawingSubject.HOUSE
         || steps.get(1).getDrawingSubject() != HtpDrawingSubject.TREE
-        || steps.get(2).getDrawingSubject() != HtpDrawingSubject.PERSON
-        || steps.stream()
-            .anyMatch(
-                step ->
-                    step.getDrawingSession().getSessionStatus()
-                        != DrawingSessionStatus.COMPLETED)) {
+        || steps.get(2).getDrawingSubject() != HtpDrawingSubject.PERSON) {
       throw new BusinessException(HtpErrorCode.HTP_RESULTS_NOT_READY);
     }
+    if (steps.stream()
+        .anyMatch(
+            step ->
+                step.getDrawingSession().getSessionStatus() != DrawingSessionStatus.COMPLETED)) {
+      throw new BusinessException(HtpErrorCode.HTP_STEP_DRAWING_NOT_COMPLETED);
+    }
 
-    List<Long> sessionIds = steps.stream().map(step -> step.getDrawingSession().getId()).toList();
-    Map<Long, DrawingAsset> finalAssets =
-        drawingAssetRepository
-            .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
-                sessionIds, DrawingAssetType.FINAL)
-            .stream()
-            .collect(
-                Collectors.toMap(
-                    asset -> asset.getDrawingSession().getId(),
-                    Function.identity(),
-                    (latest, ignored) -> latest));
-    Map<Long, DrawingAnalysis> successfulObjectAnalyses =
-        drawingAnalysisRepository
-            .findByDrawingSessionIdInAndScopeOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
-                sessionIds, DrawingAnalysisScope.FINAL)
-            .stream()
-            .filter(analysis -> analysis.getTaskType() == DrawingAnalysisType.OBJECT_DETECTION)
-            .filter(
-                analysis ->
-                    analysis.getState() == DrawingAnalysisState.SUCCESS
-                        || analysis.getState() == DrawingAnalysisState.PARTIAL_SUCCESS)
-            .collect(
-                Collectors.toMap(
-                    analysis -> analysis.getDrawingSession().getId(),
-                    Function.identity(),
-                    (latest, ignored) -> latest));
+    List<DrawingSession> stepSessions =
+        steps.stream().map(HtpAssessmentStep::getDrawingSession).toList();
+    Map<Long, DrawingAsset> finalImages = stageFinalImageFinder.findAllBySession(stepSessions);
+    if (finalImages.size() != steps.size()) {
+      throw new BusinessException(HtpErrorCode.HTP_FINAL_IMAGE_REQUIRED);
+    }
     boolean conversationsCompleted =
-        sessionIds.stream()
+        stepSessions.stream()
+            .map(DrawingSession::getId)
             .allMatch(
                 sessionId ->
                     conversationSessionRepository
                         .findByDrawingSessionId(sessionId)
                         .filter(ConversationSession::isCompleted)
                         .isPresent());
-    if (finalAssets.size() != 3
-        || successfulObjectAnalyses.size() != 3
-        || !conversationsCompleted) {
-      throw new BusinessException(HtpErrorCode.HTP_RESULTS_NOT_READY);
+    if (!conversationsCompleted) {
+      throw new BusinessException(HtpErrorCode.HTP_CONVERSATION_NOT_COMPLETED);
     }
+    List<HtpAssessmentStep> stepsWithoutObjectDetection = findStepsWithoutObjectDetection(steps);
 
     DrawingSession personSession = steps.get(2).getDrawingSession();
-    DrawingAsset personFinal = finalAssets.get(personSession.getId());
+    DrawingAsset personFinal = finalImages.get(personSession.getId());
     LocalDateTime requestedAt = now();
     try {
       if (assessment.getStatus() == HtpAssessmentStatus.FAILED
@@ -382,6 +382,8 @@ public class HtpAssessmentService {
                   DrawingAnalysisType.ACTIVITY_REPORT,
                   idempotencyKey,
                   requestedAt));
+      recordMissingObjectDetections(
+          reportAnalysis.getId(), stepsWithoutObjectDetection, requestedAt);
       int reportVersion =
           reportRepository
               .findFirstByDrawingSessionIdOrderByReportVersionDescIdDesc(personSession.getId())
@@ -392,13 +394,63 @@ public class HtpAssessmentService {
               Report.generating(personSession, reportAnalysis, reportVersion, requestedAt));
       assessment.startAnalysis(idempotencyKey, reportAnalysis.getId(), report.getId());
       eventPublisher.publishEvent(new ReportGenerationRequestedEvent(reportAnalysis.getId()));
-      return completionResponse(assessment, reportAnalysis, report);
+      return completionResponse(
+          assessment, reportAnalysis, report, subjects(stepsWithoutObjectDetection));
     } catch (RuntimeException exception) {
       if (exception instanceof BusinessException businessException) {
         throw businessException;
       }
       throw new BusinessException(HtpErrorCode.HTP_COMPLETION_CONFLICT, exception);
     }
+  }
+
+  /**
+   * 사용할 수 있는 최종 객체 탐지 결과가 없는 단계를 찾는다.
+   *
+   * <p>객체 탐지 실패는 그림 저장과 대화를 되돌리지 않으므로 완료를 막지 않는다. 대신 어떤 단계의 탐지가 비어 있었는지 남겨 종합 리포트가 근거 없이 해석하지 않도록
+   * 한다.
+   */
+  private List<HtpAssessmentStep> findStepsWithoutObjectDetection(List<HtpAssessmentStep> steps) {
+    List<Long> sessionIds = steps.stream().map(step -> step.getDrawingSession().getId()).toList();
+    Set<Long> sessionIdsWithDetection =
+        drawingAnalysisRepository
+            .findByDrawingSessionIdInAndScopeOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
+                sessionIds, DrawingAnalysisScope.FINAL)
+            .stream()
+            .filter(analysis -> analysis.getTaskType() == DrawingAnalysisType.OBJECT_DETECTION)
+            .filter(
+                analysis ->
+                    analysis.getState() == DrawingAnalysisState.SUCCESS
+                        || analysis.getState() == DrawingAnalysisState.PARTIAL_SUCCESS)
+            .map(analysis -> analysis.getDrawingSession().getId())
+            .collect(Collectors.toSet());
+    return steps.stream()
+        .filter(step -> !sessionIdsWithDetection.contains(step.getDrawingSession().getId()))
+        .toList();
+  }
+
+  private void recordMissingObjectDetections(
+      Long reportAnalysisId, List<HtpAssessmentStep> steps, LocalDateTime occurredAt) {
+    if (steps.isEmpty()) {
+      return;
+    }
+    List<UnusedAnalysisInput> inputs =
+        steps.stream()
+            .map(
+                step ->
+                    new UnusedAnalysisInput(
+                        UNUSED_INPUT_SOURCE_TYPE,
+                        step.getDrawingSession().getId(),
+                        step.getDrawingSubject().name(),
+                        UNUSED_INPUT_REASON_CODE,
+                        UNUSED_INPUT_REASON_DETAIL,
+                        true))
+            .toList();
+    analysisResultJdbcRepository.appendUnusedInputs(reportAnalysisId, inputs, occurredAt);
+  }
+
+  private List<HtpDrawingSubject> subjects(List<HtpAssessmentStep> steps) {
+    return steps.stream().map(HtpAssessmentStep::getDrawingSubject).toList();
   }
 
   /**
@@ -515,17 +567,25 @@ public class HtpAssessmentService {
         reportRepository
             .findById(assessment.getReportId())
             .orElseThrow(() -> new BusinessException(HtpErrorCode.HTP_COMPLETION_CONFLICT));
-    return completionResponse(assessment, analysis, report);
+    return completionResponse(
+        assessment,
+        analysis,
+        report,
+        subjects(findStepsWithoutObjectDetection(assessment.getSteps())));
   }
 
   private HtpCompletionResponse completionResponse(
-      HtpAssessment assessment, DrawingAnalysis analysis, Report report) {
+      HtpAssessment assessment,
+      DrawingAnalysis analysis,
+      Report report,
+      List<HtpDrawingSubject> subjectsWithoutObjectDetection) {
     return new HtpCompletionResponse(
         assessment.getId(),
         assessment.getStatus(),
         analysis.getId(),
         analysis.getState(),
         report.getId(),
-        report.getStatus());
+        report.getStatus(),
+        subjectsWithoutObjectDetection);
   }
 }
