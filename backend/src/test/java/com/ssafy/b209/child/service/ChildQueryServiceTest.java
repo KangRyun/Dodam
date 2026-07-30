@@ -11,10 +11,12 @@ import com.ssafy.b209.child.domain.ChildTutorialStatus;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.child.dto.response.ChildDetailResponse;
 import com.ssafy.b209.child.dto.response.ChildSummaryResponse;
+import com.ssafy.b209.child.dto.response.ChildTutorialProgressResponse;
 import com.ssafy.b209.child.exception.ChildErrorCode;
 import com.ssafy.b209.child.repository.ChildDetailProjection;
 import com.ssafy.b209.child.repository.ChildRepository;
 import com.ssafy.b209.child.repository.ChildSummaryProjection;
+import com.ssafy.b209.child.repository.ChildTutorialProgressProjection;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
 import java.time.Instant;
@@ -138,6 +140,43 @@ class ChildQueryServiceTest {
     given(childRepository.findSummariesByGuardianUserId(GUARDIAN_USER_ID)).willReturn(List.of());
 
     assertThat(service.getChildren(GUARDIAN_USER_ID)).isEmpty();
+  }
+
+  @Test
+  void returnsTheConnectedChildTutorialProgressWithoutChangingIt() {
+    ChildTutorialProgressProjection projection = mock(ChildTutorialProgressProjection.class);
+    given(projection.getChildId()).willReturn(CHILD_ID);
+    given(projection.getTutorialStatus()).willReturn("COMPLETED");
+    given(projection.getLastStep()).willReturn("FINISH");
+    given(projection.getCompletedAt()).willReturn(LocalDateTime.of(2026, 7, 30, 1, 2, 3));
+    given(projection.getUpdatedAt()).willReturn(LocalDateTime.of(2026, 7, 30, 1, 2, 4));
+    given(
+            childRepository.findTutorialProgressByGuardianUserIdAndChildId(
+                GUARDIAN_USER_ID, CHILD_ID))
+        .willReturn(Optional.of(projection));
+
+    ChildTutorialProgressResponse response =
+        service.getTutorialProgress(GUARDIAN_USER_ID, CHILD_ID);
+
+    assertThat(response.childId()).isEqualTo(CHILD_ID);
+    assertThat(response.tutorialStatus()).isEqualTo(ChildTutorialStatus.COMPLETED);
+    assertThat(response.lastStep()).isEqualTo("FINISH");
+    assertThat(response.completedAt()).isEqualTo(Instant.parse("2026-07-30T01:02:03Z"));
+    assertThat(response.updatedAt()).isEqualTo(Instant.parse("2026-07-30T01:02:04Z"));
+  }
+
+  @Test
+  void hidesMissingDeletedAndUnlinkedChildrenFromTutorialProgress() {
+    given(
+            childRepository.findTutorialProgressByGuardianUserIdAndChildId(
+                GUARDIAN_USER_ID, CHILD_ID))
+        .willReturn(Optional.empty());
+
+    assertThatThrownBy(() -> service.getTutorialProgress(GUARDIAN_USER_ID, CHILD_ID))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception ->
+                assertThat(exception.getErrorCode()).isEqualTo(ChildErrorCode.CHILD_NOT_FOUND));
   }
 
   private ChildSummaryProjection summaryProjection(

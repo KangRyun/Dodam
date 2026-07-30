@@ -6,6 +6,7 @@ import com.ssafy.b209.child.dto.request.UpdateChildRequest;
 import com.ssafy.b209.child.dto.response.ChildDetailResponse;
 import com.ssafy.b209.child.dto.response.ChildRegistrationResponse;
 import com.ssafy.b209.child.dto.response.ChildSummaryResponse;
+import com.ssafy.b209.child.dto.response.ChildTutorialProgressResponse;
 import com.ssafy.b209.child.service.ChildDeletionService;
 import com.ssafy.b209.child.service.ChildQueryService;
 import com.ssafy.b209.child.service.ChildRegistrationService;
@@ -214,6 +215,50 @@ public class ChildController {
     Long resolvedGuardianUserId = guardianResolver.resolve(authorization, guardianUserId);
     return ResponseEntity.ok(
         ApiResponse.ok(childQueryService.getChild(resolvedGuardianUserId, childId)));
+  }
+
+  /**
+   * 연결된 보호자가 아동의 Tutorial 진행 상태를 조회한다.
+   *
+   * <p>조회는 상태를 변경하지 않으며, 마지막 단계와 완료 시각이 아직 없으면 응답의 해당 필드는 {@code null}이다.
+   *
+   * @param childId Tutorial 진행 상태를 조회할 아동 식별자
+   * @param authorization Bearer Access Token
+   * @param guardianUserId Test Profile 호환 검증에서만 사용하는 임시 Header
+   * @return HTTP 200과 Tutorial 진행 상태 공통 응답
+   */
+  @Operation(
+      summary = "아동 Tutorial 상태 조회",
+      description =
+          "연결된 보호자가 아동의 Tutorial 상태와 마지막 진행 단계를 조회합니다. "
+              + "삭제되었거나 연결되지 않은 아동은 존재하지 않는 아동과 동일하게 응답합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "아동 Tutorial 상태 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "아동 식별자 형식 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "아동이 없거나 삭제됐거나 요청 보호자에게 연결되지 않음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping("/{childId}/tutorial")
+  public ResponseEntity<ApiResponse<ChildTutorialProgressResponse>> getTutorialProgress(
+      @Parameter(description = "조회할 아동 식별자", required = true) @PathVariable @Positive Long childId,
+      @Parameter(hidden = true) @RequestHeader(value = "Authorization", required = false)
+          String authorization,
+      @Parameter(hidden = true) @RequestHeader(value = "X-Guardian-User-Id", required = false)
+          String guardianUserId) {
+    Long resolvedGuardianUserId = guardianResolver.resolve(authorization, guardianUserId);
+    return ResponseEntity.ok(
+        ApiResponse.ok(childQueryService.getTutorialProgress(resolvedGuardianUserId, childId)));
   }
 
   /**

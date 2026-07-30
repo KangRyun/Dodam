@@ -106,6 +106,38 @@ class ChildListIntegrationTest extends IntegrationTestSupport {
   }
 
   @Test
+  void returnsTutorialProgressForAConnectedActiveChild() throws Exception {
+    jdbcTemplate.update(
+        """
+        UPDATE children
+           SET tutorial_status = 'IN_PROGRESS',
+               tutorial_last_step = 'DRAWING_GUIDE',
+               tutorial_completed_at = NULL,
+               updated_at = '2026-07-30 01:02:03'
+         WHERE id = 1
+        """);
+
+    mockMvc
+        .perform(get("/api/v1/children/1/tutorial"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.childId").value(1))
+        .andExpect(jsonPath("$.data.tutorialStatus").value("IN_PROGRESS"))
+        .andExpect(jsonPath("$.data.lastStep").value("DRAWING_GUIDE"))
+        .andExpect(jsonPath("$.data.completedAt").value(nullValue()))
+        .andExpect(jsonPath("$.data.updatedAt").value("2026-07-30T01:02:03Z"));
+  }
+
+  @Test
+  void hidesDeletedAndUnlinkedChildrenFromTutorialProgress() throws Exception {
+    for (long childId : List.of(3L, 4L, 999L)) {
+      mockMvc
+          .perform(get("/api/v1/children/{childId}/tutorial", childId))
+          .andExpect(status().isNotFound())
+          .andExpect(jsonPath("$.code").value("CHILD_404_001"));
+    }
+  }
+
+  @Test
   void requiresAuthenticationForChildDetail() throws Exception {
     SecurityContextHolder.clearContext();
 

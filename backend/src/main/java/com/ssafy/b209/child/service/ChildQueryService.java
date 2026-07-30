@@ -5,12 +5,15 @@ import com.ssafy.b209.child.domain.ChildTutorialStatus;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.child.dto.response.ChildDetailResponse;
 import com.ssafy.b209.child.dto.response.ChildSummaryResponse;
+import com.ssafy.b209.child.dto.response.ChildTutorialProgressResponse;
 import com.ssafy.b209.child.exception.ChildErrorCode;
 import com.ssafy.b209.child.repository.ChildDetailProjection;
 import com.ssafy.b209.child.repository.ChildRepository;
 import com.ssafy.b209.child.repository.ChildSummaryProjection;
+import com.ssafy.b209.child.repository.ChildTutorialProgressProjection;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.Period;
@@ -93,6 +96,34 @@ public class ChildQueryService {
     return childRepository.findSummariesByGuardianUserId(guardianUserId).stream()
         .map(child -> toSummary(child, today))
         .toList();
+  }
+
+  /**
+   * 연결된 보호자가 아동의 현재 Tutorial 진행 정보를 조회한다.
+   *
+   * <p>조회 가능한 아동이 없으면 존재하지 않는 아동과 권한이 없는 아동을 구분하지 않고 동일한 오류를 반환한다. 이 메서드는 진행 상태를 변경하지 않는다.
+   *
+   * @param guardianUserId 조회를 요청한 보호자 사용자 식별자
+   * @param childId Tutorial 상태를 조회할 아동 식별자
+   * @return 현재 Tutorial 상태와 복원에 필요한 마지막 단계·시각
+   * @throws BusinessException 아동이 없거나 삭제됐거나 보호자에게 연결되지 않은 경우
+   */
+  public ChildTutorialProgressResponse getTutorialProgress(Long guardianUserId, Long childId) {
+    ChildTutorialProgressProjection progress =
+        childRepository
+            .findTutorialProgressByGuardianUserIdAndChildId(guardianUserId, childId)
+            .orElseThrow(() -> new BusinessException(ChildErrorCode.CHILD_NOT_FOUND));
+
+    return new ChildTutorialProgressResponse(
+        progress.getChildId(),
+        ChildTutorialStatus.valueOf(progress.getTutorialStatus()),
+        progress.getLastStep(),
+        toInstant(progress.getCompletedAt()),
+        toInstant(progress.getUpdatedAt()));
+  }
+
+  private Instant toInstant(LocalDateTime value) {
+    return value == null ? null : value.toInstant(ZoneOffset.UTC);
   }
 
   private ChildSummaryResponse toSummary(ChildSummaryProjection child, LocalDate today) {

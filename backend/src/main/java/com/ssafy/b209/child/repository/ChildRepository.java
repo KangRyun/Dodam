@@ -47,6 +47,34 @@ public interface ChildRepository extends JpaRepository<Child, Long> {
       @Param("guardianUserId") Long guardianUserId, @Param("childId") Long childId);
 
   /**
+   * 보호자와 연결된 활성 아동의 Tutorial 진행 상태를 조회한다.
+   *
+   * <p>아동의 존재 여부와 보호자 소유권을 하나의 Query에서 확인해 권한이 없는 호출자가 아동 존재 여부를 구분할 수 없게 한다.
+   *
+   * @param guardianUserId 조회를 요청한 보호자 사용자 식별자
+   * @param childId Tutorial 상태를 조회할 아동 식별자
+   * @return 조회 가능한 Tutorial 진행 상태, 없으면 빈 값
+   */
+  @Query(
+      value =
+          """
+          select c.id as childId,
+                 c.tutorial_status as tutorialStatus,
+                 c.tutorial_last_step as lastStep,
+                 c.tutorial_completed_at as completedAt,
+                 c.updated_at as updatedAt
+            from children c
+            join guardian_child_relations relation on relation.child_id = c.id
+           where c.id = :childId
+             and relation.guardian_user_id = :guardianUserId
+             and c.deleted_at is null
+             and c.profile_status = 'ACTIVE'
+          """,
+      nativeQuery = true)
+  Optional<ChildTutorialProgressProjection> findTutorialProgressByGuardianUserIdAndChildId(
+      @Param("guardianUserId") Long guardianUserId, @Param("childId") Long childId);
+
+  /**
    * 아동 응답 방식을 보호자가 지정한 표시 순서로 조회한다.
    *
    * @param childId 응답 방식을 조회할 아동 식별자
