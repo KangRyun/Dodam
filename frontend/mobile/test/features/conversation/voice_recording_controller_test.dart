@@ -88,6 +88,59 @@ void main() {
     expect(recorder.cancelCount, 1);
   });
 
+  test('새 질문이 오면 이전 답변을 비우고 다시 녹음할 수 있다', () async {
+    final recorder = _FakeVoiceRecorder();
+    final controller = VoiceRecordingController(recorder);
+    addTearDown(controller.dispose);
+
+    await controller.start();
+    await controller.stop();
+    expect(controller.status, VoiceRecordingStatus.completed);
+    expect(controller.recording, isNotNull);
+
+    await controller.beginQuestion();
+    expect(controller.status, VoiceRecordingStatus.idle);
+    expect(controller.recording, isNull);
+    expect(controller.hasDetectedSpeech, isFalse);
+
+    await controller.start();
+    expect(controller.status, VoiceRecordingStatus.recording);
+    expect(recorder.startCount, 2);
+  });
+
+  testWidgets('질문 음성 재생 중에는 수동 말하기 버튼을 노출하지 않는다', (tester) async {
+    final recorder = _FakeVoiceRecorder();
+    final controller = VoiceRecordingController(recorder);
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: VoiceRecordingControl(controller: controller)),
+      ),
+    );
+
+    controller.prepareForAutomaticStart();
+    await tester.pump();
+
+    expect(find.text('질문을 들려주고 있어요'), findsOneWidget);
+    expect(find.text('말로 대답할래'), findsNothing);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('voice-recording-toggle')),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    expect(await controller.start(), isTrue);
+    await tester.pump();
+
+    expect(controller.status, VoiceRecordingStatus.recording);
+    expect(find.textContaining('녹음 끝내기'), findsOneWidget);
+    await controller.cancel();
+  });
+
   test('3초 동안 음성이 없으면 녹음을 폐기하고 선택지를 표시한다', () async {
     final recorder = _FakeVoiceRecorder(amplitude: -80);
     final controller = VoiceRecordingController(

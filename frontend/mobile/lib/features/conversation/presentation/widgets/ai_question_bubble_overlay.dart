@@ -279,109 +279,122 @@ final class _ResponseActions extends StatelessWidget {
   final VoidCallback onEnd;
 
   @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      if (showOptions && options.isNotEmpty)
-        _QuestionOptions(
-          options: options,
-          selectedOptionId: selectedOptionId,
-          onSelected: onSelected,
-          enabled:
-              submissionStatus != OptionAnswerSubmissionStatus.submitting &&
-              skipStatus != QuestionSkipStatus.submitting &&
-              endStatus != ConversationEndStatus.submitting,
-        ),
-      if (submissionStatus == OptionAnswerSubmissionStatus.submitting) ...[
+  Widget build(BuildContext context) {
+    if (!showOptions) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (options.isNotEmpty)
+          _QuestionOptions(
+            options: options,
+            selectedOptionId: selectedOptionId,
+            onSelected: onSelected,
+            enabled:
+                submissionStatus != OptionAnswerSubmissionStatus.submitting &&
+                skipStatus != QuestionSkipStatus.submitting &&
+                endStatus != ConversationEndStatus.submitting,
+          ),
+        if (submissionStatus == OptionAnswerSubmissionStatus.submitting) ...[
+          const SizedBox(height: AppSpacing.xs),
+          const LinearProgressIndicator(
+            key: ValueKey('ai-question-answer-submitting'),
+          ),
+        ],
+        if (submissionStatus == OptionAnswerSubmissionStatus.failure) ...[
+          const SizedBox(height: AppSpacing.xs),
+          const Text(
+            '답을 보내지 못했어요. 다시 눌러 주세요.',
+            key: ValueKey('ai-question-answer-failure'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.error,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+        if (skipStatus == QuestionSkipStatus.failure) ...[
+          const SizedBox(height: AppSpacing.xs),
+          const Text(
+            '계속 그리기로 돌아가지 못했어요. 다시 눌러 주세요.',
+            key: ValueKey('ai-question-skip-failure'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.error,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+        if (endStatus == ConversationEndStatus.failure) ...[
+          const SizedBox(height: AppSpacing.xs),
+          const Text(
+            '대화를 끝내지 못했어요. 다시 시도해 주세요.',
+            key: ValueKey('ai-conversation-end-failure'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.error,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
         const SizedBox(height: AppSpacing.xs),
-        const LinearProgressIndicator(
-          key: ValueKey('ai-question-answer-submitting'),
-        ),
-      ],
-      if (submissionStatus == OptionAnswerSubmissionStatus.failure) ...[
-        const SizedBox(height: AppSpacing.xs),
-        const Text(
-          '답을 보내지 못했어요. 다시 눌러 주세요.',
-          key: ValueKey('ai-question-answer-failure'),
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.error, fontWeight: FontWeight.w700),
-        ),
-      ],
-      if (skipStatus == QuestionSkipStatus.failure) ...[
-        const SizedBox(height: AppSpacing.xs),
-        const Text(
-          '계속 그리기로 돌아가지 못했어요. 다시 눌러 주세요.',
-          key: ValueKey('ai-question-skip-failure'),
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.error, fontWeight: FontWeight.w700),
-        ),
-      ],
-      if (endStatus == ConversationEndStatus.failure) ...[
-        const SizedBox(height: AppSpacing.xs),
-        const Text(
-          '대화를 끝내지 못했어요. 다시 시도해 주세요.',
-          key: ValueKey('ai-conversation-end-failure'),
-          textAlign: TextAlign.center,
-          style: TextStyle(color: AppColors.error, fontWeight: FontWeight.w700),
-        ),
-      ],
-      const SizedBox(height: AppSpacing.xs),
-      TextButton.icon(
-        key: const ValueKey('ai-question-skip'),
-        onPressed:
-            submissionStatus == OptionAnswerSubmissionStatus.submitting ||
-                skipStatus == QuestionSkipStatus.submitting ||
-                endStatus == ConversationEndStatus.submitting
-            ? null
-            : onSkip,
-        icon: skipStatus == QuestionSkipStatus.submitting
-            ? const SizedBox.square(
-                dimension: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.sentiment_neutral_rounded),
-        label: Text(
-          skipStatus == QuestionSkipStatus.submitting
-              ? '계속 그리기로 돌아가는 중'
-              : '이 질문은 넘어갈래',
-        ),
-        style: TextButton.styleFrom(
-          foregroundColor: AppColors.inkMuted,
-          backgroundColor: AppColors.surface,
-          minimumSize: const Size.fromHeight(48),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(AppRadius.md),
-            side: const BorderSide(color: AppColors.outlineStrong),
+        TextButton.icon(
+          key: const ValueKey('ai-question-skip'),
+          onPressed:
+              submissionStatus == OptionAnswerSubmissionStatus.submitting ||
+                  skipStatus == QuestionSkipStatus.submitting ||
+                  endStatus == ConversationEndStatus.submitting
+              ? null
+              : onSkip,
+          icon: skipStatus == QuestionSkipStatus.submitting
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.sentiment_neutral_rounded),
+          label: Text(
+            skipStatus == QuestionSkipStatus.submitting
+                ? '계속 그리기로 돌아가는 중'
+                : '이 질문은 넘어갈래',
+          ),
+          style: TextButton.styleFrom(
+            foregroundColor: AppColors.inkMuted,
+            backgroundColor: AppColors.surface,
+            minimumSize: const Size.fromHeight(48),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              side: const BorderSide(color: AppColors.outlineStrong),
+            ),
           ),
         ),
-      ),
-      const SizedBox(height: AppSpacing.xs),
-      TextButton.icon(
-        key: const ValueKey('ai-conversation-end'),
-        onPressed:
-            submissionStatus == OptionAnswerSubmissionStatus.submitting ||
-                skipStatus == QuestionSkipStatus.submitting ||
-                endStatus == ConversationEndStatus.submitting
-            ? null
-            : onEnd,
-        icon: endStatus == ConversationEndStatus.submitting
-            ? const SizedBox.square(
-                dimension: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : const Icon(Icons.stop_circle_outlined),
-        label: Text(
-          endStatus == ConversationEndStatus.submitting
-              ? '대화를 마무리하는 중'
-              : '이제 질문 그만 받을래',
+        const SizedBox(height: AppSpacing.xs),
+        TextButton.icon(
+          key: const ValueKey('ai-conversation-end'),
+          onPressed:
+              submissionStatus == OptionAnswerSubmissionStatus.submitting ||
+                  skipStatus == QuestionSkipStatus.submitting ||
+                  endStatus == ConversationEndStatus.submitting
+              ? null
+              : onEnd,
+          icon: endStatus == ConversationEndStatus.submitting
+              ? const SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.stop_circle_outlined),
+          label: Text(
+            endStatus == ConversationEndStatus.submitting
+                ? '대화를 마무리하는 중'
+                : '이제 질문 그만 받을래',
+          ),
+          style: TextButton.styleFrom(
+            foregroundColor: AppColors.inkMuted,
+            minimumSize: const Size(48, 48),
+          ),
         ),
-        style: TextButton.styleFrom(
-          foregroundColor: AppColors.inkMuted,
-          minimumSize: const Size(48, 48),
-        ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 final class _QuestionOptions extends StatelessWidget {

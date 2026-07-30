@@ -8,6 +8,7 @@ import '../domain/services/voice_recorder.dart';
 
 enum VoiceRecordingStatus {
   idle,
+  preparing,
   starting,
   recording,
   awaitingChoice,
@@ -64,8 +65,38 @@ final class VoiceRecordingController extends ChangeNotifier {
   Duration get elapsed => _stopwatch.elapsed;
   bool get isRecording => _status == VoiceRecordingStatus.recording;
   bool get isBusy =>
+      _status == VoiceRecordingStatus.preparing ||
       _status == VoiceRecordingStatus.starting ||
       _status == VoiceRecordingStatus.stopping;
+
+  // 질문 음성을 들려주는 동안 수동 녹음 버튼이 먼저 노출되지 않게 한다.
+  void prepareForAutomaticStart() {
+    if (_status != VoiceRecordingStatus.idle) return;
+    _status = VoiceRecordingStatus.preparing;
+    notifyListeners();
+  }
+
+  // 새 질문에서는 이전 질문의 녹음 결과와 오류 상태를 재사용하지 않는다.
+  Future<void> beginQuestion() async {
+    if (_status == VoiceRecordingStatus.starting ||
+        _status == VoiceRecordingStatus.recording) {
+      await cancel();
+    }
+    _ticker?.cancel();
+    _ticker = null;
+    _amplitudeTimer?.cancel();
+    _amplitudeTimer = null;
+    _stopwatch
+      ..stop()
+      ..reset();
+    _recording = null;
+    _lastError = null;
+    _hasDetectedSpeech = false;
+    _lastSpeechAt = null;
+    _startedAt = null;
+    _status = VoiceRecordingStatus.idle;
+    notifyListeners();
+  }
 
   // 새 음성 답변 녹음 시작
   Future<bool> start() async {

@@ -73,7 +73,12 @@ final class _VoiceRecordingControlState extends State<VoiceRecordingControl>
     final controller = widget.controller;
     final recording = controller.recording;
     final recordingNow = controller.isRecording;
-    final label = recordingNow
+    final preparing =
+        controller.status == VoiceRecordingStatus.preparing ||
+        controller.status == VoiceRecordingStatus.starting;
+    final label = preparing
+        ? '질문을 들려주고 있어요'
+        : recordingNow
         ? '${_formatDuration(controller.elapsed)} 녹음 끝내기'
         : recording == null
         ? '말로 대답할래'
@@ -90,7 +95,7 @@ final class _VoiceRecordingControlState extends State<VoiceRecordingControl>
                   (recording != null && !recordingNow)
               ? null
               : _toggleRecording,
-          icon: controller.isBusy
+          icon: preparing
               ? const SizedBox.square(
                   dimension: 20,
                   child: CircularProgressIndicator(strokeWidth: 2),
@@ -100,6 +105,8 @@ final class _VoiceRecordingControlState extends State<VoiceRecordingControl>
           style: FilledButton.styleFrom(
             backgroundColor: recordingNow
                 ? AppColors.error
+                : preparing
+                ? AppColors.leaf
                 : AppColors.tangerine,
             foregroundColor: Colors.white,
             minimumSize: const Size.fromHeight(56),

@@ -20,7 +20,12 @@ final class DeviceQuestionAudioPlayer implements QuestionAudioPlayer {
     if (_disposed || command != _command) return;
     await _player.setSourceBytes(bytes, mimeType: mimeType);
     if (_disposed || command != _command) return;
+    final playbackCompleted = _player.onPlayerComplete.first;
+    final playbackStopped = _player.onPlayerStateChanged.firstWhere(
+      (state) => state == PlayerState.stopped,
+    );
     await _player.resume();
+    await Future.any<void>([playbackCompleted, playbackStopped]);
   }
 
   @override
