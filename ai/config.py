@@ -137,6 +137,19 @@ DETECTION_LOG_DETAIL = (
 )
 
 
+# ── RAG 검색 (S15P11B209-613 — 정책: docs/ai/rag-corpus-policy.md) ────────────
+# 임베딩도 GMS 단일 키 원칙(AI모델선정.md)을 따른다. 인덱스 구축은 오프라인 스크립트,
+# 런타임은 질의 임베딩 1회뿐이라 비용·지연 영향이 작다.
+EMBEDDING_MODEL = os.environ.get("EMBEDDING_MODEL", "text-embedding-3-small")
+# 인덱스 배포 경로 — 가중치(*.pt)와 같은 ai-models 볼륨. 기본값은 컨테이너 기준이고
+# 로컬 개발·테스트는 RAG_INDEX_DIR로 덮어쓴다(YOLO_MODEL_PATH와 같은 규약).
+RAG_INDEX_DIR = os.environ.get("RAG_INDEX_DIR", "/models/rag")
+RAG_TOP_K = int(os.environ.get("RAG_TOP_K", "5"))
+# 임계값 미만 청크는 버린다 — 저점수 근거를 억지로 실으면 리포트가 엉뚱한 지식을
+# 인용한다(정책 §1-2). 코퍼스 실측 후 조정 대상(615에서 사유 코드와 함께 다룬다).
+RAG_SCORE_THRESHOLD = float(os.environ.get("RAG_SCORE_THRESHOLD", "0.35"))
+
+
 def require_gms_key() -> str:
     """GMS_KEY가 없으면 즉시 명확히 실패시킨다(원인이 빨리 드러나게)."""
     if not GMS_KEY:
