@@ -1,14 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:dodam/core/network/network.dart';
 import 'package:dodam/features/drawing/application/drawing_session_start_controller.dart';
 import 'package:dodam/features/drawing/application/photo_upload_validation.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
+import 'package:dodam/features/drawing/domain/photo_permission_service.dart';
 import 'package:dodam/features/drawing/domain/photo_picker_adapter.dart';
 import 'package:dodam/features/drawing/domain/repositories/drawing_repository.dart';
 import 'package:dodam/features/drawing/presentation/screens/input_method_select_screen.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -41,6 +42,7 @@ void main() {
   Widget buildScreen({
     required DrawingRepository repository,
     PhotoPickerAdapter? photoPickerAdapter,
+    PhotoPermissionService? photoPermissionService,
     PhotoDimensionReader? dimensionReader,
     int? htpAssessmentId,
     int? existingDrawingSessionId,
@@ -61,6 +63,7 @@ void main() {
     // 기본값(꺼짐) 자체를 확인하는 테스트만 명시적으로 false를 넘긴다.
     htpPhotoUploadEnabled: htpPhotoUploadEnabled,
     photoPickerAdapter: photoPickerAdapter ?? _FakePhotoPickerAdapter(),
+    photoPermissionService: photoPermissionService,
     // 320~8192px 검증 범위 안의 값으로 기본값을 잡아, 크기 자체를 검증하는
     // 테스트가 아닌 한 통과하게 한다.
     dimensionReader: dimensionReader ?? ((_) async => (400, 400)),
@@ -400,6 +403,171 @@ void main() {
         findsNothing,
       );
       expect(repository.createCalls, 0);
+    });
+
+    testWidgets('카메라 권한이 거부되면 기기 설정 이동 안내를 표시한다', (tester) async {
+      const permissionChannel = MethodChannel(
+        'flutter.baseflow.com/permissions/methods',
+      );
+      final permissionCalls = <String>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(permissionChannel, (call) async {
+            permissionCalls.add(call.method);
+            return switch (call.method) {
+              'checkPermissionStatus' => 4,
+              'openAppSettings' => true,
+              _ => null,
+            };
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(permissionChannel, null),
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        cameraError: PlatformException(
+          code: 'camera_access_denied',
+          message: 'The user did not allow camera access.',
+        ),
+      );
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+
+      await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('input-method-permission-error')),
+        findsOneWidget,
+      );
+      expect(find.text('기기 설정에서 카메라 권한을 허용해 주세요.'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('input-method-open-settings')),
+        findsOneWidget,
+      );
+      await tester.tap(
+        find.byKey(const ValueKey('input-method-open-settings')),
+      );
+      await tester.pump();
+      expect(permissionCalls, contains('checkPermissionStatus'));
+      expect(permissionCalls, contains('openAppSettings'));
+      expect(repository.createCalls, 0);
+    });
+
+    testWidgets('앨범 접근이 제한되면 사진 권한 설정 이동 안내를 표시한다', (tester) async {
+      const permissionChannel = MethodChannel(
+        'flutter.baseflow.com/permissions/methods',
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(permissionChannel, (call) async {
+            return switch (call.method) {
+              'checkPermissionStatus' => 4,
+              'openAppSettings' => true,
+              _ => null,
+            };
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(permissionChannel, null),
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        galleryError: PlatformException(
+          code: 'photo_access_restricted',
+          message: 'The user cannot allow photo access.',
+        ),
+      );
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('기기 설정에서 사진 권한을 허용해 주세요.'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('input-method-open-settings')),
+        findsOneWidget,
+      );
+      expect(repository.createCalls, 0);
+    });
+
+    testWidgets('기기 설정 화면을 열지 못하면 직접 설정 안내를 표시한다', (tester) async {
+      final adapter = _FakePhotoPickerAdapter(
+        cameraError: PlatformException(code: 'camera_access_denied'),
+      );
+      final permissionService = _FakePhotoPermissionService(
+        permissionStatus: PhotoPermissionStatus.permanentlyDenied,
+        openSettingsResult: false,
+      );
+
+      await pumpScreen(
+        tester,
+        buildScreen(
+          repository: _FakeDrawingRepository(),
+          photoPickerAdapter: adapter,
+          photoPermissionService: permissionService,
+        ),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('input-method-open-settings')),
+      );
+      await tester.pumpAndSettle();
+
+      expect(permissionService.openSettingsCalls, 1);
+      expect(
+        find.text('설정 화면을 열지 못했어요. 기기 설정에서 직접 카메라 권한을 허용해 주세요.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('기기 정책으로 제한된 사진 권한에는 설정 이동을 제공하지 않는다', (
+      tester,
+    ) async {
+      const permissionChannel = MethodChannel(
+        'flutter.baseflow.com/permissions/methods',
+      );
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(permissionChannel, (call) async {
+            return call.method == 'checkPermissionStatus' ? 2 : null;
+          });
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(permissionChannel, null),
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        galleryError: PlatformException(code: 'photo_access_restricted'),
+      );
+
+      await pumpScreen(
+        tester,
+        buildScreen(
+          repository: _FakeDrawingRepository(),
+          photoPickerAdapter: adapter,
+        ),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.text('사진 사용이 기기 설정 또는 보호자 정책으로 제한되어 있어요.'),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('input-method-open-settings')),
+        findsNothing,
+      );
     });
   });
 
@@ -892,19 +1060,53 @@ final class _FakePhotoPickerAdapter implements PhotoPickerAdapter {
   _FakePhotoPickerAdapter({
     this.cameraResults = const [],
     this.galleryResults = const [],
+    this.cameraError,
+    this.galleryError,
   });
 
   final List<PickedPhoto?> cameraResults;
   final List<PickedPhoto?> galleryResults;
+  final Object? cameraError;
+  final Object? galleryError;
   int cameraCalls = 0;
   int galleryCalls = 0;
 
   @override
-  Future<PickedPhoto?> pickFromCamera() async => cameraResults[cameraCalls++];
+  Future<PickedPhoto?> pickFromCamera() async {
+    cameraCalls += 1;
+    final error = cameraError;
+    if (error != null) throw error;
+    return cameraResults[cameraCalls - 1];
+  }
 
   @override
-  Future<PickedPhoto?> pickFromGallery() async =>
-      galleryResults[galleryCalls++];
+  Future<PickedPhoto?> pickFromGallery() async {
+    galleryCalls += 1;
+    final error = galleryError;
+    if (error != null) throw error;
+    return galleryResults[galleryCalls - 1];
+  }
+}
+
+final class _FakePhotoPermissionService implements PhotoPermissionService {
+  _FakePhotoPermissionService({
+    this.permissionStatus = PhotoPermissionStatus.denied,
+    this.openSettingsResult = true,
+  });
+
+  final PhotoPermissionStatus permissionStatus;
+  final bool openSettingsResult;
+  int openSettingsCalls = 0;
+
+  @override
+  Future<PhotoPermissionStatus> status(PhotoPermissionKind kind) async =>
+      permissionStatus;
+
+  @override
+  Future<bool> openSettings() async {
+    openSettingsCalls += 1;
+    return openSettingsResult;
+  }
 }
 
 final class _FakeDrawingRepository

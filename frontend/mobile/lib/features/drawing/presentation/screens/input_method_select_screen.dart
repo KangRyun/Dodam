@@ -2,13 +2,16 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../../design_system/design_system.dart';
 import '../../application/drawing_session_start_controller.dart';
 import '../../application/drawing_upload_error.dart';
 import '../../application/photo_upload_validation.dart';
+import '../../data/device_photo_permission_service.dart';
 import '../../data/dto/drawing_dtos.dart';
 import '../../data/image_picker_photo_adapter.dart';
+import '../../domain/photo_permission_service.dart';
 import '../../domain/photo_picker_adapter.dart';
 import '../../domain/repositories/drawing_repository.dart';
 
@@ -52,6 +55,7 @@ class InputMethodSelectScreen extends StatefulWidget {
     this.htpPhotoUploadEnabled = false,
     this.idempotencyKeyProvider,
     PhotoPickerAdapter? photoPickerAdapter,
+    PhotoPermissionService? photoPermissionService,
     this.dimensionReader = readPhotoDimensions,
     this.now,
     super.key,
@@ -60,7 +64,9 @@ class InputMethodSelectScreen extends StatefulWidget {
          '복원 모드(existingDrawingSessionId)와 전환 모드(htpAssessmentId)는 '
          '동시에 켤 수 없다.',
        ),
-       photoPickerAdapter = photoPickerAdapter ?? ImagePickerPhotoAdapter();
+       photoPickerAdapter = photoPickerAdapter ?? ImagePickerPhotoAdapter(),
+       photoPermissionService =
+           photoPermissionService ?? DevicePhotoPermissionService();
 
   final int childId;
   final int drawingTypeId;
@@ -86,6 +92,7 @@ class InputMethodSelectScreen extends StatefulWidget {
   final bool htpPhotoUploadEnabled;
   final String Function()? idempotencyKeyProvider;
   final PhotoPickerAdapter photoPickerAdapter;
+  final PhotoPermissionService photoPermissionService;
   final PhotoDimensionReader dimensionReader;
   final DateTime Function()? now;
 
@@ -108,6 +115,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
   bool _busy = false;
   bool _canvasError = false;
   DrawingUploadErrorPresentation? _photoPickError;
+  _PhotoPermissionIssue? _photoPermissionIssue;
   DrawingUploadErrorPresentation? _uploadError;
   int? _uploadProgressPercent;
   ValidatedPhoto? _validated;
@@ -176,6 +184,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     setState(() {
       _step = _Step.photoSource;
       _photoPickError = null;
+      _photoPermissionIssue = null;
     });
   }
 
@@ -184,14 +193,19 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     setState(() {
       _step = _Step.methodChoice;
       _photoPickError = null;
+      _photoPermissionIssue = null;
     });
   }
 
-  Future<void> _pickFrom(Future<PickedPhoto?> Function() pick) async {
+  Future<void> _pickFrom(
+    Future<PickedPhoto?> Function() pick, {
+    required PhotoPermissionKind permissionKind,
+  }) async {
     if (_busy) return;
     setState(() {
       _busy = true;
       _photoPickError = null;
+      _photoPermissionIssue = null;
     });
     try {
       final photo = await pick();
@@ -221,6 +235,20 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
             _busy = false;
           });
       }
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      final permissionIssue = await _permissionIssue(error, permissionKind);
+      if (!mounted) return;
+      setState(() {
+        if (permissionIssue != null) {
+          _photoPermissionIssue = permissionIssue;
+        } else {
+          _photoPickError = presentationForValidationError(
+            PhotoValidationErrorType.undecodable,
+          );
+        }
+        _busy = false;
+      });
     } on Object {
       if (!mounted) return;
       setState(() {
@@ -230,6 +258,32 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
         _busy = false;
       });
     }
+  }
+
+  Future<_PhotoPermissionIssue?> _permissionIssue(
+    PlatformException error,
+    PhotoPermissionKind kind,
+  ) async {
+    const permissionErrorCodes = {
+      'camera_access_denied',
+      'camera_access_restricted',
+      'photo_access_denied',
+      'photo_access_restricted',
+    };
+    if (!permissionErrorCodes.contains(error.code)) return null;
+    final status = await widget.photoPermissionService.status(kind);
+    return _PhotoPermissionIssue(kind: kind, status: status);
+  }
+
+  Future<void> _openPermissionSettings(PhotoPermissionKind kind) async {
+    final opened = await widget.photoPermissionService.openSettings();
+    if (!mounted || opened) return;
+    final target = kind == PhotoPermissionKind.camera ? '카메라' : '사진';
+    showAppMessage(
+      context,
+      message: '설정 화면을 열지 못했어요. 기기 설정에서 직접 $target 권한을 허용해 주세요.',
+      type: AppMessageType.error,
+    );
   }
 
   void _reselectPhoto() {
@@ -533,6 +587,17 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
         ),
         const SizedBox(height: AppSpacing.md),
       ],
+      if (_photoPermissionIssue case final issue?) ...[
+        _PermissionErrorBanner(
+          key: const ValueKey('input-method-permission-error'),
+          issue: issue,
+          onOpenSettings:
+              issue.status == PhotoPermissionStatus.permanentlyDenied
+              ? () => _openPermissionSettings(issue.kind)
+              : null,
+        ),
+        const SizedBox(height: AppSpacing.md),
+      ],
       LayoutBuilder(
         builder: (context, constraints) {
           final narrow = constraints.maxWidth < 480;
@@ -553,8 +618,10 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
                   isLoading: _busy,
                   onTap: _busy
                       ? null
-                      : () =>
-                            _pickFrom(widget.photoPickerAdapter.pickFromCamera),
+                      : () => _pickFrom(
+                          widget.photoPickerAdapter.pickFromCamera,
+                          permissionKind: PhotoPermissionKind.camera,
+                        ),
                 ),
               ),
               SizedBox(
@@ -570,6 +637,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
                       ? null
                       : () => _pickFrom(
                           widget.photoPickerAdapter.pickFromGallery,
+                          permissionKind: PhotoPermissionKind.photos,
                         ),
                 ),
               ),
@@ -819,6 +887,72 @@ class _ErrorBanner extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    ),
+  );
+}
+
+final class _PhotoPermissionIssue {
+  const _PhotoPermissionIssue({required this.kind, required this.status});
+
+  final PhotoPermissionKind kind;
+  final PhotoPermissionStatus status;
+
+  String get message {
+    final target = kind == PhotoPermissionKind.camera ? '카메라' : '사진';
+    return switch (status) {
+      PhotoPermissionStatus.denied =>
+        '$target 권한이 필요해요. 다시 선택해 권한을 허용해 주세요.',
+      PhotoPermissionStatus.permanentlyDenied =>
+        '기기 설정에서 $target 권한을 허용해 주세요.',
+      PhotoPermissionStatus.restricted =>
+        '$target 사용이 기기 설정 또는 보호자 정책으로 제한되어 있어요.',
+    };
+  }
+}
+
+class _PermissionErrorBanner extends StatelessWidget {
+  const _PermissionErrorBanner({
+    required this.issue,
+    required this.onOpenSettings,
+    super.key,
+  });
+
+  final _PhotoPermissionIssue issue;
+  final Future<void> Function()? onOpenSettings;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    liveRegion: true,
+    label: issue.message,
+    child: Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.errorSoft,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: Row(
+        children: [
+          const Icon(
+            Icons.settings_rounded,
+            color: AppColors.error,
+            size: AppIconSize.lg,
+          ),
+          const SizedBox(width: AppSpacing.xs),
+          Expanded(
+            child: Text(
+              issue.message,
+              style: AppTypography.bodySm.copyWith(color: AppColors.error),
+            ),
+          ),
+          if (onOpenSettings case final openSettings?)
+            TextButton(
+              key: const ValueKey('input-method-open-settings'),
+              onPressed: openSettings,
+              child: const Text('설정 열기'),
+            ),
+        ],
       ),
     ),
   );
