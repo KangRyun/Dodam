@@ -1,8 +1,10 @@
 package com.ssafy.b209.expert.controller;
 
 import com.ssafy.b209.expert.dto.request.CreateExpertProfileRequest;
+import com.ssafy.b209.expert.dto.response.ExpertProfilePageResponse;
 import com.ssafy.b209.expert.dto.response.ExpertProfileResponse;
 import com.ssafy.b209.expert.service.ExpertProfileCreationService;
+import com.ssafy.b209.expert.service.ExpertProfileQueryService;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.ApiResponse;
@@ -13,11 +15,18 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
+import jakarta.validation.constraints.Min;
+import jakarta.validation.constraints.Size;
 import java.net.URI;
 import org.springframework.http.ResponseEntity;
+import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -26,19 +35,66 @@ import org.springframework.web.bind.annotation.RestController;
  * <p>요청 형식과 공통 응답만 조립하고 역할·단일 프로필·검증 상태 정책은 Application Service에 위임한다.
  */
 @Tag(name = "Expert Profiles", description = "전문가 공개 프로필 API")
+@Validated
 @RestController
 @RequestMapping("/api/v1/experts")
 public class ExpertProfileController {
 
   private final ExpertProfileCreationService creationService;
+  private final ExpertProfileQueryService queryService;
 
   /**
    * 전문가 프로필 생성 Use Case를 사용하는 Controller를 생성한다.
    *
    * @param creationService 프로필 권한 검증과 저장을 수행하는 서비스
+   * @param queryService 공개 프로필 검색과 노출 정책을 적용하는 서비스
    */
-  public ExpertProfileController(ExpertProfileCreationService creationService) {
+  public ExpertProfileController(
+      ExpertProfileCreationService creationService, ExpertProfileQueryService queryService) {
     this.creationService = creationService;
+    this.queryService = queryService;
+  }
+
+  /**
+   * 공개 전문가 프로필을 조건과 페이지에 따라 조회한다.
+   *
+   * @param specialty 전문 분야 코드
+   * @param consultationAvailable 상담 가능 여부
+   * @param verifiedOnly 검증 완료 프로필만 조회할지 여부
+   * @param keyword 표시명·소속 검색어
+   * @param page 0부터 시작하는 페이지 번호
+   * @param size 페이지 크기
+   * @return HTTP 200과 전문가 프로필 페이지
+   */
+  @Operation(summary = "공개 전문가 목록 조회")
+  @GetMapping
+  public ResponseEntity<ApiResponse<ExpertProfilePageResponse>> getProfiles(
+      @RequestParam(required = false) String specialty,
+      @RequestParam(required = false) Boolean consultationAvailable,
+      @RequestParam(defaultValue = "true") boolean verifiedOnly,
+      @RequestParam(required = false) @Size(max = 50) String keyword,
+      @RequestParam(defaultValue = "0") @Min(0) int page,
+      @RequestParam(defaultValue = "20") @Min(1) @Max(100) int size) {
+    return ResponseEntity.ok(
+        ApiResponse.of(
+            CommonSuccessCode.OK,
+            queryService.getProfiles(
+                specialty, consultationAvailable, verifiedOnly, keyword, page, size)));
+  }
+
+  /**
+   * 전문가 프로필의 공개 상세 정보를 조회한다.
+   *
+   * @param expertId 전문가 프로필 식별자
+   * @return HTTP 200과 공개 프로필 상세
+   * @throws BusinessException 프로필이 없거나 검증 전 타인 프로필인 경우
+   */
+  @Operation(summary = "공개 전문가 상세 조회")
+  @GetMapping("/{expertId}")
+  public ResponseEntity<ApiResponse<ExpertProfileResponse>> getProfile(
+      @PathVariable @Min(1) Long expertId) {
+    return ResponseEntity.ok(
+        ApiResponse.of(CommonSuccessCode.OK, queryService.getProfile(expertId)));
   }
 
   /**

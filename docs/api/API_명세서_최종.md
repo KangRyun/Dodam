@@ -463,6 +463,9 @@ USER-02 연락 이메일 계약:
 | EXPERT-08 | DELETE | `/experts/{expertId}/follow` | GUARDIAN | 전문가 팔로우 취소 |
 
 `EXPERT-01`은 `S15P11B209-574`에서 구현되었다. 신규 프로필은 `PENDING`으로 생성하며 사용자당 하나만 허용한다.
+`EXPERT-03`과 `EXPERT-04`는 `S15P11B209-575`에서 구현되었다. 목록은 기본적으로 `VERIFIED` 프로필만 반환하고,
+상세 조회에서 검증 전 프로필은 해당 프로필 소유자만 확인할 수 있다. 팔로워 수와 `followedByMe`는 요청 시점의
+`expert_follows`를 기준으로 계산한다.
 
 ### 7.2 목록 Query
 
