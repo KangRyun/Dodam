@@ -652,5 +652,108 @@ class SubjectContextLogTest(unittest.TestCase):
         self.assertIn("drawingSubject=-", joined)
 
 
+class SubjectPromptAndTargetTest(unittest.TestCase):
+    """HTP 주제 제약·대상 선택·반복 방지 (S15P11B209-713)."""
+
+    def _htp(self, **overrides):
+        base = {"activity_type": "HTP", "drawing_subject": "HOUSE"}
+        base.update(overrides)
+        return _request(**base)
+
+    def test_target_prefers_subject_group_over_raw_confidence(self):
+        # 배경 나무 신뢰도가 가장 높아도, 주제(집) 그룹에서 먼저 고른다(709 핵심 수정).
+        req = self._htp(
+            detected_objects=[
+                _detected("HOUSE", "집", 0.60),
+                _detected("HOUSE_ROOF", "지붕", 0.80),
+                _detected("SCENERY_TREE", "(배경) 나무", 0.95),
+            ]
+        )
+        target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        self.assertEqual(target.object_code, "HOUSE_ROOF")
+
+    def test_falls_back_to_background_when_subject_exhausted(self):
+        # 주제(집) 객체가 없으면 배경도 후보로 삼는다(결정 B: 주제 소진 후 배경).
+        req = self._htp(
+            detected_objects=[_detected("SCENERY_TREE", "(배경) 나무", 0.5)]
+        )
+        target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        self.assertEqual(target.object_code, "SCENERY_TREE")
+
+    def test_asked_object_is_excluded_from_target(self):
+        req = self._htp(
+            detected_objects=[
+                _detected("HOUSE", "집", 0.9),
+                _detected("HOUSE_ROOF", "지붕", 0.8),
+            ],
+            asked_object_codes=["HOUSE"],
+        )
+        target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        self.assertEqual(target.object_code, "HOUSE_ROOF")
+
+    def test_all_subject_objects_asked_downgrades_to_drawing_context(self):
+        req = self._htp(
+            detected_objects=[_detected("HOUSE", "집", 0.9)],
+            asked_object_codes=["HOUSE"],
+        )
+        capture: dict = {}
+        client = _mock_client(capture, reply="오늘은 뭘 그렸어?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-713")
+        self.assertEqual(resp.question_purpose, "DRAWING_CONTEXT")
+        self.assertIsNone(resp.target_object)
+
+    def test_htp_prompt_states_subject_and_forbids_other_subjects(self):
+        req = self._htp(detected_objects=[_detected("HOUSE", "집", 0.9)])
+        system = question_service._build_messages(req)[0]["content"]
+        self.assertIn("'집'", system)
+        self.assertIn("다른 주제", system)
+
+    def test_first_question_examples_no_longer_inject_other_subjects(self):
+        # 709: 예시가 집·나무·사람을 다 넣던 문제 제거 회귀 방어.
+        req = self._htp(detected_objects=[_detected("HOUSE", "집", 0.9)])
+        system = question_service._build_messages(req)[0]["content"]
+        self.assertNotIn("이 나무는 어디에 있는 나무야", system)
+        self.assertNotIn("이 집에는 누가 살고 있어", system)
+
+    def test_prompt_target_matches_response_target(self):
+        # 질문 문장이 가리키는 객체와 응답 targetObject가 같은 객체다(정합성).
+        req = self._htp(
+            detected_objects=[
+                _detected("HOUSE_ROOF", "지붕", 0.9),
+                _detected("SCENERY_TREE", "(배경) 나무", 0.95),
+            ]
+        )
+        capture: dict = {}
+        client = _mock_client(capture, reply="이 지붕은 무슨 색이야?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-713")
+        self.assertEqual(resp.target_object.object_code, "HOUSE_ROOF")
+        self.assertIn("지붕", capture["system"])
+
+    def test_diary_has_no_subject_constraint(self):
+        req = _request(
+            activity_type="ART_DIARY",
+            drawing_subject=None,
+            detected_objects=[_detected("UNKNOWN", "강아지", 0.9)],
+        )
+        system = question_service._build_messages(req)[0]["content"]
+        self.assertIn("정해진 주제는 없어", system)
+        self.assertNotIn("다른 주제", system)
+
+    def test_asked_hint_present_only_when_asked_nonempty(self):
+        with_asked = question_service._build_messages(
+            self._htp(
+                detected_objects=[_detected("HOUSE_ROOF", "지붕", 0.9)],
+                asked_object_codes=["HOUSE"],
+            )
+        )[0]["content"]
+        self.assertIn("다시 묻지 말", with_asked)
+        without_asked = question_service._build_messages(
+            self._htp(detected_objects=[_detected("HOUSE", "집", 0.9)])
+        )[0]["content"]
+        self.assertNotIn("다시 묻지 말", without_asked)
+
+
 if __name__ == "__main__":
     unittest.main()

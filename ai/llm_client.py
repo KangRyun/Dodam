@@ -138,15 +138,19 @@ def render_first_question_prompt(
     *,
     child_name: str | None = None,
     age_band: str = DEFAULT_AGE_BAND,
+    activity_block: str = "",
 ) -> str:
     """첫 질문 system 프롬프트를 렌더링한다(GMS 호출 없음).
 
     draft 경로와 내부 계약 경로(question_service)가 같은 프롬프트를 쓰도록 렌더링만 분리했다.
+    activity_block: HTP 주제·대상 객체·반복 금지 지시 블록(S15P11B209-713). draft 경로는
+    비우고(""), 내부 계약 경로가 activityType·drawingSubject 기반으로 채운다.
     """
     return _load("first_question").format(
         age_band=age_band,
         child_name=child_name or NO_CHILD_NAME,
         drawing_analysis=drawing_analysis or NO_ANALYSIS,
+        activity_block=activity_block,
         guardrails=_load("guardrails"),
     )
 
@@ -185,10 +189,12 @@ def render_next_question_prompt(
     history: list[dict] | None = None,
     child_name: str | None = None,
     age_band: str = DEFAULT_AGE_BAND,
+    activity_block: str = "",
 ) -> str:
     """다음 질문 system 프롬프트를 렌더링한다(GMS 호출 없음).
 
     draft 경로와 내부 계약 경로(question_service)가 같은 프롬프트를 쓰도록 렌더링만 분리했다.
+    activity_block: HTP 주제·반복 금지 지시 블록(S15P11B209-713). draft 경로는 비운다.
     """
     return _load("conversations").format(
         age_band=age_band,
@@ -196,6 +202,7 @@ def render_next_question_prompt(
         drawing_analysis=drawing_analysis or NO_ANALYSIS,
         history=_format_history(history),
         child_utterance=child_utterance,
+        activity_block=activity_block,
         guardrails=_load("guardrails"),
     )
 
