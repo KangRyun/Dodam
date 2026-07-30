@@ -346,6 +346,11 @@ class ObservationGenerationResult(_CamelModel):
     limitations_text: str
     rag_references: list[RagReference] = Field(default_factory=list)
     knowledge_base_version: str | None = None
+    # RAG 근거를 싣지 못한 사유 (S15P11B209-615, optional — 구 BE 무시).
+    #   RAG_NO_INDEX(인덱스 미배포) | RAG_UNAVAILABLE(임베딩 등 검색 장애) |
+    #   RAG_LOW_SCORE(전부 임계값 미달) | RAG_NO_QUERY(관찰 재료 없음).
+    #   근거가 실렸으면 None — "왜 없는가"의 설명이므로 있을 때는 침묵한다.
+    rag_skipped_reason: str | None = None
 
 
 # ── 종합 분석 계약 (API_명세서_최종.md §19.3 · §19.4) ────────────

@@ -30,7 +30,14 @@ class RagUnavailableError(RuntimeError):
 
     소비처는 이 예외를 '차단'이 아니라 '기능 저하'로 다룬다 — 리포트는 RAG 없이
     기존 경로로 생성한다(615 폴백 정책, 548 AI 장애 폴백과 정합).
+
+    reason(615): 사유 코드 표기용 구분. "NO_INDEX"=인덱스 미배포(운영상 정상일 수
+    있는 상태) / "SEARCH_FAILED"=임베딩 호출 실패 등 검색 자체의 장애.
     """
+
+    def __init__(self, message: str, *, reason: str = "SEARCH_FAILED") -> None:
+        super().__init__(message)
+        self.reason = reason
 
 
 @dataclass(frozen=True)
@@ -54,7 +61,7 @@ def _get_index() -> store.Index:
     if _index is not None:
         return _index
     if _load_failed:
-        raise RagUnavailableError("RAG 인덱스가 배포되지 않았어요.")
+        raise RagUnavailableError("RAG 인덱스가 배포되지 않았어요.", reason="NO_INDEX")
     with _lock:
         if _index is not None:  # 경합 이중 로딩 방지
             return _index
@@ -64,7 +71,9 @@ def _get_index() -> store.Index:
             _load_failed = True
             # 미배포는 정상 운영 상태일 수 있다(인덱스 나가기 전) — 에러가 아니라 정보.
             logger.info("RAG 인덱스 없음(%s) — 검색 비활성", config.RAG_INDEX_DIR)
-            raise RagUnavailableError("RAG 인덱스가 배포되지 않았어요.") from e
+            raise RagUnavailableError(
+                "RAG 인덱스가 배포되지 않았어요.", reason="NO_INDEX"
+            ) from e
         except store.IndexFormatError as e:
             _load_failed = True
             logger.error("RAG 인덱스 형식 오류: %s", e)
