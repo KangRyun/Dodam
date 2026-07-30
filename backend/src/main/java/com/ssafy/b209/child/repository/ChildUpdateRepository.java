@@ -1,5 +1,6 @@
 package com.ssafy.b209.child.repository;
 
+import com.ssafy.b209.child.domain.ChildTutorialStatus;
 import com.ssafy.b209.child.domain.GuardianRelationshipType;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.child.domain.ResponseMode;
@@ -52,6 +53,50 @@ public class ChildUpdateRepository {
             childId,
             guardianUserId)
         .isEmpty();
+  }
+
+  /**
+   * 잠긴 아동 행의 현재 Tutorial 상태를 조회한다.
+   *
+   * @param childId 상태를 조회할 아동 식별자
+   * @return 현재 Tutorial 상태
+   */
+  public ChildTutorialStatus findTutorialStatus(long childId) {
+    String status =
+        jdbcTemplate.queryForObject(
+            "select tutorial_status from children where id = ?", String.class, childId);
+    return ChildTutorialStatus.valueOf(status);
+  }
+
+  /**
+   * 아동 Tutorial 상태와 복원 정보를 변경한다.
+   *
+   * @param childId 변경할 아동 식별자
+   * @param tutorialStatus 변경할 Tutorial 상태
+   * @param lastStep 마지막 단계, 기존 값을 유지하려면 {@code null}
+   * @param completedAt 완료 또는 건너뛰기 시각, 진행 중이면 {@code null}
+   * @param updatedAt 변경 시각
+   */
+  public void updateTutorialProgress(
+      long childId,
+      ChildTutorialStatus tutorialStatus,
+      String lastStep,
+      LocalDateTime completedAt,
+      LocalDateTime updatedAt) {
+    jdbcTemplate.update(
+        """
+        update children
+           set tutorial_status = ?,
+               tutorial_last_step = coalesce(?, tutorial_last_step),
+               tutorial_completed_at = ?,
+               updated_at = ?
+         where id = ?
+        """,
+        tutorialStatus.name(),
+        lastStep,
+        completedAt,
+        updatedAt,
+        childId);
   }
 
   /**

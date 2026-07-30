@@ -3,6 +3,7 @@ package com.ssafy.b209.child.controller;
 import com.ssafy.b209.child.dto.request.DeleteChildRequest;
 import com.ssafy.b209.child.dto.request.RegisterChildRequest;
 import com.ssafy.b209.child.dto.request.UpdateChildRequest;
+import com.ssafy.b209.child.dto.request.UpdateChildTutorialProgressRequest;
 import com.ssafy.b209.child.dto.response.ChildDetailResponse;
 import com.ssafy.b209.child.dto.response.ChildRegistrationResponse;
 import com.ssafy.b209.child.dto.response.ChildSummaryResponse;
@@ -10,6 +11,7 @@ import com.ssafy.b209.child.dto.response.ChildTutorialProgressResponse;
 import com.ssafy.b209.child.service.ChildDeletionService;
 import com.ssafy.b209.child.service.ChildQueryService;
 import com.ssafy.b209.child.service.ChildRegistrationService;
+import com.ssafy.b209.child.service.ChildTutorialService;
 import com.ssafy.b209.child.service.ChildUpdateService;
 import com.ssafy.b209.conversation.service.TemporaryGuardianResolver;
 import com.ssafy.b209.global.exception.BusinessException;
@@ -54,6 +56,7 @@ public class ChildController {
   private final TemporaryGuardianResolver guardianResolver;
   private final ChildQueryService childQueryService;
   private final ChildRegistrationService childRegistrationService;
+  private final ChildTutorialService childTutorialService;
   private final ChildUpdateService childUpdateService;
   private final ChildDeletionService childDeletionService;
 
@@ -63,6 +66,7 @@ public class ChildController {
    * @param guardianResolver Access Token Principal에서 보호자 식별자를 해석하는 경계
    * @param childQueryService 아동 상세 조회 Use Case
    * @param childRegistrationService 아동 프로필 등록 Use Case
+   * @param childTutorialService 아동 Tutorial 상태 변경 Use Case
    * @param childUpdateService 아동 프로필 부분 수정 Use Case
    * @param childDeletionService 아동 프로필 삭제 Use Case
    */
@@ -70,11 +74,13 @@ public class ChildController {
       TemporaryGuardianResolver guardianResolver,
       ChildQueryService childQueryService,
       ChildRegistrationService childRegistrationService,
+      ChildTutorialService childTutorialService,
       ChildUpdateService childUpdateService,
       ChildDeletionService childDeletionService) {
     this.guardianResolver = guardianResolver;
     this.childQueryService = childQueryService;
     this.childRegistrationService = childRegistrationService;
+    this.childTutorialService = childTutorialService;
     this.childUpdateService = childUpdateService;
     this.childDeletionService = childDeletionService;
   }
@@ -259,6 +265,55 @@ public class ChildController {
     Long resolvedGuardianUserId = guardianResolver.resolve(authorization, guardianUserId);
     return ResponseEntity.ok(
         ApiResponse.ok(childQueryService.getTutorialProgress(resolvedGuardianUserId, childId)));
+  }
+
+  /**
+   * 연결된 보호자가 아동의 Tutorial 진행 상태와 마지막 단계를 변경한다.
+   *
+   * @param childId Tutorial 상태를 변경할 아동 식별자
+   * @param request 변경할 Tutorial 상태와 마지막 단계
+   * @param authorization Bearer Access Token
+   * @param guardianUserId Test Profile 호환 검증에서만 사용하는 임시 Header
+   * @return HTTP 200과 변경 후 Tutorial 진행 상태
+   */
+  @Operation(
+      summary = "아동 Tutorial 상태 변경",
+      description =
+          "NOT_STARTED에서 IN_PROGRESS로 시작하고, 진행 중 마지막 단계를 저장하거나 "
+              + "COMPLETED 또는 SKIPPED로 종료합니다. 종료 상태는 이전 상태로 되돌릴 수 없습니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "아동 Tutorial 상태 변경 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "요청 값 또는 아동 식별자 형식 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "아동이 없거나 삭제됐거나 요청 보호자에게 연결되지 않음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "409",
+        description = "허용되지 않는 Tutorial 상태 전이",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @PatchMapping("/{childId}/tutorial")
+  public ResponseEntity<ApiResponse<ChildTutorialProgressResponse>> updateTutorialProgress(
+      @Parameter(description = "변경할 아동 식별자", required = true) @PathVariable @Positive Long childId,
+      @Valid @RequestBody UpdateChildTutorialProgressRequest request,
+      @Parameter(hidden = true) @RequestHeader(value = "Authorization", required = false)
+          String authorization,
+      @Parameter(hidden = true) @RequestHeader(value = "X-Guardian-User-Id", required = false)
+          String guardianUserId) {
+    Long resolvedGuardianUserId = guardianResolver.resolve(authorization, guardianUserId);
+    return ResponseEntity.ok(
+        ApiResponse.ok(
+            childTutorialService.updateProgress(resolvedGuardianUserId, childId, request)));
   }
 
   /**
