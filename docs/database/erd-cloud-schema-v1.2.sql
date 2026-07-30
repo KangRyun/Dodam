@@ -890,6 +890,8 @@ CREATE TABLE `expert_profiles` (
   `organization` varchar(150) DEFAULT NULL COMMENT '소속 기관',
   `position_title` varchar(100) DEFAULT NULL COMMENT '직책',
   `career_years` smallint NOT NULL DEFAULT '0' COMMENT '경력 연수',
+  `target_age_min` smallint DEFAULT NULL COMMENT '상담 대상 최소 연령',
+  `target_age_max` smallint DEFAULT NULL COMMENT '상담 대상 최대 연령',
   `introduction` text COMMENT '소개',
   `is_consultation_available` tinyint(1) NOT NULL DEFAULT '0' COMMENT '상담 가능 여부',
   `verification_status` varchar(20) NOT NULL DEFAULT 'PENDING' COMMENT '검증 상태',
@@ -904,6 +906,7 @@ CREATE TABLE `expert_profiles` (
   UNIQUE KEY `uk_expert_profiles_user_id` (`user_id`),
   CONSTRAINT `fk_expert_profiles_user_id` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE RESTRICT,
   CONSTRAINT `ck_expert_profiles_career_years` CHECK ((`career_years` >= 0)),
+  CONSTRAINT `ck_expert_profiles_target_age` CHECK ((((`target_age_min` is null) and (`target_age_max` is null)) or (((`target_age_min` between 0 and 19) and (`target_age_max` between 0 and 19)) and (`target_age_min` <= `target_age_max`)))),
   CONSTRAINT `ck_expert_profiles_verification_status` CHECK ((`verification_status` in (_utf8mb4'PENDING',_utf8mb4'VERIFIED',_utf8mb4'REJECTED',_utf8mb4'REVIEW_REQUIRED')))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='전문가 프로필';
 /*!40101 SET character_set_client = @saved_cs_client */;

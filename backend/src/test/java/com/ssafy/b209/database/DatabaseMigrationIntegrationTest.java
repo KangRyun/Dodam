@@ -54,6 +54,8 @@ class DatabaseMigrationIntegrationTest {
     assertThat(tableCount()).isEqualTo(70);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
+    assertThat(columnExists("expert_profiles", "target_age_min")).isTrue();
+    assertThat(columnExists("expert_profiles", "target_age_max")).isTrue();
     assertThat(
             jdbcTemplate.queryForList(
                 "SELECT code FROM drawing_types WHERE is_active = TRUE "
