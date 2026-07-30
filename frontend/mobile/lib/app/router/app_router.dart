@@ -53,6 +53,8 @@ abstract final class AppRouter {
     ConversationEndRepository? conversationEndRepository,
     QuestionTtsRepository? questionTtsRepository,
     QuestionAudioPlayerFactory? questionAudioPlayerFactory,
+    VoiceAnswerPlaybackRepository? voiceAnswerPlaybackRepository,
+    VoiceAnswerAudioPlayerFactory? voiceAnswerAudioPlayerFactory,
     VoiceAnswerRepository? voiceAnswerRepository,
     SttResultRepository? sttResultRepository,
     ConversationAnswerRepository? conversationAnswerRepository,
@@ -201,6 +203,8 @@ abstract final class AppRouter {
         ActivityDetailScreen(
           activityId: activityId,
           repository: activityRepository,
+          voiceAnswerPlaybackRepository: voiceAnswerPlaybackRepository,
+          voiceAnswerAudioPlayerFactory: voiceAnswerAudioPlayerFactory,
         ),
       ['guardian', 'reports']
           when childController != null && reportRepository != null =>
