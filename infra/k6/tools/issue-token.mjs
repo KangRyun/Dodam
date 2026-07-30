@@ -16,7 +16,7 @@
 //
 // 사용:
 //   JWT_SECRET=... node tools/issue-token.mjs --user-id 1001 --ttl-minutes 120
-//   (또는 서버에서) docker exec dodam-backend printenv JWT_SECRET  ← 값 노출 주의
+//   (또는 서버에서) kubectl -n dodam exec deploy/backend -- printenv JWT_SECRET  ← 값 노출 주의
 // ============================================================================
 import { createHmac, randomUUID } from 'node:crypto';
 

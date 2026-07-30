@@ -88,6 +88,6 @@ export function thresholdsFor(...tiers) {
 
 /** 모든 실행에 붙는 태그 — 결과 JSON 에서 전/후 비교(362)를 구분하는 축이다. */
 export const RUN_TAGS = {
-  stack: __ENV.STACK || 'compose', // compose | k3s
+  stack: __ENV.STACK || 'k3s', // 결과 태그. compose 는 360 컷오버로 사라졌다(2026-07-29)
   issue: __ENV.ISSUE || 'S15P11B209-355',
 };

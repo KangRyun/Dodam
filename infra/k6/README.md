@@ -16,6 +16,30 @@
 | **LLM 경로는 스모크 1회** | 대화는 외부 Gemini API 호출 = 과금. `04-conversation-smoke.js` 의 `iterations: 1` 을 늘리지 말 것 |
 | **토큰·`JWT_SECRET` 커밋 금지** | `.gitignore` 로 막아 뒀지만 최종 책임은 사람이다 |
 | **끝나면 반드시 정리** | `sql/cleanup.sql` + MinIO 잔여 확인 |
+| **`kubectl exec` 에 `-t` 금지** | SQL 을 stdin 으로 밀어 넣는다. `-t`(TTY)를 붙이면 개행이 변환돼 조용히 깨진다. `-i` 만 쓴다 |
+
+---
+
+## ⚠️ 전제가 바뀌었다 (2026-07-30)
+
+이 도구는 원래 **compose 스택의 베이스라인을 재고, k3s 전환 후와 비교**하려고 만들었다(355 → 362).
+그런데 **360 컷오버가 2026-07-29 에 끝나 compose 스택은 더 이상 존재하지 않는다.**
+따라서 "전환 전" 숫자는 이제 잡을 수 없다. 지금 355 를 돌려서 얻는 것은 **k3s 베이스라인**이고,
+그 값은 여전히 쓸모가 있다 — 362(무중단 실증)의 기준선이자 용량 판단의 출발점이다.
+**다만 "전환 효과 증명"이라는 원래 목적은 달성 불가**이며, 그렇게 쓰지 말 것.
+
+실행 명령은 전부 k3s 기준으로 고쳐 뒀다(예전 `docker exec dodam-mysql ...` 은 **멈춘 컨테이너**를
+가리키고 있었고 DB 이름도 `dodam` 이 아니라 `b209` 다 — 그대로 돌렸으면 실패했다).
+
+**2026-07-30 확인한 것** — 팀 시간을 잡기 전에 미리 검증한 결과다.
+
+| 항목 | 결과 |
+|---|---|
+| `seed.sql`·`cleanup.sql` 이 쓰는 테이블 10종 | 라이브 스키마에 전부 존재 |
+| `users` 컬럼(seed 가 INSERT 하는 것) | 일치 |
+| 잔여 `k6-load-%` 합성 데이터 | 0건 |
+| `/` · `/legal/privacy/` · `/ai/health` | 200 |
+| `/api/v1/children` · `/api/v1/drawing-types` | 401 (인증 필요 — 정상) |
 
 ---
 
@@ -58,13 +82,13 @@ http_req_duration{tier:write}   p95 < 500ms   생성·업로드
 cd infra/k6
 
 # ① 합성 계정 시드 → guardian_user_id 와 child_ids 가 출력된다
-docker exec -i dodam-mysql sh -c 'mysql -u root -p"$MYSQL_ROOT_PASSWORD" dodam' < sql/seed.sql
+kubectl -n dodam exec -i sts/mysql -- sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot b209' < sql/seed.sql
 
 # ② 합성 그림 생성 (고정 시드 — 매 실행 동일 바이트)
 node tools/make-png.mjs
 
 # ③ 액세스 토큰 발급 (JWT_SECRET 은 서버 밖으로 내보내지 않는다)
-JWT_SECRET="$(docker exec dodam-backend printenv JWT_SECRET)" \
+JWT_SECRET="$(kubectl -n dodam exec deploy/backend -- printenv JWT_SECRET)" \
   node tools/issue-token.mjs --user-id <guardian_user_id> --ttl-minutes 120
 ```
 
@@ -80,7 +104,7 @@ JWT_SECRET="$(docker exec dodam-backend printenv JWT_SECRET)" \
 export BASE_URL=https://i15b209.p.ssafy.io
 export ACCESS_TOKEN='<1단계 ③ 출력>'
 export CHILD_IDS='<1단계 ① 출력>'
-export STACK=compose        # k3s 전환 후에는 k3s — 결과 태그로 전/후를 가른다
+export STACK=k3s            # 결과 태그. compose 는 360 컷오버로 사라졌다(2026-07-29)
 
 # 연결 확인 (토큰 불필요, 30초)
 k6 run -e VUS=5 -e HOLD=30s scenarios/01-gateway.js
@@ -102,10 +126,10 @@ k6 run -e VUS=10 -e RAMP_UP=1m -e HOLD=5m \
 
 ```bash
 # 서버에서: 지워질 행 수를 먼저 눈으로 확인한 뒤 실행
-docker exec -i dodam-mysql sh -c 'mysql -u root -p"$MYSQL_ROOT_PASSWORD" dodam' < sql/cleanup.sql
+kubectl -n dodam exec -i sts/mysql -- sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot b209' < sql/cleanup.sql
 
 # MinIO 잔여 객체 확인 (03 을 돌렸다면)
-docker exec dodam-minio sh -c 'ls -1 /data/dodam/images | wc -l'
+kubectl -n dodam exec sts/minio -- sh -c 'ls -1 /data/dodam/images | wc -l'
 ```
 
 발급한 토큰 파일이 있다면 **삭제**한다. 만료(기본 2시간) 전까지는 유효한 자격증명이다.

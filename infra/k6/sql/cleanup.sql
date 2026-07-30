@@ -12,7 +12,7 @@
 --    (그 외 대부분은 ON DELETE CASCADE 라 부모만 지우면 따라 지워진다)
 --
 -- 실행 (서버에서):
---   docker exec -i dodam-mysql mysql -u root -p"$MYSQL_ROOT_PASSWORD" dodam < sql/cleanup.sql
+--   kubectl -n dodam exec -i sts/mysql -- sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot b209' < sql/cleanup.sql
 --
 -- ⚠️ MinIO 잔여 객체는 이 스크립트가 지우지 않는다. DB 행만 지운다.
 --    업로드 시나리오를 돌렸다면 README 의 "MinIO 잔여 확인" 절차를 함께 수행한다.
