@@ -150,7 +150,8 @@ class DrawingStageCompletionServiceTest {
     given(uploaded.getDrawingSession()).willReturn(session);
     given(session.getId()).willReturn(SESSION_ID);
     given(session.getInputMethod()).willReturn(DrawingInputMethod.UPLOAD);
-    given(drawingAssetRepository.findById(ASSET_ID)).willReturn(Optional.of(uploaded));
+    given(drawingAssetRepository.findWithDrawingSessionById(ASSET_ID))
+        .willReturn(Optional.of(uploaded));
     given(analysisPersistenceService.findByRequestId(KEY))
         .willReturn(Optional.empty(), Optional.of(succeededSummary()));
 

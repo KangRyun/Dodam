@@ -3,13 +3,17 @@ package com.ssafy.b209.drawing.htp.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
+import com.ssafy.b209.analysis.repository.AnalysisResultJdbcRepository;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
+import com.ssafy.b209.analysis.repository.UnusedAnalysisInput;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.child.domain.Child;
@@ -34,11 +38,12 @@ import com.ssafy.b209.drawing.htp.domain.HtpDrawingSubject;
 import com.ssafy.b209.drawing.htp.dto.HtpAssessmentResponse;
 import com.ssafy.b209.drawing.htp.dto.HtpCompletionResponse;
 import com.ssafy.b209.drawing.htp.dto.StartHtpAssessmentRequest;
+import com.ssafy.b209.drawing.htp.exception.HtpErrorCode;
 import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
-import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.drawing.repository.DrawingTypeRepository;
 import com.ssafy.b209.drawing.service.DrawingReflectionService;
+import com.ssafy.b209.drawing.service.StageFinalImageFinder;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.repository.ReportRepository;
@@ -49,12 +54,15 @@ import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.context.ApplicationEventPublisher;
@@ -72,8 +80,9 @@ class HtpAssessmentServiceTest {
   @Mock private DrawingSessionRepository drawingSessionRepository;
   @Mock private HtpAssessmentRepository htpAssessmentRepository;
   @Mock private ConversationSessionRepository conversationSessionRepository;
-  @Mock private DrawingAssetRepository drawingAssetRepository;
+  @Mock private StageFinalImageFinder stageFinalImageFinder;
   @Mock private DrawingAnalysisRepository drawingAnalysisRepository;
+  @Mock private AnalysisResultJdbcRepository analysisResultJdbcRepository;
   @Mock private ReportRepository reportRepository;
   @Mock private ApplicationEventPublisher eventPublisher;
   @Mock private DrawingReflectionService drawingReflectionService;
@@ -93,8 +102,9 @@ class HtpAssessmentServiceTest {
             drawingSessionRepository,
             htpAssessmentRepository,
             conversationSessionRepository,
-            drawingAssetRepository,
+            stageFinalImageFinder,
             drawingAnalysisRepository,
+            analysisResultJdbcRepository,
             reportRepository,
             eventPublisher,
             drawingReflectionService,
@@ -427,11 +437,7 @@ class HtpAssessmentServiceTest {
     given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_ID);
     given(htpAssessmentRepository.findDetailByIdForUpdate(200L))
         .willReturn(Optional.of(assessment));
-    given(
-            drawingAssetRepository
-                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
-                    List.of(100L, 101L, 102L), DrawingAssetType.FINAL))
-        .willReturn(assets);
+    stubStageFinalImages(assets);
     given(
             drawingAnalysisRepository
                 .findByDrawingSessionIdInAndScopeOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
@@ -464,6 +470,157 @@ class HtpAssessmentServiceTest {
     assertThat(response.analysisId()).isEqualTo(900L);
     assertThat(response.reportId()).isEqualTo(901L);
     verify(eventPublisher).publishEvent(new ReportGenerationRequestedEvent(900L));
+  }
+
+  @Test
+  void acceptsCompletionWhenEveryStageObjectDetectionFailed() {
+    DrawingSession house = persistedSession(100L, "htp-start-key");
+    DrawingSession tree = persistedSession(101L, "htp-tree-key");
+    DrawingSession person = persistedSession(102L, "htp-person-key");
+    HtpAssessment assessment = completedAssessment(house, tree, person);
+    List<DrawingAsset> assets =
+        List.of(finalAsset(house, 501L), finalAsset(tree, 502L), finalAsset(person, 503L));
+    stubAuthorizedAssessment(assessment);
+    stubStageFinalImages(assets);
+    stubObjectAnalyses(
+        List.of(
+            failedObjectAnalysis(house, assets.get(0), "house-analysis"),
+            failedObjectAnalysis(tree, assets.get(1), "tree-analysis"),
+            failedObjectAnalysis(person, assets.get(2), "person-analysis")));
+    stubCompletedConversations();
+    stubReportCreation();
+
+    HtpCompletionResponse response = service.complete(200L, "htp-complete-key");
+
+    assertThat(response.status().name()).isEqualTo("ANALYZING");
+    assertThat(response.analysisId()).isEqualTo(900L);
+    assertThat(response.subjectsWithoutObjectDetection())
+        .containsExactly(HtpDrawingSubject.HOUSE, HtpDrawingSubject.TREE, HtpDrawingSubject.PERSON);
+    verify(eventPublisher).publishEvent(new ReportGenerationRequestedEvent(900L));
+  }
+
+  @Test
+  void recordsOnlyTheStageWithoutObjectDetectionAsAnUnusedReportInput() {
+    DrawingSession house = persistedSession(100L, "htp-start-key");
+    DrawingSession tree = persistedSession(101L, "htp-tree-key");
+    DrawingSession person = persistedSession(102L, "htp-person-key");
+    HtpAssessment assessment = completedAssessment(house, tree, person);
+    List<DrawingAsset> assets =
+        List.of(finalAsset(house, 501L), finalAsset(tree, 502L), finalAsset(person, 503L));
+    stubAuthorizedAssessment(assessment);
+    stubStageFinalImages(assets);
+    stubObjectAnalyses(
+        List.of(
+            successfulObjectAnalysis(house, assets.get(0), "house-analysis"),
+            successfulObjectAnalysis(tree, assets.get(1), "tree-analysis")));
+    stubCompletedConversations();
+    stubReportCreation();
+
+    HtpCompletionResponse response = service.complete(200L, "htp-complete-key");
+
+    assertThat(response.subjectsWithoutObjectDetection()).containsExactly(HtpDrawingSubject.PERSON);
+    ArgumentCaptor<List<UnusedAnalysisInput>> captor = ArgumentCaptor.captor();
+    verify(analysisResultJdbcRepository)
+        .appendUnusedInputs(eq(900L), captor.capture(), any(LocalDateTime.class));
+    assertThat(captor.getValue())
+        .singleElement()
+        .satisfies(
+            input -> {
+              assertThat(input.inputName()).isEqualTo("PERSON");
+              assertThat(input.sourceId()).isEqualTo(102L);
+              assertThat(input.reasonCode()).isEqualTo("OBJECT_DETECTION_UNAVAILABLE");
+            });
+  }
+
+  @Test
+  void acceptsCompletionWhenEachStageUploadedItsOwnPhotoAsTheFinalImage() {
+    DrawingSession house = uploadSession(100L, "htp-start-key");
+    DrawingSession tree = uploadSession(101L, "htp-tree-key");
+    DrawingSession person = uploadSession(102L, "htp-person-key");
+    HtpAssessment assessment = completedAssessment(house, tree, person);
+    DrawingAsset personPhoto = uploadedAsset(person, 603L);
+    stubAuthorizedAssessment(assessment);
+    stubStageFinalImages(
+        List.of(uploadedAsset(house, 601L), uploadedAsset(tree, 602L), personPhoto));
+    stubObjectAnalyses(List.of());
+    stubCompletedConversations();
+    stubReportCreation();
+
+    HtpCompletionResponse response = service.complete(200L, "htp-complete-key");
+
+    assertThat(response.status().name()).isEqualTo("ANALYZING");
+    assertThat(response.reportId()).isEqualTo(901L);
+    verify(stageFinalImageFinder).findAllBySession(List.of(house, tree, person));
+    ArgumentCaptor<DrawingAnalysis> captor = ArgumentCaptor.captor();
+    verify(drawingAnalysisRepository).saveAndFlush(captor.capture());
+    assertThat(captor.getValue().getDrawingAsset()).isSameAs(personPhoto);
+  }
+
+  @Test
+  void rejectsCompletionWithADistinctCodeWhenAStageDrawingIsStillInProgress() {
+    DrawingSession house = persistedSession(100L, "htp-start-key");
+    completeStep(house);
+    HtpAssessment assessment =
+        HtpAssessment.start(
+            child,
+            htpType,
+            house,
+            SERVER_TIME.minusHours(3),
+            SERVER_TIME.plusHours(21),
+            "htp-start-key");
+    DrawingSession tree = persistedSession(101L, "htp-tree-key");
+    assessment.advance(tree, SERVER_TIME.minusHours(2));
+    completeStep(tree);
+    DrawingSession person = persistedSession(102L, "htp-person-key");
+    assessment.advance(person, SERVER_TIME.minusHours(1));
+    ReflectionTestUtils.setField(assessment, "id", 200L);
+    stubAuthorizedAssessment(assessment);
+
+    assertThatThrownBy(() -> service.complete(200L, "htp-complete-key"))
+        .isInstanceOf(BusinessException.class)
+        .extracting(exception -> ((BusinessException) exception).getErrorCode())
+        .isEqualTo(HtpErrorCode.HTP_STEP_DRAWING_NOT_COMPLETED);
+  }
+
+  @Test
+  void rejectsCompletionWithADistinctCodeWhenAStageFinalImageIsMissing() {
+    DrawingSession house = persistedSession(100L, "htp-start-key");
+    DrawingSession tree = persistedSession(101L, "htp-tree-key");
+    DrawingSession person = persistedSession(102L, "htp-person-key");
+    HtpAssessment assessment = completedAssessment(house, tree, person);
+    stubAuthorizedAssessment(assessment);
+    stubStageFinalImages(List.of(finalAsset(house, 501L), finalAsset(tree, 502L)));
+
+    assertThatThrownBy(() -> service.complete(200L, "htp-complete-key"))
+        .isInstanceOf(BusinessException.class)
+        .extracting(exception -> ((BusinessException) exception).getErrorCode())
+        .isEqualTo(HtpErrorCode.HTP_FINAL_IMAGE_REQUIRED);
+  }
+
+  @Test
+  void rejectsCompletionWithADistinctCodeWhenAStageConversationIsNotCompleted() {
+    DrawingSession house = persistedSession(100L, "htp-start-key");
+    DrawingSession tree = persistedSession(101L, "htp-tree-key");
+    DrawingSession person = persistedSession(102L, "htp-person-key");
+    HtpAssessment assessment = completedAssessment(house, tree, person);
+    stubAuthorizedAssessment(assessment);
+    stubStageFinalImages(
+        List.of(finalAsset(house, 501L), finalAsset(tree, 502L), finalAsset(person, 503L)));
+    given(conversationSessionRepository.findByDrawingSessionId(any()))
+        .willAnswer(
+            invocation -> {
+              Long sessionId = invocation.getArgument(0, Long.class);
+              return sessionId == 102L
+                  ? Optional.of(
+                      ConversationSession.start(
+                          sessionId, "ELEMENTARY", 2, SERVER_TIME.minusMinutes(20)))
+                  : Optional.of(completedConversation(sessionId));
+            });
+
+    assertThatThrownBy(() -> service.complete(200L, "htp-complete-key"))
+        .isInstanceOf(BusinessException.class)
+        .extracting(exception -> ((BusinessException) exception).getErrorCode())
+        .isEqualTo(HtpErrorCode.HTP_CONVERSATION_NOT_COMPLETED);
   }
 
   @Test
@@ -501,6 +658,78 @@ class HtpAssessmentServiceTest {
     return session;
   }
 
+  private DrawingSession uploadSession(Long id, String key) {
+    DrawingSession session =
+        DrawingSession.start(child, htpType, DrawingInputMethod.UPLOAD, SERVER_TIME, key);
+    ReflectionTestUtils.setField(session, "id", id);
+    return session;
+  }
+
+  private HtpAssessment completedAssessment(
+      DrawingSession house, DrawingSession tree, DrawingSession person) {
+    completeStep(house);
+    HtpAssessment assessment =
+        HtpAssessment.start(
+            child,
+            htpType,
+            house,
+            SERVER_TIME.minusHours(3),
+            SERVER_TIME.plusHours(21),
+            "htp-start-key");
+    assessment.advance(tree, SERVER_TIME.minusHours(2));
+    completeStep(tree);
+    assessment.advance(person, SERVER_TIME.minusHours(1));
+    completeStep(person);
+    ReflectionTestUtils.setField(assessment, "id", 200L);
+    return assessment;
+  }
+
+  private void stubAuthorizedAssessment(HtpAssessment assessment) {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_ID);
+    given(htpAssessmentRepository.findDetailByIdForUpdate(200L))
+        .willReturn(Optional.of(assessment));
+  }
+
+  private void stubStageFinalImages(List<DrawingAsset> assets) {
+    Map<Long, DrawingAsset> images = new LinkedHashMap<>();
+    assets.forEach(asset -> images.put(asset.getDrawingSession().getId(), asset));
+    given(stageFinalImageFinder.findAllBySession(anyList())).willReturn(images);
+  }
+
+  private void stubObjectAnalyses(List<DrawingAnalysis> analyses) {
+    given(
+            drawingAnalysisRepository
+                .findByDrawingSessionIdInAndScopeOrderByDrawingSessionIdAscRequestedAtDescIdDesc(
+                    List.of(100L, 101L, 102L), DrawingAnalysisScope.FINAL))
+        .willReturn(analyses);
+  }
+
+  private void stubCompletedConversations() {
+    given(conversationSessionRepository.findByDrawingSessionId(any()))
+        .willAnswer(
+            invocation ->
+                Optional.of(completedConversation(invocation.getArgument(0, Long.class))));
+  }
+
+  private void stubReportCreation() {
+    given(drawingAnalysisRepository.saveAndFlush(any(DrawingAnalysis.class)))
+        .willAnswer(
+            invocation -> {
+              DrawingAnalysis analysis = invocation.getArgument(0);
+              ReflectionTestUtils.setField(analysis, "id", 900L);
+              return analysis;
+            });
+    given(reportRepository.findFirstByDrawingSessionIdOrderByReportVersionDescIdDesc(102L))
+        .willReturn(Optional.empty());
+    given(reportRepository.saveAndFlush(any(Report.class)))
+        .willAnswer(
+            invocation -> {
+              Report report = invocation.getArgument(0);
+              ReflectionTestUtils.setField(report, "id", 901L);
+              return report;
+            });
+  }
+
   private void completeStep(DrawingSession session) {
     session.startDrawingAnalysis();
     session.finishDrawingAnalysis();
@@ -524,6 +753,40 @@ class HtpAssessmentServiceTest {
             SERVER_TIME.minusMinutes(40));
     ReflectionTestUtils.setField(asset, "id", id);
     return asset;
+  }
+
+  private DrawingAsset uploadedAsset(DrawingSession session, Long id) {
+    DrawingAsset asset =
+        DrawingAsset.uploaded(
+            session,
+            "images/" + id + ".jpg",
+            "image/jpeg",
+            2048,
+            1440,
+            1080,
+            "b".repeat(64),
+            SERVER_TIME.minusMinutes(45),
+            SERVER_TIME.minusMinutes(44),
+            "upload-key-" + id,
+            "f".repeat(64),
+            0,
+            true);
+    ReflectionTestUtils.setField(asset, "id", id);
+    return asset;
+  }
+
+  private DrawingAnalysis failedObjectAnalysis(
+      DrawingSession session, DrawingAsset asset, String requestId) {
+    DrawingAnalysis analysis =
+        DrawingAnalysis.processing(
+            session,
+            asset,
+            DrawingAnalysisScope.FINAL,
+            DrawingAnalysisType.OBJECT_DETECTION,
+            requestId,
+            SERVER_TIME.minusMinutes(35));
+    analysis.fail("TIMEOUT", "그림 분석 처리에 실패했습니다.", SERVER_TIME.minusMinutes(34));
+    return analysis;
   }
 
   private DrawingAnalysis successfulObjectAnalysis(

@@ -141,7 +141,7 @@ public class DrawingStageCompletionService {
   private Long requireReusableSourceAsset(Long drawingSessionId, Long sourceAssetId) {
     DrawingAsset asset =
         drawingAssetRepository
-            .findById(sourceAssetId)
+            .findWithDrawingSessionById(sourceAssetId)
             .orElseThrow(() -> new BusinessException(DrawingErrorCode.FINAL_ASSET_REQUIRED));
     boolean reusableFinal = asset.getAssetType() == DrawingAssetType.FINAL;
     boolean reusableUpload =

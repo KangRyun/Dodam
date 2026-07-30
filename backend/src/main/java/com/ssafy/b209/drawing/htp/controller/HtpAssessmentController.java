@@ -111,7 +111,7 @@ public class HtpAssessmentController {
   }
 
   /**
-   * 세 HTP 그림 단계의 저장·분석·대화 완료를 검증하고 단일 리포트 생성을 접수한다.
+   * 세 HTP 그림 단계의 세션 완료·최종 그림·대화 완료를 검증하고 단일 리포트 생성을 접수한다.
    *
    * @param assessmentId HTP 활동 묶음 식별자
    * @param idempotencyKey 완료 요청을 식별하는 멱등 키
@@ -119,14 +119,18 @@ public class HtpAssessmentController {
    */
   @Operation(
       summary = "HTP 종합 완료",
-      description = "HOUSE, TREE, PERSON 결과가 모두 준비된 경우 HTP 리포트 하나의 생성을 접수합니다.")
+      description =
+          "HOUSE, TREE, PERSON 단계의 그림 활동과 대화가 모두 끝난 경우 HTP 리포트 하나의 생성을 접수합니다. "
+              + "AI 객체 탐지 실패는 완료를 막지 않고 응답의 subjectsWithoutObjectDetection으로 알립니다.")
   @ApiResponses({
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "202",
         description = "HTP 단일 리포트 생성 접수"),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "409",
-        description = "세 단계 결과 미완료 또는 처리 상태 충돌",
+        description =
+            "단계 구성 미완(HTP_409_006), 단계 그림 활동 미완료(HTP_409_008), 최종 그림 누락(HTP_409_009), "
+                + "대화 미완료(HTP_409_010) 또는 처리 상태 충돌(HTP_409_007)",
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
   })
   @PostMapping("/{assessmentId}/complete")

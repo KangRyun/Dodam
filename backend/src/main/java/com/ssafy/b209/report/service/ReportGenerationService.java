@@ -4,10 +4,9 @@ import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessRepository;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
-import com.ssafy.b209.drawing.domain.DrawingAssetType;
 import com.ssafy.b209.drawing.domain.DrawingSession;
-import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
+import com.ssafy.b209.drawing.service.StageFinalImageFinder;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportStatus;
@@ -28,6 +27,9 @@ import org.springframework.transaction.annotation.Transactional;
  *
  * <p>재생성은 기존 Report와 Analysis를 덮어쓰지 않고 다음 버전의 Report와 연결된 새 Analysis를 만든다. Transaction이 Commit된 뒤
  * 기존 생성 Listener가 새 Analysis를 처리한다.
+ *
+ * <p>재생성 입력 그림은 {@link StageFinalImageFinder}가 확정한다. Canvas 세션은 {@code FINAL} 그림이 있어야 하고, 사진 업로드
+ * 세션은 업로드한 원본이 최종 그림이므로 최초 생성과 같은 그림으로 재시도할 수 있다.
  */
 @Service
 public class ReportGenerationService {
@@ -38,7 +40,7 @@ public class ReportGenerationService {
   private final GuardianResourceAccessRepository accessRepository;
   private final ReportRepository reportRepository;
   private final DrawingSessionRepository sessionRepository;
-  private final DrawingAssetRepository assetRepository;
+  private final StageFinalImageFinder stageFinalImageFinder;
   private final DrawingAnalysisRepository analysisRepository;
   private final ApplicationEventPublisher eventPublisher;
   private final Clock clock;
@@ -49,7 +51,7 @@ public class ReportGenerationService {
    * @param accessRepository 보호자와 Drawing Session의 연결 관계 조회 저장소
    * @param reportRepository 리포트 저장소
    * @param sessionRepository Drawing Session 잠금 저장소
-   * @param assetRepository 최신 FINAL Asset 조회 저장소
+   * @param stageFinalImageFinder 세션의 최종 그림을 확정하는 경계
    * @param analysisRepository 최종 분석 저장소
    * @param eventPublisher Commit 이후 리포트 생성 요청을 전달할 이벤트 발행기
    * @param clock 재생성 접수 시각을 제공하는 Clock
@@ -58,14 +60,14 @@ public class ReportGenerationService {
       GuardianResourceAccessRepository accessRepository,
       ReportRepository reportRepository,
       DrawingSessionRepository sessionRepository,
-      DrawingAssetRepository assetRepository,
+      StageFinalImageFinder stageFinalImageFinder,
       DrawingAnalysisRepository analysisRepository,
       ApplicationEventPublisher eventPublisher,
       Clock clock) {
     this.accessRepository = accessRepository;
     this.reportRepository = reportRepository;
     this.sessionRepository = sessionRepository;
-    this.assetRepository = assetRepository;
+    this.stageFinalImageFinder = stageFinalImageFinder;
     this.analysisRepository = analysisRepository;
     this.eventPublisher = eventPublisher;
     this.clock = clock;
@@ -132,9 +134,8 @@ public class ReportGenerationService {
             .findNotDeletedByIdForUpdate(sessionId)
             .orElseThrow(() -> new BusinessException(ReportDetailErrorCode.REPORT_NOT_FOUND));
     DrawingAsset finalAsset =
-        assetRepository
-            .findFirstByDrawingSessionIdAndAssetTypeOrderByAssetVersionDesc(
-                sessionId, DrawingAssetType.FINAL)
+        stageFinalImageFinder
+            .find(session)
             .orElseThrow(
                 () -> new BusinessException(ReportGenerationErrorCode.FINAL_ASSET_REQUIRED));
     LocalDateTime requestedAt = LocalDateTime.now(clock);

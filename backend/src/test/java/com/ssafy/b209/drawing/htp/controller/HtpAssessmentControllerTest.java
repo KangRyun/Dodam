@@ -132,14 +132,16 @@ class HtpAssessmentControllerTest {
                 900L,
                 DrawingAnalysisState.PENDING,
                 901L,
-                ReportStatus.GENERATING));
+                ReportStatus.GENERATING,
+                List.of(HtpDrawingSubject.TREE)));
 
     mockMvc
         .perform(post("/api/v1/htp-assessments/200/complete").header("Idempotency-Key", KEY))
         .andExpect(status().isAccepted())
         .andExpect(jsonPath("$.data.status").value("ANALYZING"))
         .andExpect(jsonPath("$.data.analysisId").value(900))
-        .andExpect(jsonPath("$.data.reportId").value(901));
+        .andExpect(jsonPath("$.data.reportId").value(901))
+        .andExpect(jsonPath("$.data.subjectsWithoutObjectDetection[0]").value("TREE"));
   }
 
   @Test

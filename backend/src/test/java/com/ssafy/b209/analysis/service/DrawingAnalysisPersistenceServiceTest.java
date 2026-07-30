@@ -21,6 +21,7 @@ import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingAssetType;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
@@ -263,6 +264,64 @@ class DrawingAnalysisPersistenceServiceTest {
         () ->
             service.start(
                 SESSION_ID, ASSET_ID, DrawingAnalysisType.ACTIVITY_REPORT, "id", REQUESTED_AT),
+        DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
+    verify(drawingAnalysisRepository, never()).saveAndFlush(any());
+  }
+
+  @Test
+  void rejectsUploadedAssetFromPublicAnalysisRequest() {
+    givenValidTarget();
+    given(asset.getAssetType()).willReturn(DrawingAssetType.UPLOADED);
+
+    assertError(
+        () ->
+            service.start(
+                SESSION_ID, ASSET_ID, DrawingAnalysisType.OBJECT_DETECTION, "id", REQUESTED_AT),
+        DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
+    verify(drawingAnalysisRepository, never()).saveAndFlush(any());
+  }
+
+  @Test
+  void startsUploadedPhotoAsTheFinalAnalysisOfAnUploadStageCompletion() {
+    givenValidTarget();
+    given(asset.getAssetType()).willReturn(DrawingAssetType.UPLOADED);
+    given(session.getInputMethod()).willReturn(DrawingInputMethod.UPLOAD);
+    given(asset.getStorageKey()).willReturn("drawing/uploaded.jpg");
+    given(asset.getMimeType()).willReturn("image/jpeg");
+    given(drawingAnalysisRepository.saveAndFlush(any(DrawingAnalysis.class)))
+        .willAnswer(
+            invocation -> {
+              DrawingAnalysis analysis = invocation.getArgument(0);
+              ReflectionTestUtils.setField(analysis, "id", ANALYSIS_ID);
+              return analysis;
+            });
+
+    StartedDrawingAnalysis started =
+        service.startForDrawingCompletion(
+            SESSION_ID,
+            ASSET_ID,
+            DrawingAnalysisType.OBJECT_DETECTION,
+            "upload-stage-completion-key",
+            REQUESTED_AT);
+
+    assertThat(started.analysisScope()).isEqualTo(DrawingAnalysisScope.FINAL);
+    verify(session).startDrawingAnalysis();
+  }
+
+  @Test
+  void rejectsUploadedAssetOnTheStageCompletionOfACanvasSession() {
+    givenValidTarget();
+    given(asset.getAssetType()).willReturn(DrawingAssetType.UPLOADED);
+    given(session.getInputMethod()).willReturn(DrawingInputMethod.CANVAS);
+
+    assertError(
+        () ->
+            service.startForDrawingCompletion(
+                SESSION_ID,
+                ASSET_ID,
+                DrawingAnalysisType.OBJECT_DETECTION,
+                "canvas-upload-key",
+                REQUESTED_AT),
         DrawingAnalysisErrorCode.DRAWING_ANALYSIS_NOT_ALLOWED);
     verify(drawingAnalysisRepository, never()).saveAndFlush(any());
   }
