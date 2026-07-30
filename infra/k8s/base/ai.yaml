@@ -59,9 +59,12 @@ spec:
             periodSeconds: 20
             failureThreshold: 5
           # 실측 77MB(2026-07-28). YOLO 추론이 붙으면 늘 수 있어 상한에 여유를 뒀다.
+          # 2026-07-30: 512Mi 에서 OOMKilled 3회. AI_DRAWING_ANALYSIS_MODE=http 가 켜지며
+          #   실제 ONNX 추론이 들어오자 상한을 넘었다(정상 상태 사용량이 이미 405Mi).
+          #   360 컷오버 때 축소한 상한이 mock 모드에서는 충분해 보였을 뿐이다.
           resources:
-            requests: { memory: 128Mi, cpu: 100m }
-            limits:   { memory: 512Mi, cpu: "1" }
+            requests: { memory: 256Mi, cpu: 100m }
+            limits:   { memory: 1Gi,   cpu: "1" }
       volumes:
         - name: models
           persistentVolumeClaim: { claimName: ai-models }
