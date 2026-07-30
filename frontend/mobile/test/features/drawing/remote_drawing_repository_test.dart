@@ -496,6 +496,90 @@ void main() {
       ),
     );
   });
+
+  test(
+    'Canvas drawing completion sends image and JSON metadata parts',
+    () async {
+      final interceptor = _DrawingStageCompletionInterceptor();
+      final repository = RemoteDrawingRepository(
+        ApiClient(
+          environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+          interceptors: [interceptor],
+        ),
+      );
+
+      final result = await repository.completeDrawingStage(
+        42,
+        finalImage: const BinaryUploadDto(
+          bytes: [137, 80, 78, 71],
+          fileName: 'final.png',
+          mimeType: 'image/png',
+        ),
+        metadata: const DrawingCompleteMetadataDto(
+          drawingDurationMs: 120000,
+          clientCompletedAt: '2026-07-30T01:00:00Z',
+          lastEventSequence: 14,
+        ),
+        idempotencyKey: 'drawing-complete-key-0001',
+      );
+
+      final request = interceptor.requests.single;
+      expect(request.method, 'POST');
+      expect(request.uri.path, '/api/v1/drawing-sessions/42/drawing-complete');
+      expect(request.headers['Idempotency-Key'], 'drawing-complete-key-0001');
+      final form = request.data as FormData;
+      final finalImage = form.files.singleWhere(
+        (part) => part.key == 'finalImage',
+      );
+      expect(finalImage.value.contentType?.toString(), 'image/png');
+      expect(await _multipartBytes(finalImage.value), [137, 80, 78, 71]);
+      final metadata = form.files.singleWhere((part) => part.key == 'metadata');
+      expect(metadata.value.contentType?.toString(), 'application/json');
+      expect(jsonDecode(utf8.decode(await _multipartBytes(metadata.value))), {
+        'lastEventSequence': 14,
+        'drawingDurationMs': 120000,
+        'clientCompletedAt': '2026-07-30T01:00:00Z',
+      });
+      expect(result.currentStage, 'CONVERSING');
+      expect(result.analysis.status, 'SUCCEEDED');
+    },
+  );
+
+  test(
+    'Uploaded drawing completion sends source asset without image part',
+    () async {
+      final interceptor = _DrawingStageCompletionInterceptor();
+      final repository = RemoteDrawingRepository(
+        ApiClient(
+          environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+          interceptors: [interceptor],
+        ),
+      );
+
+      final result = await repository.completeUploadedDrawingStage(
+        42,
+        metadata: const DrawingCompleteMetadataDto(
+          drawingDurationMs: 1,
+          clientCompletedAt: '2026-07-30T01:00:00Z',
+          sourceAssetId: 130,
+        ),
+        idempotencyKey: 'drawing-complete-key-0002',
+      );
+
+      final request = interceptor.requests.single;
+      expect(request.headers['Idempotency-Key'], 'drawing-complete-key-0002');
+      final form = request.data as FormData;
+      expect(form.files.where((part) => part.key == 'finalImage'), isEmpty);
+      final metadata = form.files.singleWhere((part) => part.key == 'metadata');
+      expect(jsonDecode(utf8.decode(await _multipartBytes(metadata.value))), {
+        'sourceAssetId': 130,
+        'drawingDurationMs': 1,
+        'clientCompletedAt': '2026-07-30T01:00:00Z',
+      });
+      expect(result.finalAssetId, 150);
+      expect(result.nextAction, 'START_CONVERSATION');
+    },
+  );
 }
 
 const _strokeRequest = StrokeBatchRequestDto(
@@ -794,6 +878,38 @@ final class _DraftPreviewInterceptor extends Interceptor {
         requestOptions: options,
         statusCode: 200,
         data: const [137, 80, 78, 71],
+      ),
+    );
+  }
+}
+
+final class _DrawingStageCompletionInterceptor extends Interceptor {
+  final List<RequestOptions> requests = [];
+
+  @override
+  void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
+    requests.add(options);
+    handler.resolve(
+      Response<Map<String, dynamic>>(
+        requestOptions: options,
+        statusCode: 200,
+        data: const {
+          'success': true,
+          'code': 'COMMON_200',
+          'message': '요청에 성공했습니다.',
+          'data': {
+            'drawingSessionId': 42,
+            'finalAssetId': 150,
+            'sessionStatus': 'IN_PROGRESS',
+            'currentStage': 'CONVERSING',
+            'analysis': {
+              'analysisId': 300,
+              'analysisType': 'OBJECT_DETECTION',
+              'status': 'SUCCEEDED',
+            },
+            'nextAction': 'START_CONVERSATION',
+          },
+        },
       ),
     );
   }
