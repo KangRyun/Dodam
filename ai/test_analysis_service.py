@@ -513,5 +513,100 @@ class DetectionLogTest(unittest.TestCase):
             self.assertNotIn("0.4", line)  # bbox 폭·높이가 섞이지 않는다
 
 
+class DetectionMetadataSchemaTest(unittest.TestCase):
+    """구조화 탐지 메타데이터 로그 스키마 (S15P11B209-610).
+
+    611(TTL·집계·피드백)이 import해 MongoDB에 저장할 pydantic 모델. 아동 그림 내용
+    (표시명·bbox·이미지)은 담기지 않고 내부 코드·수치·집계만 담긴다.
+    """
+
+    OCCURRED = "2026-07-30T16:00:00+09:00"
+
+    def _req(self):
+        return contracts.AnalysisRequest.model_validate(
+            {**SPEC_REQUEST, "activityType": "HTP", "drawingSubject": "HOUSE"}
+        )
+
+    def _model_info(self):
+        return contracts.ModelInfo(
+            object_detection=contracts.ModelRef(name="yolo-htp", version="htp_best.pt")
+        )
+
+    def _objects(self):
+        objects, _ = svc._to_detected_objects(
+            [
+                _det("집전체", 0.1, 0.1, 0.4, 0.4, conf=0.91),
+                _det("지붕", 0.2, 0.1, 0.3, 0.2, conf=0.80),
+            ],
+            svc.htp_labels,
+        )
+        return objects
+
+    def _build(self, objects=None, warnings=(), ms=123):
+        return svc._detection_metadata(
+            self._req(),
+            self._objects() if objects is None else objects,
+            self._model_info(),
+            list(warnings),
+            ms,
+            self.OCCURRED,
+        )
+
+    def test_is_pydantic_model_with_min_contract(self):
+        # 611 최소 계약: analysisId · occurredAt · schemaVersion — 모델을 611이 import해 저장한다.
+        rec = self._build()
+        self.assertIsInstance(rec, contracts.DetectionMetadataLog)
+        self.assertEqual(rec.analysis_id, 701)
+        self.assertEqual(rec.occurred_at, self.OCCURRED)
+        self.assertEqual(rec.schema_version, "1")
+        self.assertEqual(rec.event, "object_detection")
+
+    def test_schema_fields(self):
+        rec = self._build(warnings=["RAG_NOT_CONFIGURED"])
+        self.assertEqual(rec.drawing_session_id, 100)
+        self.assertEqual(rec.activity_type, "HTP")
+        self.assertEqual(rec.drawing_subject, "HOUSE")
+        self.assertEqual(rec.object_detection.name, "yolo-htp")
+        self.assertEqual(rec.image_width, 1920)
+        self.assertEqual(rec.image_height, 1080)
+        self.assertEqual(rec.detection_count, 2)
+        self.assertEqual(rec.class_counts, {"HOUSE": 1, "HOUSE_ROOF": 1})
+        self.assertEqual(rec.processing_time_ms, 123)
+        self.assertEqual(rec.warnings, ["RAG_NOT_CONFIGURED"])
+
+    def test_per_object_has_no_bbox(self):
+        # 객체별 필드는 코드·수치만 — bbox는 스키마에 아예 없다(710 가드레일 유지).
+        self.assertEqual(
+            set(contracts.DetectionMetadataObject.model_fields),
+            {"object_code", "confidence", "area_ratio", "detection_order"},
+        )
+        rec = self._build()
+        self.assertEqual([o.object_code for o in rec.objects], ["HOUSE", "HOUSE_ROOF"])
+
+    def test_emit_json_is_camelcase_and_has_no_child_content(self):
+        dumped = self._build().model_dump_json(by_alias=True)
+        for key in ("schemaVersion", "occurredAt", "analysisId", "detectionCount"):
+            self.assertIn(key, dumped)
+        self.assertIn("+09:00", dumped)  # timezone 명시 ISO8601(TTL 인덱스 기준)
+        self.assertNotIn("집", dumped)  # 표시명(아동 그림 내용) 미포함
+        self.assertNotIn("지붕", dumped)
+        self.assertNotIn("bbox", dumped)  # bbox 미포함(710 가드레일)
+        self.assertNotIn("boundingBox", dumped)
+
+    def test_roundtrip_via_model(self):
+        # 611이 emit된 JSON을 같은 모델로 되읽을 수 있다(ad-hoc 파싱 불필요).
+        rec = self._build(ms=5)
+        again = contracts.DetectionMetadataLog.model_validate_json(
+            rec.model_dump_json(by_alias=True)
+        )
+        self.assertEqual(again, rec)
+
+    def test_empty_detections(self):
+        rec = self._build(objects=[])
+        self.assertEqual(rec.detection_count, 0)
+        self.assertEqual(rec.class_counts, {})
+        self.assertEqual(rec.objects, [])
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -20,6 +20,7 @@ import hashlib
 import logging
 import tempfile
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import httpx
@@ -353,6 +354,58 @@ def _format_detections_for_log(detections: list) -> str:
     return " ".join(f"{d.label}({d.confidence:.2f})" for d in detections)
 
 
+# ── 탐지 Metadata 로그 (S15P11B209-610) ─────────────────────────
+# 710(사람용 콘솔 한 줄)과 별개로, 611(로그 TTL·집계·피드백, MongoDB 문서+TTL 인덱스)이
+# 그대로 import해 저장할 구조화 레코드를 emit한다. 스키마 정본은 contracts.DetectionMetadataLog
+# (pydantic), emit은 model_dump_json() 한 줄. 마커로 로그 파이프라인이 이 줄만 골라낸다.
+DETECTION_META_MARKER = "[DETECTION_META]"
+_KST = timezone(timedelta(hours=9))  # 발생 시각 timezone(한국, S15P11B209-736 KST 통일)
+
+
+def _detection_metadata(
+    req: contracts.AnalysisRequest,
+    detected_objects: list,
+    model_info: contracts.ModelInfo,
+    warnings: list[str],
+    processing_time_ms: int,
+    occurred_at: str,
+) -> contracts.DetectionMetadataLog:
+    """객체 탐지 결과를 611이 소비할 구조화 메타데이터 모델로 만든다.
+
+    - TTL: occurred_at(timezone 명시 ISO8601)이 MongoDB TTL 인덱스 기준이 된다.
+    - 집계: class_counts·detection_count·object_detection·activity_type·drawing_subject.
+    - 피드백 연결: analysis_id(+object_code·detection_order)로 사용자 피드백을 조인한다.
+    아동 그림 내용(object_name 표시명·bbox 좌표·이미지)은 담지 않는다(코드·수치만).
+    """
+    class_counts: dict[str, int] = {}
+    objects: list[contracts.DetectionMetadataObject] = []
+    for o in detected_objects:
+        class_counts[o.object_code] = class_counts.get(o.object_code, 0) + 1
+        objects.append(
+            contracts.DetectionMetadataObject(
+                object_code=o.object_code,
+                confidence=round(o.confidence, 4),
+                area_ratio=o.area_ratio,
+                detection_order=o.detection_order,
+            )
+        )
+    return contracts.DetectionMetadataLog(
+        occurred_at=occurred_at,
+        analysis_id=req.analysis_id,
+        drawing_session_id=req.drawing_session_id,
+        activity_type=req.activity_type,
+        drawing_subject=req.drawing_subject,
+        object_detection=model_info.object_detection,
+        image_width=req.drawing.width,
+        image_height=req.drawing.height,
+        detection_count=len(detected_objects),
+        class_counts=class_counts,
+        objects=objects,
+        warnings=list(warnings),
+        processing_time_ms=processing_time_ms,
+    )
+
+
 def _filter_detections_for_activity(
     activity_type: contracts.ActivityType,
     drawing_subject: contracts.DrawingSubject | None,
@@ -542,12 +595,28 @@ def analyze(req: contracts.AnalysisRequest, request_id: str = "") -> contracts.A
         knowledge_base_version=config.RAG_KNOWLEDGE_BASE_VERSION or None,
     )
 
+    elapsed_ms = int((time.monotonic() - started) * 1000)
+
     logger.info(
         "종합 분석 완료: analysisId=%s objects=%d unused=%d requestId=%s",
         req.analysis_id,
         len(detected_objects),
         len(unused),
         request_id or "-",
+    )
+    # 구조화 탐지 메타데이터(S15P11B209-610) — 611이 MongoDB 문서로 저장·집계·TTL한다.
+    # 마커로 로그 파이프라인이 이 줄만 골라낸다. occurredAt이 TTL 인덱스 기준(KST ISO8601).
+    logger.info(
+        "%s %s",
+        DETECTION_META_MARKER,
+        _detection_metadata(
+            req,
+            detected_objects,
+            model_info,
+            warnings,
+            elapsed_ms,
+            datetime.now(_KST).isoformat(),
+        ).model_dump_json(by_alias=True),
     )
 
     return contracts.AnalysisResponse(
@@ -563,5 +632,5 @@ def analyze(req: contracts.AnalysisRequest, request_id: str = "") -> contracts.A
         evidence_references=[],
         unused_inputs=unused,
         warnings=warnings,
-        processing_time_ms=int((time.monotonic() - started) * 1000),
+        processing_time_ms=elapsed_ms,
     )
