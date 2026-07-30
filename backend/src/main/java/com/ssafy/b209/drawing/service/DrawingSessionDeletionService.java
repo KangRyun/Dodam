@@ -28,6 +28,7 @@ public class DrawingSessionDeletionService {
   private final GuardianResourceAccessValidator accessValidator;
   private final DrawingSessionRepository drawingSessionRepository;
   private final DrawingSessionDeletionRepository deletionRepository;
+  private final StrokeBatchDeletionService strokeBatchDeletionService;
   private final Clock clock;
 
   /**
@@ -37,6 +38,7 @@ public class DrawingSessionDeletionService {
    * @param accessValidator 보호자와 그림 활동 연결 관계 Validator
    * @param drawingSessionRepository 세션 잠금과 상태 저장 Repository
    * @param deletionRepository Storage 삭제 작업 등록 Repository
+   * @param strokeBatchDeletionService MongoDB Stroke 배치 동반 삭제 Service
    * @param clock 서버 삭제 시각을 제공하는 UTC Clock
    */
   public DrawingSessionDeletionService(
@@ -44,11 +46,13 @@ public class DrawingSessionDeletionService {
       GuardianResourceAccessValidator accessValidator,
       DrawingSessionRepository drawingSessionRepository,
       DrawingSessionDeletionRepository deletionRepository,
+      StrokeBatchDeletionService strokeBatchDeletionService,
       Clock clock) {
     this.currentUserResolver = currentUserResolver;
     this.accessValidator = accessValidator;
     this.drawingSessionRepository = drawingSessionRepository;
     this.deletionRepository = deletionRepository;
+    this.strokeBatchDeletionService = strokeBatchDeletionService;
     this.clock = clock;
   }
 
@@ -73,5 +77,8 @@ public class DrawingSessionDeletionService {
 
     session.softDelete(LocalDateTime.now(clock));
     deletionRepository.scheduleStorageDeletions(drawingSessionId);
+    // 그리기 과정 데이터는 MongoDB 에 있고 Soft Delete 대상이 아니다 — Commit 이후 실제로 지운다
+    //   (S15P11B209-365). MySQL 의 stroke_* 테이블에 남은 옛 데이터는 세션 FK 의 CASCADE 를 그대로 둔다.
+    strokeBatchDeletionService.deleteByDrawingSession(drawingSessionId);
   }
 }

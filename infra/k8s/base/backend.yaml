@@ -93,6 +93,14 @@ spec:
             - { name: JWT_SECRET,        valueFrom: { secretKeyRef: { name: dodam-secrets, key: JWT_SECRET } } }
             - { name: MINIO_BE_USER,     valueFrom: { secretKeyRef: { name: dodam-secrets, key: MINIO_BE_USER } } }
             - { name: MINIO_BE_PASSWORD, valueFrom: { secretKeyRef: { name: dodam-secrets, key: MINIO_BE_PASSWORD } } }
+            # 그리기 과정 데이터(스트로크) 저장소 — S15P11B209-365.
+            #   optional 을 붙이지 않는다: 이 값이 없으면 스트로크 저장이 조용히 실패하는 게 아니라
+            #   틀린 자격증명으로 붙었다가 첫 저장에서야 터진다. 파드가 아예 뜨지 않는 편이 낫다.
+            #   ⚠️ 인증 DB 도 dodam 이다(앱 계정은 admin 이 아니라 해당 DB 에 있다 — 364 initdb).
+            #      application-local.yml 이 authentication-database 에 같은 값을 쓴다.
+            - { name: MONGO_APP_USERNAME, valueFrom: { secretKeyRef: { name: dodam-secrets, key: MONGO_APP_USERNAME } } }
+            - { name: MONGO_APP_PASSWORD, valueFrom: { secretKeyRef: { name: dodam-secrets, key: MONGO_APP_PASSWORD } } }
+            - { name: MONGO_DATABASE,     valueFrom: { secretKeyRef: { name: dodam-secrets, key: MONGO_DATABASE } } }
             # 아래 3개는 미설정이어도 앱이 뜬다(해당 기능만 막힘) → optional: true.
             # compose 의 `${VAR:-}` 비차단 passthrough 와 같은 정책이다.
             - { name: PUSH_DEVICE_TOKEN_ENCRYPTION_KEY, valueFrom: { secretKeyRef: { name: dodam-secrets, key: PUSH_DEVICE_TOKEN_ENCRYPTION_KEY, optional: true } } }

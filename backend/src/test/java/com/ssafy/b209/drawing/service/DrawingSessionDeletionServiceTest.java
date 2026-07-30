@@ -44,6 +44,7 @@ class DrawingSessionDeletionServiceTest {
   @Mock private GuardianResourceAccessValidator accessValidator;
   @Mock private DrawingSessionRepository drawingSessionRepository;
   @Mock private DrawingSessionDeletionRepository deletionRepository;
+  @Mock private StrokeBatchDeletionService strokeBatchDeletionService;
 
   private DrawingSessionDeletionService service;
 
@@ -55,6 +56,7 @@ class DrawingSessionDeletionServiceTest {
             accessValidator,
             drawingSessionRepository,
             deletionRepository,
+            strokeBatchDeletionService,
             Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
@@ -69,6 +71,8 @@ class DrawingSessionDeletionServiceTest {
 
     verify(accessValidator).requireDrawingSessionAccess(GUARDIAN_ID, SESSION_ID);
     verify(deletionRepository).scheduleStorageDeletions(SESSION_ID);
+    // 그리기 과정 데이터는 MongoDB 에 있고 Soft Delete 개념이 없다 — 동반 삭제가 빠지면 보관 기간까지 남는다.
+    verify(strokeBatchDeletionService).deleteByDrawingSession(SESSION_ID);
     assertThat(session.getSessionStatus()).isEqualTo(DrawingSessionStatus.DELETED);
     assertThat(session.getDeletedAt()).isEqualTo(LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
   }

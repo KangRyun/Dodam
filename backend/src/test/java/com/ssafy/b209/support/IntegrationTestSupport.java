@@ -12,6 +12,7 @@ import java.util.StringJoiner;
 import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.jdbc.core.ConnectionCallback;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
@@ -73,12 +74,16 @@ public abstract class IntegrationTestSupport {
 
   @Autowired private JdbcTemplate jdbcTemplate;
 
+  @Autowired private MongoTemplate mongoTemplate;
+
   @DynamicPropertySource
   static void datasourceProperties(DynamicPropertyRegistry registry) {
     registry.add("spring.datasource.url", MYSQL_CONTAINER::getJdbcUrl);
     registry.add("spring.datasource.username", MYSQL_CONTAINER::getUsername);
     registry.add("spring.datasource.password", MYSQL_CONTAINER::getPassword);
     registry.add("spring.datasource.driver-class-name", MYSQL_CONTAINER::getDriverClassName);
+    // 스트로크 저장소(S15P11B209-365). 컨테이너는 상속 밖에서 공유한다 — SharedMongoContainer 주석 참고.
+    SharedMongoContainer.registerTo(registry);
   }
 
   /**
@@ -120,6 +125,16 @@ public abstract class IntegrationTestSupport {
               }
               return null;
             });
+  }
+
+  /**
+   * 그리기 과정 데이터(스트로크) 저장소를 매 테스트 전에 초기화한다 (S15P11B209-365).
+   *
+   * <p>초기화 규칙과 근거는 {@link SharedMongoContainer#reset} 참고. 컨테이너를 이 클래스가 아니라 별도 홀더가 들고 있는 이유도 거기에 적었다.
+   */
+  @BeforeEach
+  void resetSharedMongo() {
+    SharedMongoContainer.reset(mongoTemplate);
   }
 
   /**

@@ -125,6 +125,19 @@ app:
       retention-days: ${NOTIFICATION_RETENTION_DAYS:180}
       notice-days-before: ${NOTIFICATION_RETENTION_NOTICE_DAYS_BEFORE:30}
       batch-size: ${NOTIFICATION_RETENTION_BATCH_SIZE:100}
+  stroke:
+    # 그리기 과정 데이터(스트로크) 보관 기간(일). MongoDB `strokes` 의 TTL 인덱스가 쓰는
+    # expireAt = createdAt + 이 값 으로 계산된다 (S15P11B209-365).
+    #   ⚠️ 이 값을 바꿔도 **이미 저장된 문서의 expireAt 은 바뀌지 않는다.** TTL 인덱스는
+    #      문서에 적힌 시각만 보기 때문이다. 정책 변경 시 소급 갱신 여부를 별도로 결정할 것.
+    #   보관 정책(564/565) 확정 전까지 알림 보관 기간과 같은 임시 기준값을 쓴다.
+    retention-days: ${STROKE_RETENTION_DAYS:180}
+    mongo-backfill:
+      # MySQL stroke_* → MongoDB 일회성 이관 러너. 기본은 꺼져 있다.
+      #   운영에서 한 번 켜서 돌리고 즉시 되돌리는 용도다 — 켠 채로 두면 배포·재시작마다 재실행된다
+      #   (upsert 라 데이터는 안 깨지지만 매 기동마다 전량 스캔한다).
+      enabled: ${STROKE_MONGO_BACKFILL:false}
+      batch-size: ${STROKE_MONGO_BACKFILL_BATCH_SIZE:200}
   idempotency:
     conversation:
       processing-ttl: ${CONVERSATION_IDEMPOTENCY_PROCESSING_TTL:30s}
