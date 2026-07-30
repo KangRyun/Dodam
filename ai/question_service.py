@@ -215,7 +215,12 @@ def _history_dicts(messages: list) -> list[dict]:
 _SUBJECT_KO = {"HOUSE": "집", "TREE": "나무", "PERSON": "사람"}
 
 
-def _activity_block(req: QuestionRequest, target: DetectedObject | None) -> str:
+def _activity_block(
+    req: QuestionRequest,
+    target: DetectedObject | None,
+    *,
+    reask_candidates: bool = False,
+) -> str:
     """activityType·drawingSubject·대상 객체를 프롬프트 지시 블록으로 만든다.
 
     - HTP: 주제를 확정 사실로 못박고 다른 주제(집·나무·사람)로 넘어가지 못하게 한다.
@@ -223,6 +228,8 @@ def _activity_block(req: QuestionRequest, target: DetectedObject | None) -> str:
     - ART_DIARY: 주제 개념 없이, 대상이 있으면 그 하나만 묻게 한다.
     - activityType이 없으면(구 BE·주제 미전달) 주제 제약 없이 기존 동작을 유지한다.
     반복 방지: 이미 물어본 게 있으면 새로운 것을 묻도록 덧붙인다(대상 선택에서도 이미 배제됨).
+    reask_candidates(S15P11B209-718): 아이가 탐지를 부정해 후보 칩으로 다시 묻는 경우, 보기 중에서
+      고르도록 짧게 되묻는 지시를 덧붙인다(보기 내용은 칩으로 제시하므로 프롬프트엔 넣지 않는다).
     """
     subject_ko = _SUBJECT_KO.get(req.drawing_subject or "")
     target_name = (
@@ -247,6 +254,11 @@ def _activity_block(req: QuestionRequest, target: DetectedObject | None) -> str:
     elif target_name:
         lines.append("[지금 물어볼 것]")
         lines.append(f"- {target_name}")
+    if reask_candidates:
+        lines.append(
+            "- 아이가 방금 '아니야'라고 했어. 그럼 무엇을 그린 건지 아래 보기 중에서 고르도록 "
+            "'그럼 이건 뭐야?'처럼 짧게 다시 물어봐. 보기 내용을 네가 미리 말하지는 마."
+        )
     if req.asked_object_codes:
         lines.append(
             "- 이미 이야기한 것은 다시 묻지 말고, 아직 이야기하지 않은 새로운 것을 물어봐."
@@ -259,6 +271,7 @@ def _build_messages(
     *,
     purpose: str | None = None,
     target: DetectedObject | None = None,
+    reask_candidates: bool = False,
 ) -> list[dict]:
     """요청 문맥 → GMS messages. draft 프롬프트를 재사용해 컨텍스트 기반으로 생성한다.
 
@@ -276,7 +289,7 @@ def _build_messages(
 
     age_band = str(req.child_age)
     drawing = _drawing_analysis_text(req)
-    activity_block = _activity_block(req, target)
+    activity_block = _activity_block(req, target, reask_candidates=reask_candidates)
     last_child = _last_child_index(req)
 
     if last_child is None:
@@ -386,6 +399,57 @@ def _target_for_purpose(req: QuestionRequest, purpose: str) -> DetectedObject | 
     else:
         pool = available
     return max(pool, key=lambda o: o.confidence)
+
+
+# ── 탐지 부정 시 후보 칩 재질문 (S15P11B209-718) ──────────────────
+# 아이가 "아니야"(CHIP_NO)로 탐지를 부정하면, 이미 탐지된 다른 객체를 후보 칩으로 다시 묻는다.
+# 신뢰도 하한(YOLO_CONF_THRESHOLD)은 건드리지 않는다 — 후보는 '이미 탐지된' detectedObjects에서만 뽑는다.
+_NEGATION_CODE = "CHIP_NO"
+_ESCAPE_CODE = "CAND_NONE"  # "이 중에 없어" — 후보를 모두 거부하는 탈출 칩
+_MAX_CANDIDATES = 3
+
+
+def _last_child_selected_codes(req: QuestionRequest) -> list[str]:
+    """가장 최근 아이 메시지의 선택 칩 코드(없으면 빈 목록)."""
+    for message in reversed(req.recent_messages):
+        if (message.sender_type or "").upper() == "CHILD":
+            return list(message.selected_option_codes or [])
+    return []
+
+
+def _negation_count(req: QuestionRequest) -> int:
+    """아이가 최근 문맥에서 CHIP_NO로 부정한 횟수(연속 부정 방지 판단용)."""
+    return sum(
+        1
+        for m in req.recent_messages
+        if (m.sender_type or "").upper() == "CHILD"
+        and m.selected_option_codes
+        and _NEGATION_CODE in m.selected_option_codes
+    )
+
+
+def _candidate_options(req: QuestionRequest) -> list[QuestionOption]:
+    """부정 재질문용 후보 칩 — 이미 탐지된 객체 중 아직 안 물어본 상위 3개 + 탈출 칩.
+
+    라벨은 표시명(object_name, S15P11B209-711)을 쓴다 — 내부 코드·영문을 아동 화면에 노출하지
+    않는다. 표시명이 없는 객체는 후보에서 뺀다(코드 노출 금지). 후보가 하나도 없으면 빈 목록.
+    """
+    asked = set(req.asked_object_codes)
+    pool = [
+        o
+        for o in req.detected_objects
+        if o.object_code not in asked and (o.object_name or "").strip()
+    ]
+    pool.sort(key=lambda o: o.confidence, reverse=True)
+    top = pool[:_MAX_CANDIDATES]
+    if not top:
+        return []
+    options = [
+        QuestionOption(code=f"CAND_{index}", label=o.object_name)
+        for index, o in enumerate(top, start=1)
+    ]
+    options.append(QuestionOption(code=_ESCAPE_CODE, label="이 중에 없어"))
+    return options
 
 
 def _is_consistent(
@@ -615,12 +679,38 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
 
     # 목적·대상을 GMS 호출 전에 정해 프롬프트에 그대로 싣는다(S15P11B209-713) — 질문 문장과
     # 응답 targetObject가 같은 객체를 가리키게 하고, HTP면 주제를 벗어난 명사가 안 나오게 한다.
+    option_allowed = "OPTION" in req.allowed_response_modes
     purpose = _pick_question_purpose(req)
     target = _target_for_purpose(req, purpose)
     if purpose == "OBJECT_DESCRIPTION" and target is None:
         # 주제 객체가 없거나 후보를 모두 물어봤으면 특정 객체 대신 그림 전체를 묻는다.
         purpose = "DRAWING_CONTEXT"
-    messages = _build_messages(req, purpose=purpose, target=target)
+
+    # 탐지 부정 처리(S15P11B209-718). 아이가 방금 고른 칩으로 분기한다.
+    #   - 탈출 칩("이 중에 없어") → 그림 전체를 다시 여는 질문.
+    #   - 부정("아니야") → 이미 탐지된 다른 객체를 후보 칩으로 재질문. 단 연속 부정(2회 이상)이면
+    #     후보를 또 들이밀지 않고 열린 질문으로 넘어간다(아이가 계속 부정당하는 경험 방지, 9절).
+    candidate_options: list[QuestionOption] | None = None
+    reask_candidates = False
+    selected_codes = _last_child_selected_codes(req)
+    if _ESCAPE_CODE in selected_codes:
+        purpose, target = "DRAWING_CONTEXT", None
+    elif _NEGATION_CODE in selected_codes:
+        cand = (
+            _candidate_options(req)
+            if option_allowed and _negation_count(req) < 2
+            else []
+        )
+        if cand:
+            purpose, target = "FOLLOW_UP", None
+            candidate_options = cand
+            reask_candidates = True
+        else:
+            purpose, target = "DRAWING_CONTEXT", None
+
+    messages = _build_messages(
+        req, purpose=purpose, target=target, reask_candidates=reask_candidates
+    )
     text, served_model = _call_gms_with_retry(messages, request_id)
     text = text.strip()
     if not text:
@@ -634,10 +724,12 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         raise UpstreamError("AI_EMPTY_COMPLETION", "EmptyCompletion")
 
     # 칩·정합성은 위(프롬프트 조립 전)에서 정한 목적·대상을 그대로 쓴다 — 프롬프트에 실은 것과
-    # 응답 targetObject가 어긋나지 않게 한다(S15P11B209-713).
-    option_allowed = "OPTION" in req.allowed_response_modes
+    # 응답 targetObject가 어긋나지 않게 한다(S15P11B209-713). 부정 재질문이면 후보 칩(718)을 쓴다.
     # OPTION 비허용이면 반드시 null — 빈 배열도 계약 위반이다(isContractValidFor).
-    options = _options_for_purpose(purpose) if option_allowed else None
+    if candidate_options is not None:
+        options = candidate_options
+    else:
+        options = _options_for_purpose(purpose) if option_allowed else None
     if not _is_consistent(purpose, target, options, option_allowed):
         # 정합성이 깨진 조합은 아동 화면에 내보내지 않는다 → 실패로 돌려 BE 폴백에 맡긴다.
         raise UpstreamError("AI_INCONSISTENT_RESPONSE", "Consistency")
