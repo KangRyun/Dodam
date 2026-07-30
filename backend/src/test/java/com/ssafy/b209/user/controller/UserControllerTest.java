@@ -17,8 +17,10 @@ import com.ssafy.b209.auth.domain.UserRole;
 import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.exception.BusinessException;
+import com.ssafy.b209.user.dto.response.DataRetentionPolicyResponse;
 import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
+import com.ssafy.b209.user.service.UserDataRetentionPolicyReader;
 import com.ssafy.b209.user.service.UserDeletionService;
 import com.ssafy.b209.user.service.UserNotificationSettingsReader;
 import com.ssafy.b209.user.service.UserNotificationSettingsUpdateService;
@@ -46,6 +48,7 @@ class UserControllerTest {
   @MockitoBean private UserDeletionService deletionService;
   @MockitoBean private UserNotificationSettingsReader notificationSettingsReader;
   @MockitoBean private UserNotificationSettingsUpdateService notificationSettingsUpdateService;
+  @MockitoBean private UserDataRetentionPolicyReader dataRetentionPolicyReader;
 
   @Test
   void immediatelyDeletesTheAuthenticatedUserAfterExplicitConfirmation() throws Exception {
@@ -213,6 +216,45 @@ class UserControllerTest {
                     }
                     """))
         .andExpect(status().isUnauthorized());
+  }
+
+  @Test
+  void returnsTheAuthenticatedUsersDataRetentionPolicy() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(51L);
+    given(dataRetentionPolicyReader.read(51L))
+        .willReturn(DataRetentionPolicyResponse.provisional(365, 14));
+
+    mockMvc
+        .perform(get("/api/v1/users/me/data-retention"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.retentionDays").value(365))
+        .andExpect(jsonPath("$.data.noticeDaysBefore").value(14))
+        .andExpect(jsonPath("$.data.policyStatus").value("PROVISIONAL"));
+  }
+
+  @Test
+  void returnsDefaultDataRetentionPolicyWhenNoRowExists() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(51L);
+    given(dataRetentionPolicyReader.read(51L)).willReturn(DataRetentionPolicyResponse.defaults());
+
+    mockMvc
+        .perform(get("/api/v1/users/me/data-retention"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.retentionDays").value(180))
+        .andExpect(jsonPath("$.data.noticeDaysBefore").value(30))
+        .andExpect(jsonPath("$.data.policyStatus").value("PROVISIONAL"));
+  }
+
+  @Test
+  void returnsUnauthorizedForDataRetentionPolicyWhenAccessTokenIsMissing() throws Exception {
+    given(currentUserResolver.requireUserId())
+        .willThrow(new BusinessException(AuthErrorCode.AUTHENTICATION_REQUIRED));
+
+    mockMvc.perform(get("/api/v1/users/me/data-retention")).andExpect(status().isUnauthorized());
+
+    verify(dataRetentionPolicyReader, never()).read(any());
   }
 
   @Test

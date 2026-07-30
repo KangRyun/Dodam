@@ -49,9 +49,9 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("23");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("24");
     assertThat(tableExists("flyway_schema_history")).isTrue();
-    assertThat(tableCount()).isEqualTo(69);
+    assertThat(tableCount()).isEqualTo(70);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
     assertThat(
@@ -436,6 +436,53 @@ class DatabaseMigrationIntegrationTest {
     assertThat(
             indexExists("notification_device_tokens", "uk_notification_device_tokens_hash", true))
         .isTrue();
+  }
+
+  @Test
+  void createsUserDataRetentionSettingsWithProvisionalDefaultsAndRangeConstraints() {
+    assertThat(tableExists("user_data_retention_settings")).isTrue();
+    assertThat(primaryKeyExists("user_data_retention_settings")).isTrue();
+    assertThat(
+            foreignKeyDeleteRuleIs(
+                "user_data_retention_settings",
+                "fk_user_data_retention_settings_user_id",
+                "CASCADE"))
+        .isTrue();
+
+    jdbcTemplate.update("INSERT INTO users (id, role) VALUES (9601, 'GUARDIAN')");
+
+    // 조회 API의 기본값(180/30)은 컬럼 DEFAULT와 같아야 한다. 어긋나면 행 생성 시점에 응답이 바뀐다.
+    jdbcTemplate.update("INSERT INTO user_data_retention_settings (user_id) VALUES (9601)");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT retention_days FROM user_data_retention_settings WHERE user_id = 9601",
+                Integer.class))
+        .isEqualTo(180);
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT notice_days_before FROM user_data_retention_settings WHERE user_id = 9601",
+                Integer.class))
+        .isEqualTo(30);
+
+    assertThatThrownBy(
+            () ->
+                jdbcTemplate.update(
+                    "UPDATE user_data_retention_settings SET retention_days = 0 "
+                        + "WHERE user_id = 9601"))
+        .isInstanceOf(org.springframework.dao.DataAccessException.class);
+    assertThatThrownBy(
+            () ->
+                jdbcTemplate.update(
+                    "UPDATE user_data_retention_settings SET notice_days_before = 180 "
+                        + "WHERE user_id = 9601"))
+        .isInstanceOf(org.springframework.dao.DataAccessException.class);
+
+    jdbcTemplate.update("DELETE FROM users WHERE id = 9601");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM user_data_retention_settings WHERE user_id = 9601",
+                Integer.class))
+        .isZero();
   }
 
   @Test
