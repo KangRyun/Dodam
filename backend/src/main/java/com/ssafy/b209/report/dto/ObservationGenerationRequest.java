@@ -62,7 +62,8 @@ public record ObservationGenerationRequest(
       List<SubjectQaPair> qaPairs) {
 
     public SubjectSummary {
-      detectedObjectCodes = detectedObjectCodes == null ? List.of() : List.copyOf(detectedObjectCodes);
+      detectedObjectCodes =
+          detectedObjectCodes == null ? List.of() : List.copyOf(detectedObjectCodes);
       qaPairs = qaPairs == null ? List.of() : List.copyOf(qaPairs);
     }
   }

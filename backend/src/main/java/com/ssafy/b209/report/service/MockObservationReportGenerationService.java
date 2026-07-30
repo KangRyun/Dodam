@@ -133,8 +133,8 @@ public class MockObservationReportGenerationService {
   /**
    * 주제별 수집 맥락을 AI 계약의 {@code subjectSummaries}로 옮긴다 (S15P11B209-741).
    *
-   * <p>계약({@code docs/ai/ai-observation-report-contract.md})과 1:1 — 비어 있으면 AI가 기존
-   * 집계·대표 발화 경로로 동작한다(롤아웃 호환).
+   * <p>계약({@code docs/ai/ai-observation-report-contract.md})과 1:1 — 비어 있으면 AI가 기존 집계·대표 발화 경로로
+   * 동작한다(롤아웃 호환).
    */
   private List<ObservationGenerationRequest.SubjectSummary> toSubjectSummaries(
       ObservationGenerationContext context) {
