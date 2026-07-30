@@ -6,6 +6,7 @@ import 'package:dodam/app/router/app_routes.dart';
 import 'package:dodam/core/network/network.dart';
 import 'package:dodam/features/activity/data/dto/activity_dtos.dart';
 import 'package:dodam/features/activity/domain/repositories/activity_repository.dart';
+import 'package:dodam/features/conversation/conversation.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/report/data/dto/report_dtos.dart';
 import 'package:dodam/features/report/domain/repositories/report_repository.dart';
@@ -182,8 +183,6 @@ void main() {
     expect(find.textContaining('위험도'), findsNothing);
     expect(find.textContaining('진단명'), findsNothing);
     expect(find.text('음성으로 답했어요 · 재생 파일 미제공'), findsNothing);
-    // 490 이전이므로 재생 컨트롤은 없다.
-    expect(find.byIcon(Icons.play_arrow), findsNothing);
   });
 
   testWidgets('representativeUtterances가 비면 아이 표현 섹션을 만들지 않는다', (tester) async {
@@ -218,7 +217,263 @@ void main() {
     );
 
     expect(find.textContaining('원본 없는 음성 답변'), findsOneWidget);
-    expect(find.byIcon(Icons.play_arrow), findsNothing);
+    expect(find.byKey(const ValueKey('voice-answer-play-804')), findsNothing);
+  });
+
+  testWidgets('STT 발화와 유효한 messageId에만 재생 UI를 표시한다', (tester) async {
+    final playback = _VoicePlaybackRepository();
+    final player = _VoicePlaybackPlayer();
+    await _openReport(
+      tester,
+      _ReportRepository(
+        report: _report(
+          expression: _expression([
+            _utterance(804, '재생 가능한 음성', 'STT'),
+            _utterance(null, 'messageId 없음', 'STT'),
+            _utterance(0, 'messageId 0', 'STT'),
+            _utterance(-1, '음수 messageId', 'STT'),
+            _utterance(805, '직접 입력', 'TEXT'),
+            _utterance(806, '알 수 없는 출처', 'UNKNOWN'),
+          ]),
+        ),
+      ),
+      voicePlaybackRepository: playback,
+      voicePlayer: player,
+    );
+
+    expect(find.byKey(const ValueKey('voice-answer-play-804')), findsOneWidget);
+    for (final id in [0, -1, 805, 806]) {
+      expect(find.byKey(ValueKey('voice-answer-play-$id')), findsNothing);
+    }
+    for (final text in [
+      '재생 가능한 음성',
+      'messageId 없음',
+      'messageId 0',
+      '음수 messageId',
+      '직접 입력',
+      '알 수 없는 출처',
+    ]) {
+      expect(find.textContaining(text), findsOneWidget);
+    }
+    expect(playback.messageIds, isEmpty);
+  });
+
+  testWidgets('재생·정지·완료 후 다시 재생 상태를 Report 안에서 구분한다', (tester) async {
+    final playback = _VoicePlaybackRepository();
+    final player = _VoicePlaybackPlayer(holdPlayback: true);
+    await _openReport(
+      tester,
+      _ReportRepository(),
+      voicePlaybackRepository: playback,
+      voicePlayer: player,
+    );
+
+    final play = find.byKey(const ValueKey('voice-answer-play-804'));
+    await tester.ensureVisible(play);
+    await tester.tap(play);
+    await tester.pump();
+    await tester.pump();
+
+    expect(playback.messageIds, [804]);
+    expect(find.byKey(const ValueKey('voice-answer-stop-804')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('voice-answer-stop-804')));
+    await tester.pumpAndSettle();
+    expect(find.text('재생을 멈췄어요.'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('voice-answer-replay-804')),
+      findsOneWidget,
+    );
+
+    player.holdPlayback = false;
+    await tester.tap(find.byKey(const ValueKey('voice-answer-replay-804')));
+    await tester.pumpAndSettle();
+    expect(playback.messageIds, [804, 804]);
+    expect(find.text('재생이 끝났어요.'), findsOneWidget);
+  });
+
+  testWidgets('다운로드 중에는 loading만 표시하고 화면 이탈 시 취소·dispose한다', (tester) async {
+    final pending = Completer<VoiceAnswerAudio>();
+    final playback = _VoicePlaybackRepository(pending: pending);
+    final player = _VoicePlaybackPlayer();
+    await _openReport(
+      tester,
+      _ReportRepository(),
+      voicePlaybackRepository: playback,
+      voicePlayer: player,
+    );
+
+    final play = find.byKey(const ValueKey('voice-answer-play-804'));
+    await tester.ensureVisible(play);
+    await tester.tap(play);
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('voice-answer-loading-804')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('voice-answer-stop-804')), findsNothing);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(playback.cancelledMessageIds, [804]);
+    expect(player.disposeCount, 1);
+
+    pending.complete(_voiceAudio());
+    await tester.pump();
+    expect(player.playCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('일시 오류만 재시도하고 Report 본문과 PDF 기능은 유지한다', (tester) async {
+    final playback = _VoicePlaybackRepository(
+      failure: const ApiResponseFailure(statusCode: 500, error: null),
+    );
+    final player = _VoicePlaybackPlayer();
+    await _openReport(
+      tester,
+      _ReportRepository(),
+      voicePlaybackRepository: playback,
+      voicePlayer: player,
+    );
+
+    final play = find.byKey(const ValueKey('voice-answer-play-804'));
+    await tester.ensureVisible(play);
+    await tester.tap(play);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('voice-answer-failure-804')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('voice-answer-retry-804')),
+      findsOneWidget,
+    );
+    expect(find.text('우리 가족'), findsOneWidget);
+    expect(find.textContaining('우리 동생이야.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('report-save-pdf')), findsOneWidget);
+    expect(find.byKey(const ValueKey('report-share-pdf')), findsOneWidget);
+
+    playback.failure = null;
+    await tester.tap(find.byKey(const ValueKey('voice-answer-retry-804')));
+    await tester.pumpAndSettle();
+    expect(find.text('재생이 끝났어요.'), findsOneWidget);
+  });
+
+  testWidgets('영구 음성 오류에는 재시도를 표시하지 않는다', (tester) async {
+    final playback = _VoicePlaybackRepository(
+      failure: const ApiResponseFailure(statusCode: 404, error: null),
+    );
+    await _openReport(
+      tester,
+      _ReportRepository(),
+      voicePlaybackRepository: playback,
+      voicePlayer: _VoicePlaybackPlayer(),
+    );
+
+    final play = find.byKey(const ValueKey('voice-answer-play-804'));
+    await tester.ensureVisible(play);
+    await tester.tap(play);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('voice-answer-failure-804')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('voice-answer-retry-804')), findsNothing);
+    expect(find.text('녹음한 음성을 찾을 수 없어요.'), findsOneWidget);
+  });
+
+  testWidgets('다른 대표 음성을 재생하면 기존 재생을 멈추고 하나만 활성화한다', (tester) async {
+    final playback = _VoicePlaybackRepository();
+    final player = _VoicePlaybackPlayer(holdPlayback: true);
+    await _openReport(
+      tester,
+      _ReportRepository(
+        report: _report(
+          expression: _expression([
+            _utterance(804, '첫 번째 음성', 'STT'),
+            _utterance(806, '두 번째 음성', 'STT'),
+          ]),
+        ),
+      ),
+      voicePlaybackRepository: playback,
+      voicePlayer: player,
+    );
+
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('voice-answer-play-804')),
+    );
+    await tester.tap(find.byKey(const ValueKey('voice-answer-play-804')));
+    await tester.pump();
+    await tester.pump();
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('voice-answer-play-806')),
+    );
+    await tester.tap(find.byKey(const ValueKey('voice-answer-play-806')));
+    await tester.pump();
+    await tester.pump();
+
+    expect(playback.messageIds, [804, 806]);
+    expect(find.byKey(const ValueKey('voice-answer-stop-804')), findsNothing);
+    expect(find.byKey(const ValueKey('voice-answer-stop-806')), findsOneWidget);
+  });
+
+  testWidgets('background 전환은 Report 음성 재생을 정지한다', (tester) async {
+    final player = _VoicePlaybackPlayer(holdPlayback: true);
+    await _openReport(
+      tester,
+      _ReportRepository(),
+      voicePlaybackRepository: _VoicePlaybackRepository(),
+      voicePlayer: player,
+    );
+
+    final play = find.byKey(const ValueKey('voice-answer-play-804'));
+    await tester.ensureVisible(play);
+    await tester.tap(play);
+    await tester.pump();
+    await tester.pump();
+    expect(find.byKey(const ValueKey('voice-answer-stop-804')), findsOneWidget);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pumpAndSettle();
+    expect(find.text('재생을 멈췄어요.'), findsOneWidget);
+  });
+
+  testWidgets('작은 화면과 textScale 2.0에서도 음성 버튼 접근성과 48dp를 지킨다', (tester) async {
+    final semantics = tester.ensureSemantics();
+    tester.view.physicalSize = const Size(360, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await _openReport(
+      tester,
+      _ReportRepository(
+        report: _report(
+          expression: _expression([
+            _utterance(
+              804,
+              '아주 긴 대표 발화 ${List.filled(30, '내용').join(' ')}',
+              'STT',
+            ),
+          ]),
+        ),
+      ),
+      voicePlaybackRepository: _VoicePlaybackRepository(),
+      voicePlayer: _VoicePlaybackPlayer(),
+      textScale: 2.0,
+    );
+
+    final play = find.byKey(const ValueKey('voice-answer-play-804'));
+    await tester.ensureVisible(play);
+    await tester.pump();
+
+    expect(tester.getSize(play).height, greaterThanOrEqualTo(48));
+    expect(find.bySemanticsLabel('아이 음성 답변 재생'), findsOneWidget);
+    expect(find.byKey(const ValueKey('report-small-layout')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
   });
 
   testWidgets('조회 중 Loading을 표시한다', (tester) async {
@@ -467,6 +722,8 @@ Future<void> _openReport(
   String reportId = '501',
   bool settle = true,
   double textScale = 1.0,
+  VoiceAnswerPlaybackRepository? voicePlaybackRepository,
+  VoiceAnswerAudioPlayer? voicePlayer,
 }) async {
   await tester.pumpWidget(
     MediaQuery(
@@ -474,6 +731,10 @@ Future<void> _openReport(
       child: DodamApp(
         reportRepository: repository,
         reportFileActions: fileActions ?? _ReportFileActions(),
+        voiceAnswerPlaybackRepository: voicePlaybackRepository,
+        voiceAnswerAudioPlayerFactory: voicePlayer == null
+            ? null
+            : () => voicePlayer,
         initialRoute: AppRoutes.report(reportId),
       ),
     ),
@@ -578,6 +839,70 @@ final class _ReportFileActions implements ReportFileActions {
   }
 }
 
+final class _VoicePlaybackRepository implements VoiceAnswerPlaybackRepository {
+  _VoicePlaybackRepository({this.failure, this.pending});
+
+  Object? failure;
+  final Completer<VoiceAnswerAudio>? pending;
+  final List<int> messageIds = [];
+  final List<int> cancelledMessageIds = [];
+
+  @override
+  Future<VoiceAnswerAudio> loadVoiceAnswerAudio(
+    int messageId, {
+    VoiceAnswerPlaybackCancellation? cancellation,
+  }) async {
+    messageIds.add(messageId);
+    if (cancellation != null) {
+      unawaited(
+        cancellation.whenCancelled.then((_) {
+          cancelledMessageIds.add(messageId);
+        }),
+      );
+    }
+    if (failure case final caught?) throw caught;
+    return pending?.future ?? _voiceAudio();
+  }
+}
+
+VoiceAnswerAudio _voiceAudio() => VoiceAnswerAudio(
+  bytes: Uint8List.fromList([1, 2, 3]),
+  mimeType: 'audio/webm',
+);
+
+final class _VoicePlaybackPlayer implements VoiceAnswerAudioPlayer {
+  _VoicePlaybackPlayer({this.holdPlayback = false});
+
+  bool holdPlayback;
+  Completer<void>? _activePlayback;
+  int playCount = 0;
+  int stopCount = 0;
+  int disposeCount = 0;
+
+  @override
+  Future<void> play(Uint8List bytes, {required String mimeType}) async {
+    playCount += 1;
+    if (!holdPlayback) return;
+    final playback = Completer<void>();
+    _activePlayback = playback;
+    await playback.future;
+  }
+
+  @override
+  Future<void> stop() async {
+    stopCount += 1;
+    final active = _activePlayback;
+    if (active != null && !active.isCompleted) active.complete();
+    _activePlayback = null;
+  }
+
+  @override
+  Future<void> dispose() async {
+    disposeCount += 1;
+    await stop();
+  }
+}
+
 final class _ActivityRepository implements ActivityRepository {
   const _ActivityRepository();
 
@@ -627,6 +952,21 @@ const _emptyExpression = ReportChildExpressionDto(
   expressedEmotionText: null,
   representativeUtterances: [],
 );
+
+ReportChildExpressionDto _expression(List<ReportUtteranceDto> utterances) =>
+    ReportChildExpressionDto(
+      selectedEmotions: const [],
+      expressedEmotionText: null,
+      representativeUtterances: utterances,
+    );
+
+ReportUtteranceDto _utterance(int? messageId, String? text, String source) =>
+    ReportUtteranceDto(
+      messageId: messageId,
+      text: text,
+      source: source,
+      sttNeedsConfirmation: false,
+    );
 
 final _completed = _report();
 final _pdfBytes = Uint8List.fromList(const [0x25, 0x50, 0x44, 0x46, 0x2D]);
