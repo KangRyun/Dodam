@@ -3,6 +3,9 @@ uvicorn[standard]
 openai
 python-dotenv
 python-multipart
+# RAG 인덱스·검색(rag/)이 직접 쓴다 — torch가 전이로 끌어오지만 전이 의존에 기대면
+#   상위 패키지 교체 시 조용히 사라진다(httpx와 동일 원칙). S15P11B209-613.
+numpy
 # 종합 분석(§19.3)에서 BE가 준 signedUrl로 그림을 받아온다. openai가 전이 의존으로 끌어오지만
 #   전이 의존에 기대면 상위 패키지 교체 시 조용히 사라진다 — 직접 쓰는 이상 명시한다.
 httpx
