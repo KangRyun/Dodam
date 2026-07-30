@@ -17,11 +17,15 @@ import java.net.SocketTimeoutException;
 import java.net.URI;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestClient;
 
+@ExtendWith(OutputCaptureExtension.class)
 class RestClientDrawingAnalysisClientTest {
 
   private static final String ENDPOINT_URL = "http://ai.test/internal/v1/analyses";
@@ -128,6 +132,46 @@ class RestClientDrawingAnalysisClientTest {
                 successResponse(701L).replace("\"analysisId\": 701", "\"analysisId\": null"),
                 MediaType.APPLICATION_JSON));
     assertClientFailure(DrawingAnalysisClientException.Type.INVALID_RESPONSE);
+    server.verify();
+  }
+
+  @Test
+  void logsMostSpecificCauseWithoutResponseBodyWhenDeserializationFails(CapturedOutput output) {
+    server
+        .expect(requestTo(ENDPOINT_URL))
+        .andRespond(
+            withSuccess(
+                "{\"analysisId\":701,\"privateChildUtterance\":\"절대 기록하면 안 되는 원문\",",
+                MediaType.APPLICATION_JSON));
+
+    assertClientFailure(DrawingAnalysisClientException.Type.INVALID_RESPONSE);
+
+    assertThat(output)
+        .contains("[735] AI 응답 역직렬화 실패:")
+        .contains("Unexpected end-of-input")
+        .doesNotContain("privateChildUtterance", "절대 기록하면 안 되는 원문");
+    server.verify();
+  }
+
+  @Test
+  void logsOnlySafeIdentifiersStatusAndViolationPathsWhenResponseValidationFails(
+      CapturedOutput output) {
+    server
+        .expect(requestTo(ENDPOINT_URL))
+        .andRespond(
+            withSuccess(
+                successResponse(999L)
+                    .replace(
+                        "\"name\": \"yolo\"",
+                        "\"name\": \"\", \"privateChildUtterance\": \"절대 기록하면 안 되는 원문\""),
+                MediaType.APPLICATION_JSON));
+
+    assertClientFailure(DrawingAnalysisClientException.Type.INVALID_RESPONSE);
+
+    assertThat(output)
+        .contains("[735] AI 응답 검증 실패: reqId=701, respId=999, idMatch=false, status=SUCCESS")
+        .contains("modelInfo.objectDetection.name:")
+        .doesNotContain("privateChildUtterance", "절대 기록하면 안 되는 원문");
     server.verify();
   }
 

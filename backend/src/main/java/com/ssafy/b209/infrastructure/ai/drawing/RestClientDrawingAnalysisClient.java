@@ -3,11 +3,16 @@ package com.ssafy.b209.infrastructure.ai.drawing;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisClientCommand;
 import com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisRequest;
 import com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse;
+import jakarta.validation.ConstraintViolation;
 import jakarta.validation.Validator;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.http.HttpTimeoutException;
 import java.util.Objects;
+import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.core.NestedExceptionUtils;
 import org.springframework.http.MediaType;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
@@ -19,6 +24,8 @@ import org.springframework.web.client.RestClientException;
  * <p>Entity나 HTTP 응답 객체를 상위 계층에 노출하지 않으며 요청 전후에 144번 계약의 Bean Validation을 적용한다.
  */
 public final class RestClientDrawingAnalysisClient implements DrawingAnalysisClient {
+
+  private static final Logger log = LoggerFactory.getLogger(RestClientDrawingAnalysisClient.class);
 
   private final RestClient restClient;
   private final String endpointPath;
@@ -85,13 +92,27 @@ public final class RestClientDrawingAnalysisClient implements DrawingAnalysisCli
               : DrawingAnalysisClientException.Type.REQUEST_FAILED,
           exception);
     } catch (RestClientException exception) {
+      log.warn(
+          "[735] AI 응답 역직렬화 실패: {}",
+          NestedExceptionUtils.getMostSpecificCause(exception).getMessage());
       throw new DrawingAnalysisClientException(
           DrawingAnalysisClientException.Type.INVALID_RESPONSE, exception);
     }
 
-    if (response == null
-        || !Objects.equals(command.analysisId(), response.analysisId())
-        || !validator.validate(response).isEmpty()) {
+    Set<ConstraintViolation<AiDrawingAnalysisResponse>> violations =
+        response == null ? Set.of() : validator.validate(response);
+    boolean idMatch =
+        response != null && Objects.equals(command.analysisId(), response.analysisId());
+    if (response == null || !idMatch || !violations.isEmpty()) {
+      log.warn(
+          "[735] AI 응답 검증 실패: reqId={}, respId={}, idMatch={}, status={}, violations={}",
+          command.analysisId(),
+          response == null ? null : response.analysisId(),
+          idMatch,
+          response == null ? null : response.status(),
+          violations.stream()
+              .map(violation -> violation.getPropertyPath() + ": " + violation.getMessage())
+              .toList());
       throw new DrawingAnalysisClientException(
           DrawingAnalysisClientException.Type.INVALID_RESPONSE);
     }
