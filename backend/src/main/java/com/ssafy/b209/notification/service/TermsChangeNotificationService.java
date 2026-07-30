@@ -9,6 +9,7 @@ import java.time.ZoneOffset;
 import java.util.ArrayList;
 import java.util.List;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
@@ -50,10 +51,14 @@ public class TermsChangeNotificationService {
   /**
    * 변경된 약관에 활성 동의를 보유한 사용자마다 약관 변경 알림함 원본을 생성한다.
    *
+   * <p>독립 Transaction으로 고정한다. 이 진입점은 약관 게시 흐름이 배선되면 그 게시 Transaction의 커밋 후 단계에서 호출될 가능성이 크고, 그때
+   * {@code REQUIRED}면 이미 커밋된 Transaction에 참여해 식별자가 비고 INSERT가 유실된다(S15P11B209-749에서 분석 완료 알림이 같은
+   * 이유로 사라졌다). 호출 문맥에 따라 저장 여부가 달라지지 않게 한다.
+   *
    * @param termCode 변경된 약관을 식별하는 안정적인 코드
    * @return 저장된 알림의 발송용 요약 목록이며 수신 대상이 없으면 빈 목록
    */
-  @Transactional
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
   public List<CreatedNotification> createConsentUpdated(String termCode) {
     List<Long> recipientUserIds = recipientRepository.findActiveConsentUserIdsByTermCode(termCode);
     if (recipientUserIds.isEmpty()) {
