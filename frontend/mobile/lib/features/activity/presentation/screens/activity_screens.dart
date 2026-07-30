@@ -108,6 +108,9 @@ class DrawingScreen extends StatefulWidget {
     this.conversationEndRepository,
     this.questionTtsRepository,
     this.questionAudioPlayerFactory,
+    this.voiceRecorder,
+    this.microphonePermissionService,
+    this.voiceNoSpeechTimeout = const Duration(seconds: 3),
     this.voiceAnswerRepository,
     this.sttResultRepository,
     this.conversationId,
@@ -140,6 +143,9 @@ class DrawingScreen extends StatefulWidget {
   final ConversationEndRepository? conversationEndRepository;
   final QuestionTtsRepository? questionTtsRepository;
   final QuestionAudioPlayerFactory? questionAudioPlayerFactory;
+  final VoiceRecorder? voiceRecorder;
+  final MicrophonePermissionService? microphonePermissionService;
+  final Duration voiceNoSpeechTimeout;
   final VoiceAnswerRepository? voiceAnswerRepository;
   final SttResultRepository? sttResultRepository;
   final int? conversationId;
@@ -457,8 +463,11 @@ class _DrawingScreenState extends State<DrawingScreen>
           widget.idempotencyKeyProvider ?? _createIdempotencyKey,
     )..addListener(_handleConversationEndChanged);
     _voiceRecordingController = VoiceRecordingController(
-      DeviceVoiceRecorder(),
-      permissionService: DeviceMicrophonePermissionService(),
+      widget.voiceRecorder ?? DeviceVoiceRecorder(),
+      permissionService:
+          widget.microphonePermissionService ??
+          DeviceMicrophonePermissionService(),
+      noSpeechTimeout: widget.voiceNoSpeechTimeout,
       beforeStart: () async {
         await _questionTtsController?.stop();
       },
@@ -501,13 +510,50 @@ class _DrawingScreenState extends State<DrawingScreen>
       if (!mounted) return;
       final accepted = _questionDisplayController.receive(question);
       if (accepted) {
-        _questionSelectionController.beginQuestion(question);
+        // 선택지는 자동 녹음에서 음성이 감지되지 않았을 때만 표시한다.
+        _questionSelectionController.beginQuestion(
+          question,
+          scheduleReveal: _voiceAnswerUploadController == null,
+        );
         _answerSubmissionController?.beginQuestion();
         _questionSkipController?.beginQuestion();
         _voiceAnswerUploadController?.beginQuestion();
-        unawaited(_questionTtsController?.playQuestion(question));
+        unawaited(_prepareVoiceAnswerForQuestion(question));
       }
     });
+  }
+
+  // 질문 음성 재생이 끝나면 별도 버튼 없이 새 답변 녹음을 시작한다.
+  Future<void> _prepareVoiceAnswerForQuestion(AiQuestion question) async {
+    final recordingController = _voiceRecordingController;
+    if (recordingController == null) return;
+
+    await recordingController.beginQuestion();
+    recordingController.prepareForAutomaticStart();
+    try {
+      // 오디오 완료 이벤트가 유실되어도 자동 녹음 시작이 막히지 않게 제한시간을 둔다.
+      await _questionTtsController
+          ?.playQuestion(question)
+          .timeout(const Duration(seconds: 20));
+    } on TimeoutException {
+      await _questionTtsController?.stop();
+      if (kDebugMode) {
+        debugPrint('[VOICE_AUTO] tts_timeout messageId=${question.messageId}');
+      }
+    }
+    if (!mounted ||
+        _conversationEndController?.completed == true ||
+        _questionDisplayController.visibleQuestion?.messageId !=
+            question.messageId) {
+      return;
+    }
+    final started = await recordingController.start();
+    if (kDebugMode) {
+      debugPrint(
+        '[VOICE_AUTO] recording_start messageId=${question.messageId} '
+        'started=$started status=${recordingController.status.name}',
+      );
+    }
   }
 
   void _handleQuestionDisplayChanged() {
@@ -581,6 +627,10 @@ class _DrawingScreenState extends State<DrawingScreen>
           ),
         );
       }
+    } else if (uploadController?.status ==
+            VoiceAnswerUploadStatus.consentRequired &&
+        kDebugMode) {
+      debugPrint('[VOICE_UPLOAD] rejected reason=VOICE_CONSENT_REQUIRED');
     }
     if (mounted) setState(() {});
   }

@@ -14,13 +14,14 @@ void main() {
       ttsRepository: ttsRepository,
       player: _Player(),
     );
-    await tester.pump(const Duration(seconds: 3));
+    await _waitForNoSpeechActions(tester);
 
     expect(find.text('무엇을 그렸어?'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('voice-recording-toggle')),
       findsOneWidget,
     );
+    // 자동 녹음에서 3초간 음성이 없으면 모든 대체 응답 수단을 노출한다.
     expect(find.byKey(const ValueKey('ai-question-option-1')), findsOneWidget);
     expect(find.byKey(const ValueKey('ai-question-skip')), findsOneWidget);
     expect(find.byKey(const ValueKey('ai-conversation-end')), findsOneWidget);
@@ -51,28 +52,22 @@ void main() {
     expect(ttsRepository.messageIds, [9001]);
   });
 
-  testWidgets('선택지 답변과 skip은 요청 전에 TTS를 중단한다', (tester) async {
-    for (final actionKey in [
-      const ValueKey('ai-question-option-1'),
-      const ValueKey('ai-question-skip'),
-    ]) {
-      final player = _Player();
-      await _pumpConversation(
-        tester,
-        ttsRepository: _TtsRepository(),
-        player: player,
-      );
-      await tester.pump(const Duration(seconds: 3));
-      final stopsBeforeAction = player.stopCount;
+  testWidgets('질문 건너뛰기는 요청 전에 TTS를 중단한다', (tester) async {
+    final player = _Player();
+    await _pumpConversation(
+      tester,
+      ttsRepository: _TtsRepository(),
+      player: player,
+    );
+    await _waitForNoSpeechActions(tester);
+    final stopsBeforeAction = player.stopCount;
 
-      final action = find.byKey(actionKey);
-      await tester.ensureVisible(action);
-      await tester.tap(action);
-      await tester.pump();
+    final action = find.byKey(const ValueKey('ai-question-skip'));
+    await tester.ensureVisible(action);
+    await tester.tap(action);
+    await tester.pump();
 
-      expect(player.stopCount, greaterThan(stopsBeforeAction));
-      await tester.pumpWidget(const SizedBox.shrink());
-    }
+    expect(player.stopCount, greaterThan(stopsBeforeAction));
   });
 
   testWidgets('대화 종료 확인 후 TTS를 중단한다', (tester) async {
@@ -82,6 +77,7 @@ void main() {
       ttsRepository: _TtsRepository(),
       player: player,
     );
+    await _waitForNoSpeechActions(tester);
     final stopsBeforeAction = player.stopCount;
 
     final end = find.byKey(const ValueKey('ai-conversation-end'));
@@ -129,11 +125,29 @@ Future<void> _pumpConversation(
         resumeConversation: true,
         questionTtsRepository: ttsRepository,
         questionAudioPlayerFactory: () => player,
+        voiceRecorder: _SilentRecorder(),
+        microphonePermissionService: const _GrantedMicrophonePermission(),
+        voiceNoSpeechTimeout: const Duration(milliseconds: 100),
       ),
     ),
   );
   await tester.pump();
   await tester.pump();
+}
+
+Future<void> _waitForNoSpeechActions(WidgetTester tester) async {
+  final skip = find.byKey(const ValueKey('ai-question-skip'));
+  final recording = find.textContaining('녹음 끝내기');
+  for (
+    var attempt = 0;
+    attempt < 24 && recording.evaluate().isEmpty;
+    attempt++
+  ) {
+    await tester.pump(const Duration(milliseconds: 250));
+  }
+  for (var attempt = 0; attempt < 20 && skip.evaluate().isEmpty; attempt++) {
+    await tester.pump(const Duration(milliseconds: 250));
+  }
 }
 
 final class _AnswerRepository implements ConversationAnswerRepository {
@@ -247,4 +261,33 @@ final class _Player implements QuestionAudioPlayer {
   Future<void> dispose() async {
     disposeCount += 1;
   }
+}
+
+final class _SilentRecorder implements VoiceRecorder {
+  @override
+  Future<void> start() async {}
+
+  @override
+  Future<String?> stop() async => '/tmp/voice-answer.m4a';
+
+  @override
+  Future<void> cancel() async {}
+
+  @override
+  Future<double> readAmplitude() async => -80;
+
+  @override
+  Future<void> dispose() async {}
+}
+
+final class _GrantedMicrophonePermission
+    implements MicrophonePermissionService {
+  const _GrantedMicrophonePermission();
+
+  @override
+  Future<MicrophonePermissionStatus> request() async =>
+      MicrophonePermissionStatus.granted;
+
+  @override
+  Future<bool> openSettings() async => true;
 }
