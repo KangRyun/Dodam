@@ -38,6 +38,7 @@ final class DrawingObjectDetectionController extends ChangeNotifier {
   DrawingObjectDetectionStatus _status = DrawingObjectDetectionStatus.idle;
   ObjectDetectionResponseDto? _validResult;
   Object? _failure;
+  bool _disposed = false;
 
   DrawingObjectDetectionStatus get status => _status;
   int? get latestDrawingAssetId => _latestDrawingAssetId;
@@ -46,6 +47,7 @@ final class DrawingObjectDetectionController extends ChangeNotifier {
 
   /// 새 그림 입력은 대기 중 요청과 이전 비동기 결과를 무효화한다.
   void onDrawingInputStarted() {
+    if (_disposed) return;
     _inputGeneration += 1;
     _debounceTimer?.cancel();
     _latestDrawingAssetId = null;
@@ -56,6 +58,7 @@ final class DrawingObjectDetectionController extends ChangeNotifier {
 
   /// 마지막 입력 이후 3초 동안 추가 입력이 없을 때 탐지 흐름을 시작한다.
   void onDrawingInputEnded() {
+    if (_disposed) return;
     _debounceTimer?.cancel();
     final generation = _inputGeneration;
     _setStatus(DrawingObjectDetectionStatus.waiting);
@@ -66,7 +69,7 @@ final class DrawingObjectDetectionController extends ChangeNotifier {
   }
 
   Future<void> _saveAndDetect(int generation) async {
-    if (generation != _inputGeneration) return;
+    if (!_isCurrent(generation)) return;
     _setStatus(DrawingObjectDetectionStatus.saving);
 
     DraftSaveResponseDto? draft;
@@ -76,7 +79,7 @@ final class DrawingObjectDetectionController extends ChangeNotifier {
       _handleFailure(generation, error);
       return;
     }
-    if (generation != _inputGeneration) return;
+    if (!_isCurrent(generation)) return;
     if (draft == null) {
       _handleFailure(generation, StateError('DRAFT_SAVE_FAILED'));
       return;
@@ -99,7 +102,7 @@ final class DrawingObjectDetectionController extends ChangeNotifier {
           triggerReason: ObjectDetectionTriggerReason.pause,
         ),
       );
-      if (generation != _inputGeneration) return;
+      if (!_isCurrent(generation)) return;
       if (result.drawingAssetId != _latestDrawingAssetId) {
         _handleFailure(generation, StateError('STALE_ANALYSIS_RESULT'));
         return;
@@ -113,19 +116,24 @@ final class DrawingObjectDetectionController extends ChangeNotifier {
   }
 
   void _handleFailure(int generation, Object error) {
-    if (generation != _inputGeneration) return;
+    if (!_isCurrent(generation)) return;
     _failure = error;
     _setStatus(DrawingObjectDetectionStatus.failed);
   }
 
   void _setStatus(DrawingObjectDetectionStatus value) {
-    if (_status == value) return;
+    if (_disposed || _status == value) return;
     _status = value;
     notifyListeners();
   }
 
+  bool _isCurrent(int generation) =>
+      !_disposed && generation == _inputGeneration;
+
   @override
   void dispose() {
+    _disposed = true;
+    _inputGeneration += 1;
     _debounceTimer?.cancel();
     super.dispose();
   }

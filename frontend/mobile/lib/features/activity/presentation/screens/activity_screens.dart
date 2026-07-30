@@ -764,6 +764,10 @@ class _DrawingScreenState extends State<DrawingScreen>
     );
     if (submitted) {
       _questionDisplayController.dismiss();
+      if (controller.conversationAlreadyEnded) {
+        _skipConversationEndAndContinue();
+        return;
+      }
       await _requestFollowingQuestion(controller.answerMessageId);
     }
   }

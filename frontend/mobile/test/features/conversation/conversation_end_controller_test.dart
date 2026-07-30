@@ -62,6 +62,31 @@ void main() {
     });
   });
 
+  test('중간 대화 종료의 DRAWING과 ANALYZING 단계를 정상 응답으로 처리한다', () async {
+    for (final nextStage in ['DRAWING', 'ANALYZING']) {
+      final controller = ConversationEndController(
+        _RecordingEndRepository(
+          result: Future.value(
+            ConversationEndResult(
+              conversationId: 20,
+              conversationStatus: 'COMPLETED',
+              completed: true,
+              completionReason: 'CHILD_REQUEST',
+              completedAt: '2026-07-30T12:00:00',
+              nextStage: nextStage,
+            ),
+          ),
+        ),
+        conversationId: 20,
+        idempotencyKeyProvider: () => 'end-key-$nextStage',
+      );
+
+      expect(await controller.submit(lastQuestionMessageId: 10), isTrue);
+      expect(controller.completed, isTrue);
+      expect(controller.nextStage, nextStage);
+    }
+  });
+
   test('응답 유실 후 다시 요청하면 같은 멱등성 키와 Body로 재시도한다', () async {
     final repository = _RecordingEndRepository(
       firstFailure: const ApiTransportFailure(

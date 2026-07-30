@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../domain/models/conversation_end.dart';
 import '../domain/repositories/conversation_end_repository.dart';
+import 'conversation_failure_log.dart';
 import 'conversation_retry_policy.dart';
 
 enum ConversationEndStatus { idle, submitting, success, failure }
@@ -20,6 +21,7 @@ final class ConversationEndController extends ChangeNotifier {
 
   ConversationEndStatus status = ConversationEndStatus.idle;
   Object? error;
+  String? nextStage;
 
   /// 종료 요청의 Key와 Body. 재시도·다음 화면 인계 모두 이 짝을 그대로 쓴다.
   String? _pendingIdempotencyKey;
@@ -68,16 +70,18 @@ final class ConversationEndController extends ChangeNotifier {
       if (result.conversationId != conversationId ||
           !result.completed ||
           result.conversationStatus != 'COMPLETED' ||
-          result.nextStage != 'REFLECTION') {
+          !_validNextStages.contains(result.nextStage)) {
         throw StateError('Unexpected conversation end result.');
       }
       // 화면을 떠난 뒤 도착한 응답은 상태를 되돌리지 않는다.
       if (_disposed) return false;
+      nextStage = result.nextStage;
       status = ConversationEndStatus.success;
       notifyListeners();
       return true;
     } catch (caught) {
       if (_disposed) return false;
+      debugConversationFailure(operation: 'conversation_end', error: caught);
       error = caught;
       status = ConversationEndStatus.failure;
       if (!shouldKeepRequestSnapshot(
@@ -91,6 +95,9 @@ final class ConversationEndController extends ChangeNotifier {
       return false;
     }
   }
+
+  // 중간 대화는 그림·분석 단계로, 최종 대화는 감정 선택 단계로 돌아간다.
+  static const _validNextStages = {'DRAWING', 'ANALYZING', 'REFLECTION'};
 
   @override
   void dispose() {
