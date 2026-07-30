@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import com.ssafy.b209.child.dto.request.DeleteChildRequest;
 import com.ssafy.b209.child.exception.ChildErrorCode;
 import com.ssafy.b209.child.repository.ChildDeletionRepository;
+import com.ssafy.b209.drawing.service.StrokeBatchDeletionService;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
 import java.time.Instant;
@@ -29,13 +30,15 @@ class ChildDeletionServiceTest {
   private static final Instant NOW = Instant.parse("2026-07-24T01:00:00Z");
 
   @Mock private ChildDeletionRepository childDeletionRepository;
+  @Mock private StrokeBatchDeletionService strokeBatchDeletionService;
 
   private ChildDeletionService childDeletionService;
 
   @BeforeEach
   void setUp() {
     childDeletionService =
-        new ChildDeletionService(childDeletionRepository, Clock.fixed(NOW, ZoneOffset.UTC));
+        new ChildDeletionService(
+            childDeletionRepository, strokeBatchDeletionService, Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
   @Test
@@ -50,6 +53,8 @@ class ChildDeletionServiceTest {
         .verify(childDeletionRepository)
         .markDeleted(CHILD_ID, NOW.atOffset(ZoneOffset.UTC).toLocalDateTime());
     order.verify(childDeletionRepository).scheduleStorageDeletions(CHILD_ID);
+    // 삭제된 아동의 그리기 과정 데이터도 함께 지운다 (CLAUDE.md 9절).
+    verify(strokeBatchDeletionService).deleteByChild(CHILD_ID);
   }
 
   @Test

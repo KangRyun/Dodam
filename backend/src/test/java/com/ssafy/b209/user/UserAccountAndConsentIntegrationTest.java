@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.ssafy.b209.auth.token.AuthenticatedUser;
 import java.util.List;
+import com.ssafy.b209.support.SharedMongoContainer;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -20,6 +21,8 @@ import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.testcontainers.containers.MySQLContainer;
@@ -58,6 +61,17 @@ class UserAccountAndConsentIntegrationTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbcTemplate;
+
+  /**
+   * 탈퇴는 아동의 스트로크를 MongoDB 에서 동반 삭제한다(S15P11B209-365).
+   *
+   * <p>이 클래스는 {@code IntegrationTestSupport} 를 상속하지 않는 예외라 여기서 직접 붙인다. 없어도 삭제 실패는 삼켜지지만(ERROR 로그),
+   * 그러면 가드레일이 실제로 도는지 검증하지 못한 채 초록이 된다.
+   */
+  @DynamicPropertySource
+  static void strokeStoreProperties(DynamicPropertyRegistry registry) {
+    SharedMongoContainer.registerTo(registry);
+  }
 
   @BeforeEach
   void setUp() {

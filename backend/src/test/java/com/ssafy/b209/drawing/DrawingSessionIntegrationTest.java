@@ -14,6 +14,7 @@ import com.ssafy.b209.child.domain.ChildFixture;
 import com.ssafy.b209.child.domain.ChildProfileStatus;
 import com.ssafy.b209.child.domain.ChildTutorialStatus;
 import com.ssafy.b209.child.repository.ChildRepository;
+import com.ssafy.b209.drawing.document.StrokeBatchDocument;
 import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.domain.DrawingType;
 import com.ssafy.b209.drawing.domain.DrawingTypeFixture;
@@ -23,11 +24,13 @@ import com.ssafy.b209.drawing.dto.request.CreateDrawingSessionRequest;
 import com.ssafy.b209.drawing.dto.response.CreateDrawingSessionResponse;
 import com.ssafy.b209.drawing.exception.DrawingErrorCode;
 import com.ssafy.b209.drawing.repository.DrawingTypeRepository;
+import com.ssafy.b209.drawing.repository.StrokeBatchDocumentRepository;
 import com.ssafy.b209.drawing.service.DrawingSessionService;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.support.IntegrationTestSupport;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CountDownLatch;
@@ -55,6 +58,7 @@ class DrawingSessionIntegrationTest extends IntegrationTestSupport {
   @Autowired private DrawingSessionService drawingSessionService;
   @Autowired private ChildRepository childRepository;
   @Autowired private DrawingTypeRepository drawingTypeRepository;
+  @Autowired private StrokeBatchDocumentRepository strokeBatchDocumentRepository;
 
   @BeforeEach
   void setUp() {
@@ -256,13 +260,24 @@ class DrawingSessionIntegrationTest extends IntegrationTestSupport {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.batchId").isNumber());
 
+    // 저장소가 MongoDB 로 옮겨갔다(S15P11B209-365). MySQL stroke_* 테이블은 병행 기간 동안 남지만
+    //   더는 쓰이지 않는다 — 옛 경로로 새 데이터가 새지 않는지 함께 확인한다.
+    assertThat(strokeBatchDocumentRepository.count()).isEqualTo(1);
+    StrokeBatchDocument stored =
+        strokeBatchDocumentRepository.findBySessionIdAndBatchSeq(1L, 3).orElseThrow();
+    assertThat(stored.eventCount()).isEqualTo(1);
+    assertThat(stored.pointCount()).isEqualTo(2);
+    assertThat(stored.strokes())
+        .singleElement()
+        .satisfies(
+            event -> {
+              assertThat(event.eventType()).isEqualTo("STROKE");
+              assertThat(event.points()).hasSize(2);
+            });
+    // expireAt 이 없으면 TTL 인덱스가 이 문서를 영원히 지우지 않는다(가드레일 9절).
+    assertThat(stored.expireAt()).isEqualTo(stored.createdAt().plus(180, ChronoUnit.DAYS));
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM stroke_batches", Integer.class))
-        .isEqualTo(1);
-    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM stroke_events", Integer.class))
-        .isEqualTo(1);
-    assertThat(
-            jdbcTemplate.queryForObject("SELECT COUNT(*) FROM stroke_event_points", Integer.class))
-        .isEqualTo(2);
+        .isZero();
 
     mockMvc
         .perform(

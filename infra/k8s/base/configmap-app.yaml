@@ -18,6 +18,12 @@ data:
   DB_PORT: "3306"
   REDIS_HOST: "redis"
   REDIS_PORT: "6379"
+  # 그리기 과정 데이터(스트로크) 저장소 — S15P11B209-365.
+  #   계정·DB명은 비밀이라 Secret 으로 간다(backend.yaml 의 MONGO_APP_* / MONGO_DATABASE).
+  #   여기에는 주소만 둔다. 기본값(application-local.yml)이 127.0.0.1 이라 이 값이 없으면
+  #   파드가 자기 자신에게 붙으려 한다.
+  MONGO_HOST: "mongodb"
+  MONGO_PORT: "27017"
   AI_BASE_URL: "http://ai:8000"
   AI_DRAWING_ANALYSIS_BASE_URL: "http://ai:8000"
   AI_OBSERVATION_BASE_URL: "http://ai:8000"

@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 import javax.imageio.ImageIO;
+import com.ssafy.b209.support.SharedMongoContainer;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -116,6 +117,9 @@ class MvpFlowIntegrationTest {
   @DynamicPropertySource
   static void storageProperties(DynamicPropertyRegistry registry) {
     registry.add("app.storage.image.root", () -> STORAGE_ROOT.toString());
+    // 스트로크 저장은 MongoDB 로 간다(S15P11B209-365). 이 클래스는 IntegrationTestSupport 를
+    //   상속하지 않는 예외라, 여기서 직접 붙여 주지 않으면 배치 저장이 500 으로 죽는다.
+    SharedMongoContainer.registerTo(registry);
   }
 
   @BeforeEach
