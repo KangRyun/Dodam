@@ -42,26 +42,69 @@ chmod +x /home/kr/S15P11B209/infra/scripts/mysql-backup.sh /home/kr/S15P11B209/i
 
 ---
 
-## 3. cron 등록 (매일 04:00 KST)
+## 3. 스케줄 — k3s CronJob (2026-07-30 전환 완료, S15P11B209-733)
 
-서버 타임존 확인부터 — cron은 **서버 로컬 시간** 기준으로 돈다.
+**호스트 cron 은 제거됐다.** 스케줄은 k3s CronJob 이 담당한다.
+
+| CronJob | 시각 (KST) | 산출물 |
+|---------|-----------|--------|
+| `db-backup` | 04:00 | `/var/backups/dodam/b209-<stamp>.sql.gz.enc` |
+| `mongo-backup` | 04:30 | `mongo-<stamp>.tar.gz.enc` |
+| `minio-backup` | 05:00 | `minio-<stamp>.tar.gz.enc` (호스트 cron 시절 04:30 에서 옮김) |
+
+매니페스트: `infra/k8s/base/cronjobs.yaml` · 활성화: `infra/k8s/overlays/prod/cronjobs-enable.yaml`
 
 ```bash
-timedatectl | grep "Time zone"   # → Asia/Seoul (KST, +0900) 이어야 아래 04:00이 새벽 4시
+kubectl -n dodam get cronjob                    # SUSPEND 가 False 여야 한다
+kubectl -n dodam get job | grep backup          # 실행 이력
+kubectl -n dodam logs job/db-backup-<id>        # 결과 한 줄
 ```
 
-(2026-07-23 확인: 이 서버는 `Asia/Seoul` — 그대로 진행. UTC라면 `0 19 * * *`로 환산 필요.)
+### ⚠️ `timeZone` 이 없으면 UTC 로 해석된다
 
-root crontab에 등록 (패스프레이즈·백업 디렉토리가 root 전용이므로 root cron 필수):
+CronJob 의 `schedule` 은 **호스트 TZ 가 아니라 컨트롤러 시간대(UTC)** 로 해석된다.
+파드도 기본이 UTC 다. 2026-07-30 실측: host `KST 09:45` / pod `UTC 00:45`.
+
+`timeZone` 없이 `0 4 * * *` 를 두면 **04:00 UTC = 13:00 KST**, 한낮에 백업이 돈다.
+그래서 두 가지를 **둘 다** 넣었다 — 하나만으로는 부족하다.
+
+| 설정 | 없으면 | 고치는 대상 |
+|------|--------|-------------|
+| `spec.timeZone: "Asia/Seoul"` | 13:00 KST 에 실행 | **스케줄 해석** |
+| `env: TZ=Asia/Seoul` | 파일명이 `b209-…-0038`(실제 09:38) | **컨테이너의 `date`** |
+
+`kubectl get cronjob` 의 `TIMEZONE` 열이 `<none>` 이면 UTC 다. 확인 지점으로 쓸 것.
+
+### ⚠️ suspend 를 풀면 놓친 스케줄을 따라잡는다
+
+`startingDeadlineSeconds` 를 두지 않았으므로, suspend 해제 시 컨트롤러가 **미실행 스케줄을
+즉시 보충 실행**한다. 2026-07-30 컷오버 때 10:46 에 04:00·04:30 분이 따라 돌았다.
+의도한 동작이다 — 노드가 04:00 에 죽어 있었다면 복구 후에라도 백업이 남는 게 낫다.
+다만 "왜 지금 백업이 돌지?" 하고 놀라지 말 것.
+
+### 실패 알림
+
+`docs/인프라/` 밖 이야기지만 여기 적어 둔다 — 이 백업의 실패를 아는 유일한 경로다.
+Prometheus 룰 3종(`infra/k8s/base/monitoring-prometheus.yaml` 의 `backup.yml`) →
+Alertmanager → Mattermost.
+
+| 룰 | 잡는 것 |
+|----|---------|
+| `BackupJobFailed` | 잡이 돌았고 실패했다 |
+| `BackupMissing` | **잡이 아예 돌지 않았다** — 25시간 내 성공 없음. 2026-07-30 새벽 양상 |
+| `BackupSuspended` | 점검 창에서 끄고 되돌리지 않았다(24시간 초과) |
+
+> 733 이전에는 실패가 `/var/log/dodam-backup.log` 에만 남았고, 아무도 보지 않아
+> **백업 4종이 전부 죽을 예정인 것을 몰랐다.** "깨끗한 실패"가 곧 "모르는 실패"였다.
+
+### 수동 백업 / 복원 스크립트는 그대로 쓴다
+
+`infra/scripts/{mysql,minio}-{backup,restore}.sh` 는 **없애지 않았다.**
+없앤 것은 cron 등록뿐이다. 특히 `mysql-restore.sh` 는 §5 의 정식 복원 경로다.
 
 ```bash
-sudo crontab -e
-# 아래 한 줄 추가 — 새벽 4시: 트래픽 최저 시간대 + Jenkins 배포와 겹치지 않음
-0 4 * * * /home/kr/S15P11B209/infra/scripts/mysql-backup.sh >> /var/log/dodam-backup.log 2>&1
+sudo /home/kr/S15P11B209/infra/scripts/mysql-backup.sh    # 임의 시점 수동 백업
 ```
-
-등록 확인: `sudo crontab -l` · 로그 확인: `sudo tail /var/log/dodam-backup.log`
-(성공 시 `[mysql-backup] OK db=b209 file=... size=... elapsed=...s` 한 줄이 남는다.)
 
 ---
 
@@ -107,14 +150,55 @@ sudo /home/kr/S15P11B209/infra/scripts/mysql-restore.sh /var/backups/dodam/b209-
 
 백업은 "복원해 본 백업"만 신뢰할 수 있다.
 
-- **월 1회** 복원 드릴 수행 — 최신 백업으로 `--dry-run` + 스테이징(별도 컨테이너) 실복원까지.
-- **1회차 = Day 5 스테이징 복원** (k3s 컷오버 Day 6 전날). 컷오버 안전망이 실제로 작동하는지
-  본번 전에 검증하는 것이 이 드릴의 존재 이유.
-- 드릴 결과(일시·파일명·성공 여부·소요 시간)는 본 문서 하단이나 팀 노션에 한 줄씩 기록.
+- **월 1회** 복원 드릴 수행 — 최신 백업으로 `--dry-run` + **임시 파드 실복원**까지.
+- 드릴 결과(일시·파일명·성공 여부·대조 결과)는 아래 표에 한 줄씩 기록.
 
 | 회차 | 일시 | 백업 파일 | 결과 | 비고 |
 |------|------|-----------|------|------|
-| 1 | (Day 5 예정) | | | k3s 컷오버 전 스테이징 복원 |
+| 1 | 2026-07-30 10:1x | `b209-2026-07-30-1005.sql.gz.enc` (884KB) | **성공** | CronJob 산출물 · 69/69 테이블 · 55576/55847행 (차이는 백업 후 유입분) |
+
+### 1회차 드릴 상세 (S15P11B209-733)
+
+무엇을 확인했는가 — "백업이 돌았다"가 아니라 **복원된다**는 것:
+
+| # | 검증 | 방법 | 결과 |
+|---|------|------|------|
+| ① | 복호화된다 | Secret 의 `-pass env:` 경로 | OK |
+| ② | **기존 절차와 같은 방식으로** 복원된다 | DB명을 지정하지 않고 `mysql` 에 흘려보냄 | OK |
+| ③ | 내용이 맞는다 | 69개 테이블 전수 `COUNT(*)` 대조 | 63개 정확히 일치 |
+
+②가 핵심이다. `mysql-restore.sh` 는 *"덤프가 `--databases` 로 만들어져 CREATE DATABASE/USE 가
+포함돼 있으므로 DB명을 지정하지 않고 흘려보낸다"* 는 전제로 짜여 있다(그 스크립트 109행).
+CronJob 매니페스트에는 원래 **`--databases` 가 없었고**, 그대로 켰으면 새 백업이 기존 복원
+절차로 복원되지 않아 절차가 두 벌이 됐을 것이다. 733 에서 플래그를 맞췄다.
+
+행 수 차이 6건은 전부 **복원 ≤ 원본**이고 백업 시각(10:05) 이후 유입분으로 확인됐다:
+
+```
+drawing_sessions     -1     analyses  -3     drawing_assets       -3
+stroke_batches       -3     stroke_events -3  stroke_event_points -258
+```
+
+그리기 세션 1건이 만든 인과 한 줄이다. 결함 신호(**복원 > 원본**, 빈 테이블)는 없었다.
+
+### 드릴 방법 (운영 DB 를 건드리지 않는다)
+
+운영 `mysql-0` 에는 `SELECT COUNT(*)` 만 던지고, 복원은 임시 파드에만 한다.
+
+```bash
+# 요지: 임시 mysql 파드(emptyDir) + 백업 hostPath 를 readOnly 로 마운트 + Secret 주입
+kubectl -n dodam run <임시> --image=mysql:8.4.10 ...   # 상세는 733 이슈의 드릴 스크립트
+# 복원 후 행 수 대조 → 파드 즉시 삭제
+```
+
+⚠️ **가드레일:** 복원 순간 임시 파드 안에 **아동 데이터 실물**이 만들어진다.
+`emptyDir`(파드와 함께 소멸) · 백업 볼륨 `readOnly` · **Service 를 만들지 않음** ·
+드릴 종료 시 즉시 삭제. 이 네 가지를 지키지 않으면 드릴 자체가 유출 경로가 된다.
+
+⚠️ **준비 판정에 `mysqladmin ping` 을 쓰지 말 것.** mysql 이미지는 초기화 중 소켓 전용
+임시 서버를 먼저 띄우고, 그 서버는 **root 비밀번호가 설정되기 전에도 ping 에 alive 로 답한다.**
+1회차 드릴에서 그 상태를 "준비됨"으로 읽고 복원을 던져 `ERROR 1045` 를 받았다.
+`SELECT 1` 이 **인증까지 통과**하는지로 판정한다.
 
 ---
 
@@ -123,10 +207,42 @@ sudo /home/kr/S15P11B209/infra/scripts/mysql-restore.sh /var/backups/dodam/b209-
 - 백업 파일·패스프레이즈의 **복사·전송 금지** — scp/이메일/채팅/클라우드 업로드 전부 금지.
   아동 민감정보 원본이며, 반출 시점부터 수명주기(자동 삭제) 통제를 벗어난다.
 - 열람·복원은 **Infra 담당(root)** 만. 다른 팀원에게 필요한 건 백업 "존재 여부"뿐, 내용이 아니다.
-- 보관 기간(14일) 초과분은 스크립트가 자동 삭제 — 수동으로 따로 빼두지 않는다.
-- **k3s 전환 시(Day 6 이후)**: 이 cron 체계는 k3s **CronJob으로 이전 예정**. 이전 완료 전까지는
-  현행 cron을 유지하고, 이전 후 root crontab에서 제거한다. 패스프레이즈는 k8s Secret이 아닌
-  노드 로컬 파일 유지 여부를 이전 시점에 재결정(etcd 평문 저장 이슈 검토).
+- 보관 기간(14일) 초과분은 자동 삭제 — 수동으로 따로 빼두지 않는다.
+  파일명 규약을 CronJob 도 `b209-*` 로 맞췄기 때문에 **호스트 cron 시절 산출물도 같은 규칙으로
+  정리된다.** 이름이 갈리면 옛 파일을 아무도 지우지 않고 무한 적재된다.
+- **k3s CronJob 이전 완료** (2026-07-30, S15P11B209-733). root crontab ·
+  `/etc/cron.d/dodam-minio-backup` 제거됨. 제거 전 원본은 `/etc/dodam/733-cron-backup/` 에 보관.
+
+### 패스프레이즈는 노드 로컬 파일 + k8s Secret **둘 다** 있다
+
+이전 시점에 재결정한 결과: **노드 로컬 파일(`/etc/dodam/backup-passphrase`)을 원본으로 유지**하고,
+CronJob 용 Secret `dodam-backup` 을 그 값에서 만든다. 스크립트(수동·복원)와 CronJob 이
+같은 키를 쓰게 하려면 두 곳에 있어야 한다.
+
+```bash
+# 만드는 법 — ★ 꼬리 개행을 반드시 떼고 넣는다
+sudo sh -c 'umask 077; printf %s "$(cat /etc/dodam/backup-passphrase)" > /tmp/.bp \
+  && kubectl -n dodam create secret generic dodam-backup --from-file=BACKUP_PASSPHRASE=/tmp/.bp; rm -f /tmp/.bp'
+```
+
+⚠️ **`--from-file` 을 파일에 그대로 걸면 안 된다.** 패스프레이즈 파일은
+`openssl rand -base64 32 > 파일` 로 만들어져 **꼬리 개행이 있다**(45바이트 = 값 44 + 개행 1).
+
+| 경로 | 전달 방식 | 실제 키 |
+|------|-----------|---------|
+| 스크립트(기존 백업) | `-pass file:` | **44바이트** — `file:` 은 첫 줄만 읽고 개행을 버린다 |
+| CronJob | `-pass env:` | Secret 값 **그대로** |
+
+개행이 섞인 45바이트를 Secret 에 넣으면 **다른 키**가 되어, 새 백업은 잘 만들어지는데
+**기존 `b209-*`·`minio-*` 백업을 복호화할 수 없다.** 복호화가 필요한 날에야 안다.
+
+교체·재생성 후에는 **눈으로 대조하지 말고** 반드시 실제로 확인한다(S15P11B209-730 과 같은 결):
+
+```bash
+# ① 길이 대조
+sudo kubectl -n dodam get secret dodam-backup -o jsonpath='{.data.BACKUP_PASSPHRASE}' | base64 -d | wc -c
+# ② ★ 진짜 검증 — 기존 백업이 env: 경로로 복호화되는가 (gzip -t 까지)
+```
 
 ---
 
@@ -138,5 +254,15 @@ sudo /home/kr/S15P11B209/infra/scripts/mysql-restore.sh /var/backups/dodam/b209-
 | `패스프레이즈 파일이 없습니다` | 3 | §2 사전 준비 수행 |
 | `패스프레이즈 파일 권한 오류` | 3 | `chown root:root` + `chmod 600` |
 | `백업 디렉토리가 없습니다/권한 오류` | 4 | `install -d -m 700 -o root -g root /var/backups/dodam` |
-| `컨테이너가 실행 중이 아닙니다` | 5 | `docker ps` 확인, compose 기동 후 재시도 |
+| 워크로드가 준비되지 않았습니다 | 5 | `kubectl -n dodam get sts mysql` — `docker ps` 가 아니다(732 에서 k3s 로 전환). 옛 compose 컨테이너를 되살리지 말 것 |
 | 파이프라인 실패(덤프/복호화) | 6 | 로그 확인 — 디스크 용량(`df -h`), 패스프레이즈 일치 여부(`--dry-run`) 순서로 점검 |
+
+### CronJob 쪽 문제
+
+| 증상 | 확인 |
+|------|------|
+| 백업이 한낮에 돈다 | `kubectl get cronjob` 의 `TIMEZONE` 열. `<none>` 이면 UTC 다 → `spec.timeZone` 확인 |
+| 파일명 시각이 9시간 어긋난다 | 컨테이너 `env: TZ`. `timeZone` 은 스케줄만 바꾼다 |
+| 잡이 생성조차 안 된다 | `kubectl -n dodam describe cronjob <이름>` · `suspend` 값 · hostPath `/var/backups/dodam` 존재 여부(`type: Directory` 라 없으면 파드가 뜨지 않는다) |
+| `mongo-backup` 이 WARN | `documents=0` 이면 정상 — 앱이 아직 Mongo 에 쓰지 않는다(365). `collections=0` 이면 **실제 결함**(DB명·자격증명·접속) |
+| `Illegal option -o pipefail` | `command` 가 `/bin/sh` 로 되어 있다. `mongo` 이미지의 sh 는 dash 다 → `/bin/bash` 로 |

@@ -16,7 +16,11 @@ metadata:
   name: certbot-renew
   namespace: dodam
 spec:
-  schedule: "17 3,15 * * *"       # 하루 2회. 정시를 피해 LE 서버 부하 집중을 피한다.
+  # timeZone 을 일부러 지정하지 않았다 — 이 스케줄은 **UTC** 로 해석된다(= KST 12:17 · 00:17).
+  #   백업 잡들과 달리 여기서는 시각이 중요하지 않다: renew 는 만료 30일 전이 아니면 no-op 이고
+  #   하루 두 번 중 한 번만 걸려도 충분하다. "새벽에 돈다"고 **읽지는 말 것** — 그게 아니다.
+  #   (백업 3종은 시각이 중요해서 timeZone: Asia/Seoul 을 명시했다. 아래 db-backup 주석 참조.)
+  schedule: "17 3,15 * * *"       # 하루 2회(UTC). 정시를 피해 LE 서버 부하 집중을 피한다.
   concurrencyPolicy: Forbid       # 이전 실행이 안 끝났으면 건너뛴다(인증서 파일 동시 쓰기 방지)
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
@@ -43,18 +47,33 @@ spec:
               persistentVolumeClaim: { claimName: certbot-webroot }
 ---
 # ── MySQL 백업 ──────────────────────────────────────────────────────────────
-# ⚠️⚠️ 기본값이 suspend: true 다. 의도적이다.
+# ⚠️⚠️ base 기본값은 suspend: true 다. 의도적이다. 켜는 것은 overlay 의 몫이다
+#      (prod/cronjobs-enable.yaml). staging 에서 켜지면 운영 백업 디렉터리를 함께 쓴다.
 #
-#   백업은 "돌고 있다"가 아니라 "복원된다"로만 검증된다. 오늘(2026-07-28)만 해도
-#   `OK size=4.0K` 로 성공을 알리던 백업이 실제로는 빈 파일이었던 사례가 있었다(374).
-#   그래서 아래 두 가지가 끝나기 전에는 켜지 않는다:
+#   백업은 "돌고 있다"가 아니라 "복원된다"로만 검증된다. 2026-07-28 에는
+#   `OK size=4.0K` 로 성공을 알리던 백업이 실제로는 빈 파일이었다(374).
+#   켜기 전 두 조건 (S15P11B209-733):
 #     ① Secret `dodam-backup` 에 BACKUP_PASSPHRASE 존재
-#        (호스트 /etc/dodam/backup-passphrase 와 **같은 값** — 기존 백업과 복호화 호환)
-#     ② 이 CronJob 산출물로 복원 드릴 1회 성공
-#   켜는 법: overlay 에서 spec.suspend: false 로 패치.
+#        → 2026-07-30 생성 완료. 호스트 /etc/dodam/backup-passphrase 의 **꼬리 개행을 뗀**
+#          44바이트. ★ --from-file 을 그대로 쓰면 개행 포함 45바이트가 실려 "다른 키"가 되고
+#          기존 b209-*/minio-* 백업을 복호화할 수 없다. 옛 백업은 `-pass file:` 로
+#          암호화됐고 openssl 의 file: 는 첫 줄만 읽어 개행을 버리기 때문이다(730 과 같은 결).
+#          검증: 기존 백업을 `-pass env:` 경로로 복호화 + gzip -t 통과 확인.
+#     ② 이 CronJob 산출물로 복원 드릴 1회 성공  ← 아직. 이게 733 의 핵심이다
 #
-#   그때까지는 호스트 cron 의 mysql-backup.sh 가 계속 담당한다(둘을 동시에 켜지 말 것 —
-#   같은 시간대에 두 벌이 돌면 DB 부하만 두 배가 된다).
+#   그때까지는 호스트 cron 의 mysql-backup.sh 가 계속 담당한다. ★둘을 동시에 켜지 말 것 —
+#   같은 04:00 에 두 벌이 돌면 DB 부하가 두 배인 것은 물론, STAMP 가 같아 **같은 파일명**을
+#   두고 경쟁한다. 호스트 cron 제거와 suspend 해제는 반드시 같은 시점에.
+#
+# ── 저장 위치: PVC 가 아니라 hostPath 다 (733 에서 변경) ──────────────────────
+#   pvc.yaml 의 원래 설계는 "파드가 호스트 경로에 직접 쓰지 않도록 PVC 로 받는다"였다.
+#   그 원칙을 여기서만 뒤집는 이유:
+#     · 기존 백업이 /var/backups/dodam 에 있다. PVC 를 쓰면 산출물이
+#       /var/lib/rancher/k3s/storage/pvc-<uuid>_dodam_db-backup/ 로 갈라져
+#       **"복원할 때 어디를 보나"가 두 벌**이 된다 — 733 이 없애려는 문제 그 자체다.
+#     · PVC 경로에는 uuid 가 들어가 복원 문서에 적을 수 없다(프로비저닝마다 바뀐다).
+#     · 보관(retention) 정리도 두 디렉터리로 갈린다.
+#   대가: 노드 로컬 경로에 결합된다. 다중 노드로 가면 이 볼륨과 백업 절차를 함께 다시 봐야 한다.
 #
 # ⚠️ 백업 파일 = 아동 민감정보. 서버 밖 반출·전송 금지(가드레일 9절).
 apiVersion: batch/v1
@@ -64,7 +83,13 @@ metadata:
   namespace: dodam
 spec:
   suspend: true                   # ← 위 ①②가 끝나기 전에는 켜지 않는다
-  schedule: "0 4 * * *"           # 호스트 cron 과 같은 시각(전환 시 혼동 방지)
+  # ★ timeZone 이 없으면 schedule 은 **컨트롤러 시간대(UTC)** 로 해석된다.
+  #   2026-07-30 첫 수동 실행에서 확인했다: host KST 09:45 / pod UTC 00:45.
+  #   그대로 두면 "0 4 * * *" 가 04:00 UTC = **13:00 KST** 에 뜬다 — 새벽을 피해 고른 시각이
+  #   한낮 피크로 옮겨간다. 호스트 cron 은 호스트 TZ(KST)로 돌았으니 9시간 어긋난 셈이다.
+  #   "호스트 cron 과 같은 시각"이라던 원래 주석은 사실이 아니었다.
+  timeZone: "Asia/Seoul"
+  schedule: "0 4 * * *"           # KST 04:00 (timeZone 지정 덕분에 호스트 cron 과 같은 시각)
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 7
   failedJobsHistoryLimit: 7
@@ -77,15 +102,31 @@ spec:
           containers:
             - name: backup
               image: mysql:8.4.10       # mysqldump 를 쓰기 위해 DB 와 동일 이미지·버전
-              command: ["/bin/sh", "-c"]
+              # /bin/sh 가 아니라 /bin/bash 다. 아래 pipefail 이 dash 에서는 없는 옵션이라
+              # 스크립트가 1행에서 죽는다(mongo 판이 실제로 그 상태였다 — 733 에서 발견).
+              command: ["/bin/bash", "-c"]
               args:
                 - |
                   set -euo pipefail
+                  umask 077                       # 산출물 root 600 — 아동 민감정보(가드레일 9절)
                   STAMP="$(date +%F-%H%M)"
-                  OUT="/backup/mysql-${STAMP}.sql.gz.enc"
+                  # 파일명은 호스트 스크립트와 같은 규약(b209-<stamp>)을 쓴다.
+                  #   reason: 기존 백업과 같은 디렉터리에 쌓인다. 이름이 갈리면 아래 retention
+                  #   패턴도 갈려서 기존 b209-* 파일을 아무도 정리하지 않고 무한 적재된다.
+                  OUT="/backup/b209-${STAMP}.sql.gz.enc"
+                  # 파이프 중간이 실패하면 부분 파일이 남는다. 성공 경로에서는 이미 mv 됐으므로 no-op.
+                  trap 'rm -f "${OUT}.part"' EXIT
                   # --single-transaction: InnoDB 를 잠그지 않고 일관된 스냅샷을 뜬다(서비스 무영향)
-                  mysqldump --single-transaction --routines --triggers \
-                    -h mysql -u root -p"${MYSQL_ROOT_PASSWORD}" "${MYSQL_DATABASE}" \
+                  # --databases: CREATE DATABASE/USE 를 덤프에 포함한다. ★빠뜨리면 안 된다 —
+                  #   mysql-restore.sh 가 "DB명을 지정하지 않고 mysql 클라이언트에 그대로
+                  #   흘려보낸다"는 전제로 짜여 있다(그 스크립트 109행 주석). 이 플래그가 없으면
+                  #   새 백업이 기존 복원 절차로 복원되지 않아 절차가 두 벌이 된다.
+                  # MYSQL_PWD: 비밀번호를 argv 에 두지 않는다. -p 는 파드 프로세스 목록에 남고
+                  #   mysqldump 가 경고를 stderr 로 뱉어 성공 로그를 더럽힌다.
+                  MYSQL_PWD="${MYSQL_ROOT_PASSWORD}" \
+                    mysqldump -h mysql -u root \
+                      --single-transaction --routines --triggers \
+                      --databases "${MYSQL_DATABASE}" \
                     | gzip \
                     | openssl enc -aes-256-cbc -pbkdf2 -md sha256 -iter 200000 \
                         -pass "env:BACKUP_PASSPHRASE" -out "${OUT}.part"
@@ -96,9 +137,14 @@ spec:
                     echo "[db-backup] FAIL 백업이 비어 있습니다 bytes=${BYTES}" >&2
                     exit 1
                   fi
-                  find /backup -maxdepth 1 -name 'mysql-*.sql.gz.enc' -mtime +14 -delete
+                  # 호스트 스크립트가 만든 것과 이 CronJob 이 만든 것이 같은 이름 규약이라
+                  # 한 줄로 둘 다 정리된다(전환 기간에 산출물이 섞여도 보관 정책에 구멍이 없다).
+                  find /backup -maxdepth 1 -name 'b209-*.sql.gz.enc' -mtime +14 -delete
                   echo "[db-backup] OK file=${OUT} bytes=${BYTES} retention=14d"
               env:
+                # TZ: timeZone(위)은 **스케줄 해석**만 바꾼다. 컨테이너의 date 는 여전히 UTC 다.
+                # 파일명 스탬프를 기존 호스트 cron 산출물(KST)과 같은 규약으로 맞추려면 이것도 필요하다.
+                - { name: TZ, value: "Asia/Seoul" }
                 - { name: MYSQL_ROOT_PASSWORD, valueFrom: { secretKeyRef: { name: dodam-secrets, key: MYSQL_ROOT_PASSWORD } } }
                 - { name: MYSQL_DATABASE,      valueFrom: { secretKeyRef: { name: dodam-secrets, key: MYSQL_DATABASE } } }
                 # 별도 Secret — 백업 암호는 앱 비밀과 수명주기가 다르다(교체하면 옛 백업 복호화 불가).
@@ -109,8 +155,14 @@ spec:
                 requests: { memory: 128Mi, cpu: 100m }
                 limits:   { memory: 512Mi, cpu: "1" }
           volumes:
+            # hostPath — 이유는 이 CronJob 위 주석 "저장 위치" 절 참조.
+            #   type: Directory → 경로가 없으면 파드가 뜨지 않는다. 조용히 빈 디렉터리를
+            #   만들어 "백업이 도는데 아무것도 안 남는" 상태가 되는 것보다 낫다.
+            #   디렉터리는 root 700 이어야 한다(백업 스크립트도 같은 권한을 요구한다).
             - name: backup
-              persistentVolumeClaim: { claimName: db-backup }
+              hostPath:
+                path: /var/backups/dodam
+                type: Directory
 ---
 # MongoDB 백업 (S15P11B209-634)
 #
@@ -119,8 +171,14 @@ spec:
 #   같은 것: 암호화(AES-256) · 같은 PVC · 14일 보관 · **빈 백업을 성공으로 보고하지 않기**
 #   다른 것: mongodump 는 디렉터리를 만들므로 tar 로 묶은 뒤 암호화한다.
 #
-# ⚠️ suspend: true — 아직 켜지 않는다. MongoDB 워크로드 자체가 배포되지 않은 상태에서
-#    스케줄이 돌면 매번 실패 알림만 쌓인다. 364 적용 + 앱 전환(365) 후에 해제한다.
+# ⚠️ base 는 suspend: true. 켜는 것은 prod overlay(cronjobs-enable.yaml).
+#    원래 잠근 사유("MongoDB 워크로드 미배포")는 해소됐다 — mongodb-0 Running(2026-07-30).
+#    남은 조건은 db-backup 과 같다: 복원 드릴 1회 성공(733).
+#
+# ★ 이 CronJob 은 작성(634) 이후 **한 번도 돈 적이 없고, 그 사이 1행에서 죽는 상태였다.**
+#   mongo:8.0.4 의 /bin/sh 는 dash 라 `set -euo pipefail` 이 "Illegal option" 으로 즉사한다.
+#   suspend 로 잠겨 있었기 때문에 아무도 몰랐다 — "존재한다"와 "동작한다"는 다르다.
+#   733 에서 /bin/bash 로 고쳤다. 백업 파일은 hostPath 로 MySQL 백업과 같은 곳에 쌓는다.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -128,7 +186,8 @@ metadata:
   namespace: dodam
 spec:
   suspend: true
-  schedule: "30 4 * * *"          # MySQL 백업(04:00)과 30분 띄운다 — 동시 실행 시 I/O·메모리 경합
+  timeZone: "Asia/Seoul"          # 없으면 UTC 로 해석된다 — db-backup 주석 참조
+  schedule: "30 4 * * *"          # KST 04:30. MySQL(04:00)과 30분 띄운다 — 동시 실행 시 I/O·메모리 경합
   concurrencyPolicy: Forbid
   successfulJobsHistoryLimit: 7
   failedJobsHistoryLimit: 7
@@ -141,42 +200,80 @@ spec:
           containers:
             - name: backup
               image: mongo:8.0.4        # mongodump 를 쓰기 위해 DB 와 동일 이미지·버전
-              command: ["/bin/sh", "-c"]
+              # ★ /bin/sh 가 아니라 /bin/bash. 이 이미지의 sh 는 dash 이고 pipefail 이 없다.
+              #   /bin/sh 로 두면 아래 첫 줄에서 "Illegal option -o pipefail" 로 즉사한다.
+              command: ["/bin/bash", "-c"]
               args:
                 - |
                   set -euo pipefail
+                  umask 077                      # 산출물 root 600 — 아동 민감정보(가드레일 9절)
                   STAMP="$(date +%F-%H%M)"
                   OUT="/backup/mongo-${STAMP}.tar.gz.enc"
                   WORK="$(mktemp -d)"
-                  trap 'rm -rf "${WORK}"' EXIT   # 평문 덤프를 남기지 않는다(아동 대화 원문 포함)
+                  # 평문 덤프도, 실패한 부분 파일도 남기지 않는다(아동 대화 원문 포함).
+                  trap 'rm -rf "${WORK}"; rm -f "${OUT}.part"' EXIT
 
                   # --authenticationDatabase admin: root 계정은 admin DB 에 있다.
                   #   이걸 빠뜨리면 "인증 실패"가 아니라 "사용자 없음"으로 나와 원인을 헷갈린다.
+                  # 진행 로그를 파일로도 받는다 — 아래에서 "(N documents)" 를 합산해
+                  # 실제 문서 수를 판정에 쓴다. tee 를 거쳐도 pipefail 이 mongodump 실패를 잡는다.
                   mongodump --host mongodb --port 27017 \
                     --username "${MONGO_ROOT_USERNAME}" \
                     --password "${MONGO_ROOT_PASSWORD}" \
                     --authenticationDatabase admin \
                     --db "${MONGO_DATABASE}" \
-                    --out "${WORK}/dump"
+                    --out "${WORK}/dump" 2>&1 | tee "${WORK}/dump.log"
 
                   tar -czf - -C "${WORK}" dump \
                     | openssl enc -aes-256-cbc -pbkdf2 -md sha256 -iter 200000 \
                         -pass "env:BACKUP_PASSPHRASE" -out "${OUT}.part"
                   mv "${OUT}.part" "${OUT}"
 
-                  # ★ 크기만 보지 않는다. mongodump 는 컬렉션이 0건이어도 성공하고,
-                  #   빈 덤프도 tar+gzip 하면 수백 바이트가 나온다 — "OK size=4.0K 인데 빈 파일"이
-                  #   374 에서 실제로 겪은 실패 양상이다. 덤프 안 BSON 파일 개수를 함께 센다.
-                  DOCS="$(find "${WORK}/dump" -name '*.bson' | wc -l)"
+                  # ── 무엇을 실패로 볼 것인가 (733 에서 다시 정의) ──────────────────
+                  # 처음 판정은 `bytes < 1024 || collections == 0` 였는데, 이게 서로 다른
+                  # 두 상황을 한 덩어리로 묶고 있었다. 2026-07-30 첫 실행에서 드러났다:
+                  #   collections=2 · documents=0 · bytes=528 → FAIL 로 떨어졌다.
+                  # 그런데 collections=2 는 **접속도 됐고 올바른 DB 를 읽었다는 증거**다.
+                  # 문서가 0 인 것은 앱이 아직 Mongo 에 쓰지 않기 때문이고(365 미완), 그
+                  # 상태의 백업은 복원하면 빈 DB 가 나오는 **유효한 백업**이다.
+                  #
+                  # 374 의 교훈은 "비었다"가 아니라 **"비었다는 걸 아무도 몰랐다"** 였다.
+                  # 그래서 판정을 이렇게 갈랐다:
+                  #   collections == 0  → FAIL. DB 를 아예 읽지 못했다(DB명·자격증명·접속).
+                  #   bytes      < 200  → FAIL. tar/암호화 파이프라인 자체가 망가졌다.
+                  #   documents  == 0   → WARN(exit 0). DB 가 정말 비었다. 로그에 크게 남긴다.
+                  COLLECTIONS="$(find "${WORK}/dump" -name '*.bson' | wc -l)"
+                  # mongodump 의 "done dumping X (N documents)" 를 합산한다.
+                  #   컬렉션 개수보다 문서 수가 실제 관측값이다 — 빈 DB 를 조용히 넘기지 않는 근거.
+                  DOCUMENTS="$(sed -n 's/.*(\([0-9]\+\) document[s]*)$/\1/p' "${WORK}/dump.log" \
+                    | awk '{s+=$1} END {print s+0}')"
                   BYTES="$(stat -c %s "${OUT}")"
-                  if [ "${BYTES}" -lt 1024 ] || [ "${DOCS}" -eq 0 ]; then
-                    echo "[mongo-backup] FAIL 백업이 비어 있습니다 bytes=${BYTES} collections=${DOCS}" >&2
+
+                  if [ "${COLLECTIONS}" -eq 0 ]; then
+                    echo "[mongo-backup] FAIL 컬렉션을 하나도 읽지 못했습니다" \
+                         "db=${MONGO_DATABASE} bytes=${BYTES} —" \
+                         "DB명·자격증명·접속을 확인하세요(빈 DB 와는 다른 상황입니다)." >&2
+                    exit 1
+                  fi
+                  if [ "${BYTES}" -lt 200 ]; then
+                    echo "[mongo-backup] FAIL 산출물이 깨졌습니다 bytes=${BYTES}" \
+                         "collections=${COLLECTIONS} — tar/암호화 파이프라인을 확인하세요." >&2
                     exit 1
                   fi
 
                   find /backup -maxdepth 1 -name 'mongo-*.tar.gz.enc' -mtime +14 -delete
-                  echo "[mongo-backup] OK file=${OUT} bytes=${BYTES} collections=${DOCS} retention=14d"
+                  if [ "${DOCUMENTS}" -eq 0 ]; then
+                    echo "[mongo-backup] WARN file=${OUT} bytes=${BYTES}" \
+                         "collections=${COLLECTIONS} documents=0 retention=14d —" \
+                         "DB 가 비어 있습니다. 앱이 Mongo 에 쓰기 시작했는지 확인하세요(365)."
+                  else
+                    echo "[mongo-backup] OK file=${OUT} bytes=${BYTES}" \
+                         "collections=${COLLECTIONS} documents=${DOCUMENTS} retention=14d"
+                  fi
               env:
+                # TZ: timeZone(위)은 **스케줄 해석**만 바꾼다. 컨테이너의 date 는 여전히 UTC 다.
+                # 파일명 스탬프를 기존 호스트 cron 산출물(KST)과 같은 규약으로 맞추려면 이것도 필요하다.
+                - { name: TZ, value: "Asia/Seoul" }
                 - { name: MONGO_ROOT_USERNAME, valueFrom: { secretKeyRef: { name: dodam-secrets, key: MONGO_ROOT_USERNAME } } }
                 - { name: MONGO_ROOT_PASSWORD, valueFrom: { secretKeyRef: { name: dodam-secrets, key: MONGO_ROOT_PASSWORD } } }
                 - { name: MONGO_DATABASE,      valueFrom: { secretKeyRef: { name: dodam-secrets, key: MONGO_DATABASE } } }
@@ -188,5 +285,148 @@ spec:
                 requests: { memory: 128Mi, cpu: 100m }
                 limits:   { memory: 512Mi, cpu: "1" }
           volumes:
+            # MySQL 백업과 같은 디렉터리 — 복원 절차를 한 벌로 유지한다.
             - name: backup
-              persistentVolumeClaim: { claimName: db-backup }
+              hostPath:
+                path: /var/backups/dodam
+                type: Directory
+---
+# ── MinIO 오브젝트 백업 (S15P11B209-733 신설) ────────────────────────────────
+# 지금까지 MinIO 만 CronJob 이 없어 호스트 cron(/etc/cron.d/dodam-minio-backup)이 담당했다.
+# 그 스크립트는 백업 동안만 `kubectl port-forward` 로 MinIO 를 루프백에 노출하는데,
+# 클러스터 안에서 돌면 그 다리가 통째로 필요 없다 — 이게 CronJob 으로 옮기는 실익이다.
+#
+# ★ 왜 컨테이너가 두 개인가
+#   minio/mc 이미지에는 **mc 와 stat 밖에 없다.** tar·gzip·openssl·find 가 전부 없어서
+#   한 컨테이너로는 "받아서 묶고 암호화"를 끝낼 수 없다(733 에서 실측 확인).
+#     initContainer(mc)  : 버킷 → /stage 로 mirror
+#     container(mysql)   : /stage → tar+gzip+암호화. 이 이미지엔 네 도구가 다 있다.
+#   initContainer 는 본 컨테이너보다 반드시 먼저 완료되므로 순서 보장은 k8s 가 해준다.
+#
+# ★ /stage 는 emptyDir 다 — PVC 나 hostPath 가 아니다.
+#   mirror 직후 /stage 에는 **아이 그림·음성 원본이 평문으로** 놓인다. emptyDir 는 파드가
+#   사라질 때 함께 지워지므로, 잡이 중간에 실패해도 평문이 디스크에 남지 않는다(가드레일 9절).
+#   호스트 스크립트는 /var/backups/dodam/.minio-stage-* 에 풀어서 실패 시 잔여물이 남았다.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: minio-backup
+  namespace: dodam
+spec:
+  suspend: true                   # base 기본값. 켜는 것은 prod overlay(cronjobs-enable.yaml)
+  # ★ 6시간 주기다 — MySQL·Mongo(하루 1회)와 다르다. 근거는 데이터 성격이 달라서다.
+  #   docs/인프라/MinIO백업-복원.md 가 374(2026-07-28)에서 이미 이렇게 규정했다:
+  #     "하루 1회면 최대 24시간의 백업 공백이 생긴다. 07-28 하루에만 파일이 30→70개로 늘었다.
+  #      낮에 디스크가 나가면 그날 그린 그림이 전부 사라진다."
+  #   MySQL 은 잃어도 계정·설정이지만, MinIO 는 **아이가 그린 그림과 음성 원본**이다.
+  #   재생성할 수 없다. 데이터도 작아(2026-07-30 기준 8MB) 주기를 올리는 비용이 거의 없다.
+  #
+  # ⚠️ 그런데 그 결정은 **문서에만 있었고 실제로 적용된 적이 없었다.**
+  #   서버의 호스트 cron 은 `30 4 * * *`(하루 1회)였다 — `30 */6` 은 git 의 어떤 cron 파일에도
+  #   들어간 적이 없다(733 에서 확인). 문서가 결정을 기록했는데 배선이 따라오지 않은 경우다.
+  #   여기서 문서 쪽으로 맞춘다. 매니페스트에 하루 1회를 박으면 그 드리프트가 굳어진다.
+  #
+  #   00:30 · 06:30 · 12:30 · 18:30 — mysql(04:00)·mongo(04:30)와 겹치지 않는다.
+  #   concurrencyPolicy: Forbid 는 **같은 CronJob 의** 중복만 막는다(다른 잡끼리는 못 막는다).
+  #   보관 14일 × 하루 4회 = 최대 56개 ≈ 230MB. 디스크 여유(217GB) 대비 무의미한 양이다.
+  timeZone: "Asia/Seoul"          # 없으면 UTC 로 해석된다 — db-backup 주석 참조
+  schedule: "30 */6 * * *"        # KST 00:30 · 06:30 · 12:30 · 18:30
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 7
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: OnFailure
+          initContainers:
+            - name: mirror
+              image: minio/mc:RELEASE.2025-04-16T18-13-26Z   # latest 금지 — init 과 동일 태그
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  # alias set 에 URL 을 쓰지 않고 **인자를 분리**한다.
+                  #   MC_HOST_<alias>=http://user:pass@host 형식은 비밀번호의 @ : / 를
+                  #   퍼센트 인코딩해야 하고, 안 하면 조용히 다른 호스트를 가리킨다.
+                  #   호스트 스크립트도 같은 이유로 분리 인자를 쓴다.
+                  # --config-dir: $HOME 쓰기 가능성에 의존하지 않는다.
+                  mc --config-dir /tmp/mc alias set src \
+                    "http://minio:9000" "${MINIO_ROOT_USER}" "${MINIO_ROOT_PASSWORD}" >/dev/null
+                  # tts-cache 는 TTS 로 다시 만들 수 있는 파생물 → 백업 제외(설계 §1).
+                  mc --config-dir /tmp/mc mirror --quiet --overwrite \
+                    "src/${S3_BUCKET}" /stage --exclude "tts-cache/*"
+              env:
+                # 자격증명은 파드 env 로만 받는다(argv 비노출). minio 파드에서 꺼내오던
+                # 호스트 스크립트와 달리 클러스터 안에서는 Secret 을 직접 참조할 수 있다.
+                - { name: MINIO_ROOT_USER,     valueFrom: { secretKeyRef: { name: dodam-secrets, key: MINIO_ROOT_USER } } }
+                - { name: MINIO_ROOT_PASSWORD, valueFrom: { secretKeyRef: { name: dodam-secrets, key: MINIO_ROOT_PASSWORD } } }
+                - { name: S3_BUCKET,           valueFrom: { secretKeyRef: { name: dodam-secrets, key: S3_BUCKET } } }
+              volumeMounts:
+                - { name: stage, mountPath: /stage }
+              resources:
+                requests: { memory: 128Mi, cpu: 100m }
+                limits:   { memory: 512Mi, cpu: "1" }
+          containers:
+            - name: archive
+              # mysql 이미지를 쓰는 것은 DB 와 무관하다 — tar·gzip·openssl·find 가 있고
+              # 이미 노드에 받아져 있어서다(db-backup 과 같은 태그 → 추가 pull 없음).
+              image: mysql:8.4.10
+              command: ["/bin/bash", "-c"]
+              args:
+                - |
+                  set -euo pipefail
+                  umask 077                       # 산출물 root 600 — 아동 민감정보(가드레일 9절)
+                  STAMP="$(date +%F-%H%M)"
+                  OUT="/backup/minio-${STAMP}.tar.gz.enc"
+                  trap 'rm -f "${OUT}.part"' EXIT
+
+                  # ★ 담긴 객체 수를 먼저 센다 (374 교훈).
+                  #   빈 디렉터리도 tar+gzip 하면 수십~수백 바이트가 나와서, 크기만 보면
+                  #   "OK size=4.0K" 로 성공처럼 보인다. 2026-07-27·28 에 실제로 이틀 연속
+                  #   그 상태였고 아무도 몰랐다. 개수를 함께 남기면 한눈에 드러난다.
+                  OBJECTS="$(find /stage -type f | wc -l)"
+                  if [ "${OBJECTS}" -eq 0 ]; then
+                    echo "[minio-backup] FAIL 미러링 결과가 비었습니다 objects=0 —" \
+                         "버킷이 실제로 비었는지, 자격증명·버킷명이 어긋나지 않았는지 확인하세요." >&2
+                    exit 1
+                  fi
+
+                  # tar 레이아웃을 호스트 스크립트와 **똑같이** 맞춘다: -C /stage 로 들어가서 "." 를 묶는다.
+                  #   reason: minio-restore.sh 가 이 레이아웃을 전제로 풀어 넣는다. 여기서 어긋나면
+                  #   기존 백업과 새 백업의 복원 절차가 갈린다(733 이 없애려는 문제).
+                  # openssl 파라미터도 mysql/mongo 백업과 동일 — 복원 파라미터를 한 벌로 고정한다.
+                  tar -C /stage -czf - . \
+                    | openssl enc -aes-256-cbc -pbkdf2 -md sha256 -iter 200000 \
+                        -pass "env:BACKUP_PASSPHRASE" -out "${OUT}.part"
+                  mv "${OUT}.part" "${OUT}"
+
+                  BYTES="$(stat -c %s "${OUT}")"
+                  if [ "${BYTES}" -lt 1024 ]; then
+                    echo "[minio-backup] FAIL 백업이 비어 있습니다 bytes=${BYTES} objects=${OBJECTS}" >&2
+                    exit 1
+                  fi
+                  find /backup -maxdepth 1 -name 'minio-*.tar.gz.enc' -mtime +14 -delete
+                  echo "[minio-backup] OK file=${OUT} bytes=${BYTES} objects=${OBJECTS} retention=14d exclude=tts-cache/*"
+              env:
+                # TZ: timeZone(위)은 **스케줄 해석**만 바꾼다. 컨테이너의 date 는 여전히 UTC 다.
+                # 파일명 스탬프를 기존 호스트 cron 산출물(KST)과 같은 규약으로 맞추려면 이것도 필요하다.
+                - { name: TZ, value: "Asia/Seoul" }
+                - { name: BACKUP_PASSPHRASE, valueFrom: { secretKeyRef: { name: dodam-backup, key: BACKUP_PASSPHRASE } } }
+              volumeMounts:
+                - { name: stage,  mountPath: /stage, readOnly: true }
+                - { name: backup, mountPath: /backup }
+              resources:
+                requests: { memory: 128Mi, cpu: 100m }
+                limits:   { memory: 512Mi, cpu: "1" }
+          volumes:
+            # 평문 스테이징 — 파드와 함께 사라진다. sizeLimit 은 노드 디스크를 지키는 안전장치다
+            # (초과하면 파드가 축출된다). 현재 MinIO 실사용 8MB. 데이터가 커지면 이 값도 함께 볼 것.
+            - name: stage
+              emptyDir: { sizeLimit: 10Gi }
+            # MySQL·Mongo 백업과 같은 디렉터리 — 복원 절차를 한 벌로 유지한다.
+            - name: backup
+              hostPath:
+                path: /var/backups/dodam
+                type: Directory

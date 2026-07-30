@@ -42,6 +42,9 @@ resources:
   - monitoring-exporters.yaml
   - monitoring-grafana.yaml
   - monitoring-dashboards.yaml   # S15P11B209-729 — 손으로 짠 경량 대시보드 2종
+  # S15P11B209-733 — 경보 통보 경로. 361 에서 룰만 옮기고 Alertmanager 를 두지 않아
+  #   메모리 경보 3종이 그동안 아무데도 통보되지 않았다. 백업 경보를 넣으면서 함께 세운다.
+  - monitoring-alertmanager.yaml
 
 commonLabels:
   app.kubernetes.io/part-of: dodam
