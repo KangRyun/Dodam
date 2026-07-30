@@ -65,6 +65,57 @@ Jenkins 크리덴셜 `dodam-env` 뿐이다. **어떤 값도 문서·이슈·메�
 
 ---
 
+## 1-b. ⏰ MySQL 의 시각은 **KST** 로 저장된다 (2026-07-30, S15P11B209-736)
+
+조회하기 전에 이것부터 알아야 한다. **`SELECT created_at` 의 값은 그대로 한국 시간이다.**
+변환하지 말 것 — 변환하면 9시간 틀린다.
+
+| 계층 | 시간대 | |
+|---|---|---|
+| **MySQL 저장값** | **KST** | 사람이 보는 값. 그대로 읽는다 |
+| MySQL 서버(`@@time_zone`) | UTC(`SYSTEM`) | 서버 기본값은 그대로 두었다 |
+| 백엔드 앱 내부 | UTC | 드라이버가 읽을 때 KST→UTC 로 변환한다 |
+| 파드 로그 · Prometheus | UTC | 관측 축을 UTC 로 유지 |
+
+**앱은 내부적으로 UTC 로 일관되고 DB 에는 KST 가 저장된다.** 드라이버가 양방향으로 변환하기
+때문에 모순이 아니다. 그래서 API 응답이나 로그에서 UTC 를 보는 것은 정상이다.
+
+### 어떻게 그렇게 되는가
+
+```
+jdbc:mysql://...?serverTimezone=Asia/Seoul&sessionVariables=time_zone='+09:00'
+                 ↑ 값 변환 기준            ↑ 세션 시간대 자체
+```
+
+두 설정의 역할이 다르다. 이걸 몰라서 2026-07-30 까지 규약이 둘로 갈려 있었다.
+
+| 설정 | 무엇을 지배하나 |
+|---|---|
+| `serverTimezone` | **드라이버가 값을 변환**할 때의 기준 → **앱이 쓰는 컬럼**만 KST 가 됐다 |
+| `sessionVariables=time_zone` | **MySQL 세션 시간대** → `DEFAULT CURRENT_TIMESTAMP` 가 평가되는 기준 |
+
+`DEFAULT CURRENT_TIMESTAMP` 는 드라이버를 거치지 않고 서버가 채운다. 그래서 `serverTimezone`
+이 닿지 않아 서버 기본값(UTC)이 들어갔고, **같은 행 안에서 `started_at` 은 KST, `created_at` 은
+UTC** 인 상태가 됐다. V26 마이그레이션이 과거분 50개 컬럼을 +9h 보정했다.
+
+### ⚠️ 새 datetime 컬럼을 만들 때
+
+`DEFAULT CURRENT_TIMESTAMP` 를 쓰든 엔티티가 값을 넣든 **이제 둘 다 KST** 다. 다만 위 JDBC
+설정에 의존하는 구조이므로, 그 설정을 손대면 **모든 신규 행의 기준이 조용히 바뀐다.**
+`application-local.yml` 의 datasource URL 을 수정할 때는 이 문서를 함께 볼 것.
+
+### 사람이 직접 INSERT 할 때 주의
+
+`mysql` CLI 로 붙으면 세션 시간대가 서버 기본값(**UTC**)이다. 그 상태로
+`DEFAULT CURRENT_TIMESTAMP` 에 의존해 INSERT 하면 **UTC 가 들어가 규약이 깨진다.**
+운영 DB 에 직접 INSERT 하지 않는 것이 원칙이지만(§4), 부득이하면 먼저:
+
+```sql
+SET SESSION time_zone = '+09:00';
+```
+
+---
+
 ## 2. 서버에서 직접 접속 (가장 흔한 경로)
 
 ### ⚠️ `-t`(TTY)를 언제 붙이고 언제 빼는가
@@ -283,6 +334,8 @@ kubectl -n dodam port-forward deploy/prometheus 9091:9090  # Prometheus UI
 | 파드가 `CrashLoopBackOff`/`Pending` | `kubectl -n dodam describe pod <이름>` 의 Events 부터 본다. 이후 [배포검증-롤백.md](배포검증-롤백.md) 절차 |
 | Mongo 가 `test` DB 에 붙고 `requires authentication` | Secret 키 이름(`$MONGO_ROOT_USERNAME`)을 파드 안에서 썼다 → 빈 값. **`$MONGO_INITDB_ROOT_USERNAME`** 을 쓸 것 (2-4). `ping` 은 인증 없이도 성공하므로 접속된 것처럼 보인다 |
 | MongoDB 조회가 "사용자 없음" | `--authenticationDatabase` 누락·불일치. root=`admin`, 앱 계정=`dodam` (2-4) |
+| 시각이 9시간 어긋나 보인다 | **DB 값은 KST 다**(1-b). 변환하지 말 것. 앱 로그·API 는 UTC 이므로 그 둘을 비교할 때만 9시간을 감안한다 |
+| 새로 넣은 행만 UTC 로 들어갔다 | `mysql` CLI 세션이 UTC 라서다. `SET SESSION time_zone='+09:00'` 후 재시도 (1-b 마지막) |
 
 ---
 
