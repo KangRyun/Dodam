@@ -36,6 +36,66 @@ Jenkins 는 네임스페이스 한정 SA 로 `set image` 와 rollout 조회만 �
 (2026-07-30, `f65fc9e`(AI 모드 http)가 develop 에 머지된 채 클러스터에 적용되지 않아
  하루 종일 mock 으로 돌던 사례가 있다.)
 
+> ⚠️ **이 경고는 원래 여기 적혀 있었는데도 같은 날 또 당했다.**
+> 365(스트로크 MongoDB) 가 `backend.yaml` 에 `MONGO_APP_*` env 를 정확히 넣었지만 아무도
+> apply 하지 않았고, 새 파드가 빈 비밀번호로 뜨려다 설정 바인딩 NPE → CrashLoopBackOff →
+> 배포 실패했다. 구 파드가 계속 서빙해서(maxUnavailable: 0) 장애가 없었던 탓에 더 늦게 알았다.
+> **문서로는 막히지 않는다**는 게 이날의 결론이고, 그래서 아래 절차와 자동 감시(751)를 뒀다.
+
+---
+
+## 매니페스트를 고친 뒤 반영하기
+
+머지는 반영이 아니다. 아래 절차를 따른다.
+
+### 1. 무엇이 어긋나 있는지 먼저 본다
+
+```bash
+./infra/scripts/check-manifest-drift.sh          # 클러스터를 읽기만 한다
+```
+
+`0` 반영 완료 · `1` 미반영 있음 · `2` 점검 자체가 실패(권한·연결). **2 를 0 으로 읽지 말 것.**
+
+`kubectl diff -k` 를 쓰지 않는 이유가 있다. 그건 내부적으로 `PATCH ...?dryRun=All` 을 보내는데
+쿠버네티스는 dry-run 도 실제 쓰기와 동일하게 인가한다. 즉 **읽기 권한만으로는 돌지 않고**,
+돌리려면 ClusterRole 에까지 patch 권한이 필요하다. 위 스크립트는 `kubectl get` 만 쓴다.
+
+### 2. 필요한 것만 골라 반영한다
+
+⚠️ **`kubectl apply -k overlays/prod` 를 통째로 돌리지 말 것** — 이미지 태그가 `:prod` 로
+되돌아가 지금 배포된 빌드가 무엇이었는지 사라진다(위 ①).
+
+| 바뀐 것 | 반영 방법 |
+| --- | --- |
+| ConfigMap 키 추가·수정 | `kubectl -n dodam patch cm <name> --type merge -p '{"data":{"K":"V"}}'` |
+| Deployment 의 env | `kubectl -n dodam set env deployment/<name> --from=secret/dodam-secrets --keys=A,B` |
+| 그 외 필드 | 해당 필드만 `kubectl -n dodam patch` |
+| 새로 생긴 리소스 | `kubectl apply -f <그 파일 하나만>` |
+
+⚠️ **`kubectl apply -f base/configmap-app.yaml` 도 금지.** prod overlay 가 덮어쓰는
+`AI_*_MODE=http` 가 base 의 `mock` 으로 회귀한다 — 360 컷오버 직후 TTS 가 무음이던 원인이
+정확히 이것이다.
+
+### 3. ConfigMap 만 바꿨으면 롤아웃을 직접 건다
+
+`envFrom` 으로 읽는 값은 파드 기동 시점에만 반영된다. ConfigMap 을 고쳐도 도는 파드는 모른다.
+
+```bash
+kubectl -n dodam rollout restart deployment/backend
+```
+
+### 4. 다시 확인한다
+
+```bash
+./infra/scripts/check-manifest-drift.sh          # 0 이 나와야 끝난 것
+```
+
+### 자동 감시
+
+매시 20분에 `manifest-drift-check` CronJob 이 같은 점검을 돌린다. 드리프트가 있으면 Job 이
+실패로 남고 → Prometheus `ManifestDriftDetected` → Alertmanager → Mattermost 로 알린다.
+기본값은 `suspend: true` 이며 해제 절차는 `base/manifest-drift.yaml` 주석 참조.
+
 ---
 
 ## 이 설계의 한 줄

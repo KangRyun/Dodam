@@ -45,6 +45,10 @@ resources:
   # S15P11B209-733 — 경보 통보 경로. 361 에서 룰만 옮기고 Alertmanager 를 두지 않아
   #   메모리 경보 3종이 그동안 아무데도 통보되지 않았다. 백업 경보를 넣으면서 함께 세운다.
   - monitoring-alertmanager.yaml
+  # S15P11B209-751 — 매니페스트 드리프트 감시. Jenkins 는 `set image` 만 하므로 env·ConfigMap
+  #   변경은 사람이 apply 해야 하는데, 안 해도 아무도 모른다(2026-07-30 배포 실패의 원인).
+  #   ⚠️ 기본 suspend: true — 선행 Secret `dodam-drift-git` 이 필요하다(파일 내 주석 참조).
+  - manifest-drift.yaml
 
 commonLabels:
   app.kubernetes.io/part-of: dodam
