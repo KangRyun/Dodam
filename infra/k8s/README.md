@@ -70,11 +70,36 @@ Jenkins 는 네임스페이스 한정 SA 로 `set image` 와 rollout 조회만 �
 | ConfigMap 키 추가·수정 | `kubectl -n dodam patch cm <name> --type merge -p '{"data":{"K":"V"}}'` |
 | Deployment 의 env | `kubectl -n dodam set env deployment/<name> --from=secret/dodam-secrets --keys=A,B` |
 | 그 외 필드 | 해당 필드만 `kubectl -n dodam patch` |
-| 새로 생긴 리소스 | `kubectl apply -f <그 파일 하나만>` |
+| 새로 생긴 리소스 | **렌더본에서 골라서** apply — 아래 참조 |
 
-⚠️ **`kubectl apply -f base/configmap-app.yaml` 도 금지.** prod overlay 가 덮어쓰는
-`AI_*_MODE=http` 가 base 의 `mock` 으로 회귀한다 — 360 컷오버 직후 TTS 가 무음이던 원인이
-정확히 이것이다.
+⚠️ **`kubectl apply -f base/<파일>` 로 때우지 말 것.** base 파일에는 kustomize 가 주입하는
+`commonLabels`(`app.kubernetes.io/part-of: dodam`)가 없다. 그대로 apply 하면 라벨이 빠진 채
+만들어지고, **드리프트 점검이 즉시 그걸 잡는다.** 게다가 `configmap-app.yaml` 의 경우
+prod overlay 가 덮어쓰는 `AI_*_MODE=http` 가 base 의 `mock` 으로 회귀한다 — 360 컷오버 직후
+TTS 가 무음이던 원인이 정확히 이것이다.
+
+새 리소스는 **오버레이를 렌더한 뒤 필요한 것만 골라** 적용한다. 이러면 라벨이 온전하고
+이미지 태그도 건드리지 않는다.
+
+```bash
+cd <저장소 루트>          # ⚠️ 하위 디렉터리에서 상대경로를 쓰면 "path does not exist" 가 난다
+
+kubectl kustomize infra/k8s/overlays/prod \
+  | python3 -c '
+import sys
+want = set(sys.argv[1:])
+for d in sys.stdin.read().split("\n---\n"):
+    kind = name = None
+    for line in d.splitlines():
+        if line.startswith("kind: "): kind = line[6:].strip()
+        elif line.startswith("  name: ") and name is None: name = line[8:].strip()
+    if kind and name and f"{kind}/{name}" in want: print(d.strip() + "\n---")
+' Kind/name Kind2/name2 \
+  | kubectl apply --dry-run=server -f -      # 먼저 dry-run, 확인되면 --dry-run 빼고 재실행
+```
+
+⚠️ zsh 은 따옴표 없는 변수를 단어 분리하지 않는다. 리소스 목록을 변수에 담아 `$LIST` 로
+넘기면 **인자 하나로 들어가 아무것도 매칭되지 않는다.** 위처럼 나열하거나 `${=LIST}` 를 쓴다.
 
 ### 3. ConfigMap 만 바꿨으면 롤아웃을 직접 건다
 
