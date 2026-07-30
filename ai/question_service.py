@@ -369,6 +369,29 @@ def _options_for_purpose(purpose: str) -> list[QuestionOption]:
     return list(_OPTIONS_BY_PURPOSE.get(purpose, _OPTIONS_BY_PURPOSE["FOLLOW_UP"]))
 
 
+# 마음·느낌을 묻는 질문 표시어 (S15P11B209-650). 이 말이 있으면 EXPRESSION으로 보고 감정 칩을 붙인다.
+# 목적 분류(_pick_question_purpose)는 EXPRESSION을 고르지 못했다 — 그건 생성 전엔 알 수 없고
+# 생성된 문장 내용을 봐야 알 수 있어서다. 그래서 생성 후 문장으로 판별한다. 감정 칩이 안 어울리는
+# 객체 질문("이 색 좋아?")까지 잡지 않도록 표시어를 마음·감정에 좁게 둔다.
+_EMOTION_QUESTION_MARKERS = (
+    "기분",
+    "느낌",
+    "마음",
+    "행복",
+    "슬펐",
+    "슬퍼",
+    "무서웠",
+    "속상",
+    "즐거웠",
+    "설레",
+)
+
+
+def _is_expression_question(text: str) -> bool:
+    """생성된 질문이 아이의 마음·느낌을 묻는지 간단 분류한다(감정 칩 정합용)."""
+    return any(marker in text for marker in _EMOTION_QUESTION_MARKERS)
+
+
 def _target_for_purpose(req: QuestionRequest, purpose: str) -> DetectedObject | None:
     """대상 객체는 특정 객체를 묻는 OBJECT_DESCRIPTION일 때만 붙인다(목적과 정합).
 
@@ -722,6 +745,12 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
     if not text:
         # 정화 후 남는 게 없으면(기호뿐이었으면) 빈 출력 — 폴백 템플릿에 맡긴다.
         raise UpstreamError("AI_EMPTY_COMPLETION", "EmptyCompletion")
+
+    # 생성된 질문이 마음·느낌을 묻는 문장이면 EXPRESSION으로 재분류해 감정 칩을 붙인다
+    # (S15P11B209-650: 칩을 '질문 내용'과 맞춘다). 목적은 생성 전에 정하지만 감정 질문 여부는
+    # 문장을 봐야 알 수 있어 여기서 보정한다. 부정 후보 재질문(718) 중에는 그 칩을 유지한다.
+    if candidate_options is None and _is_expression_question(text):
+        purpose, target = "EXPRESSION", None
 
     # 칩·정합성은 위(프롬프트 조립 전)에서 정한 목적·대상을 그대로 쓴다 — 프롬프트에 실은 것과
     # 응답 targetObject가 어긋나지 않게 한다(S15P11B209-713). 부정 재질문이면 후보 칩(718)을 쓴다.

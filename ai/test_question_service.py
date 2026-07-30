@@ -865,5 +865,70 @@ class NegationCandidateReaskTest(unittest.TestCase):
         self.assertFalse(any(o.code.startswith("CAND_") for o in (resp.options or [])))
 
 
+class ExpressionChipConsistencyTest(unittest.TestCase):
+    """감정 질문 → EXPRESSION 목적·감정 칩 정합 (S15P11B209-650)."""
+
+    def _gen(self, reply, **overrides):
+        req = _request(allowed_response_modes=["OPTION"], **overrides)
+        capture: dict = {}
+        client = _mock_client(capture, reply=reply)
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            return question_service.generate(req, "req-650")
+
+    def test_feeling_question_gets_expression_chips(self):
+        resp = self._gen("그림 그릴 때 기분이 어땠어?")
+        self.assertEqual(resp.question_purpose, "EXPRESSION")
+        self.assertIsNone(resp.target_object)  # 감정 질문엔 대상 객체가 붙지 않는다
+        self.assertEqual(
+            [o.code for o in resp.options],
+            [o.code for o in question_service._OPTIONS_BY_PURPOSE["EXPRESSION"]],
+        )
+
+    def test_object_question_keeps_object_description(self):
+        resp = self._gen("이 집은 무슨 색이야?")
+        self.assertEqual(resp.question_purpose, "OBJECT_DESCRIPTION")
+        self.assertIsNotNone(resp.target_object)
+
+    def test_voice_mode_feeling_question_expression_purpose_no_chips(self):
+        req = _request(allowed_response_modes=["VOICE"])
+        capture: dict = {}
+        client = _mock_client(capture, reply="지금 마음이 어때?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-650")
+        self.assertEqual(resp.question_purpose, "EXPRESSION")
+        self.assertIsNone(resp.options)
+
+    def test_is_expression_question_classifier(self):
+        self.assertTrue(question_service._is_expression_question("기분이 어땠어?"))
+        self.assertTrue(question_service._is_expression_question("그때 마음이 어땠어?"))
+        self.assertFalse(question_service._is_expression_question("이 집은 누가 살아?"))
+
+    def test_negation_candidates_not_reclassified_by_emotion_words(self):
+        # 부정 후보 재질문(718) 중에는 감정어가 섞여도 후보 칩을 유지한다.
+        req = _request(
+            allowed_response_modes=["OPTION"],
+            detected_objects=[
+                _detected("HOUSE", "집", 0.9),
+                _detected("TREE", "나무", 0.8),
+            ],
+            asked_object_codes=["HOUSE"],
+            recent_messages=[
+                RecentMessage(sender_type="AI", message_type="QUESTION", text="이 집 맞아?"),
+                RecentMessage(
+                    sender_type="CHILD",
+                    message_type="OPTION_ANSWER",
+                    text="음, 아니야",
+                    selected_option_codes=["CHIP_NO"],
+                ),
+            ],
+        )
+        capture: dict = {}
+        client = _mock_client(capture, reply="그럼 이건 뭐야? 기분 말고.")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-650")
+        self.assertEqual(resp.question_purpose, "FOLLOW_UP")
+        self.assertTrue(any(o.code.startswith("CAND_") for o in resp.options))
+
+
 if __name__ == "__main__":
     unittest.main()
