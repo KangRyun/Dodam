@@ -28,6 +28,7 @@ import com.ssafy.b209.child.exception.ChildErrorCode;
 import com.ssafy.b209.child.service.ChildDeletionService;
 import com.ssafy.b209.child.service.ChildQueryService;
 import com.ssafy.b209.child.service.ChildRegistrationService;
+import com.ssafy.b209.child.service.ChildTutorialService;
 import com.ssafy.b209.child.service.ChildUpdateService;
 import com.ssafy.b209.conversation.exception.ConversationStartErrorCode;
 import com.ssafy.b209.conversation.service.TemporaryGuardianResolver;
@@ -50,6 +51,7 @@ class ChildControllerTest {
   @Autowired private MockMvc mockMvc;
   @MockitoBean private ChildQueryService childQueryService;
   @MockitoBean private ChildRegistrationService childRegistrationService;
+  @MockitoBean private ChildTutorialService childTutorialService;
   @MockitoBean private ChildUpdateService childUpdateService;
   @MockitoBean private ChildDeletionService childDeletionService;
   @MockitoBean private TemporaryGuardianResolver guardianResolver;
@@ -125,6 +127,53 @@ class ChildControllerTest {
         .andExpect(jsonPath("$.code").value("UNAUTHORIZED"));
 
     verify(childQueryService, never()).getTutorialProgress(any(), any());
+  }
+
+  @Test
+  void updatesTheConnectedChildTutorialProgress() throws Exception {
+    given(guardianResolver.resolve("Bearer access-token", "10")).willReturn(10L);
+    given(childTutorialService.updateProgress(eq(10L), eq(3L), any()))
+        .willReturn(
+            new ChildTutorialProgressResponse(
+                3L,
+                ChildTutorialStatus.COMPLETED,
+                "FINISH",
+                Instant.parse("2026-07-30T02:03:04Z"),
+                Instant.parse("2026-07-30T02:03:04Z")));
+
+    mockMvc
+        .perform(
+            patch("/api/v1/children/3/tutorial")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "tutorialStatus": "COMPLETED",
+                      "lastStep": "FINISH"
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.childId").value(3))
+        .andExpect(jsonPath("$.data.tutorialStatus").value("COMPLETED"))
+        .andExpect(jsonPath("$.data.lastStep").value("FINISH"))
+        .andExpect(jsonPath("$.data.completedAt").value("2026-07-30T02:03:04Z"));
+  }
+
+  @Test
+  void rejectsATutorialUpdateWithoutStatus() throws Exception {
+    mockMvc
+        .perform(
+            patch("/api/v1/children/3/tutorial")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"lastStep\":\"DRAWING_GUIDE\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+
+    verify(childTutorialService, never()).updateProgress(any(), any(), any());
   }
 
   @Test

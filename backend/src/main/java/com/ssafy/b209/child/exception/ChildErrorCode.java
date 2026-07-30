@@ -17,7 +17,10 @@ public enum ChildErrorCode implements ErrorCode {
       HttpStatus.BAD_REQUEST, "CHILD_400_002", "아동 삭제 확인 값이 올바르지 않습니다."),
 
   /** 다른 보호자가 연결되어 전체 프로필 삭제를 허용할 수 없는 경우다. */
-  CHILD_HAS_OTHER_GUARDIAN(HttpStatus.CONFLICT, "CHILD_409_001", "다른 보호자가 연결된 아동은 삭제할 수 없습니다.");
+  CHILD_HAS_OTHER_GUARDIAN(HttpStatus.CONFLICT, "CHILD_409_001", "다른 보호자가 연결된 아동은 삭제할 수 없습니다."),
+
+  /** 완료·건너뛰기 상태를 되돌리거나 허용 순서를 건너뛰는 Tutorial 변경 요청이다. */
+  CHILD_TUTORIAL_STATUS_CONFLICT(HttpStatus.CONFLICT, "CHILD_409_002", "변경할 수 없는 Tutorial 상태입니다.");
 
   private final HttpStatus httpStatus;
   private final String code;

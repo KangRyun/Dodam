@@ -176,7 +176,7 @@ Controller가 없다. 이번 이슈에서 호환 Endpoint를 추가하지 않는
 | `DELETE /api/v1/activities/{activityId}` | `DELETE /api/v1/drawing-sessions/{drawingSessionId}` | Flutter 삭제 Body 포함 정합화 |
 | `POST /api/v1/drawing-sessions/{id}/upload` | `POST /api/v1/drawing-sessions/{id}/snapshots` | Snapshot 계약으로 정합화 |
 | `GET /api/v1/children/{childId}/tutorial` | 구현 | `S15P11B209-571` |
-| `PATCH /api/v1/children/{childId}/tutorial` | 미구현 | `S15P11B209-572` |
+| `PATCH /api/v1/children/{childId}/tutorial` | 구현 | `S15P11B209-572` |
 | `GET /api/v1/children/{childId}/reports` | 미구현 | Report 조회 Backend Jira |
 | `GET /api/v1/reports/{reportId}` | 미구현 | Report 조회 Backend Jira |
 
