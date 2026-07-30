@@ -3,9 +3,11 @@ import 'dart:typed_data';
 
 import 'package:dodam/app/app.dart';
 import 'package:dodam/app/router/app_routes.dart';
+import 'package:dodam/core/network/api_failure.dart';
 import 'package:dodam/core/network/api_page.dart';
 import 'package:dodam/features/activity/data/dto/activity_dtos.dart';
 import 'package:dodam/features/activity/domain/repositories/activity_repository.dart';
+import 'package:dodam/features/conversation/conversation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -495,6 +497,181 @@ void main() {
 
     semantics.dispose();
   });
+
+  testWidgets('음성 답변은 재생·정지·다시 재생 상태를 구분한다', (tester) async {
+    final playback = _VoicePlaybackRepository();
+    final player = _VoicePlaybackPlayer(holdPlayback: true);
+    await _openDetail(
+      tester,
+      _DetailRepository(),
+      voicePlaybackRepository: playback,
+      voicePlayer: player,
+    );
+
+    final play = find.byKey(const ValueKey('voice-answer-play-804'));
+    expect(play, findsOneWidget);
+    await tester.ensureVisible(play);
+    await tester.tap(play);
+    await tester.pump();
+
+    expect(playback.messageIds, [804]);
+    expect(find.byKey(const ValueKey('voice-answer-stop-804')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('voice-answer-stop-804')));
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('voice-answer-replay-804')),
+      findsOneWidget,
+    );
+    expect(find.text('재생을 멈췄어요.'), findsOneWidget);
+
+    player.holdPlayback = false;
+    await tester.tap(find.byKey(const ValueKey('voice-answer-replay-804')));
+    await tester.pumpAndSettle();
+    expect(find.text('재생이 끝났어요.'), findsOneWidget);
+    expect(playback.messageIds, [804, 804]);
+  });
+
+  testWidgets('음성 다운로드 중에는 loading만 표시하고 중복 탭을 막는다', (tester) async {
+    final pending = Completer<VoiceAnswerAudio>();
+    final playback = _VoicePlaybackRepository(pending: pending);
+    await _openDetail(
+      tester,
+      _DetailRepository(),
+      voicePlaybackRepository: playback,
+      voicePlayer: _VoicePlaybackPlayer(),
+    );
+
+    final play = find.byKey(const ValueKey('voice-answer-play-804'));
+    await tester.ensureVisible(play);
+    await tester.tap(play);
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('voice-answer-loading-804')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('voice-answer-play-804')), findsNothing);
+    expect(find.byKey(const ValueKey('voice-answer-stop-804')), findsNothing);
+    expect(playback.messageIds, [804]);
+
+    pending.complete(_voiceAudio());
+    await tester.pumpAndSettle();
+    expect(find.text('재생이 끝났어요.'), findsOneWidget);
+  });
+
+  testWidgets('다른 음성을 재생하면 기존 재생을 정리하고 하나만 활성화한다', (tester) async {
+    final playback = _VoicePlaybackRepository();
+    final player = _VoicePlaybackPlayer(holdPlayback: true);
+    await _openDetail(
+      tester,
+      _DetailRepository(),
+      voicePlaybackRepository: playback,
+      voicePlayer: player,
+    );
+
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('voice-answer-play-804')),
+    );
+    await tester.tap(find.byKey(const ValueKey('voice-answer-play-804')));
+    await tester.pump();
+    await tester.ensureVisible(
+      find.byKey(const ValueKey('voice-answer-play-806')),
+    );
+    await tester.tap(find.byKey(const ValueKey('voice-answer-play-806')));
+    await tester.pump();
+
+    expect(playback.messageIds, [804, 806]);
+    expect(find.byKey(const ValueKey('voice-answer-stop-804')), findsNothing);
+    expect(find.byKey(const ValueKey('voice-answer-stop-806')), findsOneWidget);
+    expect(player.stopCount, greaterThanOrEqualTo(2));
+  });
+
+  testWidgets('앱이 background로 가면 재생을 정지한다', (tester) async {
+    final player = _VoicePlaybackPlayer(holdPlayback: true);
+    await _openDetail(
+      tester,
+      _DetailRepository(),
+      voicePlaybackRepository: _VoicePlaybackRepository(),
+      voicePlayer: player,
+    );
+    final play = find.byKey(const ValueKey('voice-answer-play-804'));
+    await tester.ensureVisible(play);
+    await tester.tap(play);
+    await tester.pump();
+    expect(find.byKey(const ValueKey('voice-answer-stop-804')), findsOneWidget);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    await tester.pump();
+
+    expect(find.text('재생을 멈췄어요.'), findsOneWidget);
+    expect(player.stopCount, greaterThanOrEqualTo(2));
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+  });
+
+  testWidgets('음성 조회 오류는 재시도 가능 여부에 따라 UI를 제한한다', (tester) async {
+    final playback = _VoicePlaybackRepository(
+      failure: const ApiResponseFailure(statusCode: 503, error: null),
+    );
+    await _openDetail(
+      tester,
+      _DetailRepository(),
+      voicePlaybackRepository: playback,
+      voicePlayer: _VoicePlaybackPlayer(),
+    );
+
+    final play = find.byKey(const ValueKey('voice-answer-play-804'));
+    await tester.ensureVisible(play);
+    await tester.tap(play);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('voice-answer-failure-804')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('voice-answer-retry-804')),
+      findsOneWidget,
+    );
+
+    playback.failure = const ApiResponseFailure(statusCode: 404, error: null);
+    await tester.tap(find.byKey(const ValueKey('voice-answer-retry-804')));
+    await tester.pumpAndSettle();
+    expect(find.text('녹음한 음성을 찾을 수 없어요.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('voice-answer-retry-804')), findsNothing);
+  });
+
+  testWidgets('음성 버튼은 Semantics·48dp를 지키고 화면 dispose에서 player를 정리한다', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final player = _VoicePlaybackPlayer();
+    tester.view.physicalSize = const Size(500, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    await _openDetail(
+      tester,
+      _DetailRepository(),
+      voicePlaybackRepository: _VoicePlaybackRepository(),
+      voicePlayer: player,
+    );
+
+    final play = find.byKey(const ValueKey('voice-answer-play-804'));
+    await tester.ensureVisible(play);
+    await tester.pumpAndSettle();
+    expect(find.bySemanticsLabel('아이 음성 답변 재생'), findsAtLeastNWidgets(1));
+    final size = tester.getSize(play);
+    expect(size.width, greaterThanOrEqualTo(48));
+    expect(size.height, greaterThanOrEqualTo(48));
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    expect(player.disposeCount, 1);
+    semantics.dispose();
+  });
 }
 
 Future<void> _openDetail(
@@ -502,10 +679,16 @@ Future<void> _openDetail(
   ActivityRepository repository, {
   String activityId = '120',
   bool settle = true,
+  VoiceAnswerPlaybackRepository? voicePlaybackRepository,
+  VoiceAnswerAudioPlayer? voicePlayer,
 }) async {
   await tester.pumpWidget(
     DodamApp(
       activityRepository: repository,
+      voiceAnswerPlaybackRepository: voicePlaybackRepository,
+      voiceAnswerAudioPlayerFactory: voicePlayer == null
+          ? null
+          : () => voicePlayer,
       initialRoute: AppRoutes.activityDetail(activityId),
     ),
   );
@@ -564,6 +747,62 @@ final class _DetailRepository implements ActivityRepository {
   @override
   Future<Uint8List> downloadImage(String url) =>
       throw StateError('image fetch failed');
+}
+
+final class _VoicePlaybackRepository implements VoiceAnswerPlaybackRepository {
+  _VoicePlaybackRepository({this.failure, this.pending});
+
+  Object? failure;
+  final Completer<VoiceAnswerAudio>? pending;
+  final List<int> messageIds = [];
+
+  @override
+  Future<VoiceAnswerAudio> loadVoiceAnswerAudio(
+    int messageId, {
+    VoiceAnswerPlaybackCancellation? cancellation,
+  }) async {
+    messageIds.add(messageId);
+    if (failure case final caught?) throw caught;
+    return pending?.future ?? _voiceAudio();
+  }
+}
+
+VoiceAnswerAudio _voiceAudio() => VoiceAnswerAudio(
+  bytes: Uint8List.fromList([1, 2, 3]),
+  mimeType: 'audio/webm',
+);
+
+final class _VoicePlaybackPlayer implements VoiceAnswerAudioPlayer {
+  _VoicePlaybackPlayer({this.holdPlayback = false});
+
+  bool holdPlayback;
+  Completer<void>? _activePlayback;
+  int playCount = 0;
+  int stopCount = 0;
+  int disposeCount = 0;
+
+  @override
+  Future<void> play(Uint8List bytes, {required String mimeType}) async {
+    playCount += 1;
+    if (!holdPlayback) return;
+    final playback = Completer<void>();
+    _activePlayback = playback;
+    await playback.future;
+  }
+
+  @override
+  Future<void> stop() async {
+    stopCount += 1;
+    final active = _activePlayback;
+    if (active != null && !active.isCompleted) active.complete();
+    _activePlayback = null;
+  }
+
+  @override
+  Future<void> dispose() async {
+    disposeCount += 1;
+    await stop();
+  }
 }
 
 const _asset = ActivityAssetDto(

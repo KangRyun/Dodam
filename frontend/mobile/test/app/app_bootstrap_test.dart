@@ -7,6 +7,7 @@ import 'package:dodam/features/conversation/data/repositories/remote_conversatio
 import 'package:dodam/features/conversation/data/repositories/remote_conversation_end_repository.dart';
 import 'package:dodam/features/conversation/data/repositories/remote_conversation_repository.dart';
 import 'package:dodam/features/conversation/data/repositories/remote_question_tts_repository.dart';
+import 'package:dodam/features/conversation/data/repositories/remote_voice_answer_playback_repository.dart';
 import 'package:dodam/features/drawing/data/repositories/mock_drawing_repository.dart';
 import 'package:dodam/features/drawing/data/repositories/remote_drawing_repository.dart';
 import 'package:dodam/features/report/data/repositories/remote_report_repository.dart';
@@ -32,6 +33,11 @@ void main() {
     );
     expect(app.questionTtsRepository, isA<RemoteQuestionTtsRepository>());
     expect(app.questionAudioPlayerFactory, isNotNull);
+    expect(
+      app.voiceAnswerPlaybackRepository,
+      isA<RemoteVoiceAnswerPlaybackRepository>(),
+    );
+    expect(app.voiceAnswerAudioPlayerFactory, isNotNull);
     expect(app.drawingRepository, isA<RemoteDrawingRepository>());
     expect(app.reportRepository, isA<RemoteReportRepository>());
     // Activity now uses the real backend API (S15P11B209 activity 연동).

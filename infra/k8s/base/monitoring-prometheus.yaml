@@ -258,6 +258,68 @@ data:
               description: >-
                 점검 창에서 끈 뒤 되돌리지 않았을 수 있다. 의도한 것이면 이슈에 근거를 남길 것.
                 이 기간의 백업은 존재하지 않는다.
+
+  drift.yml: |
+    # 매니페스트 드리프트 경보 (S15P11B209-751)
+    #
+    # ★ 근거 — 2026-07-30 배포 실패.
+    #   365 가 backend.yaml 에 MONGO_APP_* env 를, configmap-app.yaml 에 MONGO_HOST 를
+    #   제대로 넣었는데 **클러스터에는 닿지 않았다.** Jenkins 배포 단계는 `set image` 만 하고
+    #   설정 반영은 사람 몫인데, 그 사실을 알려주는 장치가 없었다.
+    #   새 파드가 빈 비밀번호로 뜨려다 CrashLoopBackOff → 배포 실패로야 알게 됐다.
+    #   구 파드가 계속 서빙해서(maxUnavailable: 0) 장애가 없었고, 그래서 더 늦게 알았다.
+    #
+    # ★ 점검 자체는 infra/scripts/check-manifest-drift.sh 가 한다.
+    #   exit 1 = 드리프트 있음 · exit 2 = 점검 실패. **둘 다 Job 실패로 남는다.**
+    #   메트릭에는 종료 코드가 노출되지 않으므로 어느 쪽인지는 로그로 판별한다.
+    #   둘을 합쳐 하나의 경보로 둔 것은 의도다 — 어느 쪽이든 사람이 봐야 한다.
+    groups:
+      - name: drift
+        interval: 60s
+        rules:
+          # ── ① 드리프트가 있거나, 점검이 깨졌다 ───────────────────────────
+          - alert: ManifestDriftDetected
+            expr: kube_job_status_failed{namespace="dodam", job_name=~"manifest-drift-check-.*"} > 0
+            for: 5m
+            labels: { severity: warning, category: drift }
+            annotations:
+              summary: "⚠️ 매니페스트가 클러스터에 반영되지 않았다 — {{ $labels.job_name }}"
+              description: >-
+                kubectl -n dodam logs job/{{ $labels.job_name }} 로 어떤 필드인지 볼 것.
+                ⚠️ `kubectl apply -k overlays/prod` 를 통째로 돌리지 말 것 — 이미지 태그가
+                :prod 로 되돌아가 방금 배포한 빌드가 사라진다. 반영 절차는 infra/k8s/README.md.
+                로그가 "점검 실패"라면 드리프트가 아니라 권한·연결 문제다(종료 코드 2).
+
+          # ── ② 점검이 아예 돌지 않는다 ────────────────────────────────────
+          # ①은 "실패한 잡"만 잡으므로 **잡이 생성조차 안 되면 침묵한다**(733 의 BackupMissing 과 같은 구멍).
+          # 성공 시각이 아니라 **스케줄 시각**을 보는 게 핵심이다 — 드리프트가 며칠 이어지면
+          # 성공 시각은 계속 낡은 채로 남아서, 성공 기준으로 짜면 ①과 중복해 울린다.
+          - alert: ManifestDriftCheckNotRunning
+            expr: >-
+              kube_cronjob_spec_suspend{namespace="dodam", cronjob="manifest-drift-check"} == 0
+              unless on(cronjob) (
+                kube_cronjob_status_last_schedule_time > time() - 3*3600
+              )
+            for: 10m
+            labels: { severity: warning, category: drift }
+            annotations:
+              summary: "⚠️ 드리프트 점검이 3시간 넘게 실행되지 않았다"
+              description: >-
+                매시 실행이어야 한다. kubectl -n dodam get cronjob,job 으로 생성 여부부터 확인할 것.
+                생성조차 안 됐다면 이미지 pull·노드 압박·Secret dodam-drift-git 부재를 본다.
+
+          # ── ③ 끄고 잊은 점검 ─────────────────────────────────────────────
+          # 기본값이 suspend: true 라(선행 Secret 때문) 켜는 걸 잊기 쉽다. ②는 suspend 를
+          # 일부러 제외하므로 이 룰이 없으면 **아무 경보도 오지 않는다.**
+          - alert: ManifestDriftCheckSuspended
+            expr: kube_cronjob_spec_suspend{namespace="dodam", cronjob="manifest-drift-check"} == 1
+            for: 24h
+            labels: { severity: warning, category: drift }
+            annotations:
+              summary: "드리프트 점검이 24시간 넘게 suspend 상태다"
+              description: >-
+                이 기간에는 매니페스트 미반영을 아무도 감시하지 않는다.
+                해제 절차는 infra/k8s/base/manifest-drift.yaml 의 suspend 주석 참조.
 ---
 apiVersion: apps/v1
 kind: Deployment

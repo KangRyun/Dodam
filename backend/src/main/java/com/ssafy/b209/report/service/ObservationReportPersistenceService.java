@@ -4,6 +4,7 @@ import com.ssafy.b209.analysis.domain.AnalysisConversationSummary;
 import com.ssafy.b209.analysis.domain.AnalysisObservationResult;
 import com.ssafy.b209.analysis.domain.ConversationEmotionSource;
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
+import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
 import com.ssafy.b209.analysis.domain.ObservationReviewStatus;
 import com.ssafy.b209.analysis.repository.AnalysisConversationSummaryRepository;
 import com.ssafy.b209.analysis.repository.AnalysisObservationResultRepository;
@@ -14,7 +15,6 @@ import com.ssafy.b209.conversation.repository.ConversationMessageRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.domain.DrawingSessionEmotion;
-import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
 import com.ssafy.b209.drawing.htp.domain.HtpAssessment;
 import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
 import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
@@ -240,7 +240,9 @@ public class ObservationReportPersistenceService {
                   .map(DrawingDetectedObject::getLabel)
                   .toList();
       // 서술·코드·문답이 전부 비면 담지 않는다 — 빈 항목은 AI 프롬프트에 노이즈만 더한다.
-      if (drawingDescription != null || !detectedObjectCodes.isEmpty() || !subjectQaPairs.isEmpty()) {
+      if (drawingDescription != null
+          || !detectedObjectCodes.isEmpty()
+          || !subjectQaPairs.isEmpty()) {
         subjectContexts.add(
             new ObservationGenerationContext.SubjectContext(
                 contextSession.drawingSubject(),
@@ -277,9 +279,7 @@ public class ObservationReportPersistenceService {
             subjectContexts));
   }
 
-  /**
-   * 주제별 수집 대상 세션과 HTP 주제의 쌍이다 (S15P11B209-741). 그림일기·단독 세션은 주제가 {@code null}.
-   */
+  /** 주제별 수집 대상 세션과 HTP 주제의 쌍이다 (S15P11B209-741). 그림일기·단독 세션은 주제가 {@code null}. */
   private record SubjectSessionRef(Long drawingSessionId, String drawingSubject) {}
 
   /**

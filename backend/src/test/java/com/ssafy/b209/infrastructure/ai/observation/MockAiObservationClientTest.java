@@ -88,7 +88,19 @@ class MockAiObservationClientTest {
             "request-1", 0L, 100L, "FINAL", null, 0, 0, 0, 0, List.of(), null, null, List.of()));
     assertRequestFailure(
         new ObservationGenerationRequest(
-            "request-1", 700L, 100L, "INTERMEDIATE", null, 0, 0, 0, 0, List.of(), null, null, List.of()));
+            "request-1",
+            700L,
+            100L,
+            "INTERMEDIATE",
+            null,
+            0,
+            0,
+            0,
+            0,
+            List.of(),
+            null,
+            null,
+            List.of()));
     assertRequestFailure(
         new ObservationGenerationRequest(
             "request-1", 700L, 100L, "FINAL", null, -1, 0, 0, 0, List.of(), null, null, List.of()));
@@ -118,6 +130,18 @@ class MockAiObservationClientTest {
 
   private ObservationGenerationRequest validRequest() {
     return new ObservationGenerationRequest(
-        "request-1", 700L, 100L, "FINAL", "NORMAL", 3, 2, 1, 0, List.of("HAPPY"), "행복했어요", null, List.of());
+        "request-1",
+        700L,
+        100L,
+        "FINAL",
+        "NORMAL",
+        3,
+        2,
+        1,
+        0,
+        List.of("HAPPY"),
+        "행복했어요",
+        null,
+        List.of());
   }
 }
