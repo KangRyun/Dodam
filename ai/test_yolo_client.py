@@ -197,5 +197,54 @@ class ModelReadinessTest(unittest.TestCase):
             self.assertEqual(registry.call_count, 1)
 
 
+class SketchInkGatingTest(unittest.TestCase):
+    """sketch 잉크 정규화 게이트 (S15P11B209-679).
+
+    기본("none")은 동작 불변, "ink"일 때만 sketch YOLO 입력을 잉크 ndarray로 바꾸고
+    VLM 주석은 색 보존 원본에 그린다. HTP는 어느 모드에서도 전처리하지 않는다.
+    """
+
+    def _fake_model(self):
+        model = mock.Mock()
+        model.predict.return_value = [mock.Mock()]  # result[0], .plot() 보유
+        return model
+
+    def _predict_source(self, model_key, preprocess):
+        model = self._fake_model()
+        with mock.patch.object(yolo_client, "_get_model", return_value=model), mock.patch.object(
+            yolo_client, "_parse_result", return_value=[]
+        ), mock.patch.object(
+            yolo_client, "_encode_png", return_value=b""
+        ), mock.patch.object(yolo_client.config, "SKETCH_PREPROCESS", preprocess):
+            yolo_client.detect_and_annotate("/tmp/x.png", model_key=model_key)
+        return model.predict.call_args.args[0]
+
+    def test_none_predicts_on_original_path(self):
+        self.assertEqual(self._predict_source("sketch", "none"), "/tmp/x.png")
+
+    def test_htp_never_preprocesses(self):
+        self.assertEqual(self._predict_source("htp", "ink"), "/tmp/x.png")
+
+    def test_sketch_ink_predicts_on_normalized_ndarray(self):
+        import image_preprocess
+
+        sentinel = object()
+        model = self._fake_model()
+        with mock.patch.object(yolo_client, "_get_model", return_value=model), mock.patch.object(
+            yolo_client, "_parse_result", return_value=[]
+        ), mock.patch.object(
+            yolo_client, "_encode_png", return_value=b""
+        ), mock.patch.object(
+            yolo_client.config, "SKETCH_PREPROCESS", "ink"
+        ), mock.patch(
+            "cv2.imread", return_value="ORIGINAL_IMG"
+        ), mock.patch.object(image_preprocess, "ink_normalize", return_value=sentinel):
+            yolo_client.detect_and_annotate("/tmp/x.png", model_key="sketch")
+        # YOLO 입력은 잉크 ndarray(sentinel)
+        self.assertIs(model.predict.call_args.args[0], sentinel)
+        # VLM 주석은 색 보존 원본에 그린다(679)
+        model.predict.return_value[0].plot.assert_called_with(img="ORIGINAL_IMG")
+
+
 if __name__ == "__main__":
     unittest.main()

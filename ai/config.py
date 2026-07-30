@@ -136,6 +136,12 @@ DETECTION_LOG_DETAIL = (
     os.environ.get("DETECTION_LOG_DETAIL", "").strip().lower() == "true"
 )
 
+# sketch(그림일기) 추론 입력 전처리 모드 (S15P11B209-679).
+#   "none"(기본): 컬러 이미지를 그대로 predict — 실측 전엔 동작을 바꾸지 않는다.
+#   "ink": image_preprocess.ink_normalize로 흑백 선화 도메인에 맞춘다(색 있는 선 보존).
+#   color_ablation_test.ipynb 실측으로 도움이 확인되면 "ink"로 켠다. HTP는 흑백 강제라 무관.
+SKETCH_PREPROCESS = os.environ.get("SKETCH_PREPROCESS", "none").strip().lower()
+
 
 # ── RAG 검색 (S15P11B209-613 — 정책: docs/ai/rag-corpus-policy.md) ────────────
 # 임베딩도 GMS 단일 키 원칙(AI모델선정.md)을 따른다. 인덱스 구축은 오프라인 스크립트,
