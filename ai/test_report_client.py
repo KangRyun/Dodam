@@ -653,5 +653,210 @@ class SubjectSummariesTest(unittest.TestCase):
         self.assertEqual(req.subject_summaries, [])
 
 
+class RagInjectionTest(unittest.TestCase):
+    """RAG 근거 주입·출처 반환 (S15P11B209-614) — retrieve는 mock, GMS 미의존."""
+
+    def _generate(self, req, *, chunks=None, unavailable=False, **kwargs):
+        captured = {}
+
+        def fake_create(*, model, messages, **_kwargs):
+            captured["messages"] = messages
+            return _fake_response(_llm_json())
+
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = fake_create
+
+        if unavailable:
+            retrieve_patch = mock.patch.object(
+                report_client,
+                "retrieve",
+                side_effect=report_client.RagUnavailableError("인덱스 없음"),
+            )
+        else:
+            retrieve_patch = mock.patch.object(
+                report_client, "retrieve", return_value=chunks or []
+            )
+        kb_patch = mock.patch.object(
+            report_client, "rag_knowledge_base_version", return_value="kb-2026.07-1"
+        )
+        with retrieve_patch, kb_patch, mock.patch.object(
+            report_client, "get_client", return_value=fake_client
+        ):
+            result = report_client.generate(req, model="m", **kwargs)
+        return result, captured["messages"][1]["content"]
+
+    @staticmethod
+    def _chunks():
+        from rag import Chunk
+
+        return [
+            Chunk(
+                chunk_id="kicce-mr2303#0",
+                source_id="kicce-mr2303",
+                title="아동 사회·정서 발달지원",
+                text="이 연령대 아이들은 그림으로 감정을 표현하는 것이 자연스럽습니다.",
+                score=0.8,
+            ),
+            Chunk(
+                chunk_id="kicce-mr2303#4",
+                source_id="kicce-mr2303",  # 같은 자료의 다른 청크 — 출처는 1건으로 dedupe
+                title="아동 사회·정서 발달지원",
+                text="놀이와 그리기는 정서 표현의 통로입니다.",
+                score=0.7,
+            ),
+        ]
+
+    def test_chunks_injected_into_prompt_and_sources_returned(self):
+        # 관찰 재료(서술)가 있어야 검색이 성립한다 — _build_rag_query 규칙과 정합.
+        result, user_msg = self._generate(
+            _sample_request(),
+            chunks=self._chunks(),
+            drawing_description="집이 크게 그려져 있어요.",
+        )
+        self.assertIn("[전문 자료 근거]", user_msg)
+        self.assertIn("감정을 표현하는 것이 자연스럽습니다", user_msg)
+        # 출처는 자료 단위 dedupe — 청크 2개, 참조 1건.
+        self.assertEqual(len(result.rag_references), 1)
+        self.assertEqual(result.rag_references[0].source_id, "kicce-mr2303")
+        self.assertEqual(result.knowledge_base_version, "kb-2026.07-1")
+
+    def test_unavailable_rag_degrades_not_blocks(self):
+        # 인덱스 미배포·임베딩 실패 → 리포트는 그대로 생성, RAG 필드는 비움(기존 응답과 동일).
+        result, user_msg = self._generate(_sample_request(), unavailable=True)
+        self.assertNotIn("[전문 자료 근거]", user_msg)
+        self.assertEqual(result.rag_references, [])
+        self.assertIsNone(result.knowledge_base_version)
+        self.assertIn("즐겁게", result.observation_draft.overall_summary)
+
+    def test_empty_chunks_omit_block_and_kb_version(self):
+        # 검색은 됐지만 임계값 미달(빈 목록) — 근거를 안 썼으므로 KB Version도 싣지 않는다.
+        result, user_msg = self._generate(_sample_request(), chunks=[])
+        self.assertNotIn("[전문 자료 근거]", user_msg)
+        self.assertIsNone(result.knowledge_base_version)
+
+    def test_query_excludes_child_utterances(self):
+        # 질의는 관찰 서술·객체·선택 감정로만 — 아이 발화(답변·대표 발화)는 GMS로 안 나간다(정책 §1-1).
+        req = _sample_request(
+            representative_utterance="우리 엄마가 만든 김밥이 최고야",
+            subject_summaries=[
+                contracts.SubjectSummary(
+                    drawing_subject="HOUSE",
+                    drawing_description="집이 크게 그려져 있어요.",
+                    detected_object_codes=["HOUSE"],
+                    qa_pairs=[
+                        contracts.SubjectQaPair(
+                            question="누구랑 살아?", answer_text="비밀 발화 내용"
+                        )
+                    ],
+                )
+            ],
+        )
+        query = report_client._build_rag_query(req, None)
+        self.assertIn("집이 크게 그려져 있어요.", query)
+        self.assertIn("HOUSE", query)
+        self.assertNotIn("비밀 발화 내용", query)
+        self.assertNotIn("김밥", query)
+
+    def test_no_query_material_skips_search(self):
+        # 서술·객체·감정이 전부 없으면 임베딩 호출 자체를 하지 않는다.
+        req = _sample_request(selected_emotions=[], subject_summaries=[])
+        with mock.patch.object(report_client, "retrieve") as retrieve_spy:
+            chunks, reason = report_client._search_rag(req, None)
+        self.assertEqual(chunks, [])
+        self.assertEqual(reason, "RAG_NO_QUERY")
+        retrieve_spy.assert_not_called()
+
+
+class RagSkippedReasonTest(unittest.TestCase):
+    """근거를 싣지 못한 사유 코드 (S15P11B209-615) — 실패 종류별 표기와 응답 반영."""
+
+    def _req_with_material(self):
+        return _sample_request(
+            subject_summaries=[
+                contracts.SubjectSummary(
+                    drawing_subject="HOUSE", drawing_description="집이 크게."
+                )
+            ]
+        )
+
+    def test_no_index_maps_to_rag_no_index(self):
+        from rag import RagUnavailableError
+
+        with mock.patch.object(
+            report_client,
+            "retrieve",
+            side_effect=RagUnavailableError("미배포", reason="NO_INDEX"),
+        ):
+            chunks, reason = report_client._search_rag(self._req_with_material(), None)
+        self.assertEqual((chunks, reason), ([], "RAG_NO_INDEX"))
+
+    def test_search_failure_maps_to_rag_unavailable(self):
+        from rag import RagUnavailableError
+
+        with mock.patch.object(
+            report_client,
+            "retrieve",
+            side_effect=RagUnavailableError("GMS 실패", reason="SEARCH_FAILED"),
+        ):
+            chunks, reason = report_client._search_rag(self._req_with_material(), None)
+        self.assertEqual((chunks, reason), ([], "RAG_UNAVAILABLE"))
+
+    def test_empty_results_map_to_low_score(self):
+        with mock.patch.object(report_client, "retrieve", return_value=[]):
+            chunks, reason = report_client._search_rag(self._req_with_material(), None)
+        self.assertEqual((chunks, reason), ([], "RAG_LOW_SCORE"))
+
+    def test_success_has_no_reason(self):
+        from rag import Chunk
+
+        chunk = Chunk(
+            chunk_id="s#0", source_id="s", title="제목", text="본문", score=0.9
+        )
+        with mock.patch.object(report_client, "retrieve", return_value=[chunk]):
+            chunks, reason = report_client._search_rag(self._req_with_material(), None)
+        self.assertEqual(len(chunks), 1)
+        self.assertIsNone(reason)
+
+    def test_reason_lands_in_response(self):
+        # 사유가 응답(ragSkippedReason)까지 흐르는지 — 미배포 시나리오로 종단 확인.
+        from rag import RagUnavailableError
+
+        def fake_create(*, model, messages, **_kwargs):
+            return _fake_response(_llm_json())
+
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = fake_create
+        with mock.patch.object(
+            report_client,
+            "retrieve",
+            side_effect=RagUnavailableError("미배포", reason="NO_INDEX"),
+        ), mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(self._req_with_material(), model="m")
+        self.assertEqual(result.rag_skipped_reason, "RAG_NO_INDEX")
+        self.assertEqual(result.rag_references, [])
+        self.assertIsNone(result.knowledge_base_version)
+
+    def test_success_response_has_null_reason(self):
+        from rag import Chunk
+
+        chunk = Chunk(
+            chunk_id="s#0", source_id="s", title="제목", text="본문", score=0.9
+        )
+
+        def fake_create(*, model, messages, **_kwargs):
+            return _fake_response(_llm_json())
+
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = fake_create
+        with mock.patch.object(
+            report_client, "retrieve", return_value=[chunk]
+        ), mock.patch.object(
+            report_client, "rag_knowledge_base_version", return_value="kb-2026.07-1"
+        ), mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(self._req_with_material(), model="m")
+        self.assertIsNone(result.rag_skipped_reason)
+        self.assertEqual(len(result.rag_references), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

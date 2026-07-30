@@ -11,6 +11,11 @@ docs/ai/rag-corpus-policy.md 가 정본이다.
   검색 실패의 폴백 정책(리포트는 RAG 없이 생성)은 615가 소비처에서 구현한다.
 """
 
-from rag.retriever import Chunk, RagUnavailableError, retrieve
+from rag.retriever import (
+    Chunk,
+    RagUnavailableError,
+    knowledge_base_version,
+    retrieve,
+)
 
-__all__ = ["Chunk", "RagUnavailableError", "retrieve"]
+__all__ = ["Chunk", "RagUnavailableError", "knowledge_base_version", "retrieve"]

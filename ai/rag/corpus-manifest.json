@@ -1,0 +1,22 @@
+{
+  "knowledgeBaseVersion": "kb-2026.07-1",
+  "sources": [
+    {
+      "sourceId": "dodam-observation-guide-v1",
+      "title": "도담 관찰 가이드 v1 — 아동 그림 활동의 관찰 어휘와 부모 대화",
+      "publisher": "도담 팀 (자체 저작)",
+      "url": "repo:ai/rag/corpus/dodam-observation-guide-v1.txt",
+      "license": "INTERNAL",
+      "licenseVerifiedAt": "2026-07-30",
+      "collectedAt": "2026-07-30",
+      "sha256": "f1dd5b543ae5f88b1802f79315db1231800a409e2b5f00d264a021b705e01705",
+      "tags": [
+        "DEV_STAGE",
+        "EMOTION_VOCAB",
+        "PARENT_TALK",
+        "ART_ACTIVITY"
+      ],
+      "excludedSections": []
+    }
+  ]
+}

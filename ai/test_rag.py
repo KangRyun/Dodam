@@ -54,6 +54,21 @@ class ManifestGateTest(unittest.TestCase):
         self.assertEqual(loaded.knowledge_base_version, "kb-2026.07-1")
         self.assertEqual(loaded.sources[0].source_id, "kicce-mr2303")
 
+    def test_internal_authored_corpus_allowed(self):
+        # 자체 저작 트랙(정책 §4b) — 1차 외부 후보 전원 탈락 후 도입한 주 코퍼스.
+        path = _write_manifest(self.dir, _manifest_dict(license="INTERNAL"))
+        self.assertEqual(manifest.load(path).sources[0].license, "INTERNAL")
+
+    def test_repo_manifest_passes_gate(self):
+        # 리포지토리에 커밋된 실제 매니페스트가 게이트를 통과하는지 — 문서와 실물의 정합.
+        from pathlib import Path
+
+        repo_manifest = Path(__file__).parent / "rag" / "corpus-manifest.json"
+        loaded = manifest.load(repo_manifest)
+        self.assertTrue(loaded.knowledge_base_version.startswith("kb-"))
+        for source in loaded.sources:
+            self.assertTrue(source.license_verified_at)
+
     def test_disallowed_license_rejected(self):
         # KOGL-3(변경금지)은 청크 발췌가 변형이라 정책 §2에서 배제 — 빌드 자체를 거부.
         path = _write_manifest(self.dir, _manifest_dict(license="KOGL-3"))

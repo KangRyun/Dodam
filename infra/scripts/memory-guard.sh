@@ -44,11 +44,28 @@ RECOVER_PCT="${RECOVER_PCT:-20}"   # 여기까지 회복되면 더 안 끊는다
 COOLDOWN_SEC="${COOLDOWN_SEC:-900}"  # 같은 알림 재발송 간격(15분) — 스팸이 되면 아무도 안 본다
 LOG_MAX_BYTES="${LOG_MAX_BYTES:-5242880}"
 
+# ── ⚠️ 이 스크립트의 사정거리 (2026-07-30, S15P11B209-746 에서 갱신) ──────────
+# 360 컷오버 이후 **운영 스택은 k3s(containerd) 로 갔다.** 이 스크립트는 `docker` 만 보므로
+# backend·mysql·ai·minio 파드는 **아예 보이지 않는다** — 잡을 수도, 지킬 수도 없다.
+#
+# 그러니 운영 워크로드의 메모리 방어는 더 이상 여기가 아니다:
+#   · k8s `resources.limits` (파드별 상한 — 초과 시 OOMKill)
+#   · `ContainerMemoryNearLimit` 경보 → Alertmanager → Mattermost (S15P11B209-733)
+# 이 스크립트가 지금 하는 일은 **호스트에 남은 Docker 작업(빌드류)을 끊어 호스트를 살리는 것**뿐이다.
+#
 # ── 절대 건드리지 않는 것 ─────────────────────────────────────────────────────
-# 운영 스택 전부. 여기 있는 이름은 어떤 임계에서도 정지 대상이 되지 않는다.
+# ★ 이 목록은 **두 번째 안전망**이다. 실제 방어선은 아래 `sacrificial_list()` 의 **허용목록**이고,
+#   거기에 오르지 않은 컨테이너는 애초에 후보가 되지 않는다(예: `dodam-registry` —
+#   k3s 가 이미지를 받아오는 곳이라 끊기면 배포가 멈춘다. 허용목록에 없어 안전하다).
+#   그래도 이중으로 남겨 둔다 — 허용목록을 넓히는 사람이 실수하지 않도록.
+#
 #   reason: 아동 민감정보를 다루는 서비스다(가드레일 9절). 자동화가 서비스를 끊는 것보다
 #   빌드 하나가 죽는 편이 언제나 낫다.
-PROTECTED='^(dodam-mysql|dodam-backend|dodam-nginx|dodam-redis|dodam-minio|dodam-certbot|dodam-ai|dodam-prometheus|dodam-grafana|dodam-node-exporter|dodam-cadvisor)$'
+#
+# ⚠️ 2026-07-30 이전에는 여기에 compose 시절 이름(dodam-mysql·dodam-backend·dodam-nginx…)이
+#   적혀 있었다. 그 컨테이너들은 07-29 23:55 에 전부 정지했으므로 **이 정규식은 아무것도
+#   매치하지 않는 죽은 코드**였다. 무해했지만("지키고 있다"는 착시만 남았다) 정정한다.
+PROTECTED='^(dodam-registry|dodam-jenkins-agent)$'
 
 mkdir -p "$STATE_DIR" 2>/dev/null
 

@@ -314,10 +314,24 @@ class GuardianQuestionDraft(_CamelModel):
     question_purpose: str
 
 
+class RagReference(_CamelModel):
+    """리포트가 근거로 참조한 전문 자료 출처 (S15P11B209-614).
+
+    출처 표시는 라이선스 의무(KOGL-1)이자 보호자 신뢰 재료다 — 정책 §1-4.
+    청크 텍스트는 싣지 않는다(응답 비대 방지) — sourceId·제목이면 추적에 충분.
+    """
+
+    source_id: str
+    title: str
+
+
 class ObservationGenerationResult(_CamelModel):
     """BE ObservationGenerationResult와 1:1. disclaimer·limitations_text는 필수.
 
     confidence는 0~1 또는 None. model_name/model_version은 생성 주체 표기.
+    rag_references·knowledge_base_version은 optional 확장(S15P11B209-614) —
+    구 BE는 unknown 필드를 무시하므로 하위호환(Jackson 기본 설정), BE record
+    반영은 후속. RAG 미사용 시 빈 목록/None으로 기존 응답과 동일하다.
     """
 
     request_id: str
@@ -330,6 +344,13 @@ class ObservationGenerationResult(_CamelModel):
     follow_up_guides: list[FollowUpGuideDraft] = Field(default_factory=list)
     guardian_questions: list[GuardianQuestionDraft] = Field(default_factory=list)
     limitations_text: str
+    rag_references: list[RagReference] = Field(default_factory=list)
+    knowledge_base_version: str | None = None
+    # RAG 근거를 싣지 못한 사유 (S15P11B209-615, optional — 구 BE 무시).
+    #   RAG_NO_INDEX(인덱스 미배포) | RAG_UNAVAILABLE(임베딩 등 검색 장애) |
+    #   RAG_LOW_SCORE(전부 임계값 미달) | RAG_NO_QUERY(관찰 재료 없음).
+    #   근거가 실렸으면 None — "왜 없는가"의 설명이므로 있을 때는 침묵한다.
+    rag_skipped_reason: str | None = None
 
 
 # ── 종합 분석 계약 (API_명세서_최종.md §19.3 · §19.4) ────────────
@@ -561,5 +582,46 @@ class AnalysisResponse(_CamelModel):
     observation_draft: AnalysisObservationDraft | None = None
     evidence_references: list[dict] = Field(default_factory=list)
     unused_inputs: list[UnusedInput] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
+    processing_time_ms: int
+
+
+# ── 객체 탐지 Metadata 로그 스키마 (S15P11B209-610) ─────────────
+# 710(사람이 읽는 진단 콘솔 한 줄)과 별개의, 기계가 읽는 구조화 레코드다. 611(로그 TTL·집계·
+# 사용자 피드백 연결)이 이 모델을 그대로 import해 MongoDB 문서로 저장한다(문서 + TTL 인덱스).
+# 그래서 스키마 정본은 dict가 아니라 이 pydantic 모델이고, emit은 model_dump_json() 한 줄이다.
+# ⚠️ 아동 그림 내용은 담지 않는다 — 표시명(한국어)·bbox 좌표·이미지 원본 제외, 계약 코드·수치·집계만.
+#    bbox는 그림 구도를 서술하는 내용이라 710 가드레일(어느 모드에서도 미기록)을 그대로 따른다.
+class DetectionMetadataObject(_CamelModel):
+    """탐지 객체 1건의 집계용 메타. 코드·수치만 — bbox·표시명은 담지 않는다(610/710 가드레일)."""
+
+    object_code: str
+    confidence: float
+    area_ratio: float | None = None
+    detection_order: int
+
+
+class DetectionMetadataLog(_CamelModel):
+    """객체 탐지 구조화 메타데이터 로그(S15P11B209-610). 611이 import해 MongoDB에 저장한다.
+
+    소비자(611)와의 최소 계약:
+    - analysis_id: 사용자 피드백 연결의 조인 키
+    - occurred_at: TTL 인덱스 기준 발생 시각. timezone 명시 ISO8601(KST +09:00, S15P11B209-736)
+    - schema_version: 611이 집계 시 스키마 변화를 구분하는 유일한 수단
+    """
+
+    schema_version: str = "1"
+    event: Literal["object_detection"] = "object_detection"
+    occurred_at: str
+    analysis_id: int
+    drawing_session_id: int
+    activity_type: ActivityType | None = None
+    drawing_subject: DrawingSubject | None = None
+    object_detection: ModelRef | None = None
+    image_width: int | None = None
+    image_height: int | None = None
+    detection_count: int
+    class_counts: dict[str, int] = Field(default_factory=dict)
+    objects: list[DetectionMetadataObject] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
     processing_time_ms: int

@@ -443,24 +443,21 @@ services:
       - dodam-net
 
   # ───────────────────────────────────────────────────────────────
-  # certbot — Let's Encrypt 인증서 자동 갱신 (S15P11B209-301).
-  #   12시간마다 renew 시도(실제 갱신은 만료 30일 전부터만 일어남 — 그 외엔 no-op).
-  #   최초 발급은 1회 수동 — ⚠️ 이 서비스는 entrypoint가 갱신 루프라 --entrypoint 덮어쓰기 필수:
-  #   docker compose -f infra/docker-compose.yml run --rm --entrypoint certbot certbot \
-  #     certonly --webroot -w /var/www/certbot -d i15b209.p.ssafy.io --email <이메일> --agree-tos --no-eff-email
-  #   (내부망 불필요 — LE와의 통신은 아웃바운드, 챌린지 서빙은 nginx가 담당. 2026-07-22 발급 완료)
+  # certbot 서비스는 제거됐다 (S15P11B209-746, 2026-07-30).
+  #
+  # TLS 갱신은 이제 **k8s CronJob `certbot-renew`** 소관이다
+  #   (infra/k8s/base/cronjobs.yaml · 하루 2회 17 3,15 * * * UTC).
+  #
+  # 왜 지웠나: 360 컷오버로 compose nginx 가 멈춘 뒤부터 이 컨테이너는 **갱신할 수 없었다.**
+  #   webroot 챌린지 토큰을 써도 그걸 서빙하던 nginx 가 없어 LE 가 읽어갈 수 없다.
+  #   그런데 만료 30일 전이 아니라 매번 no-op 으로 끝나 로그가 깨끗했다 —
+  #   "이중화가 있으니 괜찮다"는 착시만 남기고 실제로는 아무 일도 하지 않았다.
+  #   k3s 경로는 LE 스테이징 dry-run 으로 실증했다("all simulated renewals succeeded").
+  #
+  # ⚠️ 아래 볼륨 선언(letsencrypt · certbot-webroot)은 **지우지 말 것** —
+  #   nginx 서비스가 아직 참조한다. 지우면 compose 파일 보간이 깨져
+  #   Jenkins 의 `docker compose build` 가 통째로 실패한다.
   # ───────────────────────────────────────────────────────────────
-  certbot:
-    image: certbot/certbot:v2.11.0   # latest 금지 — 버전 고정
-    container_name: dodam-certbot
-    restart: unless-stopped
-    mem_limit: 256m                # S15P11B209-356 — 07-28 호스트 OOM 대응
-                                   #   reason: 12시간에 한 번 깨어나는 갱신 루프. 실사용 약 23MB.
-    volumes:
-      - letsencrypt:/etc/letsencrypt            # 인증서 저장(쓰기)
-      - certbot-webroot:/var/www/certbot        # 챌린지 토큰 쓰기(nginx가 서빙)
-    # 갱신 루프 — 인증서가 없으면 "갱신 대상 없음"으로 조용히 지나감(안전)
-    entrypoint: sh -c 'trap exit TERM; while true; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $$!; done'
 
 # 내부 전용 네트워크 — mysql·backend·ai·nginx가 여기 붙는다. 외부 노출은 nginx만.
 networks:

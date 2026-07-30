@@ -55,9 +55,26 @@
 - **전 필드 optional + 기본 빈 목록.** 구 BE가 안 보내면 기존(집계+대표 발화) 경로로 동일 동작 — `QuestionRequest.activityType`(713)과 같은 패턴.
 - `subjectSummaries`가 비어 있지 않으면 프롬프트의 `[그림 관찰 서술]` 단일 블록 **대신** 주제별 블록(`[집 그림 관찰]`·`[집 그림 문답]` …)이 실린다. 레거시 `drawing_description` 인자(draft 경로 전용)와 동시 제공 시 주제별 블록이 우선.
 
-## 3. 응답 — 변경 없음
+## 3. 응답 — RAG 확장 (S15P11B209-614·615, 전부 optional — 구 BE는 무시)
 
-`ObservationGenerationResult` 기존 그대로. RAG 출처·KB Version 필드는 614에서 확장 예정(optional).
+`ObservationGenerationResult` 기존 필드 그대로 + 아래 3필드:
+
+| 필드 | 값 | 설명 |
+|---|---|---|
+| `ragReferences[]` | `{sourceId, title}` | 리포트가 근거로 쓴 전문 자료 출처(자료 단위 중복 제거). 출처 표시는 라이선스 의무(KOGL-1) |
+| `knowledgeBaseVersion` | `kb-<YYYY.MM>-<seq>` \| null | **근거를 실제로 썼을 때만** 싣는다 — 근거 없는 리포트에 버전이 붙으면 "이 지식에 기반했다"는 거짓 신호 |
+| `ragSkippedReason` | 아래 코드 \| null | 근거를 싣지 못한 사유. 근거가 실렸으면 null |
+
+`ragSkippedReason` 코드 (615 — 어떤 사유든 리포트 생성은 계속된다, 기능 저하이지 차단이 아님):
+
+| 코드 | 의미 |
+|---|---|
+| `RAG_NO_QUERY` | 관찰 재료(그림 서술·탐지 객체)가 없어 검색을 시도하지 않음 |
+| `RAG_NO_INDEX` | 인덱스 미배포(운영상 정상일 수 있는 상태) |
+| `RAG_UNAVAILABLE` | 임베딩 호출 실패 등 검색 장애 |
+| `RAG_LOW_SCORE` | 검색은 됐지만 전부 점수 임계값 미달 — 억지 근거를 싣지 않음 |
+
+운영 관측: 검색 결과 비율은 Prometheus `dodam_rag_search_total{outcome=used|no_query|no_index|unavailable|low_score}` 카운터로 본다.
 
 ## 4. 가드레일 (9절)
 
