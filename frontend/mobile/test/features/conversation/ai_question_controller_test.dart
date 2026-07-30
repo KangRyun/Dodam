@@ -6,6 +6,17 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('AiQuestionController', () {
+    test('저장된 질문 복원은 새 질문 API를 호출하지 않는다', () {
+      final repository = _RecordingConversationRepository();
+      final controller = AiQuestionController(repository, conversationId: 11);
+
+      controller.restore(_question);
+
+      expect(controller.status, AiQuestionStatus.success);
+      expect(controller.question, same(_question));
+      expect(repository.callCount, 0);
+    });
+
     test('질문 조회 성공 상태와 응답을 저장한다', () async {
       final repository = _RecordingConversationRepository();
       final controller = AiQuestionController(

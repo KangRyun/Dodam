@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -254,6 +255,31 @@ void main() {
     sync.dispose();
   });
 
+  testWidgets('이어 그리기 Draft를 조회하는 동안 도담이 로딩 화면을 표시한다', (tester) async {
+    final pendingDraft = Completer<DraftRecoveryDto?>();
+    final repository = _DraftRepository(pendingDraft: pendingDraft);
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+
+    await _pumpScreen(
+      tester,
+      repository: repository,
+      sync: sync,
+      autoRestoreDraft: true,
+    );
+
+    expect(
+      find.byKey(const ValueKey('draft-restore-loading-character')),
+      findsOneWidget,
+    );
+    expect(find.text('그리던 그림을 확인하고 있어요'), findsOneWidget);
+    expect(_canvas(tester).inputEnabled, isFalse);
+
+    pendingDraft.complete(null);
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+    sync.dispose();
+  });
+
   testWidgets('주제 선택 뒤 새 활동은 Draft를 조회하지 않고 빈 캔버스를 연다', (tester) async {
     final repository = _DraftRepository();
     final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
@@ -308,6 +334,32 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     sync.dispose();
   });
+
+  testWidgets('복원된 Draft만 있어도 완료 버튼을 활성화한다', (tester) async {
+    final repository = _DraftRepository();
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    final restore = await _pumpScreen(
+      tester,
+      repository: repository,
+      sync: sync,
+      autoRestoreDraft: true,
+    );
+
+    for (var attempt = 0; attempt < 10; attempt += 1) {
+      await tester.pump(const Duration(milliseconds: 20));
+      if (restore.backgroundImage != null) break;
+    }
+    restore.markImageLoaded();
+    await tester.pump();
+
+    final button = tester.widget<AppButton>(
+      find.byKey(const ValueKey('drawing-complete')),
+    );
+    expect(button.onPressed, isNotNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    sync.dispose();
+  });
 }
 
 Future<DrawingDraftRestoreController> _pumpScreen(
@@ -341,7 +393,15 @@ Future<DrawingDraftRestoreController> _pumpScreen(
       ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (autoRestoreDraft) {
+    // 자동 복원 중에는 로딩 표시가 계속 회전하므로 첫 비동기 상태까지만 진행한다.
+    for (var attempt = 0; attempt < 10; attempt += 1) {
+      await tester.pump(const Duration(milliseconds: 20));
+      if (restore.status == DrawingDraftRestoreStatus.loadingImage) break;
+    }
+  } else {
+    await tester.pumpAndSettle();
+  }
   return restore;
 }
 
@@ -367,10 +427,12 @@ final class _DraftRepository implements DrawingRepository {
   _DraftRepository({
     this.scenario = _Scenario.found,
     this.nullSequences = false,
+    this.pendingDraft,
   });
 
   _Scenario scenario;
   final bool nullSequences;
+  final Completer<DraftRecoveryDto?>? pendingDraft;
   int getDraftCalls = 0;
   int downloadDraftPreviewCalls = 0;
   int deleteDraftCalls = 0;
@@ -382,6 +444,7 @@ final class _DraftRepository implements DrawingRepository {
   @override
   Future<DraftRecoveryDto?> getDraft(int sessionId) async {
     getDraftCalls += 1;
+    if (pendingDraft case final pending?) return pending.future;
     if (scenario == _Scenario.failure) {
       throw const ApiTransportFailure(type: ApiTransportFailureType.connection);
     }

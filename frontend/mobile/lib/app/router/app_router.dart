@@ -287,6 +287,7 @@ abstract final class AppRouter {
           questionAudioPlayerFactory: questionAudioPlayerFactory,
           voiceAnswerRepository: voiceAnswerRepository,
           sttResultRepository: sttResultRepository,
+          activityRepository: activityRepository,
           conversationAnswerRepository: conversationAnswerRepository,
           questionSkipRepository: questionSkipRepository,
           conversationId: conversationId,
