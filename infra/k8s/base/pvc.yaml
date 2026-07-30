@@ -10,7 +10,7 @@
 # | apk-dist         | apk-dist          | gateway                      |
 # | backend-storage  | backend-storage   | backend                      |
 # | ai-models        | ai-models         | ai(읽기 전용)                 |
-# | db-backup        | (신규)            | db-backup CronJob            |
+# | (db-backup)      | 제거됨            | → hostPath /var/backups/dodam (733) |
 #
 # ⚠️ storageClassName: local-path 는 k3s 기본 프로비저너로, **노드의 로컬 디스크**에 만든다.
 #    노드가 하나뿐이라 지금은 문제가 없지만, 노드가 늘면 파드가 다른 노드로 가는 순간
@@ -60,16 +60,19 @@ spec:
   storageClassName: local-path
   resources: { requests: { storage: 5Gi } }
 ---
-# DB 백업 산출물. compose 에서는 호스트 /var/backups/dodam 을 썼지만,
-# k8s 에서는 파드가 호스트 경로에 직접 쓰지 않도록 PVC 로 받는다(hostPath 회피).
-# ⚠️ 백업 파일 = 아동 민감정보. 서버 밖 반출 금지(가드레일 9절).
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata: { name: db-backup, namespace: dodam }
-spec:
-  accessModes: ["ReadWriteOnce"]
-  storageClassName: local-path
-  resources: { requests: { storage: 20Gi } }
+# ⚠️ db-backup PVC 는 **없다** (S15P11B209-733 에서 제거). 실수가 아니라 결정이다.
+#
+#   원래는 "파드가 호스트 경로에 직접 쓰지 않도록" 20Gi PVC 로 받으려 했다. 그 원칙은
+#   맞지만, 백업에서는 대가가 원칙보다 컸다:
+#     · 기존 백업이 /var/backups/dodam 에 있다. PVC 를 쓰면 산출물이
+#       /var/lib/rancher/k3s/storage/pvc-<uuid>_dodam_db-backup/ 로 갈라져
+#       복원할 때 볼 곳이 두 군데가 된다.
+#     · 그 경로에는 uuid 가 들어가 복원 문서에 적을 수 없다(프로비저닝마다 바뀐다).
+#     · 보관(retention) 정리도 두 디렉터리로 갈린다.
+#   → cronjobs.yaml 의 세 백업 잡이 hostPath /var/backups/dodam 을 직접 쓴다.
+#     대가(노드 로컬 경로 결합)와 근거는 그 파일의 "저장 위치" 주석에 적어 뒀다.
+#
+#   ⚠️ 백업 파일 = 아동 민감정보. 서버 밖 반출 금지(가드레일 9절).
 ---
 # Prometheus TSDB (S15P11B209-361). 보관 15일 · 스크레이프 15초 기준으로 잡은 값이다.
 # compose 판의 이력은 잇지 않는다(이슈: "이력 단절 허용") — 빈 볼륨으로 시작한다.

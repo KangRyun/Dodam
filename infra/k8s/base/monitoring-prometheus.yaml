@@ -53,6 +53,14 @@ data:
     rule_files:
       - /etc/prometheus/rules/*.yml
 
+    # ★ 이 블록이 없어서 361 이후 경보 룰 3종이 **아무데도 통보되지 않았다**(733 에서 추가).
+    #   Prometheus /alerts 에 FIRING 으로 보이기만 했다 — 룰이 있는 것과 알림이 오는 것은 다르다.
+    #   Alertmanager 는 monitoring-alertmanager.yaml 참조(Mattermost 로 나간다).
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ["alertmanager:9093"]
+
     scrape_configs:
       # ── ① 앱 메트릭 — Service DNS ────────────────────────────────────────
       #   같은 네임스페이스라 짧은 이름으로 해석된다. compose 판과 job 이름을 맞춰
@@ -183,6 +191,73 @@ data:
             annotations:
               summary: "{{ $labels.pod }}/{{ $labels.container }} 에 메모리 상한이 없다"
               description: "07-28 사고의 조건 그 자체다. 매니페스트에 resources.limits.memory 를 넣을 것."
+
+  backup.yml: |
+    # 백업 경보 (S15P11B209-733)
+    #
+    # ★ 왜 이 룰들이 필요한가 — 2026-07-30 새벽에 겪은 일이 근거다.
+    #   360 컷오버로 MySQL·MinIO 가 k3s 로 갔는데 백업 스크립트 4종이 여전히 정지된
+    #   Docker 컨테이너를 보고 있었다. 스크립트에 `exit 5` 가드가 있어 **깨끗하게 실패**했지만,
+    #   결과가 /var/log/dodam-backup.log 에만 남아 **아무도 몰랐다.**
+    #   "깨끗한 실패"가 곧 "모르는 실패"였다. 통보되지 않는 실패는 실패로 취급되지 않는다.
+    #
+    # ★ 표현식은 반증으로 검증했다(2026-07-30).
+    #   임계를 25h → 1s 로 낮추면 certbot-renew 가 잡히는 것을 확인했다. 이 확인 없이는
+    #   "룰은 살아 있는데 영원히 발동하지 않는" 상태를 구분할 수 없다 — memory.yml 의
+    #   container-memory 주석이 경고하는 바로 그 함정이다.
+    groups:
+      - name: backup
+        interval: 60s        # 하루 한 번 도는 사건이라 촘촘히 볼 이유가 없다
+        rules:
+          # ── ① 잡이 돌았고 실패했다 ────────────────────────────────────────
+          # 스케줄 생성 잡의 이름은 <cronjob>-<epoch> 이다. 접미사까지 포함해 매치한다.
+          - alert: BackupJobFailed
+            expr: kube_job_status_failed{namespace="dodam", job_name=~"(db|mongo|minio)-backup-.*"} > 0
+            for: 1m
+            labels: { severity: critical, category: backup }
+            annotations:
+              summary: "🔴 백업 잡 실패 — {{ $labels.job_name }}"
+              description: >-
+                kubectl -n dodam logs job/{{ $labels.job_name }} 로 원인을 볼 것.
+                산출물은 /var/backups/dodam 에 쌓인다. 실패했다면 그 날짜 백업이 **없다**.
+
+          # ── ② 잡이 아예 돌지 않았다 (★ 732 의 실패 양상) ──────────────────
+          # 이게 이번 사고를 직접 잡는 룰이다. 스케줄은 살아 있는데 산출물이 없는 상태 —
+          # ①은 "실패한 잡"만 잡으므로 **잡이 생성조차 안 되면 침묵한다.**
+          #
+          # 표현식 읽는 법:
+          #   "활성(suspend=0)인 백업 CronJob 중, 25시간 안에 성공한 적이 없는 것"
+          #   unless 를 쓰면 '한 번도 성공한 적 없음'(시계열 부재)도 같이 걸린다.
+          #   absent() 로 쓰면 라벨이 사라져 어느 백업인지 알 수 없다.
+          # suspend 중인 것은 제외한다 — 의도적으로 끈 백업이 매일 울리면 경보를 무시하게 된다.
+          #   대신 ③ 이 "끄고 잊은 것"을 따로 잡는다.
+          - alert: BackupMissing
+            expr: >-
+              kube_cronjob_spec_suspend{namespace="dodam", cronjob=~"(db|mongo|minio)-backup"} == 0
+              unless on(cronjob) (
+                kube_cronjob_status_last_successful_time > time() - 25*3600
+              )
+            for: 10m
+            labels: { severity: critical, category: backup }
+            annotations:
+              summary: "🔴 {{ $labels.cronjob }} — 25시간 내 성공한 백업이 없다"
+              description: >-
+                스케줄이 살아 있는데 산출물이 없는 상태다(2026-07-30 새벽과 같은 양상).
+                kubectl -n dodam get job,cronjob 으로 잡 생성 여부부터 확인할 것.
+                생성조차 안 됐다면 이미지 pull·노드 압박·hostPath 부재를 본다.
+
+          # ── ③ 끄고 잊은 백업 ──────────────────────────────────────────────
+          # "스케줄 유무 ≠ 동작 여부"의 반대편. 점검 창에서 suspend 해 두고 복구를 잊으면
+          # ②가 일부러 침묵하므로 아무 경보도 오지 않는다. 그 구멍을 이 룰이 막는다.
+          - alert: BackupSuspended
+            expr: kube_cronjob_spec_suspend{namespace="dodam", cronjob=~"(db|mongo|minio)-backup"} == 1
+            for: 24h
+            labels: { severity: warning, category: backup }
+            annotations:
+              summary: "{{ $labels.cronjob }} 이 24시간 넘게 suspend 상태다"
+              description: >-
+                점검 창에서 끈 뒤 되돌리지 않았을 수 있다. 의도한 것이면 이슈에 근거를 남길 것.
+                이 기간의 백업은 존재하지 않는다.
 ---
 apiVersion: apps/v1
 kind: Deployment

@@ -37,3 +37,8 @@ patches:
   - path: gateway-hostport.yaml
   # prod 전용 AI 연동 모드(그림분석·관찰·TTS)를 실 AI(http)로 올린다. base 는 mock 유지.
   - path: configmap-ai-modes.yaml
+  # ⚠️ 백업 CronJob 3종 활성화 — **일부러 주석 처리해 뒀다** (S15P11B209-733).
+  #    지금 풀면 호스트 cron 과 두 벌이 같은 시각·같은 파일명으로 동시에 돈다.
+  #    푸는 시점 = 호스트 cron 을 제거하는 시점. 순서와 근거는 cronjobs-enable.yaml 참조.
+  #    선행: 복원 드릴 1회 성공.
+  - path: cronjobs-enable.yaml

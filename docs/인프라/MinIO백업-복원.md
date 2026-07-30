@@ -28,19 +28,45 @@ MySQL 백업이 이미 구성돼 있으면 1·2는 갖춰져 있음(공용).
    ```
 3. **mc 이미지** — `minio/mc:RELEASE.2025-04-16T18-13-26Z` (minio-init 빌드로 이미 pull됨)
 
-## 백업 (자동 — cron)
+## 백업 (자동 — k3s CronJob)
+
+**호스트 cron 은 제거됐다** (2026-07-30, S15P11B209-733). 매니페스트: `infra/k8s/base/cronjobs.yaml`
+
+| CronJob | 시각 (KST) | 비고 |
+|---------|-----------|------|
+| `minio-backup` | **00:30 · 06:30 · 12:30 · 18:30** | 6시간 주기 |
+| `db-backup` | 04:00 | 하루 1회 |
+| `mongo-backup` | 04:30 | 하루 1회 |
+
+- **6시간 주기인 이유** — 하루 1회면 최대 24시간의 백업 공백이 생긴다.
+  2026-07-28 하루에만 파일이 30 → 70개로 늘었다. 낮에 디스크가 나가면 그날 그린 그림이
+  전부 사라진다. MySQL 은 잃어도 계정·설정이지만 **MinIO 는 재생성할 수 없는 원본**이다.
+  데이터도 작아(2026-07-30 기준 8MB) 주기를 올리는 비용이 거의 없다.
+- MySQL·Mongo 와 **시차(:30)** — 같은 hostPath·같은 노드 디스크를 쓰므로 겹치지 않게 띄운다.
+- 수동 1회: `sudo infra/scripts/minio-backup.sh` (스크립트는 그대로 유지된다 — cron 등록만 없앴다)
+- 성공 로그: `[minio-backup] OK file=... objects=225 bytes=4284000 retention=14d exclude=tts-cache/*`
+
+> ⚠️ **이 6시간 주기는 374(2026-07-28)에 이 문서로 결정됐지만 2026-07-30 까지 실제로는
+> 적용된 적이 없었다.** 서버의 호스트 cron 은 `30 4 * * *`(하루 1회)였고, `30 */6` 은 git 의
+> 어떤 cron 파일에도 들어간 적이 없다. 733 에서 CronJob 으로 옮기며 문서 쪽으로 맞췄다.
+> **문서가 결정을 적어도 배선이 따라오지 않으면 결정이 아니다.**
+
+### ★ 컨테이너 두 개인 이유 (CronJob)
+
+`minio/mc` 이미지에는 **`mc` 와 `stat` 밖에 없다** — `tar`·`gzip`·`openssl`·`find` 가 전부 없다
+(2026-07-30 실측). 한 컨테이너로 "받아서 묶고 암호화"를 끝낼 수 없다.
 
 ```
-# /etc/cron.d/dodam-backup  (root)
-0  4    * * *  root  /경로/infra/scripts/mysql-backup.sh  >> /var/log/dodam-backup.log 2>&1
-30 */6  * * *  root  /경로/infra/scripts/minio-backup.sh  >> /var/log/dodam-backup.log 2>&1
+initContainer(minio/mc)   버킷 → /stage 로 mc mirror
+container(mysql:8.4.10)   /stage → tar+gzip+AES-256   ← 이 이미지엔 네 도구가 다 있다
 ```
-- MinIO는 MySQL과 **시차(:30)** — 동시 I/O·CPU 경합 회피.
-- **6시간 주기(00:30·06:30·12:30·18:30)** — 하루 1회면 최대 24시간의 백업 공백이 생긴다.
-  2026-07-28 하루에만 파일이 30 → 70개로 늘었다. 낮에 디스크가 나가면 그날 그린 그림이
-  전부 사라진다. 데이터가 작아(수백 KB) 주기를 올려도 부담이 거의 없다.
-- 수동 1회: `sudo infra/scripts/minio-backup.sh`
-- 성공 로그: `[minio-backup] OK bucket=dodam file=... objects=70 size=228K retention=14d exclude=tts-cache/*`
+
+호스트 스크립트가 쓰던 `kubectl port-forward` 는 필요 없다 — 클러스터 안에서 `minio:9000` 에
+직접 붙는다. 그 다리를 없애는 것이 CronJob 으로 옮긴 실익이다.
+
+`/stage` 는 **emptyDir** 다. mirror 직후 그 안에는 **아이 그림·음성이 평문으로** 놓이므로,
+파드와 함께 사라지는 볼륨을 쓴다. 호스트 스크립트는 `/var/backups/dodam/.minio-stage-*` 에
+풀어서 실패 시 평문이 남았다.
 
 ### ⚠️ 로그의 `OK` 를 그대로 믿지 말 것
 
@@ -102,12 +128,25 @@ sudo /home/kr/S15P11B209/infra/scripts/minio-restore.sh --dry-run \
 
 결과는 팀 로그에 기록한다 — 언제 드릴했고 몇 개였는지가 다음 드릴의 비교 기준이 된다.
 
-## ⚠️ 첫 실행 시 검증 필요 (리눅스 세션서 미검증 항목)
+## 검증 현황
 
-- `mc mirror --exclude "tts-cache/*"` 가 실제로 tts-cache를 건너뛰는지 (스테이지에 없어야 함)
-- `mc ilm import` 지원 여부 (미지원 시 init 로그 WARN + 수동 적용 안내)
-- 백업→`--dry-run` 복원 왕복 1회 성공
+| 항목 | 상태 |
+|------|------|
+| `mc mirror --exclude "tts-cache/*"` 가 tts-cache 를 건너뛰는지 | **검증됨** (2026-07-30) — 스테이지에 tts-cache 없음, `objects=225` |
+| CronJob 경로로 산출물 생성 | **검증됨** (2026-07-30) — `minio-2026-07-30-1005.tar.gz.enc` 4.28MB |
+| 백업 → 복호화 왕복 | **검증됨** (2026-07-30) — `-pass env:` 경로로 복호화 + `gzip -t` 통과 |
+| CronJob **스케줄** 경로(컨트롤러가 잡을 만드는 것) | 미검증 — 수동 실행만 확인. 다음 00:30/06:30 에 확인할 것 |
+| `mc ilm import` 지원 여부 | 미검증 (미지원 시 init 로그 WARN + 수동 적용 안내) |
+| 복원(실제 객체를 버킷에 되돌리기) 드릴 | **미검증** — MySQL 은 733 에서 드릴 완료, MinIO 는 남아 있다 |
 
-## 종료 코드
+> MinIO 복원 드릴이 아직 남아 있다. MySQL 처럼 임시 버킷에 되돌려 객체 수를 대조하는
+> 절차가 필요하다. "백업이 돌았다"는 검증이 아니다.
 
-`0` 성공 / `2` root 아님·인자 / `3` 패스프레이즈 / `4` 백업 디렉토리·파일 / `5` minio 컨테이너 미기동 / `6` mirror·암복호화 파이프라인
+## 종료 코드 (호스트 스크립트 — 수동 실행 경로)
+
+`0` 성공 / `2` root 아님·인자 / `3` 패스프레이즈 / `4` 백업 디렉토리·파일 /
+`5` minio 워크로드 미준비(`kubectl -n dodam get sts minio` — 732 에서 docker→k3s 전환) /
+`6` mirror·암복호화 파이프라인
+
+CronJob 쪽은 종료 코드가 아니라 잡 상태로 본다: `kubectl -n dodam get job | grep minio-backup`.
+실패 시 Mattermost 알림이 온다(`BackupJobFailed`·`BackupMissing` — DB백업-복원.md §3 참조).
