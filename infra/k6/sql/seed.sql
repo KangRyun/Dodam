@@ -12,7 +12,7 @@
 --    기본 30명 = 355 의 계획 최대 VU(30) 기준.
 --
 -- 실행 (서버에서):
---   docker exec -i dodam-mysql mysql -u root -p"$MYSQL_ROOT_PASSWORD" dodam < sql/seed.sql
+--   kubectl -n dodam exec -i sts/mysql -- sh -c 'MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot b209' < sql/seed.sql
 --   ※ 비밀번호를 셸에 직접 적지 말 것. 컨테이너 환경변수를 그대로 참조한다.
 --
 -- 멱등: 두 번 실행해도 중복 생성되지 않는다(NOT EXISTS / LIKE 로 방어).
