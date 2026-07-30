@@ -1,7 +1,40 @@
 # 도담 k8s 매니페스트 (S15P11B209-357)
 
-> compose 스택을 k3s 로 옮기기 위한 리소스 정의. **아직 아무것도 배포하지 않았다.**
-> 선행 356(k3s 설치) · 후속 358(스테이징 검증) → 359(Jenkins 전환) → 360(컷오버) → 362(성능 실증)
+> ## ⚠️ 이 매니페스트가 **운영을 돌리고 있다.**
+>
+> 2026-07-29 **360 컷오버 완료** — 운영 트래픽은 100% k3s 가 받는다(다운타임 3분 16초).
+> 남아 있는 compose 워크로드는 `dodam-jenkins`·`dodam-registry`·`dodam-certbot` **셋뿐**이고
+> 의도된 구성이다. 저장소(MySQL·Redis·MinIO·MongoDB)는 전부 k3s 로 넘어왔다.
+>
+> **연습장이 아니다.** 여기서 `kubectl apply -k overlays/prod` 를 돌리면 운영이 즉시 바뀐다.
+> 아래 "손대기 전에 알아야 할 것"을 먼저 읽을 것.
+>
+> 진행 경과: 356(k3s 설치) → 357(매니페스트) → 358(스테이징 검증) → 359(Jenkins 전환) →
+> **360(컷오버 ✅)** → 361(모니터링) · 733(백업 CronJob·경보) · 362(성능 실증, 355 대기)
+
+---
+
+## 손대기 전에 알아야 할 것
+
+**① `apply -k overlays/prod` 는 이미지 태그를 되돌린다.**
+매니페스트의 이미지는 `:prod` 태그인데, 지금 도는 것은 Jenkins 가 박은 **커밋 SHA 태그**다.
+전체 apply 를 하면 `:prod` 로 덮어써져 "무엇이 배포됐는지" 추적성이 사라진다(내용은 같다).
+특정 리소스만 고치려면 그 리소스만 골라 apply 하거나 `kubectl patch` 를 쓴다.
+
+**② Secret 은 kustomize 밖에 있다.**
+`base/kustomization.yaml` 에 Secret 이 없는 것은 실수가 아니라 설계다. 값이 빈 매니페스트를
+apply 하는 순간 운영 비밀이 통째로 지워지기 때문이다. Secret 은 `infra/scripts/sync-secrets.sh`
+로만 만들고 갱신한다.
+
+**③ `jenkins-external.yaml` 은 kustomize 에서 일부러 뺐다.**
+`commonLabels` 가 Service 의 selector 에도 주입되는데, 이 Service 는 selector 가 없어야만
+수동 Endpoints 가 유지된다. 그 한 파일만 `kubectl apply -f` 로 직접 적용한다.
+
+**④ 배포 계정에는 apply 권한이 없다.**
+Jenkins 는 네임스페이스 한정 SA 로 `set image` 와 rollout 조회만 한다. **매니페스트 변경은
+사람이 apply 해야 반영된다** — MR 이 머지됐다고 클러스터에 적용된 것이 아니다.
+(2026-07-30, `f65fc9e`(AI 모드 http)가 develop 에 머지된 채 클러스터에 적용되지 않아
+ 하루 종일 mock 으로 돌던 사례가 있다.)
 
 ---
 
@@ -27,7 +60,8 @@ infra/k8s/
 ├── base/                    ← 단독 apply 금지 (이미지 태그·노출 방식 비어 있음)
 │   ├── namespace.yaml
 │   ├── configmap-app.yaml   비밀 아닌 설정 전부
-│   ├── pvc.yaml             letsencrypt · webroot · apk · backend-storage · ai-models · db-backup
+│   ├── pvc.yaml             letsencrypt · webroot · apk · backend-storage · ai-models
+│   │                          (db-backup PVC 는 733 에서 제거 — 백업은 hostPath)
 │   ├── mysql.yaml           StatefulSet + headless Service
 │   ├── redis.yaml           StatefulSet + headless Service
 │   ├── minio.yaml           StatefulSet + headless Service
@@ -35,7 +69,8 @@ infra/k8s/
 │   ├── ai.yaml              Deployment + Service
 │   ├── gateway.yaml         nginx Deployment + conf ConfigMap + Service
 │   ├── jenkins-external.yaml  셀렉터 없는 Service + 수동 Endpoints
-│   └── cronjobs.yaml        certbot 갱신 · DB 백업(기본 suspend)
+│   ├── cronjobs.yaml        certbot 갱신 · MySQL·Mongo·MinIO 백업 (prod 에서 활성)
+│   └── monitoring-*.yaml    Prometheus · Alertmanager · Grafana · exporters · 대시보드
 └── overlays/
     ├── staging/   NodePort 30080/30443 · backend ×1   ← 358 검증용, 운영 포트 미점유
     └── prod/      hostPort 80/443     · backend ×2    ← 360 컷오버 시점에만
@@ -59,9 +94,10 @@ infra/scripts/sync-secrets.sh infra/.env --dry-run   # 검사만
 infra/scripts/sync-secrets.sh infra/.env             # 실제 적용
 ```
 
-이 스크립트가 compose 의 `${VAR:?}` fail-fast 를 대신한다 — 필수 키 13종이 **존재하고
-비어 있지 않은지** 검사하고, `JWT_SECRET` 이 32바이트 이상인지도 본다.
-(값은 절대 출력하지 않는다 — 키 이름만)
+이 스크립트가 compose 의 `${VAR:?}` fail-fast 를 대신한다 — 필수 키 18종이 **존재하고
+비어 있지 않은지** 검사하고, `JWT_SECRET` 이 (공백 제외) 32바이트 이상인지도 본다.
+또 **모든 키**에 대해 선두/꼬리 공백 오염을 검출해 실패시킨다(S15P11B209-730).
+(값은 절대 출력하지 않는다 — 키 이름과 길이만)
 
 ### ② 외부 노출 방식을 base 가 정하지 않는다
 
@@ -121,11 +157,13 @@ gateway 프로브가 `/`(301)인 것도 같은 이유다. **k8s httpGet 프로�
 그 자리에 노드 주소를 손으로 적어 넣으면, 클러스터 안에서는 평범한 Service 처럼 보이지만
 트래픽은 호스트로 나간다.
 
-> ⚠️ `base/jenkins-external.yaml` 의 IP `10.0.0.1` 은 **자리표시자**다. 노드 InternalIP 로 교체해야 하고,
-> Jenkins 는 지금 `127.0.0.1:9090` 으로만 바인딩돼 있어 파드에서 닿지 않는다.
-> 이 두 가지가 해결되기 전까지 `/jenkins/` 는 502 다 — 359 와 함께 결정한다.
-> `/grafana/` 는 361 소관이라 그때까지 역시 502 다. **둘 다 게이트웨이 전체를 막지는 않는다**
-> (변수+resolver 패턴 덕분 — 고정 `proxy_pass` 였다면 nginx 가 통째로 못 떴을 것).
+> ✅ **둘 다 해결됐다**(359·361). `/jenkins/` 와 `/grafana/` 모두 게이트웨이를 통해 응답한다
+> (각자 로그인 필요). Prometheus 는 **공개 라우트가 없다** — `/prometheus/` 는 랜딩 페이지
+> catch-all 이 200 을 줄 뿐이다. UI 가 필요하면 `kubectl port-forward` 를 쓴다.
+>
+> ⚠️ `base/jenkins-external.yaml` 을 kustomize 에서 뺀 이유는 위 "손대기 전에" ③ 참조.
+> 변수+resolver 패턴은 그대로 유지한다 — 고정 `proxy_pass` 면 업스트림 부재 시 nginx 가
+> 통째로 못 뜬다.
 
 ---
 
@@ -154,14 +192,14 @@ kubectl -n dodam rollout restart deployment/gateway
 
 ## 메모리 예산
 
-2026-07-28 실측(available 4.4GB · swap 2GB 사용 중) 기준으로 잡았다.
+2026-07-28 실측 기준으로 잡고, 이후 실제 부하로 드러난 값은 갱신했다.
 
 | 워크로드 | 실측 | requests | limits | 비고 |
 |---|---|---|---|---|
 | backend | 760MB | 768Mi ×N | 1536Mi | 최대 소비자 |
 | mysql | 490MB | 512Mi | 1Gi | OOMKill 이 가장 위험 |
 | minio | 237MB | 256Mi | 1Gi | 캐시로 여유 메모리를 흡수하는 성격 |
-| ai | 77MB | 128Mi | 512Mi | |
+| ai | 405MB | 256Mi | 1Gi | 512Mi 에서 OOMKilled — 실 AI 모드 전환 후 상향(738) |
 | redis | 4.4MB | 64Mi | 256Mi | AOF 재작성 여유 |
 | gateway | 5.5MB | 32Mi | 128Mi | |
 
@@ -174,45 +212,58 @@ kubectl -n dodam rollout restart deployment/gateway
 
 ---
 
-## 아직 하지 않은 것 / 컷오버 위험
+## 끝난 것 / 남은 위험
 
-### 🔴 데이터 이관이 최대 난제다
+### ✅ 데이터 이관 (360, 2026-07-29)
 
-이 매니페스트의 PVC 는 **전부 비어 있는 채로** 생성된다. compose 볼륨의 내용은 자동으로
-넘어오지 않는다.
+컷오버의 최대 난제였고, 끝났다. MySQL 덤프→복원 · MinIO mirror · letsencrypt 복사를
+모두 마친 뒤 overlay 를 올렸다. 다운타임 3분 16초.
 
-| 데이터 | 어디에 | 이관 안 하면 |
+> ⚠️ **정지된 compose 컨테이너를 다시 켜지 말 것.** `dodam-mysql`·`dodam-minio` 는
+> 2026-07-29 23:55 에 멈췄고 **컷오버 이전 데이터**를 갖고 있다. 켜면 조회도 되고 백업도
+> 성공하는데 **내용만 과거**다. 백업 스크립트가 정확히 그 함정에 빠질 뻔했다(S15P11B209-732).
+
+### ✅ 백업 (733, 2026-07-30)
+
+`db-backup`·`mongo-backup`·`minio-backup` 세 CronJob 이 **활성 상태로 돌고 있다.**
+호스트 cron 은 제거됐다. 산출물은 hostPath `/var/backups/dodam`(PVC 아님 — 기존 백업과
+같은 곳에 모아 복원 절차를 한 벌로 유지한다).
+
+| CronJob | 시각(KST) | timeZone |
 |---|---|---|
-| MySQL | `dodam_mysql-data` | 빈 DB — 회원·활동 전부 없음 |
-| MinIO **(아동 그림·음성)** | `dodam_minio-data` (객체 71개) | 파일 전부 유실처럼 보임 |
-| letsencrypt 인증서 | `dodam_letsencrypt` | **TLS 가 깨진다 — 서비스 접속 불가** |
+| `db-backup` | 04:00 | `Asia/Seoul` |
+| `mongo-backup` | 04:30 | `Asia/Seoul` |
+| `minio-backup` | 00:30·06:30·12:30·18:30 | `Asia/Seoul` |
 
-358(스테이징)에서 빈 상태로 뜨는 것은 **정상이자 의도**다 — 운영 데이터와 섞지 않는다.
-문제는 360이고, 이관 절차 확정이 컷오버의 선행 조건이다.
+> ⚠️ **`timeZone` 을 빼면 UTC 로 해석된다.** 파드도 기본이 UTC 다. `0 4 * * *` 가
+> 13:00 KST 에 뜬다. 스케줄 해석(`spec.timeZone`)과 컨테이너 `date`(`TZ` env)는 **별개**라
+> 둘 다 필요하다.
 
-### 그 밖에
+실패는 Alertmanager 를 거쳐 Mattermost 로 통보된다(`BackupJobFailed`·`BackupMissing`·`BackupSuspended`).
+361 에서 경보 룰만 옮기고 Alertmanager 를 두지 않아 **그때까지 메모리 경보 3종이 아무데도
+통보되지 않고 있었다** — 733 에서 함께 세웠다.
 
-- **db-backup CronJob 은 `suspend: true`** — Secret `dodam-backup`(BACKUP_PASSPHRASE)과
-  복원 드릴 1회가 끝나기 전에는 켜지 않는다. 호스트 cron 과 동시에 켜지 말 것.
-- **kube-dns IP `10.43.0.10`** 은 k3s 기본값이다. 설치 후 실측 확인:
+### 남은 위험
+
+- **kube-dns IP `10.43.0.10`** 은 k3s 기본값이다. 실측 확인:
   `kubectl -n kube-system get svc kube-dns -o jsonpath='{.spec.clusterIP}'`
   (nginx `resolver` 는 IP 리터럴만 받아 환경변수·호스트명을 쓸 수 없다)
 - **nginx conf 가 두 벌**이다 — `infra/nginx/conf.d/default.conf`(compose)와
-  `base/gateway.yaml`의 ConfigMap. 360 까지는 둘을 함께 고쳐야 한다. 갈라지면 컷오버에서 사고가 난다.
-- **모니터링(Prometheus·Grafana)은 없다** — S15P11B209-361 소관.
+  `base/gateway.yaml`의 ConfigMap. 운영은 후자를 쓴다. 갈라지면 다음 사고가 여기서 난다.
+- **`certbot` 이 Docker·k3s 양쪽에 있다** — 갱신 경로가 이중화돼 있다. 정리 필요.
 - **local-path 는 노드 로컬 디스크**다. 노드가 늘면 파드가 다른 노드로 가는 순간 데이터에
-  접근하지 못한다.
+  접근하지 못한다. 백업 hostPath 도 같은 제약을 갖는다.
+- **`mysql-0` 이 상한의 66%**(677Mi/1024Mi). 컷오버 때 2g→1Gi 로 줄인 값이라 지켜볼 것.
+- **MinIO 복원 드릴 미수행** — MySQL 만 했다(S15P11B209-737).
 
 ---
 
 ## 검증한 것
 
-- `kustomize build overlays/staging` · `overlays/prod` **양쪽 성공** (각 26 리소스)
-- 렌더링 결과 실물 확인: staging = NodePort 30080/30443 · backend replicas 1 · `:staging` 태그 /
-  prod = hostPort 80/443 · backend replicas 2 · `:prod` 태그
-- prod gateway 포트 병합이 `containerPort` + `hostPort` 로 올바르게 합쳐짐(중복 없음)
-- 프로브 경로 5종 전부 운영 컨테이너에서 실제 응답 확인
-- `sync-secrets.sh` bash 구문 통과
+- 렌더링: `overlays/staging`·`overlays/prod` 양쪽 빌드 성공
+- 프로브 경로 5종 전부 실제 응답 확인 (**actuator 는 9404** · 404 를 프로브에 걸지 말 것)
+- 무중단 롤링: backend `maxUnavailable: 0` 으로 컷오버 후 여러 차례 실증
+- 복원 드릴 1회 성공 (733) — CronJob 산출물을 임시 파드에 복원해 **69/69 테이블 대조**
+- 경보 발송 경로 실증 — `alertmanager_notifications_total{integration="slack"}` 증가 확인
 
-**클러스터에는 적용하지 않았다** — k3s 가 아직 설치되지 않았고(356 미실행),
-`kubectl apply` 는 서버 상태를 바꾸는 작업이다.
+**지금은 이 매니페스트가 운영을 돌리고 있다.** 문서 맨 위 경고를 다시 읽을 것.
