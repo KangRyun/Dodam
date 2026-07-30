@@ -214,6 +214,16 @@ final class _ReportRepository implements ReportRepository {
   Future<ReportDetailDto> getReport(int reportId) => throw UnimplementedError();
 
   @override
+  Future<ReportExportDto> requestExport(
+    int reportId, {
+    required String idempotencyKey,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<Uint8List> downloadExport(String downloadUrl) =>
+      throw UnimplementedError();
+
+  @override
   Future<AnalysisStatusDto> getAnalysisStatus(int analysisId) =>
       throw UnimplementedError();
 

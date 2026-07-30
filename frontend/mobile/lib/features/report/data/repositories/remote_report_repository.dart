@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 
 import '../../../../core/network/network.dart';
@@ -37,6 +39,28 @@ final class RemoteReportRepository implements ReportRepository {
   }
 
   @override
+  Future<ReportExportDto> requestExport(
+    int reportId, {
+    required String idempotencyKey,
+  }) async {
+    final response = await _apiClient.post<Map<String, dynamic>>(
+      'reports/$reportId/exports',
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+    );
+    return ReportExportDto.fromJson(envelopeObject(response.data));
+  }
+
+  @override
+  Future<Uint8List> downloadExport(String downloadUrl) async {
+    final path = _reportExportApiPath(downloadUrl);
+    final response = await _apiClient.get<Uint8List>(
+      path,
+      options: Options(responseType: ResponseType.bytes),
+    );
+    return response.data ?? Uint8List(0);
+  }
+
+  @override
   Future<AnalysisStatusDto> getAnalysisStatus(int analysisId) async {
     final response = await _apiClient.get<Map<String, dynamic>>(
       'analyses/$analysisId',
@@ -55,4 +79,21 @@ final class RemoteReportRepository implements ReportRepository {
     );
     return AnalysisAcceptedDto.fromJson(envelopeObject(response.data));
   }
+}
+
+String _reportExportApiPath(String downloadUrl) {
+  final uri = Uri.tryParse(downloadUrl);
+  if (uri == null ||
+      uri.hasScheme ||
+      uri.hasAuthority ||
+      uri.query.isNotEmpty ||
+      uri.fragment.isNotEmpty) {
+    throw ArgumentError.value(downloadUrl, 'downloadUrl');
+  }
+  if (!RegExp(
+    r'^/api/v1/reports/[1-9][0-9]*/exports/[1-9][0-9]*/file$',
+  ).hasMatch(uri.path)) {
+    throw ArgumentError.value(downloadUrl, 'downloadUrl');
+  }
+  return uri.path.substring('/api/v1/'.length);
 }

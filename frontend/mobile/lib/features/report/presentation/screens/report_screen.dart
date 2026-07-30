@@ -5,7 +5,9 @@ import '../../../../app/widgets/app_failure_view.dart';
 import '../../../../core/network/network.dart';
 import '../../../../design_system/design_system.dart';
 import '../../data/dto/report_dtos.dart';
+import '../../data/services/platform_report_file_actions.dart';
 import '../../domain/repositories/report_repository.dart';
+import '../../domain/services/report_file_actions.dart';
 
 enum _ReportViewStatus {
   loading,
@@ -17,15 +19,19 @@ enum _ReportViewStatus {
   invalidId,
 }
 
+enum _ReportPdfAction { save, share }
+
 class ReportScreen extends StatefulWidget {
   const ReportScreen({
     required this.reportId,
     required this.repository,
+    ReportFileActions? fileActions,
     super.key,
-  });
+  }) : fileActions = fileActions ?? const PlatformReportFileActions();
 
   final String reportId;
   final ReportRepository repository;
+  final ReportFileActions fileActions;
 
   @override
   State<ReportScreen> createState() => _ReportScreenState();
@@ -35,6 +41,7 @@ class _ReportScreenState extends State<ReportScreen> {
   _ReportViewStatus _status = _ReportViewStatus.loading;
   ReportDetailDto? _report;
   Object? _failure;
+  _ReportPdfAction? _pdfAction;
 
   @override
   void initState() {
@@ -89,6 +96,76 @@ class _ReportScreenState extends State<ReportScreen> {
     }
   }
 
+  Future<void> _handlePdf(_ReportPdfAction action) async {
+    final report = _report;
+    if (report == null || _pdfAction != null) return;
+    final shareOrigin = action == _ReportPdfAction.share
+        ? _currentScreenRect()
+        : null;
+
+    setState(() => _pdfAction = action);
+    try {
+      final export = await widget.repository.requestExport(
+        report.reportId,
+        idempotencyKey: 'report-export-${report.reportId}',
+      );
+      if (!export.isReady ||
+          export.reportId != report.reportId ||
+          export.downloadUrl !=
+              '/api/v1/reports/${report.reportId}/exports/${export.exportId}/file') {
+        throw const _ReportExportNotReady();
+      }
+      final bytes = await widget.repository.downloadExport(export.downloadUrl!);
+      if (!_isPdf(bytes)) {
+        throw const _ReportExportNotReady();
+      }
+
+      final fileName = 'dodam-report-${report.reportId}.pdf';
+      switch (action) {
+        case _ReportPdfAction.save:
+          final saved = await widget.fileActions.save(
+            fileName: fileName,
+            bytes: bytes,
+          );
+          if (!saved) return;
+        case _ReportPdfAction.share:
+          await widget.fileActions.share(
+            fileName: fileName,
+            bytes: bytes,
+            shareOrigin: shareOrigin,
+          );
+      }
+      if (!mounted) return;
+      if (action == _ReportPdfAction.save) {
+        showAppMessage(
+          context,
+          message: 'PDF를 저장했어요.',
+          type: AppMessageType.success,
+        );
+      }
+    } on Object {
+      if (!mounted) return;
+      showAppMessage(
+        context,
+        message: action == _ReportPdfAction.save
+            ? 'PDF를 저장하지 못했어요. 다시 시도해 주세요.'
+            : 'PDF를 공유하지 못했어요. 다시 시도해 주세요.',
+        type: AppMessageType.error,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _pdfAction = null);
+      }
+    }
+  }
+
+  Rect? _currentScreenRect() {
+    final renderBox = context.findRenderObject();
+    return renderBox is RenderBox
+        ? renderBox.localToGlobal(Offset.zero) & renderBox.size
+        : null;
+  }
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: AppColors.canvas,
@@ -139,7 +216,12 @@ class _ReportScreenState extends State<ReportScreen> {
         message: '활동 상세에서 관찰 리포트를 다시 선택해 주세요.',
       ),
     ),
-    _ReportViewStatus.completed => _ReportContent(report: _report!),
+    _ReportViewStatus.completed => _ReportContent(
+      report: _report!,
+      pdfAction: _pdfAction,
+      onSavePdf: () => _handlePdf(_ReportPdfAction.save),
+      onSharePdf: () => _handlePdf(_ReportPdfAction.share),
+    ),
   };
 }
 
@@ -165,8 +247,16 @@ class _ReportStateWithHome extends StatelessWidget {
 }
 
 class _ReportContent extends StatelessWidget {
-  const _ReportContent({required this.report});
+  const _ReportContent({
+    required this.report,
+    required this.pdfAction,
+    required this.onSavePdf,
+    required this.onSharePdf,
+  });
   final ReportDetailDto report;
+  final _ReportPdfAction? pdfAction;
+  final VoidCallback onSavePdf;
+  final VoidCallback onSharePdf;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -204,6 +294,31 @@ class _ReportContent extends StatelessWidget {
                 _NoticeCard(lines: report.limitations),
               ],
               const SizedBox(height: AppSpacing.lg),
+              Row(
+                children: [
+                  Expanded(
+                    child: AppButton(
+                      key: const ValueKey('report-save-pdf'),
+                      label: 'PDF 저장',
+                      leading: const Icon(Icons.download_rounded),
+                      isLoading: pdfAction == _ReportPdfAction.save,
+                      onPressed: pdfAction == null ? onSavePdf : null,
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  Expanded(
+                    child: AppButton(
+                      key: const ValueKey('report-share-pdf'),
+                      label: '공유',
+                      leading: const Icon(Icons.ios_share_rounded),
+                      variant: AppButtonVariant.secondary,
+                      isLoading: pdfAction == _ReportPdfAction.share,
+                      onPressed: pdfAction == null ? onSharePdf : null,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.sm),
               AppButton(
                 key: const ValueKey('report-home-cta'),
                 label: '보호자 홈으로 돌아가기',
@@ -217,6 +332,18 @@ class _ReportContent extends StatelessWidget {
     ),
   );
 }
+
+final class _ReportExportNotReady implements Exception {
+  const _ReportExportNotReady();
+}
+
+bool _isPdf(List<int> bytes) =>
+    bytes.length >= 5 &&
+    bytes[0] == 0x25 &&
+    bytes[1] == 0x50 &&
+    bytes[2] == 0x44 &&
+    bytes[3] == 0x46 &&
+    bytes[4] == 0x2D;
 
 class _ReportOverview extends StatelessWidget {
   const _ReportOverview({required this.report});

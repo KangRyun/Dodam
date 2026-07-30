@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../../../../core/network/api_page.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../domain/repositories/report_repository.dart';
@@ -93,6 +95,22 @@ final class MockReportRepository implements ReportRepository {
   @override
   Future<ReportDetailDto> getReport(int reportId) async =>
       ReportDetailDto.fromJson(_detail);
+
+  @override
+  Future<ReportExportDto> requestExport(
+    int reportId, {
+    required String idempotencyKey,
+  }) async => ReportExportDto(
+    reportId: reportId,
+    exportId: reportId,
+    status: 'COMPLETED',
+    downloadUrl: '/api/v1/reports/$reportId/exports/$reportId/file',
+  );
+
+  @override
+  Future<Uint8List> downloadExport(String downloadUrl) async =>
+      Uint8List.fromList(const [0x25, 0x50, 0x44, 0x46]);
+
   @override
   Future<AnalysisStatusDto> getAnalysisStatus(int analysisId) async =>
       AnalysisStatusDto.fromJson(const {

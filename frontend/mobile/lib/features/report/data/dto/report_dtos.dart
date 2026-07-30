@@ -310,6 +310,31 @@ final class ReportDetailDto {
       guardianConversationGuide.isEmpty;
 }
 
+/// REPORT-04 리포트 PDF 내보내기 접수 결과.
+final class ReportExportDto {
+  const ReportExportDto({
+    required this.reportId,
+    required this.exportId,
+    required this.status,
+    required this.downloadUrl,
+  });
+
+  factory ReportExportDto.fromJson(Map<String, dynamic> json) =>
+      ReportExportDto(
+        reportId: (json['reportId'] as num).toInt(),
+        exportId: (json['exportId'] as num).toInt(),
+        status: json['status'] as String,
+        downloadUrl: json['downloadUrl'] as String?,
+      );
+
+  final int reportId;
+  final int exportId;
+  final String status;
+  final String? downloadUrl;
+
+  bool get isReady => status == 'COMPLETED' && downloadUrl != null;
+}
+
 final class AnalysisObservationDto {
   const AnalysisObservationDto({
     required this.overallSummary,
