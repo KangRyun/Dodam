@@ -25,6 +25,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import time
 
 from openai import APIConnectionError, APIStatusError, OpenAIError
@@ -488,6 +489,117 @@ def _candidate_options(req: QuestionRequest) -> list[QuestionOption]:
     return options
 
 
+# ── 질문 내용 맞춤 답변 칩 (S15P11B209-747, 방향 D 혼합) ─────────
+# 목적별 고정 칩(_OPTIONS_BY_PURPOSE)은 질문 내용과 안 맞는다("무슨 색?"에 응/아니야). 그래서
+# 질문 유형(색·무엇·누구·어디)을 규칙으로 분류해 맞춤 칩을 주고(B), 규칙에 안 걸리는 wh-질문은
+# LLM 2차 호출로 후보를 받는다(A). 둘 다 없으면 목적별 generic으로 폴백. 어느 경로든 마지막에
+# 열린 탈출 '더 이야기해 줄래'를 붙여 아이가 선택지에 갇히지 않게 한다.
+_TELL_MORE = QuestionOption(code="CHIP_TELL_MORE", label="더 이야기해 줄래")
+_COLOR_CHIPS = ["빨간색", "노란색", "파란색"]  # 큐레이션 안전 라벨(우리 값이라 안전검증 불필요)
+_WHO_CHIPS = ["엄마", "아빠", "나", "친구"]
+_WHERE_CHIPS = ["집 안", "집 밖", "방 안"]
+
+_RE_COLOR = re.compile(r"무슨\s*색|어떤\s*색|색깔|색이(?:야|니|에요|예요)")
+_RE_WHO = re.compile(r"누구|누가")
+_RE_WHERE = re.compile(r"어디")
+_RE_WHAT = re.compile(r"뭐야|뭐를|무엇|무슨\s*그림|어떤\s*그림|뭘\s*그렸")
+# wh-의문사 — 있으면 예/아니오형이 아니다(규칙 미분류 시 LLM으로 넘긴다).
+_RE_WH = re.compile(r"무엇|뭐|무슨|어떤|누구|누가|어디|왜|어떻게|언제|몇")
+
+
+def _labeled_chips(labels: list[str], *, escape: str | None) -> list[QuestionOption]:
+    """라벨 목록 → code 유일한 QuestionOption. 항상 열린 탈출로 끝낸다(escape 있으면 그것 + 더 이야기)."""
+    chips = [
+        QuestionOption(code=f"CHIP_C{i}", label=label)
+        for i, label in enumerate(labels, start=1)
+    ]
+    if escape:
+        chips.append(QuestionOption(code="CHIP_OTHER", label=escape))
+    chips.append(_TELL_MORE)
+    return chips
+
+
+def _content_chips(text: str, req: QuestionRequest) -> list[QuestionOption] | None:
+    """질문 유형을 규칙으로 분류해 맞춤 칩(B). 못 맞추면 None.
+
+    색·누구·어디는 큐레이션 라벨, '무엇'은 이미 탐지된 객체 후보(718 로직 재사용)를 쓴다.
+    감정(기분/느낌)은 상위에서 EXPRESSION(650)으로 처리하므로 여기서 다루지 않는다.
+    """
+    if _RE_COLOR.search(text):
+        return _labeled_chips(_COLOR_CHIPS, escape="다른 색이야")
+    if _RE_WHO.search(text):
+        return _labeled_chips(_WHO_CHIPS, escape="다른 사람이야")
+    if _RE_WHERE.search(text):
+        return _labeled_chips(_WHERE_CHIPS, escape="다른 데야")
+    if _RE_WHAT.search(text):
+        return _candidate_options(req) or None  # 탐지 후보 + '이 중에 없어'
+    return None
+
+
+def _safe_chip_labels(raw_lines: list[str]) -> list[str]:
+    """LLM이 준 후보 줄을 아동 안전 라벨로 정화한다(747 · 안전 파이프라인 596/597 재사용).
+
+    각 줄을 question_safety로 판정·정화하고 차단·빈값·너무 긴 것은 버린다. 아동 화면에 그대로
+    나가는 텍스트라 통과한 것만 라벨로 쓴다(최대 3개, 중복 제거).
+    """
+    labels: list[str] = []
+    seen: set[str] = set()
+    for line in raw_lines:
+        cand = line.strip().lstrip("-·•0123456789. ").strip()
+        if not cand or len(cand) > 12:
+            continue
+        verdict = question_safety.evaluate(cand)
+        if verdict.blocked:
+            continue
+        clean = (verdict.sanitized_text or "").strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        labels.append(clean)
+        if len(labels) == 3:
+            break
+    return labels
+
+
+def _llm_answer_chips(
+    text: str, req: QuestionRequest, request_id: str
+) -> list[QuestionOption] | None:
+    """규칙에 안 걸린 wh-질문의 답변 후보를 2차 GMS 호출로 받는다(747, 방향 A).
+
+    질문 프롬프트와 분리된 짧은 best-effort 호출이다 — 재시도 없이 한 번만, 실패하면 None을
+    돌려 상위에서 generic 칩으로 폴백한다(질문 응답을 지연·차단시키지 않는다).
+    받은 후보는 _safe_chip_labels로 아동 안전 정화 후 쓴다.
+    """
+    system = (
+        f'너는 {req.child_age}세 아이와 이야기하는 친구야. 아이가 방금 이런 질문을 받았어: "{text}"\n'
+        "아이가 손가락으로 고를 만한 짧은 답 3개만 줘. 규칙:\n"
+        "- 각 줄에 하나씩, 5자 안팎의 아주 쉬운 말.\n"
+        "- 번호·설명·따옴표·기호 없이 답만.\n"
+        "- 아이를 판단하거나 마음을 단정하는 말은 쓰지 마."
+    )
+    try:
+        client = get_client().with_options(
+            timeout=config.QUESTION_LLM_TIMEOUT_SEC, max_retries=0
+        )
+        resp = client.chat.completions.create(
+            model=config.LLM_MODEL,
+            messages=[
+                {"role": "system", "content": system},
+                {"role": "user", "content": "답 3개를 줄바꿈으로 줘."},
+            ],
+            temperature=0.4,
+        )
+        raw = resp.choices[0].message.content or ""
+    except OpenAIError as e:
+        # 칩 생성 실패는 질문 응답을 막지 않는다 — 유형만 남기고 generic으로 폴백.
+        logger.warning(
+            "답변 칩 생성 실패(폴백): type=%s request_id=%s", type(e).__name__, request_id
+        )
+        return None
+    labels = _safe_chip_labels(raw.splitlines())
+    return _labeled_chips(labels, escape=None) if labels else None
+
+
 def _is_consistent(
     purpose: str,
     target: DetectedObject | None,
@@ -828,10 +940,25 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
     # 칩·정합성은 위(프롬프트 조립 전)에서 정한 목적·대상을 그대로 쓴다 — 프롬프트에 실은 것과
     # 응답 targetObject가 어긋나지 않게 한다(S15P11B209-713). 부정 재질문이면 후보 칩(718)을 쓴다.
     # OPTION 비허용이면 반드시 null — 빈 배열도 계약 위반이다(isContractValidFor).
-    if candidate_options is not None:
-        options = candidate_options
+    if not option_allowed:
+        options = None  # OPTION 비허용 → 칩 없음(빈 배열도 계약 위반)
+    elif candidate_options is not None:
+        options = candidate_options  # 부정 재질문 후보(718)
+    elif _NEGATION_CODE in selected_codes or _ESCAPE_CODE in selected_codes:
+        # 부정/탈출 뒤 열린 질문(718) — 아이가 거부·탈출한 뒤라 후보를 다시 들이밀지 않고
+        # 목적별 generic 칩을 쓴다(747의 '무엇→후보' 규칙이 재제시하는 것을 막는다).
+        options = _options_for_purpose(purpose)
+    elif purpose == "EXPRESSION":
+        options = _options_for_purpose(purpose)  # 감정 칩(650)
     else:
-        options = _options_for_purpose(purpose) if option_allowed else None
+        # 질문 내용 맞춤 칩(747, 방향 D): 규칙(B) → LLM 2차(A) → 목적별 generic 폴백.
+        options = _content_chips(text, req)
+        if options is None and _RE_WH.search(text):
+            # 2차 GMS 호출은 BE 15s 예산 안에서만 — 이미 많이 썼으면 건너뛰고 generic으로.
+            if time.monotonic() - started < config.QUESTION_LLM_TIMEOUT_SEC * 2:
+                options = _llm_answer_chips(text, req, request_id)
+        if options is None:
+            options = _options_for_purpose(purpose)
     if not _is_consistent(purpose, target, options, option_allowed):
         # 정합성이 깨진 조합은 아동 화면에 내보내지 않는다 → 실패로 돌려 BE 폴백에 맡긴다.
         raise UpstreamError("AI_INCONSISTENT_RESPONSE", "Consistency")

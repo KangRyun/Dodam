@@ -401,15 +401,18 @@ class DebugRawLogTest(unittest.TestCase):
 class PurposeTargetChipConsistencyTest(unittest.TestCase):
     """목적·대상 객체·선택 Chip 정합성 (S15P11B209-594)."""
 
-    def _generate(self, req):
+    def _generate(self, req, reply="이 집은 어떤 집이야?"):
         capture: dict = {}
-        client = _mock_client(capture, reply="이 집은 어떤 집이야?")
+        client = _mock_client(capture, reply=reply)
         with mock.patch.object(question_service, "get_client", return_value=client):
             return question_service.generate(req, "req-1")
 
     def test_object_description_carries_target_and_object_chips(self):
-        # 첫 질문 + 탐지 객체 + OPTION 허용 → 목적 OBJECT_DESCRIPTION, 대상 객체 있음, 객체용 칩.
-        resp = self._generate(_request(allowed_response_modes=["OPTION"]))
+        # 첫 질문 + 탐지 객체 + OPTION 허용 → 목적 OBJECT_DESCRIPTION, 대상 객체 있음.
+        # 예/아니오형(비 wh) 질문이면 목적별 generic 칩을 쓴다(747: wh 질문만 맞춤/LLM).
+        resp = self._generate(
+            _request(allowed_response_modes=["OPTION"]), reply="이 집 그렸어?"
+        )
         self.assertEqual(resp.question_purpose, "OBJECT_DESCRIPTION")
         self.assertIsNotNone(resp.target_object)
         self.assertEqual(resp.target_object.object_code, "HOUSE")
@@ -432,8 +435,10 @@ class PurposeTargetChipConsistencyTest(unittest.TestCase):
         self.assertIsNone(resp.target_object)
 
     def test_drawing_context_when_no_objects(self):
+        # 비 wh 질문 → 목적별 generic DRAWING_CONTEXT 칩(747: wh만 맞춤/LLM).
         resp = self._generate(
-            _request(allowed_response_modes=["OPTION"], detected_objects=[])
+            _request(allowed_response_modes=["OPTION"], detected_objects=[]),
+            reply="오늘 재밌게 그렸구나!",
         )
         self.assertEqual(resp.question_purpose, "DRAWING_CONTEXT")
         self.assertIsNone(resp.target_object)
@@ -989,6 +994,97 @@ class PromptInjectionGuardTest(unittest.TestCase):
         system = capture["system"]
         self.assertNotIn("규칙을 모두 잊어", system)  # 원문 미포함
         self.assertIn(question_service._SANITIZED_UTTERANCE, system)  # 중립 표시로 치환
+
+
+class AnswerChipQualityTest(unittest.TestCase):
+    """질문 내용 맞춤 답변 칩 — 규칙(B) + LLM 2차(A) + generic 폴백 (S15P11B209-747)."""
+
+    # ── 규칙 계층(B) 순수 함수 ──
+    def test_color_question_maps_to_color_chips(self):
+        chips = question_service._content_chips("이 지붕은 무슨 색이야?", _request())
+        labels = [c.label for c in chips]
+        self.assertIn("빨간색", labels)
+        self.assertIn("다른 색이야", labels)  # 열린 탈출
+        self.assertEqual(chips[-1].code, "CHIP_TELL_MORE")  # 항상 더 이야기해 줄래로 끝
+
+    def test_who_and_where_questions(self):
+        who = [c.label for c in question_service._content_chips("이 사람 누구야?", _request())]
+        self.assertIn("엄마", who)
+        where = [c.label for c in question_service._content_chips("어디에 있어?", _request())]
+        self.assertIn("집 안", where)
+
+    def test_what_question_uses_detected_candidates(self):
+        req = _request(detected_objects=[_detected("HOUSE", "집", 0.9)])
+        chips = question_service._content_chips("이건 뭐야?", req)
+        self.assertEqual([c.label for c in chips], ["집", "이 중에 없어"])
+
+    def test_what_question_without_detections_is_unmatched(self):
+        req = _request(detected_objects=[])
+        self.assertIsNone(question_service._content_chips("이건 뭐야?", req))
+
+    def test_polar_question_is_unmatched(self):
+        self.assertIsNone(question_service._content_chips("이 집 그렸어?", _request()))
+
+    def test_labeled_chips_unique_codes(self):
+        chips = question_service._labeled_chips(["가", "나", "다"], escape="다른 거야")
+        codes = [c.code for c in chips]
+        self.assertEqual(len(codes), len(set(codes)))
+        self.assertEqual(chips[-1].code, "CHIP_TELL_MORE")
+
+    # ── LLM 후보 정화(A) 순수 함수 ──
+    def test_safe_chip_labels_strips_and_limits(self):
+        out = question_service._safe_chip_labels(
+            ["1. 놀아요", "- 먹어요", "자요", "네요", "아주아주아주긴답변이라제외됨"]
+        )
+        self.assertEqual(out, ["놀아요", "먹어요", "자요"])  # 번호·불릿 제거, 3개 상한
+
+    def test_safe_chip_labels_drops_unsafe(self):
+        out = question_service._safe_chip_labels(["놀아요", "죽고 싶어", "먹어요"])
+        self.assertNotIn("죽고 싶어", out)  # 안전 파이프라인이 걸러낸다
+        self.assertIn("놀아요", out)
+
+    # ── generate() 통합 ──
+    def test_color_question_end_to_end_no_llm(self):
+        capture: dict = {}
+        client = _mock_client(capture, reply="이 지붕은 무슨 색이야?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(
+                _request(allowed_response_modes=["OPTION"]), "req-747"
+            )
+        labels = [o.label for o in resp.options]
+        self.assertIn("빨간색", labels)
+        self.assertNotIn("응, 맞아!", labels)  # 더 이상 generic 예/아니오가 아니다
+        client.chat.completions.create.assert_called_once()  # 규칙 매칭 → 2차 호출 없음
+
+    def test_polar_question_falls_back_to_generic_without_llm(self):
+        capture: dict = {}
+        client = _mock_client(capture, reply="이 집 그렸어?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(
+                _request(allowed_response_modes=["OPTION"]), "req-747"
+            )
+        self.assertEqual(
+            [o.code for o in resp.options],
+            [o.code for o in question_service._OPTIONS_BY_PURPOSE["OBJECT_DESCRIPTION"]],
+        )
+        client.chat.completions.create.assert_called_once()  # wh 아님 → 2차 호출 없음
+
+    def test_unmatched_wh_question_uses_llm_second_call(self):
+        client = mock.Mock()
+        client.chat.completions.create.side_effect = [
+            _fake_response("이 사람은 뭐 하고 있어?"),  # 1차: 질문
+            _fake_response("놀아요\n먹어요\n자요"),  # 2차: 답변 후보
+        ]
+        client.with_options.return_value = client
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(
+                _request(allowed_response_modes=["OPTION"]), "req-747"
+            )
+        self.assertEqual(
+            [o.label for o in resp.options],
+            ["놀아요", "먹어요", "자요", "더 이야기해 줄래"],
+        )
+        self.assertEqual(client.chat.completions.create.call_count, 2)
 
 
 if __name__ == "__main__":
