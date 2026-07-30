@@ -1,9 +1,12 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../app/widgets/app_failure_view.dart';
 import '../../../../core/network/network.dart';
 import '../../../../design_system/design_system.dart';
+import '../../../conversation/conversation.dart';
 import '../../data/dto/report_dtos.dart';
 import '../../data/services/platform_report_file_actions.dart';
 import '../../domain/repositories/report_repository.dart';
@@ -26,30 +29,77 @@ class ReportScreen extends StatefulWidget {
     required this.reportId,
     required this.repository,
     ReportFileActions? fileActions,
+    this.voiceAnswerPlaybackRepository,
+    this.voiceAnswerAudioPlayerFactory,
     super.key,
   }) : fileActions = fileActions ?? const PlatformReportFileActions();
 
   final String reportId;
   final ReportRepository repository;
   final ReportFileActions fileActions;
+  final VoiceAnswerPlaybackRepository? voiceAnswerPlaybackRepository;
+  final VoiceAnswerAudioPlayerFactory? voiceAnswerAudioPlayerFactory;
 
   @override
   State<ReportScreen> createState() => _ReportScreenState();
 }
 
-class _ReportScreenState extends State<ReportScreen> {
+class _ReportScreenState extends State<ReportScreen>
+    with WidgetsBindingObserver {
   _ReportViewStatus _status = _ReportViewStatus.loading;
   ReportDetailDto? _report;
   Object? _failure;
   _ReportPdfAction? _pdfAction;
+  VoiceAnswerPlaybackController? _playbackController;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _createPlaybackController();
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
+  @override
+  void didUpdateWidget(covariant ReportScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.voiceAnswerPlaybackRepository !=
+            widget.voiceAnswerPlaybackRepository ||
+        oldWidget.voiceAnswerAudioPlayerFactory !=
+            widget.voiceAnswerAudioPlayerFactory) {
+      _playbackController?.dispose();
+      _createPlaybackController();
+    }
+    if (oldWidget.reportId != widget.reportId ||
+        oldWidget.repository != widget.repository) {
+      unawaited(_load());
+    }
+  }
+
+  void _createPlaybackController() {
+    final repository = widget.voiceAnswerPlaybackRepository;
+    final playerFactory = widget.voiceAnswerAudioPlayerFactory;
+    _playbackController = repository == null || playerFactory == null
+        ? null
+        : VoiceAnswerPlaybackController(repository, playerFactory());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      unawaited(_playbackController?.stop());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _playbackController?.dispose();
+    super.dispose();
+  }
+
   Future<void> _load() async {
+    unawaited(_playbackController?.reset());
     final reportId = int.tryParse(widget.reportId);
     if (reportId == null || reportId <= 0) {
       setState(() => _status = _ReportViewStatus.invalidId);
@@ -221,6 +271,7 @@ class _ReportScreenState extends State<ReportScreen> {
       pdfAction: _pdfAction,
       onSavePdf: () => _handlePdf(_ReportPdfAction.save),
       onSharePdf: () => _handlePdf(_ReportPdfAction.share),
+      playbackController: _playbackController,
     ),
   };
 }
@@ -252,11 +303,13 @@ class _ReportContent extends StatelessWidget {
     required this.pdfAction,
     required this.onSavePdf,
     required this.onSharePdf,
+    required this.playbackController,
   });
   final ReportDetailDto report;
   final _ReportPdfAction? pdfAction;
   final VoidCallback onSavePdf;
   final VoidCallback onSharePdf;
+  final VoiceAnswerPlaybackController? playbackController;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -281,13 +334,22 @@ class _ReportContent extends StatelessWidget {
                   children: [
                     Expanded(flex: 5, child: _ReportOverview(report: report)),
                     const SizedBox(width: AppSpacing.lg),
-                    Expanded(flex: 6, child: _ReportDetails(report: report)),
+                    Expanded(
+                      flex: 6,
+                      child: _ReportDetails(
+                        report: report,
+                        playbackController: playbackController,
+                      ),
+                    ),
                   ],
                 )
               else ...[
                 _ReportOverview(report: report),
                 const SizedBox(height: AppSpacing.lg),
-                _ReportDetails(report: report),
+                _ReportDetails(
+                  report: report,
+                  playbackController: playbackController,
+                ),
               ],
               if (report.limitations.isNotEmpty) ...[
                 const SizedBox(height: AppSpacing.lg),
@@ -446,8 +508,12 @@ class _ReportOverview extends StatelessWidget {
 }
 
 class _ReportDetails extends StatelessWidget {
-  const _ReportDetails({required this.report});
+  const _ReportDetails({
+    required this.report,
+    required this.playbackController,
+  });
   final ReportDetailDto report;
+  final VoiceAnswerPlaybackController? playbackController;
 
   @override
   Widget build(BuildContext context) {
@@ -468,7 +534,10 @@ class _ReportDetails extends StatelessWidget {
                 const SizedBox(height: AppSpacing.md),
             ],
             for (final utterance in expression.representativeUtterances)
-              if (utterance.text case final text?) _Utterance(text: text),
+              _Utterance(
+                utterance: utterance,
+                playbackController: playbackController,
+              ),
           ],
         ),
       if (facts != null && !facts.isEmpty)
@@ -638,16 +707,44 @@ class _Bullet extends StatelessWidget {
   );
 }
 
-/// 대표 발화 한 줄. 음성/텍스트 출처와 무관하게 문장만 보여준다.
-/// (음성 원본 재생은 S15P11B209-490에서 별도로 붙인다.)
+/// 대표 발화 텍스트를 유지하면서 저장 음성으로 확인된 항목만 재생한다.
 class _Utterance extends StatelessWidget {
-  const _Utterance({required this.text});
-  final String text;
+  const _Utterance({required this.utterance, required this.playbackController});
+
+  final ReportUtteranceDto utterance;
+  final VoiceAnswerPlaybackController? playbackController;
+
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-    child: Text('“$text”', style: const TextStyle(color: AppColors.ink)),
-  );
+  Widget build(BuildContext context) {
+    final text = utterance.text;
+    final messageId = _playableVoiceMessageId(utterance);
+    final canPlay = messageId != null && playbackController != null;
+    if (text == null && !canPlay) return const SizedBox.shrink();
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (text != null)
+            Text('“$text”', style: const TextStyle(color: AppColors.ink)),
+          if (text != null && canPlay) const SizedBox(height: AppSpacing.xxs),
+          if (canPlay)
+            VoiceAnswerPlaybackControl(
+              controller: playbackController!,
+              messageId: messageId,
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+int? _playableVoiceMessageId(ReportUtteranceDto utterance) {
+  final messageId = utterance.messageId;
+  return utterance.source == 'STT' && messageId != null && messageId > 0
+      ? messageId
+      : null;
 }
 
 class _NoticeCard extends StatelessWidget {

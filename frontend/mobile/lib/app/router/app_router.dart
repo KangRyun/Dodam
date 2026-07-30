@@ -217,6 +217,8 @@ abstract final class AppRouter {
           reportId: reportId,
           repository: reportRepository,
           fileActions: reportFileActions,
+          voiceAnswerPlaybackRepository: voiceAnswerPlaybackRepository,
+          voiceAnswerAudioPlayerFactory: voiceAnswerAudioPlayerFactory,
         ),
       ['guardian', 'notifications'] when notificationInboxRepository != null =>
         NotificationListScreen(repository: notificationInboxRepository),
