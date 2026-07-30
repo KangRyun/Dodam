@@ -6,6 +6,7 @@ import '../../../core/network/network.dart';
 import '../domain/models/conversation_end.dart';
 import '../domain/models/ai_question.dart';
 import '../domain/repositories/conversation_repository.dart';
+import 'conversation_retry_policy.dart';
 
 enum AiQuestionStatus {
   initial,
@@ -35,11 +36,27 @@ final class AiQuestionController extends ChangeNotifier {
   AiQuestion? question;
   Object? error;
   ConversationCompletionReason? completionReason;
+
+  /// 서버가 이미 종료된 대화라고 응답했는지.
+  ///
+  /// 이 경우 종료 사유는 서버가 처음 저장한 값이라 다음 질문 응답으로는 알 수
+  /// 없다. 이미 완료된 상태를 바꿀 필요가 없고 불필요한 네트워크 요청을 피하기
+  /// 위해, 화면은 [completionReason] 없이 이 값만 보고 다음 단계로 넘어간다.
+  bool conversationAlreadyEnded = false;
+
   String? _requestKey;
   int? _requestBasisAnalysisId;
   int? _requestPreviousAnswerMessageId;
+  int _generation = 0;
+  bool _disposed = false;
 
   bool get isLoading => status == AiQuestionStatus.loading;
+  bool get canRetry =>
+      status == AiQuestionStatus.failure &&
+      canRetryConversationRequest(
+        error,
+        endpoint: ConversationRequestEndpoint.nextQuestion,
+      );
 
   Future<void> load() => _load(
     _requestBasisAnalysisId ?? basisAnalysisId,
@@ -62,6 +79,7 @@ final class AiQuestionController extends ChangeNotifier {
     required int? previousAnswerMessageId,
     bool forceNext = false,
   }) async {
+    if (_disposed) return;
     if (analysisId != null && analysisId <= 0) return;
     // 한 요청이 처리되는 동안 답변 버튼 연타로 생기는 중복 질문을 차단
     if (isLoading) return;
@@ -83,13 +101,16 @@ final class AiQuestionController extends ChangeNotifier {
     }
     // 실패 재시도는 같은 요청 키를 재사용
     _requestKey ??= _idempotencyKeyProvider();
+    final generation = ++_generation;
     status = AiQuestionStatus.loading;
     error = null;
     completionReason = null;
+    conversationAlreadyEnded = false;
     notifyListeners();
 
+    final AiQuestion? loaded;
     try {
-      question = await _repository.requestNextQuestion(
+      loaded = await _repository.requestNextQuestion(
         conversationId: conversationId,
         request: NextQuestionRequest(
           basisAnalysisId: analysisId,
@@ -97,32 +118,66 @@ final class AiQuestionController extends ChangeNotifier {
         ),
         idempotencyKey: _requestKey!,
       );
-      status = AiQuestionStatus.success;
     } on ApiResponseFailure catch (caught) {
-      final reason = _completionReasonFor(caught);
-      if (reason != null) {
-        completionReason = reason;
-        status = AiQuestionStatus.conversationComplete;
-      } else {
-        error = caught;
-        status = AiQuestionStatus.failure;
-      }
+      // 화면을 떠난 뒤 도착한 응답은 상태를 되돌리지 않는다.
+      if (!_isCurrent(generation)) return;
+      _applyFailure(caught);
+      notifyListeners();
+      return;
     } catch (caught) {
+      if (!_isCurrent(generation)) return;
       error = caught;
       status = AiQuestionStatus.failure;
+      if (!shouldKeepRequestSnapshot(
+        caught,
+        endpoint: ConversationRequestEndpoint.nextQuestion,
+      )) {
+        _requestKey = null;
+      }
+      notifyListeners();
+      return;
     }
+    if (!_isCurrent(generation)) return;
+    question = loaded;
+    status = AiQuestionStatus.success;
     notifyListeners();
   }
 
-  ConversationCompletionReason? _completionReasonFor(
-    ApiResponseFailure failure,
-  ) {
-    return switch (failure.error?.code) {
-      'CONVERSATION_409_001' || 'QUESTION_LIMIT_REACHED' =>
-        ConversationCompletionReason.questionLimitReached,
-      'NO_MORE_QUESTION' => ConversationCompletionReason.noMoreQuestion,
-      _ => null,
-    };
+  /// 실패 응답을 정상 종료와 재시도 대상 실패로 나눈다.
+  ///
+  /// 다음 질문 API가 실제로 내려주는 종료성 오류만 완료로 다룬다. 같은 409라도
+  /// `INVALID_STATE_TRANSITION`·`CONVERSATION_409_002`는 종료가 아니므로 기존
+  /// 실패 처리를 유지한다.
+  void _applyFailure(ApiResponseFailure failure) {
+    switch (failure.error?.code) {
+      // 질문 한도 소진 — 아직 대화가 열려 있어 종료 요청이 필요하다.
+      case 'CONVERSATION_409_001':
+      case 'QUESTION_LIMIT_REACHED':
+        completionReason = ConversationCompletionReason.questionLimitReached;
+        status = AiQuestionStatus.conversationComplete;
+      // 이미 종료된 대화 — 종료 요청을 다시 보내면 안 된다.
+      case 'CONVERSATION_ALREADY_COMPLETED':
+        conversationAlreadyEnded = true;
+        status = AiQuestionStatus.conversationComplete;
+      default:
+        error = failure;
+        status = AiQuestionStatus.failure;
+        if (!shouldKeepRequestSnapshot(
+          failure,
+          endpoint: ConversationRequestEndpoint.nextQuestion,
+        )) {
+          _requestKey = null;
+        }
+    }
+  }
+
+  bool _isCurrent(int generation) => !_disposed && generation == _generation;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _generation += 1;
+    super.dispose();
   }
 
   static String _createKey() {

@@ -97,6 +97,45 @@ void main() {
     expect(skipRequested, isTrue);
   });
 
+  testWidgets('재시도 불가 Voice 실패에서는 녹음 UI를 직접 차단한다', (tester) async {
+    final controller = VoiceRecordingController(_FakeVoiceRecorder());
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Stack(
+            children: [
+              AiQuestionBubbleOverlay(
+                question: _question,
+                visible: true,
+                selectedOptionId: null,
+                onOptionSelected: (_) {},
+                showResponseActions: true,
+                submissionStatus: OptionAnswerSubmissionStatus.idle,
+                skipStatus: QuestionSkipStatus.idle,
+                endStatus: ConversationEndStatus.idle,
+                onEnd: () {},
+                onSkip: () {},
+                voiceRecordingController: controller,
+                voiceAnswerUploadStatus: VoiceAnswerUploadStatus.failure,
+                voiceRetryable: false,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final button = tester.widget<FilledButton>(
+      find.byKey(const ValueKey('voice-recording-toggle')),
+    );
+    expect(button.onPressed, isNull);
+    expect(
+      find.byKey(const ValueKey('voice-answer-upload-retry')),
+      findsNothing,
+    );
+  });
+
   testWidgets('대화 그만하기를 누르면 종료 확인 요청을 전달한다', (tester) async {
     var endRequested = false;
     await tester.pumpWidget(

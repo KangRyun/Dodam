@@ -154,6 +154,44 @@ void main() {
     expect(await first, isTrue);
     expect(repository.callCount, 1);
   });
+
+  test('dispose 뒤 늦게 도착한 업로드 응답은 상태를 바꾸지 않는다', () async {
+    final completer = Completer<VoiceAnswerUploadResult>();
+    final controller = VoiceAnswerUploadController(
+      _FakeVoiceAnswerRepository(result: completer.future),
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'voice-key',
+    );
+
+    final pending = controller.submit(
+      questionMessageId: 10,
+      recording: _recording,
+    );
+    controller.dispose();
+    completer.complete(_result);
+
+    expect(await pending, isFalse);
+    expect(controller.status, VoiceAnswerUploadStatus.uploading);
+    expect(controller.result, isNull);
+  });
+
+  test('dispose 뒤에는 재전송하지 않는다', () async {
+    final repository = _FakeVoiceAnswerRepository(failOnce: true);
+    final controller = VoiceAnswerUploadController(
+      repository,
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'voice-key',
+    );
+
+    expect(
+      await controller.submit(questionMessageId: 10, recording: _recording),
+      isFalse,
+    );
+    controller.dispose();
+
+    expect(await controller.retry(), isFalse);
+    expect(repository.callCount, 1);
+  });
 }
 
 final _recording = VoiceRecording(

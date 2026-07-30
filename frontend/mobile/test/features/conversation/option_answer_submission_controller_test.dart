@@ -55,6 +55,32 @@ void main() {
         'labelSnapshot': '기뻤어요',
       },
     ]);
+    expect(json['directText'], isNull);
+  });
+
+  test('원본 List 변경 뒤에도 선택 순서와 실제 전송 Body snapshot은 불변이다', () {
+    final source = [_option('1'), _option('2')];
+    final request = OptionAnswerRequest(
+      questionMessageId: 10,
+      selectedOptions: source,
+      directText: '직접 입력',
+    );
+    final identityBody = request.toJson();
+
+    source
+      ..clear()
+      ..add(_option('3'));
+
+    expect(request.selectedOptions.map((option) => option.optionId).toList(), [
+      '1',
+      '2',
+    ]);
+    expect(request.toJson(), identityBody);
+    expect(request.toJson()['directText'], '직접 입력');
+    expect(
+      () => request.selectedOptions.add(_option('3')),
+      throwsUnsupportedError,
+    );
   });
 
   test('실패 후 다시 누르면 같은 멱등성 키로 재시도한다', () async {
@@ -100,6 +126,43 @@ void main() {
     expect(repository.callCount, 1);
     completer.complete(const OptionAnswerResult(answerMessageId: 30));
     expect(await first, isTrue);
+  });
+
+  test('dispose 뒤 늦게 도착한 응답은 상태를 바꾸지 않는다', () async {
+    final completer = Completer<OptionAnswerResult>();
+    final controller = OptionAnswerSubmissionController(
+      _RecordingAnswerRepository(result: completer.future),
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'answer-key',
+    );
+
+    final pending = controller.submit(
+      questionMessageId: 10,
+      option: _option('1'),
+    );
+    controller.dispose();
+    completer.complete(const OptionAnswerResult(answerMessageId: 30));
+
+    expect(await pending, isFalse);
+    expect(controller.status, OptionAnswerSubmissionStatus.submitting);
+    expect(controller.answerMessageId, isNull);
+  });
+
+  test('dispose 뒤에는 새 제출을 보내지 않는다', () async {
+    final repository = _RecordingAnswerRepository();
+    final controller = OptionAnswerSubmissionController(
+      repository,
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'answer-key',
+    );
+
+    controller.dispose();
+
+    expect(
+      await controller.submit(questionMessageId: 10, option: _option('1')),
+      isFalse,
+    );
+    expect(repository.callCount, 0);
   });
 }
 

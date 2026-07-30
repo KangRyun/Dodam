@@ -169,6 +169,37 @@ void main() {
     completer.complete(_completedResult);
     expect(await first, isTrue);
   });
+
+  test('dispose 뒤 늦게 도착한 응답은 완료로 바꾸지 않는다', () async {
+    final completer = Completer<ConversationEndResult>();
+    final controller = ConversationEndController(
+      _RecordingEndRepository(result: completer.future),
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'end-key-1',
+    );
+
+    final pending = controller.submit(lastQuestionMessageId: 10);
+    controller.dispose();
+    completer.complete(_completedResult);
+
+    expect(await pending, isFalse);
+    expect(controller.completed, isFalse);
+    expect(controller.status, ConversationEndStatus.submitting);
+  });
+
+  test('dispose 뒤에는 새 종료 요청을 보내지 않는다', () async {
+    final repository = _RecordingEndRepository();
+    final controller = ConversationEndController(
+      repository,
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'end-key-1',
+    );
+
+    controller.dispose();
+
+    expect(await controller.submit(lastQuestionMessageId: 10), isFalse);
+    expect(repository.callCount, 0);
+  });
 }
 
 final class _RecordingEndRepository implements ConversationEndRepository {

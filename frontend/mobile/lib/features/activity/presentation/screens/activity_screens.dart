@@ -9,6 +9,7 @@ import 'package:flutter/rendering.dart';
 import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../core/network/api_failure.dart';
+import '../../../../core/network/api_failure_presentation.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../drawing/application/activity_completion_controller.dart';
 import '../../../drawing/application/drawing_object_detection_controller.dart';
@@ -230,6 +231,29 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 그대로 재사용한다 — 새로 만들지 않는다.
   String? _htpAdvanceIdempotencyKey;
 
+  /// `steps/next`가 실패해 화면에 재시도 카드를 띄워야 하는 상태.
+  Object? _htpAdvanceError;
+
+  /// 오류 카드를 화면 안으로 끌어와 스크롤 없이 발견할 수 있게 하는 앵커.
+  final GlobalKey _stageErrorAnchorKey = GlobalKey();
+
+  /// 대화 생성이 실패해 질문을 시작하지 못한 상태.
+  Object? _conversationStartError;
+
+  /// 대화 생성 요청 하나의 identity와 Key.
+  ///
+  /// 백엔드가 Key와 요청 Body의 fingerprint를 함께 검사하므로, 분석 ID나 세션이
+  /// 달라지면 Key도 새로 만들어야 `IDEMPOTENCY_KEY_REUSED`(409)를 피한다.
+  String? _conversationStartIdempotencyKey;
+  String? _conversationStartIdentity;
+  int? _conversationStartAnalysisId;
+
+  /// 대화 생성 요청 세대. 이전 analysis의 늦은 응답이 새 요청을 덮지 않게 한다.
+  int _conversationStartGeneration = 0;
+
+  /// 서버가 이미 종료됐다고 응답한 대화인지. 감정·완료 화면까지 전달한다.
+  bool _conversationAlreadyEnded = false;
+
   /// 캔버스 입력이 막힌 상태인지 나타낸다.
   ///
   /// 대화 단계 세션으로 복귀했거나(S15P11B209-664) 이번 화면에서 그림 단계를
@@ -410,25 +434,76 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 반환된 conversationId로 이후 질문·답변 흐름을 연결한다(S15P11B209-246).
   Future<bool> _ensureConversationStarted(int? analysisId) async {
     if (_questionController != null) return true;
-    if (_conversationSetupStarted) return false;
     final conversationRepository = widget.conversationRepository;
     final sessionId = widget.sessionId;
     if (conversationRepository == null || sessionId == null) return false;
+    // 요청 Body를 그대로 식별자로 쓴다 — 백엔드가 해시하는 대상과 같다.
+    final identity = 'session=$sessionId&analysis=${analysisId ?? ''}';
+    // 같은 요청이 이미 진행 중이면 중복 발사하지 않는다. 다른 분석이 들어오면
+    // 진행 중이더라도 그 요청을 폐기하고 새 요청으로 갈아탄다 — 그러지 않으면
+    // 뒤늦게 도착한 이전 분석의 대화 ID가 최신 그림 위에 얹힌다.
+    if (_conversationSetupStarted && _conversationStartIdentity == identity) {
+      return false;
+    }
     _conversationSetupStarted = true;
+    _conversationStartAnalysisId = analysisId;
+    if (_conversationStartIdentity != identity) {
+      // 다른 분석·세션이면 이전 보류 요청을 무효화하고 Key도 새로 만든다.
+      _conversationStartIdentity = identity;
+      _conversationStartIdempotencyKey = null;
+      _conversationStartGeneration += 1;
+    }
+    // 같은 identity 재시도는 같은 Key를 재사용한다 — 새 Key를 쓰면 첫 시도가
+    // 서버에 도달했을 때 대화가 두 번 생길 수 있다.
+    final key = _conversationStartIdempotencyKey ??=
+        (widget.idempotencyKeyProvider ?? _createIdempotencyKey)();
+    final generation = _conversationStartGeneration;
     try {
       final conversationId = await conversationRepository.startConversation(
         drawingSessionId: sessionId,
         analysisId: analysisId,
-        idempotencyKey:
-            (widget.idempotencyKeyProvider ?? _createIdempotencyKey)(),
+        idempotencyKey: key,
       );
-      if (!mounted) return false;
-      setState(() => _setupConversationControllers(conversationId));
+      // 이전 analysis의 늦은 성공이 새 요청의 대화 ID를 덮어쓰면 안 된다.
+      if (!mounted || generation != _conversationStartGeneration) return false;
+      setState(() {
+        _conversationStartError = null;
+        _conversationStartIdentity = null;
+        _conversationStartIdempotencyKey = null;
+        _setupConversationControllers(conversationId);
+      });
       return _questionController != null;
-    } on Object {
+    } on Object catch (error) {
+      if (generation != _conversationStartGeneration) return false;
       // 실패 시 다음 탐지 성공에서 재시도할 수 있도록 플래그를 되돌린다.
       _conversationSetupStarted = false;
+      // 저장 전 거절이 확정된 실패는 보류 Key를 버려 새 요청을 허용한다.
+      if (!shouldKeepRequestSnapshot(
+        error,
+        endpoint: ConversationRequestEndpoint.conversationStart,
+      )) {
+        _conversationStartIdentity = null;
+        _conversationStartIdempotencyKey = null;
+      }
+      if (mounted) {
+        setState(() => _conversationStartError = error);
+        _revealStageError();
+      }
       return false;
+    }
+  }
+
+  /// 대화 생성 실패 뒤 같은 멱등성 키로 다시 대화를 열고 첫 질문을 요청한다.
+  Future<void> _retryConversationStart() async {
+    if (_conversationSetupStarted || _questionController != null) return;
+    setState(() => _conversationStartError = null);
+    final analysisId = _conversationStartAnalysisId;
+    final started = await _ensureConversationStarted(analysisId);
+    if (!started || !mounted) return;
+    if (analysisId != null) {
+      await _questionController?.loadForAnalysis(analysisId);
+    } else {
+      await _questionController?.load();
     }
   }
 
@@ -491,6 +566,12 @@ class _DrawingScreenState extends State<DrawingScreen>
   void _handleQuestionChanged() {
     final questionController = _questionController;
     if (questionController?.status == AiQuestionStatus.conversationComplete) {
+      // 이미 완료된 상태를 바꿀 필요가 없고 불필요한 네트워크 요청을 피하기
+      // 위해 종료 API를 다시 부르지 않는다.
+      if (questionController?.conversationAlreadyEnded == true) {
+        _skipConversationEndAndContinue();
+        return;
+      }
       final reason = questionController?.completionReason;
       if (reason != null && !_automaticConversationEndStarted) {
         unawaited(_completeConversationAutomatically(reason));
@@ -515,10 +596,15 @@ class _DrawingScreenState extends State<DrawingScreen>
           question,
           scheduleReveal: _voiceAnswerUploadController == null,
         );
-        _answerSubmissionController?.beginQuestion();
-        _questionSkipController?.beginQuestion();
-        _voiceAnswerUploadController?.beginQuestion();
-        unawaited(_prepareVoiceAnswerForQuestion(question));
+        // 질문 ID를 함께 넘겨 이전 질문의 늦은 응답을 무효화한다.
+        _answerSubmissionController?.beginQuestion(question.messageId);
+        _questionSkipController?.beginQuestion(question.messageId);
+        _voiceAnswerUploadController?.beginQuestion(question.messageId);
+        if (_voiceAnswerUploadController == null) {
+          unawaited(_questionTtsController?.playQuestion(question));
+        } else {
+          unawaited(_prepareVoiceAnswerForQuestion(question));
+        }
       }
     });
   }
@@ -653,10 +739,19 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   Future<void> _selectQuestionOption(String optionId) async {
     final question = _questionDisplayController.visibleQuestion;
-    if (question == null) return;
-    final valid = _questionSelectionController.select(question, optionId);
     final controller = _answerSubmissionController;
-    if (!valid || controller == null) return;
+    if (question == null || controller == null) return;
+    final pendingOptionId = controller.pendingOptionId;
+    if (controller.isLockedToPendingAnswer &&
+        pendingOptionId != null &&
+        pendingOptionId != optionId) {
+      // 저장 결과가 불확실한 동안 화면도 실제 재전송 가능한 pending 답변을
+      // 가리켜야 한다. 새 선택은 표시하거나 전송하지 않는다.
+      _questionSelectionController.select(question, pendingOptionId);
+      return;
+    }
+    final valid = _questionSelectionController.select(question, optionId);
+    if (!valid) return;
     await _questionTtsController?.stop();
     await _voiceRecordingController?.cancel();
     // BE 답변 계약이 선택 시점 스냅샷(type·value·label)을 요구해 객체째 전달
@@ -1051,16 +1146,67 @@ class _DrawingScreenState extends State<DrawingScreen>
           inputMethod: resolution.inputMethod,
         ),
       );
-    } on Object {
+    } on Object catch (error) {
+      // 대화는 이미 끝나 다시 알림이 오지 않으므로, 토스트만 띄우면 화면에
+      // 앞으로 나아갈 방법이 남지 않는다. 재시도 카드를 띄워 같은 Key로 다시
+      // 부를 수 있게 한다.
       _movedToReflection = false;
-      if (mounted) {
-        showAppMessage(
-          context,
-          message: '다음 그림을 준비하지 못했어요. 다시 시도해 주세요.',
-          type: AppMessageType.error,
-        );
-      }
+      if (!mounted) return;
+      setState(() => _htpAdvanceError = error);
+      _revealStageError();
+      showAppMessage(
+        context,
+        message: '다음 그림을 준비하지 못했어요. 다시 시도해 주세요.',
+        type: AppMessageType.error,
+      );
     }
+  }
+
+  /// 도구 패널 아래쪽에 생긴 오류 카드를 현재 화면 안으로 끌어온다.
+  ///
+  /// 좁은 화면에서는 카드가 스크롤 밖에 있어, 아이가 스스로 찾아 내려가야만
+  /// 다음 단계로 갈 수 있는 상태가 된다. 다음 프레임에 카드가 배치된 뒤
+  /// 스크롤을 맞추고, 스크린리더에는 카드 자체의 live region이 알린다.
+  void _revealStageError() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final anchor = _stageErrorAnchorKey.currentContext;
+      if (anchor == null) return;
+      // 앵커를 viewport 위쪽에 붙여 바로 아래 카드 전체가 드러나게 한다.
+      // 중첩 스크롤(바깥 세로 스크롤 + 도구 패널 스크롤)도 함께 맞춘다.
+      unawaited(
+        Scrollable.ensureVisible(
+          anchor,
+          duration: const Duration(milliseconds: 250),
+        ),
+      );
+    });
+  }
+
+  /// `steps/next` 실패 뒤 같은 멱등성 키로 다시 다음 주제를 연다.
+  ///
+  /// `_movedToReflection`이 연타를 막고 `_htpAdvanceIdempotencyKey`를 그대로
+  /// 재사용하므로 서버에 중복 전환이 생기지 않는다.
+  Future<void> _retryHtpAdvance() async {
+    if (_movedToReflection) return;
+    setState(() => _htpAdvanceError = null);
+    await _continueAfterConversation();
+  }
+
+  /// 서버가 이미 종료했다고 답한 대화를 종료 API 없이 다음 단계로 넘긴다.
+  ///
+  /// 종료 API는 이미 끝난 대화에도 저장된 응답을 돌려주지만, 상태를 바꾸지 않는
+  /// 요청을 한 번 더 보낼 이유가 없어 생략한다. HTP HOUSE·TREE는
+  /// [_continueAfterConversation]이 다음 주제를 열고, 일반 그림과 PERSON은 같은
+  /// 함수가 감정 화면으로 넘기므로 두 경로 모두 여기서 처리된다.
+  void _skipConversationEndAndContinue() {
+    if (_automaticConversationEndStarted || !mounted) return;
+    _automaticConversationEndStarted = true;
+    // 감정·완료 화면이 종료 API를 다시 부르지 않도록 상태를 함께 넘긴다.
+    _conversationAlreadyEnded = true;
+    unawaited(_questionTtsController?.stop());
+    _questionDisplayController.dismiss();
+    unawaited(_continueAfterConversation());
   }
 
   /// 감정 회고 화면으로 한 번만 이동한다.
@@ -1077,7 +1223,10 @@ class _DrawingScreenState extends State<DrawingScreen>
         sessionId: sessionId,
         repository: repository,
         conversationId: _activeConversationId,
-        conversationAlreadyEnded: _conversationEndController?.completed == true,
+        // 서버가 이미 종료했다고 답한 대화도 끝난 것으로 넘겨 종료 API 재호출을 막는다.
+        conversationAlreadyEnded:
+            _conversationAlreadyEnded ||
+            _conversationEndController?.completed == true,
         conversationEndRepository: widget.conversationEndRepository,
         conversationEndIdempotencyKey:
             _conversationEndController?.requestIdempotencyKey,
@@ -1192,6 +1341,21 @@ class _DrawingScreenState extends State<DrawingScreen>
                 _voiceAnswerUploadController?.status ??
                 VoiceAnswerUploadStatus.idle,
             onRetryVoiceAnswerUpload: _retryVoiceAnswerUpload,
+            // 실패했지만 다시 시도해도 같은 결과인 조작은 잠근다.
+            answerRetryable:
+                _answerSubmissionController?.status !=
+                    OptionAnswerSubmissionStatus.failure ||
+                _answerSubmissionController?.canRetry == true,
+            answerOptionsEnabled:
+                _answerSubmissionController?.canSelectOption ?? true,
+            skipRetryable:
+                _questionSkipController?.status != QuestionSkipStatus.failure ||
+                _questionSkipController?.canRetry == true,
+            endRetryable:
+                _conversationEndController?.status !=
+                    ConversationEndStatus.failure ||
+                _conversationEndController?.canRetry == true,
+            voiceRetryable: _voiceAnswerUploadController?.canRetry ?? false,
             sttResultController: _sttResultController,
           );
           final sidePanel = _DrawingSidePanel(
@@ -1211,6 +1375,12 @@ class _DrawingScreenState extends State<DrawingScreen>
             saveStatus: _syncCoordinator.saveStatus,
             onRetrySave: () => unawaited(_syncCoordinator.retry()),
             questionController: _questionController,
+            conversationStartError: _conversationStartError,
+            htpAdvanceError: _htpAdvanceError,
+            onRetryConversationStart: () =>
+                unawaited(_retryConversationStart()),
+            onRetryHtpAdvance: () => unawaited(_retryHtpAdvance()),
+            stageErrorAnchorKey: _stageErrorAnchorKey,
           );
           final screenSize = MediaQuery.sizeOf(context);
           final useCompactLandscape =
@@ -1288,6 +1458,11 @@ class _CanvasPanel extends StatelessWidget {
     required this.voiceRecordingController,
     required this.voiceAnswerUploadStatus,
     required this.onRetryVoiceAnswerUpload,
+    required this.answerRetryable,
+    required this.answerOptionsEnabled,
+    required this.skipRetryable,
+    required this.endRetryable,
+    required this.voiceRetryable,
     required this.sttResultController,
   });
 
@@ -1323,6 +1498,13 @@ class _CanvasPanel extends StatelessWidget {
   final VoiceRecordingController? voiceRecordingController;
   final VoiceAnswerUploadStatus voiceAnswerUploadStatus;
   final VoidCallback onRetryVoiceAnswerUpload;
+
+  /// 실패한 조작을 같은 버튼으로 다시 시도해도 되는지(Overlay로 그대로 전달).
+  final bool answerRetryable;
+  final bool answerOptionsEnabled;
+  final bool skipRetryable;
+  final bool endRetryable;
+  final bool voiceRetryable;
   final SttResultController? sttResultController;
 
   @override
@@ -1374,6 +1556,11 @@ class _CanvasPanel extends StatelessWidget {
               voiceRecordingController: voiceRecordingController,
               voiceAnswerUploadStatus: voiceAnswerUploadStatus,
               onRetryVoiceAnswerUpload: onRetryVoiceAnswerUpload,
+              answerRetryable: answerRetryable,
+              answerOptionsEnabled: answerOptionsEnabled,
+              skipRetryable: skipRetryable,
+              endRetryable: endRetryable,
+              voiceRetryable: voiceRetryable,
             ),
             if (sttResultController case final controller?)
               Positioned(
@@ -1515,7 +1702,12 @@ class _DrawingSidePanel extends StatelessWidget {
     required this.onComplete,
     required this.saveStatus,
     required this.onRetrySave,
+    required this.onRetryConversationStart,
+    required this.onRetryHtpAdvance,
+    required this.stageErrorAnchorKey,
     this.questionController,
+    this.conversationStartError,
+    this.htpAdvanceError,
   });
 
   final DrawingTool selectedTool;
@@ -1530,6 +1722,18 @@ class _DrawingSidePanel extends StatelessWidget {
   final DrawingSaveStatus saveStatus;
   final VoidCallback onRetrySave;
   final AiQuestionController? questionController;
+
+  /// 대화 생성 실패 원인. `null`이 아니면 준비 안내 대신 재시도 카드를 띄운다.
+  final Object? conversationStartError;
+
+  /// `steps/next` 실패 원인. `null`이 아니면 재시도 카드를 함께 띄운다.
+  final Object? htpAdvanceError;
+
+  final VoidCallback onRetryConversationStart;
+  final VoidCallback onRetryHtpAdvance;
+
+  /// 오류 카드를 화면 안으로 스크롤하기 위한 앵커.
+  final GlobalKey stageErrorAnchorKey;
 
   static const _colors = <(String, Color)>[
     ('검정', AppColors.drawingInk),
@@ -1641,8 +1845,19 @@ class _DrawingSidePanel extends StatelessWidget {
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
+          // 오류 카드가 붙는 자리. 실패 시 이 지점을 화면 안으로 스크롤한다.
+          SizedBox.shrink(key: stageErrorAnchorKey),
           if (questionController case final controller?)
             AiQuestionLoadPanel(controller: controller, loadOnMount: false)
+          else if (conversationStartError != null)
+            _AiStageRetryCard(
+              key: const ValueKey('conversation-start-error'),
+              title: '대화를 시작하지 못했어요',
+              error: conversationStartError,
+              onRetry: onRetryConversationStart,
+              retryKey: const ValueKey('conversation-start-retry'),
+              endpoint: ConversationRequestEndpoint.conversationStart,
+            )
           else
             Container(
               padding: const EdgeInsets.all(AppSpacing.md),
@@ -1656,6 +1871,16 @@ class _DrawingSidePanel extends StatelessWidget {
                 style: TextStyle(color: AppColors.inkMuted, fontSize: 16),
               ),
             ),
+          if (htpAdvanceError != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            _AiStageRetryCard(
+              key: const ValueKey('htp-advance-error'),
+              title: '다음 그림을 준비하지 못했어요',
+              error: htpAdvanceError,
+              onRetry: onRetryHtpAdvance,
+              retryKey: const ValueKey('htp-advance-retry'),
+            ),
+          ],
           const SizedBox(height: AppSpacing.lg),
           _SaveStatusIndicator(status: saveStatus, onRetry: onRetrySave),
           const SizedBox(height: AppSpacing.sm),
@@ -1674,6 +1899,93 @@ class _DrawingSidePanel extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// 대화 시작·다음 주제 전환처럼 화면 안에서 되짚을 수 있는 단계 실패 카드.
+///
+/// 아이 화면이므로 원인 문구는 공통 `childFriendly` 표현만 쓰고 HTTP status나
+/// errorCode는 절대 노출하지 않는다. 같은 요청을 반복해도 결과가 같은 실패
+/// (401·403·404·검증 오류)에는 재시도 버튼을 만들지 않는다.
+class _AiStageRetryCard extends StatelessWidget {
+  const _AiStageRetryCard({
+    required this.title,
+    required this.error,
+    required this.onRetry,
+    required this.retryKey,
+    this.endpoint,
+    super.key,
+  });
+
+  final String title;
+  final Object? error;
+  final VoidCallback onRetry;
+  final Key retryKey;
+  final ConversationRequestEndpoint? endpoint;
+
+  @override
+  Widget build(BuildContext context) {
+    final presentation = ApiFailurePresentation.of(error, childFriendly: true);
+    final canRetry = endpoint == null
+        ? presentation.canRetry
+        : canRetryConversationRequest(error, endpoint: endpoint!);
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.lavenderSoft,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+      ),
+      child: Column(
+        children: [
+          Semantics(
+            liveRegion: true,
+            container: true,
+            label: '$title. ${presentation.message}',
+            child: ExcludeSemantics(
+              child: Column(
+                children: [
+                  const Icon(
+                    Icons.cloud_off_rounded,
+                    color: AppColors.error,
+                    size: 32,
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    presentation.message,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: AppColors.inkMuted),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (canRetry)
+            TextButton(
+              key: retryKey,
+              onPressed: onRetry,
+              style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.refresh_rounded),
+                  SizedBox(width: AppSpacing.xs),
+                  Flexible(child: Text('다시 시도')),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }
 
 class _SaveStatusIndicator extends StatelessWidget {

@@ -3,6 +3,7 @@ export 'application/ai_question_display_controller.dart';
 export 'application/ai_question_selection_controller.dart';
 export 'application/ai_question_tts_controller.dart';
 export 'application/conversation_end_controller.dart';
+export 'application/conversation_retry_policy.dart';
 export 'application/option_answer_submission_controller.dart';
 export 'application/question_skip_controller.dart';
 export 'application/voice_recording_controller.dart';
