@@ -4,7 +4,15 @@ spring:
       on-profile: local
 
   datasource:
-    url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:dodam}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&characterEncoding=UTF-8
+    # sessionVariables=time_zone='+09:00' — S15P11B209-736
+    #   serverTimezone 은 **드라이버가 값을 변환**할 때 쓰는 기준이라, 앱이 쓴 컬럼만 KST 가 됐다.
+    #   DEFAULT CURRENT_TIMESTAMP 는 드라이버를 거치지 않고 **MySQL 세션 시간대**로 평가되므로
+    #   서버 기본값(UTC)이 그대로 들어갔다 — 같은 행 안에서 started_at 은 KST, created_at 은 UTC.
+    #   세션 시간대를 커넥션 단위로 고정해 두 경로를 같은 기준으로 맞춘다.
+    #   %2B 는 '+' 의 URL 인코딩이다(생략하면 공백으로 해석돼 time_zone 설정이 깨진다).
+    #   ⚠️ V10__unify_timestamps_to_kst.sql 과 반드시 같이 배포돼야 한다. 따로 나가면
+    #      한 테이블에 두 규약이 섞이고 그 뒤로는 데이터만으로 판별할 수 없다.
+    url: jdbc:mysql://${DB_HOST:127.0.0.1}:${DB_PORT:3306}/${DB_NAME:dodam}?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Seoul&sessionVariables=time_zone%3D%27%2B09%3A00%27&characterEncoding=UTF-8
     username: ${DB_USERNAME:root}
     password: ${DB_PASSWORD:}
     driver-class-name: com.mysql.cj.jdbc.Driver
