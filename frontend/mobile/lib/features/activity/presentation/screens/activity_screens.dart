@@ -869,7 +869,8 @@ class _DrawingScreenState extends State<DrawingScreen>
       // 근거로 쓰지 않는다 — 명세 §10.8은 감정 선택을 가리키지만 정본 활동 흐름
       // §23.1은 대화(14~18) 뒤에 회고(19)를 두므로 단계로만 분기한다.
       completionPhase = _DrawingCompletePhase.contractValidation;
-      if (completionResponse.currentStage != 'CONVERSING') {
+      if (completionResponse.currentStage != 'CONVERSING' &&
+          completionResponse.currentStage != 'REFLECTION') {
         throw StateError('Unexpected drawing completion result');
       }
       if (kDebugMode) {
@@ -884,6 +885,10 @@ class _DrawingScreenState extends State<DrawingScreen>
       // 이 뒤로 캔버스 저장은 서버가 받지 않으므로 자동 저장을 멈춘다.
       _syncCoordinator.stop();
       setState(() => _drawingStageFinished = true);
+      if (completionResponse.currentStage == 'REFLECTION') {
+        await _continueAfterConversation();
+        return;
+      }
       await _startConversationAfterDrawing(
         completionResponse.analysis.analysisId,
       );

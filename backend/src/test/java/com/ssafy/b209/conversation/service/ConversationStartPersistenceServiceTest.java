@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.verify;
 
+import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.domain.ConversationStartChildProfile;
@@ -17,6 +18,7 @@ import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartAuthorizationRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartChildProfileRepository;
 import com.ssafy.b209.conversation.repository.ConversationStartDrawingSessionRepository;
+import com.ssafy.b209.drawing.domain.DrawingStage;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.lang.reflect.Constructor;
 import java.time.Clock;
@@ -32,6 +34,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
 class ConversationStartPersistenceServiceTest {
+  @Mock private DrawingAnalysisRepository analysisRepository;
   @Mock private ConversationStartDrawingSessionRepository drawingSessionRepository;
   @Mock private ConversationStartChildProfileRepository childProfileRepository;
   @Mock private ConversationStartAuthorizationRepository authorizationRepository;
@@ -43,6 +46,7 @@ class ConversationStartPersistenceServiceTest {
   void setUp() {
     service =
         new ConversationStartPersistenceService(
+            analysisRepository,
             drawingSessionRepository,
             childProfileRepository,
             authorizationRepository,
@@ -74,7 +78,50 @@ class ConversationStartPersistenceServiceTest {
     assertThat(response.difficulty()).isEqualTo("LOWER_ELEMENTARY");
     assertThat(response.questionCount()).isZero();
     assertThat(response.nextAction()).isEqualTo("REQUEST_NEXT_QUESTION");
+    assertThat(ReflectionTestUtils.getField(drawingSession, "currentStage"))
+        .isEqualTo(DrawingStage.CONVERSING);
     verify(conversationSessionRepository).saveAndFlush(any(ConversationSession.class));
+  }
+
+  @Test
+  void createsConversationFromIntermediateAnalysisWithoutLeavingDrawingStage() throws Exception {
+    ConversationStartDrawingSession drawingSession = drawingSession(DrawingStage.DRAWING);
+    ConversationStartChildProfile child = child("LOWER_ELEMENTARY");
+    given(drawingSessionRepository.findActiveByIdForUpdate(100L))
+        .willReturn(Optional.of(drawingSession));
+    given(authorizationRepository.hasGuardianChildRelation(9L, 1L)).willReturn(true);
+    given(authorizationRepository.hasRequiredConsents(1L)).willReturn(true);
+    given(analysisRepository.isUsableIntermediateConversationBasis(100L, 700L)).willReturn(true);
+    given(conversationSessionRepository.findByDrawingSessionId(100L)).willReturn(Optional.empty());
+    given(childProfileRepository.findById(1L)).willReturn(Optional.of(child));
+    given(conversationSessionRepository.saveAndFlush(any()))
+        .willAnswer(
+            invocation -> {
+              ConversationSession session = invocation.getArgument(0);
+              ReflectionTestUtils.setField(session, "id", 800L);
+              return session;
+            });
+
+    var response = service.create(9L, 100L, new StartConversationRequest(700L, 5));
+
+    assertThat(response.conversationId()).isEqualTo(800L);
+    assertThat(ReflectionTestUtils.getField(drawingSession, "currentStage"))
+        .isEqualTo(DrawingStage.DRAWING);
+  }
+
+  @Test
+  void rejectsDrawingStageConversationWithoutIntermediateAnalysis() throws Exception {
+    given(drawingSessionRepository.findActiveByIdForUpdate(100L))
+        .willReturn(Optional.of(drawingSession(DrawingStage.DRAWING)));
+    given(authorizationRepository.hasGuardianChildRelation(9L, 1L)).willReturn(true);
+    given(authorizationRepository.hasRequiredConsents(1L)).willReturn(true);
+
+    assertThatThrownBy(() -> service.create(9L, 100L, null))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception ->
+                assertThat(exception.getErrorCode())
+                    .isEqualTo(ConversationStartErrorCode.INVALID_STATE_TRANSITION));
   }
 
   @Test
@@ -111,13 +158,16 @@ class ConversationStartPersistenceServiceTest {
   }
 
   private ConversationStartDrawingSession drawingSession() throws Exception {
+    return drawingSession(DrawingStage.ANALYZING);
+  }
+
+  private ConversationStartDrawingSession drawingSession(DrawingStage stage) throws Exception {
     ConversationStartDrawingSession session = instantiate(ConversationStartDrawingSession.class);
     ReflectionTestUtils.setField(session, "id", 100L);
     ReflectionTestUtils.setField(session, "childId", 1L);
     ReflectionTestUtils.setField(
         session, "sessionStatus", com.ssafy.b209.drawing.domain.DrawingSessionStatus.IN_PROGRESS);
-    ReflectionTestUtils.setField(
-        session, "currentStage", com.ssafy.b209.drawing.domain.DrawingStage.ANALYZING);
+    ReflectionTestUtils.setField(session, "currentStage", stage);
     return session;
   }
 

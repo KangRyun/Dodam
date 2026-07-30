@@ -19,7 +19,11 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-/** 보호자 권한과 최신 질문 상태를 확인한 뒤 대화를 종료하고 그림 활동을 회고 단계로 전환한다. */
+/**
+ * 보호자 권한과 최신 질문 상태를 확인한 뒤 대화를 종료한다.
+ *
+ * <p>그림 작성 중 시작된 대화는 종료 후에도 Drawing 단계를 유지하며, 그림 완료 이후의 대화는 Reflection 단계로 전환한다.
+ */
 @Service
 public class ConversationEndService {
 
@@ -71,10 +75,10 @@ public class ConversationEndService {
   }
 
   /**
-   * 현재 보호자가 접근 가능한 진행 중 대화를 종료하고 연결된 그림 세션을 회고 단계로 전환한다.
+   * 현재 보호자가 접근 가능한 진행 중 대화를 종료하고 연결된 그림 세션의 후속 단계를 확정한다.
    *
    * <p>이미 종료된 대화는 최초 완료 사유와 시각을 바꾸지 않고 같은 종료 결과를 반환한다. 마지막 질문 식별자가 전달되면 잠금 안에서 최신 질문과 비교해 오래된 화면
-   * 상태로 인한 종료를 차단한다.
+   * 상태로 인한 종료를 차단한다. 그림 작성 또는 최종 분석 중 종료하면 해당 단계를 유지하고, 최종 분석 완료 처리가 종료된 대화를 확인해 Reflection으로 전환한다.
    *
    * @param conversationId 종료할 대화 세션 식별자
    * @param request 종료 사유와 마지막 질문 식별자
@@ -94,15 +98,15 @@ public class ConversationEndService {
             .orElseThrow(
                 () -> new BusinessException(ConversationEndErrorCode.CONVERSATION_NOT_FOUND));
 
-    if (conversation.isCompleted()) {
-      return toResponse(conversation);
-    }
-
     DrawingSession drawingSession =
         drawingRepository
             .findNotDeletedByIdForUpdate(conversation.getDrawingSessionId())
             .orElseThrow(
                 () -> new BusinessException(ConversationEndErrorCode.CONVERSATION_NOT_FOUND));
+
+    if (conversation.isCompleted()) {
+      return toResponse(conversation, drawingSession.getCurrentStage());
+    }
 
     validateLastQuestion(conversation.getId(), request.lastQuestionMessageId());
     if (!conversation.isConversing()) {
@@ -110,8 +114,12 @@ public class ConversationEndService {
     }
 
     conversation.complete(request.reason(), LocalDateTime.now(clock));
-    drawingSession.enterReflection();
-    return toResponse(conversation);
+    DrawingStage nextStage = drawingSession.getCurrentStage();
+    if (nextStage == DrawingStage.CONVERSING || nextStage == DrawingStage.REFLECTION) {
+      drawingSession.enterReflection();
+      nextStage = DrawingStage.REFLECTION;
+    }
+    return toResponse(conversation, nextStage);
   }
 
   private void validateLastQuestion(Long conversationId, Long lastQuestionMessageId) {
@@ -132,13 +140,14 @@ public class ConversationEndService {
     }
   }
 
-  private EndConversationResponse toResponse(ConversationSession conversation) {
+  private EndConversationResponse toResponse(
+      ConversationSession conversation, DrawingStage nextStage) {
     return new EndConversationResponse(
         conversation.getId(),
         conversation.getConversationStatus(),
         conversation.isCompleted(),
         conversation.getCompletionReason(),
         conversation.getCompletedAt(),
-        DrawingStage.REFLECTION);
+        nextStage);
   }
 }

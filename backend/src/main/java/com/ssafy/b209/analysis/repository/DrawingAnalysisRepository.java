@@ -113,6 +113,28 @@ public interface DrawingAnalysisRepository extends JpaRepository<DrawingAnalysis
   Optional<DrawingAnalysis> findDetailByAnalysisId(@Param("analysisId") Long analysisId);
 
   /**
+   * 그림 작성 중 대화를 시작할 근거로 사용할 수 있는 성공한 중간 객체 탐지인지 확인한다.
+   *
+   * <p>세션 식별자와 분석 식별자를 함께 대조해 다른 그림 세션의 결과를 대화 근거로 사용하는 것을 막고, 그림일기 활동의 중간 분석만 허용한다.
+   *
+   * @param drawingSessionId 대화를 시작할 그림 활동 세션 식별자
+   * @param analysisId 요청에서 전달한 분석 식별자
+   * @return 같은 그림일기 세션에서 완료된 중간 객체 탐지이면 {@code true}
+   */
+  @Query(
+      "select (count(a) > 0) from DrawingAnalysis a "
+          + "join a.drawingSession s "
+          + "join s.drawingType type "
+          + "where a.id = :analysisId and s.id = :drawingSessionId "
+          + "and type.code = 'ART_DIARY' "
+          + "and a.scope = com.ssafy.b209.analysis.domain.DrawingAnalysisScope.INTERMEDIATE "
+          + "and a.taskType = com.ssafy.b209.analysis.dto.DrawingAnalysisType.OBJECT_DETECTION "
+          + "and a.state in (com.ssafy.b209.analysis.domain.DrawingAnalysisState.SUCCESS, "
+          + "com.ssafy.b209.analysis.domain.DrawingAnalysisState.PARTIAL_SUCCESS)")
+  boolean isUsableIntermediateConversationBasis(
+      @Param("drawingSessionId") Long drawingSessionId, @Param("analysisId") Long analysisId);
+
+  /**
    * 동일 그림과 작업 유형에 처리 중이거나 성공한 분석이 존재하는지 확인한다.
    *
    * @param drawingAssetId 그림 파일 식별자

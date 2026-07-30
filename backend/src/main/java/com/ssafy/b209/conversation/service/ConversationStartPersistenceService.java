@@ -1,5 +1,6 @@
 package com.ssafy.b209.conversation.service;
 
+import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.domain.ConversationStartChildProfile;
 import com.ssafy.b209.conversation.domain.ConversationStartDrawingSession;
@@ -24,6 +25,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ConversationStartPersistenceService {
   private static final int DEFAULT_MAX_QUESTION_COUNT = 10;
+  private final DrawingAnalysisRepository analysisRepository;
   private final ConversationStartDrawingSessionRepository drawingSessionRepository;
   private final ConversationStartChildProfileRepository childProfileRepository;
   private final ConversationStartAuthorizationRepository authorizationRepository;
@@ -33,6 +35,7 @@ public class ConversationStartPersistenceService {
   /**
    * 대화 시작 영속성 의존성을 생성한다.
    *
+   * @param analysisRepository 그림 작성 중 대화 시작 근거 분석 조회 경계
    * @param drawingSessionRepository 그림 활동 세션 잠금 조회 경계
    * @param childProfileRepository 아동 난이도 Snapshot 조회 경계
    * @param authorizationRepository 관계·동의 검증 경계
@@ -40,11 +43,13 @@ public class ConversationStartPersistenceService {
    * @param clock 서버 시각 경계
    */
   public ConversationStartPersistenceService(
+      DrawingAnalysisRepository analysisRepository,
       ConversationStartDrawingSessionRepository drawingSessionRepository,
       ConversationStartChildProfileRepository childProfileRepository,
       ConversationStartAuthorizationRepository authorizationRepository,
       ConversationSessionRepository conversationSessionRepository,
       Clock clock) {
+    this.analysisRepository = analysisRepository;
     this.drawingSessionRepository = drawingSessionRepository;
     this.childProfileRepository = childProfileRepository;
     this.authorizationRepository = authorizationRepository;
@@ -77,7 +82,12 @@ public class ConversationStartPersistenceService {
     if (!authorizationRepository.hasRequiredConsents(drawingSession.getChildId())) {
       throw new BusinessException(ConversationStartErrorCode.REQUIRED_CONSENT_MISSING);
     }
-    if (!drawingSession.canStartConversation()) {
+    boolean hasUsableIntermediateAnalysis =
+        request != null
+            && request.analysisId() != null
+            && analysisRepository.isUsableIntermediateConversationBasis(
+                drawingSessionId, request.analysisId());
+    if (!drawingSession.canStartConversation(hasUsableIntermediateAnalysis)) {
       throw new BusinessException(ConversationStartErrorCode.INVALID_STATE_TRANSITION);
     }
     conversationSessionRepository

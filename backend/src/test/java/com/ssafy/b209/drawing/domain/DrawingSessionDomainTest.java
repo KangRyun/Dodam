@@ -100,6 +100,18 @@ class DrawingSessionDomainTest {
   }
 
   @Test
+  void drawingAnalysisMovesDirectlyToReflectionWhenConversationAlreadyEnded() {
+    DrawingSession session = session();
+    session.startDrawingAnalysis();
+
+    session.finishDrawingAnalysis(true);
+
+    assertThat(session.getSessionStatus()).isEqualTo(DrawingSessionStatus.IN_PROGRESS);
+    assertThat(session.getCurrentStage()).isEqualTo(DrawingStage.REFLECTION);
+    assertThat(session.canSaveReflection()).isTrue();
+  }
+
+  @Test
   void completesHtpStepFromReflectionWithoutEnteringReporting() {
     DrawingSession session = session();
     LocalDateTime completedAt = LocalDateTime.of(2026, 7, 21, 11, 30);

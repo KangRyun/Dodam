@@ -40,17 +40,26 @@ public class ConversationStartDrawingSession {
   /**
    * 대화 시작 가능 상태인지 확인한다.
    *
-   * @return 진행 중이며 ANALYZING 또는 CONVERSING 단계이면 {@code true}
+   * @param hasUsableIntermediateAnalysis 같은 그림일기 세션에서 성공한 중간 객체 탐지 여부
+   * @return 진행 중이고 현재 단계에 필요한 분석 근거가 충족되면 {@code true}
    */
-  public boolean canStartConversation() {
+  public boolean canStartConversation(boolean hasUsableIntermediateAnalysis) {
     return deletedAt == null
         && sessionStatus == DrawingSessionStatus.IN_PROGRESS
-        && (currentStage == DrawingStage.ANALYZING || currentStage == DrawingStage.CONVERSING);
+        && ((currentStage == DrawingStage.DRAWING && hasUsableIntermediateAnalysis)
+            || currentStage == DrawingStage.ANALYZING
+            || currentStage == DrawingStage.CONVERSING);
   }
 
-  /** 대화 세션 생성이 완료되면 그림 활동 화면 단계를 대화로 전이한다. */
+  /**
+   * 대화 세션 생성이 완료되면 최종 그림 분석 단계만 대화 단계로 전이한다.
+   *
+   * <p>그림일기의 중간 분석으로 대화를 시작한 경우에는 획·Draft 저장을 계속 받아야 하므로 DRAWING 단계를 유지한다.
+   */
   public void moveToConversing() {
-    currentStage = DrawingStage.CONVERSING;
+    if (currentStage != DrawingStage.DRAWING) {
+      currentStage = DrawingStage.CONVERSING;
+    }
   }
 
   /**

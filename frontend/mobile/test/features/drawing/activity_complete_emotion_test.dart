@@ -215,6 +215,24 @@ void main() {
     );
   });
 
+  testWidgets('대화를 먼저 종료한 그림은 완료 후 감정 선택 화면으로 이동한다', (tester) async {
+    final repository = _CompletionRepository(
+      completionResponse: _reflectionCompleteResponse,
+    );
+
+    await _pumpDrawing(tester, repository: repository);
+    await _drawStroke(tester);
+
+    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다 그렸어요'));
+    await tester.pumpAndSettle();
+
+    expect(repository.completeCalls, 1);
+    expect(find.byKey(const ValueKey('emotion-submit')), findsOneWidget);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
+  });
+
   testWidgets('생성된 대화를 종료하기 전에는 감정 선택 화면으로 이동하지 않는다', (tester) async {
     final repository = _CompletionRepository();
     await _pumpDrawing(
@@ -1126,6 +1144,19 @@ const _completeResponse = DrawingStageCompleteResponseDto(
   finalAssetId: 140,
   sessionStatus: 'IN_PROGRESS',
   currentStage: 'CONVERSING',
+  analysis: DrawingStageAnalysisDto(
+    analysisId: 700,
+    analysisType: 'OBJECT_DETECTION',
+    status: 'SUCCEEDED',
+  ),
+  nextAction: 'SELECT_EMOTION',
+);
+
+const _reflectionCompleteResponse = DrawingStageCompleteResponseDto(
+  drawingSessionId: 42,
+  finalAssetId: 140,
+  sessionStatus: 'IN_PROGRESS',
+  currentStage: 'REFLECTION',
   analysis: DrawingStageAnalysisDto(
     analysisId: 700,
     analysisType: 'OBJECT_DETECTION',
