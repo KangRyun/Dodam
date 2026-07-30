@@ -94,9 +94,9 @@ ANALYSIS_IMAGE_MAX_BYTES = int(
     os.environ.get("ANALYSIS_IMAGE_MAX_BYTES", str(10 * 1024 * 1024))
 )
 
-# RAG 지식베이스 버전. 검색 파이프라인이 아직 없어 근거를 만들지 못한다 —
-# 그 사실을 응답 unusedInputs로 명시하고 evidenceReferences는 비운다(§24.3).
-RAG_KNOWLEDGE_BASE_VERSION = os.environ.get("RAG_KNOWLEDGE_BASE_VERSION", "")
+# (제거됨 — S15P11B209-614) RAG_KNOWLEDGE_BASE_VERSION env 선언은 배포된 인덱스
+# 실물 기준(rag.knowledge_base_version())으로 대체했다 — 파일 없이 READY로 읽히는
+# 거짓 신호를 막는다. 버전의 정본은 인덱스 메타(index.json) 안에 있다(정책 §7).
 
 # 로컬 개발 전용 명시적 opt-out — 정확히 "true"일 때만 토큰 없이 기동·검사 생략을 허용.
 # reason: 로컬 편의는 '조용한 기본값'이 아니라 개발자가 의도를 선언한 경우에만(C-183-1).

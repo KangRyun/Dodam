@@ -37,11 +37,11 @@ import config
 import internal_contracts
 import llm_client
 import question_service
+import rag
 import report_client
 import stt_client
 import tts_client
 import vlm_client
-import yolo_client
 import yolo_client
 
 
@@ -385,7 +385,8 @@ def internal_health():
       가중치는 프로세스 동안 불변이라 첫 계산을 캐시해 poll마다 재해시하지 않는다(604).
     - vision·language·stt·tts: GMS 키 설정 여부. 원격 모델이라 실제 호출로 확인하면
       health 조회마다 비용이 발생하므로 설정 유무를 대리 지표로 쓴다.
-    - rag: 검색 파이프라인 미구현 — 항상 NOT_READY.
+    - rag: 배포된 인덱스 실물 기준(S15P11B209-614) — env 선언이 아니라 rag.knowledge_base_version()
+      (인덱스 파일 로드 성공 + KB Version)로 판정한다. 선언만 있고 파일이 없는 READY를 막는다.
 
     ⚠️ 가중치 '경로'는 노출하지 않는다(서버 파일 구조 힌트) — 준비 여부만.
     ⚠️ status는 서버 응답 가능 여부이고, 구성요소 상태는 models로 따로 알린다.
@@ -395,6 +396,8 @@ def internal_health():
 
     gms_ready = "READY" if config.GMS_KEY else "NOT_READY"
     detection_readiness = yolo_client.model_readiness()
+    # 배포된 인덱스 실물 기준 — 미배포면 None(로드는 retriever가 캐시하므로 poll 비용 없음).
+    rag_kb_version = rag.knowledge_base_version()
 
     def ready(flag: bool) -> str:
         return "READY" if flag else "NOT_READY"
@@ -410,9 +413,9 @@ def internal_health():
             "stt": gms_ready,
             "tts": gms_ready,
             # 근거 검색이 없으면 근거 기반 문장을 만들 수 없다(§24.3) — 준비됨으로 표시하지 않는다.
-            "rag": ready(bool(config.RAG_KNOWLEDGE_BASE_VERSION)),
+            "rag": ready(rag_kb_version is not None),
         },
-        "knowledgeBaseVersion": config.RAG_KNOWLEDGE_BASE_VERSION or None,
+        "knowledgeBaseVersion": rag_kb_version,
         "timestamp": datetime.now(timezone.utc)
         .isoformat(timespec="milliseconds")
         .replace("+00:00", "Z"),

@@ -12,7 +12,9 @@ BE 계약(report.dto.ObservationGenerationRequest → ObservationGenerationResul
 가드레일:
 - 진단·점수화 금지는 프롬프트가 강제하고, 안전 문구(disclaimer/limitations)는 코드가 상수로 보장한다.
 - 대표 발화·표현 감정 등 아이 표현은 로그로 남기지 않는다(실패 로그에 에러 유형만).
-- RAG(학술 근거 문헌 evidence_references)는 이번 범위 밖 — evidence_summary 수준의 요약만 생성한다(후속 이슈).
+- RAG 근거(S15P11B209-614): 배포된 인덱스에서 관찰 어휘·일반 지식을 검색해 프롬프트 보조
+  근거로 싣고, 출처(ragReferences)와 KB Version을 응답에 기록한다. 검색 실패는 차단이
+  아니라 기능 저하 — RAG 없이 생성한다(정책: docs/ai/rag-corpus-policy.md).
 """
 
 from __future__ import annotations
@@ -28,6 +30,8 @@ import internal_contracts as contracts
 import prompts_registry  # 프롬프트 파일 로딩·버전 관리 중앙화 (S15P11B209-595)
 import report_safety
 from gms import get_client
+from rag import Chunk, RagUnavailableError, retrieve
+from rag import knowledge_base_version as rag_knowledge_base_version
 
 logger = logging.getLogger(__name__)
 
@@ -182,12 +186,14 @@ def _format_activity(
     req: contracts.ObservationGenerationRequest,
     drawing_description: str | None,
     behavior: DrawingBehaviorMetrics | None = None,
+    rag_chunks: list[Chunk] | None = None,
 ) -> str:
-    """[그림 관찰 서술](VLM) + [형식적 분석] + 요청의 집계·감정·대표 발화를 프롬프트 user 메시지로.
+    """[그림 관찰 서술](VLM) + [형식적 분석] + [전문 자료 근거] + 집계·감정·대표 발화.
 
     drawing_description 은 vlm_client.describe 산출물(그림 사실 묘사)이며, 있으면
     관찰 특징·요약의 근거가 된다. 없으면 그림 특징은 언급하지 않도록 안내 문구를 넣는다.
     behavior 는 소요시간·필압 등 형식적 지표이며, 있으면 관찰 보조 근거로 반영된다.
+    rag_chunks(614)는 검색된 전문 자료 근거 — 있으면 어휘·일반 지식 보조로 실린다.
 
     subject_summaries(740)가 있으면 단일 [그림 관찰 서술] 대신 주제별 블록을 쓴다 —
     drawing_description(레거시 draft 경로 인자)과 동시에 오면 주제별 블록이 우선한다.
@@ -203,6 +209,7 @@ def _format_activity(
     return (
         f"{observation_block}"
         f"{_format_behavior(behavior)}"
+        f"{_format_rag_block(rag_chunks or [])}"
         "[활동 데이터]\n"
         f"- 질문 난이도: {req.question_difficulty or '정보 없음'}\n"
         f"- 제시한 질문 수: {req.question_count}\n"
@@ -214,6 +221,78 @@ def _format_activity(
         f"- 대표 발화: {req.representative_utterance or '없음'}\n\n"
         "이 데이터로 규칙에 맞는 관찰 기록 JSON을 만들어줘."
     )
+
+
+# ── RAG 근거 검색 (S15P11B209-614 — 정책: docs/ai/rag-corpus-policy.md) ──────
+def _build_rag_query(
+    req: contracts.ObservationGenerationRequest, drawing_description: str | None
+) -> str:
+    """검색 질의 텍스트 — 관찰 서술·탐지 객체·선택 감정로만 만든다.
+
+    ⚠️ 아이 발화(qaPairs.answerText·대표 발화·표현 감정 문구)는 넣지 않는다(정책 §1-1) —
+    질의는 GMS로 나가는 표면이라 아동 개인 표현의 유출면을 늘리지 않는다.
+    선택 감정은 고정 코드(HAPPY 등)라 개인 표현이 아니다.
+    """
+    parts: list[str] = []
+    if req.subject_summaries:
+        for summary in req.subject_summaries:
+            if summary.drawing_description:
+                parts.append(summary.drawing_description)
+            parts.extend(summary.detected_object_codes)
+    elif drawing_description:
+        parts.append(drawing_description)
+    # 관찰 재료(그림 서술·탐지 객체)가 없으면 질의를 만들지 않는다 — 감정 코드·난이도만으로
+    # 검색하면 그림과 무관한 근거가 붙는다. 둘은 관찰 재료가 있을 때의 보강 신호로만 쓴다.
+    if not parts:
+        return ""
+    if req.selected_emotions:
+        parts.append("아이가 선택한 감정: " + ", ".join(req.selected_emotions))
+    if req.question_difficulty:
+        parts.append(f"연령 난이도: {req.question_difficulty}")
+    return "\n".join(parts).strip()
+
+
+def _search_rag(
+    req: contracts.ObservationGenerationRequest, drawing_description: str | None
+) -> list[Chunk]:
+    """근거 청크 검색. 실패는 '차단'이 아니라 '기능 저하'다(548 폴백 정책과 정합).
+
+    - 인덱스 미배포·임베딩 실패(RagUnavailableError) → 빈 목록으로 진행(로그는 유형만).
+    - 질의 재료가 아예 없으면 검색하지 않는다(임베딩 호출 낭비 + 무의미 질의).
+    사유 코드 표기·메트릭은 후속 615가 이 경계 위에 얹는다.
+    """
+    query = _build_rag_query(req, drawing_description)
+    if not query:
+        return []
+    try:
+        return retrieve(query)
+    except RagUnavailableError as e:
+        logger.info("RAG 근거 없이 리포트 생성 — %s", e)
+        return []
+
+
+def _format_rag_block(chunks: list[Chunk]) -> str:
+    """[전문 자료 근거] 블록. 근거가 없으면 빈 문자열(블록 자체를 싣지 않는다)."""
+    if not chunks:
+        return ""
+    lines = ["[전문 자료 근거]"]
+    for chunk in chunks:
+        lines.append(f"- ({chunk.title}) {chunk.text}")
+    return "\n".join(lines) + "\n\n"
+
+
+def _rag_references(chunks: list[Chunk]) -> list[contracts.RagReference]:
+    """청크 → 출처 목록(자료 단위 중복 제거, 검색 순위 순서 유지)."""
+    seen: set[str] = set()
+    references: list[contracts.RagReference] = []
+    for chunk in chunks:
+        if chunk.source_id in seen:
+            continue
+        seen.add(chunk.source_id)
+        references.append(
+            contracts.RagReference(source_id=chunk.source_id, title=chunk.title)
+        )
+    return references
 
 
 def _extract_json(raw: str) -> dict:
@@ -299,9 +378,16 @@ def _safe_follow_up(raw) -> str:
 
 
 def _assemble(
-    req: contracts.ObservationGenerationRequest, data: dict, model: str
+    req: contracts.ObservationGenerationRequest,
+    data: dict,
+    model: str,
+    rag_chunks: list[Chunk] | None = None,
 ) -> contracts.ObservationGenerationResult:
-    """LLM 정성 결과(data) + 서버 고정 필드를 합쳐 계약 결과를 만든다."""
+    """LLM 정성 결과(data) + 서버 고정 필드를 합쳐 계약 결과를 만든다.
+
+    rag_chunks(614)가 있으면 출처 목록과 KB Version을 함께 싣는다 — 출처 표시는
+    라이선스 의무이자 리포트 재현성 재료(어떤 지식 근거로 생성됐나).
+    """
     conv = data.get("conversationSummary") or {}
     features = [_feature(f) for f in data.get("features", []) if isinstance(f, dict)]
 
@@ -368,6 +454,12 @@ def _assemble(
             if isinstance(q, dict)
         ],
         limitations_text=LIMITATIONS,
+        rag_references=_rag_references(rag_chunks or []),
+        # 근거를 실제로 썼을 때만 KB Version을 싣는다 — 근거 없는 리포트에 버전이 붙으면
+        # "이 지식에 기반했다"는 거짓 신호가 된다.
+        knowledge_base_version=(
+            rag_knowledge_base_version() if rag_chunks else None
+        ),
     )
 
 
@@ -394,9 +486,14 @@ def generate(
         RuntimeError: GMS 호출 실패 또는 응답 JSON 파싱 실패 시(내용은 감추고 유형만 로그).
     """
     used_model = model or config.LLM_MODEL
+    # RAG 근거 검색(614) — 실패해도 리포트는 생성한다(기능 저하, 차단 아님).
+    rag_chunks = _search_rag(req, drawing_description)
     messages = [
         {"role": "system", "content": _system_prompt()},
-        {"role": "user", "content": _format_activity(req, drawing_description, behavior)},
+        {
+            "role": "user",
+            "content": _format_activity(req, drawing_description, behavior, rag_chunks),
+        },
     ]
     try:
         resp = get_client().chat.completions.create(
@@ -413,7 +510,7 @@ def generate(
     data = _extract_json(resp.choices[0].message.content or "")
     # 재현성: GMS가 실제 서빙한 모델 ID를 기록한다(예: gpt-4o-mini-2024-07-18). 없으면 요청 모델명.
     served_model = getattr(resp, "model", "") or used_model
-    return _assemble(req, data, served_model)
+    return _assemble(req, data, served_model, rag_chunks)
 
 
 if __name__ == "__main__":
