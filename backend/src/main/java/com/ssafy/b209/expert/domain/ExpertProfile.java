@@ -17,6 +17,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import org.hibernate.annotations.BatchSize;
 
 /**
  * 전문가 사용자의 공개 프로필과 검증 상태를 관리한다.
@@ -76,6 +77,7 @@ public class ExpertProfile {
 
   @OneToMany(mappedBy = "expertProfile", cascade = CascadeType.ALL, orphanRemoval = true)
   @OrderBy("displayOrder ASC")
+  @BatchSize(size = 50)
   private final List<ExpertProfileSpecialty> specialties = new ArrayList<>();
 
   /** JPA가 Entity를 복원할 때 사용한다. */
@@ -121,6 +123,13 @@ public class ExpertProfile {
    */
   public Long getId() {
     return id;
+  }
+
+  /**
+   * @return 프로필을 소유한 사용자 식별자
+   */
+  public Long getUserId() {
+    return userId;
   }
 
   /**

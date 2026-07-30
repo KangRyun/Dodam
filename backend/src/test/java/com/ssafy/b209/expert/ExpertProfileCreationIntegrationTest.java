@@ -1,6 +1,7 @@
 package com.ssafy.b209.expert;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -33,6 +34,8 @@ class ExpertProfileCreationIntegrationTest {
 
   private static final long EXPERT_USER_ID = 5741L;
   private static final long GUARDIAN_USER_ID = 5742L;
+  private static final long VERIFIED_EXPERT_USER_ID = 5743L;
+  private static final long VERIFIED_EXPERT_PROFILE_ID = 5751L;
 
   @Container @ServiceConnection
   static final MySQLContainer<?> MYSQL_CONTAINER =
@@ -46,6 +49,7 @@ class ExpertProfileCreationIntegrationTest {
 
   @BeforeEach
   void setUp() {
+    jdbcTemplate.update("DELETE FROM expert_follows");
     jdbcTemplate.update("DELETE FROM expert_profile_specialties");
     jdbcTemplate.update("DELETE FROM expert_profiles");
     jdbcTemplate.update("DELETE FROM users");
@@ -55,10 +59,37 @@ class ExpertProfileCreationIntegrationTest {
           (id, role, account_status, is_completed, nickname, email, created_at, updated_at)
         VALUES
           (?, 'EXPERT', 'ACTIVE', TRUE, '전문가', 'expert@example.com', NOW(6), NOW(6)),
-          (?, 'GUARDIAN', 'ACTIVE', TRUE, '보호자', 'guardian@example.com', NOW(6), NOW(6))
+          (?, 'GUARDIAN', 'ACTIVE', TRUE, '보호자', 'guardian@example.com', NOW(6), NOW(6)),
+          (?, 'EXPERT', 'ACTIVE', TRUE, '검증 전문가', 'verified@example.com', NOW(6), NOW(6))
         """,
         EXPERT_USER_ID,
-        GUARDIAN_USER_ID);
+        GUARDIAN_USER_ID,
+        VERIFIED_EXPERT_USER_ID);
+    jdbcTemplate.update(
+        """
+        INSERT INTO expert_profiles
+          (id, user_id, display_name, organization, position_title, career_years,
+           target_age_min, target_age_max, introduction, is_consultation_available,
+           verification_status, workplace, created_at, updated_at)
+        VALUES (?, ?, '마음숲 전문가', '마음숲 센터', '상담사', 8, 5, 13,
+                '검증된 공개 소개', TRUE, 'VERIFIED', '대전', NOW(6), NOW(6))
+        """,
+        VERIFIED_EXPERT_PROFILE_ID,
+        VERIFIED_EXPERT_USER_ID);
+    jdbcTemplate.update(
+        """
+        INSERT INTO expert_profile_specialties
+          (expert_profile_id, specialty_code, specialty_name, display_order, created_at)
+        VALUES (?, 'CHILD_ART', '아동 미술', 0, NOW(6))
+        """,
+        VERIFIED_EXPERT_PROFILE_ID);
+    jdbcTemplate.update(
+        """
+        INSERT INTO expert_follows (guardian_user_id, expert_profile_id, created_at)
+        VALUES (?, ?, NOW(6))
+        """,
+        GUARDIAN_USER_ID,
+        VERIFIED_EXPERT_PROFILE_ID);
   }
 
   @AfterEach
@@ -112,9 +143,13 @@ class ExpertProfileCreationIntegrationTest {
                 """
                 SELECT specialty_code
                   FROM expert_profile_specialties
+                 WHERE expert_profile_id = (
+                   SELECT id FROM expert_profiles WHERE user_id = ?
+                 )
                  ORDER BY display_order
                 """,
-                String.class))
+                String.class,
+                EXPERT_USER_ID))
         .containsExactly("CHILD_ART", "PARENT_COUNSELING");
   }
 
@@ -171,6 +206,39 @@ class ExpertProfileCreationIntegrationTest {
                 Integer.class,
                 EXPERT_USER_ID))
         .isZero();
+  }
+
+  @Test
+  void listsVerifiedProfilesWithFiltersAndCurrentGuardianFollowState() throws Exception {
+    authenticate(GUARDIAN_USER_ID);
+
+    mockMvc
+        .perform(
+            get("/api/v1/experts")
+                .param("specialty", "child_art")
+                .param("consultationAvailable", "true")
+                .param("keyword", "마음숲")
+                .param("page", "0")
+                .param("size", "10"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.totalElements").value(1))
+        .andExpect(jsonPath("$.data.content[0].expertId").value(VERIFIED_EXPERT_PROFILE_ID))
+        .andExpect(jsonPath("$.data.content[0].specialties[0]").value("CHILD_ART"))
+        .andExpect(jsonPath("$.data.content[0].followerCount").value(1))
+        .andExpect(jsonPath("$.data.content[0].followedByMe").value(true));
+  }
+
+  @Test
+  void returnsVerifiedProfileDetail() throws Exception {
+    authenticate(EXPERT_USER_ID);
+
+    mockMvc
+        .perform(get("/api/v1/experts/{expertId}", VERIFIED_EXPERT_PROFILE_ID))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.expertId").value(VERIFIED_EXPERT_PROFILE_ID))
+        .andExpect(jsonPath("$.data.displayName").value("마음숲 전문가"))
+        .andExpect(jsonPath("$.data.followerCount").value(1))
+        .andExpect(jsonPath("$.data.followedByMe").value(false));
   }
 
   private void authenticate(long userId) {
