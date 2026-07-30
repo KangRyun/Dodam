@@ -28,6 +28,11 @@ import com.ssafy.b209.drawing.domain.DrawingSessionStatus;
 import com.ssafy.b209.drawing.domain.DrawingStage;
 import com.ssafy.b209.drawing.domain.DrawingType;
 import com.ssafy.b209.drawing.dto.response.DrawingSessionHistoryPageResponse;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessment;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStatus;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
+import com.ssafy.b209.drawing.htp.domain.HtpDrawingSubject;
+import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
 import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
@@ -65,6 +70,7 @@ class DrawingSessionHistoryQueryServiceTest {
   @Mock private DrawingSessionEmotionRepository drawingSessionEmotionRepository;
   @Mock private DrawingAnalysisRepository drawingAnalysisRepository;
   @Mock private ReportRepository reportRepository;
+  @Mock private HtpAssessmentRepository htpAssessmentRepository;
   @Mock private CurrentAuthenticatedUserResolver currentUserResolver;
   @Mock private GuardianResourceAccessValidator accessValidator;
 
@@ -82,6 +88,7 @@ class DrawingSessionHistoryQueryServiceTest {
         drawingSessionEmotionRepository,
         drawingAnalysisRepository,
         reportRepository,
+        htpAssessmentRepository,
         new DrawingAssetFileUrlFactory(),
         currentUserResolver,
         accessValidator);
@@ -94,6 +101,8 @@ class DrawingSessionHistoryQueryServiceTest {
     given(session.getTitle()).willReturn("우리 집");
     given(session.getCompletedAt()).willReturn(COMPLETED_AT);
     givenPageOf(session);
+    given(htpAssessmentRepository.findByStepDrawingSessionIdIn(List.of(SESSION_ID)))
+        .willReturn(List.of());
 
     given(thumbnail.getDrawingSession()).willReturn(session);
     given(thumbnail.getId()).willReturn(30L);
@@ -162,6 +171,8 @@ class DrawingSessionHistoryQueryServiceTest {
     given(session.getTitle()).willReturn(null);
     given(session.getCompletedAt()).willReturn(null);
     givenPageOf(session);
+    given(htpAssessmentRepository.findByStepDrawingSessionIdIn(List.of(SESSION_ID)))
+        .willReturn(List.of());
 
     given(analysis.getDrawingSession()).willReturn(session);
     given(analysis.getState()).willReturn(DrawingAnalysisState.PARTIAL_SUCCESS);
@@ -204,6 +215,8 @@ class DrawingSessionHistoryQueryServiceTest {
     given(session.getTitle()).willReturn(null);
     given(session.getCompletedAt()).willReturn(null);
     givenPageOf(session);
+    given(htpAssessmentRepository.findByStepDrawingSessionIdIn(List.of(SESSION_ID)))
+        .willReturn(List.of());
 
     given(
             drawingAssetRepository
@@ -249,6 +262,8 @@ class DrawingSessionHistoryQueryServiceTest {
     given(session.getTitle()).willReturn(null);
     given(session.getCompletedAt()).willReturn(COMPLETED_AT);
     givenPageOf(session);
+    given(htpAssessmentRepository.findByStepDrawingSessionIdIn(List.of(SESSION_ID)))
+        .willReturn(List.of());
 
     DrawingAsset finalAsset = org.mockito.Mockito.mock(DrawingAsset.class);
     given(finalAsset.getId()).willReturn(31L);
@@ -272,6 +287,64 @@ class DrawingSessionHistoryQueryServiceTest {
   }
 
   @Test
+  void groupsHtpStepsIntoOneHistoryItem() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+
+    DrawingSession houseSession = org.mockito.Mockito.mock(DrawingSession.class);
+    DrawingSession treeSession = org.mockito.Mockito.mock(DrawingSession.class);
+    DrawingSession personSession = org.mockito.Mockito.mock(DrawingSession.class);
+    HtpAssessment assessment = org.mockito.Mockito.mock(HtpAssessment.class);
+    HtpAssessmentStep houseStep = org.mockito.Mockito.mock(HtpAssessmentStep.class);
+    HtpAssessmentStep treeStep = org.mockito.Mockito.mock(HtpAssessmentStep.class);
+    HtpAssessmentStep personStep = org.mockito.Mockito.mock(HtpAssessmentStep.class);
+    DrawingType htpType = org.mockito.Mockito.mock(DrawingType.class);
+
+    given(houseSession.getId()).willReturn(10L);
+    given(treeSession.getId()).willReturn(11L);
+    given(personSession.getId()).willReturn(12L);
+    given(personSession.getDrawingType()).willReturn(htpType);
+    given(htpType.getId()).willReturn(9L);
+    given(htpType.getCode()).willReturn("HTP");
+    given(htpType.getName()).willReturn("집·나무·사람 그림");
+    given(personSession.getInputMethod()).willReturn(DrawingInputMethod.CANVAS);
+    given(personSession.getSessionStatus()).willReturn(DrawingSessionStatus.COMPLETED);
+    given(personSession.getCurrentStage()).willReturn(DrawingStage.COMPLETED);
+    given(houseStep.getStepOrder()).willReturn(1);
+    given(houseStep.getDrawingSubject()).willReturn(HtpDrawingSubject.HOUSE);
+    given(houseStep.getDrawingSession()).willReturn(houseSession);
+    given(treeStep.getStepOrder()).willReturn(2);
+    given(treeStep.getDrawingSubject()).willReturn(HtpDrawingSubject.TREE);
+    given(treeStep.getDrawingSession()).willReturn(treeSession);
+    given(personStep.getStepOrder()).willReturn(3);
+    given(personStep.getDrawingSubject()).willReturn(HtpDrawingSubject.PERSON);
+    given(personStep.getDrawingSession()).willReturn(personSession);
+    given(assessment.getId()).willReturn(40L);
+    given(assessment.getStatus()).willReturn(HtpAssessmentStatus.COMPLETED);
+    given(assessment.getCreatedAt()).willReturn(STARTED_AT);
+    given(assessment.getCompletedAt()).willReturn(COMPLETED_AT);
+    given(assessment.getSteps()).willReturn(List.of(houseStep, treeStep, personStep));
+
+    given(
+            drawingSessionRepository.findHistoryPage(
+                eq(CHILD_ID), any(), any(), any(), any(), any(), any(Pageable.class)))
+        .willReturn(new PageImpl<>(List.of(personSession), PAGEABLE, 1));
+    given(htpAssessmentRepository.findByStepDrawingSessionIdIn(List.of(12L)))
+        .willReturn(List.of(assessment));
+
+    DrawingSessionHistoryPageResponse response =
+        service().getHistory(CHILD_ID, null, null, null, null, null, PAGEABLE);
+
+    var item = response.content().getFirst();
+    assertThat(item.activityKind()).isEqualTo("HTP");
+    assertThat(item.htpAssessmentId()).isEqualTo(40L);
+    assertThat(item.htpStatus()).isEqualTo(HtpAssessmentStatus.COMPLETED);
+    assertThat(item.htpDrawings())
+        .extracting("drawingSubject")
+        .containsExactly(HtpDrawingSubject.HOUSE, HtpDrawingSubject.TREE, HtpDrawingSubject.PERSON);
+    assertThat(item.htpDrawings()).extracting("drawingSessionId").containsExactly(10L, 11L, 12L);
+  }
+
+  @Test
   void returnsEmptyPageWithoutBatchQueriesWhenNoSessions() {
     given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
     given(
@@ -288,7 +361,8 @@ class DrawingSessionHistoryQueryServiceTest {
         drawingAssetRepository,
         drawingSessionEmotionRepository,
         drawingAnalysisRepository,
-        reportRepository);
+        reportRepository,
+        htpAssessmentRepository);
   }
 
   @Test
@@ -339,7 +413,8 @@ class DrawingSessionHistoryQueryServiceTest {
         drawingAssetRepository,
         drawingSessionEmotionRepository,
         drawingAnalysisRepository,
-        reportRepository);
+        reportRepository,
+        htpAssessmentRepository);
   }
 
   @Test
@@ -360,7 +435,8 @@ class DrawingSessionHistoryQueryServiceTest {
         drawingAssetRepository,
         drawingSessionEmotionRepository,
         drawingAnalysisRepository,
-        reportRepository);
+        reportRepository,
+        htpAssessmentRepository);
   }
 
   private void givenSession() {

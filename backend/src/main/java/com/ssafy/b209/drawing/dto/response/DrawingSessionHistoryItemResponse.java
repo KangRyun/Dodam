@@ -6,6 +6,7 @@ import com.ssafy.b209.drawing.domain.DrawingEmotionCode;
 import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.domain.DrawingSessionStatus;
 import com.ssafy.b209.drawing.domain.DrawingStage;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStatus;
 import com.ssafy.b209.report.domain.ReportStatus;
 import java.time.Instant;
 import java.util.List;
@@ -30,6 +31,10 @@ import java.util.List;
  * @param reportStatus 최신 리포트 상태, 없으면 {@code null}
  * @param startedAt 세션 시작 시각
  * @param completedAt 세션 완료 시각, 완료 전이면 {@code null}
+ * @param activityKind 일반 그림은 {@code GENERAL}, HTP 묶음은 {@code HTP}
+ * @param htpAssessmentId HTP 묶음 식별자, 일반 그림이면 {@code null}
+ * @param htpStatus HTP 묶음 처리 상태, 일반 그림이면 {@code null}
+ * @param htpDrawings HOUSE, TREE, PERSON 순서의 HTP 그림 목록
  */
 public record DrawingSessionHistoryItemResponse(
     Long drawingSessionId,
@@ -44,10 +49,50 @@ public record DrawingSessionHistoryItemResponse(
     Long reportId,
     ReportStatus reportStatus,
     @JsonFormat(shape = JsonFormat.Shape.STRING) Instant startedAt,
-    @JsonFormat(shape = JsonFormat.Shape.STRING) Instant completedAt) {
+    @JsonFormat(shape = JsonFormat.Shape.STRING) Instant completedAt,
+    String activityKind,
+    Long htpAssessmentId,
+    HtpAssessmentStatus htpStatus,
+    List<HtpDrawingHistoryResponse> htpDrawings) {
 
-  /** 응답의 선택 감정 목록을 외부에서 변경할 수 없도록 복사한다. */
+  /** 기존 일반 그림 응답 생성 코드는 HTP 확장 필드 없이 그대로 사용할 수 있다. */
+  public DrawingSessionHistoryItemResponse(
+      Long drawingSessionId,
+      String thumbnailUrl,
+      DrawingTypeSummaryResponse drawingType,
+      String title,
+      DrawingInputMethod inputMethod,
+      DrawingSessionStatus sessionStatus,
+      DrawingStage currentStage,
+      List<DrawingEmotionCode> selectedEmotions,
+      DrawingAnalysisStatus analysisStatus,
+      Long reportId,
+      ReportStatus reportStatus,
+      Instant startedAt,
+      Instant completedAt) {
+    this(
+        drawingSessionId,
+        thumbnailUrl,
+        drawingType,
+        title,
+        inputMethod,
+        sessionStatus,
+        currentStage,
+        selectedEmotions,
+        analysisStatus,
+        reportId,
+        reportStatus,
+        startedAt,
+        completedAt,
+        "GENERAL",
+        null,
+        null,
+        List.of());
+  }
+
+  /** 응답 목록을 외부에서 변경할 수 없도록 복사한다. */
   public DrawingSessionHistoryItemResponse {
     selectedEmotions = List.copyOf(selectedEmotions);
+    htpDrawings = List.copyOf(htpDrawings);
   }
 }

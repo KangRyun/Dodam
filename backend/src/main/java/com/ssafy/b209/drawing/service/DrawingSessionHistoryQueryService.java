@@ -16,6 +16,10 @@ import com.ssafy.b209.drawing.domain.DrawingType;
 import com.ssafy.b209.drawing.dto.response.DrawingSessionHistoryItemResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingSessionHistoryPageResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingTypeSummaryResponse;
+import com.ssafy.b209.drawing.dto.response.HtpDrawingHistoryResponse;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessment;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
+import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
 import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
@@ -53,6 +57,7 @@ public class DrawingSessionHistoryQueryService {
   private final DrawingSessionEmotionRepository drawingSessionEmotionRepository;
   private final DrawingAnalysisRepository drawingAnalysisRepository;
   private final ReportRepository reportRepository;
+  private final HtpAssessmentRepository htpAssessmentRepository;
   private final DrawingAssetFileUrlFactory fileUrlFactory;
   private final CurrentAuthenticatedUserResolver currentUserResolver;
   private final GuardianResourceAccessValidator accessValidator;
@@ -75,6 +80,7 @@ public class DrawingSessionHistoryQueryService {
       DrawingSessionEmotionRepository drawingSessionEmotionRepository,
       DrawingAnalysisRepository drawingAnalysisRepository,
       ReportRepository reportRepository,
+      HtpAssessmentRepository htpAssessmentRepository,
       DrawingAssetFileUrlFactory fileUrlFactory,
       CurrentAuthenticatedUserResolver currentUserResolver,
       GuardianResourceAccessValidator accessValidator) {
@@ -83,6 +89,7 @@ public class DrawingSessionHistoryQueryService {
     this.drawingSessionEmotionRepository = drawingSessionEmotionRepository;
     this.drawingAnalysisRepository = drawingAnalysisRepository;
     this.reportRepository = reportRepository;
+    this.htpAssessmentRepository = htpAssessmentRepository;
     this.fileUrlFactory = fileUrlFactory;
     this.currentUserResolver = currentUserResolver;
     this.accessValidator = accessValidator;
@@ -127,8 +134,19 @@ public class DrawingSessionHistoryQueryService {
             pageable);
     List<DrawingSession> sessions = page.getContent();
     List<Long> sessionIds = sessions.stream().map(DrawingSession::getId).toList();
+    Map<Long, HtpAssessment> htpByRepresentativeSession = loadHtpAssessments(sessionIds);
+    List<Long> imageSessionIds =
+        htpByRepresentativeSession.values().stream()
+            .flatMap(assessment -> assessment.getSteps().stream())
+            .map(step -> step.getDrawingSession().getId())
+            .distinct()
+            .toList();
+    List<Long> thumbnailSessionIds =
+        java.util.stream.Stream.concat(sessionIds.stream(), imageSessionIds.stream())
+            .distinct()
+            .toList();
 
-    Map<Long, String> thumbnailUrlBySession = loadThumbnailUrls(sessionIds);
+    Map<Long, String> thumbnailUrlBySession = loadThumbnailUrls(thumbnailSessionIds);
     Map<Long, List<DrawingEmotionCode>> emotionsBySession = loadSelectedEmotions(sessionIds);
     Map<Long, DrawingAnalysisStatus> analysisStatusBySession = loadLatestAnalysisStatus(sessionIds);
     Map<Long, Report> latestReportBySession = loadLatestReports(sessionIds);
@@ -137,6 +155,7 @@ public class DrawingSessionHistoryQueryService {
     for (DrawingSession session : sessions) {
       Long sessionId = session.getId();
       Report report = latestReportBySession.get(sessionId);
+      HtpAssessment htpAssessment = htpByRepresentativeSession.get(sessionId);
       content.add(
           new DrawingSessionHistoryItemResponse(
               sessionId,
@@ -148,10 +167,20 @@ public class DrawingSessionHistoryQueryService {
               session.getCurrentStage(),
               emotionsBySession.getOrDefault(sessionId, List.of()),
               analysisStatusBySession.get(sessionId),
-              report == null ? null : report.getId(),
+              htpAssessment == null
+                  ? (report == null ? null : report.getId())
+                  : htpAssessment.getReportId(),
               report == null ? null : report.getStatus(),
-              session.getStartedAt().toInstant(ZoneOffset.UTC),
-              toNullableInstant(session.getCompletedAt())));
+              (htpAssessment == null ? session.getStartedAt() : htpAssessment.getCreatedAt())
+                  .toInstant(ZoneOffset.UTC),
+              toNullableInstant(
+                  htpAssessment == null
+                      ? session.getCompletedAt()
+                      : htpAssessment.getCompletedAt()),
+              htpAssessment == null ? "GENERAL" : "HTP",
+              htpAssessment == null ? null : htpAssessment.getId(),
+              htpAssessment == null ? null : htpAssessment.getStatus(),
+              toHtpDrawings(htpAssessment, thumbnailUrlBySession)));
     }
 
     return new DrawingSessionHistoryPageResponse(
@@ -163,6 +192,38 @@ public class DrawingSessionHistoryQueryService {
         page.isFirst(),
         page.isLast(),
         page.hasNext());
+  }
+
+  private Map<Long, HtpAssessment> loadHtpAssessments(List<Long> representativeSessionIds) {
+    Map<Long, HtpAssessment> byRepresentativeSession = new LinkedHashMap<>();
+    if (representativeSessionIds.isEmpty()) {
+      return byRepresentativeSession;
+    }
+    for (HtpAssessment assessment :
+        htpAssessmentRepository.findByStepDrawingSessionIdIn(representativeSessionIds)) {
+      HtpAssessmentStep representativeStep =
+          assessment.getSteps().stream()
+              .max(java.util.Comparator.comparingInt(HtpAssessmentStep::getStepOrder))
+              .orElseThrow();
+      byRepresentativeSession.put(representativeStep.getDrawingSession().getId(), assessment);
+    }
+    return byRepresentativeSession;
+  }
+
+  private List<HtpDrawingHistoryResponse> toHtpDrawings(
+      HtpAssessment assessment, Map<Long, String> thumbnailUrlBySession) {
+    if (assessment == null) {
+      return List.of();
+    }
+    // 엔티티의 stepOrder 정렬을 그대로 사용해 HOUSE, TREE, PERSON 순서를 보장한다.
+    return assessment.getSteps().stream()
+        .map(
+            step ->
+                new HtpDrawingHistoryResponse(
+                    step.getDrawingSubject(),
+                    step.getDrawingSession().getId(),
+                    thumbnailUrlBySession.get(step.getDrawingSession().getId())))
+        .toList();
   }
 
   private Map<Long, String> loadThumbnailUrls(List<Long> sessionIds) {

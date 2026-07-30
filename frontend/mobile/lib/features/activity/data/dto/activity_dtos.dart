@@ -59,6 +59,26 @@ final class ActivityReportSummaryDto {
   final int? reportVersion;
 }
 
+/// HTP 활동 한 묶음에 포함된 집·나무·사람 그림 한 장.
+final class HtpActivityDrawingDto {
+  const HtpActivityDrawingDto({
+    required this.drawingSubject,
+    required this.drawingSessionId,
+    required this.thumbnailUrl,
+  });
+
+  factory HtpActivityDrawingDto.fromJson(Map<String, dynamic> json) =>
+      HtpActivityDrawingDto(
+        drawingSubject: json['drawingSubject'] as String,
+        drawingSessionId: json['drawingSessionId'] as int,
+        thumbnailUrl: json['thumbnailUrl'] as String?,
+      );
+
+  final String drawingSubject;
+  final int drawingSessionId;
+  final String? thumbnailUrl;
+}
+
 final class ActivitySummaryDto {
   const ActivitySummaryDto({
     required this.activityId,
@@ -72,6 +92,10 @@ final class ActivitySummaryDto {
     required this.report,
     required this.startedAt,
     required this.completedAt,
+    this.activityKind = 'GENERAL',
+    this.htpAssessmentId,
+    this.htpStatus,
+    this.htpDrawings = const [],
   });
   factory ActivitySummaryDto.fromJson(Map<String, dynamic> json) =>
       ActivitySummaryDto(
@@ -88,6 +112,12 @@ final class ActivitySummaryDto {
         report: _summaryReportFromJson(json),
         startedAt: json['startedAt'] as String,
         completedAt: json['completedAt'] as String?,
+        activityKind: json['activityKind'] as String? ?? 'GENERAL',
+        htpAssessmentId: json['htpAssessmentId'] as int?,
+        htpStatus: json['htpStatus'] as String?,
+        htpDrawings: _mapList(
+          json['htpDrawings'],
+        ).map(HtpActivityDrawingDto.fromJson).toList(growable: false),
       );
   final int activityId;
   final String? title, thumbnailUrl, analysisStatus, completedAt;
@@ -95,6 +125,12 @@ final class ActivitySummaryDto {
   final String inputMethod, sessionStatus, startedAt;
   final List<String> selectedEmotions;
   final ActivityReportSummaryDto? report;
+  final String activityKind;
+  final int? htpAssessmentId;
+  final String? htpStatus;
+  final List<HtpActivityDrawingDto> htpDrawings;
+
+  bool get isHtp => activityKind == 'HTP' && htpAssessmentId != null;
 }
 
 /// 목록 항목의 리포트 요약을 만든다.
