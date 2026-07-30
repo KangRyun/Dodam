@@ -581,6 +581,108 @@ void main() {
       mimeType: 'image/png',
     );
 
+    testWidgets('사진 전송이 시작되면 실제 진행률을 기다리는 0% 상태를 표시한다', (tester) async {
+      final photo = await validPhoto();
+      final uploadGate = Completer<void>();
+      final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
+      final repository = _FakeDrawingRepository(uploadGate: uploadGate);
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      for (
+        var attempt = 0;
+        attempt < 5 && repository.uploadCalls == 0;
+        attempt++
+      ) {
+        await tester.pump();
+      }
+      await tester.pump();
+
+      expect(repository.uploadCalls, 1);
+      expect(
+        find.byKey(const ValueKey('input-method-upload-progress')),
+        findsOneWidget,
+      );
+      expect(find.text('사진을 올리고 있어요 0%'), findsOneWidget);
+
+      uploadGate.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('전송 100% 뒤 서버 응답을 기다리는 상태를 구분해 표시한다', (
+      tester,
+    ) async {
+      final photo = await validPhoto();
+      final uploadGate = Completer<void>();
+      final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
+      final repository = _FakeDrawingRepository(
+        uploadGate: uploadGate,
+        uploadProgressEvents: const [(100, 100)],
+      );
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      for (
+        var attempt = 0;
+        attempt < 5 && repository.uploadCalls == 0;
+        attempt++
+      ) {
+        await tester.pump();
+      }
+      await tester.pump();
+
+      expect(find.text('업로드 100% · 사진을 확인하고 있어요'), findsOneWidget);
+
+      uploadGate.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('전송 callback의 실제 바이트 진행률을 백분율로 표시한다', (tester) async {
+      final photo = await validPhoto();
+      final uploadGate = Completer<void>();
+      final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
+      final repository = _FakeDrawingRepository(
+        uploadGate: uploadGate,
+        uploadProgressEvents: const [(42, 100)],
+      );
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      for (
+        var attempt = 0;
+        attempt < 5 && repository.uploadCalls == 0;
+        attempt++
+      ) {
+        await tester.pump();
+      }
+      await tester.pump();
+
+      expect(find.text('사진을 올리고 있어요 42%'), findsOneWidget);
+      expect(find.bySemanticsLabel('사진 업로드 42퍼센트'), findsOneWidget);
+
+      uploadGate.complete();
+      await tester.pumpAndSettle();
+    });
+
     testWidgets('업로드에 성공하면 inputMethod UPLOAD 세션을 만들고 최신 세션 상태로 pop한다', (
       tester,
     ) async {
@@ -807,13 +909,15 @@ final class _FakePhotoPickerAdapter implements PhotoPickerAdapter {
 
 final class _FakeDrawingRepository
     implements
-        DrawingRepository,
+        DrawingUploadProgressRepository,
         HtpDrawingRepository,
         UploadedDrawingCompletionRepository,
         DrawingSessionDiscarder {
   _FakeDrawingRepository({
     List<bool>? createFailures,
     this.uploadFailures = const [],
+    this.uploadGate,
+    this.uploadProgressEvents = const [],
     this.getSessionCurrentStage = 'DRAWING',
   }) : createFailures = createFailures ?? const [];
 
@@ -821,6 +925,8 @@ final class _FakeDrawingRepository
 
   final List<bool> createFailures;
   final List<Object?> uploadFailures;
+  final Completer<void>? uploadGate;
+  final List<(int sent, int total)> uploadProgressEvents;
   final String getSessionCurrentStage;
 
   int createCalls = 0;
@@ -957,6 +1063,7 @@ final class _FakeDrawingRepository
     BinaryUploadDto image, {
     required UploadDrawingImageMetadataDto metadata,
     required String idempotencyKey,
+    DrawingUploadProgressCallback? onProgress,
   }) async {
     final index = uploadCalls;
     uploadCalls += 1;
@@ -965,6 +1072,10 @@ final class _FakeDrawingRepository
       final failure = uploadFailures[index];
       if (failure != null) throw failure;
     }
+    for (final event in uploadProgressEvents) {
+      onProgress?.call(event.$1, event.$2);
+    }
+    await uploadGate?.future;
     return DrawingUploadResponseDto.fromJson({
       'drawingSessionId': sessionId,
       'drawingAssetId': 1,

@@ -67,6 +67,7 @@ final class ApiClient {
     Map<String, dynamic>? queryParameters,
     Options? options,
     CancelToken? cancelToken,
+    ProgressCallback? onSendProgress,
   }) => _request(
     () => _dio.post<T>(
       PublicApiPath.normalize(path),
@@ -74,6 +75,7 @@ final class ApiClient {
       queryParameters: queryParameters,
       options: options,
       cancelToken: cancelToken,
+      onSendProgress: onSendProgress,
     ),
   );
 

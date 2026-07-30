@@ -7,6 +7,7 @@ import 'package:dodam/core/network/api_failure.dart';
 import 'package:dodam/core/network/auth/access_token_provider.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/drawing/data/repositories/remote_drawing_repository.dart';
+import 'package:dodam/features/drawing/domain/repositories/drawing_repository.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -457,6 +458,39 @@ void main() {
     expect(result.drawingSubject, 'TREE');
     expect(result.drawingAssetId, 130);
     expect(result.previewUrl, '/api/v1/drawing-assets/130/file');
+  });
+
+  test('사진 업로드는 실제 multipart 전송 바이트 진행률을 전달한다', () async {
+    final adapter = _UploadProgressAdapter();
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        httpClientAdapter: adapter,
+      ),
+    );
+    final progress = <(int sent, int total)>[];
+
+    expect(repository, isA<DrawingUploadProgressRepository>());
+    await (repository as DrawingUploadProgressRepository).uploadDrawing(
+      42,
+      const BinaryUploadDto(
+        bytes: [137, 80, 78, 71],
+        fileName: 'photo.png',
+        mimeType: 'image/png',
+      ),
+      metadata: const UploadDrawingImageMetadataDto(
+        clientCapturedAt: '2026-07-29T01:00:00Z',
+        rotationDegrees: 0,
+        cropApplied: false,
+      ),
+      idempotencyKey: 'htp-upload-progress-key',
+      onProgress: (sent, total) => progress.add((sent, total)),
+    );
+
+    expect(adapter.receivedBytes, greaterThan(0));
+    expect(progress, isNotEmpty);
+    expect(progress.last.$1, progress.last.$2);
+    expect(progress.last.$2, adapter.receivedBytes);
   });
 
   test('사진 업로드 검증 실패는 오류 코드를 그대로 전달한다', () async {
@@ -1004,6 +1038,52 @@ final class _UploadInterceptor extends Interceptor {
       ),
     );
   }
+}
+
+final class _UploadProgressAdapter implements HttpClientAdapter {
+  int receivedBytes = 0;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    if (requestStream != null) {
+      await for (final chunk in requestStream) {
+        receivedBytes += chunk.length;
+      }
+    }
+    return ResponseBody.fromString(
+      jsonEncode(const {
+        'success': true,
+        'code': 'COMMON_200',
+        'message': '요청에 성공했습니다.',
+        'data': {
+          'drawingSessionId': 42,
+          'drawingAssetId': 130,
+          'assetType': 'UPLOADED',
+          'drawingSubject': 'TREE',
+          'currentStage': 'DRAWING',
+          'previewUrl': '/api/v1/drawing-assets/130/file',
+          'mimeType': 'image/png',
+          'fileSizeBytes': 4096,
+          'widthPx': 1024,
+          'heightPx': 768,
+          'capturedAt': '2026-07-29T01:00:00Z',
+          'uploadedAt': '2026-07-29T01:00:01Z',
+          'qualityWarnings': <String>[],
+        },
+      }),
+      200,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
 }
 
 final class _AccessTokenProvider implements AccessTokenProvider {
