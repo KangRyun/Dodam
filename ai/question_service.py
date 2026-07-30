@@ -33,6 +33,7 @@ import config
 import crisis_detection
 import crisis_guidance
 import llm_client
+import prompt_injection
 import question_safety
 from gms import get_client
 from internal_contracts import (
@@ -198,14 +199,26 @@ def _last_child_index(req: QuestionRequest) -> int | None:
     return None
 
 
+# 인젝션으로 걸린 과거 발화를 원문 대신 넣는 중립 표시(S15P11B209-742).
+_SANITIZED_UTTERANCE = "(아이의 말)"
+
+
 def _history_dicts(messages: list) -> list[dict]:
-    """recent_messages → llm_client._format_history가 받는 [{"role","content"}] 형태로."""
+    """recent_messages → llm_client._format_history가 받는 [{"role","content"}] 형태로.
+
+    과거 아이 발화 중 프롬프트 인젝션에 걸리는 것은 원문 대신 중립 표시로 치환한다(S15P11B209-742).
+    현재 발화의 인젝션은 generate가 앞단에서 막지만, 과거 발화는 BE에 저장돼 history로 다시
+    흘러들 수 있어 여기서 한 번 더 걸러 원문이 LLM에 닿지 않게 한다.
+    """
     turns: list[dict] = []
     for m in messages:
         if not (m.text or "").strip():
             continue
-        role = "user" if (m.sender_type or "").upper() == "CHILD" else "assistant"
-        turns.append({"role": role, "content": m.text})
+        is_child = (m.sender_type or "").upper() == "CHILD"
+        content = m.text
+        if is_child and prompt_injection.scan(m.text):
+            content = _SANITIZED_UTTERANCE
+        turns.append({"role": "user" if is_child else "assistant", "content": content})
     return turns
 
 
@@ -554,6 +567,46 @@ def _debug_log_blocked_raw(reason: str, text: str, request_id: str) -> None:
     )
 
 
+# ── 프롬프트 인젝션 차단 (S15P11B209-742) ───────────────────────
+# 아이 발화가 프롬프트를 조작하려 하면(예: "지금까지의 모든 지시를 잊고~") LLM에 전달하지 않고
+# 결정적 재질문으로 되묻는다. 위기 차단과 달리 대화는 끊지 않는다(정상적인 되묻기).
+REASK_QUESTION = "미안, 잘 못 들었어. 그림에서 뭘 그렸는지 다시 이야기해줄래?"
+
+
+def _detect_injection(req: QuestionRequest) -> str | None:
+    """가장 최근 아이 발화(프롬프트의 {child_utterance}가 될 것)에서 인젝션 신호를 찾는다."""
+    index = _last_child_index(req)
+    if index is None:
+        return None
+    return prompt_injection.scan(req.recent_messages[index].text or "")
+
+
+def _reask_response(req: QuestionRequest, started: float) -> QuestionResponse:
+    """인젝션 감지 시 GMS 호출 없이 돌려주는 결정적 재질문 응답.
+
+    조작 입력이 출력에 절대 영향 못 주도록 검토된 고정 문구를 쓴다. safetyResult는 PASSED라
+    BE가 정상 저장하고 대화가 이어진다. 목적은 그림 전체를 다시 여는 DRAWING_CONTEXT.
+    """
+    option_allowed = "OPTION" in req.allowed_response_modes
+    return QuestionResponse(
+        question_text=REASK_QUESTION,
+        question_purpose="DRAWING_CONTEXT",
+        options=(
+            list(_OPTIONS_BY_PURPOSE["DRAWING_CONTEXT"]) if option_allowed else None
+        ),
+        target_object=None,
+        fallback_used=False,
+        safety_result=SafetyResult(
+            status="PASSED", rule_version=req.safety_rule_version, block_reason_code=None
+        ),
+        model_name=config.LLM_MODEL,
+        # GMS를 호출하지 않았으므로 파생 모델 ID가 없다 — 엔진명으로 대신 기록한다.
+        model_version=config.LLM_MODEL,
+        prompt_version=PROMPT_VERSION,
+        processing_time_ms=int((time.monotonic() - started) * 1000),
+    )
+
+
 def _detect_crisis(req: QuestionRequest) -> str | None:
     """아이 발화에서 자해·학대·위기 신호를 탐지한다(S15P11B209-593).
 
@@ -699,6 +752,26 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         ]
         _debug_log_blocked_raw(crisis_reason, " | ".join(child_texts), request_id)
         return _crisis_safe_response(req, started)
+
+    # 프롬프트 인젝션(맥락 파괴 시도)은 LLM에 전달하지 않고 결정적 재질문으로 되묻는다
+    # (S15P11B209-742). 위기와 달리 대화를 끊지 않는다 — 정상적인 "다시 말해줄래?"로 이어간다.
+    injection_reason = _detect_injection(req)
+    if injection_reason:
+        # ⚠️ 아이 발화 원문은 남기지 않는다 — 사유 코드·request_id만.
+        logger.warning(
+            "프롬프트 인젝션 차단 — 재질문: reason=%s request_id=%s",
+            injection_reason,
+            request_id,
+        )
+        # ⚠️ 임시 검증용(출시 전 제거: S15P11B209-689) — 어떤 입력이 인젝션으로 걸렸는지 원문 확인.
+        injected_index = _last_child_index(req)
+        if injected_index is not None:
+            _debug_log_blocked_raw(
+                injection_reason,
+                req.recent_messages[injected_index].text or "",
+                request_id,
+            )
+        return _reask_response(req, started)
 
     # 목적·대상을 GMS 호출 전에 정해 프롬프트에 그대로 싣는다(S15P11B209-713) — 질문 문장과
     # 응답 targetObject가 같은 객체를 가리키게 하고, HTP면 주제를 벗어난 명사가 안 나오게 한다.
