@@ -17,6 +17,7 @@ import java.util.List;
  * @param selectedEmotions 아동이 선택한 감정 코드 목록
  * @param expressedEmotionText 아동이 직접 표현한 감정 문구이며 없으면 {@code null}
  * @param keyConversations 실제 대화에서 선별한 대표 질문·답변 목록
+ * @param subjectContexts 주제(그림)별 관찰 서술·탐지 코드·문답 묶음이며 HTP는 최대 3건, 그림일기는 1건 (S15P11B209-741)
  */
 public record ObservationGenerationContext(
     Long analysisId,
@@ -30,7 +31,8 @@ public record ObservationGenerationContext(
     int unrecognizedSpeechCount,
     List<String> selectedEmotions,
     String expressedEmotionText,
-    List<KeyConversationLine> keyConversations) {
+    List<KeyConversationLine> keyConversations,
+    List<SubjectContext> subjectContexts) {
 
   /**
    * 대표 답변 중 첫 발화를 반환한다.
@@ -56,4 +58,20 @@ public record ObservationGenerationContext(
       Long answerMessageId,
       String answerText,
       String answerType) {}
+
+  /**
+   * 주제(그림) 하나의 관찰 서술·탐지 코드·문답 묶음이다 (S15P11B209-741).
+   *
+   * <p>AI 요청 {@code subjectSummaries}의 재료 — 매핑은 생성 서비스가 한다.
+   *
+   * @param drawingSubject HTP 주제 이름({@code HOUSE|TREE|PERSON})이며 그림일기는 {@code null}
+   * @param drawingDescription 해당 그림의 VLM 관찰 서술이며 없으면 {@code null}
+   * @param detectedObjectCodes 해당 그림에서 탐지된 객체 내부 코드 목록
+   * @param qaPairs 해당 그림 대화의 질문·답변 목록
+   */
+  public record SubjectContext(
+      String drawingSubject,
+      String drawingDescription,
+      List<String> detectedObjectCodes,
+      List<KeyConversationLine> qaPairs) {}
 }

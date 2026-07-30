@@ -5,6 +5,7 @@ import com.ssafy.b209.infrastructure.ai.observation.AiObservationClientException
 import com.ssafy.b209.report.dto.ObservationGenerationRequest;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.exception.MockObservationReportErrorCode;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -125,7 +126,32 @@ public class MockObservationReportGenerationService {
         context.unrecognizedSpeechCount(),
         context.selectedEmotions(),
         context.expressedEmotionText(),
-        context.representativeUtterance());
+        context.representativeUtterance(),
+        toSubjectSummaries(context));
+  }
+
+  /**
+   * 주제별 수집 맥락을 AI 계약의 {@code subjectSummaries}로 옮긴다 (S15P11B209-741).
+   *
+   * <p>계약({@code docs/ai/ai-observation-report-contract.md})과 1:1 — 비어 있으면 AI가 기존
+   * 집계·대표 발화 경로로 동작한다(롤아웃 호환).
+   */
+  private List<ObservationGenerationRequest.SubjectSummary> toSubjectSummaries(
+      ObservationGenerationContext context) {
+    return context.subjectContexts().stream()
+        .map(
+            subject ->
+                new ObservationGenerationRequest.SubjectSummary(
+                    subject.drawingSubject(),
+                    subject.drawingDescription(),
+                    subject.detectedObjectCodes(),
+                    subject.qaPairs().stream()
+                        .map(
+                            line ->
+                                new ObservationGenerationRequest.SubjectQaPair(
+                                    line.questionText(), line.answerText(), line.answerType()))
+                        .toList()))
+        .toList();
   }
 
   private String validate(String requestId, ObservationGenerationResult result) {
