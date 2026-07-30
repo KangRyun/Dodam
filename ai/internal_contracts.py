@@ -314,10 +314,24 @@ class GuardianQuestionDraft(_CamelModel):
     question_purpose: str
 
 
+class RagReference(_CamelModel):
+    """리포트가 근거로 참조한 전문 자료 출처 (S15P11B209-614).
+
+    출처 표시는 라이선스 의무(KOGL-1)이자 보호자 신뢰 재료다 — 정책 §1-4.
+    청크 텍스트는 싣지 않는다(응답 비대 방지) — sourceId·제목이면 추적에 충분.
+    """
+
+    source_id: str
+    title: str
+
+
 class ObservationGenerationResult(_CamelModel):
     """BE ObservationGenerationResult와 1:1. disclaimer·limitations_text는 필수.
 
     confidence는 0~1 또는 None. model_name/model_version은 생성 주체 표기.
+    rag_references·knowledge_base_version은 optional 확장(S15P11B209-614) —
+    구 BE는 unknown 필드를 무시하므로 하위호환(Jackson 기본 설정), BE record
+    반영은 후속. RAG 미사용 시 빈 목록/None으로 기존 응답과 동일하다.
     """
 
     request_id: str
@@ -330,6 +344,8 @@ class ObservationGenerationResult(_CamelModel):
     follow_up_guides: list[FollowUpGuideDraft] = Field(default_factory=list)
     guardian_questions: list[GuardianQuestionDraft] = Field(default_factory=list)
     limitations_text: str
+    rag_references: list[RagReference] = Field(default_factory=list)
+    knowledge_base_version: str | None = None
 
 
 # ── 종합 분석 계약 (API_명세서_최종.md §19.3 · §19.4) ────────────

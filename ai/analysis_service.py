@@ -27,6 +27,7 @@ import httpx
 import config
 import htp_labels
 import internal_contracts as contracts
+import rag
 import sketch_labels
 import vlm_client
 import yolo_client
@@ -539,7 +540,9 @@ def analyze(req: contracts.AnalysisRequest, request_id: str = "") -> contracts.A
         # GMS 모델은 빌드 버전을 노출하지 않으므로 파이프라인 버전을 기록해 재현 가능하게 한다.
         vision=contracts.ModelRef(name=config.VLM_MODEL, version=config.PIPELINE_VERSION),
         language=None,
-        knowledge_base_version=config.RAG_KNOWLEDGE_BASE_VERSION or None,
+        # 배포된 인덱스 실물 기준(S15P11B209-614) — env 선언(RAG_KNOWLEDGE_BASE_VERSION)은
+        # 파일 없이 READY로 읽히는 거짓 신호라 제거했다. 미배포면 None.
+        knowledge_base_version=rag.knowledge_base_version(),
     )
 
     logger.info(
