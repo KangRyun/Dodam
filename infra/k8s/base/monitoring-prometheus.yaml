@@ -294,11 +294,21 @@ data:
           # ①은 "실패한 잡"만 잡으므로 **잡이 생성조차 안 되면 침묵한다**(733 의 BackupMissing 과 같은 구멍).
           # 성공 시각이 아니라 **스케줄 시각**을 보는 게 핵심이다 — 드리프트가 며칠 이어지면
           # 성공 시각은 계속 낡은 채로 남아서, 성공 기준으로 짜면 ①과 중복해 울린다.
+          #
+          # ⚠️ 세 번째 절(생성 유예)이 없으면 **CronJob 을 만든 직후 반드시 오탐이 난다.**
+          #   갓 만든 CronJob 은 last_schedule_time 시계열이 아예 없어서 unless 가 걸러주지
+          #   못하고, 첫 실행(매시 20분)까지 최대 한 시간을 울린다. 실제로 2026-07-30 23:37
+          #   배포 직후 pending 상태로 재현했다. 첫날부터 헛경보가 뜨면 그 경보는 그날로 죽는다.
+          #   유예를 점검 주기와 같은 3시간으로 두되, 유예를 1초로 낮추면 다시 걸리는 것까지
+          #   확인해 "탐지 능력이 죽지 않았음"을 반증했다.
           - alert: ManifestDriftCheckNotRunning
             expr: >-
               kube_cronjob_spec_suspend{namespace="dodam", cronjob="manifest-drift-check"} == 0
               unless on(cronjob) (
                 kube_cronjob_status_last_schedule_time > time() - 3*3600
+              )
+              unless on(cronjob) (
+                kube_cronjob_created > time() - 3*3600
               )
             for: 10m
             labels: { severity: warning, category: drift }
