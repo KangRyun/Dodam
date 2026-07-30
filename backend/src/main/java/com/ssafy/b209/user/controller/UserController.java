@@ -7,8 +7,10 @@ import com.ssafy.b209.user.dto.request.DeleteUserRequest;
 import com.ssafy.b209.user.dto.request.NotificationSettingsUpdateRequest;
 import com.ssafy.b209.user.dto.request.OnboardingRequest;
 import com.ssafy.b209.user.dto.request.UpdateUserRequest;
+import com.ssafy.b209.user.dto.response.DataRetentionPolicyResponse;
 import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
+import com.ssafy.b209.user.service.UserDataRetentionPolicyReader;
 import com.ssafy.b209.user.service.UserDeletionService;
 import com.ssafy.b209.user.service.UserNotificationSettingsReader;
 import com.ssafy.b209.user.service.UserNotificationSettingsUpdateService;
@@ -55,6 +57,7 @@ public class UserController {
   private final UserDeletionService deletionService;
   private final UserNotificationSettingsReader notificationSettingsReader;
   private final UserNotificationSettingsUpdateService notificationSettingsUpdateService;
+  private final UserDataRetentionPolicyReader dataRetentionPolicyReader;
 
   /**
    * 사용자 식별 경계와 조회·Onboarding·수정 서비스를 사용하는 Controller를 생성한다.
@@ -66,6 +69,7 @@ public class UserController {
    * @param deletionService 사용자 계정 즉시 삭제 Use Case
    * @param notificationSettingsReader 알림 수신 설정 조회 Use Case
    * @param notificationSettingsUpdateService 알림 수신 설정 변경 Use Case
+   * @param dataRetentionPolicyReader 데이터 보관 정책 조회 Use Case
    */
   public UserController(
       CurrentAuthenticatedUserResolver currentUserResolver,
@@ -74,7 +78,8 @@ public class UserController {
       UserUpdateService updateService,
       UserDeletionService deletionService,
       UserNotificationSettingsReader notificationSettingsReader,
-      UserNotificationSettingsUpdateService notificationSettingsUpdateService) {
+      UserNotificationSettingsUpdateService notificationSettingsUpdateService,
+      UserDataRetentionPolicyReader dataRetentionPolicyReader) {
     this.currentUserResolver = currentUserResolver;
     this.onboardingService = onboardingService;
     this.queryService = queryService;
@@ -82,6 +87,7 @@ public class UserController {
     this.deletionService = deletionService;
     this.notificationSettingsReader = notificationSettingsReader;
     this.notificationSettingsUpdateService = notificationSettingsUpdateService;
+    this.dataRetentionPolicyReader = dataRetentionPolicyReader;
   }
 
   /**
@@ -251,6 +257,37 @@ public class UserController {
         ApiResponse.ok(
             notificationSettingsUpdateService.update(
                 currentUserResolver.requireUserId(), request)));
+  }
+
+  /**
+   * 인증 사용자에게 적용 중인 데이터 보관 정책을 조회한다.
+   *
+   * <p>조회만 수행하며 정책을 변경하지 않는다. 저장된 보관 설정 행이 없는 사용자에게는 컬럼 DEFAULT와 동일한 기본값을 반환하므로 항상 HTTP 200이다. 보관
+   * 기간 수치는 팀 확정 전 잠정값이므로 응답의 {@code policyStatus}가 {@code PROVISIONAL}로 내려간다. Authorization Bearer
+   * Access Token의 사용자 ID를 대상으로 한다.
+   *
+   * @return HTTP 200과 데이터 보관 정책 공통 응답
+   */
+  @Operation(
+      summary = "데이터 보관 정책 조회",
+      description =
+          "인증 사용자에게 적용 중인 데이터 보관 기간과 만료 사전 안내 시점을 조회합니다. "
+              + "저장된 설정이 없으면 기본값을 반환하므로 항상 200으로 응답합니다. "
+              + "보관 기간 수치는 팀 확정 전 잠정값이며 policyStatus가 PROVISIONAL로 내려갑니다. "
+              + "Authorization Bearer Access Token의 사용자 ID를 대상으로 합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "데이터 보관 정책 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping("/me/data-retention")
+  public ResponseEntity<ApiResponse<DataRetentionPolicyResponse>> getMyDataRetentionPolicy() {
+    return ResponseEntity.ok(
+        ApiResponse.ok(dataRetentionPolicyReader.read(currentUserResolver.requireUserId())));
   }
 
   /**

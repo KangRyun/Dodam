@@ -65,6 +65,7 @@ class UserAccountAndConsentIntegrationTest {
     jdbcTemplate.update("DELETE FROM consent_records");
     jdbcTemplate.update("DELETE FROM consent_terms");
     jdbcTemplate.update("DELETE FROM user_notification_settings");
+    jdbcTemplate.update("DELETE FROM user_data_retention_settings");
     jdbcTemplate.update("DELETE FROM auth_accounts");
     jdbcTemplate.update("DELETE FROM guardian_child_relations");
     jdbcTemplate.update("DELETE FROM child_response_modes");
@@ -498,6 +499,44 @@ class UserAccountAndConsentIntegrationTest {
 
     assertThat(count("SELECT COUNT(*) FROM user_notification_settings WHERE user_id = " + USER_ID))
         .isZero();
+  }
+
+  // ---------------------------------------------------------------- 564 데이터 보관 정책 조회
+
+  @Test
+  void returnsProvisionalDefaultRetentionPolicyWhenNoSettingsRowExists() throws Exception {
+    assertThat(
+            count("SELECT COUNT(*) FROM user_data_retention_settings WHERE user_id = " + USER_ID))
+        .isZero();
+
+    mockMvc
+        .perform(get("/api/v1/users/me/data-retention"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.retentionDays").value(180))
+        .andExpect(jsonPath("$.data.noticeDaysBefore").value(30))
+        .andExpect(jsonPath("$.data.policyStatus").value("PROVISIONAL"));
+
+    // 조회는 행을 만들지 않는다. 만들면 이후 정책 수치 변경이 사용자별로 고정돼 버린다.
+    assertThat(
+            count("SELECT COUNT(*) FROM user_data_retention_settings WHERE user_id = " + USER_ID))
+        .isZero();
+  }
+
+  @Test
+  void returnsStoredRetentionPolicyForTheAuthenticatedUserOnly() throws Exception {
+    jdbcTemplate.update(
+        "INSERT INTO user_data_retention_settings "
+            + "(user_id, retention_days, notice_days_before) VALUES (?, 365, 14), (?, 90, 7)",
+        USER_ID,
+        OTHER_USER_ID);
+
+    mockMvc
+        .perform(get("/api/v1/users/me/data-retention"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.retentionDays").value(365))
+        .andExpect(jsonPath("$.data.noticeDaysBefore").value(14))
+        .andExpect(jsonPath("$.data.policyStatus").value("PROVISIONAL"));
   }
 
   // ---------------------------------------------------------------- 345~348 아동 범위 동의
