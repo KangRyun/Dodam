@@ -62,6 +62,56 @@ class MockObservationReportGenerationServiceTest {
   }
 
   @Test
+  void mapsSubjectContextsIntoSubjectSummaries() {
+    // 주제별 수집 맥락(741)이 AI 계약 subjectSummaries(740)로 1:1 매핑되는지 검증한다.
+    ObservationGenerationContext context =
+        new ObservationGenerationContext(
+            ANALYSIS_ID,
+            100L,
+            REPORT_ID,
+            50L,
+            "NORMAL",
+            3,
+            2,
+            1,
+            0,
+            List.of("HAPPY"),
+            "행복했어요",
+            List.of(),
+            List.of(
+                new ObservationGenerationContext.SubjectContext(
+                    "HOUSE",
+                    "가운데에 집이 크게 그려져 있어요.",
+                    List.of("HOUSE_DOOR"),
+                    List.of(
+                        new ObservationGenerationContext.KeyConversationLine(
+                            1L, "이 집에는 누가 살아?", 2L, "엄마랑 나!", "VOICE_ANSWER"))),
+                new ObservationGenerationContext.SubjectContext(
+                    null, "공룡이 풍선을 들고 있어요.", List.of(), List.of())));
+    given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context));
+    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+
+    service.generate(ANALYSIS_ID);
+
+    verify(observationClient).generate(requestCaptor.capture());
+    List<ObservationGenerationRequest.SubjectSummary> summaries =
+        requestCaptor.getValue().subjectSummaries();
+    org.assertj.core.api.Assertions.assertThat(summaries).hasSize(2);
+    org.assertj.core.api.Assertions.assertThat(summaries.get(0).drawingSubject())
+        .isEqualTo("HOUSE");
+    org.assertj.core.api.Assertions.assertThat(summaries.get(0).drawingDescription())
+        .isEqualTo("가운데에 집이 크게 그려져 있어요.");
+    org.assertj.core.api.Assertions.assertThat(summaries.get(0).detectedObjectCodes())
+        .containsExactly("HOUSE_DOOR");
+    org.assertj.core.api.Assertions.assertThat(summaries.get(0).qaPairs())
+        .containsExactly(
+            new ObservationGenerationRequest.SubjectQaPair(
+                "이 집에는 누가 살아?", "엄마랑 나!", "VOICE_ANSWER"));
+    // 그림일기 항목 — 주제 없음(null)이 그대로 전달된다.
+    org.assertj.core.api.Assertions.assertThat(summaries.get(1).drawingSubject()).isNull();
+  }
+
+  @Test
   void skipsWhenContextIsAbsentForIdempotency() {
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.empty());
 
@@ -136,6 +186,7 @@ class MockObservationReportGenerationServiceTest {
         0,
         List.of("HAPPY"),
         "행복했어요",
+        List.of(),
         List.of());
   }
 

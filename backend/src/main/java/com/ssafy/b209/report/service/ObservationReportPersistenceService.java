@@ -14,7 +14,9 @@ import com.ssafy.b209.conversation.repository.ConversationMessageRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.domain.DrawingSessionEmotion;
+import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
 import com.ssafy.b209.drawing.htp.domain.HtpAssessment;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
 import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.global.exception.BusinessException;
@@ -44,6 +46,7 @@ import com.ssafy.b209.report.repository.ReportRepository;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.context.ApplicationEventPublisher;
@@ -159,15 +162,24 @@ public class ObservationReportPersistenceService {
     DrawingSession session = analysis.getDrawingSession();
     Long drawingSessionId = session.getId();
     String expressedEmotionText = session.getExpressedEmotionText();
-    List<Long> contextSessionIds =
+    // HTP면 (세션, 주제) 3쌍 — 주제별 서술·문답 수집(S15P11B209-741)에 주제가 필요하다.
+    // 그림일기·단독 세션은 주제 없는 1쌍.
+    List<SubjectSessionRef> contextSessions =
         htpAssessmentRepository
             .findStepByDrawingSessionId(drawingSessionId)
             .map(
                 step ->
                     step.getAssessment().getSteps().stream()
-                        .map(htpStep -> htpStep.getDrawingSession().getId())
+                        .sorted(Comparator.comparingInt(HtpAssessmentStep::getStepOrder))
+                        .map(
+                            htpStep ->
+                                new SubjectSessionRef(
+                                    htpStep.getDrawingSession().getId(),
+                                    htpStep.getDrawingSubject().name()))
                         .toList())
-            .orElseGet(() -> List.of(drawingSessionId));
+            .orElseGet(() -> List.of(new SubjectSessionRef(drawingSessionId, null)));
+    List<Long> contextSessionIds =
+        contextSessions.stream().map(SubjectSessionRef::drawingSessionId).toList();
 
     ConversationSession representativeConversation =
         conversationSessionRepository.findByDrawingSessionId(drawingSessionId).orElse(null);
@@ -183,31 +195,58 @@ public class ObservationReportPersistenceService {
     int skippedCount = 0;
     int unrecognizedSpeechCount = 0;
     List<ObservationGenerationContext.KeyConversationLine> keyConversations = new ArrayList<>();
-    for (Long contextSessionId : contextSessionIds) {
+    List<ObservationGenerationContext.SubjectContext> subjectContexts = new ArrayList<>();
+    for (SubjectSessionRef contextSession : contextSessions) {
+      Long contextSessionId = contextSession.drawingSessionId();
+      // 주제별 문답(S15P11B209-741) — keyConversations(리포트 저장용 평탄 목록)와 같은 소스를
+      // 쓰되, MAX_KEY_CONVERSATIONS 상한과 무관하게 주제 단위로 담는다(상한에 걸리면 뒤 주제의
+      // 문답이 통째로 빠져 리포트가 특정 그림에만 치우친다).
+      List<ObservationGenerationContext.KeyConversationLine> subjectQaPairs = new ArrayList<>();
       ConversationSession conversation =
           conversationSessionRepository.findByDrawingSessionId(contextSessionId).orElse(null);
-      if (conversation == null) {
-        continue;
-      }
-      Long contextConversationId = conversation.getId();
-      questionCount += (int) conversationMessageRepository.countQuestions(contextConversationId);
-      answeredCount += (int) conversationMessageRepository.countAnswered(contextConversationId);
-      skippedCount += (int) conversationMessageRepository.countSkipped(contextConversationId);
-      unrecognizedSpeechCount +=
-          (int) conversationMessageRepository.countUnrecognizedSpeech(contextConversationId);
-      List<KeyConversationSource> sources =
-          conversationMessageRepository.findKeyConversationSources(contextConversationId);
-      for (KeyConversationSource source : sources) {
-        if (keyConversations.size() >= MAX_KEY_CONVERSATIONS) {
-          break;
+      if (conversation != null) {
+        Long contextConversationId = conversation.getId();
+        questionCount += (int) conversationMessageRepository.countQuestions(contextConversationId);
+        answeredCount += (int) conversationMessageRepository.countAnswered(contextConversationId);
+        skippedCount += (int) conversationMessageRepository.countSkipped(contextConversationId);
+        unrecognizedSpeechCount +=
+            (int) conversationMessageRepository.countUnrecognizedSpeech(contextConversationId);
+        List<KeyConversationSource> sources =
+            conversationMessageRepository.findKeyConversationSources(contextConversationId);
+        for (KeyConversationSource source : sources) {
+          ObservationGenerationContext.KeyConversationLine line =
+              new ObservationGenerationContext.KeyConversationLine(
+                  source.getQuestionMessageId(),
+                  source.getQuestionText(),
+                  source.getAnswerMessageId(),
+                  source.getAnswerText(),
+                  source.getAnswerType());
+          subjectQaPairs.add(line);
+          if (keyConversations.size() < MAX_KEY_CONVERSATIONS) {
+            keyConversations.add(line);
+          }
         }
-        keyConversations.add(
-            new ObservationGenerationContext.KeyConversationLine(
-                source.getQuestionMessageId(),
-                source.getQuestionText(),
-                source.getAnswerMessageId(),
-                source.getAnswerText(),
-                source.getAnswerType()));
+      }
+
+      // 주제별 그림 서술·탐지 코드 — 대화를 건너뛴 세션도 그림 자체는 리포트 근거가 된다.
+      AnalysisObservationResult subjectObservation =
+          observationResultRepository.findLatestByDrawingSessionId(contextSessionId).orElse(null);
+      String drawingDescription =
+          subjectObservation == null ? null : subjectObservation.getOverallSummary();
+      List<String> detectedObjectCodes =
+          subjectObservation == null
+              ? List.of()
+              : subjectObservation.getAnalysis().getDetections().stream()
+                  .map(DrawingDetectedObject::getLabel)
+                  .toList();
+      // 서술·코드·문답이 전부 비면 담지 않는다 — 빈 항목은 AI 프롬프트에 노이즈만 더한다.
+      if (drawingDescription != null || !detectedObjectCodes.isEmpty() || !subjectQaPairs.isEmpty()) {
+        subjectContexts.add(
+            new ObservationGenerationContext.SubjectContext(
+                contextSession.drawingSubject(),
+                drawingDescription,
+                detectedObjectCodes,
+                subjectQaPairs));
       }
     }
 
@@ -234,8 +273,14 @@ public class ObservationReportPersistenceService {
             unrecognizedSpeechCount,
             selectedEmotions,
             expressedEmotionText,
-            keyConversations));
+            keyConversations,
+            subjectContexts));
   }
+
+  /**
+   * 주제별 수집 대상 세션과 HTP 주제의 쌍이다 (S15P11B209-741). 그림일기·단독 세션은 주제가 {@code null}.
+   */
+  private record SubjectSessionRef(Long drawingSessionId, String drawingSubject) {}
 
   /**
    * 검증된 관찰 결과를 정규화 테이블에 저장하고 분석·리포트·그림 활동 세션을 완료 상태로 전이한다.

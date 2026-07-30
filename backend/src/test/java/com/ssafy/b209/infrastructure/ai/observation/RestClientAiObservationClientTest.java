@@ -146,7 +146,8 @@ class RestClientAiObservationClientTest {
             0,
             List.of("HAPPY"),
             null,
-            null);
+            null,
+            List.of());
 
     assertThatThrownBy(() -> client.generate(intermediate))
         .isInstanceOfSatisfying(
@@ -185,7 +186,7 @@ class RestClientAiObservationClientTest {
 
   private ObservationGenerationRequest validRequest() {
     return new ObservationGenerationRequest(
-        "request-1", 700L, 100L, "FINAL", "NORMAL", 3, 2, 1, 0, List.of("HAPPY"), "행복했어요", null);
+        "request-1", 700L, 100L, "FINAL", "NORMAL", 3, 2, 1, 0, List.of("HAPPY"), "행복했어요", null, List.of());
   }
 
   private String successResponse(String requestId) {

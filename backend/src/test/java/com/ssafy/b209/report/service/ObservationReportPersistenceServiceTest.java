@@ -15,6 +15,7 @@ import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.repository.AnalysisConversationSummaryRepository;
+import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
 import com.ssafy.b209.analysis.repository.AnalysisObservationResultRepository;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.conversation.domain.ConversationSession;
@@ -22,8 +23,10 @@ import com.ssafy.b209.conversation.repository.ConversationMessageRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingSession;
+import com.ssafy.b209.conversation.dto.KeyConversationSource;
 import com.ssafy.b209.drawing.htp.domain.HtpAssessment;
 import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
+import com.ssafy.b209.drawing.htp.domain.HtpDrawingSubject;
 import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.global.exception.BusinessException;
@@ -216,6 +219,126 @@ class ObservationReportPersistenceServiceTest {
     assertThat(context.questionCount()).isEqualTo(6);
     assertThat(context.answeredCount()).isEqualTo(3);
     assertThat(context.skippedCount()).isEqualTo(3);
+    // 서술·탐지 코드·문답이 전부 빈 주제는 담지 않는다(S15P11B209-741) — 프롬프트 노이즈 방지.
+    assertThat(context.subjectContexts()).isEmpty();
+  }
+
+  @Test
+  void loadsSubjectContextsPerHtpStepInStepOrder() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    HtpAssessmentStep currentStep = org.mockito.Mockito.mock(HtpAssessmentStep.class);
+    HtpAssessment assessment = org.mockito.Mockito.mock(HtpAssessment.class);
+    // getSteps()가 저장 순서를 보장하지 않아도 stepOrder로 정렬됨을 함께 검증한다(역순 제공).
+    List<HtpAssessmentStep> steps =
+        List.of(
+            htpStepWithSession(100L, 2, HtpDrawingSubject.PERSON),
+            htpStepWithSession(99L, 1, HtpDrawingSubject.TREE),
+            htpStepWithSession(98L, 0, HtpDrawingSubject.HOUSE));
+    given(currentStep.getAssessment()).willReturn(assessment);
+    given(assessment.getSteps()).willReturn(steps);
+    given(analysisRepository.findById(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByAnalysisId(ANALYSIS_ID)).willReturn(Optional.of(report));
+    given(htpAssessmentRepository.findStepByDrawingSessionId(DRAWING_SESSION_ID))
+        .willReturn(Optional.of(currentStep));
+
+    // 집(98L): 서술 + 탐지 코드 + 문답이 모두 있는 주제.
+    AnalysisObservationResult houseObservation =
+        org.mockito.Mockito.mock(AnalysisObservationResult.class);
+    DrawingAnalysis houseAnalysis = org.mockito.Mockito.mock(DrawingAnalysis.class);
+    DrawingDetectedObject houseDoor = org.mockito.Mockito.mock(DrawingDetectedObject.class);
+    given(houseObservation.getOverallSummary()).willReturn("가운데에 집이 크게 그려져 있어요.");
+    given(houseObservation.getAnalysis()).willReturn(houseAnalysis);
+    given(houseAnalysis.getDetections()).willReturn(List.of(houseDoor));
+    given(houseDoor.getLabel()).willReturn("HOUSE_DOOR");
+    given(observationResultRepository.findLatestByDrawingSessionId(98L))
+        .willReturn(Optional.of(houseObservation));
+
+    ConversationSession houseConversation = org.mockito.Mockito.mock(ConversationSession.class);
+    given(houseConversation.getId()).willReturn(300L);
+    lenient().when(houseConversation.getDifficultySnapshot()).thenReturn("NORMAL");
+    given(conversationSessionRepository.findByDrawingSessionId(98L))
+        .willReturn(Optional.of(houseConversation));
+    KeyConversationSource houseQa = org.mockito.Mockito.mock(KeyConversationSource.class);
+    lenient().when(houseQa.getQuestionMessageId()).thenReturn(1L);
+    given(houseQa.getQuestionText()).willReturn("이 집에는 누가 살아?");
+    lenient().when(houseQa.getAnswerMessageId()).thenReturn(2L);
+    given(houseQa.getAnswerText()).willReturn("엄마랑 나!");
+    given(houseQa.getAnswerType()).willReturn("VOICE_ANSWER");
+    given(conversationMessageRepository.findKeyConversationSources(300L))
+        .willReturn(List.of(houseQa));
+
+    // 나무(99L): 서술만 있고 대화는 건너뛴 주제 — 그래도 담긴다.
+    AnalysisObservationResult treeObservation =
+        org.mockito.Mockito.mock(AnalysisObservationResult.class);
+    DrawingAnalysis treeAnalysis = org.mockito.Mockito.mock(DrawingAnalysis.class);
+    given(treeObservation.getOverallSummary()).willReturn("나무에 열매가 세 개 달려 있어요.");
+    given(treeObservation.getAnalysis()).willReturn(treeAnalysis);
+    given(treeAnalysis.getDetections()).willReturn(List.of());
+    given(observationResultRepository.findLatestByDrawingSessionId(99L))
+        .willReturn(Optional.of(treeObservation));
+    given(conversationSessionRepository.findByDrawingSessionId(99L)).willReturn(Optional.empty());
+
+    // 사람(100L): 서술·문답·코드 전부 없음 — 담지 않는다.
+    given(observationResultRepository.findLatestByDrawingSessionId(100L))
+        .willReturn(Optional.empty());
+    given(conversationSessionRepository.findByDrawingSessionId(100L)).willReturn(Optional.empty());
+
+    given(
+            emotionRepository
+                .findByDrawingSessionIdInOrderByDrawingSessionIdAscSelectionOrderAscIdAsc(
+                    List.of(98L, 99L, 100L)))
+        .willReturn(List.of());
+
+    ObservationGenerationContext context = service.loadContext(ANALYSIS_ID).orElseThrow();
+
+    assertThat(context.subjectContexts()).hasSize(2);
+    ObservationGenerationContext.SubjectContext house = context.subjectContexts().get(0);
+    assertThat(house.drawingSubject()).isEqualTo("HOUSE");
+    assertThat(house.drawingDescription()).isEqualTo("가운데에 집이 크게 그려져 있어요.");
+    assertThat(house.detectedObjectCodes()).containsExactly("HOUSE_DOOR");
+    assertThat(house.qaPairs()).hasSize(1);
+    assertThat(house.qaPairs().get(0).questionText()).isEqualTo("이 집에는 누가 살아?");
+    assertThat(house.qaPairs().get(0).answerText()).isEqualTo("엄마랑 나!");
+    ObservationGenerationContext.SubjectContext tree = context.subjectContexts().get(1);
+    assertThat(tree.drawingSubject()).isEqualTo("TREE");
+    assertThat(tree.qaPairs()).isEmpty();
+    // 평탄 keyConversations에도 같은 문답이 실린다(리포트 저장용 — 기존 동작 유지).
+    assertThat(context.keyConversations()).hasSize(1);
+  }
+
+  @Test
+  void loadsSingleSubjectContextWithoutHtpAssessment() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findById(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByAnalysisId(ANALYSIS_ID)).willReturn(Optional.of(report));
+    given(htpAssessmentRepository.findStepByDrawingSessionId(DRAWING_SESSION_ID))
+        .willReturn(Optional.empty());
+    given(conversationSessionRepository.findByDrawingSessionId(DRAWING_SESSION_ID))
+        .willReturn(Optional.empty());
+
+    AnalysisObservationResult observation =
+        org.mockito.Mockito.mock(AnalysisObservationResult.class);
+    DrawingAnalysis observationAnalysis = org.mockito.Mockito.mock(DrawingAnalysis.class);
+    given(observation.getOverallSummary()).willReturn("공룡이 풍선을 들고 있어요.");
+    given(observation.getAnalysis()).willReturn(observationAnalysis);
+    given(observationAnalysis.getDetections()).willReturn(List.of());
+    given(observationResultRepository.findLatestByDrawingSessionId(DRAWING_SESSION_ID))
+        .willReturn(Optional.of(observation));
+
+    given(
+            emotionRepository.findAllByDrawingSessionIdOrderBySelectionOrderAscIdAsc(
+                DRAWING_SESSION_ID))
+        .willReturn(List.of());
+
+    ObservationGenerationContext context = service.loadContext(ANALYSIS_ID).orElseThrow();
+
+    assertThat(context.subjectContexts()).hasSize(1);
+    ObservationGenerationContext.SubjectContext subject = context.subjectContexts().get(0);
+    // 그림일기(HTP 아님)는 주제가 없다 — AI 계약의 drawingSubject=null과 1:1.
+    assertThat(subject.drawingSubject()).isNull();
+    assertThat(subject.drawingDescription()).isEqualTo("공룡이 풍선을 들고 있어요.");
   }
 
   @Test
@@ -388,10 +511,18 @@ class ObservationReportPersistenceServiceTest {
   }
 
   private HtpAssessmentStep htpStepWithSession(Long sessionId) {
+    // 주제·순서는 임의 기본값 — 주제별 수집(741)이 step에서 항상 읽으므로 stub이 필수다.
+    return htpStepWithSession(sessionId, 0, HtpDrawingSubject.HOUSE);
+  }
+
+  private HtpAssessmentStep htpStepWithSession(
+      Long sessionId, int stepOrder, HtpDrawingSubject subject) {
     HtpAssessmentStep step = org.mockito.Mockito.mock(HtpAssessmentStep.class);
     DrawingSession session = org.mockito.Mockito.mock(DrawingSession.class);
     lenient().when(session.getId()).thenReturn(sessionId);
     given(step.getDrawingSession()).willReturn(session);
+    given(step.getDrawingSubject()).willReturn(subject);
+    lenient().when(step.getStepOrder()).thenReturn(stepOrder);
     return step;
   }
 
@@ -417,7 +548,8 @@ class ObservationReportPersistenceServiceTest {
         0,
         List.of("HAPPY"),
         "행복했어요",
-        keyConversations);
+        keyConversations,
+        List.of());
   }
 
   private ObservationGenerationContext emptyConversationContext() {
@@ -433,6 +565,7 @@ class ObservationReportPersistenceServiceTest {
         0,
         List.of(),
         null,
+        List.of(),
         List.of());
   }
 
