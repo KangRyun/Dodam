@@ -4,6 +4,7 @@ import '../../../core/network/network.dart';
 import '../domain/models/voice_answer.dart';
 import '../domain/models/voice_recording.dart';
 import '../domain/repositories/voice_answer_repository.dart';
+import 'conversation_retry_policy.dart';
 
 /// 음성 답변 업로드 상태.
 ///
@@ -33,33 +34,68 @@ final class VoiceAnswerUploadController extends ChangeNotifier {
 
   VoiceAnswerUploadStatus status = VoiceAnswerUploadStatus.idle;
   VoiceAnswerUploadResult? result;
+  Object? error;
+
+  /// 보류 중인 업로드. 파일·질문 ID·Key를 한 묶음으로 들고 있어야 재전송이
+  /// 같은 fingerprint로 나간다.
   VoiceAnswerUploadRequest? _pendingRequest;
   String? _pendingIdempotencyKey;
+  int _generation = 0;
+  int? _questionMessageId;
+  bool _disposed = false;
+
+  /// 재시도 조작을 노출해도 되는 실패인지.
+  ///
+  /// 동의 필요는 전용 안내로 처리하므로 여기서 재시도를 제공하지 않는다.
+  bool get canRetry =>
+      status == VoiceAnswerUploadStatus.failure &&
+      _pendingRequest != null &&
+      canRetryConversationRequest(
+        error,
+        endpoint: ConversationRequestEndpoint.voiceAnswer,
+      );
 
   Future<bool> submit({
     required int questionMessageId,
     required VoiceRecording recording,
   }) async {
-    if (status == VoiceAnswerUploadStatus.uploading) return false;
-    _pendingRequest ??= VoiceAnswerUploadRequest(
+    if (_disposed || status == VoiceAnswerUploadStatus.uploading) return false;
+    if (status == VoiceAnswerUploadStatus.failure &&
+        blocksConversationAction(error)) {
+      return false;
+    }
+    // 다른 질문의 보류 요청을 물려받지 않는다 — Body가 달라져 Key가 재사용된다.
+    if (_pendingRequest?.questionMessageId != questionMessageId) {
+      _pendingRequest = null;
+      _pendingIdempotencyKey = null;
+    }
+    final request = _pendingRequest ??= VoiceAnswerUploadRequest(
       questionMessageId: questionMessageId,
       recording: recording,
     );
-    _pendingIdempotencyKey ??= idempotencyKeyProvider();
+    final key = _pendingIdempotencyKey ??= idempotencyKeyProvider();
+    _questionMessageId = questionMessageId;
+    final generation = _generation;
+
     status = VoiceAnswerUploadStatus.uploading;
+    error = null;
     notifyListeners();
     try {
-      result = await _repository.upload(
+      final uploaded = await _repository.upload(
         conversationId: conversationId,
-        request: _pendingRequest!,
-        idempotencyKey: _pendingIdempotencyKey!,
+        request: request,
+        idempotencyKey: key,
       );
+      if (!_isCurrent(generation, questionMessageId)) return false;
+      result = uploaded;
       status = VoiceAnswerUploadStatus.success;
       _pendingRequest = null;
       _pendingIdempotencyKey = null;
       notifyListeners();
       return true;
     } on ApiResponseFailure catch (failure) {
+      if (!_isCurrent(generation, questionMessageId)) return false;
+      error = failure;
       // 동의 부재는 재전송으로 해결되지 않으므로 보류 요청을 버리고 별도 상태로 알린다.
       if (failure.error?.code == _consentRequiredCode) {
         status = VoiceAnswerUploadStatus.consentRequired;
@@ -67,11 +103,28 @@ final class VoiceAnswerUploadController extends ChangeNotifier {
         _pendingIdempotencyKey = null;
       } else {
         status = VoiceAnswerUploadStatus.failure;
+        // 저장 전 거절이 확정된 실패는 같은 Key 재전송이 무의미하다.
+        if (!shouldKeepRequestSnapshot(
+          failure,
+          endpoint: ConversationRequestEndpoint.voiceAnswer,
+        )) {
+          _pendingRequest = null;
+          _pendingIdempotencyKey = null;
+        }
       }
       notifyListeners();
       return false;
-    } catch (_) {
+    } catch (caught) {
+      if (!_isCurrent(generation, questionMessageId)) return false;
+      error = caught;
       status = VoiceAnswerUploadStatus.failure;
+      if (!shouldKeepRequestSnapshot(
+        caught,
+        endpoint: ConversationRequestEndpoint.voiceAnswer,
+      )) {
+        _pendingRequest = null;
+        _pendingIdempotencyKey = null;
+      }
       notifyListeners();
       return false;
     }
@@ -79,18 +132,35 @@ final class VoiceAnswerUploadController extends ChangeNotifier {
 
   Future<bool> retry() async {
     final request = _pendingRequest;
-    if (request == null) return false;
+    if (_disposed || request == null) return false;
     return submit(
       questionMessageId: request.questionMessageId,
       recording: request.recording,
     );
   }
 
-  void beginQuestion() {
+  /// 새 질문으로 넘어가며 이전 질문의 업로드를 모두 무효화한다.
+  void beginQuestion(int questionMessageId) {
+    if (_disposed) return;
+    _generation += 1;
+    _questionMessageId = questionMessageId;
     status = VoiceAnswerUploadStatus.idle;
     result = null;
+    error = null;
     _pendingRequest = null;
     _pendingIdempotencyKey = null;
     notifyListeners();
+  }
+
+  bool _isCurrent(int generation, int questionMessageId) =>
+      !_disposed &&
+      generation == _generation &&
+      questionMessageId == _questionMessageId;
+
+  @override
+  void dispose() {
+    _disposed = true;
+    _generation += 1;
+    super.dispose();
   }
 }

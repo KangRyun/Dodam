@@ -53,6 +53,36 @@ void main() {
     completer.complete(const QuestionSkipResult(skipped: true));
     expect(await first, isTrue);
   });
+
+  test('dispose 뒤 늦게 도착한 응답은 상태를 바꾸지 않는다', () async {
+    final completer = Completer<QuestionSkipResult>();
+    final controller = QuestionSkipController(
+      _RecordingSkipRepository(result: completer.future),
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'skip-key',
+    );
+
+    final pending = controller.submit(questionMessageId: 10);
+    controller.dispose();
+    completer.complete(const QuestionSkipResult(skipped: true));
+
+    expect(await pending, isFalse);
+    expect(controller.status, QuestionSkipStatus.submitting);
+  });
+
+  test('dispose 뒤에는 새 건너뛰기를 보내지 않는다', () async {
+    final repository = _RecordingSkipRepository();
+    final controller = QuestionSkipController(
+      repository,
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'skip-key',
+    );
+
+    controller.dispose();
+
+    expect(await controller.submit(questionMessageId: 10), isFalse);
+    expect(repository.callCount, 0);
+  });
 }
 
 final class _RecordingSkipRepository implements QuestionSkipRepository {

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dodam/core/config/api_environment.dart';
 import 'package:dodam/core/network/api_client.dart';
 import 'package:dodam/features/conversation/conversation.dart';
@@ -131,6 +133,76 @@ void main() {
 
     expect(controller.status, SttResultStatus.delayed);
   });
+
+  test('dispose 뒤 늦게 도착한 polling 응답은 상태를 바꾸지 않는다', () async {
+    final completer = Completer<SttResult>();
+    final controller = SttResultController(
+      _PendingSttRepository(completer.future),
+      conversationId: 20,
+      pollInterval: Duration.zero,
+      delay: (_) async {},
+    );
+
+    final pending = controller.watch(messageId: 30, sequence: 3);
+    controller.dispose();
+    completer.complete(
+      const SttResult(
+        messageId: 30,
+        status: SttSpeechStatus.success,
+        text: '완성된 문장',
+      ),
+    );
+
+    await expectLater(pending, completes);
+    expect(controller.status, SttResultStatus.polling);
+    expect(controller.text, isNull);
+  });
+
+  test('dispose 뒤에는 새 polling을 시작하지 않는다', () async {
+    final repository = _CountingSttRepository();
+    final controller = SttResultController(
+      repository,
+      conversationId: 20,
+      pollInterval: Duration.zero,
+      delay: (_) async {},
+    );
+
+    controller.dispose();
+    await controller.watch(messageId: 30, sequence: 3);
+
+    expect(repository.callCount, 0);
+  });
+}
+
+final class _PendingSttRepository implements SttResultRepository {
+  const _PendingSttRepository(this.pending);
+
+  final Future<SttResult> pending;
+
+  @override
+  Future<SttResult> getResult({
+    required int conversationId,
+    required int messageId,
+    required int afterSequence,
+  }) => pending;
+}
+
+final class _CountingSttRepository implements SttResultRepository {
+  int callCount = 0;
+
+  @override
+  Future<SttResult> getResult({
+    required int conversationId,
+    required int messageId,
+    required int afterSequence,
+  }) async {
+    callCount += 1;
+    return const SttResult(
+      messageId: 30,
+      status: SttSpeechStatus.success,
+      text: '완성된 문장',
+    );
+  }
 }
 
 final class _SttMessageInterceptor extends Interceptor {

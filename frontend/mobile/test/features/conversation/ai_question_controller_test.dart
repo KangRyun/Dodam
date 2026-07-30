@@ -57,6 +57,53 @@ void main() {
       expect(repository.idempotencyKeys, ['stable-key', 'stable-key']);
     });
 
+    test('cancelled는 UI 재시도를 막아도 직접 재실행 시 같은 Key·Body를 쓴다', () async {
+      var keySequence = 0;
+      final repository = _RecordingConversationRepository(
+        failures: [
+          const ApiTransportFailure(type: ApiTransportFailureType.cancelled),
+        ],
+      );
+      final controller = AiQuestionController(
+        repository,
+        conversationId: 11,
+        basisAnalysisId: 22,
+        idempotencyKeyProvider: () => 'question-key-${++keySequence}',
+      );
+
+      await controller.load();
+      expect(controller.canRetry, isFalse);
+      await controller.load();
+
+      expect(repository.idempotencyKeys, ['question-key-1', 'question-key-1']);
+      expect(repository.basisAnalysisIds, [22, 22]);
+      expect(repository.previousAnswerMessageIds, [null, null]);
+    });
+
+    test('모호한 CONVERSATION_409_002는 자동 재시도 불가지만 Key를 바꾸지 않는다', () async {
+      var keySequence = 0;
+      final repository = _RecordingConversationRepository(
+        failures: [
+          const ApiResponseFailure(
+            statusCode: 409,
+            error: ApiError(code: 'CONVERSATION_409_002', message: '충돌'),
+          ),
+        ],
+      );
+      final controller = AiQuestionController(
+        repository,
+        conversationId: 11,
+        basisAnalysisId: 22,
+        idempotencyKeyProvider: () => 'question-key-${++keySequence}',
+      );
+
+      await controller.load();
+      expect(controller.canRetry, isFalse);
+      await controller.load();
+
+      expect(repository.idempotencyKeys, ['question-key-1', 'question-key-1']);
+    });
+
     test('새 객체 탐지 결과마다 분석 ID를 바꿔 다음 질문을 요청한다', () async {
       var keySequence = 0;
       final repository = _RecordingConversationRepository();
@@ -137,14 +184,14 @@ void main() {
       expect(controller.error, isNull);
     });
 
-    test('질문 없음 응답은 NO_MORE_QUESTION 종료 사유로 구분한다', () async {
+    test('이미 종료된 대화는 종료 사유 없이 완료로 표시하고 재시도하지 않는다', () async {
       final repository = _RecordingConversationRepository(
         failures: [
           const ApiResponseFailure(
             statusCode: 409,
             error: ApiError(
-              code: 'NO_MORE_QUESTION',
-              message: '더 이상 생성할 질문이 없습니다.',
+              code: 'CONVERSATION_ALREADY_COMPLETED',
+              message: '이미 종료된 대화입니다.',
             ),
           ),
         ],
@@ -154,10 +201,117 @@ void main() {
       await controller.loadNext(previousAnswerMessageId: 801);
 
       expect(controller.status, AiQuestionStatus.conversationComplete);
+      expect(controller.conversationAlreadyEnded, isTrue);
+      // 종료 사유는 서버가 처음 저장한 값이라 알 수 없다. 화면이 종료 API를
+      // 다시 부르지 않도록 reason은 비워 둔다.
+      expect(controller.completionReason, isNull);
+      expect(controller.error, isNull);
+    });
+
+    test('질문 한도 완료는 이미 종료된 대화와 구분한다', () async {
+      final repository = _RecordingConversationRepository(
+        failures: [
+          const ApiResponseFailure(
+            statusCode: 409,
+            error: ApiError(
+              code: 'QUESTION_LIMIT_REACHED',
+              message: '질문 가능 횟수를 모두 사용했습니다.',
+            ),
+          ),
+        ],
+      );
+      final controller = AiQuestionController(repository, conversationId: 11);
+
+      await controller.loadNext(previousAnswerMessageId: 801);
+
+      expect(controller.status, AiQuestionStatus.conversationComplete);
+      expect(controller.conversationAlreadyEnded, isFalse);
       expect(
         controller.completionReason,
-        ConversationCompletionReason.noMoreQuestion,
+        ConversationCompletionReason.questionLimitReached,
       );
+    });
+
+    // 같은 409라도 종료가 아닌 코드는 재시도 대상 실패로 남아야 한다.
+    for (final code in [
+      'CONVERSATION_409_002',
+      'INVALID_STATE_TRANSITION',
+      'SOME_UNKNOWN_CODE',
+    ]) {
+      test('종료가 아닌 409($code)는 실패로 유지한다', () async {
+        final repository = _RecordingConversationRepository(
+          failures: [
+            ApiResponseFailure(
+              statusCode: 409,
+              error: ApiError(code: code, message: '충돌'),
+            ),
+          ],
+        );
+        final controller = AiQuestionController(repository, conversationId: 11);
+
+        await controller.loadNext(previousAnswerMessageId: 801);
+
+        expect(controller.status, AiQuestionStatus.failure);
+        expect(controller.conversationAlreadyEnded, isFalse);
+        expect(controller.completionReason, isNull);
+        expect(controller.error, isA<ApiResponseFailure>());
+      });
+    }
+
+    test('errorCode가 없는 실패도 안전하게 failure로 남는다', () async {
+      final repository = _RecordingConversationRepository(
+        failures: [const ApiResponseFailure(statusCode: 500, error: null)],
+      );
+      final controller = AiQuestionController(repository, conversationId: 11);
+
+      await controller.loadNext(previousAnswerMessageId: 801);
+
+      expect(controller.status, AiQuestionStatus.failure);
+      expect(controller.conversationAlreadyEnded, isFalse);
+    });
+
+    test('dispose 뒤 늦게 도착한 성공은 상태를 바꾸지 않는다', () async {
+      final completer = Completer<AiQuestion>();
+      final repository = _RecordingConversationRepository(
+        result: completer.future,
+      );
+      final controller = AiQuestionController(repository, conversationId: 11);
+
+      final pending = controller.load();
+      controller.dispose();
+      completer.complete(_question);
+
+      await expectLater(pending, completes);
+      expect(controller.status, AiQuestionStatus.loading);
+      expect(controller.question, isNull);
+    });
+
+    test('dispose 뒤 늦게 도착한 실패도 상태를 바꾸지 않는다', () async {
+      final completer = Completer<AiQuestion>();
+      final repository = _RecordingConversationRepository(
+        result: completer.future,
+      );
+      final controller = AiQuestionController(repository, conversationId: 11);
+
+      final pending = controller.load();
+      controller.dispose();
+      completer.completeError(
+        const ApiResponseFailure(statusCode: 500, error: null),
+      );
+
+      await expectLater(pending, completes);
+      expect(controller.status, AiQuestionStatus.loading);
+      expect(controller.error, isNull);
+    });
+
+    test('dispose 뒤에는 새 요청을 보내지 않는다', () async {
+      final repository = _RecordingConversationRepository();
+      final controller = AiQuestionController(repository, conversationId: 11);
+
+      controller.dispose();
+      await controller.load();
+
+      expect(repository.callCount, 0);
     });
   });
 }

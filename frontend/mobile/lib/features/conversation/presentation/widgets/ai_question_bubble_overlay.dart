@@ -27,6 +27,11 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
     this.voiceRecordingController,
     this.voiceAnswerUploadStatus = VoiceAnswerUploadStatus.idle,
     this.onRetryVoiceAnswerUpload,
+    this.answerRetryable = true,
+    this.answerOptionsEnabled = true,
+    this.skipRetryable = true,
+    this.endRetryable = true,
+    this.voiceRetryable = true,
     super.key,
   });
 
@@ -45,6 +50,17 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
   final VoiceRecordingController? voiceRecordingController;
   final VoiceAnswerUploadStatus voiceAnswerUploadStatus;
   final VoidCallback? onRetryVoiceAnswerUpload;
+
+  /// 실패한 조작을 같은 버튼으로 다시 시도해도 되는지.
+  ///
+  /// 권한·검증처럼 결과가 달라지지 않는 실패에서는 조작을 잠가, 아이가 같은
+  /// 버튼을 반복해 눌러도 아무 일도 일어나지 않는 상황을 만들지 않는다.
+  /// 잠기더라도 건너뛰기·대화 그만하기 중 살아 있는 경로로 빠져나갈 수 있다.
+  final bool answerRetryable;
+  final bool answerOptionsEnabled;
+  final bool skipRetryable;
+  final bool endRetryable;
+  final bool voiceRetryable;
 
   @override
   Widget build(BuildContext context) {
@@ -141,7 +157,11 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                                                       .submitting &&
                                               endStatus !=
                                                   ConversationEndStatus
-                                                      .submitting,
+                                                      .submitting &&
+                                              (voiceAnswerUploadStatus !=
+                                                      VoiceAnswerUploadStatus
+                                                          .failure ||
+                                                  voiceRetryable),
                                         ),
                                         if (voiceAnswerUploadStatus ==
                                             VoiceAnswerUploadStatus
@@ -162,27 +182,33 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                                             VoiceAnswerUploadStatus
                                                 .failure) ...[
                                           const SizedBox(height: AppSpacing.xs),
-                                          const Text(
-                                            '목소리를 보내지 못했어요.',
-                                            key: ValueKey(
+                                          Text(
+                                            voiceRetryable
+                                                ? '목소리를 보내지 못했어요.'
+                                                : '지금은 목소리를 보낼 수 없어요.\n'
+                                                      '아래에서 골라서 답해 볼까요?',
+                                            key: const ValueKey(
                                               'voice-answer-upload-failure',
                                             ),
                                             textAlign: TextAlign.center,
-                                            style: TextStyle(
+                                            style: const TextStyle(
                                               color: AppColors.error,
                                               fontWeight: FontWeight.w700,
                                             ),
                                           ),
-                                          TextButton(
-                                            key: const ValueKey(
-                                              'voice-answer-upload-retry',
+                                          // 다시 보내도 같은 결과인 실패에는 버튼을 만들지 않는다.
+                                          if (voiceRetryable)
+                                            TextButton(
+                                              key: const ValueKey(
+                                                'voice-answer-upload-retry',
+                                              ),
+                                              onPressed:
+                                                  onRetryVoiceAnswerUpload,
+                                              style: TextButton.styleFrom(
+                                                minimumSize: const Size(48, 48),
+                                              ),
+                                              child: const Text('다시 보내기'),
                                             ),
-                                            onPressed: onRetryVoiceAnswerUpload,
-                                            style: TextButton.styleFrom(
-                                              minimumSize: const Size(48, 48),
-                                            ),
-                                            child: const Text('다시 보내기'),
-                                          ),
                                         ],
                                         // 동의 부재는 아이 화면에 어른 문구를 노출하지 않고
                                         // 선택형 답변으로 자연스럽게 유도한다(가드레일 9절).
@@ -223,6 +249,11 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                                           skipStatus: skipStatus,
                                           endStatus: endStatus,
                                           onEnd: onEnd,
+                                          answerRetryable: answerRetryable,
+                                          answerOptionsEnabled:
+                                              answerOptionsEnabled,
+                                          skipRetryable: skipRetryable,
+                                          endRetryable: endRetryable,
                                         ),
                                       ),
                                       if (!compact) ...[
@@ -254,6 +285,29 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
   }
 }
 
+/// 실패 안내 한 줄. 색만으로 구분하지 않도록 문구를 항상 함께 낭독한다.
+final class _FailureNotice extends StatelessWidget {
+  const _FailureNotice({required this.message, super.key});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: AppSpacing.xs),
+    child: Semantics(
+      liveRegion: true,
+      child: Text(
+        message,
+        textAlign: TextAlign.center,
+        style: const TextStyle(
+          color: AppColors.error,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    ),
+  );
+}
+
 final class _ResponseActions extends StatelessWidget {
   const _ResponseActions({
     required this.showOptions,
@@ -265,6 +319,10 @@ final class _ResponseActions extends StatelessWidget {
     required this.skipStatus,
     required this.endStatus,
     required this.onEnd,
+    required this.answerRetryable,
+    required this.answerOptionsEnabled,
+    required this.skipRetryable,
+    required this.endRetryable,
     super.key,
   });
 
@@ -277,23 +335,28 @@ final class _ResponseActions extends StatelessWidget {
   final QuestionSkipStatus skipStatus;
   final ConversationEndStatus endStatus;
   final VoidCallback onEnd;
+  final bool answerRetryable;
+  final bool answerOptionsEnabled;
+  final bool skipRetryable;
+  final bool endRetryable;
+
+  /// 어느 요청이든 전송 중이면 다른 조작을 막는다.
+  bool get _busy =>
+      submissionStatus == OptionAnswerSubmissionStatus.submitting ||
+      skipStatus == QuestionSkipStatus.submitting ||
+      endStatus == ConversationEndStatus.submitting;
 
   @override
   Widget build(BuildContext context) {
-    if (!showOptions) return const SizedBox.shrink();
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (options.isNotEmpty)
+        if (showOptions && options.isNotEmpty)
           _QuestionOptions(
             options: options,
             selectedOptionId: selectedOptionId,
             onSelected: onSelected,
-            enabled:
-                submissionStatus != OptionAnswerSubmissionStatus.submitting &&
-                skipStatus != QuestionSkipStatus.submitting &&
-                endStatus != ConversationEndStatus.submitting,
+            enabled: !_busy && answerOptionsEnabled,
           ),
         if (submissionStatus == OptionAnswerSubmissionStatus.submitting) ...[
           const SizedBox(height: AppSpacing.xs),
@@ -301,51 +364,33 @@ final class _ResponseActions extends StatelessWidget {
             key: ValueKey('ai-question-answer-submitting'),
           ),
         ],
-        if (submissionStatus == OptionAnswerSubmissionStatus.failure) ...[
-          const SizedBox(height: AppSpacing.xs),
-          const Text(
-            '답을 보내지 못했어요. 다시 눌러 주세요.',
+        // 다시 눌러 볼 수 있는 실패와 그렇지 않은 실패의 안내를 구분한다.
+        // 어느 쪽도 내부 status·errorCode를 드러내지 않는다.
+        if (submissionStatus == OptionAnswerSubmissionStatus.failure)
+          _FailureNotice(
             key: ValueKey('ai-question-answer-failure'),
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.error,
-              fontWeight: FontWeight.w700,
-            ),
+            message: answerRetryable
+                ? '답을 보내지 못했어요. 다시 눌러 주세요.'
+                : '지금은 이 답을 보낼 수 없어요. 다른 방법으로 해 볼까요?',
           ),
-        ],
-        if (skipStatus == QuestionSkipStatus.failure) ...[
-          const SizedBox(height: AppSpacing.xs),
-          const Text(
-            '계속 그리기로 돌아가지 못했어요. 다시 눌러 주세요.',
+        if (skipStatus == QuestionSkipStatus.failure)
+          _FailureNotice(
             key: ValueKey('ai-question-skip-failure'),
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.error,
-              fontWeight: FontWeight.w700,
-            ),
+            message: skipRetryable
+                ? '계속 그리기로 돌아가지 못했어요. 다시 눌러 주세요.'
+                : '지금은 넘어갈 수 없어요. 답을 골라 볼까요?',
           ),
-        ],
-        if (endStatus == ConversationEndStatus.failure) ...[
-          const SizedBox(height: AppSpacing.xs),
-          const Text(
-            '대화를 끝내지 못했어요. 다시 시도해 주세요.',
+        if (endStatus == ConversationEndStatus.failure)
+          _FailureNotice(
             key: ValueKey('ai-conversation-end-failure'),
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.error,
-              fontWeight: FontWeight.w700,
-            ),
+            message: endRetryable
+                ? '대화를 끝내지 못했어요. 다시 시도해 주세요.'
+                : '지금은 대화를 끝낼 수 없어요. 조금 더 이야기해 볼까요?',
           ),
-        ],
         const SizedBox(height: AppSpacing.xs),
         TextButton.icon(
           key: const ValueKey('ai-question-skip'),
-          onPressed:
-              submissionStatus == OptionAnswerSubmissionStatus.submitting ||
-                  skipStatus == QuestionSkipStatus.submitting ||
-                  endStatus == ConversationEndStatus.submitting
-              ? null
-              : onSkip,
+          onPressed: _busy || !skipRetryable ? null : onSkip,
           icon: skipStatus == QuestionSkipStatus.submitting
               ? const SizedBox.square(
                   dimension: 18,
@@ -370,12 +415,7 @@ final class _ResponseActions extends StatelessWidget {
         const SizedBox(height: AppSpacing.xs),
         TextButton.icon(
           key: const ValueKey('ai-conversation-end'),
-          onPressed:
-              submissionStatus == OptionAnswerSubmissionStatus.submitting ||
-                  skipStatus == QuestionSkipStatus.submitting ||
-                  endStatus == ConversationEndStatus.submitting
-              ? null
-              : onEnd,
+          onPressed: _busy || !endRetryable ? null : onEnd,
           icon: endStatus == ConversationEndStatus.submitting
               ? const SizedBox.square(
                   dimension: 18,

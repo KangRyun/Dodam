@@ -26,8 +26,10 @@ final class SttResultController extends ChangeNotifier {
   String? text;
   int? messageId;
   int _generation = 0;
+  bool _disposed = false;
 
   Future<void> watch({required int messageId, required int sequence}) async {
+    if (_disposed) return;
     final generation = ++_generation;
     status = SttResultStatus.polling;
     text = null;
@@ -41,6 +43,8 @@ final class SttResultController extends ChangeNotifier {
           messageId: messageId,
           afterSequence: sequence - 1,
         );
+        // 응답을 기다리는 사이 dismiss·새 감시·dispose가 끼어들 수 있다.
+        if (generation != _generation) return;
         if (result.status == SttSpeechStatus.success &&
             result.text?.trim().isNotEmpty == true) {
           status = SttResultStatus.success;
@@ -54,6 +58,7 @@ final class SttResultController extends ChangeNotifier {
           return;
         }
       } catch (_) {
+        if (generation != _generation) return;
         if (attempt == maxAttempts - 1) {
           status = SttResultStatus.failure;
           notifyListeners();
@@ -69,6 +74,7 @@ final class SttResultController extends ChangeNotifier {
   }
 
   void dismiss() {
+    if (_disposed) return;
     _generation++;
     status = SttResultStatus.idle;
     text = null;
@@ -78,6 +84,7 @@ final class SttResultController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _generation++;
     super.dispose();
   }
