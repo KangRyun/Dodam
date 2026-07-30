@@ -151,6 +151,26 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('보호자 홈'), findsWidgets);
   });
+
+  testWidgets('HTP 활동은 집·나무·사람 그림을 한 미리보기에서 전환한다', (tester) async {
+    tester.view.physicalSize = const Size(1400, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await _openHistoryDirect(
+      tester,
+      _ActivityRepository(activities: [_htpActivity]),
+    );
+
+    expect(find.text('집 1/3'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('htp-preview-next')));
+    await tester.pump();
+    expect(find.text('나무 2/3'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('htp-preview-next')));
+    await tester.pump();
+    expect(find.text('사람 3/3'), findsOneWidget);
+  });
 }
 
 /// 보호자 홈을 거쳐 활동 이력으로 들어간다. 홈에서의 이동 자체를 보는
@@ -267,6 +287,40 @@ final _activities = [
   _activity(120, '우리 가족', 'ART_DIARY', '그림일기'),
   _activity(121, '비 오는 날', 'FREE_DRAWING', '자유화'),
 ];
+
+const _htpActivity = ActivitySummaryDto(
+  activityId: 122,
+  title: null,
+  drawingType: ActivityDrawingTypeDto(code: 'HTP', name: '집·나무·사람 그림'),
+  inputMethod: 'CANVAS',
+  sessionStatus: 'COMPLETED',
+  selectedEmotions: ['CALM'],
+  thumbnailUrl: '/api/v1/drawing-assets/33/file',
+  analysisStatus: 'COMPLETED',
+  report: null,
+  startedAt: '2026-07-20T09:40:00Z',
+  completedAt: '2026-07-20T10:03:00Z',
+  activityKind: 'HTP',
+  htpAssessmentId: 40,
+  htpStatus: 'COMPLETED',
+  htpDrawings: [
+    HtpActivityDrawingDto(
+      drawingSubject: 'HOUSE',
+      drawingSessionId: 10,
+      thumbnailUrl: '/api/v1/drawing-assets/31/file',
+    ),
+    HtpActivityDrawingDto(
+      drawingSubject: 'TREE',
+      drawingSessionId: 11,
+      thumbnailUrl: '/api/v1/drawing-assets/32/file',
+    ),
+    HtpActivityDrawingDto(
+      drawingSubject: 'PERSON',
+      drawingSessionId: 12,
+      thumbnailUrl: '/api/v1/drawing-assets/33/file',
+    ),
+  ],
+);
 
 ActivitySummaryDto _activity(int id, String title, String code, String name) =>
     ActivitySummaryDto(

@@ -622,7 +622,7 @@ class _CardAction extends StatelessWidget {
 }
 
 // ── 우측 프리뷰(그림 + 관찰 리포트 보기) ─────────────────────────────
-class _PreviewPane extends StatelessWidget {
+class _PreviewPane extends StatefulWidget {
   const _PreviewPane({
     required this.activity,
     required this.repository,
@@ -633,8 +633,29 @@ class _PreviewPane extends StatelessWidget {
   final ValueChanged<ActivitySummaryDto> onReport;
 
   @override
+  State<_PreviewPane> createState() => _PreviewPaneState();
+}
+
+class _PreviewPaneState extends State<_PreviewPane> {
+  int _drawingIndex = 0;
+
+  @override
+  void didUpdateWidget(covariant _PreviewPane oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.activity?.activityId != widget.activity?.activityId) {
+      _drawingIndex = 0;
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final activity = this.activity;
+    final activity = widget.activity;
+    final htpDrawings = activity?.htpDrawings ?? const [];
+    final hasHtpCarousel = activity?.isHtp == true && htpDrawings.isNotEmpty;
+    final safeIndex = hasHtpCarousel
+        ? _drawingIndex.clamp(0, htpDrawings.length - 1)
+        : 0;
+    final selectedHtpDrawing = hasHtpCarousel ? htpDrawings[safeIndex] : null;
     return Container(
       key: const ValueKey('activity-history-summary'),
       padding: const EdgeInsets.all(AppSpacing.lg),
@@ -660,17 +681,73 @@ class _PreviewPane extends StatelessWidget {
                 const SizedBox(height: AppSpacing.md),
                 AspectRatio(
                   aspectRatio: 4 / 3,
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: AppColors.surfaceSoft,
-                      borderRadius: BorderRadius.circular(AppRadius.lg),
-                      border: Border.all(color: AppColors.outline),
-                    ),
-                    child: _Thumbnail(
-                      url: activity.thumbnailUrl,
-                      repository: repository,
-                      fit: BoxFit.contain,
-                    ),
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      Positioned.fill(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: AppColors.surfaceSoft,
+                            borderRadius: BorderRadius.circular(AppRadius.lg),
+                            border: Border.all(color: AppColors.outline),
+                          ),
+                          child: _Thumbnail(
+                            url:
+                                selectedHtpDrawing?.thumbnailUrl ??
+                                activity.thumbnailUrl,
+                            repository: widget.repository,
+                            fit: BoxFit.contain,
+                          ),
+                        ),
+                      ),
+                      if (hasHtpCarousel) ...[
+                        Positioned(
+                          left: AppSpacing.sm,
+                          child: _CarouselButton(
+                            key: const ValueKey('htp-preview-previous'),
+                            icon: Icons.chevron_left_rounded,
+                            enabled: safeIndex > 0,
+                            onPressed: () {
+                              setState(() => _drawingIndex = safeIndex - 1);
+                            },
+                          ),
+                        ),
+                        Positioned(
+                          right: AppSpacing.sm,
+                          child: _CarouselButton(
+                            key: const ValueKey('htp-preview-next'),
+                            icon: Icons.chevron_right_rounded,
+                            enabled: safeIndex < htpDrawings.length - 1,
+                            onPressed: () {
+                              setState(() => _drawingIndex = safeIndex + 1);
+                            },
+                          ),
+                        ),
+                        Positioned(
+                          bottom: AppSpacing.sm,
+                          child: Container(
+                            key: const ValueKey('htp-preview-indicator'),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.sm,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AppColors.ink.withValues(alpha: 0.72),
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            child: Text(
+                              '${_htpSubjectLabel(selectedHtpDrawing!.drawingSubject)} '
+                              '${safeIndex + 1}/${htpDrawings.length}',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
                   ),
                 ),
                 const SizedBox(height: AppSpacing.lg),
@@ -678,7 +755,7 @@ class _PreviewPane extends StatelessWidget {
                   key: const ValueKey('activity-report-cta'),
                   label: '관찰 리포트 보기',
                   onPressed: _reportReady(activity)
-                      ? () => onReport(activity)
+                      ? () => widget.onReport(activity)
                       : null,
                 ),
               ],
@@ -686,6 +763,40 @@ class _PreviewPane extends StatelessWidget {
     );
   }
 }
+
+class _CarouselButton extends StatelessWidget {
+  const _CarouselButton({
+    required this.icon,
+    required this.enabled,
+    required this.onPressed,
+    super.key,
+  });
+
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => Material(
+    color: AppColors.surface.withValues(alpha: 0.92),
+    shape: const CircleBorder(),
+    elevation: enabled ? 2 : 0,
+    child: IconButton(
+      onPressed: enabled ? onPressed : null,
+      icon: Icon(icon),
+      color: AppColors.ink,
+      disabledColor: AppColors.outline,
+      tooltip: icon == Icons.chevron_left_rounded ? '이전 그림' : '다음 그림',
+    ),
+  );
+}
+
+String _htpSubjectLabel(String subject) => switch (subject) {
+  'HOUSE' => '집',
+  'TREE' => '나무',
+  'PERSON' => '사람',
+  _ => subject,
+};
 
 class _DeleteNotice extends StatelessWidget {
   const _DeleteNotice();

@@ -366,6 +366,24 @@ public class HtpAssessment {
   }
 
   /**
+   * HTP 묶음이 처음 시작된 시각을 반환한다.
+   *
+   * @return HOUSE 단계 생성 시각
+   */
+  public LocalDateTime getCreatedAt() {
+    return createdAt;
+  }
+
+  /**
+   * HTP 묶음 전체가 종료된 시각을 반환한다.
+   *
+   * @return 완료 전이면 {@code null}
+   */
+  public LocalDateTime getCompletedAt() {
+    return completedAt;
+  }
+
+  /**
    * 생성된 HTP 그림 단계를 고정 순서로 반환한다.
    *
    * @return 외부에서 변경할 수 없는 단계 목록
