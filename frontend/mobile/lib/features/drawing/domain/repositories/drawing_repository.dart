@@ -55,6 +55,25 @@ abstract interface class DrawingRepository {
   );
 }
 
+/// 업로드 요청이 전송한 바이트 수와 전체 바이트 수를 전달하는 callback이다.
+typedef DrawingUploadProgressCallback = void Function(int sent, int total);
+
+/// 사진 업로드의 실제 전송 진행률을 제공하는 [DrawingRepository] capability다.
+///
+/// Mock처럼 진행률을 제공하지 않는 구현은 기존 [DrawingRepository]만 구현할 수
+/// 있으며, 화면은 이 capability가 없을 때 기존 로딩 상태를 유지한다.
+abstract interface class DrawingUploadProgressRepository
+    implements DrawingRepository {
+  @override
+  Future<DrawingUploadResponseDto> uploadDrawing(
+    int sessionId,
+    BinaryUploadDto image, {
+    required UploadDrawingImageMetadataDto metadata,
+    required String idempotencyKey,
+    DrawingUploadProgressCallback? onProgress,
+  });
+}
+
 abstract interface class UploadedDrawingCompletionRepository {
   Future<DrawingStageCompleteResponseDto> completeUploadedDrawingStage(
     int sessionId, {

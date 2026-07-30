@@ -109,6 +109,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
   bool _canvasError = false;
   DrawingUploadErrorPresentation? _photoPickError;
   DrawingUploadErrorPresentation? _uploadError;
+  int? _uploadProgressPercent;
   ValidatedPhoto? _validated;
 
   /// 사진 경로에서만 지연 생성된다 — 유효한 사진이 확보되기 전에는 세션을
@@ -236,6 +237,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     setState(() {
       _validated = null;
       _uploadError = null;
+      _uploadProgressPercent = null;
       _step = _Step.photoSource;
     });
   }
@@ -247,6 +249,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     setState(() {
       _busy = true;
       _uploadError = null;
+      _uploadProgressPercent = 0;
     });
     try {
       var sessionId = _sessionId;
@@ -265,22 +268,33 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
         });
       }
 
-      final uploaded = await widget.repository.uploadDrawing(
-        sessionId,
-        BinaryUploadDto(
-          bytes: validated.photo.bytes,
-          fileName: validated.photo.fileName,
-          mimeType: validated.mimeType,
-        ),
-        metadata: UploadDrawingImageMetadataDto(
-          clientCapturedAt: (widget.now?.call() ?? DateTime.now())
-              .toUtc()
-              .toIso8601String(),
-          rotationDegrees: 0,
-          cropApplied: false,
-        ),
-        idempotencyKey: _uploadIdempotencyKey!,
+      final image = BinaryUploadDto(
+        bytes: validated.photo.bytes,
+        fileName: validated.photo.fileName,
+        mimeType: validated.mimeType,
       );
+      final metadata = UploadDrawingImageMetadataDto(
+        clientCapturedAt: (widget.now?.call() ?? DateTime.now())
+            .toUtc()
+            .toIso8601String(),
+        rotationDegrees: 0,
+        cropApplied: false,
+      );
+      final repository = widget.repository;
+      final uploaded = repository is DrawingUploadProgressRepository
+          ? await repository.uploadDrawing(
+              sessionId,
+              image,
+              metadata: metadata,
+              idempotencyKey: _uploadIdempotencyKey!,
+              onProgress: _handleUploadProgress,
+            )
+          : await repository.uploadDrawing(
+              sessionId,
+              image,
+              metadata: metadata,
+              idempotencyKey: _uploadIdempotencyKey!,
+            );
 
       if (widget.repository is! UploadedDrawingCompletionRepository) {
         throw UnsupportedError('Uploaded drawing completion is unavailable.');
@@ -313,10 +327,20 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
       );
     } on Object catch (error) {
       if (!mounted) return;
-      setState(() => _uploadError = DrawingUploadErrorPresentation.of(error));
+      setState(() {
+        _uploadError = DrawingUploadErrorPresentation.of(error);
+        _uploadProgressPercent = null;
+      });
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+
+  void _handleUploadProgress(int sent, int total) {
+    if (!mounted || !_busy || total <= 0) return;
+    final percent = ((sent / total) * 100).floor().clamp(0, 100);
+    if (_uploadProgressPercent == percent) return;
+    setState(() => _uploadProgressPercent = percent);
   }
 
   Future<void> _cancel() async {
@@ -614,6 +638,32 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
           ),
           const SizedBox(height: AppSpacing.md),
         ],
+        if (_busy)
+          if (_uploadProgressPercent case final progress?) ...[
+            Builder(
+              builder: (context) {
+                final statusMessage = progress >= 100
+                    ? '업로드 100% · 사진을 확인하고 있어요'
+                    : '사진을 올리고 있어요 $progress%';
+
+                return Semantics(
+                  label: '사진 업로드 $progress퍼센트',
+                  value: '$progress%',
+                  child: ExcludeSemantics(
+                    child: Column(
+                      key: const ValueKey('input-method-upload-progress'),
+                      children: [
+                        LinearProgressIndicator(value: progress / 100),
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(statusMessage),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: AppSpacing.md),
+          ],
         AppButton(
           key: const ValueKey('input-method-confirm'),
           label: _uploadError != null ? '다시 시도' : '이 사진 사용하기',

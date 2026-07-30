@@ -60,7 +60,7 @@ String _idempotencyKey() {
 
 final class RemoteDrawingRepository
     implements
-        DrawingRepository,
+        DrawingUploadProgressRepository,
         HtpDrawingRepository,
         UploadedDrawingCompletionRepository,
         DrawingSessionDiscarder {
@@ -318,6 +318,7 @@ final class RemoteDrawingRepository
     BinaryUploadDto image, {
     required UploadDrawingImageMetadataDto metadata,
     required String idempotencyKey,
+    DrawingUploadProgressCallback? onProgress,
   }) async {
     final response = await _apiClient.post<Map<String, dynamic>>(
       'drawing-sessions/$sessionId/upload',
@@ -334,6 +335,7 @@ final class RemoteDrawingRepository
         ),
       }),
       options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+      onSendProgress: onProgress,
     );
     return DrawingUploadResponseDto.fromJson(envelopeObject(response.data));
   }
