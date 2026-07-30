@@ -23,7 +23,9 @@ import '../features/notification/domain/repositories/notification_inbox_reposito
 import '../features/notification/domain/services/push_coordinator.dart';
 import '../features/notification/domain/services/push_setup.dart';
 import '../features/report/data/repositories/mock_report_repository.dart';
+import '../features/report/data/services/platform_report_file_actions.dart';
 import '../features/report/domain/repositories/report_repository.dart';
+import '../features/report/domain/services/report_file_actions.dart';
 import 'router/app_router.dart';
 import 'router/app_routes.dart';
 import 'router/current_route_observer.dart';
@@ -38,6 +40,7 @@ class DodamApp extends StatefulWidget {
     this.consentRepository = const MockConsentRepository(),
     this.drawingRepository = const MockDrawingRepository(),
     this.reportRepository = const MockReportRepository(),
+    this.reportFileActions = const PlatformReportFileActions(),
     this.drawingCompletionSnapshotProvider,
     this.authSessionStore,
     this.authRepository,
@@ -66,6 +69,7 @@ class DodamApp extends StatefulWidget {
   final ConsentRepository consentRepository;
   final DrawingRepository drawingRepository;
   final ReportRepository reportRepository;
+  final ReportFileActions reportFileActions;
   final Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider;
   final AuthSessionStore? authSessionStore;
   final AuthRepository? authRepository;
@@ -307,6 +311,7 @@ class _DodamAppState extends State<DodamApp> {
       activityRepository: widget.activityRepository,
       drawingRepository: widget.drawingRepository,
       reportRepository: widget.reportRepository,
+      reportFileActions: widget.reportFileActions,
       notificationInboxRepository: widget.notificationInboxRepository,
       consentRepository: widget.consentRepository,
       drawingCompletionSnapshotProvider:

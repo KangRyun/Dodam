@@ -76,6 +76,55 @@ void main() {
     expect(report.reportId, 500);
   });
 
+  test('PDF 내보내기는 REPORT-04 경로와 동일 Idempotency-Key를 전달한다', () async {
+    final adapter = _StubAdapter(
+      _okResponse({
+        'reportId': 500,
+        'exportId': 500,
+        'status': 'COMPLETED',
+        'downloadUrl': '/api/v1/reports/500/exports/500/file',
+      }),
+    );
+    final repository = RemoteReportRepository(_client(adapter));
+
+    final export = await repository.requestExport(
+      500,
+      idempotencyKey: 'report-export-500',
+    );
+
+    final request = adapter.requests.single;
+    expect(request.method, 'POST');
+    expect(request.uri.path, '/api/v1/reports/500/exports');
+    expect(request.headers['Idempotency-Key'], 'report-export-500');
+    expect(export.exportId, 500);
+    expect(export.status, 'COMPLETED');
+    expect(export.downloadUrl, '/api/v1/reports/500/exports/500/file');
+  });
+
+  test('PDF 파일은 인증 proxy URI에서 bytes로 내려받는다', () async {
+    final adapter = _StubAdapter(
+      ResponseBody.fromBytes(
+        const [0x25, 0x50, 0x44, 0x46],
+        200,
+        headers: {
+          Headers.contentTypeHeader: ['application/pdf'],
+        },
+      ),
+    );
+    final repository = RemoteReportRepository(_client(adapter));
+
+    final bytes = await repository.downloadExport(
+      '/api/v1/reports/500/exports/500/file',
+    );
+
+    final request = adapter.requests.single;
+    expect(request.method, 'GET');
+    expect(request.uri.path, '/api/v1/reports/500/exports/500/file');
+    expect(request.headers['Authorization'], 'Bearer test-token');
+    expect(request.responseType, ResponseType.bytes);
+    expect(bytes, Uint8List.fromList(const [0x25, 0x50, 0x44, 0x46]));
+  });
+
   test('401은 ApiResponseFailure로 올라온다', () async {
     final repository = RemoteReportRepository(
       _client(_StubAdapter(_errorResponse(401, 'AUTH_401_006', '인증이 필요합니다.'))),

@@ -20,6 +20,7 @@ import '../../features/notification/presentation/screens/notification_list_scree
 import '../../features/report/presentation/screens/report_screen.dart';
 import '../../features/report/presentation/screens/report_list_screen.dart';
 import '../../features/report/domain/repositories/report_repository.dart';
+import '../../features/report/domain/services/report_file_actions.dart';
 import '../../features/consent/domain/repositories/consent_repository.dart';
 import '../../features/consent/presentation/screens/consent_management_screen.dart';
 import '../../features/settings/presentation/screens/settings_main_screen.dart';
@@ -44,6 +45,7 @@ abstract final class AppRouter {
     ActivityRepository? activityRepository,
     DrawingRepository? drawingRepository,
     ReportRepository? reportRepository,
+    ReportFileActions? reportFileActions,
     NotificationInboxRepository? notificationInboxRepository,
     ConsentRepository? consentRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
@@ -207,7 +209,11 @@ abstract final class AppRouter {
           repository: reportRepository,
         ),
       ['guardian', 'reports', final reportId] when reportRepository != null =>
-        ReportScreen(reportId: reportId, repository: reportRepository),
+        ReportScreen(
+          reportId: reportId,
+          repository: reportRepository,
+          fileActions: reportFileActions,
+        ),
       ['guardian', 'notifications'] when notificationInboxRepository != null =>
         NotificationListScreen(repository: notificationInboxRepository),
       ['guardian', 'settings'] when authSignOut != null => SettingsMainScreen(
