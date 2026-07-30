@@ -11,6 +11,7 @@ import '../../../activity/data/dto/activity_dtos.dart';
 import '../../../activity/domain/models/activity_conversation_turn.dart';
 import '../../../activity/domain/repositories/activity_repository.dart';
 import '../../../child/data/dto/child_dtos.dart';
+import '../../../conversation/conversation.dart';
 
 enum _HistoryStatus { loading, success, empty, error, noChild }
 
@@ -940,11 +941,15 @@ class ActivityDetailScreen extends StatefulWidget {
   const ActivityDetailScreen({
     required this.activityId,
     required this.repository,
+    this.voiceAnswerPlaybackRepository,
+    this.voiceAnswerAudioPlayerFactory,
     super.key,
   });
 
   final String activityId;
   final ActivityRepository repository;
+  final VoiceAnswerPlaybackRepository? voiceAnswerPlaybackRepository;
+  final VoiceAnswerAudioPlayerFactory? voiceAnswerAudioPlayerFactory;
 
   @override
   State<ActivityDetailScreen> createState() => _ActivityDetailScreenState();
@@ -1024,6 +1029,8 @@ class _ActivityDetailScreenState extends State<ActivityDetailScreen> {
     _DetailStatus.success => _ActivityDetailContent(
       activity: _activity!,
       repository: widget.repository,
+      voiceAnswerPlaybackRepository: widget.voiceAnswerPlaybackRepository,
+      voiceAnswerAudioPlayerFactory: widget.voiceAnswerAudioPlayerFactory,
     ),
   };
 }
@@ -1032,9 +1039,13 @@ class _ActivityDetailContent extends StatelessWidget {
   const _ActivityDetailContent({
     required this.activity,
     required this.repository,
+    required this.voiceAnswerPlaybackRepository,
+    required this.voiceAnswerAudioPlayerFactory,
   });
   final ActivityDetailDto activity;
   final ActivityRepository repository;
+  final VoiceAnswerPlaybackRepository? voiceAnswerPlaybackRepository;
+  final VoiceAnswerAudioPlayerFactory? voiceAnswerAudioPlayerFactory;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -1043,6 +1054,8 @@ class _ActivityDetailContent extends StatelessWidget {
       final right = _ActivityInformation(
         activity: activity,
         repository: repository,
+        voiceAnswerPlaybackRepository: voiceAnswerPlaybackRepository,
+        voiceAnswerAudioPlayerFactory: voiceAnswerAudioPlayerFactory,
       );
       return SingleChildScrollView(
         key: ValueKey(
@@ -1129,9 +1142,13 @@ class _ActivityInformation extends StatelessWidget {
   const _ActivityInformation({
     required this.activity,
     required this.repository,
+    required this.voiceAnswerPlaybackRepository,
+    required this.voiceAnswerAudioPlayerFactory,
   });
   final ActivityDetailDto activity;
   final ActivityRepository repository;
+  final VoiceAnswerPlaybackRepository? voiceAnswerPlaybackRepository;
+  final VoiceAnswerAudioPlayerFactory? voiceAnswerAudioPlayerFactory;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -1175,6 +1192,8 @@ class _ActivityInformation extends StatelessWidget {
       _ConversationSection(
         conversationId: activity.conversationId,
         repository: repository,
+        voiceAnswerPlaybackRepository: voiceAnswerPlaybackRepository,
+        voiceAnswerAudioPlayerFactory: voiceAnswerAudioPlayerFactory,
       ),
       const SizedBox(height: AppSpacing.md),
       _DetailSection(
@@ -1215,10 +1234,14 @@ class _ConversationSection extends StatefulWidget {
   const _ConversationSection({
     required this.conversationId,
     required this.repository,
+    required this.voiceAnswerPlaybackRepository,
+    required this.voiceAnswerAudioPlayerFactory,
   });
 
   final int? conversationId;
   final ActivityRepository repository;
+  final VoiceAnswerPlaybackRepository? voiceAnswerPlaybackRepository;
+  final VoiceAnswerAudioPlayerFactory? voiceAnswerAudioPlayerFactory;
 
   @override
   State<_ConversationSection> createState() => _ConversationSectionState();
@@ -1226,10 +1249,12 @@ class _ConversationSection extends StatefulWidget {
 
 enum _ConversationStatus { loading, success, empty, error, none }
 
-class _ConversationSectionState extends State<_ConversationSection> {
+class _ConversationSectionState extends State<_ConversationSection>
+    with WidgetsBindingObserver {
   _ConversationStatus _status = _ConversationStatus.loading;
   List<ActivityConversationTurn> _turns = const [];
   Object? _failure;
+  VoiceAnswerPlaybackController? _playbackController;
 
   /// 조회를 시작한 순서표. 활동을 바꿔 다시 부르면 값이 올라가므로, 늦게
   /// 도착한 지난 응답이 새 화면을 덮어쓰지 못한다.
@@ -1238,16 +1263,49 @@ class _ConversationSectionState extends State<_ConversationSection> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _createPlaybackController();
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
   @override
   void didUpdateWidget(_ConversationSection oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.voiceAnswerPlaybackRepository !=
+            widget.voiceAnswerPlaybackRepository ||
+        oldWidget.voiceAnswerAudioPlayerFactory !=
+            widget.voiceAnswerAudioPlayerFactory) {
+      _playbackController?.dispose();
+      _createPlaybackController();
+    }
     if (oldWidget.conversationId != widget.conversationId ||
         oldWidget.repository != widget.repository) {
+      unawaited(_playbackController?.reset());
       unawaited(_load());
     }
+  }
+
+  void _createPlaybackController() {
+    final repository = widget.voiceAnswerPlaybackRepository;
+    final playerFactory = widget.voiceAnswerAudioPlayerFactory;
+    _playbackController = repository == null || playerFactory == null
+        ? null
+        : VoiceAnswerPlaybackController(repository, playerFactory());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) {
+      unawaited(_playbackController?.stop());
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _loadToken += 1;
+    _playbackController?.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -1331,7 +1389,11 @@ class _ConversationSectionState extends State<_ConversationSection> {
       children: [
         for (final (index, turn) in _turns.indexed) ...[
           if (index > 0) const SizedBox(height: AppSpacing.md),
-          _ConversationTurnView(turn: turn, index: index),
+          _ConversationTurnView(
+            turn: turn,
+            index: index,
+            playbackController: _playbackController,
+          ),
         ],
       ],
     ),
@@ -1339,10 +1401,15 @@ class _ConversationSectionState extends State<_ConversationSection> {
 }
 
 class _ConversationTurnView extends StatelessWidget {
-  const _ConversationTurnView({required this.turn, required this.index});
+  const _ConversationTurnView({
+    required this.turn,
+    required this.index,
+    required this.playbackController,
+  });
 
   final ActivityConversationTurn turn;
   final int index;
+  final VoiceAnswerPlaybackController? playbackController;
 
   @override
   Widget build(BuildContext context) {
@@ -1371,7 +1438,7 @@ class _ConversationTurnView extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
           for (final (index, answer) in turn.answers.indexed) ...[
             if (index > 0) const SizedBox(height: AppSpacing.xs),
-            _AnswerView(answer: answer),
+            _AnswerView(answer: answer, playbackController: playbackController),
           ],
           if (question != null && turn.hasNoAnswer) ...[
             const SizedBox(height: AppSpacing.sm),
@@ -1466,8 +1533,9 @@ class _QuestionView extends StatelessWidget {
 }
 
 class _AnswerView extends StatelessWidget {
-  const _AnswerView({required this.answer});
+  const _AnswerView({required this.answer, required this.playbackController});
   final ActivityConversationMessageDto answer;
+  final VoiceAnswerPlaybackController? playbackController;
 
   @override
   Widget build(BuildContext context) {
@@ -1477,6 +1545,12 @@ class _AnswerView extends StatelessWidget {
       body: body,
       muted: muted,
       createdAt: answer.createdAt,
+      footer: answer.messageType == 'ANSWER_VOICE' && playbackController != null
+          ? VoiceAnswerPlaybackControl(
+              controller: playbackController!,
+              messageId: answer.messageId,
+            )
+          : null,
     );
   }
 }
@@ -1520,46 +1594,57 @@ class _AnswerBubble extends StatelessWidget {
     required this.body,
     required this.muted,
     this.createdAt,
+    this.footer,
   });
   final String label, body;
   final bool muted;
   final String? createdAt;
+  final Widget? footer;
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    label: '$label. $body',
-    child: ExcludeSemantics(
-      child: Container(
-        padding: const EdgeInsets.all(AppSpacing.sm),
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          borderRadius: BorderRadius.circular(AppRadius.sm),
-          border: Border.all(color: AppColors.outline),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _MessageHeader(
-              createdAt: createdAt,
-              badges: [
-                _Pill(
-                  label: label,
-                  fg: AppColors.lavender,
-                  bg: AppColors.lavenderSoft,
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(AppSpacing.sm),
+    decoration: BoxDecoration(
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(AppRadius.sm),
+      border: Border.all(color: AppColors.outline),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Semantics(
+          label: '$label. $body',
+          child: ExcludeSemantics(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _MessageHeader(
+                  createdAt: createdAt,
+                  badges: [
+                    _Pill(
+                      label: label,
+                      fg: AppColors.lavender,
+                      bg: AppColors.lavenderSoft,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(
+                  body,
+                  style: TextStyle(
+                    color: muted ? AppColors.inkMuted : AppColors.ink,
+                    height: 1.4,
+                  ),
                 ),
               ],
             ),
-            const SizedBox(height: AppSpacing.xxs),
-            Text(
-              body,
-              style: TextStyle(
-                color: muted ? AppColors.inkMuted : AppColors.ink,
-                height: 1.4,
-              ),
-            ),
-          ],
+          ),
         ),
-      ),
+        if (footer case final footer?) ...[
+          const SizedBox(height: AppSpacing.xxs),
+          footer,
+        ],
+      ],
     ),
   );
 }
