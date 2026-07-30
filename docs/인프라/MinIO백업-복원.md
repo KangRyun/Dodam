@@ -57,7 +57,7 @@ MySQL 백업이 이미 구성돼 있으면 1·2는 갖춰져 있음(공용).
 
 ```bash
 # 대조용 — DB 가 기억하는 파일 수
-docker exec dodam-mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N \
+/usr/local/bin/kubectl -n dodam exec statefulset/mysql -- sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N \
   -e "SELECT COUNT(*) FROM drawing_assets;" b209'
 ```
 
@@ -91,7 +91,7 @@ sudo /home/kr/S15P11B209/infra/scripts/minio-restore.sh --dry-run \
   /var/backups/dodam/minio-<날짜>-<시각>.tar.gz.enc
 
 # 3) 대조 — 담긴 개수가 DB·현재 버킷과 맞는지
-docker exec dodam-mysql sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N \
+/usr/local/bin/kubectl -n dodam exec statefulset/mysql -- sh -c 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -N \
   -e "SELECT COUNT(*) FROM drawing_assets;" b209'
 ```
 
