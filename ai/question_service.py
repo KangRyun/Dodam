@@ -209,25 +209,90 @@ def _history_dicts(messages: list) -> list[dict]:
     return turns
 
 
-def _build_messages(req: QuestionRequest) -> list[dict]:
+# ── HTP 주제·대상 지시 블록 (S15P11B209-713) ────────────────────
+# 프롬프트가 '지금 무슨 주제인지'를 몰라 다른 주제 명사를 집어오던 버그(709 원인 4)를 막는다.
+# activityType·drawingSubject를 프롬프트에 못박아 다른 주제로 새지 않게 하고, 고른 대상 하나만 묻게 한다.
+_SUBJECT_KO = {"HOUSE": "집", "TREE": "나무", "PERSON": "사람"}
+
+
+def _activity_block(req: QuestionRequest, target: DetectedObject | None) -> str:
+    """activityType·drawingSubject·대상 객체를 프롬프트 지시 블록으로 만든다.
+
+    - HTP: 주제를 확정 사실로 못박고 다른 주제(집·나무·사람)로 넘어가지 못하게 한다.
+      고른 대상이 있으면 그 하나만, 없으면 주제 그림 전체를 묻게 한다.
+    - ART_DIARY: 주제 개념 없이, 대상이 있으면 그 하나만 묻게 한다.
+    - activityType이 없으면(구 BE·주제 미전달) 주제 제약 없이 기존 동작을 유지한다.
+    반복 방지: 이미 물어본 게 있으면 새로운 것을 묻도록 덧붙인다(대상 선택에서도 이미 배제됨).
+    """
+    subject_ko = _SUBJECT_KO.get(req.drawing_subject or "")
+    target_name = (
+        (target.object_name or target.object_code) if target is not None else None
+    )
+    lines: list[str] = []
+    if req.activity_type == "HTP" and subject_ko:
+        lines.append("[이 그림의 주제]")
+        lines.append(
+            f"- 아이는 '{subject_ko}'을(를) 그렸어. 이건 정해진 사실이야. "
+            f"'{subject_ko}'와 그 부분에 대해서만 묻고, 다른 주제(집·나무·사람)로 넘어가지 마."
+        )
+        if target_name:
+            lines.append(f"- 지금은 이 하나에 대해서만 물어봐: {target_name}")
+        else:
+            lines.append(f"- '{subject_ko}' 그림 전체에 대해 열린 질문을 해.")
+    elif req.activity_type == "ART_DIARY":
+        lines.append("[이 그림]")
+        lines.append("- 자유롭게 그린 그림이야. 정해진 주제는 없어.")
+        if target_name:
+            lines.append(f"- 지금은 이 하나에 대해서만 물어봐: {target_name}")
+    elif target_name:
+        lines.append("[지금 물어볼 것]")
+        lines.append(f"- {target_name}")
+    if req.asked_object_codes:
+        lines.append(
+            "- 이미 이야기한 것은 다시 묻지 말고, 아직 이야기하지 않은 새로운 것을 물어봐."
+        )
+    return "\n".join(lines)
+
+
+def _build_messages(
+    req: QuestionRequest,
+    *,
+    purpose: str | None = None,
+    target: DetectedObject | None = None,
+) -> list[dict]:
     """요청 문맥 → GMS messages. draft 프롬프트를 재사용해 컨텍스트 기반으로 생성한다.
 
     - 아이 발화가 아직 없으면: 첫 질문 프롬프트(그림 탐지 객체 기반).
     - 아이 발화가 있으면: 다음 질문 프롬프트(마지막 발화 + 그 이전 이력).
     연령대는 아이 나이를 넘기고, 난이도별 길이·어휘·말투 규칙을 덧붙인다.
+
+    purpose·target을 넘기면 그대로 쓴다(generate가 응답과 동일한 값을 프롬프트에 싣기 위함).
+    안 넘기면 여기서 계산한다 — _build_messages를 직접 호출하는 테스트 편의용(S15P11B209-713).
     """
+    if purpose is None:
+        purpose = _pick_question_purpose(req)
+        if purpose == "OBJECT_DESCRIPTION":
+            target = _target_for_purpose(req, purpose)
+
     age_band = str(req.child_age)
     drawing = _drawing_analysis_text(req)
+    activity_block = _activity_block(req, target)
     last_child = _last_child_index(req)
 
     if last_child is None:
-        system = llm_client.render_first_question_prompt(drawing, age_band=age_band)
+        system = llm_client.render_first_question_prompt(
+            drawing, age_band=age_band, activity_block=activity_block
+        )
         trigger = llm_client.FIRST_QUESTION_TRIGGER
     else:
         utterance = req.recent_messages[last_child].text or ""
         history = _history_dicts(req.recent_messages[:last_child])
         system = llm_client.render_next_question_prompt(
-            utterance, drawing_analysis=drawing, history=history, age_band=age_band
+            utterance,
+            drawing_analysis=drawing,
+            history=history,
+            age_band=age_band,
+            activity_block=activity_block,
         )
         trigger = llm_client.NEXT_QUESTION_TRIGGER
 
@@ -295,11 +360,32 @@ def _target_for_purpose(req: QuestionRequest, purpose: str) -> DetectedObject | 
     """대상 객체는 특정 객체를 묻는 OBJECT_DESCRIPTION일 때만 붙인다(목적과 정합).
 
     요청의 detectedObjects는 BE가 이미 검증(objectCode·confidence·정규화 bbox)한 값이라
-    그대로 되돌려도 계약을 통과한다. 신뢰도 최고 객체를 대상으로 고른다.
+    그대로 되돌려도 계약을 통과한다.
+
+    선택 규칙(S15P11B209-713):
+    - 이미 물어본 객체(askedObjectCodes)는 후보에서 뺀다 → 같은 것을 두 번 묻지 않는다.
+    - HTP면 현재 주제 그룹 객체(집 단계=HOUSE·HOUSE_*)를 먼저 고른다. 주제 객체가 없을 때만
+      배경(SCENERY) 등 나머지에서 고른다(결정: 주제 우선·소진 후 배경). 집 단계에서 배경 나무가
+      대뜸 대상이 되어 "이 나무는?"이 나오던 709 경로가 이걸로 대부분 사라진다.
+    - 남은 후보 중 신뢰도 최고를 고른다. 후보가 없으면 None(호출부가 그림 전체 질문으로 전환).
     """
     if purpose != "OBJECT_DESCRIPTION" or not req.detected_objects:
         return None
-    return max(req.detected_objects, key=lambda o: o.confidence)
+    asked = set(req.asked_object_codes)
+    available = [o for o in req.detected_objects if o.object_code not in asked]
+    if not available:
+        return None
+    if req.activity_type == "HTP" and req.drawing_subject:
+        subject = req.drawing_subject
+        subject_objs = [
+            o
+            for o in available
+            if o.object_code == subject or o.object_code.startswith(f"{subject}_")
+        ]
+        pool = subject_objs or available
+    else:
+        pool = available
+    return max(pool, key=lambda o: o.confidence)
 
 
 def _is_consistent(
@@ -527,7 +613,14 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         _debug_log_blocked_raw(crisis_reason, " | ".join(child_texts), request_id)
         return _crisis_safe_response(req, started)
 
-    messages = _build_messages(req)
+    # 목적·대상을 GMS 호출 전에 정해 프롬프트에 그대로 싣는다(S15P11B209-713) — 질문 문장과
+    # 응답 targetObject가 같은 객체를 가리키게 하고, HTP면 주제를 벗어난 명사가 안 나오게 한다.
+    purpose = _pick_question_purpose(req)
+    target = _target_for_purpose(req, purpose)
+    if purpose == "OBJECT_DESCRIPTION" and target is None:
+        # 주제 객체가 없거나 후보를 모두 물어봤으면 특정 객체 대신 그림 전체를 묻는다.
+        purpose = "DRAWING_CONTEXT"
+    messages = _build_messages(req, purpose=purpose, target=target)
     text, served_model = _call_gms_with_retry(messages, request_id)
     text = text.strip()
     if not text:
@@ -540,10 +633,9 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         # 정화 후 남는 게 없으면(기호뿐이었으면) 빈 출력 — 폴백 템플릿에 맡긴다.
         raise UpstreamError("AI_EMPTY_COMPLETION", "EmptyCompletion")
 
-    # 목적을 먼저 정하고 대상 객체·칩을 그 목적에 맞춰 파생 — 셋을 항상 정합하게 만든다.
+    # 칩·정합성은 위(프롬프트 조립 전)에서 정한 목적·대상을 그대로 쓴다 — 프롬프트에 실은 것과
+    # 응답 targetObject가 어긋나지 않게 한다(S15P11B209-713).
     option_allowed = "OPTION" in req.allowed_response_modes
-    purpose = _pick_question_purpose(req)
-    target = _target_for_purpose(req, purpose)
     # OPTION 비허용이면 반드시 null — 빈 배열도 계약 위반이다(isContractValidFor).
     options = _options_for_purpose(purpose) if option_allowed else None
     if not _is_consistent(purpose, target, options, option_allowed):
