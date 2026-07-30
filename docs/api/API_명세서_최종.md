@@ -462,6 +462,8 @@ USER-02 연락 이메일 계약:
 | EXPERT-07 | POST | `/experts/{expertId}/follow` | GUARDIAN | 전문가 팔로우 |
 | EXPERT-08 | DELETE | `/experts/{expertId}/follow` | GUARDIAN | 전문가 팔로우 취소 |
 
+`EXPERT-01`은 `S15P11B209-574`에서 구현되었다. 신규 프로필은 `PENDING`으로 생성하며 사용자당 하나만 허용한다.
+
 ### 7.2 목록 Query
 
 | 필드 | 타입 | 기본값 | 설명 |

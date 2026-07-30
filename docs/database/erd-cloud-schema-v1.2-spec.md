@@ -390,6 +390,8 @@ Refresh Token은 MySQL 테이블에 저장하지 않는다. Redis에서 로그�
 | 소속 기관 | `organization` | `varchar(150)` | Y | `-` | - | 소속 기관 |
 | 직책 | `position_title` | `varchar(100)` | Y | `-` | - | 직책 |
 | 경력 연수 | `career_years` | `smallint` | N | `0` | - | 경력 연수 |
+| 상담 대상 최소 연령 | `target_age_min` | `smallint` | Y | `-` | - | 상담 대상 최소 연령 |
+| 상담 대상 최대 연령 | `target_age_max` | `smallint` | Y | `-` | - | 상담 대상 최대 연령 |
 | 소개 | `introduction` | `text` | Y | `-` | - | 소개 |
 | 상담 가능 여부 | `is_consultation_available` | `tinyint(1)` | N | `0` | - | 상담 가능 여부 |
 | 검증 상태 | `verification_status` | `varchar(20)` | N | `PENDING` | - | 검증 상태 |
@@ -413,6 +415,7 @@ Refresh Token은 MySQL 테이블에 저장하지 않는다. Redis에서 로그�
 **CHECK 제약**
 
 - `ck_expert_profiles_career_years`: `(`career_years` >= 0)`
+- `ck_expert_profiles_target_age`: 두 값이 모두 `NULL`이거나 각각 `0~19`이며 `target_age_min <= target_age_max`
 - `ck_expert_profiles_verification_status`: `(`verification_status` in (_utf8mb4\'PENDING\',_utf8mb4\'VERIFIED\',_utf8mb4\'REJECTED\',_utf8mb4\'REVIEW_REQUIRED\'))`
 
 ### 전문가 전문 분야 (`expert_profile_specialties`)

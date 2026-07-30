@@ -1,0 +1,223 @@
+package com.ssafy.b209.expert.domain;
+
+import com.ssafy.b209.expert.dto.request.CreateExpertProfileRequest;
+import jakarta.persistence.CascadeType;
+import jakarta.persistence.Column;
+import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
+import jakarta.persistence.GeneratedValue;
+import jakarta.persistence.GenerationType;
+import jakarta.persistence.Id;
+import jakarta.persistence.OneToMany;
+import jakarta.persistence.OrderBy;
+import jakarta.persistence.Table;
+import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Objects;
+
+/**
+ * 전문가 사용자의 공개 프로필과 검증 상태를 관리한다.
+ *
+ * <p>사용자당 하나만 생성할 수 있으며, 전문 분야는 검색과 노출 순서를 위해 별도 행으로 소유한다. 자격 증빙과 관리자 검증은 후속 Use Case가 담당한다.
+ */
+@Entity
+@Table(name = "expert_profiles")
+public class ExpertProfile {
+
+  @Id
+  @GeneratedValue(strategy = GenerationType.IDENTITY)
+  private Long id;
+
+  @Column(name = "user_id", nullable = false, unique = true)
+  private Long userId;
+
+  @Column(name = "display_name", nullable = false, length = 80)
+  private String displayName;
+
+  @Column(name = "profile_image_url", length = 1000)
+  private String profileImageUrl;
+
+  @Column(name = "organization", length = 150)
+  private String organization;
+
+  @Column(name = "position_title", length = 100)
+  private String positionTitle;
+
+  @Column(name = "career_years", nullable = false)
+  private short careerYears;
+
+  @Column(name = "target_age_min")
+  private Short targetAgeMin;
+
+  @Column(name = "target_age_max")
+  private Short targetAgeMax;
+
+  @Column(name = "introduction", columnDefinition = "text")
+  private String introduction;
+
+  @Column(name = "is_consultation_available", nullable = false)
+  private boolean consultationAvailable;
+
+  @Enumerated(EnumType.STRING)
+  @Column(name = "verification_status", nullable = false, length = 20)
+  private ExpertVerificationStatus verificationStatus;
+
+  @Column(name = "workplace", length = 255)
+  private String workplace;
+
+  @Column(name = "created_at", nullable = false)
+  private LocalDateTime createdAt;
+
+  @Column(name = "updated_at", nullable = false)
+  private LocalDateTime updatedAt;
+
+  @OneToMany(mappedBy = "expertProfile", cascade = CascadeType.ALL, orphanRemoval = true)
+  @OrderBy("displayOrder ASC")
+  private final List<ExpertProfileSpecialty> specialties = new ArrayList<>();
+
+  /** JPA가 Entity를 복원할 때 사용한다. */
+  protected ExpertProfile() {}
+
+  /**
+   * 검토 대기 상태의 전문가 프로필을 생성한다.
+   *
+   * @param userId 전문가 역할 사용자 식별자
+   * @param profileImageUrl 사용자 계정의 프로필 이미지 URL
+   * @param request 검증을 마친 프로필 입력값
+   * @param now 생성 시각
+   * @return 전문 분야를 포함한 신규 프로필
+   */
+  public static ExpertProfile pending(
+      Long userId, String profileImageUrl, CreateExpertProfileRequest request, LocalDateTime now) {
+    ExpertProfile profile = new ExpertProfile();
+    profile.userId = Objects.requireNonNull(userId, "userId must not be null");
+    profile.displayName = normalizeRequired(request.displayName());
+    profile.profileImageUrl = normalizeOptional(profileImageUrl);
+    profile.organization = normalizeOptional(request.organization());
+    profile.positionTitle = normalizeOptional(request.positionTitle());
+    profile.careerYears = request.careerYears().shortValue();
+    profile.targetAgeMin =
+        request.targetAgeMin() == null ? null : request.targetAgeMin().shortValue();
+    profile.targetAgeMax =
+        request.targetAgeMax() == null ? null : request.targetAgeMax().shortValue();
+    profile.introduction = normalizeOptional(request.introduction());
+    profile.consultationAvailable = request.consultationAvailable();
+    profile.verificationStatus = ExpertVerificationStatus.PENDING;
+    profile.workplace = normalizeOptional(request.workplace());
+    profile.createdAt = Objects.requireNonNull(now, "now must not be null");
+    profile.updatedAt = now;
+    for (int index = 0; index < request.specialties().size(); index++) {
+      String code = request.specialties().get(index).trim();
+      profile.specialties.add(ExpertProfileSpecialty.snapshot(profile, code, index, now));
+    }
+    return profile;
+  }
+
+  /**
+   * @return 전문가 프로필 식별자
+   */
+  public Long getId() {
+    return id;
+  }
+
+  /**
+   * @return 사용자 계정의 프로필 이미지 URL
+   */
+  public String getProfileImageUrl() {
+    return profileImageUrl;
+  }
+
+  /**
+   * @return 공개 표시 이름
+   */
+  public String getDisplayName() {
+    return displayName;
+  }
+
+  /**
+   * @return 소속 기관
+   */
+  public String getOrganization() {
+    return organization;
+  }
+
+  /**
+   * @return 직책
+   */
+  public String getPositionTitle() {
+    return positionTitle;
+  }
+
+  /**
+   * @return 경력 연수
+   */
+  public int getCareerYears() {
+    return careerYears;
+  }
+
+  /**
+   * @return 상담 대상 최소 연령
+   */
+  public Integer getTargetAgeMin() {
+    return targetAgeMin == null ? null : targetAgeMin.intValue();
+  }
+
+  /**
+   * @return 상담 대상 최대 연령
+   */
+  public Integer getTargetAgeMax() {
+    return targetAgeMax == null ? null : targetAgeMax.intValue();
+  }
+
+  /**
+   * @return 공개 소개 문구
+   */
+  public String getIntroduction() {
+    return introduction;
+  }
+
+  /**
+   * @return 상담 가능 여부
+   */
+  public boolean isConsultationAvailable() {
+    return consultationAvailable;
+  }
+
+  /**
+   * @return 운영 검증 상태
+   */
+  public ExpertVerificationStatus getVerificationStatus() {
+    return verificationStatus;
+  }
+
+  /**
+   * @return 공개 근무지
+   */
+  public String getWorkplace() {
+    return workplace;
+  }
+
+  /**
+   * 전문 분야 코드를 노출 순서대로 반환한다.
+   *
+   * @return 수정할 수 없는 전문 분야 코드 목록
+   */
+  public List<String> getSpecialtyCodes() {
+    return Collections.unmodifiableList(
+        specialties.stream().map(ExpertProfileSpecialty::getSpecialtyCode).toList());
+  }
+
+  private static String normalizeRequired(String value) {
+    return Objects.requireNonNull(value, "value must not be null").trim();
+  }
+
+  private static String normalizeOptional(String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    return value.trim();
+  }
+}

@@ -49,11 +49,13 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("23");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("24");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(69);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
+    assertThat(columnExists("expert_profiles", "target_age_min")).isTrue();
+    assertThat(columnExists("expert_profiles", "target_age_max")).isTrue();
     assertThat(
             jdbcTemplate.queryForList(
                 "SELECT code FROM drawing_types WHERE is_active = TRUE "
