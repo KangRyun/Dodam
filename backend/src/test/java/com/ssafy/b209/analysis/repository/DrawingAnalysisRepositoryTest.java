@@ -153,6 +153,59 @@ class DrawingAnalysisRepositoryTest {
     assertThat(drawingAnalysisRepository.findDetailByAnalysisId(analysisId)).isEmpty();
   }
 
+  @Test
+  void acceptsOnlySuccessfulIntermediateObjectDetectionFromSameArtDiarySession() {
+    DrawingType artDiary =
+        drawingTypeRepository.save(
+            DrawingTypeFixture.create(
+                null, "ART_DIARY", "그림 일기", DrawingTypeSelectableBy.BOTH, 6, 10, true));
+    DrawingSession artDiarySession =
+        drawingSessionRepository.save(
+            DrawingSession.start(
+                session.getChild(),
+                artDiary,
+                DrawingInputMethod.CANVAS,
+                REQUESTED_AT.minusMinutes(4),
+                "art-diary-conversation-session"));
+    DrawingAsset draft =
+        drawingAssetRepository.save(
+            DrawingAsset.snapshot(
+                artDiarySession,
+                DrawingAssetType.INTERMEDIATE,
+                1,
+                "drawing/draft.png",
+                "image/png",
+                1024,
+                "b".repeat(64),
+                REQUESTED_AT.minusSeconds(1),
+                REQUESTED_AT.minusSeconds(1)));
+    DrawingAnalysis intermediate =
+        DrawingAnalysis.processing(
+            artDiarySession,
+            draft,
+            DrawingAnalysisScope.INTERMEDIATE,
+            DrawingAnalysisType.OBJECT_DETECTION,
+            "550e8400-e29b-41d4-a716-446655440001",
+            REQUESTED_AT);
+    intermediate.succeed("mock-drawing-detector", "1.0", List.of(), REQUESTED_AT.plusSeconds(1));
+    drawingAnalysisRepository.saveAndFlush(intermediate);
+    analysis.succeed("mock-drawing-detector", "1.0", List.of(), REQUESTED_AT.plusSeconds(1));
+    drawingAnalysisRepository.saveAndFlush(analysis);
+
+    assertThat(
+            drawingAnalysisRepository.isUsableIntermediateConversationBasis(
+                artDiarySession.getId(), intermediate.getId()))
+        .isTrue();
+    assertThat(
+            drawingAnalysisRepository.isUsableIntermediateConversationBasis(
+                session.getId(), intermediate.getId()))
+        .isFalse();
+    assertThat(
+            drawingAnalysisRepository.isUsableIntermediateConversationBasis(
+                session.getId(), analysis.getId()))
+        .isFalse();
+  }
+
   private DrawingDetectedObject detection(String label, int displayOrder) {
     return DrawingDetectedObject.detected(
         label,

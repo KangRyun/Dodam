@@ -68,6 +68,7 @@ class ConversationEndServiceTest {
     given(conversationRepository.findByIdForUpdate(20L)).willReturn(Optional.of(conversation));
     given(drawingRepository.findNotDeletedByIdForUpdate(100L))
         .willReturn(Optional.of(drawingSession));
+    given(drawingSession.getCurrentStage()).willReturn(DrawingStage.CONVERSING);
     given(
             messageRepository
                 .findFirstByConversationSessionIdAndMessageTypeOrderByMessageSequenceDesc(
@@ -86,6 +87,44 @@ class ConversationEndServiceTest {
     assertThat(response.nextStage()).isEqualTo(DrawingStage.REFLECTION);
     assertThat(conversation.isCompleted()).isTrue();
     verify(drawingSession).enterReflection();
+  }
+
+  @Test
+  void completesConversationWithoutLeavingDrawingStage() {
+    ConversationSession conversation = conversation();
+    given(currentUserResolver.requireUserId()).willReturn(7L);
+    given(authorizationRepository.hasConversationAccess(7L, 20L)).willReturn(true);
+    given(conversationRepository.findByIdForUpdate(20L)).willReturn(Optional.of(conversation));
+    given(drawingRepository.findNotDeletedByIdForUpdate(100L))
+        .willReturn(Optional.of(drawingSession));
+    given(drawingSession.getCurrentStage()).willReturn(DrawingStage.DRAWING);
+
+    EndConversationResponse response =
+        service.end(
+            20L, new EndConversationRequest(ConversationCompletionReason.CHILD_REQUEST, null));
+
+    assertThat(response.completed()).isTrue();
+    assertThat(response.nextStage()).isEqualTo(DrawingStage.DRAWING);
+    verify(drawingSession, never()).enterReflection();
+  }
+
+  @Test
+  void completesConversationWithoutInterruptingFinalAnalysis() {
+    ConversationSession conversation = conversation();
+    given(currentUserResolver.requireUserId()).willReturn(7L);
+    given(authorizationRepository.hasConversationAccess(7L, 20L)).willReturn(true);
+    given(conversationRepository.findByIdForUpdate(20L)).willReturn(Optional.of(conversation));
+    given(drawingRepository.findNotDeletedByIdForUpdate(100L))
+        .willReturn(Optional.of(drawingSession));
+    given(drawingSession.getCurrentStage()).willReturn(DrawingStage.ANALYZING);
+
+    EndConversationResponse response =
+        service.end(
+            20L, new EndConversationRequest(ConversationCompletionReason.CHILD_REQUEST, null));
+
+    assertThat(response.completed()).isTrue();
+    assertThat(response.nextStage()).isEqualTo(DrawingStage.ANALYZING);
+    verify(drawingSession, never()).enterReflection();
   }
 
   @Test
@@ -210,6 +249,9 @@ class ConversationEndServiceTest {
     given(currentUserResolver.requireUserId()).willReturn(7L);
     given(authorizationRepository.hasConversationAccess(7L, 20L)).willReturn(true);
     given(conversationRepository.findByIdForUpdate(20L)).willReturn(Optional.of(conversation));
+    given(drawingRepository.findNotDeletedByIdForUpdate(100L))
+        .willReturn(Optional.of(drawingSession));
+    given(drawingSession.getCurrentStage()).willReturn(DrawingStage.REFLECTION);
 
     EndConversationResponse response =
         service.end(
@@ -218,7 +260,7 @@ class ConversationEndServiceTest {
     assertThat(response.completionReason())
         .isEqualTo(ConversationCompletionReason.QUESTION_LIMIT_REACHED);
     assertThat(response.completedAt()).isEqualTo(LocalDateTime.of(2026, 7, 24, 7, 20));
-    verify(drawingRepository, never()).findNotDeletedByIdForUpdate(100L);
+    assertThat(response.nextStage()).isEqualTo(DrawingStage.REFLECTION);
     verify(drawingSession, never()).enterReflection();
   }
 

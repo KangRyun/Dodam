@@ -16,6 +16,9 @@ import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
 import com.ssafy.b209.analysis.repository.AnalysisResultJdbcRepository;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
+import com.ssafy.b209.conversation.domain.ConversationCompletionReason;
+import com.ssafy.b209.conversation.domain.ConversationSession;
+import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingAssetType;
 import com.ssafy.b209.drawing.domain.DrawingSession;
@@ -49,6 +52,7 @@ class DrawingAnalysisPersistenceServiceTest {
   @Mock private DrawingAnalysisRepository drawingAnalysisRepository;
   @Mock private AnalysisResultJdbcRepository analysisResultJdbcRepository;
   @Mock private DrawingAnalysisActivityContextResolver activityContextResolver;
+  @Mock private ConversationSessionRepository conversationSessionRepository;
   @Mock private DrawingSession session;
   @Mock private DrawingAsset asset;
 
@@ -62,7 +66,8 @@ class DrawingAnalysisPersistenceServiceTest {
             drawingAssetRepository,
             drawingAnalysisRepository,
             analysisResultJdbcRepository,
-            activityContextResolver);
+            activityContextResolver,
+            conversationSessionRepository);
   }
 
   @Test
@@ -135,6 +140,7 @@ class DrawingAnalysisPersistenceServiceTest {
         .willReturn(Optional.of(processing));
     given(session.getCurrentStage())
         .willReturn(com.ssafy.b209.drawing.domain.DrawingStage.ANALYZING);
+    given(session.getId()).willReturn(SESSION_ID);
     var model =
         new com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse.ModelRef(
             "yolo", "1.0");
@@ -161,7 +167,7 @@ class DrawingAnalysisPersistenceServiceTest {
 
     assertThat(processing.getState()).isEqualTo(DrawingAnalysisState.PARTIAL_SUCCESS);
     verify(analysisResultJdbcRepository).replace(ANALYSIS_ID, response, PROCESSED_AT);
-    verify(session).finishDrawingAnalysis();
+    verify(session).finishDrawingAnalysis(false);
   }
 
   @Test
@@ -284,13 +290,33 @@ class DrawingAnalysisPersistenceServiceTest {
         .willReturn(Optional.of(analysis));
     given(session.getCurrentStage())
         .willReturn(com.ssafy.b209.drawing.domain.DrawingStage.ANALYZING);
+    given(session.getId()).willReturn(SESSION_ID);
 
     service.fail(ANALYSIS_ID, "TIMEOUT", "그림 분석 요청을 완료하지 못했습니다.", PROCESSED_AT);
 
     assertThat(analysis.getState()).isEqualTo(DrawingAnalysisState.FAILED);
     assertThat(analysis.getErrorCode()).isEqualTo("TIMEOUT");
     verify(drawingAnalysisRepository).flush();
-    verify(session).finishDrawingAnalysis();
+    verify(session).finishDrawingAnalysis(false);
+  }
+
+  @Test
+  void finishesFinalAnalysisAtReflectionWhenConversationAlreadyCompleted() {
+    DrawingAnalysis analysis = processingAnalysis();
+    ConversationSession conversation =
+        ConversationSession.start(SESSION_ID, "LOW", 5, REQUESTED_AT.minusMinutes(1));
+    conversation.complete(ConversationCompletionReason.CHILD_REQUEST, REQUESTED_AT);
+    given(drawingAnalysisRepository.findByIdForUpdate(ANALYSIS_ID))
+        .willReturn(Optional.of(analysis));
+    given(session.getCurrentStage())
+        .willReturn(com.ssafy.b209.drawing.domain.DrawingStage.ANALYZING);
+    given(session.getId()).willReturn(SESSION_ID);
+    given(conversationSessionRepository.findByDrawingSessionId(SESSION_ID))
+        .willReturn(Optional.of(conversation));
+
+    service.fail(ANALYSIS_ID, "TIMEOUT", "그림 분석 요청을 완료하지 못했습니다.", PROCESSED_AT);
+
+    verify(session).finishDrawingAnalysis(true);
   }
 
   @Test

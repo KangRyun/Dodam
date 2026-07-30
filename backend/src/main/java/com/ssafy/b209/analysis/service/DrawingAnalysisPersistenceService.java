@@ -9,6 +9,8 @@ import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
 import com.ssafy.b209.analysis.repository.AnalysisResultJdbcRepository;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
+import com.ssafy.b209.conversation.domain.ConversationSession;
+import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
 import com.ssafy.b209.drawing.domain.DrawingAsset;
 import com.ssafy.b209.drawing.domain.DrawingAssetType;
 import com.ssafy.b209.drawing.domain.DrawingSession;
@@ -42,6 +44,7 @@ public class DrawingAnalysisPersistenceService {
   private final DrawingAnalysisRepository drawingAnalysisRepository;
   private final AnalysisResultJdbcRepository analysisResultJdbcRepository;
   private final DrawingAnalysisActivityContextResolver activityContextResolver;
+  private final ConversationSessionRepository conversationSessionRepository;
 
   /**
    * 분석 저장에 필요한 Repository를 주입받는다.
@@ -51,18 +54,21 @@ public class DrawingAnalysisPersistenceService {
    * @param drawingAnalysisRepository 분석 실행 저장소
    * @param analysisResultJdbcRepository 정규화된 종합 분석 보조 결과 저장소
    * @param activityContextResolver 저장된 세션과 HTP 단계에서 AI 활동 맥락을 확정하는 Resolver
+   * @param conversationSessionRepository 그림 작성 중 종료된 대화 상태 조회 저장소
    */
   public DrawingAnalysisPersistenceService(
       DrawingSessionRepository drawingSessionRepository,
       DrawingAssetRepository drawingAssetRepository,
       DrawingAnalysisRepository drawingAnalysisRepository,
       AnalysisResultJdbcRepository analysisResultJdbcRepository,
-      DrawingAnalysisActivityContextResolver activityContextResolver) {
+      DrawingAnalysisActivityContextResolver activityContextResolver,
+      ConversationSessionRepository conversationSessionRepository) {
     this.drawingSessionRepository = drawingSessionRepository;
     this.drawingAssetRepository = drawingAssetRepository;
     this.drawingAnalysisRepository = drawingAnalysisRepository;
     this.analysisResultJdbcRepository = analysisResultJdbcRepository;
     this.activityContextResolver = activityContextResolver;
+    this.conversationSessionRepository = conversationSessionRepository;
   }
 
   /**
@@ -414,7 +420,12 @@ public class DrawingAnalysisPersistenceService {
     if (analysis.getScope() == DrawingAnalysisScope.FINAL
         && analysis.getDrawingSession().getCurrentStage()
             == com.ssafy.b209.drawing.domain.DrawingStage.ANALYZING) {
-      analysis.getDrawingSession().finishDrawingAnalysis();
+      boolean conversationCompleted =
+          conversationSessionRepository
+              .findByDrawingSessionId(analysis.getDrawingSession().getId())
+              .map(ConversationSession::isCompleted)
+              .orElse(false);
+      analysis.getDrawingSession().finishDrawingAnalysis(conversationCompleted);
     }
   }
 

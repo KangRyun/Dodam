@@ -184,12 +184,24 @@ public class DrawingSession {
    * @throws IllegalStateException 삭제되었거나 진행 중이 아니거나 ANALYZING 단계가 아닌 경우
    */
   public void finishDrawingAnalysis() {
+    finishDrawingAnalysis(false);
+  }
+
+  /**
+   * 대화 종료 여부를 반영해 최종 그림 분석 이후의 후속 단계를 확정한다.
+   *
+   * <p>그림 작성 중 이미 대화를 마친 그림일기는 다시 대화를 열지 않고 감정 회고로 이동한다.
+   *
+   * @param conversationCompleted 연결된 대화가 그림 완료 전에 이미 종료되었는지 여부
+   * @throws IllegalStateException 삭제되었거나 진행 중이 아니거나 ANALYZING 단계가 아닌 경우
+   */
+  public void finishDrawingAnalysis(boolean conversationCompleted) {
     if (deletedAt != null
         || sessionStatus != DrawingSessionStatus.IN_PROGRESS
         || currentStage != DrawingStage.ANALYZING) {
       throw new IllegalStateException("분석 중인 진행 세션만 대화 단계로 전환할 수 있습니다.");
     }
-    currentStage = DrawingStage.CONVERSING;
+    currentStage = conversationCompleted ? DrawingStage.REFLECTION : DrawingStage.CONVERSING;
   }
 
   /**
