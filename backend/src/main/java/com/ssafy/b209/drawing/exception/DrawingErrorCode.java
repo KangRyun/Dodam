@@ -59,7 +59,7 @@ public enum DrawingErrorCode implements ErrorCode {
   DRAWING_DRAFT_SAVE_CONFLICT(HttpStatus.CONFLICT, "DRAWING_409_011", "그림 초안 저장 요청이 충돌했습니다."),
   /** 동일 Draft 멱등 키가 다른 이미지 또는 canvasState에 재사용된 경우다. */
   DRAFT_IDEMPOTENCY_KEY_REUSED(
-      HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED", "동일한 Idempotency-Key가 다른 초안 요청에 사용되었습니다."),
+      HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED", "동일한 멱등성 키가 다른 요청에 사용되었습니다."),
   /** 동일 Draft 요청의 선행 처리가 제한 시간 안에 완료되지 않은 경우다. */
   DRAFT_SAVE_IN_PROGRESS(
       HttpStatus.CONFLICT, "DRAFT_SAVE_IN_PROGRESS", "동일한 그림 초안 저장 요청이 처리 중입니다."),
