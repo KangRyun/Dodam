@@ -20,6 +20,7 @@ import com.ssafy.b209.child.domain.GuardianRelationshipType;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.child.domain.ResponseMode;
 import com.ssafy.b209.child.dto.request.DeleteChildRequest;
+import com.ssafy.b209.child.dto.request.UpdateChildRequest;
 import com.ssafy.b209.child.dto.response.ChildDetailResponse;
 import com.ssafy.b209.child.dto.response.ChildRegistrationResponse;
 import com.ssafy.b209.child.dto.response.ChildSummaryResponse;
@@ -366,6 +367,28 @@ class ChildControllerTest {
   }
 
   @Test
+  void distinguishesAnExplicitNullProfileImageFromAnOmittedField() throws Exception {
+    given(guardianResolver.resolve("Bearer access-token", "10")).willReturn(10L);
+    given(childUpdateService.update(eq(10L), eq(3L), any())).willReturn(response());
+    org.mockito.ArgumentCaptor<UpdateChildRequest> captor =
+        org.mockito.ArgumentCaptor.forClass(UpdateChildRequest.class);
+
+    mockMvc
+        .perform(
+            patch("/api/v1/children/3")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"profileImageFileId\":null}"))
+        .andExpect(status().isOk());
+
+    verify(childUpdateService).update(eq(10L), eq(3L), captor.capture());
+    org.assertj.core.api.Assertions.assertThat(captor.getValue().profileImageFileIdSpecified())
+        .isTrue();
+    org.assertj.core.api.Assertions.assertThat(captor.getValue().profileImageFileId()).isNull();
+  }
+
+  @Test
   void rejectsAnInvalidChildProfileUpdateBeforeCallingTheService() throws Exception {
     mockMvc
         .perform(
@@ -475,6 +498,7 @@ class ChildControllerTest {
         List.of(ResponseMode.VOICE, ResponseMode.EMOJI),
         ChildTutorialStatus.NOT_STARTED,
         ChildProfileStatus.ACTIVE,
+        null,
         Instant.parse("2026-07-23T02:30:00Z"));
   }
 

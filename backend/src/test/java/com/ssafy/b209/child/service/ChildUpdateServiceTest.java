@@ -33,12 +33,15 @@ class ChildUpdateServiceTest {
 
   @Mock private ChildUpdateRepository childUpdateRepository;
   @Mock private ChildQueryService childQueryService;
+  @Mock private ChildProfileImageLinkService profileImageLinkService;
 
   private ChildUpdateService service;
 
   @BeforeEach
   void setUp() {
-    service = new ChildUpdateService(childUpdateRepository, childQueryService, CLOCK);
+    service =
+        new ChildUpdateService(
+            childUpdateRepository, childQueryService, profileImageLinkService, CLOCK);
   }
 
   @Test
@@ -107,5 +110,20 @@ class ChildUpdateServiceTest {
                     .isEqualTo(ChildErrorCode.CHILD_AGE_OUT_OF_RANGE));
 
     verifyNoMoreInteractions(childUpdateRepository);
+  }
+
+  @Test
+  void explicitNullProfileImageRemovesItWhileOmittedFieldKeepsIt() {
+    given(childUpdateRepository.lockAccessibleChild(10L, 3L)).willReturn(true);
+    given(childQueryService.getChild(10L, 3L))
+        .willReturn(org.mockito.Mockito.mock(ChildDetailResponse.class));
+    UpdateChildRequest request = new UpdateChildRequest();
+    request.setProfileImageFileId(null);
+
+    service.update(10L, 3L, request);
+
+    verify(profileImageLinkService).replace(10L, 3L, null);
+    verify(childUpdateRepository)
+        .updateProfileImageUrl(3L, null, LocalDateTime.of(2026, 7, 24, 3, 0));
   }
 }

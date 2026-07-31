@@ -88,8 +88,7 @@ public class ChildController {
   /**
    * 요청 보호자 소유의 새 아동 프로필을 등록한다.
    *
-   * <p>등록일 기준 만 나이 범위를 검증하고 보호자와의 관계와 응답 방식을 함께 저장한다. {@code profileImageFileId}는 계약 호환을 위해 받지만 현재
-   * 사전 업로드 이미지를 연결하는 기반이 없어 프로필 이미지를 저장하지 않는다.
+   * <p>등록일 기준 만 나이 범위를 검증하고 보호자와의 관계, 응답 방식, 선택한 사전 업로드 프로필 이미지를 함께 저장한다.
    *
    * @param request 등록할 아동 프로필 정보
    * @param authorization Test Profile의 호환성 검증에만 사용하는 임시 Header

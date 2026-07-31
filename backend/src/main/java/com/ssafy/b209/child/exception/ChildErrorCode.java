@@ -30,6 +30,13 @@ public enum ChildErrorCode implements ErrorCode {
   CHILD_PROFILE_IMAGE_TOO_LARGE(
       HttpStatus.PAYLOAD_TOO_LARGE, "CHILD_413_001", "아동 프로필 이미지는 5 MiB 이하여야 합니다."),
 
+  /** 요청 사용자가 연결할 수 있는 프로필 이미지 파일을 찾지 못한 경우다. */
+  CHILD_PROFILE_IMAGE_NOT_FOUND(HttpStatus.NOT_FOUND, "CHILD_404_002", "아동 프로필 이미지 파일을 찾을 수 없습니다."),
+
+  /** 만료됐거나 이미 다른 프로필에 연결된 파일을 다시 연결하려는 경우다. */
+  CHILD_PROFILE_IMAGE_LINK_CONFLICT(
+      HttpStatus.CONFLICT, "CHILD_409_003", "연결할 수 없는 아동 프로필 이미지 파일입니다."),
+
   /** 아동 프로필 이미지의 Storage 또는 Metadata 저장에 실패한 경우다. */
   CHILD_PROFILE_IMAGE_UPLOAD_FAILED(
       HttpStatus.INTERNAL_SERVER_ERROR, "CHILD_500_001", "아동 프로필 이미지를 저장하지 못했습니다.");

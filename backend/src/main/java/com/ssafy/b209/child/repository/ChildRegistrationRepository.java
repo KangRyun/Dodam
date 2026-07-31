@@ -125,4 +125,19 @@ public class ChildRegistrationRepository {
           }
         });
   }
+
+  /**
+   * 등록 Transaction에서 연결이 끝난 프로필 이미지 조회 URL을 저장한다.
+   *
+   * @param childId 등록된 아동 ID
+   * @param profileImageUrl 인증 이미지 조회 URL
+   * @param updatedAt 변경 시각
+   */
+  public void updateProfileImageUrl(long childId, String profileImageUrl, LocalDateTime updatedAt) {
+    jdbcTemplate.update(
+        "update children set profile_image_url = ?, updated_at = ? where id = ?",
+        profileImageUrl,
+        updatedAt,
+        childId);
+  }
 }

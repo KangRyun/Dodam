@@ -24,6 +24,7 @@ import java.util.List;
  * @param responseModes 아동이 사용할 수 있는 응답 방식 목록
  * @param tutorialStatus 초기 Tutorial 진행 상태
  * @param profileStatus 프로필 상태
+ * @param profileImageUrl 인증 후 조회할 수 있는 프로필 이미지 URL, 이미지가 없으면 {@code null}
  * @param createdAt 프로필 생성 시각
  */
 public record ChildRegistrationResponse(
@@ -37,6 +38,7 @@ public record ChildRegistrationResponse(
     List<ResponseMode> responseModes,
     ChildTutorialStatus tutorialStatus,
     ChildProfileStatus profileStatus,
+    String profileImageUrl,
     Instant createdAt) {
 
   /** 응답 방식 목록을 외부에서 변경할 수 없도록 복사한다. */

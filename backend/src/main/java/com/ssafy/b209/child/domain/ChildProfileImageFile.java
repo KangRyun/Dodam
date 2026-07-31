@@ -135,8 +135,28 @@ public class ChildProfileImageFile {
         createdAt);
   }
 
+  /**
+   * 임시 업로드 파일을 아동 프로필에 연결한다.
+   *
+   * @param childId 이미지를 사용할 아동 ID
+   * @param attachedAt 연결 시각
+   * @throws IllegalStateException 임시 상태가 아니거나 유효 시간이 지난 경우
+   */
+  public void attachTo(long childId, LocalDateTime attachedAt) {
+    if (status != ChildProfileImageFileStatus.TEMP || !expiresAt.isAfter(attachedAt)) {
+      throw new IllegalStateException("연결할 수 없는 프로필 이미지 파일입니다.");
+    }
+    this.status = ChildProfileImageFileStatus.ATTACHED;
+    this.childId = childId;
+    this.attachedAt = Objects.requireNonNull(attachedAt);
+  }
+
   public String getFileId() {
     return fileId;
+  }
+
+  public Long getId() {
+    return id;
   }
 
   public Long getUploadedByUserId() {
