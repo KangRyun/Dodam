@@ -1,15 +1,38 @@
-# Android 릴리스 AAB 빌드 파이프라인 (S15P11B209-623)
+# Android 릴리스 빌드 파이프라인 (S15P11B209-623 · 651)
 
-Play Console 에 올릴 **AAB(Android App Bundle)** 를 재현 가능하게 굽는 경로.
+Play Console 에 올릴 **AAB** 와 원스토어에 올릴 **APK** 를 재현 가능하게 굽는 경로.
 호스트에서도 Jenkins 에서도 같은 명령으로 같은 결과가 나오는 것이 목표다.
 
 ```
 infra/mobile/
-├── Dockerfile      # Flutter 3.44.7 + JDK 17 + Android SDK 36 툴체인 이미지
-├── build-aab.sh    # 호스트/Jenkins 공용 진입점 (컨테이너 수명·자재 주입·산출물 회수)
-├── ci-build.sh     # 컨테이너 **안에서** 도는 실제 빌드 절차
+├── Dockerfile         # Flutter 3.44.7 + JDK 17 + Android SDK 36 툴체인 이미지
+├── build-aab.sh       # 진입점 — Play 용 AAB   (BUILD_FORMAT=appbundle)
+├── build-apk.sh       # 진입점 — 원스토어용 APK (BUILD_FORMAT=apk)
+├── build-android.sh   # ★ 공용 코어 (컨테이너 수명·자재 주입·산출물 회수)
+├── ci-build.sh        # 컨테이너 **안에서** 도는 실제 빌드 절차
 └── README.md
 ```
+
+## AAB(Play) vs APK(원스토어)
+
+두 스토어의 **서명 모델이 다르다.** 이 차이가 형식 선택의 이유 전부다.
+
+| | Play (AAB) | 원스토어 (APK) |
+|---|---|---|
+| 진입점 | `build-aab.sh` | `build-apk.sh` |
+| 산출물 | `build-artifacts/app-release.aab` | `build-artifacts/app-release.apk` |
+| 서명 주체 | 업로드 키로 올리면 **구글이 재서명**(Play App Signing) | **내 릴리스 키가 곧 앱 신원** — 재서명 위탁이 없다 |
+| 키 분실 시 | 업로드 키는 구글에 재발급 요청 가능 | **업데이트를 영원히 못 올린다** — 백업이 유일한 보험 |
+| 서명 검증 도구 | `keytool -printcert -jarfile` | `apksigner verify --print-certs` |
+| 설치 파일인가 | 아니다(스토어가 기기별 APK 생성) | 그렇다 — `adb install` 로 바로 검증 가능 |
+
+> **왜 검증 도구가 다른가**: 최신 APK 는 v2/v3 서명 스킴만 쓸 수 있는데 그때는 v1(JAR) 서명
+> 블록이 없다. `keytool -printcert -jarfile` 은 v1 만 읽으므로 **제대로 서명된 APK 를
+> "서명되지 않았다"고 잘못 판정한다.** 그래서 APK 경로만 `apksigner` 로 갈라 쓴다.
+> `apksigner` 는 build-tools 안에 있고 PATH 에 없어서 스크립트가 직접 찾는다.
+
+키스토어·버전·OAuth 자재는 **두 형식이 완전히 공유한다.** 같은 커밋에서 두 스토어에
+같은 versionCode 로 각각 올려도 무방하다.
 
 ---
 
@@ -112,7 +135,23 @@ infra/mobile/build-aab.sh
 
 산출물: `build-artifacts/app-release.aab` + `build-artifacts/signing-report.txt`
 
-`BUILD_NUMBER=<n>` 를 주면 versionCode 가 그 값이 된다(Play 는 같은 versionCode 재업로드를 거절).
+**원스토어용 APK** 는 진입점만 바꾼다 — 나머지는 완전히 같다:
+
+```bash
+KEYSTORE_FILE=~/dodam-secrets/upload-keystore.jks \
+KEY_PROPERTIES_FILE=~/dodam-secrets/key.properties \
+OAUTH_ENV_FILE=~/dodam-secrets/oauth.env \
+infra/mobile/build-apk.sh
+```
+
+산출물: `build-artifacts/app-release.apk` + `build-artifacts/signing-report.txt`
+(원스토어 등록 절차 전체는 [ONESTORE-HANDOFF.md](ONESTORE-HANDOFF.md))
+
+⚠️ 두 형식이 `build-artifacts/signing-report.txt` **같은 파일에 쓴다.** 연달아 구우면
+나중 것이 덮어쓰므로, 둘 다 남겨야 하면 사이에 이름을 바꿔 두거나 `OUT_DIR` 을 나눈다.
+
+`BUILD_NUMBER=<n>` 를 주면 versionCode 가 그 값이 된다(Play·원스토어 모두 같은 versionCode
+재업로드를 거절한다).
 
 ### 서명 없이 툴체인만 확인하고 싶을 때
 
@@ -164,8 +203,8 @@ Jenkins 는 컨테이너 안에서 **호스트** 도커 소켓을 부른다(Dock
 그러나 CI 는 `REQUIRE_RELEASE_SIGNING=true` 로 돌아 두 겹으로 막는다:
 
 1. `build.gradle.kts` 의 `preReleaseBuild` 가드 — 키가 없으면 빌드 자체를 세운다
-2. `ci-build.sh` 의 `keytool -printcert -jarfile` — **나온 AAB 를 실제로 열어** 인증서 주체가
-   `CN=Android Debug` 면 실패시킨다
+2. `ci-build.sh` 의 서명 실검증 — **나온 산출물을 실제로 열어** 인증서 주체가
+   `CN=Android Debug` 면 실패시킨다 (AAB=`keytool -printcert -jarfile` · APK=`apksigner verify`)
 
 "설정은 켜져 있는데 실제로는 동작하지 않는" 상태를 여러 번 겪은 저장소라, **존재 검사와
 동작 검사를 따로** 둔다.
@@ -181,5 +220,8 @@ Jenkins 는 컨테이너 안에서 **호스트** 도커 소켓을 부른다(Dock
 ## 아직 안 한 것
 
 - **Play Console 업로드 자동화** — 계정·서비스 계정 키가 필요하다. 별도 이슈.
+- **원스토어 APK 의 Jenkins 스테이지** — 5절의 `BUILD_ANDROID_AAB` 는 AAB 전용이다.
+  APK 도 CI 에서 뽑으려면 Jenkinsfile 에 스테이지를 추가해야 한다(호스트 실행은 지금도 된다).
+- **원스토어 업로드 API 자동화** — 지금은 수동 업로드 전제.
 - **iOS(IPA)** — macOS 빌더가 필요해 이 서버에서 불가능하다.
 - **versionName 정책** — 지금은 `pubspec.yaml` 의 `1.0.0` 고정. 태그 연동은 미정.

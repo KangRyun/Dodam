@@ -7,6 +7,13 @@ cd /src
 
 REQUIRE_RELEASE_SIGNING="${REQUIRE_RELEASE_SIGNING:-true}"
 
+# 산출 형식 (S15P11B209-765 원스토어). 기본값이 appbundle 인 것은 **의도적이다** —
+# 이 값을 넘기지 않는 기존 호출부(build-aab.sh · Jenkins BUILD_ANDROID_AAB)는
+# 아무것도 바꾸지 않아도 종전과 똑같이 동작해야 한다.
+#   appbundle → Play (Play App Signing 이 재서명하므로 업로드 키만 있으면 된다)
+#   apk       → 원스토어 (재서명 위탁이 없어 **내가 서명한 키가 곧 앱 신원**이다)
+BUILD_FORMAT="${BUILD_FORMAT:-appbundle}"
+
 log() { printf '\n\033[1m── %s\033[0m\n' "$*"; }
 
 # ── 0. 호스트에서 딸려온 찌꺼기 제거 ───────────────────────────────────────
@@ -35,27 +42,68 @@ fi
 log "flutter pub get"
 flutter pub get
 
-# ── 3. AAB 빌드 ────────────────────────────────────────────────────────────
+# ── 3. 빌드 ────────────────────────────────────────────────────────────────
 BUILD_ARGS=(--release)
 [ -n "${BUILD_NAME:-}" ]   && BUILD_ARGS+=(--build-name "$BUILD_NAME")
 [ -n "${BUILD_NUMBER:-}" ] && BUILD_ARGS+=(--build-number "$BUILD_NUMBER")
 
-log "flutter build appbundle ${BUILD_ARGS[*]}"
+case "$BUILD_FORMAT" in
+  appbundle) ;;
+  apk)       ;;
+  *) echo "❌ BUILD_FORMAT 은 appbundle 또는 apk 다: '$BUILD_FORMAT'" >&2; exit 1 ;;
+esac
+
+log "flutter build $BUILD_FORMAT ${BUILD_ARGS[*]}"
 # gradle 쪽 가드에도 같은 뜻을 전달한다 — 스크립트가 아니라 빌드가 직접 판정하게 한다.
 export DODAM_REQUIRE_RELEASE_SIGNING="$REQUIRE_RELEASE_SIGNING"
-flutter build appbundle "${BUILD_ARGS[@]}"
+flutter build "$BUILD_FORMAT" "${BUILD_ARGS[@]}"
 
-AAB=build/app/outputs/bundle/release/app-release.aab
-[ -f "$AAB" ] || { echo "❌ AAB 가 생성되지 않았다: $AAB" >&2; exit 1; }
+# 산출 경로는 형식마다 다르다. APK 는 gradle 이 build/app/outputs/apk/release/ 에 쓰고
+# flutter 가 build/app/outputs/flutter-apk/ 로 복사한다 — 둘 다 볼 수 있어야 한다.
+# (flutter 버전에 따라 어느 쪽만 남기도 해서, 있는 쪽을 집는다)
+if [ "$BUILD_FORMAT" = "appbundle" ]; then
+  ARTIFACT=build/app/outputs/bundle/release/app-release.aab
+else
+  ARTIFACT=""
+  for c in build/app/outputs/flutter-apk/app-release.apk \
+           build/app/outputs/apk/release/app-release.apk; do
+    [ -f "$c" ] && { ARTIFACT="$c"; break; }
+  done
+  [ -n "$ARTIFACT" ] || { echo "❌ APK 를 찾지 못했다 (flutter-apk/·apk/release/ 둘 다 없음)" >&2; exit 1; }
+fi
+[ -f "$ARTIFACT" ] || { echo "❌ 산출물이 생성되지 않았다: $ARTIFACT" >&2; exit 1; }
 
 # ── 4. ★ 서명 실검증 ───────────────────────────────────────────────────────
-# "빌드가 성공했다"와 "제대로 서명됐다"는 다르다. AAB 가 나왔어도 debug 키로 서명돼 있으면
-# Play 업로드에서 거절당한다 — 그걸 여기서 잡지 못하면 배포 직전에 안다.
-log "서명 검증"
-keytool -printcert -jarfile "$AAB" > /tmp/signing-report.txt 2>&1 \
-  || { echo "❌ AAB 에서 인증서를 읽지 못했다 = 서명되지 않았다" >&2; cat /tmp/signing-report.txt >&2; exit 1; }
+# "빌드가 성공했다"와 "제대로 서명됐다"는 다르다. 산출물이 나왔어도 debug 키로 서명돼 있으면
+# 스토어 업로드에서 거절당한다 — 그걸 여기서 잡지 못하면 배포 직전에 안다.
+#
+# ★ 형식마다 검증 도구가 다르다 (2026-07-31)
+#   AAB : keytool -printcert -jarfile — AAB 는 JAR 서명(v1)만 쓰므로 이걸로 읽힌다.
+#   APK : **apksigner** 를 쓴다. 최신 APK 는 v2/v3(APK Signature Scheme)로만 서명될 수 있고,
+#         그 경우 v1 서명 블록이 없어 keytool 은 "서명되지 않았다"고 **잘못** 말한다.
+#         릴리스 키로 제대로 서명된 APK 를 실패로 판정하는 것이라 반드시 갈라 써야 한다.
+log "서명 검증 ($BUILD_FORMAT)"
 
-OWNER="$(grep -m1 '^소유자:\|^Owner:' /tmp/signing-report.txt || true)"
+if [ "$BUILD_FORMAT" = "appbundle" ]; then
+  keytool -printcert -jarfile "$ARTIFACT" > /tmp/signing-report.txt 2>&1 \
+    || { echo "❌ AAB 에서 인증서를 읽지 못했다 = 서명되지 않았다" >&2; cat /tmp/signing-report.txt >&2; exit 1; }
+  OWNER="$(grep -m1 '^소유자:\|^Owner:' /tmp/signing-report.txt || true)"
+else
+  # apksigner 는 build-tools 안에 있고 **PATH 에 없다**(Dockerfile 은 cmdline-tools·platform-tools 만
+  # PATH 에 넣는다). 버전을 박아 두면 BUILD_TOOLS_VERSION 을 올리는 순간 조용히 깨지므로
+  # 설치된 것 중 가장 높은 버전을 고른다.
+  APKSIGNER="$(command -v apksigner 2>/dev/null || true)"
+  [ -n "$APKSIGNER" ] || APKSIGNER="$(ls -1 "${ANDROID_HOME:-/opt/android-sdk}"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -1)"
+  [ -n "$APKSIGNER" ] && [ -x "$APKSIGNER" ] \
+    || { echo "❌ apksigner 를 찾지 못했다 — 이미지에 build-tools 가 설치돼 있는지 확인할 것" >&2; exit 1; }
+
+  # verify 는 서명이 없거나 깨졌으면 0 이 아닌 코드로 끝난다 = 검증이 곧 판정이다.
+  # -v 를 붙이면 어떤 스킴(v1/v2/v3)으로 서명됐는지도 리포트에 남아 나중에 되짚기 좋다.
+  "$APKSIGNER" verify --print-certs -v "$ARTIFACT" > /tmp/signing-report.txt 2>&1 \
+    || { echo "❌ APK 서명 검증 실패 = 서명되지 않았거나 깨졌다" >&2; cat /tmp/signing-report.txt >&2; exit 1; }
+  OWNER="$(grep -m1 'Signer #1 certificate DN' /tmp/signing-report.txt || true)"
+fi
+
 echo "   $OWNER"
 
 if [ "$REQUIRE_RELEASE_SIGNING" = "true" ]; then
@@ -68,4 +116,10 @@ if [ "$REQUIRE_RELEASE_SIGNING" = "true" ]; then
   echo "   ✅ 릴리스 키로 서명됨 (debug 키 아님)"
 fi
 
-log "완료: $AAB ($(du -h "$AAB" | cut -f1))"
+# ── 5. 산출물을 고정 위치로 모은다 ─────────────────────────────────────────
+# 호스트 스크립트가 flutter 의 내부 디렉터리 구조를 알 필요가 없게 한다.
+# flutter 가 산출 경로를 바꾸면(실제로 버전마다 바뀐다) 여기 한 곳만 고치면 된다.
+mkdir -p /src/build-out
+cp "$ARTIFACT" "/src/build-out/$(basename "$ARTIFACT")"
+
+log "완료: $ARTIFACT ($(du -h "$ARTIFACT" | cut -f1))"
