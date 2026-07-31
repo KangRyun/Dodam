@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 도담 Android 릴리스 APK 빌드 — **원스토어(ONE Store) 용** (S15P11B209-651)
+# 도담 Android 릴리스 APK 빌드 — **원스토어(ONE Store) 용** (S15P11B209-765)
 #
 # 실제 로직은 build-android.sh 에 있다. AAB 와 컨테이너 수명·시크릿 주입·버전 산출·
 # 서명 검증이 **같은 코드**를 탄다. 다른 것은 형식 하나뿐이다.

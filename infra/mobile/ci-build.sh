@@ -7,7 +7,7 @@ cd /src
 
 REQUIRE_RELEASE_SIGNING="${REQUIRE_RELEASE_SIGNING:-true}"
 
-# 산출 형식 (S15P11B209-651 원스토어). 기본값이 appbundle 인 것은 **의도적이다** —
+# 산출 형식 (S15P11B209-765 원스토어). 기본값이 appbundle 인 것은 **의도적이다** —
 # 이 값을 넘기지 않는 기존 호출부(build-aab.sh · Jenkins BUILD_ANDROID_AAB)는
 # 아무것도 바꾸지 않아도 종전과 똑같이 동작해야 한다.
 #   appbundle → Play (Play App Signing 이 재서명하므로 업로드 키만 있으면 된다)
