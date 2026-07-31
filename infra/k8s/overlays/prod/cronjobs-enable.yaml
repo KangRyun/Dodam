@@ -42,3 +42,20 @@ metadata:
   namespace: dodam
 spec:
   suspend: false
+---
+# 매니페스트 드리프트 감시 (S15P11B209-751)
+#
+# base 가 suspend: true 인 이유는 백업과 같다 — 선행 조건(Secret `dodam-drift-git`)이
+# 갖춰지지 않은 환경에서 켜지면 initContainer 가 CreateContainerConfigError 로 계속 재시도한다.
+#
+# ★ 이 항목이 없으면 **게이트가 자기 자신을 드리프트로 신고한다.**
+#   운영에서 손으로 `patch ... suspend:false` 하면 git(true)과 클러스터(false)가 갈라지고,
+#   그 차이는 사라지지 않으므로 매시간 경보가 뜬다. 2026-07-30 배포 직후 실제로 그렇게 났다.
+#   "운영에서 켠다"는 판단은 overlay 로 선언해야 드리프트가 아니게 된다.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: manifest-drift-check
+  namespace: dodam
+spec:
+  suspend: false
