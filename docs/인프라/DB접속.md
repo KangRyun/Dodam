@@ -83,9 +83,67 @@ SSH 터널 없이 GUI 툴·CLI 에서 바로 붙는다.
 | Database | `b209` |
 | User / Password | `dodam` / `.env` 의 `MYSQL_PASSWORD` |
 
-```bash
-mysql -h i15b209.p.ssafy.io -P 30306 -u dodam -p b209
+### ⚠️ TLS 는 선택이 아니다 (2026-07-31 실측)
+
 ```
+tls_version               TLSv1.2,TLSv1.3     ← 서버는 TLS 를 할 수 있고
+require_secure_transport  OFF                 ← 평문 접속도 그대로 받는다
+```
+
+**클라이언트가 TLS 를 켜지 않으면 평문으로 붙는다.** 클러스터 안에서만 오갈 때는 문제가
+아니었지만, 이제 비밀번호와 아동 데이터가 인터넷을 건넌다. 그래서 아래 모든 설정에
+`sslMode=REQUIRED` 가 들어간다 — **빼먹으면 조용히 평문이 된다.**
+
+```bash
+mysql -h i15b209.p.ssafy.io -P 30306 -u dodam -p b209 --ssl-mode=REQUIRED
+```
+
+> 서버에서 `require_secure_transport=ON` 으로 막는 편이 근본적이다. **다만 지금 켜면 백엔드가 죽는다** —
+> `application-local.yml:15` 의 JDBC URL 이 `useSSL=false` 로 명시돼 있다. 순서는
+> ① 백엔드를 `sslMode=REQUIRED` 로 고쳐 배포 → ② 서버 스위치 ON. 포트를 오래 열어 둘 거면 해 둔다.
+
+### GUI 툴 설정 (DBeaver · Workbench · IntelliJ)
+
+접속 정보는 위 표와 같고, **드라이버 속성 두 개**를 반드시 넣는다.
+
+```
+sslMode            = REQUIRED
+connectionTimeZone = Asia/Seoul
+```
+
+| 툴 | 넣는 곳 |
+|----|---------|
+| DBeaver | 새 연결 → MySQL → **Driver properties** 탭 |
+| MySQL Workbench | Standard TCP/IP → **SSL** 탭에서 `Use SSL: Require` |
+| IntelliJ Database | URL `jdbc:mysql://i15b209.p.ssafy.io:30306/b209` → **Advanced** 탭 |
+
+#### GUI 함정 셋
+
+1. **`Public Key Retrieval is not allowed` 가 뜨면 `allowPublicKeyRetrieval=true` 로 끄지 말 것.**
+   그 에러는 "권한이 모자라다"가 아니라 **TLS 가 꺼졌다**는 신호다. MySQL 8.4 의 기본 인증
+   플러그인(`caching_sha2_password`)은 평문 연결일 때 서버 공개키를 따로 받아와야 하는데,
+   그 요청이 기본 거부라서 나는 것이다. `sslMode=REQUIRED` 를 제대로 넣으면 애초에 뜨지 않는다.
+   백엔드 설정에 `allowPublicKeyRetrieval=true` 가 있는 것은 **파드 간 통신이라 그런 것이고,
+   인터넷 경유 설정에 그대로 베끼면 평문 접속이 된다.**
+2. **시각을 변환하지 말 것.** DB 값은 이미 KST 다(§1-b). `connectionTimeZone` 을 안 잡으면
+   드라이버가 저장값을 UTC 로 착각해 화면에서 **9시간 밀어** 보여 준다.
+3. **읽기 전용으로 걸어 둘 것.** 운영 DB 직접 DML/DDL 은 §4 금지 사항이다. DBeaver 는 연결 편집
+   창에서 `Connection type: Production` + `Read-only connection` 체크(메뉴 위치는 버전마다 다르다).
+   실수로 `UPDATE` 를 커밋하는 사고를 **구조적으로** 막는 편이 조심하는 것보다 낫다.
+
+### GUI 내장 SSH 터널 — 보안그룹이 막혀 있어도 되는 경로
+
+30306 이 밖에서 안 열리면 GUI 의 **SSH 탭**을 쓴다. 22 번만 타므로 보안그룹과 무관하고,
+SSH 가 암호화하므로 TLS 설정도 필요 없다.
+
+| 탭 | 항목 | 값 |
+|----|------|-----|
+| SSH | Host / Port | `i15b209.p.ssafy.io` / `22` |
+| SSH | User / 인증 | `kr` / 비밀번호 (`PasswordAuthentication yes`) |
+| Main | Host / Port | `127.0.0.1` / `30306` ← **서버 기준 주소다** |
+
+> `mysql-ext` 가 생긴 뒤로 이 경로에 **`kubectl port-forward` 가 필요 없어졌다.** 서버 루프백에서
+> 30306 이 바로 잡히기 때문이다. §3 의 port-forward 절차는 Redis·MinIO·Mongo 에만 해당한다.
 
 ### 관문이 셋이다 — 안 닿으면 순서대로 짚는다
 
@@ -301,6 +359,9 @@ kubectl -n dodam exec -it sts/mongodb -- \
 
 DBeaver·MySQL Workbench·IntelliJ Database 등에서 붙고 싶을 때.
 
+> **MySQL 은 이 절이 필요 없다**(2026-07-31). `mysql-ext`(NodePort 30306) 가 생겨서 직접 접속이든
+> GUI 내장 SSH 터널이든 **§1-a** 로 끝난다. 아래 `port-forward` 절차는 **Redis·MinIO·MongoDB** 용이다.
+
 compose 시절에는 `docker inspect` 로 컨테이너 IP 를 뽑아 그 IP 로 터널을 뚫었다.
 **k3s 에서는 그럴 필요가 없다** — `kubectl port-forward` 가 파드를 서버의 루프백에 붙여 준다.
 파드 IP 가 바뀌어도 명령이 그대로다.
@@ -323,14 +384,18 @@ ssh -N -L 3307:127.0.0.1:3307 kr@i15b209.p.ssafy.io \
   -o "RemoteCommand kubectl -n dodam port-forward sts/mysql 3307:3306" -t
 ```
 
-GUI 툴 접속 설정:
+GUI 툴 접속 설정 (위 터널 기준):
 
 | 항목 | 값 |
 |------|-----|
-| Host / Port | `127.0.0.1` / `3307` |
+| Host / Port | `127.0.0.1` / `3307` ← **내 PC 기준** |
 | Database | `b209` |
 | User | `dodam` (`MYSQL_USER`) |
 | Password | `.env` 의 `MYSQL_PASSWORD` |
+
+> MySQL 예시는 **구조를 보여 주려고 남겨 둔다.** 실제로 MySQL 에 붙을 때는 §1-a 가 더 짧다
+> (창을 켜 둘 필요도, 파드 재생성 때 터널이 끊길 일도 없다). 이 절의 값어치는
+> **Redis·MinIO·Mongo 처럼 외부 입구가 없는 저장소**에 있다.
 
 같은 방식으로 다른 저장소도 (포트만 바꿔서):
 
@@ -386,6 +451,8 @@ kubectl -n dodam port-forward deploy/prometheus 9091:9090  # Prometheus UI
 | 파드가 `CrashLoopBackOff`/`Pending` | `kubectl -n dodam describe pod <이름>` 의 Events 부터 본다. 이후 [배포검증-롤백.md](배포검증-롤백.md) 절차 |
 | Mongo 가 `test` DB 에 붙고 `requires authentication` | Secret 키 이름(`$MONGO_ROOT_USERNAME`)을 파드 안에서 썼다 → 빈 값. **`$MONGO_INITDB_ROOT_USERNAME`** 을 쓸 것 (2-4). `ping` 은 인증 없이도 성공하므로 접속된 것처럼 보인다 |
 | MongoDB 조회가 "사용자 없음" | `--authenticationDatabase` 누락·불일치. root=`admin`, 앱 계정=`dodam` (2-4) |
+| GUI 에서 `Public Key Retrieval is not allowed` | **TLS 가 꺼진 상태**라는 신호다. `allowPublicKeyRetrieval=true` 로 끄지 말고 `sslMode=REQUIRED` 를 넣는다 (§1-a GUI 함정 1) |
+| 외부 30306 이 timeout | 관문 3개를 순서대로: `kubectl get svc mysql-ext` → `sudo ufw status` → 보안그룹(우리 권한 밖). 서버 안에서 `127.0.0.1:30306` 이 되면 ①은 정상이다 (§1-a) |
 | 시각이 9시간 어긋나 보인다 | **DB 값은 KST 다**(1-b). 변환하지 말 것. 앱 로그·API 는 UTC 이므로 그 둘을 비교할 때만 9시간을 감안한다 |
 | 새로 넣은 행만 UTC 로 들어갔다 | `mysql` CLI 세션이 UTC 라서다. `SET SESSION time_zone='+09:00'` 후 재시도 (1-b 마지막) |
 
