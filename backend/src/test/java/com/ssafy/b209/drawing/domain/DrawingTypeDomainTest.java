@@ -7,30 +7,25 @@ import org.junit.jupiter.api.Test;
 class DrawingTypeDomainTest {
 
   @Test
-  void isAvailableForAgeUsesInclusiveConfiguredBoundaries() {
+  void exposesActiveStateAndRecommendedAgeMetadataSeparately() {
     DrawingType drawingType =
         DrawingTypeFixture.create(3L, "HOUSE", "House", DrawingTypeSelectableBy.BOTH, 6, 10, true);
 
-    assertThat(drawingType.isAvailableForAge(5)).isFalse();
-    assertThat(drawingType.isAvailableForAge(6)).isTrue();
-    assertThat(drawingType.isAvailableForAge(10)).isTrue();
-    assertThat(drawingType.isAvailableForAge(11)).isFalse();
+    assertThat(drawingType.isActive()).isTrue();
+    assertThat(drawingType.getRecommendedAgeMin()).isEqualTo(6);
+    assertThat(drawingType.getRecommendedAgeMax()).isEqualTo(10);
     assertThat(drawingType.getId()).isEqualTo(3L);
     assertThat(drawingType.getCode()).isEqualTo("HOUSE");
     assertThat(drawingType.getName()).isEqualTo("House");
   }
 
   @Test
-  void isAvailableForAgeAllowsAbsentBoundariesButNeverNegativeAgeOrInactiveTypes() {
-    DrawingType unbounded =
-        DrawingTypeFixture.create(
-            3L, "HOUSE", "House", DrawingTypeSelectableBy.BOTH, null, null, true);
+  void reportsInactiveTypeWithoutInterpretingRecommendedAge() {
     DrawingType inactive =
-        DrawingTypeFixture.create(
-            4L, "TREE", "Tree", DrawingTypeSelectableBy.CHILD, null, null, false);
+        DrawingTypeFixture.create(4L, "TREE", "Tree", DrawingTypeSelectableBy.CHILD, 6, 10, false);
 
-    assertThat(unbounded.isAvailableForAge(0)).isTrue();
-    assertThat(unbounded.isAvailableForAge(-1)).isFalse();
-    assertThat(inactive.isAvailableForAge(7)).isFalse();
+    assertThat(inactive.isActive()).isFalse();
+    assertThat(inactive.getRecommendedAgeMin()).isEqualTo(6);
+    assertThat(inactive.getRecommendedAgeMax()).isEqualTo(10);
   }
 }

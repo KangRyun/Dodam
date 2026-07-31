@@ -709,7 +709,7 @@ IN_PROGRESS/DRAWING
 
 | 필드 | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
-| `childId` | int64 | O | 연령·권한·설정에 맞는 유형을 반환 |
+| `childId` | int64 | O | 연결 권한과 아동 상태를 확인할 식별자 |
 | `category` | `DrawingCategory` | X | `ASSESSMENT`, `GENERAL` |
 | `activeOnly` | boolean | X | 기본 `true` |
 
@@ -718,8 +718,9 @@ IN_PROGRESS/DRAWING
 `drawingTypeId`, `code`, `name`, `activityCategory`, `selectableBy`, `recommendedAgeMin`, `recommendedAgeMax`, `guideText`, `displayOrder`.
 
 응답은 공통 성공 응답의 `data`에 `content`, `page`, `size`, `totalElements`, `totalPages`, `hasNext`를 포함하는 단일 페이지로 반환한다.
-유형은 `displayOrder`, `drawingTypeId` 오름차순으로 정렬되며 아동의 만 나이가 권장 연령 범위에 포함되는 항목만 노출한다.
-`activeOnly=false`이면 비활성 유형도 조회 대상에 포함하지만 연령 조건은 동일하게 적용한다.
+유형은 `displayOrder`, `drawingTypeId` 오름차순으로 정렬한다.
+`recommendedAgeMin`, `recommendedAgeMax`는 보호자 화면 안내를 위한 참고 Metadata이며 목록 노출이나 활동 시작을 제한하지 않는다.
+`activeOnly=false`이면 비활성 유형도 조회 대상에 포함한다.
 
 검사형 코드를 지원하더라도 API·화면은 AI가 검사를 실시하거나 진단을 확정하는 것처럼 표현하지 않는다. 일반 활동 코드는 `ART_DIARY`, `FREE_DRAWING`, `EMOTION_COLORING`, `WEATHER_MIND` 등을 사용한다.
 초기 기준 데이터로 위 네 가지 일반 활동 코드를 제공하며, 코드는 화면 표시명이 아닌 클라이언트와 서버 간 식별값으로 사용한다.
@@ -742,7 +743,7 @@ Header `Idempotency-Key` 필수.
 - 보호자-아동 연결과 필수 동의를 확인한다.
 - `canvas`는 입력 방식과 무관하게 선택 필드이다. Flutter는 화면 렌더링 전에 세션을 생성하므로 임의의 고정 크기를 보내지 않고 생략한다.
 - `canvas`를 전달할 때 `width`, `height`, `backgroundColor`는 각각 양수와 `#RRGGBB` 형식을 만족해야 한다. 이 값은 클라이언트의 논리 화면 설정이며 저장 이미지의 실제 픽셀 크기로 사용하지 않는다.
-- 그림 유형의 연령과 선택 주체를 확인한다.
+- 그림 유형의 활성 상태와 유형별 전용 시작 경로를 확인한다. 권장 연령은 활동 시작을 제한하지 않는다.
 - 같은 아동에게 복구 가능한 `IN_PROGRESS` 세션이 있으면 `409 ACTIVE_DRAWING_SESSION_EXISTS`와 해당 `drawingSessionId`를 반환한다.
 
 #### 응답 `201`

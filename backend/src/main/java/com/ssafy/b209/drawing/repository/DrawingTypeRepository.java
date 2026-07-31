@@ -22,8 +22,6 @@ public interface DrawingTypeRepository extends JpaRepository<DrawingType, Long> 
   /**
    * 그림 유형 목록을 분류와 활성 상태 조건으로 조회한다.
    *
-   * <p>연령 조건은 아동의 만 나이를 계산한 Service가 적용한다.
-   *
    * @param category 조회할 활동 분류, 전체 분류이면 {@code null}
    * @param activeOnly 활성 유형만 조회할지 여부
    * @return 기본 노출 순서와 식별자 순서가 적용된 그림 유형 목록

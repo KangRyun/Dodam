@@ -163,6 +163,40 @@ class HtpAssessmentServiceTest {
   }
 
   @Test
+  void startsHtpOutsideTheRecommendedAgeRange() {
+    htpType =
+        DrawingTypeFixture.create(
+            10L, "HTP", "집·나무·사람 그림", DrawingTypeSelectableBy.GUARDIAN, 20, 30, true);
+    stubGuardianAndStartReferences();
+    given(drawingSessionRepository.save(any(DrawingSession.class)))
+        .willAnswer(
+            invocation -> {
+              DrawingSession session = invocation.getArgument(0);
+              ReflectionTestUtils.setField(session, "id", 100L);
+              return session;
+            });
+    given(htpAssessmentRepository.saveAndFlush(any(HtpAssessment.class)))
+        .willAnswer(
+            invocation -> {
+              HtpAssessment assessment = invocation.getArgument(0);
+              ReflectionTestUtils.setField(assessment, "id", 200L);
+              return assessment;
+            });
+
+    HtpAssessmentResponse response =
+        service.start(
+            "htp-outside-age-key",
+            new StartHtpAssessmentRequest(
+                1L,
+                DrawingInputMethod.CANVAS,
+                OffsetDateTime.parse("2026-07-28T10:00:00+09:00"),
+                null));
+
+    assertThat(response.htpAssessmentId()).isEqualTo(200L);
+    assertThat(response.currentStep().drawingSubject()).isEqualTo(HtpDrawingSubject.HOUSE);
+  }
+
+  @Test
   void replacesAnActiveGeneralDrawingWithAHouseStep() {
     DrawingSession activeGeneral =
         DrawingSession.start(

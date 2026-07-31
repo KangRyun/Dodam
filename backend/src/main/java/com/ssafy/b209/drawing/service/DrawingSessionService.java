@@ -19,7 +19,6 @@ import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.drawing.repository.DrawingTypeRepository;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
@@ -119,8 +118,7 @@ public class DrawingSessionService {
             .findById(request.drawingTypeId())
             .orElseThrow(() -> new BusinessException(DrawingErrorCode.DRAWING_TYPE_NOT_FOUND));
 
-    int age = child.ageOn(LocalDate.now(clock));
-    if ("HTP".equals(drawingType.getCode()) || !drawingType.isAvailableForAge(age)) {
+    if ("HTP".equals(drawingType.getCode()) || !drawingType.isActive()) {
       throw new BusinessException(DrawingErrorCode.DRAWING_TYPE_NOT_AVAILABLE);
     }
     LocalDateTime startedAt = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
