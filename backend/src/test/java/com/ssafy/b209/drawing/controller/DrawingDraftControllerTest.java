@@ -10,12 +10,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.drawing.domain.DrawingAssetType;
 import com.ssafy.b209.drawing.dto.request.SaveDrawingDraftRequest;
 import com.ssafy.b209.drawing.dto.response.DrawingCanvasStateResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingDraftResponse;
+import com.ssafy.b209.drawing.service.DrawingDraftIdempotencyStore;
 import com.ssafy.b209.drawing.service.DrawingDraftService;
-import com.ssafy.b209.storage.image.StoreImageCommand;
+import com.ssafy.b209.storage.image.ImageStorageProperties;
 import java.time.Instant;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -32,12 +34,22 @@ class DrawingDraftControllerTest {
 
   @Autowired private MockMvc mockMvc;
   @MockitoBean private DrawingDraftService drawingDraftService;
+  @MockitoBean private DrawingDraftIdempotencyStore idempotencyStore;
+  @MockitoBean private CurrentAuthenticatedUserResolver currentUserResolver;
+  @MockitoBean private ImageStorageProperties imageStorageProperties;
 
   @Test
   void replacesCurrentDraftWithPreviewAndCanvasState() throws Exception {
+    given(imageStorageProperties.maxSize()).willReturn(10_485_760L);
+    given(currentUserResolver.requireUserId()).willReturn(1L);
     given(
-            drawingDraftService.save(
-                eq(10L), any(StoreImageCommand.class), any(SaveDrawingDraftRequest.class)))
+            idempotencyStore.execute(
+                eq(1L),
+                eq(10L),
+                eq("draft-key-0001"),
+                any(byte[].class),
+                any(SaveDrawingDraftRequest.class),
+                any()))
         .willReturn(response());
 
     mockMvc
@@ -45,6 +57,7 @@ class DrawingDraftControllerTest {
             multipart("/api/v1/drawing-sessions/{id}/draft", 10L)
                 .file(preview())
                 .file(canvasState(17, true))
+                .header("Idempotency-Key", "draft-key-0001")
                 .with(
                     request -> {
                       request.setMethod("PUT");
@@ -78,6 +91,7 @@ class DrawingDraftControllerTest {
             multipart("/api/v1/drawing-sessions/{id}/draft", 10L)
                 .file(preview())
                 .file(canvasState(0, false))
+                .header("Idempotency-Key", "draft-key-0002")
                 .with(
                     request -> {
                       request.setMethod("PUT");

@@ -465,7 +465,8 @@ class DrawingActivityQueryIntegrationTest {
                     ("{\"lastEventSequence\":"
                             + sequence
                             + ",\"clientSavedAt\":\"2026-07-20T11:30:00+09:00\"}")
-                        .getBytes(StandardCharsets.UTF_8)));
+                        .getBytes(StandardCharsets.UTF_8)))
+            .header("Idempotency-Key", "draft-" + drawingSessionId + "-" + sequence);
   }
 
   private void insertAsset(long id, long drawingSessionId, String assetType, int version) {

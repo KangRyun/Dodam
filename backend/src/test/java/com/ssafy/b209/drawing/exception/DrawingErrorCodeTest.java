@@ -78,6 +78,16 @@ class DrawingErrorCodeTest {
         DrawingErrorCode.DRAWING_DRAFT_SAVE_CONFLICT,
         new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_011", "그림 초안 저장 요청이 충돌했습니다."));
     expected.put(
+        DrawingErrorCode.DRAFT_IDEMPOTENCY_KEY_REUSED,
+        new ErrorContract(
+            HttpStatus.CONFLICT,
+            "IDEMPOTENCY_KEY_REUSED",
+            "동일한 Idempotency-Key가 다른 초안 요청에 사용되었습니다."));
+    expected.put(
+        DrawingErrorCode.DRAFT_SAVE_IN_PROGRESS,
+        new ErrorContract(
+            HttpStatus.CONFLICT, "DRAFT_SAVE_IN_PROGRESS", "동일한 그림 초안 저장 요청이 처리 중입니다."));
+    expected.put(
         DrawingErrorCode.DRAWING_DRAFT_STORAGE_FAILED,
         new ErrorContract(
             HttpStatus.INTERNAL_SERVER_ERROR, "DRAWING_500_002", "그림 초안 저장 중 오류가 발생했습니다."));
