@@ -142,6 +142,14 @@ DETECTION_LOG_DETAIL = (
 #   color_ablation_test.ipynb 실측으로 도움이 확인되면 "ink"로 켠다. HTP는 흑백 강제라 무관.
 SKETCH_PREPROCESS = os.environ.get("SKETCH_PREPROCESS", "none").strip().lower()
 
+# 추론 입력 해상도 — 학습 imgsz와 일치시킨다 (S15P11B209-761 1단계).
+#   ultralytics predict는 imgsz 미지정 시 기본 640으로 letterbox한다. 학습이 960인 모델을
+#   640으로 추론하면 작은 객체·가는 선에서 손해다. 두 모델 모두 960으로 통일한다.
+#   htp_best=960(학습값 일치), sketch_base_v4=960. ⚠️ 현재 배포 sketch는 v1(학습 640)이라
+#   960은 v4 배포를 앞서 반영한 값 — v1로 되돌리려면 env SKETCH_IMGSZ=640.
+HTP_IMGSZ = int(os.environ.get("HTP_IMGSZ", "960"))
+SKETCH_IMGSZ = int(os.environ.get("SKETCH_IMGSZ", "960"))
+
 
 # ── RAG 검색 (S15P11B209-613 — 정책: docs/ai/rag-corpus-policy.md) ────────────
 # 임베딩도 GMS 단일 키 원칙(AI모델선정.md)을 따른다. 인덱스 구축은 오프라인 스크립트,

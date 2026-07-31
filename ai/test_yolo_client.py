@@ -246,5 +246,61 @@ class SketchInkGatingTest(unittest.TestCase):
         model.predict.return_value[0].plot.assert_called_with(img="ORIGINAL_IMG")
 
 
+class InferenceImgszTest(unittest.TestCase):
+    """추론 imgsz가 모델별 학습 해상도로 predict에 전달되는지(S15P11B209-761)."""
+
+    def _predict_imgsz(self, model_key):
+        model = mock.Mock()
+        model.predict.return_value = [mock.Mock()]
+        with mock.patch.object(yolo_client, "_get_model", return_value=model), mock.patch.object(
+            yolo_client, "_parse_result", return_value=[]
+        ), mock.patch.object(
+            yolo_client, "_encode_png", return_value=b""
+        ), mock.patch.object(yolo_client, "_load_bgr_oriented", return_value=None):
+            yolo_client.detect_and_annotate("/tmp/x.png", model_key=model_key)
+        return model.predict.call_args.kwargs["imgsz"]
+
+    def test_htp_uses_htp_imgsz(self):
+        self.assertEqual(self._predict_imgsz("htp"), yolo_client.config.HTP_IMGSZ)
+
+    def test_sketch_uses_sketch_imgsz(self):
+        self.assertEqual(self._predict_imgsz("sketch"), yolo_client.config.SKETCH_IMGSZ)
+
+
+class ExifOrientationTest(unittest.TestCase):
+    """EXIF 방향 보정 — 회전 필요할 때만 BGR ndarray, 정상·부재는 None(S15P11B209-761)."""
+
+    def _tmp(self, suffix: str) -> str:
+        fd, name = tempfile.mkstemp(suffix=suffix)
+        os.close(fd)
+        self.addCleanup(os.unlink, name)
+        return name
+
+    def test_missing_file_returns_none(self):
+        self.assertIsNone(yolo_client._load_bgr_oriented("/no/such/file.jpg"))
+
+    def test_normal_image_returns_none(self):
+        from PIL import Image
+
+        path = self._tmp(".png")
+        Image.new("RGB", (8, 16), (10, 20, 30)).save(path)  # 방향 태그 없음 → 보정 불필요
+        self.assertIsNone(yolo_client._load_bgr_oriented(path))
+
+    def test_rotated_exif_returns_bgr_ndarray(self):
+        import numpy as np
+        from PIL import Image
+
+        path = self._tmp(".jpg")
+        img = Image.new("RGB", (8, 16), (10, 20, 30))
+        exif = img.getexif()
+        exif[0x0112] = 6  # Orientation=6(회전 필요)
+        img.save(path, exif=exif.tobytes())
+
+        out = yolo_client._load_bgr_oriented(path)
+        self.assertIsInstance(out, np.ndarray)
+        self.assertEqual(out.ndim, 3)
+        self.assertEqual(out.shape[2], 3)  # 3채널 BGR
+
+
 if __name__ == "__main__":
     unittest.main()
