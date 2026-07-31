@@ -203,9 +203,28 @@ def detect_and_annotate(
     """
     threshold = config.YOLO_CONF_THRESHOLD if conf is None else conf
     model = _get_model(model_key)
-    result = model.predict(str(image_path), conf=threshold, verbose=False)[0]
+
+    # sketch는 흑백 선화로 학습됐다 — 컬러 캔버스를 잉크 정규화해 도메인을 맞춘다(S15P11B209-679).
+    # 기본 "none"이면 동작 불변. "ink"일 때만 YOLO '입력'을 잉크로 바꾸고, VLM용 주석 이미지는
+    # 색을 보존한 '원본'에 박스를 그린다(679: 색은 분석 레이어의 해석 재료라 잃지 않는다).
+    source: object = str(image_path)
+    plot_img = None
+    if model_key == "sketch" and config.SKETCH_PREPROCESS == "ink":
+        import cv2  # 지연 import — torch 없이 모듈 import되게 유지(cv2도 함수 안에서)
+
+        import image_preprocess
+
+        original = cv2.imread(str(image_path))
+        if original is not None:
+            source = image_preprocess.ink_normalize(original)
+            plot_img = original
+        else:
+            logger.warning("잉크 정규화 건너뜀 — 이미지 로드 실패(원본 경로로 진행)")
+
+    result = model.predict(source, conf=threshold, verbose=False)[0]
     detections = _parse_result(result)
-    annotated_png = _encode_png(result.plot())  # BGR ndarray → PNG bytes
+    annotated = result.plot() if plot_img is None else result.plot(img=plot_img)
+    annotated_png = _encode_png(annotated)  # BGR ndarray → PNG bytes
     logger.info("YOLO 탐지 %d건(model=%s)", len(detections), model_key)
     return detections, annotated_png
 
