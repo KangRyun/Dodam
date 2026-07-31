@@ -11,6 +11,7 @@ import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisClientCommand;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisSubject;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import jakarta.validation.Validation;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
@@ -225,6 +226,7 @@ class RestClientDrawingAnalysisClientTest {
         DrawingAnalysisScope.FINAL,
         DrawingAnalysisActivityType.HTP,
         DrawingAnalysisSubject.HOUSE,
+        DrawingInputMethod.CANVAS,
         "drawings/example.png",
         "image/png",
         null,

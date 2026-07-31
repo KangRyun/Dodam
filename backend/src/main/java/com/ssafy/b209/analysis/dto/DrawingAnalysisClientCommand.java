@@ -2,6 +2,7 @@ package com.ssafy.b209.analysis.dto;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisTriggerReason;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -20,6 +21,7 @@ import jakarta.validation.constraints.Positive;
  * @param analysisScope 중간 또는 최종 분석 범위
  * @param activityType 저장된 그림 유형에서 확정한 AI 활동 유형
  * @param drawingSubject 저장된 HTP 단계 주제이며 그림일기는 {@code null}
+ * @param inputMethod 그림 세션에 저장된 입력 방식
  * @param triggerReason 저장된 분석 실행 사유
  * @param storageKey 이미지 저장소의 안전한 상대 Key
  * @param mimeType 검증된 이미지 MIME Type
@@ -35,6 +37,7 @@ public record DrawingAnalysisClientCommand(
     @NotNull DrawingAnalysisScope analysisScope,
     @NotNull DrawingAnalysisActivityType activityType,
     DrawingAnalysisSubject drawingSubject,
+    @NotNull DrawingInputMethod inputMethod,
     @NotNull DrawingAnalysisTriggerReason triggerReason,
     @NotBlank @Pattern(regexp = "^(?![A-Za-z]:)(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//).+(?<!/)$")
         String storageKey,
@@ -43,7 +46,7 @@ public record DrawingAnalysisClientCommand(
     @Positive Integer height,
     @Pattern(regexp = "(?:sha256-)?[0-9a-fA-F]{64}") String checksumSha256) {
 
-  /** 실행 사유 필드가 추가되기 전 내부 호출을 호환한다. */
+  /** 실행 사유가 생략된 내부 호출에 입력 방식을 명시한다. */
   public DrawingAnalysisClientCommand(
       String requestId,
       Long analysisId,
@@ -52,6 +55,7 @@ public record DrawingAnalysisClientCommand(
       DrawingAnalysisScope analysisScope,
       DrawingAnalysisActivityType activityType,
       DrawingAnalysisSubject drawingSubject,
+      DrawingInputMethod inputMethod,
       String storageKey,
       String mimeType,
       Integer width,
@@ -65,6 +69,7 @@ public record DrawingAnalysisClientCommand(
         analysisScope,
         activityType,
         drawingSubject,
+        inputMethod,
         DrawingAnalysisTriggerReason.USER_REQUEST,
         storageKey,
         mimeType,

@@ -549,8 +549,9 @@ final class _RecordingDrawingRepository implements DrawingRepository {
   Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
     BinaryUploadDto preview,
-    DraftCanvasStateDto canvasState,
-  ) => throw UnimplementedError();
+    DraftCanvasStateDto canvasState, {
+    required String idempotencyKey,
+  }) => throw UnimplementedError();
   @override
   Future<StrokeBatchResponseDto> sendStrokeBatch(
     int sessionId,

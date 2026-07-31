@@ -298,6 +298,7 @@ class _DodamAppState extends State<DodamApp> {
     onGenerateRoute: (settings) => AppRouter.onGenerateRoute(
       settings,
       childController: _childController,
+      childRepository: widget.childRepository,
       authSignIn: _signIn,
       authCompleteOnboarding: _completeOnboarding,
       authSignOut: _signOut,

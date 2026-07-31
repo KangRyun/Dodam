@@ -6,8 +6,10 @@ import '../../features/activity/presentation/screens/activity_screens.dart';
 import '../../features/auth/auth.dart';
 import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
 import '../../features/child/data/dto/child_dtos.dart';
+import '../../features/child/domain/repositories/child_repository.dart';
 import '../../features/child/presentation/screens/child_registration_screen.dart';
 import '../../features/community/presentation/screens/community_webview_screen.dart';
+import '../../features/drawing/application/drawing_session_start_controller.dart';
 import '../../features/drawing/data/dto/drawing_dtos.dart';
 import '../../features/drawing/domain/repositories/drawing_repository.dart';
 import '../../features/drawing/presentation/screens/drawing_activity_selection_screen.dart';
@@ -31,9 +33,10 @@ import 'app_navigation.dart';
 import 'app_routes.dart';
 
 abstract final class AppRouter {
-  static Route<void> onGenerateRoute(
+  static Route<dynamic> onGenerateRoute(
     RouteSettings settings, {
     GuardianChildController? childController,
+    ChildRepository? childRepository,
     WidgetBuilder? notificationsTabBuilder,
     WidgetBuilder? settingsTabBuilder,
     AuthProviderSignIn? authSignIn,
@@ -245,6 +248,14 @@ abstract final class AppRouter {
           drawingRepository: drawingRepository,
           completionSnapshotProvider: drawingCompletionSnapshotProvider,
           htpPhotoUploadEnabled: htpPhotoUploadEnabled,
+          preparedResolution: settings.arguments is ChildModeHomeRouteArguments
+              ? (settings.arguments! as ChildModeHomeRouteArguments)
+                    .preparedResolution
+              : null,
+          autoStartPrepared:
+              settings.arguments is ChildModeHomeRouteArguments &&
+              (settings.arguments! as ChildModeHomeRouteArguments)
+                  .autoStartPrepared,
         ),
       ['child', final childId, 'activity', 'select']
           when _hasChildContext(childController, childId) &&
@@ -307,6 +318,7 @@ abstract final class AppRouter {
               (settings.arguments! as DrawingRouteArguments).activityContext,
           inputMethod:
               (settings.arguments! as DrawingRouteArguments).inputMethod,
+          childRepository: childRepository,
         ),
       ['child', final childId, 'activity', 'emotions']
           when _hasChildContext(childController, childId) =>
@@ -382,6 +394,12 @@ abstract final class AppRouter {
       _ => UnknownRouteScreen(location: location),
     };
 
+    if (_isDrawingRoute(segments)) {
+      return MaterialPageRoute<DrawingRouteResult>(
+        settings: settings,
+        builder: (_) => screen,
+      );
+    }
     return MaterialPageRoute<void>(settings: settings, builder: (_) => screen);
   }
 
@@ -400,6 +418,11 @@ abstract final class AppRouter {
     final parsedId = int.tryParse(childId);
     return parsedId != null && controller?.hasSelectedChild(parsedId) == true;
   }
+
+  static bool _isDrawingRoute(List<String> segments) => switch (segments) {
+    ['child', _, 'activity', 'drawing'] => true,
+    _ => false,
+  };
 
   // 아래 이동들은 "여기서 다시 시작"이라 앱 최상단 스택을 갈아끼운다.
   // 탭 안에서 불러도 탭 하나만 바뀌는 일이 없도록 최상단 Navigator를 쓴다.
@@ -493,6 +516,20 @@ final class DrawingActivitySelectionRouteArguments {
   const DrawingActivitySelectionRouteArguments({this.replaceActive = false});
 
   final bool replaceActive;
+}
+
+/// 보호자가 정한 활동을 아동 홈까지 전달하고, 실제 캔버스 진입은 아동이 한다.
+///
+/// [autoStartPrepared]가 참이면 아동 홈을 거치지 않고 곧바로 캔버스를 연다.
+/// 이어 그리기처럼 이미 진행 중인 그림을 다시 여는 경우에 사용한다.
+final class ChildModeHomeRouteArguments {
+  const ChildModeHomeRouteArguments({
+    required this.preparedResolution,
+    this.autoStartPrepared = false,
+  });
+
+  final DrawingSessionResolution preparedResolution;
+  final bool autoStartPrepared;
 }
 
 class ChildContextGuardScreen extends StatelessWidget {

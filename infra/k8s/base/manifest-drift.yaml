@@ -97,15 +97,48 @@ spec:
   #   선행 조건: Secret `dodam-drift-git` (저장소 읽기 전용 토큰) 이 있어야 한다.
   #     없으면 initContainer 가 CreateContainerConfigError 로 계속 재시도하며 시끄럽다.
   #   푸는 절차:
-  #     ① GitLab → 프로젝트 → Settings → Repository → Deploy tokens
-  #        scope: read_repository 만. 이름 예: dodam-drift-reader
-  #     ② kubectl -n dodam create secret generic dodam-drift-git \
-  #          --from-literal=GIT_USERNAME='<토큰 사용자명>' --from-literal=GIT_TOKEN='<토큰>'
+  #     ① GitLab → **이 저장소** → Settings → Repository → Deploy tokens
+  #        · scope 는 `read_repository` 만. 바로 아래 `read_registry` 와 헷갈리기 쉽다 —
+  #          registry 만 켜면 토큰은 멀쩡히 발급되는데 clone 만 거부된다(HTTP Basic: Access denied).
+  #        · Username 칸을 비우면 GitLab 이 `gitlab+deploy-token-<id>` 를 자동 부여한다.
+  #          ②에 넣는 GIT_USERNAME 과 **반드시 같아야** 한다.
+  #        · 배포 토큰은 **프로젝트마다 따로**다. 다른 프로젝트에서 만든 토큰은 값·이름·스코프가
+  #          모두 옳아도 이 저장소에는 통하지 않는다. 증상은 위와 똑같은 Access denied 다.
+  #     ② 시크릿 생성 — ⚠️ `--from-literal=GIT_TOKEN='<값>'` 로 하지 말 것.
+  #        토큰이 argv 에 실려 셸 히스토리에 평문으로 남는다(2026-07-31 실제로 그렇게 유출됐다).
+  #        이 잡의 initContainer 가 URL 대신 credential store 를 쓰는 것과 같은 이유다.
+  #
+  #          read -rs "TOK?배포 토큰: "; echo
+  #          kubectl -n dodam create secret generic dodam-drift-git \
+  #            --from-literal=GIT_USERNAME='<토큰 사용자명>' \
+  #            --from-literal=GIT_TOKEN="${TOK:?토큰이 비었다 — 중단}" \
+  #            --dry-run=client -o yaml | kubectl apply -f -
+  #          unset TOK
+  #
+  #        ⚠️ `${TOK:?}` 를 빼지 말 것. kubectl 은 **빈 값도 군말 없이 저장한다.**
+  #           2026-07-31, 비대화형 셸에서 read 가 EOF 를 받아 빈 토큰이 들어갔고 그대로 성공했다.
+  #           다음 정기 실행 두 번이 인증 실패로 죽고 나서야 알았다. 365 의 MONGO_APP_PASSWORD
+  #           빈 값 → CrashLoopBackOff 와 **같은 부류**다: 빈 값은 조용히 들어가 나중에 터진다.
+  #        ⚠️ read 는 대화형 TTY 가 필요하다. 도구·래퍼를 거치지 말고 실제 터미널에서 실행할 것.
+  #
+  #        넣은 뒤 값을 노출하지 않고 검증한다(길이 · 지문):
+  #          kubectl -n dodam get secret dodam-drift-git -o jsonpath='{.data.GIT_TOKEN}' \
+  #            | base64 -d | wc -c                     # 25 여야 한다(gldt- + 20자)
+  #          kubectl -n dodam get secret dodam-drift-git -o jsonpath='{.data.GIT_TOKEN}' \
+  #            | base64 -d | sha256sum                 # 교체 전후 비교용. 값은 안 찍힌다
+  #        빈 문자열의 sha256 은 e3b0c442... 로 시작한다. 이게 나오면 주입 실패다.
+  #        ⚠️ od/xxd 로 꼬리 공백을 보지 말 것 — 토큰 일부가 화면에 찍힌다. 길이 비교로 갈음한다.
   #        (sync-secrets.sh 를 타지 않는다 — 앱 비밀과 수명주기가 다르다. dodam-backup 과 같은 취급)
-  #     ③ 수동 1회 실행으로 실증:
+  #     ③ 수동 1회 실행으로 실증 — 시크릿이 "있는 것"과 "clone 되는 것"은 다르다:
   #          kubectl -n dodam create job --from=cronjob/manifest-drift-check drift-once
-  #          kubectl -n dodam logs job/drift-once
-  #     ④ kubectl -n dodam patch cronjob manifest-drift-check -p '{"spec":{"suspend":false}}'
+  #          kubectl -n dodam logs job/drift-once -c fetch   # ← "clone OK" 가 나와야 한다
+  #          kubectl -n dodam logs job/drift-once -c check
+  #        ※ 이 잡은 CronJob 이 소유한다(ownerReferences). 그래서 성공하면 lastSuccessfulTime 이
+  #          갱신되어 ManifestDriftDetected 가 해제되고, successfulJobsHistoryLimit 에도 잡힌다.
+  #     ④ 활성화는 **overlay 에 선언**한다 — overlays/prod/cronjobs-enable.yaml 의 `suspend: false`.
+  #        ⚠️ `kubectl patch cronjob ... '{"spec":{"suspend":false}}'` 로 손대지 말 것.
+  #        git 은 true, 클러스터는 false 가 되어 **이 게이트가 자기 자신을 드리프트로 신고한다.**
+  #        2026-07-31 오전 내내 그 경보가 울렸다. 운영 상태는 손이 아니라 overlay 에 적는다.
   #   ※ 풀기를 잊어도 ManifestDriftCheckSuspended 경보가 24시간 뒤 알린다(monitoring-prometheus.yaml).
   #      "스케줄 유무 ≠ 동작 여부" — 733 에서 배운 것을 여기에도 적용한다.
   suspend: true

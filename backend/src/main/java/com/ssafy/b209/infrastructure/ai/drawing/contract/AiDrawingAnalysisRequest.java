@@ -3,6 +3,7 @@ package com.ssafy.b209.infrastructure.ai.drawing.contract;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisSubject;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotBlank;
@@ -159,6 +160,7 @@ public record AiDrawingAnalysisRequest(
    * @param mimeType 검증된 이미지 MIME Type
    * @param width 원본 이미지 너비
    * @param height 원본 이미지 높이
+   * @param inputMethod 그림 세션에 저장된 Canvas 또는 외부 이미지 입력 방식
    * @param checksumSha256 원본 이미지 SHA-256 Checksum
    */
   public record DrawingInput(
@@ -167,6 +169,7 @@ public record AiDrawingAnalysisRequest(
       @NotBlank @Pattern(regexp = "image/(png|jpeg)") String mimeType,
       @Positive Integer width,
       @Positive Integer height,
+      @NotNull DrawingInputMethod inputMethod,
       @Pattern(regexp = "(?:sha256-)?[0-9a-fA-F]{64}") String checksumSha256) {}
 
   /**

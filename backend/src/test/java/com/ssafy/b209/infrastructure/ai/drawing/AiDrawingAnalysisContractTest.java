@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisSubject;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisRequest;
 import com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse;
 import jakarta.validation.Validation;
@@ -27,7 +28,13 @@ class AiDrawingAnalysisContractTest {
             DrawingAnalysisSubject.HOUSE,
             AiDrawingAnalysisRequest.AnalysisType.FINAL,
             new AiDrawingAnalysisRequest.DrawingInput(
-                200L, "https://signed.example/drawing", "image/png", 1200, 800, "a".repeat(64)));
+                200L,
+                "https://signed.example/drawing",
+                "image/png",
+                1200,
+                800,
+                DrawingInputMethod.CANVAS,
+                "a".repeat(64)));
 
     String json = objectMapper.writeValueAsString(request);
 
@@ -37,6 +44,7 @@ class AiDrawingAnalysisContractTest {
         .contains("\"activityType\":\"HTP\"")
         .contains("\"drawingSubject\":\"HOUSE\"")
         .contains("\"analysisType\":\"FINAL\"")
+        .contains("\"inputMethod\":\"CANVAS\"")
         .contains("\"signedUrl\":\"https://signed.example/drawing\"")
         .doesNotContain("requestId", "storageKey");
     assertThat(validator.validate(request)).isEmpty();

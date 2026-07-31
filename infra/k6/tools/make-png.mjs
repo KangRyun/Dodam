@@ -34,11 +34,16 @@ const args = parseArgs(process.argv.slice(2));
 
 const targetBytes = Number(args['bytes'] || 100 * 1024);
 const outPath = resolve(HERE, args['out'] || '../assets/synthetic-drawing.png');
-const WIDTH = 180;
+// 백엔드 ImageDimensionPolicy 는 가로·세로가 모두 [320, 8192]px 인 이미지만 저장한다.
+// 그 밖은 422(STORAGE_422_001). 예전 180px 폭은 이 하한에 걸려 업로드가 전량 실패했다.
+const MIN_DIMENSION = 320;
+const WIDTH = Math.max(MIN_DIMENSION, Number(args['width'] || MIN_DIMENSION));
 const SEED = 20260728; // 고정 — 재현성의 근거
 
 const bytesPerRow = 1 + WIDTH * 3; // 필터 바이트 1 + RGB
-const height = Math.max(1, Math.floor(targetBytes / bytesPerRow));
+// targetBytes 로 높이를 잡되 320px 하한을 깐다. 320x320 난수 픽셀은 압축이 안 돼 이미 ~300KB라,
+// 기본값(100KB)에서는 하한이 지배한다 — 기본 산출물은 320x320(≈300KB)이다.
+const height = Math.max(MIN_DIMENSION, Math.floor(targetBytes / bytesPerRow));
 
 const random = mulberry32(SEED);
 const raw = Buffer.alloc(height * bytesPerRow);

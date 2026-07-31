@@ -278,22 +278,56 @@ data:
         interval: 60s
         rules:
           # ── ① 드리프트가 있거나, 점검이 깨졌다 ───────────────────────────
+          # ⚠️ 2026-07-31 재작성. 원래는 실패한 **Job 오브젝트**를 셌다:
+          #      kube_job_status_failed{job_name=~"manifest-drift-check-.*"} > 0
+          #   그날 알림이 11건 나갔는데 진짜 매니페스트 미반영은 0건이었다. 두 군데서 무너진다.
+          #     ⓐ 알림이 **잡마다 1건**씩 뜬다. 원인 하나에 4건이 나갔다.
+          #     ⓑ 고쳐도 **스스로 꺼지지 않는다.** 실패한 Job 은 ttlSecondsAfterFinished(3일)
+          #        동안 남고, 이후 성공만 이어지면 failedJobsHistoryLimit 로도 밀려나지 않는다.
+          #        결국 사람이 `kubectl delete job` 을 해야 조용해진다 — 그날 두 번 했다.
+          #   그래서 BackupMissing 과 같은 관례로 바꾼다: **CronJob 의 마지막 성공 시각**을 본다.
+          #     · 알림은 CronJob 당 1건
+          #     · 다음 실행이 성공하는 순간 스스로 해제된다(사람 손 불필요)
+          #     · unless 라서 '한 번도 성공한 적 없음'(시계열 부재)까지 걸린다
+          #
+          # 표현식 읽는 법:
+          #   "활성(suspend=0)이고 최근 3시간 안에 스케줄은 됐는데, 2시간 안에 성공한 적이 없는 것"
+          #   · 스케줄 절(3시간)이 없으면 잡이 아예 안 돌 때 ②와 겹쳐 두 번 운다.
+          #     3시간은 ②의 임계와 **일부러 맞춘** 값이다 — 어긋나면 그 사이 구간을 아무도 안 잡는다.
+          #   · 성공 임계 2시간 = 매시 실행이니 **연속 2회 실패**를 뜻한다. 1회로 잡으면
+          #     clone 순간 장애 같은 일시적 실패(종료 코드 2)에도 운다. 대신 진짜 드리프트를
+          #     알아채는 데 최대 1시간이 걸린다 — 미반영은 장애가 아니라 그 지연을 감수할 값이 있다.
+          #   · 수동 검증 잡(`create job --from=cronjob`)도 CronJob 이 **소유**하므로 성공하면
+          #     이 경보가 해제된다. "지금 드리프트 없음"이 사실이니 의도된 동작이다.
           - alert: ManifestDriftDetected
-            expr: kube_job_status_failed{namespace="dodam", job_name=~"manifest-drift-check-.*"} > 0
-            for: 5m
+            expr: >-
+              kube_cronjob_spec_suspend{namespace="dodam", cronjob="manifest-drift-check"} == 0
+              and on(cronjob) (
+                kube_cronjob_status_last_schedule_time > time() - 3*3600
+              )
+              unless on(cronjob) (
+                kube_cronjob_status_last_successful_time > time() - 2*3600
+              )
+            for: 10m
             labels: { severity: warning, category: drift }
             annotations:
-              summary: "⚠️ 매니페스트가 클러스터에 반영되지 않았다 — {{ $labels.job_name }}"
+              summary: "⚠️ 매니페스트 드리프트 점검이 2시간째 성공하지 못했다"
               description: >-
-                kubectl -n dodam logs job/{{ $labels.job_name }} 로 어떤 필드인지 볼 것.
-                ⚠️ `kubectl apply -k overlays/prod` 를 통째로 돌리지 말 것 — 이미지 태그가
-                :prod 로 되돌아가 방금 배포한 빌드가 사라진다. 반영 절차는 infra/k8s/README.md.
-                로그가 "점검 실패"라면 드리프트가 아니라 권한·연결 문제다(종료 코드 2).
+                드리프트가 있거나(종료 코드 1) 점검 자체가 깨졌다(종료 코드 2).
+                어느 쪽인지는 로그로만 안다 — kubectl -n dodam get jobs | grep manifest-drift-check
+                로 실패 잡을 찾아 kubectl -n dodam logs job/<이름> 을 볼 것.
+                ⚠️ 반사적으로 apply 하지 말 것 — 클러스터가 옳고 git 이 틀린 경우가 있다.
+                ⚠️ `kubectl apply -k overlays/prod` 통째 실행 금지(이미지 태그가 :prod 로 회귀).
+                📖 대응 절차: docs/인프라/드리프트경보-대응.md
 
           # ── ② 점검이 아예 돌지 않는다 ────────────────────────────────────
-          # ①은 "실패한 잡"만 잡으므로 **잡이 생성조차 안 되면 침묵한다**(733 의 BackupMissing 과 같은 구멍).
-          # 성공 시각이 아니라 **스케줄 시각**을 보는 게 핵심이다 — 드리프트가 며칠 이어지면
-          # 성공 시각은 계속 낡은 채로 남아서, 성공 기준으로 짜면 ①과 중복해 울린다.
+          # ①과의 분담(2026-07-31 ① 재작성에 맞춰 정리):
+          #   ① = "돌기는 하는데 성공하지 못한다"  → 최근 3시간 안에 스케줄됨 + 2시간 내 성공 없음
+          #   ② = "아예 돌지 않는다"              → 3시간 안에 스케줄된 적 없음
+          # 두 룰의 3시간 임계는 **일부러 같은 값**이다. 어긋나면 그 사이 구간(예: 스케줄이
+          # 2~3시간 전에 멈춘 상태)을 ①도 ②도 잡지 못하는 사각이 생긴다.
+          # ②가 성공 시각이 아니라 **스케줄 시각**을 보는 이유: 드리프트가 며칠 이어지면 성공
+          # 시각은 계속 낡은 채로 남는다. ②까지 성공 기준으로 짜면 ①과 겹쳐 두 번 운다.
           #
           # ⚠️ 세 번째 절(생성 유예)이 없으면 **CronJob 을 만든 직후 반드시 오탐이 난다.**
           #   갓 만든 CronJob 은 last_schedule_time 시계열이 아예 없어서 unless 가 걸러주지
@@ -317,6 +351,7 @@ data:
               description: >-
                 매시 실행이어야 한다. kubectl -n dodam get cronjob,job 으로 생성 여부부터 확인할 것.
                 생성조차 안 됐다면 이미지 pull·노드 압박·Secret dodam-drift-git 부재를 본다.
+                📖 대응 절차: docs/인프라/드리프트경보-대응.md (5절)
 
           # ── ③ 끄고 잊은 점검 ─────────────────────────────────────────────
           # 기본값이 suspend: true 라(선행 Secret 때문) 켜는 걸 잊기 쉽다. ②는 suspend 를
@@ -330,6 +365,8 @@ data:
               description: >-
                 이 기간에는 매니페스트 미반영을 아무도 감시하지 않는다.
                 해제 절차는 infra/k8s/base/manifest-drift.yaml 의 suspend 주석 참조.
+                ⚠️ kubectl patch 로 풀지 말 것 — overlay 에 선언해야 한다(그러지 않으면 영구 드리프트).
+                📖 대응 절차: docs/인프라/드리프트경보-대응.md
 ---
 apiVersion: apps/v1
 kind: Deployment

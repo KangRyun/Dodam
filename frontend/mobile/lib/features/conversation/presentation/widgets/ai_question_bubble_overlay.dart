@@ -32,6 +32,7 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
     this.skipRetryable = true,
     this.endRetryable = true,
     this.voiceRetryable = true,
+    this.characterAsset = _characterAsset,
     super.key,
   });
 
@@ -61,6 +62,9 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
   final bool skipRetryable;
   final bool endRetryable;
   final bool voiceRetryable;
+
+  /// 캔버스에서 말하는 캐릭터로 쓸 이미지(선택한 도담이 코스튬, S15P11B209-750).
+  final String characterAsset;
 
   @override
   Widget build(BuildContext context) {
@@ -121,6 +125,7 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                                           children: [
                                             IgnorePointer(
                                               child: _DodamiCharacter(
+                                                characterAsset: characterAsset,
                                                 compact: true,
                                               ),
                                             ),
@@ -258,10 +263,12 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                                       ),
                                       if (!compact) ...[
                                         const SizedBox(height: AppSpacing.xs),
-                                        const Align(
+                                        Align(
                                           alignment: Alignment.centerRight,
                                           child: IgnorePointer(
-                                            child: _DodamiCharacter(),
+                                            child: _DodamiCharacter(
+                                              characterAsset: characterAsset,
+                                            ),
                                           ),
                                         ),
                                       ],
@@ -583,8 +590,9 @@ final class _QuestionBubble extends StatelessWidget {
 }
 
 final class _DodamiCharacter extends StatelessWidget {
-  const _DodamiCharacter({this.compact = false});
+  const _DodamiCharacter({required this.characterAsset, this.compact = false});
 
+  final String characterAsset;
   final bool compact;
 
   @override
@@ -608,8 +616,9 @@ final class _DodamiCharacter extends StatelessWidget {
       child: Transform.scale(
         scale: 1.35,
         child: Image.asset(
-          AiQuestionBubbleOverlay._characterAsset,
+          characterAsset,
           fit: BoxFit.cover,
+          alignment: Alignment.topCenter,
           filterQuality: FilterQuality.high,
         ),
       ),

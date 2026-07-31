@@ -1,3 +1,5 @@
+import '../../domain/preferred_character.dart';
+
 final class ChildRecentActivityDto {
   const ChildRecentActivityDto({
     required this.lastActivityAt,
@@ -126,7 +128,8 @@ final class CreateChildRequestDto {
     'nickname': nickname,
     'birthDate': birthDate,
     'relationshipType': relationshipType,
-    if (preferredCharacter != null) 'preferredCharacter': preferredCharacter,
+    if (preferredCharacter != null)
+      'preferredCharacter': normalizePreferredCharacter(preferredCharacter),
     'questionDifficulty': questionDifficulty,
     'responseModes': responseModes,
     if (profileImageFileId != null) 'profileImageFileId': profileImageFileId,
@@ -152,7 +155,8 @@ final class UpdateChildRequestDto {
   Map<String, dynamic> toJson() => {
     if (nickname != null) 'nickname': nickname,
     if (includeProfileImageUrl) 'profileImageUrl': profileImageUrl,
-    if (preferredCharacter != null) 'preferredCharacter': preferredCharacter,
+    if (preferredCharacter != null)
+      'preferredCharacter': normalizePreferredCharacter(preferredCharacter),
     if (questionDifficulty != null) 'questionDifficulty': questionDifficulty,
     if (responseModes != null) 'responseModes': responseModes,
   };

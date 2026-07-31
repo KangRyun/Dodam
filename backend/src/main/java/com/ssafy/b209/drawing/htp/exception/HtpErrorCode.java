@@ -38,10 +38,7 @@ public enum HtpErrorCode implements ErrorCode {
   /** 세 단계 중 최종 그림이 저장되지 않은 단계가 있는 경우다. */
   HTP_FINAL_IMAGE_REQUIRED(HttpStatus.CONFLICT, "HTP_409_009", "HTP 세 단계의 최종 그림이 모두 필요합니다."),
   /** 세 단계 중 대화가 완료되지 않은 단계가 있는 경우다. */
-  HTP_CONVERSATION_NOT_COMPLETED(HttpStatus.CONFLICT, "HTP_409_010", "HTP 세 단계의 대화를 모두 마쳐야 합니다."),
-  /** 현재 주제의 감정 선택을 저장하지 않고 다음 단계 전이를 요청한 경우다. */
-  HTP_REFLECTION_REQUIRED(
-      HttpStatus.CONFLICT, "HTP_409_011", "현재 HTP 그림의 감정을 선택한 후 다음 단계로 이동해 주세요.");
+  HTP_CONVERSATION_NOT_COMPLETED(HttpStatus.CONFLICT, "HTP_409_010", "HTP 세 단계의 대화를 모두 마쳐야 합니다.");
 
   private final HttpStatus httpStatus;
   private final String code;

@@ -19,6 +19,9 @@ namespace: dodam
 
 resources:
   - ../../base
+  # ⚠️ 운영 MySQL 을 인터넷에 직접 노출한다(2026-07-31, 사용자 지시). 노출면 0 원칙의 예외이며
+  #   경위·관문 3개(k8s·UFW·보안그룹)·되돌리는 법은 파일 머리주석에 있다.
+  - mysql-nodeport.yaml
 
 images:
   # 태그는 Jenkins 가 커밋 SHA 로 덮어쓴다(359). latest 를 쓰지 않는 이유는

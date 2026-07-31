@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../../app/router/app_navigation.dart';
+import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../app/state/guardian_child_controller.dart';
 import '../../../activity/data/dto/activity_dtos.dart';
@@ -308,7 +309,10 @@ class _HeroCard extends StatelessWidget {
                 ? null
                 : () => AppNavigation.pushNamed(
                     context,
-                    AppRoutes.childModeHome(child.childId.toString()),
+                    AppRoutes.drawingActivitySelection(
+                      child.childId.toString(),
+                    ),
+                    arguments: const DrawingActivitySelectionRouteArguments(),
                     rootNavigator: true,
                   ),
           ),
@@ -339,8 +343,7 @@ class _MiniSwitch extends StatelessWidget {
           onTap: () => controller.selectChild(child),
         ),
       _MiniAdd(
-        onTap: () =>
-            AppNavigation.pushNamed(context, AppRoutes.childRegister),
+        onTap: () => AppNavigation.pushNamed(context, AppRoutes.childRegister),
       ),
     ],
   );
@@ -416,7 +419,11 @@ class _MiniAdd extends StatelessWidget {
   Widget build(BuildContext context) => Material(
     color: Colors.transparent,
     shape: const StadiumBorder(
-      side: BorderSide(color: DodamHome.chipBorder, width: 1.5, style: BorderStyle.solid),
+      side: BorderSide(
+        color: DodamHome.chipBorder,
+        width: 1.5,
+        style: BorderStyle.solid,
+      ),
     ),
     child: InkWell(
       customBorder: const StadiumBorder(),
@@ -436,60 +443,57 @@ class _MoodPill extends StatelessWidget {
   final Future<List<ActivitySummaryDto>>? recentFuture;
 
   @override
-  Widget build(BuildContext context) =>
-      FutureBuilder<List<ActivitySummaryDto>>(
-        future: recentFuture,
-        builder: (context, snapshot) {
-          final activities = snapshot.data ?? const <ActivitySummaryDto>[];
-          final latest = activities.isEmpty ? null : activities.first;
-          final emotion = latest == null
-              ? null
-              : MindEmotion.fromApi(
-                  latest.selectedEmotions.isEmpty
-                      ? null
-                      : latest.selectedEmotions.first,
-                );
-          final label = emotion?.label ?? '기록 없음';
-          final ago = _agoText(child?.recentActivity.lastActivityAt);
-          final text = ago == null
-              ? '마지막 마음 · $label'
-              : '마지막 마음 · $label · $ago';
-          return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
-            decoration: BoxDecoration(
-              color: DodamHome.surface,
-              border: Border.all(color: DodamHome.heroBorder),
-              borderRadius: BorderRadius.circular(999),
+  Widget build(BuildContext context) => FutureBuilder<List<ActivitySummaryDto>>(
+    future: recentFuture,
+    builder: (context, snapshot) {
+      final activities = snapshot.data ?? const <ActivitySummaryDto>[];
+      final latest = activities.isEmpty ? null : activities.first;
+      final emotion = latest == null
+          ? null
+          : MindEmotion.fromApi(
+              latest.selectedEmotions.isEmpty
+                  ? null
+                  : latest.selectedEmotions.first,
+            );
+      final label = emotion?.label ?? '기록 없음';
+      final ago = _agoText(child?.recentActivity.lastActivityAt);
+      final text = ago == null ? '마지막 마음 · $label' : '마지막 마음 · $label · $ago';
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
+        decoration: BoxDecoration(
+          color: DodamHome.surface,
+          border: Border.all(color: DodamHome.heroBorder),
+          borderRadius: BorderRadius.circular(999),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 10,
+              height: 10,
+              decoration: BoxDecoration(
+                color: emotion?.background ?? DodamHome.moodDot,
+                shape: BoxShape.circle,
+              ),
             ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: emotion?.background ?? DodamHome.moodDot,
-                    shape: BoxShape.circle,
-                  ),
+            const SizedBox(width: 6),
+            Flexible(
+              child: Text(
+                text,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  color: DodamHome.navOn,
                 ),
-                const SizedBox(width: 6),
-                Flexible(
-                  child: Text(
-                    text,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w800,
-                      color: DodamHome.navOn,
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
-          );
-        },
+          ],
+        ),
       );
+    },
+  );
 
   static String? _agoText(String? iso) {
     if (iso == null) return null;
@@ -544,95 +548,94 @@ class _ReportButton extends StatelessWidget {
   final Future<List<ActivitySummaryDto>>? recentFuture;
 
   @override
-  Widget build(BuildContext context) =>
-      FutureBuilder<List<ActivitySummaryDto>>(
-        future: recentFuture,
-        builder: (context, snapshot) {
-          final activities = snapshot.data ?? const <ActivitySummaryDto>[];
-          int? reportId;
-          var hasNew = false;
-          for (final activity in activities) {
-            final report = activity.report;
-            if (report != null && report.reportStatus == 'COMPLETED') {
-              reportId = report.reportId;
-              // "new!"는 새 리포트일 때만 — 최근 7일 내 완료된 활동의 리포트만
-              // 표시한다(데이터에 열람 플래그가 없어 최신성으로 판단).
-              final at = DateTime.tryParse(
-                activity.completedAt ?? activity.startedAt,
-              )?.toLocal();
-              hasNew = at != null && DateTime.now().difference(at).inDays <= 7;
-              break;
-            }
-          }
-          return Material(
-            color: hasNew ? DodamHome.pointSoft : DodamHome.surface,
-            borderRadius: BorderRadius.circular(13),
-            child: InkWell(
-              // 리포트가 있을 때만 키를 단다 — 키의 존재가 곧 "진입 가능"을 뜻하도록.
-              key: reportId == null
-                  ? null
-                  : ValueKey('guardian-latest-report-$reportId'),
+  Widget build(BuildContext context) => FutureBuilder<List<ActivitySummaryDto>>(
+    future: recentFuture,
+    builder: (context, snapshot) {
+      final activities = snapshot.data ?? const <ActivitySummaryDto>[];
+      int? reportId;
+      var hasNew = false;
+      for (final activity in activities) {
+        final report = activity.report;
+        if (report != null && report.reportStatus == 'COMPLETED') {
+          reportId = report.reportId;
+          // "new!"는 새 리포트일 때만 — 최근 7일 내 완료된 활동의 리포트만
+          // 표시한다(데이터에 열람 플래그가 없어 최신성으로 판단).
+          final at = DateTime.tryParse(
+            activity.completedAt ?? activity.startedAt,
+          )?.toLocal();
+          hasNew = at != null && DateTime.now().difference(at).inDays <= 7;
+          break;
+        }
+      }
+      return Material(
+        color: hasNew ? DodamHome.pointSoft : DodamHome.surface,
+        borderRadius: BorderRadius.circular(13),
+        child: InkWell(
+          // 리포트가 있을 때만 키를 단다 — 키의 존재가 곧 "진입 가능"을 뜻하도록.
+          key: reportId == null
+              ? null
+              : ValueKey('guardian-latest-report-$reportId'),
+          borderRadius: BorderRadius.circular(13),
+          onTap: reportId == null
+              ? null
+              : () => AppNavigation.pushNamed(
+                  context,
+                  AppRoutes.report(reportId.toString()),
+                ),
+          child: Container(
+            height: 44,
+            decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(13),
-              onTap: reportId == null
-                  ? null
-                  : () => AppNavigation.pushNamed(
-                      context,
-                      AppRoutes.report(reportId.toString()),
-                    ),
-              child: Container(
-                height: 44,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(13),
-                  border: Border.all(
-                    color: hasNew ? DodamHome.pointDeep : DodamHome.line,
-                    width: 1.5,
-                  ),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const Icon(
-                      Icons.description_outlined,
-                      size: 18,
-                      color: DodamHome.ink,
-                    ),
-                    const SizedBox(width: 8),
-                    const Text(
-                      '최신 리포트 보기',
-                      style: TextStyle(
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w800,
-                        color: DodamHome.ink,
-                      ),
-                    ),
-                    if (hasNew) ...[
-                      const SizedBox(width: 8),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 7,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color: DodamHome.coral,
-                          borderRadius: BorderRadius.circular(999),
-                        ),
-                        child: const Text(
-                          'new!',
-                          style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w900,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
+              border: Border.all(
+                color: hasNew ? DodamHome.pointDeep : DodamHome.line,
+                width: 1.5,
               ),
             ),
-          );
-        },
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(
+                  Icons.description_outlined,
+                  size: 18,
+                  color: DodamHome.ink,
+                ),
+                const SizedBox(width: 8),
+                const Text(
+                  '최신 리포트 보기',
+                  style: TextStyle(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w800,
+                    color: DodamHome.ink,
+                  ),
+                ),
+                if (hasNew) ...[
+                  const SizedBox(width: 8),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 2,
+                    ),
+                    decoration: BoxDecoration(
+                      color: DodamHome.coral,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: const Text(
+                      'new!',
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
       );
+    },
+  );
 }
 
 // ── 최근 활동 ────────────────────────────────────────────────────────
@@ -672,8 +675,11 @@ class _RecentActivityCard extends StatelessWidget {
                       color: DodamHome.inkSoft,
                     ),
                   ),
-                  Icon(Icons.chevron_right_rounded,
-                      size: 15, color: DodamHome.inkSoft),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    size: 15,
+                    color: DodamHome.inkSoft,
+                  ),
                 ],
               ),
             ),
@@ -825,11 +831,7 @@ class _StatusBadge extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: TextStyle(
-          fontSize: 11,
-          fontWeight: FontWeight.w800,
-          color: fg,
-        ),
+        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: fg),
       ),
     );
   }

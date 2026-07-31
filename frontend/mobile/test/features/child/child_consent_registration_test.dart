@@ -86,7 +86,7 @@ void main() {
       77,
       const UpdateChildRequestDto(
         nickname: '민지 수정',
-        preferredCharacter: 'FOX',
+        preferredCharacter: 'OCTOPUS',
         questionDifficulty: 'LOWER_ELEMENTARY',
       ),
     );
@@ -113,7 +113,7 @@ const _request = CreateChildRequestDto(
   nickname: '민지',
   birthDate: '2020-03-02',
   relationshipType: 'MOTHER',
-  preferredCharacter: 'BEAR',
+  preferredCharacter: 'BASE',
   questionDifficulty: 'PRESCHOOL',
   responseModes: ['VOICE'],
 );
@@ -200,7 +200,7 @@ const _detail = ChildDetailDto(
   birthDate: '2020-03-02',
   age: 6,
   profileImageUrl: null,
-  preferredCharacter: 'BEAR',
+  preferredCharacter: 'BASE',
   questionDifficulty: 'PRESCHOOL',
   responseModes: ['VOICE'],
   tutorialStatus: 'NOT_STARTED',
@@ -215,7 +215,7 @@ const _summary = ChildSummaryDto(
   birthDate: '2020-03-02',
   age: 6,
   profileImageUrl: null,
-  preferredCharacter: 'BEAR',
+  preferredCharacter: 'BASE',
   questionDifficulty: 'PRESCHOOL',
   tutorialStatus: 'NOT_STARTED',
   relationshipType: 'MOTHER',

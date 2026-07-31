@@ -40,7 +40,6 @@ import com.ssafy.b209.drawing.htp.dto.HtpCompletionResponse;
 import com.ssafy.b209.drawing.htp.dto.StartHtpAssessmentRequest;
 import com.ssafy.b209.drawing.htp.exception.HtpErrorCode;
 import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
-import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.drawing.repository.DrawingTypeRepository;
 import com.ssafy.b209.drawing.service.DrawingReflectionService;
@@ -81,7 +80,6 @@ class HtpAssessmentServiceTest {
   @Mock private DrawingSessionRepository drawingSessionRepository;
   @Mock private HtpAssessmentRepository htpAssessmentRepository;
   @Mock private ConversationSessionRepository conversationSessionRepository;
-  @Mock private DrawingSessionEmotionRepository drawingSessionEmotionRepository;
   @Mock private StageFinalImageFinder stageFinalImageFinder;
   @Mock private DrawingAnalysisRepository drawingAnalysisRepository;
   @Mock private AnalysisResultJdbcRepository analysisResultJdbcRepository;
@@ -104,7 +102,6 @@ class HtpAssessmentServiceTest {
             drawingSessionRepository,
             htpAssessmentRepository,
             conversationSessionRepository,
-            drawingSessionEmotionRepository,
             stageFinalImageFinder,
             drawingAnalysisRepository,
             analysisResultJdbcRepository,
@@ -160,6 +157,40 @@ class HtpAssessmentServiceTest {
     assertThat(response.currentStep().sessionStatus()).isEqualTo(DrawingSessionStatus.IN_PROGRESS);
     assertThat(response.currentStep().currentStage()).isEqualTo(DrawingStage.DRAWING);
     assertThat(response.expiresAt()).isEqualTo(NOW.plusSeconds(24 * 60 * 60));
+  }
+
+  @Test
+  void startsHtpOutsideTheRecommendedAgeRange() {
+    htpType =
+        DrawingTypeFixture.create(
+            10L, "HTP", "집·나무·사람 그림", DrawingTypeSelectableBy.GUARDIAN, 20, 30, true);
+    stubGuardianAndStartReferences();
+    given(drawingSessionRepository.save(any(DrawingSession.class)))
+        .willAnswer(
+            invocation -> {
+              DrawingSession session = invocation.getArgument(0);
+              ReflectionTestUtils.setField(session, "id", 100L);
+              return session;
+            });
+    given(htpAssessmentRepository.saveAndFlush(any(HtpAssessment.class)))
+        .willAnswer(
+            invocation -> {
+              HtpAssessment assessment = invocation.getArgument(0);
+              ReflectionTestUtils.setField(assessment, "id", 200L);
+              return assessment;
+            });
+
+    HtpAssessmentResponse response =
+        service.start(
+            "htp-outside-age-key",
+            new StartHtpAssessmentRequest(
+                1L,
+                DrawingInputMethod.CANVAS,
+                OffsetDateTime.parse("2026-07-28T10:00:00+09:00"),
+                null));
+
+    assertThat(response.htpAssessmentId()).isEqualTo(200L);
+    assertThat(response.currentStep().drawingSubject()).isEqualTo(HtpDrawingSubject.HOUSE);
   }
 
   @Test
@@ -302,7 +333,6 @@ class HtpAssessmentServiceTest {
         .willReturn(Optional.of(assessment));
     given(conversationSessionRepository.findByDrawingSessionId(100L))
         .willReturn(Optional.of(conversation));
-    given(drawingSessionEmotionRepository.existsByDrawingSessionId(100L)).willReturn(true);
     AtomicLong ids = new AtomicLong(101L);
     given(drawingSessionRepository.save(any(DrawingSession.class)))
         .willAnswer(
@@ -350,37 +380,6 @@ class HtpAssessmentServiceTest {
   }
 
   @Test
-  void rejectsNextStepUntilCurrentSubjectReflectionHasBeenSaved() {
-    DrawingSession houseSession = persistedSession(100L, "htp-start-key");
-    houseSession.startDrawingAnalysis();
-    houseSession.finishDrawingAnalysis();
-    houseSession.enterReflection();
-    HtpAssessment assessment =
-        HtpAssessment.start(
-            child,
-            htpType,
-            houseSession,
-            SERVER_TIME.minusHours(1),
-            SERVER_TIME.plusHours(23),
-            "htp-start-key");
-    ReflectionTestUtils.setField(assessment, "id", 200L);
-    ConversationSession conversation =
-        ConversationSession.start(100L, "ELEMENTARY", 2, SERVER_TIME.minusMinutes(20));
-    conversation.complete(ConversationCompletionReason.CHILD_REQUEST, SERVER_TIME.minusMinutes(1));
-    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_ID);
-    given(htpAssessmentRepository.findDetailByIdForUpdate(200L))
-        .willReturn(Optional.of(assessment));
-    given(conversationSessionRepository.findByDrawingSessionId(100L))
-        .willReturn(Optional.of(conversation));
-    given(drawingSessionEmotionRepository.existsByDrawingSessionId(100L)).willReturn(false);
-
-    assertThatThrownBy(() -> service.nextStep(200L, "htp-tree-key", DrawingInputMethod.CANVAS))
-        .isInstanceOf(BusinessException.class)
-        .extracting(exception -> ((BusinessException) exception).getErrorCode())
-        .isEqualTo(HtpErrorCode.HTP_REFLECTION_REQUIRED);
-  }
-
-  @Test
   void replaysPersonCompletionWithTheSameIdempotencyKey() {
     DrawingSession houseSession = persistedSession(100L, "htp-start-key");
     completeStep(houseSession);
@@ -409,7 +408,6 @@ class HtpAssessmentServiceTest {
         .willReturn(Optional.of(assessment));
     given(conversationSessionRepository.findByDrawingSessionId(102L))
         .willReturn(Optional.of(conversation));
-    given(drawingSessionEmotionRepository.existsByDrawingSessionId(102L)).willReturn(true);
 
     HtpAssessmentResponse first =
         service.nextStep(200L, "htp-finish-key", DrawingInputMethod.CANVAS);

@@ -78,7 +78,9 @@ flutter:
   assets:
     - assets/branding/
     - assets/characters/
+    - assets/characters/costumes/
     - assets/characters/emotions/
+    - assets/scene/
 
   fonts:
     - family: NanumSquareNeo
