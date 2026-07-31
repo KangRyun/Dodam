@@ -139,6 +139,11 @@ app:
       enabled: ${STROKE_MONGO_BACKFILL:false}
       batch-size: ${STROKE_MONGO_BACKFILL_BATCH_SIZE:200}
   idempotency:
+    drawing-draft:
+      processing-ttl: ${DRAWING_DRAFT_IDEMPOTENCY_PROCESSING_TTL:30s}
+      completed-ttl: ${DRAWING_DRAFT_IDEMPOTENCY_COMPLETED_TTL:24h}
+      processing-wait: ${DRAWING_DRAFT_IDEMPOTENCY_PROCESSING_WAIT:3s}
+      polling-interval: ${DRAWING_DRAFT_IDEMPOTENCY_POLLING_INTERVAL:50ms}
     conversation:
       processing-ttl: ${CONVERSATION_IDEMPOTENCY_PROCESSING_TTL:30s}
       completed-ttl: ${CONVERSATION_IDEMPOTENCY_COMPLETED_TTL:24h}

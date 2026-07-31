@@ -818,12 +818,27 @@ Header `Idempotency-Key` 필수.
 
 `multipart/form-data`
 
+Header `Idempotency-Key`는 필수이며 8~100자의 영문·숫자·`.`·`_`·`:`·`-`만 허용한다.
+
 | Part | 타입 | 필수 | 설명 |
 | --- | --- | --- | --- |
 | `preview` | image binary | O | 현재 캔버스 미리보기. 서버가 이미지 Header에서 실제 픽셀 크기를 확인한다. |
 | `canvasState` | JSON string | O | `lastEventSequence`, `toolState`, `viewport`, `clientSavedAt` |
 
 PUT은 마지막 임시 저장 전체본을 교체한다. 응답은 `drawingAssetId`, `assetVersion`, `lastEventSequence`, `widthPx`, `heightPx`, `savedAt`, `expiresAt`이다.
+
+멱등성 범위는 인증 사용자·HTTP Method·`drawingSessionId`·`Idempotency-Key` 조합이다. 요청
+fingerprint에는 `preview` 전체 Byte와 `canvasState` 전체 JSON이 포함된다.
+
+- 동일 Key와 동일 Multipart 요청: 최초 HTTP 200 응답을 재생하고 새 Asset을 만들지 않는다.
+- 동일 Key와 다른 `preview` 또는 `canvasState`: `409 IDEMPOTENCY_KEY_REUSED`.
+- 동일 요청이 처리 중인 경우 최대 3초 동안 최초 처리를 기다리고, 완료되지 않으면
+  `409 DRAFT_SAVE_IN_PROGRESS`. 클라이언트는 잠시 후 동일 Key와 동일 요청으로 재시도한다.
+- 완료 응답 보존 TTL은 24시간, 처리 중 선점 TTL은 30초다.
+- 새 Snapshot에는 새 Key를 발급하고, 응답 유실 등 동일 Snapshot 재시도에만 기존 Key를 유지한다.
+- 다른 Key로 이미 저장된 동일 sequence는 기존 `DRAWING_409_009`, 이전 sequence는
+  `DRAWING_409_010` 계약을 유지한다.
+- `preview`의 유효 최대 크기는 10 MiB이며 초과하면 `413 STORAGE_413_001`로 거부한다.
 
 GET 응답에는 복구용 `previewUrl`, `canvasState`, `assetVersion`을 포함한다. DELETE는 DRAFT asset과 복구 메타데이터만 제거하고 stroke batch 원본의 보관 여부는 데이터 정책을 따른다.
 

@@ -343,6 +343,7 @@ class MvpFlowIntegrationTest {
                 multipart("/api/v1/drawing-sessions/{drawingSessionId}/draft", drawingSessionId)
                     .file(preview)
                     .file(canvasState)
+                    .header("Idempotency-Key", "mvp-draft-0001")
                     .with(
                         request -> {
                           request.setMethod("PUT");
