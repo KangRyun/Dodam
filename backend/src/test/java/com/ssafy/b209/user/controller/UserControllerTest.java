@@ -21,6 +21,7 @@ import com.ssafy.b209.user.dto.response.DataRetentionPolicyResponse;
 import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
 import com.ssafy.b209.user.service.UserDataRetentionPolicyReader;
+import com.ssafy.b209.user.service.UserDataRetentionPolicyUpdateService;
 import com.ssafy.b209.user.service.UserDeletionService;
 import com.ssafy.b209.user.service.UserNotificationSettingsReader;
 import com.ssafy.b209.user.service.UserNotificationSettingsUpdateService;
@@ -49,6 +50,7 @@ class UserControllerTest {
   @MockitoBean private UserNotificationSettingsReader notificationSettingsReader;
   @MockitoBean private UserNotificationSettingsUpdateService notificationSettingsUpdateService;
   @MockitoBean private UserDataRetentionPolicyReader dataRetentionPolicyReader;
+  @MockitoBean private UserDataRetentionPolicyUpdateService dataRetentionPolicyUpdateService;
 
   @Test
   void immediatelyDeletesTheAuthenticatedUserAfterExplicitConfirmation() throws Exception {
@@ -258,6 +260,63 @@ class UserControllerTest {
   }
 
   @Test
+  void updatesTheAuthenticatedUsersDataRetentionPolicy() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(51L);
+    given(dataRetentionPolicyUpdateService.update(eq(51L), any()))
+        .willReturn(DataRetentionPolicyResponse.provisional(365, 14));
+
+    mockMvc
+        .perform(
+            patch("/api/v1/users/me/data-retention")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"retentionDays\":365,\"noticeDaysBefore\":14}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.retentionDays").value(365))
+        .andExpect(jsonPath("$.data.noticeDaysBefore").value(14))
+        .andExpect(jsonPath("$.data.policyStatus").value("PROVISIONAL"));
+
+    verify(dataRetentionPolicyUpdateService)
+        .update(
+            eq(51L),
+            org.mockito.ArgumentMatchers.argThat(
+                request -> request.retentionDays() == 365 && request.noticeDaysBefore() == 14));
+  }
+
+  @Test
+  void rejectsDataRetentionPolicyUpdateWhenARequiredFieldIsMissing() throws Exception {
+    assertInvalidDataRetentionUpdate("{\"retentionDays\":365}");
+    assertInvalidDataRetentionUpdate("{\"noticeDaysBefore\":14}");
+
+    verify(dataRetentionPolicyUpdateService, never()).update(any(), any());
+  }
+
+  @Test
+  void rejectsDataRetentionPolicyUpdateOutsideTheAllowedBoundaries() throws Exception {
+    assertInvalidDataRetentionUpdate("{\"retentionDays\":0,\"noticeDaysBefore\":0}");
+    assertInvalidDataRetentionUpdate("{\"retentionDays\":10,\"noticeDaysBefore\":-1}");
+    assertInvalidDataRetentionUpdate("{\"retentionDays\":10,\"noticeDaysBefore\":10}");
+    assertInvalidDataRetentionUpdate("{\"retentionDays\":10,\"noticeDaysBefore\":11}");
+
+    verify(dataRetentionPolicyUpdateService, never()).update(any(), any());
+  }
+
+  @Test
+  void returnsUnauthorizedForDataRetentionPolicyUpdateWhenAccessTokenIsMissing() throws Exception {
+    given(currentUserResolver.requireUserId())
+        .willThrow(new BusinessException(AuthErrorCode.AUTHENTICATION_REQUIRED));
+
+    mockMvc
+        .perform(
+            patch("/api/v1/users/me/data-retention")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"retentionDays\":365,\"noticeDaysBefore\":14}"))
+        .andExpect(status().isUnauthorized());
+
+    verify(dataRetentionPolicyUpdateService, never()).update(any(), any());
+  }
+
+  @Test
   void completesOnboardingAndReturnsTheUpdatedUser() throws Exception {
     given(currentUserResolver.requireUserId()).willReturn(51L);
     given(onboardingService.completeOnboarding(eq(51L), any(), any(), any()))
@@ -323,6 +382,16 @@ class UserControllerTest {
                     }
                     """))
         .andExpect(status().isUnauthorized());
+  }
+
+  private void assertInvalidDataRetentionUpdate(String content) throws Exception {
+    mockMvc
+        .perform(
+            patch("/api/v1/users/me/data-retention")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(content))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
   }
 
   private static UserResponse userResponse(String nickname) {

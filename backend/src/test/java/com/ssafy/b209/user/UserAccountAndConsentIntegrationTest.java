@@ -553,6 +553,72 @@ class UserAccountAndConsentIntegrationTest {
         .andExpect(jsonPath("$.data.policyStatus").value("PROVISIONAL"));
   }
 
+  // ---------------------------------------------------------------- 565 데이터 보관 정책 수정
+
+  @Test
+  void insertsDataRetentionSettingsRowWhenNoneExistsOnUpdate() throws Exception {
+    assertThat(
+            count("SELECT COUNT(*) FROM user_data_retention_settings WHERE user_id = " + USER_ID))
+        .isZero();
+
+    mockMvc
+        .perform(
+            patch("/api/v1/users/me/data-retention")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"retentionDays\":365,\"noticeDaysBefore\":14}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.retentionDays").value(365))
+        .andExpect(jsonPath("$.data.noticeDaysBefore").value(14))
+        .andExpect(jsonPath("$.data.policyStatus").value("PROVISIONAL"));
+
+    assertThat(
+            count("SELECT COUNT(*) FROM user_data_retention_settings WHERE user_id = " + USER_ID))
+        .isEqualTo(1);
+    assertThat(retentionSetting("retention_days", USER_ID)).isEqualTo(365);
+    assertThat(retentionSetting("notice_days_before", USER_ID)).isEqualTo(14);
+  }
+
+  @Test
+  void updatesOnlyTheAuthenticatedUsersExistingDataRetentionSettings() throws Exception {
+    jdbcTemplate.update(
+        "INSERT INTO user_data_retention_settings "
+            + "(user_id, retention_days, notice_days_before) VALUES (?, 365, 14), (?, 30, 5)",
+        USER_ID,
+        OTHER_USER_ID);
+
+    mockMvc
+        .perform(
+            patch("/api/v1/users/me/data-retention")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"retentionDays\":90,\"noticeDaysBefore\":7}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.retentionDays").value(90))
+        .andExpect(jsonPath("$.data.noticeDaysBefore").value(7))
+        .andExpect(jsonPath("$.data.policyStatus").value("PROVISIONAL"));
+
+    assertThat(count("SELECT COUNT(*) FROM user_data_retention_settings")).isEqualTo(2);
+    assertThat(retentionSetting("retention_days", USER_ID)).isEqualTo(90);
+    assertThat(retentionSetting("notice_days_before", USER_ID)).isEqualTo(7);
+    assertThat(retentionSetting("retention_days", OTHER_USER_ID)).isEqualTo(30);
+    assertThat(retentionSetting("notice_days_before", OTHER_USER_ID)).isEqualTo(5);
+  }
+
+  @Test
+  void rejectsInvalidDataRetentionUpdateWithoutChangingStoredValues() throws Exception {
+    jdbcTemplate.update(
+        "INSERT INTO user_data_retention_settings "
+            + "(user_id, retention_days, notice_days_before) VALUES (?, 365, 14)",
+        USER_ID);
+
+    assertInvalidDataRetentionUpdate("{\"retentionDays\":365}");
+    assertInvalidDataRetentionUpdate("{\"retentionDays\":0,\"noticeDaysBefore\":0}");
+    assertInvalidDataRetentionUpdate("{\"retentionDays\":10,\"noticeDaysBefore\":10}");
+
+    assertThat(retentionSetting("retention_days", USER_ID)).isEqualTo(365);
+    assertThat(retentionSetting("notice_days_before", USER_ID)).isEqualTo(14);
+  }
+
   // ---------------------------------------------------------------- 345~348 아동 범위 동의
 
   @Test
@@ -703,6 +769,23 @@ class UserAccountAndConsentIntegrationTest {
         USER_ID,
         childId,
         hashSeed);
+  }
+
+  private void assertInvalidDataRetentionUpdate(String content) throws Exception {
+    mockMvc
+        .perform(
+            patch("/api/v1/users/me/data-retention")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(content))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
+  private int retentionSetting(String column, Long userId) {
+    return jdbcTemplate.queryForObject(
+        "SELECT " + column + " FROM user_data_retention_settings WHERE user_id = ?",
+        Integer.class,
+        userId);
   }
 
   private int count(String sql) {
