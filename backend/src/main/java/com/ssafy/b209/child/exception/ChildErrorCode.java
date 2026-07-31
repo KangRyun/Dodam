@@ -20,7 +20,19 @@ public enum ChildErrorCode implements ErrorCode {
   CHILD_HAS_OTHER_GUARDIAN(HttpStatus.CONFLICT, "CHILD_409_001", "다른 보호자가 연결된 아동은 삭제할 수 없습니다."),
 
   /** 완료·건너뛰기 상태를 되돌리거나 허용 순서를 건너뛰는 Tutorial 변경 요청이다. */
-  CHILD_TUTORIAL_STATUS_CONFLICT(HttpStatus.CONFLICT, "CHILD_409_002", "변경할 수 없는 Tutorial 상태입니다.");
+  CHILD_TUTORIAL_STATUS_CONFLICT(HttpStatus.CONFLICT, "CHILD_409_002", "변경할 수 없는 Tutorial 상태입니다."),
+
+  /** 아동 프로필 이미지 Multipart Part가 누락되었거나 비어 있는 경우다. */
+  CHILD_PROFILE_IMAGE_FILE_REQUIRED(
+      HttpStatus.BAD_REQUEST, "CHILD_400_003", "아동 프로필 이미지 파일이 필요합니다."),
+
+  /** 아동 프로필 이미지가 5 MiB 제한을 초과한 경우다. */
+  CHILD_PROFILE_IMAGE_TOO_LARGE(
+      HttpStatus.PAYLOAD_TOO_LARGE, "CHILD_413_001", "아동 프로필 이미지는 5 MiB 이하여야 합니다."),
+
+  /** 아동 프로필 이미지의 Storage 또는 Metadata 저장에 실패한 경우다. */
+  CHILD_PROFILE_IMAGE_UPLOAD_FAILED(
+      HttpStatus.INTERNAL_SERVER_ERROR, "CHILD_500_001", "아동 프로필 이미지를 저장하지 못했습니다.");
 
   private final HttpStatus httpStatus;
   private final String code;
