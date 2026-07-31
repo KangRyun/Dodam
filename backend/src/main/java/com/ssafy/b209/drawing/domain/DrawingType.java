@@ -10,7 +10,11 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.util.Objects;
 
-/** 그림 활동 시작 시 선택 가능한 그림 유형과 권장 연령 범위를 관리한다. */
+/**
+ * 그림 활동 시작 시 선택 가능한 유형과 화면 안내용 권장 연령 Metadata를 관리한다.
+ *
+ * <p>권장 연령은 보호자에게 제공하는 참고 정보이며 활동 노출이나 시작을 제한하지 않는다.
+ */
 @Entity
 @Table(name = "drawing_types")
 public class DrawingType {
@@ -72,27 +76,14 @@ public class DrawingType {
   }
 
   /**
-   * 활성 상태와 권장 연령의 양 끝값을 포함해 선택 가능 여부를 판단한다.
+   * 사용자에게 제공 가능한 활성 유형인지 확인한다.
    *
-   * @param age 유형을 선택하려는 아동의 만 나이
-   * @return 활성 유형이고 권장 연령 범위에 포함되면 {@code true}
+   * <p>권장 연령 범위는 화면 안내를 위한 Metadata이며 활동 선택이나 시작을 제한하지 않는다.
+   *
+   * @return 운영 중인 그림 활동 유형이면 {@code true}
    */
-  public boolean isAvailableForAge(int age) {
-    return active && isRecommendedForAge(age);
-  }
-
-  /**
-   * 활성 상태와 무관하게 지정 나이가 권장 연령 범위에 포함되는지 판단한다.
-   *
-   * <p>관리 목적 조회에서 비활성 유형까지 포함할 때 사용하며, 실제 세션 생성 가능 여부는 {@link #isAvailableForAge(int)}로 확인해야 한다.
-   *
-   * @param age 유형을 노출할 아동의 만 나이
-   * @return 나이가 0 이상이고 권장 연령의 양 끝값을 포함한 범위에 들면 {@code true}
-   */
-  public boolean isRecommendedForAge(int age) {
-    return age >= 0
-        && (recommendedAgeMin == null || age >= recommendedAgeMin)
-        && (recommendedAgeMax == null || age <= recommendedAgeMax);
+  public boolean isActive() {
+    return active;
   }
 
   /**

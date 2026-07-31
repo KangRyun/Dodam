@@ -11,16 +11,14 @@ import com.ssafy.b209.drawing.dto.response.DrawingTypePageResponse;
 import com.ssafy.b209.drawing.dto.response.DrawingTypeResponse;
 import com.ssafy.b209.drawing.repository.DrawingTypeRepository;
 import com.ssafy.b209.global.exception.BusinessException;
-import java.time.Clock;
-import java.time.LocalDate;
 import java.util.Comparator;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 연결 아동의 연령과 조회 조건에 맞는 그림 활동 유형 목록을 제공한다.
+ * 연결 아동의 권한과 조회 조건에 맞는 그림 활동 유형 목록을 제공한다.
  *
- * <p>인증 사용자와 아동의 연결 관계를 먼저 검증하고, 생년월일은 외부에 노출하지 않은 채 만 나이 계산에만 사용한다.
+ * <p>인증 사용자와 아동의 연결 관계 및 활성 상태를 먼저 검증한다. 권장 연령은 응답 Metadata로 제공하지만 목록을 제한하는 조건으로 사용하지 않는다.
  */
 @Service
 @Transactional(readOnly = true)
@@ -33,28 +31,24 @@ public class DrawingTypeQueryService {
   private final GuardianResourceAccessValidator accessValidator;
   private final ChildRepository childRepository;
   private final DrawingTypeRepository drawingTypeRepository;
-  private final Clock clock;
 
   /**
-   * 그림 유형 조회에 필요한 인증·권한·저장소와 기준 시계를 주입받는다.
+   * 그림 유형 조회에 필요한 인증·권한·저장소를 주입받는다.
    *
    * @param currentUserResolver 인증된 사용자 식별자를 제공하는 Resolver
    * @param accessValidator 보호자와 아동의 연결 관계를 검증하는 Validator
-   * @param childRepository 연령 계산에 사용할 아동을 조회하는 저장소
+   * @param childRepository 조회 대상 아동의 활성 상태를 확인하는 저장소
    * @param drawingTypeRepository 그림 유형을 조회하는 저장소
-   * @param clock 만 나이를 계산할 기준 시계
    */
   public DrawingTypeQueryService(
       CurrentAuthenticatedUserResolver currentUserResolver,
       GuardianResourceAccessValidator accessValidator,
       ChildRepository childRepository,
-      DrawingTypeRepository drawingTypeRepository,
-      Clock clock) {
+      DrawingTypeRepository drawingTypeRepository) {
     this.currentUserResolver = currentUserResolver;
     this.accessValidator = accessValidator;
     this.childRepository = childRepository;
     this.drawingTypeRepository = drawingTypeRepository;
-    this.clock = clock;
   }
 
   /**
@@ -70,16 +64,13 @@ public class DrawingTypeQueryService {
       Long childId, DrawingActivityCategory category, boolean activeOnly) {
     Long guardianUserId = currentUserResolver.requireUserId();
     accessValidator.requireChildAccess(guardianUserId, childId);
-    Child child =
-        childRepository
-            .findById(childId)
-            .filter(Child::isAvailable)
-            .orElseThrow(() -> new BusinessException(ChildErrorCode.CHILD_NOT_FOUND));
-    int age = child.ageOn(LocalDate.now(clock));
+    childRepository
+        .findById(childId)
+        .filter(Child::isAvailable)
+        .orElseThrow(() -> new BusinessException(ChildErrorCode.CHILD_NOT_FOUND));
 
     var responses =
         drawingTypeRepository.findForListing(category, activeOnly).stream()
-            .filter(drawingType -> drawingType.isRecommendedForAge(age))
             .sorted(DISPLAY_ORDER)
             .map(DrawingTypeResponse::from)
             .toList();

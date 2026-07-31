@@ -21,10 +21,7 @@ import com.ssafy.b209.drawing.domain.DrawingTypeSelectableBy;
 import com.ssafy.b209.drawing.dto.response.DrawingTypePageResponse;
 import com.ssafy.b209.drawing.repository.DrawingTypeRepository;
 import com.ssafy.b209.global.exception.BusinessException;
-import java.time.Clock;
-import java.time.Instant;
 import java.time.LocalDate;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,8 +36,6 @@ class DrawingTypeQueryServiceTest {
 
   private static final Long GUARDIAN_USER_ID = 41L;
   private static final Long CHILD_ID = 7L;
-  private static final Instant NOW = Instant.parse("2026-07-24T08:00:00Z");
-
   @Mock private CurrentAuthenticatedUserResolver currentUserResolver;
   @Mock private GuardianResourceAccessValidator accessValidator;
   @Mock private ChildRepository childRepository;
@@ -52,11 +47,7 @@ class DrawingTypeQueryServiceTest {
   void setUp() {
     service =
         new DrawingTypeQueryService(
-            currentUserResolver,
-            accessValidator,
-            childRepository,
-            drawingTypeRepository,
-            Clock.fixed(NOW, ZoneOffset.UTC));
+            currentUserResolver, accessValidator, childRepository, drawingTypeRepository);
   }
 
   @Test
@@ -74,7 +65,7 @@ class DrawingTypeQueryServiceTest {
   }
 
   @Test
-  void returnsAgeEligibleTypesInDisplayOrderWithCompleteContractFields() {
+  void returnsAllListedTypesRegardlessOfRecommendedAgeInDisplayOrder() {
     Child child =
         ChildFixture.create(
             CHILD_ID,
@@ -94,13 +85,15 @@ class DrawingTypeQueryServiceTest {
     DrawingTypePageResponse response =
         service.getDrawingTypes(CHILD_ID, DrawingActivityCategory.GENERAL, true);
 
-    assertThat(response.content()).hasSize(2);
-    assertThat(response.content()).extracting("code").containsExactly("FREE_DRAWING", "ART_DIARY");
+    assertThat(response.content()).hasSize(3);
+    assertThat(response.content())
+        .extracting("code")
+        .containsExactly("FREE_DRAWING", "ART_DIARY", "TODDLER_COLOR");
     assertThat(response.content().getFirst().guideText()).isEqualTo("자유롭게 그려 보세요.");
     assertThat(response.content().getFirst().displayOrder()).isEqualTo(1);
     assertThat(response.page()).isZero();
-    assertThat(response.size()).isEqualTo(2);
-    assertThat(response.totalElements()).isEqualTo(2);
+    assertThat(response.size()).isEqualTo(3);
+    assertThat(response.totalElements()).isEqualTo(3);
     assertThat(response.totalPages()).isEqualTo(1);
     assertThat(response.hasNext()).isFalse();
   }

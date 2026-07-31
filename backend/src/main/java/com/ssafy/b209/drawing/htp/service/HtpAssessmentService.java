@@ -41,7 +41,6 @@ import com.ssafy.b209.report.repository.ReportRepository;
 import com.ssafy.b209.report.service.ReportGenerationRequestedEvent;
 import java.time.Clock;
 import java.time.Duration;
-import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -173,7 +172,7 @@ public class HtpAssessmentService {
     DrawingType htpType =
         drawingTypeRepository
             .findByCode(HTP_TYPE_CODE)
-            .filter(type -> type.isAvailableForAge(child.ageOn(LocalDate.now(clock))))
+            .filter(DrawingType::isActive)
             .orElseThrow(() -> new BusinessException(HtpErrorCode.HTP_TYPE_NOT_AVAILABLE));
     LocalDateTime startedAt = now();
     HtpAssessment activeAssessment =

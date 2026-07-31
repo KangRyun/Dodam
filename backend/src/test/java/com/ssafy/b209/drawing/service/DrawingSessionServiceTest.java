@@ -241,7 +241,7 @@ class DrawingSessionServiceTest {
   }
 
   @Test
-  void rejectsMissingInactiveOrAgeRestrictedDrawingType() {
+  void rejectsMissingOrInactiveDrawingType() {
     given(drawingSessionRepository.findByIdempotencyKeyForUpdate(KEY)).willReturn(Optional.empty());
     given(childRepository.findNotDeletedByIdForUpdate(1L)).willReturn(Optional.of(child));
     given(drawingTypeRepository.findById(2L)).willReturn(Optional.empty());
@@ -252,12 +252,17 @@ class DrawingSessionServiceTest {
     DrawingType inactive = drawingType(5, 10, false);
     given(drawingTypeRepository.findById(2L)).willReturn(Optional.of(inactive));
     assertUnavailableType();
+  }
 
-    given(drawingTypeRepository.findById(2L)).willReturn(Optional.of(drawingType(7, null, true)));
-    assertUnavailableType();
+  @Test
+  void createsSessionOutsideTheRecommendedAgeRange() {
+    drawingType = drawingType(7, 12, true);
+    stubSuccessfulCreation();
 
-    given(drawingTypeRepository.findById(2L)).willReturn(Optional.of(drawingType(null, 5, true)));
-    assertUnavailableType();
+    CreateDrawingSessionResponse response = service.createDrawingSession(KEY, request(CANVAS));
+
+    assertThat(response.drawingSessionId()).isEqualTo(100L);
+    assertThat(response.drawingType().drawingTypeId()).isEqualTo(2L);
   }
 
   @Test
