@@ -135,6 +135,21 @@ public class ChildUpdateRepository {
   }
 
   /**
+   * 아동 프로필 이미지 조회 URL을 명시된 값으로 교체한다.
+   *
+   * @param childId 변경할 아동 ID
+   * @param profileImageUrl 새 조회 URL, 기존 이미지를 제거하는 경우 {@code null}
+   * @param updatedAt 변경 시각
+   */
+  public void updateProfileImageUrl(long childId, String profileImageUrl, LocalDateTime updatedAt) {
+    jdbcTemplate.update(
+        "update children set profile_image_url = ?, updated_at = ? where id = ?",
+        profileImageUrl,
+        updatedAt,
+        childId);
+  }
+
+  /**
    * 현재 요청 보호자와 아동의 관계 유형을 변경한다.
    *
    * @param guardianUserId 관계를 변경할 보호자 사용자 식별자

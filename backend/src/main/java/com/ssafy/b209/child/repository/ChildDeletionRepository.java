@@ -113,7 +113,12 @@ public class ChildDeletionRepository {
           join drawing_sessions session on session.id = report.drawing_session_id
          where session.child_id = ?
            and report.pdf_storage_key is not null
+        union all
+        select profile.storage_key, 'CHILD_PROFILE_IMAGE', profile.id
+          from child_profile_image_files profile
+         where profile.child_id = ?
         """,
+        childId,
         childId,
         childId,
         childId);

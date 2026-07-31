@@ -37,12 +37,14 @@ class ChildRegistrationServiceTest {
       Clock.fixed(Instant.parse("2026-07-23T12:00:00Z"), ZoneOffset.UTC);
 
   @Mock private ChildRegistrationRepository childRegistrationRepository;
+  @Mock private ChildProfileImageLinkService profileImageLinkService;
 
   private ChildRegistrationService service;
 
   @BeforeEach
   void setUp() {
-    service = new ChildRegistrationService(childRegistrationRepository, CLOCK);
+    service =
+        new ChildRegistrationService(childRegistrationRepository, profileImageLinkService, CLOCK);
   }
 
   @Test
@@ -119,6 +121,33 @@ class ChildRegistrationServiceTest {
                 assertThat(exception.getErrorCode())
                     .isEqualTo(ChildErrorCode.CHILD_AGE_OUT_OF_RANGE));
     verifyNoInteractions(childRegistrationRepository);
+  }
+
+  @Test
+  void attachesUploadedProfileImageInTheSameRegistrationTransaction() {
+    given(childRegistrationRepository.insertChild(any(), any(), any(), any(), any(), any()))
+        .willReturn(3L);
+    given(profileImageLinkService.attach(GUARDIAN_USER_ID, 3L, "profile-file-id"))
+        .willReturn("/api/v1/child-profile-images/profile-file-id/file");
+    RegisterChildRequest request =
+        new RegisterChildRequest(
+            "별이",
+            LocalDate.of(2019, 3, 15),
+            GuardianRelationshipType.MOTHER,
+            "MONGLE",
+            QuestionDifficulty.LOWER_ELEMENTARY,
+            List.of(ResponseMode.VOICE),
+            "profile-file-id");
+
+    ChildRegistrationResponse response = service.register(GUARDIAN_USER_ID, request);
+
+    verify(childRegistrationRepository)
+        .updateProfileImageUrl(
+            3L,
+            "/api/v1/child-profile-images/profile-file-id/file",
+            LocalDateTime.of(2026, 7, 23, 12, 0));
+    assertThat(response.profileImageUrl())
+        .isEqualTo("/api/v1/child-profile-images/profile-file-id/file");
   }
 
   private RegisterChildRequest request(LocalDate birthDate, List<ResponseMode> responseModes) {

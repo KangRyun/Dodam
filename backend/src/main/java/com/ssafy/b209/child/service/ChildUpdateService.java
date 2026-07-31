@@ -29,6 +29,7 @@ public class ChildUpdateService {
 
   private final ChildUpdateRepository childUpdateRepository;
   private final ChildQueryService childQueryService;
+  private final ChildProfileImageLinkService profileImageLinkService;
   private final Clock clock;
 
   /**
@@ -39,16 +40,27 @@ public class ChildUpdateService {
    */
   @Autowired
   public ChildUpdateService(
-      ChildUpdateRepository childUpdateRepository, ChildQueryService childQueryService) {
-    this(childUpdateRepository, childQueryService, Clock.systemUTC());
+      ChildUpdateRepository childUpdateRepository,
+      ChildQueryService childQueryService,
+      ChildProfileImageLinkService profileImageLinkService) {
+    this(childUpdateRepository, childQueryService, profileImageLinkService, Clock.systemUTC());
   }
 
   ChildUpdateService(
       ChildUpdateRepository childUpdateRepository,
       ChildQueryService childQueryService,
       Clock clock) {
+    this(childUpdateRepository, childQueryService, null, clock);
+  }
+
+  ChildUpdateService(
+      ChildUpdateRepository childUpdateRepository,
+      ChildQueryService childQueryService,
+      ChildProfileImageLinkService profileImageLinkService,
+      Clock clock) {
     this.childUpdateRepository = childUpdateRepository;
     this.childQueryService = childQueryService;
+    this.profileImageLinkService = profileImageLinkService;
     this.clock = clock;
   }
 
@@ -68,13 +80,19 @@ public class ChildUpdateService {
     }
     validateAge(request.birthDate());
 
+    LocalDateTime now = LocalDateTime.now(clock);
     childUpdateRepository.updateProfile(
         childId,
         request.nickname(),
         request.birthDate(),
         request.preferredCharacter(),
         request.questionDifficulty(),
-        LocalDateTime.now(clock));
+        now);
+    if (request.profileImageFileIdSpecified()) {
+      String profileImageUrl =
+          profileImageLinkService.replace(guardianUserId, childId, request.profileImageFileId());
+      childUpdateRepository.updateProfileImageUrl(childId, profileImageUrl, now);
+    }
     if (request.relationshipType() != null) {
       childUpdateRepository.updateRelationship(guardianUserId, childId, request.relationshipType());
     }

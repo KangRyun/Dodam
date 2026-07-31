@@ -32,6 +32,7 @@ public class ChildRegistrationService {
   private static final int MAXIMUM_AGE = 12;
 
   private final ChildRegistrationRepository childRegistrationRepository;
+  private final ChildProfileImageLinkService profileImageLinkService;
   private final Clock clock;
 
   /**
@@ -40,12 +41,22 @@ public class ChildRegistrationService {
    * @param childRegistrationRepository 아동 프로필과 관계, 응답 방식을 저장할 저장소
    */
   @Autowired
-  public ChildRegistrationService(ChildRegistrationRepository childRegistrationRepository) {
-    this(childRegistrationRepository, Clock.systemUTC());
+  public ChildRegistrationService(
+      ChildRegistrationRepository childRegistrationRepository,
+      ChildProfileImageLinkService profileImageLinkService) {
+    this(childRegistrationRepository, profileImageLinkService, Clock.systemUTC());
   }
 
   ChildRegistrationService(ChildRegistrationRepository childRegistrationRepository, Clock clock) {
+    this(childRegistrationRepository, null, clock);
+  }
+
+  ChildRegistrationService(
+      ChildRegistrationRepository childRegistrationRepository,
+      ChildProfileImageLinkService profileImageLinkService,
+      Clock clock) {
     this.childRegistrationRepository = childRegistrationRepository;
+    this.profileImageLinkService = profileImageLinkService;
     this.clock = clock;
   }
 
@@ -80,6 +91,12 @@ public class ChildRegistrationService {
         guardianUserId, childId, request.relationshipType().name());
     childRegistrationRepository.insertResponseModes(
         childId, responseModes.stream().map(Enum::name).toList());
+    String profileImageUrl = null;
+    if (request.profileImageFileId() != null) {
+      profileImageUrl =
+          profileImageLinkService.attach(guardianUserId, childId, request.profileImageFileId());
+      childRegistrationRepository.updateProfileImageUrl(childId, profileImageUrl, now);
+    }
 
     return new ChildRegistrationResponse(
         childId,
@@ -92,6 +109,7 @@ public class ChildRegistrationService {
         responseModes,
         ChildTutorialStatus.NOT_STARTED,
         ChildProfileStatus.ACTIVE,
+        profileImageUrl,
         now.toInstant(ZoneOffset.UTC));
   }
 
