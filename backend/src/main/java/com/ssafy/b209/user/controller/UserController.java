@@ -3,6 +3,7 @@ package com.ssafy.b209.user.controller;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.ApiResponse;
+import com.ssafy.b209.user.dto.request.DataRetentionPolicyUpdateRequest;
 import com.ssafy.b209.user.dto.request.DeleteUserRequest;
 import com.ssafy.b209.user.dto.request.NotificationSettingsUpdateRequest;
 import com.ssafy.b209.user.dto.request.OnboardingRequest;
@@ -11,6 +12,7 @@ import com.ssafy.b209.user.dto.response.DataRetentionPolicyResponse;
 import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
 import com.ssafy.b209.user.service.UserDataRetentionPolicyReader;
+import com.ssafy.b209.user.service.UserDataRetentionPolicyUpdateService;
 import com.ssafy.b209.user.service.UserDeletionService;
 import com.ssafy.b209.user.service.UserNotificationSettingsReader;
 import com.ssafy.b209.user.service.UserNotificationSettingsUpdateService;
@@ -58,6 +60,7 @@ public class UserController {
   private final UserNotificationSettingsReader notificationSettingsReader;
   private final UserNotificationSettingsUpdateService notificationSettingsUpdateService;
   private final UserDataRetentionPolicyReader dataRetentionPolicyReader;
+  private final UserDataRetentionPolicyUpdateService dataRetentionPolicyUpdateService;
 
   /**
    * 사용자 식별 경계와 조회·Onboarding·수정 서비스를 사용하는 Controller를 생성한다.
@@ -70,6 +73,7 @@ public class UserController {
    * @param notificationSettingsReader 알림 수신 설정 조회 Use Case
    * @param notificationSettingsUpdateService 알림 수신 설정 변경 Use Case
    * @param dataRetentionPolicyReader 데이터 보관 정책 조회 Use Case
+   * @param dataRetentionPolicyUpdateService 데이터 보관 정책 변경 Use Case
    */
   public UserController(
       CurrentAuthenticatedUserResolver currentUserResolver,
@@ -79,7 +83,8 @@ public class UserController {
       UserDeletionService deletionService,
       UserNotificationSettingsReader notificationSettingsReader,
       UserNotificationSettingsUpdateService notificationSettingsUpdateService,
-      UserDataRetentionPolicyReader dataRetentionPolicyReader) {
+      UserDataRetentionPolicyReader dataRetentionPolicyReader,
+      UserDataRetentionPolicyUpdateService dataRetentionPolicyUpdateService) {
     this.currentUserResolver = currentUserResolver;
     this.onboardingService = onboardingService;
     this.queryService = queryService;
@@ -88,6 +93,7 @@ public class UserController {
     this.notificationSettingsReader = notificationSettingsReader;
     this.notificationSettingsUpdateService = notificationSettingsUpdateService;
     this.dataRetentionPolicyReader = dataRetentionPolicyReader;
+    this.dataRetentionPolicyUpdateService = dataRetentionPolicyUpdateService;
   }
 
   /**
@@ -288,6 +294,44 @@ public class UserController {
   public ResponseEntity<ApiResponse<DataRetentionPolicyResponse>> getMyDataRetentionPolicy() {
     return ResponseEntity.ok(
         ApiResponse.ok(dataRetentionPolicyReader.read(currentUserResolver.requireUserId())));
+  }
+
+  /**
+   * 인증 사용자의 데이터 보관 정책을 전체 교체한다.
+   *
+   * <p>부분 수정이 아니라 두 값을 모두 받는 전체 교체다. 저장된 설정 행이 없으면 새로 만들고 있으면 갱신하는 upsert이며, 저장 후 GET과 같은 응답을 반환한다.
+   * Authorization Bearer Access Token의 사용자 ID를 대상으로 한다.
+   *
+   * @param request 변경할 데이터 보관 기간과 사전 안내 시점
+   * @return HTTP 200과 수정 후 데이터 보관 정책 공통 응답
+   */
+  @Operation(
+      summary = "데이터 보관 정책 수정",
+      description =
+          "인증 사용자에게 적용할 데이터 보관 기간과 만료 사전 안내 시점을 변경합니다. "
+              + "두 값을 모두 전달하는 전체 교체이며 하나라도 누락하면 400을 반환합니다. "
+              + "보관 기간은 1일 이상, 사전 안내 시점은 0일 이상이면서 보관 기간보다 짧아야 합니다. "
+              + "저장된 설정이 없으면 새로 만들고 있으면 갱신합니다. "
+              + "Authorization Bearer Access Token의 사용자 ID를 대상으로 합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "데이터 보관 정책 수정 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "요청 값 오류 또는 필수 필드 누락",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @PatchMapping("/me/data-retention")
+  public ResponseEntity<ApiResponse<DataRetentionPolicyResponse>> updateMyDataRetentionPolicy(
+      @Valid @RequestBody DataRetentionPolicyUpdateRequest request) {
+    return ResponseEntity.ok(
+        ApiResponse.ok(
+            dataRetentionPolicyUpdateService.update(currentUserResolver.requireUserId(), request)));
   }
 
   /**
