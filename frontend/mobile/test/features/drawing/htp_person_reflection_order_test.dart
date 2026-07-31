@@ -21,10 +21,89 @@ const _personContext = DrawingActivityContextDto(
   drawingSubject: 'PERSON',
 );
 
+const _personFinalImage = BinaryUploadDto(
+  bytes: [
+    137,
+    80,
+    78,
+    71,
+    13,
+    10,
+    26,
+    10,
+    0,
+    0,
+    0,
+    13,
+    73,
+    72,
+    68,
+    82,
+    0,
+    0,
+    0,
+    2,
+    0,
+    0,
+    0,
+    1,
+    8,
+    6,
+    0,
+    0,
+    0,
+    244,
+    34,
+    127,
+    138,
+    0,
+    0,
+    0,
+    14,
+    73,
+    68,
+    65,
+    84,
+    120,
+    156,
+    99,
+    248,
+    207,
+    192,
+    0,
+    66,
+    255,
+    1,
+    15,
+    249,
+    3,
+    253,
+    133,
+    17,
+    153,
+    118,
+    0,
+    0,
+    0,
+    0,
+    73,
+    69,
+    78,
+    68,
+    174,
+    66,
+    96,
+    130,
+  ],
+  fileName: 'person-final.png',
+  mimeType: 'image/png',
+);
+
 Future<void> _pumpPersonEmotionScreen(
   WidgetTester tester, {
   required _RecordingHtpRepository repository,
   String inputMethod = 'UPLOAD',
+  BinaryUploadDto? completedDrawingImage = _personFinalImage,
 }) async {
   tester.view.physicalSize = const Size(1200, 2000);
   tester.view.devicePixelRatio = 1;
@@ -48,6 +127,7 @@ Future<void> _pumpPersonEmotionScreen(
         conversationAlreadyEnded: true,
         activityContext: _personContext,
         inputMethod: inputMethod,
+        completedDrawingImage: completedDrawingImage,
       ),
     ),
   );
@@ -65,7 +145,41 @@ Future<void> _submitAgain(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+Future<void> _skipAndSubmit(WidgetTester tester) async {
+  await tester.scrollUntilVisible(
+    find.byKey(const ValueKey('emotion-skip')),
+    220,
+    scrollable: find
+        .descendant(
+          of: find.byKey(const ValueKey('emotion-screen-scroll')),
+          matching: find.byType(Scrollable),
+        )
+        .first,
+  );
+  await tester.tap(find.byKey(const ValueKey('emotion-skip')));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const ValueKey('emotion-skip-confirm')));
+  await tester.pumpAndSettle();
+}
+
 void main() {
+  testWidgets('PERSON도 완료 요청의 최종 합성 PNG를 contain preview로 표시한다', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final repository = _RecordingHtpRepository();
+
+    await _pumpPersonEmotionScreen(tester, repository: repository);
+
+    expect(find.bySemanticsLabel('내가 완성한 그림'), findsOneWidget);
+    final preview = tester.widget<Image>(
+      find.byKey(const ValueKey('emotion-drawing-preview-image')),
+    );
+    expect(preview.fit, BoxFit.contain);
+    expect((preview.image as MemoryImage).bytes, _personFinalImage.bytes);
+    semantics.dispose();
+  });
+
   testWidgets('PERSON은 Reflection → steps/next → complete 순서로 호출한다', (
     tester,
   ) async {
@@ -80,6 +194,26 @@ void main() {
       'complete(91)',
     ]);
     // HTP 흐름에서 Drawing Session Reflection은 절대 호출하지 않는다.
+    expect(repository.drawingSessionReflectionCalls, 0);
+    expect(find.text('activity-complete-44'), findsOneWidget);
+  });
+
+  testWidgets('PERSON skip도 빈 감정 Reflection → steps/next → complete 순서를 유지한다', (
+    tester,
+  ) async {
+    final repository = _RecordingHtpRepository();
+
+    await _pumpPersonEmotionScreen(tester, repository: repository);
+    await _skipAndSubmit(tester);
+
+    expect(repository.lastReflection?.selectedEmotions, isEmpty);
+    expect(repository.lastReflection?.expressedEmotionText, isNull);
+    expect(repository.lastReflection?.skipped, isTrue);
+    expect(repository.callLog, [
+      'saveHtpReflection(91)',
+      'stepsNext(UPLOAD)',
+      'complete(91)',
+    ]);
     expect(repository.drawingSessionReflectionCalls, 0);
     expect(find.text('activity-complete-44'), findsOneWidget);
   });
@@ -139,6 +273,31 @@ void main() {
     expect(repository.completeKeys.first, repository.completeKeys.last);
     expect(find.text('activity-complete-44'), findsOneWidget);
   });
+
+  testWidgets('PERSON skip complete 재시도는 Reflection·step과 기존 Key를 재사용한다', (
+    tester,
+  ) async {
+    final repository = _RecordingHtpRepository(failCompleteOnce: true);
+
+    await _pumpPersonEmotionScreen(tester, repository: repository);
+    await _skipAndSubmit(tester);
+
+    expect(repository.reflectionCalls, 1);
+    expect(repository.stepCalls, 1);
+    expect(repository.completeCalls, 1);
+    expect(find.text('activity-complete-44'), findsNothing);
+
+    await _skipAndSubmit(tester);
+
+    expect(repository.reflectionCalls, 1);
+    expect(repository.stepCalls, 1);
+    expect(repository.completeCalls, 2);
+    expect(repository.stepKeys, hasLength(1));
+    expect(repository.completeKeys.first, repository.completeKeys.last);
+    expect(repository.lastReflection?.selectedEmotions, isEmpty);
+    expect(repository.lastReflection?.skipped, isTrue);
+    expect(find.text('activity-complete-44'), findsOneWidget);
+  });
 }
 
 final class _RecordingHtpRepository
@@ -159,6 +318,7 @@ final class _RecordingHtpRepository
   int stepCalls = 0;
   int completeCalls = 0;
   int drawingSessionReflectionCalls = 0;
+  SaveDrawingReflectionRequestDto? lastReflection;
 
   @override
   Future<void> saveHtpReflection(
@@ -166,6 +326,7 @@ final class _RecordingHtpRepository
     SaveDrawingReflectionRequestDto request,
   ) async {
     reflectionCalls += 1;
+    lastReflection = request;
     callLog.add('saveHtpReflection($assessmentId)');
     if (failReflectionOnce) {
       failReflectionOnce = false;

@@ -370,6 +370,11 @@ abstract final class AppRouter {
           inputMethod: settings.arguments is EmotionSelectRouteArguments
               ? (settings.arguments! as EmotionSelectRouteArguments).inputMethod
               : null,
+          completedDrawingImage:
+              settings.arguments is EmotionSelectRouteArguments
+              ? (settings.arguments! as EmotionSelectRouteArguments)
+                    .completedDrawingImage
+              : null,
         ),
       ['child', final childId, 'activity', 'complete']
           when _hasChildContext(childController, childId) =>
