@@ -11,6 +11,7 @@ import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisActivityType;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisClientCommand;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisSubject;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse;
 import jakarta.validation.Validation;
 import java.net.URI;
@@ -55,6 +56,7 @@ class CanonicalRestClientDrawingAnalysisClientTest {
                         "mimeType": "image/png",
                         "width": 1200,
                         "height": 800,
+                        "inputMethod": "UPLOAD",
                         "checksumSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                       }
                     }
@@ -79,6 +81,7 @@ class CanonicalRestClientDrawingAnalysisClientTest {
         DrawingAnalysisScope.FINAL,
         DrawingAnalysisActivityType.HTP,
         DrawingAnalysisSubject.HOUSE,
+        DrawingInputMethod.UPLOAD,
         "drawings/example.png",
         "image/png",
         1200,

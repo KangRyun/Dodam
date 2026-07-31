@@ -305,6 +305,7 @@ class DrawingAnalysisPersistenceServiceTest {
             REQUESTED_AT);
 
     assertThat(started.analysisScope()).isEqualTo(DrawingAnalysisScope.FINAL);
+    assertThat(started.inputMethod()).isEqualTo(DrawingInputMethod.UPLOAD);
     verify(session).startDrawingAnalysis();
   }
 

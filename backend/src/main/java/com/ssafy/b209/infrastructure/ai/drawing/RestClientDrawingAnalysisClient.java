@@ -142,6 +142,7 @@ public final class RestClientDrawingAnalysisClient implements DrawingAnalysisCli
                 command.mimeType(),
                 command.width(),
                 command.height(),
+                command.inputMethod(),
                 command.checksumSha256()));
     if (!validator.validate(request).isEmpty()) {
       throw new DrawingAnalysisClientException(DrawingAnalysisClientException.Type.REQUEST_FAILED);
