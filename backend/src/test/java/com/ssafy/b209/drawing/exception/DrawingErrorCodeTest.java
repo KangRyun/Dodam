@@ -80,9 +80,7 @@ class DrawingErrorCodeTest {
     expected.put(
         DrawingErrorCode.DRAFT_IDEMPOTENCY_KEY_REUSED,
         new ErrorContract(
-            HttpStatus.CONFLICT,
-            "IDEMPOTENCY_KEY_REUSED",
-            "동일한 Idempotency-Key가 다른 초안 요청에 사용되었습니다."));
+            HttpStatus.CONFLICT, "IDEMPOTENCY_KEY_REUSED", "동일한 멱등성 키가 다른 요청에 사용되었습니다."));
     expected.put(
         DrawingErrorCode.DRAFT_SAVE_IN_PROGRESS,
         new ErrorContract(
