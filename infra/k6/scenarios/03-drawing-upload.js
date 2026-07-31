@@ -19,6 +19,7 @@ import http from 'k6/http';
 import { group, sleep } from 'k6';
 import {
   BASE_URL,
+  CHILD_IDS,
   RUN_TAGS,
   TIER,
   authHeaders,
@@ -58,11 +59,17 @@ export function setup() {
   if (__ENV.DRAWING_TYPE_ID) {
     return { drawingTypeId: Number(__ENV.DRAWING_TYPE_ID) };
   }
-  const types = http.get(`${BASE_URL}/api/v1/drawing-types`, { headers: authHeaders() });
+  // drawing-types 는 childId 가 필수(@RequestParam @Positive)다. setup 은 VU 컨텍스트가
+  // 없으므로 시드한 첫 아동으로 조회한다. 응답은 페이지 응답이라 목록은 data.content 에 있다.
+  const types = http.get(`${BASE_URL}/api/v1/drawing-types?childId=${CHILD_IDS[0]}`, {
+    headers: authHeaders(),
+  });
   const body = dataOf(types);
-  const list = Array.isArray(body) ? body : body && body.drawingTypes;
+  const list = Array.isArray(body) ? body : body && body.content;
   if (!list || list.length === 0) {
-    throw new Error('활동 유형을 가져오지 못했습니다. ACCESS_TOKEN 을 확인하세요.');
+    throw new Error(
+      `활동 유형을 가져오지 못했습니다 (status=${types.status}). 토큰·childId(${CHILD_IDS[0]})를 확인하세요.`,
+    );
   }
   return { drawingTypeId: list[0].drawingTypeId || list[0].id };
 }
