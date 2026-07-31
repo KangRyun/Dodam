@@ -26,7 +26,7 @@ _PROMPT_SEMVER: dict[str, str] = {
     # S15P11B209-704: 그림 서술(VLM)을 {drawing_analysis} 재료로 받기 시작.
     #   서술을 그대로 인용하지 말 것·단정 표현 금지·색/표정/구도 질문 허용 규칙 추가.
     "first_question": "1.2.0",
-    "conversations": "1.2.0",
+    "conversations": "1.3.0",  # 아이가 정정하면 객체 분류를 분석 결과 대신 아이 말에 따름
     "guardrails": "1.0.0",
     "drawing_description": "1.0.0",
     "report": "1.2.0",  # S15P11B209-601: 진단 표현 금지 강화·한계 고지·후속 질문 목적 명시
