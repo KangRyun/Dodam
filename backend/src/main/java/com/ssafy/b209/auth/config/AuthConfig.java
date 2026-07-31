@@ -3,6 +3,7 @@ package com.ssafy.b209.auth.config;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssafy.b209.auth.filter.AccessTokenAuthenticationFilter;
 import com.ssafy.b209.auth.filter.AuthFilterProperties;
+import com.ssafy.b209.auth.repository.UserRepository;
 import com.ssafy.b209.auth.service.OAuthProviderProperties;
 import com.ssafy.b209.auth.token.JwtAccessTokenDecoder;
 import com.ssafy.b209.auth.token.JwtProperties;
@@ -34,8 +35,11 @@ public class AuthConfig {
    */
   @Bean
   public AccessTokenAuthenticationFilter accessTokenAuthenticationFilter(
-      JwtAccessTokenDecoder decoder, ObjectMapper objectMapper, AuthFilterProperties properties) {
-    return new AccessTokenAuthenticationFilter(decoder, objectMapper, properties);
+      JwtAccessTokenDecoder decoder,
+      ObjectMapper objectMapper,
+      AuthFilterProperties properties,
+      UserRepository userRepository) {
+    return new AccessTokenAuthenticationFilter(decoder, objectMapper, properties, userRepository);
   }
 
   /**

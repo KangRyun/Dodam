@@ -125,17 +125,18 @@ public class ChildDeletionRepository {
   }
 
   /**
-   * 보호자가 <b>혼자</b> 보유한 아동 ID를 모두 찾는다 (S15P11B209-728).
+   * 보호자가 <b>혼자</b> 보유한 아동 ID를 쓰기 잠금으로 조회한다 (S15P11B209-728).
    *
    * <p>회원 탈퇴 시 쓴다. 공동 보호자가 있는 아동은 제외한다 — 한 사람이 나간다고 다른 보호자의 아동 데이터를 지울 수는 없다. 그런 아동은 {@code
    * guardian_child_relations}의 CASCADE로 <b>관계만</b> 끊기고 레코드는 남는 것이 옳다.
    *
-   * <p>이미 삭제된 아동({@code profile_status = 'DELETED'})은 제외한다. 다시 큐에 넣으면 스토리지 삭제 작업이 중복된다.
+   * <p>이미 삭제된 아동({@code profile_status = 'DELETED'})은 제외한다. 다시 큐에 넣으면 스토리지 삭제 작업이 중복된다. 반환한 아동 행의
+   * 쓰기 잠금은 호출 Transaction이 끝날 때까지 유지돼, 단독 판정 뒤 관계가 추가되어 공동 아동이 되는 경쟁을 막는다.
    *
    * @param guardianUserId 탈퇴하는 보호자 사용자 ID
    * @return 이 보호자만 보유한 활성 아동 ID 목록. 없으면 빈 목록
    */
-  public List<Long> findSolelyOwnedChildIds(long guardianUserId) {
+  public List<Long> lockSolelyOwnedChildIds(long guardianUserId) {
     return jdbcTemplate.queryForList(
         """
         select child.id
@@ -145,11 +146,25 @@ public class ChildDeletionRepository {
            and child.profile_status = 'ACTIVE'
            and child.deleted_at is null
            and (select count(*)
-                  from guardian_child_relations other
+                 from guardian_child_relations other
                  where other.child_id = child.id) = 1
+         for update
         """,
         Long.class,
         guardianUserId);
+  }
+
+  /**
+   * 탈퇴한 보호자와 모든 아동의 관계를 해제한다.
+   *
+   * <p>사용자 Soft Delete는 FK CASCADE를 실행하지 않으므로, 공동 보호 아동에서 탈퇴한 보호자의 관계를 명시적으로 제거한다. 단독 보호 아동도 Soft
+   * Delete 후 이 경로로 관계를 해제한다.
+   *
+   * @param guardianUserId 탈퇴한 보호자 사용자 ID
+   */
+  public void deleteGuardianRelations(long guardianUserId) {
+    jdbcTemplate.update(
+        "delete from guardian_child_relations where guardian_user_id = ?", guardianUserId);
   }
 
   /**

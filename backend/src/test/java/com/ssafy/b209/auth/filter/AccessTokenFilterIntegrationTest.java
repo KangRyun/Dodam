@@ -5,9 +5,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ssafy.b209.auth.domain.User;
+import com.ssafy.b209.auth.repository.UserRepository;
 import com.ssafy.b209.auth.token.AuthenticatedUser;
 import com.ssafy.b209.auth.token.IssuedTokenPair;
 import com.ssafy.b209.auth.token.JwtTokenIssuer;
+import java.time.LocalDateTime;
+import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -17,6 +22,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.TestPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -34,6 +40,13 @@ class AccessTokenFilterIntegrationTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JwtTokenIssuer tokenIssuer;
+  @MockitoBean private UserRepository userRepository;
+
+  @BeforeEach
+  void setUpActiveUser() {
+    org.mockito.BDDMockito.given(userRepository.findById(41L))
+        .willReturn(Optional.of(User.pending(LocalDateTime.of(2026, 7, 31, 1, 0))));
+  }
 
   @Test
   void registeredFilterProvidesVerifiedPrincipalToApiController() throws Exception {

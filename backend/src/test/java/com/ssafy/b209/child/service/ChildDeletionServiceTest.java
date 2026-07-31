@@ -15,6 +15,7 @@ import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -68,6 +69,21 @@ class ChildDeletionServiceTest {
 
     verify(childDeletionRepository, never())
         .markDeleted(org.mockito.ArgumentMatchers.anyLong(), org.mockito.ArgumentMatchers.any());
+  }
+
+  @Test
+  void deletesOnlyChildrenReturnedByTheSoleOwnershipLock() {
+    given(childDeletionRepository.lockSolelyOwnedChildIds(GUARDIAN_ID))
+        .willReturn(List.of(CHILD_ID));
+
+    int deleted = childDeletionService.deleteAllSolelyOwnedBy(GUARDIAN_ID);
+
+    assertThat(deleted).isEqualTo(1);
+    verify(childDeletionRepository).lockSolelyOwnedChildIds(GUARDIAN_ID);
+    verify(childDeletionRepository)
+        .markDeleted(CHILD_ID, NOW.atOffset(ZoneOffset.UTC).toLocalDateTime());
+    verify(childDeletionRepository).scheduleStorageDeletions(CHILD_ID);
+    verify(strokeBatchDeletionService).deleteByChild(CHILD_ID);
   }
 
   @Test

@@ -54,6 +54,9 @@ public class User {
   @Column(name = "updated_at", nullable = false)
   private LocalDateTime updatedAt;
 
+  @Column(name = "deleted_at")
+  private LocalDateTime deletedAt;
+
   /** JPA가 Entity를 복원할 때 사용한다. */
   protected User() {}
 
@@ -172,6 +175,19 @@ public class User {
   public void recordSuccessfulLogin(LocalDateTime loggedInAt) {
     this.lastLoginAt = Objects.requireNonNull(loggedInAt, "loggedInAt must not be null");
     this.updatedAt = loggedInAt;
+  }
+
+  /**
+   * 계정을 삭제 상태로 전환한다.
+   *
+   * <p>사용자 행은 보존하고, 이후 인증 경계가 {@link AccountStatus#DELETED} 상태를 차단한다.
+   *
+   * @param deletedAt 삭제 처리 시각
+   */
+  public void markDeleted(LocalDateTime deletedAt) {
+    this.accountStatus = AccountStatus.DELETED;
+    this.deletedAt = Objects.requireNonNull(deletedAt, "deletedAt must not be null");
+    this.updatedAt = deletedAt;
   }
 
   /**

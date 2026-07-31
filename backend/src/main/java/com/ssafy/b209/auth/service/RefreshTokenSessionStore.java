@@ -45,4 +45,11 @@ public interface RefreshTokenSessionStore {
    * @return 세션을 폐기했으면 {@code true}, 세션이 없거나 식별 정보가 다르면 {@code false}
    */
   boolean revoke(String familyId, Long userId, String deviceId, String tokenHash);
+
+  /**
+   * 사용자의 모든 기기 Refresh Token family를 폐기한다.
+   *
+   * @param userId 탈퇴 또는 전체 로그아웃 대상 사용자 ID
+   */
+  void revokeAll(Long userId);
 }

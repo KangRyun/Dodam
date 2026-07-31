@@ -103,7 +103,7 @@ public class ChildDeletionService {
   public int deleteAllSolelyOwnedBy(Long guardianUserId) {
     LocalDateTime deletedAt = LocalDateTime.now(clock);
     int deleted = 0;
-    for (Long childId : childDeletionRepository.findSolelyOwnedChildIds(guardianUserId)) {
+    for (Long childId : childDeletionRepository.lockSolelyOwnedChildIds(guardianUserId)) {
       childDeletionRepository.markDeleted(childId, deletedAt);
       childDeletionRepository.scheduleStorageDeletions(childId);
       strokeBatchDeletionService.deleteByChild(childId);

@@ -264,7 +264,7 @@ Query 기본값은 `page=0`, `size=20`이며 `size`는 `1~100`이다.
 | Enum | 허용값 |
 | --- | --- |
 | `UserRole` | `GUARDIAN`, `EXPERT`, `ADMIN` |
-| `AccountStatus` | `PENDING`, `ACTIVE`, `SUSPENDED`, `WITHDRAWN` |
+| `AccountStatus` | `PENDING`, `ACTIVE`, `SUSPENDED`, `DELETED` |
 | `AuthProvider` | `KAKAO`, `GOOGLE`, `NAVER`, `APPLE` |
 | `QuestionDifficulty` | `PRESCHOOL`, `LOWER_ELEMENTARY`, `UPPER_ELEMENTARY`, `SUPPORT` |
 | `TutorialStatus` | `NOT_STARTED`, `IN_PROGRESS`, `COMPLETED`, `SKIPPED` |
@@ -373,14 +373,14 @@ Apple 계정 처리 규칙:
 - 최초 Apple 로그인에서 검증된 이메일은 인증 계정에 보존하며, 후속 Token에 이메일이 없어도 로그인 응답에 재사용한다.
 - 온보딩에서 확정한 `users.email`이 있으면 인증 계정의 Provider 이메일보다 우선한다.
 - 이메일이 같은 다른 OAuth Provider 계정과 자동 병합하지 않는다.
-- 회원 탈퇴로 사용자와 Apple 인증 계정이 삭제된 뒤 같은 `sub`로 로그인하면 신규 사용자로 가입한다.
+- 회원 탈퇴는 사용자·Apple 인증 계정 행을 삭제하지 않고 사용자 상태를 `DELETED`로 전환한다. 같은 `sub`의 재로그인은 기존 삭제 계정으로 식별되어 거부되며, 신규 사용자로 자동 가입하지 않는다.
 
 ### 5.4 처리 규칙과 오류
 
 | API | 주요 처리 | 오류 코드 |
 | --- | --- | --- |
 | AUTH-01 | `users`와 `auth_accounts(provider=LOCAL)`를 한 트랜잭션으로 생성 | `EMAIL_ALREADY_EXISTS`, `PASSWORD_POLICY_VIOLATION`, `ROLE_NOT_ALLOWED` |
-| AUTH-02 | 비밀번호 hash 검증, `last_login_at` 갱신, 토큰 발급 | `INVALID_CREDENTIALS`, `ACCOUNT_SUSPENDED`, `ACCOUNT_WITHDRAWN` |
+| AUTH-02 | 비밀번호 hash 검증, `last_login_at` 갱신, 토큰 발급 | `INVALID_CREDENTIALS`, `ACCOUNT_SUSPENDED` (`DELETED` 포함) |
 | AUTH-03 | authorization code를 Provider token과 교환하고 `provider_subject`로 계정 식별 | `OAUTH_CODE_INVALID`, `OAUTH_PROVIDER_ERROR`, `ACCOUNT_LINK_CONFLICT` |
 | AUTH-04 | hash·기기·만료·폐기 여부 검증 후 기존 Refresh Token 폐기 및 새 토큰 발급 | `REFRESH_TOKEN_INVALID`, `REFRESH_TOKEN_EXPIRED`, `DEVICE_MISMATCH` |
 | AUTH-05 | 요청의 Refresh Token 또는 해당 기기의 활성 토큰 폐기 | `REFRESH_TOKEN_INVALID` |
@@ -441,7 +441,9 @@ USER-02 연락 이메일 계약:
 
 - USER-02는 멱등한 `PUT`이다. 이미 완료한 사용자가 동일 내용을 보내면 현재 정보를 반환한다.
 - 역할을 `ADMIN`으로 변경하는 요청은 거부한다.
-- USER-05는 즉시 hard delete하지 않고 `account_status=WITHDRAWN`으로 변경하고 토큰을 전부 폐기한다.
+- USER-05는 사용자 행을 hard delete하지 않고 `account_status=DELETED`, `deleted_at`으로 전환한다. Access Token은 요청마다 상태를 확인해 즉시 차단하고, 모든 Refresh Token family를 폐기한다.
+- USER-05는 단독 보호 아동만 Soft Delete하고 해당 그림·대화 음성·리포트·아동 프로필 이미지의 `storage_deletion_jobs`를 `PENDING`으로 적재한다. 공동 보호 아동은 삭제하지 않고 탈퇴 사용자와의 보호자 관계만 해제한다.
+- Storage deletion worker의 claim·재시도·물리 객체 삭제, 보존 만료 purge, data export 파일·작업 삭제는 USER-05 범위에 포함하지 않는다. 성공한 파일 물리 삭제로 해석하면 안 된다.
 - 아동·그림·음성·대화·리포트 삭제 범위와 법적 보존 데이터는 탈퇴 응답 전 확인 화면에 표시한다.
 - 오류: `NICKNAME_ALREADY_EXISTS`, `ONBOARDING_REQUIRED`, `WITHDRAWAL_CONFIRMATION_MISMATCH`.
 

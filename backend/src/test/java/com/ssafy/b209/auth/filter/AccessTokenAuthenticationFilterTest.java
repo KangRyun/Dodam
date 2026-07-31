@@ -6,9 +6,13 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ssafy.b209.auth.domain.AccountStatus;
+import com.ssafy.b209.auth.domain.User;
+import com.ssafy.b209.auth.repository.UserRepository;
 import com.ssafy.b209.auth.token.AuthenticatedUser;
 import com.ssafy.b209.auth.token.JwtAccessTokenDecoder;
 import jakarta.servlet.FilterChain;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -115,5 +119,27 @@ class AccessTokenAuthenticationFilterTest {
     legacyFilter.doFilter(request, response, chain);
 
     verify(chain).doFilter(request, response);
+  }
+
+  @Test
+  void rejectsAccessTokenForDeletedUser() throws Exception {
+    UserRepository userRepository = mock(UserRepository.class);
+    AccessTokenAuthenticationFilter stateAwareFilter =
+        new AccessTokenAuthenticationFilter(
+            decoder, new ObjectMapper(), new AuthFilterProperties(false), userRepository);
+    MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/v1/users/me");
+    request.addHeader("Authorization", "Bearer signed-access-token");
+    MockHttpServletResponse response = new MockHttpServletResponse();
+    FilterChain chain = mock(FilterChain.class);
+    when(decoder.decode("signed-access-token")).thenReturn(new AuthenticatedUser(41L));
+    User deletedUser = User.pending(java.time.LocalDateTime.of(2026, 7, 31, 1, 0));
+    deletedUser.markDeleted(java.time.LocalDateTime.of(2026, 7, 31, 1, 1));
+    when(userRepository.findById(41L)).thenReturn(Optional.of(deletedUser));
+
+    stateAwareFilter.doFilter(request, response, chain);
+
+    assertThat(deletedUser.getAccountStatus()).isEqualTo(AccountStatus.DELETED);
+    assertThat(response.getStatus()).isEqualTo(403);
+    assertThat(response.getContentAsString()).contains("AUTH_403_001");
   }
 }
