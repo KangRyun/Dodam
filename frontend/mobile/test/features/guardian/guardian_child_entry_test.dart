@@ -227,7 +227,10 @@ void main() {
   });
 
   testWidgets('실제 앱 진입 흐름에서 생성한 세션으로 완료부터 보호자 홈까지 이어진다', (tester) async {
-    final drawingRepository = _TrackingDrawingRepository(sessionId: 731);
+    final drawingRepository = _TrackingDrawingRepository(
+      sessionId: 731,
+      completionStage: 'REFLECTION',
+    );
     await tester.pumpWidget(
       DodamApp(
         childRepository: _FakeChildRepository(children: _children),
@@ -241,9 +244,11 @@ void main() {
     await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
     await tester.pumpAndSettle();
 
-    await _tapAfterScroll(tester, const ValueKey('draw-entry'));
+    await tester.tap(find.text('그림일기'));
+    await tester.pump();
+    await _tapNext(tester);
     await tester.pumpAndSettle();
-    await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
+    await _tapAfterScroll(tester, const ValueKey('draw-entry'));
     await tester.pumpAndSettle();
 
     expect(drawingRepository.getTypesChildId, 3);
@@ -289,13 +294,11 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('guardian-handoff')));
     await _pumpUntil(tester, find.text('확인'));
     await tester.tap(find.text('확인'));
-    await _pumpUntil(tester, find.text('보호자 홈'));
+    await _pumpUntilGone(tester, find.text('내 마음 고르기'));
 
     expect(find.text('보호자 홈'), findsWidgets);
     expect(find.text('내 마음 고르기'), findsNothing);
-    // 사전 존재 이슈: develop 최신에서도 아동 모드 완료→감정 선택 화면이 위젯
-    // 테스트에서 렌더되지 않아 실패한다(보호자 홈 재설계와 무관, 흐름 담당 티켓에서 처리).
-  }, skip: true);
+  });
 
   testWidgets('세션 생성 실패 시 Drawing으로 이동하지 않고 다시 시도할 수 있다', (tester) async {
     final drawingRepository = _TrackingDrawingRepository(
@@ -426,6 +429,16 @@ Future<void> _pumpUntil(
   }
 }
 
+Future<void> _pumpUntilGone(
+  WidgetTester tester,
+  Finder finder, {
+  int maxFrames = 80,
+}) async {
+  for (var i = 0; i < maxFrames && finder.evaluate().isNotEmpty; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+
 Future<void> _pumpChildHome(
   WidgetTester tester,
   DrawingRepository drawingRepository,
@@ -494,8 +507,19 @@ final class _FakeChildRepository implements ChildRepository {
   @override
   Future<ChildDetailDto> getChild(int childId) => throw UnimplementedError();
   @override
-  Future<TutorialProgressDto> getTutorialProgress(int childId) =>
-      throw UnimplementedError();
+  Future<TutorialProgressDto> getTutorialProgress(int childId) async {
+    final status = children
+        .singleWhere((child) => child.childId == childId)
+        .tutorialStatus;
+    return TutorialProgressDto(
+      childId: childId,
+      tutorialStatus: status,
+      lastStep: status == 'COMPLETED' ? 'COMPLETE' : null,
+      completedAt: status == 'COMPLETED' ? '2026-07-20T08:15:00Z' : null,
+      updatedAt: '2026-07-20T08:15:00Z',
+    );
+  }
+
   @override
   Future<ChildDetailDto> updateChild(
     int childId,
@@ -505,7 +529,15 @@ final class _FakeChildRepository implements ChildRepository {
   Future<TutorialProgressDto> updateTutorialProgress(
     int childId,
     UpdateTutorialRequestDto request,
-  ) => throw UnimplementedError();
+  ) async => TutorialProgressDto(
+    childId: childId,
+    tutorialStatus: request.tutorialStatus,
+    lastStep: request.lastStep,
+    completedAt: request.tutorialStatus == 'COMPLETED'
+        ? '2026-07-20T08:15:00Z'
+        : null,
+    updatedAt: '2026-07-20T08:15:00Z',
+  );
 }
 
 final class _TrackingDrawingRepository
@@ -514,6 +546,7 @@ final class _TrackingDrawingRepository
     this.sessionId = 731,
     this.activeSessionId,
     this.activeHasDraft = false,
+    this.completionStage = 'CONVERSING',
     this.createError,
     this.pending,
   });
@@ -521,6 +554,7 @@ final class _TrackingDrawingRepository
   final int sessionId;
   final int? activeSessionId;
   final bool activeHasDraft;
+  final String completionStage;
   final Object? createError;
   final Completer<DrawingSessionDto>? pending;
   int createCalls = 0;
@@ -644,7 +678,7 @@ final class _TrackingDrawingRepository
       'drawingSessionId': sessionId,
       'finalAssetId': 900,
       'sessionStatus': 'IN_PROGRESS',
-      'currentStage': 'CONVERSING',
+      'currentStage': completionStage,
       'analysis': {
         'analysisId': 901,
         'analysisType': 'INTERMEDIATE',
