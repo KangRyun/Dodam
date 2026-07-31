@@ -22,6 +22,8 @@ import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 import '../../../conversation/conversation.dart';
+import '../../../child_mode/data/costume_preference_store.dart';
+import '../../../child_mode/domain/dodam_costume.dart';
 import '../../domain/models/activity_conversation_turn.dart';
 import '../../domain/repositories/activity_repository.dart';
 
@@ -283,10 +285,24 @@ class _DrawingScreenState extends State<DrawingScreen>
   bool get _hasDrawingContent =>
       _completedStrokes.isNotEmpty || _draftRestoreController.draft != null;
 
+  /// 캔버스에서 말하는 캐릭터로 쓸 코스튬 에셋. 이 아이가 홈에서 고른 코스튬을
+  /// 로컬에서 읽어 반영한다(S15P11B209-750). 없으면 기본 도담이.
+  String _characterAsset = DodamCostume.base.asset;
+
+  Future<void> _loadCharacterCostume() async {
+    final childId = int.tryParse(widget.childId);
+    if (childId == null) return;
+    final code = await CostumePreferenceStore().read(childId);
+    if (!mounted) return;
+    final asset = DodamCostume.fromCode(code).asset;
+    if (asset != _characterAsset) setState(() => _characterAsset = asset);
+  }
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_loadCharacterCostume());
     final ttsRepository = widget.questionTtsRepository;
     final playerFactory = widget.questionAudioPlayerFactory;
     if (ttsRepository != null && playerFactory != null) {
@@ -1535,6 +1551,7 @@ class _DrawingScreenState extends State<DrawingScreen>
                     restoreStatus == DrawingDraftRestoreStatus.loadingImage);
             final canvas = _CanvasPanel(
               repaintBoundaryKey: _canvasBoundaryKey,
+              characterAsset: _characterAsset,
               strokes: _visibleStrokes,
               onPointerDown: _startStroke,
               onPointerMove: _extendStroke,
@@ -1719,9 +1736,11 @@ class _CanvasPanel extends StatelessWidget {
     required this.endRetryable,
     required this.voiceRetryable,
     required this.sttResultController,
+    required this.characterAsset,
   });
 
   final GlobalKey repaintBoundaryKey;
+  final String characterAsset;
   final List<DrawingStroke> strokes;
   final ValueChanged<PointerDownEvent> onPointerDown;
   final ValueChanged<PointerMoveEvent> onPointerMove;
@@ -1800,6 +1819,7 @@ class _CanvasPanel extends StatelessWidget {
               ),
             ),
             AiQuestionBubbleOverlay(
+              characterAsset: characterAsset,
               question: question,
               visible: showQuestion,
               selectedOptionId: selectedQuestionOptionId,

@@ -23,6 +23,13 @@ abstract final class AppColors {
   static const Color tangerinePressed = Color(0xFFB96A2F);
   static const Color tangerineSoft = Color(0xFFFFEBD8);
   static const Color sunshine = Color(0xFFF4CC58);
+
+  /// 아동 화면 메인 브랜드 옐로(S15P11B209-750). CTA·강조에 쓰고, 어두운
+  /// ink 텍스트와 조합해 대비를 확보한다.
+  static const Color brandYellow = Color(0xFFF2D765);
+  static const Color brandYellowPressed = Color(0xFFE0C23D);
+  static const Color brandYellowSoft = Color(0xFFFCF4CE);
+
   static const Color lavender = Color(0xFF8A76C8);
   static const Color lavenderSoft = Color(0xFFF0ECFF);
 

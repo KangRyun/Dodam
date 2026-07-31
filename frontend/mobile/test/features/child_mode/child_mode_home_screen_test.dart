@@ -136,7 +136,7 @@ Widget _wrap(Widget home) => MaterialApp(
 );
 
 void main() {
-  testWidgets('지원하는 그림 유형마다 카드가 표시된다', (tester) async {
+  testWidgets('아동 홈은 코스튬 캐러셀과 그림 그리기 버튼을 보여준다', (tester) async {
     final repository = _FakeDrawingRepository(
       drawingTypes: const [_secondType, _artDiary],
     );
@@ -146,12 +146,13 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('activity-5')), findsOneWidget);
-    expect(find.byKey(const ValueKey('activity-9')), findsOneWidget);
-    expect(find.text('그림일기'), findsOneWidget);
-    expect(find.text('집·나무·사람 그림'), findsOneWidget);
-    // 활동 유형과 무관한 기존 "지난 그림 보기" 카드는 그대로 유지된다.
-    expect(find.text('지난 그림 보기'), findsOneWidget);
+    expect(find.byKey(const ValueKey('costume-carousel')), findsOneWidget);
+    expect(find.byKey(const ValueKey('draw-entry')), findsOneWidget);
+    expect(find.text('그림 그리기'), findsOneWidget);
+    // 아동은 그림일기만 진입한다 — HTP·지난 그림 보기 카드는 홈에 없다.
+    expect(find.byKey(const ValueKey('activity-9')), findsNothing);
+    expect(find.text('집·나무·사람 그림'), findsNothing);
+    expect(find.text('지난 그림 보기'), findsNothing);
   });
 
   testWidgets('그림 유형을 불러오는 동안 로딩 상태를 보여준다', (tester) async {
@@ -176,7 +177,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('activity-5')), findsOneWidget);
+    expect(find.byKey(const ValueKey('draw-entry')), findsOneWidget);
   });
 
   testWidgets('그림 유형을 불러오지 못하면 오류와 다시 시도를 보여준다', (tester) async {
@@ -194,13 +195,13 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byType(AppErrorView), findsOneWidget);
-    expect(find.byKey(const ValueKey('activity-5')), findsNothing);
+    expect(find.byKey(const ValueKey('draw-entry')), findsNothing);
 
     await tester.ensureVisible(find.text('다시 시도'));
     await tester.tap(find.text('다시 시도'));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('activity-5')), findsOneWidget);
+    expect(find.byKey(const ValueKey('draw-entry')), findsOneWidget);
   });
 
   testWidgets('지원하는 그림 유형이 없으면 빈 상태를 보여준다', (tester) async {
@@ -214,26 +215,7 @@ void main() {
     expect(find.byType(AppEmptyView), findsOneWidget);
   });
 
-  testWidgets('그림일기 외 활동도 같은 공통 안내 팝업을 안내 문구만 바꿔 재사용한다', (tester) async {
-    final repository = _FakeDrawingRepository(
-      drawingTypes: const [_secondType],
-    );
-
-    await tester.pumpWidget(
-      _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
-    );
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const ValueKey('activity-9')));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const ValueKey('activity-guide-start')), findsOneWidget);
-    expect(find.text('집·나무·사람 그림'), findsWidgets);
-    // guideText가 없는 유형은 아동 친화적인 임시 문구로 대체된다.
-    expect(find.text('그리고 싶은 것을 자유롭게 그려 보자!'), findsWidgets);
-  });
-
-  testWidgets('카드를 탭하면 해당 활동 안내 팝업이 표시된다', (tester) async {
+  testWidgets('그림 그리기를 탭하면 그림일기 안내 팝업이 표시된다', (tester) async {
     final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
 
     await tester.pumpWidget(
@@ -241,7 +223,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('activity-5')));
+    await tester.tap(find.byKey(const ValueKey('draw-entry')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('activity-guide-start')), findsOneWidget);
@@ -258,14 +240,14 @@ void main() {
       _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('activity-5')));
+    await tester.tap(find.byKey(const ValueKey('draw-entry')));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('activity-guide-cancel')));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('activity-guide-start')), findsNothing);
-    expect(find.byKey(const ValueKey('activity-5')), findsOneWidget);
+    expect(find.byKey(const ValueKey('draw-entry')), findsOneWidget);
     expect(repository.createCalls, 0);
     // 안내 팝업을 띄우기 전에 이어 그리기 대상이 있는지 한 번 확인한다.
     expect(repository.getActiveSessionCalls, 1);
@@ -278,7 +260,7 @@ void main() {
       _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('activity-5')));
+    await tester.tap(find.byKey(const ValueKey('draw-entry')));
     await tester.pumpAndSettle();
 
     // 팝업 바깥(스크림)을 탭해 취소와 같은 효과를 낸다.
@@ -296,7 +278,7 @@ void main() {
       _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('activity-5')));
+    await tester.tap(find.byKey(const ValueKey('draw-entry')));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
@@ -422,7 +404,7 @@ void main() {
     expect(find.text('새로 그리기'), findsOneWidget);
     await tester.tap(find.text('새로 그리기'));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('activity-5')));
+    await tester.tap(find.byKey(const ValueKey('draw-entry')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
     await tester.pumpAndSettle();
@@ -436,48 +418,6 @@ void main() {
     expect(repository.lastCreateRequest?.replaceActive, isTrue);
     expect(
       find.text('drawing-session-900-resume-false-auto-false-fresh-true'),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('새로 그리기를 고른 뒤 HTP와 캔버스를 선택하면 HOUSE 캔버스로 이동한다', (tester) async {
-    final repository = _FakeDrawingRepository(
-      drawingTypes: const [_artDiary, _secondType],
-      activeSession: const ActiveDrawingSessionDto(
-        drawingSessionId: 555,
-        childId: 7,
-        drawingType: DrawingTypeSummaryDto(
-          drawingTypeId: 5,
-          code: 'ART_DIARY',
-          name: '그림일기',
-        ),
-        inputMethod: 'CANVAS',
-        sessionStatus: 'IN_PROGRESS',
-        currentStage: 'DRAWING',
-        startedAt: '2026-07-26T01:00:00Z',
-        latestDraft: null,
-      ),
-    );
-
-    await tester.pumpWidget(
-      _wrap(ChildModeHomeScreen(child: _child, drawingRepository: repository)),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('새로 그리기'));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const ValueKey('activity-9')));
-    await tester.tap(find.byKey(const ValueKey('activity-9')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
-    await tester.pumpAndSettle();
-
-    expect(repository.htpStartCalls, 1);
-    expect(repository.lastHtpRequest?.inputMethod, 'CANVAS');
-    expect(repository.lastHtpRequest?.replaceActive, isTrue);
-    expect(
-      find.text('drawing-session-901-resume-false-auto-false-fresh-true'),
       findsOneWidget,
     );
   });
@@ -671,7 +611,7 @@ void main() {
       // 첫 시도는 실패해 완료 화면으로 가지 않고 홈에 남는다(오류만 안내).
       expect(repository.completeAssessmentCalls, 1);
       expect(find.text('activity-complete-812'), findsNothing);
-      expect(find.byKey(const ValueKey('activity-9')), findsOneWidget);
+      expect(find.byKey(const ValueKey('costume-carousel')), findsOneWidget);
 
       // 복구는 화면 진입 시점에만 판단하므로, 재시도는 아동 모드에 다시
       // 들어오는 것(앱 재시작·보호자 모드 왕복)으로 이뤄진다. 새 key로
@@ -717,8 +657,8 @@ void main() {
 
     expect(tester.takeException(), isNull);
 
-    await tester.ensureVisible(find.byKey(const ValueKey('activity-5')));
-    await tester.tap(find.byKey(const ValueKey('activity-5')));
+    await tester.ensureVisible(find.byKey(const ValueKey('draw-entry')));
+    await tester.tap(find.byKey(const ValueKey('draw-entry')));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);

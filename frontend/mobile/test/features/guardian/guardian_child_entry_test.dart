@@ -115,36 +115,37 @@ void main() {
   });
 
   testWidgets('선택된 childId를 유지해 해당 아동 모드로 진입한다', (tester) async {
-    await tester.pumpWidget(
-      DodamApp(childRepository: _FakeChildRepository(children: _children)),
+    final drawingRepository = _TrackingDrawingRepository();
+    await _pumpActivitySelect(
+      tester,
+      drawingRepository,
+      childKey: const ValueKey('child-7'),
     );
-    await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const ValueKey('child-7')));
+    // 활동 선택 화면에서 그림일기를 고르면 선택한 봄이의 아동 홈으로 진입한다.
+    await tester.tap(find.text('그림일기'));
     await tester.pump();
-    await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
+    await _tapNext(tester);
     await tester.pumpAndSettle();
 
     expect(find.text('봄이, 오늘은 무엇을 그려 볼까?'), findsOneWidget);
-    // 461: 지원하는 그림 유형(기본 Mock은 그림일기)마다 카드가 뜬다.
-    expect(find.byKey(const ValueKey('activity-5')), findsOneWidget);
+    // 750: 아동 홈은 그림일기로 들어가는 "그림 그리기" 버튼을 보여준다.
+    expect(find.byKey(const ValueKey('draw-entry')), findsOneWidget);
   });
 
   testWidgets('선택된 아동의 그림 활동 시작 버튼은 활동 선택 화면으로 연결된다', (tester) async {
-    await tester.pumpWidget(
-      DodamApp(childRepository: _FakeChildRepository(children: _children)),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const ValueKey('child-3')));
-    await tester.pump();
-    await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
-    await tester.pumpAndSettle();
+    final drawingRepository = _TrackingDrawingRepository();
+    await _pumpActivitySelect(tester, drawingRepository);
 
-    // 그림일기는 CANVAS 전용이므로 카드 탭 → 안내 팝업 → 시작하기 직후
-    // Drawing에 진입한다.
-    await _tapAfterScroll(tester, const ValueKey('activity-5'));
+    // start-child-mode → 활동 선택 화면.
+    expect(find.text('어떤 활동을 해볼까요?'), findsOneWidget);
+
+    // 그림일기 → 다음 → 아동 홈 → 그림 그리기 → 캔버스.
+    await tester.tap(find.text('그림일기'));
+    await tester.pump();
+    await _tapNext(tester);
     await tester.pumpAndSettle();
-    await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
+    await _tapAfterScroll(tester, const ValueKey('draw-entry'));
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
@@ -157,7 +158,7 @@ void main() {
     // 진입 시 활성 세션이 있으면 활동 카드 탭 없이도 '이어/새로' 선택
     // 다이얼로그가 자동으로 뜬다(_resolveEntry).
     await _pumpUntil(tester, find.text('이어 그리기'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.text('이어 그리기'));
     await _pumpUntil(tester, find.byKey(const ValueKey('drawing-canvas')));
 
@@ -181,7 +182,7 @@ void main() {
     // 선택 다이얼로그가 자동으로 뜬다(_resolveEntry). 다이얼로그 등장 애니메이션이
     // 끝나 버튼이 탭 가능해질 때까지 기다린다.
     await _pumpUntil(tester, find.text('이어 그리기'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
 
     expect(find.text('그리던 그림이 있어요'), findsOneWidget);
     expect(find.text('이어 그리기'), findsOneWidget);
@@ -200,23 +201,21 @@ void main() {
       activeSessionId: 812,
       activeHasDraft: true,
     );
-    await _pumpChildHome(tester, drawingRepository);
+    await _pumpActivitySelect(tester, drawingRepository);
 
-    // 진입 시 자동으로 뜨는 '이어/새로' 다이얼로그에서 '새로 그리기'를 고르면
-    // 기존 세션을 교체하도록 표시하고 다이얼로그를 닫는다. 이후 활동 카드를 탭해
-    // 새 세션을 만든다.
+    // 활동 선택 화면 진입 시 활성 세션이 있으면 '이어/새로' 다이얼로그가 뜬다.
+    // '새로 그리기'를 고르면 기존 세션을 교체하도록 표시하고 활동 카드를 보여준다.
     await _pumpUntil(tester, find.text('새로 그리기'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.tap(find.text('새로 그리기'));
     await tester.pumpAndSettle();
-    await _tapAfterScroll(tester, const ValueKey('activity-77'));
+
+    // 그림일기 → 다음 → 교체 옵션으로 세션 생성 → 아동 홈.
+    await tester.tap(find.text('그림일기'));
+    await tester.pump();
+    await _tapNext(tester);
     await tester.pumpAndSettle();
-    if (find
-        .byKey(const ValueKey('activity-guide-start'))
-        .evaluate()
-        .isNotEmpty) {
-      await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
-    }
+    await _tapAfterScroll(tester, const ValueKey('draw-entry'));
     await _pumpUntil(tester, find.byKey(const ValueKey('drawing-canvas')));
 
     expect(drawingRepository.deletedSessionIds, isEmpty);
@@ -225,7 +224,6 @@ void main() {
     expect(drawingRepository.createRequest?.inputMethod, 'CANVAS');
     expect(drawingRepository.createRequest?.replaceActive, isTrue);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
-    expect(find.text('어떤 활동을 해볼까요?'), findsNothing);
   });
 
   testWidgets('실제 앱 진입 흐름에서 생성한 세션으로 완료부터 보호자 홈까지 이어진다', (tester) async {
@@ -243,7 +241,7 @@ void main() {
     await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
     await tester.pumpAndSettle();
 
-    await _tapAfterScroll(tester, const ValueKey('activity-77'));
+    await _tapAfterScroll(tester, const ValueKey('draw-entry'));
     await tester.pumpAndSettle();
     await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
     await tester.pumpAndSettle();
@@ -303,48 +301,51 @@ void main() {
     final drawingRepository = _TrackingDrawingRepository(
       createError: StateError('create failed'),
     );
-    await _pumpChildHome(tester, drawingRepository);
+    await _pumpActivitySelect(tester, drawingRepository);
 
-    await _tapAfterScroll(tester, const ValueKey('activity-77'));
+    await tester.tap(find.text('그림일기'));
+    await tester.pump();
+    await _tapNext(tester);
     await tester.pumpAndSettle();
-    await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
-    await tester.pumpAndSettle();
-    // 실패는 활동 안내 팝업 안에서 오류·재시도로 처리하고 Drawing으로는
-    // 이동하지 않는다.
+
+    // 실패 시 Drawing으로 이동하지 않고 활동 선택 화면에 머문다.
     expect(drawingRepository.createCalls, 1);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
-    expect(find.byKey(const ValueKey('activity-guide-error')), findsOneWidget);
+    expect(find.text('어떤 활동을 해볼까요?'), findsOneWidget);
 
-    await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
+    // 오류 안내가 사라진 뒤 같은 활동으로 다시 시도할 수 있다.
+    await tester.pump(const Duration(seconds: 5));
+    await tester.pumpAndSettle();
+    await _tapNext(tester);
     await tester.pumpAndSettle();
 
     expect(drawingRepository.createCalls, 2);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
-
-    await _tapAfterScroll(tester, const ValueKey('activity-guide-cancel'));
-    await tester.pumpAndSettle();
-
-    expect(find.byKey(const ValueKey('activity-77')), findsOneWidget);
   });
 
   testWidgets('활동 시작 연속 탭은 DrawingSession을 중복 생성하지 않는다', (tester) async {
     final pending = Completer<DrawingSessionDto>();
     final drawingRepository = _TrackingDrawingRepository(pending: pending);
-    await _pumpChildHome(tester, drawingRepository);
+    await _pumpActivitySelect(tester, drawingRepository);
 
-    await _tapAfterScroll(tester, const ValueKey('activity-77'));
-    await tester.pumpAndSettle();
-    final startButton = find.byKey(const ValueKey('activity-guide-start'));
-    await tester.tap(startButton);
+    await tester.tap(find.text('그림일기'));
     await tester.pump();
-    await tester.tap(startButton, warnIfMissed: false);
+    // "다음"을 연속으로 두 번 눌러도 세션은 한 번만 생성된다.
+    final nextButton = find.byType(FilledButton);
+    await tester.ensureVisible(nextButton);
+    await tester.tap(nextButton);
+    await tester.pump();
+    await tester.tap(nextButton, warnIfMissed: false);
     await tester.pump();
 
     expect(drawingRepository.createCalls, 1);
-    expect(find.byKey(const ValueKey('loading')), findsOneWidget);
+
     pending.complete(drawingRepository.session());
     await tester.pumpAndSettle();
-    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+
+    // 중복 생성 없이 아동 홈으로 진입한다.
+    expect(drawingRepository.createCalls, 1);
+    expect(find.byKey(const ValueKey('draw-entry')), findsOneWidget);
   });
 
   testWidgets('아동 모드에는 보호자 전용 요약과 리포트 정보가 노출되지 않는다', (tester) async {
@@ -383,6 +384,36 @@ Future<void> _tapAfterScroll(WidgetTester tester, Key key) async {
   await tester.tap(target);
 }
 
+/// 활동 선택 화면의 "다음" 버튼을 눌러 아동 홈으로 넘어간다.
+Future<void> _tapNext(WidgetTester tester) async {
+  final next = find.widgetWithText(FilledButton, '다음');
+  await tester.ensureVisible(next);
+  await tester.tap(next);
+}
+
+/// 보호자 홈에서 아동을 골라 활동 선택 화면까지 진입한다.
+Future<void> _pumpActivitySelect(
+  WidgetTester tester,
+  DrawingRepository drawingRepository, {
+  Key childKey = const ValueKey('child-3'),
+}) async {
+  await tester.pumpWidget(
+    DodamApp(
+      childRepository: _FakeChildRepository(children: _children),
+      drawingRepository: drawingRepository,
+    ),
+  );
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(childKey));
+  await tester.pump();
+  await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
+  // 활동 선택 화면은 진입 확인 로딩과 이어/새로 다이얼로그 애니메이션이 계속
+  // 돌아 pumpAndSettle이 멎지 않으므로 제한 프레임만 진행한다.
+  for (var i = 0; i < 24; i++) {
+    await tester.pump(const Duration(milliseconds: 50));
+  }
+}
+
 /// 지속 애니메이션이 있는 화면은 pumpAndSettle이 멎지 않으므로, 대상 위젯이
 /// 나타날 때까지만 제한 프레임을 진행한다.
 Future<void> _pumpUntil(
@@ -398,19 +429,7 @@ Future<void> _pumpUntil(
 Future<void> _pumpChildHome(
   WidgetTester tester,
   DrawingRepository drawingRepository,
-) async {
-  await tester.pumpWidget(
-    DodamApp(
-      childRepository: _FakeChildRepository(children: _children),
-      drawingRepository: drawingRepository,
-    ),
-  );
-  await tester.pumpAndSettle();
-  await tester.tap(find.byKey(const ValueKey('child-3')));
-  await tester.pump();
-  await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
-  await tester.pumpAndSettle();
-}
+) => _pumpActivitySelect(tester, drawingRepository);
 
 const _children = [
   ChildSummaryDto(
