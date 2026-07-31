@@ -1,20 +1,12 @@
+"use client";
+
 import Link from "next/link";
 
+import { categoryLabels } from "@/features/community/community-category";
 import type {
   CommunityComment,
   CommunityPost,
-  CommunityPostCategory,
 } from "@/features/community/domain/community-models";
-
-const categoryLabels: Record<CommunityPostCategory, string> = {
-  GUARDIAN_STORY: "보호자 이야기",
-  ACTIVITY_REVIEW: "활동 후기",
-  EXPERT_COLUMN: "칼럼",
-  ART_ACTIVITY_RESOURCE: "미술 활동 자료",
-  DRAWING_GUIDE: "그림 활동 가이드",
-  EXPERT_QNA: "전문가 Q&A",
-  NOTICE: "공지",
-};
 
 function formatDate(value: string) {
   const date = new Date(value);
@@ -61,7 +53,24 @@ function CommunityCommentCard({ comment }: { comment: CommunityComment }) {
   );
 }
 
-export function CommunityPostDetail({ post }: { post: CommunityPost }) {
+type CommunityPostDetailProps = {
+  post: CommunityPost;
+  /** 작성자 본인일 때 수정 화면으로 이동시키는 콜백. */
+  onEdit?: () => void;
+  /** 작성자 본인/관리자일 때 게시글을 삭제하는 콜백. */
+  onDelete?: () => void;
+  /** 삭제 요청이 진행 중인지. */
+  isDeleting?: boolean;
+};
+
+export function CommunityPostDetail({
+  post,
+  onEdit,
+  onDelete,
+  isDeleting = false,
+}: CommunityPostDetailProps) {
+  const canManage = post.editableByMe === true;
+
   return (
     <main className="community-detail-main">
       <Link className="community-detail-back" href="/community">
@@ -76,7 +85,29 @@ export function CommunityPostDetail({ post }: { post: CommunityPost }) {
 
         <div className="community-detail-title-row">
           <h1>{post.title}</h1>
-          <button type="button" aria-label="게시글 신고">신고</button>
+          <div className="community-detail-actions">
+            {canManage && onEdit && (
+              <button
+                type="button"
+                onClick={onEdit}
+                disabled={isDeleting}
+              >
+                수정
+              </button>
+            )}
+            {canManage && onDelete && (
+              <button
+                type="button"
+                onClick={onDelete}
+                disabled={isDeleting}
+              >
+                {isDeleting ? "삭제 중…" : "삭제"}
+              </button>
+            )}
+            <button type="button" aria-label="게시글 신고">
+              신고
+            </button>
+          </div>
         </div>
 
         <div className="community-detail-author">

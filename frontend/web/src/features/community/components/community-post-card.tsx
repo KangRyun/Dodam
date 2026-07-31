@@ -1,27 +1,10 @@
 import Link from "next/link";
 
-import type {
-  CommunityPost,
-  CommunityPostCategory,
-} from "@/features/community/domain/community-models";
-
-const categoryLabels: Record<CommunityPostCategory, string> = {
-  GUARDIAN_STORY: "보호자 이야기",
-  ACTIVITY_REVIEW: "활동 후기",
-  EXPERT_COLUMN: "칼럼",
-  ART_ACTIVITY_RESOURCE: "미술 활동 자료",
-  DRAWING_GUIDE: "그림 활동 가이드",
-  EXPERT_QNA: "전문가 Q&A",
-  NOTICE: "공지",
-};
-
-const categoryIcons: Partial<Record<CommunityPostCategory, string>> = {
-  GUARDIAN_STORY: "🌧️",
-  ACTIVITY_REVIEW: "🖼️",
-  EXPERT_COLUMN: "🖍️",
-  ART_ACTIVITY_RESOURCE: "🎨",
-  DRAWING_GUIDE: "📒",
-};
+import {
+  categoryIcons,
+  categoryLabels,
+} from "@/features/community/community-category";
+import type { CommunityPost } from "@/features/community/domain/community-models";
 
 function formatPostDate(value: string) {
   const date = new Date(value);
