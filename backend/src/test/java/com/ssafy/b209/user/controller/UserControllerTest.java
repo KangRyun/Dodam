@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verify;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -17,9 +18,12 @@ import com.ssafy.b209.auth.domain.UserRole;
 import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.exception.BusinessException;
+import com.ssafy.b209.user.domain.DataExportStatus;
+import com.ssafy.b209.user.dto.response.DataExportJobResponse;
 import com.ssafy.b209.user.dto.response.DataRetentionPolicyResponse;
 import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
+import com.ssafy.b209.user.service.UserDataExportRequestService;
 import com.ssafy.b209.user.service.UserDataRetentionPolicyReader;
 import com.ssafy.b209.user.service.UserDataRetentionPolicyUpdateService;
 import com.ssafy.b209.user.service.UserDeletionService;
@@ -51,6 +55,40 @@ class UserControllerTest {
   @MockitoBean private UserNotificationSettingsUpdateService notificationSettingsUpdateService;
   @MockitoBean private UserDataRetentionPolicyReader dataRetentionPolicyReader;
   @MockitoBean private UserDataRetentionPolicyUpdateService dataRetentionPolicyUpdateService;
+  @MockitoBean private UserDataExportRequestService dataExportRequestService;
+
+  @Test
+  void acceptsTheAuthenticatedUsersDataExportRequest() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(51L);
+    given(dataExportRequestService.request(51L))
+        .willReturn(
+            new DataExportJobResponse(
+                901L,
+                DataExportStatus.PENDING,
+                java.time.LocalDateTime.of(2026, 7, 31, 10, 25, 3)));
+
+    mockMvc
+        .perform(post("/api/v1/users/me/data-exports"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.dataExportJobId").value(901))
+        .andExpect(jsonPath("$.data.exportStatus").value("PENDING"))
+        .andExpect(jsonPath("$.data.requestedAt").value("2026-07-31T10:25:03"))
+        .andExpect(jsonPath("$.data.fileSizeBytes").doesNotExist())
+        .andExpect(jsonPath("$.data.checksumSha256").doesNotExist());
+
+    verify(dataExportRequestService).request(51L);
+  }
+
+  @Test
+  void returnsUnauthorizedForDataExportRequestWhenAccessTokenIsMissing() throws Exception {
+    given(currentUserResolver.requireUserId())
+        .willThrow(new BusinessException(AuthErrorCode.AUTHENTICATION_REQUIRED));
+
+    mockMvc.perform(post("/api/v1/users/me/data-exports")).andExpect(status().isUnauthorized());
+
+    verify(dataExportRequestService, never()).request(any());
+  }
 
   @Test
   void immediatelyDeletesTheAuthenticatedUserAfterExplicitConfirmation() throws Exception {
