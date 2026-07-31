@@ -75,7 +75,7 @@ export default function authedRead() {
   });
 
   group('공통 메타·알림', () => {
-    checkOk(read('GET /drawing-types', '/api/v1/drawing-types'), '활동 유형');
+    checkOk(read('GET /drawing-types', `/api/v1/drawing-types?childId=${childId}`), '활동 유형');
     checkOk(read('GET /notifications', '/api/v1/notifications?page=0&size=20'), '알림함');
   });
 
