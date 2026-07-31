@@ -144,6 +144,25 @@ void main() {
     expect(journal.events.where((event) => event.type == 'UNDO').length, 2);
     expect(journal.lastEventSequence, 6);
   });
+
+  test('REDO는 Undo한 획만 복원하고 새 stroke가 생기면 다시 실행 이력을 비운다', () {
+    final journal = DrawingEventJournal();
+    journal
+      ..recordStroke(_stroke(10), const Size(100, 100))
+      ..recordStroke(_stroke(30), const Size(100, 100));
+
+    expect(journal.recordUndo(elapsedMilliseconds: 50), isNotNull);
+    final redo = journal.recordRedo(elapsedMilliseconds: 60)!;
+    expect(redo.type, 'REDO');
+    expect(redo.seq, 6);
+    expect(journal.undoableStrokeCount, 2);
+    expect(journal.redoableStrokeCount, 0);
+
+    expect(journal.recordUndo(elapsedMilliseconds: 70), isNotNull);
+    journal.recordStroke(_stroke(80), const Size(100, 100));
+    expect(journal.redoableStrokeCount, 0);
+    expect(journal.recordRedo(elapsedMilliseconds: 90), isNull);
+  });
 }
 
 DrawingStroke _stroke(int t) => DrawingStroke(

@@ -171,6 +171,23 @@ void main() {
     expect(request.metrics.undoCountDelta, 2);
   });
 
+  test('Redo-only batch도 event와 metrics를 함께 전송한다', () async {
+    final queue = _queue();
+    queue.addEvents([
+      const StrokeEventDto(seq: 46, t: 330, type: 'REDO'),
+      const StrokeEventDto(seq: 48, t: 350, type: 'REDO'),
+    ]);
+
+    await queue.flush();
+
+    final request = queue.pendingBatches.single.request;
+    expect(request.events.map((event) => event.eventType), ['REDO', 'REDO']);
+    expect(request.events.every((event) => event.points.isEmpty), isTrue);
+    expect(request.firstEventSequence, 46);
+    expect(request.lastEventSequence, 48);
+    expect(request.metrics.redoCountDelta, 2);
+  });
+
   test('불완전 Stroke는 버퍼에 보존하고 END 확보 후 전송한다', () async {
     final queue = _queue();
     final stroke = _stroke(startSeq: 51, endSeq: 53, startTime: 400);
