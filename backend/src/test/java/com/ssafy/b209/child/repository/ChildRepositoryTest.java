@@ -53,7 +53,7 @@ class ChildRepositoryTest {
         "별이",
         Date.valueOf(LocalDate.of(2019, 3, 15)),
         "https://cdn.example/child/3",
-        "MONGLE",
+        "BASE",
         "LOWER_ELEMENTARY",
         "IN_PROGRESS",
         "ACTIVE",
@@ -116,7 +116,7 @@ class ChildRepositoryTest {
     assertThat(summaries).hasSize(2);
     ChildSummaryProjection firstChild = summaries.get(0);
     assertThat(firstChild.getChildId()).isEqualTo(3L);
-    assertThat(firstChild.getPreferredCharacter()).isEqualTo("MONGLE");
+    assertThat(firstChild.getPreferredCharacter()).isEqualTo("BASE");
     assertThat(firstChild.getTotalActivityCount()).isEqualTo(2L);
     assertThat(firstChild.getLastActivityAt()).isEqualTo(LocalDateTime.of(2026, 7, 20, 8, 15, 0));
 

@@ -57,7 +57,7 @@ class ChildRegistrationIntegrationTest extends IntegrationTestSupport {
                       "nickname": "별이",
                       "birthDate": "2018-05-10",
                       "relationshipType": "MOTHER",
-                      "preferredCharacter": "MONGLE",
+                      "preferredCharacter": "BASE",
                       "questionDifficulty": "LOWER_ELEMENTARY",
                       "responseModes": ["VOICE", "EMOJI"]
                     }
@@ -83,7 +83,7 @@ class ChildRegistrationIntegrationTest extends IntegrationTestSupport {
         .containsEntry("question_difficulty", "LOWER_ELEMENTARY")
         .containsEntry("tutorial_status", "NOT_STARTED")
         .containsEntry("profile_status", "ACTIVE")
-        .containsEntry("preferred_character", "MONGLE")
+        .containsEntry("preferred_character", "BASE")
         .containsEntry("profile_image_url", null);
     assertThat(
             jdbcTemplate.queryForObject(
@@ -135,7 +135,7 @@ class ChildRegistrationIntegrationTest extends IntegrationTestSupport {
                       "nickname": "별이",
                       "birthDate": "2019-03-15",
                       "relationshipType": "MOTHER",
-                      "preferredCharacter": "MONGLE",
+                      "preferredCharacter": "BASE",
                       "questionDifficulty": "LOWER_ELEMENTARY",
                       "responseModes": ["VOICE", "COLOR"]
                     }
@@ -169,7 +169,7 @@ class ChildRegistrationIntegrationTest extends IntegrationTestSupport {
                     + "FROM children WHERE id = 1"))
         .containsEntry("nickname", "새별이")
         .containsEntry("birth_date", java.sql.Date.valueOf(LocalDate.of(2019, 3, 15)))
-        .containsEntry("preferred_character", "MONGLE")
+        .containsEntry("preferred_character", "BASE")
         .containsEntry("question_difficulty", "UPPER_ELEMENTARY");
     assertThat(
             jdbcTemplate.queryForObject(

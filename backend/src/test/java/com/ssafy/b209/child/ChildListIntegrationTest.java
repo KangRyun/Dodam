@@ -68,7 +68,7 @@ class ChildListIntegrationTest extends IntegrationTestSupport {
   @Test
   void returnsChildDetailWithResponseModesAndRelationship() throws Exception {
     jdbcTemplate.update(
-        "UPDATE children SET preferred_character = 'MONGLE', "
+        "UPDATE children SET preferred_character = 'BASE', "
             + "profile_image_url = 'https://cdn.example.com/child-1.png' WHERE id = 1");
     jdbcTemplate.update(
         "INSERT INTO child_response_modes (child_id, response_mode, display_order) "
@@ -85,7 +85,7 @@ class ChildListIntegrationTest extends IntegrationTestSupport {
         .andExpect(jsonPath("$.data.birthDate").value("2018-05-10"))
         .andExpect(jsonPath("$.data.age").value(expectedAge))
         .andExpect(jsonPath("$.data.profileImageUrl").value("https://cdn.example.com/child-1.png"))
-        .andExpect(jsonPath("$.data.preferredCharacter").value("MONGLE"))
+        .andExpect(jsonPath("$.data.preferredCharacter").value("BASE"))
         .andExpect(jsonPath("$.data.questionDifficulty").value("LOWER_ELEMENTARY"))
         .andExpect(jsonPath("$.data.responseModes[0]").value("EMOJI"))
         .andExpect(jsonPath("$.data.responseModes[1]").value("VOICE"))

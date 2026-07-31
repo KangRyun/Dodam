@@ -126,4 +126,18 @@ class ChildUpdateServiceTest {
     verify(childUpdateRepository)
         .updateProfileImageUrl(3L, null, LocalDateTime.of(2026, 7, 24, 3, 0));
   }
+
+  @Test
+  void explicitNullPreferredCharacterClearsTheSelection() {
+    given(childUpdateRepository.lockAccessibleChild(10L, 3L)).willReturn(true);
+    given(childQueryService.getChild(10L, 3L))
+        .willReturn(org.mockito.Mockito.mock(ChildDetailResponse.class));
+    UpdateChildRequest request = new UpdateChildRequest();
+    request.setPreferredCharacter(null);
+
+    service.update(10L, 3L, request);
+
+    verify(childUpdateRepository)
+        .updatePreferredCharacter(3L, null, LocalDateTime.of(2026, 7, 24, 3, 0));
+  }
 }

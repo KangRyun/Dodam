@@ -302,7 +302,7 @@ class ChildControllerTest {
                     LocalDate.of(2019, 3, 15),
                     7,
                     null,
-                    "MONGLE",
+                    "BASE",
                     QuestionDifficulty.LOWER_ELEMENTARY,
                     ChildTutorialStatus.NOT_STARTED,
                     ChildProfileStatus.ACTIVE,
@@ -320,7 +320,7 @@ class ChildControllerTest {
         .andExpect(jsonPath("$.data[0].childId").value(3))
         .andExpect(jsonPath("$.data[0].nickname").value("별이"))
         .andExpect(jsonPath("$.data[0].age").value(7))
-        .andExpect(jsonPath("$.data[0].preferredCharacter").value("MONGLE"))
+        .andExpect(jsonPath("$.data[0].preferredCharacter").value("BASE"))
         .andExpect(jsonPath("$.data[0].relationshipType").value("MOTHER"))
         .andExpect(
             jsonPath("$.data[0].recentActivity.lastActivityAt").value("2026-07-20T08:15:00Z"))
@@ -408,6 +408,21 @@ class ChildControllerTest {
   }
 
   @Test
+  void rejectsAnUnknownPreferredCharacterCode() throws Exception {
+    mockMvc
+        .perform(
+            patch("/api/v1/children/3")
+                .header("Authorization", "Bearer access-token")
+                .header("X-Guardian-User-Id", "10")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"preferredCharacter\":\"UNKNOWN\"}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+
+    verify(childUpdateService, never()).update(any(), any(), any());
+  }
+
+  @Test
   void deletesAChildAfterExplicitConfirmation() throws Exception {
     given(guardianResolver.resolve("Bearer access-token", "10")).willReturn(10L);
 
@@ -479,7 +494,7 @@ class ChildControllerTest {
           "nickname": "별이",
           "birthDate": "2019-03-15",
           "relationshipType": "MOTHER",
-          "preferredCharacter": "MONGLE",
+          "preferredCharacter": "BASE",
           "questionDifficulty": "LOWER_ELEMENTARY",
           "responseModes": ["VOICE", "EMOJI"]
         }
@@ -493,7 +508,7 @@ class ChildControllerTest {
         LocalDate.of(2019, 3, 15),
         7,
         GuardianRelationshipType.MOTHER,
-        "MONGLE",
+        "BASE",
         QuestionDifficulty.LOWER_ELEMENTARY,
         List.of(ResponseMode.VOICE, ResponseMode.EMOJI),
         ChildTutorialStatus.NOT_STARTED,
@@ -509,7 +524,7 @@ class ChildControllerTest {
         LocalDate.of(2019, 3, 15),
         7,
         null,
-        "MONGLE",
+        "BASE",
         QuestionDifficulty.LOWER_ELEMENTARY,
         List.of("VOICE", "EMOJI"),
         ChildTutorialStatus.NOT_STARTED,

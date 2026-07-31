@@ -9,6 +9,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Past;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import java.time.LocalDate;
 import java.util.List;
@@ -31,7 +32,12 @@ public record RegisterChildRequest(
     @Schema(description = "아동 생년월일", example = "2018-05-10") @NotNull @Past LocalDate birthDate,
     @Schema(description = "보호자와 아동의 관계 유형", example = "MOTHER") @NotNull
         GuardianRelationshipType relationshipType,
-    @Schema(description = "선호 캐릭터", example = "MONGLE") @Size(max = 50) String preferredCharacter,
+    @Schema(
+            description = "선호 캐릭터 코드",
+            example = "BASE",
+            allowableValues = {"BASE", "PRINCESS", "DINO", "OCTOPUS"})
+        @Pattern(regexp = "BASE|PRINCESS|DINO|OCTOPUS")
+        String preferredCharacter,
     @Schema(description = "대화 질문 난이도", example = "LOWER_ELEMENTARY") @NotNull
         QuestionDifficulty questionDifficulty,
     @ArraySchema(schema = @Schema(implementation = ResponseMode.class, example = "EMOJI")) @NotEmpty

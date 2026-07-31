@@ -540,7 +540,7 @@ USER-02 연락 이메일 계약:
 | `nickname` | string | O | 1~50자, 실명 대신 별칭 허용 |
 | `birthDate` | date | O | 요청일 기준 만 4~12세 |
 | `relationshipType` | string | O | `MOTHER`, `FATHER`, `GRANDPARENT`, `GUARDIAN`, `OTHER` |
-| `preferredCharacter` | string | X | 최대 50자 |
+| `preferredCharacter` | string | X | `BASE`, `PRINCESS`, `DINO`, `OCTOPUS` |
 | `questionDifficulty` | `QuestionDifficulty` | O | 연령 기본값을 제안하되 보호자가 변경 가능 |
 | `responseModes` | string[] | O | `VOICE`, `EMOJI`, `COLOR`, `PICTURE`, `TEXT` 중 1개 이상 |
 | `profileImageFileId` | string | X | 사전 업로드 파일 식별자 |
@@ -554,14 +554,23 @@ USER-02 연락 이메일 계약:
   "birthDate": "2019-03-15",
   "age": 7,
   "relationshipType": "MOTHER",
-  "preferredCharacter": "MONGLE",
+  "preferredCharacter": "BASE",
   "questionDifficulty": "LOWER_ELEMENTARY",
   "responseModes": ["VOICE", "EMOJI", "COLOR"],
   "tutorialStatus": "NOT_STARTED",
   "profileStatus": "ACTIVE",
+  "profileImageUrl": "/api/v1/child-profile-images/d20f42a9-6a55-4c91-b4b0-b6c79b8bd121/file",
   "createdAt": "2026-07-21T02:30:00Z"
 }
 ```
+
+`PATCH /api/v1/children/{childId}`는 JSON 필드 존재 여부를 구분한다.
+
+- `preferredCharacter` 생략: 기존 캐릭터를 유지한다.
+- `preferredCharacter: null`: 캐릭터 선택을 해제한다.
+- `profileImageFileId` 생략: 기존 사진을 유지한다.
+- `profileImageFileId: null`: 기존 사진을 삭제 큐에 등록하고 연결을 해제한다.
+- `profileImageUrl`은 JWT 인증이 필요한 Backend proxy 상대 경로이며 Storage Key나 presigned URL이 아니다.
 
 ### 8.4 튜토리얼 변경
 

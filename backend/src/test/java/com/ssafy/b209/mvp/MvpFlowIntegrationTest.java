@@ -237,7 +237,7 @@ class MvpFlowIntegrationTest {
                           "nickname": "별이",
                           "birthDate": "2018-05-10",
                           "relationshipType": "MOTHER",
-                          "preferredCharacter": "MONGLE",
+                          "preferredCharacter": "BASE",
                           "questionDifficulty": "LOWER_ELEMENTARY",
                           "responseModes": ["EMOJI", "VOICE"]
                         }
