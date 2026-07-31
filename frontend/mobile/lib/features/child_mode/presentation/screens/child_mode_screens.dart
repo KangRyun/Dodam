@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../../app/router/app_navigation.dart';
 import '../../../../app/router/app_router.dart';
@@ -13,7 +14,17 @@ import '../../../drawing/application/drawing_session_start_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/screens/input_method_select_screen.dart';
+import '../../data/costume_preference_store.dart';
+import '../../domain/dodam_costume.dart';
 import '../widgets/activity_guide_dialog.dart';
+
+/// 아동 홈 "놀이 언덕" 배경 장면 색(S15P11B209-750). 이 화면 전용이라 공용
+/// 토큰 대신 여기 둔다.
+const Color _skyTop = Color(0xFFBFE3F0);
+const Color _skyLow = Color(0xFFEAF6EF);
+const Color _grass = Color(0xFFA7D585);
+const Color _grassDeep = Color(0xFF8AC468);
+const Color _treeTrunk = Color(0xFFC79A66);
 
 enum _ActivityLoadStatus { loading, loaded, empty, error }
 
@@ -100,6 +111,9 @@ class ChildModeHomeScreen extends StatefulWidget {
     required this.drawingRepository,
     this.completionSnapshotProvider,
     this.htpPhotoUploadEnabled = false,
+    this.costumeStore,
+    this.preparedResolution,
+    this.autoStartPrepared = false,
     super.key,
   });
 
@@ -109,6 +123,15 @@ class ChildModeHomeScreen extends StatefulWidget {
 
   /// HTP 사진으로 시작하기 옵션 노출 여부(S15P11B209-702, 기본 꺼짐).
   final bool htpPhotoUploadEnabled;
+
+  /// 도담이 코스튬 로컬 저장소. 주입하지 않으면 기기 보안 저장소를 쓴다.
+  final CostumePreferenceStore? costumeStore;
+
+  /// 보호자가 활동 주제와 입력 방식을 선택해 미리 준비한 새 활동.
+  final DrawingSessionResolution? preparedResolution;
+
+  /// 참이면 아동 홈을 거치지 않고 준비된 활동(이어 그리기)을 바로 캔버스로 연다.
+  final bool autoStartPrepared;
 
   @override
   State<ChildModeHomeScreen> createState() => _ChildModeHomeScreenState();
@@ -128,14 +151,99 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   bool _checkingActiveSession = false;
   bool _entryResolved = false;
   bool _replaceActiveOnSelection = false;
+  DrawingSessionResolution? _preparedResolution;
+
+  late final CostumePreferenceStore _costumeStore;
+  late final PageController _costumeController;
+  DodamCostume _costume = DodamCostume.base;
 
   @override
   void initState() {
     super.initState();
+    _costumeStore = widget.costumeStore ?? CostumePreferenceStore();
+    _costumeController = PageController();
+    _preparedResolution = widget.preparedResolution;
+    // 자동 시작(이어 그리기)은 홈을 "확인 중" 상태로 두고 곧바로 캔버스를 연다.
+    _entryResolved = _preparedResolution != null && !widget.autoStartPrepared;
+    unawaited(_loadCostume());
     unawaited(_loadDrawingTypes());
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_resolveEntry());
+      if (!mounted) return;
+      if (widget.autoStartPrepared && _preparedResolution != null) {
+        unawaited(_autoStartPreparedResolution());
+      } else if (_preparedResolution == null) {
+        unawaited(_resolveEntry());
+      }
     });
+  }
+
+  /// 보호자가 이어 그리기를 고른 경우, 홈을 거치지 않고 진행 중인 캔버스를 바로 연다.
+  Future<void> _autoStartPreparedResolution() async {
+    final resolution = _preparedResolution;
+    if (resolution == null) return;
+    setState(() => _preparedResolution = null);
+    await _openResolution(resolution, autoRestoreDraft: true);
+    if (!mounted) return;
+    // 캔버스에서 뒤로 나온 경우 _openResolution 이 _resolveEntry 를 다시 예약한다.
+    // 그 밖의 경로(감정·완료 화면 등)에서는 홈을 상호작용 가능한 상태로 되돌린다.
+    if (!_entryResolved && !_checkingActiveSession) {
+      setState(() => _entryResolved = true);
+    }
+  }
+
+  @override
+  void dispose() {
+    _costumeController.dispose();
+    super.dispose();
+  }
+
+  /// 지원 그림 유형 중 기본 그림 활동 진입에 사용하는 그림일기.
+  DrawingTypeDto? get _artDiaryType {
+    for (final type in _drawingTypes) {
+      if (type.code == 'ART_DIARY') return type;
+    }
+    return null;
+  }
+
+  Future<void> _openPreparedActivity() async {
+    final resolution = _preparedResolution;
+    if (resolution == null) return;
+    setState(() => _preparedResolution = null);
+    await _openResolution(resolution, startFresh: true);
+    if (!mounted) return;
+    setState(() => _entryResolved = false);
+    unawaited(_resolveEntry());
+  }
+
+  /// 저장된 코스튬을 복원해 캐러셀 첫 페이지를 맞춘다.
+  Future<void> _loadCostume() async {
+    final code = await _costumeStore.read(widget.child.childId);
+    if (!mounted) return;
+    final costume = DodamCostume.fromCode(code);
+    if (costume == _costume) return;
+    setState(() => _costume = costume);
+    final index = DodamCostume.values.indexOf(costume);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_costumeController.hasClients) _costumeController.jumpToPage(index);
+    });
+  }
+
+  /// 캐러셀에서 코스튬이 바뀌면 상태를 갱신하고 로컬에 저장한다.
+  void _onCostumeSelected(int index) {
+    final costume = DodamCostume.values[index];
+    if (costume == _costume) return;
+    HapticFeedback.selectionClick();
+    setState(() => _costume = costume);
+    unawaited(_costumeStore.write(widget.child.childId, costume.code));
+  }
+
+  void _animateCostumeTo(int index) {
+    final clamped = index.clamp(0, DodamCostume.values.length - 1);
+    _costumeController.animateToPage(
+      clamped,
+      duration: const Duration(milliseconds: 360),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   Future<void> _resolveEntry() async {
@@ -410,6 +518,27 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       await _recoverHtpAssessmentCompletion(resolution);
       return;
     }
+    if (!resolution.activityContext.isHtp &&
+        resolution.currentStage == 'REFLECTION') {
+      await AppNavigation.pushNamed(
+        context,
+        AppRoutes.emotionSelect(widget.child.childId.toString()),
+        arguments: EmotionSelectRouteArguments(
+          sessionId: resolution.sessionId,
+          repository: widget.drawingRepository,
+          conversationId: null,
+          conversationAlreadyEnded: true,
+          conversationEndRepository: null,
+          conversationEndIdempotencyKey: null,
+          conversationEndRequest: null,
+          lastQuestionMessageId: null,
+          idempotencyKeyProvider: null,
+          activityContext: resolution.activityContext,
+          inputMethod: resolution.inputMethod,
+        ),
+      );
+      return;
+    }
     if (resolution.isUploadInput && resolution.isDrawingStage) {
       // 사진을 아직 찍지 않은 UPLOAD 세션 — Canvas로 열지 않고 사진 촬영
       // 단계를 그대로 복원한다. 새 세션·새 HTP 활동을 만들지 않는다.
@@ -557,271 +686,667 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     );
   }
 
-  Widget _buildActivitySection() {
+  /// 오른쪽 "그림 그리기" 영역. 아동 홈에서는 그림일기로 바로 진입한다.
+  Widget _buildDrawSection() {
     switch (_status) {
       case _ActivityLoadStatus.loading:
-        return const Padding(
-          padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
-          child: AppLoadingView(
-            message: '어떤 활동이 있는지 불러오고 있어요',
-            childFriendly: true,
-          ),
+        return const AppLoadingView(
+          message: '어떤 활동이 있는지 불러오고 있어요',
+          childFriendly: true,
         );
       case _ActivityLoadStatus.error:
-        return Padding(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xl),
-          child: AppErrorView(
-            title: '활동을 불러오지 못했어요',
-            message: '잠시 후 다시 시도해 주세요.',
-            onRetry: () => unawaited(_loadDrawingTypes()),
-            childFriendly: true,
-          ),
+        return AppErrorView(
+          title: '활동을 불러오지 못했어요',
+          message: '잠시 후 다시 시도해 주세요.',
+          onRetry: () => unawaited(_loadDrawingTypes()),
+          childFriendly: true,
         );
       case _ActivityLoadStatus.empty:
-        return const Padding(
-          padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
-          child: AppEmptyView(
-            title: '아직 준비된 그림 활동이 없어요',
-            message: '조금 있다가 다시 확인해 볼까?',
-            childFriendly: true,
-          ),
+        return const AppEmptyView(
+          title: '아직 준비된 그림 활동이 없어요',
+          message: '조금 있다가 다시 확인해 볼까?',
+          childFriendly: true,
         );
       case _ActivityLoadStatus.loaded:
         if (!_entryResolved) {
-          return const Padding(
-            padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
-            child: AppLoadingView(
-              message: '그리던 활동이 있는지 확인하고 있어요',
-              childFriendly: true,
-            ),
+          return const AppLoadingView(
+            message: '그리던 활동이 있는지 확인하고 있어요',
+            childFriendly: true,
           );
         }
-        return LayoutBuilder(
-          builder: (context, constraints) {
-            final narrow = constraints.maxWidth < 700;
-            final cardWidth = narrow ? constraints.maxWidth : 320.0;
-            final history = _ChildActionCard(
-              key: const ValueKey('history-action'),
-              icon: Icons.collections_bookmark_outlined,
-              title: '지난 그림 보기',
-              description: '다음 단계에서 만날 수 있어요',
-              color: AppColors.lavender,
-            );
-            return Wrap(
-              alignment: WrapAlignment.center,
-              spacing: AppSpacing.lg,
-              runSpacing: AppSpacing.md,
-              children: [
-                SizedBox(width: cardWidth, child: history),
-                for (final type in _drawingTypes)
-                  SizedBox(
-                    width: cardWidth,
-                    child: _ChildActionCard(
-                      key: ValueKey('activity-${type.drawingTypeId}'),
-                      icon: _visualForDrawingType(type.code).$1,
-                      title: type.name,
-                      description: _descriptionForDrawingType(type),
-                      color: _visualForDrawingType(type.code).$2,
-                      // 안내 팝업이 열린 동안 카드 뒤에서 무한 로딩을 돌리지 않는다.
-                      isLoading: false,
-                      onTap: _startingDrawingTypeId == null
-                          ? () => unawaited(_selectActivity(type))
-                          : null,
-                    ),
-                  ),
-              ],
-            );
-          },
+        final artDiary = _artDiaryType;
+        if (artDiary == null) {
+          return const AppEmptyView(
+            title: '아직 그림일기를 준비 중이에요',
+            message: '조금 있다가 다시 확인해 볼까?',
+            childFriendly: true,
+          );
+        }
+        // 안내 팝업이 열린 동안 버튼 뒤에서 무한 로딩(스피너)을 돌리지 않는다.
+        // 팝업이 입력을 막으므로 onTap만 비워 중복 시작을 방지한다.
+        return _DrawEntryButton(
+          key: const ValueKey('draw-entry'),
+          onTap: _startingDrawingTypeId == null
+              ? () => unawaited(
+                  _preparedResolution == null
+                      ? _selectActivity(artDiary)
+                      : _openPreparedActivity(),
+                )
+              : null,
         );
     }
   }
+
+  Widget _carousel() => _CostumeCarousel(
+    controller: _costumeController,
+    selected: _costume,
+    onSelected: _onCostumeSelected,
+    onStep: _animateCostumeTo,
+  );
+
+  Widget _title(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(
+        '${widget.child.nickname}, 오늘은 무엇을 그려 볼까?',
+        textAlign: TextAlign.center,
+        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+          color: AppColors.ink,
+          fontWeight: FontWeight.w900,
+          shadows: const [
+            Shadow(
+              color: Color(0x40FFFFFF),
+              blurRadius: 8,
+              offset: Offset(0, 1),
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: AppSpacing.xs),
+      const Text(
+        '친구를 고르고, 그림을 그려 볼까?',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: AppColors.inkMuted,
+          fontSize: 17,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    ],
+  );
+
+  Widget _backButton(BuildContext context) => Semantics(
+    button: true,
+    label: '뒤로 가기',
+    child: _Pressable(
+      onTap: () => AppRouter.goProfileSelection(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: AppColors.surface.withValues(alpha: 0.82),
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.ink.withValues(alpha: 0.08),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.arrow_back_rounded, color: AppColors.inkMuted, size: 20),
+            SizedBox(width: AppSpacing.xs),
+            Text(
+              '뒤로',
+              style: TextStyle(
+                color: AppColors.inkMuted,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Widget _guardianReturn(BuildContext context) => Tooltip(
+    message: '길게 눌러 보호자 화면으로 돌아가기',
+    child: GestureDetector(
+      key: const ValueKey('guardian-return-hold'),
+      onLongPress: () => AppRouter.goGuardianHome(context),
+      child: Container(
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: AppColors.surface.withValues(alpha: 0.82),
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.ink.withValues(alpha: 0.08),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: const Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.lock_outline_rounded,
+              color: AppColors.inkMuted,
+              size: 20,
+            ),
+            SizedBox(width: AppSpacing.xs),
+            Text(
+              '보호자 화면',
+              style: TextStyle(
+                color: AppColors.inkMuted,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  /// 태블릿(넓은 화면): 캐릭터는 언덕 위에 서고 이젤은 오른쪽에 세운다.
+  Widget _wideBody(BuildContext context) => Column(
+    children: [
+      _title(context),
+      const SizedBox(height: AppSpacing.md),
+      Expanded(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Expanded(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 440),
+                  child: _carousel(),
+                ),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.lg),
+            Expanded(
+              child: Align(
+                alignment: Alignment.bottomCenter,
+                child: Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.xl),
+                  child: _buildDrawSection(),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    ],
+  );
+
+  /// 좁은 화면: 세로로 쌓고 스크롤한다(오버플로 방지).
+  Widget _narrowBody(BuildContext context) => Center(
+    child: SingleChildScrollView(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(
+          maxWidth: AppSizes.wideContentMaxWidth,
+        ),
+        child: Column(
+          children: [
+            _title(context),
+            const SizedBox(height: AppSpacing.xl),
+            _carousel(),
+            const SizedBox(height: AppSpacing.xl),
+            _buildDrawSection(),
+          ],
+        ),
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: false,
     child: Scaffold(
-      backgroundColor: AppColors.childCanvas,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.xl),
-          child: Column(
-            children: [
-              Align(
-                alignment: Alignment.centerRight,
-                child: Tooltip(
-                  message: '길게 눌러 보호자 화면으로 돌아가기',
-                  child: GestureDetector(
-                    key: const ValueKey('guardian-return-hold'),
-                    onLongPress: () => AppRouter.goGuardianHome(context),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: AppSpacing.md,
-                        vertical: AppSpacing.sm,
-                      ),
-                      decoration: BoxDecoration(
-                        color: AppColors.surface.withValues(alpha: 0.75),
-                        borderRadius: BorderRadius.circular(AppRadius.pill),
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            Icons.lock_outline_rounded,
-                            color: AppColors.inkMuted,
-                            size: 20,
-                          ),
-                          SizedBox(width: AppSpacing.xs),
-                          Text(
-                            '보호자 화면',
-                            style: TextStyle(
-                              color: AppColors.inkMuted,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Center(
-                  child: SingleChildScrollView(
-                    child: ConstrainedBox(
-                      constraints: const BoxConstraints(
-                        maxWidth: AppSizes.wideContentMaxWidth,
-                      ),
-                      child: Column(
-                        children: [
-                          Container(
-                            width: 132,
-                            height: 132,
-                            decoration: const BoxDecoration(
-                              color: AppColors.tangerineSoft,
-                              shape: BoxShape.circle,
-                            ),
-                            child: const Icon(
-                              Icons.emoji_nature_rounded,
-                              size: 72,
-                              color: AppColors.tangerine,
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.lg),
-                          Text(
-                            '${widget.child.nickname}, 오늘은 무엇을 그려 볼까?',
-                            textAlign: TextAlign.center,
-                            style: Theme.of(context).textTheme.headlineMedium
-                                ?.copyWith(
-                                  color: AppColors.ink,
-                                  fontWeight: FontWeight.w900,
-                                ),
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                          const Text(
-                            '그리고 싶은 것을 천천히 골라도 괜찮아!',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: AppColors.inkMuted,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                          const SizedBox(height: AppSpacing.xxl),
-                          _buildActivitySection(),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    ),
-  );
-}
-
-class _ChildActionCard extends StatelessWidget {
-  const _ChildActionCard({
-    required this.icon,
-    required this.title,
-    required this.description,
-    required this.color,
-    this.isLoading = false,
-    this.onTap,
-    super.key,
-  });
-  final IconData icon;
-  final String title, description;
-  final Color color;
-  final bool isLoading;
-  final VoidCallback? onTap;
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    button: onTap != null,
-    enabled: onTap != null,
-    label: isLoading ? '$title, 활동을 준비하는 중' : '$title. $description',
-    child: ExcludeSemantics(
-      child: Material(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(AppRadius.lg),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              minHeight: 180,
-              minWidth: AppSizes.minTouchTarget,
-            ),
+      backgroundColor: _skyLow,
+      body: Stack(
+        children: [
+          Positioned.fill(child: CustomPaint(painter: _PlaygroundScene())),
+          const Positioned.fill(child: _SceneDecor()),
+          SafeArea(
             child: Padding(
               padding: const EdgeInsets.all(AppSpacing.xl),
               child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (isLoading)
-                    const SizedBox.square(
-                      dimension: 58,
-                      child: Padding(
-                        padding: EdgeInsets.all(AppSpacing.sm),
-                        child: CircularProgressIndicator(
-                          color: AppColors.tangerine,
-                        ),
+                  Stack(
+                    children: [
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: _guardianReturn(context),
                       ),
-                    )
-                  else
-                    Icon(
-                      icon,
-                      size: 58,
-                      color: onTap == null ? AppColors.disabled : color,
-                    ),
-                  const SizedBox(height: AppSpacing.md),
-                  Text(
-                    title,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: AppColors.ink,
-                      fontSize: 24,
-                      fontWeight: FontWeight.w900,
-                    ),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: _backButton(context),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(
-                    description,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: AppColors.inkMuted,
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
+                  Expanded(
+                    child: LayoutBuilder(
+                      builder: (context, constraints) =>
+                          constraints.maxWidth >= 720
+                          ? _wideBody(context)
+                          : _narrowBody(context),
                     ),
                   ),
                 ],
               ),
             ),
           ),
+        ],
+      ),
+    ),
+  );
+}
+
+/// 왼쪽 도담이 코스튬 캐러셀(S15P11B209-750).
+///
+/// 옆으로 넘기거나(스와이프) 좌우 화살표로 코스튬을 바꾼다. 큰 캐릭터가 화면의
+/// 주인공이 되도록 부드러운 받침 위에 올린다.
+class _CostumeCarousel extends StatelessWidget {
+  const _CostumeCarousel({
+    required this.controller,
+    required this.selected,
+    required this.onSelected,
+    required this.onStep,
+  });
+
+  final PageController controller;
+  final DodamCostume selected;
+  final ValueChanged<int> onSelected;
+  final ValueChanged<int> onStep;
+
+  @override
+  Widget build(BuildContext context) {
+    const costumes = DodamCostume.values;
+    final index = costumes.indexOf(selected);
+    return Semantics(
+      label: '캐릭터 고르기. 지금은 ${selected.label}. 옆으로 넘겨서 바꿀 수 있어요.',
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // 배경 장면(언덕) 위에 캐릭터가 그대로 서 있도록 카드 없이 투명하게 둔다.
+          SizedBox(
+            height: 320,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                PageView.builder(
+                  key: const ValueKey('costume-carousel'),
+                  controller: controller,
+                  onPageChanged: onSelected,
+                  itemCount: costumes.length,
+                  itemBuilder: (context, i) =>
+                      _CostumeStage(costume: costumes[i]),
+                ),
+                Positioned(
+                  left: 0,
+                  child: _CostumeChevron(
+                    key: const ValueKey('costume-prev'),
+                    icon: Icons.chevron_left_rounded,
+                    enabled: index > 0,
+                    onTap: () => onStep(index - 1),
+                  ),
+                ),
+                Positioned(
+                  right: 0,
+                  child: _CostumeChevron(
+                    key: const ValueKey('costume-next'),
+                    icon: Icons.chevron_right_rounded,
+                    enabled: index < costumes.length - 1,
+                    onTap: () => onStep(index + 1),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppColors.surface.withValues(alpha: 0.85),
+              borderRadius: BorderRadius.circular(AppRadius.pill),
+              boxShadow: [
+                BoxShadow(
+                  color: AppColors.ink.withValues(alpha: 0.08),
+                  blurRadius: 10,
+                  offset: const Offset(0, 3),
+                ),
+              ],
+            ),
+            child: Text(
+              selected.label,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                color: AppColors.ink,
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              for (var i = 0; i < costumes.length; i++)
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOut,
+                  margin: const EdgeInsets.symmetric(horizontal: 4),
+                  width: i == index ? 26 : 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: i == index
+                        ? AppColors.brandYellow
+                        : Colors.white.withValues(alpha: 0.7),
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(
+                      color: AppColors.brandYellow.withValues(alpha: 0.5),
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 캐러셀 한 페이지 — 언덕 위에 선 캐릭터 한 명(배경 투명).
+class _CostumeStage extends StatelessWidget {
+  const _CostumeStage({required this.costume});
+
+  final DodamCostume costume;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    // 좌우 화살표와 겹치지 않도록 여백을 둔다.
+    padding: const EdgeInsets.fromLTRB(56, 6, 56, 8),
+    child: Column(
+      children: [
+        Expanded(
+          child: Image.asset(
+            costume.asset,
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.medium,
+          ),
+        ),
+        // 발밑에 깔리는 부드러운 땅 그림자 — 언덕에 서 있는 느낌을 준다.
+        Container(
+          width: 108,
+          height: 18,
+          decoration: BoxDecoration(
+            gradient: RadialGradient(
+              colors: [
+                AppColors.ink.withValues(alpha: 0.18),
+                AppColors.ink.withValues(alpha: 0),
+              ],
+            ),
+            borderRadius: BorderRadius.circular(9),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// 캐러셀 좌우 이동 버튼. 끝에서는 흐려지고 눌리지 않는다.
+class _CostumeChevron extends StatelessWidget {
+  const _CostumeChevron({
+    required this.icon,
+    required this.enabled,
+    required this.onTap,
+    super.key,
+  });
+
+  final IconData icon;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => AnimatedOpacity(
+    duration: const Duration(milliseconds: 180),
+    opacity: enabled ? 1 : 0.35,
+    child: _Pressable(
+      onTap: enabled ? onTap : null,
+      child: Container(
+        width: 52,
+        height: 52,
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          shape: BoxShape.circle,
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.ink.withValues(alpha: 0.12),
+              blurRadius: 12,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Icon(icon, size: 34, color: AppColors.ink),
+      ),
+    ),
+  );
+}
+
+/// 오른쪽 "그림 그리기" 이젤 — 그림일기로 들어가는 큰 아동 친화 CTA.
+///
+/// 언덕 위에 세운 그림판(이젤)처럼 보이도록 아래에 다리 두 개를 둔다.
+class _DrawEntryButton extends StatelessWidget {
+  const _DrawEntryButton({required this.onTap, super.key});
+
+  final VoidCallback? onTap;
+
+  static Widget _leg(double angle) => Transform.rotate(
+    angle: angle,
+    child: Container(
+      width: 13,
+      height: 46,
+      decoration: BoxDecoration(
+        color: _treeTrunk,
+        borderRadius: BorderRadius.circular(6),
+      ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    enabled: onTap != null,
+    label: '그림 그리기. 오늘 있었던 일을 그려볼까?',
+    child: ExcludeSemantics(
+      child: _Pressable(
+        onTap: onTap,
+        child: Stack(
+          clipBehavior: Clip.none,
+          alignment: Alignment.center,
+          children: [
+            Positioned(bottom: -16, left: 40, child: _leg(0.26)),
+            Positioned(bottom: -16, right: 40, child: _leg(-0.26)),
+            Container(
+              constraints: const BoxConstraints(
+                minWidth: 230,
+                maxWidth: 320,
+                minHeight: 300,
+              ),
+              padding: const EdgeInsets.fromLTRB(26, 22, 26, 26),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [Colors.white, AppColors.brandYellowSoft],
+                ),
+                borderRadius: BorderRadius.circular(30),
+                border: Border.all(color: AppColors.brandYellow, width: 5),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.brandYellow.withValues(alpha: 0.45),
+                    blurRadius: 26,
+                    offset: const Offset(0, 16),
+                  ),
+                ],
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Image.asset(
+                    'assets/characters/costumes/dodam_draw.png',
+                    height: 150,
+                    fit: BoxFit.contain,
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  const Text(
+                    '그림 그리기',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 30,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  const Text(
+                    '오늘 있었던 일을 그려볼까?',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.inkMuted,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
+    ),
+  );
+}
+
+/// 눌림 즉시 살짝 줄어드는 피드백(포인터 다운에 반응). 비활성이면 반응하지 않는다.
+class _Pressable extends StatefulWidget {
+  const _Pressable({required this.child, this.onTap});
+
+  final Widget child;
+  final VoidCallback? onTap;
+
+  @override
+  State<_Pressable> createState() => _PressableState();
+}
+
+class _PressableState extends State<_Pressable> {
+  bool _down = false;
+
+  void _setDown(bool value) {
+    if (widget.onTap == null || _down == value) return;
+    setState(() => _down = value);
+  }
+
+  @override
+  Widget build(BuildContext context) => GestureDetector(
+    onTapDown: (_) => _setDown(true),
+    onTapUp: (_) => _setDown(false),
+    onTapCancel: () => _setDown(false),
+    onTap: widget.onTap,
+    child: AnimatedScale(
+      scale: _down ? 0.96 : 1,
+      duration: const Duration(milliseconds: 110),
+      curve: Curves.easeOut,
+      child: widget.child,
+    ),
+  );
+}
+
+/// 아동 홈 배경 — 하늘 그라데이션과 언덕(해·구름·나무는 손그림 이미지로 얹는다).
+class _PlaygroundScene extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    final sky = Paint()
+      ..shader = const LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: [_skyTop, _skyLow],
+        stops: [0.0, 0.66],
+      ).createShader(Rect.fromLTWH(0, 0, w, h));
+    canvas.drawRect(Offset.zero & size, sky);
+
+    final hillTop = h * 0.62;
+    final hill = Path()
+      ..moveTo(0, hillTop + h * 0.05)
+      ..quadraticBezierTo(w * 0.5, hillTop - h * 0.10, w, hillTop + h * 0.03)
+      ..lineTo(w, h)
+      ..lineTo(0, h)
+      ..close();
+    final grass = Paint()
+      ..shader =
+          const LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [_grass, _grassDeep],
+          ).createShader(
+            Rect.fromLTWH(0, hillTop - h * 0.1, w, h - hillTop + h * 0.1),
+          );
+    canvas.drawPath(hill, grass);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// 하늘·언덕 위에 얹는 손그림 장식(해·구름·나무). 장식이라 터치를 막지 않는다.
+class _SceneDecor extends StatelessWidget {
+  const _SceneDecor();
+
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+    child: LayoutBuilder(
+      builder: (context, c) {
+        final w = c.maxWidth;
+        final h = c.maxHeight;
+        return Stack(
+          children: [
+            Positioned(
+              top: -h * 0.03,
+              left: -w * 0.03,
+              width: w * 0.32,
+              child: Image.asset('assets/scene/sun.png', fit: BoxFit.contain),
+            ),
+            Positioned(
+              top: h * 0.14,
+              right: w * 0.06,
+              width: w * 0.17,
+              child: Image.asset('assets/scene/cloud.png', fit: BoxFit.contain),
+            ),
+            Positioned(
+              bottom: h * 0.08,
+              right: w * 0.02,
+              height: h * 0.34,
+              child: Image.asset('assets/scene/tree.png', fit: BoxFit.contain),
+            ),
+          ],
+        );
+      },
     ),
   );
 }
