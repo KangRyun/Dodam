@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:dodam/app/router/app_router.dart';
 import 'package:dodam/core/network/network.dart';
 import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
@@ -177,6 +178,121 @@ void main() {
 
     expect(events.first.seq, 1);
     expect(repository.lastBatch?.batchSequence, 1);
+  });
+
+  test('같은 Draft metadata 요청은 하나로 합쳐진다', () async {
+    final pending = Completer<DraftRecoveryDto?>();
+    final repository = _DraftRepository(pendingDraft: pending);
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    final controller = DrawingDraftRestoreController(
+      sessionId: 42,
+      repository: repository,
+      syncCoordinator: sync,
+    );
+    addTearDown(sync.dispose);
+    addTearDown(controller.dispose);
+
+    final first = controller.load();
+    final second = controller.load();
+    await Future<void>.delayed(Duration.zero);
+
+    expect(repository.getDraftCalls, 1);
+    pending.complete(_draftRecovery);
+    await Future.wait([first, second]);
+    expect(controller.status, DrawingDraftRestoreStatus.found);
+  });
+
+  test('새로 시작한 뒤 늦은 Draft metadata 응답은 화면을 덮지 않는다', () async {
+    final pending = Completer<DraftRecoveryDto?>();
+    final repository = _DraftRepository(pendingDraft: pending);
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    final controller = DrawingDraftRestoreController(
+      sessionId: 42,
+      repository: repository,
+      syncCoordinator: sync,
+    );
+    addTearDown(sync.dispose);
+    addTearDown(controller.dispose);
+
+    final loading = controller.load();
+    await Future<void>.delayed(Duration.zero);
+    controller.startNewDrawing();
+    pending.complete(_draftRecovery);
+    await loading;
+
+    expect(controller.status, DrawingDraftRestoreStatus.newDrawing);
+    expect(controller.draft, isNull);
+    expect(controller.backgroundImage, isNull);
+  });
+
+  test('새로 시작한 뒤 늦은 preview 응답은 화면을 덮지 않는다', () async {
+    final pendingPreview = Completer<Uint8List>();
+    final repository = _DraftRepository(pendingPreview: pendingPreview);
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    final controller = DrawingDraftRestoreController(
+      sessionId: 42,
+      repository: repository,
+      syncCoordinator: sync,
+    );
+    addTearDown(sync.dispose);
+    addTearDown(controller.dispose);
+    await controller.load();
+
+    final first = controller.continueDrawing();
+    final duplicate = controller.continueDrawing();
+    await Future<void>.delayed(Duration.zero);
+    expect(repository.downloadDraftPreviewCalls, 1);
+
+    controller.startNewDrawing();
+    pendingPreview.complete(_validPng);
+    await Future.wait([first, duplicate]);
+
+    expect(controller.status, DrawingDraftRestoreStatus.newDrawing);
+    expect(controller.backgroundImage, isNull);
+  });
+
+  test('dispose 뒤 늦은 metadata 응답은 상태 알림을 발생시키지 않는다', () async {
+    final pending = Completer<DraftRecoveryDto?>();
+    final repository = _DraftRepository(pendingDraft: pending);
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    final controller = DrawingDraftRestoreController(
+      sessionId: 42,
+      repository: repository,
+      syncCoordinator: sync,
+    );
+    addTearDown(sync.dispose);
+    var notifications = 0;
+    controller.addListener(() => notifications += 1);
+    final loading = controller.load();
+    await Future<void>.delayed(Duration.zero);
+    final notificationsAtDispose = notifications;
+
+    controller.dispose();
+    pending.complete(_draftRecovery);
+    await loading;
+
+    expect(notifications, notificationsAtDispose);
+  });
+
+  test('403 Draft 조회 실패는 영구 오류로 분류해 retry를 숨긴다', () async {
+    final repository = _DraftRepository(
+      scenario: _Scenario.failure,
+      failure: ApiResponseFailure(statusCode: 403, error: null),
+    );
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    final controller = DrawingDraftRestoreController(
+      sessionId: 42,
+      repository: repository,
+      syncCoordinator: sync,
+    );
+    addTearDown(sync.dispose);
+    addTearDown(controller.dispose);
+
+    await controller.load();
+
+    expect(controller.status, DrawingDraftRestoreStatus.queryFailed);
+    expect(controller.failure, isA<ApiResponseFailure>());
+    expect(controller.canRetry, isFalse);
   });
 
   testWidgets('복구 이미지를 배경으로 표시하고 새 Stroke와 Undo를 분리한다', (tester) async {
@@ -360,6 +476,348 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
     sync.dispose();
   });
+
+  testWidgets('다른 화면 비율에서도 raster와 새 stroke를 같은 snapshot에 합성한다', (
+    tester,
+  ) async {
+    final repository = _DraftRepository();
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    final restore = await _pumpScreen(
+      tester,
+      repository: repository,
+      sync: sync,
+      size: const Size(500, 900),
+    );
+    await tester.tap(find.byKey(const ValueKey('draft-primary-action')));
+    await tester.runAsync(
+      () => _waitFor(() => restore.backgroundImage != null),
+    );
+    expect(restore.backgroundImage, isNotNull);
+    restore.markImageLoaded();
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const ValueKey('drawing-canvas')));
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    final gesture = await tester.startGesture(center);
+    await gesture.moveBy(const Offset(20, 16));
+    await gesture.up();
+    await tester.pump();
+    await tester.runAsync(sync.saveDraftNow);
+
+    expect(
+      find.byKey(const ValueKey('draft-background-image')),
+      findsOneWidget,
+    );
+    expect(_canvas(tester).strokes, hasLength(1));
+    expect(repository.savedImage?.bytes, isNotEmpty);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    sync.dispose();
+  });
+
+  testWidgets('Draft 선택 overlay는 작은 화면과 textScale 2.0에서 overflow가 없다', (
+    tester,
+  ) async {
+    final repository = _DraftRepository();
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    await _pumpScreen(
+      tester,
+      repository: repository,
+      sync: sync,
+      size: const Size(420, 760),
+      textScaler: const TextScaler.linear(2),
+    );
+
+    expect(find.byKey(const ValueKey('draft-start-new')), findsOneWidget);
+    expect(find.byKey(const ValueKey('draft-primary-action')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+    sync.dispose();
+  });
+
+  testWidgets('paused에서 batch와 Draft를 저장하고 resumed 뒤 autosave를 재개한다', (
+    tester,
+  ) async {
+    final repository = _DraftRepository();
+    final sync = DrawingSyncCoordinator(
+      sessionId: 42,
+      repository: repository,
+      policy: const DrawingSyncPolicy(
+        flushInterval: Duration(hours: 1),
+        autosaveInterval: Duration(milliseconds: 100),
+      ),
+    );
+    await _pumpScreen(
+      tester,
+      repository: repository,
+      sync: sync,
+      startFresh: true,
+    );
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    final first = await tester.startGesture(center);
+    await first.moveBy(const Offset(24, 18));
+    await first.up();
+    await tester.pump();
+
+    await tester.runAsync(() async {
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+      await _waitFor(() => repository.saveDraftCalls == 1);
+    });
+    await tester.pumpAndSettle();
+
+    expect(repository.strokeBatchCalls, 1);
+    expect(repository.saveDraftCalls, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    final second = await tester.startGesture(center + const Offset(30, 20));
+    await second.moveBy(const Offset(24, 18));
+    await second.up();
+    await tester.pump(const Duration(milliseconds: 150));
+    await tester.runAsync(() => _waitFor(() => repository.saveDraftCalls == 2));
+    await tester.pumpAndSettle();
+
+    expect(repository.saveDraftCalls, 2);
+    await tester.pumpWidget(const SizedBox.shrink());
+    sync.dispose();
+  });
+
+  testWidgets('시스템 뒤로 가기는 batch와 Draft 저장 뒤 한 번만 pop한다', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = _DraftRepository();
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    addTearDown(sync.dispose);
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final observer = _CountingNavigatorObserver();
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigatorKey,
+        navigatorObservers: [observer],
+        home: const Scaffold(body: Text('이전 화면')),
+      ),
+    );
+    final routeResult = navigatorKey.currentState!.push<DrawingRouteResult>(
+      MaterialPageRoute<DrawingRouteResult>(
+        builder: (_) => DrawingScreen(
+          childId: '3',
+          sessionId: 42,
+          drawingRepository: repository,
+          syncCoordinator: sync,
+          startFresh: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    final gesture = await tester.startGesture(center);
+    await gesture.moveBy(const Offset(24, 18));
+    await gesture.up();
+    await tester.pump();
+
+    await tester.runAsync(() async {
+      await tester.binding.handlePopRoute();
+      await _waitFor(() => repository.saveDraftCalls == 1);
+    });
+    await tester.pumpAndSettle();
+
+    expect(repository.strokeBatchCalls, 1);
+    expect(repository.saveDraftCalls, 1);
+    expect(observer.popCount, 1);
+    expect(await routeResult, DrawingRouteResult.backToActivityEntry);
+    expect(find.text('이전 화면'), findsOneWidget);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
+  });
+
+  testWidgets('빠른 시스템 back과 AppBar back은 저장 뒤 route를 한 번만 pop한다', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final pendingSave = Completer<DraftSaveResponseDto>();
+    final repository = _DraftRepository(pendingSave: pendingSave);
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    addTearDown(sync.dispose);
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final observer = _CountingNavigatorObserver();
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigatorKey,
+        navigatorObservers: [observer],
+        home: const Scaffold(body: Text('이전 화면')),
+      ),
+    );
+    final routeResult = navigatorKey.currentState!.push<DrawingRouteResult>(
+      MaterialPageRoute<DrawingRouteResult>(
+        builder: (_) => DrawingScreen(
+          childId: '3',
+          sessionId: 42,
+          drawingRepository: repository,
+          syncCoordinator: sync,
+          startFresh: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    final gesture = await tester.startGesture(center);
+    await gesture.moveBy(const Offset(24, 18));
+    await gesture.up();
+    await tester.pump();
+
+    await tester.tap(find.byTooltip('뒤로 가기'));
+    await tester.pump();
+    unawaited(tester.binding.handlePopRoute());
+    await tester.pump();
+    await tester.runAsync(() => _waitFor(() => repository.saveDraftCalls == 1));
+
+    expect(observer.popCount, 0);
+    expect(repository.saveDraftCalls, 1);
+    pendingSave.complete(
+      const DraftSaveResponseDto(
+        drawingAssetId: 1,
+        assetVersion: 1,
+        lastEventSequence: 2,
+        savedAt: '2026-07-22T00:00:00Z',
+        expiresAt: null,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(observer.popCount, 1);
+    expect(await routeResult, DrawingRouteResult.backToActivityEntry);
+    expect(find.text('이전 화면'), findsOneWidget);
+  });
+
+  testWidgets('저장 실패 후 나가기를 선택해도 route를 한 번만 pop한다', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final repository = _DraftRepository(
+      saveFailure: const ApiTransportFailure(
+        type: ApiTransportFailureType.connection,
+      ),
+    );
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    addTearDown(sync.dispose);
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final observer = _CountingNavigatorObserver();
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigatorKey,
+        navigatorObservers: [observer],
+        home: const Scaffold(body: Text('이전 화면')),
+      ),
+    );
+    final routeResult = navigatorKey.currentState!.push<DrawingRouteResult>(
+      MaterialPageRoute<DrawingRouteResult>(
+        builder: (_) => DrawingScreen(
+          childId: '3',
+          sessionId: 42,
+          drawingRepository: repository,
+          syncCoordinator: sync,
+          startFresh: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    final gesture = await tester.startGesture(center);
+    await gesture.moveBy(const Offset(24, 18));
+    await gesture.up();
+    await tester.pump();
+
+    unawaited(tester.binding.handlePopRoute());
+    await tester.runAsync(() => _waitFor(() => repository.saveDraftCalls == 1));
+    await tester.pumpAndSettle();
+    expect(find.text('그림을 저장하지 못했어요'), findsOneWidget);
+    await tester.tap(find.text('저장하지 않고 나가기'));
+    await tester.pumpAndSettle();
+
+    expect(repository.saveDraftCalls, 1);
+    expect(observer.popCount, 2);
+    expect(observer.pagePopCount, 1);
+    expect(await routeResult, DrawingRouteResult.backToActivityEntry);
+    expect(find.text('이전 화면'), findsOneWidget);
+  });
+
+  testWidgets('저장 중 화면이 dispose되면 늦은 완료가 route를 pop하지 않는다', (tester) async {
+    tester.view.physicalSize = const Size(1200, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final pendingSave = Completer<DraftSaveResponseDto>();
+    final repository = _DraftRepository(pendingSave: pendingSave);
+    final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+    addTearDown(sync.dispose);
+    final navigatorKey = GlobalKey<NavigatorState>();
+    final observer = _CountingNavigatorObserver();
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: navigatorKey,
+        navigatorObservers: [observer],
+        home: const Scaffold(body: Text('이전 화면')),
+      ),
+    );
+    unawaited(
+      navigatorKey.currentState!.push<void>(
+        MaterialPageRoute(
+          builder: (_) => DrawingScreen(
+            childId: '3',
+            sessionId: 42,
+            drawingRepository: repository,
+            syncCoordinator: sync,
+            startFresh: true,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    final gesture = await tester.startGesture(center);
+    await gesture.moveBy(const Offset(24, 18));
+    await gesture.up();
+    await tester.pump();
+
+    unawaited(tester.binding.handlePopRoute());
+    await tester.runAsync(() => _waitFor(() => repository.saveDraftCalls == 1));
+    await tester.pumpWidget(const SizedBox.shrink());
+    pendingSave.complete(
+      const DraftSaveResponseDto(
+        drawingAssetId: 1,
+        assetVersion: 1,
+        lastEventSequence: 2,
+        savedAt: '2026-07-22T00:00:00Z',
+        expiresAt: null,
+      ),
+    );
+    await tester.pump();
+
+    expect(observer.popCount, 0);
+    expect(tester.takeException(), isNull);
+  });
+}
+
+Future<void> _waitFor(bool Function() condition) async {
+  for (var attempt = 0; attempt < 50; attempt += 1) {
+    if (condition()) return;
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+  }
 }
 
 Future<DrawingDraftRestoreController> _pumpScreen(
@@ -368,8 +826,10 @@ Future<DrawingDraftRestoreController> _pumpScreen(
   required DrawingSyncCoordinator sync,
   bool autoRestoreDraft = false,
   bool startFresh = false,
+  Size size = const Size(1200, 800),
+  TextScaler textScaler = TextScaler.noScaling,
 }) async {
-  tester.view.physicalSize = const Size(1200, 800);
+  tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
@@ -382,14 +842,17 @@ Future<DrawingDraftRestoreController> _pumpScreen(
   addTearDown(restore.dispose);
   await tester.pumpWidget(
     MaterialApp(
-      home: DrawingScreen(
-        childId: '3',
-        sessionId: 42,
-        drawingRepository: repository,
-        syncCoordinator: sync,
-        draftRestoreController: restore,
-        autoRestoreDraft: autoRestoreDraft,
-        startFresh: startFresh,
+      home: MediaQuery(
+        data: MediaQueryData(textScaler: textScaler),
+        child: DrawingScreen(
+          childId: '3',
+          sessionId: 42,
+          drawingRepository: repository,
+          syncCoordinator: sync,
+          draftRestoreController: restore,
+          autoRestoreDraft: autoRestoreDraft,
+          startFresh: startFresh,
+        ),
       ),
     ),
   );
@@ -428,11 +891,19 @@ final class _DraftRepository implements DrawingRepository {
     this.scenario = _Scenario.found,
     this.nullSequences = false,
     this.pendingDraft,
+    this.pendingPreview,
+    this.failure,
+    this.pendingSave,
+    this.saveFailure,
   });
 
   _Scenario scenario;
   final bool nullSequences;
   final Completer<DraftRecoveryDto?>? pendingDraft;
+  final Completer<Uint8List>? pendingPreview;
+  final Object? failure;
+  final Completer<DraftSaveResponseDto>? pendingSave;
+  final Object? saveFailure;
   int getDraftCalls = 0;
   int downloadDraftPreviewCalls = 0;
   int deleteDraftCalls = 0;
@@ -440,13 +911,16 @@ final class _DraftRepository implements DrawingRepository {
   StrokeBatchRequestDto? lastBatch;
   BinaryUploadDto? savedImage;
   int? savedLastEventSequence;
+  int strokeBatchCalls = 0;
+  int saveDraftCalls = 0;
 
   @override
   Future<DraftRecoveryDto?> getDraft(int sessionId) async {
     getDraftCalls += 1;
     if (pendingDraft case final pending?) return pending.future;
     if (scenario == _Scenario.failure) {
-      throw const ApiTransportFailure(type: ApiTransportFailureType.connection);
+      throw failure ??
+          const ApiTransportFailure(type: ApiTransportFailureType.connection);
     }
     if (scenario == _Scenario.absent) {
       throw ApiResponseFailure(
@@ -460,10 +934,11 @@ final class _DraftRepository implements DrawingRepository {
       );
     }
     if (scenario == _Scenario.empty) return null;
-    return DraftRecoveryDto(
-      previewUrl: _asset.fileUrl,
+    if (!nullSequences) return _draftRecovery;
+    return const DraftRecoveryDto(
+      previewUrl: 'https://example.test/draft.png',
       canvasState: DraftCanvasStateDto(
-        lastEventSequence: nullSequences ? null : 1105,
+        lastEventSequence: null,
         toolState: null,
         viewport: null,
         clientSavedAt: '2026-07-21T09:41:10Z',
@@ -476,8 +951,10 @@ final class _DraftRepository implements DrawingRepository {
   Future<Uint8List> downloadDraftPreview(String previewUrl) async {
     downloadDraftPreviewCalls += 1;
     downloadedPreviewUrl = previewUrl;
+    if (pendingPreview case final pending?) return pending.future;
     if (scenario == _Scenario.failure) {
-      throw const ApiTransportFailure(type: ApiTransportFailureType.connection);
+      throw failure ??
+          const ApiTransportFailure(type: ApiTransportFailureType.connection);
     }
     return _validPng;
   }
@@ -490,6 +967,7 @@ final class _DraftRepository implements DrawingRepository {
     int sessionId,
     StrokeBatchRequestDto request,
   ) async {
+    strokeBatchCalls += 1;
     lastBatch = request;
     return StrokeBatchResponseDto(
       batchId: 1,
@@ -504,10 +982,14 @@ final class _DraftRepository implements DrawingRepository {
   Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
     BinaryUploadDto preview,
-    DraftCanvasStateDto canvasState,
-  ) async {
+    DraftCanvasStateDto canvasState, {
+    required String idempotencyKey,
+  }) async {
+    saveDraftCalls += 1;
     savedImage = preview;
     savedLastEventSequence = canvasState.lastEventSequence;
+    if (pendingSave case final pending?) return pending.future;
+    if (saveFailure case final failure?) throw failure;
     return DraftSaveResponseDto(
       drawingAssetId: 1,
       assetVersion: 3,
@@ -574,3 +1056,26 @@ const _asset = DrawingAssetDto(
   widthPx: 100,
   heightPx: 100,
 );
+
+const _draftRecovery = DraftRecoveryDto(
+  previewUrl: 'https://example.test/draft.png',
+  canvasState: DraftCanvasStateDto(
+    lastEventSequence: 1105,
+    toolState: null,
+    viewport: null,
+    clientSavedAt: '2026-07-21T09:41:10Z',
+  ),
+  assetVersion: 3,
+);
+
+final class _CountingNavigatorObserver extends NavigatorObserver {
+  int popCount = 0;
+  int pagePopCount = 0;
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    popCount += 1;
+    if (route is PageRoute<dynamic>) pagePopCount += 1;
+    super.didPop(route, previousRoute);
+  }
+}

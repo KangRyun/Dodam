@@ -25,7 +25,12 @@ import '../../../conversation/conversation.dart';
 import '../../domain/models/activity_conversation_turn.dart';
 import '../../domain/repositories/activity_repository.dart';
 
-enum _DrawingCompletePhase { canvasCapture, request, contractValidation }
+enum _DrawingCompletePhase {
+  strokeFlush,
+  canvasCapture,
+  request,
+  contractValidation,
+}
 
 void _debugDrawingCompleteFailure({
   required _DrawingCompletePhase phase,
@@ -36,6 +41,11 @@ void _debugDrawingCompleteFailure({
   if (!kDebugMode) return;
   final exceptionType = error.runtimeType;
   switch (phase) {
+    case _DrawingCompletePhase.strokeFlush:
+      debugPrint(
+        '[DRAWING_COMPLETE] stroke_flush_failure '
+        'exceptionType=$exceptionType',
+      );
     case _DrawingCompletePhase.canvasCapture:
       debugPrint(
         '[DRAWING_COMPLETE] canvas_capture_failure '
@@ -194,6 +204,9 @@ class _DrawingScreenState extends State<DrawingScreen>
   late final DrawingDraftRestoreController _draftRestoreController;
   late final bool _ownsDraftRestoreController;
   bool _isCompleting = false;
+  bool _isLeaving = false;
+  bool _appInBackground = false;
+  Future<bool>? _lifecycleSave;
   String? _pendingCompletionKey;
   BinaryUploadDto? _pendingCompletionImage;
   DrawingCompleteMetadataDto? _pendingCompletionMetadata;
@@ -293,6 +306,8 @@ class _DrawingScreenState extends State<DrawingScreen>
           sessionId: widget.sessionId,
           repository: widget.drawingRepository,
           policy: widget.syncPolicy,
+          idempotencyKeyProvider:
+              widget.idempotencyKeyProvider ?? _createIdempotencyKey,
         );
     _syncCoordinator.addListener(_handleSyncChanged);
     _ownsObjectDetectionController = widget.objectDetectionController == null;
@@ -479,11 +494,42 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _appInBackground = false;
+      if (!_canvasLocked) _syncCoordinator.resume();
+      return;
+    }
     if (state == AppLifecycleState.inactive ||
         state == AppLifecycleState.paused ||
         state == AppLifecycleState.detached ||
         state == AppLifecycleState.hidden) {
+      _appInBackground = true;
       unawaited(_questionTtsController?.stop());
+      if (_canvasLocked) return;
+      _syncCoordinator.pause();
+      if (_isCompleting || _syncCoordinator.isCompleting) return;
+      _finishActiveStrokeForSave();
+      final existing = _lifecycleSave;
+      if (existing == null) {
+        final saving = _syncCoordinator.flushAndSaveDraft();
+        _lifecycleSave = saving;
+        unawaited(
+          saving.then<void>(
+            (_) {
+              if (identical(_lifecycleSave, saving)) {
+                _lifecycleSave = null;
+              }
+            },
+            onError: (Object _, StackTrace _) {
+              // lifecycle callback은 저장을 시작할 뿐 완료를 보장할 수 없다.
+              // 예상 밖 오류도 unhandled zone error로 확산시키지 않는다.
+              if (identical(_lifecycleSave, saving)) {
+                _lifecycleSave = null;
+              }
+            },
+          ),
+        );
+      }
     }
   }
 
@@ -994,6 +1040,24 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
   }
 
+  /// lifecycle·route 경계에서 pointer up을 더 이상 받을 수 없는 active stroke를
+  /// 현재 점까지 완결한다. 이후 늦은 pointer up은 pointer id가 지워져 무시된다.
+  void _finishActiveStrokeForSave() {
+    final stroke = _activeStroke;
+    if (stroke == null) return;
+    final canvasSize = _canvasBoundaryKey.currentContext?.size;
+    setState(() {
+      _completedStrokes.add(stroke);
+      _redoStrokes.clear();
+      _activeStroke = null;
+      _activePointer = null;
+    });
+    if (canvasSize != null) {
+      _syncCoordinator.recordStroke(stroke, canvasSize);
+      _objectDetectionController?.onDrawingInputEnded();
+    }
+  }
+
   void _undoLastStroke() {
     if (_activeStroke != null || _completedStrokes.isEmpty) return;
     _invalidatePendingCompletion();
@@ -1030,6 +1094,10 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   Future<BinaryUploadDto?> _captureCanvasSnapshot() async {
+    // 아직 journal에 완결 event로 기록되지 않은 active stroke를 Draft 이미지에만
+    // 넣으면 lastEventSequence와 PNG가 어긋난다. lifecycle·route 경계는 먼저
+    // [_finishActiveStrokeForSave]로 완결하고, 주기 autosave는 다음 tick을 기다린다.
+    if (_activeStroke != null) return null;
     final boundary = _canvasBoundaryKey.currentContext?.findRenderObject();
     if (boundary is! RenderRepaintBoundary) return null;
     final image = await boundary.toImage(pixelRatio: 1);
@@ -1037,7 +1105,6 @@ class _DrawingScreenState extends State<DrawingScreen>
     image.dispose();
     if (data == null) return null;
     final bytes = data.buffer.asUint8List();
-    if (bytes.length > 10 * 1024 * 1024) return null;
     return BinaryUploadDto(
       bytes: bytes,
       fileName: 'drawing-draft.png',
@@ -1083,12 +1150,19 @@ class _DrawingScreenState extends State<DrawingScreen>
       return;
     }
     setState(() => _isCompleting = true);
+    final completionBarrier = _syncCoordinator.beginCompletion();
     var completionPhase = _DrawingCompletePhase.canvasCapture;
     var snapshotWasNull = false;
     DrawingStageCompleteResponseDto? completionResponse;
     try {
-      // TODO(API): Define the authoritative pending-batch/Draft flush order
-      // before coordinating a forced flush here.
+      completionPhase = _DrawingCompletePhase.strokeFlush;
+      await completionBarrier;
+      if (!mounted) return;
+      final batchesFlushed = await _syncCoordinator.flushStrokeBatches();
+      if (!batchesFlushed) {
+        throw StateError('Pending stroke batch could not be saved.');
+      }
+      completionPhase = _DrawingCompletePhase.canvasCapture;
       final snapshot =
           _pendingCompletionImage ??
           await (widget.completionSnapshotProvider ?? _captureCanvasSnapshot)();
@@ -1159,7 +1233,15 @@ class _DrawingScreenState extends State<DrawingScreen>
         );
       }
     } finally {
-      if (mounted) setState(() => _isCompleting = false);
+      if (!_drawingStageFinished) {
+        _syncCoordinator.cancelCompletion();
+      }
+      if (mounted) {
+        if (!_drawingStageFinished && !_appInBackground) {
+          _syncCoordinator.resume();
+        }
+        setState(() => _isCompleting = false);
+      }
     }
   }
 
@@ -1359,191 +1441,241 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   Future<void> _stopTtsAndPop() async {
-    await _questionTtsController?.stop();
-    if (mounted) {
-      Navigator.of(context).pop(DrawingRouteResult.backToActivityEntry);
+    if (_isLeaving || _isCompleting) return;
+    setState(() => _isLeaving = true);
+    try {
+      await _questionTtsController?.stop();
+      await _voiceRecordingController?.cancel();
+      if (!_canvasLocked &&
+          widget.sessionId != null &&
+          widget.drawingRepository != null) {
+        _syncCoordinator.pause();
+        _finishActiveStrokeForSave();
+        final saved = await _syncCoordinator.flushAndSaveDraft();
+        if (!mounted) return;
+        if (!saved) {
+          final leaveAnyway = await showAppConfirmDialog(
+            context: context,
+            title: '그림을 저장하지 못했어요',
+            message: '연결을 확인하고 다시 시도하거나, 저장하지 않고 나갈 수 있어요.',
+            confirmLabel: '저장하지 않고 나가기',
+            cancelLabel: '그림으로 돌아가기',
+            illustration: const Icon(
+              Icons.cloud_off_rounded,
+              size: 56,
+              color: AppColors.tangerine,
+            ),
+          );
+          if (leaveAnyway != true || !mounted) {
+            if (!_appInBackground) _syncCoordinator.resume();
+            return;
+          }
+        }
+      }
+      if (mounted) {
+        Navigator.of(context).pop(DrawingRouteResult.backToActivityEntry);
+      }
+    } finally {
+      if (mounted) setState(() => _isLeaving = false);
     }
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    backgroundColor: AppColors.childCanvas,
-    appBar: AppTopBar(
-      title: _activityTitle,
-      onBack: () => unawaited(_stopTtsAndPop()),
-      actions: [
-        IconButton.filledTonal(
-          key: const ValueKey('redo-action'),
-          tooltip: _activeStroke != null
-              ? '그리는 중에는 다시 실행할 수 없어요'
-              : '취소한 그림 획 다시 실행',
-          onPressed: _activeStroke == null && _redoStrokes.isNotEmpty
-              ? _redoLastStroke
-              : null,
-          icon: const Icon(Icons.redo_rounded),
-          style: IconButton.styleFrom(
-            minimumSize: const Size.square(AppSizes.iconButton),
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.only(right: AppSpacing.md),
-          child: IconButton.filledTonal(
-            key: const ValueKey('undo-action'),
+  Widget build(BuildContext context) => PopScope(
+    canPop: false,
+    onPopInvokedWithResult: (didPop, _) {
+      if (!didPop) unawaited(_stopTtsAndPop());
+    },
+    child: Scaffold(
+      backgroundColor: AppColors.childCanvas,
+      appBar: AppTopBar(
+        title: _activityTitle,
+        onBack: () => unawaited(_stopTtsAndPop()),
+        actions: [
+          IconButton.filledTonal(
+            key: const ValueKey('redo-action'),
             tooltip: _activeStroke != null
-                ? '그리는 중에는 실행 취소할 수 없어요'
-                : '마지막 그림 획 실행 취소',
-            onPressed: _activeStroke == null && _completedStrokes.isNotEmpty
-                ? _undoLastStroke
+                ? '그리는 중에는 다시 실행할 수 없어요'
+                : '취소한 그림 획 다시 실행',
+            onPressed: _activeStroke == null && _redoStrokes.isNotEmpty
+                ? _redoLastStroke
                 : null,
-            icon: const Icon(Icons.undo_rounded),
+            icon: const Icon(Icons.redo_rounded),
             style: IconButton.styleFrom(
               minimumSize: const Size.square(AppSizes.iconButton),
             ),
           ),
-        ),
-      ],
-    ),
-    body: SafeArea(
-      top: false,
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final restoreStatus = _draftRestoreController.status;
-          final autoRestoreInProgress =
-              widget.autoRestoreDraft &&
-              (restoreStatus == DrawingDraftRestoreStatus.loading ||
-                  restoreStatus == DrawingDraftRestoreStatus.found ||
-                  restoreStatus == DrawingDraftRestoreStatus.loadingImage);
-          final canvas = _CanvasPanel(
-            repaintBoundaryKey: _canvasBoundaryKey,
-            strokes: _visibleStrokes,
-            onPointerDown: _startStroke,
-            onPointerMove: _extendStroke,
-            onPointerUp: _endStroke,
-            backgroundImage: _draftRestoreController.backgroundImage,
-            inputEnabled: !_canvasLocked && _draftRestoreController.canDraw,
-            showRestoreOverlay:
-                !_canvasLocked && !_draftRestoreController.canDraw,
-            autoRestoreInProgress: autoRestoreInProgress,
-            onBackgroundLoaded: _draftRestoreController.markImageLoaded,
-            onBackgroundError: _draftRestoreController.markImageFailed,
-            restoreStatus: restoreStatus,
-            onContinue: _draftRestoreController.continueDrawing,
-            onStartNew: _draftRestoreController.startNewDrawing,
-            onRetryQuery: () => unawaited(_draftRestoreController.load()),
-            onRetryImage: _draftRestoreController.retryImage,
-            question: _questionDisplayController.visibleQuestion,
-            showQuestion:
-                _questionDisplayController.isVisible &&
-                _activePointer == null &&
-                (_canvasLocked || _draftRestoreController.canDraw),
-            selectedQuestionOptionId:
-                _questionSelectionController.selectedOptionId,
-            onQuestionOptionSelected: (optionId) {
-              unawaited(_selectQuestionOption(optionId));
-            },
-            answerSubmissionStatus:
-                _answerSubmissionController?.status ??
-                OptionAnswerSubmissionStatus.idle,
-            questionSkipStatus:
-                _questionSkipController?.status ?? QuestionSkipStatus.idle,
-            conversationEndStatus:
-                _conversationEndController?.status ??
-                ConversationEndStatus.idle,
-            showQuestionResponseActions:
-                _questionSelectionController.optionsVisible,
-            onQuestionSkip: () {
-              unawaited(_skipQuestion());
-            },
-            onConversationEnd: () {
-              unawaited(_confirmAndEndConversation());
-            },
-            voiceRecordingController: _voiceRecordingController,
-            voiceAnswerUploadStatus:
-                _voiceAnswerUploadController?.status ??
-                VoiceAnswerUploadStatus.idle,
-            onRetryVoiceAnswerUpload: _retryVoiceAnswerUpload,
-            // 실패했지만 다시 시도해도 같은 결과인 조작은 잠근다.
-            answerRetryable:
-                _answerSubmissionController?.status !=
-                    OptionAnswerSubmissionStatus.failure ||
-                _answerSubmissionController?.canRetry == true,
-            answerOptionsEnabled:
-                _answerSubmissionController?.canSelectOption ?? true,
-            skipRetryable:
-                _questionSkipController?.status != QuestionSkipStatus.failure ||
-                _questionSkipController?.canRetry == true,
-            endRetryable:
-                _conversationEndController?.status !=
-                    ConversationEndStatus.failure ||
-                _conversationEndController?.canRetry == true,
-            voiceRetryable: _voiceAnswerUploadController?.canRetry ?? false,
-            sttResultController: _sttResultController,
-          );
-          final sidePanel = _DrawingSidePanel(
-            selectedTool: _tool,
-            selectedColor: _color,
-            selectedThickness: _thickness,
-            onToolChanged: (tool) => setState(() => _tool = tool),
-            onColorChanged: (color) => setState(() => _color = color),
-            onThicknessChanged: (value) => setState(() => _thickness = value),
-            canComplete:
-                !_canvasLocked &&
-                !_isCompleting &&
-                _activeStroke == null &&
-                _hasDrawingContent,
-            isCompleting: _isCompleting,
-            onComplete: () => unawaited(_confirmAndComplete()),
-            saveStatus: _syncCoordinator.saveStatus,
-            onRetrySave: () => unawaited(_syncCoordinator.retry()),
-            questionController: _questionController,
-            conversationStartError: _conversationStartError,
-            htpAdvanceError: _htpAdvanceError,
-            onRetryConversationStart: () =>
-                unawaited(_retryConversationStart()),
-            onRetryHtpAdvance: () => unawaited(_retryHtpAdvance()),
-            stageErrorAnchorKey: _stageErrorAnchorKey,
-          );
-          final screenSize = MediaQuery.sizeOf(context);
-          final useCompactLandscape =
-              screenSize.width >= 640 && screenSize.height <= 520;
-          final useTabletLayout =
-              !useCompactLandscape && screenSize.width >= 900;
-          if (useCompactLandscape || useTabletLayout) {
-            final padding = useCompactLandscape ? AppSpacing.sm : AppSpacing.lg;
-            final panelWidth = useCompactLandscape ? 240.0 : 320.0;
-            return Padding(
-              key: ValueKey(
-                useCompactLandscape
-                    ? 'drawing-layout-compact-landscape'
-                    : 'drawing-layout-tablet',
+          Padding(
+            padding: const EdgeInsets.only(right: AppSpacing.md),
+            child: IconButton.filledTonal(
+              key: const ValueKey('undo-action'),
+              tooltip: _activeStroke != null
+                  ? '그리는 중에는 실행 취소할 수 없어요'
+                  : '마지막 그림 획 실행 취소',
+              onPressed: _activeStroke == null && _completedStrokes.isNotEmpty
+                  ? _undoLastStroke
+                  : null,
+              icon: const Icon(Icons.undo_rounded),
+              style: IconButton.styleFrom(
+                minimumSize: const Size.square(AppSizes.iconButton),
               ),
-              padding: EdgeInsets.all(padding),
-              child: Row(
+            ),
+          ),
+        ],
+      ),
+      body: SafeArea(
+        top: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final restoreStatus = _draftRestoreController.status;
+            final autoRestoreInProgress =
+                widget.autoRestoreDraft &&
+                (restoreStatus == DrawingDraftRestoreStatus.loading ||
+                    restoreStatus == DrawingDraftRestoreStatus.found ||
+                    restoreStatus == DrawingDraftRestoreStatus.loadingImage);
+            final canvas = _CanvasPanel(
+              repaintBoundaryKey: _canvasBoundaryKey,
+              strokes: _visibleStrokes,
+              onPointerDown: _startStroke,
+              onPointerMove: _extendStroke,
+              onPointerUp: _endStroke,
+              backgroundImage: _draftRestoreController.backgroundImage,
+              inputEnabled:
+                  !_canvasLocked &&
+                  !_isCompleting &&
+                  !_isLeaving &&
+                  _draftRestoreController.canDraw,
+              showRestoreOverlay:
+                  !_canvasLocked && !_draftRestoreController.canDraw,
+              autoRestoreInProgress: autoRestoreInProgress,
+              onBackgroundLoaded: _draftRestoreController.markImageLoaded,
+              onBackgroundError: _draftRestoreController.markImageFailed,
+              restoreStatus: restoreStatus,
+              restoreRetryable: _draftRestoreController.canRetry,
+              onContinue: _draftRestoreController.continueDrawing,
+              onStartNew: _draftRestoreController.startNewDrawing,
+              onRetryQuery: () => unawaited(_draftRestoreController.load()),
+              onRetryImage: _draftRestoreController.retryImage,
+              question: _questionDisplayController.visibleQuestion,
+              showQuestion:
+                  _questionDisplayController.isVisible &&
+                  _activePointer == null &&
+                  (_canvasLocked || _draftRestoreController.canDraw),
+              selectedQuestionOptionId:
+                  _questionSelectionController.selectedOptionId,
+              onQuestionOptionSelected: (optionId) {
+                unawaited(_selectQuestionOption(optionId));
+              },
+              answerSubmissionStatus:
+                  _answerSubmissionController?.status ??
+                  OptionAnswerSubmissionStatus.idle,
+              questionSkipStatus:
+                  _questionSkipController?.status ?? QuestionSkipStatus.idle,
+              conversationEndStatus:
+                  _conversationEndController?.status ??
+                  ConversationEndStatus.idle,
+              showQuestionResponseActions:
+                  _questionSelectionController.optionsVisible,
+              onQuestionSkip: () {
+                unawaited(_skipQuestion());
+              },
+              onConversationEnd: () {
+                unawaited(_confirmAndEndConversation());
+              },
+              voiceRecordingController: _voiceRecordingController,
+              voiceAnswerUploadStatus:
+                  _voiceAnswerUploadController?.status ??
+                  VoiceAnswerUploadStatus.idle,
+              onRetryVoiceAnswerUpload: _retryVoiceAnswerUpload,
+              // 실패했지만 다시 시도해도 같은 결과인 조작은 잠근다.
+              answerRetryable:
+                  _answerSubmissionController?.status !=
+                      OptionAnswerSubmissionStatus.failure ||
+                  _answerSubmissionController?.canRetry == true,
+              answerOptionsEnabled:
+                  _answerSubmissionController?.canSelectOption ?? true,
+              skipRetryable:
+                  _questionSkipController?.status !=
+                      QuestionSkipStatus.failure ||
+                  _questionSkipController?.canRetry == true,
+              endRetryable:
+                  _conversationEndController?.status !=
+                      ConversationEndStatus.failure ||
+                  _conversationEndController?.canRetry == true,
+              voiceRetryable: _voiceAnswerUploadController?.canRetry ?? false,
+              sttResultController: _sttResultController,
+            );
+            final sidePanel = _DrawingSidePanel(
+              selectedTool: _tool,
+              selectedColor: _color,
+              selectedThickness: _thickness,
+              onToolChanged: (tool) => setState(() => _tool = tool),
+              onColorChanged: (color) => setState(() => _color = color),
+              onThicknessChanged: (value) => setState(() => _thickness = value),
+              canComplete:
+                  !_canvasLocked &&
+                  !_isCompleting &&
+                  _activeStroke == null &&
+                  _hasDrawingContent,
+              isCompleting: _isCompleting,
+              onComplete: () => unawaited(_confirmAndComplete()),
+              saveStatus: _syncCoordinator.saveStatus,
+              canRetrySave: _syncCoordinator.canRetrySave,
+              onRetrySave: () => unawaited(_syncCoordinator.retry()),
+              questionController: _questionController,
+              conversationStartError: _conversationStartError,
+              htpAdvanceError: _htpAdvanceError,
+              onRetryConversationStart: () =>
+                  unawaited(_retryConversationStart()),
+              onRetryHtpAdvance: () => unawaited(_retryHtpAdvance()),
+              stageErrorAnchorKey: _stageErrorAnchorKey,
+            );
+            final screenSize = MediaQuery.sizeOf(context);
+            final useCompactLandscape =
+                screenSize.width >= 640 && screenSize.height <= 520;
+            final useTabletLayout =
+                !useCompactLandscape && screenSize.width >= 900;
+            if (useCompactLandscape || useTabletLayout) {
+              final padding = useCompactLandscape
+                  ? AppSpacing.sm
+                  : AppSpacing.lg;
+              final panelWidth = useCompactLandscape ? 240.0 : 320.0;
+              return Padding(
+                key: ValueKey(
+                  useCompactLandscape
+                      ? 'drawing-layout-compact-landscape'
+                      : 'drawing-layout-tablet',
+                ),
+                padding: EdgeInsets.all(padding),
+                child: Row(
+                  children: [
+                    Expanded(flex: 3, child: canvas),
+                    SizedBox(
+                      width: useCompactLandscape
+                          ? AppSpacing.sm
+                          : AppSpacing.lg,
+                    ),
+                    SizedBox(width: panelWidth, child: sidePanel),
+                  ],
+                ),
+              );
+            }
+            final canvasHeight = constraints.maxWidth >= 720
+                ? min(520.0, max(420.0, constraints.maxHeight * 0.55))
+                : 420.0;
+            return SingleChildScrollView(
+              key: const ValueKey('drawing-layout-stacked'),
+              padding: const EdgeInsets.all(AppSpacing.md),
+              child: Column(
                 children: [
-                  Expanded(flex: 3, child: canvas),
-                  SizedBox(
-                    width: useCompactLandscape ? AppSpacing.sm : AppSpacing.lg,
-                  ),
-                  SizedBox(width: panelWidth, child: sidePanel),
+                  SizedBox(height: canvasHeight, child: canvas),
+                  const SizedBox(height: AppSpacing.md),
+                  sidePanel,
                 ],
               ),
             );
-          }
-          final canvasHeight = constraints.maxWidth >= 720
-              ? min(520.0, max(420.0, constraints.maxHeight * 0.55))
-              : 420.0;
-          return SingleChildScrollView(
-            key: const ValueKey('drawing-layout-stacked'),
-            padding: const EdgeInsets.all(AppSpacing.md),
-            child: Column(
-              children: [
-                SizedBox(height: canvasHeight, child: canvas),
-                const SizedBox(height: AppSpacing.md),
-                sidePanel,
-              ],
-            ),
-          );
-        },
+          },
+        ),
       ),
     ),
   );
@@ -1563,6 +1695,7 @@ class _CanvasPanel extends StatelessWidget {
     required this.onBackgroundLoaded,
     required this.onBackgroundError,
     required this.restoreStatus,
+    required this.restoreRetryable,
     required this.onContinue,
     required this.onStartNew,
     required this.onRetryQuery,
@@ -1604,6 +1737,7 @@ class _CanvasPanel extends StatelessWidget {
   final VoidCallback onBackgroundLoaded;
   final VoidCallback onBackgroundError;
   final DrawingDraftRestoreStatus restoreStatus;
+  final bool restoreRetryable;
   final VoidCallback onContinue;
   final VoidCallback onStartNew;
   final VoidCallback onRetryQuery;
@@ -1701,6 +1835,7 @@ class _CanvasPanel extends StatelessWidget {
             if (showRestoreOverlay)
               _DraftRestoreOverlay(
                 status: restoreStatus,
+                canRetry: restoreRetryable,
                 autoRestoreInProgress: autoRestoreInProgress,
                 onContinue: onContinue,
                 onStartNew: onStartNew,
@@ -1717,6 +1852,7 @@ class _CanvasPanel extends StatelessWidget {
 class _DraftRestoreOverlay extends StatelessWidget {
   const _DraftRestoreOverlay({
     required this.status,
+    required this.canRetry,
     required this.autoRestoreInProgress,
     required this.onContinue,
     required this.onStartNew,
@@ -1725,6 +1861,7 @@ class _DraftRestoreOverlay extends StatelessWidget {
   });
 
   final DrawingDraftRestoreStatus status;
+  final bool canRetry;
   final bool autoRestoreInProgress;
   final VoidCallback onContinue;
   final VoidCallback onStartNew;
@@ -1754,73 +1891,83 @@ class _DraftRestoreOverlay extends StatelessWidget {
 
     return ColoredBox(
       color: const Color(0x66000000),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 420),
-          child: Card(
-            margin: const EdgeInsets.all(AppSpacing.lg),
-            child: Padding(
-              padding: const EdgeInsets.all(AppSpacing.lg),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (loading) ...[
-                    Image.asset(
-                      'assets/characters/dodam_resume_loading.png',
-                      key: const ValueKey('draft-restore-loading-character'),
-                      width: 150,
-                      height: 120,
-                      fit: BoxFit.contain,
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    const SizedBox(
-                      width: 28,
-                      height: 28,
-                      child: CircularProgressIndicator(strokeWidth: 3),
-                    ),
-                    const SizedBox(height: AppSpacing.md),
-                  ],
-                  Text(
-                    title,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: AppColors.ink,
-                      fontSize: 22,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text(description, textAlign: TextAlign.center),
-                  if (!loading) ...[
-                    const SizedBox(height: AppSpacing.lg),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: AppButton(
-                            key: const ValueKey('draft-start-new'),
-                            label: '새로 시작하기',
-                            onPressed: onStartNew,
+      child: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(AppSpacing.lg),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Card(
+                margin: EdgeInsets.zero,
+                child: Padding(
+                  padding: const EdgeInsets.all(AppSpacing.lg),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (loading) ...[
+                        Image.asset(
+                          'assets/characters/dodam_resume_loading.png',
+                          key: const ValueKey(
+                            'draft-restore-loading-character',
                           ),
+                          width: 150,
+                          height: 120,
+                          fit: BoxFit.contain,
                         ),
-                        const SizedBox(width: AppSpacing.sm),
-                        Expanded(
-                          child: AppButton(
-                            key: const ValueKey('draft-primary-action'),
-                            label: imageFailure || queryFailure
-                                ? '다시 시도'
-                                : '이어서 그리기',
-                            variant: AppButtonVariant.child,
-                            onPressed: imageFailure
-                                ? onRetryImage
-                                : queryFailure
-                                ? onRetryQuery
-                                : onContinue,
-                          ),
+                        const SizedBox(height: AppSpacing.sm),
+                        const SizedBox(
+                          width: 28,
+                          height: 28,
+                          child: CircularProgressIndicator(strokeWidth: 3),
+                        ),
+                        const SizedBox(height: AppSpacing.md),
+                      ],
+                      Text(
+                        title,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: AppColors.ink,
+                          fontSize: 22,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.xs),
+                      Text(description, textAlign: TextAlign.center),
+                      if (!loading) ...[
+                        const SizedBox(height: AppSpacing.lg),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: AppButton(
+                                key: const ValueKey('draft-start-new'),
+                                label: '새로 시작하기',
+                                onPressed: onStartNew,
+                              ),
+                            ),
+                            if ((!imageFailure && !queryFailure) ||
+                                canRetry) ...[
+                              const SizedBox(width: AppSpacing.sm),
+                              Expanded(
+                                child: AppButton(
+                                  key: const ValueKey('draft-primary-action'),
+                                  label: imageFailure || queryFailure
+                                      ? '다시 시도'
+                                      : '이어서 그리기',
+                                  variant: AppButtonVariant.child,
+                                  onPressed: imageFailure
+                                      ? onRetryImage
+                                      : queryFailure
+                                      ? onRetryQuery
+                                      : onContinue,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ],
-                    ),
-                  ],
-                ],
+                    ],
+                  ),
+                ),
               ),
             ),
           ),
@@ -1842,6 +1989,7 @@ class _DrawingSidePanel extends StatelessWidget {
     required this.isCompleting,
     required this.onComplete,
     required this.saveStatus,
+    required this.canRetrySave,
     required this.onRetrySave,
     required this.onRetryConversationStart,
     required this.onRetryHtpAdvance,
@@ -1861,6 +2009,7 @@ class _DrawingSidePanel extends StatelessWidget {
   final bool isCompleting;
   final VoidCallback onComplete;
   final DrawingSaveStatus saveStatus;
+  final bool canRetrySave;
   final VoidCallback onRetrySave;
   final AiQuestionController? questionController;
 
@@ -2023,7 +2172,11 @@ class _DrawingSidePanel extends StatelessWidget {
             ),
           ],
           const SizedBox(height: AppSpacing.lg),
-          _SaveStatusIndicator(status: saveStatus, onRetry: onRetrySave),
+          _SaveStatusIndicator(
+            status: saveStatus,
+            canRetry: canRetrySave,
+            onRetry: onRetrySave,
+          ),
           const SizedBox(height: AppSpacing.sm),
           AppButton(
             key: const ValueKey('drawing-complete'),
@@ -2130,9 +2283,14 @@ class _AiStageRetryCard extends StatelessWidget {
 }
 
 class _SaveStatusIndicator extends StatelessWidget {
-  const _SaveStatusIndicator({required this.status, required this.onRetry});
+  const _SaveStatusIndicator({
+    required this.status,
+    required this.canRetry,
+    required this.onRetry,
+  });
 
   final DrawingSaveStatus status;
+  final bool canRetry;
   final VoidCallback onRetry;
 
   @override
@@ -2173,7 +2331,7 @@ class _SaveStatusIndicator extends StatelessWidget {
               style: TextStyle(color: color, fontWeight: FontWeight.w700),
             ),
           ),
-          if (status == DrawingSaveStatus.failed)
+          if (status == DrawingSaveStatus.failed && canRetry)
             IconButton(
               key: const ValueKey('save-retry'),
               tooltip: '저장 다시 시도',

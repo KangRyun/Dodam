@@ -42,10 +42,18 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
   DrawingDraftRestoreStatus _status;
   DraftRecoveryDto? _draft;
   ImageProvider<Object>? _backgroundImage;
+  Object? _failure;
+  bool _canRetry = false;
+  Future<void>? _loadInFlight;
+  Future<void>? _imageInFlight;
+  int _generation = 0;
+  bool _disposed = false;
 
   DrawingDraftRestoreStatus get status => _status;
   DraftRecoveryDto? get draft => _draft;
   ImageProvider<Object>? get backgroundImage => _backgroundImage;
+  Object? get failure => _failure;
+  bool get canRetry => _canRetry;
   bool get canDraw => switch (_status) {
     DrawingDraftRestoreStatus.unavailable ||
     DrawingDraftRestoreStatus.noDraft ||
@@ -54,13 +62,38 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
     _ => false,
   };
 
-  Future<void> load({bool autoRestore = false}) async {
+  Future<void> load({bool autoRestore = false}) {
+    if (_disposed) return Future.value();
+    final existing = _loadInFlight;
+    if (existing != null) return existing;
     final id = sessionId;
     final dataSource = repository;
-    if (id == null || dataSource == null) return;
+    if (id == null || dataSource == null) return Future.value();
+    final generation = ++_generation;
+    final future = _load(
+      generation: generation,
+      capturedSessionId: id,
+      dataSource: dataSource,
+      autoRestore: autoRestore,
+    );
+    _loadInFlight = future;
+    return future.whenComplete(() {
+      if (identical(_loadInFlight, future)) _loadInFlight = null;
+    });
+  }
+
+  Future<void> _load({
+    required int generation,
+    required int capturedSessionId,
+    required DrawingRepository dataSource,
+    required bool autoRestore,
+  }) async {
+    _failure = null;
+    _canRetry = false;
     _setStatus(DrawingDraftRestoreStatus.loading);
     try {
-      final result = await dataSource.getDraft(id);
+      final result = await dataSource.getDraft(capturedSessionId);
+      if (!_isCurrent(generation, capturedSessionId)) return;
       if (result == null) {
         _draft = null;
         _setStatus(DrawingDraftRestoreStatus.noDraft);
@@ -76,32 +109,90 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
         result.canvasState.lastEventSequence,
       );
       _setStatus(DrawingDraftRestoreStatus.found);
-      if (autoRestore) await continueDrawing();
+      if (autoRestore) {
+        await _loadPreview(
+          generation: generation,
+          capturedSessionId: capturedSessionId,
+          capturedDraft: result,
+          dataSource: dataSource,
+        );
+      }
     } on ApiResponseFailure catch (failure) {
+      if (!_isCurrent(generation, capturedSessionId)) return;
       if (failure.error?.code == 'DRAWING_404_004') {
         _draft = null;
         _setStatus(DrawingDraftRestoreStatus.noDraft);
       } else {
+        _failure = failure;
+        _canRetry = ApiFailurePresentation.of(failure).canRetry;
         _setStatus(DrawingDraftRestoreStatus.queryFailed);
       }
-    } on Object {
+    } on Object catch (error) {
+      if (!_isCurrent(generation, capturedSessionId)) return;
+      _failure = error;
+      _canRetry = _isRetryable(error);
       _setStatus(DrawingDraftRestoreStatus.queryFailed);
     }
   }
 
-  Future<void> continueDrawing() async {
-    final url = _draft?.previewUrl;
+  Future<void> continueDrawing() {
+    if (_disposed) return Future.value();
+    final existing = _imageInFlight;
+    if (existing != null) return existing;
+    final capturedDraft = _draft;
+    final capturedSessionId = sessionId;
     final dataSource = repository;
-    if (url == null || url.isEmpty || dataSource == null) {
+    if (capturedDraft == null ||
+        capturedSessionId == null ||
+        dataSource == null) {
+      _canRetry = false;
       _setStatus(DrawingDraftRestoreStatus.imageFailed);
+      return Future.value();
+    }
+    final generation = ++_generation;
+    final future = _loadPreview(
+      generation: generation,
+      capturedSessionId: capturedSessionId,
+      capturedDraft: capturedDraft,
+      dataSource: dataSource,
+    );
+    _imageInFlight = future;
+    return future.whenComplete(() {
+      if (identical(_imageInFlight, future)) _imageInFlight = null;
+    });
+  }
+
+  Future<void> _loadPreview({
+    required int generation,
+    required int capturedSessionId,
+    required DraftRecoveryDto capturedDraft,
+    required DrawingRepository dataSource,
+  }) async {
+    final url = capturedDraft.previewUrl;
+    if (url.isEmpty) {
+      if (_isCurrentDraft(generation, capturedSessionId, capturedDraft)) {
+        _failure = const FormatException('Draft preview URL is empty.');
+        _canRetry = false;
+        _setStatus(DrawingDraftRestoreStatus.imageFailed);
+      }
       return;
     }
+    _failure = null;
+    _canRetry = false;
     _setStatus(DrawingDraftRestoreStatus.loadingImage);
     try {
       final bytes = await dataSource.downloadDraftPreview(url);
+      if (!_isCurrentDraft(generation, capturedSessionId, capturedDraft)) {
+        return;
+      }
       _backgroundImage = _imageProviderFactory(bytes);
-      notifyListeners();
-    } on Object {
+      _safeNotify();
+    } on Object catch (error) {
+      if (!_isCurrentDraft(generation, capturedSessionId, capturedDraft)) {
+        return;
+      }
+      _failure = error;
+      _canRetry = _isRetryable(error);
       _backgroundImage = null;
       _setStatus(DrawingDraftRestoreStatus.imageFailed);
     }
@@ -111,27 +202,41 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
   ///
   /// 입력 가능 여부는 화면의 단계 잠금이 결정하며 이 메서드는 파일 조회만 맡는다.
   Future<void> loadReadOnlyImage(String fileUrl) async {
+    if (_disposed) return;
     final dataSource = repository;
     if (fileUrl.isEmpty || dataSource == null) return;
+    final capturedSessionId = sessionId;
+    if (capturedSessionId == null) return;
+    final generation = ++_generation;
+    _failure = null;
+    _canRetry = false;
     _setStatus(DrawingDraftRestoreStatus.loadingImage);
     try {
       final bytes = await dataSource.downloadDraftPreview(fileUrl);
+      if (!_isCurrent(generation, capturedSessionId)) return;
       _backgroundImage = _imageProviderFactory(bytes);
-      notifyListeners();
-    } on Object {
+      _safeNotify();
+    } on Object catch (error) {
+      if (!_isCurrent(generation, capturedSessionId)) return;
+      _failure = error;
+      _canRetry = _isRetryable(error);
       _backgroundImage = null;
       _setStatus(DrawingDraftRestoreStatus.imageFailed);
     }
   }
 
   void markImageLoaded() {
+    if (_disposed) return;
     if (_status == DrawingDraftRestoreStatus.loadingImage) {
       _setStatus(DrawingDraftRestoreStatus.restored);
     }
   }
 
   void markImageFailed() {
+    if (_disposed) return;
     if (_status == DrawingDraftRestoreStatus.loadingImage) {
+      _failure = const FormatException('Draft preview could not be decoded.');
+      _canRetry = false;
       _backgroundImage = null;
       _setStatus(DrawingDraftRestoreStatus.imageFailed);
     }
@@ -140,13 +245,54 @@ final class DrawingDraftRestoreController extends ChangeNotifier {
   Future<void> retryImage() => continueDrawing();
 
   void startNewDrawing() {
+    if (_disposed) return;
+    _generation += 1;
+    _loadInFlight = null;
+    _imageInFlight = null;
+    _failure = null;
+    _canRetry = false;
+    _draft = null;
     _backgroundImage = null;
-    // TODO(API): Define whether starting over should delete the server Draft.
+    // 이 화면 안에서는 기존 active session을 폐기할 안전한 원자 계약이 없다.
+    // Child home의 "새로 그리기"는 replaceActive 세션 생성 성공 뒤 서버가 기존
+    // 세션을 ABANDONED로 바꾸므로, 여기서는 복구 요청만 무효화하고 삭제하지 않는다.
     _setStatus(DrawingDraftRestoreStatus.newDrawing);
   }
 
+  bool _isCurrent(int generation, int capturedSessionId) =>
+      !_disposed && generation == _generation && capturedSessionId == sessionId;
+
+  bool _isCurrentDraft(
+    int generation,
+    int capturedSessionId,
+    DraftRecoveryDto capturedDraft,
+  ) =>
+      _isCurrent(generation, capturedSessionId) &&
+      identical(_draft, capturedDraft) &&
+      _draft?.assetVersion == capturedDraft.assetVersion &&
+      _draft?.canvasState.lastEventSequence ==
+          capturedDraft.canvasState.lastEventSequence;
+
+  bool _isRetryable(Object error) =>
+      error is! FormatException && ApiFailurePresentation.of(error).canRetry;
+
   void _setStatus(DrawingDraftRestoreStatus value) {
+    if (_disposed) return;
     _status = value;
-    notifyListeners();
+    _safeNotify();
+  }
+
+  void _safeNotify() {
+    if (!_disposed) notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    if (_disposed) return;
+    _disposed = true;
+    _generation += 1;
+    _loadInFlight = null;
+    _imageInFlight = null;
+    super.dispose();
   }
 }

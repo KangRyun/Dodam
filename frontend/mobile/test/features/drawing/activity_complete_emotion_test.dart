@@ -40,11 +40,13 @@ void main() {
         viewport: null,
         clientSavedAt: '2026-07-22T10:00:00Z',
       ),
+      idempotencyKey: 'draft-save-key-0001',
     );
 
     final request = recorder.requests.single;
     expect(request.method, 'PUT');
     expect(request.uri.path, '/api/v1/drawing-sessions/42/draft');
+    expect(request.headers['Idempotency-Key'], 'draft-save-key-0001');
     final form = request.data as FormData;
     expect(form.fields, isEmpty);
     expect(
@@ -309,6 +311,107 @@ void main() {
 
     expect(repository.completionMetadata.single.drawingDurationMs, 1);
     coordinator.dispose();
+  });
+
+  testWidgets('완료 API보다 pending stroke batch를 먼저 전송한다', (tester) async {
+    final calls = <String>[];
+    final repository = _CompletionRepository(calls: calls);
+    await _pumpDrawing(tester, repository: repository);
+    await _drawStroke(tester);
+
+    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다 그렸어요'));
+    await tester.pumpAndSettle();
+
+    expect(calls.take(2), ['stroke', 'drawing-complete']);
+    expect(repository.strokeCalls, 1);
+    expect(repository.completeCalls, 1);
+  });
+
+  testWidgets('stroke batch 실패 시 완료 API를 호출하지 않고 Canvas를 유지한다', (tester) async {
+    final repository = _CompletionRepository(
+      strokeError: const ApiTransportFailure(
+        type: ApiTransportFailureType.connection,
+      ),
+    );
+    await _pumpDrawing(tester, repository: repository);
+    await _drawStroke(tester);
+
+    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다 그렸어요'));
+    await tester.pumpAndSettle();
+
+    expect(repository.strokeCalls, 1);
+    expect(repository.completeCalls, 0);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+    expect(find.textContaining('그림은 그대로'), findsOneWidget);
+  });
+
+  for (final lifecycleState in [
+    AppLifecycleState.inactive,
+    AppLifecycleState.hidden,
+    AppLifecycleState.paused,
+    AppLifecycleState.detached,
+  ]) {
+    testWidgets('완료 시작 뒤 ${lifecycleState.name}가 와도 Draft PUT을 시작하지 않는다', (
+      tester,
+    ) async {
+      final completion = Completer<DrawingStageCompleteResponseDto>();
+      final repository = _CompletionRepository(completer: completion);
+      await _pumpDrawing(tester, repository: repository);
+      await _drawStroke(tester);
+
+      await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('다 그렸어요'));
+      await tester.pump();
+      expect(repository.completeCalls, 1);
+
+      tester.binding.handleAppLifecycleStateChanged(lifecycleState);
+      await tester.pump();
+
+      expect(repository.draftCalls, 0);
+      completion.complete(_completeResponse);
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpAndSettle();
+      expect(repository.completeCalls, 1);
+    });
+  }
+
+  testWidgets('완료 시작 전 in-flight Draft를 기다린 뒤 complete를 한 번 호출한다', (
+    tester,
+  ) async {
+    final draft = Completer<DraftSaveResponseDto>();
+    final repository = _CompletionRepository(draftCompleter: draft);
+    final coordinator = DrawingSyncCoordinator(
+      sessionId: 42,
+      repository: repository,
+    );
+    addTearDown(coordinator.dispose);
+    await _pumpDrawing(
+      tester,
+      repository: repository,
+      syncCoordinator: coordinator,
+    );
+    await _drawStroke(tester);
+    coordinator.start(snapshotProvider: () async => _png);
+    final saving = coordinator.saveDraftNow();
+    await _pumpUntil(tester, () => repository.draftCalls == 1);
+
+    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다 그렸어요'));
+    await tester.pump();
+
+    expect(repository.completeCalls, 0);
+    draft.complete(_draftSaveResponse);
+    await saving;
+    await tester.pumpAndSettle();
+
+    expect(repository.draftCalls, 1);
+    expect(repository.completeCalls, 1);
   });
 
   testWidgets('양수 경과 시간은 Drawing Complete metadata에 그대로 유지한다', (tester) async {
@@ -1135,6 +1238,22 @@ const _png = BinaryUploadDto(
   mimeType: 'image/png',
 );
 
+const _draftSaveResponse = DraftSaveResponseDto(
+  drawingAssetId: 1,
+  assetVersion: 1,
+  lastEventSequence: 2,
+  savedAt: '2026-07-22T00:00:00Z',
+  expiresAt: null,
+);
+
+Future<void> _pumpUntil(WidgetTester tester, bool Function() condition) async {
+  for (var attempt = 0; attempt < 100; attempt += 1) {
+    if (condition()) return;
+    await tester.pump();
+  }
+  fail('condition was not met');
+}
+
 Future<List<int>> _multipartBytes(MultipartFile file) => file
     .finalize()
     .fold<List<int>>(<int>[], (bytes, chunk) => bytes..addAll(chunk));
@@ -1203,6 +1322,8 @@ final class _CompletionRepository implements DrawingRepository {
     this.sessionCompleter,
     this.calls,
     this.existingConversationId,
+    this.strokeError,
+    this.draftCompleter,
   }) : _sessionStatuses = List.of(sessionStatuses),
        _sessionFailures = List.of(sessionFailures);
 
@@ -1225,6 +1346,10 @@ final class _CompletionRepository implements DrawingRepository {
   final List<String> _sessionStatuses;
   final List<Object> _sessionFailures;
   int sessionStatusCalls = 0;
+  int strokeCalls = 0;
+  final Object? strokeError;
+  final Completer<DraftSaveResponseDto>? draftCompleter;
+  int draftCalls = 0;
 
   @override
   Future<DrawingStageCompleteResponseDto> completeDrawingStage(
@@ -1233,6 +1358,7 @@ final class _CompletionRepository implements DrawingRepository {
     required DrawingCompleteMetadataDto metadata,
     required String idempotencyKey,
   }) {
+    calls?.add('drawing-complete');
     completeCalls += 1;
     completionKeys.add(idempotencyKey);
     completionMetadata.add(metadata);
@@ -1284,13 +1410,31 @@ final class _CompletionRepository implements DrawingRepository {
   Future<StrokeBatchResponseDto> sendStrokeBatch(
     int sessionId,
     StrokeBatchRequestDto request,
-  ) => throw UnimplementedError();
+  ) async {
+    calls?.add('stroke');
+    strokeCalls += 1;
+    if (strokeError case final error?) throw error;
+    return StrokeBatchResponseDto(
+      batchId: strokeCalls,
+      batchSequence: request.batchSequence,
+      acceptedEventCount: request.events.length,
+      lastEventSequence: request.lastEventSequence,
+      receivedAt: '2026-07-22T00:00:00Z',
+    );
+  }
+
   @override
   Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
     BinaryUploadDto preview,
-    DraftCanvasStateDto canvasState,
-  ) => throw UnimplementedError();
+    DraftCanvasStateDto canvasState, {
+    required String idempotencyKey,
+  }) {
+    draftCalls += 1;
+    calls?.add('draft');
+    return draftCompleter?.future ?? Future.value(_draftSaveResponse);
+  }
+
   @override
   Future<DrawingSessionDto> createSession(
     CreateDrawingSessionRequestDto request,
