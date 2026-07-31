@@ -130,7 +130,8 @@ public abstract class IntegrationTestSupport {
   /**
    * 그리기 과정 데이터(스트로크) 저장소를 매 테스트 전에 초기화한다 (S15P11B209-365).
    *
-   * <p>초기화 규칙과 근거는 {@link SharedMongoContainer#reset} 참고. 컨테이너를 이 클래스가 아니라 별도 홀더가 들고 있는 이유도 거기에 적었다.
+   * <p>초기화 규칙과 근거는 {@link SharedMongoContainer#reset} 참고. 컨테이너를 이 클래스가 아니라 별도 홀더가 들고 있는 이유도 거기에
+   * 적었다.
    */
   @BeforeEach
   void resetSharedMongo() {

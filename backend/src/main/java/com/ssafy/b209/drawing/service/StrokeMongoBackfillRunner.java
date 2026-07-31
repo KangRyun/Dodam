@@ -37,8 +37,8 @@ import org.springframework.stereotype.Component;
  * <p><b>멱등하다.</b> {@code (sessionId, batchSeq)} 로 이미 있는 문서는 건너뛴다. 중간에 죽어도 다시 돌리면 이어서 진행한다.
  *
  * <p><b>⚠️ 삭제된 세션·아동은 옮기지 않는다.</b> MySQL 은 Soft Delete 라 삭제된 아동의 {@code stroke_*} 행이 그대로 남아 있다. 필터가
- * 없으면 이 러너가 <b>이미 지운 아동의 그리기 기록을 Mongo 로 되살린다</b> — 이관이 가드레일(CLAUDE.md 9절)을 되돌리는 셈이 된다. 삭제 경로는 Mongo
- * 문서를 즉시 지우도록 되어 있으므로(StrokeBatchDeletionService) 여기서 다시 넣으면 그 조치가 무의미해진다.
+ * 없으면 이 러너가 <b>이미 지운 아동의 그리기 기록을 Mongo 로 되살린다</b> — 이관이 가드레일(CLAUDE.md 9절)을 되돌리는 셈이 된다. 삭제 경로는
+ * Mongo 문서를 즉시 지우도록 되어 있으므로(StrokeBatchDeletionService) 여기서 다시 넣으면 그 조치가 무의미해진다.
  */
 @Component
 @ConditionalOnProperty(name = "app.stroke.mongo-backfill.enabled", havingValue = "true")

@@ -69,9 +69,9 @@ public class StrokeBatchDeletionService {
   /**
    * Transaction 이 있으면 Commit 이후에, 없으면 즉시 실행한다.
    *
-   * <p><b>⚠️ 실패를 밖으로 던지지 않는다.</b> 이 시점에는 MySQL 삭제가 <b>이미 Commit 됐다.</b> 여기서 예외를 던지면 Spring 이 그것을 호출자에게
-   * 전파해 <b>탈퇴가 성공했는데 응답은 500</b> 이 된다. 사용자는 실패로 알고 다시 시도하지만 계정이 없으니 404를 받는다 — 게다가 Mongo 문서는 어차피 지워지지
-   * 않은 채다. 즉 던지면 <b>UX 와 데이터 양쪽에서 더 나쁘다.</b>
+   * <p><b>⚠️ 실패를 밖으로 던지지 않는다.</b> 이 시점에는 MySQL 삭제가 <b>이미 Commit 됐다.</b> 여기서 예외를 던지면 Spring 이 그것을
+   * 호출자에게 전파해 <b>탈퇴가 성공했는데 응답은 500</b> 이 된다. 사용자는 실패로 알고 다시 시도하지만 계정이 없으니 404를 받는다 — 게다가 Mongo 문서는
+   * 어차피 지워지지 않은 채다. 즉 던지면 <b>UX 와 데이터 양쪽에서 더 나쁘다.</b>
    *
    * <p>대신 ERROR 로 남긴다. 남은 문서는 TTL 이 최종 안전망으로 회수하며, 로그의 식별자로 운영자가 즉시 정리할 수 있다.
    *
@@ -90,8 +90,7 @@ public class StrokeBatchDeletionService {
               action.run();
             } catch (RuntimeException exception) {
               log.error(
-                  "Stroke 배치 동반 삭제에 실패했습니다. MySQL 삭제는 이미 확정됐으므로 남은 문서를 수동 정리해야 합니다.",
-                  exception);
+                  "Stroke 배치 동반 삭제에 실패했습니다. MySQL 삭제는 이미 확정됐으므로 남은 문서를 수동 정리해야 합니다.", exception);
             }
           }
         });
