@@ -4,6 +4,7 @@ import '../../../../app/state/guardian_child_controller.dart';
 import '../../../../design_system/design_system.dart';
 import '../../data/dto/child_consent_dtos.dart';
 import '../../data/dto/child_dtos.dart';
+import '../../domain/preferred_character.dart';
 
 class ChildRegistrationScreen extends StatefulWidget {
   const ChildRegistrationScreen({
@@ -24,7 +25,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   final _nicknameController = TextEditingController();
   DateTime? _birthDate;
   String _relationshipType = 'MOTHER';
-  String _preferredCharacter = 'BEAR';
+  String _preferredCharacter = 'BASE';
   String _questionDifficulty = 'PRESCHOOL';
   bool _submitted = false;
   bool get _isEditing => widget.child != null;
@@ -33,10 +34,10 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   final Map<int, bool> _consentAgreed = {};
 
   static const _characters = [
-    ('RABBIT', '🐰'),
-    ('GIRL', '👧'),
-    ('BEAR', '🐻'),
-    ('FOX', '🦊'),
+    ('BASE', '🌱'),
+    ('PRINCESS', '👸'),
+    ('DINO', '🦖'),
+    ('OCTOPUS', '🐙'),
   ];
 
   static const _relationships = {
@@ -61,7 +62,9 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
       _nicknameController.text = child.nickname;
       _birthDate = DateTime.tryParse(child.birthDate);
       _relationshipType = child.relationshipType;
-      _preferredCharacter = child.preferredCharacter ?? 'BEAR';
+      _preferredCharacter = normalizePreferredCharacter(
+        child.preferredCharacter,
+      );
       _questionDifficulty = child.questionDifficulty;
     }
     widget.controller.resetRegistration();

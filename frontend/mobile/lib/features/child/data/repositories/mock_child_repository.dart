@@ -9,7 +9,7 @@ final class MockChildRepository implements ChildRepository {
     'birthDate': '2019-03-14',
     'age': 7,
     'profileImageUrl': null,
-    'preferredCharacter': 'BEAR',
+    'preferredCharacter': 'BASE',
     'questionDifficulty': 'PRESCHOOL',
     'responseModes': ['VOICE', 'OPTION'],
     'tutorialStatus': 'NOT_STARTED',
