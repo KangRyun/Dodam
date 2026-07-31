@@ -30,6 +30,7 @@ import com.ssafy.b209.drawing.htp.dto.HtpCompletionResponse;
 import com.ssafy.b209.drawing.htp.dto.StartHtpAssessmentRequest;
 import com.ssafy.b209.drawing.htp.exception.HtpErrorCode;
 import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
+import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.drawing.repository.DrawingTypeRepository;
 import com.ssafy.b209.drawing.service.DrawingReflectionService;
@@ -79,6 +80,7 @@ public class HtpAssessmentService {
   private final DrawingSessionRepository drawingSessionRepository;
   private final HtpAssessmentRepository htpAssessmentRepository;
   private final ConversationSessionRepository conversationSessionRepository;
+  private final DrawingSessionEmotionRepository drawingSessionEmotionRepository;
   private final StageFinalImageFinder stageFinalImageFinder;
   private final DrawingAnalysisRepository drawingAnalysisRepository;
   private final AnalysisResultJdbcRepository analysisResultJdbcRepository;
@@ -97,6 +99,7 @@ public class HtpAssessmentService {
    * @param drawingSessionRepository 단계별 그림 세션 저장소
    * @param htpAssessmentRepository HTP 묶음 저장소
    * @param conversationSessionRepository 단계별 대화 완료 조회 저장소
+   * @param drawingSessionEmotionRepository 단계별 선택 감정 조회 저장소
    * @param stageFinalImageFinder 단계별 최종 그림을 확정하는 경계
    * @param drawingAnalysisRepository 단계별 객체 탐지와 리포트 분석 저장소
    * @param analysisResultJdbcRepository 종합 리포트 입력에서 제외한 단계를 기록하는 저장소
@@ -113,6 +116,7 @@ public class HtpAssessmentService {
       DrawingSessionRepository drawingSessionRepository,
       HtpAssessmentRepository htpAssessmentRepository,
       ConversationSessionRepository conversationSessionRepository,
+      DrawingSessionEmotionRepository drawingSessionEmotionRepository,
       StageFinalImageFinder stageFinalImageFinder,
       DrawingAnalysisRepository drawingAnalysisRepository,
       AnalysisResultJdbcRepository analysisResultJdbcRepository,
@@ -127,6 +131,7 @@ public class HtpAssessmentService {
     this.drawingSessionRepository = drawingSessionRepository;
     this.htpAssessmentRepository = htpAssessmentRepository;
     this.conversationSessionRepository = conversationSessionRepository;
+    this.drawingSessionEmotionRepository = drawingSessionEmotionRepository;
     this.stageFinalImageFinder = stageFinalImageFinder;
     this.drawingAnalysisRepository = drawingAnalysisRepository;
     this.analysisResultJdbcRepository = analysisResultJdbcRepository;
@@ -252,6 +257,9 @@ public class HtpAssessmentService {
         .findByDrawingSessionId(currentSession.getId())
         .filter(ConversationSession::isCompleted)
         .orElseThrow(() -> new BusinessException(HtpErrorCode.CURRENT_STEP_NOT_COMPLETED));
+    if (!drawingSessionEmotionRepository.existsByDrawingSessionId(currentSession.getId())) {
+      throw new BusinessException(HtpErrorCode.HTP_REFLECTION_REQUIRED);
+    }
     try {
       currentStep.completeDrawingSession(idempotencyKey, now());
     } catch (IllegalStateException exception) {
@@ -454,7 +462,7 @@ public class HtpAssessmentService {
   }
 
   /**
-   * PERSON 단계에서 HTP 활동 전체를 대표하는 감정을 한 번 저장한다.
+   * PERSON 단계의 선택 감정을 현재 그림 세션에 저장한다.
    *
    * @param assessmentId HTP 활동 식별자
    * @param request 선택 감정과 건너뛰기 여부
