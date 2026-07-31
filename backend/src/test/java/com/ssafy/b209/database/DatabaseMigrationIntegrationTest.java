@@ -49,11 +49,18 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("26");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("28");
     assertThat(tableExists("flyway_schema_history")).isTrue();
-    assertThat(tableCount()).isEqualTo(70);
+    assertThat(tableCount()).isEqualTo(71);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
+    assertThat(tableExists("child_profile_image_files")).isTrue();
+    assertThat(
+            checkConstraintContains(
+                "child_profile_image_files", "ck_child_profile_image_files_size", "5242880"))
+        .isTrue();
+    assertThat(checkConstraintContains("children", "ck_children_preferred_character", "OCTOPUS"))
+        .isTrue();
     assertThat(columnExists("expert_profiles", "target_age_min")).isTrue();
     assertThat(columnExists("expert_profiles", "target_age_max")).isTrue();
     assertThat(
