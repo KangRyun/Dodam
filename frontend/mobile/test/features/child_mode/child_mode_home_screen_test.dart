@@ -112,7 +112,7 @@ Widget _wrap(Widget home) => MaterialApp(
     }
     if (settings.name != AppRoutes.drawing('7')) return null;
     final arguments = settings.arguments! as DrawingRouteArguments;
-    return MaterialPageRoute<void>(
+    return MaterialPageRoute<DrawingRouteResult>(
       settings: settings,
       builder: (routeContext) => Scaffold(
         body: Column(
@@ -123,7 +123,9 @@ Widget _wrap(Widget home) => MaterialApp(
             ),
             TextButton(
               key: const ValueKey('leave-drawing'),
-              onPressed: () => Navigator.of(routeContext).pop(),
+              onPressed: () => Navigator.of(
+                routeContext,
+              ).pop(DrawingRouteResult.backToActivityEntry),
               child: const Text('나가기'),
             ),
           ],
@@ -350,9 +352,10 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('leave-drawing')));
     await tester.pumpAndSettle();
 
-    // 같은 화면으로 돌아와도 이미 처리한 진입 팝업은 다시 열지 않는다.
-    expect(find.text('이어 그리기'), findsNothing);
-    expect(find.text('새로 그리기'), findsNothing);
+    // 캔버스에서 뒤로 나오면 활성 세션을 다시 조회하고 같은 팝업을 복원한다.
+    expect(repository.getActiveSessionCalls, 2);
+    expect(find.text('이어 그리기'), findsOneWidget);
+    expect(find.text('새로 그리기'), findsOneWidget);
   });
 
   testWidgets('저장된 초안이 없는 활성 세션도 재개와 새 활동을 선택한다', (tester) async {

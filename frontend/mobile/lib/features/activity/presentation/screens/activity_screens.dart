@@ -1360,7 +1360,9 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   Future<void> _stopTtsAndPop() async {
     await _questionTtsController?.stop();
-    if (mounted) Navigator.of(context).pop();
+    if (mounted) {
+      Navigator.of(context).pop(DrawingRouteResult.backToActivityEntry);
+    }
   }
 
   @override
