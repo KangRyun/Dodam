@@ -8,9 +8,11 @@ import com.ssafy.b209.user.dto.request.DeleteUserRequest;
 import com.ssafy.b209.user.dto.request.NotificationSettingsUpdateRequest;
 import com.ssafy.b209.user.dto.request.OnboardingRequest;
 import com.ssafy.b209.user.dto.request.UpdateUserRequest;
+import com.ssafy.b209.user.dto.response.DataExportJobResponse;
 import com.ssafy.b209.user.dto.response.DataRetentionPolicyResponse;
 import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
+import com.ssafy.b209.user.service.UserDataExportRequestService;
 import com.ssafy.b209.user.service.UserDataRetentionPolicyReader;
 import com.ssafy.b209.user.service.UserDataRetentionPolicyUpdateService;
 import com.ssafy.b209.user.service.UserDeletionService;
@@ -32,6 +34,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -61,6 +64,7 @@ public class UserController {
   private final UserNotificationSettingsUpdateService notificationSettingsUpdateService;
   private final UserDataRetentionPolicyReader dataRetentionPolicyReader;
   private final UserDataRetentionPolicyUpdateService dataRetentionPolicyUpdateService;
+  private final UserDataExportRequestService dataExportRequestService;
 
   /**
    * 사용자 식별 경계와 조회·Onboarding·수정 서비스를 사용하는 Controller를 생성한다.
@@ -74,6 +78,7 @@ public class UserController {
    * @param notificationSettingsUpdateService 알림 수신 설정 변경 Use Case
    * @param dataRetentionPolicyReader 데이터 보관 정책 조회 Use Case
    * @param dataRetentionPolicyUpdateService 데이터 보관 정책 변경 Use Case
+   * @param dataExportRequestService 데이터 내보내기 작업 접수 Use Case
    */
   public UserController(
       CurrentAuthenticatedUserResolver currentUserResolver,
@@ -84,7 +89,8 @@ public class UserController {
       UserNotificationSettingsReader notificationSettingsReader,
       UserNotificationSettingsUpdateService notificationSettingsUpdateService,
       UserDataRetentionPolicyReader dataRetentionPolicyReader,
-      UserDataRetentionPolicyUpdateService dataRetentionPolicyUpdateService) {
+      UserDataRetentionPolicyUpdateService dataRetentionPolicyUpdateService,
+      UserDataExportRequestService dataExportRequestService) {
     this.currentUserResolver = currentUserResolver;
     this.onboardingService = onboardingService;
     this.queryService = queryService;
@@ -94,6 +100,37 @@ public class UserController {
     this.notificationSettingsUpdateService = notificationSettingsUpdateService;
     this.dataRetentionPolicyReader = dataRetentionPolicyReader;
     this.dataRetentionPolicyUpdateService = dataRetentionPolicyUpdateService;
+    this.dataExportRequestService = dataExportRequestService;
+  }
+
+  /**
+   * 인증 사용자의 데이터 내보내기 작업을 접수한다.
+   *
+   * <p>작업은 항상 {@code PENDING}으로 저장한다. ZIP 생성, 파일 저장, 상태 조회는 이 API에 포함하지 않는다. Authorization Bearer
+   * Access Token의 사용자 ID를 대상으로 한다.
+   *
+   * @return HTTP 202와 생성된 데이터 내보내기 작업 공통 응답
+   */
+  @Operation(
+      summary = "내 데이터 내보내기 요청",
+      description =
+          "인증 사용자의 데이터 내보내기 작업을 PENDING 상태로 접수합니다. "
+              + "이 API는 작업 행만 생성하며 ZIP 생성, 다운로드, 상태 조회는 제공하지 않습니다. "
+              + "Authorization Bearer Access Token의 사용자 ID를 대상으로 합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "202",
+        description = "데이터 내보내기 작업 접수 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @PostMapping("/me/data-exports")
+  public ResponseEntity<ApiResponse<DataExportJobResponse>> requestMyDataExport() {
+    return ResponseEntity.accepted()
+        .body(
+            ApiResponse.ok(dataExportRequestService.request(currentUserResolver.requireUserId())));
   }
 
   /**
