@@ -483,6 +483,12 @@ final class DrawingRouteArguments {
   final DrawingActivityContextDto activityContext;
 }
 
+/// 캔버스가 상위 활동 진입 화면에 전달하는 종료 결과.
+enum DrawingRouteResult {
+  /// 완료 화면 이동이 아니라 사용자가 뒤로가기로 캔버스를 나간 경우.
+  backToActivityEntry,
+}
+
 final class DrawingActivitySelectionRouteArguments {
   const DrawingActivitySelectionRouteArguments({this.replaceActive = false});
 

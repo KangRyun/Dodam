@@ -444,7 +444,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       );
       return;
     }
-    await AppNavigation.pushNamed(
+    final route = AppNavigation.pushNamed<DrawingRouteResult>(
       context,
       AppRoutes.drawing(widget.child.childId.toString()),
       arguments: DrawingRouteArguments(
@@ -458,6 +458,20 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         inputMethod: resolution.inputMethod,
       ),
     );
+    if (route == null) return;
+    final result = await route;
+    if (!mounted || result != DrawingRouteResult.backToActivityEntry) return;
+
+    // 캔버스에서 뒤로 나온 경우에만 진행 중 세션을 다시 확인한다.
+    // 완료·감정 화면으로 이동한 경우에는 기존 라우팅 흐름을 유지한다.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      setState(() {
+        _entryResolved = false;
+        _checkingActiveSession = false;
+      });
+      unawaited(_resolveEntry());
+    });
   }
 
   /// 이미 만든 UPLOAD 세션을 복원해 사진 촬영 단계로 바로 들어간다.
