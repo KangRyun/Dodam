@@ -141,6 +141,7 @@ final class StrokeBatchQueue {
           events: events,
           metrics: StrokeMetricsDto(
             undoCountDelta: conversion.undoCount,
+            redoCountDelta: conversion.redoCount,
             eraseCountDelta: conversion.eraseCount,
           ),
         );
@@ -216,12 +217,14 @@ final class StrokeBatchConversion {
     required this.events,
     required this.consumedRawEventCount,
     required this.undoCount,
+    required this.redoCount,
     required this.eraseCount,
   });
 
   final List<StrokeBatchEventDto> events;
   final int consumedRawEventCount;
   final int undoCount;
+  final int redoCount;
   final int eraseCount;
 }
 
@@ -229,6 +232,7 @@ abstract final class StrokeBatchEventConverter {
   static StrokeBatchConversion convert(List<StrokeEventDto> rawEvents) {
     final converted = <StrokeBatchEventDto>[];
     var undoCount = 0;
+    var redoCount = 0;
     var eraseCount = 0;
     var index = 0;
     var previousSequence = 0;
@@ -239,22 +243,29 @@ abstract final class StrokeBatchEventConverter {
         throw StateError('Stroke event sequence must be strictly increasing.');
       }
 
-      if (event.type == DrawingEventTypes.undo) {
+      if (event.type == DrawingEventTypes.undo ||
+          event.type == DrawingEventTypes.redo) {
         converted.add(
           StrokeBatchEventDto(
             sequence: event.seq,
-            eventType: DrawingEventTypes.undo,
+            eventType: event.type,
             points: const [],
           ),
         );
-        undoCount += 1;
+        if (event.type == DrawingEventTypes.undo) {
+          undoCount += 1;
+        } else {
+          redoCount += 1;
+        }
         previousSequence = event.seq;
         index += 1;
         continue;
       }
 
       if (event.type != DrawingEventTypes.strokeStart) {
-        throw StateError('Stroke batch must start with STROKE_START or UNDO.');
+        throw StateError(
+          'Stroke batch must start with STROKE_START, UNDO, or REDO.',
+        );
       }
 
       final startIndex = index;
@@ -274,6 +285,7 @@ abstract final class StrokeBatchEventConverter {
           events: List.unmodifiable(converted),
           consumedRawEventCount: startIndex,
           undoCount: undoCount,
+          redoCount: redoCount,
           eraseCount: eraseCount,
         );
       }
@@ -299,6 +311,7 @@ abstract final class StrokeBatchEventConverter {
       events: List.unmodifiable(converted),
       consumedRawEventCount: index,
       undoCount: undoCount,
+      redoCount: redoCount,
       eraseCount: eraseCount,
     );
   }
@@ -442,6 +455,12 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
 
   StrokeEventDto? recordUndo() {
     final event = journal.recordUndo();
+    if (event != null) batchQueue.addEvents([event]);
+    return event;
+  }
+
+  StrokeEventDto? recordRedo() {
+    final event = journal.recordRedo();
     if (event != null) batchQueue.addEvents([event]);
     return event;
   }

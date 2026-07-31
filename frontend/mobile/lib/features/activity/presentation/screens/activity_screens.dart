@@ -180,6 +180,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   static const _thick = 14.0;
 
   final List<DrawingStroke> _completedStrokes = [];
+  final List<DrawingStroke> _redoStrokes = [];
   DrawingStroke? _activeStroke;
   DrawingTool _tool = DrawingTool.pen;
   Color _color = AppColors.drawingInk;
@@ -981,6 +982,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     setState(() {
       if (completed) {
         _completedStrokes.add(stroke);
+        _redoStrokes.clear();
       }
       _activeStroke = null;
       _activePointer = null;
@@ -998,8 +1000,17 @@ class _DrawingScreenState extends State<DrawingScreen>
     _objectDetectionController?.onDrawingInputStarted();
     // Rebuilding the vector action list also restores pixels removed from a
     // recovered Draft by the last local eraser stroke.
-    setState(() => _completedStrokes.removeLast());
+    setState(() => _redoStrokes.add(_completedStrokes.removeLast()));
     _syncCoordinator.recordUndo();
+    _objectDetectionController?.onDrawingInputEnded();
+  }
+
+  void _redoLastStroke() {
+    if (_activeStroke != null || _redoStrokes.isEmpty) return;
+    _invalidatePendingCompletion();
+    _objectDetectionController?.onDrawingInputStarted();
+    setState(() => _completedStrokes.add(_redoStrokes.removeLast()));
+    _syncCoordinator.recordRedo();
     _objectDetectionController?.onDrawingInputEnded();
   }
 
@@ -1359,6 +1370,19 @@ class _DrawingScreenState extends State<DrawingScreen>
       title: _activityTitle,
       onBack: () => unawaited(_stopTtsAndPop()),
       actions: [
+        IconButton.filledTonal(
+          key: const ValueKey('redo-action'),
+          tooltip: _activeStroke != null
+              ? '그리는 중에는 다시 실행할 수 없어요'
+              : '취소한 그림 획 다시 실행',
+          onPressed: _activeStroke == null && _redoStrokes.isNotEmpty
+              ? _redoLastStroke
+              : null,
+          icon: const Icon(Icons.redo_rounded),
+          style: IconButton.styleFrom(
+            minimumSize: const Size.square(AppSizes.iconButton),
+          ),
+        ),
         Padding(
           padding: const EdgeInsets.only(right: AppSpacing.md),
           child: IconButton.filledTonal(

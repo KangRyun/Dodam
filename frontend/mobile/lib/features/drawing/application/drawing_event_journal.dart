@@ -44,11 +44,13 @@ final class DrawingEventJournal {
   final Stopwatch _sessionClock;
   final List<StrokeEventDto> _events = [];
   int _undoableStrokeCount = 0;
+  int _redoableStrokeCount = 0;
 
   int get elapsedMilliseconds => _sessionClock.elapsedMilliseconds;
   List<StrokeEventDto> get events => List.unmodifiable(_events);
   int? get lastEventSequence => _events.lastOrNull?.seq;
   int get undoableStrokeCount => _undoableStrokeCount;
+  int get redoableStrokeCount => _redoableStrokeCount;
 
   bool resumeEventSequence(int nextValue) {
     if (_events.isNotEmpty) return false;
@@ -63,7 +65,10 @@ final class DrawingEventJournal {
       sequenceAllocator: _sequenceAllocator,
     );
     _events.addAll(converted);
-    if (converted.isNotEmpty) _undoableStrokeCount += 1;
+    if (converted.isNotEmpty) {
+      _undoableStrokeCount += 1;
+      _redoableStrokeCount = 0;
+    }
     return converted;
   }
 
@@ -76,10 +81,24 @@ final class DrawingEventJournal {
     );
     _events.add(event);
     _undoableStrokeCount -= 1;
+    _redoableStrokeCount += 1;
     return event;
   }
 
-  // REDO/CLEAR/PAUSE and tool setting events remain intentionally dormant.
+  StrokeEventDto? recordRedo({int? elapsedMilliseconds}) {
+    if (_redoableStrokeCount == 0) return null;
+    final event = StrokeEventDto(
+      seq: _sequenceAllocator.allocate(),
+      t: elapsedMilliseconds ?? _sessionClock.elapsedMilliseconds,
+      type: DrawingEventTypes.redo,
+    );
+    _events.add(event);
+    _redoableStrokeCount -= 1;
+    _undoableStrokeCount += 1;
+    return event;
+  }
+
+  // CLEAR/PAUSE and tool setting events remain intentionally dormant.
 }
 
 abstract final class DrawingStrokeEventConverter {

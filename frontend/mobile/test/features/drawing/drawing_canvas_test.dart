@@ -163,6 +163,49 @@ void main() {
     expect(_completeButton(tester).onPressed, isNotNull);
   });
 
+  testWidgets('Redo는 마지막으로 취소한 stroke를 원래 속성으로 복원한다', (tester) async {
+    await _pumpDrawing(tester);
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    await _drawStroke(tester, center - const Offset(50, 20));
+    await tester.tap(find.byKey(const ValueKey('color-빨강')));
+    await tester.tap(find.text('얇게'));
+    await tester.pump();
+    await _drawStroke(tester, center + const Offset(50, 20));
+
+    await tester.tap(find.byKey(const ValueKey('undo-action')));
+    await tester.pump();
+    expect(_redoButton(tester).onPressed, isNotNull);
+
+    await tester.tap(find.byKey(const ValueKey('redo-action')));
+    await tester.pump();
+
+    final restored = _canvas(tester).strokes.last;
+    expect(_canvas(tester).strokes, hasLength(2));
+    expect(restored.color, AppColors.drawingRed);
+    expect(restored.thickness, 4);
+    expect(_redoButton(tester).onPressed, isNull);
+  });
+
+  testWidgets('Undo 후 새 stroke를 그리면 Redo 이력을 폐기한다', (tester) async {
+    await _pumpDrawing(tester);
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    await _drawStroke(tester, center - const Offset(50, 20));
+    await _drawStroke(tester, center + const Offset(50, 20));
+
+    await tester.tap(find.byKey(const ValueKey('undo-action')));
+    await tester.pump();
+    expect(_redoButton(tester).onPressed, isNotNull);
+
+    await _drawStroke(tester, center + const Offset(80, 30));
+
+    expect(_redoButton(tester).onPressed, isNull);
+    expect(_canvas(tester).strokes, hasLength(2));
+  });
+
   testWidgets('연속 Undo로 빈 Canvas가 되면 버튼들을 비활성화한다', (tester) async {
     await _pumpDrawing(tester);
     final center = tester.getCenter(
@@ -252,6 +295,34 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('undo-action')));
     await tester.pump();
     expect(coordinator.journal.events, hasLength(6));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    coordinator.dispose();
+  });
+
+  testWidgets('Canvas Redo는 REDO를 journal에 append한다', (tester) async {
+    final coordinator = DrawingSyncCoordinator(
+      sessionId: null,
+      repository: null,
+    );
+    await _pumpDrawing(tester, coordinator: coordinator);
+    final center = tester.getCenter(
+      find.byKey(const ValueKey('drawing-canvas')),
+    );
+    await _drawStroke(tester, center);
+
+    await tester.tap(find.byKey(const ValueKey('undo-action')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('redo-action')));
+    await tester.pump();
+
+    expect(coordinator.journal.events.last.type, 'REDO');
+    expect(coordinator.journal.events.map((event) => event.type), [
+      'STROKE_START',
+      'STROKE_END',
+      'UNDO',
+      'REDO',
+    ]);
 
     await tester.pumpWidget(const SizedBox.shrink());
     coordinator.dispose();
@@ -432,6 +503,9 @@ DrawingCanvas _canvas(WidgetTester tester) =>
 
 IconButton _undoButton(WidgetTester tester) =>
     tester.widget<IconButton>(find.byKey(const ValueKey('undo-action')));
+
+IconButton _redoButton(WidgetTester tester) =>
+    tester.widget<IconButton>(find.byKey(const ValueKey('redo-action')));
 
 FilledButton _completeButton(WidgetTester tester) =>
     tester.widget<FilledButton>(
