@@ -6,6 +6,7 @@ import '../../features/activity/presentation/screens/activity_screens.dart';
 import '../../features/auth/auth.dart';
 import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
 import '../../features/child/data/dto/child_dtos.dart';
+import '../../features/child/domain/repositories/child_repository.dart';
 import '../../features/child/presentation/screens/child_registration_screen.dart';
 import '../../features/community/presentation/screens/community_webview_screen.dart';
 import '../../features/drawing/application/drawing_session_start_controller.dart';
@@ -35,6 +36,7 @@ abstract final class AppRouter {
   static Route<dynamic> onGenerateRoute(
     RouteSettings settings, {
     GuardianChildController? childController,
+    ChildRepository? childRepository,
     WidgetBuilder? notificationsTabBuilder,
     WidgetBuilder? settingsTabBuilder,
     AuthProviderSignIn? authSignIn,
@@ -316,6 +318,7 @@ abstract final class AppRouter {
               (settings.arguments! as DrawingRouteArguments).activityContext,
           inputMethod:
               (settings.arguments! as DrawingRouteArguments).inputMethod,
+          childRepository: childRepository,
         ),
       ['child', final childId, 'activity', 'emotions']
           when _hasChildContext(childController, childId) =>
