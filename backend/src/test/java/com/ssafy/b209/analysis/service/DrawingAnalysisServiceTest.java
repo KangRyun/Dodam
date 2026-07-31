@@ -23,6 +23,7 @@ import com.ssafy.b209.analysis.dto.RetryDrawingAnalysisRequest;
 import com.ssafy.b209.analysis.exception.DrawingAnalysisErrorCode;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClient;
 import com.ssafy.b209.infrastructure.ai.drawing.DrawingAnalysisClientException;
@@ -124,6 +125,7 @@ class DrawingAnalysisServiceTest {
     verify(drawingAnalysisClient).analyze(requestCaptor.capture());
     assertThat(requestCaptor.getValue().requestId()).isEqualTo(REQUEST_ID.toString());
     assertThat(requestCaptor.getValue().analysisId()).isEqualTo(ANALYSIS_ID);
+    assertThat(requestCaptor.getValue().inputMethod()).isEqualTo(DrawingInputMethod.UPLOAD);
     assertThat(requestCaptor.getValue().storageKey()).isEqualTo("drawing/final.png");
     assertThat(requestCaptor.getValue().mimeType()).isEqualTo("image/png");
   }
@@ -148,6 +150,8 @@ class DrawingAnalysisServiceTest {
                 com.ssafy.b209.analysis.domain.DrawingAnalysisScope.FINAL,
                 DrawingAnalysisActivityType.HTP,
                 DrawingAnalysisSubject.HOUSE,
+                DrawingInputMethod.UPLOAD,
+                DrawingAnalysisTriggerReason.USER_REQUEST,
                 "drawing/final.png",
                 "image/png",
                 1200,
@@ -295,6 +299,8 @@ class DrawingAnalysisServiceTest {
                 com.ssafy.b209.analysis.domain.DrawingAnalysisScope.FINAL,
                 DrawingAnalysisActivityType.HTP,
                 DrawingAnalysisSubject.HOUSE,
+                DrawingInputMethod.UPLOAD,
+                DrawingAnalysisTriggerReason.USER_REQUEST,
                 "drawing/final.png",
                 "image/png",
                 null,
@@ -483,6 +489,8 @@ class DrawingAnalysisServiceTest {
                 com.ssafy.b209.analysis.domain.DrawingAnalysisScope.FINAL,
                 DrawingAnalysisActivityType.HTP,
                 DrawingAnalysisSubject.HOUSE,
+                DrawingInputMethod.UPLOAD,
+                DrawingAnalysisTriggerReason.USER_REQUEST,
                 "drawing/final.png",
                 "image/png",
                 null,

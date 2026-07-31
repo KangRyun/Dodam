@@ -3,6 +3,7 @@ package com.ssafy.b209.analysis.dto;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ssafy.b209.analysis.domain.DrawingAnalysisScope;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import jakarta.validation.Validation;
 import jakarta.validation.Validator;
 import java.math.BigDecimal;
@@ -26,6 +27,7 @@ class DrawingAnalysisContractTest {
             DrawingAnalysisScope.FINAL,
             DrawingAnalysisActivityType.HTP,
             DrawingAnalysisSubject.HOUSE,
+            DrawingInputMethod.CANVAS,
             "drawings/example.png",
             "image/png",
             1200,
@@ -40,6 +42,7 @@ class DrawingAnalysisContractTest {
             DrawingAnalysisScope.FINAL,
             DrawingAnalysisActivityType.ART_DIARY,
             null,
+            DrawingInputMethod.CANVAS,
             "../private.png",
             "image/gif",
             null,
@@ -115,6 +118,7 @@ class DrawingAnalysisContractTest {
         DrawingAnalysisScope.FINAL,
         activityType,
         drawingSubject,
+        DrawingInputMethod.CANVAS,
         "drawings/example.png",
         "image/png",
         1200,

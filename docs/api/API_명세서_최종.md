@@ -2071,6 +2071,7 @@ COUNSEL-08 요청 예시:
     "mimeType": "image/png",
     "width": 1920,
     "height": 1080,
+    "inputMethod": "CANVAS",
     "checksumSha256": "sha256-value"
   },
   "behavior": {
@@ -2104,6 +2105,12 @@ COUNSEL-08 요청 예시:
 `drawing.signedUrl`은 외부 공개 URL이 아니다. Backend가 분석 요청 직전에 발급하는 Docker 내부망
 전용 URL이며 기본 60초 안에 최초 한 번만 조회할 수 있다. AI 서버는 URL, Token 또는 원본 이미지
 Byte를 로그에 기록하지 않는다.
+
+`drawing.inputMethod`는 그림 세션에 저장된 입력 방식이며 Backend가 항상 전달한다. `CANVAS`는 앱
+Canvas에서 직접 그린 그림이고, `UPLOAD`는 카메라 촬영·스캔·갤러리 선택·외부 디지털 이미지처럼
+파일로 입력된 그림 전체를 뜻한다. AI 서버는 순차 배포 중 필드가 없는 구버전 요청만 `CANVAS`로
+간주한다. `UPLOAD`가 촬영 사진임을 보장하지 않으므로 사진 보정은 조명·그림자·원근·종이 질감 등
+촬영 흔적을 확인한 경우에만 선택적으로 적용한다.
 
 ### 19.4 종합 분석 응답
 

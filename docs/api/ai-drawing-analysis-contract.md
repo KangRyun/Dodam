@@ -279,6 +279,7 @@ public interface DrawingAnalysisClient {
 - HTTP Client: Spring `RestClient`
 - Method/Endpoint: `POST /internal/v1/analyses`
 - Request/Response: 정본 §19.3의 JSON 요청과 §19.4 응답
+- 그림 입력 방식: 저장된 `DrawingSession.inputMethod`를 `drawing.inputMethod`로 항상 전달
 - 인증 Header: `X-Internal-Token` 필수
 - 상관관계 Header: `X-Request-Id`
 - 자동 Retry, Circuit Breaker, 실행 중 Mock 전환: Client 계층에는 구현하지 않음
@@ -320,6 +321,13 @@ HTTP 2xx의 유효한 `status=FAILED` 응답은 통신 실패가 아니므로 Ex
 저장한다. AI 서버는 Docker 내부망의 `GET /internal/v1/ai-images/{token}`으로 이미지를 한 번만
 조회한다. 소비는 Lua `GET`·`DEL`로 원자적으로 처리하며 Nginx는 외부 `/internal/` 요청을 404로
 차단한다.
+
+`drawing.inputMethod`의 허용값은 `CANVAS`, `UPLOAD`다. `CANVAS`는 앱 Canvas 입력이고
+`UPLOAD`는 카메라 촬영, 스캔, 갤러리 및 외부 디지털 이미지 파일을 모두 포함한다. 따라서 AI는
+`UPLOAD`에 사진 보정을 무조건 적용하지 않고 촬영 흔적이 확인될 때만 선택적으로 적용한다. AI는
+순차 배포 하위 호환을 위해 필드가 누락된 요청을 `CANVAS`로 처리하지만, 최신 Backend는 영속화된
+값을 항상 전송한다. 촬영·스캔·갤러리를 구분해야 하는 요구가 생기면 `inputMethod` 의미를 확장하지
+않고 별도 `sourceType` 계약을 추가한다.
 
 HTTP Client와 내부 이미지 조회는 단위·구성 테스트로 검증했다. 실제 FastAPI 추론의 정상 동작과
 YOLO 가중치 배치는 별도 운영 검증 범위이므로, 준비 전에는 기본

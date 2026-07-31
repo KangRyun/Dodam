@@ -258,6 +258,7 @@ public class DrawingAnalysisService {
             started.analysisScope(),
             started.activityType(),
             started.drawingSubject(),
+            started.inputMethod(),
             started.triggerReason(),
             started.storageKey(),
             started.contentType(),
