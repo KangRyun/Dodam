@@ -20,9 +20,11 @@ import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.user.domain.DataExportStatus;
 import com.ssafy.b209.user.dto.response.DataExportJobResponse;
+import com.ssafy.b209.user.dto.response.DataExportJobStatusResponse;
 import com.ssafy.b209.user.dto.response.DataRetentionPolicyResponse;
 import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
+import com.ssafy.b209.user.service.UserDataExportQueryService;
 import com.ssafy.b209.user.service.UserDataExportRequestService;
 import com.ssafy.b209.user.service.UserDataRetentionPolicyReader;
 import com.ssafy.b209.user.service.UserDataRetentionPolicyUpdateService;
@@ -56,6 +58,7 @@ class UserControllerTest {
   @MockitoBean private UserDataRetentionPolicyReader dataRetentionPolicyReader;
   @MockitoBean private UserDataRetentionPolicyUpdateService dataRetentionPolicyUpdateService;
   @MockitoBean private UserDataExportRequestService dataExportRequestService;
+  @MockitoBean private UserDataExportQueryService dataExportQueryService;
 
   @Test
   void acceptsTheAuthenticatedUsersDataExportRequest() throws Exception {
@@ -88,6 +91,61 @@ class UserControllerTest {
     mockMvc.perform(post("/api/v1/users/me/data-exports")).andExpect(status().isUnauthorized());
 
     verify(dataExportRequestService, never()).request(any());
+  }
+
+  @Test
+  void returnsOnlyTheAuthenticatedUsersDataExportStatus() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(51L);
+    given(dataExportQueryService.get(51L, 901L))
+        .willReturn(
+            new DataExportJobStatusResponse(
+                901L,
+                DataExportStatus.COMPLETED,
+                java.time.LocalDateTime.of(2026, 7, 31, 10, 25, 3),
+                java.time.LocalDateTime.of(2026, 7, 31, 10, 30, 3),
+                java.time.LocalDateTime.of(2026, 8, 1, 10, 30, 3),
+                null));
+
+    mockMvc
+        .perform(get("/api/v1/users/me/data-exports/901"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.dataExportJobId").value(901))
+        .andExpect(jsonPath("$.data.exportStatus").value("COMPLETED"))
+        .andExpect(jsonPath("$.data.requestedAt").value("2026-07-31T10:25:03"))
+        .andExpect(jsonPath("$.data.completedAt").value("2026-07-31T10:30:03"))
+        .andExpect(jsonPath("$.data.expiresAt").value("2026-08-01T10:30:03"))
+        .andExpect(jsonPath("$.data.errorCode").isEmpty())
+        .andExpect(jsonPath("$.data.storageKey").doesNotExist())
+        .andExpect(jsonPath("$.data.downloadUrl").doesNotExist())
+        .andExpect(jsonPath("$.data.fileSizeBytes").doesNotExist())
+        .andExpect(jsonPath("$.data.checksumSha256").doesNotExist());
+
+    verify(dataExportQueryService).get(51L, 901L);
+  }
+
+  @Test
+  void hidesOtherUsersDataExportJobAsNotFound() throws Exception {
+    given(currentUserResolver.requireUserId()).willReturn(51L);
+    given(dataExportQueryService.get(51L, 902L))
+        .willThrow(
+            new BusinessException(
+                com.ssafy.b209.user.exception.UserErrorCode.DATA_EXPORT_JOB_NOT_FOUND));
+
+    mockMvc
+        .perform(get("/api/v1/users/me/data-exports/902"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("USER_404_002"));
+  }
+
+  @Test
+  void returnsUnauthorizedForDataExportStatusWhenAccessTokenIsMissing() throws Exception {
+    given(currentUserResolver.requireUserId())
+        .willThrow(new BusinessException(AuthErrorCode.AUTHENTICATION_REQUIRED));
+
+    mockMvc.perform(get("/api/v1/users/me/data-exports/901")).andExpect(status().isUnauthorized());
+
+    verify(dataExportQueryService, never()).get(any(), any());
   }
 
   @Test

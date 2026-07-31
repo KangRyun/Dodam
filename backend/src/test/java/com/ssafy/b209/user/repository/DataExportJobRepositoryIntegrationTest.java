@@ -40,4 +40,15 @@ class DataExportJobRepositoryIntegrationTest extends IntegrationTestSupport {
         .containsEntry("export_status", "PENDING")
         .containsEntry("created_at", requestedAt);
   }
+
+  @Test
+  void findsOnlyTheSpecifiedOwnersJob() {
+    DataExportJob saved =
+        repository.saveAndFlush(
+            DataExportJob.requested(USER_ID, LocalDateTime.of(2026, 7, 31, 10, 25, 3)));
+
+    assertThat(repository.findByIdAndUserId(saved.getId(), USER_ID))
+        .hasValueSatisfying(job -> assertThat(job.getId()).isEqualTo(saved.getId()));
+    assertThat(repository.findByIdAndUserId(saved.getId(), 52L)).isEmpty();
+  }
 }
