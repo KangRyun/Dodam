@@ -31,7 +31,7 @@ import 'app_navigation.dart';
 import 'app_routes.dart';
 
 abstract final class AppRouter {
-  static Route<void> onGenerateRoute(
+  static Route<dynamic> onGenerateRoute(
     RouteSettings settings, {
     GuardianChildController? childController,
     WidgetBuilder? notificationsTabBuilder,
@@ -382,6 +382,12 @@ abstract final class AppRouter {
       _ => UnknownRouteScreen(location: location),
     };
 
+    if (_isDrawingRoute(segments)) {
+      return MaterialPageRoute<DrawingRouteResult>(
+        settings: settings,
+        builder: (_) => screen,
+      );
+    }
     return MaterialPageRoute<void>(settings: settings, builder: (_) => screen);
   }
 
@@ -400,6 +406,11 @@ abstract final class AppRouter {
     final parsedId = int.tryParse(childId);
     return parsedId != null && controller?.hasSelectedChild(parsedId) == true;
   }
+
+  static bool _isDrawingRoute(List<String> segments) => switch (segments) {
+    ['child', _, 'activity', 'drawing'] => true,
+    _ => false,
+  };
 
   // 아래 이동들은 "여기서 다시 시작"이라 앱 최상단 스택을 갈아끼운다.
   // 탭 안에서 불러도 탭 하나만 바뀌는 일이 없도록 최상단 Navigator를 쓴다.

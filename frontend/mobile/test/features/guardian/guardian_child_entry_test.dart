@@ -211,7 +211,10 @@ void main() {
     await tester.pumpAndSettle();
     await _tapAfterScroll(tester, const ValueKey('activity-77'));
     await tester.pumpAndSettle();
-    if (find.byKey(const ValueKey('activity-guide-start')).evaluate().isNotEmpty) {
+    if (find
+        .byKey(const ValueKey('activity-guide-start'))
+        .evaluate()
+        .isNotEmpty) {
       await _tapAfterScroll(tester, const ValueKey('activity-guide-start'));
     }
     await _pumpUntil(tester, find.byKey(const ValueKey('drawing-canvas')));
@@ -660,8 +663,9 @@ final class _TrackingDrawingRepository
   Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
     BinaryUploadDto preview,
-    DraftCanvasStateDto canvasState,
-  ) async => DraftSaveResponseDto(
+    DraftCanvasStateDto canvasState, {
+    required String idempotencyKey,
+  }) async => DraftSaveResponseDto(
     drawingAssetId: 1,
     assetVersion: 1,
     lastEventSequence: canvasState.lastEventSequence,

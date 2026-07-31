@@ -193,11 +193,13 @@ final class RemoteDrawingRepository
   Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
     BinaryUploadDto preview,
-    DraftCanvasStateDto canvasState,
-  ) async {
+    DraftCanvasStateDto canvasState, {
+    required String idempotencyKey,
+  }) async {
     final response = await _apiClient.put<Map<String, dynamic>>(
       'drawing-sessions/$sessionId/draft',
       data: buildDraftFormData(preview, canvasState),
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
     );
     return DraftSaveResponseDto.fromJson(envelopeObject(response.data));
   }

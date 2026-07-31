@@ -119,10 +119,7 @@ void main() {
     expect(session.latestAnalysis?['drawingAnalysisId'], 300);
     expect(session.latestAsset?.drawingAssetId, 200);
     expect(session.latestAsset?.assetType, 'FINAL');
-    expect(
-      session.latestAsset?.fileUrl,
-      '/api/v1/drawing-assets/200/file',
-    );
+    expect(session.latestAsset?.fileUrl, '/api/v1/drawing-assets/200/file');
   });
 
   test('Draft 저장은 JSON MIME multipart와 공통 응답 봉투를 처리한다', () async {
@@ -147,11 +144,13 @@ void main() {
         viewport: null,
         clientSavedAt: '2026-07-25T17:00:00+09:00',
       ),
+      idempotencyKey: 'draft-save-key-0001',
     );
 
     final request = interceptor.requests.single;
     expect(request.method, 'PUT');
     expect(request.uri.path, '/api/v1/drawing-sessions/42/draft');
+    expect(request.headers['Idempotency-Key'], 'draft-save-key-0001');
     final form = request.data as FormData;
     expect(form.fields, isEmpty);
     final preview = form.files.singleWhere((part) => part.key == 'preview');
@@ -294,6 +293,7 @@ void main() {
             viewport: null,
             clientSavedAt: '2026-07-25T17:00:00+09:00',
           ),
+          idempotencyKey: 'draft-save-key-0002',
         ),
         throwsA(
           isA<ApiResponseFailure>()

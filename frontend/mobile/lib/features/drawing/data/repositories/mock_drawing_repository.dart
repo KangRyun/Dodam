@@ -163,8 +163,9 @@ final class MockDrawingRepository
   Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
     BinaryUploadDto preview,
-    DraftCanvasStateDto canvasState,
-  ) async => DraftSaveResponseDto.fromJson({
+    DraftCanvasStateDto canvasState, {
+    required String idempotencyKey,
+  }) async => DraftSaveResponseDto.fromJson({
     'drawingAssetId': 120,
     'assetVersion': 3,
     'lastEventSequence': canvasState.lastEventSequence,

@@ -23,8 +23,9 @@ abstract interface class DrawingRepository {
   Future<DraftSaveResponseDto> saveDraft(
     int sessionId,
     BinaryUploadDto preview,
-    DraftCanvasStateDto canvasState,
-  );
+    DraftCanvasStateDto canvasState, {
+    required String idempotencyKey,
+  });
   Future<DraftRecoveryDto?> getDraft(int sessionId);
   Future<Uint8List> downloadDraftPreview(String previewUrl);
   Future<void> deleteDraft(int sessionId);
