@@ -63,7 +63,7 @@ class ChildQueryServiceTest {
     assertThat(response.birthDate()).isEqualTo(LocalDate.of(2019, 7, 23));
     assertThat(response.age()).isEqualTo(6);
     assertThat(response.profileImageUrl()).isEqualTo("https://cdn.example/child/3");
-    assertThat(response.preferredCharacter()).isEqualTo("MONGLE");
+    assertThat(response.preferredCharacter()).isEqualTo("BASE");
     assertThat(response.questionDifficulty()).isEqualTo(QuestionDifficulty.LOWER_ELEMENTARY);
     assertThat(response.responseModes()).containsExactly("VOICE", "EMOJI", "COLOR");
     assertThat(response.tutorialStatus()).isEqualTo(ChildTutorialStatus.IN_PROGRESS);
@@ -106,7 +106,7 @@ class ChildQueryServiceTest {
             "별이",
             LocalDate.of(2019, 7, 23),
             "MOTHER",
-            "MONGLE",
+            "BASE",
             LocalDateTime.of(2026, 7, 20, 8, 15, 0),
             12L);
     ChildSummaryProjection second =
@@ -124,7 +124,7 @@ class ChildQueryServiceTest {
     assertThat(children.get(0).questionDifficulty()).isEqualTo(QuestionDifficulty.LOWER_ELEMENTARY);
     assertThat(children.get(0).tutorialStatus()).isEqualTo(ChildTutorialStatus.IN_PROGRESS);
     assertThat(children.get(0).profileStatus()).isEqualTo(ChildProfileStatus.ACTIVE);
-    assertThat(children.get(0).preferredCharacter()).isEqualTo("MONGLE");
+    assertThat(children.get(0).preferredCharacter()).isEqualTo("BASE");
     assertThat(children.get(0).recentActivity().lastActivityAt())
         .isEqualTo(Instant.parse("2026-07-20T08:15:00Z"));
     assertThat(children.get(0).recentActivity().totalActivityCount()).isEqualTo(12L);
@@ -208,7 +208,7 @@ class ChildQueryServiceTest {
     given(projection.getNickname()).willReturn("별이");
     given(projection.getBirthDate()).willReturn(birthDate);
     given(projection.getProfileImageUrl()).willReturn("https://cdn.example/child/3");
-    given(projection.getPreferredCharacter()).willReturn("MONGLE");
+    given(projection.getPreferredCharacter()).willReturn("BASE");
     given(projection.getQuestionDifficulty()).willReturn("LOWER_ELEMENTARY");
     given(projection.getTutorialStatus()).willReturn("IN_PROGRESS");
     given(projection.getProfileStatus()).willReturn("ACTIVE");

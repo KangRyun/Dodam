@@ -82,12 +82,10 @@ public class ChildUpdateService {
 
     LocalDateTime now = LocalDateTime.now(clock);
     childUpdateRepository.updateProfile(
-        childId,
-        request.nickname(),
-        request.birthDate(),
-        request.preferredCharacter(),
-        request.questionDifficulty(),
-        now);
+        childId, request.nickname(), request.birthDate(), null, request.questionDifficulty(), now);
+    if (request.preferredCharacterSpecified()) {
+      childUpdateRepository.updatePreferredCharacter(childId, request.preferredCharacter(), now);
+    }
     if (request.profileImageFileIdSpecified()) {
       String profileImageUrl =
           profileImageLinkService.replace(guardianUserId, childId, request.profileImageFileId());

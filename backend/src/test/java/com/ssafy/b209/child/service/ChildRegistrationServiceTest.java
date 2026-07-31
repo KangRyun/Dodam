@@ -62,7 +62,7 @@ class ChildRegistrationServiceTest {
             "별이",
             LocalDate.of(2019, 3, 15),
             "LOWER_ELEMENTARY",
-            "MONGLE",
+            "BASE",
             null,
             LocalDateTime.of(2026, 7, 23, 12, 0, 0));
     verify(childRegistrationRepository).insertGuardianRelation(GUARDIAN_USER_ID, 3L, "MOTHER");
@@ -134,7 +134,7 @@ class ChildRegistrationServiceTest {
             "별이",
             LocalDate.of(2019, 3, 15),
             GuardianRelationshipType.MOTHER,
-            "MONGLE",
+            "BASE",
             QuestionDifficulty.LOWER_ELEMENTARY,
             List.of(ResponseMode.VOICE),
             "profile-file-id");
@@ -155,7 +155,7 @@ class ChildRegistrationServiceTest {
         "별이",
         birthDate,
         GuardianRelationshipType.MOTHER,
-        "MONGLE",
+        "BASE",
         QuestionDifficulty.LOWER_ELEMENTARY,
         responseModes,
         null);

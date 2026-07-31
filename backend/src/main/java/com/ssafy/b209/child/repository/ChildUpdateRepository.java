@@ -150,6 +150,22 @@ public class ChildUpdateRepository {
   }
 
   /**
+   * 선호 캐릭터를 명시된 코드로 교체하거나 선택을 해제한다.
+   *
+   * @param childId 변경할 아동 ID
+   * @param preferredCharacter 새 캐릭터 코드, 선택 해제 시 {@code null}
+   * @param updatedAt 변경 시각
+   */
+  public void updatePreferredCharacter(
+      long childId, String preferredCharacter, LocalDateTime updatedAt) {
+    jdbcTemplate.update(
+        "update children set preferred_character = ?, updated_at = ? where id = ?",
+        preferredCharacter,
+        updatedAt,
+        childId);
+  }
+
+  /**
    * 현재 요청 보호자와 아동의 관계 유형을 변경한다.
    *
    * @param guardianUserId 관계를 변경할 보호자 사용자 식별자

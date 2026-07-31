@@ -16,8 +16,8 @@ import java.util.List;
 /**
  * 연결 보호자가 아동 프로필에서 변경할 값을 전달한다.
  *
- * <p>전달하지 않은 필드는 유지한다. {@code profileImageFileId}를 명시적으로 {@code null}로 전달하면 기존 이미지를 삭제하고, 필드를 생략하면
- * 현재 이미지를 유지한다.
+ * <p>전달하지 않은 필드는 유지한다. {@code profileImageFileId}와 {@code preferredCharacter}는 명시적 {@code null}을
+ * 전달하면 각각 기존 이미지와 캐릭터 선택을 삭제한다.
  */
 @JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.ANY)
 public class UpdateChildRequest {
@@ -29,7 +29,7 @@ public class UpdateChildRequest {
   @Past private LocalDate birthDate;
   private GuardianRelationshipType relationshipType;
 
-  @Size(max = 50)
+  @Pattern(regexp = "BASE|PRINCESS|DINO|OCTOPUS")
   private String preferredCharacter;
 
   private QuestionDifficulty questionDifficulty;
@@ -41,6 +41,7 @@ public class UpdateChildRequest {
   private String profileImageFileId;
 
   @JsonIgnore private boolean profileImageFileIdSpecified;
+  @JsonIgnore private boolean preferredCharacterSpecified;
 
   public UpdateChildRequest() {}
 
@@ -56,6 +57,7 @@ public class UpdateChildRequest {
     this.birthDate = birthDate;
     this.relationshipType = relationshipType;
     this.preferredCharacter = preferredCharacter;
+    this.preferredCharacterSpecified = preferredCharacter != null;
     this.questionDifficulty = questionDifficulty;
     this.responseModes = responseModes;
     this.profileImageFileId = profileImageFileId;
@@ -78,6 +80,10 @@ public class UpdateChildRequest {
     return preferredCharacter;
   }
 
+  public boolean preferredCharacterSpecified() {
+    return preferredCharacterSpecified;
+  }
+
   public QuestionDifficulty questionDifficulty() {
     return questionDifficulty;
   }
@@ -98,5 +104,11 @@ public class UpdateChildRequest {
   public void setProfileImageFileId(String profileImageFileId) {
     this.profileImageFileId = profileImageFileId;
     this.profileImageFileIdSpecified = true;
+  }
+
+  @JsonSetter("preferredCharacter")
+  public void setPreferredCharacter(String preferredCharacter) {
+    this.preferredCharacter = preferredCharacter;
+    this.preferredCharacterSpecified = true;
   }
 }
