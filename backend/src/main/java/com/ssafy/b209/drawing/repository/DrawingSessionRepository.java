@@ -191,4 +191,45 @@ public interface DrawingSessionRepository extends JpaRepository<DrawingSession, 
       @Param("sessionStatus") DrawingSessionStatus sessionStatus,
       @Param("reportStatus") ReportStatus reportStatus,
       Pageable pageable);
+
+  /**
+   * 월간 감정 달력 집계를 위해 시작 시각 범위에 속한 활동과 아동 선택 감정을 한 Query로 조회한다.
+   *
+   * <p>세션과 선택 감정을 한 번만 LEFT JOIN하므로 활동 수만큼 추가 Query가 발생하지 않는다. 선택 감정이 여러 건인 세션은 감정 수만큼 행이 반환되므로 활동
+   * 수를 세는 계층이 세션 식별자로 중복을 제거해야 한다. 선택 감정이 없는 세션도 감정 값이 {@code null}인 한 행으로 반환된다.
+   *
+   * <p>Soft Delete된 활동과 삭제·중단 상태 활동은 활동 기록 목록과 같은 기준으로 제외한다. 완료 리포트 수는 {@code count(*)} 스칼라
+   * Subquery로 세어 조인으로 행이 늘어나지 않게 한다.
+   *
+   * <p>시작 시각은 저장된 UTC 기준 벽시계 값과 비교하므로 달력 기준 시간대의 월 경계를 UTC로 변환한 값을 전달해야 한다.
+   *
+   * @param childId 조회 대상 아동 식별자
+   * @param fromInclusive UTC 기준 시작 시각 하한(이상)
+   * @param toExclusive UTC 기준 시작 시각 상한(미만)
+   * @return 시작 시각과 선택 순서로 정렬된 활동·감정 행 목록, 없으면 빈 목록
+   */
+  @Query(
+      value =
+          """
+          select ds.id as drawingSessionId,
+                 ds.started_at as startedAt,
+                 e.emotion_code as emotionCode,
+                 (select count(*)
+                    from reports r
+                   where r.drawing_session_id = ds.id
+                     and r.report_status = 'COMPLETED') as completedReportCount
+            from drawing_sessions ds
+            left join drawing_session_emotions e on e.drawing_session_id = ds.id
+           where ds.child_id = :childId
+             and ds.deleted_at is null
+             and ds.session_status not in ('DELETED', 'ABANDONED')
+             and ds.started_at >= :fromInclusive
+             and ds.started_at < :toExclusive
+           order by ds.started_at, ds.id, e.selection_order, e.id
+          """,
+      nativeQuery = true)
+  List<EmotionCalendarRowProjection> findEmotionCalendarRows(
+      @Param("childId") Long childId,
+      @Param("fromInclusive") LocalDateTime fromInclusive,
+      @Param("toExclusive") LocalDateTime toExclusive);
 }
