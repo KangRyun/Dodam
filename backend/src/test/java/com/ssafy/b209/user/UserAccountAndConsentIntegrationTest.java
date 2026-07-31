@@ -1,15 +1,24 @@
 package com.ssafy.b209.user;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.ssafy.b209.auth.service.RefreshTokenSessionStore;
 import com.ssafy.b209.auth.token.AuthenticatedUser;
+import com.ssafy.b209.child.repository.ChildDeletionRepository;
 import com.ssafy.b209.support.SharedMongoContainer;
 import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -24,7 +33,10 @@ import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.MySQLContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
@@ -61,6 +73,9 @@ class UserAccountAndConsentIntegrationTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbcTemplate;
+  @Autowired private ChildDeletionRepository childDeletionRepository;
+  @Autowired private PlatformTransactionManager transactionManager;
+  @MockitoBean private RefreshTokenSessionStore refreshTokenSessionStore;
 
   /**
    * 탈퇴는 아동의 스트로크를 MongoDB 에서 동반 삭제한다(S15P11B209-365).
@@ -80,6 +95,8 @@ class UserAccountAndConsentIntegrationTest {
     jdbcTemplate.update("DELETE FROM consent_terms");
     jdbcTemplate.update("DELETE FROM user_notification_settings");
     jdbcTemplate.update("DELETE FROM user_data_retention_settings");
+    jdbcTemplate.update("DELETE FROM storage_deletion_jobs");
+    jdbcTemplate.update("DELETE FROM child_profile_image_files");
     jdbcTemplate.update("DELETE FROM auth_accounts");
     jdbcTemplate.update("DELETE FROM guardian_child_relations");
     jdbcTemplate.update("DELETE FROM child_response_modes");
@@ -295,7 +312,8 @@ class UserAccountAndConsentIntegrationTest {
    * 한다.
    */
   @Test
-  void deletesAccountAndSoftDeletesSolelyOwnedChild() throws Exception {
+  void marksAccountDeletedSoftDeletesSolelyOwnedChildAndReleasesAllGuardianRelations()
+      throws Exception {
     jdbcTemplate.update(
         "INSERT INTO auth_accounts (user_id, provider, provider_subject) "
             + "VALUES (?, 'KAKAO', 'kakao-42-subject')",
@@ -311,6 +329,22 @@ class UserAccountAndConsentIntegrationTest {
             + "(consent_term_id, actor_user_id, subject_child_id, subject_reference_hash, action) "
             + "VALUES (1, ?, NULL, REPEAT('a', 64), 'AGREE')",
         USER_ID);
+    jdbcTemplate.update(
+        "INSERT INTO child_profile_image_files "
+            + "(file_id, uploaded_by_user_id, storage_key, content_type, file_size_bytes, width_px, "
+            + "height_px, checksum_sha256, status, child_id, expires_at, attached_at) "
+            + "VALUES ('00000000-0000-0000-0000-000000000001', ?, 'children/1/profile.png', "
+            + "'image/png', 10, 1, 1, REPEAT('a', 64), 'ATTACHED', ?, "
+            + "'2026-08-01 00:00:00.000000', '2026-07-31 00:00:00.000000')",
+        USER_ID,
+        CHILD_ID);
+    jdbcTemplate.update(
+        "INSERT INTO guardian_child_relations (guardian_user_id, child_id, relationship_type) "
+            + "VALUES (?, ?, 'MOTHER'), (?, ?, 'FATHER')",
+        USER_ID,
+        OTHER_CHILD_ID,
+        OTHER_USER_ID,
+        OTHER_CHILD_ID);
 
     mockMvc
         .perform(
@@ -319,10 +353,15 @@ class UserAccountAndConsentIntegrationTest {
                 .content("{\"confirmation\":\"DELETE\"}"))
         .andExpect(status().isNoContent());
 
-    assertThat(count("SELECT COUNT(*) FROM users WHERE id = " + USER_ID)).isZero();
-    assertThat(count("SELECT COUNT(*) FROM auth_accounts WHERE user_id = " + USER_ID)).isZero();
+    assertThat(
+            count(
+                "SELECT COUNT(*) FROM users WHERE id = "
+                    + USER_ID
+                    + " AND account_status = 'DELETED' AND deleted_at IS NOT NULL"))
+        .isEqualTo(1);
+    assertThat(count("SELECT COUNT(*) FROM auth_accounts WHERE user_id = " + USER_ID)).isEqualTo(1);
     assertThat(count("SELECT COUNT(*) FROM user_notification_settings WHERE user_id = " + USER_ID))
-        .isZero();
+        .isEqualTo(1);
     assertThat(
             count(
                 "SELECT COUNT(*) FROM guardian_child_relations WHERE guardian_user_id = "
@@ -344,22 +383,31 @@ class UserAccountAndConsentIntegrationTest {
                     + OTHER_CHILD_ID
                     + " AND profile_status = 'ACTIVE'"))
         .isEqualTo(1);
-    // 동의 이력은 행위자만 비식별화한다(법적 보존 대상).
-    assertThat(count("SELECT COUNT(*) FROM consent_records WHERE actor_user_id IS NULL"))
+    assertThat(
+            count(
+                "SELECT COUNT(*) FROM guardian_child_relations WHERE guardian_user_id = "
+                    + OTHER_USER_ID
+                    + " AND child_id = "
+                    + OTHER_CHILD_ID))
         .isEqualTo(1);
+    assertThat(
+            count(
+                "SELECT COUNT(*) FROM storage_deletion_jobs WHERE storage_key = 'children/1/profile.png' "
+                    + "AND resource_type = 'CHILD_PROFILE_IMAGE'"))
+        .isEqualTo(1);
+    assertThat(count("SELECT COUNT(*) FROM consent_records WHERE actor_user_id = " + USER_ID))
+        .isEqualTo(1);
+    org.mockito.Mockito.verify(refreshTokenSessionStore).revokeAll(USER_ID);
   }
 
   /**
    * S15P11B209-728 — 전문가도 탈퇴할 수 있어야 한다(2026-07-30 결정).
    *
-   * <p>{@code expert_profiles.user_id}가 {@code ON DELETE RESTRICT}라, 전문가 프로필을 남겨둔 채 사용자를 지우면 DB 제약
-   * 위반이 500으로 샌다. 탈퇴 처리에서 프로필을 먼저 지워 경로를 연다.
-   *
-   * <p>이 테스트는 <b>V22 마이그레이션도 함께 검증</b>한다. 미술 활동 자료가 {@code ON DELETE SET NULL}로 바뀌지 않았다면 프로필 삭제가 그
-   * FK에 걸려 여전히 500이 난다.
+   * <p>사용자를 Soft Delete하므로 {@code expert_profiles.user_id}의 {@code ON DELETE RESTRICT}를 건드리지 않는다.
+   * 전문가 프로필과 작성 자료를 유지해도 FK 위반 없이 계정만 {@code DELETED}로 전환돼야 한다.
    */
   @Test
-  void allowsWithdrawalForExpertAndKeepsAuthoredMaterial() throws Exception {
+  void allowsWithdrawalForExpertWithoutHardDeletingTheProfileOrAuthoredMaterial() throws Exception {
     jdbcTemplate.update(
         "INSERT INTO expert_profiles (id, user_id, display_name, career_years, verification_status) "
             + "VALUES (900, ?, '김상담', 5, 'VERIFIED')",
@@ -376,13 +424,17 @@ class UserAccountAndConsentIntegrationTest {
                 .content("{\"confirmation\":\"DELETE\"}"))
         .andExpect(status().isNoContent());
 
-    assertThat(count("SELECT COUNT(*) FROM users WHERE id = " + USER_ID)).isZero();
-    assertThat(count("SELECT COUNT(*) FROM expert_profiles WHERE id = 900")).isZero();
-    // 미술 자료는 남고 작성자만 끊긴다 — 보호자에게 제공되는 콘텐츠이기 때문이다.
+    assertThat(
+            count(
+                "SELECT COUNT(*) FROM users WHERE id = "
+                    + USER_ID
+                    + " AND account_status = 'DELETED'"))
+        .isEqualTo(1);
+    assertThat(count("SELECT COUNT(*) FROM expert_profiles WHERE id = 900")).isEqualTo(1);
     assertThat(count("SELECT COUNT(*) FROM activity_templates WHERE id = 900")).isEqualTo(1);
     assertThat(
             count(
-                "SELECT COUNT(*) FROM activity_templates WHERE id = 900 AND expert_profile_id IS NULL"))
+                "SELECT COUNT(*) FROM activity_templates WHERE id = 900 AND expert_profile_id = 900"))
         .isEqualTo(1);
   }
 
@@ -423,6 +475,52 @@ class UserAccountAndConsentIntegrationTest {
                 .content("{\"confirmation\":\"DELETE\"}"))
         .andExpect(status().isNotFound())
         .andExpect(jsonPath("$.code").value("USER_404_001"));
+  }
+
+  @Test
+  void preventsConcurrentGuardianRelationInsertionWhileSoleOwnershipIsLocked() throws Exception {
+    CountDownLatch ownershipLocked = new CountDownLatch(1);
+    CountDownLatch releaseOwnershipLock = new CountDownLatch(1);
+    CountDownLatch relationInsertStarted = new CountDownLatch(1);
+    ExecutorService executor = Executors.newFixedThreadPool(2);
+    try {
+      Future<List<Long>> lockedChildIds =
+          executor.submit(
+              () ->
+                  new TransactionTemplate(transactionManager)
+                      .execute(
+                          status -> {
+                            List<Long> childIds =
+                                childDeletionRepository.lockSolelyOwnedChildIds(USER_ID);
+                            ownershipLocked.countDown();
+                            await(releaseOwnershipLock);
+                            return childIds;
+                          }));
+
+      assertThat(ownershipLocked.await(5, TimeUnit.SECONDS)).isTrue();
+      Future<Integer> relationInsert =
+          executor.submit(
+              () -> {
+                relationInsertStarted.countDown();
+                return jdbcTemplate.update(
+                    "INSERT INTO guardian_child_relations (guardian_user_id, child_id, relationship_type) "
+                        + "VALUES (?, ?, 'FATHER')",
+                    OTHER_USER_ID,
+                    CHILD_ID);
+              });
+
+      assertThat(relationInsertStarted.await(5, TimeUnit.SECONDS)).isTrue();
+      assertThatThrownBy(() -> relationInsert.get(250, TimeUnit.MILLISECONDS))
+          .isInstanceOf(TimeoutException.class);
+
+      releaseOwnershipLock.countDown();
+
+      assertThat(lockedChildIds.get(5, TimeUnit.SECONDS)).containsExactly(CHILD_ID);
+      assertThat(relationInsert.get(5, TimeUnit.SECONDS)).isEqualTo(1);
+    } finally {
+      releaseOwnershipLock.countDown();
+      executor.shutdownNow();
+    }
   }
 
   // ---------------------------------------------------------------- 555 알림 설정 수정
@@ -758,6 +856,18 @@ class UserAccountAndConsentIntegrationTest {
             + "'2020-01-01 00:00:00', TRUE), "
             + "(3, 'CHILD_MARKETING', 'CHILD', FALSE, 'v1', '아동 마케팅 동의', "
             + "'2020-01-01 00:00:00', TRUE)");
+  }
+
+  private static void await(CountDownLatch latch) {
+    try {
+      if (!latch.await(5, TimeUnit.SECONDS)) {
+        throw new AssertionError("Timed out waiting for concurrent test coordination");
+      }
+    } catch (InterruptedException exception) {
+      Thread.currentThread().interrupt();
+      throw new AssertionError(
+          "Interrupted while waiting for concurrent test coordination", exception);
+    }
   }
 
   private void agree(long termId, Long childId, String hashSeed) {

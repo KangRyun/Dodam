@@ -32,8 +32,7 @@ Spring Boot와 AI 서버 사이의 `/internal/v1/**`는 이 문서의 범위가 
 - Apple은 `idToken`, `rawNonce`, `deviceId`를 전달한다.
 - Apple 계정은 `(APPLE, sub)`로 식별한다. 같은 `sub`는 기존 사용자를 재사용하고,
   최초 검증 이메일은 후속 Token에 없어도 로그인 응답에 재사용한다.
-- 이메일이 같은 다른 Provider 계정은 자동 병합하지 않는다. 회원 탈퇴로 Apple
-  연결이 삭제된 뒤 같은 Apple 계정으로 로그인하면 신규 사용자로 가입한다.
+- 이메일이 같은 다른 Provider 계정은 자동 병합하지 않는다. 회원 탈퇴는 인증 연결을 삭제하지 않고 계정을 `DELETED`로 전환하므로, 같은 Apple 계정 재로그인은 거부되며 신규 사용자로 자동 가입하지 않는다.
 
 ### 2.2 요청과 응답
 
@@ -88,7 +87,7 @@ Spring Boot와 AI 서버 사이의 `/internal/v1/**`는 이 문서의 범위가 
 | GET | `/api/v1/users/me` | Bearer | 구현 | 미연동 | 사용자 본인 조회 |
 | PATCH | `/api/v1/users/me` | Bearer, JSON | 구현 | 미연동 | 사용자 본인 수정 |
 | PUT | `/api/v1/users/me/onboarding` | Bearer, JSON | 구현 | 연동 | 프로필과 약관 동의 제출 |
-| DELETE | `/api/v1/users/me` | Bearer, JSON | 구현 | 미연동 | 사용자 즉시 탈퇴 |
+| DELETE | `/api/v1/users/me` | Bearer, JSON | 구현 | 미연동 | `DELETED` Soft Delete·모든 Refresh Token 폐기·아동 삭제 orchestration |
 | GET | `/api/v1/consents/terms` | Bearer | 구현 | 연동 | 가입 시 약관 목록 조회 |
 | GET | `/api/v1/consents` | Bearer | 구현 | 미연동 | 현재 동의 상태 조회 |
 | GET | `/api/v1/consents/history` | Bearer | 구현 | 미연동 | 동의 이력 조회 |

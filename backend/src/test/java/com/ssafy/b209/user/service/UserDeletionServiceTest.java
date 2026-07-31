@@ -7,12 +7,20 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.ssafy.b209.auth.domain.AccountStatus;
+import com.ssafy.b209.auth.domain.User;
+import com.ssafy.b209.auth.domain.UserRole;
 import com.ssafy.b209.auth.repository.UserRepository;
+import com.ssafy.b209.auth.service.RefreshTokenSessionStore;
 import com.ssafy.b209.child.repository.ChildDeletionRepository;
 import com.ssafy.b209.child.service.ChildDeletionService;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.user.dto.request.DeleteUserRequest;
 import com.ssafy.b209.user.exception.UserErrorCode;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -23,73 +31,57 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class UserDeletionServiceTest {
 
+  private static final Instant NOW = Instant.parse("2026-07-31T01:02:03Z");
+
   @Mock private UserRepository userRepository;
   @Mock private ChildDeletionService childDeletionService;
   @Mock private ChildDeletionRepository childDeletionRepository;
+  @Mock private RefreshTokenSessionStore refreshTokenSessionStore;
 
   private UserDeletionService service;
 
   @BeforeEach
   void setUp() {
     service =
-        new UserDeletionService(userRepository, childDeletionService, childDeletionRepository);
+        new UserDeletionService(
+            userRepository,
+            childDeletionService,
+            childDeletionRepository,
+            refreshTokenSessionStore,
+            Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
   @Test
-  void immediatelyDeletesExistingUserAfterExplicitConfirmation() {
-    when(userRepository.existsById(51L)).thenReturn(true);
+  void marksExistingUserDeletedWithoutHardDeletingTheRow() {
+    User user = activeUser();
+    when(userRepository.findById(51L)).thenReturn(Optional.of(user));
 
     service.delete(51L, new DeleteUserRequest("DELETE"));
 
-    verify(userRepository).deleteById(51L);
+    assertThat(user.getAccountStatus()).isEqualTo(AccountStatus.DELETED);
+    verify(userRepository, never()).deleteById(51L);
   }
 
-  /**
-   * S15P11B209-728 — 탈퇴가 아동 데이터를 함께 지우는지.
-   *
-   * <p>이 검증이 없던 동안 탈퇴는 {@code users} 행만 지웠고, 아동 프로필·그림·음성이 소유자 없이 남았다.
-   */
   @Test
-  void deletesChildrenOwnedSolelyByWithdrawingGuardian() {
-    when(userRepository.existsById(51L)).thenReturn(true);
+  void deletesSolelyOwnedChildrenBeforeReleasingGuardianRelations() {
+    when(userRepository.findById(51L)).thenReturn(Optional.of(activeUser()));
 
     service.delete(51L, new DeleteUserRequest("DELETE"));
 
-    verify(childDeletionService).deleteAllSolelyOwnedBy(51L);
-  }
-
-  /**
-   * ★ 순서가 이 기능의 핵심이다.
-   *
-   * <p>사용자를 먼저 지우면 {@code guardian_child_relations}가 CASCADE로 사라져 "이 보호자의 아동"을 더는 찾을 수 없다. 그러면 오류
-   * 없이 <b>조용히 아무것도 지우지 못한다.</b> 순서를 뒤집는 리팩터링을 이 테스트가 막는다.
-   */
-  @Test
-  void deletesChildDataBeforeRemovingUser() {
-    when(userRepository.existsById(51L)).thenReturn(true);
-
-    service.delete(51L, new DeleteUserRequest("DELETE"));
-
-    InOrder order = inOrder(childDeletionService, userRepository);
+    InOrder order = inOrder(childDeletionService, childDeletionRepository);
     order.verify(childDeletionService).deleteAllSolelyOwnedBy(51L);
-    order.verify(userRepository).deleteById(51L);
+    order.verify(childDeletionRepository).deleteGuardianRelations(51L);
   }
 
-  /**
-   * 전문가도 탈퇴할 수 있어야 한다는 결정(2026-07-30)에 따른 검증.
-   *
-   * <p>{@code expert_profiles.user_id}가 {@code ON DELETE RESTRICT}라, 남겨둔 채 사용자를 지우면 DB 제약 위반이 500으로
-   * 샌다. 사용자보다 <b>먼저</b> 지워야 한다.
-   */
   @Test
-  void deletesExpertProfileBeforeRemovingUser() {
-    when(userRepository.existsById(51L)).thenReturn(true);
+  void revokesAllRefreshSessionsAfterTheAccountIsMarkedDeleted() {
+    User user = activeUser();
+    when(userRepository.findById(51L)).thenReturn(Optional.of(user));
 
     service.delete(51L, new DeleteUserRequest("DELETE"));
 
-    InOrder order = inOrder(childDeletionRepository, userRepository);
-    order.verify(childDeletionRepository).deleteExpertProfile(51L);
-    order.verify(userRepository).deleteById(51L);
+    assertThat(user.getAccountStatus()).isEqualTo(AccountStatus.DELETED);
+    verify(refreshTokenSessionStore).revokeAll(51L);
   }
 
   @Test
@@ -101,14 +93,14 @@ class UserDeletionServiceTest {
                 assertThat(exception.getErrorCode())
                     .isEqualTo(UserErrorCode.WITHDRAWAL_CONFIRMATION_MISMATCH));
 
-    verify(userRepository, never()).existsById(51L);
-    verify(userRepository, never()).deleteById(51L);
+    verify(userRepository, never()).findById(51L);
     verify(childDeletionService, never()).deleteAllSolelyOwnedBy(51L);
+    verify(refreshTokenSessionStore, never()).revokeAll(51L);
   }
 
   @Test
-  void reportsMissingUserWithoutDeleting() {
-    when(userRepository.existsById(51L)).thenReturn(false);
+  void reportsMissingUserWithoutChangingChildrenOrSessions() {
+    when(userRepository.findById(51L)).thenReturn(Optional.empty());
 
     assertThatThrownBy(() -> service.delete(51L, new DeleteUserRequest("DELETE")))
         .isInstanceOfSatisfying(
@@ -116,7 +108,35 @@ class UserDeletionServiceTest {
             exception ->
                 assertThat(exception.getErrorCode()).isEqualTo(UserErrorCode.USER_NOT_FOUND));
 
-    verify(userRepository, never()).deleteById(51L);
     verify(childDeletionService, never()).deleteAllSolelyOwnedBy(51L);
+    verify(childDeletionRepository, never()).deleteGuardianRelations(51L);
+    verify(refreshTokenSessionStore, never()).revokeAll(51L);
+    verify(userRepository, never()).deleteById(51L);
+  }
+
+  @Test
+  void hidesAlreadyDeletedUserWithoutRepeatingCleanup() {
+    User deletedUser = activeUser();
+    deletedUser.markDeleted(NOW.atOffset(ZoneOffset.UTC).toLocalDateTime());
+    when(userRepository.findById(51L)).thenReturn(Optional.of(deletedUser));
+
+    assertThatThrownBy(() -> service.delete(51L, new DeleteUserRequest("DELETE")))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception ->
+                assertThat(exception.getErrorCode()).isEqualTo(UserErrorCode.USER_NOT_FOUND));
+
+    verify(childDeletionService, never()).deleteAllSolelyOwnedBy(51L);
+    verify(refreshTokenSessionStore, never()).revokeAll(51L);
+  }
+
+  private static User activeUser() {
+    User user = User.pending(NOW.atOffset(ZoneOffset.UTC).toLocalDateTime());
+    user.completeOnboarding(
+        UserRole.GUARDIAN,
+        "별이맘",
+        "guardian@example.com",
+        NOW.atOffset(ZoneOffset.UTC).toLocalDateTime());
+    return user;
   }
 }

@@ -147,7 +147,7 @@ GET과 같은 `ApiResponse<DataRetentionPolicyResponse>`를 반환한다.
 
 V24 `user_data_retention_settings`:
 
-- PK `user_id`, FK → `users(id)` `ON DELETE CASCADE` (탈퇴 시 설정 동반 삭제)
+- PK `user_id`, FK → `users(id)` `ON DELETE CASCADE`. 회원 탈퇴는 `users` Soft Delete이므로 이 CASCADE는 실행되지 않으며 설정 행도 유지된다.
 - `CHECK retention_days > 0`
 - `CHECK notice_days_before >= 0`
 - `CHECK notice_days_before < retention_days` — 만료 후에 안내하는 조합을 DB에서 차단

@@ -37,6 +37,18 @@ public class RedisRefreshTokenSessionStore implements RefreshTokenSessionStore {
               + "if redis.call('HGET', KEYS[1], 'tokenHash') ~= ARGV[3] then return 0 end "
               + "redis.call('DEL', KEYS[1]) return 1",
           Long.class);
+  private static final DefaultRedisScript<Long> REVOKE_ALL_SCRIPT =
+      new DefaultRedisScript<>(
+          "local cursor = '0' "
+              + "repeat "
+              + "local result = redis.call('SCAN', cursor, 'MATCH', ARGV[1], 'COUNT', 100) "
+              + "cursor = result[1] "
+              + "for _, key in ipairs(result[2]) do "
+              + "if redis.call('HGET', key, 'userId') == ARGV[2] then redis.call('DEL', key) end "
+              + "end "
+              + "until cursor == '0' "
+              + "return 1",
+          Long.class);
 
   private final StringRedisTemplate redisTemplate;
 
@@ -103,6 +115,11 @@ public class RedisRefreshTokenSessionStore implements RefreshTokenSessionStore {
         redisTemplate.execute(
             REVOKE_SCRIPT, List.of(key(familyId)), userId.toString(), deviceId, tokenHash);
     return Long.valueOf(1L).equals(revoked);
+  }
+
+  @Override
+  public void revokeAll(Long userId) {
+    redisTemplate.execute(REVOKE_ALL_SCRIPT, List.of(), KEY_PREFIX + "*", userId.toString());
   }
 
   private String key(String familyId) {

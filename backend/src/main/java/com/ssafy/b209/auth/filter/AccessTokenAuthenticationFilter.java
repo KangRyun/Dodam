@@ -1,7 +1,9 @@
 package com.ssafy.b209.auth.filter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ssafy.b209.auth.domain.AccountStatus;
 import com.ssafy.b209.auth.exception.AuthErrorCode;
+import com.ssafy.b209.auth.repository.UserRepository;
 import com.ssafy.b209.auth.token.AuthenticatedUser;
 import com.ssafy.b209.auth.token.JwtAccessTokenDecoder;
 import com.ssafy.b209.global.exception.BusinessException;
@@ -36,6 +38,7 @@ public class AccessTokenAuthenticationFilter extends OncePerRequestFilter {
   private final JwtAccessTokenDecoder decoder;
   private final ObjectMapper objectMapper;
   private final AuthFilterProperties properties;
+  private final UserRepository userRepository;
 
   /**
    * Access Token Filter를 구성한다.
@@ -46,9 +49,26 @@ public class AccessTokenAuthenticationFilter extends OncePerRequestFilter {
    */
   public AccessTokenAuthenticationFilter(
       JwtAccessTokenDecoder decoder, ObjectMapper objectMapper, AuthFilterProperties properties) {
+    this(decoder, objectMapper, properties, null);
+  }
+
+  /**
+   * 운영 요청의 Access Token을 검증하고 사용자 상태도 확인하는 Filter를 구성한다.
+   *
+   * @param decoder JWT 검증과 Principal 복원을 담당하는 Decoder
+   * @param objectMapper 공통 오류 JSON 직렬화 도구
+   * @param properties 임시 Header 전환 설정
+   * @param userRepository 삭제·정지 계정 차단용 사용자 저장소
+   */
+  public AccessTokenAuthenticationFilter(
+      JwtAccessTokenDecoder decoder,
+      ObjectMapper objectMapper,
+      AuthFilterProperties properties,
+      UserRepository userRepository) {
     this.decoder = decoder;
     this.objectMapper = objectMapper;
     this.properties = properties;
+    this.userRepository = userRepository;
   }
 
   @Override
@@ -76,6 +96,7 @@ public class AccessTokenAuthenticationFilter extends OncePerRequestFilter {
 
     try {
       AuthenticatedUser principal = decoder.decode(authorization.substring(BEARER_PREFIX.length()));
+      verifyAccountStatus(principal);
       SecurityContext context = SecurityContextHolder.createEmptyContext();
       context.setAuthentication(
           UsernamePasswordAuthenticationToken.authenticated(principal, null, List.of()));
@@ -87,6 +108,20 @@ public class AccessTokenAuthenticationFilter extends OncePerRequestFilter {
       writeError(response, exception.getErrorCode());
     } finally {
       SecurityContextHolder.clearContext();
+    }
+  }
+
+  private void verifyAccountStatus(AuthenticatedUser principal) {
+    if (userRepository == null) {
+      return;
+    }
+    AccountStatus accountStatus =
+        userRepository
+            .findById(principal.userId())
+            .map(com.ssafy.b209.auth.domain.User::getAccountStatus)
+            .orElseThrow(() -> new BusinessException(AuthErrorCode.ACCESS_TOKEN_INVALID));
+    if (accountStatus == AccountStatus.SUSPENDED || accountStatus == AccountStatus.DELETED) {
+      throw new BusinessException(AuthErrorCode.ACCOUNT_SUSPENDED);
     }
   }
 

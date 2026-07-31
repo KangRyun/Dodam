@@ -77,7 +77,7 @@ public class UserController {
    * @param onboardingService 최초 정보 등록·온보딩 완료 Use Case
    * @param queryService 사용자 본인 정보 조회 Use Case
    * @param updateService 사용자 본인 정보 수정 Use Case
-   * @param deletionService 사용자 계정 즉시 삭제 Use Case
+   * @param deletionService 사용자 계정 Soft Delete Use Case
    * @param notificationSettingsReader 알림 수신 설정 조회 Use Case
    * @param notificationSettingsUpdateService 알림 수신 설정 변경 Use Case
    * @param dataRetentionPolicyReader 데이터 보관 정책 조회 Use Case
@@ -176,14 +176,16 @@ public class UserController {
   }
 
   /**
-   * 인증 사용자의 계정 식별정보를 즉시 삭제한다.
+   * 인증 사용자의 계정 상태를 삭제 상태로 전환한다.
    *
    * @param request 탈퇴 확인 문자열
    * @return Body가 없는 HTTP 204 응답
    */
   @Operation(
       summary = "회원 탈퇴",
-      description = "confirmation 값이 DELETE인 경우 인증 사용자의 계정 식별정보를 즉시 삭제합니다.")
+      description =
+          "confirmation 값이 DELETE인 경우 계정을 DELETED로 전환하고 모든 Refresh Token을 폐기합니다. "
+              + "단독 보호 아동은 Soft Delete와 파일 삭제 작업 적재를 수행하며, 공동 보호 아동은 관계만 해제합니다.")
   @ApiResponses({
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "204",

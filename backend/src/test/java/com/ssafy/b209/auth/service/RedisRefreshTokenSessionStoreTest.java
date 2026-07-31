@@ -53,4 +53,15 @@ class RedisRefreshTokenSessionStoreTest {
             eq("device-1"),
             eq("token-hash"));
   }
+
+  @Test
+  @SuppressWarnings("unchecked")
+  void revokesAllFamiliesRegisteredForTheUser() {
+    RedisRefreshTokenSessionStore store = new RedisRefreshTokenSessionStore(redisTemplate);
+
+    store.revokeAll(41L);
+
+    verify(redisTemplate)
+        .execute(any(RedisScript.class), eq(List.of()), eq("auth:refresh:family:*"), eq("41"));
+  }
 }
