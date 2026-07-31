@@ -93,4 +93,25 @@ public class DataExportJob {
   public LocalDateTime getCreatedAt() {
     return createdAt;
   }
+
+  /**
+   * @return 내보내기 파일 다운로드 만료 시각
+   */
+  public LocalDateTime getExpiresAt() {
+    return expiresAt;
+  }
+
+  /**
+   * @return 내보내기 작업 완료 시각
+   */
+  public LocalDateTime getCompletedAt() {
+    return completedAt;
+  }
+
+  /**
+   * @return 작업 실패 시 기록한 안전한 오류 코드
+   */
+  public String getErrorCode() {
+    return errorCode;
+  }
 }

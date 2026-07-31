@@ -11,6 +11,9 @@ public enum UserErrorCode implements ErrorCode {
   /** 인증된 사용자 식별자에 해당하는 사용자를 찾을 수 없는 경우다. */
   USER_NOT_FOUND(HttpStatus.NOT_FOUND, "USER_404_001", "사용자 정보를 찾을 수 없습니다."),
 
+  /** 존재하지 않거나 인증 사용자가 소유하지 않은 데이터 내보내기 작업을 조회한 경우다. */
+  DATA_EXPORT_JOB_NOT_FOUND(HttpStatus.NOT_FOUND, "USER_404_002", "데이터 내보내기 작업을 찾을 수 없습니다."),
+
   /** 회원 탈퇴 확인 문자열이 정확한 값과 일치하지 않는 경우다. */
   WITHDRAWAL_CONFIRMATION_MISMATCH(
       HttpStatus.BAD_REQUEST, "USER_400_002", "회원 탈퇴 확인 값이 올바르지 않습니다.");

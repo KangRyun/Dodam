@@ -9,9 +9,11 @@ import com.ssafy.b209.user.dto.request.NotificationSettingsUpdateRequest;
 import com.ssafy.b209.user.dto.request.OnboardingRequest;
 import com.ssafy.b209.user.dto.request.UpdateUserRequest;
 import com.ssafy.b209.user.dto.response.DataExportJobResponse;
+import com.ssafy.b209.user.dto.response.DataExportJobStatusResponse;
 import com.ssafy.b209.user.dto.response.DataRetentionPolicyResponse;
 import com.ssafy.b209.user.dto.response.NotificationSettingsResponse;
 import com.ssafy.b209.user.dto.response.UserResponse;
+import com.ssafy.b209.user.service.UserDataExportQueryService;
 import com.ssafy.b209.user.service.UserDataExportRequestService;
 import com.ssafy.b209.user.service.UserDataRetentionPolicyReader;
 import com.ssafy.b209.user.service.UserDataRetentionPolicyUpdateService;
@@ -34,6 +36,7 @@ import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -65,6 +68,7 @@ public class UserController {
   private final UserDataRetentionPolicyReader dataRetentionPolicyReader;
   private final UserDataRetentionPolicyUpdateService dataRetentionPolicyUpdateService;
   private final UserDataExportRequestService dataExportRequestService;
+  private final UserDataExportQueryService dataExportQueryService;
 
   /**
    * 사용자 식별 경계와 조회·Onboarding·수정 서비스를 사용하는 Controller를 생성한다.
@@ -79,6 +83,7 @@ public class UserController {
    * @param dataRetentionPolicyReader 데이터 보관 정책 조회 Use Case
    * @param dataRetentionPolicyUpdateService 데이터 보관 정책 변경 Use Case
    * @param dataExportRequestService 데이터 내보내기 작업 접수 Use Case
+   * @param dataExportQueryService 데이터 내보내기 작업 상태 조회 Use Case
    */
   public UserController(
       CurrentAuthenticatedUserResolver currentUserResolver,
@@ -90,7 +95,8 @@ public class UserController {
       UserNotificationSettingsUpdateService notificationSettingsUpdateService,
       UserDataRetentionPolicyReader dataRetentionPolicyReader,
       UserDataRetentionPolicyUpdateService dataRetentionPolicyUpdateService,
-      UserDataExportRequestService dataExportRequestService) {
+      UserDataExportRequestService dataExportRequestService,
+      UserDataExportQueryService dataExportQueryService) {
     this.currentUserResolver = currentUserResolver;
     this.onboardingService = onboardingService;
     this.queryService = queryService;
@@ -101,6 +107,7 @@ public class UserController {
     this.dataRetentionPolicyReader = dataRetentionPolicyReader;
     this.dataRetentionPolicyUpdateService = dataRetentionPolicyUpdateService;
     this.dataExportRequestService = dataExportRequestService;
+    this.dataExportQueryService = dataExportQueryService;
   }
 
   /**
@@ -131,6 +138,41 @@ public class UserController {
     return ResponseEntity.accepted()
         .body(
             ApiResponse.ok(dataExportRequestService.request(currentUserResolver.requireUserId())));
+  }
+
+  /**
+   * 인증 사용자가 소유한 데이터 내보내기 작업 상태를 조회한다.
+   *
+   * <p>없는 작업과 타인 작업은 같은 404로 처리한다. 저장 Key, 다운로드 URL, 파일 크기, 체크섬은 노출하지 않는다. Authorization Bearer
+   * Access Token의 사용자 ID를 대상으로 한다.
+   *
+   * @param exportId 조회할 데이터 내보내기 작업 식별자
+   * @return HTTP 200과 작업 상태 공통 응답
+   */
+  @Operation(
+      summary = "내 데이터 내보내기 상태 조회",
+      description =
+          "인증 사용자가 소유한 데이터 내보내기 작업 상태를 조회합니다. "
+              + "없는 작업과 타인 작업은 같은 404로 응답하며 저장 Key·다운로드 URL·파일 크기·체크섬은 제공하지 않습니다. "
+              + "Authorization Bearer Access Token의 사용자 ID를 대상으로 합니다.")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "200",
+        description = "데이터 내보내기 작업 상태 조회 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "데이터 내보내기 작업 없음 또는 접근 권한 없음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @GetMapping("/me/data-exports/{exportId}")
+  public ResponseEntity<ApiResponse<DataExportJobStatusResponse>> getMyDataExport(
+      @PathVariable Long exportId) {
+    return ResponseEntity.ok(
+        ApiResponse.ok(dataExportQueryService.get(currentUserResolver.requireUserId(), exportId)));
   }
 
   /**
