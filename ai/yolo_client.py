@@ -186,6 +186,34 @@ def _encode_png(bgr_ndarray) -> bytes:
     return buf.tobytes()
 
 
+def _imgsz_for(model_key: str) -> int:
+    """모델별 추론 입력 해상도 — 학습 imgsz에 맞춘다(S15P11B209-761). htp만 별도, 그 외 sketch."""
+    return config.HTP_IMGSZ if model_key == "htp" else config.SKETCH_IMGSZ
+
+
+def _load_bgr_oriented(image_path: str):
+    """EXIF 방향 태그로 회전이 필요할 때만 보정된 BGR ndarray를 돌려준다(S15P11B209-761 1단계).
+
+    정상(태그 없음·1)이면 None → 호출부는 현행대로 파일 경로를 그대로 predict한다(동작 불변).
+    사진(UPLOAD)엔 회전 EXIF가 흔해 누운 이미지가 그대로 들어가면 탐지가 무너진다. 캔버스
+    export엔 방향 태그가 없어 무해하다. cv2.imread는 EXIF를 무시하므로 PIL로 처리한다.
+    """
+    try:
+        import numpy as np
+        from PIL import Image, ImageOps
+
+        with Image.open(image_path) as img:
+            orientation = img.getexif().get(0x0112)  # 0x0112(274) = Orientation
+            if orientation in (None, 1):
+                return None  # 회전 불필요 — 현행 경로 유지
+            oriented = ImageOps.exif_transpose(img).convert("RGB")
+            rgb = np.asarray(oriented)
+            return rgb[:, :, ::-1].copy()  # RGB → BGR(ultralytics·cv2 규약)
+    except Exception as error:  # PIL 부재·손상 등 — 보정 없이 현행 경로로 진행
+        logger.warning("EXIF 방향 보정 건너뜀(원본 경로로 진행): %s", type(error).__name__)
+        return None
+
+
 def detect_and_annotate(
     image_path: str, *, model_key: str = "htp", conf: float | None = None
 ) -> tuple[list[Detection], bytes]:
@@ -203,25 +231,32 @@ def detect_and_annotate(
     """
     threshold = config.YOLO_CONF_THRESHOLD if conf is None else conf
     model = _get_model(model_key)
+    imgsz = _imgsz_for(model_key)
+
+    # EXIF 방향 보정 — 사진(UPLOAD)은 회전 태그가 흔하다. 회전이 필요할 때만 보정본(BGR)을 쓰고,
+    # 정상 이미지는 경로 그대로 predict한다(동작 불변). S15P11B209-761 1단계.
+    oriented = _load_bgr_oriented(image_path)
+    source: object = oriented if oriented is not None else str(image_path)
+    plot_img = oriented  # 회전 보정본이 있으면 그 위에 주석(없으면 None → result.plot() 원본)
 
     # sketch는 흑백 선화로 학습됐다 — 컬러 캔버스를 잉크 정규화해 도메인을 맞춘다(S15P11B209-679).
     # 기본 "none"이면 동작 불변. "ink"일 때만 YOLO '입력'을 잉크로 바꾸고, VLM용 주석 이미지는
     # 색을 보존한 '원본'에 박스를 그린다(679: 색은 분석 레이어의 해석 재료라 잃지 않는다).
-    source: object = str(image_path)
-    plot_img = None
     if model_key == "sketch" and config.SKETCH_PREPROCESS == "ink":
         import cv2  # 지연 import — torch 없이 모듈 import되게 유지(cv2도 함수 안에서)
 
         import image_preprocess
 
-        original = cv2.imread(str(image_path))
+        original = oriented if oriented is not None else cv2.imread(str(image_path))
         if original is not None:
             source = image_preprocess.ink_normalize(original)
             plot_img = original
         else:
             logger.warning("잉크 정규화 건너뜀 — 이미지 로드 실패(원본 경로로 진행)")
+            source = str(image_path)
+            plot_img = None
 
-    result = model.predict(source, conf=threshold, verbose=False)[0]
+    result = model.predict(source, conf=threshold, imgsz=imgsz, verbose=False)[0]
     detections = _parse_result(result)
     annotated = result.plot() if plot_img is None else result.plot(img=plot_img)
     annotated_png = _encode_png(annotated)  # BGR ndarray → PNG bytes

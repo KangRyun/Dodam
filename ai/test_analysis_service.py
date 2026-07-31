@@ -108,6 +108,25 @@ class RequestContractTest(unittest.TestCase):
         self.assertEqual(req.reflection.selected_emotions, ["HAPPY", "CALM"])
         self.assertFalse(req.behavior.summary.pressure_available)
 
+    def test_input_method_defaults_and_backward_compat(self):
+        """inputMethod(S15P11B209-762): 없거나 null·미지의 값이면 CANVAS, UPLOAD는 그대로."""
+        # 필드 없음(구버전 요청) → CANVAS
+        self.assertEqual(
+            contracts.AnalysisRequest.model_validate(SPEC_REQUEST).drawing.input_method,
+            "CANVAS",
+        )
+        for sent, expected in (
+            ("UPLOAD", "UPLOAD"),
+            ("CANVAS", "CANVAS"),
+            (None, "CANVAS"),  # 명시적 null → 하위호환 CANVAS
+            ("SCAN", "CANVAS"),  # 미지의 값 → 방어적으로 CANVAS
+        ):
+            with self.subTest(inputMethod=sent):
+                req = contracts.AnalysisRequest.model_validate(
+                    {**SPEC_REQUEST, "drawing": {**SPEC_REQUEST["drawing"], "inputMethod": sent}}
+                )
+                self.assertEqual(req.drawing.input_method, expected)
+
     def test_rejects_value_outside_enum(self):
         """§4 Enum 밖의 analysisType은 거부한다(구 계약의 OBJECT_DETECTION 포함)."""
         for bad in ("OBJECT_DETECTION", "ACTIVITY_REPORT", "SUCCEEDED"):

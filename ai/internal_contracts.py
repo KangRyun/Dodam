@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from pydantic.alias_generators import to_camel
 
 
@@ -409,6 +409,16 @@ class DrawingInput(_CamelModel):
     width: int | None = None
     height: int | None = None
     checksum_sha256: str | None = None
+    # 입력 출처(S15P11B209-762): CANVAS=앱 캔버스 직접 그림, UPLOAD=촬영·스캔·갤러리 등 외부 파일.
+    # 사진 보정 분기의 게이트로 쓴다(761). UPLOAD는 사진만이 아니라 스캔·디지털 파일도 포함하므로
+    # 무조건 보정하지 않고, 촬영 흔적이 감지될 때만 선택 적용한다(761 2단계).
+    input_method: Literal["CANVAS", "UPLOAD"] = "CANVAS"
+
+    @field_validator("input_method", mode="before")
+    @classmethod
+    def _default_input_method(cls, value: object) -> str:
+        """하위호환(순차 배포): 필드가 없거나 null·미지의 값이면 CANVAS로 간주한다(S15P11B209-762)."""
+        return value if value in ("CANVAS", "UPLOAD") else "CANVAS"
 
 
 class BehaviorSummary(_CamelModel):
