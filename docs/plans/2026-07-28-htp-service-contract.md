@@ -77,8 +77,8 @@ HTP 단계에서는 일반 활동의 `POST /drawing-sessions/{id}/complete`를 �
 - 그림을 그리는 중에는 AI 대화를 시작하지 않는다.
 - 그림 한 장을 완료한 뒤 해당 그림에 대한 질문을 최대 2개 제공한다.
 - 대화는 건너뛸 수 있다. 건너뛴 사실은 분석의 `unusedInputs` 또는 대화 집계에 남긴다.
-- 그림별 제목과 감정은 받지 않는다.
-- 세 장을 모두 마친 뒤 활동 단위 감정을 1회 받을 수 있으며 건너뛰기도 허용한다.
+- 그림별 제목은 받지 않지만, HOUSE·TREE·PERSON 각 주제의 대화가 끝난 뒤 아동이 선택한 감정을 저장한다.
+- 감정 선택은 단계 완료 조건이며 건너뛸 수 없다. HOUSE·TREE는 그림 세션 Reflection API, PERSON은 HTP Reflection API를 사용한다.
 - 진행 중 활동은 24시간 동안 재개할 수 있다. 24시간을 넘기면 새 분석에 사용하지 않고 `EXPIRED`로 정리한다.
 
 기존 초안의 7일 유효기간은 폐기한다. HTP 자료를 한 시점의 관찰 자료로 묶는다는 전제와 맞지 않고, 출시 초기에는 장기 재개보다 데이터 일관성이 우선이다.
@@ -92,13 +92,14 @@ HTP 단계에서는 일반 활동의 `POST /drawing-sessions/{id}/complete`를 �
 | HTP 시작 | POST | `/api/v1/htp-assessments` |
 | HTP 진행 상태 조회 | GET | `/api/v1/htp-assessments/{htpAssessmentId}` |
 | 현재 단계 완료 및 다음 단계 생성 | POST | `/api/v1/htp-assessments/{htpAssessmentId}/steps/next` |
-| 활동 단위 감정 저장 | PUT | `/api/v1/htp-assessments/{htpAssessmentId}/reflection` |
+| HOUSE·TREE 감정 저장 | PUT | `/api/v1/drawing-sessions/{drawingSessionId}/reflection` |
+| PERSON 감정 저장 | PUT | `/api/v1/htp-assessments/{htpAssessmentId}/reflection` |
 | HTP 완료 접수 | POST | `/api/v1/htp-assessments/{htpAssessmentId}/complete` |
 | HTP 포기 | POST | `/api/v1/htp-assessments/{htpAssessmentId}/abandon` |
 
 상태를 변경하는 POST 요청은 `Idempotency-Key`를 필수로 사용한다. 같은 Key와 같은 요청은 최초 결과를 반환하고, 같은 Key에 다른 요청 Body가 들어오면 `409`로 거부한다.
 
-`steps/next`는 직전 단계의 FINAL 이미지, 분석 결과, 대화 종료 여부를 검증하고 직전 세션을 리포트 없이 완료한 뒤 다음 세션을 생성한다. 마지막 `PERSON` 단계에서는 다음 세션을 만들지 않고 단계 완료 결과만 반환한다. `complete`는 세 단계가 모두 끝났는지 확인한 뒤 기존 주제별 분석을 집계하고 HTP 리포트 하나만 접수한다.
+`steps/next`는 직전 단계의 FINAL 이미지, 분석 결과, 대화 종료 여부와 선택 감정 저장 여부를 검증하고 직전 세션을 리포트 없이 완료한 뒤 다음 세션을 생성한다. 선택 감정이 없으면 `409 HTP_409_011`로 거부한다. 마지막 `PERSON` 단계에서는 다음 세션을 만들지 않고 단계 완료 결과만 반환한다. 동일한 `Idempotency-Key`의 정상 재호출은 최초 전이 결과를 반환한다. `complete`는 세 단계가 모두 끝났는지 확인한 뒤 기존 주제별 분석을 집계하고 HTP 리포트 하나만 접수한다.
 
 `complete`는 HTTP 202를 반환한다. 응답에는 `status=ANALYZING`, `analysisId`, `analysisStatus`, `reportId`, `reportStatus`, `subjectsWithoutObjectDetection`이 포함된다. 클라이언트는 `reportId`로 기존 리포트 상태 조회 계약을 사용한다.
 
@@ -112,6 +113,7 @@ HTP 단계에서는 일반 활동의 `POST /drawing-sessions/{id}/complete`를 �
 | 세 단계의 그림 활동 세션이 모두 `COMPLETED` | `HTP_409_008` |
 | 세 단계에 최종 그림이 모두 있음 | `HTP_409_009` |
 | 세 단계의 대화가 모두 완료 | `HTP_409_010` |
+| 현재 단계의 선택 감정이 저장됨 | `HTP_409_011` |
 | 다른 완료 요청이 처리 중이거나 이미 완료됨 | `HTP_409_007` |
 
 기존 `HTP_409_006`은 클라이언트 호환을 위해 유지하되 의미를 **단계 구성 불충족**으로 좁힌다. 이전에는 위 네 가지 검증이 모두 `HTP_409_006` 하나로 뭉쳐 있어 클라이언트와 운영이 원인을 특정할 수 없었다.

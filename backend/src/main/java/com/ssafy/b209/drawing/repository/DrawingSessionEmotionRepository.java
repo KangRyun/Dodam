@@ -12,6 +12,14 @@ public interface DrawingSessionEmotionRepository
     extends JpaRepository<DrawingSessionEmotion, Long> {
 
   /**
+   * 그림 활동에 선택 감정이 한 건 이상 저장되어 있는지 확인한다.
+   *
+   * @param drawingSessionId 확인할 그림 활동 세션 식별자
+   * @return 선택 감정이 저장되어 있으면 {@code true}
+   */
+  boolean existsByDrawingSessionId(Long drawingSessionId);
+
+  /**
    * 세션에 저장된 감정을 아동이 선택한 순서로 조회한다.
    *
    * @param drawingSessionId 그림 활동 세션 식별자

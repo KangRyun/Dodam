@@ -3,6 +3,7 @@ package com.ssafy.b209.drawing.htp;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -286,6 +287,41 @@ class HtpAssessmentCompletionIntegrationTest extends IntegrationTestSupport {
         .containsEntry("trigger_reason", "DRAWING_COMPLETE");
   }
 
+  @Test
+  void requiresReflectionBetweenConversationEndAndNextStep() throws Exception {
+    seedAssessment(1);
+    seedSession(HOUSE_SESSION_ID, "CANVAS", "IN_PROGRESS", "REFLECTION");
+    seedStep(HOUSE_SESSION_ID, 1, "HOUSE");
+    seedCompletedConversation(HOUSE_SESSION_ID);
+
+    mockMvc
+        .perform(nextStepRequest("htp-next-without-reflection-0001"))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("HTP_409_011"));
+
+    mockMvc
+        .perform(
+            put("/api/v1/drawing-sessions/{drawingSessionId}/reflection", HOUSE_SESSION_ID)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "title": null,
+                      "selectedEmotions": ["HAPPY"],
+                      "expressedEmotionText": null,
+                      "skipped": false
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.selectedEmotions[0]").value("HAPPY"));
+
+    mockMvc
+        .perform(nextStepRequest("htp-next-after-reflection-0001"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.currentStep.stepOrder").value(2))
+        .andExpect(jsonPath("$.data.currentStep.drawingSubject").value("TREE"));
+  }
+
   private void seedThreeCanvasStagesWithFailedObjectDetection() {
     seedAssessment(3);
     seedCompletedCanvasStage(HOUSE_SESSION_ID, HOUSE_ASSET_ID, 1, "HOUSE");
@@ -432,6 +468,13 @@ class HtpAssessmentCompletionIntegrationTest extends IntegrationTestSupport {
   private RequestBuilder completionRequest(String idempotencyKey) {
     return post("/api/v1/htp-assessments/{assessmentId}/complete", ASSESSMENT_ID)
         .header("Idempotency-Key", idempotencyKey);
+  }
+
+  private RequestBuilder nextStepRequest(String idempotencyKey) {
+    return post("/api/v1/htp-assessments/{assessmentId}/steps/next", ASSESSMENT_ID)
+        .header("Idempotency-Key", idempotencyKey)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content("{\"inputMethod\":\"CANVAS\"}");
   }
 
   private RequestBuilder uploadStageCompletionRequest(String idempotencyKey) {
