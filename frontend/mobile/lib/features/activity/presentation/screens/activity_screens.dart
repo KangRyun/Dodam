@@ -11,7 +11,9 @@ import '../../../../app/router/app_routes.dart';
 import '../../../../core/network/api_failure.dart';
 import '../../../../core/network/api_failure_presentation.dart';
 import '../../../../design_system/design_system.dart';
+import '../../../child/domain/repositories/child_repository.dart';
 import '../../../drawing/application/activity_completion_controller.dart';
+import '../../../drawing/application/canvas_tutorial_controller.dart';
 import '../../../drawing/application/drawing_object_detection_controller.dart';
 import '../../../drawing/application/drawing_activity_completion_controller.dart';
 import '../../../drawing/application/drawing_sync_coordinator.dart';
@@ -21,6 +23,7 @@ import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
+import '../../../drawing/presentation/widgets/canvas_tool_tutorial_overlay.dart';
 import '../../../conversation/conversation.dart';
 import '../../../child_mode/data/costume_preference_store.dart';
 import '../../../child_mode/domain/dodam_costume.dart';
@@ -136,6 +139,8 @@ class DrawingScreen extends StatefulWidget {
     this.startFresh = false,
     this.activityContext = const DrawingActivityContextDto.general(),
     this.inputMethod,
+    this.childRepository,
+    this.canvasTutorialController,
     super.key,
   });
 
@@ -145,6 +150,8 @@ class DrawingScreen extends StatefulWidget {
   /// 이 세션이 실제로 쓰는 입력 방식(`CANVAS`|`UPLOAD`). HTP 주제 전환에서 다음
   /// 세션에 그대로 이어 쓰기 위해 들고 다닌다.
   final String? inputMethod;
+  final ChildRepository? childRepository;
+  final CanvasTutorialController? canvasTutorialController;
   final DrawingRepository? drawingRepository;
   final DrawingSyncPolicy syncPolicy;
   final DrawingSyncCoordinator? syncCoordinator;
@@ -288,6 +295,8 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 캔버스에서 말하는 캐릭터로 쓸 코스튬 에셋. 이 아이가 홈에서 고른 코스튬을
   /// 로컬에서 읽어 반영한다(S15P11B209-750). 없으면 기본 도담이.
   String _characterAsset = DodamCostume.base.asset;
+  CanvasTutorialController? _canvasTutorialController;
+  late final bool _ownsCanvasTutorialController;
 
   Future<void> _loadCharacterCostume() async {
     final childId = int.tryParse(widget.childId);
@@ -303,6 +312,30 @@ class _DrawingScreenState extends State<DrawingScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     unawaited(_loadCharacterCostume());
+    final parsedChildId = int.tryParse(widget.childId);
+    final tutorialApplicable =
+        !widget.resumeConversation &&
+        widget.inputMethod?.trim().toUpperCase() != 'UPLOAD';
+    _ownsCanvasTutorialController =
+        tutorialApplicable &&
+        widget.canvasTutorialController == null &&
+        widget.childRepository != null &&
+        parsedChildId != null;
+    _canvasTutorialController = tutorialApplicable
+        ? widget.canvasTutorialController
+        : null;
+    final childRepository = widget.childRepository;
+    if (tutorialApplicable &&
+        _canvasTutorialController == null &&
+        childRepository != null &&
+        parsedChildId != null) {
+      _canvasTutorialController = CanvasTutorialController(
+        childId: parsedChildId,
+        loadProgress: childRepository.getTutorialProgress,
+        saveProgress: childRepository.updateTutorialProgress,
+      );
+    }
+    unawaited(_canvasTutorialController?.load());
     final ttsRepository = widget.questionTtsRepository;
     final playerFactory = widget.questionAudioPlayerFactory;
     if (ttsRepository != null && playerFactory != null) {
@@ -474,6 +507,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (_ownsCanvasTutorialController) _canvasTutorialController?.dispose();
     _syncCoordinator.removeListener(_handleSyncChanged);
     _draftRestoreController.removeListener(_handleDraftRestoreChanged);
     if (_ownsDraftRestoreController) _draftRestoreController.dispose();
@@ -1508,6 +1542,21 @@ class _DrawingScreenState extends State<DrawingScreen>
         title: _activityTitle,
         onBack: () => unawaited(_stopTtsAndPop()),
         actions: [
+          if (_canvasTutorialController case final tutorialController?)
+            AnimatedBuilder(
+              animation: tutorialController,
+              builder: (context, _) => IconButton.filledTonal(
+                key: const ValueKey('canvas-tutorial-help'),
+                tooltip: '그림 도구 다시 보기',
+                onPressed: tutorialController.isBusy
+                    ? null
+                    : tutorialController.replay,
+                icon: const Icon(Icons.help_outline_rounded),
+                style: IconButton.styleFrom(
+                  minimumSize: const Size.square(AppSizes.iconButton),
+                ),
+              ),
+            ),
           IconButton.filledTonal(
             key: const ValueKey('redo-action'),
             tooltip: _activeStroke != null
@@ -1539,9 +1588,11 @@ class _DrawingScreenState extends State<DrawingScreen>
           ),
         ],
       ),
-      body: SafeArea(
-        top: false,
-        child: LayoutBuilder(
+      body: Stack(
+        children: [
+          SafeArea(
+            top: false,
+            child: LayoutBuilder(
           builder: (context, constraints) {
             final restoreStatus = _draftRestoreController.status;
             final autoRestoreInProgress =
@@ -1692,7 +1743,11 @@ class _DrawingScreenState extends State<DrawingScreen>
               ),
             );
           },
-        ),
+            ),
+          ),
+          if (_canvasTutorialController case final tutorialController?)
+            CanvasToolTutorialOverlay(tutorialController),
+        ],
       ),
     ),
   );
