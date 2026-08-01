@@ -19,7 +19,7 @@ class DataExportJobStatusResponseTest {
             "requestedAt",
             "completedAt",
             "expiresAt",
-            "errorCode");
+            "failureCode");
 
     DataExportJobStatusResponse response =
         new DataExportJobStatusResponse(
