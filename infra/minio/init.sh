@@ -1,7 +1,11 @@
 #!/bin/sh
 # MinIO 1회성 프로비저닝 — S15P11B209-620
-# 버킷 dodam(private) + 앱 계정 2벌(be-rw 버킷 rw / ai-ro images/ 읽기전용, 최소권한).
+# 버킷 dodam(private) + 앱 계정 1벌(be-rw 버킷 rw, 최소권한).
 # minio-init 컨테이너(minio/mc 기반 dodam-minio-init:local)가 실행. 정책 JSON은 이 스크립트와 같은 디렉터리의 policies/.
+#
+# ※ ai-ro(images/ 읽기전용) 계정은 673 에서 회수했다 — AI 이미지 접근이 BE 프록시
+#   1회용 토큰(402)으로 구현돼, 만들기만 하고 아무도 쓰지 않는 유휴 자격증명이었다.
+#   직접 GET 방식을 되살리려면 저장소-아키텍처 §4 의 as-built 근거부터 뒤집어야 한다.
 set -eu
 
 # 정책 JSON 경로는 스크립트 위치 기준으로 잡는다(이미지 안 /opt/dodam, 로컬 직접 실행 모두 동일).
@@ -23,19 +27,14 @@ mc anonymous set none local/dodam || true
 
 # 3) 앱 계정 (이미 있으면 무시)
 mc admin user add local "$MINIO_BE_USER" "$MINIO_BE_PASSWORD" || true
-mc admin user add local "$MINIO_AI_USER" "$MINIO_AI_PASSWORD" || true
 
 # 4) 최소권한 정책 생성·부착
 #    ⚠️ mc 명령이 버전에 따라 create/attach ↔ add/set 로 다름 → 양쪽 폴백.
 mc admin policy create local dodam-be-rw "$SCRIPT_DIR/policies/be-rw.json" 2>/dev/null || \
   mc admin policy add    local dodam-be-rw "$SCRIPT_DIR/policies/be-rw.json"
-mc admin policy create local dodam-ai-ro "$SCRIPT_DIR/policies/ai-ro.json" 2>/dev/null || \
-  mc admin policy add    local dodam-ai-ro "$SCRIPT_DIR/policies/ai-ro.json"
 
 mc admin policy attach local dodam-be-rw --user "$MINIO_BE_USER" 2>/dev/null || \
   mc admin policy set    local dodam-be-rw "user=$MINIO_BE_USER"
-mc admin policy attach local dodam-ai-ro --user "$MINIO_AI_USER" 2>/dev/null || \
-  mc admin policy set    local dodam-ai-ro "user=$MINIO_AI_USER"
 
 # 5) 수명주기(ILM) — S15P11B209-622.
 #    lifecycle.json 을 선언적으로 import(전체 교체 → 멱등). 현재 규칙은 tts-cache/ 만:
@@ -50,4 +49,4 @@ else
   echo "[minio-init] WARN: ILM import 실패(mc 버전 미지원?) — 수동 적용: mc ilm rule add local/dodam --prefix tts-cache/ --expire-days 30"
 fi
 
-echo "[minio-init] done: bucket=dodam, users=be-rw(rw) / ai-ro(images:read), ilm=tts-cache/30d"
+echo "[minio-init] done: bucket=dodam, users=be-rw(rw), ilm=tts-cache/30d"
