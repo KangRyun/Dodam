@@ -235,6 +235,7 @@ pipeline {
             docker tag dodam-backend:local dodam-backend:${IMAGE_TAG}
             docker tag dodam-ai:local      dodam-ai:${IMAGE_TAG}
             docker tag dodam-nginx:local   dodam-nginx:${IMAGE_TAG}
+            docker tag dodam-web:local     dodam-web:${IMAGE_TAG}
           '''
         }
       }
@@ -296,18 +297,22 @@ pipeline {
             #   :prod 도 함께 갱신하는 이유: 매니페스트가 :prod 를 가리키므로, 갱신하지 않으면
             #   나중에 누가 `kubectl apply -k overlays/prod` 를 돌렸을 때 **옛 이미지로
             #   조용히 되돌아간다.** SHA 태그는 추적용, :prod 는 매니페스트 기본값용이다.
-            infra/scripts/push-staging-images.sh --tag "$IMAGE_TAG" --with-ai
-            infra/scripts/push-staging-images.sh --tag prod         --with-ai
+            infra/scripts/push-staging-images.sh --tag "$IMAGE_TAG" --with-ai --with-web
+            infra/scripts/push-staging-images.sh --tag prod         --with-ai --with-web
 
             # 컨테이너 이름은 Deployment 이름과 다를 수 있다 — gateway 의 컨테이너는 nginx 다.
             kubectl -n dodam set image deployment/backend backend=127.0.0.1:5000/dodam-backend:"$IMAGE_TAG"
             kubectl -n dodam set image deployment/gateway nginx=127.0.0.1:5000/dodam-nginx:"$IMAGE_TAG"
             kubectl -n dodam set image deployment/ai      ai=127.0.0.1:5000/dodam-ai:"$IMAGE_TAG"
+            kubectl -n dodam set image deployment/web     web=127.0.0.1:5000/dodam-web:"$IMAGE_TAG"
 
             # backend 는 replicas 2 + maxUnavailable 0 + preStop 8s 로 무중단이다(362 실증).
             kubectl -n dodam rollout status deployment/backend --timeout=300s
             kubectl -n dodam rollout status deployment/gateway --timeout=300s
             kubectl -n dodam rollout status deployment/ai      --timeout=300s
+            # ★ web 은 gateway 보다 먼저 준비돼야 한다. 순서가 어긋나면 gateway 가 새 conf 로
+            #   뜬 뒤 web 이 아직 없어 `/` 가 잠깐 502 가 된다. rollout status 로 기다린다.
+            kubectl -n dodam rollout status deployment/web     --timeout=300s
           '''
         }
       }

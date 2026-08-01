@@ -1,0 +1,24 @@
+# 도담 커뮤니티 웹 빌드 컨텍스트에서 제외할 것 — S15P11B209-383
+#
+# node_modules 가 제일 중요하다. build 스테이지가 `COPY . .` 를 하는데, 이걸 막지 않으면
+# 호스트의 node_modules(수백 MB, 게다가 리눅스가 아닌 플랫폼에서 설치됐을 수도 있다)가
+# deps 스테이지에서 만든 것을 덮어써 버린다. 빌드가 깨지거나, 더 나쁘게는 조용히 성공한다.
+node_modules
+.next
+out
+
+# 테스트·개발 산출물 — 런타임 이미지와 무관하다.
+tests
+playwright-report
+test-results
+.playwright
+
+# 로컬 환경 파일이 이미지에 들어가면 안 된다(가드레일 9절).
+.env
+.env.*
+
+.git
+.gitignore
+README.md
+Dockerfile
+.dockerignore

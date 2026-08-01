@@ -9,9 +9,11 @@
 #   infra/scripts/push-staging-images.sh                  # :local → :staging
 #   infra/scripts/push-staging-images.sh --tag 5298a8ff   # :local → :5298a8ff
 #   infra/scripts/push-staging-images.sh --with-ai        # ai(2.36GB) 포함
+#   infra/scripts/push-staging-images.sh --with-web       # 커뮤니티 웹 포함 (S15P11B209-383)
 #
 # ai 를 기본에서 뺀 이유: staging-min overlay 가 ai 를 replicas 0 으로 두므로 pull 되지 않는다.
 #   2.36GB 를 매번 밀 이유가 없다. 전체 스테이징으로 갈 때 --with-ai 로 켠다.
+# web 도 같은 이유로 옵트인이다 — 웹을 안 띄우는 overlay 에서 굳이 밀 필요가 없다.
 
 set -euo pipefail
 
@@ -19,6 +21,7 @@ REGISTRY="${REGISTRY:-127.0.0.1:5000}"
 SRC_TAG="${SRC_TAG:-local}"
 TAG="staging"
 WITH_AI=0
+WITH_WEB=0
 
 log() { printf '\n\033[1m▸ %s\033[0m\n' "$*"; }
 die() { printf '\n❌ %s\n' "$*" >&2; exit 1; }
@@ -27,12 +30,14 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --tag)      TAG="${2:?--tag 에 값이 필요하다}"; shift 2 ;;
     --with-ai)  WITH_AI=1; shift ;;
-    *)          die "알 수 없는 인자: $1 (--tag TAG | --with-ai)" ;;
+    --with-web) WITH_WEB=1; shift ;;
+    *)          die "알 수 없는 인자: $1 (--tag TAG | --with-ai | --with-web)" ;;
   esac
 done
 
 IMAGES=(dodam-backend dodam-nginx)
-[ "$WITH_AI" = "1" ] && IMAGES+=(dodam-ai)
+[ "$WITH_AI"  = "1" ] && IMAGES+=(dodam-ai)
+[ "$WITH_WEB" = "1" ] && IMAGES+=(dodam-web)
 
 # ── 레지스트리 HTTP 조회 ───────────────────────────────────────────────────
 # ★ 여기가 이 스크립트에서 제일 헷갈리는 지점이다.
