@@ -5,8 +5,10 @@ import com.ssafy.b209.notification.push.PushMessage;
 import com.ssafy.b209.notification.push.PushSendOutcome;
 import com.ssafy.b209.notification.push.PushSender;
 import com.ssafy.b209.notification.repository.NotificationDeviceTokenRepository;
+import io.micrometer.core.instrument.MeterRegistry;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -30,24 +32,28 @@ public class NotificationPushDispatcher {
   private final NotificationDeviceTokenRepository deviceTokenRepository;
   private final DeviceTokenCipher cipher;
   private final NotificationDeliveryService deliveryService;
+  private final MeterRegistry meterRegistry;
 
   /**
-   * 발송 경계, 기기 Token 저장소, 복호화 도구, 상태 반영 서비스를 연결한다.
+   * 발송 경계, 기기 Token 저장소, 복호화 도구, 상태 반영 서비스, 지표 레지스트리를 연결한다.
    *
    * @param pushSender data-only 발송 경계
    * @param deviceTokenRepository 활성 기기 Token 조회 저장소
    * @param cipher Token 복호화 도구
    * @param deliveryService 전송 상태·죽은 Token 반영 서비스
+   * @param meterRegistry 발송 결과 카운터를 등록할 지표 레지스트리
    */
   public NotificationPushDispatcher(
       PushSender pushSender,
       NotificationDeviceTokenRepository deviceTokenRepository,
       DeviceTokenCipher cipher,
-      NotificationDeliveryService deliveryService) {
+      NotificationDeliveryService deliveryService,
+      MeterRegistry meterRegistry) {
     this.pushSender = pushSender;
     this.deviceTokenRepository = deviceTokenRepository;
     this.cipher = cipher;
     this.deliveryService = deliveryService;
+    this.meterRegistry = meterRegistry;
   }
 
   /**
@@ -80,6 +86,10 @@ public class NotificationPushDispatcher {
       }
       attempted = true;
       PushSendOutcome outcome = pushSender.send(new PushMessage(plainToken, data));
+      // 발송 결과 지표(S15P11B209-631) — outcome 라벨 3종뿐인 저카디널리티, Token·본문 없음(§5.4).
+      meterRegistry
+          .counter("dodam.push.send", "outcome", outcome.name().toLowerCase(Locale.ROOT))
+          .increment();
       if (outcome == PushSendOutcome.SENT) {
         anySent = true;
       } else if (outcome == PushSendOutcome.TOKEN_INVALID) {
