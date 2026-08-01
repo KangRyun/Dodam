@@ -67,7 +67,7 @@ Jenkins 크리덴셜 `dodam-env` 뿐이다. **어떤 값도 문서·이슈·메�
 |------|-----------------|---------|------------------------|
 | MySQL | `sts/mysql` · `mysql-0` | `b209` | 앱: `dodam`(`MYSQL_USER`) · 관리: `root`(`MYSQL_ROOT_PASSWORD`) |
 | Redis | `sts/redis` · `redis-0` | DB 0 | 비밀번호 `REDIS_PASSWORD` |
-| MinIO | `sts/minio` · `minio-0` | 버킷 `dodam` | 관리: `MINIO_ROOT_USER` · 앱: `dodam-be-rw` / `dodam-ai-ro` |
+| MinIO | `sts/minio` · `minio-0` | 버킷 `dodam` | 관리: `MINIO_ROOT_USER` · 앱: `dodam-be-rw` (ai-ro 는 673 회수) |
 | MongoDB | `sts/mongodb` · `mongodb-0` | `dodam` | 관리: `MONGO_ROOT_USERNAME` · 앱: `MONGO_APP_USERNAME` |
 
 ---

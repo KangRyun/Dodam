@@ -137,8 +137,9 @@ services:
       - dodam-net
 
   # ───────────────────────────────────────────────────────────────
-  # minio-init — 1회성 프로비저닝. 버킷 dodam·프리픽스·최소권한 계정 2벌 생성 후 종료.
-  #   be-rw(버킷 rw) / ai-ro(images/ 읽기전용). 스크립트: infra/minio/init.sh
+  # minio-init — 1회성 프로비저닝. 버킷 dodam·프리픽스·최소권한 계정 생성 후 종료.
+  #   be-rw(버킷 rw). 스크립트: infra/minio/init.sh
+  #   ※ ai-ro 계정은 673 에서 회수 — AI 이미지 접근이 BE 프록시 토큰(402)이라 유휴였다.
   #
   # ⚠️ 평시 배포에서는 뜨지 않는다(profiles: init) — 2026-07-26 장애 재발 방지.
   #   프로비저닝은 멱등한 1회성 작업인데, 이게 실패하면서 backend·nginx까지 막아
@@ -164,8 +165,6 @@ services:
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
       MINIO_BE_USER: ${MINIO_BE_USER}           # dodam-be-rw
       MINIO_BE_PASSWORD: ${MINIO_BE_PASSWORD}
-      MINIO_AI_USER: ${MINIO_AI_USER}           # dodam-ai-ro
-      MINIO_AI_PASSWORD: ${MINIO_AI_PASSWORD}
     # entrypoint·스크립트는 이미지에 내장(infra/minio/Dockerfile) — 여기서 마운트하지 않는다.
     networks:
       - dodam-net

@@ -37,7 +37,8 @@ BE  S3ImageStorage.objectKey() : prefix + "/" + storage_key
 docker exec dodam-minio sh -c \
   'mc alias set m http://localhost:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null &&
    mc admin user list m && mc ls m/'
-# 기대: dodam-be-rw · dodam-ai-ro 계정, dodam 버킷
+# 기대: dodam-be-rw 계정, dodam 버킷
+#   (컷오버 당시엔 dodam-ai-ro 도 있었으나 673 에서 회수 — 목록에 보이면 mc admin user remove)
 ```
 
 ## 2. 실행 절차
