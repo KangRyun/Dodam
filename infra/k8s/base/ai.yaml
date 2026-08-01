@@ -58,13 +58,15 @@ spec:
             httpGet: { path: /health, port: 8000 }
             periodSeconds: 20
             failureThreshold: 5
-          # 실측 77MB(2026-07-28). YOLO 추론이 붙으면 늘 수 있어 상한에 여유를 뒀다.
-          # 2026-07-30: 512Mi 에서 OOMKilled 3회. AI_DRAWING_ANALYSIS_MODE=http 가 켜지며
-          #   실제 ONNX 추론이 들어오자 상한을 넘었다(정상 상태 사용량이 이미 405Mi).
-          #   360 컷오버 때 축소한 상한이 mock 모드에서는 충분해 보였을 뿐이다.
+          # 실측 근거: docs/ai/yolo-cpu-benchmark-2026-08.md (S15P11B209-609)
+          #   두 모델 로드 + imgsz 960 추론 시 메모리 피크 1.75Gi — 1Gi 상한은 첫 실분석에서
+          #   OOMKilled 됨(동일 이미지·cgroup 조건 벤치로 재현). 2026-07-30 의 1Gi 상향이
+          #   버텼던 건 sketch imgsz 640 시절 트래픽 기준이라 960(761) 이후엔 무효.
+          #   cpu 2: 추론 p50 1.5s → 0.6~1.1s (1.6~2.5×). limit 은 예약이 아니라 상한 —
+          #   분석은 간헐 버스트라 4코어 호스트에서 상시 경합 없음.
           resources:
-            requests: { memory: 256Mi, cpu: 100m }
-            limits:   { memory: 1Gi,   cpu: "1" }
+            requests: { memory: 512Mi, cpu: 200m }
+            limits:   { memory: 2Gi,   cpu: "2" }
       volumes:
         - name: models
           persistentVolumeClaim: { claimName: ai-models }
