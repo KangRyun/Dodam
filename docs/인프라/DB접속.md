@@ -353,6 +353,33 @@ kubectl -n dodam exec -it sts/mongodb -- \
 > 2026-07-30 기준 컬렉션(`strokes`·`conversation_events`)은 **비어 있다.** 앱의 Mongo 전환이
 > 아직 진행 중이다(S15P11B209-365). 백업이 `documents=0` WARN 을 내는 것도 그래서다.
 
+### 2-5. 백엔드를 로컬에서 띄울 때 필요한 환경변수 (S15P11B209-752)
+
+`MONGO_APP_PASSWORD` 는 **기본값이 없다.** 없이 실행하면 앱이 뜨지 않는다.
+
+```
+Could not resolve placeholder 'MONGO_APP_PASSWORD' in value "${MONGO_APP_PASSWORD}"
+```
+
+이건 버그가 아니라 의도다. 예전에는 빈 기본값(`${MONGO_APP_PASSWORD:}`)이 있었는데, 그러면
+Boot 가 빈 문자열을 `char[]` 로 바인딩하다 **NullPointerException** 을 던졌다. 죽는 건 같은데
+메시지가 무엇이 없는지 알려주지 않아서, 2026-07-30 배포 실패(365) 때 원인을 찾는 데 시간을 썼다.
+지금은 **없는 변수 이름이 그대로 찍힌다.**
+
+로컬 실행:
+
+```bash
+cd backend
+MONGO_APP_PASSWORD='<로컬 mongo 앱 계정 비밀번호>' ./gradlew bootRun
+```
+
+운영·스테이징은 `dodam-secrets` 에서 주입되므로 손댈 것이 없다.
+
+> **다른 시크릿은 왜 안 바꿨나** — `REDIS_PASSWORD`·`DB_PASSWORD`·`JWT_SECRET` 등에도 빈
+> 기본값이 남아 있지만 일괄 변경 대상이 아니다. 그것들은 `String` 으로 바인딩돼 빈 값이 들어가도
+> NPE 가 나지 않고, 실패하더라도 인증 오류처럼 **읽을 수 있는 메시지**로 죽는다.
+> 바꿔야 하는 건 "빈 값으로 조용히 뜨거나, 원인을 가린 채 죽는" 것들뿐이다.
+
 ---
 
 ## 3. 로컬 GUI 툴에서 접속 (port-forward + SSH 터널)
