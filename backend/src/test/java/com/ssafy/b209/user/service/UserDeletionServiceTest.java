@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 import com.ssafy.b209.auth.domain.AccountStatus;
 import com.ssafy.b209.auth.domain.User;
 import com.ssafy.b209.auth.domain.UserRole;
+import com.ssafy.b209.auth.repository.AuthAccountRepository;
 import com.ssafy.b209.auth.repository.UserRepository;
 import com.ssafy.b209.auth.service.RefreshTokenSessionStore;
 import com.ssafy.b209.child.repository.ChildDeletionRepository;
@@ -34,6 +35,7 @@ class UserDeletionServiceTest {
   private static final Instant NOW = Instant.parse("2026-07-31T01:02:03Z");
 
   @Mock private UserRepository userRepository;
+  @Mock private AuthAccountRepository authAccountRepository;
   @Mock private ChildDeletionService childDeletionService;
   @Mock private ChildDeletionRepository childDeletionRepository;
   @Mock private RefreshTokenSessionStore refreshTokenSessionStore;
@@ -45,10 +47,23 @@ class UserDeletionServiceTest {
     service =
         new UserDeletionService(
             userRepository,
+            authAccountRepository,
             childDeletionService,
             childDeletionRepository,
             refreshTokenSessionStore,
             Clock.fixed(NOW, ZoneOffset.UTC));
+  }
+
+  @Test
+  void deletesAuthAccountsSoTheSameSocialAccountCanRejoin() {
+    // 인증 계정을 지우지 않으면 재로그인 provisioning 이 남은 행으로 DELETED 사용자를
+    // 물어와 같은 소셜 계정의 재가입이 영영 막힌다(768 — 529 재로그인 계약 회귀).
+    User user = activeUser();
+    when(userRepository.findById(51L)).thenReturn(Optional.of(user));
+
+    service.delete(51L, new DeleteUserRequest("DELETE"));
+
+    verify(authAccountRepository).deleteAllByUserId(51L);
   }
 
   @Test
