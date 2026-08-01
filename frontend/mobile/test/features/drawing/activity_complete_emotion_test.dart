@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:dodam/app/router/app_routes.dart';
 import 'package:dodam/core/config/api_environment.dart';
@@ -9,6 +8,7 @@ import 'package:dodam/core/network/api_error.dart';
 import 'package:dodam/core/network/api_failure.dart';
 import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
+import 'package:dodam/features/activity/presentation/widgets/emotion_selection_widgets.dart';
 import 'package:dodam/features/conversation/conversation.dart';
 import 'package:dodam/features/drawing/application/drawing_activity_completion_controller.dart';
 import 'package:dodam/features/drawing/application/drawing_event_journal.dart';
@@ -19,6 +19,7 @@ import 'package:dodam/features/drawing/data/repositories/remote_drawing_reposito
 import 'package:dodam/features/drawing/domain/repositories/drawing_repository.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -217,6 +218,38 @@ void main() {
     );
   });
 
+  testWidgets('일반 그림은 drawing-complete에 보낸 최종 합성 PNG를 preview로 재사용한다', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final repository = _CompletionRepository();
+    EmotionSelectRouteArguments? routeArguments;
+    await _pumpDrawing(
+      tester,
+      repository: repository,
+      onEmotionRouteArguments: (arguments) => routeArguments = arguments,
+    );
+    await _drawStroke(tester);
+
+    await tester.tap(find.byKey(const ValueKey('drawing-complete')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('다 그렸어요'));
+    await tester.pumpAndSettle();
+
+    expect(repository.lastFinalImage, same(_png));
+    expect(
+      routeArguments?.completedDrawingImage,
+      same(repository.lastFinalImage),
+    );
+    expect(find.bySemanticsLabel('내가 완성한 그림'), findsOneWidget);
+    final preview = tester.widget<Image>(
+      find.byKey(const ValueKey('emotion-drawing-preview-image')),
+    );
+    expect(preview.fit, BoxFit.contain);
+    expect((preview.image as MemoryImage).bytes, _png.bytes);
+    semantics.dispose();
+  });
+
   testWidgets('대화를 먼저 종료한 그림은 완료 후 감정 선택 화면으로 이동한다', (tester) async {
     final repository = _CompletionRepository(
       completionResponse: _reflectionCompleteResponse,
@@ -231,7 +264,11 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(repository.completeCalls, 1);
-    expect(find.byKey(const ValueKey('emotion-submit')), findsOneWidget);
+    expect(find.text('그림을 그리고 나니, 지금 마음은 어때?'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('emotion-confirmation-panel')),
+      findsNothing,
+    );
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
   });
 
@@ -678,20 +715,65 @@ void main() {
     );
   });
 
-  testWidgets('감정 6개를 표시하고 여러 카드의 로컬 선택 상태를 유지한다', (tester) async {
+  testWidgets('감정 5개를 표시하고 대표 감정 하나만 선택한다', (tester) async {
     await _pumpEmotion(tester);
 
-    for (final label in ['기쁨', '슬픔', '화남', '무서움', '편안함', '모르겠어']) {
+    expect(find.text('그림을 그리고 나니, 지금 마음은 어때?'), findsOneWidget);
+    expect(find.text('지금 마음과 가장 비슷한 표정을 하나 골라줘.'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('emotion-confirmation-panel')),
+      findsNothing,
+    );
+    for (final label in ['불안', '화남', '슬픔', '편안', '기쁨']) {
       expect(find.text(label), findsOneWidget);
     }
+    expect(find.text('모르겠어'), findsNothing);
+    expect(find.text('다시 고를래'), findsNothing);
+    expect(find.byKey(const ValueKey('emotion-skip')), findsOneWidget);
+    final defaultBackground = tester.widget<AnimatedContainer>(
+      find.byKey(const ValueKey('emotion-background')),
+    );
+    expect(
+      (defaultBackground.decoration! as BoxDecoration).color,
+      AppColors.childCanvas,
+    );
 
     await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
-    await tester.tap(find.byKey(const ValueKey('emotion-편안함')));
-    await tester.pump();
-
+    await tester.pumpAndSettle();
     expect(_choice(tester, '기쁨').isSelected, isTrue);
-    expect(_choice(tester, '편안함').isSelected, isTrue);
+    expect(_choice(tester, '슬픔').isDimmed, isTrue);
+    expect(find.byKey(const ValueKey('emotion-check-HAPPY')), findsOneWidget);
+    expect(find.text('기쁜 마음을 골랐구나.'), findsOneWidget);
+    expect(find.text('이 마음이 지금 마음과 가장 비슷해?'), findsOneWidget);
+    expect(find.text('응! 맞아!'), findsOneWidget);
+    final selectedBackground = tester.widget<AnimatedContainer>(
+      find.byKey(const ValueKey('emotion-background')),
+    );
+    expect(
+      (selectedBackground.decoration! as BoxDecoration).color,
+      emotionPresentationOf(DrawingEmotionType.happy).canvasBackground,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('emotion-편안')));
+    await tester.pumpAndSettle();
+
+    expect(_choice(tester, '기쁨').isSelected, isFalse);
+    expect(_choice(tester, '편안').isSelected, isTrue);
     expect(_choice(tester, '슬픔').isSelected, isFalse);
+  });
+
+  testWidgets('완료 이미지를 전달할 수 없는 예외 진입은 안전한 안내를 표시한다', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await _pumpEmotion(tester, completedDrawingImage: null);
+
+    expect(find.bySemanticsLabel('내가 완성한 그림'), findsOneWidget);
+    expect(find.text('완성한 그림을 불러오지 못했어요.'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('emotion-drawing-preview-image')),
+      findsNothing,
+    );
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
   });
 
   testWidgets('선택적 제목은 감정 선택 후에도 유지된다', (tester) async {
@@ -701,11 +783,11 @@ void main() {
       find.byKey(const ValueKey('drawing-title')),
       '우리 가족 소풍',
     );
-    await tester.tap(find.byKey(const ValueKey('emotion-편안함')));
-    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('emotion-편안')));
+    await tester.pumpAndSettle();
 
     expect(find.text('우리 가족 소풍'), findsOneWidget);
-    expect(_choice(tester, '편안함').isSelected, isTrue);
+    expect(_choice(tester, '편안').isSelected, isTrue);
   });
 
   test('Emotion API enum은 v1.0 값만 사용한다', () {
@@ -719,21 +801,199 @@ void main() {
     ]);
   });
 
-  testWidgets('UNKNOWN과 일반 감정은 동시에 선택되지 않는다', (tester) async {
+  testWidgets('대표 감정 5개의 enum·asset 매핑을 로드하고 contain으로 표시한다', (tester) async {
     await _pumpEmotion(tester);
-    await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
-    await tester.tap(find.byKey(const ValueKey('emotion-편안함')));
-    await tester.tap(find.byKey(const ValueKey('emotion-모르겠어')));
-    await tester.pump();
 
-    expect(_choice(tester, '기쁨').isSelected, isFalse);
-    expect(_choice(tester, '편안함').isSelected, isFalse);
-    expect(_choice(tester, '모르겠어').isSelected, isTrue);
+    expect(
+      emotionChoicePresentations
+          .map(
+            (presentation) =>
+                (presentation.emotion.apiValue, presentation.label),
+          )
+          .toList(),
+      [
+        ('SCARED', '불안'),
+        ('ANGRY', '화남'),
+        ('SAD', '슬픔'),
+        ('CALM', '편안'),
+        ('HAPPY', '기쁨'),
+      ],
+    );
+    for (final presentation in emotionChoicePresentations) {
+      final asset = await rootBundle.load(presentation.assetPath);
+      expect(
+        asset.lengthInBytes,
+        greaterThan(0),
+        reason: presentation.assetPath,
+      );
+      final image = tester.widget<Image>(
+        find.byKey(ValueKey('emotion-image-${presentation.emotion.apiValue}')),
+      );
+      expect(image.fit, BoxFit.contain);
+      expect(image.excludeFromSemantics, isTrue);
+    }
+  });
+
+  testWidgets('감정 카드는 button·selected semantics와 48px 이상 터치 영역을 제공한다', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await _pumpEmotion(tester);
+
+    final unselected = find.bySemanticsLabel('기쁨 감정 선택');
+    expect(unselected, findsOneWidget);
+    expect(
+      tester.getSemantics(unselected),
+      matchesSemantics(
+        label: '기쁨 감정 선택',
+        isButton: true,
+        hasSelectedState: true,
+        isSelected: false,
+        hasEnabledState: true,
+        isEnabled: true,
+      ),
+    );
+    final cardSize = tester.getSize(find.byKey(const ValueKey('emotion-기쁨')));
+    expect(cardSize.width, greaterThanOrEqualTo(48));
+    expect(cardSize.height, greaterThanOrEqualTo(48));
+
+    await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
+    await tester.pumpAndSettle();
+    final selected = find.bySemanticsLabel('기쁨, 선택됨');
+    expect(selected, findsOneWidget);
+    expect(
+      tester.getSemantics(selected),
+      matchesSemantics(
+        label: '기쁨, 선택됨',
+        isButton: true,
+        hasSelectedState: true,
+        isSelected: true,
+        hasEnabledState: true,
+        isEnabled: true,
+      ),
+    );
+    expect(
+      find.bySemanticsLabel('기쁜 마음을 골랐구나. 이 마음이 지금 마음과 가장 비슷해?'),
+      findsOneWidget,
+    );
+    semantics.dispose();
+  });
+
+  testWidgets('skip은 48dp button semantics와 아동 친화적 확인·focus 복원을 제공한다', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    final repository = _CompletionRepository();
+    await _pumpEmotion(tester, repository: repository, sessionId: 42);
+
+    final skip = find.bySemanticsLabel('지금은 고르지 않을래');
+    expect(skip, findsOneWidget);
+    expect(
+      tester.getSemantics(skip),
+      matchesSemantics(
+        label: '지금은 고르지 않을래',
+        isButton: true,
+        hasEnabledState: true,
+        isEnabled: true,
+      ),
+    );
+    final skipSize = tester.getSize(find.byKey(const ValueKey('emotion-skip')));
+    expect(skipSize.width, greaterThanOrEqualTo(48));
+    expect(skipSize.height, greaterThanOrEqualTo(48));
+
+    await _openSkipDialog(tester);
+    expect(repository.reflectionCalls, 0);
+    expect(find.text('지금은 마음을 고르지 않고 넘어갈까?'), findsOneWidget);
+    expect(find.text('나중에 그림을 보면서 다시 이야기해도 괜찮아.'), findsOneWidget);
+    expect(find.text('응, 넘어갈래'), findsOneWidget);
+    expect(find.text('다시 생각해볼래'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('emotion-skip-cancel')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('emotion-skip-dialog')), findsNothing);
+    expect(repository.reflectionCalls, 0);
+    expect(
+      tester
+          .widget<EmotionSkipButton>(find.byKey(const ValueKey('emotion-skip')))
+          .focusNode
+          ?.hasFocus,
+      isTrue,
+    );
+    semantics.dispose();
+  });
+
+  testWidgets('skip 로딩은 disabled button과 live-region semantics를 제공한다', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Center(
+            child: EmotionSkipButton(onPressed: () {}, isLoading: true),
+          ),
+        ),
+      ),
+    );
+
+    expect(find.text('넘어갈 준비를 하고 있어요'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(
+      tester.getSemantics(
+        find.byKey(const ValueKey('emotion-skip-loading-semantics')),
+      ),
+      matchesSemantics(
+        label: '넘어갈 준비를 하고 있어요',
+        isButton: true,
+        hasEnabledState: true,
+        isEnabled: false,
+        isLiveRegion: true,
+      ),
+    );
+    semantics.dispose();
+  });
+
+  testWidgets('감정 선택 후 skip을 취소하면 대표 감정과 확인 패널을 유지한다', (tester) async {
+    final repository = _CompletionRepository();
+    await _pumpEmotion(tester, repository: repository, sessionId: 42);
+    await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
+    await tester.pumpAndSettle();
+
+    await _openSkipDialog(tester);
+    expect(_choice(tester, '기쁨').isSelected, isTrue);
+    expect(repository.reflectionCalls, 0);
+    await tester.tap(find.byKey(const ValueKey('emotion-skip-cancel')));
+    await tester.pumpAndSettle();
+
+    expect(_choice(tester, '기쁨').isSelected, isTrue);
+    expect(
+      find.byKey(const ValueKey('emotion-confirmation-panel')),
+      findsOneWidget,
+    );
+    expect(repository.reflectionCalls, 0);
+  });
+
+  testWidgets('별도 다시 고르기 없이 다른 카드를 누르면 대표 감정 하나가 교체된다', (tester) async {
+    final semantics = tester.ensureSemantics();
+    final repository = _CompletionRepository();
+    await _pumpEmotion(tester, repository: repository, sessionId: 42);
+    await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
+    await tester.pumpAndSettle();
+    expect(find.text('다시 고를래'), findsNothing);
+    expect(find.bySemanticsLabel('응! 맞아!'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('emotion-슬픔')));
-    await tester.pump();
-    expect(_choice(tester, '모르겠어').isSelected, isFalse);
+    await tester.pumpAndSettle();
+
+    expect(_choice(tester, '기쁨').isSelected, isFalse);
     expect(_choice(tester, '슬픔').isSelected, isTrue);
+    expect(
+      find.byKey(const ValueKey('emotion-confirmation-panel')),
+      findsOneWidget,
+    );
+    expect(repository.reflectionCalls, 0);
+    semantics.dispose();
   });
 
   testWidgets('Reflection 성공 시 아동 활동 완료 안내 화면으로 이동한다', (tester) async {
@@ -745,7 +1005,7 @@ void main() {
       conversationSkipped: false,
     );
     await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
-    await tester.tap(find.byKey(const ValueKey('emotion-편안함')));
+    await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('drawing-title')),
       '우리 가족 소풍',
@@ -755,10 +1015,9 @@ void main() {
 
     expect(repository.reflectionCalls, 1);
     expect(repository.lastReflection?.title, '우리 가족 소풍');
-    expect(
-      repository.lastReflection?.selectedEmotions,
-      containsAll([DrawingEmotionType.happy, DrawingEmotionType.calm]),
-    );
+    expect(repository.lastReflection?.selectedEmotions, [
+      DrawingEmotionType.happy,
+    ]);
     expect(repository.lastReflection?.expressedEmotionText, isNull);
     expect(repository.lastReflection?.skipped, isFalse);
     expect(repository.activityCompletionCalls, 1);
@@ -767,6 +1026,42 @@ void main() {
     expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
     expect(find.text('이제 보호자에게 기기를 건네주세요.'), findsOneWidget);
     expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
+  });
+
+  testWidgets('skip 확인은 빈 감정·skipped true로 한 번 저장하고 일반 완료로 이동한다', (
+    tester,
+  ) async {
+    final calls = <String>[];
+    final repository = _CompletionRepository(calls: calls);
+    final observer = _CompletionNavigationObserver();
+    await _pumpEmotion(
+      tester,
+      repository: repository,
+      sessionId: 42,
+      navigatorObserver: observer,
+    );
+    await tester.enterText(
+      find.byKey(const ValueKey('drawing-title')),
+      '말하지 않은 그림',
+    );
+    await _openSkipDialog(tester);
+    expect(repository.reflectionCalls, 0);
+
+    final confirm = find.byKey(const ValueKey('emotion-skip-confirm'));
+    final confirmButton = tester.widget<AppButton>(confirm);
+    confirmButton.onPressed!();
+    confirmButton.onPressed!();
+    await tester.pumpAndSettle();
+
+    expect(repository.reflectionCalls, 1);
+    expect(repository.lastReflection?.title, '말하지 않은 그림');
+    expect(repository.lastReflection?.selectedEmotions, isEmpty);
+    expect(repository.lastReflection?.expressedEmotionText, isNull);
+    expect(repository.lastReflection?.skipped, isTrue);
+    expect(calls.take(3), ['detail', 'reflection', 'complete']);
+    expect(repository.activityCompleteCalls, 1);
+    expect(observer.activityCompleteReplacements, 1);
+    expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
   });
 
   testWidgets('다 했어요는 상세 조회 후 End, Reflection, Complete를 순서대로 호출한다', (
@@ -800,7 +1095,7 @@ void main() {
     );
 
     await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
-    await tester.pump();
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('emotion-submit')));
     await tester.pumpAndSettle();
 
@@ -914,21 +1209,34 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('건너뛰기는 빈 감정과 null 직접 표현을 제출한다', (tester) async {
+  testWidgets('확인 전에는 Reflection을 호출하지 않고 목업 기능을 표시하지 않는다', (tester) async {
     final repository = _CompletionRepository();
     await _pumpEmotion(tester, repository: repository, sessionId: 42);
-    await tester.tap(find.byKey(const ValueKey('emotion-skip')));
+    await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
     await tester.pumpAndSettle();
 
-    expect(repository.lastReflection?.selectedEmotions, isEmpty);
-    expect(repository.lastReflection?.expressedEmotionText, isNull);
-    expect(repository.lastReflection?.skipped, isTrue);
+    expect(repository.reflectionCalls, 0);
+    for (final removedCopy in [
+      '얼마나 그런 기분이야?',
+      '조금',
+      '보통',
+      '많이',
+      '왜 그런 기분인지 말해줄래?',
+      '크레용',
+      '그림첩에 저장하기',
+      '보여주기',
+      '또 그리기',
+    ]) {
+      expect(find.text(removedCopy), findsNothing);
+    }
+    expect(find.byIcon(Icons.mic_rounded), findsNothing);
   });
 
   testWidgets('Reflection 실패 시 감정과 제목을 유지해 재시도할 수 있다', (tester) async {
     final repository = _CompletionRepository(reflectionError: StateError('x'));
     await _pumpEmotion(tester, repository: repository, sessionId: 42);
     await tester.tap(find.byKey(const ValueKey('emotion-화남')));
+    await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('drawing-title')),
       '화난 그림',
@@ -938,7 +1246,136 @@ void main() {
 
     expect(_choice(tester, '화남').isSelected, isTrue);
     expect(find.text('화난 그림'), findsOneWidget);
-    expect(find.textContaining('고른 내용은 그대로'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('emotion-drawing-preview-image')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('고른 마음은 그대로'), findsOneWidget);
+    expect(find.textContaining('StateError'), findsNothing);
+  });
+
+  testWidgets('일시 오류는 같은 대표 감정으로 재시도하고 성공 시 한 번 이동한다', (tester) async {
+    final failures = <Object>[
+      const ApiTransportFailure(type: ApiTransportFailureType.connection),
+      const ApiTransportFailure(type: ApiTransportFailureType.receiveTimeout),
+      _reflectionFailure(500),
+      _reflectionFailure(502),
+      _reflectionFailure(503),
+    ];
+    for (final failure in failures) {
+      final repository = _CompletionRepository(reflectionError: failure);
+      await _pumpEmotion(tester, repository: repository, sessionId: 42);
+      await tester.tap(find.byKey(const ValueKey('emotion-슬픔')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('emotion-submit')));
+      await tester.pumpAndSettle();
+
+      expect(repository.reflectionCalls, 1, reason: '$failure');
+      expect(_choice(tester, '슬픔').isSelected, isTrue);
+      expect(
+        find.byKey(const ValueKey('emotion-submit-error')),
+        findsOneWidget,
+      );
+      repository.reflectionError = null;
+
+      await tester.tap(find.byKey(const ValueKey('emotion-submit')));
+      await tester.pumpAndSettle();
+      expect(repository.reflectionCalls, 2, reason: '$failure');
+      expect(repository.activityCompleteCalls, 1, reason: '$failure');
+      expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
+    }
+  });
+
+  testWidgets('영구 오류와 취소는 기술 정보를 숨기고 추가 Reflection 요청을 막는다', (tester) async {
+    final failures = <Object>[
+      for (final status in [400, 401, 403, 404, 409, 422])
+        _reflectionFailure(status),
+      const ApiTransportFailure(type: ApiTransportFailureType.cancelled),
+    ];
+    for (final failure in failures) {
+      final repository = _CompletionRepository(reflectionError: failure);
+      await _pumpEmotion(tester, repository: repository, sessionId: 42);
+      await tester.tap(find.byKey(const ValueKey('emotion-불안')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('emotion-submit')));
+      await tester.pumpAndSettle();
+
+      expect(repository.reflectionCalls, 1, reason: '$failure');
+      expect(_choice(tester, '불안').isSelected, isTrue);
+      expect(find.textContaining('SECRET_REFLECTION'), findsNothing);
+      await tester.tap(
+        find.byKey(const ValueKey('emotion-submit')),
+        warnIfMissed: false,
+      );
+      await tester.pump();
+      expect(repository.reflectionCalls, 1, reason: '$failure');
+    }
+  });
+
+  testWidgets('skip 일시 오류는 같은 빈 감정 요청으로 재시도해 한 번 이동한다', (tester) async {
+    final failures = <Object>[
+      const ApiTransportFailure(type: ApiTransportFailureType.connection),
+      const ApiTransportFailure(type: ApiTransportFailureType.receiveTimeout),
+      _reflectionFailure(500),
+      _reflectionFailure(502),
+      _reflectionFailure(503),
+    ];
+    for (final failure in failures) {
+      final repository = _CompletionRepository(reflectionError: failure);
+      final observer = _CompletionNavigationObserver();
+      await _pumpEmotion(
+        tester,
+        repository: repository,
+        sessionId: 42,
+        navigatorObserver: observer,
+      );
+      await tester.tap(find.byKey(const ValueKey('emotion-편안')));
+      await tester.pumpAndSettle();
+      await _confirmSkip(tester);
+
+      expect(repository.reflectionCalls, 1, reason: '$failure');
+      expect(repository.lastReflection?.selectedEmotions, isEmpty);
+      expect(repository.lastReflection?.skipped, isTrue);
+      expect(_choice(tester, '편안').isSelected, isTrue);
+      expect(find.byKey(const ValueKey('emotion-skip-error')), findsOneWidget);
+      expect(find.textContaining('SECRET_REFLECTION'), findsNothing);
+      repository.reflectionError = null;
+
+      await _confirmSkip(tester);
+      expect(repository.reflectionCalls, 2, reason: '$failure');
+      expect(repository.lastReflection?.selectedEmotions, isEmpty);
+      expect(repository.lastReflection?.skipped, isTrue);
+      expect(repository.activityCompleteCalls, 1, reason: '$failure');
+      expect(observer.activityCompleteReplacements, 1, reason: '$failure');
+    }
+  });
+
+  testWidgets('skip 영구 오류와 취소는 기술 정보를 숨기고 추가 요청을 막는다', (tester) async {
+    final failures = <Object>[
+      for (final status in [400, 401, 403, 404, 409, 422])
+        _reflectionFailure(status),
+      const ApiTransportFailure(type: ApiTransportFailureType.cancelled),
+    ];
+    for (final failure in failures) {
+      final repository = _CompletionRepository(reflectionError: failure);
+      await _pumpEmotion(tester, repository: repository, sessionId: 42);
+      await tester.tap(find.byKey(const ValueKey('emotion-불안')));
+      await tester.pumpAndSettle();
+      await _confirmSkip(tester);
+
+      expect(repository.reflectionCalls, 1, reason: '$failure');
+      expect(repository.lastReflection?.selectedEmotions, isEmpty);
+      expect(repository.lastReflection?.skipped, isTrue);
+      expect(_choice(tester, '불안').isSelected, isTrue);
+      expect(find.textContaining('SECRET_REFLECTION'), findsNothing);
+      await tester.tap(
+        find.byKey(const ValueKey('emotion-skip')),
+        warnIfMissed: false,
+      );
+      await tester.pump();
+      expect(find.byKey(const ValueKey('emotion-skip-dialog')), findsNothing);
+      expect(repository.reflectionCalls, 1, reason: '$failure');
+    }
   });
 
   testWidgets('Reflection 전송 후 입력을 잠그고 중복 탭 없이 완료 화면으로 한 번 이동한다', (
@@ -965,6 +1402,7 @@ void main() {
       navigatorObserver: observer,
     );
     await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
+    await tester.pumpAndSettle();
     await tester.enterText(
       find.byKey(const ValueKey('drawing-title')),
       '잠근 제목',
@@ -974,6 +1412,18 @@ void main() {
     await tester.pump();
 
     expect(repository.reflectionCalls, 1);
+    final loadingStatus = find.bySemanticsLabel('마음을 저장하고 있어요');
+    expect(loadingStatus, findsOneWidget);
+    expect(
+      tester.getSemantics(loadingStatus),
+      matchesSemantics(
+        label: '마음을 저장하고 있어요',
+        isButton: true,
+        hasEnabledState: true,
+        isEnabled: false,
+        isLiveRegion: true,
+      ),
+    );
     expect(
       tester
           .widget<AppTextField>(find.byKey(const ValueKey('drawing-title')))
@@ -993,12 +1443,148 @@ void main() {
     await tester.pump();
     expect(repository.reflectionCalls, 1);
 
+    await tester.tap(
+      find.byKey(const ValueKey('emotion-skip')),
+      warnIfMissed: false,
+    );
+    await tester.pump();
+    expect(find.byKey(const ValueKey('emotion-skip-dialog')), findsNothing);
+    expect(repository.reflectionCalls, 1);
+
     reflectionCompleter.complete();
     await tester.pumpAndSettle();
 
     expect(repository.activityCompleteCalls, 1);
     expect(observer.activityCompleteReplacements, 1);
     expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
+  });
+
+  testWidgets('skip 요청 중 카드·감정 확인을 잠그고 연속 입력에도 요청은 하나다', (tester) async {
+    final reflectionCompleter = Completer<void>();
+    final repository = _CompletionRepository(
+      reflectionCompleter: reflectionCompleter,
+    );
+    final observer = _CompletionNavigationObserver();
+    await _pumpEmotion(
+      tester,
+      repository: repository,
+      sessionId: 42,
+      navigatorObserver: observer,
+    );
+    await tester.tap(find.byKey(const ValueKey('emotion-슬픔')));
+    await tester.pumpAndSettle();
+    await _openSkipDialog(tester);
+    final confirm = find.byKey(const ValueKey('emotion-skip-confirm'));
+    final confirmButton = tester.widget<AppButton>(confirm);
+    confirmButton.onPressed!();
+    confirmButton.onPressed!();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pump();
+
+    expect(repository.reflectionCalls, 1);
+    expect(repository.lastReflection?.selectedEmotions, isEmpty);
+    expect(repository.lastReflection?.skipped, isTrue);
+    expect(_choice(tester, '슬픔').isSelected, isTrue);
+    expect(_choice(tester, '기쁨').onTap, isNull);
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('emotion-skip')),
+      120,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('emotion-screen-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.pump();
+    expect(
+      tester
+          .widget<EmotionSkipButton>(find.byKey(const ValueKey('emotion-skip')))
+          .isLoading,
+      isTrue,
+    );
+    expect(find.text('넘어갈 준비를 하고 있어요'), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('emotion-skip')),
+        matching: find.byType(CircularProgressIndicator),
+      ),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('emotion-submit')),
+      warnIfMissed: false,
+    );
+    await tester.tap(
+      find.byKey(const ValueKey('emotion-기쁨')),
+      warnIfMissed: false,
+    );
+    await tester.pump();
+    expect(repository.reflectionCalls, 1);
+    expect(_choice(tester, '슬픔').isSelected, isTrue);
+
+    reflectionCompleter.complete();
+    await tester.pumpAndSettle();
+    expect(repository.activityCompleteCalls, 1);
+    expect(observer.activityCompleteReplacements, 1);
+  });
+
+  testWidgets('감정 화면 dispose 후 늦은 Reflection 성공은 완료 화면으로 이동하지 않는다', (
+    tester,
+  ) async {
+    final reflectionCompleter = Completer<void>();
+    final repository = _CompletionRepository(
+      reflectionCompleter: reflectionCompleter,
+    );
+    final observer = _CompletionNavigationObserver();
+    await _pumpEmotion(
+      tester,
+      repository: repository,
+      sessionId: 42,
+      navigatorObserver: observer,
+    );
+    await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('emotion-submit')));
+    await tester.pump();
+    expect(repository.reflectionCalls, 1);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    reflectionCompleter.complete();
+    await tester.pumpAndSettle();
+
+    expect(repository.activityCompleteCalls, 0);
+    expect(observer.activityCompleteReplacements, 0);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('감정 화면 dispose 후 늦은 skip 성공은 후속 API와 이동을 시작하지 않는다', (
+    tester,
+  ) async {
+    final reflectionCompleter = Completer<void>();
+    final repository = _CompletionRepository(
+      reflectionCompleter: reflectionCompleter,
+    );
+    final observer = _CompletionNavigationObserver();
+    await _pumpEmotion(
+      tester,
+      repository: repository,
+      sessionId: 42,
+      navigatorObserver: observer,
+    );
+    await _openSkipDialog(tester);
+    await tester.tap(find.byKey(const ValueKey('emotion-skip-confirm')));
+    await tester.pump();
+    expect(repository.reflectionCalls, 1);
+
+    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+    reflectionCompleter.complete();
+    await tester.pumpAndSettle();
+
+    expect(repository.activityCompleteCalls, 0);
+    expect(observer.activityCompleteReplacements, 0);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('HTTP 202 직후 완료 상태 화면으로 이동하고 그 화면에서만 조회한다', (tester) async {
@@ -1015,7 +1601,7 @@ void main() {
       conversationSkipped: false,
     );
     await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
-    await tester.pump();
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('emotion-submit')));
     for (var pump = 0; pump < 5; pump += 1) {
       await tester.pump();
@@ -1066,33 +1652,85 @@ void main() {
     final repository = _CompletionRepository();
     await _pumpEmotion(tester, repository: repository, sessionId: null);
     await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
-    await tester.tap(find.byKey(const ValueKey('emotion-submit')));
     await tester.pumpAndSettle();
 
     expect(repository.reflectionCalls, 0);
     expect(find.textContaining('아직 마음을 저장할 수 없어요'), findsWidgets);
   });
 
-  testWidgets('감정 화면은 tablet landscape와 작은 높이에서 overflow가 없다', (tester) async {
+  testWidgets('감정 화면은 360×640·textScale 2·tablet 세로·가로에서 overflow가 없다', (
+    tester,
+  ) async {
     await _pumpEmotion(tester, size: const Size(1200, 600));
-    expect(tester.takeException(), isNull);
-
-    await tester.drag(
-      find.byKey(const ValueKey('emotion-screen-scroll')),
-      const Offset(0, -1000),
-    );
-    await tester.pump();
+    expect(find.byKey(const ValueKey('emotion-wide-layout')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('emotion-submit')), findsOneWidget);
 
-    await _pumpEmotion(tester, size: const Size(600, 500));
-    await tester.drag(
-      find.byKey(const ValueKey('emotion-screen-scroll')),
-      const Offset(0, -1000),
+    await _pumpEmotion(
+      tester,
+      size: const Size(360, 640),
+      textScaler: const TextScaler.linear(2),
     );
-    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('emotion-compact-layout')),
+      findsOneWidget,
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('emotion-skip')),
+      220,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('emotion-screen-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await _openSkipDialog(tester);
+    expect(tester.takeException(), isNull);
+    expect(find.byKey(const ValueKey('emotion-skip-confirm')), findsOneWidget);
+    expect(find.byKey(const ValueKey('emotion-skip-cancel')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('emotion-skip-cancel')));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('emotion-불안')),
+      220,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('emotion-screen-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+    await tester.tap(find.byKey(const ValueKey('emotion-불안')));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('emotion-submit')), findsOneWidget);
+    expect(
+      tester.getRect(find.byKey(const ValueKey('emotion-submit'))).bottom,
+      lessThanOrEqualTo(640),
+    );
+
+    await _pumpEmotion(tester, size: const Size(800, 1280));
+    expect(find.byKey(const ValueKey('emotion-wide-layout')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('emotion-편안')));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+
+    await _pumpEmotion(tester, size: const Size(1280, 800));
+    expect(find.byKey(const ValueKey('emotion-wide-layout')), findsOneWidget);
+    expect(
+      tester
+          .widget<Image>(
+            find.byKey(const ValueKey('emotion-drawing-preview-image')),
+          )
+          .fit,
+      BoxFit.contain,
+    );
+    expect(tester.takeException(), isNull);
   });
 }
 
@@ -1104,6 +1742,7 @@ Future<void> _pumpDrawing(
   int? conversationId,
   ConversationRepository? conversationRepository,
   Future<BinaryUploadDto?> Function()? completionSnapshotProvider,
+  ValueChanged<EmotionSelectRouteArguments>? onEmotionRouteArguments,
 }) async {
   tester.view.physicalSize = const Size(1200, 800);
   tester.view.devicePixelRatio = 1;
@@ -1112,8 +1751,16 @@ Future<void> _pumpDrawing(
   await tester.pumpWidget(
     MaterialApp(
       routes: {
-        AppRoutes.emotionSelect('3'): (_) =>
-            const EmotionSelectScreen(childId: '3'),
+        AppRoutes.emotionSelect('3'): (context) {
+          final arguments =
+              ModalRoute.of(context)!.settings.arguments!
+                  as EmotionSelectRouteArguments;
+          onEmotionRouteArguments?.call(arguments);
+          return EmotionSelectScreen(
+            childId: '3',
+            completedDrawingImage: arguments.completedDrawingImage,
+          );
+        },
       },
       home: DrawingScreen(
         childId: '3',
@@ -1151,11 +1798,13 @@ Future<List<String>> _captureDebugPrint(Future<void> Function() action) async {
 Future<void> _pumpEmotion(
   WidgetTester tester, {
   Size size = const Size(1200, 800),
+  TextScaler textScaler = TextScaler.noScaling,
   DrawingRepository? repository,
   int? sessionId,
   DrawingActivityCompletionController? activityCompletionController,
   NavigatorObserver? navigatorObserver,
   bool conversationSkipped = true,
+  BinaryUploadDto? completedDrawingImage = _png,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -1163,7 +1812,12 @@ Future<void> _pumpEmotion(
   addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(
     MaterialApp(
+      key: UniqueKey(),
       navigatorObservers: [?navigatorObserver],
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: textScaler),
+        child: child!,
+      ),
       routes: {
         AppRoutes.guardianHome: (_) => const Scaffold(body: Text('보호자 홈 테스트')),
       },
@@ -1187,6 +1841,7 @@ Future<void> _pumpEmotion(
         conversationId: conversationSkipped ? null : 20,
         conversationAlreadyEnded: !conversationSkipped,
         activityCompletionController: activityCompletionController,
+        completedDrawingImage: completedDrawingImage,
       ),
     ),
   );
@@ -1229,11 +1884,106 @@ Future<void> _drawStroke(WidgetTester tester) async {
   await tester.pump();
 }
 
-AppChoiceCard _choice(WidgetTester tester, String label) =>
-    tester.widget<AppChoiceCard>(find.byKey(ValueKey('emotion-$label')));
+Future<void> _openSkipDialog(WidgetTester tester) async {
+  final skip = find.byKey(const ValueKey('emotion-skip'));
+  await tester.scrollUntilVisible(
+    skip,
+    220,
+    scrollable: find
+        .descendant(
+          of: find.byKey(const ValueKey('emotion-screen-scroll')),
+          matching: find.byType(Scrollable),
+        )
+        .first,
+  );
+  await tester.tap(skip);
+  await tester.pumpAndSettle();
+  expect(find.byKey(const ValueKey('emotion-skip-dialog')), findsOneWidget);
+}
+
+Future<void> _confirmSkip(WidgetTester tester) async {
+  await _openSkipDialog(tester);
+  await tester.tap(find.byKey(const ValueKey('emotion-skip-confirm')));
+  await tester.pumpAndSettle();
+}
+
+EmotionChoiceCard _choice(WidgetTester tester, String label) =>
+    tester.widget<EmotionChoiceCard>(find.byKey(ValueKey('emotion-$label')));
 
 const _png = BinaryUploadDto(
-  bytes: [137, 80, 78, 71],
+  bytes: [
+    137,
+    80,
+    78,
+    71,
+    13,
+    10,
+    26,
+    10,
+    0,
+    0,
+    0,
+    13,
+    73,
+    72,
+    68,
+    82,
+    0,
+    0,
+    0,
+    2,
+    0,
+    0,
+    0,
+    1,
+    8,
+    6,
+    0,
+    0,
+    0,
+    244,
+    34,
+    127,
+    138,
+    0,
+    0,
+    0,
+    14,
+    73,
+    68,
+    65,
+    84,
+    120,
+    156,
+    99,
+    248,
+    207,
+    192,
+    0,
+    66,
+    255,
+    1,
+    15,
+    249,
+    3,
+    253,
+    133,
+    17,
+    153,
+    118,
+    0,
+    0,
+    0,
+    0,
+    73,
+    69,
+    78,
+    68,
+    174,
+    66,
+    96,
+    130,
+  ],
   fileName: 'final.png',
   mimeType: 'image/png',
 );
@@ -1244,6 +1994,14 @@ const _draftSaveResponse = DraftSaveResponseDto(
   lastEventSequence: 2,
   savedAt: '2026-07-22T00:00:00Z',
   expiresAt: null,
+);
+
+ApiResponseFailure _reflectionFailure(int statusCode) => ApiResponseFailure(
+  statusCode: statusCode,
+  error: const ApiError(
+    code: 'SECRET_REFLECTION',
+    message: 'internal reflection failure',
+  ),
 );
 
 Future<void> _pumpUntil(WidgetTester tester, bool Function() condition) async {
@@ -1331,6 +2089,7 @@ final class _CompletionRepository implements DrawingRepository {
   final DrawingStageCompleteResponseDto completionResponse;
   Object? completionError;
   int completeCalls = 0;
+  BinaryUploadDto? lastFinalImage;
   final List<String> completionKeys = [];
   final List<DrawingCompleteMetadataDto> completionMetadata = [];
   int reflectionCalls = 0;
@@ -1360,6 +2119,7 @@ final class _CompletionRepository implements DrawingRepository {
   }) {
     calls?.add('drawing-complete');
     completeCalls += 1;
+    lastFinalImage = finalImage;
     completionKeys.add(idempotencyKey);
     completionMetadata.add(metadata);
     if (completionError case final error?) return Future.error(error);

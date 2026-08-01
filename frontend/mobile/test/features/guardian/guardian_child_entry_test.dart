@@ -284,9 +284,17 @@ void main() {
     // 멎지 않으므로, 목표 위젯이 나타날 때까지 제한 프레임만 진행한다.
     await _pumpUntil(tester, find.text('내 마음 고르기'));
     expect(find.text('내 마음 고르기'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
-    await tester.pump();
-    await tester.tap(find.byKey(const ValueKey('emotion-submit')));
+    final happyEmotion = find.byKey(const ValueKey('emotion-기쁨'));
+    await tester.ensureVisible(happyEmotion);
+    await tester.pumpAndSettle();
+    await tester.tap(happyEmotion);
+    await tester.pumpAndSettle();
+
+    final emotionSubmit = find.byKey(const ValueKey('emotion-submit'));
+    expect(emotionSubmit, findsOneWidget);
+    await tester.ensureVisible(emotionSubmit);
+    await tester.pumpAndSettle();
+    await tester.tap(emotionSubmit);
     await _pumpUntil(tester, find.text('그림 활동을 모두 마쳤어요!'));
 
     expect(drawingRepository.reflectionSessionId, 731);
