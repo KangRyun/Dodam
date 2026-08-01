@@ -14,6 +14,7 @@ import com.ssafy.b209.notification.push.PushMessage;
 import com.ssafy.b209.notification.push.PushSendOutcome;
 import com.ssafy.b209.notification.push.PushSender;
 import com.ssafy.b209.notification.repository.NotificationDeviceTokenRepository;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -37,9 +38,15 @@ class NotificationPushDispatcherTest {
   @Mock private NotificationDeliveryService deliveryService;
   @Captor private ArgumentCaptor<PushMessage> messageCaptor;
 
+  private final SimpleMeterRegistry meterRegistry = new SimpleMeterRegistry();
+
   private NotificationPushDispatcher dispatcher() {
     return new NotificationPushDispatcher(
-        pushSender, deviceTokenRepository, cipher, deliveryService);
+        pushSender, deviceTokenRepository, cipher, deliveryService, meterRegistry);
+  }
+
+  private double outcomeCount(String outcome) {
+    return meterRegistry.counter("dodam.push.send", "outcome", outcome).count();
   }
 
   @Test
@@ -107,6 +114,39 @@ class NotificationPushDispatcherTest {
 
     verify(deliveryService).deactivateDeviceToken(7L);
     verify(deliveryService).markDelivered(900L, false);
+  }
+
+  @Test
+  void countsSendOutcomesByMetricLabel() {
+    given(pushSender.isEnabled()).willReturn(true);
+    given(cipher.isConfigured()).willReturn(true);
+    given(deviceTokenRepository.findByUserIdAndActiveTrue(11L))
+        .willReturn(List.of(token(1L, "cipher-a"), token(2L, "cipher-b"), token(3L, "cipher-c")));
+    given(cipher.decrypt("cipher-a")).willReturn("plain-a");
+    given(cipher.decrypt("cipher-b")).willReturn("plain-b");
+    given(cipher.decrypt("cipher-c")).willReturn("plain-c");
+    given(pushSender.send(any(PushMessage.class)))
+        .willReturn(
+            PushSendOutcome.SENT, PushSendOutcome.TOKEN_INVALID, PushSendOutcome.TEMPORARY_FAILURE);
+
+    dispatcher().dispatch(NOTIFICATION);
+
+    assertThat(outcomeCount("sent")).isEqualTo(1.0);
+    assertThat(outcomeCount("token_invalid")).isEqualTo(1.0);
+    assertThat(outcomeCount("temporary_failure")).isEqualTo(1.0);
+  }
+
+  @Test
+  void decryptFailureIsNotCountedAsSendOutcome() {
+    given(pushSender.isEnabled()).willReturn(true);
+    given(cipher.isConfigured()).willReturn(true);
+    given(deviceTokenRepository.findByUserIdAndActiveTrue(11L))
+        .willReturn(List.of(token(3L, "cipher-broken")));
+    given(cipher.decrypt("cipher-broken")).willThrow(new IllegalStateException("broken"));
+
+    dispatcher().dispatch(NOTIFICATION);
+
+    assertThat(meterRegistry.find("dodam.push.send").counters()).isEmpty();
   }
 
   @Test
