@@ -114,9 +114,15 @@ Authorization: Bearer {accessToken}
 - 기본 TTL **60초** (`AiImageAccessProperties.java:20`), Docker 내부망 전용
 - AI 서버는 URL·토큰·이미지 bytes를 로그에 남기지 않는다(`ai/internal_contracts.py:320`의 `repr=False`)
 
-문서 정정 필요: 저장소-아키텍처 §4는 "AI가 `dodam-ai-ro` 자격증명으로 MinIO를 직접 GET" 방식을 채택했다고 기록하지만, 구현은 위의 BE 프록시 토큰 방식이다. `MINIO_AI_USER`는 `minio-init` 프로비저닝에만 주입되고 AI 서비스는 사용하지 않으므로 **현재 ai-ro는 유휴 자격증명**이다. 저장소-아키텍처 §4를 as-built로 정정하고, ai-ro를 유지할지 회수할지 결정한다(§9-4).
+~~문서 정정 필요~~ → **정정 완료 (2026-08-02 · S15P11B209-671)**: 저장소-아키텍처 §4를 as-built(BE 프록시 토큰)로 교체했고, 직접 GET 구성 이슈(372)는 대체·종료했다. `MINIO_AI_USER`는 `minio-init` 프로비저닝에만 주입되고 AI 서비스는 사용하지 않으므로 **현재 ai-ro는 유휴 자격증명**이다 — 회수 실행은 673 에서 진행한다.
 
 ## 5. 스트로크 배치 저장 계약 (§10.5)
+
+> **as-built 갱신 (2026-08-02 · 671)**: 아래 표의 파일:라인 근거는 **MySQL JPA 시절** 검증분이다.
+> 365 에서 저장소가 MongoDB 문서(`StrokeBatchDocument`, 배치=문서)로 전환됐고, 계약 규칙
+> (순번 unique·checksum 멱등·내용 다른 재사용 409·이벤트 500개·1 MiB)은 `StrokeBatchService` 가
+> 그대로 지킨다(멱등·409 는 서비스 로직, unique 인덱스는 mongodb-initdb 소관). 표의 세부 라인은
+> 전환 전 기준이므로 재인용 시 현행 코드로 재확인할 것.
 
 | 명세 규칙 | 구현 | 판정 |
 | --- | --- | --- |
