@@ -335,7 +335,7 @@ pipeline {
             set -e
             export KUBECONFIG="$DEPLOYER_KUBECONFIG"
             fail=0
-            for d in backend gateway ai; do
+            for d in backend gateway ai web; do
               ready="$(kubectl -n dodam get deployment "$d" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
               ready="${ready:-0}"
               if [ "$ready" -ge 1 ]; then
@@ -365,10 +365,14 @@ pipeline {
             echo "   ❌ $1 → $code (기대 $2)"; return 1
           }
           fail=0
-          check /                 200 || fail=1
+          # / 는 383 부터 커뮤니티 웹이다 — /community 로 307 리다이렉트한다.
+          #   "/ = 200" 은 임시 페이지 시절의 계약이다. 지금 / 에서 200 이 오면 오히려
+          #   웹 전환이 풀렸다는 신호다. 리다이렉트와 목적지를 각각 단언한다.
+          check /                 307 || fail=1
+          check /community        200 || fail=1
           check /ai/health        200 || fail=1
           check /api/v1/children  401 || fail=1   # 무토큰 차단 = 인증이 살아 있다는 뜻
-          check /legal/privacy/   200 || fail=1
+          check /legal/privacy/   200 || fail=1   # 스토어 심사 URL — 웹 전환 후에도 살아야 한다(383)
           [ "$fail" = "0" ] || { echo "  ✗ 공개 e2e 실패 — 롤백 판단 지점"; exit 1; }
           echo "✅ k3s 배포 정상 + 공개 경로 e2e 통과"
         '''
