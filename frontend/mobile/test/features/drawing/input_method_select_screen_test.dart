@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:dodam/core/network/network.dart';
 import 'package:dodam/features/drawing/application/drawing_session_start_controller.dart';
+import 'package:dodam/features/drawing/application/drawing_upload_error.dart';
 import 'package:dodam/features/drawing/application/photo_upload_validation.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/drawing/domain/photo_permission_service.dart';
@@ -41,6 +42,7 @@ void main() {
 
   Widget buildScreen({
     required DrawingRepository repository,
+    int childId = 7,
     PhotoPickerAdapter? photoPickerAdapter,
     PhotoPermissionService? photoPermissionService,
     PhotoDimensionReader? dimensionReader,
@@ -49,7 +51,7 @@ void main() {
     DrawingActivityContextDto? restoredActivityContext,
     bool htpPhotoUploadEnabled = true,
   }) => InputMethodSelectScreen(
-    childId: 7,
+    childId: childId,
     drawingTypeId: 5,
     title: '그림일기',
     description: '오늘 있었던 일을 그림으로 그려 볼까?',
@@ -217,6 +219,143 @@ void main() {
       expect(repository.nextStepInputMethods, ['CANVAS', 'CANVAS']);
       // 전환에서는 새 HTP 활동을 만들지 않는다.
       expect(repository.createCalls, 0);
+    });
+
+    testWidgets('같은 inputMethod여도 다른 assessment는 새 Key를 쓰고 느린 성공을 버린다', (
+      tester,
+    ) async {
+      final nextA = Completer<HtpAssessmentDto>();
+      final nextB = Completer<HtpAssessmentDto>();
+      final repository = _FakeDrawingRepository(
+        nextStepCompleters: [nextA, nextB],
+      );
+      var assessmentId = 91;
+      late StateSetter updateIdentity;
+      var popCount = 0;
+
+      await pumpScreen(
+        tester,
+        StatefulBuilder(
+          builder: (context, setState) {
+            updateIdentity = setState;
+            return buildScreen(
+              repository: repository,
+              htpAssessmentId: assessmentId,
+            );
+          },
+        ),
+        onPopped: (_) => popCount += 1,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
+      await tester.pump();
+      expect(repository.nextStepCalls, 1);
+
+      updateIdentity(() => assessmentId = 92);
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
+      await tester.pump();
+
+      expect(repository.nextStepCalls, 2);
+      expect(repository.nextStepAssessmentIds, [91, 92]);
+      expect(repository.nextStepInputMethods, ['CANVAS', 'CANVAS']);
+      expect(repository.nextStepKeys, hasLength(2));
+      expect(repository.nextStepKeys.toSet(), hasLength(2));
+
+      nextA.complete(
+        repository.nextStepAssessment(assessmentId: 91, sessionId: 901),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(popCount, 0);
+      expect(find.byKey(const ValueKey('input-method-canvas')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('input-method-canvas-error')),
+        findsNothing,
+      );
+
+      nextB.complete(
+        repository.nextStepAssessment(assessmentId: 92, sessionId: 902),
+      );
+      await tester.pumpAndSettle();
+
+      expect(popCount, 1);
+      expect(repository.nextStepCalls, 2);
+    });
+
+    testWidgets('같은 assessment여도 다른 HTP stage는 새 Key를 쓰고 느린 실패를 버린다', (
+      tester,
+    ) async {
+      final nextA = Completer<HtpAssessmentDto>();
+      final nextB = Completer<HtpAssessmentDto>();
+      final repository = _FakeDrawingRepository(
+        nextStepCompleters: [nextA, nextB],
+      );
+      var stepOrder = 1;
+      var drawingSubject = 'HOUSE';
+      late StateSetter updateIdentity;
+      var popCount = 0;
+
+      await pumpScreen(
+        tester,
+        StatefulBuilder(
+          builder: (context, setState) {
+            updateIdentity = setState;
+            return buildScreen(
+              repository: repository,
+              htpAssessmentId: 91,
+              restoredActivityContext: DrawingActivityContextDto(
+                activityKind: 'HTP',
+                htpAssessmentId: 91,
+                htpStatus: 'IN_PROGRESS',
+                stepOrder: stepOrder,
+                drawingSubject: drawingSubject,
+              ),
+            );
+          },
+        ),
+        onPopped: (_) => popCount += 1,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
+      await tester.pump();
+      expect(repository.nextStepCalls, 1);
+
+      updateIdentity(() {
+        stepOrder = 2;
+        drawingSubject = 'TREE';
+      });
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
+      await tester.pump();
+
+      expect(repository.nextStepCalls, 2);
+      expect(repository.nextStepAssessmentIds, [91, 91]);
+      expect(repository.nextStepInputMethods, ['CANVAS', 'CANVAS']);
+      expect(repository.nextStepKeys, hasLength(2));
+      expect(repository.nextStepKeys.toSet(), hasLength(2));
+
+      nextA.completeError(
+        const ApiTransportFailure(type: ApiTransportFailureType.connection),
+      );
+      await tester.pump();
+      await tester.pump();
+
+      expect(popCount, 0);
+      expect(find.byKey(const ValueKey('input-method-canvas')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('input-method-canvas-error')),
+        findsNothing,
+      );
+
+      nextB.complete(
+        repository.nextStepAssessment(assessmentId: 91, sessionId: 902),
+      );
+      await tester.pumpAndSettle();
+
+      expect(popCount, 1);
+      expect(repository.nextStepCalls, 2);
     });
 
     testWidgets('입력 방식을 바꾸면 새 Key를 쓴다', (tester) async {
@@ -531,9 +670,61 @@ void main() {
       );
     });
 
-    testWidgets('기기 정책으로 제한된 사진 권한에는 설정 이동을 제공하지 않는다', (
+    testWidgets('권한 설정의 느린 false는 다른 route identity에 오류를 표시하지 않는다', (
       tester,
     ) async {
+      final settings = Completer<bool>();
+      final adapter = _FakePhotoPickerAdapter(
+        cameraError: PlatformException(code: 'camera_access_denied'),
+      );
+      final permissionService = _FakePhotoPermissionService(
+        permissionStatus: PhotoPermissionStatus.permanentlyDenied,
+        openSettingsCompleter: settings,
+      );
+      var childId = 7;
+      late StateSetter updateIdentity;
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, setState) {
+              updateIdentity = setState;
+              return buildScreen(
+                repository: _FakeDrawingRepository(),
+                photoPickerAdapter: adapter,
+                photoPermissionService: permissionService,
+                childId: childId,
+              );
+            },
+          ),
+        ),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+      await tester.pumpAndSettle();
+      await tester.tap(
+        find.byKey(const ValueKey('input-method-open-settings')),
+      );
+      await tester.pump();
+
+      expect(permissionService.openSettingsCalls, 1);
+      updateIdentity(() => childId = 8);
+      await tester.pump();
+      expect(find.byKey(const ValueKey('input-method-photo')), findsOneWidget);
+
+      settings.complete(false);
+      await tester.pump();
+      await tester.pump();
+
+      expect(
+        find.text('설정 화면을 열지 못했어요. 기기 설정에서 직접 카메라 권한을 허용해 주세요.'),
+        findsNothing,
+      );
+      expect(find.byKey(const ValueKey('input-method-photo')), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('기기 정책으로 제한된 사진 권한에는 설정 이동을 제공하지 않는다', (tester) async {
       const permissionChannel = MethodChannel(
         'flutter.baseflow.com/permissions/methods',
       );
@@ -560,10 +751,7 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
       await tester.pumpAndSettle();
 
-      expect(
-        find.text('사진 사용이 기기 설정 또는 보호자 정책으로 제한되어 있어요.'),
-        findsOneWidget,
-      );
+      expect(find.text('사진 사용이 기기 설정 또는 보호자 정책으로 제한되어 있어요.'), findsOneWidget);
       expect(
         find.byKey(const ValueKey('input-method-open-settings')),
         findsNothing,
@@ -784,9 +972,7 @@ void main() {
       await tester.pumpAndSettle();
     });
 
-    testWidgets('전송 100% 뒤 서버 응답을 기다리는 상태를 구분해 표시한다', (
-      tester,
-    ) async {
+    testWidgets('전송 100% 뒤 서버 응답을 기다리는 상태를 구분해 표시한다', (tester) async {
       final photo = await validPhoto();
       final uploadGate = Completer<void>();
       final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
@@ -881,10 +1067,54 @@ void main() {
       expect(popped?.isDrawingStage, isFalse);
     });
 
+    for (final stage in const [(1, 'HOUSE'), (2, 'TREE'), (3, 'PERSON')]) {
+      testWidgets('HTP ${stage.$2} 기존 세션은 identity를 보존해 업로드·완료한다', (
+        tester,
+      ) async {
+        final photo = await validPhoto();
+        final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
+        final repository = _FakeDrawingRepository(
+          getSessionCurrentStage: 'CONVERSING',
+        );
+        DrawingSessionResolution? popped;
+
+        await pumpScreen(
+          tester,
+          buildScreen(
+            repository: repository,
+            photoPickerAdapter: adapter,
+            existingDrawingSessionId: 900 + stage.$1,
+            restoredActivityContext: DrawingActivityContextDto(
+              activityKind: 'HTP',
+              htpAssessmentId: 91,
+              htpStatus: 'IN_PROGRESS',
+              stepOrder: stage.$1,
+              drawingSubject: stage.$2,
+            ),
+          ),
+          onPopped: (value) => popped = value,
+        );
+        await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+        await tester.pumpAndSettle();
+
+        expect(repository.createCalls, 0);
+        expect(repository.uploadSessionIds, [900 + stage.$1]);
+        expect(repository.completionKeys, hasLength(1));
+        expect(popped, isNotNull);
+        final activityContext = popped?.activityContext;
+        expect(activityContext, isNotNull);
+        expect(activityContext?.drawingSubject, stage.$2);
+        expect(activityContext?.stepOrder, stage.$1);
+      });
+    }
+
     testWidgets('연속으로 두 번 탭해도 세션 생성과 업로드는 한 번만 일어난다', (tester) async {
       final photo = await validPhoto();
+      final uploadGate = Completer<void>();
       final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
-      final repository = _FakeDrawingRepository();
+      final repository = _FakeDrawingRepository(uploadGate: uploadGate);
 
       await pumpScreen(
         tester,
@@ -895,26 +1125,22 @@ void main() {
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
-      // 첫 탭으로 버튼이 로딩 상태로 바뀌는 애니메이션 프레임 중이라 두 번째
-      // 탭이 히트테스트를 놓칠 수 있다 — 중복 탭 방지 자체는 onPressed가
-      // null이 되는 로직이 맡으므로 경고는 무시해도 된다.
-      await tester.tap(
-        find.byKey(const ValueKey('input-method-confirm')),
-        warnIfMissed: false,
-      );
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pump();
+
+      expect(repository.createCalls, 1);
+      expect(repository.uploadCalls, 1);
+
+      uploadGate.complete();
       await tester.pumpAndSettle();
 
       expect(repository.createCalls, 1);
       expect(repository.uploadCalls, 1);
+      expect(repository.completionKeys, hasLength(1));
     });
 
-    for (final testCase in [
-      ('IMAGE_TOO_BLURRY', '흐려서'),
-      ('DRAWING_REGION_NOT_FOUND', '보이지 않아요'),
-      ('IMAGE_DIMENSION_INVALID', '크기가 적절하지'),
-      ('UPLOAD_FAILED', '올리지 못했어요'),
-    ]) {
-      testWidgets('서버 오류 ${testCase.$1}는 아이콘·문구로 안내하고 같은 사진으로 재시도할 수 있다', (
+    for (final testCase in [('STORAGE_422_001', '크기가 적절하지')]) {
+      testWidgets('실제 422 서버 오류 ${testCase.$1}는 안내 후 재시도를 차단한다', (
         tester,
       ) async {
         final photo = await validPhoto();
@@ -945,14 +1171,19 @@ void main() {
         expect(find.textContaining(testCase.$2), findsOneWidget);
         expect(repository.createCalls, 1);
         expect(repository.uploadCalls, 1);
-
-        // 같은 세션·같은 사진으로 재시도 — 세션을 다시 만들지 않는다.
-        await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
-        await tester.pumpAndSettle();
-
-        expect(repository.createCalls, 1);
-        expect(repository.uploadCalls, 2);
-        expect(popped?.sessionId, 900);
+        expect(
+          find.byKey(const ValueKey('input-method-confirm')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('input-method-reselect')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('input-method-preview-cancel')),
+          findsOneWidget,
+        );
+        expect(popped, isNull);
       });
     }
 
@@ -987,7 +1218,1151 @@ void main() {
 
       expect(repository.createCalls, 1);
       expect(repository.uploadCalls, 2);
+      expect(repository.uploadKeys.toSet(), hasLength(1));
+      expect(
+        repository.uploadImages[0].bytes,
+        orderedEquals(repository.uploadImages[1].bytes),
+      );
+      expect(
+        repository.uploadMetadata[0].toJson(),
+        repository.uploadMetadata[1].toJson(),
+      );
       expect(popped?.sessionId, 900);
+    });
+
+    testWidgets('completion 5xx 재시도도 동일 upload·completion snapshot을 재사용한다', (
+      tester,
+    ) async {
+      final photo = await validPhoto();
+      final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
+      final repository = _FakeDrawingRepository(
+        completionFailures: [
+          const ApiResponseFailure(
+            statusCode: 503,
+            error: ApiError(code: 'COMMON_503', message: 'temporary'),
+          ),
+        ],
+      );
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pumpAndSettle();
+      expect(find.text('다시 시도'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(repository.uploadCalls, 2);
+      expect(repository.completionKeys, hasLength(2));
+      expect(repository.uploadKeys.toSet(), hasLength(1));
+      expect(repository.completionKeys.toSet(), hasLength(1));
+      expect(
+        repository.uploadMetadata[0].toJson(),
+        repository.uploadMetadata[1].toJson(),
+      );
+      expect(
+        repository.completionMetadata[0].toJson(),
+        repository.completionMetadata[1].toJson(),
+      );
+    });
+  });
+
+  group('업로드 오류 재시도 정책', () {
+    test('network·timeout·unknown·5xx만 upload 재시도를 허용한다', () {
+      for (final type in [
+        ApiTransportFailureType.connection,
+        ApiTransportFailureType.connectionTimeout,
+        ApiTransportFailureType.sendTimeout,
+        ApiTransportFailureType.receiveTimeout,
+        ApiTransportFailureType.transformTimeout,
+        ApiTransportFailureType.unknown,
+      ]) {
+        expect(
+          DrawingUploadErrorPresentation.of(
+            ApiTransportFailure(type: type),
+          ).canRetry,
+          isTrue,
+          reason: '$type',
+        );
+      }
+      expect(
+        DrawingUploadErrorPresentation.of(
+          const ApiResponseFailure(
+            statusCode: 500,
+            error: ApiError(code: 'DRAWING_UPLOAD_FAILED', message: 'failed'),
+          ),
+        ).canRetry,
+        isTrue,
+      );
+    });
+
+    test('cancelled와 400·401·403·404·409·422는 upload 재시도를 차단한다', () {
+      expect(
+        DrawingUploadErrorPresentation.of(
+          const ApiTransportFailure(type: ApiTransportFailureType.cancelled),
+        ).canRetry,
+        isFalse,
+      );
+      for (final status in [400, 401, 403, 404, 409, 422]) {
+        expect(
+          DrawingUploadErrorPresentation.of(
+            ApiResponseFailure(
+              statusCode: status,
+              error: const ApiError(code: 'DRAWING_ERROR', message: 'failed'),
+            ),
+          ).canRetry,
+          isFalse,
+          reason: '$status',
+        );
+      }
+    });
+
+    test('처리 중 409는 completion의 DRAWING_409_017에만 재시도를 허용한다', () {
+      const processing = ApiResponseFailure(
+        statusCode: 409,
+        error: ApiError(code: 'DRAWING_409_017', message: 'processing'),
+      );
+      expect(DrawingUploadErrorPresentation.of(processing).canRetry, isFalse);
+      expect(
+        DrawingUploadErrorPresentation.of(
+          processing,
+          endpoint: DrawingUploadEndpoint.completion,
+        ).canRetry,
+        isTrue,
+      );
+      expect(
+        DrawingUploadErrorPresentation.of(
+          const ApiResponseFailure(
+            statusCode: 409,
+            error: ApiError(
+              code: 'DRAWING_UPLOAD_IDEMPOTENCY_CONFLICT',
+              message: 'conflict',
+            ),
+          ),
+          endpoint: DrawingUploadEndpoint.completion,
+        ).canRetry,
+        isFalse,
+      );
+    });
+  });
+
+  group('실제 취소·generation·stale 응답', () {
+    Future<void> waitForUpload(
+      WidgetTester tester,
+      _FakeDrawingRepository repository,
+      int calls,
+    ) async {
+      for (
+        var attempt = 0;
+        attempt < 10 && repository.uploadCalls < calls;
+        attempt++
+      ) {
+        await tester.pump();
+      }
+      expect(repository.uploadCalls, calls);
+      await tester.pump();
+    }
+
+    Future<void> selectGalleryPhoto(WidgetTester tester) async {
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('업로드 취소는 전송만 1회 취소하고 늦은 성공에도 completion을 시작하지 않는다', (
+      tester,
+    ) async {
+      final upload = Completer<DrawingUploadResponseDto>();
+      final repository = _FakeDrawingRepository(uploadCompleters: [upload]);
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'first.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await selectGalleryPhoto(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await waitForUpload(tester, repository, 1);
+
+      final cancel = find.byKey(const ValueKey('input-method-preview-cancel'));
+      expect(find.bySemanticsLabel('업로드 취소'), findsWidgets);
+      expect(tester.getSize(cancel).height, greaterThanOrEqualTo(48));
+      expect(tester.getSize(cancel).width, greaterThanOrEqualTo(48));
+      await tester.tap(cancel);
+      await tester.pump();
+
+      expect(repository.cancellationSignals, 1);
+      expect(repository.completionKeys, isEmpty);
+      expect(
+        find.byKey(const ValueKey('input-method-upload-error')),
+        findsNothing,
+      );
+      expect(
+        find.byKey(const ValueKey('input-method-confirm')),
+        findsOneWidget,
+      );
+      expect(find.bySemanticsLabel('업로드 취소 중'), findsWidgets);
+      expect(find.bySemanticsLabel('이 사진 사용하기 처리 중'), findsWidgets);
+
+      upload.complete(repository._uploadResponse(900, 1));
+      await tester.pump();
+      await tester.pump();
+
+      expect(repository.completionKeys, isEmpty);
+      expect(
+        find.byKey(const ValueKey('input-method-confirm')),
+        findsOneWidget,
+      );
+      expect(find.bySemanticsLabel('이 사진 사용하기'), findsWidgets);
+    });
+
+    testWidgets('A 취소 settlement 전 재선택·B 전송을 막고 정리 후 B만 완료한다', (tester) async {
+      final uploadA = Completer<DrawingUploadResponseDto>();
+      final uploadB = Completer<DrawingUploadResponseDto>();
+      final repository = _FakeDrawingRepository(
+        uploadCompleters: [uploadA, uploadB],
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'a.png',
+            mimeType: 'image/png',
+          ),
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'b.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await selectGalleryPhoto(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await waitForUpload(tester, repository, 1);
+      repository.emitUploadProgress(0, 42, 100);
+      await tester.pump();
+      expect(find.text('사진을 올리고 있어요 42%'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('input-method-reselect')));
+      await tester.pump();
+      expect(repository.cancellationSignals, 0);
+      expect(find.byKey(const ValueKey('input-method-gallery')), findsNothing);
+
+      await tester.tap(
+        find.byKey(const ValueKey('input-method-preview-cancel')),
+      );
+      await tester.pump();
+      expect(repository.cancellationSignals, 1);
+      repository.emitUploadProgress(0, 99, 100);
+      await tester.pump();
+      expect(find.textContaining('99%'), findsNothing);
+
+      uploadA.complete(repository._uploadResponse(900, 1));
+      await tester.pump();
+      await tester.pump();
+      expect(repository.completionKeys, isEmpty);
+
+      await tester.tap(find.byKey(const ValueKey('input-method-reselect')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await waitForUpload(tester, repository, 2);
+
+      uploadB.complete(repository._uploadResponse(900, 2));
+      await tester.pumpAndSettle();
+
+      expect(repository.completionKeys, hasLength(1));
+      expect(repository.completionMetadata.single.sourceAssetId, 2);
+      expect(repository.uploadImages.map((image) => image.fileName), [
+        'a.png',
+        'b.png',
+      ]);
+      expect(repository.uploadKeys.toSet(), hasLength(2));
+    });
+
+    testWidgets('취소된 A의 늦은 실패가 정리된 뒤 B 오류 상태를 덮지 않는다', (tester) async {
+      final uploadA = Completer<DrawingUploadResponseDto>();
+      final uploadB = Completer<DrawingUploadResponseDto>();
+      final repository = _FakeDrawingRepository(
+        uploadCompleters: [uploadA, uploadB],
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'a.png',
+            mimeType: 'image/png',
+          ),
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'b.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await selectGalleryPhoto(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await waitForUpload(tester, repository, 1);
+      await tester.tap(
+        find.byKey(const ValueKey('input-method-preview-cancel')),
+      );
+      await tester.pump();
+      uploadA.completeError(
+        const ApiTransportFailure(type: ApiTransportFailureType.connection),
+      );
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('input-method-reselect')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await waitForUpload(tester, repository, 2);
+      expect(
+        find.byKey(const ValueKey('input-method-upload-error')),
+        findsNothing,
+      );
+      expect(find.bySemanticsLabel('업로드 취소'), findsWidgets);
+
+      uploadB.complete(repository._uploadResponse(900, 2));
+      await tester.pumpAndSettle();
+      expect(repository.completionKeys, hasLength(1));
+    });
+
+    testWidgets('completion settlement 동안 재시도·재선택을 막고 back 결과를 한 번만 반환한다', (
+      tester,
+    ) async {
+      final completion = Completer<DrawingStageCompleteResponseDto>();
+      final repository = _FakeDrawingRepository(
+        completionCompleters: [completion],
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'photo.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+      var popCount = 0;
+      DrawingSessionResolution? popped;
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+        onPopped: (value) {
+          popCount += 1;
+          popped = value;
+        },
+      );
+      await selectGalleryPhoto(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      for (
+        var attempt = 0;
+        attempt < 10 && repository.completionKeys.isEmpty;
+        attempt++
+      ) {
+        await tester.pump();
+      }
+      await tester.pump();
+
+      expect(repository.uploadCalls, 1);
+      expect(repository.completionKeys, hasLength(1));
+      expect(find.text('완료 처리 중이에요'), findsOneWidget);
+
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.tap(find.byKey(const ValueKey('input-method-reselect')));
+      await tester.tap(
+        find.byKey(const ValueKey('input-method-preview-cancel')),
+      );
+      await tester.pump();
+      expect(repository.uploadCalls, 1);
+      expect(repository.completionKeys, hasLength(1));
+
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(popCount, 0);
+      expect(repository.deletedSessionIds, isEmpty);
+
+      completion.complete(repository.completionResponse(900, 1));
+      await tester.pumpAndSettle();
+
+      expect(popCount, 1);
+      expect(popped?.sessionId, 900);
+      expect(popped?.currentStage, 'CONVERSING');
+      expect(repository.uploadCalls, 1);
+      expect(repository.completionKeys, hasLength(1));
+    });
+
+    testWidgets('completion 늦은 실패 전에는 중복 요청이 없고 settlement 뒤 같은 Key로 재시도한다', (
+      tester,
+    ) async {
+      final completion = Completer<DrawingStageCompleteResponseDto>();
+      final repository = _FakeDrawingRepository(
+        completionCompleters: [completion],
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'photo.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+      var popCount = 0;
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+        onPopped: (_) => popCount += 1,
+      );
+      await selectGalleryPhoto(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      for (
+        var attempt = 0;
+        attempt < 10 && repository.completionKeys.isEmpty;
+        attempt++
+      ) {
+        await tester.pump();
+      }
+      await tester.pump();
+
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.tap(find.byKey(const ValueKey('input-method-reselect')));
+      await tester.tap(
+        find.byKey(const ValueKey('input-method-preview-cancel')),
+      );
+      await tester.pump();
+      expect(repository.uploadCalls, 1);
+      expect(repository.completionKeys, hasLength(1));
+      expect(popCount, 0);
+
+      completion.completeError(
+        const ApiTransportFailure(type: ApiTransportFailureType.connection),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('input-method-upload-error')),
+        findsOneWidget,
+      );
+      expect(find.bySemanticsLabel('다시 시도'), findsWidgets);
+      expect(popCount, 0);
+
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(repository.uploadCalls, 2);
+      expect(repository.completionKeys, hasLength(2));
+      expect(repository.uploadKeys.toSet(), hasLength(1));
+      expect(repository.completionKeys.toSet(), hasLength(1));
+      expect(popCount, 1);
+    });
+
+    testWidgets('completion pending 중 dispose되면 늦은 성공이 navigation을 만들지 않는다', (
+      tester,
+    ) async {
+      final completion = Completer<DrawingStageCompleteResponseDto>();
+      final repository = _FakeDrawingRepository(
+        completionCompleters: [completion],
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'photo.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+      var popCount = 0;
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+        onPopped: (_) => popCount += 1,
+      );
+      await selectGalleryPhoto(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      for (
+        var attempt = 0;
+        attempt < 10 && repository.completionKeys.isEmpty;
+        attempt++
+      ) {
+        await tester.pump();
+      }
+      expect(repository.completionKeys, hasLength(1));
+
+      await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+      await tester.pump();
+      completion.complete(repository.completionResponse(900, 1));
+      await tester.pump();
+      await tester.pump();
+
+      expect(popCount, 0);
+      expect(repository.completionKeys, hasLength(1));
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets(
+      'completion pending 중 route identity 변경도 settlement 전 새 시작을 막는다',
+      (tester) async {
+        final completion = Completer<DrawingStageCompleteResponseDto>();
+        final repository = _FakeDrawingRepository(
+          completionCompleters: [completion],
+        );
+        final adapter = _FakePhotoPickerAdapter(
+          galleryResults: [
+            PickedPhoto(
+              bytes: _tinyPngBytes,
+              fileName: 'stage-a.png',
+              mimeType: 'image/png',
+            ),
+          ],
+        );
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: buildScreen(
+              repository: repository,
+              photoPickerAdapter: adapter,
+            ),
+          ),
+        );
+        await goToPhotoSource(tester);
+        await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+        for (
+          var attempt = 0;
+          attempt < 10 && repository.completionKeys.isEmpty;
+          attempt++
+        ) {
+          await tester.pump();
+        }
+
+        await tester.pumpWidget(
+          MaterialApp(
+            home: buildScreen(
+              repository: repository,
+              photoPickerAdapter: adapter,
+              childId: 8,
+            ),
+          ),
+        );
+        await tester.pump();
+        await tester.tap(find.byKey(const ValueKey('input-method-photo')));
+        await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
+        await tester.pump();
+
+        expect(repository.createCalls, 1);
+        expect(repository.uploadCalls, 1);
+        expect(repository.completionKeys, hasLength(1));
+        expect(
+          find.byKey(const ValueKey('input-method-gallery')),
+          findsNothing,
+        );
+
+        completion.complete(repository.completionResponse(900, 1));
+        await tester.pump();
+        await tester.pump();
+        await tester.tap(find.byKey(const ValueKey('input-method-photo')));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const ValueKey('input-method-gallery')),
+          findsOneWidget,
+        );
+        expect(repository.completionKeys, hasLength(1));
+      },
+    );
+
+    testWidgets('세션 생성 취소는 늦은 성공을 보존하고 다음 확인에서 같은 세션을 재사용한다', (tester) async {
+      final creation = Completer<HtpAssessmentDto>();
+      final repository = _FakeDrawingRepository(
+        sessionCreationCompleters: [creation],
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'photo.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await selectGalleryPhoto(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pump();
+
+      expect(repository.createCalls, 1);
+      expect(repository.uploadCalls, 0);
+      expect(find.text('사진을 올릴 준비를 하고 있어요'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(const ValueKey('input-method-preview-cancel')),
+      );
+      await tester.pump();
+      expect(find.bySemanticsLabel('준비 취소 중'), findsWidgets);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.tap(find.byKey(const ValueKey('input-method-reselect')));
+      await tester.pump();
+      expect(repository.createCalls, 1);
+      expect(repository.uploadCalls, 0);
+
+      creation.complete(repository.createdAssessment());
+      await tester.pump();
+      await tester.pump();
+      expect(find.bySemanticsLabel('이 사진 사용하기'), findsWidgets);
+      expect(repository.uploadCalls, 0);
+
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(repository.createCalls, 1);
+      expect(repository.uploadSessionIds, [900]);
+      expect(repository.completionKeys, hasLength(1));
+    });
+
+    testWidgets('다른 route identity의 늦은 세션 생성 결과가 현재 stage를 덮지 않는다', (
+      tester,
+    ) async {
+      final creationA = Completer<HtpAssessmentDto>();
+      final creationB = Completer<HtpAssessmentDto>();
+      final repository = _FakeDrawingRepository(
+        sessionCreationCompleters: [creationA, creationB],
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'stage-a.png',
+            mimeType: 'image/png',
+          ),
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'stage-b.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: buildScreen(
+            repository: repository,
+            photoPickerAdapter: adapter,
+          ),
+        ),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pump();
+      expect(repository.createCalls, 1);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: buildScreen(
+            repository: repository,
+            photoPickerAdapter: adapter,
+            childId: 8,
+          ),
+        ),
+      );
+      await tester.pump();
+      creationA.complete(repository.createdAssessment(sessionId: 900));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('input-method-photo')), findsOneWidget);
+      expect(find.byKey(const ValueKey('input-method-confirm')), findsNothing);
+      expect(repository.uploadCalls, 0);
+
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pump();
+      expect(repository.createCalls, 2);
+
+      creationB.complete(repository.createdAssessment(sessionId: 901));
+      await tester.pumpAndSettle();
+      expect(repository.uploadSessionIds, [901]);
+      expect(repository.uploadImages.single.fileName, 'stage-b.png');
+    });
+
+    testWidgets('세션 생성 중 leave는 늦게 생긴 세션 삭제까지 기다리고 한 번만 pop한다', (tester) async {
+      final creation = Completer<HtpAssessmentDto>();
+      final deletion = Completer<void>();
+      final repository = _FakeDrawingRepository(
+        sessionCreationCompleters: [creation],
+        deleteGate: deletion,
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'photo.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+      var popCount = 0;
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+        onPopped: (_) => popCount += 1,
+      );
+      await selectGalleryPhoto(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pump();
+      expect(repository.createCalls, 1);
+
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(popCount, 0);
+
+      creation.complete(repository.createdAssessment());
+      await tester.pump();
+      await tester.pump();
+      expect(repository.deletedSessionIds, [900]);
+      expect(popCount, 0);
+
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(repository.createCalls, 1);
+      expect(repository.deletedSessionIds, [900]);
+      expect(popCount, 0);
+
+      deletion.complete();
+      await tester.pumpAndSettle();
+      expect(popCount, 1);
+      expect(repository.uploadCalls, 0);
+    });
+
+    testWidgets('delete settlement 동안 모든 진입을 막고 정리 뒤 한 번만 pop한다', (
+      tester,
+    ) async {
+      final deletion = Completer<void>();
+      final repository = _FakeDrawingRepository(
+        uploadFailures: const [
+          ApiTransportFailure(type: ApiTransportFailureType.connection),
+        ],
+        deleteGate: deletion,
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'photo.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+      var popCount = 0;
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+        onPopped: (_) => popCount += 1,
+      );
+      await selectGalleryPhoto(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pumpAndSettle();
+      expect(repository.createCalls, 1);
+      expect(repository.uploadCalls, 1);
+
+      await tester.tap(
+        find.byKey(const ValueKey('input-method-preview-cancel')),
+      );
+      await tester.pump();
+      expect(repository.deletedSessionIds, [900]);
+      expect(popCount, 0);
+
+      final confirmButton = tester.widget<FilledButton>(
+        find
+            .descendant(
+              of: find.byKey(const ValueKey('input-method-confirm')),
+              matching: find.byType(FilledButton),
+            )
+            .first,
+      );
+      expect(confirmButton.onPressed, isNull);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.tap(find.byKey(const ValueKey('input-method-reselect')));
+      await tester.tap(
+        find.byKey(const ValueKey('input-method-preview-cancel')),
+      );
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(repository.createCalls, 1);
+      expect(repository.uploadCalls, 1);
+      expect(repository.deletedSessionIds, [900]);
+      expect(popCount, 0);
+
+      deletion.complete();
+      await tester.pumpAndSettle();
+      expect(popCount, 1);
+    });
+
+    testWidgets('delete pending의 사진 선택 화면에서 camera·picker·back 실제 탭을 차단한다', (
+      tester,
+    ) async {
+      final deletion = Completer<void>();
+      final repository = _FakeDrawingRepository(
+        uploadFailures: const [
+          ApiTransportFailure(type: ApiTransportFailureType.connection),
+        ],
+        deleteGate: deletion,
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'photo.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+      var popCount = 0;
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+        onPopped: (_) => popCount += 1,
+      );
+      await selectGalleryPhoto(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-reselect')));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const ValueKey('input-method-cancel')));
+      await tester.pump();
+      expect(repository.deletedSessionIds, [900]);
+      expect(popCount, 0);
+
+      await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.tap(find.byKey(const ValueKey('input-method-back')));
+      await tester.tap(find.byKey(const ValueKey('input-method-cancel')));
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+
+      expect(adapter.cameraCalls, 0);
+      expect(adapter.galleryCalls, 1);
+      expect(repository.createCalls, 1);
+      expect(repository.uploadCalls, 1);
+      expect(repository.completionKeys, isEmpty);
+      expect(repository.deletedSessionIds, [900]);
+      expect(popCount, 0);
+
+      deletion.complete();
+      await tester.pumpAndSettle();
+      expect(popCount, 1);
+    });
+
+    testWidgets('route identity가 바뀐 뒤 늦은 picker A 결과를 버리고 B만 업로드한다', (
+      tester,
+    ) async {
+      final pickerA = Completer<PickedPhoto?>();
+      final pickerB = Completer<PickedPhoto?>();
+      final repository = _FakeDrawingRepository();
+      final adapter = _FakePhotoPickerAdapter(
+        galleryCompleters: [pickerA, pickerB],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: buildScreen(
+            repository: repository,
+            photoPickerAdapter: adapter,
+          ),
+        ),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pump();
+      expect(adapter.galleryCalls, 1);
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: buildScreen(
+            repository: repository,
+            photoPickerAdapter: adapter,
+            childId: 8,
+          ),
+        ),
+      );
+      await tester.pump();
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pump();
+      expect(adapter.galleryCalls, 2);
+
+      pickerA.complete(
+        PickedPhoto(
+          bytes: _tinyPngBytes,
+          fileName: 'stale-a.png',
+          mimeType: 'image/png',
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('input-method-confirm')), findsNothing);
+
+      pickerB.complete(
+        PickedPhoto(
+          bytes: _tinyPngBytes,
+          fileName: 'current-b.png',
+          mimeType: 'image/png',
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('input-method-confirm')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pumpAndSettle();
+      expect(repository.uploadImages.single.fileName, 'current-b.png');
+    });
+
+    testWidgets('route identity 변경 뒤 picker A 늦은 실패가 현재 오류·step을 덮지 않는다', (
+      tester,
+    ) async {
+      final pickerA = Completer<PickedPhoto?>();
+      final repository = _FakeDrawingRepository();
+      final adapter = _FakePhotoPickerAdapter(
+        galleryCompleters: [pickerA],
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'current-b.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: buildScreen(
+            repository: repository,
+            photoPickerAdapter: adapter,
+          ),
+        ),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pump();
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: buildScreen(
+            repository: repository,
+            photoPickerAdapter: adapter,
+            childId: 8,
+          ),
+        ),
+      );
+      await tester.pump();
+      pickerA.completeError(StateError('stale picker failure'));
+      await tester.pump();
+      await tester.pump();
+
+      expect(find.byKey(const ValueKey('input-method-photo')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('input-method-photo-error')),
+        findsNothing,
+      );
+
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(repository.uploadImages.single.fileName, 'current-b.png');
+      expect(repository.createCalls, 1);
+    });
+
+    testWidgets('dispose는 업로드를 취소하고 늦은 성공의 API·navigation을 차단한다', (
+      tester,
+    ) async {
+      final upload = Completer<DrawingUploadResponseDto>();
+      final repository = _FakeDrawingRepository(uploadCompleters: [upload]);
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'photo.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+      var popCount = 0;
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+        onPopped: (_) => popCount += 1,
+      );
+      await selectGalleryPhoto(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await waitForUpload(tester, repository, 1);
+
+      await tester.pumpWidget(const MaterialApp(home: SizedBox()));
+      await tester.pump();
+      expect(repository.cancellationSignals, 1);
+
+      upload.complete(repository._uploadResponse(900, 1));
+      await tester.pump();
+      await tester.pump();
+      expect(repository.completionKeys, isEmpty);
+      expect(popCount, 0);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('시스템 back은 업로드를 취소하고 늦은 완료에도 한 번만 pop한다', (tester) async {
+      final upload = Completer<DrawingUploadResponseDto>();
+      final repository = _FakeDrawingRepository(uploadCompleters: [upload]);
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'photo.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+      var popCount = 0;
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+        onPopped: (_) => popCount += 1,
+      );
+      await selectGalleryPhoto(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await waitForUpload(tester, repository, 1);
+
+      await tester.binding.handlePopRoute();
+      await tester.pumpAndSettle();
+      expect(repository.cancellationSignals, 1);
+      expect(repository.completionKeys, isEmpty);
+      expect(popCount, 1);
+
+      upload.complete(repository._uploadResponse(900, 1));
+      await tester.pump();
+      await tester.pump();
+      expect(repository.completionKeys, isEmpty);
+      expect(popCount, 1);
+    });
+
+    testWidgets('HTP session·stage identity 변경은 이전 전송을 취소하고 새 snapshot을 쓴다', (
+      tester,
+    ) async {
+      final uploadA = Completer<DrawingUploadResponseDto>();
+      final uploadB = Completer<DrawingUploadResponseDto>();
+      final repository = _FakeDrawingRepository(
+        uploadCompleters: [uploadA, uploadB],
+      );
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'house.png',
+            mimeType: 'image/png',
+          ),
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'tree.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+
+      Widget stageScreen(int sessionId, int step, String subject) =>
+          buildScreen(
+            repository: repository,
+            photoPickerAdapter: adapter,
+            existingDrawingSessionId: sessionId,
+            restoredActivityContext: DrawingActivityContextDto(
+              activityKind: 'HTP',
+              htpAssessmentId: 91,
+              htpStatus: 'IN_PROGRESS',
+              stepOrder: step,
+              drawingSubject: subject,
+            ),
+          );
+
+      await tester.pumpWidget(MaterialApp(home: stageScreen(901, 1, 'HOUSE')));
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await waitForUpload(tester, repository, 1);
+
+      await tester.pumpWidget(MaterialApp(home: stageScreen(902, 2, 'TREE')));
+      await tester.pump();
+      expect(repository.cancellationSignals, 1);
+      expect(
+        find.byKey(const ValueKey('input-method-gallery')),
+        findsOneWidget,
+      );
+
+      uploadA.complete(repository._uploadResponse(901, 1));
+      await tester.pump();
+      expect(repository.completionKeys, isEmpty);
+
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await waitForUpload(tester, repository, 2);
+      uploadB.complete(repository._uploadResponse(902, 2));
+      await tester.pumpAndSettle();
+
+      expect(repository.uploadSessionIds, [901, 902]);
+      expect(repository.uploadKeys.toSet(), hasLength(2));
+      expect(repository.completionMetadata.single.sourceAssetId, 2);
     });
   });
 
@@ -1060,12 +2435,14 @@ final class _FakePhotoPickerAdapter implements PhotoPickerAdapter {
   _FakePhotoPickerAdapter({
     this.cameraResults = const [],
     this.galleryResults = const [],
+    this.galleryCompleters = const [],
     this.cameraError,
     this.galleryError,
   });
 
   final List<PickedPhoto?> cameraResults;
   final List<PickedPhoto?> galleryResults;
+  final List<Completer<PickedPhoto?>> galleryCompleters;
   final Object? cameraError;
   final Object? galleryError;
   int cameraCalls = 0;
@@ -1081,10 +2458,14 @@ final class _FakePhotoPickerAdapter implements PhotoPickerAdapter {
 
   @override
   Future<PickedPhoto?> pickFromGallery() async {
+    final index = galleryCalls;
     galleryCalls += 1;
     final error = galleryError;
     if (error != null) throw error;
-    return galleryResults[galleryCalls - 1];
+    if (index < galleryCompleters.length) {
+      return galleryCompleters[index].future;
+    }
+    return galleryResults[index - galleryCompleters.length];
   }
 }
 
@@ -1092,10 +2473,12 @@ final class _FakePhotoPermissionService implements PhotoPermissionService {
   _FakePhotoPermissionService({
     this.permissionStatus = PhotoPermissionStatus.denied,
     this.openSettingsResult = true,
+    this.openSettingsCompleter,
   });
 
   final PhotoPermissionStatus permissionStatus;
   final bool openSettingsResult;
+  final Completer<bool>? openSettingsCompleter;
   int openSettingsCalls = 0;
 
   @override
@@ -1105,13 +2488,13 @@ final class _FakePhotoPermissionService implements PhotoPermissionService {
   @override
   Future<bool> openSettings() async {
     openSettingsCalls += 1;
-    return openSettingsResult;
+    return openSettingsCompleter?.future ?? openSettingsResult;
   }
 }
 
 final class _FakeDrawingRepository
     implements
-        DrawingUploadProgressRepository,
+        CancellableDrawingUploadRepository,
         HtpDrawingRepository,
         UploadedDrawingCompletionRepository,
         DrawingSessionDiscarder {
@@ -1119,7 +2502,13 @@ final class _FakeDrawingRepository
     List<bool>? createFailures,
     this.uploadFailures = const [],
     this.uploadGate,
+    this.uploadCompleters = const [],
+    this.sessionCreationCompleters = const [],
+    this.nextStepCompleters = const [],
     this.uploadProgressEvents = const [],
+    this.completionFailures = const [],
+    this.completionCompleters = const [],
+    this.deleteGate,
     this.getSessionCurrentStage = 'DRAWING',
   }) : createFailures = createFailures ?? const [];
 
@@ -1128,7 +2517,13 @@ final class _FakeDrawingRepository
   final List<bool> createFailures;
   final List<Object?> uploadFailures;
   final Completer<void>? uploadGate;
+  final List<Completer<DrawingUploadResponseDto>> uploadCompleters;
+  final List<Completer<HtpAssessmentDto>> sessionCreationCompleters;
+  final List<Completer<HtpAssessmentDto>> nextStepCompleters;
   final List<(int sent, int total)> uploadProgressEvents;
+  final List<Object?> completionFailures;
+  final List<Completer<DrawingStageCompleteResponseDto>> completionCompleters;
+  final Completer<void>? deleteGate;
   final String getSessionCurrentStage;
 
   int createCalls = 0;
@@ -1136,10 +2531,19 @@ final class _FakeDrawingRepository
   int getSessionCalls = 0;
   int nextStepCalls = 0;
   final List<int> deletedSessionIds = [];
+  final List<int> nextStepAssessmentIds = [];
   final List<String> nextStepKeys = [];
   final List<String> nextStepInputMethods = [];
   final List<String> uploadKeys = [];
   final List<String> completionKeys = [];
+  final List<int> uploadSessionIds = [];
+  final List<BinaryUploadDto> uploadImages = [];
+  final List<UploadDrawingImageMetadataDto> uploadMetadata = [];
+  final List<DrawingCompleteMetadataDto> completionMetadata = [];
+  final List<DrawingUploadCancellation> uploadCancellations = [];
+  final List<DrawingUploadProgressCallback?> uploadProgressCallbacks = [];
+  final Map<String, int> _assetIdsByUploadKey = {};
+  int cancellationSignals = 0;
   CreateDrawingSessionRequestDto? createRequest;
   StartHtpAssessmentRequestDto? startHtpRequest;
 
@@ -1154,51 +2558,66 @@ final class _FakeDrawingRepository
   }) async {
     final index = nextStepCalls;
     nextStepCalls += 1;
+    nextStepAssessmentIds.add(assessmentId);
     nextStepKeys.add(idempotencyKey);
     nextStepInputMethods.add(inputMethod);
     if (index < nextStepFailures.length && nextStepFailures[index]) {
       throw const ApiTransportFailure(type: ApiTransportFailureType.connection);
     }
-    return HtpAssessmentDto(
-      htpAssessmentId: assessmentId,
-      status: 'IN_PROGRESS',
-      expiresAt: '2026-07-30T01:00:00Z',
-      currentStep: const HtpAssessmentStepDto(
-        stepOrder: 2,
-        drawingSubject: 'TREE',
-        drawingSessionId: 902,
-        sessionStatus: 'IN_PROGRESS',
-        currentStage: 'DRAWING',
-      ),
-      allStepsCompleted: false,
-    );
+    if (index < nextStepCompleters.length) {
+      return nextStepCompleters[index].future;
+    }
+    return nextStepAssessment(assessmentId: assessmentId, sessionId: 902);
   }
+
+  HtpAssessmentDto nextStepAssessment({
+    required int assessmentId,
+    required int sessionId,
+  }) => HtpAssessmentDto(
+    htpAssessmentId: assessmentId,
+    status: 'IN_PROGRESS',
+    expiresAt: '2026-07-30T01:00:00Z',
+    currentStep: HtpAssessmentStepDto(
+      stepOrder: 2,
+      drawingSubject: 'TREE',
+      drawingSessionId: sessionId,
+      sessionStatus: 'IN_PROGRESS',
+      currentStage: 'DRAWING',
+    ),
+    allStepsCompleted: false,
+  );
 
   @override
   Future<HtpAssessmentDto> startHtpAssessment(
     StartHtpAssessmentRequestDto request,
   ) async {
+    final index = createCalls;
     startHtpRequest = request;
-    final shouldFail =
-        createCalls < createFailures.length && createFailures[createCalls];
+    final shouldFail = index < createFailures.length && createFailures[index];
     createCalls += 1;
     if (shouldFail) {
       throw const ApiTransportFailure(type: ApiTransportFailureType.connection);
     }
-    return const HtpAssessmentDto(
-      htpAssessmentId: 91,
-      status: 'IN_PROGRESS',
-      expiresAt: '2026-07-30T01:00:00Z',
-      currentStep: HtpAssessmentStepDto(
-        stepOrder: 1,
-        drawingSubject: 'HOUSE',
-        drawingSessionId: createdSessionId,
-        sessionStatus: 'IN_PROGRESS',
-        currentStage: 'DRAWING',
-      ),
-      allStepsCompleted: false,
-    );
+    if (index < sessionCreationCompleters.length) {
+      return sessionCreationCompleters[index].future;
+    }
+    return createdAssessment();
   }
+
+  HtpAssessmentDto createdAssessment({int sessionId = createdSessionId}) =>
+      HtpAssessmentDto(
+        htpAssessmentId: 91,
+        status: 'IN_PROGRESS',
+        expiresAt: '2026-07-30T01:00:00Z',
+        currentStep: HtpAssessmentStepDto(
+          stepOrder: 1,
+          drawingSubject: 'HOUSE',
+          drawingSessionId: sessionId,
+          sessionStatus: 'IN_PROGRESS',
+          currentStage: 'DRAWING',
+        ),
+        allStepsCompleted: false,
+      );
 
   @override
   Future<ApiPage<DrawingTypeDto>> getDrawingTypes({
@@ -1266,10 +2685,21 @@ final class _FakeDrawingRepository
     required UploadDrawingImageMetadataDto metadata,
     required String idempotencyKey,
     DrawingUploadProgressCallback? onProgress,
+    DrawingUploadCancellation? cancellation,
   }) async {
     final index = uploadCalls;
     uploadCalls += 1;
+    uploadSessionIds.add(sessionId);
+    uploadImages.add(image);
+    uploadMetadata.add(metadata);
     uploadKeys.add(idempotencyKey);
+    uploadProgressCallbacks.add(onProgress);
+    if (cancellation != null) {
+      uploadCancellations.add(cancellation);
+      unawaited(
+        cancellation.whenCancelled.then((_) => cancellationSignals += 1),
+      );
+    }
     if (index < uploadFailures.length) {
       final failure = uploadFailures[index];
       if (failure != null) throw failure;
@@ -1278,13 +2708,27 @@ final class _FakeDrawingRepository
       onProgress?.call(event.$1, event.$2);
     }
     await uploadGate?.future;
+    if (index < uploadCompleters.length) {
+      return uploadCompleters[index].future;
+    }
+    return _uploadResponse(
+      sessionId,
+      _assetIdsByUploadKey.putIfAbsent(idempotencyKey, () => index + 1),
+    );
+  }
+
+  void emitUploadProgress(int attempt, int sent, int total) {
+    uploadProgressCallbacks[attempt]?.call(sent, total);
+  }
+
+  DrawingUploadResponseDto _uploadResponse(int sessionId, int assetId) {
     return DrawingUploadResponseDto.fromJson({
       'drawingSessionId': sessionId,
-      'drawingAssetId': 1,
+      'drawingAssetId': assetId,
       'assetType': 'UPLOADED',
       'drawingSubject': 'HOUSE',
       'currentStage': 'DRAWING',
-      'previewUrl': '/api/v1/drawing-assets/1/file',
+      'previewUrl': '/api/v1/drawing-assets/$assetId/file',
       'mimeType': 'image/png',
       'fileSizeBytes': 100,
       'widthPx': 100,
@@ -1301,20 +2745,34 @@ final class _FakeDrawingRepository
     required DrawingCompleteMetadataDto metadata,
     required String idempotencyKey,
   }) async {
+    final index = completionKeys.length;
     completionKeys.add(idempotencyKey);
-    return DrawingStageCompleteResponseDto.fromJson({
-      'drawingSessionId': sessionId,
-      'finalAssetId': metadata.sourceAssetId,
-      'sessionStatus': 'IN_PROGRESS',
-      'currentStage': 'CONVERSING',
-      'analysis': {
-        'analysisId': 10,
-        'analysisType': 'OBJECT_DETECTION',
-        'status': 'SUCCEEDED',
-      },
-      'nextAction': 'SELECT_EMOTION',
-    });
+    completionMetadata.add(metadata);
+    if (index < completionFailures.length) {
+      final failure = completionFailures[index];
+      if (failure != null) throw failure;
+    }
+    if (index < completionCompleters.length) {
+      return completionCompleters[index].future;
+    }
+    return completionResponse(sessionId, metadata.sourceAssetId!);
   }
+
+  DrawingStageCompleteResponseDto completionResponse(
+    int sessionId,
+    int assetId,
+  ) => DrawingStageCompleteResponseDto.fromJson({
+    'drawingSessionId': sessionId,
+    'finalAssetId': assetId,
+    'sessionStatus': 'IN_PROGRESS',
+    'currentStage': 'CONVERSING',
+    'analysis': {
+      'analysisId': 10,
+      'analysisType': 'OBJECT_DETECTION',
+      'status': 'SUCCEEDED',
+    },
+    'nextAction': 'SELECT_EMOTION',
+  });
 
   @override
   Future<DrawingSessionDto> getSession(int sessionId) async {
@@ -1342,6 +2800,7 @@ final class _FakeDrawingRepository
   @override
   Future<void> deleteSession(int sessionId) async {
     deletedSessionIds.add(sessionId);
+    await deleteGate?.future;
   }
 
   @override

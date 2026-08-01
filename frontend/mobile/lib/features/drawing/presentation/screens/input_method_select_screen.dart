@@ -17,6 +17,52 @@ import '../../domain/repositories/drawing_repository.dart';
 
 enum _Step { methodChoice, photoSource, preview }
 
+enum _InputPhase {
+  idle,
+  picking,
+  creatingSession,
+  uploading,
+  completing,
+  leaving,
+  disposed,
+}
+
+final class _DrawingUploadSnapshot {
+  const _DrawingUploadSnapshot({
+    required this.source,
+    required this.sessionId,
+    required this.routeIdentity,
+    required this.image,
+    required this.uploadMetadata,
+    required this.drawingDurationMs,
+    required this.clientCompletedAt,
+    required this.uploadIdempotencyKey,
+    required this.completionIdempotencyKey,
+  });
+
+  final ValidatedPhoto source;
+  final int sessionId;
+  final String routeIdentity;
+  final BinaryUploadDto image;
+  final UploadDrawingImageMetadataDto uploadMetadata;
+  final int drawingDurationMs;
+  final String clientCompletedAt;
+  final String uploadIdempotencyKey;
+  final String completionIdempotencyKey;
+}
+
+final class _DrawingUploadAttempt {
+  const _DrawingUploadAttempt({
+    required this.generation,
+    required this.snapshot,
+    required this.cancellation,
+  });
+
+  final int generation;
+  final _DrawingUploadSnapshot snapshot;
+  final DrawingUploadCancellation cancellation;
+}
+
 String _createIdempotencyKey() {
   final random = Random.secure();
   final bytes = List<int>.generate(16, (_) => random.nextInt(256));
@@ -110,9 +156,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
 
   late _Step _step;
 
-  /// 세션 생성·업로드 등 되돌릴 수 없는 요청이 진행 중일 때만 켜진다.
-  /// 켜져 있는 동안 모든 선택 버튼을 잠가 중복 탭·중복 세션 생성을 막는다.
-  bool _busy = false;
+  _InputPhase _phase = _InputPhase.idle;
   bool _canvasError = false;
   DrawingUploadErrorPresentation? _photoPickError;
   _PhotoPermissionIssue? _photoPermissionIssue;
@@ -126,15 +170,28 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
   /// 미리 채워져 있어 새 세션을 만들지 않는다.
   int? _sessionId;
   DrawingSessionResolution? _sessionResolution;
-  String? _uploadIdempotencyKey;
-  String? _completionIdempotencyKey;
+  _DrawingUploadSnapshot? _pendingUploadSnapshot;
+  _DrawingUploadAttempt? _activeUploadAttempt;
+  int _uploadGeneration = 0;
+  int _pickerGeneration = 0;
+  bool _isLeaving = false;
+  bool _preUploadCancelRequested = false;
+  Future<DrawingSessionResolution>? _sessionCreationFuture;
+  String? _sessionCreationIdentity;
+  Future<DrawingStageCompleteResponseDto>? _completionSettlement;
+  int _permissionSettingsOperation = 0;
   String? _advanceIdempotencyKey;
-  String? _advanceInputMethod;
+  String? _advanceRequestIdentity;
   late final DateTime _flowStartedAt = widget.now?.call() ?? DateTime.now();
 
   /// 이 화면이 새 세션을 만들었는지(복원 모드가 아니면 참). 복원한 세션은
   /// 취소해도 삭제하지 않는다.
   bool get _ownsSession => widget.existingDrawingSessionId == null;
+
+  bool get _busy => _phase != _InputPhase.idle;
+
+  bool get _canStartAction =>
+      mounted && !_isLeaving && _phase == _InputPhase.idle;
 
   @override
   void initState() {
@@ -151,36 +208,128 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
             const DrawingActivityContextDto.general(),
         inputMethod: 'UPLOAD',
       );
-      final now = widget.now?.call() ?? DateTime.now();
-      _uploadIdempotencyKey =
-          'htp-upload-$existingSessionId-${now.microsecondsSinceEpoch}';
-      _completionIdempotencyKey =
-          'htp-complete-$existingSessionId-${now.microsecondsSinceEpoch}';
     } else {
       _step = _Step.methodChoice;
     }
   }
 
+  @override
+  void didUpdateWidget(covariant InputMethodSelectScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final oldContext = oldWidget.restoredActivityContext;
+    final newContext = widget.restoredActivityContext;
+    final identityChanged =
+        oldWidget.childId != widget.childId ||
+        oldWidget.drawingTypeId != widget.drawingTypeId ||
+        oldWidget.htpAssessmentId != widget.htpAssessmentId ||
+        oldWidget.existingDrawingSessionId != widget.existingDrawingSessionId ||
+        oldContext?.htpAssessmentId != newContext?.htpAssessmentId ||
+        oldContext?.stepOrder != newContext?.stepOrder ||
+        oldContext?.drawingSubject != newContext?.drawingSubject;
+    if (identityChanged) {
+      final pendingCompletion = _completionSettlement;
+      final newRouteIdentity = _routeInputIdentity;
+      _invalidateUpload(clearSnapshot: true);
+      _invalidatePicker();
+      _sessionCreationFuture = null;
+      _sessionCreationIdentity = null;
+      _advanceIdempotencyKey = null;
+      _advanceRequestIdentity = null;
+      _phase = pendingCompletion == null
+          ? _InputPhase.idle
+          : _InputPhase.completing;
+      _canvasError = false;
+      _photoPickError = null;
+      _photoPermissionIssue = null;
+      _validated = null;
+      _uploadError = null;
+      _uploadProgressPercent = null;
+      final existingSessionId = widget.existingDrawingSessionId;
+      if (existingSessionId == null) {
+        _step = _Step.methodChoice;
+        _sessionId = null;
+        _sessionResolution = null;
+      } else {
+        _step = _Step.photoSource;
+        _sessionId = existingSessionId;
+        _sessionResolution = DrawingSessionResolution(
+          sessionId: existingSessionId,
+          currentStage: 'DRAWING',
+          activityContext:
+              widget.restoredActivityContext ??
+              const DrawingActivityContextDto.general(),
+          inputMethod: 'UPLOAD',
+        );
+      }
+      if (pendingCompletion != null) {
+        unawaited(
+          _releaseCompletionAfterIdentityChange(
+            pendingCompletion,
+            newRouteIdentity,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _releaseCompletionAfterIdentityChange(
+    Future<DrawingStageCompleteResponseDto> completion,
+    String routeIdentity,
+  ) async {
+    try {
+      await completion;
+    } on Object {
+      // 이전 identity의 결과는 성공·실패와 무관하게 현재 화면에 표시하지 않는다.
+    }
+    if (!mounted ||
+        _isLeaving ||
+        _phase != _InputPhase.completing ||
+        routeIdentity != _routeInputIdentity) {
+      return;
+    }
+    setState(() => _phase = _InputPhase.idle);
+  }
+
+  @override
+  void dispose() {
+    _isLeaving = true;
+    _phase = _InputPhase.disposed;
+    _invalidatePicker();
+    _sessionCreationIdentity = null;
+    _invalidateUpload(clearSnapshot: false);
+    super.dispose();
+  }
+
   Future<void> _handleCanvasChoice() async {
-    if (_busy) return;
+    if (!_canStartAction) return;
+    final routeIdentity = _routeInputIdentity;
     setState(() {
-      _busy = true;
+      _phase = _InputPhase.creatingSession;
       _canvasError = false;
     });
     try {
       final resolution = await _createHtpResolution('CANVAS');
-      if (!mounted) return;
+      if (!mounted || !_isCanvasChoiceCurrent(routeIdentity)) return;
       Navigator.of(context).pop(resolution);
     } on Object {
-      if (!mounted) return;
+      if (!_isCanvasChoiceCurrent(routeIdentity)) return;
       setState(() => _canvasError = true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (_isCanvasChoiceCurrent(routeIdentity)) {
+        setState(() => _phase = _InputPhase.idle);
+      }
     }
   }
 
+  bool _isCanvasChoiceCurrent(String routeIdentity) =>
+      mounted &&
+      !_isLeaving &&
+      _phase == _InputPhase.creatingSession &&
+      routeIdentity == _routeInputIdentity;
+
   void _choosePhotoMethod() {
-    if (_busy) return;
+    if (!_canStartAction) return;
+    _invalidateUpload(clearSnapshot: true);
     setState(() {
       _step = _Step.photoSource;
       _photoPickError = null;
@@ -189,7 +338,8 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
   }
 
   void _backToMethodChoice() {
-    if (_busy) return;
+    if (!_canStartAction) return;
+    _invalidateUpload(clearSnapshot: true);
     setState(() {
       _step = _Step.methodChoice;
       _photoPickError = null;
@@ -201,44 +351,47 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     Future<PickedPhoto?> Function() pick, {
     required PhotoPermissionKind permissionKind,
   }) async {
-    if (_busy) return;
+    if (!_canStartAction) return;
+    _invalidateUpload(clearSnapshot: true);
+    final pickerGeneration = ++_pickerGeneration;
+    final pickerIdentity = _routeInputIdentity;
     setState(() {
-      _busy = true;
+      _phase = _InputPhase.picking;
       _photoPickError = null;
       _photoPermissionIssue = null;
     });
     try {
       final photo = await pick();
-      if (!mounted) return;
+      if (!_isPickerCurrent(pickerGeneration, pickerIdentity)) return;
       if (photo == null) {
         // 시스템 picker를 사용자가 취소한 것 — 오류가 아니라 이 화면에
         // 그대로 남는다.
-        setState(() => _busy = false);
+        setState(() => _phase = _InputPhase.idle);
         return;
       }
       final result = await validatePickedPhoto(
         photo,
         dimensionReader: widget.dimensionReader,
       );
-      if (!mounted) return;
+      if (!_isPickerCurrent(pickerGeneration, pickerIdentity)) return;
       switch (result) {
         case PhotoValidationOk(:final validated):
           setState(() {
             _validated = validated;
             _uploadError = null;
             _step = _Step.preview;
-            _busy = false;
+            _phase = _InputPhase.idle;
           });
         case PhotoValidationFailed(:final type):
           setState(() {
             _photoPickError = presentationForValidationError(type);
-            _busy = false;
+            _phase = _InputPhase.idle;
           });
       }
     } on PlatformException catch (error) {
-      if (!mounted) return;
+      if (!_isPickerCurrent(pickerGeneration, pickerIdentity)) return;
       final permissionIssue = await _permissionIssue(error, permissionKind);
-      if (!mounted) return;
+      if (!_isPickerCurrent(pickerGeneration, pickerIdentity)) return;
       setState(() {
         if (permissionIssue != null) {
           _photoPermissionIssue = permissionIssue;
@@ -247,15 +400,15 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
             PhotoValidationErrorType.undecodable,
           );
         }
-        _busy = false;
+        _phase = _InputPhase.idle;
       });
     } on Object {
-      if (!mounted) return;
+      if (!_isPickerCurrent(pickerGeneration, pickerIdentity)) return;
       setState(() {
         _photoPickError = presentationForValidationError(
           PhotoValidationErrorType.undecodable,
         );
-        _busy = false;
+        _phase = _InputPhase.idle;
       });
     }
   }
@@ -276,8 +429,31 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
   }
 
   Future<void> _openPermissionSettings(PhotoPermissionKind kind) async {
-    final opened = await widget.photoPermissionService.openSettings();
-    if (!mounted || opened) return;
+    if (!_canStartAction) return;
+    final operation = ++_permissionSettingsOperation;
+    final pickerGeneration = _pickerGeneration;
+    final routeIdentity = _routeInputIdentity;
+    final phase = _phase;
+    final wasLeaving = _isLeaving;
+    final permissionIssue = _photoPermissionIssue;
+    var opened = false;
+    try {
+      opened = await widget.photoPermissionService.openSettings();
+    } on Object {
+      // 현재 operation이면 아래에서 같은 복구 안내를 표시하고, stale이면 버린다.
+    }
+    if (!mounted ||
+        !_isPermissionSettingsCurrent(
+          operation: operation,
+          pickerGeneration: pickerGeneration,
+          routeIdentity: routeIdentity,
+          phase: phase,
+          wasLeaving: wasLeaving,
+          permissionIssue: permissionIssue,
+        ) ||
+        opened) {
+      return;
+    }
     final target = kind == PhotoPermissionKind.camera ? '카메라' : '사진';
     showAppMessage(
       context,
@@ -286,8 +462,29 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     );
   }
 
+  bool _isPermissionSettingsCurrent({
+    required int operation,
+    required int pickerGeneration,
+    required String routeIdentity,
+    required _InputPhase phase,
+    required bool wasLeaving,
+    required _PhotoPermissionIssue? permissionIssue,
+  }) =>
+      mounted &&
+      !wasLeaving &&
+      !_isLeaving &&
+      phase == _InputPhase.idle &&
+      _phase == phase &&
+      _step == _Step.photoSource &&
+      operation == _permissionSettingsOperation &&
+      pickerGeneration == _pickerGeneration &&
+      routeIdentity == _routeInputIdentity &&
+      identical(permissionIssue, _photoPermissionIssue);
+
   void _reselectPhoto() {
-    if (_busy) return;
+    if (!_canStartAction) return;
+    _invalidatePicker();
+    _invalidateUpload(clearSnapshot: true);
     setState(() {
       _validated = null;
       _uploadError = null;
@@ -296,81 +493,176 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     });
   }
 
+  String get _routeInputIdentity {
+    final activityContext = widget.restoredActivityContext;
+    return '${widget.childId}|${widget.drawingTypeId}|'
+        '${widget.htpAssessmentId}|${widget.existingDrawingSessionId}|'
+        '${activityContext?.htpAssessmentId}|${activityContext?.stepOrder}|'
+        '${activityContext?.drawingSubject}|UPLOAD';
+  }
+
+  void _invalidatePicker() {
+    _pickerGeneration += 1;
+  }
+
+  bool _isPickerCurrent(int generation, String routeIdentity) =>
+      mounted &&
+      !_isLeaving &&
+      _phase == _InputPhase.picking &&
+      generation == _pickerGeneration &&
+      routeIdentity == _routeInputIdentity;
+
+  Future<DrawingSessionResolution> _resolveUploadSession() {
+    final resolution = _sessionResolution;
+    if (_sessionId != null && resolution != null) {
+      return Future.value(resolution);
+    }
+
+    final routeIdentity = _routeInputIdentity;
+    final pending = _sessionCreationFuture;
+    if (pending != null && _sessionCreationIdentity == routeIdentity) {
+      return pending;
+    }
+
+    late final Future<DrawingSessionResolution> future;
+    future = () async {
+      try {
+        final created = await _createHtpResolution('UPLOAD');
+        if (_sessionCreationIdentity == routeIdentity &&
+            _routeInputIdentity == routeIdentity) {
+          _sessionId = created.sessionId;
+          _sessionResolution = created;
+        }
+        return created;
+      } finally {
+        if (identical(_sessionCreationFuture, future)) {
+          _sessionCreationFuture = null;
+          _sessionCreationIdentity = null;
+        }
+      }
+    }();
+    _sessionCreationIdentity = routeIdentity;
+    _sessionCreationFuture = future;
+    return future;
+  }
+
   Future<void> _confirmAndUpload() async {
-    if (_busy) return;
+    if (!_canStartAction) return;
+    if (_uploadError case final error? when !error.canRetry) return;
     final validated = _validated;
     if (validated == null) return;
+    final generation = ++_uploadGeneration;
+    DrawingUploadEndpoint endpoint = DrawingUploadEndpoint.upload;
+    _DrawingUploadAttempt? attempt;
+    Future<DrawingStageCompleteResponseDto>? completionFuture;
     setState(() {
-      _busy = true;
+      _phase = _InputPhase.creatingSession;
+      _preUploadCancelRequested = false;
       _uploadError = null;
-      _uploadProgressPercent = 0;
+      _uploadProgressPercent = null;
     });
     try {
-      var sessionId = _sessionId;
-      if (sessionId == null) {
+      final resolution = await _resolveUploadSession();
+      if (!_isOperationCurrent(generation) || _preUploadCancelRequested) return;
+      final sessionId = resolution.sessionId;
+
+      var snapshot = _pendingUploadSnapshot;
+      final routeIdentity = _uploadRouteIdentity(sessionId);
+      if (snapshot == null ||
+          !identical(snapshot.source, validated) ||
+          snapshot.sessionId != sessionId ||
+          snapshot.routeIdentity != routeIdentity) {
         final now = widget.now?.call() ?? DateTime.now();
-        final resolution = await _createHtpResolution('UPLOAD');
-        sessionId = resolution.sessionId;
-        if (!mounted) return;
-        setState(() {
-          _sessionId = sessionId;
-          _sessionResolution = resolution;
-          _uploadIdempotencyKey =
-              'htp-upload-$sessionId-${now.microsecondsSinceEpoch}';
-          _completionIdempotencyKey =
-              'htp-complete-$sessionId-${now.microsecondsSinceEpoch}';
-        });
+        snapshot = _DrawingUploadSnapshot(
+          source: validated,
+          sessionId: sessionId,
+          routeIdentity: routeIdentity,
+          image: BinaryUploadDto(
+            bytes: List<int>.unmodifiable(validated.photo.bytes),
+            fileName: validated.photo.fileName,
+            mimeType: validated.mimeType,
+          ),
+          uploadMetadata: UploadDrawingImageMetadataDto(
+            clientCapturedAt: now.toUtc().toIso8601String(),
+            rotationDegrees: 0,
+            cropApplied: false,
+          ),
+          drawingDurationMs: now
+              .difference(_flowStartedAt)
+              .inMilliseconds
+              .clamp(1, 1 << 31),
+          clientCompletedAt: now.toUtc().toIso8601String(),
+          uploadIdempotencyKey: _createIdempotencyKey(),
+          completionIdempotencyKey: _createIdempotencyKey(),
+        );
+        _pendingUploadSnapshot = snapshot;
       }
 
-      final image = BinaryUploadDto(
-        bytes: validated.photo.bytes,
-        fileName: validated.photo.fileName,
-        mimeType: validated.mimeType,
+      attempt = _DrawingUploadAttempt(
+        generation: generation,
+        snapshot: snapshot,
+        cancellation: DrawingUploadCancellation(),
       );
-      final metadata = UploadDrawingImageMetadataDto(
-        clientCapturedAt: (widget.now?.call() ?? DateTime.now())
-            .toUtc()
-            .toIso8601String(),
-        rotationDegrees: 0,
-        cropApplied: false,
-      );
+      _activeUploadAttempt = attempt;
+      setState(() {
+        _phase = _InputPhase.uploading;
+        _uploadProgressPercent = 0;
+      });
       final repository = widget.repository;
-      final uploaded = repository is DrawingUploadProgressRepository
+      final uploaded = repository is CancellableDrawingUploadRepository
           ? await repository.uploadDrawing(
               sessionId,
-              image,
-              metadata: metadata,
-              idempotencyKey: _uploadIdempotencyKey!,
-              onProgress: _handleUploadProgress,
+              snapshot.image,
+              metadata: snapshot.uploadMetadata,
+              idempotencyKey: snapshot.uploadIdempotencyKey,
+              cancellation: attempt.cancellation,
+              onProgress: (sent, total) =>
+                  _handleUploadProgress(attempt!, sent, total),
+            )
+          : repository is DrawingUploadProgressRepository
+          ? await repository.uploadDrawing(
+              sessionId,
+              snapshot.image,
+              metadata: snapshot.uploadMetadata,
+              idempotencyKey: snapshot.uploadIdempotencyKey,
+              onProgress: (sent, total) =>
+                  _handleUploadProgress(attempt!, sent, total),
             )
           : await repository.uploadDrawing(
               sessionId,
-              image,
-              metadata: metadata,
-              idempotencyKey: _uploadIdempotencyKey!,
+              snapshot.image,
+              metadata: snapshot.uploadMetadata,
+              idempotencyKey: snapshot.uploadIdempotencyKey,
             );
+      if (!_isAttemptCurrent(attempt)) return;
 
       if (widget.repository is! UploadedDrawingCompletionRepository) {
         throw UnsupportedError('Uploaded drawing completion is unavailable.');
       }
-      final completed =
-          await (widget.repository as UploadedDrawingCompletionRepository)
+      endpoint = DrawingUploadEndpoint.completion;
+      setState(() {
+        _phase = _InputPhase.completing;
+        _uploadProgressPercent = null;
+      });
+      completionFuture =
+          (widget.repository as UploadedDrawingCompletionRepository)
               .completeUploadedDrawingStage(
                 sessionId,
                 metadata: DrawingCompleteMetadataDto(
                   sourceAssetId: uploaded.drawingAssetId,
-                  drawingDurationMs: (widget.now?.call() ?? DateTime.now())
-                      .difference(_flowStartedAt)
-                      .inMilliseconds
-                      .clamp(1, 1 << 31),
-                  clientCompletedAt: (widget.now?.call() ?? DateTime.now())
-                      .toUtc()
-                      .toIso8601String(),
+                  drawingDurationMs: snapshot.drawingDurationMs,
+                  clientCompletedAt: snapshot.clientCompletedAt,
                 ),
-                idempotencyKey: _completionIdempotencyKey!,
+                idempotencyKey: snapshot.completionIdempotencyKey,
               );
+      _completionSettlement = completionFuture;
+      final completed = await completionFuture;
+      if (!_isAttemptCurrent(attempt)) return;
       if (!mounted) return;
       final initial = _sessionResolution!;
+      _activeUploadAttempt = null;
+      _isLeaving = true;
+      _phase = _InputPhase.leaving;
       Navigator.of(context).pop(
         DrawingSessionResolution(
           sessionId: completed.drawingSessionId,
@@ -380,25 +672,146 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
         ),
       );
     } on Object catch (error) {
-      if (!mounted) return;
+      final stillCurrent = attempt == null
+          ? _isOperationCurrent(generation)
+          : _isAttemptCurrent(attempt);
+      if (!stillCurrent) return;
+      if (attempt == null && _preUploadCancelRequested) return;
+      _activeUploadAttempt = null;
+      if (isDrawingUploadCancelled(error)) {
+        setState(() {
+          _phase = _InputPhase.idle;
+          _uploadError = null;
+          _uploadProgressPercent = null;
+        });
+        return;
+      }
       setState(() {
-        _uploadError = DrawingUploadErrorPresentation.of(error);
+        _phase = _InputPhase.idle;
+        _uploadError = DrawingUploadErrorPresentation.of(
+          error,
+          endpoint: endpoint,
+        );
         _uploadProgressPercent = null;
       });
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (identical(_completionSettlement, completionFuture)) {
+        _completionSettlement = null;
+      }
+      if (identical(_activeUploadAttempt, attempt)) {
+        _activeUploadAttempt = null;
+      }
+      if (_isOperationCurrent(generation) &&
+          _phase != _InputPhase.idle &&
+          _phase != _InputPhase.leaving) {
+        setState(() => _phase = _InputPhase.idle);
+      }
     }
   }
 
-  void _handleUploadProgress(int sent, int total) {
-    if (!mounted || !_busy || total <= 0) return;
+  void _handleUploadProgress(
+    _DrawingUploadAttempt attempt,
+    int sent,
+    int total,
+  ) {
+    if (!_isAttemptCurrent(attempt) ||
+        _phase != _InputPhase.uploading ||
+        total <= 0) {
+      return;
+    }
     final percent = ((sent / total) * 100).floor().clamp(0, 100);
     if (_uploadProgressPercent == percent) return;
     setState(() => _uploadProgressPercent = percent);
   }
 
-  Future<void> _cancel() async {
-    if (_busy) return;
+  bool _isOperationCurrent(int generation) =>
+      mounted && !_isLeaving && generation == _uploadGeneration;
+
+  bool _isAttemptCurrent(_DrawingUploadAttempt? attempt) =>
+      attempt != null &&
+      _isOperationCurrent(attempt.generation) &&
+      identical(_activeUploadAttempt, attempt) &&
+      !attempt.cancellation.isCancelled &&
+      attempt.snapshot.routeIdentity ==
+          _uploadRouteIdentity(attempt.snapshot.sessionId);
+
+  String _uploadRouteIdentity(int sessionId) {
+    final context = _sessionResolution?.activityContext;
+    return '${widget.childId}|${widget.drawingTypeId}|$sessionId|'
+        '${widget.htpAssessmentId ?? context?.htpAssessmentId}|'
+        '${context?.stepOrder}|${context?.drawingSubject}|UPLOAD';
+  }
+
+  void _invalidateUpload({required bool clearSnapshot}) {
+    _uploadGeneration += 1;
+    final attempt = _activeUploadAttempt;
+    _activeUploadAttempt = null;
+    attempt?.cancellation.cancel();
+    if (clearSnapshot) _pendingUploadSnapshot = null;
+  }
+
+  void _cancelUpload() {
+    if (_phase != _InputPhase.uploading) return;
+    final attempt = _activeUploadAttempt;
+    if (attempt == null || attempt.cancellation.isCancelled) return;
+    attempt.cancellation.cancel();
+    setState(() {
+      _uploadError = null;
+      _uploadProgressPercent = null;
+    });
+  }
+
+  void _cancelPreparation() {
+    if (_phase != _InputPhase.creatingSession || _preUploadCancelRequested) {
+      return;
+    }
+    setState(() => _preUploadCancelRequested = true);
+  }
+
+  Future<void> _leave() async {
+    if (_isLeaving) return;
+    final phaseAtLeave = _phase;
+    final pendingCompletion = _completionSettlement;
+    final pendingSessionCreation = _sessionCreationFuture;
+    _isLeaving = true;
+    _invalidatePicker();
+    if (phaseAtLeave == _InputPhase.completing) {
+      _uploadGeneration += 1;
+      _activeUploadAttempt = null;
+    } else {
+      _invalidateUpload(clearSnapshot: false);
+    }
+    setState(() => _phase = _InputPhase.leaving);
+
+    if (pendingCompletion != null) {
+      try {
+        final completed = await pendingCompletion;
+        if (!mounted) return;
+        final initial = _sessionResolution;
+        if (initial != null) {
+          Navigator.of(context).pop(
+            DrawingSessionResolution(
+              sessionId: completed.drawingSessionId,
+              currentStage: completed.currentStage,
+              activityContext: initial.activityContext,
+              inputMethod: 'UPLOAD',
+            ),
+          );
+          return;
+        }
+      } on Object {
+        // 완료가 실패하면 아래에서 이 화면이 만든 미완료 세션을 정리한다.
+      }
+    }
+
+    if (pendingSessionCreation != null) {
+      try {
+        await pendingSessionCreation;
+      } on Object {
+        // 생성 실패라면 정리할 세션이 없으므로 그대로 이탈한다.
+      }
+    }
+
     final sessionId = _sessionId;
     if (_ownsSession &&
         sessionId != null &&
@@ -429,19 +842,21 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     if (widget.repository is! HtpDrawingRepository) {
       throw UnsupportedError('HTP activity is unavailable.');
     }
-    // 같은 방식 재시도는 같은 Key를, 다른 방식으로 바꾸면 새 Key를 쓴다.
-    if (_advanceInputMethod != inputMethod) {
-      _advanceInputMethod = inputMethod;
+    final repository = widget.repository as HtpDrawingRepository;
+    final requestIdentity = '$_routeInputIdentity|NEXT_STEP|$inputMethod';
+    // 같은 논리 요청의 재시도만 같은 Key를 쓴다. assessment/session/stage 또는
+    // 입력 방식이 바뀌면 Backend 전역 unique 제약과 충돌하지 않도록 새 Key를 쓴다.
+    if (_advanceRequestIdentity != requestIdentity) {
+      _advanceRequestIdentity = requestIdentity;
       _advanceIdempotencyKey = null;
     }
     final idempotencyKey = _advanceIdempotencyKey ??=
         widget.idempotencyKeyProvider?.call() ?? _createIdempotencyKey();
-    final assessment = await (widget.repository as HtpDrawingRepository)
-        .moveToNextHtpStep(
-          assessmentId,
-          inputMethod: inputMethod,
-          idempotencyKey: idempotencyKey,
-        );
+    final assessment = await repository.moveToNextHtpStep(
+      assessmentId,
+      inputMethod: inputMethod,
+      idempotencyKey: idempotencyKey,
+    );
     final step = assessment.currentStep;
     return DrawingSessionResolution(
       sessionId: step.drawingSessionId,
@@ -460,6 +875,9 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: false,
+    onPopInvokedWithResult: (didPop, _) {
+      if (!didPop) unawaited(_leave());
+    },
     child: Scaffold(
       backgroundColor: AppColors.childCanvas,
       body: SafeArea(
@@ -569,7 +987,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
         key: const ValueKey('input-method-cancel'),
         label: '취소',
         variant: AppButtonVariant.secondary,
-        onPressed: _busy ? null : () => Navigator.of(context).pop(),
+        onPressed: _busy ? null : () => unawaited(_leave()),
       ),
     ],
   );
@@ -667,7 +1085,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
               key: const ValueKey('input-method-cancel'),
               label: '취소',
               variant: AppButtonVariant.secondary,
-              onPressed: _busy ? null : () => Navigator.of(context).pop(),
+              onPressed: _busy ? null : () => unawaited(_leave()),
             ),
           ),
         ],
@@ -706,7 +1124,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
           ),
           const SizedBox(height: AppSpacing.md),
         ],
-        if (_busy)
+        if (_phase == _InputPhase.uploading)
           if (_uploadProgressPercent case final progress?) ...[
             Builder(
               builder: (context) {
@@ -732,13 +1150,33 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
             ),
             const SizedBox(height: AppSpacing.md),
           ],
-        AppButton(
-          key: const ValueKey('input-method-confirm'),
-          label: _uploadError != null ? '다시 시도' : '이 사진 사용하기',
-          variant: AppButtonVariant.child,
-          isLoading: _busy,
-          onPressed: _busy ? null : _confirmAndUpload,
-        ),
+        if (_phase == _InputPhase.creatingSession) ...[
+          Semantics(
+            liveRegion: true,
+            label: '업로드 준비 중',
+            child: const Text('사진을 올릴 준비를 하고 있어요'),
+          ),
+          const SizedBox(height: AppSpacing.md),
+        ],
+        if (_phase == _InputPhase.completing) ...[
+          Semantics(
+            liveRegion: true,
+            label: '완료 처리 중',
+            child: const Text('완료 처리 중이에요'),
+          ),
+          const SizedBox(height: AppSpacing.md),
+        ],
+        if (_uploadError?.canRetry != false)
+          AppButton(
+            key: const ValueKey('input-method-confirm'),
+            label: _uploadError != null ? '다시 시도' : '이 사진 사용하기',
+            variant: AppButtonVariant.child,
+            isLoading:
+                _phase == _InputPhase.creatingSession ||
+                _phase == _InputPhase.uploading ||
+                _phase == _InputPhase.completing,
+            onPressed: _canStartAction ? _confirmAndUpload : null,
+          ),
         const SizedBox(height: AppSpacing.sm),
         Row(
           mainAxisSize: MainAxisSize.min,
@@ -748,16 +1186,35 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
                 key: const ValueKey('input-method-reselect'),
                 label: '다시 선택',
                 variant: AppButtonVariant.secondary,
-                onPressed: _busy ? null : _reselectPhoto,
+                onPressed: _canStartAction ? _reselectPhoto : null,
               ),
             ),
             const SizedBox(width: AppSpacing.sm),
             Expanded(
               child: AppButton(
                 key: const ValueKey('input-method-preview-cancel'),
-                label: '취소',
+                label: switch (_phase) {
+                  _InputPhase.creatingSession =>
+                    _preUploadCancelRequested ? '준비 취소 중' : '준비 취소',
+                  _InputPhase.uploading =>
+                    _activeUploadAttempt?.cancellation.isCancelled == true
+                        ? '업로드 취소 중'
+                        : '업로드 취소',
+                  _InputPhase.completing => '완료 처리 중',
+                  _InputPhase.leaving || _InputPhase.disposed => '나가는 중',
+                  _ => '취소',
+                },
                 variant: AppButtonVariant.secondary,
-                onPressed: _busy ? null : () => unawaited(_cancel()),
+                onPressed: switch (_phase) {
+                  _InputPhase.creatingSession =>
+                    _preUploadCancelRequested ? null : _cancelPreparation,
+                  _InputPhase.uploading =>
+                    _activeUploadAttempt?.cancellation.isCancelled == true
+                        ? null
+                        : _cancelUpload,
+                  _InputPhase.idle => () => unawaited(_leave()),
+                  _ => null,
+                },
               ),
             ),
           ],
@@ -901,10 +1358,8 @@ final class _PhotoPermissionIssue {
   String get message {
     final target = kind == PhotoPermissionKind.camera ? '카메라' : '사진';
     return switch (status) {
-      PhotoPermissionStatus.denied =>
-        '$target 권한이 필요해요. 다시 선택해 권한을 허용해 주세요.',
-      PhotoPermissionStatus.permanentlyDenied =>
-        '기기 설정에서 $target 권한을 허용해 주세요.',
+      PhotoPermissionStatus.denied => '$target 권한이 필요해요. 다시 선택해 권한을 허용해 주세요.',
+      PhotoPermissionStatus.permanentlyDenied => '기기 설정에서 $target 권한을 허용해 주세요.',
       PhotoPermissionStatus.restricted =>
         '$target 사용이 기기 설정 또는 보호자 정책으로 제한되어 있어요.',
     };
