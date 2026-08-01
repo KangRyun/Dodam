@@ -146,13 +146,23 @@ class OAuthAuthenticationFlowIntegrationTest extends IntegrationTestSupport {
 
     assertThat(rejoined.at("/data/user/userId").asLong()).isNotEqualTo(withdrawnUserId);
     assertThat(rejoined.at("/data/user/emailRequired").asBoolean()).isTrue();
+    // 탈퇴는 소프트 삭제다(728) — 옛 사용자 행이 DELETED 로 남고 재가입이 새 행을 만든다.
+    // 종전의 COUNT(*)==1 단언은 물리 삭제 전제였다 — 768 에서 새 계약으로 정정.
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM users", Integer.class))
+        .isEqualTo(2);
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM users WHERE account_status = 'DELETED'", Integer.class))
         .isEqualTo(1);
+    // 인증 계정은 탈퇴 시 물리 삭제된다(768) — 남는 것은 재가입이 만든 새 연결 하나뿐이다.
     assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM auth_accounts", Integer.class))
         .isEqualTo(1);
     assertThat(
             jdbcTemplate.queryForObject("SELECT provider_subject FROM auth_accounts", String.class))
         .isEqualTo("apple-sub");
+    // 그 연결은 새 사용자를 가리켜야 한다 — 옛 행을 재사용했다면 여기서 걸린다.
+    assertThat(jdbcTemplate.queryForObject("SELECT user_id FROM auth_accounts", Long.class))
+        .isEqualTo(rejoined.at("/data/user/userId").asLong());
   }
 
   @Test

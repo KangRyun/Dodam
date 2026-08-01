@@ -73,6 +73,8 @@ public class OAuthLoginService {
         userRepository
             .findById(provisioned.userId())
             .orElseThrow(() -> new BusinessException(AuthErrorCode.AUTH_ACCOUNT_INVALID));
+    // DELETED 분기는 심층 방어다(768). 정상 경로에서는 탈퇴 시 auth_accounts 가 삭제돼
+    // 탈퇴 사용자가 여기까지 오지 못한다 — 온다면 데이터 정합이 깨진 것이므로 차단이 맞다.
     if (user.getAccountStatus() == AccountStatus.SUSPENDED
         || user.getAccountStatus() == AccountStatus.DELETED) {
       throw new BusinessException(AuthErrorCode.ACCOUNT_SUSPENDED);

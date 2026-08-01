@@ -359,7 +359,9 @@ class UserAccountAndConsentIntegrationTest {
                     + USER_ID
                     + " AND account_status = 'DELETED' AND deleted_at IS NOT NULL"))
         .isEqualTo(1);
-    assertThat(count("SELECT COUNT(*) FROM auth_accounts WHERE user_id = " + USER_ID)).isEqualTo(1);
+    // 인증 계정은 탈퇴 시 물리 삭제된다(768). 남겨두면 재로그인 provisioning 이 이 행으로
+    // DELETED 사용자를 물어와 같은 소셜 계정의 재가입이 막힌다(529 재로그인 계약 회귀).
+    assertThat(count("SELECT COUNT(*) FROM auth_accounts WHERE user_id = " + USER_ID)).isZero();
     assertThat(count("SELECT COUNT(*) FROM user_notification_settings WHERE user_id = " + USER_ID))
         .isEqualTo(1);
     assertThat(

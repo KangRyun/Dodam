@@ -2,6 +2,7 @@ package com.ssafy.b209.user.service;
 
 import com.ssafy.b209.auth.domain.AccountStatus;
 import com.ssafy.b209.auth.domain.User;
+import com.ssafy.b209.auth.repository.AuthAccountRepository;
 import com.ssafy.b209.auth.repository.UserRepository;
 import com.ssafy.b209.auth.service.RefreshTokenSessionStore;
 import com.ssafy.b209.child.repository.ChildDeletionRepository;
@@ -30,8 +31,10 @@ import org.springframework.transaction.annotation.Transactional;
  *   <li><b>공동 보유 아동</b> — 관계만 해제(CASCADE). 다른 보호자의 데이터를 지울 수는 없다
  *   <li><b>사용자 행</b> — {@code account_status=DELETED}, {@code deleted_at} 기록. 물리 삭제하지 않는다
  *   <li><b>Access·Refresh Token</b> — Access Token은 사용자 상태 확인으로 차단하고, Refresh family는 모두 폐기
- *   <li><b>인증 계정·동의 증빙·전문가 프로필</b> — 행을 유지한다. 물리 삭제와 보존 만료 purge는 이번 범위가 아니다
- *   <li><b>동의 증빙</b> — 보존. 법적 보존 대상이다(가드레일 9절)
+ *   <li><b>인증 계정</b> — <b>물리 삭제한다(S15P11B209-768).</b> 처음(728)에는 유지했으나, 소프트 삭제와
+ *       조합되면 재로그인 provisioning 이 남은 행으로 DELETED 사용자를 물어와 같은 소셜 계정의 재가입이
+ *       영영 막혔다(529 재로그인 계약 회귀). {@code provider_subject}는 개인 식별자라 비보존이 9절과도 맞다
+ *   <li><b>동의 증빙·전문가 프로필</b> — 행을 유지한다. 동의 증빙은 법적 보존 대상이다(가드레일 9절)
  * </ul>
  */
 @Service
@@ -40,6 +43,7 @@ public class UserDeletionService {
   private static final String CONFIRMATION = "DELETE";
 
   private final UserRepository userRepository;
+  private final AuthAccountRepository authAccountRepository;
   private final ChildDeletionService childDeletionService;
   private final ChildDeletionRepository childDeletionRepository;
   private final RefreshTokenSessionStore refreshTokenSessionStore;
@@ -49,6 +53,7 @@ public class UserDeletionService {
    * 회원 탈퇴 서비스를 구성한다.
    *
    * @param userRepository 사용자 상태 전이를 수행할 저장소
+   * @param authAccountRepository 탈퇴 시 소셜 인증 계정 연결을 물리 삭제할 저장소(768)
    * @param childDeletionService 아동 삭제 정책(소프트 삭제 + 스토리지 큐)을 가진 서비스
    * @param childDeletionRepository 보호자-아동 관계 해제 저장소
    * @param refreshTokenSessionStore 사용자 전체 Refresh Token family 폐기 저장소
@@ -56,11 +61,13 @@ public class UserDeletionService {
   @Autowired
   public UserDeletionService(
       UserRepository userRepository,
+      AuthAccountRepository authAccountRepository,
       ChildDeletionService childDeletionService,
       ChildDeletionRepository childDeletionRepository,
       RefreshTokenSessionStore refreshTokenSessionStore) {
     this(
         userRepository,
+        authAccountRepository,
         childDeletionService,
         childDeletionRepository,
         refreshTokenSessionStore,
@@ -69,11 +76,13 @@ public class UserDeletionService {
 
   UserDeletionService(
       UserRepository userRepository,
+      AuthAccountRepository authAccountRepository,
       ChildDeletionService childDeletionService,
       ChildDeletionRepository childDeletionRepository,
       RefreshTokenSessionStore refreshTokenSessionStore,
       Clock clock) {
     this.userRepository = userRepository;
+    this.authAccountRepository = authAccountRepository;
     this.childDeletionService = childDeletionService;
     this.childDeletionRepository = childDeletionRepository;
     this.refreshTokenSessionStore = refreshTokenSessionStore;
@@ -105,6 +114,9 @@ public class UserDeletionService {
     }
     childDeletionService.deleteAllSolelyOwnedBy(userId);
     childDeletionRepository.deleteGuardianRelations(userId);
+    // 인증 계정을 지워야 같은 소셜 계정으로 다시 가입할 수 있다(768).
+    // 남겨두면 재로그인 provisioning 이 이 행으로 DELETED 사용자를 물어와 403 이 난다.
+    authAccountRepository.deleteAllByUserId(userId);
     user.markDeleted(LocalDateTime.now(clock));
     refreshTokenSessionStore.revokeAll(userId);
   }
