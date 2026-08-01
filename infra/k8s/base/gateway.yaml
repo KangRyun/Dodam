@@ -50,7 +50,10 @@ data:
         ssl_session_cache shared:SSL:10m;
         ssl_session_timeout 1d;
 
-        client_max_body_size 20m;
+        # ★ 앱 상한보다 높아야 한다(S15P11B209-670). 낮거나 같으면 nginx 가 먼저 잘라
+        #   클라이언트가 앱의 413 JSON 대신 nginx 기본 HTML 413 을 받는다(파싱 실패 → 원인 불명).
+        #   기준선: spring.servlet.multipart.max-request-size = 22020096B(21 MiB).
+        client_max_body_size 22m;
 
         add_header X-Content-Type-Options nosniff always;
         add_header X-Frame-Options SAMEORIGIN always;
