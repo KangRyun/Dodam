@@ -35,6 +35,9 @@ images:
   - name: dodam-nginx
     newName: 127.0.0.1:5000/dodam-nginx
     newTag: prod
+  - name: dodam-web
+    newName: 127.0.0.1:5000/dodam-web
+    newTag: prod
 
 patches:
   - path: gateway-hostport.yaml

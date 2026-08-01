@@ -25,6 +25,7 @@ resources:
   - mongodb-initdb.yaml     #   최초 기동 시 앱 계정 생성 (데이터 디렉터리가 빌 때만 1회 실행)
   - backend.yaml
   - ai.yaml
+  - web.yaml                # S15P11B209-383 — 커뮤니티 웹. gateway 의 `/` 가 여기로 간다
   - gateway.yaml
   # ⚠️ jenkins-external.yaml 은 **일부러 뺐다** (S15P11B209-360).
   #   commonLabels 가 Service 의 selector 에도 라벨을 주입하는데, 이 Service 는 selector 가

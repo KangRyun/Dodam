@@ -32,6 +32,9 @@ images:
   - name: dodam-nginx
     newName: 127.0.0.1:5000/dodam-nginx
     newTag: staging
+  - name: dodam-web
+    newName: 127.0.0.1:5000/dodam-web
+    newTag: staging
 
 patches:
   - path: gateway-nodeport.yaml

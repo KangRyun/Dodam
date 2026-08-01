@@ -9,5 +9,9 @@
 
 FROM nginx:1.27-alpine
 COPY conf.d/ /etc/nginx/conf.d/
-# 커뮤니티 웹 준비 전 임시 페이지 (S15P11B209-302) — 산출물 생기면 이 COPY 대상 교체(정적) 또는 proxy 전환(SSR)
+# 정적 페이지 — /legal/(개인정보처리방침·이용약관) · /download/(APK 안내).
+#   S15P11B209-383 에서 루트 임시 페이지(302)는 걷어내고 `/` 는 web 컨테이너로 프록시한다.
+#   ⚠️ 그렇다고 이 COPY 를 지우면 안 된다. 루트만 웹으로 넘어갔을 뿐 /legal/·/download/ 는
+#      여전히 이 이미지의 정적 파일이 서빙한다(conf 에 전용 location 이 있다).
+#      스토어 심사에 등록된 URL 이라 사라지면 심사가 막힌다.
 COPY html/  /usr/share/nginx/html/

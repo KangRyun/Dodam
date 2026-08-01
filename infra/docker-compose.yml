@@ -407,6 +407,33 @@ services:
       - dodam-net
 
   # ───────────────────────────────────────────────────────────────
+  # web — 커뮤니티 웹(Next.js standalone). S15P11B209-383
+  #
+  # ⚠️ 실행은 k3s 가 한다(infra/k8s/base/web.yaml). 이 블록이 있는 이유는 **빌드** 때문이다 —
+  #    Jenkins 의 Docker Build 스테이지가 `docker compose build` 로 이미지를 만들고,
+  #    그 결과를 레지스트리에 밀어 k3s 가 당겨간다. 여기 없으면 dodam-web 이 안 만들어진다.
+  # ───────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ../frontend/web   # 빌드 컨텍스트 = 리포지토리 frontend/web
+      dockerfile: Dockerfile
+      args:
+        # ★ NEXT_PUBLIC_* 는 빌드 시점에 번들에 구워진다 — 런타임 env 로는 못 바꾼다.
+        #   상대경로라 웹과 API 가 같은 오리진(gateway)이면 도메인이 바뀌어도 재빌드가 필요 없다.
+        NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api/v1}
+    image: dodam-web:local       # 로컬 빌드 이미지 이름(backend·ai·nginx 와 동일 규칙)
+    container_name: dodam-web
+    restart: unless-stopped
+    mem_limit: 512m              # k8s 매니페스트의 limits 와 맞춘다
+
+    # 호스트 3000 은 Grafana 가 점유 중이다. 포트를 열지 않고 gateway 를 통해서만 노출한다.
+    expose:
+      - "3000"
+
+    networks:
+      - dodam-net
+
+  # ───────────────────────────────────────────────────────────────
   # nginx — 리버스 프록시. ★ 유일하게 외부(호스트)로 열리는 서비스. (EC2 UFW도 80/443만 허용)
   # ───────────────────────────────────────────────────────────────
   nginx:
