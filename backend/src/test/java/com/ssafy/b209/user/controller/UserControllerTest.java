@@ -115,7 +115,7 @@ class UserControllerTest {
         .andExpect(jsonPath("$.data.requestedAt").value("2026-07-31T10:25:03"))
         .andExpect(jsonPath("$.data.completedAt").value("2026-07-31T10:30:03"))
         .andExpect(jsonPath("$.data.expiresAt").value("2026-08-01T10:30:03"))
-        .andExpect(jsonPath("$.data.errorCode").isEmpty())
+        .andExpect(jsonPath("$.data.failureCode").isEmpty())
         .andExpect(jsonPath("$.data.storageKey").doesNotExist())
         .andExpect(jsonPath("$.data.downloadUrl").doesNotExist())
         .andExpect(jsonPath("$.data.fileSizeBytes").doesNotExist())
