@@ -335,7 +335,7 @@ pipeline {
             set -e
             export KUBECONFIG="$DEPLOYER_KUBECONFIG"
             fail=0
-            for d in backend gateway ai; do
+            for d in backend gateway ai web; do
               ready="$(kubectl -n dodam get deployment "$d" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
               ready="${ready:-0}"
               if [ "$ready" -ge 1 ]; then
@@ -365,10 +365,14 @@ pipeline {
             echo "   ❌ $1 → $code (기대 $2)"; return 1
           }
           fail=0
+          # / 는 769 의 랜딩이다(302 임시 페이지 → 383 리다이렉트 307 → 769 랜딩 200).
+          # 랜딩과 커뮤니티는 다른 파드 경로가 아니라 같은 web 컨테이너의 두 라우트다 —
+          # 둘 다 단언해야 "web 이 떠 있다"와 "라우팅이 온전하다"를 함께 검증한다.
           check /                 200 || fail=1
+          check /community        200 || fail=1
           check /ai/health        200 || fail=1
           check /api/v1/children  401 || fail=1   # 무토큰 차단 = 인증이 살아 있다는 뜻
-          check /legal/privacy/   200 || fail=1
+          check /legal/privacy/   200 || fail=1   # 스토어 심사 URL — 웹 전환 후에도 살아야 한다(383)
           [ "$fail" = "0" ] || { echo "  ✗ 공개 e2e 실패 — 롤백 판단 지점"; exit 1; }
           echo "✅ k3s 배포 정상 + 공개 경로 e2e 통과"
         '''
