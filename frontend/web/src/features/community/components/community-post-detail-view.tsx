@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
+import { CommunityCommentSection } from "@/features/community/components/community-comment-section";
 import { CommunityHeader } from "@/features/community/components/community-header";
 import { CommunityPostDetail } from "@/features/community/components/community-post-detail";
 import {
@@ -61,6 +62,12 @@ export function CommunityPostDetailView({ postId }: { postId: number }) {
           onEdit={() => router.push(`/community/posts/${postId}/edit`)}
           onDelete={handleDelete}
           isDeleting={deletePost.isPending}
+          commentsSlot={
+            <CommunityCommentSection
+              postId={postId}
+              totalCount={data.commentCount}
+            />
+          }
         />
       )}
     </div>
