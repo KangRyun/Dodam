@@ -49,7 +49,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("28");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("29");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(71);
     assertThat(tableExists("refresh_tokens")).isFalse();
@@ -90,6 +90,26 @@ class DatabaseMigrationIntegrationTest {
                     + "AND is_required = TRUE AND is_active = TRUE",
                 Integer.class))
         .isEqualTo(1);
+    // V29 약관 원문 시드 — content_html 이 비어 있으면 앱 약관 상세가 본문을 못 띄운다(447 D3).
+    // 앱은 contentHtml 을 먼저 쓰고 비어 있을 때만 contentUrl 로 폴백하므로 html 이 채워져야 한다.
+    assertThat(
+            jdbcTemplate.queryForList(
+                "SELECT term_code FROM consent_terms "
+                    + "WHERE is_active = TRUE AND version = 'v1' "
+                    + "AND (content_html IS NULL OR content_html = '')",
+                String.class))
+        .isEmpty();
+    // 평문 변환(consentTermPlainText)이 <p>·<br> 만 줄바꿈으로 처리하므로 그 두 태그로만 구성한다.
+    // <li>·<h1> 이 섞이면 평문에서 앞뒤 글자가 붙어 읽을 수 없게 된다(447 D7).
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM consent_terms "
+                    + "WHERE is_active = TRUE AND version = 'v1' "
+                    + "AND (content_html LIKE '%<li>%' OR content_html LIKE '%<h1>%' "
+                    + "OR content_html LIKE '%<h2>%' OR content_html LIKE '%<ul>%' "
+                    + "OR content_html LIKE '%<ol>%')",
+                Integer.class))
+        .isZero();
   }
 
   @Test
