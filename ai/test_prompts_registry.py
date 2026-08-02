@@ -29,7 +29,7 @@ class VersionTest(unittest.TestCase):
         # 서로 다른 프롬프트는(내용이 다르므로) 해시가 다르다.
         self.assertNotEqual(
             prompts_registry.content_hash("first_question"),
-            prompts_registry.content_hash("report"),
+            prompts_registry.content_hash("report_common"),
         )
 
     def test_unknown_prompt_uses_zero_semver(self):
@@ -66,7 +66,7 @@ class ClientVersionWiringTest(unittest.TestCase):
         import report_client
         import vlm_client
 
-        # 서술 프롬프트는 활동 유형별로 갈라져 통합 버전을 쓴다.
+        # 서술·리포트 프롬프트는 활동 유형별로 갈라져 통합 버전을 쓴다.
         self.assertEqual(
             vlm_client.PROMPT_VERSION,
             prompts_registry.composite_version(
@@ -74,7 +74,10 @@ class ClientVersionWiringTest(unittest.TestCase):
             ),
         )
         self.assertEqual(
-            report_client.PROMPT_VERSION, prompts_registry.version("report")
+            report_client.PROMPT_VERSION,
+            prompts_registry.composite_version(
+                "report_common", "report_htp", "report_diary"
+            ),
         )
 
     def test_vlm_prompt_version_resolves_per_activity(self):

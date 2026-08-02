@@ -32,7 +32,12 @@ _PROMPT_SEMVER: dict[str, str] = {
     # 힌트로만 쓴다(sketch 가중치가 자유 그림을 자주 놓쳐 목록 고정이 서술을 죽였다).
     "drawing_description_htp": "1.0.0",
     "drawing_description_diary": "1.0.0",
-    "report": "1.2.0",  # S15P11B209-601: 진단 표현 금지 강화·한계 고지·후속 질문 목적 명시
+    # 리포트도 활동 유형별로 갈라진다 — 근거 블록 구성이 다르고(주제별 vs 단일),
+    # RAG 근거는 HTP 경로에만 실린다. 공통 규칙·JSON 스키마는 report_common이 소유한다.
+    # S15P11B209-601: 진단 표현 금지 강화·한계 고지·후속 질문 목적 명시(구 report 1.2.0 계승).
+    "report_common": "1.3.0",
+    "report_htp": "1.3.0",
+    "report_diary": "1.3.0",
 }
 
 _UNKNOWN_SEMVER = "0.0.0"

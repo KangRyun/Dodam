@@ -73,8 +73,11 @@
 | `RAG_NO_INDEX` | 인덱스 미배포(운영상 정상일 수 있는 상태) |
 | `RAG_UNAVAILABLE` | 임베딩 호출 실패 등 검색 장애 |
 | `RAG_LOW_SCORE` | 검색은 됐지만 전부 점수 임계값 미달 — 억지 근거를 싣지 않음 |
+| `RAG_NOT_APPLICABLE` | 그림일기 리포트라 검색을 시도하지 않음 — 장애가 아니라 정책(아래) |
 
-운영 관측: 검색 결과 비율은 Prometheus `dodam_rag_search_total{outcome=used|no_query|no_index|unavailable|low_score}` 카운터로 본다.
+**RAG 적용 범위: HTP 리포트만.** 그림일기 프롬프트는 `[전문 자료 근거]`를 근거 화이트리스트에 두지 않으므로 검색해도 쓰이지 않는다. 코퍼스 자체는 활동유형 중립이지만(`docs/ai/rag-corpus-policy.md` §1-2 — HTP를 점수화·해석하지 않는다), 전문 자료 어휘가 필요한 쪽은 '검사처럼 읽히기 쉬운' HTP 리포트다. 판별은 `subjectSummaries[].drawingSubject` 유무 — 계약에 `activityType` 필드가 없어 추론한다(HTP는 항상 채워지고, 그림일기는 `null`, 구 BE는 빈 목록).
+
+운영 관측: 검색 결과 비율은 Prometheus `dodam_rag_search_total{outcome=used|no_query|no_index|unavailable|low_score|not_applicable}` 카운터로 본다.
 
 ## 4. 가드레일 (9절)
 
