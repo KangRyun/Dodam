@@ -73,7 +73,7 @@ DrawingUploadErrorPresentation presentationForValidationError(
   PhotoValidationErrorType.unsupportedFormat =>
     const DrawingUploadErrorPresentation(
       icon: Icons.image_not_supported_rounded,
-      message: 'JPEG·PNG·WEBP 형식의 사진만 사용할 수 있어요. 다른 사진을 선택해 주세요.',
+      message: 'JPEG·PNG 형식의 사진만 사용할 수 있어요. 다른 사진을 선택해 주세요.',
       canRetry: false,
     ),
   PhotoValidationErrorType.signatureMismatch =>
