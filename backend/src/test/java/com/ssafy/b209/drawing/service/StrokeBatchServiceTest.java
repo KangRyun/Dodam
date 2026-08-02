@@ -16,6 +16,7 @@ import com.ssafy.b209.child.domain.ChildProfileStatus;
 import com.ssafy.b209.child.domain.ChildTutorialStatus;
 import com.ssafy.b209.drawing.config.StrokeRetentionProperties;
 import com.ssafy.b209.drawing.document.StrokeBatchDocument;
+import com.ssafy.b209.drawing.document.StrokePointDocument;
 import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.domain.DrawingType;
@@ -211,6 +212,61 @@ class StrokeBatchServiceTest {
   }
 
   @Test
+  void keepsPointPressureInTheStoredDocument() {
+    stubCanvasSession();
+
+    service.save(
+        100L, requestWithPointPressure(new BigDecimal("0.0"), new BigDecimal("0.7")));
+
+    ArgumentCaptor<StrokeBatchDocument> captor = ArgumentCaptor.forClass(StrokeBatchDocument.class);
+    verify(strokeBatchDocumentRepository).insert(captor.capture());
+    List<StrokePointDocument> points = captor.getValue().strokes().getFirst().points();
+    // 0.0은 "감지 가능한 압력 없음"이라는 유효한 측정값이다 — null 과 뭉개지면 안 된다.
+    assertThat(points.getFirst().pressure()).isEqualByComparingTo("0.0");
+    assertThat(points.getLast().pressure()).isEqualByComparingTo("0.7");
+  }
+
+  @Test
+  void returnsTheStoredBatchWhenTheSamePressurePayloadIsResent() {
+    stubCanvasSession();
+    StrokeBatchSaveResult first =
+        service.save(
+            100L, requestWithPointPressure(new BigDecimal("0.30"), new BigDecimal("0.70")));
+    ArgumentCaptor<StrokeBatchDocument> captor = ArgumentCaptor.forClass(StrokeBatchDocument.class);
+    verify(strokeBatchDocumentRepository).insert(captor.capture());
+    when(strokeBatchDocumentRepository.findBySessionIdAndBatchSeq(100L, 3))
+        .thenReturn(Optional.of(captor.getValue()));
+
+    StrokeBatchSaveResult second =
+        service.save(
+            100L, requestWithPointPressure(new BigDecimal("0.30"), new BigDecimal("0.70")));
+
+    assertThat(second.created()).isFalse();
+    assertThat(second.response().batchId()).isEqualTo(first.response().batchId());
+  }
+
+  @Test
+  void rejectsAPressureOnlyDifferenceReusingTheSameBatchSequence() {
+    stubCanvasSession();
+    service.save(
+        100L, requestWithPointPressure(new BigDecimal("0.30"), new BigDecimal("0.70")));
+    ArgumentCaptor<StrokeBatchDocument> captor = ArgumentCaptor.forClass(StrokeBatchDocument.class);
+    verify(strokeBatchDocumentRepository).insert(captor.capture());
+    when(strokeBatchDocumentRepository.findBySessionIdAndBatchSeq(100L, 3))
+        .thenReturn(Optional.of(captor.getValue()));
+
+    // 필압만 달라도 payload checksum 이 달라지므로 같은 순번 재사용을 거부한다.
+    assertThatThrownBy(
+            () ->
+                service.save(
+                    100L,
+                    requestWithPointPressure(new BigDecimal("0.30"), new BigDecimal("0.71"))))
+        .isInstanceOf(BusinessException.class)
+        .extracting("errorCode")
+        .isEqualTo(DrawingErrorCode.STROKE_BATCH_CONFLICT);
+  }
+
+  @Test
   void returnsTheStoredBatchWhenTheSamePayloadIsResent() {
     stubCanvasSession();
     StrokeBatchSaveResult first = service.save(100L, request(101, 101));
@@ -360,6 +416,36 @@ class StrokeBatchServiceTest {
                     new StrokePointRequest(
                         BigDecimal.valueOf(0.19), BigDecimal.valueOf(0.43), 16, null)))),
         new StrokeMetricsRequest(9, 0, 2, 3200));
+  }
+
+  /**
+   * 좌표·순번은 기본 요청과 같고 점 필압만 지정한 요청을 만든다(S15P11B209-481).
+   *
+   * @param firstPressure 첫 점의 필압
+   * @param secondPressure 마지막 점의 필압
+   * @return 필압이 checksum 에 반영되는 유효한 요청
+   */
+  private SaveStrokeBatchRequest requestWithPointPressure(
+      BigDecimal firstPressure, BigDecimal secondPressure) {
+    return new SaveStrokeBatchRequest(
+        3,
+        101,
+        101,
+        OffsetDateTime.parse("2026-07-21T11:32:10.120+09:00"),
+        List.of(
+            new StrokeEventRequest(
+                101,
+                "STROKE",
+                "PEN",
+                "#FFCC00",
+                BigDecimal.valueOf(8),
+                null,
+                List.of(
+                    new StrokePointRequest(
+                        BigDecimal.valueOf(0.18), BigDecimal.valueOf(0.42), 0, firstPressure),
+                    new StrokePointRequest(
+                        BigDecimal.valueOf(0.19), BigDecimal.valueOf(0.43), 16, secondPressure)))),
+        new StrokeMetricsRequest(1, 0, 2, 3200));
   }
 
   private SaveStrokeBatchRequest request(long first, long last) {

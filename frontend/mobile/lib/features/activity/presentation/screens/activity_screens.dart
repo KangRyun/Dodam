@@ -16,6 +16,7 @@ import '../../../drawing/application/activity_completion_controller.dart';
 import '../../../drawing/application/canvas_tutorial_controller.dart';
 import '../../../drawing/application/drawing_object_detection_controller.dart';
 import '../../../drawing/application/drawing_activity_completion_controller.dart';
+import '../../../drawing/application/drawing_pressure_policy.dart';
 import '../../../drawing/application/drawing_sync_coordinator.dart';
 import '../../../drawing/application/drawing_draft_restore_controller.dart';
 import '../../../drawing/application/htp_response_flow_controller.dart';
@@ -1133,17 +1134,14 @@ class _DrawingScreenState extends State<DrawingScreen>
   DrawingPoint _pointFrom(PointerEvent event) => DrawingPoint(
     position: event.localPosition,
     elapsedMilliseconds: _syncCoordinator.elapsedMilliseconds,
-    pressure: _supportedPressure(event),
+    // 측정 정책은 테스트와 같은 단일 구현을 공유한다(S15P11B209-481).
+    pressure: DrawingPressurePolicy.resolve(
+      kind: event.kind,
+      pressure: event.pressure,
+      pressureMin: event.pressureMin,
+      pressureMax: event.pressureMax,
+    ),
   );
-
-  double? _supportedPressure(PointerEvent event) {
-    final stylus =
-        event.kind == ui.PointerDeviceKind.stylus ||
-        event.kind == ui.PointerDeviceKind.invertedStylus;
-    if (!stylus || event.pressureMax <= event.pressureMin) return null;
-    // TODO(DEVICE): Verify capability reporting on the target Galaxy Tab/S Pen.
-    return event.pressure.clamp(0.0, 1.0);
-  }
 
   Future<BinaryUploadDto?> _captureCanvasSnapshot() async {
     // 아직 journal에 완결 event로 기록되지 않은 active stroke를 Draft 이미지에만
