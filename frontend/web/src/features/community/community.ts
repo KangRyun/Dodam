@@ -23,3 +23,8 @@ export type {
   UpdateCommunityPostInput,
 } from "@/features/community/domain/community-models";
 export type { CommunityRepository } from "@/features/community/domain/community-repository";
+export type {
+  CommunityComplaintReason,
+  CommunityComplaintTargetType,
+  CreateCommunityComplaintInput,
+} from "@/features/community/domain/community-models";

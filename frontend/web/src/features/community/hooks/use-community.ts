@@ -9,11 +9,13 @@ import {
 } from "@tanstack/react-query";
 
 import { communityRepository } from "@/features/community/data/community-repository-factory";
+import { createCommunityComplaint } from "@/features/community/data/api/community-complaint-api";
 import type {
   CommunityComment,
   CommunityFeed,
   CommunityPost,
   CommunityPostFilter,
+  CreateCommunityComplaintInput,
   CreateCommunityCommentInput,
   CreateCommunityPostInput,
   UpdateCommunityCommentInput,
@@ -189,5 +191,16 @@ export function useDeleteCommunityComment(
     mutationFn: (commentId: number) =>
       communityRepository.deleteComment(commentId),
     onSuccess: () => invalidateComments(queryClient, postId),
+  });
+}
+
+/** COMM-11 신고는 Mock 저장소를 거치지 않고 실제 공통 신고 API로 제출한다. */
+export function useCreateCommunityComplaint(): UseMutationResult<
+  void,
+  Error,
+  CreateCommunityComplaintInput
+> {
+  return useMutation({
+    mutationFn: createCommunityComplaint,
   });
 }

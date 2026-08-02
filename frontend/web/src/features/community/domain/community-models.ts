@@ -81,6 +81,26 @@ export type CommunityPostLikeResult = {
   likeCount: number;
 };
 
+/** COMM-11 신고 대상. */
+export type CommunityComplaintTargetType = "POST" | "COMMENT";
+
+/** COMM-11 신고 사유 코드. */
+export type CommunityComplaintReason =
+  | "INAPPROPRIATE_CONTENT"
+  | "PERSONAL_INFORMATION"
+  | "MISLEADING_DIAGNOSIS"
+  | "HARASSMENT"
+  | "COPYRIGHT"
+  | "OTHER";
+
+/** COMM-11 `POST /complaints` 요청 본문. */
+export type CreateCommunityComplaintInput = {
+  targetType: CommunityComplaintTargetType;
+  targetId: number;
+  reasonCode: CommunityComplaintReason;
+  description?: string;
+};
+
 export type CommunityProfile = {
   nickname: string;
   avatar: string;

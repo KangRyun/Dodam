@@ -2,10 +2,15 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 
 import { CommunityCommentSection } from "@/features/community/components/community-comment-section";
 import { CommunityHeader } from "@/features/community/components/community-header";
 import { CommunityPostDetail } from "@/features/community/components/community-post-detail";
+import {
+  CommunityReportDialog,
+  type CommunityReportTarget,
+} from "@/features/community/components/community-report-dialog";
 import {
   useCommunityPost,
   useDeleteCommunityPost,
@@ -14,6 +19,8 @@ import {
 
 export function CommunityPostDetailView({ postId }: { postId: number }) {
   const router = useRouter();
+  const [reportTarget, setReportTarget] =
+    useState<CommunityReportTarget | null>(null);
   const { data, isPending, isError, error, refetch } =
     useCommunityPost(postId);
   const deletePost = useDeleteCommunityPost(postId);
@@ -74,12 +81,27 @@ export function CommunityPostDetailView({ postId }: { postId: number }) {
               ? toggleLike.error.message || "좋아요를 처리하지 못했어요."
               : null
           }
+          onReport={
+            data.editableByMe
+              ? undefined
+              : () => setReportTarget({ type: "POST", id: postId })
+          }
           commentsSlot={
             <CommunityCommentSection
               postId={postId}
               totalCount={data.commentCount}
+              onReport={(commentId) =>
+                setReportTarget({ type: "COMMENT", id: commentId })
+              }
             />
           }
+        />
+      )}
+
+      {reportTarget && (
+        <CommunityReportDialog
+          target={reportTarget}
+          onClose={() => setReportTarget(null)}
         />
       )}
     </div>

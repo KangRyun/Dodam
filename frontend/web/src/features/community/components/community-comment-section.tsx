@@ -29,9 +29,11 @@ function formatDate(value: string) {
 export function CommunityCommentSection({
   postId,
   totalCount,
+  onReport,
 }: {
   postId: number;
   totalCount: number;
+  onReport: (commentId: number) => void;
 }) {
   const { data, isPending, isError, error, refetch } =
     useCommunityComments(postId);
@@ -99,6 +101,7 @@ export function CommunityCommentSection({
                   if (!window.confirm("이 댓글을 삭제할까요?")) return;
                   deleteComment.mutate(comment.id);
                 }}
+                onReport={() => onReport(comment.id)}
               />
             ))}
           </div>
@@ -177,6 +180,7 @@ function CommentItem({
   onCancelEdit,
   onSaveEdit,
   onDelete,
+  onReport,
 }: {
   comment: CommunityComment;
   isEditing: boolean;
@@ -186,6 +190,7 @@ function CommentItem({
   onCancelEdit: () => void;
   onSaveEdit: (content: string) => void;
   onDelete: () => void;
+  onReport: () => void;
 }) {
   const isExpert = comment.author.role === "EXPERT";
   const canManage = comment.editableByMe === true;
@@ -268,6 +273,15 @@ function CommentItem({
                 {isDeleting ? "삭제 중…" : "삭제"}
               </button>
             </>
+          )}
+          {!canManage && (
+            <button
+              type="button"
+              className="community-comment-textbtn"
+              onClick={onReport}
+            >
+              신고
+            </button>
           )}
         </footer>
       )}
