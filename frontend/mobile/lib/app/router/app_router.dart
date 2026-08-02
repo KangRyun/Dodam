@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../design_system/design_system.dart';
@@ -17,6 +19,7 @@ import '../../features/drawing/presentation/screens/input_method_select_screen.d
 import '../../features/conversation/conversation.dart';
 import '../../features/guardian/presentation/screens/guardian_screens.dart';
 import '../../features/history/presentation/screens/history_screens.dart';
+import '../../features/notification/application/notification_badge_controller.dart';
 import '../../features/notification/domain/repositories/notification_inbox_repository.dart';
 import '../../features/notification/presentation/screens/notification_list_screen.dart';
 import '../../features/report/presentation/screens/report_screen.dart';
@@ -50,6 +53,8 @@ abstract final class AppRouter {
     ReportRepository? reportRepository,
     ReportFileActions? reportFileActions,
     NotificationInboxRepository? notificationInboxRepository,
+    NotificationBadgeController? notificationBadgeController,
+    ValueChanged<String?>? onGuardianTabChanged,
     ConsentRepository? consentRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
     ConversationRepository? conversationRepository,
@@ -116,6 +121,7 @@ abstract final class AppRouter {
       // 각 담당 화면(없으면 자리표시자), 커뮤니티는 웹 전용이라 자리표시자.
       ['guardian', 'home'] when childController != null => GuardianSidebarShell(
         onSwitchProfile: goProfileSelection,
+        onVisibleRouteChanged: onGuardianTabChanged,
         destinations: [
           GuardianNavItem(
             icon: Icons.home_outlined,
@@ -149,6 +155,16 @@ abstract final class AppRouter {
             icon: Icons.notifications_none_rounded,
             selectedIcon: Icons.notifications_rounded,
             label: '알림',
+            // 이 탭이 보여주는 화면은 `/guardian/notifications`가 여는 것과 같다.
+            // 셸 밖의 중복 이동 판정이 "이미 알림함을 보고 있다"를 알 수 있게
+            // 라우트 이름을 붙인다(S15P11B209-501). 나머지 탭은 푸시가 겨냥하는
+            // 라우트가 따로 없어 비워 둔다.
+            routeName: AppRoutes.notifications,
+            badgeCount: notificationBadgeController,
+            // 알림 탭은 IndexedStack에 살아남아 재진입해도 목록 화면이 다시
+            // 만들어지지 않는다. 탭을 누를 때마다 배지를 다시 세어, 어긋난 수를
+            // 사용자가 앱을 재개하지 않고도 되돌릴 수 있게 한다.
+            onSelected: () => unawaited(notificationBadgeController?.refresh()),
             builder:
                 notificationsTabBuilder ??
                 (_) => notificationInboxRepository == null
@@ -158,6 +174,7 @@ abstract final class AppRouter {
                       )
                     : NotificationListScreen(
                         repository: notificationInboxRepository,
+                        badgeController: notificationBadgeController,
                       ),
           ),
           GuardianNavItem(
@@ -224,7 +241,10 @@ abstract final class AppRouter {
           voiceAnswerAudioPlayerFactory: voiceAnswerAudioPlayerFactory,
         ),
       ['guardian', 'notifications'] when notificationInboxRepository != null =>
-        NotificationListScreen(repository: notificationInboxRepository),
+        NotificationListScreen(
+          repository: notificationInboxRepository,
+          badgeController: notificationBadgeController,
+        ),
       ['guardian', 'settings'] when authSignOut != null => SettingsMainScreen(
         user: authCurrentUser?.call(),
         onSignOut: authSignOut,
@@ -240,6 +260,13 @@ abstract final class AppRouter {
       ['guardian', 'community'] => CommunityWebViewScreen(
         accessTokenProvider: communityAccessToken,
       ),
+      // 알림이 가리키는 게시글은 같은 웹뷰를 게시글 상세 주소로 연다
+      // (S15P11B209-501, 푸시 계약 §4.3의 `POST` 매핑).
+      ['guardian', 'community', 'posts', final postId] =>
+        CommunityWebViewScreen(
+          url: communityPostUrl(postId),
+          accessTokenProvider: communityAccessToken,
+        ),
       ['child', final childId, 'home']
           when _hasChildContext(childController, childId) &&
               drawingRepository != null =>
@@ -267,6 +294,9 @@ abstract final class AppRouter {
           replaceActive:
               (settings.arguments! as DrawingActivitySelectionRouteArguments)
                   .replaceActive,
+          initialActivityCode:
+              (settings.arguments! as DrawingActivitySelectionRouteArguments)
+                  .initialActivityCode,
           completionSnapshotProvider: drawingCompletionSnapshotProvider,
         ),
       ['child', final childId, 'activity', 'input-method']
@@ -518,9 +548,15 @@ enum DrawingRouteResult {
 }
 
 final class DrawingActivitySelectionRouteArguments {
-  const DrawingActivitySelectionRouteArguments({this.replaceActive = false});
+  const DrawingActivitySelectionRouteArguments({
+    this.replaceActive = false,
+    this.initialActivityCode,
+  });
 
   final bool replaceActive;
+
+  /// 값이 있으면 활동 카드 선택을 생략하고 해당 활동의 시작 화면을 연다.
+  final String? initialActivityCode;
 }
 
 /// 보호자가 정한 활동을 아동 홈까지 전달하고, 실제 캔버스 진입은 아동이 한다.

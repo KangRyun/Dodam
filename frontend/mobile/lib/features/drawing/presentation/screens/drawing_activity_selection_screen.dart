@@ -16,6 +16,7 @@ class DrawingActivitySelectionScreen extends StatefulWidget {
     required this.childId,
     required this.repository,
     required this.replaceActive,
+    this.initialActivityCode,
     this.completionSnapshotProvider,
     super.key,
   });
@@ -23,6 +24,7 @@ class DrawingActivitySelectionScreen extends StatefulWidget {
   final int childId;
   final DrawingRepository repository;
   final bool replaceActive;
+  final String? initialActivityCode;
   final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
 
   @override
@@ -39,6 +41,8 @@ class _DrawingActivitySelectionScreenState
   bool _entryResolved = false;
   bool _replaceActive = false;
   Object? _entryError;
+  Object? _directStartError;
+  bool _directStartScheduled = false;
 
   @override
   void initState() {
@@ -208,22 +212,61 @@ class _DrawingActivitySelectionScreenState
               inputMethod: 'CANVAS',
             );
       if (!mounted) return;
-      if (resolution == null) return;
+      if (resolution == null) {
+        if (widget.initialActivityCode != null) {
+          Navigator.of(context).pop();
+        }
+        return;
+      }
       await Navigator.of(context).pushReplacementNamed(
         AppRoutes.childModeHome(widget.childId.toString()),
         arguments: ChildModeHomeRouteArguments(preparedResolution: resolution),
       );
     } on Object {
       if (mounted) {
-        showAppMessage(
-          context,
-          message: '활동을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.',
-          type: AppMessageType.error,
-        );
+        if (widget.initialActivityCode != null) {
+          setState(() => _directStartError = StateError('활동 시작 실패'));
+        } else {
+          showAppMessage(
+            context,
+            message: '활동을 시작하지 못했어요. 잠시 후 다시 시도해 주세요.',
+            type: AppMessageType.error,
+          );
+        }
       }
     } finally {
       if (mounted) setState(() => _isStarting = false);
     }
+  }
+
+  void _scheduleDirectStart(List<DrawingTypeDto> types) {
+    if (_directStartScheduled || _isStarting) return;
+    final targetCode = widget.initialActivityCode;
+    if (targetCode == null) return;
+    DrawingTypeDto? target;
+    for (final type in types) {
+      if (type.code == targetCode) {
+        target = type;
+        break;
+      }
+    }
+    if (target == null) {
+      _directStartError = StateError('지원하는 활동을 찾지 못했습니다.');
+      return;
+    }
+    _directStartScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      setState(() {
+        _selected = target;
+        _directStartError = null;
+      });
+      await _startSelected();
+      if (!mounted) return;
+      if (_selected != null && !_isStarting) {
+        setState(() => _directStartScheduled = false);
+      }
+    });
   }
 
   @override
@@ -262,6 +305,23 @@ class _DrawingActivitySelectionScreenState
                   return const AppEmptyView(
                     title: '지금 시작할 수 있는 활동이 없어요',
                     message: '활동이 준비되면 다시 알려드릴게요.',
+                  );
+                }
+                if (widget.initialActivityCode != null) {
+                  if (_directStartError != null) {
+                    return AppErrorView(
+                      title: '활동을 시작하지 못했어요',
+                      message: '잠시 후 다시 시도해 주세요.',
+                      retryLabel: '다시 시도',
+                      onRetry: () => setState(() {
+                        _directStartError = null;
+                        _directStartScheduled = false;
+                      }),
+                    );
+                  }
+                  _scheduleDirectStart(types);
+                  return const AppLoadingView(
+                    message: '집·나무·사람 그림 활동을 준비하고 있어요',
                   );
                 }
                 return Padding(
