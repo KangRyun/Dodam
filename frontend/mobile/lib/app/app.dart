@@ -28,6 +28,8 @@ import '../features/report/data/repositories/mock_report_repository.dart';
 import '../features/report/data/services/platform_report_file_actions.dart';
 import '../features/report/domain/repositories/report_repository.dart';
 import '../features/report/domain/services/report_file_actions.dart';
+import '../features/settings/data/repositories/mock_account_withdrawal_repository.dart';
+import '../features/settings/domain/repositories/account_withdrawal_repository.dart';
 import 'router/app_navigation.dart';
 import 'router/app_router.dart';
 import 'router/app_routes.dart';
@@ -41,6 +43,7 @@ class DodamApp extends StatefulWidget {
     this.childRepository = const MockChildRepository(),
     this.childConsentRepository = const MockChildConsentRepository(),
     this.consentRepository = const MockConsentRepository(),
+    this.accountWithdrawalRepository = const MockAccountWithdrawalRepository(),
     this.drawingRepository = const MockDrawingRepository(),
     this.reportRepository = const MockReportRepository(),
     this.reportFileActions = const PlatformReportFileActions(),
@@ -72,6 +75,9 @@ class DodamApp extends StatefulWidget {
   /// 아동 대상 약관 조회·동의 기록 경계. 실 연동 시 원격 구현을 주입한다.
   final ChildConsentRepository childConsentRepository;
   final ConsentRepository consentRepository;
+
+  /// USER-05 회원 탈퇴 경계. 실 연동 시 원격 구현을 주입한다.
+  final AccountWithdrawalRepository accountWithdrawalRepository;
   final DrawingRepository drawingRepository;
   final ReportRepository reportRepository;
   final ReportFileActions reportFileActions;
@@ -397,6 +403,7 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       notificationBadgeController: _notificationBadgeController,
       onGuardianTabChanged: (routeName) => _guardianTabRoute = routeName,
       consentRepository: widget.consentRepository,
+      accountWithdrawalRepository: widget.accountWithdrawalRepository,
       drawingCompletionSnapshotProvider:
           widget.drawingCompletionSnapshotProvider,
       conversationRepository: widget.conversationRepository,

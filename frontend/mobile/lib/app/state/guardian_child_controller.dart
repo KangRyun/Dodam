@@ -32,6 +32,18 @@ final class GuardianChildController extends ChangeNotifier {
   /// 목록 조회가 실패한 원인. 화면이 오프라인·서버 오류를 구분해 안내하는 데 쓴다.
   Object? get listError => _listError;
   List<ChildSummaryDto> get children => _children;
+
+  /// 목록 조회로 **확정된** 아동 수. 아직 확인하지 못했으면 `null`.
+  ///
+  /// 조회 실패([ChildListStatus.error])나 조회 전([ChildListStatus.idle],
+  /// [ChildListStatus.loading])에도 [children]은 빈 목록이라, 길이만 보면
+  /// "아이가 없는 계정"과 구분되지 않는다. 없다고 단정하면 위험한 화면
+  /// (회원 탈퇴 안내 등)은 이 값을 써야 한다.
+  int? get confirmedChildCount => switch (_status) {
+    ChildListStatus.success || ChildListStatus.empty => _children.length,
+    ChildListStatus.idle || ChildListStatus.loading || ChildListStatus.error =>
+      null,
+  };
   ChildSummaryDto? get selectedChild => _selectedChild;
   int? get selectedChildId => _selectedChild?.childId;
   ChildRegistrationStatus get registrationStatus => _registrationStatus;
