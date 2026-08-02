@@ -113,11 +113,18 @@ v1(JAR) 서명 블록이 없어서, `keytool -printcert -jarfile` 이 **제대�
 `apksigner` 는 build-tools 안에 있고 PATH 에 없어(이미지 PATH 에는 cmdline-tools·platform-tools 만
 있다) 스크립트가 설치된 것 중 가장 높은 버전을 직접 찾는다.
 
-(선택) 실기기 스모크 — APK 는 설치 파일이라 바로 얹어볼 수 있다:
+### 실기기 스모크 — **제출 전 필수** (S15P11B209-632)
+
+APK 는 설치 파일이라 바로 얹어볼 수 있다. **제출할 바로 그 APK 로** 한 번 훑는다(10~15분):
 
 ```bash
 adb install -r build-artifacts/app-release.apk
 ```
+
+체크리스트: **`docs/출시/RC-스모크-체크리스트.md`**
+
+★ 표시(아동 가드레일) 항목이 하나라도 어긋나면 **제출하지 않는다.** 결과는 그 문서 §7 표에
+기록해 Jira 에 남긴다 — "이상 없음"도 기록이다.
 
 ---
 
