@@ -9,11 +9,17 @@ final class RemoteConsentRepository implements ConsentRepository {
 
   final ApiClient _apiClient;
 
+  /// CONSENT-01 `GET /consents/terms`.
+  ///
+  /// [scope]가 `null`이면 `targetScope`를 아예 보내지 않는다. 서버가 그 Query를
+  /// 선택값으로 두고 없으면 범위 필터를 걸지 않아, 한 번의 호출로 USER·CHILD
+  /// 약관을 모두 받는다. 빈 문자열을 보내면 Enum 변환 400이 되므로 키 자체를
+  /// 뺀다.
   @override
-  Future<List<ConsentTermDto>> getTerms(ConsentTargetScope scope) async {
+  Future<List<ConsentTermDto>> getTerms([ConsentTargetScope? scope]) async {
     final response = await _apiClient.get<Object?>(
       'consents/terms',
-      queryParameters: {'targetScope': scope.wire},
+      queryParameters: {'targetScope': ?scope?.wire},
     );
     return envelopeList(response.data)
         .map((item) => ConsentTermDto.fromJson(jsonObject(item)))

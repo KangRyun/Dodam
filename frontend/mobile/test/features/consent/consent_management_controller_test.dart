@@ -110,7 +110,7 @@ final class _FakeConsentRepository implements ConsentRepository {
   int? lastStatusChildId;
 
   @override
-  Future<List<ConsentTermDto>> getTerms(ConsentTargetScope scope) async =>
+  Future<List<ConsentTermDto>> getTerms([ConsentTargetScope? scope]) async =>
       scope == ConsentTargetScope.child ? childTerms : userTerms;
 
   @override

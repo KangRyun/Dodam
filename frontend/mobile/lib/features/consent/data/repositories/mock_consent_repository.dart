@@ -13,6 +13,8 @@ final class MockConsentRepository implements ConsentRepository {
       title: '서비스 이용약관',
       required: true,
       version: 'v1',
+      targetScope: ConsentTargetScope.user,
+      contentHtml: '<p>제1조(목적)</p><p>이 약관은 서비스 이용 조건과 절차를 정합니다.</p>',
     ),
     ConsentTermDto(
       termId: 2,
@@ -20,6 +22,9 @@ final class MockConsentRepository implements ConsentRepository {
       title: '개인정보 수집·이용',
       required: true,
       version: 'v1',
+      targetScope: ConsentTargetScope.user,
+      // 실제로 공표된 정적 페이지. mock 모드 시연에서 원문 웹뷰가 열려야 한다.
+      contentUrl: 'https://i15b209.p.ssafy.io/legal/privacy/',
     ),
     ConsentTermDto(
       termId: 3,
@@ -27,6 +32,7 @@ final class MockConsentRepository implements ConsentRepository {
       title: '마케팅 정보 수신',
       required: false,
       version: 'v1',
+      targetScope: ConsentTargetScope.user,
     ),
   ];
 
@@ -37,6 +43,8 @@ final class MockConsentRepository implements ConsentRepository {
       title: '아동 데이터 처리',
       required: true,
       version: 'v1',
+      targetScope: ConsentTargetScope.child,
+      contentHtml: '<p>아이의 그림과 대화를 관찰 리포트를 만드는 데 사용합니다.</p>',
     ),
     ConsentTermDto(
       termId: 12,
@@ -44,6 +52,7 @@ final class MockConsentRepository implements ConsentRepository {
       title: '음성 데이터 처리',
       required: false,
       version: 'v1',
+      targetScope: ConsentTargetScope.child,
     ),
   ];
 
@@ -89,8 +98,12 @@ final class MockConsentRepository implements ConsentRepository {
   ];
 
   @override
-  Future<List<ConsentTermDto>> getTerms(ConsentTargetScope scope) async =>
-      scope == ConsentTargetScope.child ? _childTerms : _userTerms;
+  Future<List<ConsentTermDto>> getTerms([ConsentTargetScope? scope]) async =>
+      switch (scope) {
+        ConsentTargetScope.child => _childTerms,
+        ConsentTargetScope.user => _userTerms,
+        null => const [..._userTerms, ..._childTerms],
+      };
 
   @override
   Future<ConsentStatusDto> getStatus({int? childId}) async => childId == null

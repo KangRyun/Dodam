@@ -173,10 +173,12 @@ class _SettingsContent extends StatelessWidget {
             _SettingsGroup(
               children: [
                 _SettingsTile(
+                  key: const ValueKey('settings-terms-tile'),
                   icon: Icons.description_outlined,
                   title: '약관 및 정책',
                   subtitle: '서비스 이용약관 · 개인정보 처리방침',
-                  onTap: () => onItemSelected('약관 및 정책'),
+                  onTap: () =>
+                      AppNavigation.pushNamed(context, AppRoutes.settingsTerms),
                 ),
               ],
             ),
@@ -294,6 +296,7 @@ class _SettingsTile extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onTap,
+    super.key,
   });
 
   final IconData icon;
