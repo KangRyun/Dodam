@@ -32,9 +32,10 @@ class VersionTest(unittest.TestCase):
             prompts_registry.content_hash("report_common"),
         )
 
-    def test_unknown_prompt_uses_zero_semver(self):
-        # 표에 없는 이름은 0.0.0으로 표기(파일이 있으면 해시는 계산됨).
-        self.assertTrue(prompts_registry.version("guardrails").startswith("1.0.0+"))
+    def test_registered_prompt_uses_its_semver(self):
+        # 표에 등록된 이름은 그 semver를 그대로 쓴다.
+        semver = prompts_registry._PROMPT_SEMVER["guardrails"]
+        self.assertTrue(prompts_registry.version("guardrails").startswith(f"{semver}+"))
 
     def test_composite_sorts_and_joins(self):
         composite = prompts_registry.composite_version("conversations", "first_question")
