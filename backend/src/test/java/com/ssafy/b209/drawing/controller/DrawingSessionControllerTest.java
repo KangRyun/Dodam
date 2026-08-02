@@ -110,6 +110,59 @@ class DrawingSessionControllerTest {
   }
 
   @Test
+  void rejectsOutOfRangeStrokePointPressureBeforeCallingTheService() throws Exception {
+    // 필압은 nullable 이지만 값이 오면 0..1 계약을 지켜야 한다(S15P11B209-481).
+    for (String pressure : new String[] {"1.5", "-0.1"}) {
+      mockMvc
+          .perform(
+              post("/api/v1/drawing-sessions/100/stroke-batches")
+                  .contentType(MediaType.APPLICATION_JSON)
+                  .content(
+                      validStrokeBatch()
+                          .replace(
+                              "{\"x\":0.18,\"y\":0.42,\"t\":0}",
+                              "{\"x\":0.18,\"y\":0.42,\"t\":0,\"pressure\":" + pressure + "}")))
+          .andExpect(status().isBadRequest())
+          .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+    }
+    verifyNoInteractions(strokeBatchService);
+  }
+
+  @Test
+  void rejectsOutOfRangeStrokeEventPressureBeforeCallingTheService() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/100/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(validStrokeBatch().replace("\"pressure\": null", "\"pressure\": 1.5")))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+
+    verifyNoInteractions(strokeBatchService);
+  }
+
+  @Test
+  void acceptsBoundaryStrokePointPressureZeroAndOne() throws Exception {
+    StrokeBatchResponse response =
+        new StrokeBatchResponse(15L, 3, 1, 101, Instant.parse("2026-07-21T02:32:10Z"));
+    given(strokeBatchService.save(eq(100L), any()))
+        .willReturn(new StrokeBatchSaveResult(response, true));
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/100/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    validStrokeBatch()
+                        .replace(
+                            "{\"x\":0.18,\"y\":0.42,\"t\":0},{\"x\":0.19,\"y\":0.43,\"t\":16}",
+                            "{\"x\":0.18,\"y\":0.42,\"t\":0,\"pressure\":0.0},"
+                                + "{\"x\":0.19,\"y\":0.43,\"t\":16,\"pressure\":1.0}")))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.code").value("COMMON_201"));
+  }
+
+  @Test
   void rejectsStrokeBatchHttpBodyOverOneMebibyteBeforeDeserialization() throws Exception {
     String valid = validStrokeBatch();
     int paddingLength = 1024 * 1024 + 1 - valid.getBytes(StandardCharsets.UTF_8).length;
