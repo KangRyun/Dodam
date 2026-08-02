@@ -11,7 +11,6 @@ import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.ReportActivityNoteView;
 import com.ssafy.b209.report.domain.ReportActivitySummaryView;
 import com.ssafy.b209.report.domain.ReportDetailView;
-import com.ssafy.b209.report.domain.ReportDetectedObjectView;
 import com.ssafy.b209.report.domain.ReportDrawingAssetView;
 import com.ssafy.b209.report.domain.ReportDrawingEmotionView;
 import com.ssafy.b209.report.domain.ReportDrawingSessionView;
@@ -25,6 +24,7 @@ import com.ssafy.b209.report.repository.ReportActivityNoteViewRepository;
 import com.ssafy.b209.report.repository.ReportActivitySummaryViewRepository;
 import com.ssafy.b209.report.repository.ReportConversationSummaryViewRepository;
 import com.ssafy.b209.report.repository.ReportDetailViewRepository;
+import com.ssafy.b209.report.repository.ReportDetectedObjectRow;
 import com.ssafy.b209.report.repository.ReportDetectedObjectViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingAssetViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingEmotionViewRepository;
@@ -53,6 +53,9 @@ class ReportDetailQueryServiceTest {
   private static final Long REPORT_ID = 500L;
   private static final Long SESSION_ID = 100L;
   private static final Long ANALYSIS_ID = 700L;
+  private static final Long DETECTION_ANALYSIS_ID = 344L;
+  private static final Long TREE_SESSION_ID = 101L;
+  private static final Long PERSON_SESSION_ID = 102L;
   private static final Long TYPE_ID = 3L;
   private static final Long CHILD_ID = 1L;
   private static final LocalDateTime STARTED_AT = LocalDateTime.of(2026, 7, 21, 2, 0, 0);
@@ -151,8 +154,8 @@ class ReportDetailQueryServiceTest {
                 keyConversation(806L, "파란색", "OPTION_ANSWER", (short) 1)));
     when(followUpGuideRepository.findByReportIdOrderByDisplayOrderAsc(REPORT_ID))
         .thenReturn(List.of(guide("오늘 그림에 대해 함께 이야기해 보세요", (short) 0)));
-    when(detectedObjectRepository.findByAnalysisIdOrderByDetectionOrderAsc(ANALYSIS_ID))
-        .thenReturn(List.of(detectedObject("집", 0), detectedObject("나무", 1)));
+    when(detectedObjectRepository.findActivityDetectedObjects(SESSION_ID))
+        .thenReturn(List.of(detectedObject(SESSION_ID, "집"), detectedObject(SESSION_ID, "나무")));
 
     ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
 
@@ -227,6 +230,71 @@ class ReportDetailQueryServiceTest {
 
     assertThat(response.drawing().finalImageUrl()).isEqualTo("/api/v1/drawing-assets/12/file");
     assertThat(response.drawing().thumbnailUrl()).isEqualTo("/api/v1/drawing-assets/12/file");
+  }
+
+  @Test
+  void listsDetectedObjectsOfEveryHtpSessionInSubjectOrder() {
+    givenAccessibleReport();
+    when(detectedObjectRepository.findActivityDetectedObjects(SESSION_ID))
+        .thenReturn(
+            List.of(
+                detectedObject(SESSION_ID, "집"),
+                detectedObject(SESSION_ID, "창문"),
+                detectedObject(TREE_SESSION_ID, "나무"),
+                detectedObject(PERSON_SESSION_ID, "사람")));
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.activityFacts().detectedObjects()).containsExactly("집", "창문", "나무", "사람");
+  }
+
+  @Test
+  void keepsOnlyTheLatestDetectionAnalysisOfEachSession() {
+    givenAccessibleReport();
+    when(detectedObjectRepository.findActivityDetectedObjects(SESSION_ID))
+        .thenReturn(
+            List.of(
+                detectedObject(SESSION_ID, 344L, "집"),
+                detectedObject(SESSION_ID, 300L, "지난 분석 결과"),
+                detectedObject(TREE_SESSION_ID, 345L, "나무")));
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.activityFacts().detectedObjects()).containsExactly("집", "나무");
+  }
+
+  @Test
+  void skipsSessionsWithoutDetectedObjectNames() {
+    givenAccessibleReport();
+    when(detectedObjectRepository.findActivityDetectedObjects(SESSION_ID))
+        .thenReturn(
+            List.of(
+                detectedObject(SESSION_ID, "집"),
+                detectedObject(TREE_SESSION_ID, null),
+                detectedObject(PERSON_SESSION_ID, "   "),
+                detectedObject(PERSON_SESSION_ID, "사람")));
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.activityFacts().detectedObjects()).containsExactly("집", "사람");
+  }
+
+  @Test
+  void returnsEmptyDetectedObjectsWhenActivityHasNoObjectDetectionAnalysis() {
+    givenAccessibleReport();
+    when(detectedObjectRepository.findActivityDetectedObjects(SESSION_ID)).thenReturn(List.of());
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.activityFacts().detectedObjects()).isEmpty();
+  }
+
+  private void givenAccessibleReport() {
+    when(reportRepository.findById(REPORT_ID))
+        .thenReturn(Optional.of(report(ReportStatus.COMPLETED, "한계 문구")));
+    when(guardianAccessRepository.hasDrawingSessionAccess(GUARDIAN_ID, SESSION_ID))
+        .thenReturn(true);
+    when(drawingSessionRepository.findById(SESSION_ID)).thenReturn(Optional.of(session()));
   }
 
   private ReportDetailView report(ReportStatus status, String limitationsText) {
@@ -320,12 +388,13 @@ class ReportDetailQueryServiceTest {
     return guide;
   }
 
-  private ReportDetectedObjectView detectedObject(String name, int order) {
-    ReportDetectedObjectView object = instantiate(ReportDetectedObjectView.class);
-    ReflectionTestUtils.setField(object, "analysisId", ANALYSIS_ID);
-    ReflectionTestUtils.setField(object, "objectName", name);
-    ReflectionTestUtils.setField(object, "detectionOrder", order);
-    return object;
+  private ReportDetectedObjectRow detectedObject(Long drawingSessionId, String name) {
+    return new ReportDetectedObjectRow(drawingSessionId, DETECTION_ANALYSIS_ID, name);
+  }
+
+  private ReportDetectedObjectRow detectedObject(
+      Long drawingSessionId, Long analysisId, String name) {
+    return new ReportDetectedObjectRow(drawingSessionId, analysisId, name);
   }
 
   private static <T> T instantiate(Class<T> type) {

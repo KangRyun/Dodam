@@ -6,7 +6,6 @@ import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.ReportActivitySummaryView;
 import com.ssafy.b209.report.domain.ReportConversationSummaryView;
 import com.ssafy.b209.report.domain.ReportDetailView;
-import com.ssafy.b209.report.domain.ReportDetectedObjectView;
 import com.ssafy.b209.report.domain.ReportDrawingAssetView;
 import com.ssafy.b209.report.domain.ReportDrawingEmotionView;
 import com.ssafy.b209.report.domain.ReportDrawingSessionView;
@@ -25,6 +24,7 @@ import com.ssafy.b209.report.repository.ReportActivityNoteViewRepository;
 import com.ssafy.b209.report.repository.ReportActivitySummaryViewRepository;
 import com.ssafy.b209.report.repository.ReportConversationSummaryViewRepository;
 import com.ssafy.b209.report.repository.ReportDetailViewRepository;
+import com.ssafy.b209.report.repository.ReportDetectedObjectRow;
 import com.ssafy.b209.report.repository.ReportDetectedObjectViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingAssetViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingEmotionViewRepository;
@@ -33,6 +33,7 @@ import com.ssafy.b209.report.repository.ReportDrawingTypeViewRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideViewRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationViewRepository;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -226,27 +227,42 @@ public class ReportDetailQueryService {
     ReportActivitySummaryView summary =
         activitySummaryRepository.findById(report.getId()).orElse(null);
 
-    List<String> detectedObjects = new ArrayList<>();
-    for (ReportDetectedObjectView object :
-        detectedObjectRepository.findByAnalysisIdOrderByDetectionOrderAsc(report.getAnalysisId())) {
-      String name = object.getObjectName();
-      if (name != null && !name.isBlank()) {
-        detectedObjects.add(name);
-      }
-    }
-
     List<String> notes = new ArrayList<>();
     activityNoteRepository
         .findByReportIdOrderByDisplayOrderAsc(report.getId())
         .forEach(note -> notes.add(note.getNoteText()));
 
     return new ReportActivityFactsResponse(
-        detectedObjects,
+        buildDetectedObjects(report.getDrawingSessionId()),
         summary == null ? null : summary.getDrawingDurationMs(),
         summary == null ? null : summary.getPauseCount(),
         summary == null ? null : summary.getEraseCount(),
         summary != null && summary.isPressureAvailable(),
         notes);
+  }
+
+  /**
+   * 활동에서 탐지된 객체명을 노출 순서대로 모은다.
+   *
+   * <p>조회 결과는 이미 주제 순서와 세션별 분석 최신순으로 정렬돼 있어, 세션마다 처음 만난 분석의 행만 남기면 세션당 최신 한 건이 된다. 탐지 결과가 없는 세션은 행이
+   * 없어 자연히 건너뛴다.
+   */
+  private List<String> buildDetectedObjects(Long drawingSessionId) {
+    List<String> detectedObjects = new ArrayList<>();
+    Map<Long, Long> latestAnalysisBySession = new HashMap<>();
+    for (ReportDetectedObjectRow row :
+        detectedObjectRepository.findActivityDetectedObjects(drawingSessionId)) {
+      Long latestAnalysisId =
+          latestAnalysisBySession.computeIfAbsent(row.drawingSessionId(), key -> row.analysisId());
+      if (!latestAnalysisId.equals(row.analysisId())) {
+        continue;
+      }
+      String name = row.objectName();
+      if (name != null && !name.isBlank()) {
+        detectedObjects.add(name);
+      }
+    }
+    return detectedObjects;
   }
 
   private ReportConversationSummaryResponse buildConversationSummary(ReportDetailView report) {
