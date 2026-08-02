@@ -328,6 +328,43 @@ void main() {
     expect(find.text('선택된 아동이 없어요'), findsOneWidget);
     expect(find.text('봄이, 오늘은 무엇을 그려 볼까?'), findsNothing);
   });
+
+  // 회원 탈퇴 안내처럼 "아이가 없다"는 단정이 위험한 화면이 쓰는 값이다.
+  // 실패·미조회를 0으로 뭉개면 서버가 실제로 아이를 삭제하는데도 없다고 안내한다.
+  test('아동 수는 목록 조회가 확정된 뒤에만 알려준다', () async {
+    final repository = _FakeChildRepository(children: _children);
+    final controller = GuardianChildController(repository);
+    addTearDown(controller.dispose);
+
+    expect(
+      controller.confirmedChildCount,
+      isNull,
+      reason: '조회 전에는 확정된 수가 없다',
+    );
+
+    await controller.loadChildren();
+    expect(controller.confirmedChildCount, _children.length);
+
+    repository.children = const [];
+    await controller.loadChildren();
+    expect(
+      controller.confirmedChildCount,
+      0,
+      reason: '실제로 0건임을 확인한 경우에만 0이다',
+    );
+
+    repository.error = StateError('offline');
+    await controller.loadChildren();
+    expect(controller.status, ChildListStatus.error);
+    expect(
+      controller.confirmedChildCount,
+      isNull,
+      reason: '조회 실패는 "아이 0명"이 아니다',
+    );
+
+    controller.clear();
+    expect(controller.confirmedChildCount, isNull);
+  });
 }
 
 Future<void> _tapAfterScroll(WidgetTester tester, Key key) async {

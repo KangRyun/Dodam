@@ -28,6 +28,8 @@ import '../../features/report/domain/repositories/report_repository.dart';
 import '../../features/report/domain/services/report_file_actions.dart';
 import '../../features/consent/domain/repositories/consent_repository.dart';
 import '../../features/consent/presentation/screens/consent_management_screen.dart';
+import '../../features/settings/domain/repositories/account_withdrawal_repository.dart';
+import '../../features/settings/presentation/screens/account_withdrawal_screen.dart';
 import '../../features/settings/presentation/screens/settings_main_screen.dart';
 import '../state/guardian_child_controller.dart';
 import '../widgets/app_placeholder_scaffold.dart';
@@ -56,6 +58,7 @@ abstract final class AppRouter {
     NotificationBadgeController? notificationBadgeController,
     ValueChanged<String?>? onGuardianTabChanged,
     ConsentRepository? consentRepository,
+    AccountWithdrawalRepository? accountWithdrawalRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
     ConversationRepository? conversationRepository,
     ConversationEndRepository? conversationEndRepository,
@@ -254,6 +257,18 @@ abstract final class AppRouter {
         ConsentManagementScreen(
           repository: consentRepository,
           children: childController.children,
+        ),
+      // 어떤 아이가 단독 보호인지는 서버만 안다. 화면에는 연결된 아이 수만
+      // 넘겨 "아이가 있는 계정 / 없는 계정" 안내를 가른다(S15P11B209-460).
+      // 목록 조회가 확정되지 않았으면(`confirmedChildCount == null`) "아이가
+      // 없다"고 단정하지 않는다 — 서버는 목록 조회 성공 여부와 무관하게 단독
+      // 보호 아동을 삭제한다.
+      ['guardian', 'settings', 'withdraw']
+          when accountWithdrawalRepository != null && authSignOut != null =>
+        AccountWithdrawalScreen(
+          repository: accountWithdrawalRepository,
+          onSignOut: authSignOut,
+          connectedChildCount: childController?.confirmedChildCount,
         ),
       // 커뮤니티는 웹 전용(CLAUDE.md 6절). 웹앱을 웹뷰로 띄우고 로그인 토큰을
       // localStorage에 주입한다. URL은 COMMUNITY_WEB_URL dart-define로 교체 가능.

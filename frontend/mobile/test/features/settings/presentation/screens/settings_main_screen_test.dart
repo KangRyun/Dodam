@@ -86,4 +86,26 @@ void main() {
     expect(signOutCount, 1);
     expect(find.text('소셜 로그인'), findsOneWidget);
   });
+
+  testWidgets('회원 탈퇴를 누르면 준비 중 안내 대신 탈퇴 화면으로 이동한다', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        routes: {
+          '/guardian/settings/withdraw': (_) =>
+              const Scaffold(body: Text('회원 탈퇴 확인 화면')),
+        },
+        home: SettingsMainScreen(user: session.user, onSignOut: () async {}),
+      ),
+    );
+
+    final withdrawAction = find.byKey(
+      const ValueKey('settings-withdraw-action'),
+    );
+    await tester.ensureVisible(withdrawAction);
+    await tester.tap(withdrawAction);
+    await tester.pumpAndSettle();
+
+    expect(find.text('회원 탈퇴 확인 화면'), findsOneWidget);
+    expect(find.textContaining('준비 중이에요'), findsNothing);
+  });
 }

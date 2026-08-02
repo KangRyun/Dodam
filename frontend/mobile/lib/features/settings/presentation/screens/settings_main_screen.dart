@@ -184,7 +184,10 @@ class _SettingsContent extends StatelessWidget {
             _AccountActions(
               isSigningOut: isSigningOut,
               onSignOut: onSignOut,
-              onWithdraw: () => onItemSelected('회원 탈퇴'),
+              onWithdraw: () => AppNavigation.pushNamed(
+                context,
+                AppRoutes.settingsWithdraw,
+              ),
             ),
           ],
         ),
@@ -363,6 +366,7 @@ class _AccountActions extends StatelessWidget {
           endIndent: AppSpacing.md,
         ),
         ListTile(
+          key: const ValueKey('settings-withdraw-action'),
           minTileHeight: 64,
           title: Text(
             '회원 탈퇴',

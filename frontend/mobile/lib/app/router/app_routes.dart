@@ -22,6 +22,10 @@ abstract final class AppRoutes {
   static const String settingsConsents =
       '/guardian/settings/consents'; // CONSENT /consents (S15P11B209-706)
 
+  /// USER-05 `DELETE /users/me` 회원 탈퇴 확인·데이터 처리 안내
+  /// (S15P11B209-460).
+  static const String settingsWithdraw = '/guardian/settings/withdraw';
+
   static String childModeHome(String childId) =>
       '/child/${Uri.encodeComponent(childId)}/home';
 
