@@ -294,6 +294,9 @@ abstract final class AppRouter {
           replaceActive:
               (settings.arguments! as DrawingActivitySelectionRouteArguments)
                   .replaceActive,
+          initialActivityCode:
+              (settings.arguments! as DrawingActivitySelectionRouteArguments)
+                  .initialActivityCode,
           completionSnapshotProvider: drawingCompletionSnapshotProvider,
         ),
       ['child', final childId, 'activity', 'input-method']
@@ -545,9 +548,15 @@ enum DrawingRouteResult {
 }
 
 final class DrawingActivitySelectionRouteArguments {
-  const DrawingActivitySelectionRouteArguments({this.replaceActive = false});
+  const DrawingActivitySelectionRouteArguments({
+    this.replaceActive = false,
+    this.initialActivityCode,
+  });
 
   final bool replaceActive;
+
+  /// 값이 있으면 활동 카드 선택을 생략하고 해당 활동의 시작 화면을 연다.
+  final String? initialActivityCode;
 }
 
 /// 보호자가 정한 활동을 아동 홈까지 전달하고, 실제 캔버스 진입은 아동이 한다.

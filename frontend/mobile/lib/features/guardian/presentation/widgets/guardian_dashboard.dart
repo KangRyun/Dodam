@@ -312,7 +312,9 @@ class _HeroCard extends StatelessWidget {
                     AppRoutes.drawingActivitySelection(
                       child.childId.toString(),
                     ),
-                    arguments: const DrawingActivitySelectionRouteArguments(),
+                    arguments: const DrawingActivitySelectionRouteArguments(
+                      initialActivityCode: 'HTP',
+                    ),
                     rootNavigator: true,
                   ),
           ),
@@ -527,12 +529,16 @@ class _Cta extends StatelessWidget {
             children: [
               Icon(Icons.edit_outlined, size: 20, color: DodamHome.onPoint),
               SizedBox(width: 8),
-              Text(
-                '새 활동 시작하기',
-                style: TextStyle(
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                  color: DodamHome.onPoint,
+              Flexible(
+                child: Text(
+                  '집·나무·사람 그림 활동하기',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: DodamHome.onPoint,
+                  ),
                 ),
               ),
             ],
