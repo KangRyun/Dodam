@@ -1,6 +1,11 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../../../app/router/app_navigation.dart';
+import '../../../../app/router/notification_route_resolver.dart';
 import '../../../../design_system/design_system.dart';
+import '../../application/notification_badge_controller.dart';
 import '../../data/dto/notification_inbox_dtos.dart';
 import '../../domain/repositories/notification_inbox_repository.dart';
 
@@ -9,9 +14,17 @@ import '../../domain/repositories/notification_inbox_repository.dart';
 /// 첫 페이지와 추가 페이지 모두 NOTI-03을 사용하며 화면 내부에 샘플 알림을
 /// 만들지 않는다. 서버가 빈 목록을 반환하면 빈 상태를 표시한다.
 class NotificationListScreen extends StatefulWidget {
-  const NotificationListScreen({required this.repository, super.key});
+  const NotificationListScreen({
+    required this.repository,
+    this.badgeController,
+    super.key,
+  });
 
   final NotificationInboxRepository repository;
+
+  /// 읽음 처리 결과를 사이드바 배지에 반영할 대상. 주지 않으면 배지를 갱신하지
+  /// 않고 목록만 동작한다(단독 라우트·테스트 구성).
+  final NotificationBadgeController? badgeController;
 
   @override
   State<NotificationListScreen> createState() => _NotificationListScreenState();
@@ -20,6 +33,11 @@ class NotificationListScreen extends StatefulWidget {
 class _NotificationListScreenState extends State<NotificationListScreen> {
   final _scrollController = ScrollController();
   final List<NotificationItemDto> _items = [];
+
+  /// 읽음 처리 응답을 기다리는 중인 알림 id. 카드가 들고 있는 [NotificationItemDto]는
+  /// build 시점에 캡처된 불변 인스턴스라 응답이 오기 전에는 계속 미열람으로 보인다.
+  /// 연타를 막지 않으면 서버는 멱등이라 1건만 줄지만 배지는 두 번 줄어든다.
+  final _pendingReads = <int>{};
 
   bool _isLoading = true;
   bool _isLoadingMore = false;
@@ -63,6 +81,11 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
         _page = result.page;
         _hasNext = result.hasNext;
       });
+      // 사이드바 셸이 IndexedStack으로 탭을 살려 두므로 알림 탭에 다시 들어와도
+      // initState가 재실행되지 않는다. 당겨서 새로고침·오류 재시도처럼 사용자가
+      // 목록을 다시 받는 지점이 배지 어긋남을 되돌릴 창구가 된다. 목록 왕복과
+      // 함께 보내고 기다리지 않아 새로고침 표시가 길어지지 않는다.
+      unawaited(widget.badgeController?.refresh());
     } on Object catch (error) {
       if (mounted) setState(() => _error = error);
     } finally {
@@ -102,11 +125,39 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
     }
   }
 
+  /// 알림 카드를 눌렀을 때 읽음 처리와 화면 이동을 함께 수행한다.
+  ///
+  /// 읽음 처리(NOTI-04)는 멱등하고 이동과 독립이라 결과를 기다리지 않는다.
+  /// 푸시 클릭 경로에는 읽음 호출 자체가 없으므로, 여기서 읽음을 이동의 전제로
+  /// 삼으면 두 경로의 동작이 갈라진다. 실패하면 `_markRead`가 안내만 띄운다.
+  ///
+  /// 이동 대상은 푸시와 같은 매핑 함수가 정한다(S15P11B209-501, 푸시 계약 §4.3).
+  /// 연결 자원이 없으면 계약상 알림함 목록이 기본값인데 이미 그 화면이므로
+  /// 이동하지 않는다.
+  void _handleCardTap(NotificationItemDto item) {
+    unawaited(_markRead(item));
+
+    final route = resolveNotificationItemRoute(
+      relatedResourceType: item.relatedResourceType,
+      relatedResourceId: item.relatedResourceId,
+    );
+    if (route == null) return;
+
+    AppNavigation.pushNamed(context, route);
+  }
+
   Future<void> _markRead(NotificationItemDto item) async {
     if (item.isRead) return;
+    // 응답을 기다리는 동안 같은 카드를 다시 눌러도 위 isRead 가드는 통과한다.
+    // 진행 중인 id를 붙잡아 두 번째 탭을 흘려보내야 감산이 한 번만 일어난다.
+    if (!_pendingReads.add(item.notificationId)) return;
 
     try {
       final result = await widget.repository.markRead(item.notificationId);
+      // 화면에 미열람으로 남아 있던 항목의 첫 읽음 처리이므로 배지에서 1건 뺀다.
+      // (다른 기기에서 이미 읽은 건이면 서버 미열람 수는 그대로라 배지가 한 건
+      // 적게 표시될 수 있다 — 응답에 판별 필드가 없어 다음 갱신 때 복구된다.)
+      widget.badgeController?.decrementBy(1);
       if (!mounted) return;
       final index = _items.indexWhere(
         (candidate) => candidate.notificationId == item.notificationId,
@@ -123,6 +174,8 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
           type: AppMessageType.error,
         );
       }
+    } finally {
+      _pendingReads.remove(item.notificationId);
     }
   }
 
@@ -132,6 +185,9 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
 
     try {
       final result = await widget.repository.markAllRead();
+      // updatedCount는 이번 호출로 새로 읽음 처리된 건수다(계약 §6.5). 화면에
+      // 안 올라온 페이지의 미열람까지 포함하므로 목록 길이 대신 이 값을 쓴다.
+      widget.badgeController?.decrementBy(result.updatedCount);
       if (!mounted) return;
       final readAt = result.readAt ?? DateTime.now().toIso8601String();
       setState(() {
@@ -223,7 +279,10 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
             );
           }
           final item = _items[index];
-          return _NotificationCard(item: item, onTap: () => _markRead(item));
+          return _NotificationCard(
+            item: item,
+            onTap: () => _handleCardTap(item),
+          );
         },
       ),
     );

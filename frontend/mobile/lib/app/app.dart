@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
@@ -18,6 +19,7 @@ import '../features/drawing/data/dto/drawing_dtos.dart';
 import '../features/drawing/data/repositories/mock_drawing_repository.dart';
 import '../features/drawing/domain/repositories/drawing_repository.dart';
 import '../features/conversation/conversation.dart';
+import '../features/notification/application/notification_badge_controller.dart';
 import '../features/notification/domain/entities/push_message.dart';
 import '../features/notification/domain/repositories/notification_inbox_repository.dart';
 import '../features/notification/domain/services/push_coordinator.dart';
@@ -26,10 +28,11 @@ import '../features/report/data/repositories/mock_report_repository.dart';
 import '../features/report/data/services/platform_report_file_actions.dart';
 import '../features/report/domain/repositories/report_repository.dart';
 import '../features/report/domain/services/report_file_actions.dart';
+import 'router/app_navigation.dart';
 import 'router/app_router.dart';
 import 'router/app_routes.dart';
 import 'router/current_route_observer.dart';
-import 'router/push_route_resolver.dart';
+import 'router/notification_route_resolver.dart';
 import 'state/guardian_child_controller.dart';
 
 class DodamApp extends StatefulWidget {
@@ -102,7 +105,7 @@ class DodamApp extends StatefulWidget {
   State<DodamApp> createState() => _DodamAppState();
 }
 
-class _DodamAppState extends State<DodamApp> {
+class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
   late final GuardianChildController _childController;
   late final AuthRepository _authRepository;
   late final SocialLoginService _socialLoginService;
@@ -115,17 +118,27 @@ class _DodamAppState extends State<DodamApp> {
   final _navigatorKey = GlobalKey<NavigatorState>();
   final _routeObserver = CurrentRouteObserver();
   PushCoordinator? _pushCoordinator;
+  NotificationBadgeController? _notificationBadgeController;
   AuthSession? _currentSession;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _childController = GuardianChildController(
       widget.childRepository,
       widget.childConsentRepository,
     );
+    final inboxRepository = widget.notificationInboxRepository;
+    if (inboxRepository != null) {
+      _notificationBadgeController = NotificationBadgeController(
+        inboxRepository,
+      );
+    }
     if (widget.initialRoute != AppRoutes.authBootstrap) {
       _childController.loadChildren();
+      // 인증 부트스트랩을 거치지 않는 구성(데모·직접 진입)은 여기가 앱 진입이다.
+      _refreshNotificationBadge();
     }
 
     _authRepository =
@@ -164,19 +177,39 @@ class _DodamAppState extends State<DodamApp> {
     _pushCoordinator = widget.pushSetup?.createCoordinator(
       onOpen: _openPushTarget,
       isChildModeActive: () => _routeObserver.isChildModeActive,
+      onInboxChanged: _refreshNotificationBadge,
     );
+  }
+
+  void _refreshNotificationBadge() {
+    unawaited(_notificationBadgeController?.refresh());
+  }
+
+  /// 포그라운드로 돌아오면 미열람 수를 다시 센다. 백그라운드에서 받은 푸시는
+  /// 앱이 떠 있을 때의 수신 스트림을 타지 않아 배지가 뒤처진다.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed) return;
+    _refreshNotificationBadge();
   }
 
   /// 푸시가 가리키는 화면으로 이동한다.
   ///
-  /// 대응 화면이 없으면 아무 데도 보내지 않는다. 서버가 준 자원과 무관한 화면을
-  /// 여는 것보다 앱만 열린 채 두는 편이 낫다(계약 §4.3). 알림함 화면
-  /// (S15P11B209-499)이 붙으면 그쪽으로 보낸다.
+  /// 연결 자원이 없으면 알림함 목록으로 보낸다(계약 §4.3). 알림함 카드 클릭과
+  /// 같은 매핑 함수를 쓰고, 이동도 같은 진입점을 지난다(S15P11B209-501).
+  ///
+  /// `Navigator`를 직접 부르면 이미 보고 있는 화면이 한 장 더 쌓인다 — 연결
+  /// 자원이 없는 푸시를 알림함에서 누르는 경우가 그렇다. 카드 탭 쪽은 같은
+  /// 상황에서 이동하지 않으므로, 판정기를 공유해 두 경로를 맞춘다.
   void _openPushTarget(PushMessage message) {
-    final route = resolvePushRoute(message);
-    if (route == null) return;
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) return;
 
-    _navigatorKey.currentState?.pushNamed(route);
+    AppNavigation.pushNamedOn(
+      navigator,
+      resolvePushRoute(message),
+      currentRouteName: _routeObserver.currentRouteName,
+    );
   }
 
   // Provider별 로그인 실행
@@ -241,6 +274,8 @@ class _DodamAppState extends State<DodamApp> {
       return;
     }
     await _childController.loadChildren();
+    // 보호자 세션이 확정된 뒤라야 알림함 조회에 토큰이 실린다.
+    _refreshNotificationBadge();
 
     if (_pushCoordinator == null) {
       developer.log('pushSetup 미주입 — 푸시 비활성', name: 'push');
@@ -271,10 +306,13 @@ class _DodamAppState extends State<DodamApp> {
     }
     _currentSession = null;
     _childController.clear();
+    _notificationBadgeController?.clear();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _notificationBadgeController?.dispose();
     _childController.dispose();
     super.dispose();
   }
@@ -318,6 +356,7 @@ class _DodamAppState extends State<DodamApp> {
       reportRepository: widget.reportRepository,
       reportFileActions: widget.reportFileActions,
       notificationInboxRepository: widget.notificationInboxRepository,
+      notificationBadgeController: _notificationBadgeController,
       consentRepository: widget.consentRepository,
       drawingCompletionSnapshotProvider:
           widget.drawingCompletionSnapshotProvider,

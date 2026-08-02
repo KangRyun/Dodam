@@ -48,4 +48,9 @@ abstract final class AppRoutes {
 
   static String report(String reportId) =>
       '/guardian/reports/${Uri.encodeComponent(reportId)}';
+
+  /// 커뮤니티 게시글 상세. 앱에 네이티브 화면이 없어 커뮤니티 웹뷰를 해당
+  /// 게시글 주소로 연다(알림 클릭 라우팅 — S15P11B209-501).
+  static String communityPost(String postId) =>
+      '/guardian/community/posts/${Uri.encodeComponent(postId)}';
 }

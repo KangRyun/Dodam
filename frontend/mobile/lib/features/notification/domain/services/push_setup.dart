@@ -29,6 +29,7 @@ final class PushSetup {
   PushCoordinator createCoordinator({
     required void Function(PushMessage message) onOpen,
     required bool Function() isChildModeActive,
+    void Function()? onInboxChanged,
   }) => PushCoordinator(
     gateway: gateway,
     presenter: presenter,
@@ -36,6 +37,7 @@ final class PushSetup {
     permissionService: permissionService,
     onOpen: onOpen,
     isChildModeActive: isChildModeActive,
+    onInboxChanged: onInboxChanged,
     exposeTokenInLogs: exposeTokenInLogs,
   );
 }

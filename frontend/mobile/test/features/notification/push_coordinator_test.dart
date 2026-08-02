@@ -14,6 +14,7 @@ void main() {
   late _FakePermissionService permissionService;
   late List<PushMessage> opened;
   late bool childModeActive;
+  late int inboxChanges;
 
   PushCoordinator build() => PushCoordinator(
     gateway: gateway,
@@ -22,6 +23,7 @@ void main() {
     permissionService: permissionService,
     onOpen: opened.add,
     isChildModeActive: () => childModeActive,
+    onInboxChanged: () => inboxChanges += 1,
   );
 
   PushMessage message(int id) => PushMessage(
@@ -38,6 +40,7 @@ void main() {
     permissionService = _FakePermissionService();
     opened = [];
     childModeActive = false;
+    inboxChanges = 0;
   });
 
   tearDown(() {
@@ -103,6 +106,36 @@ void main() {
 
     // 아이 화면을 덮거나 위험 문구가 노출되면 안 된다(가드레일 9절).
     expect(presenter.shown, isEmpty);
+  });
+
+  test('포그라운드 메시지를 받으면 알림함 갱신을 통지한다', () async {
+    await build().start();
+
+    gateway.emitForeground(message(900));
+    await pumpEventQueue();
+
+    expect(inboxChanges, 1);
+  });
+
+  test('아동 모드로 표시를 건너뛰어도 알림함 갱신은 통지한다', () async {
+    await build().start();
+    childModeActive = true;
+
+    gateway.emitForeground(message(900));
+    await pumpEventQueue();
+
+    // 표시만 막을 뿐 알림함에는 쌓였으므로 미열람 배지는 따라가야 한다.
+    expect(presenter.shown, isEmpty);
+    expect(inboxChanges, 1);
+  });
+
+  test('백그라운드에서 받은 알림을 눌러 열어도 알림함 갱신을 통지한다', () async {
+    await build().start();
+
+    gateway.emitOpened(message(900));
+    await pumpEventQueue();
+
+    expect(inboxChanges, 1);
   });
 
   test('알림을 누르면 이동 콜백을 부른다', () async {
