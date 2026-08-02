@@ -262,6 +262,13 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         return;
       }
 
+      // 홈 위에 다른 화면(그림 전시관 등)이 올라와 있으면 "이어 그리기" 팝업을 그
+      // 화면 위에 띄우지 않는다. _entryResolved 를 확정하지 않으므로 홈으로 돌아오면
+      // (_openPastDrawings 복귀 처리에서) 다시 확인해 그때 띄운다.
+      if (!(ModalRoute.of(context)?.isCurrent ?? true)) {
+        return;
+      }
+
       // 팝업 뒤 화면은 정적인 활동 목록으로 유지해 불필요한 로딩 애니메이션을
       // 계속 실행하지 않는다. 팝업이 입력을 막으므로 활동 중복 시작은 발생하지 않는다.
       setState(() => _entryResolved = true);
@@ -747,17 +754,23 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   /// 이젤 아래 secondary 입구. 활동 로딩 상태와 무관하게 항상 보여준다.
   Widget _pastDrawings() => _PastDrawingsButton(
     key: const ValueKey('past-drawings-entry'),
-    onTap: _openPastDrawings,
+    onTap: () => unawaited(_openPastDrawings()),
   );
 
   /// 지난 그림 보기 — 아이의 "그림 전시관"으로 이동한다.
   ///
   /// 갤러리 화면(HISTORY-01 활동 기록 재사용)은 라우터가 `activityRepository`와
   /// 함께 조립한다. 홈은 childId만 넘긴다.
-  void _openPastDrawings() {
-    Navigator.of(
+  Future<void> _openPastDrawings() async {
+    await Navigator.of(
       context,
     ).pushNamed(AppRoutes.childGallery(widget.child.childId.toString()));
+    // 전시관으로 넘어가느라 진입 확인(이어 그리기 여부)이 홈 위에서 미뤄졌다면,
+    // 돌아온 지금 다시 확인해 필요하면 이어 그리기 팝업을 띄운다.
+    if (!mounted) return;
+    if (!_entryResolved && !_checkingActiveSession) {
+      unawaited(_resolveEntry());
+    }
   }
 
   Widget _title(BuildContext context) => Column(
