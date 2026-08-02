@@ -14,6 +14,7 @@ void main() {
   late _FakePermissionService permissionService;
   late List<PushMessage> opened;
   late bool childModeActive;
+  late bool guardianSessionActive;
   late int inboxChanges;
 
   PushCoordinator build() => PushCoordinator(
@@ -23,6 +24,7 @@ void main() {
     permissionService: permissionService,
     onOpen: opened.add,
     isChildModeActive: () => childModeActive,
+    isGuardianSessionActive: () => guardianSessionActive,
     onInboxChanged: () => inboxChanges += 1,
   );
 
@@ -40,6 +42,7 @@ void main() {
     permissionService = _FakePermissionService();
     opened = [];
     childModeActive = false;
+    guardianSessionActive = true;
     inboxChanges = 0;
   });
 
@@ -164,6 +167,34 @@ void main() {
     await pumpEventQueue();
 
     expect(opened, isEmpty);
+  });
+
+  test('보호자 세션이 없으면 알림을 눌러도 이동하지 않는다', () async {
+    // 구독 해제와 플랫폼의 탭 전달이 딱 맞물리지 않아 로그아웃 정리 도중·직후에도
+    // 탭이 올라온다. S15P11B209-501이 "연결 자원이 없으면 알림함"을 기본값으로
+    // 둔 뒤로는 이동이 항상 일어나므로, 세션을 보지 않으면 로그인 화면 위에
+    // 직전 보호자의 알림함이 얹힌다(501 QA M-3).
+    await build().start();
+    guardianSessionActive = false;
+
+    gateway.emitOpened(message(900));
+    presenter.emitTap(message(901));
+    await pumpEventQueue();
+
+    expect(opened, isEmpty);
+  });
+
+  test('세션이 없어 이동을 버려도 알림함 갱신은 통지한다', () async {
+    // 통지는 두 게이트보다 앞에 있어야 한다. 뒤로 밀면 이동을 막는 동안 미열람
+    // 배지가 따라오지 못한다(S15P11B209-502 설계).
+    await build().start();
+    guardianSessionActive = false;
+
+    gateway.emitOpened(message(900));
+    await pumpEventQueue();
+
+    expect(opened, isEmpty);
+    expect(inboxChanges, 1);
   });
 
   test('종료 상태에서 알림으로 실행되면 최초 메시지를 이어받는다', () async {

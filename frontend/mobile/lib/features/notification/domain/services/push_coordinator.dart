@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'dart:developer' as developer;
 
 import '../entities/push_message.dart';
@@ -19,6 +19,7 @@ final class PushCoordinator {
     required PushPermissionService permissionService,
     required void Function(PushMessage message) onOpen,
     required bool Function() isChildModeActive,
+    required bool Function() isGuardianSessionActive,
     void Function()? onInboxChanged,
     PushDedupe? dedupe,
     bool exposeTokenInLogs = false,
@@ -29,6 +30,7 @@ final class PushCoordinator {
     permissionService,
     onOpen,
     isChildModeActive,
+    isGuardianSessionActive,
     onInboxChanged,
     dedupe ?? PushDedupe(),
     exposeTokenInLogs,
@@ -41,6 +43,7 @@ final class PushCoordinator {
     this._permissionService,
     this._onOpen,
     this._isChildModeActive,
+    this._isGuardianSessionActive,
     this._onInboxChanged,
     this._dedupe,
     this._exposeTokenInLogs,
@@ -52,6 +55,9 @@ final class PushCoordinator {
   final PushPermissionService _permissionService;
   final void Function(PushMessage message) _onOpen;
   final bool Function() _isChildModeActive;
+
+  /// 지금 보호자 세션이 살아 있는지. 앱 계층만 알 수 있어 주입받는다.
+  final bool Function() _isGuardianSessionActive;
 
   /// 알림함 내용이 바뀌었을 수 있음을 알린다. 미열람 배지를 다시 세는 용도이며
   /// 실패해도 푸시 흐름을 끊지 않는다.
@@ -135,8 +141,20 @@ final class PushCoordinator {
 
   void _open(PushMessage message) {
     // 백그라운드·종료 상태에서 받은 알림은 _present를 거치지 않아 여기서 처음
-    // 알게 된다.
+    // 알게 된다. 아래 두 게이트보다 **앞**이어야 이동을 막아도 미열람 배지가
+    // 정확히 오른다(S15P11B209-502 설계).
     _notifyInboxChanged();
+
+    // 세션이 끝난 뒤 도착한 탭이다. 구독 해제와 플랫폼의 탭 전달이 딱 맞물리지
+    // 않아 로그아웃 정리 도중·직후에도 여기까지 올라올 수 있다. S15P11B209-501이
+    // "연결 자원이 없으면 알림함"이라는 기본값을 두면서 이동이 항상 일어나게 됐고,
+    // 그대로 두면 로그인 화면 위에 직전 보호자의 알림함이 얹힌다(501 QA M-3).
+    // 보관했다가 다음 로그인에 여는 방식은 쓰지 않는다 — 여기 오는 탭은 모두
+    // 끝난 세션의 것이라 다음 사용자에게는 남의 아동 자원이 된다.
+    if (!_isGuardianSessionActive()) {
+      developer.log('보호자 세션 없음 — 푸시 이동을 버린다', name: 'push');
+      return;
+    }
 
     if (_isChildModeActive()) return;
     _onOpen(message);
