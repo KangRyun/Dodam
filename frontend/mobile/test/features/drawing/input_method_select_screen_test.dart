@@ -19,6 +19,22 @@ final _tinyPngBytes = base64Decode(
   'AAAADElEQVR42mP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
 );
 
+/// 진짜 WEBP 파일 앞머리: `RIFF` + 4바이트 크기 + `WEBP`.
+final _webpBytes = Uint8List.fromList(<int>[
+  0x52, 0x49, 0x46, 0x46, // RIFF
+  0x00, 0x00, 0x00, 0x00,
+  0x57, 0x45, 0x42, 0x50, // WEBP
+  ...List<int>.filled(52, 0),
+]);
+
+/// 실제로 디코딩되는 1×1 JPEG. 미리보기가 `Image.memory`로 그리므로 앞머리만
+/// 맞춘 가짜 바이트로는 이미지 디코딩에서 실패한다.
+final _tinyJpegBytes = base64Decode(
+  '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRof'
+  'Hh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAAB'
+  'AAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==',
+);
+
 void main() {
   final navigatorKey = GlobalKey<NavigatorState>();
 
@@ -782,6 +798,177 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('input-method-confirm')), findsNothing);
+    });
+
+    // 일부 기기 picker는 JPEG에 `image/jpg`를 준다. 서버는 이를 `image/jpeg`로
+    // 정규화해 받으므로 앱도 막지 않아야 한다.
+    testWidgets('image/jpg JPEG는 정상 미리보기로 넘어간다', (tester) async {
+      final photo = PickedPhoto(
+        bytes: _tinyJpegBytes,
+        fileName: 'photo.jpg',
+        mimeType: 'image/jpg',
+      );
+      final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('input-method-confirm')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('input-method-photo-error')),
+        findsNothing,
+      );
+      // 미리보기 단계까지는 업로드·세션 생성이 없다(기존 계약).
+      expect(repository.uploadCalls, 0);
+      expect(repository.createCalls, 0);
+    });
+
+    // 서버 저장소는 PNG·JPEG만 재인코딩할 수 있어 WEBP를 STORAGE_400_002로
+    // 거절한다. 전송을 마친 뒤 실패하지 않도록 선택 즉시 막아야 한다.
+    testWidgets('WEBP는 미리보기로 넘어가지 않고 업로드도 하지 않는다', (tester) async {
+      final photo = PickedPhoto(
+        bytes: _webpBytes,
+        fileName: 'drawing.webp',
+        mimeType: 'image/webp',
+      );
+      final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('input-method-photo-error')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('input-method-confirm')), findsNothing);
+      expect(repository.uploadCalls, 0);
+      expect(repository.createCalls, 0);
+      // 아이 화면에 MIME·상태 코드·예외 문자열을 노출하지 않는다.
+      expect(
+        find.text('JPEG·PNG 형식의 사진만 사용할 수 있어요. 다른 사진을 선택해 주세요.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('image/webp'), findsNothing);
+      expect(find.textContaining('STORAGE_'), findsNothing);
+      expect(find.textContaining('Exception'), findsNothing);
+    });
+
+    testWidgets('WEBP 오류 뒤 PNG를 다시 고르면 정상 미리보기로 넘어간다', (tester) async {
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _webpBytes,
+            fileName: 'drawing.webp',
+            mimeType: 'image/webp',
+          ),
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'photo.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('input-method-photo-error')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+
+      expect(adapter.galleryCalls, 2);
+      expect(
+        find.byKey(const ValueKey('input-method-confirm')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('input-method-photo-error')),
+        findsNothing,
+      );
+      expect(repository.uploadCalls, 0);
+    });
+
+    testWidgets('카메라로 찍은 WEBP도 같은 검증 경로에서 막힌다', (tester) async {
+      final photo = PickedPhoto(
+        bytes: _webpBytes,
+        fileName: 'shot.webp',
+        mimeType: 'image/webp',
+      );
+      final adapter = _FakePhotoPickerAdapter(cameraResults: [photo]);
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+      await tester.pumpAndSettle();
+
+      expect(adapter.cameraCalls, 1);
+      expect(
+        find.byKey(const ValueKey('input-method-photo-error')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('input-method-confirm')), findsNothing);
+      expect(repository.uploadCalls, 0);
+    });
+
+    testWidgets('0-byte 파일은 예외 없이 막고 업로드하지 않는다', (tester) async {
+      final photo = PickedPhoto(
+        bytes: Uint8List(0),
+        fileName: 'empty.jpg',
+        mimeType: 'image/jpeg',
+      );
+      final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const ValueKey('input-method-photo-error')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('input-method-confirm')), findsNothing);
+      expect(repository.uploadCalls, 0);
+      expect(repository.createCalls, 0);
+      // 오류 뒤에도 다시 고르거나 나갈 수 있어야 한다.
+      expect(
+        find.byKey(const ValueKey('input-method-gallery')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('input-method-camera')), findsOneWidget);
     });
 
     testWidgets('10MiB를 넘는 사진은 차단한다', (tester) async {

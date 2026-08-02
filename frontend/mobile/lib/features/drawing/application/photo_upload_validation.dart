@@ -3,7 +3,7 @@ import 'dart:ui' as ui;
 
 import '../domain/photo_picker_adapter.dart';
 
-/// 백엔드 업로드 계약(JPEG/PNG/WEBP, 최대 10MiB)과 맞춘 클라이언트 사전 검증
+/// 백엔드 업로드 계약(JPEG/PNG, 최대 10MiB)과 맞춘 클라이언트 사전 검증
 /// 상한. 서버가 최종 권한자이며(흐림·그림 영역 등은 서버만 판단할 수 있다),
 /// 여기서는 업로드 전에 걸러낼 수 있는 형식·크기·디코딩 가능 여부만 본다.
 const int kMaxPhotoUploadBytes = 10 * 1024 * 1024;
@@ -12,11 +12,11 @@ const int kMaxPhotoUploadBytes = 10 * 1024 * 1024;
 const int kMinPhotoEdgePx = 320;
 const int kMaxPhotoEdgePx = 8192;
 
-const Set<String> kSupportedPhotoMimeTypes = {
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-};
+/// 서버 저장소가 실제로 받는 형식과 같은 목록이다. `LocalImageStorage`는
+/// PNG·JPEG만 재인코딩할 수 있고 그 외에는 `STORAGE_400_002`로 거절하므로,
+/// WEBP를 여기서 통과시키면 업로드까지 간 뒤에야 실패한다. ERD v1.1 §195도
+/// 공통 파일 규약을 PNG/JPEG로 고정한다 — 넓히려면 명세·서버·앱을 함께 바꾼다.
+const Set<String> kSupportedPhotoMimeTypes = {'image/jpeg', 'image/png'};
 
 enum PhotoValidationErrorType {
   unsupportedFormat,
@@ -50,13 +50,6 @@ bool _matchesSignature(Uint8List bytes, String mimeType) {
       0x1A,
       0x0A,
     ]),
-    'image/webp' =>
-      bytes.length >= 12 &&
-          startsWith(const [0x52, 0x49, 0x46, 0x46]) &&
-          bytes[8] == 0x57 &&
-          bytes[9] == 0x45 &&
-          bytes[10] == 0x42 &&
-          bytes[11] == 0x50,
     _ => false,
   };
 }
@@ -107,15 +100,31 @@ String? _mimeTypeFromFileName(String fileName) {
   final lower = fileName.toLowerCase();
   if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
   if (lower.endsWith('.png')) return 'image/png';
-  if (lower.endsWith('.webp')) return 'image/webp';
   return null;
+}
+
+/// picker가 준 MIME을 서버와 같은 방식으로 canonical 값으로 바꾼다.
+///
+/// 서버 `LocalImageStorage.fromContentType`은 `trim().toLowerCase()` 뒤
+/// `image/jpg`를 `image/jpeg`로 정규화한 다음 형식을 판정한다. 여기서 같은
+/// 정규화를 하지 않으면 `image/jpg`를 돌려주는 기기의 정상 JPEG가 서버는
+/// 받아 줄 파일인데도 선택 단계에서 막힌다. 정규화한 값은 이후 signature
+/// 판정과 multipart Content-Type에 그대로 쓰여 판정 로직이 갈라지지 않는다.
+String? _canonicalMimeType(String? mimeType) {
+  if (mimeType == null) return null;
+  final normalized = mimeType.trim().toLowerCase();
+  // 빈 문자열은 "플랫폼이 알려주지 않음"과 같으므로 확장자 보완으로 넘긴다.
+  if (normalized.isEmpty) return null;
+  return normalized == 'image/jpg' ? 'image/jpeg' : normalized;
 }
 
 Future<PhotoValidationResult> validatePickedPhoto(
   PickedPhoto photo, {
   PhotoDimensionReader dimensionReader = readPhotoDimensions,
 }) async {
-  final mimeType = photo.mimeType ?? _mimeTypeFromFileName(photo.fileName);
+  final mimeType =
+      _canonicalMimeType(photo.mimeType) ??
+      _mimeTypeFromFileName(photo.fileName);
   if (mimeType == null || !kSupportedPhotoMimeTypes.contains(mimeType)) {
     return const PhotoValidationFailed(
       PhotoValidationErrorType.unsupportedFormat,
