@@ -99,8 +99,13 @@ class DatabaseMigrationIntegrationTest {
                     + "AND (content_html IS NULL OR content_html = '')",
                 String.class))
         .isEmpty();
-    // 평문 변환(consentTermPlainText)이 <p>·<br> 만 줄바꿈으로 처리하므로 그 두 태그로만 구성한다.
-    // <li>·<h1> 이 섞이면 평문에서 앞뒤 글자가 붙어 읽을 수 없게 된다(447 D7).
+    // 적재된 문구가 문단 태그만 쓰는지 확인한다. 원래 근거였던 기술적 제약은 해소됐다 —
+    // consentTermPlainText 가 <p>·<br> 만 줄바꿈으로 처리해 <li>·<h1> 이 섞이면 앞뒤 글자가
+    // 붙던 문제(447 D7)는 S15P11B209-782(5f9bf3b4941c5398aef96d7ddb29ed687b4f208a)가
+    // 블록 태그 26종을 개행으로 치환하도록 고쳐 사라졌다. 그럼에도 유지하는 것은 정책적 선택으로,
+    // 같은 이용약관이 정적 공표본(infra/nginx/html/legal/terms/index.html)과 DB 두 곳에 있어
+    // 양쪽 마크업이 모두 자유로워지면 대조가 어려워지기 때문이다
+    // (S15P11B209-783, docs/adr/0002-legal-document-source-of-truth.md).
     assertThat(
             jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM consent_terms "
