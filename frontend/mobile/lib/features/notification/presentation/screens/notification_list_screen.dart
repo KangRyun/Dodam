@@ -155,9 +155,16 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
     try {
       final result = await widget.repository.markRead(item.notificationId);
       // 화면에 미열람으로 남아 있던 항목의 첫 읽음 처리이므로 배지에서 1건 뺀다.
-      // (다른 기기에서 이미 읽은 건이면 서버 미열람 수는 그대로라 배지가 한 건
-      // 적게 표시될 수 있다 — 응답에 판별 필드가 없어 다음 갱신 때 복구된다.)
+      // 왕복을 기다리지 않고 바로 반응하는 것이 계약 §6의 설계 의도다.
       widget.badgeController?.decrementBy(1);
+      // 그리고 서버 값으로 맞춘다. NOTI-04 응답에는 "이번 호출로 미열람이 실제로
+      // 줄었는지" 알려주는 필드가 없다(NOTI-05는 updatedCount를 주는 비대칭).
+      // 다른 기기에서 이미 읽은 건이면 서버 미열람 수는 그대로인데 여기서만 1을
+      // 빼서 배지가 실제보다 적게 남는다. 감산이 맞았으면 서버도 같은 수를 주므로
+      // 배지는 움직이지 않고, 틀렸을 때만 제자리로 올라간다 — 정상 경로에는
+      // 깜빡임이 없다. decrementBy가 세대를 올려 두어 이 조회가 최신이고,
+      // 컨트롤러가 요청을 합쳐 두므로 연타해도 재조회가 늘지 않는다.
+      unawaited(widget.badgeController?.refresh());
       if (!mounted) return;
       final index = _items.indexWhere(
         (candidate) => candidate.notificationId == item.notificationId,
