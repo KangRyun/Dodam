@@ -6,6 +6,7 @@ import '../../design_system/design_system.dart';
 import '../../features/activity/domain/repositories/activity_repository.dart';
 import '../../features/activity/presentation/screens/activity_screens.dart';
 import '../../features/auth/auth.dart';
+import '../../features/child_mode/presentation/screens/child_gallery_screen.dart';
 import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
 import '../../features/child/data/dto/child_dtos.dart';
 import '../../features/child/domain/repositories/child_repository.dart';
@@ -298,6 +299,13 @@ abstract final class AppRouter {
               settings.arguments is ChildModeHomeRouteArguments &&
               (settings.arguments! as ChildModeHomeRouteArguments)
                   .autoStartPrepared,
+        ),
+      ['child', final childId, 'gallery']
+          when _hasChildContext(childController, childId) &&
+              activityRepository != null =>
+        ChildGalleryScreen(
+          child: childController!.selectedChild!,
+          repository: activityRepository,
         ),
       ['child', final childId, 'activity', 'select']
           when _hasChildContext(childController, childId) &&
