@@ -82,6 +82,58 @@ class DescribeTest(unittest.TestCase):
                 vlm_client.describe(b"png", _sample_detections())
 
 
+class ActivityPromptSplitTest(unittest.TestCase):
+    """서술 프롬프트 HTP/그림일기 분리 — 활동에 맞는 파일이 실리는지."""
+
+    def _system_for(self, activity_type):
+        captured = {}
+
+        def fake_create(*, model, messages, temperature):
+            captured["messages"] = messages
+            return _fake_response("서술")
+
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = fake_create
+        with mock.patch.object(vlm_client, "get_client", return_value=fake_client):
+            vlm_client.describe(
+                b"\x89PNG-fake-bytes",
+                _sample_detections(),
+                activity_type=activity_type,
+            )
+        return captured["messages"][0]["content"]
+
+    def test_htp_uses_htp_prompt(self):
+        system = self._system_for("HTP")
+        self.assertIn("HTP(집·나무·사람)", system)
+        self.assertNotIn("그림일기", system)
+
+    def test_art_diary_uses_diary_prompt(self):
+        system = self._system_for("ART_DIARY")
+        self.assertIn("그림일기", system)
+        self.assertNotIn("HTP(집·나무·사람)", system)
+        # 자유 그림은 탐지 목록이 '힌트'다 — 목록에 고정하면 sketch 미탐지 때 서술이 죽는다.
+        self.assertIn("목록에 없더라도 이미지에서 분명히 보이는 것은 묘사해도 좋아", system)
+
+    def test_unknown_activity_falls_back_to_htp(self):
+        # 활동 유형을 안 넘기는 draft 경로는 기본 HTP 가중치를 쓰므로 HTP 서술이 맞다.
+        self.assertIn("HTP(집·나무·사람)", self._system_for(None))
+
+    def test_both_prompts_require_visible_detail_for_conversation(self):
+        """대화 품질의 원천 — 색·표정·위치 세부를 서술이 내야 질문이 구체해진다.
+
+        이 세부는 리포트 RAG 질의(report_client._build_rag_query)의 본문이기도 하다.
+        """
+        for activity in ("HTP", "ART_DIARY"):
+            system = self._system_for(activity)
+            self.assertIn("색·표정 모양·방향·개수·서로의 위치 관계", system)
+            self.assertIn("한두 가지는 꼭 넣어", system)
+
+    def test_both_prompts_forbid_mind_reading(self):
+        for activity in ("HTP", "ART_DIARY"):
+            system = self._system_for(activity)
+            self.assertIn("마음·기분을 짐작해 쓰지 마", system)
+
+
 class EncodeForUploadTest(unittest.TestCase):
     """전송 전 축소 — GMS 페이로드 한도(약 100KB base64) 안에 드는지 실제 인코딩으로 검증.
 

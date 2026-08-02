@@ -66,11 +66,33 @@ class ClientVersionWiringTest(unittest.TestCase):
         import report_client
         import vlm_client
 
+        # 서술 프롬프트는 활동 유형별로 갈라져 통합 버전을 쓴다.
         self.assertEqual(
-            vlm_client.PROMPT_VERSION, prompts_registry.version("drawing_description")
+            vlm_client.PROMPT_VERSION,
+            prompts_registry.composite_version(
+                "drawing_description_htp", "drawing_description_diary"
+            ),
         )
         self.assertEqual(
             report_client.PROMPT_VERSION, prompts_registry.version("report")
+        )
+
+    def test_vlm_prompt_version_resolves_per_activity(self):
+        """'실제로 쓴' 프롬프트 하나의 버전 — 결과 재현·추적의 단위."""
+        import vlm_client
+
+        self.assertEqual(
+            vlm_client.prompt_version_for("HTP"),
+            prompts_registry.version("drawing_description_htp"),
+        )
+        self.assertEqual(
+            vlm_client.prompt_version_for("ART_DIARY"),
+            prompts_registry.version("drawing_description_diary"),
+        )
+        # 활동 유형을 모르는 호출(draft 경로)은 기본 가중치와 같은 HTP로 떨어진다.
+        self.assertEqual(
+            vlm_client.prompt_version_for(None),
+            prompts_registry.version("drawing_description_htp"),
         )
 
     def test_question_path_uses_composite_version(self):

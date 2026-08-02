@@ -22,8 +22,35 @@ from gms import get_client
 
 logger = logging.getLogger(__name__)
 
-# 그림 서술 프롬프트 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
-PROMPT_VERSION = prompts_registry.version("drawing_description")
+# ── 활동 유형별 서술 프롬프트 ───────────────────────────────────
+# 하나의 프롬프트로 두 활동을 서술하던 것을 갈랐다. 구 프롬프트는 첫 줄이
+# "너는 아이가 그린 HTP(집·나무·사람) 그림을…"이라, ART_DIARY 그림도 HTP 틀로 서술됐다.
+# 규칙 자체도 갈라져야 한다:
+#   - HTP: 탐지 목록에 있는 이름만 쓴다. 주제가 확정돼 있어 목록 밖 명사가 나오면
+#     질문 단계에서 주제를 벗어난다(709 계열).
+#   - ART_DIARY: 탐지 목록은 '힌트'다. sketch 가중치는 자유 그림을 자주 못 알아봐서,
+#     목록에 고정하면 서술이 통째로 비고 첫 질문이 "오늘은 뭘 그렸어?"로 고정된다.
+_PROMPT_BY_ACTIVITY = {
+    "HTP": "drawing_description_htp",
+    "ART_DIARY": "drawing_description_diary",
+}
+# 활동 유형을 못 받은 호출(draft /analyze/drawing 등)은 HTP로 본다 — 기본 가중치가 HTP다.
+DEFAULT_ACTIVITY_TYPE = "HTP"
+
+# 두 서술 프롬프트를 함께 담은 통합 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
+PROMPT_VERSION = prompts_registry.composite_version(*_PROMPT_BY_ACTIVITY.values())
+
+
+def prompt_name_for(activity_type: str | None) -> str:
+    """활동 유형 → 서술 프롬프트 파일명. 모르는 값은 기본(HTP)으로 둔다."""
+    return _PROMPT_BY_ACTIVITY.get(
+        activity_type or DEFAULT_ACTIVITY_TYPE, _PROMPT_BY_ACTIVITY[DEFAULT_ACTIVITY_TYPE]
+    )
+
+
+def prompt_version_for(activity_type: str | None) -> str:
+    """이번 호출이 '실제로 쓴' 프롬프트 하나의 버전 — 결과 재현·추적용."""
+    return prompts_registry.version(prompt_name_for(activity_type))
 
 
 def _load(name: str) -> str:
@@ -117,6 +144,7 @@ def describe(
     *,
     model: str | None = None,
     display_name_of=None,
+    activity_type: str | None = None,
 ) -> str:
     """주석 이미지 + 탐지 목록 → 한국어 관찰 서술.
 
@@ -126,6 +154,8 @@ def describe(
         model: 미지정 시 config.VLM_MODEL.
         display_name_of: 클래스명 → 표시명 변환 함수. 활동 유형에 맞는 라벨 표의 것을
             넘긴다. 없으면 클래스명을 그대로 쓴다(하위 호환).
+        activity_type: "HTP" | "ART_DIARY". 서술 프롬프트를 고른다. 미지정이면 HTP
+            (기본 가중치와 같은 쪽) — display_name_of와 짝을 맞춰 넘길 것.
 
     Returns:
         한국어 서술 문자열(빈 응답이면 "").
@@ -136,7 +166,7 @@ def describe(
     used_model = model or config.VLM_MODEL
     mime, image_b64 = _encode_for_upload(annotated_png)
     data_url = f"data:{mime};base64,{image_b64}"
-    system = _load("drawing_description").format(
+    system = _load(prompt_name_for(activity_type)).format(
         detections=_format_detections(detections, display_name_of)
     )
     messages = [

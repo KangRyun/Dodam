@@ -28,7 +28,10 @@ _PROMPT_SEMVER: dict[str, str] = {
     "first_question": "1.2.0",
     "conversations": "1.3.0",  # 아이가 정정하면 객체 분류를 분석 결과 대신 아이 말에 따름
     "guardrails": "1.0.0",
-    "drawing_description": "1.0.0",
+    # 그림 서술은 활동 유형별로 갈라진다 — HTP는 탐지 목록에 고정, 그림일기는 탐지를
+    # 힌트로만 쓴다(sketch 가중치가 자유 그림을 자주 놓쳐 목록 고정이 서술을 죽였다).
+    "drawing_description_htp": "1.0.0",
+    "drawing_description_diary": "1.0.0",
     "report": "1.2.0",  # S15P11B209-601: 진단 표현 금지 강화·한계 고지·후속 질문 목적 명시
 }
 
