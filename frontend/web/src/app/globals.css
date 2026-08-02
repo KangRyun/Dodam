@@ -1206,3 +1206,54 @@ a {
     opacity: 1;
   }
 }
+
+/* --- 댓글 작성·수정·삭제 (S15P11B209-520) --- */
+
+.community-comment-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 18px;
+  border: 1px solid #dfe4dc;
+  border-radius: 18px;
+  background: #fff;
+}
+
+.community-comment-composer-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.community-comment-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.community-comment-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.community-comment-textbtn {
+  border: 0;
+  background: transparent;
+  color: #7b858e;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.community-comment-textbtn:hover:not(:disabled) {
+  color: #5c9070;
+}
+
+.community-comment-textbtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}

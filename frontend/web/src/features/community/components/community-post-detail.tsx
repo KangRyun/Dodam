@@ -1,12 +1,10 @@
 "use client";
 
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { categoryLabels } from "@/features/community/community-category";
-import type {
-  CommunityComment,
-  CommunityPost,
-} from "@/features/community/domain/community-models";
+import type { CommunityPost } from "@/features/community/domain/community-models";
 
 function formatDate(value: string) {
   const date = new Date(value);
@@ -24,35 +22,6 @@ function formatDate(value: string) {
   return `${part("year")}. ${part("month")}. ${part("day")} ${part("hour")}:${part("minute")}`;
 }
 
-function CommunityCommentCard({ comment }: { comment: CommunityComment }) {
-  const isExpert = comment.author.role === "EXPERT";
-
-  return (
-    <article className="community-comment-card" data-expert={isExpert}>
-      <header>
-        <div className="community-comment-author">
-          <span className="community-comment-avatar" aria-hidden="true">
-            {comment.author.avatar}
-          </span>
-          <div>
-            <div className="community-comment-name">
-              <strong>{comment.author.nickname}</strong>
-              {isExpert && <span>EXPERT ✓</span>}
-            </div>
-            {comment.author.credential && <p>{comment.author.credential}</p>}
-          </div>
-        </div>
-        <time dateTime={comment.createdAt}>{formatDate(comment.createdAt)}</time>
-      </header>
-      <p className="community-comment-content">{comment.content}</p>
-      <footer>
-        {comment.helpfulCount > 0 && <span>♥ 도움됐어요 {comment.helpfulCount}</span>}
-        <span>답글</span>
-      </footer>
-    </article>
-  );
-}
-
 type CommunityPostDetailProps = {
   post: CommunityPost;
   /** 작성자 본인일 때 수정 화면으로 이동시키는 콜백. */
@@ -61,6 +30,8 @@ type CommunityPostDetailProps = {
   onDelete?: () => void;
   /** 삭제 요청이 진행 중인지. */
   isDeleting?: boolean;
+  /** 댓글 영역. 별도 조회(COMM-16) 기반 섹션을 주입한다. */
+  commentsSlot?: ReactNode;
 };
 
 export function CommunityPostDetail({
@@ -68,6 +39,7 @@ export function CommunityPostDetail({
   onEdit,
   onDelete,
   isDeleting = false,
+  commentsSlot,
 }: CommunityPostDetailProps) {
   const canManage = post.editableByMe === true;
 
@@ -147,20 +119,7 @@ export function CommunityPostDetail({
         </footer>
       </article>
 
-      <section className="community-comments" aria-labelledby="comment-title">
-        <h2 id="comment-title">댓글 {post.commentCount}</h2>
-        {post.comments.length > 0 ? (
-          <div className="community-comment-list">
-            {post.comments.map((comment) => (
-              <CommunityCommentCard key={comment.id} comment={comment} />
-            ))}
-          </div>
-        ) : (
-          <div className="community-comments-empty">
-            아직 작성된 댓글이 없어요.
-          </div>
-        )}
-      </section>
+      {commentsSlot}
     </main>
   );
 }

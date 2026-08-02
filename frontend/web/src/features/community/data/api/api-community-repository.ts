@@ -1,12 +1,16 @@
 import { apiRequest } from "@/lib/api/api-client";
 import type {
   CommunityAuthor,
+  CommunityAuthorRole,
+  CommunityComment,
   CommunityFeed,
   CommunityPost,
   CommunityPostCategory,
   CommunityPostFilter,
   CommunityProfile,
+  CreateCommunityCommentInput,
   CreateCommunityPostInput,
+  UpdateCommunityCommentInput,
   UpdateCommunityPostInput,
 } from "@/features/community/domain/community-models";
 import type { CommunityRepository } from "@/features/community/domain/community-repository";
@@ -20,6 +24,38 @@ type PostAuthorDto = {
 
 type PostDetailAuthorDto = PostAuthorDto & {
   profileImageUrl: string | null;
+};
+
+type CommentAuthorDto = {
+  userId: number | null;
+  nickname: string | null;
+  role: CommunityAuthorRole | null;
+  profileImageUrl: string | null;
+};
+
+/** COMM-16/08/09 댓글 항목 DTO. (API 명세서 16.6-A) */
+type CommentDto = {
+  commentId: number;
+  postId: number | null;
+  author: CommentAuthorDto | null;
+  anonymous: boolean;
+  content: string;
+  expertAnswer: boolean;
+  accepted: boolean;
+  editableByMe: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type CommentPageDto = {
+  content: CommentDto[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  first: boolean;
+  last: boolean;
+  hasNext: boolean;
 };
 
 type PostListItemDto = {
@@ -123,6 +159,43 @@ function mapListItem(dto: PostListItemDto): CommunityPost {
   };
 }
 
+function toCommentAuthor(
+  author: CommentAuthorDto | null,
+  anonymous: boolean,
+): CommunityAuthor {
+  if (anonymous || author === null) {
+    return {
+      id: 0,
+      nickname: ANONYMOUS_DISPLAY_NAME,
+      role: "GUARDIAN",
+      avatar: "🙂",
+    };
+  }
+  return {
+    id: author.userId ?? 0,
+    nickname: author.nickname ?? ANONYMOUS_DISPLAY_NAME,
+    role: author.role ?? "GUARDIAN",
+    avatar: author.role === "EXPERT" ? "👩‍⚕️" : DEFAULT_AVATAR,
+  };
+}
+
+function mapComment(dto: CommentDto): CommunityComment {
+  return {
+    id: dto.commentId,
+    postId: dto.postId ?? undefined,
+    author: toCommentAuthor(dto.author, dto.anonymous),
+    content: dto.content,
+    anonymous: dto.anonymous,
+    isExpertAnswer: dto.expertAnswer,
+    accepted: dto.accepted,
+    // 댓글 "도움됐어요"는 아직 백엔드 계약에 없어 0으로 둔다.
+    helpfulCount: 0,
+    editableByMe: dto.editableByMe,
+    createdAt: dto.createdAt,
+    updatedAt: dto.updatedAt,
+  };
+}
+
 function mapDetail(dto: PostDetailDto): CommunityPost {
   return {
     id: dto.postId,
@@ -208,6 +281,43 @@ export class ApiCommunityRepository implements CommunityRepository {
 
   async deletePost(postId: number): Promise<void> {
     await apiRequest<void>(`/posts/${postId}`, { method: "DELETE" });
+  }
+
+  async getComments(postId: number): Promise<readonly CommunityComment[]> {
+    // 통로 단계에서는 첫 페이지만 가져온다. 페이지네이션 UI가 생기면 확장한다.
+    const page = await apiRequest<CommentPageDto>(
+      `/posts/${postId}/comments?page=0&size=100&sort=createdAt,asc`,
+    );
+    return page.content.map(mapComment);
+  }
+
+  async createComment(
+    postId: number,
+    input: CreateCommunityCommentInput,
+  ): Promise<CommunityComment> {
+    const comment = await apiRequest<CommentDto>(`/posts/${postId}/comments`, {
+      method: "POST",
+      body: JSON.stringify({
+        content: input.content,
+        anonymous: input.anonymous,
+      }),
+    });
+    return mapComment(comment);
+  }
+
+  async updateComment(
+    commentId: number,
+    input: UpdateCommunityCommentInput,
+  ): Promise<CommunityComment> {
+    const comment = await apiRequest<CommentDto>(`/comments/${commentId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ content: input.content }),
+    });
+    return mapComment(comment);
+  }
+
+  async deleteComment(commentId: number): Promise<void> {
+    await apiRequest<void>(`/comments/${commentId}`, { method: "DELETE" });
   }
 }
 

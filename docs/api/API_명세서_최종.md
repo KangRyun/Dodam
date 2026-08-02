@@ -1673,6 +1673,7 @@ REPORT-07은 Request Body 없이 `Idempotency-Key` Header를 필수로 받는다
 | COMM-13 | GET | `/activity-templates/{templateId}` | 로그인 사용자 | 템플릿 상세 |
 | COMM-14 | POST | `/activity-templates` | VERIFIED EXPERT, ADMIN | 템플릿 등록 |
 | COMM-15 | PATCH | `/activity-templates/{templateId}` | 작성 전문가, ADMIN | 템플릿 수정·비활성화 |
+| COMM-16 | GET | `/posts/{postId}/comments` | 로그인 사용자 | 게시글 댓글 목록 조회 |
 
 전문가 팔로우는 전문가 도메인의 EXPERT-07·08을 사용한다.
 
@@ -1750,6 +1751,34 @@ REPORT-07은 Request Body 없이 `Idempotency-Key` Header를 필수로 받는다
 - `postType=EXPERT_QNA`에서는 검증 전문가 댓글을 전문가 답변으로 취급한다.
 - Q&A 답변의 `accepted`가 필요하면 comment 확장 필드로 관리하며 하나의 게시글에 한 건만 채택한다.
 - 댓글 수정·삭제 권한은 작성자와 관리자에게만 있다.
+
+#### 16.6-A 댓글 목록 조회 (COMM-16, S15P11B209-520)
+
+게시글 상세(COMM-03)는 `commentCount`만 반환하므로, 댓글 본문 목록은 이 API로 분리 조회한다. 댓글 작성·수정·삭제(COMM-08/09/10) 후 목록을 다시 받아 화면을 갱신하는 읽기 경로다.
+
+- `GET /posts/{postId}/comments`
+- Query: `page`(0 이상, 기본 0), `size`(1~100, 기본 20), `sort`(`createdAt`만 허용, 기본 `createdAt,asc`). 같은 정렬값의 tie-breaker는 `commentId` 오름차순을 사용한다.
+- 대상은 `comment_status=ACTIVE AND is_visible=true`인 댓글만이다(16.2-A의 `commentCount` 집계 기준과 동일). 삭제·숨김 댓글은 제외한다.
+- 성공 응답은 공통 페이지 형식(`content`, `page`, `size`, `totalElements`, `totalPages`, `first`, `last`, `hasNext`)을 사용한다. 결과가 없으면 404가 아니라 200과 빈 `content`를 반환한다.
+- 게시글이 없거나 비공개(`POST_NOT_FOUND`)면 404, 잘못된 `page`·`size`·`sort`는 공통 `VALIDATION_FAILED`(422)를 반환한다.
+
+목록·작성·수정 응답의 댓글 항목 형식:
+
+| 필드 | 타입 | 설명 |
+| --- | --- | --- |
+| `commentId` | long | 댓글 식별자 |
+| `postId` | long | 소속 게시글 식별자 |
+| `author` | object\|null | 비익명은 `{userId, nickname, role, profileImageUrl}`. 익명·삭제 작성자는 `authorId:null`, `displayName:"익명 보호자"`로 마스킹하며 원 작성자 ID는 서버 감사·관리 목적에만 보존한다 |
+| `anonymous` | boolean | 익명 댓글 여부 |
+| `content` | string | 공개 가능한 댓글 본문 |
+| `expertAnswer` | boolean | 검증 전문가가 작성한 전문가 답변 여부 |
+| `accepted` | boolean | `EXPERT_QNA`에서 채택된 답변 여부(게시글당 1건) |
+| `editableByMe` | boolean | 현재 인증 사용자의 수정·삭제 가능 여부(작성자 또는 ADMIN) |
+| `createdAt` | string | 생성 UTC 시각 |
+| `updatedAt` | string | 수정 UTC 시각 |
+
+- COMM-08 작성 성공은 `201`, COMM-09 수정 성공은 `200`으로 생성·수정된 댓글 1건을 위 항목 형식으로 반환한다. COMM-10 삭제는 `204`다.
+- 본 절은 S15P11B209-520 진행을 위해 추가된 초안이며, 팀 협약(Notion 반영·MM 공지·FE/BE 확인)을 거쳐 최종 병합한다.
 
 ### 16.7 신고
 
