@@ -28,10 +28,11 @@ import '../features/report/data/repositories/mock_report_repository.dart';
 import '../features/report/data/services/platform_report_file_actions.dart';
 import '../features/report/domain/repositories/report_repository.dart';
 import '../features/report/domain/services/report_file_actions.dart';
+import 'router/app_navigation.dart';
 import 'router/app_router.dart';
 import 'router/app_routes.dart';
 import 'router/current_route_observer.dart';
-import 'router/push_route_resolver.dart';
+import 'router/notification_route_resolver.dart';
 import 'state/guardian_child_controller.dart';
 
 class DodamApp extends StatefulWidget {
@@ -194,14 +195,21 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
 
   /// 푸시가 가리키는 화면으로 이동한다.
   ///
-  /// 대응 화면이 없으면 아무 데도 보내지 않는다. 서버가 준 자원과 무관한 화면을
-  /// 여는 것보다 앱만 열린 채 두는 편이 낫다(계약 §4.3). 알림함 화면
-  /// (S15P11B209-499)이 붙으면 그쪽으로 보낸다.
+  /// 연결 자원이 없으면 알림함 목록으로 보낸다(계약 §4.3). 알림함 카드 클릭과
+  /// 같은 매핑 함수를 쓰고, 이동도 같은 진입점을 지난다(S15P11B209-501).
+  ///
+  /// `Navigator`를 직접 부르면 이미 보고 있는 화면이 한 장 더 쌓인다 — 연결
+  /// 자원이 없는 푸시를 알림함에서 누르는 경우가 그렇다. 카드 탭 쪽은 같은
+  /// 상황에서 이동하지 않으므로, 판정기를 공유해 두 경로를 맞춘다.
   void _openPushTarget(PushMessage message) {
-    final route = resolvePushRoute(message);
-    if (route == null) return;
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) return;
 
-    _navigatorKey.currentState?.pushNamed(route);
+    AppNavigation.pushNamedOn(
+      navigator,
+      resolvePushRoute(message),
+      currentRouteName: _routeObserver.currentRouteName,
+    );
   }
 
   // Provider별 로그인 실행

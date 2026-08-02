@@ -12,6 +12,13 @@ const String kCommunityWebUrl = String.fromEnvironment(
   defaultValue: 'https://i15b209.p.ssafy.io/community',
 );
 
+/// 커뮤니티 웹앱의 게시글 상세 주소를 만든다.
+///
+/// 웹앱 라우트는 `/community/posts/{postId}`이며 [kCommunityWebUrl]이 이미
+/// `/community`까지 포함한다.
+String communityPostUrl(String postId) =>
+    '$kCommunityWebUrl/posts/${Uri.encodeComponent(postId)}';
+
 /// 커뮤니티 웹앱을 웹뷰로 보여주는 화면.
 ///
 /// 커뮤니티는 웹 전용이라(CLAUDE.md 6절) 앱은 웹앱을 그대로 띄운다. 로그인 토큰을
@@ -162,7 +169,14 @@ class _CommunityWebError extends StatelessWidget {
 
 /// 상단바를 갖춘 독립 화면 형태(라우트 진입용).
 class CommunityWebViewScreen extends StatelessWidget {
-  const CommunityWebViewScreen({this.accessTokenProvider, super.key});
+  const CommunityWebViewScreen({
+    this.url = kCommunityWebUrl,
+    this.accessTokenProvider,
+    super.key,
+  });
+
+  /// 처음 열 주소. 알림에서 들어오면 게시글 상세 주소가 들어온다.
+  final String url;
 
   final Future<String?> Function()? accessTokenProvider;
 
@@ -174,7 +188,10 @@ class CommunityWebViewScreen extends StatelessWidget {
       onBack: () => Navigator.of(context).maybePop(),
     ),
     body: SafeArea(
-      child: CommunityWebView(accessTokenProvider: accessTokenProvider),
+      child: CommunityWebView(
+        url: url,
+        accessTokenProvider: accessTokenProvider,
+      ),
     ),
   );
 }
