@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../../app/router/app_navigation.dart';
+import '../../../../app/router/notification_route_resolver.dart';
 import '../../../../design_system/design_system.dart';
 import '../../application/notification_badge_controller.dart';
 import '../../data/dto/notification_inbox_dtos.dart';
@@ -121,6 +123,27 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
     } finally {
       if (mounted) setState(() => _isLoadingMore = false);
     }
+  }
+
+  /// 알림 카드를 눌렀을 때 읽음 처리와 화면 이동을 함께 수행한다.
+  ///
+  /// 읽음 처리(NOTI-04)는 멱등하고 이동과 독립이라 결과를 기다리지 않는다.
+  /// 푸시 클릭 경로에는 읽음 호출 자체가 없으므로, 여기서 읽음을 이동의 전제로
+  /// 삼으면 두 경로의 동작이 갈라진다. 실패하면 `_markRead`가 안내만 띄운다.
+  ///
+  /// 이동 대상은 푸시와 같은 매핑 함수가 정한다(S15P11B209-501, 푸시 계약 §4.3).
+  /// 연결 자원이 없으면 계약상 알림함 목록이 기본값인데 이미 그 화면이므로
+  /// 이동하지 않는다.
+  void _handleCardTap(NotificationItemDto item) {
+    unawaited(_markRead(item));
+
+    final route = resolveNotificationItemRoute(
+      relatedResourceType: item.relatedResourceType,
+      relatedResourceId: item.relatedResourceId,
+    );
+    if (route == null) return;
+
+    AppNavigation.pushNamed(context, route);
   }
 
   Future<void> _markRead(NotificationItemDto item) async {
@@ -256,7 +279,10 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
             );
           }
           final item = _items[index];
-          return _NotificationCard(item: item, onTap: () => _markRead(item));
+          return _NotificationCard(
+            item: item,
+            onTap: () => _handleCardTap(item),
+          );
         },
       ),
     );

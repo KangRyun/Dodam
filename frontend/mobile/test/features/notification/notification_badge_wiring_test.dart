@@ -31,8 +31,119 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// 이동이 일어나는 알림을 띄우고, 화면이 밀어 올린 라우트 이름을 모아 돌려준다.
+  ///
+  /// 연결 자원이 있는 카드는 읽음 처리(배지)와 화면 이동을 함께 일으킨다
+  /// (S15P11B209-501 + 502). 두 기능이 각자의 브랜치에서만 검증돼 합쳐진 경로는
+  /// 여기서 처음 확인한다.
+  Future<List<String?>> pumpScreenWithRoutes(
+    WidgetTester tester, {
+    required NotificationInboxRepository repository,
+    required NotificationBadgeController badgeController,
+  }) async {
+    final pushedRoutes = <String?>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: NotificationListScreen(
+          repository: repository,
+          badgeController: badgeController,
+        ),
+        onGenerateRoute: (settings) {
+          pushedRoutes.add(settings.name);
+          return MaterialPageRoute<void>(
+            settings: settings,
+            builder: (_) => const Scaffold(body: Text('이동한 화면')),
+          );
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    return pushedRoutes;
+  }
+
+  testWidgets('상세로 이동하는 알림도 배지를 1 줄인다', (tester) async {
+    final repository = _FakeInbox([
+      _unreadWithResource(1, '분석이 끝났어요', 'REPORT', 3),
+      _unread(2, '리포트가 왔어요'),
+    ]);
+    final badgeController = NotificationBadgeController(repository);
+    addTearDown(badgeController.dispose);
+    await badgeController.refresh();
+    expect(badgeController.value, 2);
+
+    final pushedRoutes = await pumpScreenWithRoutes(
+      tester,
+      repository: repository,
+      badgeController: badgeController,
+    );
+    await tester.tap(find.text('분석이 끝났어요'));
+    await tester.pumpAndSettle();
+
+    // 감산이 `_markRead`의 mounted 확인보다 앞에 있어야 성립한다. 뒤로 밀리면
+    // 이동으로 목록이 가려진 사이 응답이 도착해 배지가 갱신되지 않는다.
+    expect(pushedRoutes, [AppRoutes.report('3')]);
+    expect(badgeController.value, 1);
+  });
+
+  testWidgets('이동하는 알림의 읽음 처리가 실패하면 배지는 그대로다', (tester) async {
+    final repository = _FakeInbox([
+      _unreadWithResource(1, '분석이 끝났어요', 'REPORT', 3),
+    ], markReadFailure: StateError('read failed'));
+    final badgeController = NotificationBadgeController(repository);
+    addTearDown(badgeController.dispose);
+    await badgeController.refresh();
+    expect(badgeController.value, 1);
+
+    final pushedRoutes = await pumpScreenWithRoutes(
+      tester,
+      repository: repository,
+      badgeController: badgeController,
+    );
+    await tester.tap(find.text('분석이 끝났어요'));
+    await tester.pumpAndSettle();
+
+    // 읽음 실패는 이동을 막지 않지만(501), 배지를 줄이지도 않는다(502).
+    expect(pushedRoutes, [AppRoutes.report('3')]);
+    expect(badgeController.value, 1);
+  });
+
+  testWidgets('이동한 뒤 늦게 도착한 읽음 응답도 배지에 한 번만 반영된다', (tester) async {
+    final repository = _FakeInbox([
+      _unreadWithResource(1, '분석이 끝났어요', 'REPORT', 3),
+      _unread(2, '리포트가 왔어요'),
+    ]);
+    final gate = Completer<void>();
+    repository.markReadGate = gate;
+    final badgeController = NotificationBadgeController(repository);
+    addTearDown(badgeController.dispose);
+    await badgeController.refresh();
+    expect(badgeController.value, 2);
+
+    final pushedRoutes = await pumpScreenWithRoutes(
+      tester,
+      repository: repository,
+      badgeController: badgeController,
+    );
+    await tester.tap(find.text('분석이 끝났어요'));
+    await tester.pumpAndSettle();
+
+    // `_handleCardTap`이 읽음 처리를 unawaited로 띄우므로 이동은 응답을 기다리지
+    // 않는다. 배지는 응답이 와야 움직인다.
+    expect(pushedRoutes, [AppRoutes.report('3')]);
+    expect(badgeController.value, 2);
+
+    gate.complete();
+    await tester.pumpAndSettle();
+
+    expect(repository.markReadCalls, [1]);
+    expect(badgeController.value, 1);
+  });
+
   testWidgets('알림 하나를 읽으면 배지가 1 줄어든다', (tester) async {
-    final repository = _FakeInbox([_unread(1, '분석이 끝났어요'), _unread(2, '리포트가 왔어요')]);
+    final repository = _FakeInbox([
+      _unread(1, '분석이 끝났어요'),
+      _unread(2, '리포트가 왔어요'),
+    ]);
     final badgeController = NotificationBadgeController(repository);
     addTearDown(badgeController.dispose);
     await badgeController.refresh();
@@ -74,9 +185,11 @@ void main() {
 
   testWidgets('모두 읽음은 서버가 알려준 updatedCount만큼 배지를 줄인다', (tester) async {
     // 화면에 올라온 건수가 아니라 서버 처리 건수를 쓴다(계약 §6.5).
-    final repository = _FakeInbox([
-      _unread(1, '분석이 끝났어요'),
-    ], unreadTotal: 5, updatedCount: 5);
+    final repository = _FakeInbox(
+      [_unread(1, '분석이 끝났어요')],
+      unreadTotal: 5,
+      updatedCount: 5,
+    );
     final badgeController = NotificationBadgeController(repository);
     addTearDown(badgeController.dispose);
     await badgeController.refresh();
@@ -116,7 +229,10 @@ void main() {
   testWidgets('같은 알림을 연달아 눌러도 배지는 1만 줄어든다', (tester) async {
     // 카드가 들고 있는 항목은 build 시점의 불변 인스턴스라 응답 대기 중에도
     // 미열람으로 보인다. 서버는 멱등이라 1건만 줄므로 배지도 1만 줄어야 한다.
-    final repository = _FakeInbox([_unread(1, '분석이 끝났어요'), _unread(2, '리포트가 왔어요')]);
+    final repository = _FakeInbox([
+      _unread(1, '분석이 끝났어요'),
+      _unread(2, '리포트가 왔어요'),
+    ]);
     final badgeController = NotificationBadgeController(repository);
     addTearDown(badgeController.dispose);
 
@@ -164,7 +280,9 @@ void main() {
     final repository = _FakeInbox([_unread(1, '분석이 끝났어요')], unreadTotal: 1);
     final badgeController = NotificationBadgeController(repository);
     addTearDown(badgeController.dispose);
-    final childController = GuardianChildController(const MockChildRepository());
+    final childController = GuardianChildController(
+      const MockChildRepository(),
+    );
     addTearDown(childController.dispose);
 
     final route =
@@ -221,8 +339,7 @@ final class _FakeInbox implements NotificationInboxRepository {
     int? unreadTotal,
     this.updatedCount = 1,
     this.markReadFailure,
-  }) : unreadTotal =
-           unreadTotal ?? items.where((item) => !item.isRead).length;
+  }) : unreadTotal = unreadTotal ?? items.where((item) => !item.isRead).length;
 
   final List<NotificationItemDto> items;
   int unreadTotal;
@@ -280,20 +397,39 @@ final class _FakeInbox implements NotificationInboxRepository {
 
 NotificationItemDto _unread(int id, String title) => _item(id, title, null);
 
+/// 연결 자원이 있는 미열람 알림. 카드를 누르면 읽음 처리와 함께 상세로 이동한다.
+NotificationItemDto _unreadWithResource(
+  int id,
+  String title,
+  String resourceType,
+  int resourceId,
+) => _item(
+  id,
+  title,
+  null,
+  relatedResourceType: resourceType,
+  relatedResourceId: resourceId,
+);
+
 NotificationItemDto _read(int id, String title) =>
     _item(id, title, '2026-07-26T11:00:00');
 
-NotificationItemDto _item(int id, String title, String? readAt) =>
-    NotificationItemDto(
-      notificationId: id,
-      type: 'ANALYSIS_COMPLETED',
-      title: title,
-      content: null,
-      relatedResourceType: null,
-      relatedResourceId: null,
-      data: const {},
-      deliveryStatus: 'SENT',
-      readAt: readAt,
-      sentAt: null,
-      createdAt: '2026-07-26T10:00:00',
-    );
+NotificationItemDto _item(
+  int id,
+  String title,
+  String? readAt, {
+  String? relatedResourceType,
+  int? relatedResourceId,
+}) => NotificationItemDto(
+  notificationId: id,
+  type: 'ANALYSIS_COMPLETED',
+  title: title,
+  content: null,
+  relatedResourceType: relatedResourceType,
+  relatedResourceId: relatedResourceId,
+  data: const {},
+  deliveryStatus: 'SENT',
+  readAt: readAt,
+  sentAt: null,
+  createdAt: '2026-07-26T10:00:00',
+);

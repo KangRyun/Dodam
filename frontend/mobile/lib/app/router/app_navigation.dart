@@ -22,12 +22,35 @@ abstract final class AppNavigation {
     Object? arguments,
     bool rootNavigator = false,
     NavigationTapGuard? guard,
+  }) => pushNamedOn<T>(
+    Navigator.of(context, rootNavigator: rootNavigator),
+    routeName,
+    arguments: arguments,
+    currentRouteName: ModalRoute.of(context)?.settings.name,
+    guard: guard,
+  );
+
+  /// [BuildContext] 없이 [NavigatorState]를 직접 들고 이동한다.
+  ///
+  /// 푸시 알림 클릭처럼 위젯 밖에서 시작되는 이동은 붙잡을 `context`가 없어
+  /// `Navigator`를 직접 부르기 쉬운데, 그러면 같은 목적지가 화면 위에 겹쳐
+  /// 쌓인다. 이쪽으로 들어오면 화면에서 시작한 이동과 **같은 판정기**를 쓰므로
+  /// 두 경로가 같은 상황에서 같게 동작한다.
+  ///
+  /// [currentRouteName]은 지금 보이는 화면의 라우트 이름이다. `NavigatorObserver`
+  /// (`CurrentRouteObserver`)로 얻어 넘긴다. 주지 않으면 "이미 그 화면인지"는
+  /// 판정하지 못하고 연속 탭만 걸러진다.
+  static Future<T?>? pushNamedOn<T extends Object?>(
+    NavigatorState navigator,
+    String routeName, {
+    Object? arguments,
+    String? currentRouteName,
+    NavigationTapGuard? guard,
   }) {
-    final navigator = Navigator.of(context, rootNavigator: rootNavigator);
     final tapGuard = guard ?? guardFor(navigator);
     final allowed = tapGuard.shouldAllow(
       routeName,
-      currentRouteName: ModalRoute.of(context)?.settings.name,
+      currentRouteName: currentRouteName,
     );
     if (!allowed) return null;
 
