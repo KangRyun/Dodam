@@ -29,6 +29,10 @@ abstract final class AppRoutes {
   static String childModeHome(String childId) =>
       '/child/${Uri.encodeComponent(childId)}/home';
 
+  /// 아동 "그림 전시관" — 아이가 그린 지난 그림 갤러리(HISTORY-01 재사용).
+  static String childGallery(String childId) =>
+      '/child/${Uri.encodeComponent(childId)}/gallery';
+
   static String drawing(String childId) =>
       '/child/${Uri.encodeComponent(childId)}/activity/drawing';
 

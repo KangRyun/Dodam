@@ -747,76 +747,17 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   /// 이젤 아래 secondary 입구. 활동 로딩 상태와 무관하게 항상 보여준다.
   Widget _pastDrawings() => _PastDrawingsButton(
     key: const ValueKey('past-drawings-entry'),
-    onTap: () => unawaited(_openPastDrawings()),
+    onTap: _openPastDrawings,
   );
 
-  /// 지난 그림 보기.
+  /// 지난 그림 보기 — 아이의 "그림 전시관"으로 이동한다.
   ///
-  /// 아동용 지난 그림 갤러리 화면은 아직 없다(보호자 `activityHistory`는 아동
-  /// 모드에서 열 수 없다). 갤러리 화면이 생기면 이 콜백에서 해당 라우트로 이동시키고,
-  /// 그때까지는 아이가 이해할 수 있는 "준비 중" 안내를 보여준다.
-  Future<void> _openPastDrawings() async {
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => Dialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(32, 30, 32, 26),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 88,
-                  height: 88,
-                  decoration: const BoxDecoration(
-                    color: AppColors.lavenderSoft,
-                    shape: BoxShape.circle,
-                  ),
-                  alignment: Alignment.center,
-                  child: const Text('🖼️', style: TextStyle(fontSize: 42)),
-                ),
-                const SizedBox(height: 22),
-                Text(
-                  '지난 그림을 모으고 있어요',
-                  style: Theme.of(dialogContext).textTheme.headlineSmall
-                      ?.copyWith(fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  '그동안 그린 그림을 여기에서\n곧 다시 볼 수 있어요.',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(dialogContext).textTheme.bodyLarge
-                      ?.copyWith(color: AppColors.inkMuted, height: 1.45),
-                ),
-                const SizedBox(height: 26),
-                SizedBox(
-                  width: double.infinity,
-                  height: 56,
-                  child: FilledButton(
-                    onPressed: () => Navigator.of(dialogContext).pop(),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: AppColors.lavender,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                    ),
-                    child: const Text(
-                      '알겠어요',
-                      style: TextStyle(
-                        fontSize: 19,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+  /// 갤러리 화면(HISTORY-01 활동 기록 재사용)은 라우터가 `activityRepository`와
+  /// 함께 조립한다. 홈은 childId만 넘긴다.
+  void _openPastDrawings() {
+    Navigator.of(
+      context,
+    ).pushNamed(AppRoutes.childGallery(widget.child.childId.toString()));
   }
 
   Widget _title(BuildContext context) => Column(
