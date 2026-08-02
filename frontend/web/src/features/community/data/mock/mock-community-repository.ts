@@ -49,9 +49,19 @@ export class MockCommunityRepository implements CommunityRepository {
       return matchesCategory && matchesQuery;
     });
 
+    const sortedPosts = [...posts].sort((left, right) => {
+      if (filter.sort === "createdAt,asc") {
+        return Date.parse(left.createdAt) - Date.parse(right.createdAt);
+      }
+      if (filter.sort === "likeCount,desc") {
+        return right.likeCount - left.likeCount || right.id - left.id;
+      }
+      return Date.parse(right.createdAt) - Date.parse(left.createdAt);
+    });
+
     return {
       ...mockCommunityFeed,
-      posts: posts.map((post) => this.withLikeState(post)),
+      posts: sortedPosts.map((post) => this.withLikeState(post)),
     };
   }
 

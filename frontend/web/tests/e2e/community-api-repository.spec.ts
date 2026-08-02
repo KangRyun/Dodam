@@ -66,11 +66,13 @@ test("목록 응답을 표시용 게시글로 매핑하고 필터를 쿼리로 �
   const feed = await repository.getFeed({
     category: "GUARDIAN_STORY",
     query: "토끼",
+    sort: "likeCount,desc",
   });
 
   expect(calls[0]?.url).toContain("/posts?");
   expect(calls[0]?.url).toContain("type=GUARDIAN_STORY");
   expect(calls[0]?.url).toContain("keyword=");
+  expect(calls[0]?.url).toContain("sort=likeCount%2Cdesc");
   expect(feed.posts).toHaveLength(1);
   expect(feed.posts[0]?.excerpt).toBe("미리보기");
   expect(feed.posts[0]?.isLiked).toBe(true);

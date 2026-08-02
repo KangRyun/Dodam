@@ -4,6 +4,8 @@ import type { CommunityPostCategory } from "@/features/community/domain/communit
 
 type CommunityCategoryTabsProps = {
   selectedCategory?: CommunityPostCategory;
+  query?: string;
+  sort?: string;
 };
 
 const categories: ReadonlyArray<{
@@ -31,15 +33,18 @@ export function parseCommunityCategory(
 
 export function CommunityCategoryTabs({
   selectedCategory,
+  query,
+  sort,
 }: CommunityCategoryTabsProps) {
   return (
     <div className="community-category-tabs">
       {categories.map(({ label, value }) => {
         const selected = selectedCategory === value;
-        const href =
-          value === undefined
-            ? "/community"
-            : `/community?category=${value}`;
+        const params = new URLSearchParams();
+        if (value) params.set("category", value);
+        if (query) params.set("query", query);
+        if (sort) params.set("sort", sort);
+        const href = `/community${params.size > 0 ? `?${params}` : ""}`;
 
         return (
           <Link
