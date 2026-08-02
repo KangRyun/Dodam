@@ -240,6 +240,13 @@ abstract final class AppRouter {
       ['guardian', 'community'] => CommunityWebViewScreen(
         accessTokenProvider: communityAccessToken,
       ),
+      // 알림이 가리키는 게시글은 같은 웹뷰를 게시글 상세 주소로 연다
+      // (S15P11B209-501, 푸시 계약 §4.3의 `POST` 매핑).
+      ['guardian', 'community', 'posts', final postId] =>
+        CommunityWebViewScreen(
+          url: communityPostUrl(postId),
+          accessTokenProvider: communityAccessToken,
+        ),
       ['child', final childId, 'home']
           when _hasChildContext(childController, childId) &&
               drawingRepository != null =>
