@@ -19,6 +19,7 @@ final class PushCoordinator {
     required PushPermissionService permissionService,
     required void Function(PushMessage message) onOpen,
     required bool Function() isChildModeActive,
+    void Function()? onInboxChanged,
     PushDedupe? dedupe,
     bool exposeTokenInLogs = false,
   }) => PushCoordinator._(
@@ -28,6 +29,7 @@ final class PushCoordinator {
     permissionService,
     onOpen,
     isChildModeActive,
+    onInboxChanged,
     dedupe ?? PushDedupe(),
     exposeTokenInLogs,
   );
@@ -39,6 +41,7 @@ final class PushCoordinator {
     this._permissionService,
     this._onOpen,
     this._isChildModeActive,
+    this._onInboxChanged,
     this._dedupe,
     this._exposeTokenInLogs,
   );
@@ -49,6 +52,10 @@ final class PushCoordinator {
   final PushPermissionService _permissionService;
   final void Function(PushMessage message) _onOpen;
   final bool Function() _isChildModeActive;
+
+  /// 알림함 내용이 바뀌었을 수 있음을 알린다. 미열람 배지를 다시 세는 용도이며
+  /// 실패해도 푸시 흐름을 끊지 않는다.
+  final void Function()? _onInboxChanged;
   final PushDedupe _dedupe;
   final bool _exposeTokenInLogs;
 
@@ -115,6 +122,9 @@ final class PushCoordinator {
   }
 
   Future<void> _present(PushMessage message) async {
+    // 표시를 건너뛰더라도 알림함에는 새 알림이 쌓였으므로 배지는 갱신한다.
+    _notifyInboxChanged();
+
     // 아동 활동 화면을 알림이 덮거나 위험 문구가 아이에게 노출되면 안 된다
     // (CLAUDE.md 9절·4절 · 계약 §4.4). 알림함에는 이미 원본이 남아 있다.
     if (_isChildModeActive()) return;
@@ -124,8 +134,20 @@ final class PushCoordinator {
   }
 
   void _open(PushMessage message) {
+    // 백그라운드·종료 상태에서 받은 알림은 _present를 거치지 않아 여기서 처음
+    // 알게 된다.
+    _notifyInboxChanged();
+
     if (_isChildModeActive()) return;
     _onOpen(message);
+  }
+
+  void _notifyInboxChanged() {
+    try {
+      _onInboxChanged?.call();
+    } on Object catch (error) {
+      developer.log('알림함 갱신 통지 실패(무시)', name: 'push', error: error);
+    }
   }
 
   /// 푸시 실패가 앱 흐름을 끊지 않게 삼킨다. 부가 기능이라 화면에 오류를

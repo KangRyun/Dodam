@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../design_system/design_system.dart';
@@ -17,6 +19,7 @@ import '../../features/drawing/presentation/screens/input_method_select_screen.d
 import '../../features/conversation/conversation.dart';
 import '../../features/guardian/presentation/screens/guardian_screens.dart';
 import '../../features/history/presentation/screens/history_screens.dart';
+import '../../features/notification/application/notification_badge_controller.dart';
 import '../../features/notification/domain/repositories/notification_inbox_repository.dart';
 import '../../features/notification/presentation/screens/notification_list_screen.dart';
 import '../../features/report/presentation/screens/report_screen.dart';
@@ -50,6 +53,7 @@ abstract final class AppRouter {
     ReportRepository? reportRepository,
     ReportFileActions? reportFileActions,
     NotificationInboxRepository? notificationInboxRepository,
+    NotificationBadgeController? notificationBadgeController,
     ConsentRepository? consentRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
     ConversationRepository? conversationRepository,
@@ -149,6 +153,11 @@ abstract final class AppRouter {
             icon: Icons.notifications_none_rounded,
             selectedIcon: Icons.notifications_rounded,
             label: '알림',
+            badgeCount: notificationBadgeController,
+            // 알림 탭은 IndexedStack에 살아남아 재진입해도 목록 화면이 다시
+            // 만들어지지 않는다. 탭을 누를 때마다 배지를 다시 세어, 어긋난 수를
+            // 사용자가 앱을 재개하지 않고도 되돌릴 수 있게 한다.
+            onSelected: () => unawaited(notificationBadgeController?.refresh()),
             builder:
                 notificationsTabBuilder ??
                 (_) => notificationInboxRepository == null
@@ -158,6 +167,7 @@ abstract final class AppRouter {
                       )
                     : NotificationListScreen(
                         repository: notificationInboxRepository,
+                        badgeController: notificationBadgeController,
                       ),
           ),
           GuardianNavItem(
@@ -224,7 +234,10 @@ abstract final class AppRouter {
           voiceAnswerAudioPlayerFactory: voiceAnswerAudioPlayerFactory,
         ),
       ['guardian', 'notifications'] when notificationInboxRepository != null =>
-        NotificationListScreen(repository: notificationInboxRepository),
+        NotificationListScreen(
+          repository: notificationInboxRepository,
+          badgeController: notificationBadgeController,
+        ),
       ['guardian', 'settings'] when authSignOut != null => SettingsMainScreen(
         user: authCurrentUser?.call(),
         onSignOut: authSignOut,
