@@ -109,6 +109,22 @@ a {
   color: #8a949e;
 }
 
+.community-search button {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #5f9270;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.community-search button:hover {
+  background: #edf5ed;
+}
+
 .community-profile-button {
   display: grid;
   place-items: center;
@@ -842,8 +858,35 @@ a {
 
 .community-feed-toolbar {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 12px;
   margin-bottom: 16px;
+}
+
+.community-sort-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #6e7882;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.community-sort-control select {
+  min-height: 42px;
+  padding: 0 34px 0 13px;
+  border: 1px solid #dfe4dc;
+  border-radius: 12px;
+  outline: 0;
+  background: #fff;
+  color: #45505b;
+  cursor: pointer;
+}
+
+.community-sort-control select:focus-visible {
+  border-color: #6ca37c;
+  box-shadow: 0 0 0 3px rgb(108 163 124 / 14%);
 }
 
 .community-feed-status {

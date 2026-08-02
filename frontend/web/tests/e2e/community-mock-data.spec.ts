@@ -26,3 +26,11 @@ test("게시글 상세와 존재하지 않는 게시글을 구분한다", async 
   expect(post?.comments).toHaveLength(2);
   expect(missingPost).toBeNull();
 });
+
+test("좋아요순 정렬은 좋아요 수가 많은 게시글부터 반환한다", async () => {
+  const repository = new MockCommunityRepository();
+  const feed = await repository.getFeed({ sort: "likeCount,desc" });
+
+  const counts = feed.posts.map((post) => post.likeCount);
+  expect(counts).toEqual([...counts].sort((left, right) => right - left));
+});

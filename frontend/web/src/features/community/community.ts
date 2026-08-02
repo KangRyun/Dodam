@@ -14,6 +14,7 @@ export type {
   CommunityPostAttachmentInput,
   CommunityPostCategory,
   CommunityPostFilter,
+  CommunityPostSort,
   CommunityProfile,
   CreateCommunityCommentInput,
   CreateCommunityPostInput,

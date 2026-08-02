@@ -1,26 +1,53 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { CommunityCategoryTabs } from "@/features/community/components/community-category-tabs";
 import { CommunityFeed } from "@/features/community/components/community-feed";
 import { CommunityShell } from "@/features/community/components/community-shell";
 import { CommunitySidebarContent } from "@/features/community/components/community-sidebar-content";
 import { useCommunityFeed } from "@/features/community/hooks/use-community";
-import type { CommunityPostCategory } from "@/features/community/domain/community-models";
+import type {
+  CommunityPostCategory,
+  CommunityPostSort,
+} from "@/features/community/domain/community-models";
 
 export function CommunityFeedView({
   category,
+  query,
+  sort = "createdAt,desc",
 }: {
   category?: CommunityPostCategory;
+  query?: string;
+  sort?: CommunityPostSort;
 }) {
+  const router = useRouter();
   const { data, isPending, isError, error, refetch } = useCommunityFeed({
     category,
+    query,
+    sort,
   });
+
+  const handleSort = (nextSort: CommunityPostSort) => {
+    const params = new URLSearchParams();
+    if (category) params.set("category", category);
+    if (query) params.set("query", query);
+    if (nextSort !== "createdAt,desc") params.set("sort", nextSort);
+    router.push(`/community${params.size > 0 ? `?${params}` : ""}`, {
+      scroll: false,
+    });
+  };
 
   return (
     <CommunityShell
-      navigation={<CommunityCategoryTabs selectedCategory={category} />}
+      navigation={
+        <CommunityCategoryTabs
+          selectedCategory={category}
+          query={query}
+          sort={sort === "createdAt,desc" ? undefined : sort}
+        />
+      }
       sidebar={
         data ? (
           <CommunitySidebarContent
@@ -31,6 +58,20 @@ export function CommunityFeedView({
       }
     >
       <div className="community-feed-toolbar">
+        <label className="community-sort-control">
+          <span>정렬</span>
+          <select
+            value={sort}
+            aria-label="게시글 정렬"
+            onChange={(event) =>
+              handleSort(event.target.value as CommunityPostSort)
+            }
+          >
+            <option value="createdAt,desc">최신순</option>
+            <option value="createdAt,asc">오래된순</option>
+            <option value="likeCount,desc">좋아요순</option>
+          </select>
+        </label>
         <Link
           className="community-button community-button-primary"
           href="/community/write"

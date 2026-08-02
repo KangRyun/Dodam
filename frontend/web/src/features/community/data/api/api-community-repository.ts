@@ -233,6 +233,7 @@ function buildFeedQuery(filter: CommunityPostFilter): string {
   if (filter.category) params.set("type", filter.category);
   const keyword = filter.query?.trim();
   if (keyword) params.set("keyword", keyword);
+  if (filter.sort) params.set("sort", filter.sort);
   const query = params.toString();
   return query.length > 0 ? `?${query}` : "";
 }

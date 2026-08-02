@@ -96,7 +96,14 @@ export type CommunityFeed = {
 export type CommunityPostFilter = {
   category?: CommunityPostCategory;
   query?: string;
+  sort?: CommunityPostSort;
 };
+
+/** COMM-01이 허용하는 게시글 정렬 조건. */
+export type CommunityPostSort =
+  | "createdAt,desc"
+  | "createdAt,asc"
+  | "likeCount,desc";
 
 /** 게시글 첨부(COMM-02/04). 현재 백엔드는 형식만 수용하고 저장하지 않는다. */
 export type CommunityPostAttachmentInput = {
