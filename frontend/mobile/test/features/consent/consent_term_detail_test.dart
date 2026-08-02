@@ -2,6 +2,7 @@ import 'package:dodam/features/child/data/dto/child_consent_dtos.dart';
 import 'package:dodam/features/consent/data/dto/consent_status_dtos.dart';
 import 'package:dodam/features/consent/domain/repositories/consent_repository.dart';
 import 'package:dodam/features/consent/presentation/screens/consent_management_screen.dart';
+import 'package:dodam/features/consent/presentation/widgets/consent_term_detail_sheet.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -315,7 +316,7 @@ final class _FakeConsentRepository implements ConsentRepository {
   final List<ConsentTermDto> userTerms;
 
   @override
-  Future<List<ConsentTermDto>> getTerms(ConsentTargetScope scope) async =>
+  Future<List<ConsentTermDto>> getTerms([ConsentTargetScope? scope]) async =>
       scope == ConsentTargetScope.child ? const [] : userTerms;
 
   @override

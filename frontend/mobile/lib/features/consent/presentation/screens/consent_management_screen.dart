@@ -5,44 +5,8 @@ import '../../../../design_system/design_system.dart';
 import '../../../child/data/dto/child_dtos.dart';
 import '../../domain/repositories/consent_repository.dart';
 import '../controllers/consent_management_controller.dart';
-import 'term_content_web_view_screen.dart';
-
-/// 약관 전문 URL을 여는 동작. 기본 동작은 앱 안 웹뷰 화면으로 이동하는 것이다.
-typedef TermUrlOpener =
-    void Function(BuildContext context, String title, Uri url);
-
-/// 약관 본문(HTML)을 읽기 쉬운 평문으로 정리한다. 별도 HTML 렌더러 의존성 없이
-/// 문단·줄바꿈만 보존한다.
-String consentTermPlainText(String? html) {
-  if (html == null) return '';
-  return html
-      .replaceAll(RegExp('<br[^>]*>', caseSensitive: false), '\n')
-      .replaceAll(RegExp('</p>', caseSensitive: false), '\n\n')
-      .replaceAll(RegExp('<[^>]+>'), '')
-      .replaceAll('&nbsp;', ' ')
-      .replaceAll('&amp;', '&')
-      .replaceAll('&lt;', '<')
-      .replaceAll('&gt;', '>')
-      .replaceAll('&quot;', '"')
-      .replaceAll(RegExp(r'\n{3,}'), '\n\n')
-      .trim();
-}
-
-/// 약관 원문 주소를 열 수 있는 형태인지 확인해 [Uri]로 돌려준다.
-///
-/// 앱 안 웹뷰로 여는 값이므로 http·https 절대 주소만 허용한다. 비어 있거나
-/// 형식이 잘못됐거나 다른 스킴이면 `null`을 돌려주고, 화면은 링크를 감춘다.
-///
-/// 스킴 유무는 [Uri.hasScheme]로 본다. [Uri.isAbsolute]는 fragment가 있으면
-/// 무조건 `false`라서, 조항 앵커를 단 약관 주소(`.../terms#제3조`)까지 거른다.
-Uri? consentTermContentUri(String? raw) {
-  final value = raw?.trim();
-  if (value == null || value.isEmpty) return null;
-  final uri = Uri.tryParse(value);
-  if (uri == null || !uri.hasScheme || uri.host.isEmpty) return null;
-  if (uri.scheme != 'http' && uri.scheme != 'https') return null;
-  return uri;
-}
+import '../widgets/consent_section_card.dart';
+import '../widgets/consent_term_detail_sheet.dart';
 
 /// 설정 > 동의 관리.
 ///
@@ -60,8 +24,8 @@ class ConsentManagementScreen extends StatefulWidget {
   final ConsentRepository repository;
   final List<ChildSummaryDto> children;
 
-  /// 약관 전문 URL을 열 때 실행할 동작. 주지 않으면 [TermContentWebViewScreen]으로
-  /// 이동한다. 웹뷰는 플랫폼 구현이 필요해 위젯 테스트에서 대체 동작을 넣는다.
+  /// 약관 전문 URL을 열 때 실행할 동작. 주지 않으면 [openConsentTermUrl]이 앱 안
+  /// 웹뷰로 이동한다. 웹뷰는 플랫폼 구현이 필요해 위젯 테스트에서 대체 동작을 넣는다.
   final TermUrlOpener? openTermUrl;
 
   @override
@@ -110,73 +74,16 @@ class _ConsentManagementScreenState extends State<ConsentManagementScreen> {
     }
   }
 
-  void _openTermUrl(BuildContext sheetContext, String title, Uri url) {
-    final opener = widget.openTermUrl;
-    if (opener != null) {
-      opener(sheetContext, title, url);
-      return;
-    }
-    Navigator.of(sheetContext).push<void>(
-      MaterialPageRoute<void>(
-        builder: (_) => TermContentWebViewScreen(title: title, url: url),
-      ),
-    );
-  }
-
   void _showTermDetail(ConsentView item) {
-    // 본문(HTML)이 있으면 시트 안에서 바로 읽히므로 우선한다. 본문이 없을 때만
-    // 원문 주소로 넘어가고, 둘 다 없으면 안내 문구를 보여준다.
-    final body = consentTermPlainText(item.contentHtml);
-    final contentUri = body.isEmpty
-        ? consentTermContentUri(item.contentUrl)
-        : null;
-    showModalBottomSheet<void>(
+    showConsentTermDetailSheet(
       context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      backgroundColor: AppColors.surface,
-      builder: (sheetContext) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.6,
-        maxChildSize: 0.9,
-        minChildSize: 0.3,
-        builder: (context, scrollController) => ListView(
-          controller: scrollController,
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.xl,
-            0,
-            AppSpacing.xl,
-            AppSpacing.xl,
-          ),
-          children: [
-            Text(item.title, style: AppTypography.titleLg),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              '${item.required ? '필수' : '선택'}'
-              '${item.version.isEmpty ? '' : ' · 버전 ${item.version}'}',
-              style: AppTypography.bodySm,
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            if (contentUri != null) ...[
-              const Text(
-                '약관 전문은 웹 페이지에서 확인할 수 있어요.',
-                style: TextStyle(color: AppColors.ink, height: 1.6),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              AppButton(
-                key: ValueKey('consent-detail-open-url-${item.termId}'),
-                label: '약관 전문 보기',
-                onPressed: () =>
-                    _openTermUrl(sheetContext, item.title, contentUri),
-              ),
-            ] else
-              SelectableText(
-                body.isEmpty ? '약관 상세 내용을 제공하지 않아요.' : body,
-                style: const TextStyle(color: AppColors.ink, height: 1.6),
-              ),
-          ],
-        ),
-      ),
+      termId: item.termId,
+      title: item.title,
+      required: item.required,
+      version: item.version,
+      contentHtml: item.contentHtml,
+      contentUrl: item.contentUrl,
+      openTermUrl: widget.openTermUrl,
     );
   }
 
@@ -227,7 +134,7 @@ class _ConsentManagementScreenState extends State<ConsentManagementScreen> {
   Widget _childSection() {
     final children = widget.children;
     if (children.isEmpty) {
-      return const _SectionCard(
+      return const ConsentSectionCard(
         title: '아동 동의',
         child: Padding(
           padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
@@ -327,7 +234,7 @@ class _ConsentSection extends StatelessWidget {
   final Widget? header;
 
   @override
-  Widget build(BuildContext context) => _SectionCard(
+  Widget build(BuildContext context) => ConsentSectionCard(
     title: title,
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -405,7 +312,7 @@ class _ConsentRow extends StatelessWidget {
               children: [
                 Text(item.title, style: AppTypography.bodyStrong),
                 const SizedBox(height: AppSpacing.xxs),
-                _RequirementBadge(required: item.required),
+                ConsentRequirementBadge(required: item.required),
               ],
             ),
           ),
@@ -425,51 +332,3 @@ class _ConsentRow extends StatelessWidget {
   }
 }
 
-class _RequirementBadge extends StatelessWidget {
-  const _RequirementBadge({required this.required});
-  final bool required;
-
-  @override
-  Widget build(BuildContext context) {
-    final (label, fg, bg) = required
-        ? ('필수', AppColors.ink, AppColors.surfaceSoft)
-        : ('선택', AppColors.leaf, AppColors.leafSoft);
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(color: fg, fontSize: 11, fontWeight: FontWeight.w800),
-      ),
-    );
-  }
-}
-
-class _SectionCard extends StatelessWidget {
-  const _SectionCard({required this.title, required this.child});
-  final String title;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) => Material(
-    color: AppColors.surface,
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(AppRadius.lg),
-      side: const BorderSide(color: AppColors.outline),
-    ),
-    child: Padding(
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(title, style: AppTypography.titleLg),
-          const SizedBox(height: AppSpacing.md),
-          child,
-        ],
-      ),
-    ),
-  );
-}

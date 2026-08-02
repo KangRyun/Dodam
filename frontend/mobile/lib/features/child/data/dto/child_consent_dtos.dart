@@ -1,4 +1,6 @@
-/// 아동(CHILD) 대상 약관 한 건.
+import '../../../consent/domain/enums/consent_target_scope.dart';
+
+/// 동의 약관 한 건. `GET /consents/terms` 응답 항목이다.
 ///
 /// 서버가 버전별로 발행하며 동의 이력은 `termId`(= 고정 버전 약관)로 기록된다.
 /// 동의 화면은 이 목록을 그대로 보여주고 사용자가 고른 결과만 되돌려준다.
@@ -9,6 +11,7 @@ class ConsentTermDto {
     required this.title,
     required this.required,
     required this.version,
+    this.targetScope,
     this.contentUrl,
     this.contentHtml,
   });
@@ -19,6 +22,7 @@ class ConsentTermDto {
     title: json['title'] as String? ?? json['termCode'] as String,
     required: json['required'] as bool? ?? false,
     version: json['version'] as String? ?? '',
+    targetScope: ConsentTargetScope.fromWire(json['targetScope']),
     contentUrl: json['contentUrl'] as String?,
     contentHtml: json['contentHtml'] as String?,
   );
@@ -30,6 +34,9 @@ class ConsentTermDto {
   /// 서버가 정한 필수 여부. 앱이 임의로 필수/선택을 바꾸지 않는다.
   final bool required;
   final String version;
+
+  /// 약관이 적용되는 대상 범위. 서버가 값을 주지 않거나 앱이 모르는 값이면 `null`.
+  final ConsentTargetScope? targetScope;
   final String? contentUrl;
 
   /// 약관 본문(HTML). 상세 보기에 사용한다.
