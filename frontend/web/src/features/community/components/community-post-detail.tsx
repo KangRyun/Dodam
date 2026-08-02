@@ -30,6 +30,12 @@ type CommunityPostDetailProps = {
   onDelete?: () => void;
   /** 삭제 요청이 진행 중인지. */
   isDeleting?: boolean;
+  /** 좋아요 등록·취소 콜백. */
+  onToggleLike?: () => void;
+  /** 좋아요 요청 진행 여부. */
+  isLikePending?: boolean;
+  /** 좋아요 처리 실패 안내. */
+  likeError?: string | null;
   /** 댓글 영역. 별도 조회(COMM-16) 기반 섹션을 주입한다. */
   commentsSlot?: ReactNode;
 };
@@ -39,6 +45,9 @@ export function CommunityPostDetail({
   onEdit,
   onDelete,
   isDeleting = false,
+  onToggleLike,
+  isLikePending = false,
+  likeError,
   commentsSlot,
 }: CommunityPostDetailProps) {
   const canManage = post.editableByMe === true;
@@ -112,11 +121,27 @@ export function CommunityPostDetail({
 
         <footer className="community-detail-reactions">
           <div>
-            <span>♥ {post.likeCount}</span>
+            <button
+              type="button"
+              className="community-like-button"
+              data-liked={post.isLiked}
+              aria-pressed={post.isLiked}
+              aria-label={post.isLiked ? "좋아요 취소" : "좋아요"}
+              onClick={onToggleLike}
+              disabled={isLikePending || onToggleLike === undefined}
+            >
+              <span aria-hidden="true">{post.isLiked ? "♥" : "♡"}</span>
+              <span>{post.likeCount}</span>
+            </button>
             <span>💬 {post.commentCount}</span>
           </div>
           <button type="button">스크랩</button>
         </footer>
+        {likeError && (
+          <p className="community-like-error" role="alert">
+            {likeError}
+          </p>
+        )}
       </article>
 
       {commentsSlot}

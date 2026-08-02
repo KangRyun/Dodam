@@ -74,6 +74,13 @@ export type CommunityPost = {
   comments: readonly CommunityComment[];
 };
 
+/** COMM-06 좋아요 등록 결과. */
+export type CommunityPostLikeResult = {
+  postId: number;
+  liked: boolean;
+  likeCount: number;
+};
+
 export type CommunityProfile = {
   nickname: string;
   avatar: string;

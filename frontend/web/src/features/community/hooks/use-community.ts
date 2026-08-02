@@ -90,6 +90,51 @@ export function useDeleteCommunityPost(
   });
 }
 
+type ToggleLikeVariables = {
+  liked: boolean;
+};
+
+/** 좋아요 상태를 즉시 반영하고 요청 실패 시 이전 상세 데이터로 복구한다. */
+export function useToggleCommunityPostLike(
+  postId: number,
+): UseMutationResult<void, Error, ToggleLikeVariables, CommunityPost | null> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ liked }) => {
+      if (liked) {
+        await communityRepository.unlikePost(postId);
+      } else {
+        await communityRepository.likePost(postId);
+      }
+    },
+    onMutate: async ({ liked }) => {
+      await queryClient.cancelQueries({ queryKey: communityKeys.post(postId) });
+      const previous =
+        queryClient.getQueryData<CommunityPost | null>(
+          communityKeys.post(postId),
+        ) ?? null;
+      queryClient.setQueryData<CommunityPost | null>(
+        communityKeys.post(postId),
+        (current) =>
+          current
+            ? {
+                ...current,
+                isLiked: !liked,
+                likeCount: Math.max(0, current.likeCount + (liked ? -1 : 1)),
+              }
+            : current,
+      );
+      return previous;
+    },
+    onError: (_error, _variables, previous) => {
+      queryClient.setQueryData(communityKeys.post(postId), previous);
+    },
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: communityKeys.all });
+    },
+  });
+}
+
 export function useCommunityComments(
   postId: number,
 ): UseQueryResult<readonly CommunityComment[]> {
