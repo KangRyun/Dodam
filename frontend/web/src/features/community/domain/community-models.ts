@@ -25,10 +25,32 @@ export type CommunityAuthor = {
 
 export type CommunityComment = {
   id: number;
+  /** 소속 게시글 식별자. 목록 응답(COMM-16)에서 채워진다. */
+  postId?: number;
   author: CommunityAuthor;
   content: string;
+  /** 익명 댓글 여부. */
+  anonymous?: boolean;
+  /** 검증 전문가가 작성한 전문가 답변 여부. */
+  isExpertAnswer?: boolean;
+  /** EXPERT_QNA에서 채택된 답변 여부. */
+  accepted?: boolean;
   helpfulCount: number;
+  /** 현재 로그인 사용자가 수정·삭제할 수 있는 댓글인지(작성자 또는 ADMIN). */
+  editableByMe?: boolean;
   createdAt: string;
+  updatedAt?: string;
+};
+
+/** 댓글 작성 요청 본문(COMM-08 `POST /posts/{postId}/comments`). */
+export type CreateCommunityCommentInput = {
+  content: string;
+  anonymous: boolean;
+};
+
+/** 댓글 수정 요청 본문(COMM-09 `PATCH /comments/{commentId}`). */
+export type UpdateCommunityCommentInput = {
+  content: string;
 };
 
 export type CommunityPost = {

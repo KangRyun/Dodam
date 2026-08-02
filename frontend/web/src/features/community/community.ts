@@ -14,8 +14,10 @@ export type {
   CommunityPostCategory,
   CommunityPostFilter,
   CommunityProfile,
+  CreateCommunityCommentInput,
   CreateCommunityPostInput,
   ExpertAnswerStatus,
+  UpdateCommunityCommentInput,
   UpdateCommunityPostInput,
 } from "@/features/community/domain/community-models";
 export type { CommunityRepository } from "@/features/community/domain/community-repository";

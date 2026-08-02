@@ -10,10 +10,13 @@ import {
 
 import { communityRepository } from "@/features/community/data/community-repository-factory";
 import type {
+  CommunityComment,
   CommunityFeed,
   CommunityPost,
   CommunityPostFilter,
+  CreateCommunityCommentInput,
   CreateCommunityPostInput,
+  UpdateCommunityCommentInput,
   UpdateCommunityPostInput,
 } from "@/features/community/domain/community-models";
 
@@ -23,6 +26,8 @@ export const communityKeys = {
   feed: (filter: CommunityPostFilter) =>
     [...communityKeys.all, "feed", filter] as const,
   post: (postId: number) => [...communityKeys.all, "post", postId] as const,
+  comments: (postId: number) =>
+    [...communityKeys.all, "comments", postId] as const,
 };
 
 export function useCommunityFeed(
@@ -82,5 +87,62 @@ export function useDeleteCommunityPost(
       queryClient.removeQueries({ queryKey: communityKeys.post(postId) });
       void queryClient.invalidateQueries({ queryKey: communityKeys.all });
     },
+  });
+}
+
+export function useCommunityComments(
+  postId: number,
+): UseQueryResult<readonly CommunityComment[]> {
+  return useQuery({
+    queryKey: communityKeys.comments(postId),
+    queryFn: () => communityRepository.getComments(postId),
+  });
+}
+
+/** 댓글 수·목록이 함께 바뀌므로 댓글 목록과 게시글 상세를 같이 무효화한다. */
+function invalidateComments(
+  queryClient: ReturnType<typeof useQueryClient>,
+  postId: number,
+) {
+  void queryClient.invalidateQueries({
+    queryKey: communityKeys.comments(postId),
+  });
+  void queryClient.invalidateQueries({ queryKey: communityKeys.post(postId) });
+}
+
+export function useCreateCommunityComment(
+  postId: number,
+): UseMutationResult<CommunityComment, Error, CreateCommunityCommentInput> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input: CreateCommunityCommentInput) =>
+      communityRepository.createComment(postId, input),
+    onSuccess: () => invalidateComments(queryClient, postId),
+  });
+}
+
+export function useUpdateCommunityComment(
+  postId: number,
+): UseMutationResult<
+  CommunityComment,
+  Error,
+  { commentId: number; input: UpdateCommunityCommentInput }
+> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ commentId, input }) =>
+      communityRepository.updateComment(commentId, input),
+    onSuccess: () => invalidateComments(queryClient, postId),
+  });
+}
+
+export function useDeleteCommunityComment(
+  postId: number,
+): UseMutationResult<void, Error, number> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (commentId: number) =>
+      communityRepository.deleteComment(commentId),
+    onSuccess: () => invalidateComments(queryClient, postId),
   });
 }
