@@ -515,6 +515,31 @@ a {
   cursor: pointer;
 }
 
+.community-detail-reactions .community-like-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 0;
+  color: #7d8790;
+}
+
+.community-detail-reactions .community-like-button[data-liked="true"] {
+  color: #d55f58;
+}
+
+.community-like-button:disabled {
+  cursor: wait;
+  opacity: 0.65;
+}
+
+.community-like-error {
+  margin: 10px 0 0;
+  color: #c75a4c;
+  font-size: 13px;
+  text-align: left;
+}
+
 .community-detail-author {
   display: flex;
   align-items: center;

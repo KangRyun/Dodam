@@ -9,6 +9,7 @@ import { CommunityPostDetail } from "@/features/community/components/community-p
 import {
   useCommunityPost,
   useDeleteCommunityPost,
+  useToggleCommunityPostLike,
 } from "@/features/community/hooks/use-community";
 
 export function CommunityPostDetailView({ postId }: { postId: number }) {
@@ -16,6 +17,7 @@ export function CommunityPostDetailView({ postId }: { postId: number }) {
   const { data, isPending, isError, error, refetch } =
     useCommunityPost(postId);
   const deletePost = useDeleteCommunityPost(postId);
+  const toggleLike = useToggleCommunityPostLike(postId);
 
   const handleDelete = () => {
     if (deletePost.isPending) return;
@@ -62,6 +64,16 @@ export function CommunityPostDetailView({ postId }: { postId: number }) {
           onEdit={() => router.push(`/community/posts/${postId}/edit`)}
           onDelete={handleDelete}
           isDeleting={deletePost.isPending}
+          onToggleLike={() => {
+            if (toggleLike.isPending) return;
+            toggleLike.mutate({ liked: data.isLiked });
+          }}
+          isLikePending={toggleLike.isPending}
+          likeError={
+            toggleLike.isError
+              ? toggleLike.error.message || "좋아요를 처리하지 못했어요."
+              : null
+          }
           commentsSlot={
             <CommunityCommentSection
               postId={postId}

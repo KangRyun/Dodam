@@ -5,6 +5,7 @@ import type {
   CommunityComment,
   CommunityFeed,
   CommunityPost,
+  CommunityPostLikeResult,
   CommunityPostCategory,
   CommunityPostFilter,
   CommunityProfile,
@@ -281,6 +282,16 @@ export class ApiCommunityRepository implements CommunityRepository {
 
   async deletePost(postId: number): Promise<void> {
     await apiRequest<void>(`/posts/${postId}`, { method: "DELETE" });
+  }
+
+  async likePost(postId: number): Promise<CommunityPostLikeResult> {
+    return apiRequest<CommunityPostLikeResult>(`/posts/${postId}/likes`, {
+      method: "POST",
+    });
+  }
+
+  async unlikePost(postId: number): Promise<void> {
+    await apiRequest<void>(`/posts/${postId}/likes`, { method: "DELETE" });
   }
 
   async getComments(postId: number): Promise<readonly CommunityComment[]> {

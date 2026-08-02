@@ -2,6 +2,7 @@ import type {
   CommunityComment,
   CommunityFeed,
   CommunityPost,
+  CommunityPostLikeResult,
   CommunityPostFilter,
   CreateCommunityCommentInput,
   CreateCommunityPostInput,
@@ -23,6 +24,10 @@ export interface CommunityRepository {
   ): Promise<CommunityPost>;
   /** COMM-05 게시글 삭제(Soft Delete). */
   deletePost(postId: number): Promise<void>;
+  /** COMM-06 게시글 좋아요 등록. */
+  likePost(postId: number): Promise<CommunityPostLikeResult>;
+  /** COMM-07 게시글 좋아요 취소. */
+  unlikePost(postId: number): Promise<void>;
   /** COMM-16 게시글 댓글 목록 조회. */
   getComments(postId: number): Promise<readonly CommunityComment[]>;
   /** COMM-08 댓글 작성. 생성된 댓글을 반환한다. */

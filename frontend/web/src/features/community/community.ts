@@ -10,6 +10,7 @@ export type {
   CommunityComment,
   CommunityFeed,
   CommunityPost,
+  CommunityPostLikeResult,
   CommunityPostAttachmentInput,
   CommunityPostCategory,
   CommunityPostFilter,

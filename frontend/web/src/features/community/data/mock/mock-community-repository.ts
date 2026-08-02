@@ -3,6 +3,7 @@ import type {
   CommunityComment,
   CommunityFeed,
   CommunityPost,
+  CommunityPostLikeResult,
   CommunityPostFilter,
   CreateCommunityCommentInput,
   CreateCommunityPostInput,
@@ -26,6 +27,10 @@ export class MockCommunityRepository implements CommunityRepository {
   private nextId = 9000;
   /** 게시글별 인메모리 댓글 저장소. 최초 접근 시 목업 데이터에서 시드한다. */
   private readonly commentsByPost = new Map<number, CommunityComment[]>();
+  private readonly likesByPost = new Map<
+    number,
+    { liked: boolean; likeCount: number }
+  >();
 
   constructor(private readonly options: MockCommunityRepositoryOptions = {}) {}
 
@@ -46,14 +51,16 @@ export class MockCommunityRepository implements CommunityRepository {
 
     return {
       ...mockCommunityFeed,
-      posts,
+      posts: posts.map((post) => this.withLikeState(post)),
     };
   }
 
   async getPost(postId: number): Promise<CommunityPost | null> {
     await this.wait();
     const post = mockCommunityFeed.posts.find((item) => item.id === postId);
-    return post ? { ...post, editableByMe: true } : null;
+    return post
+      ? { ...this.withLikeState(post), editableByMe: true }
+      : null;
   }
 
   async createPost(input: CreateCommunityPostInput): Promise<CommunityPost> {
@@ -71,6 +78,29 @@ export class MockCommunityRepository implements CommunityRepository {
 
   async deletePost(): Promise<void> {
     await this.wait();
+  }
+
+  async likePost(postId: number): Promise<CommunityPostLikeResult> {
+    await this.wait();
+    const post = this.findPost(postId);
+    const current = this.getLikeState(post);
+    const result = {
+      postId,
+      liked: true,
+      likeCount: current.likeCount + (current.liked ? 0 : 1),
+    };
+    this.likesByPost.set(postId, result);
+    return result;
+  }
+
+  async unlikePost(postId: number): Promise<void> {
+    await this.wait();
+    const post = this.findPost(postId);
+    const current = this.getLikeState(post);
+    this.likesByPost.set(postId, {
+      liked: false,
+      likeCount: Math.max(0, current.likeCount - (current.liked ? 1 : 0)),
+    });
   }
 
   async getComments(postId: number): Promise<readonly CommunityComment[]> {
@@ -139,6 +169,26 @@ export class MockCommunityRepository implements CommunityRepository {
       this.commentsByPost.set(postId, comments);
     }
     return comments;
+  }
+
+  private findPost(postId: number): CommunityPost {
+    const post = mockCommunityFeed.posts.find((item) => item.id === postId);
+    if (!post) throw new Error("게시글을 찾을 수 없어요.");
+    return post;
+  }
+
+  private getLikeState(post: CommunityPost) {
+    return (
+      this.likesByPost.get(post.id) ?? {
+        liked: post.isLiked,
+        likeCount: post.likeCount,
+      }
+    );
+  }
+
+  private withLikeState(post: CommunityPost): CommunityPost {
+    const state = this.getLikeState(post);
+    return { ...post, isLiked: state.liked, likeCount: state.likeCount };
   }
 
   /** 작성·수정 입력을 표시용 게시글 형태로 조립하는 로컬 헬퍼. */

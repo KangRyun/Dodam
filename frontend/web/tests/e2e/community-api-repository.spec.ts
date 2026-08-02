@@ -127,3 +127,32 @@ test("존재하지 않는 게시글은 null을 반환한다", async () => {
 
   expect(post).toBeNull();
 });
+
+test("좋아요 등록은 COMM-06 경로로 요청하고 결과를 반환한다", async () => {
+  const calls = installFetch({
+    status: 201,
+    body: {
+      success: true,
+      code: "COMMON_201",
+      message: "ok",
+      data: { postId: 12, liked: true, likeCount: 4 },
+    },
+  });
+
+  const repository = new ApiCommunityRepository();
+  const result = await repository.likePost(12);
+
+  expect(calls[0]?.url).toContain("/posts/12/likes");
+  expect(calls[0]?.init?.method).toBe("POST");
+  expect(result).toEqual({ postId: 12, liked: true, likeCount: 4 });
+});
+
+test("좋아요 취소는 COMM-07 경로로 DELETE 요청한다", async () => {
+  const calls = installFetch({ status: 204, body: null });
+
+  const repository = new ApiCommunityRepository();
+  await repository.unlikePost(12);
+
+  expect(calls[0]?.url).toContain("/posts/12/likes");
+  expect(calls[0]?.init?.method).toBe("DELETE");
+});
