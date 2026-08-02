@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -60,7 +61,7 @@ String _idempotencyKey() {
 
 final class RemoteDrawingRepository
     implements
-        DrawingUploadProgressRepository,
+        CancellableDrawingUploadRepository,
         HtpDrawingRepository,
         UploadedDrawingCompletionRepository,
         DrawingSessionDiscarder {
@@ -321,25 +322,55 @@ final class RemoteDrawingRepository
     required UploadDrawingImageMetadataDto metadata,
     required String idempotencyKey,
     DrawingUploadProgressCallback? onProgress,
+    DrawingUploadCancellation? cancellation,
   }) async {
-    final response = await _apiClient.post<Map<String, dynamic>>(
-      'drawing-sessions/$sessionId/upload',
-      data: FormData.fromMap({
-        'image': MultipartFile.fromBytes(
-          image.bytes,
-          filename: image.fileName,
-          contentType: DioMediaType.parse(image.mimeType),
-        ),
-        'metadata': MultipartFile.fromBytes(
-          utf8.encode(jsonEncode(metadata.toJson())),
-          filename: 'metadata.json',
-          contentType: DioMediaType.parse('application/json'),
-        ),
-      }),
-      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
-      onSendProgress: onProgress,
-    );
-    return DrawingUploadResponseDto.fromJson(envelopeObject(response.data));
+    if (cancellation?.isCancelled ?? false) {
+      throw const ApiTransportFailure(type: ApiTransportFailureType.cancelled);
+    }
+    final cancelToken = CancelToken();
+    var settled = false;
+    final cancelFuture = cancellation?.whenCancelled;
+    if (cancelFuture != null) {
+      unawaited(
+        cancelFuture.then((_) {
+          if (!settled && !cancelToken.isCancelled) cancelToken.cancel();
+        }),
+      );
+    }
+    try {
+      final response = await _apiClient.post<Map<String, dynamic>>(
+        'drawing-sessions/$sessionId/upload',
+        data: FormData.fromMap({
+          'image': MultipartFile.fromBytes(
+            image.bytes,
+            filename: image.fileName,
+            contentType: DioMediaType.parse(image.mimeType),
+          ),
+          'metadata': MultipartFile.fromBytes(
+            utf8.encode(jsonEncode(metadata.toJson())),
+            filename: 'metadata.json',
+            contentType: DioMediaType.parse('application/json'),
+          ),
+        }),
+        options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+        cancelToken: cancelToken,
+        onSendProgress: onProgress == null
+            ? null
+            : (sent, total) {
+                if (!(cancellation?.isCancelled ?? false)) {
+                  onProgress(sent, total);
+                }
+              },
+      );
+      if (cancellation?.isCancelled ?? false) {
+        throw const ApiTransportFailure(
+          type: ApiTransportFailureType.cancelled,
+        );
+      }
+      return DrawingUploadResponseDto.fromJson(envelopeObject(response.data));
+    } finally {
+      settled = true;
+    }
   }
 
   @override

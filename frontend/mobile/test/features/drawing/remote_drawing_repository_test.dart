@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
@@ -499,6 +500,91 @@ void main() {
     expect(progress.last.$2, adapter.receivedBytes);
   });
 
+  test('사진 업로드 취소 신호는 Dio CancelToken에 연결되고 cancelled로 분류된다', () async {
+    final adapter = _CancellableUploadAdapter();
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        httpClientAdapter: adapter,
+      ),
+    );
+    final cancellation = DrawingUploadCancellation();
+
+    expect(repository, isA<CancellableDrawingUploadRepository>());
+    final upload = (repository as CancellableDrawingUploadRepository)
+        .uploadDrawing(
+          42,
+          const BinaryUploadDto(
+            bytes: [137, 80, 78, 71],
+            fileName: 'photo.png',
+            mimeType: 'image/png',
+          ),
+          metadata: const UploadDrawingImageMetadataDto(
+            clientCapturedAt: '2026-07-29T01:00:00Z',
+            rotationDegrees: 0,
+            cropApplied: false,
+          ),
+          idempotencyKey: 'htp-upload-cancel-key',
+          cancellation: cancellation,
+        );
+    final expectation = expectLater(
+      upload,
+      throwsA(
+        isA<ApiTransportFailure>().having(
+          (failure) => failure.type,
+          'type',
+          ApiTransportFailureType.cancelled,
+        ),
+      ),
+    );
+    await adapter.started.future;
+
+    cancellation.cancel();
+    cancellation.cancel();
+
+    await expectation;
+    expect(adapter.cancelFutureWasProvided, isTrue);
+    expect(adapter.cancelSignals, 1);
+  });
+
+  test('전송 전에 취소된 사진 업로드는 adapter 요청 없이 cancelled로 끝난다', () async {
+    final adapter = _CancellableUploadAdapter();
+    final repository = RemoteDrawingRepository(
+      ApiClient(
+        environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+        httpClientAdapter: adapter,
+      ),
+    );
+    final cancellation = DrawingUploadCancellation()..cancel();
+
+    await expectLater(
+      repository.uploadDrawing(
+        42,
+        const BinaryUploadDto(
+          bytes: [137, 80, 78, 71],
+          fileName: 'photo.png',
+          mimeType: 'image/png',
+        ),
+        metadata: const UploadDrawingImageMetadataDto(
+          clientCapturedAt: '2026-07-29T01:00:00Z',
+          rotationDegrees: 0,
+          cropApplied: false,
+        ),
+        idempotencyKey: 'htp-upload-pre-cancel-key',
+        cancellation: cancellation,
+      ),
+      throwsA(
+        isA<ApiTransportFailure>().having(
+          (failure) => failure.type,
+          'type',
+          ApiTransportFailureType.cancelled,
+        ),
+      ),
+    );
+
+    expect(adapter.fetchCalls, 0);
+  });
+
   test('사진 업로드 검증 실패는 오류 코드를 그대로 전달한다', () async {
     final repository = RemoteDrawingRepository(
       ApiClient(
@@ -506,7 +592,7 @@ void main() {
         interceptors: [
           _UploadInterceptor(
             errorStatusCode: 422,
-            errorCode: 'IMAGE_TOO_BLURRY',
+            errorCode: 'STORAGE_422_001',
           ),
         ],
       ),
@@ -531,7 +617,7 @@ void main() {
         isA<ApiResponseFailure>().having(
           (failure) => failure.error?.code,
           'code',
-          'IMAGE_TOO_BLURRY',
+          'STORAGE_422_001',
         ),
       ),
     );
@@ -1085,6 +1171,37 @@ final class _UploadProgressAdapter implements HttpClientAdapter {
       headers: {
         Headers.contentTypeHeader: [Headers.jsonContentType],
       },
+    );
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
+final class _CancellableUploadAdapter implements HttpClientAdapter {
+  final Completer<void> started = Completer<void>();
+  bool cancelFutureWasProvided = false;
+  int cancelSignals = 0;
+  int fetchCalls = 0;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    fetchCalls += 1;
+    cancelFutureWasProvided = cancelFuture != null;
+    if (!started.isCompleted) started.complete();
+    if (cancelFuture == null) {
+      throw StateError('CancelToken was not connected to the adapter.');
+    }
+    await cancelFuture;
+    cancelSignals += 1;
+    throw DioException(
+      requestOptions: options,
+      type: DioExceptionType.cancel,
+      error: 'cancelled',
     );
   }
 

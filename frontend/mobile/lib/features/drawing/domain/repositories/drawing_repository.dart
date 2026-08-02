@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import '../../data/dto/drawing_dtos.dart';
@@ -59,6 +60,21 @@ abstract interface class DrawingRepository {
 /// 업로드 요청이 전송한 바이트 수와 전체 바이트 수를 전달하는 callback이다.
 typedef DrawingUploadProgressCallback = void Function(int sent, int total);
 
+/// 화면·route 생명주기에서 사진 업로드 전송을 중단하는 Domain 취소 신호다.
+///
+/// Dio 타입을 Domain에 노출하지 않는다. 여러 경로가 동시에 취소해도 최초 한
+/// 번만 완료되며, 이미 끝난 요청에 대한 취소는 안전한 no-op이다.
+final class DrawingUploadCancellation {
+  final Completer<void> _cancelled = Completer<void>();
+
+  bool get isCancelled => _cancelled.isCompleted;
+  Future<void> get whenCancelled => _cancelled.future;
+
+  void cancel() {
+    if (!_cancelled.isCompleted) _cancelled.complete();
+  }
+}
+
 /// 사진 업로드의 실제 전송 진행률을 제공하는 [DrawingRepository] capability다.
 ///
 /// Mock처럼 진행률을 제공하지 않는 구현은 기존 [DrawingRepository]만 구현할 수
@@ -72,6 +88,20 @@ abstract interface class DrawingUploadProgressRepository
     required UploadDrawingImageMetadataDto metadata,
     required String idempotencyKey,
     DrawingUploadProgressCallback? onProgress,
+  });
+}
+
+/// 진행률과 실제 네트워크 취소를 함께 지원하는 사진 업로드 capability다.
+abstract interface class CancellableDrawingUploadRepository
+    implements DrawingUploadProgressRepository {
+  @override
+  Future<DrawingUploadResponseDto> uploadDrawing(
+    int sessionId,
+    BinaryUploadDto image, {
+    required UploadDrawingImageMetadataDto metadata,
+    required String idempotencyKey,
+    DrawingUploadProgressCallback? onProgress,
+    DrawingUploadCancellation? cancellation,
   });
 }
 
