@@ -149,10 +149,12 @@ void main() {
     expect(find.byKey(const ValueKey('costume-carousel')), findsOneWidget);
     expect(find.byKey(const ValueKey('draw-entry')), findsOneWidget);
     expect(find.text('그림 그리기'), findsOneWidget);
-    // 아동은 그림일기만 진입한다 — HTP·지난 그림 보기 카드는 홈에 없다.
+    // 새 활동 시작은 그림일기만 — HTP 카드는 홈에 없다.
     expect(find.byKey(const ValueKey('activity-9')), findsNothing);
     expect(find.text('집·나무·사람 그림'), findsNothing);
-    expect(find.text('지난 그림 보기'), findsNothing);
+    // 지난 그림 보기(과거 그림 다시 보기) 입구는 그림 그리기 옆 secondary로 노출한다.
+    expect(find.byKey(const ValueKey('past-drawings-entry')), findsOneWidget);
+    expect(find.text('지난 그림 보기'), findsOneWidget);
   });
 
   testWidgets('그림 유형을 불러오는 동안 로딩 상태를 보여준다', (tester) async {

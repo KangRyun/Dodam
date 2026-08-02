@@ -744,6 +744,81 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     onStep: _animateCostumeTo,
   );
 
+  /// 이젤 아래 secondary 입구. 활동 로딩 상태와 무관하게 항상 보여준다.
+  Widget _pastDrawings() => _PastDrawingsButton(
+    key: const ValueKey('past-drawings-entry'),
+    onTap: () => unawaited(_openPastDrawings()),
+  );
+
+  /// 지난 그림 보기.
+  ///
+  /// 아동용 지난 그림 갤러리 화면은 아직 없다(보호자 `activityHistory`는 아동
+  /// 모드에서 열 수 없다). 갤러리 화면이 생기면 이 콜백에서 해당 라우트로 이동시키고,
+  /// 그때까지는 아이가 이해할 수 있는 "준비 중" 안내를 보여준다.
+  Future<void> _openPastDrawings() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(32, 30, 32, 26),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 88,
+                  height: 88,
+                  decoration: const BoxDecoration(
+                    color: AppColors.lavenderSoft,
+                    shape: BoxShape.circle,
+                  ),
+                  alignment: Alignment.center,
+                  child: const Text('🖼️', style: TextStyle(fontSize: 42)),
+                ),
+                const SizedBox(height: 22),
+                Text(
+                  '지난 그림을 모으고 있어요',
+                  style: Theme.of(dialogContext).textTheme.headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  '그동안 그린 그림을 여기에서\n곧 다시 볼 수 있어요.',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(dialogContext).textTheme.bodyLarge
+                      ?.copyWith(color: AppColors.inkMuted, height: 1.45),
+                ),
+                const SizedBox(height: 26),
+                SizedBox(
+                  width: double.infinity,
+                  height: 56,
+                  child: FilledButton(
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.lavender,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                    ),
+                    child: const Text(
+                      '알겠어요',
+                      style: TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _title(BuildContext context) => Column(
     mainAxisSize: MainAxisSize.min,
     children: [
@@ -878,10 +953,26 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
             const SizedBox(width: AppSpacing.lg),
             Expanded(
               child: Align(
-                alignment: Alignment.bottomCenter,
+                // 하단 정렬 + 살짝 왼쪽으로 당겨 캐릭터와 균형을 맞추고
+                // 오른쪽 나무와 겹치지 않게 한다.
+                alignment: const Alignment(-0.6, 1),
                 child: Padding(
                   padding: const EdgeInsets.only(bottom: AppSpacing.xl),
-                  child: _buildDrawSection(),
+                  // 이젤(고정 높이)+지난 그림 카드가 짧은 화면에서 넘치지 않도록
+                  // 필요할 때만 살짝 축소한다(큰 태블릿에선 원본 크기 유지).
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    // 이젤·지난 그림 카드는 둘 다 폭 300으로 고정돼 좌우 가장자리가 맞는다.
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildDrawSection(),
+                        // 이젤 다리(bottom -16)를 지나 secondary와 시각적 간격을 준다.
+                        const SizedBox(height: 34),
+                        _pastDrawings(),
+                      ],
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -905,6 +996,8 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
             _carousel(),
             const SizedBox(height: AppSpacing.xl),
             _buildDrawSection(),
+            const SizedBox(height: AppSpacing.xl),
+            _pastDrawings(),
           ],
         ),
       ),
@@ -1182,8 +1275,8 @@ class _DrawEntryButton extends StatelessWidget {
             Positioned(bottom: -16, right: 40, child: _leg(-0.26)),
             Container(
               constraints: const BoxConstraints(
-                minWidth: 230,
-                maxWidth: 320,
+                minWidth: 300,
+                maxWidth: 300,
                 minHeight: 300,
               ),
               padding: const EdgeInsets.fromLTRB(26, 22, 26, 26),
@@ -1237,6 +1330,100 @@ class _DrawEntryButton extends StatelessWidget {
           ],
         ),
       ),
+    ),
+  );
+}
+
+/// 이젤(그림 그리기) 아래 secondary CTA — 아이가 그린 지난 그림을 다시 보는 입구.
+///
+/// "그림 그리기"가 노란 이젤로 primary라, 여기는 한 단계 낮은 위계로 둔다: 흰 pill에
+/// 차분한 라벤더(노랑의 보색) 액센트를 얹어, 큰 노란 이젤과 명확히 구분되면서도
+/// 같은 둥근 손그림 결을 유지한다. 눌림 피드백은 이젤과 같은 [_Pressable]을 공유한다.
+class _PastDrawingsButton extends StatelessWidget {
+  const _PastDrawingsButton({required this.onTap, super.key});
+
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    enabled: onTap != null,
+    label: '지난 그림 보기. 내가 그린 그림들을 다시 봐요.',
+    child: ExcludeSemantics(
+      child: _Pressable(
+        onTap: onTap,
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 300, maxWidth: 300),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          decoration: BoxDecoration(
+            color: AppColors.surface.withValues(alpha: 0.94),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(
+              color: AppColors.lavender.withValues(alpha: 0.35),
+              width: 3,
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.ink.withValues(alpha: 0.10),
+                blurRadius: 18,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: const Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _PastDrawingsIcon(),
+              SizedBox(width: 14),
+              Flexible(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '지난 그림 보기',
+                      style: TextStyle(
+                        color: AppColors.ink,
+                        fontSize: 21,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      '내가 그린 그림 다시 보기',
+                      style: TextStyle(
+                        color: AppColors.inkMuted,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _PastDrawingsIcon extends StatelessWidget {
+  const _PastDrawingsIcon();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 54,
+    height: 54,
+    decoration: const BoxDecoration(
+      color: AppColors.lavenderSoft,
+      shape: BoxShape.circle,
+    ),
+    alignment: Alignment.center,
+    child: const Icon(
+      Icons.collections_rounded,
+      color: AppColors.lavender,
+      size: 28,
     ),
   );
 }
