@@ -36,6 +36,8 @@ type CommunityPostDetailProps = {
   isLikePending?: boolean;
   /** 좋아요 처리 실패 안내. */
   likeError?: string | null;
+  /** 게시글 신고 창을 여는 콜백. */
+  onReport?: () => void;
   /** 댓글 영역. 별도 조회(COMM-16) 기반 섹션을 주입한다. */
   commentsSlot?: ReactNode;
 };
@@ -48,6 +50,7 @@ export function CommunityPostDetail({
   onToggleLike,
   isLikePending = false,
   likeError,
+  onReport,
   commentsSlot,
 }: CommunityPostDetailProps) {
   const canManage = post.editableByMe === true;
@@ -85,9 +88,11 @@ export function CommunityPostDetail({
                 {isDeleting ? "삭제 중…" : "삭제"}
               </button>
             )}
-            <button type="button" aria-label="게시글 신고">
-              신고
-            </button>
+            {onReport && (
+              <button type="button" aria-label="게시글 신고" onClick={onReport}>
+                신고
+              </button>
+            )}
           </div>
         </div>
 
