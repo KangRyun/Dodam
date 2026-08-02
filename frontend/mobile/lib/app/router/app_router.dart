@@ -54,6 +54,7 @@ abstract final class AppRouter {
     ReportFileActions? reportFileActions,
     NotificationInboxRepository? notificationInboxRepository,
     NotificationBadgeController? notificationBadgeController,
+    ValueChanged<String?>? onGuardianTabChanged,
     ConsentRepository? consentRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
     ConversationRepository? conversationRepository,
@@ -120,6 +121,7 @@ abstract final class AppRouter {
       // 각 담당 화면(없으면 자리표시자), 커뮤니티는 웹 전용이라 자리표시자.
       ['guardian', 'home'] when childController != null => GuardianSidebarShell(
         onSwitchProfile: goProfileSelection,
+        onVisibleRouteChanged: onGuardianTabChanged,
         destinations: [
           GuardianNavItem(
             icon: Icons.home_outlined,
@@ -153,6 +155,11 @@ abstract final class AppRouter {
             icon: Icons.notifications_none_rounded,
             selectedIcon: Icons.notifications_rounded,
             label: '알림',
+            // 이 탭이 보여주는 화면은 `/guardian/notifications`가 여는 것과 같다.
+            // 셸 밖의 중복 이동 판정이 "이미 알림함을 보고 있다"를 알 수 있게
+            // 라우트 이름을 붙인다(S15P11B209-501). 나머지 탭은 푸시가 겨냥하는
+            // 라우트가 따로 없어 비워 둔다.
+            routeName: AppRoutes.notifications,
             badgeCount: notificationBadgeController,
             // 알림 탭은 IndexedStack에 살아남아 재진입해도 목록 화면이 다시
             // 만들어지지 않는다. 탭을 누를 때마다 배지를 다시 세어, 어긋난 수를

@@ -12,6 +12,7 @@ import 'package:dodam/features/notification/domain/services/push_gateway.dart';
 import 'package:dodam/features/notification/domain/services/push_permission_service.dart';
 import 'package:dodam/features/notification/domain/services/push_setup.dart';
 import 'package:dodam/features/notification/presentation/screens/notification_list_screen.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// 푸시 클릭이 실제 앱 조립(`DodamApp`)에서 화면을 어떻게 여는지 고정한다.
@@ -71,6 +72,84 @@ void main() {
     // 카드 탭 경로는 같은 상황에서 이동하지 않는다. 푸시도 같아야 한다.
     expect(find.byType(NotificationListScreen, skipOffstage: false), findsOneWidget);
   });
+
+  testWidgets('사이드바 알림 탭을 보는 중에 온 무자원 푸시는 알림함을 겹쳐 쌓지 않는다', (tester) async {
+    // 셸은 탭을 바꿔도 라우트를 쌓지 않아 관찰자에게는 늘 `/guardian/home`이다.
+    // 셸이 보여주는 탭을 알려 주지 않으면 중복 판정이 통과해, 이미 보고 있는
+    // 알림함이 한 장 더 쌓인다(S15P11B209-501 잔여).
+    await tester.pumpWidget(
+      DodamApp(
+        initialRoute: AppRoutes.authBootstrap,
+        authRepository: _FakeAuthRepository(_guardianSession()),
+        notificationInboxRepository: _EmptyNotificationInboxRepository(),
+        pushSetup: PushSetup(
+          gateway: gateway,
+          presenter: presenter,
+          tokenRepository: _NoopPushTokenRepository(),
+          permissionService: _GrantedPushPermissionService(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _enterGuardianHome(tester);
+
+    // 푸시로 연 것이 아니라 사용자가 사이드바에서 알림 탭을 골랐다.
+    await tester.tap(find.text('알림'));
+    await tester.pumpAndSettle();
+    expect(
+      find.byType(NotificationListScreen, skipOffstage: false),
+      findsOneWidget,
+    );
+
+    gateway.emitOpened(noResource(902));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byType(NotificationListScreen, skipOffstage: false),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('알림 탭을 떠나면 무자원 푸시가 다시 알림함을 연다', (tester) async {
+    // 탭 정보를 넘기되 갱신하지 않으면 반대 방향으로 틀린다 — 알림 탭을 떠난 뒤
+    // 온 푸시까지 "이미 그 화면"으로 보고 막아 버린다.
+    await tester.pumpWidget(
+      DodamApp(
+        initialRoute: AppRoutes.authBootstrap,
+        authRepository: _FakeAuthRepository(_guardianSession()),
+        notificationInboxRepository: _EmptyNotificationInboxRepository(),
+        pushSetup: PushSetup(
+          gateway: gateway,
+          presenter: presenter,
+          tokenRepository: _NoopPushTokenRepository(),
+          permissionService: _GrantedPushPermissionService(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await _enterGuardianHome(tester);
+
+    await tester.tap(find.text('알림'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('홈'));
+    await tester.pumpAndSettle();
+
+    gateway.emitOpened(noResource(903));
+    await tester.pumpAndSettle();
+
+    // 알림 탭은 IndexedStack에 살아 있으므로(offstage) 새로 쌓인 화면까지 두 장이다.
+    expect(
+      find.byType(NotificationListScreen, skipOffstage: false),
+      findsNWidgets(2),
+    );
+  });
+}
+
+/// 부트스트랩이 멈춰 서는 프로필 선택에서 보호자 셸까지 들어간다. 사이드바 탭이
+/// 관련된 판정은 셸이 실제로 떠 있어야 볼 수 있다.
+Future<void> _enterGuardianHome(WidgetTester tester) async {
+  await tester.tap(find.byKey(const ValueKey('guardian-profile')));
+  await tester.pumpAndSettle();
 }
 
 AuthSession _guardianSession() => AuthSession(

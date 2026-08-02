@@ -10,6 +10,7 @@ class GuardianNavItem {
     required this.selectedIcon,
     required this.label,
     required this.builder,
+    this.routeName,
     this.badgeCount,
     this.onSelected,
   });
@@ -18,6 +19,12 @@ class GuardianNavItem {
   final IconData selectedIcon;
   final String label;
   final WidgetBuilder builder;
+
+  /// 이 목적지가 대응하는 라우트 이름. 셸은 값을 해석하지 않고
+  /// [GuardianSidebarShell.onVisibleRouteChanged]로 그대로 넘기기만 한다
+  /// ([label]과 같은 취급이다). 같은 화면을 여는 라우트가 따로 있는 목적지만
+  /// 채우면 되고, 나머지는 비워 둔다.
+  final String? routeName;
 
   /// 아이콘 우상단에 표시할 개수. null이거나 값이 0 이하면 배지를 그리지 않는다.
   /// 셸은 개수의 출처를 모르며 값이 바뀌면 해당 항목만 다시 그린다.
@@ -37,11 +44,23 @@ class GuardianSidebarShell extends StatefulWidget {
   const GuardianSidebarShell({
     required this.destinations,
     required this.onSwitchProfile,
+    this.onVisibleRouteChanged,
     super.key,
   });
 
   final List<GuardianNavItem> destinations;
   final void Function(BuildContext context) onSwitchProfile;
+
+  /// 지금 보이는 목적지의 [GuardianNavItem.routeName]을 알린다.
+  ///
+  /// 탭 전환은 라우트를 쌓지 않아 `Navigator` 관찰자 눈에는 셸 하나만 보인다.
+  /// 셸 밖에서 "이미 그 화면인지"를 판정하려면 어느 탭이 떠 있는지 알아야 한다
+  /// (S15P11B209-501: 알림 탭을 보는 중에 온 푸시가 알림함을 한 장 더 쌓았다).
+  ///
+  /// 셸을 만들 때 첫 목적지로 한 번, 이후 보이는 목적지가 바뀔 때마다 부른다.
+  /// 셸이 다시 만들어지면 처음부터 다시 알리므로 밖에 남은 값이 뒤처지지 않는다.
+  /// 목적지가 [GuardianNavItem.routeName]을 두지 않았으면 `null`을 넘긴다.
+  final ValueChanged<String?>? onVisibleRouteChanged;
 
   @override
   State<GuardianSidebarShell> createState() => _GuardianSidebarShellState();
@@ -50,6 +69,12 @@ class GuardianSidebarShell extends StatefulWidget {
 class _GuardianSidebarShellState extends State<GuardianSidebarShell> {
   int _index = 0;
   final _visited = <int>{0};
+
+  @override
+  void initState() {
+    super.initState();
+    _notifyVisibleRoute();
+  }
 
   void _select(int index) {
     // 보고 있던 탭을 다시 눌렀을 때도 알린다. 갱신을 바라고 아이콘을 다시 누르는
@@ -60,7 +85,11 @@ class _GuardianSidebarShellState extends State<GuardianSidebarShell> {
       _index = index;
       _visited.add(index);
     });
+    _notifyVisibleRoute();
   }
+
+  void _notifyVisibleRoute() =>
+      widget.onVisibleRouteChanged?.call(widget.destinations[_index].routeName);
 
   @override
   Widget build(BuildContext context) {

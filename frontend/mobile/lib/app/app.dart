@@ -121,6 +121,9 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
   NotificationBadgeController? _notificationBadgeController;
   AuthSession? _currentSession;
 
+  /// 보호자 셸이 지금 보여주는 탭의 라우트 이름. 셸이 알려 준다.
+  String? _guardianTabRoute;
+
   @override
   void initState() {
     super.initState();
@@ -225,8 +228,23 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
     AppNavigation.pushNamedOn(
       navigator,
       resolvePushRoute(message),
-      currentRouteName: _routeObserver.currentRouteName,
+      currentRouteName: _visibleRouteName,
     );
+  }
+
+  /// 중복 이동 판정이 "지금 보고 있는 화면"으로 삼을 라우트.
+  ///
+  /// 보호자 셸은 탭을 바꿔도 라우트를 쌓지 않아 관찰자에게는 늘
+  /// `/guardian/home`이다. 그래서 알림 탭을 보는 중에 연결 자원 없는 푸시가 오면
+  /// 이미 보고 있는 알림함이 한 장 더 쌓였다(S15P11B209-501). 셸이 알려 준 탭
+  /// 라우트를 그 자리에 대신 넣어 두 경로의 판정을 맞춘다.
+  ///
+  /// 셸 위에 다른 화면이 올라가 있으면 그 화면이 "지금 화면"이 맞으므로, 셸이
+  /// 최상단일 때만 바꿔치기한다.
+  String? get _visibleRouteName {
+    final current = _routeObserver.currentRouteName;
+    if (current != AppRoutes.guardianHome) return current;
+    return _guardianTabRoute ?? current;
   }
 
   // Provider별 로그인 실행
@@ -377,6 +395,7 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       reportFileActions: widget.reportFileActions,
       notificationInboxRepository: widget.notificationInboxRepository,
       notificationBadgeController: _notificationBadgeController,
+      onGuardianTabChanged: (routeName) => _guardianTabRoute = routeName,
       consentRepository: widget.consentRepository,
       drawingCompletionSnapshotProvider:
           widget.drawingCompletionSnapshotProvider,
