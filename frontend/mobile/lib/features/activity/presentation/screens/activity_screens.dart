@@ -28,6 +28,7 @@ import '../../../drawing/presentation/widgets/canvas_tool_tutorial_overlay.dart'
 import '../../../conversation/conversation.dart';
 import '../../../child_mode/data/costume_preference_store.dart';
 import '../../../child_mode/domain/dodam_costume.dart';
+import '../../data/dto/activity_dtos.dart';
 import '../../domain/models/activity_conversation_turn.dart';
 import '../../domain/repositories/activity_repository.dart';
 import '../widgets/emotion_selection_widgets.dart';
@@ -110,6 +111,12 @@ String _createIdempotencyKey() {
       '${hex.substring(20)}';
 }
 
+/// 질문 음성 재생이 끝난 뒤 아동의 응답을 기다리는 기본 시간이다.
+const aiQuestionNoResponseTimeout = Duration(seconds: 10);
+
+/// Backend 대화 생성 계약의 생략 시 기본 질문 상한과 같은 값이다.
+const defaultConversationMaxQuestionCount = 10;
+
 class DrawingScreen extends StatefulWidget {
   const DrawingScreen({
     required this.childId,
@@ -131,6 +138,9 @@ class DrawingScreen extends StatefulWidget {
     this.voiceRecorder,
     this.microphonePermissionService,
     this.voiceNoSpeechTimeout = const Duration(seconds: 3),
+    this.questionOptionRevealDelay = const Duration(milliseconds: 2500),
+    this.noResponseTimeout = aiQuestionNoResponseTimeout,
+    this.maxQuestionCount = defaultConversationMaxQuestionCount,
     this.voiceAnswerRepository,
     this.sttResultRepository,
     this.activityRepository,
@@ -144,7 +154,7 @@ class DrawingScreen extends StatefulWidget {
     this.childRepository,
     this.canvasTutorialController,
     super.key,
-  });
+  }) : assert(maxQuestionCount > 0 && maxQuestionCount <= 10);
 
   final String childId;
   final int? sessionId;
@@ -171,6 +181,9 @@ class DrawingScreen extends StatefulWidget {
   final VoiceRecorder? voiceRecorder;
   final MicrophonePermissionService? microphonePermissionService;
   final Duration voiceNoSpeechTimeout;
+  final Duration questionOptionRevealDelay;
+  final Duration noResponseTimeout;
+  final int maxQuestionCount;
   final VoiceAnswerRepository? voiceAnswerRepository;
   final SttResultRepository? sttResultRepository;
   final ActivityRepository? activityRepository;
@@ -233,6 +246,14 @@ class _DrawingScreenState extends State<DrawingScreen>
   VoiceAnswerUploadController? _voiceAnswerUploadController;
   SttResultController? _sttResultController;
   bool _conversationSetupStarted = false;
+  Timer? _noResponseTimer;
+  int _noResponseGeneration = 0;
+  bool _noResponseRequestInFlight = false;
+  bool _awaitingNoResponseQuestion = false;
+  AiQuestion? _noResponseRequestSourceQuestion;
+  int? _noResponseTtsReadyQuestionMessageId;
+  final Set<int> _knownQuestionMessageIds = <int>{};
+  final Set<int> _noResponseHandledQuestionMessageIds = <int>{};
 
   /// 그림 단계 완료(`drawing-complete`)가 접수된 뒤 켜진다.
   ///
@@ -349,8 +370,9 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
     _questionDisplayController = AiQuestionDisplayController()
       ..addListener(_handleQuestionDisplayChanged);
-    _questionSelectionController = AiQuestionSelectionController()
-      ..addListener(_handleQuestionSelectionChanged);
+    _questionSelectionController = AiQuestionSelectionController(
+      revealDelay: widget.questionOptionRevealDelay,
+    )..addListener(_handleQuestionSelectionChanged);
     _ownsSyncCoordinator = widget.syncCoordinator == null;
     _syncCoordinator =
         widget.syncCoordinator ??
@@ -436,6 +458,7 @@ class _DrawingScreenState extends State<DrawingScreen>
         conversationId,
       );
       if (!mounted) return;
+      _rememberExistingQuestions(messages);
       final turns = ActivityConversationTurn.group(messages);
       ActivityConversationTurn? pendingTurn;
       for (final turn in turns.reversed) {
@@ -504,12 +527,36 @@ class _DrawingScreenState extends State<DrawingScreen>
   Future<void> _restoreConversationQuestion() async {
     await _ensureConversationStarted(null);
     if (!mounted) return;
+    await _restoreExistingQuestionCount();
+    if (!mounted) return;
     await _questionController?.load();
+  }
+
+  Future<void> _restoreExistingQuestionCount() async {
+    final repository = widget.activityRepository;
+    final conversationId = _activeConversationId;
+    if (repository == null || conversationId == null) return;
+    try {
+      final messages = await repository.getConversationMessages(conversationId);
+      if (mounted) _rememberExistingQuestions(messages);
+    } on Object {
+      // 질문 수 복원 실패가 기존 대화 복귀 자체를 막지 않게 한다. 서버 상한은
+      // next-question 저장 시점에 다시 검증된다.
+    }
+  }
+
+  void _rememberExistingQuestions(
+    Iterable<ActivityConversationMessageDto> messages,
+  ) {
+    for (final message in messages) {
+      if (message.isQuestion) _knownQuestionMessageIds.add(message.messageId);
+    }
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _cancelNoResponseTimer();
     if (_ownsCanvasTutorialController) _canvasTutorialController?.dispose();
     _syncCoordinator.removeListener(_handleSyncChanged);
     _draftRestoreController.removeListener(_handleDraftRestoreChanged);
@@ -550,6 +597,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     if (state == AppLifecycleState.resumed) {
       _appInBackground = false;
       if (!_canvasLocked) _syncCoordinator.resume();
+      _resumeNoResponseTimer();
       return;
     }
     if (state == AppLifecycleState.inactive ||
@@ -557,6 +605,7 @@ class _DrawingScreenState extends State<DrawingScreen>
         state == AppLifecycleState.detached ||
         state == AppLifecycleState.hidden) {
       _appInBackground = true;
+      _invalidateNoResponseRequest();
       unawaited(_questionTtsController?.stop());
       if (_canvasLocked) return;
       _syncCoordinator.pause();
@@ -654,6 +703,7 @@ class _DrawingScreenState extends State<DrawingScreen>
       final conversationId = await conversationRepository.startConversation(
         drawingSessionId: sessionId,
         analysisId: analysisId,
+        maxQuestionCount: widget.maxQuestionCount,
         idempotencyKey: key,
       );
       // 이전 analysis의 늦은 성공이 새 요청의 대화 ID를 덮어쓰면 안 된다.
@@ -758,6 +808,10 @@ class _DrawingScreenState extends State<DrawingScreen>
   void _handleQuestionChanged() {
     final questionController = _questionController;
     if (questionController?.status == AiQuestionStatus.conversationComplete) {
+      _cancelNoResponseTimer();
+      _noResponseRequestInFlight = false;
+      _awaitingNoResponseQuestion = false;
+      _noResponseRequestSourceQuestion = null;
       // 이미 완료된 상태를 바꿀 필요가 없고 불필요한 네트워크 요청을 피하기
       // 위해 종료 API를 다시 부르지 않는다.
       if (questionController?.conversationAlreadyEnded == true) {
@@ -770,12 +824,28 @@ class _DrawingScreenState extends State<DrawingScreen>
       }
       return;
     }
+    if (questionController?.status != AiQuestionStatus.success) {
+      _cancelNoResponseTimer();
+      if (questionController?.status != AiQuestionStatus.loading) {
+        _noResponseRequestInFlight = false;
+      }
+      if (mounted) setState(() {});
+      return;
+    }
     final question = _questionController?.question;
     if (!mounted ||
+        _appInBackground ||
         _conversationEndController?.completed == true ||
-        _questionController?.status != AiQuestionStatus.success ||
         question == null) {
       return;
+    }
+    _knownQuestionMessageIds.add(question.messageId);
+    _noResponseTtsReadyQuestionMessageId = null;
+    if (_awaitingNoResponseQuestion) {
+      _noResponseHandledQuestionMessageIds.add(question.messageId);
+      _awaitingNoResponseQuestion = false;
+      _noResponseRequestInFlight = false;
+      _noResponseRequestSourceQuestion = null;
     }
     _lastQuestionMessageId = question.messageId;
     // 하위 상태 UI의 빌드 중 알림과 겹치지 않도록 다음 프레임에 반영
@@ -793,12 +863,121 @@ class _DrawingScreenState extends State<DrawingScreen>
         _questionSkipController?.beginQuestion(question.messageId);
         _voiceAnswerUploadController?.beginQuestion(question.messageId);
         if (_voiceAnswerUploadController == null) {
-          unawaited(_questionTtsController?.playQuestion(question));
+          unawaited(_prepareNoResponseTimerAfterTts(question));
         } else {
           unawaited(_prepareVoiceAnswerForQuestion(question));
         }
       }
     });
+  }
+
+  Future<void> _prepareNoResponseTimerAfterTts(AiQuestion question) async {
+    await _questionTtsController?.playQuestion(question);
+    if (!_isVisibleCurrentQuestion(question)) return;
+    _markNoResponseTtsReady(question);
+  }
+
+  void _markNoResponseTtsReady(AiQuestion question) {
+    _noResponseTtsReadyQuestionMessageId = question.messageId;
+    _scheduleNoResponseTimerIfReady(question);
+  }
+
+  void _scheduleNoResponseTimerIfReady(AiQuestion question) {
+    if (_noResponseTtsReadyQuestionMessageId != question.messageId ||
+        !_questionSelectionController.optionsVisible) {
+      return;
+    }
+    _scheduleNoResponseTimer(question);
+  }
+
+  bool _isVisibleCurrentQuestion(AiQuestion question) =>
+      mounted &&
+      !_appInBackground &&
+      _conversationEndController?.completed != true &&
+      _questionDisplayController.isVisible &&
+      _questionDisplayController.visibleQuestion?.messageId ==
+          question.messageId &&
+      _questionController?.question?.messageId == question.messageId;
+
+  bool _canScheduleNoResponse(AiQuestion question) =>
+      _isVisibleCurrentQuestion(question) &&
+      !_noResponseRequestInFlight &&
+      !_noResponseHandledQuestionMessageIds.contains(question.messageId) &&
+      _knownQuestionMessageIds.length < widget.maxQuestionCount;
+
+  void _scheduleNoResponseTimer(AiQuestion question) {
+    _cancelNoResponseTimer();
+    if (!_canScheduleNoResponse(question)) return;
+    final generation = _noResponseGeneration;
+    _noResponseTimer = Timer(widget.noResponseTimeout, () {
+      if (generation != _noResponseGeneration) return;
+      _noResponseTimer = null;
+      unawaited(_requestQuestionAfterNoResponse(question));
+    });
+  }
+
+  void _cancelNoResponseTimer() {
+    _noResponseTimer?.cancel();
+    _noResponseTimer = null;
+    _noResponseGeneration += 1;
+  }
+
+  void _invalidateNoResponseRequest() {
+    _cancelNoResponseTimer();
+    if (!_noResponseRequestInFlight && !_awaitingNoResponseQuestion) return;
+    final sourceQuestion = _noResponseRequestSourceQuestion;
+    _noResponseRequestInFlight = false;
+    _awaitingNoResponseQuestion = false;
+    _noResponseRequestSourceQuestion = null;
+    if (mounted &&
+        sourceQuestion != null &&
+        _questionController?.isLoading == true) {
+      // restore()의 generation 증가를 이용해 이미 전송된 요청의 늦은 결과가
+      // 사용자 입력이나 lifecycle 전환 뒤 화면을 덮어쓰지 못하게 한다.
+      _questionController?.restore(sourceQuestion);
+    }
+  }
+
+  void _resumeNoResponseTimer() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _appInBackground) return;
+      final loaded = _questionController?.question;
+      final visible = _questionDisplayController.visibleQuestion;
+      if (_questionController?.status == AiQuestionStatus.success &&
+          loaded != null &&
+          (!_questionDisplayController.isVisible ||
+              loaded.messageId != visible?.messageId)) {
+        _handleQuestionChanged();
+        return;
+      }
+      if (visible != null && _questionDisplayController.isVisible) {
+        if (_noResponseTtsReadyQuestionMessageId == visible.messageId) {
+          _scheduleNoResponseTimerIfReady(visible);
+        } else {
+          unawaited(_prepareNoResponseTimerAfterTts(visible));
+        }
+      }
+    });
+  }
+
+  Future<void> _requestQuestionAfterNoResponse(AiQuestion question) async {
+    if (!_canScheduleNoResponse(question)) return;
+    _noResponseRequestInFlight = true;
+    _awaitingNoResponseQuestion = true;
+    _noResponseRequestSourceQuestion = question;
+    _noResponseHandledQuestionMessageIds.add(question.messageId);
+    await _questionTtsController?.stop();
+    await _voiceRecordingController?.cancel();
+    if (!mounted ||
+        _appInBackground ||
+        !_noResponseRequestInFlight ||
+        _noResponseRequestSourceQuestion?.messageId != question.messageId) {
+      return;
+    }
+    await _questionController?.loadNext();
+    if (mounted && _questionController?.status != AiQuestionStatus.loading) {
+      _noResponseRequestInFlight = false;
+    }
   }
 
   // 질문 음성 재생이 끝나면 별도 버튼 없이 새 답변 녹음을 시작한다.
@@ -825,6 +1004,7 @@ class _DrawingScreenState extends State<DrawingScreen>
             question.messageId) {
       return;
     }
+    _markNoResponseTtsReady(question);
     final started = await recordingController.start();
     if (kDebugMode) {
       debugPrint(
@@ -839,6 +1019,10 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _handleQuestionSelectionChanged() {
+    final question = _questionDisplayController.visibleQuestion;
+    if (question != null && _questionSelectionController.optionsVisible) {
+      _scheduleNoResponseTimerIfReady(question);
+    }
     if (mounted) setState(() {});
   }
 
@@ -872,6 +1056,7 @@ class _DrawingScreenState extends State<DrawingScreen>
       _questionSelectionController.revealOptions();
     } else if (controller.status == VoiceRecordingStatus.starting ||
         controller.status == VoiceRecordingStatus.recording) {
+      _invalidateNoResponseRequest();
       _questionSelectionController.hideOptions();
     } else if (controller.status == VoiceRecordingStatus.completed) {
       _questionSelectionController.hideOptions();
@@ -933,6 +1118,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     final question = _questionDisplayController.visibleQuestion;
     final controller = _answerSubmissionController;
     if (question == null || controller == null) return;
+    _invalidateNoResponseRequest();
     final pendingOptionId = controller.pendingOptionId;
     if (controller.isLockedToPendingAnswer &&
         pendingOptionId != null &&
@@ -968,6 +1154,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     final question = _questionDisplayController.visibleQuestion;
     final controller = _questionSkipController;
     if (question == null || controller == null) return;
+    _invalidateNoResponseRequest();
     await _questionTtsController?.stop();
     await _voiceRecordingController?.cancel();
     final skipped = await controller.submit(
@@ -981,6 +1168,7 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   /// 저장된 응답을 문맥으로 전달해 같은 그림의 다음 질문을 요청한다.
   Future<void> _requestFollowingQuestion(int? previousAnswerMessageId) async {
+    _invalidateNoResponseRequest();
     if (!mounted ||
         _conversationEndController?.completed == true ||
         _automaticConversationEndStarted) {
@@ -995,6 +1183,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   Future<void> _completeConversationAutomatically(
     ConversationCompletionReason reason,
   ) async {
+    _invalidateNoResponseRequest();
     final controller = _conversationEndController;
     if (controller == null ||
         controller.completed ||
@@ -1025,6 +1214,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   Future<void> _confirmAndEndConversation() async {
     final controller = _conversationEndController;
     if (controller == null || controller.completed) return;
+    _invalidateNoResponseRequest();
     final confirmed = await showAppConfirmDialog(
       context: context,
       title: '도다미와 대화를 그만할까요?',
@@ -1052,6 +1242,7 @@ class _DrawingScreenState extends State<DrawingScreen>
       return;
     }
     _invalidatePendingCompletion();
+    _invalidateNoResponseRequest();
     // 새 입력은 진행 중인 객체 탐지 결과를 현재 그림에서 제외
     _objectDetectionController?.onDrawingInputStarted();
     // 그림 입력이 시작되면 질문 오버레이 숨김
@@ -1443,6 +1634,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 함수가 감정 화면으로 넘기므로 두 경로 모두 여기서 처리된다.
   void _skipConversationEndAndContinue() {
     if (_automaticConversationEndStarted || !mounted) return;
+    _invalidateNoResponseRequest();
     _automaticConversationEndStarted = true;
     // 감정·완료 화면이 종료 API를 다시 부르지 않도록 상태를 함께 넘긴다.
     _conversationAlreadyEnded = true;
@@ -1454,6 +1646,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 감정 회고 화면으로 한 번만 이동한다.
   void _goToEmotionSelect() {
     if (_movedToReflection || !mounted) return;
+    _invalidateNoResponseRequest();
     final sessionId = widget.sessionId;
     final repository = widget.drawingRepository;
     if (sessionId == null || repository == null) return;
@@ -1496,6 +1689,7 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   Future<void> _stopTtsAndPop() async {
     if (_isLeaving || _isCompleting) return;
+    _invalidateNoResponseRequest();
     setState(() => _isLeaving = true);
     try {
       await _questionTtsController?.stop();

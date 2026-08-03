@@ -104,6 +104,63 @@ void main() {
       isTrue,
     );
     expect(repository.idempotencyKeys, ['stable-key', 'stable-key']);
+    expect(repository.requests, hasLength(2));
+    expect(repository.requests[0].toJson(), repository.requests[1].toJson());
+  });
+
+  for (final optionId in ['1', 'CHIP_NO']) {
+    test('즉시 성공 후 같은 질문의 $optionId 재제출은 요청하지 않는다', () async {
+      final repository = _RecordingAnswerRepository();
+      final controller = OptionAnswerSubmissionController(
+        repository,
+        conversationId: 20,
+        idempotencyKeyProvider: () => 'answer-key',
+      );
+
+      expect(
+        await controller.submit(
+          questionMessageId: 10,
+          option: _option(optionId),
+        ),
+        isTrue,
+      );
+      expect(
+        await controller.submit(
+          questionMessageId: 10,
+          option: _option(optionId),
+        ),
+        isFalse,
+      );
+
+      expect(repository.callCount, 1);
+      expect(controller.answerMessageId, 30);
+    });
+  }
+
+  test('성공한 질문과 다른 새 질문은 정상 제출한다', () async {
+    final repository = _RecordingAnswerRepository();
+    var keySequence = 0;
+    final controller = OptionAnswerSubmissionController(
+      repository,
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'answer-key-${++keySequence}',
+    );
+
+    expect(
+      await controller.submit(questionMessageId: 10, option: _option('1')),
+      isTrue,
+    );
+    expect(
+      await controller.submit(questionMessageId: 11, option: _option('2')),
+      isTrue,
+    );
+
+    expect(repository.callCount, 2);
+    expect(repository.requests.map((request) => request.questionMessageId), [
+      10,
+      11,
+    ]);
+    expect(repository.idempotencyKeys, ['answer-key-1', 'answer-key-2']);
   });
 
   test('이미 종료된 대화 응답은 잔여 질문을 닫을 수 있도록 정상 처리한다', () async {
@@ -176,6 +233,33 @@ void main() {
     expect(controller.answerMessageId, isNull);
   });
 
+  test('이전 질문의 늦은 성공은 새 질문 상태를 오염시키지 않는다', () async {
+    final completer = Completer<OptionAnswerResult>();
+    final repository = _RecordingAnswerRepository(result: completer.future);
+    final controller = OptionAnswerSubmissionController(
+      repository,
+      conversationId: 20,
+      idempotencyKeyProvider: () => 'answer-key',
+    );
+
+    final previous = controller.submit(
+      questionMessageId: 10,
+      option: _option('1'),
+    );
+    controller.beginQuestion(11);
+    completer.complete(const OptionAnswerResult(answerMessageId: 30));
+
+    expect(await previous, isFalse);
+    expect(controller.status, OptionAnswerSubmissionStatus.idle);
+    expect(controller.answerMessageId, isNull);
+    expect(
+      await controller.submit(questionMessageId: 11, option: _option('2')),
+      isTrue,
+    );
+    expect(repository.callCount, 2);
+    expect(controller.answerMessageId, 30);
+  });
+
   test('dispose 뒤에는 새 제출을 보내지 않는다', () async {
     final repository = _RecordingAnswerRepository();
     final controller = OptionAnswerSubmissionController(
@@ -207,6 +291,7 @@ final class _RecordingAnswerRepository implements ConversationAnswerRepository {
   int callCount = 0;
   int? conversationId;
   OptionAnswerRequest? request;
+  final List<OptionAnswerRequest> requests = [];
   final List<String> idempotencyKeys = [];
 
   @override
@@ -218,6 +303,7 @@ final class _RecordingAnswerRepository implements ConversationAnswerRepository {
     callCount++;
     this.conversationId = conversationId;
     this.request = request;
+    requests.add(request);
     idempotencyKeys.add(idempotencyKey);
     if (failure != null) throw failure!;
     if (failOnce && callCount == 1) throw Exception('temporary failure');
