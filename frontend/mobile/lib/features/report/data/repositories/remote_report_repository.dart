@@ -39,6 +39,36 @@ final class RemoteReportRepository implements ReportRepository {
   }
 
   @override
+  Future<ReportGenerationStatusDto> getGenerationStatus(int reportId) async {
+    final response = await _apiClient.get<Map<String, dynamic>>(
+      'reports/$reportId/generation-status',
+    );
+    return ReportGenerationStatusDto.fromJson(envelopeObject(response.data));
+  }
+
+  @override
+  Future<ReportGenerationStatusDto> regenerateReport(
+    int reportId, {
+    required String idempotencyKey,
+  }) async {
+    final response = await _apiClient.post<Map<String, dynamic>>(
+      'reports/$reportId/regenerate',
+      options: Options(headers: {'Idempotency-Key': idempotencyKey}),
+    );
+    return ReportGenerationStatusDto.fromJson(envelopeObject(response.data));
+  }
+
+  @override
+  Future<Uint8List> downloadImage(String imageUrl) async {
+    final path = _reportImageApiPath(imageUrl);
+    final response = await _apiClient.get<Uint8List>(
+      path,
+      options: Options(responseType: ResponseType.bytes),
+    );
+    return response.data ?? Uint8List(0);
+  }
+
+  @override
   Future<ReportExportDto> requestExport(
     int reportId, {
     required String idempotencyKey,
@@ -96,4 +126,12 @@ String _reportExportApiPath(String downloadUrl) {
     throw ArgumentError.value(downloadUrl, 'downloadUrl');
   }
   return uri.path.substring('/api/v1/'.length);
+}
+
+String _reportImageApiPath(String imageUrl) {
+  final match = RegExp(
+    r'^/api/v1/drawing-assets/([1-9][0-9]*)/file$',
+  ).firstMatch(imageUrl);
+  if (match == null) throw ArgumentError.value(imageUrl, 'imageUrl');
+  return 'drawing-assets/${match.group(1)}/file';
 }

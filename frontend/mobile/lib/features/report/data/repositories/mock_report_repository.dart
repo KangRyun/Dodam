@@ -15,7 +15,7 @@ final class MockReportRepository implements ReportRepository {
     'title': '우리 가족',
     'drawingType': {'drawingTypeId': 7, 'code': 'ART_DIARY', 'name': '그림일기'},
     'selectedEmotions': ['JOY', 'UNSURE'],
-    'thumbnailUrl': 'https://storage.i15b209.example/previews/ds120-v1.png',
+    'thumbnailUrl': '/api/v1/drawing-assets/120/file',
     'activityDate': '2026-07-20',
     'durationMs': 1380000,
     'expertReviewAvailable': false,
@@ -40,8 +40,8 @@ final class MockReportRepository implements ReportRepository {
       'durationMs': 1380000,
     },
     'drawing': {
-      'finalImageUrl': 'https://storage.i15b209.example/final/ds120-v2.png',
-      'thumbnailUrl': 'https://storage.i15b209.example/previews/ds120-v1.png',
+      'finalImageUrl': '/api/v1/drawing-assets/120/file',
+      'thumbnailUrl': '/api/v1/drawing-assets/120/file',
     },
     'childExpression': {
       'selectedEmotions': ['JOY', 'UNSURE'],
@@ -95,6 +95,34 @@ final class MockReportRepository implements ReportRepository {
   @override
   Future<ReportDetailDto> getReport(int reportId) async =>
       ReportDetailDto.fromJson(_detail);
+
+  @override
+  Future<ReportGenerationStatusDto> getGenerationStatus(int reportId) async =>
+      ReportGenerationStatusDto.fromJson({
+        'reportId': reportId,
+        'drawingSessionId': 120,
+        'analysisId': 15901,
+        'reportVersion': 1,
+        'reportStatus': 'COMPLETED',
+        'retryable': false,
+      });
+
+  @override
+  Future<ReportGenerationStatusDto> regenerateReport(
+    int reportId, {
+    required String idempotencyKey,
+  }) async => ReportGenerationStatusDto.fromJson({
+    'reportId': reportId + 1,
+    'drawingSessionId': 120,
+    'analysisId': 15901,
+    'reportVersion': 2,
+    'reportStatus': 'GENERATING',
+    'retryable': false,
+  });
+
+  @override
+  Future<Uint8List> downloadImage(String imageUrl) async =>
+      Uint8List.fromList(const <int>[]);
 
   @override
   Future<ReportExportDto> requestExport(

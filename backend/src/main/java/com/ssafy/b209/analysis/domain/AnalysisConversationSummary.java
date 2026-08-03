@@ -65,7 +65,7 @@ public class AnalysisConversationSummary {
   @Column(name = "representative_utterance", columnDefinition = "TEXT")
   private String representativeUtterance;
 
-  @Column(name = "summary_model_version", length = 50)
+  @Column(name = "summary_model_version", length = 255)
   private String summaryModelVersion;
 
   @Column(name = "created_at", nullable = false)

@@ -70,7 +70,7 @@ public class DrawingAnalysis {
   @Column(name = "model_name", length = 100)
   private String modelName;
 
-  @Column(name = "model_version", length = 100)
+  @Column(name = "model_version", length = 255)
   private String modelVersion;
 
   @Column(name = "confidence", precision = 5, scale = 4)

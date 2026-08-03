@@ -65,6 +65,40 @@ dev_dependencies:
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
 
+  # 런처 아이콘 생성 (S15P11B209-790). 아래 flutter_launcher_icons 설정을 읽어
+  # android/app/src/main/res 의 mipmap 리소스를 다시 만든다.
+  #   재생성:  dart run flutter_launcher_icons
+  flutter_launcher_icons: ^0.14.4
+
+# 런처 아이콘 생성 설정 (S15P11B209-790)
+#
+# ⚠️ 적응형 아이콘(Android 8.0+)은 108dp 중 **가운데 72dp(66.67%)만 보이고** 바깥 1/3은
+#    런처 마스크(원형·스쿼클·둥근사각)에 잘린다. 원화(app_icon.png)는 가장자리까지 꽉 찬
+#    구도라 그대로 쓰면 안테나 컬·반다나 매듭·스케치북이 전부 잘려 얼굴만 남는다.
+#    그래서 전경은 원화를 축소해 가운데 배치한 별도 파일을 쓴다.
+#
+# ⚠️ flutter_launcher_icons 는 생성하는 ic_launcher.xml 에 `android:inset="16%"` 를
+#    **제 마음대로 덧붙인다.** 그래서 전경 PNG 안의 아트 비율이 그대로 화면에 나오지 않는다:
+#      최종 비율 = 전경 안 아트 비율 x (1 - 2*0.16)
+#    아트가 최종 캔버스의 62%(가시영역을 알맞게 채우는 값)가 되게 하려면 전경 PNG 안에서는
+#    62% / 0.68 = **91%** 여야 한다. 이 역산을 빼먹으면 아이콘이 눈에 띄게 작아진다.
+#
+# ⚠️ 배경색 #F3D448 은 임의 값이 아니라 **원화 테두리 24px 링의 평균색**이다. 원화 노랑에
+#    종이 질감과 미세한 그라데이션이 있어 눈대중 단색(#FDDC40)을 쓰면 축소된 아트와 배경
+#    사이에 옅은 사각 이음매가 보인다. 전경 가장자리에 알파 페더를 준 것도 같은 이유다.
+#
+# 레거시 아이콘(image_path)은 마스킹이 없어 원화를 그대로 쓴다 — 구형 런처에서는
+# 그림이 꽉 차게 나오고, 최신 런처에서는 위 적응형이 쓰인다.
+#
+# 전경 재생성: python3 tool/make_icon_foreground.py (원화 경로는 스크립트 상단 참조)
+flutter_launcher_icons:
+  android: true
+  ios: false # 맥 없이는 검증할 수 없어 범위 밖 (S15P11B209-790)
+  image_path: assets/branding/app_icon.png
+  adaptive_icon_background: "#F3D448"
+  adaptive_icon_foreground: assets/branding/app_icon_foreground.png
+  remove_alpha_ios: true
+
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
 

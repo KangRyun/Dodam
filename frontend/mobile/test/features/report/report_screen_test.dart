@@ -498,17 +498,37 @@ void main() {
     expect(find.text('관찰 리포트를 준비하고 있어요'), findsOneWidget);
   });
 
-  testWidgets('FAILED 상태에서 같은 reportId를 다시 조회한다', (tester) async {
+  testWidgets('FAILED 상태에서 실패 사유를 조회하고 재생성을 접수한다', (tester) async {
     final repository = _ReportRepository(
       report: _report(status: 'FAILED', sections: false),
     );
     await _openReport(tester, repository);
     expect(find.byKey(const ValueKey('report-failed')), findsOneWidget);
+    expect(repository.generationStatusCalls, [501]);
+    expect(find.textContaining('분석이 잠시 지연됐어요'), findsOneWidget);
 
-    repository.report = _completed;
-    await tester.tap(find.text('다시 확인'));
-    await tester.pumpAndSettle();
-    expect(repository.calls, [501, 501]);
+    await tester.tap(find.text('다시 준비하기'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(repository.regenerateCalls, [501]);
+    expect(find.byKey(const ValueKey('report-generating')), findsOneWidget);
+  });
+
+  testWidgets('재시도할 수 없는 FAILED 상태에는 재생성 버튼을 표시하지 않는다', (tester) async {
+    final repository =
+        _ReportRepository(report: _report(status: 'FAILED', sections: false))
+          ..generationStatus = ReportGenerationStatusDto.fromJson(const {
+            'reportId': 501,
+            'reportStatus': 'FAILED',
+            'reportVersion': 1,
+            'retryable': false,
+            'failureReason': 'UNKNOWN_NEW_CODE',
+          });
+
+    await _openReport(tester, repository);
+
+    expect(find.textContaining('리포트를 준비하는 중 문제가 생겼어요'), findsOneWidget);
+    expect(find.text('다시 준비하기'), findsNothing);
   });
 
   testWidgets('네트워크 Error에서 Retry할 수 있다', (tester) async {
@@ -767,6 +787,39 @@ final class _ReportRepository implements ReportRepository {
   final List<int> exportCalls = [];
   final List<String> exportKeys = [];
   final List<String> downloadUrls = [];
+  ReportGenerationStatusDto generationStatus =
+      ReportGenerationStatusDto.fromJson(const {
+        'reportId': 501,
+        'reportStatus': 'FAILED',
+        'reportVersion': 1,
+        'retryable': true,
+        'failureReason': 'AI_TIMEOUT',
+      });
+  final List<int> generationStatusCalls = [];
+  final List<int> regenerateCalls = [];
+
+  @override
+  Future<ReportGenerationStatusDto> getGenerationStatus(int reportId) async {
+    generationStatusCalls.add(reportId);
+    return generationStatus;
+  }
+
+  @override
+  Future<ReportGenerationStatusDto> regenerateReport(
+    int reportId, {
+    required String idempotencyKey,
+  }) async {
+    regenerateCalls.add(reportId);
+    return ReportGenerationStatusDto.fromJson({
+      'reportId': reportId + 1,
+      'reportStatus': 'GENERATING',
+      'reportVersion': 2,
+      'retryable': false,
+    });
+  }
+
+  @override
+  Future<Uint8List> downloadImage(String imageUrl) async => Uint8List(0);
 
   @override
   Future<ReportDetailDto> getReport(int reportId) async {

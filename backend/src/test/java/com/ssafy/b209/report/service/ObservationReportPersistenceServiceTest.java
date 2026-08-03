@@ -34,6 +34,7 @@ import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportActivityNote;
 import com.ssafy.b209.report.domain.ReportActivitySummary;
 import com.ssafy.b209.report.domain.ReportFeatureVisibility;
+import com.ssafy.b209.report.domain.ReportGuardianQuestion;
 import com.ssafy.b209.report.domain.ReportKeyConversation;
 import com.ssafy.b209.report.domain.ReportObservedFeature;
 import com.ssafy.b209.report.domain.ReportStatus;
@@ -75,6 +76,9 @@ class ObservationReportPersistenceServiceTest {
   private static final long DRAWING_SESSION_ID = 100L;
   private static final String ATTENTION_POINTS = "특정 주제에서 응답을 주저하는 패턴이 관찰되었습니다.";
   private static final String DISCLAIMER = "본 결과는 진단이 아니라 관찰 기록입니다.";
+  // 786에서 리포트 프롬프트가 갈린 뒤 AI가 실제로 보내는 재현성 태그 형식과 길이(그림일기 78자)다.
+  private static final String SPLIT_PROMPT_MODEL_VERSION =
+      "pipeline=0.1.0;prompt=report_common@1.3.0+195ae9fc;report_diary@1.3.0+05f29d3b";
   private static final Clock CLOCK =
       Clock.fixed(Instant.parse("2026-07-23T10:31:00Z"), ZoneOffset.UTC);
 
@@ -100,6 +104,7 @@ class ObservationReportPersistenceServiceTest {
   @Captor private ArgumentCaptor<List<ReportActivityNote>> notesCaptor;
   @Captor private ArgumentCaptor<List<ReportObservedFeature>> featuresCaptor;
   @Captor private ArgumentCaptor<List<ReportKeyConversation>> keyConversationsCaptor;
+  @Captor private ArgumentCaptor<List<ReportGuardianQuestion>> guardianQuestionsCaptor;
 
   private ObservationReportPersistenceService service;
 
@@ -178,6 +183,91 @@ class ObservationReportPersistenceServiceTest {
         .containsExactly(0, 1);
 
     verify(eventPublisher).publishEvent(new AnalysisCompletedEvent(REPORT_ID));
+  }
+
+  @Test
+  void storesFullReproducibilityTagWithoutTruncation() {
+    // S15P11B209-815 회귀: 프롬프트가 report_common + 활동별 변형으로 갈리며 태그가 43자에서 78자로
+    // 늘어 VARCHAR(50)을 넘겼고 리포트 저장이 통째로 실패했다. 확장 후에는 원본 그대로 저장돼야 한다.
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.complete(context(List.of()), resultWithModelVersion(SPLIT_PROMPT_MODEL_VERSION));
+
+    assertThat(SPLIT_PROMPT_MODEL_VERSION).hasSize(78);
+    assertThat(analysis.getModelVersion()).isEqualTo(SPLIT_PROMPT_MODEL_VERSION);
+    verify(observationResultRepository).save(observationCaptor.capture());
+    assertThat(observationCaptor.getValue().getGeneratedModelVersion())
+        .isEqualTo(SPLIT_PROMPT_MODEL_VERSION);
+    verify(conversationSummaryRepository).save(conversationCaptor.capture());
+    assertThat(conversationCaptor.getValue().getSummaryModelVersion())
+        .isEqualTo(SPLIT_PROMPT_MODEL_VERSION);
+    assertThat(report.getStatus()).isEqualTo(ReportStatus.COMPLETED);
+  }
+
+  @Test
+  void storesModelVersionTruncatedToColumnLimitWhenTagKeepsGrowing() {
+    // 프롬프트가 더 갈려 255자를 넘겨도 재현성 태그 하나 때문에 리포트가 실패해선 안 된다.
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+    String oversized = "p".repeat(400);
+
+    service.complete(context(List.of()), resultWithModelVersion(oversized));
+
+    assertThat(analysis.getModelVersion()).hasSize(255);
+    verify(observationResultRepository).save(observationCaptor.capture());
+    assertThat(observationCaptor.getValue().getGeneratedModelVersion()).hasSize(255);
+    verify(conversationSummaryRepository).save(conversationCaptor.capture());
+    assertThat(conversationCaptor.getValue().getSummaryModelVersion()).hasSize(255);
+    assertThat(report.getStatus()).isEqualTo(ReportStatus.COMPLETED);
+  }
+
+  @Test
+  void truncatesAiTextExceedingVarcharColumnLimits() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.complete(context(List.of()), resultWithOversizedText());
+
+    assertThat(analysis.getModelName()).hasSize(100);
+    verify(conversationSummaryRepository).save(conversationCaptor.capture());
+    AnalysisConversationSummary summary = conversationCaptor.getValue();
+    assertThat(summary.getMainTopic()).hasSize(100);
+    assertThat(summary.getExpressedEmotion()).hasSize(50);
+
+    verify(observedFeatureRepository).saveAll(featuresCaptor.capture());
+    ReportObservedFeature feature = featuresCaptor.getValue().get(0);
+    assertThat(feature.getFeatureCode()).hasSize(80);
+    assertThat(feature.getTitle()).hasSize(200);
+
+    verify(guardianQuestionRepository).saveAll(guardianQuestionsCaptor.capture());
+    assertThat(guardianQuestionsCaptor.getValue().get(0).getQuestionPurpose()).hasSize(50);
+
+    assertThat(report.getStatus()).isEqualTo(ReportStatus.COMPLETED);
+  }
+
+  @Test
+  void truncatesEmojiTextOnCharacterCountNotCodeUnitCount() {
+    // MySQL VARCHAR(50)은 Emoji도 1자로 센다. Java의 UTF-16 길이로 자르면 25자만 남고
+    // Surrogate Pair가 쪼개질 수 있다.
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.complete(context(List.of()), resultWithEmotion("😀".repeat(60)));
+
+    verify(conversationSummaryRepository).save(conversationCaptor.capture());
+    String emotion = conversationCaptor.getValue().getExpressedEmotion();
+    assertThat(emotion.codePointCount(0, emotion.length())).isEqualTo(50);
+    assertThat(emotion).isEqualTo("😀".repeat(50));
+    assertThat(Character.isHighSurrogate(emotion.charAt(emotion.length() - 1))).isFalse();
   }
 
   @Test
@@ -598,6 +688,81 @@ class ObservationReportPersistenceServiceTest {
         List.of("색을 여러 번 바꾸었습니다.", "잠시 생각하는 시간을 가졌습니다."),
         List.of(new FollowUpGuideDraft("개방형 질문을 해보세요.", "정답을 요구하지 마세요.")),
         List.of(new GuardianQuestionDraft("어떤 기분이었어?", "감정 표현 유도")),
+        "한계 문구");
+  }
+
+  private ObservationGenerationResult resultWithModelVersion(String modelVersion) {
+    return new ObservationGenerationResult(
+        "request-1",
+        "mock-observation-generator",
+        modelVersion,
+        new BigDecimal("0.80"),
+        new ObservationDraft(
+            "AI_DRAFT",
+            "전체 요약",
+            "긍정 신호",
+            ATTENTION_POINTS,
+            "근거 요약",
+            "보호자 안내",
+            "후속 질문",
+            false,
+            DISCLAIMER,
+            List.of()),
+        new ConversationSummaryDraft("보호자용 대화 요약", "오늘의 그림", "즐거움", "SELECTED", "즐거웠어요"),
+        List.of(),
+        List.of(),
+        List.of(),
+        "한계 문구");
+  }
+
+  private ObservationGenerationResult resultWithOversizedText() {
+    return new ObservationGenerationResult(
+        "request-1",
+        "모".repeat(150),
+        SPLIT_PROMPT_MODEL_VERSION,
+        new BigDecimal("0.80"),
+        new ObservationDraft(
+            "AI_DRAFT",
+            "전체 요약",
+            "긍정 신호",
+            ATTENTION_POINTS,
+            "근거 요약",
+            "보호자 안내",
+            "후속 질문",
+            false,
+            DISCLAIMER,
+            List.of(
+                new ObservedFeatureDraft(
+                    "코".repeat(120), "제".repeat(300), "적극적으로 표현", "관찰 근거", "EXPERT_ONLY"))),
+        new ConversationSummaryDraft(
+            "보호자용 대화 요약", "주".repeat(150), "감".repeat(90), "SELECTED", "즐거웠어요"),
+        List.of(),
+        List.of(),
+        List.of(new GuardianQuestionDraft("어떤 기분이었어?", "목".repeat(90))),
+        "한계 문구");
+  }
+
+  private ObservationGenerationResult resultWithEmotion(String expressedEmotion) {
+    return new ObservationGenerationResult(
+        "request-1",
+        "mock-observation-generator",
+        SPLIT_PROMPT_MODEL_VERSION,
+        new BigDecimal("0.80"),
+        new ObservationDraft(
+            "AI_DRAFT",
+            "전체 요약",
+            "긍정 신호",
+            ATTENTION_POINTS,
+            "근거 요약",
+            "보호자 안내",
+            "후속 질문",
+            false,
+            DISCLAIMER,
+            List.of()),
+        new ConversationSummaryDraft("보호자용 대화 요약", "오늘의 그림", expressedEmotion, "SELECTED", null),
+        List.of(),
+        List.of(),
+        List.of(),
         "한계 문구");
   }
 
