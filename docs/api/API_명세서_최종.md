@@ -1692,6 +1692,8 @@ REPORT-07은 Request Body 없이 `Idempotency-Key` Header를 필수로 받는다
 | COMM-14 | POST | `/activity-templates` | VERIFIED EXPERT, ADMIN | 템플릿 등록 |
 | COMM-15 | PATCH | `/activity-templates/{templateId}` | 작성 전문가, ADMIN | 템플릿 수정·비활성화 |
 | COMM-16 | GET | `/posts/{postId}/comments` | 로그인 사용자 | 게시글 댓글 목록 조회 |
+| COMM-17 | POST | `/users/me/blocks/{blockedUserId}` | 로그인 사용자 | 사용자 차단 |
+| COMM-18 | DELETE | `/users/me/blocks/{blockedUserId}` | 로그인 사용자 | 사용자 차단 해제 |
 
 전문가 팔로우는 전문가 도메인의 EXPERT-07·08을 사용한다.
 
@@ -1813,6 +1815,16 @@ REPORT-07은 Request Body 없이 `Idempotency-Key` Header를 필수로 받는다
 `reasonCode`: `INAPPROPRIATE_CONTENT`, `PERSONAL_INFORMATION`, `MISLEADING_DIAGNOSIS`, `HARASSMENT`, `COPYRIGHT`, `OTHER`.
 
 신고자는 자신의 신고만 조회할 수 있고, 신고 대상 작성자에게 신고자 정보를 공개하지 않는다. 같은 사용자의 동일 대상·사유 중복 신고는 `409 COMPLAINT_ALREADY_EXISTS`이다.
+
+S15P11B209-585 기준 공개 신고 대상은 DB 외래키와 접근 제어를 확정한 `POST`, `COMMENT`, `REPORT`다. `REPORT`는 연결 보호자가 조회할 수 있는 리포트만 신고할 수 있다. AI 질문 신고는 질문 메시지 식별자와 보존 정책이 확정되기 전까지 지원하지 않으며 임의로 게시글·댓글 ID로 변환하지 않는다.
+
+사용자 차단 계약:
+
+- `POST /users/me/blocks/{blockedUserId}`는 최초 차단 시 `201`, 이미 차단한 대상이면 현재 상태를 담아 `200`을 반환한다. 응답은 `{ "blockedUserId": 10, "blocked": true }`다.
+- `DELETE /users/me/blocks/{blockedUserId}`는 차단 관계가 없어도 멱등하게 `204`를 반환한다.
+- 자기 자신 차단은 `400 USER_BLOCK_SELF_NOT_ALLOWED`, 없거나 삭제된 사용자는 `404 USER_404_001`이다.
+- 차단한 사용자가 작성한 게시글은 목록과 직접 상세 조회에서 모두 `POST_NOT_FOUND`와 같은 비노출 정책을 적용한다. 익명 게시글도 서버가 보존한 실제 작성자 ID를 기준으로 필터링한다.
+- 차단은 상대 사용자의 계정 상태를 변경하거나 상대방에게 알림을 보내지 않는다.
 
 ### 16.8 활동 템플릿
 
