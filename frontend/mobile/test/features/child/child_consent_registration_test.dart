@@ -3,6 +3,8 @@ import 'package:dodam/features/child/data/dto/child_consent_dtos.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
 import 'package:dodam/features/child/domain/repositories/child_consent_repository.dart';
 import 'package:dodam/features/child/domain/repositories/child_repository.dart';
+import 'package:dodam/features/child/presentation/screens/child_registration_screen.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -107,6 +109,49 @@ void main() {
     expect(repository.deletedChildIds, [77]);
     expect(repository.getChildrenCallCount, 1);
   });
+
+  testWidgets('아동 등록 전체 동의는 모든 선택 약관을 함께 선택하고 해제한다', (tester) async {
+    final controller = GuardianChildController(
+      _FakeChildRepository(),
+      _FakeChildConsentRepository(),
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(home: ChildRegistrationScreen(controller: controller)),
+    );
+    await tester.pumpAndSettle();
+
+    final allConsent = find.byKey(const ValueKey('child-consent-all'));
+    await tester.ensureVisible(allConsent);
+    await tester.tap(allConsent);
+    await tester.pump();
+
+    for (final code in const [
+      'DRAWING_ANALYSIS',
+      'VOICE_PROCESSING',
+      'EXPERT_REPORT_SHARE',
+    ]) {
+      final checkbox = tester.widget<CheckboxListTile>(
+        find.byKey(ValueKey('child-consent-$code')),
+      );
+      expect(checkbox.value, isTrue);
+    }
+
+    await tester.tap(allConsent);
+    await tester.pump();
+
+    for (final code in const [
+      'DRAWING_ANALYSIS',
+      'VOICE_PROCESSING',
+      'EXPERT_REPORT_SHARE',
+    ]) {
+      final checkbox = tester.widget<CheckboxListTile>(
+        find.byKey(ValueKey('child-consent-$code')),
+      );
+      expect(checkbox.value, isFalse);
+    }
+  });
 }
 
 const _request = CreateChildRequestDto(
@@ -132,8 +177,22 @@ final class _FakeChildConsentRepository implements ChildConsentRepository {
     return const [
       ConsentTermDto(
         termId: 11,
+        termCode: 'DRAWING_ANALYSIS',
+        title: '그림 데이터 분석 활용',
+        required: false,
+        version: 'v1',
+      ),
+      ConsentTermDto(
+        termId: 12,
         termCode: 'VOICE_PROCESSING',
         title: '음성 데이터 처리',
+        required: false,
+        version: 'v1',
+      ),
+      ConsentTermDto(
+        termId: 13,
+        termCode: 'EXPERT_REPORT_SHARE',
+        title: '전문가 리포트 공유',
         required: false,
         version: 'v1',
       ),
