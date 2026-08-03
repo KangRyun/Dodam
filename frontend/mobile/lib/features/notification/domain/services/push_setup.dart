@@ -1,4 +1,5 @@
 import '../entities/push_message.dart';
+import '../failures/push_token_registration_failure.dart';
 import '../repositories/push_token_repository.dart';
 import 'push_coordinator.dart';
 import 'push_gateway.dart';
@@ -31,6 +32,8 @@ final class PushSetup {
     required bool Function() isChildModeActive,
     required bool Function() isGuardianSessionActive,
     void Function()? onInboxChanged,
+    void Function(PushTokenRegistrationFailure? failure)?
+    onTokenRegistrationResult,
   }) => PushCoordinator(
     gateway: gateway,
     presenter: presenter,
@@ -40,6 +43,7 @@ final class PushSetup {
     isChildModeActive: isChildModeActive,
     isGuardianSessionActive: isGuardianSessionActive,
     onInboxChanged: onInboxChanged,
+    onTokenRegistrationResult: onTokenRegistrationResult,
     exposeTokenInLogs: exposeTokenInLogs,
   );
 }

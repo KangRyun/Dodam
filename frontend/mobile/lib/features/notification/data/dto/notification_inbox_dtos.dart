@@ -71,6 +71,22 @@ final class NotificationItemDto {
   final Map<String, String> data;
 
   bool get isRead => readAt != null;
+
+  /// 읽음 처리 결과를 반영한 사본. 목록·팝업이 서버 재조회 없이 카드 하나만
+  /// 미열람에서 열람으로 바꿀 때 쓴다.
+  NotificationItemDto copyWithReadAt(String readAt) => NotificationItemDto(
+    notificationId: notificationId,
+    type: type,
+    title: title,
+    content: content,
+    relatedResourceType: relatedResourceType,
+    relatedResourceId: relatedResourceId,
+    data: data,
+    deliveryStatus: deliveryStatus,
+    readAt: readAt,
+    sentAt: sentAt,
+    createdAt: createdAt,
+  );
 }
 
 /// NOTI-04 단건 읽음 처리 응답. 멱등하므로 이미 읽은 알림은 최초 `readAt`을

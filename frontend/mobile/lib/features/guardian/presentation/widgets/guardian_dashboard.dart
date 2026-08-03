@@ -8,6 +8,12 @@ import '../../../activity/data/dto/activity_dtos.dart';
 import '../../../activity/domain/repositories/activity_repository.dart';
 import '../../../child/data/dto/child_dtos.dart';
 import '../../../drawing/presentation/widgets/htp_intro_dialog.dart';
+import '../../../notification/application/notification_badge_controller.dart';
+import '../../../notification/application/push_registration_status_controller.dart';
+import '../../../notification/domain/failures/push_token_registration_failure.dart';
+import '../../../notification/domain/repositories/notification_inbox_repository.dart';
+import '../../../notification/presentation/widgets/notification_popup.dart';
+import '../../../notification/presentation/widgets/push_registration_notice.dart';
 import 'guardian_home_theme.dart';
 import 'mind_calendar_card.dart';
 import 'mind_emotion.dart';
@@ -18,11 +24,24 @@ class GuardianDashboard extends StatefulWidget {
   const GuardianDashboard({
     required this.controller,
     this.activityRepository,
+    this.notificationInboxRepository,
+    this.notificationBadgeController,
+    this.pushRegistrationStatus,
     super.key,
   });
 
   final GuardianChildController controller;
   final ActivityRepository? activityRepository;
+
+  /// 헤더 알림 버튼이 여는 팝업이 읽을 알림함. 주지 않으면 팝업 대신 사이드바
+  /// 알림함으로 안내한다(로그인 전·목 구성).
+  final NotificationInboxRepository? notificationInboxRepository;
+
+  /// 미열람 수. 헤더 알림 버튼의 점 표시와 팝업 요약이 같은 값을 본다.
+  final NotificationBadgeController? notificationBadgeController;
+
+  /// 이 기기가 푸시를 받지 못하는 상태인지. 값이 있으면 안내 띠를 띄운다.
+  final PushRegistrationStatusController? pushRegistrationStatus;
 
   @override
   State<GuardianDashboard> createState() => _GuardianDashboardState();
@@ -58,7 +77,14 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          _Header(child: selected),
+          _Header(
+            child: selected,
+            notificationInboxRepository: widget.notificationInboxRepository,
+            notificationBadgeController: widget.notificationBadgeController,
+            pushRegistrationStatus: widget.pushRegistrationStatus,
+          ),
+          if (widget.pushRegistrationStatus case final status?)
+            _PushRegistrationBanner(status: status),
           const SizedBox(height: 16),
           Expanded(
             child: Row(
@@ -100,8 +126,16 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
 
 // ── 헤더 ─────────────────────────────────────────────────────────────
 class _Header extends StatelessWidget {
-  const _Header({required this.child});
+  const _Header({
+    required this.child,
+    required this.notificationInboxRepository,
+    required this.notificationBadgeController,
+    required this.pushRegistrationStatus,
+  });
   final ChildSummaryDto? child;
+  final NotificationInboxRepository? notificationInboxRepository;
+  final NotificationBadgeController? notificationBadgeController;
+  final PushRegistrationStatusController? pushRegistrationStatus;
 
   static String _relLabel(String? rel) => switch (rel) {
     'MOTHER' => '엄마',
@@ -150,11 +184,10 @@ class _Header extends StatelessWidget {
           onTap: () => _snack(context, '도움말은 준비 중이에요.'),
         ),
         const SizedBox(width: 10),
-        _IconBtn(
-          icon: Icons.notifications_none_rounded,
-          tooltip: '알림',
-          showDot: true,
-          onTap: () => _snack(context, '알림은 왼쪽 사이드바 "알림"에서 확인할 수 있어요.'),
+        _NotificationButton(
+          repository: notificationInboxRepository,
+          badgeController: notificationBadgeController,
+          pushRegistrationStatus: pushRegistrationStatus,
         ),
       ],
     );
@@ -167,12 +200,115 @@ class _Header extends StatelessWidget {
   }
 }
 
+/// 헤더 알림 버튼. 누르면 그 자리에 최근 알림 팝업을 띄운다.
+///
+/// 팝업이 고른 이동 대상은 팝업이 닫힌 뒤 여기서 연다. 이동은 사이드바 알림함이
+/// 쓰는 진입점([AppNavigation.pushNamed])과 같아, 중복 이동 판정도 같이 걸린다
+/// (S15P11B209-501).
+class _NotificationButton extends StatefulWidget {
+  const _NotificationButton({
+    required this.repository,
+    required this.badgeController,
+    required this.pushRegistrationStatus,
+  });
+
+  final NotificationInboxRepository? repository;
+  final NotificationBadgeController? badgeController;
+  final PushRegistrationStatusController? pushRegistrationStatus;
+
+  @override
+  State<_NotificationButton> createState() => _NotificationButtonState();
+}
+
+class _NotificationButtonState extends State<_NotificationButton> {
+  /// 팝업을 붙일 기준. 버튼의 전역 좌표를 팝업 배치에 넘긴다.
+  final _anchorKey = GlobalKey();
+  bool _isOpen = false;
+
+  Future<void> _openPopup() async {
+    final repository = widget.repository;
+    if (repository == null) {
+      _Header._snack(context, '로그인 후 알림을 확인할 수 있어요.');
+      return;
+    }
+    // 연타로 팝업이 겹쳐 열리면 뒤에 남은 것이 화면을 덮는다.
+    if (_isOpen) return;
+    final box = _anchorKey.currentContext?.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) return;
+
+    setState(() => _isOpen = true);
+    final route = await showNotificationPopup(
+      context,
+      anchorRect: box.localToGlobal(Offset.zero) & box.size,
+      repository: repository,
+      badgeController: widget.badgeController,
+      pushRegistrationStatus: widget.pushRegistrationStatus,
+      onDismissPushNotice: widget.pushRegistrationStatus?.dismiss,
+    );
+    if (!mounted) return;
+    setState(() => _isOpen = false);
+    if (route == null) return;
+
+    AppNavigation.pushNamed(context, route);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final badge = widget.badgeController;
+    final button = _IconBtn(
+      key: _anchorKey,
+      icon: Icons.notifications_none_rounded,
+      tooltip: '알림',
+      onTap: _openPopup,
+    );
+    if (badge == null) return button;
+
+    return ValueListenableBuilder<int>(
+      valueListenable: badge,
+      builder: (context, value, _) => _IconBtn(
+        key: _anchorKey,
+        icon: Icons.notifications_none_rounded,
+        tooltip: '알림',
+        // 미열람이 있을 때만 점을 켠다. 예전에는 항상 켜져 있어 읽을 알림이
+        // 없어도 새 소식이 있는 것처럼 보였다.
+        showDot: value > 0,
+        onTap: _openPopup,
+      ),
+    );
+  }
+}
+
+/// 푸시를 받지 못하는 상태를 보호자 홈 상단에 알린다.
+///
+/// 아동 화면에는 올리지 않는다 — 이 위젯은 보호자 대시보드에만 있다.
+class _PushRegistrationBanner extends StatelessWidget {
+  const _PushRegistrationBanner({required this.status});
+
+  final PushRegistrationStatusController status;
+
+  @override
+  Widget build(BuildContext context) =>
+      ValueListenableBuilder<PushTokenRegistrationFailure?>(
+        valueListenable: status,
+        builder: (context, failure, _) => failure == null
+            ? const SizedBox.shrink()
+            : Padding(
+                padding: const EdgeInsets.only(top: 12),
+                child: PushRegistrationNotice(
+                  failure: failure,
+                  onDismiss: status.dismiss,
+                ),
+              ),
+      );
+}
+
 class _IconBtn extends StatelessWidget {
   const _IconBtn({
     required this.icon,
     required this.tooltip,
     required this.onTap,
     this.showDot = false,
+    super.key,
   });
   final IconData icon;
   final String tooltip;
@@ -204,6 +340,7 @@ class _IconBtn extends StatelessWidget {
                   top: 11,
                   right: 12,
                   child: Container(
+                    key: const ValueKey('guardian-header-dot'),
                     width: 8,
                     height: 8,
                     decoration: BoxDecoration(

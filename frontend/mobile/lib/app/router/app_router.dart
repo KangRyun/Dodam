@@ -22,6 +22,7 @@ import '../../features/conversation/conversation.dart';
 import '../../features/guardian/presentation/screens/guardian_screens.dart';
 import '../../features/history/presentation/screens/history_screens.dart';
 import '../../features/notification/application/notification_badge_controller.dart';
+import '../../features/notification/application/push_registration_status_controller.dart';
 import '../../features/notification/domain/repositories/notification_inbox_repository.dart';
 import '../../features/notification/presentation/screens/notification_list_screen.dart';
 import '../../features/report/presentation/screens/report_screen.dart';
@@ -64,6 +65,7 @@ abstract final class AppRouter {
     ReportFileActions? reportFileActions,
     NotificationInboxRepository? notificationInboxRepository,
     NotificationBadgeController? notificationBadgeController,
+    PushRegistrationStatusController? pushRegistrationStatus,
     ValueChanged<String?>? onGuardianTabChanged,
     ConsentRepository? consentRepository,
     AccountWithdrawalRepository? accountWithdrawalRepository,
@@ -146,7 +148,19 @@ abstract final class AppRouter {
             icon: Icons.home_outlined,
             selectedIcon: Icons.home_rounded,
             label: '홈',
-            builder: (_) => _guardianHome(childController, activityRepository),
+            // 대시보드 헤더의 알림 버튼도 미열람 배지를 보여주므로 홈 탭이 다시
+            // 보일 때 수를 다시 센다. 셸이 IndexedStack으로 홈을 살려 두어 재진입
+            // 시 initState가 돌지 않고, 푸시 등록이 실패한 기기는 푸시 수신
+            // 시점의 갱신조차 오지 않는다(S15P11B209-842). 주기 폴링은 두지 않고
+            // 사용자가 홈으로 돌아오는 순간만 쓴다.
+            onSelected: () => unawaited(notificationBadgeController?.refresh()),
+            builder: (_) => _guardianHome(
+              childController,
+              activityRepository,
+              notificationInboxRepository,
+              notificationBadgeController,
+              pushRegistrationStatus,
+            ),
           ),
           GuardianNavItem(
             icon: Icons.article_outlined,
@@ -514,9 +528,15 @@ abstract final class AppRouter {
   static Widget _guardianHome(
     GuardianChildController controller,
     ActivityRepository? activityRepository,
+    NotificationInboxRepository? notificationInboxRepository,
+    NotificationBadgeController? notificationBadgeController,
+    PushRegistrationStatusController? pushRegistrationStatus,
   ) => GuardianHomeScreen(
     controller: controller,
     activityRepository: activityRepository,
+    notificationInboxRepository: notificationInboxRepository,
+    notificationBadgeController: notificationBadgeController,
+    pushRegistrationStatus: pushRegistrationStatus,
   );
 
   static bool _hasChildContext(
