@@ -7,7 +7,7 @@ const API_BASE_URL =
  * 커뮤니티 웹앱은 앱 웹뷰 안에서 이 키를 읽어 백엔드를 같은 사용자로 호출한다.
  * (`community_webview_screen.dart`가 주입한다.)
  */
-const ACCESS_TOKEN_STORAGE_KEY = "dodam.accessToken";
+export const ACCESS_TOKEN_STORAGE_KEY = "dodam.accessToken";
 
 export class ApiClientError extends Error {
   constructor(

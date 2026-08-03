@@ -39,12 +39,26 @@ spec:
           image: dodam-web          # 태그는 overlay 의 images 트랜스포머가 채운다
           ports:
             - { name: http, containerPort: 3000 }
-          # ⚠️ env 로 API 주소를 넣지 않는다. NEXT_PUBLIC_* 는 빌드 시점에 번들에
-          #    구워지므로 여기서 줘도 아무 효과가 없다. 주소를 바꾸려면 build-arg 를
-          #    바꿔 **재빌드**해야 한다(frontend/web/Dockerfile 주석 참조).
-          #    여기에 env 를 추가하면 "설정했는데 왜 안 바뀌지"로 반나절을 쓴다.
+          # ⚠️ 브라우저용 API 주소(NEXT_PUBLIC_API_BASE_URL)는 여기 두지 않는다 — 빌드 시점에
+          #    번들에 구워지므로(상대경로 /api/v1) 런타임 env 로는 안 바뀐다. 바꾸려면 build-arg 로
+          #    **재빌드**해야 한다(frontend/web/Dockerfile 주석). 여기 넣으면 "설정했는데 왜 안 바뀌지"다.
+          #
+          #  ↔ 아래 API_BASE_URL 은 그것과 **다른 것**이다. 소셜 로그인의 code→token 교환은 서버 전용
+          #    Route Handler(/api/oauth/[provider])에서 일어나고, 그 핸들러가 백엔드를 부를 때 쓰는
+          #    주소다. 서버-사이드 fetch 는 상대경로(/api/v1)를 못 쓰므로 클러스터 내부 절대주소가
+          #    필요하다. gateway/TLS 를 거치지 않고 backend 를 직접 부른다 — nginx 의
+          #    `location /api/ { proxy_pass http://backend:8080; }` 와 동일 대상이며, 경로를 떼지
+          #    않으므로 백엔드 컨텍스트 /api/v1 을 포함한다.
           env:
             - { name: NODE_ENV, value: production }
+            - { name: API_BASE_URL, value: "http://backend:8080/api/v1" }
+            # 소셜 로그인 Client Secret(서버 전용) — dodam-secrets 의 동일 키를 참조한다.
+            #   optional: true 인 이유: 값이 아직 동기화 전이어도 web 파드는 떠서 커뮤니티는 정상
+            #   서비스하고 해당 provider 로그인만 실패한다(OAuth secret 하나로 웹 전체가 죽지 않게).
+            #   값 주입: dodam-env 에 키 추가 → infra/scripts/sync-secrets.sh 로 dodam-secrets 갱신.
+            - { name: KAKAO_CLIENT_SECRET,  valueFrom: { secretKeyRef: { name: dodam-secrets, key: KAKAO_CLIENT_SECRET,  optional: true } } }
+            - { name: NAVER_CLIENT_SECRET,  valueFrom: { secretKeyRef: { name: dodam-secrets, key: NAVER_CLIENT_SECRET,  optional: true } } }
+            - { name: GOOGLE_CLIENT_SECRET, valueFrom: { secretKeyRef: { name: dodam-secrets, key: GOOGLE_CLIENT_SECRET, optional: true } } }
           # `/` 는 /community 로 리다이렉트한다(src/app/page.tsx). 3xx 는 프로브 성공으로
           # 취급되므로 그대로 쓴다 — 별도 헬스 엔드포인트를 만들 이유가 없다.
           startupProbe:

@@ -30,6 +30,16 @@ COPY . .
 
 ARG NEXT_PUBLIC_API_BASE_URL=/api/v1
 ENV NEXT_PUBLIC_API_BASE_URL=$NEXT_PUBLIC_API_BASE_URL
+# ★ 소셜 로그인 Client ID 도 NEXT_PUBLIC_* 라 빌드 시점에 번들에 구워진다(런타임 불가).
+#   값은 compose 의 build.args 로 주입하며, 그 소스는 dodam-env 다. 미주입이면 빈 문자열이
+#   구워져 해당 provider 버튼이 비활성으로 뜬다(코드의 isProviderConfigured 가 false).
+#   ⚠️ Client "Secret" 은 여기 오면 안 된다 — 그건 서버 전용 런타임 secret 이다(k8s web.yaml).
+ARG NEXT_PUBLIC_KAKAO_CLIENT_ID=
+ENV NEXT_PUBLIC_KAKAO_CLIENT_ID=$NEXT_PUBLIC_KAKAO_CLIENT_ID
+ARG NEXT_PUBLIC_GOOGLE_CLIENT_ID=
+ENV NEXT_PUBLIC_GOOGLE_CLIENT_ID=$NEXT_PUBLIC_GOOGLE_CLIENT_ID
+ARG NEXT_PUBLIC_NAVER_CLIENT_ID=
+ENV NEXT_PUBLIC_NAVER_CLIENT_ID=$NEXT_PUBLIC_NAVER_CLIENT_ID
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN pnpm build
 
@@ -47,7 +57,9 @@ COPY --from=build --chown=nextjs:nodejs /app/.next/standalone ./
 # 정적 자산은 standalone 에 포함되지 않아 따로 넣어야 한다.
 #   빠뜨리면 페이지는 뜨는데 CSS·JS 가 전부 404 나서 "화면이 깨진 채로 200" 이 된다.
 COPY --from=build --chown=nextjs:nodejs /app/.next/static ./.next/static
-# ※ public/ 은 이 프로젝트에 없다. 생기면 여기에 COPY 를 한 줄 추가할 것.
+# public/ 정적 자산(소셜 로그인 브랜드 아이콘 /branding/*.svg 등)도 standalone 에
+#   포함되지 않아 따로 넣는다. 빠뜨리면 아이콘이 전부 404 나서 로그인 버튼 로고가 사라진다.
+COPY --from=build --chown=nextjs:nodejs /app/public ./public
 
 USER nextjs
 

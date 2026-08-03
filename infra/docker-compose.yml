@@ -420,6 +420,11 @@ services:
         # ★ NEXT_PUBLIC_* 는 빌드 시점에 번들에 구워진다 — 런타임 env 로는 못 바꾼다.
         #   상대경로라 웹과 API 가 같은 오리진(gateway)이면 도메인이 바뀌어도 재빌드가 필요 없다.
         NEXT_PUBLIC_API_BASE_URL: ${NEXT_PUBLIC_API_BASE_URL:-/api/v1}
+        # 소셜 로그인 Client ID(3사). 값 소스는 dodam-env(= --env-file). 미설정이면 빈 문자열이
+        #   구워져 해당 버튼만 비활성으로 뜬다(다른 provider·페이지는 정상). Secret 은 여기 아님.
+        NEXT_PUBLIC_KAKAO_CLIENT_ID: ${NEXT_PUBLIC_KAKAO_CLIENT_ID:-}
+        NEXT_PUBLIC_GOOGLE_CLIENT_ID: ${NEXT_PUBLIC_GOOGLE_CLIENT_ID:-}
+        NEXT_PUBLIC_NAVER_CLIENT_ID: ${NEXT_PUBLIC_NAVER_CLIENT_ID:-}
     image: dodam-web:local       # 로컬 빌드 이미지 이름(backend·ai·nginx 와 동일 규칙)
     container_name: dodam-web
     restart: unless-stopped
