@@ -65,6 +65,9 @@ class _SettingsMainScreenState extends State<SettingsMainScreen> {
     showAppMessage(context, message: '$title 화면은 준비 중이에요.');
   }
 
+  void _openProfile() =>
+      AppNavigation.pushNamed(context, AppRoutes.settingsProfile);
+
   @override
   Widget build(BuildContext context) => Scaffold(
     backgroundColor: AppColors.canvas,
@@ -74,6 +77,7 @@ class _SettingsMainScreenState extends State<SettingsMainScreen> {
         user: widget.user,
         isSigningOut: _isSigningOut,
         onItemSelected: _showPending,
+        onProfileSelected: _openProfile,
         onSignOut: _signOut,
       ),
     ),
@@ -85,12 +89,14 @@ class _SettingsContent extends StatelessWidget {
     required this.user,
     required this.isSigningOut,
     required this.onItemSelected,
+    required this.onProfileSelected,
     required this.onSignOut,
   });
 
   final AuthenticatedUser? user;
   final bool isSigningOut;
   final ValueChanged<String> onItemSelected;
+  final VoidCallback onProfileSelected;
   final VoidCallback onSignOut;
 
   @override
@@ -104,7 +110,7 @@ class _SettingsContent extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            _ProfileCard(user: user),
+            _ProfileCard(user: user, onTap: onProfileSelected),
             const SizedBox(height: AppSpacing.lg),
             LayoutBuilder(
               builder: (context, constraints) {
@@ -114,7 +120,7 @@ class _SettingsContent extends StatelessWidget {
                       icon: Icons.person_outline_rounded,
                       title: '내 정보 관리',
                       subtitle: '닉네임 · 이메일 · 프로필',
-                      onTap: () => onItemSelected('내 정보 관리'),
+                      onTap: onProfileSelected,
                     ),
                     _SettingsTile(
                       icon: Icons.lock_outline_rounded,
@@ -186,10 +192,8 @@ class _SettingsContent extends StatelessWidget {
             _AccountActions(
               isSigningOut: isSigningOut,
               onSignOut: onSignOut,
-              onWithdraw: () => AppNavigation.pushNamed(
-                context,
-                AppRoutes.settingsWithdraw,
-              ),
+              onWithdraw: () =>
+                  AppNavigation.pushNamed(context, AppRoutes.settingsWithdraw),
             ),
           ],
         ),
@@ -199,9 +203,10 @@ class _SettingsContent extends StatelessWidget {
 }
 
 class _ProfileCard extends StatelessWidget {
-  const _ProfileCard({required this.user});
+  const _ProfileCard({required this.user, required this.onTap});
 
   final AuthenticatedUser? user;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -224,7 +229,7 @@ class _ProfileCard extends StatelessWidget {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        onTap: () => showAppMessage(context, message: '내 정보 관리 화면은 준비 중이에요.'),
+        onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(AppSpacing.lg),
           child: Row(

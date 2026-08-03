@@ -33,6 +33,7 @@ import '../../features/consent/presentation/screens/consent_terms_screen.dart';
 import '../../features/settings/domain/repositories/account_withdrawal_repository.dart';
 import '../../features/settings/presentation/screens/account_withdrawal_screen.dart';
 import '../../features/settings/presentation/screens/settings_main_screen.dart';
+import '../../features/settings/presentation/screens/guardian_profile_screen.dart';
 import '../state/guardian_child_controller.dart';
 import '../widgets/app_placeholder_scaffold.dart';
 import '../widgets/guardian_sidebar_shell.dart';
@@ -51,6 +52,8 @@ abstract final class AppRouter {
     AuthSignOut? authSignOut,
     AuthSessionRestore? authRestoreSession,
     AuthenticatedUser? Function()? authCurrentUser,
+    GuardianProfileLoad? authLoadProfile,
+    GuardianProfileUpdate? authUpdateProfile,
     Future<String?> Function()? communityAccessToken,
     ActivityRepository? activityRepository,
     DrawingRepository? drawingRepository,
@@ -254,6 +257,13 @@ abstract final class AppRouter {
         user: authCurrentUser?.call(),
         onSignOut: authSignOut,
       ),
+      ['guardian', 'settings', 'profile']
+          when authLoadProfile != null && authUpdateProfile != null =>
+        GuardianProfileScreen(
+          initialUser: authCurrentUser?.call(),
+          loadProfile: authLoadProfile,
+          updateProfile: authUpdateProfile,
+        ),
       ['guardian', 'settings', 'consents']
           when consentRepository != null && childController != null =>
         ConsentManagementScreen(

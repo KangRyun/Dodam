@@ -19,6 +19,7 @@ abstract final class AppRoutes {
       '/guardian/notifications'; // NOTI-03 GET /notifications (S15P11B209-499)
   static const String settings =
       '/guardian/settings'; // USER-01/04 /users/me (S15P11B209-454)
+  static const String settingsProfile = '/guardian/settings/profile';
   static const String settingsConsents =
       '/guardian/settings/consents'; // CONSENT /consents (S15P11B209-706)
 

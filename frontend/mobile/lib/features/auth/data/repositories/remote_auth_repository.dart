@@ -15,10 +15,15 @@ import '../../domain/failures/auth_failure.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../../domain/repositories/auth_session_store.dart';
 import '../../domain/repositories/device_id_provider.dart';
+import '../../../settings/domain/repositories/guardian_profile_repository.dart';
 
 /// Provider Token을 서비스 Token으로 교환하고 인증 세션을 영속화한다.
 final class RemoteAuthRepository
-    implements AuthRepository, AccessTokenProvider, TokenRefresher {
+    implements
+        AuthRepository,
+        AccessTokenProvider,
+        TokenRefresher,
+        GuardianProfileRepository {
   factory RemoteAuthRepository({
     required ApiClient Function() apiClient,
     required DeviceIdProvider deviceIdProvider,
@@ -183,6 +188,45 @@ final class RemoteAuthRepository
   }
 
   @override
+  Future<AuthenticatedUser> getCurrentUserProfile() async {
+    final session = _currentSession ?? await _sessionStore.read();
+    if (session == null) throw _sessionRequiredFailure();
+    try {
+      final response = await _apiClient().get<Map<String, dynamic>>('users/me');
+      final user = _parseUser(
+        jsonObject(jsonObject(response.data)['data']),
+        session.user.provider,
+      );
+      await _saveSession(session.copyWith(user: user));
+      return user;
+    } on ApiFailure catch (failure) {
+      throw _mapFailure(failure);
+    }
+  }
+
+  @override
+  Future<AuthenticatedUser> updateCurrentUserProfile({
+    required String nickname,
+  }) async {
+    final session = _currentSession ?? await _sessionStore.read();
+    if (session == null) throw _sessionRequiredFailure();
+    try {
+      final response = await _apiClient().patch<Map<String, dynamic>>(
+        'users/me',
+        data: {'nickname': nickname.trim()},
+      );
+      final user = _parseUser(
+        jsonObject(jsonObject(response.data)['data']),
+        session.user.provider,
+      );
+      await _saveSession(session.copyWith(user: user));
+      return user;
+    } on ApiFailure catch (failure) {
+      throw _mapFailure(failure);
+    }
+  }
+
+  @override
   Future<void> signOut() async {
     final session = _currentSession ?? await _sessionStore.read();
     try {
@@ -243,8 +287,15 @@ final class RemoteAuthRepository
       emailRequired: data['emailRequired'] as bool? ?? false,
       email: data['email'] as String?,
       nickname: data['nickname'] as String?,
+      profileImageUrl: data['profileImageUrl'] as String?,
     );
   }
+
+  AuthFailure _sessionRequiredFailure() => const AuthFailure(
+    type: AuthFailureType.tokenExpired,
+    code: 'AUTH_SESSION_REQUIRED',
+    message: '로그인 정보를 확인할 수 없어요. 다시 로그인해 주세요.',
+  );
 
   ConsentCode? _consentByTermCode(String termCode) => switch (termCode) {
     'SERVICE_TOS' || 'SERVICE_TERMS' => ConsentCode.serviceTerms,
