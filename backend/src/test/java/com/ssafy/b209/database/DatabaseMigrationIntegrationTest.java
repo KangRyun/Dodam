@@ -49,9 +49,9 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("32");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("33");
     assertThat(tableExists("flyway_schema_history")).isTrue();
-    assertThat(tableCount()).isEqualTo(73);
+    assertThat(tableCount()).isEqualTo(74);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
     assertThat(tableExists("child_profile_image_files")).isTrue();
@@ -71,6 +71,11 @@ class DatabaseMigrationIntegrationTest {
     assertThat(columnExists("expert_profiles", "target_age_max")).isTrue();
     assertThat(tableExists("expert_verification_reviews")).isTrue();
     assertThat(tableExists("expert_verification_review_credentials")).isTrue();
+    assertThat(tableExists("user_blocks")).isTrue();
+    assertThat(indexExists("user_blocks", "uk_user_blocks_blocker_blocked", true)).isTrue();
+    assertThat(indexExists("complaints", "uk_complaints_reporter_post_reason", true)).isTrue();
+    assertThat(indexExists("complaints", "uk_complaints_reporter_comment_reason", true)).isTrue();
+    assertThat(indexExists("complaints", "uk_complaints_reporter_report_reason", true)).isTrue();
     assertThat(
             checkConstraintContains(
                 "notifications", "ck_notifications_type", "EXPERT_VERIFICATION_RESULT"))

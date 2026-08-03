@@ -25,6 +25,12 @@ public class CommunityPostListRepositoryImpl implements CommunityPostListReposit
       WHERE p.post_status = 'ACTIVE'
         AND p.is_visible = true
         AND p.deleted_at IS NULL
+        AND NOT EXISTS (
+          SELECT 1
+          FROM user_blocks ub
+          WHERE ub.blocker_user_id = :viewerUserId
+            AND ub.blocked_user_id = p.author_user_id
+        )
         AND (:postType IS NULL OR p.post_type = :postType)
         AND (:keywordPattern IS NULL
           OR p.title LIKE :keywordPattern ESCAPE '!'
