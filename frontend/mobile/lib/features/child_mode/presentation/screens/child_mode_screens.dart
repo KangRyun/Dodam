@@ -31,7 +31,9 @@ enum _ActivityLoadStatus { loading, loaded, empty, error }
 
 enum _DrawingStartChoice { resume, startNew }
 
-enum _CharacterIntroChoice { later, pick }
+enum _CharacterIntroChoice { useCurrent, pick, dismissed }
+
+enum _CharacterGuideStatus { inactive, choosing, saving, failure }
 
 /// 그림 유형 코드별 카드·안내 팝업 아이콘/강조색.
 ///
@@ -183,6 +185,11 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   bool _introCheckRunning = false;
   bool _introOpen = false;
   bool _introHandled = false;
+  bool _introAllowedForResolvedEntry = false;
+  _CharacterGuideStatus _characterGuideStatus = _CharacterGuideStatus.inactive;
+  int? _characterGuideChildId;
+  bool _characterGuideInteracted = false;
+  int _costumeSelectionGeneration = 0;
   static const Duration _persistCharacterDelay = Duration(milliseconds: 600);
 
   @override
@@ -222,6 +229,11 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     _introCheckRunning = false;
     _introOpen = false;
     _introHandled = false;
+    _introAllowedForResolvedEntry = false;
+    _characterGuideStatus = _CharacterGuideStatus.inactive;
+    _characterGuideChildId = null;
+    _characterGuideInteracted = false;
+    _costumeSelectionGeneration++;
 
     final costume = _costumeFromCode(widget.child.preferredCharacter);
     _costume = costume;
@@ -333,7 +345,15 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     final costume = costumes[index];
     if (costume == _costume) return;
     HapticFeedback.selectionClick();
-    setState(() => _costume = costume);
+    _costumeSelectionGeneration++;
+    setState(() {
+      _costume = costume;
+      if (_characterGuideStatus != _CharacterGuideStatus.inactive &&
+          _characterGuideChildId == widget.child.childId) {
+        _characterGuideInteracted = true;
+        _characterGuideStatus = _CharacterGuideStatus.choosing;
+      }
+    });
     unawaited(_costumeStore.write(widget.child.childId, costume.code));
     _schedulePersistCharacter(costume.code);
   }
@@ -374,8 +394,16 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     }
     _characterSaveInFlight = true;
     final generation = ++_characterSaveGeneration;
+    final selectionGeneration = _costumeSelectionGeneration;
     final childId = widget.child.childId;
     final requested = _costumeFromCode(code);
+    final guideRequest =
+        _characterGuideStatus != _CharacterGuideStatus.inactive &&
+        _characterGuideChildId == childId &&
+        _characterGuideInteracted;
+    if (guideRequest && mounted) {
+      setState(() => _characterGuideStatus = _CharacterGuideStatus.saving);
+    }
     final succeeded =
         await widget.onCharacterSelected?.call(childId, code) ?? true;
     if (!mounted ||
@@ -388,15 +416,33 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     _pendingCharacterCode = null;
     if (succeeded) {
       _confirmedCostume = requested;
+      if (guideRequest &&
+          queuedCode == null &&
+          selectionGeneration == _costumeSelectionGeneration &&
+          requested == _costume &&
+          _isCurrentHomeRoute) {
+        await _completeCharacterGuide(
+          childId: childId,
+          saveGeneration: generation,
+          selectionGeneration: selectionGeneration,
+        );
+      }
     } else if (queuedCode == null || queuedCode == requested.code) {
-      setState(() => _costume = _confirmedCostume);
+      setState(() {
+        _costume = _confirmedCostume;
+        if (guideRequest) {
+          _characterGuideStatus = _CharacterGuideStatus.failure;
+        }
+      });
       unawaited(
         _costumeStore.write(widget.child.childId, _confirmedCostume.code),
       );
       _jumpToCostume(_confirmedCostume);
       showAppMessage(
         context,
-        message: '친구를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.',
+        message: guideRequest
+            ? '친구를 정하지 못했어요. 다시 골라볼까요?'
+            : '친구를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.',
         type: AppMessageType.error,
       );
     }
@@ -405,6 +451,86 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         queuedCode != requested.code &&
         queuedCode != _confirmedCostume.code) {
       unawaited(_persistCharacter(queuedCode));
+    }
+  }
+
+  bool get _isCurrentHomeRoute =>
+      mounted && (ModalRoute.of(context)?.isCurrent ?? false);
+
+  Future<void> _completeCharacterGuide({
+    required int childId,
+    required int saveGeneration,
+    required int selectionGeneration,
+  }) async {
+    if (!_isCurrentHomeRoute ||
+        childId != widget.child.childId ||
+        _characterGuideChildId != childId ||
+        !_characterGuideInteracted ||
+        saveGeneration != _characterSaveGeneration ||
+        selectionGeneration != _costumeSelectionGeneration) {
+      return;
+    }
+
+    setState(() {
+      _characterGuideStatus = _CharacterGuideStatus.inactive;
+      _characterGuideChildId = null;
+      _characterGuideInteracted = false;
+    });
+    showAppMessage(
+      context,
+      message: '새 친구와 함께 시작해 볼까?',
+      type: AppMessageType.success,
+    );
+    try {
+      await _introStore.markSeen(childId);
+    } on Object {
+      // 캐릭터 저장은 끝났다. 안내 상태 저장 실패로 홈 사용을 막지 않고,
+      // 다음 정상 진입에서 안내를 다시 보여 줄 수 있게 둔다.
+    }
+  }
+
+  void _startCharacterGuide(int childId) {
+    if (!mounted || childId != widget.child.childId) return;
+    setState(() {
+      _characterGuideStatus = _CharacterGuideStatus.choosing;
+      _characterGuideChildId = childId;
+      _characterGuideInteracted = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          _characterGuideStatus == _CharacterGuideStatus.inactive ||
+          _characterGuideChildId != widget.child.childId) {
+        return;
+      }
+      _costumeFocusNode.requestFocus();
+      final selectorContext = _costumeKey.currentContext;
+      if (selectorContext != null) {
+        unawaited(
+          Scrollable.ensureVisible(
+            selectorContext,
+            duration: const Duration(milliseconds: 240),
+            alignment: 0.35,
+          ),
+        );
+      }
+    });
+  }
+
+  void _dismissCharacterGuide() {
+    if (_characterGuideStatus == _CharacterGuideStatus.inactive) return;
+    setState(() {
+      _characterGuideStatus = _CharacterGuideStatus.inactive;
+      _characterGuideChildId = null;
+      _characterGuideInteracted = false;
+    });
+  }
+
+  Future<void> _markCurrentCharacterIntroSeen(int childId) async {
+    try {
+      await _introStore.markSeen(childId);
+    } on Object {
+      // 명시적으로 현재 친구를 선택한 흐름은 막지 않는다. 저장 실패 시 다음
+      // 진입에서 안내가 다시 나타날 수 있다.
     }
   }
 
@@ -423,7 +549,10 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
 
   Future<void> _resolveEntry() async {
     if (_checkingActiveSession || _entryResolved) return;
-    setState(() => _checkingActiveSession = true);
+    setState(() {
+      _checkingActiveSession = true;
+      _introAllowedForResolvedEntry = false;
+    });
     try {
       final controller = DrawingSessionStartController(
         repository: widget.drawingRepository,
@@ -433,7 +562,10 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       );
       if (!mounted) return;
       if (activeSession == null) {
-        setState(() => _entryResolved = true);
+        setState(() {
+          _entryResolved = true;
+          _introAllowedForResolvedEntry = true;
+        });
         unawaited(_maybeShowCharacterIntro());
         return;
       }
@@ -454,6 +586,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         setState(() {
           _replaceActiveOnSelection = true;
           _entryResolved = true;
+          _introAllowedForResolvedEntry = true;
         });
         return;
       }
@@ -511,6 +644,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         _introOpen ||
         _status != _ActivityLoadStatus.loaded ||
         !_entryResolved ||
+        !_introAllowedForResolvedEntry ||
         _checkingActiveSession ||
         _preparedResolution != null ||
         _startingDrawingTypeId != null ||
@@ -520,7 +654,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     _introCheckRunning = true;
     final childId = widget.child.childId;
     final seen = await _introStore.hasSeen(childId);
-    if (!mounted) return;
+    if (!mounted || childId != widget.child.childId) return;
     _introCheckRunning = false;
     if (seen) {
       _introHandled = true;
@@ -529,6 +663,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     if (_introOpen ||
         _status != _ActivityLoadStatus.loaded ||
         !_entryResolved ||
+        !_introAllowedForResolvedEntry ||
         _checkingActiveSession ||
         _preparedResolution != null ||
         !(ModalRoute.of(context)?.isCurrent ?? false)) {
@@ -536,24 +671,16 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     }
     _introOpen = true;
     final choice = await _showCharacterIntro(childId);
-    if (!mounted) return;
+    if (!mounted || childId != widget.child.childId) return;
     _introOpen = false;
     _introHandled = true;
-    if (choice == _CharacterIntroChoice.pick) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _costumeFocusNode.requestFocus();
-        final selectorContext = _costumeKey.currentContext;
-        if (selectorContext != null) {
-          unawaited(
-            Scrollable.ensureVisible(
-              selectorContext,
-              duration: const Duration(milliseconds: 240),
-              alignment: 0.35,
-            ),
-          );
-        }
-      });
+    switch (choice) {
+      case _CharacterIntroChoice.pick:
+        _startCharacterGuide(childId);
+      case _CharacterIntroChoice.useCurrent:
+        await _markCurrentCharacterIntroSeen(childId);
+      case _CharacterIntroChoice.dismissed || null:
+        break;
     }
   }
 
@@ -563,21 +690,16 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
-        Future<void> close(_CharacterIntroChoice choice) async {
+        void close(_CharacterIntroChoice choice) {
           if (closing) return;
           closing = true;
-          try {
-            await _introStore.markSeen(childId);
-          } on Object {
-            // 저장 실패가 아이를 dialog에 가두지 않도록 이번 진입에서는 닫는다.
-          }
-          if (dialogContext.mounted) Navigator.of(dialogContext).pop(choice);
+          Navigator.of(dialogContext).pop(choice);
         }
 
         return PopScope(
           canPop: false,
           onPopInvokedWithResult: (didPop, _) {
-            if (!didPop) unawaited(close(_CharacterIntroChoice.later));
+            if (!didPop) close(_CharacterIntroChoice.dismissed);
           },
           child: Dialog(
             key: const ValueKey('child-character-intro-dialog'),
@@ -636,12 +758,11 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
                           height: 52,
                           child: FilledButton(
                             key: const ValueKey('pick-character-from-intro'),
-                            onPressed: () =>
-                                unawaited(close(_CharacterIntroChoice.pick)),
+                            onPressed: () => close(_CharacterIntroChoice.pick),
                             style: FilledButton.styleFrom(
                               backgroundColor: AppColors.leaf,
                             ),
-                            child: const Text('친구 고르기'),
+                            child: const Text('친구 골라보기'),
                           ),
                         ),
                       ),
@@ -654,8 +775,8 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
                           child: OutlinedButton(
                             key: const ValueKey('choose-character-later'),
                             onPressed: () =>
-                                unawaited(close(_CharacterIntroChoice.later)),
-                            child: const Text('다음에 고를래'),
+                                close(_CharacterIntroChoice.useCurrent),
+                            child: const Text('지금 도담이로 시작할래'),
                           ),
                         ),
                       ),
@@ -1110,15 +1231,18 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     }
   }
 
-  Widget _carousel() => Focus(
-    key: _costumeKey,
-    focusNode: _costumeFocusNode,
-    child: _CostumeCarousel(
-      controller: _costumeController,
-      costumes: widget.availableCostumes,
-      selected: _costume,
-      onSelected: _onCostumeSelected,
-      onStep: _stepCostume,
+  Widget _carousel() => _CharacterSelectionGuide(
+    status: _characterGuideStatus,
+    child: Focus(
+      key: _costumeKey,
+      focusNode: _costumeFocusNode,
+      child: _CostumeCarousel(
+        controller: _costumeController,
+        costumes: widget.availableCostumes,
+        selected: _costume,
+        onSelected: _onCostumeSelected,
+        onStep: _stepCostume,
+      ),
     ),
   );
 
@@ -1332,6 +1456,9 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: false,
+    onPopInvokedWithResult: (didPop, _) {
+      if (!didPop) _dismissCharacterGuide();
+    },
     child: Scaffold(
       backgroundColor: _skyLow,
       body: Stack(
@@ -1371,6 +1498,120 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       ),
     ),
   );
+}
+
+/// 실제 캐러셀 위에만 표시하는 비차단 단계형 안내.
+///
+/// 테두리와 문구는 [IgnorePointer]라 PageView swipe와 좌우 화살표 hit target을
+/// 그대로 유지한다. 고정 높이 안에 겹쳐 그려 좁은 화면·가로 화면의 레이아웃도
+/// 바꾸지 않는다.
+class _CharacterSelectionGuide extends StatelessWidget {
+  const _CharacterSelectionGuide({required this.status, required this.child});
+
+  final _CharacterGuideStatus status;
+  final Widget child;
+
+  String get _message => switch (status) {
+    _CharacterGuideStatus.inactive => '',
+    _CharacterGuideStatus.choosing => '화살표를 눌러 함께할 도담이를 골라봐!',
+    _CharacterGuideStatus.saving => '친구를 정하고 있어요',
+    _CharacterGuideStatus.failure => '친구를 정하지 못했어요. 다시 골라볼까요?',
+  };
+
+  Color get _accent => switch (status) {
+    _CharacterGuideStatus.failure => AppColors.error,
+    _ => AppColors.leaf,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final active = status != _CharacterGuideStatus.inactive;
+    return Stack(
+      key: const ValueKey('child-character-guide-region'),
+      clipBehavior: Clip.none,
+      children: [
+        child,
+        Positioned.fill(
+          child: IgnorePointer(
+            child: AnimatedContainer(
+              key: const ValueKey('child-character-guide-highlight'),
+              duration: const Duration(milliseconds: 180),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(28),
+                border: active ? Border.all(color: _accent, width: 3) : null,
+                boxShadow: active
+                    ? [
+                        BoxShadow(
+                          color: _accent.withValues(alpha: 0.22),
+                          blurRadius: 18,
+                          spreadRadius: 2,
+                        ),
+                      ]
+                    : null,
+              ),
+            ),
+          ),
+        ),
+        if (active)
+          Positioned(
+            top: 4,
+            left: 60,
+            right: 60,
+            child: Semantics(
+              key: const ValueKey('child-character-guide'),
+              container: true,
+              liveRegion: true,
+              label: _message,
+              child: ExcludeSemantics(
+                child: IgnorePointer(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: AppSpacing.sm,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.surface.withValues(alpha: 0.96),
+                      borderRadius: BorderRadius.circular(AppRadius.pill),
+                      border: Border.all(color: _accent, width: 2),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        if (status == _CharacterGuideStatus.saving) ...[
+                          SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: _accent,
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                        ],
+                        Flexible(
+                          child: Text(
+                            _message,
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: status == _CharacterGuideStatus.failure
+                                  ? AppColors.error
+                                  : AppColors.ink,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 /// 왼쪽 도담이 코스튬 캐러셀(S15P11B209-750).
