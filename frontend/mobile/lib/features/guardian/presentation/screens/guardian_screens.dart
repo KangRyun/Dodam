@@ -9,12 +9,18 @@ import '../../../../design_system/design_system.dart';
 import '../../../activity/domain/repositories/activity_repository.dart';
 import '../../../child/data/dto/child_dtos.dart';
 import '../../../child_mode/domain/dodam_costume.dart';
+import '../../../notification/application/notification_badge_controller.dart';
+import '../../../notification/application/push_registration_status_controller.dart';
+import '../../../notification/domain/repositories/notification_inbox_repository.dart';
 import '../widgets/guardian_dashboard.dart';
 
 class GuardianHomeScreen extends StatelessWidget {
   const GuardianHomeScreen({
     required this.controller,
     this.activityRepository,
+    this.notificationInboxRepository,
+    this.notificationBadgeController,
+    this.pushRegistrationStatus,
     super.key,
   });
 
@@ -22,6 +28,11 @@ class GuardianHomeScreen extends StatelessWidget {
 
   /// 마음 달력·최근 활동을 그리는 데 쓰는 활동 이력 레포.
   final ActivityRepository? activityRepository;
+
+  /// 헤더 알림 버튼 팝업이 쓰는 알림함·배지·푸시 등록 상태.
+  final NotificationInboxRepository? notificationInboxRepository;
+  final NotificationBadgeController? notificationBadgeController;
+  final PushRegistrationStatusController? pushRegistrationStatus;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -51,6 +62,9 @@ class GuardianHomeScreen extends StatelessWidget {
       key: ValueKey('guardian-dashboard-${controller.selectedChildId}'),
       controller: controller,
       activityRepository: activityRepository,
+      notificationInboxRepository: notificationInboxRepository,
+      notificationBadgeController: notificationBadgeController,
+      pushRegistrationStatus: pushRegistrationStatus,
     ),
   };
 }

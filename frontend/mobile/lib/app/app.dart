@@ -20,7 +20,9 @@ import '../features/drawing/data/repositories/mock_drawing_repository.dart';
 import '../features/drawing/domain/repositories/drawing_repository.dart';
 import '../features/conversation/conversation.dart';
 import '../features/notification/application/notification_badge_controller.dart';
+import '../features/notification/application/push_registration_status_controller.dart';
 import '../features/notification/domain/entities/push_message.dart';
+import '../features/notification/domain/failures/push_token_registration_failure.dart';
 import '../features/notification/domain/repositories/notification_inbox_repository.dart';
 import '../features/notification/domain/services/push_coordinator.dart';
 import '../features/notification/domain/services/push_setup.dart';
@@ -132,6 +134,10 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
   final _routeObserver = CurrentRouteObserver();
   PushCoordinator? _pushCoordinator;
   NotificationBadgeController? _notificationBadgeController;
+
+  /// 디바이스 Token 등록이 거절돼 이 계정이 푸시를 받지 못하는 상태인지.
+  /// 보호자 화면이 구독해 안내를 띄운다.
+  final _pushRegistrationStatus = PushRegistrationStatusController();
   AuthSession? _currentSession;
 
   /// 보호자 셸이 지금 보여주는 탭의 라우트 이름. 셸이 알려 준다.
@@ -195,11 +201,25 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       isChildModeActive: () => _routeObserver.isChildModeActive,
       isGuardianSessionActive: () => _hasGuardianSession,
       onInboxChanged: _refreshNotificationBadge,
+      onTokenRegistrationResult: _handlePushTokenRegistrationResult,
     );
   }
 
   void _refreshNotificationBadge() {
     unawaited(_notificationBadgeController?.refresh());
+  }
+
+  /// 디바이스 Token 등록 결과를 보호자 화면에 전달한다.
+  ///
+  /// 등록이 거절된 계정에는 서버가 푸시를 보내지 않는다. 푸시 수신에 기대던 배지
+  /// 갱신이 아예 오지 않으므로, 실패를 알게 된 지금 한 번 서버 값을 읽어 배지가
+  /// 0에서 멈춰 있지 않게 한다. 주기 폴링은 두지 않는다(배터리·트래픽) —
+  /// 나머지는 홈·알림 탭 재진입과 알림 팝업 열기가 담당한다(S15P11B209-842).
+  void _handlePushTokenRegistrationResult(
+    PushTokenRegistrationFailure? failure,
+  ) {
+    _pushRegistrationStatus.report(failure);
+    if (failure != null) _refreshNotificationBadge();
   }
 
   /// 포그라운드로 돌아오면 미열람 수를 다시 센다. 백그라운드에서 받은 푸시는
@@ -358,6 +378,8 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
     }
     _childController.clear();
     _notificationBadgeController?.clear();
+    // 등록 상태는 직전 계정의 것이다. 다음 로그인이 다시 판정한다.
+    _pushRegistrationStatus.clear();
   }
 
   Future<AuthenticatedUser> _loadProfile() async {
@@ -390,6 +412,7 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _notificationBadgeController?.dispose();
+    _pushRegistrationStatus.dispose();
     _childController.dispose();
     super.dispose();
   }
@@ -436,6 +459,7 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       reportFileActions: widget.reportFileActions,
       notificationInboxRepository: widget.notificationInboxRepository,
       notificationBadgeController: _notificationBadgeController,
+      pushRegistrationStatus: _pushRegistrationStatus,
       onGuardianTabChanged: (routeName) => _guardianTabRoute = routeName,
       consentRepository: widget.consentRepository,
       accountWithdrawalRepository: widget.accountWithdrawalRepository,

@@ -6,8 +6,10 @@ import '../../../../app/router/app_navigation.dart';
 import '../../../../app/router/notification_route_resolver.dart';
 import '../../../../design_system/design_system.dart';
 import '../../application/notification_badge_controller.dart';
+import '../../application/notification_read_marker.dart';
 import '../../data/dto/notification_inbox_dtos.dart';
 import '../../domain/repositories/notification_inbox_repository.dart';
+import '../widgets/notification_item_card.dart';
 
 /// 서버 알림함을 최신순으로 보여주는 보호자 알림 탭.
 ///
@@ -34,10 +36,11 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
   final _scrollController = ScrollController();
   final List<NotificationItemDto> _items = [];
 
-  /// 읽음 처리 응답을 기다리는 중인 알림 id. 카드가 들고 있는 [NotificationItemDto]는
-  /// build 시점에 캡처된 불변 인스턴스라 응답이 오기 전에는 계속 미열람으로 보인다.
-  /// 연타를 막지 않으면 서버는 멱등이라 1건만 줄지만 배지는 두 번 줄어든다.
-  final _pendingReads = <int>{};
+  /// 읽음 처리와 배지 동기화. 대시보드 알림 팝업이 같은 것을 쓴다.
+  late final NotificationReadMarker _readMarker = NotificationReadMarker(
+    widget.repository,
+    badgeController: widget.badgeController,
+  );
 
   bool _isLoading = true;
   bool _isLoadingMore = false;
@@ -147,43 +150,23 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
   }
 
   Future<void> _markRead(NotificationItemDto item) async {
-    if (item.isRead) return;
-    // 응답을 기다리는 동안 같은 카드를 다시 눌러도 위 isRead 가드는 통과한다.
-    // 진행 중인 id를 붙잡아 두 번째 탭을 흘려보내야 감산이 한 번만 일어난다.
-    if (!_pendingReads.add(item.notificationId)) return;
-
-    try {
-      final result = await widget.repository.markRead(item.notificationId);
-      // 화면에 미열람으로 남아 있던 항목의 첫 읽음 처리이므로 배지에서 1건 뺀다.
-      // 왕복을 기다리지 않고 바로 반응하는 것이 계약 §6의 설계 의도다.
-      widget.badgeController?.decrementBy(1);
-      // 그리고 서버 값으로 맞춘다. NOTI-04 응답에는 "이번 호출로 미열람이 실제로
-      // 줄었는지" 알려주는 필드가 없다(NOTI-05는 updatedCount를 주는 비대칭).
-      // 다른 기기에서 이미 읽은 건이면 서버 미열람 수는 그대로인데 여기서만 1을
-      // 빼서 배지가 실제보다 적게 남는다. 감산이 맞았으면 서버도 같은 수를 주므로
-      // 배지는 움직이지 않고, 틀렸을 때만 제자리로 올라간다 — 정상 경로에는
-      // 깜빡임이 없다. decrementBy가 세대를 올려 두어 이 조회가 최신이고,
-      // 컨트롤러가 요청을 합쳐 두므로 연타해도 재조회가 늘지 않는다.
-      unawaited(widget.badgeController?.refresh());
-      if (!mounted) return;
-      final index = _items.indexWhere(
-        (candidate) => candidate.notificationId == item.notificationId,
+    final result = await _readMarker.markRead(item);
+    if (!mounted) return;
+    if (result.outcome == NotificationReadOutcome.failure) {
+      showAppMessage(
+        context,
+        message: '알림을 읽음 처리하지 못했어요.',
+        type: AppMessageType.error,
       );
-      if (index < 0) return;
-      setState(() {
-        _items[index] = _copyWithReadAt(_items[index], result.readAt);
-      });
-    } on Object {
-      if (mounted) {
-        showAppMessage(
-          context,
-          message: '알림을 읽음 처리하지 못했어요.',
-          type: AppMessageType.error,
-        );
-      }
-    } finally {
-      _pendingReads.remove(item.notificationId);
+      return;
     }
+    final readAt = result.readAt;
+    if (readAt == null) return;
+    final index = _items.indexWhere(
+      (candidate) => candidate.notificationId == item.notificationId,
+    );
+    if (index < 0) return;
+    setState(() => _items[index] = _items[index].copyWithReadAt(readAt));
   }
 
   Future<void> _markAllRead() async {
@@ -200,7 +183,7 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
       setState(() {
         for (var index = 0; index < _items.length; index++) {
           final item = _items[index];
-          if (!item.isRead) _items[index] = _copyWithReadAt(item, readAt);
+          if (!item.isRead) _items[index] = item.copyWithReadAt(readAt);
         }
       });
     } on Object {
@@ -286,7 +269,7 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
             );
           }
           final item = _items[index];
-          return _NotificationCard(
+          return NotificationItemCard(
             item: item,
             onTap: () => _handleCardTap(item),
           );
@@ -295,159 +278,3 @@ class _NotificationListScreenState extends State<NotificationListScreen> {
     );
   }
 }
-
-class _NotificationCard extends StatelessWidget {
-  const _NotificationCard({required this.item, required this.onTap});
-
-  final NotificationItemDto item;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final visual = _visualFor(item.type);
-    return Material(
-      color: item.isRead ? AppColors.surface : AppColors.leafSoft,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        side: BorderSide(
-          color: item.isRead ? AppColors.outline : AppColors.leaf,
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Container(
-                width: 52,
-                height: 52,
-                decoration: BoxDecoration(
-                  color: visual.background,
-                  borderRadius: BorderRadius.circular(AppRadius.md),
-                ),
-                child: Icon(visual.icon, color: visual.foreground, size: 28),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(item.title, style: AppTypography.titleMd),
-                    if (item.content case final content?)
-                      if (content.trim().isNotEmpty) ...[
-                        const SizedBox(height: AppSpacing.xxs),
-                        Text(content, style: AppTypography.bodySm),
-                      ],
-                  ],
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Text(
-                    _relativeTime(item.createdAt),
-                    style: AppTypography.caption,
-                  ),
-                  if (!item.isRead) ...[
-                    const SizedBox(height: AppSpacing.xs),
-                    Semantics(
-                      label: '읽지 않은 알림',
-                      child: const CircleAvatar(
-                        radius: 5,
-                        backgroundColor: AppColors.error,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _NotificationVisual {
-  const _NotificationVisual(this.icon, this.foreground, this.background);
-
-  final IconData icon;
-  final Color foreground;
-  final Color background;
-}
-
-_NotificationVisual _visualFor(String type) => switch (type) {
-  'ANALYSIS_COMPLETED' || 'REPORT_COMPLETED' => const _NotificationVisual(
-    Icons.check_circle_outline_rounded,
-    AppColors.success,
-    AppColors.successSoft,
-  ),
-  'ANALYSIS_FAILED' => const _NotificationVisual(
-    Icons.warning_amber_rounded,
-    AppColors.error,
-    AppColors.errorSoft,
-  ),
-  'NEW_EXPERT_POST' || 'COMMENT_CREATED' => const _NotificationVisual(
-    Icons.chat_bubble_outline_rounded,
-    AppColors.lavender,
-    AppColors.lavenderSoft,
-  ),
-  'CONSENT_UPDATED' => const _NotificationVisual(
-    Icons.description_outlined,
-    AppColors.drawingBlue,
-    Color(0xFFEAF1FC),
-  ),
-  'RETENTION_NOTICE' => const _NotificationVisual(
-    Icons.hourglass_bottom_rounded,
-    AppColors.warning,
-    AppColors.warningSoft,
-  ),
-  'ACTIVITY_REMINDER' => const _NotificationVisual(
-    Icons.brush_outlined,
-    AppColors.tangerine,
-    AppColors.tangerineSoft,
-  ),
-  'RISK_REVIEW_GUIDE' => const _NotificationVisual(
-    Icons.shield_outlined,
-    AppColors.warning,
-    AppColors.warningSoft,
-  ),
-  _ => const _NotificationVisual(
-    Icons.notifications_none_rounded,
-    AppColors.leaf,
-    AppColors.leafSoft,
-  ),
-};
-
-String _relativeTime(String value) {
-  final createdAt = DateTime.tryParse(value)?.toLocal();
-  if (createdAt == null) return '';
-  final now = DateTime.now();
-  final difference = now.difference(createdAt);
-
-  if (difference.isNegative || difference.inMinutes < 1) return '방금';
-  if (difference.inHours < 1) return '${difference.inMinutes}분 전';
-  if (difference.inDays < 1) return '${difference.inHours}시간 전';
-  if (difference.inDays == 1) return '어제';
-  if (difference.inDays < 7) return '${difference.inDays}일 전';
-  return '${createdAt.month}/${createdAt.day}';
-}
-
-NotificationItemDto _copyWithReadAt(NotificationItemDto item, String readAt) =>
-    NotificationItemDto(
-      notificationId: item.notificationId,
-      type: item.type,
-      title: item.title,
-      content: item.content,
-      relatedResourceType: item.relatedResourceType,
-      relatedResourceId: item.relatedResourceId,
-      data: item.data,
-      deliveryStatus: item.deliveryStatus,
-      readAt: readAt,
-      sentAt: item.sentAt,
-      createdAt: item.createdAt,
-    );

@@ -2,6 +2,7 @@
 import 'dart:developer' as developer;
 
 import '../entities/push_message.dart';
+import '../failures/push_token_registration_failure.dart';
 import '../repositories/push_token_repository.dart';
 import 'push_dedupe.dart';
 import 'push_gateway.dart';
@@ -21,6 +22,8 @@ final class PushCoordinator {
     required bool Function() isChildModeActive,
     required bool Function() isGuardianSessionActive,
     void Function()? onInboxChanged,
+    void Function(PushTokenRegistrationFailure? failure)?
+    onTokenRegistrationResult,
     PushDedupe? dedupe,
     bool exposeTokenInLogs = false,
   }) => PushCoordinator._(
@@ -32,6 +35,7 @@ final class PushCoordinator {
     isChildModeActive,
     isGuardianSessionActive,
     onInboxChanged,
+    onTokenRegistrationResult,
     dedupe ?? PushDedupe(),
     exposeTokenInLogs,
   );
@@ -45,6 +49,7 @@ final class PushCoordinator {
     this._isChildModeActive,
     this._isGuardianSessionActive,
     this._onInboxChanged,
+    this._onTokenRegistrationResult,
     this._dedupe,
     this._exposeTokenInLogs,
   );
@@ -62,6 +67,16 @@ final class PushCoordinator {
   /// 알림함 내용이 바뀌었을 수 있음을 알린다. 미열람 배지를 다시 세는 용도이며
   /// 실패해도 푸시 흐름을 끊지 않는다.
   final void Function()? _onInboxChanged;
+
+  /// 디바이스 Token 등록 결과를 알린다. 성공하면 `null`, 서버가 계약된 사유로
+  /// 거절하면 그 실패를 넘긴다.
+  ///
+  /// 등록 실패는 "이 계정은 푸시를 받지 못한다"는 뜻이라 조용히 삼키면 보호자가
+  /// 알림이 오지 않는 이유를 알 수 없다. 다만 푸시는 선택 기능이므로 이 통지가
+  /// 실패해도 푸시 흐름은 계속한다. 네트워크 오류처럼 다시 시도하면 풀릴 수
+  /// 있는 실패는 알리지 않는다 — 상태를 굳혀 두면 회복 뒤에도 경고가 남는다.
+  final void Function(PushTokenRegistrationFailure? failure)?
+  _onTokenRegistrationResult;
   final PushDedupe _dedupe;
   final bool _exposeTokenInLogs;
 
@@ -124,7 +139,25 @@ final class PushCoordinator {
     } else {
       developer.log('FCM Token 등록 시도 (${token.length}자)', name: 'push');
     }
-    await _guard(() => _tokenRepository.register(token));
+
+    try {
+      await _tokenRepository.register(token);
+      _notifyTokenRegistrationResult(null);
+    } on PushTokenRegistrationFailure catch (failure) {
+      developer.log('푸시 Token 등록 거절 — ${failure.type.name}', name: 'push');
+      _notifyTokenRegistrationResult(failure);
+    } on Object catch (error) {
+      // 일시적 실패는 상태로 굳히지 않는다. Token 갱신·재로그인 때 다시 등록한다.
+      developer.log('푸시 Token 등록 실패(무시)', name: 'push', error: error);
+    }
+  }
+
+  void _notifyTokenRegistrationResult(PushTokenRegistrationFailure? failure) {
+    try {
+      _onTokenRegistrationResult?.call(failure);
+    } on Object catch (error) {
+      developer.log('Token 등록 결과 통지 실패(무시)', name: 'push', error: error);
+    }
   }
 
   Future<void> _present(PushMessage message) async {
