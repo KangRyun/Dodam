@@ -3,6 +3,7 @@ package com.ssafy.b209.community.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.verify;
 
 import com.ssafy.b209.auth.domain.User;
 import com.ssafy.b209.auth.domain.UserRole;
@@ -47,6 +48,7 @@ class CommunityPostCommandServiceTest {
 
   @Mock private UserRepository userRepository;
   @Mock private CommunityPostRepository communityPostRepository;
+  @Mock private CommunityAttachmentService communityAttachmentService;
 
   private CommunityPostCommandService service;
 
@@ -57,6 +59,7 @@ class CommunityPostCommandServiceTest {
             new CurrentAuthenticatedUserResolver(),
             userRepository,
             communityPostRepository,
+            communityAttachmentService,
             Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC));
     authenticateAs(AUTHOR_ID);
   }
@@ -85,6 +88,7 @@ class CommunityPostCommandServiceTest {
     assertThat(response.author().userId()).isEqualTo(AUTHOR_ID);
     assertThat(response.editableByMe()).isTrue();
     assertThat(response.updatedAt()).isEqualTo(FIXED_INSTANT);
+    verify(communityAttachmentService).replace(AUTHOR_ID, POST_ID, null);
   }
 
   @Test
@@ -170,6 +174,7 @@ class CommunityPostCommandServiceTest {
 
     assertThat(post.getPostStatus()).isEqualTo(PostStatus.DELETED);
     assertThat(post.getDeletedAt().toInstant(ZoneOffset.UTC)).isEqualTo(FIXED_INSTANT);
+    verify(communityAttachmentService).deleteByPostId(POST_ID);
   }
 
   @Test

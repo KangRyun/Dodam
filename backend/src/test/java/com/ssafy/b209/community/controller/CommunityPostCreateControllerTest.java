@@ -110,6 +110,28 @@ class CommunityPostCreateControllerTest {
   }
 
   @Test
+  void rejectsUnsupportedAttachmentType() throws Exception {
+    given(decoder.decode("valid-token")).willReturn(new AuthenticatedUser(41L));
+
+    mockMvc
+        .perform(
+            post("/api/v1/posts")
+                .header("Authorization", "Bearer valid-token")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "postType":"GUARDIAN_STORY",
+                      "title":"제목",
+                      "content":"본문",
+                      "attachments":[{"fileId":"file-id","type":"AUDIO"}]
+                    }
+                    """))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_003"));
+  }
+
+  @Test
   void returnsForbiddenWhenPostTypeNotAllowed() throws Exception {
     given(decoder.decode("valid-token")).willReturn(new AuthenticatedUser(41L));
     given(communityPostCreateService.createPost(any(CreatePostRequest.class)))

@@ -2,6 +2,7 @@ package com.ssafy.b209.community.service;
 
 import com.ssafy.b209.auth.domain.User;
 import com.ssafy.b209.community.domain.CommunityPost;
+import com.ssafy.b209.community.dto.CommunityAttachmentResponse;
 import com.ssafy.b209.community.dto.PostDetailAuthorResponse;
 import com.ssafy.b209.community.dto.PostDetailResponse;
 import java.time.ZoneOffset;
@@ -25,7 +26,8 @@ final class CommunityPostResponseMapper {
    * @param author 게시글 작성자 사용자
    * @return 쓰기 직후 상세 응답
    */
-  static PostDetailResponse toDetailResponse(CommunityPost post, User author) {
+  static PostDetailResponse toDetailResponse(
+      CommunityPost post, User author, List<CommunityAttachmentResponse> attachments) {
     PostDetailAuthorResponse authorResponse =
         post.isAnonymous()
             ? null
@@ -37,7 +39,7 @@ final class CommunityPostResponseMapper {
         post.getContent(),
         authorResponse,
         post.isAnonymous(),
-        List.of(),
+        List.copyOf(attachments),
         List.of(),
         0L,
         0L,

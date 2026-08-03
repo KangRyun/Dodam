@@ -49,9 +49,9 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("33");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("34");
     assertThat(tableExists("flyway_schema_history")).isTrue();
-    assertThat(tableCount()).isEqualTo(74);
+    assertThat(tableCount()).isEqualTo(75);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
     assertThat(tableExists("child_profile_image_files")).isTrue();
