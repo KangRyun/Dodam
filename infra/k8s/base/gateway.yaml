@@ -60,6 +60,26 @@ data:
         add_header Referrer-Policy strict-origin-when-cross-origin always;
         add_header Strict-Transport-Security "max-age=31536000" always;
 
+        # 웹 소셜 로그인의 code→token 교환 (S15P11B209-817). Next Route Handler
+        # (frontend/web/src/app/api/oauth/[provider]/route.ts) 가 처리한다 — client secret 이
+        # 필요해 브라우저가 직접 못 하고, 그래서 웹 서버 쪽에 있어야 한다.
+        #
+        # ⚠️ 이 블록이 없으면 아래 `location /api/` 가 먼저 잡아 **Spring 으로 가고 404** 가 된다.
+        #   코드·시크릿·매니페스트가 전부 정상이어도 브라우저에서 버튼을 눌러야만 드러나는
+        #   종류의 결함이다(2026-08-04 실측: /api/oauth/kakao → COMMON_404_001).
+        #   nginx 는 접두 location 중 **가장 긴 것**을 고르므로 순서와 무관하게 이 블록이 이긴다.
+        #
+        # 백엔드와 겹치지 않는다: 앱(Flutter)이 쓰는 백엔드 경로는 `/api/v1/auth/oauth/{provider}`
+        # 이고(OAuthController @RequestMapping("/api/v1/auth")), 여기는 버전 없는 `/api/oauth/` 다.
+        location /api/oauth/ {
+            proxy_pass http://web:3000;
+            proxy_set_header Host              $host;
+            proxy_set_header X-Real-IP         $remote_addr;
+            proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_http_version 1.1;
+        }
+
         location /api/ {
             proxy_pass http://backend:8080;
             proxy_set_header Host              $host;
