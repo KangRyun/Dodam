@@ -73,9 +73,15 @@ class MigrationVersionTest {
       assertThat(sql).contains("WHERE term_code = '" + termCode + "' AND version = 'v1';");
     }
 
-    // 앱이 태그를 벗겨 평문으로 보여주는데 <br>·</p> 만 줄바꿈이 된다. 그 외 블록 태그를 쓰면
-    // 평문에서 제목과 본문이 붙어버린다(447 D7). 헤더 주석은 그 규칙 자체를 설명하며 태그 이름을
-    // 언급하므로, 주석 줄을 걷어낸 실제 SQL 본문만 검사한다.
+    // 시드 문구를 문단 태그만으로 제한한다. 원래 근거였던 기술적 제약은 이미 해소됐다 —
+    // 평문 변환기가 <br>·</p> 만 줄바꿈으로 처리해 <h1>·<ul>·<li> 가 한 줄로 붙던 문제(447 D7)는
+    // S15P11B209-782(5f9bf3b4941c5398aef96d7ddb29ed687b4f208a)가 블록 태그 26종을 개행으로
+    // 치환하도록 고쳐 사라졌다. 그럼에도 제한을 유지하는 것은 정책적 선택이다: 같은 이용약관이
+    // 정적 공표본(infra/nginx/html/legal/terms/index.html)과 이 시드 두 곳에 존재하므로,
+    // 양쪽 마크업이 모두 자유로워지면 대조가 어려워진다. 표현의 자유는 정적본에 두고 이쪽은
+    // 문단 단위로 단순하게 유지한다(S15P11B209-783, docs/adr/0002-legal-document-source-of-truth.md).
+    // 조 번호·제목의 일치 여부는 LegalDocumentConsistencyTest 가 따로 지킨다.
+    // 헤더 주석은 이 규칙 자체를 설명하며 태그 이름을 언급하므로, 주석 줄을 걷어낸 SQL 본문만 검사한다.
     String statements =
         sql.lines().filter(line -> !line.startsWith("--")).collect(Collectors.joining("\n"));
 
