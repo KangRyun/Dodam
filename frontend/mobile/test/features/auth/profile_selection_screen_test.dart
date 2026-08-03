@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:dodam/app/state/guardian_child_controller.dart';
+import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/auth/auth.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
 import 'package:dodam/features/child/domain/repositories/child_repository.dart';
@@ -438,16 +441,112 @@ void main() {
     addTearDown(controller.dispose);
     await _pumpScreen(tester, controller: controller);
 
-    final avatar = tester.widget<CircleAvatar>(
+    final avatar = tester.widget<Image>(
       find.descendant(
         of: find.byKey(const ValueKey('child-profile-3')),
-        matching: find.byType(CircleAvatar),
+        matching: find.byType(Image),
       ),
     );
-    expect(avatar.backgroundImage, isA<AssetImage>());
+    expect(avatar.image, isA<AssetImage>());
     expect(
-      (avatar.backgroundImage! as AssetImage).assetName,
+      (avatar.image as AssetImage).assetName,
       'assets/characters/costumes/dodam_princess.png',
+    );
+  });
+
+  testWidgets('인증 상대 경로 사진이 성공하면 캐릭터보다 우선 표시한다', (tester) async {
+    final controller = await _loadedController([
+      _child(
+        id: 3,
+        profileImageUrl: '/api/v1/child-profile-images/file-3/file',
+        preferredCharacter: 'DINO',
+      ),
+    ]);
+    addTearDown(controller.dispose);
+    final requested = <String>[];
+
+    await _pumpScreen(
+      tester,
+      controller: controller,
+      imageFetcher: (url) async {
+        requested.add(url);
+        return base64Decode(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+        );
+      },
+    );
+    await tester.pumpAndSettle();
+
+    expect(requested, ['/api/v1/child-profile-images/file-3/file']);
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('child-profile-3')),
+        matching: find.byKey(const ValueKey('authenticated-image-success')),
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('인증 사진 404는 preferredCharacter로 fallback한다', (tester) async {
+    final controller = await _loadedController([
+      _child(
+        id: 3,
+        profileImageUrl: '/api/v1/child-profile-images/missing/file',
+        preferredCharacter: 'PRINCESS',
+      ),
+    ]);
+    addTearDown(controller.dispose);
+
+    await _pumpScreen(
+      tester,
+      controller: controller,
+      imageFetcher: (_) async => throw StateError('404'),
+    );
+    await tester.pumpAndSettle();
+
+    final fallback = tester.widget<Image>(
+      find.descendant(
+        of: find.byKey(const ValueKey('child-profile-3')),
+        matching: find.byType(Image),
+      ),
+    );
+    expect(
+      (fallback.image as AssetImage).assetName,
+      'assets/characters/costumes/dodam_princess.png',
+    );
+  });
+
+  testWidgets('인증 사진 decode 실패와 캐릭터 null은 BASE로 fallback한다', (tester) async {
+    final controller = await _loadedController([
+      _child(
+        id: 3,
+        profileImageUrl: '/api/v1/child-profile-images/broken/file',
+        preferredCharacter: null,
+      ),
+    ]);
+    addTearDown(controller.dispose);
+
+    await _pumpScreen(
+      tester,
+      controller: controller,
+      imageFetcher: (_) async => Uint8List.fromList(const [1, 2, 3]),
+    );
+    await tester.pumpAndSettle();
+
+    final images = tester.widgetList<Image>(
+      find.descendant(
+        of: find.byKey(const ValueKey('child-profile-3')),
+        matching: find.byType(Image),
+      ),
+    );
+    expect(
+      images.any(
+        (image) =>
+            image.image is AssetImage &&
+            (image.image as AssetImage).assetName ==
+                'assets/characters/costumes/dodam_base.png',
+      ),
+      isTrue,
     );
   });
 }
@@ -463,6 +562,7 @@ Future<void> _pumpScreen(
   ChildProfileSelected? onEditChild,
   ValueChanged<BuildContext>? onSettings,
   Widget? headerAction,
+  ImageByteFetcher? imageFetcher,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -478,6 +578,7 @@ Future<void> _pumpScreen(
       ),
       home: ProfileSelectionScreen(
         controller: controller,
+        imageFetcher: imageFetcher,
         onGuardianSelected: onGuardianSelected ?? (_) {},
         onChildSelected: onChildSelected ?? (_, _) {},
         onAddChild: onAddChild,

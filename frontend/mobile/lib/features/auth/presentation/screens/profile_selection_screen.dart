@@ -15,6 +15,7 @@ class ProfileSelectionScreen extends StatefulWidget {
     required this.controller,
     required this.onGuardianSelected,
     required this.onChildSelected,
+    this.imageFetcher,
     this.onAddChild,
     this.onEditProfiles,
     this.onEditChild,
@@ -26,6 +27,7 @@ class ProfileSelectionScreen extends StatefulWidget {
   final GuardianChildController controller;
   final ValueChanged<BuildContext> onGuardianSelected;
   final ChildProfileSelected onChildSelected;
+  final ImageByteFetcher? imageFetcher;
   final ValueChanged<BuildContext>? onAddChild;
   final ValueChanged<BuildContext>? onEditProfiles;
   final ChildProfileSelected? onEditChild;
@@ -148,6 +150,7 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
                           );
                           final children = _ChildrenCard(
                             controller: widget.controller,
+                            imageFetcher: widget.imageFetcher,
                             isEditing: _isEditingProfiles,
                             navigationEnabled:
                                 !_guardianNavigationStarted &&
@@ -358,6 +361,7 @@ class _GuardianCard extends StatelessWidget {
 class _ChildrenCard extends StatelessWidget {
   const _ChildrenCard({
     required this.controller,
+    required this.imageFetcher,
     required this.isEditing,
     required this.navigationEnabled,
     required this.onChildSelected,
@@ -365,6 +369,7 @@ class _ChildrenCard extends StatelessWidget {
   });
 
   final GuardianChildController controller;
+  final ImageByteFetcher? imageFetcher;
   final bool isEditing;
   final bool navigationEnabled;
   final ValueChanged<ChildSummaryDto> onChildSelected;
@@ -462,6 +467,7 @@ class _ChildrenCard extends StatelessWidget {
         return _ChildProfileCard(
           key: ValueKey('child-profile-${child.childId}'),
           child: child,
+          imageFetcher: imageFetcher,
           isSelected:
               controller.hasExplicitChildSelection &&
               controller.selectedChildId == child.childId,
@@ -542,6 +548,7 @@ class _ModePill extends StatelessWidget {
 class _ChildProfileCard extends StatelessWidget {
   const _ChildProfileCard({
     required this.child,
+    required this.imageFetcher,
     required this.isSelected,
     required this.enabled,
     required this.sortOrder,
@@ -550,6 +557,7 @@ class _ChildProfileCard extends StatelessWidget {
   });
 
   final ChildSummaryDto child;
+  final ImageByteFetcher? imageFetcher;
   final bool isSelected;
   final bool enabled;
   final double sortOrder;
@@ -561,9 +569,11 @@ class _ChildProfileCard extends StatelessWidget {
     return '$nickname · ${child.age}세';
   }
 
-  ImageProvider<Object> get _avatar => child.profileImageUrl != null
-      ? NetworkImage(child.profileImageUrl!)
-      : AssetImage(DodamCostume.fromCode(child.preferredCharacter).asset);
+  Widget _fallback(BuildContext context) => Image.asset(
+    DodamCostume.fromCode(child.preferredCharacter).asset,
+    fit: BoxFit.cover,
+    semanticLabel: '${child.nickname} 도담이',
+  );
 
   @override
   Widget build(BuildContext context) => Semantics(
@@ -594,10 +604,27 @@ class _ChildProfileCard extends StatelessWidget {
               Stack(
                 clipBehavior: Clip.none,
                 children: [
-                  CircleAvatar(
-                    radius: 42,
-                    backgroundColor: _ProfileColors.avatarBackground,
-                    backgroundImage: _avatar,
+                  ClipOval(
+                    child: ColoredBox(
+                      color: _ProfileColors.avatarBackground,
+                      child: SizedBox.square(
+                        dimension: 84,
+                        child:
+                            child.profileImageUrl != null &&
+                                imageFetcher != null
+                            ? AuthenticatedImage(
+                                key: ValueKey(
+                                  'child-authenticated-image-${child.childId}',
+                                ),
+                                url: child.profileImageUrl,
+                                fetcher: imageFetcher!,
+                                fit: BoxFit.cover,
+                                semanticLabel: '${child.nickname} 프로필 사진',
+                                placeholderBuilder: _fallback,
+                              )
+                            : _fallback(context),
+                      ),
+                    ),
                   ),
                   if (isSelected)
                     Positioned(

@@ -53,7 +53,7 @@ void main() {
       );
       const update = UpdateChildRequestDto(
         questionDifficulty: 'ELEMENTARY',
-        includeProfileImageUrl: true,
+        profileImage: ProfileImageUpdate.clear(),
       );
       expect(create.toJson(), {
         'nickname': '도담이',
@@ -62,7 +62,7 @@ void main() {
         'questionDifficulty': 'LOWER_ELEMENTARY',
         'responseModes': ['VOICE'],
       });
-      expect(update.toJson(), containsPair('profileImageUrl', null));
+      expect(update.toJson(), containsPair('profileImageFileId', null));
     });
   });
 

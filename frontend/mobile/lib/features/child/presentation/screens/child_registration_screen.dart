@@ -2,19 +2,28 @@ import 'package:flutter/material.dart';
 
 import '../../../../app/state/guardian_child_controller.dart';
 import '../../../../design_system/design_system.dart';
+import '../../../drawing/application/photo_upload_validation.dart';
+import '../../../drawing/data/image_picker_photo_adapter.dart';
+import '../../../drawing/domain/photo_picker_adapter.dart';
 import '../../data/dto/child_consent_dtos.dart';
 import '../../data/dto/child_dtos.dart';
-import '../../domain/preferred_character.dart';
+import '../../domain/repositories/child_profile_image_repository.dart';
 
 class ChildRegistrationScreen extends StatefulWidget {
   const ChildRegistrationScreen({
     required this.controller,
     this.child,
+    this.profileImageRepository,
+    this.photoPicker,
+    this.photoDimensionReader,
     super.key,
   });
 
   final GuardianChildController controller;
   final ChildSummaryDto? child;
+  final ChildProfileImageRepository? profileImageRepository;
+  final PhotoPickerAdapter? photoPicker;
+  final PhotoDimensionReader? photoDimensionReader;
 
   @override
   State<ChildRegistrationScreen> createState() =>
@@ -25,21 +34,24 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   final _nicknameController = TextEditingController();
   DateTime? _birthDate;
   String _relationshipType = 'MOTHER';
-  String _preferredCharacter = 'BASE';
   String _questionDifficulty = 'PRESCHOOL';
   bool _submitted = false;
+  bool _saving = false;
+  bool _pickingPhoto = false;
+  bool _uploadingPhoto = false;
+  bool _removeExistingPhoto = false;
+  double? _uploadProgress;
+  String? _photoError;
+  ValidatedPhoto? _selectedPhoto;
+  String? _uploadedProfileImageFileId;
+  int _selectionGeneration = 0;
+  int? _uploadedGeneration;
+  late final PhotoPickerAdapter _photoPicker;
   Set<int> _acknowledgedDeclinedTermIds = const {};
   bool get _isEditing => widget.child != null;
 
   /// 아동 대상 약관의 동의 여부. 기본값은 미동의이며 사용자가 직접 켜야 한다.
   final Map<int, bool> _consentAgreed = {};
-
-  static const _characters = [
-    ('BASE', '🌱'),
-    ('PRINCESS', '👸'),
-    ('DINO', '🦖'),
-    ('OCTOPUS', '🐙'),
-  ];
 
   static const _relationships = {
     'MOTHER': '어머니',
@@ -59,13 +71,11 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   void initState() {
     super.initState();
     final child = widget.child;
+    _photoPicker = widget.photoPicker ?? ImagePickerPhotoAdapter();
     if (child != null) {
       _nicknameController.text = child.nickname;
       _birthDate = DateTime.tryParse(child.birthDate);
       _relationshipType = child.relationshipType;
-      _preferredCharacter = normalizePreferredCharacter(
-        child.preferredCharacter,
-      );
       _questionDifficulty = child.questionDifficulty;
     }
     widget.controller.resetRegistration();
@@ -298,7 +308,137 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
     if (selected != null && mounted) setState(() => _birthDate = selected);
   }
 
+  Future<void> _pickProfilePhoto() async {
+    if (_pickingPhoto || _uploadingPhoto || _saving) return;
+    final requestGeneration = ++_selectionGeneration;
+    setState(() {
+      _pickingPhoto = true;
+      _photoError = null;
+    });
+    try {
+      final photo = await _photoPicker.pickFromGallery();
+      if (!mounted || requestGeneration != _selectionGeneration) return;
+      if (photo == null) return;
+      final validation = await validatePickedPhoto(
+        photo,
+        dimensionReader: widget.photoDimensionReader ?? readPhotoDimensions,
+        maxBytes: 5 * 1024 * 1024,
+        minEdgePx: 1,
+      );
+      if (!mounted || requestGeneration != _selectionGeneration) return;
+      switch (validation) {
+        case PhotoValidationOk(:final validated):
+          setState(() {
+            _selectedPhoto = validated;
+            _removeExistingPhoto = false;
+            _uploadedProfileImageFileId = null;
+            _uploadedGeneration = null;
+            _photoError = null;
+          });
+        case PhotoValidationFailed(:final type):
+          setState(() => _photoError = _photoValidationMessage(type));
+      }
+    } on Object {
+      if (mounted && requestGeneration == _selectionGeneration) {
+        setState(() => _photoError = '사진을 불러오지 못했어요. 다시 선택해 주세요.');
+      }
+    } finally {
+      if (mounted && requestGeneration == _selectionGeneration) {
+        setState(() => _pickingPhoto = false);
+      }
+    }
+  }
+
+  String _photoValidationMessage(
+    PhotoValidationErrorType type,
+  ) => switch (type) {
+    PhotoValidationErrorType.unsupportedFormat ||
+    PhotoValidationErrorType.signatureMismatch => 'JPEG·PNG 형식의 사진만 사용할 수 있어요.',
+    PhotoValidationErrorType.tooLarge => '사진은 5MB 이하만 사용할 수 있어요.',
+    PhotoValidationErrorType.edgeTooSmall ||
+    PhotoValidationErrorType.edgeTooLarge ||
+    PhotoValidationErrorType.undecodable => '사진을 확인할 수 없어요. 다른 사진을 선택해 주세요.',
+  };
+
+  void _cancelSelectedPhoto() {
+    if (_uploadingPhoto || _saving) return;
+    _selectionGeneration += 1;
+    setState(() {
+      _selectedPhoto = null;
+      _uploadedProfileImageFileId = null;
+      _uploadedGeneration = null;
+      _removeExistingPhoto = false;
+      _photoError = null;
+    });
+  }
+
+  void _removePhoto() {
+    if (_uploadingPhoto || _saving) return;
+    _selectionGeneration += 1;
+    setState(() {
+      _selectedPhoto = null;
+      _uploadedProfileImageFileId = null;
+      _uploadedGeneration = null;
+      _removeExistingPhoto = true;
+      _photoError = null;
+    });
+  }
+
+  Future<String?> _ensurePhotoUploaded() async {
+    final selected = _selectedPhoto;
+    if (selected == null) return null;
+    final generation = _selectionGeneration;
+    if (_uploadedGeneration == generation &&
+        _uploadedProfileImageFileId != null) {
+      return _uploadedProfileImageFileId;
+    }
+    final repository = widget.profileImageRepository;
+    if (repository == null) {
+      setState(() => _photoError = '사진 업로드를 준비하지 못했어요. 잠시 후 다시 시도해 주세요.');
+      return null;
+    }
+    setState(() {
+      _uploadingPhoto = true;
+      _uploadProgress = null;
+      _photoError = null;
+    });
+    try {
+      final response = await repository.uploadProfileImage(
+        ChildProfileImageUpload(
+          bytes: selected.photo.bytes,
+          fileName: selected.photo.fileName,
+          mimeType: selected.mimeType,
+        ),
+        onSendProgress: (sent, total) {
+          if (!mounted || generation != _selectionGeneration || total <= 0) {
+            return;
+          }
+          setState(() => _uploadProgress = sent / total);
+        },
+      );
+      if (!mounted || generation != _selectionGeneration) return null;
+      setState(() {
+        _uploadedProfileImageFileId = response.profileImageFileId;
+        _uploadedGeneration = generation;
+      });
+      return response.profileImageFileId;
+    } on Object {
+      if (mounted && generation == _selectionGeneration) {
+        setState(() => _photoError = '사진을 업로드하지 못했어요. 다시 시도해 주세요.');
+      }
+      return null;
+    } finally {
+      if (mounted && generation == _selectionGeneration) {
+        setState(() {
+          _uploadingPhoto = false;
+          _uploadProgress = null;
+        });
+      }
+    }
+  }
+
   Future<void> _submit() async {
+    if (_saving || _uploadingPhoto || _pickingPhoto) return;
     setState(() => _submitted = true);
     if (_nicknameError != null ||
         _birthDateError != null ||
@@ -307,12 +447,25 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
     }
     if (!_isEditing && !await _confirmOptionalConsentRestrictions()) return;
 
+    setState(() => _saving = true);
+    final selected = _selectedPhoto;
+    final uploadedId = selected == null ? null : await _ensurePhotoUploaded();
+    if (!mounted) return;
+    if (selected != null && uploadedId == null) {
+      setState(() => _saving = false);
+      return;
+    }
+
     final succeeded = _isEditing
         ? await widget.controller.updateChild(
             widget.child!.childId,
             UpdateChildRequestDto(
               nickname: _nicknameController.text.trim(),
-              preferredCharacter: _preferredCharacter,
+              profileImage: selected != null
+                  ? ProfileImageUpdate.replace(uploadedId!)
+                  : _removeExistingPhoto
+                  ? const ProfileImageUpdate.clear()
+                  : const ProfileImageUpdate.unchanged(),
               questionDifficulty: _questionDifficulty,
               responseModes: const ['VOICE'],
             ),
@@ -325,13 +478,15 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                   '${_birthDate!.month.toString().padLeft(2, '0')}-'
                   '${_birthDate!.day.toString().padLeft(2, '0')}',
               relationshipType: _relationshipType,
-              preferredCharacter: _preferredCharacter,
+              preferredCharacter: 'BASE',
+              profileImageFileId: uploadedId,
               questionDifficulty: _questionDifficulty,
               responseModes: const ['VOICE'],
             ),
             consentAgreements: _consentAgreements,
           );
     if (!mounted) return;
+    setState(() => _saving = false);
     if (succeeded) {
       // 아동은 등록됐지만 동의 기록이 실패하면 음성 답변이 거절되므로 그대로 알린다.
       if (!_isEditing && widget.controller.consentRecordError != null) {
@@ -353,6 +508,9 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
         ),
       ),
     );
+    if (_isEditing && _removeExistingPhoto) {
+      setState(() => _removeExistingPhoto = false);
+    }
   }
 
   Future<void> _delete() async {
@@ -408,11 +566,20 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _CharacterSelector(
-                    characters: _characters,
-                    selected: _preferredCharacter,
-                    onSelected: (value) =>
-                        setState(() => _preferredCharacter = value),
+                  _ProfilePhotoEditor(
+                    selectedPhoto: _selectedPhoto,
+                    existingUrl: _removeExistingPhoto
+                        ? null
+                        : widget.child?.profileImageUrl,
+                    imageFetcher:
+                        widget.profileImageRepository?.downloadProfileImage,
+                    isPicking: _pickingPhoto,
+                    isUploading: _uploadingPhoto,
+                    uploadProgress: _uploadProgress,
+                    errorText: _photoError,
+                    onPick: _pickProfilePhoto,
+                    onCancelSelection: _cancelSelectedPhoto,
+                    onRemove: _removePhoto,
                   ),
                   const SizedBox(height: AppSpacing.xl),
                   AppTextField(
@@ -494,8 +661,10 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                     key: const ValueKey('submit-child-registration'),
                     label: _isEditing ? '저장하기' : '등록하기',
                     isLoading:
+                        _saving ||
+                        _uploadingPhoto ||
                         widget.controller.registrationStatus ==
-                        ChildRegistrationStatus.submitting,
+                            ChildRegistrationStatus.submitting,
                     onPressed: _submit,
                   ),
                   if (_isEditing) ...[
@@ -597,66 +766,138 @@ class _ConsentSection extends StatelessWidget {
   );
 }
 
-class _CharacterSelector extends StatelessWidget {
-  const _CharacterSelector({
-    required this.characters,
-    required this.selected,
-    required this.onSelected,
+class _ProfilePhotoEditor extends StatelessWidget {
+  const _ProfilePhotoEditor({
+    required this.selectedPhoto,
+    required this.existingUrl,
+    required this.imageFetcher,
+    required this.isPicking,
+    required this.isUploading,
+    required this.uploadProgress,
+    required this.errorText,
+    required this.onPick,
+    required this.onCancelSelection,
+    required this.onRemove,
   });
 
-  final List<(String, String)> characters;
-  final String selected;
-  final ValueChanged<String> onSelected;
+  final ValidatedPhoto? selectedPhoto;
+  final String? existingUrl;
+  final ImageByteFetcher? imageFetcher;
+  final bool isPicking;
+  final bool isUploading;
+  final double? uploadProgress;
+  final String? errorText;
+  final VoidCallback onPick;
+  final VoidCallback onCancelSelection;
+  final VoidCallback onRemove;
+
+  bool get _hasPhoto => selectedPhoto != null || existingUrl != null;
+
+  Widget _placeholder(BuildContext context) => const ColoredBox(
+    color: AppColors.surfaceSoft,
+    child: Center(
+      child: Icon(Icons.person_rounded, color: AppColors.inkMuted, size: 64),
+    ),
+  );
 
   @override
-  Widget build(BuildContext context) => Column(
-    children: [
-      const Text(
-        '아이와 함께할 친구를 골라주세요',
-        style: TextStyle(
-          color: AppColors.ink,
-          fontSize: 18,
-          fontWeight: FontWeight.w800,
+  Widget build(BuildContext context) => Semantics(
+    container: true,
+    label: '아이 프로필 사진. 선택 사항',
+    child: Column(
+      children: [
+        const Text(
+          '아이 프로필 사진',
+          style: TextStyle(
+            color: AppColors.ink,
+            fontSize: 18,
+            fontWeight: FontWeight.w800,
+          ),
         ),
-      ),
-      const SizedBox(height: AppSpacing.md),
-      Wrap(
-        alignment: WrapAlignment.center,
-        spacing: AppSpacing.md,
-        children: [
-          for (final character in characters)
-            Semantics(
-              button: true,
-              selected: selected == character.$1,
-              child: InkWell(
-                key: ValueKey('character-${character.$1}'),
-                onTap: () => onSelected(character.$1),
-                borderRadius: BorderRadius.circular(40),
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 160),
-                  width: 66,
-                  height: 66,
-                  alignment: Alignment.center,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: AppColors.surfaceSoft,
-                    border: Border.all(
-                      color: selected == character.$1
-                          ? AppColors.leaf
-                          : Colors.transparent,
-                      width: 3,
-                    ),
-                  ),
-                  child: Text(
-                    character.$2,
-                    style: const TextStyle(fontSize: 34),
-                  ),
-                ),
+        const SizedBox(height: AppSpacing.xs),
+        const Text(
+          '선택 사항 · JPEG 또는 PNG, 최대 5MB',
+          style: TextStyle(color: AppColors.inkMuted, fontSize: 13),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        ClipOval(
+          child: SizedBox(
+            key: const ValueKey('child-profile-photo-preview'),
+            width: 132,
+            height: 132,
+            child: switch ((selectedPhoto, existingUrl, imageFetcher)) {
+              (final selected?, _, _) => Image.memory(
+                selected.photo.bytes,
+                fit: BoxFit.cover,
+                gaplessPlayback: true,
+                semanticLabel: '선택한 아이 프로필 사진',
               ),
+              (null, final url?, final fetcher?) => AuthenticatedImage(
+                url: url,
+                fetcher: fetcher,
+                fit: BoxFit.cover,
+                semanticLabel: '현재 아이 프로필 사진',
+                placeholderBuilder: _placeholder,
+              ),
+              _ => _placeholder(context),
+            },
+          ),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: [
+            OutlinedButton.icon(
+              key: const ValueKey('pick-child-profile-photo'),
+              onPressed: isPicking || isUploading ? null : onPick,
+              icon: isPicking
+                  ? const SizedBox.square(
+                      dimension: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.photo_library_outlined),
+              label: Text(_hasPhoto ? '다시 선택' : '앨범에서 선택'),
             ),
+            if (selectedPhoto != null)
+              TextButton(
+                key: const ValueKey('cancel-child-profile-photo'),
+                onPressed: isUploading ? null : onCancelSelection,
+                child: const Text('선택 취소'),
+              )
+            else if (existingUrl != null)
+              TextButton(
+                key: const ValueKey('remove-child-profile-photo'),
+                onPressed: isUploading ? null : onRemove,
+                child: const Text('사진 삭제'),
+              ),
+          ],
+        ),
+        if (isUploading) ...[
+          const SizedBox(height: AppSpacing.sm),
+          LinearProgressIndicator(
+            key: const ValueKey('child-profile-photo-upload-progress'),
+            value: uploadProgress,
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          const Text('사진을 안전하게 올리고 있어요'),
         ],
-      ),
-    ],
+        if (errorText != null) ...[
+          const SizedBox(height: AppSpacing.sm),
+          Text(
+            errorText!,
+            key: const ValueKey('child-profile-photo-error'),
+            textAlign: TextAlign.center,
+            style: const TextStyle(
+              color: AppColors.error,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ],
+      ],
+    ),
   );
 }
 

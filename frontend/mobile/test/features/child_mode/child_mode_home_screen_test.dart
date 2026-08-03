@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:dodam/app/router/app_router.dart';
 import 'package:dodam/app/router/app_routes.dart';
@@ -6,6 +7,8 @@ import 'package:dodam/core/network/network.dart';
 import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
+import 'package:dodam/features/child_mode/data/child_home_intro_store.dart';
+import 'package:dodam/features/child_mode/domain/dodam_costume.dart';
 import 'package:dodam/features/child_mode/presentation/screens/child_mode_screens.dart';
 import 'package:dodam/features/child_mode/presentation/widgets/activity_guide_dialog.dart';
 import 'package:dodam/features/drawing/application/drawing_session_start_controller.dart';
@@ -26,6 +29,26 @@ const _child = ChildSummaryDto(
   tutorialStatus: 'DONE',
   relationshipType: 'PARENT',
   recentActivity: ChildRecentActivityDto(
+    lastActivityAt: null,
+    totalActivityCount: 0,
+  ),
+);
+
+ChildSummaryDto _childWith({
+  required int childId,
+  required String nickname,
+  String? preferredCharacter,
+}) => ChildSummaryDto(
+  childId: childId,
+  nickname: nickname,
+  birthDate: '2020-01-01',
+  age: 6,
+  profileImageUrl: null,
+  preferredCharacter: preferredCharacter,
+  questionDifficulty: 'EASY',
+  tutorialStatus: 'DONE',
+  relationshipType: 'PARENT',
+  recentActivity: const ChildRecentActivityDto(
     lastActivityAt: null,
     totalActivityCount: 0,
   ),
@@ -135,6 +158,66 @@ Widget _wrap(Widget home) => MaterialApp(
   },
 );
 
+Future<void> _pumpCarouselHome(
+  WidgetTester tester, {
+  ChildSummaryDto child = _child,
+  List<DodamCostume> costumes = DodamCostume.values,
+  Future<bool> Function(int childId, String code)? onCharacterSelected,
+}) async {
+  await tester.pumpWidget(
+    _wrap(
+      ChildModeHomeScreen(
+        child: child,
+        drawingRepository: _FakeDrawingRepository(
+          drawingTypes: const [_secondType, _artDiary],
+        ),
+        introStore: _FakeIntroStore(seen: {child.childId}),
+        availableCostumes: costumes,
+        onCharacterSelected: onCharacterSelected,
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+void _expectCurrentCostume(
+  WidgetTester tester,
+  DodamCostume costume, {
+  List<DodamCostume> costumes = DodamCostume.values,
+}) {
+  expect(find.text(costume.label), findsOneWidget);
+  expect(find.byKey(ValueKey('costume-stage-${costume.code}')), findsOneWidget);
+  final pageView = tester.widget<PageView>(
+    find.byKey(const ValueKey('costume-carousel')),
+  );
+  expect(pageView.controller!.page, costumes.indexOf(costume).toDouble());
+  expect(
+    tester
+        .widget<AnimatedContainer>(
+          find.byKey(ValueKey('costume-indicator-${costume.code}')),
+        )
+        .constraints!
+        .minWidth,
+    26,
+  );
+  for (final other in costumes.where((item) => item != costume)) {
+    expect(
+      tester
+          .widget<AnimatedContainer>(
+            find.byKey(ValueKey('costume-indicator-${other.code}')),
+          )
+          .constraints!
+          .minWidth,
+      10,
+    );
+  }
+  final semantics = tester.getSemantics(
+    find.byKey(const ValueKey('costume-selection-semantics')),
+  );
+  expect(semantics.value, '${costume.label}, 선택됨');
+  expect(semantics.flagsCollection.isSelected, ui.Tristate.isTrue);
+}
+
 void main() {
   testWidgets('아동 홈은 코스튬 캐러셀과 그림 그리기 버튼을 보여준다', (tester) async {
     final repository = _FakeDrawingRepository(
@@ -168,8 +251,10 @@ void main() {
         ChildModeHomeScreen(
           child: _child,
           drawingRepository: repository,
-          onCharacterSelected: (childId, code) async =>
-              selections.add((childId, code)),
+          onCharacterSelected: (childId, code) async {
+            selections.add((childId, code));
+            return true;
+          },
         ),
       ),
     );
@@ -182,6 +267,502 @@ void main() {
     await tester.pump(const Duration(milliseconds: 700));
 
     expect(selections, [(_child.childId, 'PRINCESS')]);
+  });
+
+  testWidgets('캐릭터 저장 실패는 이전 확정 캐릭터로 rollback하고 안내한다', (tester) async {
+    final repository = _FakeDrawingRepository(
+      drawingTypes: const [_secondType, _artDiary],
+    );
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: repository,
+          onCharacterSelected: (_, _) async => false,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pumpAndSettle();
+
+    expect(find.text('도담이'), findsOneWidget);
+    expect(find.text('친구를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.'), findsOneWidget);
+  });
+
+  testWidgets('캐러셀 마지막에서 다음은 BASE로 순환하고 표시·indicator·저장을 동기화한다', (
+    tester,
+  ) async {
+    final selections = <(int, String)>[];
+    await _pumpCarouselHome(
+      tester,
+      child: _childWith(
+        childId: 7,
+        nickname: '도담',
+        preferredCharacter: 'OCTOPUS',
+      ),
+      onCharacterSelected: (childId, code) async {
+        selections.add((childId, code));
+        return true;
+      },
+    );
+    _expectCurrentCostume(tester, DodamCostume.octopus);
+
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pumpAndSettle();
+    _expectCurrentCostume(tester, DodamCostume.base);
+    await tester.pump(const Duration(milliseconds: 700));
+
+    expect(selections, [(7, 'BASE')]);
+  });
+
+  testWidgets('캐러셀 첫 항목에서 이전은 OCTOPUS로 순환하며 endpoint 화살표는 활성이다', (
+    tester,
+  ) async {
+    await _pumpCarouselHome(tester);
+
+    final previous = tester.getSemantics(
+      find.byKey(const ValueKey('costume-prev')),
+    );
+    final next = tester.getSemantics(
+      find.byKey(const ValueKey('costume-next')),
+    );
+    expect(previous.label, '이전 친구');
+    expect(previous.flagsCollection.isEnabled, ui.Tristate.isTrue);
+    expect(next.label, '다음 친구');
+    expect(next.flagsCollection.isEnabled, ui.Tristate.isTrue);
+    expect(
+      tester.getSize(find.byKey(const ValueKey('costume-prev'))).height,
+      greaterThanOrEqualTo(48),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('costume-prev')));
+    await tester.pumpAndSettle();
+    _expectCurrentCostume(tester, DodamCostume.octopus);
+
+    final endpointNext = tester.getSemantics(
+      find.byKey(const ValueKey('costume-next')),
+    );
+    expect(endpointNext.flagsCollection.isEnabled, ui.Tristate.isTrue);
+  });
+
+  testWidgets('캐릭터 수보다 많은 연속 다음 탭도 modulo 순환하고 마지막 값만 저장한다', (tester) async {
+    final selections = <String>[];
+    await _pumpCarouselHome(
+      tester,
+      onCharacterSelected: (_, code) async {
+        selections.add(code);
+        return true;
+      },
+    );
+
+    for (var i = 0; i < 6; i++) {
+      await tester.tap(find.byKey(const ValueKey('costume-next')));
+    }
+    await tester.pumpAndSettle();
+    _expectCurrentCostume(tester, DodamCostume.dino);
+    await tester.pump(const Duration(milliseconds: 700));
+
+    expect(selections, ['DINO']);
+  });
+
+  testWidgets('캐릭터 수보다 많은 이전 탭과 좌우 교차 탭도 마지막 사용자 의도를 유지한다', (tester) async {
+    final selections = <String>[];
+    await _pumpCarouselHome(
+      tester,
+      onCharacterSelected: (_, code) async {
+        selections.add(code);
+        return true;
+      },
+    );
+
+    for (var i = 0; i < 5; i++) {
+      await tester.tap(find.byKey(const ValueKey('costume-prev')));
+    }
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.tap(find.byKey(const ValueKey('costume-prev')));
+    await tester.tap(find.byKey(const ValueKey('costume-prev')));
+    await tester.pumpAndSettle();
+    _expectCurrentCostume(tester, DodamCostume.dino);
+    await tester.pump(const Duration(milliseconds: 700));
+
+    expect(selections, ['DINO']);
+  });
+
+  testWidgets('한 바퀴 돌아 확정 캐릭터로 복귀하면 동일 PATCH를 만들지 않는다', (tester) async {
+    final selections = <String>[];
+    await _pumpCarouselHome(
+      tester,
+      onCharacterSelected: (_, code) async {
+        selections.add(code);
+        return true;
+      },
+    );
+
+    for (var i = 0; i < DodamCostume.values.length; i++) {
+      await tester.tap(find.byKey(const ValueKey('costume-next')));
+    }
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 700));
+
+    _expectCurrentCostume(tester, DodamCostume.base);
+    expect(selections, isEmpty);
+  });
+
+  testWidgets('저장 in-flight 중 새 선택은 직렬화되고 늦은 실패가 최신 선택을 덮지 않는다', (
+    tester,
+  ) async {
+    final requests = <String>[];
+    final princessResult = Completer<bool>();
+    final dinoResult = Completer<bool>();
+    await _pumpCarouselHome(
+      tester,
+      onCharacterSelected: (_, code) {
+        requests.add(code);
+        return switch (code) {
+          'PRINCESS' => princessResult.future,
+          'DINO' => dinoResult.future,
+          _ => Future.value(true),
+        };
+      },
+    );
+
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(requests, ['PRINCESS']);
+
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pump(const Duration(milliseconds: 700));
+    expect(requests, ['PRINCESS']);
+    _expectCurrentCostume(tester, DodamCostume.dino);
+
+    princessResult.complete(false);
+    await tester.pump();
+    expect(requests, ['PRINCESS', 'DINO']);
+    _expectCurrentCostume(tester, DodamCostume.dino);
+
+    dinoResult.complete(true);
+    await tester.pumpAndSettle();
+    _expectCurrentCostume(tester, DodamCostume.dino);
+  });
+
+  testWidgets('같은 child rebuild는 index를 유지하고 childId 변경은 새 아이 확정값으로 맞춘다', (
+    tester,
+  ) async {
+    final first = _childWith(
+      childId: 7,
+      nickname: '도담',
+      preferredCharacter: 'PRINCESS',
+    );
+    await _pumpCarouselHome(tester, child: first);
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pumpAndSettle();
+    _expectCurrentCostume(tester, DodamCostume.dino);
+
+    await _pumpCarouselHome(
+      tester,
+      child: _childWith(
+        childId: 7,
+        nickname: '도담 새 이름',
+        preferredCharacter: 'PRINCESS',
+      ),
+    );
+    _expectCurrentCostume(tester, DodamCostume.dino);
+
+    await _pumpCarouselHome(
+      tester,
+      child: _childWith(
+        childId: 8,
+        nickname: '새봄',
+        preferredCharacter: 'OCTOPUS',
+      ),
+    );
+    _expectCurrentCostume(tester, DodamCostume.octopus);
+  });
+
+  testWidgets('빈 목록과 단일 목록은 예외·animation·저장 없이 안전하다', (tester) async {
+    final selections = <String>[];
+    await _pumpCarouselHome(tester, costumes: const []);
+    expect(find.text('선택할 친구가 없어요'), findsNothing);
+    expect(find.bySemanticsLabel('선택할 친구가 없어요'), findsOneWidget);
+    expect(find.byKey(const ValueKey('costume-prev')), findsNothing);
+    expect(find.byKey(const ValueKey('costume-next')), findsNothing);
+    expect(tester.takeException(), isNull);
+
+    await _pumpCarouselHome(
+      tester,
+      costumes: const [DodamCostume.base],
+      onCharacterSelected: (_, code) async {
+        selections.add(code);
+        return true;
+      },
+    );
+    await tester.tap(find.byKey(const ValueKey('costume-prev')));
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pump(const Duration(milliseconds: 700));
+
+    _expectCurrentCostume(
+      tester,
+      DodamCostume.base,
+      costumes: const [DodamCostume.base],
+    );
+    expect(selections, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('화살표 탭 직후 dispose되어도 animation·저장 결과가 상태를 변경하지 않는다', (
+    tester,
+  ) async {
+    final result = Completer<bool>();
+    var calls = 0;
+    await _pumpCarouselHome(
+      tester,
+      onCharacterSelected: (_, _) {
+        calls++;
+        return result.future;
+      },
+    );
+
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pump(const Duration(milliseconds: 100));
+    await tester.pumpWidget(const SizedBox());
+    expect(calls, 1);
+
+    result.complete(false);
+    await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('아이별 최초 1회 안내에서 다음에 고르기를 실제 tap하면 저장 후 재진입 시 숨긴다', (
+    tester,
+  ) async {
+    final store = _FakeIntroStore();
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: repository,
+          introStore: store,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsOneWidget,
+    );
+    final mascot = tester.widget<Image>(
+      find.byKey(const ValueKey('child-character-intro-mascot')),
+    );
+    expect(
+      (mascot.image as AssetImage).assetName,
+      'assets/characters/dodam_intro.png',
+    );
+    final titleSemantics = tester.getSemantics(
+      find.text('반가워!\n함께할 도담이를 골라볼까?'),
+    );
+    expect(titleSemantics.flagsCollection.isHeader, isTrue);
+    expect(
+      tester
+          .getSize(find.byKey(const ValueKey('pick-character-from-intro')))
+          .height,
+      greaterThanOrEqualTo(48),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('choose-character-later')));
+    await tester.pumpAndSettle();
+    expect(store.marked, [7]);
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsNothing,
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: repository,
+          introStore: store,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('다른 childId는 독립적으로 안내하고 친구 고르기는 기존 carousel로 연결한다', (
+    tester,
+  ) async {
+    final store = _FakeIntroStore(seen: {7});
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+    const otherChild = ChildSummaryDto(
+      childId: 8,
+      nickname: '새봄',
+      birthDate: '2020-01-01',
+      age: 6,
+      profileImageUrl: '/api/v1/child-profile-images/photo/file',
+      preferredCharacter: 'DINO',
+      questionDifficulty: 'EASY',
+      tutorialStatus: 'DONE',
+      relationshipType: 'PARENT',
+      recentActivity: ChildRecentActivityDto(
+        lastActivityAt: null,
+        totalActivityCount: 0,
+      ),
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: otherChild,
+          drawingRepository: repository,
+          introStore: store,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
+    await tester.pumpAndSettle();
+
+    expect(store.marked, [8]);
+    expect(find.byKey(const ValueKey('costume-carousel')), findsOneWidget);
+    expect(
+      tester.binding.focusManager.primaryFocus?.debugLabel,
+      'costume-selector',
+    );
+  });
+
+  testWidgets('안내 바깥 탭은 닫지 않고 system back은 확인 저장 후 닫는다', (tester) async {
+    final store = _FakeIntroStore();
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: repository,
+          introStore: store,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tapAt(const Offset(2, 2));
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsOneWidget,
+    );
+    expect(store.marked, isEmpty);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(store.marked, [7]);
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsNothing,
+    );
+  });
+
+  testWidgets('active session 확인 중에는 최초 안내를 띄우지 않는다', (tester) async {
+    final store = _FakeIntroStore();
+    final active = Completer<ActiveDrawingSessionDto?>();
+    final repository = _FakeDrawingRepository(
+      drawingTypes: const [_artDiary],
+      activeSessionCompleter: active,
+    );
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: repository,
+          introStore: store,
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsNothing,
+    );
+    expect(store.readChildIds, isEmpty);
+
+    active.complete(null);
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('최초 안내는 320x640·text scale 2.0에서 overflow가 없다', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(320, 640));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    final store = _FakeIntroStore();
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(
+          size: Size(320, 640),
+          textScaler: TextScaler.linear(2),
+        ),
+        child: _wrap(
+          ChildModeHomeScreen(
+            child: _child,
+            drawingRepository: repository,
+            introStore: store,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('최초 안내는 Pixel Tablet 세로·가로에서 overflow가 없다', (tester) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    for (final size in const [Size(800, 1280), Size(1280, 800)]) {
+      await tester.binding.setSurfaceSize(size);
+      await tester.pumpWidget(
+        _wrap(
+          ChildModeHomeScreen(
+            child: _child,
+            drawingRepository: _FakeDrawingRepository(
+              drawingTypes: const [_artDiary],
+            ),
+            introStore: _FakeIntroStore(),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('child-character-intro-dialog')),
+        findsOneWidget,
+        reason: '$size',
+      );
+      expect(tester.takeException(), isNull, reason: '$size');
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    }
   });
 
   testWidgets('그림 유형을 불러오는 동안 로딩 상태를 보여준다', (tester) async {
@@ -979,4 +1560,24 @@ final class _FakeDrawingRepository
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
+}
+
+final class _FakeIntroStore implements ChildHomeIntroStore {
+  _FakeIntroStore({Set<int>? seen}) : seen = {...?seen};
+
+  final Set<int> seen;
+  final List<int> readChildIds = [];
+  final List<int> marked = [];
+
+  @override
+  Future<bool> hasSeen(int childId) async {
+    readChildIds.add(childId);
+    return seen.contains(childId);
+  }
+
+  @override
+  Future<void> markSeen(int childId) async {
+    marked.add(childId);
+    seen.add(childId);
+  }
 }

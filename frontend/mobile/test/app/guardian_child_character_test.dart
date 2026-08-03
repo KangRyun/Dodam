@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dodam/app/state/guardian_child_controller.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
 import 'package:dodam/features/child/domain/repositories/child_repository.dart';
@@ -29,18 +31,18 @@ void main() {
       expect(controller.selectedChild?.preferredCharacter, 'PRINCESS');
     });
 
-    test('백엔드 저장이 실패해도 예외 없이 화면 값은 유지한다', () async {
-      final repository = _FakeChildRepository(
-        [_child(3, 'BASE')],
-        updateError: StateError('network'),
-      );
+    test('백엔드 저장이 실패하면 이전 서버 확정값으로 rollback한다', () async {
+      final repository = _FakeChildRepository([
+        _child(3, 'BASE'),
+      ], updateError: StateError('network'));
       final controller = GuardianChildController(repository);
       addTearDown(controller.dispose);
       await controller.loadChildren();
 
-      await controller.updateChildCharacter(3, 'OCTOPUS');
+      final succeeded = await controller.updateChildCharacter(3, 'OCTOPUS');
 
-      expect(controller.children.single.preferredCharacter, 'OCTOPUS');
+      expect(succeeded, isFalse);
+      expect(controller.children.single.preferredCharacter, 'BASE');
     });
 
     test('같은 캐릭터면 목록을 바꾸지 않지만 저장은 시도한다', () async {
@@ -54,6 +56,41 @@ void main() {
       expect(controller.children.single.preferredCharacter, 'DINO');
       // 같은 값이라도 배경 저장(best-effort)은 한 번 나간다.
       expect(repository.updateCalls, hasLength(1));
+    });
+
+    test('이전 요청의 늦은 실패는 최신 성공값을 덮어쓰지 않는다', () async {
+      final first = Completer<ChildDetailDto>();
+      final second = Completer<ChildDetailDto>();
+      final repository = _DeferredChildRepository([first, second]);
+      final controller = GuardianChildController(repository);
+      addTearDown(controller.dispose);
+      await controller.loadChildren();
+
+      final firstResult = controller.updateChildCharacter(3, 'DINO');
+      final secondResult = controller.updateChildCharacter(3, 'OCTOPUS');
+      second.complete(_detail(3, 'OCTOPUS'));
+      expect(await secondResult, isTrue);
+      first.completeError(StateError('late failure'));
+      expect(await firstResult, isFalse);
+
+      expect(controller.children.single.preferredCharacter, 'OCTOPUS');
+      expect(
+        repository.requests.every(
+          (request) => !request.toJson().containsKey('profileImageFileId'),
+        ),
+        isTrue,
+      );
+    });
+
+    test('허용되지 않은 코드는 BASE로 정규화해 전송한다', () async {
+      final repository = _FakeChildRepository([_child(3, 'DINO')]);
+      final controller = GuardianChildController(repository);
+      addTearDown(controller.dispose);
+      await controller.loadChildren();
+
+      await controller.updateChildCharacter(3, 'BEAR');
+
+      expect(repository.updateCalls.single.$2.preferredCharacter, 'BASE');
     });
   });
 }
@@ -107,6 +144,46 @@ final class _FakeChildRepository implements ChildRepository {
     updateCalls.add((childId, request));
     if (updateError != null) throw updateError!;
     return _detail(childId, request.preferredCharacter ?? 'BASE');
+  }
+
+  @override
+  Future<ChildDetailDto> createChild(CreateChildRequestDto request) =>
+      throw UnimplementedError();
+
+  @override
+  Future<void> deleteChild(int childId) => throw UnimplementedError();
+
+  @override
+  Future<ChildDetailDto> getChild(int childId) => throw UnimplementedError();
+
+  @override
+  Future<TutorialProgressDto> getTutorialProgress(int childId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<TutorialProgressDto> updateTutorialProgress(
+    int childId,
+    UpdateTutorialRequestDto request,
+  ) => throw UnimplementedError();
+}
+
+final class _DeferredChildRepository implements ChildRepository {
+  _DeferredChildRepository(this.completers);
+
+  final List<Completer<ChildDetailDto>> completers;
+  final List<UpdateChildRequestDto> requests = [];
+  int _index = 0;
+
+  @override
+  Future<List<ChildSummaryDto>> getChildren() async => [_child(3, 'BASE')];
+
+  @override
+  Future<ChildDetailDto> updateChild(
+    int childId,
+    UpdateChildRequestDto request,
+  ) {
+    requests.add(request);
+    return completers[_index++].future;
   }
 
   @override
