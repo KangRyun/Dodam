@@ -203,7 +203,10 @@ class BuildMessagesTest(unittest.TestCase):
         )[0]["content"]
         self.assertIn("그림 자체가 궁금해", htp)
         self.assertNotIn("그림 자체가 궁금해", diary)
-        self.assertIn("그림 속 그 일과 그때 아이의 마음", diary)
+        self.assertIn("그림 속", diary)
+        self.assertIn("실제 경험", diary)
+        self.assertIn("상상", diary)
+        self.assertIn("첫 질문에서는 실제 경험인지 상상인지부터 묻지 마", diary)
 
     def test_missing_activity_type_keeps_htp_behaviour(self):
         """구 BE는 activityType을 안 보낸다 — 기존 동작(HTP)이 유지돼야 한다."""

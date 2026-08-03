@@ -210,6 +210,18 @@ def check_question_response(case, resp: QuestionResponse) -> list[Finding]:
             Finding("B", "포기 문구 없음", not giveup, f"검출: {giveup}" if giveup else "")
         )
 
+    # 그림일기 첫 질문은 그림 속 이야기를 먼저 열고, 실제 경험·상상 확인은 다음 턴에 한다.
+    if "premature_reality_check_patterns" in meta:
+        premature = _contains_any(text, meta["premature_reality_check_patterns"])
+        out.append(
+            Finding(
+                "B",
+                "첫 질문에서 실제·상상 선확인 안 함",
+                not premature,
+                f"검출: {premature}" if premature else "",
+            )
+        )
+
     # HTP 첫 질문에는 이유 질문을 쓰지 않고, 아이가 이미 이유를 말했다면 다시 묻지 않는다.
     if meta.get("forbid_reason_question") or meta.get("reason_already_stated"):
         asks_reason = bool(_REASON_QUESTION.search(text))

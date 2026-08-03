@@ -219,7 +219,7 @@ class ConversationPromptRulesTest(unittest.TestCase):
 class ActivitySplitTest(unittest.TestCase):
     """대화 목표가 활동 유형별로 갈리는지 (S15P11B209-786).
 
-    HTP는 그림 자체를 파고들고, 그림일기는 그림을 소재 삼아 그날 일·마음으로 넓힌다.
+    HTP는 그림 자체를 파고들고, 그림일기는 그림 속 이야기를 들은 뒤 실제·상상과 마음으로 넓힌다.
     두 목적을 한 프롬프트에 넣으면 어느 쪽도 제대로 안 된다.
     """
 
@@ -239,8 +239,20 @@ class ActivitySplitTest(unittest.TestCase):
 
     def test_diary_treats_drawing_as_a_conversation_opener(self):
         for system in (self._first("ART_DIARY"), self._next("ART_DIARY")):
-            self.assertIn("그림 속 그 일과 그때 아이의 마음", system)
+            self.assertIn("그림 속", system)
+            self.assertIn("실제", system)
+            self.assertIn("상상", system)
             self.assertNotIn("그림 자체가 궁금해", system)
+
+    def test_diary_starts_with_story_before_reality_check(self):
+        first = self._first("ART_DIARY")
+        next_prompt = self._next("ART_DIARY")
+        self.assertIn("그림 속 이야기를 먼저 들은 뒤", first)
+        self.assertIn("첫 질문에서는 실제 경험인지 상상인지부터 묻지 마", first)
+        self.assertIn("실제 경험인지 상상인지 한 번만 확인해", next_prompt)
+        self.assertIn("아이가 이미 말했으면 다시 묻지 마", next_prompt)
+        self.assertNotIn("오늘 있었던 일을 이야기하는", first)
+        self.assertNotIn("오늘 있었던 일을 이야기하는", next_prompt)
 
     def test_diary_does_not_put_words_in_the_childs_mouth(self):
         """정서 대화로 가되 감정을 대신 정해주지 않는다 — guardrails '단정 금지'와 같은 선."""
