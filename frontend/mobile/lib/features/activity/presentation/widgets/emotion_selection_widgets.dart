@@ -548,66 +548,68 @@ class _EmotionSkipConfirmationDialogState
       borderRadius: BorderRadius.circular(AppRadius.lg),
     ),
     contentPadding: const EdgeInsets.all(AppSpacing.lg),
-    content: ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 420),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(
-            Icons.favorite_border_rounded,
-            size: 52,
-            color: AppColors.tangerine,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          const Text(
-            '지금은 마음을 고르지 않고 넘어갈까?',
-            textAlign: TextAlign.center,
-            style: AppTypography.titleLg,
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          Text(
-            '나중에 그림을 보면서 다시 이야기해도 괜찮아.',
-            textAlign: TextAlign.center,
-            style: AppTypography.body.copyWith(color: AppColors.inkMuted),
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          Builder(
-            builder: (context) {
-              final textScale = MediaQuery.textScalerOf(context).scale(1);
-              final stackButtons =
-                  MediaQuery.sizeOf(context).width < 520 || textScale > 1.3;
-              final reconsider = AppButton(
-                key: const ValueKey('emotion-skip-cancel'),
-                label: '다시 생각해볼래',
-                variant: AppButtonVariant.secondary,
-                onPressed: () => _finish(false),
-              );
-              final continueButton = AppButton(
-                key: const ValueKey('emotion-skip-confirm'),
-                label: '응, 넘어갈래',
-                variant: AppButtonVariant.primary,
-                onPressed: () => _finish(true),
-              );
-              if (stackButtons) {
-                return Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
+    content: SingleChildScrollView(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(
+              Icons.favorite_border_rounded,
+              size: 52,
+              color: AppColors.tangerine,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            const Text(
+              '지금은 마음을 고르지 않고 넘어갈까?',
+              textAlign: TextAlign.center,
+              style: AppTypography.titleLg,
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              '나중에 그림을 보면서 다시 이야기해도 괜찮아.',
+              textAlign: TextAlign.center,
+              style: AppTypography.body.copyWith(color: AppColors.inkMuted),
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            Builder(
+              builder: (context) {
+                final textScale = MediaQuery.textScalerOf(context).scale(1);
+                final stackButtons =
+                    MediaQuery.sizeOf(context).width < 520 || textScale > 1.3;
+                final reconsider = AppButton(
+                  key: const ValueKey('emotion-skip-cancel'),
+                  label: '다시 생각해볼래',
+                  variant: AppButtonVariant.secondary,
+                  onPressed: () => _finish(false),
+                );
+                final continueButton = AppButton(
+                  key: const ValueKey('emotion-skip-confirm'),
+                  label: '응, 넘어갈래',
+                  variant: AppButtonVariant.primary,
+                  onPressed: () => _finish(true),
+                );
+                if (stackButtons) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      continueButton,
+                      const SizedBox(height: AppSpacing.sm),
+                      reconsider,
+                    ],
+                  );
+                }
+                return Row(
                   children: [
-                    continueButton,
-                    const SizedBox(height: AppSpacing.sm),
-                    reconsider,
+                    Expanded(child: reconsider),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(child: continueButton),
                   ],
                 );
-              }
-              return Row(
-                children: [
-                  Expanded(child: reconsider),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(child: continueButton),
-                ],
-              );
-            },
-          ),
-        ],
+              },
+            ),
+          ],
+        ),
       ),
     ),
   );

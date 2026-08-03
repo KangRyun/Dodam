@@ -33,6 +33,7 @@ import '../../data/dto/activity_dtos.dart';
 import '../../domain/models/activity_conversation_turn.dart';
 import '../../domain/repositories/activity_repository.dart';
 import '../widgets/emotion_selection_widgets.dart';
+import '../widgets/htp_emotion_preview_gallery.dart';
 
 enum _DrawingCompletePhase {
   strokeFlush,
@@ -2894,6 +2895,7 @@ class EmotionSelectScreen extends StatefulWidget {
     this.lastQuestionMessageId,
     this.idempotencyKeyProvider,
     this.activityCompletionController,
+    this.activityRepository,
     this.activityContext = const DrawingActivityContextDto.general(),
     this.inputMethod,
     this.completedDrawingImage,
@@ -2910,6 +2912,7 @@ class EmotionSelectScreen extends StatefulWidget {
   final ConversationEndRequest? conversationEndRequest;
   final String Function()? idempotencyKeyProvider;
   final DrawingActivityCompletionController? activityCompletionController;
+  final ActivityRepository? activityRepository;
   final DrawingActivityContextDto activityContext;
   final BinaryUploadDto? completedDrawingImage;
 
@@ -3402,9 +3405,22 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
                                         .toDouble();
                               final preview = CompletedDrawingPreview(
                                 completedDrawingImage:
-                                    widget.completedDrawingImage,
+                                    widget.activityContext.isHtp
+                                    ? null
+                                    : widget.completedDrawingImage,
                                 height: previewHeight,
                               );
+                              final assessmentId =
+                                  widget.activityContext.htpAssessmentId;
+                              final previewWidget =
+                                  widget.activityContext.isHtp &&
+                                      assessmentId != null
+                                  ? HtpEmotionPreviewGallery(
+                                      childId: widget.childId,
+                                      assessmentId: assessmentId,
+                                      repository: widget.activityRepository,
+                                    )
+                                  : preview;
                               final controls = _buildEmotionControls(
                                 selectedPresentation: selectedPresentation,
                                 lockedSubmissionKind: lockedSubmissionKind,
@@ -3414,13 +3430,14 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
                                 hasSaveContract: hasSaveContract,
                                 reflectionInputLocked: reflectionInputLocked,
                               );
-                              if (!useWideLayout) {
+                              if (!useWideLayout ||
+                                  widget.activityContext.isHtp) {
                                 return Column(
                                   key: const ValueKey('emotion-compact-layout'),
                                   crossAxisAlignment:
                                       CrossAxisAlignment.stretch,
                                   children: [
-                                    preview,
+                                    previewWidget,
                                     const SizedBox(height: AppSpacing.lg),
                                     controls,
                                   ],
@@ -3434,7 +3451,10 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
                                 key: const ValueKey('emotion-wide-layout'),
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  SizedBox(width: previewWidth, child: preview),
+                                  SizedBox(
+                                    width: previewWidth,
+                                    child: previewWidget,
+                                  ),
                                   const SizedBox(width: AppSpacing.lg),
                                   Expanded(child: controls),
                                 ],
