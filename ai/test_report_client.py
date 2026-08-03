@@ -175,22 +175,31 @@ class GenerateTest(unittest.TestCase):
 
         user_msg = captured["messages"][1]["content"]
         self.assertIn("[형식적 분석]", user_msg)
-        self.assertIn("약 10.0분", user_msg)  # 600_000ms → 10분
+        self.assertIn("약 10분", user_msg)  # 600_000ms → 10분
         self.assertIn("지우기 횟수: 3회", user_msg)
         self.assertIn("평균 0.62", user_msg)
 
-    def test_pressure_unavailable_marks_not_measured(self):
+    def test_pressure_line_is_omitted_without_a_value(self):
+        """필압 강약 값이 없으면 필압 줄을 아예 내지 않는다 (S15P11B209-838).
+
+        pressure_available 은 기기가 측정할 수 있는지일 뿐 아이에 대한 관찰이 아니다 —
+        "측정됨"·"측정 불가"를 적으면 관찰 내용이 0인 줄이 해석 재료처럼 놓인다.
+        """
         captured = {}
         fake_client = mock.Mock()
         fake_client.chat.completions.create.side_effect = lambda **k: captured.update(
             messages=k["messages"]
         ) or _fake_response(_llm_json())
 
-        behavior = contracts.BehaviorMetrics(pressure_available=False)
+        behavior = contracts.BehaviorMetrics(
+            pressure_available=True, average_pressure=None, erase_count=1
+        )
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             report_client.generate(_sample_request(), behavior=behavior, model="m")
 
-        self.assertIn("필압: 측정 불가", captured["messages"][1]["content"])
+        user_msg = captured["messages"][1]["content"]
+        self.assertNotIn("필압", user_msg)
+        self.assertIn("지우기 횟수: 1회", user_msg)  # 다른 항목은 그대로 실린다
 
 
 class BehaviorMetricsContractTest(unittest.TestCase):
@@ -219,7 +228,7 @@ class BehaviorMetricsContractTest(unittest.TestCase):
         user_msg = self._capture_prompt(req)
 
         self.assertIn("[형식적 분석]", user_msg)
-        self.assertIn("약 12.0분", user_msg)
+        self.assertIn("약 12분", user_msg)
         self.assertIn("지우기 횟수: 3회", user_msg)
 
     def test_absent_behavior_metrics_keeps_legacy_behaviour(self):
@@ -237,7 +246,7 @@ class BehaviorMetricsContractTest(unittest.TestCase):
 
         user_msg = self._capture_prompt(req)
 
-        self.assertIn("멈춤 횟수: 0회", user_msg)
+        self.assertIn("멈춤 횟수: 0번", user_msg)
         self.assertNotIn("지우기 횟수", user_msg)
 
     def test_explicit_argument_overrides_contract_value(self):
@@ -257,7 +266,7 @@ class BehaviorMetricsContractTest(unittest.TestCase):
                 model="m",
             )
 
-        self.assertIn("약 10.0분", captured["messages"][1]["content"])
+        self.assertIn("약 10분", captured["messages"][1]["content"])
 
     def test_camel_case_payload_parses(self):
         """BE가 보내는 camelCase JSON이 계약 모델로 그대로 들어온다."""
@@ -286,6 +295,103 @@ class BehaviorMetricsContractTest(unittest.TestCase):
         self.assertEqual(480000, req.behavior_metrics.active_drawing_ms)
         self.assertIsNone(req.behavior_metrics.average_pressure)
         self.assertFalse(req.behavior_metrics.truncated)
+
+
+class BehaviorBlockWordingTest(unittest.TestCase):
+    """[형식적 분석] 블록의 표현 규칙 (S15P11B209-838).
+
+    블록 생성만 검증하므로 LLM 호출 없이 _format_behavior 를 직접 부른다.
+    """
+
+    def test_truncated_marks_partial_aggregation(self):
+        """부분 집계를 활동 전체처럼 읽히게 두면 안 된다."""
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(drawing_duration_ms=720_000, truncated=True)
+        )
+
+        self.assertIn("저장된 캔버스 입력 구간까지만 집계", block)
+        self.assertIn("활동 전체가 아닐 수 있어요", block)
+
+    def test_complete_aggregation_has_no_partial_note(self):
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(drawing_duration_ms=720_000, truncated=False)
+        )
+
+        self.assertNotIn("저장된 캔버스 입력 구간", block)
+
+    def test_htp_block_states_three_drawing_scope(self):
+        """HTP는 BE가 세 단계를 합산해 보낸다 — 한 장 기준으로 읽히면 안 된다."""
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(drawing_duration_ms=720_000), is_htp=True
+        )
+
+        self.assertIn("집·나무·사람 세 장을 합친 활동 전체 기준", block)
+
+    def test_diary_block_has_no_htp_scope_note(self):
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(drawing_duration_ms=720_000), is_htp=False
+        )
+
+        self.assertNotIn("세 장", block)
+
+    def test_pause_count_is_hedged_as_an_estimate(self):
+        """배치 경계 기반 추정값이라 단정 표기를 피한다."""
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(pause_count=4)
+        )
+
+        self.assertIn("약 4번", block)
+        self.assertIn("추정값", block)
+
+    def test_zero_pauses_avoid_the_approximation_word(self):
+        """'약 0번'은 문장이 이상하다 — 0일 때만 숫자를 그대로 쓴다."""
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(pause_count=0)
+        )
+
+        self.assertIn("멈춤 횟수: 0번", block)
+        self.assertNotIn("약 0번", block)
+
+    def test_minutes_are_rounded_to_whole_minutes(self):
+        """0.1분 자리는 집계가 갖지 않은 정밀도다(구 구현의 '약 10.0분')."""
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(
+                drawing_duration_ms=600_000, active_drawing_ms=410_000
+            )
+        )
+
+        self.assertIn("총 소요시간: 약 10분", block)
+        self.assertIn("실제 그린 시간: 약 7분", block)  # 410_000ms ≈ 6.83분 → 7분
+        self.assertNotIn(".", block)
+
+    def test_under_a_minute_is_not_rounded_to_zero(self):
+        """'약 0분'은 아예 안 그린 것처럼 읽힌다."""
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(drawing_duration_ms=30_000)
+        )
+
+        self.assertIn("1분 미만", block)
+        self.assertNotIn("약 0분", block)
+
+    def test_block_is_dropped_when_nothing_is_measurable(self):
+        """적을 관찰이 하나도 없으면 빈 블록을 싣지 않는다 — 모델이 채우려 든다."""
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(pressure_available=True, truncated=True)
+        )
+
+        self.assertEqual("", block)
+
+    def test_tool_and_color_changes_are_not_rendered(self):
+        """계약으로 받되 이번 단계에서는 블록에 싣지 않는다."""
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(
+                erase_count=1, tool_change_count=3, color_change_count=5
+            )
+        )
+
+        self.assertIn("지우기 횟수: 1회", block)
+        self.assertNotIn("도구", block)
+        self.assertNotIn("색", block)
 
 
 class DetectedObjectContractTest(unittest.TestCase):
