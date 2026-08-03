@@ -547,6 +547,14 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       return;
     }
     if (resolution.isUploadInput && resolution.isDrawingStage) {
+      if (resolution.activityContext.isHtp && !widget.htpPhotoUploadEnabled) {
+        showAppMessage(
+          context,
+          message: '사진으로 시작한 활동은 지금 이어갈 수 없어요. 보호자와 함께 다시 시도해 주세요.',
+          type: AppMessageType.warning,
+        );
+        return;
+      }
       // 사진을 아직 찍지 않은 UPLOAD 세션 — Canvas로 열지 않고 사진 촬영
       // 단계를 그대로 복원한다. 새 세션·새 HTP 활동을 만들지 않는다.
       await _restoreUploadInput(resolution);

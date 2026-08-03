@@ -155,7 +155,7 @@ void main() {
   });
 
   group('capability flag (HTP_PHOTO_UPLOAD_ENABLED)', () {
-    testWidgets('꺼져 있으면 사진 경로로 들어갈 수 없고 업로드·세션 생성이 0회다', (tester) async {
+    testWidgets('꺼져 있으면 사진 CTA가 없고 사진 API·picker 호출이 0회다', (tester) async {
       final adapter = _FakePhotoPickerAdapter();
       final repository = _FakeDrawingRepository();
 
@@ -168,17 +168,13 @@ void main() {
         ),
       );
 
-      // 카드 자체는 안내를 위해 남지만 비활성 상태다.
-      expect(find.byKey(const ValueKey('input-method-photo')), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('input-method-photo')));
-      await tester.pumpAndSettle();
-
-      // 사진 선택 단계로 넘어가지 않는다.
+      expect(find.byKey(const ValueKey('input-method-photo')), findsNothing);
       expect(find.byKey(const ValueKey('input-method-camera')), findsNothing);
       expect(find.byKey(const ValueKey('input-method-gallery')), findsNothing);
       expect(adapter.cameraCalls, 0);
       expect(adapter.galleryCalls, 0);
       expect(repository.uploadCalls, 0);
+      expect(repository.completionKeys, isEmpty);
       expect(repository.createCalls, 0);
     });
 

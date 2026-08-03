@@ -337,6 +337,7 @@ abstract final class AppRouter {
               (settings.arguments! as DrawingActivitySelectionRouteArguments)
                   .initialActivityCode,
           completionSnapshotProvider: drawingCompletionSnapshotProvider,
+          htpPhotoUploadEnabled: htpPhotoUploadEnabled,
         ),
       ['child', final childId, 'activity', 'input-method']
           when _hasChildContext(childController, childId) &&
