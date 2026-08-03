@@ -80,6 +80,7 @@ class S3StorageIntegrationTest {
             "images",
             "audio",
             "tts-cache",
+            "credentials",
             true);
     s3Client =
         S3Client.builder()

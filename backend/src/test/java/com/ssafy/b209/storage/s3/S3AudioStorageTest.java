@@ -177,6 +177,7 @@ class S3AudioStorageTest {
         "images",
         "audio",
         "tts-cache",
+        "credentials",
         true);
   }
 

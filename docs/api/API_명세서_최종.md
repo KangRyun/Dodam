@@ -513,6 +513,17 @@ USER-02 연락 이메일 계약:
 
 증빙 업로드·프로필의 주요 정보 변경 시 `verificationStatus=REVIEW_REQUIRED`로 전환한다.
 
+`EXPERT-05`는 `S15P11B209-577`에서 구현되었다. `file`의 선언 MIME Type·확장자·실제 Signature가 모두
+PDF/JPEG/PNG 중 같은 형식이어야 하며 실제 Byte 기준 최대 크기는 10 MiB이다. 파일은 로컬 또는 MinIO의
+`credentials/` 전용 영역에 저장하고, API 응답에는 내부 `storageKey`와 Checksum을 노출하지 않는다.
+등록한 자격 자체의 `verificationStatus`는 `PENDING`이며, 기존 프로필이 이미 검증된 상태였다면 프로필은
+`REVIEW_REQUIRED`로 전환한다.
+
+성공 응답 `data`는 `credentialId`, `credentialType`, `credentialName`, `issuer`, `issuedAt`,
+`credentialNumberMasked`, `verificationStatus`, `fileName`, `mimeType`, `fileSizeBytes`, `createdAt`을 포함한다.
+파일 형식 불일치는 `CREDENTIAL_FILE_INVALID`, 10 MiB 초과는 `CREDENTIAL_FILE_TOO_LARGE`, Storage 오류는
+`CREDENTIAL_STORAGE_FAILED`로 반환한다.
+
 ### 7.6 팔로우 응답·오류
 
 - EXPERT-07: `201`, `{ "expertId": 10, "followed": true, "followerCount": 128 }`

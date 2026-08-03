@@ -91,6 +91,7 @@ app:
       image-prefix: ${S3_IMAGE_PREFIX:images}
       audio-prefix: ${S3_AUDIO_PREFIX:audio}
       tts-prefix: ${S3_TTS_PREFIX:tts-cache}
+      credential-prefix: ${S3_CREDENTIAL_PREFIX:credentials}
       path-style-access-enabled: ${S3_PATH_STYLE_ACCESS_ENABLED:true}
     image:
       root: ${LOCAL_IMAGE_STORAGE_ROOT:./storage/images}
@@ -98,6 +99,9 @@ app:
     audio:
       root: ${LOCAL_AUDIO_STORAGE_ROOT:./storage/audio}
       max-size: ${LOCAL_AUDIO_MAX_SIZE:20971520}
+    credential:
+      root: ${LOCAL_CREDENTIAL_STORAGE_ROOT:./storage/credentials}
+      max-size: ${LOCAL_CREDENTIAL_MAX_SIZE:10485760}
   push:
     device-token:
       # Base64(32바이트) AES-256 키. 운영은 시크릿으로 주입한다.

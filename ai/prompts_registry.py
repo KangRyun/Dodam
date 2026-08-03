@@ -23,13 +23,35 @@ PROMPT_DIR = Path(__file__).parent / "prompts"
 # 프롬프트 파일별 의미 버전(semver). 프롬프트를 의미 있게 바꾸면 여기 값을 올린다.
 # ⚠️ 키를 추가/삭제하면 verify_prompt_files()가 파일과의 불일치를 잡는다.
 _PROMPT_SEMVER: dict[str, str] = {
-    # S15P11B209-704: 그림 서술(VLM)을 {drawing_analysis} 재료로 받기 시작.
-    #   서술을 그대로 인용하지 말 것·단정 표현 금지·색/표정/구도 질문 허용 규칙 추가.
-    "first_question": "1.2.0",
-    "conversations": "1.3.0",  # 아이가 정정하면 객체 분류를 분석 결과 대신 아이 말에 따름
-    "guardrails": "1.0.0",
-    "drawing_description": "1.0.0",
-    "report": "1.2.0",  # S15P11B209-601: 진단 표현 금지 강화·한계 고지·후속 질문 목적 명시
+    # 대화 프롬프트도 활동 유형별로 갈라진다(S15P11B209-786) — 대화의 '목적'이 다르다:
+    #   HTP는 그림 자체가 궁금해 그림 안에서 좁혀 가고, 그림일기는 그림을 소재 삼아
+    #   그날 일·아이 마음으로 넓혀 간다. 한 문장으로 두 목적을 시키면 어느 쪽도 안 된다.
+    # 구 first_question(1.3.0)·conversations(1.4.0)를 갈라 만든 것이라 2.0.0에서 시작한다.
+    "first_question_htp": "2.0.0",
+    "first_question_diary": "2.0.0",
+    "conversations_htp": "2.0.0",
+    "conversations_diary": "2.0.0",
+    # 공유 규칙(이름·분석결과 취급·출력 형식)은 변형 뒤에 이어붙는다. 문장 수·길이는
+    # 여기서 정하지 않고 conversation_tone에 위임한다(구 프롬프트의 "한 문장만"이
+    # UPPER_ELEMENTARY "한두 문장"과 어긋나던 것을 소유자를 하나로 만들어 없앴다).
+    "conversation_common": "1.0.0",
+    # 구 question_service._DIFFICULTY_RULES를 프롬프트 파일로 옮긴 것(버전 추적·draft 경로 반영).
+    #   구 PRESCHOOL "10자 안팎"은 대화 프롬프트의 "반응한 다음 질문을 이어줘"와 동시에
+    #   만족할 수 없어, 반응/질문 몫을 나눠 "두 문장 이내"로 고쳤다.
+    "conversation_tone": "1.0.0",
+    # 1.1.0: "중립적으로 반응"(대화 프롬프트의 '따뜻하게 반응'과 모순) 제거,
+    #   길이 규칙 제거(각 프롬프트·난이도 블록이 소유), 입력 취급·개인정보 규칙 추가.
+    "guardrails": "1.1.0",
+    # 그림 서술은 활동 유형별로 갈라진다 — HTP는 탐지 목록에 고정, 그림일기는 탐지를
+    # 힌트로만 쓴다(sketch 가중치가 자유 그림을 자주 놓쳐 목록 고정이 서술을 죽였다).
+    "drawing_description_htp": "1.0.0",
+    "drawing_description_diary": "1.0.0",
+    # 리포트도 활동 유형별로 갈라진다 — 근거 블록 구성이 다르고(주제별 vs 단일),
+    # RAG 근거는 HTP 경로에만 실린다. 공통 규칙·JSON 스키마는 report_common이 소유한다.
+    # S15P11B209-601: 진단 표현 금지 강화·한계 고지·후속 질문 목적 명시(구 report 1.2.0 계승).
+    "report_common": "1.3.0",
+    "report_htp": "1.3.0",
+    "report_diary": "1.3.0",
 }
 
 _UNKNOWN_SEMVER = "0.0.0"
