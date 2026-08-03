@@ -32,7 +32,7 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
- * 커뮤니티 게시글 CRUD 5개 endpoint(목록·상세·작성·수정·삭제)를 실 MySQL로 관통 검증하는 통합 테스트다.
+ * 커뮤니티 게시글과 댓글 CRUD endpoint를 실 MySQL로 관통 검증하는 통합 테스트다.
  *
  * <p>커뮤니티 단면에는 통합 테스트가 없어 다중 생성자 빈 배선 사고(develop CI #172)가 로컬에서 잡히지 않았다. 이 클래스는 그 회귀 그물이면서 유형별 작성
  * 권한, 공개 조건 필터, 정렬·페이징 화이트리스트, Soft Delete 후 비노출을 함께 검증한다.
@@ -68,6 +68,7 @@ class CommunityPostIntegrationTest {
     jdbcTemplate.update("DELETE FROM community_post_template_fields");
     jdbcTemplate.update("DELETE FROM post_likes");
     jdbcTemplate.update("DELETE FROM comments");
+    jdbcTemplate.execute("ALTER TABLE comments AUTO_INCREMENT = 1");
     jdbcTemplate.update("DELETE FROM community_posts");
     jdbcTemplate.update("DELETE FROM expert_follows");
     jdbcTemplate.update("DELETE FROM expert_profiles");
@@ -536,6 +537,92 @@ class CommunityPostIntegrationTest {
         .perform(updatePost(1, "GUARDIAN_STORY", "제목", "본문", false))
         .andExpect(status().isUnauthorized());
     mockMvc.perform(delete("/api/v1/posts/{postId}", 1)).andExpect(status().isUnauthorized());
+  }
+
+  // ---------------------------------------------------------------- 582 댓글 작성·수정·삭제
+
+  @Test
+  void createsUpdatesAndSoftDeletesComment() throws Exception {
+    insertPost(1, EXPERT_USER_ID, "EXPERT_COLUMN", "공개 글", "본문", false, "ACTIVE", true, null);
+
+    mockMvc
+        .perform(
+            post("/api/v1/posts/{postId}/comments", 1)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"첫 댓글\",\"anonymous\":false}"))
+        .andExpect(status().isCreated())
+        .andExpect(header().string("Location", "/api/v1/comments/1"))
+        .andExpect(jsonPath("$.data.commentId").value(1))
+        .andExpect(jsonPath("$.data.author.nickname").value("별이맘"))
+        .andExpect(jsonPath("$.data.editableByMe").value(true));
+
+    mockMvc
+        .perform(
+            patch("/api/v1/comments/{commentId}", 1)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"수정 댓글\"}"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.content").value("수정 댓글"));
+
+    mockMvc.perform(delete("/api/v1/comments/{commentId}", 1)).andExpect(status().isNoContent());
+
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT content, comment_status, deleted_at FROM comments WHERE id = 1"))
+        .containsEntry("content", "수정 댓글")
+        .containsEntry("comment_status", "DELETED")
+        .doesNotContainEntry("deleted_at", null);
+  }
+
+  @Test
+  void anonymousCommentHidesAuthorButRemainsEditableByWriter() throws Exception {
+    insertPost(1, EXPERT_USER_ID, "EXPERT_COLUMN", "공개 글", "본문", false, "ACTIVE", true, null);
+
+    mockMvc
+        .perform(
+            post("/api/v1/posts/{postId}/comments", 1)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"익명 댓글\",\"anonymous\":true}"))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.author").doesNotExist())
+        .andExpect(jsonPath("$.data.anonymous").value(true))
+        .andExpect(jsonPath("$.data.editableByMe").value(true));
+  }
+
+  @Test
+  void nonAuthorCannotUpdateOrDeleteCommentButAdminCanDelete() throws Exception {
+    insertPost(1, GUARDIAN_USER_ID, "GUARDIAN_STORY", "공개 글", "본문", false, "ACTIVE", true, null);
+    insertComment(1, "ACTIVE", true, null);
+
+    mockMvc
+        .perform(
+            patch("/api/v1/comments/{commentId}", 1)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"가로채기\"}"))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("COMMENT_ACCESS_DENIED"));
+    mockMvc.perform(delete("/api/v1/comments/{commentId}", 1)).andExpect(status().isForbidden());
+
+    authenticate(ADMIN_USER_ID);
+    mockMvc.perform(delete("/api/v1/comments/{commentId}", 1)).andExpect(status().isNoContent());
+  }
+
+  @Test
+  void rejectsCommentForMissingPostAndBlankContent() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/posts/{postId}/comments", 999)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"댓글\",\"anonymous\":false}"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("POST_NOT_FOUND"));
+
+    mockMvc
+        .perform(
+            post("/api/v1/posts/{postId}/comments", 999)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"content\":\"\",\"anonymous\":false}"))
+        .andExpect(status().isBadRequest());
   }
 
   // ---------------------------------------------------------------- 요청·fixture 도우미
