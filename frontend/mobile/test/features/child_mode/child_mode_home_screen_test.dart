@@ -107,7 +107,11 @@ ActiveDrawingSessionDto _htpActiveSession({
   ),
 );
 
-Widget _wrap(Widget home) => MaterialApp(
+/// 앱 라우터와 같은 방식으로 화면을 감싼다.
+///
+/// [htpPhotoUploadEnabled]는 `main.dart`의 dart-define 기본값에 의존하지 않고
+/// 테스트가 명시적으로 주입한다(S15P11B209-834).
+Widget _wrap(Widget home, {bool htpPhotoUploadEnabled = false}) => MaterialApp(
   home: home,
   onGenerateRoute: (settings) {
     if (settings.name == AppRoutes.drawingInputMethod('7')) {
@@ -122,6 +126,11 @@ Widget _wrap(Widget home) => MaterialApp(
           icon: arguments.icon,
           accentColor: arguments.accentColor,
           repository: arguments.repository,
+          existingDrawingSessionId: arguments.existingDrawingSessionId,
+          restoredActivityContext: arguments.restoredActivityContext,
+          htpAssessmentId: arguments.htpAssessmentId,
+          // 실제 라우터(app_router.dart)와 같이 앱 수준 flag를 그대로 넘긴다.
+          htpPhotoUploadEnabled: htpPhotoUploadEnabled,
         ),
       );
     }
@@ -148,7 +157,7 @@ Widget _wrap(Widget home) => MaterialApp(
               key: const ValueKey('leave-drawing'),
               onPressed: () => Navigator.of(
                 routeContext,
-              ).pop(DrawingRouteResult.backToActivityEntry),
+              ).pop(const DrawingRouteResult.backToActivityEntry()),
               child: const Text('나가기'),
             ),
           ],
@@ -1195,6 +1204,7 @@ void main() {
             drawingRepository: repository,
             htpPhotoUploadEnabled: true,
           ),
+          htpPhotoUploadEnabled: true,
         ),
       );
       await resumeActive(tester);

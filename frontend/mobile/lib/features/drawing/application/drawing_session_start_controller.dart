@@ -32,7 +32,40 @@ final class DrawingSessionResolution {
 
   /// 이 세션이 사진 업로드 방식인지 나타낸다.
   bool get isUploadInput => inputMethod == 'UPLOAD';
+
+  /// 이 세션을 어느 화면으로 열어야 하는지.
+  ///
+  /// 입력 방식·단계 판정을 여기 한 곳에만 둔다(S15P11B209-834). 아동 홈의
+  /// 재진입 복구와 HTP 주제 전환이 서로 다른 규칙을 쓰면, 사진으로 만든 다음
+  /// 주제 세션이 캔버스로 열려 촬영이 한 번만 일어난다.
+  DrawingResolutionTarget get target => !isDrawingStage
+      ? DrawingResolutionTarget.conversation
+      : isUploadInput
+      ? DrawingResolutionTarget.photoInput
+      : DrawingResolutionTarget.canvas;
 }
+
+/// [DrawingSessionResolution]이 열려야 하는 화면.
+enum DrawingResolutionTarget {
+  /// 사진을 아직 올리지 않은 `UPLOAD` 세션 — 사진 입력 화면.
+  photoInput,
+
+  /// 그림 단계의 `CANVAS` 세션 — 캔버스.
+  canvas,
+
+  /// 그림 단계를 지난 세션 — 대화를 이어서 연다.
+  conversation,
+}
+
+/// HTP 주제 코드를 아이에게 보여줄 제목으로 바꾼다.
+///
+/// 아동 홈과 캔버스가 같은 문구를 쓰도록 한 곳에 둔다.
+String htpSubjectTitle(String? subject) => switch (subject) {
+  'HOUSE' => '집 그리기',
+  'TREE' => '나무 그리기',
+  'PERSON' => '사람 그리기',
+  _ => 'HTP 그림',
+};
 
 final class DrawingSessionStartController {
   DrawingSessionStartController({

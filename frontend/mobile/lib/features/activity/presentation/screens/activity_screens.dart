@@ -18,6 +18,7 @@ import '../../../drawing/application/canvas_tutorial_controller.dart';
 import '../../../drawing/application/drawing_object_detection_controller.dart';
 import '../../../drawing/application/drawing_activity_completion_controller.dart';
 import '../../../drawing/application/drawing_pressure_policy.dart';
+import '../../../drawing/application/drawing_session_start_controller.dart';
 import '../../../drawing/application/drawing_sync_coordinator.dart';
 import '../../../drawing/application/drawing_draft_restore_controller.dart';
 import '../../../drawing/application/htp_response_flow_controller.dart';
@@ -1568,18 +1569,7 @@ class _DrawingScreenState extends State<DrawingScreen>
       if (resolution == null) {
         throw StateError('Next HTP drawing session is missing.');
       }
-      await Navigator.of(context).pushReplacementNamed(
-        AppRoutes.drawing(widget.childId),
-        arguments: DrawingRouteArguments(
-          sessionId: resolution.sessionId,
-          repository: repository,
-          completionSnapshotProvider: widget.completionSnapshotProvider,
-          resumeConversation: !resolution.isDrawingStage,
-          startFresh: true,
-          activityContext: resolution.activityContext,
-          inputMethod: resolution.inputMethod,
-        ),
-      );
+      await _openNextHtpSubject(resolution, repository);
     } on Object catch (error) {
       // 대화는 이미 끝나 다시 알림이 오지 않으므로, 토스트만 띄우면 화면에
       // 앞으로 나아갈 방법이 남지 않는다. 재시도 카드를 띄워 같은 Key로 다시
@@ -1594,6 +1584,37 @@ class _DrawingScreenState extends State<DrawingScreen>
         type: AppMessageType.error,
       );
     }
+  }
+
+  /// `steps/next`로 만들어진 다음 주제 세션을 그 세션에 맞는 화면으로 연다.
+  ///
+  /// 입력 방식을 보지 않고 캔버스를 열면 사진으로 시작한 HTP가 집만 촬영되고
+  /// 나무·사람은 캔버스로 열린다(S15P11B209-834). 어느 화면인지는
+  /// [DrawingSessionResolution.target] 한 곳에서만 판정한다.
+  ///
+  /// 사진 세션은 이 화면이 직접 열지 않고 상위 활동 진입 화면에 올려보낸다 —
+  /// 여기서 열면 그 화면의 결과를 기다리는 곳이 없어 업로드 후 흐름이 끊긴다.
+  Future<void> _openNextHtpSubject(
+    DrawingSessionResolution resolution,
+    DrawingRepository repository,
+  ) async {
+    if (resolution.target == DrawingResolutionTarget.photoInput) {
+      Navigator.of(context).pop(DrawingRouteResult.advanceTo(resolution));
+      return;
+    }
+    await Navigator.of(context).pushReplacementNamed(
+      AppRoutes.drawing(widget.childId),
+      arguments: DrawingRouteArguments(
+        sessionId: resolution.sessionId,
+        repository: repository,
+        completionSnapshotProvider: widget.completionSnapshotProvider,
+        resumeConversation:
+            resolution.target == DrawingResolutionTarget.conversation,
+        startFresh: true,
+        activityContext: resolution.activityContext,
+        inputMethod: resolution.inputMethod,
+      ),
+    );
   }
 
   /// 도구 패널 아래쪽에 생긴 오류 카드를 현재 화면 안으로 끌어온다.
@@ -1722,7 +1743,9 @@ class _DrawingScreenState extends State<DrawingScreen>
         }
       }
       if (mounted) {
-        Navigator.of(context).pop(DrawingRouteResult.backToActivityEntry);
+        Navigator.of(
+          context,
+        ).pop(const DrawingRouteResult.backToActivityEntry());
       }
     } finally {
       if (mounted) setState(() => _isLeaving = false);

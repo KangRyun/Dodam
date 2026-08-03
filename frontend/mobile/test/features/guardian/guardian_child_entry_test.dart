@@ -130,7 +130,10 @@ void main() {
     await tester.pumpAndSettle();
 
     // 선택한 아동의 HTP 준비 정보를 유지한 채 아동 홈으로 진입한다.
+    // 캔버스 최초 선택은 아직 그림 단계이므로 아이가 직접 시작한다
+    // (S15P11B209-834 자동 시작은 사진 업로드가 끝난 세션에만 적용한다).
     expect(find.byKey(const ValueKey('draw-entry')), findsOneWidget);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
   });
 
   testWidgets('보호자 HTP 버튼은 입력 방식 선택 후 아동 홈과 HTP 캔버스로 연결된다', (tester) async {
@@ -148,7 +151,9 @@ void main() {
     expect(drawingRepository.completeSessionId, isNull);
     await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
     await tester.pumpAndSettle();
+    // 캔버스는 아이가 홈에서 시작한다 — 자동으로 열지 않는다.
     expect(find.byKey(const ValueKey('draw-entry')), findsOneWidget);
+    expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
     await _tapAfterScroll(tester, const ValueKey('draw-entry'));
     await tester.pumpAndSettle();
 
@@ -276,7 +281,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
     await tester.pumpAndSettle();
     await _tapAfterScroll(tester, const ValueKey('draw-entry'));
-    await tester.pumpAndSettle();
+    await _pumpUntil(tester, find.byKey(const ValueKey('drawing-canvas')));
 
     expect(drawingRepository.getTypesChildId, 3);
     expect(drawingRepository.htpStartCalls, 1);

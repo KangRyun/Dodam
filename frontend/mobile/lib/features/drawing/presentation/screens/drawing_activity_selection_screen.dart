@@ -222,7 +222,17 @@ class _DrawingActivitySelectionScreenState
       }
       await Navigator.of(context).pushReplacementNamed(
         AppRoutes.childModeHome(widget.childId.toString()),
-        arguments: ChildModeHomeRouteArguments(preparedResolution: resolution),
+        arguments: ChildModeHomeRouteArguments(
+          preparedResolution: resolution,
+          // 사진 업로드·완료까지 끝난 세션만 자동으로 이어 연다. 이 세션은 이미
+          // 대화 단계라 홈에 멈추면 대화가 열리지 않고 갇힌다(S15P11B209-834).
+          //
+          // 캔버스 최초 선택은 아직 그림 단계이므로 기존처럼 아이가 홈에서
+          // `그림 그리기`를 눌러 시작한다 — 자동으로 열지 않는다.
+          autoStartPrepared:
+              resolution.isUploadInput &&
+              resolution.target == DrawingResolutionTarget.conversation,
+        ),
       );
     } on Object {
       if (mounted) {
