@@ -72,7 +72,8 @@ class DeviceTokenServiceTest {
     assertThat(saved.getTokenHash()).hasSize(64);
     assertThat(saved.getTokenCiphertext()).doesNotContain("fcm-token");
     assertThat(response.registered()).isTrue();
-    assertThat(response.updatedAt()).isEqualTo(LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
+    // 응답 시각은 UTC instant 그대로다. 타임존 표기 없는 벽시계로 내보내면 클라이언트가 자기 지역 시각으로 읽는다.
+    assertThat(response.updatedAt()).isEqualTo(NOW);
   }
 
   @Test

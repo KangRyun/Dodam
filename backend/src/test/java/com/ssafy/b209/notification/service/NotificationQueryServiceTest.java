@@ -17,6 +17,7 @@ import com.ssafy.b209.notification.dto.response.NotificationListItemResponse;
 import com.ssafy.b209.notification.dto.response.NotificationListPageResponse;
 import com.ssafy.b209.notification.repository.NotificationAttributeRepository;
 import com.ssafy.b209.notification.repository.NotificationRepository;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import org.junit.jupiter.api.Test;
@@ -110,6 +111,24 @@ class NotificationQueryServiceTest {
         service.getNotifications(USER_ID, null, false, 0, 20).content().getFirst();
 
     assertThat(item.data()).containsExactly(entry("analysisId", "77"), entry("childId", "3"));
+  }
+
+  @Test
+  void readsEntityWallClockAsUtcAndKeepsMissingTimesNull() {
+    Notification notification = notification(904L, null, null, 12L);
+    given(notificationRepository.findInbox(any(), any(), anyBoolean(), any(Pageable.class)))
+        .willReturn(new PageImpl<>(List.of(notification), PageRequest.of(0, 20), 1));
+    given(attributeRepository.findByNotificationIdInOrderByAttributeKeyAsc(List.of(904L)))
+        .willReturn(List.of());
+
+    NotificationListItemResponse item =
+        service.getNotifications(USER_ID, null, false, 0, 20).content().getFirst();
+
+    // Entity의 LocalDateTime은 앱 내부 규약상 UTC 벽시계다. KST로 해석하면 9시간 어긋난다.
+    assertThat(item.createdAt()).isEqualTo(Instant.parse("2026-07-26T10:00:00Z"));
+    // 미열람·미전송은 시각을 만들지 않고 null을 유지한다.
+    assertThat(item.readAt()).isNull();
+    assertThat(item.sentAt()).isNull();
   }
 
   @Test

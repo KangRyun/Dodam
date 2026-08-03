@@ -54,7 +54,8 @@ public class NotificationReadService {
     if (notification.markRead(LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC))) {
       notificationRepository.saveAndFlush(notification);
     }
-    return new NotificationReadResponse(notification.getId(), notification.getReadAt());
+    return new NotificationReadResponse(
+        notification.getId(), notification.getReadAt().toInstant(ZoneOffset.UTC));
   }
 
   /**
@@ -74,7 +75,8 @@ public class NotificationReadService {
     LocalDateTime now = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
     int updatedCount =
         notificationRepository.markAllReadByRecipient(recipientUserId, normalizedType, now);
-    return new NotificationMarkAllReadResponse(updatedCount, updatedCount > 0 ? now : null);
+    return new NotificationMarkAllReadResponse(
+        updatedCount, updatedCount > 0 ? now.toInstant(ZoneOffset.UTC) : null);
   }
 
   private String normalizeType(String type) {
