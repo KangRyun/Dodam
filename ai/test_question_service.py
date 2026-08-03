@@ -229,6 +229,31 @@ class BuildMessagesTest(unittest.TestCase):
         self.assertIn("엄마랑 나 살아.", system)  # 마지막 아이 발화
         self.assertIn("이 집에는 누가 살아?", system)  # 이전 이력
 
+    def test_verbal_skip_intent_carries_non_repetition_rule_for_both_activities(self):
+        """VOICE 답변으로 들어온 건너뛰기 표현도 운영 프롬프트에서 우선 처리한다(831)."""
+        for activity, subject in (("HTP", "HOUSE"), ("ART_DIARY", None)):
+            req = _request(
+                activity_type=activity,
+                drawing_subject=subject,
+                recent_messages=[
+                    RecentMessage(
+                        sender_type="AI",
+                        message_type="QUESTION",
+                        text="지붕은 무슨 색으로 칠했어?",
+                    ),
+                    RecentMessage(
+                        sender_type="CHILD",
+                        message_type="VOICE_ANSWER",
+                        text="질문을 건너뛸래.",
+                    ),
+                ],
+            )
+            system = question_service._build_messages(req)[0]["content"]
+            self.assertIn("질문을 건너뛸래.", system)
+            self.assertIn("지붕은 무슨 색으로 칠했어?", system)
+            self.assertIn("[질문 건너뛰기 의사 처리]", system)
+            self.assertIn("표현만 바꿔 다시 묻지 마", system)
+
 
 class GenerateTest(unittest.TestCase):
     def test_generate_builds_context_based_contract_response(self):
@@ -905,7 +930,92 @@ class TargetLineScopeTest(unittest.TestCase):
         self.assertIn("무리해서 끌어오지 말고", line)
 
 
-class NegationCandidateReaskTest(unittest.TestCase):
+class ActivityBlockVersionTrackingTest(unittest.TestCase):
+    """활동 지시 블록이 프롬프트 버전 추적 안에 있는지 (S15P11B209-832).
+
+    이 블록은 GPT에 나가는 지시문인데 question_service 코드 안 문자열이라
+    prompts_registry 해시에 안 잡혔다. 788에서 문구를 크게 고쳤는데도
+    promptVersion(conv-htp@2.1.0+bd5e3622)이 그대로여서, 버전은 같은데 동작이 다른
+    상태가 됐다 — 792 평가 하네스로 전후를 구분할 수 없고 사후 재현도 안 된다.
+    """
+
+    def _htp(self, **overrides):
+        base = dict(
+            activity_type="HTP",
+            drawing_subject="HOUSE",
+            detected_objects=[_detected("HOUSE_DOOR", "집의 문", 0.9)],
+        )
+        base.update(overrides)
+        return _request(**base)
+
+    def test_block_prompt_is_registered(self):
+        import prompts_registry
+
+        self.assertIn(
+            question_service.ACTIVITY_BLOCK_PROMPT, prompts_registry._PROMPT_SEMVER
+        )
+        # 표와 파일이 어긋나면 verify_prompt_files가 잡는다.
+        self.assertEqual(prompts_registry.verify_prompt_files(), [])
+
+    def test_every_section_the_code_uses_exists_in_the_file(self):
+        """코드가 고르는 구획 이름과 파일의 [[KEY]]가 어긋나면 KeyError로 질문 생성이 죽는다."""
+        import prompts_registry
+
+        available = set(prompts_registry.sections(question_service.ACTIVITY_BLOCK_PROMPT))
+        used = {
+            "HTP",
+            "HTP_WHOLE",
+            "ART_DIARY",
+            "TARGET_ONLY",
+            "TARGET_FIRST",
+            "TARGET_FOLLOW_UP",
+            "REASK_CANDIDATES",
+            "ASKED_ALREADY",
+        }
+        self.assertEqual(used - available, set(), "파일에 없는 구획을 코드가 고른다")
+
+    def test_changing_the_block_moves_prompt_version(self):
+        """수용 기준 — 블록 문구를 고치면 promptVersion 값이 달라진다.
+
+        이 이슈의 핵심이다. 실제 파일을 잠깐 고쳐 태그가 움직이는지 본다 —
+        load/content_hash가 lru_cache라 캐시를 비우고 재도 반드시 원복한다.
+        """
+        import prompts_registry
+
+        path = prompts_registry.PROMPT_DIR / f"{question_service.ACTIVITY_BLOCK_PROMPT}.txt"
+        original = path.read_text(encoding="utf-8")
+
+        def clear() -> None:
+            prompts_registry.load.cache_clear()
+            prompts_registry.sections.cache_clear()
+            prompts_registry.content_hash.cache_clear()
+
+        self.addCleanup(clear)
+        self.addCleanup(path.write_text, original, encoding="utf-8")
+
+        clear()
+        before = llm_client.prompt_version_for("HTP")
+        path.write_text(original + "\n- 한 줄 덧붙임.\n", encoding="utf-8")
+        clear()
+        after = llm_client.prompt_version_for("HTP")
+
+        self.assertNotEqual(before, after, "블록을 고쳐도 promptVersion이 그대로다(832 회귀)")
+
+    def test_block_text_is_unchanged_by_the_move(self):
+        """순수 이관 — 788 병합 상태의 문구가 그대로 조립돼야 한다."""
+        block = question_service._activity_block(
+            self._htp(), _detected("HOUSE_DOOR", "집의 문", 0.9)
+        )
+        self.assertIn("지금은 '집' 그림을 그리는 순서야. 활동에서 정해진 것이라 바뀌지 않아.", block)
+        self.assertIn("그래서 나무·사람 이야기로 넘어가지 마.", block)
+        self.assertIn("각 부분이 무엇인지는 아이가 정해", block)
+        self.assertIn('아이가 "이건 집 아니야"처럼', block)
+        self.assertIn("지금은 이 하나에 대해서만 물어봐: 집의 문", block)
+
+    def test_block_reaches_the_assembled_prompt(self):
+        system = question_service._build_messages(self._htp())[0]["content"]
+        self.assertIn("[이 그림의 주제]", system)
+        self.assertIn("그림을 그리는 순서야", system)
     """탐지 부정 시 후보 칩 재질문 (S15P11B209-718)."""
 
     def _chip(self, *codes, text="음, 아니야"):
