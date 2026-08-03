@@ -126,6 +126,7 @@ Q1_FIRST_HTP = QuestionCase(
         # 주제를 벗어난 다른 HTP 주제어 — 첫 질문에 나오면 주제 이탈이다.
         "off_subject_terms": ["나무", "사람"],
         "detected_names": ["지붕", "문", "창문"],
+        "forbid_reason_question": True,
     },
 )
 
@@ -221,7 +222,9 @@ Q4_NEXT_NORMAL = QuestionCase(
             "이만",
             "즐거웠어. 안녕",
             "대화를 마",
-        ]
+        ],
+        # 마지막 아이 발화가 "다 같이 들어가려고"로 이유를 이미 설명했다.
+        "reason_already_stated": True,
     },
 )
 

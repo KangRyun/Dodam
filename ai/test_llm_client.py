@@ -299,6 +299,11 @@ class HtpQuestionBankTest(unittest.TestCase):
         self.assertIn("그대로 읽지 마", bank)
         self.assertIn("해석하거나 채점하지 마", bank)
 
+    def test_reason_question_is_removed_from_first_question_bank(self):
+        bank = llm_client.question_bank_block("HTP", "HOUSE")
+        self.assertNotIn("왜 이렇게 그렸어", bank)
+        self.assertNotIn("이렇게 그린 데에는 어떤 이유가 있을까", bank)
+
     def test_next_question_also_carries_the_bank(self):
         system = llm_client.render_next_question_prompt(
             "우리 집이야", drawing_analysis="집이 크게",
@@ -322,10 +327,21 @@ class FirstQuestionHtpRegressionTest(unittest.TestCase):
     def test_why_questions_are_forbidden(self):
         """세부를 고르라는 지시가 '왜 ~했어?' 추궁으로 흐르지 않게 못 박는다.
 
-        conversation_common의 "'왜 그렇게 그렸어?'처럼 추궁하지 마"와 같은 선이다.
+        금지 예시 자체도 모델의 문장 앵커가 되므로 실제 프롬프트에서는 제거한다.
         """
         htp = llm_client._load("first_question_htp")
-        self.assertIn('"왜"로 시작하는 질문은 하지 마', htp)
+        self.assertIn("표현을 바꿔도 그린 이유 자체를 묻지 마", htp)
+        self.assertIn('"왜"·"이유"·"까닭"이라는 낱말도 쓰지 마', htp)
+        self.assertNotIn("왜 빨간색으로 칠했어", htp)
+        self.assertNotIn("왜 그렇게 그렸어", llm_client._load("conversation_common"))
+
+    def test_reason_question_is_only_allowed_after_child_signal(self):
+        htp = llm_client._load("conversations_htp")
+        self.assertIn("아이가 먼저", htp)
+        self.assertIn("이렇게 그린 데에는", htp)
+        self.assertIn("부드럽게 한 번", htp)
+        self.assertIn("이유를 이미 말했다면", htp)
+        self.assertIn("이유를 다시 묻거나", htp)
 
 
 class GuardrailsScopeTest(unittest.TestCase):

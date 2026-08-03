@@ -91,11 +91,11 @@ class ShortVersionTest(unittest.TestCase):
         )
 
     def test_semver_is_max_of_members(self):
-        # conversations_htp(2.1.0) > conversation_common(1.0.0) — 큰 쪽이 세대를 대표한다.
+        # conversations_htp(2.2.0) > conversation_common(1.0.0) — 큰 쪽이 세대를 대표한다.
         value = prompts_registry.short_version(
             "conv", "conversations_htp", "conversation_common"
         )
-        self.assertTrue(value.startswith("conv@2.1.0+"))
+        self.assertTrue(value.startswith("conv@2.2.0+"))
 
 
 class VersionTagLengthTest(unittest.TestCase):
