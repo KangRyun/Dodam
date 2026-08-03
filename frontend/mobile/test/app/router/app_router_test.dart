@@ -103,6 +103,18 @@ void main() {
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
   });
 
+  testWidgets('약관 및 정책 경로는 자리표시자 대신 약관 열람 화면을 연다', (tester) async {
+    await tester.pumpWidget(
+      const DodamApp(initialRoute: AppRoutes.settingsTerms),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('약관 및 정책'), findsOneWidget);
+    expect(find.text('서비스 이용약관'), findsOneWidget);
+    expect(find.text('개인정보 처리방침'), findsOneWidget);
+    expect(find.text('페이지를 찾을 수 없어요'), findsNothing);
+  });
+
   testWidgets('알 수 없는 경로는 공통 Error UI를 사용한다', (tester) async {
     await tester.pumpWidget(const DodamApp(initialRoute: '/missing'));
     await tester.pumpAndSettle();

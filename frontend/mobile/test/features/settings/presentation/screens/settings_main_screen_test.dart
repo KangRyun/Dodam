@@ -87,6 +87,26 @@ void main() {
     expect(find.text('소셜 로그인'), findsOneWidget);
   });
 
+  testWidgets('약관 및 정책을 누르면 준비 중 안내 대신 약관 열람 화면으로 이동한다', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        routes: {
+          '/guardian/settings/terms': (_) =>
+              const Scaffold(body: Text('약관 및 정책 화면')),
+        },
+        home: SettingsMainScreen(user: session.user, onSignOut: () async {}),
+      ),
+    );
+
+    final termsTile = find.byKey(const ValueKey('settings-terms-tile'));
+    await tester.ensureVisible(termsTile);
+    await tester.tap(termsTile);
+    await tester.pumpAndSettle();
+
+    expect(find.text('약관 및 정책 화면'), findsOneWidget);
+    expect(find.textContaining('준비 중이에요'), findsNothing);
+  });
+
   testWidgets('회원 탈퇴를 누르면 준비 중 안내 대신 탈퇴 화면으로 이동한다', (tester) async {
     await tester.pumpWidget(
       MaterialApp(

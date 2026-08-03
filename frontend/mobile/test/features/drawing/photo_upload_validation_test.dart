@@ -26,6 +26,22 @@ final _pngBytes = _withSignature(const [
   0x0A,
 ]);
 
+/// 진짜 WEBP 파일 앞머리: `RIFF` + 4바이트 크기 + `WEBP`.
+final _webpBytes = _withSignature(const [
+  0x52,
+  0x49,
+  0x46,
+  0x46,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x57,
+  0x45,
+  0x42,
+  0x50,
+]);
+
 PickedPhoto _photo(
   Uint8List bytes, {
   String fileName = 'photo.png',
@@ -70,6 +86,140 @@ void main() {
       );
     });
 
+    // 서버는 `image/jpg`를 `image/jpeg`로 정규화해 받는다. 여기서 막으면
+    // 서버가 받아 줄 정상 JPEG를 선택 단계에서 거절하게 된다.
+    test('image/jpg는 JPEG로 정규화해 통과시킨다', () async {
+      final result = await _validate(
+        _photo(_jpegBytes, fileName: 'photo.jpg', mimeType: 'image/jpg'),
+      );
+
+      expect(result, isA<PhotoValidationOk>());
+      // 정규화한 값이 그대로 multipart Content-Type으로 나간다.
+      expect((result as PhotoValidationOk).validated.mimeType, 'image/jpeg');
+    });
+
+    test('대소문자·앞뒤 공백이 섞인 MIME도 서버와 같게 정규화한다', () async {
+      for (final mimeType in ['IMAGE/JPEG', ' image/jpeg ', 'Image/Jpg']) {
+        final result = await _validate(
+          _photo(_jpegBytes, fileName: 'photo.jpg', mimeType: mimeType),
+        );
+
+        expect(result, isA<PhotoValidationOk>(), reason: mimeType);
+        expect(
+          (result as PhotoValidationOk).validated.mimeType,
+          'image/jpeg',
+          reason: mimeType,
+        );
+      }
+    });
+
+    test('빈 MIME 문자열은 확장자 보완으로 넘긴다', () async {
+      expect(
+        await _validate(
+          _photo(_pngBytes, fileName: 'photo.png', mimeType: '   '),
+        ),
+        isA<PhotoValidationOk>(),
+      );
+    });
+
+    // 정규화는 형식 주장만 바꾼다 — 실제 bytes 검증은 그대로 통과해야 한다.
+    test('image/jpg인데 실제 bytes가 PNG면 signatureMismatch로 막는다', () async {
+      expect(
+        await _validate(
+          _photo(_pngBytes, fileName: 'photo.jpg', mimeType: 'image/jpg'),
+        ),
+        isA<PhotoValidationFailed>().having(
+          (failed) => failed.type,
+          'type',
+          PhotoValidationErrorType.signatureMismatch,
+        ),
+      );
+    });
+
+    test('image/jpg인데 실제 bytes가 WEBP면 signatureMismatch로 막는다', () async {
+      expect(
+        await _validate(
+          _photo(_webpBytes, fileName: 'photo.jpg', mimeType: 'image/jpg'),
+        ),
+        isA<PhotoValidationFailed>().having(
+          (failed) => failed.type,
+          'type',
+          PhotoValidationErrorType.signatureMismatch,
+        ),
+      );
+    });
+
+    // 정규화가 WEBP까지 열어 주지 않는지 고정한다.
+    test('WEBP는 MIME 대소문자·공백을 바꿔도 계속 막는다', () async {
+      for (final mimeType in ['image/webp', 'IMAGE/WEBP', ' image/webp ']) {
+        expect(
+          await _validate(
+            _photo(_webpBytes, fileName: 'drawing.webp', mimeType: mimeType),
+          ),
+          isA<PhotoValidationFailed>().having(
+            (failed) => failed.type,
+            'type',
+            PhotoValidationErrorType.unsupportedFormat,
+          ),
+          reason: mimeType,
+        );
+      }
+    });
+
+    // 서버 저장소가 PNG·JPEG만 재인코딩할 수 있어(STORAGE_400_002) WEBP는
+    // 업로드 전에 막는다. 여기서 통과시키면 아이가 전송을 마친 뒤에 실패한다.
+    test('정상 WEBP는 업로드 전에 unsupportedFormat으로 막는다', () async {
+      final result = await _validate(
+        _photo(_webpBytes, fileName: 'drawing.webp', mimeType: 'image/webp'),
+      );
+
+      expect(
+        result,
+        isA<PhotoValidationFailed>().having(
+          (failed) => failed.type,
+          'type',
+          PhotoValidationErrorType.unsupportedFormat,
+        ),
+      );
+    });
+
+    test('mimeType 없이 .webp 확장자만 있어도 막는다', () async {
+      final result = await _validate(
+        _photo(_webpBytes, fileName: 'drawing.WEBP'),
+      );
+
+      expect(
+        result,
+        isA<PhotoValidationFailed>().having(
+          (failed) => failed.type,
+          'type',
+          PhotoValidationErrorType.unsupportedFormat,
+        ),
+      );
+    });
+
+    // 지원 형식으로 위장해도 실제 bytes가 WEBP면 signature 단계에서 걸린다.
+    for (final (label, fileName, mimeType) in <(String, String, String?)>[
+      ('JPEG 확장자로 위장', 'drawing.jpg', null),
+      ('JPEG MIME으로 위장', 'drawing.jpg', 'image/jpeg'),
+      ('PNG MIME으로 위장', 'drawing.png', 'image/png'),
+    ]) {
+      test('WEBP bytes를 $label해도 signatureMismatch로 막는다', () async {
+        final result = await _validate(
+          _photo(_webpBytes, fileName: fileName, mimeType: mimeType),
+        );
+
+        expect(
+          result,
+          isA<PhotoValidationFailed>().having(
+            (failed) => failed.type,
+            'type',
+            PhotoValidationErrorType.signatureMismatch,
+          ),
+        );
+      });
+    }
+
     test('확장자만 바꾼 파일은 signatureMismatch로 막는다', () async {
       // 내용은 PNG인데 JPEG라고 주장하는 경우.
       final result = await _validate(
@@ -101,6 +251,40 @@ void main() {
           (failed) => failed.type,
           'type',
           PhotoValidationErrorType.signatureMismatch,
+        ),
+      );
+    });
+
+    // 빈 파일은 signature 길이 검사에서 걸려야 한다 — 인덱스 접근으로 예외를
+    // 던지거나 디코더까지 내려가면 안 된다.
+    test('0-byte 파일은 예외 없이 막고 디코더까지 내려가지 않는다', () async {
+      var decoderCalls = 0;
+      final result = await validatePickedPhoto(
+        _photo(Uint8List(0), fileName: 'empty.jpg', mimeType: 'image/jpeg'),
+        dimensionReader: (_) async {
+          decoderCalls += 1;
+          return (800, 600);
+        },
+      );
+
+      expect(
+        result,
+        isA<PhotoValidationFailed>().having(
+          (failed) => failed.type,
+          'type',
+          PhotoValidationErrorType.signatureMismatch,
+        ),
+      );
+      expect(decoderCalls, 0);
+    });
+
+    test('확장자·mimeType이 없는 0-byte 파일도 예외 없이 막는다', () async {
+      expect(
+        await _validate(_photo(Uint8List(0), fileName: 'empty')),
+        isA<PhotoValidationFailed>().having(
+          (failed) => failed.type,
+          'type',
+          PhotoValidationErrorType.unsupportedFormat,
         ),
       );
     });

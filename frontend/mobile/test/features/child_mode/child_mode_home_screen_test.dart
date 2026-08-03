@@ -149,10 +149,12 @@ void main() {
     expect(find.byKey(const ValueKey('costume-carousel')), findsOneWidget);
     expect(find.byKey(const ValueKey('draw-entry')), findsOneWidget);
     expect(find.text('그림 그리기'), findsOneWidget);
-    // 아동은 그림일기만 진입한다 — HTP·지난 그림 보기 카드는 홈에 없다.
+    // 새 활동 시작은 그림일기만 — HTP 카드는 홈에 없다.
     expect(find.byKey(const ValueKey('activity-9')), findsNothing);
     expect(find.text('집·나무·사람 그림'), findsNothing);
-    expect(find.text('지난 그림 보기'), findsNothing);
+    // 지난 그림 보기(과거 그림 다시 보기) 입구는 그림 그리기 옆 secondary로 노출한다.
+    expect(find.byKey(const ValueKey('past-drawings-entry')), findsOneWidget);
+    expect(find.text('지난 그림 보기'), findsOneWidget);
   });
 
   testWidgets('그림 유형을 불러오는 동안 로딩 상태를 보여준다', (tester) async {
@@ -338,6 +340,57 @@ void main() {
     expect(repository.getActiveSessionCalls, 2);
     expect(find.text('이어 그리기'), findsOneWidget);
     expect(find.text('새로 그리기'), findsOneWidget);
+  });
+
+  testWidgets('전시관 등 다른 화면이 홈 위에 있으면 이어 그리기 팝업을 띄우지 않는다', (tester) async {
+    final completer = Completer<ActiveDrawingSessionDto?>();
+    final repository = _FakeDrawingRepository(
+      drawingTypes: const [_artDiary],
+      activeSessionCompleter: completer,
+    );
+    final nav = GlobalKey<NavigatorState>();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        navigatorKey: nav,
+        home: ChildModeHomeScreen(child: _child, drawingRepository: repository),
+      ),
+    );
+    await tester.pump();
+
+    // 진입 확인(활성 세션 조회)이 끝나기 전에 홈 위에 다른 화면(전시관 대역)을 올린다.
+    unawaited(
+      nav.currentState!.push(
+        MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(body: Text('상단-화면')),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 이제서야 활성 세션이 있다고 응답한다.
+    completer.complete(
+      const ActiveDrawingSessionDto(
+        drawingSessionId: 321,
+        childId: 7,
+        drawingType: DrawingTypeSummaryDto(
+          drawingTypeId: 5,
+          code: 'ART_DIARY',
+          name: '그림일기',
+        ),
+        inputMethod: 'CANVAS',
+        sessionStatus: 'IN_PROGRESS',
+        currentStage: 'CONVERSING',
+        startedAt: '2026-07-26T01:00:00Z',
+        latestDraft: null,
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 홈이 최상단이 아니므로 이어 그리기 팝업이 그 화면 위에 뜨지 않는다.
+    expect(find.text('상단-화면'), findsOneWidget);
+    expect(find.text('이어 그리기'), findsNothing);
+    expect(find.text('그리던 그림이 있어요'), findsNothing);
   });
 
   testWidgets('저장된 초안이 없는 활성 세션도 재개와 새 활동을 선택한다', (tester) async {
@@ -715,6 +768,7 @@ final class _FakeDrawingRepository
     this.failGetTypesOnce = false,
     this.failCompleteAssessmentOnce = false,
     this.typesCompleter,
+    this.activeSessionCompleter,
   });
 
   final List<DrawingTypeDto> drawingTypes;
@@ -723,6 +777,9 @@ final class _FakeDrawingRepository
   bool failGetTypesOnce;
   bool failCompleteAssessmentOnce;
   final Completer<ApiPage<DrawingTypeDto>>? typesCompleter;
+
+  /// 활성 세션 응답을 테스트가 원하는 시점에 완료시키기 위한 지연 통로.
+  final Completer<ActiveDrawingSessionDto?>? activeSessionCompleter;
 
   int getDrawingTypesCalls = 0;
   int getActiveSessionCalls = 0;
@@ -807,6 +864,7 @@ final class _FakeDrawingRepository
   @override
   Future<ActiveDrawingSessionDto?> getActiveSession(int childId) async {
     getActiveSessionCalls += 1;
+    if (activeSessionCompleter != null) return activeSessionCompleter!.future;
     return activeSession;
   }
 

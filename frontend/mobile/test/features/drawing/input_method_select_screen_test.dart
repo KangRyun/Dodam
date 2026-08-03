@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:dodam/core/network/network.dart';
+import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/drawing/application/drawing_session_start_controller.dart';
 import 'package:dodam/features/drawing/application/drawing_upload_error.dart';
 import 'package:dodam/features/drawing/application/photo_upload_validation.dart';
@@ -17,6 +18,22 @@ import 'package:flutter_test/flutter_test.dart';
 final _tinyPngBytes = base64Decode(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1Pe'
   'AAAADElEQVR42mP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
+);
+
+/// 진짜 WEBP 파일 앞머리: `RIFF` + 4바이트 크기 + `WEBP`.
+final _webpBytes = Uint8List.fromList(<int>[
+  0x52, 0x49, 0x46, 0x46, // RIFF
+  0x00, 0x00, 0x00, 0x00,
+  0x57, 0x45, 0x42, 0x50, // WEBP
+  ...List<int>.filled(52, 0),
+]);
+
+/// 실제로 디코딩되는 1×1 JPEG. 미리보기가 `Image.memory`로 그리므로 앞머리만
+/// 맞춘 가짜 바이트로는 이미지 디코딩에서 실패한다.
+final _tinyJpegBytes = base64Decode(
+  '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRof'
+  'Hh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFAAB'
+  'AAAAAAAAAAAAAAAAAAAACf/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AKp//2Q==',
 );
 
 void main() {
@@ -74,6 +91,16 @@ void main() {
 
   Future<void> goToPhotoSource(WidgetTester tester) async {
     await tester.tap(find.byKey(const ValueKey('input-method-photo')));
+    await tester.pumpAndSettle();
+  }
+
+  /// 카메라 카드는 촬영 도움말을 거친 뒤에야 시스템 카메라를 연다
+  /// (S15P11B209-471). 카메라 경로를 쓰는 기존 테스트는 이 helper로 두 단계를
+  /// 함께 지난다 — picker 호출 시점 자체는 `촬영하기` 탭 이후로 동일하다.
+  Future<void> tapCameraAndCapture(WidgetTester tester) async {
+    await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('camera-guidance-capture')));
     await tester.pumpAndSettle();
   }
 
@@ -473,8 +500,7 @@ void main() {
       );
       await goToPhotoSource(tester);
 
-      await tester.tap(find.byKey(const ValueKey('input-method-camera')));
-      await tester.pumpAndSettle();
+      await tapCameraAndCapture(tester);
 
       expect(adapter.cameraCalls, 1);
       expect(adapter.galleryCalls, 0);
@@ -482,6 +508,469 @@ void main() {
         find.byKey(const ValueKey('input-method-confirm')),
         findsOneWidget,
       );
+    });
+
+    // S15P11B209-471 — 카메라는 시스템 카메라를 열기 전에 촬영 도움말을 거친다.
+    group('촬영 도움말', () {
+      testWidgets('카메라를 고르면 제목·안내 4개·CTA 2개를 보여준다', (tester) async {
+        final adapter = _FakePhotoPickerAdapter();
+        final repository = _FakeDrawingRepository();
+
+        await pumpScreen(
+          tester,
+          buildScreen(repository: repository, photoPickerAdapter: adapter),
+        );
+        await goToPhotoSource(tester);
+        await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('그림을 예쁘게 찍어볼까?'), findsOneWidget);
+        expect(find.text('그림이 잘 보이도록 이렇게 찍어줘.'), findsOneWidget);
+        expect(find.text('그림 전체가 화면에 들어오게 해줘.'), findsOneWidget);
+        expect(find.text('밝은 곳에서 그림자가 지지 않게 찍어줘.'), findsOneWidget);
+        expect(find.text('카메라를 그림과 나란히 맞춰줘.'), findsOneWidget);
+        expect(find.text('흔들리지 않게 잠깐 멈춰 찍어줘.'), findsOneWidget);
+        expect(find.text('촬영하기'), findsOneWidget);
+        expect(find.text('돌아가기'), findsOneWidget);
+        // 위협적인 표현을 쓰지 않는다.
+        expect(find.textContaining('주의'), findsNothing);
+        expect(find.textContaining('경고'), findsNothing);
+        expect(find.textContaining('잘못'), findsNothing);
+      });
+
+      testWidgets('안내 진입만으로는 picker·권한·세션·업로드를 건드리지 않는다', (tester) async {
+        final permissionService = _FakePhotoPermissionService(
+          permissionStatus: PhotoPermissionStatus.permanentlyDenied,
+        );
+        final adapter = _FakePhotoPickerAdapter();
+        final repository = _FakeDrawingRepository();
+
+        await pumpScreen(
+          tester,
+          buildScreen(
+            repository: repository,
+            photoPickerAdapter: adapter,
+            photoPermissionService: permissionService,
+          ),
+        );
+        await goToPhotoSource(tester);
+        await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+        await tester.pumpAndSettle();
+
+        expect(adapter.cameraCalls, 0);
+        expect(adapter.galleryCalls, 0);
+        expect(permissionService.statusCalls, 0);
+        expect(permissionService.openSettingsCalls, 0);
+        expect(repository.createCalls, 0);
+        expect(repository.uploadCalls, 0);
+        expect(repository.completionKeys, isEmpty);
+      });
+
+      testWidgets('앨범 카드는 안내 없이 기존 Photo Picker를 바로 연다', (tester) async {
+        final photo = PickedPhoto(
+          bytes: _tinyPngBytes,
+          fileName: 'photo.png',
+          mimeType: 'image/png',
+        );
+        final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
+        final repository = _FakeDrawingRepository();
+
+        await pumpScreen(
+          tester,
+          buildScreen(repository: repository, photoPickerAdapter: adapter),
+        );
+        await goToPhotoSource(tester);
+        await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+        await tester.pumpAndSettle();
+
+        expect(find.text('그림을 예쁘게 찍어볼까?'), findsNothing);
+        expect(adapter.galleryCalls, 1);
+        expect(adapter.cameraCalls, 0);
+        expect(
+          find.byKey(const ValueKey('input-method-confirm')),
+          findsOneWidget,
+        );
+      });
+
+      testWidgets('촬영하기를 연달아 눌러도 카메라는 한 번만 열린다', (tester) async {
+        final completer = Completer<PickedPhoto?>();
+        final adapter = _FakePhotoPickerAdapter(
+          cameraCompleters: [completer],
+          cameraResults: [null],
+        );
+        final repository = _FakeDrawingRepository();
+
+        await pumpScreen(
+          tester,
+          buildScreen(repository: repository, photoPickerAdapter: adapter),
+        );
+        await goToPhotoSource(tester);
+        await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+        await tester.pumpAndSettle();
+
+        final capture = find.byKey(const ValueKey('camera-guidance-capture'));
+        await tester.tap(capture);
+        await tester.pump();
+        await tester.tap(capture);
+        await tester.pump();
+
+        expect(adapter.cameraCalls, 1);
+        completer.complete(null);
+        await tester.pumpAndSettle();
+      });
+
+      testWidgets('전송 중에는 촬영하기·돌아가기가 잠긴다', (tester) async {
+        final completer = Completer<PickedPhoto?>();
+        final adapter = _FakePhotoPickerAdapter(
+          cameraCompleters: [completer],
+          cameraResults: [null],
+        );
+        final repository = _FakeDrawingRepository();
+
+        await pumpScreen(
+          tester,
+          buildScreen(repository: repository, photoPickerAdapter: adapter),
+        );
+        await goToPhotoSource(tester);
+        await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('camera-guidance-capture')));
+        await tester.pump();
+
+        expect(_isButtonEnabled(tester, 'camera-guidance-capture'), isFalse);
+        expect(_isButtonEnabled(tester, 'camera-guidance-back'), isFalse);
+
+        completer.complete(null);
+        await tester.pumpAndSettle();
+        expect(_isButtonEnabled(tester, 'camera-guidance-capture'), isTrue);
+      });
+
+      for (final (label, fileName, mimeType) in <(String, String, String)>[
+        ('PNG', 'photo.png', 'image/png'),
+        ('JPEG', 'photo.jpg', 'image/jpeg'),
+      ]) {
+        testWidgets('촬영한 $label은 기존 미리보기로 넘어간다', (tester) async {
+          final photo = PickedPhoto(
+            bytes: label == 'PNG' ? _tinyPngBytes : _tinyJpegBytes,
+            fileName: fileName,
+            mimeType: mimeType,
+          );
+          final adapter = _FakePhotoPickerAdapter(cameraResults: [photo]);
+          final repository = _FakeDrawingRepository();
+
+          await pumpScreen(
+            tester,
+            buildScreen(repository: repository, photoPickerAdapter: adapter),
+          );
+          await goToPhotoSource(tester);
+          await tapCameraAndCapture(tester);
+
+          expect(adapter.cameraCalls, 1);
+          expect(
+            find.byKey(const ValueKey('input-method-confirm')),
+            findsOneWidget,
+          );
+          expect(repository.uploadCalls, 0);
+        });
+      }
+
+      testWidgets('촬영한 WEBP는 기존 검증 오류로 막고 업로드하지 않는다', (tester) async {
+        final photo = PickedPhoto(
+          bytes: _webpBytes,
+          fileName: 'shot.webp',
+          mimeType: 'image/webp',
+        );
+        final adapter = _FakePhotoPickerAdapter(cameraResults: [photo]);
+        final repository = _FakeDrawingRepository();
+
+        await pumpScreen(
+          tester,
+          buildScreen(repository: repository, photoPickerAdapter: adapter),
+        );
+        await goToPhotoSource(tester);
+        await tapCameraAndCapture(tester);
+
+        expect(
+          find.byKey(const ValueKey('input-method-photo-error')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('input-method-confirm')),
+          findsNothing,
+        );
+        expect(repository.uploadCalls, 0);
+        expect(repository.createCalls, 0);
+        // 오류 뒤에도 다시 촬영하거나 돌아갈 수 있다.
+        expect(
+          find.byKey(const ValueKey('camera-guidance-capture')),
+          findsOneWidget,
+        );
+      });
+
+      testWidgets('취소 뒤 다시 촬영하면 카메라가 다시 열린다', (tester) async {
+        final photo = PickedPhoto(
+          bytes: _tinyPngBytes,
+          fileName: 'photo.png',
+          mimeType: 'image/png',
+        );
+        final adapter = _FakePhotoPickerAdapter(cameraResults: [null, photo]);
+        final repository = _FakeDrawingRepository();
+
+        await pumpScreen(
+          tester,
+          buildScreen(repository: repository, photoPickerAdapter: adapter),
+        );
+        await goToPhotoSource(tester);
+        await tapCameraAndCapture(tester);
+        expect(
+          find.byKey(const ValueKey('camera-guidance-capture')),
+          findsOneWidget,
+        );
+
+        await tester.tap(find.byKey(const ValueKey('camera-guidance-capture')));
+        await tester.pumpAndSettle();
+
+        expect(adapter.cameraCalls, 2);
+        expect(
+          find.byKey(const ValueKey('input-method-confirm')),
+          findsOneWidget,
+        );
+      });
+
+      testWidgets('돌아가기는 사진 소스로 돌아가고 화면을 pop하지 않는다', (tester) async {
+        final adapter = _FakePhotoPickerAdapter();
+        final repository = _FakeDrawingRepository();
+        var popCount = 0;
+
+        await pumpScreen(
+          tester,
+          buildScreen(repository: repository, photoPickerAdapter: adapter),
+          onPopped: (_) => popCount += 1,
+        );
+        await goToPhotoSource(tester);
+        await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+        await tester.pumpAndSettle();
+
+        await tester.tap(find.byKey(const ValueKey('camera-guidance-back')));
+        await tester.pumpAndSettle();
+
+        expect(
+          find.byKey(const ValueKey('input-method-camera')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('input-method-gallery')),
+          findsOneWidget,
+        );
+        expect(popCount, 0);
+        expect(adapter.cameraCalls, 0);
+        expect(repository.createCalls, 0);
+        expect(repository.deletedSessionIds, isEmpty);
+      });
+
+      testWidgets('시스템 back도 돌아가기와 같게 사진 소스로 이동한다', (tester) async {
+        final adapter = _FakePhotoPickerAdapter();
+        final repository = _FakeDrawingRepository();
+        var popCount = 0;
+
+        await pumpScreen(
+          tester,
+          buildScreen(repository: repository, photoPickerAdapter: adapter),
+          onPopped: (_) => popCount += 1,
+        );
+        await goToPhotoSource(tester);
+        await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+        await tester.pumpAndSettle();
+
+        await _systemBack(tester);
+
+        expect(
+          find.byKey(const ValueKey('input-method-camera')),
+          findsOneWidget,
+        );
+        expect(popCount, 0);
+        expect(repository.deletedSessionIds, isEmpty);
+      });
+
+      testWidgets('빠른 중복 back에도 화면 pop이나 정리가 중복되지 않는다', (tester) async {
+        final adapter = _FakePhotoPickerAdapter();
+        final repository = _FakeDrawingRepository();
+        var popCount = 0;
+
+        await pumpScreen(
+          tester,
+          buildScreen(repository: repository, photoPickerAdapter: adapter),
+          onPopped: (_) => popCount += 1,
+        );
+        await goToPhotoSource(tester);
+        await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+        await tester.pumpAndSettle();
+
+        await _systemBack(tester);
+        await _systemBack(tester);
+
+        // 첫 back은 사진 소스로, 두 번째 back은 기존 소스 화면 정책(leave)으로
+        // 정확히 한 번만 pop한다 — 중복 pop·중복 삭제가 없어야 한다.
+        expect(popCount, lessThanOrEqualTo(1));
+        expect(repository.deletedSessionIds, isEmpty);
+        expect(adapter.cameraCalls, 0);
+      });
+
+      testWidgets('안내에서 dispose되면 늦은 촬영 결과가 상태를 바꾸지 않는다', (tester) async {
+        final completer = Completer<PickedPhoto?>();
+        final adapter = _FakePhotoPickerAdapter(
+          cameraCompleters: [completer],
+          cameraResults: [null],
+        );
+        final repository = _FakeDrawingRepository();
+
+        await pumpScreen(
+          tester,
+          buildScreen(repository: repository, photoPickerAdapter: adapter),
+        );
+        await goToPhotoSource(tester);
+        await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const ValueKey('camera-guidance-capture')));
+        await tester.pump();
+
+        await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
+        completer.complete(
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'photo.png',
+            mimeType: 'image/png',
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        expect(tester.takeException(), isNull);
+        expect(repository.createCalls, 0);
+        expect(repository.uploadCalls, 0);
+      });
+
+      testWidgets('CTA는 button Semantics와 48×48 이상을 만족한다', (tester) async {
+        final handle = tester.ensureSemantics();
+        await pumpScreen(
+          tester,
+          buildScreen(
+            repository: _FakeDrawingRepository(),
+            photoPickerAdapter: _FakePhotoPickerAdapter(),
+          ),
+        );
+        await goToPhotoSource(tester);
+        await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+        await tester.pumpAndSettle();
+
+        for (final (key, label) in <(String, String)>[
+          ('camera-guidance-capture', '촬영하기'),
+          ('camera-guidance-back', '돌아가기'),
+        ]) {
+          final size = tester.getSize(find.byKey(ValueKey(key)));
+          expect(size.width, greaterThanOrEqualTo(48.0), reason: key);
+          expect(size.height, greaterThanOrEqualTo(48.0), reason: key);
+          // 버튼 안쪽 Text에서 위로 올라가면 병합된 버튼 semantics 노드가 나온다.
+          expect(
+            tester.getSemantics(
+              find.descendant(
+                of: find.byKey(ValueKey(key)),
+                matching: find.text(label),
+              ),
+            ),
+            matchesSemantics(
+              isButton: true,
+              isEnabled: true,
+              hasEnabledState: true,
+              hasTapAction: true,
+              hasFocusAction: true,
+              isFocusable: true,
+              label: label,
+            ),
+            reason: key,
+          );
+        }
+        handle.dispose();
+      });
+
+      testWidgets('안내 아이콘은 문구와 중복 낭독되지 않는다', (tester) async {
+        final handle = tester.ensureSemantics();
+        await pumpScreen(
+          tester,
+          buildScreen(
+            repository: _FakeDrawingRepository(),
+            photoPickerAdapter: _FakePhotoPickerAdapter(),
+          ),
+        );
+        await goToPhotoSource(tester);
+        await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+        await tester.pumpAndSettle();
+
+        // 각 안내 문구는 정확히 한 번만 낭독된다.
+        for (final tip in [
+          '그림 전체가 화면에 들어오게 해줘.',
+          '밝은 곳에서 그림자가 지지 않게 찍어줘.',
+          '카메라를 그림과 나란히 맞춰줘.',
+          '흔들리지 않게 잠깐 멈춰 찍어줘.',
+        ]) {
+          expect(find.bySemanticsLabel(tip), findsOneWidget, reason: tip);
+        }
+        handle.dispose();
+      });
+
+      for (final (name, size, scale) in <(String, Size, double)>[
+        ('작은 화면', Size(360, 640), 1.0),
+        ('큰 글자', Size(360, 640), 2.0),
+        ('태블릿 세로', Size(800, 1280), 1.0),
+        ('태블릿 가로', Size(1280, 800), 1.0),
+      ]) {
+        testWidgets('$name에서 안내와 CTA가 overflow 없이 보인다', (tester) async {
+          tester.view.physicalSize = size;
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.reset);
+
+          await pumpScreen(
+            tester,
+            MediaQuery(
+              data: MediaQueryData(
+                size: size,
+                textScaler: TextScaler.linear(scale),
+              ),
+              child: buildScreen(
+                repository: _FakeDrawingRepository(),
+                photoPickerAdapter: _FakePhotoPickerAdapter(),
+              ),
+            ),
+          );
+          // 작은 화면·큰 글자에서는 목록이 접혀 세로 스크롤로 닿는다.
+          await tester.ensureVisible(
+            find.byKey(const ValueKey('input-method-photo')),
+          );
+          await tester.tap(find.byKey(const ValueKey('input-method-photo')));
+          await tester.pumpAndSettle();
+          await tester.ensureVisible(
+            find.byKey(const ValueKey('input-method-camera')),
+          );
+          await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+          await tester.pumpAndSettle();
+
+          expect(tester.takeException(), isNull);
+          expect(
+            find.byKey(const ValueKey('camera-guidance-tips')),
+            findsOneWidget,
+          );
+          // 안내 4줄과 두 CTA 모두 스크롤로 반드시 닿을 수 있어야 한다.
+          for (final tip in ['그림 전체가 화면에 들어오게 해줘.', '흔들리지 않게 잠깐 멈춰 찍어줘.']) {
+            await tester.ensureVisible(find.text(tip));
+          }
+          for (final key in [
+            'camera-guidance-capture',
+            'camera-guidance-back',
+          ]) {
+            await tester.ensureVisible(find.byKey(ValueKey(key)));
+          }
+          expect(tester.takeException(), isNull);
+        });
+      }
     });
 
     testWidgets('앨범에서 고르면 시스템 Photo Picker 어댑터가 호출되고 미리보기로 넘어간다', (
@@ -524,15 +1013,27 @@ void main() {
       );
       await goToPhotoSource(tester);
 
-      await tester.tap(find.byKey(const ValueKey('input-method-camera')));
-      await tester.pumpAndSettle();
+      await tapCameraAndCapture(tester);
 
-      expect(find.byKey(const ValueKey('input-method-camera')), findsOneWidget);
+      // 카메라 취소는 오류가 아니라 촬영 도움말에 그대로 머무는 것이다 —
+      // 다시 촬영하거나 돌아갈 수 있어야 한다(S15P11B209-471 §6.3).
+      expect(
+        find.byKey(const ValueKey('camera-guidance-capture')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('camera-guidance-back')),
+        findsOneWidget,
+      );
       expect(
         find.byKey(const ValueKey('input-method-photo-error')),
         findsNothing,
       );
       expect(repository.createCalls, 0);
+
+      await tester.tap(find.byKey(const ValueKey('camera-guidance-back')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const ValueKey('input-method-camera')), findsOneWidget);
 
       await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
       await tester.pumpAndSettle();
@@ -576,8 +1077,7 @@ void main() {
       );
       await goToPhotoSource(tester);
 
-      await tester.tap(find.byKey(const ValueKey('input-method-camera')));
-      await tester.pumpAndSettle();
+      await tapCameraAndCapture(tester);
 
       expect(
         find.byKey(const ValueKey('input-method-permission-error')),
@@ -656,8 +1156,7 @@ void main() {
         ),
       );
       await goToPhotoSource(tester);
-      await tester.tap(find.byKey(const ValueKey('input-method-camera')));
-      await tester.pumpAndSettle();
+      await tapCameraAndCapture(tester);
       await tester.tap(
         find.byKey(const ValueKey('input-method-open-settings')),
       );
@@ -700,8 +1199,7 @@ void main() {
         ),
       );
       await goToPhotoSource(tester);
-      await tester.tap(find.byKey(const ValueKey('input-method-camera')));
-      await tester.pumpAndSettle();
+      await tapCameraAndCapture(tester);
       await tester.tap(
         find.byKey(const ValueKey('input-method-open-settings')),
       );
@@ -782,6 +1280,176 @@ void main() {
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('input-method-confirm')), findsNothing);
+    });
+
+    // 일부 기기 picker는 JPEG에 `image/jpg`를 준다. 서버는 이를 `image/jpeg`로
+    // 정규화해 받으므로 앱도 막지 않아야 한다.
+    testWidgets('image/jpg JPEG는 정상 미리보기로 넘어간다', (tester) async {
+      final photo = PickedPhoto(
+        bytes: _tinyJpegBytes,
+        fileName: 'photo.jpg',
+        mimeType: 'image/jpg',
+      );
+      final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('input-method-confirm')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('input-method-photo-error')),
+        findsNothing,
+      );
+      // 미리보기 단계까지는 업로드·세션 생성이 없다(기존 계약).
+      expect(repository.uploadCalls, 0);
+      expect(repository.createCalls, 0);
+    });
+
+    // 서버 저장소는 PNG·JPEG만 재인코딩할 수 있어 WEBP를 STORAGE_400_002로
+    // 거절한다. 전송을 마친 뒤 실패하지 않도록 선택 즉시 막아야 한다.
+    testWidgets('WEBP는 미리보기로 넘어가지 않고 업로드도 하지 않는다', (tester) async {
+      final photo = PickedPhoto(
+        bytes: _webpBytes,
+        fileName: 'drawing.webp',
+        mimeType: 'image/webp',
+      );
+      final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('input-method-photo-error')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('input-method-confirm')), findsNothing);
+      expect(repository.uploadCalls, 0);
+      expect(repository.createCalls, 0);
+      // 아이 화면에 MIME·상태 코드·예외 문자열을 노출하지 않는다.
+      expect(
+        find.text('JPEG·PNG 형식의 사진만 사용할 수 있어요. 다른 사진을 선택해 주세요.'),
+        findsOneWidget,
+      );
+      expect(find.textContaining('image/webp'), findsNothing);
+      expect(find.textContaining('STORAGE_'), findsNothing);
+      expect(find.textContaining('Exception'), findsNothing);
+    });
+
+    testWidgets('WEBP 오류 뒤 PNG를 다시 고르면 정상 미리보기로 넘어간다', (tester) async {
+      final adapter = _FakePhotoPickerAdapter(
+        galleryResults: [
+          PickedPhoto(
+            bytes: _webpBytes,
+            fileName: 'drawing.webp',
+            mimeType: 'image/webp',
+          ),
+          PickedPhoto(
+            bytes: _tinyPngBytes,
+            fileName: 'photo.png',
+            mimeType: 'image/png',
+          ),
+        ],
+      );
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+      expect(
+        find.byKey(const ValueKey('input-method-photo-error')),
+        findsOneWidget,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+
+      expect(adapter.galleryCalls, 2);
+      expect(
+        find.byKey(const ValueKey('input-method-confirm')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('input-method-photo-error')),
+        findsNothing,
+      );
+      expect(repository.uploadCalls, 0);
+    });
+
+    testWidgets('카메라로 찍은 WEBP도 같은 검증 경로에서 막힌다', (tester) async {
+      final photo = PickedPhoto(
+        bytes: _webpBytes,
+        fileName: 'shot.webp',
+        mimeType: 'image/webp',
+      );
+      final adapter = _FakePhotoPickerAdapter(cameraResults: [photo]);
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tapCameraAndCapture(tester);
+
+      expect(adapter.cameraCalls, 1);
+      expect(
+        find.byKey(const ValueKey('input-method-photo-error')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('input-method-confirm')), findsNothing);
+      expect(repository.uploadCalls, 0);
+    });
+
+    testWidgets('0-byte 파일은 예외 없이 막고 업로드하지 않는다', (tester) async {
+      final photo = PickedPhoto(
+        bytes: Uint8List(0),
+        fileName: 'empty.jpg',
+        mimeType: 'image/jpeg',
+      );
+      final adapter = _FakePhotoPickerAdapter(galleryResults: [photo]);
+      final repository = _FakeDrawingRepository();
+
+      await pumpScreen(
+        tester,
+        buildScreen(repository: repository, photoPickerAdapter: adapter),
+      );
+      await goToPhotoSource(tester);
+      await tester.tap(find.byKey(const ValueKey('input-method-gallery')));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const ValueKey('input-method-photo-error')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('input-method-confirm')), findsNothing);
+      expect(repository.uploadCalls, 0);
+      expect(repository.createCalls, 0);
+      // 오류 뒤에도 다시 고르거나 나갈 수 있어야 한다.
+      expect(
+        find.byKey(const ValueKey('input-method-gallery')),
+        findsOneWidget,
+      );
+      expect(find.byKey(const ValueKey('input-method-camera')), findsOneWidget);
     });
 
     testWidgets('10MiB를 넘는 사진은 차단한다', (tester) async {
@@ -2431,11 +3099,25 @@ void main() {
   });
 }
 
+/// 버튼이 눌리는 상태인지(`onPressed`가 살아 있는지) 확인한다.
+bool _isButtonEnabled(WidgetTester tester, String key) {
+  final widget = tester.widget(find.byKey(ValueKey(key)));
+  if (widget is AppButton) return widget.onPressed != null;
+  throw StateError('Unsupported widget: ${widget.runtimeType}');
+}
+
+/// 실제 시스템 back과 같은 경로(`PopScope`)로 뒤로가기를 흘린다.
+Future<void> _systemBack(WidgetTester tester) async {
+  await tester.binding.handlePopRoute();
+  await tester.pumpAndSettle();
+}
+
 final class _FakePhotoPickerAdapter implements PhotoPickerAdapter {
   _FakePhotoPickerAdapter({
     this.cameraResults = const [],
     this.galleryResults = const [],
     this.galleryCompleters = const [],
+    this.cameraCompleters = const [],
     this.cameraError,
     this.galleryError,
   });
@@ -2443,6 +3125,7 @@ final class _FakePhotoPickerAdapter implements PhotoPickerAdapter {
   final List<PickedPhoto?> cameraResults;
   final List<PickedPhoto?> galleryResults;
   final List<Completer<PickedPhoto?>> galleryCompleters;
+  final List<Completer<PickedPhoto?>> cameraCompleters;
   final Object? cameraError;
   final Object? galleryError;
   int cameraCalls = 0;
@@ -2450,10 +3133,14 @@ final class _FakePhotoPickerAdapter implements PhotoPickerAdapter {
 
   @override
   Future<PickedPhoto?> pickFromCamera() async {
+    final index = cameraCalls;
     cameraCalls += 1;
     final error = cameraError;
     if (error != null) throw error;
-    return cameraResults[cameraCalls - 1];
+    if (index < cameraCompleters.length) {
+      return cameraCompleters[index].future;
+    }
+    return cameraResults[index - cameraCompleters.length];
   }
 
   @override
@@ -2480,10 +3167,13 @@ final class _FakePhotoPermissionService implements PhotoPermissionService {
   final bool openSettingsResult;
   final Completer<bool>? openSettingsCompleter;
   int openSettingsCalls = 0;
+  int statusCalls = 0;
 
   @override
-  Future<PhotoPermissionStatus> status(PhotoPermissionKind kind) async =>
-      permissionStatus;
+  Future<PhotoPermissionStatus> status(PhotoPermissionKind kind) async {
+    statusCalls += 1;
+    return permissionStatus;
+  }
 
   @override
   Future<bool> openSettings() async {

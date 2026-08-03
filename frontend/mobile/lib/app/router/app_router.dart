@@ -6,6 +6,7 @@ import '../../design_system/design_system.dart';
 import '../../features/activity/domain/repositories/activity_repository.dart';
 import '../../features/activity/presentation/screens/activity_screens.dart';
 import '../../features/auth/auth.dart';
+import '../../features/child_mode/presentation/screens/child_gallery_screen.dart';
 import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
 import '../../features/child/data/dto/child_dtos.dart';
 import '../../features/child/domain/repositories/child_repository.dart';
@@ -28,6 +29,7 @@ import '../../features/report/domain/repositories/report_repository.dart';
 import '../../features/report/domain/services/report_file_actions.dart';
 import '../../features/consent/domain/repositories/consent_repository.dart';
 import '../../features/consent/presentation/screens/consent_management_screen.dart';
+import '../../features/consent/presentation/screens/consent_terms_screen.dart';
 import '../../features/settings/domain/repositories/account_withdrawal_repository.dart';
 import '../../features/settings/presentation/screens/account_withdrawal_screen.dart';
 import '../../features/settings/presentation/screens/settings_main_screen.dart';
@@ -258,6 +260,11 @@ abstract final class AppRouter {
           repository: consentRepository,
           children: childController.children,
         ),
+      // 약관 열람은 동의 현황을 보지 않으므로 아동 컨텍스트가 필요 없다.
+      // 아이를 등록하지 않은 계정도 아동 대상 약관 전문을 읽을 수 있어야 한다
+      // (S15P11B209-458).
+      ['guardian', 'settings', 'terms'] when consentRepository != null =>
+        ConsentTermsScreen(repository: consentRepository),
       // 어떤 아이가 단독 보호인지는 서버만 안다. 화면에는 연결된 아이 수만
       // 넘겨 "아이가 있는 계정 / 없는 계정" 안내를 가른다(S15P11B209-460).
       // 목록 조회가 확정되지 않았으면(`confirmedChildCount == null`) "아이가
@@ -298,6 +305,13 @@ abstract final class AppRouter {
               settings.arguments is ChildModeHomeRouteArguments &&
               (settings.arguments! as ChildModeHomeRouteArguments)
                   .autoStartPrepared,
+        ),
+      ['child', final childId, 'gallery']
+          when _hasChildContext(childController, childId) &&
+              activityRepository != null =>
+        ChildGalleryScreen(
+          child: childController!.selectedChild!,
+          repository: activityRepository,
         ),
       ['child', final childId, 'activity', 'select']
           when _hasChildContext(childController, childId) &&

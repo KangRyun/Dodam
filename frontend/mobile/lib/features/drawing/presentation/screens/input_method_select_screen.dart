@@ -16,7 +16,7 @@ import '../../domain/photo_picker_adapter.dart';
 import '../../domain/repositories/drawing_repository.dart';
 import 'guided_camera_screen.dart';
 
-enum _Step { methodChoice, photoSource, preview }
+enum _Step { methodChoice, photoSource, cameraGuidance, preview }
 
 enum _InputPhase {
   idle,
@@ -63,6 +63,15 @@ final class _DrawingUploadAttempt {
   final _DrawingUploadSnapshot snapshot;
   final DrawingUploadCancellation cancellation;
 }
+
+/// 촬영 도움말 항목(아이콘, 문구). 아이콘만으로 뜻을 전달하지 않도록 문구를
+/// 항상 함께 보여준다(S15P11B209-471).
+const List<(IconData, String)> _cameraGuidanceTips = [
+  (Icons.crop_free_rounded, '그림 전체가 화면에 들어오게 해줘.'),
+  (Icons.wb_sunny_rounded, '밝은 곳에서 그림자가 지지 않게 찍어줘.'),
+  (Icons.grid_on_rounded, '카메라를 그림과 나란히 맞춰줘.'),
+  (Icons.pan_tool_rounded, '흔들리지 않게 잠깐 멈춰 찍어줘.'),
+];
 
 String _createIdempotencyKey() {
   final random = Random.secure();
@@ -383,6 +392,35 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     });
   }
 
+  /// 카메라를 고르면 시스템 카메라를 바로 열지 않고 촬영 도움말을 먼저 보여준다
+  /// (S15P11B209-471). 이 단계는 설명만 하므로 picker·권한·서버 상태를 만들지
+  /// 않는다 — 실제 촬영은 [_captureFromCamera]에서만 시작한다.
+  void _showCameraGuidance() {
+    if (!_canStartAction) return;
+    _invalidateUpload(clearSnapshot: true);
+    setState(() {
+      _step = _Step.cameraGuidance;
+      _photoPickError = null;
+      _photoPermissionIssue = null;
+    });
+  }
+
+  /// 촬영 도움말에서 사진 소스 선택으로 되돌아간다.
+  ///
+  /// 화면 자체를 pop하지 않는다 — 아이는 앨범으로 바꾸거나 다시 촬영을 고를 수
+  /// 있어야 한다. 세션을 만든 적이 없으므로 정리할 서버 상태도 없다.
+  void _backToPhotoSource() {
+    if (!_canStartAction) return;
+    setState(() {
+      _step = _Step.photoSource;
+      _photoPickError = null;
+      _photoPermissionIssue = null;
+    });
+  }
+
+  /// 도움말의 `촬영하기`. 실제 기기에서는 가이드가 포함된 인앱 카메라를 연다.
+  Future<void> _captureFromCamera() => _openGuidedCamera();
+
   Future<void> _pickFrom(
     Future<PickedPhoto?> Function() pick, {
     required PhotoPermissionKind permissionKind,
@@ -511,7 +549,8 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
       !_isLeaving &&
       phase == _InputPhase.idle &&
       _phase == phase &&
-      _step == _Step.photoSource &&
+      // 권한 안내는 사진 소스 선택과 촬영 도움말 두 단계에서 나올 수 있다.
+      (_step == _Step.photoSource || _step == _Step.cameraGuidance) &&
       operation == _permissionSettingsOperation &&
       pickerGeneration == _pickerGeneration &&
       routeIdentity == _routeInputIdentity &&
@@ -912,7 +951,14 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
   Widget build(BuildContext context) => PopScope(
     canPop: false,
     onPopInvokedWithResult: (didPop, _) {
-      if (!didPop) unawaited(_leave());
+      if (didPop) return;
+      // 촬영 도움말에서의 시스템 back은 화면을 떠나는 대신 사진 소스 선택으로
+      // 돌아간다 — `돌아가기` 버튼과 같은 동작이다(S15P11B209-471).
+      if (_step == _Step.cameraGuidance && _canStartAction) {
+        _backToPhotoSource();
+        return;
+      }
+      unawaited(_leave());
     },
     child: Scaffold(
       backgroundColor: AppColors.childCanvas,
@@ -928,6 +974,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
                 child: switch (_step) {
                   _Step.methodChoice => _buildMethodChoice(context),
                   _Step.photoSource => _buildPhotoSource(context),
+                  _Step.cameraGuidance => _buildCameraGuidance(context),
                   _Step.preview => _buildPreview(context),
                 },
               ),
@@ -1028,6 +1075,72 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     ],
   );
 
+  /// 시스템 카메라를 열기 전에 보여주는 촬영 도움말(S15P11B209-471).
+  ///
+  /// 바깥 `SingleChildScrollView` 안에 들어가므로 여기서 다시 스크롤을 만들지
+  /// 않는다. 아이콘은 문구를 거드는 장식이라 스크린리더에서 제외하고, 읽기
+  /// 순서는 제목 → 도움말 → CTA가 되도록 배치 순서를 그대로 따른다.
+  Widget _buildCameraGuidance(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      _buildHeader(title: '그림을 예쁘게 찍어볼까?', description: '그림이 잘 보이도록 이렇게 찍어줘.'),
+      const SizedBox(height: AppSpacing.lg),
+      if (_photoPickError case final error?) ...[
+        _ErrorBanner(
+          key: const ValueKey('input-method-photo-error'),
+          icon: error.icon,
+          message: error.message,
+        ),
+        const SizedBox(height: AppSpacing.md),
+      ],
+      if (_photoPermissionIssue case final issue?) ...[
+        _PermissionErrorBanner(
+          key: const ValueKey('input-method-permission-error'),
+          issue: issue,
+          onOpenSettings:
+              issue.status == PhotoPermissionStatus.permanentlyDenied
+              ? () => _openPermissionSettings(issue.kind)
+              : null,
+        ),
+        const SizedBox(height: AppSpacing.md),
+      ],
+      Container(
+        key: const ValueKey('camera-guidance-tips'),
+        padding: const EdgeInsets.all(AppSpacing.md),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          border: Border.all(color: AppColors.outline),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            for (final (index, (icon, text))
+                in _cameraGuidanceTips.indexed) ...[
+              if (index > 0) const SizedBox(height: AppSpacing.md),
+              _CameraGuidanceTip(icon: icon, text: text),
+            ],
+          ],
+        ),
+      ),
+      const SizedBox(height: AppSpacing.lg),
+      AppButton(
+        key: const ValueKey('camera-guidance-capture'),
+        label: '촬영하기',
+        variant: AppButtonVariant.child,
+        isLoading: _phase == _InputPhase.picking,
+        onPressed: _busy ? null : () => unawaited(_captureFromCamera()),
+      ),
+      const SizedBox(height: AppSpacing.sm),
+      AppButton(
+        key: const ValueKey('camera-guidance-back'),
+        label: '돌아가기',
+        variant: AppButtonVariant.secondary,
+        onPressed: _busy ? null : _backToPhotoSource,
+      ),
+    ],
+  );
+
   Widget _buildPhotoSource(BuildContext context) => Column(
     mainAxisSize: MainAxisSize.min,
     children: [
@@ -1070,7 +1183,9 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
                   description: '지금 바로 촬영해요',
                   color: AppColors.tangerine,
                   isLoading: _busy,
-                  onTap: _busy ? null : _openGuidedCamera,
+                  // 카메라는 촬영 도움말을 먼저 보여준다 — 여기서는 단계만
+                  // 바꾸고 picker·권한·세션을 건드리지 않는다.
+                  onTap: _busy ? null : _showCameraGuidance,
                 ),
               ),
               SizedBox(
@@ -1344,6 +1459,26 @@ class _ChoiceCard extends StatelessWidget {
 }
 
 /// 오류를 색상만으로 구분하지 않도록 아이콘+문구를 함께 보여주는 배너.
+/// 촬영 도움말 한 줄. 아이콘은 장식이라 낭독에서 제외하고 문구만 읽게 한다.
+class _CameraGuidanceTip extends StatelessWidget {
+  const _CameraGuidanceTip({required this.icon, required this.text});
+
+  final IconData icon;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      ExcludeSemantics(
+        child: Icon(icon, size: AppIconSize.lg, color: AppColors.tangerine),
+      ),
+      const SizedBox(width: AppSpacing.sm),
+      Expanded(child: Text(text, style: AppTypography.body)),
+    ],
+  );
+}
+
 class _ErrorBanner extends StatelessWidget {
   const _ErrorBanner({required this.icon, required this.message, super.key});
 
