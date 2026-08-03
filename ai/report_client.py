@@ -156,24 +156,54 @@ def _emotion_source(req: contracts.ObservationGenerationRequest) -> str:
 
 
 def _fmt_minutes(ms: int | None) -> str | None:
-    """밀리초를 '약 N분' 문구로. None이면 None."""
+    """밀리초를 '약 N분' 문구로. None이면 None.
+
+    분 단위로 반올림한다 — 0.1분(6초) 자리까지 적으면 집계가 갖지 않은 정밀도를
+    관찰 사실처럼 보이게 한다(구 구현의 "약 10.0분"). 1분 미만은 반올림하면 "약 0분"이 되어
+    아예 안 그린 것처럼 읽히므로 따로 적는다.
+    """
     if ms is None:
         return None
-    return f"약 {round(ms / 60000, 1)}분"
+    if ms < 60_000:
+        return "1분 미만"
+    return f"약 {round(ms / 60000)}분"
 
 
-def _format_behavior(behavior: contracts.BehaviorMetrics | None) -> str:
+# 블록 머리에 붙는 '이 수치가 무엇의 값인가' 단서 (S15P11B209-838).
+#   HTP는 BE가 집·나무·사람 세 단계를 합산해 보낸다 — 한 장 기준으로 읽히면 안 된다.
+#   truncated는 배치 상한에 걸려 세션 앞부분만 집계한 값이라 활동 전체로 읽히면 안 된다.
+_SCOPE_NOTE_HTP = "집·나무·사람 세 장을 합친 활동 전체 기준"
+_SCOPE_NOTE_TRUNCATED = "저장된 캔버스 입력 구간까지만 집계 — 활동 전체가 아닐 수 있어요"
+
+
+def _format_behavior(
+    behavior: contracts.BehaviorMetrics | None, *, is_htp: bool = False
+) -> str:
     """형식적 분석 지표를 프롬프트 [형식적 분석] 블록으로. 없으면 빈 문자열.
 
-    None인 항목은 줄 자체를 넣지 않는다 — 0("0회")과 구분하기 위해서다. 집계하지 못한 값을
+    None인 항목은 줄 자체를 넣지 않는다 — 0("0번")과 구분하기 위해서다. 집계하지 못한 값을
     0으로 적으면 "멈춤 없이 그렸다"는 관찰 사실로 읽힌다(BE StrokeBehaviorSummary 와 같은 원칙).
 
-    ⚠️ 표현 다듬기(truncated 부분 집계 표기·추정값 완화·필압 줄 처리)는 S15P11B209-838 범위다.
-       이 이슈(836)는 계약 모델 전환과 배선까지만 한다.
+    필압은 강약 값(average_pressure)이 있을 때만 적는다. pressure_available 은 기기가 필압을
+    측정할 수 있는지일 뿐 아이에 대한 관찰이 아니라서, "측정됨"·"측정 불가(미지원 기기)"를
+    적으면 관찰 내용이 0인 줄이 해석 재료처럼 놓인다. BE도 이 필드를 감정 근거로 쓰지 말라고
+    명시했다. 현재 average_pressure 는 항상 None이라 실질적으로 필압 줄은 나오지 않는다.
+
+    tool_change_count·color_change_count 는 계약으로 받되 싣지 않는다 — "색을 5번 바꿨다"의
+    관찰 의미가 불분명하고, 블록 항목이 늘수록 프롬프트 규칙끼리 충돌해 왔다(788·808).
+    실제 값 분포를 본 뒤 후속에서 판단한다.
     """
     if behavior is None:
         return ""
-    lines = ["[형식적 분석]"]
+
+    notes = []
+    if is_htp:
+        notes.append(_SCOPE_NOTE_HTP)
+    if behavior.truncated:
+        notes.append(_SCOPE_NOTE_TRUNCATED)
+    header = "[형식적 분석]" + (f" ({' / '.join(notes)})" if notes else "")
+
+    lines = [header]
     total = _fmt_minutes(behavior.drawing_duration_ms)
     active = _fmt_minutes(behavior.active_drawing_ms)
     if total:
@@ -181,18 +211,22 @@ def _format_behavior(behavior: contracts.BehaviorMetrics | None) -> str:
     if active:
         lines.append(f"- 실제 그린 시간: {active}")
     if behavior.pause_count is not None:
-        lines.append(f"- 멈춤 횟수: {behavior.pause_count}회")
+        # 배치 경계로 세는 추정값이라 상한도 하한도 아니다(BE javadoc) — 단정 표기를 피한다.
+        # 0에 "약"을 붙이면 문장이 이상해지므로 그때만 숫자를 그대로 쓴다.
+        count = (
+            "0번" if behavior.pause_count == 0 else f"약 {behavior.pause_count}번"
+        )
+        lines.append(f"- 멈춤 횟수: {count} (추정값)")
     if behavior.erase_count is not None:
         lines.append(f"- 지우기 횟수: {behavior.erase_count}회")
     if behavior.undo_count is not None:
         lines.append(f"- 되돌리기 횟수: {behavior.undo_count}회")
-    if behavior.pressure_available:
-        if behavior.average_pressure is not None:
-            lines.append(f"- 필압: 평균 {behavior.average_pressure:.2f} (0~1)")
-        else:
-            lines.append("- 필압: 측정됨")
-    else:
-        lines.append("- 필압: 측정 불가(미지원 기기)")
+    if behavior.average_pressure is not None:
+        lines.append(f"- 필압: 평균 {behavior.average_pressure:.2f} (0~1)")
+
+    # 머리말만 남았다면 적을 관찰이 없다는 뜻 — 빈 블록을 실으면 모델이 채우려 든다.
+    if len(lines) == 1:
+        return ""
     return "\n".join(lines) + "\n\n"
 
 
@@ -265,7 +299,7 @@ def _format_activity(
         observation_block = f"[그림 관찰 서술]\n{description}\n\n"
     return (
         f"{observation_block}"
-        f"{_format_behavior(behavior)}"
+        f"{_format_behavior(behavior, is_htp=_is_htp(req))}"
         f"{_format_rag_block(rag_chunks or [])}"
         "[활동 데이터]\n"
         f"- 질문 난이도: {req.question_difficulty or '정보 없음'}\n"
