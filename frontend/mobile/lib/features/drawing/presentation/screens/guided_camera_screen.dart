@@ -3,18 +3,134 @@ import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
-import 'package:permission_handler/permission_handler.dart';
 
 import '../../../../design_system/design_system.dart';
+import '../../data/device_photo_permission_service.dart';
+import '../../domain/photo_permission_service.dart';
 import '../../domain/photo_picker_adapter.dart';
 
 const _tutorialStorageKey = 'htp_camera_tutorial_hidden';
 
+Future<List<CameraDescription>> _availablePluginCameras() => availableCameras();
+
+abstract interface class GuidedCameraController {
+  bool get isInitialized;
+  double get aspectRatio;
+
+  Widget buildPreview();
+  Future<void> initialize();
+  Future<void> dispose();
+  Future<void> setFlashMode(FlashMode mode);
+  Future<void> setFocusPoint(Offset point);
+  Future<void> setExposurePoint(Offset point);
+  Future<PickedPhoto> takePicture();
+}
+
+abstract interface class GuidedCameraPlatform {
+  Future<List<CameraDescription>> availableCameras();
+  GuidedCameraController createController(CameraDescription description);
+}
+
+abstract interface class GuidedCameraTutorialStore {
+  Future<bool> isHidden();
+  Future<void> hide();
+}
+
+final class _PluginGuidedCameraPlatform implements GuidedCameraPlatform {
+  const _PluginGuidedCameraPlatform();
+
+  @override
+  Future<List<CameraDescription>> availableCameras() =>
+      _availablePluginCameras();
+
+  @override
+  GuidedCameraController createController(CameraDescription description) =>
+      _PluginGuidedCameraController(description);
+}
+
+final class _PluginGuidedCameraController implements GuidedCameraController {
+  _PluginGuidedCameraController(CameraDescription description)
+    : _controller = CameraController(
+        description,
+        ResolutionPreset.high,
+        enableAudio: false,
+        imageFormatGroup: ImageFormatGroup.jpeg,
+      );
+
+  final CameraController _controller;
+
+  @override
+  bool get isInitialized => _controller.value.isInitialized;
+  @override
+  double get aspectRatio => _controller.value.aspectRatio;
+  @override
+  Widget buildPreview() => CameraPreview(_controller);
+  @override
+  Future<void> initialize() => _controller.initialize();
+  @override
+  Future<void> dispose() => _controller.dispose();
+  @override
+  Future<void> setFlashMode(FlashMode mode) => _controller.setFlashMode(mode);
+  @override
+  Future<void> setFocusPoint(Offset point) => _controller.setFocusPoint(point);
+  @override
+  Future<void> setExposurePoint(Offset point) =>
+      _controller.setExposurePoint(point);
+  @override
+  Future<PickedPhoto> takePicture() async {
+    final file = await _controller.takePicture();
+    return PickedPhoto(
+      bytes: await file.readAsBytes(),
+      fileName: file.name,
+      mimeType: 'image/jpeg',
+    );
+  }
+}
+
+final class _SecureGuidedCameraTutorialStore
+    implements GuidedCameraTutorialStore {
+  const _SecureGuidedCameraTutorialStore();
+
+  static const _storage = FlutterSecureStorage();
+
+  @override
+  Future<bool> isHidden() async =>
+      await _storage.read(key: _tutorialStorageKey) == 'true';
+  @override
+  Future<void> hide() =>
+      _storage.write(key: _tutorialStorageKey, value: 'true');
+}
+
+enum _CameraFailureKind {
+  permissionDenied,
+  permissionPermanentlyDenied,
+  permissionRestricted,
+  noCamera,
+  cameraInUse,
+  initialization,
+}
+
+final class _CameraFailure {
+  const _CameraFailure(this.kind, this.message);
+
+  final _CameraFailureKind kind;
+  final String message;
+}
+
 /// 종이 그림이 프레임 안에 들어오도록 안내하는 HTP 전용 인앱 카메라.
 class GuidedCameraScreen extends StatefulWidget {
-  const GuidedCameraScreen({required this.drawingSubject, super.key});
+  const GuidedCameraScreen({
+    required this.drawingSubject,
+    this.cameraPlatform,
+    this.permissionService,
+    this.tutorialStore,
+    super.key,
+  });
 
   final String drawingSubject;
+  final GuidedCameraPlatform? cameraPlatform;
+  final PhotoPermissionService? permissionService;
+  final GuidedCameraTutorialStore? tutorialStore;
 
   @override
   State<GuidedCameraScreen> createState() => _GuidedCameraScreenState();
@@ -22,14 +138,27 @@ class GuidedCameraScreen extends StatefulWidget {
 
 class _GuidedCameraScreenState extends State<GuidedCameraScreen>
     with WidgetsBindingObserver {
-  final FlutterSecureStorage _storage = const FlutterSecureStorage();
-  CameraController? _controller;
-  Object? _initializationError;
+  late final GuidedCameraPlatform _cameraPlatform =
+      widget.cameraPlatform ?? const _PluginGuidedCameraPlatform();
+  late final PhotoPermissionService _permissionService =
+      widget.permissionService ?? const DevicePhotoPermissionService();
+  late final GuidedCameraTutorialStore _tutorialStore =
+      widget.tutorialStore ?? const _SecureGuidedCameraTutorialStore();
+
+  GuidedCameraController? _controller;
+  _CameraFailure? _failure;
   bool _initializing = true;
   bool _capturing = false;
   bool _tutorialVisible = false;
   bool _hideTutorial = false;
+  bool _openingSettings = false;
+  bool _foreground = true;
+  bool _detached = false;
+  bool _disposed = false;
   FlashMode _flashMode = FlashMode.off;
+  int _generation = 0;
+  int? _requestedInitializationGeneration;
+  Future<void> _operations = Future<void>.value();
 
   String get _subjectLabel => switch (widget.drawingSubject.toUpperCase()) {
     'TREE' => '나무',
@@ -41,81 +170,290 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    unawaited(_initialize());
+    final generation = _generation;
+    _requestedInitializationGeneration = generation;
+    _enqueue(
+      () => _initializeGeneration(
+        generation,
+        requestPermission: true,
+        showTutorial: true,
+      ),
+    );
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) return;
-    if (state == AppLifecycleState.inactive) {
-      unawaited(controller.dispose());
-      _controller = null;
-    } else if (state == AppLifecycleState.resumed) {
-      unawaited(_initialize(showTutorial: false));
+    if (_disposed || _detached) return;
+    switch (state) {
+      case AppLifecycleState.resumed:
+        if (_foreground) return;
+        _foreground = true;
+        _generation += 1;
+        _scheduleInitialization(requestPermission: false, showTutorial: false);
+        return;
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.paused:
+      case AppLifecycleState.hidden:
+        _releaseForBackground(detached: false);
+        return;
+      case AppLifecycleState.detached:
+        _releaseForBackground(detached: true);
+        return;
     }
   }
 
-  Future<void> _initialize({bool showTutorial = true}) async {
-    if (mounted) {
-      setState(() {
-        _initializing = true;
-        _initializationError = null;
-      });
+  static Future<void> _runAfter(
+    Future<void> previous,
+    Future<void> Function() operation,
+  ) async {
+    try {
+      await previous;
+    } on Object {
+      // 앞선 실패가 다음 lifecycle 작업을 막지 않게 한다.
     }
     try {
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) throw StateError('No camera is available.');
+      await operation();
+    } on Object {
+      // 개별 작업은 화면 상태로 변환하며 dispose 실패는 안전하게 무시한다.
+    }
+  }
+
+  void _enqueue(Future<void> Function() operation) {
+    final previous = _operations;
+    _operations = _runAfter(previous, operation);
+  }
+
+  bool _isCurrent(int generation) =>
+      mounted &&
+      !_disposed &&
+      !_detached &&
+      _foreground &&
+      generation == _generation;
+
+  bool _isControllerCurrent(
+    GuidedCameraController controller,
+    int generation,
+  ) => _isCurrent(generation) && identical(_controller, controller);
+
+  void _scheduleInitialization({
+    required bool requestPermission,
+    required bool showTutorial,
+  }) {
+    if (!mounted || _disposed || _detached || !_foreground) return;
+    final generation = _generation;
+    if (_requestedInitializationGeneration == generation) return;
+    _requestedInitializationGeneration = generation;
+    setState(() {
+      _initializing = true;
+      _failure = null;
+    });
+    _enqueue(
+      () => _initializeGeneration(
+        generation,
+        requestPermission: requestPermission,
+        showTutorial: showTutorial,
+      ),
+    );
+  }
+
+  void _retry({bool requestPermission = false}) {
+    if (_initializing || !_foreground || _detached || _disposed) return;
+    _generation += 1;
+    _scheduleInitialization(
+      requestPermission: requestPermission,
+      showTutorial: false,
+    );
+  }
+
+  Future<void> _initializeGeneration(
+    int generation, {
+    required bool requestPermission,
+    required bool showTutorial,
+  }) async {
+    GuidedCameraController? candidate;
+    try {
+      var permission = await _permissionService.status(
+        PhotoPermissionKind.camera,
+      );
+      if (!_isCurrent(generation)) return;
+      if (permission == PhotoPermissionStatus.denied && requestPermission) {
+        permission = await _permissionService.request(
+          PhotoPermissionKind.camera,
+        );
+      }
+      if (!_isCurrent(generation)) return;
+      if (permission != PhotoPermissionStatus.granted) {
+        _showFailure(_permissionFailure(permission), generation);
+        return;
+      }
+
+      final cameras = await _cameraPlatform.availableCameras();
+      if (!_isCurrent(generation)) return;
+      if (cameras.isEmpty) {
+        _showFailure(
+          const _CameraFailure(
+            _CameraFailureKind.noCamera,
+            '이 기기에서 사용할 수 있는 카메라를 찾지 못했어요.',
+          ),
+          generation,
+        );
+        return;
+      }
       final rearCamera = cameras.firstWhere(
         (camera) => camera.lensDirection == CameraLensDirection.back,
         orElse: () => cameras.first,
       );
-      final controller = CameraController(
-        rearCamera,
-        ResolutionPreset.high,
-        enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
-      );
-      await controller.initialize();
-      await controller.setFlashMode(_flashMode);
-      if (!mounted) {
-        await controller.dispose();
+      candidate = _cameraPlatform.createController(rearCamera);
+      await candidate.initialize();
+      if (!_isCurrent(generation)) {
+        await _disposeSafely(candidate);
+        candidate = null;
         return;
       }
-      await _controller?.dispose();
-      final hidden = showTutorial
-          ? await _storage.read(key: _tutorialStorageKey) == 'true'
-          : true;
+      await candidate.setFlashMode(_flashMode);
+      if (!_isCurrent(generation)) {
+        await _disposeSafely(candidate);
+        candidate = null;
+        return;
+      }
+      final hidden = showTutorial ? await _tutorialStore.isHidden() : true;
+      if (!_isCurrent(generation)) {
+        await _disposeSafely(candidate);
+        candidate = null;
+        return;
+      }
+      final previous = _controller;
+      final initialized = candidate;
+      candidate = null;
       setState(() {
-        _controller = controller;
+        _controller = initialized;
         _initializing = false;
+        _failure = null;
         _tutorialVisible = !hidden;
       });
+      if (previous != null && !identical(previous, initialized)) {
+        await _disposeSafely(previous);
+      }
     } on Object catch (error) {
-      if (!mounted) return;
+      if (candidate != null) await _disposeSafely(candidate);
+      if (_isCurrent(generation)) {
+        _showFailure(_failureFor(error), generation);
+      }
+    } finally {
+      if (_requestedInitializationGeneration == generation) {
+        _requestedInitializationGeneration = null;
+      }
+    }
+  }
+
+  _CameraFailure _permissionFailure(PhotoPermissionStatus status) =>
+      switch (status) {
+        PhotoPermissionStatus.granted => const _CameraFailure(
+          _CameraFailureKind.initialization,
+          '카메라를 준비하지 못했어요. 잠시 후 다시 시도해 주세요.',
+        ),
+        PhotoPermissionStatus.denied => const _CameraFailure(
+          _CameraFailureKind.permissionDenied,
+          '사진을 찍으려면 카메라 권한이 필요해요.',
+        ),
+        PhotoPermissionStatus.permanentlyDenied => const _CameraFailure(
+          _CameraFailureKind.permissionPermanentlyDenied,
+          '기기 설정에서 카메라 권한을 허용해 주세요.',
+        ),
+        PhotoPermissionStatus.restricted => const _CameraFailure(
+          _CameraFailureKind.permissionRestricted,
+          '카메라 사용이 기기 설정 또는 보호자 정책으로 제한되어 있어요.',
+        ),
+      };
+
+  _CameraFailure _failureFor(Object error) {
+    if (error is CameraException) {
+      final code = error.code.toLowerCase();
+      if (code.contains('restricted')) {
+        return _permissionFailure(PhotoPermissionStatus.restricted);
+      }
+      if (code.contains('withoutprompt') || code.contains('permanent')) {
+        return _permissionFailure(PhotoPermissionStatus.permanentlyDenied);
+      }
+      if (code.contains('denied')) {
+        return _permissionFailure(PhotoPermissionStatus.denied);
+      }
+      if (code.contains('inuse') ||
+          code.contains('in_use') ||
+          code.contains('busy') ||
+          code.contains('already')) {
+        return const _CameraFailure(
+          _CameraFailureKind.cameraInUse,
+          '다른 앱에서 카메라를 사용 중이에요. 잠시 후 다시 시도해 주세요.',
+        );
+      }
+    }
+    return const _CameraFailure(
+      _CameraFailureKind.initialization,
+      '카메라를 준비하지 못했어요. 잠시 후 다시 시도해 주세요.',
+    );
+  }
+
+  void _showFailure(_CameraFailure failure, int generation) {
+    if (!_isCurrent(generation)) return;
+    setState(() {
+      _controller = null;
+      _failure = failure;
+      _initializing = false;
+      _tutorialVisible = false;
+    });
+  }
+
+  void _releaseForBackground({required bool detached}) {
+    if (_detached || (!_foreground && !detached)) return;
+    _foreground = false;
+    _detached = detached;
+    _generation += 1;
+    _requestedInitializationGeneration = null;
+    final controller = _controller;
+    _controller = null;
+    if (mounted) {
       setState(() {
-        _initializationError = error;
         _initializing = false;
+        _capturing = false;
+        _tutorialVisible = false;
       });
+    }
+    if (controller != null) {
+      _enqueue(() => _disposeSafely(controller));
+    }
+  }
+
+  Future<void> _disposeSafely(GuidedCameraController controller) async {
+    try {
+      await controller.dispose();
+    } on Object {
+      // lifecycle 정리 실패가 이후 재초기화를 막지 않게 한다.
     }
   }
 
   Future<void> _closeTutorial() async {
+    final generation = _generation;
     if (_hideTutorial) {
-      await _storage.write(key: _tutorialStorageKey, value: 'true');
+      await _tutorialStore.hide();
     }
-    if (mounted) setState(() => _tutorialVisible = false);
+    if (_isCurrent(generation)) {
+      setState(() => _tutorialVisible = false);
+    }
   }
 
   Future<void> _toggleFlash() async {
     final controller = _controller;
     if (controller == null || _capturing) return;
+    final generation = _generation;
     final next = _flashMode == FlashMode.off ? FlashMode.torch : FlashMode.off;
     try {
       await controller.setFlashMode(next);
-      if (mounted) setState(() => _flashMode = next);
+      if (_isControllerCurrent(controller, generation)) {
+        setState(() => _flashMode = next);
+      }
     } on Object {
-      if (mounted) {
+      if (mounted && _isControllerCurrent(controller, generation)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('이 기기에서는 플래시를 사용할 수 없어요.')),
         );
@@ -125,40 +463,39 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen>
 
   Future<void> _capture() async {
     final controller = _controller;
-    if (controller == null || !controller.value.isInitialized || _capturing) {
+    if (controller == null || !controller.isInitialized || _capturing) {
       return;
     }
+    final generation = _generation;
     setState(() => _capturing = true);
     try {
-      final file = await controller.takePicture();
-      final bytes = await file.readAsBytes();
-      if (!mounted) return;
-      Navigator.of(context).pop(
-        PickedPhoto(bytes: bytes, fileName: file.name, mimeType: 'image/jpeg'),
-      );
+      final photo = await controller.takePicture();
+      if (!mounted || !_isControllerCurrent(controller, generation)) return;
+      Navigator.of(context).pop(photo);
     } on Object {
-      if (mounted) {
+      if (mounted && _isControllerCurrent(controller, generation)) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('사진을 찍지 못했어요. 잠시 후 다시 시도해 주세요.')),
         );
       }
     } finally {
-      if (mounted) setState(() => _capturing = false);
+      if (_isControllerCurrent(controller, generation)) {
+        setState(() => _capturing = false);
+      }
     }
   }
 
-  Future<void> _focus(
-    TapDownDetails details,
-    BoxConstraints constraints,
-  ) async {
+  Future<void> _focus(TapDownDetails details, Size previewSize) async {
     final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) return;
+    if (controller == null || !controller.isInitialized) return;
+    final generation = _generation;
     final point = Offset(
-      (details.localPosition.dx / constraints.maxWidth).clamp(0, 1),
-      (details.localPosition.dy / constraints.maxHeight).clamp(0, 1),
+      (details.localPosition.dx / previewSize.width).clamp(0, 1),
+      (details.localPosition.dy / previewSize.height).clamp(0, 1),
     );
     try {
       await controller.setFocusPoint(point);
+      if (!_isControllerCurrent(controller, generation)) return;
       await controller.setExposurePoint(point);
     } on Object {
       // 일부 기기는 초점 좌표 설정을 지원하지 않아도 촬영은 가능하다.
@@ -168,7 +505,16 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    unawaited(_controller?.dispose());
+    _disposed = true;
+    _detached = true;
+    _foreground = false;
+    _generation += 1;
+    _requestedInitializationGeneration = null;
+    final controller = _controller;
+    _controller = null;
+    if (controller != null) {
+      _enqueue(() => _disposeSafely(controller));
+    }
     super.dispose();
   }
 
@@ -212,59 +558,126 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen>
         child: CircularProgressIndicator(color: AppColors.sunshine),
       );
     }
-    if (_initializationError != null || _controller == null) {
-      return _CameraError(onRetry: _initialize, onSettings: openAppSettings);
+    if (_failure case final failure?) {
+      return _CameraError(
+        failure: failure,
+        openingSettings: _openingSettings,
+        onRetry: () => _retry(
+          requestPermission:
+              failure.kind == _CameraFailureKind.permissionDenied,
+        ),
+        onSettings:
+            failure.kind == _CameraFailureKind.permissionPermanentlyDenied
+            ? _openPermissionSettings
+            : null,
+      );
+    }
+    if (_controller == null) {
+      return _CameraError(
+        failure: const _CameraFailure(
+          _CameraFailureKind.initialization,
+          '카메라를 준비하지 못했어요. 잠시 후 다시 시도해 주세요.',
+        ),
+        openingSettings: false,
+        onRetry: () => _retry(),
+      );
     }
     final controller = _controller!;
     return Padding(
       padding: const EdgeInsets.fromLTRB(24, 8, 24, 0),
       child: LayoutBuilder(
-        builder: (context, constraints) => GestureDetector(
-          onTapDown: (details) => _focus(details, constraints),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                ColoredBox(
-                  color: const Color(0xFF383E47),
-                  child: Center(
-                    child: AspectRatio(
-                      aspectRatio: controller.value.aspectRatio,
-                      child: CameraPreview(controller),
-                    ),
+        builder: (context, constraints) {
+          final previewSize = _containedPreviewSize(
+            constraints.biggest,
+            controller.aspectRatio,
+          );
+          return Center(
+            child: SizedBox.fromSize(
+              key: const ValueKey('guided-camera-preview-space'),
+              size: previewSize,
+              child: GestureDetector(
+                key: const ValueKey('guided-camera-focus-area'),
+                onTapDown: (details) => _focus(details, previewSize),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(20),
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      ColoredBox(
+                        color: const Color(0xFF383E47),
+                        child: KeyedSubtree(
+                          key: const ValueKey('guided-camera-preview'),
+                          child: controller.buildPreview(),
+                        ),
+                      ),
+                      const KeyedSubtree(
+                        key: ValueKey('guided-camera-guide'),
+                        child: _PaperGuideFrame(),
+                      ),
+                      Positioned(
+                        top: 14,
+                        right: 14,
+                        child: _HtpStepPanel(
+                          currentSubject: widget.drawingSubject,
+                        ),
+                      ),
+                      Align(
+                        alignment: Alignment.bottomCenter,
+                        child: Container(
+                          margin: const EdgeInsets.all(12),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 9,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.58),
+                            borderRadius: BorderRadius.circular(20),
+                          ),
+                          child: const Text(
+                            '그림 전체가 네모 안에 들어오게 해주세요',
+                            style: TextStyle(color: Colors.white, fontSize: 14),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const _PaperGuideFrame(),
-                Positioned(
-                  top: 14,
-                  right: 14,
-                  child: _HtpStepPanel(currentSubject: widget.drawingSubject),
-                ),
-                Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Container(
-                    margin: const EdgeInsets.all(12),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 9,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.58),
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: const Text(
-                      '그림 전체가 네모 안에 들어오게 해주세요',
-                      style: TextStyle(color: Colors.white, fontSize: 14),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
+  }
+
+  Size _containedPreviewSize(Size available, double aspectRatio) {
+    final safeAspectRatio = aspectRatio.isFinite && aspectRatio > 0
+        ? aspectRatio
+        : 1.0;
+    if (available.width / available.height > safeAspectRatio) {
+      return Size(available.height * safeAspectRatio, available.height);
+    }
+    return Size(available.width, available.width / safeAspectRatio);
+  }
+
+  Future<void> _openPermissionSettings() async {
+    if (_openingSettings) return;
+    setState(() => _openingSettings = true);
+    var opened = false;
+    try {
+      opened = await _permissionService.openSettings();
+    } on Object {
+      opened = false;
+    }
+    if (!mounted || _disposed) return;
+    setState(() => _openingSettings = false);
+    if (!opened) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('설정 화면을 열지 못했어요. 기기 설정에서 카메라 권한을 확인해 주세요.'),
+        ),
+      );
+    }
   }
 }
 
@@ -287,6 +700,7 @@ class _CameraHeader extends StatelessWidget {
     child: Row(
       children: [
         TextButton.icon(
+          key: const ValueKey('guided-camera-close'),
           onPressed: onClose,
           icon: const Icon(Icons.close_rounded),
           label: const Text('닫기'),
@@ -347,6 +761,7 @@ class _CameraControls extends StatelessWidget {
           ),
         ),
         Semantics(
+          key: const ValueKey('guided-camera-capture'),
           button: true,
           label: capturing ? '사진 촬영 중' : '사진 촬영',
           child: InkWell(
@@ -641,15 +1056,39 @@ class _TutorialItem extends StatelessWidget {
 }
 
 class _CameraError extends StatelessWidget {
-  const _CameraError({required this.onRetry, required this.onSettings});
-  final Future<void> Function() onRetry;
-  final Future<bool> Function() onSettings;
+  const _CameraError({
+    required this.failure,
+    required this.openingSettings,
+    required this.onRetry,
+    this.onSettings,
+  });
+
+  final _CameraFailure failure;
+  final bool openingSettings;
+  final VoidCallback onRetry;
+  final Future<void> Function()? onSettings;
+
+  String get _title => switch (failure.kind) {
+    _CameraFailureKind.permissionDenied ||
+    _CameraFailureKind.permissionPermanentlyDenied => '카메라 권한이 필요해요',
+    _CameraFailureKind.permissionRestricted => '카메라 사용이 제한되어 있어요',
+    _CameraFailureKind.noCamera => '카메라를 찾지 못했어요',
+    _CameraFailureKind.cameraInUse => '카메라를 사용 중이에요',
+    _CameraFailureKind.initialization => '카메라를 열 수 없어요',
+  };
+
+  String get _retryLabel => failure.kind == _CameraFailureKind.permissionDenied
+      ? '권한 다시 요청'
+      : failure.kind == _CameraFailureKind.permissionRestricted
+      ? '다시 확인'
+      : '다시 시도';
 
   @override
   Widget build(BuildContext context) => Center(
     child: ConstrainedBox(
       constraints: const BoxConstraints(maxWidth: 460),
       child: Padding(
+        key: const ValueKey('guided-camera-error'),
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -660,17 +1099,17 @@ class _CameraError extends StatelessWidget {
               size: 56,
             ),
             const SizedBox(height: 16),
-            const Text(
-              '카메라를 열 수 없어요',
-              style: TextStyle(
+            Text(
+              _title,
+              style: const TextStyle(
                 color: Colors.white,
                 fontSize: 22,
                 fontWeight: FontWeight.w800,
               ),
             ),
             const SizedBox(height: 8),
-            const Text(
-              '카메라 권한을 확인하거나 잠시 후 다시 시도해 주세요.',
+            Text(
+              failure.message,
               textAlign: TextAlign.center,
               style: TextStyle(color: Colors.white70),
             ),
@@ -678,8 +1117,19 @@ class _CameraError extends StatelessWidget {
             Wrap(
               spacing: 12,
               children: [
-                OutlinedButton(onPressed: onRetry, child: const Text('다시 시도')),
-                FilledButton(onPressed: onSettings, child: const Text('설정 열기')),
+                if (failure.kind !=
+                    _CameraFailureKind.permissionPermanentlyDenied)
+                  OutlinedButton(
+                    key: const ValueKey('guided-camera-retry'),
+                    onPressed: onRetry,
+                    child: Text(_retryLabel),
+                  ),
+                if (onSettings case final openSettings?)
+                  FilledButton(
+                    key: const ValueKey('guided-camera-open-settings'),
+                    onPressed: openingSettings ? null : openSettings,
+                    child: Text(openingSettings ? '설정 여는 중' : '설정 열기'),
+                  ),
               ],
             ),
           ],
