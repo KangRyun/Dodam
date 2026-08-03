@@ -171,6 +171,76 @@ void main() {
     await tester.pump();
     expect(find.text('사람 3/3'), findsOneWidget);
   });
+
+  testWidgets('끝까지 스크롤하면 다음 페이지를 이어붙인다', (tester) async {
+    final repository = _PagingActivityRepository(
+      pages: [_pageItems(200, 12), _pageItems(300, 3)],
+    );
+    await _openHistoryPaging(
+      tester,
+      repository,
+      viewport: const Size(1200, 800),
+    );
+
+    // 첫 페이지만 불러온 상태.
+    expect(repository.requestedPages, [0]);
+    expect(find.byKey(const ValueKey('activity-200')), findsOneWidget);
+
+    // 목록 끝으로 스크롤하면 다음 페이지(page 1)를 이어서 불러온다.
+    await tester.drag(
+      find.byKey(const ValueKey('activity-history-list')),
+      const Offset(0, -4000),
+    );
+    await tester.pumpAndSettle();
+
+    expect(repository.requestedPages, [0, 1]);
+  });
+
+  testWidgets('다음 페이지가 없으면 스크롤해도 더 부르지 않는다', (tester) async {
+    final repository = _PagingActivityRepository(pages: [_pageItems(200, 6)]);
+    await _openHistoryPaging(
+      tester,
+      repository,
+      viewport: const Size(1200, 800),
+    );
+
+    expect(repository.requestedPages, [0]);
+
+    await tester.drag(
+      find.byKey(const ValueKey('activity-history-list')),
+      const Offset(0, -4000),
+    );
+    await tester.pumpAndSettle();
+
+    // hasNext=false이므로 page 1을 요청하지 않는다.
+    expect(repository.requestedPages, [0]);
+  });
+
+  testWidgets('다음 페이지 로드 실패 시 재시도 버튼으로 다시 불러온다', (tester) async {
+    final repository = _PagingActivityRepository(
+      pages: [_pageItems(200, 2), _pageItems(300, 2)],
+      loadMoreError: StateError('network'),
+    );
+    // 첫 페이지(2개)가 화면을 못 채워 다음 페이지를 자동으로 당기다 실패한다.
+    await _openHistoryPaging(
+      tester,
+      repository,
+      viewport: const Size(1200, 800),
+    );
+
+    expect(repository.requestedPages, [0, 1]);
+    expect(
+      find.byKey(const ValueKey('activity-history-load-more-error')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('activity-300')), findsNothing);
+
+    repository.loadMoreError = null;
+    await tester.tap(find.text('더 불러오기'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('activity-300')), findsOneWidget);
+  });
 }
 
 /// 보호자 홈을 거쳐 활동 이력으로 들어간다. 홈에서의 이동 자체를 보는
@@ -254,6 +324,81 @@ final class _ActivityRepository implements ActivityRepository {
     lastFilter = filter;
     if (error case final error?) throw error;
     return pending?.future ?? _page(activities);
+  }
+
+  @override
+  Future<void> deleteActivity(int activityId) async {}
+
+  @override
+  Future<ActivityDetailDto> getActivity(int activityId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<ActivityConversationMessageDto>> getConversationMessages(
+    int conversationId,
+  ) => throw UnimplementedError();
+
+  @override
+  Future<Uint8List> downloadImage(String url) =>
+      throw StateError('image fetch failed');
+}
+
+/// 활동 이력 화면을 단독으로 띄우되, 뷰포트를 지정해 레이아웃(좁은/넓은)을
+/// 고정한다. 넓은 뷰포트(>=760)에선 목록이 자체 스크롤러가 되어 무한 스크롤
+/// 검증이 단순해진다.
+Future<void> _openHistoryPaging(
+  WidgetTester tester,
+  ActivityRepository repository, {
+  required Size viewport,
+}) async {
+  tester.view.physicalSize = viewport;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(
+    DodamApp(
+      childRepository: const _ChildRepository(),
+      activityRepository: repository,
+      initialRoute: AppRoutes.activityHistory,
+    ),
+  );
+  await tester.pumpAndSettle();
+}
+
+List<ActivitySummaryDto> _pageItems(int startId, int count) => [
+  for (var i = 0; i < count; i++)
+    _activity(startId + i, 'A${startId + i}', 'FREE_DRAWING', '자유화'),
+];
+
+/// 페이지 단위로 응답하는 저장소. `filter.page`에 해당하는 페이지를 돌려주고,
+/// 마지막 페이지가 아니면 `hasNext=true`를 준다. [loadMoreError]가 있으면
+/// 2페이지 이후(page>=1) 요청에서 던진다.
+final class _PagingActivityRepository implements ActivityRepository {
+  _PagingActivityRepository({required this.pages, this.loadMoreError});
+
+  final List<List<ActivitySummaryDto>> pages;
+  Object? loadMoreError;
+  final List<int> requestedPages = [];
+
+  @override
+  Future<ApiPage<ActivitySummaryDto>> getActivities(
+    int childId, {
+    ActivityFilterDto filter = const ActivityFilterDto(),
+  }) async {
+    requestedPages.add(filter.page);
+    if (loadMoreError != null && filter.page >= 1) throw loadMoreError!;
+    final index = filter.page;
+    final content = index >= 0 && index < pages.length
+        ? pages[index]
+        : const <ActivitySummaryDto>[];
+    return ApiPage(
+      content: content,
+      page: index,
+      size: 20,
+      totalElements: pages.fold<int>(0, (sum, p) => sum + p.length),
+      totalPages: pages.length,
+      hasNext: index < pages.length - 1,
+    );
   }
 
   @override
