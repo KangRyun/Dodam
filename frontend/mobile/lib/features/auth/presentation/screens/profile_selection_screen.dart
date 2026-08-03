@@ -4,6 +4,7 @@ import '../../../../app/state/guardian_child_controller.dart';
 import '../../../../app/widgets/app_failure_view.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../child/data/dto/child_dtos.dart';
+import '../../../child_mode/domain/dodam_costume.dart';
 
 typedef ChildProfileSelected =
     void Function(BuildContext context, ChildSummaryDto child);
@@ -370,16 +371,12 @@ class _ChildProfileCard extends StatelessWidget {
     avatar: CircleAvatar(
       radius: 44,
       backgroundColor: AppColors.surface,
-      backgroundImage: child.profileImageUrl == null
-          ? null
-          : NetworkImage(child.profileImageUrl!),
-      child: child.profileImageUrl == null
-          ? const Icon(
-              Icons.face_rounded,
-              size: 48,
-              color: _ProfileColors.orange,
-            )
-          : null,
+      // 업로드한 프로필 이미지가 있으면 그것을, 없으면 아이가 고른 캐릭터
+      // (preferredCharacter) 이미지를 프로필로 쓴다(S15P11B209-505).
+      backgroundImage: child.profileImageUrl != null
+          ? NetworkImage(child.profileImageUrl!)
+          : AssetImage(DodamCostume.fromCode(child.preferredCharacter).asset)
+                as ImageProvider,
     ),
   );
 }

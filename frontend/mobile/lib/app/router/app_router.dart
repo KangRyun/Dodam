@@ -316,6 +316,9 @@ abstract final class AppRouter {
           drawingRepository: drawingRepository,
           completionSnapshotProvider: drawingCompletionSnapshotProvider,
           htpPhotoUploadEnabled: htpPhotoUploadEnabled,
+          // 아동이 고른 캐릭터를 그 아이의 preferredCharacter로 저장해 프로필
+          // 이미지에 반영한다(S15P11B209-505).
+          onCharacterSelected: childController.updateChildCharacter,
           preparedResolution: settings.arguments is ChildModeHomeRouteArguments
               ? (settings.arguments! as ChildModeHomeRouteArguments)
                     .preparedResolution

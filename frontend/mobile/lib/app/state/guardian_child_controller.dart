@@ -167,6 +167,44 @@ final class GuardianChildController extends ChangeNotifier {
     }
   }
 
+  /// 아동이 홈에서 고른 캐릭터를 그 아이의 `preferredCharacter`로 저장한다
+  /// (S15P11B209-505). 프로필 이미지가 곧바로 바뀌도록 메모리 목록을 먼저
+  /// 낙관적으로 갱신한 뒤, 백엔드 저장은 best-effort로 뒤따른다(전체 재조회 없이).
+  ///
+  /// 등록 수정(`updateChild`)과 달리 목록 전체를 다시 불러오지 않고, 등록 UI
+  /// 상태(`_registrationStatus`)도 건드리지 않는다 — 아동 홈의 가벼운 배경 저장이다.
+  Future<void> updateChildCharacter(int childId, String characterCode) async {
+    final updated = <ChildSummaryDto>[];
+    var changed = false;
+    for (final child in _children) {
+      if (child.childId == childId &&
+          child.preferredCharacter != characterCode) {
+        updated.add(child.copyWith(preferredCharacter: characterCode));
+        changed = true;
+      } else {
+        updated.add(child);
+      }
+    }
+    if (changed) {
+      _children = updated;
+      if (_selectedChild?.childId == childId) {
+        _selectedChild = _selectedChild!.copyWith(
+          preferredCharacter: characterCode,
+        );
+      }
+      notifyListeners();
+    }
+    try {
+      await _repository.updateChild(
+        childId,
+        UpdateChildRequestDto(preferredCharacter: characterCode),
+      );
+    } on Object {
+      // 백엔드 저장 실패는 홈 사용을 막지 않는다. 화면 표시와 로컬 코스튬은
+      // 유지되고, 다음 목록 조회 때 서버 값으로 다시 맞춰진다.
+    }
+  }
+
   // 삭제 완료 후 제거된 아동의 선택 상태를 비우고 최신 목록을 조회
   Future<bool> deleteChild(int childId) async {
     if (_registrationStatus == ChildRegistrationStatus.submitting) return false;

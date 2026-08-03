@@ -56,6 +56,21 @@ final class ChildSummaryDto {
   final String tutorialStatus;
   final String relationshipType;
   final ChildRecentActivityDto recentActivity;
+
+  /// 프로필 이미지(캐릭터) 갱신을 메모리에서 낙관적으로 반영하기 위한 복제
+  /// (S15P11B209-505). 현재는 [preferredCharacter]만 바꿀 수 있으면 충분하다.
+  ChildSummaryDto copyWith({String? preferredCharacter}) => ChildSummaryDto(
+    childId: childId,
+    nickname: nickname,
+    birthDate: birthDate,
+    age: age,
+    profileImageUrl: profileImageUrl,
+    preferredCharacter: preferredCharacter ?? this.preferredCharacter,
+    questionDifficulty: questionDifficulty,
+    tutorialStatus: tutorialStatus,
+    relationshipType: relationshipType,
+    recentActivity: recentActivity,
+  );
 }
 
 final class ChildDetailDto {
