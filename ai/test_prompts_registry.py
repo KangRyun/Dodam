@@ -62,6 +62,120 @@ class VerifyPromptFilesTest(unittest.TestCase):
         self.assertEqual(prompts_registry.verify_prompt_files(), [])
 
 
+class ShortVersionTest(unittest.TestCase):
+    """저장·전송용 축약 버전 (S15P11B209-819)."""
+
+    def test_short_version_format(self):
+        value = prompts_registry.short_version("htp", "report_common", "report_htp")
+        self.assertRegex(value, prompts_registry._TAG_PATTERN)
+
+    def test_length_is_independent_of_file_count(self):
+        """핵심 성질 — 파일이 늘어도 태그가 길어지지 않는다.
+
+        정본(composite_version)은 파일당 30자쯤 늘어 786에서 컬럼을 넘겼다. 축약 태그는
+        같은 라벨이면 파일 수와 무관하게 길이가 같아야 한다.
+        """
+        one = prompts_registry.short_version("x", "report_common")
+        many = prompts_registry.short_version(
+            "x", "report_common", "report_htp", "report_diary", "guardrails"
+        )
+        self.assertEqual(len(one), len(many))
+        # 그래도 조합이 다르면 값은 달라야 한다 — 길이만 같고 구분은 살아 있다.
+        self.assertNotEqual(one, many)
+
+    def test_digest_reflects_any_member_content(self):
+        # 구성원이 하나만 달라도 다이제스트가 달라진다(내용 변경 추적이 끊기지 않게).
+        self.assertNotEqual(
+            prompts_registry.composite_digest("report_common", "report_htp"),
+            prompts_registry.composite_digest("report_common", "report_diary"),
+        )
+
+    def test_semver_is_max_of_members(self):
+        # conversations_htp(2.1.0) > conversation_common(1.0.0) — 큰 쪽이 세대를 대표한다.
+        value = prompts_registry.short_version(
+            "conv", "conversations_htp", "conversation_common"
+        )
+        self.assertTrue(value.startswith("conv@2.1.0+"))
+
+
+class VersionTagLengthTest(unittest.TestCase):
+    """BE에 저장되는 모든 재현성 태그가 컬럼 한계 안에 있는지 (S15P11B209-819).
+
+    이번 장애(815)의 본질은 43자가 50자 한계에 7자 남기고 통과하던 것을 아무도 보고 있지
+    않다가, 프롬프트 파일이 하나 갈리자 76자가 되며 리포트 생성이 전량 실패한 것이다.
+    한계를 테스트로 고정해 같은 회귀를 배포 전에 잡는다.
+
+    ⚠️ AI 쪽에서 문자열을 자르지는 않는다 — 자르면 잘린 태그가 재현성 정보를 잃어
+    필드의 존재 이유가 사라진다. 넘치면 여기서 실패시켜 축약 방식을 고치게 한다.
+    """
+
+    def _assert_fits(self, label: str, value: str):
+        self.assertLessEqual(
+            len(value),
+            prompts_registry.MAX_VERSION_TAG,
+            f"{label} 태그가 {prompts_registry.MAX_VERSION_TAG}자를 넘었다"
+            f"({len(value)}자): {value}",
+        )
+
+    def test_report_model_version_fits(self):
+        """generated_model_version·summary_model_version 컬럼에 들어가는 값."""
+        import report_client
+
+        for is_htp in (True, False):
+            self._assert_fits(
+                f"report(is_htp={is_htp})", report_client._generation_version(is_htp)
+            )
+
+    def test_question_prompt_version_fits(self):
+        """QuestionResponse.promptVersion — 위기·인젝션 결정적 응답 포함."""
+        import llm_client
+        import question_service
+
+        for activity in ("HTP", "ART_DIARY", None):
+            self._assert_fits(
+                f"question({activity})", llm_client.prompt_version_for(activity)
+            )
+        self._assert_fits("question(all)", question_service.PROMPT_VERSION)
+
+    def test_analysis_prompt_version_fits(self):
+        import vlm_client
+
+        for activity in ("HTP", "ART_DIARY", None):
+            self._assert_fits(
+                f"analysis({activity})", vlm_client.prompt_version_for(activity)
+            )
+        self._assert_fits("analysis(all)", vlm_client.PROMPT_VERSION)
+
+
+class VersionManifestTest(unittest.TestCase):
+    """축약 태그가 정본으로 되짚어지는지 — 축약해도 재현성이 유지되는 근거 (S15P11B209-819)."""
+
+    def test_report_manifest_resolves_to_composites(self):
+        import report_client
+
+        manifest = report_client.version_manifest()
+        self.assertEqual(
+            manifest[report_client._generation_version(True).split("prompt=")[1]],
+            prompts_registry.composite_version("report_common", "report_htp"),
+        )
+        self.assertEqual(
+            manifest[report_client._generation_version(False).split("prompt=")[1]],
+            prompts_registry.composite_version("report_common", "report_diary"),
+        )
+
+    def test_question_manifest_resolves_to_composites(self):
+        import llm_client
+
+        manifest = llm_client.version_manifest()
+        for activity in ("HTP", "ART_DIARY"):
+            self.assertEqual(
+                manifest[llm_client.prompt_version_for(activity)],
+                prompts_registry.composite_version(
+                    *llm_client.prompt_names_for(activity)
+                ),
+            )
+
+
 class ClientVersionWiringTest(unittest.TestCase):
     """각 클라이언트 PROMPT_VERSION이 레지스트리에서 파생되는지."""
 
@@ -72,14 +186,14 @@ class ClientVersionWiringTest(unittest.TestCase):
         # 서술·리포트 프롬프트는 활동 유형별로 갈라져 통합 버전을 쓴다.
         self.assertEqual(
             vlm_client.PROMPT_VERSION,
-            prompts_registry.composite_version(
-                "drawing_description_htp", "drawing_description_diary"
+            prompts_registry.short_version(
+                "desc-all", "drawing_description_htp", "drawing_description_diary"
             ),
         )
         self.assertEqual(
             report_client.PROMPT_VERSION,
-            prompts_registry.composite_version(
-                "report_common", "report_htp", "report_diary"
+            prompts_registry.short_version(
+                "report-all", "report_common", "report_htp", "report_diary"
             ),
         )
 
@@ -106,7 +220,8 @@ class ClientVersionWiringTest(unittest.TestCase):
         import llm_client
         import question_service
 
-        expected = prompts_registry.composite_version(
+        expected = prompts_registry.short_version(
+            "conv-all",
             "first_question_htp",
             "first_question_diary",
             "conversations_htp",
@@ -129,19 +244,25 @@ class ClientVersionWiringTest(unittest.TestCase):
         htp = llm_client.prompt_version_for("HTP")
         diary = llm_client.prompt_version_for("ART_DIARY")
         self.assertNotEqual(htp, diary)
-        self.assertIn("first_question_htp@", htp)
-        self.assertIn("conversations_htp@", htp)
-        self.assertNotIn("_diary@", htp)
-        self.assertIn("first_question_diary@", diary)
-        self.assertNotIn("_htp@", diary)
+        # 태그는 축약됐지만(819) 어느 변형인지는 라벨로 구분된다 — 사후에 갈라볼 수 있어야 한다.
+        self.assertTrue(htp.startswith("conv-htp@"))
+        self.assertTrue(diary.startswith("conv-diary@"))
+        # 조합 자체(태그가 가리키는 실체)는 변형 파일이 갈라져 있어야 한다.
+        htp_names = llm_client.prompt_names_for("HTP")
+        diary_names = llm_client.prompt_names_for("ART_DIARY")
+        self.assertIn("first_question_htp", htp_names)
+        self.assertIn("conversations_htp", htp_names)
+        self.assertNotIn("first_question_diary", htp_names)
+        self.assertIn("first_question_diary", diary_names)
+        self.assertNotIn("first_question_htp", diary_names)
         # 공유 파일은 어느 쪽에나 실린다 — 내용이 바뀌면 두 버전 모두 달라져야 한다.
-        for version in (htp, diary):
-            self.assertIn("conversation_common@", version)
-            self.assertIn("conversation_tone@", version)
-            self.assertIn("guardrails@", version)
+        for names in (htp_names, diary_names):
+            self.assertIn("conversation_common", names)
+            self.assertIn("conversation_tone", names)
+            self.assertIn("guardrails", names)
         # 질문 뱅크(811)는 HTP 전용 — PDI는 HTP 프로토콜이라 그림일기엔 실리지 않는다.
-        self.assertIn("htp_question_bank@", htp)
-        self.assertNotIn("htp_question_bank@", diary)
+        self.assertIn("htp_question_bank", htp_names)
+        self.assertNotIn("htp_question_bank", diary_names)
         # 활동 유형을 모르는 호출(draft 경로)은 기본인 HTP로 떨어진다.
         self.assertEqual(llm_client.prompt_version_for(None), htp)
 

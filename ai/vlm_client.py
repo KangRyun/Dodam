@@ -38,7 +38,11 @@ _PROMPT_BY_ACTIVITY = {
 DEFAULT_ACTIVITY_TYPE = "HTP"
 
 # 두 서술 프롬프트를 함께 담은 통합 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
-PROMPT_VERSION = prompts_registry.composite_version(*_PROMPT_BY_ACTIVITY.values())
+# 축약 태그로 싣는다(S15P11B209-819) — 리포트·대화 경로와 같은 이유로 길이를 파일 개수와
+# 무관하게 고정한다. prompt_version_for()는 파일 하나짜리라 그대로 둔다(이미 14자).
+PROMPT_VERSION = prompts_registry.short_version(
+    "desc-all", *_PROMPT_BY_ACTIVITY.values()
+)
 
 
 def prompt_name_for(activity_type: str | None) -> str:

@@ -15,6 +15,7 @@ from unittest import mock
 from openai import OpenAIError
 
 import internal_contracts as contracts
+import prompts_registry
 import report_client
 
 
@@ -403,9 +404,10 @@ class VersionRecordingTest(unittest.TestCase):
         self.assertIn(f"pipeline={report_client.config.PIPELINE_VERSION}", result.model_version)
         self.assertIn("prompt=", result.model_version)
         # '이번에 쓴' 조합만 실린다 — 두 변형을 다 적으면 어느 쪽으로 뽑혔는지 구분이 안 된다.
+        # 조합은 축약 태그로 실리고(819) 변형은 라벨로 구분된다.
         self.assertIn(report_client._generation_version(False), result.model_version)
-        self.assertIn("report_diary@", result.model_version)
-        self.assertNotIn("report_htp@", result.model_version)
+        self.assertIn("prompt=diary@", result.model_version)
+        self.assertNotIn("htp@", result.model_version)
 
     def test_htp_request_records_htp_prompt_version(self):
         fake_client = mock.Mock()
@@ -414,8 +416,20 @@ class VersionRecordingTest(unittest.TestCase):
             report_client, "retrieve", return_value=[]
         ), mock.patch.object(report_client, "get_client", return_value=fake_client):
             result = report_client.generate(_htp_request(), model="m")
-        self.assertIn("report_htp@", result.model_version)
-        self.assertNotIn("report_diary@", result.model_version)
+        self.assertIn("prompt=htp@", result.model_version)
+        self.assertNotIn("diary@", result.model_version)
+
+    def test_model_version_fits_backend_column(self):
+        """BE generated_model_version·summary_model_version 컬럼 한계 (S15P11B209-819).
+
+        786에서 리포트 프롬프트가 갈리며 76자가 돼 컬럼(VARCHAR(50))을 넘겼고, 저장 실패가
+        리포트 전량 실패로 번졌다(815). 생성 경로에서 직접 한 번 더 못박는다.
+        """
+        for is_htp in (True, False):
+            value = report_client._generation_version(is_htp)
+            self.assertLessEqual(
+                len(value), prompts_registry.MAX_VERSION_TAG, f"{len(value)}자: {value}"
+            )
 
     def test_model_name_records_actual_served_model(self):
         # GMS가 실제 서빙한 모델 ID를 기록한다(요청 모델명이 아니라).
