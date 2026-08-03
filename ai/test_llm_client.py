@@ -187,6 +187,21 @@ class ConversationPromptRulesTest(unittest.TestCase):
             self.assertIn("따뜻하게 반응한 다음", system)
             self.assertNotIn("중립적으로 반응", system)
 
+    def test_explicit_skip_intent_overrides_followup_rule(self):
+        """명시적 건너뛰기는 일반 답변이 아니며 같은 질문을 바꿔 묻지 않는다(831)."""
+        for activity in ("HTP", "ART_DIARY"):
+            system = self._next(activity)
+            self.assertIn("[질문 건너뛰기 의사 처리]", system)
+            self.assertIn("그림 내용에 대한 답이 아니야", system)
+            self.assertIn("같거나 의미상 비슷한 질문", system)
+            self.assertIn("표현만 바꿔 다시 묻지 마", system)
+            self.assertIn("이 규칙을 우선해", system)
+            self.assertIn('"몰라"라고 한 것만으로', system)
+
+        # 첫 질문에는 아직 아이 답변이 없으므로 skip 예시를 노출하지 않는다.
+        for activity in ("HTP", "ART_DIARY"):
+            self.assertNotIn("[질문 건너뛰기 의사 처리]", self._first(activity))
+
     def test_prompts_consume_visual_detail_from_description(self):
         """VLM 서술의 색·표정·위치 세부를 실제로 골라 묻게 한다(대화 품질의 핵심).
 

@@ -413,6 +413,76 @@ Q11_HTP_SUBJECT_DENIAL = QuestionCase(
 )
 
 
+# ── 12) HTP · 말로 질문 건너뛰기 ───────────────────────────────
+# 건너뛰기 표현은 일반 답변이 아니다. 직전 질문의 대상·속성을 표현만 바꿔 다시 묻지 않고,
+# 현재 HTP 주제 단계 안에서 아직 다루지 않은 방향으로 전환해야 한다(S15P11B209-831).
+Q12_HTP_VERBAL_SKIP = QuestionCase(
+    id="Q12_htp_verbal_skip",
+    title="HTP · 말로 질문 건너뛰기",
+    why="건너뛰기 의사를 존중하고 지붕·색 질문을 되묻지 않은 채 집 그림의 다른 방향으로 전환하는가.",
+    request=QuestionRequest(
+        conversation_id=9012,
+        drawing_session_id=8012,
+        child_age=8,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=2,
+        max_question_count=5,
+        detected_objects=_HTP_HOUSE_OBJECTS,
+        drawing_description=(
+            "가운데에 집이 크게 있고 빨간 지붕 아래에 문과 창문 두 개가 나란히 있어요."
+        ),
+        recent_messages=[
+            _dodam("지붕은 무슨 색으로 칠했어?"),
+            _child("질문을 건너뛸래."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="HTP",
+        drawing_subject="HOUSE",
+        asked_object_codes=["HOUSE_ROOF"],
+    ),
+    meta={
+        "skipped_focus_terms": ["지붕", "무슨 색", "어떤 색", "색으로"],
+        "off_subject_terms": ["나무", "사람"],
+    },
+)
+
+
+# ── 13) 그림일기 · 말로 질문 건너뛰기 ─────────────────────────
+Q13_DIARY_VERBAL_SKIP = QuestionCase(
+    id="Q13_diary_verbal_skip",
+    title="그림일기 · 말로 질문 건너뛰기",
+    why="말하기 싫다는 의사를 내용 답변으로 오해하지 않고 인물 행동 질문과 다른 이야기로 전환하는가.",
+    request=QuestionRequest(
+        conversation_id=9013,
+        drawing_session_id=8013,
+        child_age=8,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=2,
+        max_question_count=5,
+        detected_objects=[
+            _obj("PERSON", "사람", 0.91),
+            _obj("BALL", "공", 0.84),
+            _obj("SUN", "해", 0.77),
+        ],
+        drawing_description=(
+            "사람 두 명 옆에 파란 공이 있고 왼쪽 위에는 노란 해가 그려져 있어요."
+        ),
+        recent_messages=[
+            _dodam("두 사람은 지금 무엇을 하고 있어?"),
+            _child("이건 말하기 싫어. 다른 질문 해줘."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="ART_DIARY",
+        asked_object_codes=["PERSON"],
+    ),
+    meta={
+        "skipped_focus_terms": ["두 사람", "사람들은", "무엇을 하고", "뭘 하고", "하고 있어"],
+    },
+)
+
+
 QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q1_FIRST_HTP,
     Q2_FIRST_DIARY,
@@ -423,6 +493,8 @@ QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q9_PRIVACY,
     Q10_HTP_PART_CORRECTION,
     Q11_HTP_SUBJECT_DENIAL,
+    Q12_HTP_VERBAL_SKIP,
+    Q13_DIARY_VERBAL_SKIP,
 )
 
 

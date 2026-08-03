@@ -234,6 +234,18 @@ def check_question_response(case, resp: QuestionResponse) -> list[Finding]:
             Finding("B", rule, not asks_reason, "이유 재질문 검출" if asks_reason else "")
         )
 
+    # 명시적으로 건너뛴 질문은 표현만 바꿔 되묻지 않고 다른 방향으로 전환해야 한다(831).
+    if "skipped_focus_terms" in meta:
+        repeated = _contains_any(text, meta["skipped_focus_terms"])
+        out.append(
+            Finding(
+                "B",
+                "건너뛴 질문 미반복",
+                not repeated,
+                f"직전 질문 초점 재등장: {repeated}" if repeated else "",
+            )
+        )
+
     # 아이 정정 수용 — 아이가 말한 이름을 쓰고, 분석 결과 이름으로 돌아가지 않는가.
     if "child_term" in meta:
         stale = meta["stale_term"] in text
