@@ -21,6 +21,7 @@ STT/TTS 경로 정리(179·289, 2026-07-23):
 
 import base64
 import hmac
+import logging
 import os
 import tempfile
 import time
@@ -63,9 +64,25 @@ def _require_internal_auth_config() -> None:
     )
 
 
+logger = logging.getLogger(__name__)
+
+
+def _prompt_version_manifest() -> dict[str, str]:
+    """저장되는 축약 태그 → 정본 조합 버전 (S15P11B209-819).
+
+    BE에 남는 재현성 태그는 조합 전체를 접은 다이제스트라, 이 매핑이 있어야 "어떤 프롬프트
+    파일·내용으로 생성된 결과인가"를 되짚을 수 있다. 태그의 존재 이유가 재현성이므로
+    매핑을 노출하는 것까지가 한 세트다.
+    """
+    return {**report_client.version_manifest(), **llm_client.version_manifest()}
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
     _require_internal_auth_config()
+    # 기동 시 1회 기록 — 배포된 빌드가 어떤 프롬프트 조합을 썼는지 로그만으로 역추적 가능하게.
+    for tag, composite in _prompt_version_manifest().items():
+        logger.info("prompt version %s = %s", tag, composite)
     yield
 
 
@@ -224,6 +241,26 @@ def _internal_auth_ok(token: str = "", api_key: str = "") -> bool:
         hmac.compare_digest(received or "", expected)
         for received, expected in expectations
     )
+
+
+@app.get("/internal/v1/prompt-versions")
+def internal_prompt_versions(
+    x_internal_token: str = Header(default="", alias="X-Internal-Token"),
+    x_internal_api_key: str = Header(default="", alias="X-Internal-Api-Key"),
+):
+    """저장된 재현성 태그 → 정본 프롬프트 조합 역추적 (S15P11B209-819).
+
+    내부 인증을 건다 — 운영 진단용이고, 프롬프트 파일 구성은 외부에 알릴 정보가 아니다.
+    (nginx가 /ai/ 를 인터넷에 프록시하므로 무인증이면 그대로 공개된다.)
+    """
+    if not _internal_auth_ok(x_internal_token, x_internal_api_key):
+        return JSONResponse(
+            status_code=401, content={"errorCode": "INVALID_INTERNAL_TOKEN"}
+        )
+    return {
+        "pipelineVersion": config.PIPELINE_VERSION,
+        "promptVersions": _prompt_version_manifest(),
+    }
 
 
 def _safe_stt_suffix(filename: str | None) -> str:

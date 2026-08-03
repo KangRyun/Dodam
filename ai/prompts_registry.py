@@ -9,6 +9,11 @@
 - 내용 해시: 파일 내용에서 자동 계산한다. semver를 깜빡 안 올려도 내용이 바뀌면
   해시가 달라져 결과 추적이 끊기지 않는다(이중 안전장치).
 
+여러 파일을 함께 쓰는 경로는 두 가지 표현을 갖는다(S15P11B209-819).
+- composite_version(): 정본. 전부 풀어 쓴 문자열이라 사람이 그대로 읽을 수 있다. 로그·진단용.
+- short_version(): BE에 저장되는 값. 조합 전체를 해시 하나로 접어 길이를 상수로 만든다.
+  정본을 그대로 저장하면 길이가 파일 개수에 비례해 늘어나 컬럼을 넘긴다(아래 참고).
+
 파일명은 ai/prompts/<name>.txt. torch·GMS 의존성이 없어 어디서든 import된다.
 """
 
@@ -89,8 +94,49 @@ def composite_version(*names: str) -> str:
 
     "name@<version>" 을 프롬프트 이름순으로 정렬해 이어붙인다 — 어떤 파일 조합·내용으로
     생성됐는지 한 문자열로 재현 가능하게 한다.
+
+    ⚠️ 이건 정본이라 길이가 파일 개수에 비례한다. 저장·전송에는 short_version()을 쓴다.
     """
     return ";".join(f"{name}@{version(name)}" for name in sorted(names))
+
+
+# ── 저장·전송용 축약 버전 (S15P11B209-819) ────────────────────────
+# BE는 재현성 태그를 좁은 VARCHAR에 넣는다(generated_model_version·summary_model_version은
+# VARCHAR(50)). 정본(composite_version)은 파일 하나당 30자쯤 늘어나, 786에서 리포트 프롬프트가
+# report_common+report_htp/report_diary로 갈리자 43자 → 76자가 되며 컬럼을 넘겨 리포트 생성이
+# 전량 실패했다(S15P11B209-815). 파일이 더 갈릴 예정이라 컬럼만 넓히면 같은 사고가 반복된다.
+#
+# 그래서 조합 전체를 해시 하나로 접어 길이를 파일 개수와 무관한 상수로 만든다. 잘라 버리는 게
+# 아니라 접는 것이라, 정본은 기동 로그·버전 엔드포인트에 그대로 남아 다이제스트로 되짚을 수 있다
+# (자르면 재현성 정보가 죽는다 — 이 필드의 존재 이유가 사라진다).
+MAX_VERSION_TAG = 50
+
+_TAG_PATTERN = r"^[a-z-]+@\d+\.\d+\.\d+\+[0-9a-f]{8}$"
+
+
+def composite_digest(*names: str) -> str:
+    """조합 전체(composite_version 출력)의 짧은 해시. 파일 하나라도 내용이 바뀌면 달라진다."""
+    return hashlib.sha256(composite_version(*names).encode("utf-8")).hexdigest()[:8]
+
+
+def _max_semver(*names: str) -> str:
+    """조합 구성원 semver의 최댓값 — 사람이 세대를 눈으로 구분하는 용도."""
+    return max(
+        (_PROMPT_SEMVER.get(name, _UNKNOWN_SEMVER) for name in names),
+        key=lambda s: tuple(int(p) for p in s.split(".")),
+        default=_UNKNOWN_SEMVER,
+    )
+
+
+def short_version(label: str, *names: str) -> str:
+    """저장·전송용 조합 버전: "<label>@<최대 semver>+<조합 해시8>".
+
+    label은 이 조합이 무엇인지 가리키는 짧은 고정 어휘(예: "htp"·"diary"). 어느 활동 변형으로
+    생성됐는지는 태그만 보고 구분돼야 한다 — 두 변형을 뭉뚱그리면 사후에 갈라볼 수 없다(786).
+
+    길이는 label 길이 + 15자로 고정이라 프롬프트 파일이 늘어도 커지지 않는다.
+    """
+    return f"{label}@{_max_semver(*names)}+{composite_digest(*names)}"
 
 
 def verify_prompt_files() -> list[str]:
