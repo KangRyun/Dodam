@@ -30,6 +30,7 @@ import '../features/report/domain/repositories/report_repository.dart';
 import '../features/report/domain/services/report_file_actions.dart';
 import '../features/settings/data/repositories/mock_account_withdrawal_repository.dart';
 import '../features/settings/domain/repositories/account_withdrawal_repository.dart';
+import '../features/settings/domain/repositories/guardian_profile_repository.dart';
 import 'router/app_navigation.dart';
 import 'router/app_router.dart';
 import 'router/app_routes.dart';
@@ -353,6 +354,32 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
     _notificationBadgeController?.clear();
   }
 
+  Future<AuthenticatedUser> _loadProfile() async {
+    final repository = _authRepository;
+    if (repository is! GuardianProfileRepository) return _currentSession!.user;
+    final user = await (repository as GuardianProfileRepository)
+        .getCurrentUserProfile();
+    final session = _currentSession;
+    if (session != null && mounted) {
+      setState(() => _currentSession = session.copyWith(user: user));
+    }
+    return user;
+  }
+
+  Future<AuthenticatedUser> _updateProfile(String nickname) async {
+    final repository = _authRepository;
+    if (repository is! GuardianProfileRepository) {
+      throw StateError('보호자 프로필 수정 기능을 사용할 수 없습니다.');
+    }
+    final user = await (repository as GuardianProfileRepository)
+        .updateCurrentUserProfile(nickname: nickname);
+    final session = _currentSession;
+    if (session != null && mounted) {
+      setState(() => _currentSession = session.copyWith(user: user));
+    }
+    return user;
+  }
+
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
@@ -386,6 +413,8 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       authSignOut: _signOut,
       authRestoreSession: _restoreSession,
       authCurrentUser: () => _currentSession?.user,
+      authLoadProfile: _loadProfile,
+      authUpdateProfile: _updateProfile,
       // 커뮤니티 웹뷰에 주입할 로그인 토큰. 원격 인증일 때만 값이 있고,
       // Mock 인증에서는 null이라 토큰 없이 웹앱을 로드한다.
       communityAccessToken: () async {
