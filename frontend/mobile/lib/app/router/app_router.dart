@@ -403,6 +403,16 @@ abstract final class AppRouter {
               .accentColor,
           repository: (settings.arguments! as InputMethodSelectRouteArguments)
               .repository,
+          existingDrawingSessionId:
+              (settings.arguments! as InputMethodSelectRouteArguments)
+                  .existingDrawingSessionId,
+          restoredActivityContext:
+              (settings.arguments! as InputMethodSelectRouteArguments)
+                  .restoredActivityContext,
+          htpAssessmentId:
+              (settings.arguments! as InputMethodSelectRouteArguments)
+                  .htpAssessmentId,
+          htpPhotoUploadEnabled: htpPhotoUploadEnabled,
         ),
       ['child', final childId, 'activity', 'drawing']
           when _hasChildContext(childController, childId) &&
@@ -522,6 +532,14 @@ abstract final class AppRouter {
         builder: (_) => screen,
       );
     }
+    // 사진 입력 화면은 다음에 열 세션을 pop으로 돌려준다. 호출부가 그 결과로
+    // 대화·캔버스를 결정하므로 라우트 타입을 맞춰 둔다(S15P11B209-834).
+    if (_isInputMethodRoute(segments)) {
+      return MaterialPageRoute<DrawingSessionResolution>(
+        settings: settings,
+        builder: (_) => screen,
+      );
+    }
     return MaterialPageRoute<void>(settings: settings, builder: (_) => screen);
   }
 
@@ -546,6 +564,11 @@ abstract final class AppRouter {
     final parsedId = int.tryParse(childId);
     return parsedId != null && controller?.hasSelectedChild(parsedId) == true;
   }
+
+  static bool _isInputMethodRoute(List<String> segments) => switch (segments) {
+    ['child', _, 'activity', 'input-method'] => true,
+    _ => false,
+  };
 
   static bool _isDrawingRoute(List<String> segments) => switch (segments) {
     ['child', _, 'activity', 'drawing'] => true,
@@ -593,6 +616,9 @@ final class InputMethodSelectRouteArguments {
     required this.icon,
     required this.accentColor,
     required this.repository,
+    this.existingDrawingSessionId,
+    this.restoredActivityContext,
+    this.htpAssessmentId,
   });
 
   final int childId;
@@ -602,6 +628,17 @@ final class InputMethodSelectRouteArguments {
   final IconData icon;
   final Color accentColor;
   final DrawingRepository repository;
+
+  /// 이미 만들어진 `UPLOAD` 세션을 그대로 이어 사진만 올릴 때 넘긴다.
+  ///
+  /// 값이 있으면 화면이 새 세션을 만들지 않고 이 세션으로 업로드·완료한다.
+  final int? existingDrawingSessionId;
+
+  /// 복원 모드에서 서버 재조회 없이 쓰는 `activityContext`.
+  final DrawingActivityContextDto? restoredActivityContext;
+
+  /// 다음 HTP 주제 세션을 이 화면에서 만들어야 할 때 넘긴다.
+  final int? htpAssessmentId;
 }
 
 final class DrawingRouteArguments {
@@ -635,9 +672,20 @@ final class DrawingRouteArguments {
 }
 
 /// 캔버스가 상위 활동 진입 화면에 전달하는 종료 결과.
-enum DrawingRouteResult {
+final class DrawingRouteResult {
   /// 완료 화면 이동이 아니라 사용자가 뒤로가기로 캔버스를 나간 경우.
-  backToActivityEntry,
+  const DrawingRouteResult.backToActivityEntry() : nextResolution = null;
+
+  /// HTP 다음 주제 세션이 만들어져 상위 진입 화면이 열어야 하는 경우.
+  ///
+  /// 어떤 화면을 열지는 상위 진입 화면이 [DrawingSessionResolution.target]으로
+  /// 한 번에 판정한다. 캔버스가 직접 사진 화면을 열면 그 결과를 기다리는 곳이
+  /// 없어 업로드 이후 흐름이 끊긴다(S15P11B209-834).
+  const DrawingRouteResult.advanceTo(DrawingSessionResolution resolution)
+    : nextResolution = resolution;
+
+  /// 다음으로 열어야 하는 세션. 뒤로가기로 나온 경우 `null`.
+  final DrawingSessionResolution? nextResolution;
 }
 
 final class DrawingActivitySelectionRouteArguments {

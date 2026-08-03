@@ -64,12 +64,7 @@ String _createIdempotencyKey() {
       '${hex.substring(20)}';
 }
 
-String _htpSubjectTitle(String? subject) => switch (subject) {
-  'HOUSE' => '집 그리기',
-  'TREE' => '나무 그리기',
-  'PERSON' => '사람 그리기',
-  _ => 'HTP 그림',
-};
+String _htpSubjectTitle(String? subject) => htpSubjectTitle(subject);
 
 String _nextHtpSubjectTitle(String? currentSubject) => switch (currentSubject) {
   'HOUSE' => '나무 그리기',
@@ -235,11 +230,16 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     unawaited(_loadCostume());
   }
 
-  /// 보호자가 이어 그리기를 고른 경우, 홈을 거치지 않고 진행 중인 캔버스를 바로 연다.
+  /// 보호자가 정해 넘긴 활동을 홈을 거치지 않고 바로 연다.
+  ///
+  /// 사진 업로드·완료까지 끝난 세션(`UPLOAD`+`CONVERSING`)만 이 경로로 들어온다
+  /// (S15P11B209-834). 캔버스 최초 선택은 기존처럼 아이가 홈에서 시작한다.
+  /// 어떤 화면을 열지는 [_openResolution]이 판정한다.
   Future<void> _autoStartPreparedResolution() async {
     final resolution = _preparedResolution;
     if (resolution == null) return;
     setState(() => _preparedResolution = null);
+    // Draft 복원 의사만 전달한다. `UPLOAD` 세션 제외는 [_openResolution]이 한다.
     await _openResolution(resolution, autoRestoreDraft: true);
     if (!mounted) return;
     // 캔버스에서 뒤로 나온 경우 _openResolution 이 _resolveEntry 를 다시 예약한다.
@@ -889,7 +889,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       );
       return;
     }
-    if (resolution.isUploadInput && resolution.isDrawingStage) {
+    if (resolution.target == DrawingResolutionTarget.photoInput) {
       if (resolution.activityContext.isHtp && !widget.htpPhotoUploadEnabled) {
         showAppMessage(
           context,
@@ -939,7 +939,10 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         repository: widget.drawingRepository,
         completionSnapshotProvider: widget.completionSnapshotProvider,
         resumeConversation: !resolution.isDrawingStage,
-        autoRestoreDraft: autoRestoreDraft,
+        // `UPLOAD` 세션에는 Canvas Draft가 없다. 조회·복원을 시도하지 않는다
+        // (S15P11B209-834). `CANVAS`는 대화·회고 단계에서도 기존 복원 계약을
+        // 그대로 유지한다.
+        autoRestoreDraft: autoRestoreDraft && !resolution.isUploadInput,
         startFresh: startFresh,
         activityContext: resolution.activityContext,
         inputMethod: resolution.inputMethod,
@@ -947,7 +950,15 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     );
     if (route == null) return;
     final result = await route;
-    if (!mounted || result != DrawingRouteResult.backToActivityEntry) return;
+    if (!mounted || result == null) return;
+
+    // HTP 주제 전환은 캔버스가 직접 라우팅하지 않고 다음 세션만 올려보낸다.
+    // 어떤 화면을 열지는 이 함수 하나가 판정하므로, 사진으로 시작한 활동도
+    // 나무·사람에서 다시 사진 입력 화면으로 들어간다(S15P11B209-834).
+    if (result.nextResolution case final next?) {
+      await _openResolution(next, startFresh: true);
+      return;
+    }
 
     // 캔버스에서 뒤로 나온 경우에만 진행 중 세션을 다시 확인한다.
     // 완료·감정 화면으로 이동한 경우에는 기존 라우팅 흐름을 유지한다.
@@ -962,26 +973,30 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   }
 
   /// 이미 만든 UPLOAD 세션을 복원해 사진 촬영 단계로 바로 들어간다.
+  ///
+  /// 화면 생성은 라우터 한 곳에만 두어(S15P11B209-834) 캔버스에서 주제를 넘길
+  /// 때도 같은 인자·같은 화면을 쓰게 한다.
   Future<void> _restoreUploadInput(DrawingSessionResolution resolution) async {
     final (icon, accentColor) = _visualForDrawingType(
       resolution.activityContext.isHtp ? 'HTP' : 'ART_DIARY',
     );
-    final advanced = await Navigator.of(context).push<DrawingSessionResolution>(
-      MaterialPageRoute(
-        builder: (_) => InputMethodSelectScreen(
-          childId: widget.child.childId,
-          drawingTypeId: 0,
-          title: _htpSubjectTitle(resolution.activityContext.drawingSubject),
-          description: '아까 찍던 사진을 마저 올려볼까?',
-          icon: icon,
-          accentColor: accentColor,
-          repository: widget.drawingRepository,
-          existingDrawingSessionId: resolution.sessionId,
-          restoredActivityContext: resolution.activityContext,
-          htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
-        ),
+    final route = AppNavigation.pushNamed<DrawingSessionResolution>(
+      context,
+      AppRoutes.drawingInputMethod(widget.child.childId.toString()),
+      arguments: InputMethodSelectRouteArguments(
+        childId: widget.child.childId,
+        drawingTypeId: 0,
+        title: _htpSubjectTitle(resolution.activityContext.drawingSubject),
+        description: '아까 찍던 사진을 마저 올려볼까?',
+        icon: icon,
+        accentColor: accentColor,
+        repository: widget.drawingRepository,
+        existingDrawingSessionId: resolution.sessionId,
+        restoredActivityContext: resolution.activityContext,
       ),
     );
+    if (route == null) return;
+    final advanced = await route;
     if (advanced == null || !mounted) return;
     await _openResolution(advanced);
   }

@@ -630,7 +630,7 @@ void main() {
     expect(repository.strokeBatchCalls, 1);
     expect(repository.saveDraftCalls, 1);
     expect(observer.popCount, 1);
-    expect(await routeResult, DrawingRouteResult.backToActivityEntry);
+    expect(await routeResult, const DrawingRouteResult.backToActivityEntry());
     expect(find.text('이전 화면'), findsOneWidget);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsNothing);
   });
@@ -695,7 +695,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(observer.popCount, 1);
-    expect(await routeResult, DrawingRouteResult.backToActivityEntry);
+    expect(await routeResult, const DrawingRouteResult.backToActivityEntry());
     expect(find.text('이전 화면'), findsOneWidget);
   });
 
@@ -750,7 +750,7 @@ void main() {
     expect(repository.saveDraftCalls, 1);
     expect(observer.popCount, 2);
     expect(observer.pagePopCount, 1);
-    expect(await routeResult, DrawingRouteResult.backToActivityEntry);
+    expect(await routeResult, const DrawingRouteResult.backToActivityEntry());
     expect(find.text('이전 화면'), findsOneWidget);
   });
 
