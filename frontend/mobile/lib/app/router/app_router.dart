@@ -496,6 +496,7 @@ abstract final class AppRouter {
               ? (settings.arguments! as EmotionSelectRouteArguments)
                     .activityContext
               : const DrawingActivityContextDto.general(),
+          activityRepository: activityRepository,
           inputMethod: settings.arguments is EmotionSelectRouteArguments
               ? (settings.arguments! as EmotionSelectRouteArguments).inputMethod
               : null,

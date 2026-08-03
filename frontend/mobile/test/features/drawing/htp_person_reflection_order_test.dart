@@ -1,5 +1,9 @@
+import 'dart:typed_data';
+
 import 'package:dodam/app/router/app_routes.dart';
 import 'package:dodam/core/network/network.dart';
+import 'package:dodam/features/activity/data/dto/activity_dtos.dart';
+import 'package:dodam/features/activity/domain/repositories/activity_repository.dart';
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/drawing/domain/repositories/drawing_repository.dart';
@@ -102,6 +106,7 @@ const _personFinalImage = BinaryUploadDto(
 Future<void> _pumpPersonEmotionScreen(
   WidgetTester tester, {
   required _RecordingHtpRepository repository,
+  ActivityRepository? activityRepository,
   String inputMethod = 'UPLOAD',
   BinaryUploadDto? completedDrawingImage = _personFinalImage,
 }) async {
@@ -124,6 +129,8 @@ Future<void> _pumpPersonEmotionScreen(
         childId: '3',
         sessionId: 44,
         drawingRepository: repository,
+        activityRepository:
+            activityRepository ?? const _PreviewActivityRepository(),
         conversationAlreadyEnded: true,
         activityContext: _personContext,
         inputMethod: inputMethod,
@@ -163,7 +170,7 @@ Future<void> _skipAndSubmit(WidgetTester tester) async {
 }
 
 void main() {
-  testWidgets('PERSON도 완료 요청의 최종 합성 PNG를 contain preview로 표시한다', (
+  testWidgets('PERSON 감정 화면은 단일 memory 대신 HTP 3장 인증 preview를 표시한다', (
     tester,
   ) async {
     final semantics = tester.ensureSemantics();
@@ -171,12 +178,30 @@ void main() {
 
     await _pumpPersonEmotionScreen(tester, repository: repository);
 
-    expect(find.bySemanticsLabel('내가 완성한 그림'), findsOneWidget);
-    final preview = tester.widget<Image>(
-      find.byKey(const ValueKey('emotion-drawing-preview-image')),
+    expect(find.bySemanticsLabel('내가 완성한 그림'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('htp-emotion-preview-HOUSE')),
+      findsOneWidget,
     );
-    expect(preview.fit, BoxFit.contain);
-    expect((preview.image as MemoryImage).bytes, _personFinalImage.bytes);
+    expect(
+      find.byKey(const ValueKey('htp-emotion-preview-TREE')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('htp-emotion-preview-PERSON')),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel('집 그림'), findsOneWidget);
+    expect(find.bySemanticsLabel('나무 그림'), findsOneWidget);
+    expect(find.bySemanticsLabel('사람 그림'), findsOneWidget);
+    final previews = find.descendant(
+      of: find.byKey(const ValueKey('htp-emotion-preview-gallery')),
+      matching: find.byKey(const ValueKey('authenticated-image-success')),
+    );
+    expect(previews, findsNWidgets(3));
+    for (final image in tester.widgetList<Image>(previews)) {
+      expect(image.fit, BoxFit.contain);
+    }
     semantics.dispose();
   });
 
@@ -298,6 +323,73 @@ void main() {
     expect(repository.lastReflection?.skipped, isTrue);
     expect(find.text('activity-complete-44'), findsOneWidget);
   });
+}
+
+final class _PreviewActivityRepository implements ActivityRepository {
+  const _PreviewActivityRepository();
+
+  @override
+  Future<ApiPage<ActivitySummaryDto>> getActivities(
+    int childId, {
+    ActivityFilterDto filter = const ActivityFilterDto(),
+  }) async => ApiPage(
+    content: [
+      ActivitySummaryDto(
+        activityId: 44,
+        title: 'HTP',
+        drawingType: const ActivityDrawingTypeDto(code: 'HTP', name: 'HTP'),
+        inputMethod: 'UPLOAD',
+        sessionStatus: 'REFLECTION',
+        selectedEmotions: const [],
+        thumbnailUrl: null,
+        analysisStatus: null,
+        report: null,
+        startedAt: '2026-08-03T00:00:00Z',
+        completedAt: null,
+        activityKind: 'HTP',
+        htpAssessmentId: 91,
+        htpStatus: 'IN_PROGRESS',
+        htpDrawings: const [
+          HtpActivityDrawingDto(
+            drawingSubject: 'HOUSE',
+            drawingSessionId: 42,
+            thumbnailUrl: '/api/v1/house',
+          ),
+          HtpActivityDrawingDto(
+            drawingSubject: 'TREE',
+            drawingSessionId: 43,
+            thumbnailUrl: '/api/v1/tree',
+          ),
+          HtpActivityDrawingDto(
+            drawingSubject: 'PERSON',
+            drawingSessionId: 44,
+            thumbnailUrl: '/api/v1/person',
+          ),
+        ],
+      ),
+    ],
+    page: 0,
+    size: 20,
+    totalElements: 1,
+    totalPages: 1,
+    hasNext: false,
+  );
+
+  @override
+  Future<Uint8List> downloadImage(String url) async =>
+      Uint8List.fromList(_personFinalImage.bytes);
+
+  @override
+  Future<void> deleteActivity(int activityId) => throw UnimplementedError();
+
+  @override
+  Future<ActivityDetailDto> getActivity(int activityId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<ActivityConversationMessageDto>> getConversationMessages(
+    int conversationId,
+  ) => throw UnimplementedError();
 }
 
 final class _RecordingHtpRepository
