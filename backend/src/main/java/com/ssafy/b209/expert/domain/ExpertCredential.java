@@ -132,6 +132,22 @@ public class ExpertCredential {
     return List.copyOf(files);
   }
 
+  /**
+   * 관리자 검토 결과를 자격에 반영한다.
+   *
+   * @param status 승인 또는 반려 상태
+   * @param now 검토 완료 시각
+   * @throws IllegalArgumentException 최종 상태가 아닌 값을 전달한 경우
+   */
+  public void completeVerification(ExpertVerificationStatus status, LocalDateTime now) {
+    if (status != ExpertVerificationStatus.VERIFIED
+        && status != ExpertVerificationStatus.REJECTED) {
+      throw new IllegalArgumentException("final verification status is required");
+    }
+    verificationStatus = status;
+    updatedAt = Objects.requireNonNull(now, "now must not be null");
+  }
+
   private static String normalizeOptional(String value) {
     return value == null || value.isBlank() ? null : value.trim();
   }

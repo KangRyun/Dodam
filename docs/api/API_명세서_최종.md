@@ -1957,7 +1957,22 @@ Query: `drawingTypeCode?`, `ageGroup?`, `difficulty?`, `templateType?`, `active?
 }
 ```
 
-자격 증빙 원본 URL은 짧은 만료시간으로 관리자에게만 제공한다. 검증 결과 변경 시 전문가에게 알림을 생성한다.
+`status`는 최종 상태인 `VERIFIED`, `REJECTED`만 허용한다. `VERIFIED`는 해당 전문가가 소유한
+`verifiedCredentialIds`를 한 개 이상 전달하며 선택된 자격만 승인한다. `REJECTED`는 승인 자격 목록을 비우고
+공백이 아닌 `rejectionReason`을 필수로 전달하며, 아직 승인되지 않은 자격을 함께 반려한다. 중복 자격 ID 또는 다른
+전문가의 자격 ID는 거부한다.
+
+성공 응답 `data`는 `expertId`, `verificationStatus`, `credentials[] { credentialId,
+verificationStatus }`, `reviewedAt`을 반환한다. 검토 결과와 내부 메모는 정규화된 검토 이력에 보존하고 공통 감사
+로그를 남긴다. `internalNote`는 관리자 내부 기록이며 전문가 응답이나 알림에 노출하지 않는다. 검증 결과 변경 시
+전문가 알림함에 `EXPERT_VERIFICATION_RESULT` 알림을 생성한다.
+
+오류는 관리자 권한이 없으면 `AUTH_403_002`, 요청 조합이 잘못되면
+`EXPERT_VERIFICATION_REQUEST_INVALID`, 전문가가 없으면 `EXPERT_PROFILE_NOT_FOUND`, 선택 자격이 해당 전문가에게
+속하지 않으면 `CREDENTIAL_NOT_FOUND`를 반환한다.
+
+자격 증빙 원본 URL은 짧은 만료시간으로 관리자에게만 제공한다. 원본 조회와 관리자 검증 대기 목록은 ADMIN-09 범위에서
+제공한다.
 
 ### 17.7 감사 로그
 

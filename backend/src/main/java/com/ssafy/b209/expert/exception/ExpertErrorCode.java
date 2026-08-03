@@ -28,7 +28,10 @@ public enum ExpertErrorCode implements ErrorCode {
   CREDENTIAL_NOT_FOUND(HttpStatus.NOT_FOUND, "CREDENTIAL_NOT_FOUND", "전문가 자격 정보를 찾을 수 없습니다."),
   /** 관리자 검토가 시작되거나 끝난 자격을 사용자가 삭제하려는 경우다. */
   CREDENTIAL_DELETE_NOT_ALLOWED(
-      HttpStatus.CONFLICT, "CREDENTIAL_DELETE_NOT_ALLOWED", "검토 이력이 있는 자격 정보는 삭제할 수 없습니다.");
+      HttpStatus.CONFLICT, "CREDENTIAL_DELETE_NOT_ALLOWED", "검토 이력이 있는 자격 정보는 삭제할 수 없습니다."),
+  /** 승인·반려 상태와 사유 또는 선택 자격 조합이 올바르지 않은 경우다. */
+  EXPERT_VERIFICATION_REQUEST_INVALID(
+      HttpStatus.BAD_REQUEST, "EXPERT_VERIFICATION_REQUEST_INVALID", "전문가 검증 요청이 올바르지 않습니다.");
 
   private final HttpStatus httpStatus;
   private final String code;
