@@ -84,6 +84,18 @@ tasks.named('test') {
         systemProperty 'junit.jupiter.testclass.order.default',
                 'org.junit.jupiter.api.ClassOrderer$Random'
     }
+
+    // 테스트 JVM 시간대를 운영·CI와 같은 UTC로 고정한다.
+    // 운영 파드와 backend/Dockerfile 은 TZ 를 주지 않아 JVM 기본 시간대가 UTC 다
+    // (infra/k8s/base/cronjobs.yaml:145 가 "컨테이너의 date 는 여전히 UTC 다"로 명시).
+    // 반면 개발 PC 는 보통 Asia/Seoul 이다. JDBC 드라이버가 instant 기반 값(java.sql.Timestamp —
+    // Hibernate 가 LocalDateTime 필드를 이걸로 주고받는다)을 JVM 기본 시간대 ↔ 세션 시간대(+09:00)로
+    // 변환하므로, 시각을 다루는 테스트가 로컬에서만 통과하고 CI 에서 9시간 어긋날 수 있다.
+    // 실제로 S15P11B209-822 의 NotificationIntegrationTest 2건이 그렇게 develop CI 를 깨뜨렸다 —
+    // 로컬에서는 변환이 항등이어서 false green 이었다.
+    // 고정해 두면 그 계열의 어긋남이 CI 가 아니라 로컬에서 먼저 드러난다.
+    // 다른 시간대를 의도적으로 재현할 때만 `-PtestTimeZone=Asia/Seoul` 로 덮어쓴다.
+    systemProperty 'user.timezone', project.findProperty('testTimeZone') ?: 'UTC'
 }
 
 tasks.withType(Javadoc).configureEach {
