@@ -26,7 +26,7 @@ import com.ssafy.b209.notification.exception.NotificationErrorCode;
 import com.ssafy.b209.notification.service.DeviceTokenService;
 import com.ssafy.b209.notification.service.NotificationQueryService;
 import com.ssafy.b209.notification.service.NotificationReadService;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
@@ -62,7 +62,7 @@ class NotificationControllerTest {
                 "FCM",
                 true,
                 true,
-                LocalDateTime.parse("2026-07-26T12:00:00")));
+                Instant.parse("2026-07-26T12:00:00Z")));
 
     mockMvc
         .perform(
@@ -76,6 +76,8 @@ class NotificationControllerTest {
         .andExpect(jsonPath("$.data.pushProvider").value("FCM"))
         .andExpect(jsonPath("$.data.registered").value(true))
         .andExpect(jsonPath("$.data.active").value(true))
+        // 시각은 타임존 표기가 있는 UTC ISO-8601로 나간다. `Z`가 없으면 클라이언트가 자기 지역 시각으로 읽어 어긋난다.
+        .andExpect(jsonPath("$.data.updatedAt").value("2026-07-26T12:00:00Z"))
         // Token 원문·암호문·hash는 응답에 실리지 않는다.
         .andExpect(jsonPath("$.data.pushToken").doesNotExist())
         .andExpect(jsonPath("$.data.tokenHash").doesNotExist());
@@ -166,8 +168,8 @@ class NotificationControllerTest {
                         Map.of("analysisId", "77"),
                         "SENT",
                         null,
-                        LocalDateTime.parse("2026-07-26T11:00:00"),
-                        LocalDateTime.parse("2026-07-26T10:00:00")))));
+                        Instant.parse("2026-07-26T11:00:00Z"),
+                        Instant.parse("2026-07-26T10:00:00Z")))));
 
     mockMvc
         .perform(
@@ -182,6 +184,9 @@ class NotificationControllerTest {
         .andExpect(jsonPath("$.data.content[0].relatedResourceId").value(55))
         .andExpect(jsonPath("$.data.content[0].data.analysisId").value("77"))
         .andExpect(jsonPath("$.data.content[0].readAt").doesNotExist())
+        // 시각은 타임존 표기가 있는 UTC ISO-8601로 나간다.
+        .andExpect(jsonPath("$.data.content[0].sentAt").value("2026-07-26T11:00:00Z"))
+        .andExpect(jsonPath("$.data.content[0].createdAt").value("2026-07-26T10:00:00Z"))
         // 서버가 이동 URL을 만들지 않는다.
         .andExpect(jsonPath("$.data.content[0].linkUrl").doesNotExist());
   }
@@ -190,13 +195,13 @@ class NotificationControllerTest {
   void marksNotificationReadAndReturnsFirstReadTime() throws Exception {
     given(currentUserResolver.requireUserId()).willReturn(USER_ID);
     given(notificationReadService.markRead(USER_ID, 900L))
-        .willReturn(new NotificationReadResponse(900L, LocalDateTime.parse("2026-07-26T12:00:00")));
+        .willReturn(new NotificationReadResponse(900L, Instant.parse("2026-07-26T12:00:00Z")));
 
     mockMvc
         .perform(patch("/api/v1/notifications/{notificationId}/read", 900L))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.notificationId").value(900))
-        .andExpect(jsonPath("$.data.readAt").value("2026-07-26T12:00:00"));
+        .andExpect(jsonPath("$.data.readAt").value("2026-07-26T12:00:00Z"));
   }
 
   @Test
@@ -216,14 +221,13 @@ class NotificationControllerTest {
   void marksAllNotificationsReadAndReturnsCountAndReadTime() throws Exception {
     given(currentUserResolver.requireUserId()).willReturn(USER_ID);
     given(notificationReadService.markAllRead(USER_ID, null))
-        .willReturn(
-            new NotificationMarkAllReadResponse(3, LocalDateTime.parse("2026-07-26T12:00:00")));
+        .willReturn(new NotificationMarkAllReadResponse(3, Instant.parse("2026-07-26T12:00:00Z")));
 
     mockMvc
         .perform(patch("/api/v1/notifications/read-all"))
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.data.updatedCount").value(3))
-        .andExpect(jsonPath("$.data.readAt").value("2026-07-26T12:00:00"));
+        .andExpect(jsonPath("$.data.readAt").value("2026-07-26T12:00:00Z"));
 
     verify(notificationReadService).markAllRead(USER_ID, null);
   }

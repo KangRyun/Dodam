@@ -1,11 +1,14 @@
 package com.ssafy.b209.notification.dto.response;
 
 import io.swagger.v3.oas.annotations.media.Schema;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.Map;
 
 /**
  * NOTI-03 목록의 알림 한 건이다. 명세 15.3 항목 계약을 따른다.
+ *
+ * <p>시각은 {@code Instant}로 담아 UTC ISO-8601(`Z` 접미사)로 직렬화한다. 타임존 표기가 없으면 클라이언트가 값을 자기 지역 시각으로 해석해
+ * UTC와의 차이만큼 어긋난다.
  *
  * @param notificationId 알림 식별자
  * @param type 알림 유형
@@ -29,6 +32,6 @@ public record NotificationListItemResponse(
     Long relatedResourceId,
     Map<String, String> data,
     String deliveryStatus,
-    LocalDateTime readAt,
-    LocalDateTime sentAt,
-    LocalDateTime createdAt) {}
+    Instant readAt,
+    Instant sentAt,
+    Instant createdAt) {}

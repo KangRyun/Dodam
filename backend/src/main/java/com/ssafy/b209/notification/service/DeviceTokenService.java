@@ -186,6 +186,8 @@ public class DeviceTokenService {
    *
    * <p>{@code updatedAt}은 Entity가 아니라 서버 수신 시각을 쓴다. DB의 {@code ON UPDATE CURRENT_TIMESTAMP}는 flush
    * 후 Entity에 반영되지 않아 갱신 경로에서 이전 값이 나간다.
+   *
+   * <p>응답 시각은 UTC ISO-8601(`Z` 접미사)로 나가도록 {@code Instant}를 그대로 쓴다.
    */
   private DeviceTokenResponse response(NotificationDeviceToken deviceToken, boolean registered) {
     return new DeviceTokenResponse(
@@ -194,6 +196,6 @@ public class DeviceTokenService {
         deviceToken.getPushProvider(),
         deviceToken.isActive(),
         registered,
-        LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC));
+        clock.instant());
   }
 }

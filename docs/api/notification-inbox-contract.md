@@ -3,7 +3,7 @@
 > Jira: `S15P11B209-549`(NOTI-01) · `550`(NOTI-02) · `551`(NOTI-03) · `552`(NOTI-04) · `553`(NOTI-05)
 > 범위: 푸시 디바이스 Token 등록·해제, 알림 목록 조회, 단건 읽음 처리, 전체 읽음 처리
 > 기준 명세: `API_명세서_최종.md` §15 알림, `erd-cloud-schema-v1.2`
-> 최종 수정: 2026-07-27
+> 최종 수정: 2026-08-03 (시각 표기를 UTC ISO-8601로 확정 — `S15P11B209-822`)
 
 명세 §15가 정의하지 않은 응답 본문·오류 코드·경계 동작을 as-built로 확정한다. 프론트엔드와 백엔드가 이 문서를 단일 기준으로 사용한다. NOTI-05(`PATCH /notifications/read-all`, S15P11B209-553)의 as-built는 §6.5에 있다.
 
@@ -19,6 +19,22 @@
 6. **남의 자원은 `403`이 아니라 `404`로 응답한다**(존재 은닉). 알림 ID·기기 식별자의 실재 여부를 노출하지 않는다.
 7. **응답에 Push Token 원문·암호문·hash를 포함하지 않는다.** 클라이언트가 이미 아는 값이며, 응답에 실으면 로그·프록시에 남을 경로만 늘어난다.
 8. **목록 응답에 `unreadCount` 같은 추가 필드를 넣지 않는다.** §15.3 항목 목록을 그대로 따른다. 미열람 건수는 `unreadOnly=true&size=1`의 `totalElements`로 얻는다.
+9. **모든 시각은 UTC ISO-8601로 `Z` 접미사를 붙여 보낸다** — §0.1 참조.
+
+### 0.1 시각 표기 규약 (UTC ISO-8601)
+
+이 계약의 모든 시각 필드(`readAt`·`sentAt`·`createdAt`·`updatedAt`)는 **UTC ISO-8601이며 타임존 표기 `Z`를 반드시 포함한다.**
+
+```
+2026-08-03T04:53:00.123456Z
+```
+
+- **표기가 없으면 클라이언트가 값을 자기 지역 시각으로 해석한다.** Dart의 `DateTime.parse`는 `Z`가 없는 문자열을 로컬 시각으로 읽으므로 뒤이은 `.toLocal()`이 무동작이 되고, KST(UTC+9) 기기에서 9시간 과거로 표시된다(`S15P11B209-822`).
+- 소수 초 자리수는 값에 따라 달라진다(0·3·6자리). 고정 길이를 가정하거나 문자열을 잘라 쓰지 말고 ISO-8601 파서로 읽을 것.
+- 클라이언트는 표시 직전에만 지역 시각으로 변환한다. 서버는 지역 시각을 만들지 않는다.
+- 이 규약은 같은 레포의 `GET /api/v1/drawing-sessions/{id}` 등 다른 endpoint와 같다. 알림만 예외였던 것을 정렬했다.
+
+> 저장 계층과의 관계: 앱 내부는 UTC 기준 시계(`Clock.systemUTC()`)로 계산하고 Entity의 `LocalDateTime`은 UTC 벽시계다. 응답 경계에서 `ZoneOffset.UTC`로 해석해 `Instant`로 내보낸다. `notifications`의 시각 컬럼은 `DATETIME(6)`이라 마이크로초까지만 보존된다.
 
 ## 1. 스키마 전제 (V14)
 
@@ -91,13 +107,13 @@ Content-Type: application/json
     "pushProvider": "FCM",
     "active": true,
     "registered": true,
-    "updatedAt": "2026-07-26T12:00:00"
+    "updatedAt": "2026-07-26T12:00:00Z"
   }
 }
 ```
 
 - `registered`: 새로 등록했으면 `true`, 기존 기기를 갱신했으면 `false`
-- `updatedAt`: 서버가 요청을 수신한 시각. DB의 `ON UPDATE CURRENT_TIMESTAMP`는 flush 후 Entity에 반영되지 않아 갱신 경로에서 이전 값이 나가므로 서버 시각을 쓴다
+- `updatedAt`: 서버가 요청을 수신한 시각(UTC ISO-8601, §0.1). DB의 `ON UPDATE CURRENT_TIMESTAMP`는 flush 후 Entity에 반영되지 않아 갱신 경로에서 이전 값이 나가므로 서버 시각을 쓴다
 - **Token 원문·암호문·hash는 응답에 없다**
 
 ### 오류
@@ -163,8 +179,8 @@ Authorization: Bearer {accessToken}
         "data": { "analysisId": "77" },
         "deliveryStatus": "SENT",
         "readAt": null,
-        "sentAt": "2026-07-26T11:00:00",
-        "createdAt": "2026-07-26T10:00:00"
+        "sentAt": "2026-07-26T11:00:00Z",
+        "createdAt": "2026-07-26T10:00:00Z"
       }
     ],
     "page": 0,
@@ -204,7 +220,7 @@ Authorization: Bearer {accessToken}
 {
   "data": {
     "notificationId": 900,
-    "readAt": "2026-07-26T12:00:00"
+    "readAt": "2026-07-26T12:00:00Z"
   }
 }
 ```
@@ -240,13 +256,13 @@ Authorization: Bearer {accessToken}
 {
   "data": {
     "updatedCount": 3,
-    "readAt": "2026-07-26T12:00:00"
+    "readAt": "2026-07-26T12:00:00Z"
   }
 }
 ```
 
 - `updatedCount`: 이번 호출로 **새로 읽음 처리된 건수**다. 이미 읽은 알림은 세지 않는다
-- `readAt`: 이번 호출로 기록한 읽은 시각(서버 시각)이다. 바뀐 건이 없으면(`updatedCount = 0`) `null`이다 — §5 목록의 미열람 항목이 `readAt: null`인 것과 같은 규약이다
+- `readAt`: 이번 호출로 기록한 읽은 시각(서버 시각, UTC ISO-8601 — §0.1)이다. 바뀐 건이 없으면(`updatedCount = 0`) `null`이다 — §5 목록의 미열람 항목이 `readAt: null`인 것과 같은 규약이다
 
 **상태 코드는 `204`가 아니라 `200`이다.** NOTI-04와 같은 이유로, 클라이언트가 목록을 다시 받지 않고 미열람 배지를 갱신할 수 있게 처리 건수와 시각을 본문으로 준다. 본문이 의미를 가지므로 `204`(본문 없음)는 맞지 않다.
 
@@ -289,8 +305,8 @@ Authorization: Bearer {accessToken}
 
 - `DeviceTokenCipherTest` — 왕복 복원, 같은 Token의 암호문이 매번 다름, 키 미구성·비32바이트·비Base64·변조 암호문 거부
 - `DeviceTokenServiceTest` — 평문 미저장, 같은 기기 갱신 시 행 누적 없음·재활성화, 타 계정 Token 409, 잘못된 요청 5종이 같은 코드, 해제는 비활성화
-- `NotificationQueryServiceTest` — 정렬 tie-breaker, 자원 우선순위, 부가 속성 조립, 빈 페이지에서 속성 조회 생략, `type`·페이지 범위 거부
+- `NotificationQueryServiceTest` — 정렬 tie-breaker, 자원 우선순위, 부가 속성 조립, 빈 페이지에서 속성 조회 생략, `type`·페이지 범위 거부, **Entity 벽시계를 UTC로 해석·미열람 시각 null 유지**
 - `NotificationReadServiceTest` — 멱등성(최초 시각 유지·쓰기 생략), 남의 알림 404, 전체 읽음(유형 필터·0건 시 시각 null·잘못된 유형 400)
-- `NotificationControllerTest` — Token 미노출, 오류 코드, 명세 기본 Query 값 전달
-- `NotificationIntegrationTest` — 실 MySQL 관통. 암호문 왕복, V14 UNIQUE가 upsert를 성립시키는지, 해제 후 행 유지·재활성화, 필터 조합, 빈 페이지 200, 읽음 멱등, 존재 은닉, 전체 읽음(유형 필터·이미 읽은 시각 유지·타 사용자 미영향)
+- `NotificationControllerTest` — Token 미노출, 오류 코드, 명세 기본 Query 값 전달, **시각이 `Z` 표기로 직렬화되는지**
+- `NotificationIntegrationTest` — 실 MySQL 관통. 암호문 왕복, V14 UNIQUE가 upsert를 성립시키는지, 해제 후 행 유지·재활성화, 필터 조합, 빈 페이지 200, 읽음 멱등, 존재 은닉, 전체 읽음(유형 필터·이미 읽은 시각 유지·타 사용자 미영향), **시각 표기 규약(§0.1) 두 건 — DB 벽시계가 `Z` 표기로 나가는지, 쓰기·읽기가 같은 instant인지**
 - `DatabaseMigrationIntegrationTest` — V14 컬럼과 **두 UNIQUE 공존** 단언

@@ -57,7 +57,8 @@ class NotificationReadServiceTest {
     NotificationReadResponse response = service.markRead(USER_ID, NOTIFICATION_ID);
 
     assertThat(response.notificationId()).isEqualTo(NOTIFICATION_ID);
-    assertThat(response.readAt()).isEqualTo(LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
+    // Entity의 LocalDateTime은 UTC 벽시계이므로 응답 Instant는 시계가 준 instant와 같아야 한다.
+    assertThat(response.readAt()).isEqualTo(NOW);
   }
 
   @Test
@@ -69,7 +70,7 @@ class NotificationReadServiceTest {
     NotificationReadResponse response = service.markRead(USER_ID, NOTIFICATION_ID);
 
     // 재호출이 최초 읽은 시각을 덮어쓰면 목록 재진입만으로 기록이 바뀐다.
-    assertThat(response.readAt()).isEqualTo(EARLIER);
+    assertThat(response.readAt()).isEqualTo(EARLIER.toInstant(ZoneOffset.UTC));
     verify(notificationRepository, never()).saveAndFlush(any(Notification.class));
   }
 
@@ -94,7 +95,8 @@ class NotificationReadServiceTest {
     NotificationMarkAllReadResponse response = service.markAllRead(USER_ID, null);
 
     assertThat(response.updatedCount()).isEqualTo(3);
-    assertThat(response.readAt()).isEqualTo(LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
+    // 응답은 UTC instant로, DB에 넘기는 값은 UTC 벽시계 LocalDateTime으로 같은 시각을 가리킨다.
+    assertThat(response.readAt()).isEqualTo(NOW);
     verify(notificationRepository)
         .markAllReadByRecipient(USER_ID, null, LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
   }

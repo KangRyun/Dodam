@@ -1654,6 +1654,7 @@ REPORT-07은 Request Body 없이 `Idempotency-Key` Header를 필수로 받는다
 - Query: `type?`, `unreadOnly=false`, `page=0`, `size=20`.
 - 항목: `notificationId`, `type`, `title`, `content`, `relatedResourceType`, `relatedResourceId`, `data`, `deliveryStatus`, `readAt`, `sentAt`, `createdAt`.
 - 알림의 이동 경로는 서버가 임의 URL 대신 `relatedResourceType`과 `relatedResourceId`로 제공하고 프론트가 라우팅한다.
+- `readAt`·`sentAt`·`createdAt`(및 NOTI-01 응답 `updatedAt`)은 **UTC ISO-8601로 `Z` 접미사를 포함한다**(예: `2026-08-03T04:53:00.123456Z`). 표기가 없으면 클라이언트가 지역 시각으로 해석해 어긋난다 — 상세는 `notification-inbox-contract.md` §0.1.
 
 ### 15.4 위험 관련 알림
 
