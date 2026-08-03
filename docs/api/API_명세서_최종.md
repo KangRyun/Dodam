@@ -1750,9 +1750,10 @@ REPORT-07은 Request Body 없이 `Idempotency-Key` Header를 필수로 받는다
 
 ### 16.5 좋아요
 
-- 등록 응답 `201`: `{ "postId": 1, "liked": true, "likeCount": 12 }`.
+- 최초 등록 응답 `201`: `{ "postId": 1, "liked": true, "likeCount": 12 }`.
+- 이미 좋아요 상태인 사용자의 등록 재요청은 멱등하게 `200`으로 현재 상태와 동일한 응답을 반환하며 행과 집계를 중복 생성하지 않는다.
 - 취소 `204`.
-- 중복 등록은 `409 LIKE_ALREADY_EXISTS`; 삭제 재호출은 멱등하게 `204`로 처리할 수 있다.
+- 좋아요가 없는 사용자의 삭제 재요청도 멱등하게 `204`로 처리한다.
 
 ### 16.6 댓글과 전문가 Q&A
 
@@ -1838,7 +1839,7 @@ REPORT-07은 Request Body 없이 `Idempotency-Key` Header를 필수로 받는다
 
 ### 16.9 오류
 
-`POST_NOT_FOUND`, `POST_ACCESS_DENIED`, `POST_TYPE_NOT_ALLOWED`, `POST_CONTENT_REJECTED`, `LIKE_ALREADY_EXISTS`, `COMMENT_NOT_FOUND`, `COMMENT_ROLE_NOT_ALLOWED`, `COMPLAINT_ALREADY_EXISTS`, `TEMPLATE_NOT_FOUND`, `TEMPLATE_AUTHOR_NOT_VERIFIED`.
+`POST_NOT_FOUND`, `POST_ACCESS_DENIED`, `POST_TYPE_NOT_ALLOWED`, `POST_CONTENT_REJECTED`, `COMMENT_NOT_FOUND`, `COMMENT_ROLE_NOT_ALLOWED`, `COMPLAINT_ALREADY_EXISTS`, `TEMPLATE_NOT_FOUND`, `TEMPLATE_AUTHOR_NOT_VERIFIED`.
 
 COMM-01 목록 조회에서 인증 누락·만료는 공통 401, 역할·피드 권한 거부는 403, 잘못된 `type`·`feed`·`authorRole`·`page`·`size`·`sort`·`keyword`는 공통 `VALIDATION_FAILED`(422)를 사용한다. 목록 0건은 200 빈 페이지이며 `POST_NOT_FOUND`를 사용하지 않는다.
 
