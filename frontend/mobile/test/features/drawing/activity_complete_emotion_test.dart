@@ -1024,7 +1024,14 @@ void main() {
     expect(repository.lastActivityRequest?.conversationSkipped, isFalse);
     expect(repository.lastActivityRequest?.requestReport, isTrue);
     expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
-    expect(find.text('이제 보호자에게 기기를 건네주세요.'), findsOneWidget);
+    expect(
+      find.text('더 그리고 싶으면 또 그려도 돼요.\n다 했으면 보호자에게 기기를 건네주세요.'),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('activity-complete-draw-again')),
+      findsOneWidget,
+    );
     expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
   });
 
@@ -1558,6 +1565,26 @@ void main() {
 
     expect(repository.sessionStatusCalls, 2);
     expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
+  });
+
+  testWidgets('또 그리기를 누르면 아동 홈으로 스택을 세워 새 활동을 시작한다', (tester) async {
+    final observer = _LeaveNavigationObserver();
+    await _pumpComplete(tester, navigatorObserver: observer);
+
+    expect(
+      find.byKey(const ValueKey('activity-complete-draw-again')),
+      findsOneWidget,
+    );
+
+    await tester.tap(
+      find.byKey(const ValueKey('activity-complete-draw-again')),
+    );
+    await tester.pumpAndSettle();
+
+    // 완료 확인 Dialog 없이 곧바로 아동 홈으로 이동한다.
+    expect(find.text('아동 홈 테스트'), findsOneWidget);
+    expect(find.text('그림 활동을 모두 마쳤어요!'), findsNothing);
+    expect(observer.childHomePushes, 1);
   });
 
   testWidgets('보호자 확인 후 스택을 정리해 Guardian Home으로 이동한다', (tester) async {
