@@ -397,7 +397,7 @@ a {
   padding: 8px 18px 10px;
 }
 
-.community-profile-menu > div {
+.community-profile-menu > a {
   display: flex;
   min-height: 44px;
   align-items: center;
@@ -405,13 +405,20 @@ a {
   border-bottom: 1px solid #e8ebe5;
   color: #45505b;
   font-size: 14px;
+  text-decoration: none;
 }
 
-.community-profile-menu > div:last-child {
+.community-profile-menu > a:hover,
+.community-profile-menu > a:focus-visible {
+  color: #5f9f73;
+  background: #f7faf6;
+}
+
+.community-profile-menu > a:last-child {
   border-bottom: 0;
 }
 
-.community-profile-menu > div > span:last-child {
+.community-profile-menu > a > span:last-child {
   color: #a5ada5;
   font-size: 20px;
 }
@@ -432,6 +439,96 @@ a {
   border-radius: 999px;
   color: #78828c;
   font-size: 13px;
+}
+
+.community-personal-heading {
+  display: flex;
+  min-height: 64px;
+  align-items: center;
+  gap: 18px;
+}
+
+.community-personal-heading a {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  place-items: center;
+  border: 1px solid #dfe4dc;
+  border-radius: 50%;
+  color: #28323d;
+  text-decoration: none;
+}
+
+.community-personal-heading h1 {
+  margin: 0;
+  font-size: 24px;
+}
+
+.community-settings-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 28px;
+  border: 1px solid #dfe4dc;
+  border-radius: 22px;
+  background: #fff;
+}
+
+.community-settings-card + .community-settings-card {
+  margin-top: 18px;
+}
+
+.community-post-list[data-compact="true"] .community-post-excerpt {
+  display: none;
+}
+
+.community-post-list[data-compact="true"] .community-post-card {
+  min-height: 116px;
+}
+
+.community-settings-card h2 {
+  margin: 0 0 8px;
+  font-size: 18px;
+}
+
+.community-settings-card p {
+  margin: 0;
+  color: #77818c;
+}
+
+.community-switch input {
+  position: absolute;
+  opacity: 0;
+}
+
+.community-switch span {
+  display: block;
+  width: 54px;
+  height: 30px;
+  border-radius: 999px;
+  background: #d8ddd7;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.community-switch span::after {
+  display: block;
+  width: 24px;
+  height: 24px;
+  margin: 3px;
+  border-radius: 50%;
+  background: white;
+  content: "";
+  transition: transform 0.2s;
+}
+
+.community-switch input:checked + span {
+  background: #6fa77e;
+}
+
+.community-switch input:checked + span::after {
+  transform: translateX(24px);
 }
 
 .community-empty-state {

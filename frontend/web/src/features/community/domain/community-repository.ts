@@ -13,6 +13,10 @@ import type {
 export interface CommunityRepository {
   /** COMM-01 게시글 목록·피드 조회. */
   getFeed(filter?: CommunityPostFilter): Promise<CommunityFeed>;
+  /** 로그인 사용자가 작성한 게시글 목록. */
+  getMyPosts(): Promise<CommunityFeed>;
+  /** 로그인 사용자가 좋아요한 게시글 목록. */
+  getLikedPosts(): Promise<CommunityFeed>;
   /** COMM-03 게시글 상세 조회. 없으면 `null`. */
   getPost(postId: number): Promise<CommunityPost | null>;
   /** COMM-02 게시글 작성. 생성된 게시글 상세를 반환한다. */
