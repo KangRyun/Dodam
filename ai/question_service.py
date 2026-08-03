@@ -198,7 +198,41 @@ def _history_dicts(messages: list) -> list[dict]:
 # ── HTP 주제·대상 지시 블록 (S15P11B209-713) ────────────────────
 # 프롬프트가 '지금 무슨 주제인지'를 몰라 다른 주제 명사를 집어오던 버그(709 원인 4)를 막는다.
 # activityType·drawingSubject를 프롬프트에 못박아 다른 주제로 새지 않게 하고, 고른 대상 하나만 묻게 한다.
+#
+# ⚠️ 무엇을 못 박는가 — S15P11B209-788 B의 핵심 구분:
+#   HTP는 아이가 그릴 주제가 집·나무·사람으로 정해져 있다. 그래서 **'지금 어느 주제 단계인가'는
+#   활동이 정한 사실**이고 아이가 뒤집을 수 없다(다른 주제로 새면 709 계열 재발).
+#   그러나 **그 그림 안의 각 부분이 무엇인지는 아이가 정한다** — 탐지가 '문'이라 해도 아이가
+#   창문이라 하면 창문이다. 예전 문구("아이는 '집'을 그렸어. 이건 정해진 사실이야")는 이 둘을
+#   뭉쳐 못 박아, 공통 프롬프트(conversation_common)의 "무조건 아이 말을 믿어"와 정면 충돌했다.
+#   718 부정 재질문은 아이가 **칩(CHIP_NO)** 으로 부정한 경우만 처리하므로, **말로 정정한 경로**가
+#   그 충돌에 그대로 노출됐다.
 _SUBJECT_KO = {"HOUSE": "집", "TREE": "나무", "PERSON": "사람"}
+
+
+def _other_subjects(subject: str | None) -> str:
+    """현재 주제를 뺀 나머지 HTP 주제 이름(S15P11B209-788 H).
+
+    예전 문구는 "다른 주제(집·나무·사람)로 넘어가지 마"라고 세 주제를 통째로 나열해
+    **현재 주제까지 금지 목록에 넣었다** — 집 단계에서 집을 묻지 말라고 읽힐 수 있었다.
+    """
+    return "·".join(name for code, name in _SUBJECT_KO.items() if code != subject)
+
+
+def _target_line(req: QuestionRequest, target_name: str) -> str:
+    """대상 객체 지시 한 줄 — 첫 질문에서만 '이것만'으로 좁힌다(S15P11B209-788 C).
+
+    target_name은 아이 발화와 무관하게 신뢰도 최고순으로 뽑힌다(_target_for_purpose).
+    아이가 이미 말한 뒤에도 "이 하나에 대해서만 물어봐"를 붙이면, 대화 프롬프트의
+    "방금 한 말에서 이어지는 질문을 해. 갑자기 주제를 바꾸지 마"와 동시에 지시되어
+    프롬프트가 스스로 "바꿔라/바꾸지 마라"를 요구한다.
+    """
+    if _last_child_index(req) is None:
+        return f"- 지금은 이 하나에 대해서만 물어봐: {target_name}"
+    return (
+        f"- 아이가 방금 한 말과 이어진다면 이것도 물어볼 수 있어: {target_name}"
+        " 아이 말과 안 이어지면 무리해서 끌어오지 말고, 아이가 한 말을 따라가."
+    )
 
 
 def _activity_block(
@@ -209,9 +243,11 @@ def _activity_block(
 ) -> str:
     """activityType·drawingSubject·대상 객체를 프롬프트 지시 블록으로 만든다.
 
-    - HTP: 주제를 확정 사실로 못박고 다른 주제(집·나무·사람)로 넘어가지 못하게 한다.
+    - HTP: '지금 어느 주제 단계인가'만 확정 사실로 못박아 다른 주제로 넘어가지 못하게 하고,
+      그림 안의 각 부분 이름은 아이 말에 따르게 한다(S15P11B209-788 B).
       고른 대상이 있으면 그 하나만, 없으면 주제 그림 전체를 묻게 한다.
-    - ART_DIARY: 주제 개념 없이, 대상이 있으면 그 하나만 묻게 한다.
+    - ART_DIARY: 주제 개념이 없고, 탐지 이름도 믿지 않게 한다 — sketch 가중치는 오탐이 잦아
+      이름의 근거는 탐지 목록이 아니라 그림 서술과 아이 말이다.
     - activityType이 없으면(구 BE·주제 미전달) 주제 제약 없이 기존 동작을 유지한다.
     반복 방지: 이미 물어본 게 있으면 새로운 것을 묻도록 덧붙인다(대상 선택에서도 이미 배제됨).
     reask_candidates(S15P11B209-718): 아이가 탐지를 부정해 후보 칩으로 다시 묻는 경우, 보기 중에서
@@ -224,19 +260,37 @@ def _activity_block(
     lines: list[str] = []
     if req.activity_type == "HTP" and subject_ko:
         lines.append("[이 그림의 주제]")
+        # 못 박는 것은 '활동 단계'다 — 그림 내용의 이름이 아니다(788 B).
         lines.append(
-            f"- 아이는 '{subject_ko}'을(를) 그렸어. 이건 정해진 사실이야. "
-            f"'{subject_ko}'와 그 부분에 대해서만 묻고, 다른 주제(집·나무·사람)로 넘어가지 마."
+            f"- 지금은 '{subject_ko}' 그림을 그리는 순서야. 활동에서 정해진 것이라 바뀌지 않아."
+        )
+        lines.append(
+            f"- 그래서 {_other_subjects(req.drawing_subject)} 이야기로 넘어가지 마."
+            " 아이가 방금 그린 이 그림 하나에 대해서만 물어봐."
+        )
+        lines.append(
+            "- 다만 이 그림 안의 각 부분이 무엇인지는 아이가 정해."
+            " 분석 결과와 다르게 말하면 아이 말을 따라."
+        )
+        lines.append(
+            f'- 아이가 "이건 {subject_ko} 아니야"처럼 그림 자체를 다르게 말해도 우기지 마.'
+            " 아이 말을 그대로 받아준 다음, 그 그림에 대해 계속 이야기해."
         )
         if target_name:
-            lines.append(f"- 지금은 이 하나에 대해서만 물어봐: {target_name}")
+            lines.append(_target_line(req, target_name))
         else:
             lines.append(f"- '{subject_ko}' 그림 전체에 대해 열린 질문을 해.")
     elif req.activity_type == "ART_DIARY":
         lines.append("[이 그림]")
         lines.append("- 자유롭게 그린 그림이야. 정해진 주제는 없어.")
+        # 그림일기 탐지 모델(sketch)은 오탐이 잦다 — 이름의 근거는 탐지 목록이 아니라
+        # 그림 서술과 아이 말이다(788 B, 활동별 판단).
+        lines.append(
+            "- 탐지된 이름은 자주 틀려. 이름을 못 박지 말고 그림 서술과 아이 말을 먼저 믿어."
+            " 아이가 다르게 말하면 그 말을 그대로 따라."
+        )
         if target_name:
-            lines.append(f"- 지금은 이 하나에 대해서만 물어봐: {target_name}")
+            lines.append(_target_line(req, target_name))
     elif target_name:
         lines.append("[지금 물어볼 것]")
         lines.append(f"- {target_name}")

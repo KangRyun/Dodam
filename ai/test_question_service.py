@@ -721,7 +721,34 @@ class SubjectPromptAndTargetTest(unittest.TestCase):
         req = self._htp(detected_objects=[_detected("HOUSE", "집", 0.9)])
         system = question_service._build_messages(req)[0]["content"]
         self.assertIn("'집'", system)
-        self.assertIn("다른 주제", system)
+        # 금지 목록은 '나머지' 주제만 나열한다 — 현재 주제를 넣으면 집 단계에서 집을 묻지
+        # 말라고 읽힐 수 있었다(S15P11B209-788 H).
+        block = question_service._activity_block(req, None)
+        self.assertIn("나무·사람 이야기로 넘어가지 마", block)
+        self.assertNotIn("집·나무·사람", block)
+
+    def test_other_subjects_excludes_current_subject(self):
+        # 788 H: 세 주제를 통째로 나열하던 것을 현재 주제만 빼고 나열하도록 고쳤다.
+        self.assertEqual(question_service._other_subjects("HOUSE"), "나무·사람")
+        self.assertEqual(question_service._other_subjects("TREE"), "집·사람")
+        self.assertEqual(question_service._other_subjects("PERSON"), "집·나무")
+
+    def test_no_broken_particle_in_subject_block(self):
+        """788 H: _SUBJECT_KO 값에 받침이 섞여 "'집'와"처럼 조사가 틀린 문장이 나갔다.
+
+        조사가 필요 없는 문형으로 바꿔 해소했으므로, 어느 주제에서도 깨진 조사가 없어야 한다.
+        """
+        for subject in ("HOUSE", "TREE", "PERSON"):
+            block = question_service._activity_block(
+                self._htp(
+                    drawing_subject=subject,
+                    detected_objects=[_detected("HOUSE", "집", 0.9)],
+                ),
+                None,
+            )
+            for broken in ("'와", "'을(를)", "'과"):
+                self.assertNotIn(broken, block, f"{subject}: 조사 오류 {broken}")
+
 
     def test_first_question_examples_no_longer_inject_other_subjects(self):
         # 709: 예시가 집·나무·사람을 다 넣던 문제 제거 회귀 방어.
@@ -753,7 +780,7 @@ class SubjectPromptAndTargetTest(unittest.TestCase):
         )
         system = question_service._build_messages(req)[0]["content"]
         self.assertIn("정해진 주제는 없어", system)
-        self.assertNotIn("다른 주제", system)
+        self.assertNotIn("이야기로 넘어가지 마", system)
 
     def test_asked_hint_present_only_when_asked_nonempty(self):
         with_asked = question_service._build_messages(
@@ -767,6 +794,111 @@ class SubjectPromptAndTargetTest(unittest.TestCase):
             self._htp(detected_objects=[_detected("HOUSE", "집", 0.9)])
         )[0]["content"]
         self.assertNotIn("다시 묻지 말", without_asked)
+
+
+class SubjectPinningScopeTest(unittest.TestCase):
+    """못 박는 대상은 '활동 단계'이고 그림 내용의 이름은 아이가 정한다 (S15P11B209-788 B).
+
+    예전 문구("아이는 '집'을 그렸어. 이건 정해진 사실이야")는 둘을 뭉쳐 못 박아
+    conversation_common 의 "무조건 아이 말을 믿어"와 정면 충돌했다. 718 부정 재질문은
+    아이가 칩(CHIP_NO)으로 부정한 경우만 처리하므로 '말로 정정한 경로'가 그대로 노출됐다.
+    """
+
+    def _htp(self, **overrides):
+        base = dict(
+            activity_type="HTP",
+            drawing_subject="HOUSE",
+            detected_objects=[_detected("HOUSE_DOOR", "집의 문", 0.9)],
+        )
+        base.update(overrides)
+        return _request(**base)
+
+    def test_stage_is_pinned_not_the_drawing_content(self):
+        block = question_service._activity_block(self._htp(), None)
+        # 활동 단계는 확정 — 다른 주제로 새면 709 계열이 재발한다.
+        self.assertIn("그리는 순서야", block)
+        self.assertIn("바뀌지 않아", block)
+        # 그림 내용을 확정 사실로 못 박는 옛 문구는 사라졌다.
+        self.assertNotIn("이건 정해진 사실이야", block)
+
+    def test_part_naming_yields_to_the_child(self):
+        block = question_service._activity_block(self._htp(), None)
+        self.assertIn("각 부분이 무엇인지는 아이가 정해", block)
+        self.assertIn("분석 결과와 다르게 말하면 아이 말을 따라", block)
+
+    def test_subject_denial_is_not_argued_with(self):
+        # 아이가 주제 자체를 부정해도 우기지 않는다 — 다만 다른 주제로는 넘어가지 않는다.
+        block = question_service._activity_block(self._htp(), None)
+        self.assertIn('"이건 집 아니야"', block)
+        self.assertIn("우기지 마", block)
+        self.assertIn("나무·사람 이야기로 넘어가지 마", block)
+
+    def test_no_contradiction_with_common_child_first_rule(self):
+        """조립된 프롬프트 안에서 '아이 말 우선'과 '주제 고정'이 함께 성립한다."""
+        req = self._htp(
+            recent_messages=[
+                RecentMessage(
+                    sender_type="AI", message_type="QUESTION", text="이 문은 무슨 색이야?"
+                ),
+                RecentMessage(
+                    sender_type="CHILD",
+                    message_type="ANSWER",
+                    text="그거 문 아니고 창문이야.",
+                ),
+            ]
+        )
+        system = question_service._build_messages(req)[0]["content"]
+        self.assertIn("무조건 아이 말을 믿어", system)  # conversation_common
+        self.assertIn("각 부분이 무엇인지는 아이가 정해", system)  # activity_block
+        self.assertNotIn("이건 정해진 사실이야", system)
+
+    def test_diary_does_not_trust_detected_names(self):
+        # 그림일기 탐지(sketch)는 오탐이 잦다 — 이름의 근거는 서술과 아이 말이다.
+        block = question_service._activity_block(
+            _request(
+                activity_type="ART_DIARY",
+                drawing_subject=None,
+                detected_objects=[_detected("UNKNOWN", "강아지", 0.9)],
+            ),
+            None,
+        )
+        self.assertIn("탐지된 이름은 자주 틀려", block)
+        self.assertIn("아이가 다르게 말하면 그 말을 그대로 따라", block)
+
+
+class TargetLineScopeTest(unittest.TestCase):
+    """대상 지정은 첫 질문에서만 '이것만'으로 좁힌다 (S15P11B209-788 C).
+
+    target_name 은 아이 발화와 무관하게 신뢰도 최고순으로 뽑힌다(_target_for_purpose).
+    아이가 이미 말한 뒤에도 "이 하나에 대해서만"을 붙이면, 대화 프롬프트의
+    "방금 한 말에서 이어지는 질문을 해"와 동시에 지시되어 서로 모순된다.
+    """
+
+    def _req(self, *, spoken: bool):
+        messages = []
+        if spoken:
+            messages = [
+                RecentMessage(sender_type="AI", message_type="QUESTION", text="뭐 그렸어?"),
+                RecentMessage(
+                    sender_type="CHILD", message_type="ANSWER", text="창문 그렸어."
+                ),
+            ]
+        return _request(
+            activity_type="HTP",
+            drawing_subject="HOUSE",
+            detected_objects=[_detected("HOUSE_DOOR", "집의 문", 0.9)],
+            recent_messages=messages,
+        )
+
+    def test_first_question_narrows_to_one_target(self):
+        line = question_service._target_line(self._req(spoken=False), "집의 문")
+        self.assertIn("이 하나에 대해서만 물어봐", line)
+
+    def test_after_child_spoke_target_is_conditional(self):
+        line = question_service._target_line(self._req(spoken=True), "집의 문")
+        self.assertNotIn("이 하나에 대해서만", line)
+        self.assertIn("이어진다면", line)
+        self.assertIn("무리해서 끌어오지 말고", line)
 
 
 class NegationCandidateReaskTest(unittest.TestCase):
