@@ -117,10 +117,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // 온보딩 완료 후 프로필 선택 화면 → 보호자 선택
-    await tester.tap(find.byKey(const ValueKey('guardian-profile')));
-    await tester.pumpAndSettle();
-
+    // 신규 보호자는 온보딩 완료 후 보호자 홈으로 바로 이동한다.
     expect(childRepository.getChildrenCalls, 1);
     expect(find.byKey(const ValueKey('child-list-empty')), findsOneWidget);
   });
