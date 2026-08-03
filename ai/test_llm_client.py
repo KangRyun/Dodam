@@ -259,6 +259,106 @@ class ActivitySplitTest(unittest.TestCase):
             self.assertIn("---\n이건 우리 집이야\n---", fenced)
 
 
+class HtpQuestionBankTest(unittest.TestCase):
+    """HTP 주제별 질문 뱅크 — 표준 사후질문(PDI)을 아동용으로 포장 (S15P11B209-811)."""
+
+    def test_every_subject_has_a_section(self):
+        # BE DrawingSubject enum 3값 전부에 구획이 있어야 주제별로 갈린다.
+        self.assertEqual(
+            set(llm_client._sections("htp_question_bank")),
+            {"HOUSE", "TREE", "PERSON"},
+        )
+
+    def test_only_the_current_subject_section_is_loaded(self):
+        """셋을 다 실으면 다른 주제로 새는 709 계열이 다시 열린다."""
+        system = llm_client.render_first_question_prompt(
+            "집이 크게", activity_type="HTP", drawing_subject="HOUSE"
+        )
+        self.assertIn(llm_client.BANK_BLOCK_TITLE, system)
+        self.assertIn("이 집에는 누가 살아?", system)
+        # 다른 주제 구획의 고유 문장은 실리지 않는다.
+        self.assertNotIn("이건 무슨 나무야", system)
+        self.assertNotIn("이 사람은 무슨 일을 해", system)
+
+    def test_bank_is_htp_only(self):
+        """PDI는 HTP 전용 프로토콜 — 그림일기 대화에는 싣지 않는다."""
+        diary = llm_client.render_first_question_prompt(
+            "하늘을 파랗게", activity_type="ART_DIARY", drawing_subject=None
+        )
+        self.assertNotIn(llm_client.BANK_BLOCK_TITLE, diary)
+        self.assertEqual(llm_client.question_bank_block("ART_DIARY", "HOUSE"), "")
+
+    def test_unknown_subject_loads_nothing(self):
+        """주제를 모르면(구 BE·주제 미전달) 아무것도 싣지 않는다 — 셋 다 싣지 않는다."""
+        self.assertEqual(llm_client.question_bank_block("HTP", None), "")
+        self.assertEqual(llm_client.question_bank_block("HTP", "NOPE"), "")
+
+    def test_bank_forbids_verbatim_copying(self):
+        """그대로 읽으면 매번 같은 질문이 나온다 — 첫 질문 고정(808 F-1)의 재발이다."""
+        bank = llm_client._load("htp_question_bank")
+        self.assertIn("그대로 읽지 마", bank)
+        self.assertIn("해석하거나 채점하지 마", bank)
+
+    def test_next_question_also_carries_the_bank(self):
+        system = llm_client.render_next_question_prompt(
+            "우리 집이야", drawing_analysis="집이 크게",
+            activity_type="HTP", drawing_subject="TREE",
+        )
+        self.assertIn("이건 무슨 나무야?", system)
+
+
+class FirstQuestionHtpRegressionTest(unittest.TestCase):
+    """808 F-1: HTP 첫 질문이 12/12 "오늘은 뭘 그렸어?"로 고정되던 회귀 (S15P11B209-811)."""
+
+    def test_no_completed_fallback_sentence_is_offered_twice(self):
+        """완성문을 예시로 여러 번 적으면 모델이 규칙 대신 그 문장을 복사한다."""
+        htp = llm_client._load("first_question_htp")
+        self.assertLessEqual(htp.count("오늘은 뭘 그렸어?"), 1)
+
+    def test_detail_use_is_mandatory_not_optional(self):
+        htp = llm_client._load("first_question_htp")
+        self.assertIn("반드시 그중 하나를 골라", htp)
+
+    def test_why_questions_are_forbidden(self):
+        """세부를 고르라는 지시가 '왜 ~했어?' 추궁으로 흐르지 않게 못 박는다.
+
+        conversation_common의 "'왜 그렇게 그렸어?'처럼 추궁하지 마"와 같은 선이다.
+        """
+        htp = llm_client._load("first_question_htp")
+        self.assertIn('"왜"로 시작하는 질문은 하지 마', htp)
+
+
+class GuardrailsScopeTest(unittest.TestCase):
+    """가드레일의 '적용 대상'이 아이 본인으로 좁혀졌는지 (S15P11B209-811).
+
+    평가·감정·슬픈 주제 금지가 그림 속 인물에까지 걸려 HTP 사후질문을 통째로 막고 있었다.
+    """
+
+    def _guardrails(self) -> str:
+        import prompts_registry
+
+        return prompts_registry.load("guardrails")
+
+    def test_absolute_rules_remain(self):
+        # 진단·점수화·개인정보·외부 접촉은 예외 없는 절대 규칙이다 — 완화 대상이 아니다.
+        g = self._guardrails()
+        self.assertIn("절대 금지(예외 없음)", g)
+        for rule in ("진단하거나 점수화하지 마", "찾아낼 수 있는 정보", "만나자거나"):
+            self.assertIn(rule, g)
+            # 절대 금지 절 안에 있어야 한다(뒤의 '아이/그림 속 대상 구분' 절이 아니라).
+            self.assertLess(g.index(rule), g.index("'아이'와 '그림 속 대상'을 구분해라"))
+
+    def test_evaluation_and_mood_rules_scope_to_the_child_only(self):
+        g = self._guardrails()
+        self.assertIn("그림 속 인물의 기분을 묻는 건 괜찮아", g)
+        self.assertIn("평가 대상은 아이가 아니라 그림 속 이야기야", g)
+
+    def test_sad_topics_allowed_once_but_not_pushed(self):
+        g = self._guardrails()
+        self.assertIn("한 번 물어보는 건 괜찮아", g)
+        self.assertIn("더 캐묻지 말고", g)
+
+
 class ToneBlockTest(unittest.TestCase):
     """연령별 말투 — ai/prompts/conversation_tone.txt가 유일한 소유자 (S15P11B209-786)."""
 
