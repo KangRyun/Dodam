@@ -303,6 +303,18 @@ public class ExpertProfile {
     updatedAt = Objects.requireNonNull(now, "now must not be null");
   }
 
+  /**
+   * 자격 증빙이 추가되면 검토 완료 상태를 재검토 대상으로 전환한다.
+   *
+   * @param now 프로필 갱신 시각
+   */
+  public void requireCredentialReview(LocalDateTime now) {
+    if (verificationStatus != ExpertVerificationStatus.PENDING) {
+      verificationStatus = ExpertVerificationStatus.REVIEW_REQUIRED;
+    }
+    updatedAt = Objects.requireNonNull(now, "now must not be null");
+  }
+
   private static String normalizeRequired(String value) {
     return Objects.requireNonNull(value, "value must not be null").trim();
   }
