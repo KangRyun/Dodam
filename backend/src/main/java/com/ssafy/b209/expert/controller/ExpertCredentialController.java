@@ -3,6 +3,7 @@ package com.ssafy.b209.expert.controller;
 import com.ssafy.b209.expert.dto.request.UploadExpertCredentialRequest;
 import com.ssafy.b209.expert.dto.response.ExpertCredentialResponse;
 import com.ssafy.b209.expert.exception.ExpertErrorCode;
+import com.ssafy.b209.expert.service.ExpertCredentialManagementService;
 import com.ssafy.b209.expert.service.ExpertCredentialUploadService;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.response.ApiErrorResponse;
@@ -16,11 +17,16 @@ import io.swagger.v3.oas.annotations.media.Schema;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Positive;
 import java.io.IOException;
 import java.net.URI;
+import java.util.List;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
+import org.springframework.web.bind.annotation.DeleteMapping;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
@@ -34,19 +40,34 @@ import org.springframework.web.multipart.MultipartFile;
 @RequestMapping("/api/v1/experts/me/credentials")
 public class ExpertCredentialController {
   private final ExpertCredentialUploadService uploadService;
+  private final ExpertCredentialManagementService managementService;
   private final CredentialFileStorageProperties storageProperties;
 
   /**
    * 자격 업로드 서비스와 HTTP 사전 크기 제한을 주입한다.
    *
    * @param uploadService 자격 Metadata와 파일 저장 서비스
+   * @param managementService 자격 목록 조회와 삭제 서비스
    * @param storageProperties 허용할 최대 파일 크기 설정
    */
   public ExpertCredentialController(
       ExpertCredentialUploadService uploadService,
+      ExpertCredentialManagementService managementService,
       CredentialFileStorageProperties storageProperties) {
     this.uploadService = uploadService;
+    this.managementService = managementService;
     this.storageProperties = storageProperties;
+  }
+
+  /**
+   * 로그인 전문가가 등록한 자격 목록을 최신 등록 순으로 조회한다.
+   *
+   * @return 내부 Storage Key를 제외한 자격 목록
+   */
+  @Operation(summary = "내 자격 증빙 목록 조회")
+  @GetMapping
+  public ResponseEntity<ApiResponse<List<ExpertCredentialResponse>>> listMine() {
+    return ResponseEntity.ok(ApiResponse.of(CommonSuccessCode.OK, managementService.listMine()));
   }
 
   /**
@@ -94,5 +115,31 @@ public class ExpertCredentialController {
     } catch (IOException exception) {
       throw new BusinessException(ExpertErrorCode.CREDENTIAL_STORAGE_FAILED, exception);
     }
+  }
+
+  /**
+   * 아직 관리자 검토가 시작되지 않은 본인 자격을 삭제한다.
+   *
+   * @param credentialId 삭제할 자격 식별자
+   * @return 본문 없는 HTTP 204 응답
+   */
+  @Operation(summary = "검토 전 내 자격 증빙 삭제")
+  @ApiResponses({
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "204",
+        description = "자격 증빙 삭제 성공"),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "자격이 없거나 본인 소유가 아님",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "409",
+        description = "검토 이력이 있어 삭제할 수 없음",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
+  })
+  @DeleteMapping("/{credentialId}")
+  public ResponseEntity<Void> deleteMine(@PathVariable @Positive Long credentialId) {
+    managementService.deleteMine(credentialId);
+    return ResponseEntity.noContent().build();
   }
 }

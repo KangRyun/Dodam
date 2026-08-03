@@ -87,6 +87,17 @@ public class ExpertCredentialFile {
     return fileSizeBytes;
   }
 
+  /**
+   * 내부 파일 삭제에 사용하는 Storage Key를 반환한다.
+   *
+   * <p>API 응답에는 노출하지 않고 Storage Adapter에만 전달해야 한다.
+   *
+   * @return Local 또는 S3 내부 Storage Key
+   */
+  public String getStorageKey() {
+    return storageKey;
+  }
+
   private static String normalizeFilename(String value) {
     if (value == null || value.isBlank()) return null;
     String normalized = value.replace('\\', '/');

@@ -460,9 +460,10 @@ USER-02 연락 이메일 계약:
 | EXPERT-03 | GET | `/experts` | GUARDIAN, EXPERT | 공개 전문가 목록 조회 |
 | EXPERT-04 | GET | `/experts/{expertId}` | GUARDIAN, EXPERT | 공개 전문가 상세 조회 |
 | EXPERT-05 | POST | `/experts/me/credentials` | EXPERT | 자격 증빙 업로드 |
-| EXPERT-06 | DELETE | `/experts/me/credentials/{credentialId}` | EXPERT | 검토 전 자격 증빙 삭제 |
-| EXPERT-07 | POST | `/experts/{expertId}/follow` | GUARDIAN | 전문가 팔로우 |
-| EXPERT-08 | DELETE | `/experts/{expertId}/follow` | GUARDIAN | 전문가 팔로우 취소 |
+| EXPERT-06 | GET | `/experts/me/credentials` | EXPERT | 내 자격 증빙 목록 조회 |
+| EXPERT-07 | DELETE | `/experts/me/credentials/{credentialId}` | EXPERT | 검토 전 자격 증빙 삭제 |
+| EXPERT-08 | POST | `/experts/{expertId}/follow` | GUARDIAN | 전문가 팔로우 |
+| EXPERT-09 | DELETE | `/experts/{expertId}/follow` | GUARDIAN | 전문가 팔로우 취소 |
 
 `EXPERT-01`은 `S15P11B209-574`에서 구현되었다. 신규 프로필은 `PENDING`으로 생성하며 사용자당 하나만 허용한다.
 `EXPERT-03`과 `EXPERT-04`는 `S15P11B209-575`에서 구현되었다. 목록은 기본적으로 `VERIFIED` 프로필만 반환하고,
@@ -524,10 +525,16 @@ PDF/JPEG/PNG 중 같은 형식이어야 하며 실제 Byte 기준 최대 크기�
 파일 형식 불일치는 `CREDENTIAL_FILE_INVALID`, 10 MiB 초과는 `CREDENTIAL_FILE_TOO_LARGE`, Storage 오류는
 `CREDENTIAL_STORAGE_FAILED`로 반환한다.
 
+`EXPERT-06`과 `EXPERT-07`은 `S15P11B209-578`에서 구현되었다. 목록은 로그인 전문가가 소유한 자격만
+`createdAt`, `credentialId` 내림차순으로 반환하며 업로드 성공 응답과 같은 공개 필드를 사용한다. 삭제는 관리자 검토가
+시작되지 않은 `PENDING` 자격만 허용한다. `VERIFIED`, `REJECTED`, `REVIEW_REQUIRED`는 검토 이력 보존을 위해 삭제할 수
+없으며 `CREDENTIAL_DELETE_NOT_ALLOWED`를 반환한다. 존재하지 않거나 다른 전문가가 소유한 자격은 소유권 정보를 숨기기
+위해 모두 `CREDENTIAL_NOT_FOUND`로 반환한다. DB 삭제가 Commit된 다음 Local/MinIO 증빙 파일을 제거한다.
+
 ### 7.6 팔로우 응답·오류
 
-- EXPERT-07: `201`, `{ "expertId": 10, "followed": true, "followerCount": 128 }`
-- EXPERT-08: `204`
+- EXPERT-08: `201`, `{ "expertId": 10, "followed": true, "followerCount": 128 }`
+- EXPERT-09: `204`
 - 오류: `EXPERT_PROFILE_ALREADY_EXISTS`, `EXPERT_NOT_VERIFIED`, `CREDENTIAL_FILE_INVALID`, `FOLLOW_SELF_NOT_ALLOWED`, `FOLLOW_ALREADY_EXISTS`.
 
 ---

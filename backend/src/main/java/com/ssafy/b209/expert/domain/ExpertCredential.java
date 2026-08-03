@@ -123,6 +123,15 @@ public class ExpertCredential {
     return createdAt;
   }
 
+  /**
+   * 자격에 연결된 증빙 파일을 변경할 수 없는 목록으로 반환한다.
+   *
+   * @return 등록 순서의 증빙 파일 목록
+   */
+  public List<ExpertCredentialFile> getFiles() {
+    return List.copyOf(files);
+  }
+
   private static String normalizeOptional(String value) {
     return value == null || value.isBlank() ? null : value.trim();
   }

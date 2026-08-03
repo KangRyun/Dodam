@@ -2,6 +2,8 @@ package com.ssafy.b209.expert.controller;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.BDDMockito.given;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -9,10 +11,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.ssafy.b209.expert.domain.ExpertVerificationStatus;
 import com.ssafy.b209.expert.dto.response.ExpertCredentialResponse;
+import com.ssafy.b209.expert.service.ExpertCredentialManagementService;
 import com.ssafy.b209.expert.service.ExpertCredentialUploadService;
 import com.ssafy.b209.storage.credential.CredentialFileStorageProperties;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.WebMvcTest;
@@ -28,6 +32,7 @@ class ExpertCredentialControllerTest {
 
   @Autowired private MockMvc mockMvc;
   @MockitoBean private ExpertCredentialUploadService uploadService;
+  @MockitoBean private ExpertCredentialManagementService managementService;
   @MockitoBean private CredentialFileStorageProperties storageProperties;
 
   @Test
@@ -92,5 +97,39 @@ class ExpertCredentialControllerTest {
     mockMvc
         .perform(multipart("/api/v1/experts/me/credentials").file(metadata))
         .andExpect(status().isBadRequest());
+  }
+
+  @Test
+  void listsCurrentExpertsCredentials() throws Exception {
+    given(managementService.listMine())
+        .willReturn(
+            List.of(
+                new ExpertCredentialResponse(
+                    31L,
+                    "ART_THERAPIST",
+                    "미술심리상담사",
+                    "한국상담협회",
+                    null,
+                    null,
+                    ExpertVerificationStatus.PENDING,
+                    "license.pdf",
+                    MediaType.APPLICATION_PDF_VALUE,
+                    9L,
+                    Instant.parse("2026-08-03T00:00:00Z"))));
+
+    mockMvc
+        .perform(get("/api/v1/experts/me/credentials"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].credentialId").value(31))
+        .andExpect(jsonPath("$.data[0].storageKey").doesNotExist());
+  }
+
+  @Test
+  void deletesPendingCredential() throws Exception {
+    mockMvc
+        .perform(delete("/api/v1/experts/me/credentials/{credentialId}", 31L))
+        .andExpect(status().isNoContent());
+
+    org.mockito.Mockito.verify(managementService).deleteMine(31L);
   }
 }
