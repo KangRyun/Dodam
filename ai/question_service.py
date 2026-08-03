@@ -285,6 +285,7 @@ def _build_messages(
             activity_block=activity_block,
             activity_type=req.activity_type,
             difficulty=req.difficulty,
+            drawing_subject=req.drawing_subject,
         )
         trigger = llm_client.FIRST_QUESTION_TRIGGER
     else:
@@ -298,6 +299,7 @@ def _build_messages(
             activity_block=activity_block,
             activity_type=req.activity_type,
             difficulty=req.difficulty,
+            drawing_subject=req.drawing_subject,
         )
         trigger = llm_client.NEXT_QUESTION_TRIGGER
 

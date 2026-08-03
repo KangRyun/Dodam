@@ -114,6 +114,7 @@ class ClientVersionWiringTest(unittest.TestCase):
             "conversation_common",
             "conversation_tone",
             "guardrails",
+            "htp_question_bank",
         )
         self.assertEqual(llm_client.PROMPT_VERSION, expected)
         self.assertEqual(question_service.PROMPT_VERSION, expected)
@@ -138,6 +139,9 @@ class ClientVersionWiringTest(unittest.TestCase):
             self.assertIn("conversation_common@", version)
             self.assertIn("conversation_tone@", version)
             self.assertIn("guardrails@", version)
+        # 질문 뱅크(811)는 HTP 전용 — PDI는 HTP 프로토콜이라 그림일기엔 실리지 않는다.
+        self.assertIn("htp_question_bank@", htp)
+        self.assertNotIn("htp_question_bank@", diary)
         # 활동 유형을 모르는 호출(draft 경로)은 기본인 HTP로 떨어진다.
         self.assertEqual(llm_client.prompt_version_for(None), htp)
 
