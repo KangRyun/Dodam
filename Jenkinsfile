@@ -297,6 +297,12 @@ pipeline {
             #   :prod 도 함께 갱신하는 이유: 매니페스트가 :prod 를 가리키므로, 갱신하지 않으면
             #   나중에 누가 `kubectl apply -k overlays/prod` 를 돌렸을 때 **옛 이미지로
             #   조용히 되돌아간다.** SHA 태그는 추적용, :prod 는 매니페스트 기본값용이다.
+            #
+            #   ★ 이 갱신은 방어의 **절반**이다 (S15P11B209-771).
+            #     레지스트리 :prod 를 아무리 최신으로 맞춰도, 파드가 기본값 IfNotPresent 로
+            #     뜨면 kubelet 은 **노드에 캐시된 옛 :prod** 를 재풀 없이 쓴다.
+            #     나머지 절반이 base 매니페스트의 `imagePullPolicy: Always` 다.
+            #     둘 중 하나만 있으면 막히지 않는다 — 2026-08-02·08-04 두 번 그렇게 터졌다.
             infra/scripts/push-staging-images.sh --tag "$IMAGE_TAG" --with-ai --with-web
             infra/scripts/push-staging-images.sh --tag prod         --with-ai --with-web
 

@@ -225,6 +225,13 @@ spec:
       containers:
         - name: nginx
           image: dodam-nginx        # 태그는 overlay 의 images 트랜스포머가 채운다
+          # ⚠️ Always 인 이유 (S15P11B209-771). 기본값 IfNotPresent 는 여기서 위험하다:
+          #   `apply -k` 는 이미지를 SHA 태그에서 :prod 로 되돌리는데(overlay 의 images),
+          #   그때 kubelet 이 **노드에 캐시된 옛 :prod** 를 재풀 없이 그대로 띄운다.
+          #   Jenkins 가 배포마다 레지스트리 :prod 를 갱신하는 방어(359)는 노드 캐시를 못 이긴다.
+          #   실제로 2026-08-02·08-04 두 번 터졌다(08-04 는 /login 404, 약 10분).
+          #   비용: 레지스트리가 루프백(127.0.0.1:5000)이라 다이제스트만 확인하고 레이어는 캐시 재사용.
+          imagePullPolicy: Always
           # ⚠️ nginx 는 시작 시 proxy_pass 의 호스트명을 해석한다. backend/ai Service 가
           #    아직 없으면 기동에 실패하는데, k8s 에는 compose 의 depends_on 이 없다.
           #    → 파드가 CrashLoopBackOff 로 재시도하다 Service 가 생기면 스스로 뜬다(자가 치유).
