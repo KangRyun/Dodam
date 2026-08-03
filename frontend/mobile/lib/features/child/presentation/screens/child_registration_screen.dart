@@ -28,6 +28,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   String _preferredCharacter = 'BASE';
   String _questionDifficulty = 'PRESCHOOL';
   bool _submitted = false;
+  Set<int> _acknowledgedDeclinedTermIds = const {};
   bool get _isEditing => widget.child != null;
 
   /// 아동 대상 약관의 동의 여부. 기본값은 미동의이며 사용자가 직접 켜야 한다.
@@ -107,6 +108,182 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
       )
       .toList(growable: false);
 
+  Set<int> get _declinedOptionalTermIds => _consentTerms
+      .where(
+        (term) => !term.required && !(_consentAgreed[term.termId] ?? false),
+      )
+      .map((term) => term.termId)
+      .toSet();
+
+  String _consentRestriction(ConsentTermDto term) {
+    final code = term.termCode.toUpperCase();
+    if (code.contains('DRAWING') || code.contains('ANALYSIS')) {
+      return '그림 데이터 분석을 사용하지 않아 그림 기반 질문과 분석 리포트 제공이 제한돼요.';
+    }
+    if (code.contains('VOICE') || code.contains('AUDIO')) {
+      return '음성 데이터 처리를 사용하지 않아 아이가 목소리로 답할 수 없고 선택지로만 대화해요.';
+    }
+    if (code.contains('EXPERT') || code.contains('REPORT')) {
+      return '전문가 리포트 공유를 사용하지 않아 전문가에게 활동 결과를 공유하거나 의견을 받을 수 없어요.';
+    }
+    return '${term.title}에 동의하지 않아 관련 기능 사용이 제한돼요.';
+  }
+
+  Future<bool> _confirmOptionalConsentRestrictions() async {
+    final declinedIds = _declinedOptionalTermIds;
+    if (declinedIds.isEmpty ||
+        declinedIds.difference(_acknowledgedDeclinedTermIds).isEmpty &&
+            _acknowledgedDeclinedTermIds.difference(declinedIds).isEmpty) {
+      return true;
+    }
+
+    final declinedTerms = _consentTerms
+        .where((term) => declinedIds.contains(term.termId))
+        .toList(growable: false);
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: const EdgeInsets.all(AppSpacing.lg),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            maxWidth: 620,
+            maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.86,
+          ),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: AppColors.canvas,
+              borderRadius: BorderRadius.circular(28),
+              border: Border.all(color: AppColors.outline),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x26000000),
+                  blurRadius: 24,
+                  offset: Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(28),
+              child: Column(
+                children: [
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: const BoxDecoration(
+                      color: AppColors.warningSoft,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.info_outline_rounded,
+                      color: AppColors.warning,
+                      size: 38,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  const Text(
+                    '잠깐, 사용할 수 없는 기능이 있어요',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 24,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  const Text(
+                    '선택하지 않은 약관에 따라 아래 기능이 제한돼요.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: AppColors.inkMuted, fontSize: 15),
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  Flexible(
+                    child: Scrollbar(
+                      thumbVisibility: declinedTerms.length > 3,
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: declinedTerms.length,
+                        separatorBuilder: (_, _) =>
+                            const SizedBox(height: AppSpacing.sm),
+                        itemBuilder: (context, index) {
+                          final term = declinedTerms[index];
+                          return Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(AppSpacing.md),
+                            decoration: BoxDecoration(
+                              color: AppColors.surface,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: AppColors.outline),
+                            ),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(
+                                  Icons.lock_outline_rounded,
+                                  color: AppColors.tangerine,
+                                  size: 22,
+                                ),
+                                const SizedBox(width: AppSpacing.sm),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        term.title,
+                                        style: const TextStyle(
+                                          color: AppColors.ink,
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        _consentRestriction(term),
+                                        style: const TextStyle(
+                                          color: AppColors.inkMuted,
+                                          fontSize: 14,
+                                          height: 1.4,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  const Text(
+                    '확인을 누르면 동의 화면으로 돌아가요. 동의하지 않으려면 선택을 유지한 채 등록하기를 다시 눌러 주세요.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      color: AppColors.inkMuted,
+                      fontSize: 13,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  AppButton(
+                    key: const ValueKey('confirm-consent-restrictions'),
+                    label: '동의 항목 다시 확인하기',
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    if (!mounted) return false;
+    setState(() => _acknowledgedDeclinedTermIds = declinedIds);
+    return false;
+  }
+
   Future<void> _pickBirthDate() async {
     final now = DateTime.now();
     final selected = await showDatePicker(
@@ -128,6 +305,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
         _consentError != null) {
       return;
     }
+    if (!_isEditing && !await _confirmOptionalConsentRestrictions()) return;
 
     final succeeded = _isEditing
         ? await widget.controller.updateChild(
@@ -299,8 +477,16 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                       terms: _consentTerms,
                       agreed: _consentAgreed,
                       errorText: _consentError,
-                      onChanged: (termId, value) =>
-                          setState(() => _consentAgreed[termId] = value),
+                      onChanged: (termId, value) => setState(() {
+                        _consentAgreed[termId] = value;
+                        _acknowledgedDeclinedTermIds = const {};
+                      }),
+                      onAllChanged: (value) => setState(() {
+                        for (final term in _consentTerms) {
+                          _consentAgreed[term.termId] = value;
+                        }
+                        _acknowledgedDeclinedTermIds = const {};
+                      }),
                     ),
                   ],
                   const SizedBox(height: AppSpacing.lg),
@@ -341,12 +527,14 @@ class _ConsentSection extends StatelessWidget {
     required this.agreed,
     required this.errorText,
     required this.onChanged,
+    required this.onAllChanged,
   });
 
   final List<ConsentTermDto> terms;
   final Map<int, bool> agreed;
   final String? errorText;
   final void Function(int termId, bool value) onChanged;
+  final ValueChanged<bool> onAllChanged;
 
   @override
   Widget build(BuildContext context) => Column(
@@ -366,6 +554,23 @@ class _ConsentSection extends StatelessWidget {
         '동의하지 않으면 아이는 선택형 답변으로 대화해요.',
         style: TextStyle(color: AppColors.inkMuted, fontSize: 13),
       ),
+      CheckboxListTile(
+        key: const ValueKey('child-consent-all'),
+        value: terms.every((term) => agreed[term.termId] ?? false),
+        onChanged: (value) => onAllChanged(value ?? false),
+        controlAffinity: ListTileControlAffinity.leading,
+        contentPadding: EdgeInsets.zero,
+        title: const Text(
+          '전체 동의',
+          style: TextStyle(
+            color: AppColors.ink,
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        subtitle: const Text('필수 및 선택 약관에 모두 동의해요.'),
+      ),
+      const Divider(height: 1),
       for (final term in terms)
         CheckboxListTile(
           key: ValueKey('child-consent-${term.termCode}'),
