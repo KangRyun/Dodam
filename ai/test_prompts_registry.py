@@ -16,7 +16,7 @@ import prompts_registry
 
 class VersionTest(unittest.TestCase):
     def test_version_has_semver_and_hash(self):
-        value = prompts_registry.version("first_question")
+        value = prompts_registry.version("first_question_htp")
         # 예: "1.1.0+ab12cd34"
         self.assertRegex(value, r"^\d+\.\d+\.\d+\+[0-9a-f]{8}$")
 
@@ -28,7 +28,7 @@ class VersionTest(unittest.TestCase):
         )
         # 서로 다른 프롬프트는(내용이 다르므로) 해시가 다르다.
         self.assertNotEqual(
-            prompts_registry.content_hash("first_question"),
+            prompts_registry.content_hash("first_question_htp"),
             prompts_registry.content_hash("report_common"),
         )
 
@@ -38,12 +38,14 @@ class VersionTest(unittest.TestCase):
         self.assertTrue(prompts_registry.version("guardrails").startswith(f"{semver}+"))
 
     def test_composite_sorts_and_joins(self):
-        composite = prompts_registry.composite_version("conversations", "first_question")
+        composite = prompts_registry.composite_version(
+            "conversations_htp", "first_question_htp"
+        )
         parts = composite.split(";")
         self.assertEqual(len(parts), 2)
-        # 이름순 정렬 — conversations가 first_question보다 앞.
-        self.assertTrue(parts[0].startswith("conversations@"))
-        self.assertTrue(parts[1].startswith("first_question@"))
+        # 이름순 정렬 — conversations_htp가 first_question_htp보다 앞.
+        self.assertTrue(parts[0].startswith("conversations_htp@"))
+        self.assertTrue(parts[1].startswith("first_question_htp@"))
         # 각 파트는 name@<version> 형식.
         for part in parts:
             self.assertRegex(part, r"^[a-z_]+@\d+\.\d+\.\d+\+[0-9a-f]{8}$")
@@ -100,14 +102,44 @@ class ClientVersionWiringTest(unittest.TestCase):
         )
 
     def test_question_path_uses_composite_version(self):
+        """모듈 상수는 '대화 경로가 쓸 수 있는 파일 전부'의 통합 버전이다."""
         import llm_client
         import question_service
 
         expected = prompts_registry.composite_version(
-            "first_question", "conversations", "guardrails"
+            "first_question_htp",
+            "first_question_diary",
+            "conversations_htp",
+            "conversations_diary",
+            "conversation_common",
+            "conversation_tone",
+            "guardrails",
         )
         self.assertEqual(llm_client.PROMPT_VERSION, expected)
         self.assertEqual(question_service.PROMPT_VERSION, expected)
+
+    def test_conversation_prompt_version_resolves_per_activity(self):
+        """생성된 질문에 실리는 버전은 '이번에 쓴' 활동 변형만 담는다(S15P11B209-786).
+
+        두 변형을 모두 적으면 어느 쪽으로 뽑힌 결과인지 사후에 구분할 수 없다.
+        """
+        import llm_client
+
+        htp = llm_client.prompt_version_for("HTP")
+        diary = llm_client.prompt_version_for("ART_DIARY")
+        self.assertNotEqual(htp, diary)
+        self.assertIn("first_question_htp@", htp)
+        self.assertIn("conversations_htp@", htp)
+        self.assertNotIn("_diary@", htp)
+        self.assertIn("first_question_diary@", diary)
+        self.assertNotIn("_htp@", diary)
+        # 공유 파일은 어느 쪽에나 실린다 — 내용이 바뀌면 두 버전 모두 달라져야 한다.
+        for version in (htp, diary):
+            self.assertIn("conversation_common@", version)
+            self.assertIn("conversation_tone@", version)
+            self.assertIn("guardrails@", version)
+        # 활동 유형을 모르는 호출(draft 경로)은 기본인 HTP로 떨어진다.
+        self.assertEqual(llm_client.prompt_version_for(None), htp)
 
 
 if __name__ == "__main__":

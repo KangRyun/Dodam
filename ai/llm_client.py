@@ -18,6 +18,8 @@ GMS는 OpenAI 호환 게이트웨이라, 공식 `openai` SDK에 base_url만 GMS�
 from __future__ import annotations
 
 import logging
+import re
+from functools import lru_cache
 
 from openai import OpenAIError
 
@@ -28,10 +30,50 @@ from gms import get_client  # GMS(OpenAI 호환) 공용 클라이언트
 
 logger = logging.getLogger(__name__)
 
-# 질문 생성에 쓰는 프롬프트 파일 조합의 통합 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
+# ── 활동 유형별 대화 프롬프트 (S15P11B209-786) ──────────────────
+# 하나의 first_question/conversations로 두 활동을 처리하던 것을 갈랐다. 대화의 '목적'이
+# 다르기 때문이다 — 같은 문장으로 두 목적을 시키면 어느 쪽도 제대로 안 된다:
+#   - HTP: 그림 자체가 궁금하다. 아이가 그림에 무엇을 담으려 했는지 그림 안에서 좁혀 간다.
+#   - ART_DIARY: 그림은 대화 소재일 뿐이다. 그림에서 시작해 그날 있었던 일·아이 마음으로 넓혀 간다.
+# 공유 규칙(이름·분석결과 취급·출력 형식)은 conversation_common이 소유하고 뒤에 이어붙인다.
+_FIRST_BY_ACTIVITY = {
+    "HTP": "first_question_htp",
+    "ART_DIARY": "first_question_diary",
+}
+_NEXT_BY_ACTIVITY = {
+    "HTP": "conversations_htp",
+    "ART_DIARY": "conversations_diary",
+}
+# 활동 유형을 못 받은 호출(draft 경로·구 BE)은 HTP로 본다 — vlm_client.DEFAULT_ACTIVITY_TYPE과 같은 기준.
+DEFAULT_ACTIVITY_TYPE = "HTP"
+
+_COMMON = "conversation_common"
+_TONE = "conversation_tone"
+_GUARDRAILS = "guardrails"
+
+# 대화 경로가 쓰는 프롬프트 파일 전체의 통합 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
 PROMPT_VERSION = prompts_registry.composite_version(
-    "first_question", "conversations", "guardrails"
+    *_FIRST_BY_ACTIVITY.values(),
+    *_NEXT_BY_ACTIVITY.values(),
+    _COMMON,
+    _TONE,
+    _GUARDRAILS,
 )
+
+
+def prompt_names_for(activity_type: str | None) -> tuple[str, ...]:
+    """이 활동 유형이 실제로 쓰는 프롬프트 파일 이름들. 모르는 값은 기본(HTP)으로 둔다."""
+    key = activity_type if activity_type in _FIRST_BY_ACTIVITY else DEFAULT_ACTIVITY_TYPE
+    return (_FIRST_BY_ACTIVITY[key], _NEXT_BY_ACTIVITY[key], _COMMON, _TONE, _GUARDRAILS)
+
+
+def prompt_version_for(activity_type: str | None) -> str:
+    """이번 활동이 '실제로 쓴' 프롬프트 조합의 버전 — 결과 재현·추적용.
+
+    두 활동 변형을 모두 적으면 어느 쪽으로 뽑힌 결과인지 사후에 구분할 수 없다
+    (report_client._generation_version과 같은 이유).
+    """
+    return prompts_registry.composite_version(*prompt_names_for(activity_type))
 
 # 캐릭터 이름. 프롬프트 txt에도 '도담'으로 적혀 있으니 바꾸려면 양쪽을 같이 고칠 것.
 CHARACTER_NAME = "도담"
@@ -42,7 +84,11 @@ NO_ANALYSIS = "(아직 그림 분석 결과가 없어요)"
 # 아이 이름을 모를 때. 템플릿의 '이름 규칙'이 이걸 보고 "너"로 부르게 한다.
 NO_CHILD_NAME = "(이름은 아직 몰라요)"
 
-DEFAULT_AGE_BAND = "5~7"
+# draft 경로 기본 연령대. 난이도를 안 넘기면 말투가 DEFAULT_DIFFICULTY(=LOWER_ELEMENTARY,
+# 초등 저학년형 만 7~9세)로 떨어지므로 같은 구간으로 맞춘다 — 프롬프트 첫 줄의 나이와
+# 말투 블록의 연령대가 어긋나면 모델이 둘을 조율해야 한다.
+# 내부 계약 경로는 요청의 childAge·difficulty를 그대로 쓴다(둘 다 BE가 정한다).
+DEFAULT_AGE_BAND = "7~9"
 
 # _ask에 넘기는 짧은 트리거(system 하나로 맥락은 충분하지만 chat 모델은 user 1건이 필요하다).
 # 내부 계약 경로(question_service)도 같은 프롬프트를 재사용하도록 상수로 공개한다.
@@ -92,6 +138,54 @@ def _load(name: str) -> str:
     return prompts_registry.load(name)
 
 
+# ── 연령(난이도)별 말하기 규칙 (S15P11B209-786) ──────────────────
+# 구조: conversation_tone.txt 안에 [[PRESCHOOL]] 같은 머리표로 난이도별 구획을 두고, 그중
+# 하나만 골라 싣는다. 한 파일에 모아 둬야 네 단계를 나란히 놓고 어휘·길이 균형을 볼 수 있다.
+# ⚠️ 이 규칙은 원래 question_service._DIFFICULTY_RULES 코드 상수였다. 프롬프트 파일로 옮긴 이유:
+#   ① 아이에게 그대로 들려줄 문구인데 prompts_registry 버전 추적 밖에 있었다,
+#   ② draft 경로(first_question/next_question)에는 아예 안 붙어 연령별 말투가 없었다.
+_TONE_HEADER = re.compile(r"^\[\[([A-Z_]+)\]\]$", re.M)
+
+# 알 수 없는 난이도가 오면 저학년 기준으로 둔다(요청은 계약상 검증되지만 방어적으로).
+DEFAULT_DIFFICULTY = "LOWER_ELEMENTARY"
+
+TONE_BLOCK_TITLE = "[연령별 말하기 규칙]"
+
+
+@lru_cache(maxsize=1)
+def _tone_sections() -> dict[str, str]:
+    """conversation_tone.txt → {난이도: 규칙 본문}. 머리표 앞의 설명 문단은 버린다."""
+    text = _load(_TONE)
+    headers = list(_TONE_HEADER.finditer(text))
+    return {
+        match.group(1): text[
+            match.end() : (headers[i + 1].start() if i + 1 < len(headers) else len(text))
+        ].strip()
+        for i, match in enumerate(headers)
+    }
+
+
+def tone_block(difficulty: str | None) -> str:
+    """난이도에 맞는 길이·어휘·말투 규칙 블록. 대화 프롬프트 뒤에 덧붙는다."""
+    sections = _tone_sections()
+    body = sections.get(difficulty or "") or sections[DEFAULT_DIFFICULTY]
+    return f"{TONE_BLOCK_TITLE}\n{body}"
+
+
+def _assemble(variant: str, *, activity_block: str, difficulty: str | None) -> str:
+    """대화 system 프롬프트 조립 — 변형 → 활동 지시 → 가드레일 → 말투 → 공통 순.
+
+    순서 근거: 변형이 앞(역할·대화 목표·재료 블록)이라 모델이 먼저 '무슨 대화인지'를 잡고,
+    공통이 맨 뒤(이름 규칙·출력 형식)라 형식 지시를 놓치지 않는다. 말투는 공통의
+    "문장 수·길이는 [연령별 말하기 규칙]이 정한다"가 가리키는 대상이라 바로 앞에 둔다.
+    """
+    parts = [variant]
+    if activity_block:
+        parts.append(activity_block)
+    parts += [_load(_GUARDRAILS), tone_block(difficulty), _load(_COMMON)]
+    return "\n\n".join(parts)
+
+
 def _format_history(history: list[dict] | None) -> str:
     """대화 이력을 템플릿에 넣을 여러 줄 텍스트로 만든다.
 
@@ -133,26 +227,34 @@ def _ask(system_prompt: str, trigger: str, *, temperature: float) -> str:
 # ── 질문 생성 ───────────────────────────────────────────────────
 
 
+def _variant(by_activity: dict[str, str], activity_type: str | None) -> str:
+    """활동 유형 → 변형 프롬프트 본문. 모르는 값은 기본(HTP)으로 둔다."""
+    return _load(by_activity.get(activity_type or "", by_activity[DEFAULT_ACTIVITY_TYPE]))
+
+
 def render_first_question_prompt(
     drawing_analysis: str | None = None,
     *,
     child_name: str | None = None,
     age_band: str = DEFAULT_AGE_BAND,
     activity_block: str = "",
+    activity_type: str | None = None,
+    difficulty: str | None = None,
 ) -> str:
     """첫 질문 system 프롬프트를 렌더링한다(GMS 호출 없음).
 
     draft 경로와 내부 계약 경로(question_service)가 같은 프롬프트를 쓰도록 렌더링만 분리했다.
     activity_block: HTP 주제·대상 객체·반복 금지 지시 블록(S15P11B209-713). draft 경로는
     비우고(""), 내부 계약 경로가 activityType·drawingSubject 기반으로 채운다.
+    activity_type: HTP | ART_DIARY. 대화 목표가 다른 변형 프롬프트를 고른다(S15P11B209-786).
+    difficulty: BE QuestionDifficulty. 연령별 말투 블록을 고른다. None이면 기본 난이도.
     """
-    return _load("first_question").format(
+    variant = _variant(_FIRST_BY_ACTIVITY, activity_type).format(
         age_band=age_band,
         child_name=child_name or NO_CHILD_NAME,
         drawing_analysis=drawing_analysis or NO_ANALYSIS,
-        activity_block=activity_block,
-        guardrails=_load("guardrails"),
     )
+    return _assemble(variant, activity_block=activity_block, difficulty=difficulty)
 
 
 def first_question(
@@ -160,6 +262,8 @@ def first_question(
     *,
     child_name: str | None = None,
     age_band: str = DEFAULT_AGE_BAND,
+    activity_type: str | None = None,
+    difficulty: str | None = None,
     temperature: float = 0.7,
 ) -> str:
     """그림 분석 결과를 보고 아이에게 건넬 첫 질문을 만든다.
@@ -168,6 +272,8 @@ def first_question(
         drawing_analysis: 그림분석 모델 결과 요약. None이면 "뭘 그렸어?"류로 유도된다.
         child_name: 아이 이름(호칭용). None이면 "너"라고 부르게 된다.
         age_band: 연령대 문구(템플릿의 {age_band}에 그대로 들어감).
+        activity_type: HTP | ART_DIARY. None이면 기본(HTP) 변형.
+        difficulty: BE QuestionDifficulty. None이면 기본 난이도 말투.
         temperature: 첫 질문은 조금 다양해도 좋아 기본 0.7.
 
     Returns:
@@ -177,7 +283,11 @@ def first_question(
         RuntimeError: GMS 호출 실패 시.
     """
     system = render_first_question_prompt(
-        drawing_analysis, child_name=child_name, age_band=age_band
+        drawing_analysis,
+        child_name=child_name,
+        age_band=age_band,
+        activity_type=activity_type,
+        difficulty=difficulty,
     )
     return _ask(system, FIRST_QUESTION_TRIGGER, temperature=temperature)
 
@@ -190,21 +300,24 @@ def render_next_question_prompt(
     child_name: str | None = None,
     age_band: str = DEFAULT_AGE_BAND,
     activity_block: str = "",
+    activity_type: str | None = None,
+    difficulty: str | None = None,
 ) -> str:
     """다음 질문 system 프롬프트를 렌더링한다(GMS 호출 없음).
 
     draft 경로와 내부 계약 경로(question_service)가 같은 프롬프트를 쓰도록 렌더링만 분리했다.
     activity_block: HTP 주제·반복 금지 지시 블록(S15P11B209-713). draft 경로는 비운다.
+    activity_type: HTP | ART_DIARY. 대화 목표가 다른 변형 프롬프트를 고른다(S15P11B209-786).
+    difficulty: BE QuestionDifficulty. 연령별 말투 블록을 고른다. None이면 기본 난이도.
     """
-    return _load("conversations").format(
+    variant = _variant(_NEXT_BY_ACTIVITY, activity_type).format(
         age_band=age_band,
         child_name=child_name or NO_CHILD_NAME,
         drawing_analysis=drawing_analysis or NO_ANALYSIS,
         history=_format_history(history),
         child_utterance=child_utterance,
-        activity_block=activity_block,
-        guardrails=_load("guardrails"),
     )
+    return _assemble(variant, activity_block=activity_block, difficulty=difficulty)
 
 
 def next_question(
@@ -214,6 +327,8 @@ def next_question(
     history: list[dict] | None = None,
     child_name: str | None = None,
     age_band: str = DEFAULT_AGE_BAND,
+    activity_type: str | None = None,
+    difficulty: str | None = None,
     temperature: float = 0.6,
 ) -> str:
     """아이가 방금 한 말에 반응하고 다음 질문을 이어간다.
@@ -224,10 +339,12 @@ def next_question(
         history: 지금까지의 대화(마지막 발화는 제외하고 넘기면 중복이 없다).
         child_name: 아이 이름(호칭용). None이면 "너"라고 부르게 된다.
         age_band: 연령대 문구.
+        activity_type: HTP | ART_DIARY. None이면 기본(HTP) 변형.
+        difficulty: BE QuestionDifficulty. None이면 기본 난이도 말투.
         temperature: 이어지는 대화는 튀지 않게 기본 0.6.
 
     Returns:
-        아이에게 건넬 다음 말(한두 문장).
+        아이에게 건넬 다음 말(연령별 말하기 규칙이 정한 길이).
 
     Raises:
         RuntimeError: GMS 호출 실패 시.
@@ -238,6 +355,8 @@ def next_question(
         history=history,
         child_name=child_name,
         age_band=age_band,
+        activity_type=activity_type,
+        difficulty=difficulty,
     )
     return _ask(system, NEXT_QUESTION_TRIGGER, temperature=temperature)
 

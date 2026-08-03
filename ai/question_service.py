@@ -49,6 +49,10 @@ logger = logging.getLogger(__name__)
 
 # 내부 계약 경로도 draft 경로(llm_client)와 같은 프롬프트 파일을 쓴다 — 버전도 그대로 따른다.
 # 버전은 prompts_registry가 중앙 관리하는 통합 버전이다(S15P11B209-595).
+# 이건 '대화 경로가 쓸 수 있는 파일 전부'의 버전이다. GMS를 실제로 부른 응답에는 이번에 고른
+# 활동 변형만 담은 llm_client.prompt_version_for(activityType)를 싣는다(S15P11B209-786) —
+# 두 변형을 모두 적으면 어느 쪽으로 뽑힌 결과인지 사후에 구분할 수 없다.
+# 위기·인젝션 결정적 응답은 프롬프트를 쓰지 않으므로 이 전체 버전을 그대로 남긴다.
 PROMPT_VERSION = llm_client.PROMPT_VERSION
 
 
@@ -81,45 +85,13 @@ class SafetyBlockedError(Exception):
 # 그림 탐지 객체·대화 문맥 기반으로 생성한다 — 두 경로를 한 프롬프트로 통일.
 # ⚠️ 내부 계약엔 아이 이름이 없다(개인정보 최소화) → 항상 "너"로 부른다.
 
-# 연령(난이도)별 질문 규칙 — 길이·어휘·말투 세 축으로 나눠 draft 프롬프트에 덧붙인다
-# (S15P11B209-590). BE QuestionDifficulty enum과 키를 맞춘다. 아이에게 그대로 들려줄
-# 질문이므로 길이·어휘를 연령에 맞춰 통제하는 것이 품질의 핵심이다.
-_DIFFICULTY_RULES = {
-    "PRESCHOOL": {
-        "length": "한 문장, 아주 짧게(대략 10자 안팎). 한 번에 한 가지만 물어봐.",
-        "vocabulary": "유아도 아는 아주 쉬운 말만. 어려운 낱말·한자어·추상어는 쓰지 마.",
-        "tone": "다정하고 밝게. '우와' 같은 반가운 반응으로 시작해도 좋아.",
-    },
-    "LOWER_ELEMENTARY": {
-        "length": "한 문장, 짧고 간결하게. 한 번에 한 가지만.",
-        "vocabulary": "일상에서 자주 쓰는 쉬운 말.",
-        "tone": "따뜻하고 친근하게, 칭찬을 살짝 섞어.",
-    },
-    "UPPER_ELEMENTARY": {
-        "length": "한두 문장까지 괜찮지만 그래도 간결하게.",
-        "vocabulary": "조금 더 구체적인 낱말도 좋지만 어렵지 않게.",
-        "tone": "또렷하고 아이를 존중하는 말투.",
-    },
-    "SUPPORT": {
-        "length": "아주 짧은 한 문장. 천천히, 한 번에 한 가지만.",
-        "vocabulary": "가장 쉬운 말만. 낯선 낱말은 피해.",
-        "tone": "아주 다정하고 차분하게. 재촉하거나 다그치지 마.",
-    },
-}
-
-# 알 수 없는 난이도가 오면 저학년 기준으로 둔다(요청은 계약상 검증되지만 방어적으로).
-_DEFAULT_DIFFICULTY = "LOWER_ELEMENTARY"
-
-
-def _difficulty_guidance(req: QuestionRequest) -> str:
-    """난이도에 맞는 길이·어휘·말투 규칙 블록. draft 프롬프트 뒤에 덧붙는다."""
-    rule = _DIFFICULTY_RULES.get(req.difficulty, _DIFFICULTY_RULES[_DEFAULT_DIFFICULTY])
-    return (
-        "[연령별 말하기 규칙]\n"
-        f"- 문장 길이: {rule['length']}\n"
-        f"- 어휘: {rule['vocabulary']}\n"
-        f"- 말투: {rule['tone']}"
-    )
+# 연령(난이도)별 질문 규칙은 ai/prompts/conversation_tone.txt가 소유한다(S15P11B209-786).
+# 원래 여기 코드 상수(_DIFFICULTY_RULES)였는데 프롬프트 파일로 옮겼다:
+#   ① 아이에게 그대로 들려줄 문구인데 prompts_registry 버전 추적 밖이었다,
+#   ② 이 블록을 붙이는 곳이 여기뿐이라 draft 경로엔 연령별 말투가 아예 없었다,
+#   ③ 프롬프트 파일의 고정 '말투:' 절과 같은 말을 두 번 해 서로 어긋났다(구 PRESCHOOL
+#      "10자 안팎"은 대화 프롬프트의 "반응한 다음 질문을 이어줘"와 동시에 만족할 수 없었다).
+# 이제 llm_client가 프롬프트 조립 시 난이도 구획 하나를 골라 싣는다.
 
 
 def _truncate_description(text: str | None) -> str | None:
@@ -308,7 +280,11 @@ def _build_messages(
 
     if last_child is None:
         system = llm_client.render_first_question_prompt(
-            drawing, age_band=age_band, activity_block=activity_block
+            drawing,
+            age_band=age_band,
+            activity_block=activity_block,
+            activity_type=req.activity_type,
+            difficulty=req.difficulty,
         )
         trigger = llm_client.FIRST_QUESTION_TRIGGER
     else:
@@ -320,10 +296,11 @@ def _build_messages(
             history=history,
             age_band=age_band,
             activity_block=activity_block,
+            activity_type=req.activity_type,
+            difficulty=req.difficulty,
         )
         trigger = llm_client.NEXT_QUESTION_TRIGGER
 
-    system = f"{system}\n\n{_difficulty_guidance(req)}"
     return [
         {"role": "system", "content": system},
         {"role": "user", "content": trigger},
@@ -990,6 +967,7 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         model_name=config.LLM_MODEL,
         # modelVersion: GMS가 실제 서빙한 모델 ID(예: gpt-4o-mini-2024-07-18) — 재현성 기록.
         model_version=served_model or config.LLM_MODEL,
-        prompt_version=PROMPT_VERSION,
+        # 이번 생성이 '실제로 쓴' 활동 변형만 담는다(S15P11B209-786).
+        prompt_version=llm_client.prompt_version_for(req.activity_type),
         processing_time_ms=int((time.monotonic() - started) * 1000),
     )
