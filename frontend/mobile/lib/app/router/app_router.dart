@@ -31,7 +31,9 @@ import '../../features/consent/domain/repositories/consent_repository.dart';
 import '../../features/consent/presentation/screens/consent_management_screen.dart';
 import '../../features/consent/presentation/screens/consent_terms_screen.dart';
 import '../../features/settings/domain/repositories/account_withdrawal_repository.dart';
+import '../../features/settings/domain/repositories/data_retention_repository.dart';
 import '../../features/settings/presentation/screens/account_withdrawal_screen.dart';
+import '../../features/settings/presentation/screens/data_retention_screen.dart';
 import '../../features/settings/presentation/screens/settings_main_screen.dart';
 import '../../features/settings/presentation/screens/guardian_profile_screen.dart';
 import '../state/guardian_child_controller.dart';
@@ -64,6 +66,7 @@ abstract final class AppRouter {
     ValueChanged<String?>? onGuardianTabChanged,
     ConsentRepository? consentRepository,
     AccountWithdrawalRepository? accountWithdrawalRepository,
+    DataRetentionRepository? dataRetentionRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
     ConversationRepository? conversationRepository,
     ConversationEndRepository? conversationEndRepository,
@@ -287,6 +290,11 @@ abstract final class AppRouter {
           onSignOut: authSignOut,
           connectedChildCount: childController?.confirmedChildCount,
         ),
+      // 데이터 보관 기간 조회·편집. 대상 사용자는 토큰에서 해석하므로 아동
+      // 컨텍스트가 필요 없다(S15P11B209-456).
+      ['guardian', 'settings', 'data-retention']
+          when dataRetentionRepository != null =>
+        DataRetentionScreen(repository: dataRetentionRepository),
       // 커뮤니티는 웹 전용(CLAUDE.md 6절). 웹앱을 웹뷰로 띄우고 로그인 토큰을
       // localStorage에 주입한다. URL은 COMMUNITY_WEB_URL dart-define로 교체 가능.
       ['guardian', 'community'] => CommunityWebViewScreen(
@@ -337,6 +345,7 @@ abstract final class AppRouter {
               (settings.arguments! as DrawingActivitySelectionRouteArguments)
                   .initialActivityCode,
           completionSnapshotProvider: drawingCompletionSnapshotProvider,
+          htpPhotoUploadEnabled: htpPhotoUploadEnabled,
         ),
       ['child', final childId, 'activity', 'input-method']
           when _hasChildContext(childController, childId) &&

@@ -18,6 +18,7 @@ class DrawingActivitySelectionScreen extends StatefulWidget {
     required this.replaceActive,
     this.initialActivityCode,
     this.completionSnapshotProvider,
+    this.htpPhotoUploadEnabled = false,
     super.key,
   });
 
@@ -26,6 +27,7 @@ class DrawingActivitySelectionScreen extends StatefulWidget {
   final bool replaceActive;
   final String? initialActivityCode;
   final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
+  final bool htpPhotoUploadEnabled;
 
   @override
   State<DrawingActivitySelectionScreen> createState() =>
@@ -199,7 +201,7 @@ class _DrawingActivitySelectionScreenState
                   accentColor: AppColors.tangerine,
                   repository: widget.repository,
                   replaceActive: _replaceActive,
-                  htpPhotoUploadEnabled: true,
+                  htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
                 ),
               ),
             )

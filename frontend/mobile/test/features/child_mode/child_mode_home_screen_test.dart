@@ -483,7 +483,7 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('HOUSE + REFLECTION 재진입은 입력 방식 선택을 복원하고 steps/next는 0회다', (
+    testWidgets('flag false의 HOUSE 다음 TREE 선택에는 사진 CTA가 없고 API 호출이 0회다', (
       tester,
     ) async {
       final repository = _FakeDrawingRepository(
@@ -503,7 +503,9 @@ void main() {
 
       // 다음 주제 입력 방식 선택 화면이 복원된다.
       expect(find.byKey(const ValueKey('input-method-canvas')), findsOneWidget);
-      expect(find.byKey(const ValueKey('input-method-photo')), findsOneWidget);
+      expect(find.byKey(const ValueKey('input-method-photo')), findsNothing);
+      expect(find.byKey(const ValueKey('input-method-camera')), findsNothing);
+      expect(find.byKey(const ValueKey('input-method-gallery')), findsNothing);
       // Canvas나 끝난 대화로 돌아가지 않는다.
       expect(find.textContaining('drawing-session-'), findsNothing);
       // 사용자가 고르기 전에는 전환·생성 API가 나가지 않는다.
@@ -512,7 +514,7 @@ void main() {
       expect(repository.createCalls, 0);
     });
 
-    testWidgets('TREE + REFLECTION 재진입도 stage 우선으로 입력 방식 선택을 복원한다', (
+    testWidgets('flag false의 TREE 다음 PERSON 선택에도 사진 CTA가 없고 API 호출이 0회다', (
       tester,
     ) async {
       final repository = _FakeDrawingRepository(
@@ -535,12 +537,16 @@ void main() {
       // UPLOAD 세션이지만 stage가 REFLECTION이라 사진 복원이 아니라 전환
       // 선택으로 간다.
       expect(find.byKey(const ValueKey('input-method-canvas')), findsOneWidget);
+      expect(find.byKey(const ValueKey('input-method-photo')), findsNothing);
       expect(find.byKey(const ValueKey('input-method-camera')), findsNothing);
+      expect(find.byKey(const ValueKey('input-method-gallery')), findsNothing);
       expect(repository.nextStepCalls, 0);
       expect(repository.htpStartCalls, 0);
     });
 
-    testWidgets('UPLOAD + DRAWING 재진입은 기존 세션으로 사진 복원 화면에 들어간다', (tester) async {
+    testWidgets('flag false의 UPLOAD + DRAWING 재진입은 세션을 보존하고 홈에서 안내한다', (
+      tester,
+    ) async {
       final repository = _FakeDrawingRepository(
         drawingTypes: const [_secondType],
         activeSession: _htpActiveSession(inputMethod: 'UPLOAD'),
@@ -553,22 +559,49 @@ void main() {
       );
       await resumeActive(tester);
 
-      // 방식 선택을 다시 묻지 않고 사진 촬영 단계로 바로 들어간다.
+      expect(find.byKey(const ValueKey('input-method-photo')), findsNothing);
+      expect(find.byKey(const ValueKey('input-method-camera')), findsNothing);
+      expect(find.byKey(const ValueKey('input-method-gallery')), findsNothing);
+      expect(find.byKey(const ValueKey('input-method-canvas')), findsNothing);
+      expect(find.textContaining('사진으로 시작한 활동은 지금 이어갈 수 없어요'), findsOneWidget);
+      expect(find.textContaining('drawing-session-'), findsNothing);
+      expect(repository.createCalls, 0);
+      expect(repository.htpStartCalls, 0);
+      expect(repository.nextStepCalls, 0);
+      expect(repository.completeAssessmentCalls, 0);
+      expect(repository.deleteSessionCalls, 0);
+    });
+
+    testWidgets('flag true의 UPLOAD + DRAWING 재진입은 기존 사진 복원 흐름을 유지한다', (
+      tester,
+    ) async {
+      final repository = _FakeDrawingRepository(
+        drawingTypes: const [_secondType],
+        activeSession: _htpActiveSession(inputMethod: 'UPLOAD'),
+      );
+
+      await tester.pumpWidget(
+        _wrap(
+          ChildModeHomeScreen(
+            child: _child,
+            drawingRepository: repository,
+            htpPhotoUploadEnabled: true,
+          ),
+        ),
+      );
+      await resumeActive(tester);
+
       expect(find.byKey(const ValueKey('input-method-camera')), findsOneWidget);
       expect(
         find.byKey(const ValueKey('input-method-gallery')),
         findsOneWidget,
       );
       expect(find.byKey(const ValueKey('input-method-canvas')), findsNothing);
-      // 재생성 위험이 있는 "뒤로"는 복원 모드에서 노출하지 않는다.
       expect(find.byKey(const ValueKey('input-method-back')), findsNothing);
-      // Canvas로 열지 않고, 새 세션·새 HTP 활동도 만들지 않는다.
-      expect(find.textContaining('drawing-session-'), findsNothing);
       expect(repository.createCalls, 0);
       expect(repository.htpStartCalls, 0);
       expect(repository.nextStepCalls, 0);
 
-      // 취소해도 복원한 기존 세션을 삭제하지 않는다.
       await tester.tap(find.byKey(const ValueKey('input-method-cancel')));
       await tester.pumpAndSettle();
       expect(repository.deleteSessionCalls, 0);

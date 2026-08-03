@@ -1046,21 +1046,18 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
                   onTap: _busy ? null : _handleCanvasChoice,
                 ),
               ),
-              SizedBox(
-                width: cardWidth,
-                child: _ChoiceCard(
-                  key: const ValueKey('input-method-photo'),
-                  icon: Icons.photo_camera_rounded,
-                  title: '사진으로 시작하기',
-                  description: widget.htpPhotoUploadEnabled
-                      ? '그려둔 그림을 사진으로 담아요'
-                      : '곧 만나요',
-                  color: AppColors.tangerine,
-                  onTap: !widget.htpPhotoUploadEnabled || _busy
-                      ? null
-                      : _choosePhotoMethod,
+              if (widget.htpPhotoUploadEnabled)
+                SizedBox(
+                  width: cardWidth,
+                  child: _ChoiceCard(
+                    key: const ValueKey('input-method-photo'),
+                    icon: Icons.photo_camera_rounded,
+                    title: '사진으로 시작하기',
+                    description: '그려둔 그림을 사진으로 담아요',
+                    color: AppColors.tangerine,
+                    onTap: _busy ? null : _choosePhotoMethod,
+                  ),
                 ),
-              ),
             ],
           );
         },
