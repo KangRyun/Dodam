@@ -50,9 +50,76 @@
 | `qaPairs[].answerText` | X | 아이 답변(STT 텍스트 또는 선택 칩 라벨). **repr 은닉 — 로그 금지** |
 | `qaPairs[].answerType` | X | BE 어휘(예: VOICE·OPTION·SKIPPED). AI는 `SKIPPED`만 프롬프트에 "(건너뛴 질문)"으로 구분 표기 — 아이가 스스로 넘긴 것은 무응답과 다른 관찰 사실. 그 외 값은 해석하지 않음 |
 
-### 2.3 롤아웃 호환 (양방향)
+### 2.3 `behaviorMetrics` — 그리기 형식 지표 (S15P11B209-836 신설)
 
-- **전 필드 optional + 기본 빈 목록.** 구 BE가 안 보내면 기존(집계+대표 발화) 경로로 동일 동작 — `QuestionRequest.activityType`(713)과 같은 패턴.
+`[형식적 분석]` 블록의 입력이다. 확장 전에는 전달 수단이 없어 이 블록이 **운영 경로에서 한 번도
+실리지 않았다** — 프롬프트(`report_common.txt` 첫 9줄)는 블록을 전제로 쓰여 있는데 데이터가
+도착하지 않던 상태였다. BE `StrokeBehaviorSummary` 와 필드 1:1이며, 같은 값이 이미
+`POST /analyze/drawing` 의 `BehaviorInput.summary` 로 나가고 있다.
+
+```jsonc
+"behaviorMetrics": {              // optional, 기본 null
+  "drawingDurationMs": 720000,
+  "activeDrawingMs":   480000,
+  "pauseCount":        4,
+  "undoCount":         2,
+  "eraseCount":        3,
+  "toolChangeCount":   1,
+  "colorChangeCount":  5,
+  "pressureAvailable": true,
+  "averagePressure":   null,      // 이번 단계에서 항상 null
+  "truncated":         false
+}
+```
+
+| 필드 | 필수 | 설명 |
+|---|---|---|
+| `drawingDurationMs` · `activeDrawingMs` | X | 없으면 `null`. **0으로 채우지 않는다** |
+| `pauseCount` | X | 배치 경계 기반 **추정값** — 리포트는 "약 N번"으로 완화 표기 |
+| `undoCount` · `eraseCount` | X | |
+| `toolChangeCount` · `colorChangeCount` | X | 계약으로 받되 현재 프롬프트 블록에는 싣지 않는다 |
+| `pressureAvailable` | O | **측정 가능 여부일 뿐** 필압의 강약도 감정 근거도 아니다 |
+| `averagePressure` | X | 이번 단계 항상 `null`(BE 확정). 값 도입은 후속 |
+| `truncated` | O | `true`면 "저장된 캔버스 입력 구간 기준" — 활동 전체를 완전 집계한 것처럼 표현 금지 |
+
+**`null` 과 `0` 은 다른 뜻이다.** `null`은 '집계하지 못함'이라 프롬프트 블록에서 항목을 빼고,
+`0`은 '0회'라는 관찰 사실이라 그대로 적는다. 멈춤 없이 몰입해 그린 활동(`pauseCount=0`)과
+집계 실패(`null`)가 같은 문장이 되면 안 된다.
+
+**HTP는 세 단계 합산값이다.** HOUSE·TREE·PERSON 이 모두 CANVAS 이고 집계 가능할 때만 합산해
+보내고, UPLOAD 가 섞이거나 한 단계라도 집계 불가면 **전체를 `null`** 로 보낸다 — 부분 집계를
+전체 활동으로 오인시키지 않기 위해서다. 주제별 행동 지표는 이번 범위 밖.
+
+### 2.4 `subjectSummaries[].detectedObjects` — 탐지 기하 (S15P11B209-836 신설)
+
+기존 `detectedObjectCodes`(라벨 문자열)와 **병렬로** 실린다. 기존 필드는 유지된다.
+
+```jsonc
+"detectedObjects": [              // optional, 기본 빈 목록
+  { "objectCode": "HOUSE",      "x": 0.21, "y": 0.18, "width": 0.55, "height": 0.60,
+    "areaRatio": 0.33,  "confidence": 0.94 },
+  { "objectCode": "HOUSE_DOOR", "x": 0.42, "y": 0.55, "width": 0.09, "height": 0.16,
+    "areaRatio": 0.014, "confidence": 0.81 }
+]
+```
+
+| 필드 | 필수 | 설명 |
+|---|---|---|
+| `objectCode` | O | `analysis_detected_objects.object_code`. 리포트 문장에 원문 노출 금지(기존 규칙) |
+| `x` `y` `width` `height` | O | **NORMALIZED(0~1) 만** 전달 |
+| `areaRatio` | X | 없으면 `null`. **AI에서 `width*height` 로 보정하지 않는다** |
+| `confidence` | X | 낮은 신뢰도 탐지를 확정 사실처럼 표현하지 않기 위한 값 |
+
+**좌표계는 `NORMALIZED` 만.** AI는 캔버스 원본 크기를 모르므로 픽셀 좌표로는 용지 점유율을
+계산할 수 없다. `coordinateSpace == PIXEL` 인 결과뿐이면 그 주제는 **빈 목록**으로 보낸다
+(부분 전달 금지 — 좌표계가 섞이면 판단 불가).
+
+가드레일: 크기·위치는 **관찰 사실로만** 쓴다. 단일 기하 신호 단정, 아동의 평소 성격·발달로의
+일반화, 진단명·점수 생성, 낮은 신뢰도 탐지의 확정 표현은 프롬프트가 금지한다.
+
+### 2.5 롤아웃 호환 (양방향)
+
+- **전 필드 optional + 기본 빈 목록/`null`.** 구 BE가 안 보내면 기존(집계+대표 발화) 경로로 동일 동작 — `QuestionRequest.activityType`(713)과 같은 패턴. 836의 두 필드도 같다: `behaviorMetrics`가 없으면 `[형식적 분석]` 블록이 실리지 않고, `detectedObjects`가 비면 기존 코드 목록 경로가 그대로 쓰인다. 배포 순서 제약 없음.
 - `subjectSummaries`가 비어 있지 않으면 프롬프트의 `[그림 관찰 서술]` 단일 블록 **대신** 주제별 블록(`[집 그림 관찰]`·`[집 그림 문답]` …)이 실린다. 레거시 `drawing_description` 인자(draft 경로 전용)와 동시 제공 시 주제별 블록이 우선.
 
 ## 3. 응답 — RAG 확장 (S15P11B209-614·615, 전부 optional — 구 BE는 무시)

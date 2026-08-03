@@ -519,6 +519,9 @@ def internal_observations(
     - 502 AI_UPSTREAM_ERROR → 상류(GMS) 장애·응답 형식 오류
 
     그림 서술은 받지 않는다. 이미지가 필요한 호출은 파일을 함께 보내는 /analyze/report를 쓴다.
+
+    형식 지표(behaviorMetrics)·탐지 기하(detectedObjects)는 요청 본문에 실려 오므로
+    별도 인자가 필요 없다 — generate()가 req 에서 꺼내 쓴다(S15P11B209-836).
     """
     if not _internal_auth_ok(x_internal_token, x_internal_api_key):
         return JSONResponse(

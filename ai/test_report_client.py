@@ -163,7 +163,7 @@ class GenerateTest(unittest.TestCase):
         fake_client = mock.Mock()
         fake_client.chat.completions.create.side_effect = fake_create
 
-        behavior = report_client.DrawingBehaviorMetrics(
+        behavior = contracts.BehaviorMetrics(
             drawing_duration_ms=600_000,
             pause_count=4,
             erase_count=3,
@@ -186,11 +186,170 @@ class GenerateTest(unittest.TestCase):
             messages=k["messages"]
         ) or _fake_response(_llm_json())
 
-        behavior = report_client.DrawingBehaviorMetrics(pressure_available=False)
+        behavior = contracts.BehaviorMetrics(pressure_available=False)
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             report_client.generate(_sample_request(), behavior=behavior, model="m")
 
         self.assertIn("필압: 측정 불가", captured["messages"][1]["content"])
+
+
+class BehaviorMetricsContractTest(unittest.TestCase):
+    """요청 계약으로 들어온 형식 지표가 프롬프트까지 도달하는지 (S15P11B209-836).
+
+    확장 전에는 behavior 를 넘길 수단이 계약에 없어 [형식적 분석] 블록이 운영 경로에서
+    한 번도 실리지 않았다 — 이 테스트가 그 배선을 고정한다.
+    """
+
+    def _capture_prompt(self, req) -> str:
+        captured = {}
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = lambda **k: captured.update(
+            messages=k["messages"]
+        ) or _fake_response(_llm_json())
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            report_client.generate(req, model="m")
+        return captured["messages"][1]["content"]
+
+    def test_request_behavior_metrics_reach_the_prompt(self):
+        req = _sample_request()
+        req.behavior_metrics = contracts.BehaviorMetrics(
+            drawing_duration_ms=720_000, erase_count=3, pressure_available=False
+        )
+
+        user_msg = self._capture_prompt(req)
+
+        self.assertIn("[형식적 분석]", user_msg)
+        self.assertIn("약 12.0분", user_msg)
+        self.assertIn("지우기 횟수: 3회", user_msg)
+
+    def test_absent_behavior_metrics_keeps_legacy_behaviour(self):
+        """구 BE(behaviorMetrics 미전달) 요청은 확장 전과 똑같이 동작한다."""
+        user_msg = self._capture_prompt(_sample_request())
+
+        self.assertNotIn("[형식적 분석]", user_msg)
+
+    def test_zero_and_none_are_distinguished(self):
+        """0은 '0회'라는 관찰 사실, None은 '집계 못 함' — 같은 문장이 되면 안 된다."""
+        req = _sample_request()
+        req.behavior_metrics = contracts.BehaviorMetrics(
+            pause_count=0, erase_count=None, pressure_available=False
+        )
+
+        user_msg = self._capture_prompt(req)
+
+        self.assertIn("멈춤 횟수: 0회", user_msg)
+        self.assertNotIn("지우기 횟수", user_msg)
+
+    def test_explicit_argument_overrides_contract_value(self):
+        """draft·스모크가 계약 밖 값을 넣어 볼 수 있어야 한다."""
+        req = _sample_request()
+        req.behavior_metrics = contracts.BehaviorMetrics(drawing_duration_ms=60_000)
+        captured = {}
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = lambda **k: captured.update(
+            messages=k["messages"]
+        ) or _fake_response(_llm_json())
+
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            report_client.generate(
+                req,
+                behavior=contracts.BehaviorMetrics(drawing_duration_ms=600_000),
+                model="m",
+            )
+
+        self.assertIn("약 10.0분", captured["messages"][1]["content"])
+
+    def test_camel_case_payload_parses(self):
+        """BE가 보내는 camelCase JSON이 계약 모델로 그대로 들어온다."""
+        req = contracts.ObservationGenerationRequest.model_validate(
+            {
+                "requestId": "r-1",
+                "analysisId": 1,
+                "drawingSessionId": 1,
+                "analysisType": "FINAL",
+                "behaviorMetrics": {
+                    "drawingDurationMs": 720000,
+                    "activeDrawingMs": 480000,
+                    "pauseCount": 4,
+                    "undoCount": 2,
+                    "eraseCount": 3,
+                    "toolChangeCount": 1,
+                    "colorChangeCount": 5,
+                    "pressureAvailable": True,
+                    "averagePressure": None,
+                    "truncated": False,
+                },
+            }
+        )
+
+        self.assertEqual(720000, req.behavior_metrics.drawing_duration_ms)
+        self.assertEqual(480000, req.behavior_metrics.active_drawing_ms)
+        self.assertIsNone(req.behavior_metrics.average_pressure)
+        self.assertFalse(req.behavior_metrics.truncated)
+
+
+class DetectedObjectContractTest(unittest.TestCase):
+    """탐지 기하 필드가 계약으로 들어오는지 (S15P11B209-836).
+
+    소비(용지 점유율·9분할 위치 서술)는 S15P11B209-839 범위 — 여기서는 계약만 고정한다.
+    """
+
+    def test_detected_objects_parse_alongside_codes(self):
+        req = contracts.ObservationGenerationRequest.model_validate(
+            {
+                "requestId": "r-1",
+                "analysisId": 1,
+                "drawingSessionId": 1,
+                "analysisType": "FINAL",
+                "subjectSummaries": [
+                    {
+                        "drawingSubject": "HOUSE",
+                        "detectedObjectCodes": ["HOUSE", "HOUSE_DOOR"],
+                        "detectedObjects": [
+                            {
+                                "objectCode": "HOUSE",
+                                "x": 0.21,
+                                "y": 0.18,
+                                "width": 0.55,
+                                "height": 0.60,
+                                "areaRatio": 0.33,
+                                "confidence": 0.94,
+                            },
+                            {
+                                "objectCode": "HOUSE_DOOR",
+                                "x": 0.42,
+                                "y": 0.55,
+                                "width": 0.09,
+                                "height": 0.16,
+                                "areaRatio": None,
+                                "confidence": 0.81,
+                            },
+                        ],
+                    }
+                ],
+            }
+        )
+
+        summary = req.subject_summaries[0]
+        # 기존 코드 목록은 유지된다 — 신구 필드가 병렬로 존재한다(하위호환).
+        self.assertEqual(["HOUSE", "HOUSE_DOOR"], summary.detected_object_codes)
+        self.assertEqual(0.33, summary.detected_objects[0].area_ratio)
+        # areaRatio 가 없으면 None 그대로 — width*height 로 보정하지 않는다(BE 명시).
+        self.assertIsNone(summary.detected_objects[1].area_ratio)
+
+    def test_missing_detected_objects_defaults_to_empty(self):
+        """구 BE(그리고 PIXEL 결과만 있는 주제)는 빈 목록으로 들어온다."""
+        req = contracts.ObservationGenerationRequest.model_validate(
+            {
+                "requestId": "r-1",
+                "analysisId": 1,
+                "drawingSessionId": 1,
+                "analysisType": "FINAL",
+                "subjectSummaries": [{"drawingSubject": "TREE"}],
+            }
+        )
+
+        self.assertEqual([], req.subject_summaries[0].detected_objects)
 
     def test_without_description_prompts_placeholder(self):
         captured = {}

@@ -20,13 +20,16 @@ BE 계약(report.dto.ObservationGenerationRequest → ObservationGenerationResul
 
 프롬프트 구성: 활동 변형(report_htp | report_diary) + 공통(report_common)을 이어붙인다.
 활동 판별은 subject_summaries[].drawing_subject 유무로 추론한다(계약에 activityType 없음).
+
+형식 지표(S15P11B209-836): 그리기 소요시간·멈춤·지우기 등은 요청의 behaviorMetrics 로 들어온다.
+계약 확장 전에는 전달 수단이 없어 [형식적 분석] 블록이 운영 경로에서 한 번도 실리지 않았다 —
+프롬프트는 그 블록을 전제로 쓰여 있는데 데이터가 도착하지 않던 상태였다.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
 
 from openai import OpenAIError
 from prometheus_client import Counter as PrometheusCounter
@@ -103,25 +106,6 @@ DEFAULT_FOLLOW_UP_QUESTION = "오늘 그림에서 어떤 부분이 제일 마음
 _VALID_SCOPES = {"EXPERT_ONLY", "REVIEWED_GUARDIAN"}
 
 
-@dataclass
-class DrawingBehaviorMetrics:
-    """(AI 보조 입력) 그리기의 형식/행동 지표 — 스펙 §13.4 activityFacts / §19.3 behavior.summary.
-
-    리포트의 '형식적 분석'(소요시간·필압 등)을 관찰 근거로 반영하기 위한 입력이다.
-    ⚠️ BE ObservationGenerationRequest 엔 아직 없다(개인정보 최소화 계약). 정식 전달(계약 확장)은
-    후속 이슈 — 지금은 draft/데모 경로에서 별도 인자로 넘긴다. 수치 자체는 심리 단정 근거가 아니라
-    관찰 보조 근거로만 쓴다(프롬프트가 강제).
-    """
-
-    drawing_duration_ms: int | None = None
-    active_drawing_duration_ms: int | None = None
-    pause_count: int | None = None
-    erase_count: int | None = None
-    undo_count: int | None = None
-    pressure_available: bool = False
-    average_pressure: float | None = None
-
-
 def _load(name: str) -> str:
     """프롬프트 로딩은 prompts_registry로 중앙화했다(S15P11B209-595)."""
     return prompts_registry.load(name)
@@ -178,13 +162,20 @@ def _fmt_minutes(ms: int | None) -> str | None:
     return f"약 {round(ms / 60000, 1)}분"
 
 
-def _format_behavior(behavior: DrawingBehaviorMetrics | None) -> str:
-    """형식적 분석 지표를 프롬프트 [형식적 분석] 블록으로. 없으면 빈 문자열."""
+def _format_behavior(behavior: contracts.BehaviorMetrics | None) -> str:
+    """형식적 분석 지표를 프롬프트 [형식적 분석] 블록으로. 없으면 빈 문자열.
+
+    None인 항목은 줄 자체를 넣지 않는다 — 0("0회")과 구분하기 위해서다. 집계하지 못한 값을
+    0으로 적으면 "멈춤 없이 그렸다"는 관찰 사실로 읽힌다(BE StrokeBehaviorSummary 와 같은 원칙).
+
+    ⚠️ 표현 다듬기(truncated 부분 집계 표기·추정값 완화·필압 줄 처리)는 S15P11B209-838 범위다.
+       이 이슈(836)는 계약 모델 전환과 배선까지만 한다.
+    """
     if behavior is None:
         return ""
     lines = ["[형식적 분석]"]
     total = _fmt_minutes(behavior.drawing_duration_ms)
-    active = _fmt_minutes(behavior.active_drawing_duration_ms)
+    active = _fmt_minutes(behavior.active_drawing_ms)
     if total:
         lines.append(f"- 총 소요시간: {total}")
     if active:
@@ -251,7 +242,7 @@ def _format_subject_blocks(req: contracts.ObservationGenerationRequest) -> str:
 def _format_activity(
     req: contracts.ObservationGenerationRequest,
     drawing_description: str | None,
-    behavior: DrawingBehaviorMetrics | None = None,
+    behavior: contracts.BehaviorMetrics | None = None,
     rag_chunks: list[Chunk] | None = None,
 ) -> str:
     """[그림 관찰 서술](VLM) + [형식적 분석] + [전문 자료 근거] + 집계·감정·대표 발화.
@@ -575,7 +566,7 @@ def generate(
     req: contracts.ObservationGenerationRequest,
     *,
     drawing_description: str | None = None,
-    behavior: DrawingBehaviorMetrics | None = None,
+    behavior: contracts.BehaviorMetrics | None = None,
     model: str | None = None,
 ) -> contracts.ObservationGenerationResult:
     """[그림 관찰 서술] + [형식적 분석] + 활동 요청 → GMS LLM 관찰 리포트 초안(계약 결과).
@@ -584,7 +575,9 @@ def generate(
         req: 최종 분석 관찰 생성 요청(집계·감정·대표 발화).
         drawing_description: vlm_client.describe 산출물(그림 사실 묘사). 있으면 관찰 근거로
             쓰인다. None이면 그림 특징은 언급하지 않고 나머지 데이터만으로 생성한다.
-        behavior: 소요시간·필압 등 형식적 지표(있으면 관찰 보조 근거로 반영).
+        behavior: 소요시간·필압 등 형식적 지표(있으면 관찰 보조 근거로 반영). 생략하면
+            req.behavior_metrics 를 쓴다 — 계약으로 들어온 값이 정상 경로이고, 이 인자는
+            draft/스모크에서 계약 밖 값을 넣어 보기 위한 덮어쓰기다.
         model: 미지정 시 config.LLM_MODEL(텍스트 전용 — 이미지 자체는 넘기지 않는다).
 
     Returns:
@@ -594,6 +587,8 @@ def generate(
         RuntimeError: GMS 호출 실패 또는 응답 JSON 파싱 실패 시(내용은 감추고 유형만 로그).
     """
     used_model = model or config.LLM_MODEL
+    # 계약 값(836)이 기본. 인자로 준 값이 있으면 그쪽이 이긴다(draft/스모크 덮어쓰기).
+    behavior = behavior if behavior is not None else req.behavior_metrics
     is_htp = _is_htp(req)
     # RAG 근거 검색(614)은 HTP 리포트에서만 한다 — 그림일기 프롬프트는 [전문 자료 근거]를
     # 근거 목록에 두지 않으므로, 검색해 봐야 프롬프트가 쓰지 않는 블록에 비용만 쓴다.
@@ -646,13 +641,14 @@ if __name__ == "__main__":
         representative_utterance="이건 우리 집이야. 엄마랑 나 있어.",
     )
     sample_description = "가운데에 집이 크게 그려져 있고, 왼쪽에 나무 한 그루가 있어요. 오른쪽에는 사람 두 명이 나란히 서 있어요."
-    sample_behavior = DrawingBehaviorMetrics(
+    sample_behavior = contracts.BehaviorMetrics(
         drawing_duration_ms=600_000,  # 총 10분
-        active_drawing_duration_ms=410_000,  # 실제 그린 시간 약 6.8분
+        active_drawing_ms=410_000,  # 실제 그린 시간 약 6.8분
         pause_count=4,
         erase_count=3,
         undo_count=2,
         pressure_available=True,
+        # BE는 이번 단계에서 항상 None을 보낸다 — 스모크에서만 값을 넣어 표기를 확인한다.
         average_pressure=0.62,
     )
     result = generate(
