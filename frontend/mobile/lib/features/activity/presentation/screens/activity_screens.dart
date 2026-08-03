@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../../../../app/router/app_navigation.dart';
 import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../core/network/api_failure.dart';
@@ -3469,8 +3470,28 @@ class ActivityCompleteScreen extends StatefulWidget {
 class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
   ActivityCompletionController? _completionController;
 
+  /// 이 화면을 떠나기로 확정했는지. 한 번 서면 되돌리지 않는다 — 늦게 도착한
+  /// 상태 조회 결과가 떠나는 화면을 다시 그리거나 polling을 되살리면 안 된다.
+  bool _isLeaving = false;
+
+  /// 보호자 전환 확인 Dialog가 열려 있는지. 이동을 확정한 것은 아니므로
+  /// 취소하면 되돌리고, 그 사이에 다른 이탈이 겹치는 것만 막는다.
+  bool _guardianDialogOpen = false;
+
   bool get _legacyCompleted =>
       widget.sessionId == null || widget.drawingRepository == null;
+
+  /// 서버가 세션을 최종 실패로 확정한 상태. 이 상태에서만 이탈을 허용한다.
+  ///
+  /// polling 중·성공 처리 중에는 기존 이탈 방지 정책을 그대로 유지한다 —
+  /// 아이가 실수로 빠져나가면 완료 안내를 다시 볼 방법이 없다.
+  bool get _isTerminalFailure =>
+      !_legacyCompleted &&
+      _completionController?.status == ActivityCompletionStatus.terminalFailure;
+
+  /// 이탈 동작을 시작해도 되는지. 이미 떠나기로 했거나 확인 Dialog가 열려 있으면
+  /// 두 번째 입력은 조용히 무시한다(연속 탭·back 중복 실행 방지).
+  bool get _canStartLeaving => mounted && !_isLeaving && !_guardianDialogOpen;
 
   @override
   void initState() {
@@ -3498,18 +3519,45 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
   }
 
   void _handleCompletionStatusChanged() {
-    if (mounted) setState(() {});
+    // 떠나기로 확정한 뒤 도착한 결과는 버린다. dispose 전이라도 화면을 다시
+    // 그리면 사용자가 이미 벗어난 상태 안내가 한 프레임 깜빡인다.
+    if (mounted && !_isLeaving) setState(() {});
   }
 
   void _retryStatusCheck() {
+    if (_isLeaving) return;
     unawaited(_completionController?.pollUntilTerminal());
+  }
+
+  /// 최종 실패 화면에서 아동 홈으로 돌아간다.
+  ///
+  /// 실패 화면 이전 단계(감정 선택·회고)는 이미 성공해 되돌아갈 곳이 아니고,
+  /// 재진입 복구로 들어온 경우에는 이전 route가 아예 없을 수도 있다. 그래서
+  /// `pop`하지 않고 아동 홈으로 스택을 다시 세운다 — 홈 route가 아동 문맥을
+  /// 확인하므로 문맥이 없으면 라우터가 안전한 화면으로 흘려보낸다.
+  void _leaveToChildHome() {
+    if (!_canStartLeaving) return;
+    setState(() => _isLeaving = true);
+    AppNavigation.resetTo(context, AppRoutes.childModeHome(widget.childId));
   }
 
   @override
   Widget build(BuildContext context) => PopScope(
+    // 계속 직접 처리한다. polling·성공 상태에서는 기존처럼 back을 삼키고,
+    // 최종 실패에서만 아동 홈으로 보낸다.
     canPop: false,
+    onPopInvokedWithResult: (didPop, _) {
+      if (!didPop && _isTerminalFailure) _leaveToChildHome();
+    },
     child: Scaffold(
       backgroundColor: AppColors.childCanvas,
+      appBar: _isTerminalFailure
+          ? AppTopBar(
+              key: const ValueKey('activity-completion-failure-appbar'),
+              title: '활동 마무리',
+              onBack: _leaveToChildHome,
+            )
+          : null,
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) => SingleChildScrollView(
@@ -3602,10 +3650,32 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
     }
 
     if (status == ActivityCompletionStatus.terminalFailure) {
-      return const _CompletionStatusMessage(
+      // 실패 안내만 두면 아이가 이 화면에서 나갈 수 없다(S15P11B209-820).
+      // 안내 문구는 그대로 두고 다음 행동만 덧붙인다.
+      return _CompletionStatusMessage(
         icon: Icons.error_outline_rounded,
         title: '활동을 마무리하지 못했어요',
         description: '보호자에게 알려 다시 확인해 주세요.',
+        button: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            AppButton(
+              key: const ValueKey('activity-completion-child-home'),
+              label: '아동 홈으로 돌아가기',
+              variant: AppButtonVariant.child,
+              leading: const Icon(Icons.home_rounded),
+              onPressed: _leaveToChildHome,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            AppButton(
+              key: const ValueKey('activity-completion-guardian-home'),
+              label: '보호자 화면으로 돌아가기',
+              variant: AppButtonVariant.secondary,
+              leading: const Icon(Icons.family_restroom_rounded),
+              onPressed: () => _confirmGuardianTransition(context),
+            ),
+          ],
+        ),
       );
     }
 
@@ -3619,19 +3689,29 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
   }
 
   Future<void> _confirmGuardianTransition(BuildContext context) async {
-    final confirmed = await showAppConfirmDialog(
-      context: context,
-      title: '보호자 화면으로 이동할까요?',
-      message: '보호자가 기기를 받았다면 확인을 눌러 주세요.',
-      confirmLabel: '확인',
-      cancelLabel: '취소',
-      illustration: const Icon(
-        Icons.family_restroom_rounded,
-        color: AppColors.leaf,
-        size: 56,
-      ),
-    );
-    if (confirmed != true || !context.mounted) return;
+    // 확인 Dialog가 열려 있는 동안에는 아동 홈 이탈·두 번째 Dialog를 막는다.
+    if (!_canStartLeaving) return;
+    _guardianDialogOpen = true;
+    final bool? confirmed;
+    try {
+      confirmed = await showAppConfirmDialog(
+        context: context,
+        title: '보호자 화면으로 이동할까요?',
+        message: '보호자가 기기를 받았다면 확인을 눌러 주세요.',
+        confirmLabel: '확인',
+        cancelLabel: '취소',
+        illustration: const Icon(
+          Icons.family_restroom_rounded,
+          color: AppColors.leaf,
+          size: 56,
+        ),
+      );
+    } finally {
+      // 취소·바깥 탭으로 닫혔으면 실패 화면에 그대로 남아야 하므로 되돌린다.
+      _guardianDialogOpen = false;
+    }
+    if (confirmed != true || !context.mounted || _isLeaving) return;
+    setState(() => _isLeaving = true);
     AppRouter.goGuardianHome(context);
   }
 }
