@@ -65,6 +65,7 @@ class CommunityPostIntegrationTest {
   @BeforeEach
   void setUp() {
     authenticate(GUARDIAN_USER_ID);
+    jdbcTemplate.update("DELETE FROM community_attachment_files");
     jdbcTemplate.update("DELETE FROM community_post_template_fields");
     jdbcTemplate.update("DELETE FROM post_likes");
     jdbcTemplate.update("DELETE FROM comments");
@@ -126,6 +127,70 @@ class CommunityPostIntegrationTest {
         .containsEntry("is_visible", true)
         .containsEntry("deleted_at", null)
         .containsEntry("author_user_id", GUARDIAN_USER_ID);
+  }
+
+  @Test
+  void attachesOwnedTemporaryImageAndReturnsItFromPostDetail() throws Exception {
+    String fileId = "70e956a0-42b7-4d83-a79f-4d73e80a6acc";
+    insertTemporaryAttachment(fileId, GUARDIAN_USER_ID);
+    String request =
+        """
+        {
+          "postType":"GUARDIAN_STORY",
+          "title":"그림 후기",
+          "content":"첨부 이미지가 있습니다.",
+          "attachments":[{"fileId":"%s","type":"IMAGE"}]
+        }
+        """
+            .formatted(fileId);
+
+    String body =
+        mockMvc
+            .perform(post("/api/v1/posts").contentType(MediaType.APPLICATION_JSON).content(request))
+            .andExpect(status().isCreated())
+            .andExpect(jsonPath("$.data.attachments[0].fileId").value(fileId))
+            .andExpect(jsonPath("$.data.attachments[0].type").value("IMAGE"))
+            .andExpect(
+                jsonPath("$.data.attachments[0].url")
+                    .value("/api/v1/community-files/" + fileId + "/file"))
+            .andReturn()
+            .getResponse()
+            .getContentAsString(StandardCharsets.UTF_8);
+    long postId = objectMapper.readTree(body).at("/data/postId").asLong();
+
+    mockMvc
+        .perform(get("/api/v1/posts/{postId}", postId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.attachments[0].fileId").value(fileId));
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT status, post_id, display_order FROM community_attachment_files WHERE file_id = ?",
+                fileId))
+        .containsEntry("status", "ATTACHED")
+        .containsEntry("post_id", postId)
+        .containsEntry("display_order", 0);
+  }
+
+  @Test
+  void rejectsAnotherUsersTemporaryAttachmentWithoutRevealingIt() throws Exception {
+    String fileId = "ea6c6fc1-a840-4853-a890-dbb1a5ce36e0";
+    insertTemporaryAttachment(fileId, OTHER_GUARDIAN_USER_ID);
+    String request =
+        """
+        {
+          "postType":"GUARDIAN_STORY",
+          "title":"제목",
+          "content":"본문",
+          "attachments":[{"fileId":"%s","type":"IMAGE"}]
+        }
+        """
+            .formatted(fileId);
+
+    mockMvc
+        .perform(post("/api/v1/posts").contentType(MediaType.APPLICATION_JSON).content(request))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("COMMUNITY_ATTACHMENT_NOT_FOUND"));
+    assertThat(postCount()).isZero();
   }
 
   @Test
@@ -766,6 +831,20 @@ class CommunityPostIntegrationTest {
         status,
         visible,
         deletedAt);
+  }
+
+  private void insertTemporaryAttachment(String fileId, Long userId) {
+    jdbcTemplate.update(
+        """
+        INSERT INTO community_attachment_files
+          (file_id, uploaded_by_user_id, storage_key, content_type, file_size_bytes,
+           width_px, height_px, checksum_sha256, status, expires_at)
+        VALUES (?, ?, ?, 'image/png', 1024, 640, 480, ?, 'TEMP', DATE_ADD(NOW(6), INTERVAL 1 DAY))
+        """,
+        fileId,
+        userId,
+        "community/" + fileId + ".png",
+        "a".repeat(64));
   }
 
   private int postCount() {

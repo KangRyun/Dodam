@@ -13,9 +13,12 @@ import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.auth.repository.UserRepository;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.auth.token.AuthenticatedUser;
+import com.ssafy.b209.community.domain.CommunityAttachmentType;
 import com.ssafy.b209.community.domain.CommunityPost;
 import com.ssafy.b209.community.domain.PostStatus;
 import com.ssafy.b209.community.domain.PostType;
+import com.ssafy.b209.community.dto.CommunityAttachmentInput;
+import com.ssafy.b209.community.dto.CommunityAttachmentResponse;
 import com.ssafy.b209.community.dto.CreatePostRequest;
 import com.ssafy.b209.community.dto.PostDetailResponse;
 import com.ssafy.b209.community.exception.CommunityErrorCode;
@@ -47,6 +50,7 @@ class CommunityPostCreateServiceTest {
 
   @Mock private UserRepository userRepository;
   @Mock private CommunityPostRepository communityPostRepository;
+  @Mock private CommunityAttachmentService communityAttachmentService;
 
   private CommunityPostCreateService service;
 
@@ -57,6 +61,7 @@ class CommunityPostCreateServiceTest {
             new CurrentAuthenticatedUserResolver(),
             userRepository,
             communityPostRepository,
+            communityAttachmentService,
             Clock.fixed(FIXED_INSTANT, ZoneOffset.UTC));
     SecurityContextHolder.getContext()
         .setAuthentication(
@@ -112,6 +117,30 @@ class CommunityPostCreateServiceTest {
 
     assertThat(response.anonymous()).isTrue();
     assertThat(response.author()).isNull();
+  }
+
+  @Test
+  void returnsRequestedAttachmentAfterCreatingPost() {
+    givenAuthor(UserRole.GUARDIAN, "작성자");
+    givenSaveAssignsId();
+    CreatePostRequest request =
+        new CreatePostRequest(
+            PostType.GUARDIAN_STORY,
+            "제목",
+            "본문",
+            false,
+            null,
+            List.of(new CommunityAttachmentInput("file-id", CommunityAttachmentType.IMAGE)));
+    given(communityAttachmentService.attach(AUTHOR_ID, SAVED_ID, request.attachments()))
+        .willReturn(
+            List.of(
+                new CommunityAttachmentResponse(
+                    "file-id", CommunityAttachmentType.IMAGE, "/files/file-id", 640, 480)));
+
+    PostDetailResponse response = service.createPost(request);
+
+    assertThat(response.attachments()).hasSize(1);
+    verify(communityAttachmentService).attach(AUTHOR_ID, SAVED_ID, request.attachments());
   }
 
   @Test

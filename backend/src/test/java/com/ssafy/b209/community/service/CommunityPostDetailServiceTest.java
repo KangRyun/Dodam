@@ -35,6 +35,7 @@ class CommunityPostDetailServiceTest {
   private static final long VIEWER_ID = 41L;
 
   @Mock private CommunityPostDetailRepository communityPostDetailRepository;
+  @Mock private CommunityAttachmentService communityAttachmentService;
 
   private CommunityPostDetailService service;
 
@@ -42,7 +43,9 @@ class CommunityPostDetailServiceTest {
   void setUp() {
     service =
         new CommunityPostDetailService(
-            new CurrentAuthenticatedUserResolver(), communityPostDetailRepository);
+            new CurrentAuthenticatedUserResolver(),
+            communityPostDetailRepository,
+            communityAttachmentService);
     SecurityContextHolder.getContext()
         .setAuthentication(
             UsernamePasswordAuthenticationToken.authenticated(
