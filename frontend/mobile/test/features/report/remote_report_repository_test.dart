@@ -66,6 +66,72 @@ void main() {
     expect(report.limitations, ['이 리포트는 진단이 아닙니다']);
   });
 
+  test('생성 실패 상태는 REPORT-06 경로에서 사유와 재시도 가능 여부를 받는다', () async {
+    final adapter = _StubAdapter(
+      _okResponse({
+        'reportId': 500,
+        'drawingSessionId': 100,
+        'analysisId': 90,
+        'reportVersion': 1,
+        'reportStatus': 'FAILED',
+        'retryable': true,
+        'failureReason': 'AI_TIMEOUT',
+        'failedAt': '2026-08-03T09:30:00',
+      }),
+    );
+    final repository = RemoteReportRepository(_client(adapter));
+
+    final status = await repository.getGenerationStatus(500);
+
+    expect(
+      adapter.requests.single.uri.path,
+      '/api/v1/reports/500/generation-status',
+    );
+    expect(status.failureReason, 'AI_TIMEOUT');
+    expect(status.retryable, isTrue);
+    expect(status.failedAt, DateTime(2026, 8, 3, 9, 30));
+  });
+
+  test('재생성은 REPORT-07 경로와 Idempotency-Key를 전달한다', () async {
+    final adapter = _StubAdapter(
+      _okResponse({
+        'reportId': 501,
+        'drawingSessionId': 100,
+        'analysisId': 90,
+        'reportVersion': 2,
+        'reportStatus': 'GENERATING',
+        'retryable': false,
+      }),
+    );
+    final repository = RemoteReportRepository(_client(adapter));
+
+    final status = await repository.regenerateReport(
+      500,
+      idempotencyKey: 'report-regenerate-500-test',
+    );
+
+    final request = adapter.requests.single;
+    expect(request.method, 'POST');
+    expect(request.uri.path, '/api/v1/reports/500/regenerate');
+    expect(request.headers['Idempotency-Key'], 'report-regenerate-500-test');
+    expect(status.reportId, 501);
+    expect(status.reportStatus, 'GENERATING');
+  });
+
+  test('상대 그림 경로는 인증 헤더를 포함해 bytes로 내려받는다', () async {
+    final adapter = _StubAdapter(ResponseBody.fromBytes(const [1, 2, 3], 200));
+    final repository = RemoteReportRepository(_client(adapter));
+
+    final bytes = await repository.downloadImage(
+      '/api/v1/drawing-assets/30/file',
+    );
+
+    final request = adapter.requests.single;
+    expect(request.uri.path, '/api/v1/drawing-assets/30/file');
+    expect(request.headers['Authorization'], 'Bearer test-token');
+    expect(bytes, Uint8List.fromList(const [1, 2, 3]));
+  });
+
   test('봉투 없이 본문만 오는 응답도 그대로 파싱한다', () async {
     final repository = RemoteReportRepository(
       _client(_StubAdapter(_rawResponse(_detailData()))),
