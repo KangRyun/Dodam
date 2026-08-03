@@ -1032,6 +1032,14 @@ class ReportCommonContradictionTest(unittest.TestCase):
             self.text.index("관찰 '사실'과 AI '해석'을 분리한다"),
         )
 
+    def test_emotion_inference_requires_multiple_aligned_signals(self):
+        """그림·필압 기반 추론은 허용하되, 단일 신호 억측과 성격 일반화는 막는다."""
+        self.assertIn("단일 신호만으로 감정을 추론하지 마", self.text)
+        self.assertIn("독립적인 관찰 신호가 두 가지 이상", self.text)
+        self.assertIn("신호가 엇갈리거나 근거가 약하면 감정을 추론하지 않는다", self.text)
+        self.assertIn("이번 활동에서는", self.text)
+        self.assertIn("평소 마음·성격·발달 상태로 넓히지 않는다", self.text)
+
 
 class ReportContractAlignmentTest(unittest.TestCase):
     """프롬프트가 BE 수신·화면 도달 실태와 맞는지 (S15P11B209-826).
