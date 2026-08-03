@@ -87,7 +87,10 @@ final class OptionAnswerSubmissionController extends ChangeNotifier {
     required AiQuestionOption option,
     String? directText,
   }) async {
-    if (_disposed || status == OptionAnswerSubmissionStatus.submitting) {
+    if (_disposed ||
+        status == OptionAnswerSubmissionStatus.submitting ||
+        (status == OptionAnswerSubmissionStatus.success &&
+            _questionMessageId == questionMessageId)) {
       return false;
     }
     if (status == OptionAnswerSubmissionStatus.failure &&
