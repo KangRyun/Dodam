@@ -6,6 +6,7 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClient;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClientException;
 import com.ssafy.b209.report.dto.ObservationGenerationRequest;
@@ -13,6 +14,7 @@ import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummaryDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ObservationDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ObservedFeatureDraft;
+import com.ssafy.b209.report.exception.MockObservationReportErrorCode;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
@@ -24,6 +26,7 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 @ExtendWith(MockitoExtension.class)
 class MockObservationReportGenerationServiceTest {
@@ -171,6 +174,25 @@ class MockObservationReportGenerationServiceTest {
 
     verify(persistenceService)
         .markFailed(eq(ANALYSIS_ID), eq(REPORT_ID), eq("REPORT_STORAGE_FAILED"), any());
+  }
+
+  @Test
+  void keepsStorageFailureClassificationFromPersistenceLayer() {
+    // S15P11B209-815: 저장 계층이 분류한 실패를 REPORT_STORAGE_FAILED로 덮으면
+    // generation-status의 failureReason이 실제 원인과 무관해진다.
+    given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
+    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    org.mockito.BDDMockito.willThrow(
+            new BusinessException(
+                MockObservationReportErrorCode.REPORT_STORAGE_CONFLICT,
+                new DataIntegrityViolationException("data too long")))
+        .given(persistenceService)
+        .complete(any(), any());
+
+    service.generate(ANALYSIS_ID);
+
+    verify(persistenceService)
+        .markFailed(eq(ANALYSIS_ID), eq(REPORT_ID), eq("REPORT_STORAGE_CONFLICT"), any());
   }
 
   private ObservationGenerationContext context() {

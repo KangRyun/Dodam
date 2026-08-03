@@ -49,7 +49,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("31");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("32");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(73);
     assertThat(tableExists("refresh_tokens")).isFalse();
@@ -61,6 +61,12 @@ class DatabaseMigrationIntegrationTest {
         .isTrue();
     assertThat(checkConstraintContains("children", "ck_children_preferred_character", "OCTOPUS"))
         .isTrue();
+    // V32 — AI 재현성 태그(현재 76~78자)가 VARCHAR(50)을 넘겨 리포트 저장이 통째로 실패했다(815).
+    assertThat(characterLengthOf("analyses", "model_version")).isEqualTo(255);
+    assertThat(characterLengthOf("analysis_observation_results", "generated_model_version"))
+        .isEqualTo(255);
+    assertThat(characterLengthOf("analysis_conversation_summaries", "summary_model_version"))
+        .isEqualTo(255);
     assertThat(columnExists("expert_profiles", "target_age_min")).isTrue();
     assertThat(columnExists("expert_profiles", "target_age_max")).isTrue();
     assertThat(tableExists("expert_verification_reviews")).isTrue();
@@ -567,6 +573,15 @@ class DatabaseMigrationIntegrationTest {
             tableName,
             columnName)
         > 0;
+  }
+
+  private int characterLengthOf(String tableName, String columnName) {
+    return jdbcTemplate.queryForObject(
+        "SELECT character_maximum_length FROM information_schema.columns "
+            + "WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?",
+        Integer.class,
+        tableName,
+        columnName);
   }
 
   private boolean columnIsNullable(String tableName, String columnName) {

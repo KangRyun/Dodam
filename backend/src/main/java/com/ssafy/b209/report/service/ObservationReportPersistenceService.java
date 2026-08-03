@@ -20,6 +20,7 @@ import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
 import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.global.exception.BusinessException;
+import com.ssafy.b209.global.support.ColumnTextLimiter;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportActivityNote;
 import com.ssafy.b209.report.domain.ReportActivitySummary;
@@ -66,6 +67,18 @@ public class ObservationReportPersistenceService {
 
   private static final int MAX_KEY_CONVERSATIONS = 5;
   private static final String FAILED_LIMITATIONS = "리포트 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.";
+
+  // AI 응답이 들어가는 VARCHAR 컬럼의 문자 수 상한이다. 값 하나가 상한을 넘겨도 리포트 전체가 실패하지 않도록
+  // 저장 직전에 ColumnTextLimiter로 맞춘다(S15P11B209-815). TEXT 컬럼은 상한이 없어 대상이 아니다.
+  private static final int MODEL_NAME_LIMIT = 100;
+  private static final int MODEL_VERSION_LIMIT = 255;
+  private static final int MAIN_TOPIC_LIMIT = 100;
+  private static final int EXPRESSED_EMOTION_LIMIT = 50;
+  private static final int FEATURE_CODE_LIMIT = 80;
+  private static final int FEATURE_TITLE_LIMIT = 200;
+  private static final int QUESTION_PURPOSE_LIMIT = 50;
+  private static final int ANALYSIS_ERROR_CODE_LIMIT = 80;
+  private static final int REPORT_FAILURE_REASON_LIMIT = 100;
 
   private final DrawingAnalysisRepository analysisRepository;
   private final ReportRepository reportRepository;
@@ -313,7 +326,12 @@ public class ObservationReportPersistenceService {
     ConversationSummaryDraft summary = result.conversationSummary();
 
     try {
-      analysis.succeedFinal(result.modelName(), result.modelVersion(), result.confidence(), now);
+      analysis.succeedFinal(
+          ColumnTextLimiter.fit(result.modelName(), MODEL_NAME_LIMIT, "analyses.model_name"),
+          ColumnTextLimiter.fit(
+              result.modelVersion(), MODEL_VERSION_LIMIT, "analyses.model_version"),
+          result.confidence(),
+          now);
 
       AnalysisObservationResult observation =
           AnalysisObservationResult.aiDraft(
@@ -327,7 +345,10 @@ public class ObservationReportPersistenceService {
               draft.followUpQuestion(),
               draft.expertReviewRequired(),
               draft.disclaimer(),
-              result.modelVersion(),
+              ColumnTextLimiter.fit(
+                  result.modelVersion(),
+                  MODEL_VERSION_LIMIT,
+                  "analysis_observation_results.generated_model_version"),
               now);
       observationResultRepository.save(observation);
 
@@ -342,15 +363,28 @@ public class ObservationReportPersistenceService {
               analysis,
               conversation,
               summary == null ? null : summary.summaryText(),
-              summary == null ? null : summary.mainTopic(),
-              summary == null ? null : summary.expressedEmotion(),
+              summary == null
+                  ? null
+                  : ColumnTextLimiter.fit(
+                      summary.mainTopic(),
+                      MAIN_TOPIC_LIMIT,
+                      "analysis_conversation_summaries.main_topic"),
+              summary == null
+                  ? null
+                  : ColumnTextLimiter.fit(
+                      summary.expressedEmotion(),
+                      EXPRESSED_EMOTION_LIMIT,
+                      "analysis_conversation_summaries.expressed_emotion"),
               summary == null ? null : parseEmotionSource(summary.emotionSource()),
               context.questionCount(),
               context.answeredCount(),
               context.skippedCount(),
               context.unrecognizedSpeechCount(),
               summary == null ? null : summary.representativeUtterance(),
-              result.modelVersion(),
+              ColumnTextLimiter.fit(
+                  result.modelVersion(),
+                  MODEL_VERSION_LIMIT,
+                  "analysis_conversation_summaries.summary_model_version"),
               now));
 
       activitySummaryRepository.save(
@@ -405,7 +439,11 @@ public class ObservationReportPersistenceService {
         .filter(DrawingAnalysis::isPending)
         .ifPresent(
             analysis -> {
-              analysis.failFinal(failureCode, failureMessage, now);
+              analysis.failFinal(
+                  ColumnTextLimiter.fit(
+                      failureCode, ANALYSIS_ERROR_CODE_LIMIT, "analyses.error_code"),
+                  failureMessage,
+                  now);
               Optional<HtpAssessment> htpAssessment =
                   htpAssessmentRepository.findByStepDrawingSessionIdForUpdate(
                       analysis.getDrawingSession().getId());
@@ -419,7 +457,13 @@ public class ObservationReportPersistenceService {
       reportRepository
           .findByIdForUpdate(reportId)
           .filter(report -> report.getStatus() == ReportStatus.GENERATING)
-          .ifPresent(report -> report.fail(FAILED_LIMITATIONS, failureCode, now));
+          .ifPresent(
+              report ->
+                  report.fail(
+                      FAILED_LIMITATIONS,
+                      ColumnTextLimiter.fit(
+                          failureCode, REPORT_FAILURE_REASON_LIMIT, "reports.failure_reason"),
+                      now));
     }
   }
 
@@ -443,8 +487,12 @@ public class ObservationReportPersistenceService {
       entities.add(
           ReportObservedFeature.create(
               report,
-              feature.featureCode(),
-              feature.title(),
+              ColumnTextLimiter.fit(
+                  feature.featureCode(),
+                  FEATURE_CODE_LIMIT,
+                  "report_observed_features.feature_code"),
+              ColumnTextLimiter.fit(
+                  feature.title(), FEATURE_TITLE_LIMIT, "report_observed_features.title"),
               feature.description(),
               feature.evidenceSummary(),
               resolveVisibility(feature.visibilityScope(), expertReviewed),
@@ -486,7 +534,13 @@ public class ObservationReportPersistenceService {
       GuardianQuestionDraft question = questions.get(index);
       entities.add(
           ReportGuardianQuestion.create(
-              report, question.questionText(), question.questionPurpose(), index));
+              report,
+              question.questionText(),
+              ColumnTextLimiter.fit(
+                  question.questionPurpose(),
+                  QUESTION_PURPOSE_LIMIT,
+                  "report_guardian_questions.question_purpose"),
+              index));
     }
     guardianQuestionRepository.saveAll(entities);
   }
