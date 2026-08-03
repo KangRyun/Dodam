@@ -29,7 +29,9 @@ import '../features/report/data/services/platform_report_file_actions.dart';
 import '../features/report/domain/repositories/report_repository.dart';
 import '../features/report/domain/services/report_file_actions.dart';
 import '../features/settings/data/repositories/mock_account_withdrawal_repository.dart';
+import '../features/settings/data/repositories/mock_data_retention_repository.dart';
 import '../features/settings/domain/repositories/account_withdrawal_repository.dart';
+import '../features/settings/domain/repositories/data_retention_repository.dart';
 import 'router/app_navigation.dart';
 import 'router/app_router.dart';
 import 'router/app_routes.dart';
@@ -44,6 +46,7 @@ class DodamApp extends StatefulWidget {
     this.childConsentRepository = const MockChildConsentRepository(),
     this.consentRepository = const MockConsentRepository(),
     this.accountWithdrawalRepository = const MockAccountWithdrawalRepository(),
+    this.dataRetentionRepository = const MockDataRetentionRepository(),
     this.drawingRepository = const MockDrawingRepository(),
     this.reportRepository = const MockReportRepository(),
     this.reportFileActions = const PlatformReportFileActions(),
@@ -78,6 +81,9 @@ class DodamApp extends StatefulWidget {
 
   /// USER-05 회원 탈퇴 경계. 실 연동 시 원격 구현을 주입한다.
   final AccountWithdrawalRepository accountWithdrawalRepository;
+
+  /// 데이터 보관 기간 조회·편집 경계(S15P11B209-456). 실 연동 시 원격 구현을 주입한다.
+  final DataRetentionRepository dataRetentionRepository;
   final DrawingRepository drawingRepository;
   final ReportRepository reportRepository;
   final ReportFileActions reportFileActions;
@@ -404,6 +410,7 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       onGuardianTabChanged: (routeName) => _guardianTabRoute = routeName,
       consentRepository: widget.consentRepository,
       accountWithdrawalRepository: widget.accountWithdrawalRepository,
+      dataRetentionRepository: widget.dataRetentionRepository,
       drawingCompletionSnapshotProvider:
           widget.drawingCompletionSnapshotProvider,
       conversationRepository: widget.conversationRepository,

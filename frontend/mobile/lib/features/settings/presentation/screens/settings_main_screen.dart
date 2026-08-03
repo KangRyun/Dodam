@@ -144,8 +144,11 @@ class _SettingsContent extends StatelessWidget {
                     _SettingsTile(
                       icon: Icons.inventory_2_outlined,
                       title: '데이터 보관 기간',
-                      subtitle: '보관 기간과 삭제 기준 확인',
-                      onTap: () => onItemSelected('데이터 보관 기간'),
+                      subtitle: '보관 기간과 안내 시점 설정',
+                      onTap: () => AppNavigation.pushNamed(
+                        context,
+                        AppRoutes.settingsDataRetention,
+                      ),
                     ),
                   ],
                 );
