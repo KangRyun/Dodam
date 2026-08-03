@@ -157,6 +157,33 @@ void main() {
     expect(find.text('지난 그림 보기'), findsOneWidget);
   });
 
+  testWidgets('캐릭터를 고르면 그 아이의 preferredCharacter로 저장하도록 알린다', (tester) async {
+    final repository = _FakeDrawingRepository(
+      drawingTypes: const [_secondType, _artDiary],
+    );
+    final selections = <(int, String)>[];
+
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: repository,
+          onCharacterSelected: (childId, code) async =>
+              selections.add((childId, code)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 다음 캐릭터로 넘기면 base -> princess.
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pumpAndSettle();
+    // 디바운스가 지나야 저장 알림이 나간다(스와이프마다 보내지 않는다).
+    await tester.pump(const Duration(milliseconds: 700));
+
+    expect(selections, [(_child.childId, 'PRINCESS')]);
+  });
+
   testWidgets('그림 유형을 불러오는 동안 로딩 상태를 보여준다', (tester) async {
     final completer = Completer<ApiPage<DrawingTypeDto>>();
     final repository = _FakeDrawingRepository(typesCompleter: completer);

@@ -37,6 +37,43 @@ void main() {
     );
   });
 
+  testWidgets('아동 카드는 아이의 캐릭터 이미지를 프로필로 보여준다', (tester) async {
+    final controller = GuardianChildController(const MockChildRepository());
+    await controller.loadChildren();
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ProfileSelectionScreen(
+          controller: controller,
+          onGuardianSelected: (_) {},
+          onChildSelected: (_, _) {},
+        ),
+      ),
+    );
+
+    final avatar = tester.widget<CircleAvatar>(
+      find.descendant(
+        of: find.byKey(const ValueKey('child-profile-3')),
+        matching: find.byType(CircleAvatar),
+      ),
+    );
+    // preferredCharacter에 해당하는 캐릭터(코스튬) 에셋을 프로필로 쓴다.
+    expect(avatar.backgroundImage, isA<AssetImage>());
+    expect(
+      (avatar.backgroundImage! as AssetImage).assetName,
+      contains('assets/characters/costumes/'),
+    );
+    // 옛 generic face 아이콘은 더 이상 아동 카드에 쓰지 않는다.
+    expect(
+      find.descendant(
+        of: find.byKey(const ValueKey('child-profile-3')),
+        matching: find.byIcon(Icons.face_rounded),
+      ),
+      findsNothing,
+    );
+  });
+
   testWidgets('아동 프로필을 누르면 해당 아동을 전달한다', (tester) async {
     final controller = GuardianChildController(const MockChildRepository());
     await controller.loadChildren();

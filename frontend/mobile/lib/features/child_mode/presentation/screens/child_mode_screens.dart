@@ -112,6 +112,7 @@ class ChildModeHomeScreen extends StatefulWidget {
     this.completionSnapshotProvider,
     this.htpPhotoUploadEnabled = false,
     this.costumeStore,
+    this.onCharacterSelected,
     this.preparedResolution,
     this.autoStartPrepared = false,
     super.key,
@@ -126,6 +127,12 @@ class ChildModeHomeScreen extends StatefulWidget {
 
   /// 도담이 코스튬 로컬 저장소. 주입하지 않으면 기기 보안 저장소를 쓴다.
   final CostumePreferenceStore? costumeStore;
+
+  /// 아동이 캐릭터를 고르면 그 아이의 `preferredCharacter`로 저장하도록 알린다
+  /// (S15P11B209-505). 프로필 이미지가 이 값에서 그려진다. 주입하지 않으면
+  /// 로컬 코스튬 저장까지만 하고 프로필에는 반영되지 않는다.
+  final Future<void> Function(int childId, String characterCode)?
+  onCharacterSelected;
 
   /// 보호자가 활동 주제와 입력 방식을 선택해 미리 준비한 새 활동.
   final DrawingSessionResolution? preparedResolution;
@@ -156,6 +163,12 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   late final CostumePreferenceStore _costumeStore;
   late final PageController _costumeController;
   DodamCostume _costume = DodamCostume.base;
+
+  /// 캐릭터 선택을 백엔드에 저장하기 전 잠깐 모으는 디바운스(S15P11B209-505).
+  /// 스와이프마다 저장하지 않고, 잠시 멈춘 뒤 마지막 선택만 한 번 저장한다.
+  Timer? _persistCharacterTimer;
+  String? _pendingCharacterCode;
+  static const Duration _persistCharacterDelay = Duration(milliseconds: 600);
 
   @override
   void initState() {
@@ -193,6 +206,9 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
 
   @override
   void dispose() {
+    // 아직 저장 안 된 마지막 선택이 있으면 나가기 전에 보낸다.
+    if (_persistCharacterTimer?.isActive ?? false) _flushPersistCharacter();
+    _persistCharacterTimer?.cancel();
     _costumeController.dispose();
     super.dispose();
   }
@@ -215,9 +231,12 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     unawaited(_resolveEntry());
   }
 
-  /// 저장된 코스튬을 복원해 캐러셀 첫 페이지를 맞춘다.
+  /// 저장된 캐릭터로 캐러셀 첫 페이지를 맞춘다. 프로필과 같은 값을 쓰도록
+  /// 아이의 `preferredCharacter`를 우선하고, 없으면 로컬 코스튬으로 되돌린다
+  /// (S15P11B209-505).
   Future<void> _loadCostume() async {
-    final code = await _costumeStore.read(widget.child.childId);
+    final preferred = widget.child.preferredCharacter;
+    final code = preferred ?? await _costumeStore.read(widget.child.childId);
     if (!mounted) return;
     final costume = DodamCostume.fromCode(code);
     if (costume == _costume) return;
@@ -228,13 +247,34 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     });
   }
 
-  /// 캐러셀에서 코스튬이 바뀌면 상태를 갱신하고 로컬에 저장한다.
+  /// 캐러셀에서 캐릭터가 바뀌면 상태·로컬 저장을 즉시 반영하고, 프로필에 반영할
+  /// `preferredCharacter` 저장은 디바운스로 마지막 선택만 보낸다(S15P11B209-505).
   void _onCostumeSelected(int index) {
     final costume = DodamCostume.values[index];
     if (costume == _costume) return;
     HapticFeedback.selectionClick();
     setState(() => _costume = costume);
     unawaited(_costumeStore.write(widget.child.childId, costume.code));
+    _schedulePersistCharacter(costume.code);
+  }
+
+  void _schedulePersistCharacter(String code) {
+    _pendingCharacterCode = code;
+    _persistCharacterTimer?.cancel();
+    _persistCharacterTimer = Timer(
+      _persistCharacterDelay,
+      _flushPersistCharacter,
+    );
+  }
+
+  void _flushPersistCharacter() {
+    _persistCharacterTimer?.cancel();
+    _persistCharacterTimer = null;
+    final code = _pendingCharacterCode;
+    _pendingCharacterCode = null;
+    if (code == null) return;
+    final future = widget.onCharacterSelected?.call(widget.child.childId, code);
+    if (future != null) unawaited(future);
   }
 
   void _animateCostumeTo(int index) {
