@@ -146,7 +146,8 @@ async def analyze_drawing(file: UploadFile = File(...)):
         ],
         "description": description,
         "model_id": config.VLM_MODEL,
-        "prompt_version": vlm_client.PROMPT_VERSION,
+        # draft 경로는 활동 유형을 받지 않는다 — 기본 HTP 가중치·HTP 서술 프롬프트를 쓴다.
+        "prompt_version": vlm_client.prompt_version_for(None),
         "pipeline_version": config.PIPELINE_VERSION,
     }
 

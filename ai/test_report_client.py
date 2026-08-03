@@ -82,6 +82,25 @@ def _sample_request(**overrides) -> contracts.ObservationGenerationRequest:
     return contracts.ObservationGenerationRequest(**base)
 
 
+def _htp_request(**overrides) -> contracts.ObservationGenerationRequest:
+    """HTP 활동 요청 — drawingSubject가 채워진 subject_summaries가 HTP 판별 근거다.
+
+    RAG는 HTP 리포트에서만 검색한다. 그림일기(subject 없음)·구 BE(빈 목록)는
+    검색을 건너뛰고 RAG_NOT_APPLICABLE로 표시된다.
+    """
+    overrides.setdefault(
+        "subject_summaries",
+        [
+            contracts.SubjectSummary(
+                drawing_subject="HOUSE",
+                drawing_description="집이 가운데에 크게 그려져 있어요.",
+                detected_object_codes=["HOUSE"],
+            )
+        ],
+    )
+    return _sample_request(**overrides)
+
+
 class GenerateTest(unittest.TestCase):
     def test_assembles_contract_result_with_server_owned_fields(self):
         captured = {}
@@ -106,7 +125,8 @@ class GenerateTest(unittest.TestCase):
         self.assertEqual(result.request_id, "req-1")  # 요청 에코
         self.assertEqual(result.model_name, "test-model")
         # model_version은 프롬프트+파이프라인 복합 버전(S15P11B209-602).
-        self.assertEqual(result.model_version, report_client._generation_version())
+        # _sample_request()는 subject_summaries가 없어 그림일기(비 HTP) 경로다.
+        self.assertEqual(result.model_version, report_client._generation_version(False))
         self.assertIsNone(result.confidence)
         self.assertEqual(result.observation_draft.status, "AI_DRAFT")
         self.assertEqual(result.observation_draft.disclaimer, report_client.DISCLAIMER)
@@ -382,7 +402,20 @@ class VersionRecordingTest(unittest.TestCase):
         # 재현성 3종: model_name(모델) + model_version(프롬프트·파이프라인)
         self.assertIn(f"pipeline={report_client.config.PIPELINE_VERSION}", result.model_version)
         self.assertIn("prompt=", result.model_version)
-        self.assertIn(report_client.PROMPT_VERSION, result.model_version)
+        # '이번에 쓴' 조합만 실린다 — 두 변형을 다 적으면 어느 쪽으로 뽑혔는지 구분이 안 된다.
+        self.assertIn(report_client._generation_version(False), result.model_version)
+        self.assertIn("report_diary@", result.model_version)
+        self.assertNotIn("report_htp@", result.model_version)
+
+    def test_htp_request_records_htp_prompt_version(self):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(_llm_json())
+        with mock.patch.object(
+            report_client, "retrieve", return_value=[]
+        ), mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(_htp_request(), model="m")
+        self.assertIn("report_htp@", result.model_version)
+        self.assertNotIn("report_diary@", result.model_version)
 
     def test_model_name_records_actual_served_model(self):
         # GMS가 실제 서빙한 모델 ID를 기록한다(요청 모델명이 아니라).
@@ -709,7 +742,7 @@ class RagInjectionTest(unittest.TestCase):
     def test_chunks_injected_into_prompt_and_sources_returned(self):
         # 관찰 재료(서술)가 있어야 검색이 성립한다 — _build_rag_query 규칙과 정합.
         result, user_msg = self._generate(
-            _sample_request(),
+            _htp_request(),
             chunks=self._chunks(),
             drawing_description="집이 크게 그려져 있어요.",
         )
@@ -722,7 +755,7 @@ class RagInjectionTest(unittest.TestCase):
 
     def test_unavailable_rag_degrades_not_blocks(self):
         # 인덱스 미배포·임베딩 실패 → 리포트는 그대로 생성, RAG 필드는 비움(기존 응답과 동일).
-        result, user_msg = self._generate(_sample_request(), unavailable=True)
+        result, user_msg = self._generate(_htp_request(), unavailable=True)
         self.assertNotIn("[전문 자료 근거]", user_msg)
         self.assertEqual(result.rag_references, [])
         self.assertIsNone(result.knowledge_base_version)
@@ -730,7 +763,7 @@ class RagInjectionTest(unittest.TestCase):
 
     def test_empty_chunks_omit_block_and_kb_version(self):
         # 검색은 됐지만 임계값 미달(빈 목록) — 근거를 안 썼으므로 KB Version도 싣지 않는다.
-        result, user_msg = self._generate(_sample_request(), chunks=[])
+        result, user_msg = self._generate(_htp_request(), chunks=[])
         self.assertNotIn("[전문 자료 근거]", user_msg)
         self.assertIsNone(result.knowledge_base_version)
 
@@ -856,6 +889,81 @@ class RagSkippedReasonTest(unittest.TestCase):
             result = report_client.generate(self._req_with_material(), model="m")
         self.assertIsNone(result.rag_skipped_reason)
         self.assertEqual(len(result.rag_references), 1)
+
+
+class ActivityPromptSplitTest(unittest.TestCase):
+    """리포트 프롬프트 HTP/그림일기 분리 — 근거 화이트리스트·RAG 적용 범위."""
+
+    def _generate(self, req):
+        """generate()를 돌리고 (결과, system 프롬프트, retrieve 스파이)를 돌려준다."""
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(_llm_json())
+        with mock.patch.object(
+            report_client, "retrieve", return_value=[]
+        ) as retrieve_spy, mock.patch.object(
+            report_client, "get_client", return_value=fake_client
+        ):
+            result = report_client.generate(req, model="m")
+        system = fake_client.chat.completions.create.call_args.kwargs["messages"][0]
+        return result, system["content"], retrieve_spy
+
+    def test_htp_request_selects_htp_prompt(self):
+        _, system, _ = self._generate(_htp_request())
+        self.assertIn("HTP(집·나무·사람)", system)
+        self.assertNotIn("그림일기", system)
+
+    def test_diary_request_selects_diary_prompt(self):
+        # drawingSubject가 없는 subject_summaries = 그림일기 1건.
+        req = _sample_request(
+            subject_summaries=[
+                contracts.SubjectSummary(drawing_description="하늘을 파랗게 칠했어요.")
+            ]
+        )
+        _, system, _ = self._generate(req)
+        self.assertIn("그림일기", system)
+        self.assertNotIn("HTP(집·나무·사람)", system)
+
+    def test_legacy_request_without_summaries_uses_diary_prompt(self):
+        # 구 BE(subject_summaries 미전달)도 '단일 그림 + RAG 없음' 경로라 그림일기 쪽이 맞다.
+        _, system, _ = self._generate(_sample_request())
+        self.assertIn("그림일기", system)
+
+    def test_both_variants_carry_common_rules_and_schema(self):
+        for req in (_htp_request(), _sample_request()):
+            _, system, _ = self._generate(req)
+            # 공통부(report_common)가 뒤에 이어붙는다 — 사실/해석 분리와 출력 스키마.
+            self.assertIn("관찰 '사실'과 AI '해석'을 분리한다", system)
+            self.assertIn('"overallSummary"', system)
+            self.assertIn('"visibilityScope"', system)
+            # 출력 형식이 프롬프트 맨 끝에 오는지(모델이 형식을 놓치지 않게).
+            self.assertGreater(system.index("출력 형식:"), system.index("근거 범위"))
+
+    def test_whitelist_names_every_block_that_is_actually_injected(self):
+        """근거 화이트리스트 누락 회귀 — 구 report.txt가 주제별 블록·RAG를 빠뜨렸다.
+
+        '~만 근거로 삼는다'는 화이트리스트라, 실제 주입되는 블록이 목록에 없으면
+        모델이 그 블록을 버린다(RAG 무력화·HTP 그림 내용 누락).
+        """
+        _, htp_system, _ = self._generate(_htp_request())
+        for block in ("[집 그림 관찰]", "[형식적 분석]", "[전문 자료 근거]", "[활동 데이터]"):
+            self.assertIn(block, htp_system)
+
+        _, diary_system, _ = self._generate(_sample_request())
+        for block in ("[그림 관찰]", "[형식적 분석]", "[활동 데이터]"):
+            self.assertIn(block, diary_system)
+        # 그림일기 프롬프트는 RAG 블록을 근거로 두지 않는다(검색도 하지 않으므로).
+        self.assertNotIn("[전문 자료 근거]", diary_system)
+
+    def test_diary_skips_rag_search_entirely(self):
+        result, _, retrieve_spy = self._generate(_sample_request())
+        retrieve_spy.assert_not_called()
+        self.assertEqual(result.rag_skipped_reason, report_client.RAG_NOT_APPLICABLE)
+        self.assertEqual(result.rag_references, [])
+        self.assertIsNone(result.knowledge_base_version)
+
+    def test_htp_still_searches_rag(self):
+        _, _, retrieve_spy = self._generate(_htp_request())
+        retrieve_spy.assert_called_once()
 
 
 if __name__ == "__main__":
