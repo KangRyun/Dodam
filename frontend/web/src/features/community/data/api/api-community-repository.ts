@@ -251,6 +251,24 @@ export class ApiCommunityRepository implements CommunityRepository {
     };
   }
 
+  async getMyPosts(): Promise<CommunityFeed> {
+    const feed = await this.getFeed();
+    const details = await Promise.all(
+      feed.posts.map((post) => this.getPost(post.id)),
+    );
+    return {
+      ...feed,
+      posts: details.filter(
+        (post): post is CommunityPost => post !== null && post.editableByMe === true,
+      ),
+    };
+  }
+
+  async getLikedPosts(): Promise<CommunityFeed> {
+    const feed = await this.getFeed();
+    return { ...feed, posts: feed.posts.filter((post) => post.isLiked) };
+  }
+
   async getPost(postId: number): Promise<CommunityPost | null> {
     try {
       const detail = await apiRequest<PostDetailDto>(`/posts/${postId}`);

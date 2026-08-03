@@ -30,6 +30,8 @@ export const communityKeys = {
   post: (postId: number) => [...communityKeys.all, "post", postId] as const,
   comments: (postId: number) =>
     [...communityKeys.all, "comments", postId] as const,
+  myPosts: () => [...communityKeys.all, "my-posts"] as const,
+  likedPosts: () => [...communityKeys.all, "liked-posts"] as const,
 };
 
 export function useCommunityFeed(
@@ -38,6 +40,19 @@ export function useCommunityFeed(
   return useQuery({
     queryKey: communityKeys.feed(filter),
     queryFn: () => communityRepository.getFeed(filter),
+  });
+}
+
+export function useCommunityPersonalPosts(
+  mode: "mine" | "liked",
+): UseQueryResult<CommunityFeed> {
+  return useQuery({
+    queryKey:
+      mode === "mine" ? communityKeys.myPosts() : communityKeys.likedPosts(),
+    queryFn: () =>
+      mode === "mine"
+        ? communityRepository.getMyPosts()
+        : communityRepository.getLikedPosts(),
   });
 }
 

@@ -1,7 +1,20 @@
+"use client";
+
+import { useSyncExternalStore } from "react";
+
 import { CommunityPostCard } from "@/features/community/components/community-post-card";
+import {
+  readCompactFeedPreference,
+  subscribeCommunityPreference,
+} from "@/features/community/community-preferences";
 import type { CommunityPost } from "@/features/community/domain/community-models";
 
 export function CommunityFeed({ posts }: { posts: readonly CommunityPost[] }) {
+  const compact = useSyncExternalStore(
+    subscribeCommunityPreference,
+    readCompactFeedPreference,
+    () => false,
+  );
   if (posts.length === 0) {
     return (
       <section className="community-empty-state" aria-labelledby="feed-title">
@@ -15,7 +28,11 @@ export function CommunityFeed({ posts }: { posts: readonly CommunityPost[] }) {
   }
 
   return (
-    <section className="community-post-list" aria-label="커뮤니티 게시글">
+    <section
+      className="community-post-list"
+      data-compact={compact}
+      aria-label="커뮤니티 게시글"
+    >
       {posts.map((post) => (
         <CommunityPostCard key={post.id} post={post} />
       ))}
