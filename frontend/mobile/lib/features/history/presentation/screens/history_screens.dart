@@ -55,6 +55,33 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
   /// 대상 아동이 실제로 바뀐 경우에만 다시 조회한다.
   int? _loadedChildId;
 
+  // ── 무한 스크롤(페이지네이션) 상태 (S15P11B209-513) ──────────────────
+  final ScrollController _scrollController = ScrollController();
+
+  /// 마지막으로 불러온 페이지 번호(0부터). 다음은 `_page + 1`.
+  int _page = 0;
+
+  /// 서버에 아직 더 불러올 페이지가 있는지.
+  bool _hasNext = false;
+
+  /// 다음 페이지를 불러오는 중인지(중복 요청 방지·하단 로더 표시).
+  bool _loadingMore = false;
+
+  /// 다음 페이지 로드가 실패했을 때의 오류. 하단 재시도 버튼을 띄운다.
+  Object? _loadMoreFailed;
+
+  /// 조회 세대. 필터·아동이 바뀌면 증가시켜, 진행 중이던 이전 조회의 응답을
+  /// 무시한다(늦게 도착한 응답이 새 목록을 덮어쓰지 못하게).
+  int _loadGeneration = 0;
+
+  /// 목록이 화면을 못 채워 스크롤이 안 생길 때 자동으로 더 당길 수 있는 횟수.
+  /// 무한 반복을 막는 예산이며 [_load]마다 초기화한다.
+  int _autoFillBudget = _autoFillBudgetMax;
+
+  /// 목록 끝에서 이 거리(px) 안으로 들어오면 다음 페이지를 미리 당긴다.
+  static const double _loadMoreThreshold = 400;
+  static const int _autoFillBudgetMax = 5;
+
   /// 상태 필터(클라이언트)를 적용한 보이는 목록.
   List<ActivitySummaryDto> get _visible => _statusFilter == _StatusFilter.all
       ? _activities
@@ -75,12 +102,14 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
     super.initState();
     // 탭의 뿌리로 살아 있는 동안 보호자가 아이를 바꿀 수 있다.
     widget.childController.addListener(_onChildChanged);
+    _scrollController.addListener(_onScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) => _load());
   }
 
   @override
   void dispose() {
     widget.childController.removeListener(_onChildChanged);
+    _scrollController.dispose();
     super.dispose();
   }
 
@@ -89,48 +118,41 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
     unawaited(_load());
   }
 
+  /// 첫 페이지를 새로 불러온다. 아동·필터가 바뀌는 리셋 지점이므로 페이지 상태도
+  /// 처음으로 되돌린다. 늦게 도착한 이전 조회 응답은 세대(generation)로 걸러낸다.
   Future<void> _load() async {
     final childId = widget.childController.selectedChildId;
     _loadedChildId = childId;
+    final generation = ++_loadGeneration;
     if (childId == null) {
       setState(() {
         _status = _HistoryStatus.noChild;
         _activities = const [];
         _selectedActivityId = null;
+        _resetPagination();
       });
       return;
     }
     setState(() {
       _status = _HistoryStatus.loading;
       _failure = null;
+      _resetPagination();
     });
     try {
-      final now = DateTime.now().toUtc();
       final response = await widget.repository.getActivities(
         childId,
-        filter: ActivityFilterDto(
-          // HISTORY-01 from/to는 date(yyyy-MM-dd) — datetime을 보내면 서버가
-          // 필터를 적용하지 못한다.
-          from: _period == _PeriodFilter.recent30Days
-              ? _isoDate(now.subtract(const Duration(days: 30)))
-              : null,
-          to: _period == _PeriodFilter.recent30Days ? _isoDate(now) : null,
-          drawingType: _drawingType,
-        ),
+        filter: _filterForPage(0),
       );
-      if (!mounted) return;
+      if (!mounted || generation != _loadGeneration) return;
       final activities = response.content;
-      final knownTypes = <String, ActivityDrawingTypeDto>{
-        for (final type in _knownTypes) type.code: type,
-        for (final activity in activities)
-          activity.drawingType.code: activity.drawingType,
-      }.values.toList(growable: false);
       final selectedStillExists = activities.any(
         (activity) => activity.activityId == _selectedActivityId,
       );
       setState(() {
         _activities = activities;
-        _knownTypes = knownTypes;
+        _knownTypes = _mergeKnownTypes(const [], activities);
+        _page = 0;
+        _hasNext = response.hasNext && activities.isNotEmpty;
         _selectedActivityId = selectedStillExists
             ? _selectedActivityId
             : activities.firstOrNull?.activityId;
@@ -138,14 +160,156 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
             ? _HistoryStatus.empty
             : _HistoryStatus.success;
       });
+      _scheduleAutoFill();
     } on Object catch (error) {
-      if (mounted) {
-        setState(() {
-          _failure = error;
-          _status = _HistoryStatus.error;
-        });
-      }
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _failure = error;
+        _status = _HistoryStatus.error;
+      });
     }
+  }
+
+  /// 다음 페이지를 불러와 목록 뒤에 이어붙인다(무한 스크롤). 이미 불러오는 중이거나
+  /// 다음 페이지가 없거나 목록 상태가 아니면 아무 일도 하지 않는다.
+  Future<void> _loadMore() async {
+    if (_loadingMore || !_hasNext || _status != _HistoryStatus.success) return;
+    final childId = _loadedChildId;
+    if (childId == null) return;
+    final generation = _loadGeneration;
+    final nextPage = _page + 1;
+    setState(() {
+      _loadingMore = true;
+      _loadMoreFailed = null;
+    });
+    try {
+      final response = await widget.repository.getActivities(
+        childId,
+        filter: _filterForPage(nextPage),
+      );
+      // 도중에 필터·아동이 바뀌었으면(세대 불일치) 이 페이지는 버린다.
+      if (!mounted || generation != _loadGeneration) return;
+      final existingIds = {for (final a in _activities) a.activityId};
+      final fresh = response.content
+          .where((activity) => !existingIds.contains(activity.activityId))
+          .toList(growable: false);
+      setState(() {
+        _activities = [..._activities, ...fresh];
+        _knownTypes = _mergeKnownTypes(_knownTypes, fresh);
+        _page = nextPage;
+        // 빈 페이지거나 새로 추가된 게 없으면 끝으로 본다(중복 응답 방어).
+        _hasNext = response.hasNext && fresh.isNotEmpty;
+        _loadingMore = false;
+      });
+      if (fresh.isNotEmpty) _scheduleAutoFill();
+    } on Object catch (error) {
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _loadingMore = false;
+        _loadMoreFailed = error;
+      });
+    }
+  }
+
+  void _resetPagination() {
+    _page = 0;
+    _hasNext = false;
+    _loadingMore = false;
+    _loadMoreFailed = null;
+    _autoFillBudget = _autoFillBudgetMax;
+  }
+
+  ActivityFilterDto _filterForPage(int page) {
+    final now = DateTime.now().toUtc();
+    return ActivityFilterDto(
+      page: page,
+      // HISTORY-01 from/to는 date(yyyy-MM-dd) — datetime을 보내면 서버가
+      // 필터를 적용하지 못한다.
+      from: _period == _PeriodFilter.recent30Days
+          ? _isoDate(now.subtract(const Duration(days: 30)))
+          : null,
+      to: _period == _PeriodFilter.recent30Days ? _isoDate(now) : null,
+      drawingType: _drawingType,
+    );
+  }
+
+  /// 이미 아는 유형과 새로 들어온 활동의 유형을 code 기준으로 합친다(중복 제거).
+  List<ActivityDrawingTypeDto> _mergeKnownTypes(
+    List<ActivityDrawingTypeDto> base,
+    List<ActivitySummaryDto> activities,
+  ) => <String, ActivityDrawingTypeDto>{
+    for (final type in base) type.code: type,
+    for (final activity in activities)
+      activity.drawingType.code: activity.drawingType,
+  }.values.toList(growable: false);
+
+  /// 목록 끝 근처로 스크롤하면 다음 페이지를 미리 당긴다.
+  void _onScroll() {
+    if (!_scrollController.hasClients ||
+        !_hasNext ||
+        _loadingMore ||
+        _loadMoreFailed != null) {
+      return;
+    }
+    final position = _scrollController.position;
+    if (position.pixels >= position.maxScrollExtent - _loadMoreThreshold) {
+      unawaited(_loadMore());
+    }
+  }
+
+  /// 방금 불러온 페이지가 화면을 다 못 채워 스크롤이 생기지 않으면(예: 상태 필터로
+  /// 보이는 항목이 적을 때) 다음 페이지를 한 번 더 당겨 스크롤로 이어볼 수 있게 한다.
+  /// [_autoFillBudget]으로 무한 반복을 막는다.
+  void _scheduleAutoFill() {
+    if (!_hasNext || _autoFillBudget <= 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !_hasNext ||
+          _loadingMore ||
+          _loadMoreFailed != null ||
+          !_scrollController.hasClients) {
+        return;
+      }
+      if (_scrollController.position.maxScrollExtent <= 0) {
+        _autoFillBudget -= 1;
+        unawaited(_loadMore());
+      }
+    });
+  }
+
+  /// 목록 하단에 붙일 로더/재시도 조각. 없으면 null.
+  Widget? _loadMoreFooter() {
+    if (_loadingMore) {
+      return const Padding(
+        key: ValueKey('activity-history-load-more'),
+        padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
+        child: Center(
+          child: SizedBox.square(
+            dimension: 24,
+            child: CircularProgressIndicator(strokeWidth: 2.5),
+          ),
+        ),
+      );
+    }
+    if (_loadMoreFailed != null) {
+      return Padding(
+        key: const ValueKey('activity-history-load-more-error'),
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
+        child: Center(
+          child: AppButton(
+            label: '더 불러오기',
+            variant: AppButtonVariant.secondary,
+            expand: false,
+            leading: const Icon(Icons.refresh_rounded),
+            onPressed: () {
+              setState(() => _loadMoreFailed = null);
+              unawaited(_loadMore());
+            },
+          ),
+        ),
+      );
+    }
+    return null;
   }
 
   Future<void> _selectChild(int childId) async {
@@ -272,6 +436,10 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
           selectedActivityId: _selectedActivity?.activityId,
           repository: widget.repository,
           scrollable: scrollable,
+          // 스크롤러가 되는 리스트에만 컨트롤러를 붙인다. 좁은 화면에선 바깥
+          // ListView가 스크롤러라 여기(scrollable=false)엔 붙이지 않는다.
+          controller: scrollable ? _scrollController : null,
+          footer: _loadMoreFooter(),
           onSelected: (activityId) =>
               setState(() => _selectedActivityId = activityId),
           onReport: _openReport,
@@ -284,6 +452,9 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
         if (constraints.maxWidth < 760) {
           return ListView(
             key: const ValueKey('activity-history-small-layout'),
+            // 좁은 화면에선 이 바깥 ListView가 스크롤러다. 무한 스크롤 감지를
+            // 위해 컨트롤러를 여기에 붙인다(안쪽 리스트는 스크롤하지 않는다).
+            controller: _scrollController,
             children: [
               list(scrollable: false),
               const SizedBox(height: AppSpacing.sm),
@@ -443,6 +614,8 @@ class _ActivityListView extends StatelessWidget {
     required this.onSelected,
     required this.onReport,
     this.scrollable = true,
+    this.controller,
+    this.footer,
   });
   final List<ActivitySummaryDto> activities;
   final int? selectedActivityId;
@@ -450,6 +623,12 @@ class _ActivityListView extends StatelessWidget {
   final ValueChanged<int> onSelected;
   final ValueChanged<ActivitySummaryDto> onReport;
   final bool scrollable;
+
+  /// 스크롤러일 때만 붙는 컨트롤러(무한 스크롤 감지용).
+  final ScrollController? controller;
+
+  /// 목록 하단에 덧붙일 조각(다음 페이지 로더/재시도). 없으면 붙이지 않는다.
+  final Widget? footer;
 
   @override
   Widget build(BuildContext context) {
@@ -460,14 +639,17 @@ class _ActivityListView extends StatelessWidget {
         message: '필터를 바꿔 다시 확인해 보세요.',
       );
     }
+    final hasFooter = footer != null;
     return ListView.separated(
       key: const ValueKey('activity-history-list'),
+      controller: scrollable ? controller : null,
       shrinkWrap: !scrollable,
       physics: scrollable ? null : const NeverScrollableScrollPhysics(),
       padding: EdgeInsets.zero,
-      itemCount: activities.length,
+      itemCount: activities.length + (hasFooter ? 1 : 0),
       separatorBuilder: (_, _) => const SizedBox(height: AppSpacing.sm),
       itemBuilder: (context, index) {
+        if (index >= activities.length) return footer!;
         final activity = activities[index];
         return _ActivityCard(
           activity: activity,
