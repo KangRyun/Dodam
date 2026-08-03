@@ -48,8 +48,10 @@ class _ReportScreenState extends State<ReportScreen>
     with WidgetsBindingObserver {
   _ReportViewStatus _status = _ReportViewStatus.loading;
   ReportDetailDto? _report;
+  ReportGenerationStatusDto? _generationStatus;
   Object? _failure;
   _ReportPdfAction? _pdfAction;
+  bool _isRegenerating = false;
   VoiceAnswerPlaybackController? _playbackController;
 
   @override
@@ -108,9 +110,20 @@ class _ReportScreenState extends State<ReportScreen>
     setState(() {
       _status = _ReportViewStatus.loading;
       _failure = null;
+      _generationStatus = null;
     });
     try {
       final report = await widget.repository.getReport(reportId);
+      ReportGenerationStatusDto? generationStatus;
+      if (report.reportStatus == 'FAILED') {
+        try {
+          generationStatus = await widget.repository.getGenerationStatus(
+            reportId,
+          );
+        } on Object {
+          // 상태 조회 실패 시에도 리포트 실패 안내 자체는 유지한다.
+        }
+      }
       if (!mounted) return;
       if (report.reportId != reportId) {
         setState(() {
@@ -121,6 +134,7 @@ class _ReportScreenState extends State<ReportScreen>
       }
       setState(() {
         _report = report;
+        _generationStatus = generationStatus;
         _status = switch (report.reportStatus) {
           'COMPLETED' => _ReportViewStatus.completed,
           'GENERATING' => _ReportViewStatus.generating,
@@ -143,6 +157,35 @@ class _ReportScreenState extends State<ReportScreen>
           _status = _ReportViewStatus.error;
         });
       }
+    }
+  }
+
+  Future<void> _regenerate() async {
+    final report = _report;
+    if (report == null || _isRegenerating) return;
+    setState(() => _isRegenerating = true);
+    try {
+      await widget.repository.regenerateReport(
+        report.reportId,
+        idempotencyKey:
+            'report-regenerate-${report.reportId}-${DateTime.now().microsecondsSinceEpoch}',
+      );
+      if (!mounted) return;
+      setState(() => _status = _ReportViewStatus.generating);
+      showAppMessage(
+        context,
+        message: '관찰 리포트를 다시 준비하고 있어요.',
+        type: AppMessageType.success,
+      );
+    } on Object {
+      if (!mounted) return;
+      showAppMessage(
+        context,
+        message: '다시 준비하지 못했어요. 잠시 후 다시 시도해 주세요.',
+        type: AppMessageType.error,
+      );
+    } finally {
+      if (mounted) setState(() => _isRegenerating = false);
     }
   }
 
@@ -239,9 +282,11 @@ class _ReportScreenState extends State<ReportScreen>
       key: const ValueKey('report-failed'),
       child: AppErrorView(
         title: '관찰 리포트를 준비하지 못했어요',
-        message: '잠시 후 상태를 다시 확인해 주세요.',
-        retryLabel: '다시 확인',
-        onRetry: _load,
+        message: _reportFailureMessage(_generationStatus?.failureReason),
+        retryLabel: _isRegenerating ? '다시 준비하는 중' : '다시 준비하기',
+        onRetry: _generationStatus?.retryable == true && !_isRegenerating
+            ? _regenerate
+            : null,
       ),
     ),
     _ReportViewStatus.error => _ReportStateWithHome(
@@ -272,8 +317,25 @@ class _ReportScreenState extends State<ReportScreen>
       onSavePdf: () => _handlePdf(_ReportPdfAction.save),
       onSharePdf: () => _handlePdf(_ReportPdfAction.share),
       playbackController: _playbackController,
+      imageFetcher: widget.repository.downloadImage,
     ),
   };
+}
+
+String _reportFailureMessage(String? reason) {
+  final normalized = reason?.toUpperCase() ?? '';
+  if (normalized.contains('TIMEOUT') ||
+      normalized.contains('AI') ||
+      normalized.contains('ANALYSIS')) {
+    return '분석이 잠시 지연됐어요. 다시 준비할 수 있는지 확인해 주세요.';
+  }
+  if (normalized.contains('IMAGE') ||
+      normalized.contains('ASSET') ||
+      normalized.contains('STORAGE') ||
+      normalized.contains('FILE')) {
+    return '그림을 확인하는 중 문제가 생겼어요. 다시 준비할 수 있는지 확인해 주세요.';
+  }
+  return '리포트를 준비하는 중 문제가 생겼어요. 잠시 후 다시 확인해 주세요.';
 }
 
 class _ReportStateWithHome extends StatelessWidget {
@@ -304,12 +366,14 @@ class _ReportContent extends StatelessWidget {
     required this.onSavePdf,
     required this.onSharePdf,
     required this.playbackController,
+    required this.imageFetcher,
   });
   final ReportDetailDto report;
   final _ReportPdfAction? pdfAction;
   final VoidCallback onSavePdf;
   final VoidCallback onSharePdf;
   final VoiceAnswerPlaybackController? playbackController;
+  final ImageByteFetcher imageFetcher;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -332,7 +396,13 @@ class _ReportContent extends StatelessWidget {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(flex: 5, child: _ReportOverview(report: report)),
+                    Expanded(
+                      flex: 5,
+                      child: _ReportOverview(
+                        report: report,
+                        imageFetcher: imageFetcher,
+                      ),
+                    ),
                     const SizedBox(width: AppSpacing.lg),
                     Expanded(
                       flex: 6,
@@ -344,7 +414,7 @@ class _ReportContent extends StatelessWidget {
                   ],
                 )
               else ...[
-                _ReportOverview(report: report),
+                _ReportOverview(report: report, imageFetcher: imageFetcher),
                 const SizedBox(height: AppSpacing.lg),
                 _ReportDetails(
                   report: report,
@@ -408,8 +478,9 @@ bool _isPdf(List<int> bytes) =>
     bytes[4] == 0x2D;
 
 class _ReportOverview extends StatelessWidget {
-  const _ReportOverview({required this.report});
+  const _ReportOverview({required this.report, required this.imageFetcher});
   final ReportDetailDto report;
+  final ImageByteFetcher imageFetcher;
 
   @override
   Widget build(BuildContext context) {
@@ -469,10 +540,12 @@ class _ReportOverview extends StatelessWidget {
             clipBehavior: Clip.antiAlias,
             child: imageUrl == null
                 ? const _ImagePlaceholder()
-                : Image.network(
-                    imageUrl,
+                : AuthenticatedImage(
+                    url: imageUrl,
+                    fetcher: imageFetcher,
                     fit: BoxFit.contain,
-                    errorBuilder: (_, _, _) => const _ImagePlaceholder(),
+                    semanticLabel: '아동이 완성한 그림',
+                    placeholderBuilder: (_) => const _ImagePlaceholder(),
                   ),
           ),
         ),

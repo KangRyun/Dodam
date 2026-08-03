@@ -123,6 +123,43 @@ final class ReportDrawingDto {
   final String? finalImageUrl, thumbnailUrl;
 }
 
+/// REPORT-06·07 리포트 생성 상태와 재접수 결과.
+final class ReportGenerationStatusDto {
+  const ReportGenerationStatusDto({
+    required this.reportId,
+    required this.drawingSessionId,
+    required this.analysisId,
+    required this.reportVersion,
+    required this.reportStatus,
+    required this.retryable,
+    required this.failureReason,
+    required this.createdAt,
+    required this.updatedAt,
+    required this.failedAt,
+  });
+
+  factory ReportGenerationStatusDto.fromJson(Map<String, dynamic> json) =>
+      ReportGenerationStatusDto(
+        reportId: (json['reportId'] as num).toInt(),
+        drawingSessionId: (json['drawingSessionId'] as num?)?.toInt(),
+        analysisId: (json['analysisId'] as num?)?.toInt(),
+        reportVersion: (json['reportVersion'] as num?)?.toInt() ?? 0,
+        reportStatus: json['reportStatus'] as String? ?? 'GENERATING',
+        retryable: json['retryable'] as bool? ?? false,
+        failureReason: json['failureReason'] as String?,
+        createdAt: DateTime.tryParse(json['createdAt'] as String? ?? ''),
+        updatedAt: DateTime.tryParse(json['updatedAt'] as String? ?? ''),
+        failedAt: DateTime.tryParse(json['failedAt'] as String? ?? ''),
+      );
+
+  final int reportId, reportVersion;
+  final int? drawingSessionId, analysisId;
+  final String reportStatus;
+  final bool retryable;
+  final String? failureReason;
+  final DateTime? createdAt, updatedAt, failedAt;
+}
+
 /// `data.childExpression.representativeUtterances[]` 항목.
 ///
 /// `messageId`와 `text`는 원본 메시지가 없으면 null이다. `source`는 서버가

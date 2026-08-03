@@ -10,6 +10,12 @@ abstract interface class ReportRepository {
     ReportFilterDto filter = const ReportFilterDto(),
   });
   Future<ReportDetailDto> getReport(int reportId);
+  Future<ReportGenerationStatusDto> getGenerationStatus(int reportId);
+  Future<ReportGenerationStatusDto> regenerateReport(
+    int reportId, {
+    required String idempotencyKey,
+  });
+  Future<Uint8List> downloadImage(String imageUrl);
   Future<ReportExportDto> requestExport(
     int reportId, {
     required String idempotencyKey,

@@ -148,6 +148,20 @@ final class _ReportRepository implements ReportRepository {
   int calls = 0;
 
   @override
+  Future<ReportGenerationStatusDto> getGenerationStatus(int reportId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<ReportGenerationStatusDto> regenerateReport(
+    int reportId, {
+    required String idempotencyKey,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<Uint8List> downloadImage(String imageUrl) =>
+      throw UnimplementedError();
+
+  @override
   Future<ApiPage<ReportSummaryDto>> getReports(
     int childId, {
     ReportFilterDto filter = const ReportFilterDto(),

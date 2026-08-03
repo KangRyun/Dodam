@@ -14,7 +14,7 @@ final class MockActivityRepository implements ActivityRepository {
     'inputMethod': 'CANVAS',
     'sessionStatus': 'COMPLETED',
     'selectedEmotions': ['JOY', 'UNSURE'],
-    'thumbnailUrl': 'https://storage.i15b209.example/previews/ds120-v1.png',
+    'thumbnailUrl': '/api/v1/drawing-assets/120/file',
     'analysisStatus': 'COMPLETED',
     'report': {'reportId': 501, 'reportStatus': 'COMPLETED'},
     'startedAt': '2026-07-20T09:40:00Z',
