@@ -1,6 +1,7 @@
 package com.ssafy.b209.expert;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -11,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.ssafy.b209.auth.token.AuthenticatedUser;
 import com.ssafy.b209.storage.credential.CredentialFileStorage;
+import com.ssafy.b209.storage.credential.CredentialFileStorageProperties;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -51,10 +53,13 @@ class ExpertProfileCreationIntegrationTest {
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbcTemplate;
   @Autowired private CredentialFileStorage credentialFileStorage;
+  @Autowired private CredentialFileStorageProperties credentialFileStorageProperties;
 
   @BeforeEach
   void setUp() {
     jdbcTemplate.update("DELETE FROM expert_follows");
+    jdbcTemplate.update("DELETE FROM expert_credential_files");
+    jdbcTemplate.update("DELETE FROM expert_credentials");
     jdbcTemplate.update("DELETE FROM expert_profile_specialties");
     jdbcTemplate.update("DELETE FROM expert_profiles");
     jdbcTemplate.update("DELETE FROM users");
@@ -231,6 +236,58 @@ class ExpertProfileCreationIntegrationTest {
         jdbcTemplate.queryForObject(
             "SELECT storage_key FROM expert_credential_files LIMIT 1", String.class);
     credentialFileStorage.delete(storageKey);
+  }
+
+  @Test
+  void listsAndDeletesPendingCredentialOwnedByCurrentExpert() throws Exception {
+    authenticate(VERIFIED_EXPERT_USER_ID);
+    MockMultipartFile file =
+        new MockMultipartFile(
+            "file", "license.pdf", MediaType.APPLICATION_PDF_VALUE, "%PDF-1.7\nproof".getBytes());
+    MockMultipartFile metadata =
+        new MockMultipartFile(
+            "metadata",
+            "metadata.json",
+            MediaType.APPLICATION_JSON_VALUE,
+            """
+            {
+              "credentialType":"ART_THERAPIST",
+              "credentialName":"미술심리상담사 1급",
+              "issuer":"한국상담협회"
+            }
+            """
+                .getBytes());
+    mockMvc
+        .perform(multipart("/api/v1/experts/me/credentials").file(file).file(metadata))
+        .andExpect(status().isCreated());
+    Long credentialId =
+        jdbcTemplate.queryForObject(
+            "SELECT id FROM expert_credentials WHERE expert_profile_id = ?",
+            Long.class,
+            VERIFIED_EXPERT_PROFILE_ID);
+    String storageKey =
+        jdbcTemplate.queryForObject(
+            "SELECT storage_key FROM expert_credential_files WHERE expert_credential_id = ?",
+            String.class,
+            credentialId);
+
+    mockMvc
+        .perform(get("/api/v1/experts/me/credentials"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data[0].credentialId").value(credentialId))
+        .andExpect(jsonPath("$.data[0].fileName").value("license.pdf"))
+        .andExpect(jsonPath("$.data[0].storageKey").doesNotExist());
+    mockMvc
+        .perform(delete("/api/v1/experts/me/credentials/{credentialId}", credentialId))
+        .andExpect(status().isNoContent());
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM expert_credentials WHERE id = ?",
+                Integer.class,
+                credentialId))
+        .isZero();
+    assertThat(credentialFileStorageProperties.root().resolve(storageKey)).doesNotExist();
   }
 
   @Test
