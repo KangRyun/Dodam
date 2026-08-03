@@ -545,18 +545,26 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('아이별 최초 1회 안내에서 다음에 고르기를 실제 tap하면 저장 후 재진입 시 숨긴다', (
-    tester,
-  ) async {
+  testWidgets('최초 안내 secondary는 현재 확정 캐릭터를 유지하고 PATCH 없이 완료한다', (tester) async {
     final store = _FakeIntroStore();
     final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+    var characterPatchCalls = 0;
+    final child = _childWith(
+      childId: 7,
+      nickname: '도담',
+      preferredCharacter: 'DINO',
+    );
 
     await tester.pumpWidget(
       _wrap(
         ChildModeHomeScreen(
-          child: _child,
+          child: child,
           drawingRepository: repository,
           introStore: store,
+          onCharacterSelected: (_, _) async {
+            characterPatchCalls++;
+            return true;
+          },
         ),
       ),
     );
@@ -583,9 +591,19 @@ void main() {
       greaterThanOrEqualTo(48),
     );
 
-    await tester.tap(find.byKey(const ValueKey('choose-character-later')));
+    expect(find.text('친구 골라보기'), findsOneWidget);
+    expect(find.text('지금 도담이로 시작할래'), findsOneWidget);
+
+    final secondary = find.byKey(const ValueKey('choose-character-later'));
+    final secondaryCenter = tester.getCenter(secondary);
+    final firstTap = await tester.startGesture(secondaryCenter, pointer: 1);
+    final secondTap = await tester.startGesture(secondaryCenter, pointer: 2);
+    await firstTap.up();
+    await secondTap.up();
     await tester.pumpAndSettle();
     expect(store.marked, [7]);
+    expect(characterPatchCalls, 0);
+    _expectCurrentCostume(tester, DodamCostume.dino);
     expect(
       find.byKey(const ValueKey('child-character-intro-dialog')),
       findsNothing,
@@ -594,7 +612,7 @@ void main() {
     await tester.pumpWidget(
       _wrap(
         ChildModeHomeScreen(
-          child: _child,
+          child: child,
           drawingRepository: repository,
           introStore: store,
         ),
@@ -607,33 +625,22 @@ void main() {
     );
   });
 
-  testWidgets('다른 childId는 독립적으로 안내하고 친구 고르기는 기존 carousel로 연결한다', (
-    tester,
-  ) async {
-    final store = _FakeIntroStore(seen: {7});
+  testWidgets('친구 골라보기는 실제 다음 화살표 저장 성공 뒤에만 intro를 완료한다', (tester) async {
+    final store = _FakeIntroStore();
     final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
-    const otherChild = ChildSummaryDto(
-      childId: 8,
-      nickname: '새봄',
-      birthDate: '2020-01-01',
-      age: 6,
-      profileImageUrl: '/api/v1/child-profile-images/photo/file',
-      preferredCharacter: 'DINO',
-      questionDifficulty: 'EASY',
-      tutorialStatus: 'DONE',
-      relationshipType: 'PARENT',
-      recentActivity: ChildRecentActivityDto(
-        lastActivityAt: null,
-        totalActivityCount: 0,
-      ),
-    );
+    final save = Completer<bool>();
+    final patches = <String>[];
 
     await tester.pumpWidget(
       _wrap(
         ChildModeHomeScreen(
-          child: otherChild,
+          child: _child,
           drawingRepository: repository,
           introStore: store,
+          onCharacterSelected: (_, code) {
+            patches.add(code);
+            return save.future;
+          },
         ),
       ),
     );
@@ -646,15 +653,135 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
     await tester.pumpAndSettle();
 
-    expect(store.marked, [8]);
+    expect(store.marked, isEmpty);
     expect(find.byKey(const ValueKey('costume-carousel')), findsOneWidget);
+    expect(find.byKey(const ValueKey('child-character-guide')), findsOneWidget);
+    expect(find.text('화살표를 눌러 함께할 도담이를 골라봐!'), findsOneWidget);
     expect(
       tester.binding.focusManager.primaryFocus?.debugLabel,
       'costume-selector',
     );
+
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pump(const Duration(milliseconds: 599));
+    expect(patches, isEmpty);
+    expect(store.marked, isEmpty);
+    _expectCurrentCostume(tester, DodamCostume.princess);
+
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(patches, ['PRINCESS']);
+    expect(find.text('친구를 정하고 있어요'), findsOneWidget);
+    expect(store.marked, isEmpty);
+
+    save.complete(true);
+    await tester.pumpAndSettle();
+    expect(store.marked, [7]);
+    expect(find.byKey(const ValueKey('child-character-guide')), findsNothing);
+    expect(find.text('새 친구와 함께 시작해 볼까?'), findsOneWidget);
   });
 
-  testWidgets('안내 바깥 탭은 닫지 않고 system back은 확인 저장 후 닫는다', (tester) async {
+  testWidgets('가이드는 실제 이전 화살표의 원형 순환과 PageView swipe를 저장한다', (tester) async {
+    final store = _FakeIntroStore();
+    final patches = <String>[];
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: repository,
+          introStore: store,
+          onCharacterSelected: (_, code) async {
+            patches.add(code);
+            return true;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('costume-prev')));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
+    _expectCurrentCostume(tester, DodamCostume.octopus);
+    expect(patches, ['OCTOPUS']);
+    expect(store.marked, [7]);
+
+    final swipeStore = _FakeIntroStore();
+    patches.clear();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: repository,
+          introStore: swipeStore,
+          onCharacterSelected: (_, code) async {
+            patches.add(code);
+            return true;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
+    await tester.pumpAndSettle();
+    await tester.drag(
+      find.byKey(const ValueKey('costume-carousel')),
+      const Offset(-320, 0),
+    );
+    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
+
+    _expectCurrentCostume(tester, DodamCostume.princess);
+    expect(patches, ['PRINCESS']);
+    expect(swipeStore.marked, [7]);
+  });
+
+  testWidgets('가이드 저장 실패는 rollback·미완료 후 실제 재선택 성공을 허용한다', (tester) async {
+    final store = _FakeIntroStore();
+    final patches = <String>[];
+    var shouldSucceed = false;
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: _FakeDrawingRepository(
+            drawingTypes: const [_artDiary],
+          ),
+          introStore: store,
+          onCharacterSelected: (_, code) async {
+            patches.add(code);
+            return shouldSucceed;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
+    _expectCurrentCostume(tester, DodamCostume.base);
+    expect(store.marked, isEmpty);
+    expect(find.byKey(const ValueKey('child-character-guide')), findsOneWidget);
+    expect(find.text('친구를 정하지 못했어요. 다시 골라볼까요?'), findsWidgets);
+
+    shouldSucceed = true;
+    await tester.tap(find.byKey(const ValueKey('costume-prev')));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pumpAndSettle();
+    expect(patches, ['PRINCESS', 'OCTOPUS']);
+    expect(store.marked, [7]);
+    _expectCurrentCostume(tester, DodamCostume.octopus);
+  });
+
+  testWidgets('안내와 가이드의 system back은 현재 진입만 닫고 완료를 저장하지 않는다', (tester) async {
     final store = _FakeIntroStore();
     final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
     await tester.pumpWidget(
@@ -678,11 +805,372 @@ void main() {
 
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
-    expect(store.marked, [7]);
+    expect(store.marked, isEmpty);
     expect(
       find.byKey(const ValueKey('child-character-intro-dialog')),
       findsNothing,
     );
+
+    // 같은 화면에서 rebuild되어도 즉시 다시 열리지 않는다.
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsNothing,
+    );
+
+    // 다음 정상 진입에는 미완료 상태라 다시 나타난다.
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: repository,
+          introStore: store,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('child-character-guide')), findsOneWidget);
+
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('child-character-guide')), findsNothing);
+    expect(store.marked, isEmpty);
+  });
+
+  testWidgets('가이드 저장 중 dispose와 이전 child의 늦은 성공은 intro를 완료하지 않는다', (
+    tester,
+  ) async {
+    final store = _FakeIntroStore();
+    final save = Completer<bool>();
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: _FakeDrawingRepository(
+            drawingTypes: const [_artDiary],
+          ),
+          introStore: store,
+          onCharacterSelected: (_, _) => save.future,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pump(const Duration(milliseconds: 600));
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    save.complete(true);
+    await tester.pump();
+    expect(store.marked, isEmpty);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('확정 캐릭터로 한 바퀴 복귀하면 PATCH·intro 완료 없이 가이드를 유지한다', (tester) async {
+    final store = _FakeIntroStore();
+    final patches = <String>[];
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: _FakeDrawingRepository(
+            drawingTypes: const [_artDiary],
+          ),
+          introStore: store,
+          onCharacterSelected: (_, code) async {
+            patches.add(code);
+            return true;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
+    await tester.pumpAndSettle();
+
+    for (var i = 0; i < DodamCostume.values.length; i++) {
+      await tester.tap(find.byKey(const ValueKey('costume-next')));
+    }
+    await tester.pump(const Duration(milliseconds: 700));
+
+    _expectCurrentCostume(tester, DodamCostume.base);
+    expect(patches, isEmpty);
+    expect(store.marked, isEmpty);
+    expect(find.byKey(const ValueKey('child-character-guide')), findsOneWidget);
+  });
+
+  testWidgets('childId 전환은 이전 아이의 늦은 저장 성공을 버리고 intro 상태를 분리한다', (
+    tester,
+  ) async {
+    final store = _FakeIntroStore();
+    final save = Completer<bool>();
+    final child = ValueNotifier<ChildSummaryDto>(_child);
+    addTearDown(child.dispose);
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+    final otherChild = _childWith(
+      childId: 8,
+      nickname: '새봄',
+      preferredCharacter: 'DINO',
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ValueListenableBuilder<ChildSummaryDto>(
+          valueListenable: child,
+          builder: (_, value, _) => ChildModeHomeScreen(
+            child: value,
+            drawingRepository: repository,
+            introStore: store,
+            onCharacterSelected: (_, _) => save.future,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pump(const Duration(milliseconds: 600));
+
+    child.value = otherChild;
+    await tester.pump();
+    save.complete(true);
+    await tester.pumpAndSettle();
+
+    expect(store.marked, isEmpty);
+    _expectCurrentCostume(tester, DodamCostume.dino);
+    expect(tester.takeException(), isNull);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: otherChild,
+          drawingRepository: repository,
+          introStore: store,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsOneWidget,
+    );
+    await tester.tap(find.byKey(const ValueKey('choose-character-later')));
+    await tester.pumpAndSettle();
+    expect(store.marked, [8]);
+    expect(store.seen, {8});
+  });
+
+  testWidgets('intro 저장 실패는 홈을 막지 않고 다음 정상 진입에서 안내를 다시 표시한다', (tester) async {
+    final store = _FakeIntroStore(markFailure: StateError('storage failed'));
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: repository,
+          introStore: store,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('choose-character-later')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsNothing,
+    );
+    expect(store.marked, [7]);
+    expect(store.seen, isEmpty);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pump();
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: repository,
+          introStore: store,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('active session dialog을 닫아도 최초 캐릭터 안내를 뒤이어 열지 않는다', (
+    tester,
+  ) async {
+    final store = _FakeIntroStore();
+    final repository = _FakeDrawingRepository(
+      drawingTypes: const [_artDiary],
+      activeSession: const ActiveDrawingSessionDto(
+        drawingSessionId: 555,
+        childId: 7,
+        drawingType: DrawingTypeSummaryDto(
+          drawingTypeId: 5,
+          code: 'ART_DIARY',
+          name: '그림일기',
+        ),
+        inputMethod: 'CANVAS',
+        sessionStatus: 'IN_PROGRESS',
+        currentStage: 'DRAWING',
+        startedAt: '2026-07-26T01:00:00Z',
+        latestDraft: null,
+      ),
+    );
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: repository,
+          introStore: store,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('이어 그리기'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsNothing,
+    );
+    expect(store.readChildIds, isEmpty);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsNothing,
+    );
+    expect(store.readChildIds, isEmpty);
+  });
+
+  testWidgets('prepared UPLOAD 자동 진입은 intro 조회보다 먼저 대화 route를 연다', (
+    tester,
+  ) async {
+    final store = _FakeIntroStore();
+    const prepared = DrawingSessionResolution(
+      sessionId: 834,
+      currentStage: 'CONVERSING',
+      inputMethod: 'UPLOAD',
+      activityContext: DrawingActivityContextDto(
+        activityKind: 'HTP',
+        htpAssessmentId: 84,
+        stepOrder: 1,
+        drawingSubject: 'HOUSE',
+      ),
+    );
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: _FakeDrawingRepository(
+            drawingTypes: const [_artDiary],
+          ),
+          introStore: store,
+          preparedResolution: prepared,
+          autoStartPrepared: true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('drawing-session-834-resume-true-auto-false-fresh-false'),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsNothing,
+    );
+    expect(store.readChildIds, isEmpty);
+  });
+
+  testWidgets('rebuild·background·resume에도 최초 dialog를 중복 생성하지 않는다', (
+    tester,
+  ) async {
+    final store = _FakeIntroStore();
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+    final home = _wrap(
+      ChildModeHomeScreen(
+        child: _child,
+        drawingRepository: repository,
+        introStore: store,
+      ),
+    );
+    await tester.pumpWidget(home);
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(home);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsOneWidget,
+    );
+    expect(store.readChildIds, [7]);
+  });
+
+  testWidgets('단계형 가이드는 320x640·태블릿·가로·text scale 2.0에서 동작한다', (tester) async {
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    for (final configuration in const [
+      (Size(320, 640), 2.0),
+      (Size(800, 1280), 1.0),
+      (Size(1280, 800), 1.0),
+    ]) {
+      await tester.binding.setSurfaceSize(configuration.$1);
+      await tester.pumpWidget(
+        MediaQuery(
+          data: MediaQueryData(
+            size: configuration.$1,
+            textScaler: TextScaler.linear(configuration.$2),
+          ),
+          child: _wrap(
+            ChildModeHomeScreen(
+              child: _child,
+              drawingRepository: _FakeDrawingRepository(
+                drawingTypes: const [_artDiary],
+              ),
+              introStore: _FakeIntroStore(),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final pick = find.byKey(const ValueKey('pick-character-from-intro'));
+      await tester.ensureVisible(pick);
+      await tester.pump();
+      await tester.tap(pick);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('child-character-guide')),
+        findsOneWidget,
+      );
+      expect(
+        tester.getSize(find.byKey(const ValueKey('costume-prev'))).height,
+        greaterThanOrEqualTo(48),
+      );
+      expect(tester.takeException(), isNull, reason: '${configuration.$1}');
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    }
   });
 
   testWidgets('active session 확인 중에는 최초 안내를 띄우지 않는다', (tester) async {
@@ -1573,9 +2061,10 @@ final class _FakeDrawingRepository
 }
 
 final class _FakeIntroStore implements ChildHomeIntroStore {
-  _FakeIntroStore({Set<int>? seen}) : seen = {...?seen};
+  _FakeIntroStore({Set<int>? seen, this.markFailure}) : seen = {...?seen};
 
   final Set<int> seen;
+  final Object? markFailure;
   final List<int> readChildIds = [];
   final List<int> marked = [];
 
@@ -1588,6 +2077,7 @@ final class _FakeIntroStore implements ChildHomeIntroStore {
   @override
   Future<void> markSeen(int childId) async {
     marked.add(childId);
+    if (markFailure case final failure?) throw failure;
     seen.add(childId);
   }
 }
