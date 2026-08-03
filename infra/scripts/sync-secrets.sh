@@ -271,4 +271,9 @@ else
   echo "[sync-secrets] SKIP: FCM 자격증명 없음 — 푸시는 비활성으로 뜹니다(정상)."
 fi
 
-echo "[sync-secrets] 다음: kubectl apply -k infra/k8s/overlays/staging"
+# ⚠️ 여기서 staging 을 안내하면 안 된다 (S15P11B209-771 / 770).
+#   staging overlay 는 운영과 **같은 네임스페이스(dodam)** 를 쓰면서 gateway 를 NodePort 로
+#   바꾼다 → 운영 hostPort 80/443 이 제거돼 외부 접속이 전면 죽는다(2026-08-02, 20~30분).
+#   컷오버 전에는 맞는 안내였지만 360 이후로는 prod 가 운영이다.
+#   staging 을 정말 띄우려면 770(네임스페이스 분리)이 먼저다.
+echo "[sync-secrets] 다음: kubectl apply -k infra/k8s/overlays/prod"
