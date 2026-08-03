@@ -241,12 +241,108 @@ def _subject_label(subject: str | None) -> str:
     return f"{name} 그림" if name else "그림"
 
 
+# ── 탐지 기하 → 관찰 사실 (S15P11B209-839) ─────────────────────
+# HTP 임상 리포트의 형식적 분석 1단계가 크기·위치다. 정규화 bbox 에서 바로 계산된다
+# (같은 접근: 이은정·황세진, 미술치료연구 2023 — 객체검출 위치·크기로 형식적 해석 산출).
+# ⚠️ 여기서 만드는 것은 '관찰 사실'뿐이다. 크기가 작다/크다에 의미를 붙이는 일은 하지 않는다.
+_POSITION_COLS = ("왼쪽", "가운데", "오른쪽")
+_POSITION_ROWS = ("위쪽", "가운데", "아래쪽")
+
+
+def _third(value: float) -> int:
+    """0~1 좌표를 3분할 인덱스로. 화면을 9칸으로 나눠 위치를 말하기 위한 것."""
+    if value < 1 / 3:
+        return 0
+    if value < 2 / 3:
+        return 1
+    return 2
+
+
+def _position_label(obj: contracts.SubjectDetectedObject) -> str:
+    """bbox 중심점의 9분할 위치를 한국어로. 중앙이면 '한가운데'."""
+    col = _POSITION_COLS[_third(obj.x + obj.width / 2)]
+    row = _POSITION_ROWS[_third(obj.y + obj.height / 2)]
+    if col == "가운데" and row == "가운데":
+        return "화면 한가운데"
+    # 한 축만 가운데면 그 축은 말하지 않는다("화면 아래쪽 가운데"보다 "화면 아래쪽"이 자연스럽다).
+    return "화면 " + " ".join(part for part in (row, col) if part != "가운데")
+
+
+def _percent(ratio: float) -> str:
+    """비율(0~1)을 '약 N%'로. 반올림이 0%가 되면 '1% 미만'으로 적는다."""
+    percent = round(ratio * 100)
+    return "1% 미만" if percent < 1 else f"약 {percent}%"
+
+
+def _whole_object(
+    summary: contracts.SubjectSummary,
+) -> contracts.SubjectDetectedObject | None:
+    """주제 전체를 감싸는 탐지(집 그림의 HOUSE 등). 그림일기(drawing_subject=None)는 없다."""
+    if summary.drawing_subject is None:
+        return None
+    return next(
+        (o for o in summary.detected_objects if o.object_code == summary.drawing_subject),
+        None,
+    )
+
+
+def _geometry_line(
+    obj: contracts.SubjectDetectedObject,
+    whole: contracts.SubjectDetectedObject | None,
+    subject_name: str,
+) -> str:
+    """탐지 하나 → 크기·위치 한 줄.
+
+    신뢰도가 확정 구간 미만이면 완화 문구를 앞에 붙인다 — 겨우 통과한 탐지가 확정 사실로
+    적혀 보호자에게 나가면 안 된다(BE 요청). confidence 가 아예 없으면 판단할 근거가 없으므로
+    완화하지도 제외하지도 않는다(구 detectedObjectCodes 경로와 같은 취급).
+    """
+    facts = []
+    if obj.area_ratio is not None:
+        facts.append(f"종이의 {_percent(obj.area_ratio)}")
+        # 부위:주제 비율 — '집에 비해 문이 작다' 같은 관계를 수치로 남긴다.
+        if whole is not None and whole is not obj and whole.area_ratio:
+            facts.append(f"{subject_name} 전체의 {_percent(obj.area_ratio / whole.area_ratio)}")
+    facts.append(_position_label(obj))
+
+    hedge = ""
+    if (
+        obj.confidence is not None
+        and obj.confidence < config.REPORT_GEOMETRY_CERTAIN_CONF
+    ):
+        hedge = "(희미해 확실하지 않아요) "
+    return f"- {obj.object_code}: {hedge}{', '.join(facts)}"
+
+
+def _format_geometry(summary: contracts.SubjectSummary, label: str) -> str:
+    """주제 하나의 [OO 크기·위치] 블록. 쓸 탐지가 없으면 빈 문자열.
+
+    신뢰도가 REPORT_GEOMETRY_MIN_CONF 미만인 탐지는 아예 뺀다 — 탐지 임계값(0.20)은
+    '박스를 남길지'의 기준이라 리포트 문장의 근거 기준으로 쓰기엔 낮다.
+    """
+    usable = [
+        obj
+        for obj in summary.detected_objects
+        if obj.confidence is None or obj.confidence >= config.REPORT_GEOMETRY_MIN_CONF
+    ]
+    if not usable:
+        return ""
+    whole = _whole_object(summary)
+    subject_name = _SUBJECT_KO.get(summary.drawing_subject or "", "그림")
+    lines = [f"[{label} 크기·위치]"]
+    lines.extend(_geometry_line(obj, whole, subject_name) for obj in usable)
+    return "\n".join(lines)
+
+
 def _format_subject_blocks(req: contracts.ObservationGenerationRequest) -> str:
     """주제별 [OO 관찰]·[OO 문답] 블록 (S15P11B209-740).
 
     HTP는 집·나무·사람 각 그림의 VLM 서술과 그 그림에서 나눈 문답이 블록으로 실린다.
     문답의 아이 답변은 '관찰된 사실' 근거로만 쓰이도록 활동별 프롬프트가 강제한다.
     탐지 요소 코드는 서술 검증 참고용 — 리포트 문장에 코드 원문 노출 금지(프롬프트 규칙).
+
+    기하 정보(839)가 있으면 [OO 크기·위치] 블록이 뒤따른다. 없으면(구 BE·PIXEL 좌표뿐인
+    주제) 지금까지처럼 코드 목록만 실린다.
     """
     parts: list[str] = []
     for summary in req.subject_summaries:
@@ -260,6 +356,9 @@ def _format_subject_blocks(req: contracts.ObservationGenerationRequest) -> str:
                 "- 탐지된 요소 코드(참고용): " + ", ".join(summary.detected_object_codes)
             )
         parts.append("\n".join(lines))
+        geometry = _format_geometry(summary, label)
+        if geometry:
+            parts.append(geometry)
         if summary.qa_pairs:
             qa_lines = [f"[{label} 문답]"]
             for qa in summary.qa_pairs:

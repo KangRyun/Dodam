@@ -394,6 +394,189 @@ class BehaviorBlockWordingTest(unittest.TestCase):
         self.assertNotIn("색", block)
 
 
+def _house_summary(**overrides) -> contracts.SubjectSummary:
+    """집 그림 한 장의 주제 요약. detected_objects 를 overrides 로 갈아끼운다."""
+    payload = {
+        "drawingSubject": "HOUSE",
+        "drawingDescription": "가운데에 집이 크게 그려져 있어요.",
+        "detectedObjectCodes": ["HOUSE", "HOUSE_DOOR"],
+        "detectedObjects": [
+            {
+                "objectCode": "HOUSE",
+                "x": 0.21,
+                "y": 0.18,
+                "width": 0.55,
+                "height": 0.60,
+                "areaRatio": 0.33,
+                "confidence": 0.94,
+            },
+            {
+                "objectCode": "HOUSE_DOOR",
+                "x": 0.42,
+                "y": 0.70,
+                "width": 0.09,
+                "height": 0.16,
+                "areaRatio": 0.014,
+                "confidence": 0.81,
+            },
+        ],
+    }
+    payload.update(overrides)
+    return contracts.SubjectSummary.model_validate(payload)
+
+
+class GeometryBlockTest(unittest.TestCase):
+    """[OO 크기·위치] 블록 생성 (S15P11B209-839).
+
+    블록 생성만 검증하므로 LLM 호출 없이 _format_geometry 를 직접 부른다.
+    """
+
+    def test_area_and_position_are_rendered_as_facts(self):
+        block = report_client._format_geometry(_house_summary(), "집 그림")
+
+        self.assertIn("[집 그림 크기·위치]", block)
+        self.assertIn("종이의 약 33%", block)
+        self.assertIn("화면 한가운데", block)
+
+    def test_part_ratio_is_relative_to_the_subject(self):
+        """'집에 비해 문이 작다'를 수치로 남긴다 — 0.014 / 0.33 ≈ 4%."""
+        block = report_client._format_geometry(_house_summary(), "집 그림")
+
+        self.assertIn("집 전체의 약 4%", block)
+
+    def test_missing_area_ratio_is_not_estimated(self):
+        """areaRatio 가 없으면 점유율을 말하지 않는다 — width*height 로 보정 금지(BE 명시)."""
+        summary = _house_summary(
+            detectedObjects=[
+                {
+                    "objectCode": "HOUSE",
+                    "x": 0.2,
+                    "y": 0.2,
+                    "width": 0.5,
+                    "height": 0.5,
+                    "areaRatio": None,
+                    "confidence": 0.9,
+                }
+            ]
+        )
+
+        block = report_client._format_geometry(summary, "집 그림")
+
+        self.assertNotIn("종이의", block)
+        self.assertNotIn("%", block)
+        self.assertIn("화면", block)  # 위치는 좌표만으로 말할 수 있다
+
+    def test_low_confidence_detection_is_dropped(self):
+        """탐지 임계값(0.20)은 박스를 남길 기준이지 문장의 근거 기준이 아니다."""
+        summary = _house_summary(
+            detectedObjects=[
+                {
+                    "objectCode": "HOUSE_WINDOW",
+                    "x": 0.3,
+                    "y": 0.3,
+                    "width": 0.1,
+                    "height": 0.1,
+                    "areaRatio": 0.01,
+                    "confidence": 0.31,
+                }
+            ]
+        )
+
+        self.assertEqual("", report_client._format_geometry(summary, "집 그림"))
+
+    def test_middle_confidence_detection_is_hedged(self):
+        summary = _house_summary(
+            detectedObjects=[
+                {
+                    "objectCode": "HOUSE_WINDOW",
+                    "x": 0.3,
+                    "y": 0.3,
+                    "width": 0.1,
+                    "height": 0.1,
+                    "areaRatio": 0.01,
+                    "confidence": 0.55,
+                }
+            ]
+        )
+
+        block = report_client._format_geometry(summary, "집 그림")
+
+        self.assertIn("확실하지 않아요", block)
+
+    def test_high_confidence_detection_is_not_hedged(self):
+        block = report_client._format_geometry(_house_summary(), "집 그림")
+
+        self.assertNotIn("확실하지 않아요", block)
+
+    def test_empty_detected_objects_produces_no_block(self):
+        """구 BE·PIXEL 좌표뿐인 주제 — 기존 코드 목록 경로로 폴백한다."""
+        summary = _house_summary(detectedObjects=[])
+
+        self.assertEqual("", report_client._format_geometry(summary, "집 그림"))
+
+    def test_diary_has_no_part_ratio(self):
+        """그림일기는 주제 전체 객체가 없어 부위:주제 비율을 낼 수 없다."""
+        summary = contracts.SubjectSummary.model_validate(
+            {
+                "drawingSubject": None,
+                "detectedObjects": [
+                    {
+                        "objectCode": "SUN",
+                        "x": 0.75,
+                        "y": 0.05,
+                        "width": 0.15,
+                        "height": 0.15,
+                        "areaRatio": 0.02,
+                        "confidence": 0.88,
+                    }
+                ],
+            }
+        )
+
+        block = report_client._format_geometry(summary, "그림")
+
+        self.assertIn("종이의 약 2%", block)
+        self.assertNotIn("전체의", block)  # 부위:주제 비율은 낼 수 없다
+        self.assertIn("화면 위쪽 오른쪽", block)
+
+    def test_tiny_object_avoids_zero_percent(self):
+        """'약 0%'는 안 그린 것처럼 읽힌다."""
+        summary = _house_summary(
+            detectedObjects=[
+                {
+                    "objectCode": "HOUSE_CHIMNEY",
+                    "x": 0.5,
+                    "y": 0.1,
+                    "width": 0.03,
+                    "height": 0.03,
+                    "areaRatio": 0.002,
+                    "confidence": 0.9,
+                }
+            ]
+        )
+
+        block = report_client._format_geometry(summary, "집 그림")
+
+        self.assertIn("1% 미만", block)
+        self.assertNotIn("약 0%", block)
+
+    def test_geometry_block_reaches_the_prompt(self):
+        captured = {}
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = lambda **k: captured.update(
+            messages=k["messages"]
+        ) or _fake_response(_llm_json())
+        req = _sample_request()
+        req.subject_summaries = [_house_summary()]
+
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            report_client.generate(req, model="m")
+
+        user_msg = captured["messages"][1]["content"]
+        self.assertIn("[집 그림 크기·위치]", user_msg)
+        self.assertIn("종이의 약 33%", user_msg)
+
+
 class DetectedObjectContractTest(unittest.TestCase):
     """탐지 기하 필드가 계약으로 들어오는지 (S15P11B209-836).
 

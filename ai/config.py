@@ -48,6 +48,20 @@ YOLO_MODEL_PATH = os.environ.get(
 #   htp_labels.suppress_cross_subject_parts로 거른다 — 그래서 임계값을 검출률 쪽에 맞출 수 있다.
 YOLO_CONF_THRESHOLD = float(os.environ.get("YOLO_CONF_THRESHOLD", "0.20"))
 
+# 리포트 [탐지 기하] 블록의 신뢰도 구간 (S15P11B209-839).
+#   탐지 임계값(YOLO_CONF_THRESHOLD=0.20)은 '박스를 남길지'의 기준이고, 이 둘은
+#   '리포트 문장에 어떻게 적을지'의 기준이라 별개다. 같은 값을 쓰면 겨우 통과한 탐지가
+#   확정 사실로 적혀 보호자에게 나간다 — BE가 "낮은 신뢰도 탐지를 확정 사실처럼 표현 금지"를
+#   명시한 지점이다.
+#     conf < REPORT_GEOMETRY_MIN_CONF   → 블록에서 제외(문장의 근거로 쓰지 않는다)
+#     min ≤ conf < CERTAIN              → "~로 보이는 것"처럼 완화 표기
+#     conf ≥ REPORT_GEOMETRY_CERTAIN_CONF → 그대로 표기
+#   ⚠️ 0.5/0.7은 실측이 아니라 초기값이다. 운영 분포를 본 뒤 조정한다 — 그래서 상수로 뺐다.
+REPORT_GEOMETRY_MIN_CONF = float(os.environ.get("REPORT_GEOMETRY_MIN_CONF", "0.50"))
+REPORT_GEOMETRY_CERTAIN_CONF = float(
+    os.environ.get("REPORT_GEOMETRY_CERTAIN_CONF", "0.70")
+)
+
 # YOLO 가중치 무결성 핀(sha256) — 운영 볼륨에 배포된 실제 가중치의 해시다.
 #   reason: 파일 존재만 확인하면 전송 중 손상·오배포된 가중치를 못 거른다. 로드 전에
 #           sha256을 이 값과 대조해 다르면 로드를 거부한다(fail-closed). 값이 비면(미설정)
