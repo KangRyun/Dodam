@@ -35,6 +35,11 @@ enum _CharacterIntroChoice { useCurrent, pick, dismissed }
 
 enum _CharacterGuideStatus { inactive, choosing, saving, failure }
 
+typedef _PreparedDrawingActivity = ({
+  DrawingSessionResolution resolution,
+  DodamCostume companion,
+});
+
 /// 그림 유형 코드별 카드·안내 팝업 아이콘/강조색.
 ///
 /// 백엔드가 새 activityType(예: 462 HTP)을 추가해도 이 표에 항목만 더하면
@@ -172,6 +177,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   late final PageController _costumeController;
   late DodamCostume _costume;
   late DodamCostume _confirmedCostume;
+  late DodamCostume _activityCompanion;
   final FocusNode _costumeFocusNode = FocusNode(debugLabel: 'costume-selector');
   final GlobalKey _costumeKey = GlobalKey();
 
@@ -182,6 +188,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   int _characterSaveGeneration = 0;
   int _costumeLoadGeneration = 0;
   bool _characterSaveInFlight = false;
+  final List<Completer<bool>> _characterSettlementWaiters = [];
   bool _introCheckRunning = false;
   bool _introOpen = false;
   bool _introHandled = false;
@@ -199,6 +206,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     _introStore = widget.introStore ?? SecureChildHomeIntroStore();
     _costume = _costumeFromCode(widget.child.preferredCharacter);
     _confirmedCostume = _costume;
+    _activityCompanion = _serverCompanionSnapshot;
     _costumeController = PageController(initialPage: _costumeIndex(_costume));
     _preparedResolution = widget.preparedResolution;
     // 자동 시작(이어 그리기)은 홈을 "확인 중" 상태로 두고 곧바로 캔버스를 연다.
@@ -225,6 +233,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     _pendingCharacterCode = null;
     _characterSaveInFlight = false;
     _characterSaveGeneration++;
+    _finishCharacterSettlements(false);
     _costumeLoadGeneration++;
     _introCheckRunning = false;
     _introOpen = false;
@@ -238,6 +247,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     final costume = _costumeFromCode(widget.child.preferredCharacter);
     _costume = costume;
     _confirmedCostume = costume;
+    _activityCompanion = _serverCompanionSnapshot;
     _jumpToCostume(costume);
     unawaited(_loadCostume());
   }
@@ -252,7 +262,11 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     if (resolution == null) return;
     setState(() => _preparedResolution = null);
     // Draft 복원 의사만 전달한다. `UPLOAD` 세션 제외는 [_openResolution]이 한다.
-    await _openResolution(resolution, autoRestoreDraft: true);
+    await _openResolution(
+      resolution,
+      companion: _serverCompanionSnapshot,
+      autoRestoreDraft: true,
+    );
     if (!mounted) return;
     // 캔버스에서 뒤로 나온 경우 _openResolution 이 _resolveEntry 를 다시 예약한다.
     // 그 밖의 경로(감정·완료 화면 등)에서는 홈을 상호작용 가능한 상태로 되돌린다.
@@ -265,6 +279,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   void dispose() {
     // 아직 저장 안 된 마지막 선택이 있으면 나가기 전에 보낸다.
     if (_persistCharacterTimer?.isActive ?? false) _flushPersistCharacter();
+    _finishCharacterSettlements(false);
     _persistCharacterTimer?.cancel();
     _costumeController.dispose();
     _costumeFocusNode.dispose();
@@ -279,11 +294,22 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     return null;
   }
 
+  /// 서버에서 확정된 값만 활동 snapshot으로 사용한다.
+  ///
+  /// 홈 캐러셀의 로컬 저장소는 S828 마이그레이션·복원 보조로 남지만, 활동은
+  /// null·빈 값·알 수 없는 코드까지 모두 BASE로 정규화한다(S835).
+  DodamCostume get _serverCompanionSnapshot =>
+      DodamCostume.fromCode(widget.child.preferredCharacter);
+
   Future<void> _openPreparedActivity() async {
     final resolution = _preparedResolution;
     if (resolution == null) return;
     setState(() => _preparedResolution = null);
-    await _openResolution(resolution, startFresh: true);
+    await _openResolution(
+      resolution,
+      companion: _serverCompanionSnapshot,
+      startFresh: true,
+    );
     if (!mounted) return;
     setState(() => _entryResolved = false);
     unawaited(_resolveEntry());
@@ -383,7 +409,10 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     if (_characterSaveInFlight) return;
     final code = _pendingCharacterCode;
     _pendingCharacterCode = null;
-    if (code == null || code == _confirmedCostume.code) return;
+    if (code == null || code == _confirmedCostume.code) {
+      _notifyCharacterSettledIfIdle();
+      return;
+    }
     unawaited(_persistCharacter(code));
   }
 
@@ -404,8 +433,14 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     if (guideRequest && mounted) {
       setState(() => _characterGuideStatus = _CharacterGuideStatus.saving);
     }
-    final succeeded =
-        await widget.onCharacterSelected?.call(childId, code) ?? true;
+    var succeeded = false;
+    try {
+      succeeded = await widget.onCharacterSelected?.call(childId, code) ?? true;
+    } on Object {
+      // Production controller는 실패를 false로 정규화하지만, 주입 구현이 예외를
+      // 던져도 저장 settlement가 영원히 끝나지 않도록 같은 rollback으로 보낸다.
+      succeeded = false;
+    }
     if (!mounted ||
         generation != _characterSaveGeneration ||
         childId != widget.child.childId) {
@@ -416,6 +451,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     _pendingCharacterCode = null;
     if (succeeded) {
       _confirmedCostume = requested;
+      _activityCompanion = requested;
       if (guideRequest &&
           queuedCode == null &&
           selectionGeneration == _costumeSelectionGeneration &&
@@ -451,6 +487,44 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         queuedCode != requested.code &&
         queuedCode != _confirmedCostume.code) {
       unawaited(_persistCharacter(queuedCode));
+    }
+    _notifyCharacterSettledIfIdle();
+  }
+
+  /// 활동을 만들기 전에 600ms debounce와 진행 중 PATCH를 끝까지 정리한다.
+  ///
+  /// 성공이면 새 확정값, 실패면 기존 rollback 값이 [_confirmedCostume]에 남는다.
+  /// child 전환·dispose로 identity가 바뀌면 false를 반환해 이전 아동의 결과로
+  /// 세션을 만들지 않는다. 임의 timeout은 두지 않는다.
+  Future<DodamCostume?> _settleCharacterForActivity() async {
+    final childId = widget.child.childId;
+    final waiter = Completer<bool>();
+    _characterSettlementWaiters.add(waiter);
+
+    _persistCharacterTimer?.cancel();
+    _flushPersistCharacter();
+    _notifyCharacterSettledIfIdle();
+
+    final settled = await waiter.future;
+    if (!settled || !mounted || childId != widget.child.childId) return null;
+    return _activityCompanion;
+  }
+
+  void _notifyCharacterSettledIfIdle() {
+    if (_characterSaveInFlight ||
+        _pendingCharacterCode != null ||
+        (_persistCharacterTimer?.isActive ?? false)) {
+      return;
+    }
+    _finishCharacterSettlements(true);
+  }
+
+  void _finishCharacterSettlements(bool settled) {
+    if (_characterSettlementWaiters.isEmpty) return;
+    final waiters = List<Completer<bool>>.of(_characterSettlementWaiters);
+    _characterSettlementWaiters.clear();
+    for (final waiter in waiters) {
+      if (!waiter.isCompleted) waiter.complete(settled);
     }
   }
 
@@ -897,23 +971,26 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         repository: widget.drawingRepository,
       );
       final (icon, accentColor) = _visualForDrawingType(type.code);
-      final resolution =
-          await showActivityGuideDialog<DrawingSessionResolution?>(
-            context: context,
-            title: type.name,
-            description: _descriptionForDrawingType(type),
-            icon: icon,
-            accentColor: accentColor,
-            onStart: () => _startGuidedActivity(
-              controller: controller,
-              type: type,
-              icon: icon,
-              accentColor: accentColor,
-              replaceActive: _replaceActiveOnSelection,
-            ),
-          );
-      if (resolution == null || !mounted) return;
-      await _openResolution(resolution, startFresh: true);
+      final prepared = await showActivityGuideDialog<_PreparedDrawingActivity?>(
+        context: context,
+        title: type.name,
+        description: _descriptionForDrawingType(type),
+        icon: icon,
+        accentColor: accentColor,
+        onStart: () => _startGuidedActivity(
+          controller: controller,
+          type: type,
+          icon: icon,
+          accentColor: accentColor,
+          replaceActive: _replaceActiveOnSelection,
+        ),
+      );
+      if (prepared == null || !mounted) return;
+      await _openResolution(
+        prepared.resolution,
+        companion: prepared.companion,
+        startFresh: true,
+      );
     } on Object {
       if (mounted) {
         showAppMessage(
@@ -947,42 +1024,55 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
           inputMethod: 'CANVAS',
         );
 
-  Future<DrawingSessionResolution?> _startGuidedActivity({
+  Future<_PreparedDrawingActivity?> _startGuidedActivity({
     required DrawingSessionStartController controller,
     required DrawingTypeDto type,
     required IconData icon,
     required Color accentColor,
     required bool replaceActive,
-  }) {
+  }) async {
+    final companion = await _settleCharacterForActivity();
+    if (companion == null ||
+        !mounted ||
+        _startingDrawingTypeId != type.drawingTypeId ||
+        !(ModalRoute.of(context)?.isActive ?? false)) {
+      throw StateError('Character settlement was cancelled.');
+    }
     if (type.code != 'HTP') {
-      return _createSelectedActivity(
+      final resolution = await _createSelectedActivity(
         controller: controller,
         type: type,
         replaceActive: replaceActive,
       );
+      return (resolution: resolution, companion: companion);
     }
-    return Navigator.of(context).push<DrawingSessionResolution>(
-      MaterialPageRoute(
-        builder: (_) => InputMethodSelectScreen(
-          childId: widget.child.childId,
-          drawingTypeId: type.drawingTypeId,
-          title: type.name,
-          description: _descriptionForDrawingType(type),
-          icon: icon,
-          accentColor: accentColor,
-          repository: widget.drawingRepository,
-          replaceActive: replaceActive,
-          htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
-        ),
-      ),
-    );
+    final resolution = await Navigator.of(context)
+        .push<DrawingSessionResolution>(
+          MaterialPageRoute(
+            builder: (_) => InputMethodSelectScreen(
+              childId: widget.child.childId,
+              drawingTypeId: type.drawingTypeId,
+              title: type.name,
+              description: _descriptionForDrawingType(type),
+              icon: icon,
+              accentColor: accentColor,
+              repository: widget.drawingRepository,
+              replaceActive: replaceActive,
+              htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
+            ),
+          ),
+        );
+    if (resolution == null || !mounted) return null;
+    return (resolution: resolution, companion: companion);
   }
 
   Future<void> _openResolution(
     DrawingSessionResolution resolution, {
+    DodamCostume? companion,
     bool autoRestoreDraft = false,
     bool startFresh = false,
   }) async {
+    final companionSnapshot = companion ?? _serverCompanionSnapshot;
     if (_isHtpPersonCompletedSession(resolution)) {
       // PERSON steps/next는 이미 성공해 세션이 COMPLETED다. Reflection도
       // steps/next도 다시 부르지 않고, 남은 Assessment Complete만 복구한다.
@@ -1021,14 +1111,14 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       }
       // 사진을 아직 찍지 않은 UPLOAD 세션 — Canvas로 열지 않고 사진 촬영
       // 단계를 그대로 복원한다. 새 세션·새 HTP 활동을 만들지 않는다.
-      await _restoreUploadInput(resolution);
+      await _restoreUploadInput(resolution, companionSnapshot);
       return;
     }
     if (_isAwaitingNextHtpSubject(resolution)) {
       // Conversation End가 세션을 REFLECTION으로 올린 뒤 아직 steps/next를
       // 부르지 않은 상태 — 감정 화면도 Canvas도 아니라 다음 주제 입력 방식
       // 선택으로 복원한다. 사용자가 고르기 전에는 steps/next가 나가지 않는다.
-      await _restoreNextHtpSubjectInputMethod(resolution);
+      await _restoreNextHtpSubjectInputMethod(resolution, companionSnapshot);
       return;
     }
     if (resolution.activityContext.isHtp &&
@@ -1067,6 +1157,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         startFresh: startFresh,
         activityContext: resolution.activityContext,
         inputMethod: resolution.inputMethod,
+        companion: companionSnapshot,
       ),
     );
     if (route == null) return;
@@ -1077,7 +1168,11 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     // 어떤 화면을 열지는 이 함수 하나가 판정하므로, 사진으로 시작한 활동도
     // 나무·사람에서 다시 사진 입력 화면으로 들어간다(S15P11B209-834).
     if (result.nextResolution case final next?) {
-      await _openResolution(next, startFresh: true);
+      await _openResolution(
+        next,
+        companion: companionSnapshot,
+        startFresh: true,
+      );
       return;
     }
 
@@ -1097,7 +1192,10 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   ///
   /// 화면 생성은 라우터 한 곳에만 두어(S15P11B209-834) 캔버스에서 주제를 넘길
   /// 때도 같은 인자·같은 화면을 쓰게 한다.
-  Future<void> _restoreUploadInput(DrawingSessionResolution resolution) async {
+  Future<void> _restoreUploadInput(
+    DrawingSessionResolution resolution,
+    DodamCostume companion,
+  ) async {
     final (icon, accentColor) = _visualForDrawingType(
       resolution.activityContext.isHtp ? 'HTP' : 'ART_DIARY',
     );
@@ -1119,12 +1217,13 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     if (route == null) return;
     final advanced = await route;
     if (advanced == null || !mounted) return;
-    await _openResolution(advanced);
+    await _openResolution(advanced, companion: companion);
   }
 
   /// HOUSE·TREE REFLECTION 재진입 — 다음 주제 입력 방식 선택을 복원한다.
   Future<void> _restoreNextHtpSubjectInputMethod(
     DrawingSessionResolution resolution,
+    DodamCostume companion,
   ) async {
     final assessmentId = resolution.activityContext.htpAssessmentId;
     if (assessmentId == null) return;
@@ -1147,7 +1246,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       ),
     );
     if (advanced == null || !mounted) return;
-    await _openResolution(advanced, startFresh: true);
+    await _openResolution(advanced, companion: companion, startFresh: true);
   }
 
   /// PERSON 완료 직후 앱이 종료된 경우 남은 Assessment Complete만 복구한다.
