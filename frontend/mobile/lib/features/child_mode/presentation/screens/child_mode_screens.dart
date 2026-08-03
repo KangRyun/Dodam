@@ -15,6 +15,7 @@ import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/screens/input_method_select_screen.dart';
 import '../../data/costume_preference_store.dart';
+import '../../data/child_home_intro_store.dart';
 import '../../domain/dodam_costume.dart';
 import '../widgets/activity_guide_dialog.dart';
 
@@ -29,6 +30,8 @@ const Color _treeTrunk = Color(0xFFC79A66);
 enum _ActivityLoadStatus { loading, loaded, empty, error }
 
 enum _DrawingStartChoice { resume, startNew }
+
+enum _CharacterIntroChoice { later, pick }
 
 /// 그림 유형 코드별 카드·안내 팝업 아이콘/강조색.
 ///
@@ -112,6 +115,8 @@ class ChildModeHomeScreen extends StatefulWidget {
     this.completionSnapshotProvider,
     this.htpPhotoUploadEnabled = false,
     this.costumeStore,
+    this.introStore,
+    this.availableCostumes = DodamCostume.values,
     this.onCharacterSelected,
     this.preparedResolution,
     this.autoStartPrepared = false,
@@ -127,11 +132,16 @@ class ChildModeHomeScreen extends StatefulWidget {
 
   /// 도담이 코스튬 로컬 저장소. 주입하지 않으면 기기 보안 저장소를 쓴다.
   final CostumePreferenceStore? costumeStore;
+  final ChildHomeIntroStore? introStore;
+
+  /// 홈 캐러셀에서 선택할 수 있는 친구 목록. production은 전체 목록을 사용하며,
+  /// 빈 목록이나 단일 목록도 안전하게 표시할 수 있다.
+  final List<DodamCostume> availableCostumes;
 
   /// 아동이 캐릭터를 고르면 그 아이의 `preferredCharacter`로 저장하도록 알린다
   /// (S15P11B209-505). 프로필 이미지가 이 값에서 그려진다. 주입하지 않으면
   /// 로컬 코스튬 저장까지만 하고 프로필에는 반영되지 않는다.
-  final Future<void> Function(int childId, String characterCode)?
+  final Future<bool> Function(int childId, String characterCode)?
   onCharacterSelected;
 
   /// 보호자가 활동 주제와 입력 방식을 선택해 미리 준비한 새 활동.
@@ -161,20 +171,33 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   DrawingSessionResolution? _preparedResolution;
 
   late final CostumePreferenceStore _costumeStore;
+  late final ChildHomeIntroStore _introStore;
   late final PageController _costumeController;
-  DodamCostume _costume = DodamCostume.base;
+  late DodamCostume _costume;
+  late DodamCostume _confirmedCostume;
+  final FocusNode _costumeFocusNode = FocusNode(debugLabel: 'costume-selector');
+  final GlobalKey _costumeKey = GlobalKey();
 
   /// 캐릭터 선택을 백엔드에 저장하기 전 잠깐 모으는 디바운스(S15P11B209-505).
   /// 스와이프마다 저장하지 않고, 잠시 멈춘 뒤 마지막 선택만 한 번 저장한다.
   Timer? _persistCharacterTimer;
   String? _pendingCharacterCode;
+  int _characterSaveGeneration = 0;
+  int _costumeLoadGeneration = 0;
+  bool _characterSaveInFlight = false;
+  bool _introCheckRunning = false;
+  bool _introOpen = false;
+  bool _introHandled = false;
   static const Duration _persistCharacterDelay = Duration(milliseconds: 600);
 
   @override
   void initState() {
     super.initState();
     _costumeStore = widget.costumeStore ?? CostumePreferenceStore();
-    _costumeController = PageController();
+    _introStore = widget.introStore ?? SecureChildHomeIntroStore();
+    _costume = _costumeFromCode(widget.child.preferredCharacter);
+    _confirmedCostume = _costume;
+    _costumeController = PageController(initialPage: _costumeIndex(_costume));
     _preparedResolution = widget.preparedResolution;
     // 자동 시작(이어 그리기)은 홈을 "확인 중" 상태로 두고 곧바로 캔버스를 연다.
     _entryResolved = _preparedResolution != null && !widget.autoStartPrepared;
@@ -188,6 +211,28 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         unawaited(_resolveEntry());
       }
     });
+  }
+
+  @override
+  void didUpdateWidget(covariant ChildModeHomeScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.child.childId == widget.child.childId) return;
+
+    _persistCharacterTimer?.cancel();
+    _persistCharacterTimer = null;
+    _pendingCharacterCode = null;
+    _characterSaveInFlight = false;
+    _characterSaveGeneration++;
+    _costumeLoadGeneration++;
+    _introCheckRunning = false;
+    _introOpen = false;
+    _introHandled = false;
+
+    final costume = _costumeFromCode(widget.child.preferredCharacter);
+    _costume = costume;
+    _confirmedCostume = costume;
+    _jumpToCostume(costume);
+    unawaited(_loadCostume());
   }
 
   /// 보호자가 이어 그리기를 고른 경우, 홈을 거치지 않고 진행 중인 캔버스를 바로 연다.
@@ -210,6 +255,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     if (_persistCharacterTimer?.isActive ?? false) _flushPersistCharacter();
     _persistCharacterTimer?.cancel();
     _costumeController.dispose();
+    _costumeFocusNode.dispose();
     super.dispose();
   }
 
@@ -235,22 +281,56 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   /// 아이의 `preferredCharacter`를 우선하고, 없으면 로컬 코스튬으로 되돌린다
   /// (S15P11B209-505).
   Future<void> _loadCostume() async {
+    final generation = ++_costumeLoadGeneration;
+    final childId = widget.child.childId;
     final preferred = widget.child.preferredCharacter;
-    final code = preferred ?? await _costumeStore.read(widget.child.childId);
-    if (!mounted) return;
-    final costume = DodamCostume.fromCode(code);
-    if (costume == _costume) return;
-    setState(() => _costume = costume);
-    final index = DodamCostume.values.indexOf(costume);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_costumeController.hasClients) _costumeController.jumpToPage(index);
-    });
+    final code = preferred ?? await _costumeStore.read(childId);
+    if (!mounted ||
+        generation != _costumeLoadGeneration ||
+        childId != widget.child.childId) {
+      return;
+    }
+    final costume = _costumeFromCode(code);
+    _confirmedCostume = costume;
+    if (costume != _costume) setState(() => _costume = costume);
+    _jumpToCostume(costume);
+  }
+
+  DodamCostume _costumeFromCode(String? code) {
+    final costumes = widget.availableCostumes;
+    if (costumes.isEmpty) return DodamCostume.base;
+    return costumes.firstWhere(
+      (costume) => costume.code == code,
+      orElse: () => costumes.first,
+    );
+  }
+
+  int _costumeIndex(DodamCostume costume) {
+    final index = widget.availableCostumes.indexOf(costume);
+    return index < 0 ? 0 : index;
+  }
+
+  void _jumpToCostume(DodamCostume costume) {
+    if (widget.availableCostumes.isEmpty) return;
+    final index = _costumeIndex(costume);
+    void jump() {
+      if (!mounted || !_costumeController.hasClients) return;
+      _costumeController.jumpToPage(index);
+    }
+
+    if (_costumeController.hasClients) {
+      jump();
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) => jump());
+    }
   }
 
   /// 캐러셀에서 캐릭터가 바뀌면 상태·로컬 저장을 즉시 반영하고, 프로필에 반영할
   /// `preferredCharacter` 저장은 디바운스로 마지막 선택만 보낸다(S15P11B209-505).
   void _onCostumeSelected(int index) {
-    final costume = DodamCostume.values[index];
+    final costumes = widget.availableCostumes;
+    if (index < 0 || index >= costumes.length) return;
+    final costume = costumes[index];
     if (costume == _costume) return;
     HapticFeedback.selectionClick();
     setState(() => _costume = costume);
@@ -259,6 +339,16 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   }
 
   void _schedulePersistCharacter(String code) {
+    if (!_characterSaveInFlight && code == _confirmedCostume.code) {
+      _persistCharacterTimer?.cancel();
+      _persistCharacterTimer = null;
+      _pendingCharacterCode = null;
+      return;
+    }
+    if (_pendingCharacterCode == code &&
+        (_persistCharacterTimer?.isActive ?? false)) {
+      return;
+    }
     _pendingCharacterCode = code;
     _persistCharacterTimer?.cancel();
     _persistCharacterTimer = Timer(
@@ -270,20 +360,65 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   void _flushPersistCharacter() {
     _persistCharacterTimer?.cancel();
     _persistCharacterTimer = null;
+    if (_characterSaveInFlight) return;
     final code = _pendingCharacterCode;
     _pendingCharacterCode = null;
-    if (code == null) return;
-    final future = widget.onCharacterSelected?.call(widget.child.childId, code);
-    if (future != null) unawaited(future);
+    if (code == null || code == _confirmedCostume.code) return;
+    unawaited(_persistCharacter(code));
   }
 
-  void _animateCostumeTo(int index) {
-    final clamped = index.clamp(0, DodamCostume.values.length - 1);
-    _costumeController.animateToPage(
-      clamped,
-      duration: const Duration(milliseconds: 360),
-      curve: Curves.easeOutCubic,
-    );
+  Future<void> _persistCharacter(String code) async {
+    if (_characterSaveInFlight) {
+      _pendingCharacterCode = code;
+      return;
+    }
+    _characterSaveInFlight = true;
+    final generation = ++_characterSaveGeneration;
+    final childId = widget.child.childId;
+    final requested = _costumeFromCode(code);
+    final succeeded =
+        await widget.onCharacterSelected?.call(childId, code) ?? true;
+    if (!mounted ||
+        generation != _characterSaveGeneration ||
+        childId != widget.child.childId) {
+      return;
+    }
+    _characterSaveInFlight = false;
+    final queuedCode = _pendingCharacterCode;
+    _pendingCharacterCode = null;
+    if (succeeded) {
+      _confirmedCostume = requested;
+    } else if (queuedCode == null || queuedCode == requested.code) {
+      setState(() => _costume = _confirmedCostume);
+      unawaited(
+        _costumeStore.write(widget.child.childId, _confirmedCostume.code),
+      );
+      _jumpToCostume(_confirmedCostume);
+      showAppMessage(
+        context,
+        message: '친구를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.',
+        type: AppMessageType.error,
+      );
+    }
+
+    if (queuedCode != null &&
+        queuedCode != requested.code &&
+        queuedCode != _confirmedCostume.code) {
+      unawaited(_persistCharacter(queuedCode));
+    }
+  }
+
+  void _stepCostume(int delta) {
+    final costumes = widget.availableCostumes;
+    final count = costumes.length;
+    if (count <= 1) return;
+    final current = costumes.indexOf(_costume);
+    final safeCurrent = current < 0 ? 0 : current;
+    final next = (safeCurrent + delta) % count;
+    _onCostumeSelected(next);
+    if (_costumeController.hasClients) {
+      _costumeController.jumpToPage(next);
+    }
   }
 
   Future<void> _resolveEntry() async {
@@ -299,6 +434,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       if (!mounted) return;
       if (activeSession == null) {
         setState(() => _entryResolved = true);
+        unawaited(_maybeShowCharacterIntro());
         return;
       }
 
@@ -338,6 +474,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     } finally {
       if (mounted) {
         setState(() => _checkingActiveSession = false);
+        unawaited(_maybeShowCharacterIntro());
       }
     }
   }
@@ -362,9 +499,175 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
             ? _ActivityLoadStatus.empty
             : _ActivityLoadStatus.loaded;
       });
+      unawaited(_maybeShowCharacterIntro());
     } on Object {
       if (mounted) setState(() => _status = _ActivityLoadStatus.error);
     }
+  }
+
+  Future<void> _maybeShowCharacterIntro() async {
+    if (_introHandled ||
+        _introCheckRunning ||
+        _introOpen ||
+        _status != _ActivityLoadStatus.loaded ||
+        !_entryResolved ||
+        _checkingActiveSession ||
+        _preparedResolution != null ||
+        _startingDrawingTypeId != null ||
+        !(ModalRoute.of(context)?.isCurrent ?? false)) {
+      return;
+    }
+    _introCheckRunning = true;
+    final childId = widget.child.childId;
+    final seen = await _introStore.hasSeen(childId);
+    if (!mounted) return;
+    _introCheckRunning = false;
+    if (seen) {
+      _introHandled = true;
+      return;
+    }
+    if (_introOpen ||
+        _status != _ActivityLoadStatus.loaded ||
+        !_entryResolved ||
+        _checkingActiveSession ||
+        _preparedResolution != null ||
+        !(ModalRoute.of(context)?.isCurrent ?? false)) {
+      return;
+    }
+    _introOpen = true;
+    final choice = await _showCharacterIntro(childId);
+    if (!mounted) return;
+    _introOpen = false;
+    _introHandled = true;
+    if (choice == _CharacterIntroChoice.pick) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _costumeFocusNode.requestFocus();
+        final selectorContext = _costumeKey.currentContext;
+        if (selectorContext != null) {
+          unawaited(
+            Scrollable.ensureVisible(
+              selectorContext,
+              duration: const Duration(milliseconds: 240),
+              alignment: 0.35,
+            ),
+          );
+        }
+      });
+    }
+  }
+
+  Future<_CharacterIntroChoice?> _showCharacterIntro(int childId) {
+    var closing = false;
+    return showDialog<_CharacterIntroChoice>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        Future<void> close(_CharacterIntroChoice choice) async {
+          if (closing) return;
+          closing = true;
+          try {
+            await _introStore.markSeen(childId);
+          } on Object {
+            // 저장 실패가 아이를 dialog에 가두지 않도록 이번 진입에서는 닫는다.
+          }
+          if (dialogContext.mounted) Navigator.of(dialogContext).pop(choice);
+        }
+
+        return PopScope(
+          canPop: false,
+          onPopInvokedWithResult: (didPop, _) {
+            if (!didPop) unawaited(close(_CharacterIntroChoice.later));
+          },
+          child: Dialog(
+            key: const ValueKey('child-character-intro-dialog'),
+            insetPadding: const EdgeInsets.all(AppSpacing.md),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(28),
+              side: const BorderSide(color: AppColors.sunshine, width: 2),
+            ),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 560),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(AppSpacing.xl),
+                child: FocusTraversalGroup(
+                  policy: OrderedTraversalPolicy(),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      ExcludeSemantics(
+                        child: Image.asset(
+                          'assets/characters/dodam_intro.png',
+                          key: const ValueKey('child-character-intro-mascot'),
+                          height: 116,
+                          fit: BoxFit.contain,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Semantics(
+                        header: true,
+                        child: const Text(
+                          '반가워!\n함께할 도담이를 골라볼까?',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: AppColors.ink,
+                            fontSize: 24,
+                            fontWeight: FontWeight.w900,
+                            height: 1.25,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      const Text(
+                        '그림을 그릴 때 옆에서 함께할 친구야.\n'
+                        '지금 고르지 않아도 나중에 언제든 바꿀 수 있어!',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: AppColors.inkMuted,
+                          fontSize: 16,
+                          height: 1.5,
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.lg),
+                      FocusTraversalOrder(
+                        order: const NumericFocusOrder(1),
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: FilledButton(
+                            key: const ValueKey('pick-character-from-intro'),
+                            onPressed: () =>
+                                unawaited(close(_CharacterIntroChoice.pick)),
+                            style: FilledButton.styleFrom(
+                              backgroundColor: AppColors.leaf,
+                            ),
+                            child: const Text('친구 고르기'),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      FocusTraversalOrder(
+                        order: const NumericFocusOrder(2),
+                        child: SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: OutlinedButton(
+                            key: const ValueKey('choose-character-later'),
+                            onPressed: () =>
+                                unawaited(close(_CharacterIntroChoice.later)),
+                            child: const Text('다음에 고를래'),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<_DrawingStartChoice?> _showDrawingStartDialog() {
@@ -792,11 +1095,16 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     }
   }
 
-  Widget _carousel() => _CostumeCarousel(
-    controller: _costumeController,
-    selected: _costume,
-    onSelected: _onCostumeSelected,
-    onStep: _animateCostumeTo,
+  Widget _carousel() => Focus(
+    key: _costumeKey,
+    focusNode: _costumeFocusNode,
+    child: _CostumeCarousel(
+      controller: _costumeController,
+      costumes: widget.availableCostumes,
+      selected: _costume,
+      onSelected: _onCostumeSelected,
+      onStep: _stepCostume,
+    ),
   );
 
   /// 이젤 아래 secondary 입구. 활동 로딩 상태와 무관하게 항상 보여준다.
@@ -1057,22 +1365,33 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
 class _CostumeCarousel extends StatelessWidget {
   const _CostumeCarousel({
     required this.controller,
+    required this.costumes,
     required this.selected,
     required this.onSelected,
     required this.onStep,
   });
 
   final PageController controller;
+  final List<DodamCostume> costumes;
   final DodamCostume selected;
   final ValueChanged<int> onSelected;
   final ValueChanged<int> onStep;
 
   @override
   Widget build(BuildContext context) {
-    const costumes = DodamCostume.values;
+    if (costumes.isEmpty) {
+      return Semantics(
+        label: '선택할 친구가 없어요',
+        child: const SizedBox(height: 320),
+      );
+    }
     final index = costumes.indexOf(selected);
     return Semantics(
-      label: '캐릭터 고르기. 지금은 ${selected.label}. 옆으로 넘겨서 바꿀 수 있어요.',
+      key: const ValueKey('costume-selection-semantics'),
+      container: true,
+      selected: true,
+      label: '캐릭터 고르기',
+      value: '${selected.label}, 선택됨',
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1087,16 +1406,18 @@ class _CostumeCarousel extends StatelessWidget {
                   controller: controller,
                   onPageChanged: onSelected,
                   itemCount: costumes.length,
-                  itemBuilder: (context, i) =>
-                      _CostumeStage(costume: costumes[i]),
+                  itemBuilder: (context, i) => _CostumeStage(
+                    key: ValueKey('costume-stage-${costumes[i].code}'),
+                    costume: costumes[i],
+                  ),
                 ),
                 Positioned(
                   left: 0,
                   child: _CostumeChevron(
                     key: const ValueKey('costume-prev'),
                     icon: Icons.chevron_left_rounded,
-                    enabled: index > 0,
-                    onTap: () => onStep(index - 1),
+                    semanticLabel: '이전 친구',
+                    onTap: () => onStep(-1),
                   ),
                 ),
                 Positioned(
@@ -1104,8 +1425,8 @@ class _CostumeCarousel extends StatelessWidget {
                   child: _CostumeChevron(
                     key: const ValueKey('costume-next'),
                     icon: Icons.chevron_right_rounded,
-                    enabled: index < costumes.length - 1,
-                    onTap: () => onStep(index + 1),
+                    semanticLabel: '다음 친구',
+                    onTap: () => onStep(1),
                   ),
                 ),
               ],
@@ -1141,6 +1462,7 @@ class _CostumeCarousel extends StatelessWidget {
             children: [
               for (var i = 0; i < costumes.length; i++)
                 AnimatedContainer(
+                  key: ValueKey('costume-indicator-${costumes[i].code}'),
                   duration: const Duration(milliseconds: 220),
                   curve: Curves.easeOut,
                   margin: const EdgeInsets.symmetric(horizontal: 4),
@@ -1166,7 +1488,7 @@ class _CostumeCarousel extends StatelessWidget {
 
 /// 캐러셀 한 페이지 — 언덕 위에 선 캐릭터 한 명(배경 투명).
 class _CostumeStage extends StatelessWidget {
-  const _CostumeStage({required this.costume});
+  const _CostumeStage({required this.costume, super.key});
 
   final DodamCostume costume;
 
@@ -1202,40 +1524,43 @@ class _CostumeStage extends StatelessWidget {
   );
 }
 
-/// 캐러셀 좌우 이동 버튼. 끝에서는 흐려지고 눌리지 않는다.
+/// 캐러셀 좌우 이동 버튼. 목록 끝에서도 반대편 항목으로 순환한다.
 class _CostumeChevron extends StatelessWidget {
   const _CostumeChevron({
     required this.icon,
-    required this.enabled,
+    required this.semanticLabel,
     required this.onTap,
     super.key,
   });
 
   final IconData icon;
-  final bool enabled;
+  final String semanticLabel;
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => AnimatedOpacity(
-    duration: const Duration(milliseconds: 180),
-    opacity: enabled ? 1 : 0.35,
-    child: _Pressable(
-      onTap: enabled ? onTap : null,
-      child: Container(
-        width: 52,
-        height: 52,
-        decoration: BoxDecoration(
-          color: AppColors.surface,
-          shape: BoxShape.circle,
-          boxShadow: [
-            BoxShadow(
-              color: AppColors.ink.withValues(alpha: 0.12),
-              blurRadius: 12,
-              offset: const Offset(0, 4),
-            ),
-          ],
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    enabled: true,
+    label: semanticLabel,
+    child: ExcludeSemantics(
+      child: _Pressable(
+        onTap: onTap,
+        child: Container(
+          width: 52,
+          height: 52,
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            shape: BoxShape.circle,
+            boxShadow: [
+              BoxShadow(
+                color: AppColors.ink.withValues(alpha: 0.12),
+                blurRadius: 12,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Icon(icon, size: 34, color: AppColors.ink),
         ),
-        child: Icon(icon, size: 34, color: AppColors.ink),
       ),
     ),
   );

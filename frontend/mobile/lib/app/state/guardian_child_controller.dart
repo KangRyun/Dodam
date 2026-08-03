@@ -5,6 +5,7 @@ import '../../features/child/data/dto/child_dtos.dart';
 import '../../features/child/data/repositories/mock_child_consent_repository.dart';
 import '../../features/child/domain/repositories/child_consent_repository.dart';
 import '../../features/child/domain/repositories/child_repository.dart';
+import '../../features/child/domain/preferred_character.dart';
 
 enum ChildListStatus { idle, loading, success, empty, error }
 
@@ -27,6 +28,8 @@ final class GuardianChildController extends ChangeNotifier {
   Object? _listError;
   List<ConsentTermDto> _childConsentTerms = const [];
   Object? _consentRecordError;
+  final Map<int, String> _confirmedCharacters = {};
+  final Map<int, int> _characterRequestGenerations = {};
 
   ChildListStatus get status => _status;
 
@@ -78,6 +81,16 @@ final class GuardianChildController extends ChangeNotifier {
     try {
       final children = await _repository.getChildren();
       _children = children;
+      _confirmedCharacters
+        ..clear()
+        ..addEntries(
+          children.map(
+            (child) => MapEntry(
+              child.childId,
+              normalizePreferredCharacter(child.preferredCharacter),
+            ),
+          ),
+        );
       if (_selectedChild case final selected?) {
         _selectedChild = children.cast<ChildSummaryDto?>().firstWhere(
           (child) => child?.childId == selected.childId,
@@ -179,7 +192,43 @@ final class GuardianChildController extends ChangeNotifier {
   ///
   /// 등록 수정(`updateChild`)과 달리 목록 전체를 다시 불러오지 않고, 등록 UI
   /// 상태(`_registrationStatus`)도 건드리지 않는다 — 아동 홈의 가벼운 배경 저장이다.
-  Future<void> updateChildCharacter(int childId, String characterCode) async {
+  Future<bool> updateChildCharacter(int childId, String characterCode) async {
+    final normalized = normalizePreferredCharacter(characterCode);
+    final generation = (_characterRequestGenerations[childId] ?? 0) + 1;
+    _characterRequestGenerations[childId] = generation;
+    final confirmedBefore =
+        _confirmedCharacters[childId] ??
+        normalizePreferredCharacter(
+          _children
+              .cast<ChildSummaryDto?>()
+              .firstWhere(
+                (child) => child?.childId == childId,
+                orElse: () => null,
+              )
+              ?.preferredCharacter,
+        );
+    _replaceChildCharacter(childId, normalized);
+    try {
+      final response = await _repository.updateChild(
+        childId,
+        UpdateChildRequestDto(preferredCharacter: normalized),
+      );
+      if (_characterRequestGenerations[childId] != generation) return true;
+      final confirmed = normalizePreferredCharacter(
+        response.preferredCharacter ?? normalized,
+      );
+      _confirmedCharacters[childId] = confirmed;
+      _replaceChildCharacter(childId, confirmed);
+      return true;
+    } on Object {
+      if (_characterRequestGenerations[childId] == generation) {
+        _replaceChildCharacter(childId, confirmedBefore);
+      }
+      return false;
+    }
+  }
+
+  void _replaceChildCharacter(int childId, String characterCode) {
     final updated = <ChildSummaryDto>[];
     var changed = false;
     for (final child in _children) {
@@ -199,15 +248,6 @@ final class GuardianChildController extends ChangeNotifier {
         );
       }
       notifyListeners();
-    }
-    try {
-      await _repository.updateChild(
-        childId,
-        UpdateChildRequestDto(preferredCharacter: characterCode),
-      );
-    } on Object {
-      // 백엔드 저장 실패는 홈 사용을 막지 않는다. 화면 표시와 로컬 코스튬은
-      // 유지되고, 다음 목록 조회 때 서버 값으로 다시 맞춰진다.
     }
   }
 

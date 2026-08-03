@@ -8,6 +8,7 @@ import '../../../../app/widgets/app_placeholder_scaffold.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../activity/domain/repositories/activity_repository.dart';
 import '../../../child/data/dto/child_dtos.dart';
+import '../../../child_mode/domain/dodam_costume.dart';
 import '../widgets/guardian_dashboard.dart';
 
 class GuardianHomeScreen extends StatelessWidget {
@@ -55,8 +56,13 @@ class GuardianHomeScreen extends StatelessWidget {
 }
 
 class ChildSelectScreen extends StatelessWidget {
-  const ChildSelectScreen({required this.controller, super.key});
+  const ChildSelectScreen({
+    required this.controller,
+    this.imageFetcher,
+    super.key,
+  });
   final GuardianChildController controller;
+  final ImageByteFetcher? imageFetcher;
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -82,6 +88,7 @@ class ChildSelectScreen extends StatelessWidget {
           ),
           ChildListStatus.success => _ChildSelectContent(
             controller: controller,
+            imageFetcher: imageFetcher,
           ),
         },
       ),
@@ -90,8 +97,9 @@ class ChildSelectScreen extends StatelessWidget {
 }
 
 class _ChildSelectContent extends StatelessWidget {
-  const _ChildSelectContent({required this.controller});
+  const _ChildSelectContent({required this.controller, this.imageFetcher});
   final GuardianChildController controller;
+  final ImageByteFetcher? imageFetcher;
 
   @override
   Widget build(BuildContext context) => SingleChildScrollView(
@@ -116,7 +124,10 @@ class _ChildSelectContent extends StatelessWidget {
               style: TextStyle(color: AppColors.inkMuted, fontSize: 16),
             ),
             const SizedBox(height: AppSpacing.lg),
-            _ChildSelectionCard(controller: controller),
+            _ChildSelectionCard(
+              controller: controller,
+              imageFetcher: imageFetcher,
+            ),
             const SizedBox(height: AppSpacing.lg),
             AppButton(
               label: '선택한 아이로 시작',
@@ -140,8 +151,9 @@ class _ChildSelectContent extends StatelessWidget {
 }
 
 class _ChildSelectionCard extends StatelessWidget {
-  const _ChildSelectionCard({required this.controller});
+  const _ChildSelectionCard({required this.controller, this.imageFetcher});
   final GuardianChildController controller;
+  final ImageByteFetcher? imageFetcher;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -171,7 +183,7 @@ class _ChildSelectionCard extends StatelessWidget {
                 '${child.age}세 · 활동 ${child.recentActivity.totalActivityCount}회',
             isSelected: controller.selectedChildId == child.childId,
             onTap: () => controller.selectChild(child),
-            leading: _ChildAvatar(child: child),
+            leading: _ChildAvatar(child: child, imageFetcher: imageFetcher),
           ),
           if (child != controller.children.last)
             const SizedBox(height: AppSpacing.sm),
@@ -182,25 +194,31 @@ class _ChildSelectionCard extends StatelessWidget {
 }
 
 class _ChildAvatar extends StatelessWidget {
-  const _ChildAvatar({required this.child});
+  const _ChildAvatar({required this.child, this.imageFetcher});
   final ChildSummaryDto child;
+  final ImageByteFetcher? imageFetcher;
+
+  Widget _fallback(BuildContext context) => Image.asset(
+    DodamCostume.fromCode(child.preferredCharacter).asset,
+    fit: BoxFit.cover,
+    semanticLabel: '${child.nickname} 도담이',
+  );
+
   @override
   Widget build(BuildContext context) => ClipOval(
     child: Container(
       width: AppSizes.childAvatar,
       height: AppSizes.childAvatar,
       color: AppColors.tangerineSoft,
-      child: child.profileImageUrl == null
-          ? const Icon(Icons.face_rounded, color: AppColors.tangerine, size: 38)
-          : Image.network(
-              child.profileImageUrl!,
+      child: child.profileImageUrl != null && imageFetcher != null
+          ? AuthenticatedImage(
+              url: child.profileImageUrl,
+              fetcher: imageFetcher!,
               fit: BoxFit.cover,
-              errorBuilder: (_, _, _) => const Icon(
-                Icons.face_rounded,
-                color: AppColors.tangerine,
-                size: 38,
-              ),
-            ),
+              semanticLabel: '${child.nickname} 프로필 사진',
+              placeholderBuilder: _fallback,
+            )
+          : _fallback(context),
     ),
   );
 }

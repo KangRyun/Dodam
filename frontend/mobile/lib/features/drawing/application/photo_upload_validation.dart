@@ -121,6 +121,9 @@ String? _canonicalMimeType(String? mimeType) {
 Future<PhotoValidationResult> validatePickedPhoto(
   PickedPhoto photo, {
   PhotoDimensionReader dimensionReader = readPhotoDimensions,
+  int maxBytes = kMaxPhotoUploadBytes,
+  int minEdgePx = kMinPhotoEdgePx,
+  int maxEdgePx = kMaxPhotoEdgePx,
 }) async {
   final mimeType =
       _canonicalMimeType(photo.mimeType) ??
@@ -135,7 +138,7 @@ Future<PhotoValidationResult> validatePickedPhoto(
       PhotoValidationErrorType.signatureMismatch,
     );
   }
-  if (photo.bytes.lengthInBytes > kMaxPhotoUploadBytes) {
+  if (photo.bytes.lengthInBytes > maxBytes) {
     return const PhotoValidationFailed(PhotoValidationErrorType.tooLarge);
   }
   try {
@@ -143,10 +146,10 @@ Future<PhotoValidationResult> validatePickedPhoto(
     if (width <= 0 || height <= 0) {
       return const PhotoValidationFailed(PhotoValidationErrorType.undecodable);
     }
-    if (width < kMinPhotoEdgePx || height < kMinPhotoEdgePx) {
+    if (width < minEdgePx || height < minEdgePx) {
       return const PhotoValidationFailed(PhotoValidationErrorType.edgeTooSmall);
     }
-    if (width > kMaxPhotoEdgePx || height > kMaxPhotoEdgePx) {
+    if (width > maxEdgePx || height > maxEdgePx) {
       return const PhotoValidationFailed(PhotoValidationErrorType.edgeTooLarge);
     }
     return PhotoValidationOk(

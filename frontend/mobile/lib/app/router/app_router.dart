@@ -9,6 +9,7 @@ import '../../features/auth/auth.dart';
 import '../../features/child_mode/presentation/screens/child_gallery_screen.dart';
 import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
 import '../../features/child/data/dto/child_dtos.dart';
+import '../../features/child/domain/repositories/child_profile_image_repository.dart';
 import '../../features/child/domain/repositories/child_repository.dart';
 import '../../features/child/presentation/screens/child_registration_screen.dart';
 import '../../features/community/presentation/screens/community_webview_screen.dart';
@@ -106,6 +107,10 @@ abstract final class AppRouter {
       ['profiles', 'select'] when childController != null =>
         ProfileSelectionScreen(
           controller: childController,
+          imageFetcher: childRepository is ChildProfileImageRepository
+              ? (childRepository as ChildProfileImageRepository)
+                    .downloadProfileImage
+              : null,
           onGuardianSelected: goGuardianHome,
           headerAction: authSignOut == null
               ? null
@@ -210,13 +215,27 @@ abstract final class AppRouter {
         ],
       ),
       ['guardian', 'children', 'select'] when childController != null =>
-        ChildSelectScreen(controller: childController),
+        ChildSelectScreen(
+          controller: childController,
+          imageFetcher: childRepository is ChildProfileImageRepository
+              ? (childRepository as ChildProfileImageRepository)
+                    .downloadProfileImage
+              : null,
+        ),
       ['guardian', 'children', 'register'] when childController != null =>
-        ChildRegistrationScreen(controller: childController),
+        ChildRegistrationScreen(
+          controller: childController,
+          profileImageRepository: childRepository is ChildProfileImageRepository
+              ? childRepository as ChildProfileImageRepository
+              : null,
+        ),
       ['guardian', 'children', final childId, 'edit']
           when childController != null =>
         ChildRegistrationScreen(
           controller: childController,
+          profileImageRepository: childRepository is ChildProfileImageRepository
+              ? childRepository as ChildProfileImageRepository
+              : null,
           child: settings.arguments is ChildSummaryDto
               ? settings.arguments! as ChildSummaryDto
               : childController.children.cast<ChildSummaryDto?>().firstWhere(

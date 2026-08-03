@@ -151,30 +151,83 @@ final class CreateChildRequestDto {
   };
 }
 
+/// PATCH에서 프로필 사진의 생략/null/value를 구분한다.
+sealed class ProfileImageUpdate {
+  const ProfileImageUpdate();
+
+  const factory ProfileImageUpdate.unchanged() = ProfileImageUnchanged;
+  const factory ProfileImageUpdate.clear() = ProfileImageClear;
+  const factory ProfileImageUpdate.replace(String profileImageFileId) =
+      ProfileImageReplace;
+}
+
+final class ProfileImageUnchanged extends ProfileImageUpdate {
+  const ProfileImageUnchanged();
+}
+
+final class ProfileImageClear extends ProfileImageUpdate {
+  const ProfileImageClear();
+}
+
+final class ProfileImageReplace extends ProfileImageUpdate {
+  const ProfileImageReplace(this.profileImageFileId);
+
+  final String profileImageFileId;
+}
+
 final class UpdateChildRequestDto {
   const UpdateChildRequestDto({
     this.nickname,
-    this.profileImageUrl,
-    this.includeProfileImageUrl = false,
+    this.profileImage = const ProfileImageUpdate.unchanged(),
     this.preferredCharacter,
     this.questionDifficulty,
     this.responseModes,
   });
   final String? nickname;
-  final String? profileImageUrl;
-  final bool includeProfileImageUrl;
+  final ProfileImageUpdate profileImage;
   final String? preferredCharacter;
   final String? questionDifficulty;
   final List<String>? responseModes;
 
   Map<String, dynamic> toJson() => {
     if (nickname != null) 'nickname': nickname,
-    if (includeProfileImageUrl) 'profileImageUrl': profileImageUrl,
+    if (profileImage is ProfileImageClear) 'profileImageFileId': null,
+    if (profileImage case ProfileImageReplace(:final profileImageFileId))
+      'profileImageFileId': profileImageFileId,
     if (preferredCharacter != null)
       'preferredCharacter': normalizePreferredCharacter(preferredCharacter),
     if (questionDifficulty != null) 'questionDifficulty': questionDifficulty,
     if (responseModes != null) 'responseModes': responseModes,
   };
+}
+
+final class ChildProfileImageUploadResponseDto {
+  const ChildProfileImageUploadResponseDto({
+    required this.profileImageFileId,
+    required this.contentType,
+    required this.fileSizeBytes,
+    required this.widthPx,
+    required this.heightPx,
+    required this.expiresAt,
+  });
+
+  factory ChildProfileImageUploadResponseDto.fromJson(
+    Map<String, dynamic> json,
+  ) => ChildProfileImageUploadResponseDto(
+    profileImageFileId: json['profileImageFileId'] as String,
+    contentType: json['contentType'] as String,
+    fileSizeBytes: json['fileSizeBytes'] as int,
+    widthPx: json['widthPx'] as int,
+    heightPx: json['heightPx'] as int,
+    expiresAt: json['expiresAt'] as String,
+  );
+
+  final String profileImageFileId;
+  final String contentType;
+  final int fileSizeBytes;
+  final int widthPx;
+  final int heightPx;
+  final String expiresAt;
 }
 
 final class TutorialProgressDto {
