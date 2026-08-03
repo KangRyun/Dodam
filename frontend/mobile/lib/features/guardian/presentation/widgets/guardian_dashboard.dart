@@ -67,59 +67,194 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
     return page.content;
   }
 
+  /// 2단 그리드가 더는 줄어들 수 없는 최소 세로 높이(글자 배율 1.0 기준).
+  ///
+  /// 마음카드는 도담이 이미지·CTA·리포트 버튼이 고정이라 압축되지 않고, 최근 활동
+  /// 카드도 헤더·간격·카드 패딩만으로 최소 높이를 요구한다. 남은 높이가 이보다
+  /// 작으면 최근 활동 카드가 그 부족분을 전부 흡수해 RenderFlex가 넘쳤다
+  /// (S15P11B209-848). 이 높이를 보장하고 부족한 만큼 화면을 스크롤한다.
+  ///
+  /// 실측 하한은 약 472다(470을 주면 2.3px 넘친다). 여유를 크게 잡으면 지금까지
+  /// 넘치지 않던 화면(예: 800×600은 헤더 72를 뺀 482가 남는다)까지 스크롤로 바뀌어
+  /// 헤더가 밀려나므로, 하한 바로 위에 붙여 둔다.
+  static const double _bodyMinHeight = 480;
+
+  /// 글자 배율이 커질 때 카드 안 텍스트·버튼이 함께 커지는 만큼의 추가 여유.
+  ///
+  /// 마음 달력의 날짜 셀은 `날짜 글자 + 3 + 원(최소 지름 12)`이 하한이라 글자
+  /// 배율에 따라 6줄 전체가 함께 커진다. 배율 2.0까지 그 증가분을 덮는다.
+  static const double _bodyTextScaleAllowance = 280;
+
+  /// 2단 그리드를 유지할 수 있는 최소 본문 폭.
+  ///
+  /// 이보다 좁으면 마음카드·최근 활동·마음 달력이 각각 절반도 못 받아 카드 내부
+  /// Row와 달력 셀이 가로로 넘친다. 좁은 화면은 한 열로 쌓아 폭을 온전히 준다.
+  static const double _twoColumnMinWidth = 720;
+
+  /// 한 열로 쌓을 때 최근 활동 카드에 주는 높이(글자 배율 1.0 기준).
+  static const double _stackedRecentHeight = 280;
+
+  /// 한 열로 쌓을 때 마음 달력에 주는 높이(글자 배율 1.0 기준).
+  ///
+  /// 달력은 머리말·요약·요일·범례가 고정이고 날짜 격자만 늘어난다. 6줄 × 날짜 셀
+  /// 하한(약 29)을 격자에 남겨야 셀이 잘리지 않는다.
+  static const double _stackedCalendarHeight = 440;
+
   @override
   Widget build(BuildContext context) {
-    final controller = widget.controller;
-    final selected = controller.selectedChild;
+    final textScale = MediaQuery.textScalerOf(context).scale(1);
+    // 글자 배율이 커지면 카드 안 텍스트·버튼이 함께 커져 최소 높이도 늘어난다.
+    final scaleAllowance = (textScale - 1).clamp(0.0, 1.0);
     return Container(
       key: const ValueKey('child-list-success'),
       padding: const EdgeInsets.fromLTRB(30, 24, 30, 22),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _Header(
-            child: selected,
-            notificationInboxRepository: widget.notificationInboxRepository,
-            notificationBadgeController: widget.notificationBadgeController,
-            pushRegistrationStatus: widget.pushRegistrationStatus,
-          ),
-          if (widget.pushRegistrationStatus case final status?)
-            _PushRegistrationBanner(status: status),
-          const SizedBox(height: 16),
-          Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  flex: 92,
-                  child: Column(
-                    children: [
-                      _HeroCard(
-                        controller: controller,
-                        selected: selected,
-                        recentFuture: _recentFuture,
-                      ),
-                      const SizedBox(height: 16),
-                      Expanded(
-                        child: _RecentActivityCard(recentFuture: _recentFuture),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 18),
-                Expanded(
-                  flex: 108,
-                  child: _CalendarSection(
-                    childId: selected?.childId,
-                    childName: selected?.nickname,
-                    repository: widget.activityRepository,
-                  ),
-                ),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final bodySliver = _buildBodySliver(
+            maxWidth: constraints.maxWidth,
+            scaleAllowance: scaleAllowance,
+          );
+          // 헤더 블록만으로도 화면을 넘기는 극단 조합(아주 낮은 높이 + 큰 글자 배율
+          // + 푸시 안내 띠)에서는 헤더를 스크롤 밖에 두면 헤더가 넘치고 본문 몫이
+          // 0이 된다. 그때만 헤더까지 같은 스크롤에 넣는다.
+          if (constraints.maxHeight < _headerOutsideMinHeight(scaleAllowance)) {
+            return CustomScrollView(
+              slivers: [
+                SliverToBoxAdapter(child: _buildHeader()),
+                bodySliver,
               ],
-            ),
-          ),
-        ],
+            );
+          }
+          // 평소에는 헤더와 푸시 안내를 스크롤 밖에 두어 항상 보이고 본문만
+          // 스크롤한다. 본문에 남은 높이가 최소 높이보다 작을 때만 스크롤이
+          // 생긴다 — 여유가 있는 화면에서는 스크롤 범위가 0이라 기존 배치와 같다.
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _buildHeader(),
+              Expanded(child: CustomScrollView(slivers: [bodySliver])),
+            ],
+          );
+        },
       ),
+    );
+  }
+
+  /// 헤더를 스크롤 밖에 둘 수 있는 최소 화면 높이.
+  ///
+  /// 실측 헤더 높이는 배율 1.0에서 72, 2.0에서 125이고 푸시 안내 띠가 그만큼 더
+  /// 붙는다. 여기에 본문이 최소한 보일 몫을 더해 판단한다.
+  double _headerOutsideMinHeight(double scaleAllowance) {
+    final header = 72 + 60 * scaleAllowance;
+    final banner = widget.pushRegistrationStatus == null
+        ? 0
+        : 72 + 60 * scaleAllowance;
+    return header + banner + _bodyVisibleMinHeight;
+  }
+
+  /// 헤더를 고정으로 둘 때 본문에 최소한 남겨야 하는 높이.
+  static const double _bodyVisibleMinHeight = 120;
+
+  Widget _buildBodySliver({
+    required double maxWidth,
+    required double scaleAllowance,
+  }) {
+    if (maxWidth < _twoColumnMinWidth) {
+      return SliverToBoxAdapter(
+        child: _buildStackedBody(scaleAllowance: scaleAllowance),
+      );
+    }
+    // `hasScrollBody: false`는 남은 높이와 자식의 최대 intrinsic 높이 중 큰 값으로
+    // 자식을 **tight**하게 배치한다. 아래 SizedBox가 tight height라 intrinsic
+    // 질의가 마음 달력의 LayoutBuilder까지 내려가지 않으면서도, 2단 그리드는 항상
+    // 유한한 높이를 받아 Expanded 계약을 유지한다.
+    return SliverFillRemaining(
+      hasScrollBody: false,
+      child: SizedBox(
+        height: _bodyMinHeight + _bodyTextScaleAllowance * scaleAllowance,
+        child: _buildTwoColumnBody(),
+      ),
+    );
+  }
+
+  Widget _buildHeader() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _Header(
+        child: widget.controller.selectedChild,
+        notificationInboxRepository: widget.notificationInboxRepository,
+        notificationBadgeController: widget.notificationBadgeController,
+        pushRegistrationStatus: widget.pushRegistrationStatus,
+      ),
+      if (widget.pushRegistrationStatus case final status?)
+        _PushRegistrationBanner(status: status),
+      const SizedBox(height: 16),
+    ],
+  );
+
+  Widget _buildTwoColumnBody() {
+    final selected = widget.controller.selectedChild;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          flex: 92,
+          child: Column(
+            children: [
+              _HeroCard(
+                controller: widget.controller,
+                selected: selected,
+                recentFuture: _recentFuture,
+              ),
+              const SizedBox(height: 16),
+              Expanded(child: _RecentActivityCard(recentFuture: _recentFuture)),
+            ],
+          ),
+        ),
+        const SizedBox(width: 18),
+        Expanded(
+          flex: 108,
+          child: _CalendarSection(
+            childId: selected?.childId,
+            childName: selected?.nickname,
+            repository: widget.activityRepository,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// 좁은 화면 배치. 카드마다 폭을 온전히 주고 세로로 쌓아 스크롤한다.
+  ///
+  /// 최근 활동 카드와 마음 달력은 내부에 [Expanded]가 있어 유한한 높이가 필요하다.
+  /// 여기서는 채울 남은 높이가 없으므로 각자 명시 높이를 준다.
+  Widget _buildStackedBody({required double scaleAllowance}) {
+    final selected = widget.controller.selectedChild;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _HeroCard(
+          controller: widget.controller,
+          selected: selected,
+          recentFuture: _recentFuture,
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          height:
+              _stackedRecentHeight + _bodyTextScaleAllowance * scaleAllowance,
+          child: _RecentActivityCard(recentFuture: _recentFuture),
+        ),
+        const SizedBox(height: 16),
+        SizedBox(
+          height:
+              _stackedCalendarHeight + _bodyTextScaleAllowance * scaleAllowance,
+          child: _CalendarSection(
+            childId: selected?.childId,
+            childName: selected?.nickname,
+            repository: widget.activityRepository,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -543,12 +678,18 @@ class _MiniKid extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 7),
-            Text(
-              child.nickname,
-              style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w700,
-                color: DodamHome.ink,
+            // 이름이 길면 칩이 Wrap 폭을 넘어 가로로 넘친다. 칩을 남은 폭 안에
+            // 두기 위해 라벨만 줄인다(S15P11B209-848).
+            Flexible(
+              child: Text(
+                child.nickname,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w700,
+                  color: DodamHome.ink,
+                ),
               ),
             ),
           ],
