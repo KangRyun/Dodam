@@ -58,12 +58,23 @@ _PROMPT_SEMVER: dict[str, str] = {
     "guardrails": "1.2.0",
     # 그림 서술은 활동 유형별로 갈라진다 — HTP는 탐지 목록에 고정, 그림일기는 탐지를
     # 힌트로만 쓴다(sketch 가중치가 자유 그림을 자주 놓쳐 목록 고정이 서술을 죽였다).
-    "drawing_description_htp": "1.0.0",
+    # 1.1.0(S15P11B209-788 G): 세부가 흐려 확실한 것이 없을 때의 탈출구 추가 —
+    #   "한두 가지는 꼭 넣어" ↔ "확실하지 않으면 빼"가 동시 충족 불가였다.
+    "drawing_description_htp": "1.1.0",
     "drawing_description_diary": "1.0.0",
+    # 답변 칩 2차 호출 프롬프트(S15P11B209-788 부수). question_service 코드 상수였던 것을
+    # 파일로 옮겼다 — 아동 화면에 나갈 칩을 만드는 프롬프트가 버전 추적 밖에 있었다.
+    #   ⚠️ 고정 안전 문구(CRISIS_SAFE_QUESTION·REASK_QUESTION·FALLBACK_QUESTION·
+    #      DEFAULT_FOLLOW_UP_QUESTION)는 의도적으로 코드 상수로 남긴다 — 그건 '프롬프트'가
+    #      아니라 LLM을 못 믿을 때 코드가 보장하는 출력이다(report_client 모듈 docstring).
+    #      파일로 옮기면 프롬프트처럼 자유롭게 편집되어 그 보장이 약해진다.
+    "answer_chips": "1.0.0",
     # 리포트도 활동 유형별로 갈라진다 — 근거 블록 구성이 다르고(주제별 vs 단일),
     # RAG 근거는 HTP 경로에만 실린다. 공통 규칙·JSON 스키마는 report_common이 소유한다.
     # S15P11B209-601: 진단 표현 금지 강화·한계 고지·후속 질문 목적 명시(구 report 1.2.0 계승).
-    "report_common": "1.3.0",
+    # 1.4.0(S15P11B209-788 E·F): 걱정 신호 배출구 두 곳의 역할을 갈라 명시("로만" 제거),
+    #   형식적 분석 수치는 사실 자리·수치와 감정의 연결은 해석 자리로 자리를 못박음.
+    "report_common": "1.4.0",
     "report_htp": "1.3.0",
     "report_diary": "1.3.0",
 }

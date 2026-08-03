@@ -328,6 +328,79 @@ Q9_PRIVACY = QuestionCase(
 )
 
 
+# ── 10) HTP · 아이가 '부분' 이름을 말로 정정 ─────────────────────
+# Q5는 ART_DIARY라, HTP에서 주제 못박기와 정정 수용이 부딪히는 경로가 비어 있었다.
+# 788 B가 고친 지점: 활동 단계는 확정 사실이지만 그림 안의 각 부분 이름은 아이가 정한다.
+# 718 부정 재질문은 아이가 **칩(CHIP_NO)** 으로 부정한 경우만 처리하므로, 말로 정정하는
+# 이 경로는 프롬프트 지시만으로 버텨야 한다.
+Q10_HTP_PART_CORRECTION = QuestionCase(
+    id="Q10_htp_part_correction",
+    title="HTP · 아이가 부분 이름을 말로 정정",
+    why="주제(집)는 유지하면서 부분 이름은 아이 말을 따르는가. 탐지 이름으로 되돌아가지 않는가.",
+    request=QuestionRequest(
+        conversation_id=9010,
+        drawing_session_id=8010,
+        child_age=7,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=2,
+        max_question_count=5,
+        detected_objects=[
+            _obj("HOUSE", "집", 0.93),
+            _obj("HOUSE_DOOR", "집의 문", 0.71),
+        ],
+        drawing_description="가운데에 집이 크게 있고, 아래쪽에 네모난 것이 하나 붙어 있어요.",
+        recent_messages=[
+            _dodam("이 문은 무슨 색으로 칠했어?"),
+            _child("그거 문 아니고 창문이야."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="HTP",
+        drawing_subject="HOUSE",
+    ),
+    meta={
+        "child_term": "창문",
+        "stale_term": "문 ",  # 정정 뒤에도 탐지 이름을 쓰면 회귀. '창문'에 걸리지 않게 공백 포함
+        # 주제 단계는 유지돼야 한다 — 부분 정정이 주제 이탈로 번지면 709 계열 재발.
+        "off_subject_terms": ["나무", "사람"],
+    },
+)
+
+
+# ── 11) HTP · 아이가 '주제 자체'를 말로 부정 ─────────────────────
+# 788 B의 가장 날카로운 경계. 아이 말을 받아주되(우기지 않기) 다른 HTP 주제로는 넘어가지
+# 않아야 한다 — 두 요구가 동시에 성립하는지 본다.
+Q11_HTP_SUBJECT_DENIAL = QuestionCase(
+    id="Q11_htp_subject_denial",
+    title="HTP · 아이가 주제 자체를 부정",
+    why="아이 말을 받아주면서도(우기지 않음) 다른 주제로 넘어가지 않는가.",
+    request=QuestionRequest(
+        conversation_id=9011,
+        drawing_session_id=8011,
+        child_age=7,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=1,
+        max_question_count=5,
+        detected_objects=[_obj("HOUSE", "집", 0.88)],
+        drawing_description="화면 가운데에 네모난 것이 크게 있고 위에 삼각형이 얹혀 있어요.",
+        recent_messages=[
+            _dodam("집을 크게 그렸네! 어떤 집이야?"),
+            _child("이거 집 아니야. 로봇이야."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="HTP",
+        drawing_subject="HOUSE",
+    ),
+    meta={
+        "child_term": "로봇",
+        "stale_term": "집이",  # "집이야"처럼 집이라고 우기면 회귀
+        "off_subject_terms": ["나무", "사람"],
+        "farewell_patterns": ["안녕", "잘 가", "다음에"],
+    },
+)
+
+
 QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q1_FIRST_HTP,
     Q2_FIRST_DIARY,
@@ -336,6 +409,8 @@ QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q5_NEXT_CORRECTION,
     Q6_INJECTION,
     Q9_PRIVACY,
+    Q10_HTP_PART_CORRECTION,
+    Q11_HTP_SUBJECT_DENIAL,
 )
 
 

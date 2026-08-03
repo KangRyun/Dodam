@@ -980,5 +980,58 @@ class ActivityPromptSplitTest(unittest.TestCase):
         retrieve_spy.assert_called_once()
 
 
+class ReportCommonContradictionTest(unittest.TestCase):
+    """report_common.txt 안에서 같은 내용에 두 지시가 갈리지 않는지 (S15P11B209-788 E·F).
+
+    프롬프트 '문구'를 직접 본다 — 여기서 고친 것은 모델에게 주는 지시의 일관성이고,
+    조립·호출 경로는 ActivityPromptSplitTest가 이미 덮는다.
+    """
+
+    def setUp(self):
+        import prompts_registry
+
+        self.text = prompts_registry.load("report_common")
+
+    # ── E: 걱정 신호 배출구 ──
+    def test_two_expert_channels_are_defined_with_distinct_roles(self):
+        self.assertIn("전문가 채널 두 곳", self.text)
+        self.assertIn("같은 내용을 양쪽에 중복해 적지 마", self.text)
+        # 관찰 카드 = EXPERT_ONLY feature / 추가 확인 지점 = attentionPoints
+        self.assertIn("관찰 카드", self.text)
+        self.assertIn("무엇을 더 확인하면 좋을지", self.text)
+
+    def test_attention_points_is_no_longer_the_only_outlet(self):
+        """구 문구는 걱정 신호를 attentionPoints '로만' 옮기라고 해서, 코드가 전제하는
+        EXPERT_ONLY feature 경로(report_client._feature 강등 로직)와 어긋났다."""
+        self.assertNotIn("attentionPoints(전문가용)로만 옮긴다", self.text)
+        self.assertNotIn("관찰된 사실만 attentionPoints(전문가용)로 옮긴다", self.text)
+
+    def test_expert_only_channel_matches_code_behaviour(self):
+        # 코드가 실제로 EXPERT_ONLY feature 경로를 갖고 있다(프롬프트가 그걸 부정하면 안 된다).
+        self.assertIn("EXPERT_ONLY", report_client._VALID_SCOPES)
+        self.assertIn('features 의 EXPERT_ONLY 항목', self.text)
+
+    def test_attention_points_is_not_a_summary_of_cards(self):
+        self.assertIn("EXPERT_ONLY 관찰 카드를 다시 요약하지 마", self.text)
+
+    # ── F: 형식적 분석 수치의 자리 ──
+    def test_metric_facts_and_emotion_link_have_separate_homes(self):
+        """구 문구는 수치를 evidenceSummary에 넣고 거기서 감정과 '연결'하라고 했는데,
+        같은 파일의 사실/해석 분리 원칙은 evidenceSummary에 감정 판단을 금지한다."""
+        self.assertIn("수치와 감정을 잇는 문장은 '해석'이라 자리가 다르다", self.text)
+        self.assertIn("evidenceSummary 에는 수치만 남기고", self.text)
+        # 사실/해석 분리 원칙은 그대로 살아 있어야 한다.
+        self.assertIn("감정 판단·심리 해석(\"안정감을 느낀다\" 등)을 절대 넣지 마", self.text)
+
+    def test_metric_link_instruction_appears_before_fact_split_principle(self):
+        # 앞에 오는 지시가 뒤의 원칙과 어긋나면 모델이 어느 쪽을 따를지 알 수 없다 —
+        # 이제 앞쪽이 뒤쪽 원칙을 가리킨다.
+        self.assertIn("아래 사실/해석 분리 원칙", self.text)
+        self.assertLess(
+            self.text.index("아래 사실/해석 분리 원칙"),
+            self.text.index("관찰 '사실'과 AI '해석'을 분리한다"),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()
