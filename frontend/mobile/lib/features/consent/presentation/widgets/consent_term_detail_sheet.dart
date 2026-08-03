@@ -7,20 +7,61 @@ import '../screens/term_content_web_view_screen.dart';
 typedef TermUrlOpener =
     void Function(BuildContext context, String title, Uri url);
 
+final RegExp _lineBreakTagPattern = RegExp('<br[^>]*>', caseSensitive: false);
+
+/// 평문에서 줄을 바꿔야 하는 블록 레벨 태그. 여는 태그와 닫는 태그를 모두 줄바꿈
+/// 하나로 바꾼다. `</p><p>` 처럼 두 경계가 맞닿으면 줄바꿈이 겹쳐 빈 줄이 생기고,
+/// 그 빈 줄이 문단 구분이 된다. 경계가 한쪽만 있으면 줄만 바뀐다.
+///
+/// 태그 이름 뒤에 `[\s/>]`를 요구한다. 이것이 없으면 `<pre>`가 `p`로, `<progress>`가
+/// `p`로 잡혀 인라인이 아닌 곳에서 줄이 끊긴다.
+final RegExp _blockLevelTagPattern = RegExp(
+  r'</?(?:'
+  r'p|div|section|article|header|footer|blockquote|hr|h[1-6]|'
+  r'ul|ol|dl|dt|dd|'
+  r'table|thead|tbody|tfoot|tr|td|th'
+  r')(?=[\s/>])[^>]*>',
+  caseSensitive: false,
+);
+
+/// 목록 항목의 시작. 평문에는 목록 구조가 남지 않아 항목 경계가 사라지므로 불릿을
+/// 붙인다. 줄바꿈은 [_listItemEndPattern]이 담당한다.
+final RegExp _listItemStartPattern = RegExp(
+  r'<li(?=[\s/>])[^>]*>',
+  caseSensitive: false,
+);
+
+/// 목록 항목의 끝. 뒤따르는 공백까지 함께 먹는다. 원문이 `</li>` 다음 줄에 `<li>`를
+/// 쓰더라도 항목 사이에 빈 줄이 생기지 않게 하려는 것이다.
+final RegExp _listItemEndPattern = RegExp(r'</li\s*>\s*', caseSensitive: false);
+
+final RegExp _remainingTagPattern = RegExp('<[^>]+>');
+
+final RegExp _blankLineRunPattern = RegExp(r'\n{3,}');
+
 /// 약관 본문(HTML)을 읽기 쉬운 평문으로 정리한다. 별도 HTML 렌더러 의존성 없이
-/// 문단·줄바꿈만 보존한다.
+/// 문단·항목·줄바꿈만 보존한다.
+///
+/// 블록 레벨 태그는 지우기 전에 줄바꿈으로 바꾸고, 인라인 태그(`b`·`strong`·`em`·
+/// `span`·`a` 등)만 구분자 없이 지운다. 인라인까지 줄바꿈으로 바꾸면 강조가 들어간
+/// 문장이 중간에서 쪼개진다.
+///
+/// 태그를 다 걷어낸 뒤에 HTML 엔티티를 되돌린다. 순서를 뒤집으면 `&lt;p&gt;`처럼
+/// 이스케이프된 텍스트가 실제 태그로 되살아나 본문에서 사라진다.
 String consentTermPlainText(String? html) {
   if (html == null) return '';
   return html
-      .replaceAll(RegExp('<br[^>]*>', caseSensitive: false), '\n')
-      .replaceAll(RegExp('</p>', caseSensitive: false), '\n\n')
-      .replaceAll(RegExp('<[^>]+>'), '')
+      .replaceAll(_lineBreakTagPattern, '\n')
+      .replaceAll(_listItemEndPattern, '\n')
+      .replaceAll(_listItemStartPattern, '• ')
+      .replaceAll(_blockLevelTagPattern, '\n')
+      .replaceAll(_remainingTagPattern, '')
       .replaceAll('&nbsp;', ' ')
       .replaceAll('&amp;', '&')
       .replaceAll('&lt;', '<')
       .replaceAll('&gt;', '>')
       .replaceAll('&quot;', '"')
-      .replaceAll(RegExp(r'\n{3,}'), '\n\n')
+      .replaceAll(_blankLineRunPattern, '\n\n')
       .trim();
 }
 

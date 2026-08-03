@@ -6,6 +6,26 @@ import 'package:dodam/features/consent/presentation/widgets/consent_term_detail_
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+/// `consentTermPlainText`가 줄바꿈으로 바꿔야 하는 블록 레벨 태그 전부.
+/// 구현의 `_blockLevelTagPattern` 목록과 짝을 이룬다. `li`는 처리가 달라 뺐다.
+const _blockLevelTags = <String>[
+  'p', 'div', 'section', 'article', 'header', 'footer', 'blockquote', 'hr',
+  'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+  'ul', 'ol', 'dl', 'dt', 'dd',
+  'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th',
+];
+
+/// 블록 태그와 앞글자가 겹치지만 줄을 바꾸면 안 되는 태그들.
+/// `pre`·`param`·`picture`·`progress`·`path`·`polygon`·`pattern`은 `p`와,
+/// `track`은 `tr`과 겹쳐 룩어헤드가 없으면 실제로 잘못 잡힌다. 나머지는 대안
+/// 나열 순서로 이미 걸러지지만 목록을 손댈 때를 대비해 함께 고정한다.
+const _prefixCollidingTags = <String>[
+  'pre', 'param', 'picture', 'progress', 'path', 'polygon', 'pattern',
+  'track', 'text', 'textarea', 'template', 'time', 'title',
+  'html', 'head', 'hgroup',
+  'data', 'details', 'dialog', 'option',
+];
+
 void main() {
   group('consentTermPlainText', () {
     test('null이면 빈 문자열이다', () {
@@ -18,16 +38,152 @@ void main() {
       expect(consentTermPlainText(html), '제1조 목적\n가\n\n제2조 정의');
     });
 
-    test('br·p가 아닌 블록 태그는 줄바꿈을 만들지 않는다', () {
-      // 문단 구분을 p·br로만 판단하므로 h1 뒤 텍스트는 같은 줄에 이어 붙는다.
-      //
-      // 알려진 한계를 고정한 단언이지 바람직한 결과가 아니다. 법무 확정 약관
-      // 원문에는 h1~h3·li·table이 거의 반드시 들어가는데, 그런 원문이 들어오면
-      // 전문이 한 덩어리로 붙어 읽을 수 없게 된다. 원문 시드 시 태그별 줄바꿈
-      // 규칙을 넓히고 이 단언도 함께 바꿔야 한다.
+    test('제목 태그 뒤에서 줄을 바꾼다', () {
       const html = '<h1>서비스 이용약관</h1>제1조 목적';
 
-      expect(consentTermPlainText(html), '서비스 이용약관제1조 목적');
+      expect(consentTermPlainText(html), '서비스 이용약관\n제1조 목적');
+    });
+
+    test('제목과 문단이 이어지면 빈 줄로 나눈다', () {
+      const html = '<h1>서비스 이용약관</h1><h2>제1장 총칙</h2><p>제1조 목적</p>';
+
+      expect(
+        consentTermPlainText(html),
+        '서비스 이용약관\n\n제1장 총칙\n\n제1조 목적',
+      );
+    });
+
+    test('목록 항목마다 불릿을 붙여 한 줄씩 나눈다', () {
+      const html = '<p>수집 항목</p><ul><li>이름</li><li>생년월일</li></ul>';
+
+      expect(consentTermPlainText(html), '수집 항목\n\n• 이름\n• 생년월일');
+    });
+
+    test('목록을 여러 줄로 쓴 원문도 항목 사이에 빈 줄을 넣지 않는다', () {
+      // V29 시드처럼 태그를 줄마다 나눠 쓴 원문. </li> 뒤 개행을 함께 먹지 않으면
+      // <li>가 만드는 줄바꿈과 겹쳐 항목마다 빈 줄이 생긴다.
+      const html =
+          '<p>수집 항목</p>\n<ul>\n<li>이름</li>\n<li>생년월일</li>\n</ul>';
+
+      expect(consentTermPlainText(html), '수집 항목\n\n• 이름\n• 생년월일');
+    });
+
+    test('번호 목록도 같은 불릿으로 나눈다', () {
+      // ol의 순번은 상태를 들고 세어야 나오므로 순수 문자열 변환에서는 재현하지
+      // 않는다. 항목이 붙어버리지 않는 것까지만 보장한다.
+      const html = '<ol><li>가</li><li>나</li></ol>';
+
+      expect(consentTermPlainText(html), '• 가\n• 나');
+    });
+
+    test('div로 나뉜 덩어리를 빈 줄로 나눈다', () {
+      const html = '<div>가</div><div>나</div>';
+
+      expect(consentTermPlainText(html), '가\n\n나');
+    });
+
+    test('표의 칸이 서로 붙지 않는다', () {
+      const html =
+          '<table><tr><td>항목</td><td>보관 기간</td></tr>'
+          '<tr><td>이름</td><td>1년</td></tr></table>';
+
+      expect(consentTermPlainText(html), '항목\n\n보관 기간\n\n이름\n\n1년');
+    });
+
+    test('구분선이 맨 텍스트 사이에서도 줄을 나눈다', () {
+      // <p>가</p><hr><p>나</p> 로 쓰면 </p><p> 경계가 이미 빈 줄을 만들어 <hr> 을
+      // 목록에서 빼도 결과가 같다. hr 자체를 판별하려면 맨 텍스트 사이에 끼워야 한다.
+      expect(consentTermPlainText('가<hr>나'), '가\n나');
+      expect(consentTermPlainText('가<hr/>나'), '가\n나');
+    });
+
+    test('목록 항목 안의 인라인 태그는 항목을 쪼개지 않는다', () {
+      const html = '<ul><li><b>강조</b> 항목</li><li>보통 항목</li></ul>';
+
+      expect(consentTermPlainText(html), '• 강조 항목\n• 보통 항목');
+    });
+
+    test('인라인 태그는 줄바꿈을 만들지 않는다', () {
+      // 블록 태그를 줄바꿈으로 바꾸면서 인라인까지 함께 바꾸면 강조가 들어간
+      // 문장이 중간에서 쪼개진다. 과잉 치환 회귀를 막는 단언이다.
+      const html =
+          '<p><strong>중요</strong>한 <em>사항</em>을 <span>확인</span>하고 '
+          '<a href="https://example.com">약관</a>에 <b>동의</b><i>합니다</i></p>';
+
+      expect(consentTermPlainText(html), '중요한 사항을 확인하고 약관에 동의합니다');
+    });
+
+    test('p 여는 태그만 있거나 닫는 태그만 있어도 줄을 바꾼다', () {
+      expect(consentTermPlainText('제0조<p>제1조</p>제2조'), '제0조\n제1조\n제2조');
+      expect(consentTermPlainText('<p>가<p>나'), '가\n나');
+    });
+
+    test('블록 태그가 겹겹이 중첩돼도 빈 줄은 하나까지만 생긴다', () {
+      const html =
+          '<div><section><h1>제목</h1></section></div><div><p>본문</p></div>';
+
+      final text = consentTermPlainText(html);
+
+      expect(text, '제목\n\n본문');
+      expect(text, isNot(contains('\n\n\n')));
+    });
+
+    test('블록 태그와 엔티티가 섞여도 순서대로 처리한다', () {
+      const html = '<h1>제1조 &lt;목적&gt;</h1><ul><li>A&nbsp;&amp;&nbsp;B</li></ul>';
+
+      expect(consentTermPlainText(html), '제1조 <목적>\n\n• A & B');
+    });
+
+    test('이스케이프된 태그 텍스트는 태그로 오인하지 않는다', () {
+      // 엔티티 되돌리기가 태그 제거보다 먼저 오면 &lt;p&gt;가 실제 <p>로 되살아나
+      // 본문에서 사라진다. 순서를 고정하는 단언이다.
+      const html = '<p>&lt;p&gt; 태그는 문단을 뜻해요</p>';
+
+      expect(consentTermPlainText(html), '<p> 태그는 문단을 뜻해요');
+    });
+
+    test('대문자 블록 태그와 속성이 붙은 태그도 처리한다', () {
+      const html = '<DIV CLASS="a">가</DIV><UL><LI>나</LI></UL>';
+
+      expect(consentTermPlainText(html), '가\n\n• 나');
+    });
+
+    test('블록 레벨 태그 목록의 각 태그가 저마다 줄을 바꾼다', () {
+      // 목록에서 태그를 지우거나 이름에 오타를 내면 여기서 바로 잡힌다. 이웃한
+      // 블록 태그가 결과를 가리지 않도록 맨 텍스트 사이에 하나씩만 끼워 확인한다.
+      // 예를 들어 <table><tr><td>로 확인하면 td가 만든 줄바꿈이 table·tr의 부재를
+      // 덮어버려 그 둘을 지워도 통과한다.
+      for (final tag in _blockLevelTags) {
+        expect(
+          consentTermPlainText('앞<$tag>뒤'),
+          '앞\n뒤',
+          reason: '여는 태그 <$tag>가 줄을 바꾸지 않는다',
+        );
+        expect(
+          consentTermPlainText('앞</$tag>뒤'),
+          '앞\n뒤',
+          reason: '닫는 태그 </$tag>가 줄을 바꾸지 않는다',
+        );
+      }
+    });
+
+    test('목록 항목은 여는 쪽이 불릿을, 닫는 쪽이 줄바꿈을 맡는다', () {
+      // li는 블록 태그와 처리가 다르다. 여는 태그는 줄을 바꾸지 않고 불릿만 붙이며,
+      // 항목의 줄바꿈은 닫는 태그가 만든다. 첫 항목의 줄바꿈은 앞선 ul·ol이 만든다.
+      expect(consentTermPlainText('앞<li>뒤'), '앞• 뒤');
+      expect(consentTermPlainText('앞</li>뒤'), '앞\n뒤');
+    });
+
+    test('블록 태그와 접두사가 겹치는 태그는 줄을 바꾸지 않는다', () {
+      // 정규식의 (?=[\s/>]) 룩어헤드를 지우면 <pre>가 p로, <track>이 tr로 잡혀
+      // 문장 중간에서 줄이 끊긴다. 그 안전장치를 고정하는 단언이다.
+      for (final tag in _prefixCollidingTags) {
+        expect(
+          consentTermPlainText('앞<$tag>뒤</$tag>끝'),
+          '앞뒤끝',
+          reason: '<$tag>가 블록 태그로 잘못 잡혀 줄이 끊긴다',
+        );
+      }
     });
 
     test('HTML 엔티티를 원래 문자로 되돌린다', () {
