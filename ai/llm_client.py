@@ -50,6 +50,9 @@ DEFAULT_ACTIVITY_TYPE = "HTP"
 _COMMON = "conversation_common"
 _TONE = "conversation_tone"
 _GUARDRAILS = "guardrails"
+# HTP 주제별 질문 뱅크(S15P11B209-811). 표준 사후질문(PDI)을 아동용으로 포장한 목록이며,
+# 현재 주제 구획 하나만 싣는다. 그림일기는 쓰지 않는다 — PDI는 HTP 전용 프로토콜이다.
+_HTP_BANK = "htp_question_bank"
 
 # 대화 경로가 쓰는 프롬프트 파일 전체의 통합 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
 PROMPT_VERSION = prompts_registry.composite_version(
@@ -58,13 +61,15 @@ PROMPT_VERSION = prompts_registry.composite_version(
     _COMMON,
     _TONE,
     _GUARDRAILS,
+    _HTP_BANK,
 )
 
 
 def prompt_names_for(activity_type: str | None) -> tuple[str, ...]:
     """이 활동 유형이 실제로 쓰는 프롬프트 파일 이름들. 모르는 값은 기본(HTP)으로 둔다."""
     key = activity_type if activity_type in _FIRST_BY_ACTIVITY else DEFAULT_ACTIVITY_TYPE
-    return (_FIRST_BY_ACTIVITY[key], _NEXT_BY_ACTIVITY[key], _COMMON, _TONE, _GUARDRAILS)
+    names = (_FIRST_BY_ACTIVITY[key], _NEXT_BY_ACTIVITY[key], _COMMON, _TONE, _GUARDRAILS)
+    return names + (_HTP_BANK,) if key == "HTP" else names
 
 
 def prompt_version_for(activity_type: str | None) -> str:
@@ -144,25 +149,30 @@ def _load(name: str) -> str:
 # ⚠️ 이 규칙은 원래 question_service._DIFFICULTY_RULES 코드 상수였다. 프롬프트 파일로 옮긴 이유:
 #   ① 아이에게 그대로 들려줄 문구인데 prompts_registry 버전 추적 밖에 있었다,
 #   ② draft 경로(first_question/next_question)에는 아예 안 붙어 연령별 말투가 없었다.
-_TONE_HEADER = re.compile(r"^\[\[([A-Z_]+)\]\]$", re.M)
+_SECTION_HEADER = re.compile(r"^\[\[([A-Z_]+)\]\]$", re.M)
 
 # 알 수 없는 난이도가 오면 저학년 기준으로 둔다(요청은 계약상 검증되지만 방어적으로).
 DEFAULT_DIFFICULTY = "LOWER_ELEMENTARY"
 
 TONE_BLOCK_TITLE = "[연령별 말하기 규칙]"
+BANK_BLOCK_TITLE = "[이 주제에서 궁금해할 것]"
 
 
-@lru_cache(maxsize=1)
-def _tone_sections() -> dict[str, str]:
-    """conversation_tone.txt → {난이도: 규칙 본문}. 머리표 앞의 설명 문단은 버린다."""
-    text = _load(_TONE)
-    headers = list(_TONE_HEADER.finditer(text))
+@lru_cache(maxsize=None)
+def _sections(name: str) -> dict[str, str]:
+    """[[KEY]] 머리표로 나뉜 프롬프트 → {KEY: 본문}. 머리표 앞의 설명 문단은 버린다."""
+    text = _load(name)
+    headers = list(_SECTION_HEADER.finditer(text))
     return {
         match.group(1): text[
             match.end() : (headers[i + 1].start() if i + 1 < len(headers) else len(text))
         ].strip()
         for i, match in enumerate(headers)
     }
+
+
+def _tone_sections() -> dict[str, str]:
+    return _sections(_TONE)
 
 
 def tone_block(difficulty: str | None) -> str:
@@ -172,14 +182,37 @@ def tone_block(difficulty: str | None) -> str:
     return f"{TONE_BLOCK_TITLE}\n{body}"
 
 
-def _assemble(variant: str, *, activity_block: str, difficulty: str | None) -> str:
-    """대화 system 프롬프트 조립 — 변형 → 활동 지시 → 가드레일 → 말투 → 공통 순.
+def question_bank_block(activity_type: str | None, subject: str | None) -> str:
+    """HTP 현재 주제의 질문 뱅크 블록(S15P11B209-811). 해당 없으면 빈 문자열.
+
+    - 그림일기는 싣지 않는다 — PDI는 HTP 전용 프로토콜이다.
+    - 주제를 모르면(구 BE·주제 미전달) 싣지 않는다. 세 주제를 다 실으면 다른 주제로 새는
+      709 계열이 다시 열리므로, 확실할 때만 하나를 싣는다.
+    """
+    if activity_type != "HTP":
+        return ""
+    body = _sections(_HTP_BANK).get(subject or "")
+    return f"{BANK_BLOCK_TITLE}\n{body}" if body else ""
+
+
+def _assemble(
+    variant: str,
+    *,
+    activity_block: str,
+    difficulty: str | None,
+    question_bank: str = "",
+) -> str:
+    """대화 system 프롬프트 조립 — 변형 → 질문 뱅크 → 활동 지시 → 가드레일 → 말투 → 공통.
 
     순서 근거: 변형이 앞(역할·대화 목표·재료 블록)이라 모델이 먼저 '무슨 대화인지'를 잡고,
     공통이 맨 뒤(이름 규칙·출력 형식)라 형식 지시를 놓치지 않는다. 말투는 공통의
     "문장 수·길이는 [연령별 말하기 규칙]이 정한다"가 가리키는 대상이라 바로 앞에 둔다.
+    질문 뱅크는 '무엇을 물을지'(방향)라 '지금 이것만 물어라'(activity_block)보다 앞에 둔다 —
+    뒤에 오는 활동 지시가 뱅크에서 고른 방향을 현재 대상으로 좁히는 순서가 된다.
     """
     parts = [variant]
+    if question_bank:
+        parts.append(question_bank)
     if activity_block:
         parts.append(activity_block)
     parts += [_load(_GUARDRAILS), tone_block(difficulty), _load(_COMMON)]
@@ -240,6 +273,7 @@ def render_first_question_prompt(
     activity_block: str = "",
     activity_type: str | None = None,
     difficulty: str | None = None,
+    drawing_subject: str | None = None,
 ) -> str:
     """첫 질문 system 프롬프트를 렌더링한다(GMS 호출 없음).
 
@@ -248,13 +282,19 @@ def render_first_question_prompt(
     비우고(""), 내부 계약 경로가 activityType·drawingSubject 기반으로 채운다.
     activity_type: HTP | ART_DIARY. 대화 목표가 다른 변형 프롬프트를 고른다(S15P11B209-786).
     difficulty: BE QuestionDifficulty. 연령별 말투 블록을 고른다. None이면 기본 난이도.
+    drawing_subject: HOUSE | TREE | PERSON. HTP 질문 뱅크 구획을 고른다(S15P11B209-811).
     """
     variant = _variant(_FIRST_BY_ACTIVITY, activity_type).format(
         age_band=age_band,
         child_name=child_name or NO_CHILD_NAME,
         drawing_analysis=drawing_analysis or NO_ANALYSIS,
     )
-    return _assemble(variant, activity_block=activity_block, difficulty=difficulty)
+    return _assemble(
+        variant,
+        activity_block=activity_block,
+        difficulty=difficulty,
+        question_bank=question_bank_block(activity_type, drawing_subject),
+    )
 
 
 def first_question(
@@ -264,6 +304,7 @@ def first_question(
     age_band: str = DEFAULT_AGE_BAND,
     activity_type: str | None = None,
     difficulty: str | None = None,
+    drawing_subject: str | None = None,
     temperature: float = 0.7,
 ) -> str:
     """그림 분석 결과를 보고 아이에게 건넬 첫 질문을 만든다.
@@ -288,6 +329,7 @@ def first_question(
         age_band=age_band,
         activity_type=activity_type,
         difficulty=difficulty,
+        drawing_subject=drawing_subject,
     )
     return _ask(system, FIRST_QUESTION_TRIGGER, temperature=temperature)
 
@@ -302,6 +344,7 @@ def render_next_question_prompt(
     activity_block: str = "",
     activity_type: str | None = None,
     difficulty: str | None = None,
+    drawing_subject: str | None = None,
 ) -> str:
     """다음 질문 system 프롬프트를 렌더링한다(GMS 호출 없음).
 
@@ -309,6 +352,7 @@ def render_next_question_prompt(
     activity_block: HTP 주제·반복 금지 지시 블록(S15P11B209-713). draft 경로는 비운다.
     activity_type: HTP | ART_DIARY. 대화 목표가 다른 변형 프롬프트를 고른다(S15P11B209-786).
     difficulty: BE QuestionDifficulty. 연령별 말투 블록을 고른다. None이면 기본 난이도.
+    drawing_subject: HOUSE | TREE | PERSON. HTP 질문 뱅크 구획을 고른다(S15P11B209-811).
     """
     variant = _variant(_NEXT_BY_ACTIVITY, activity_type).format(
         age_band=age_band,
@@ -317,7 +361,12 @@ def render_next_question_prompt(
         history=_format_history(history),
         child_utterance=child_utterance,
     )
-    return _assemble(variant, activity_block=activity_block, difficulty=difficulty)
+    return _assemble(
+        variant,
+        activity_block=activity_block,
+        difficulty=difficulty,
+        question_bank=question_bank_block(activity_type, drawing_subject),
+    )
 
 
 def next_question(
@@ -329,6 +378,7 @@ def next_question(
     age_band: str = DEFAULT_AGE_BAND,
     activity_type: str | None = None,
     difficulty: str | None = None,
+    drawing_subject: str | None = None,
     temperature: float = 0.6,
 ) -> str:
     """아이가 방금 한 말에 반응하고 다음 질문을 이어간다.
@@ -357,6 +407,7 @@ def next_question(
         age_band=age_band,
         activity_type=activity_type,
         difficulty=difficulty,
+        drawing_subject=drawing_subject,
     )
     return _ask(system, NEXT_QUESTION_TRIGGER, temperature=temperature)
 

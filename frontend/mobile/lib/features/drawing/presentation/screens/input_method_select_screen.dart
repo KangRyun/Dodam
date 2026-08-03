@@ -1521,6 +1521,7 @@ final class _PhotoPermissionIssue {
   String get message {
     final target = kind == PhotoPermissionKind.camera ? '카메라' : '사진';
     return switch (status) {
+      PhotoPermissionStatus.granted => '$target에 접근하지 못했어요. 다시 시도해 주세요.',
       PhotoPermissionStatus.denied => '$target 권한이 필요해요. 다시 선택해 권한을 허용해 주세요.',
       PhotoPermissionStatus.permanentlyDenied => '기기 설정에서 $target 권한을 허용해 주세요.',
       PhotoPermissionStatus.restricted =>

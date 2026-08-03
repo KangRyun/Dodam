@@ -3164,10 +3164,17 @@ final class _FakePhotoPermissionService implements PhotoPermissionService {
   final Completer<bool>? openSettingsCompleter;
   int openSettingsCalls = 0;
   int statusCalls = 0;
+  int requestCalls = 0;
 
   @override
   Future<PhotoPermissionStatus> status(PhotoPermissionKind kind) async {
     statusCalls += 1;
+    return permissionStatus;
+  }
+
+  @override
+  Future<PhotoPermissionStatus> request(PhotoPermissionKind kind) async {
+    requestCalls += 1;
     return permissionStatus;
   }
 
