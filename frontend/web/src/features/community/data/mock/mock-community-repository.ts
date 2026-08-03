@@ -65,6 +65,16 @@ export class MockCommunityRepository implements CommunityRepository {
     };
   }
 
+  async getMyPosts(): Promise<CommunityFeed> {
+    const feed = await this.getFeed();
+    return { ...feed, posts: feed.posts.filter((post) => post.editableByMe) };
+  }
+
+  async getLikedPosts(): Promise<CommunityFeed> {
+    const feed = await this.getFeed();
+    return { ...feed, posts: feed.posts.filter((post) => post.isLiked) };
+  }
+
   async getPost(postId: number): Promise<CommunityPost | null> {
     await this.wait();
     const post = mockCommunityFeed.posts.find((item) => item.id === postId);

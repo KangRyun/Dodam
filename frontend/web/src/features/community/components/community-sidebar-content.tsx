@@ -1,6 +1,7 @@
 import type {
   CommunityProfile,
 } from "@/features/community/domain/community-models";
+import Link from "next/link";
 
 const providerLabels: Record<CommunityProfile["connectedProvider"], string> = {
   KAKAO: "카카오 연결",
@@ -31,9 +32,9 @@ export function CommunitySidebarContent({
           </div>
         </div>
         <div className="community-profile-menu" aria-label="내 커뮤니티 메뉴">
-          <div><span>📝 내가 쓴 글</span><span>›</span></div>
-          <div><span>♥ 좋아요 한 글</span><span>›</span></div>
-          <div><span>⚙ 설정</span><span>›</span></div>
+          <Link href="/community/my-posts"><span>📝 내가 쓴 글</span><span>›</span></Link>
+          <Link href="/community/liked-posts"><span>♥ 좋아요 한 글</span><span>›</span></Link>
+          <Link href="/community/settings"><span>⚙ 설정</span><span>›</span></Link>
         </div>
       </section>
 

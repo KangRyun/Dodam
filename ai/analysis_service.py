@@ -535,14 +535,22 @@ def analyze(req: contracts.AnalysisRequest, request_id: str = "") -> contracts.A
     unused.extend(conversation_unused)
     warnings.extend(conversation_warnings)
 
-    # 관찰 서술: 프롬프트(ai/prompts/drawing_description.txt)가 진단형 표현을 막는 1차 방어선.
+    # 관찰 서술: 프롬프트(ai/prompts/drawing_description_<활동>.txt)가 진단형 표현을 막는 1차 방어선.
+    # activity_type을 넘겨 활동에 맞는 서술 프롬프트를 고르게 한다 — HTP는 탐지 목록에 고정,
+    # 그림일기는 탐지를 힌트로만 쓴다(sketch 가중치 미탐지가 잦아 목록 고정이 서술을 죽인다).
+    # ⚠️ 이 서술은 BE에 overall_summary로 저장돼 두 곳으로 다시 흘러간다:
+    #    질문 프롬프트의 {drawing_analysis}(704)와 리포트의 RAG 검색 질의(614,
+    #    report_client._build_rag_query). 서술 문구를 바꾸면 그 둘의 품질이 함께 움직인다.
     # ⚠️ 주석 이미지는 억제 '전' 박스로 그려져 있다(yolo_client가 탐지와 함께 만든 것).
     #    탐지 목록은 억제 후를 넘기므로 텍스트 근거는 정확하지만, 이미지에는 억제된 박스가
     #    남아 서술에 섞일 수 있다 — CROSS_SUBJECT_PARTS_SUPPRESSED 경고로 드러낸다.
     #    억제 후 재렌더링은 추론을 한 번 더 돌려야 해서 후속 과제로 둔다.
     try:
         description = vlm_client.describe(
-            annotated_png, detections, display_name_of=labels.display_name_of
+            annotated_png,
+            detections,
+            display_name_of=labels.display_name_of,
+            activity_type=req.activity_type,
         )
     except RuntimeError as e:
         logger.error(

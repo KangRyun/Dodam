@@ -153,6 +153,7 @@ class S3ImageStorageTest {
         "images",
         "audio",
         "tts-cache",
+        "credentials",
         true);
   }
 

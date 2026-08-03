@@ -137,6 +137,13 @@ void main() {
 
     expect(find.text('집·나무·사람 그림'), findsOneWidget);
     expect(find.text('어떤 활동을 해볼까요?'), findsNothing);
+    expect(find.byKey(const ValueKey('input-method-photo')), findsNothing);
+    expect(find.byKey(const ValueKey('input-method-camera')), findsNothing);
+    expect(find.byKey(const ValueKey('input-method-gallery')), findsNothing);
+    expect(drawingRepository.htpStartCalls, 0);
+    expect(drawingRepository.createCalls, 0);
+    expect(drawingRepository.uploadCalls, 0);
+    expect(drawingRepository.completeSessionId, isNull);
     await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('draw-entry')), findsOneWidget);
@@ -144,6 +151,34 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
+  });
+
+  testWidgets('보호자 HTP는 flag가 켜져 있으면 사진 CTA와 촬영 안내를 연다', (tester) async {
+    final drawingRepository = _TrackingDrawingRepository();
+    await _pumpActivitySelect(
+      tester,
+      drawingRepository,
+      htpPhotoUploadEnabled: true,
+    );
+
+    await _pumpUntil(tester, find.byKey(const ValueKey('input-method-photo')));
+    expect(find.byKey(const ValueKey('input-method-photo')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('input-method-photo')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('input-method-camera')), findsOneWidget);
+    expect(find.byKey(const ValueKey('input-method-gallery')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('input-method-camera')));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('camera-guidance-capture')),
+      findsOneWidget,
+    );
+    expect(drawingRepository.htpStartCalls, 0);
+    expect(drawingRepository.createCalls, 0);
+    expect(drawingRepository.uploadCalls, 0);
+    expect(drawingRepository.completeSessionId, isNull);
   });
 
   testWidgets('활성 그림 세션이 있으면 새로 만들지 않고 기존 sessionId로 재개한다', (tester) async {
@@ -286,8 +321,7 @@ void main() {
     // 입력 방식 카드를 연속으로 두 번 눌러도 세션은 한 번만 생성된다.
     final canvasChoice = find.byKey(const ValueKey('input-method-canvas'));
     await tester.tap(canvasChoice);
-    await tester.pump();
-    await tester.tap(canvasChoice, warnIfMissed: false);
+    await tester.tap(canvasChoice);
     await tester.pump();
 
     expect(drawingRepository.htpStartCalls, 1);
@@ -336,22 +370,14 @@ void main() {
     final controller = GuardianChildController(repository);
     addTearDown(controller.dispose);
 
-    expect(
-      controller.confirmedChildCount,
-      isNull,
-      reason: '조회 전에는 확정된 수가 없다',
-    );
+    expect(controller.confirmedChildCount, isNull, reason: '조회 전에는 확정된 수가 없다');
 
     await controller.loadChildren();
     expect(controller.confirmedChildCount, _children.length);
 
     repository.children = const [];
     await controller.loadChildren();
-    expect(
-      controller.confirmedChildCount,
-      0,
-      reason: '실제로 0건임을 확인한 경우에만 0이다',
-    );
+    expect(controller.confirmedChildCount, 0, reason: '실제로 0건임을 확인한 경우에만 0이다');
 
     repository.error = StateError('offline');
     await controller.loadChildren();
@@ -379,11 +405,13 @@ Future<void> _pumpActivitySelect(
   WidgetTester tester,
   DrawingRepository drawingRepository, {
   Key childKey = const ValueKey('child-3'),
+  bool htpPhotoUploadEnabled = false,
 }) async {
   await tester.pumpWidget(
     DodamApp(
       childRepository: _FakeChildRepository(children: _children),
       drawingRepository: drawingRepository,
+      htpPhotoUploadEnabled: htpPhotoUploadEnabled,
     ),
   );
   await tester.pumpAndSettle();
@@ -532,6 +560,7 @@ final class _TrackingDrawingRepository
   final Completer<HtpAssessmentDto>? pending;
   int createCalls = 0;
   int htpStartCalls = 0;
+  int uploadCalls = 0;
   int? getTypesChildId;
   int? completeSessionId;
   int? reflectionSessionId;
@@ -779,5 +808,8 @@ final class _TrackingDrawingRepository
     BinaryUploadDto image, {
     required UploadDrawingImageMetadataDto metadata,
     required String idempotencyKey,
-  }) => throw UnimplementedError();
+  }) {
+    uploadCalls += 1;
+    throw StateError('이 테스트에서는 사진 업로드를 호출하면 안 된다.');
+  }
 }

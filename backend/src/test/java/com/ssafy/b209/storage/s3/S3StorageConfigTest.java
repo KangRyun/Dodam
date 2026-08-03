@@ -6,6 +6,7 @@ import com.ssafy.b209.global.config.TimeConfig;
 import com.ssafy.b209.storage.audio.AudioStorage;
 import com.ssafy.b209.storage.audio.AudioStorageConfig;
 import com.ssafy.b209.storage.audio.LocalAudioStorage;
+import com.ssafy.b209.storage.credential.CredentialFileStorage;
 import com.ssafy.b209.storage.image.ImageStorage;
 import com.ssafy.b209.storage.image.ImageStorageConfig;
 import com.ssafy.b209.storage.image.LocalImageStorage;
@@ -52,6 +53,8 @@ class S3StorageConfigTest {
               assertThat(context).hasSingleBean(S3Client.class);
               assertThat(context.getBean(ImageStorage.class)).isInstanceOf(S3ImageStorage.class);
               assertThat(context.getBean(AudioStorage.class)).isInstanceOf(S3AudioStorage.class);
+              assertThat(context.getBean(CredentialFileStorage.class))
+                  .isInstanceOf(S3CredentialFileStorage.class);
             });
   }
 

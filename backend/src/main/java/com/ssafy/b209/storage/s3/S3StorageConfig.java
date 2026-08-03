@@ -5,6 +5,8 @@ import com.ssafy.b209.storage.audio.AudioStorageProperties;
 import com.ssafy.b209.storage.audio.LocalAudioStorage;
 import com.ssafy.b209.storage.audio.StorageDelegatingStoredAudioReader;
 import com.ssafy.b209.storage.audio.StoredAudioReader;
+import com.ssafy.b209.storage.credential.CredentialFileStorage;
+import com.ssafy.b209.storage.credential.CredentialFileStorageProperties;
 import com.ssafy.b209.storage.image.ImageStorage;
 import com.ssafy.b209.storage.image.ImageStorageProperties;
 import com.ssafy.b209.storage.image.LocalImageStorage;
@@ -27,7 +29,8 @@ import software.amazon.awssdk.services.s3.S3Configuration;
 @EnableConfigurationProperties({
   S3StorageProperties.class,
   ImageStorageProperties.class,
-  AudioStorageProperties.class
+  AudioStorageProperties.class,
+  CredentialFileStorageProperties.class
 })
 public class S3StorageConfig {
 
@@ -132,5 +135,23 @@ public class S3StorageConfig {
   @Bean
   public StoredAudioReader storedAudioReader(AudioStorage audioStorage) {
     return new StorageDelegatingStoredAudioReader(audioStorage);
+  }
+
+  /**
+   * PDF와 이미지 자격 증빙을 MinIO의 분리된 Prefix에 저장한다.
+   *
+   * @param s3Client S3 호환 API Client
+   * @param s3Properties Bucket과 자격 증빙 Prefix 설정
+   * @param fileProperties 로컬 staging 경로와 10MiB 제한
+   * @param clock 날짜 기반 상대 Key 생성 시계
+   * @return 자격 증빙 전용 S3 Storage
+   */
+  @Bean
+  public CredentialFileStorage credentialFileStorage(
+      S3Client s3Client,
+      S3StorageProperties s3Properties,
+      CredentialFileStorageProperties fileProperties,
+      Clock clock) {
+    return new S3CredentialFileStorage(s3Client, s3Properties, fileProperties, clock);
   }
 }

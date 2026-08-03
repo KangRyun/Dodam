@@ -111,14 +111,11 @@ class BuildMessagesTest(unittest.TestCase):
         self.assertIn(llm_client.NO_ANALYSIS, system)
 
     def test_difficulty_rules_block_is_appended(self):
+        """난이도 말투는 ai/prompts/conversation_tone.txt가 소유한다(S15P11B209-786)."""
         system = question_service._build_messages(_request(difficulty="PRESCHOOL"))[0][
             "content"
         ]
-        self.assertIn("[연령별 말하기 규칙]", system)
-        rule = question_service._DIFFICULTY_RULES["PRESCHOOL"]
-        self.assertIn(rule["length"], system)
-        self.assertIn(rule["vocabulary"], system)
-        self.assertIn(rule["tone"], system)
+        self.assertIn(llm_client.tone_block("PRESCHOOL"), system)
 
     # ── 그림 서술(VLM) 전달 — S15P11B209-704 ──────────────────────────────
     def test_drawing_description_reaches_the_prompt(self):
@@ -182,23 +179,35 @@ class BuildMessagesTest(unittest.TestCase):
         self.assertNotIn("검은 하늘", line)
         self.assertIn("서술있음", line)
 
-    def test_each_difficulty_injects_its_own_rules(self):
-        for difficulty, rule in question_service._DIFFICULTY_RULES.items():
+    def test_each_difficulty_injects_only_its_own_rules(self):
+        """요청 난이도의 구획 하나만 실린다 — 다른 연령 규칙이 섞이면 길이가 흔들린다."""
+        sections = llm_client._tone_sections()
+        for difficulty in sections:
             with self.subTest(difficulty=difficulty):
                 system = question_service._build_messages(_request(difficulty=difficulty))[
                     0
                 ]["content"]
-                self.assertIn(rule["length"], system)
-                self.assertIn(rule["tone"], system)
+                self.assertIn(llm_client.tone_block(difficulty), system)
+                for other in sections:
+                    if other != difficulty:
+                        self.assertNotIn(sections[other], system)
 
-    def test_unknown_difficulty_falls_back_to_lower_elementary(self):
-        # 계약상 검증되지만 방어적으로 — 알 수 없는 값이면 저학년 규칙을 쓴다.
-        # _difficulty_guidance는 .difficulty만 읽으므로 가짜 객체로 경계 조건을 검증한다.
-        fake = types.SimpleNamespace(difficulty="UNKNOWN_LEVEL")
-        guidance = question_service._difficulty_guidance(fake)
-        self.assertIn(
-            question_service._DIFFICULTY_RULES["LOWER_ELEMENTARY"]["length"], guidance
-        )
+    # ── 활동 유형별 대화 프롬프트 (S15P11B209-786) ────────────────────────
+    def test_activity_type_selects_the_conversation_variant(self):
+        htp = question_service._build_messages(
+            _request(activity_type="HTP", drawing_subject="HOUSE")
+        )[0]["content"]
+        diary = question_service._build_messages(
+            _request(activity_type="ART_DIARY", drawing_subject=None)
+        )[0]["content"]
+        self.assertIn("그림 자체가 궁금해", htp)
+        self.assertNotIn("그림 자체가 궁금해", diary)
+        self.assertIn("그림 속 그 일과 그때 아이의 마음", diary)
+
+    def test_missing_activity_type_keeps_htp_behaviour(self):
+        """구 BE는 activityType을 안 보낸다 — 기존 동작(HTP)이 유지돼야 한다."""
+        system = question_service._build_messages(_request())[0]["content"]
+        self.assertIn("그림 자체가 궁금해", system)
 
     def test_internal_contract_has_no_child_name(self):
         # 개인정보 최소화 — 이름 슬롯은 항상 "너"(대체 문구)로 채워진다.
@@ -227,8 +236,8 @@ class GenerateTest(unittest.TestCase):
         self.assertEqual(resp.question_text, "이 집은 어떤 집이야?")
         # 첫 질문(아이 발화 없음) + 탐지 객체 있음 → OBJECT_DESCRIPTION
         self.assertEqual(resp.question_purpose, "OBJECT_DESCRIPTION")
-        # placeholder 버전이 아니라 실제 프롬프트 버전을 쓴다.
-        self.assertEqual(resp.prompt_version, llm_client.PROMPT_VERSION)
+        # placeholder 버전이 아니라 '이번에 쓴' 활동 변형의 프롬프트 버전을 쓴다(786).
+        self.assertEqual(resp.prompt_version, llm_client.prompt_version_for(None))
         self.assertNotEqual(resp.prompt_version, "placeholder-0")
         self.assertEqual(resp.safety_result.status, "PASSED")
         # 프롬프트에 탐지 객체 문맥이 실렸는지

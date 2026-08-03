@@ -12,9 +12,14 @@ import '../../domain/repositories/auth_repository.dart';
 import '../../domain/repositories/auth_session_store.dart';
 import '../mock/mock_auth_scenario.dart';
 import '../storage/in_memory_auth_session_store.dart';
+import '../../../settings/domain/repositories/guardian_profile_repository.dart';
 
 class AuthRepositoryImpl
-    implements AuthRepository, AccessTokenProvider, TokenRefresher {
+    implements
+        AuthRepository,
+        AccessTokenProvider,
+        TokenRefresher,
+        GuardianProfileRepository {
   AuthRepositoryImpl({
     this.scenario = MockAuthScenario.existingGuardian,
     this.providerScenarios = const {},
@@ -180,6 +185,38 @@ class AuthRepositoryImpl
     final session = await _sessionStore.read();
     _currentSession = session;
     return session;
+  }
+
+  @override
+  Future<AuthenticatedUser> getCurrentUserProfile() async {
+    await Future<void>.delayed(responseDelay);
+    final session = _currentSession ?? await _sessionStore.read();
+    if (session == null) {
+      throw const AuthFailure(
+        type: AuthFailureType.tokenExpired,
+        code: 'AUTH_SESSION_REQUIRED',
+        message: '로그인 정보를 확인할 수 없어요. 다시 로그인해 주세요.',
+      );
+    }
+    return session.user;
+  }
+
+  @override
+  Future<AuthenticatedUser> updateCurrentUserProfile({
+    required String nickname,
+  }) async {
+    await Future<void>.delayed(responseDelay);
+    final session = _currentSession ?? await _sessionStore.read();
+    if (session == null) {
+      throw const AuthFailure(
+        type: AuthFailureType.tokenExpired,
+        code: 'AUTH_SESSION_REQUIRED',
+        message: '로그인 정보를 확인할 수 없어요. 다시 로그인해 주세요.',
+      );
+    }
+    final user = session.user.copyWith(nickname: nickname.trim());
+    await _saveSession(session.copyWith(user: user));
+    return user;
   }
 
   @override

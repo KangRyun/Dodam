@@ -15,6 +15,11 @@ BE 계약(report.dto.ObservationGenerationRequest → ObservationGenerationResul
 - RAG 근거(S15P11B209-614): 배포된 인덱스에서 관찰 어휘·일반 지식을 검색해 프롬프트 보조
   근거로 싣고, 출처(ragReferences)와 KB Version을 응답에 기록한다. 검색 실패는 차단이
   아니라 기능 저하 — RAG 없이 생성한다(정책: docs/ai/rag-corpus-policy.md).
+  ⚠️ RAG는 HTP 리포트에서만 검색한다. 그림일기 프롬프트는 [전문 자료 근거]를 근거 목록에
+  두지 않으므로 검색해도 쓰이지 않는다 — RAG_NOT_APPLICABLE로 표시하고 건너뛴다.
+
+프롬프트 구성: 활동 변형(report_htp | report_diary) + 공통(report_common)을 이어붙인다.
+활동 판별은 subject_summaries[].drawing_subject 유무로 추론한다(계약에 activityType 없음).
 """
 
 from __future__ import annotations
@@ -36,8 +41,28 @@ from rag import knowledge_base_version as rag_knowledge_base_version
 
 logger = logging.getLogger(__name__)
 
-# 리포트 프롬프트 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
-PROMPT_VERSION = prompts_registry.version("report")
+# ── 활동 유형별 리포트 프롬프트 ─────────────────────────────────
+# 하나의 report.txt로 두 활동을 처리하던 것을 갈랐다. 근거 블록 구성이 다르기 때문이다:
+#   - HTP: 주제별 [집 그림 관찰]·[집 그림 문답] … + [전문 자료 근거](RAG)
+#   - 그림일기: 단일 [그림 관찰](740) 또는 [그림 관찰 서술](레거시 draft 인자). RAG 없음.
+# 구 report.txt는 근거 화이트리스트가 "[그림 관찰 서술]·[형식적 분석]·[활동 데이터]만"이라
+# 실제로 주입되는 주제별 블록·RAG 블록이 목록에서 빠져 있었다 — 뒤쪽 상세 설명과 정면 모순이라
+# 모델이 화이트리스트를 곧이곧대로 읽으면 RAG 근거와 그림 내용을 통째로 버린다.
+# 공통 규칙·JSON 스키마는 report_common이 소유하고, 변형 파일 뒤에 이어붙인다
+# (JSON 중괄호 때문에 str.format 을 쓸 수 없어 문자열 연결로 조립한다).
+_REPORT_COMMON = "report_common"
+_REPORT_HTP = "report_htp"
+_REPORT_DIARY = "report_diary"
+
+# 두 변형과 공통부를 함께 담은 통합 버전 — 어떤 파일 조합으로 생성됐는지 한 문자열로 남긴다.
+PROMPT_VERSION = prompts_registry.composite_version(
+    _REPORT_COMMON, _REPORT_HTP, _REPORT_DIARY
+)
+
+# 그림일기에는 RAG 근거를 싣지 않는다(결정: HTP 전용). 코퍼스는 활동유형 중립이지만,
+# 전문 자료 인용이 필요한 쪽은 '검사처럼 읽히기 쉬운' HTP 리포트다 — 거기서만 관찰 어휘를
+# 보조받고, 가벼운 그림일기 리포트는 활동 데이터만으로 담백하게 쓴다.
+RAG_NOT_APPLICABLE = "RAG_NOT_APPLICABLE"
 
 # 안전 문구는 LLM이 빠뜨리거나 바꾸면 안 되는 필수 고지 — 서버가 상수로 보장한다.
 # (BE MockAiObservationClient와 동일 문구를 써서 두 구현의 고지가 일관되게.)
@@ -83,15 +108,36 @@ def _load(name: str) -> str:
     return prompts_registry.load(name)
 
 
-def _system_prompt() -> str:
-    """리포트 지침 system 프롬프트.
+def _is_htp(req: contracts.ObservationGenerationRequest) -> bool:
+    """이 요청이 HTP 활동인지 판별한다.
+
+    계약(ObservationGenerationRequest)에 activityType 필드가 없어 subject_summaries로 추론한다 —
+    HTP는 drawingSubject가 반드시 채워지고(AnalysisRequest·QuestionRequest와 같은 검증 규칙),
+    그림일기는 None, 구 BE(subject_summaries 미전달)는 빈 목록이다. 뒤의 둘은 모두
+    '단일 그림 + RAG 없음' 경로라 그림일기 프롬프트가 그대로 맞는다.
+    """
+    return any(s.drawing_subject is not None for s in req.subject_summaries)
+
+
+def _prompt_names(is_htp: bool) -> tuple[str, str]:
+    """이번 생성이 쓰는 (변형 프롬프트, 공통 프롬프트) 이름."""
+    return (_REPORT_HTP if is_htp else _REPORT_DIARY), _REPORT_COMMON
+
+
+def _system_prompt(is_htp: bool) -> str:
+    """리포트 지침 system 프롬프트 — 활동 변형 + 공통 규칙을 이어붙인다.
+
+    변형이 앞(역할·근거 화이트리스트·블록 사용법), 공통이 뒤(사실/해석 분리·작성 규칙·
+    출력 JSON 스키마)다. 출력 형식을 맨 끝에 두어야 모델이 형식을 놓치지 않는다.
 
     ⚠️ 공용 guardrails.txt(대화용)는 append 하지 않는다 — 그 파일은 "정서를 진단·해석하지 마"를
     전제로 한 대화 응답용이라, 리포트의 '요소별 감정 해석' 지침과 충돌한다. 리포트의 안전 기준
-    (장애명·진단명·점수·낙인 금지, 과도한 부정 금지, 걱정 신호는 attentionPoints로만)은 report.txt가
-    자체적으로 담는다. JSON 스키마 중괄호 때문에 str.format 을 쓰지 않고 문자열을 그대로 쓴다.
+    (장애명·진단명·점수·낙인 금지, 과도한 부정 금지, 걱정 신호는 attentionPoints로만)은
+    report_common.txt가 자체적으로 담는다.
+    JSON 스키마 중괄호 때문에 str.format 을 쓰지 않고 문자열을 그대로 이어붙인다.
     """
-    return _load("report")
+    variant, common = _prompt_names(is_htp)
+    return f"{_load(variant)}\n\n{_load(common)}"
 
 
 def _emotion_source(req: contracts.ObservationGenerationRequest) -> str:
@@ -155,7 +201,7 @@ def _format_subject_blocks(req: contracts.ObservationGenerationRequest) -> str:
     """주제별 [OO 관찰]·[OO 문답] 블록 (S15P11B209-740).
 
     HTP는 집·나무·사람 각 그림의 VLM 서술과 그 그림에서 나눈 문답이 블록으로 실린다.
-    문답의 아이 답변은 '관찰된 사실' 근거로만 쓰이도록 프롬프트(report.txt)가 강제한다.
+    문답의 아이 답변은 '관찰된 사실' 근거로만 쓰이도록 활동별 프롬프트가 강제한다.
     탐지 요소 코드는 서술 검증 참고용 — 리포트 문장에 코드 원문 노출 금지(프롬프트 규칙).
     """
     parts: list[str] = []
@@ -230,6 +276,11 @@ def _build_rag_query(
 ) -> str:
     """검색 질의 텍스트 — 관찰 서술·탐지 객체·선택 감정로만 만든다.
 
+    ⚠️ 질의의 본문은 VLM 관찰 서술 원문이다 — 서술 프롬프트(ai/prompts/drawing_description_*.txt)를
+    고치면 이 질의가 바뀌고, 따라서 검색되는 청크와 RAG_SCORE_THRESHOLD 통과 여부도 바뀐다.
+    서술이 색·크기·위치 같은 구체적 관찰 어휘를 담을수록 코퍼스(관찰 어휘·발달 일반 지식)와
+    가까워진다. 서술을 한 문장으로 줄이는 변경은 질의를 죽여 RAG_LOW_SCORE를 상시화한다.
+
     ⚠️ 아이 발화(qaPairs.answerText·대표 발화·표현 감정 문구)는 넣지 않는다(정책 §1-1) —
     질의는 GMS로 나가는 표면이라 아동 개인 표현의 유출면을 늘리지 않는다.
     선택 감정은 고정 코드(HAPPY 등)라 개인 표현이 아니다.
@@ -254,8 +305,9 @@ def _build_rag_query(
 
 
 # RAG 검색 결과 카운터 (S15P11B209-615). outcome: used | no_index | unavailable |
-#   low_score | no_query. "성공/실패/저점수 비율"을 운영에서 볼 수 있게 한다 —
+#   low_score | no_query | not_applicable. "성공/실패/저점수 비율"을 운영에서 볼 수 있게 한다 —
 #   저점수 비율이 높으면 코퍼스가 얇거나 임계값(RAG_SCORE_THRESHOLD)이 높은 것.
+#   not_applicable은 그림일기라 검색을 아예 시도하지 않은 경우 — 장애가 아니라 정책이다.
 _RAG_SEARCH_COUNTER = PrometheusCounter(
     "dodam_rag_search_total",
     "관찰 리포트 RAG 검색 결과 (outcome별 누적)",
@@ -374,14 +426,18 @@ def _feature(item: dict) -> contracts.ObservedFeatureDraft:
     )
 
 
-def _generation_version() -> str:
+def _generation_version(is_htp: bool) -> str:
     """리포트 재현성 버전 태그 — 프롬프트·파이프라인 버전을 함께 기록한다(S15P11B209-602).
 
     ObservationGenerationResult 계약엔 prompt/pipeline 전용 필드가 없어(BE 소유), model_version
     문자열에 둘을 함께 실어 재현·재분석에 필요한 버전을 모두 남긴다(모델 ID는 model_name).
-    형식: "pipeline=<파이프라인>;prompt=<리포트 프롬프트 버전>". 전용 필드 분리는 BE 계약 확장 후속.
+    형식: "pipeline=<파이프라인>;prompt=<이번에 쓴 프롬프트 조합 버전>".
+
+    프롬프트가 활동별로 갈린 뒤로는 '이번 생성이 실제로 쓴' 조합만 싣는다 — 두 변형을 모두
+    적으면 어느 쪽으로 뽑힌 결과인지 사후에 구분할 수 없다. 전용 필드 분리는 BE 계약 확장 후속.
     """
-    return f"pipeline={config.PIPELINE_VERSION};prompt={PROMPT_VERSION}"
+    prompt = prompts_registry.composite_version(*_prompt_names(is_htp))
+    return f"pipeline={config.PIPELINE_VERSION};prompt={prompt}"
 
 
 def _safe_follow_up(raw) -> str:
@@ -407,12 +463,15 @@ def _assemble(
     model: str,
     rag_chunks: list[Chunk] | None = None,
     rag_skipped_reason: str | None = None,
+    is_htp: bool | None = None,
 ) -> contracts.ObservationGenerationResult:
     """LLM 정성 결과(data) + 서버 고정 필드를 합쳐 계약 결과를 만든다.
 
     rag_chunks(614)가 있으면 출처 목록과 KB Version을 함께 싣는다 — 출처 표시는
     라이선스 의무이자 리포트 재현성 재료(어떤 지식 근거로 생성됐나).
     """
+    if is_htp is None:
+        is_htp = _is_htp(req)
     conv = data.get("conversationSummary") or {}
     features = [_feature(f) for f in data.get("features", []) if isinstance(f, dict)]
 
@@ -457,7 +516,7 @@ def _assemble(
         request_id=req.request_id,
         # 재현성(S15P11B209-602): model_name=실제 서빙 모델, model_version=프롬프트+파이프라인 버전.
         model_name=model,
-        model_version=_generation_version(),
+        model_version=_generation_version(is_htp),
         confidence=None,  # LLM 서술엔 보정된 신뢰도가 없다 — 지어내지 않고 None.
         observation_draft=observation,
         conversation_summary=conversation_summary,
@@ -512,11 +571,17 @@ def generate(
         RuntimeError: GMS 호출 실패 또는 응답 JSON 파싱 실패 시(내용은 감추고 유형만 로그).
     """
     used_model = model or config.LLM_MODEL
-    # RAG 근거 검색(614) — 실패해도 리포트는 생성한다(기능 저하, 차단 아님).
-    # 근거를 싣지 못한 사유(615)는 응답·메트릭으로만 남긴다.
-    rag_chunks, rag_skipped_reason = _search_rag(req, drawing_description)
+    is_htp = _is_htp(req)
+    # RAG 근거 검색(614)은 HTP 리포트에서만 한다 — 그림일기 프롬프트는 [전문 자료 근거]를
+    # 근거 목록에 두지 않으므로, 검색해 봐야 프롬프트가 쓰지 않는 블록에 비용만 쓴다.
+    # 실패해도 리포트는 생성한다(기능 저하, 차단 아님). 사유(615)는 응답·메트릭으로만 남긴다.
+    if is_htp:
+        rag_chunks, rag_skipped_reason = _search_rag(req, drawing_description)
+    else:
+        _RAG_SEARCH_COUNTER.labels(outcome="not_applicable").inc()
+        rag_chunks, rag_skipped_reason = [], RAG_NOT_APPLICABLE
     messages = [
-        {"role": "system", "content": _system_prompt()},
+        {"role": "system", "content": _system_prompt(is_htp)},
         {
             "role": "user",
             "content": _format_activity(req, drawing_description, behavior, rag_chunks),
@@ -537,7 +602,7 @@ def generate(
     data = _extract_json(resp.choices[0].message.content or "")
     # 재현성: GMS가 실제 서빙한 모델 ID를 기록한다(예: gpt-4o-mini-2024-07-18). 없으면 요청 모델명.
     served_model = getattr(resp, "model", "") or used_model
-    return _assemble(req, data, served_model, rag_chunks, rag_skipped_reason)
+    return _assemble(req, data, served_model, rag_chunks, rag_skipped_reason, is_htp)
 
 
 if __name__ == "__main__":

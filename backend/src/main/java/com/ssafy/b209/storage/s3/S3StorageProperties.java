@@ -18,6 +18,7 @@ import org.springframework.boot.context.properties.bind.DefaultValue;
  * @param imagePrefix 그림 객체 Prefix
  * @param audioPrefix 아동 음성 원본 객체 Prefix
  * @param ttsPrefix 재생성 가능한 TTS 캐시 객체 Prefix
+ * @param credentialPrefix 전문가 자격 증빙 객체 Prefix
  * @param pathStyleAccessEnabled MinIO 호환 Path-style 접근 사용 여부
  */
 @ConfigurationProperties(prefix = "app.storage.s3")
@@ -30,6 +31,7 @@ public record S3StorageProperties(
     @DefaultValue("images") String imagePrefix,
     @DefaultValue("audio") String audioPrefix,
     @DefaultValue("tts-cache") String ttsPrefix,
+    @DefaultValue("credentials") String credentialPrefix,
     @DefaultValue("true") boolean pathStyleAccessEnabled) {
 
   /** S3 Client가 안전하게 사용할 수 있도록 설정값을 검증하고 Prefix를 정규화한다. */
@@ -48,6 +50,7 @@ public record S3StorageProperties(
     imagePrefix = normalizePrefix(imagePrefix, "S3 image prefix");
     audioPrefix = normalizePrefix(audioPrefix, "S3 audio prefix");
     ttsPrefix = normalizePrefix(ttsPrefix, "S3 TTS prefix");
+    credentialPrefix = normalizePrefix(credentialPrefix, "S3 credential prefix");
   }
 
   private static void requireText(String value, String name) {
