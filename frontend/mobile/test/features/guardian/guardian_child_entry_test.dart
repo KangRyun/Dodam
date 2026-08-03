@@ -268,8 +268,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('child-3')));
     await tester.pump();
-    await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
-    await tester.pumpAndSettle();
+    await _startHtpFromHome(tester);
 
     await _pumpUntil(tester, find.byKey(const ValueKey('input-method-canvas')));
     await tester.tap(find.byKey(const ValueKey('input-method-canvas')));
@@ -341,7 +340,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('child-3')));
     await tester.pump();
-    await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
+    await _startHtpFromHome(tester);
     await tester.pumpAndSettle();
 
     expect(find.text('월간 활동 요약'), findsNothing);
@@ -399,6 +398,15 @@ Future<void> _tapAfterScroll(WidgetTester tester, Key key) async {
   await tester.tap(target);
 }
 
+/// 보호자 홈 CTA를 눌러 HTP 소개 팝업을 연 뒤 "시작하기"로 활동 흐름에 진입한다
+/// (S15P11B209-462). 소개 팝업이 활동 흐름 앞단에 끼면서 진입 경로가 이 단계를
+/// 반드시 거치게 됐다.
+Future<void> _startHtpFromHome(WidgetTester tester) async {
+  await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(const ValueKey('htp-intro-start')));
+}
+
 /// 활동 선택 화면의 "다음" 버튼을 눌러 아동 홈으로 넘어간다.
 /// 보호자 홈에서 아동을 골라 활동 선택 화면까지 진입한다.
 Future<void> _pumpActivitySelect(
@@ -417,7 +425,7 @@ Future<void> _pumpActivitySelect(
   await tester.pumpAndSettle();
   await tester.tap(find.byKey(childKey));
   await tester.pump();
-  await _tapAfterScroll(tester, const ValueKey('start-child-mode'));
+  await _startHtpFromHome(tester);
   // 활동 선택 화면은 진입 확인 로딩과 이어/새로 다이얼로그 애니메이션이 계속
   // 돌아 pumpAndSettle이 멎지 않으므로 제한 프레임만 진행한다.
   for (var i = 0; i < 24; i++) {

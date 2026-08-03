@@ -7,6 +7,7 @@ import '../../../../app/state/guardian_child_controller.dart';
 import '../../../activity/data/dto/activity_dtos.dart';
 import '../../../activity/domain/repositories/activity_repository.dart';
 import '../../../child/data/dto/child_dtos.dart';
+import '../../../drawing/presentation/widgets/htp_intro_dialog.dart';
 import 'guardian_home_theme.dart';
 import 'mind_calendar_card.dart';
 import 'mind_emotion.dart';
@@ -307,16 +308,23 @@ class _HeroCard extends StatelessWidget {
             enabled: child != null,
             onTap: child == null
                 ? null
-                : () => AppNavigation.pushNamed(
-                    context,
-                    AppRoutes.drawingActivitySelection(
-                      child.childId.toString(),
-                    ),
-                    arguments: const DrawingActivitySelectionRouteArguments(
-                      initialActivityCode: 'HTP',
-                    ),
-                    rootNavigator: true,
-                  ),
+                : () async {
+                    // 활동을 시작하기 전에 HTP 소개 팝업을 먼저 띄우고,
+                    // "시작하기"를 눌렀을 때만 기존 활동 흐름으로 넘어간다
+                    // (S15P11B209-462).
+                    final start = await showHtpIntroDialog(context);
+                    if (start != true || !context.mounted) return;
+                    AppNavigation.pushNamed(
+                      context,
+                      AppRoutes.drawingActivitySelection(
+                        child.childId.toString(),
+                      ),
+                      arguments: const DrawingActivitySelectionRouteArguments(
+                        initialActivityCode: 'HTP',
+                      ),
+                      rootNavigator: true,
+                    );
+                  },
           ),
           const SizedBox(height: 8),
           _ReportButton(recentFuture: recentFuture),
