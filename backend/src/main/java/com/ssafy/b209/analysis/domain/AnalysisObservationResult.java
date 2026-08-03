@@ -64,7 +64,7 @@ public class AnalysisObservationResult {
   @Column(name = "disclaimer_text", columnDefinition = "TEXT")
   private String disclaimerText;
 
-  @Column(name = "generated_model_version", length = 50)
+  @Column(name = "generated_model_version", length = 255)
   private String generatedModelVersion;
 
   @Column(name = "created_at", nullable = false)
