@@ -31,7 +31,9 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('guardian-switch-profile')));
     await tester.pumpAndSettle();
 
-    expect(find.text('누가 도담을 이용하나요?'), findsOneWidget);
+    expect(find.text('안녕하세요! 누구로 시작할까요?'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('profile-selection-settings')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('logout-action')), findsOneWidget);
   });
 

@@ -21,6 +21,7 @@ final class GuardianChildController extends ChangeNotifier {
   ChildListStatus _status = ChildListStatus.idle;
   List<ChildSummaryDto> _children = const [];
   ChildSummaryDto? _selectedChild;
+  bool _hasExplicitChildSelection = false;
   ChildRegistrationStatus _registrationStatus = ChildRegistrationStatus.idle;
   Object? _registrationError;
   Object? _listError;
@@ -41,11 +42,13 @@ final class GuardianChildController extends ChangeNotifier {
   /// (회원 탈퇴 안내 등)은 이 값을 써야 한다.
   int? get confirmedChildCount => switch (_status) {
     ChildListStatus.success || ChildListStatus.empty => _children.length,
-    ChildListStatus.idle || ChildListStatus.loading || ChildListStatus.error =>
-      null,
+    ChildListStatus.idle ||
+    ChildListStatus.loading ||
+    ChildListStatus.error => null,
   };
   ChildSummaryDto? get selectedChild => _selectedChild;
   int? get selectedChildId => _selectedChild?.childId;
+  bool get hasExplicitChildSelection => _hasExplicitChildSelection;
   ChildRegistrationStatus get registrationStatus => _registrationStatus;
   Object? get registrationError => _registrationError;
 
@@ -80,6 +83,7 @@ final class GuardianChildController extends ChangeNotifier {
           (child) => child?.childId == selected.childId,
           orElse: () => null,
         );
+        if (_selectedChild == null) _hasExplicitChildSelection = false;
       }
       // 첫 진입 시 첫 아이를 자동 선택해 보호자 홈 대시보드가 바로 데이터를
       // 보여준다(마음 카드·최근 활동·마음 달력). 선택 이력이 있으면 유지한다.
@@ -97,6 +101,7 @@ final class GuardianChildController extends ChangeNotifier {
   void selectChild(ChildSummaryDto child) {
     if (!_children.any((item) => item.childId == child.childId)) return;
     _selectedChild = child;
+    _hasExplicitChildSelection = true;
     notifyListeners();
   }
 
@@ -133,6 +138,7 @@ final class GuardianChildController extends ChangeNotifier {
         (child) => child?.childId == created.childId,
         orElse: () => null,
       );
+      _hasExplicitChildSelection = _selectedChild != null;
       _registrationStatus = ChildRegistrationStatus.success;
       notifyListeners();
       return true;
@@ -213,7 +219,10 @@ final class GuardianChildController extends ChangeNotifier {
     notifyListeners();
     try {
       await _repository.deleteChild(childId);
-      if (_selectedChild?.childId == childId) _selectedChild = null;
+      if (_selectedChild?.childId == childId) {
+        _selectedChild = null;
+        _hasExplicitChildSelection = false;
+      }
       await loadChildren();
       if (_status == ChildListStatus.error) {
         throw StateError('아동 목록을 갱신하지 못했습니다.');
@@ -243,8 +252,9 @@ final class GuardianChildController extends ChangeNotifier {
 
   // 로그아웃 시 보호자 선택 상태 초기화
   void clearSelection() {
-    if (_selectedChild == null) return;
+    if (_selectedChild == null && !_hasExplicitChildSelection) return;
     _selectedChild = null;
+    _hasExplicitChildSelection = false;
     notifyListeners();
   }
 
@@ -253,6 +263,7 @@ final class GuardianChildController extends ChangeNotifier {
     _status = ChildListStatus.idle;
     _children = const [];
     _selectedChild = null;
+    _hasExplicitChildSelection = false;
     _listError = null;
     _registrationStatus = ChildRegistrationStatus.idle;
     _registrationError = null;
