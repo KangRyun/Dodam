@@ -1033,5 +1033,94 @@ class ReportCommonContradictionTest(unittest.TestCase):
         )
 
 
+class ReportContractAlignmentTest(unittest.TestCase):
+    """프롬프트가 BE 수신·화면 도달 실태와 맞는지 (S15P11B209-826).
+
+    구 문구는 "각 필드가 화면에서 쓰이는 자리"로 7항목을 열거했는데 4.5개가 거짓이었다.
+    모델이 그 맥락을 믿고 화면에 안 나가는 필드에 공을 들이고, 정작 보호자 조언 영역
+    전부인 followUpGuides는 강조 없이 스키마 맨 끝에 있었다(818 근인 후보).
+    """
+
+    def setUp(self):
+        self.text = prompts_registry.load("report_common")
+
+    # ── 3. 렌더링 설명이 사실과 맞는가 ──
+    def test_guardian_facing_fields_are_named_exactly(self):
+        """보호자 화면에 실제로 도달하는 셋만 [1]로 분류돼야 한다.
+
+        경로: ReportDetailQueryService → ReportDetailResponse → report_screen.dart.
+        그 서비스에는 observedFeature·guardianQuestion·observationResult 저장소가
+        주입되지 않는다 — 읽기 경로 부재의 확정 증거다.
+        """
+        section = self.text.split("[1]", 1)[1].split("[2]", 1)[0]
+        for field in ("activityNotes", "conversationSummary.summaryText", "guidance"):
+            self.assertIn(field, section)
+        # 전문가 계층 필드가 '보호자 화면' 칸에 섞이면 안 된다.
+        for field in ("overallSummary", "positiveSignals", "features", "attentionPoints"):
+            self.assertNotIn(field, section)
+
+    def test_expert_only_fields_are_not_claimed_as_guardian_screen(self):
+        """§13.1은 AI 관찰 초안을 ExpertReviewMaterial 계층에 둔다(REPORT-03 미구현)."""
+        self.assertNotIn("리포트 맨 위 전체 요약", self.text)
+        self.assertNotIn("'아이의 좋은 모습' 영역", self.text)
+        self.assertNotIn("'관찰된 특징' 카드 목록", self.text)
+        # 대신 '전문가 검토용으로만 저장' 갈래로 옮겨졌다.
+        expert = self.text.split("[2]", 1)[1].split("[3]", 1)[0]
+        for field in ("overallSummary", "positiveSignals", "features", "attentionPoints"):
+            self.assertIn(field, expert)
+
+    def test_unused_fields_are_marked_as_such(self):
+        unused = self.text.split("[3]", 1)[1].split("어느 갈래든", 1)[0]
+        for field in ("detailText", "guardianQuestions", "mainTopic", "expressedEmotion"):
+            self.assertIn(field, unused)
+
+    def test_screen_section_title_matches_the_frontend(self):
+        """FE 섹션 제목은 '이런 질문으로 대화해 보세요'다 — 구 문구의 '집에서 이렇게 해보세요'가 아니다."""
+        self.assertIn("이런 질문으로 대화해 보세요", self.text)
+        self.assertNotIn("'집에서 이렇게 해보세요' 안내와 질문", self.text)
+
+    def test_follow_up_guides_are_question_first_with_one_attitude_slot(self):
+        self.assertIn("그대로 물어볼 수 있는 질문을 앞에 둔다", self.text)
+        self.assertIn("마지막 1개는 질문 대신 듣는 태도 안내로 써도 좋다", self.text)
+
+    # ── 1. NOT NULL 필드가 필수로 표시되는가 ──
+    def test_not_null_fields_are_marked_required(self):
+        """BE 컬럼이 NOT NULL인데 프롬프트에 표시가 없었다.
+
+        지금 예외가 안 나는 이유는 report_client._assemble이 빈 문자열을 채우기 때문이고,
+        BE는 saveActivityNotes만 blank를 스킵한다 — 나머지는 빈 행이 저장돼 화면에
+        빈 불릿으로 나간다.
+        """
+        self.assertIn("비어 있으면 안 된다", self.text)
+        for field in ("followUpGuides", "questionText", "description", "visibilityScope"):
+            self.assertIn(field, self.text)
+        self.assertIn("비워 두지 마라", self.text)
+
+    # ── 2. 조용히 잘리는 길이 상한이 명시되는가 ──
+    def test_silent_truncation_limits_are_stated_as_numbers(self):
+        """ColumnTextLimiter.fit은 초과분을 잘라내고 log.warn만 남긴다(조용한 절단)."""
+        for limit in ("50자", "100자", "80자", "200자"):
+            self.assertIn(limit, self.text)
+        self.assertIn("말없이 잘라내", self.text)
+
+    def test_limits_match_backend_column_constants(self):
+        """BE ObservationReportPersistenceService의 *_LIMIT 값과 어긋나면 안 된다.
+
+        어긋나면 프롬프트가 허용한 길이가 조용히 잘린다 — 두 벌을 따로 관리하는 함정이라
+        값이 바뀌면 이 테스트가 먼저 깨지도록 둔다.
+        """
+        expected = {
+            "expressedEmotion": "50자",  # EXPRESSED_EMOTION_LIMIT
+            "mainTopic": "100자",  # MAIN_TOPIC_LIMIT
+            "questionPurpose": "50자",  # QUESTION_PURPOSE_LIMIT
+            "featureCode": "80자",  # FEATURE_CODE_LIMIT
+            "title": "200자",  # FEATURE_TITLE_LIMIT
+        }
+        block = self.text.split("길이 상한", 1)[1].split("{", 1)[0]
+        for field, limit in expected.items():
+            with self.subTest(field=field):
+                self.assertRegex(block + self.text, rf"{field}[^\n]*{limit}|{limit}[^\n]*{field}")
+
+
 if __name__ == "__main__":
     unittest.main()
