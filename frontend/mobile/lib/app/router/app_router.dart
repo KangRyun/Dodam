@@ -284,6 +284,7 @@ abstract final class AppRouter {
         ReportScreen(
           reportId: reportId,
           repository: reportRepository,
+          activityRepository: activityRepository,
           fileActions: reportFileActions,
           voiceAnswerPlaybackRepository: voiceAnswerPlaybackRepository,
           voiceAnswerAudioPlayerFactory: voiceAnswerAudioPlayerFactory,

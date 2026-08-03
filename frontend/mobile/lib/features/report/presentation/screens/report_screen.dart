@@ -6,11 +6,13 @@ import '../../../../app/router/app_router.dart';
 import '../../../../app/widgets/app_failure_view.dart';
 import '../../../../core/network/network.dart';
 import '../../../../design_system/design_system.dart';
+import '../../../activity/domain/repositories/activity_repository.dart';
 import '../../../conversation/conversation.dart';
 import '../../data/dto/report_dtos.dart';
 import '../../data/services/platform_report_file_actions.dart';
 import '../../domain/repositories/report_repository.dart';
 import '../../domain/services/report_file_actions.dart';
+import '../widgets/htp_report_gallery.dart';
 
 enum _ReportViewStatus {
   loading,
@@ -28,6 +30,7 @@ class ReportScreen extends StatefulWidget {
   const ReportScreen({
     required this.reportId,
     required this.repository,
+    this.activityRepository,
     ReportFileActions? fileActions,
     this.voiceAnswerPlaybackRepository,
     this.voiceAnswerAudioPlayerFactory,
@@ -36,6 +39,7 @@ class ReportScreen extends StatefulWidget {
 
   final String reportId;
   final ReportRepository repository;
+  final ActivityRepository? activityRepository;
   final ReportFileActions fileActions;
   final VoiceAnswerPlaybackRepository? voiceAnswerPlaybackRepository;
   final VoiceAnswerAudioPlayerFactory? voiceAnswerAudioPlayerFactory;
@@ -53,6 +57,7 @@ class _ReportScreenState extends State<ReportScreen>
   _ReportPdfAction? _pdfAction;
   bool _isRegenerating = false;
   VoiceAnswerPlaybackController? _playbackController;
+  int _loadGeneration = 0;
 
   @override
   void initState() {
@@ -95,12 +100,15 @@ class _ReportScreenState extends State<ReportScreen>
 
   @override
   void dispose() {
+    _loadGeneration++;
     WidgetsBinding.instance.removeObserver(this);
     _playbackController?.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
+    final generation = ++_loadGeneration;
+    final repository = widget.repository;
     unawaited(_playbackController?.reset());
     final reportId = int.tryParse(widget.reportId);
     if (reportId == null || reportId <= 0) {
@@ -113,18 +121,18 @@ class _ReportScreenState extends State<ReportScreen>
       _generationStatus = null;
     });
     try {
-      final report = await widget.repository.getReport(reportId);
+      final report = await repository.getReport(reportId);
+      if (!_isCurrentLoad(generation, reportId, repository)) return;
       ReportGenerationStatusDto? generationStatus;
       if (report.reportStatus == 'FAILED') {
         try {
-          generationStatus = await widget.repository.getGenerationStatus(
-            reportId,
-          );
+          generationStatus = await repository.getGenerationStatus(reportId);
+          if (!_isCurrentLoad(generation, reportId, repository)) return;
         } on Object {
           // 상태 조회 실패 시에도 리포트 실패 안내 자체는 유지한다.
         }
       }
-      if (!mounted) return;
+      if (!_isCurrentLoad(generation, reportId, repository)) return;
       if (report.reportId != reportId) {
         setState(() {
           _report = null;
@@ -143,7 +151,7 @@ class _ReportScreenState extends State<ReportScreen>
         };
       });
     } on ApiResponseFailure catch (failure) {
-      if (!mounted) return;
+      if (!_isCurrentLoad(generation, reportId, repository)) return;
       setState(() {
         _failure = failure;
         _status = failure.statusCode == 404
@@ -151,7 +159,7 @@ class _ReportScreenState extends State<ReportScreen>
             : _ReportViewStatus.error;
       });
     } on Object catch (error) {
-      if (mounted) {
+      if (_isCurrentLoad(generation, reportId, repository)) {
         setState(() {
           _failure = error;
           _status = _ReportViewStatus.error;
@@ -159,6 +167,16 @@ class _ReportScreenState extends State<ReportScreen>
       }
     }
   }
+
+  bool _isCurrentLoad(
+    int generation,
+    int reportId,
+    ReportRepository repository,
+  ) =>
+      mounted &&
+      generation == _loadGeneration &&
+      int.tryParse(widget.reportId) == reportId &&
+      identical(widget.repository, repository);
 
   Future<void> _regenerate() async {
     final report = _report;
@@ -318,6 +336,7 @@ class _ReportScreenState extends State<ReportScreen>
       onSharePdf: () => _handlePdf(_ReportPdfAction.share),
       playbackController: _playbackController,
       imageFetcher: widget.repository.downloadImage,
+      activityRepository: widget.activityRepository,
     ),
   };
 }
@@ -367,6 +386,7 @@ class _ReportContent extends StatelessWidget {
     required this.onSharePdf,
     required this.playbackController,
     required this.imageFetcher,
+    required this.activityRepository,
   });
   final ReportDetailDto report;
   final _ReportPdfAction? pdfAction;
@@ -374,6 +394,7 @@ class _ReportContent extends StatelessWidget {
   final VoidCallback onSharePdf;
   final VoiceAnswerPlaybackController? playbackController;
   final ImageByteFetcher imageFetcher;
+  final ActivityRepository? activityRepository;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -401,6 +422,7 @@ class _ReportContent extends StatelessWidget {
                       child: _ReportOverview(
                         report: report,
                         imageFetcher: imageFetcher,
+                        activityRepository: activityRepository,
                       ),
                     ),
                     const SizedBox(width: AppSpacing.lg),
@@ -414,7 +436,11 @@ class _ReportContent extends StatelessWidget {
                   ],
                 )
               else ...[
-                _ReportOverview(report: report, imageFetcher: imageFetcher),
+                _ReportOverview(
+                  report: report,
+                  imageFetcher: imageFetcher,
+                  activityRepository: activityRepository,
+                ),
                 const SizedBox(height: AppSpacing.lg),
                 _ReportDetails(
                   report: report,
@@ -478,17 +504,27 @@ bool _isPdf(List<int> bytes) =>
     bytes[4] == 0x2D;
 
 class _ReportOverview extends StatelessWidget {
-  const _ReportOverview({required this.report, required this.imageFetcher});
+  const _ReportOverview({
+    required this.report,
+    required this.imageFetcher,
+    required this.activityRepository,
+  });
   final ReportDetailDto report;
   final ImageByteFetcher imageFetcher;
+  final ActivityRepository? activityRepository;
 
   @override
   Widget build(BuildContext context) {
     final session = report.drawingSession;
     final emotions = report.childExpression?.selectedEmotions ?? const [];
+    final isHtp = session?.drawingTypeCode?.toUpperCase() == 'HTP';
     // 서버는 완성본이 없으면 finalImageUrl을 비우므로 썸네일로 물러난다.
     final imageUrl =
         report.drawing?.finalImageUrl ?? report.drawing?.thumbnailUrl;
+    final singleImagePreview = _ReportSingleImagePreview(
+      imageUrl: imageUrl,
+      imageFetcher: imageFetcher,
+    );
     final activityLines = <Widget>[
       if ((session?.drawingTypeName ?? session?.drawingTypeCode)
           case final type?)
@@ -528,27 +564,15 @@ class _ReportOverview extends StatelessWidget {
           ),
         ),
         const SizedBox(height: AppSpacing.md),
-        AspectRatio(
-          aspectRatio: 4 / 3,
-          child: Container(
-            key: const ValueKey('report-image'),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(AppRadius.lg),
-              border: Border.all(color: AppColors.outline),
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: imageUrl == null
-                ? const _ImagePlaceholder()
-                : AuthenticatedImage(
-                    url: imageUrl,
-                    fetcher: imageFetcher,
-                    fit: BoxFit.contain,
-                    semanticLabel: '아동이 완성한 그림',
-                    placeholderBuilder: (_) => const _ImagePlaceholder(),
-                  ),
-          ),
-        ),
+        if (isHtp)
+          HtpReportGallery(
+            childId: session?.childId ?? -1,
+            reportDrawingSessionId: session?.drawingSessionId ?? -1,
+            repository: activityRepository,
+            fallback: singleImagePreview,
+          )
+        else
+          singleImagePreview,
         if (activityLines.isNotEmpty || emotions.isNotEmpty) ...[
           const SizedBox(height: AppSpacing.md),
           _ReportSection(
@@ -578,6 +602,39 @@ class _ReportOverview extends StatelessWidget {
       ],
     );
   }
+}
+
+class _ReportSingleImagePreview extends StatelessWidget {
+  const _ReportSingleImagePreview({
+    required this.imageUrl,
+    required this.imageFetcher,
+  });
+
+  final String? imageUrl;
+  final ImageByteFetcher imageFetcher;
+
+  @override
+  Widget build(BuildContext context) => AspectRatio(
+    aspectRatio: 4 / 3,
+    child: Container(
+      key: const ValueKey('report-image'),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.outline),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: imageUrl == null
+          ? const _ImagePlaceholder()
+          : AuthenticatedImage(
+              url: imageUrl,
+              fetcher: imageFetcher,
+              fit: BoxFit.contain,
+              semanticLabel: '아동이 완성한 그림',
+              placeholderBuilder: (_) => const _ImagePlaceholder(),
+            ),
+    ),
+  );
 }
 
 class _ReportDetails extends StatelessWidget {
