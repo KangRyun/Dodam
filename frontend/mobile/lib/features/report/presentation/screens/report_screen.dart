@@ -13,6 +13,7 @@ import '../../data/services/platform_report_file_actions.dart';
 import '../../domain/repositories/report_repository.dart';
 import '../../domain/services/report_file_actions.dart';
 import '../widgets/htp_report_gallery.dart';
+import '../widgets/report_mascot.dart';
 
 enum _ReportViewStatus {
   loading,
@@ -398,44 +399,24 @@ class _ReportContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) => SingleChildScrollView(
-      key: ValueKey(
-        constraints.maxWidth >= 900
-            ? 'report-wide-layout'
-            : 'report-small-layout',
-      ),
-      padding: const EdgeInsets.all(AppSpacing.lg),
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(
-            maxWidth: AppSizes.wideContentMaxWidth,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (constraints.maxWidth >= 900)
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      flex: 5,
-                      child: _ReportOverview(
-                        report: report,
-                        imageFetcher: imageFetcher,
-                        activityRepository: activityRepository,
-                      ),
-                    ),
-                    const SizedBox(width: AppSpacing.lg),
-                    Expanded(
-                      flex: 6,
-                      child: _ReportDetails(
-                        report: report,
-                        playbackController: playbackController,
-                      ),
-                    ),
-                  ],
-                )
-              else ...[
+    builder: (context, constraints) {
+      final isWide = constraints.maxWidth >= 900;
+      final pagePadding = constraints.maxWidth < 360
+          ? AppSpacing.sm
+          : AppSpacing.lg;
+      return SingleChildScrollView(
+        key: ValueKey(isWide ? 'report-wide-layout' : 'report-small-layout'),
+        padding: EdgeInsets.all(pagePadding),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: AppSizes.wideContentMaxWidth,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _ReportHero(report: report),
+                const SizedBox(height: AppSpacing.lg),
                 _ReportOverview(
                   report: report,
                   imageFetcher: imageFetcher,
@@ -445,49 +426,24 @@ class _ReportContent extends StatelessWidget {
                 _ReportDetails(
                   report: report,
                   playbackController: playbackController,
+                  wide: isWide,
+                ),
+                if (report.limitations.isNotEmpty) ...[
+                  const SizedBox(height: AppSpacing.lg),
+                  _NoticeCard(lines: report.limitations),
+                ],
+                const SizedBox(height: AppSpacing.lg),
+                _ReportActionSection(
+                  pdfAction: pdfAction,
+                  onSavePdf: onSavePdf,
+                  onSharePdf: onSharePdf,
                 ),
               ],
-              if (report.limitations.isNotEmpty) ...[
-                const SizedBox(height: AppSpacing.lg),
-                _NoticeCard(lines: report.limitations),
-              ],
-              const SizedBox(height: AppSpacing.lg),
-              Row(
-                children: [
-                  Expanded(
-                    child: AppButton(
-                      key: const ValueKey('report-save-pdf'),
-                      label: 'PDF 저장',
-                      leading: const Icon(Icons.download_rounded),
-                      isLoading: pdfAction == _ReportPdfAction.save,
-                      onPressed: pdfAction == null ? onSavePdf : null,
-                    ),
-                  ),
-                  const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: AppButton(
-                      key: const ValueKey('report-share-pdf'),
-                      label: '공유',
-                      leading: const Icon(Icons.ios_share_rounded),
-                      variant: AppButtonVariant.secondary,
-                      isLoading: pdfAction == _ReportPdfAction.share,
-                      onPressed: pdfAction == null ? onSharePdf : null,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              AppButton(
-                key: const ValueKey('report-home-cta'),
-                label: '보호자 홈으로 돌아가기',
-                variant: AppButtonVariant.secondary,
-                onPressed: () => AppRouter.goGuardianHome(context),
-              ),
-            ],
+            ),
           ),
         ),
-      ),
-    ),
+      );
+    },
   );
 }
 
@@ -503,6 +459,111 @@ bool _isPdf(List<int> bytes) =>
     bytes[3] == 0x46 &&
     bytes[4] == 0x2D;
 
+class _ReportHero extends StatelessWidget {
+  const _ReportHero({required this.report});
+
+  final ReportDetailDto report;
+
+  @override
+  Widget build(BuildContext context) => _ReportCard(
+    backgroundColor: AppColors.brandYellowSoft,
+    borderColor: AppColors.sunshine,
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 520;
+        final mascot = const ReportMascotImage(
+          assetPath: ReportMascotAssets.intro,
+          maxWidth: 188,
+          mascotKey: ValueKey('report-mascot-intro'),
+        );
+        final copy = Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: compact
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
+          children: [
+            Semantics(
+              header: true,
+              child: const Text(
+                '그림 속 이야기를 함께 돌아볼까요?',
+                textAlign: TextAlign.start,
+                style: TextStyle(
+                  color: AppColors.ink,
+                  fontSize: 27,
+                  height: 1.25,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            const Text(
+              '돌아보기 친구가 아이의 그림과 이야기를 차근차근 정리했어요.',
+              style: TextStyle(color: AppColors.inkMuted, height: 1.5),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xs,
+              children: [
+                if (report.createdAt case final createdAt?)
+                  _MetadataPill(label: _date(createdAt)),
+                _MetadataPill(label: '리포트 v${report.reportVersion}'),
+              ],
+            ),
+          ],
+        );
+        if (compact) {
+          return Column(
+            children: [
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 132),
+                child: mascot,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              copy,
+            ],
+          );
+        }
+        return Row(
+          children: [
+            SizedBox(width: 172, child: mascot),
+            const SizedBox(width: AppSpacing.xl),
+            Expanded(child: copy),
+          ],
+        );
+      },
+    ),
+  );
+}
+
+class _MetadataPill extends StatelessWidget {
+  const _MetadataPill({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => DecoratedBox(
+    decoration: BoxDecoration(
+      color: AppColors.surface.withValues(alpha: 0.78),
+      borderRadius: BorderRadius.circular(AppRadius.pill),
+      border: Border.all(color: AppColors.sunshine),
+    ),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.sm,
+        vertical: AppSpacing.xs,
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(
+          color: AppColors.ink,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    ),
+  );
+}
+
 class _ReportOverview extends StatelessWidget {
   const _ReportOverview({
     required this.report,
@@ -516,7 +577,6 @@ class _ReportOverview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final session = report.drawingSession;
-    final emotions = report.childExpression?.selectedEmotions ?? const [];
     final isHtp = session?.drawingTypeCode?.toUpperCase() == 'HTP';
     // 서버는 완성본이 없으면 finalImageUrl을 비우므로 썸네일로 물러난다.
     final imageUrl =
@@ -525,80 +585,60 @@ class _ReportOverview extends StatelessWidget {
       imageUrl: imageUrl,
       imageFetcher: imageFetcher,
     );
-    final activityLines = <Widget>[
-      if ((session?.drawingTypeName ?? session?.drawingTypeCode)
-          case final type?)
-        _InfoLine(label: '활동 유형', value: type),
-      if (session?.inputMethod case final inputMethod?)
-        _InfoLine(label: '입력 방식', value: inputMethod),
-      if (_minutes(session?.durationMs) case final duration?)
-        _InfoLine(label: '활동 시간', value: duration),
-      if (session?.completedAt case final completedAt?)
-        _InfoLine(label: '완료일', value: _date(completedAt)),
-    ];
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        _ReportCard(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                session?.title ?? '그림 활동 관찰 기록',
-                style: const TextStyle(
-                  color: AppColors.ink,
-                  fontSize: 23,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.xs),
-              Text(
-                [
-                  if (report.createdAt case final createdAt?) _date(createdAt),
-                  '리포트 v${report.reportVersion}',
-                ].join(' · '),
-                style: const TextStyle(color: AppColors.inkMuted),
-              ),
-            ],
-          ),
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (isHtp)
-          HtpReportGallery(
+    final preview = isHtp
+        ? HtpReportGallery(
             childId: session?.childId ?? -1,
             reportDrawingSessionId: session?.drawingSessionId ?? -1,
             repository: activityRepository,
             fallback: singleImagePreview,
           )
-        else
-          singleImagePreview,
-        if (activityLines.isNotEmpty || emotions.isNotEmpty) ...[
-          const SizedBox(height: AppSpacing.md),
-          _ReportSection(
-            key: const ValueKey('report-activity-info'),
-            title: '활동 정보',
-            children: [
-              ...activityLines,
-              if (emotions.isNotEmpty) ...[
-                const SizedBox(height: AppSpacing.xs),
-                const Text(
-                  '아이가 선택한 감정',
-                  style: TextStyle(color: AppColors.inkMuted),
+        : singleImagePreview;
+
+    return _ReportSection(
+      key: const ValueKey('report-drawings-section'),
+      title: '완성한 그림',
+      backgroundColor: const Color(0xFFEAF6FA),
+      accentColor: const Color(0xFF8CC6D8),
+      children: [
+        LayoutBuilder(
+          builder: (context, constraints) {
+            if (constraints.maxWidth < 720) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: SizedBox(
+                      width: 92,
+                      child: ReportMascotImage(
+                        assetPath: ReportMascotAssets.observe,
+                        maxWidth: 92,
+                        mascotKey: ValueKey('report-mascot-observe'),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  preview,
+                ],
+              );
+            }
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                const SizedBox(
+                  width: 132,
+                  child: ReportMascotImage(
+                    assetPath: ReportMascotAssets.observe,
+                    maxWidth: 132,
+                    mascotKey: ValueKey('report-mascot-observe'),
+                  ),
                 ),
-                const SizedBox(height: AppSpacing.xs),
-                Wrap(
-                  spacing: AppSpacing.xs,
-                  runSpacing: AppSpacing.xs,
-                  children: [
-                    for (final emotion in emotions)
-                      Chip(label: Text(_emotionLabel(emotion))),
-                  ],
-                ),
+                const SizedBox(width: AppSpacing.lg),
+                Expanded(child: preview),
               ],
-            ],
-          ),
-        ],
+            );
+          },
+        ),
       ],
     );
   }
@@ -641,9 +681,11 @@ class _ReportDetails extends StatelessWidget {
   const _ReportDetails({
     required this.report,
     required this.playbackController,
+    required this.wide,
   });
   final ReportDetailDto report;
   final VoiceAnswerPlaybackController? playbackController;
+  final bool wide;
 
   @override
   Widget build(BuildContext context) {
@@ -651,105 +693,254 @@ class _ReportDetails extends StatelessWidget {
     final facts = report.activityFacts;
     final conversation = report.conversationSummary;
     final guide = report.guardianConversationGuide;
+    final hasExpression =
+        expression != null &&
+        (expression.expressedEmotionText != null ||
+            expression.representativeUtterances.isNotEmpty);
+    final hasFacts =
+        facts != null && (!facts.isEmpty || facts.pressureAvailable);
+    final hasConversation = conversation != null && !conversation.isEmpty;
+    final hasGuide = guide.isNotEmpty;
+    final hasObservations =
+        hasExpression || hasFacts || hasConversation || hasGuide;
 
-    final sections = <Widget>[
-      if (expression != null && !expression.isEmpty)
-        _ReportSection(
-          key: const ValueKey('report-child-expression'),
-          title: '아이가 표현한 것',
-          children: [
-            if (expression.expressedEmotionText case final text?) ...[
-              Text(text, style: const TextStyle(color: AppColors.ink)),
-              if (expression.representativeUtterances.isNotEmpty)
+    final expressionSection = hasExpression
+        ? _ReportSection(
+            key: const ValueKey('report-child-expression'),
+            title: '아이가 표현한 말과 음성',
+            backgroundColor: AppColors.lavenderSoft,
+            accentColor: AppColors.lavender,
+            children: [
+              if (expression.expressedEmotionText case final text?) ...[
+                Text(text, style: const TextStyle(color: AppColors.ink)),
+                if (expression.representativeUtterances.isNotEmpty)
+                  const SizedBox(height: AppSpacing.md),
+              ],
+              for (final utterance in expression.representativeUtterances)
+                _Utterance(
+                  utterance: utterance,
+                  playbackController: playbackController,
+                ),
+            ],
+          )
+        : null;
+    final factsSection = hasFacts
+        ? _ReportSection(
+            key: const ValueKey('report-activity-facts'),
+            title: '활동에서 관찰된 내용',
+            backgroundColor: AppColors.leafSoft,
+            accentColor: AppColors.leaf,
+            children: [
+              if (facts.detectedObjects.isNotEmpty)
+                _InfoLine(
+                  label: '그린 것',
+                  value: facts.detectedObjects.join(', '),
+                ),
+              if (facts.pauseCount != null ||
+                  facts.eraseCount != null ||
+                  facts.pressureAvailable) ...[
+                const SizedBox(height: AppSpacing.xs),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    if (facts.pauseCount case final count?)
+                      _StatisticTile(label: '멈춤', value: '$count회'),
+                    if (facts.eraseCount case final count?)
+                      _StatisticTile(label: '지우기', value: '$count회'),
+                    if (facts.pressureAvailable)
+                      const _StatisticTile(label: '필압 정보', value: '기록됨'),
+                  ],
+                ),
+              ],
+              if (facts.notes.isNotEmpty) ...[
                 const SizedBox(height: AppSpacing.md),
+                for (final note in facts.notes) _Bullet(title: note),
+              ],
             ],
-            for (final utterance in expression.representativeUtterances)
-              _Utterance(
-                utterance: utterance,
-                playbackController: playbackController,
-              ),
-          ],
-        ),
-      if (facts != null && !facts.isEmpty)
-        _ReportSection(
-          key: const ValueKey('report-activity-facts'),
-          title: '활동 기록',
-          children: [
-            if (facts.detectedObjects.isNotEmpty)
-              _InfoLine(label: '그린 것', value: facts.detectedObjects.join(', ')),
-            if (facts.pauseCount case final count?)
-              _InfoLine(label: '멈춤', value: '$count회'),
-            if (facts.eraseCount case final count?)
-              _InfoLine(label: '지우기', value: '$count회'),
-            for (final note in facts.notes) _Bullet(title: note),
-          ],
-        ),
-      if (conversation != null && !conversation.isEmpty)
-        _ReportSection(
-          key: const ValueKey('report-conversation-summary'),
-          title: '대화 요약',
-          children: [
-            if (conversation.questionCount case final count?)
-              _InfoLine(label: '질문', value: '$count개'),
-            if (conversation.answeredCount case final count?)
-              _InfoLine(label: '대답', value: '$count개'),
-            if (conversation.skippedCount case final count?)
-              _InfoLine(label: '건너뜀', value: '$count개'),
-            if (conversation.summary case final summary?) ...[
-              const SizedBox(height: AppSpacing.xs),
-              Text(summary, style: const TextStyle(color: AppColors.ink)),
+          )
+        : null;
+    final conversationSection = hasConversation
+        ? _ReportSection(
+            key: const ValueKey('report-conversation-summary'),
+            title: '대화 요약',
+            backgroundColor: AppColors.tangerineSoft,
+            accentColor: AppColors.tangerine,
+            children: [
+              if (conversation.questionCount != null ||
+                  conversation.answeredCount != null ||
+                  conversation.skippedCount != null)
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.sm,
+                  children: [
+                    if (conversation.questionCount case final count?)
+                      _StatisticTile(label: '질문', value: '$count개'),
+                    if (conversation.answeredCount case final count?)
+                      _StatisticTile(label: '대답', value: '$count개'),
+                    if (conversation.skippedCount case final count?)
+                      _StatisticTile(label: '건너뜀', value: '$count개'),
+                  ],
+                ),
+              if (conversation.summary case final summary?) ...[
+                if (conversation.questionCount != null ||
+                    conversation.answeredCount != null ||
+                    conversation.skippedCount != null)
+                  const SizedBox(height: AppSpacing.md),
+                Text(
+                  summary,
+                  style: const TextStyle(color: AppColors.ink, height: 1.55),
+                ),
+              ],
             ],
-          ],
-        ),
-      if (guide.isNotEmpty)
-        _ReportSection(
-          key: const ValueKey('report-conversation-guide'),
-          title: '이런 질문으로 대화해 보세요',
-          children: [for (final question in guide) _Bullet(title: question)],
-        ),
-    ];
-
-    if (sections.isEmpty) {
-      return const _ReportCard(
-        key: ValueKey('report-no-observations'),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(Icons.inbox_outlined, color: AppColors.inkMuted),
-            SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: Text(
-                '아직 표시할 관찰 기록이 없어요.',
-                style: TextStyle(color: AppColors.inkMuted),
-              ),
+          )
+        : null;
+    final activitySection = _activitySection(report);
+    final guideSection = hasGuide
+        ? _ReportSection(
+            key: const ValueKey('report-conversation-guide'),
+            title: '보호자 대화 가이드',
+            backgroundColor: const Color(0xFFF2F6E8),
+            accentColor: AppColors.leaf,
+            children: [
+              for (final (index, question) in guide.indexed)
+                _NumberedBullet(number: index + 1, title: question),
+            ],
+          )
+        : null;
+    const noObservations = _ReportCard(
+      key: ValueKey('report-no-observations'),
+      backgroundColor: AppColors.surfaceSoft,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.inbox_outlined, color: AppColors.inkMuted),
+          SizedBox(width: AppSpacing.sm),
+          Expanded(
+            child: Text(
+              '아직 표시할 관찰 기록이 없어요.',
+              style: TextStyle(color: AppColors.inkMuted),
             ),
-          ],
-        ),
+          ),
+        ],
+      ),
+    );
+
+    if (!wide) {
+      return _SectionColumn(
+        children: [
+          ?expressionSection,
+          ?factsSection,
+          ?conversationSection,
+          if (!hasObservations) noObservations,
+          ?activitySection,
+          ?guideSection,
+        ],
       );
     }
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+    final left = <Widget>[?activitySection, ?expressionSection];
+    final right = <Widget>[
+      ?factsSection,
+      ?conversationSection,
+      ?guideSection,
+      if (!hasObservations) noObservations,
+    ];
+    if (left.isEmpty) return _SectionColumn(children: right);
+    if (right.isEmpty) return _SectionColumn(children: left);
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        for (final (index, section) in sections.indexed) ...[
-          if (index > 0) const SizedBox(height: AppSpacing.md),
-          section,
-        ],
+        Expanded(child: _SectionColumn(children: left)),
+        const SizedBox(width: AppSpacing.lg),
+        Expanded(child: _SectionColumn(children: right)),
       ],
     );
   }
 }
 
+Widget? _activitySection(ReportDetailDto report) {
+  final session = report.drawingSession;
+  final emotions = report.childExpression?.selectedEmotions ?? const [];
+  final lines = <Widget>[
+    if (session?.title case final title?)
+      _InfoLine(label: '활동 이름', value: title),
+    if ((session?.drawingTypeName ?? session?.drawingTypeCode) case final type?)
+      _InfoLine(label: '활동 유형', value: type),
+    if (session?.inputMethod case final inputMethod?)
+      _InfoLine(label: '입력 방식', value: inputMethod),
+    if (_minutes(session?.durationMs) case final duration?)
+      _InfoLine(label: '활동 시간', value: duration),
+    if (session?.completedAt case final completedAt?)
+      _InfoLine(label: '완료일', value: _date(completedAt)),
+  ];
+  if (lines.isEmpty && emotions.isEmpty) return null;
+  return _ReportSection(
+    key: const ValueKey('report-activity-info'),
+    title: '활동 정보와 선택 감정',
+    backgroundColor: const Color(0xFFFFF7DA),
+    accentColor: AppColors.warning,
+    children: [
+      ...lines,
+      if (emotions.isNotEmpty) ...[
+        const SizedBox(height: AppSpacing.xs),
+        const Text('아이가 선택한 감정', style: TextStyle(color: AppColors.inkMuted)),
+        const SizedBox(height: AppSpacing.xs),
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
+          children: [
+            for (final emotion in emotions)
+              Chip(label: Text(_emotionLabel(emotion))),
+          ],
+        ),
+      ],
+    ],
+  );
+}
+
+class _SectionColumn extends StatelessWidget {
+  const _SectionColumn({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (final (index, section) in children.indexed) ...[
+        if (index > 0) const SizedBox(height: AppSpacing.md),
+        section,
+      ],
+    ],
+  );
+}
+
 class _ReportCard extends StatelessWidget {
-  const _ReportCard({required this.child, super.key});
+  const _ReportCard({
+    required this.child,
+    this.backgroundColor = AppColors.surface,
+    this.borderColor = AppColors.outline,
+    super.key,
+  });
   final Widget child;
+  final Color backgroundColor;
+  final Color borderColor;
+
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(AppSpacing.lg),
     decoration: BoxDecoration(
-      color: AppColors.surface,
+      color: backgroundColor,
       borderRadius: BorderRadius.circular(AppRadius.lg),
-      border: Border.all(color: AppColors.outline),
+      border: Border.all(color: borderColor),
+      boxShadow: const [
+        BoxShadow(
+          color: Color(0x10000000),
+          blurRadius: 18,
+          offset: Offset(0, 6),
+        ),
+      ],
     ),
     child: child,
   );
@@ -759,21 +950,32 @@ class _ReportSection extends StatelessWidget {
   const _ReportSection({
     required this.title,
     required this.children,
+    this.backgroundColor = AppColors.surface,
+    this.accentColor = AppColors.lavender,
     super.key,
   });
   final String title;
   final List<Widget> children;
+  final Color backgroundColor;
+  final Color accentColor;
+
   @override
   Widget build(BuildContext context) => _ReportCard(
+    backgroundColor: backgroundColor,
+    borderColor: accentColor.withValues(alpha: 0.45),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          title,
-          style: const TextStyle(
-            color: AppColors.lavender,
-            fontSize: 18,
-            fontWeight: FontWeight.w800,
+        Semantics(
+          header: true,
+          child: Text(
+            title,
+            style: TextStyle(
+              color: accentColor,
+              fontSize: 20,
+              height: 1.3,
+              fontWeight: FontWeight.w900,
+            ),
           ),
         ),
         const SizedBox(height: AppSpacing.md),
@@ -789,22 +991,75 @@ class _InfoLine extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-    child: Row(
-      children: [
-        SizedBox(
-          width: 88,
-          child: Text(label, style: const TextStyle(color: AppColors.inkMuted)),
-        ),
-        Expanded(
-          child: Text(
-            value,
-            style: const TextStyle(
-              color: AppColors.ink,
-              fontWeight: FontWeight.w600,
-            ),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final labelText = Text(
+          label,
+          style: const TextStyle(color: AppColors.inkMuted),
+        );
+        final valueText = Text(
+          value,
+          style: const TextStyle(
+            color: AppColors.ink,
+            fontWeight: FontWeight.w700,
           ),
+        );
+        if (constraints.maxWidth < 280) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              labelText,
+              const SizedBox(height: AppSpacing.xxs),
+              valueText,
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            SizedBox(width: 96, child: labelText),
+            Expanded(child: valueText),
+          ],
+        );
+      },
+    ),
+  );
+}
+
+class _StatisticTile extends StatelessWidget {
+  const _StatisticTile({required this.label, required this.value});
+
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => ConstrainedBox(
+    constraints: const BoxConstraints(minWidth: 104, maxWidth: 176),
+    child: DecoratedBox(
+      decoration: BoxDecoration(
+        color: AppColors.surface.withValues(alpha: 0.76),
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.outline),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(AppSpacing.sm),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: const TextStyle(color: AppColors.inkMuted)),
+            const SizedBox(height: AppSpacing.xxs),
+            Text(
+              value,
+              style: const TextStyle(
+                color: AppColors.ink,
+                fontSize: 18,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+          ],
         ),
-      ],
+      ),
     ),
   );
 }
@@ -829,6 +1084,55 @@ class _Bullet extends StatelessWidget {
             style: const TextStyle(
               color: AppColors.ink,
               fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+class _NumberedBullet extends StatelessWidget {
+  const _NumberedBullet({required this.number, required this.title});
+
+  final int number;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          constraints: const BoxConstraints(
+            minWidth: AppSizes.minTouchTarget / 2,
+            minHeight: AppSizes.minTouchTarget / 2,
+          ),
+          alignment: Alignment.center,
+          decoration: const BoxDecoration(
+            color: AppColors.surface,
+            shape: BoxShape.circle,
+          ),
+          child: Text(
+            '$number',
+            style: const TextStyle(
+              color: AppColors.leaf,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Padding(
+            padding: const EdgeInsets.only(top: AppSpacing.xxs),
+            child: Text(
+              title,
+              style: const TextStyle(
+                color: AppColors.ink,
+                height: 1.5,
+                fontWeight: FontWeight.w700,
+              ),
             ),
           ),
         ),
@@ -875,6 +1179,139 @@ int? _playableVoiceMessageId(ReportUtteranceDto utterance) {
   return utterance.source == 'STT' && messageId != null && messageId > 0
       ? messageId
       : null;
+}
+
+class _ReportActionSection extends StatelessWidget {
+  const _ReportActionSection({
+    required this.pdfAction,
+    required this.onSavePdf,
+    required this.onSharePdf,
+  });
+
+  final _ReportPdfAction? pdfAction;
+  final VoidCallback onSavePdf;
+  final VoidCallback onSharePdf;
+
+  @override
+  Widget build(BuildContext context) => _ReportCard(
+    backgroundColor: const Color(0xFFFFF4D5),
+    borderColor: AppColors.sunshine,
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 640;
+        final copy = Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Semantics(
+              header: true,
+              child: const Text(
+                '돌아보기를 마쳤어요',
+                style: TextStyle(
+                  color: AppColors.ink,
+                  fontSize: 22,
+                  height: 1.3,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            const Text(
+              '리포트를 저장하거나 공유하고, 보호자 홈에서 다음 활동을 이어가세요.',
+              style: TextStyle(color: AppColors.inkMuted, height: 1.5),
+            ),
+          ],
+        );
+        final intro = Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const SizedBox(
+              width: 108,
+              child: ReportMascotImage(
+                assetPath: ReportMascotAssets.complete,
+                maxWidth: 108,
+                mascotKey: ValueKey('report-mascot-complete'),
+              ),
+            ),
+            const SizedBox(width: AppSpacing.md),
+            Expanded(child: copy),
+          ],
+        );
+        final buttons = _ReportActionButtons(
+          horizontal: !compact,
+          pdfAction: pdfAction,
+          onSavePdf: onSavePdf,
+          onSharePdf: onSharePdf,
+        );
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            intro,
+            const SizedBox(height: AppSpacing.lg),
+            buttons,
+          ],
+        );
+      },
+    ),
+  );
+}
+
+class _ReportActionButtons extends StatelessWidget {
+  const _ReportActionButtons({
+    required this.horizontal,
+    required this.pdfAction,
+    required this.onSavePdf,
+    required this.onSharePdf,
+  });
+
+  final bool horizontal;
+  final _ReportPdfAction? pdfAction;
+  final VoidCallback onSavePdf;
+  final VoidCallback onSharePdf;
+
+  @override
+  Widget build(BuildContext context) {
+    final save = AppButton(
+      key: const ValueKey('report-save-pdf'),
+      label: 'PDF 저장',
+      leading: const Icon(Icons.download_rounded),
+      isLoading: pdfAction == _ReportPdfAction.save,
+      onPressed: pdfAction == null ? onSavePdf : null,
+    );
+    final share = AppButton(
+      key: const ValueKey('report-share-pdf'),
+      label: '공유',
+      leading: const Icon(Icons.ios_share_rounded),
+      variant: AppButtonVariant.secondary,
+      isLoading: pdfAction == _ReportPdfAction.share,
+      onPressed: pdfAction == null ? onSharePdf : null,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (horizontal)
+          Row(
+            children: [
+              Expanded(child: save),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(child: share),
+            ],
+          )
+        else ...[
+          save,
+          const SizedBox(height: AppSpacing.sm),
+          share,
+        ],
+        const SizedBox(height: AppSpacing.sm),
+        AppButton(
+          key: const ValueKey('report-home-cta'),
+          label: '보호자 홈으로 돌아가기',
+          variant: AppButtonVariant.secondary,
+          onPressed: () => AppRouter.goGuardianHome(context),
+        ),
+      ],
+    );
+  }
 }
 
 class _NoticeCard extends StatelessWidget {

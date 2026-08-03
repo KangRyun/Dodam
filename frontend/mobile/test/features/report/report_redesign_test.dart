@@ -1,0 +1,594 @@
+import 'dart:convert';
+import 'dart:ui' as ui;
+
+import 'package:dodam/app/router/app_routes.dart';
+import 'package:dodam/core/network/api_page.dart';
+import 'package:dodam/features/activity/data/dto/activity_dtos.dart';
+import 'package:dodam/features/activity/domain/repositories/activity_repository.dart';
+import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
+import 'package:dodam/features/report/data/dto/report_dtos.dart';
+import 'package:dodam/features/report/domain/repositories/report_repository.dart';
+import 'package:dodam/features/report/presentation/screens/report_screen.dart';
+import 'package:dodam/features/report/presentation/widgets/report_mascot.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  testWidgets('production mascot 3종은 bundle에서 480×560으로 decode된다', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      for (final path in [
+        ReportMascotAssets.intro,
+        ReportMascotAssets.observe,
+        ReportMascotAssets.complete,
+      ]) {
+        final data = await rootBundle.load(path);
+        final codec = await ui.instantiateImageCodec(data.buffer.asUint8List());
+        final frame = await codec.getNextFrame();
+        expect(frame.image.width, 480, reason: path);
+        expect(frame.image.height, 560, reason: path);
+        frame.image.dispose();
+        codec.dispose();
+      }
+    });
+  });
+
+  testWidgets('completed Report는 일반형 Hero와 세 mascot을 장식으로 표시한다', (
+    tester,
+  ) async {
+    final semantics = tester.ensureSemantics();
+    await _pumpReport(tester, report: _fullReport());
+
+    expect(find.text('그림 속 이야기를 함께 돌아볼까요?'), findsOneWidget);
+    expect(find.text('돌아보기 친구가 아이의 그림과 이야기를 차근차근 정리했어요.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('report-mascot-intro')), findsOneWidget);
+    expect(find.byKey(const ValueKey('report-mascot-observe')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('report-mascot-complete')),
+      findsOneWidget,
+    );
+    expect(find.text('민지'), findsNothing);
+    expect(find.text('6세'), findsNothing);
+    expect(find.bySemanticsLabel(RegExp('그림 속 이야기를 함께 돌아볼까요')), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp('mascot|마스코트')), findsNothing);
+    semantics.dispose();
+  });
+
+  testWidgets('mascot asset decode 실패는 fallback만 표시하고 본문과 CTA를 유지한다', (
+    tester,
+  ) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(),
+      assetBundle: _FailingMascotBundle(),
+    );
+
+    expect(
+      find.byKey(const ValueKey('report-mascot-fallback')),
+      findsNWidgets(3),
+    );
+    expect(find.text('편안하게 대화했어요.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('report-home-cta')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('모든 Report section은 DTO 원문과 flat notes를 그대로 매핑한다', (
+    tester,
+  ) async {
+    await _pumpReport(tester, report: _fullReport());
+
+    expect(find.text('동생이랑 놀아서 좋았어요'), findsOneWidget);
+    expect(find.textContaining('우리 동생이야.'), findsOneWidget);
+    expect(find.text('사람, 집'), findsOneWidget);
+    expect(find.text('잠시 멈춘 뒤 다시 그렸어요.'), findsOneWidget);
+    expect(find.text('색을 여러 번 덧칠했어요.'), findsOneWidget);
+    expect(find.text('멈춤'), findsOneWidget);
+    expect(find.text('4회'), findsOneWidget);
+    expect(find.text('지우기'), findsOneWidget);
+    expect(find.text('2회'), findsOneWidget);
+    expect(find.text('필압 정보'), findsOneWidget);
+    expect(find.text('기록됨'), findsOneWidget);
+    expect(find.text('질문'), findsOneWidget);
+    expect(find.text('5개'), findsOneWidget);
+    expect(find.text('대답'), findsOneWidget);
+    expect(find.text('4개'), findsOneWidget);
+    expect(find.text('건너뜀'), findsOneWidget);
+    expect(find.text('1개'), findsOneWidget);
+    expect(find.text('기쁨'), findsOneWidget);
+    expect(find.text('어떤 부분이 좋아?'), findsOneWidget);
+    expect(find.textContaining('진단이 아닌 관찰 참고 자료'), findsOneWidget);
+    expect(find.textContaining('집에서 관찰'), findsNothing);
+    expect(find.textContaining('나무에서 관찰'), findsNothing);
+    expect(find.textContaining('사람에서 관찰'), findsNothing);
+  });
+
+  testWidgets('통계의 null 값만 숨기고 summary는 유지한다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        conversation: const ReportConversationSummaryDto(
+          questionCount: 5,
+          answeredCount: null,
+          skippedCount: null,
+          summary: '질문 수만 제공된 요약이에요.',
+        ),
+      ),
+    );
+
+    expect(find.text('질문'), findsOneWidget);
+    expect(find.text('5개'), findsOneWidget);
+    expect(find.text('대답'), findsNothing);
+    expect(find.text('건너뜀'), findsNothing);
+    expect(find.text('질문 수만 제공된 요약이에요.'), findsOneWidget);
+  });
+
+  testWidgets('선택 감정·guide·limitations가 없으면 해당 내용만 숨긴다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        expression: const ReportChildExpressionDto(
+          selectedEmotions: [],
+          expressedEmotionText: '오늘 있었던 일을 말했어요.',
+          representativeUtterances: [],
+        ),
+        guide: const [],
+        limitations: const [],
+      ),
+    );
+
+    expect(find.text('아이가 선택한 감정'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('report-conversation-guide')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('report-non-diagnostic-notice')),
+      findsNothing,
+    );
+    expect(find.text('오늘 있었던 일을 말했어요.'), findsOneWidget);
+  });
+
+  testWidgets('모든 관찰 데이터가 비면 기존 no-observations 계약을 유지한다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        expression: const ReportChildExpressionDto(
+          selectedEmotions: [],
+          expressedEmotionText: null,
+          representativeUtterances: [],
+        ),
+        facts: null,
+        conversation: null,
+        guide: const [],
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('report-no-observations')),
+      findsOneWidget,
+    );
+    expect(find.text('아직 표시할 관찰 기록이 없어요.'), findsOneWidget);
+  });
+
+  testWidgets('일반 그림은 단일 인증 preview를 유지하고 history를 조회하지 않는다', (tester) async {
+    final activityRepository = _ActivityRepository();
+    await _pumpReport(
+      tester,
+      report: _fullReport(),
+      activityRepository: activityRepository,
+    );
+
+    expect(find.byKey(const ValueKey('report-image')), findsOneWidget);
+    expect(find.byKey(const ValueKey('htp-report-gallery')), findsNothing);
+    expect(activityRepository.requests, isEmpty);
+  });
+
+  testWidgets('HTP는 기존 gallery를 shell 안에서 HOUSE→TREE→PERSON으로 유지한다', (
+    tester,
+  ) async {
+    final activityRepository = _ActivityRepository(
+      activities: [_htpActivity()],
+    );
+    await _pumpReport(
+      tester,
+      report: _fullReport(isHtp: true),
+      activityRepository: activityRepository,
+    );
+
+    expect(find.byKey(const ValueKey('htp-report-gallery')), findsOneWidget);
+    final labels = [
+      for (final element
+          in find
+              .byWidgetPredicate(
+                (widget) =>
+                    widget.key is ValueKey<String> &&
+                    (widget.key! as ValueKey<String>).value.startsWith(
+                      'htp-report-preview-label-',
+                    ),
+              )
+              .evaluate())
+        ((element.widget.key! as ValueKey<String>).value.split('-').last),
+    ];
+    expect(labels, ['HOUSE', 'TREE', 'PERSON']);
+    expect(activityRepository.requests, [(3, 0)]);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('작은 화면 section의 시각적 순서는 확정 계약과 일치한다', (tester) async {
+    _setViewport(tester, const Size(390, 844));
+    await _pumpReport(tester, report: _fullReport());
+
+    final keys = [
+      'report-mascot-intro',
+      'report-drawings-section',
+      'report-child-expression',
+      'report-activity-facts',
+      'report-conversation-summary',
+      'report-activity-info',
+      'report-conversation-guide',
+      'report-non-diagnostic-notice',
+      'report-save-pdf',
+    ];
+    final tops = [
+      for (final key in keys) tester.getTopLeft(find.byKey(ValueKey(key))).dy,
+    ];
+    expect(tops, orderedEquals([...tops]..sort()));
+    expect(find.byKey(const ValueKey('report-small-layout')), findsOneWidget);
+  });
+
+  testWidgets('900px breakpoint는 기존 wide·small key와 2단 배치를 유지한다', (
+    tester,
+  ) async {
+    _setViewport(tester, const Size(900, 1000));
+    await _pumpReport(tester, report: _fullReport());
+
+    expect(find.byKey(const ValueKey('report-wide-layout')), findsOneWidget);
+    final activityX = tester
+        .getTopLeft(find.byKey(const ValueKey('report-activity-info')))
+        .dx;
+    final factsX = tester
+        .getTopLeft(find.byKey(const ValueKey('report-activity-facts')))
+        .dx;
+    expect(factsX, greaterThan(activityX));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('AppTopBar back을 실제 tap하면 이전 화면으로 한 번 복귀한다', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        initialRoute: AppRoutes.guardianHome,
+        routes: {
+          AppRoutes.guardianHome: (_) => const Scaffold(
+            body: Text('리포트 이전 화면', key: ValueKey('report-previous-screen')),
+          ),
+          AppRoutes.report('501'): (_) => ReportScreen(
+            reportId: '501',
+            repository: _ReportRepository(_fullReport()),
+            activityRepository: _ActivityRepository(),
+          ),
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    final context = tester.element(
+      find.byKey(const ValueKey('report-previous-screen')),
+    );
+    Navigator.of(context).pushNamed(AppRoutes.report('501'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byIcon(Icons.arrow_back_ios_new_rounded));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('report-previous-screen')),
+      findsOneWidget,
+    );
+    expect(find.text('관찰 리포트'), findsNothing);
+  });
+
+  for (final viewport in const [
+    (name: '320×640', size: Size(320, 640), scale: 1.0),
+    (name: '390×844', size: Size(390, 844), scale: 1.0),
+    (name: '휴대폰 가로', size: Size(844, 390), scale: 1.0),
+    (name: '800×1280', size: Size(800, 1280), scale: 1.0),
+    (name: '1600×1000', size: Size(1600, 1000), scale: 1.0),
+    (name: '낮은 높이', size: Size(600, 320), scale: 1.0),
+    (name: 'text scale 2.0', size: Size(390, 844), scale: 2.0),
+  ]) {
+    testWidgets('${viewport.name}에서 단일 스크롤로 최하단 CTA를 실제 tap한다', (tester) async {
+      _setViewport(tester, viewport.size);
+      await _pumpReport(
+        tester,
+        report: _longReport(),
+        textScale: viewport.scale,
+      );
+
+      expect(find.byType(SingleChildScrollView), findsOneWidget);
+      final cta = find.byKey(const ValueKey('report-home-cta'));
+      final scrollable = find.descendant(
+        of: find.byType(SingleChildScrollView),
+        matching: find.byType(Scrollable),
+      );
+      expect(scrollable, findsOneWidget);
+      await tester.scrollUntilVisible(cta, 500, scrollable: scrollable);
+      await tester.tap(cta);
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('guardian-home-target')),
+        findsOneWidget,
+      );
+      expect(tester.takeException(), isNull);
+    });
+  }
+}
+
+void _setViewport(WidgetTester tester, Size size) {
+  tester.view.physicalSize = size;
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+Future<void> _pumpReport(
+  WidgetTester tester, {
+  required ReportDetailDto report,
+  ActivityRepository? activityRepository,
+  AssetBundle? assetBundle,
+  double textScale = 1,
+}) async {
+  Widget app = MaterialApp(
+    initialRoute: AppRoutes.report('501'),
+    routes: {
+      AppRoutes.report('501'): (_) => MediaQuery(
+        data: MediaQueryData(textScaler: TextScaler.linear(textScale)),
+        child: ReportScreen(
+          reportId: '501',
+          repository: _ReportRepository(report),
+          activityRepository: activityRepository ?? _ActivityRepository(),
+        ),
+      ),
+      AppRoutes.guardianHome: (_) => const Scaffold(
+        body: Center(
+          child: Text('보호자 홈', key: ValueKey('guardian-home-target')),
+        ),
+      ),
+    },
+    builder: (context, child) => MediaQuery(
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: TextScaler.linear(textScale)),
+      child: child!,
+    ),
+  );
+  if (assetBundle != null) {
+    app = DefaultAssetBundle(bundle: assetBundle, child: app);
+  }
+  await tester.pumpWidget(app);
+  await tester.pumpAndSettle();
+}
+
+ReportDetailDto _fullReport({
+  bool isHtp = false,
+  ReportChildExpressionDto? expression = const ReportChildExpressionDto(
+    selectedEmotions: ['JOY'],
+    expressedEmotionText: '동생이랑 놀아서 좋았어요',
+    representativeUtterances: [
+      ReportUtteranceDto(
+        messageId: 804,
+        text: '우리 동생이야.',
+        source: 'STT',
+        sttNeedsConfirmation: false,
+      ),
+    ],
+  ),
+  ReportActivityFactsDto? facts = const ReportActivityFactsDto(
+    detectedObjects: ['사람', '집'],
+    drawingDurationMs: 1320000,
+    pauseCount: 4,
+    eraseCount: 2,
+    pressureAvailable: true,
+    notes: ['잠시 멈춘 뒤 다시 그렸어요.', '색을 여러 번 덧칠했어요.'],
+  ),
+  ReportConversationSummaryDto? conversation =
+      const ReportConversationSummaryDto(
+        questionCount: 5,
+        answeredCount: 4,
+        skippedCount: 1,
+        summary: '편안하게 대화했어요.',
+      ),
+  List<String> guide = const ['어떤 부분이 좋아?'],
+  List<String> limitations = const ['이 리포트는 진단이 아닌 관찰 참고 자료입니다.'],
+}) => ReportDetailDto(
+  reportId: 501,
+  reportVersion: 2,
+  reportStatus: 'COMPLETED',
+  drawingSession: ReportDrawingSessionDto(
+    drawingSessionId: 120,
+    childId: 3,
+    drawingTypeCode: isHtp ? 'HTP' : 'ART_DIARY',
+    drawingTypeName: isHtp ? 'HTP 검사' : '그림일기',
+    title: '우리 가족',
+    inputMethod: isHtp ? 'UPLOAD' : 'CANVAS',
+    startedAt: '2026-08-03T09:40:00Z',
+    completedAt: '2026-08-03T10:03:00Z',
+    durationMs: 1380000,
+  ),
+  drawing: const ReportDrawingDto(
+    finalImageUrl: '/api/v1/drawing-assets/general/file',
+    thumbnailUrl: null,
+  ),
+  childExpression: expression,
+  activityFacts: facts,
+  conversationSummary: conversation,
+  guardianConversationGuide: guide,
+  limitations: limitations,
+  expertReview: const ReportExpertReviewDto(
+    status: 'NOT_REQUESTED',
+    available: false,
+  ),
+  createdAt: '2026-08-03T10:12:00Z',
+);
+
+ReportDetailDto _longReport() => _fullReport(
+  facts: const ReportActivityFactsDto(
+    detectedObjects: ['사람', '집', '나무', '구름'],
+    drawingDurationMs: 1320000,
+    pauseCount: 4,
+    eraseCount: 2,
+    pressureAvailable: true,
+    notes: [
+      '아이가 긴 이야기를 충분히 이어갈 수 있도록 줄 수를 제한하지 않는 관찰 문장입니다. '
+          '작은 화면과 큰 글자에서도 자연스럽게 여러 줄로 표시되어야 합니다.',
+      '관찰 내용은 HOUSE, TREE, PERSON 주제를 임의로 붙이지 않고 서버가 제공한 순서 그대로 표시합니다.',
+    ],
+  ),
+  conversation: const ReportConversationSummaryDto(
+    questionCount: 12,
+    answeredCount: 10,
+    skippedCount: 2,
+    summary:
+        '대화 요약은 길어져도 말줄임 없이 모든 내용을 보여 줍니다. '
+        '화면 폭이 좁거나 글자 크기가 커져도 다음 section과 겹치지 않아야 합니다.',
+  ),
+  guide: const [
+    '그림을 그리면서 가장 즐거웠던 순간을 아이의 속도에 맞춰 천천히 물어보세요.',
+    '정답을 유도하지 말고 아이가 사용한 표현을 그대로 되짚어 주세요.',
+  ],
+);
+
+ActivitySummaryDto _htpActivity() => ActivitySummaryDto(
+  activityId: 77,
+  title: 'HTP',
+  drawingType: const ActivityDrawingTypeDto(code: 'HTP', name: 'HTP'),
+  inputMethod: 'UPLOAD',
+  sessionStatus: 'COMPLETED',
+  selectedEmotions: const [],
+  thumbnailUrl: null,
+  analysisStatus: null,
+  report: null,
+  startedAt: '2026-08-03T00:00:00Z',
+  completedAt: '2026-08-03T00:10:00Z',
+  activityKind: 'HTP',
+  htpAssessmentId: 7,
+  htpStatus: 'COMPLETED',
+  htpDrawings: const [
+    HtpActivityDrawingDto(
+      drawingSubject: 'HOUSE',
+      drawingSessionId: 71,
+      thumbnailUrl: '/api/v1/drawing-assets/house/file',
+    ),
+    HtpActivityDrawingDto(
+      drawingSubject: 'TREE',
+      drawingSessionId: 72,
+      thumbnailUrl: '/api/v1/drawing-assets/tree/file',
+    ),
+    HtpActivityDrawingDto(
+      drawingSubject: 'PERSON',
+      drawingSessionId: 120,
+      thumbnailUrl: '/api/v1/drawing-assets/person/file',
+    ),
+  ],
+);
+
+final class _ReportRepository implements ReportRepository {
+  _ReportRepository(this.report);
+
+  final ReportDetailDto report;
+
+  @override
+  Future<ReportDetailDto> getReport(int reportId) async => report;
+
+  @override
+  Future<Uint8List> downloadImage(String imageUrl) async => _validPng;
+
+  @override
+  Future<ReportGenerationStatusDto> getGenerationStatus(int reportId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<ReportGenerationStatusDto> regenerateReport(
+    int reportId, {
+    required String idempotencyKey,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<ApiPage<ReportSummaryDto>> getReports(
+    int childId, {
+    ReportFilterDto filter = const ReportFilterDto(),
+  }) => throw UnimplementedError();
+
+  @override
+  Future<ReportExportDto> requestExport(
+    int reportId, {
+    required String idempotencyKey,
+  }) => throw UnimplementedError();
+
+  @override
+  Future<Uint8List> downloadExport(String downloadUrl) =>
+      throw UnimplementedError();
+
+  @override
+  Future<AnalysisStatusDto> getAnalysisStatus(int analysisId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<AnalysisAcceptedDto> retryAnalysis(
+    int analysisId, {
+    required String idempotencyKey,
+  }) => throw UnimplementedError();
+}
+
+final class _ActivityRepository implements ActivityRepository {
+  _ActivityRepository({this.activities = const []});
+
+  final List<ActivitySummaryDto> activities;
+  final List<(int, int)> requests = [];
+
+  @override
+  Future<ApiPage<ActivitySummaryDto>> getActivities(
+    int childId, {
+    ActivityFilterDto filter = const ActivityFilterDto(),
+  }) async {
+    requests.add((childId, filter.page));
+    return ApiPage(
+      content: activities,
+      page: 0,
+      size: 20,
+      totalElements: activities.length,
+      totalPages: 1,
+      hasNext: false,
+    );
+  }
+
+  @override
+  Future<Uint8List> downloadImage(String url) async => _validPng;
+
+  @override
+  Future<void> deleteActivity(int activityId) => throw UnimplementedError();
+
+  @override
+  Future<ActivityDetailDto> getActivity(int activityId) =>
+      throw UnimplementedError();
+
+  @override
+  Future<List<ActivityConversationMessageDto>> getConversationMessages(
+    int conversationId,
+  ) => throw UnimplementedError();
+}
+
+class _FailingMascotBundle extends CachingAssetBundle {
+  @override
+  Future<ByteData> load(String key) {
+    if (key.startsWith('assets/characters/report_mascot_')) {
+      return Future<ByteData>.error(StateError('mascot decode failure'));
+    }
+    return rootBundle.load(key);
+  }
+}
+
+final Uint8List _validPng = base64Decode(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+);
