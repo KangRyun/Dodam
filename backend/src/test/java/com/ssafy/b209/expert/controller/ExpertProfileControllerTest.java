@@ -17,6 +17,7 @@ import com.ssafy.b209.expert.dto.request.CreateExpertProfileRequest;
 import com.ssafy.b209.expert.dto.response.ExpertProfileResponse;
 import com.ssafy.b209.expert.service.ExpertProfileCreationService;
 import com.ssafy.b209.expert.service.ExpertProfileQueryService;
+import com.ssafy.b209.expert.service.ExpertProfileUpdateService;
 import com.ssafy.b209.global.exception.GlobalExceptionHandler;
 import java.util.List;
 import org.junit.jupiter.api.BeforeEach;
@@ -33,12 +34,15 @@ class ExpertProfileControllerTest {
       Mockito.mock(ExpertProfileCreationService.class);
   private final ExpertProfileQueryService queryService =
       Mockito.mock(ExpertProfileQueryService.class);
+  private final ExpertProfileUpdateService updateService =
+      Mockito.mock(ExpertProfileUpdateService.class);
   private MockMvc mockMvc;
 
   @BeforeEach
   void setUp() {
     mockMvc =
-        MockMvcBuilders.standaloneSetup(new ExpertProfileController(creationService, queryService))
+        MockMvcBuilders.standaloneSetup(
+                new ExpertProfileController(creationService, queryService, updateService))
             .setControllerAdvice(new GlobalExceptionHandler())
             .addFilters(
                 new AccessTokenAuthenticationFilter(

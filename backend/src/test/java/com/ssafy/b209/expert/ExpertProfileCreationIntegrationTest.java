@@ -2,6 +2,7 @@ package com.ssafy.b209.expert;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -206,6 +207,141 @@ class ExpertProfileCreationIntegrationTest {
                 Integer.class,
                 EXPERT_USER_ID))
         .isZero();
+  }
+
+  @Test
+  void updatesOwnedProfileAndRequiresReviewWhenProfessionalInformationChanges() throws Exception {
+    authenticate(VERIFIED_EXPERT_USER_ID);
+
+    mockMvc
+        .perform(
+            patch("/api/v1/experts/me/profile")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "organization": "새마음 아동상담센터",
+                      "specialties": ["PARENT_COUNSELING", "CHILD_ART"]
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.code").value("COMMON_200"))
+        .andExpect(jsonPath("$.data.organization").value("새마음 아동상담센터"))
+        .andExpect(jsonPath("$.data.specialties[0]").value("PARENT_COUNSELING"))
+        .andExpect(jsonPath("$.data.specialties[1]").value("CHILD_ART"))
+        .andExpect(jsonPath("$.data.verificationStatus").value("REVIEW_REQUIRED"))
+        .andExpect(jsonPath("$.data.followerCount").value(1))
+        .andExpect(jsonPath("$.data.followedByMe").value(false));
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT verification_status FROM expert_profiles WHERE id = ?",
+                String.class,
+                VERIFIED_EXPERT_PROFILE_ID))
+        .isEqualTo("REVIEW_REQUIRED");
+    assertThat(
+            jdbcTemplate.queryForList(
+                """
+                SELECT specialty_code
+                  FROM expert_profile_specialties
+                 WHERE expert_profile_id = ?
+                 ORDER BY display_order
+                """,
+                String.class,
+                VERIFIED_EXPERT_PROFILE_ID))
+        .containsExactly("PARENT_COUNSELING", "CHILD_ART");
+  }
+
+  @Test
+  void keepsVerificationWhenOnlyIntroductionAndAvailabilityChange() throws Exception {
+    authenticate(VERIFIED_EXPERT_USER_ID);
+
+    mockMvc
+        .perform(
+            patch("/api/v1/experts/me/profile")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "introduction": "상담 가능 시간을 조정했습니다.",
+                      "consultationAvailable": false
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.introduction").value("상담 가능 시간을 조정했습니다."))
+        .andExpect(jsonPath("$.data.consultationAvailable").value(false))
+        .andExpect(jsonPath("$.data.verificationStatus").value("VERIFIED"));
+  }
+
+  @Test
+  void keepsVerificationWhenProfessionalInformationDoesNotActuallyChange() throws Exception {
+    authenticate(VERIFIED_EXPERT_USER_ID);
+
+    mockMvc
+        .perform(
+            patch("/api/v1/experts/me/profile")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(
+                    """
+                    {
+                      "organization": "마음숲 센터",
+                      "specialties": ["CHILD_ART"]
+                    }
+                    """))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.verificationStatus").value("VERIFIED"));
+  }
+
+  @Test
+  void rejectsProfileUpdateWhenOwnedProfileDoesNotExist() throws Exception {
+    authenticate(EXPERT_USER_ID);
+
+    mockMvc
+        .perform(
+            patch("/api/v1/experts/me/profile")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"introduction\":\"소개 수정\"}"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("EXPERT_PROFILE_NOT_FOUND"));
+  }
+
+  @Test
+  void rejectsProfileUpdateForGuardian() throws Exception {
+    authenticate(GUARDIAN_USER_ID);
+
+    mockMvc
+        .perform(
+            patch("/api/v1/experts/me/profile")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"introduction\":\"소개 수정\"}"))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("AUTH_403_002"));
+  }
+
+  @Test
+  void rejectsUpdateThatMakesEffectiveTargetAgeRangeInvalid() throws Exception {
+    authenticate(VERIFIED_EXPERT_USER_ID);
+
+    mockMvc
+        .perform(
+            patch("/api/v1/experts/me/profile")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"targetAgeMin\":14}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("EXPERT_PROFILE_INVALID"));
+  }
+
+  @Test
+  void rejectsEmptyProfilePatch() throws Exception {
+    authenticate(VERIFIED_EXPERT_USER_ID);
+
+    mockMvc
+        .perform(
+            patch("/api/v1/experts/me/profile")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{}"))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
   }
 
   @Test
