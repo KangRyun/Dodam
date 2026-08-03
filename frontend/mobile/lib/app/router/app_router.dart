@@ -8,6 +8,7 @@ import '../../features/activity/presentation/screens/activity_screens.dart';
 import '../../features/auth/auth.dart';
 import '../../features/child_mode/presentation/screens/child_gallery_screen.dart';
 import '../../features/child_mode/presentation/screens/child_mode_screens.dart';
+import '../../features/child_mode/domain/dodam_costume.dart';
 import '../../features/child/data/dto/child_dtos.dart';
 import '../../features/child/domain/repositories/child_profile_image_repository.dart';
 import '../../features/child/domain/repositories/child_repository.dart';
@@ -445,6 +446,7 @@ abstract final class AppRouter {
               (settings.arguments! as DrawingRouteArguments).activityContext,
           inputMethod:
               (settings.arguments! as DrawingRouteArguments).inputMethod,
+          companion: (settings.arguments! as DrawingRouteArguments).companion,
           childRepository: childRepository,
         ),
       ['child', final childId, 'activity', 'emotions']
@@ -651,6 +653,7 @@ final class DrawingRouteArguments {
     this.startFresh = false,
     this.activityContext = const DrawingActivityContextDto.general(),
     this.inputMethod,
+    this.companion = DodamCostume.base,
   });
 
   final int sessionId;
@@ -659,6 +662,9 @@ final class DrawingRouteArguments {
 
   /// 이 세션이 실제로 쓰는 입력 방식(`CANVAS`|`UPLOAD`).
   final String? inputMethod;
+
+  /// 활동 시작 시 서버 확정 `preferredCharacter`에서 만든 immutable snapshot.
+  final DodamCostume companion;
 
   /// 그림 단계를 지난 세션으로 들어올 때 대화를 즉시 이어받게 한다.
   final bool resumeConversation;

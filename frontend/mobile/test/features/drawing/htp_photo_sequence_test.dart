@@ -6,6 +6,7 @@ import 'package:dodam/app/router/app_routes.dart';
 import 'package:dodam/core/network/network.dart';
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
+import 'package:dodam/features/child_mode/domain/dodam_costume.dart';
 import 'package:dodam/features/child_mode/presentation/screens/child_mode_screens.dart';
 import 'package:dodam/features/conversation/conversation.dart';
 import 'package:dodam/features/drawing/application/drawing_session_start_controller.dart';
@@ -72,6 +73,7 @@ void main() {
       // 그림 단계이므로 대화를 이어열지 않는다.
       expect(drawingRoutes.single.resumeConversation, isFalse);
       expect(drawingRoutes.single.autoRestoreDraft, isFalse);
+      expect(drawingRoutes.single.companion, DodamCostume.octopus);
     });
 
     testWidgets('주제 전환 실패 후 재시도는 같은 Key를 재사용한다', (tester) async {
@@ -183,6 +185,7 @@ void main() {
       expect(harness.drawingRoutes, hasLength(1));
       expect(harness.drawingRoutes.single.resumeConversation, isTrue);
       expect(harness.drawingRoutes.single.sessionId, 901);
+      expect(harness.drawingRoutes.single.companion, DodamCostume.dino);
       // UPLOAD 세션에는 Canvas Draft가 없다 — 조회·복원을 시도하지 않는다.
       expect(harness.drawingRoutes.single.autoRestoreDraft, isFalse);
       expect(harness.repository.createCalls, 0);
@@ -265,6 +268,9 @@ void main() {
         harness.drawingRoutes.every((it) => it.resumeConversation),
         isTrue,
       );
+      expect(harness.drawingRoutes.map((it) => it.companion).toSet(), {
+        DodamCostume.dino,
+      });
       // 세 주제의 asset이 서로 다르다.
       expect(
         harness.repository.completionMetadata
@@ -427,6 +433,7 @@ Future<Future<DrawingRouteResult?>> _pumpHouseConversation(
       builder: (_) => DrawingScreen(
         childId: '7',
         sessionId: 901,
+        companion: DodamCostume.octopus,
         drawingRepository: repository,
         conversationRepository: const _ConversationRepository(),
         conversationEndRepository: const _EndRepository(),
@@ -628,8 +635,8 @@ const _child = ChildSummaryDto(
   nickname: '도담',
   birthDate: '2020-01-01',
   age: 6,
-  profileImageUrl: null,
-  preferredCharacter: null,
+  profileImageUrl: 'https://example.invalid/profile.jpg',
+  preferredCharacter: 'DINO',
   questionDifficulty: 'EASY',
   tutorialStatus: 'DONE',
   relationshipType: 'PARENT',

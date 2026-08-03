@@ -28,7 +28,6 @@ import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 import '../../../drawing/presentation/widgets/canvas_tool_tutorial_overlay.dart';
 import '../../../conversation/conversation.dart';
-import '../../../child_mode/data/costume_preference_store.dart';
 import '../../../child_mode/domain/dodam_costume.dart';
 import '../../data/dto/activity_dtos.dart';
 import '../../domain/models/activity_conversation_turn.dart';
@@ -153,6 +152,7 @@ class DrawingScreen extends StatefulWidget {
     this.startFresh = false,
     this.activityContext = const DrawingActivityContextDto.general(),
     this.inputMethod,
+    this.companion = DodamCostume.base,
     this.childRepository,
     this.canvasTutorialController,
     super.key,
@@ -164,6 +164,7 @@ class DrawingScreen extends StatefulWidget {
   /// 이 세션이 실제로 쓰는 입력 방식(`CANVAS`|`UPLOAD`). HTP 주제 전환에서 다음
   /// 세션에 그대로 이어 쓰기 위해 들고 다닌다.
   final String? inputMethod;
+  final DodamCostume companion;
   final ChildRepository? childRepository;
   final CanvasTutorialController? canvasTutorialController;
   final DrawingRepository? drawingRepository;
@@ -232,6 +233,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   bool _isCompleting = false;
   bool _isLeaving = false;
   bool _appInBackground = false;
+  late final DodamCostume _companionSnapshot;
   Future<bool>? _lifecycleSave;
   String? _pendingCompletionKey;
   BinaryUploadDto? _pendingCompletionImage;
@@ -318,26 +320,14 @@ class _DrawingScreenState extends State<DrawingScreen>
   bool get _hasDrawingContent =>
       _completedStrokes.isNotEmpty || _draftRestoreController.draft != null;
 
-  /// 캔버스에서 말하는 캐릭터로 쓸 코스튬 에셋. 이 아이가 홈에서 고른 코스튬을
-  /// 로컬에서 읽어 반영한다(S15P11B209-750). 없으면 기본 도담이.
-  String _characterAsset = DodamCostume.base.asset;
   CanvasTutorialController? _canvasTutorialController;
   late final bool _ownsCanvasTutorialController;
-
-  Future<void> _loadCharacterCostume() async {
-    final childId = int.tryParse(widget.childId);
-    if (childId == null) return;
-    final code = await CostumePreferenceStore().read(childId);
-    if (!mounted) return;
-    final asset = DodamCostume.fromCode(code).asset;
-    if (asset != _characterAsset) setState(() => _characterAsset = asset);
-  }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    unawaited(_loadCharacterCostume());
+    _companionSnapshot = widget.companion;
     final parsedChildId = int.tryParse(widget.childId);
     final tutorialApplicable =
         !widget.resumeConversation &&
@@ -1613,6 +1603,7 @@ class _DrawingScreenState extends State<DrawingScreen>
         startFresh: true,
         activityContext: resolution.activityContext,
         inputMethod: resolution.inputMethod,
+        companion: _companionSnapshot,
       ),
     );
   }
@@ -1815,156 +1806,160 @@ class _DrawingScreenState extends State<DrawingScreen>
           SafeArea(
             top: false,
             child: LayoutBuilder(
-          builder: (context, constraints) {
-            final restoreStatus = _draftRestoreController.status;
-            final autoRestoreInProgress =
-                widget.autoRestoreDraft &&
-                (restoreStatus == DrawingDraftRestoreStatus.loading ||
-                    restoreStatus == DrawingDraftRestoreStatus.found ||
-                    restoreStatus == DrawingDraftRestoreStatus.loadingImage);
-            final canvas = _CanvasPanel(
-              repaintBoundaryKey: _canvasBoundaryKey,
-              characterAsset: _characterAsset,
-              strokes: _visibleStrokes,
-              onPointerDown: _startStroke,
-              onPointerMove: _extendStroke,
-              onPointerUp: _endStroke,
-              backgroundImage: _draftRestoreController.backgroundImage,
-              inputEnabled:
-                  !_canvasLocked &&
-                  !_isCompleting &&
-                  !_isLeaving &&
-                  _draftRestoreController.canDraw,
-              showRestoreOverlay:
-                  !_canvasLocked && !_draftRestoreController.canDraw,
-              autoRestoreInProgress: autoRestoreInProgress,
-              onBackgroundLoaded: _draftRestoreController.markImageLoaded,
-              onBackgroundError: _draftRestoreController.markImageFailed,
-              restoreStatus: restoreStatus,
-              restoreRetryable: _draftRestoreController.canRetry,
-              onContinue: _draftRestoreController.continueDrawing,
-              onStartNew: _draftRestoreController.startNewDrawing,
-              onRetryQuery: () => unawaited(_draftRestoreController.load()),
-              onRetryImage: _draftRestoreController.retryImage,
-              question: _questionDisplayController.visibleQuestion,
-              showQuestion:
-                  _questionDisplayController.isVisible &&
-                  _activePointer == null &&
-                  (_canvasLocked || _draftRestoreController.canDraw),
-              selectedQuestionOptionId:
-                  _questionSelectionController.selectedOptionId,
-              onQuestionOptionSelected: (optionId) {
-                unawaited(_selectQuestionOption(optionId));
-              },
-              answerSubmissionStatus:
-                  _answerSubmissionController?.status ??
-                  OptionAnswerSubmissionStatus.idle,
-              questionSkipStatus:
-                  _questionSkipController?.status ?? QuestionSkipStatus.idle,
-              conversationEndStatus:
-                  _conversationEndController?.status ??
-                  ConversationEndStatus.idle,
-              showQuestionResponseActions:
-                  _questionSelectionController.optionsVisible,
-              onQuestionSkip: () {
-                unawaited(_skipQuestion());
-              },
-              onConversationEnd: () {
-                unawaited(_confirmAndEndConversation());
-              },
-              voiceRecordingController: _voiceRecordingController,
-              voiceAnswerUploadStatus:
-                  _voiceAnswerUploadController?.status ??
-                  VoiceAnswerUploadStatus.idle,
-              onRetryVoiceAnswerUpload: _retryVoiceAnswerUpload,
-              // 실패했지만 다시 시도해도 같은 결과인 조작은 잠근다.
-              answerRetryable:
-                  _answerSubmissionController?.status !=
-                      OptionAnswerSubmissionStatus.failure ||
-                  _answerSubmissionController?.canRetry == true,
-              answerOptionsEnabled:
-                  _answerSubmissionController?.canSelectOption ?? true,
-              skipRetryable:
-                  _questionSkipController?.status !=
-                      QuestionSkipStatus.failure ||
-                  _questionSkipController?.canRetry == true,
-              endRetryable:
-                  _conversationEndController?.status !=
-                      ConversationEndStatus.failure ||
-                  _conversationEndController?.canRetry == true,
-              voiceRetryable: _voiceAnswerUploadController?.canRetry ?? false,
-              sttResultController: _sttResultController,
-            );
-            final sidePanel = _DrawingSidePanel(
-              selectedTool: _tool,
-              selectedColor: _color,
-              selectedThickness: _thickness,
-              onToolChanged: (tool) => setState(() => _tool = tool),
-              onColorChanged: (color) => setState(() => _color = color),
-              onThicknessChanged: (value) => setState(() => _thickness = value),
-              canComplete:
-                  !_canvasLocked &&
-                  !_isCompleting &&
-                  _activeStroke == null &&
-                  _hasDrawingContent,
-              isCompleting: _isCompleting,
-              onComplete: () => unawaited(_confirmAndComplete()),
-              saveStatus: _syncCoordinator.saveStatus,
-              canRetrySave: _syncCoordinator.canRetrySave,
-              onRetrySave: () => unawaited(_syncCoordinator.retry()),
-              questionController: _questionController,
-              conversationStartError: _conversationStartError,
-              htpAdvanceError: _htpAdvanceError,
-              onRetryConversationStart: () =>
-                  unawaited(_retryConversationStart()),
-              onRetryHtpAdvance: () => unawaited(_retryHtpAdvance()),
-              stageErrorAnchorKey: _stageErrorAnchorKey,
-            );
-            final screenSize = MediaQuery.sizeOf(context);
-            final useCompactLandscape =
-                screenSize.width >= 640 && screenSize.height <= 520;
-            final useTabletLayout =
-                !useCompactLandscape && screenSize.width >= 900;
-            if (useCompactLandscape || useTabletLayout) {
-              final padding = useCompactLandscape
-                  ? AppSpacing.sm
-                  : AppSpacing.lg;
-              final panelWidth = useCompactLandscape ? 240.0 : 320.0;
-              return Padding(
-                key: ValueKey(
-                  useCompactLandscape
-                      ? 'drawing-layout-compact-landscape'
-                      : 'drawing-layout-tablet',
-                ),
-                padding: EdgeInsets.all(padding),
-                child: Row(
-                  children: [
-                    Expanded(flex: 3, child: canvas),
-                    SizedBox(
-                      width: useCompactLandscape
-                          ? AppSpacing.sm
-                          : AppSpacing.lg,
+              builder: (context, constraints) {
+                final restoreStatus = _draftRestoreController.status;
+                final autoRestoreInProgress =
+                    widget.autoRestoreDraft &&
+                    (restoreStatus == DrawingDraftRestoreStatus.loading ||
+                        restoreStatus == DrawingDraftRestoreStatus.found ||
+                        restoreStatus ==
+                            DrawingDraftRestoreStatus.loadingImage);
+                final canvas = _CanvasPanel(
+                  repaintBoundaryKey: _canvasBoundaryKey,
+                  companion: _companionSnapshot,
+                  strokes: _visibleStrokes,
+                  onPointerDown: _startStroke,
+                  onPointerMove: _extendStroke,
+                  onPointerUp: _endStroke,
+                  backgroundImage: _draftRestoreController.backgroundImage,
+                  inputEnabled:
+                      !_canvasLocked &&
+                      !_isCompleting &&
+                      !_isLeaving &&
+                      _draftRestoreController.canDraw,
+                  showRestoreOverlay:
+                      !_canvasLocked && !_draftRestoreController.canDraw,
+                  autoRestoreInProgress: autoRestoreInProgress,
+                  onBackgroundLoaded: _draftRestoreController.markImageLoaded,
+                  onBackgroundError: _draftRestoreController.markImageFailed,
+                  restoreStatus: restoreStatus,
+                  restoreRetryable: _draftRestoreController.canRetry,
+                  onContinue: _draftRestoreController.continueDrawing,
+                  onStartNew: _draftRestoreController.startNewDrawing,
+                  onRetryQuery: () => unawaited(_draftRestoreController.load()),
+                  onRetryImage: _draftRestoreController.retryImage,
+                  question: _questionDisplayController.visibleQuestion,
+                  showQuestion:
+                      _questionDisplayController.isVisible &&
+                      _activePointer == null &&
+                      (_canvasLocked || _draftRestoreController.canDraw),
+                  selectedQuestionOptionId:
+                      _questionSelectionController.selectedOptionId,
+                  onQuestionOptionSelected: (optionId) {
+                    unawaited(_selectQuestionOption(optionId));
+                  },
+                  answerSubmissionStatus:
+                      _answerSubmissionController?.status ??
+                      OptionAnswerSubmissionStatus.idle,
+                  questionSkipStatus:
+                      _questionSkipController?.status ??
+                      QuestionSkipStatus.idle,
+                  conversationEndStatus:
+                      _conversationEndController?.status ??
+                      ConversationEndStatus.idle,
+                  showQuestionResponseActions:
+                      _questionSelectionController.optionsVisible,
+                  onQuestionSkip: () {
+                    unawaited(_skipQuestion());
+                  },
+                  onConversationEnd: () {
+                    unawaited(_confirmAndEndConversation());
+                  },
+                  voiceRecordingController: _voiceRecordingController,
+                  voiceAnswerUploadStatus:
+                      _voiceAnswerUploadController?.status ??
+                      VoiceAnswerUploadStatus.idle,
+                  onRetryVoiceAnswerUpload: _retryVoiceAnswerUpload,
+                  // 실패했지만 다시 시도해도 같은 결과인 조작은 잠근다.
+                  answerRetryable:
+                      _answerSubmissionController?.status !=
+                          OptionAnswerSubmissionStatus.failure ||
+                      _answerSubmissionController?.canRetry == true,
+                  answerOptionsEnabled:
+                      _answerSubmissionController?.canSelectOption ?? true,
+                  skipRetryable:
+                      _questionSkipController?.status !=
+                          QuestionSkipStatus.failure ||
+                      _questionSkipController?.canRetry == true,
+                  endRetryable:
+                      _conversationEndController?.status !=
+                          ConversationEndStatus.failure ||
+                      _conversationEndController?.canRetry == true,
+                  voiceRetryable:
+                      _voiceAnswerUploadController?.canRetry ?? false,
+                  sttResultController: _sttResultController,
+                );
+                final sidePanel = _DrawingSidePanel(
+                  selectedTool: _tool,
+                  selectedColor: _color,
+                  selectedThickness: _thickness,
+                  onToolChanged: (tool) => setState(() => _tool = tool),
+                  onColorChanged: (color) => setState(() => _color = color),
+                  onThicknessChanged: (value) =>
+                      setState(() => _thickness = value),
+                  canComplete:
+                      !_canvasLocked &&
+                      !_isCompleting &&
+                      _activeStroke == null &&
+                      _hasDrawingContent,
+                  isCompleting: _isCompleting,
+                  onComplete: () => unawaited(_confirmAndComplete()),
+                  saveStatus: _syncCoordinator.saveStatus,
+                  canRetrySave: _syncCoordinator.canRetrySave,
+                  onRetrySave: () => unawaited(_syncCoordinator.retry()),
+                  questionController: _questionController,
+                  conversationStartError: _conversationStartError,
+                  htpAdvanceError: _htpAdvanceError,
+                  onRetryConversationStart: () =>
+                      unawaited(_retryConversationStart()),
+                  onRetryHtpAdvance: () => unawaited(_retryHtpAdvance()),
+                  stageErrorAnchorKey: _stageErrorAnchorKey,
+                );
+                final screenSize = MediaQuery.sizeOf(context);
+                final useCompactLandscape =
+                    screenSize.width >= 640 && screenSize.height <= 520;
+                final useTabletLayout =
+                    !useCompactLandscape && screenSize.width >= 900;
+                if (useCompactLandscape || useTabletLayout) {
+                  final padding = useCompactLandscape
+                      ? AppSpacing.sm
+                      : AppSpacing.lg;
+                  final panelWidth = useCompactLandscape ? 240.0 : 320.0;
+                  return Padding(
+                    key: ValueKey(
+                      useCompactLandscape
+                          ? 'drawing-layout-compact-landscape'
+                          : 'drawing-layout-tablet',
                     ),
-                    SizedBox(width: panelWidth, child: sidePanel),
-                  ],
-                ),
-              );
-            }
-            final canvasHeight = constraints.maxWidth >= 720
-                ? min(520.0, max(420.0, constraints.maxHeight * 0.55))
-                : 420.0;
-            return SingleChildScrollView(
-              key: const ValueKey('drawing-layout-stacked'),
-              padding: const EdgeInsets.all(AppSpacing.md),
-              child: Column(
-                children: [
-                  SizedBox(height: canvasHeight, child: canvas),
-                  const SizedBox(height: AppSpacing.md),
-                  sidePanel,
-                ],
-              ),
-            );
-          },
+                    padding: EdgeInsets.all(padding),
+                    child: Row(
+                      children: [
+                        Expanded(flex: 3, child: canvas),
+                        SizedBox(
+                          width: useCompactLandscape
+                              ? AppSpacing.sm
+                              : AppSpacing.lg,
+                        ),
+                        SizedBox(width: panelWidth, child: sidePanel),
+                      ],
+                    ),
+                  );
+                }
+                final canvasHeight = constraints.maxWidth >= 720
+                    ? min(520.0, max(420.0, constraints.maxHeight * 0.55))
+                    : 420.0;
+                return SingleChildScrollView(
+                  key: const ValueKey('drawing-layout-stacked'),
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  child: Column(
+                    children: [
+                      SizedBox(height: canvasHeight, child: canvas),
+                      const SizedBox(height: AppSpacing.md),
+                      sidePanel,
+                    ],
+                  ),
+                );
+              },
             ),
           ),
           if (_canvasTutorialController case final tutorialController?)
@@ -2013,11 +2008,11 @@ class _CanvasPanel extends StatelessWidget {
     required this.endRetryable,
     required this.voiceRetryable,
     required this.sttResultController,
-    required this.characterAsset,
+    required this.companion,
   });
 
   final GlobalKey repaintBoundaryKey;
-  final String characterAsset;
+  final DodamCostume companion;
   final List<DrawingStroke> strokes;
   final ValueChanged<PointerDownEvent> onPointerDown;
   final ValueChanged<PointerMoveEvent> onPointerMove;
@@ -2096,7 +2091,7 @@ class _CanvasPanel extends StatelessWidget {
               ),
             ),
             AiQuestionBubbleOverlay(
-              characterAsset: characterAsset,
+              companion: companion,
               question: question,
               visible: showQuestion,
               selectedOptionId: selectedQuestionOptionId,

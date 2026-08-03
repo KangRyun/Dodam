@@ -3,6 +3,8 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 
 import '../../../../design_system/design_system.dart';
+import '../../../child_mode/domain/dodam_costume.dart';
+import '../../../child_mode/presentation/widgets/dodam_companion.dart';
 import '../../application/conversation_end_controller.dart';
 import '../../application/option_answer_submission_controller.dart';
 import '../../application/question_skip_controller.dart';
@@ -32,11 +34,9 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
     this.skipRetryable = true,
     this.endRetryable = true,
     this.voiceRetryable = true,
-    this.characterAsset = _characterAsset,
+    this.companion = DodamCostume.base,
     super.key,
   });
-
-  static const _characterAsset = 'assets/characters/dodami.png';
 
   final AiQuestion? question;
   final bool visible;
@@ -63,8 +63,8 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
   final bool endRetryable;
   final bool voiceRetryable;
 
-  /// 캔버스에서 말하는 캐릭터로 쓸 이미지(선택한 도담이 코스튬, S15P11B209-750).
-  final String characterAsset;
+  /// 활동 시작 시 서버 확정 preferredCharacter에서 만든 immutable snapshot.
+  final DodamCostume companion;
 
   @override
   Widget build(BuildContext context) {
@@ -100,7 +100,7 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                       child: Semantics(
                         container: true,
                         liveRegion: true,
-                        label: '도다미 질문. ${currentQuestion.text}',
+                        label: '${companion.label} 질문. ${currentQuestion.text}',
                         child: ConstrainedBox(
                           constraints: BoxConstraints(
                             maxWidth: maxWidth,
@@ -124,8 +124,8 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                                               CrossAxisAlignment.start,
                                           children: [
                                             IgnorePointer(
-                                              child: _DodamiCharacter(
-                                                characterAsset: characterAsset,
+                                              child: DodamCompanionAvatar(
+                                                companion: companion,
                                                 compact: true,
                                               ),
                                             ),
@@ -266,8 +266,8 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                                         Align(
                                           alignment: Alignment.centerRight,
                                           child: IgnorePointer(
-                                            child: _DodamiCharacter(
-                                              characterAsset: characterAsset,
+                                            child: DodamCompanionAvatar(
+                                              companion: companion,
                                             ),
                                           ),
                                         ),
@@ -584,43 +584,6 @@ final class _QuestionBubble extends StatelessWidget {
         fontSize: compact ? 16 : 19,
         fontWeight: FontWeight.w800,
         height: 1.35,
-      ),
-    ),
-  );
-}
-
-final class _DodamiCharacter extends StatelessWidget {
-  const _DodamiCharacter({required this.characterAsset, this.compact = false});
-
-  final String characterAsset;
-  final bool compact;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    key: const ValueKey('dodami-character'),
-    width: compact ? 64 : 124,
-    height: compact ? 64 : 124,
-    decoration: BoxDecoration(
-      shape: BoxShape.circle,
-      color: AppColors.surface,
-      border: Border.all(color: AppColors.tangerineSoft, width: 4),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x1A000000),
-          blurRadius: 12,
-          offset: Offset(0, 4),
-        ),
-      ],
-    ),
-    child: ClipOval(
-      child: Transform.scale(
-        scale: 1.35,
-        child: Image.asset(
-          characterAsset,
-          fit: BoxFit.cover,
-          alignment: Alignment.topCenter,
-          filterQuality: FilterQuality.high,
-        ),
       ),
     ),
   );

@@ -38,12 +38,13 @@ ChildSummaryDto _childWith({
   required int childId,
   required String nickname,
   String? preferredCharacter,
+  String? profileImageUrl,
 }) => ChildSummaryDto(
   childId: childId,
   nickname: nickname,
   birthDate: '2020-01-01',
   age: 6,
-  profileImageUrl: null,
+  profileImageUrl: profileImageUrl,
   preferredCharacter: preferredCharacter,
   questionDifficulty: 'EASY',
   tutorialStatus: 'DONE',
@@ -153,6 +154,7 @@ Widget _wrap(Widget home, {bool htpPhotoUploadEnabled = false}) => MaterialApp(
               'drawing-session-${arguments.sessionId}-resume-${arguments.resumeConversation}'
               '-auto-${arguments.autoRestoreDraft}-fresh-${arguments.startFresh}',
             ),
+            Text('drawing-companion-${arguments.companion.code}'),
             TextButton(
               key: const ValueKey('leave-drawing'),
               onPressed: () => Navigator.of(
@@ -542,6 +544,180 @@ void main() {
 
     result.complete(false);
     await tester.pump(const Duration(milliseconds: 500));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pending 저장이 없으면 서버 preferredCharacter snapshot으로 활동을 시작한다', (
+    tester,
+  ) async {
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+    final child = _childWith(
+      childId: 7,
+      nickname: '도담',
+      preferredCharacter: 'BASE',
+      profileImageUrl: 'https://example.invalid/child.jpg',
+    );
+    var characterPatchCalls = 0;
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: child,
+          drawingRepository: repository,
+          introStore: _FakeIntroStore(seen: {7}),
+          onCharacterSelected: (_, _) async {
+            characterPatchCalls++;
+            return true;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('draw-entry')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
+    await tester.pumpAndSettle();
+
+    expect(repository.createCalls, 1);
+    expect(characterPatchCalls, 0);
+    expect(find.text('drawing-companion-BASE'), findsOneWidget);
+  });
+
+  testWidgets('debounce 중 연속 활동 탭은 PATCH 성공 뒤 새 snapshot으로 세션을 한 번 만든다', (
+    tester,
+  ) async {
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+    final save = Completer<bool>();
+    final patches = <String>[];
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _childWith(
+            childId: 7,
+            nickname: '도담',
+            preferredCharacter: 'BASE',
+          ),
+          drawingRepository: repository,
+          introStore: _FakeIntroStore(seen: {7}),
+          onCharacterSelected: (_, code) {
+            patches.add(code);
+            return save.future;
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pumpAndSettle();
+    final drawEntry = tester.getCenter(
+      find.byKey(const ValueKey('draw-entry')),
+    );
+    final firstEntryTap = await tester.startGesture(drawEntry, pointer: 11);
+    final secondEntryTap = await tester.startGesture(drawEntry, pointer: 12);
+    await firstEntryTap.up();
+    await secondEntryTap.up();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('activity-guide-start')), findsOneWidget);
+
+    final start = tester.getCenter(
+      find.byKey(const ValueKey('activity-guide-start')),
+    );
+    final first = await tester.startGesture(start, pointer: 1);
+    final second = await tester.startGesture(start, pointer: 2);
+    await first.up();
+    await second.up();
+    await tester.pump();
+
+    expect(patches, ['PRINCESS']);
+    expect(repository.createCalls, 0);
+
+    save.complete(true);
+    await tester.pumpAndSettle();
+
+    expect(repository.createCalls, 1);
+    expect(find.text('drawing-companion-PRINCESS'), findsOneWidget);
+  });
+
+  testWidgets('활동 시작 settlement의 PATCH 실패는 서버 확정값으로 rollback해 시작한다', (
+    tester,
+  ) async {
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+    final save = Completer<bool>();
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _childWith(
+            childId: 7,
+            nickname: '도담',
+            preferredCharacter: 'BASE',
+          ),
+          drawingRepository: repository,
+          introStore: _FakeIntroStore(seen: {7}),
+          onCharacterSelected: (_, _) => save.future,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('draw-entry')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
+    await tester.pump();
+    expect(repository.createCalls, 0);
+
+    save.complete(false);
+    await tester.pumpAndSettle();
+
+    expect(repository.createCalls, 1);
+    expect(find.text('drawing-companion-BASE'), findsOneWidget);
+  });
+
+  testWidgets('저장 중 system back·dispose·child 변경은 이전 결과로 세션을 만들지 않는다', (
+    tester,
+  ) async {
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+    final save = Completer<bool>();
+    final child = ValueNotifier<ChildSummaryDto>(
+      _childWith(childId: 7, nickname: '도담', preferredCharacter: 'BASE'),
+    );
+    addTearDown(child.dispose);
+    await tester.pumpWidget(
+      _wrap(
+        ValueListenableBuilder<ChildSummaryDto>(
+          valueListenable: child,
+          builder: (_, value, _) => ChildModeHomeScreen(
+            child: value,
+            drawingRepository: repository,
+            introStore: _FakeIntroStore(seen: {7, 8}),
+            onCharacterSelected: (_, _) => save.future,
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('draw-entry')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
+    await tester.pump();
+
+    await tester.binding.handlePopRoute();
+    child.value = _childWith(
+      childId: 8,
+      nickname: '새봄',
+      preferredCharacter: 'DINO',
+    );
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+    save.complete(true);
+    await tester.pumpAndSettle();
+
+    expect(repository.createCalls, 0);
     expect(tester.takeException(), isNull);
   });
 
