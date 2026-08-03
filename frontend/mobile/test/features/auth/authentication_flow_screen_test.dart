@@ -19,6 +19,7 @@ void main() {
           onCompleteOnboarding: (_) async =>
               _session(role: UserRole.guardian, onboardingCompleted: true),
           onProfileSelectionRequired: (_) => movedToProfileSelection = true,
+          onGuardianOnboardingCompleted: (_) {},
           onExpertAuthenticated: (_) {},
         ),
       ),
@@ -40,6 +41,7 @@ void main() {
           onCompleteOnboarding: (_) async =>
               _session(role: UserRole.guardian, onboardingCompleted: true),
           onProfileSelectionRequired: (_) {},
+          onGuardianOnboardingCompleted: (_) {},
           onExpertAuthenticated: (_) {},
         ),
       ),
@@ -49,6 +51,53 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('도담에서 어떻게 활동할까요?'), findsOneWidget);
+  });
+
+  testWidgets('신규 보호자 온보딩 완료 후 보호자 홈 이동을 요청한다', (tester) async {
+    var movedToGuardianHome = false;
+    var movedToProfileSelection = false;
+    await tester.binding.setSurfaceSize(const Size(1200, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: AuthenticationFlowScreen(
+          onSignIn: (_) async => AuthState.onboardingRequired(
+            _session(role: UserRole.guardian, onboardingCompleted: false),
+          ),
+          onCompleteOnboarding: (_) async =>
+              _session(role: UserRole.guardian, onboardingCompleted: true),
+          onProfileSelectionRequired: (_) => movedToProfileSelection = true,
+          onGuardianOnboardingCompleted: (_) => movedToGuardianHome = true,
+          onExpertAuthenticated: (_) {},
+        ),
+      ),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('social-login-google')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('onboarding-role-guardian')));
+    await tester.pump();
+    await tester.enterText(
+      find.byKey(const ValueKey('onboarding-nickname')),
+      '민지엄마',
+    );
+    await tester.pump();
+    final profileNext = find.byKey(const ValueKey('onboarding-profile-next'));
+    await tester.ensureVisible(profileNext);
+    await tester.tap(profileNext);
+    await tester.pumpAndSettle();
+    final consentAll = find.byKey(const ValueKey('consent-all'));
+    await tester.ensureVisible(consentAll);
+    await tester.tap(consentAll);
+    await tester.pump();
+    final consentSubmit = find.byKey(const ValueKey('consent-submit'));
+    await tester.ensureVisible(consentSubmit);
+    await tester.tap(consentSubmit);
+    await tester.pumpAndSettle();
+
+    expect(movedToGuardianHome, isTrue);
+    expect(movedToProfileSelection, isFalse);
   });
 
   testWidgets('전문가 로그인 완료 시 전문가 화면 이동을 요청한다', (tester) async {
@@ -63,6 +112,7 @@ void main() {
           onCompleteOnboarding: (_) async =>
               _session(role: UserRole.expert, onboardingCompleted: true),
           onProfileSelectionRequired: (_) {},
+          onGuardianOnboardingCompleted: (_) {},
           onExpertAuthenticated: (_) => movedToExpertProfile = true,
         ),
       ),

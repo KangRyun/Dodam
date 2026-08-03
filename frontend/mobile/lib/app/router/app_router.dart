@@ -100,6 +100,7 @@ abstract final class AppRouter {
           onSignIn: authSignIn,
           onCompleteOnboarding: authCompleteOnboarding,
           onProfileSelectionRequired: goProfileSelection,
+          onGuardianOnboardingCompleted: goGuardianHome,
           onExpertAuthenticated: goExpertProfile,
         ),
       ['profiles', 'select'] when childController != null =>
