@@ -14,6 +14,7 @@ import '../../data/image_picker_photo_adapter.dart';
 import '../../domain/photo_permission_service.dart';
 import '../../domain/photo_picker_adapter.dart';
 import '../../domain/repositories/drawing_repository.dart';
+import 'guided_camera_screen.dart';
 
 enum _Step { methodChoice, photoSource, cameraGuidance, preview }
 
@@ -119,6 +120,7 @@ class InputMethodSelectScreen extends StatefulWidget {
          '복원 모드(existingDrawingSessionId)와 전환 모드(htpAssessmentId)는 '
          '동시에 켤 수 없다.',
        ),
+       useInAppCamera = photoPickerAdapter == null,
        photoPickerAdapter = photoPickerAdapter ?? ImagePickerPhotoAdapter(),
        photoPermissionService =
            photoPermissionService ?? DevicePhotoPermissionService();
@@ -146,6 +148,7 @@ class InputMethodSelectScreen extends StatefulWidget {
   /// 사진으로 시작하기 옵션을 노출할지 여부(S15P11B209-702, 기본 꺼짐).
   final bool htpPhotoUploadEnabled;
   final String Function()? idempotencyKeyProvider;
+  final bool useInAppCamera;
   final PhotoPickerAdapter photoPickerAdapter;
   final PhotoPermissionService photoPermissionService;
   final PhotoDimensionReader dimensionReader;
@@ -346,6 +349,39 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     });
   }
 
+  Future<void> _openGuidedCamera() async {
+    if (!_canStartAction) return;
+    if (!widget.useInAppCamera) {
+      await _pickFrom(
+        widget.photoPickerAdapter.pickFromCamera,
+        permissionKind: PhotoPermissionKind.camera,
+      );
+      return;
+    }
+    final result = await Navigator.of(context).push<Object?>(
+      MaterialPageRoute<Object?>(
+        builder: (_) => GuidedCameraScreen(
+          drawingSubject:
+              widget.restoredActivityContext?.drawingSubject ?? 'HOUSE',
+        ),
+      ),
+    );
+    if (!mounted || result == null) return;
+    if (result == 'gallery') {
+      await _pickFrom(
+        widget.photoPickerAdapter.pickFromGallery,
+        permissionKind: PhotoPermissionKind.photos,
+      );
+      return;
+    }
+    if (result is PickedPhoto) {
+      await _pickFrom(
+        () async => result,
+        permissionKind: PhotoPermissionKind.camera,
+      );
+    }
+  }
+
   void _backToMethodChoice() {
     if (!_canStartAction) return;
     _invalidateUpload(clearSnapshot: true);
@@ -382,11 +418,8 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     });
   }
 
-  /// 도움말의 `촬영하기`. 기존 카메라 picker 경로를 그대로 쓴다.
-  Future<void> _captureFromCamera() => _pickFrom(
-    widget.photoPickerAdapter.pickFromCamera,
-    permissionKind: PhotoPermissionKind.camera,
-  );
+  /// 도움말의 `촬영하기`. 실제 기기에서는 가이드가 포함된 인앱 카메라를 연다.
+  Future<void> _captureFromCamera() => _openGuidedCamera();
 
   Future<void> _pickFrom(
     Future<PickedPhoto?> Function() pick, {
