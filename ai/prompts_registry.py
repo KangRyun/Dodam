@@ -20,10 +20,16 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from functools import lru_cache
 from pathlib import Path
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
+
+# [[KEY]] 머리표로 프롬프트 한 파일 안에 여러 구획을 두는 규약(conversation_tone·
+# htp_question_bank·activity_block). 한 파일에 모아 두면 구획들을 나란히 놓고 균형을 볼 수 있고,
+# 파일 하나만 버전 추적하면 된다.
+_SECTION_HEADER = re.compile(r"^\[\[([A-Z_]+)\]\]$", re.M)
 
 # 프롬프트 파일별 의미 버전(semver). 프롬프트를 의미 있게 바꾸면 여기 값을 올린다.
 # ⚠️ 키를 추가/삭제하면 verify_prompt_files()가 파일과의 불일치를 잡는다.
@@ -41,8 +47,10 @@ _PROMPT_SEMVER: dict[str, str] = {
     # 2.1.0(그림일기, S15P11B209-808): "오늘 있었던 일" 전제를 버리고 그림 속 이야기에서
     #   시작해, 실제 경험인지 상상인지 한 번 확인한 뒤 그 흐름을 따라간다.
     "first_question_diary": "2.1.0",
-    "conversations_htp": "2.2.0",
-    "conversations_diary": "2.1.0",
+    # S15P11B209-831: 명시적인 질문 건너뛰기 의사를 내용 답변과 구분하고, 직전 질문을
+    #   표현만 바꿔 반복하지 않은 채 아직 다루지 않은 방향으로 전환한다.
+    "conversations_htp": "2.3.0",
+    "conversations_diary": "2.2.0",
     # HTP 표준 사후질문(PDI)을 아동용으로 포장한 주제별 질문 뱅크(S15P11B209-811).
     # 현재 주제 구획 하나만 싣는다 — 셋을 다 실으면 주제 이탈(709 계열)이 다시 열린다.
     # 1.1.0(808): PDI 문항에서 "왜 이렇게 그렸어?"를 제외했다 — 뱅크가 이유 질문의 출처였다.
@@ -52,6 +60,11 @@ _PROMPT_SEMVER: dict[str, str] = {
     # UPPER_ELEMENTARY "한두 문장"과 어긋나던 것을 소유자를 하나로 만들어 없앴다).
     # 1.1.0(808): 추궁형 이유 질문을 금지 예시로도 노출하지 않고 긍정형 행동 지시로 바꾼다.
     "conversation_common": "1.1.0",
+    # 구 question_service._activity_block 코드 문자열을 옮긴 것(S15P11B209-832).
+    #   GPT에 나가는 지시문인데 버전 추적 밖이라, 788에서 문구를 크게 고쳐도 promptVersion이
+    #   그대로였다 — 버전은 같은데 동작이 다른 상태였다. 이제 llm_client.prompt_names_for()에
+    #   포함돼 문구가 바뀌면 다이제스트가 움직인다.
+    "activity_block": "1.0.0",
     # 구 question_service._DIFFICULTY_RULES를 프롬프트 파일로 옮긴 것(버전 추적·draft 경로 반영).
     #   구 PRESCHOOL "10자 안팎"은 대화 프롬프트의 "반응한 다음 질문을 이어줘"와 동시에
     #   만족할 수 없어, 반응/질문 몫을 나눠 "두 문장 이내"로 고쳤다.
@@ -102,6 +115,23 @@ _UNKNOWN_SEMVER = "0.0.0"
 def load(name: str) -> str:
     """ai/prompts/<name>.txt 를 읽어 캐시한다(서버 기동 중 파일은 안 바뀐다고 가정)."""
     return (PROMPT_DIR / f"{name}.txt").read_text(encoding="utf-8").strip()
+
+
+@lru_cache(maxsize=None)
+def sections(name: str) -> dict[str, str]:
+    """[[KEY]] 머리표로 나뉜 프롬프트 → {KEY: 본문}. 머리표 앞의 설명 문단은 버린다.
+
+    구획을 고르는 소비자가 여럿이라(llm_client의 말투·질문 뱅크, question_service의 활동 블록)
+    파싱을 여기 둔다 — 프롬프트 파일의 구조는 로딩·버전과 함께 레지스트리가 소유한다.
+    """
+    text = load(name)
+    headers = list(_SECTION_HEADER.finditer(text))
+    return {
+        match.group(1): text[
+            match.end() : (headers[i + 1].start() if i + 1 < len(headers) else len(text))
+        ].strip()
+        for i, match in enumerate(headers)
+    }
 
 
 @lru_cache(maxsize=None)
