@@ -1,6 +1,7 @@
 package com.ssafy.b209.expert.domain;
 
 import com.ssafy.b209.expert.dto.request.CreateExpertProfileRequest;
+import com.ssafy.b209.expert.dto.request.UpdateExpertProfileRequest;
 import jakarta.persistence.CascadeType;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
@@ -15,6 +16,8 @@ import jakarta.persistence.Table;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
 import org.hibernate.annotations.BatchSize;
@@ -217,6 +220,87 @@ public class ExpertProfile {
   public List<String> getSpecialtyCodes() {
     return Collections.unmodifiableList(
         specialties.stream().map(ExpertProfileSpecialty::getSpecialtyCode).toList());
+  }
+
+  /**
+   * 요청에 포함된 필드만 변경하고 자격 검토에 영향을 주는 변경이면 재검토 상태로 전이한다.
+   *
+   * <p>소개 문구와 상담 가능 여부는 운영 정보이므로 기존 검증 상태를 유지한다. 나머지 공개 자격 정보가 실제로 달라진 경우 {@link
+   * ExpertVerificationStatus#REVIEW_REQUIRED}로 전환한다. 최초 검토 전인 {@link
+   * ExpertVerificationStatus#PENDING} 상태는 그대로 유지한다.
+   *
+   * @param request 부분 수정 요청
+   * @param now 수정 시각
+   */
+  public void update(UpdateExpertProfileRequest request, LocalDateTime now) {
+    Objects.requireNonNull(request, "request must not be null");
+    boolean reviewRequired = false;
+
+    if (request.displayName() != null) {
+      String value = normalizeRequired(request.displayName());
+      reviewRequired |= !Objects.equals(displayName, value);
+      displayName = value;
+    }
+    if (request.organization() != null) {
+      String value = normalizeOptional(request.organization());
+      reviewRequired |= !Objects.equals(organization, value);
+      organization = value;
+    }
+    if (request.positionTitle() != null) {
+      String value = normalizeOptional(request.positionTitle());
+      reviewRequired |= !Objects.equals(positionTitle, value);
+      positionTitle = value;
+    }
+    if (request.careerYears() != null) {
+      short value = request.careerYears().shortValue();
+      reviewRequired |= careerYears != value;
+      careerYears = value;
+    }
+    if (request.targetAgeMin() != null) {
+      short value = request.targetAgeMin().shortValue();
+      reviewRequired |= !Objects.equals(targetAgeMin, value);
+      targetAgeMin = value;
+    }
+    if (request.targetAgeMax() != null) {
+      short value = request.targetAgeMax().shortValue();
+      reviewRequired |= !Objects.equals(targetAgeMax, value);
+      targetAgeMax = value;
+    }
+    if (request.workplace() != null) {
+      String value = normalizeOptional(request.workplace());
+      reviewRequired |= !Objects.equals(workplace, value);
+      workplace = value;
+    }
+    if (request.specialties() != null) {
+      List<String> values = request.specialties().stream().map(String::trim).toList();
+      reviewRequired |= !getSpecialtyCodes().equals(values);
+      var requestedCodes = new HashSet<>(values);
+      specialties.removeIf(specialty -> !requestedCodes.contains(specialty.getSpecialtyCode()));
+      for (int index = 0; index < values.size(); index++) {
+        String code = values.get(index);
+        ExpertProfileSpecialty existing =
+            specialties.stream()
+                .filter(specialty -> specialty.getSpecialtyCode().equals(code))
+                .findFirst()
+                .orElse(null);
+        if (existing == null) {
+          specialties.add(ExpertProfileSpecialty.snapshot(this, code, index, now));
+        } else {
+          existing.changeDisplayOrder(index);
+        }
+      }
+      specialties.sort(Comparator.comparingInt(ExpertProfileSpecialty::getDisplayOrder));
+    }
+    if (request.introduction() != null) {
+      introduction = normalizeOptional(request.introduction());
+    }
+    if (request.consultationAvailable() != null) {
+      consultationAvailable = request.consultationAvailable();
+    }
+    if (reviewRequired && verificationStatus != ExpertVerificationStatus.PENDING) {
+      verificationStatus = ExpertVerificationStatus.REVIEW_REQUIRED;
+    }
+    updatedAt = Objects.requireNonNull(now, "now must not be null");
   }
 
   private static String normalizeRequired(String value) {

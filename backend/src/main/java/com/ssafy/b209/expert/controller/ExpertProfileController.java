@@ -1,10 +1,12 @@
 package com.ssafy.b209.expert.controller;
 
 import com.ssafy.b209.expert.dto.request.CreateExpertProfileRequest;
+import com.ssafy.b209.expert.dto.request.UpdateExpertProfileRequest;
 import com.ssafy.b209.expert.dto.response.ExpertProfilePageResponse;
 import com.ssafy.b209.expert.dto.response.ExpertProfileResponse;
 import com.ssafy.b209.expert.service.ExpertProfileCreationService;
 import com.ssafy.b209.expert.service.ExpertProfileQueryService;
+import com.ssafy.b209.expert.service.ExpertProfileUpdateService;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.response.ApiErrorResponse;
 import com.ssafy.b209.global.response.ApiResponse;
@@ -22,6 +24,7 @@ import java.net.URI;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -42,17 +45,22 @@ public class ExpertProfileController {
 
   private final ExpertProfileCreationService creationService;
   private final ExpertProfileQueryService queryService;
+  private final ExpertProfileUpdateService updateService;
 
   /**
    * 전문가 프로필 생성 Use Case를 사용하는 Controller를 생성한다.
    *
    * @param creationService 프로필 권한 검증과 저장을 수행하는 서비스
    * @param queryService 공개 프로필 검색과 노출 정책을 적용하는 서비스
+   * @param updateService 소유자 프로필의 부분 수정과 재검토 전이를 처리하는 서비스
    */
   public ExpertProfileController(
-      ExpertProfileCreationService creationService, ExpertProfileQueryService queryService) {
+      ExpertProfileCreationService creationService,
+      ExpertProfileQueryService queryService,
+      ExpertProfileUpdateService updateService) {
     this.creationService = creationService;
     this.queryService = queryService;
+    this.updateService = updateService;
   }
 
   /**
@@ -132,5 +140,21 @@ public class ExpertProfileController {
     ExpertProfileResponse response = creationService.create(request);
     return ResponseEntity.created(URI.create("/api/v1/experts/" + response.expertId()))
         .body(ApiResponse.of(CommonSuccessCode.CREATED, response));
+  }
+
+  /**
+   * 현재 인증된 전문가가 소유한 공개 프로필의 일부 필드를 수정한다.
+   *
+   * @param request 수정할 필드만 포함한 요청
+   * @return HTTP 200과 변경 후 프로필
+   * @throws BusinessException 활성 전문가 계정이 아니거나 등록된 프로필이 없는 경우
+   */
+  @Operation(
+      summary = "내 전문가 프로필 수정",
+      description = "전문 자격 관련 정보가 변경되면 검증 상태를 REVIEW_REQUIRED로 전환합니다.")
+  @PatchMapping("/me/profile")
+  public ResponseEntity<ApiResponse<ExpertProfileResponse>> update(
+      @Valid @RequestBody UpdateExpertProfileRequest request) {
+    return ResponseEntity.ok(ApiResponse.of(CommonSuccessCode.OK, updateService.update(request)));
   }
 }

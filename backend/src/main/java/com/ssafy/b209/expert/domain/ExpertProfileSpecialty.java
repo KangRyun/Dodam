@@ -52,4 +52,12 @@ class ExpertProfileSpecialty {
   String getSpecialtyCode() {
     return specialtyCode;
   }
+
+  void changeDisplayOrder(int displayOrder) {
+    this.displayOrder = (short) displayOrder;
+  }
+
+  int getDisplayOrder() {
+    return displayOrder;
+  }
 }

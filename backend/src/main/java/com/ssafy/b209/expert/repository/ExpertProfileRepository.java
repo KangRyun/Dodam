@@ -27,6 +27,15 @@ public interface ExpertProfileRepository
   boolean existsByUserId(Long userId);
 
   /**
+   * 인증 사용자가 소유한 전문가 프로필과 전문 분야를 함께 조회한다.
+   *
+   * @param userId 전문가 역할 사용자 식별자
+   * @return 등록된 프로필이 없으면 빈 값
+   */
+  @EntityGraph(attributePaths = "specialties")
+  Optional<ExpertProfile> findDetailByUserId(Long userId);
+
+  /**
    * 전문 분야를 포함한 전문가 상세 프로필을 조회한다.
    *
    * @param expertId 전문가 프로필 식별자

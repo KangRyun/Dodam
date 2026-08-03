@@ -11,7 +11,10 @@ public enum ExpertErrorCode implements ErrorCode {
   EXPERT_NOT_VERIFIED(HttpStatus.FORBIDDEN, "EXPERT_NOT_VERIFIED", "검증이 완료되지 않은 전문가 프로필입니다."),
   /** 동일한 사용자에게 전문가 프로필이 이미 존재하는 경우다. */
   EXPERT_PROFILE_ALREADY_EXISTS(
-      HttpStatus.CONFLICT, "EXPERT_PROFILE_ALREADY_EXISTS", "전문가 프로필이 이미 등록되어 있습니다.");
+      HttpStatus.CONFLICT, "EXPERT_PROFILE_ALREADY_EXISTS", "전문가 프로필이 이미 등록되어 있습니다."),
+  /** 수정 결과의 대상 연령 범위가 올바르지 않은 경우이다. */
+  EXPERT_PROFILE_INVALID(
+      HttpStatus.BAD_REQUEST, "EXPERT_PROFILE_INVALID", "전문가 프로필 입력값이 올바르지 않습니다.");
 
   private final HttpStatus httpStatus;
   private final String code;
