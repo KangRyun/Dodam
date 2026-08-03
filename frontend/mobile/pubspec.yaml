@@ -115,6 +115,7 @@ flutter:
     - assets/characters/
     - assets/characters/costumes/
     - assets/characters/emotions/
+    - assets/images/role_selection/
     - assets/scene/
 
   fonts:

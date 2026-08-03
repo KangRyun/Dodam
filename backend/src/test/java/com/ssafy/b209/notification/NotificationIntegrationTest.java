@@ -1,6 +1,7 @@
 package com.ssafy.b209.notification;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.hamcrest.Matchers.endsWith;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
@@ -8,8 +9,13 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.jayway.jsonpath.JsonPath;
 import com.ssafy.b209.auth.token.AuthenticatedUser;
 import com.ssafy.b209.notification.service.DeviceTokenCipher;
+import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
@@ -50,12 +56,24 @@ class NotificationIntegrationTest {
   private static final Long OTHER_USER_ID = 42L;
   private static final String DEVICE_ID = "installation-uuid";
 
+  /**
+   * 시간대 파라미터를 운영·로컬 datasource와 같게 맞춘 컨테이너다.
+   *
+   * <p>이 두 파라미터가 없으면 시각 왕복 테스트가 실제 배포 동작을 증명하지 못한다(S15P11B209-736이 정리한 규약이 바로 이 설정에 의존한다). {@code
+   * serverTimezone}은 드라이버의 값 변환 기준, {@code sessionVariables}는 {@code DEFAULT CURRENT_TIMESTAMP}가
+   * 평가되는 세션 시간대다.
+   *
+   * <p>{@code sessionVariables} 값은 {@code application-local.yml}과 같은 percent-encoding으로 넘긴다.
+   * Testcontainers는 URL 파라미터를 그대로 이어 붙이므로, 따옴표와 {@code +}를 날것으로 주면 컨테이너 기동 시 접속 자체가 실패한다.
+   */
   @Container @ServiceConnection
   static final MySQLContainer<?> MYSQL_CONTAINER =
       new MySQLContainer<>("mysql:8.4.10")
           .withDatabaseName("dodam_notification")
           .withUsername("test")
-          .withPassword("test");
+          .withPassword("test")
+          .withUrlParam("serverTimezone", "Asia/Seoul")
+          .withUrlParam("sessionVariables", "time_zone%3D%27%2B09%3A00%27");
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbcTemplate;
@@ -279,6 +297,57 @@ class NotificationIntegrationTest {
         .perform(get("/api/v1/notifications").queryParam("type", "UNKNOWN_TYPE"))
         .andExpect(status().isBadRequest())
         .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
+  // ---------------------------------------------------------------- 시각 표기 규약
+
+  @Test
+  void serializesInboxTimesAsUtcIso8601WithZoneMarker() throws Exception {
+    insertNotification(
+        900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", "2026-07-26 09:30:00", "2026-07-26 10:00:00");
+
+    // DB의 벽시계를 UTC로 해석해 `Z`를 붙여 내보낸다. 표기가 없으면 클라이언트가 자기 지역 시각으로 읽어 UTC와의 차이만큼 어긋난다.
+    mockMvc
+        .perform(get("/api/v1/notifications"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.content[0].readAt").value("2026-07-26T09:30:00Z"))
+        .andExpect(jsonPath("$.data.content[0].sentAt").value("2026-07-26T10:00:00Z"))
+        .andExpect(jsonPath("$.data.content[0].createdAt").value("2026-07-26T10:00:00Z"));
+  }
+
+  @Test
+  void keepsWriteAndReadOnTheSameInstantThroughRealMysql() throws Exception {
+    insertNotification(901L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 10:00:00");
+
+    // 쓰기는 Entity 경로(Clock 기준 UTC 벽시계)를, 읽기는 응답 직렬화를 탄다. 둘이 같은 instant를 가리켜야 한다.
+    String body =
+        mockMvc
+            .perform(patch("/api/v1/notifications/{notificationId}/read", 901L))
+            .andExpect(status().isOk())
+            .andExpect(jsonPath("$.data.readAt").value(endsWith("Z")))
+            .andReturn()
+            .getResponse()
+            .getContentAsString();
+
+    Instant fromResponse = Instant.parse(JsonPath.read(body, "$.data.readAt"));
+    String storedWallClock =
+        jdbcTemplate.queryForObject(
+            "SELECT read_at FROM notifications WHERE id = 901", String.class);
+    Instant fromDatabase =
+        LocalDateTime.parse(storedWallClock.replace(' ', 'T')).toInstant(ZoneOffset.UTC);
+
+    // DB에 남은 벽시계를 UTC로 읽으면 응답 instant와 같은 시각이다. 시간대 오프셋만큼(KST면 9시간) 어긋나면
+    // 저장 기준이 UTC가 아니라는 뜻이므로 이 단언이 깨진다.
+    // 허용 오차는 1마이크로초다 — DATETIME(6)은 마이크로초까지 담으면서 나노초를 반올림하는데,
+    // Clock.systemUTC()는 나노초를 주므로 마지막 자리가 1 다를 수 있다.
+    assertThat(Duration.between(fromDatabase, fromResponse).abs())
+        .isLessThanOrEqualTo(Duration.ofNanos(1_000L));
+
+    // 같은 알림을 목록으로 다시 받아도 DB에 남은 그 instant다.
+    mockMvc
+        .perform(get("/api/v1/notifications"))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.content[0].readAt").value(fromDatabase.toString()));
   }
 
   // ---------------------------------------------------------------- NOTI-04 단건 읽음

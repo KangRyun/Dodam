@@ -9,6 +9,9 @@ import com.ssafy.b209.notification.dto.response.NotificationListItemResponse;
 import com.ssafy.b209.notification.dto.response.NotificationListPageResponse;
 import com.ssafy.b209.notification.repository.NotificationAttributeRepository;
 import com.ssafy.b209.notification.repository.NotificationRepository;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -128,9 +131,19 @@ public class NotificationQueryService {
         resourceId,
         data,
         notification.getDeliveryStatus(),
-        notification.getReadAt(),
-        notification.getSentAt(),
-        notification.getCreatedAt());
+        toInstant(notification.getReadAt()),
+        toInstant(notification.getSentAt()),
+        toInstant(notification.getCreatedAt()));
+  }
+
+  /**
+   * Entity의 시각을 응답용 UTC {@code Instant}로 옮긴다.
+   *
+   * <p>Entity의 {@code LocalDateTime}은 앱 내부 규약상 UTC 벽시계다(JDBC 드라이버가 DB의 KST 저장값을 UTC로 변환해 읽는다). 따라서
+   * {@code ZoneOffset.UTC}로 해석해야 실제 instant가 된다.
+   */
+  private Instant toInstant(LocalDateTime value) {
+    return value == null ? null : value.toInstant(ZoneOffset.UTC);
   }
 
   private String normalizeType(String type) {

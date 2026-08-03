@@ -187,6 +187,21 @@ class ConversationPromptRulesTest(unittest.TestCase):
             self.assertIn("따뜻하게 반응한 다음", system)
             self.assertNotIn("중립적으로 반응", system)
 
+    def test_explicit_skip_intent_overrides_followup_rule(self):
+        """명시적 건너뛰기는 일반 답변이 아니며 같은 질문을 바꿔 묻지 않는다(831)."""
+        for activity in ("HTP", "ART_DIARY"):
+            system = self._next(activity)
+            self.assertIn("[질문 건너뛰기 의사 처리]", system)
+            self.assertIn("그림 내용에 대한 답이 아니야", system)
+            self.assertIn("같거나 의미상 비슷한 질문", system)
+            self.assertIn("표현만 바꿔 다시 묻지 마", system)
+            self.assertIn("이 규칙을 우선해", system)
+            self.assertIn('"몰라"라고 한 것만으로', system)
+
+        # 첫 질문에는 아직 아이 답변이 없으므로 skip 예시를 노출하지 않는다.
+        for activity in ("HTP", "ART_DIARY"):
+            self.assertNotIn("[질문 건너뛰기 의사 처리]", self._first(activity))
+
     def test_prompts_consume_visual_detail_from_description(self):
         """VLM 서술의 색·표정·위치 세부를 실제로 골라 묻게 한다(대화 품질의 핵심).
 
@@ -219,7 +234,7 @@ class ConversationPromptRulesTest(unittest.TestCase):
 class ActivitySplitTest(unittest.TestCase):
     """대화 목표가 활동 유형별로 갈리는지 (S15P11B209-786).
 
-    HTP는 그림 자체를 파고들고, 그림일기는 그림을 소재 삼아 그날 일·마음으로 넓힌다.
+    HTP는 그림 자체를 파고들고, 그림일기는 그림 속 이야기를 들은 뒤 실제·상상과 마음으로 넓힌다.
     두 목적을 한 프롬프트에 넣으면 어느 쪽도 제대로 안 된다.
     """
 
@@ -239,8 +254,20 @@ class ActivitySplitTest(unittest.TestCase):
 
     def test_diary_treats_drawing_as_a_conversation_opener(self):
         for system in (self._first("ART_DIARY"), self._next("ART_DIARY")):
-            self.assertIn("그림 속 그 일과 그때 아이의 마음", system)
+            self.assertIn("그림 속", system)
+            self.assertIn("실제", system)
+            self.assertIn("상상", system)
             self.assertNotIn("그림 자체가 궁금해", system)
+
+    def test_diary_starts_with_story_before_reality_check(self):
+        first = self._first("ART_DIARY")
+        next_prompt = self._next("ART_DIARY")
+        self.assertIn("그림 속 이야기를 먼저 들은 뒤", first)
+        self.assertIn("첫 질문에서는 실제 경험인지 상상인지부터 묻지 마", first)
+        self.assertIn("실제 경험인지 상상인지 한 번만 확인해", next_prompt)
+        self.assertIn("아이가 이미 말했으면 다시 묻지 마", next_prompt)
+        self.assertNotIn("오늘 있었던 일을 이야기하는", first)
+        self.assertNotIn("오늘 있었던 일을 이야기하는", next_prompt)
 
     def test_diary_does_not_put_words_in_the_childs_mouth(self):
         """정서 대화로 가되 감정을 대신 정해주지 않는다 — guardrails '단정 금지'와 같은 선."""
@@ -299,6 +326,11 @@ class HtpQuestionBankTest(unittest.TestCase):
         self.assertIn("그대로 읽지 마", bank)
         self.assertIn("해석하거나 채점하지 마", bank)
 
+    def test_reason_question_is_removed_from_first_question_bank(self):
+        bank = llm_client.question_bank_block("HTP", "HOUSE")
+        self.assertNotIn("왜 이렇게 그렸어", bank)
+        self.assertNotIn("이렇게 그린 데에는 어떤 이유가 있을까", bank)
+
     def test_next_question_also_carries_the_bank(self):
         system = llm_client.render_next_question_prompt(
             "우리 집이야", drawing_analysis="집이 크게",
@@ -322,10 +354,21 @@ class FirstQuestionHtpRegressionTest(unittest.TestCase):
     def test_why_questions_are_forbidden(self):
         """세부를 고르라는 지시가 '왜 ~했어?' 추궁으로 흐르지 않게 못 박는다.
 
-        conversation_common의 "'왜 그렇게 그렸어?'처럼 추궁하지 마"와 같은 선이다.
+        금지 예시 자체도 모델의 문장 앵커가 되므로 실제 프롬프트에서는 제거한다.
         """
         htp = llm_client._load("first_question_htp")
-        self.assertIn('"왜"로 시작하는 질문은 하지 마', htp)
+        self.assertIn("표현을 바꿔도 그린 이유 자체를 묻지 마", htp)
+        self.assertIn('"왜"·"이유"·"까닭"이라는 낱말도 쓰지 마', htp)
+        self.assertNotIn("왜 빨간색으로 칠했어", htp)
+        self.assertNotIn("왜 그렇게 그렸어", llm_client._load("conversation_common"))
+
+    def test_reason_question_is_only_allowed_after_child_signal(self):
+        htp = llm_client._load("conversations_htp")
+        self.assertIn("아이가 먼저", htp)
+        self.assertIn("이렇게 그린 데에는", htp)
+        self.assertIn("부드럽게 한 번", htp)
+        self.assertIn("이유를 이미 말했다면", htp)
+        self.assertIn("이유를 다시 묻거나", htp)
 
 
 class GuardrailsScopeTest(unittest.TestCase):

@@ -3541,6 +3541,18 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
     AppNavigation.resetTo(context, AppRoutes.childModeHome(widget.childId));
   }
 
+  /// 완료 화면에서 같은 아이로 새 그림 활동을 시작한다(S15P11B209-777).
+  ///
+  /// 새 세션 생성·활동 선택은 아동 홈의 진입 흐름이 담당하므로, 여기서
+  /// 세션을 직접 만들지 않고 아동 홈으로 스택을 다시 세운다 — 아이는 홈에서
+  /// 곧바로 다음 그림을 시작할 수 있다. 이미 접수된 이번 활동의 분석·리포트는
+  /// 서버에 남아 보호자가 나중에 확인할 수 있다.
+  void _drawAgain() {
+    if (!_canStartLeaving) return;
+    setState(() => _isLeaving = true);
+    AppNavigation.resetTo(context, AppRoutes.childModeHome(widget.childId));
+  }
+
   @override
   Widget build(BuildContext context) => PopScope(
     // 계속 직접 처리한다. polling·성공 상태에서는 기존처럼 back을 삼키고,
@@ -3614,7 +3626,7 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
           ),
           const SizedBox(height: AppSpacing.sm),
           const Text(
-            '이제 보호자에게 기기를 건네주세요.',
+            '더 그리고 싶으면 또 그려도 돼요.\n다 했으면 보호자에게 기기를 건네주세요.',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: AppColors.inkMuted,
@@ -3625,9 +3637,17 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
           ),
           const SizedBox(height: AppSpacing.xl),
           AppButton(
+            key: const ValueKey('activity-complete-draw-again'),
+            label: '또 그리기',
+            variant: AppButtonVariant.child,
+            leading: const Icon(Icons.brush_rounded),
+            onPressed: _drawAgain,
+          ),
+          const SizedBox(height: AppSpacing.sm),
+          AppButton(
             key: const ValueKey('guardian-handoff'),
             label: '보호자에게 건넸어요',
-            variant: AppButtonVariant.child,
+            variant: AppButtonVariant.secondary,
             leading: const Icon(Icons.family_restroom_rounded),
             onPressed: () => _confirmGuardianTransition(context),
           ),

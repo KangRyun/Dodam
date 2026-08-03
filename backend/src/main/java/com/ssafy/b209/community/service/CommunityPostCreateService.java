@@ -21,8 +21,8 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 인증된 사용자의 커뮤니티 게시글 작성 유스케이스를 조율한다.
  *
- * <p>게시글 유형별 작성 권한을 역할로 검증한 뒤 활성·공개 상태로 단일 저장하고, 생성 결과를 상세 조회와 동일한 형태의 응답으로 반환한다. 첨부와 Template 저장
- * 구조는 이 범위에 없으므로 응답의 {@code attachments}와 {@code templateData}는 항상 빈 목록이다.
+ * <p>게시글 유형별 작성 권한을 역할로 검증한 뒤 활성·공개 상태로 저장하고, 같은 사용자가 사전 업로드한 첨부 이미지를 연결한다. 생성 결과는 상세 조회와 동일한 형태로
+ * 반환한다.
  */
 @Service
 public class CommunityPostCreateService {
@@ -30,6 +30,7 @@ public class CommunityPostCreateService {
   private final CurrentAuthenticatedUserResolver currentAuthenticatedUserResolver;
   private final UserRepository userRepository;
   private final CommunityPostRepository communityPostRepository;
+  private final CommunityAttachmentService communityAttachmentService;
   private final Clock clock;
 
   /**
@@ -38,16 +39,19 @@ public class CommunityPostCreateService {
    * @param currentAuthenticatedUserResolver 검증된 Access JWT 사용자 확인 도구
    * @param userRepository 작성자 역할 확인 저장소
    * @param communityPostRepository 게시글 저장소
+   * @param communityAttachmentService 사전 업로드 첨부 연결 서비스
    */
   @Autowired
   public CommunityPostCreateService(
       CurrentAuthenticatedUserResolver currentAuthenticatedUserResolver,
       UserRepository userRepository,
-      CommunityPostRepository communityPostRepository) {
+      CommunityPostRepository communityPostRepository,
+      CommunityAttachmentService communityAttachmentService) {
     this(
         currentAuthenticatedUserResolver,
         userRepository,
         communityPostRepository,
+        communityAttachmentService,
         Clock.systemUTC());
   }
 
@@ -55,10 +59,12 @@ public class CommunityPostCreateService {
       CurrentAuthenticatedUserResolver currentAuthenticatedUserResolver,
       UserRepository userRepository,
       CommunityPostRepository communityPostRepository,
+      CommunityAttachmentService communityAttachmentService,
       Clock clock) {
     this.currentAuthenticatedUserResolver = currentAuthenticatedUserResolver;
     this.userRepository = userRepository;
     this.communityPostRepository = communityPostRepository;
+    this.communityAttachmentService = communityAttachmentService;
     this.clock = clock;
   }
 
@@ -92,6 +98,8 @@ public class CommunityPostCreateService {
                 request.content(),
                 request.anonymous(),
                 now));
-    return CommunityPostResponseMapper.toDetailResponse(saved, author);
+    var attachments =
+        communityAttachmentService.attach(authorUserId, saved.getId(), request.attachments());
+    return CommunityPostResponseMapper.toDetailResponse(saved, author, attachments);
   }
 }

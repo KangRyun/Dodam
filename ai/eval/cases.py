@@ -126,6 +126,7 @@ Q1_FIRST_HTP = QuestionCase(
         # 주제를 벗어난 다른 HTP 주제어 — 첫 질문에 나오면 주제 이탈이다.
         "off_subject_terms": ["나무", "사람"],
         "detected_names": ["지붕", "문", "창문"],
+        "forbid_reason_question": True,
     },
 )
 
@@ -135,7 +136,7 @@ Q1_FIRST_HTP = QuestionCase(
 Q2_FIRST_DIARY = QuestionCase(
     id="Q2_first_diary",
     title="첫 질문 · 그림일기 · 탐지 정상",
-    why="HTP 틀(집·나무·사람 주제, 검사 어휘)로 다루지 않는가. 그림에서 '그날 일'로 열어 가는가.",
+    why="HTP 틀(집·나무·사람 주제, 검사 어휘)로 다루지 않는가. 그림 속 이야기부터 열고 실제·상상을 미리 정하지 않는가.",
     request=QuestionRequest(
         conversation_id=9002,
         drawing_session_id=8002,
@@ -153,7 +154,16 @@ Q2_FIRST_DIARY = QuestionCase(
         safety_rule_version=SAFETY_RULE_VERSION,
         activity_type="ART_DIARY",
     ),
-    meta={"detected_names": ["사람", "해"]},
+    meta={
+        "detected_names": ["사람", "해"],
+        # 첫 질문은 그림 속 이야기를 먼저 열어야 한다. 실제·상상 확인은 다음 대화의 몫이다.
+        "premature_reality_check_patterns": [
+            "진짜 있었던 일이야",
+            "실제로 있었던 일이야",
+            "상상해서 그렸어",
+            "상상한 이야기야",
+        ],
+    },
 )
 
 
@@ -221,7 +231,9 @@ Q4_NEXT_NORMAL = QuestionCase(
             "이만",
             "즐거웠어. 안녕",
             "대화를 마",
-        ]
+        ],
+        # 마지막 아이 발화가 "다 같이 들어가려고"로 이유를 이미 설명했다.
+        "reason_already_stated": True,
     },
 )
 
@@ -328,6 +340,149 @@ Q9_PRIVACY = QuestionCase(
 )
 
 
+# ── 10) HTP · 아이가 '부분' 이름을 말로 정정 ─────────────────────
+# Q5는 ART_DIARY라, HTP에서 주제 못박기와 정정 수용이 부딪히는 경로가 비어 있었다.
+# 788 B가 고친 지점: 활동 단계는 확정 사실이지만 그림 안의 각 부분 이름은 아이가 정한다.
+# 718 부정 재질문은 아이가 **칩(CHIP_NO)** 으로 부정한 경우만 처리하므로, 말로 정정하는
+# 이 경로는 프롬프트 지시만으로 버텨야 한다.
+Q10_HTP_PART_CORRECTION = QuestionCase(
+    id="Q10_htp_part_correction",
+    title="HTP · 아이가 부분 이름을 말로 정정",
+    why="주제(집)는 유지하면서 부분 이름은 아이 말을 따르는가. 탐지 이름으로 되돌아가지 않는가.",
+    request=QuestionRequest(
+        conversation_id=9010,
+        drawing_session_id=8010,
+        child_age=7,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=2,
+        max_question_count=5,
+        detected_objects=[
+            _obj("HOUSE", "집", 0.93),
+            _obj("HOUSE_DOOR", "집의 문", 0.71),
+        ],
+        drawing_description="가운데에 집이 크게 있고, 아래쪽에 네모난 것이 하나 붙어 있어요.",
+        recent_messages=[
+            _dodam("이 문은 무슨 색으로 칠했어?"),
+            _child("그거 문 아니고 창문이야."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="HTP",
+        drawing_subject="HOUSE",
+    ),
+    meta={
+        "child_term": "창문",
+        "stale_term": "문 ",  # 정정 뒤에도 탐지 이름을 쓰면 회귀. '창문'에 걸리지 않게 공백 포함
+        # 주제 단계는 유지돼야 한다 — 부분 정정이 주제 이탈로 번지면 709 계열 재발.
+        "off_subject_terms": ["나무", "사람"],
+    },
+)
+
+
+# ── 11) HTP · 아이가 '주제 자체'를 말로 부정 ─────────────────────
+# 788 B의 가장 날카로운 경계. 아이 말을 받아주되(우기지 않기) 다른 HTP 주제로는 넘어가지
+# 않아야 한다 — 두 요구가 동시에 성립하는지 본다.
+Q11_HTP_SUBJECT_DENIAL = QuestionCase(
+    id="Q11_htp_subject_denial",
+    title="HTP · 아이가 주제 자체를 부정",
+    why="아이 말을 받아주면서도(우기지 않음) 다른 주제로 넘어가지 않는가.",
+    request=QuestionRequest(
+        conversation_id=9011,
+        drawing_session_id=8011,
+        child_age=7,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=1,
+        max_question_count=5,
+        detected_objects=[_obj("HOUSE", "집", 0.88)],
+        drawing_description="화면 가운데에 네모난 것이 크게 있고 위에 삼각형이 얹혀 있어요.",
+        recent_messages=[
+            _dodam("집을 크게 그렸네! 어떤 집이야?"),
+            _child("이거 집 아니야. 로봇이야."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="HTP",
+        drawing_subject="HOUSE",
+    ),
+    meta={
+        "child_term": "로봇",
+        "stale_term": "집이",  # "집이야"처럼 집이라고 우기면 회귀
+        "off_subject_terms": ["나무", "사람"],
+        "farewell_patterns": ["안녕", "잘 가", "다음에"],
+    },
+)
+
+
+# ── 12) HTP · 말로 질문 건너뛰기 ───────────────────────────────
+# 건너뛰기 표현은 일반 답변이 아니다. 직전 질문의 대상·속성을 표현만 바꿔 다시 묻지 않고,
+# 현재 HTP 주제 단계 안에서 아직 다루지 않은 방향으로 전환해야 한다(S15P11B209-831).
+Q12_HTP_VERBAL_SKIP = QuestionCase(
+    id="Q12_htp_verbal_skip",
+    title="HTP · 말로 질문 건너뛰기",
+    why="건너뛰기 의사를 존중하고 지붕·색 질문을 되묻지 않은 채 집 그림의 다른 방향으로 전환하는가.",
+    request=QuestionRequest(
+        conversation_id=9012,
+        drawing_session_id=8012,
+        child_age=8,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=2,
+        max_question_count=5,
+        detected_objects=_HTP_HOUSE_OBJECTS,
+        drawing_description=(
+            "가운데에 집이 크게 있고 빨간 지붕 아래에 문과 창문 두 개가 나란히 있어요."
+        ),
+        recent_messages=[
+            _dodam("지붕은 무슨 색으로 칠했어?"),
+            _child("질문을 건너뛸래."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="HTP",
+        drawing_subject="HOUSE",
+        asked_object_codes=["HOUSE_ROOF"],
+    ),
+    meta={
+        "skipped_focus_terms": ["지붕", "무슨 색", "어떤 색", "색으로"],
+        "off_subject_terms": ["나무", "사람"],
+    },
+)
+
+
+# ── 13) 그림일기 · 말로 질문 건너뛰기 ─────────────────────────
+Q13_DIARY_VERBAL_SKIP = QuestionCase(
+    id="Q13_diary_verbal_skip",
+    title="그림일기 · 말로 질문 건너뛰기",
+    why="말하기 싫다는 의사를 내용 답변으로 오해하지 않고 인물 행동 질문과 다른 이야기로 전환하는가.",
+    request=QuestionRequest(
+        conversation_id=9013,
+        drawing_session_id=8013,
+        child_age=8,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=2,
+        max_question_count=5,
+        detected_objects=[
+            _obj("PERSON", "사람", 0.91),
+            _obj("BALL", "공", 0.84),
+            _obj("SUN", "해", 0.77),
+        ],
+        drawing_description=(
+            "사람 두 명 옆에 파란 공이 있고 왼쪽 위에는 노란 해가 그려져 있어요."
+        ),
+        recent_messages=[
+            _dodam("두 사람은 지금 무엇을 하고 있어?"),
+            _child("이건 말하기 싫어. 다른 질문 해줘."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="ART_DIARY",
+        asked_object_codes=["PERSON"],
+    ),
+    meta={
+        "skipped_focus_terms": ["두 사람", "사람들은", "무엇을 하고", "뭘 하고", "하고 있어"],
+    },
+)
+
+
 QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q1_FIRST_HTP,
     Q2_FIRST_DIARY,
@@ -336,6 +491,10 @@ QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q5_NEXT_CORRECTION,
     Q6_INJECTION,
     Q9_PRIVACY,
+    Q10_HTP_PART_CORRECTION,
+    Q11_HTP_SUBJECT_DENIAL,
+    Q12_HTP_VERBAL_SKIP,
+    Q13_DIARY_VERBAL_SKIP,
 )
 
 

@@ -980,5 +980,155 @@ class ActivityPromptSplitTest(unittest.TestCase):
         retrieve_spy.assert_called_once()
 
 
+class ReportCommonContradictionTest(unittest.TestCase):
+    """report_common.txt 안에서 같은 내용에 두 지시가 갈리지 않는지 (S15P11B209-788 E·F).
+
+    프롬프트 '문구'를 직접 본다 — 여기서 고친 것은 모델에게 주는 지시의 일관성이고,
+    조립·호출 경로는 ActivityPromptSplitTest가 이미 덮는다.
+    """
+
+    def setUp(self):
+        import prompts_registry
+
+        self.text = prompts_registry.load("report_common")
+
+    # ── E: 걱정 신호 배출구 ──
+    def test_two_expert_channels_are_defined_with_distinct_roles(self):
+        self.assertIn("전문가 채널 두 곳", self.text)
+        self.assertIn("같은 내용을 양쪽에 중복해 적지 마", self.text)
+        # 관찰 카드 = EXPERT_ONLY feature / 추가 확인 지점 = attentionPoints
+        self.assertIn("관찰 카드", self.text)
+        self.assertIn("무엇을 더 확인하면 좋을지", self.text)
+
+    def test_attention_points_is_no_longer_the_only_outlet(self):
+        """구 문구는 걱정 신호를 attentionPoints '로만' 옮기라고 해서, 코드가 전제하는
+        EXPERT_ONLY feature 경로(report_client._feature 강등 로직)와 어긋났다."""
+        self.assertNotIn("attentionPoints(전문가용)로만 옮긴다", self.text)
+        self.assertNotIn("관찰된 사실만 attentionPoints(전문가용)로 옮긴다", self.text)
+
+    def test_expert_only_channel_matches_code_behaviour(self):
+        # 코드가 실제로 EXPERT_ONLY feature 경로를 갖고 있다(프롬프트가 그걸 부정하면 안 된다).
+        self.assertIn("EXPERT_ONLY", report_client._VALID_SCOPES)
+        self.assertIn('features 의 EXPERT_ONLY 항목', self.text)
+
+    def test_attention_points_is_not_a_summary_of_cards(self):
+        self.assertIn("EXPERT_ONLY 관찰 카드를 다시 요약하지 마", self.text)
+
+    # ── F: 형식적 분석 수치의 자리 ──
+    def test_metric_facts_and_emotion_link_have_separate_homes(self):
+        """구 문구는 수치를 evidenceSummary에 넣고 거기서 감정과 '연결'하라고 했는데,
+        같은 파일의 사실/해석 분리 원칙은 evidenceSummary에 감정 판단을 금지한다."""
+        self.assertIn("수치와 감정을 잇는 문장은 '해석'이라 자리가 다르다", self.text)
+        self.assertIn("evidenceSummary 에는 수치만 남기고", self.text)
+        # 사실/해석 분리 원칙은 그대로 살아 있어야 한다.
+        self.assertIn("감정 판단·심리 해석(\"안정감을 느낀다\" 등)을 절대 넣지 마", self.text)
+
+    def test_metric_link_instruction_appears_before_fact_split_principle(self):
+        # 앞에 오는 지시가 뒤의 원칙과 어긋나면 모델이 어느 쪽을 따를지 알 수 없다 —
+        # 이제 앞쪽이 뒤쪽 원칙을 가리킨다.
+        self.assertIn("아래 사실/해석 분리 원칙", self.text)
+        self.assertLess(
+            self.text.index("아래 사실/해석 분리 원칙"),
+            self.text.index("관찰 '사실'과 AI '해석'을 분리한다"),
+        )
+
+    def test_emotion_inference_requires_multiple_aligned_signals(self):
+        """그림·필압 기반 추론은 허용하되, 단일 신호 억측과 성격 일반화는 막는다."""
+        self.assertIn("단일 신호만으로 감정을 추론하지 마", self.text)
+        self.assertIn("독립적인 관찰 신호가 두 가지 이상", self.text)
+        self.assertIn("신호가 엇갈리거나 근거가 약하면 감정을 추론하지 않는다", self.text)
+        self.assertIn("이번 활동에서는", self.text)
+        self.assertIn("평소 마음·성격·발달 상태로 넓히지 않는다", self.text)
+
+
+class ReportContractAlignmentTest(unittest.TestCase):
+    """프롬프트가 BE 수신·화면 도달 실태와 맞는지 (S15P11B209-826).
+
+    구 문구는 "각 필드가 화면에서 쓰이는 자리"로 7항목을 열거했는데 4.5개가 거짓이었다.
+    모델이 그 맥락을 믿고 화면에 안 나가는 필드에 공을 들이고, 정작 보호자 조언 영역
+    전부인 followUpGuides는 강조 없이 스키마 맨 끝에 있었다(818 근인 후보).
+    """
+
+    def setUp(self):
+        self.text = prompts_registry.load("report_common")
+
+    # ── 3. 렌더링 설명이 사실과 맞는가 ──
+    def test_guardian_facing_fields_are_named_exactly(self):
+        """보호자 화면에 실제로 도달하는 셋만 [1]로 분류돼야 한다.
+
+        경로: ReportDetailQueryService → ReportDetailResponse → report_screen.dart.
+        그 서비스에는 observedFeature·guardianQuestion·observationResult 저장소가
+        주입되지 않는다 — 읽기 경로 부재의 확정 증거다.
+        """
+        section = self.text.split("[1]", 1)[1].split("[2]", 1)[0]
+        for field in ("activityNotes", "conversationSummary.summaryText", "guidance"):
+            self.assertIn(field, section)
+        # 전문가 계층 필드가 '보호자 화면' 칸에 섞이면 안 된다.
+        for field in ("overallSummary", "positiveSignals", "features", "attentionPoints"):
+            self.assertNotIn(field, section)
+
+    def test_expert_only_fields_are_not_claimed_as_guardian_screen(self):
+        """§13.1은 AI 관찰 초안을 ExpertReviewMaterial 계층에 둔다(REPORT-03 미구현)."""
+        self.assertNotIn("리포트 맨 위 전체 요약", self.text)
+        self.assertNotIn("'아이의 좋은 모습' 영역", self.text)
+        self.assertNotIn("'관찰된 특징' 카드 목록", self.text)
+        # 대신 '전문가 검토용으로만 저장' 갈래로 옮겨졌다.
+        expert = self.text.split("[2]", 1)[1].split("[3]", 1)[0]
+        for field in ("overallSummary", "positiveSignals", "features", "attentionPoints"):
+            self.assertIn(field, expert)
+
+    def test_unused_fields_are_marked_as_such(self):
+        unused = self.text.split("[3]", 1)[1].split("어느 갈래든", 1)[0]
+        for field in ("detailText", "guardianQuestions", "mainTopic", "expressedEmotion"):
+            self.assertIn(field, unused)
+
+    def test_screen_section_title_matches_the_frontend(self):
+        """FE 섹션 제목은 '이런 질문으로 대화해 보세요'다 — 구 문구의 '집에서 이렇게 해보세요'가 아니다."""
+        self.assertIn("이런 질문으로 대화해 보세요", self.text)
+        self.assertNotIn("'집에서 이렇게 해보세요' 안내와 질문", self.text)
+
+    def test_follow_up_guides_are_question_first_with_one_attitude_slot(self):
+        self.assertIn("그대로 물어볼 수 있는 질문을 앞에 둔다", self.text)
+        self.assertIn("마지막 1개는 질문 대신 듣는 태도 안내로 써도 좋다", self.text)
+
+    # ── 1. NOT NULL 필드가 필수로 표시되는가 ──
+    def test_not_null_fields_are_marked_required(self):
+        """BE 컬럼이 NOT NULL인데 프롬프트에 표시가 없었다.
+
+        지금 예외가 안 나는 이유는 report_client._assemble이 빈 문자열을 채우기 때문이고,
+        BE는 saveActivityNotes만 blank를 스킵한다 — 나머지는 빈 행이 저장돼 화면에
+        빈 불릿으로 나간다.
+        """
+        self.assertIn("비어 있으면 안 된다", self.text)
+        for field in ("followUpGuides", "questionText", "description", "visibilityScope"):
+            self.assertIn(field, self.text)
+        self.assertIn("비워 두지 마라", self.text)
+
+    # ── 2. 조용히 잘리는 길이 상한이 명시되는가 ──
+    def test_silent_truncation_limits_are_stated_as_numbers(self):
+        """ColumnTextLimiter.fit은 초과분을 잘라내고 log.warn만 남긴다(조용한 절단)."""
+        for limit in ("50자", "100자", "80자", "200자"):
+            self.assertIn(limit, self.text)
+        self.assertIn("말없이 잘라내", self.text)
+
+    def test_limits_match_backend_column_constants(self):
+        """BE ObservationReportPersistenceService의 *_LIMIT 값과 어긋나면 안 된다.
+
+        어긋나면 프롬프트가 허용한 길이가 조용히 잘린다 — 두 벌을 따로 관리하는 함정이라
+        값이 바뀌면 이 테스트가 먼저 깨지도록 둔다.
+        """
+        expected = {
+            "expressedEmotion": "50자",  # EXPRESSED_EMOTION_LIMIT
+            "mainTopic": "100자",  # MAIN_TOPIC_LIMIT
+            "questionPurpose": "50자",  # QUESTION_PURPOSE_LIMIT
+            "featureCode": "80자",  # FEATURE_CODE_LIMIT
+            "title": "200자",  # FEATURE_TITLE_LIMIT
+        }
+        block = self.text.split("길이 상한", 1)[1].split("{", 1)[0]
+        for field, limit in expected.items():
+            with self.subTest(field=field):
+                self.assertRegex(block + self.text, rf"{field}[^\n]*{limit}|{limit}[^\n]*{field}")
+
+
 if __name__ == "__main__":
     unittest.main()

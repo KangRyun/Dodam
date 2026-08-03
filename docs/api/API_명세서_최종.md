@@ -1654,6 +1654,7 @@ REPORT-07은 Request Body 없이 `Idempotency-Key` Header를 필수로 받는다
 - Query: `type?`, `unreadOnly=false`, `page=0`, `size=20`.
 - 항목: `notificationId`, `type`, `title`, `content`, `relatedResourceType`, `relatedResourceId`, `data`, `deliveryStatus`, `readAt`, `sentAt`, `createdAt`.
 - 알림의 이동 경로는 서버가 임의 URL 대신 `relatedResourceType`과 `relatedResourceId`로 제공하고 프론트가 라우팅한다.
+- `readAt`·`sentAt`·`createdAt`(및 NOTI-01 응답 `updatedAt`)은 **UTC ISO-8601로 `Z` 접미사를 포함한다**(예: `2026-08-03T04:53:00.123456Z`). 표기가 없으면 클라이언트가 지역 시각으로 해석해 어긋난다 — 상세는 `notification-inbox-contract.md` §0.1.
 
 ### 15.4 위험 관련 알림
 
@@ -1694,6 +1695,8 @@ REPORT-07은 Request Body 없이 `Idempotency-Key` Header를 필수로 받는다
 | COMM-16 | GET | `/posts/{postId}/comments` | 로그인 사용자 | 게시글 댓글 목록 조회 |
 | COMM-17 | POST | `/users/me/blocks/{blockedUserId}` | 로그인 사용자 | 사용자 차단 |
 | COMM-18 | DELETE | `/users/me/blocks/{blockedUserId}` | 로그인 사용자 | 사용자 차단 해제 |
+| COMM-19 | POST | `/community-files` | 로그인 사용자 | 게시글 첨부 이미지 사전 업로드 |
+| COMM-20 | GET | `/community-files/{fileId}/file` | 접근 권한 보유 사용자 | 첨부 이미지 인증 Proxy 조회 |
 
 전문가 팔로우는 전문가 도메인의 EXPERT-07·08을 사용한다.
 
@@ -1745,6 +1748,19 @@ REPORT-07은 Request Body 없이 `Idempotency-Key` Header를 필수로 받는다
 - `EXPERT_COLUMN`, `ART_RESOURCE`, `DRAWING_GUIDE`는 검증 전문가 또는 ADMIN만 작성한다.
 - 아동 실명·학교·주소·연락처, 분석 리포트 원문, 대화 원문을 탐지해 경고·차단한다.
 - 아동 그림 첨부는 별도 공개 동의가 있는 복사본만 허용하고 분석·대화 메타데이터를 제거한다.
+
+#### 16.3-A 첨부 이미지 업로드·연결 (S15P11B209-586)
+
+- 게시글 작성·수정 전에 `POST /community-files`에 `multipart/form-data`의 `image` Part로 PNG 또는 JPEG를 업로드한다.
+- 최대 크기는 5 MiB이며 공통 이미지 저장 계층이 Signature, MIME Type, 실제 크기, 차원 및 SHA-256을 검증하고 Metadata를 제거한 복사본을 저장한다.
+- 성공 시 HTTP 201과 `fileId`, `contentType`, `size`, `widthPx`, `heightPx`, `expiresAt`을 반환한다. 게시글에 연결되지 않은 파일은 24시간 동안만 유효하다.
+- `POST /posts` 또는 `PATCH /posts/{postId}`의 `attachments`에는 같은 사용자가 업로드한 `fileId`와 `type: IMAGE`를 최대 5개까지 전달한다. 요청 배열 순서가 노출 순서다.
+- `fileId`는 한 게시글에 한 번만 연결할 수 있다. 다른 사용자 파일, 존재하지 않는 파일, 만료 또는 이미 다른 게시글에 연결된 파일은 연결하지 않는다.
+- 상세 응답의 첨부 항목은 `fileId`, `type`, `url`, `widthPx`, `heightPx`를 반환한다. `url`은 `/api/v1/community-files/{fileId}/file` 형태의 상대 경로이며 JWT 인증이 필요하다.
+- 임시 파일은 업로더만 조회할 수 있다. 연결된 파일은 게시글을 조회할 수 있는 로그인 사용자에게만 제공하며, 비공개·삭제 게시글과 차단 사용자 게시글은 404로 숨긴다.
+- 게시글 수정의 `attachments`는 전체 교체 의미다. 목록에서 제거된 파일과 게시글 삭제로 더 이상 쓰이지 않는 파일은 `storage_deletion_jobs`에 등록해 비동기 삭제한다.
+
+오류 코드는 `COMMUNITY_ATTACHMENT_FILE_REQUIRED`, `COMMUNITY_ATTACHMENT_FILE_TOO_LARGE`, `COMMUNITY_ATTACHMENT_NOT_FOUND`, `COMMUNITY_ATTACHMENT_NOT_ATTACHABLE`, `COMMUNITY_ATTACHMENT_DUPLICATED`, `COMMUNITY_ATTACHMENT_UPLOAD_FAILED`를 사용한다. 이미지 Signature·형식·차원 오류는 공통 ImageStorage 오류 계약을 따른다.
 
 ### 16.4 게시글 상세
 

@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # 하나의 first_question/conversations로 두 활동을 처리하던 것을 갈랐다. 대화의 '목적'이
 # 다르기 때문이다 — 같은 문장으로 두 목적을 시키면 어느 쪽도 제대로 안 된다:
 #   - HTP: 그림 자체가 궁금하다. 아이가 그림에 무엇을 담으려 했는지 그림 안에서 좁혀 간다.
-#   - ART_DIARY: 그림은 대화 소재일 뿐이다. 그림에서 시작해 그날 있었던 일·아이 마음으로 넓혀 간다.
+#   - ART_DIARY: 그림 속 이야기에서 시작해 실제 경험인지 상상인지 확인한 뒤 그 흐름과 마음으로 넓혀 간다.
 # 공유 규칙(이름·분석결과 취급·출력 형식)은 conversation_common이 소유하고 뒤에 이어붙인다.
 _FIRST_BY_ACTIVITY = {
     "HTP": "first_question_htp",
@@ -53,6 +53,9 @@ _GUARDRAILS = "guardrails"
 # HTP 주제별 질문 뱅크(S15P11B209-811). 표준 사후질문(PDI)을 아동용으로 포장한 목록이며,
 # 현재 주제 구획 하나만 싣는다. 그림일기는 쓰지 않는다 — PDI는 HTP 전용 프로토콜이다.
 _HTP_BANK = "htp_question_bank"
+# 활동·주제·대상 지시 블록(S15P11B209-832). question_service가 구획을 골라 조립해
+# 대화 프롬프트에 끼워 넣는다. 원래 코드 안 문자열이라 버전 추적 밖이었다.
+_ACTIVITY_BLOCK = "activity_block"
 
 # 대화 경로가 쓰는 프롬프트 파일 전체의 통합 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
 # 축약 태그로 싣는다(S15P11B209-819) — 대화 경로는 파일이 여섯 개라 정본이 193자다. BE가 아직
@@ -64,6 +67,7 @@ _ALL_NAMES = (
     _TONE,
     _GUARDRAILS,
     _HTP_BANK,
+    _ACTIVITY_BLOCK,
 )
 PROMPT_VERSION = prompts_registry.short_version("conv-all", *_ALL_NAMES)
 
@@ -72,9 +76,22 @@ _LABEL_BY_ACTIVITY = {"HTP": "conv-htp", "ART_DIARY": "conv-diary"}
 
 
 def prompt_names_for(activity_type: str | None) -> tuple[str, ...]:
-    """이 활동 유형이 실제로 쓰는 프롬프트 파일 이름들. 모르는 값은 기본(HTP)으로 둔다."""
+    """이 활동 유형이 실제로 쓰는 프롬프트 파일 이름들. 모르는 값은 기본(HTP)으로 둔다.
+
+    _ACTIVITY_BLOCK도 포함한다(S15P11B209-832) — 내부 계약 경로(question_service)가 활동·주제·
+    대상 지시를 이 파일에서 조립해 끼워 넣으므로, 문구가 바뀌면 promptVersion이 움직여야 한다.
+    draft 경로는 activity_block을 비워 보내지만, 이 값은 '이 경로가 쓸 수 있는 파일 조합'이라
+    양쪽을 같은 태그로 둔다 — 경로별로 태그를 갈라 두면 같은 프롬프트에 두 버전이 생긴다.
+    """
     key = activity_type if activity_type in _FIRST_BY_ACTIVITY else DEFAULT_ACTIVITY_TYPE
-    names = (_FIRST_BY_ACTIVITY[key], _NEXT_BY_ACTIVITY[key], _COMMON, _TONE, _GUARDRAILS)
+    names = (
+        _FIRST_BY_ACTIVITY[key],
+        _NEXT_BY_ACTIVITY[key],
+        _COMMON,
+        _TONE,
+        _GUARDRAILS,
+        _ACTIVITY_BLOCK,
+    )
     return names + (_HTP_BANK,) if key == "HTP" else names
 
 
@@ -172,26 +189,15 @@ def _load(name: str) -> str:
 # ⚠️ 이 규칙은 원래 question_service._DIFFICULTY_RULES 코드 상수였다. 프롬프트 파일로 옮긴 이유:
 #   ① 아이에게 그대로 들려줄 문구인데 prompts_registry 버전 추적 밖에 있었다,
 #   ② draft 경로(first_question/next_question)에는 아예 안 붙어 연령별 말투가 없었다.
-_SECTION_HEADER = re.compile(r"^\[\[([A-Z_]+)\]\]$", re.M)
-
 # 알 수 없는 난이도가 오면 저학년 기준으로 둔다(요청은 계약상 검증되지만 방어적으로).
 DEFAULT_DIFFICULTY = "LOWER_ELEMENTARY"
 
 TONE_BLOCK_TITLE = "[연령별 말하기 규칙]"
 BANK_BLOCK_TITLE = "[이 주제에서 궁금해할 것]"
 
-
-@lru_cache(maxsize=None)
-def _sections(name: str) -> dict[str, str]:
-    """[[KEY]] 머리표로 나뉜 프롬프트 → {KEY: 본문}. 머리표 앞의 설명 문단은 버린다."""
-    text = _load(name)
-    headers = list(_SECTION_HEADER.finditer(text))
-    return {
-        match.group(1): text[
-            match.end() : (headers[i + 1].start() if i + 1 < len(headers) else len(text))
-        ].strip()
-        for i, match in enumerate(headers)
-    }
+# [[KEY]] 파싱은 prompts_registry가 소유한다(S15P11B209-832) — question_service의 활동 블록도
+# 같은 규약을 쓰게 되면서 private 함수를 여럿이 들여다보는 모양이 됐다.
+_sections = prompts_registry.sections
 
 
 def _tone_sections() -> dict[str, str]:

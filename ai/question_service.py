@@ -35,6 +35,7 @@ import crisis_detection
 import crisis_guidance
 import llm_client
 import prompt_injection
+import prompts_registry  # 답변 칩 프롬프트 로딩·버전 추적 (S15P11B209-788)
 import question_safety
 from gms import get_client
 from internal_contracts import (
@@ -198,7 +199,49 @@ def _history_dicts(messages: list) -> list[dict]:
 # ── HTP 주제·대상 지시 블록 (S15P11B209-713) ────────────────────
 # 프롬프트가 '지금 무슨 주제인지'를 몰라 다른 주제 명사를 집어오던 버그(709 원인 4)를 막는다.
 # activityType·drawingSubject를 프롬프트에 못박아 다른 주제로 새지 않게 하고, 고른 대상 하나만 묻게 한다.
+#
+# ⚠️ 무엇을 못 박는가 — S15P11B209-788 B의 핵심 구분:
+#   HTP는 아이가 그릴 주제가 집·나무·사람으로 정해져 있다. 그래서 **'지금 어느 주제 단계인가'는
+#   활동이 정한 사실**이고 아이가 뒤집을 수 없다(다른 주제로 새면 709 계열 재발).
+#   그러나 **그 그림 안의 각 부분이 무엇인지는 아이가 정한다** — 탐지가 '문'이라 해도 아이가
+#   창문이라 하면 창문이다. 예전 문구("아이는 '집'을 그렸어. 이건 정해진 사실이야")는 이 둘을
+#   뭉쳐 못 박아, 공통 프롬프트(conversation_common)의 "무조건 아이 말을 믿어"와 정면 충돌했다.
+#   718 부정 재질문은 아이가 **칩(CHIP_NO)** 으로 부정한 경우만 처리하므로, **말로 정정한 경로**가
+#   그 충돌에 그대로 노출됐다.
 _SUBJECT_KO = {"HOUSE": "집", "TREE": "나무", "PERSON": "사람"}
+
+
+def _other_subjects(subject: str | None) -> str:
+    """현재 주제를 뺀 나머지 HTP 주제 이름(S15P11B209-788 H).
+
+    예전 문구는 "다른 주제(집·나무·사람)로 넘어가지 마"라고 세 주제를 통째로 나열해
+    **현재 주제까지 금지 목록에 넣었다** — 집 단계에서 집을 묻지 말라고 읽힐 수 있었다.
+    """
+    return "·".join(name for code, name in _SUBJECT_KO.items() if code != subject)
+
+
+# 지시 문구는 ai/prompts/activity_block.txt가 소유한다(S15P11B209-832). 코드 안 문자열이던
+# 것을 옮긴 이유: GPT에 나가는 지시문인데 prompts_registry 버전 추적 밖이라, 788에서 문구를
+# 크게 고쳐도 promptVersion이 그대로였다(conv-htp@2.1.0+bd5e3622 → 동일). 버전은 같은데
+# 동작이 다른 상태여서 792 평가 하네스로 전후를 구분할 수 없었다.
+ACTIVITY_BLOCK_PROMPT = "activity_block"
+
+
+def _block(key: str, **values) -> str:
+    """활동 블록 구획 하나를 치환해 돌려준다."""
+    return prompts_registry.sections(ACTIVITY_BLOCK_PROMPT)[key].format(**values)
+
+
+def _target_line(req: QuestionRequest, target_name: str) -> str:
+    """대상 객체 지시 한 줄 — 첫 질문에서만 '이것만'으로 좁힌다(S15P11B209-788 C).
+
+    target_name은 아이 발화와 무관하게 신뢰도 최고순으로 뽑힌다(_target_for_purpose).
+    아이가 이미 말한 뒤에도 "이 하나에 대해서만 물어봐"를 붙이면, 대화 프롬프트의
+    "방금 한 말에서 이어지는 질문을 해. 갑자기 주제를 바꾸지 마"와 동시에 지시되어
+    프롬프트가 스스로 "바꿔라/바꾸지 마라"를 요구한다.
+    """
+    key = "TARGET_FIRST" if _last_child_index(req) is None else "TARGET_FOLLOW_UP"
+    return _block(key, target=target_name)
 
 
 def _activity_block(
@@ -209,9 +252,11 @@ def _activity_block(
 ) -> str:
     """activityType·drawingSubject·대상 객체를 프롬프트 지시 블록으로 만든다.
 
-    - HTP: 주제를 확정 사실로 못박고 다른 주제(집·나무·사람)로 넘어가지 못하게 한다.
+    - HTP: '지금 어느 주제 단계인가'만 확정 사실로 못박아 다른 주제로 넘어가지 못하게 하고,
+      그림 안의 각 부분 이름은 아이 말에 따르게 한다(S15P11B209-788 B).
       고른 대상이 있으면 그 하나만, 없으면 주제 그림 전체를 묻게 한다.
-    - ART_DIARY: 주제 개념 없이, 대상이 있으면 그 하나만 묻게 한다.
+    - ART_DIARY: 주제 개념이 없고, 탐지 이름도 믿지 않게 한다 — sketch 가중치는 오탐이 잦아
+      이름의 근거는 탐지 목록이 아니라 그림 서술과 아이 말이다.
     - activityType이 없으면(구 BE·주제 미전달) 주제 제약 없이 기존 동작을 유지한다.
     반복 방지: 이미 물어본 게 있으면 새로운 것을 묻도록 덧붙인다(대상 선택에서도 이미 배제됨).
     reask_candidates(S15P11B209-718): 아이가 탐지를 부정해 후보 칩으로 다시 묻는 경우, 보기 중에서
@@ -223,32 +268,31 @@ def _activity_block(
     )
     lines: list[str] = []
     if req.activity_type == "HTP" and subject_ko:
-        lines.append("[이 그림의 주제]")
+        # 못 박는 것은 '활동 단계'다 — 그림 내용의 이름이 아니다(788 B).
         lines.append(
-            f"- 아이는 '{subject_ko}'을(를) 그렸어. 이건 정해진 사실이야. "
-            f"'{subject_ko}'와 그 부분에 대해서만 묻고, 다른 주제(집·나무·사람)로 넘어가지 마."
+            _block(
+                "HTP",
+                subject=subject_ko,
+                other_subjects=_other_subjects(req.drawing_subject),
+            )
         )
-        if target_name:
-            lines.append(f"- 지금은 이 하나에 대해서만 물어봐: {target_name}")
-        else:
-            lines.append(f"- '{subject_ko}' 그림 전체에 대해 열린 질문을 해.")
+        lines.append(
+            _target_line(req, target_name)
+            if target_name
+            else _block("HTP_WHOLE", subject=subject_ko)
+        )
     elif req.activity_type == "ART_DIARY":
-        lines.append("[이 그림]")
-        lines.append("- 자유롭게 그린 그림이야. 정해진 주제는 없어.")
+        # 그림일기 탐지 모델(sketch)은 오탐이 잦다 — 이름의 근거는 탐지 목록이 아니라
+        # 그림 서술과 아이 말이다(788 B, 활동별 판단).
+        lines.append(_block("ART_DIARY"))
         if target_name:
-            lines.append(f"- 지금은 이 하나에 대해서만 물어봐: {target_name}")
+            lines.append(_target_line(req, target_name))
     elif target_name:
-        lines.append("[지금 물어볼 것]")
-        lines.append(f"- {target_name}")
+        lines.append(_block("TARGET_ONLY", target=target_name))
     if reask_candidates:
-        lines.append(
-            "- 아이가 방금 '아니야'라고 했어. 그럼 무엇을 그린 건지 아래 보기 중에서 고르도록 "
-            "'그럼 이건 뭐야?'처럼 짧게 다시 물어봐. 보기 내용을 네가 미리 말하지는 마."
-        )
+        lines.append(_block("REASK_CANDIDATES"))
     if req.asked_object_codes:
-        lines.append(
-            "- 이미 이야기한 것은 다시 묻지 말고, 아직 이야기하지 않은 새로운 것을 물어봐."
-        )
+        lines.append(_block("ASKED_ALREADY"))
     return "\n".join(lines)
 
 
@@ -548,13 +592,12 @@ def _llm_answer_chips(
     질문 프롬프트와 분리된 짧은 best-effort 호출이다 — 재시도 없이 한 번만, 실패하면 None을
     돌려 상위에서 generic 칩으로 폴백한다(질문 응답을 지연·차단시키지 않는다).
     받은 후보는 _safe_chip_labels로 아동 안전 정화 후 쓴다.
+
+    프롬프트 문구는 ai/prompts/answer_chips.txt에 있다(S15P11B209-788 부수). 코드 상수로
+    두면 아동 화면에 나갈 칩을 만드는 프롬프트가 prompts_registry 버전 추적 밖에 남는다.
     """
-    system = (
-        f'너는 {req.child_age}세 아이와 이야기하는 친구야. 아이가 방금 이런 질문을 받았어: "{text}"\n'
-        "아이가 손가락으로 고를 만한 짧은 답 3개만 줘. 규칙:\n"
-        "- 각 줄에 하나씩, 5자 안팎의 아주 쉬운 말.\n"
-        "- 번호·설명·따옴표·기호 없이 답만.\n"
-        "- 아이를 판단하거나 마음을 단정하는 말은 쓰지 마."
+    system = prompts_registry.load("answer_chips").format(
+        age_band=req.child_age, question=text
     )
     try:
         client = get_client().with_options(
