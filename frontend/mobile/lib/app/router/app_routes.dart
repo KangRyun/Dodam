@@ -30,6 +30,11 @@ abstract final class AppRoutes {
   /// (S15P11B209-460).
   static const String settingsWithdraw = '/guardian/settings/withdraw';
 
+  /// `GET`·`PATCH /users/me/data-retention` 데이터 보관 기간 조회·편집
+  /// (S15P11B209-456).
+  static const String settingsDataRetention =
+      '/guardian/settings/data-retention';
+
   static String childModeHome(String childId) =>
       '/child/${Uri.encodeComponent(childId)}/home';
 
