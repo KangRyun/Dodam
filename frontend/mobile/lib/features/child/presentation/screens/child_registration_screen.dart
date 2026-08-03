@@ -40,6 +40,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   bool _pickingPhoto = false;
   bool _uploadingPhoto = false;
   bool _removeExistingPhoto = false;
+  bool _deleting = false;
   double? _uploadProgress;
   String? _photoError;
   ValidatedPhoto? _selectedPhoto;
@@ -514,11 +515,15 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   }
 
   Future<void> _delete() async {
+    final child = widget.child;
+    // 진행 중 재진입은 컨트롤러 가드에서 false로 떨어져 성공 예정인 삭제를 실패로
+    // 안내하게 된다. 다이얼로그를 열기 전에 여기서 먼저 막는다.
+    if (child == null || _deleting) return;
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('아이 프로필을 삭제할까요?'),
-        content: const Text('그림과 대화, 활동 기록도 함께 삭제되며 되돌릴 수 없어요.'),
+        content: Text('${child.nickname}의 그림과 대화, 활동 기록도 함께 삭제되며 되돌릴 수 없어요.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
@@ -533,14 +538,15 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    final succeeded = await widget.controller.deleteChild(
-      widget.child!.childId,
-    );
+    setState(() => _deleting = true);
+    final succeeded = await widget.controller.deleteChild(child.childId);
     if (!mounted) return;
     if (succeeded) {
       Navigator.of(context).pop();
       return;
     }
+    // 실패는 화면을 유지하고 재시도를 허용하므로 진행 상태만 되돌린다.
+    setState(() => _deleting = false);
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('아이 프로필을 삭제하지 못했어요. 다시 시도해 주세요.')),
     );
@@ -673,6 +679,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                       key: const ValueKey('delete-child-profile'),
                       label: '아이 프로필 삭제',
                       variant: AppButtonVariant.danger,
+                      isLoading: _deleting,
                       onPressed: _delete,
                     ),
                   ],
