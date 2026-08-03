@@ -37,8 +37,8 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * <p>커뮤니티 단면에는 통합 테스트가 없어 다중 생성자 빈 배선 사고(develop CI #172)가 로컬에서 잡히지 않았다. 이 클래스는 그 회귀 그물이면서 유형별 작성
  * 권한, 공개 조건 필터, 정렬·페이징 화이트리스트, Soft Delete 후 비노출을 함께 검증한다.
  *
- * <p>인증은 다른 단면 통합 테스트와 같이 검증된 {@link AuthenticatedUser} Principal을 SecurityContext에 넣어 재현한다.
- * 좋아요·댓글·전문가 팔로우·Template 필드는 쓰기 API가 아직 없으므로 jdbc로 직접 구성하고, 게시글 자체는 가능한 한 공개 API로 만든다.
+ * <p>인증은 다른 단면 통합 테스트와 같이 검증된 {@link AuthenticatedUser} Principal을 SecurityContext에 넣어 재현한다. 전문가
+ * 팔로우·Template 필드는 쓰기 API가 아직 없으므로 jdbc로 직접 구성하고, 게시글 자체는 가능한 한 공개 API로 만든다.
  */
 @Testcontainers
 @SpringBootTest
@@ -521,6 +521,80 @@ class CommunityPostIntegrationTest {
             jdbcTemplate.queryForObject(
                 "SELECT post_status FROM community_posts WHERE id = 1", String.class))
         .isEqualTo("DELETED");
+  }
+
+  // ---------------------------------------------------------------- 583 게시글 좋아요 등록·취소
+
+  @Test
+  void repeatedLikeAndUnlikeRequestsKeepTheSameFinalState() throws Exception {
+    insertPost(1, EXPERT_USER_ID, "EXPERT_COLUMN", "좋아요 대상", "본문", false, "ACTIVE", true, null);
+
+    mockMvc
+        .perform(post("/api/v1/posts/{postId}/likes", 1))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.postId").value(1))
+        .andExpect(jsonPath("$.data.liked").value(true))
+        .andExpect(jsonPath("$.data.likeCount").value(1));
+
+    mockMvc
+        .perform(post("/api/v1/posts/{postId}/likes", 1))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.postId").value(1))
+        .andExpect(jsonPath("$.data.liked").value(true))
+        .andExpect(jsonPath("$.data.likeCount").value(1));
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM post_likes WHERE post_id = 1 AND user_id = ?",
+                Integer.class,
+                GUARDIAN_USER_ID))
+        .isEqualTo(1);
+
+    mockMvc.perform(delete("/api/v1/posts/{postId}/likes", 1)).andExpect(status().isNoContent());
+    mockMvc.perform(delete("/api/v1/posts/{postId}/likes", 1)).andExpect(status().isNoContent());
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM post_likes WHERE post_id = 1 AND user_id = ?",
+                Integer.class,
+                GUARDIAN_USER_ID))
+        .isZero();
+  }
+
+  @Test
+  void likeChangesAreImmediatelyVisibleInPostDetail() throws Exception {
+    insertPost(1, EXPERT_USER_ID, "EXPERT_COLUMN", "집계 대상", "본문", false, "ACTIVE", true, null);
+
+    mockMvc.perform(post("/api/v1/posts/{postId}/likes", 1)).andExpect(status().isCreated());
+    mockMvc
+        .perform(get("/api/v1/posts/{postId}", 1))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.likeCount").value(1))
+        .andExpect(jsonPath("$.data.likedByMe").value(true));
+
+    mockMvc.perform(delete("/api/v1/posts/{postId}/likes", 1)).andExpect(status().isNoContent());
+    mockMvc
+        .perform(get("/api/v1/posts/{postId}", 1))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.likeCount").value(0))
+        .andExpect(jsonPath("$.data.likedByMe").value(false));
+  }
+
+  @Test
+  void rejectsLikesForNonPublicPostsAndUnsupportedRoles() throws Exception {
+    insertPost(1, GUARDIAN_USER_ID, "GUARDIAN_STORY", "숨김 글", "본문", false, "ACTIVE", false, null);
+
+    mockMvc
+        .perform(post("/api/v1/posts/{postId}/likes", 1))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("POST_NOT_FOUND"));
+
+    insertPost(2, GUARDIAN_USER_ID, "GUARDIAN_STORY", "공개 글", "본문", false, "ACTIVE", true, null);
+    authenticate(ADMIN_USER_ID);
+    mockMvc
+        .perform(post("/api/v1/posts/{postId}/likes", 2))
+        .andExpect(status().isForbidden())
+        .andExpect(jsonPath("$.code").value("AUTH_403_002"));
   }
 
   @Test
