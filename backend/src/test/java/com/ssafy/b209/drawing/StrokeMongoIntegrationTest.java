@@ -22,6 +22,8 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -93,6 +95,36 @@ class StrokeMongoIntegrationTest extends IntegrationTestSupport {
 
     assertThat(deleted).isEqualTo(2);
     assertThat(strokeBatchDocumentRepository.count()).isEqualTo(1);
+  }
+
+  /**
+   * 행동 요약 집계 조회가 실제 MongoDB에서 의도대로 동작하는지 확인한다 (S15P11B209-772).
+   *
+   * <p>Mock Repository로는 검증할 수 없는 것들이다 — {@code fields} projection이 중첩 배열 경로({@code
+   * strokes.points.x})에서 실제로 좌표만 걷어내는지, {@code Pageable}의 정렬·개수 제한이 배치 순번 기준으로 걸리는지. 집계가 읽는 {@code
+   * elapsedMs}·{@code pressure}는 살아 있어야 하고 위치만 사라져야 한다.
+   */
+  @Test
+  void behaviorAggregationQueryDropsPointCoordinatesAndAppliesSortAndLimit() {
+    strokeBatchDocumentRepository.insert(document(3L, 7L, 3, "checksum-c"));
+    strokeBatchDocumentRepository.insert(document(1L, 7L, 1, "checksum-a"));
+    strokeBatchDocumentRepository.insert(document(2L, 7L, 2, "checksum-b"));
+    strokeBatchDocumentRepository.insert(document(4L, 8L, 1, "other-session"));
+
+    List<StrokeBatchDocument> loaded =
+        strokeBatchDocumentRepository.findBehaviorAggregationInputs(
+            7L, PageRequest.of(0, 2, Sort.by(Sort.Direction.ASC, "batchSeq")));
+
+    assertThat(loaded).extracting(StrokeBatchDocument::batchSeq).containsExactly(1, 2);
+    StrokePointDocument point = loaded.getFirst().strokes().getFirst().points().getFirst();
+    // 집계가 쓰는 값은 남고
+    assertThat(point.elapsedMs()).isZero();
+    // 한 번도 읽지 않는 좌표는 힙에 올라오지 않는다
+    assertThat(point.x()).isNull();
+    assertThat(point.y()).isNull();
+    // 배치 단위 값도 그대로다
+    assertThat(loaded.getFirst().clientCreatedAt()).isEqualTo(Instant.parse("2026-07-21T02:32:10Z"));
+    assertThat(loaded.getFirst().strokes().getFirst().tool()).isEqualTo("PEN");
   }
 
   @Test

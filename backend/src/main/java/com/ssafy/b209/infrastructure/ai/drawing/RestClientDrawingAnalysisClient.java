@@ -1,6 +1,7 @@
 package com.ssafy.b209.infrastructure.ai.drawing;
 
 import com.ssafy.b209.analysis.dto.DrawingAnalysisClientCommand;
+import com.ssafy.b209.drawing.service.StrokeBehaviorSummary;
 import com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisRequest;
 import com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse;
 import jakarta.validation.ConstraintViolation;
@@ -8,6 +9,7 @@ import jakarta.validation.Validator;
 import java.net.SocketTimeoutException;
 import java.net.URI;
 import java.net.http.HttpTimeoutException;
+import java.util.List;
 import java.util.Objects;
 import java.util.Set;
 import org.slf4j.Logger;
@@ -31,6 +33,7 @@ public final class RestClientDrawingAnalysisClient implements DrawingAnalysisCli
   private final String endpointPath;
   private final String internalToken;
   private final DrawingAnalysisImageUrlProvider imageUrlProvider;
+  private final DrawingBehaviorSummaryProvider behaviorSummaryProvider;
   private final Validator validator;
 
   RestClientDrawingAnalysisClient(
@@ -38,6 +41,7 @@ public final class RestClientDrawingAnalysisClient implements DrawingAnalysisCli
       String endpointPath,
       String internalToken,
       DrawingAnalysisImageUrlProvider imageUrlProvider,
+      DrawingBehaviorSummaryProvider behaviorSummaryProvider,
       Validator validator) {
     this.restClient = restClient;
     this.endpointPath = endpointPath;
@@ -46,6 +50,7 @@ public final class RestClientDrawingAnalysisClient implements DrawingAnalysisCli
     }
     this.internalToken = internalToken;
     this.imageUrlProvider = imageUrlProvider;
+    this.behaviorSummaryProvider = behaviorSummaryProvider;
     this.validator = validator;
   }
 
@@ -129,7 +134,7 @@ public final class RestClientDrawingAnalysisClient implements DrawingAnalysisCli
             ? AiDrawingAnalysisRequest.AnalysisType.INTERMEDIATE
             : AiDrawingAnalysisRequest.AnalysisType.FINAL;
     AiDrawingAnalysisRequest request =
-        AiDrawingAnalysisRequest.minimum(
+        AiDrawingAnalysisRequest.withBehavior(
             command.analysisId(),
             command.drawingSessionId(),
             command.activityType(),
@@ -143,11 +148,63 @@ public final class RestClientDrawingAnalysisClient implements DrawingAnalysisCli
                 command.width(),
                 command.height(),
                 command.inputMethod(),
-                command.checksumSha256()));
+                command.checksumSha256()),
+            behaviorInput(command, analysisType));
     if (!validator.validate(request).isEmpty()) {
       throw new DrawingAnalysisClientException(DrawingAnalysisClientException.Type.REQUEST_FAILED);
     }
     return request;
+  }
+
+  /**
+   * 최종 분석에만 저장된 그리기 과정 요약을 붙인다.
+   *
+   * <p>중간 분석은 자동 저장 debounce마다 실행되는데 집계는 그 시점까지의 배치를 매번 전부 읽는다. 한 세션에서 중간 분석이 반복될수록 읽는 양이 누적으로
+   * 커지므로, 단계별 성능 실측(S15P11B209-609)에서 비용을 확인하기 전까지는 완료 조건이 요구하는 최종 분석에만 싣는다. 중간 분석은 지금처럼 AI가 {@code
+   * BEHAVIOR_SUMMARY_ABSENT}로 표시한다.
+   *
+   * <p>저장소 조회가 실패해도 분석 자체를 실패시키지 않는다. 행동 요약은 그림 분석의 부가 입력이고, 없으면 AI가 사실대로 미사용 입력으로 남긴다.
+   */
+  private AiDrawingAnalysisRequest.BehaviorInput behaviorInput(
+      DrawingAnalysisClientCommand command, AiDrawingAnalysisRequest.AnalysisType analysisType) {
+    if (analysisType != AiDrawingAnalysisRequest.AnalysisType.FINAL) {
+      return null;
+    }
+    try {
+      return behaviorSummaryProvider
+          .findByDrawingSession(command.drawingSessionId())
+          .map(RestClientDrawingAnalysisClient::toBehaviorInput)
+          .orElse(null);
+    } catch (RuntimeException exception) {
+      log.warn(
+          "[772] 행동 요약 집계 실패로 behavior 없이 분석을 요청한다: analysisId={}, cause={}",
+          command.analysisId(),
+          exception.getClass().getSimpleName());
+      return null;
+    }
+  }
+
+  /**
+   * 집계 결과를 §19.3 계약 형태로 옮긴다.
+   *
+   * <p>{@link StrokeBehaviorSummary#truncated()}는 계약에 자리가 없어 전달하지 않는다. 부분 집계라는 사실은 집계 시점의 경고 로그로만
+   * 남는다 — 계약에 필드를 추가하려면 AI와 합의해야 한다.
+   */
+  private static AiDrawingAnalysisRequest.BehaviorInput toBehaviorInput(
+      StrokeBehaviorSummary summary) {
+    return new AiDrawingAnalysisRequest.BehaviorInput(
+        // 획 원본 해석(strokeBatchUrls)은 아직 AI가 구현하지 않았다. 빈 목록으로 보내야 AI가
+        //   "받았지만 쓰지 않았다"는 STROKE_BATCH_NOT_ANALYZED 경고를 남기지 않는다.
+        List.of(),
+        new AiDrawingAnalysisRequest.BehaviorSummary(
+            summary.drawingDurationMs(),
+            summary.activeDrawingMs(),
+            summary.pauseCount(),
+            summary.undoCount(),
+            summary.eraseCount(),
+            summary.toolChangeCount(),
+            summary.colorChangeCount(),
+            summary.pressureAvailable()));
   }
 
   private boolean hasTimeoutCause(Throwable throwable) {

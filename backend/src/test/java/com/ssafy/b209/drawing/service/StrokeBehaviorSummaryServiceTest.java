@@ -1,0 +1,482 @@
+package com.ssafy.b209.drawing.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
+
+import com.ssafy.b209.drawing.document.StrokeBatchDocument;
+import com.ssafy.b209.drawing.document.StrokeEventDocument;
+import com.ssafy.b209.drawing.document.StrokePointDocument;
+import com.ssafy.b209.drawing.repository.StrokeBatchDocumentRepository;
+import java.math.BigDecimal;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+import java.util.stream.IntStream;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
+
+class StrokeBehaviorSummaryServiceTest {
+
+  private static final Long SESSION_ID = 100L;
+  private static final Instant BASE = Instant.parse("2026-08-03T01:00:00Z");
+
+  private final StrokeBatchDocumentRepository repository =
+      mock(StrokeBatchDocumentRepository.class);
+  private final StrokeBehaviorSummaryService service = new StrokeBehaviorSummaryService(repository);
+
+  @Test
+  void returnsEmptyWhenSessionHasNoStrokeBatch() {
+    givenBatches(List.of());
+
+    assertThat(service.summarize(SESSION_ID)).isEmpty();
+  }
+
+  @Test
+  void doesNotQueryStorageWithoutSession() {
+    assertThat(service.summarize(null)).isEmpty();
+
+    verifyNoInteractions(repository);
+  }
+
+  @Test
+  void measuresSingleStrokeFromItsFirstAndLastPoint() {
+    givenBatches(batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 300, 800)));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    assertThat(summary.activeDrawingMs()).isEqualTo(800L);
+    // 배치가 하나뿐이라 배치 사이 간격이 없다. 실제 입력 시간이 전체 시간의 하한이 된다.
+    assertThat(summary.drawingDurationMs()).isEqualTo(800L);
+    assertThat(summary.pauseCount()).isZero();
+    assertThat(summary.undoCount()).isZero();
+    assertThat(summary.eraseCount()).isZero();
+    assertThat(summary.toolChangeCount()).isZero();
+    assertThat(summary.colorChangeCount()).isZero();
+    assertThat(summary.pressureAvailable()).isFalse();
+  }
+
+  @Test
+  void sumsActiveTimeOfEveryStrokeAcrossBatches() {
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 1000)),
+        batch(2, BASE.plusMillis(3_000), stroke(2, "PEN", "#FF0000", 0, 1000)),
+        batch(3, BASE.plusMillis(6_000), stroke(3, "PEN", "#FF0000", 0, 1000)));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    assertThat(summary.activeDrawingMs()).isEqualTo(3_000L);
+    // 첫 배치와 마지막 배치 생성 시각의 간격.
+    assertThat(summary.drawingDurationMs()).isEqualTo(6_000L);
+  }
+
+  @Test
+  void ordersBatchesByBatchSequenceNotByStorageOrder() {
+    givenBatches(
+        batch(3, BASE.plusMillis(6_000), stroke(3, "ERASER", null, 0, 100)),
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 100)),
+        batch(2, BASE.plusMillis(3_000), stroke(2, "PEN", "#00FF00", 0, 100)));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    assertThat(summary.drawingDurationMs()).isEqualTo(6_000L);
+    assertThat(summary.toolChangeCount()).isEqualTo(1);
+    assertThat(summary.colorChangeCount()).isEqualTo(1);
+  }
+
+  @Test
+  void ordersEventsWithinBatchByStrokeSequence() {
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(3, "PEN", "#0000FF", 0, 100),
+            stroke(1, "PEN", "#FF0000", 0, 100),
+            stroke(2, "ERASER", null, 0, 100)));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    // 순번 순서 PEN → ERASER → PEN 이므로 도구는 두 번 바뀐다. 저장 순서대로 읽으면 한 번으로 잘못 센다.
+    assertThat(summary.toolChangeCount()).isEqualTo(2);
+    assertThat(summary.colorChangeCount()).isEqualTo(1);
+    assertThat(summary.eraseCount()).isEqualTo(1);
+  }
+
+  @Test
+  void countsNoChangeWhenToolAndColorStayTheSame() {
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "PEN", "#FF0000", 0, 100),
+            stroke(2, "PEN", "#FF0000", 0, 100),
+            stroke(3, "PEN", "#FF0000", 0, 100)));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    assertThat(summary.toolChangeCount()).isZero();
+    assertThat(summary.colorChangeCount()).isZero();
+  }
+
+  @Test
+  void countsEveryAlternationOfToolAndColor() {
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "PEN", "#FF0000", 0, 100),
+            stroke(2, "PEN", "#00FF00", 0, 100),
+            stroke(3, "PEN", "#FF0000", 0, 100)));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    assertThat(summary.colorChangeCount()).isEqualTo(2);
+    assertThat(summary.toolChangeCount()).isZero();
+  }
+
+  @Test
+  void doesNotTreatColorlessEraserStrokeAsColorChange() {
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "PEN", "#FF0000", 0, 100),
+            stroke(2, "ERASER", null, 0, 100),
+            stroke(3, "PEN", "#FF0000", 0, 100)));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    assertThat(summary.colorChangeCount()).isZero();
+    assertThat(summary.toolChangeCount()).isEqualTo(2);
+  }
+
+  @Test
+  void countsUndoEventsAndIgnoresRedo() {
+    givenBatches(batch(1, BASE, marker(1, "UNDO"), marker(2, "REDO"), marker(3, "UNDO")));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    // REDO 로 되돌렸다고 UNDO 를 빼지 않는다. 되돌린 행동 자체가 관찰값이다.
+    assertThat(summary.undoCount()).isEqualTo(2);
+    assertThat(summary.activeDrawingMs()).isZero();
+    assertThat(summary.drawingDurationMs()).isZero();
+  }
+
+  @Test
+  void countsEraserStrokesAndStandaloneEraseEvents() {
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "ERASER", null, 0, 100),
+            marker(2, "ERASE"),
+            stroke(3, "PEN", "#FF0000", 0, 100)));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    assertThat(summary.eraseCount()).isEqualTo(2);
+  }
+
+  @Test
+  void doesNotCountIdleShorterThanPauseThreshold() {
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 0)),
+        batch(2, BASE.plusMillis(2_999), stroke(2, "PEN", "#FF0000", 0, 0)));
+
+    assertThat(summarize().pauseCount()).isZero();
+  }
+
+  @Test
+  void countsIdleExactlyAtPauseThreshold() {
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 0)),
+        batch(2, BASE.plusMillis(3_000), stroke(2, "PEN", "#FF0000", 0, 0)));
+
+    assertThat(summarize().pauseCount()).isEqualTo(1);
+  }
+
+  @Test
+  void countsIdleAbovePauseThreshold() {
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 0)),
+        batch(2, BASE.plusMillis(3_001), stroke(2, "PEN", "#FF0000", 0, 0)));
+
+    assertThat(summarize().pauseCount()).isEqualTo(1);
+  }
+
+  @Test
+  void subtractsDrawingTimeFromBatchGapBeforeJudgingPause() {
+    // 배치 간격은 5초지만 그 사이 2001ms 를 실제로 그렸다. 멈춘 시간은 2999ms 라 멈춤이 아니다.
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 0)),
+        batch(2, BASE.plusMillis(5_000), stroke(2, "PEN", "#FF0000", 0, 2_001)));
+
+    assertThat(summarize().pauseCount()).isZero();
+  }
+
+  @Test
+  void countsPauseWhenIdleRemainsAfterSubtractingDrawingTime() {
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 0)),
+        batch(2, BASE.plusMillis(5_000), stroke(2, "PEN", "#FF0000", 0, 2_000)));
+
+    assertThat(summarize().pauseCount()).isEqualTo(1);
+  }
+
+  @Test
+  void countsPauseAtEveryBatchBoundaryThatExceedsThreshold() {
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 0)),
+        batch(2, BASE.plusMillis(4_000), stroke(2, "PEN", "#FF0000", 0, 0)),
+        batch(3, BASE.plusMillis(8_000), stroke(3, "PEN", "#FF0000", 0, 0)));
+
+    assertThat(summarize().pauseCount()).isEqualTo(2);
+  }
+
+  @Test
+  void countsGapJustUnderInterruptionLimitAsDrawingTime() {
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 0)),
+        batch(2, BASE.plusMillis(299_999), stroke(2, "PEN", "#FF0000", 0, 0)));
+
+    assertThat(summarize().drawingDurationMs()).isEqualTo(299_999L);
+  }
+
+  @Test
+  void countsGapExactlyAtInterruptionLimitAsDrawingTime() {
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 0)),
+        batch(2, BASE.plusMillis(300_000), stroke(2, "PEN", "#FF0000", 0, 0)));
+
+    assertThat(summarize().drawingDurationMs()).isEqualTo(300_000L);
+  }
+
+  @Test
+  void excludesGapAboveInterruptionLimitFromDrawingTime() {
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 400)),
+        batch(2, BASE.plusMillis(300_001), stroke(2, "PEN", "#FF0000", 0, 400)));
+
+    // 중단 후 재개로 보고 간격을 빼면 남는 것은 실제로 그린 800ms 뿐이다.
+    assertThat(summarize().drawingDurationMs()).isEqualTo(800L);
+  }
+
+  @Test
+  void excludesOnlyTheInterruptedGapAndKeepsContinuousOnes() {
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 0)),
+        batch(2, BASE.plusMillis(10_000), stroke(2, "PEN", "#FF0000", 0, 0)),
+        // 앱을 12시간 떠났다가 이어 그린 배치.
+        batch(3, BASE.plusMillis(43_210_000L), stroke(3, "PEN", "#FF0000", 0, 0)),
+        batch(4, BASE.plusMillis(43_215_000L), stroke(4, "PEN", "#FF0000", 0, 0)));
+
+    assertThat(summarize().drawingDurationMs()).isEqualTo(15_000L);
+  }
+
+  @Test
+  void treatsSameColorWithDifferentHexCaseAsNoChange() {
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "PEN", "#ff0000", 0, 100),
+            stroke(2, "PEN", "#FF0000", 0, 100),
+            stroke(3, "PEN", "#Ff0000", 0, 100)));
+
+    assertThat(summarize().colorChangeCount()).isZero();
+  }
+
+  @Test
+  void skipsStrokeWithoutToolWhenCountingToolChanges() {
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "PEN", "#FF0000", 0, 100),
+            stroke(2, null, "#FF0000", 0, 100),
+            stroke(3, "PEN", "#FF0000", 0, 100)));
+
+    assertThat(summarize().toolChangeCount()).isZero();
+  }
+
+  @Test
+  void ignoresBatchWithoutClientCreatedAtWhenMeasuringTime() {
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 100)),
+        batch(2, null, stroke(2, "PEN", "#FF0000", 0, 100)),
+        batch(3, BASE.plusMillis(4_000), stroke(3, "PEN", "#FF0000", 0, 100)));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    assertThat(summary.drawingDurationMs()).isEqualTo(4_000L);
+    // 시각을 모르는 배치는 경계 판정에서 건너뛰고 직전 시각을 유지한다. 4000 - 100(batch3 활동) = 3900 >= 3000.
+    assertThat(summary.pauseCount()).isEqualTo(1);
+    assertThat(summary.activeDrawingMs()).isEqualTo(300L);
+  }
+
+  @Test
+  void treatsStrokeWithoutPointsAsZeroDrawingTime() {
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            new StrokeEventDocument(
+                1, "STROKE", "PEN", "#FF0000", new BigDecimal("8.0"), null, List.of())));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    assertThat(summary.activeDrawingMs()).isZero();
+    assertThat(summary.drawingDurationMs()).isZero();
+  }
+
+  @Test
+  void requestsBatchesOrderedByBatchSequenceWithOneMoreThanTheLimit() {
+    givenBatches(List.of(batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 100))));
+
+    service.summarize(SESSION_ID);
+
+    ArgumentCaptor<Pageable> captor = ArgumentCaptor.forClass(Pageable.class);
+    verify(repository).findBehaviorAggregationInputs(eq(SESSION_ID), captor.capture());
+    Pageable pageable = captor.getValue();
+    // 상한 + 1 을 요청해야 별도 count 조회 없이 절단 여부를 알 수 있다.
+    assertThat(pageable.getPageSize())
+        .isEqualTo(StrokeBehaviorSummaryService.MAX_AGGREGATED_BATCHES + 1);
+    assertThat(pageable.getSort()).isEqualTo(Sort.by(Sort.Direction.ASC, "batchSeq"));
+  }
+
+  @Test
+  void doesNotMarkTruncatedWhenBatchCountIsExactlyAtTheLimit() {
+    givenBatches(batchesOf(StrokeBehaviorSummaryService.MAX_AGGREGATED_BATCHES));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    assertThat(summary.truncated()).isFalse();
+    assertThat(summary.undoCount()).isEqualTo(StrokeBehaviorSummaryService.MAX_AGGREGATED_BATCHES);
+  }
+
+  @Test
+  void marksTruncatedAndAggregatesOnlyTheLimitWhenBatchCountExceedsIt() {
+    givenBatches(batchesOf(StrokeBehaviorSummaryService.MAX_AGGREGATED_BATCHES + 1));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    // 조용히 자르면 하류가 전체를 본 값으로 읽는다. 부분 집계라는 사실이 값에 드러나야 한다.
+    assertThat(summary.truncated()).isTrue();
+    assertThat(summary.undoCount()).isEqualTo(StrokeBehaviorSummaryService.MAX_AGGREGATED_BATCHES);
+  }
+
+  @Test
+  void reportsPressureUnavailableWhenNoPointCarriesIt() {
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 100, 200)),
+        batch(2, BASE.plusMillis(1_000), stroke(2, "PEN", "#FF0000", 0, 100)));
+
+    assertThat(summarize().pressureAvailable()).isFalse();
+  }
+
+  @Test
+  void reportsPressureAvailableWhenAnySinglePointCarriesIt() {
+    StrokeEventDocument withPressure =
+        new StrokeEventDocument(
+            2,
+            "STROKE",
+            "PEN",
+            "#FF0000",
+            new BigDecimal("8.0"),
+            null,
+            List.of(point(0, null), point(100, null), point(200, new BigDecimal("0.42"))));
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 100)),
+        batch(2, BASE.plusMillis(1_000), withPressure));
+
+    assertThat(summarize().pressureAvailable()).isTrue();
+  }
+
+  @Test
+  void treatsZeroPressureAsAvailableMeasurement() {
+    StrokeEventDocument zeroPressure =
+        new StrokeEventDocument(
+            1,
+            "STROKE",
+            "PEN",
+            "#FF0000",
+            new BigDecimal("8.0"),
+            null,
+            List.of(point(0, BigDecimal.ZERO), point(100, BigDecimal.ZERO)));
+    givenBatches(batch(1, BASE, zeroPressure));
+
+    assertThat(summarize().pressureAvailable()).isTrue();
+  }
+
+  private StrokeBehaviorSummary summarize() {
+    Optional<StrokeBehaviorSummary> summary = service.summarize(SESSION_ID);
+    assertThat(summary).isPresent();
+    return summary.get();
+  }
+
+  private void givenBatches(StrokeBatchDocument... batches) {
+    givenBatches(List.of(batches));
+  }
+
+  private void givenBatches(List<StrokeBatchDocument> batches) {
+    when(repository.findBehaviorAggregationInputs(eq(SESSION_ID), any(Pageable.class)))
+        .thenReturn(batches);
+  }
+
+  /** 배치 하나마다 UNDO 하나만 담아, 집계된 배치 수를 {@code undoCount} 로 셀 수 있게 한다. */
+  private static List<StrokeBatchDocument> batchesOf(int count) {
+    return IntStream.rangeClosed(1, count)
+        .mapToObj(seq -> batch(seq, BASE.plusMillis(seq * 3_000L), marker(seq, "UNDO")))
+        .toList();
+  }
+
+  private static StrokeBatchDocument batch(
+      int batchSeq, Instant clientCreatedAt, StrokeEventDocument... strokes) {
+    List<StrokeEventDocument> events = List.of(strokes);
+    return new StrokeBatchDocument(
+        (long) batchSeq,
+        SESSION_ID,
+        7L,
+        batchSeq,
+        events.isEmpty() ? 0 : events.getFirst().strokeSeq(),
+        events.isEmpty() ? 0 : events.getLast().strokeSeq(),
+        events.size(),
+        events.stream().mapToInt(event -> event.points().size()).sum(),
+        "checksum-" + batchSeq,
+        0,
+        0,
+        0,
+        0,
+        clientCreatedAt,
+        BASE,
+        BASE,
+        BASE.plusSeconds(60),
+        events);
+  }
+
+  private static StrokeEventDocument stroke(
+      long strokeSeq, String tool, String color, long... pointTimes) {
+    List<StrokePointDocument> points = new ArrayList<>(pointTimes.length);
+    for (long pointTime : pointTimes) {
+      points.add(point(pointTime, null));
+    }
+    return new StrokeEventDocument(
+        strokeSeq, "STROKE", tool, color, new BigDecimal("8.0"), null, List.copyOf(points));
+  }
+
+  private static StrokeEventDocument marker(long strokeSeq, String eventType) {
+    return new StrokeEventDocument(strokeSeq, eventType, null, null, null, null, List.of());
+  }
+
+  private static StrokePointDocument point(long elapsedMs, BigDecimal pressure) {
+    return new StrokePointDocument(
+        new BigDecimal("0.5"), new BigDecimal("0.5"), elapsedMs, pressure);
+  }
+}
