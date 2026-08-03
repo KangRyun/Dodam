@@ -30,6 +30,11 @@ _PLACEHOLDER = re.compile(r"\{[a-z_]+\}")
 # 조립 검증에서 '그 파일의 지문'으로 쓸 줄의 최소 길이. 너무 짧으면 우연히 겹친다.
 _SIGNATURE_MIN_LEN = 20
 
+# 이유를 실제로 되묻는 문장만 잡는다. "그런 이유가 있구나" 같은 인정 표현은 허용한다.
+_REASON_QUESTION = re.compile(
+    r"왜|이유.{0,15}(있을까|있어\?|뭘까|뭐야|무엇|말해|알려)|까닭.{0,15}[?까]"
+)
+
 
 @dataclass(frozen=True)
 class Finding:
@@ -203,6 +208,30 @@ def check_question_response(case, resp: QuestionResponse) -> list[Finding]:
         giveup = _contains_any(text, meta["giveup_phrases"])
         out.append(
             Finding("B", "포기 문구 없음", not giveup, f"검출: {giveup}" if giveup else "")
+        )
+
+    # 그림일기 첫 질문은 그림 속 이야기를 먼저 열고, 실제 경험·상상 확인은 다음 턴에 한다.
+    if "premature_reality_check_patterns" in meta:
+        premature = _contains_any(text, meta["premature_reality_check_patterns"])
+        out.append(
+            Finding(
+                "B",
+                "첫 질문에서 실제·상상 선확인 안 함",
+                not premature,
+                f"검출: {premature}" if premature else "",
+            )
+        )
+
+    # HTP 첫 질문에는 이유 질문을 쓰지 않고, 아이가 이미 이유를 말했다면 다시 묻지 않는다.
+    if meta.get("forbid_reason_question") or meta.get("reason_already_stated"):
+        asks_reason = bool(_REASON_QUESTION.search(text))
+        rule = (
+            "첫 질문에서 이유를 묻지 않음"
+            if meta.get("forbid_reason_question")
+            else "이미 답한 이유를 다시 묻지 않음"
+        )
+        out.append(
+            Finding("B", rule, not asks_reason, "이유 재질문 검출" if asks_reason else "")
         )
 
     # 아이 정정 수용 — 아이가 말한 이름을 쓰고, 분석 결과 이름으로 돌아가지 않는가.

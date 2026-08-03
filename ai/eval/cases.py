@@ -126,6 +126,7 @@ Q1_FIRST_HTP = QuestionCase(
         # 주제를 벗어난 다른 HTP 주제어 — 첫 질문에 나오면 주제 이탈이다.
         "off_subject_terms": ["나무", "사람"],
         "detected_names": ["지붕", "문", "창문"],
+        "forbid_reason_question": True,
     },
 )
 
@@ -135,7 +136,7 @@ Q1_FIRST_HTP = QuestionCase(
 Q2_FIRST_DIARY = QuestionCase(
     id="Q2_first_diary",
     title="첫 질문 · 그림일기 · 탐지 정상",
-    why="HTP 틀(집·나무·사람 주제, 검사 어휘)로 다루지 않는가. 그림에서 '그날 일'로 열어 가는가.",
+    why="HTP 틀(집·나무·사람 주제, 검사 어휘)로 다루지 않는가. 그림 속 이야기부터 열고 실제·상상을 미리 정하지 않는가.",
     request=QuestionRequest(
         conversation_id=9002,
         drawing_session_id=8002,
@@ -153,7 +154,16 @@ Q2_FIRST_DIARY = QuestionCase(
         safety_rule_version=SAFETY_RULE_VERSION,
         activity_type="ART_DIARY",
     ),
-    meta={"detected_names": ["사람", "해"]},
+    meta={
+        "detected_names": ["사람", "해"],
+        # 첫 질문은 그림 속 이야기를 먼저 열어야 한다. 실제·상상 확인은 다음 대화의 몫이다.
+        "premature_reality_check_patterns": [
+            "진짜 있었던 일이야",
+            "실제로 있었던 일이야",
+            "상상해서 그렸어",
+            "상상한 이야기야",
+        ],
+    },
 )
 
 
@@ -221,7 +231,9 @@ Q4_NEXT_NORMAL = QuestionCase(
             "이만",
             "즐거웠어. 안녕",
             "대화를 마",
-        ]
+        ],
+        # 마지막 아이 발화가 "다 같이 들어가려고"로 이유를 이미 설명했다.
+        "reason_already_stated": True,
     },
 )
 

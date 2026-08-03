@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 # 하나의 first_question/conversations로 두 활동을 처리하던 것을 갈랐다. 대화의 '목적'이
 # 다르기 때문이다 — 같은 문장으로 두 목적을 시키면 어느 쪽도 제대로 안 된다:
 #   - HTP: 그림 자체가 궁금하다. 아이가 그림에 무엇을 담으려 했는지 그림 안에서 좁혀 간다.
-#   - ART_DIARY: 그림은 대화 소재일 뿐이다. 그림에서 시작해 그날 있었던 일·아이 마음으로 넓혀 간다.
+#   - ART_DIARY: 그림 속 이야기에서 시작해 실제 경험인지 상상인지 확인한 뒤 그 흐름과 마음으로 넓혀 간다.
 # 공유 규칙(이름·분석결과 취급·출력 형식)은 conversation_common이 소유하고 뒤에 이어붙인다.
 _FIRST_BY_ACTIVITY = {
     "HTP": "first_question_htp",
