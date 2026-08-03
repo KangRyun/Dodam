@@ -315,6 +315,24 @@ public class ExpertProfile {
     updatedAt = Objects.requireNonNull(now, "now must not be null");
   }
 
+  /**
+   * 관리자가 전문가 프로필의 최종 검증 상태를 확정한다.
+   *
+   * <p>검토 대기 상태를 표현하는 {@code PENDING}, {@code REVIEW_REQUIRED}는 이 메서드로 지정할 수 없다.
+   *
+   * @param status 승인 또는 반려 상태
+   * @param now 검토 완료 시각
+   * @throws IllegalArgumentException 최종 상태가 아닌 값을 전달한 경우
+   */
+  public void completeVerification(ExpertVerificationStatus status, LocalDateTime now) {
+    if (status != ExpertVerificationStatus.VERIFIED
+        && status != ExpertVerificationStatus.REJECTED) {
+      throw new IllegalArgumentException("final verification status is required");
+    }
+    verificationStatus = status;
+    updatedAt = Objects.requireNonNull(now, "now must not be null");
+  }
+
   private static String normalizeRequired(String value) {
     return Objects.requireNonNull(value, "value must not be null").trim();
   }

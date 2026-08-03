@@ -38,4 +38,16 @@ public interface ExpertCredentialRepository extends JpaRepository<ExpertCredenti
           + "and credential.expertProfile.userId = :userId")
   Optional<ExpertCredential> findOwnedById(
       @Param("credentialId") Long credentialId, @Param("userId") Long userId);
+
+  /**
+   * 관리자 검토를 위해 특정 전문가 프로필의 자격을 등록 순으로 조회한다.
+   *
+   * @param expertId 전문가 프로필 식별자
+   * @return 해당 프로필에 속한 자격 목록
+   */
+  @Query(
+      "select credential from ExpertCredential credential "
+          + "where credential.expertProfile.id = :expertId "
+          + "order by credential.createdAt asc, credential.id asc")
+  List<ExpertCredential> findAllForReview(@Param("expertId") Long expertId);
 }

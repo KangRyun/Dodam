@@ -19,7 +19,8 @@ public final class NotificationTypes {
           "CONSENT_UPDATED",
           "RETENTION_NOTICE",
           "ACTIVITY_REMINDER",
-          "RISK_REVIEW_GUIDE");
+          "RISK_REVIEW_GUIDE",
+          "EXPERT_VERIFICATION_RESULT");
 
   private NotificationTypes() {}
 
