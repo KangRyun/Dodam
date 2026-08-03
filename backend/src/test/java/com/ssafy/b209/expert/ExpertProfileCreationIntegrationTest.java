@@ -2,6 +2,7 @@ package com.ssafy.b209.expert;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -9,6 +10,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import com.ssafy.b209.auth.token.AuthenticatedUser;
+import com.ssafy.b209.storage.credential.CredentialFileStorage;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -18,6 +20,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mock.web.MockMultipartFile;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.ActiveProfiles;
@@ -47,6 +50,7 @@ class ExpertProfileCreationIntegrationTest {
 
   @Autowired private MockMvc mockMvc;
   @Autowired private JdbcTemplate jdbcTemplate;
+  @Autowired private CredentialFileStorage credentialFileStorage;
 
   @BeforeEach
   void setUp() {
@@ -171,6 +175,62 @@ class ExpertProfileCreationIntegrationTest {
                 .content(validRequest()))
         .andExpect(status().isConflict())
         .andExpect(jsonPath("$.code").value("EXPERT_PROFILE_ALREADY_EXISTS"));
+  }
+
+  @Test
+  void uploadsCredentialAndMovesVerifiedProfileToReviewRequired() throws Exception {
+    authenticate(VERIFIED_EXPERT_USER_ID);
+    MockMultipartFile file =
+        new MockMultipartFile(
+            "file", "license.pdf", MediaType.APPLICATION_PDF_VALUE, "%PDF-1.7\nproof".getBytes());
+    MockMultipartFile metadata =
+        new MockMultipartFile(
+            "metadata",
+            "metadata.json",
+            MediaType.APPLICATION_JSON_VALUE,
+            """
+            {
+              "credentialType":"ART_THERAPIST",
+              "credentialName":"미술심리상담사 1급",
+              "issuer":"한국상담협회",
+              "issuedAt":"2025-03-01",
+              "credentialNumberMasked":"25-***-1234"
+            }
+            """
+                .getBytes());
+
+    mockMvc
+        .perform(multipart("/api/v1/experts/me/credentials").file(file).file(metadata))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.code").value("COMMON_201"))
+        .andExpect(jsonPath("$.data.credentialType").value("ART_THERAPIST"))
+        .andExpect(jsonPath("$.data.verificationStatus").value("PENDING"))
+        .andExpect(jsonPath("$.data.storageKey").doesNotExist());
+
+    var credential =
+        jdbcTemplate.queryForMap(
+            """
+            SELECT credential_type, license_name, issuer, credential_number,
+                   acquired_on, verification_status
+              FROM expert_credentials
+             WHERE expert_profile_id = ?
+            """,
+            VERIFIED_EXPERT_PROFILE_ID);
+    assertThat(credential)
+        .containsEntry("credential_type", "ART_THERAPIST")
+        .containsEntry("license_name", "미술심리상담사 1급")
+        .containsEntry("verification_status", "PENDING");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT verification_status FROM expert_profiles WHERE id = ?",
+                String.class,
+                VERIFIED_EXPERT_PROFILE_ID))
+        .isEqualTo("REVIEW_REQUIRED");
+
+    String storageKey =
+        jdbcTemplate.queryForObject(
+            "SELECT storage_key FROM expert_credential_files LIMIT 1", String.class);
+    credentialFileStorage.delete(storageKey);
   }
 
   @Test
