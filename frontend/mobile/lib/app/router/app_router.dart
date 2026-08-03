@@ -115,6 +115,8 @@ abstract final class AppRouter {
                 ),
           onAddChild: (context) =>
               AppNavigation.pushNamed(context, AppRoutes.childRegister),
+          onSettings: (context) =>
+              AppNavigation.pushNamed(context, AppRoutes.settings),
           onEditChild: (context, child) => AppNavigation.pushNamed(
             context,
             AppRoutes.childEdit(child.childId.toString()),

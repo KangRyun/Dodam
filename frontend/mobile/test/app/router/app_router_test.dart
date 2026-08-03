@@ -23,7 +23,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('guardian-switch-profile')));
     await tester.pumpAndSettle();
 
-    expect(find.text('누가 도담을 이용하나요?'), findsOneWidget);
+    expect(find.text('안녕하세요! 누구로 시작할까요?'), findsOneWidget);
     expect(find.byKey(const ValueKey('guardian-profile')), findsOneWidget);
   });
 
@@ -33,6 +33,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const ValueKey('profile-selection-settings')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('logout-action')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('로그아웃').last);
@@ -67,6 +69,23 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('아이 등록'), findsOneWidget);
+  });
+
+  testWidgets('프로필 선택 설정은 기존 설정 화면을 열고 system back으로 복귀한다', (tester) async {
+    await tester.pumpWidget(
+      const DodamApp(initialRoute: AppRoutes.profileSelection),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const ValueKey('profile-selection-settings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('open-guardian-settings')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('설정'), findsWidgets);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('안녕하세요! 누구로 시작할까요?'), findsOneWidget);
   });
 
   testWidgets('보호자 홈의 아동 선택은 인라인 칩으로 처리한다(화면 이동 없음)', (tester) async {
