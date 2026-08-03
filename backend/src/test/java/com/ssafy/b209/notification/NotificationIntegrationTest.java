@@ -12,6 +12,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.jayway.jsonpath.JsonPath;
 import com.ssafy.b209.auth.token.AuthenticatedUser;
 import com.ssafy.b209.notification.service.DeviceTokenCipher;
+import java.sql.Timestamp;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -42,6 +43,20 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * <p>V14가 추가한 {@code device_id} UNIQUE 제약이 실제로 upsert를 성립시키는지, Token이 평문으로 저장되지 않는지, 목록이 정규화된 부가
  * 속성과 관련 자원을 조립하는지를 DB 상태까지 확인한다. 인증은 다른 단면 통합 테스트와 같이 검증된 {@link AuthenticatedUser} Principal을
  * SecurityContext에 넣어 재현한다.
+ *
+ * <p><b>이 클래스의 시각 단정은 JVM 기본 시간대와 무관해야 한다.</b> 운영·CI의 JVM은 UTC지만(파드에 {@code TZ}를 주지 않는다) 개발 PC는 보통
+ * {@code Asia/Seoul}이다. 드라이버가 {@code LocalDateTime}을 JVM 기본 시간대 ↔ 세션 시간대({@code +09:00})로 변환하므로,
+ * 시각을 다루는 방식이 조금만 비대칭이면 로컬에서만 통과하고 CI에서 9시간 어긋난다(S15P11B209-822 실측).
+ *
+ * <p>그래서 이 클래스는 두 규칙을 지킨다.
+ *
+ * <ul>
+ *   <li>시각을 넣을 때는 {@link #insertNotification}처럼 <b>{@link Timestamp}로 바인딩</b>한다. Hibernate가 Entity를
+ *       쓸 때와 같은 instant 기반 경로여서 드라이버 변환을 함께 탄다. 문자열이나 {@code LocalDateTime}으로 바인딩하면 변환을 타지 않아 쓰기와
+ *       읽기가 어긋난다.
+ *   <li>DB에 남은 시각을 읽을 때도 {@code Timestamp.class}로 읽는다. {@code String}이나 {@code
+ *       LocalDateTime.class}로 읽으면 드라이버 변환을 건너뛴 <b>DB 원시 벽시계</b>(KST)가 나오는데, 그 값은 JVM 시간대에 따라 달라진다.
+ * </ul>
  */
 @Testcontainers
 @SpringBootTest
@@ -235,10 +250,11 @@ class NotificationIntegrationTest {
 
   @Test
   void listsOnlyOwnNotificationsLatestFirstWithNormalizedData() throws Exception {
-    insertNotification(900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 10:00:00");
-    insertNotification(901L, USER_ID, "RETENTION_NOTICE", "SENT", null, "2026-07-26 11:00:00");
     insertNotification(
-        902L, OTHER_USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 12:00:00");
+        900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, utc("2026-07-26 10:00:00"));
+    insertNotification(901L, USER_ID, "RETENTION_NOTICE", "SENT", null, utc("2026-07-26 11:00:00"));
+    insertNotification(
+        902L, OTHER_USER_ID, "ANALYSIS_COMPLETED", "SENT", null, utc("2026-07-26 12:00:00"));
     jdbcTemplate.update(
         "INSERT INTO notification_attributes "
             + "(notification_id, attribute_key, value_type, value_text) "
@@ -257,9 +273,15 @@ class NotificationIntegrationTest {
   @Test
   void filtersByTypeAndUnreadOnly() throws Exception {
     insertNotification(
-        900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", "2026-07-26 10:30:00", "2026-07-26 10:00:00");
-    insertNotification(901L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 11:00:00");
-    insertNotification(902L, USER_ID, "RETENTION_NOTICE", "SENT", null, "2026-07-26 12:00:00");
+        900L,
+        USER_ID,
+        "ANALYSIS_COMPLETED",
+        "SENT",
+        utc("2026-07-26 10:30:00"),
+        utc("2026-07-26 10:00:00"));
+    insertNotification(
+        901L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, utc("2026-07-26 11:00:00"));
+    insertNotification(902L, USER_ID, "RETENTION_NOTICE", "SENT", null, utc("2026-07-26 12:00:00"));
 
     mockMvc
         .perform(get("/api/v1/notifications").queryParam("type", "ANALYSIS_COMPLETED"))
@@ -304,9 +326,15 @@ class NotificationIntegrationTest {
   @Test
   void serializesInboxTimesAsUtcIso8601WithZoneMarker() throws Exception {
     insertNotification(
-        900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", "2026-07-26 09:30:00", "2026-07-26 10:00:00");
+        900L,
+        USER_ID,
+        "ANALYSIS_COMPLETED",
+        "SENT",
+        utc("2026-07-26 09:30:00"),
+        utc("2026-07-26 10:00:00"));
 
-    // DB의 벽시계를 UTC로 해석해 `Z`를 붙여 내보낸다. 표기가 없으면 클라이언트가 자기 지역 시각으로 읽어 UTC와의 차이만큼 어긋난다.
+    // Entity가 보는 UTC 벽시계를 그대로 `Z`를 붙여 내보낸다. 표기가 없으면 클라이언트가 자기 지역 시각으로 읽어 UTC와의 차이만큼 어긋난다.
+    // 심은 값과 기대값이 모두 앱 규약(UTC 벽시계)이라 JVM 기본 시간대가 UTC든 Asia/Seoul이든 같은 결과다.
     mockMvc
         .perform(get("/api/v1/notifications"))
         .andExpect(status().isOk())
@@ -317,7 +345,8 @@ class NotificationIntegrationTest {
 
   @Test
   void keepsWriteAndReadOnTheSameInstantThroughRealMysql() throws Exception {
-    insertNotification(901L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 10:00:00");
+    insertNotification(
+        901L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, utc("2026-07-26 10:00:00"));
 
     // 쓰기는 Entity 경로(Clock 기준 UTC 벽시계)를, 읽기는 응답 직렬화를 탄다. 둘이 같은 instant를 가리켜야 한다.
     String body =
@@ -330,14 +359,14 @@ class NotificationIntegrationTest {
             .getContentAsString();
 
     Instant fromResponse = Instant.parse(JsonPath.read(body, "$.data.readAt"));
-    String storedWallClock =
-        jdbcTemplate.queryForObject(
-            "SELECT read_at FROM notifications WHERE id = 901", String.class);
+    // Entity와 같은 instant 기반 경로로 읽어야 왕복이 성립한다. 원시 문자열로 읽으면 드라이버 변환을 건너뛴
+    // DB 벽시계(KST)가 나와, 그걸 UTC로 해석하는 순간 JVM 시간대만큼 어긋난다.
     Instant fromDatabase =
-        LocalDateTime.parse(storedWallClock.replace(' ', 'T')).toInstant(ZoneOffset.UTC);
+        readTimeColumn("SELECT read_at FROM notifications WHERE id = 901")
+            .toInstant(ZoneOffset.UTC);
 
-    // DB에 남은 벽시계를 UTC로 읽으면 응답 instant와 같은 시각이다. 시간대 오프셋만큼(KST면 9시간) 어긋나면
-    // 저장 기준이 UTC가 아니라는 뜻이므로 이 단언이 깨진다.
+    // 앱이 기록한 instant가 실 MySQL을 왕복해도 그대로다. 저장·조회 어느 한쪽이 기준을 잃으면
+    // 그 차이(시간대 오프셋이면 9시간)만큼 벌어져 이 단언이 깨진다.
     // 허용 오차는 1마이크로초다 — DATETIME(6)은 마이크로초까지 담으면서 나노초를 반올림하는데,
     // Clock.systemUTC()는 나노초를 주므로 마지막 자리가 1 다를 수 있다.
     assertThat(Duration.between(fromDatabase, fromResponse).abs())
@@ -354,7 +383,8 @@ class NotificationIntegrationTest {
 
   @Test
   void marksNotificationReadIdempotently() throws Exception {
-    insertNotification(900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 10:00:00");
+    insertNotification(
+        900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, utc("2026-07-26 10:00:00"));
 
     String firstReadAt =
         mockMvc
@@ -382,7 +412,7 @@ class NotificationIntegrationTest {
   @Test
   void hidesOtherUsersNotificationOnRead() throws Exception {
     insertNotification(
-        902L, OTHER_USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 10:00:00");
+        902L, OTHER_USER_ID, "ANALYSIS_COMPLETED", "SENT", null, utc("2026-07-26 10:00:00"));
 
     mockMvc
         .perform(patch("/api/v1/notifications/{notificationId}/read", 902L))
@@ -400,10 +430,16 @@ class NotificationIntegrationTest {
 
   @Test
   void marksAllOwnUnreadNotificationsReadAndReturnsCount() throws Exception {
-    insertNotification(900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 10:00:00");
     insertNotification(
-        901L, USER_ID, "RETENTION_NOTICE", "SENT", "2026-07-26 09:00:00", "2026-07-26 11:00:00");
-    insertNotification(902L, USER_ID, "COMMENT_CREATED", "SENT", null, "2026-07-26 12:00:00");
+        900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, utc("2026-07-26 10:00:00"));
+    insertNotification(
+        901L,
+        USER_ID,
+        "RETENTION_NOTICE",
+        "SENT",
+        utc("2026-07-26 09:00:00"),
+        utc("2026-07-26 11:00:00"));
+    insertNotification(902L, USER_ID, "COMMENT_CREATED", "SENT", null, utc("2026-07-26 12:00:00"));
 
     mockMvc
         .perform(patch("/api/v1/notifications/read-all"))
@@ -414,17 +450,17 @@ class NotificationIntegrationTest {
 
     assertThat(unreadCount(USER_ID)).isZero();
     // 이미 읽은 알림의 최초 읽은 시각은 유지된다.
-    assertThat(
-            jdbcTemplate.queryForObject(
-                "SELECT read_at FROM notifications WHERE id = 901", String.class))
-        .startsWith("2026-07-26 09:00:00");
+    assertThat(readTimeColumn("SELECT read_at FROM notifications WHERE id = 901"))
+        .isEqualTo(utc("2026-07-26 09:00:00"));
   }
 
   @Test
   void marksOnlyRequestedTypeOnReadAll() throws Exception {
-    insertNotification(900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 10:00:00");
-    insertNotification(901L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 11:00:00");
-    insertNotification(902L, USER_ID, "RETENTION_NOTICE", "SENT", null, "2026-07-26 12:00:00");
+    insertNotification(
+        900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, utc("2026-07-26 10:00:00"));
+    insertNotification(
+        901L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, utc("2026-07-26 11:00:00"));
+    insertNotification(902L, USER_ID, "RETENTION_NOTICE", "SENT", null, utc("2026-07-26 12:00:00"));
 
     mockMvc
         .perform(patch("/api/v1/notifications/read-all").queryParam("type", "ANALYSIS_COMPLETED"))
@@ -443,7 +479,12 @@ class NotificationIntegrationTest {
   @Test
   void isIdempotentWhenNothingIsUnread() throws Exception {
     insertNotification(
-        900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", "2026-07-26 09:00:00", "2026-07-26 10:00:00");
+        900L,
+        USER_ID,
+        "ANALYSIS_COMPLETED",
+        "SENT",
+        utc("2026-07-26 09:00:00"),
+        utc("2026-07-26 10:00:00"));
 
     mockMvc
         .perform(patch("/api/v1/notifications/read-all"))
@@ -454,9 +495,10 @@ class NotificationIntegrationTest {
 
   @Test
   void doesNotTouchOtherUsersNotificationsOnReadAll() throws Exception {
-    insertNotification(900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 10:00:00");
     insertNotification(
-        902L, OTHER_USER_ID, "ANALYSIS_COMPLETED", "SENT", null, "2026-07-26 12:00:00");
+        900L, USER_ID, "ANALYSIS_COMPLETED", "SENT", null, utc("2026-07-26 10:00:00"));
+    insertNotification(
+        902L, OTHER_USER_ID, "ANALYSIS_COMPLETED", "SENT", null, utc("2026-07-26 12:00:00"));
 
     mockMvc
         .perform(patch("/api/v1/notifications/read-all"))
@@ -493,13 +535,19 @@ class NotificationIntegrationTest {
                 .formatted(deviceId, platform, pushToken, appVersion));
   }
 
+  /**
+   * 알림 한 건을 심는다. {@code readAt}·{@code createdAt}은 <b>앱이 다루는 UTC 벽시계</b>다({@link #utc}로 만든다).
+   *
+   * <p>시각은 {@link #instantBased(LocalDateTime)}를 거쳐 바인딩한다 — Entity를 저장하는 Hibernate와 같은 경로라 넣은 벽시계가
+   * 읽을 때 그대로 돌아온다. 문자열로 바인딩하면 쓰기만 드라이버 변환을 건너뛰어, 읽기와 JVM 시간대만큼 어긋난다.
+   */
   private void insertNotification(
       Long id,
       Long recipientUserId,
       String type,
       String deliveryStatus,
-      String readAt,
-      String createdAt) {
+      LocalDateTime readAt,
+      LocalDateTime createdAt) {
     jdbcTemplate.update(
         "INSERT INTO notifications "
             + "(id, recipient_user_id, notification_type, title, content, delivery_status, "
@@ -509,9 +557,35 @@ class NotificationIntegrationTest {
         recipientUserId,
         type,
         deliveryStatus,
-        readAt,
-        createdAt,
-        createdAt);
+        instantBased(readAt),
+        instantBased(createdAt),
+        instantBased(createdAt));
+  }
+
+  /** 앱 규약대로 UTC 벽시계를 만든다. 인자는 DB 원시 값이 아니라 Entity가 들고 있을 값이다. */
+  private static LocalDateTime utc(String wallClock) {
+    return LocalDateTime.parse(wallClock.replace(' ', 'T'));
+  }
+
+  /**
+   * 드라이버 변환을 타는 타입으로 감싼다.
+   *
+   * <p>{@link Timestamp}는 instant 기반이라 드라이버가 JVM 기본 시간대 → 세션 시간대({@code +09:00})로 변환해 저장한다. {@code
+   * LocalDateTime}이나 문자열을 그대로 바인딩하면 변환 없이 저장돼, {@code Timestamp}로 읽는 Hibernate와 어긋난다.
+   */
+  private static Timestamp instantBased(LocalDateTime value) {
+    return value == null ? null : Timestamp.valueOf(value);
+  }
+
+  /**
+   * DB에 남은 시각을 Entity가 보게 될 UTC 벽시계로 읽는다.
+   *
+   * <p>Hibernate와 같은 {@code Timestamp} 경로로 읽어 드라이버 변환을 함께 태운다. 그래서 결과는 JVM 기본 시간대와 무관하게 {@link
+   * #utc}로 넣은 값과 같다.
+   */
+  private LocalDateTime readTimeColumn(String sql, Object... args) {
+    Timestamp stored = jdbcTemplate.queryForObject(sql, Timestamp.class, args);
+    return stored == null ? null : stored.toLocalDateTime();
   }
 
   private int deviceTokenCount() {
