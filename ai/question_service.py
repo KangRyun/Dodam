@@ -35,6 +35,7 @@ import crisis_detection
 import crisis_guidance
 import llm_client
 import prompt_injection
+import prompts_registry  # 답변 칩 프롬프트 로딩·버전 추적 (S15P11B209-788)
 import question_safety
 from gms import get_client
 from internal_contracts import (
@@ -602,13 +603,12 @@ def _llm_answer_chips(
     질문 프롬프트와 분리된 짧은 best-effort 호출이다 — 재시도 없이 한 번만, 실패하면 None을
     돌려 상위에서 generic 칩으로 폴백한다(질문 응답을 지연·차단시키지 않는다).
     받은 후보는 _safe_chip_labels로 아동 안전 정화 후 쓴다.
+
+    프롬프트 문구는 ai/prompts/answer_chips.txt에 있다(S15P11B209-788 부수). 코드 상수로
+    두면 아동 화면에 나갈 칩을 만드는 프롬프트가 prompts_registry 버전 추적 밖에 남는다.
     """
-    system = (
-        f'너는 {req.child_age}세 아이와 이야기하는 친구야. 아이가 방금 이런 질문을 받았어: "{text}"\n'
-        "아이가 손가락으로 고를 만한 짧은 답 3개만 줘. 규칙:\n"
-        "- 각 줄에 하나씩, 5자 안팎의 아주 쉬운 말.\n"
-        "- 번호·설명·따옴표·기호 없이 답만.\n"
-        "- 아이를 판단하거나 마음을 단정하는 말은 쓰지 마."
+    system = prompts_registry.load("answer_chips").format(
+        age_band=req.child_age, question=text
     )
     try:
         client = get_client().with_options(
