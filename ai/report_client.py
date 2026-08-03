@@ -54,10 +54,29 @@ _REPORT_COMMON = "report_common"
 _REPORT_HTP = "report_htp"
 _REPORT_DIARY = "report_diary"
 
+# 활동 변형별 조합 — 라벨은 저장 태그에 그대로 실리는 고정 어휘다(S15P11B209-819).
+_COMBOS: dict[str, tuple[str, ...]] = {
+    "htp": (_REPORT_COMMON, _REPORT_HTP),
+    "diary": (_REPORT_COMMON, _REPORT_DIARY),
+}
+
 # 두 변형과 공통부를 함께 담은 통합 버전 — 어떤 파일 조합으로 생성됐는지 한 문자열로 남긴다.
-PROMPT_VERSION = prompts_registry.composite_version(
-    _REPORT_COMMON, _REPORT_HTP, _REPORT_DIARY
+PROMPT_VERSION = prompts_registry.short_version(
+    "report-all", _REPORT_COMMON, _REPORT_HTP, _REPORT_DIARY
 )
+
+
+def version_manifest() -> dict[str, str]:
+    """축약 태그 → 정본 조합 버전. 저장된 다이제스트를 되짚는 수단이다(S15P11B209-819).
+
+    저장 값은 포인터라, 이 매핑이 로그·버전 엔드포인트로 노출돼야 재현성이 유지된다.
+    """
+    return {
+        prompts_registry.short_version(label, *names): prompts_registry.composite_version(
+            *names
+        )
+        for label, names in _COMBOS.items()
+    }
 
 # 그림일기에는 RAG 근거를 싣지 않는다(결정: HTP 전용). 코퍼스는 활동유형 중립이지만,
 # 전문 자료 인용이 필요한 쪽은 '검사처럼 읽히기 쉬운' HTP 리포트다 — 거기서만 관찰 어휘를
@@ -435,8 +454,12 @@ def _generation_version(is_htp: bool) -> str:
 
     프롬프트가 활동별로 갈린 뒤로는 '이번 생성이 실제로 쓴' 조합만 싣는다 — 두 변형을 모두
     적으면 어느 쪽으로 뽑힌 결과인지 사후에 구분할 수 없다. 전용 필드 분리는 BE 계약 확장 후속.
+
+    프롬프트 조합은 축약 태그로 싣는다(S15P11B209-819) — 정본을 그대로 실으면 파일이 갈릴 때마다
+    길어져 BE 컬럼을 넘긴다. 정본은 version_manifest()로 되짚는다.
     """
-    prompt = prompts_registry.composite_version(*_prompt_names(is_htp))
+    label = "htp" if is_htp else "diary"
+    prompt = prompts_registry.short_version(label, *_prompt_names(is_htp))
     return f"pipeline={config.PIPELINE_VERSION};prompt={prompt}"
 
 

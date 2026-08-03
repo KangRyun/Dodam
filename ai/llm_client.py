@@ -55,7 +55,9 @@ _GUARDRAILS = "guardrails"
 _HTP_BANK = "htp_question_bank"
 
 # 대화 경로가 쓰는 프롬프트 파일 전체의 통합 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
-PROMPT_VERSION = prompts_registry.composite_version(
+# 축약 태그로 싣는다(S15P11B209-819) — 대화 경로는 파일이 여섯 개라 정본이 193자다. BE가 아직
+# promptVersion을 저장하지 않아 리포트 경로처럼 터지지 않았을 뿐, 저장을 시작하면 같은 사고가 난다.
+_ALL_NAMES = (
     *_FIRST_BY_ACTIVITY.values(),
     *_NEXT_BY_ACTIVITY.values(),
     _COMMON,
@@ -63,6 +65,10 @@ PROMPT_VERSION = prompts_registry.composite_version(
     _GUARDRAILS,
     _HTP_BANK,
 )
+PROMPT_VERSION = prompts_registry.short_version("conv-all", *_ALL_NAMES)
+
+# 라벨은 저장 태그에 그대로 실리는 고정 어휘 — 활동 변형이 태그만으로 구분돼야 한다(786).
+_LABEL_BY_ACTIVITY = {"HTP": "conv-htp", "ART_DIARY": "conv-diary"}
 
 
 def prompt_names_for(activity_type: str | None) -> tuple[str, ...]:
@@ -77,8 +83,25 @@ def prompt_version_for(activity_type: str | None) -> str:
 
     두 활동 변형을 모두 적으면 어느 쪽으로 뽑힌 결과인지 사후에 구분할 수 없다
     (report_client._generation_version과 같은 이유).
+
+    정본은 version_manifest()로 되짚는다(S15P11B209-819).
     """
-    return prompts_registry.composite_version(*prompt_names_for(activity_type))
+    key = activity_type if activity_type in _LABEL_BY_ACTIVITY else DEFAULT_ACTIVITY_TYPE
+    return prompts_registry.short_version(
+        _LABEL_BY_ACTIVITY[key], *prompt_names_for(activity_type)
+    )
+
+
+def version_manifest() -> dict[str, str]:
+    """축약 태그 → 정본 조합 버전 — 저장된 다이제스트를 되짚는 수단(S15P11B209-819)."""
+    manifest = {
+        PROMPT_VERSION: prompts_registry.composite_version(*_ALL_NAMES),
+    }
+    for activity in _LABEL_BY_ACTIVITY:
+        manifest[prompt_version_for(activity)] = prompts_registry.composite_version(
+            *prompt_names_for(activity)
+        )
+    return manifest
 
 # 캐릭터 이름. 프롬프트 txt에도 '도담'으로 적혀 있으니 바꾸려면 양쪽을 같이 고칠 것.
 CHARACTER_NAME = "도담"
