@@ -20,6 +20,7 @@ class AuthenticationFlowScreen extends StatefulWidget {
     required this.onSignIn,
     required this.onCompleteOnboarding,
     required this.onProfileSelectionRequired,
+    required this.onGuardianOnboardingCompleted,
     required this.onExpertAuthenticated,
     super.key,
   });
@@ -27,6 +28,7 @@ class AuthenticationFlowScreen extends StatefulWidget {
   final AuthProviderSignIn onSignIn;
   final AuthOnboardingComplete onCompleteOnboarding;
   final AuthGuardianNavigation onProfileSelectionRequired;
+  final AuthGuardianNavigation onGuardianOnboardingCompleted;
   final AuthGuardianNavigation onExpertAuthenticated;
 
   @override
@@ -58,6 +60,11 @@ class _AuthenticationFlowScreenState extends State<AuthenticationFlowScreen> {
   // 온보딩 입력 역할에 따른 다음 화면 결정
   Future<void> _completeOnboarding(NewUserOnboardingInput input) async {
     final session = await widget.onCompleteOnboarding(input);
+    if (!mounted) return;
+    if (session.user.role == UserRole.guardian) {
+      widget.onGuardianOnboardingCompleted(context);
+      return;
+    }
     _moveToRoleDestination(session.user.role);
   }
 
