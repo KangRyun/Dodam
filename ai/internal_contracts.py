@@ -220,6 +220,30 @@ class SubjectQaPair(_CamelModel):
     answer_type: str | None = None
 
 
+class SubjectDetectedObject(_CamelModel):
+    """관찰 리포트용 탐지 객체 하나의 정규화 기하 정보 (S15P11B209-836).
+
+    ⚠️ 위 DetectedObject(그림 분석 계약, BoundingBox 중첩)와 다른 모델이다. 이름을 갈라 둔 것은
+       의도다 — 같은 이름을 쓰면 뒤 정의가 앞 모델의 forward ref 를 가로채 그림 분석 계약이
+       통째로 깨진다(실제로 겪음). 여기 좌표는 평면 x·y·width·height 다.
+
+    좌표계는 항상 NORMALIZED(0~1)다 — BE가 PIXEL 행은 싣지 않고, PIXEL 결과뿐인 주제는
+    빈 목록으로 보낸다. AI는 캔버스 원본 크기를 모르므로 픽셀 좌표로는 용지 점유율을
+    계산할 수 없다(계약 합의 사항).
+
+    ⚠️ area_ratio 가 None이면 그대로 둔다 — width*height 로 대체 계산하지 않는다(BE 명시).
+       추정값을 관찰 사실로 적으면 근거가 아닌 것이 근거 자리에 들어간다.
+    """
+
+    object_code: str
+    x: float
+    y: float
+    width: float
+    height: float
+    area_ratio: float | None = None
+    confidence: float | None = None
+
+
 class SubjectSummary(_CamelModel):
     """주제(집/나무/사람 또는 그림일기 단일 그림) 하나의 관찰 서술·문답 묶음 (S15P11B209-740).
 
@@ -230,7 +254,38 @@ class SubjectSummary(_CamelModel):
     drawing_subject: DrawingSubject | None = None  # 그림일기는 None
     drawing_description: str = ""
     detected_object_codes: list[str] = Field(default_factory=list)
+    # 탐지 기하 (S15P11B209-836). detected_object_codes 와 병렬로 실린다 — 구 BE가 안 보내면
+    #   빈 목록이라 기존 코드 목록 경로가 그대로 동작한다(740 롤아웃 패턴과 동일).
+    detected_objects: list[SubjectDetectedObject] = Field(default_factory=list)
     qa_pairs: list[SubjectQaPair] = Field(default_factory=list)
+
+
+class BehaviorMetrics(_CamelModel):
+    """그리기 과정의 형식 지표 (S15P11B209-836). BE StrokeBehaviorSummary 와 필드 1:1.
+
+    ⚠️ None 과 0 은 다른 뜻이다 — None은 '집계하지 못함'이라 프롬프트 블록에서 항목을 빼고,
+       0은 '0회'라는 관찰 사실이라 그대로 적는다. 멈춤 없이 몰입해 그린 활동(pause_count=0)과
+       집계 실패(None)가 같은 문장이 되면 안 된다(BE javadoc과 같은 원칙).
+
+    HTP는 집·나무·사람 세 단계를 **합산**한 값이다. 한 단계라도 집계할 수 없거나 UPLOAD가
+    섞이면 BE가 전체를 None으로 보낸다 — 부분 집계를 전체 활동으로 오인시키지 않기 위해서다.
+
+    truncated=True 면 배치 상한에 걸려 세션 앞부분만 집계한 값이라, 활동 전체를 완전히
+    집계한 것처럼 표현하면 안 된다.
+    average_pressure 는 이번 단계에서 항상 None이다(BE 확정) — pressure_available 은
+    측정 가능 여부일 뿐 필압의 강약도 감정 근거도 아니다.
+    """
+
+    drawing_duration_ms: int | None = None
+    active_drawing_ms: int | None = None
+    pause_count: int | None = None
+    undo_count: int | None = None
+    erase_count: int | None = None
+    tool_change_count: int | None = None
+    color_change_count: int | None = None
+    pressure_available: bool = False
+    average_pressure: float | None = None
+    truncated: bool = False
 
 
 class ObservationGenerationRequest(_CamelModel):
@@ -255,6 +310,9 @@ class ObservationGenerationRequest(_CamelModel):
     # 주제별 그림 서술·문답 (S15P11B209-740). HTP=최대 3건(집·나무·사람), 그림일기=1건.
     #   롤아웃 안전: 구 BE가 안 보내도 기존 동작 유지 — 기본 빈 목록(QuestionRequest.activity_type 패턴).
     subject_summaries: list[SubjectSummary] = Field(default_factory=list)
+    # 그리기 형식 지표 (S15P11B209-836). 구 BE가 안 보내면 None이라 [형식적 분석] 블록이
+    #   실리지 않는다 — 확장 전과 동일 동작.
+    behavior_metrics: BehaviorMetrics | None = None
 
 
 class ObservedFeatureDraft(_CamelModel):
