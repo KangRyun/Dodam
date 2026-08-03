@@ -1,5 +1,6 @@
 package com.ssafy.b209.infrastructure.ai.drawing;
 
+import com.ssafy.b209.drawing.service.StrokeBehaviorSummaryService;
 import jakarta.validation.Validator;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -39,6 +40,9 @@ public class DrawingAnalysisClientConfig {
    *
    * @param restClient 그림 분석 전용 RestClient
    * @param properties 검증된 그림 분석 Client 설정
+   * @param internalToken 내부 인증 Token
+   * @param imageUrlProvider 이미지 읽기 URL 발급기
+   * @param behaviorSummaryService 저장된 Stroke 배치 행동 요약 집계기
    * @param validator 요청·응답 계약 검증기
    * @return RestClient 기반 그림 분석 Client
    */
@@ -49,9 +53,15 @@ public class DrawingAnalysisClientConfig {
       DrawingAnalysisClientProperties properties,
       @Value("${AI_INTERNAL_TOKEN:}") String internalToken,
       DrawingAnalysisImageUrlProvider imageUrlProvider,
+      StrokeBehaviorSummaryService behaviorSummaryService,
       Validator validator) {
     return new RestClientDrawingAnalysisClient(
-        restClient, properties.endpointPath(), internalToken, imageUrlProvider, validator);
+        restClient,
+        properties.endpointPath(),
+        internalToken,
+        imageUrlProvider,
+        behaviorSummaryService::summarize,
+        validator);
   }
 
   /**

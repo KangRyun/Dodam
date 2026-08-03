@@ -15,6 +15,7 @@ import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.infrastructure.ai.drawing.contract.AiDrawingAnalysisResponse;
 import jakarta.validation.Validation;
 import java.net.URI;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
@@ -33,6 +34,7 @@ class CanonicalRestClientDrawingAnalysisClientTest {
             "/internal/v1/analyses",
             "internal-token",
             storageKey -> URI.create("https://signed.example/" + storageKey),
+            drawingSessionId -> Optional.empty(),
             Validation.buildDefaultValidatorFactory().getValidator());
     server
         .expect(requestTo("http://ai.test/internal/v1/analyses"))

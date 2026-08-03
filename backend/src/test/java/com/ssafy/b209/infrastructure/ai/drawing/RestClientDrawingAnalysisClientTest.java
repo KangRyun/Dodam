@@ -16,6 +16,7 @@ import jakarta.validation.Validation;
 import java.net.ConnectException;
 import java.net.SocketTimeoutException;
 import java.net.URI;
+import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -44,6 +45,7 @@ class RestClientDrawingAnalysisClientTest {
             "/internal/v1/analyses",
             "internal-token",
             storageKey -> URI.create("https://signed.example/drawing"),
+            drawingSessionId -> Optional.empty(),
             Validation.buildDefaultValidatorFactory().getValidator());
   }
 
@@ -189,6 +191,7 @@ class RestClientDrawingAnalysisClientTest {
               throw new DrawingAnalysisClientException(
                   DrawingAnalysisClientException.Type.REQUEST_FAILED);
             },
+            drawingSessionId -> Optional.empty(),
             Validation.buildDefaultValidatorFactory().getValidator());
 
     assertThatThrownBy(() -> unavailableClient.analyze(validCommand()))

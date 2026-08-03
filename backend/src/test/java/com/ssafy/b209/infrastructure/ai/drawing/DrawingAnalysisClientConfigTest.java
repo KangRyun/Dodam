@@ -3,6 +3,8 @@ package com.ssafy.b209.infrastructure.ai.drawing;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
 
+import com.ssafy.b209.drawing.repository.StrokeBatchDocumentRepository;
+import com.ssafy.b209.drawing.service.StrokeBehaviorSummaryService;
 import com.ssafy.b209.infrastructure.ai.image.AiImageAccessConfig;
 import com.ssafy.b209.infrastructure.ai.image.RedisDrawingAnalysisImageUrlProvider;
 import com.ssafy.b209.storage.image.ImageStorage;
@@ -114,6 +116,11 @@ class DrawingAnalysisClientConfigTest {
     @Bean
     ImageStorage imageStorage() {
       return mock(ImageStorage.class);
+    }
+
+    @Bean
+    StrokeBehaviorSummaryService strokeBehaviorSummaryService() {
+      return new StrokeBehaviorSummaryService(mock(StrokeBatchDocumentRepository.class));
     }
   }
 }

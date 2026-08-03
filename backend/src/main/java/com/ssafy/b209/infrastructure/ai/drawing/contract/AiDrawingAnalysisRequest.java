@@ -87,6 +87,43 @@ public record AiDrawingAnalysisRequest(
       AnalysisType analysisType,
       TriggerReason triggerReason,
       DrawingInput drawing) {
+    return withBehavior(
+        analysisId,
+        drawingSessionId,
+        activityType,
+        drawingSubject,
+        analysisType,
+        triggerReason,
+        drawing,
+        null);
+  }
+
+  /**
+   * 그리기 과정 데이터를 함께 전달하는 정본 요청을 생성한다 (S15P11B209-772).
+   *
+   * <p>{@code behavior}가 {@code null}이면 {@link #minimum(Long, Long, DrawingAnalysisActivityType,
+   * DrawingAnalysisSubject, AnalysisType, TriggerReason, DrawingInput)} 과 같은 요청이 된다. 캔버스 과정이 없는 활동에
+   * 빈 요약을 붙이지 않고 항목 자체를 빼기 위한 경로다.
+   *
+   * @param analysisId 분석 식별자
+   * @param drawingSessionId 그림 세션 식별자
+   * @param activityType 분석 활동 유형
+   * @param drawingSubject HTP 주제이며 그림일기는 {@code null}
+   * @param analysisType 분석 범위
+   * @param triggerReason 분석을 시작한 실제 계기
+   * @param drawing 그림 접근 정보
+   * @param behavior 집계된 그리기 과정 데이터이며 없으면 {@code null}
+   * @return 그리기 과정 데이터를 포함한 정본 분석 요청
+   */
+  public static AiDrawingAnalysisRequest withBehavior(
+      Long analysisId,
+      Long drawingSessionId,
+      DrawingAnalysisActivityType activityType,
+      DrawingAnalysisSubject drawingSubject,
+      AnalysisType analysisType,
+      TriggerReason triggerReason,
+      DrawingInput drawing,
+      BehaviorInput behavior) {
     return new AiDrawingAnalysisRequest(
         analysisId,
         drawingSessionId,
@@ -96,7 +133,7 @@ public record AiDrawingAnalysisRequest(
         triggerReason,
         null,
         drawing,
-        null,
+        behavior,
         null,
         null,
         null);
