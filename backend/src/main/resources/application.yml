@@ -102,6 +102,15 @@ app:
     credential:
       root: ${LOCAL_CREDENTIAL_STORAGE_ROOT:./storage/credentials}
       max-size: ${LOCAL_CREDENTIAL_MAX_SIZE:10485760}
+    # storage_deletion_jobs 소비 워커 (S15P11B209-780).
+    #   끄면 탈퇴·아동 삭제로 등록된 파일 삭제가 멈춘다 — 잡은 계속 쌓인다(유실은 아니다).
+    #   점검 창에서만 잠시 끄고, 끈 사실을 잊지 말 것(가드레일 9절).
+    deletion:
+      enabled: ${STORAGE_DELETION_ENABLED:true}
+      interval: ${STORAGE_DELETION_INTERVAL:60s}
+      batch-size: ${STORAGE_DELETION_BATCH_SIZE:100}
+      max-retry-count: ${STORAGE_DELETION_MAX_RETRY_COUNT:5}
+      stuck-after: ${STORAGE_DELETION_STUCK_AFTER:10m}
   push:
     device-token:
       # Base64(32바이트) AES-256 키. 운영은 시크릿으로 주입한다.
