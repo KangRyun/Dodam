@@ -72,7 +72,7 @@ registry_get "/v2/" >/dev/null 2>&1 \
 for img in "${IMAGES[@]}"; do
   docker image inspect "${img}:${SRC_TAG}" >/dev/null 2>&1 \
     || die "원본 이미지가 없다: ${img}:${SRC_TAG}
-   → 먼저 빌드할 것: docker compose -f infra/docker-compose.yml build"
+   → 먼저 빌드할 것: docker compose -f infra/docker-compose.build.yml --env-file infra/.env build"
 done
 
 # ── 3. 태그 + 푸시 ─────────────────────────────────────────────────────────

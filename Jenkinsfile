@@ -92,7 +92,9 @@ pipeline {
   }
 
   environment {
-    COMPOSE_FILE = 'infra/docker-compose.yml'   // 앱 스택 compose (Jenkins 자체 compose와 다름)
+    // 이미지 빌드 전용 compose. 실행 정의는 들어 있지 않다(S15P11B209-791) — 운영은 k3s 소관.
+    // (Jenkins 자체 compose `infra/jenkins/docker-compose.yml` 와 다른 파일이다)
+    COMPOSE_FILE = 'infra/docker-compose.build.yml'
     // 배포 프리즈 플래그 — 이 파일이 있으면 develop 빌드도 배포하지 않는다(S15P11B209-358).
     //   왜 파라미터가 아니라 파일인가: Multibranch 는 새 파라미터를 "한 번 돌린 뒤"에야 인식한다
     //   (위 parameters 주석 참조). 정작 막아야 할 다음 빌드에 안 먹으므로 프리즈 용도로는 못 쓴다.
@@ -152,6 +154,13 @@ pipeline {
         //   여기서 누락 목록 전체를 한 번에 보고하고 즉시 실패시킨다.
         // 필수 목록은 compose의 `:?` 가드에서 자동 추출 — 하드코딩 금지(가드 추가 시 자동 반영).
         // ⚠️ 시크릿 값은 절대 출력하지 않는다 — 키 이름만 다룬다.
+        //
+        // ★ 791 이후 이 검사가 확인하는 키는 **0개일 수 있다.** 실행용 시크릿이 전부 k8s
+        //   Secret/ConfigMap 으로 넘어가면서 compose 에 `:?` 가드가 남지 않았기 때문이다.
+        //   "0개 확인 → 통과"는 고장이 아니라 의도된 상태다.
+        //   ⚠️ 다만 `dodam-env` 는 여전히 **web 빌드 인자 4개**(NEXT_PUBLIC_*)에 쓰인다.
+        //     그쪽은 `:-` 기본값이라 여기서 안 잡히고, 누락되면 빌드가 조용히 성공한 뒤
+        //     브라우저에서 소셜 로그인만 깨진다. 아래 web-args 확인이 그 구멍을 메운다.
         withCredentials([file(credentialsId: 'dodam-env', variable: 'ENV_FILE')]) {
           sh '''
             required=$(grep -v "^[[:space:]]*#" "$COMPOSE_FILE" | grep -oE '\\$\\{[A-Z_]+:\\?' | tr -cd 'A-Z_\\n' | sort -u)
@@ -176,6 +185,26 @@ pipeline {
               exit 1
             fi
             echo "✅ 시크릿 preflight 통과 — 필수 키 $(echo "$required" | wc -w)개 확인: $(echo $required)"
+
+            # ── web 빌드 인자 확인 (S15P11B209-791) ────────────────────────────
+            # NEXT_PUBLIC_* 는 빌드 시점에 **JS 번들로 구워진다.** compose 에서 `:-` 기본값이라
+            # 비어 있어도 빌드가 서지 않고, 증상은 브라우저에서 소셜 로그인 실패로만 나타난다.
+            # 위 `:?` 자동 추출로는 잡히지 않으므로 여기서 이름을 직접 확인한다.
+            #   ⚠️ 실패가 아니라 경고인 이유: 이 키들이 없어도 빌드·배포 자체는 성립하고(로그인만
+            #      안 됨), 여기서 세우면 무관한 변경까지 배포가 막힌다. 대신 로그에 크게 남긴다.
+            #      값이 실제로 번들에 들어갔는지는 배포 후 **JS 번들 실물**로 확인할 것 —
+            #      서버렌더 HTML 만 보면 알 수 없다(2026-08-04 실제 오진).
+            web_missing=""
+            for k in NEXT_PUBLIC_KAKAO_CLIENT_ID NEXT_PUBLIC_GOOGLE_CLIENT_ID NEXT_PUBLIC_NAVER_CLIENT_ID; do
+              grep -qE "^${k}=." "$ENV_FILE" || web_missing="$web_missing $k"
+            done
+            if [ -n "$web_missing" ]; then
+              echo "⚠️  web 빌드 인자 누락(비어 있음):$web_missing"
+              echo "    → 이 상태로 구운 번들은 해당 소셜 로그인이 동작하지 않는다."
+              echo "      dodam-env 에 값을 채우고 web 을 다시 빌드할 것."
+            else
+              echo "✅ web 빌드 인자 3종 확인 — OAuth 클라이언트 ID 채워짐"
+            fi
           '''
         }
       }
