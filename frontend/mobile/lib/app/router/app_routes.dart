@@ -35,6 +35,11 @@ abstract final class AppRoutes {
   static const String settingsDataRetention =
       '/guardian/settings/data-retention';
 
+  /// `GET`·`PATCH /users/me/notification-settings` 알림 수신 설정 조회·편집
+  /// (S15P11B209-455).
+  static const String settingsNotifications =
+      '/guardian/settings/notifications';
+
   static String childModeHome(String childId) =>
       '/child/${Uri.encodeComponent(childId)}/home';
 
