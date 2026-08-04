@@ -108,9 +108,14 @@ spec:
             - { name: MONGO_APP_USERNAME, valueFrom: { secretKeyRef: { name: dodam-secrets, key: MONGO_APP_USERNAME } } }
             - { name: MONGO_APP_PASSWORD, valueFrom: { secretKeyRef: { name: dodam-secrets, key: MONGO_APP_PASSWORD } } }
             - { name: MONGO_DATABASE,     valueFrom: { secretKeyRef: { name: dodam-secrets, key: MONGO_DATABASE } } }
-            # 아래 3개는 미설정이어도 앱이 뜬다(해당 기능만 막힘) → optional: true.
+            # 아래 것들은 미설정이어도 앱이 뜬다(해당 기능만 막힘) → optional: true.
             # compose 의 `${VAR:-}` 비차단 passthrough 와 같은 정책이다.
             - { name: PUSH_DEVICE_TOKEN_ENCRYPTION_KEY, valueFrom: { secretKeyRef: { name: dodam-secrets, key: PUSH_DEVICE_TOKEN_ENCRYPTION_KEY, optional: true } } }
+            # 보호자 PIN 해시의 pepper (S15P11B209-879). 없으면 PIN API 만 503(PIN_UNAVAILABLE) 로
+            # 거부하고 나머지는 정상 동작한다 — 기기 토큰 암호화 키와 같은 fail-closed-at-use 방식.
+            # ⚠️ 값을 바꾸면 저장된 모든 PIN 이 즉시 무효가 된다(해시 입력이 달라진다).
+            #    보호자 전원이 소셜 재인증 → PIN 초기화를 해야 하므로 **한 번 정하면 고정**한다.
+            - { name: GUARDIAN_PIN_PEPPER, valueFrom: { secretKeyRef: { name: dodam-secrets, key: GUARDIAN_PIN_PEPPER, optional: true } } }
             - { name: KAKAO_APP_ID,      valueFrom: { secretKeyRef: { name: dodam-secrets, key: KAKAO_APP_ID,      optional: true } } }
             - { name: GOOGLE_CLIENT_ID,  valueFrom: { secretKeyRef: { name: dodam-secrets, key: GOOGLE_CLIENT_ID,  optional: true } } }
             - { name: APPLE_CLIENT_ID,   valueFrom: { secretKeyRef: { name: dodam-secrets, key: APPLE_CLIENT_ID,   optional: true } } }
