@@ -363,60 +363,64 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
         : Scaffold(backgroundColor: AppColors.canvas, body: content);
   }
 
-  Widget _content(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final compact = constraints.maxWidth < 600;
-      final showFilters =
-          _status != _HistoryStatus.noChild &&
-          _status != _HistoryStatus.loading;
-      final hero = _ArchiveHero(
-        embedded: widget.embedded,
-        activityCount: _totalActivityCount,
-        showCount:
-            _status == _HistoryStatus.success ||
-            _status == _HistoryStatus.empty,
-        onBack: () => Navigator.of(context).maybePop(),
-      );
-      final padding = EdgeInsets.fromLTRB(
-        compact ? AppSpacing.md : AppSpacing.lg,
-        AppSpacing.md,
-        compact ? AppSpacing.md : AppSpacing.lg,
-        compact ? AppSpacing.md : AppSpacing.lg,
-      );
-      if (constraints.maxHeight < 520) {
+  // 넓은 태블릿에서 콘텐츠가 화면 끝까지 늘어나지 않도록 폭 상한 적용(홈·리포트와 일관,
+  // S15P11B209-787). 좁은 폭에선 무시돼 개편 레이아웃을 그대로 쓴다.
+  Widget _content(BuildContext context) => ResponsiveContent(
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 600;
+        final showFilters =
+            _status != _HistoryStatus.noChild &&
+            _status != _HistoryStatus.loading;
+        final hero = _ArchiveHero(
+          embedded: widget.embedded,
+          activityCount: _totalActivityCount,
+          showCount:
+              _status == _HistoryStatus.success ||
+              _status == _HistoryStatus.empty,
+          onBack: () => Navigator.of(context).maybePop(),
+        );
+        final padding = EdgeInsets.fromLTRB(
+          compact ? AppSpacing.md : AppSpacing.lg,
+          AppSpacing.md,
+          compact ? AppSpacing.md : AppSpacing.lg,
+          compact ? AppSpacing.md : AppSpacing.lg,
+        );
+        if (constraints.maxHeight < 520) {
+          return Padding(
+            padding: padding,
+            child: ListView(
+              key: const ValueKey('activity-history-low-height-layout'),
+              children: [
+                hero,
+                if (showFilters) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  _buildFilters(),
+                ],
+                const SizedBox(height: AppSpacing.sm),
+                SizedBox(height: constraints.maxHeight, child: _buildBody()),
+              ],
+            ),
+          );
+        }
         return Padding(
           padding: padding,
-          child: ListView(
-            key: const ValueKey('activity-history-low-height-layout'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               hero,
               if (showFilters) ...[
                 const SizedBox(height: AppSpacing.sm),
                 _buildFilters(),
-              ],
-              const SizedBox(height: AppSpacing.sm),
-              SizedBox(height: constraints.maxHeight, child: _buildBody()),
+                const SizedBox(height: AppSpacing.sm),
+              ] else
+                const SizedBox(height: AppSpacing.sm),
+              Expanded(child: _buildBody()),
             ],
           ),
         );
-      }
-      return Padding(
-        padding: padding,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            hero,
-            if (showFilters) ...[
-              const SizedBox(height: AppSpacing.sm),
-              _buildFilters(),
-              const SizedBox(height: AppSpacing.sm),
-            ] else
-              const SizedBox(height: AppSpacing.sm),
-            Expanded(child: _buildBody()),
-          ],
-        ),
-      );
-    },
+      },
+    ),
   );
 
   Widget _buildFilters() => _ActivityFilters(
