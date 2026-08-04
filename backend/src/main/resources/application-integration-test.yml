@@ -43,3 +43,11 @@ app:
       enabled: false
     recovery:
       enabled: false
+  # 삭제 워커(780)도 같은 이유로 끈다. 큐가 비어도 매 틱이 releaseStuck으로 DB를 먼저 쓰므로,
+  # DataSource가 닫힌 컨텍스트에 남은 스케줄러가 던지면 Spring이 JVM 공용 stdout에 ERROR를 찍고
+  # CapturedOutput(JVM 전역)을 보는 남의 테스트가 깨진다(2026-08-04 develop 빌드 189).
+  # SQL·스키마 검증은 StorageDeletionJobRepositoryIntegrationTest가 리포지토리를 직접 불러 하므로
+  # 이 빈을 꺼도 780의 검증 범위는 그대로다.
+  storage:
+    deletion:
+      enabled: false
