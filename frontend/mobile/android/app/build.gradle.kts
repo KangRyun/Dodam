@@ -110,6 +110,33 @@ android {
                 } else {
                     signingConfigs.getByName("debug")
                 }
+
+            // ── R8 축소·난독화를 끈다 (S15P11B209-765) ────────────────────────
+            // 2026-08-04, 릴리스 APK 가 실행 즉시 죽었다. 스택은 이랬다:
+            //   ClassCastException: ExceptionInInitializerError cannot be cast to Exception
+            //     at bf.l0.run(r8-map-id-…)        ← kotlinx.coroutines.DispatchedTask.run
+            //
+            // 읽는 법: 네이버 로그인 SDK 의 static 초기화가 ExceptionInInitializerError 로
+            // 터졌고(= R8 이 리플렉션으로만 참조되는 클래스를 지웠다), SDK 의 실패 처리
+            // 경로가 그걸 Exception 으로 캐스팅하려다 앱을 죽였다
+            // (NidOAuthInitializingCallback.onFailure 의 시그니처가 Exception 이다).
+            //
+            // ★ MainActivity 의 initializeNaverSdk() 를 try/catch 로 감싸도 소용없다.
+            //   크래시가 Dispatchers.Main 의 코루틴에서 **비동기로** 발생하므로
+            //   동기 호출을 감싼 catch 에 걸리지 않는다.
+            //
+            // 이 프로젝트에는 proguard-rules.pro 가 아예 없다. keep 규칙 없이 R8 만
+            // 켜져 있던 것이고, debug 빌드에는 R8 이 없어 이 결함이 보이지 않았다.
+            //
+            // 왜 규칙을 쓰지 않고 끄나: 어느 클래스를 살려야 하는지는 시행착오로만
+            // 알아낼 수 있는데 한 번 확인에 빌드 15분 + 실기기 설치가 든다. 원스토어
+            // 등록이 막힌 상태에서 감당할 비용이 아니다. 대가는 APK 가 커지는 것뿐이다.
+            //
+            // ⚠️ 되돌릴 때: proguard-rules.pro 에 네이버(com.navercorp.nid.**)·카카오
+            //   SDK keep 규칙을 넣고 **릴리스 APK 를 실기기에 설치해 앱이 뜨는지**까지
+            //   확인한 뒤에 켤 것. 빌드 성공은 검증이 아니다 — 이번이 그 사례다.
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
 }
