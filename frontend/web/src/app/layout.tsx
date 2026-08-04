@@ -6,7 +6,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "도담",
-  description: "보호자와 전문가가 함께하는 마음그림 커뮤니티",
+  description: "보호자와 전문가가 함께하는 도담 커뮤니티",
 };
 
 export default function RootLayout({

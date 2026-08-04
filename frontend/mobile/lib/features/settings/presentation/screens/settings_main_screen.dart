@@ -142,10 +142,14 @@ class _SettingsContent extends StatelessWidget {
                       ),
                     ),
                     _SettingsTile(
+                      key: const ValueKey('settings-notifications-tile'),
                       icon: Icons.notifications_none_rounded,
                       title: '알림 설정',
                       subtitle: '분석 완료 · 서비스 · 커뮤니티 알림',
-                      onTap: () => onItemSelected('알림 설정'),
+                      onTap: () => AppNavigation.pushNamed(
+                        context,
+                        AppRoutes.settingsNotifications,
+                      ),
                     ),
                     _SettingsTile(
                       icon: Icons.inventory_2_outlined,

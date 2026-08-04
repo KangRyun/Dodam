@@ -88,8 +88,8 @@ void main() {
     expect(find.text('4회'), findsOneWidget);
     expect(find.text('지우기'), findsOneWidget);
     expect(find.text('2회'), findsOneWidget);
-    expect(find.text('필압 정보'), findsOneWidget);
-    expect(find.text('기록됨'), findsOneWidget);
+    expect(find.text('평균 필압'), findsOneWidget);
+    expect(find.text('0.62'), findsOneWidget);
     expect(find.text('질문'), findsOneWidget);
     expect(find.text('5개'), findsOneWidget);
     expect(find.text('대답'), findsOneWidget);
@@ -143,10 +143,8 @@ void main() {
       find.byKey(const ValueKey('report-conversation-guide')),
       findsNothing,
     );
-    expect(
-      find.byKey(const ValueKey('report-non-diagnostic-notice')),
-      findsNothing,
-    );
+    // limitations가 비면 §11 섹션만 숨는다. §1 비진단 안내는 고정 필드라 유지된다.
+    expect(find.byKey(const ValueKey('report-limitations')), findsNothing);
     expect(find.text('오늘 있었던 일을 말했어요.'), findsOneWidget);
   });
 
@@ -220,15 +218,17 @@ void main() {
     _setViewport(tester, const Size(390, 844));
     await _pumpReport(tester, report: _fullReport());
 
+    // 계약 §11 확정 섹션 순서(단일 세로 스크롤).
     final keys = [
       'report-mascot-intro',
+      'report-non-diagnostic-notice',
+      'report-activity-info',
       'report-drawings-section',
       'report-child-expression',
-      'report-activity-facts',
       'report-conversation-summary',
-      'report-activity-info',
+      'report-activity-facts',
       'report-conversation-guide',
-      'report-non-diagnostic-notice',
+      'report-limitations',
       'report-save-pdf',
     ];
     final tops = [
@@ -238,20 +238,21 @@ void main() {
     expect(find.byKey(const ValueKey('report-small-layout')), findsOneWidget);
   });
 
-  testWidgets('900px breakpoint는 기존 wide·small key와 2단 배치를 유지한다', (
+  testWidgets('900px breakpoint는 wide key와 단일 세로 섹션 순서를 유지한다', (
     tester,
   ) async {
     _setViewport(tester, const Size(900, 1000));
     await _pumpReport(tester, report: _fullReport());
 
     expect(find.byKey(const ValueKey('report-wide-layout')), findsOneWidget);
-    final activityX = tester
+    // 재구성 후에는 폭과 무관하게 계약 §11 순서대로 세로로 쌓는다.
+    final activityY = tester
         .getTopLeft(find.byKey(const ValueKey('report-activity-info')))
-        .dx;
-    final factsX = tester
+        .dy;
+    final factsY = tester
         .getTopLeft(find.byKey(const ValueKey('report-activity-facts')))
-        .dx;
-    expect(factsX, greaterThan(activityX));
+        .dy;
+    expect(factsY, greaterThan(activityY));
     expect(tester.takeException(), isNull);
   });
 
@@ -286,6 +287,201 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('관찰 리포트'), findsNothing);
+  });
+
+  testWidgets('publicInterpretations는 category 순서로 카드를 그리고 근거를 라벨로 편다', (
+    tester,
+  ) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        publicInterpretations: const [
+          ReportInterpretationDto(
+            category: 'EMOTION',
+            title: '감정 표현',
+            tendencyText: '감정을 적극적으로 드러내는 경향이 보일 수 있습니다.',
+            scopeText: '이번 그림 활동에서 나타난 가능성입니다.',
+            homeObservationGuide: '집에서도 감정을 말로 표현하는지 살펴봐 주세요.',
+            evidenceRefs: [],
+          ),
+          ReportInterpretationDto(
+            category: 'RELATIONSHIP',
+            title: '가족과의 연결',
+            tendencyText: '가족에게 정서적으로 의지하려는 경향이 보일 수 있습니다.',
+            scopeText: '이번 그림에서 나타난 가능성입니다.',
+            homeObservationGuide: '보호자의 확인을 반복해서 구하는지 살펴봐 주세요.',
+            evidenceRefs: [101],
+          ),
+        ],
+        evidenceItems: const [
+          ReportEvidenceItemDto(
+            evidenceId: 101,
+            sourceType: 'CHILD_ANSWER',
+            text: '집에는 우리 가족이 산다고 답했어요.',
+          ),
+        ],
+      ),
+    );
+
+    expect(find.byKey(const ValueKey('report-interpretations')), findsOneWidget);
+    // RELATIONSHIP이 EMOTION보다 먼저 온다.
+    final relationshipY = tester.getTopLeft(find.text('가족과의 연결')).dy;
+    final emotionY = tester.getTopLeft(find.text('감정 표현')).dy;
+    expect(relationshipY, lessThan(emotionY));
+    expect(find.textContaining('의지하려는 경향이 보일 수 있습니다'), findsOneWidget);
+    expect(find.text('이번 그림에서 나타난 가능성입니다.'), findsOneWidget);
+    expect(find.textContaining('보호자의 확인을 반복해서'), findsOneWidget);
+
+    // 근거는 접혀 있다가 라벨로만 펼쳐지고, 코드값은 노출하지 않는다.
+    await tester.ensureVisible(find.text('근거 보기').first);
+    await tester.tap(find.text('근거 보기').first);
+    await tester.pumpAndSettle();
+    expect(find.text('아이의 답변'), findsOneWidget);
+    expect(find.text('집에는 우리 가족이 산다고 답했어요.'), findsOneWidget);
+    expect(find.textContaining('CHILD_ANSWER'), findsNothing);
+    expect(find.textContaining('101'), findsNothing);
+  });
+
+  testWidgets('subjectReports는 HOUSE→TREE→PERSON으로 문답 상태 문구를 표시한다', (
+    tester,
+  ) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        subjectReports: const [
+          ReportSubjectReportDto(
+            subjectType: 'PERSON',
+            imageUrl: null,
+            visionObservations: ['사람을 크게 그렸어요.'],
+            qaPairs: [],
+            interpretationRefs: [],
+          ),
+          ReportSubjectReportDto(
+            subjectType: 'HOUSE',
+            imageUrl: null,
+            visionObservations: [],
+            qaPairs: [
+              ReportQaPairDto(
+                question: '이 집에는 누가 살아요?',
+                answer: null,
+                state: 'ANSWERED',
+                inputType: 'TEXT',
+                sttNeedsConfirmation: false,
+                isRepresentative: true,
+              ),
+              ReportQaPairDto(
+                question: '문은 어디 있어요?',
+                answer: null,
+                state: 'SKIPPED',
+                inputType: 'TEXT',
+                sttNeedsConfirmation: false,
+                isRepresentative: true,
+              ),
+              ReportQaPairDto(
+                question: '누구랑 살아요?',
+                answer: '가족이요',
+                state: 'ANSWERED',
+                inputType: 'VOICE',
+                sttNeedsConfirmation: true,
+                isRepresentative: true,
+              ),
+            ],
+            interpretationRefs: [],
+          ),
+        ],
+      ),
+    );
+
+    final houseY = tester
+        .getTopLeft(find.byKey(const ValueKey('report-subject-HOUSE')))
+        .dy;
+    final personY = tester
+        .getTopLeft(find.byKey(const ValueKey('report-subject-PERSON')))
+        .dy;
+    expect(houseY, lessThan(personY));
+    expect(find.textContaining('답하지 않았어요'), findsOneWidget);
+    expect(find.textContaining('이 질문은 건너뛰었어요'), findsOneWidget);
+    expect(find.text('음성 인식 내용을 확인해 주세요'), findsOneWidget);
+    expect(find.text('사람을 크게 그렸어요.'), findsOneWidget);
+  });
+
+  testWidgets('parentGuides는 guideType별 제목으로 정렬해 나눈다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        parentGuides: const [
+          ReportParentGuideDto(
+            guideType: 'DAILY_PARENTING',
+            items: ['하루 한 번 아이의 이야기를 들어 주세요.'],
+          ),
+          ReportParentGuideDto(
+            guideType: 'DRAWING_CONVERSATION',
+            items: ['그림에서 무엇을 그렸는지 물어봐 주세요.'],
+          ),
+          ReportParentGuideDto(
+            guideType: 'PROFESSIONAL_SUPPORT',
+            items: ['더 이야기 나누고 싶을 때 상담을 참고할 수 있어요.'],
+          ),
+        ],
+      ),
+    );
+
+    expect(find.text('그림으로 대화해 보세요'), findsOneWidget);
+    expect(find.text('일상에서 이렇게 도와주세요'), findsOneWidget);
+    expect(find.text('도움이 필요할 때'), findsOneWidget);
+    // DRAWING_CONVERSATION이 DAILY_PARENTING보다 먼저 온다.
+    final drawingY = tester.getTopLeft(find.text('그림으로 대화해 보세요')).dy;
+    final dailyY = tester.getTopLeft(find.text('일상에서 이렇게 도와주세요')).dy;
+    expect(drawingY, lessThan(dailyY));
+  });
+
+  testWidgets('references는 §11 섹션에 표시되고 nonDiagnosticNotice가 없으면 카드가 숨는다', (
+    tester,
+  ) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        nonDiagnosticNotice: null,
+        references: const [
+          ReportReferenceDto(title: '그림 심리의 이해', url: 'https://example.test'),
+        ],
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('report-non-diagnostic-notice')),
+      findsNothing,
+    );
+    expect(find.byKey(const ValueKey('report-limitations')), findsOneWidget);
+    expect(find.text('그림 심리의 이해'), findsOneWidget);
+  });
+
+  testWidgets('재구성 화면은 금지어(위험·이상·문제·정상)를 노출하지 않는다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        publicInterpretations: const [
+          ReportInterpretationDto(
+            category: 'ADAPTATION',
+            title: '새로운 환경 적응',
+            tendencyText: '새 상황에서 천천히 살펴보는 경향이 보일 수 있습니다.',
+            scopeText: '이번 활동에서 나타난 가능성입니다.',
+            homeObservationGuide: '새로운 곳에서 어떻게 반응하는지 살펴봐 주세요.',
+            evidenceRefs: [],
+          ),
+        ],
+        parentGuides: const [
+          ReportParentGuideDto(
+            guideType: 'PROFESSIONAL_SUPPORT',
+            items: ['더 이야기하고 싶을 때 참고할 수 있어요.'],
+          ),
+        ],
+      ),
+    );
+
+    for (final banned in ['위험', '이상', '문제', '정상', '비정상']) {
+      expect(find.textContaining(banned), findsNothing, reason: banned);
+    }
   });
 
   for (final viewport in const [
@@ -390,6 +586,7 @@ ReportDetailDto _fullReport({
     pauseCount: 4,
     eraseCount: 2,
     pressureAvailable: true,
+    pressureValue: 0.62,
     notes: ['잠시 멈춘 뒤 다시 그렸어요.', '색을 여러 번 덧칠했어요.'],
   ),
   ReportConversationSummaryDto? conversation =
@@ -401,6 +598,13 @@ ReportDetailDto _fullReport({
       ),
   List<String> guide = const ['어떤 부분이 좋아?'],
   List<String> limitations = const ['이 리포트는 진단이 아닌 관찰 참고 자료입니다.'],
+  String? nonDiagnosticNotice =
+      '이 리포트는 아이가 그림을 그리고 대화한 과정에서 나타난 특징을 정리한 자료예요.',
+  List<ReportInterpretationDto> publicInterpretations = const [],
+  List<ReportEvidenceItemDto> evidenceItems = const [],
+  List<ReportSubjectReportDto> subjectReports = const [],
+  List<ReportParentGuideDto> parentGuides = const [],
+  List<ReportReferenceDto> references = const [],
 }) => ReportDetailDto(
   reportId: 501,
   reportVersion: 2,
@@ -425,6 +629,12 @@ ReportDetailDto _fullReport({
   conversationSummary: conversation,
   guardianConversationGuide: guide,
   limitations: limitations,
+  nonDiagnosticNotice: nonDiagnosticNotice,
+  publicInterpretations: publicInterpretations,
+  evidenceItems: evidenceItems,
+  subjectReports: subjectReports,
+  parentGuides: parentGuides,
+  references: references,
   expertReview: const ReportExpertReviewDto(
     status: 'NOT_REQUESTED',
     available: false,

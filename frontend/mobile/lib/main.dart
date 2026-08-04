@@ -25,6 +25,7 @@ import 'features/notification/domain/services/push_setup.dart';
 import 'features/report/data/repositories/remote_report_repository.dart';
 import 'features/settings/data/repositories/remote_account_withdrawal_repository.dart';
 import 'features/settings/data/repositories/remote_data_retention_repository.dart';
+import 'features/settings/data/repositories/remote_notification_settings_repository.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -100,6 +101,9 @@ DodamApp createDefaultApp({
     consentRepository: RemoteConsentRepository(apiClient),
     accountWithdrawalRepository: RemoteAccountWithdrawalRepository(apiClient),
     dataRetentionRepository: RemoteDataRetentionRepository(apiClient),
+    notificationSettingsRepository: RemoteNotificationSettingsRepository(
+      apiClient,
+    ),
     conversationRepository: RemoteConversationRepository(apiClient),
     conversationEndRepository: RemoteConversationEndRepository(apiClient),
     questionTtsRepository: RemoteQuestionTtsRepository(apiClient),

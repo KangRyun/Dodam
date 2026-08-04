@@ -72,6 +72,24 @@ List<String> _stringList(Object? value) => value is List
     ? value.whereType<String>().toList(growable: false)
     : const [];
 
+/// 계약상 객체 배열을 안전하게 파싱한다. 값이 없거나 리스트가 아니면 빈 목록을
+/// 돌려주므로(오류 아님), 서버가 필드를 아직 내려주지 않는 동안에도 화면이
+/// 해당 섹션을 자연스럽게 숨긴다.
+List<T> _objectList<T>(Object? value, T Function(Map<String, dynamic>) parse) =>
+    value is List
+    ? [
+        for (final item in value)
+          if (item is Map) parse(_map(item)),
+      ]
+    : const [];
+
+List<int> _intList(Object? value) => value is List
+    ? [
+        for (final item in value)
+          if (item is num) item.toInt(),
+      ]
+    : const [];
+
 /// `data.drawingSession` — 리포트가 가리키는 그림 활동 세션.
 ///
 /// 세션이 없으면 서버가 404를 주므로 상세 응답에서는 객체 자체가 비지 않지만,
@@ -185,11 +203,16 @@ final class ReportUtteranceDto {
 }
 
 /// `data.childExpression` — 아이가 고른 감정과 대표 발화.
+///
+/// [summary]·[keywords]는 계약 §9의 "아이의 표현 요약"이며, 서버가 아직
+/// 내려주지 않으면 각각 null·빈 목록이 되어 요약 섹션이 숨는다.
 final class ReportChildExpressionDto {
   const ReportChildExpressionDto({
     required this.selectedEmotions,
     required this.expressedEmotionText,
     required this.representativeUtterances,
+    this.summary,
+    this.keywords = const [],
   });
   factory ReportChildExpressionDto.fromJson(Map<String, dynamic> json) =>
       ReportChildExpressionDto(
@@ -199,18 +222,29 @@ final class ReportChildExpressionDto {
             (json['representativeUtterances'] as List? ?? const [])
                 .map((item) => ReportUtteranceDto.fromJson(_map(item)))
                 .toList(growable: false),
+        summary: json['summary'] as String?,
+        keywords: _stringList(json['keywords']),
       );
   final List<String> selectedEmotions;
   final String? expressedEmotionText;
   final List<ReportUtteranceDto> representativeUtterances;
+  final String? summary;
+  final List<String> keywords;
 
   bool get isEmpty =>
       selectedEmotions.isEmpty &&
       expressedEmotionText == null &&
-      representativeUtterances.isEmpty;
+      representativeUtterances.isEmpty &&
+      summary == null &&
+      keywords.isEmpty;
 }
 
-/// `data.activityFacts` — 해석 없이 관찰된 활동 기록.
+/// `data.activityFacts` — 해석 없이 관찰된 객관 수치(계약 §8).
+///
+/// 계약은 초 단위(`totalDurationSec` 등)로 수치를 준다. 구형 응답의
+/// `drawingDurationMs`(밀리초)·`detectedObjects`·`notes`도 하위 호환으로 계속
+/// 읽는다. 모든 수치는 nullable이라 `null`이면 화면에서 줄을 숨기고 `0`이면
+/// "0회"로 보여줄 수 있다. 어떤 값에도 심리 해석을 붙이지 않는다.
 final class ReportActivityFactsDto {
   const ReportActivityFactsDto({
     required this.detectedObjects,
@@ -219,6 +253,16 @@ final class ReportActivityFactsDto {
     required this.eraseCount,
     required this.pressureAvailable,
     required this.notes,
+    this.totalDurationSec,
+    this.drawingDurationSec,
+    this.undoCount,
+    this.questionCount,
+    this.answerCount,
+    this.skipCount,
+    this.detectedElementCount,
+    this.pressureValue,
+    this.truncated = false,
+    this.aggregatedHtp = false,
   });
   factory ReportActivityFactsDto.fromJson(Map<String, dynamic> json) =>
       ReportActivityFactsDto(
@@ -228,16 +272,46 @@ final class ReportActivityFactsDto {
         eraseCount: (json['eraseCount'] as num?)?.toInt(),
         pressureAvailable: json['pressureAvailable'] as bool? ?? false,
         notes: _stringList(json['notes']),
+        totalDurationSec: (json['totalDurationSec'] as num?)?.toInt(),
+        drawingDurationSec: (json['drawingDurationSec'] as num?)?.toInt(),
+        undoCount: (json['undoCount'] as num?)?.toInt(),
+        questionCount: (json['questionCount'] as num?)?.toInt(),
+        answerCount: (json['answerCount'] as num?)?.toInt(),
+        skipCount: (json['skipCount'] as num?)?.toInt(),
+        detectedElementCount: (json['detectedElementCount'] as num?)?.toInt(),
+        pressureValue: (json['pressureValue'] as num?)?.toDouble(),
+        truncated: json['truncated'] as bool? ?? false,
+        aggregatedHtp: json['aggregatedHtp'] as bool? ?? false,
       );
   final List<String> detectedObjects, notes;
   final int? drawingDurationMs, pauseCount, eraseCount;
   final bool pressureAvailable;
+  final int? totalDurationSec,
+      drawingDurationSec,
+      undoCount,
+      questionCount,
+      answerCount,
+      skipCount,
+      detectedElementCount;
+  final double? pressureValue;
+  final bool truncated, aggregatedHtp;
+
+  /// 필압 항목은 플래그가 켜져 있고 실제 값이 있을 때만 노출한다.
+  bool get hasPressureValue => pressureAvailable && pressureValue != null;
 
   bool get isEmpty =>
       detectedObjects.isEmpty &&
       notes.isEmpty &&
       pauseCount == null &&
-      eraseCount == null;
+      eraseCount == null &&
+      totalDurationSec == null &&
+      drawingDurationSec == null &&
+      undoCount == null &&
+      questionCount == null &&
+      answerCount == null &&
+      skipCount == null &&
+      detectedElementCount == null &&
+      !hasPressureValue;
 }
 
 /// `data.conversationSummary` — 대화 진행 수치와 요약문.
@@ -263,6 +337,139 @@ final class ReportConversationSummaryDto {
       answeredCount == null &&
       skippedCount == null &&
       summary == null;
+}
+
+/// `publicInterpretations[]` — 주요 심리 경향 카드(계약 §3).
+///
+/// 비진단 원칙: [tendencyText]는 가능성 어조이며, 화면에서 단독으로 크게 쓰지
+/// 않고 근거·[scopeText]와 함께 보여준다. [evidenceRefs]는 [ReportDetailDto]
+/// 최상위 `evidenceItems`의 `evidenceId`를 참조한다.
+final class ReportInterpretationDto {
+  const ReportInterpretationDto({
+    required this.category,
+    required this.title,
+    required this.tendencyText,
+    required this.scopeText,
+    required this.homeObservationGuide,
+    required this.evidenceRefs,
+  });
+  factory ReportInterpretationDto.fromJson(Map<String, dynamic> json) =>
+      ReportInterpretationDto(
+        category: json['category'] as String?,
+        title: json['title'] as String?,
+        tendencyText: json['tendencyText'] as String?,
+        scopeText: json['scopeText'] as String?,
+        homeObservationGuide: json['homeObservationGuide'] as String?,
+        evidenceRefs: _intList(json['evidenceRefs']),
+      );
+
+  /// RELATIONSHIP|EMOTION|SELF_EXPRESSION|ACTIVITY_STYLE|ADAPTATION.
+  final String? category;
+  final String? title, tendencyText, scopeText, homeObservationGuide;
+  final List<int> evidenceRefs;
+}
+
+/// `evidenceItems[]` — 카드가 참조하는 근거 풀(계약 §4).
+///
+/// [evidenceId]·[sourceType] 코드값은 화면에 노출하지 않는다(라벨만).
+final class ReportEvidenceItemDto {
+  const ReportEvidenceItemDto({
+    required this.evidenceId,
+    required this.sourceType,
+    required this.text,
+  });
+  factory ReportEvidenceItemDto.fromJson(Map<String, dynamic> json) =>
+      ReportEvidenceItemDto(
+        evidenceId: (json['evidenceId'] as num?)?.toInt(),
+        sourceType: json['sourceType'] as String?,
+        text: json['text'] as String?,
+      );
+  final int? evidenceId;
+  final String? sourceType, text;
+}
+
+/// `subjectReports[].qaPairs[]` — 아이와 나눈 문답(계약 §6).
+final class ReportQaPairDto {
+  const ReportQaPairDto({
+    required this.question,
+    required this.answer,
+    required this.state,
+    required this.inputType,
+    required this.sttNeedsConfirmation,
+    required this.isRepresentative,
+  });
+  factory ReportQaPairDto.fromJson(Map<String, dynamic> json) =>
+      ReportQaPairDto(
+        question: json['question'] as String?,
+        answer: json['answer'] as String?,
+        state: json['state'] as String? ?? 'ANSWERED',
+        inputType: json['inputType'] as String? ?? 'TEXT',
+        sttNeedsConfirmation: json['sttNeedsConfirmation'] as bool? ?? false,
+        isRepresentative: json['isRepresentative'] as bool? ?? false,
+      );
+  final String? question, answer;
+
+  /// ANSWERED | SKIPPED.
+  final String state;
+
+  /// TEXT | VOICE.
+  final String inputType;
+  final bool sttNeedsConfirmation, isRepresentative;
+}
+
+/// `subjectReports[]` — 집·나무·사람 주제별 보고(계약 §5).
+///
+/// 순서는 서버가 HOUSE→TREE→PERSON으로 보장하지만, 화면에서도 한 번 더
+/// 정렬해 안전하게 표시한다.
+final class ReportSubjectReportDto {
+  const ReportSubjectReportDto({
+    required this.subjectType,
+    required this.imageUrl,
+    required this.visionObservations,
+    required this.qaPairs,
+    required this.interpretationRefs,
+  });
+  factory ReportSubjectReportDto.fromJson(Map<String, dynamic> json) =>
+      ReportSubjectReportDto(
+        subjectType: json['subjectType'] as String?,
+        imageUrl: json['imageUrl'] as String?,
+        visionObservations: _stringList(json['visionObservations']),
+        qaPairs: _objectList(json['qaPairs'], ReportQaPairDto.fromJson),
+        interpretationRefs: _intList(json['interpretationRefs']),
+      );
+
+  /// HOUSE | TREE | PERSON.
+  final String? subjectType;
+  final String? imageUrl;
+  final List<String> visionObservations;
+  final List<ReportQaPairDto> qaPairs;
+  final List<int> interpretationRefs;
+}
+
+/// `parentGuides[]` — 보호자 가이드(계약 §7). guideType별로 섹션이 나뉜다.
+final class ReportParentGuideDto {
+  const ReportParentGuideDto({required this.guideType, required this.items});
+  factory ReportParentGuideDto.fromJson(Map<String, dynamic> json) =>
+      ReportParentGuideDto(
+        guideType: json['guideType'] as String?,
+        items: _stringList(json['items']),
+      );
+
+  /// DRAWING_CONVERSATION | DAILY_PARENTING | HOME_OBSERVATION |
+  /// PROFESSIONAL_SUPPORT.
+  final String? guideType;
+  final List<String> items;
+}
+
+/// `references[]` — 참고 자료(계약 §9).
+final class ReportReferenceDto {
+  const ReportReferenceDto({required this.title, required this.url});
+  factory ReportReferenceDto.fromJson(Map<String, dynamic> json) =>
+      ReportReferenceDto(
+        title: json['title'] as String?,
+        url: json['url'] as String?,
+      );
+  final String? title, url;
 }
 
 /// `data.expertReview` — 전문가 검토 워크플로 상태.
@@ -296,6 +503,12 @@ final class ReportDetailDto {
     required this.limitations,
     required this.expertReview,
     required this.createdAt,
+    this.nonDiagnosticNotice,
+    this.publicInterpretations = const [],
+    this.evidenceItems = const [],
+    this.subjectReports = const [],
+    this.parentGuides = const [],
+    this.references = const [],
   });
   factory ReportDetailDto.fromJson(Map<String, dynamic> json) =>
       ReportDetailDto(
@@ -327,6 +540,27 @@ final class ReportDetailDto {
             ? ReportExpertReviewDto.fromJson(_map(json['expertReview']))
             : null,
         createdAt: json['createdAt'] as String?,
+        nonDiagnosticNotice: json['nonDiagnosticNotice'] as String?,
+        publicInterpretations: _objectList(
+          json['publicInterpretations'],
+          ReportInterpretationDto.fromJson,
+        ),
+        evidenceItems: _objectList(
+          json['evidenceItems'],
+          ReportEvidenceItemDto.fromJson,
+        ),
+        subjectReports: _objectList(
+          json['subjectReports'],
+          ReportSubjectReportDto.fromJson,
+        ),
+        parentGuides: _objectList(
+          json['parentGuides'],
+          ReportParentGuideDto.fromJson,
+        ),
+        references: _objectList(
+          json['references'],
+          ReportReferenceDto.fromJson,
+        ),
       );
   final int reportId, reportVersion;
   final String reportStatus;
@@ -339,12 +573,54 @@ final class ReportDetailDto {
   final ReportExpertReviewDto? expertReview;
   final String? createdAt;
 
-  /// 관찰 섹션이 하나도 없어 "표시할 기록 없음"을 보여줘야 하는 상태.
+  /// 계약 §2·§10 추가 필드. 서버가 아직 내려주지 않으면 각각 null·빈 목록이라
+  /// 해당 섹션이 숨는다(하위 호환).
+  final String? nonDiagnosticNotice;
+  final List<ReportInterpretationDto> publicInterpretations;
+  final List<ReportEvidenceItemDto> evidenceItems;
+  final List<ReportSubjectReportDto> subjectReports;
+  final List<ReportParentGuideDto> parentGuides;
+  final List<ReportReferenceDto> references;
+
+  /// 계약 §7의 4종 가이드를 화면 순서(그림 대화→일상 육아→가정 관찰→전문 도움)로
+  /// 정렬해 돌려준다. 알 수 없는 유형은 뒤에 둔다.
+  List<ReportParentGuideDto> get orderedParentGuides {
+    const order = [
+      'DRAWING_CONVERSATION',
+      'DAILY_PARENTING',
+      'HOME_OBSERVATION',
+      'PROFESSIONAL_SUPPORT',
+    ];
+    int rank(ReportParentGuideDto guide) {
+      final index = order.indexOf(guide.guideType ?? '');
+      return index < 0 ? order.length : index;
+    }
+
+    return [...parentGuides.where((guide) => guide.items.isNotEmpty)]
+      ..sort((a, b) => rank(a).compareTo(rank(b)));
+  }
+
+  /// 계약 §5의 집·나무·사람 순서를 보장한다.
+  List<ReportSubjectReportDto> get orderedSubjectReports {
+    const order = ['HOUSE', 'TREE', 'PERSON'];
+    int rank(ReportSubjectReportDto report) {
+      final index = order.indexOf(report.subjectType ?? '');
+      return index < 0 ? order.length : index;
+    }
+
+    return [...subjectReports]..sort((a, b) => rank(a).compareTo(rank(b)));
+  }
+
+  /// 관찰 섹션이 하나도 없어 "표시할 기록 없음"을 보여줘야 하는 상태(계약 §10):
+  /// publicInterpretations + childExpression + activityFacts +
+  /// conversationSummary + parentGuides가 모두 비었을 때만 참.
   bool get hasNoObservations =>
+      publicInterpretations.isEmpty &&
       (childExpression?.isEmpty ?? true) &&
       (activityFacts?.isEmpty ?? true) &&
       (conversationSummary?.isEmpty ?? true) &&
-      guardianConversationGuide.isEmpty;
+      guardianConversationGuide.isEmpty &&
+      orderedParentGuides.isEmpty;
 }
 
 /// REPORT-04 리포트 PDF 내보내기 접수 결과.

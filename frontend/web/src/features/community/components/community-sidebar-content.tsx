@@ -1,13 +1,9 @@
-import type {
-  CommunityProfile,
-} from "@/features/community/domain/community-models";
+"use client";
+
 import Link from "next/link";
 
-const providerLabels: Record<CommunityProfile["connectedProvider"], string> = {
-  KAKAO: "카카오 연결",
-  GOOGLE: "구글 연결",
-  NAVER: "네이버 연결",
-};
+import { useCommunityViewer } from "@/features/community/hooks/use-community-viewer";
+import type { CommunityProfile } from "@/features/community/domain/community-models";
 
 export function CommunitySidebarContent({
   profile,
@@ -16,6 +12,9 @@ export function CommunitySidebarContent({
   profile: CommunityProfile;
   popularTags: readonly string[];
 }) {
+  // 프로필 카드의 이름은 하드코딩 기본값이 아니라 실제 로그인 사용자에서 가져온다.
+  const { nickname } = useCommunityViewer();
+
   return (
     <>
       <section
@@ -27,11 +26,11 @@ export function CommunitySidebarContent({
             {profile.avatar}
           </div>
           <div>
-            <h2 id="profile-title">{profile.nickname}</h2>
-            <p>{providerLabels[profile.connectedProvider]}</p>
+            <h2 id="profile-title">{nickname}</h2>
           </div>
         </div>
         <div className="community-profile-menu" aria-label="내 커뮤니티 메뉴">
+          <Link href="/community/profile"><span>👤 내 프로필</span><span>›</span></Link>
           <Link href="/community/my-posts"><span>📝 내가 쓴 글</span><span>›</span></Link>
           <Link href="/community/liked-posts"><span>♥ 좋아요 한 글</span><span>›</span></Link>
           <Link href="/community/settings"><span>⚙ 설정</span><span>›</span></Link>
