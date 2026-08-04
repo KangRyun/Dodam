@@ -122,6 +122,7 @@ flutter:
     - assets/canvas/swatches/
     - assets/canvas/tools/
     - assets/canvas/tools/masks/
+    - assets/canvas/brushes/
 
   fonts:
     - family: NanumSquareNeo

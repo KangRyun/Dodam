@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ui' as ui;
 
 import 'package:flutter/gestures.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../../../../design_system/design_system.dart';
 import '../models/drawing_canvas_action.dart';
 import '../models/drawing_stroke.dart';
+import '../rendering/drawing_brush_stamps.dart';
 import '../rendering/drawing_stroke_renderer.dart';
 
 class DrawingCanvas extends StatefulWidget {
@@ -66,6 +68,14 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
       _handleBackgroundImage,
       onError: _handleBackgroundError,
     );
+    // 도구별 질감 스탬프는 한 번만 읽는다. 다 읽히기 전에는 단색 선으로 그리고
+    // 준비되면 다시 그려 결이 나타나게 한다.
+    DrawingBrushStamps.revision.addListener(_handleBrushStampsReady);
+    unawaited(DrawingBrushStamps.ensureLoaded());
+  }
+
+  void _handleBrushStampsReady() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -125,6 +135,7 @@ class _DrawingCanvasState extends State<DrawingCanvas> {
 
   @override
   void dispose() {
+    DrawingBrushStamps.revision.removeListener(_handleBrushStampsReady);
     _backgroundImageStream?.removeListener(_backgroundImageListener);
     _backgroundImageInfo?.dispose();
     super.dispose();

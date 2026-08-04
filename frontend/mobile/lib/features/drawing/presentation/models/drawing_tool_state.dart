@@ -9,6 +9,17 @@ enum DrawingEraserMode { stroke, area }
 
 enum DrawingEraserMenuAction { selectStroke, selectArea, clearAll }
 
+extension DrawingInstrumentBrush on DrawingInstrument {
+  /// 도구가 남기는 자국의 질감이다. 지우개·채우기는 획을 남기지 않는다.
+  DrawingBrushProfileId get brushProfile => switch (this) {
+    DrawingInstrument.crayon => DrawingBrushProfileId.crayon,
+    DrawingInstrument.pencil => DrawingBrushProfileId.pencil,
+    DrawingInstrument.brush => DrawingBrushProfileId.brush,
+    DrawingInstrument.eraser ||
+    DrawingInstrument.fill => DrawingBrushProfileId.legacyPen,
+  };
+}
+
 @immutable
 final class DrawingToolState {
   const DrawingToolState({
@@ -22,6 +33,8 @@ final class DrawingToolState {
   final DrawingEraserMode eraserMode;
   final Color color;
   final double width;
+
+  DrawingBrushProfileId get brushProfile => instrument.brushProfile;
 
   DrawingTool? get wireTool => switch (instrument) {
     DrawingInstrument.crayon ||

@@ -24,6 +24,12 @@ final class DrawingToolButton extends StatefulWidget {
   State<DrawingToolButton> createState() => _DrawingToolButtonState();
 }
 
+/// 손가락으로 누를 수 있는 최소 크기다. 툴바가 좁아져도 줄이지 않는다.
+const double _buttonSize = 48;
+
+/// 도구 그림 크기다. 승인 시안의 버튼:그림 비율(62:47)을 따른다.
+const double _artworkSize = 36;
+
 final class _DrawingToolButtonState extends State<DrawingToolButton> {
   bool _hovered = false;
   bool _focused = false;
@@ -44,7 +50,7 @@ final class _DrawingToolButtonState extends State<DrawingToolButton> {
         onTap: widget.onPressed,
         excludeSemantics: true,
         child: SizedBox.square(
-          dimension: 48,
+          dimension: _buttonSize,
           child: Material(
             color: Colors.transparent,
             child: InkWell(
@@ -61,13 +67,16 @@ final class _DrawingToolButtonState extends State<DrawingToolButton> {
               child: Stack(
                 alignment: Alignment.center,
                 children: [
+                  // 선택 판은 버튼을 가득 채워야 도구 그림을 감싸는 받침으로
+                  // 읽힌다. 그림보다 조금만 크면 뒤에 낀 상자처럼 보인다.
                   if (widget.selected)
                     IgnorePointer(
                       child: Image.asset(
                         'assets/canvas/frame/selected_tool.png',
-                        width: 44,
-                        height: 44,
-                        fit: BoxFit.contain,
+                        width: _buttonSize,
+                        height: _buttonSize,
+                        fit: BoxFit.fill,
+                        filterQuality: FilterQuality.high,
                         excludeFromSemantics: true,
                       ),
                     ),
@@ -83,7 +92,7 @@ final class _DrawingToolButtonState extends State<DrawingToolButton> {
                     child: CanvasToolAssetIcon(
                       artwork: widget.artwork,
                       pointColor: widget.pointColor,
-                      size: 40,
+                      size: _artworkSize,
                     ),
                   ),
                 ],

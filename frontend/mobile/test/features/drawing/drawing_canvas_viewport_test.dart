@@ -6,6 +6,7 @@ import 'package:dodam/features/drawing/application/drawing_document_controller.d
 import 'package:dodam/features/drawing/application/drawing_sync_coordinator.dart';
 import 'package:dodam/features/drawing/presentation/models/drawing_stroke.dart';
 import 'package:dodam/features/drawing/presentation/models/drawing_tool_state.dart';
+import 'package:dodam/features/drawing/presentation/rendering/drawing_stroke_renderer.dart';
 import 'package:dodam/features/drawing/presentation/widgets/drawing_canvas_viewport.dart';
 import 'package:dodam/features/drawing/presentation/widgets/drawing_cursor_overlay.dart';
 import 'package:flutter/material.dart';
@@ -108,11 +109,16 @@ void main() {
                     boundary.localToGlobal(const Offset(480, 384)))
                 .distance;
         expect(transformedWidth, closeTo(69.5, 1e-9));
+        // 커서는 선 굵기가 아니라 실제로 찍히는 자국 크기를 보여 준다.
+        final footprint = DrawingStrokeRenderer.footprintFor(
+          DrawingInstrument.brush.brushProfile,
+          64,
+        );
         expect(
           tester
               .getSize(find.byKey(const ValueKey('drawing-cursor-visual')))
               .width,
-          closeTo(transformedWidth, 1e-9),
+          closeTo(footprint * metrics.scale, 1e-9),
         );
       },
     );

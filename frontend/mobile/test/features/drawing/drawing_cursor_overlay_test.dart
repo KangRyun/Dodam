@@ -7,6 +7,7 @@ import 'package:dodam/features/drawing/application/drawing_object_detection_cont
 import 'package:dodam/features/drawing/application/drawing_sync_coordinator.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/drawing/presentation/models/drawing_tool_state.dart';
+import 'package:dodam/features/drawing/presentation/rendering/drawing_stroke_renderer.dart';
 import 'package:dodam/features/drawing/presentation/widgets/drawing_canvas_viewport.dart';
 import 'package:dodam/features/drawing/presentation/widgets/drawing_cursor_overlay.dart';
 import 'package:flutter/foundation.dart';
@@ -76,7 +77,12 @@ void main() {
     );
     expect(ignorePointer.ignoring, isTrue);
     final visual = find.byKey(const ValueKey('drawing-cursor-visual'));
-    expect(tester.getSize(visual), const Size.square(12));
+    // 붓은 선 굵기보다 자국이 넓다. 커서는 그 자국 크기를 그린다.
+    final footprint = DrawingStrokeRenderer.footprintFor(
+      DrawingInstrument.brush.brushProfile,
+      24,
+    );
+    expect(tester.getSize(visual), Size.square(footprint * 0.5));
     expect(
       tester.getCenter(visual),
       const Offset(20 + 100 * 0.5, 30 + 80 * 0.5),
@@ -135,7 +141,7 @@ void main() {
     await tester.pump();
     expect(
       tester.getSize(find.byKey(const ValueKey('drawing-cursor-visual'))),
-      const Size.square(5),
+      Size.square(_footprint(10) * 0.5),
     );
 
     controller.update(
@@ -146,7 +152,7 @@ void main() {
     await tester.pump();
     expect(
       tester.getSize(find.byKey(const ValueKey('drawing-cursor-visual'))),
-      const Size.square(18),
+      Size.square(_footprint(36) * 0.5),
     );
   });
 
@@ -496,4 +502,10 @@ const _cursorDetection = ObjectDetectionResponseDto(
   detections: [],
   requestedAt: '2026-08-03T00:00:00Z',
   processedAt: '2026-08-03T00:00:01Z',
+);
+
+/// 기본 도구(크레파스)로 [thickness] 만큼 그었을 때 찍히는 자국 지름이다.
+double _footprint(double thickness) => DrawingStrokeRenderer.footprintFor(
+  const DrawingToolState().brushProfile,
+  thickness,
 );

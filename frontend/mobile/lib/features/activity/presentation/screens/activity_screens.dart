@@ -1555,13 +1555,7 @@ class _DrawingScreenState extends State<DrawingScreen>
         color: _toolState.color,
         thickness: _toolState.width,
         tool: tool,
-        brushProfile: switch (_toolState.instrument) {
-          DrawingInstrument.pencil => DrawingBrushProfileId.pencil,
-          DrawingInstrument.brush => DrawingBrushProfileId.brush,
-          DrawingInstrument.crayon => DrawingBrushProfileId.crayon,
-          DrawingInstrument.eraser ||
-          DrawingInstrument.fill => DrawingBrushProfileId.legacyPen,
-        },
+        brushProfile: _toolState.brushProfile,
       );
     });
   }

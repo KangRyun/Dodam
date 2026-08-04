@@ -106,8 +106,13 @@ void main() {
     addTearDown(image.dispose);
 
     final bounds = await _paintedBounds(tester, image);
-    expect(bounds.width, lessThanOrEqualTo(14));
-    expect(bounds.height, lessThanOrEqualTo(14));
+    // 크레파스 자국은 선 굵기보다 번지지만 프로필이 정한 범위 안에 있어야 한다.
+    final limit =
+        DrawingStrokeRenderer.footprintFor(DrawingBrushProfileId.crayon, 12) *
+            (1 + DrawingStrokeRenderer.crayon.stampScaleJitter) +
+        2;
+    expect(bounds.width, lessThanOrEqualTo(limit));
+    expect(bounds.height, lessThanOrEqualTo(limit));
   });
 
   testWidgets('crayon taps are deterministic for a seed and textured by seed', (
