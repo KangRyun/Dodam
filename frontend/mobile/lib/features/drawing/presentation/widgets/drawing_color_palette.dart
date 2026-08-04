@@ -5,6 +5,100 @@ import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 
+/// 색조·채도·명도를 각각 조절하는 슬라이더 묶음이다.
+///
+/// 2차원 색상 면만으로는 한 채널만 미세하게 바꾸기 어렵고, 지금 값이 얼마인지도
+/// 보이지 않는다. 승인 디자인이 요구하는 대로 채널을 나눠 보여주고 수치도 함께
+/// 적는다. 값은 화면 위 2차원 면과 같은 HSV 기준이라 서로 어긋나지 않는다.
+final class _ChannelSliders extends StatelessWidget {
+  const _ChannelSliders({required this.value, required this.onChanged});
+
+  final HSVColor value;
+  final ValueChanged<HSVColor> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      _ChannelSlider(
+        key: const ValueKey('hsv-channel-hue'),
+        label: '색조',
+        max: 359,
+        value: value.hue,
+        readout: '${value.hue.round()}°',
+        onChanged: (next) => onChanged(value.withHue(next.clamp(0, 359))),
+      ),
+      _ChannelSlider(
+        key: const ValueKey('hsv-channel-saturation'),
+        label: '채도',
+        max: 100,
+        value: value.saturation * 100,
+        readout: '${(value.saturation * 100).round()}%',
+        onChanged: (next) =>
+            onChanged(value.withSaturation((next / 100).clamp(0, 1))),
+      ),
+      _ChannelSlider(
+        key: const ValueKey('hsv-channel-value'),
+        label: '명도',
+        max: 100,
+        value: value.value * 100,
+        readout: '${(value.value * 100).round()}%',
+        onChanged: (next) =>
+            onChanged(value.withValue((next / 100).clamp(0, 1))),
+      ),
+    ],
+  );
+}
+
+final class _ChannelSlider extends StatelessWidget {
+  const _ChannelSlider({
+    required this.label,
+    required this.value,
+    required this.max,
+    required this.readout,
+    required this.onChanged,
+    super.key,
+  });
+
+  final String label;
+  final double value;
+  final double max;
+  final String readout;
+  final ValueChanged<double> onChanged;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      SizedBox(
+        width: 36,
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        ),
+      ),
+      Expanded(
+        child: Slider(
+          value: value.clamp(0, max),
+          max: max,
+          label: '$label $readout',
+          semanticFormatterCallback: (_) => '$label $readout',
+          onChanged: onChanged,
+        ),
+      ),
+      SizedBox(
+        width: 44,
+        child: Text(
+          readout,
+          textAlign: TextAlign.end,
+          style: const TextStyle(fontSize: 12, fontFeatures: [
+            FontFeature.tabularFigures(),
+          ]),
+        ),
+      ),
+    ],
+  );
+}
+
 final class DrawingColorPalette extends StatelessWidget {
   const DrawingColorPalette({
     required this.value,
@@ -61,6 +155,8 @@ final class DrawingColorPalette extends StatelessWidget {
                   ),
                 ],
               ),
+              const SizedBox(height: 12),
+              _ChannelSliders(value: value, onChanged: onChanged),
               const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
