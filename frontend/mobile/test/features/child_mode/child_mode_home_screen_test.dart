@@ -310,32 +310,34 @@ void main() {
   testWidgets('캐러셀 마지막에서 다음은 BASE로 순환하고 표시·indicator·저장을 동기화한다', (
     tester,
   ) async {
+    // "끝 → 처음" 순환을 보려면 마지막 코스튬에서 시작해야 한다. 코스튬이 늘어도
+    // 전제가 유지되도록 목록의 마지막·첫 항목으로 기대값을 만든다(S15P11B209-866).
+    final last = DodamCostume.values.last;
+    final first = DodamCostume.values.first;
     final selections = <(int, String)>[];
     await _pumpCarouselHome(
       tester,
       child: _childWith(
         childId: 7,
         nickname: '도담',
-        preferredCharacter: 'OCTOPUS',
+        preferredCharacter: last.code,
       ),
       onCharacterSelected: (childId, code) async {
         selections.add((childId, code));
         return true;
       },
     );
-    _expectCurrentCostume(tester, DodamCostume.octopus);
+    _expectCurrentCostume(tester, last);
 
     await tester.tap(find.byKey(const ValueKey('costume-next')));
     await tester.pumpAndSettle();
-    _expectCurrentCostume(tester, DodamCostume.base);
+    _expectCurrentCostume(tester, first);
     await tester.pump(const Duration(milliseconds: 700));
 
-    expect(selections, [(7, 'BASE')]);
+    expect(selections, [(7, first.code)]);
   });
 
-  testWidgets('캐러셀 첫 항목에서 이전은 OCTOPUS로 순환하며 endpoint 화살표는 활성이다', (
-    tester,
-  ) async {
+  testWidgets('캐러셀 첫 항목에서 이전은 마지막 친구로 순환하며 endpoint 화살표는 활성이다', (tester) async {
     await _pumpCarouselHome(tester);
 
     final previous = tester.getSemantics(
@@ -355,7 +357,8 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('costume-prev')));
     await tester.pumpAndSettle();
-    _expectCurrentCostume(tester, DodamCostume.octopus);
+    // 첫 항목에서 이전은 목록의 마지막으로 감싸 돈다(S15P11B209-866 이후 PRINCE).
+    _expectCurrentCostume(tester, DodamCostume.values.last);
 
     final endpointNext = tester.getSemantics(
       find.byKey(const ValueKey('costume-next')),
@@ -373,14 +376,19 @@ void main() {
       },
     );
 
-    for (var i = 0; i < 6; i++) {
+    // 코스튬 수보다 많이 눌러야 modulo 순환을 검증한다. 개수를 하드코딩하지 않고
+    // 목록 길이에서 계산한다(S15P11B209-866).
+    final count = DodamCostume.values.length;
+    final taps = count + 2;
+    for (var i = 0; i < taps; i++) {
       await tester.tap(find.byKey(const ValueKey('costume-next')));
     }
     await tester.pumpAndSettle();
-    _expectCurrentCostume(tester, DodamCostume.dino);
+    final expected = DodamCostume.values[taps % count];
+    _expectCurrentCostume(tester, expected);
     await tester.pump(const Duration(milliseconds: 700));
 
-    expect(selections, ['DINO']);
+    expect(selections, [expected.code]);
   });
 
   testWidgets('캐릭터 수보다 많은 이전 탭과 좌우 교차 탭도 마지막 사용자 의도를 유지한다', (tester) async {
@@ -393,17 +401,23 @@ void main() {
       },
     );
 
-    for (var i = 0; i < 5; i++) {
+    // 코스튬 수보다 많은 prev 뒤에 좌우를 교차한다. 기대값은 시작 index 0에서
+    // 실제 이동 횟수를 합산해 계산한다(S15P11B209-866).
+    final count = DodamCostume.values.length;
+    final prevTaps = count + 1;
+    for (var i = 0; i < prevTaps; i++) {
       await tester.tap(find.byKey(const ValueKey('costume-prev')));
     }
     await tester.tap(find.byKey(const ValueKey('costume-next')));
     await tester.tap(find.byKey(const ValueKey('costume-prev')));
     await tester.tap(find.byKey(const ValueKey('costume-prev')));
     await tester.pumpAndSettle();
-    _expectCurrentCostume(tester, DodamCostume.dino);
+    final net = -prevTaps + 1 - 2;
+    final expected = DodamCostume.values[((net % count) + count) % count];
+    _expectCurrentCostume(tester, expected);
     await tester.pump(const Duration(milliseconds: 700));
 
-    expect(selections, ['DINO']);
+    expect(selections, [expected.code]);
   });
 
   testWidgets('한 바퀴 돌아 확정 캐릭터로 복귀하면 동일 PATCH를 만들지 않는다', (tester) async {
@@ -910,14 +924,16 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
     await tester.pumpAndSettle();
 
+    // 첫 항목에서 이전은 목록의 마지막으로 감싸 돈다(S15P11B209-866).
+    final wrapped = DodamCostume.values.last;
     await tester.tap(find.byKey(const ValueKey('costume-prev')));
     await tester.pump(const Duration(seconds: 5));
-    _expectCurrentCostume(tester, DodamCostume.octopus);
+    _expectCurrentCostume(tester, wrapped);
     expect(patches, isEmpty);
-    expect(find.text('문어 도담이로 할래!'), findsOneWidget);
+    expect(find.text('${wrapped.label}로 할래!'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
     await tester.pumpAndSettle();
-    expect(patches, ['OCTOPUS']);
+    expect(patches, [wrapped.code]);
     expect(store.marked, [7]);
 
     final swipeStore = _FakeIntroStore();
@@ -2508,17 +2524,19 @@ void main() {
         },
       );
 
+      // 첫 항목에서 이전은 목록의 마지막으로 감싸 돈다(S15P11B209-866).
+      final wrapped = DodamCostume.values.last;
       await tester.tap(find.byKey(const ValueKey('costume-prev')));
       await tester.pump();
 
       expect(find.text('마음에 드는 도담이를 골라봐!'), findsOneWidget);
-      _expectCurrentCostume(tester, DodamCostume.octopus);
+      _expectCurrentCostume(tester, wrapped);
       await tester.pump(const Duration(seconds: 5));
       expect(patches, isEmpty);
 
       await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
       await tester.pumpAndSettle();
-      expect(patches, ['OCTOPUS']);
+      expect(patches, [wrapped.code]);
     });
 
     testWidgets('swipe 실제 동작도 조작으로 인정한다', (tester) async {

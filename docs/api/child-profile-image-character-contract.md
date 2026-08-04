@@ -73,14 +73,19 @@ Content-Type: multipart/form-data
 
 ## 4. 캐릭터 코드 계약
 
-`preferredCharacter`의 허용값은 다음 네 가지다.
+`preferredCharacter`의 허용값은 다음 일곱 가지다.
 
-| 코드 | 의미 |
-| --- | --- |
-| `BASE` | 기본 도담이 |
-| `PRINCESS` | 공주 캐릭터 |
-| `DINO` | 공룡 캐릭터 |
-| `OCTOPUS` | 문어 캐릭터 |
+| 코드 | 표시명 | Flutter asset |
+| --- | --- | --- |
+| `BASE` | 도담이 | `assets/characters/costumes/dodam_base.png` |
+| `PRINCESS` | 공주 도담이 | `assets/characters/costumes/dodam_princess.png` |
+| `DINO` | 공룡 도담이 | `assets/characters/costumes/dodam_dino.png` |
+| `OCTOPUS` | 문어 도담이 | `assets/characters/costumes/dodam_octopus.png` |
+| `EXPLORER` | 탐험가 도담이 | `assets/characters/costumes/dodami_explorer_profile.png` |
+| `RIBBON` | 리본 도담이 | `assets/characters/costumes/dodami_ribbon_profile.png` |
+| `PRINCE` | 왕자 도담이 | `assets/characters/costumes/dodami_prince_profile.png` |
+
+`EXPLORER`·`RIBBON`·`PRINCE`는 `S15P11B209-866`에서 추가했다. 코드는 캐릭터 외형만 가리키며 성별·연령·진단 의미를 갖지 않는다.
 
 `POST /api/v1/children`에서는 생략 또는 `null`을 허용한다. `PATCH /api/v1/children/{childId}`에서는 필드 생략 시 기존 값을 유지하고 명시적 `null`이면 선택을 해제한다. 허용 목록 밖의 문자열은 HTTP 400으로 거부한다.
 
@@ -98,3 +103,4 @@ Content-Type: multipart/form-data
 - `S15P11B209-755`: 프로필 이미지 업로드 API
 - `S15P11B209-756`: 아동 등록·수정 이미지 연결 및 조회
 - `S15P11B209-757`: 캐릭터 코드·표시 우선순위
+- `S15P11B209-866`: 캐릭터 선택 캐러셀 신규 도담이 3종 추가

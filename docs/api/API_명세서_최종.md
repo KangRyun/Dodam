@@ -560,7 +560,7 @@ PDF/JPEG/PNG 중 같은 형식이어야 하며 실제 Byte 기준 최대 크기�
 | `nickname` | string | O | 1~50자, 실명 대신 별칭 허용 |
 | `birthDate` | date | O | 요청일 기준 만 4~12세 |
 | `relationshipType` | string | O | `MOTHER`, `FATHER`, `GRANDPARENT`, `GUARDIAN`, `OTHER` |
-| `preferredCharacter` | string | X | `BASE`, `PRINCESS`, `DINO`, `OCTOPUS` |
+| `preferredCharacter` | string | X | `BASE`, `PRINCESS`, `DINO`, `OCTOPUS`, `EXPLORER`, `RIBBON`, `PRINCE` |
 | `questionDifficulty` | `QuestionDifficulty` | O | 연령 기본값을 제안하되 보호자가 변경 가능 |
 | `responseModes` | string[] | O | `VOICE`, `EMOJI`, `COLOR`, `PICTURE`, `TEXT` 중 1개 이상 |
 | `profileImageFileId` | string | X | 사전 업로드 파일 식별자 |
