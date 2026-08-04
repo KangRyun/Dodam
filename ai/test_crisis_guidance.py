@@ -21,15 +21,31 @@ class GuidanceMappingTest(unittest.TestCase):
         self.assertEqual(alert.severity, cg.SEVERITY_HIGH)
         self.assertEqual(alert.reason_code, cd.SELF_HARM_RISK)
         contacts = [r.contact for r in alert.resources]
-        self.assertIn("1393", contacts)  # 자살예방상담전화
+        self.assertIn("109", contacts)  # 자살예방 상담전화(2024-01 통합)
 
     def test_abuse_is_high_with_child_protection_line(self):
         alert = cg.guidance_for(cd.ABUSE_DISCLOSURE)
         self.assertIsNotNone(alert)
         self.assertEqual(alert.severity, cg.SEVERITY_HIGH)
         contacts = [r.contact for r in alert.resources]
-        self.assertIn("1577-1391", contacts)  # 아동보호전문기관
-        self.assertIn("112", contacts)  # 긴급 신고
+        self.assertIn("112", contacts)  # 아동학대 신고·상담(112로 일원화)
+
+    def test_no_discontinued_number_is_offered(self):
+        """폐지된 번호가 어느 안내에도 남아 있으면 안 된다 (S15P11B209-853).
+
+        1393(→109 통합)·1577-1391(폐지)은 걸어도 연결되지 않는다. 위기 안내에 죽은 번호가
+        실리면 도움이 아니라 해가 되므로, 개별 케이스가 아니라 전체를 훑어 막는다.
+        """
+        dead = {"1393", "1577-1391", "15771391"}
+        for code in (cd.SELF_HARM_RISK, cd.ABUSE_DISCLOSURE, cd.CRISIS_INTENT):
+            alert = cg.guidance_for(code)
+            with self.subTest(code=code):
+                for resource in alert.resources:
+                    self.assertNotIn(resource.contact.replace(" ", ""), dead)
+                # 안내 문장에 번호를 직접 적은 경우까지 훑는다.
+                text = " ".join([alert.message, *alert.action_steps])
+                for number in dead:
+                    self.assertNotIn(number, text)
 
     def test_crisis_intent_is_elevated(self):
         alert = cg.guidance_for(cd.CRISIS_INTENT)

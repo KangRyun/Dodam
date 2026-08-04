@@ -60,12 +60,23 @@ class GuardianAlert:
     disclaimer: str = DISCLAIMER
 
 
-# 자주 쓰는 공식 상담·신고 자원(2026 기준 국내 대표 번호).
-_R_SUICIDE = CrisisResource("자살예방상담전화", "1393", "24시간 무료 상담")
+# 공식 상담·신고 자원.
+#
+# ⚠️ 번호는 통폐합으로 바뀐다. 여기 값은 아래 '확인일' 기준이며, 고칠 때는 기관 공식 안내에서
+#    자료 단위로 다시 확인하고 확인일·출처를 함께 갱신한다. "예전에 맞았다"는 근거가 아니다
+#    (rag-corpus-policy.md 의 licenseVerifiedAt 과 같은 취지).
+#    위기 안내에 죽은 번호가 실리면 그 안내는 도움이 아니라 해가 된다.
+#
+# 최종 확인: 2026-08-04 (S15P11B209-853)
+#   - 자살예방 109: 2024-01-01 자 1393 등 8개 상담전화를 통합. 보건복지부 보도자료
+#     https://www.mohw.go.kr/board.es?mid=a10503010100&bid=0027&act=view&list_no=1479607
+#   - 정신건강 1577-0199 · 청소년 1388: 109 통합 대상이 아니며 각 영역에서 그대로 운영.
+#   - 아동학대 신고 112: 아동학대 신고 창구가 112로 일원화됐다(아동권리보장원 공지).
+#     구 중앙아동보호전문기관 대표번호 1577-1391 은 폐지돼 더 쓰지 않는다.
+_R_SUICIDE = CrisisResource("자살예방 상담전화", "109", "24시간 무료 상담")
 _R_MENTAL = CrisisResource("정신건강상담전화", "1577-0199", "24시간 정신건강 위기 상담")
 _R_YOUTH = CrisisResource("청소년상담전화", "1388", "청소년·보호자 상담")
-_R_CHILD_PROTECT = CrisisResource("아동보호전문기관", "1577-1391", "아동학대 상담·지원")
-_R_REPORT_112 = CrisisResource("아동학대 신고", "112", "긴급 시 즉시 신고")
+_R_REPORT_112 = CrisisResource("아동학대 신고", "112", "24시간 신고·상담")
 _R_WELFARE = CrisisResource("보건복지상담센터", "129", "복지·위기 지원 안내")
 
 
@@ -100,9 +111,9 @@ _GUIDANCE: dict[str, GuardianAlert] = {
         action_steps=[
             "아이가 안전한 곳에 있는지 먼저 확인하고 안심시켜 주세요.",
             "이야기해 줘서 고맙다고 말하고, 아이의 말을 끝까지 들어주세요.",
-            "안전이 우려되면 아동보호전문기관에 상담하거나 긴급 시 112에 신고해 주세요.",
+            "안전이 우려되면 112에 알려 주세요. 아동학대 신고·상담은 112에서 24시간 받아요.",
         ],
-        resources=[_R_CHILD_PROTECT, _R_REPORT_112, _R_WELFARE],
+        resources=[_R_REPORT_112, _R_WELFARE, _R_YOUTH],
     ),
     crisis_detection.CRISIS_INTENT: GuardianAlert(
         reason_code=crisis_detection.CRISIS_INTENT,
