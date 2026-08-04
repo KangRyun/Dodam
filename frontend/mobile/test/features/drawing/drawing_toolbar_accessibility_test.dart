@@ -169,7 +169,7 @@ void main() {
           find.bySemanticsLabel('빠른 색상 8'),
         );
         expect(selectedSemantics.flagsCollection.isSelected, Tristate.isTrue);
-        expect(tester.getSize(ordered[2]), const Size(48, 48));
+        expect(tester.getSize(ordered[2]), const Size(32, 32)); // 굵기 미리보기는 팔레트 버튼 자리를 내주려고 작게 둔다.
       },
     );
 
@@ -577,7 +577,8 @@ void main() {
         find.byKey(const ValueKey('drawing-crayon-frame-spirals')),
       );
 
-      expect(exterior.color, AppColors.canvasWarm);
+      // 테두리 밖은 화면 배경이 그대로 보여야 한다.
+      expect(exterior.color, Colors.transparent);
       expect(document.color, Colors.white);
       expect(
         (frame.image as AssetImage).assetName,

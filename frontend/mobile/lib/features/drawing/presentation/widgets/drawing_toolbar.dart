@@ -268,7 +268,7 @@ final class DrawingToolbar extends StatelessWidget {
         const SizedBox(width: 8),
         SizedBox(
           key: const ValueKey('drawing-thickness-slider'),
-          width: 144,
+          width: 116,
           height: 48,
           child: Semantics(
             label: '선 굵기',
@@ -301,9 +301,11 @@ final class DrawingToolbar extends StatelessWidget {
             onPressed: () => onWidthChanged(width),
           ),
         const SizedBox(width: 8),
+        // 지금 굵기와 색은 팔레트 버튼이 함께 보여 준다. 따로 미리보기 점을
+        // 두면 툴바가 넘쳐 팔레트 버튼이 화면 밖으로 밀린다.
         SizedBox.square(
           key: const ValueKey('drawing-thickness-preview'),
-          dimension: 48,
+          dimension: 32,
           child: Center(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -311,11 +313,11 @@ final class DrawingToolbar extends StatelessWidget {
                 shape: BoxShape.circle,
                 border: Border.all(color: AppColors.canvasInk),
               ),
-              child: SizedBox.square(dimension: toolState.width.clamp(4, 32)),
+              child: SizedBox.square(dimension: toolState.width.clamp(4, 24)),
             ),
           ),
         ),
-        const SizedBox(width: 8),
+        const SizedBox(width: 4),
         CompositedTransformTarget(
           link: paletteAnchorLink,
           child: DrawingToolButton(
@@ -495,7 +497,7 @@ final class _ThicknessPresetButton extends StatelessWidget {
     onTap: onPressed,
     excludeSemantics: true,
     child: SizedBox.square(
-      dimension: 48,
+      dimension: 44,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
