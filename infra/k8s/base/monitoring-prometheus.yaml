@@ -218,7 +218,38 @@ data:
               summary: "푸시 일시 실패율 30% 초과 ({{ $value | humanizePercentage }})"
               description: >-
                 FCM 연결·자격증명(fcm-service-account)·쿼터를 확인할 것.
-                지표가 아예 없다면 backend 가 발송 자체를 못 하는 상태다(§5.1 PENDING 적체 확인).
+                지표가 아예 없다면 backend 가 발송 자체를 못 하는 상태다(아래 PushSendingDisabled 참조).
+
+          # ★ 이 룰이 없어서 운영 푸시가 몇 주 동안 0건이었다 (S15P11B209-774, 2026-08-04 해소).
+          #   619(compose 기준 시크릿 구성)가 완료로 닫힌 채 360 k3s 컷오버 때 넘어오지 않았는데,
+          #   fcm 볼륨이 optional: true 라 **파드는 정상 기동하고 마운트만 조용히 생략**됐다.
+          #   알림함 행은 계속 생성되니 화면상 멀쩡해 보였고, 헬스체크도 드리프트 점검도 못 잡았다
+          #   (git 에 없는 out-of-band 시크릿이라 "빠졌다"고 판정할 근거가 없다).
+          #   결국 이 게이지 하나가 유일한 관측 지점인데 아무도 보고 있지 않았다.
+          #
+          # expr 은 max 다 — min 이 아니다.
+          #   잡으려는 것은 "설정 누락으로 **모든** 파드가 못 보내는 상태"다. 롤링 배포 중에는
+          #   신·구 파드가 잠깐 섞이는데, min 을 쓰면 그때마다 오탐한다.
+          #   대가: 일부 파드만 꺼진 상태는 못 잡는다. 그건 설정이 파드별로 다를 때뿐이고
+          #   (Secret 은 Deployment 단위라 정상 경로에선 생기지 않는다) 그때는 발송 실패율
+          #   룰이 먼저 운다.
+          # 지표가 **없는** 경우(backend 다운·스크레이프 실패)는 여기서 안 잡힌다 — 비교식은
+          #   샘플이 없으면 발동하지 않는다. 그건 backend 가용성 룰 소관이다.
+          - alert: PushSendingDisabled
+            expr: max(dodam_push_sending_enabled) == 0
+            for: 10m
+            labels: { severity: critical }
+            annotations:
+              summary: "🔴 푸시 발송이 꺼져 있다 — 알림함만 쌓이고 기기로는 안 나간다"
+              description: >-
+                backend 가 NoopPushSender 로 서 있다. 알림 행은 정상 생성되지만 deliveryStatus 가
+                PENDING 에 머물고 기기로는 한 건도 가지 않는다.
+                원인은 둘 중 하나다 — (1) dodam-secrets 의 APP_PUSH_FCM_ENABLED 가 true 가 아니다,
+                (2) Secret dodam-fcm 이 없거나 키 이름이 fcm-service-account.json 이 아니라
+                /run/secrets 에 파일이 안 생겼다.
+                기동 로그의 "FCM 발송" 라인이 INFO 면 (1), ERROR 면 (2) 다.
+                조치 절차: docs/인프라/푸시-실기기-검증.md 7절.
+                ⚠️ 설정을 고쳐도 이미 PENDING 인 알림은 소급 발송되지 않는다.
 
   backup.yml: |
     # 백업 경보 (S15P11B209-733)
