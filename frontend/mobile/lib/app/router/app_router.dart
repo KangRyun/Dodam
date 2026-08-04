@@ -16,6 +16,7 @@ import '../../features/child/presentation/screens/child_registration_screen.dart
 import '../../features/community/presentation/screens/community_webview_screen.dart';
 import '../../features/drawing/application/drawing_session_start_controller.dart';
 import '../../features/drawing/data/dto/drawing_dtos.dart';
+import '../../features/drawing/domain/pending_htp_photo.dart';
 import '../../features/drawing/domain/repositories/drawing_repository.dart';
 import '../../features/drawing/presentation/screens/drawing_activity_selection_screen.dart';
 import '../../features/drawing/presentation/screens/input_method_select_screen.dart';
@@ -86,6 +87,7 @@ abstract final class AppRouter {
     int? basisAnalysisId,
     bool insideShell = false,
     bool htpPhotoUploadEnabled = false,
+    PendingHtpPhotoStore? pendingHtpPhotoStore,
   }) {
     final location = settings.name ?? AppRoutes.guardianHome;
     final segments = Uri.tryParse(location)?.pathSegments ?? const <String>[];
@@ -353,6 +355,7 @@ abstract final class AppRouter {
           drawingRepository: drawingRepository,
           completionSnapshotProvider: drawingCompletionSnapshotProvider,
           htpPhotoUploadEnabled: htpPhotoUploadEnabled,
+          pendingHtpPhotoStore: pendingHtpPhotoStore,
           // 아동이 고른 캐릭터를 그 아이의 preferredCharacter로 저장해 프로필
           // 이미지에 반영한다(S15P11B209-505).
           onCharacterSelected: childController.updateChildCharacter,
@@ -387,6 +390,7 @@ abstract final class AppRouter {
                   .initialActivityCode,
           completionSnapshotProvider: drawingCompletionSnapshotProvider,
           htpPhotoUploadEnabled: htpPhotoUploadEnabled,
+          pendingHtpPhotoStore: pendingHtpPhotoStore,
         ),
       ['child', final childId, 'activity', 'input-method']
           when _hasChildContext(childController, childId) &&

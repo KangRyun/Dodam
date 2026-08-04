@@ -5,7 +5,9 @@ import '../../../../../app/router/app_routes.dart';
 import '../../../../../design_system/design_system.dart';
 import '../../application/drawing_session_start_controller.dart';
 import '../../data/dto/drawing_dtos.dart';
+import '../../domain/pending_htp_photo.dart';
 import '../../domain/repositories/drawing_repository.dart';
+import 'htp_photo_precapture_screen.dart';
 import 'input_method_select_screen.dart';
 
 enum _ExistingActivityChoice { resume, startNew }
@@ -19,6 +21,7 @@ class DrawingActivitySelectionScreen extends StatefulWidget {
     this.initialActivityCode,
     this.completionSnapshotProvider,
     this.htpPhotoUploadEnabled = false,
+    this.pendingHtpPhotoStore,
     super.key,
   });
 
@@ -28,6 +31,10 @@ class DrawingActivitySelectionScreen extends StatefulWidget {
   final String? initialActivityCode;
   final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
   final bool htpPhotoUploadEnabled;
+
+  /// HTP 선촬영 사진 보관 저장소(S15P11B209-872). 주입하면 "사진으로
+  /// 시작하기"가 집·나무·사람을 미리 촬영하는 배치 흐름을 시작한다.
+  final PendingHtpPhotoStore? pendingHtpPhotoStore;
 
   @override
   State<DrawingActivitySelectionScreen> createState() =>
@@ -189,30 +196,56 @@ class _DrawingActivitySelectionScreenState
     if (selected == null || _isStarting) return;
     setState(() => _isStarting = true);
     try {
-      final resolution = selected.code == 'HTP'
-          ? await Navigator.of(context).push<DrawingSessionResolution>(
-              MaterialPageRoute(
-                builder: (_) => InputMethodSelectScreen(
-                  childId: widget.childId,
-                  drawingTypeId: selected.drawingTypeId,
-                  title: selected.name,
-                  description: selected.guideText ?? '집·나무·사람을 차례로 그려요.',
-                  icon: Icons.home_work_rounded,
-                  accentColor: AppColors.tangerine,
-                  repository: widget.repository,
-                  replaceActive: _replaceActive,
-                  htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
-                ),
-              ),
-            )
-          : await DrawingSessionStartController(
-              repository: widget.repository,
-            ).createSelectedSession(
+      DrawingSessionResolution? resolution;
+      // 선촬영 배치로 시작하면 HOUSE는 아직 사진 입력 단계라, 홈에서 자동으로
+      // 이어 열어 보관 사진을 자동 업로드하게 한다(S15P11B209-872).
+      var autoStartBatch = false;
+      if (selected.code == 'HTP') {
+        final htpResult = await Navigator.of(context).push<Object?>(
+          MaterialPageRoute(
+            builder: (_) => InputMethodSelectScreen(
               childId: widget.childId,
               drawingTypeId: selected.drawingTypeId,
+              title: selected.name,
+              description: selected.guideText ?? '집·나무·사람을 차례로 그려요.',
+              icon: Icons.home_work_rounded,
+              accentColor: AppColors.tangerine,
+              repository: widget.repository,
               replaceActive: _replaceActive,
-              inputMethod: 'CANVAS',
-            );
+              htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
+              htpPhotoBatchEnabled: widget.pendingHtpPhotoStore != null,
+            ),
+          ),
+        );
+        if (!mounted) return;
+        if (htpResult is HtpPhotoBatchRequested) {
+          final captured = await runHtpPhotoPrecapture(
+            context: context,
+            childId: widget.childId,
+            store: widget.pendingHtpPhotoStore!,
+          );
+          if (!captured || !mounted) return;
+          resolution = await DrawingSessionStartController(
+            repository: widget.repository,
+          ).createHtpAssessment(
+            childId: widget.childId,
+            replaceActive: _replaceActive,
+            inputMethod: 'UPLOAD',
+          );
+          autoStartBatch = true;
+        } else if (htpResult is DrawingSessionResolution) {
+          resolution = htpResult;
+        }
+      } else {
+        resolution = await DrawingSessionStartController(
+          repository: widget.repository,
+        ).createSelectedSession(
+          childId: widget.childId,
+          drawingTypeId: selected.drawingTypeId,
+          replaceActive: _replaceActive,
+          inputMethod: 'CANVAS',
+        );
+      }
       if (!mounted) return;
       if (resolution == null) {
         if (widget.initialActivityCode != null) {
@@ -224,14 +257,13 @@ class _DrawingActivitySelectionScreenState
         AppRoutes.childModeHome(widget.childId.toString()),
         arguments: ChildModeHomeRouteArguments(
           preparedResolution: resolution,
-          // 사진 업로드·완료까지 끝난 세션만 자동으로 이어 연다. 이 세션은 이미
-          // 대화 단계라 홈에 멈추면 대화가 열리지 않고 갇힌다(S15P11B209-834).
-          //
-          // 캔버스 최초 선택은 아직 그림 단계이므로 기존처럼 아이가 홈에서
-          // `그림 그리기`를 눌러 시작한다 — 자동으로 열지 않는다.
+          // 사진 업로드·완료까지 끝난 세션(대화 단계)이나 선촬영 배치의 첫 주제는
+          // 홈에서 자동으로 이어 연다. 캔버스 최초 선택은 아이가 직접 시작한다
+          // (S15P11B209-834·872).
           autoStartPrepared:
-              resolution.isUploadInput &&
-              resolution.target == DrawingResolutionTarget.conversation,
+              autoStartBatch ||
+              (resolution.isUploadInput &&
+                  resolution.target == DrawingResolutionTarget.conversation),
         ),
       );
     } on Object {
