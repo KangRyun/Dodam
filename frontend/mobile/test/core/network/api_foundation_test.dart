@@ -174,10 +174,11 @@ void main() {
     final response = await client.post<Map<String, dynamic>>(
       'conversations/1/answers/voice',
       data: FormData.fromMap({
-        'audio': MultipartFile.fromBytes(
-          const [1, 2, 3],
-          filename: 'voice-answer.m4a',
-        ),
+        'audio': MultipartFile.fromBytes(const [
+          1,
+          2,
+          3,
+        ], filename: 'voice-answer.m4a'),
         'metadata': '{}',
       }),
     );
@@ -206,6 +207,114 @@ void main() {
     );
     expect(refresher.callCount, 1);
   });
+
+  test('업무 401의 제외 코드가 지정되면 Token 재발급과 원 요청 재시도를 하지 않는다', () async {
+    final tokens = _MutableTokenProvider('valid-access-token');
+    final refresher = _TestTokenRefresher(() async => true);
+    final server = _PinMismatchAdapter();
+    final client = ApiClient(
+      environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+      accessTokenProvider: tokens,
+      tokenRefresher: refresher,
+      httpClientAdapter: server,
+    );
+
+    await expectLater(
+      client.post<Map<String, dynamic>>(
+        'users/me/guardian-pin/verifications',
+        data: const {'pin': '0123'},
+        options: Options(
+          extra: const {
+            authRetryExcludedErrorCodesExtraKey: <String>{'PIN_MISMATCH'},
+          },
+        ),
+      ),
+      throwsA(
+        isA<ApiResponseFailure>().having(
+          (failure) => failure.error?.code,
+          'code',
+          'PIN_MISMATCH',
+        ),
+      ),
+    );
+    expect(refresher.callCount, 0);
+    expect(server.requestCount, 1);
+  });
+
+  for (final responseBody in <String>[
+    '{"success":false,"code":"AUTH_401_002"}',
+    '{"success":false}',
+    '{"success":false,"code":123}',
+  ]) {
+    test(
+      'PIN_MISMATCH 제외 요청도 다른·없는·malformed errorCode 401은 기존 재시도한다: $responseBody',
+      () async {
+        final tokens = _MutableTokenProvider('expired-access-token');
+        final refresher = _TestTokenRefresher(() async {
+          tokens.accessToken = 'refreshed-access-token';
+          return true;
+        });
+        final server = _UnauthorizedOnceAdapter(
+          firstResponseBody: responseBody,
+        );
+        final client = ApiClient(
+          environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+          accessTokenProvider: tokens,
+          tokenRefresher: refresher,
+          httpClientAdapter: server,
+        );
+
+        final response = await client.post<Map<String, dynamic>>(
+          'users/me/guardian-pin/verifications',
+          data: const {'pin': '0123'},
+          options: Options(
+            extra: const {
+              authRetryExcludedErrorCodesExtraKey: <String>{'PIN_MISMATCH'},
+            },
+          ),
+        );
+
+        expect(response.data, {'ok': true});
+        expect(refresher.callCount, 1);
+        expect(server.authorizationHeaders.length, 2);
+      },
+    );
+  }
+
+  test('PIN_MISMATCH 실패 표현·URL·header에는 PIN 원문이 없고 POST는 한 번뿐이다', () async {
+    const pin = '7391';
+    final tokens = _MutableTokenProvider('valid-access-token');
+    final refresher = _TestTokenRefresher(() async => true);
+    final server = _PinMismatchAdapter();
+    final client = ApiClient(
+      environment: ApiEnvironment.fromBaseUrl('https://example.test'),
+      accessTokenProvider: tokens,
+      tokenRefresher: refresher,
+      httpClientAdapter: server,
+    );
+    ApiResponseFailure? caught;
+
+    try {
+      await client.post<Map<String, dynamic>>(
+        'users/me/guardian-pin/verifications',
+        data: const {'pin': pin},
+        options: Options(
+          extra: const {
+            authRetryExcludedErrorCodesExtraKey: <String>{'PIN_MISMATCH'},
+          },
+        ),
+      );
+    } on ApiResponseFailure catch (failure) {
+      caught = failure;
+    }
+
+    expect(caught, isNotNull);
+    expect('$caught', isNot(contains(pin)));
+    expect(server.paths.join(), isNot(contains(pin)));
+    expect(server.headerValues.join(), isNot(contains(pin)));
+    expect(refresher.callCount, 0);
+    expect(server.requestCount, 1);
+  });
 }
 
 final class _MutableTokenProvider implements AccessTokenProvider {
@@ -231,6 +340,11 @@ final class _TestTokenRefresher implements TokenRefresher {
 }
 
 final class _UnauthorizedOnceAdapter implements HttpClientAdapter {
+  _UnauthorizedOnceAdapter({
+    this.firstResponseBody = '{"success":false,"code":"AUTH_EXPIRED"}',
+  });
+
+  final String firstResponseBody;
   final List<String?> authorizationHeaders = [];
   int _requestCount = 0;
 
@@ -244,7 +358,7 @@ final class _UnauthorizedOnceAdapter implements HttpClientAdapter {
     _requestCount += 1;
     if (_requestCount == 1) {
       return ResponseBody.fromString(
-        '{"success":false,"code":"AUTH_EXPIRED"}',
+        firstResponseBody,
         401,
         headers: {
           Headers.contentTypeHeader: [Headers.jsonContentType],
@@ -277,6 +391,33 @@ final class _AlwaysUnauthorizedAdapter implements HttpClientAdapter {
       Headers.contentTypeHeader: [Headers.jsonContentType],
     },
   );
+
+  @override
+  void close({bool force = false}) {}
+}
+
+final class _PinMismatchAdapter implements HttpClientAdapter {
+  int requestCount = 0;
+  final List<String> paths = [];
+  final List<Object?> headerValues = [];
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) async {
+    requestCount += 1;
+    paths.add(options.path);
+    headerValues.addAll(options.headers.values);
+    return ResponseBody.fromString(
+      '{"success":false,"code":"PIN_MISMATCH","message":"mismatch","data":null}',
+      401,
+      headers: {
+        Headers.contentTypeHeader: [Headers.jsonContentType],
+      },
+    );
+  }
 
   @override
   void close({bool force = false}) {}

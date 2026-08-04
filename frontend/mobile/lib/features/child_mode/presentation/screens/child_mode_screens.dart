@@ -11,8 +11,12 @@ import '../../../../design_system/design_system.dart';
 import '../../../activity/presentation/screens/activity_screens.dart';
 import '../../../child/data/dto/child_dtos.dart';
 import '../../../drawing/application/drawing_session_start_controller.dart';
+import '../../../drawing/application/photo_upload_validation.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
+import '../../../drawing/domain/pending_htp_photo.dart';
+import '../../../drawing/domain/photo_picker_adapter.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
+import '../../../drawing/presentation/screens/htp_photo_precapture_screen.dart';
 import '../../../drawing/presentation/screens/input_method_select_screen.dart';
 import '../../data/costume_preference_store.dart';
 import '../../data/child_home_intro_store.dart';
@@ -123,11 +127,17 @@ class ChildModeHomeScreen extends StatefulWidget {
     this.onCharacterSelected,
     this.preparedResolution,
     this.autoStartPrepared = false,
+    this.pendingHtpPhotoStore,
     super.key,
   });
 
   final ChildSummaryDto child;
   final DrawingRepository drawingRepository;
+
+  /// HTP 사진을 선촬영해 주제별로 보관·복원하는 저장소(S15P11B209-872).
+  /// 주입하면 사진 3장을 미리 찍어 두고 각 주제 차례에 자동 업로드한다.
+  /// 미주입 시 기존 주제별 촬영 흐름을 그대로 쓴다.
+  final PendingHtpPhotoStore? pendingHtpPhotoStore;
   final Future<BinaryUploadDto?> Function()? completionSnapshotProvider;
 
   /// HTP 사진으로 시작하기 옵션 노출 여부(S15P11B209-702, 기본 꺼짐).
@@ -1200,23 +1210,60 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
       );
       return (resolution: resolution, companion: companion);
     }
-    final resolution = await Navigator.of(context)
-        .push<DrawingSessionResolution>(
-          MaterialPageRoute(
-            builder: (_) => InputMethodSelectScreen(
-              childId: widget.child.childId,
-              drawingTypeId: type.drawingTypeId,
-              title: type.name,
-              description: _descriptionForDrawingType(type),
-              icon: icon,
-              accentColor: accentColor,
-              repository: widget.drawingRepository,
-              replaceActive: replaceActive,
-              htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
-            ),
-          ),
-        );
-    if (resolution == null || !mounted) return null;
+    final result = await Navigator.of(context).push<Object?>(
+      MaterialPageRoute(
+        builder: (_) => InputMethodSelectScreen(
+          childId: widget.child.childId,
+          drawingTypeId: type.drawingTypeId,
+          title: type.name,
+          description: _descriptionForDrawingType(type),
+          icon: icon,
+          accentColor: accentColor,
+          repository: widget.drawingRepository,
+          replaceActive: replaceActive,
+          htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
+          // 선촬영 스토어가 있으면 "사진으로 시작하기"가 3장 선촬영을 요청한다.
+          htpPhotoBatchEnabled: widget.pendingHtpPhotoStore != null,
+        ),
+      ),
+    );
+    if (!mounted) return null;
+    if (result is HtpPhotoBatchRequested) {
+      return _startHtpPhotoBatch(
+        controller: controller,
+        replaceActive: replaceActive,
+        companion: companion,
+      );
+    }
+    if (result is DrawingSessionResolution) {
+      return (resolution: result, companion: companion);
+    }
+    return null;
+  }
+
+  /// HTP "사진으로 시작하기" 선촬영 배치(S15P11B209-872).
+  ///
+  /// 집·나무·사람 사진을 미리 촬영해 스토어에 보관한 뒤, HTP 세션을 UPLOAD로
+  /// 생성한다. 이후 각 주제 차례에 [_restoreUploadInput]이 보관 사진을 자동
+  /// 업로드한다.
+  Future<_PreparedDrawingActivity?> _startHtpPhotoBatch({
+    required DrawingSessionStartController controller,
+    required bool replaceActive,
+    required DodamCostume companion,
+  }) async {
+    final store = widget.pendingHtpPhotoStore;
+    if (store == null) return null;
+    final captured = await runHtpPhotoPrecapture(
+      context: context,
+      childId: widget.child.childId,
+      store: store,
+    );
+    if (!captured || !mounted) return null;
+    final resolution = await controller.createHtpAssessment(
+      childId: widget.child.childId,
+      replaceActive: replaceActive,
+      inputMethod: 'UPLOAD',
+    );
     return (resolution: resolution, companion: companion);
   }
 
@@ -1353,6 +1400,41 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     final (icon, accentColor) = _visualForDrawingType(
       resolution.activityContext.isHtp ? 'HTP' : 'ART_DIARY',
     );
+    final subject = resolution.activityContext.drawingSubject;
+
+    // 선촬영해 보관한 사진이 있으면 카메라를 열지 않고 그 사진을 바로
+    // 올린다(S15P11B209-872). 성공 시 보관분을 지운다.
+    final held = await _loadHeldHtpPhoto(subject);
+    if (held != null) {
+      if (!mounted) return;
+      final advanced = await Navigator.of(context).push<DrawingSessionResolution>(
+        MaterialPageRoute(
+          builder: (_) => InputMethodSelectScreen(
+            childId: widget.child.childId,
+            drawingTypeId: 0,
+            title: _htpSubjectTitle(subject),
+            description: '미리 찍어 둔 사진을 올릴게요.',
+            icon: icon,
+            accentColor: accentColor,
+            repository: widget.drawingRepository,
+            existingDrawingSessionId: resolution.sessionId,
+            restoredActivityContext: resolution.activityContext,
+            pendingPhoto: _heldPhotoToValidated(held),
+          ),
+        ),
+      );
+      if (advanced != null) {
+        await widget.pendingHtpPhotoStore?.remove(
+          widget.child.childId,
+          held.subject,
+        );
+      }
+      if (advanced == null || !mounted) return;
+      await _openResolution(advanced, companion: companion);
+      return;
+    }
+
+    if (!mounted) return;
     final route = AppNavigation.pushNamed<DrawingSessionResolution>(
       context,
       AppRoutes.drawingInputMethod(widget.child.childId.toString()),
@@ -1373,6 +1455,28 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     if (advanced == null || !mounted) return;
     await _openResolution(advanced, companion: companion);
   }
+
+  /// 보관된 HTP 선촬영 사진 중 해당 주제의 것을 찾는다(없으면 null).
+  Future<PendingHtpPhoto?> _loadHeldHtpPhoto(String? subject) async {
+    final store = widget.pendingHtpPhotoStore;
+    if (store == null || subject == null) return null;
+    final held = await store.load(widget.child.childId);
+    for (final photo in held) {
+      if (photo.subject == subject) return photo;
+    }
+    return null;
+  }
+
+  ValidatedPhoto _heldPhotoToValidated(PendingHtpPhoto photo) => ValidatedPhoto(
+    photo: PickedPhoto(
+      bytes: photo.bytes,
+      fileName: photo.fileName,
+      mimeType: photo.mimeType,
+    ),
+    mimeType: photo.mimeType,
+    width: photo.width,
+    height: photo.height,
+  );
 
   /// HOUSE·TREE REFLECTION 재진입 — 다음 주제 입력 방식 선택을 복원한다.
   Future<void> _restoreNextHtpSubjectInputMethod(

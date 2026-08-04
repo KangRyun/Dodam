@@ -29,7 +29,7 @@ public class UpdateChildRequest {
   @Past private LocalDate birthDate;
   private GuardianRelationshipType relationshipType;
 
-  @Pattern(regexp = "BASE|PRINCESS|DINO|OCTOPUS")
+  @Pattern(regexp = "BASE|PRINCESS|DINO|OCTOPUS|EXPLORER|RIBBON|PRINCE")
   private String preferredCharacter;
 
   private QuestionDifficulty questionDifficulty;
