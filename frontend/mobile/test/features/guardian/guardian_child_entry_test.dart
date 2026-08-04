@@ -8,9 +8,31 @@ import 'package:dodam/core/network/api_page.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
 import 'package:dodam/features/child/domain/repositories/child_repository.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
+import 'package:dodam/features/drawing/domain/pending_htp_photo.dart';
 import 'package:dodam/features/drawing/domain/repositories/drawing_repository.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+
+/// 선촬영 배치 진입을 확인하기 위한 인메모리 저장소(path_provider 없이).
+final class _MemoryPendingHtpPhotoStore implements PendingHtpPhotoStore {
+  final Map<String, PendingHtpPhoto> _photos = {};
+
+  @override
+  Future<void> save(int childId, PendingHtpPhoto photo) async =>
+      _photos[photo.subject] = photo;
+
+  @override
+  Future<List<PendingHtpPhoto>> load(int childId) async => [
+    for (final s in const ['HOUSE', 'TREE', 'PERSON']) ?_photos[s],
+  ];
+
+  @override
+  Future<void> remove(int childId, String subject) async =>
+      _photos.remove(subject);
+
+  @override
+  Future<void> clear(int childId) async => _photos.clear();
+}
 
 void main() {
   testWidgets('사이드바 "프로필 전환"은 프로필 선택 화면으로 이동한다', (tester) async {
@@ -31,7 +53,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('guardian-switch-profile')));
     await tester.pumpAndSettle();
 
-    expect(find.text('안녕하세요! 누구로 시작할까요?'), findsOneWidget);
+    expect(find.text('누가 도담이와 함께할까요?'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('profile-selection-settings')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('logout-action')), findsOneWidget);
@@ -160,12 +182,13 @@ void main() {
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
   });
 
-  testWidgets('보호자 HTP는 flag가 켜져 있으면 사진 CTA와 촬영 안내를 연다', (tester) async {
+  testWidgets('보호자 HTP는 flag가 켜지고 스토어가 있으면 사진 선택 시 선촬영을 시작한다', (tester) async {
     final drawingRepository = _TrackingDrawingRepository();
     await _pumpActivitySelect(
       tester,
       drawingRepository,
       htpPhotoUploadEnabled: true,
+      pendingHtpPhotoStore: _MemoryPendingHtpPhotoStore(),
     );
 
     await _pumpUntil(tester, find.byKey(const ValueKey('input-method-photo')));
@@ -173,15 +196,13 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('input-method-photo')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const ValueKey('input-method-camera')), findsOneWidget);
-    expect(find.byKey(const ValueKey('input-method-gallery')), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('input-method-camera')));
-    await tester.pumpAndSettle();
-
+    // 872: 단일 촬영이 아니라 집·나무·사람 선촬영 화면으로 진입한다.
     expect(
-      find.byKey(const ValueKey('camera-guidance-capture')),
+      find.byKey(const ValueKey('htp-precapture-open-camera')),
       findsOneWidget,
     );
+    expect(find.text('집 그림을 찍어요'), findsOneWidget);
+    // 세 장을 찍기 전에는 세션·업로드를 만들지 않는다.
     expect(drawingRepository.htpStartCalls, 0);
     expect(drawingRepository.createCalls, 0);
     expect(drawingRepository.uploadCalls, 0);
@@ -421,12 +442,14 @@ Future<void> _pumpActivitySelect(
   DrawingRepository drawingRepository, {
   Key childKey = const ValueKey('child-3'),
   bool htpPhotoUploadEnabled = false,
+  PendingHtpPhotoStore? pendingHtpPhotoStore,
 }) async {
   await tester.pumpWidget(
     DodamApp(
       childRepository: _FakeChildRepository(children: _children),
       drawingRepository: drawingRepository,
       htpPhotoUploadEnabled: htpPhotoUploadEnabled,
+      pendingHtpPhotoStore: pendingHtpPhotoStore,
     ),
   );
   await tester.pumpAndSettle();

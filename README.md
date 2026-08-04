@@ -638,7 +638,7 @@ X-Guardian-User-Id: 10
     "birthDate": "2019-03-15",
     "age": 7,
     "profileImageUrl": null,
-    "preferredCharacter": "MONGLE",
+    "preferredCharacter": "EXPLORER",
     "questionDifficulty": "LOWER_ELEMENTARY",
     "responseModes": ["VOICE", "EMOJI", "COLOR"],
     "tutorialStatus": "NOT_STARTED",

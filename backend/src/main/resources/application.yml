@@ -111,6 +111,15 @@ app:
       batch-size: ${STORAGE_DELETION_BATCH_SIZE:100}
       max-retry-count: ${STORAGE_DELETION_MAX_RETRY_COUNT:5}
       stuck-after: ${STORAGE_DELETION_STUCK_AFTER:10m}
+  security:
+    guardian-pin:
+      # PIN 해시 앞단에 적용하는 서버 비밀키. 4자리 PIN 은 조합이 10,000개뿐이라 DB 만 유출돼도
+      # 전수 시도가 가능한데, 이 키가 DB 밖에 있으면 해시만으로는 대조할 입력을 만들 수 없다.
+      # 비어 있으면 PIN API 만 503 으로 거부하고 애플리케이션은 정상 부팅한다(S15P11B209-879).
+      pepper: ${GUARDIAN_PIN_PEPPER:}
+      hash-strength: ${GUARDIAN_PIN_HASH_STRENGTH:12}
+      # PIN 초기화를 허용하는 소셜 재인증 창(분). users.last_login_at 이 이 시간 안이어야 초기화된다.
+      reset-reauth-window-minutes: ${GUARDIAN_PIN_RESET_WINDOW_MINUTES:5}
   push:
     device-token:
       # Base64(32바이트) AES-256 키. 운영은 시크릿으로 주입한다.

@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../core/network/auth/access_token_provider.dart';
 import '../core/network/auth/token_refresher.dart';
@@ -15,8 +16,10 @@ import '../features/child/domain/repositories/child_consent_repository.dart';
 import '../features/child/domain/repositories/child_repository.dart';
 import '../features/consent/data/repositories/mock_consent_repository.dart';
 import '../features/consent/domain/repositories/consent_repository.dart';
+import '../features/drawing/data/disk_pending_htp_photo_store.dart';
 import '../features/drawing/data/dto/drawing_dtos.dart';
 import '../features/drawing/data/repositories/mock_drawing_repository.dart';
+import '../features/drawing/domain/pending_htp_photo.dart';
 import '../features/drawing/domain/repositories/drawing_repository.dart';
 import '../features/conversation/conversation.dart';
 import '../features/notification/application/notification_badge_controller.dart';
@@ -75,6 +78,7 @@ class DodamApp extends StatefulWidget {
     this.pushSetup,
     this.notificationInboxRepository,
     this.htpPhotoUploadEnabled = false,
+    this.pendingHtpPhotoStore,
     this.initialRoute = AppRoutes.guardianHome,
     super.key,
   });
@@ -121,6 +125,10 @@ class DodamApp extends StatefulWidget {
 
   /// HTP 사진으로 시작하기 옵션 노출 여부(S15P11B209-702, 기본 꺼짐).
   final bool htpPhotoUploadEnabled;
+
+  /// HTP 선촬영 사진 보관 저장소(S15P11B209-872). 주입하지 않으면 기기 문서
+  /// 디렉터리 기반 디스크 저장소를 쓴다(테스트는 메모리 구현을 주입).
+  final PendingHtpPhotoStore? pendingHtpPhotoStore;
   final String initialRoute;
 
   @override
@@ -128,6 +136,11 @@ class DodamApp extends StatefulWidget {
 }
 
 class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
+  /// HTP 선촬영 사진 저장소. 주입이 없으면 기기 문서 디렉터리 기반 디스크
+  /// 저장소를 쓴다(S15P11B209-872).
+  late final PendingHtpPhotoStore _pendingHtpPhotoStore =
+      widget.pendingHtpPhotoStore ??
+      DiskPendingHtpPhotoStore(rootDirectory: getApplicationDocumentsDirectory);
   late final GuardianChildController _childController;
   late final AuthRepository _authRepository;
   late final SocialLoginService _socialLoginService;
@@ -505,6 +518,7 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       conversationId: widget.conversationId,
       basisAnalysisId: widget.basisAnalysisId,
       htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
+      pendingHtpPhotoStore: _pendingHtpPhotoStore,
     ),
   );
 }

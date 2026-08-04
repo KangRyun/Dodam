@@ -204,79 +204,104 @@ class _CalHead extends StatelessWidget {
   @override
   Widget build(BuildContext context) => SizedBox(
     height: 34,
-    child: Stack(
-      alignment: Alignment.center,
-      children: [
-        // 좌: 연·월(선택)
-        Align(
-          alignment: Alignment.centerLeft,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: onPick,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '$year년 $month월',
-                    style: const TextStyle(
-                      fontSize: 19,
-                      fontWeight: FontWeight.w800,
-                      color: DodamHome.ink,
-                      letterSpacing: -0.2,
-                    ),
+    // 폭에 따라 유연하게 배치한다(옛 Stack은 좁아지면 겹쳤다). 연·월은 최후에
+    // 줄임표로 줄고, 장식용 가운데 제목은 폭이 빠듯하면 숨겨 연·월·활동수를 지킨다.
+    child: LayoutBuilder(
+      builder: (context, c) {
+        final showTitle = c.maxWidth >= 300;
+        return Row(
+          children: [
+            // 좌: 연·월(선택). 폭이 모자라면 제목·여백이 먼저 양보하고,
+            // 그래도 부족하면 연·월 텍스트가 줄임표로 줄어든다.
+            Flexible(
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: onPick,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 4,
+                    vertical: 2,
                   ),
-                  const SizedBox(width: 8),
-                  Container(
-                    width: 22,
-                    height: 22,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      border: Border.all(color: DodamHome.inkFaint, width: 1.6),
-                    ),
-                    child: const Icon(
-                      Icons.keyboard_arrow_down_rounded,
-                      size: 15,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Flexible(
+                        child: Text(
+                          '$year년 $month월',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontSize: 19,
+                            fontWeight: FontWeight.w800,
+                            color: DodamHome.ink,
+                            letterSpacing: -0.2,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        width: 22,
+                        height: 22,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: DodamHome.inkFaint,
+                            width: 1.6,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.keyboard_arrow_down_rounded,
+                          size: 15,
+                          color: DodamHome.inkSoft,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            // 중: 제목 — 남는 공간을 차지하며 좁으면 줄임표. 아주 좁으면 숨긴다.
+            if (showTitle)
+              const Expanded(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    '이번 달 마음 달력',
+                    textAlign: TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w800,
                       color: DodamHome.inkSoft,
                     ),
                   ),
+                ),
+              )
+            else
+              const Spacer(),
+            const SizedBox(width: 8),
+            // 우: 활동 합산
+            Text.rich(
+              TextSpan(
+                text: '활동 ',
+                style: const TextStyle(
+                  fontSize: 12.5,
+                  fontWeight: FontWeight.w800,
+                  color: DodamHome.inkSoft,
+                ),
+                children: [
+                  TextSpan(
+                    text: '$activityCount',
+                    style: const TextStyle(color: DodamHome.pointDeep),
+                  ),
+                  const TextSpan(text: '회'),
                 ],
               ),
             ),
-          ),
-        ),
-        // 중: 제목
-        const Text(
-          '이번 달 마음 달력',
-          style: TextStyle(
-            fontSize: 15,
-            fontWeight: FontWeight.w800,
-            color: DodamHome.inkSoft,
-          ),
-        ),
-        // 우: 활동 합산
-        Align(
-          alignment: Alignment.centerRight,
-          child: Text.rich(
-            TextSpan(
-              text: '활동 ',
-              style: const TextStyle(
-                fontSize: 12.5,
-                fontWeight: FontWeight.w800,
-                color: DodamHome.inkSoft,
-              ),
-              children: [
-                TextSpan(
-                  text: '$activityCount',
-                  style: const TextStyle(color: DodamHome.pointDeep),
-                ),
-                const TextSpan(text: '회'),
-              ],
-            ),
-          ),
-        ),
-      ],
+          ],
+        );
+      },
     ),
   );
 }

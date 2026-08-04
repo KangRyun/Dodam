@@ -6,8 +6,6 @@ import com.ssafy.b209.analysis.dto.DrawingAnalysisStatus;
 import com.ssafy.b209.analysis.repository.DrawingAnalysisRepository;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
-import com.ssafy.b209.drawing.domain.DrawingAsset;
-import com.ssafy.b209.drawing.domain.DrawingAssetType;
 import com.ssafy.b209.drawing.domain.DrawingEmotionCode;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.domain.DrawingSessionEmotion;
@@ -20,7 +18,6 @@ import com.ssafy.b209.drawing.dto.response.HtpDrawingHistoryResponse;
 import com.ssafy.b209.drawing.htp.domain.HtpAssessment;
 import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
 import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
-import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionRepository;
 import com.ssafy.b209.global.exception.BusinessException;
@@ -53,12 +50,11 @@ import org.springframework.transaction.annotation.Transactional;
 public class DrawingSessionHistoryQueryService {
 
   private final DrawingSessionRepository drawingSessionRepository;
-  private final DrawingAssetRepository drawingAssetRepository;
   private final DrawingSessionEmotionRepository drawingSessionEmotionRepository;
   private final DrawingAnalysisRepository drawingAnalysisRepository;
   private final ReportRepository reportRepository;
   private final HtpAssessmentRepository htpAssessmentRepository;
-  private final DrawingAssetFileUrlFactory fileUrlFactory;
+  private final SessionPreviewImageUrlFinder previewImageUrlFinder;
   private final CurrentAuthenticatedUserResolver currentUserResolver;
   private final GuardianResourceAccessValidator accessValidator;
 
@@ -66,31 +62,29 @@ public class DrawingSessionHistoryQueryService {
    * 활동 기록 목록 조립에 사용할 저장소와 인증·권한 경계를 구성한다.
    *
    * @param drawingSessionRepository 세션 페이지 조회 저장소
-   * @param drawingAssetRepository 미리보기 이미지 배치 조회 저장소
    * @param drawingSessionEmotionRepository 선택 감정 배치 조회 저장소
    * @param drawingAnalysisRepository 분석 상태 배치 조회 저장소
    * @param reportRepository 리포트 배치 조회 저장소
-   * @param fileUrlFactory 인증된 그림 파일 조회 URL 생성기
+   * @param htpAssessmentRepository HTP 검사 배치 조회 저장소
+   * @param previewImageUrlFinder 세션 대표 이미지 URL 확정기
    * @param currentUserResolver Access Token에서 현재 보호자 ID를 제공하는 Resolver
    * @param accessValidator 보호자와 아동의 연결 관계를 검증하는 Validator
    */
   public DrawingSessionHistoryQueryService(
       DrawingSessionRepository drawingSessionRepository,
-      DrawingAssetRepository drawingAssetRepository,
       DrawingSessionEmotionRepository drawingSessionEmotionRepository,
       DrawingAnalysisRepository drawingAnalysisRepository,
       ReportRepository reportRepository,
       HtpAssessmentRepository htpAssessmentRepository,
-      DrawingAssetFileUrlFactory fileUrlFactory,
+      SessionPreviewImageUrlFinder previewImageUrlFinder,
       CurrentAuthenticatedUserResolver currentUserResolver,
       GuardianResourceAccessValidator accessValidator) {
     this.drawingSessionRepository = drawingSessionRepository;
-    this.drawingAssetRepository = drawingAssetRepository;
     this.drawingSessionEmotionRepository = drawingSessionEmotionRepository;
     this.drawingAnalysisRepository = drawingAnalysisRepository;
     this.reportRepository = reportRepository;
     this.htpAssessmentRepository = htpAssessmentRepository;
-    this.fileUrlFactory = fileUrlFactory;
+    this.previewImageUrlFinder = previewImageUrlFinder;
     this.currentUserResolver = currentUserResolver;
     this.accessValidator = accessValidator;
   }
@@ -146,7 +140,8 @@ public class DrawingSessionHistoryQueryService {
             .distinct()
             .toList();
 
-    Map<Long, String> thumbnailUrlBySession = loadThumbnailUrls(thumbnailSessionIds);
+    Map<Long, String> thumbnailUrlBySession =
+        previewImageUrlFinder.findAllBySessionId(thumbnailSessionIds);
     Map<Long, List<DrawingEmotionCode>> emotionsBySession = loadSelectedEmotions(sessionIds);
     Map<Long, DrawingAnalysisStatus> analysisStatusBySession = loadLatestAnalysisStatus(sessionIds);
     Map<Long, Report> latestReportBySession = loadLatestReports(sessionIds);
@@ -224,33 +219,6 @@ public class DrawingSessionHistoryQueryService {
                     step.getDrawingSession().getId(),
                     thumbnailUrlBySession.get(step.getDrawingSession().getId())))
         .toList();
-  }
-
-  private Map<Long, String> loadThumbnailUrls(List<Long> sessionIds) {
-    Map<Long, String> bySession = new LinkedHashMap<>();
-    if (sessionIds.isEmpty()) {
-      return bySession;
-    }
-    for (DrawingAsset asset :
-        drawingAssetRepository
-            .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
-                sessionIds, DrawingAssetType.THUMBNAIL)) {
-      bySession.putIfAbsent(
-          asset.getDrawingSession().getId(), fileUrlFactory.create(asset.getId()));
-    }
-    List<Long> sessionsWithoutThumbnail =
-        sessionIds.stream().filter(sessionId -> !bySession.containsKey(sessionId)).toList();
-    if (sessionsWithoutThumbnail.isEmpty()) {
-      return bySession;
-    }
-    for (DrawingAsset asset :
-        drawingAssetRepository
-            .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
-                sessionsWithoutThumbnail, DrawingAssetType.FINAL)) {
-      bySession.putIfAbsent(
-          asset.getDrawingSession().getId(), fileUrlFactory.create(asset.getId()));
-    }
-    return bySession;
   }
 
   private Map<Long, List<DrawingEmotionCode>> loadSelectedEmotions(List<Long> sessionIds) {

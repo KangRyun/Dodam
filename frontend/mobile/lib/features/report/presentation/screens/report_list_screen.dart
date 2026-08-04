@@ -135,32 +135,35 @@ class _ReportListScreenState extends State<ReportListScreen> {
       title: 'AI 관찰 리포트',
       onBack: () => Navigator.of(context).maybePop(),
     ),
+    // 넓은 태블릿에서 리스트가 화면 끝까지 늘어나지 않도록 폭을 가둔다(S15P11B209-787).
     body: SafeArea(
       top: false,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _ReportListHeader(
-            childName: widget.childController.selectedChild?.nickname,
-            period: _period,
-            reportStatus: _reportStatus,
-            drawingTypeCode: _drawingTypeCode,
-            drawingTypes: _knownDrawingTypes,
-            onPeriodChanged: (value) {
-              setState(() => _period = value);
-              _load();
-            },
-            onStatusChanged: (value) {
-              setState(() => _reportStatus = value);
-              _load();
-            },
-            onDrawingTypeChanged: (value) {
-              setState(() => _drawingTypeCode = value);
-              _load();
-            },
-          ),
-          Expanded(child: _body()),
-        ],
+      child: ResponsiveContent(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            _ReportListHeader(
+              childName: widget.childController.selectedChild?.nickname,
+              period: _period,
+              reportStatus: _reportStatus,
+              drawingTypeCode: _drawingTypeCode,
+              drawingTypes: _knownDrawingTypes,
+              onPeriodChanged: (value) {
+                setState(() => _period = value);
+                _load();
+              },
+              onStatusChanged: (value) {
+                setState(() => _reportStatus = value);
+                _load();
+              },
+              onDrawingTypeChanged: (value) {
+                setState(() => _drawingTypeCode = value);
+                _load();
+              },
+            ),
+            Expanded(child: _body()),
+          ],
+        ),
       ),
     ),
   );

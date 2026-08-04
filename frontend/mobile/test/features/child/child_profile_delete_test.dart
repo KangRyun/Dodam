@@ -161,10 +161,7 @@ void main() {
       final controller = _controller(tester);
       expect(controller.status, ChildListStatus.empty);
       expect(controller.selectedChildId, isNull);
-      expect(
-        find.byKey(const ValueKey('child-profile-carousel')),
-        findsNothing,
-      );
+      expect(find.byKey(const ValueKey('child-profile-grid')), findsOneWidget);
       expect(find.byKey(const ValueKey('add-child-profile')), findsOneWidget);
       expect(find.byKey(const ValueKey('child-profile-3')), findsNothing);
     });

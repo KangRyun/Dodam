@@ -21,6 +21,23 @@ enum _StatusFilter { all, done, analyzing, failed }
 
 enum _CardStatus { done, analyzing, failed, draft }
 
+/// 활동 기록 화면 안에서만 사용하는 기록 보관소 팔레트.
+///
+/// 공통 디자인 토큰을 바꾸지 않고, 양피지·월넛·황동의 따뜻한 인상을 이 화면에만
+/// 제한한다. 상태색과 공통 CTA는 기존 [AppColors] 계약을 그대로 사용한다.
+abstract final class _ArchiveColors {
+  static const forest = Color(0xFF214A38);
+  static const forestDeep = Color(0xFF163428);
+  static const forestSoft = Color(0xFFE5EEE7);
+  static const walnut = Color(0xFF70462D);
+  static const walnutSoft = Color(0xFFE8D6BE);
+  static const brass = Color(0xFF9A6C1F);
+  static const brassSoft = Color(0xFFF3E4B9);
+  static const parchment = Color(0xFFFFF9E9);
+  static const parchmentDeep = Color(0xFFF6EBCF);
+  static const parchmentLine = Color(0xFFDCC99E);
+}
+
 /// 활동 기록 목록·상세 화면(시안). 좌측 목록+필터, 우측 선택 활동 프리뷰.
 ///
 /// 사이드바 '기록' 탭에선 [embedded]로 자체 헤더/뒤로가기 없이 콘텐츠만 그려
@@ -46,6 +63,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
   Object? _failure;
   List<ActivitySummaryDto> _activities = const [];
   List<ActivityDrawingTypeDto> _knownTypes = const [];
+  int _totalActivityCount = 0;
   int? _selectedActivityId;
   String? _drawingType;
   _PeriodFilter _period = _PeriodFilter.all;
@@ -128,6 +146,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
       setState(() {
         _status = _HistoryStatus.noChild;
         _activities = const [];
+        _totalActivityCount = 0;
         _selectedActivityId = null;
         _resetPagination();
       });
@@ -136,6 +155,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
     setState(() {
       _status = _HistoryStatus.loading;
       _failure = null;
+      _totalActivityCount = 0;
       _resetPagination();
     });
     try {
@@ -150,6 +170,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
       );
       setState(() {
         _activities = activities;
+        _totalActivityCount = response.totalElements;
         _knownTypes = _mergeKnownTypes(const [], activities);
         _page = 0;
         _hasNext = response.hasNext && activities.isNotEmpty;
@@ -195,6 +216,7 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
           .toList(growable: false);
       setState(() {
         _activities = [..._activities, ...fresh];
+        _totalActivityCount = response.totalElements;
         _knownTypes = _mergeKnownTypes(_knownTypes, fresh);
         _page = nextPage;
         // 빈 페이지거나 새로 추가된 게 없으면 끝으로 본다(중복 응답 방어).
@@ -341,48 +363,63 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
         : Scaffold(backgroundColor: AppColors.canvas, body: content);
   }
 
-  Widget _content(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(
-      AppSpacing.lg,
-      AppSpacing.md,
-      AppSpacing.lg,
-      AppSpacing.lg,
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            if (!widget.embedded) ...[
-              IconButton(
-                key: const ValueKey('activity-history-back'),
-                onPressed: () => Navigator.of(context).maybePop(),
-                icon: const Icon(Icons.arrow_back_rounded),
-                color: AppColors.ink,
-              ),
-              const SizedBox(width: AppSpacing.xs),
-            ],
-            const Expanded(
-              child: Text(
-                '활동 기록',
-                style: TextStyle(
-                  color: AppColors.ink,
-                  fontSize: 24,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
+  // 넓은 태블릿에서 콘텐츠가 화면 끝까지 늘어나지 않도록 폭 상한 적용(홈·리포트와 일관,
+  // S15P11B209-787). 좁은 폭에선 무시돼 개편 레이아웃을 그대로 쓴다.
+  Widget _content(BuildContext context) => ResponsiveContent(
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 600;
+        final showFilters =
+            _status != _HistoryStatus.noChild &&
+            _status != _HistoryStatus.loading;
+        final hero = _ArchiveHero(
+          embedded: widget.embedded,
+          activityCount: _totalActivityCount,
+          showCount:
+              _status == _HistoryStatus.success ||
+              _status == _HistoryStatus.empty,
+          onBack: () => Navigator.of(context).maybePop(),
+        );
+        final padding = EdgeInsets.fromLTRB(
+          compact ? AppSpacing.md : AppSpacing.lg,
+          AppSpacing.md,
+          compact ? AppSpacing.md : AppSpacing.lg,
+          compact ? AppSpacing.md : AppSpacing.lg,
+        );
+        if (constraints.maxHeight < 520) {
+          return Padding(
+            padding: padding,
+            child: ListView(
+              key: const ValueKey('activity-history-low-height-layout'),
+              children: [
+                hero,
+                if (showFilters) ...[
+                  const SizedBox(height: AppSpacing.sm),
+                  _buildFilters(),
+                ],
+                const SizedBox(height: AppSpacing.sm),
+                SizedBox(height: constraints.maxHeight, child: _buildBody()),
+              ],
             ),
-          ],
-        ),
-        const SizedBox(height: AppSpacing.md),
-        if (_status != _HistoryStatus.noChild &&
-            _status != _HistoryStatus.loading)
-          _buildFilters(),
-        if (_status != _HistoryStatus.noChild &&
-            _status != _HistoryStatus.loading)
-          const SizedBox(height: AppSpacing.md),
-        Expanded(child: _buildBody()),
-      ],
+          );
+        }
+        return Padding(
+          padding: padding,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              hero,
+              if (showFilters) ...[
+                const SizedBox(height: AppSpacing.sm),
+                _buildFilters(),
+                const SizedBox(height: AppSpacing.sm),
+              ] else
+                const SizedBox(height: AppSpacing.sm),
+              Expanded(child: _buildBody()),
+            ],
+          ),
+        );
+      },
     ),
   );
 
@@ -444,12 +481,20 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
               setState(() => _selectedActivityId = activityId),
           onReport: _openReport,
         );
+        final selectedChildName = widget.childController.children
+            .where(
+              (child) =>
+                  child.childId == widget.childController.selectedChildId,
+            )
+            .firstOrNull
+            ?.nickname;
         final preview = _PreviewPane(
           activity: _selectedActivity,
+          childName: selectedChildName,
           repository: widget.repository,
           onReport: _openReport,
         );
-        if (constraints.maxWidth < 760) {
+        if (constraints.maxWidth < 780) {
           return ListView(
             key: const ValueKey('activity-history-small-layout'),
             // 좁은 화면에선 이 바깥 ListView가 스크롤러다. 무한 스크롤 감지를
@@ -457,28 +502,24 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
             controller: _scrollController,
             children: [
               list(scrollable: false),
-              const SizedBox(height: AppSpacing.sm),
-              const _DeleteNotice(),
               const SizedBox(height: AppSpacing.lg),
               preview,
+              const SizedBox(height: AppSpacing.md),
             ],
           );
         }
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            Expanded(flex: 5, child: list()),
+            const SizedBox(width: AppSpacing.lg),
             Expanded(
-              flex: 5,
-              child: Column(
-                children: [
-                  Expanded(child: list()),
-                  const SizedBox(height: AppSpacing.sm),
-                  const _DeleteNotice(),
-                ],
+              flex: 4,
+              child: SingleChildScrollView(
+                key: const ValueKey('activity-history-preview-scroll'),
+                child: preview,
               ),
             ),
-            const SizedBox(width: AppSpacing.lg),
-            Expanded(flex: 4, child: preview),
           ],
         );
       },
@@ -486,7 +527,264 @@ class _ActivityHistoryScreenState extends State<ActivityHistoryScreen> {
   };
 }
 
+class _ArchiveHero extends StatelessWidget {
+  const _ArchiveHero({
+    required this.embedded,
+    required this.activityCount,
+    required this.showCount,
+    required this.onBack,
+  });
+
+  final bool embedded;
+  final int activityCount;
+  final bool showCount;
+  final VoidCallback onBack;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final compact = constraints.maxWidth < 700;
+      final characterFrameSize = compact
+          ? (constraints.maxWidth * 0.29).clamp(92.0, 112.0).toDouble()
+          : (constraints.maxWidth * 0.18).clamp(150.0, 176.0).toDouble();
+      final count = Semantics(
+        label: '총 활동 기록 $activityCount개',
+        child: Container(
+          key: const ValueKey('activity-history-count'),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
+          decoration: BoxDecoration(
+            color: _ArchiveColors.brassSoft,
+            borderRadius: BorderRadius.circular(AppRadius.pill),
+            border: Border.all(color: _ArchiveColors.brass),
+          ),
+          child: Text(
+            '$activityCount개의 기록',
+            style: const TextStyle(
+              color: _ArchiveColors.forestDeep,
+              fontSize: 13,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      );
+      return Container(
+        key: const ValueKey('activity-history-archive-hero'),
+        padding: EdgeInsets.fromLTRB(
+          embedded ? AppSpacing.md : AppSpacing.xxl,
+          AppSpacing.sm,
+          AppSpacing.lg,
+          AppSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: _ArchiveColors.forest,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          border: Border.all(color: _ArchiveColors.forestDeep),
+        ),
+        child: Stack(
+          alignment: Alignment.centerLeft,
+          children: [
+            if (!compact)
+              const Positioned(
+                right: AppSpacing.sm,
+                bottom: 0,
+                child: _ArchiveBooksPattern(),
+              ),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: Container(
+                height: 1,
+                color: _ArchiveColors.brass.withValues(alpha: 0.45),
+              ),
+            ),
+            if (!embedded)
+              Positioned(
+                left: -AppSpacing.xs,
+                top: 0,
+                child: IconButton(
+                  key: const ValueKey('activity-history-back'),
+                  onPressed: onBack,
+                  tooltip: '뒤로 가기',
+                  color: Colors.white,
+                  icon: const Icon(Icons.arrow_back_rounded),
+                ),
+              ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                if (!embedded) const SizedBox(width: AppSpacing.xl),
+                _ScribeFrame(size: characterFrameSize),
+                SizedBox(width: compact ? AppSpacing.sm : AppSpacing.lg),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        '보호자 활동 기록',
+                        key: ValueKey('activity-history-eyebrow'),
+                        style: TextStyle(
+                          color: _ArchiveColors.brassSoft,
+                          fontSize: 11,
+                          height: 1.2,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      SizedBox(height: compact ? 3 : AppSpacing.xs),
+                      Semantics(
+                        header: true,
+                        child: Text(
+                          '활동 기록',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: compact ? 23 : 27,
+                            height: 1.2,
+                            fontWeight: FontWeight.w900,
+                          ),
+                        ),
+                      ),
+                      SizedBox(height: compact ? 3 : AppSpacing.xs),
+                      const Text(
+                        '아이의 그림과 이야기를 한 권씩 소중히 모았어요.',
+                        style: TextStyle(
+                          color: Color(0xFFF5EDD8),
+                          fontSize: 14,
+                          height: 1.4,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      if (compact && showCount) ...[
+                        const SizedBox(height: AppSpacing.sm),
+                        count,
+                      ],
+                    ],
+                  ),
+                ),
+                if (!compact && showCount) ...[
+                  const SizedBox(width: AppSpacing.md),
+                  count,
+                ],
+              ],
+            ),
+          ],
+        ),
+      );
+    },
+  );
+}
+
 // ── 필터 ─────────────────────────────────────────────────────────────
+class _ScribeFrame extends StatelessWidget {
+  const _ScribeFrame({required this.size});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const ValueKey('activity-history-scribe-frame'),
+    width: size,
+    height: size,
+    padding: const EdgeInsets.all(5),
+    decoration: BoxDecoration(
+      color: _ArchiveColors.parchment,
+      borderRadius: BorderRadius.circular(25),
+      border: Border.all(color: _ArchiveColors.brass, width: 1.5),
+      boxShadow: [
+        BoxShadow(
+          color: _ArchiveColors.walnut.withValues(alpha: 0.42),
+          offset: const Offset(0, 5),
+          blurRadius: 0,
+        ),
+      ],
+    ),
+    child: DecoratedBox(
+      decoration: BoxDecoration(
+        color: _ArchiveColors.parchmentDeep,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: _ArchiveColors.brass.withValues(alpha: 0.58)),
+      ),
+      child: Padding(
+        // 원본 PNG의 투명 여백을 포함해 실제 캐릭터 도형이 프레임의 약 80%를
+        // 차지하도록 한다. 원본 비율과 알파 채널은 그대로 유지한다.
+        padding: EdgeInsets.all(size * 0.04),
+        child: Image.asset(
+          'assets/characters/dodami_scribe_profile.png',
+          key: const ValueKey('activity-history-scribe'),
+          fit: BoxFit.contain,
+          semanticLabel: '활동 기록을 정리하는 도담이',
+          filterQuality: FilterQuality.high,
+        ),
+      ),
+    ),
+  );
+}
+
+class _ArchiveBooksPattern extends StatelessWidget {
+  const _ArchiveBooksPattern();
+
+  @override
+  Widget build(BuildContext context) => ExcludeSemantics(
+    child: IgnorePointer(
+      child: Opacity(
+        opacity: 0.07,
+        child: SizedBox(
+          key: const ValueKey('activity-history-books-pattern'),
+          width: 224,
+          height: 58,
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: const [
+              _ArchiveBookSpine(width: 28, height: 42, bandOffset: 10),
+              _ArchiveBookSpine(width: 34, height: 55, bandOffset: 35),
+              _ArchiveBookSpine(width: 25, height: 47, bandOffset: 18),
+              _ArchiveBookSpine(width: 31, height: 58, bandOffset: 12),
+              _ArchiveBookSpine(width: 27, height: 45, bandOffset: 29),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _ArchiveBookSpine extends StatelessWidget {
+  const _ArchiveBookSpine({
+    required this.width,
+    required this.height,
+    required this.bandOffset,
+  });
+
+  final double width;
+  final double height;
+  final double bandOffset;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: width,
+    height: height,
+    margin: const EdgeInsets.only(left: 5),
+    decoration: BoxDecoration(
+      color: _ArchiveColors.forestDeep,
+      borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
+      border: Border.all(color: _ArchiveColors.brass, width: 1.5),
+    ),
+    child: Align(
+      alignment: Alignment.topCenter,
+      child: Container(
+        margin: EdgeInsets.only(top: bandOffset),
+        height: 2,
+        color: _ArchiveColors.brass,
+      ),
+    ),
+  );
+}
+
 class _ActivityFilters extends StatelessWidget {
   const _ActivityFilters({
     required this.children,
@@ -512,57 +810,86 @@ class _ActivityFilters extends StatelessWidget {
   final ValueChanged<_StatusFilter> onStatusChanged;
 
   @override
-  Widget build(BuildContext context) => Wrap(
+  Widget build(BuildContext context) => Container(
     key: const ValueKey('activity-history-filters'),
-    spacing: AppSpacing.sm,
-    runSpacing: AppSpacing.sm,
-    children: [
-      _FilterDropdown<int>(
-        key: const ValueKey('activity-child-filter'),
-        label: '아동',
-        value: selectedChildId,
-        items: [for (final child in children) (child.childId, child.nickname)],
-        onChanged: (value) {
-          if (value != null) onChildChanged(value);
-        },
-      ),
-      _FilterDropdown<_PeriodFilter>(
-        key: const ValueKey('activity-period-filter'),
-        label: '기간',
-        value: period,
-        items: const [
-          (_PeriodFilter.all, '전체 기간'),
-          (_PeriodFilter.recent30Days, '최근 30일'),
-        ],
-        onChanged: (value) {
-          if (value != null) onPeriodChanged(value);
-        },
-      ),
-      _FilterDropdown<String?>(
-        key: const ValueKey('activity-type-filter'),
-        label: '유형',
-        value: drawingType,
-        items: [
-          const (null, '전체 활동'),
-          for (final type in drawingTypes) (type.code, type.name),
-        ],
-        onChanged: onDrawingTypeChanged,
-      ),
-      _FilterDropdown<_StatusFilter>(
-        key: const ValueKey('activity-status-filter'),
-        label: '상태',
-        value: statusFilter,
-        items: const [
-          (_StatusFilter.all, '전체 상태'),
-          (_StatusFilter.done, '분석 완료'),
-          (_StatusFilter.analyzing, '분석 중'),
-          (_StatusFilter.failed, '분석 실패'),
-        ],
-        onChanged: (value) {
-          if (value != null) onStatusChanged(value);
-        },
-      ),
-    ],
+    padding: const EdgeInsets.all(AppSpacing.sm),
+    decoration: BoxDecoration(
+      color: _ArchiveColors.parchment,
+      borderRadius: BorderRadius.circular(AppRadius.lg),
+      border: Border.all(color: _ArchiveColors.parchmentLine),
+    ),
+    child: LayoutBuilder(
+      builder: (context, constraints) {
+        const gap = AppSpacing.sm;
+        final columns = constraints.maxWidth >= 720 ? 4 : 2;
+        final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+        return Wrap(
+          spacing: gap,
+          runSpacing: gap,
+          children: [
+            SizedBox(
+              width: width,
+              child: _FilterDropdown<int>(
+                key: const ValueKey('activity-child-filter'),
+                label: '아동',
+                value: selectedChildId,
+                items: [
+                  for (final child in children) (child.childId, child.nickname),
+                ],
+                onChanged: (value) {
+                  if (value != null) onChildChanged(value);
+                },
+              ),
+            ),
+            SizedBox(
+              width: width,
+              child: _FilterDropdown<_PeriodFilter>(
+                key: const ValueKey('activity-period-filter'),
+                label: '기간',
+                value: period,
+                items: const [
+                  (_PeriodFilter.all, '전체 기간'),
+                  (_PeriodFilter.recent30Days, '최근 30일'),
+                ],
+                onChanged: (value) {
+                  if (value != null) onPeriodChanged(value);
+                },
+              ),
+            ),
+            SizedBox(
+              width: width,
+              child: _FilterDropdown<String?>(
+                key: const ValueKey('activity-type-filter'),
+                label: '유형',
+                value: drawingType,
+                items: [
+                  const (null, '전체 활동'),
+                  for (final type in drawingTypes) (type.code, type.name),
+                ],
+                onChanged: onDrawingTypeChanged,
+              ),
+            ),
+            SizedBox(
+              width: width,
+              child: _FilterDropdown<_StatusFilter>(
+                key: const ValueKey('activity-status-filter'),
+                label: '상태',
+                value: statusFilter,
+                items: const [
+                  (_StatusFilter.all, '전체 상태'),
+                  (_StatusFilter.done, '분석 완료'),
+                  (_StatusFilter.analyzing, '분석 중'),
+                  (_StatusFilter.failed, '분석 실패'),
+                ],
+                onChanged: (value) {
+                  if (value != null) onStatusChanged(value);
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    ),
   );
 }
 
@@ -579,30 +906,72 @@ class _FilterDropdown<T> extends StatelessWidget {
   final List<(T, String)> items;
   final ValueChanged<T?> onChanged;
   @override
-  Widget build(BuildContext context) => SizedBox(
-    width: 168,
-    child: DropdownButtonFormField<T>(
-      initialValue: value,
-      isExpanded: true,
-      decoration: InputDecoration(
-        labelText: label,
-        filled: true,
-        fillColor: AppColors.surface,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(AppRadius.md),
+  Widget build(BuildContext context) {
+    final selectedLabel = items
+        .where((item) => item.$1 == value)
+        .firstOrNull
+        ?.$2;
+    return Semantics(
+      key: ValueKey('activity-filter-semantics-$label'),
+      container: true,
+      label: '$label 필터, 현재 ${selectedLabel ?? '선택 안 됨'}',
+      child: DropdownButtonFormField<T>(
+        initialValue: value,
+        isExpanded: true,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(
+            color: _ArchiveColors.forest,
+            fontWeight: FontWeight.w700,
+          ),
+          floatingLabelStyle: const TextStyle(
+            color: _ArchiveColors.forestDeep,
+            fontWeight: FontWeight.w800,
+          ),
+          filled: true,
+          fillColor: _ArchiveColors.parchmentDeep,
+          enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            borderSide: const BorderSide(color: _ArchiveColors.parchmentLine),
+          ),
+          focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            borderSide: const BorderSide(
+              color: _ArchiveColors.forest,
+              width: 2,
+            ),
+          ),
+          contentPadding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
         ),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.sm,
-        ),
+        selectedItemBuilder: (context) => [
+          for (final item in items)
+            Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                item.$2,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: AppColors.ink,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+        ],
+        items: [
+          for (final item in items)
+            DropdownMenuItem<T>(
+              value: item.$1,
+              child: Text(item.$2, overflow: TextOverflow.ellipsis),
+            ),
+        ],
+        onChanged: onChanged,
       ),
-      items: [
-        for (final item in items)
-          DropdownMenuItem<T>(value: item.$1, child: Text(item.$2)),
-      ],
-      onChanged: onChanged,
-    ),
-  );
+    );
+  }
 }
 
 // ── 목록 ─────────────────────────────────────────────────────────────
@@ -640,7 +1009,7 @@ class _ActivityListView extends StatelessWidget {
       );
     }
     final hasFooter = footer != null;
-    return ListView.separated(
+    final list = ListView.separated(
       key: const ValueKey('activity-history-list'),
       controller: scrollable ? controller : null,
       shrinkWrap: !scrollable,
@@ -660,7 +1029,44 @@ class _ActivityListView extends StatelessWidget {
         );
       },
     );
+    return Column(
+      mainAxisSize: scrollable ? MainAxisSize.max : MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const _ArchiveSectionTitle(
+          icon: Icons.auto_stories_outlined,
+          title: '기록 서가',
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        if (scrollable) Expanded(child: list) else list,
+      ],
+    );
   }
+}
+
+class _ArchiveSectionTitle extends StatelessWidget {
+  const _ArchiveSectionTitle({required this.icon, required this.title});
+
+  final IconData icon;
+  final String title;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    children: [
+      Icon(icon, color: _ArchiveColors.brass, size: 22),
+      const SizedBox(width: AppSpacing.xs),
+      Text(
+        title,
+        style: const TextStyle(
+          color: _ArchiveColors.forestDeep,
+          fontSize: 17,
+          fontWeight: FontWeight.w900,
+        ),
+      ),
+      const SizedBox(width: AppSpacing.sm),
+      const Expanded(child: Divider(color: _ArchiveColors.parchmentLine)),
+    ],
+  );
 }
 
 class _ActivityCard extends StatelessWidget {
@@ -680,75 +1086,159 @@ class _ActivityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final status = _cardStatus(activity);
-    return Material(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(AppRadius.lg),
-      child: InkWell(
-        key: ValueKey('activity-${activity.activityId}'),
-        onTap: onTap,
+    final title = activity.title ?? activity.drawingType.name;
+    final reportReady = _reportReady(activity);
+    final semanticLabel = [
+      title,
+      _date(activity.completedAt ?? activity.startedAt),
+      _inputLabel(activity.inputMethod),
+      _cardStatusLabel(status),
+      activity.drawingType.name,
+    ].join(', ');
+    return Semantics(
+      key: ValueKey('activity-semantics-${activity.activityId}'),
+      container: true,
+      explicitChildNodes: true,
+      button: true,
+      selected: selected,
+      label: semanticLabel,
+      child: Material(
+        color: selected
+            ? _ArchiveColors.parchmentDeep
+            : _ArchiveColors.parchment,
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        child: Container(
-          padding: const EdgeInsets.all(AppSpacing.md),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(AppRadius.lg),
-            border: Border.all(
-              color: selected ? AppColors.leaf : AppColors.outline,
-              width: selected ? 2 : 1,
+        child: InkWell(
+          key: ValueKey('activity-${activity.activityId}'),
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(AppRadius.lg),
+              border: Border.all(
+                color: selected
+                    ? _ArchiveColors.forest
+                    : _ArchiveColors.parchmentLine,
+                width: selected ? 2 : 1,
+              ),
             ),
-          ),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              _Thumbnail(
-                url: activity.thumbnailUrl,
-                repository: repository,
-                size: 56,
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      activity.title ?? activity.drawingType.name,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.ink,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      '${_date(activity.completedAt ?? activity.startedAt)} · '
-                      '${_inputLabel(activity.inputMethod)}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: AppColors.inkMuted,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: AppSpacing.sm),
-                    Wrap(
-                      spacing: AppSpacing.xs,
-                      runSpacing: AppSpacing.xs,
-                      children: [
-                        _StatusBadge(status: status),
-                        _TypeBadge(name: activity.drawingType.name),
-                      ],
-                    ),
-                  ],
+            clipBehavior: Clip.antiAlias,
+            child: Stack(
+              children: [
+                Positioned(
+                  left: 0,
+                  top: 0,
+                  bottom: 0,
+                  width: 9,
+                  child: ColoredBox(
+                    key: ValueKey('activity-spine-${activity.activityId}'),
+                    color: _spineColor(activity),
+                  ),
                 ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              _CardAction(
-                status: status,
-                reportReady: _reportReady(activity),
-                onReport: onReport,
-              ),
-            ],
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.md + 9,
+                    AppSpacing.md,
+                    AppSpacing.md,
+                    AppSpacing.md,
+                  ),
+                  child: LayoutBuilder(
+                    builder: (context, constraints) {
+                      final compact = constraints.maxWidth < 500;
+                      final details = Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          _Thumbnail(
+                            url: activity.thumbnailUrl,
+                            repository: repository,
+                            size: compact ? 52 : 60,
+                            semanticLabel: '$title 활동 그림',
+                          ),
+                          const SizedBox(width: AppSpacing.md),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        title,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: _ArchiveColors.forestDeep,
+                                          fontSize: 15,
+                                          height: 1.25,
+                                          fontWeight: FontWeight.w900,
+                                        ),
+                                      ),
+                                    ),
+                                    if (selected) ...[
+                                      const SizedBox(width: AppSpacing.xs),
+                                      const Icon(
+                                        Icons.check_circle_rounded,
+                                        key: ValueKey(
+                                          'activity-selected-indicator',
+                                        ),
+                                        color: _ArchiveColors.forest,
+                                        size: 22,
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  '${_date(activity.completedAt ?? activity.startedAt)} · '
+                                  '${_inputLabel(activity.inputMethod)}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: AppColors.inkMuted,
+                                    fontSize: 12,
+                                    height: 1.35,
+                                  ),
+                                ),
+                                const SizedBox(height: AppSpacing.sm),
+                                Wrap(
+                                  spacing: AppSpacing.xs,
+                                  runSpacing: AppSpacing.xs,
+                                  children: [
+                                    _StatusBadge(status: status),
+                                    _TypeBadge(name: activity.drawingType.name),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      );
+                      if (compact && reportReady) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            details,
+                            const SizedBox(height: AppSpacing.sm),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: _CardAction(onReport: onReport),
+                            ),
+                          ],
+                        );
+                      }
+                      return Row(
+                        children: [
+                          Expanded(child: details),
+                          if (reportReady) ...[
+                            const SizedBox(width: AppSpacing.sm),
+                            _CardAction(onReport: onReport),
+                          ],
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -757,61 +1247,40 @@ class _ActivityCard extends StatelessWidget {
 }
 
 class _CardAction extends StatelessWidget {
-  const _CardAction({
-    required this.status,
-    required this.reportReady,
-    required this.onReport,
-  });
-  final _CardStatus status;
-  final bool reportReady;
+  const _CardAction({required this.onReport});
   final VoidCallback onReport;
 
   @override
-  Widget build(BuildContext context) {
-    final (label, onTap) = switch (status) {
-      _CardStatus.done => ('관찰 리포트 보기', reportReady ? onReport : null),
-      _CardStatus.analyzing => ('관찰 리포트 보기', null),
-      _CardStatus.failed => (
-        '재분석 요청',
-        () => _snack(context, '재분석 요청은 준비 중이에요.'),
+  Widget build(BuildContext context) => TextButton.icon(
+    onPressed: onReport,
+    style: TextButton.styleFrom(
+      foregroundColor: _ArchiveColors.forestDeep,
+      backgroundColor: _ArchiveColors.forestSoft,
+      minimumSize: const Size(AppSizes.minTouchTarget, AppSizes.minTouchTarget),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        side: const BorderSide(color: _ArchiveColors.forest),
       ),
-      _CardStatus.draft => (
-        '이어 그리기',
-        () => _snack(context, '이어 그리기는 준비 중이에요.'),
-      ),
-    };
-    final enabled = onTap != null;
-    return TextButton(
-      onPressed: onTap,
-      style: TextButton.styleFrom(
-        foregroundColor: enabled ? AppColors.leaf : AppColors.inkMuted,
-        backgroundColor: AppColors.surfaceSoft,
-        disabledForegroundColor: AppColors.inkMuted,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(AppRadius.md),
-          side: BorderSide(color: AppColors.outline),
-        ),
-        padding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.sm,
-        ),
-      ),
-      child: Text(
-        label,
-        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
-      ),
-    );
-  }
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
+    ),
+    icon: const Icon(Icons.description_outlined, size: 18),
+    label: const Text(
+      '리포트',
+      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+    ),
+  );
 }
 
 // ── 우측 프리뷰(그림 + 관찰 리포트 보기) ─────────────────────────────
 class _PreviewPane extends StatefulWidget {
   const _PreviewPane({
     required this.activity,
+    required this.childName,
     required this.repository,
     required this.onReport,
   });
   final ActivitySummaryDto? activity;
+  final String? childName;
   final ActivityRepository repository;
   final ValueChanged<ActivitySummaryDto> onReport;
 
@@ -839,107 +1308,207 @@ class _PreviewPaneState extends State<_PreviewPane> {
         ? _drawingIndex.clamp(0, htpDrawings.length - 1)
         : 0;
     final selectedHtpDrawing = hasHtpCarousel ? htpDrawings[safeIndex] : null;
+    final title = activity?.title ?? activity?.drawingType.name;
+    final stageLabel = selectedHtpDrawing == null
+        ? null
+        : _htpSubjectLabel(selectedHtpDrawing.drawingSubject);
+    final imageLabel = activity == null
+        ? null
+        : '${widget.childName ?? '아이'}의 $title${stageLabel == null ? '' : ' $stageLabel'} 그림';
     return Container(
       key: const ValueKey('activity-history-summary'),
-      padding: const EdgeInsets.all(AppSpacing.lg),
       decoration: BoxDecoration(
-        color: AppColors.surface,
+        color: _ArchiveColors.parchment,
         borderRadius: BorderRadius.circular(AppRadius.lg),
-        border: Border.all(color: AppColors.outline),
+        border: Border.all(color: _ArchiveColors.walnut, width: 2),
       ),
+      clipBehavior: Clip.antiAlias,
       child: activity == null
-          ? const AppEmptyView(title: '활동을 선택해 주세요')
+          ? const Padding(
+              padding: EdgeInsets.all(AppSpacing.lg),
+              child: AppEmptyView(title: '활동을 선택해 주세요'),
+            )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  activity.title ?? activity.drawingType.name,
-                  style: const TextStyle(
-                    color: AppColors.ink,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-                const SizedBox(height: AppSpacing.md),
-                AspectRatio(
-                  aspectRatio: 4 / 3,
-                  child: Stack(
-                    alignment: Alignment.center,
+                Container(
+                  color: _ArchiveColors.forest,
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  child: Row(
                     children: [
-                      Positioned.fill(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: AppColors.surfaceSoft,
-                            borderRadius: BorderRadius.circular(AppRadius.lg),
-                            border: Border.all(color: AppColors.outline),
-                          ),
-                          child: _Thumbnail(
-                            url:
-                                selectedHtpDrawing?.thumbnailUrl ??
-                                activity.thumbnailUrl,
-                            repository: widget.repository,
-                            fit: BoxFit.contain,
-                          ),
-                        ),
+                      const Icon(
+                        Icons.menu_book_rounded,
+                        color: _ArchiveColors.brassSoft,
+                        size: 28,
                       ),
-                      if (hasHtpCarousel) ...[
-                        Positioned(
-                          left: AppSpacing.sm,
-                          child: _CarouselButton(
-                            key: const ValueKey('htp-preview-previous'),
-                            icon: Icons.chevron_left_rounded,
-                            enabled: safeIndex > 0,
-                            onPressed: () {
-                              setState(() => _drawingIndex = safeIndex - 1);
-                            },
-                          ),
-                        ),
-                        Positioned(
-                          right: AppSpacing.sm,
-                          child: _CarouselButton(
-                            key: const ValueKey('htp-preview-next'),
-                            icon: Icons.chevron_right_rounded,
-                            enabled: safeIndex < htpDrawings.length - 1,
-                            onPressed: () {
-                              setState(() => _drawingIndex = safeIndex + 1);
-                            },
-                          ),
-                        ),
-                        Positioned(
-                          bottom: AppSpacing.sm,
-                          child: Container(
-                            key: const ValueKey('htp-preview-indicator'),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: AppSpacing.sm,
-                              vertical: 6,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AppColors.ink.withValues(alpha: 0.72),
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              '${_htpSubjectLabel(selectedHtpDrawing!.drawingSubject)} '
-                              '${safeIndex + 1}/${htpDrawings.length}',
-                              style: const TextStyle(
-                                color: Colors.white,
+                      const SizedBox(width: AppSpacing.sm),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              '펼친 기록서',
+                              style: TextStyle(
+                                color: _ArchiveColors.brassSoft,
                                 fontSize: 12,
                                 fontWeight: FontWeight.w800,
                               ),
                             ),
+                            const SizedBox(height: 2),
+                            Text(
+                              title!,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                height: 1.25,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.all(AppSpacing.md),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      const _ArchiveSectionTitle(
+                        icon: Icons.history_edu_rounded,
+                        title: '아이의 그림',
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Container(
+                        key: const ValueKey('activity-history-open-page'),
+                        padding: const EdgeInsets.all(AppSpacing.sm),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFFFDF5),
+                          borderRadius: BorderRadius.circular(AppRadius.md),
+                          border: Border.all(
+                            color: _ArchiveColors.parchmentLine,
+                          ),
+                        ),
+                        child: AspectRatio(
+                          aspectRatio: 4 / 3,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Positioned.fill(
+                                child: _Thumbnail(
+                                  url:
+                                      selectedHtpDrawing?.thumbnailUrl ??
+                                      activity.thumbnailUrl,
+                                  repository: widget.repository,
+                                  fit: BoxFit.contain,
+                                  semanticLabel: imageLabel,
+                                ),
+                              ),
+                              if (hasHtpCarousel) ...[
+                                Positioned(
+                                  left: AppSpacing.xs,
+                                  child: _CarouselButton(
+                                    key: const ValueKey('htp-preview-previous'),
+                                    icon: Icons.chevron_left_rounded,
+                                    enabled: safeIndex > 0,
+                                    onPressed: () {
+                                      setState(
+                                        () => _drawingIndex = safeIndex - 1,
+                                      );
+                                    },
+                                  ),
+                                ),
+                                Positioned(
+                                  right: AppSpacing.xs,
+                                  child: _CarouselButton(
+                                    key: const ValueKey('htp-preview-next'),
+                                    icon: Icons.chevron_right_rounded,
+                                    enabled: safeIndex < htpDrawings.length - 1,
+                                    onPressed: () {
+                                      setState(
+                                        () => _drawingIndex = safeIndex + 1,
+                                      );
+                                    },
+                                  ),
+                                ),
+                                Positioned(
+                                  bottom: AppSpacing.xs,
+                                  child: Container(
+                                    key: const ValueKey(
+                                      'htp-preview-indicator',
+                                    ),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: AppSpacing.sm,
+                                      vertical: 6,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: _ArchiveColors.forestDeep
+                                          .withValues(alpha: 0.88),
+                                      borderRadius: BorderRadius.circular(
+                                        AppRadius.pill,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      '$stageLabel ${safeIndex + 1}/${htpDrawings.length}',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      Wrap(
+                        spacing: AppSpacing.xs,
+                        runSpacing: AppSpacing.xs,
+                        children: [
+                          _StatusBadge(status: _cardStatus(activity)),
+                          _TypeBadge(name: activity.drawingType.name),
+                          _Pill(
+                            label: _date(
+                              activity.completedAt ?? activity.startedAt,
+                            ),
+                            fg: _ArchiveColors.walnut,
+                            bg: _ArchiveColors.walnutSoft,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: AppSpacing.md),
+                      AppButton(
+                        key: const ValueKey('activity-report-cta'),
+                        label: '관찰 리포트 보기',
+                        leading: const Icon(Icons.description_outlined),
+                        onPressed: _reportReady(activity)
+                            ? () => widget.onReport(activity)
+                            : null,
+                      ),
+                      if (!_reportReady(activity)) ...[
+                        const SizedBox(height: AppSpacing.xs),
+                        Text(
+                          _reportUnavailableMessage(activity),
+                          key: const ValueKey(
+                            'activity-report-unavailable-reason',
+                          ),
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: AppColors.inkMuted,
+                            fontSize: 12,
+                            height: 1.4,
                           ),
                         ),
                       ],
                     ],
                   ),
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                AppButton(
-                  key: const ValueKey('activity-report-cta'),
-                  label: '관찰 리포트 보기',
-                  onPressed: _reportReady(activity)
-                      ? () => widget.onReport(activity)
-                      : null,
                 ),
               ],
             ),
@@ -960,18 +1529,28 @@ class _CarouselButton extends StatelessWidget {
   final VoidCallback onPressed;
 
   @override
-  Widget build(BuildContext context) => Material(
-    color: AppColors.surface.withValues(alpha: 0.92),
-    shape: const CircleBorder(),
-    elevation: enabled ? 2 : 0,
-    child: IconButton(
-      onPressed: enabled ? onPressed : null,
-      icon: Icon(icon),
-      color: AppColors.ink,
-      disabledColor: AppColors.outline,
-      tooltip: icon == Icons.chevron_left_rounded ? '이전 그림' : '다음 그림',
-    ),
-  );
+  Widget build(BuildContext context) {
+    final label = icon == Icons.chevron_left_rounded ? '이전 그림' : '다음 그림';
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: label,
+      child: ExcludeSemantics(
+        child: Material(
+          color: AppColors.surface.withValues(alpha: 0.92),
+          shape: const CircleBorder(),
+          elevation: enabled ? 2 : 0,
+          child: IconButton(
+            onPressed: enabled ? onPressed : null,
+            icon: Icon(icon),
+            color: AppColors.ink,
+            disabledColor: AppColors.outline,
+            tooltip: label,
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 String _htpSubjectLabel(String subject) => switch (subject) {
@@ -980,16 +1559,6 @@ String _htpSubjectLabel(String subject) => switch (subject) {
   'PERSON' => '사람',
   _ => subject,
 };
-
-class _DeleteNotice extends StatelessWidget {
-  const _DeleteNotice();
-  @override
-  Widget build(BuildContext context) => const Text(
-    '기록 삭제 시 연결된 대화·분석·리포트가 함께 지워져요.',
-    textAlign: TextAlign.center,
-    style: TextStyle(color: AppColors.inkMuted, fontSize: 12),
-  );
-}
 
 // ── 배지 ─────────────────────────────────────────────────────────────
 class _StatusBadge extends StatelessWidget {
@@ -1043,22 +1612,29 @@ class _Thumbnail extends StatelessWidget {
     required this.repository,
     this.size,
     this.fit = BoxFit.cover,
+    this.semanticLabel,
   });
   final String? url;
   final ActivityRepository repository;
   final double? size;
   final BoxFit fit;
+  final String? semanticLabel;
   @override
   Widget build(BuildContext context) {
     final image = AuthenticatedImage(
       url: url,
       fetcher: repository.downloadImage,
       fit: fit,
+      semanticLabel: semanticLabel,
       placeholderBuilder: (_) => Container(
         key: const ValueKey('activity-thumbnail-placeholder'),
         color: AppColors.surfaceSoft,
         alignment: Alignment.center,
-        child: const Icon(Icons.image_outlined, color: AppColors.inkMuted),
+        child: Semantics(
+          image: semanticLabel != null,
+          label: semanticLabel,
+          child: const Icon(Icons.image_outlined, color: AppColors.inkMuted),
+        ),
       ),
     );
     return ClipRRect(
@@ -1070,16 +1646,34 @@ class _Thumbnail extends StatelessWidget {
   }
 }
 
-void _snack(BuildContext context, String message) {
-  ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(content: Text(message)));
-}
-
 /// 관찰 리포트로 진입 가능한지(완료된 리포트가 있는지).
 bool _reportReady(ActivitySummaryDto activity) {
   final report = activity.report;
   return report != null && report.reportStatus == 'COMPLETED';
+}
+
+String _reportUnavailableMessage(ActivitySummaryDto activity) =>
+    switch (_cardStatus(activity)) {
+      _CardStatus.analyzing => '분석이 끝나면 관찰 리포트를 확인할 수 있어요.',
+      _CardStatus.failed => '분석을 완료하지 못해 리포트를 열 수 없어요.',
+      _CardStatus.draft => '활동을 마치면 관찰 리포트를 확인할 수 있어요.',
+      _CardStatus.done => '아직 연결된 관찰 리포트가 없어요.',
+    };
+
+String _cardStatusLabel(_CardStatus status) => switch (status) {
+  _CardStatus.done => '분석 완료',
+  _CardStatus.analyzing => '분석 중',
+  _CardStatus.failed => '분석 실패',
+  _CardStatus.draft => '임시 저장',
+};
+
+Color _spineColor(ActivitySummaryDto activity) {
+  if (activity.isHtp) return _ArchiveColors.walnut;
+  return switch (activity.drawingType.code) {
+    'ART_DIARY' => _ArchiveColors.brass,
+    'FREE_DRAWING' => _ArchiveColors.forest,
+    _ => _ArchiveColors.walnut,
+  };
 }
 
 _CardStatus _cardStatus(ActivitySummaryDto activity) {
