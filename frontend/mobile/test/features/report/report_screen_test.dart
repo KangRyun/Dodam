@@ -53,6 +53,10 @@ void main() {
     expect(find.text('기쁨'), findsOneWidget);
     // activityFacts
     expect(find.text('사람, 집'), findsOneWidget);
+    // 세션 기준 "활동 시간"(23분)과 스트로크 기준 "그린 시간"(22분)은 다른 값이다(S15P11B209-870).
+    expect(find.text('그린 시간'), findsOneWidget);
+    expect(find.text('22분'), findsOneWidget);
+    expect(find.text('4회'), findsOneWidget);
     // conversationSummary
     expect(find.text('편안하게 대화했어요.'), findsOneWidget);
     // guardianConversationGuide + limitations

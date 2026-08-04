@@ -954,7 +954,9 @@ Widget? _conversationSummarySection(ReportDetailDto report) {
 /// §7 객관적인 활동 기록 — activityFacts. 수치만, 심리 해석을 붙이지 않는다.
 Widget? _activityFactsSection(ReportDetailDto report) {
   final facts = report.activityFacts;
-  if (facts == null || facts.isEmpty) return null;
+  // 필압이 기록됐다는 사실만 있고(값 없음) 나머지 수치가 비어도 섹션을 보여준다
+  // (S15P11B209-870의 "필압 정보: 기록됨" 표시를 잃지 않기 위함).
+  if (facts == null || (facts.isEmpty && !facts.pressureAvailable)) return null;
   final tiles = <Widget>[
     if (facts.pauseCount case final count?)
       _StatisticTile(label: '멈춤', value: '$count회'),
@@ -970,16 +972,26 @@ Widget? _activityFactsSection(ReportDetailDto report) {
       _StatisticTile(label: '건너뜀', value: '$count회'),
     if (facts.detectedElementCount case final count?)
       _StatisticTile(label: '탐지된 요소', value: '$count개'),
+    // 필압은 실제 평균값이 있으면 값을 보여주고, 값 없이 기록 여부만 있으면
+    // "기록됨" 지표만 보여준다(S15P11B209-870).
     if (facts.hasPressureValue)
       _StatisticTile(
         label: '평균 필압',
         value: facts.pressureValue!.toStringAsFixed(2),
-      ),
+      )
+    else if (facts.pressureAvailable)
+      const _StatisticTile(label: '필압 정보', value: '기록됨'),
   ];
+  // "그린 시간"은 스트로크에서 집계한 실제로 그린 시간이며, §2의 세션 기준
+  // "활동 시간"과 다른 값이다(S15P11B209-870). 서버가 밀리초(drawingDurationMs)로
+  // 주면 그 값을 우선 쓰고, 초 단위 계약(drawingDurationSec)만 있으면 그것을 쓴다.
+  final drawingDuration =
+      formatActivityDuration(facts.drawingDurationMs) ??
+      _secToDuration(facts.drawingDurationSec);
   final durationLines = <Widget>[
     if (_secToDuration(facts.totalDurationSec) case final value?)
       _InfoLine(label: '총 활동 시간', value: value),
-    if (_secToDuration(facts.drawingDurationSec) case final value?)
+    if (drawingDuration case final value?)
       _InfoLine(label: '그린 시간', value: value),
   ];
   return _ReportSection(

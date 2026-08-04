@@ -19,6 +19,8 @@ import com.ssafy.b209.drawing.htp.domain.HtpAssessment;
 import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
 import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
+import com.ssafy.b209.drawing.service.StrokeBehaviorSummary;
+import com.ssafy.b209.drawing.service.StrokeBehaviorSummaryService;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.support.ColumnTextLimiter;
 import com.ssafy.b209.report.domain.Report;
@@ -50,6 +52,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -64,6 +68,9 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class ObservationReportPersistenceService {
+
+  private static final Logger log =
+      LoggerFactory.getLogger(ObservationReportPersistenceService.class);
 
   private static final int MAX_KEY_CONVERSATIONS = 5;
   private static final String FAILED_LIMITATIONS = "리포트 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.";
@@ -94,6 +101,7 @@ public class ObservationReportPersistenceService {
   private final ConversationMessageRepository conversationMessageRepository;
   private final DrawingSessionEmotionRepository emotionRepository;
   private final HtpAssessmentRepository htpAssessmentRepository;
+  private final StrokeBehaviorSummaryService behaviorSummaryService;
   private final ApplicationEventPublisher eventPublisher;
   private final Clock clock;
 
@@ -114,6 +122,7 @@ public class ObservationReportPersistenceService {
    * @param conversationMessageRepository 대화 메시지 집계 저장소
    * @param emotionRepository 그림 활동 선택 감정 저장소
    * @param htpAssessmentRepository HTP 묶음의 세 세션 집계와 상태 전이 저장소
+   * @param behaviorSummaryService 저장된 Stroke 배치에서 그리기 행동 수치를 집계하는 경계 (S15P11B209-870)
    * @param eventPublisher 완료 커밋 후 분석 완료 알림을 요청할 이벤트 발행기
    * @param clock 저장 시각을 제공하는 UTC 시계
    */
@@ -132,6 +141,7 @@ public class ObservationReportPersistenceService {
       ConversationMessageRepository conversationMessageRepository,
       DrawingSessionEmotionRepository emotionRepository,
       HtpAssessmentRepository htpAssessmentRepository,
+      StrokeBehaviorSummaryService behaviorSummaryService,
       ApplicationEventPublisher eventPublisher,
       Clock clock) {
     this.analysisRepository = analysisRepository;
@@ -148,6 +158,7 @@ public class ObservationReportPersistenceService {
     this.conversationMessageRepository = conversationMessageRepository;
     this.emotionRepository = emotionRepository;
     this.htpAssessmentRepository = htpAssessmentRepository;
+    this.behaviorSummaryService = behaviorSummaryService;
     this.eventPublisher = eventPublisher;
     this.clock = clock;
   }
@@ -289,7 +300,8 @@ public class ObservationReportPersistenceService {
             selectedEmotions,
             expressedEmotionText,
             keyConversations,
-            subjectContexts));
+            subjectContexts,
+            contextSessionIds));
   }
 
   /** 주제별 수집 대상 세션과 HTP 주제의 쌍이다 (S15P11B209-741). 그림일기·단독 세션은 주제가 {@code null}. */
@@ -387,13 +399,14 @@ public class ObservationReportPersistenceService {
                   "analysis_conversation_summaries.summary_model_version"),
               now));
 
+      StrokeBehaviorSummary behavior = aggregateBehavior(context);
       activitySummaryRepository.save(
           ReportActivitySummary.create(
               report,
-              null,
-              null,
-              null,
-              false,
+              behavior == null ? null : behavior.drawingDurationMs(),
+              behavior == null ? null : behavior.pauseCount(),
+              behavior == null ? null : behavior.eraseCount(),
+              behavior != null && behavior.pressureAvailable(),
               context.questionCount(),
               context.answeredCount(),
               context.skippedCount(),
@@ -464,6 +477,37 @@ public class ObservationReportPersistenceService {
                       ColumnTextLimiter.fit(
                           failureCode, REPORT_FAILURE_REASON_LIMIT, "reports.failure_reason"),
                       now));
+    }
+  }
+
+  /**
+   * 이 리포트가 다루는 세션들의 그리기 행동 수치를 합친다 (S15P11B209-870).
+   *
+   * <p>이전에는 이 자리에 {@code null} 을 넣어, S15P11B209-772 가 집계해 AI 로 보내던 수치가 <b>리포트에는 한 자리도 남지 않았다.</b>
+   * 보호자는 아이가 얼마나 그렸고 몇 번 멈췄는지 볼 수 없었다.
+   *
+   * <p>집계 실패로 리포트 생성을 죽이지 않는다. 읽는 곳이 MongoDB 라 JPA Transaction 과 별개로 실패할 수 있고, 그때 리포트 전체를 잃는 것은 균형에
+   * 맞지 않는다 — 행동 수치는 리포트의 부가 정보다. 실패하면 경고만 남기고 수치를 {@code null} 로 둔다(S15P11B209-815 에서 리포트 생성이 전면
+   * 실패한 것과 같은 실패 확산을 막는다).
+   *
+   * @param context 대상 세션 목록을 가진 생성 맥락
+   * @return 합산된 행동 요약이며 집계할 배치가 없거나 집계에 실패하면 {@code null}
+   */
+  private StrokeBehaviorSummary aggregateBehavior(ObservationGenerationContext context) {
+    List<Long> sessionIds = context.activitySessionIds();
+    if (sessionIds == null || sessionIds.isEmpty()) {
+      sessionIds = List.of(context.drawingSessionId());
+    }
+    try {
+      return behaviorSummaryService.summarizeAll(sessionIds).orElse(null);
+    } catch (RuntimeException exception) {
+      log.warn(
+          "그리기 행동 수치 집계에 실패해 리포트에 수치를 남기지 않습니다. reportId={}, sessionIds={}, exceptionType={}, message={}",
+          context.reportId(),
+          sessionIds,
+          exception.getClass().getName(),
+          exception.getMessage());
+      return null;
     }
   }
 
