@@ -169,7 +169,7 @@ void main() {
           find.bySemanticsLabel('빠른 색상 8'),
         );
         expect(selectedSemantics.flagsCollection.isSelected, Tristate.isTrue);
-        expect(tester.getSize(ordered[2]), const Size(32, 32)); // 굵기 미리보기는 팔레트 버튼 자리를 내주려고 작게 둔다.
+        expect(tester.getSize(ordered[2]), const Size(48, 48)); // 굵기 미리보기 원은 다른 툴바 버튼과 같은 상자를 쓴다.
       },
     );
 
@@ -210,20 +210,23 @@ void main() {
           );
         }
 
-        final thicknessLabels = tester.widgetList<Text>(
-          find.descendant(
-            of: find.byKey(const ValueKey('drawing-toolbar-secondary-row')),
-            matching: find.byType(Text),
-          ),
-        );
-        expect(thicknessLabels, hasLength(3));
-        for (final label in thicknessLabels) {
-          expect(label.style?.fontSize, greaterThanOrEqualTo(13));
-          expect(
-            label.style!.fontWeight!.value,
-            lessThanOrEqualTo(FontWeight.w800.value),
-          );
-        }
+        // 굵기는 글자 단계가 아니라 슬라이더와 원으로 보여 준다
+        // (S15P11B209-807). 원은 굵기를 올리면 같이 커져야 한다.
+        double previewDiameter() => tester
+            .getSize(
+              find
+                  .descendant(
+                    of: find.byKey(const ValueKey('drawing-thickness-preview')),
+                    matching: find.byType(SizedBox),
+                  )
+                  .last,
+            )
+            .width;
+
+        await _pumpToolbar(tester, quickColors: quickColors, width: 4);
+        final thin = previewDiameter();
+        await _pumpToolbar(tester, quickColors: quickColors, width: 24);
+        expect(previewDiameter(), greaterThan(thin));
 
         await _pumpToolbar(tester, quickColors: quickColors, textScale: 2);
         final complete = find.byKey(const ValueKey('drawing-complete'));
@@ -628,6 +631,7 @@ Future<void> _pumpToolbar(
   bool isCompleting = false,
   DrawingSaveStatus saveStatus = DrawingSaveStatus.localOnly,
   VoidCallback? onRetrySave,
+  double width = 8,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -647,7 +651,7 @@ Future<void> _pumpToolbar(
         body: Align(
           alignment: Alignment.topCenter,
           child: DrawingToolbar(
-            toolState: const DrawingToolState(),
+            toolState: DrawingToolState(width: width),
             quickColors: quickColors,
             paletteAnchorLink: LayerLink(),
             onBack: onBack ?? () {},

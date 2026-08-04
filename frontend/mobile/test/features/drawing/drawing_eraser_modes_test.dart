@@ -332,11 +332,14 @@ void main() {
     tester,
   ) async {
     await _pumpScreen(tester);
-    // 가장 굵은 프리셋을 키로 직접 고른다. 순서에 기대면 툴바 배치가 바뀔 때
-    // 슬라이더나 미리보기를 누르게 된다.
-    final widthChoices = find.byKey(const ValueKey('drawing-thickness-굵게'));
-    await tester.ensureVisible(widthChoices);
-    await tester.tap(widthChoices);
+    // 굵기는 슬라이더로 고른다(S15P11B209-807).
+    final slider = find.descendant(
+      of: find.byKey(const ValueKey('drawing-thickness-slider')),
+      matching: find.byType(Slider),
+    );
+    await tester.ensureVisible(slider);
+    await tester.pumpAndSettle();
+    tester.widget<Slider>(slider).onChanged!(14);
     await tester.pump();
 
     await _selectEraserMode(tester, DrawingEraserMode.area);

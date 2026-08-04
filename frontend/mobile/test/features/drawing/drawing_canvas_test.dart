@@ -99,7 +99,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('color-빨강')));
     await tester.pump();
     await _drawStroke(tester, center);
-    await _tapThicknessPreset(tester, '얇게');
+    await _setThickness(tester, 4);
     await tester.pump();
     await _drawStroke(tester, center + const Offset(70, 30));
 
@@ -125,16 +125,12 @@ void main() {
     await tester.tap(find.text('영역 지우개'));
     await tester.pumpAndSettle();
 
-    for (final (label, _, offset) in [
-      ('얇게', 4.0, const Offset(-80, -40)),
-      ('보통', 8.0, Offset.zero),
-      ('굵게', 14.0, const Offset(80, 40)),
+    for (final (width, offset) in [
+      (4.0, const Offset(-80, -40)),
+      (8.0, Offset.zero),
+      (14.0, const Offset(80, 40)),
     ]) {
-      final thickness = find.byKey(ValueKey('drawing-thickness-$label'));
-      await tester.ensureVisible(thickness);
-      await tester.pumpAndSettle();
-      await tester.tap(thickness);
-      await tester.pump();
+      await _setThickness(tester, width);
       await _drawStroke(tester, center + offset);
     }
 
@@ -206,7 +202,7 @@ void main() {
     );
     await _drawStroke(tester, center - const Offset(50, 20));
     await tester.tap(find.byKey(const ValueKey('color-빨강')));
-    await _tapThicknessPreset(tester, '얇게');
+    await _setThickness(tester, 4);
     await tester.pump();
     await _drawStroke(tester, center + const Offset(50, 20));
 
@@ -227,7 +223,7 @@ void main() {
     );
     await _drawStroke(tester, center - const Offset(50, 20));
     await tester.tap(find.byKey(const ValueKey('color-빨강')));
-    await _tapThicknessPreset(tester, '얇게');
+    await _setThickness(tester, 4);
     await tester.pump();
     await _drawStroke(tester, center + const Offset(50, 20));
 
@@ -443,10 +439,15 @@ Future<void> _drawStroke(WidgetTester tester, Offset start) async {
   await tester.pump();
 }
 
-Future<void> _tapThicknessPreset(WidgetTester tester, String label) async {
-  final preset = find.byKey(ValueKey('drawing-thickness-$label'));
-  await tester.ensureVisible(preset);
+/// 굵기는 툴바 슬라이더로 고른다(S15P11B209-807). 합성 드래그로 정확한 값을
+/// 맞추기 어려워 슬라이더의 콜백을 직접 부른다.
+Future<void> _setThickness(WidgetTester tester, double width) async {
+  final slider = find.descendant(
+    of: find.byKey(const ValueKey('drawing-thickness-slider')),
+    matching: find.byType(Slider),
+  );
+  await tester.ensureVisible(slider);
   await tester.pumpAndSettle();
-  await tester.tap(preset);
+  tester.widget<Slider>(slider).onChanged!(width);
   await tester.pump();
 }

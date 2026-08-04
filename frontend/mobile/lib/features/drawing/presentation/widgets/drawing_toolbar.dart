@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 
 import '../../application/drawing_sync_coordinator.dart';
 import '../models/drawing_tool_state.dart';
+import '../rendering/drawing_stroke_renderer.dart';
 import 'canvas_tool_asset_icon.dart';
 import 'drawing_crayon_frame.dart';
 import 'drawing_tool_button.dart';
@@ -291,21 +292,12 @@ final class DrawingToolbar extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
-        // 굵기 프리셋은 슬라이더 바로 옆에 둔다. 팔레트 뒤에 두면 툴바가 좁은
-        // 기기에서 스크롤 밖으로 밀려 아이 눈에 보이지 않는다.
-        for (final (label, width) in _thicknessPresets)
-          _ThicknessPresetButton(
-            key: ValueKey('drawing-thickness-$label'),
-            label: label,
-            selected: toolState.width == width,
-            onPressed: () => onWidthChanged(width),
-          ),
-        const SizedBox(width: 8),
-        // 지금 굵기와 색은 팔레트 버튼이 함께 보여 준다. 따로 미리보기 점을
-        // 두면 툴바가 넘쳐 팔레트 버튼이 화면 밖으로 밀린다.
+        // 슬라이더를 움직이면 이 원이 같이 커진다. 얇게·보통·굵게 같은 글자
+        // 단계보다 아이가 굵기를 바로 알아본다. 캔버스 커서와 같은 계산을 써서
+        // 여기 보이는 크기가 실제로 찍히는 자국 크기와 같다.
         SizedBox.square(
           key: const ValueKey('drawing-thickness-preview'),
-          dimension: 32,
+          dimension: 48,
           child: Center(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -313,7 +305,12 @@ final class DrawingToolbar extends StatelessWidget {
                 shape: BoxShape.circle,
                 border: Border.all(color: AppColors.canvasInk),
               ),
-              child: SizedBox.square(dimension: toolState.width.clamp(4, 24)),
+              child: SizedBox.square(
+                dimension: DrawingStrokeRenderer.footprintFor(
+                  toolState.brushProfile,
+                  toolState.width,
+                ).clamp(4, 40),
+              ),
             ),
           ),
         ),
@@ -354,7 +351,6 @@ final class DrawingToolbar extends StatelessWidget {
     'assets/canvas/swatches/purple.png',
     'assets/canvas/swatches/charcoal.png',
   ];
-  static const _thicknessPresets = [('얇게', 4.0), ('보통', 8.0), ('굵게', 14.0)];
 
   Widget _completeButton() => KeyedSubtree(
     key: const ValueKey('drawing-complete-button'),
@@ -475,49 +471,6 @@ final class _ToolbarSaveStatus extends StatelessWidget {
       ),
     );
   }
-}
-
-final class _ThicknessPresetButton extends StatelessWidget {
-  const _ThicknessPresetButton({
-    required this.label,
-    required this.selected,
-    required this.onPressed,
-    super.key,
-  });
-
-  final String label;
-  final bool selected;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) => Semantics(
-    button: true,
-    selected: selected,
-    label: '$label 굵기',
-    onTap: onPressed,
-    excludeSemantics: true,
-    child: SizedBox.square(
-      dimension: 44,
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          excludeFromSemantics: true,
-          customBorder: const CircleBorder(),
-          onTap: onPressed,
-          child: Center(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: AppColors.canvasInk,
-                fontSize: 13,
-                fontWeight: selected ? FontWeight.w800 : FontWeight.w700,
-              ),
-            ),
-          ),
-        ),
-      ),
-    ),
-  );
 }
 
 DrawingCanvasDeviceClass _deviceClassFor(Size size) {
