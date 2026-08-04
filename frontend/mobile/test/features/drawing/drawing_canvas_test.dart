@@ -107,9 +107,9 @@ void main() {
     expect(strokes, hasLength(3));
     expect(strokes[0].color, AppColors.canvasInk);
     expect(strokes[0].thickness, 8);
-    expect(strokes[1].color, AppColors.drawingRed);
+    expect(strokes[1].color, AppColors.canvasSwatchRed);
     expect(strokes[1].thickness, 8);
-    expect(strokes[2].color, AppColors.drawingRed);
+    expect(strokes[2].color, AppColors.canvasSwatchRed);
     expect(strokes[2].thickness, 4);
   });
 
@@ -150,7 +150,7 @@ void main() {
       DrawingTool.pen,
     ]);
     expect(strokes.take(3).map((stroke) => stroke.thickness), [4, 8, 14]);
-    expect(strokes.last.color, AppColors.drawingRed);
+    expect(strokes.last.color, AppColors.canvasSwatchRed);
     expect(strokes.last.thickness, 14);
   });
 
@@ -240,7 +240,7 @@ void main() {
 
     final restored = _canvas(tester).strokes.last;
     expect(_canvas(tester).strokes, hasLength(2));
-    expect(restored.color, AppColors.drawingRed);
+    expect(restored.color, AppColors.canvasSwatchRed);
     expect(restored.thickness, 4);
     expect(_redoButton(tester).onTap, isNull);
   });

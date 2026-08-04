@@ -23,6 +23,7 @@ import '../../../drawing/application/drawing_pressure_policy.dart';
 import '../../../drawing/application/drawing_session_start_controller.dart';
 import '../../../drawing/application/drawing_sync_coordinator.dart';
 import '../../../drawing/application/drawing_draft_restore_controller.dart';
+import '../../../drawing/application/drawing_fill_engine.dart';
 import '../../../drawing/application/htp_response_flow_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
@@ -268,6 +269,25 @@ class _DrawingScreenState extends State<DrawingScreen>
   Color get _color => _toolState.color;
   double get _thickness => _toolState.width;
   int? _activePointer;
+
+  /// 채우기·획 지우개·전체 지우기처럼 그림 이미지를 통째로 바꾸는 중인지다.
+  /// 이 동안에는 입력을 막아 캡처와 그림이 어긋나지 않게 한다.
+  bool _isApplyingRasterMutation = false;
+
+  /// 캡처가 끝나 업로드만 남았을 때 참이 된다. 업로드를 기다리는 동안에도
+  /// 아이가 계속 그릴 수 있어야 한다.
+  bool _rasterMutationAllowsDrawing = false;
+  bool _isStrokeEraseGestureActive = false;
+  bool _strokeEraseFallbackActive = false;
+
+  /// 오래 걸리는 채우기 계산이 끝났을 때 그 사이 다른 변경이 있었는지 가린다.
+  int _snapshotMutationGeneration = 0;
+  final DrawingFillEngine _fillEngine = const ScanlineDrawingFillEngine();
+
+  static const _noDocumentChange = DrawingDocumentChange(
+    changed: false,
+    wireEffect: DrawingWireEffect.none,
+  );
   final GlobalKey _canvasBoundaryKey = GlobalKey();
   late final DrawingSyncCoordinator _syncCoordinator;
   late final bool _ownsSyncCoordinator;
@@ -613,13 +633,24 @@ class _DrawingScreenState extends State<DrawingScreen>
     return DrawingCanvasDeviceClass.mobilePortrait;
   }
 
+  /// 커서에 보여 줄 도구 상태다. 지울 획이 없어 영역 지우개로 넘어간 동안에는
+  /// 실제로 하는 일과 같게 영역 지우개 커서를 보여 준다.
+  DrawingToolState get _cursorToolState => _strokeEraseFallbackActive
+      ? DrawingToolState(
+          instrument: DrawingInstrument.eraser,
+          eraserMode: DrawingEraserMode.area,
+          color: _toolState.color,
+          width: _toolState.width,
+        )
+      : _toolState;
+
   /// 커서가 보이는 중이면 바뀐 도구·굵기를 즉시 반영한다.
   void _refreshVisibleCursor() {
     final cursor = _cursorController.value;
     if (!cursor.visible) return;
     _cursorController.update(
       documentPosition: cursor.documentPosition,
-      toolState: _toolState,
+      toolState: _cursorToolState,
       deviceKind: cursor.deviceKind,
     );
   }
@@ -652,7 +683,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   void _handleCanvasHover(PointerHoverEvent event) {
     _cursorController.update(
       documentPosition: event.localPosition,
-      toolState: _toolState,
+      toolState: _cursorToolState,
       deviceKind: event.kind,
     );
   }
@@ -682,21 +713,29 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
   }
 
-  /// 전체 지우기는 되돌릴 수 있지만 아이에게는 큰 변화라 한 번 확인한다.
+  /// 전체 지우기는 되돌릴 수 없어 아이에게 큰 변화라 한 번 확인한다.
   Future<void> _confirmClearAll() async {
+    if (_isApplyingRasterMutation) return;
     final confirmed = await showAppConfirmDialog(
       context: context,
       title: '그림을 모두 지울까요?',
-      message: '되돌리기로 다시 살릴 수 있어요.',
+      message: '지운 그림은 되돌릴 수 없어요.',
       confirmLabel: '모두 지우기',
       cancelLabel: '계속 그리기',
       isDanger: true,
     );
     if (confirmed != true || !mounted) return;
-    _invalidatePendingCompletion();
-    setState(_documentController.clearAll);
-    // 전체 지우기는 그림 이벤트를 만들지 않으므로 스냅샷 변경으로 알린다.
-    _syncCoordinator.recordSnapshotChange();
+    await _runSnapshotMutation((_) async {
+      // 복원된 그림만 남아 있어도 지울 것이 있는 상태다.
+      final hadRestoredPixels = _draftRestoreController.backgroundImage != null;
+      final localChange = _documentController.clearAll();
+      if (!localChange.changed && !hadRestoredPixels) return _noDocumentChange;
+      if (hadRestoredPixels) _draftRestoreController.startNewDrawing();
+      return const DrawingDocumentChange(
+        changed: true,
+        wireEffect: DrawingWireEffect.none,
+      );
+    });
   }
 
   /// 상세 색상 팔레트를 연다. 태블릿은 팔레트 버튼 옆 팝오버, 모바일은 바텀 시트다.
@@ -825,6 +864,12 @@ class _DrawingScreenState extends State<DrawingScreen>
     _sttResultController?.removeListener(_handleSttResultChanged);
     _sttResultController?.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    _finishActiveStrokeForLayoutChange();
+    super.didChangeMetrics();
   }
 
   @override
@@ -1474,34 +1519,130 @@ class _DrawingScreenState extends State<DrawingScreen>
   void _startStroke(PointerDownEvent event) {
     if (_activePointer != null ||
         _voiceRecordingController?.isRecording == true) {
+      _cursorController.hide();
       return;
     }
-    _invalidatePendingCompletion();
-    _invalidateNoResponseRequest();
-    // 새 입력은 진행 중인 객체 탐지 결과를 현재 그림에서 제외
-    _objectDetectionController?.onDrawingInputStarted();
-    // 그림 입력이 시작되면 질문 오버레이 숨김
-    _questionDisplayController.dismiss();
+    // 스냅샷을 만드는 중에는 새 입력을 받지 않는다. 업로드가 시작된 뒤에는
+    // 아이가 기다리지 않도록 다시 그릴 수 있게 풀어 준다.
+    if (_isApplyingRasterMutation && !_rasterMutationAllowsDrawing) {
+      _cursorController.hide();
+      return;
+    }
+    _updateCursor(event);
+    switch (_toolState.instrument) {
+      case DrawingInstrument.crayon:
+      case DrawingInstrument.pencil:
+      case DrawingInstrument.brush:
+        _beginSupportedStroke(event, DrawingTool.pen);
+      case DrawingInstrument.eraser
+          when _toolState.eraserMode == DrawingEraserMode.area:
+        _beginSupportedStroke(event, DrawingTool.eraser);
+      case DrawingInstrument.eraser:
+        if (_isApplyingRasterMutation) return;
+        _beginStrokeEraseGesture(event);
+      case DrawingInstrument.fill:
+        if (_isApplyingRasterMutation) return;
+        unawaited(_applyFill(event.localPosition));
+    }
+  }
+
+  void _beginSupportedStroke(PointerDownEvent event, DrawingTool tool) {
+    _beginDrawingInput();
     setState(() {
       _activePointer = event.pointer;
       _activeStroke = DrawingStroke(
         points: [_pointFrom(event)],
-        color: _color,
-        thickness: _thickness,
-        tool: _tool,
+        color: _toolState.color,
+        thickness: _toolState.width,
+        tool: tool,
+        brushProfile: switch (_toolState.instrument) {
+          DrawingInstrument.pencil => DrawingBrushProfileId.pencil,
+          DrawingInstrument.brush => DrawingBrushProfileId.brush,
+          DrawingInstrument.crayon => DrawingBrushProfileId.crayon,
+          DrawingInstrument.eraser ||
+          DrawingInstrument.fill => DrawingBrushProfileId.legacyPen,
+        },
       );
     });
   }
 
+  /// 획 지우개는 지운 결과를 event 로 표현할 수 없어 스냅샷으로만 남는다.
+  /// 제스처 한 번이 undo 한 번이 되도록 컨트롤러에 묶음을 열어 둔다.
+  void _beginStrokeEraseGesture(PointerDownEvent event) {
+    setState(() {
+      _isApplyingRasterMutation = true;
+      _rasterMutationAllowsDrawing = false;
+      _isStrokeEraseGestureActive = true;
+      _strokeEraseFallbackActive = false;
+      _activePointer = event.pointer;
+      _activeStroke = null;
+    });
+    _beginDrawingInput();
+    _documentController.beginStrokeEraseGesture();
+    try {
+      _eraseStrokeOrStartFallback(event);
+    } on Object {
+      _cancelStrokeEraseGesture();
+      rethrow;
+    }
+  }
+
+  /// 지울 획이 없고 복원된 그림만 남아 있으면 그 위를 영역 지우개로 문지른다.
+  void _eraseStrokeOrStartFallback(PointerEvent event) {
+    if (_strokeEraseFallbackActive) {
+      setState(() {
+        _activeStroke = _activeStroke!.addPoint(_pointFrom(event));
+      });
+      _updateCursor(event);
+      return;
+    }
+    final removed = _documentController.eraseStrokeAt(
+      event.localPosition,
+      radius: _toolState.width / 2,
+    );
+    if (removed || _draftRestoreController.backgroundImage == null) return;
+    setState(() {
+      _strokeEraseFallbackActive = true;
+      _activeStroke = DrawingStroke(
+        points: [_pointFrom(event)],
+        color: _toolState.color,
+        thickness: _toolState.width,
+        tool: DrawingTool.eraser,
+      );
+    });
+    _updateCursor(event);
+  }
+
   void _extendStroke(PointerMoveEvent event) {
-    if (_activePointer != event.pointer || _activeStroke == null) return;
+    if (_activePointer != event.pointer) {
+      _cursorController.hide();
+      return;
+    }
+    _updateCursor(event);
+    if (_isStrokeEraseGestureActive && !_rasterMutationAllowsDrawing) {
+      try {
+        _eraseStrokeOrStartFallback(event);
+      } on Object {
+        _cancelStrokeEraseGesture();
+        rethrow;
+      }
+      return;
+    }
+    if (_activeStroke == null) return;
     setState(() {
       _activeStroke = _activeStroke!.addPoint(_pointFrom(event));
     });
   }
 
   void _endStroke(PointerEvent event) {
-    if (_activePointer != event.pointer) return;
+    if (_activePointer != event.pointer) {
+      _cursorController.hide();
+      return;
+    }
+    if (_isStrokeEraseGestureActive && !_rasterMutationAllowsDrawing) {
+      unawaited(_finishStrokeEraseGesture(event));
+      return;
+    }
     final stroke = _activeStroke;
     final completed = event is PointerUpEvent && stroke != null;
     setState(() {
@@ -1511,14 +1652,222 @@ class _DrawingScreenState extends State<DrawingScreen>
       _activeStroke = null;
       _activePointer = null;
     });
-    final canvasSize = _canvasBoundaryKey.currentContext?.size;
-    if (completed && canvasSize != null) {
+    if (completed) {
       _syncCoordinator.recordStroke(
         stroke,
         DrawingCanvasGeometry.documentSize,
       );
-      _objectDetectionController?.onDrawingInputEnded();
+      _endDrawingInput();
     }
+    if (event is PointerCancelEvent ||
+        event.kind == ui.PointerDeviceKind.touch) {
+      _cursorController.hide();
+    } else {
+      _updateCursor(event);
+    }
+  }
+
+  Future<void> _finishStrokeEraseGesture(PointerEvent event) async {
+    var change = const DrawingDocumentChange(
+      changed: false,
+      wireEffect: DrawingWireEffect.none,
+    );
+    try {
+      if (event is PointerCancelEvent) {
+        _documentController.cancelStrokeEraseGesture();
+      } else {
+        change = _documentController.endStrokeEraseGesture(
+          fallbackStroke: _strokeEraseFallbackActive ? _activeStroke : null,
+        );
+        if (change.wireStroke case final wireStroke?) {
+          _syncCoordinator.recordStroke(
+            wireStroke,
+            DrawingCanvasGeometry.documentSize,
+          );
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _activeStroke = null;
+          _activePointer = null;
+        });
+      } else {
+        _activeStroke = null;
+        _activePointer = null;
+      }
+      if (change.changed) {
+        await _persistRasterChange(
+          change,
+          revisionAlreadyRecorded: change.wireStroke != null,
+        );
+      }
+    } on Object {
+      _documentController.cancelStrokeEraseGesture();
+      rethrow;
+    } finally {
+      _releaseStrokeEraseGesture(event);
+    }
+  }
+
+  void _cancelStrokeEraseGesture() {
+    _documentController.cancelStrokeEraseGesture();
+    _activeStroke = null;
+    _activePointer = null;
+    _releaseStrokeEraseGesture(null);
+  }
+
+  void _releaseStrokeEraseGesture(PointerEvent? event) {
+    if (!_isStrokeEraseGestureActive) return;
+    _endDrawingInput();
+    if (!mounted) {
+      _isStrokeEraseGestureActive = false;
+      _strokeEraseFallbackActive = false;
+      _isApplyingRasterMutation = false;
+      _rasterMutationAllowsDrawing = false;
+      return;
+    }
+    setState(() {
+      _isStrokeEraseGestureActive = false;
+      _strokeEraseFallbackActive = false;
+      _isApplyingRasterMutation = false;
+      _rasterMutationAllowsDrawing = false;
+    });
+    if (event == null ||
+        event is PointerCancelEvent ||
+        event.kind == ui.PointerDeviceKind.touch) {
+      _cursorController.hide();
+    } else {
+      _updateCursor(event);
+    }
+  }
+
+  /// 문서 밖으로 나간 포인터는 커서를 숨긴다. 터치는 손가락이 가려서 안 그린다.
+  void _updateCursor(PointerEvent event) {
+    if (event.kind == ui.PointerDeviceKind.touch) {
+      _cursorController.hide();
+      return;
+    }
+    final documentBounds = Offset.zero & DrawingCanvasGeometry.documentSize;
+    if (!documentBounds.contains(event.localPosition)) {
+      _cursorController.hide();
+      return;
+    }
+    _cursorController.update(
+      documentPosition: event.localPosition,
+      toolState: _cursorToolState,
+      deviceKind: event.kind,
+    );
+  }
+
+  void _beginDrawingInput() {
+    _invalidatePendingCompletion();
+    _invalidateNoResponseRequest();
+    // 새 입력은 진행 중인 객체 탐지 결과를 현재 그림에서 제외
+    _objectDetectionController?.onDrawingInputStarted();
+    // 그림 입력이 시작되면 질문 오버레이 숨김
+    _questionDisplayController.dismiss();
+  }
+
+  void _endDrawingInput() => _objectDetectionController?.onDrawingInputEnded();
+
+  Future<ui.Image> _captureRawDocumentImage() async {
+    final boundary = _canvasBoundaryKey.currentContext?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary) {
+      throw StateError('Drawing document is not ready to capture.');
+    }
+    return boundary.toImage(pixelRatio: 1);
+  }
+
+  /// 찍은 자리와 이어진 같은 색 영역을 현재 색으로 채운다.
+  Future<void> _applyFill(Offset documentPoint) async {
+    await _runSnapshotMutation((mutationGeneration) async {
+      final source = await _captureRawDocumentImage();
+      try {
+        final patch = await _fillEngine.createPatch(
+          source: source,
+          seed: documentPoint,
+          replacement: _toolState.color,
+        );
+        if (patch == null) return _noDocumentChange;
+        var transferred = false;
+        try {
+          // 채우기를 계산하는 사이에 화면이 사라졌거나 다른 변경이 끼어들었으면
+          // 낡은 결과를 문서에 넣지 않는다.
+          if (!mounted || mutationGeneration != _snapshotMutationGeneration) {
+            return _noDocumentChange;
+          }
+          final change = _documentController.addFill(
+            patch: patch.image,
+            documentSize: patch.documentSize,
+          );
+          transferred = true;
+          return change;
+        } finally {
+          if (!transferred) patch.image.dispose();
+        }
+      } finally {
+        source.dispose();
+      }
+    });
+  }
+
+  /// 콜백은 자신이 시작될 때의 세대를 받는다. 오래 걸리는 계산이 끝났을 때
+  /// [_snapshotMutationGeneration] 이 달라졌으면 그 사이 문서가 바뀐 것이다.
+  Future<void> _runSnapshotMutation(
+    Future<DrawingDocumentChange> Function(int mutationGeneration) mutate,
+  ) async {
+    if (_isApplyingRasterMutation) return;
+    final mutationGeneration = ++_snapshotMutationGeneration;
+    setState(() {
+      _isApplyingRasterMutation = true;
+      _rasterMutationAllowsDrawing = false;
+    });
+    _beginDrawingInput();
+    try {
+      final change = await mutate(mutationGeneration);
+      await _persistRasterChange(change);
+    } finally {
+      _endDrawingInput();
+      if (mounted) {
+        setState(() {
+          _isApplyingRasterMutation = false;
+          _rasterMutationAllowsDrawing = false;
+        });
+      } else {
+        _isApplyingRasterMutation = false;
+        _rasterMutationAllowsDrawing = false;
+      }
+    }
+  }
+
+  /// event 를 만들지 않는 변경을 초안으로 곧바로 올린다.
+  ///
+  /// 한 프레임을 기다려 바뀐 그림이 실제로 그려진 뒤에 캡처해야 서버에 옛 그림이
+  /// 올라가지 않는다. 캡처가 끝나면 업로드를 기다리지 않고 다시 그릴 수 있다.
+  Future<void> _persistRasterChange(
+    DrawingDocumentChange change, {
+    bool revisionAlreadyRecorded = false,
+  }) async {
+    if (!change.changed || !mounted) return;
+    _invalidatePendingCompletion();
+    if (!revisionAlreadyRecorded) _syncCoordinator.recordSnapshotChange();
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    setState(() => _rasterMutationAllowsDrawing = true);
+    await _syncCoordinator.saveDraftNow();
+  }
+
+  /// 화면 크기·방향이 바뀌면 진행 중인 입력은 좌표 기준이 달라져 이어 갈 수 없다.
+  ///
+  /// 그리던 획은 현재 점까지 완결하고, 아직 확정되지 않은 획 지우기는 되돌린다.
+  void _finishActiveStrokeForLayoutChange() {
+    if (_isStrokeEraseGestureActive && !_rasterMutationAllowsDrawing) {
+      _cancelStrokeEraseGesture();
+      return;
+    }
+    if (_activeStroke == null) return;
+    _finishActiveStrokeForSave();
+    _cursorController.hide();
   }
 
   /// lifecycle·route 경계에서 pointer up을 더 이상 받을 수 없는 active stroke를

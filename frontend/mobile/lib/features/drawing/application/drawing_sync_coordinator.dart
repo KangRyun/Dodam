@@ -709,7 +709,7 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
   /// stroke batch를 먼저 보낸 뒤 같은 event sequence의 Draft를 저장한다.
   Future<bool> flushAndSaveDraft() async {
     if (_disposed || _stopped || _completing) return false;
-    if (journal.events.isEmpty) return true;
+    if (journal.events.isEmpty && !hasUnsavedSnapshot) return true;
     await saveDraftNow();
     if (_disposed || batchQueue.hasFailure) return false;
     return _savedEventSequence == journal.lastEventSequence;
@@ -722,7 +722,9 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
         sessionId == null ||
         repository == null ||
         _snapshotProvider == null ||
-        journal.events.isEmpty) {
+        // 채우기·전체 지우기는 event 없이 그림만 바꾼다. event 유무만 보면 이런
+        // 변경이 영영 저장되지 않으므로 스냅샷 변경도 저장 사유로 인정한다.
+        (journal.events.isEmpty && !hasUnsavedSnapshot)) {
       return Future.value(null);
     }
     final existing = _saveInFlight;

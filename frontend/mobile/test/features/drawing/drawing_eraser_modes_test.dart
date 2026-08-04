@@ -418,7 +418,9 @@ Future<_DrawingHarness> _pumpScreen(
     restore.markImageLoaded();
   }
   await tester.pump();
-  sync.stop();
+  // 주기 autosave 만 멈춘다. stop() 은 완료 이후를 뜻해 명시적 저장까지 막으므로
+  // 스냅샷 변경이 곧바로 저장되는지 보려면 pause() 여야 한다.
+  sync.pause();
 
   addTearDown(() async {
     repository.completeAllHeldDrafts();
