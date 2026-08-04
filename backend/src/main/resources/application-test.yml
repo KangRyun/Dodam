@@ -38,3 +38,10 @@ app:
   stt:
     recovery:
       enabled: false
+  # 삭제 워커도 같은 이유로 끈다. 이쪽은 큐가 비어도 매 틱이 releaseStuck으로 DB를 먼저 쓰기 때문에,
+  # DataSource가 닫힌 컨텍스트에 남은 스케줄러가 던지면 Spring이 JVM 공용 stdout에 ERROR를 찍는다.
+  # CapturedOutput은 JVM 전역이라 그 한 줄이 남의 테스트 단언을 깬다
+  # (GlobalExceptionHandlerTest의 "ERROR 없음" 단언 — 2026-08-04 develop 빌드 189).
+  storage:
+    deletion:
+      enabled: false
