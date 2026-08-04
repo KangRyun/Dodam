@@ -12,6 +12,7 @@ import '../../data/dto/report_dtos.dart';
 import '../../data/services/platform_report_file_actions.dart';
 import '../../domain/repositories/report_repository.dart';
 import '../../domain/services/report_file_actions.dart';
+import '../format/activity_duration_format.dart';
 import '../widgets/htp_report_gallery.dart';
 import '../widgets/report_mascot.dart';
 
@@ -869,7 +870,7 @@ Widget? _activitySection(ReportDetailDto report) {
       _InfoLine(label: '활동 유형', value: type),
     if (session?.inputMethod case final inputMethod?)
       _InfoLine(label: '입력 방식', value: inputMethod),
-    if (_minutes(session?.durationMs) case final duration?)
+    if (formatActivityDuration(session?.durationMs) case final duration?)
       _InfoLine(label: '활동 시간', value: duration),
     if (session?.completedAt case final completedAt?)
       _InfoLine(label: '완료일', value: _date(completedAt)),
@@ -1377,10 +1378,6 @@ class _ImagePlaceholder extends StatelessWidget {
 String _date(String isoDate) => isoDate.length >= 10
     ? isoDate.substring(0, 10).replaceAll('-', '.')
     : isoDate;
-
-/// 서버가 주는 밀리초 활동 시간을 분 단위 문구로 바꾼다. 값이 없으면 표시하지 않는다.
-String? _minutes(int? durationMs) =>
-    durationMs == null ? null : '${(durationMs / 60000).round()}분';
 
 String _emotionLabel(String emotion) => switch (emotion) {
   'HAPPY' || 'JOY' => '기쁨',
