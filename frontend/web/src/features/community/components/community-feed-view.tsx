@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 
 import { CommunityCategoryTabs } from "@/features/community/components/community-category-tabs";
 import { CommunityFeed } from "@/features/community/components/community-feed";
+import { CommunityHero } from "@/features/community/components/community-hero";
 import { CommunityShell } from "@/features/community/components/community-shell";
 import { CommunitySidebarContent } from "@/features/community/components/community-sidebar-content";
 import { useCommunityFeed } from "@/features/community/hooks/use-community";
@@ -41,6 +42,7 @@ export function CommunityFeedView({
 
   return (
     <CommunityShell
+      hero={<CommunityHero />}
       navigation={
         <CommunityCategoryTabs
           selectedCategory={category}
