@@ -95,6 +95,13 @@ String _createIdempotencyKey() {
 /// 받아 검증·미리보기 후 UPLOAD 세션을 만들어 업로드한다. 어느 경로든
 /// [DrawingSessionResolution]을 pop해 호출부가 기존 Drawing Route로
 /// 그대로 이어가게 한다. 사용자가 끝까지 취소하면 `null`을 pop한다.
+/// 첫 방식 선택에서 "사진으로 시작하기"를 고르면, 단일 촬영 대신 HTP 선촬영
+/// 배치 흐름(집·나무·사람 미리 촬영)을 시작하라는 신호로 pop된다
+/// (S15P11B209-872).
+class HtpPhotoBatchRequested {
+  const HtpPhotoBatchRequested();
+}
+
 class InputMethodSelectScreen extends StatefulWidget {
   InputMethodSelectScreen({
     required this.childId,
@@ -109,7 +116,9 @@ class InputMethodSelectScreen extends StatefulWidget {
     this.existingDrawingSessionId,
     this.restoredActivityContext,
     this.htpPhotoUploadEnabled = false,
+    this.htpPhotoBatchEnabled = false,
     this.idempotencyKeyProvider,
+    this.pendingPhoto,
     PhotoPickerAdapter? photoPickerAdapter,
     PhotoPermissionService? photoPermissionService,
     this.dimensionReader = readPhotoDimensions,
@@ -119,6 +128,10 @@ class InputMethodSelectScreen extends StatefulWidget {
          existingDrawingSessionId == null || htpAssessmentId == null,
          '복원 모드(existingDrawingSessionId)와 전환 모드(htpAssessmentId)는 '
          '동시에 켤 수 없다.',
+       ),
+       assert(
+         pendingPhoto == null || existingDrawingSessionId != null,
+         '미리 촬영한 사진 자동 업로드는 기존 UPLOAD 세션에만 올린다.',
        ),
        useInAppCamera = photoPickerAdapter == null,
        photoPickerAdapter = photoPickerAdapter ?? ImagePickerPhotoAdapter(),
@@ -147,6 +160,16 @@ class InputMethodSelectScreen extends StatefulWidget {
 
   /// 사진으로 시작하기 옵션을 노출할지 여부(S15P11B209-702, 기본 꺼짐).
   final bool htpPhotoUploadEnabled;
+
+  /// 참이면 "사진으로 시작하기"가 단일 촬영이 아니라 HTP 선촬영 배치를
+  /// 요청하며 [HtpPhotoBatchRequested]로 pop한다(S15P11B209-872). 첫 주제
+  /// 방식 선택에서만 켠다.
+  final bool htpPhotoBatchEnabled;
+
+  /// 선촬영해 보관해 둔 사진(S15P11B209-872). 주어지면 카메라·방식 선택 없이
+  /// [existingDrawingSessionId] 세션에 이 사진을 바로 업로드한다.
+  final ValidatedPhoto? pendingPhoto;
+
   final String Function()? idempotencyKeyProvider;
   final bool useInAppCamera;
   final PhotoPickerAdapter photoPickerAdapter;
@@ -220,6 +243,15 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
             const DrawingActivityContextDto.general(),
         inputMethod: 'UPLOAD',
       );
+      final pending = widget.pendingPhoto;
+      if (pending != null) {
+        // 선촬영한 사진은 확인·촬영 없이 미리보기 상태에서 바로 업로드한다.
+        _validated = pending;
+        _step = _Step.preview;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) unawaited(_confirmAndUpload());
+        });
+      }
     } else {
       _step = _Step.methodChoice;
     }
@@ -341,6 +373,12 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
 
   void _choosePhotoMethod() {
     if (!_canStartAction) return;
+    // 선촬영 배치가 켜져 있으면 단일 촬영 대신 상위에 배치 시작을 신호한다.
+    if (widget.htpPhotoBatchEnabled) {
+      _isLeaving = true;
+      Navigator.of(context).pop(const HtpPhotoBatchRequested());
+      return;
+    }
     _invalidateUpload(clearSnapshot: true);
     setState(() {
       _step = _Step.photoSource;
@@ -975,7 +1013,12 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
                   _Step.methodChoice => _buildMethodChoice(context),
                   _Step.photoSource => _buildPhotoSource(context),
                   _Step.cameraGuidance => _buildCameraGuidance(context),
-                  _Step.preview => _buildPreview(context),
+                  // 선촬영해 둔 사진은 이미 확인·재촬영을 거쳤으므로 "이 사진으로
+                  // 시작할까?" 확인 대신 곧장 업로드 진행 화면만 보여준다
+                  // (S15P11B209-872).
+                  _Step.preview => widget.pendingPhoto != null
+                      ? _buildPendingUpload(context)
+                      : _buildPreview(context),
                 },
               ),
             ),
@@ -1236,6 +1279,83 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
     ],
   );
 
+  /// 선촬영한 사진의 주제(집·나무·사람) 라벨. 진행 문구에 붙인다.
+  String get _pendingSubjectLabel => switch (widget
+          .restoredActivityContext
+          ?.drawingSubject) {
+    'HOUSE' => '집',
+    'TREE' => '나무',
+    'PERSON' => '사람',
+    _ => '',
+  };
+
+  /// 선촬영해 둔 사진을 자동 업로드하는 동안 보여주는 화면(S15P11B209-872).
+  ///
+  /// 미리보기·"이 사진 사용하기" 확인을 없애고, 도담이가 진행률만큼 걸어가는
+  /// 로딩바만 보여준다. 진행률은 실제 업로드 진행(onSendProgress)에 묶여 있어
+  /// 반복 애니메이션이 없다(완료 시 값이 확정돼 테스트에서도 정착한다).
+  Widget _buildPendingUpload(BuildContext context) {
+    final subject = _pendingSubjectLabel;
+    final prefix = subject.isEmpty ? '' : '$subject 그림 ';
+    // 진행률바 배분: 실제 바이트 전송은 앞 85%에만 반영하고(파일 전송은 금방
+    // 끝난다), 진행 신호가 없는 서버 처리(완료 응답 대기) 구간은 85%→98%로
+    // 천천히 기어가게 해 "꽉 채우고 멈춤"으로 보이지 않게 한다.
+    const sendShare = 0.85;
+    final sent = (_uploadProgressPercent ?? 0) / 100;
+    final (double progress, String message, Duration duration) =
+        switch (_phase) {
+          _InputPhase.creatingSession => (
+            0.05,
+            '사진을 올릴 준비를 하고 있어요',
+            const Duration(milliseconds: 400),
+          ),
+          _InputPhase.uploading => (
+            0.05 + sent * (sendShare - 0.05),
+            '$prefix사진을 올리고 있어요',
+            const Duration(milliseconds: 450),
+          ),
+          // 서버 처리 대기: 실제 진행 신호가 없어 100%에는 닿지 않게 하고
+          // 8초에 걸쳐 98%까지 서서히 기어간다(유한 → 테스트에서 정착).
+          _InputPhase.completing => (
+            0.98,
+            '$prefix사진을 확인하고 있어요',
+            const Duration(seconds: 8),
+          ),
+          _ => (
+            0.05,
+            '$prefix사진을 올리고 있어요',
+            const Duration(milliseconds: 400),
+          ),
+        };
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (_uploadError case final error?) ...[
+          _ErrorBanner(
+            key: const ValueKey('input-method-upload-error'),
+            icon: error.icon,
+            message: error.message,
+          ),
+          if (error.canRetry) ...[
+            const SizedBox(height: AppSpacing.lg),
+            AppButton(
+              key: const ValueKey('input-method-confirm'),
+              label: '다시 시도',
+              variant: AppButtonVariant.child,
+              onPressed: _canStartAction ? _confirmAndUpload : null,
+            ),
+          ],
+        ] else
+          _UploadMascotBar(
+            key: const ValueKey('input-method-pending-upload'),
+            progress: progress,
+            message: message,
+            duration: duration,
+          ),
+      ],
+    );
+  }
+
   Widget _buildPreview(BuildContext context) {
     final validated = _validated!;
     return Column(
@@ -1363,6 +1483,102 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// 도담이가 진행률만큼 바 위를 걸어가는 업로드 로딩바(S15P11B209-872).
+///
+/// [progress](0~1)와 [TweenAnimationBuilder]로만 움직인다 — `repeat()` 같은
+/// 무한 반복이 없어 업로드가 끝나 값이 확정되면 애니메이션이 정착한다(위젯
+/// 테스트의 pumpAndSettle가 타임아웃 나지 않는다).
+class _UploadMascotBar extends StatelessWidget {
+  const _UploadMascotBar({
+    required this.progress,
+    required this.message,
+    required this.duration,
+    super.key,
+  });
+
+  final double progress;
+  final String message;
+
+  /// 현재 진행률로 채워지는 데 걸리는 시간. 전송 구간은 짧게 반응하고, 서버
+  /// 처리 대기 구간은 길게 잡아 바가 멈춘 듯 보이지 않고 서서히 차오르게 한다.
+  final Duration duration;
+
+  static const double _mascotSize = 168;
+  static const double _trackHeight = 18;
+
+  @override
+  Widget build(BuildContext context) {
+    final target = progress.clamp(0.0, 1.0);
+    return Semantics(
+      liveRegion: true,
+      label: message,
+      value: '${(target * 100).round()}%',
+      child: ExcludeSemantics(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final width = constraints.maxWidth;
+                final travel = (width - _mascotSize).clamp(0.0, width);
+                return TweenAnimationBuilder<double>(
+                  tween: Tween<double>(begin: 0, end: target),
+                  duration: duration,
+                  curve: Curves.easeOut,
+                  builder: (context, value, _) => SizedBox(
+                    width: width,
+                    height: _mascotSize + _trackHeight + AppSpacing.xs,
+                    child: Stack(
+                      children: [
+                        Positioned(
+                          left: travel * value,
+                          top: 0,
+                          child: Image.asset(
+                            'assets/characters/dodam_resume_loading.png',
+                            width: _mascotSize,
+                            height: _mascotSize,
+                            filterQuality: FilterQuality.medium,
+                            // 테스트 등 에셋을 못 읽는 환경에서도 예외로 실패하지
+                            // 않도록 자리만 차지하는 placeholder로 대체한다.
+                            errorBuilder: (_, _, _) => const SizedBox(
+                              width: _mascotSize,
+                              height: _mascotSize,
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(
+                              _trackHeight / 2,
+                            ),
+                            child: LinearProgressIndicator(
+                              value: value,
+                              minHeight: _trackHeight,
+                              backgroundColor: AppColors.outline,
+                              valueColor: const AlwaysStoppedAnimation<Color>(
+                                AppColors.tangerine,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(message, textAlign: TextAlign.center, style: AppTypography.body),
+          ],
+        ),
+      ),
     );
   }
 }
