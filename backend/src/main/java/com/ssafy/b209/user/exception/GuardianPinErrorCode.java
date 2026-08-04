@@ -10,6 +10,16 @@ import org.springframework.http.HttpStatus;
  * 내려간다({@link GuardianPinException}).
  */
 public enum GuardianPinErrorCode implements ErrorCode {
+
+  /**
+   * PIN 형식 위반이다.
+   *
+   * <p><b>HTTP 경로로는 도달하지 않는다.</b> 요청 DTO 의 {@code @NotBlank @Pattern("^\\d{4}$")} 와 Controller 의
+   * {@code @Valid} 가 먼저 걸러 실제 응답은 {@code COMMON_400_001} 이고 {@code data} 에 {@code
+   * ValidationErrorData} 가 실린다. 이 코드는 Bean Validation 을 거치지 않는 서비스 내부 직접 호출에 대한 가드로만 유효하다. Jira
+   * S15P11B209-879 의 오류 표에 이 코드가 "400, data 없음"으로 적혀 있으나 사실과 다르다({@code
+   * docs/api/guardian-pin-contract.md} 참고).
+   */
   PIN_INVALID(HttpStatus.BAD_REQUEST, "PIN_INVALID", "PIN은 숫자 4자리여야 합니다."),
   PIN_MISMATCH(HttpStatus.UNAUTHORIZED, "PIN_MISMATCH", "PIN이 일치하지 않습니다."),
   PIN_NOT_CONFIGURED(HttpStatus.CONFLICT, "PIN_NOT_CONFIGURED", "설정된 PIN이 없습니다."),
