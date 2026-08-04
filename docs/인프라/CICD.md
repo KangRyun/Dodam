@@ -16,8 +16,8 @@ push/머지 (GitLab)
    │
    ▼  (develop 브랜치만 계속 진행)
 [develop 전용] Docker Build(+SHA 태그) → ai import 스모크
-              → Deploy (docker compose up -d, .env 주입)
-              → Healthcheck (mysql·backend·ai가 healthy 될 때까지 대기)
+              → Deploy (로컬 레지스트리 푸시 → kubectl set image → rollout status)
+              → Healthcheck (backend·gateway·ai·web 파드 Ready + 게이트웨이 e2e)
 ```
 
 - **테스트 실패 = 그 자리에서 중단.** develop이면 배포되지 않습니다(운영 보호 게이트).
