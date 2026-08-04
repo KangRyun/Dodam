@@ -1578,5 +1578,54 @@ class ReportContractAlignmentTest(unittest.TestCase):
                 self.assertRegex(block + self.text, rf"{field}[^\n]*{limit}|{limit}[^\n]*{field}")
 
 
+class RoutingSingleOwnerTest(unittest.TestCase):
+    """표시 위치를 [1]/[2]/[3] 절만 말하는지 (S15P11B209-871).
+
+    826이 라우팅을 재정의한 뒤 845가 "우려 소견도 보호자에게 보낸다"를 추가해, 같은 파일이
+    features 에 대해 '보호자에게 보낸다'와 '보호자 화면에 안 나간다'를 동시에 말했다.
+    스키마 설명도 826 이전의 "보호자에게 노출 가능한" 문구를 그대로 달고 있었다.
+    소유자를 한 곳으로 못박아, 다음 수정자가 다른 구역에 목적지를 또 쓰지 않게 한다.
+    """
+
+    def setUp(self):
+        self.text = prompts_registry.load("report_common")
+        self.schema = self.text[self.text.index("{\n  \"overallSummary\"") :]
+
+    def test_routing_ownership_is_declared(self):
+        head = self.text.split("[1]", 1)[0]
+        self.assertIn("이 절에서만", head)
+        self.assertIn("표시 위치는 다시 적지 않는다", head)
+
+    def test_schema_descriptions_make_no_display_claims(self):
+        """스키마 설명이 목적지를 말하면 [1]/[2]/[3]과 어긋날 수 있다 — 아예 말하지 않는다."""
+        for claim in ("보호자 화면", "노출 가능", "전문가 검토용", "화면에 안 나감"):
+            self.assertNotIn(claim, self.schema, f"스키마 설명에 표시 위치 주장: {claim}")
+
+    def test_expert_tier_fields_are_not_promised_to_guardian(self):
+        """845 회귀 — features 를 '보호자에게 보낸다'고 말하면 [2]와 정면 충돌한다."""
+        self.assertNotIn("이 조건을 갖추면 보호자에게 보낸다", self.text)
+        self.assertNotIn("근거가 분명하면 보호자에게 전할 수 있고", self.text)
+
+    def test_concerning_findings_have_a_named_destination(self):
+        """'보호자에게 전할 수 있다'고만 하면 담을 자리가 없다 — 필드를 지목해야 한다."""
+        rule = self.text.split("걱정되는 점이 보이면", 1)[1].split("\n-", 1)[0]
+        self.assertIn("features", rule)
+        self.assertIn("REVIEWED_GUARDIAN", rule)
+
+    def test_visibility_scope_is_described_as_classification(self):
+        """지금은 어느 쪽이든 보호자 화면에 안 나간다 — '분류'지 '노출 전환'이 아니다."""
+        expert = self.text.split("[2]", 1)[1].split("[3]", 1)[0]
+        self.assertIn("visibilityScope", expert)
+        self.assertIn("분류값", expert)
+
+    def test_activity_notes_count_floor_is_stated(self):
+        """스키마에서 '불릿' 표시를 걷어내자 activityNotes 가 평균 2.67 → 1.00 으로 줄었다.
+
+        표시 위치 주장 없이 개수 신호를 살리려면 개수를 소유한 출력 형식 절이 하한을 말해야
+        한다. 이 줄이 빠지면 보호자 '활동 기록' 카드가 한 줄짜리가 된다(실측 회귀).
+        """
+        self.assertIn("activityNotes 는 **2~3개**를 채운다(3개를 넘기지 마)", self.text)
+
+
 if __name__ == "__main__":
     unittest.main()
