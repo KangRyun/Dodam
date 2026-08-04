@@ -303,9 +303,10 @@ final class DrawingToolbar extends StatelessWidget {
             // 두고 그 안에서 점이 커지게 해야 어느 정도인지 견줄 수 있다.
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: AppColors.canvasWarm,
+                // 툴바보다 밝으면 자리 자체가 튀어 보인다. 종이 톤으로 낮춘다.
+                color: AppColors.canvasStage,
                 shape: BoxShape.circle,
-                border: Border.all(color: AppColors.canvasBorderStrong),
+                border: Border.all(color: AppColors.canvasBorder),
               ),
               child: SizedBox.square(
                 dimension: 40,
