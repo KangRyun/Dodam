@@ -1094,6 +1094,8 @@ ReportDetailDto _report({
       : null,
   guardianConversationGuide: sections ? const ['어떤 부분이 좋아?'] : const [],
   limitations: sections ? const ['이 리포트는 진단이 아닌 관찰 참고 자료입니다.'] : const [],
+  nonDiagnosticNotice:
+      '이 리포트는 아이가 그림을 그리고 대화한 과정에서 나타난 특징을 정리한 자료예요.',
   expertReview: const ReportExpertReviewDto(
     status: 'NOT_REQUESTED',
     available: false,
