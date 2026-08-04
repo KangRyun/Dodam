@@ -9,13 +9,15 @@
 - answer_check.sanitize: TTS로 곤란한 이모지·마크업 제거(형식 정화).
 - answer_check.find_violations: 진단·심리해석·검사 채점 표현(아동에게 절대 금지).
 - crisis_detection.detect: 자해·학대·위기 소재를 질문이 되레 담고 있는지(모델 오작동 방어).
+- relationship_guard.find_unsafe_relationship: 사람 행세·둘만의 비밀·정서 의존 조장.
 
 판정 순서(먼저 걸리는 것이 사유가 된다):
   1) 형식 정화 → 정화본을 이후 단계·최종 출력에 쓴다.
   2) 진단·심리해석 표현 → 차단(DIAGNOSTIC_LANGUAGE).
   3) 위기 소재를 담은 질문 → 차단(CRISIS_CONTENT).
   4) 내부 사유 코드·위기 경고 문구 유출 → 차단(CHILD_UNSAFE_NOTICE, S15P11B209-597).
-  5) 통과 → 정화본을 안전한 질문으로 돌려준다.
+  5) AI-아동 관계 위험 표현 → 차단(UNSAFE_RELATIONSHIP, S15P11B209-856).
+  6) 통과 → 정화본을 안전한 질문으로 돌려준다.
 
 처리(차단 시): question_service가 SafetyBlockedError로 올려 엔드포인트가 422
 AI_SAFETY_POLICY_BLOCKED로 매핑한다 → BE가 저장 없이 폴백 템플릿으로 대체한다.
@@ -32,15 +34,18 @@ from dataclasses import dataclass
 import answer_check
 import child_screen_guard
 import crisis_detection
+import relationship_guard
 
 # 차단 사유 코드(SafetyResult.blockReasonCode로 전달). BE·후속 위기 안내가 이 값으로 분기한다.
 DIAGNOSTIC_LANGUAGE = "DIAGNOSTIC_LANGUAGE"  # 진단·심리해석·검사 채점 표현
 CRISIS_CONTENT = "CRISIS_CONTENT"  # 자해·학대·위기 소재를 질문이 담음
 CHILD_UNSAFE_NOTICE = "CHILD_UNSAFE_NOTICE"  # 내부 사유 코드·위기 경고 문구 유출(S15P11B209-597)
+UNSAFE_RELATIONSHIP = "UNSAFE_RELATIONSHIP"  # 사람 행세·둘만의 비밀·정서 의존(S15P11B209-856)
 
 # 규칙 묶음의 버전 태그 — 규칙이 바뀌면 올려 재현성을 기록한다. 요청의 safety_rule_version과
 # 별개로, '이 파이프라인이 어떤 규칙 집합으로 판정했는지'를 나타낸다.
-PIPELINE_VERSION = "question-safety-1.0.0"
+# 1.1.0(856): relationship_guard 단계 추가.
+PIPELINE_VERSION = "question-safety-1.1.0"
 
 
 @dataclass(frozen=True)
@@ -86,6 +91,11 @@ def evaluate(question_text: str) -> SafetyVerdict:
     if child_screen_guard.contains_child_unsafe(cleaned):
         return SafetyVerdict("BLOCKED", cleaned, CHILD_UNSAFE_NOTICE)
 
+    # 사람 행세·둘만의 비밀·정서 의존 조장(S15P11B209-856). 셋 다 아이가 곁의 어른에게
+    # 가야 할 말을 도담 쪽으로 돌려놓는다 — 진단 표현만큼이나 아이 화면에 나가면 안 된다.
+    if relationship_guard.contains_unsafe_relationship(cleaned):
+        return SafetyVerdict("BLOCKED", cleaned, UNSAFE_RELATIONSHIP)
+
     return SafetyVerdict("PASSED", cleaned, None)
 
 
@@ -96,6 +106,7 @@ if __name__ == "__main__":
         "이 그림은 불안을 의미하니? 😢",          # 진단 표현 → BLOCKED
         "혹시 죽고 싶었던 적 있어?",              # 위기 소재 → BLOCKED
         "**이 집에는** (누가) 살아?",             # 마크업 정화 → PASSED
+        "엄마한테는 비밀로 하자.",                # 관계 위험 → BLOCKED
     ]
     for s in samples:
         v = evaluate(s)

@@ -91,11 +91,20 @@ class ShortVersionTest(unittest.TestCase):
         )
 
     def test_semver_is_max_of_members(self):
-        # conversations_htp(2.3.0) > conversation_common(1.1.0) — 큰 쪽이 세대를 대표한다.
-        value = prompts_registry.short_version(
-            "conv", "conversations_htp", "conversation_common"
+        # conversations_htp(2.x) > conversation_common(1.x) — 큰 쪽이 세대를 대표한다.
+        # ⚠️ 기대값을 적어 두지 않고 레지스트리에서 가져온다. 하드코딩하면 프롬프트를
+        #    올릴 때마다 이 테스트가 깨져, 규칙이 아니라 숫자를 고치게 된다(856에서 겪음).
+        members = ("conversations_htp", "conversation_common")
+        expected = max(
+            (prompts_registry._PROMPT_SEMVER[m] for m in members),
+            key=lambda s: tuple(int(p) for p in s.split(".")),
         )
-        self.assertTrue(value.startswith("conv@2.3.0+"))
+        value = prompts_registry.short_version("conv", *members)
+        self.assertTrue(value.startswith(f"conv@{expected}+"), value)
+        # 작은 쪽이 대표가 되면 안 된다.
+        self.assertNotEqual(
+            expected, prompts_registry._PROMPT_SEMVER["conversation_common"]
+        )
 
 
 class VersionTagLengthTest(unittest.TestCase):
