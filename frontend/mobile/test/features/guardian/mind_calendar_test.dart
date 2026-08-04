@@ -1,6 +1,9 @@
+import 'package:dodam/core/network/api_page.dart';
 import 'package:dodam/features/activity/data/dto/activity_dtos.dart';
+import 'package:dodam/features/activity/domain/repositories/activity_repository.dart';
 import 'package:dodam/features/guardian/presentation/widgets/mind_calendar_card.dart';
 import 'package:dodam/features/guardian/presentation/widgets/mind_emotion.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 ActivitySummaryDto _activity({
@@ -85,4 +88,82 @@ void main() {
       expect(result[3], MindEmotion.scared);
     });
   });
+
+  // 헤더 겹침 회귀(S15P11B209-787): 좁은 카드 폭에서 연·월 / 제목 / 활동수가
+  // 서로 겹치면 안 된다. 옛 Stack 구조는 가운데 제목이 연·월 위로 올라타
+  // 겹쳤다(Stack overflow는 예외를 던지지 않아 기존 overflow 테스트로는 못 잡음).
+  group('마음 달력 헤더 레이아웃', () {
+    Future<void> pumpCardAt(WidgetTester tester, double width) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Center(
+              child: SizedBox(
+                width: width,
+                height: 520,
+                child: MindCalendarCard(
+                  childId: 1,
+                  repository: _EmptyActivityRepository(),
+                  childName: '도담이',
+                  initialMonth: DateTime(2026, 8),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('좁은 폭(360)에서 연·월과 제목이 가로로 겹치지 않는다', (tester) async {
+      await pumpCardAt(tester, 360);
+
+      final monthRect = tester.getRect(find.text('2026년 8월'));
+      final titleRect = tester.getRect(find.text('이번 달 마음 달력'));
+
+      // 제목은 연·월 오른쪽에 놓여야 한다(겹치면 title.left < month.right).
+      expect(
+        titleRect.left,
+        greaterThanOrEqualTo(monthRect.right),
+        reason: '제목이 연·월 텍스트와 겹쳤다(옛 Stack 회귀).',
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('넓은 폭(560)에서도 연·월과 제목이 겹치지 않고 활동수가 오른쪽 끝에 있다', (
+      tester,
+    ) async {
+      await pumpCardAt(tester, 560);
+
+      final monthRect = tester.getRect(find.text('2026년 8월'));
+      final titleRect = tester.getRect(find.text('이번 달 마음 달력'));
+      // 활동 합산은 Text.rich라 findRichText로 잡는다.
+      final countRect = tester.getRect(
+        find.textContaining('활동', findRichText: true),
+      );
+
+      expect(titleRect.left, greaterThanOrEqualTo(monthRect.right));
+      expect(countRect.left, greaterThanOrEqualTo(titleRect.right));
+      expect(tester.takeException(), isNull);
+    });
+  });
+}
+
+/// 헤더 레이아웃만 검증하므로 활동은 비운다.
+final class _EmptyActivityRepository implements ActivityRepository {
+  @override
+  Future<ApiPage<ActivitySummaryDto>> getActivities(
+    int childId, {
+    ActivityFilterDto filter = const ActivityFilterDto(),
+  }) async => const ApiPage<ActivitySummaryDto>(
+    content: [],
+    page: 0,
+    size: 8,
+    totalElements: 0,
+    totalPages: 1,
+    hasNext: false,
+  );
+
+  @override
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
