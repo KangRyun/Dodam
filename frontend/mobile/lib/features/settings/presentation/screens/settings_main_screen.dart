@@ -61,22 +61,17 @@ class _SettingsMainScreenState extends State<SettingsMainScreen> {
     }
   }
 
-  void _showPending(String title) {
-    showAppMessage(context, message: '$title 화면은 준비 중이에요.');
-  }
-
   void _openProfile() =>
       AppNavigation.pushNamed(context, AppRoutes.settingsProfile);
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: AppColors.canvas,
+    backgroundColor: _ForgePalette.canvas,
     appBar: const AppTopBar(title: '설정'),
     body: SafeArea(
       child: _SettingsContent(
         user: widget.user,
         isSigningOut: _isSigningOut,
-        onItemSelected: _showPending,
         onProfileSelected: _openProfile,
         onSignOut: _signOut,
       ),
@@ -84,139 +79,98 @@ class _SettingsMainScreenState extends State<SettingsMainScreen> {
   );
 }
 
+abstract final class _ForgePalette {
+  static const canvas = Color(0xFFFFF9EF);
+  static const surface = Color(0xFFFFFDF7);
+  static const sage = Color(0xFFDDEAD5);
+  static const sageSoft = Color(0xFFEEF5E9);
+  static const forest = Color(0xFF315B49);
+  static const parchment = Color(0xFFF7EAC8);
+  static const parchmentSoft = Color(0xFFFFF8E8);
+  static const outline = Color(0xFFE7D9B8);
+  static const brass = Color(0xFFC89B3C);
+  static const walnut = Color(0xFF795035);
+  static const ember = Color(0xFFDF8448);
+  static const ink = Color(0xFF2F3531);
+  static const inkMuted = Color(0xFF717970);
+  static const danger = Color(0xFFC45E4D);
+  static const dangerSoft = Color(0xFFF9EBE7);
+}
+
 class _SettingsContent extends StatelessWidget {
   const _SettingsContent({
     required this.user,
     required this.isSigningOut,
-    required this.onItemSelected,
     required this.onProfileSelected,
     required this.onSignOut,
   });
 
   final AuthenticatedUser? user;
   final bool isSigningOut;
-  final ValueChanged<String> onItemSelected;
   final VoidCallback onProfileSelected;
   final VoidCallback onSignOut;
 
   @override
-  Widget build(BuildContext context) => SingleChildScrollView(
-    padding: const EdgeInsets.all(AppSpacing.xl),
-    child: Center(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(
-          maxWidth: AppSizes.wideContentMaxWidth,
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _ProfileCard(user: user, onTap: onProfileSelected),
-            const SizedBox(height: AppSpacing.lg),
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final account = _SettingsGroup(
-                  children: [
-                    _SettingsTile(
-                      icon: Icons.person_outline_rounded,
-                      title: '내 정보 관리',
-                      subtitle: '닉네임 · 이메일 · 프로필',
-                      onTap: onProfileSelected,
-                    ),
-                    _SettingsTile(
-                      icon: Icons.lock_outline_rounded,
-                      title: '개인정보 관리',
-                      subtitle: '연결 계정 · 데이터 관리',
-                      onTap: () => onItemSelected('개인정보 관리'),
-                    ),
-                  ],
-                );
-                final preferences = _SettingsGroup(
-                  children: [
-                    _SettingsTile(
-                      icon: Icons.fact_check_outlined,
-                      title: '동의 관리',
-                      subtitle: '동의 현황 · 변경 · 철회',
-                      onTap: () => AppNavigation.pushNamed(
-                        context,
-                        AppRoutes.settingsConsents,
-                      ),
-                    ),
-                    _SettingsTile(
-                      key: const ValueKey('settings-notifications-tile'),
-                      icon: Icons.notifications_none_rounded,
-                      title: '알림 설정',
-                      subtitle: '분석 완료 · 서비스 · 커뮤니티 알림',
-                      onTap: () => AppNavigation.pushNamed(
-                        context,
-                        AppRoutes.settingsNotifications,
-                      ),
-                    ),
-                    _SettingsTile(
-                      icon: Icons.inventory_2_outlined,
-                      title: '데이터 보관 기간',
-                      subtitle: '보관 기간과 안내 시점 설정',
-                      onTap: () => AppNavigation.pushNamed(
-                        context,
-                        AppRoutes.settingsDataRetention,
-                      ),
-                    ),
-                  ],
-                );
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, viewportConstraints) {
+      final horizontalPadding = switch (viewportConstraints.maxWidth) {
+        < 480 => AppSpacing.md,
+        < 900 => AppSpacing.lg,
+        _ => AppSpacing.xl,
+      };
 
-                if (constraints.maxWidth < 820) {
-                  return Column(
-                    children: [
-                      account,
-                      const SizedBox(height: AppSpacing.lg),
-                      preferences,
-                    ],
-                  );
-                }
-                return Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(child: account),
-                    const SizedBox(width: AppSpacing.lg),
-                    Expanded(child: preferences),
-                  ],
-                );
-              },
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            _SettingsGroup(
-              children: [
-                _SettingsTile(
-                  key: const ValueKey('settings-terms-tile'),
-                  icon: Icons.description_outlined,
-                  title: '약관 및 정책',
-                  subtitle: '서비스 이용약관 · 개인정보 처리방침',
-                  onTap: () =>
-                      AppNavigation.pushNamed(context, AppRoutes.settingsTerms),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
-            _AccountActions(
-              isSigningOut: isSigningOut,
-              onSignOut: onSignOut,
-              onWithdraw: () =>
-                  AppNavigation.pushNamed(context, AppRoutes.settingsWithdraw),
-            ),
-          ],
+      return SingleChildScrollView(
+        key: const ValueKey('settings-scroll-view'),
+        padding: EdgeInsets.fromLTRB(
+          horizontalPadding,
+          AppSpacing.lg,
+          horizontalPadding,
+          AppSpacing.xxl,
         ),
-      ),
-    ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: AppSizes.wideContentMaxWidth,
+            ),
+            child: LayoutBuilder(
+              builder: (context, contentConstraints) => Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _ForgeBanner(
+                    user: user,
+                    availableWidth: contentConstraints.maxWidth,
+                  ),
+                  const SizedBox(height: AppSpacing.lg),
+                  _SettingsGroups(
+                    availableWidth: contentConstraints.maxWidth,
+                    isSigningOut: isSigningOut,
+                    onProfileSelected: onProfileSelected,
+                    onSignOut: onSignOut,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    },
   );
 }
 
-class _ProfileCard extends StatelessWidget {
-  const _ProfileCard({required this.user, required this.onTap});
+class _ForgeBanner extends StatelessWidget {
+  const _ForgeBanner({required this.user, required this.availableWidth});
 
   final AuthenticatedUser? user;
-  final VoidCallback onTap;
+  final double availableWidth;
 
   @override
   Widget build(BuildContext context) {
+    final isCompact = availableWidth < 640;
+    final frameSize = switch (availableWidth) {
+      >= 960 => 168.0,
+      >= 640 => 148.0,
+      _ => 116.0,
+    };
     final nickname = user?.nickname?.trim();
     final displayName = nickname == null || nickname.isEmpty
         ? '보호자님'
@@ -225,49 +179,121 @@ class _ProfileCard extends StatelessWidget {
       AuthProvider.kakao => '카카오',
       AuthProvider.google => '구글',
       AuthProvider.naver => '네이버',
-      null => '소셜',
+      null => null,
     };
+    final accountLabel = provider == null
+        ? '$displayName의 계정 정보를 확인해 주세요'
+        : '$displayName · $provider 계정 연결됨';
 
-    return Material(
-      color: AppColors.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        side: const BorderSide(color: AppColors.outline),
-      ),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(AppRadius.lg),
-        onTap: onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(AppSpacing.lg),
-          child: Row(
+    final character = _BlacksmithFrame(size: frameSize);
+    final copy = Column(
+      crossAxisAlignment: isCompact
+          ? CrossAxisAlignment.center
+          : CrossAxisAlignment.start,
+      children: [
+        Semantics(
+          label: '설정 화면 콘셉트',
+          child: Container(
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.sm,
+              vertical: AppSpacing.xxs,
+            ),
+            decoration: BoxDecoration(
+              color: _ForgePalette.sageSoft,
+              borderRadius: BorderRadius.circular(AppRadius.pill),
+              border: Border.all(color: _ForgePalette.outline),
+            ),
+            child: Text(
+              '도담이 대장간',
+              style: AppTypography.label.copyWith(
+                color: _ForgePalette.forest,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+        Semantics(
+          header: true,
+          child: Text(
+            '설정을 차근차근 정리해요',
+            textAlign: isCompact ? TextAlign.center : TextAlign.start,
+            style: AppTypography.titleLg.copyWith(color: _ForgePalette.forest),
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          '계정과 앱 사용 환경을 보호자님에게 맞게 관리할 수 있어요.',
+          textAlign: isCompact ? TextAlign.center : TextAlign.start,
+          style: AppTypography.body.copyWith(color: _ForgePalette.inkMuted),
+        ),
+        const SizedBox(height: AppSpacing.md),
+        Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
+          decoration: BoxDecoration(
+            color: _ForgePalette.parchmentSoft,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(color: _ForgePalette.outline),
+          ),
+          child: Text(
+            accountLabel,
+            textAlign: isCompact ? TextAlign.center : TextAlign.start,
+            style: AppTypography.bodySm.copyWith(
+              color: _ForgePalette.ink,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
+    );
+
+    return Semantics(
+      container: true,
+      explicitChildNodes: true,
+      label: '설정 안내',
+      child: Container(
+        key: const ValueKey('settings-forge-banner'),
+        decoration: BoxDecoration(
+          color: _ForgePalette.sage,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          border: Border.all(color: _ForgePalette.outline),
+          boxShadow: [
+            BoxShadow(
+              color: _ForgePalette.walnut.withValues(alpha: 0.09),
+              offset: Offset(0, 5),
+              blurRadius: 12,
+            ),
+          ],
+        ),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(AppRadius.lg - 1),
+          child: Stack(
             children: [
-              Container(
-                width: 72,
-                height: 72,
-                decoration: const BoxDecoration(
-                  color: AppColors.leafSoft,
-                  shape: BoxShape.circle,
+              const Positioned.fill(child: _ForgeBannerDecoration()),
+              Padding(
+                padding: EdgeInsets.symmetric(
+                  horizontal: isCompact ? AppSpacing.lg : AppSpacing.xl,
+                  vertical: isCompact ? AppSpacing.lg : AppSpacing.xl,
                 ),
-                child: const Icon(
-                  Icons.eco_rounded,
-                  size: 34,
-                  color: AppColors.leaf,
-                ),
-              ),
-              const SizedBox(width: AppSpacing.md),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(displayName, style: AppTypography.titleLg),
-                    const SizedBox(height: AppSpacing.xxs),
-                    Text('$provider 계정 연결됨', style: AppTypography.bodySm),
-                  ],
-                ),
-              ),
-              const Icon(
-                Icons.chevron_right_rounded,
-                color: AppColors.inkMuted,
+                child: isCompact
+                    ? Column(
+                        children: [
+                          character,
+                          const SizedBox(height: AppSpacing.lg),
+                          copy,
+                        ],
+                      )
+                    : Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          character,
+                          const SizedBox(width: AppSpacing.xl),
+                          Expanded(child: copy),
+                        ],
+                      ),
               ),
             ],
           ),
@@ -277,25 +303,327 @@ class _ProfileCard extends StatelessWidget {
   }
 }
 
-class _SettingsGroup extends StatelessWidget {
-  const _SettingsGroup({required this.children});
+class _ForgeBannerDecoration extends StatelessWidget {
+  const _ForgeBannerDecoration();
 
+  @override
+  Widget build(BuildContext context) => IgnorePointer(
+    child: ExcludeSemantics(
+      child: Stack(
+        children: [
+          Positioned(
+            right: -28,
+            bottom: -44,
+            child: Container(
+              width: 180,
+              height: 180,
+              decoration: const BoxDecoration(
+                color: Color(0x18EEF5E9),
+                shape: BoxShape.circle,
+              ),
+            ),
+          ),
+          const Positioned(left: 14, top: 14, child: _BrassRivet()),
+          const Positioned(right: 14, top: 14, child: _BrassRivet()),
+          Positioned(
+            right: 28,
+            bottom: 18,
+            child: Container(
+              width: 104,
+              height: 2,
+              color: _ForgePalette.brass.withValues(alpha: 0.32),
+            ),
+          ),
+          Positioned(
+            right: 48,
+            bottom: 26,
+            child: Container(
+              width: 64,
+              height: 2,
+              color: _ForgePalette.ember.withValues(alpha: 0.18),
+            ),
+          ),
+        ],
+      ),
+    ),
+  );
+}
+
+class _BrassRivet extends StatelessWidget {
+  const _BrassRivet();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 8,
+    height: 8,
+    decoration: BoxDecoration(
+      color: _ForgePalette.brass.withValues(alpha: 0.5),
+      shape: BoxShape.circle,
+      border: Border.all(color: _ForgePalette.parchmentSoft, width: 1),
+    ),
+  );
+}
+
+class _BlacksmithFrame extends StatelessWidget {
+  const _BlacksmithFrame({required this.size});
+
+  final double size;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const ValueKey('settings-blacksmith-frame'),
+    width: size,
+    height: size,
+    padding: const EdgeInsets.all(4),
+    decoration: BoxDecoration(
+      color: _ForgePalette.parchment,
+      borderRadius: BorderRadius.circular(AppRadius.lg),
+      border: Border.all(color: _ForgePalette.brass, width: 2),
+      boxShadow: [
+        BoxShadow(
+          color: _ForgePalette.walnut.withValues(alpha: 0.25),
+          offset: Offset(0, 6),
+          blurRadius: 0,
+        ),
+      ],
+    ),
+    child: Container(
+      padding: const EdgeInsets.all(AppSpacing.xs),
+      decoration: BoxDecoration(
+        color: _ForgePalette.parchmentSoft,
+        borderRadius: BorderRadius.circular(AppRadius.lg - 6),
+        border: Border.all(color: _ForgePalette.outline),
+      ),
+      clipBehavior: Clip.hardEdge,
+      child: Semantics(
+        image: true,
+        label: '설정을 정리하는 대장장이 도담이',
+        child: ExcludeSemantics(
+          child: Transform.scale(
+            scale: 1.22,
+            alignment: const Alignment(0, -0.02),
+            child: Image.asset(
+              'assets/characters/dodami_blacksmith_profile.png',
+              key: const ValueKey('settings-blacksmith-character'),
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.high,
+            ),
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+class _SettingsGroups extends StatelessWidget {
+  const _SettingsGroups({
+    required this.availableWidth,
+    required this.isSigningOut,
+    required this.onProfileSelected,
+    required this.onSignOut,
+  });
+
+  final double availableWidth;
+  final bool isSigningOut;
+  final VoidCallback onProfileSelected;
+  final VoidCallback onSignOut;
+
+  @override
+  Widget build(BuildContext context) {
+    final account = _SettingsSection(
+      title: '계정과 프로필',
+      icon: Icons.person_outline_rounded,
+      children: [
+        _SettingsTile(
+          key: const ValueKey('settings-profile-tile'),
+          icon: Icons.badge_outlined,
+          title: '보호자 정보',
+          subtitle: '닉네임과 연결 계정을 확인하고 관리해요',
+          onTap: onProfileSelected,
+        ),
+        _SettingsTile(
+          key: const ValueKey('settings-consents-tile'),
+          icon: Icons.fact_check_outlined,
+          title: '동의 관리',
+          subtitle: '동의 현황을 확인하고 변경하거나 철회해요',
+          onTap: () =>
+              AppNavigation.pushNamed(context, AppRoutes.settingsConsents),
+        ),
+      ],
+    );
+    final preferences = _SettingsSection(
+      title: '앱 사용 설정',
+      icon: Icons.tune_rounded,
+      children: [
+        _SettingsTile(
+          key: const ValueKey('settings-notifications-tile'),
+          icon: Icons.notifications_none_rounded,
+          title: '알림 설정',
+          subtitle: '분석 완료 · 서비스 · 커뮤니티 알림을 관리해요',
+          onTap: () =>
+              AppNavigation.pushNamed(context, AppRoutes.settingsNotifications),
+        ),
+        _SettingsTile(
+          key: const ValueKey('settings-data-retention-tile'),
+          icon: Icons.inventory_2_outlined,
+          title: '데이터 보관 기간',
+          subtitle: '보관 기간과 안내 시점을 설정해요',
+          onTap: () =>
+              AppNavigation.pushNamed(context, AppRoutes.settingsDataRetention),
+        ),
+      ],
+    );
+    final service = _SettingsSection(
+      title: '서비스 정보',
+      icon: Icons.menu_book_outlined,
+      children: [
+        _SettingsTile(
+          key: const ValueKey('settings-terms-tile'),
+          icon: Icons.description_outlined,
+          title: '약관 및 정책',
+          subtitle: '서비스 이용약관과 개인정보처리방침을 확인해요',
+          onTap: () =>
+              AppNavigation.pushNamed(context, AppRoutes.settingsTerms),
+        ),
+      ],
+    );
+    final accountActions = _SettingsSection(
+      title: '계정 관리',
+      icon: Icons.shield_outlined,
+      children: [
+        _SettingsTile(
+          key: const ValueKey('settings-logout-action'),
+          icon: Icons.logout_rounded,
+          title: isSigningOut ? '로그아웃하는 중' : '로그아웃',
+          subtitle: '현재 계정에서 안전하게 나가요',
+          onTap: isSigningOut ? null : onSignOut,
+          trailing: isSigningOut
+              ? const SizedBox.square(
+                  dimension: 20,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : null,
+        ),
+        _SettingsTile(
+          key: const ValueKey('settings-withdraw-action'),
+          icon: Icons.person_remove_outlined,
+          title: '회원 탈퇴',
+          subtitle: '서비스 데이터 처리 안내를 확인한 뒤 진행해요',
+          isDanger: true,
+          onTap: () =>
+              AppNavigation.pushNamed(context, AppRoutes.settingsWithdraw),
+        ),
+      ],
+    );
+
+    if (availableWidth < 760) {
+      return Column(
+        children: [
+          account,
+          const SizedBox(height: AppSpacing.lg),
+          preferences,
+          const SizedBox(height: AppSpacing.lg),
+          service,
+          const SizedBox(height: AppSpacing.lg),
+          accountActions,
+        ],
+      );
+    }
+
+    return Column(
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: account),
+            const SizedBox(width: AppSpacing.lg),
+            Expanded(child: preferences),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.lg),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(child: service),
+            const SizedBox(width: AppSpacing.lg),
+            Expanded(child: accountActions),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _SettingsSection extends StatelessWidget {
+  const _SettingsSection({
+    required this.title,
+    required this.icon,
+    required this.children,
+  });
+
+  final String title;
+  final IconData icon;
   final List<_SettingsTile> children;
 
   @override
   Widget build(BuildContext context) => Material(
-    color: AppColors.surface,
+    color: _ForgePalette.surface,
     shape: RoundedRectangleBorder(
       borderRadius: BorderRadius.circular(AppRadius.lg),
-      side: const BorderSide(color: AppColors.outline),
+      side: const BorderSide(color: _ForgePalette.outline),
     ),
     clipBehavior: Clip.antiAlias,
     child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.md,
+            AppSpacing.sm,
+          ),
+          child: Semantics(
+            header: true,
+            child: Row(
+              children: [
+                Container(
+                  width: 32,
+                  height: 32,
+                  decoration: BoxDecoration(
+                    color: _ForgePalette.sageSoft,
+                    borderRadius: BorderRadius.circular(AppRadius.sm),
+                    border: Border.all(color: _ForgePalette.outline),
+                  ),
+                  child: Icon(
+                    icon,
+                    size: AppIconSize.md,
+                    color: _ForgePalette.forest,
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: AppTypography.titleMd.copyWith(
+                      color: _ForgePalette.forest,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const Divider(height: 1, color: _ForgePalette.outline),
         for (var index = 0; index < children.length; index++) ...[
           children[index],
           if (index != children.length - 1)
-            const Divider(height: 1, indent: 68, endIndent: AppSpacing.md),
+            const Divider(
+              height: 1,
+              indent: 76,
+              endIndent: AppSpacing.md,
+              color: _ForgePalette.outline,
+            ),
         ],
       ],
     ),
@@ -308,96 +636,69 @@ class _SettingsTile extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.trailing,
+    this.isDanger = false,
     super.key,
   });
 
   final IconData icon;
   final String title;
   final String subtitle;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final Widget? trailing;
+  final bool isDanger;
 
   @override
-  Widget build(BuildContext context) => ListTile(
-    minTileHeight: 76,
-    contentPadding: const EdgeInsets.symmetric(
-      horizontal: AppSpacing.md,
-      vertical: AppSpacing.xxs,
-    ),
-    leading: Container(
-      width: 40,
-      height: 40,
-      decoration: BoxDecoration(
-        color: AppColors.leafSoft,
-        borderRadius: BorderRadius.circular(AppRadius.sm),
+  Widget build(BuildContext context) => Semantics(
+    button: true,
+    enabled: onTap != null,
+    label: '$title, $subtitle',
+    child: ExcludeSemantics(
+      child: ListTile(
+        minTileHeight: 76,
+        minVerticalPadding: AppSpacing.sm,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.xxs,
+        ),
+        leading: Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: isDanger ? _ForgePalette.dangerSoft : _ForgePalette.sageSoft,
+            borderRadius: BorderRadius.circular(AppRadius.sm),
+            border: Border.all(
+              color: isDanger
+                  ? _ForgePalette.danger.withValues(alpha: 0.28)
+                  : _ForgePalette.outline,
+            ),
+          ),
+          child: Icon(
+            icon,
+            color: isDanger ? _ForgePalette.danger : _ForgePalette.forest,
+          ),
+        ),
+        title: Text(
+          title,
+          style: AppTypography.bodyStrong.copyWith(
+            color: isDanger ? _ForgePalette.danger : _ForgePalette.ink,
+          ),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: AppSpacing.xxs),
+          child: Text(
+            subtitle,
+            style: AppTypography.bodySm.copyWith(color: _ForgePalette.inkMuted),
+          ),
+        ),
+        trailing:
+            trailing ??
+            Icon(
+              Icons.chevron_right_rounded,
+              color: isDanger ? _ForgePalette.danger : _ForgePalette.brass,
+            ),
+        onTap: onTap,
       ),
-      child: Icon(icon, color: AppColors.leaf),
-    ),
-    title: Text(title, style: AppTypography.bodyStrong),
-    subtitle: Text(subtitle, style: AppTypography.bodySm),
-    trailing: const Icon(
-      Icons.chevron_right_rounded,
-      color: AppColors.inkMuted,
-    ),
-    onTap: onTap,
-  );
-}
-
-class _AccountActions extends StatelessWidget {
-  const _AccountActions({
-    required this.isSigningOut,
-    required this.onSignOut,
-    required this.onWithdraw,
-  });
-
-  final bool isSigningOut;
-  final VoidCallback onSignOut;
-  final VoidCallback onWithdraw;
-
-  @override
-  Widget build(BuildContext context) => Material(
-    color: AppColors.surface,
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(AppRadius.lg),
-      side: const BorderSide(color: AppColors.outline),
-    ),
-    clipBehavior: Clip.antiAlias,
-    child: Column(
-      children: [
-        ListTile(
-          key: const ValueKey('settings-logout-action'),
-          minTileHeight: 64,
-          title: Text('로그아웃', style: AppTypography.bodyStrong),
-          trailing: isSigningOut
-              ? const SizedBox.square(
-                  dimension: 20,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.logout_rounded, color: AppColors.inkMuted),
-          onTap: isSigningOut ? null : onSignOut,
-        ),
-        const Divider(
-          height: 1,
-          indent: AppSpacing.md,
-          endIndent: AppSpacing.md,
-        ),
-        ListTile(
-          key: const ValueKey('settings-withdraw-action'),
-          minTileHeight: 64,
-          title: Text(
-            '회원 탈퇴',
-            style: AppTypography.bodyStrong.copyWith(color: AppColors.error),
-          ),
-          subtitle: const Text(
-            '서비스 데이터 처리 안내 후 진행',
-            style: AppTypography.bodySm,
-          ),
-          trailing: const Icon(
-            Icons.chevron_right_rounded,
-            color: AppColors.error,
-          ),
-          onTap: onWithdraw,
-        ),
-      ],
     ),
   );
 }
