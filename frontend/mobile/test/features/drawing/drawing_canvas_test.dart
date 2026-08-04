@@ -58,8 +58,9 @@ void main() {
   testWidgets('Drawing 화면에 빈 Canvas와 비활성 완료 버튼을 표시한다', (tester) async {
     await _pumpDrawing(tester);
 
-    expect(find.text('그림 활동'), findsOneWidget);
-    expect(find.text('그림을 안전하게 담고 있어요'), findsOneWidget);
+    // 상단 바를 없애고 조작을 크레용 툴바로 모았다(S15P11B209-805).
+    expect(find.byKey(const ValueKey('drawing-toolbar')), findsOneWidget);
+    expect(find.byKey(const ValueKey('drawing-save-status')), findsOneWidget);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
     expect(_canvas(tester).strokes, isEmpty);
     expect(_undoButton(tester).onTap, isNull);
