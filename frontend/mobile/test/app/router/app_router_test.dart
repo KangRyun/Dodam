@@ -23,7 +23,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('guardian-switch-profile')));
     await tester.pumpAndSettle();
 
-    expect(find.text('안녕하세요! 누구로 시작할까요?'), findsOneWidget);
+    expect(find.text('누가 도담이와 함께할까요?'), findsOneWidget);
     expect(find.byKey(const ValueKey('guardian-profile')), findsOneWidget);
   });
 
@@ -85,7 +85,7 @@ void main() {
     expect(find.text('설정'), findsWidgets);
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
-    expect(find.text('안녕하세요! 누구로 시작할까요?'), findsOneWidget);
+    expect(find.text('누가 도담이와 함께할까요?'), findsOneWidget);
   });
 
   testWidgets('보호자 홈의 아동 선택은 인라인 칩으로 처리한다(화면 이동 없음)', (tester) async {

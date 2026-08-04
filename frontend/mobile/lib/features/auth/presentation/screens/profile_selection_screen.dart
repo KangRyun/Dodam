@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 
@@ -136,48 +138,25 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
                     children: [
                       _ProfileTopBar(onSettings: _showSettings),
                       const SizedBox(height: AppSpacing.lg),
-                      const _ProfileHeader(),
+                      _ProfileHeader(
+                        guardianEnabled:
+                            _isChildListReady &&
+                            !_guardianNavigationStarted &&
+                            _navigatingChildId == null,
+                        onGuardianSelected: _selectGuardian,
+                      ),
                       const SizedBox(height: AppSpacing.xl),
-                      LayoutBuilder(
-                        builder: (context, constraints) {
-                          final useColumns = constraints.maxWidth >= 900;
-                          final guardian = _GuardianCard(
-                            enabled:
-                                _isChildListReady &&
-                                !_guardianNavigationStarted &&
-                                _navigatingChildId == null,
-                            onSelected: _selectGuardian,
-                          );
-                          final children = _ChildrenCard(
-                            controller: widget.controller,
-                            imageFetcher: widget.imageFetcher,
-                            isEditing: _isEditingProfiles,
-                            navigationEnabled:
-                                !_guardianNavigationStarted &&
-                                _navigatingChildId == null,
-                            onChildSelected: _selectChild,
-                            onAddChild: widget.onAddChild == null
-                                ? null
-                                : () => widget.onAddChild!(context),
-                          );
-                          if (!useColumns) {
-                            return Column(
-                              children: [
-                                guardian,
-                                const SizedBox(height: AppSpacing.lg),
-                                children,
-                              ],
-                            );
-                          }
-                          return Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Expanded(child: guardian),
-                              const SizedBox(width: AppSpacing.xl),
-                              Expanded(child: children),
-                            ],
-                          );
-                        },
+                      _ChildProfileSection(
+                        controller: widget.controller,
+                        imageFetcher: widget.imageFetcher,
+                        isEditing: _isEditingProfiles,
+                        navigationEnabled:
+                            !_guardianNavigationStarted &&
+                            _navigatingChildId == null,
+                        onChildSelected: _selectChild,
+                        onAddChild: widget.onAddChild == null
+                            ? null
+                            : () => widget.onAddChild!(context),
                       ),
                     ],
                   ),
@@ -252,105 +231,149 @@ class _DodamWordmark extends StatelessWidget {
 }
 
 class _ProfileHeader extends StatelessWidget {
-  const _ProfileHeader();
+  const _ProfileHeader({
+    required this.guardianEnabled,
+    required this.onGuardianSelected,
+  });
+
+  final bool guardianEnabled;
+  final VoidCallback onGuardianSelected;
 
   @override
-  Widget build(BuildContext context) => const Text(
-    '안녕하세요! 누구로 시작할까요?',
-    textAlign: TextAlign.center,
-    style: TextStyle(
-      color: AppColors.ink,
-      fontSize: 34,
-      height: 1.25,
-      fontWeight: FontWeight.w800,
-    ),
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final useRow = constraints.maxWidth >= 720;
+      final title = Column(
+        crossAxisAlignment: useRow
+            ? CrossAxisAlignment.start
+            : CrossAxisAlignment.center,
+        children: [
+          Semantics(
+            header: true,
+            child: Text(
+              key: const ValueKey('profile-selection-title'),
+              useRow ? '누가 도담이와 함께할까요?' : '누가 도담이와\n함께할까요?',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.ink,
+                fontSize: useRow ? 34 : 30,
+                height: 1.25,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            key: const ValueKey('profile-selection-description'),
+            '활동을 시작할 아동 프로필을 선택해 주세요.',
+            textAlign: useRow ? TextAlign.start : TextAlign.center,
+            style: const TextStyle(
+              color: AppColors.inkMuted,
+              fontSize: 17,
+              height: 1.45,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      );
+      final guardian = _GuardianModeButton(
+        enabled: guardianEnabled,
+        expanded: !useRow,
+        onSelected: onGuardianSelected,
+      );
+      if (!useRow) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            title,
+            const SizedBox(height: AppSpacing.lg),
+            guardian,
+          ],
+        );
+      }
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          Expanded(child: title),
+          const SizedBox(width: AppSpacing.xl),
+          guardian,
+        ],
+      );
+    },
   );
 }
 
-class _GuardianCard extends StatelessWidget {
-  const _GuardianCard({required this.enabled, required this.onSelected});
+class _GuardianModeButton extends StatelessWidget {
+  const _GuardianModeButton({
+    required this.enabled,
+    required this.expanded,
+    required this.onSelected,
+  });
 
   final bool enabled;
+  final bool expanded;
   final VoidCallback onSelected;
 
   @override
-  Widget build(BuildContext context) => Semantics(
-    sortKey: const OrdinalSortKey(1),
-    button: true,
-    enabled: enabled,
-    label: '보호자 모드. 보호자로 시작하기. 아이의 기록과 리포트를 확인해요',
-    child: Material(
-      color: Colors.transparent,
-      child: InkWell(
-        key: const ValueKey('guardian-profile'),
-        borderRadius: BorderRadius.circular(_ProfileDimensions.cardRadius),
-        onTap: enabled ? onSelected : null,
-        child: _RoleCardSurface(
-          key: const ValueKey('guardian-role-card'),
-          backgroundColor: _ProfileColors.guardianBackground,
-          borderColor: _ProfileColors.green,
-          child: Column(
-            children: [
-              const _ModePill(
-                label: '보호자 모드',
-                foreground: _ProfileColors.greenDark,
-                border: _ProfileColors.green,
+  Widget build(BuildContext context) => SizedBox(
+    width: expanded ? double.infinity : 246,
+    child: Semantics(
+      key: const ValueKey('guardian-profile'),
+      sortKey: const OrdinalSortKey(1),
+      button: true,
+      enabled: enabled,
+      label: '보호자 모드로 이동',
+      onTap: enabled ? onSelected : null,
+      excludeSemantics: true,
+      child: Material(
+        color: _ProfileColors.guardianBackground,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          side: const BorderSide(color: _ProfileColors.green),
+        ),
+        child: InkWell(
+          key: const ValueKey('guardian-mode-action'),
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          onTap: enabled ? onSelected : null,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(minHeight: 56),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.xs,
               ),
-              const SizedBox(height: AppSpacing.md),
-              const ExcludeSemantics(
-                child: SizedBox(
-                  height: 210,
-                  child: Image(
-                    key: ValueKey('guardian-dodami-image'),
-                    image: AssetImage(_ProfileAssets.guardian),
-                    fit: BoxFit.contain,
-                  ),
-                ),
-              ),
-              const SizedBox(height: AppSpacing.md),
-              const Text(
-                '보호자로 시작하기',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: _ProfileColors.greenDark,
-                  fontSize: 28,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              const Text(
-                '아이의 기록과 리포트를 확인해요',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: AppColors.inkMuted,
-                  fontSize: 16,
-                  height: 1.45,
-                ),
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              Container(
-                key: const ValueKey('guardian-start-cta'),
-                width: 56,
-                height: 56,
-                decoration: BoxDecoration(
-                  color: AppColors.surface,
-                  shape: BoxShape.circle,
-                  border: Border.all(color: _ProfileColors.green, width: 2),
-                  boxShadow: const [
-                    BoxShadow(
-                      color: Color(0x143D7049),
-                      blurRadius: 10,
-                      offset: Offset(0, 4),
+              child: Row(
+                children: [
+                  const SizedBox.square(
+                    dimension: 44,
+                    child: Image(
+                      key: ValueKey('guardian-dodami-image'),
+                      image: AssetImage(_ProfileAssets.guardian),
+                      fit: BoxFit.contain,
                     ),
-                  ],
-                ),
-                child: const Icon(
-                  Icons.arrow_forward_rounded,
-                  color: _ProfileColors.greenDark,
-                  size: 30,
-                ),
+                  ),
+                  const SizedBox(width: AppSpacing.sm),
+                  const Expanded(
+                    child: Text(
+                      '보호자 모드로',
+                      maxLines: 2,
+                      style: TextStyle(
+                        color: _ProfileColors.greenDark,
+                        fontSize: 15,
+                        height: 1.25,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  const Icon(
+                    Icons.arrow_forward_rounded,
+                    color: _ProfileColors.greenDark,
+                    size: 23,
+                  ),
+                ],
               ),
-            ],
+            ),
           ),
         ),
       ),
@@ -358,8 +381,8 @@ class _GuardianCard extends StatelessWidget {
   );
 }
 
-class _ChildrenCard extends StatelessWidget {
-  const _ChildrenCard({
+class _ChildProfileSection extends StatelessWidget {
+  const _ChildProfileSection({
     required this.controller,
     required this.imageFetcher,
     required this.isEditing,
@@ -376,173 +399,124 @@ class _ChildrenCard extends StatelessWidget {
   final VoidCallback? onAddChild;
 
   @override
-  Widget build(BuildContext context) {
-    final textScale = MediaQuery.textScalerOf(context).scale(1);
-    final profilesHeight = 168 + ((textScale - 1).clamp(0, 1) * 28).toDouble();
-    return _RoleCardSurface(
-      key: const ValueKey('child-role-card'),
-      backgroundColor: _ProfileColors.childBackground,
-      borderColor: _ProfileColors.orange,
-      child: Column(
-        children: [
-          const _ModePill(
-            label: '아이 모드',
-            foreground: _ProfileColors.orangeDark,
-            border: _ProfileColors.orange,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          const ExcludeSemantics(
-            child: SizedBox(
-              height: 160,
-              child: Image(
-                key: ValueKey('child-dodami-image'),
-                image: AssetImage(_ProfileAssets.child),
-                fit: BoxFit.contain,
-              ),
-            ),
-          ),
-          const Text(
-            '아이로 시작하기',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: _ProfileColors.orangeDark,
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xs),
-          const Text(
-            '내 프로필을 골라 시작해요',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.inkMuted,
-              fontSize: 16,
-              height: 1.45,
-            ),
-          ),
-          if (isEditing) ...[
-            const SizedBox(height: AppSpacing.sm),
-            Semantics(
-              liveRegion: true,
-              child: const Text(
-                '수정하거나 삭제할 아이를 선택해 주세요.',
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                  color: _ProfileColors.orangeDark,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-          ],
-          const SizedBox(height: AppSpacing.md),
-          SizedBox(height: profilesHeight, child: _buildProfiles()),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProfiles() => switch (controller.status) {
-    ChildListStatus.idle || ChildListStatus.loading => const AppLoadingView(
-      message: '아이 프로필을 불러오고 있어요',
-    ),
-    ChildListStatus.error => AppFailureView(
-      title: '아이 프로필을 불러오지 못했어요',
-      failure: controller.listError,
-      onRetry: controller.loadChildren,
-    ),
-    ChildListStatus.empty => Align(
-      alignment: Alignment.centerLeft,
-      child: _AddChildCard(onTap: onAddChild),
-    ),
-    ChildListStatus.success => ListView.separated(
-      key: const ValueKey('child-profile-carousel'),
-      scrollDirection: Axis.horizontal,
-      itemCount: controller.children.length + 1,
-      separatorBuilder: (_, _) => const SizedBox(width: AppSpacing.md),
-      itemBuilder: (context, index) {
-        if (index == controller.children.length) {
-          return _AddChildCard(onTap: onAddChild);
-        }
-        final child = controller.children[index];
-        return _ChildProfileCard(
-          key: ValueKey('child-profile-${child.childId}'),
-          child: child,
-          imageFetcher: imageFetcher,
-          isSelected:
-              controller.hasExplicitChildSelection &&
-              controller.selectedChildId == child.childId,
-          enabled: navigationEnabled,
-          sortOrder: 2 + (index / 100),
-          onTap: () => onChildSelected(child),
-        );
-      },
-    ),
-  };
-}
-
-class _RoleCardSurface extends StatelessWidget {
-  const _RoleCardSurface({
-    required this.backgroundColor,
-    required this.borderColor,
-    required this.child,
-    super.key,
-  });
-
-  final Color backgroundColor;
-  final Color borderColor;
-  final Widget child;
-
-  @override
   Widget build(BuildContext context) => Container(
-    width: double.infinity,
-    padding: const EdgeInsets.all(AppSpacing.xl),
+    key: const ValueKey('child-profile-section'),
+    padding: const EdgeInsets.all(AppSpacing.lg),
     decoration: BoxDecoration(
-      color: backgroundColor,
-      borderRadius: BorderRadius.circular(_ProfileDimensions.cardRadius),
-      border: Border.all(color: borderColor.withValues(alpha: 0.78), width: 2),
-      boxShadow: const [
-        BoxShadow(
-          color: Color(0x122D2418),
-          blurRadius: 22,
-          offset: Offset(0, 8),
+      color: _ProfileColors.childBackground,
+      borderRadius: BorderRadius.circular(AppRadius.lg),
+      border: Border.all(color: _ProfileColors.orange.withValues(alpha: 0.62)),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (isEditing) ...[
+          Semantics(
+            liveRegion: true,
+            child: const Text(
+              '수정하거나 삭제할 아이를 선택해 주세요.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: _ProfileColors.orangeDark,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+        ],
+        LayoutBuilder(
+          builder: (context, constraints) =>
+              _buildProfiles(context, constraints.maxWidth),
         ),
       ],
     ),
-    child: child,
   );
-}
 
-class _ModePill extends StatelessWidget {
-  const _ModePill({
-    required this.label,
-    required this.foreground,
-    required this.border,
-  });
+  Widget _buildProfiles(BuildContext context, double availableWidth) =>
+      switch (controller.status) {
+        ChildListStatus.idle || ChildListStatus.loading => const SizedBox(
+          height: 220,
+          child: AppLoadingView(message: '아이 프로필을 불러오고 있어요'),
+        ),
+        ChildListStatus.error => SizedBox(
+          height: 240,
+          child: AppFailureView(
+            title: '아이 프로필을 불러오지 못했어요',
+            failure: controller.listError,
+            onRetry: controller.loadChildren,
+          ),
+        ),
+        ChildListStatus.empty => Column(
+          children: [
+            const Text(
+              '등록된 아동 프로필이 아직 없어요.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.inkMuted,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            _buildProfileGrid(context, availableWidth),
+          ],
+        ),
+        ChildListStatus.success => _buildProfileGrid(context, availableWidth),
+      };
 
-  final String label;
-  final Color foreground;
-  final Color border;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(
-      horizontal: AppSpacing.lg,
-      vertical: AppSpacing.xs,
-    ),
-    decoration: BoxDecoration(
-      color: AppColors.surface.withValues(alpha: 0.72),
-      borderRadius: BorderRadius.circular(999),
-      border: Border.all(color: border, width: 1.5),
-    ),
-    child: Text(
-      label,
-      style: TextStyle(
-        color: foreground,
-        fontSize: 16,
-        fontWeight: FontWeight.w800,
+  Widget _buildProfileGrid(BuildContext context, double availableWidth) {
+    const spacing = AppSpacing.md;
+    final itemCount = controller.children.length + 1;
+    final maxColumns = switch (availableWidth) {
+      >= 1040 => 5,
+      >= 820 => 4,
+      >= 580 => 3,
+      >= 300 => 2,
+      _ => 1,
+    };
+    final columns = math.min(itemCount, maxColumns);
+    final idealCardWidth = availableWidth < 480 ? 164.0 : 184.0;
+    final widthForColumns =
+        (availableWidth - (spacing * (columns - 1))) / columns;
+    final cardWidth = math.min(idealCardWidth, widthForColumns);
+    final gridWidth = (cardWidth * columns) + (spacing * (columns - 1));
+    final textScale = MediaQuery.textScalerOf(context).scale(1);
+    final cardHeight = 214 + ((textScale - 1).clamp(0, 1) * 42).toDouble();
+    return Center(
+      child: SizedBox(
+        width: gridWidth,
+        child: GridView.builder(
+          key: const ValueKey('child-profile-grid'),
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: itemCount,
+          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: columns,
+            mainAxisExtent: cardHeight,
+            crossAxisSpacing: spacing,
+            mainAxisSpacing: spacing,
+          ),
+          itemBuilder: (context, index) {
+            if (index == controller.children.length) {
+              return _AddChildCard(onTap: onAddChild);
+            }
+            final child = controller.children[index];
+            return _ChildProfileCard(
+              key: ValueKey('child-profile-${child.childId}'),
+              child: child,
+              imageFetcher: imageFetcher,
+              isSelected:
+                  controller.hasExplicitChildSelection &&
+                  controller.selectedChildId == child.childId,
+              enabled: navigationEnabled,
+              sortOrder: 2 + (index / 100),
+              onTap: () => onChildSelected(child),
+            );
+          },
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _ChildProfileCard extends StatelessWidget {
@@ -588,7 +562,6 @@ class _ChildProfileCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.lg),
         onTap: enabled ? onTap : null,
         child: Container(
-          width: 126,
           padding: const EdgeInsets.all(AppSpacing.sm),
           decoration: BoxDecoration(
             color: AppColors.surface.withValues(alpha: 0.88),
@@ -598,70 +571,91 @@ class _ChildProfileCard extends StatelessWidget {
               width: isSelected ? 3 : 1,
             ),
           ),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Stack(
-                clipBehavior: Clip.none,
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final avatarSize = (constraints.maxWidth * 0.62).clamp(
+                72.0,
+                100.0,
+              );
+              return Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  ClipOval(
-                    child: ColoredBox(
-                      color: _ProfileColors.avatarBackground,
-                      child: SizedBox.square(
-                        dimension: 84,
-                        child:
-                            child.profileImageUrl != null &&
-                                imageFetcher != null
-                            ? AuthenticatedImage(
-                                key: ValueKey(
-                                  'child-authenticated-image-${child.childId}',
-                                ),
-                                url: child.profileImageUrl,
-                                fetcher: imageFetcher!,
-                                fit: BoxFit.cover,
-                                semanticLabel: '${child.nickname} 프로필 사진',
-                                placeholderBuilder: _fallback,
-                              )
-                            : _fallback(context),
+                  Stack(
+                    clipBehavior: Clip.none,
+                    children: [
+                      ClipOval(
+                        child: ColoredBox(
+                          color: _ProfileColors.avatarBackground,
+                          child: SizedBox.square(
+                            dimension: avatarSize,
+                            child:
+                                child.profileImageUrl != null &&
+                                    imageFetcher != null
+                                ? AuthenticatedImage(
+                                    key: ValueKey(
+                                      'child-authenticated-image-${child.childId}',
+                                    ),
+                                    url: child.profileImageUrl,
+                                    fetcher: imageFetcher!,
+                                    fit: BoxFit.cover,
+                                    semanticLabel: '${child.nickname} 프로필 사진',
+                                    placeholderBuilder: _fallback,
+                                  )
+                                : _fallback(context),
+                          ),
+                        ),
                       ),
+                      if (isSelected)
+                        Positioned(
+                          top: -4,
+                          right: -4,
+                          child: Container(
+                            key: ValueKey(
+                              'child-profile-selected-${child.childId}',
+                            ),
+                            width: 30,
+                            height: 30,
+                            decoration: const BoxDecoration(
+                              color: _ProfileColors.orange,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.check_rounded,
+                              color: Colors.white,
+                              size: 21,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Text(
+                    child.nickname.trim(),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 16,
+                      height: 1.2,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                  if (isSelected)
-                    Positioned(
-                      top: -4,
-                      right: -4,
-                      child: Container(
-                        key: ValueKey(
-                          'child-profile-selected-${child.childId}',
-                        ),
-                        width: 30,
-                        height: 30,
-                        decoration: const BoxDecoration(
-                          color: _ProfileColors.orange,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.check_rounded,
-                          color: Colors.white,
-                          size: 21,
-                        ),
+                  if (child.age > 0) ...[
+                    const SizedBox(height: AppSpacing.xxs),
+                    Text(
+                      '${child.age}세',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: AppColors.inkMuted,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
+                  ],
                 ],
-              ),
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                _label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: AppColors.ink,
-                  fontSize: 15,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
+              );
+            },
           ),
         ),
       ),
@@ -687,7 +681,6 @@ class _AddChildCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(AppRadius.lg),
         onTap: onTap,
         child: Container(
-          width: 112,
           padding: const EdgeInsets.all(AppSpacing.sm),
           decoration: BoxDecoration(
             color: AppColors.surface.withValues(alpha: 0.58),
@@ -788,11 +781,6 @@ class _ProfileSettingsSheet extends StatelessWidget {
 
 abstract final class _ProfileAssets {
   static const guardian = 'assets/images/role_selection/guardian_dodami.png';
-  static const child = 'assets/images/role_selection/child_dodami.png';
-}
-
-abstract final class _ProfileDimensions {
-  static const cardRadius = 30.0;
 }
 
 abstract final class _ProfileColors {
