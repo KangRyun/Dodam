@@ -28,17 +28,110 @@ void main() {
     );
     await tester.pump();
 
-    expect(find.text('민지엄마'), findsOneWidget);
-    expect(find.text('카카오 계정 연결됨'), findsOneWidget);
-    expect(find.text('내 정보 관리'), findsOneWidget);
+    expect(find.text('도담이 대장간'), findsOneWidget);
+    expect(find.text('설정을 차근차근 정리해요'), findsOneWidget);
+    expect(find.text('민지엄마 · 카카오 계정 연결됨'), findsOneWidget);
+    expect(find.text('계정과 프로필'), findsOneWidget);
+    expect(find.text('앱 사용 설정'), findsOneWidget);
+    expect(find.text('서비스 정보'), findsOneWidget);
+    expect(find.text('계정 관리'), findsOneWidget);
+    expect(find.text('보호자 정보'), findsOneWidget);
     expect(find.text('동의 관리'), findsOneWidget);
     expect(find.text('알림 설정'), findsOneWidget);
     expect(find.text('데이터 보관 기간'), findsOneWidget);
     expect(find.text('약관 및 정책'), findsOneWidget);
     expect(find.text('로그아웃'), findsOneWidget);
     expect(find.text('회원 탈퇴'), findsOneWidget);
+    expect(find.text('개인정보 관리'), findsNothing);
     expect(find.text('아이 관리'), findsNothing);
     expect(find.text('전문가 인증'), findsNothing);
+  });
+
+  testWidgets('대장장이 도담이와 그룹 제목을 접근성 정보로 전달한다', (tester) async {
+    final semantics = tester.ensureSemantics();
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SettingsMainScreen(user: session.user, onSignOut: () async {}),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.bySemanticsLabel('설정을 정리하는 대장장이 도담이'), findsOneWidget);
+    expect(
+      find.bySemanticsLabel('보호자 정보, 닉네임과 연결 계정을 확인하고 관리해요'),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel('계정과 프로필'), findsOneWidget);
+    semantics.dispose();
+  });
+
+  testWidgets('지원 viewport와 text scale에서 overflow 없이 모든 설정에 접근한다', (
+    tester,
+  ) async {
+    const scenarios = <({Size size, double textScale})>[
+      (size: Size(1280, 800), textScale: 1),
+      (size: Size(1280, 800), textScale: 2),
+      (size: Size(844, 390), textScale: 1),
+      (size: Size(844, 390), textScale: 2),
+      (size: Size(390, 844), textScale: 1),
+      (size: Size(390, 844), textScale: 2),
+    ];
+
+    for (final scenario in scenarios) {
+      await tester.binding.setSurfaceSize(scenario.size);
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: TextScaler.linear(scenario.textScale)),
+            child: child!,
+          ),
+          home: SettingsMainScreen(user: session.user, onSignOut: () async {}),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        tester.takeException(),
+        isNull,
+        reason:
+            '${scenario.size.width}×${scenario.size.height}, text scale ${scenario.textScale}',
+      );
+      expect(
+        find.byKey(const ValueKey('settings-scroll-view')),
+        findsOneWidget,
+      );
+      expect(find.text('설정'), findsOneWidget);
+      expect(find.text('회원 탈퇴'), findsOneWidget);
+
+      final profileTile = find.byKey(const ValueKey('settings-profile-tile'));
+      await tester.ensureVisible(profileTile);
+      expect(tester.getSize(profileTile).height, greaterThanOrEqualTo(48));
+      expect(tester.takeException(), isNull);
+    }
+
+    await tester.binding.setSurfaceSize(null);
+  });
+
+  testWidgets('보호자 정보를 누르면 실제 프로필 관리 route로 이동한다', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        routes: {
+          '/guardian/settings/profile': (_) =>
+              const Scaffold(body: Text('보호자 정보 화면')),
+        },
+        home: SettingsMainScreen(user: session.user, onSignOut: () async {}),
+      ),
+    );
+
+    final profileTile = find.byKey(const ValueKey('settings-profile-tile'));
+    await tester.ensureVisible(profileTile);
+    await tester.tap(profileTile);
+    await tester.pumpAndSettle();
+
+    expect(find.text('보호자 정보 화면'), findsOneWidget);
   });
 
   testWidgets('설정 로그아웃을 취소하면 세션 초기화를 요청하지 않는다', (tester) async {
