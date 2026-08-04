@@ -2,12 +2,14 @@ import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:dodam/app/state/guardian_child_controller.dart';
+import 'package:dodam/app/widgets/guardian_sidebar_shell.dart';
 import 'package:dodam/core/network/api_page.dart';
 import 'package:dodam/features/activity/data/dto/activity_dtos.dart';
 import 'package:dodam/features/activity/domain/repositories/activity_repository.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
 import 'package:dodam/features/child/domain/repositories/child_repository.dart';
 import 'package:dodam/features/guardian/presentation/widgets/guardian_dashboard.dart';
+import 'package:dodam/features/guardian/presentation/screens/guardian_screens.dart';
 import 'package:dodam/features/notification/application/push_registration_status_controller.dart';
 import 'package:dodam/features/notification/domain/failures/push_token_registration_failure.dart';
 import 'package:dodam/features/notification/presentation/widgets/push_registration_notice.dart';
@@ -21,26 +23,89 @@ import 'package:flutter_test/flutter_test.dart';
 /// [GuardianDashboard]에서 overflow가 없고 CTA와 최근 활동에 실제로 닿을 수 있는지
 /// 확인한다.
 void main() {
+  group('production 보호자 shell', () {
+    testWidgets('Pixel Tablet 실제 viewport와 6개 아이·S842 배너에서 overflow가 없다', (
+      tester,
+    ) async {
+      final status = _failedPushStatus();
+      addTearDown(status.dispose);
+      final routes = <String>[];
+
+      await _pumpProductionDashboard(
+        tester,
+        physicalSize: const Size(2560, 1600),
+        devicePixelRatio: 2,
+        physicalPadding: const FakeViewPadding(top: 48, bottom: 64),
+        activities: _many(3),
+        pushRegistrationStatus: status,
+        children: [
+          _child(id: 1, nickname: 'minjae'),
+          _child(id: 2, nickname: 'donmi'),
+          _child(id: 3, nickname: 'asdqwe'),
+          _child(id: 4, nickname: 'zzzzz'),
+          _child(id: 5, nickname: 'nnew'),
+          _child(id: 6, nickname: 'myname'),
+        ],
+        onPushRoute: routes.add,
+      );
+
+      final shell = tester.element(find.byType(GuardianSidebarShell));
+      expect(MediaQuery.sizeOf(shell), const Size(1280, 800));
+      expect(
+        MediaQuery.paddingOf(shell),
+        const EdgeInsets.only(top: 24, bottom: 32),
+      );
+      _expectNoOverflow(tester);
+      expect(find.text('최근 활동'), findsOneWidget);
+      expect(
+        tester
+            .getSize(find.byKey(const ValueKey('recent-activity-card')))
+            .height,
+        greaterThanOrEqualTo(160),
+      );
+
+      final entry = find.byKey(const ValueKey('activity-history-entry'));
+      expect(entry, findsOneWidget);
+      expect(tester.getSize(entry).height, greaterThanOrEqualTo(48));
+      await tester.ensureVisible(entry);
+      await tester.tap(entry);
+      await tester.pumpAndSettle();
+
+      expect(routes, ['/guardian/activities']);
+      _expectNoOverflow(tester);
+    });
+  });
+
   group('화면 크기별 overflow', () {
     for (final layout in _layouts) {
       testWidgets('${layout.label}에서 overflow가 없고 주요 영역에 닿는다', (tester) async {
-        await _pumpDashboard(tester, size: layout.size, activities: _many(6));
+        final routes = <String>[];
+        await _pumpDashboard(
+          tester,
+          size: layout.size,
+          activities: _many(6),
+          onPushRoute: routes.add,
+        );
 
         _expectNoOverflow(tester);
         await _expectReachable(tester);
+        await _tapActivityHistory(tester, routes);
       });
     }
 
     testWidgets('글자 배율 2.0에서도 overflow가 없다', (tester) async {
+      final routes = <String>[];
       await _pumpDashboard(
         tester,
         size: const Size(1280, 800),
         textScale: 2,
         activities: _many(6),
+        onPushRoute: routes.add,
       );
 
       _expectNoOverflow(tester);
       await _expectReachable(tester);
+      await _tapActivityHistory(tester, routes);
     });
 
     testWidgets('낮은 높이 + 글자 배율 2.0 + 푸시 배너를 함께 겪어도 overflow가 없다', (
@@ -48,6 +113,7 @@ void main() {
     ) async {
       final status = _failedPushStatus();
       addTearDown(status.dispose);
+      final routes = <String>[];
 
       await _pumpDashboard(
         tester,
@@ -55,11 +121,13 @@ void main() {
         textScale: 2,
         activities: _many(6),
         pushRegistrationStatus: status,
+        onPushRoute: routes.add,
       );
 
       _expectNoOverflow(tester);
       expect(find.byType(PushRegistrationNotice), findsOneWidget);
       await _expectReachable(tester);
+      await _tapActivityHistory(tester, routes);
     });
 
     testWidgets('긴 보호자·아이 이름이 줄바꿈돼도 overflow가 없다', (tester) async {
@@ -124,6 +192,7 @@ void main() {
 
       _expectNoOverflow(tester);
       expect(find.text('아직 활동 기록이 없어요.'), findsNothing);
+      await _expectRecentHeader(tester);
     });
 
     testWidgets('활동이 없으면 안내 문구를 보여주고 overflow가 없다', (tester) async {
@@ -134,7 +203,8 @@ void main() {
       );
 
       _expectNoOverflow(tester);
-      expect(find.text('아직 활동 기록이 없어요.'), findsOneWidget);
+      await _expectRecentHeader(tester);
+      await _expectTextVisible(tester, '아직 활동 기록이 없어요.');
     });
 
     testWidgets('조회가 실패하면 오류 문구를 보여주고 overflow가 없다', (tester) async {
@@ -145,7 +215,20 @@ void main() {
       );
 
       _expectNoOverflow(tester);
-      expect(find.text('활동을 불러오지 못했어요.'), findsOneWidget);
+      await _expectRecentHeader(tester);
+      await _expectTextVisible(tester, '활동을 불러오지 못했어요.');
+    });
+
+    testWidgets('최근 활동 1건을 온전히 표시하고 overflow가 없다', (tester) async {
+      await _pumpDashboard(
+        tester,
+        size: const Size(1280, 800),
+        activities: _many(1),
+      );
+
+      _expectNoOverflow(tester);
+      await _expectRecentHeader(tester);
+      expect(find.text('활동 1'), findsOneWidget);
     });
 
     testWidgets('활동이 있으면 목록을 보여주고 overflow가 없다', (tester) async {
@@ -156,6 +239,7 @@ void main() {
       );
 
       _expectNoOverflow(tester);
+      await _expectRecentHeader(tester);
       expect(find.text('활동 1'), findsOneWidget);
     });
 
@@ -167,6 +251,7 @@ void main() {
       );
 
       _expectNoOverflow(tester);
+      await _expectRecentHeader(tester);
       // 최근 활동 목록은 기존대로 카드 안에서 스크롤한다.
       final list = find.descendant(
         of: find.byKey(const ValueKey('activity-history-entry')),
@@ -287,6 +372,7 @@ void main() {
 typedef _Layout = ({String label, Size size});
 
 const _layouts = <_Layout>[
+  (label: '소형 휴대폰 320×640', size: Size(320, 640)),
   (label: '기존 1280×800', size: Size(1280, 800)),
   (label: '낮은 높이 1280×360', size: Size(1280, 360)),
   (label: '휴대폰 세로 390×844', size: Size(390, 844)),
@@ -305,13 +391,43 @@ void _expectNoOverflow(WidgetTester tester) {
 /// 존재만 확인하면 Clip으로 가려도 통과하므로 실제로 스크롤해 화면에 올린 뒤
 /// 크기를 확인한다.
 Future<void> _expectReachable(WidgetTester tester) async {
+  await _expectRecentHeader(tester);
   for (final target in [
     find.byKey(const ValueKey('start-child-mode')),
     find.byKey(const ValueKey('activity-history-entry')),
+    find.text('기록 없음'),
   ]) {
     await _reveal(tester, target);
     expect(tester.getSize(target).height, greaterThan(0));
   }
+  _expectNoOverflow(tester);
+}
+
+Future<void> _expectRecentHeader(WidgetTester tester) async {
+  final entry = find.byKey(const ValueKey('activity-history-entry'));
+  await _reveal(tester, entry);
+  expect(find.text('최근 활동'), findsOneWidget);
+  expect(tester.getSize(entry).width, greaterThanOrEqualTo(48));
+  expect(tester.getSize(entry).height, greaterThanOrEqualTo(48));
+  _expectNoOverflow(tester);
+}
+
+Future<void> _tapActivityHistory(
+  WidgetTester tester,
+  List<String> routes,
+) async {
+  final entry = find.byKey(const ValueKey('activity-history-entry'));
+  await _reveal(tester, entry);
+  await tester.tap(entry);
+  await tester.pumpAndSettle();
+  expect(routes, ['/guardian/activities']);
+  _expectNoOverflow(tester);
+}
+
+Future<void> _expectTextVisible(WidgetTester tester, String text) async {
+  final finder = find.text(text);
+  await _reveal(tester, finder);
+  expect(tester.getSize(finder).height, greaterThan(0));
   _expectNoOverflow(tester);
 }
 
@@ -393,6 +509,63 @@ Future<GuardianChildController> _pumpDashboard(
   } else {
     await tester.pump();
   }
+  return controller;
+}
+
+Future<GuardianChildController> _pumpProductionDashboard(
+  WidgetTester tester, {
+  required Size physicalSize,
+  required double devicePixelRatio,
+  required FakeViewPadding physicalPadding,
+  required List<ActivitySummaryDto> activities,
+  required List<ChildSummaryDto> children,
+  PushRegistrationStatusController? pushRegistrationStatus,
+  ValueChanged<String>? onPushRoute,
+}) async {
+  tester.view.physicalSize = physicalSize;
+  tester.view.devicePixelRatio = devicePixelRatio;
+  tester.view.padding = physicalPadding;
+  tester.view.viewPadding = physicalPadding;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  addTearDown(tester.view.resetPadding);
+  addTearDown(tester.view.resetViewPadding);
+
+  final controller = GuardianChildController(_ChildRepository(children));
+  addTearDown(controller.dispose);
+  await controller.loadChildren();
+
+  await tester.pumpWidget(
+    MaterialApp(
+      onGenerateRoute: (settings) {
+        final name = settings.name;
+        if (name != null && name != '/') onPushRoute?.call(name);
+        return MaterialPageRoute<void>(
+          settings: settings,
+          builder: (_) => name == null || name == '/'
+              ? GuardianSidebarShell(
+                  onSwitchProfile: (_) {},
+                  destinations: [
+                    GuardianNavItem(
+                      icon: Icons.home_outlined,
+                      selectedIcon: Icons.home,
+                      label: '홈',
+                      builder: (_) => GuardianHomeScreen(
+                        controller: controller,
+                        activityRepository: _ActivityRepository(
+                          activities: activities,
+                        ),
+                        pushRegistrationStatus: pushRegistrationStatus,
+                      ),
+                    ),
+                  ],
+                )
+              : const Scaffold(body: Text('pushed')),
+        );
+      },
+    ),
+  );
+  await tester.pumpAndSettle();
   return controller;
 }
 
