@@ -251,14 +251,65 @@ if ! kubectl create secret generic "${SECRET_NAME}" \
   exit 4
 fi
 
-count="$(kubectl -n "${NAMESPACE}" get secret "${SECRET_NAME}" -o jsonpath='{.data}' | tr ',' '\n' | wc -l)"
+# 키 개수 — `tr ',' '\n' | wc -l` 은 **항상 1개 적게** 센다. wc -l 은 개행을 세는데
+# 마지막 조각에는 개행이 없기 때문이다(2026-08-05: 54개를 53개로 보고하던 것을 발견).
+# 이 숫자는 사람이 "내가 넣은 키가 다 들어갔나" 를 대조하는 값이라 틀리면 안 된다.
+# key 이름만 세어 개행 문제를 피한다.
+count="$(kubectl -n "${NAMESPACE}" get secret "${SECRET_NAME}" -o jsonpath='{.data}' \
+  | grep -oE '"[A-Za-z_][A-Za-z0-9_.-]*":' | wc -l)"
 echo "[sync-secrets] OK: ${NAMESPACE}/${SECRET_NAME} 적용 완료 (키 ${count}개)"
 
 # ── ③ FCM 자격증명 (선택) ────────────────────────────────────────────────────
-# 파일이 없으면 조용히 건너뛴다 — 미발급 상태에서도 배포가 깨지지 않아야 한다.
-# backend 의 secret 볼륨이 optional: true 라 Secret 이 없어도 파드는 뜬다(681 설계와 동일).
+# 미발급 상태에서도 배포가 깨지지 않아야 한다 — backend 의 secret 볼륨이 optional: true 라
+# Secret 이 없어도 파드는 뜬다(681 설계와 동일). 그래서 "없으면 건너뛴다"가 기본이다.
+#
+# ★ 다만 **"없다"와 "못 읽는다"를 구분한다** (S15P11B209-774, 2026-08-05).
+#   예전에는 `[[ -s "$FCM_PATH" ]]` 하나로 판정했다. 그런데 자격증명 원본은 보통
+#   /etc/dodam/secrets/ (700 root) 에 있어, **sudo 없이 돌리면 파일이 멀쩡히 있는데도**
+#   `-s` 가 읽기 실패로 false 가 된다. 그때 스크립트는
+#       "SKIP: FCM 자격증명 없음 — 푸시는 비활성으로 뜹니다(정상)."
+#   을 출력하고 넘어갔다. **파일이 있는데 "없음", 그것도 "(정상)" 이라고 보고한 것이다.**
+#   619 가 "완료"로 닫혔는데 운영에 dodam-fcm 이 없어 푸시가 몇 주 동안 0건이던 경로가
+#   이것으로 보인다. 통보되지 않는 실패는 실패로 취급되지 않는다(733 과 같은 교훈).
+#
+#   그래서 이제:
+#     · 경로 미지정        → SKIP (정상. 아직 발급 전인 환경)
+#     · 파일 없음          → SKIP (정상. 위와 같음)
+#     · 있는데 못 읽음     → **FAIL(exit 5)**. 조용히 넘기지 않는다
+#     · 있는데 비어 있음   → **FAIL(exit 5)**. 빈 자격증명은 발급 실수다
 FCM_PATH="$(grep -E '^FCM_CREDENTIALS_HOST_PATH=' "${ENV_FILE}" | tail -n 1 | sed -e 's/^FCM_CREDENTIALS_HOST_PATH=//' -e 's/^"\(.*\)"$/\1/' || true)"
-if [[ -n "${FCM_PATH}" && -s "${FCM_PATH}" ]]; then
+if [[ -z "${FCM_PATH}" ]]; then
+  echo "[sync-secrets] SKIP: FCM_CREDENTIALS_HOST_PATH 미지정 — 푸시는 비활성으로 뜹니다(정상)."
+elif [[ ! -e "${FCM_PATH}" ]]; then
+  # ⚠️ `-e` 가 false 인 이유는 둘이다 — 진짜 없거나, **조상 디렉터리를 탐색할 수 없거나**.
+  #   후자를 "없음"으로 단정하면 이 함수가 막으려던 바로 그 오판이 된다.
+  #   /etc/dodam 이 700 root 라 일반 사용자는 /etc/dodam/secrets 를 stat 조차 못 한다 —
+  #   그래서 dirname 하나만 보는 것으로는 부족하고, 위로 거슬러 올라가며 확인해야 한다.
+  _dir="$(dirname "${FCM_PATH}")"
+  _blocked=""
+  while [[ -n "${_dir}" && "${_dir}" != "/" ]]; do
+    if [[ -e "${_dir}" && ! -x "${_dir}" ]]; then _blocked="${_dir}"; break; fi
+    _dir="$(dirname "${_dir}")"
+  done
+  if [[ -n "${_blocked}" ]]; then
+    echo "[sync-secrets] FAIL: ${_blocked} 을(를) 탐색할 수 없어 ${FCM_PATH} 의 존재를 확인할 수 없습니다(권한)." >&2
+    echo "   '없다'와 '못 본다'는 다릅니다 — 여기서 넘어가면 자격증명이 있는데도" >&2
+    echo "   푸시가 꺼진 채 배포됩니다(S15P11B209-774)." >&2
+    echo "   → sudo -E infra/scripts/sync-secrets.sh ${ENV_FILE}" >&2
+    echo "     (-E 없이 sudo 만 쓰면 root 의 KUBECONFIG 를 보므로 반드시 -E)" >&2
+    exit 5
+  fi
+  echo "[sync-secrets] SKIP: FCM 자격증명 파일 없음(${FCM_PATH}) — 푸시는 비활성으로 뜹니다(정상)."
+elif [[ ! -r "${FCM_PATH}" ]]; then
+  echo "[sync-secrets] FAIL: ${FCM_PATH} 이(가) 존재하지만 읽을 수 없습니다(권한)." >&2
+  echo "   이 상태로 넘어가면 자격증명이 있는데도 푸시가 꺼진 채 배포됩니다(S15P11B209-774)." >&2
+  echo "   → sudo -E infra/scripts/sync-secrets.sh ${ENV_FILE}" >&2
+  echo "     (-E 없이 sudo 만 쓰면 root 의 KUBECONFIG 를 보므로 반드시 -E)" >&2
+  exit 5
+elif [[ ! -s "${FCM_PATH}" ]]; then
+  echo "[sync-secrets] FAIL: ${FCM_PATH} 이(가) 비어 있습니다 — 자격증명 발급을 확인할 것." >&2
+  exit 5
+else
   if kubectl create secret generic "${FCM_SECRET_NAME}" \
         --namespace "${NAMESPACE}" \
         --from-file=fcm-service-account.json="${FCM_PATH}" \
@@ -267,8 +318,6 @@ if [[ -n "${FCM_PATH}" && -s "${FCM_PATH}" ]]; then
   else
     echo "[sync-secrets] WARN: ${FCM_SECRET_NAME} 적용 실패 — 푸시만 비활성으로 동작합니다." >&2
   fi
-else
-  echo "[sync-secrets] SKIP: FCM 자격증명 없음 — 푸시는 비활성으로 뜹니다(정상)."
 fi
 
 # ⚠️ 여기서 staging 을 안내하면 안 된다 (S15P11B209-771 / 770).
