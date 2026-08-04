@@ -18,6 +18,7 @@ import '../../data/costume_preference_store.dart';
 import '../../data/child_home_intro_store.dart';
 import '../../domain/dodam_costume.dart';
 import '../widgets/activity_guide_dialog.dart';
+import '../widgets/character_carousel_spotlight.dart';
 
 /// 아동 홈 "놀이 언덕" 배경 장면 색(S15P11B209-750). 이 화면 전용이라 공용
 /// 토큰 대신 여기 둔다.
@@ -156,7 +157,8 @@ class ChildModeHomeScreen extends StatefulWidget {
   State<ChildModeHomeScreen> createState() => _ChildModeHomeScreenState();
 }
 
-class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
+class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
+    with WidgetsBindingObserver {
   _ActivityLoadStatus _status = _ActivityLoadStatus.loading;
   List<DrawingTypeDto> _drawingTypes = const [];
 
@@ -181,6 +183,17 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   final FocusNode _costumeFocusNode = FocusNode(debugLabel: 'costume-selector');
   final GlobalKey _costumeKey = GlobalKey();
 
+  /// Spotlight 측정 기준(스케일 바깥 레이아웃 박스).
+  final GlobalKey _spotlightAnchorKey = GlobalKey();
+
+  /// 안내 중 캐러셀을 은은하게 키우는 배율.
+  ///
+  /// [AnimatedScale]은 layout을 바꾸지 않고 paint 변환만 바꾼다. 그래서 측정은
+  /// 변환 밖의 안정된 layout rect에서 하고, 여기서 **최종** visual rect를 계산해
+  /// spotlight의 유일한 기준으로 삼는다(S15P11B209-850). 애니메이션 시작·중간·
+  /// 종료 어느 frame에서도 hole이 실제 페인트 영역을 포함한다.
+  static const double _guideScale = 1.04;
+
   /// 캐릭터 선택을 백엔드에 저장하기 전 잠깐 모으는 디바운스(S15P11B209-505).
   /// 스와이프마다 저장하지 않고, 잠시 멈춘 뒤 마지막 선택만 한 번 저장한다.
   Timer? _persistCharacterTimer;
@@ -199,9 +212,25 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   int _costumeSelectionGeneration = 0;
   static const Duration _persistCharacterDelay = Duration(milliseconds: 600);
 
+  /// Spotlight가 밝게 남길 캐러셀의 화면 좌표(S15P11B209-850).
+  ///
+  /// 첫 frame 이후 실제 `_costumeKey`에서 재며, 값이 바뀔 때만 setState 한다.
+  /// 아직 재지 못했거나 크기가 0이면 null로 두어 잘못된 자리에 구멍을 뚫지 않는다.
+  Rect? _spotlightRect;
+  bool _spotlightMeasureScheduled = false;
+
+  /// dispose가 시작됐는지.
+  ///
+  /// [dispose]는 아직 보내지 못한 마지막 선택을 flush한다(S843). 그 경로에서
+  /// [setState]를 부르면 Element가 이미 defunct라 assertion이 난다 —
+  /// `mounted`는 dispose 중에도 참이라 막아주지 못한다. 저장 자체는 그대로 보내고
+  /// 화면 갱신만 건너뛴다.
+  bool _disposed = false;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _costumeStore = widget.costumeStore ?? CostumePreferenceStore();
     _introStore = widget.introStore ?? SecureChildHomeIntroStore();
     _costume = _costumeFromCode(widget.child.preferredCharacter);
@@ -243,6 +272,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     _characterGuideChildId = null;
     _characterGuideInteracted = false;
     _costumeSelectionGeneration++;
+    _spotlightRect = null;
 
     final costume = _costumeFromCode(widget.child.preferredCharacter);
     _costume = costume;
@@ -277,6 +307,8 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
 
   @override
   void dispose() {
+    _disposed = true;
+    WidgetsBinding.instance.removeObserver(this);
     // 아직 저장 안 된 마지막 선택이 있으면 나가기 전에 보낸다.
     if (_persistCharacterTimer?.isActive ?? false) _flushPersistCharacter();
     _finishCharacterSettlements(false);
@@ -284,6 +316,56 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     _costumeController.dispose();
     _costumeFocusNode.dispose();
     super.dispose();
+  }
+
+  /// 화면 크기·방향·글자 배율이 바뀌면 spotlight 자리를 다시 잰다.
+  @override
+  void didChangeMetrics() {
+    super.didChangeMetrics();
+    _scheduleSpotlightMeasure();
+  }
+
+  @override
+  void didChangeTextScaleFactor() {
+    super.didChangeTextScaleFactor();
+    _scheduleSpotlightMeasure();
+  }
+
+  /// 다음 frame 이후 한 번만 측정한다. frame마다 재지 않도록 예약을 합친다.
+  void _scheduleSpotlightMeasure() {
+    if (_spotlightMeasureScheduled) return;
+    _spotlightMeasureScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _spotlightMeasureScheduled = false;
+      _measureSpotlight();
+    });
+  }
+
+  /// 실제 캐러셀(`_costumeKey`)의 화면 좌표를 잰다.
+  ///
+  /// dispose 이후 늦게 도착한 callback, 아직 layout 전인 render object, 크기가 0인
+  /// rect는 모두 무시한다 — 그런 값으로 구멍을 뚫으면 엉뚱한 자리가 밝아진다.
+  void _measureSpotlight() {
+    if (!mounted) return;
+    if (_characterGuideStatus == _CharacterGuideStatus.inactive ||
+        _characterGuideChildId != widget.child.childId) {
+      if (_spotlightRect != null) setState(() => _spotlightRect = null);
+      return;
+    }
+    final renderObject = _spotlightAnchorKey.currentContext?.findRenderObject();
+    if (renderObject is! RenderBox || !renderObject.hasSize) return;
+    final size = renderObject.size;
+    if (size.isEmpty) return;
+    // 캐러셀은 안내 중 AnimatedScale로 커진다. 변환된 원점과 원래 size를 섞으면
+    // 구멍이 실제 화면 위치와 어긋나 화살표가 barrier에 덮인다. 조상 변환을 통째로
+    // 적용해 화면 좌표계의 rect를 얻는다.
+    final next = MatrixUtils.transformRect(
+      renderObject.getTransformTo(null),
+      Offset.zero & size,
+    );
+    if (next.isEmpty) return;
+    if (_spotlightRect == next) return;
+    setState(() => _spotlightRect = next);
   }
 
   /// 지원 그림 유형 중 기본 그림 활동 진입에 사용하는 그림일기.
@@ -430,7 +512,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         _characterGuideStatus != _CharacterGuideStatus.inactive &&
         _characterGuideChildId == childId &&
         _characterGuideInteracted;
-    if (guideRequest && mounted) {
+    if (guideRequest && mounted && !_disposed) {
       setState(() => _characterGuideStatus = _CharacterGuideStatus.saving);
     }
     var succeeded = false;
@@ -549,6 +631,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       _characterGuideStatus = _CharacterGuideStatus.inactive;
       _characterGuideChildId = null;
       _characterGuideInteracted = false;
+      _spotlightRect = null;
     });
     showAppMessage(
       context,
@@ -578,15 +661,19 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       }
       _costumeFocusNode.requestFocus();
       final selectorContext = _costumeKey.currentContext;
-      if (selectorContext != null) {
-        unawaited(
-          Scrollable.ensureVisible(
-            selectorContext,
-            duration: const Duration(milliseconds: 240),
-            alignment: 0.35,
-          ),
-        );
+      if (selectorContext == null) {
+        _scheduleSpotlightMeasure();
+        return;
       }
+      // 스크롤이 끝난 자리에서 재야 spotlight가 캐러셀과 어긋나지 않는다.
+      unawaited(
+        Scrollable.ensureVisible(
+          selectorContext,
+          duration: const Duration(milliseconds: 240),
+          alignment: 0.35,
+        ).then((_) => _scheduleSpotlightMeasure()),
+      );
+      _scheduleSpotlightMeasure();
     });
   }
 
@@ -596,6 +683,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
       _characterGuideStatus = _CharacterGuideStatus.inactive;
       _characterGuideChildId = null;
       _characterGuideInteracted = false;
+      _spotlightRect = null;
     });
   }
 
@@ -1331,7 +1419,15 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
   }
 
   Widget _carousel() => _CharacterSelectionGuide(
+    // 측정 기준은 스케일 바깥의 레이아웃 박스다. AnimatedScale은 paint 변환만
+    // 바꾸므로 이 박스는 애니메이션 중에도 움직이지 않아 rect가 안정적이다.
+    // 1.04배로 커지는 만큼은 hole padding이 덮는다.
+    anchorKey: _spotlightAnchorKey,
     status: _characterGuideStatus,
+    // Spotlight가 켜지면 캐러셀을 은은하게 키워 시선을 모은다.
+    scale: _characterGuideStatus == _CharacterGuideStatus.inactive
+        ? 1
+        : _guideScale,
     child: Focus(
       key: _costumeKey,
       focusNode: _costumeFocusNode,
@@ -1343,6 +1439,59 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
         onStep: _stepCostume,
       ),
     ),
+  );
+
+  /// 코치마크 문구. 실제 조작 여부로만 갈린다.
+  ///
+  /// 저장은 조작이 곧바로 예약한다(기존 600ms debounce). 확정 버튼을 두지 않으므로
+  /// 조작 직후 문구가 바로 "저장 중" 맥락으로 넘어간다.
+  String get _guideMessage => switch (_characterGuideStatus) {
+    _CharacterGuideStatus.inactive => '',
+    _CharacterGuideStatus.choosing =>
+      _characterGuideInteracted ? '마음에 드는 도담이를 골랐구나!' : '화살표를 눌러 함께할 도담이를 골라봐!',
+    _CharacterGuideStatus.saving => '친구를 정하고 있어요',
+    _CharacterGuideStatus.failure => '친구를 정하지 못했어요. 다시 골라볼까요?',
+  };
+
+  String get _guideSecondaryMessage => switch (_characterGuideStatus) {
+    _CharacterGuideStatus.choosing =>
+      _characterGuideInteracted ? '선택한 친구를 저장하고 있어요' : '좌우로 넘겨볼 수도 있어요',
+    _CharacterGuideStatus.saving => '선택한 친구를 저장하고 있어요',
+    _ => '',
+  };
+
+  /// layout anchor rect에서 계산한 최종 visual rect.
+  ///
+  /// [AnimatedScale]의 alignment는 기본값 [Alignment.center]이므로 중심을 고정한
+  /// 채 배율만 곱한다.
+  Rect? get _spotlightVisualRect {
+    final layout = _spotlightRect;
+    if (layout == null || layout.isEmpty) return null;
+    return Rect.fromCenter(
+      center: layout.center,
+      width: layout.width * _guideScale,
+      height: layout.height * _guideScale,
+    );
+  }
+
+  Widget _characterSpotlight() => CharacterCarouselSpotlight(
+    key: const ValueKey('character-carousel-spotlight'),
+    targetRect: _spotlightVisualRect,
+    message: _guideMessage,
+    secondaryMessage: _guideSecondaryMessage,
+    accent: _characterGuideStatus == _CharacterGuideStatus.failure
+        ? AppColors.error
+        : AppColors.sunshine,
+    // 조작 직후부터 PATCH가 예약돼 있어 비차단 progress를 함께 켠다.
+    busy:
+        _characterGuideStatus == _CharacterGuideStatus.saving ||
+        (_characterGuideStatus == _CharacterGuideStatus.choosing &&
+            _characterGuideInteracted),
+    // 조작을 마치면 유도 표시를 낮춘다.
+    showNudge:
+        _characterGuideStatus == _CharacterGuideStatus.choosing &&
+        !_characterGuideInteracted,
+    messageKey: const ValueKey('child-character-guide'),
   );
 
   /// 이젤 아래 secondary 입구. 활동 로딩 상태와 무관하게 항상 보여준다.
@@ -1480,8 +1629,23 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
     ),
   );
 
+  /// 2단 배치가 왼쪽 캐러셀 column에 필요한 최소 높이(글자 배율 1.0 기준).
+  ///
+  /// 캐러셀 무대 320 + 간격 16 + 이름 pill + 간격 16 + dots 를 담아야 한다.
+  static const double _wideBodyMinHeight = 430;
+
+  /// 2단 배치를 쓸 수 있는지. 화면 폭만 보면 가로 화면(예: 844x390)에서 왼쪽
+  /// column이 필요한 높이를 못 받아 캐러셀이 세로로 넘친다. 실제 제약으로 판단해
+  /// 부족하면 기존 세로 스택(스크롤 가능) 배치를 쓴다(S15P11B209-850).
+  bool _canUseWideBody(BuildContext context, BoxConstraints constraints) {
+    if (constraints.maxWidth < 720) return false;
+    final textScale = MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 2.0);
+    return constraints.maxHeight >= _wideBodyMinHeight * textScale;
+  }
+
   /// 태블릿(넓은 화면): 캐릭터는 언덕 위에 서고 이젤은 오른쪽에 세운다.
   Widget _wideBody(BuildContext context) => Column(
+    key: const ValueKey('child-home-wide-body'),
     children: [
       _title(context),
       const SizedBox(height: AppSpacing.md),
@@ -1532,6 +1696,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
 
   /// 좁은 화면: 세로로 쌓고 스크롤한다(오버플로 방지).
   Widget _narrowBody(BuildContext context) => Center(
+    key: const ValueKey('child-home-narrow-body'),
     child: SingleChildScrollView(
       child: ConstrainedBox(
         constraints: const BoxConstraints(
@@ -1582,17 +1747,35 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
                     ],
                   ),
                   Expanded(
-                    child: LayoutBuilder(
-                      builder: (context, constraints) =>
-                          constraints.maxWidth >= 720
-                          ? _wideBody(context)
-                          : _narrowBody(context),
+                    // 좁은 화면 본문은 스크롤된다. 안내 진입 시 캐러셀을 화면에
+                    // 올리는 스크롤이 끝나면 spotlight 자리를 다시 잰다 — 그렇지
+                    // 않으면 이전 위치에 구멍이 남아 화살표가 barrier에 덮인다.
+                    child: NotificationListener<ScrollNotification>(
+                      onNotification: (notification) {
+                        if (notification is ScrollEndNotification ||
+                            notification is UserScrollNotification) {
+                          _scheduleSpotlightMeasure();
+                        }
+                        return false;
+                      },
+                      child: LayoutBuilder(
+                        builder: (context, constraints) {
+                          // 레이아웃 분기가 바뀌면 캐러셀 자리도 달라진다.
+                          _scheduleSpotlightMeasure();
+                          return _canUseWideBody(context, constraints)
+                              ? _wideBody(context)
+                              : _narrowBody(context);
+                        },
+                      ),
                     ),
                   ),
                 ],
               ),
             ),
           ),
+          // 안내가 켜진 동안에만 캐러셀 자리를 밝게 남기고 나머지를 덮는다.
+          if (_characterGuideStatus != _CharacterGuideStatus.inactive)
+            Positioned.fill(child: _characterSpotlight()),
         ],
       ),
     ),
@@ -1605,17 +1788,21 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen> {
 /// 그대로 유지한다. 고정 높이 안에 겹쳐 그려 좁은 화면·가로 화면의 레이아웃도
 /// 바꾸지 않는다.
 class _CharacterSelectionGuide extends StatelessWidget {
-  const _CharacterSelectionGuide({required this.status, required this.child});
+  const _CharacterSelectionGuide({
+    required this.anchorKey,
+    required this.status,
+    required this.scale,
+    required this.child,
+  });
+
+  /// Spotlight가 재는 레이아웃 박스. 스케일 변환 밖에 둔다.
+  final Key anchorKey;
 
   final _CharacterGuideStatus status;
-  final Widget child;
 
-  String get _message => switch (status) {
-    _CharacterGuideStatus.inactive => '',
-    _CharacterGuideStatus.choosing => '화살표를 눌러 함께할 도담이를 골라봐!',
-    _CharacterGuideStatus.saving => '친구를 정하고 있어요',
-    _CharacterGuideStatus.failure => '친구를 정하지 못했어요. 다시 골라볼까요?',
-  };
+  /// Spotlight가 켜졌을 때의 은은한 확대 배율.
+  final double scale;
+  final Widget child;
 
   Color get _accent => switch (status) {
     _CharacterGuideStatus.failure => AppColors.error,
@@ -1625,90 +1812,49 @@ class _CharacterSelectionGuide extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final active = status != _CharacterGuideStatus.inactive;
-    return Stack(
-      key: const ValueKey('child-character-guide-region'),
-      clipBehavior: Clip.none,
-      children: [
-        child,
-        Positioned.fill(
-          child: IgnorePointer(
-            child: AnimatedContainer(
-              key: const ValueKey('child-character-guide-highlight'),
-              duration: const Duration(milliseconds: 180),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(28),
-                border: active ? Border.all(color: _accent, width: 3) : null,
-                boxShadow: active
-                    ? [
-                        BoxShadow(
-                          color: _accent.withValues(alpha: 0.22),
-                          blurRadius: 18,
-                          spreadRadius: 2,
-                        ),
-                      ]
-                    : null,
-              ),
-            ),
-          ),
-        ),
-        if (active)
-          Positioned(
-            top: 4,
-            left: 60,
-            right: 60,
-            child: Semantics(
-              key: const ValueKey('child-character-guide'),
-              container: true,
-              liveRegion: true,
-              label: _message,
-              child: ExcludeSemantics(
-                child: IgnorePointer(
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 180),
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.md,
-                      vertical: AppSpacing.sm,
-                    ),
-                    decoration: BoxDecoration(
-                      color: AppColors.surface.withValues(alpha: 0.96),
-                      borderRadius: BorderRadius.circular(AppRadius.pill),
-                      border: Border.all(color: _accent, width: 2),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        if (status == _CharacterGuideStatus.saving) ...[
-                          SizedBox.square(
-                            dimension: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2.5,
-                              color: _accent,
+    // 안내 문구는 spotlight 코치마크가 담당한다(S15P11B209-850). 여기서 같은
+    // 문구를 또 그리면 화면과 낭독이 둘 다 중복된다.
+    // padding 0인 Padding은 layout을 바꾸지 않으면서 render box를 만든다. 이
+    // 박스를 spotlight 측정 기준으로 삼아, 안쪽 AnimatedScale이 paint 변환을
+    // 바꾸는 동안에도 rect가 흔들리지 않게 한다.
+    return Padding(
+      key: anchorKey,
+      padding: EdgeInsets.zero,
+      child: AnimatedScale(
+        scale: scale,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutBack,
+        child: Stack(
+          key: const ValueKey('child-character-guide-region'),
+          clipBehavior: Clip.none,
+          children: [
+            child,
+            Positioned.fill(
+              child: IgnorePointer(
+                child: AnimatedContainer(
+                  key: const ValueKey('child-character-guide-highlight'),
+                  duration: const Duration(milliseconds: 180),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(28),
+                    border: active
+                        ? Border.all(color: _accent, width: 3)
+                        : null,
+                    boxShadow: active
+                        ? [
+                            BoxShadow(
+                              color: _accent.withValues(alpha: 0.22),
+                              blurRadius: 18,
+                              spreadRadius: 2,
                             ),
-                          ),
-                          const SizedBox(width: AppSpacing.sm),
-                        ],
-                        Flexible(
-                          child: Text(
-                            _message,
-                            textAlign: TextAlign.center,
-                            style: TextStyle(
-                              color: status == _CharacterGuideStatus.failure
-                                  ? AppColors.error
-                                  : AppColors.ink,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
+                          ]
+                        : null,
                   ),
                 ),
               ),
             ),
-          ),
-      ],
+          ],
+        ),
+      ),
     );
   }
 }
