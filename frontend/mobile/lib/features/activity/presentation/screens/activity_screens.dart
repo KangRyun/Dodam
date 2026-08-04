@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -26,8 +27,10 @@ import '../../../drawing/application/htp_response_flow_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
+import '../../../drawing/presentation/models/drawing_canvas_action.dart';
 import '../../../drawing/presentation/models/drawing_tool_state.dart';
 import '../../../drawing/presentation/widgets/drawing_color_palette.dart';
+import '../../../drawing/presentation/widgets/drawing_canvas_viewport.dart';
 import '../../../drawing/presentation/widgets/drawing_crayon_frame.dart';
 import '../../../drawing/presentation/widgets/drawing_cursor_overlay.dart';
 import '../../../drawing/presentation/widgets/drawing_toolbar.dart';
@@ -644,6 +647,17 @@ class _DrawingScreenState extends State<DrawingScreen>
     });
     _refreshVisibleCursor();
   }
+
+  /// 마우스·스타일러스가 캔버스 위를 지나면 현재 도구와 굵기를 커서로 보여 준다.
+  void _handleCanvasHover(PointerHoverEvent event) {
+    _cursorController.update(
+      documentPosition: event.localPosition,
+      toolState: _toolState,
+      deviceKind: event.kind,
+    );
+  }
+
+  void _handleCanvasExit(PointerEvent event) => _cursorController.hide();
 
   void _setEraserMode(DrawingEraserMode mode) {
     setState(() {
@@ -1499,7 +1513,10 @@ class _DrawingScreenState extends State<DrawingScreen>
     });
     final canvasSize = _canvasBoundaryKey.currentContext?.size;
     if (completed && canvasSize != null) {
-      _syncCoordinator.recordStroke(stroke, canvasSize);
+      _syncCoordinator.recordStroke(
+        stroke,
+        DrawingCanvasGeometry.documentSize,
+      );
       _objectDetectionController?.onDrawingInputEnded();
     }
   }
@@ -1516,7 +1533,10 @@ class _DrawingScreenState extends State<DrawingScreen>
       _activePointer = null;
     });
     if (canvasSize != null) {
-      _syncCoordinator.recordStroke(stroke, canvasSize);
+      _syncCoordinator.recordStroke(
+        stroke,
+        DrawingCanvasGeometry.documentSize,
+      );
       _objectDetectionController?.onDrawingInputEnded();
     }
   }
@@ -1994,6 +2014,10 @@ class _DrawingScreenState extends State<DrawingScreen>
                 final canvas = _CanvasPanel(
                   repaintBoundaryKey: _canvasBoundaryKey,
                   companion: _companionSnapshot,
+                  actions: _documentController.actions,
+                  cursorController: _cursorController,
+                  onPointerHover: _handleCanvasHover,
+                  onPointerExit: _handleCanvasExit,
                   strokes: _visibleStrokes,
                   onPointerDown: _startStroke,
                   onPointerMove: _extendStroke,
@@ -2282,6 +2306,10 @@ class _DrawingScreenState extends State<DrawingScreen>
 class _CanvasPanel extends StatelessWidget {
   const _CanvasPanel({
     required this.repaintBoundaryKey,
+    required this.actions,
+    required this.cursorController,
+    required this.onPointerHover,
+    required this.onPointerExit,
     required this.strokes,
     required this.onPointerDown,
     required this.onPointerMove,
@@ -2322,6 +2350,12 @@ class _CanvasPanel extends StatelessWidget {
 
   final GlobalKey repaintBoundaryKey;
   final DodamCostume companion;
+
+  /// 채우기·지우기까지 포함한 문서 변경 이력이다. 획만으로는 캔버스를 다시 그릴 수 없다.
+  final List<DrawingCanvasAction> actions;
+  final DrawingCursorController cursorController;
+  final ValueChanged<PointerHoverEvent> onPointerHover;
+  final ValueChanged<PointerEvent> onPointerExit;
   final List<DrawingStroke> strokes;
   final ValueChanged<PointerDownEvent> onPointerDown;
   final ValueChanged<PointerMoveEvent> onPointerMove;
@@ -2386,18 +2420,27 @@ class _CanvasPanel extends StatelessWidget {
         return Stack(
           fit: StackFit.expand,
           children: [
-            RepaintBoundary(
-              key: repaintBoundaryKey,
-              child: DrawingCanvas(
+            DrawingCanvasViewport(
+              repaintBoundaryKey: repaintBoundaryKey,
+              canvas: DrawingCanvas(
                 strokes: strokes,
+                actions: actions,
                 onPointerDown: onPointerDown,
                 onPointerMove: onPointerMove,
                 onPointerUp: onPointerUp,
+                onPointerHover: onPointerHover,
+                onPointerExit: onPointerExit,
                 backgroundImage: backgroundImage,
                 inputEnabled: inputEnabled,
                 onBackgroundLoaded: onBackgroundLoaded,
                 onBackgroundError: onBackgroundError,
               ),
+              overlayBuilder: (context, metrics) =>
+                  ValueListenableBuilder<DrawingCursorState>(
+                    valueListenable: cursorController,
+                    builder: (context, state, child) =>
+                        DrawingCursorOverlay(state: state, metrics: metrics),
+                  ),
             ),
             AiQuestionBubbleOverlay(
               companion: companion,
