@@ -84,12 +84,11 @@ class DrawingSessionHistoryQueryServiceTest {
   private DrawingSessionHistoryQueryService service() {
     return new DrawingSessionHistoryQueryService(
         drawingSessionRepository,
-        drawingAssetRepository,
         drawingSessionEmotionRepository,
         drawingAnalysisRepository,
         reportRepository,
         htpAssessmentRepository,
-        new DrawingAssetFileUrlFactory(),
+        new SessionPreviewImageUrlFinder(drawingAssetRepository, new DrawingAssetFileUrlFactory()),
         currentUserResolver,
         accessValidator);
   }
@@ -284,6 +283,128 @@ class DrawingSessionHistoryQueryServiceTest {
 
     assertThat(response.content().getFirst().thumbnailUrl())
         .isEqualTo("/api/v1/drawing-assets/31/file");
+  }
+
+  @Test
+  void usesUploadedOriginalAsThumbnailWhenUploadSessionHasNoFinalImage() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+    givenSession();
+    given(session.getTitle()).willReturn(null);
+    given(session.getCompletedAt()).willReturn(COMPLETED_AT);
+    givenPageOf(session);
+    given(htpAssessmentRepository.findByStepDrawingSessionIdIn(List.of(SESSION_ID)))
+        .willReturn(List.of());
+
+    DrawingAsset uploadedAsset = org.mockito.Mockito.mock(DrawingAsset.class);
+    given(uploadedAsset.getId()).willReturn(32L);
+    given(uploadedAsset.getDrawingSession()).willReturn(session);
+    given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    List.of(SESSION_ID), DrawingAssetType.THUMBNAIL))
+        .willReturn(List.of());
+    given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    List.of(SESSION_ID), DrawingAssetType.FINAL))
+        .willReturn(List.of());
+    given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    List.of(SESSION_ID), DrawingAssetType.UPLOADED))
+        .willReturn(List.of(uploadedAsset));
+
+    DrawingSessionHistoryPageResponse response =
+        service().getHistory(CHILD_ID, null, null, null, null, null, PAGEABLE);
+
+    assertThat(response.content().getFirst().thumbnailUrl())
+        .isEqualTo("/api/v1/drawing-assets/32/file");
+  }
+
+  @Test
+  void exposesUploadedOriginalForEachHtpStepWhenAssessmentWasUploaded() {
+    given(currentUserResolver.requireUserId()).willReturn(GUARDIAN_USER_ID);
+
+    DrawingSession houseSession = org.mockito.Mockito.mock(DrawingSession.class);
+    DrawingSession treeSession = org.mockito.Mockito.mock(DrawingSession.class);
+    DrawingSession personSession = org.mockito.Mockito.mock(DrawingSession.class);
+    HtpAssessment assessment = org.mockito.Mockito.mock(HtpAssessment.class);
+    HtpAssessmentStep houseStep = org.mockito.Mockito.mock(HtpAssessmentStep.class);
+    HtpAssessmentStep treeStep = org.mockito.Mockito.mock(HtpAssessmentStep.class);
+    HtpAssessmentStep personStep = org.mockito.Mockito.mock(HtpAssessmentStep.class);
+    DrawingType htpType = org.mockito.Mockito.mock(DrawingType.class);
+
+    given(houseSession.getId()).willReturn(10L);
+    given(treeSession.getId()).willReturn(11L);
+    given(personSession.getId()).willReturn(12L);
+    given(personSession.getDrawingType()).willReturn(htpType);
+    given(htpType.getId()).willReturn(9L);
+    given(htpType.getCode()).willReturn("HTP");
+    given(htpType.getName()).willReturn("집·나무·사람 그림");
+    given(personSession.getInputMethod()).willReturn(DrawingInputMethod.UPLOAD);
+    given(personSession.getSessionStatus()).willReturn(DrawingSessionStatus.COMPLETED);
+    given(personSession.getCurrentStage()).willReturn(DrawingStage.COMPLETED);
+    given(houseStep.getStepOrder()).willReturn(1);
+    given(houseStep.getDrawingSubject()).willReturn(HtpDrawingSubject.HOUSE);
+    given(houseStep.getDrawingSession()).willReturn(houseSession);
+    given(treeStep.getStepOrder()).willReturn(2);
+    given(treeStep.getDrawingSubject()).willReturn(HtpDrawingSubject.TREE);
+    given(treeStep.getDrawingSession()).willReturn(treeSession);
+    given(personStep.getStepOrder()).willReturn(3);
+    given(personStep.getDrawingSubject()).willReturn(HtpDrawingSubject.PERSON);
+    given(personStep.getDrawingSession()).willReturn(personSession);
+    given(assessment.getId()).willReturn(40L);
+    given(assessment.getStatus()).willReturn(HtpAssessmentStatus.COMPLETED);
+    given(assessment.getCreatedAt()).willReturn(STARTED_AT);
+    given(assessment.getCompletedAt()).willReturn(COMPLETED_AT);
+    given(assessment.getSteps()).willReturn(List.of(houseStep, treeStep, personStep));
+
+    given(
+            drawingSessionRepository.findHistoryPage(
+                eq(CHILD_ID), any(), any(), any(), any(), any(), any(Pageable.class)))
+        .willReturn(new PageImpl<>(List.of(personSession), PAGEABLE, 1));
+    given(htpAssessmentRepository.findByStepDrawingSessionIdIn(List.of(12L)))
+        .willReturn(List.of(assessment));
+
+    // 사진 업로드로 진행한 HTP는 단계마다 UPLOADED 원본만 남고 FINAL·THUMBNAIL이 없다.
+    DrawingAsset houseUpload = uploadedAssetOf(houseSession, 61L);
+    DrawingAsset treeUpload = uploadedAssetOf(treeSession, 62L);
+    DrawingAsset personUpload = uploadedAssetOf(personSession, 63L);
+    List<Long> stepSessionIds = List.of(12L, 10L, 11L);
+    given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    stepSessionIds, DrawingAssetType.THUMBNAIL))
+        .willReturn(List.of());
+    given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    stepSessionIds, DrawingAssetType.FINAL))
+        .willReturn(List.of());
+    given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    stepSessionIds, DrawingAssetType.UPLOADED))
+        .willReturn(List.of(houseUpload, treeUpload, personUpload));
+
+    DrawingSessionHistoryPageResponse response =
+        service().getHistory(CHILD_ID, null, null, null, null, null, PAGEABLE);
+
+    var item = response.content().getFirst();
+    assertThat(item.thumbnailUrl()).isEqualTo("/api/v1/drawing-assets/63/file");
+    assertThat(item.htpDrawings())
+        .extracting("thumbnailUrl")
+        .containsExactly(
+            "/api/v1/drawing-assets/61/file",
+            "/api/v1/drawing-assets/62/file",
+            "/api/v1/drawing-assets/63/file");
+  }
+
+  private DrawingAsset uploadedAssetOf(DrawingSession drawingSession, Long assetId) {
+    DrawingAsset asset = org.mockito.Mockito.mock(DrawingAsset.class);
+    given(asset.getId()).willReturn(assetId);
+    given(asset.getDrawingSession()).willReturn(drawingSession);
+    return asset;
   }
 
   @Test

@@ -16,6 +16,7 @@ import com.ssafy.b209.drawing.domain.DrawingType;
 import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
 import com.ssafy.b209.drawing.service.DrawingAssetFileUrlFactory;
+import com.ssafy.b209.drawing.service.SessionPreviewImageUrlFinder;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportStatus;
 import com.ssafy.b209.report.dto.ReportListPageResponse;
@@ -47,11 +48,72 @@ class ReportListQueryServiceTest {
     service =
         new ReportListQueryService(
             reportRepository,
-            drawingAssetRepository,
             drawingSessionEmotionRepository,
-            new DrawingAssetFileUrlFactory(),
+            new SessionPreviewImageUrlFinder(
+                drawingAssetRepository, new DrawingAssetFileUrlFactory()),
             currentUserResolver,
             accessValidator);
+  }
+
+  @Test
+  void usesUploadedOriginalAsThumbnailForUploadedSessionReport() {
+    PageRequest pageable = PageRequest.of(0, 20);
+    DrawingType drawingType = mock(DrawingType.class);
+    given(drawingType.getId()).willReturn(9L);
+    given(drawingType.getCode()).willReturn("HTP");
+    given(drawingType.getName()).willReturn("집·나무·사람 그림");
+
+    DrawingSession session = mock(DrawingSession.class);
+    given(session.getId()).willReturn(11L);
+    given(session.getDrawingType()).willReturn(drawingType);
+    given(session.getTitle()).willReturn(null);
+    given(session.getStartedAt()).willReturn(LocalDateTime.parse("2026-08-04T04:00:00"));
+    given(session.getCompletedAt()).willReturn(LocalDateTime.parse("2026-08-04T04:03:00"));
+
+    Report report = mock(Report.class);
+    given(report.getId()).willReturn(60L);
+    given(report.getReportVersion()).willReturn(1);
+    given(report.getDrawingSession()).willReturn(session);
+    given(report.getStatus()).willReturn(ReportStatus.COMPLETED);
+
+    DrawingAsset uploaded = mock(DrawingAsset.class);
+    given(uploaded.getId()).willReturn(71L);
+    given(uploaded.getDrawingSession()).willReturn(session);
+
+    given(currentUserResolver.requireUserId()).willReturn(99L);
+    given(reportRepository.findVisiblePage(3L, null, null, null, null, pageable))
+        .willReturn(new PageImpl<>(List.of(report), pageable, 1));
+    // 사진 업로드 세션은 FINAL·THUMBNAIL 없이 UPLOADED 원본만 남는다.
+    given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    List.of(11L), DrawingAssetType.THUMBNAIL))
+        .willReturn(List.of());
+    given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    List.of(11L), DrawingAssetType.FINAL))
+        .willReturn(List.of());
+    given(
+            drawingAssetRepository
+                .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
+                    List.of(11L), DrawingAssetType.UPLOADED))
+        .willReturn(List.of(uploaded));
+    given(
+            drawingSessionEmotionRepository
+                .findByDrawingSessionIdInOrderByDrawingSessionIdAscSelectionOrderAscIdAsc(
+                    List.of(11L)))
+        .willReturn(List.of());
+
+    ReportListPageResponse response = service.getReports(3L, null, null, null, null, pageable);
+
+    assertThat(response.content())
+        .singleElement()
+        .satisfies(
+            item -> {
+              assertThat(item.thumbnailUrl()).isEqualTo("/api/v1/drawing-assets/71/file");
+              assertThat(item.title()).isEqualTo("집·나무·사람 그림");
+            });
   }
 
   @Test

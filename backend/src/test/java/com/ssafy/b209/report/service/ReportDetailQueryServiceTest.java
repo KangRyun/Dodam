@@ -233,6 +233,38 @@ class ReportDetailQueryServiceTest {
   }
 
   @Test
+  void usesUploadedOriginalAsFinalImageWhenSessionWasUploaded() {
+    when(reportRepository.findById(REPORT_ID))
+        .thenReturn(Optional.of(report(ReportStatus.COMPLETED, null)));
+    when(guardianAccessRepository.hasDrawingSessionAccess(GUARDIAN_ID, SESSION_ID))
+        .thenReturn(true);
+    when(drawingSessionRepository.findById(SESSION_ID)).thenReturn(Optional.of(session()));
+    // 사진 업로드 세션은 최종 그림을 다시 그리지 않아 UPLOADED 원본만 남는다.
+    when(assetRepository.findByDrawingSessionIdAndAssetTypeInOrderByAssetVersionAsc(any(), any()))
+        .thenReturn(List.of(asset(21L, "UPLOADED", 1)));
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.drawing().finalImageUrl()).isEqualTo("/api/v1/drawing-assets/21/file");
+    assertThat(response.drawing().thumbnailUrl()).isEqualTo("/api/v1/drawing-assets/21/file");
+  }
+
+  @Test
+  void prefersFinalSnapshotOverUploadedOriginalWhenBothExist() {
+    when(reportRepository.findById(REPORT_ID))
+        .thenReturn(Optional.of(report(ReportStatus.COMPLETED, null)));
+    when(guardianAccessRepository.hasDrawingSessionAccess(GUARDIAN_ID, SESSION_ID))
+        .thenReturn(true);
+    when(drawingSessionRepository.findById(SESSION_ID)).thenReturn(Optional.of(session()));
+    when(assetRepository.findByDrawingSessionIdAndAssetTypeInOrderByAssetVersionAsc(any(), any()))
+        .thenReturn(List.of(asset(21L, "UPLOADED", 1), asset(22L, "FINAL", 1)));
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.drawing().finalImageUrl()).isEqualTo("/api/v1/drawing-assets/22/file");
+  }
+
+  @Test
   void listsDetectedObjectsOfEveryHtpSessionInSubjectOrder() {
     givenAccessibleReport();
     when(detectedObjectRepository.findActivityDetectedObjects(SESSION_ID))

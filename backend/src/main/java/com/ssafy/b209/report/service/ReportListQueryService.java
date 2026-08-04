@@ -2,14 +2,11 @@ package com.ssafy.b209.report.service;
 
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
-import com.ssafy.b209.drawing.domain.DrawingAsset;
-import com.ssafy.b209.drawing.domain.DrawingAssetType;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.domain.DrawingSessionEmotion;
 import com.ssafy.b209.drawing.domain.DrawingType;
-import com.ssafy.b209.drawing.repository.DrawingAssetRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
-import com.ssafy.b209.drawing.service.DrawingAssetFileUrlFactory;
+import com.ssafy.b209.drawing.service.SessionPreviewImageUrlFinder;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.response.CommonErrorCode;
 import com.ssafy.b209.report.domain.Report;
@@ -40,9 +37,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class ReportListQueryService {
 
   private final ReportRepository reportRepository;
-  private final DrawingAssetRepository drawingAssetRepository;
   private final DrawingSessionEmotionRepository drawingSessionEmotionRepository;
-  private final DrawingAssetFileUrlFactory fileUrlFactory;
+  private final SessionPreviewImageUrlFinder previewImageUrlFinder;
   private final CurrentAuthenticatedUserResolver currentUserResolver;
   private final GuardianResourceAccessValidator accessValidator;
 
@@ -50,23 +46,20 @@ public class ReportListQueryService {
    * 리포트 목록 조회에 필요한 저장소와 인증 경계를 구성한다.
    *
    * @param reportRepository 리포트 페이지 조회 저장소
-   * @param drawingAssetRepository 썸네일 배치 조회 저장소
    * @param drawingSessionEmotionRepository 선택 감정 배치 조회 저장소
-   * @param fileUrlFactory 인증된 그림 파일 조회 URL 생성기
+   * @param previewImageUrlFinder 세션 대표 이미지 URL 확정기
    * @param currentUserResolver 현재 보호자 식별자 Resolver
    * @param accessValidator 보호자-아동 연결 관계 Validator
    */
   public ReportListQueryService(
       ReportRepository reportRepository,
-      DrawingAssetRepository drawingAssetRepository,
       DrawingSessionEmotionRepository drawingSessionEmotionRepository,
-      DrawingAssetFileUrlFactory fileUrlFactory,
+      SessionPreviewImageUrlFinder previewImageUrlFinder,
       CurrentAuthenticatedUserResolver currentUserResolver,
       GuardianResourceAccessValidator accessValidator) {
     this.reportRepository = reportRepository;
-    this.drawingAssetRepository = drawingAssetRepository;
     this.drawingSessionEmotionRepository = drawingSessionEmotionRepository;
-    this.fileUrlFactory = fileUrlFactory;
+    this.previewImageUrlFinder = previewImageUrlFinder;
     this.currentUserResolver = currentUserResolver;
     this.accessValidator = accessValidator;
   }
@@ -102,7 +95,7 @@ public class ReportListQueryService {
             pageable);
     List<Long> sessionIds =
         page.getContent().stream().map(report -> report.getDrawingSession().getId()).toList();
-    Map<Long, String> thumbnailUrls = loadThumbnailUrls(sessionIds);
+    Map<Long, String> thumbnailUrls = previewImageUrlFinder.findAllBySessionId(sessionIds);
     Map<Long, List<String>> emotions = loadSelectedEmotions(sessionIds);
 
     List<ReportListItemResponse> content =
@@ -139,33 +132,6 @@ public class ReportListQueryService {
         emotionsBySession.getOrDefault(sessionId, List.of()),
         report.getStatus(),
         false);
-  }
-
-  private Map<Long, String> loadThumbnailUrls(List<Long> sessionIds) {
-    Map<Long, String> bySession = new LinkedHashMap<>();
-    if (sessionIds.isEmpty()) {
-      return bySession;
-    }
-    for (DrawingAsset asset :
-        drawingAssetRepository
-            .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
-                sessionIds, DrawingAssetType.THUMBNAIL)) {
-      bySession.putIfAbsent(
-          asset.getDrawingSession().getId(), fileUrlFactory.create(asset.getId()));
-    }
-    List<Long> sessionsWithoutThumbnail =
-        sessionIds.stream().filter(sessionId -> !bySession.containsKey(sessionId)).toList();
-    if (sessionsWithoutThumbnail.isEmpty()) {
-      return bySession;
-    }
-    for (DrawingAsset asset :
-        drawingAssetRepository
-            .findByDrawingSessionIdInAndAssetTypeOrderByDrawingSessionIdAscAssetVersionDescIdDesc(
-                sessionsWithoutThumbnail, DrawingAssetType.FINAL)) {
-      bySession.putIfAbsent(
-          asset.getDrawingSession().getId(), fileUrlFactory.create(asset.getId()));
-    }
-    return bySession;
   }
 
   private Map<Long, List<String>> loadSelectedEmotions(List<Long> sessionIds) {
