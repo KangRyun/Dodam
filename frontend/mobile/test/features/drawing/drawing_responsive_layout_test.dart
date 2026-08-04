@@ -221,8 +221,10 @@ void main() {
           ),
           findsNothing,
         );
+        // 질문·오류가 없는 동안에는 사이드 패널을 아예 띄우지 않는다. 빈 상자를
+        // 캔버스 위에 겹쳐 두면 그 아래 그리기와 복원 안내가 탭을 받지 못한다.
         final stageChrome = find.byKey(const ValueKey('drawing-stage-chrome'));
-        expect(stageChrome, findsOneWidget);
+        expect(stageChrome, findsNothing);
         expect(
           find.descendant(of: marker, matching: stageChrome),
           findsNothing,
