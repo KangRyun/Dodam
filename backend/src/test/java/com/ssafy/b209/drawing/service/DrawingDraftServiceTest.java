@@ -122,17 +122,67 @@ class DrawingDraftServiceTest {
   }
 
   @Test
-  void rejectsSameAndOlderEventSequenceBeforeStoringFile() {
+  void rejectsOlderEventSequenceAndOlderSnapshotBeforeStoringFile() {
     allowSession();
     given(drawingAssetRepository.findLatestDraft(SESSION_ID))
         .willReturn(Optional.of(draft(3, 30, 19L)));
 
     assertError(
-        () -> service.save(SESSION_ID, preview, request(30)),
-        DrawingErrorCode.DRAWING_DRAFT_VERSION_CONFLICT);
-    assertError(
         () -> service.save(SESSION_ID, preview, request(29)),
         DrawingErrorCode.STALE_DRAWING_DRAFT_VERSION);
+    assertError(
+        () -> service.save(SESSION_ID, preview, request(30, "2026-07-22T05:30:00Z")),
+        DrawingErrorCode.STALE_DRAWING_DRAFT_VERSION);
+    verifyNoInteractions(imageStorage);
+  }
+
+  @Test
+  void rejectsSameEventSequenceCapturedAtTheSameMomentAsDuplicate() {
+    allowSession();
+    given(drawingAssetRepository.findLatestDraft(SESSION_ID))
+        .willReturn(Optional.of(draft(3, 30, 19L)));
+
+    assertError(
+        () -> service.save(SESSION_ID, preview, requestCapturedWithLatest(30)),
+        DrawingErrorCode.DRAWING_DRAFT_VERSION_CONFLICT);
+    verifyNoInteractions(imageStorage);
+  }
+
+  @Test
+  void storesNewerSnapshotThatKeepsTheSameEventSequence() {
+    allowSession();
+    given(drawingAssetRepository.findLatestDraft(SESSION_ID))
+        .willReturn(Optional.of(draft(3, 30, 19L)));
+    given(imageStorage.store(preview)).willReturn(storedImage());
+    given(drawingAssetRepository.saveAndFlush(any(DrawingAsset.class)))
+        .willAnswer(invocation -> saved(invocation.getArgument(0), 21L));
+
+    DrawingDraftResponse response =
+        service.save(SESSION_ID, preview, request(30, "2026-07-22T05:30:02Z"));
+
+    assertThat(response.assetVersion()).isEqualTo(4);
+    assertThat(response.lastEventSequence()).isEqualTo(30);
+  }
+
+  @Test
+  void storesDocumentThatHasNoDrawingEvents() {
+    allowSession();
+    given(drawingAssetRepository.findLatestDraft(SESSION_ID)).willReturn(Optional.empty());
+    given(imageStorage.store(preview)).willReturn(storedImage());
+    given(drawingAssetRepository.saveAndFlush(any(DrawingAsset.class)))
+        .willAnswer(invocation -> saved(invocation.getArgument(0), 22L));
+
+    DrawingDraftResponse response = service.save(SESSION_ID, preview, request(0));
+
+    assertThat(response.assetVersion()).isEqualTo(1);
+    assertThat(response.lastEventSequence()).isZero();
+  }
+
+  @Test
+  void rejectsNegativeEventSequenceBeforeStoringFile() {
+    assertError(
+        () -> service.save(SESSION_ID, preview, request(-1)),
+        DrawingErrorCode.DRAWING_DRAFT_METADATA_INVALID);
     verifyNoInteractions(imageStorage);
   }
 
@@ -210,6 +260,15 @@ class DrawingDraftServiceTest {
   private SaveDrawingDraftRequest request(long lastEventSequence) {
     return new SaveDrawingDraftRequest(
         lastEventSequence, OffsetDateTime.parse("2026-07-22T14:30:00+09:00"));
+  }
+
+  private SaveDrawingDraftRequest request(long lastEventSequence, String clientSavedAt) {
+    return new SaveDrawingDraftRequest(lastEventSequence, OffsetDateTime.parse(clientSavedAt));
+  }
+
+  /** 저장된 최신 초안과 클라이언트 저장 시각이 같은 요청이다. */
+  private SaveDrawingDraftRequest requestCapturedWithLatest(long lastEventSequence) {
+    return new SaveDrawingDraftRequest(lastEventSequence, NOW.atOffset(ZoneOffset.UTC));
   }
 
   private DrawingAsset draft(int version, long lastEventSequence, long id) {

@@ -275,7 +275,7 @@ public class DrawingAsset {
    * @param mimeType 실제 파일 Signature로 검증된 MIME Type
    * @param fileSizeBytes 실제 저장된 파일 크기(Byte)
    * @param checksumSha256 실제 저장된 Byte의 SHA-256 Hex
-   * @param lastEventSequence 초안에 반영된 마지막 그림 이벤트 순서
+   * @param lastEventSequence 초안에 반영된 마지막 그림 이벤트 순서이며, 이벤트를 만들지 않는 변경만 있는 문서는 {@code 0}이다
    * @param capturedAt 클라이언트가 초안을 저장한 UTC 시각
    * @param createdAt 서버가 Metadata를 생성한 UTC 시각
    * @return 영속화 전 초안 Metadata
@@ -296,8 +296,8 @@ public class DrawingAsset {
     if (assetVersion <= 0) {
       throw new IllegalArgumentException("assetVersion must be positive");
     }
-    if (lastEventSequence <= 0) {
-      throw new IllegalArgumentException("lastEventSequence must be positive");
+    if (lastEventSequence < 0) {
+      throw new IllegalArgumentException("lastEventSequence must not be negative");
     }
     DrawingAsset asset =
         new DrawingAsset(
@@ -325,7 +325,7 @@ public class DrawingAsset {
    * @param mimeType 검증된 이미지 MIME Type
    * @param fileSizeBytes 실제 파일 크기
    * @param checksumSha256 실제 이미지 Byte의 SHA-256
-   * @param lastEventSequence 초안에 반영된 마지막 이벤트 순서
+   * @param lastEventSequence 초안에 반영된 마지막 이벤트 순서이며, 이벤트를 만들지 않는 변경만 있는 문서는 {@code 0}이다
    * @param capturedAt 클라이언트가 초안을 저장한 시각
    * @param createdAt 서버가 Metadata를 생성한 시각
    * @return 크기가 아직 수집되지 않은 초안 Metadata

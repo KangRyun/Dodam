@@ -17,6 +17,7 @@ import com.ssafy.b209.storage.image.StoreImageCommand;
 import com.ssafy.b209.storage.image.StoredImage;
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
@@ -97,7 +98,7 @@ public class DrawingDraftService {
     }
 
     Optional<DrawingAsset> latest = drawingAssetRepository.findLatestDraft(drawingSessionId);
-    rejectStaleSequence(latest, request.lastEventSequence());
+    rejectStaleSequence(latest, request);
     int nextVersion = latest.map(asset -> asset.getAssetVersion() + 1).orElse(1);
     StoredImage storedImage = imageStorage.store(preview);
     LocalDateTime savedAt = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
@@ -112,7 +113,7 @@ public class DrawingDraftService {
             storedImage.heightPx(),
             storedImage.checksumSha256(),
             request.lastEventSequence(),
-            request.clientSavedAt().withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime(),
+            toUtc(request.clientSavedAt()),
             savedAt);
     try {
       return toResponse(drawingAssetRepository.saveAndFlush(draft));
@@ -173,22 +174,42 @@ public class DrawingDraftService {
     if (preview == null) {
       throw new BusinessException(DrawingErrorCode.DRAWING_DRAFT_FILE_REQUIRED);
     }
-    if (request == null || request.lastEventSequence() <= 0 || request.clientSavedAt() == null) {
+    if (request == null || request.lastEventSequence() < 0 || request.clientSavedAt() == null) {
       throw new BusinessException(DrawingErrorCode.DRAWING_DRAFT_METADATA_INVALID);
     }
   }
 
-  private void rejectStaleSequence(Optional<DrawingAsset> latest, long requestedSequence) {
+  /**
+   * 요청한 초안이 저장된 최신 초안보다 이전 상태인지 확인한다.
+   *
+   * <p>채우기·영역 지우개·전체 지우기는 그림 이벤트를 만들지 않고 캔버스 이미지만 바꾸므로 이벤트 순서가 그대로인 채 초안만 새로워질 수 있다. 이 경우에는 이벤트 순서
+   * 대신 클라이언트 저장 시각으로 순서를 판단해, 더 나중에 만들어진 초안만 저장한다. 시각까지 같으면 같은 상태를 다시 보낸 중복 요청으로 본다.
+   */
+  private void rejectStaleSequence(Optional<DrawingAsset> latest, SaveDrawingDraftRequest request) {
     if (latest.isEmpty()) {
       return;
     }
-    long latestSequence = latest.orElseThrow().getLastEventSequence();
-    if (requestedSequence == latestSequence) {
-      throw new BusinessException(DrawingErrorCode.DRAWING_DRAFT_VERSION_CONFLICT);
-    }
+    DrawingAsset latestDraft = latest.orElseThrow();
+    long requestedSequence = request.lastEventSequence();
+    long latestSequence = latestDraft.getLastEventSequence();
     if (requestedSequence < latestSequence) {
       throw new BusinessException(DrawingErrorCode.STALE_DRAWING_DRAFT_VERSION);
     }
+    if (requestedSequence > latestSequence) {
+      return;
+    }
+    LocalDateTime requestedCapturedAt = toUtc(request.clientSavedAt());
+    LocalDateTime latestCapturedAt = latestDraft.getCapturedAt();
+    if (requestedCapturedAt.isEqual(latestCapturedAt)) {
+      throw new BusinessException(DrawingErrorCode.DRAWING_DRAFT_VERSION_CONFLICT);
+    }
+    if (requestedCapturedAt.isBefore(latestCapturedAt)) {
+      throw new BusinessException(DrawingErrorCode.STALE_DRAWING_DRAFT_VERSION);
+    }
+  }
+
+  private LocalDateTime toUtc(OffsetDateTime clientSavedAt) {
+    return clientSavedAt.withOffsetSameInstant(ZoneOffset.UTC).toLocalDateTime();
   }
 
   private void compensate(String storageKey, Long drawingSessionId) {
