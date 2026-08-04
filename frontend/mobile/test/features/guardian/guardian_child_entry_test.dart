@@ -53,7 +53,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('guardian-switch-profile')));
     await tester.pumpAndSettle();
 
-    expect(find.text('안녕하세요! 누구로 시작할까요?'), findsOneWidget);
+    expect(find.text('누가 도담이와 함께할까요?'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('profile-selection-settings')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('logout-action')), findsOneWidget);
@@ -182,9 +182,7 @@ void main() {
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
   });
 
-  testWidgets('보호자 HTP는 flag가 켜지고 스토어가 있으면 사진 선택 시 선촬영을 시작한다', (
-    tester,
-  ) async {
+  testWidgets('보호자 HTP는 flag가 켜지고 스토어가 있으면 사진 선택 시 선촬영을 시작한다', (tester) async {
     final drawingRepository = _TrackingDrawingRepository();
     await _pumpActivitySelect(
       tester,
