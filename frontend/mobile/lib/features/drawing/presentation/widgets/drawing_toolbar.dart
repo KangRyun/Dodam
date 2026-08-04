@@ -508,7 +508,12 @@ final class _ToolbarChrome extends StatelessWidget {
             excludeFromSemantics: true,
           ),
         ),
-        child,
+        // 테두리가 둥글게 말리는 만큼 안쪽으로 들여야 첫 버튼과 완성 버튼이
+        // 모서리 선을 타고 넘어가 보이지 않는다(시안도 좌우 14px 를 비운다).
+        Padding(
+          padding: EdgeInsets.symmetric(horizontal: tablet ? 14 : 10),
+          child: child,
+        ),
       ],
     );
   }
