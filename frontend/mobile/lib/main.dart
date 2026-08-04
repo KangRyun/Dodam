@@ -3,9 +3,9 @@ import 'dart:developer' as developer;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import 'app/app.dart';
+import 'app/orientation/app_orientation_policy.dart';
 import 'app/router/app_routes.dart';
 import 'core/network/network.dart';
 import 'features/activity/data/repositories/remote_activity_repository.dart';
@@ -30,19 +30,13 @@ import 'features/settings/data/repositories/remote_notification_settings_reposit
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // 모든 기기(폰·태블릿)에서 가로로 화면 방향을 고정한다(S15P11B209-864).
-  await _lockLandscape();
+  // 모든 production route는 같은 전역 가로 정책을 사용한다. 실패해도 정책이
+  // 내부에서 기록하고 false를 반환하므로 앱 시작은 계속된다(S15P11B209-878).
+  final orientationPolicy = AppOrientationPolicy();
+  await orientationPolicy.start();
   // 푸시는 선택 기능이라 초기화가 실패해도 앱은 떠야 한다(계약 §0-6).
   final pushReady = await _initializePush();
   runApp(createDefaultApp(pushEnabled: pushReady));
-}
-
-/// 모든 기기(폰·태블릿)에서 화면을 가로로 고정한다(S15P11B209-864).
-Future<void> _lockLandscape() async {
-  await SystemChrome.setPreferredOrientations(const [
-    DeviceOrientation.landscapeLeft,
-    DeviceOrientation.landscapeRight,
-  ]);
 }
 
 /// Firebase를 준비하고 백그라운드 수신 경로를 등록한다.

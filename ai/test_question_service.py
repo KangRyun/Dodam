@@ -567,6 +567,22 @@ class CrisisSafeResponseTest(unittest.TestCase):
         self.assertEqual(resp.question_text, question_service.CRISIS_SAFE_QUESTION)
         self.assertTrue(any("ABUSE_DISCLOSURE" in m for m in logs.output))
 
+    def test_abuse_disclosure_logs_expert_route_not_guardian_alert(self):
+        """학대 신호는 보호자 안내를 준비하지 않고 전문가 검토 경로로 남는다 (S15P11B209-890).
+
+        보호자 자동 통지를 끊었더라도 신호가 조용히 사라지면 아무도 모른다 — 로그에는 남아야 한다.
+        """
+        req = _request(recent_messages=[self._child("아빠가 자꾸 때려서 무서워.")])
+        with mock.patch.object(question_service.config, "SAFETY_DEBUG_LOG_RAW", False):
+            _resp, _client, logs = self._generate(req)
+        joined = "\n".join(logs.output)
+        self.assertIn("보호자 자동 안내 보류", joined)
+        self.assertIn("ABUSE_DISCLOSURE", joined)
+        # 보호자용 안내를 준비했다는 신호는 남지 않는다.
+        self.assertNotIn("보호자 위기 안내 준비", joined)
+        # 위기 로그에도 아이 발화 원문은 남기지 않는다.
+        self.assertNotIn("때려서", joined)
+
     def test_crisis_safe_response_has_option_chips_when_allowed(self):
         req = _request(
             allowed_response_modes=["OPTION"],

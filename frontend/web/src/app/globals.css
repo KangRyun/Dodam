@@ -227,6 +227,108 @@ a {
   background: #fbeceb;
 }
 
+/* 피드 상단 스케치북 히어로. 배경은 도담 손그림 일러스트(/community-hero.png),
+   문구는 빈 페이지 위에 오버레이한다(이미지에는 글자 없음). */
+.community-hero {
+  position: relative;
+  width: min(100% - 48px, 1440px);
+  margin: 12px auto 0;
+  aspect-ratio: 1840 / 826;
+  border-radius: 22px;
+  background: url("/community-hero.webp") center / cover no-repeat;
+}
+
+.community-hero-inner {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 5% 5% 7%;
+  text-align: center;
+}
+
+.community-hero-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 19px;
+  border-radius: 999px;
+  background: rgb(255 255 255 / 82%);
+  color: #4f7d60;
+  font-size: clamp(14px, 1.5vw, 17px);
+  font-weight: 800;
+}
+
+.community-hero h1 {
+  margin: 0;
+  color: #29323d;
+  font-size: clamp(28px, 4.7vw, 54px);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+  word-break: keep-all;
+  text-wrap: balance;
+}
+
+.community-hero-highlight {
+  padding: 0 2px;
+  background: linear-gradient(transparent 58%, #fce59a 58%);
+}
+
+.community-hero p {
+  margin: 0;
+  color: #5c6771;
+  font-size: clamp(14px, 1.9vw, 20px);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.community-hero .community-button {
+  margin-top: 6px;
+  padding: 14px 30px;
+  font-size: clamp(15px, 1.6vw, 18px);
+}
+
+@media (max-width: 640px) {
+  .community-hero {
+    aspect-ratio: 7 / 5;
+  }
+
+  .community-hero-inner {
+    gap: 10px;
+    padding: 7% 8%;
+  }
+
+  .community-hero-eyebrow {
+    padding: 6px 13px;
+    font-size: 12px;
+  }
+
+  .community-hero h1 {
+    font-size: clamp(19px, 5.8vw, 27px);
+    line-height: 1.28;
+    white-space: normal;
+  }
+
+  .community-hero p {
+    font-size: 13px;
+    white-space: normal;
+  }
+
+  .community-hero .community-button {
+    padding: 11px 22px;
+    font-size: 14px;
+  }
+}
+
+/* 히어로가 있는 피드 페이지에서 히어로↔목록 간격을 좁힌다(다른 페이지엔 영향 없음) */
+.community-hero + .community-main {
+  padding-top: 14px;
+}
+
 .community-main {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(260px, 1fr);
@@ -314,11 +416,12 @@ a {
 }
 
 .community-post-card {
+  position: relative;
   display: flex;
   align-items: center;
   min-height: 136px;
   gap: 24px;
-  padding: 22px 24px;
+  padding: 22px 24px 22px 28px;
   border: 1px solid #dfe4dc;
   border-radius: 20px;
   background: #fff;
@@ -327,6 +430,40 @@ a {
     border-color 160ms ease,
     box-shadow 160ms ease,
     transform 160ms ease;
+}
+
+/* 카테고리별 색 리본(왼쪽 세로 바) */
+.community-post-card::before {
+  content: "";
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 0;
+  width: 5px;
+  border-radius: 0 5px 5px 0;
+  background: #6ca37c;
+}
+
+.community-post-card[data-category="NOTICE"]::before {
+  background: #b8564f;
+}
+.community-post-card[data-category="GUARDIAN_STORY"]::before {
+  background: #f4cc58;
+}
+.community-post-card[data-category="ACTIVITY_REVIEW"]::before {
+  background: #5f9e73;
+}
+.community-post-card[data-category="EXPERT_COLUMN"]::before {
+  background: #4d82d8;
+}
+.community-post-card[data-category="ART_RESOURCE"]::before {
+  background: #d98745;
+}
+.community-post-card[data-category="DRAWING_GUIDE"]::before {
+  background: #8a76c8;
+}
+.community-post-card[data-category="EXPERT_QNA"]::before {
+  background: #3b8686;
 }
 
 .community-post-copy {
@@ -356,15 +493,34 @@ a {
   color: #5f9270;
 }
 
-.community-post-category[data-category="EXPERT_QNA"],
-.community-post-category[data-category="EXPERT_COLUMN"] {
-  background: #f4eee6;
-  color: #9a7d5e;
+/* 카테고리별 배지 색(리본 색과 짝을 이룬다) */
+.community-post-category[data-category="GUARDIAN_STORY"] {
+  background: #fcf4ce;
+  color: #a9781c;
 }
-
+.community-post-category[data-category="ACTIVITY_REVIEW"] {
+  background: #eaf5ec;
+  color: #4f8c63;
+}
+.community-post-category[data-category="EXPERT_COLUMN"] {
+  background: #e5f0fa;
+  color: #3e77b2;
+}
+.community-post-category[data-category="ART_RESOURCE"] {
+  background: #ffebd8;
+  color: #b96a2f;
+}
+.community-post-category[data-category="DRAWING_GUIDE"] {
+  background: #f0ecff;
+  color: #765ead;
+}
+.community-post-category[data-category="EXPERT_QNA"] {
+  background: #e4f1ef;
+  color: #327575;
+}
 .community-post-category[data-category="NOTICE"] {
-  background: #e9f1fb;
-  color: #5e82ad;
+  background: #fbe9e7;
+  color: #b8564f;
 }
 
 .community-answer-status {

@@ -50,6 +50,20 @@ KEY_PROPERTIES_FILE="${KEY_PROPERTIES_FILE:-}"
 OAUTH_ENV_FILE="${OAUTH_ENV_FILE:-}"
 REQUIRE_RELEASE_SIGNING="${REQUIRE_RELEASE_SIGNING:-true}"
 
+# ── 앱이 바라볼 서버 주소 (S15P11B209-765) ──────────────────────────────────
+# ⚠️ 이 값이 없으면 **앱이 첫 화면을 그리기도 전에 죽는다.**
+#   lib/core/config/api_environment.dart 의 String.fromEnvironment('API_BASE_URL') 은
+#   defaultValue 가 없어 빈 문자열이 되고, fromBaseUrl() 이 곧바로 StateError 를 던진다.
+#   그 호출은 main() → createDefaultApp() 경로라 runApp 전에 터진다.
+#
+#   2026-08-04 원스토어 등록용 APK 가 실제로 이 상태로 나갔다. 설치하면 즉시
+#   "앱에 문제가 발생하여 종료되었습니다" 다. debug 는 `flutter run --dart-define=...` 로
+#   띄우기 때문에(docs/인프라/푸시-실기기-검증.md §1) **debug 만 만지면 영원히 안 보인다.**
+#
+# ★ oauth.env 에 넣지 않고 별도 변수로 둔 이유: oauth.env 는 비밀값 파일이고
+#   서버 주소는 비밀이 아니다. 환경마다 갈아끼울 값이라 호출부에서 보이는 게 낫다.
+API_BASE_URL="${API_BASE_URL:-https://i15b209.p.ssafy.io}"
+
 # 버전·빌드번호 (S15P11B209-629)
 #   지정하지 않으면 app-version.sh 가 산출한다 — pubspec 의 version(이름) + 커밋 수(번호).
 #   호출부(Jenkins·호스트)가 각자 다른 값을 넘겨 versionCode 가 어긋나는 걸 막으려고
@@ -98,6 +112,17 @@ if [ -z "$OAUTH_ENV_FILE" ] || [ ! -f "$OAUTH_ENV_FILE" ]; then
    Jenkins 에서는 Credentials(secret file)로 주입한다."
 fi
 
+# API_BASE_URL 형식 검사 — 앱의 ApiEnvironment.fromBaseUrl() 과 **같은 기준**으로 본다.
+# reason: 앱은 절대 HTTP(S) URL 이 아니면 FormatException 을 던진다. 그 판정을 10~20분짜리
+#   빌드가 끝난 뒤 기기에서 받느니, 여기서 즉시 끊는다. "빌드는 초록불인데 앱은 즉사"가
+#   이 프로젝트에서 반복된 실패 양상이다(build.gradle.kts:154 주석과 같은 뜻).
+case "$API_BASE_URL" in
+  http://*|https://*) ;;
+  *) die "API_BASE_URL 이 절대 HTTP(S) URL 이 아니다: '${API_BASE_URL}'
+   앱은 이 값을 그대로 Uri 로 파싱하며, 스킴이나 host 가 없으면 실행 즉시 죽는다.
+   예: API_BASE_URL=https://i15b209.p.ssafy.io" ;;
+esac
+
 CID=""
 cleanup() {
   # 컨테이너에는 keystore 와 비밀번호가 들어간다. 성공·실패 무관하게 반드시 지운다.
@@ -128,6 +153,9 @@ CID="$(docker create \
   -e "BUILD_NUMBER=${BUILD_NUMBER}" \
   -e "BUILD_FORMAT=${BUILD_FORMAT}" \
   -e "REQUIRE_RELEASE_SIGNING=${REQUIRE_RELEASE_SIGNING}" \
+  -e "API_BASE_URL=${API_BASE_URL}" \
+  -e "COMMUNITY_WEB_URL=${COMMUNITY_WEB_URL:-}" \
+  -e "LEGAL_WEB_URL=${LEGAL_WEB_URL:-}" \
   -v "${GRADLE_CACHE_VOLUME}:/root/.gradle" \
   -v "${PUB_CACHE_VOLUME}:/root/.pub-cache" \
   "$IMAGE" \

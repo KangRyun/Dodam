@@ -237,6 +237,40 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('세이지 배너의 제목·설명·실제 기록 수는 AA 대비를 충족한다', (tester) async {
+    await _openHistoryDirect(tester, _ActivityRepository());
+
+    final hero = tester.widget<Container>(
+      find.byKey(const ValueKey('activity-history-archive-hero')),
+    );
+    final heroDecoration = hero.decoration! as BoxDecoration;
+    final heroBackground = heroDecoration.color!;
+    expect(heroBackground.computeLuminance(), greaterThan(0.5));
+
+    for (final label in const [
+      '보호자 활동 기록',
+      '활동 기록',
+      '아이의 그림과 이야기를 한 권씩 소중히 모았어요.',
+    ]) {
+      final text = tester.widget<Text>(find.text(label));
+      expect(
+        _contrastRatio(text.style!.color!, heroBackground),
+        greaterThanOrEqualTo(4.5),
+        reason: '$label 텍스트 대비',
+      );
+    }
+
+    final count = tester.widget<Container>(
+      find.byKey(const ValueKey('activity-history-count')),
+    );
+    final countBackground = (count.decoration! as BoxDecoration).color!;
+    final countText = tester.widget<Text>(find.text('2개의 기록'));
+    expect(
+      _contrastRatio(countText.style!.color!, countBackground),
+      greaterThanOrEqualTo(4.5),
+    );
+  });
+
   testWidgets('선택 카드·필터·그림·이동 버튼에 의미와 48dp 터치 영역을 제공한다', (tester) async {
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
@@ -407,6 +441,18 @@ void main() {
 
     expect(find.byKey(const ValueKey('activity-300')), findsOneWidget);
   });
+}
+
+double _contrastRatio(Color foreground, Color background) {
+  final foregroundLuminance = foreground.computeLuminance();
+  final backgroundLuminance = background.computeLuminance();
+  final lighter = foregroundLuminance > backgroundLuminance
+      ? foregroundLuminance
+      : backgroundLuminance;
+  final darker = foregroundLuminance > backgroundLuminance
+      ? backgroundLuminance
+      : foregroundLuminance;
+  return (lighter + 0.05) / (darker + 0.05);
 }
 
 /// 보호자 홈을 거쳐 활동 이력으로 들어간다. 홈에서의 이동 자체를 보는
