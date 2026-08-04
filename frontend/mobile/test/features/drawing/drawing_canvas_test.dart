@@ -1,12 +1,60 @@
+import 'dart:ui' as ui;
+
 import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
 import 'package:dodam/features/drawing/application/drawing_sync_coordinator.dart';
 import 'package:dodam/features/drawing/presentation/models/drawing_stroke.dart';
+import 'package:dodam/features/drawing/presentation/models/drawing_canvas_action.dart';
+import 'package:dodam/features/drawing/presentation/widgets/canvas_tool_asset_icon.dart';
 import 'package:dodam/features/drawing/presentation/widgets/drawing_canvas.dart';
+import 'package:dodam/features/drawing/presentation/widgets/drawing_tool_button.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  testWidgets('committed actions paint before the transient stroke overlay', (
+    tester,
+  ) async {
+    const points = [
+      DrawingPoint(position: Offset(8, 32), elapsedMilliseconds: 0),
+      DrawingPoint(position: Offset(56, 32), elapsedMilliseconds: 10),
+    ];
+    const committed = DrawingStroke(
+      points: points,
+      color: AppColors.drawingRed,
+      thickness: 12,
+    );
+    const transient = DrawingStroke(
+      points: points,
+      color: AppColors.drawingBlue,
+      thickness: 8,
+    );
+    final recorder = ui.PictureRecorder();
+    final canvas = Canvas(recorder);
+
+    DrawingCanvasPainter(
+      const [transient],
+      actions: const [DrawingStrokeAction(id: 1, stroke: committed)],
+    ).paint(canvas, const Size(64, 64));
+    final picture = recorder.endRecording();
+    final image = await picture.toImage(64, 64);
+    picture.dispose();
+    addTearDown(image.dispose);
+
+    final pixel = await tester.runAsync(() async {
+      final bytes = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      final offset = (32 * image.width + 32) * 4;
+      return Color.fromARGB(
+        bytes!.getUint8(offset + 3),
+        bytes.getUint8(offset),
+        bytes.getUint8(offset + 1),
+        bytes.getUint8(offset + 2),
+      );
+    });
+
+    expect(pixel!.b, greaterThan(pixel.r));
+  });
+
   testWidgets('Drawing 화면에 빈 Canvas와 비활성 완료 버튼을 표시한다', (tester) async {
     await _pumpDrawing(tester);
 
@@ -14,8 +62,8 @@ void main() {
     expect(find.text('그림을 안전하게 담고 있어요'), findsOneWidget);
     expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
     expect(_canvas(tester).strokes, isEmpty);
-    expect(_undoButton(tester).onPressed, isNull);
-    expect(_completeButton(tester).onPressed, isNull);
+    expect(_undoButton(tester).onTap, isNull);
+    expect(_completeButton(tester).onTap, isNull);
   });
 
   testWidgets('pointer down부터 up까지 하나의 stroke로 만들고 여러 획을 누적한다', (tester) async {
@@ -50,13 +98,13 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('color-빨강')));
     await tester.pump();
     await _drawStroke(tester, center);
-    await tester.tap(find.text('얇게'));
+    await _tapThicknessPreset(tester, '얇게');
     await tester.pump();
     await _drawStroke(tester, center + const Offset(70, 30));
 
     final strokes = _canvas(tester).strokes;
     expect(strokes, hasLength(3));
-    expect(strokes[0].color, AppColors.drawingInk);
+    expect(strokes[0].color, AppColors.canvasInk);
     expect(strokes[0].thickness, 8);
     expect(strokes[1].color, AppColors.drawingRed);
     expect(strokes[1].thickness, 8);
@@ -72,14 +120,19 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('color-빨강')));
     await tester.tap(find.byKey(const ValueKey('drawing-tool-eraser')));
-    await tester.pump();
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('영역 지우개'));
+    await tester.pumpAndSettle();
 
     for (final (label, _, offset) in [
       ('얇게', 4.0, const Offset(-80, -40)),
       ('보통', 8.0, Offset.zero),
       ('굵게', 14.0, const Offset(80, 40)),
     ]) {
-      await tester.tap(find.text(label));
+      final thickness = find.byKey(ValueKey('drawing-thickness-$label'));
+      await tester.ensureVisible(thickness);
+      await tester.pumpAndSettle();
+      await tester.tap(thickness);
       await tester.pump();
       await _drawStroke(tester, center + offset);
     }
@@ -110,24 +163,27 @@ void main() {
       expect(size.width, greaterThanOrEqualTo(48));
       expect(size.height, greaterThanOrEqualTo(48));
     }
-    expect(
-      find.descendant(
-        of: eraser,
-        matching: find.byIcon(Icons.auto_fix_normal_rounded),
-      ),
-      findsOneWidget,
+    final artwork = tester.widget<CanvasToolAssetIcon>(
+      find.descendant(of: eraser, matching: find.byType(CanvasToolAssetIcon)),
     );
+    expect(artwork.artwork, CanvasToolArtwork.eraser);
+    expect(tester.widget<DrawingToolButton>(eraser).selected, isFalse);
 
     await tester.tap(eraser);
     await tester.pumpAndSettle();
+    await tester.tap(find.text('선 지우개'));
+    await tester.pumpAndSettle();
 
-    final selectedContainer = tester.widget<AnimatedContainer>(
-      find.descendant(of: eraser, matching: find.byType(AnimatedContainer)),
+    expect(tester.widget<DrawingToolButton>(eraser).selected, isTrue);
+    expect(
+      find.descendant(
+        of: eraser,
+        matching: find.image(
+          const AssetImage('assets/canvas/frame/selected_tool.png'),
+        ),
+      ),
+      findsOneWidget,
     );
-    final selectedDecoration = selectedContainer.decoration! as BoxDecoration;
-    final selectedBorder = selectedDecoration.border! as Border;
-    expect(selectedBorder.top.color, AppColors.leaf);
-    expect(selectedBorder.top.width, 2);
     expect(tester.takeException(), isNull);
   });
 
@@ -138,8 +194,8 @@ void main() {
       tester.getCenter(find.byKey(const ValueKey('drawing-canvas'))),
     );
 
-    expect(_undoButton(tester).onPressed, isNotNull);
-    expect(_completeButton(tester).onPressed, isNotNull);
+    expect(_undoButton(tester).onTap, isNotNull);
+    expect(_completeButton(tester).onTap, isNotNull);
   });
 
   testWidgets('Undo는 마지막 완료 stroke만 제거하고 기존 속성을 유지한다', (tester) async {
@@ -149,7 +205,7 @@ void main() {
     );
     await _drawStroke(tester, center - const Offset(50, 20));
     await tester.tap(find.byKey(const ValueKey('color-빨강')));
-    await tester.tap(find.text('얇게'));
+    await _tapThicknessPreset(tester, '얇게');
     await tester.pump();
     await _drawStroke(tester, center + const Offset(50, 20));
 
@@ -158,9 +214,9 @@ void main() {
     await tester.pump();
 
     final remaining = _canvas(tester).strokes.single;
-    expect(remaining.color, AppColors.drawingInk);
+    expect(remaining.color, AppColors.canvasInk);
     expect(remaining.thickness, 8);
-    expect(_completeButton(tester).onPressed, isNotNull);
+    expect(_completeButton(tester).onTap, isNotNull);
   });
 
   testWidgets('Redo는 마지막으로 취소한 stroke를 원래 속성으로 복원한다', (tester) async {
@@ -170,13 +226,13 @@ void main() {
     );
     await _drawStroke(tester, center - const Offset(50, 20));
     await tester.tap(find.byKey(const ValueKey('color-빨강')));
-    await tester.tap(find.text('얇게'));
+    await _tapThicknessPreset(tester, '얇게');
     await tester.pump();
     await _drawStroke(tester, center + const Offset(50, 20));
 
     await tester.tap(find.byKey(const ValueKey('undo-action')));
     await tester.pump();
-    expect(_redoButton(tester).onPressed, isNotNull);
+    expect(_redoButton(tester).onTap, isNotNull);
 
     await tester.tap(find.byKey(const ValueKey('redo-action')));
     await tester.pump();
@@ -185,7 +241,7 @@ void main() {
     expect(_canvas(tester).strokes, hasLength(2));
     expect(restored.color, AppColors.drawingRed);
     expect(restored.thickness, 4);
-    expect(_redoButton(tester).onPressed, isNull);
+    expect(_redoButton(tester).onTap, isNull);
   });
 
   testWidgets('Undo 후 새 stroke를 그리면 Redo 이력을 폐기한다', (tester) async {
@@ -198,11 +254,11 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('undo-action')));
     await tester.pump();
-    expect(_redoButton(tester).onPressed, isNotNull);
+    expect(_redoButton(tester).onTap, isNotNull);
 
     await _drawStroke(tester, center + const Offset(80, 30));
 
-    expect(_redoButton(tester).onPressed, isNull);
+    expect(_redoButton(tester).onTap, isNull);
     expect(_canvas(tester).strokes, hasLength(2));
   });
 
@@ -220,8 +276,8 @@ void main() {
       await tester.pump();
       expect(_canvas(tester).strokes, hasLength(expectedCount));
     }
-    expect(_undoButton(tester).onPressed, isNull);
-    expect(_completeButton(tester).onPressed, isNull);
+    expect(_undoButton(tester).onTap, isNull);
+    expect(_completeButton(tester).onTap, isNull);
 
     await tester.tap(find.byKey(const ValueKey('undo-action')));
     await tester.pump();
@@ -239,14 +295,14 @@ void main() {
     await tester.pump();
 
     expect(_canvas(tester).strokes, hasLength(2));
-    expect(_undoButton(tester).onPressed, isNull);
-    expect(_completeButton(tester).onPressed, isNull);
+    expect(_undoButton(tester).onTap, isNull);
+    expect(_completeButton(tester).onTap, isNull);
 
     await gesture.up();
     await tester.pump();
     expect(_canvas(tester).strokes, hasLength(2));
-    expect(_undoButton(tester).onPressed, isNotNull);
-    expect(_completeButton(tester).onPressed, isNotNull);
+    expect(_undoButton(tester).onTap, isNotNull);
+    expect(_completeButton(tester).onTap, isNotNull);
   });
 
   testWidgets('pointer cancel은 active stroke를 폐기하고 Undo 상태를 안전하게 복구한다', (
@@ -261,8 +317,8 @@ void main() {
     await tester.pump();
 
     expect(_canvas(tester).strokes, isEmpty);
-    expect(_undoButton(tester).onPressed, isNull);
-    expect(_completeButton(tester).onPressed, isNull);
+    expect(_undoButton(tester).onTap, isNull);
+    expect(_completeButton(tester).onTap, isNull);
   });
 
   testWidgets('Canvas Undo는 stroke event를 유지하고 UNDO를 journal에 append한다', (
@@ -328,149 +384,6 @@ void main() {
     coordinator.dispose();
   });
 
-  testWidgets('작은 화면에서는 세로 배치하며 overflow가 발생하지 않는다', (tester) async {
-    await _pumpDrawing(tester, size: const Size(600, 800));
-    await tester.drag(
-      find.byType(SingleChildScrollView).first,
-      const Offset(0, -300),
-    );
-    await tester.pump();
-
-    expect(tester.takeException(), isNull);
-    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
-    expect(find.text('다 그렸어요!'), findsOneWidget);
-  });
-
-  testWidgets('844×419 모바일 가로에서는 Canvas와 도구 패널을 한 화면에 배치한다', (tester) async {
-    await _pumpDrawing(tester, size: const Size(844, 419));
-
-    expect(tester.takeException(), isNull);
-    expect(
-      find.byKey(const ValueKey('drawing-layout-compact-landscape')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('drawing-tool-panel-scroll')),
-      findsOneWidget,
-    );
-    expect(
-      tester.getRect(find.byKey(const ValueKey('drawing-canvas'))).bottom,
-      lessThanOrEqualTo(419),
-    );
-  });
-
-  testWidgets('더 작은 모바일 가로에서도 compact Layout이 overflow 없이 유지된다', (
-    tester,
-  ) async {
-    await _pumpDrawing(tester, size: const Size(700, 360));
-
-    expect(tester.takeException(), isNull);
-    expect(
-      find.byKey(const ValueKey('drawing-layout-compact-landscape')),
-      findsOneWidget,
-    );
-    expect(
-      tester
-          .getRect(find.byKey(const ValueKey('drawing-tool-panel-scroll')))
-          .bottom,
-      lessThanOrEqualTo(360),
-    );
-  });
-
-  testWidgets('900×520 경계에서는 낮은 높이를 우선해 compact Layout을 사용한다', (tester) async {
-    await _pumpDrawing(tester, size: const Size(900, 520));
-
-    expect(tester.takeException(), isNull);
-    expect(
-      find.byKey(const ValueKey('drawing-layout-compact-landscape')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const ValueKey('drawing-layout-tablet')), findsNothing);
-  });
-
-  testWidgets('1194×419 태블릿 너비도 낮은 높이에서는 compact Layout을 사용한다', (tester) async {
-    await _pumpDrawing(tester, size: const Size(1194, 419));
-
-    expect(tester.takeException(), isNull);
-    expect(
-      find.byKey(const ValueKey('drawing-layout-compact-landscape')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const ValueKey('drawing-layout-tablet')), findsNothing);
-  });
-
-  testWidgets('900×521 경계부터 tablet Layout을 사용한다', (tester) async {
-    await _pumpDrawing(tester, size: const Size(900, 521));
-
-    expect(tester.takeException(), isNull);
-    expect(find.byKey(const ValueKey('drawing-layout-tablet')), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('drawing-layout-compact-landscape')),
-      findsNothing,
-    );
-  });
-
-  testWidgets('약 800px 세로 태블릿은 Canvas와 도구 패널을 스크롤 가능한 세로로 배치한다', (
-    tester,
-  ) async {
-    await _pumpDrawing(tester, size: const Size(800, 1000));
-
-    expect(tester.takeException(), isNull);
-    expect(
-      find.byKey(const ValueKey('drawing-layout-stacked')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
-  });
-
-  testWidgets('1194px 태블릿 가로에서는 넓은 Canvas와 우측 패널 구조를 유지한다', (tester) async {
-    await _pumpDrawing(tester, size: const Size(1194, 834));
-
-    expect(tester.takeException(), isNull);
-    expect(find.byKey(const ValueKey('drawing-layout-tablet')), findsOneWidget);
-    final canvasRect = tester.getRect(
-      find.byKey(const ValueKey('drawing-canvas')),
-    );
-    final panelRect = tester.getRect(
-      find.byKey(const ValueKey('drawing-tool-panel-scroll')),
-    );
-    expect(canvasRect.width, greaterThan(panelRect.width));
-    expect(canvasRect.right, lessThan(panelRect.left));
-  });
-
-  testWidgets('넓지만 높이가 작은 화면에서는 도구 패널이 스크롤되어 overflow가 없다', (tester) async {
-    await _pumpDrawing(tester, size: const Size(1200, 600));
-
-    expect(tester.takeException(), isNull);
-    expect(
-      find.byKey(const ValueKey('drawing-tool-panel-scroll')),
-      findsOneWidget,
-    );
-    expect(find.byKey(const ValueKey('drawing-canvas')), findsOneWidget);
-
-    await tester.drag(
-      find.byKey(const ValueKey('drawing-tool-panel-scroll')),
-      const Offset(0, -1000),
-    );
-    await tester.pump();
-
-    expect(tester.takeException(), isNull);
-    expect(find.text('그림을 안전하게 담고 있어요'), findsOneWidget);
-    expect(find.text('다 그렸어요!'), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('drawing-complete-bottom-space')),
-      findsOneWidget,
-    );
-    final panelBottom = tester
-        .getRect(find.byKey(const ValueKey('drawing-tool-panel-scroll')))
-        .bottom;
-    final buttonBottom = tester
-        .getRect(find.byKey(const ValueKey('drawing-complete')))
-        .bottom;
-    expect(panelBottom - buttonBottom, greaterThanOrEqualTo(AppSpacing.md));
-  });
-
   testWidgets('Drawing 화면에는 보호자 전용 정보가 노출되지 않는다', (tester) async {
     await _pumpDrawing(tester);
 
@@ -501,23 +414,38 @@ Future<void> _pumpDrawing(
 DrawingCanvas _canvas(WidgetTester tester) =>
     tester.widget<DrawingCanvas>(find.byType(DrawingCanvas));
 
-IconButton _undoButton(WidgetTester tester) =>
-    tester.widget<IconButton>(find.byKey(const ValueKey('undo-action')));
+InkWell _undoButton(WidgetTester tester) => tester.widget<InkWell>(
+  find.descendant(
+    of: find.byKey(const ValueKey('undo-action')),
+    matching: find.byType(InkWell),
+  ),
+);
 
-IconButton _redoButton(WidgetTester tester) =>
-    tester.widget<IconButton>(find.byKey(const ValueKey('redo-action')));
+InkWell _redoButton(WidgetTester tester) => tester.widget<InkWell>(
+  find.descendant(
+    of: find.byKey(const ValueKey('redo-action')),
+    matching: find.byType(InkWell),
+  ),
+);
 
-FilledButton _completeButton(WidgetTester tester) =>
-    tester.widget<FilledButton>(
-      find.descendant(
-        of: find.byKey(const ValueKey('drawing-complete')),
-        matching: find.byType(FilledButton),
-      ),
-    );
+InkWell _completeButton(WidgetTester tester) => tester.widget<InkWell>(
+  find.descendant(
+    of: find.byKey(const ValueKey('drawing-complete')),
+    matching: find.byType(InkWell),
+  ),
+);
 
 Future<void> _drawStroke(WidgetTester tester, Offset start) async {
   final gesture = await tester.startGesture(start);
   await gesture.moveBy(const Offset(24, 18));
   await gesture.up();
+  await tester.pump();
+}
+
+Future<void> _tapThicknessPreset(WidgetTester tester, String label) async {
+  final preset = find.byKey(ValueKey('drawing-thickness-$label'));
+  await tester.ensureVisible(preset);
+  await tester.pumpAndSettle();
+  await tester.tap(preset);
   await tester.pump();
 }

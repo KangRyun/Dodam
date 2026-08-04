@@ -1,122 +1,677 @@
-import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
+import 'dart:ui';
+
+import 'package:dodam/design_system/tokens/app_colors.dart';
+import 'package:dodam/features/drawing/application/drawing_sync_coordinator.dart';
+import 'package:dodam/features/drawing/presentation/models/drawing_tool_state.dart';
+import 'package:dodam/features/drawing/presentation/widgets/canvas_tool_asset_icon.dart';
+import 'package:dodam/features/drawing/presentation/widgets/drawing_crayon_frame.dart';
+import 'package:dodam/features/drawing/presentation/widgets/drawing_tool_button.dart';
+import 'package:dodam/features/drawing/presentation/widgets/drawing_toolbar.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  group('그림 도구 패널 접근성', () {
-    testWidgets('색상·굵기 선택과 실행취소 버튼은 48×48 이상의 터치 영역을 가진다', (tester) async {
-      await _pumpDrawing(tester);
+  const quickColors = <Color>[
+    AppColors.drawingRed,
+    Color(0xFFF47A28),
+    AppColors.drawingYellow,
+    AppColors.drawingGreen,
+    Color(0xFF2E9F98),
+    AppColors.drawingBlue,
+    AppColors.drawingPurple,
+    AppColors.canvasInk,
+  ];
 
-      for (final name in ['검정', '빨강', '파랑', '노랑']) {
-        final size = tester.getSize(find.byKey(ValueKey('color-$name')));
-        expect(size.width, greaterThanOrEqualTo(48));
-        expect(size.height, greaterThanOrEqualTo(48));
-      }
+  group('DrawingToolbar accessibility', () {
+    testWidgets(
+      'keeps every primary action at 48px and renders tools with approved artwork',
+      (tester) async {
+        final semantics = tester.ensureSemantics();
+        await _pumpToolbar(tester, quickColors: quickColors);
 
-      for (final label in ['얇게', '보통', '굵게']) {
-        final size = tester.getSize(
-          find.byKey(ValueKey('drawing-thickness-$label')),
+        const actionKeys = <String>[
+          'drawing-back',
+          'undo-action',
+          'redo-action',
+          'drawing-tool-crayon',
+          'drawing-tool-pencil',
+          'drawing-tool-brush',
+          'drawing-tool-eraser',
+          'drawing-tool-fill',
+          'drawing-palette-button',
+          'drawing-save-status',
+          'drawing-complete',
+          'drawing-complete-button',
+        ];
+        for (final key in actionKeys) {
+          final size = tester.getSize(find.byKey(ValueKey(key)));
+          expect(size.width, greaterThanOrEqualTo(48), reason: key);
+          expect(size.height, greaterThanOrEqualTo(48), reason: key);
+        }
+
+        const artworkByKey = <String, CanvasToolArtwork>{
+          'drawing-tool-crayon': CanvasToolArtwork.crayon,
+          'drawing-tool-pencil': CanvasToolArtwork.pencil,
+          'drawing-tool-brush': CanvasToolArtwork.brush,
+          'drawing-tool-eraser': CanvasToolArtwork.eraser,
+          'drawing-tool-fill': CanvasToolArtwork.fill,
+          'drawing-palette-button': CanvasToolArtwork.palette,
+        };
+        for (final entry in artworkByKey.entries) {
+          final artwork = tester.widget<CanvasToolAssetIcon>(
+            find.descendant(
+              of: find.byKey(ValueKey(entry.key)),
+              matching: find.byType(CanvasToolAssetIcon),
+            ),
+          );
+          expect(artwork.artwork, entry.value);
+          expect(artwork.pointColor, AppColors.canvasInk);
+          expect(
+            find.descendant(
+              of: find.byKey(ValueKey(entry.key)),
+              matching: find.byType(Icon),
+            ),
+            findsNothing,
+          );
+        }
+
+        final crayonSemantics = tester.getSemantics(
+          find.bySemanticsLabel('크레용 도구'),
         );
-        expect(size.width, greaterThanOrEqualTo(48));
-        expect(size.height, greaterThanOrEqualTo(48));
-      }
+        expect(crayonSemantics.flagsCollection.isButton, isTrue);
+        expect(crayonSemantics.flagsCollection.isSelected, Tristate.isTrue);
+        expect(find.textContaining('highlighter'), findsNothing);
+        expect(find.textContaining('형광펜'), findsNothing);
 
-      final undoSize = tester.getSize(
-        find.byKey(const ValueKey('undo-action')),
-      );
-      expect(undoSize.width, greaterThanOrEqualTo(48));
-      expect(undoSize.height, greaterThanOrEqualTo(48));
-    });
+        semantics.dispose();
+      },
+    );
 
-    testWidgets('펜·지우개·색상·굵기 선택 요소는 Semantics 라벨을 제공한다', (tester) async {
-      final handle = tester.ensureSemantics();
-      await _pumpDrawing(tester);
+    testWidgets(
+      'renders all textured quick colors and selects charcoal initially',
+      (tester) async {
+        await _pumpToolbar(tester, quickColors: quickColors);
 
-      expect(find.bySemanticsLabel(RegExp('^펜 도구')), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp('^지우개 도구')), findsOneWidget);
-      expect(find.bySemanticsLabel('검정 색상'), findsOneWidget);
-      expect(find.bySemanticsLabel('빨강 색상'), findsOneWidget);
-      expect(find.bySemanticsLabel('파랑 색상'), findsOneWidget);
-      expect(find.bySemanticsLabel('노랑 색상'), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp('^얇게 굵기')), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp('^보통 굵기')), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp('^굵게 굵기')), findsOneWidget);
+        final ordered = <Finder>[
+          find.byKey(const ValueKey('drawing-quick-colors')),
+          find.byKey(const ValueKey('drawing-thickness-slider')),
+          find.byKey(const ValueKey('drawing-thickness-preview')),
+          find.byKey(const ValueKey('drawing-palette-button')),
+        ];
+        for (var index = 0; index < ordered.length - 1; index++) {
+          final current = tester.getRect(ordered[index]);
+          final next = tester.getRect(ordered[index + 1]);
+          expect(current.right, lessThanOrEqualTo(next.left));
+          expect(current.overlaps(next), isFalse);
+        }
 
-      handle.dispose();
-    });
+        final baseSizes = <Size>[];
+        for (var index = 0; index < quickColors.length; index++) {
+          final target = find.byKey(ValueKey('drawing-quick-color-$index'));
+          expect(tester.getSize(target), const Size(48, 48));
+          baseSizes.add(
+            tester.getSize(
+              find.byKey(ValueKey('drawing-quick-color-swatch-$index')),
+            ),
+          );
+        }
+        expect(baseSizes.toSet(), {const Size(28, 28)});
 
-    testWidgets('색상 선택 상태는 테두리 두께·체크 아이콘으로 구분되며 색상만으로 구분하지 않는다', (
+        const expectedSwatchAssets = <String>[
+          'assets/canvas/swatches/red.png',
+          'assets/canvas/swatches/orange.png',
+          'assets/canvas/swatches/yellow.png',
+          'assets/canvas/swatches/green.png',
+          'assets/canvas/swatches/teal.png',
+          'assets/canvas/swatches/blue.png',
+          'assets/canvas/swatches/purple.png',
+          'assets/canvas/swatches/charcoal.png',
+        ];
+        expect(
+          find.descendant(
+            of: find.byKey(const ValueKey('drawing-quick-colors')),
+            matching: find.byType(Image),
+          ),
+          findsNWidgets(expectedSwatchAssets.length),
+        );
+        for (var index = 0; index < expectedSwatchAssets.length; index++) {
+          final image = tester.widget<Image>(
+            find.descendant(
+              of: find.byKey(ValueKey('drawing-quick-color-swatch-$index')),
+              matching: find.byType(Image),
+            ),
+          );
+          expect(
+            (image.image as AssetImage).assetName,
+            expectedSwatchAssets[index],
+          );
+        }
+
+        final selectedScale = tester.widget<AnimatedScale>(
+          find.byKey(const ValueKey('drawing-quick-color-scale-7')),
+        );
+        final unselectedScale = tester.widget<AnimatedScale>(
+          find.byKey(const ValueKey('drawing-quick-color-scale-0')),
+        );
+        expect(selectedScale.scale, greaterThan(1));
+        expect(unselectedScale.scale, 1);
+        expect(
+          find.byKey(const ValueKey('drawing-quick-color-selection-ring-7')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('drawing-quick-color-selection-ring-0')),
+          findsNothing,
+        );
+
+        final selectedSemantics = tester.getSemantics(
+          find.bySemanticsLabel('빠른 색상 8'),
+        );
+        expect(selectedSemantics.flagsCollection.isSelected, Tristate.isTrue);
+        expect(tester.getSize(ordered[2]), const Size(48, 48));
+      },
+    );
+
+    testWidgets(
+      'keeps save, thickness, and complete labels readable without scaling text down',
+      (tester) async {
+        const expectedStatusInks = <DrawingSaveStatus, Color>{
+          DrawingSaveStatus.localOnly: Color(0xFF2F2D24),
+          DrawingSaveStatus.saving: Color(0xFF655194),
+          DrawingSaveStatus.saved: Color(0xFF3D7A55),
+          DrawingSaveStatus.failed: Color(0xFFB33A3A),
+        };
+
+        for (final entry in expectedStatusInks.entries) {
+          await _pumpToolbar(
+            tester,
+            quickColors: quickColors,
+            saveStatus: entry.key,
+          );
+
+          final status = find.byKey(const ValueKey('drawing-save-status'));
+          final text = tester.widget<Text>(
+            find.descendant(of: status, matching: find.byType(Text)),
+          );
+          expect(text.style?.fontSize, greaterThanOrEqualTo(13));
+          expect(
+            text.style!.fontWeight!.value,
+            lessThanOrEqualTo(FontWeight.w800.value),
+          );
+          expect(text.style?.color, entry.value);
+          expect(
+            _contrastRatio(entry.value, AppColors.canvasWarm),
+            greaterThanOrEqualTo(4.5),
+          );
+          expect(
+            find.descendant(of: status, matching: find.byType(FittedBox)),
+            findsNothing,
+          );
+        }
+
+        final thicknessLabels = tester.widgetList<Text>(
+          find.descendant(
+            of: find.byKey(const ValueKey('drawing-toolbar-secondary-row')),
+            matching: find.byType(Text),
+          ),
+        );
+        expect(thicknessLabels, hasLength(3));
+        for (final label in thicknessLabels) {
+          expect(label.style?.fontSize, greaterThanOrEqualTo(13));
+          expect(
+            label.style!.fontWeight!.value,
+            lessThanOrEqualTo(FontWeight.w800.value),
+          );
+        }
+
+        await _pumpToolbar(tester, quickColors: quickColors, textScale: 2);
+        final complete = find.byKey(const ValueKey('drawing-complete'));
+        expect(tester.getSize(complete).width, greaterThanOrEqualTo(64));
+        expect(
+          find.descendant(of: complete, matching: find.byType(FittedBox)),
+          findsNothing,
+        );
+        final completeText = tester.widget<Text>(
+          find.descendant(of: complete, matching: find.byType(Text)),
+        );
+        expect(completeText.style?.fontSize, greaterThanOrEqualTo(13));
+      },
+    );
+
+    testWidgets('disables toolbar scale motion when animations are disabled', (
       tester,
     ) async {
-      await _pumpDrawing(tester);
+      await _pumpToolbar(
+        tester,
+        quickColors: quickColors,
+        disableAnimations: true,
+      );
 
-      final redSwatch = find.byKey(const ValueKey('color-빨강'));
-      await tester.tap(redSwatch);
+      final scales = tester.widgetList<AnimatedScale>(
+        find.byType(AnimatedScale),
+      );
+      expect(scales, isNotEmpty);
+      for (final scale in scales) {
+        expect(scale.duration, Duration.zero);
+      }
+    });
+
+    testWidgets(
+      'hover scales only inner tool artwork while its hit rectangle stays fixed',
+      (tester) async {
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Center(
+                child: DrawingToolButton(
+                  key: const ValueKey('test-tool'),
+                  artwork: CanvasToolArtwork.crayon,
+                  pointColor: AppColors.canvasInk,
+                  selected: false,
+                  semanticLabel: '크레용 도구',
+                  tooltip: '크레용',
+                  onPressed: () {},
+                ),
+              ),
+            ),
+          ),
+        );
+
+        final target = find.byKey(const ValueKey('test-tool'));
+        final before = tester.getRect(target);
+        expect(tester.widget<Tooltip>(find.byType(Tooltip)).message, '크레용');
+        expect(
+          tester
+              .widget<AnimatedScale>(
+                find.byKey(const ValueKey('drawing-tool-artwork-crayon')),
+              )
+              .scale,
+          1,
+        );
+
+        final pointer = TestPointer(1, PointerDeviceKind.mouse);
+        await tester.sendEventToBinding(
+          pointer.addPointer(location: const Offset(1, 1)),
+        );
+        await tester.sendEventToBinding(
+          pointer.hover(tester.getCenter(target)),
+        );
+        await tester.pump();
+
+        expect(tester.getRect(target), before);
+        expect(
+          tester
+              .widget<AnimatedScale>(
+                find.byKey(const ValueKey('drawing-tool-artwork-crayon')),
+              )
+              .scale,
+          1.06,
+        );
+      },
+    );
+
+    testWidgets(
+      'one keyboard focus stop both emphasizes and activates a tool',
+      (tester) async {
+        var presses = 0;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Center(
+                child: DrawingToolButton(
+                  artwork: CanvasToolArtwork.crayon,
+                  pointColor: AppColors.canvasInk,
+                  selected: false,
+                  semanticLabel: '크레용 도구',
+                  tooltip: '크레용',
+                  onPressed: () => presses++,
+                ),
+              ),
+            ),
+          ),
+        );
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.tab);
+        await tester.pump();
+        expect(
+          tester
+              .widget<AnimatedScale>(
+                find.byKey(const ValueKey('drawing-tool-artwork-crayon')),
+              )
+              .scale,
+          1.06,
+        );
+
+        await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+        await tester.pump();
+        expect(presses, 1);
+      },
+    );
+
+    testWidgets(
+      'semantic taps activate tool, quick color, undo, and complete exactly once',
+      (tester) async {
+        final semantics = tester.ensureSemantics();
+        final instruments = <DrawingInstrument>[];
+        final colors = <Color>[];
+        var undoCount = 0;
+        var backCount = 0;
+        var completeCount = 0;
+        await _pumpToolbar(
+          tester,
+          quickColors: quickColors,
+          onUndo: () => undoCount++,
+          onBack: () => backCount++,
+          onInstrumentChanged: instruments.add,
+          onColorChanged: colors.add,
+          onComplete: () => completeCount++,
+        );
+
+        for (final label in <String>[
+          '뒤로 가기',
+          '연필 도구',
+          '빠른 색상 2',
+          '실행 취소',
+          '그림 완료',
+        ]) {
+          final target = find.semantics.byLabel(label);
+          expect(target, findsOne, reason: label);
+          expect(target, isSemantics(hasTapAction: true), reason: label);
+          tester.semantics.tap(target);
+          await tester.pump();
+        }
+
+        expect(instruments, [DrawingInstrument.pencil]);
+        expect(colors, [quickColors[1]]);
+        expect(undoCount, 1);
+        expect(backCount, 1);
+        expect(completeCount, 1);
+        semantics.dispose();
+      },
+    );
+
+    testWidgets('eraser menu exposes only stroke, area, and clear callbacks', (
+      tester,
+    ) async {
+      final actions = <DrawingEraserMenuAction>[];
+      await _pumpToolbar(
+        tester,
+        quickColors: quickColors,
+        onEraserMenuAction: actions.add,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('drawing-tool-eraser')));
       await tester.pumpAndSettle();
 
-      final selectedBorder = _swatchBorder(tester, redSwatch);
-      expect(selectedBorder.top.width, 4);
       expect(
-        find.descendant(
-          of: redSwatch,
-          matching: find.byIcon(Icons.check_rounded),
-        ),
-        findsOneWidget,
+        find.byType(PopupMenuItem<DrawingEraserMenuAction>),
+        findsNWidgets(3),
       );
+      expect(find.text('선 지우개'), findsOneWidget);
+      expect(find.text('영역 지우개'), findsOneWidget);
+      expect(find.text('전체 지우기'), findsOneWidget);
 
-      final blackSwatch = find.byKey(const ValueKey('color-검정'));
-      final unselectedBorder = _swatchBorder(tester, blackSwatch);
-      expect(unselectedBorder.top.width, 2);
-      expect(
-        find.descendant(
-          of: blackSwatch,
-          matching: find.byIcon(Icons.check_rounded),
-        ),
-        findsNothing,
-      );
+      await tester.tap(find.text('전체 지우기'));
+      await tester.pumpAndSettle();
+      expect(actions, [DrawingEraserMenuAction.clearAll]);
     });
 
-    testWidgets('시스템 글자 크기를 2배로 확대해도 도구 패널 제목에서 overflow가 발생하지 않는다', (
+    testWidgets(
+      'completion has one real disabled or loading action and preserves both public keys',
+      (tester) async {
+        final semantics = tester.ensureSemantics();
+        var completeCount = 0;
+
+        await _pumpToolbar(
+          tester,
+          quickColors: quickColors,
+          canComplete: false,
+          onComplete: () => completeCount++,
+        );
+
+        final actual = find.byKey(const ValueKey('drawing-complete'));
+        final compatibility = find.byKey(
+          const ValueKey('drawing-complete-button'),
+        );
+        expect(actual, findsOneWidget);
+        expect(
+          find.descendant(of: compatibility, matching: actual),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .widget<InkWell>(
+                find.descendant(of: actual, matching: find.byType(InkWell)),
+              )
+              .onTap,
+          isNull,
+        );
+        expect(
+          tester
+              .getSemantics(actual)
+              .getSemanticsData()
+              .hasAction(SemanticsAction.tap),
+          isFalse,
+        );
+        await tester.tap(actual);
+        expect(completeCount, 0);
+
+        await _pumpToolbar(
+          tester,
+          quickColors: quickColors,
+          isCompleting: true,
+          onComplete: () => completeCount++,
+        );
+        expect(
+          find.descendant(
+            of: actual,
+            matching: find.byType(CircularProgressIndicator),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .widget<InkWell>(
+                find.descendant(of: actual, matching: find.byType(InkWell)),
+              )
+              .onTap,
+          isNull,
+        );
+        expect(completeCount, 0);
+        semantics.dispose();
+      },
+    );
+
+    testWidgets('failed save status exposes one fixed retry action', (
       tester,
     ) async {
-      await _pumpDrawing(tester, textScale: 2.0);
+      final semantics = tester.ensureSemantics();
+      var retries = 0;
+      await _pumpToolbar(
+        tester,
+        quickColors: quickColors,
+        saveStatus: DrawingSaveStatus.failed,
+        onRetrySave: () => retries++,
+      );
 
-      expect(tester.takeException(), isNull);
-      expect(find.text('도구'), findsOneWidget);
-      expect(find.text('색상'), findsOneWidget);
-      expect(find.text('굵기'), findsOneWidget);
-      expect(find.text('펜'), findsOneWidget);
-      expect(find.text('지우개'), findsOneWidget);
+      final status = find.byKey(const ValueKey('drawing-save-status'));
+      final retry = find.byKey(const ValueKey('save-retry'));
+      expect(status, findsOneWidget);
+      expect(retry, findsOneWidget);
+      expect(tester.getSize(status).height, greaterThanOrEqualTo(48));
+      expect(find.text('저장하지 못했어요'), findsOneWidget);
+      expect(find.semantics.byLabel('저장하지 못했어요. 다시 시도'), findsOneWidget);
+
+      await tester.tap(retry);
+      await tester.pump();
+      expect(retries, 1);
+      semantics.dispose();
+    });
+
+    testWidgets('fits its three component layouts and keeps completion fixed', (
+      tester,
+    ) async {
+      const cases = <(Size, double)>[
+        (Size(390, 844), 112),
+        (Size(844, 390), 60),
+        (Size(1194, 834), 72),
+      ];
+
+      for (final (size, expectedHeight) in cases) {
+        await _pumpToolbar(
+          tester,
+          quickColors: quickColors,
+          size: size,
+          textScale: 2,
+        );
+
+        expect(tester.takeException(), isNull, reason: '$size');
+        expect(
+          tester.getSize(find.byKey(const ValueKey('drawing-toolbar'))).height,
+          expectedHeight,
+          reason: '$size',
+        );
+        expect(
+          find.byKey(const ValueKey('drawing-complete-button')),
+          findsOneWidget,
+        );
+        for (final instrument in DrawingInstrument.values) {
+          expect(
+            find.byKey(ValueKey('drawing-tool-${instrument.name}')),
+            findsOneWidget,
+          );
+        }
+      }
     });
   });
-}
 
-Border _swatchBorder(WidgetTester tester, Finder swatch) {
-  final container = tester.widget<Container>(
-    find.descendant(of: swatch, matching: find.byType(Container)),
+  testWidgets(
+    'DrawingCrayonFrame uses graphite nine-slice art over white document and warm exterior',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: Scaffold(
+            body: SizedBox(
+              width: 480,
+              height: 320,
+              child: DrawingCrayonFrame(
+                deviceClass: DrawingCanvasDeviceClass.mobilePortrait,
+                child: ColoredBox(color: Colors.transparent),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final exterior = tester.widget<ColoredBox>(
+        find.byKey(const ValueKey('drawing-crayon-frame-exterior')),
+      );
+      final document = tester.widget<ColoredBox>(
+        find.byKey(const ValueKey('drawing-crayon-document')),
+      );
+      final frame = tester.widget<Image>(
+        find.byKey(const ValueKey('drawing-crayon-frame-nine-slice')),
+      );
+      final spiralOverlay = tester.widget<IgnorePointer>(
+        find.byKey(const ValueKey('drawing-crayon-frame-spirals')),
+      );
+
+      expect(exterior.color, AppColors.canvasWarm);
+      expect(document.color, Colors.white);
+      expect(
+        (frame.image as AssetImage).assetName,
+        'assets/canvas/frame/canvas_frame_mobile.png',
+      );
+      expect(frame.centerSlice, isNotNull);
+      expect(frame.fit, BoxFit.fill);
+      expect(spiralOverlay.ignoring, isTrue);
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('drawing-crayon-frame-spirals')),
+          matching: find.image(
+            const AssetImage('assets/canvas/frame/spiral_mobile.png'),
+          ),
+        ),
+        findsWidgets,
+      );
+    },
   );
-  return (container.decoration! as BoxDecoration).border! as Border;
 }
 
-Future<void> _pumpDrawing(
+double _contrastRatio(Color foreground, Color background) {
+  final foregroundLuminance = foreground.computeLuminance();
+  final backgroundLuminance = background.computeLuminance();
+  final lighter = foregroundLuminance > backgroundLuminance
+      ? foregroundLuminance
+      : backgroundLuminance;
+  final darker = foregroundLuminance > backgroundLuminance
+      ? backgroundLuminance
+      : foregroundLuminance;
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+Future<void> _pumpToolbar(
   WidgetTester tester, {
-  Size size = const Size(1200, 800),
-  double textScale = 1.0,
+  required List<Color> quickColors,
+  Size size = const Size(1194, 834),
+  double textScale = 1,
+  bool disableAnimations = false,
+  ValueChanged<DrawingEraserMenuAction>? onEraserMenuAction,
+  VoidCallback? onBack,
+  VoidCallback? onUndo,
+  ValueChanged<DrawingInstrument>? onInstrumentChanged,
+  ValueChanged<Color>? onColorChanged,
+  VoidCallback? onComplete,
+  bool canComplete = true,
+  bool isCompleting = false,
+  DrawingSaveStatus saveStatus = DrawingSaveStatus.localOnly,
+  VoidCallback? onRetrySave,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
+
   await tester.pumpWidget(
     MaterialApp(
       builder: (context, child) => MediaQuery(
-        data: MediaQuery.of(
-          context,
-        ).copyWith(textScaler: TextScaler.linear(textScale)),
+        data: MediaQuery.of(context).copyWith(
+          textScaler: TextScaler.linear(textScale),
+          disableAnimations: disableAnimations,
+        ),
         child: child!,
       ),
-      home: const DrawingScreen(childId: '3'),
+      home: Scaffold(
+        body: Align(
+          alignment: Alignment.topCenter,
+          child: DrawingToolbar(
+            toolState: const DrawingToolState(),
+            quickColors: quickColors,
+            paletteAnchorLink: LayerLink(),
+            onBack: onBack ?? () {},
+            canUndo: true,
+            canRedo: true,
+            canComplete: canComplete,
+            isCompleting: isCompleting,
+            saveStatus: saveStatus,
+            onUndo: onUndo ?? () {},
+            onRedo: () {},
+            onRetrySave: onRetrySave ?? () {},
+            onInstrumentChanged: onInstrumentChanged ?? (_) {},
+            onEraserMenuAction: onEraserMenuAction ?? (_) {},
+            onColorChanged: onColorChanged ?? (_) {},
+            onWidthChanged: (_) {},
+            onOpenPalette: () {},
+            onComplete: onComplete ?? () {},
+          ),
+        ),
+      ),
     ),
   );
-  await tester.pumpAndSettle();
+  if (isCompleting || saveStatus == DrawingSaveStatus.saving) {
+    await tester.pump();
+  } else {
+    await tester.pumpAndSettle();
+  }
 }

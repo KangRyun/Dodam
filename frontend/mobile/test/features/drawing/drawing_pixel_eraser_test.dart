@@ -2,6 +2,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:dodam/design_system/design_system.dart';
+import 'package:dodam/features/drawing/presentation/models/drawing_canvas_action.dart';
 import 'package:dodam/features/drawing/presentation/models/drawing_stroke.dart';
 import 'package:dodam/features/drawing/presentation/widgets/drawing_canvas.dart';
 import 'package:flutter/material.dart';
@@ -52,6 +53,29 @@ void main() {
     expect(await _pixel(tester, image, 32, 32), _isOpaqueWhite);
     expect(await _pixel(tester, image, 32, 20), _isBlue);
   });
+
+  testWidgets(
+    'area eraser clears a committed fill action before snapshot capture',
+    (tester) async {
+      final patch = await _solidImage(tester, AppColors.drawingBlue);
+      addTearDown(patch.dispose);
+      final image = await _renderCanvas(
+        tester,
+        strokes: [_eraser(width: 14)],
+        actions: [
+          DrawingFillAction(
+            id: 1,
+            patch: patch,
+            documentSize: const Size.square(64),
+          ),
+        ],
+      );
+      addTearDown(image.dispose);
+
+      expect(await _pixel(tester, image, 32, 32), _isOpaqueWhite);
+      expect(await _pixel(tester, image, 32, 20), _isBlue);
+    },
+  );
 
   testWidgets('마지막 ERASER를 Undo한 재합성은 원본 픽셀을 복원한다', (tester) async {
     final background = await _solidPng(tester, AppColors.drawingBlue);
@@ -118,6 +142,7 @@ void main() {
 Future<ui.Image> _renderCanvas(
   WidgetTester tester, {
   required List<DrawingStroke> strokes,
+  List<DrawingCanvasAction>? actions,
   Uint8List? backgroundBytes,
 }) async {
   final boundaryKey = GlobalKey();
@@ -134,6 +159,7 @@ Future<ui.Image> _renderCanvas(
               dimension: 64,
               child: DrawingCanvas(
                 strokes: strokes,
+                actions: actions,
                 backgroundImage: backgroundProvider,
                 onPointerDown: (_) {},
                 onPointerMove: (_) {},
@@ -189,6 +215,20 @@ Future<Uint8List> _solidPng(WidgetTester tester, Color color) async =>
       final data = await image.toByteData(format: ui.ImageByteFormat.png);
       image.dispose();
       return data!.buffer.asUint8List();
+    }))!;
+
+Future<ui.Image> _solidImage(WidgetTester tester, Color color) async =>
+    (await tester.runAsync(() async {
+      final recorder = ui.PictureRecorder();
+      final canvas = Canvas(recorder);
+      canvas.drawRect(
+        const Rect.fromLTWH(0, 0, 64, 64),
+        Paint()..color = color,
+      );
+      final picture = recorder.endRecording();
+      final image = await picture.toImage(64, 64);
+      picture.dispose();
+      return image;
     }))!;
 
 Future<Color> _pixel(WidgetTester tester, ui.Image image, int x, int y) async =>

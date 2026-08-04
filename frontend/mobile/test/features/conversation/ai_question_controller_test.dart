@@ -156,6 +156,58 @@ void main() {
       ]);
     });
 
+    test(
+      'loadNext uses the queued analysis and captured answer snapshot',
+      () async {
+        final repository = _RecordingConversationRepository();
+        final controller = AiQuestionController(
+          repository,
+          conversationId: 11,
+          idempotencyKeyProvider: () => 'question-key',
+        );
+
+        await controller.loadNext(
+          basisAnalysisId: 702,
+          previousAnswerMessageId: 801,
+        );
+
+        expect(repository.basisAnalysisIds, [702]);
+        expect(repository.previousAnswerMessageIds, [801]);
+      },
+    );
+
+    test(
+      'retry keeps the loadNext body and idempotency key together',
+      () async {
+        var keySequence = 0;
+        final repository = _RecordingConversationRepository(
+          failures: [
+            const ApiTransportFailure(type: ApiTransportFailureType.connection),
+          ],
+        );
+        final controller = AiQuestionController(
+          repository,
+          conversationId: 11,
+          idempotencyKeyProvider: () => 'question-key-${++keySequence}',
+        );
+
+        await controller.loadNext(
+          basisAnalysisId: 702,
+          previousAnswerMessageId: 801,
+        );
+        expect(controller.status, AiQuestionStatus.failure);
+
+        await controller.load();
+
+        expect(repository.basisAnalysisIds, [702, 702]);
+        expect(repository.previousAnswerMessageIds, [801, 801]);
+        expect(repository.idempotencyKeys, [
+          'question-key-1',
+          'question-key-1',
+        ]);
+      },
+    );
+
     test('건너뛰기 뒤에는 답변 ID 없이 같은 분석의 다음 질문을 요청한다', () async {
       final repository = _RecordingConversationRepository();
       final controller = AiQuestionController(

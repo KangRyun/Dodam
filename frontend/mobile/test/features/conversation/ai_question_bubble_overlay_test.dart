@@ -31,6 +31,16 @@ void main() {
 
     expect(find.byKey(const ValueKey('dodami-character')), findsOneWidget);
     expect(find.byKey(const ValueKey('ai-question-bubble')), findsOneWidget);
+    final mascot = tester.widget<Image>(
+      find.descendant(
+        of: find.byKey(const ValueKey('dodami-character')),
+        matching: find.byType(Image),
+      ),
+    );
+    expect(
+      (mascot.image as AssetImage).assetName,
+      'assets/characters/dodam_drawing.png',
+    );
     expect(find.text('그림에는 누가 함께 있어?'), findsOneWidget);
     expect(find.text('가족이 있어'), findsOneWidget);
     expect(find.text('친구가 있어'), findsOneWidget);
@@ -134,6 +144,42 @@ void main() {
       find.byKey(const ValueKey('voice-answer-upload-retry')),
       findsNothing,
     );
+  });
+
+  testWidgets('다른 응답 전송 중에는 Voice 재시도를 비활성화한다', (tester) async {
+    final controller = VoiceRecordingController(_FakeVoiceRecorder());
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Stack(
+            children: [
+              AiQuestionBubbleOverlay(
+                question: _question,
+                visible: true,
+                selectedOptionId: null,
+                onOptionSelected: (_) {},
+                showResponseActions: true,
+                submissionStatus: OptionAnswerSubmissionStatus.idle,
+                skipStatus: QuestionSkipStatus.submitting,
+                endStatus: ConversationEndStatus.idle,
+                onEnd: () {},
+                onSkip: () {},
+                voiceRecordingController: controller,
+                voiceAnswerUploadStatus: VoiceAnswerUploadStatus.failure,
+                voiceRetryable: true,
+                onRetryVoiceAnswerUpload: () {},
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    final retry = tester.widget<TextButton>(
+      find.byKey(const ValueKey('voice-answer-upload-retry')),
+    );
+    expect(retry.onPressed, isNull);
   });
 
   testWidgets('대화 그만하기를 누르면 종료 확인 요청을 전달한다', (tester) async {
@@ -338,13 +384,30 @@ void main() {
     expect(pointerMoveCount, greaterThan(0));
     expect(pointerUpCount, 1);
 
+    final moveCountBeforePassiveLayers = pointerMoveCount;
+    for (final passiveLayer in <Finder>[
+      find.byKey(const ValueKey('ai-question-bubble')),
+      find.byKey(const ValueKey('dodami-character')),
+    ]) {
+      final passiveGesture = await tester.startGesture(
+        tester.getCenter(passiveLayer),
+      );
+      await passiveGesture.moveBy(const Offset(-12, 8));
+      await passiveGesture.up();
+      await tester.pump();
+    }
+
+    expect(pointerDownCount, 3);
+    expect(pointerMoveCount, greaterThan(moveCountBeforePassiveLayers));
+    expect(pointerUpCount, 3);
+
     await tester.tap(find.byKey(const ValueKey('ai-question-option-1')));
     await tester.pump();
 
     expect(optionRequestCount, 1);
-    expect(pointerDownCount, 1);
+    expect(pointerDownCount, 3);
     expect(pointerMoveCount, greaterThan(0));
-    expect(pointerUpCount, 1);
+    expect(pointerUpCount, 3);
     expect(tester.takeException(), isNull);
   });
 }

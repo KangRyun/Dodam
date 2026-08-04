@@ -46,4 +46,26 @@ abstract final class AppColors {
   static const Color errorSoft = Color(0xFFFBE9E7);
   static const Color disabled = Color(0xFFD9DDD8);
   static const Color onDisabled = Color(0xFF909892);
+
+  /// 크레용 캔버스 화면 전용 색이다(S15P11B209-797~807). 종이 질감과 크레용 도구
+  /// 위에서 대비를 확보하도록 고른 값이라 일반 화면 토큰과 구분해 둔다.
+  static const Color canvasPrimary = brandYellow;
+  static const Color canvasPrimaryPressed = Color(0xFFE5C84F);
+  static const Color canvasInk = Color(0xFF2F2D24);
+  static const Color canvasWarm = Color(0xFFFFFDF5);
+  static const Color canvasBorder = Color(0xFFE5DFC8);
+  static const Color canvasBorderStrong = Color(0xFFC9BF99);
+
+  /// 캔버스 우측 상단 저장 상태 문구 색이다. 저장 단계를 색으로도 구분한다.
+  static const Color canvasStatusLocalInk = canvasInk;
+  static const Color canvasStatusSavingInk = Color(0xFF655194);
+  static const Color canvasStatusSavedInk = Color(0xFF3D7A55);
+  static const Color canvasStatusFailedInk = Color(0xFFB33A3A);
+
+  /// 캔버스 팔레트가 제공하는 그리기 색이다.
+  static const Color drawingCharcoal = canvasInk;
+  static const Color drawingOrange = Color(0xFFF47A28);
+  static const Color drawingGreen = Color(0xFF6AAE72);
+  static const Color drawingTeal = Color(0xFF2E9F98);
+  static const Color drawingPurple = Color(0xFF8A72C9);
 }

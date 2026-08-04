@@ -48,6 +48,7 @@ export 'domain/services/voice_recorder.dart';
 export 'domain/services/question_audio_player.dart';
 export 'domain/services/voice_answer_audio_player.dart';
 export 'presentation/widgets/ai_question_load_panel.dart';
+export 'presentation/widgets/ai_question_status_overlay.dart';
 export 'presentation/widgets/ai_question_bubble_overlay.dart';
 export 'presentation/widgets/voice_recording_control.dart';
 export 'presentation/widgets/voice_answer_playback_control.dart';
