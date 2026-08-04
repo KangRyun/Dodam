@@ -17,6 +17,7 @@ import '../../../drawing/application/activity_completion_controller.dart';
 import '../../../drawing/application/canvas_tutorial_controller.dart';
 import '../../../drawing/application/drawing_object_detection_controller.dart';
 import '../../../drawing/application/drawing_activity_completion_controller.dart';
+import '../../../drawing/application/drawing_document_controller.dart';
 import '../../../drawing/application/drawing_pressure_policy.dart';
 import '../../../drawing/application/drawing_session_start_controller.dart';
 import '../../../drawing/application/drawing_sync_coordinator.dart';
@@ -126,6 +127,7 @@ class DrawingScreen extends StatefulWidget {
     this.drawingRepository,
     this.syncPolicy = const DrawingSyncPolicy(),
     this.syncCoordinator,
+    this.documentController,
     this.objectDetectionController,
     this.draftRestoreController,
     this.draftImageProviderFactory,
@@ -171,6 +173,12 @@ class DrawingScreen extends StatefulWidget {
   final DrawingRepository? drawingRepository;
   final DrawingSyncPolicy syncPolicy;
   final DrawingSyncCoordinator? syncCoordinator;
+
+  /// 캔버스 문서(획·채우기·지우기 이력)를 들고 있는 컨트롤러다.
+  ///
+  /// 주지 않으면 화면이 직접 만들어 쓰고 dispose 까지 책임진다. 테스트는 문서 상태를
+  /// 직접 들여다보기 위해 주입한다.
+  final DrawingDocumentController? documentController;
   final DrawingObjectDetectionController? objectDetectionController;
   final DrawingDraftRestoreController? draftRestoreController;
   final DraftImageProviderFactory? draftImageProviderFactory;
@@ -217,8 +225,12 @@ class _DrawingScreenState extends State<DrawingScreen>
   static const _regular = 8.0;
   static const _thick = 14.0;
 
-  final List<DrawingStroke> _completedStrokes = [];
-  final List<DrawingStroke> _redoStrokes = [];
+  late final DrawingDocumentController _documentController;
+  bool _ownsDocumentController = false;
+
+  /// 화면에 보이는 완결된 획이다. 문서 컨트롤러가 획·채우기·지우기를 한 이력으로
+  /// 관리하므로 이 화면은 목록을 따로 들고 있지 않는다.
+  List<DrawingStroke> get _completedStrokes => _documentController.visibleStrokes;
   DrawingStroke? _activeStroke;
   DrawingTool _tool = DrawingTool.pen;
   Color _color = AppColors.drawingInk;
@@ -328,6 +340,9 @@ class _DrawingScreenState extends State<DrawingScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _ownsDocumentController = widget.documentController == null;
+    _documentController = widget.documentController ?? DrawingDocumentController();
+    _documentController.addListener(_handleDocumentChanged);
     _companionSnapshot = widget.companion;
     final parsedChildId = int.tryParse(widget.childId);
     final tutorialApplicable =
@@ -538,6 +553,12 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
   }
 
+  /// 문서가 바뀌면 화면을 다시 그린다. 채우기·지우기처럼 이 화면 바깥에서 일어난
+  /// 변경도 같은 경로로 반영된다.
+  void _handleDocumentChanged() {
+    if (mounted) setState(() {});
+  }
+
   void _rememberExistingQuestions(
     Iterable<ActivityConversationMessageDto> messages,
   ) {
@@ -550,6 +571,8 @@ class _DrawingScreenState extends State<DrawingScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _cancelNoResponseTimer();
+    _documentController.removeListener(_handleDocumentChanged);
+    if (_ownsDocumentController) _documentController.dispose();
     if (_ownsCanvasTutorialController) _canvasTutorialController?.dispose();
     _syncCoordinator.removeListener(_handleSyncChanged);
     _draftRestoreController.removeListener(_handleDraftRestoreChanged);
@@ -1264,8 +1287,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     final completed = event is PointerUpEvent && stroke != null;
     setState(() {
       if (completed) {
-        _completedStrokes.add(stroke);
-        _redoStrokes.clear();
+        _documentController.addStroke(stroke);
       }
       _activeStroke = null;
       _activePointer = null;
@@ -1284,8 +1306,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     if (stroke == null) return;
     final canvasSize = _canvasBoundaryKey.currentContext?.size;
     setState(() {
-      _completedStrokes.add(stroke);
-      _redoStrokes.clear();
+      _documentController.addStroke(stroke);
       _activeStroke = null;
       _activePointer = null;
     });
@@ -1296,21 +1317,21 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _undoLastStroke() {
-    if (_activeStroke != null || _completedStrokes.isEmpty) return;
+    if (_activeStroke != null || !_documentController.canUndo) return;
     _invalidatePendingCompletion();
     _objectDetectionController?.onDrawingInputStarted();
     // Rebuilding the vector action list also restores pixels removed from a
     // recovered Draft by the last local eraser stroke.
-    setState(() => _redoStrokes.add(_completedStrokes.removeLast()));
+    setState(_documentController.undo);
     _syncCoordinator.recordUndo();
     _objectDetectionController?.onDrawingInputEnded();
   }
 
   void _redoLastStroke() {
-    if (_activeStroke != null || _redoStrokes.isEmpty) return;
+    if (_activeStroke != null || !_documentController.canRedo) return;
     _invalidatePendingCompletion();
     _objectDetectionController?.onDrawingInputStarted();
-    setState(() => _completedStrokes.add(_redoStrokes.removeLast()));
+    setState(_documentController.redo);
     _syncCoordinator.recordRedo();
     _objectDetectionController?.onDrawingInputEnded();
   }
@@ -1776,7 +1797,7 @@ class _DrawingScreenState extends State<DrawingScreen>
             tooltip: _activeStroke != null
                 ? '그리는 중에는 다시 실행할 수 없어요'
                 : '취소한 그림 획 다시 실행',
-            onPressed: _activeStroke == null && _redoStrokes.isNotEmpty
+            onPressed: _activeStroke == null && _documentController.canRedo
                 ? _redoLastStroke
                 : null,
             icon: const Icon(Icons.redo_rounded),
