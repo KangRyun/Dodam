@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- API 호출·커뮤니티 웹뷰 로드에 필요. main에 둬야 release 빌드에서도 네트워크가 살아 있다
          (debug/profile 매니페스트에만 있으면 release는 네트워크 전멸 — docs/인프라/웹-배포-계획.md §6). -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -9,6 +10,24 @@
     <!-- 분석 완료 등 보호자 알림 표시에 필요한 권한 (Android 13+ 런타임 요청 · S15P11B209-617).
          거부돼도 앱과 알림함은 정상 동작한다 — docs/api/push-notification-delivery-contract.md §4.2 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- ── 라이브러리가 끌고 온 미사용 권한 제거 (S15P11B209-765) ──────────────
+         permission_handler 의 매니페스트가 자기가 요청할 수 있는 권한을 전부 선언해
+         병합된다. 우리가 실제로 요청하는 건 camera·microphone·notification·photos 넷뿐이고
+         (lib 전체에서 Permission.* 사용처를 전수 확인), 생체인증은 화면조차 없다.
+
+         왜 굳이 빼나: 원스토어 공식 반려 사유에 "과도한 권한" 이 있고, 이 앱은 아동
+         데이터를 다뤄 청소년 보호 기준 심사가 더 깐깐하다. 쓰지도 않는 지문·생체 권한이
+         목록에 있으면 설명할 수 없다. 상품설명에 고지한 권한 목록과도 어긋난다.
+
+         ⚠️ 아래 4종은 빼지 않는다 — 실제로 필요하다:
+           READ_EXTERNAL_STORAGE  갤러리 선택(image_picker_photo_adapter.dart:20)이
+                                  minSdk 24 기준 Android 12 이하에서 요구한다
+           WRITE_EXTERNAL_STORAGE 이미 maxSdkVersion=28 로 묶여 최소화돼 있다
+           WAKE_LOCK · VIBRATE    flutter_local_notifications 의 알림 표시
+           c2dm.RECEIVE 등        FCM·AndroidX 런타임 필수 -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" tools:node="remove" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" tools:node="remove" />
 
     <!-- android:label 은 홈 화면·앱 서랍에 뜨는 이름이다. 스토어 상품 제목(도담)과
          같아야 한다 — 영문 "dodam" 이면 "도담"을 받았는데 아이콘 밑엔 dodam 이 뜬다. -->
