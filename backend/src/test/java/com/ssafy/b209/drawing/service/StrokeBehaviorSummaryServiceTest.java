@@ -15,6 +15,7 @@ import com.ssafy.b209.drawing.repository.StrokeBatchDocumentRepository;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.IntStream;
@@ -419,6 +420,55 @@ class StrokeBehaviorSummaryServiceTest {
     Optional<StrokeBehaviorSummary> summary = service.summarize(SESSION_ID);
     assertThat(summary).isPresent();
     return summary.get();
+  }
+
+  @Test
+  void summarizeAllSumsCountsAndOrsFlagsAcrossSessions() {
+    // HTP 리포트 하나는 집·나무·사람 세 활동을 다룬다. 세션 하나만 쓰면 보호자가 보는 수치가 3분의 1로 줄어든다
+    // (S15P11B209-870).
+    givenBatchesFor(101L, batch(1, BASE, marker(1, "ERASE")));
+    givenBatchesFor(102L, batch(1, BASE, marker(1, "UNDO")));
+    givenBatchesFor(103L, List.of());
+
+    StrokeBehaviorSummary summary = service.summarizeAll(List.of(101L, 102L, 103L)).orElseThrow();
+
+    assertThat(summary.eraseCount()).isEqualTo(1);
+    assertThat(summary.undoCount()).isEqualTo(1);
+    assertThat(summary.truncated()).isFalse();
+  }
+
+  @Test
+  void summarizeAllReturnsEmptyWhenEverySessionHasNoBatch() {
+    givenBatchesFor(101L, List.of());
+    givenBatchesFor(102L, List.of());
+
+    assertThat(service.summarizeAll(List.of(101L, 102L))).isEmpty();
+  }
+
+  @Test
+  void summarizeAllIgnoresNullAndDuplicateSessionIds() {
+    givenBatchesFor(101L, batch(1, BASE, marker(1, "ERASE")));
+
+    StrokeBehaviorSummary summary =
+        service.summarizeAll(Arrays.asList(101L, null, 101L)).orElseThrow();
+
+    // 같은 세션을 두 번 세면 수치가 두 배가 된다.
+    assertThat(summary.eraseCount()).isEqualTo(1);
+  }
+
+  @Test
+  void summarizeAllRejectsNothingToAggregate() {
+    assertThat(service.summarizeAll(null)).isEmpty();
+    assertThat(service.summarizeAll(List.of())).isEmpty();
+  }
+
+  private void givenBatchesFor(Long sessionId, StrokeBatchDocument... batches) {
+    givenBatchesFor(sessionId, List.of(batches));
+  }
+
+  private void givenBatchesFor(Long sessionId, List<StrokeBatchDocument> batches) {
+    when(repository.findBehaviorAggregationInputs(eq(sessionId), any(Pageable.class)))
+        .thenReturn(batches);
   }
 
   private void givenBatches(StrokeBatchDocument... batches) {

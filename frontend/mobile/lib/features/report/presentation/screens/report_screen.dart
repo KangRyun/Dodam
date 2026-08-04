@@ -737,7 +737,8 @@ class _ReportDetails extends StatelessWidget {
                   label: '그린 것',
                   value: facts.detectedObjects.join(', '),
                 ),
-              if (facts.pauseCount != null ||
+              if (facts.drawingDurationMs != null ||
+                  facts.pauseCount != null ||
                   facts.eraseCount != null ||
                   facts.pressureAvailable) ...[
                 const SizedBox(height: AppSpacing.xs),
@@ -745,6 +746,11 @@ class _ReportDetails extends StatelessWidget {
                   spacing: AppSpacing.sm,
                   runSpacing: AppSpacing.sm,
                   children: [
+                    // 위 "활동 시간"(세션 시작~완료)과 다른 값이다. 이건 스트로크에서 집계한
+                    // 실제로 그린 시간이라 이름을 나눠 둔다(S15P11B209-870).
+                    if (formatActivityDuration(facts.drawingDurationMs)
+                        case final duration?)
+                      _StatisticTile(label: '그린 시간', value: duration),
                     if (facts.pauseCount case final count?)
                       _StatisticTile(label: '멈춤', value: '$count회'),
                     if (facts.eraseCount case final count?)

@@ -18,6 +18,8 @@ import java.util.List;
  * @param expressedEmotionText 아동이 직접 표현한 감정 문구이며 없으면 {@code null}
  * @param keyConversations 실제 대화에서 선별한 대표 질문·답변 목록
  * @param subjectContexts 주제(그림)별 관찰 서술·탐지 코드·문답 묶음이며 HTP는 최대 3건, 그림일기는 1건 (S15P11B209-741)
+ * @param activitySessionIds 이 리포트가 다루는 그림 활동 세션 식별자 목록이다. HTP는 집·나무·사람 세 건, 그림일기·단독 세션은 한 건이다. 행동
+ *     요약(S15P11B209-870)을 세션별로 집계해 합칠 때 쓴다 — HTP 리포트는 세 활동을 합친 기록이다
  */
 public record ObservationGenerationContext(
     Long analysisId,
@@ -32,7 +34,8 @@ public record ObservationGenerationContext(
     List<String> selectedEmotions,
     String expressedEmotionText,
     List<KeyConversationLine> keyConversations,
-    List<SubjectContext> subjectContexts) {
+    List<SubjectContext> subjectContexts,
+    List<Long> activitySessionIds) {
 
   /**
    * 대표 답변 중 첫 발화를 반환한다.

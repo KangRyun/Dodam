@@ -29,6 +29,8 @@ import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
 import com.ssafy.b209.drawing.htp.domain.HtpDrawingSubject;
 import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
 import com.ssafy.b209.drawing.repository.DrawingSessionEmotionRepository;
+import com.ssafy.b209.drawing.service.StrokeBehaviorSummary;
+import com.ssafy.b209.drawing.service.StrokeBehaviorSummaryService;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportActivityNote;
@@ -98,6 +100,8 @@ class ObservationReportPersistenceServiceTest {
   @Mock private HtpAssessmentRepository htpAssessmentRepository;
   @Mock private ApplicationEventPublisher eventPublisher;
 
+  @Mock private StrokeBehaviorSummaryService behaviorSummaryService;
+
   @Captor private ArgumentCaptor<AnalysisObservationResult> observationCaptor;
   @Captor private ArgumentCaptor<AnalysisConversationSummary> conversationCaptor;
   @Captor private ArgumentCaptor<ReportActivitySummary> activitySummaryCaptor;
@@ -126,8 +130,67 @@ class ObservationReportPersistenceServiceTest {
             conversationMessageRepository,
             emotionRepository,
             htpAssessmentRepository,
+            behaviorSummaryService,
             eventPublisher,
             CLOCK);
+  }
+
+  @Test
+  void storesAggregatedDrawingBehaviorNumbersInActivitySummary() {
+    // 772가 집계해 AI로 보내던 수치가 리포트에는 한 자리도 남지 않아 보호자가 볼 수 없었다(S15P11B209-870).
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+    given(behaviorSummaryService.summarizeAll(List.of(DRAWING_SESSION_ID)))
+        .willReturn(
+            Optional.of(new StrokeBehaviorSummary(261_000L, 180_000L, 4, 2, 5, 1, 3, true, false)));
+
+    service.complete(context(List.of(keyLine(0))), validResult());
+
+    verify(activitySummaryRepository).save(activitySummaryCaptor.capture());
+    ReportActivitySummary activitySummary = activitySummaryCaptor.getValue();
+    assertThat(activitySummary.getDrawingDurationMs()).isEqualTo(261_000L);
+    assertThat(activitySummary.getPauseCount()).isEqualTo(4);
+    assertThat(activitySummary.getEraseCount()).isEqualTo(5);
+    assertThat(activitySummary.isPressureAvailable()).isTrue();
+  }
+
+  @Test
+  void keepsBehaviorNumbersNullWhenNoStrokeBatchExists() {
+    // 측정하지 못한 값을 0으로 채우면 "한 번도 멈추지 않았다"는 관찰로 읽힌다. null로 남긴다.
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+    given(behaviorSummaryService.summarizeAll(List.of(DRAWING_SESSION_ID)))
+        .willReturn(Optional.empty());
+
+    service.complete(context(List.of(keyLine(0))), validResult());
+
+    verify(activitySummaryRepository).save(activitySummaryCaptor.capture());
+    ReportActivitySummary activitySummary = activitySummaryCaptor.getValue();
+    assertThat(activitySummary.getDrawingDurationMs()).isNull();
+    assertThat(activitySummary.getPauseCount()).isNull();
+    assertThat(activitySummary.getEraseCount()).isNull();
+    assertThat(activitySummary.isPressureAvailable()).isFalse();
+  }
+
+  @Test
+  void completesReportEvenWhenBehaviorAggregationFails() {
+    // 행동 수치는 부가 정보다. MongoDB 장애로 리포트 전체를 잃지 않는다(S15P11B209-815 실패 확산 방지).
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+    given(behaviorSummaryService.summarizeAll(List.of(DRAWING_SESSION_ID)))
+        .willThrow(new IllegalStateException("mongo down"));
+
+    service.complete(context(List.of(keyLine(0))), validResult());
+
+    assertThat(report.getStatus()).isEqualTo(ReportStatus.COMPLETED);
+    verify(activitySummaryRepository).save(activitySummaryCaptor.capture());
+    assertThat(activitySummaryCaptor.getValue().getDrawingDurationMs()).isNull();
   }
 
   @Test
@@ -639,7 +702,8 @@ class ObservationReportPersistenceServiceTest {
         List.of("HAPPY"),
         "행복했어요",
         keyConversations,
-        List.of());
+        List.of(),
+        List.of(DRAWING_SESSION_ID));
   }
 
   private ObservationGenerationContext emptyConversationContext() {
@@ -656,7 +720,8 @@ class ObservationReportPersistenceServiceTest {
         List.of(),
         null,
         List.of(),
-        List.of());
+        List.of(),
+        List.of(DRAWING_SESSION_ID));
   }
 
   private ObservationGenerationContext.KeyConversationLine keyLine(int index) {

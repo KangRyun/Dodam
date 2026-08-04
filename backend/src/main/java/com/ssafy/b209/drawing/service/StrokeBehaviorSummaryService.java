@@ -151,6 +151,73 @@ public class StrokeBehaviorSummaryService {
   }
 
   /**
+   * 여러 세션의 행동 요약을 하나로 합친다 (S15P11B209-870).
+   *
+   * <p>HTP 리포트 하나는 집·나무·사람 <b>세 활동</b>을 함께 다룬다. 그래서 리포트에 실을 수치는 세 세션의 합이어야 한다 — 세션 하나만 쓰면 보호자가 보는
+   * 그리기 시간이 실제 활동의 3분의 1로 줄어든다.
+   *
+   * <p>합치는 규칙은 값의 성격에 따라 다르다. 시간·횟수는 <b>더하고</b>, {@code pressureAvailable}·{@code truncated}는
+   * <b>OR</b>다. 한 세션이라도 절단됐으면 합계 전체가 부분 집계이고, 한 세션에서라도 필압이 저장돼 있으면 필압 데이터는 존재한다.
+   *
+   * <p>배치가 하나도 없는 세션은 조용히 건너뛴다. 모든 세션이 비면 빈 값을 돌려주고, 호출부는 수치를 {@code null}로 남긴다 — 측정하지 못한 값을 0으로
+   * 채우면 "한 번도 멈추지 않았다"는 관찰로 읽힌다.
+   *
+   * @param drawingSessionIds 합칠 그림 활동 세션 식별자 목록이며 {@code null}·빈 목록이면 빈 값
+   * @return 합산된 행동 요약, 집계할 배치가 하나도 없으면 빈 값
+   */
+  public Optional<StrokeBehaviorSummary> summarizeAll(List<Long> drawingSessionIds) {
+    if (drawingSessionIds == null || drawingSessionIds.isEmpty()) {
+      return Optional.empty();
+    }
+
+    List<StrokeBehaviorSummary> summaries =
+        drawingSessionIds.stream()
+            .filter(Objects::nonNull)
+            .distinct()
+            .map(this::summarize)
+            .flatMap(Optional::stream)
+            .toList();
+    if (summaries.isEmpty()) {
+      return Optional.empty();
+    }
+    if (summaries.size() == 1) {
+      return Optional.of(summaries.get(0));
+    }
+
+    long drawingDurationMs = 0;
+    long activeDrawingMs = 0;
+    int pauseCount = 0;
+    int undoCount = 0;
+    int eraseCount = 0;
+    int toolChangeCount = 0;
+    int colorChangeCount = 0;
+    boolean pressureAvailable = false;
+    boolean truncated = false;
+    for (StrokeBehaviorSummary summary : summaries) {
+      drawingDurationMs += summary.drawingDurationMs() == null ? 0 : summary.drawingDurationMs();
+      activeDrawingMs += summary.activeDrawingMs() == null ? 0 : summary.activeDrawingMs();
+      pauseCount += summary.pauseCount() == null ? 0 : summary.pauseCount();
+      undoCount += summary.undoCount() == null ? 0 : summary.undoCount();
+      eraseCount += summary.eraseCount() == null ? 0 : summary.eraseCount();
+      toolChangeCount += summary.toolChangeCount() == null ? 0 : summary.toolChangeCount();
+      colorChangeCount += summary.colorChangeCount() == null ? 0 : summary.colorChangeCount();
+      pressureAvailable |= summary.pressureAvailable();
+      truncated |= summary.truncated();
+    }
+    return Optional.of(
+        new StrokeBehaviorSummary(
+            drawingDurationMs,
+            activeDrawingMs,
+            pauseCount,
+            undoCount,
+            eraseCount,
+            toolChangeCount,
+            colorChangeCount,
+            pressureAvailable,
+            truncated));
+  }
+
+  /**
    * 배치 목록에서 행동 요약을 계산한다.
    *
    * @param batches 한 세션의 Stroke 배치 목록
