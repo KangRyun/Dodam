@@ -53,10 +53,47 @@ case "$BUILD_FORMAT" in
   *) echo "❌ BUILD_FORMAT 은 appbundle 또는 apk 다: '$BUILD_FORMAT'" >&2; exit 1 ;;
 esac
 
-log "flutter build $BUILD_FORMAT ${BUILD_ARGS[*]}"
+# ── 3-b. 앱 설정 주입 (S15P11B209-765) ─────────────────────────────────────
+# ★ Flutter 의 String.fromEnvironment 는 **컴파일 타임 dart-define** 만 읽는다.
+#   컨테이너 환경변수(build-android.sh 의 --env-file / -e)는 Dart 코드에 닿지 않는다.
+#   여기서 옮겨 싣지 않으면 앱 안에서는 전부 빈 문자열이 된다.
+#
+#   "build.gradle.kts 가 oauth 5개를 검사하니 괜찮다"가 **성립하지 않는 이유**:
+#   그 가드가 채우는 건 네이티브 manifestPlaceholders(kakaoScheme 등)이고,
+#   Dart 의 fromEnvironment 와는 완전히 다른 경로다. 두 경로를 같은 것으로 착각하면
+#   "gradle 검사 통과 → 그런데 앱은 빈 값" 이 그대로 만들어진다.
+#
+# ⚠️ 2026-08-04: 이 주입이 없어 원스토어 등록용 APK 가 실행 즉시 종료됐다.
+#   api_environment.dart:24 가 빈 값에 StateError 를 던지고, 그 호출(main.dart:79)이
+#   runApp 앞이라 첫 화면도 못 그린다.
+[ -n "${API_BASE_URL:-}" ] || {
+  echo "❌ API_BASE_URL 이 비었다 — 이 값 없이 만든 앱은 실행 즉시 종료된다." >&2
+  echo "   api_environment.dart 가 빈 값에 StateError 를 던지고 그 호출은 runApp 앞에 있다." >&2
+  exit 1
+}
+
+DART_DEFINES=(--dart-define "API_BASE_URL=${API_BASE_URL}")
+DART_DEFINE_KEYS=(API_BASE_URL)
+
+# 나머지는 있을 때만 싣는다.
+#   KAKAO_NATIVE_APP_KEY·GOOGLE_SERVER_CLIENT_ID → Dart 쪽 소셜 로그인이 읽는다
+#     (없으면 build.gradle.kts 의 preReleaseBuild 가드가 먼저 끊는다)
+#   COMMUNITY_WEB_URL·LEGAL_WEB_URL → Dart 에 defaultValue 가 있어 선택이다.
+#     넘기지 않으면 종전과 똑같이 기본값(운영 주소)으로 동작한다.
+for _k in KAKAO_NATIVE_APP_KEY GOOGLE_SERVER_CLIENT_ID COMMUNITY_WEB_URL LEGAL_WEB_URL; do
+  _v="${!_k:-}"
+  if [ -n "$_v" ]; then
+    DART_DEFINES+=(--dart-define "${_k}=${_v}")
+    DART_DEFINE_KEYS+=("$_k")
+  fi
+done
+
+# ⚠️ 값은 절대 로그에 남기지 않는다(가드레일 9절) — KAKAO 키·GOOGLE client id 가 섞여 있다.
+#   그래서 BUILD_ARGS 와 합치지 않고 따로 둔다. 합치면 아래 log 줄이 전부 뱉는다.
+log "flutter build $BUILD_FORMAT ${BUILD_ARGS[*]} (+dart-define: ${DART_DEFINE_KEYS[*]})"
 # gradle 쪽 가드에도 같은 뜻을 전달한다 — 스크립트가 아니라 빌드가 직접 판정하게 한다.
 export DODAM_REQUIRE_RELEASE_SIGNING="$REQUIRE_RELEASE_SIGNING"
-flutter build "$BUILD_FORMAT" "${BUILD_ARGS[@]}"
+flutter build "$BUILD_FORMAT" "${BUILD_ARGS[@]}" "${DART_DEFINES[@]}"
 
 # 산출 경로는 형식마다 다르다. APK 는 gradle 이 build/app/outputs/apk/release/ 에 쓰고
 # flutter 가 build/app/outputs/flutter-apk/ 로 복사한다 — 둘 다 볼 수 있어야 한다.

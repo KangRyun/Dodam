@@ -147,6 +147,26 @@ infra/mobile/build-apk.sh
 산출물: `build-artifacts/app-release.apk` + `build-artifacts/signing-report.txt`
 (원스토어 등록 절차 전체는 [ONESTORE-HANDOFF.md](ONESTORE-HANDOFF.md))
 
+### 앱이 바라볼 서버 주소 — `API_BASE_URL` (S15P11B209-765)
+
+기본값 `https://i15b209.p.ssafy.io` 라 **평소에는 넘기지 않아도 된다.** 다른 서버를 바라보게
+하려면 앞에 얹는다:
+
+```bash
+API_BASE_URL=https://staging.example.com \
+KEYSTORE_FILE=~/dodam-secrets/upload-keystore.jks \
+... infra/mobile/build-apk.sh
+```
+
+⚠️ **왜 이게 따로 있나** — Flutter 의 `String.fromEnvironment` 는 **컴파일 타임
+`--dart-define`** 만 읽는다. 컨테이너 환경변수는 Dart 코드에 닿지 않는다.
+2026-08-04 에 이 주입이 없어 원스토어용 APK 가 **실행 즉시 종료**됐다
+(`api_environment.dart` 가 빈 값에 `StateError`, 그 호출이 `runApp` 앞).
+debug 는 `flutter run --dart-define=...` 로 띄우므로 **debug 만 테스트하면 안 보인다** —
+릴리스 산출물은 반드시 실기기에 얹어 본다(ONESTORE-HANDOFF.md §5).
+
+`COMMUNITY_WEB_URL`·`LEGAL_WEB_URL` 도 같은 방식으로 덮어쓸 수 있다(생략하면 앱 기본값).
+
 ⚠️ 두 형식이 `build-artifacts/signing-report.txt` **같은 파일에 쓴다.** 연달아 구우면
 나중 것이 덮어쓰므로, 둘 다 남겨야 하면 사이에 이름을 바꿔 두거나 `OUT_DIR` 을 나눈다.
 
