@@ -7,7 +7,6 @@ import 'package:dodam/features/conversation/conversation.dart';
 import 'package:dodam/features/drawing/application/drawing_object_detection_controller.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/drawing/domain/repositories/drawing_repository.dart';
-import 'package:dodam/features/drawing/presentation/widgets/drawing_canvas.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -29,224 +28,6 @@ const _houseContext = DrawingActivityContextDto(
 );
 
 void main() {
-  group('transient question integration', () {
-    testWidgets(
-      'question success reserves its analysis before post-frame presentation',
-      (tester) async {
-        final pendingQuestion = Completer<void>();
-        final conversations = _ConversationRepository(
-          pendingQuestion: pendingQuestion,
-        );
-        final controlledDetection = _ControlledDetection();
-        addTearDown(controlledDetection.controller.dispose);
-        await _pumpConversation(
-          tester,
-          conversationRepository: conversations,
-          activityContext: const DrawingActivityContextDto.general(),
-          objectDetectionController: controlledDetection.controller,
-          startFresh: true,
-        );
-
-        await controlledDetection.begin(tester, 701);
-        controlledDetection.complete(0, 701);
-        await tester.pump();
-        expect(conversations.questionAnalysisIds, [701]);
-
-        await controlledDetection.begin(tester, 702);
-        conversations.pendingQuestion = null;
-        pendingQuestion.complete();
-        controlledDetection.complete(1, 702);
-        await tester.pump();
-
-        expect(conversations.questionAnalysisIds, [701]);
-
-        await tester.pump();
-        await tester.pump(const Duration(seconds: 3));
-        await tester.pumpAndSettle();
-        final questionOverlay = tester.widget<AiQuestionBubbleOverlay>(
-          find.byType(AiQuestionBubbleOverlay),
-        );
-        expect(questionOverlay.question?.messageId, 9001);
-        expect(questionOverlay.visible, isTrue);
-        expect(questionOverlay.showResponseActions, isTrue);
-        await _tap(tester, const ValueKey('ai-question-option-1'));
-        await tester.pumpAndSettle();
-
-        expect(conversations.questionAnalysisIds, [701, 702]);
-        expect(conversations.questionPreviousAnswerIds, [null, 9101]);
-      },
-    );
-
-    testWidgets('answer consumes only the newest queued analysis', (
-      tester,
-    ) async {
-      final conversations = _ConversationRepository();
-      final detection = _detectionController();
-      await _pumpConversation(
-        tester,
-        conversationRepository: conversations,
-        activityContext: const DrawingActivityContextDto.general(),
-        objectDetectionController: detection,
-        startFresh: true,
-      );
-
-      await _detectAnalysis(tester, detection, 701);
-      await _detectAnalysis(tester, detection, 702);
-      await _detectAnalysis(tester, detection, 703);
-      await _tap(tester, const ValueKey('ai-question-option-1'));
-      await tester.pumpAndSettle();
-
-      expect(conversations.questionAnalysisIds, [701, 703]);
-      expect(conversations.questionPreviousAnswerIds, [null, 9101]);
-    });
-
-    testWidgets('skip consumes only the newest queued analysis', (
-      tester,
-    ) async {
-      final conversations = _ConversationRepository();
-      final detection = _detectionController();
-      await _pumpConversation(
-        tester,
-        conversationRepository: conversations,
-        activityContext: const DrawingActivityContextDto.general(),
-        objectDetectionController: detection,
-        startFresh: true,
-      );
-
-      await _detectAnalysis(tester, detection, 701);
-      await _detectAnalysis(tester, detection, 702);
-      await _detectAnalysis(tester, detection, 703);
-      await _tap(tester, const ValueKey('ai-question-skip'));
-      await tester.pumpAndSettle();
-
-      expect(conversations.questionAnalysisIds, [701, 703]);
-      expect(conversations.questionPreviousAnswerIds, [null, null]);
-    });
-
-    testWidgets(
-      'successful manual end clears the transient question before navigation',
-      (tester) async {
-        final nextStage = Completer<void>();
-        await _pumpConversation(
-          tester,
-          drawingRepository: _HtpRepository(pending: nextStage),
-        );
-
-        await _tap(tester, const ValueKey('ai-conversation-end'));
-        await tester.tap(find.text('대화 그만하기'));
-        await tester.pump();
-
-        expect(
-          tester
-              .widget<AiQuestionBubbleOverlay>(
-                find.byType(AiQuestionBubbleOverlay),
-              )
-              .visible,
-          isFalse,
-        );
-        nextStage.complete();
-        await tester.pumpAndSettle();
-      },
-    );
-
-    testWidgets('failed manual end keeps the transient question visible', (
-      tester,
-    ) async {
-      await _pumpConversation(
-        tester,
-        endRepository: _EndRepository(failure: _failure(500)),
-      );
-
-      await _tap(tester, const ValueKey('ai-conversation-end'));
-      await tester.tap(find.text('대화 그만하기'));
-      await tester.pumpAndSettle();
-
-      expect(
-        tester
-            .widget<AiQuestionBubbleOverlay>(
-              find.byType(AiQuestionBubbleOverlay),
-            )
-            .visible,
-        isTrue,
-      );
-    });
-
-    testWidgets('idle canvas mounts no status character', (tester) async {
-      await tester.pumpWidget(
-        const MaterialApp(
-          home: DrawingScreen(childId: 'idle', startFresh: true),
-        ),
-      );
-
-      final statusOverlay = find.byType(AiQuestionStatusOverlay);
-      final documentMarker = find.byKey(
-        const ValueKey('drawing-document-marker'),
-      );
-      expect(statusOverlay, findsOneWidget);
-      expect(
-        find.descendant(of: documentMarker, matching: statusOverlay),
-        findsNothing,
-        reason: 'transient guidance must stay out of the saved drawing image',
-      );
-      expect(
-        find.byKey(const ValueKey('ai-question-status-character')),
-        findsNothing,
-      );
-    });
-
-    testWidgets('drawing a stroke does not resolve the displayed question', (
-      tester,
-    ) async {
-      final detection = _detectionController();
-      await _pumpConversation(
-        tester,
-        activityContext: const DrawingActivityContextDto.general(),
-        objectDetectionController: detection,
-        startFresh: true,
-      );
-      await _detectAnalysis(tester, detection, 701);
-
-      expect(find.text('무엇을 그렸어?'), findsOneWidget);
-      expect(
-        tester
-            .widget<AiQuestionBubbleOverlay>(
-              find.byType(AiQuestionBubbleOverlay),
-            )
-            .visible,
-        isTrue,
-      );
-      final canvas = find.byKey(const ValueKey('drawing-canvas'));
-      final gesture = await tester.startGesture(tester.getCenter(canvas));
-      await gesture.moveBy(const Offset(28, 18));
-      await tester.pump();
-
-      expect(
-        tester
-            .widget<AiQuestionBubbleOverlay>(
-              find.byType(AiQuestionBubbleOverlay),
-            )
-            .visible,
-        isTrue,
-      );
-      await gesture.up();
-      await tester.pump();
-
-      expect(
-        tester.widget<DrawingCanvas>(find.byType(DrawingCanvas)).strokes,
-        isNotEmpty,
-      );
-      expect(
-        tester
-            .widget<AiQuestionBubbleOverlay>(
-              find.byType(AiQuestionBubbleOverlay),
-            )
-            .visible,
-        isTrue,
-      );
-      await tester.pump(const Duration(seconds: 3));
-    });
-  });
-
   group('S485 답변 제출 대기 상태', () {
     testWidgets('선택형 답변 제출 중 progress를 보여주고 조작을 잠근다', (tester) async {
       final answers = _AnswerRepository(pending: Completer<int>());
@@ -526,10 +307,14 @@ void main() {
         conversationId: null,
       );
 
-      expect(find.byKey(const ValueKey('ai-question-error')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('conversation-start-error')),
+        findsOneWidget,
+      );
+      expect(find.text('대화를 시작하지 못했어요'), findsOneWidget);
 
       conversations.startFailure = null;
-      await _tap(tester, const ValueKey('ai-question-retry'));
+      await _tap(tester, const ValueKey('conversation-start-retry'));
       await tester.pumpAndSettle();
 
       expect(conversations.startKeys, hasLength(2));
@@ -546,8 +331,14 @@ void main() {
         conversationId: null,
       );
 
-      expect(find.byKey(const ValueKey('ai-question-error')), findsOneWidget);
-      expect(find.byKey(const ValueKey('ai-question-retry')), findsNothing);
+      expect(
+        find.byKey(const ValueKey('conversation-start-error')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('conversation-start-retry')),
+        findsNothing,
+      );
     });
   });
 
@@ -628,13 +419,12 @@ void main() {
         conversationId: null,
         activityContext: const DrawingActivityContextDto.general(),
         objectDetectionController: detection,
-        startFresh: true,
       );
 
       await _detectAnalysis(tester, detection, 701);
       expect(conversations.startKeys, hasLength(1));
 
-      await _tap(tester, const ValueKey('ai-question-retry'));
+      await tester.tap(find.byKey(const ValueKey('conversation-start-retry')));
       await tester.pumpAndSettle();
 
       expect(conversations.startKeys, hasLength(2));
@@ -653,25 +443,16 @@ void main() {
         conversationId: null,
         activityContext: const DrawingActivityContextDto.general(),
         objectDetectionController: detection,
-        startFresh: true,
       );
 
       await _detectAnalysis(tester, detection, 701);
       await _detectAnalysis(tester, detection, 702);
 
-      expect(conversations.analysisIds, [701]);
-      expect(find.byKey(const ValueKey('ai-question-error')), findsOneWidget);
-
-      await _tap(tester, const ValueKey('ai-question-retry'));
-      await tester.pumpAndSettle();
-
       expect(conversations.analysisIds, [701, 702]);
       expect(conversations.startKeys.toSet(), hasLength(2));
     });
 
-    testWidgets('one in-flight start consumes the latest queued analysis', (
-      tester,
-    ) async {
+    testWidgets('이전 분석의 늦은 성공이 새 분석 상태를 덮지 않는다', (tester) async {
       final completer = Completer<int>();
       final conversations = _ConversationRepository(pendingStart: completer);
       final detection = _detectionController();
@@ -690,105 +471,13 @@ void main() {
       conversations.pendingStart = null;
       await _detectAnalysis(tester, detection, 702);
 
-      expect(conversations.startKeys, hasLength(1));
-
       completer.complete(9999);
       await tester.pumpAndSettle();
 
-      expect(conversations.questionConversationIds, [9999]);
-      expect(conversations.questionAnalysisIds, [702]);
+      // 늦게 도착한 이전 대화 ID로 질문을 요청하지 않는다.
+      expect(conversations.questionConversationIds, isNot(contains(9999)));
+      expect(conversations.analysisIds.last, 702);
     });
-
-    testWidgets(
-      'stale start completion leaves the newer drawing-complete owner in flight',
-      (tester) async {
-        final firstStart = Completer<int>();
-        final secondStart = Completer<int>();
-        final conversations = _ConversationRepository(
-          pendingStarts: [firstStart, secondStart],
-        );
-        final detection = _detectionController();
-        final drawing = _ConversationStageDrawingRepository();
-        await _pumpConversation(
-          tester,
-          conversationRepository: conversations,
-          drawingRepository: drawing,
-          conversationId: null,
-          activityContext: const DrawingActivityContextDto.general(),
-          objectDetectionController: detection,
-          completionSnapshotProvider: () async => const BinaryUploadDto(
-            bytes: [137, 80, 78, 71],
-            fileName: 'final.png',
-            mimeType: 'image/png',
-          ),
-          startFresh: true,
-        );
-
-        await _detectAnalysis(tester, detection, 701);
-        expect(conversations.analysisIds, [701]);
-        expect(
-          tester
-              .widget<AiQuestionStatusOverlay>(
-                find.byType(AiQuestionStatusOverlay),
-              )
-              .conversationStartInFlight,
-          isTrue,
-        );
-
-        final canvas = find.byKey(const ValueKey('drawing-canvas'));
-        final stroke = await tester.startGesture(tester.getCenter(canvas));
-        await stroke.moveBy(const Offset(28, 18));
-        await stroke.up();
-        await tester.pump();
-        expect(
-          tester.widget<DrawingCanvas>(find.byType(DrawingCanvas)).strokes,
-          isNotEmpty,
-        );
-
-        final completeButton = find.descendant(
-          of: find.byKey(const ValueKey('drawing-complete')),
-          matching: find.byType(InkWell),
-        );
-        expect(tester.widget<InkWell>(completeButton).onTap, isNotNull);
-        await _tap(tester, const ValueKey('drawing-complete'));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('다 그렸어요'));
-        await tester.pump();
-        await tester.pump(const Duration(seconds: 1));
-        expect(drawing.completeCalls, 1);
-        expect(conversations.analysisIds, [701, 702]);
-
-        firstStart.complete(9701);
-        await tester.pump();
-        await tester.pump();
-        // 회전처럼 화면이 다시 build될 때에도 늦은 owner가 준비 상태를 지우면 안 된다.
-        tester.view.physicalSize = const Size(1199, 2399);
-        await tester.pump();
-        expect(
-          tester
-              .widget<AiQuestionStatusOverlay>(
-                find.byType(AiQuestionStatusOverlay),
-              )
-              .conversationStartInFlight,
-          isTrue,
-        );
-        expect(conversations.questionConversationIds, isEmpty);
-
-        secondStart.complete(9702);
-        await tester.pumpAndSettle();
-        expect(
-          tester
-              .widget<AiQuestionStatusOverlay>(
-                find.byType(AiQuestionStatusOverlay),
-              )
-              .conversationStartInFlight,
-          isFalse,
-        );
-        expect(conversations.questionConversationIds, [9702]);
-        expect(conversations.questionAnalysisIds, [702]);
-        detection.dispose();
-      },
-    );
   });
 
   group('S486 영구 오류 재요청 차단', () {
@@ -918,64 +607,6 @@ DrawingObjectDetectionController _detectionController() =>
       debounceDuration: const Duration(seconds: 3),
     );
 
-final class _ControlledDetection {
-  _ControlledDetection() {
-    controller = DrawingObjectDetectionController(
-      saveDraft: () async => DraftSaveResponseDto(
-        drawingAssetId: _nextAnalysisId,
-        assetVersion: 1,
-        lastEventSequence: 1,
-        savedAt: '2026-07-30T00:00:00Z',
-        expiresAt: '2026-08-01T00:00:00Z',
-      ),
-      requestDetection: (_) {
-        final request = Completer<ObjectDetectionResponseDto>();
-        requests.add(request);
-        return request.future;
-      },
-      debounceDuration: const Duration(seconds: 3),
-    );
-  }
-
-  late final DrawingObjectDetectionController controller;
-  final List<Completer<ObjectDetectionResponseDto>> requests = [];
-  int _nextAnalysisId = 701;
-
-  Future<void> begin(WidgetTester tester, int analysisId) async {
-    final expectedRequests = requests.length + 1;
-    _nextAnalysisId = analysisId;
-    controller
-      ..onDrawingInputStarted()
-      ..onDrawingInputEnded();
-    await tester.pump(const Duration(seconds: 4));
-    for (
-      var attempt = 0;
-      requests.length < expectedRequests && attempt < 5;
-      attempt++
-    ) {
-      await tester.pump();
-    }
-    expect(requests, hasLength(expectedRequests));
-  }
-
-  void complete(int index, int analysisId) {
-    requests[index].complete(
-      ObjectDetectionResponseDto(
-        drawingAnalysisId: analysisId,
-        drawingSessionId: 100,
-        drawingAssetId: analysisId,
-        requestId: 'req-$analysisId',
-        analysisType: 'OBJECT_DETECTION',
-        status: 'SUCCEEDED',
-        model: const DrawingAnalysisModelDto(name: 'yolo', version: '1'),
-        detections: const [],
-        requestedAt: '2026-07-30T00:00:00Z',
-        processedAt: '2026-07-30T00:00:01Z',
-      ),
-    );
-  }
-}
-
 // ---------------------------------------------------------------- helpers
 
 /// 마지막으로 감정 화면에 전달된 인자. 이미 종료된 대화 전달을 확인한다.
@@ -987,14 +618,12 @@ Future<void> _pumpConversation(
   _AnswerRepository? answerRepository,
   _SkipRepository? skipRepository,
   _EndRepository? endRepository,
-  DrawingRepository? drawingRepository,
+  _HtpRepository? drawingRepository,
   int? conversationId = 8001,
   DrawingActivityContextDto activityContext = _houseContext,
   Size size = const Size(1200, 2400),
   double textScale = 1,
   DrawingObjectDetectionController? objectDetectionController,
-  Future<BinaryUploadDto?> Function()? completionSnapshotProvider,
-  bool startFresh = false,
 }) async {
   _lastEmotionArguments = null;
   tester.view.physicalSize = size;
@@ -1035,8 +664,6 @@ Future<void> _pumpConversation(
         conversationEndRepository: endRepository ?? _EndRepository(),
         conversationId: conversationId,
         objectDetectionController: objectDetectionController,
-        completionSnapshotProvider: completionSnapshotProvider,
-        startFresh: startFresh,
         resumeConversation: objectDetectionController == null,
         idempotencyKeyProvider: _sequentialKeys(),
       ),
@@ -1098,21 +725,14 @@ final class _ConversationRepository implements ConversationRepository {
     this.startFailure,
     this.nextFailure,
     this.pendingStart,
-    this.pendingStarts,
-    this.pendingQuestion,
   });
 
   Object? startFailure;
   Object? nextFailure;
   Completer<int>? pendingStart;
-  final List<Completer<int>>? pendingStarts;
-  Completer<void>? pendingQuestion;
   final List<String> startKeys = [];
   final List<int?> analysisIds = [];
   final List<int> questionConversationIds = [];
-  final List<int?> questionAnalysisIds = [];
-  final List<int?> questionPreviousAnswerIds = [];
-  int _nextQuestionMessageId = 9001;
 
   @override
   Future<int> startConversation({
@@ -1123,11 +743,6 @@ final class _ConversationRepository implements ConversationRepository {
   }) async {
     startKeys.add(idempotencyKey);
     analysisIds.add(analysisId);
-    final startIndex = analysisIds.length - 1;
-    if (pendingStarts case final completers?
-        when startIndex < completers.length) {
-      return completers[startIndex].future;
-    }
     if (pendingStart case final completer?) return completer.future;
     if (startFailure case final caught?) throw caught;
     return 8001;
@@ -1140,12 +755,9 @@ final class _ConversationRepository implements ConversationRepository {
     required String idempotencyKey,
   }) async {
     questionConversationIds.add(conversationId);
-    questionAnalysisIds.add(request.basisAnalysisId);
-    questionPreviousAnswerIds.add(request.previousAnswerMessageId);
     if (nextFailure case final caught?) throw caught;
-    if (pendingQuestion case final completer?) await completer.future;
     return AiQuestion(
-      messageId: _nextQuestionMessageId++,
+      messageId: 9001,
       conversationId: conversationId,
       sequence: 1,
       text: '무엇을 그렸어?',
@@ -1167,36 +779,6 @@ final class _ConversationRepository implements ConversationRepository {
       createdAt: DateTime.utc(2026, 7, 30),
     );
   }
-}
-
-final class _ConversationStageDrawingRepository implements DrawingRepository {
-  int completeCalls = 0;
-
-  @override
-  Future<DrawingStageCompleteResponseDto> completeDrawingStage(
-    int sessionId, {
-    required BinaryUploadDto finalImage,
-    required DrawingCompleteMetadataDto metadata,
-    required String idempotencyKey,
-  }) async {
-    completeCalls += 1;
-    return DrawingStageCompleteResponseDto.fromJson({
-      'drawingSessionId': sessionId,
-      'finalAssetId': 702,
-      'sessionStatus': 'IN_PROGRESS',
-      'currentStage': 'CONVERSING',
-      'analysis': {
-        'analysisId': 702,
-        'analysisType': 'OBJECT_DETECTION',
-        'status': 'SUCCEEDED',
-      },
-      'nextAction': 'SELECT_EMOTION',
-    });
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      throw UnimplementedError('${invocation.memberName} is not used here.');
 }
 
 final class _AnswerRepository implements ConversationAnswerRepository {

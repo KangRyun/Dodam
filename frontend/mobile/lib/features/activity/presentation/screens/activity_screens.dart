@@ -2485,8 +2485,24 @@ class _DrawingScreenState extends State<DrawingScreen>
                 );
                 final screenSize = MediaQuery.sizeOf(context);
                 final deviceClass = _deviceClassFor(screenSize);
-                final hasStageChrome =
+                // 캔버스 위 말풍선이 질문을 보여 주는 동안에는 사이드 패널을
+                // 띄우지 않는다. 같은 질문을 두 번 보여 줄 뿐 아니라, 패널이
+                // 말풍선의 녹음·답변 버튼을 덮어 탭이 닿지 않는다.
+                final questionBubbleVisible =
+                    _questionDisplayController.isVisible &&
+                    _activePointer == null &&
+                    (_canvasLocked || _draftRestoreController.canDraw);
+                // 말풍선이 지금 질문을 그대로 보여 주고 있을 때만 패널을 접는다.
+                // 말풍선이 이전 질문에 머물러 있으면 새 질문을 볼 곳이 없어진다.
+                final bubbleShowsCurrentQuestion =
+                    questionBubbleVisible &&
+                    _questionDisplayController.visibleQuestion?.messageId ==
+                        _questionController?.question?.messageId;
+                final hasQuestionToShow =
                     _questionController != null ||
+                    _questionDisplayController.visibleQuestion != null;
+                final hasStageChrome =
+                    (hasQuestionToShow && !bubbleShowsCurrentQuestion) ||
                     _conversationStartError != null ||
                     _htpAdvanceError != null;
                 final toolbar = DrawingToolbar(

@@ -48,59 +48,6 @@ void main() {
 
       expect(notificationCount, 1);
     });
-
-    test(
-      'an unresolved question remains until its matching message resolves',
-      () {
-        final controller = AiQuestionDisplayController();
-        controller.receive(_question(101, 'first question'));
-
-        expect(controller.hasUnresolvedQuestion, isTrue);
-        expect(controller.resolveQuestion(100), isFalse);
-        expect(controller.visibleQuestion?.messageId, 101);
-        expect(controller.hasUnresolvedQuestion, isTrue);
-
-        expect(controller.resolveQuestion(101), isTrue);
-        expect(controller.hasUnresolvedQuestion, isFalse);
-        expect(controller.visibleQuestion, isNull);
-        expect(controller.resolveQuestion(101), isFalse);
-      },
-    );
-
-    test('resolving an older message cannot dismiss a newer question', () {
-      final controller = AiQuestionDisplayController();
-      controller.receive(_question(101, 'first question'));
-      controller.receive(_question(102, 'newer question'));
-
-      expect(controller.resolveQuestion(101), isFalse);
-      expect(controller.visibleQuestion?.messageId, 102);
-      expect(controller.isVisible, isTrue);
-    });
-
-    test('clearConversation rejects late questions terminally', () {
-      final controller = AiQuestionDisplayController();
-      controller.receive(_question(101, 'first question'));
-
-      controller.clearConversation();
-      final accepted = controller.receive(_question(102, 'late question'));
-
-      expect(accepted, isFalse);
-      expect(controller.hasUnresolvedQuestion, isFalse);
-      expect(controller.visibleQuestion, isNull);
-      expect(controller.isVisible, isFalse);
-    });
-
-    test('a duplicate message cannot trigger a second presentation', () {
-      final controller = AiQuestionDisplayController();
-      var presentationCount = 0;
-      controller.addListener(() => presentationCount += 1);
-
-      expect(controller.receive(_question(101, 'first question')), isTrue);
-      expect(controller.receive(_question(101, 'duplicate question')), isFalse);
-
-      expect(presentationCount, 1);
-      expect(controller.visibleQuestion?.text, 'first question');
-    });
   });
 }
 

@@ -213,7 +213,9 @@ void main() {
     );
     // 바깥 화면과 질문 bubble의 중첩 스크롤을 실제 손가락으로 위쪽에 맞춘다.
     await tester.drag(
-      find.byKey(const ValueKey('drawing-layout-stacked')),
+      // 크레용 셸로 바뀌며 레이아웃 키가 기기 종류별로 나뉘었다
+      // (S15P11B209-805). 세로 화면이므로 mobile-portrait 다.
+      find.byKey(const ValueKey('drawing-shell-mobile-portrait')),
       const Offset(0, 500),
     );
     await tester.pumpAndSettle();

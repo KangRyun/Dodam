@@ -80,12 +80,11 @@ final class AiQuestionController extends ChangeNotifier {
       _load(analysisId, previousAnswerMessageId: null);
 
   /// 저장된 답변 또는 건너뛰기 뒤 같은 그림을 기준으로 후속 질문을 요청한다.
-  Future<void> loadNext({int? basisAnalysisId, int? previousAnswerMessageId}) =>
-      _load(
-        basisAnalysisId ?? _requestBasisAnalysisId ?? this.basisAnalysisId,
-        previousAnswerMessageId: previousAnswerMessageId,
-        forceNext: true,
-      );
+  Future<void> loadNext({int? previousAnswerMessageId}) => _load(
+    _requestBasisAnalysisId ?? basisAnalysisId,
+    previousAnswerMessageId: previousAnswerMessageId,
+    forceNext: true,
+  );
 
   Future<void> _load(
     int? analysisId, {

@@ -437,15 +437,17 @@ void main() {
     final saving = coordinator.saveDraftNow();
     await _pumpUntil(tester, () => repository.draftCalls == 1);
 
+    // 저장 중에는 툴바가 진행 표시를 계속 돌리므로 pumpAndSettle 은 끝나지
+    // 않는다(S15P11B209-805). 확인 창이 뜰 때까지만 돌린다.
     await tester.tap(find.byKey(const ValueKey('drawing-complete')));
-    await tester.pumpAndSettle();
+    await _pumpUntil(tester, () => find.text('다 그렸어요').evaluate().isNotEmpty);
     await tester.tap(find.text('다 그렸어요'));
     await tester.pump();
 
     expect(repository.completeCalls, 0);
     draft.complete(_draftSaveResponse);
     await saving;
-    await tester.pumpAndSettle();
+    await _pumpUntil(tester, () => repository.completeCalls == 1);
 
     expect(repository.draftCalls, 1);
     expect(repository.completeCalls, 1);

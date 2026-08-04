@@ -75,29 +75,6 @@ void main() {
     expect(repository.requests[0], same(repository.requests[1]));
   });
 
-  test('다른 응답이 시작되면 실패한 음성 재시도를 폐기한다', () async {
-    final repository = _FakeVoiceAnswerRepository(failOnce: true);
-    final controller = VoiceAnswerUploadController(
-      repository,
-      conversationId: 20,
-      idempotencyKeyProvider: () => 'abandoned-key',
-    );
-    addTearDown(controller.dispose);
-
-    expect(
-      await controller.submit(questionMessageId: 10, recording: _recording),
-      isFalse,
-    );
-    expect(controller.canRetry, isTrue);
-
-    controller.abandonPendingAnswer();
-
-    expect(controller.status, VoiceAnswerUploadStatus.idle);
-    expect(controller.canRetry, isFalse);
-    expect(await controller.retry(), isFalse);
-    expect(repository.callCount, 1);
-  });
-
   test('음성 처리 동의가 없으면 재시도하지 않고 동의 필요 상태로 알린다', () async {
     final repository = _FakeVoiceAnswerRepository(
       error: const ApiResponseFailure(

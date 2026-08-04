@@ -139,22 +139,6 @@ final class VoiceAnswerUploadController extends ChangeNotifier {
     );
   }
 
-  /// 선택지·건너뛰기·종료가 이 질문의 응답권을 가져가면 이전 음성 재시도를 버린다.
-  ///
-  /// 업로드 중에는 호출자가 다른 응답을 시작하지 못하게 해야 한다. 이미 실패한
-  /// 요청만 폐기하므로, 늦은 재시도 콜백도 같은 질문에 두 번째 답을 보낼 수 없다.
-  void abandonPendingAnswer() {
-    if (_disposed || status == VoiceAnswerUploadStatus.uploading) return;
-    _generation += 1;
-    _questionMessageId = null;
-    status = VoiceAnswerUploadStatus.idle;
-    result = null;
-    error = null;
-    _pendingRequest = null;
-    _pendingIdempotencyKey = null;
-    notifyListeners();
-  }
-
   /// 새 질문으로 넘어가며 이전 질문의 업로드를 모두 무효화한다.
   void beginQuestion(int questionMessageId) {
     if (_disposed) return;
