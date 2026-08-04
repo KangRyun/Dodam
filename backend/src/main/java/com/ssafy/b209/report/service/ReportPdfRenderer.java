@@ -14,6 +14,8 @@ import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType0Font;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
@@ -23,6 +25,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class ReportPdfRenderer {
+
+  private static final Logger log = LoggerFactory.getLogger(ReportPdfRenderer.class);
 
   private static final String FONT_RESOURCE = "/fonts/NanumSquareNeo-Regular.ttf";
   private static final float FONT_SIZE = 10.5F;
@@ -35,6 +39,12 @@ public class ReportPdfRenderer {
   /**
    * 보호자용 리포트 상세를 PDF 바이트로 변환한다.
    *
+   * <p>렌더링 실패는 <b>종류를 가리지 않고</b> {@link ReportExportErrorCode#REPORT_EXPORT_FAILED}로 분류한다. 이전에는
+   * {@code IOException}과 {@code IllegalArgumentException}만 감싸서, 그 밖의 예외가 전역 핸들러까지 올라가 {@code
+   * COMMON_500_001}("서버 내부 오류가 발생했습니다.")로 응답됐다. 그 코드로는 클라이언트도 로그 독자도 <b>무엇이 실패했는지 알 수 없다</b> — 배포
+   * 서버에서 PDF 다운로드가 그렇게 실패했고(S15P11B209-860) 원인 추적이 서버 로그 확보 없이는 불가능했다. 같은 실패 분류 소실이
+   * S15P11B209-815에서도 리포트 생성을 전면 실패시켰다.
+   *
    * @param report 보호자 권한과 안전 필드 검증을 마친 리포트
    * @return PDF 파일 바이트
    * @throws BusinessException 폰트 또는 PDF 문서를 생성할 수 없는 경우
@@ -43,6 +53,7 @@ public class ReportPdfRenderer {
     try (PDDocument document = new PDDocument();
         InputStream fontStream = ReportPdfRenderer.class.getResourceAsStream(FONT_RESOURCE)) {
       if (fontStream == null) {
+        log.error("리포트 PDF 폰트 리소스를 찾을 수 없습니다. resource={}", FONT_RESOURCE);
         throw new BusinessException(ReportExportErrorCode.REPORT_EXPORT_FAILED);
       }
       PDType0Font font = PDType0Font.load(document, fontStream);
@@ -50,7 +61,16 @@ public class ReportPdfRenderer {
       ByteArrayOutputStream output = new ByteArrayOutputStream();
       document.save(output);
       return output.toByteArray();
-    } catch (IOException | IllegalArgumentException exception) {
+    } catch (BusinessException exception) {
+      throw exception;
+    } catch (IOException | RuntimeException exception) {
+      // 근본 원인을 로그에 남긴다. 예외 타입·메시지만으로는 다음 발생 때도 같은 조사를 반복해야 한다.
+      log.error(
+          "리포트 PDF 렌더링에 실패했습니다. reportId={}, exceptionType={}, message={}",
+          report == null ? null : report.reportId(),
+          exception.getClass().getName(),
+          exception.getMessage(),
+          exception);
       throw new BusinessException(ReportExportErrorCode.REPORT_EXPORT_FAILED, exception);
     }
   }

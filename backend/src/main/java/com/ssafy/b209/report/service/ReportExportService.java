@@ -5,6 +5,8 @@ import com.ssafy.b209.report.dto.ReportDetailResponse;
 import com.ssafy.b209.report.dto.ReportExportResponse;
 import com.ssafy.b209.report.dto.ReportPdfFile;
 import com.ssafy.b209.report.exception.ReportExportErrorCode;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 /**
@@ -15,6 +17,8 @@ import org.springframework.stereotype.Service;
  */
 @Service
 public class ReportExportService {
+
+  private static final Logger log = LoggerFactory.getLogger(ReportExportService.class);
 
   private static final int IDEMPOTENCY_KEY_MIN_LENGTH = 8;
   private static final int IDEMPOTENCY_KEY_MAX_LENGTH = 100;
@@ -75,10 +79,25 @@ public class ReportExportService {
    * @throws BusinessException 식별자·권한·상태 검증 또는 PDF 생성에 실패한 경우
    */
   public ReportPdfFile download(Long guardianUserId, Long reportId, Long exportId) {
-    validateExportId(reportId, exportId);
-    ReportDetailResponse report = completedReport(guardianUserId, reportId);
-    return new ReportPdfFile(
-        "dodam-report-" + report.reportId() + ".pdf", reportPdfRenderer.render(report));
+    try {
+      validateExportId(reportId, exportId);
+      ReportDetailResponse report = completedReport(guardianUserId, reportId);
+      return new ReportPdfFile(
+          "dodam-report-" + report.reportId() + ".pdf", reportPdfRenderer.render(report));
+    } catch (BusinessException exception) {
+      // 식별자·권한·상태·렌더링 실패는 이미 분류돼 있다. 그대로 올려 코드를 보존한다.
+      throw exception;
+    } catch (RuntimeException exception) {
+      // 그 밖의 예외는 전역 핸들러에서 COMMON_500_001 로 뭉개진다. 다운로드 실패임을 알 수 있게 분류하고 근본 원인을 남긴다.
+      log.error(
+          "리포트 PDF 다운로드에 실패했습니다. reportId={}, exportId={}, exceptionType={}, message={}",
+          reportId,
+          exportId,
+          exception.getClass().getName(),
+          exception.getMessage(),
+          exception);
+      throw new BusinessException(ReportExportErrorCode.REPORT_EXPORT_FAILED, exception);
+    }
   }
 
   private ReportDetailResponse completedReport(Long guardianUserId, Long reportId) {
