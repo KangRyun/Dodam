@@ -362,8 +362,9 @@ final class DrawingToolbar extends StatelessWidget {
       onPressed: canComplete && !isCompleting ? onComplete : null,
       isLoading: isCompleting,
       width: 72,
+      // 승인 디자인의 문구다. 아이에게는 '완료'보다 해낸 느낌을 준다.
       foreground: const Text(
-        '완료',
+        '완성!',
         maxLines: 1,
         style: TextStyle(
           color: AppColors.canvasInk,
