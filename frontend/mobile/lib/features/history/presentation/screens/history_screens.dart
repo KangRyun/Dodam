@@ -36,6 +36,14 @@ abstract final class _ArchiveColors {
   static const parchment = Color(0xFFFFF9E9);
   static const parchmentDeep = Color(0xFFF6EBCF);
   static const parchmentLine = Color(0xFFDCC99E);
+
+  // 설정 화면의 `_ForgePalette`와 같은 재료감을 공유하는 배너 전용 색상.
+  // 목록·필터·카드의 기존 기록 보관소 팔레트에는 영향을 주지 않는다.
+  static const heroSage = Color(0xFFDDEAD5);
+  static const heroForest = Color(0xFF315B49);
+  static const heroOutline = Color(0xFFE7D9B8);
+  static const heroBrass = Color(0xFFC89B3C);
+  static const heroWalnut = Color(0xFF795035);
 }
 
 /// 활동 기록 목록·상세 화면(시안). 좌측 목록+필터, 우측 선택 활동 프리뷰.
@@ -563,7 +571,7 @@ class _ArchiveHero extends StatelessWidget {
           child: Text(
             '$activityCount개의 기록',
             style: const TextStyle(
-              color: _ArchiveColors.forestDeep,
+              color: _ArchiveColors.heroForest,
               fontSize: 13,
               fontWeight: FontWeight.w800,
             ),
@@ -579,9 +587,9 @@ class _ArchiveHero extends StatelessWidget {
           AppSpacing.sm,
         ),
         decoration: BoxDecoration(
-          color: _ArchiveColors.forest,
+          color: _ArchiveColors.heroSage,
           borderRadius: BorderRadius.circular(AppRadius.lg),
-          border: Border.all(color: _ArchiveColors.forestDeep),
+          border: Border.all(color: _ArchiveColors.heroOutline),
         ),
         child: Stack(
           alignment: Alignment.centerLeft,
@@ -598,7 +606,7 @@ class _ArchiveHero extends StatelessWidget {
               bottom: 0,
               child: Container(
                 height: 1,
-                color: _ArchiveColors.brass.withValues(alpha: 0.45),
+                color: _ArchiveColors.heroBrass.withValues(alpha: 0.72),
               ),
             ),
             if (!embedded)
@@ -609,7 +617,7 @@ class _ArchiveHero extends StatelessWidget {
                   key: const ValueKey('activity-history-back'),
                   onPressed: onBack,
                   tooltip: '뒤로 가기',
-                  color: Colors.white,
+                  color: _ArchiveColors.heroForest,
                   icon: const Icon(Icons.arrow_back_rounded),
                 ),
               ),
@@ -628,7 +636,7 @@ class _ArchiveHero extends StatelessWidget {
                         '보호자 활동 기록',
                         key: ValueKey('activity-history-eyebrow'),
                         style: TextStyle(
-                          color: _ArchiveColors.brassSoft,
+                          color: _ArchiveColors.heroForest,
                           fontSize: 11,
                           height: 1.2,
                           fontWeight: FontWeight.w800,
@@ -641,7 +649,7 @@ class _ArchiveHero extends StatelessWidget {
                         child: Text(
                           '활동 기록',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: _ArchiveColors.heroForest,
                             fontSize: compact ? 23 : 27,
                             height: 1.2,
                             fontWeight: FontWeight.w900,
@@ -652,7 +660,7 @@ class _ArchiveHero extends StatelessWidget {
                       const Text(
                         '아이의 그림과 이야기를 한 권씩 소중히 모았어요.',
                         style: TextStyle(
-                          color: Color(0xFFF5EDD8),
+                          color: _ArchiveColors.heroForest,
                           fontSize: 14,
                           height: 1.4,
                           fontWeight: FontWeight.w600,
@@ -731,7 +739,7 @@ class _ArchiveBooksPattern extends StatelessWidget {
   Widget build(BuildContext context) => ExcludeSemantics(
     child: IgnorePointer(
       child: Opacity(
-        opacity: 0.07,
+        opacity: 0.08,
         child: SizedBox(
           key: const ValueKey('activity-history-books-pattern'),
           width: 224,
@@ -770,16 +778,16 @@ class _ArchiveBookSpine extends StatelessWidget {
     height: height,
     margin: const EdgeInsets.only(left: 5),
     decoration: BoxDecoration(
-      color: _ArchiveColors.forestDeep,
+      color: _ArchiveColors.heroForest,
       borderRadius: const BorderRadius.vertical(top: Radius.circular(4)),
-      border: Border.all(color: _ArchiveColors.brass, width: 1.5),
+      border: Border.all(color: _ArchiveColors.heroWalnut, width: 1.5),
     ),
     child: Align(
       alignment: Alignment.topCenter,
       child: Container(
         margin: EdgeInsets.only(top: bandOffset),
         height: 2,
-        color: _ArchiveColors.brass,
+        color: _ArchiveColors.heroBrass,
       ),
     ),
   );
