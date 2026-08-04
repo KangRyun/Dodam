@@ -4,6 +4,7 @@ import '../../../../app/state/guardian_child_controller.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../drawing/application/photo_upload_validation.dart';
 import '../../../drawing/data/image_picker_photo_adapter.dart';
+import '../../../consent/presentation/widgets/consent_term_detail_sheet.dart';
 import '../../../drawing/domain/photo_picker_adapter.dart';
 import '../../data/dto/child_consent_dtos.dart';
 import '../../data/dto/child_dtos.dart';
@@ -757,6 +758,22 @@ class _ConsentSection extends StatelessWidget {
           title: Text(
             term.required ? '[필수] ${term.title}' : '[선택] ${term.title}',
             style: const TextStyle(color: AppColors.ink, fontSize: 15),
+          ),
+          // 약관 전문 상세보기(설정과 동일한 서버 전문 시트 재사용, S15P11B209-884).
+          secondary: IconButton(
+            key: ValueKey('child-consent-${term.termCode}-detail'),
+            tooltip: '${term.title} 상세 보기',
+            icon: const Text('›', style: TextStyle(fontSize: 28)),
+            color: AppColors.inkMuted,
+            onPressed: () => showConsentTermDetailSheet(
+              context: context,
+              termId: term.termId,
+              title: term.title,
+              required: term.required,
+              version: term.version,
+              contentHtml: term.contentHtml,
+              contentUrl: term.contentUrl,
+            ),
           ),
         ),
       if (errorText != null)

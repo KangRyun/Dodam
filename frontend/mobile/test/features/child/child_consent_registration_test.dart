@@ -152,6 +152,30 @@ void main() {
       expect(checkbox.value, isFalse);
     }
   });
+
+  testWidgets('아동 등록 약관 상세 보기는 서버 전문(contentHtml)을 시트로 보여준다', (
+    tester,
+  ) async {
+    final controller = GuardianChildController(
+      _FakeChildRepository(),
+      _FakeChildConsentRepository(),
+    );
+    addTearDown(controller.dispose);
+
+    await tester.pumpWidget(
+      MaterialApp(home: ChildRegistrationScreen(controller: controller)),
+    );
+    await tester.pumpAndSettle();
+
+    final detail = find.byKey(
+      const ValueKey('child-consent-DRAWING_ANALYSIS-detail'),
+    );
+    await tester.ensureVisible(detail);
+    await tester.tap(detail);
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('제1조(목적)'), findsOneWidget);
+  });
 }
 
 const _request = CreateChildRequestDto(
@@ -181,6 +205,7 @@ final class _FakeChildConsentRepository implements ChildConsentRepository {
         title: '그림 데이터 분석 활용',
         required: false,
         version: 'v1',
+        contentHtml: '<p>제1조(목적) 아동의 그림 데이터를 관찰 자료로 정리합니다.</p>',
       ),
       ConsentTermDto(
         termId: 12,

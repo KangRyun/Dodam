@@ -38,6 +38,29 @@ const CONSENT_DESCRIPTIONS: Record<string, string> = {
   MARKETING: "서비스 소식과 이벤트 알림 수신",
 };
 
+// 약관 본문(HTML)을 읽기 쉬운 평문으로 정리한다. 모바일 consentTermPlainText와 같은
+// 취지로, HTML 렌더러(및 dangerouslySetInnerHTML)에 기대지 않고 문단·항목·줄바꿈만
+// 보존해 안전하게 표시한다(S15P11B209-884).
+function consentTermPlainText(html: string | null): string {
+  if (!html) return "";
+  return html
+    .replace(/<br[^>]*>/gi, "\n")
+    .replace(/<\/li\s*>\s*/gi, "\n")
+    .replace(/<li(?=[\s/>])[^>]*>/gi, "• ")
+    .replace(
+      /<\/?(?:p|div|section|article|header|footer|blockquote|hr|h[1-6]|ul|ol|dl|dt|dd|table|thead|tbody|tfoot|tr|td|th)(?=[\s/>])[^>]*>/gi,
+      "\n",
+    )
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 export function OnboardingFlow({ user }: { user: AuthUser }) {
   const router = useRouter();
   const setUser = useAuthStore((state) => state.setUser);
@@ -61,6 +84,9 @@ export function OnboardingFlow({ user }: { user: AuthUser }) {
 
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // 약관 전문 상세 보기 대상(S15P11B209-884).
+  const [detailTerm, setDetailTerm] = useState<ConsentTerm | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -256,16 +282,20 @@ export function OnboardingFlow({ user }: { user: AuthUser }) {
                         </span>
                       ) : null}
                     </span>
-                    {term.contentUrl ? (
-                      <a
+                    {term.contentHtml || term.contentUrl ? (
+                      <button
+                        type="button"
                         className="onboarding-consent-chevron"
-                        href={term.contentUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={`${term.title} 자세히 보기`}
+                        aria-label={`${term.title} 상세 보기`}
+                        onClick={(event) => {
+                          // label 안이라 기본 동작이 체크박스를 토글한다. 상세만 연다.
+                          event.preventDefault();
+                          event.stopPropagation();
+                          setDetailTerm(term);
+                        }}
                       >
                         ›
-                      </a>
+                      </button>
                     ) : null}
                   </label>
                 ))}
@@ -315,6 +345,63 @@ export function OnboardingFlow({ user }: { user: AuthUser }) {
           </button>
         )}
       </div>
+
+      {detailTerm ? (
+        <div
+          className="onboarding-term-overlay"
+          role="presentation"
+          onClick={() => setDetailTerm(null)}
+        >
+          <div
+            className="onboarding-term-panel"
+            role="dialog"
+            aria-modal="true"
+            aria-label={`${detailTerm.title} 약관 전문`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="onboarding-term-head">
+              <div>
+                <h2 className="onboarding-term-title">{detailTerm.title}</h2>
+                <p className="onboarding-term-meta">
+                  {detailTerm.required ? "필수" : "선택"}
+                  {detailTerm.version ? ` · 버전 ${detailTerm.version}` : ""}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="onboarding-term-close"
+                aria-label="닫기"
+                onClick={() => setDetailTerm(null)}
+              >
+                ×
+              </button>
+            </div>
+            {(() => {
+              const body = consentTermPlainText(detailTerm.contentHtml);
+              if (body) {
+                return <p className="onboarding-term-body">{body}</p>;
+              }
+              if (detailTerm.contentUrl) {
+                return (
+                  <a
+                    className="onboarding-term-link"
+                    href={detailTerm.contentUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    약관 전문 보기
+                  </a>
+                );
+              }
+              return (
+                <p className="onboarding-term-body">
+                  약관 상세 내용을 제공하지 않아요.
+                </p>
+              );
+            })()}
+          </div>
+        </div>
+      ) : null}
     </section>
   );
 }
