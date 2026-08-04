@@ -90,7 +90,8 @@ class MockObservationReportGenerationServiceTest {
                         new ObservationGenerationContext.KeyConversationLine(
                             1L, "이 집에는 누가 살아?", 2L, "엄마랑 나!", "VOICE_ANSWER"))),
                 new ObservationGenerationContext.SubjectContext(
-                    null, "공룡이 풍선을 들고 있어요.", List.of(), List.of())));
+                    null, "공룡이 풍선을 들고 있어요.", List.of(), List.of())),
+            List.of(100L));
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context));
     given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
 
@@ -209,7 +210,8 @@ class MockObservationReportGenerationServiceTest {
         List.of("HAPPY"),
         "행복했어요",
         List.of(),
-        List.of());
+        List.of(),
+        List.of(100L));
   }
 
   private ObservationGenerationResult validResult(String requestId) {

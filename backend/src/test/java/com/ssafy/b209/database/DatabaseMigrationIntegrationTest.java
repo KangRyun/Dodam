@@ -49,9 +49,9 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("34");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("35");
     assertThat(tableExists("flyway_schema_history")).isTrue();
-    assertThat(tableCount()).isEqualTo(75);
+    assertThat(tableCount()).isEqualTo(76);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
     assertThat(tableExists("child_profile_image_files")).isTrue();
@@ -67,6 +67,14 @@ class DatabaseMigrationIntegrationTest {
         .isEqualTo(255);
     assertThat(characterLengthOf("analysis_conversation_summaries", "summary_model_version"))
         .isEqualTo(255);
+    // V35 — 보호자 PIN(S15P11B209-879). user_id 를 PK 로 두어 계정당 PIN 하나를 구조로 보장한다.
+    // 아이별 PIN 을 만들지 않기로 한 결정이 스키마에 남아 있는지 확인한다.
+    assertThat(tableExists("user_guardian_pins")).isTrue();
+    assertThat(indexExists("user_guardian_pins", "PRIMARY", true)).isTrue();
+    assertThat(
+            checkConstraintContains(
+                "user_guardian_pins", "ck_user_guardian_pins_counters", "failed_attempt_count"))
+        .isTrue();
     assertThat(columnExists("expert_profiles", "target_age_min")).isTrue();
     assertThat(columnExists("expert_profiles", "target_age_max")).isTrue();
     assertThat(tableExists("expert_verification_reviews")).isTrue();

@@ -6,6 +6,8 @@ import com.ssafy.b209.global.response.CommonErrorCode;
 import com.ssafy.b209.global.response.ErrorCode;
 import com.ssafy.b209.global.response.FieldErrorDetail;
 import com.ssafy.b209.global.response.ValidationErrorData;
+import com.ssafy.b209.user.dto.response.GuardianPinStatusResponse;
+import com.ssafy.b209.user.exception.GuardianPinException;
 import jakarta.validation.ConstraintViolationException;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -48,6 +50,20 @@ public class GlobalExceptionHandler {
 
   /** 상태를 보관하지 않는 전역 예외 처리기를 생성한다. */
   public GlobalExceptionHandler() {}
+
+  /**
+   * 보호자 PIN 실패에 현재 상태를 함께 실어 응답한다 (S15P11B209-879).
+   *
+   * <p>{@code PIN_MISMATCH}는 남은 시도 횟수, {@code PIN_LOCKED}는 잠금 해제 시각이 있어야 화면을 만들 수 있다. 그 값을 오류 메시지
+   * 문자열에 섞지 않고 성공 응답과 같은 구조체로 {@code data}에 싣는다. PIN 원문·해시는 담기지 않는다.
+   */
+  @ExceptionHandler(GuardianPinException.class)
+  ResponseEntity<ApiErrorResponse<GuardianPinStatusResponse>> handleGuardianPinException(
+      GuardianPinException exception) {
+    ErrorCode errorCode = exception.getErrorCode();
+    logClientError(errorCode);
+    return response(errorCode, exception.getStatus());
+  }
 
   @ExceptionHandler(BusinessException.class)
   ResponseEntity<ApiErrorResponse<Void>> handleBusinessException(BusinessException exception) {
