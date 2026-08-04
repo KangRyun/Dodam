@@ -13,6 +13,12 @@
 
 - **패키지 이름**: `com.dodam.app` ← 원스토어 개발자센터에 이걸로 등록 (한 번 정하면 못 바꾼다)
 - **산출물**: 릴리스 키로 서명된 `build-artifacts/app-release.apk`
+  - **현재 산출본 — 2026-08-04 10:51, develop `f2b6647f` 기준. versionCode 1492 · 81.6MB.**
+    서명 `CN=Kangryun Lee, OU=Dodam`(apksigner v2), 인증서 SHA-256 `685b0a68…` 로 직전 산출본과 동일 —
+    **키가 같아야 업데이트로 올라간다**(원스토어는 재서명 위탁이 없어 키가 바뀌면 다른 앱이 된다).
+  - ⚠️ 07-31 산출본은 폐기했다. 런처 아이콘 교체(S15P11B209-790, 08-03 머지)보다 앞선 빌드라
+    홈 화면에 Flutter 로고가 뜨는 물건이었다. **790 이후 커밋에서 구운 것인지 항상 확인할 것.**
+  - ※ S15P11B209-796(백업 데모 영상)도 **이 APK 로** 촬영한다 — 영상에 옛 아이콘이 남으면 다시 찍어야 한다.
 - **빌드 명령**: `infra/mobile/build-apk.sh` (4번)
 - **빌드 머신**: `~/dodam-secrets/` 가 있는 곳. **현재 EC2 서버(i15b209)가 그 머신이다** —
   AAB 를 여기서 구웠고 keystore·oauth 가 여기 있다. 별도 노트북으로 옮길 필요가 없다.
@@ -138,7 +144,8 @@ adb install -r build-artifacts/app-release.apk
 | 요건 | 우리 상태 |
 |---|---|
 | targetSdkVersion ≥ 23 (2023-09~) | ✅ Flutter 기본(34+), minSdk 24 |
-| versionCode 이전보다 높게 | ✅ **1238** — `aapt dump badging` 으로 APK 실물에서 추출한 값. 커밋 수 기반이라 다음 빌드는 자동으로 더 크다 |
+| versionCode 이전보다 높게 | ✅ **1492** — 2026-08-04 재빌드본에서 `aapt2 dump badging` 으로 추출(직전 산출본은 1238). 커밋 수 기반이라 다음 빌드는 자동으로 더 크다 |
+| 런처 아이콘이 마스코트인가 | ✅ 적응형 아이콘(`res/*.xml`, anydpi 포함) + 레거시 mipmap 5종이 모두 790 자산과 일치함을 **APK 안에서 확인**(215,808·121,889·54,293·33,056·14,427B) |
 | 패키지명 중복 불가 | `com.dodam.app` — 등록 시 중복확인 버튼으로 확정. **한 번 정하면 영구 고정** |
 | 권한 최소화 (과도 권한 = 공식 반려 사유) | 4종뿐: INTERNET·CAMERA·RECORD_AUDIO·POST_NOTIFICATIONS — 전부 실기능 대응 |
 
@@ -156,7 +163,7 @@ adb install -r build-artifacts/app-release.apk
 7. **STEP5 신규 바이너리** — 유형 **APK** 선택 → `build-artifacts/app-release.apk` 업로드.
    ★ APK 경로에는 **서명키 등록 화면이 원래 없다** — 이미 서명된 파일을 그대로 올리는
    것이고, "서명키 위탁" 옵션은 AAB 전용이다. 없다고 찾아 헤매지 말 것(2026-08-01 실경험).
-   업로드 후 콘솔 표시 versionCode **1238** 대조 · **지원 단말 최소 1개** 지정(필수).
+   업로드 후 콘솔 표시 versionCode **1492** 대조 · **지원 단말 최소 1개** 지정(필수).
 8. **STEP6 In-App** — 인앱 상품 없음, 생략
 9. **STEP7 검증요청** — 판매 옵션 "즉시 적용" 권장. 심사는 통상 1~2시간(공식 보장치 아님),
    결과 이메일 통보, `검증중 → 검증완료 → 판매중`
@@ -201,10 +208,6 @@ adb install -r build-artifacts/app-release.apk
 
 ## 7. 아직 안 한 것
 
-- **설치 아이콘이 Flutter 기본값이다** (2026-08-02 발견). `ic_launcher.png`(1.4KB)가 기본
-  아이콘 그대로라, 스토어 대표 아이콘(6-3)과 달리 **설치 후 홈 화면에는 Flutter 로고**가 뜬다.
-  `icon-512.png` 디자인으로 런처 아이콘을 교체하고 재빌드(versionCode 자동 증가 → 재업로드)하는
-  후속 작업이 필요하다.
 - **스크린샷 미캡처.** 6-3 구성안대로 에뮬레이터/실기기에서 데모 데이터로 캡처해야 한다.
 - **Jenkins 자동화 없음.** README 5절의 `BUILD_ANDROID_AAB` 스테이지는 AAB 전용이다.
   APK 도 CI 에서 뽑으려면 Jenkinsfile 에 스테이지를 추가해야 한다(호스트 실행은 지금도 된다).

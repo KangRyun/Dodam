@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 도담 Android 릴리스 빌드 공용 코어 (S15P11B209-623 → 651 에서 형식 파라미터화)
+# 도담 Android 릴리스 빌드 공용 코어 (S15P11B209-623 → 765 에서 형식 파라미터화)
 #
 # 직접 부르지 않는다. 형식별 진입점을 쓴다:
 #   infra/mobile/build-aab.sh   → Play 용 AAB   (BUILD_FORMAT=appbundle)
