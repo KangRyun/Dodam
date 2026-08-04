@@ -10,8 +10,10 @@
          거부돼도 앱과 알림함은 정상 동작한다 — docs/api/push-notification-delivery-contract.md §4.2 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- android:label 은 홈 화면·앱 서랍에 뜨는 이름이다. 스토어 상품 제목(도담)과
+         같아야 한다 — 영문 "dodam" 이면 "도담"을 받았는데 아이콘 밑엔 dodam 이 뜬다. -->
     <application
-        android:label="dodam"
+        android:label="도담"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity
