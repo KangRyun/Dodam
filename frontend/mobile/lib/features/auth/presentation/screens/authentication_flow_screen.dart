@@ -8,6 +8,7 @@ import '../../domain/enums/auth_provider.dart';
 import '../../domain/enums/user_role.dart';
 import '../models/auth_state.dart';
 import 'new_user_onboarding_flow_screen.dart';
+import 'onboarding_consent_screen.dart';
 import 'social_login_screen.dart';
 
 typedef AuthProviderSignIn = Future<AuthState> Function(AuthProvider provider);
@@ -22,6 +23,7 @@ class AuthenticationFlowScreen extends StatefulWidget {
     required this.onProfileSelectionRequired,
     required this.onGuardianOnboardingCompleted,
     required this.onExpertAuthenticated,
+    this.loadConsentTerms,
     super.key,
   });
 
@@ -30,6 +32,9 @@ class AuthenticationFlowScreen extends StatefulWidget {
   final AuthGuardianNavigation onProfileSelectionRequired;
   final AuthGuardianNavigation onGuardianOnboardingCompleted;
   final AuthGuardianNavigation onExpertAuthenticated;
+
+  /// 약관 상세 보기용 USER 전문 로더(S15P11B209-884).
+  final ConsentTermsLoader? loadConsentTerms;
 
   @override
   State<AuthenticationFlowScreen> createState() =>
@@ -98,6 +103,7 @@ class _AuthenticationFlowScreenState extends State<AuthenticationFlowScreen> {
         needsEmail: session.requiresAdditionalEmail,
         onBack: _returnToLogin,
         onComplete: _completeOnboarding,
+        loadConsentTerms: widget.loadConsentTerms,
       );
     }
 

@@ -18,12 +18,16 @@ class NewUserOnboardingFlowScreen extends StatefulWidget {
     required this.needsEmail,
     required this.onComplete,
     this.onBack,
+    this.loadConsentTerms,
     super.key,
   });
 
   final bool needsEmail;
   final NewUserOnboardingComplete onComplete;
   final VoidCallback? onBack;
+
+  /// 약관 상세 보기용 USER 전문 로더(S15P11B209-884).
+  final ConsentTermsLoader? loadConsentTerms;
 
   @override
   State<NewUserOnboardingFlowScreen> createState() =>
@@ -100,6 +104,7 @@ class _NewUserOnboardingFlowScreenState
         key: const ValueKey('onboarding-flow-consent'),
         onSubmit: _submitConsents,
         onBack: _goBack,
+        loadConsentTerms: widget.loadConsentTerms,
       ),
     },
   );

@@ -111,6 +111,10 @@ abstract final class AppRouter {
           onProfileSelectionRequired: goProfileSelection,
           onGuardianOnboardingCompleted: goGuardianHome,
           onExpertAuthenticated: goExpertProfile,
+          // 온보딩 약관 상세 보기용 USER 전문 로더(S15P11B209-884).
+          loadConsentTerms: consentRepository == null
+              ? null
+              : () => consentRepository.getTerms(ConsentTargetScope.user),
         ),
       ['profiles', 'select'] when childController != null =>
         ProfileSelectionScreen(
