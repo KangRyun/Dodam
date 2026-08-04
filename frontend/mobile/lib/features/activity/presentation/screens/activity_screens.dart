@@ -2168,6 +2168,10 @@ class _DrawingScreenState extends State<DrawingScreen>
                 );
                 final screenSize = MediaQuery.sizeOf(context);
                 final deviceClass = _deviceClassFor(screenSize);
+                final hasStageChrome =
+                    _questionController != null ||
+                    _conversationStartError != null ||
+                    _htpAdvanceError != null;
                 final toolbar = DrawingToolbar(
                   toolState: _toolState,
                   quickColors: _quickColors,
@@ -2221,7 +2225,10 @@ class _DrawingScreenState extends State<DrawingScreen>
                               ),
                             ),
                           ),
-                          if (constraints.maxWidth > frameInset * 2)
+                          // 보여줄 질문·오류가 있을 때만 띄운다. 빈 상자를 겹쳐 두면
+                          // 그 아래 캔버스와 복원 안내가 탭을 받지 못한다.
+                          if (hasStageChrome &&
+                              constraints.maxWidth > frameInset * 2)
                             Positioned(
                               top: frameInset + AppSpacing.sm,
                               right: frameInset + AppSpacing.sm,
