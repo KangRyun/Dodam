@@ -2498,8 +2498,11 @@ class _DrawingScreenState extends State<DrawingScreen>
                     questionBubbleVisible &&
                     _questionDisplayController.visibleQuestion?.messageId ==
                         _questionController?.question?.messageId;
+                // 컨트롤러만 있고 아직 보여 줄 질문도 오류도 없으면 패널을 띄우지
+                // 않는다. 빈 상자가 캔버스 위에 떠 있게 된다.
                 final hasQuestionToShow =
-                    _questionController != null ||
+                    _questionController?.question != null ||
+                    _questionController?.error != null ||
                     _questionDisplayController.visibleQuestion != null;
                 final hasStageChrome =
                     (hasQuestionToShow && !bubbleShowsCurrentQuestion) ||
@@ -3058,29 +3061,32 @@ class _DrawingSidePanel extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Row(
-            children: [
-              CircleAvatar(
-                radius: 26,
-                backgroundColor: AppColors.tangerineSoft,
-                child: Icon(
-                  Icons.emoji_nature_rounded,
-                  color: AppColors.tangerine,
-                ),
-              ),
-              SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  '자유롭게 그려 보자!',
-                  style: TextStyle(
-                    color: AppColors.ink,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
+          // 도구를 툴바로 옮긴 뒤에는 이 머리말이 가리키는 것이 없다. 질문·오류만
+          // 담은 패널 위에 남겨 두면 빈 인사말만 캔버스에 떠 있게 된다.
+          if (showToolControls)
+            const Row(
+              children: [
+                CircleAvatar(
+                  radius: 26,
+                  backgroundColor: AppColors.tangerineSoft,
+                  child: Icon(
+                    Icons.emoji_nature_rounded,
+                    color: AppColors.tangerine,
                   ),
                 ),
-              ),
-            ],
-          ),
+                SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    '자유롭게 그려 보자!',
+                    style: TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           if (showToolControls) ...[
           const SizedBox(height: AppSpacing.lg),
           const _ToolHeading(icon: Icons.edit_rounded, label: '도구'),
