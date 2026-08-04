@@ -19,6 +19,6 @@ test("루트에서 랜딩을 보고 CTA로 커뮤니티에 진입한다", async 
 
   await expect(page).toHaveURL(/\/community$/);
   await expect(
-    page.getByRole("heading", { name: "마음그림 커뮤니티" }),
+    page.getByRole("link", { name: "도담 커뮤니티 홈" }),
   ).toBeVisible();
 });

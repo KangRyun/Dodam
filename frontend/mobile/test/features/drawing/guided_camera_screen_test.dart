@@ -466,6 +466,62 @@ void main() {
     expect(find.textContaining('사진을 찍지 못했어요'), findsWidgets);
     expect(find.byKey(const ValueKey('guided-camera-preview')), findsOneWidget);
   });
+
+  testWidgets('어두운 프레임은 밝기 안내를 띄우고 다시 밝아지면 사라진다', (tester) async {
+    final controller = _FakeCameraController();
+    await _pumpCamera(
+      tester,
+      platform: _FakeCameraPlatform(controllers: [controller]),
+    );
+    await _pumpUntil(
+      tester,
+      find.byKey(const ValueKey('guided-camera-preview')),
+    );
+    expect(controller.startLumaCalls, 1);
+    expect(
+      find.byKey(const ValueKey('guided-camera-brightness')),
+      findsNothing,
+    );
+
+    controller.emitLuma(20);
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('guided-camera-brightness')),
+      findsOneWidget,
+    );
+    expect(find.text('조금 더 밝은 곳에서 찍어요'), findsOneWidget);
+
+    // 히스테리시스 때문에 임계값을 충분히 넘어야 안내가 사라진다.
+    controller.emitLuma(140);
+    await tester.pump();
+    expect(
+      find.byKey(const ValueKey('guided-camera-brightness')),
+      findsNothing,
+    );
+
+    controller.emitLuma(245);
+    await tester.pump();
+    expect(find.text('너무 밝아요. 그림자 지지 않게 해요'), findsOneWidget);
+  });
+
+  testWidgets('촬영을 시작하면 밝기 스트림을 멈춘다', (tester) async {
+    final controller = _FakeCameraController();
+    final harness = await _pumpCamera(
+      tester,
+      platform: _FakeCameraPlatform(controllers: [controller]),
+    );
+    await _pumpUntil(
+      tester,
+      find.byKey(const ValueKey('guided-camera-preview')),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('guided-camera-capture')));
+    await _pumpFrames(tester, 3);
+
+    expect(harness.popCount, 1);
+    expect(controller.captureCalls, 1);
+    expect(controller.stopLumaCalls, greaterThanOrEqualTo(1));
+  });
 }
 
 Future<_CameraHarness> _pumpCamera(
@@ -629,6 +685,25 @@ final class _FakeCameraController implements GuidedCameraController {
     if (captureError case final error?) throw error;
     return captureResult;
   }
+
+  void Function(double luma)? lumaListener;
+  int startLumaCalls = 0;
+  int stopLumaCalls = 0;
+
+  @override
+  Future<void> startLumaStream(void Function(double luma) onLuma) async {
+    startLumaCalls += 1;
+    lumaListener = onLuma;
+  }
+
+  @override
+  Future<void> stopLumaStream() async {
+    stopLumaCalls += 1;
+    lumaListener = null;
+  }
+
+  /// 테스트에서 임의 밝기 표본을 화면으로 흘려보낸다.
+  void emitLuma(double luma) => lumaListener?.call(luma);
 }
 
 final class _FakePermissionService implements PhotoPermissionService {

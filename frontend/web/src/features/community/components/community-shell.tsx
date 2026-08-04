@@ -6,16 +6,20 @@ type CommunityShellProps = {
   children: ReactNode;
   navigation: ReactNode;
   sidebar: ReactNode;
+  /** 피드 상단에만 노출하는 스케치북 히어로 등. 없으면 렌더하지 않는다. */
+  hero?: ReactNode;
 };
 
 export function CommunityShell({
   children,
   navigation,
   sidebar,
+  hero,
 }: CommunityShellProps) {
   return (
     <div className="community-page">
       <CommunityHeader />
+      {hero}
       <main className="community-main">
         <div className="community-feed-column">
           <nav aria-label="게시글 카테고리">{navigation}</nav>

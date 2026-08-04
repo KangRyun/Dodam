@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:developer' as developer;
 
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../core/network/auth/access_token_provider.dart';
 import '../core/network/auth/token_refresher.dart';
@@ -15,8 +16,10 @@ import '../features/child/domain/repositories/child_consent_repository.dart';
 import '../features/child/domain/repositories/child_repository.dart';
 import '../features/consent/data/repositories/mock_consent_repository.dart';
 import '../features/consent/domain/repositories/consent_repository.dart';
+import '../features/drawing/data/disk_pending_htp_photo_store.dart';
 import '../features/drawing/data/dto/drawing_dtos.dart';
 import '../features/drawing/data/repositories/mock_drawing_repository.dart';
+import '../features/drawing/domain/pending_htp_photo.dart';
 import '../features/drawing/domain/repositories/drawing_repository.dart';
 import '../features/conversation/conversation.dart';
 import '../features/notification/application/notification_badge_controller.dart';
@@ -32,8 +35,10 @@ import '../features/report/domain/repositories/report_repository.dart';
 import '../features/report/domain/services/report_file_actions.dart';
 import '../features/settings/data/repositories/mock_account_withdrawal_repository.dart';
 import '../features/settings/data/repositories/mock_data_retention_repository.dart';
+import '../features/settings/data/repositories/mock_notification_settings_repository.dart';
 import '../features/settings/domain/repositories/account_withdrawal_repository.dart';
 import '../features/settings/domain/repositories/data_retention_repository.dart';
+import '../features/settings/domain/repositories/notification_settings_repository.dart';
 import '../features/settings/domain/repositories/guardian_profile_repository.dart';
 import 'router/app_navigation.dart';
 import 'router/app_router.dart';
@@ -50,6 +55,8 @@ class DodamApp extends StatefulWidget {
     this.consentRepository = const MockConsentRepository(),
     this.accountWithdrawalRepository = const MockAccountWithdrawalRepository(),
     this.dataRetentionRepository = const MockDataRetentionRepository(),
+    this.notificationSettingsRepository =
+        const MockNotificationSettingsRepository(),
     this.drawingRepository = const MockDrawingRepository(),
     this.reportRepository = const MockReportRepository(),
     this.reportFileActions = const PlatformReportFileActions(),
@@ -71,6 +78,7 @@ class DodamApp extends StatefulWidget {
     this.pushSetup,
     this.notificationInboxRepository,
     this.htpPhotoUploadEnabled = false,
+    this.pendingHtpPhotoStore,
     this.initialRoute = AppRoutes.guardianHome,
     super.key,
   });
@@ -87,6 +95,9 @@ class DodamApp extends StatefulWidget {
 
   /// 데이터 보관 기간 조회·편집 경계(S15P11B209-456). 실 연동 시 원격 구현을 주입한다.
   final DataRetentionRepository dataRetentionRepository;
+
+  /// 알림 수신 설정 조회·수정 경계(S15P11B209-455).
+  final NotificationSettingsRepository notificationSettingsRepository;
   final DrawingRepository drawingRepository;
   final ReportRepository reportRepository;
   final ReportFileActions reportFileActions;
@@ -114,6 +125,10 @@ class DodamApp extends StatefulWidget {
 
   /// HTP 사진으로 시작하기 옵션 노출 여부(S15P11B209-702, 기본 꺼짐).
   final bool htpPhotoUploadEnabled;
+
+  /// HTP 선촬영 사진 보관 저장소(S15P11B209-872). 주입하지 않으면 기기 문서
+  /// 디렉터리 기반 디스크 저장소를 쓴다(테스트는 메모리 구현을 주입).
+  final PendingHtpPhotoStore? pendingHtpPhotoStore;
   final String initialRoute;
 
   @override
@@ -121,6 +136,11 @@ class DodamApp extends StatefulWidget {
 }
 
 class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
+  /// HTP 선촬영 사진 저장소. 주입이 없으면 기기 문서 디렉터리 기반 디스크
+  /// 저장소를 쓴다(S15P11B209-872).
+  late final PendingHtpPhotoStore _pendingHtpPhotoStore =
+      widget.pendingHtpPhotoStore ??
+      DiskPendingHtpPhotoStore(rootDirectory: getApplicationDocumentsDirectory);
   late final GuardianChildController _childController;
   late final AuthRepository _authRepository;
   late final SocialLoginService _socialLoginService;
@@ -139,6 +159,9 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
   /// 보호자 화면이 구독해 안내를 띄운다.
   final _pushRegistrationStatus = PushRegistrationStatusController();
   AuthSession? _currentSession;
+
+  /// 로그아웃 정리가 진행 중인지. 로그아웃 진입점이 두 곳이라 재진입을 막는다.
+  bool _isSigningOut = false;
 
   /// 보호자 셸이 지금 보여주는 탭의 라우트 이름. 셸이 알려 준다.
   String? _guardianTabRoute;
@@ -353,7 +376,22 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
   }
 
   // 인증 세션과 보호자 선택 상태 초기화
+  //
+  // 로그아웃 버튼은 두 곳에 있다(보호자 홈 헤더의 LogoutActionButton, 설정 화면).
+  // 각 위젯은 자기 화면 안에서만 중복 탭을 막으므로, 여기서 한 번 더 막는다.
+  // 재진입하면 정리 작업이 두 번 실행돼 이미 만료된 세션으로 서버를 호출한다 —
+  // 기기 Token 해제가 401로 실패하던 경로가 그것이다(S15P11B209-869).
   Future<void> _signOut() async {
+    if (_isSigningOut) return;
+    _isSigningOut = true;
+    try {
+      await _runSignOut();
+    } finally {
+      _isSigningOut = false;
+    }
+  }
+
+  Future<void> _runSignOut() async {
     final provider = _currentSession?.user.provider;
     // 아래 정리에는 await가 여럿이고 그 사이에도 푸시 탭이 들어온다. 세션 표시를
     // 먼저 내려야 정리 도중 도착한 탭이 이동으로 이어지지 않는다. Token 해제
@@ -464,6 +502,7 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       consentRepository: widget.consentRepository,
       accountWithdrawalRepository: widget.accountWithdrawalRepository,
       dataRetentionRepository: widget.dataRetentionRepository,
+      notificationSettingsRepository: widget.notificationSettingsRepository,
       drawingCompletionSnapshotProvider:
           widget.drawingCompletionSnapshotProvider,
       conversationRepository: widget.conversationRepository,
@@ -479,6 +518,7 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       conversationId: widget.conversationId,
       basisAnalysisId: widget.basisAnalysisId,
       htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
+      pendingHtpPhotoStore: _pendingHtpPhotoStore,
     ),
   );
 }

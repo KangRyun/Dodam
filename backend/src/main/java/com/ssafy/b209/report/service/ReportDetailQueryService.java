@@ -53,6 +53,7 @@ public class ReportDetailQueryService {
 
   private static final String FINAL_ASSET_TYPE = "FINAL";
   private static final String THUMBNAIL_ASSET_TYPE = "THUMBNAIL";
+  private static final String UPLOADED_ASSET_TYPE = "UPLOADED";
 
   private final GuardianResourceAccessRepository guardianAccessRepository;
   private final ReportDetailViewRepository reportRepository;
@@ -173,10 +174,20 @@ public class ReportDetailQueryService {
         session.durationMs());
   }
 
+  /**
+   * 리포트 상세에 표시할 그림 URL을 확정한다.
+   *
+   * <p>사진 업로드로 진행한 세션은 최종 그림을 다시 그리지 않아 업로드 원본만 남으므로, {@code FINAL}이 없으면 {@code UPLOADED}를 최종 그림으로
+   * 인정한다. 이 폴백이 없으면 업로드 세션 리포트의 그림 자리가 빈다. 목록·미리보기의 같은 규칙은 {@code SessionPreviewImageUrlFinder}가
+   * 담당한다.
+   *
+   * @param drawingSessionId 리포트가 가리키는 그림 활동 세션 식별자
+   * @return 최종 그림·미리보기 URL이며 그림 파일이 없으면 두 항목 모두 {@code null}
+   */
   private ReportDrawingResponse buildDrawing(Long drawingSessionId) {
     List<ReportDrawingAssetView> assets =
         assetRepository.findByDrawingSessionIdAndAssetTypeInOrderByAssetVersionAsc(
-            drawingSessionId, List.of(FINAL_ASSET_TYPE, THUMBNAIL_ASSET_TYPE));
+            drawingSessionId, List.of(FINAL_ASSET_TYPE, THUMBNAIL_ASSET_TYPE, UPLOADED_ASSET_TYPE));
     Map<String, ReportDrawingAssetView> latestByType = new LinkedHashMap<>();
     for (ReportDrawingAssetView asset : assets) {
       ReportDrawingAssetView current = latestByType.get(asset.getAssetType());
@@ -185,6 +196,9 @@ public class ReportDetailQueryService {
       }
     }
     String finalImageUrl = urlOf(latestByType.get(FINAL_ASSET_TYPE));
+    if (finalImageUrl == null) {
+      finalImageUrl = urlOf(latestByType.get(UPLOADED_ASSET_TYPE));
+    }
     String thumbnailUrl = urlOf(latestByType.get(THUMBNAIL_ASSET_TYPE));
     return new ReportDrawingResponse(
         finalImageUrl, thumbnailUrl == null ? finalImageUrl : thumbnailUrl);

@@ -9,6 +9,8 @@ export 'components/inputs/app_text_field.dart';
 export 'components/navigation/app_bottom_tab_bar.dart';
 export 'components/navigation/app_top_bar.dart';
 export 'components/selection/app_selection.dart';
+export 'responsive/responsive_content.dart';
+export 'responsive/window_width_class.dart';
 export 'tokens/app_colors.dart';
 export 'tokens/app_spacing.dart';
 export 'tokens/app_shadow.dart';

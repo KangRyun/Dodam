@@ -12,6 +12,7 @@ import '../../data/dto/report_dtos.dart';
 import '../../data/services/platform_report_file_actions.dart';
 import '../../domain/repositories/report_repository.dart';
 import '../../domain/services/report_file_actions.dart';
+import '../format/activity_duration_format.dart';
 import '../widgets/htp_report_gallery.dart';
 import '../widgets/report_mascot.dart';
 
@@ -404,40 +405,46 @@ class _ReportContent extends StatelessWidget {
       final pagePadding = constraints.maxWidth < 360
           ? AppSpacing.sm
           : AppSpacing.lg;
+      // 계약 §11의 확정 섹션 순서를 그대로 세로로 쌓는다. 데이터가 없는 섹션은
+      // 각 빌더가 null을 돌려주어 자연스럽게 빠진다(오류 아님).
+      final sections = <Widget>[
+        _ReportHero(report: report),
+        ?_nonDiagnosticNoticeSection(report),
+        ?_overviewSection(report),
+        ?_interpretationsSection(report),
+        _ReportDrawings(
+          report: report,
+          imageFetcher: imageFetcher,
+          activityRepository: activityRepository,
+        ),
+        ?_childExpressionSection(report, playbackController),
+        ?_conversationSummarySection(report),
+        ?_activityFactsSection(report),
+        ..._parentGuideSections(report),
+        ?_legacyGuideSection(report),
+        if (report.hasNoObservations) _noObservationsCard,
+        ?_limitationsReferencesSection(report),
+        _ReportActionSection(
+          pdfAction: pdfAction,
+          onSavePdf: onSavePdf,
+          onSharePdf: onSharePdf,
+        ),
+      ];
       return SingleChildScrollView(
         key: ValueKey(isWide ? 'report-wide-layout' : 'report-small-layout'),
         padding: EdgeInsets.all(pagePadding),
         child: Center(
           child: ConstrainedBox(
             constraints: const BoxConstraints(
-              maxWidth: AppSizes.wideContentMaxWidth,
+              maxWidth: AppSizes.contentMaxWidth,
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _ReportHero(report: report),
-                const SizedBox(height: AppSpacing.lg),
-                _ReportOverview(
-                  report: report,
-                  imageFetcher: imageFetcher,
-                  activityRepository: activityRepository,
-                ),
-                const SizedBox(height: AppSpacing.lg),
-                _ReportDetails(
-                  report: report,
-                  playbackController: playbackController,
-                  wide: isWide,
-                ),
-                if (report.limitations.isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.lg),
-                  _NoticeCard(lines: report.limitations),
+                for (final (index, section) in sections.indexed) ...[
+                  if (index > 0) const SizedBox(height: AppSpacing.lg),
+                  section,
                 ],
-                const SizedBox(height: AppSpacing.lg),
-                _ReportActionSection(
-                  pdfAction: pdfAction,
-                  onSavePdf: onSavePdf,
-                  onSharePdf: onSharePdf,
-                ),
               ],
             ),
           ),
@@ -446,6 +453,24 @@ class _ReportContent extends StatelessWidget {
     },
   );
 }
+
+const Widget _noObservationsCard = _ReportCard(
+  key: ValueKey('report-no-observations'),
+  backgroundColor: AppColors.surfaceSoft,
+  child: Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      Icon(Icons.inbox_outlined, color: AppColors.inkMuted),
+      SizedBox(width: AppSpacing.sm),
+      Expanded(
+        child: Text(
+          '아직 표시할 관찰 기록이 없어요.',
+          style: TextStyle(color: AppColors.inkMuted),
+        ),
+      ),
+    ],
+  ),
+);
 
 final class _ReportExportNotReady implements Exception {
   const _ReportExportNotReady();
@@ -564,8 +589,9 @@ class _MetadataPill extends StatelessWidget {
   );
 }
 
-class _ReportOverview extends StatelessWidget {
-  const _ReportOverview({
+/// 계약 §4·§5: 집·나무·사람 완성 그림과 주제별 관찰·문답.
+class _ReportDrawings extends StatelessWidget {
+  const _ReportDrawings({
     required this.report,
     required this.imageFetcher,
     required this.activityRepository,
@@ -593,6 +619,8 @@ class _ReportOverview extends StatelessWidget {
             fallback: singleImagePreview,
           )
         : singleImagePreview;
+
+    final subjectReports = report.orderedSubjectReports;
 
     return _ReportSection(
       key: const ValueKey('report-drawings-section'),
@@ -639,7 +667,80 @@ class _ReportOverview extends StatelessWidget {
             );
           },
         ),
+        if (subjectReports.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.md),
+          for (final subject in subjectReports)
+            _SubjectReportCard(
+              report: subject,
+              imageFetcher: imageFetcher,
+            ),
+        ],
       ],
+    );
+  }
+}
+
+/// 계약 §5·§6: 한 주제(집/나무/사람)의 완성 그림·관찰 사실·문답.
+class _SubjectReportCard extends StatelessWidget {
+  const _SubjectReportCard({required this.report, required this.imageFetcher});
+
+  final ReportSubjectReportDto report;
+  final ImageByteFetcher imageFetcher;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _subjectLabel(report.subjectType);
+    final imageUrl = report.imageUrl;
+    return Container(
+      key: ValueKey('report-subject-${report.subjectType ?? 'UNKNOWN'}'),
+      margin: const EdgeInsets.only(top: AppSpacing.sm),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: AppColors.outline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(
+            header: true,
+            child: Text(
+              label,
+              style: const TextStyle(
+                color: AppColors.ink,
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          if (imageUrl != null) ...[
+            const SizedBox(height: AppSpacing.sm),
+            AspectRatio(
+              aspectRatio: 4 / 3,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+                child: AuthenticatedImage(
+                  url: imageUrl,
+                  fetcher: imageFetcher,
+                  fit: BoxFit.contain,
+                  semanticLabel: '$label 완성 그림',
+                  placeholderBuilder: (_) => const _ImagePlaceholder(),
+                ),
+              ),
+            ),
+          ],
+          if (report.visionObservations.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            for (final observation in report.visionObservations)
+              _Bullet(title: observation),
+          ],
+          if (report.qaPairs.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.xs),
+            _QaPairList(pairs: report.qaPairs),
+          ],
+        ],
+      ),
     );
   }
 }
@@ -677,189 +778,21 @@ class _ReportSingleImagePreview extends StatelessWidget {
   );
 }
 
-class _ReportDetails extends StatelessWidget {
-  const _ReportDetails({
-    required this.report,
-    required this.playbackController,
-    required this.wide,
-  });
-  final ReportDetailDto report;
-  final VoiceAnswerPlaybackController? playbackController;
-  final bool wide;
+// ─────────────────────────────────────────────────────────────────────────
+// 계약 §11 섹션 빌더. 각 함수는 데이터가 없으면 null(또는 빈 목록)을 돌려주어
+// 해당 섹션을 숨긴다. 비진단 원칙에 따라 색상은 라벤더·블루·그린 계열 중립만
+// 쓰고, 경고/위험 아이콘·문구는 쓰지 않는다.
+// ─────────────────────────────────────────────────────────────────────────
 
-  @override
-  Widget build(BuildContext context) {
-    final expression = report.childExpression;
-    final facts = report.activityFacts;
-    final conversation = report.conversationSummary;
-    final guide = report.guardianConversationGuide;
-    final hasExpression =
-        expression != null &&
-        (expression.expressedEmotionText != null ||
-            expression.representativeUtterances.isNotEmpty);
-    final hasFacts =
-        facts != null && (!facts.isEmpty || facts.pressureAvailable);
-    final hasConversation = conversation != null && !conversation.isEmpty;
-    final hasGuide = guide.isNotEmpty;
-    final hasObservations =
-        hasExpression || hasFacts || hasConversation || hasGuide;
-
-    final expressionSection = hasExpression
-        ? _ReportSection(
-            key: const ValueKey('report-child-expression'),
-            title: '아이가 표현한 말과 음성',
-            backgroundColor: AppColors.lavenderSoft,
-            accentColor: AppColors.lavender,
-            children: [
-              if (expression.expressedEmotionText case final text?) ...[
-                Text(text, style: const TextStyle(color: AppColors.ink)),
-                if (expression.representativeUtterances.isNotEmpty)
-                  const SizedBox(height: AppSpacing.md),
-              ],
-              for (final utterance in expression.representativeUtterances)
-                _Utterance(
-                  utterance: utterance,
-                  playbackController: playbackController,
-                ),
-            ],
-          )
-        : null;
-    final factsSection = hasFacts
-        ? _ReportSection(
-            key: const ValueKey('report-activity-facts'),
-            title: '활동에서 관찰된 내용',
-            backgroundColor: AppColors.leafSoft,
-            accentColor: AppColors.leaf,
-            children: [
-              if (facts.detectedObjects.isNotEmpty)
-                _InfoLine(
-                  label: '그린 것',
-                  value: facts.detectedObjects.join(', '),
-                ),
-              if (facts.pauseCount != null ||
-                  facts.eraseCount != null ||
-                  facts.pressureAvailable) ...[
-                const SizedBox(height: AppSpacing.xs),
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: [
-                    if (facts.pauseCount case final count?)
-                      _StatisticTile(label: '멈춤', value: '$count회'),
-                    if (facts.eraseCount case final count?)
-                      _StatisticTile(label: '지우기', value: '$count회'),
-                    if (facts.pressureAvailable)
-                      const _StatisticTile(label: '필압 정보', value: '기록됨'),
-                  ],
-                ),
-              ],
-              if (facts.notes.isNotEmpty) ...[
-                const SizedBox(height: AppSpacing.md),
-                for (final note in facts.notes) _Bullet(title: note),
-              ],
-            ],
-          )
-        : null;
-    final conversationSection = hasConversation
-        ? _ReportSection(
-            key: const ValueKey('report-conversation-summary'),
-            title: '대화 요약',
-            backgroundColor: AppColors.tangerineSoft,
-            accentColor: AppColors.tangerine,
-            children: [
-              if (conversation.questionCount != null ||
-                  conversation.answeredCount != null ||
-                  conversation.skippedCount != null)
-                Wrap(
-                  spacing: AppSpacing.sm,
-                  runSpacing: AppSpacing.sm,
-                  children: [
-                    if (conversation.questionCount case final count?)
-                      _StatisticTile(label: '질문', value: '$count개'),
-                    if (conversation.answeredCount case final count?)
-                      _StatisticTile(label: '대답', value: '$count개'),
-                    if (conversation.skippedCount case final count?)
-                      _StatisticTile(label: '건너뜀', value: '$count개'),
-                  ],
-                ),
-              if (conversation.summary case final summary?) ...[
-                if (conversation.questionCount != null ||
-                    conversation.answeredCount != null ||
-                    conversation.skippedCount != null)
-                  const SizedBox(height: AppSpacing.md),
-                Text(
-                  summary,
-                  style: const TextStyle(color: AppColors.ink, height: 1.55),
-                ),
-              ],
-            ],
-          )
-        : null;
-    final activitySection = _activitySection(report);
-    final guideSection = hasGuide
-        ? _ReportSection(
-            key: const ValueKey('report-conversation-guide'),
-            title: '보호자 대화 가이드',
-            backgroundColor: const Color(0xFFF2F6E8),
-            accentColor: AppColors.leaf,
-            children: [
-              for (final (index, question) in guide.indexed)
-                _NumberedBullet(number: index + 1, title: question),
-            ],
-          )
-        : null;
-    const noObservations = _ReportCard(
-      key: ValueKey('report-no-observations'),
-      backgroundColor: AppColors.surfaceSoft,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.inbox_outlined, color: AppColors.inkMuted),
-          SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Text(
-              '아직 표시할 관찰 기록이 없어요.',
-              style: TextStyle(color: AppColors.inkMuted),
-            ),
-          ),
-        ],
-      ),
-    );
-
-    if (!wide) {
-      return _SectionColumn(
-        children: [
-          ?expressionSection,
-          ?factsSection,
-          ?conversationSection,
-          if (!hasObservations) noObservations,
-          ?activitySection,
-          ?guideSection,
-        ],
-      );
-    }
-
-    final left = <Widget>[?activitySection, ?expressionSection];
-    final right = <Widget>[
-      ?factsSection,
-      ?conversationSection,
-      ?guideSection,
-      if (!hasObservations) noObservations,
-    ];
-    if (left.isEmpty) return _SectionColumn(children: right);
-    if (right.isEmpty) return _SectionColumn(children: left);
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Expanded(child: _SectionColumn(children: left)),
-        const SizedBox(width: AppSpacing.lg),
-        Expanded(child: _SectionColumn(children: right)),
-      ],
-    );
-  }
+/// §1 비진단 안내 — 경고 배너가 아니라 중립 정보 카드.
+Widget? _nonDiagnosticNoticeSection(ReportDetailDto report) {
+  final notice = report.nonDiagnosticNotice?.trim();
+  if (notice == null || notice.isEmpty) return null;
+  return _NoticeCard(lines: [notice]);
 }
 
-Widget? _activitySection(ReportDetailDto report) {
+/// §2 한눈에 보는 이번 활동 — 활동 정보와 아이가 고른 감정.
+Widget? _overviewSection(ReportDetailDto report) {
   final session = report.drawingSession;
   final emotions = report.childExpression?.selectedEmotions ?? const [];
   final lines = <Widget>[
@@ -869,7 +802,7 @@ Widget? _activitySection(ReportDetailDto report) {
       _InfoLine(label: '활동 유형', value: type),
     if (session?.inputMethod case final inputMethod?)
       _InfoLine(label: '입력 방식', value: inputMethod),
-    if (_minutes(session?.durationMs) case final duration?)
+    if (formatActivityDuration(session?.durationMs) case final duration?)
       _InfoLine(label: '활동 시간', value: duration),
     if (session?.completedAt case final completedAt?)
       _InfoLine(label: '완료일', value: _date(completedAt)),
@@ -877,7 +810,7 @@ Widget? _activitySection(ReportDetailDto report) {
   if (lines.isEmpty && emotions.isEmpty) return null;
   return _ReportSection(
     key: const ValueKey('report-activity-info'),
-    title: '활동 정보와 선택 감정',
+    title: '한눈에 보는 이번 활동',
     backgroundColor: const Color(0xFFFFF7DA),
     accentColor: AppColors.warning,
     children: [
@@ -899,20 +832,596 @@ Widget? _activitySection(ReportDetailDto report) {
   );
 }
 
-class _SectionColumn extends StatelessWidget {
-  const _SectionColumn({required this.children});
+const _interpretationOrder = <String>[
+  'RELATIONSHIP',
+  'EMOTION',
+  'SELF_EXPRESSION',
+  'ACTIVITY_STYLE',
+  'ADAPTATION',
+];
 
-  final List<Widget> children;
+/// §3 주요 심리 경향 — publicInterpretations 카드. 배열이 비면 숨긴다.
+Widget? _interpretationsSection(ReportDetailDto report) {
+  if (report.publicInterpretations.isEmpty) return null;
+  int rank(ReportInterpretationDto item) {
+    final index = _interpretationOrder.indexOf(item.category ?? '');
+    return index < 0 ? _interpretationOrder.length : index;
+  }
 
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
+  final interpretations = [...report.publicInterpretations]
+    ..sort((a, b) => rank(a).compareTo(rank(b)));
+  final evidenceById = <int, ReportEvidenceItemDto>{
+    for (final item in report.evidenceItems) ?item.evidenceId: item,
+  };
+  return _ReportSection(
+    key: const ValueKey('report-interpretations'),
+    title: '주요 심리 경향',
+    backgroundColor: AppColors.lavenderSoft,
+    accentColor: AppColors.lavender,
     children: [
-      for (final (index, section) in children.indexed) ...[
+      for (final (index, interpretation) in interpretations.indexed) ...[
         if (index > 0) const SizedBox(height: AppSpacing.md),
-        section,
+        _InterpretationCard(
+          index: index,
+          interpretation: interpretation,
+          evidenceById: evidenceById,
+        ),
       ],
     ],
+  );
+}
+
+/// §6 아이의 표현과 대화 요약 — childExpression.
+Widget? _childExpressionSection(
+  ReportDetailDto report,
+  VoiceAnswerPlaybackController? playbackController,
+) {
+  final expression = report.childExpression;
+  if (expression == null || expression.isEmpty) return null;
+  return _ReportSection(
+    key: const ValueKey('report-child-expression'),
+    title: '아이의 표현과 대화 요약',
+    backgroundColor: AppColors.lavenderSoft,
+    accentColor: AppColors.lavender,
+    children: [
+      if (expression.summary case final summary?) ...[
+        Text(
+          summary,
+          style: const TextStyle(color: AppColors.ink, height: 1.55),
+        ),
+        const SizedBox(height: AppSpacing.sm),
+      ],
+      if (expression.keywords.isNotEmpty) ...[
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
+          children: [for (final word in expression.keywords) Chip(label: Text(word))],
+        ),
+        const SizedBox(height: AppSpacing.sm),
+      ],
+      if (expression.expressedEmotionText case final text?) ...[
+        Text(text, style: const TextStyle(color: AppColors.ink)),
+        if (expression.representativeUtterances.isNotEmpty)
+          const SizedBox(height: AppSpacing.md),
+      ],
+      for (final utterance in expression.representativeUtterances)
+        _Utterance(
+          utterance: utterance,
+          playbackController: playbackController,
+        ),
+    ],
+  );
+}
+
+/// §6 대화 요약 — conversationSummary.
+Widget? _conversationSummarySection(ReportDetailDto report) {
+  final conversation = report.conversationSummary;
+  if (conversation == null || conversation.isEmpty) return null;
+  final hasCounts =
+      conversation.questionCount != null ||
+      conversation.answeredCount != null ||
+      conversation.skippedCount != null;
+  return _ReportSection(
+    key: const ValueKey('report-conversation-summary'),
+    title: '대화 요약',
+    backgroundColor: AppColors.tangerineSoft,
+    accentColor: AppColors.tangerine,
+    children: [
+      if (hasCounts)
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: [
+            if (conversation.questionCount case final count?)
+              _StatisticTile(label: '질문', value: '$count개'),
+            if (conversation.answeredCount case final count?)
+              _StatisticTile(label: '대답', value: '$count개'),
+            if (conversation.skippedCount case final count?)
+              _StatisticTile(label: '건너뜀', value: '$count개'),
+          ],
+        ),
+      if (conversation.summary case final summary?) ...[
+        if (hasCounts) const SizedBox(height: AppSpacing.md),
+        Text(
+          summary,
+          style: const TextStyle(color: AppColors.ink, height: 1.55),
+        ),
+      ],
+    ],
+  );
+}
+
+/// §7 객관적인 활동 기록 — activityFacts. 수치만, 심리 해석을 붙이지 않는다.
+Widget? _activityFactsSection(ReportDetailDto report) {
+  final facts = report.activityFacts;
+  // 필압이 기록됐다는 사실만 있고(값 없음) 나머지 수치가 비어도 섹션을 보여준다
+  // (S15P11B209-870의 "필압 정보: 기록됨" 표시를 잃지 않기 위함).
+  if (facts == null || (facts.isEmpty && !facts.pressureAvailable)) return null;
+  final tiles = <Widget>[
+    if (facts.pauseCount case final count?)
+      _StatisticTile(label: '멈춤', value: '$count회'),
+    if (facts.eraseCount case final count?)
+      _StatisticTile(label: '지우기', value: '$count회'),
+    if (facts.undoCount case final count?)
+      _StatisticTile(label: '되돌리기', value: '$count회'),
+    if (facts.questionCount case final count?)
+      _StatisticTile(label: '질문', value: '$count회'),
+    if (facts.answerCount case final count?)
+      _StatisticTile(label: '답변', value: '$count회'),
+    if (facts.skipCount case final count?)
+      _StatisticTile(label: '건너뜀', value: '$count회'),
+    if (facts.detectedElementCount case final count?)
+      _StatisticTile(label: '탐지된 요소', value: '$count개'),
+    // 필압은 실제 평균값이 있으면 값을 보여주고, 값 없이 기록 여부만 있으면
+    // "기록됨" 지표만 보여준다(S15P11B209-870).
+    if (facts.hasPressureValue)
+      _StatisticTile(
+        label: '평균 필압',
+        value: facts.pressureValue!.toStringAsFixed(2),
+      )
+    else if (facts.pressureAvailable)
+      const _StatisticTile(label: '필압 정보', value: '기록됨'),
+  ];
+  // "그린 시간"은 스트로크에서 집계한 실제로 그린 시간이며, §2의 세션 기준
+  // "활동 시간"과 다른 값이다(S15P11B209-870). 서버가 밀리초(drawingDurationMs)로
+  // 주면 그 값을 우선 쓰고, 초 단위 계약(drawingDurationSec)만 있으면 그것을 쓴다.
+  final drawingDuration =
+      formatActivityDuration(facts.drawingDurationMs) ??
+      _secToDuration(facts.drawingDurationSec);
+  final durationLines = <Widget>[
+    if (_secToDuration(facts.totalDurationSec) case final value?)
+      _InfoLine(label: '총 활동 시간', value: value),
+    if (drawingDuration case final value?)
+      _InfoLine(label: '그린 시간', value: value),
+  ];
+  return _ReportSection(
+    key: const ValueKey('report-activity-facts'),
+    title: '객관적인 활동 기록',
+    backgroundColor: AppColors.leafSoft,
+    accentColor: AppColors.leaf,
+    children: [
+      if (facts.detectedObjects.isNotEmpty)
+        _InfoLine(label: '그린 것', value: facts.detectedObjects.join(', ')),
+      ...durationLines,
+      if (tiles.isNotEmpty) ...[
+        const SizedBox(height: AppSpacing.xs),
+        Wrap(spacing: AppSpacing.sm, runSpacing: AppSpacing.sm, children: tiles),
+      ],
+      if (facts.notes.isNotEmpty) ...[
+        const SizedBox(height: AppSpacing.md),
+        for (final note in facts.notes) _Bullet(title: note),
+      ],
+      if (facts.truncated) ...[
+        const SizedBox(height: AppSpacing.sm),
+        const Text(
+          '저장된 구간까지만 집계된 값입니다.',
+          style: TextStyle(color: AppColors.inkMuted, height: 1.45),
+        ),
+      ],
+      if (facts.aggregatedHtp) ...[
+        const SizedBox(height: AppSpacing.xs),
+        const Text(
+          '집·나무·사람 세 활동을 합친 기록입니다.',
+          style: TextStyle(color: AppColors.inkMuted, height: 1.45),
+        ),
+      ],
+    ],
+  );
+}
+
+const _guideTitles = <String, String>{
+  'DRAWING_CONVERSATION': '그림으로 대화해 보세요',
+  'DAILY_PARENTING': '일상에서 이렇게 도와주세요',
+  'HOME_OBSERVATION': '가정에서 살펴봐 주세요',
+  'PROFESSIONAL_SUPPORT': '도움이 필요할 때',
+};
+
+/// §8·§9·§10 보호자 가이드 — parentGuides를 guideType별 섹션으로 나눈다.
+List<Widget> _parentGuideSections(ReportDetailDto report) => [
+  for (final guide in report.orderedParentGuides)
+    _ReportSection(
+      key: ValueKey('report-parent-guide-${guide.guideType ?? 'UNKNOWN'}'),
+      title: _guideTitles[guide.guideType] ?? '보호자 가이드',
+      backgroundColor: const Color(0xFFF2F6E8),
+      accentColor: AppColors.leaf,
+      children: [
+        for (final (index, item) in guide.items.indexed)
+          _NumberedBullet(number: index + 1, title: item),
+      ],
+    ),
+];
+
+/// 구형 응답 호환 — parentGuides가 없을 때 guardianConversationGuide 섹션.
+Widget? _legacyGuideSection(ReportDetailDto report) {
+  final guide = report.guardianConversationGuide;
+  if (guide.isEmpty) return null;
+  return _ReportSection(
+    key: const ValueKey('report-conversation-guide'),
+    title: '보호자 대화 가이드',
+    backgroundColor: const Color(0xFFF2F6E8),
+    accentColor: AppColors.leaf,
+    children: [
+      for (final (index, question) in guide.indexed)
+        _NumberedBullet(number: index + 1, title: question),
+    ],
+  );
+}
+
+/// §11 한계와 참고 자료 — limitations + references.
+Widget? _limitationsReferencesSection(ReportDetailDto report) {
+  final limitations = report.limitations;
+  final references = [
+    for (final reference in report.references)
+      if ((reference.title?.trim().isNotEmpty ?? false) ||
+          (reference.url?.trim().isNotEmpty ?? false))
+        reference,
+  ];
+  if (limitations.isEmpty && references.isEmpty) return null;
+  return _ReportSection(
+    key: const ValueKey('report-limitations'),
+    title: '한계와 참고 자료',
+    backgroundColor: AppColors.surfaceSoft,
+    accentColor: AppColors.inkMuted,
+    children: [
+      for (final line in limitations) _Bullet(title: line),
+      if (references.isNotEmpty) ...[
+        const SizedBox(height: AppSpacing.sm),
+        const Text('참고 자료', style: TextStyle(color: AppColors.inkMuted)),
+        const SizedBox(height: AppSpacing.xs),
+        for (final reference in references) _ReferenceLine(reference: reference),
+      ],
+    ],
+  );
+}
+
+String? _secToDuration(int? seconds) =>
+    seconds == null ? null : formatActivityDuration(seconds * 1000);
+
+// ── 카테고리·근거·문답 라벨 ────────────────────────────────────────────────
+
+String _interpretationTitle(ReportInterpretationDto item) =>
+    item.title ?? _categoryFallbackTitle(item.category);
+
+String _categoryFallbackTitle(String? category) => switch (category) {
+  'RELATIONSHIP' => '관계',
+  'EMOTION' => '감정',
+  'SELF_EXPRESSION' => '자기표현',
+  'ACTIVITY_STYLE' => '활동 방식',
+  'ADAPTATION' => '적응',
+  _ => '관찰된 경향',
+};
+
+IconData _categoryIcon(String? category) => switch (category) {
+  'RELATIONSHIP' => Icons.favorite_border_rounded,
+  'EMOTION' => Icons.emoji_emotions_outlined,
+  'SELF_EXPRESSION' => Icons.brush_outlined,
+  'ACTIVITY_STYLE' => Icons.timeline_rounded,
+  'ADAPTATION' => Icons.spa_outlined,
+  _ => Icons.auto_awesome_outlined,
+};
+
+Color _categoryColor(String? category) => switch (category) {
+  'RELATIONSHIP' => AppColors.lavender,
+  'EMOTION' => AppColors.drawingBlue,
+  'SELF_EXPRESSION' => AppColors.leaf,
+  'ACTIVITY_STYLE' => AppColors.lavender,
+  'ADAPTATION' => AppColors.leaf,
+  _ => AppColors.lavender,
+};
+
+String _evidenceSourceLabel(String? sourceType) => switch (sourceType) {
+  'VISION' => '그림에서 확인',
+  'CHILD_ANSWER' => '아이의 답변',
+  'SELECTED_EMOTION' => '아이가 선택한 감정',
+  'STATED_EMOTION' => '아이가 말한 감정',
+  'ACTIVITY_METRIC' => '활동 기록',
+  'REPEATED_SUBJECT' => '여러 그림에서 반복',
+  'LONGITUDINAL' => '이전 활동에서도 반복',
+  _ => '관찰 근거',
+};
+
+String _subjectLabel(String? subjectType) => switch (subjectType) {
+  'HOUSE' => '집',
+  'TREE' => '나무',
+  'PERSON' => '사람',
+  _ => '그림',
+};
+
+/// §3 심리 경향 카드. 근거·범위 문구를 tendencyText와 항상 함께 보여준다.
+class _InterpretationCard extends StatelessWidget {
+  const _InterpretationCard({
+    required this.index,
+    required this.interpretation,
+    required this.evidenceById,
+  });
+
+  final int index;
+  final ReportInterpretationDto interpretation;
+  final Map<int, ReportEvidenceItemDto> evidenceById;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = _categoryColor(interpretation.category);
+    final evidence = [
+      for (final ref in interpretation.evidenceRefs) ?evidenceById[ref],
+    ];
+    return Container(
+      key: ValueKey('report-interpretation-$index'),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(_categoryIcon(interpretation.category), color: color),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Semantics(
+                  header: true,
+                  child: Text(
+                    _interpretationTitle(interpretation),
+                    style: const TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 17,
+                      height: 1.3,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (interpretation.tendencyText case final tendency?) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              tendency,
+              style: const TextStyle(
+                color: AppColors.ink,
+                height: 1.65,
+              ),
+            ),
+          ],
+          if (interpretation.scopeText case final scope?) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              scope,
+              style: const TextStyle(
+                color: AppColors.inkMuted,
+                height: 1.5,
+                fontSize: 14,
+              ),
+            ),
+          ],
+          if (evidence.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.xs),
+            _EvidenceExpansion(index: index, evidence: evidence),
+          ],
+          if (interpretation.homeObservationGuide case final guide?) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Container(
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              decoration: BoxDecoration(
+                color: AppColors.leafSoft,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.visibility_outlined,
+                    size: 18,
+                    color: AppColors.leaf,
+                  ),
+                  const SizedBox(width: AppSpacing.xs),
+                  Expanded(
+                    child: Text(
+                      guide,
+                      style: const TextStyle(
+                        color: AppColors.ink,
+                        height: 1.5,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// "근거 보기" — 근거를 접었다 펴는 목록. sourceType은 라벨로만 노출한다.
+class _EvidenceExpansion extends StatelessWidget {
+  const _EvidenceExpansion({required this.index, required this.evidence});
+
+  final int index;
+  final List<ReportEvidenceItemDto> evidence;
+
+  @override
+  Widget build(BuildContext context) => Theme(
+    data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+    child: ExpansionTile(
+      key: ValueKey('report-interpretation-evidence-$index'),
+      tilePadding: EdgeInsets.zero,
+      childrenPadding: const EdgeInsets.only(bottom: AppSpacing.xs),
+      expandedCrossAxisAlignment: CrossAxisAlignment.start,
+      shape: const Border(),
+      collapsedShape: const Border(),
+      title: const Text(
+        '근거 보기',
+        style: TextStyle(
+          color: AppColors.lavender,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+      children: [
+        for (final item in evidence)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  _evidenceSourceLabel(item.sourceType),
+                  style: AppTypography.label,
+                ),
+                if (item.text case final text?)
+                  Text(
+                    text,
+                    style: const TextStyle(color: AppColors.ink, height: 1.5),
+                  ),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+/// §6 문답 목록 — 대표 문답 최대 3개, 나머지는 "대화 더 보기"로 접는다.
+class _QaPairList extends StatefulWidget {
+  const _QaPairList({required this.pairs});
+
+  final List<ReportQaPairDto> pairs;
+
+  @override
+  State<_QaPairList> createState() => _QaPairListState();
+}
+
+class _QaPairListState extends State<_QaPairList> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final representative = [
+      for (final pair in widget.pairs)
+        if (pair.isRepresentative) pair,
+    ];
+    final ordered = representative.isEmpty ? widget.pairs : representative;
+    final rest = [
+      for (final pair in widget.pairs)
+        if (!ordered.take(3).contains(pair)) pair,
+    ];
+    final primary = ordered.take(3).toList();
+    final overflow = _expanded ? rest : const <ReportQaPairDto>[];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final pair in [...primary, ...overflow]) _QaPairTile(pair: pair),
+        if (rest.isNotEmpty)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              key: const ValueKey('report-qa-more'),
+              onPressed: () => setState(() => _expanded = !_expanded),
+              child: Text(_expanded ? '대화 접기' : '대화 더 보기'),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+class _QaPairTile extends StatelessWidget {
+  const _QaPairTile({required this.pair});
+
+  final ReportQaPairDto pair;
+
+  @override
+  Widget build(BuildContext context) {
+    final String answerText;
+    if (pair.state == 'SKIPPED') {
+      answerText = '이 질문은 건너뛰었어요';
+    } else if (pair.answer == null || pair.answer!.trim().isEmpty) {
+      answerText = '답하지 않았어요';
+    } else {
+      answerText = pair.answer!;
+    }
+    final needsVoiceConfirm =
+        pair.inputType == 'VOICE' && pair.sttNeedsConfirmation;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (pair.question case final question?)
+            Text(
+              'Q. $question',
+              style: const TextStyle(
+                color: AppColors.ink,
+                fontWeight: FontWeight.w700,
+                height: 1.5,
+              ),
+            ),
+          const SizedBox(height: AppSpacing.xxs),
+          Text(
+            'A. $answerText',
+            style: const TextStyle(color: AppColors.inkMuted, height: 1.5),
+          ),
+          if (needsVoiceConfirm) ...[
+            const SizedBox(height: AppSpacing.xxs),
+            const Text(
+              '음성 인식 내용을 확인해 주세요',
+              style: TextStyle(color: AppColors.inkMuted, fontSize: 13),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _ReferenceLine extends StatelessWidget {
+  const _ReferenceLine({required this.reference});
+
+  final ReportReferenceDto reference;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (reference.title case final title?)
+          Text(
+            title,
+            style: const TextStyle(
+              color: AppColors.ink,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        if (reference.url case final url?)
+          Text(url, style: AppTypography.caption),
+      ],
+    ),
   );
 }
 
@@ -1377,10 +1886,6 @@ class _ImagePlaceholder extends StatelessWidget {
 String _date(String isoDate) => isoDate.length >= 10
     ? isoDate.substring(0, 10).replaceAll('-', '.')
     : isoDate;
-
-/// 서버가 주는 밀리초 활동 시간을 분 단위 문구로 바꾼다. 값이 없으면 표시하지 않는다.
-String? _minutes(int? durationMs) =>
-    durationMs == null ? null : '${(durationMs / 60000).round()}분';
 
 String _emotionLabel(String emotion) => switch (emotion) {
   'HAPPY' || 'JOY' => '기쁨',

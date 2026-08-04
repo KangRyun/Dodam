@@ -111,13 +111,21 @@ final class PushCoordinator {
   }
 
   /// 로그아웃 시 호출한다. 이 기기 Token을 비활성화하고 구독을 정리한다.
+  ///
+  /// 두 번 호출해도 해제 요청은 한 번만 나간다. 로그아웃 경로가 겹쳐 이 메서드가
+  /// 두 번 불리면, 두 번째 호출은 세션이 이미 지워진 뒤라 `DELETE`가 `401`로
+  /// 실패한다. 첫 호출이 성공했으므로 피해는 없지만 매 로그아웃마다 무의미한
+  /// 요청과 서버 오류 로그가 남는다(S15P11B209-869 실기기 실측). [start]가
+  /// `_started`로 재진입을 막는 것과 같은 방식으로 막는다.
   Future<void> stop() async {
+    if (!_started) return;
+    _started = false;
+
     for (final subscription in _subscriptions) {
       await subscription.cancel();
     }
     _subscriptions.clear();
     _dedupe.clear();
-    _started = false;
 
     await _guard(_tokenRepository.unregister);
   }

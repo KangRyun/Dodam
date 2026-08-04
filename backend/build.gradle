@@ -30,6 +30,9 @@ dependencies {
     implementation 'org.springframework.boot:spring-boot-starter-data-redis'
     implementation 'org.springframework.boot:spring-boot-starter-actuator'
     implementation 'org.springframework.security:spring-security-oauth2-jose'
+    // 보호자 PIN 해시(BCrypt)용. spring-security-crypto 는 웹 보안 필터를 끌고 오지 않는 순수 암호 모듈이다
+    // (S15P11B209-879). Argon2id 는 bouncycastle 이 더 필요한데 pepper 를 함께 쓰므로 실익 차이가 작다.
+    implementation 'org.springframework.security:spring-security-crypto'
     implementation 'org.flywaydb:flyway-core'
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.8.17'
     implementation 'com.google.firebase:firebase-admin:9.2.0'

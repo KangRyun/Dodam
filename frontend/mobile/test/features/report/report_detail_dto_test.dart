@@ -124,6 +124,153 @@ void main() {
     });
   });
 
+  group('재구성 계약 필드 (S15P11B209-875)', () {
+    test('신규 필드가 없으면 빈 목록·null로 하위 호환된다', () {
+      final report = ReportDetailDto.fromJson(_fullJson());
+
+      expect(report.nonDiagnosticNotice, isNull);
+      expect(report.publicInterpretations, isEmpty);
+      expect(report.evidenceItems, isEmpty);
+      expect(report.subjectReports, isEmpty);
+      expect(report.parentGuides, isEmpty);
+      expect(report.references, isEmpty);
+      expect(report.orderedParentGuides, isEmpty);
+      expect(report.orderedSubjectReports, isEmpty);
+    });
+
+    test('publicInterpretations·evidenceItems·subjectReports를 파싱한다', () {
+      final json = _fullJson()
+        ..['nonDiagnosticNotice'] = '진단이 아니라 관찰 참고 자료예요.'
+        ..['publicInterpretations'] = [
+          {
+            'category': 'RELATIONSHIP',
+            'title': '가족과의 연결',
+            'tendencyText': '의지하려는 경향이 보일 수 있습니다.',
+            'scopeText': '이번 활동에서 나타난 가능성입니다.',
+            'homeObservationGuide': '살펴봐 주세요.',
+            'evidenceRefs': [101, 102],
+          },
+        ]
+        ..['evidenceItems'] = [
+          {'evidenceId': 101, 'sourceType': 'CHILD_ANSWER', 'text': '가족이 산대요.'},
+        ]
+        ..['subjectReports'] = [
+          {
+            'subjectType': 'HOUSE',
+            'imageUrl': 'https://cdn.example/house.png',
+            'visionObservations': ['지붕이 커요.'],
+            'qaPairs': [
+              {
+                'question': '누가 살아요?',
+                'answer': '가족이요',
+                'state': 'ANSWERED',
+                'inputType': 'VOICE',
+                'sttNeedsConfirmation': true,
+                'isRepresentative': true,
+              },
+            ],
+            'interpretationRefs': [0],
+          },
+        ]
+        ..['parentGuides'] = [
+          {
+            'guideType': 'DAILY_PARENTING',
+            'items': ['하루 한 번 이야기 들어 주세요.'],
+          },
+        ]
+        ..['references'] = [
+          {'title': '그림 심리의 이해', 'url': null},
+        ];
+
+      final report = ReportDetailDto.fromJson(json);
+
+      expect(report.nonDiagnosticNotice, '진단이 아니라 관찰 참고 자료예요.');
+      final interpretation = report.publicInterpretations.single;
+      expect(interpretation.category, 'RELATIONSHIP');
+      expect(interpretation.evidenceRefs, [101, 102]);
+      expect(report.evidenceItems.single.sourceType, 'CHILD_ANSWER');
+      final subject = report.subjectReports.single;
+      expect(subject.subjectType, 'HOUSE');
+      expect(subject.visionObservations, ['지붕이 커요.']);
+      final qa = subject.qaPairs.single;
+      expect(qa.inputType, 'VOICE');
+      expect(qa.sttNeedsConfirmation, isTrue);
+      expect(report.parentGuides.single.guideType, 'DAILY_PARENTING');
+      expect(report.references.single.title, '그림 심리의 이해');
+    });
+
+    test('orderedSubjectReports·orderedParentGuides가 계약 순서로 정렬한다', () {
+      final json = _fullJson()
+        ..['subjectReports'] = [
+          {'subjectType': 'PERSON'},
+          {'subjectType': 'HOUSE'},
+          {'subjectType': 'TREE'},
+        ]
+        ..['parentGuides'] = [
+          {
+            'guideType': 'PROFESSIONAL_SUPPORT',
+            'items': ['a'],
+          },
+          {
+            'guideType': 'DRAWING_CONVERSATION',
+            'items': ['b'],
+          },
+        ];
+
+      final report = ReportDetailDto.fromJson(json);
+
+      expect(
+        report.orderedSubjectReports.map((item) => item.subjectType),
+        ['HOUSE', 'TREE', 'PERSON'],
+      );
+      expect(
+        report.orderedParentGuides.map((item) => item.guideType),
+        ['DRAWING_CONVERSATION', 'PROFESSIONAL_SUPPORT'],
+      );
+    });
+
+    test('activityFacts 신규 수치와 플래그를 파싱한다', () {
+      final json = _fullJson()
+        ..['activityFacts'] = {
+          'totalDurationSec': 420,
+          'drawingDurationSec': 260,
+          'pauseCount': 3,
+          'undoCount': 2,
+          'questionCount': 6,
+          'answerCount': 5,
+          'skipCount': 1,
+          'detectedElementCount': 12,
+          'pressureAvailable': true,
+          'pressureValue': 0.62,
+          'truncated': true,
+          'aggregatedHtp': true,
+        };
+
+      final facts = ReportDetailDto.fromJson(json).activityFacts!;
+
+      expect(facts.totalDurationSec, 420);
+      expect(facts.undoCount, 2);
+      expect(facts.detectedElementCount, 12);
+      expect(facts.hasPressureValue, isTrue);
+      expect(facts.pressureValue, 0.62);
+      expect(facts.truncated, isTrue);
+      expect(facts.aggregatedHtp, isTrue);
+    });
+
+    test('pressureAvailable만 true이고 값이 없으면 필압을 노출하지 않는다', () {
+      final json = _fullJson()
+        ..['activityFacts'] = {
+          'pressureAvailable': true,
+          'pressureValue': null,
+        };
+
+      final facts = ReportDetailDto.fromJson(json).activityFacts!;
+
+      expect(facts.pressureAvailable, isTrue);
+      expect(facts.hasPressureValue, isFalse);
+    });
+  });
+
   group('representativeUtterances', () {
     test('정상 항목을 순서대로 파싱한다', () {
       final report = ReportDetailDto.fromJson(_fullJson());

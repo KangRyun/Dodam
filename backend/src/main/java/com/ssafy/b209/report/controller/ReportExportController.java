@@ -99,8 +99,18 @@ public class ReportExportController {
    * @param guardianUserId 개발·테스트 프로필 전용 보호자 식별 Header
    * @return attachment Content-Disposition을 가진 PDF 바이트
    */
+  /**
+   * {@code produces} 를 선언하지 않는다 (S15P11B209-860).
+   *
+   * <p>선언하면 클라이언트의 {@code Accept} 와 협상해야 하고, 앱은 모든 요청에 {@code Accept: application/json} 을 붙인다. 그러면
+   * 이 Endpoint 만 협상에서 거부되는데 그 실패는 <b>컨트롤러 메서드 밖(반환값 쓰기 단계)</b>에서 나므로 서비스의 예외 분류를 지나치고 {@code
+   * COMMON_500_001}(미분류 서버 오류)로 나갔다. 실기기에서 PDF 저장·공유가 계속 실패한 원인이다.
+   *
+   * <p>응답 Content-Type 은 아래 {@code contentType(APPLICATION_PDF)} 가 명시하므로 협상 없이도 PDF 로 나간다. 같은 이유로
+   * 그림·음성 파일 Endpoint 는 스트리밍 응답이라 협상을 타지 않고 잘 동작했다.
+   */
   @Operation(summary = "관찰 리포트 PDF 파일 다운로드")
-  @GetMapping(value = "/{exportId}/file", produces = MediaType.APPLICATION_PDF_VALUE)
+  @GetMapping("/{exportId}/file")
   public ResponseEntity<byte[]> download(
       @PathVariable Long reportId,
       @PathVariable Long exportId,

@@ -22,6 +22,10 @@ void main() {
     expect(find.byKey(const ValueKey('activity-120')), findsOneWidget);
     expect(find.byKey(const ValueKey('activity-121')), findsOneWidget);
     // 첫 활동이 자동 선택되어 우측 프리뷰에 나온다.
+    await _revealHistoryWidget(
+      tester,
+      find.byKey(const ValueKey('activity-history-summary')),
+    );
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('activity-history-summary')),
@@ -31,14 +35,33 @@ void main() {
     );
 
     // 카드를 누르면 화면 이동 없이 우측 프리뷰가 그 활동으로 바뀐다.
+    final smallLayout = find.byKey(
+      const ValueKey('activity-history-small-layout'),
+    );
+    if (smallLayout.evaluate().isNotEmpty) {
+      await tester.drag(smallLayout, const Offset(0, 2000));
+      await tester.pumpAndSettle();
+    }
+    await _revealHistoryWidget(
+      tester,
+      find.byKey(const ValueKey('activity-121')),
+    );
     await tester.tap(find.byKey(const ValueKey('activity-121')));
     await tester.pump();
+    await _revealHistoryWidget(
+      tester,
+      find.byKey(const ValueKey('activity-history-summary')),
+    );
     expect(
       find.descendant(
         of: find.byKey(const ValueKey('activity-history-summary')),
         matching: find.text('비 오는 날'),
       ),
       findsOneWidget,
+    );
+    await _revealHistoryWidget(
+      tester,
+      find.byKey(const ValueKey('activity-history-list')),
     );
     expect(find.byKey(const ValueKey('activity-history-list')), findsOneWidget);
   });
@@ -172,6 +195,183 @@ void main() {
     expect(find.text('사람 3/3'), findsOneWidget);
   });
 
+  testWidgets('기록 보관소 배너는 실제 활동 수를 표시하고 삭제 안내를 만들지 않는다', (tester) async {
+    final semantics = tester.ensureSemantics();
+    await _openHistoryDirect(tester, _ActivityRepository());
+
+    expect(
+      find.byKey(const ValueKey('activity-history-archive-hero')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('activity-history-scribe-frame')),
+      findsOneWidget,
+    );
+    expect(
+      find.byKey(const ValueKey('activity-history-scribe')),
+      findsOneWidget,
+    );
+    expect(find.bySemanticsLabel('활동 기록을 정리하는 도담이'), findsOneWidget);
+    expect(
+      tester
+          .widget<Image>(find.byKey(const ValueKey('activity-history-scribe')))
+          .fit,
+      BoxFit.contain,
+    );
+    expect(find.text('보호자 활동 기록'), findsOneWidget);
+    expect(find.text('아이의 그림과 이야기를 한 권씩 소중히 모았어요.'), findsOneWidget);
+    expect(find.text('2개의 기록'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('activity-history-books-pattern')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('기록 삭제 시'), findsNothing);
+    await _revealHistoryWidget(
+      tester,
+      find.byKey(const ValueKey('activity-history-open-page')),
+    );
+    expect(
+      find.byKey(const ValueKey('activity-history-open-page')),
+      findsOneWidget,
+    );
+    semantics.dispose();
+  });
+
+  testWidgets('세이지 배너의 제목·설명·실제 기록 수는 AA 대비를 충족한다', (tester) async {
+    await _openHistoryDirect(tester, _ActivityRepository());
+
+    final hero = tester.widget<Container>(
+      find.byKey(const ValueKey('activity-history-archive-hero')),
+    );
+    final heroDecoration = hero.decoration! as BoxDecoration;
+    final heroBackground = heroDecoration.color!;
+    expect(heroBackground.computeLuminance(), greaterThan(0.5));
+
+    for (final label in const [
+      '보호자 활동 기록',
+      '활동 기록',
+      '아이의 그림과 이야기를 한 권씩 소중히 모았어요.',
+    ]) {
+      final text = tester.widget<Text>(find.text(label));
+      expect(
+        _contrastRatio(text.style!.color!, heroBackground),
+        greaterThanOrEqualTo(4.5),
+        reason: '$label 텍스트 대비',
+      );
+    }
+
+    final count = tester.widget<Container>(
+      find.byKey(const ValueKey('activity-history-count')),
+    );
+    final countBackground = (count.decoration! as BoxDecoration).color!;
+    final countText = tester.widget<Text>(find.text('2개의 기록'));
+    expect(
+      _contrastRatio(countText.style!.color!, countBackground),
+      greaterThanOrEqualTo(4.5),
+    );
+  });
+
+  testWidgets('선택 카드·필터·그림·이동 버튼에 의미와 48dp 터치 영역을 제공한다', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final semantics = tester.ensureSemantics();
+
+    await _openHistoryDirect(
+      tester,
+      _ActivityRepository(activities: [_htpActivity]),
+    );
+
+    expect(find.bySemanticsLabel('활동 기록'), findsOneWidget);
+    expect(
+      tester
+          .getSemantics(
+            find.byKey(const ValueKey('activity-filter-semantics-아동')),
+          )
+          .label,
+      contains('아동 필터, 현재 도담이'),
+    );
+    expect(
+      tester.getSemantics(find.byKey(const ValueKey('activity-semantics-122'))),
+      matchesSemantics(
+        label: '집·나무·사람 그림, 2026.07.20, 캔버스, 분석 완료, 집·나무·사람 그림',
+        isButton: true,
+        hasSelectedState: true,
+        isSelected: true,
+      ),
+    );
+    expect(find.bySemanticsLabel('도담이의 집·나무·사람 그림 집 그림'), findsOneWidget);
+    expect(find.bySemanticsLabel('이전 그림'), findsOneWidget);
+    expect(find.bySemanticsLabel('다음 그림'), findsOneWidget);
+    for (final key in const ['htp-preview-previous', 'htp-preview-next']) {
+      final size = tester.getSize(find.byKey(ValueKey(key)));
+      expect(size.width, greaterThanOrEqualTo(48), reason: key);
+      expect(size.height, greaterThanOrEqualTo(48), reason: key);
+    }
+
+    semantics.dispose();
+  });
+
+  for (final configuration in const [
+    (label: 'Pixel Tablet 1280×800', size: Size(1280, 800), scale: 1.0),
+    (label: '낮은 가로 844×390', size: Size(844, 390), scale: 1.0),
+    (label: '휴대전화 세로 390×844', size: Size(390, 844), scale: 1.0),
+    (label: 'Pixel Tablet 큰 글자', size: Size(1280, 800), scale: 2.0),
+    (label: '낮은 가로 큰 글자', size: Size(844, 390), scale: 2.0),
+    (label: '휴대전화 세로 큰 글자', size: Size(390, 844), scale: 2.0),
+  ]) {
+    testWidgets('${configuration.label}에서 overflow 없이 기록과 CTA에 접근한다', (
+      tester,
+    ) async {
+      tester.view.physicalSize = configuration.size;
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = configuration.scale;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+
+      await _openHistoryDirect(tester, _ActivityRepository());
+
+      expect(
+        find.byKey(const ValueKey('activity-history-archive-hero')),
+        findsOneWidget,
+      );
+      expect(find.text('2개의 기록'), findsOneWidget);
+      expect(find.text('아이의 그림과 이야기를 한 권씩 소중히 모았어요.'), findsOneWidget);
+      final frameSize = tester.getSize(
+        find.byKey(const ValueKey('activity-history-scribe-frame')),
+      );
+      if (configuration.size.width < 700) {
+        expect(frameSize.width, inInclusiveRange(92, 112));
+        expect(
+          find.byKey(const ValueKey('activity-history-books-pattern')),
+          findsNothing,
+        );
+      } else {
+        expect(frameSize.width, inInclusiveRange(150, 176));
+        expect(
+          find.byKey(const ValueKey('activity-history-books-pattern')),
+          findsOneWidget,
+        );
+      }
+      expect(frameSize.aspectRatio, 1);
+      await _revealHistoryWidget(
+        tester,
+        find.byKey(const ValueKey('activity-history-list')),
+      );
+      expect(
+        find.byKey(const ValueKey('activity-history-list')),
+        findsOneWidget,
+      );
+      final cta = find.byKey(const ValueKey('activity-report-cta'));
+      await _revealHistoryWidget(tester, cta);
+      expect(cta, findsOneWidget);
+      expect(tester.getSize(cta).height, greaterThanOrEqualTo(48));
+      expect(tester.takeException(), isNull, reason: configuration.label);
+    });
+  }
+
   testWidgets('끝까지 스크롤하면 다음 페이지를 이어붙인다', (tester) async {
     final repository = _PagingActivityRepository(
       pages: [_pageItems(200, 12), _pageItems(300, 3)],
@@ -243,6 +443,18 @@ void main() {
   });
 }
 
+double _contrastRatio(Color foreground, Color background) {
+  final foregroundLuminance = foreground.computeLuminance();
+  final backgroundLuminance = background.computeLuminance();
+  final lighter = foregroundLuminance > backgroundLuminance
+      ? foregroundLuminance
+      : backgroundLuminance;
+  final darker = foregroundLuminance > backgroundLuminance
+      ? backgroundLuminance
+      : foregroundLuminance;
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 /// 보호자 홈을 거쳐 활동 이력으로 들어간다. 홈에서의 이동 자체를 보는
 /// 테스트만 쓴다.
 Future<void> _openHistory(
@@ -289,6 +501,57 @@ Future<void> _openHistoryDirect(
   if (settle) {
     await tester.pumpAndSettle();
   } else {
+    await tester.pump();
+  }
+}
+
+Future<void> _revealHistoryWidget(WidgetTester tester, Finder target) async {
+  if (target.evaluate().isNotEmpty) {
+    await tester.ensureVisible(target);
+    await tester.pump();
+    return;
+  }
+
+  final lowHeightLayout = find.byKey(
+    const ValueKey('activity-history-low-height-layout'),
+  );
+  for (
+    var attempt = 0;
+    attempt < 8 &&
+        target.evaluate().isEmpty &&
+        lowHeightLayout.evaluate().isNotEmpty;
+    attempt++
+  ) {
+    await tester.drag(lowHeightLayout, const Offset(0, -240));
+    await tester.pumpAndSettle();
+  }
+
+  final smallLayout = find.byKey(
+    const ValueKey('activity-history-small-layout'),
+  );
+  for (
+    var attempt = 0;
+    attempt < 12 &&
+        target.evaluate().isEmpty &&
+        smallLayout.evaluate().isNotEmpty;
+    attempt++
+  ) {
+    await tester.drag(smallLayout, const Offset(0, -240));
+    await tester.pumpAndSettle();
+  }
+  for (
+    var attempt = 0;
+    attempt < 12 &&
+        target.evaluate().isEmpty &&
+        smallLayout.evaluate().isNotEmpty;
+    attempt++
+  ) {
+    await tester.drag(smallLayout, const Offset(0, 240));
+    await tester.pumpAndSettle();
+  }
+
+  if (target.evaluate().isNotEmpty) {
+    await tester.ensureVisible(target);
     await tester.pump();
   }
 }

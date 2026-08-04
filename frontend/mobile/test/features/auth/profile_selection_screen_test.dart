@@ -13,7 +13,7 @@ import 'package:flutter/semantics.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('보호자와 아이 카드형 레이아웃 및 production asset을 렌더링한다', (tester) async {
+  testWidgets('아동 프로필 중심 레이아웃과 작은 보호자 진입 버튼을 렌더링한다', (tester) async {
     final controller = await _loadedController([
       _child(id: 3, nickname: '하늘', age: 6),
       _child(id: 7, nickname: '바다', age: 8),
@@ -22,43 +22,35 @@ void main() {
 
     await _pumpScreen(tester, controller: controller);
 
-    expect(find.text('안녕하세요! 누구로 시작할까요?'), findsOneWidget);
-    expect(find.text('보호자 모드'), findsOneWidget);
-    expect(find.text('보호자로 시작하기'), findsOneWidget);
-    expect(find.text('아이 모드'), findsOneWidget);
-    expect(find.text('아이로 시작하기'), findsOneWidget);
-    expect(find.byKey(const ValueKey('guardian-role-card')), findsOneWidget);
-    expect(find.byKey(const ValueKey('child-role-card')), findsOneWidget);
+    expect(find.text('누가 도담이와 함께할까요?'), findsOneWidget);
+    expect(find.text('활동을 시작할 아동 프로필을 선택해 주세요.'), findsOneWidget);
+    expect(find.text('보호자 모드로'), findsOneWidget);
+    expect(find.byKey(const ValueKey('child-profile-section')), findsOneWidget);
+    expect(find.byKey(const ValueKey('child-profile-grid')), findsOneWidget);
+    expect(find.byKey(const ValueKey('guardian-role-card')), findsNothing);
+    expect(find.byKey(const ValueKey('child-role-card')), findsNothing);
+    expect(find.text('보호자로 시작하기'), findsNothing);
+    expect(find.text('아이 모드'), findsNothing);
+    expect(find.text('아이로 시작하기'), findsNothing);
+    expect(find.byKey(const ValueKey('child-dodami-image')), findsNothing);
 
     final guardian = tester.widget<Image>(
       find.byKey(const ValueKey('guardian-dodami-image')),
-    );
-    final child = tester.widget<Image>(
-      find.byKey(const ValueKey('child-dodami-image')),
     );
     expect(
       (guardian.image as AssetImage).assetName,
       'assets/images/role_selection/guardian_dodami.png',
     );
     expect(guardian.fit, BoxFit.contain);
-    expect(
-      (child.image as AssetImage).assetName,
-      'assets/images/role_selection/child_dodami.png',
-    );
-    expect(child.fit, BoxFit.contain);
 
     final context = tester.element(find.byType(ProfileSelectionScreen));
-    for (final asset in [
-      'assets/images/role_selection/guardian_dodami.png',
-      'assets/images/role_selection/child_dodami.png',
-    ]) {
-      final bytes = await DefaultAssetBundle.of(context).load(asset);
-      expect(bytes.lengthInBytes, greaterThan(0), reason: asset);
-    }
+    const asset = 'assets/images/role_selection/guardian_dodami.png';
+    final bytes = await DefaultAssetBundle.of(context).load(asset);
+    expect(bytes.lengthInBytes, greaterThan(0), reason: asset);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('보호자 카드를 연속 탭해도 callback은 한 번이다', (tester) async {
+  testWidgets('보호자 모드 버튼을 연속 탭해도 callback은 한 번이다', (tester) async {
     final controller = await _loadedController([_child(id: 3)]);
     addTearDown(controller.dispose);
     var calls = 0;
@@ -75,10 +67,11 @@ void main() {
     expect(calls, 1);
     expect(
       tester
-          .getSize(find.byKey(const ValueKey('guardian-start-cta')))
+          .getSize(find.byKey(const ValueKey('guardian-mode-action')))
           .shortestSide,
       greaterThanOrEqualTo(48),
     );
+    expect(tester.getSemantics(guardian).label, '보호자 모드로 이동');
   });
 
   testWidgets('아이 프로필 연속 탭은 정확한 childId를 한 번만 전달한다', (tester) async {
@@ -109,8 +102,10 @@ void main() {
     addTearDown(controller.dispose);
     await _pumpScreen(tester, controller: controller);
 
-    expect(find.text('하늘 · 6세'), findsOneWidget);
-    expect(find.text('바다 · 8세'), findsOneWidget);
+    expect(find.text('하늘'), findsOneWidget);
+    expect(find.text('6세'), findsOneWidget);
+    expect(find.text('바다'), findsOneWidget);
+    expect(find.text('8세'), findsOneWidget);
     expect(find.text('별'), findsOneWidget);
     expect(find.text('별 · 0세'), findsNothing);
     expect(find.textContaining('null세'), findsNothing);
@@ -129,7 +124,7 @@ void main() {
     );
 
     final label = tester.widget<Text>(find.textContaining('아주아주긴아이'));
-    expect(label.maxLines, 1);
+    expect(label.maxLines, 2);
     expect(label.overflow, TextOverflow.ellipsis);
     expect(tester.takeException(), isNull);
   });
@@ -144,7 +139,7 @@ void main() {
       onAddChild: (_) => additions += 1,
     );
 
-    expect(find.byKey(const ValueKey('child-profile-carousel')), findsNothing);
+    expect(find.byKey(const ValueKey('child-profile-grid')), findsOneWidget);
     expect(find.byKey(const ValueKey('add-child-profile')), findsOneWidget);
     expect(find.text('추가'), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('add-child-profile')));
@@ -160,7 +155,7 @@ void main() {
     expect(find.byKey(const ValueKey('add-child-profile')), findsOneWidget);
   });
 
-  testWidgets('아이 다수는 가로 스크롤해 마지막 프로필과 추가 버튼에 접근한다', (tester) async {
+  testWidgets('아이 다수는 반응형 그리드와 화면 스크롤로 마지막 항목에 접근한다', (tester) async {
     final children = List.generate(
       8,
       (index) => _child(id: index + 1, nickname: '아이 ${index + 1}'),
@@ -175,22 +170,19 @@ void main() {
       onAddChild: (_) => additions += 1,
     );
 
-    final carousel = find.byKey(const ValueKey('child-profile-carousel'));
-    await tester.ensureVisible(carousel);
-    await tester.pump();
-    final horizontalScrollable = find
-        .descendant(of: carousel, matching: find.byType(Scrollable))
-        .first;
-    await tester.scrollUntilVisible(
+    final grid = find.byKey(const ValueKey('child-profile-grid'));
+    expect(grid, findsOneWidget);
+    final outerScroll = find.byKey(const ValueKey('profile-selection-scroll'));
+    await tester.dragUntilVisible(
       find.byKey(const ValueKey('child-profile-8')),
-      300,
-      scrollable: horizontalScrollable,
+      outerScroll,
+      const Offset(0, -300),
     );
     expect(find.byKey(const ValueKey('child-profile-8')), findsOneWidget);
-    await tester.scrollUntilVisible(
+    await tester.dragUntilVisible(
       find.byKey(const ValueKey('add-child-profile')),
-      300,
-      scrollable: horizontalScrollable,
+      outerScroll,
+      const Offset(0, -300),
     );
     await tester.tap(find.byKey(const ValueKey('add-child-profile')));
     expect(additions, 1);
@@ -359,33 +351,20 @@ void main() {
     );
   });
 
-  testWidgets('태블릿 가로는 2열이고 세로·휴대폰·확대 글꼴은 overflow가 없다', (tester) async {
+  testWidgets('요구 viewport와 글자 배율에서 반응형 배치와 overflow를 검증한다', (tester) async {
     final controller = await _loadedController([
       _child(id: 3, nickname: '하늘', age: 6),
       _child(id: 7, nickname: '바다', age: 8),
     ]);
     addTearDown(controller.dispose);
 
-    await _pumpScreen(
-      tester,
-      controller: controller,
-      size: const Size(1280, 800),
-    );
-    final guardianWide = tester.getTopLeft(
-      find.byKey(const ValueKey('guardian-role-card')),
-    );
-    final childWide = tester.getTopLeft(
-      find.byKey(const ValueKey('child-role-card')),
-    );
-    expect(guardianWide.dy, childWide.dy);
-    expect(guardianWide.dx, lessThan(childWide.dx));
-    expect(tester.takeException(), isNull);
-
     for (final variant in [
-      (const Size(800, 1280), 1.0),
-      (const Size(412, 915), 1.0),
-      (const Size(320, 640), 1.0),
-      (const Size(412, 915), 2.0),
+      (const Size(1280, 800), 1.0),
+      (const Size(844, 390), 1.0),
+      (const Size(390, 844), 1.0),
+      (const Size(1280, 800), 2.0),
+      (const Size(844, 390), 2.0),
+      (const Size(390, 844), 2.0),
     ]) {
       await _pumpScreen(
         tester,
@@ -393,14 +372,34 @@ void main() {
         size: variant.$1,
         textScale: variant.$2,
       );
-      final guardianTop = tester.getTopLeft(
-        find.byKey(const ValueKey('guardian-role-card')),
+      final title = find.byKey(const ValueKey('profile-selection-title'));
+      final guardian = find.byKey(const ValueKey('guardian-mode-action'));
+      expect(title, findsOneWidget);
+      expect(guardian, findsOneWidget);
+      expect(find.byKey(const ValueKey('child-profile-grid')), findsOneWidget);
+      expect(
+        tester.getSize(guardian).height,
+        greaterThanOrEqualTo(48),
+        reason: '${variant.$1} scale ${variant.$2}',
       );
-      final childTop = tester.getTopLeft(
-        find.byKey(const ValueKey('child-role-card')),
+      if (variant.$1.width >= 720) {
+        expect(
+          tester.getTopLeft(title).dx,
+          lessThan(tester.getTopLeft(guardian).dx),
+          reason: '${variant.$1} scale ${variant.$2}',
+        );
+      } else {
+        expect(
+          tester.getTopLeft(guardian).dy,
+          greaterThan(tester.getTopLeft(title).dy),
+          reason: '${variant.$1} scale ${variant.$2}',
+        );
+      }
+      expect(
+        tester.takeException(),
+        isNull,
+        reason: '${variant.$1} scale ${variant.$2}',
       );
-      expect(childTop.dy, greaterThan(guardianTop.dy), reason: '${variant.$1}');
-      expect(tester.takeException(), isNull, reason: '${variant.$1}');
     }
   });
 
@@ -423,6 +422,7 @@ void main() {
     );
 
     expect(guardian.flagsCollection.isButton, isTrue);
+    expect(guardian.label, '보호자 모드로 이동');
     expect(child.flagsCollection.isButton, isTrue);
     expect(add.flagsCollection.isButton, isTrue);
     expect(settings.flagsCollection.isButton, isTrue);

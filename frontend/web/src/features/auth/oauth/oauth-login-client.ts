@@ -1,5 +1,8 @@
 import { toSession, type OAuthLoginResultDto } from "@/features/auth/data/auth-dto";
-import { getOrCreateDeviceId } from "@/features/auth/data/session-store";
+import {
+  getOrCreateDeviceId,
+  saveAuthProvider,
+} from "@/features/auth/data/session-store";
 import type {
   AuthProviderId,
   AuthSession,
@@ -72,6 +75,8 @@ export async function completeOAuthLogin(input: {
     throw new Error(message);
   }
 
+  // 백엔드가 연결 제공자를 내려주지 않아, 설정 "계정 연결" 표시용으로 보관한다.
+  saveAuthProvider(input.provider);
   return toSession(body as OAuthLoginResultDto);
 }
 

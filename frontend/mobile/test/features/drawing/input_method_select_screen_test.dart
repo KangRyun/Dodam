@@ -1594,6 +1594,110 @@ void main() {
     });
   });
 
+  group('선촬영 사진 자동 업로드(S15P11B209-872)', () {
+    ValidatedPhoto heldPhoto() => ValidatedPhoto(
+      photo: PickedPhoto(
+        bytes: _tinyPngBytes,
+        fileName: 'house.png',
+        mimeType: 'image/png',
+      ),
+      mimeType: 'image/png',
+      width: 400,
+      height: 400,
+    );
+
+    InputMethodSelectScreen pendingScreen({
+      required DrawingRepository repository,
+      List<Object?> uploadFailures = const [],
+    }) => InputMethodSelectScreen(
+      childId: 7,
+      drawingTypeId: 5,
+      title: '집',
+      description: '집을 그려요',
+      icon: Icons.home_rounded,
+      accentColor: Colors.orange,
+      repository: repository,
+      htpPhotoUploadEnabled: true,
+      existingDrawingSessionId: 950,
+      restoredActivityContext: const DrawingActivityContextDto(
+        activityKind: 'HTP',
+        htpAssessmentId: 91,
+        htpStatus: 'IN_PROGRESS',
+        stepOrder: 1,
+        drawingSubject: 'HOUSE',
+      ),
+      pendingPhoto: heldPhoto(),
+      photoPickerAdapter: _FakePhotoPickerAdapter(),
+      dimensionReader: (_) async => (400, 400),
+      now: () => DateTime.utc(2026, 7, 29, 1),
+    );
+
+    testWidgets('확인·미리보기 없이 곧장 마스코트 로딩바 업로드 화면을 보여준다', (tester) async {
+      final uploadGate = Completer<void>();
+      final repository = _FakeDrawingRepository(uploadGate: uploadGate);
+
+      await pumpScreen(tester, pendingScreen(repository: repository));
+      for (
+        var attempt = 0;
+        attempt < 5 && repository.uploadCalls == 0;
+        attempt++
+      ) {
+        await tester.pump();
+      }
+      await tester.pump();
+
+      // 곧장 이 세션에 업로드가 시작된다(방식 선택·확인 없음).
+      expect(repository.uploadCalls, 1);
+      expect(repository.uploadSessionIds, [950]);
+      // 마스코트 로딩바가 뜨고, 확인용 미리보기 화면은 뜨지 않는다.
+      expect(
+        find.byKey(const ValueKey('input-method-pending-upload')),
+        findsOneWidget,
+      );
+      expect(find.text('이 사진으로 시작할까?'), findsNothing);
+      expect(find.text('이 사진 사용하기'), findsNothing);
+      expect(find.text('집 그림 사진을 올리고 있어요'), findsOneWidget);
+
+      uploadGate.complete();
+      await tester.pumpAndSettle();
+    });
+
+    testWidgets('업로드가 실패하면 다시 시도를 노출하고 재시도하면 완료해 pop한다', (tester) async {
+      final repository = _FakeDrawingRepository(
+        uploadFailures: [
+          const ApiTransportFailure(type: ApiTransportFailureType.connection),
+        ],
+      );
+      DrawingSessionResolution? popped;
+      var poppedCalled = false;
+
+      await pumpScreen(
+        tester,
+        pendingScreen(repository: repository),
+        onPopped: (value) {
+          popped = value;
+          poppedCalled = true;
+        },
+      );
+      await tester.pumpAndSettle();
+
+      // 첫 시도 실패 → 오류 배너와 "다시 시도"가 뜬다.
+      expect(
+        find.byKey(const ValueKey('input-method-upload-error')),
+        findsOneWidget,
+      );
+      expect(find.text('다시 시도'), findsOneWidget);
+      expect(poppedCalled, isFalse);
+
+      await tester.tap(find.byKey(const ValueKey('input-method-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(repository.uploadCalls, 2);
+      expect(poppedCalled, isTrue);
+      expect(popped?.currentStage, 'CONVERSING');
+    });
+  });
+
   group('업로드 성공·실패·재시도', () {
     Future<PickedPhoto> validPhoto() async => PickedPhoto(
       bytes: _tinyPngBytes,

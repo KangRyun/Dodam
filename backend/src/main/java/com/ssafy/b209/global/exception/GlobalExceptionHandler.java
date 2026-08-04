@@ -6,6 +6,8 @@ import com.ssafy.b209.global.response.CommonErrorCode;
 import com.ssafy.b209.global.response.ErrorCode;
 import com.ssafy.b209.global.response.FieldErrorDetail;
 import com.ssafy.b209.global.response.ValidationErrorData;
+import com.ssafy.b209.user.dto.response.GuardianPinStatusResponse;
+import com.ssafy.b209.user.exception.GuardianPinException;
 import jakarta.validation.ConstraintViolationException;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -27,6 +29,7 @@ import org.springframework.validation.ObjectError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.web.HttpMediaTypeNotAcceptableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.HandlerMethodValidationException;
@@ -48,6 +51,20 @@ public class GlobalExceptionHandler {
 
   /** 상태를 보관하지 않는 전역 예외 처리기를 생성한다. */
   public GlobalExceptionHandler() {}
+
+  /**
+   * 보호자 PIN 실패에 현재 상태를 함께 실어 응답한다 (S15P11B209-879).
+   *
+   * <p>{@code PIN_MISMATCH}는 남은 시도 횟수, {@code PIN_LOCKED}는 잠금 해제 시각이 있어야 화면을 만들 수 있다. 그 값을 오류 메시지
+   * 문자열에 섞지 않고 성공 응답과 같은 구조체로 {@code data}에 싣는다. PIN 원문·해시는 담기지 않는다.
+   */
+  @ExceptionHandler(GuardianPinException.class)
+  ResponseEntity<ApiErrorResponse<GuardianPinStatusResponse>> handleGuardianPinException(
+      GuardianPinException exception) {
+    ErrorCode errorCode = exception.getErrorCode();
+    logClientError(errorCode);
+    return response(errorCode, exception.getStatus());
+  }
 
   @ExceptionHandler(BusinessException.class)
   ResponseEntity<ApiErrorResponse<Void>> handleBusinessException(BusinessException exception) {
@@ -181,6 +198,21 @@ public class GlobalExceptionHandler {
   ResponseEntity<ApiErrorResponse<Void>> handleMaxUploadSizeExceededException(
       MaxUploadSizeExceededException exception) {
     ErrorCode errorCode = CommonErrorCode.PAYLOAD_TOO_LARGE;
+    logClientError(errorCode);
+    return response(errorCode);
+  }
+
+  /**
+   * 클라이언트가 받아들일 수 없는 표현을 요청한 경우다 (S15P11B209-860).
+   *
+   * <p>이 핸들러가 없으면 아래 {@code Exception} 핸들러가 먼저 잡아 <b>406이어야 할 실패가 500으로 나간다.</b> 실제로 앱이 모든 요청에
+   * {@code Accept: application/json} 을 붙이는 탓에 PDF 다운로드가 {@code COMMON_500_001} 로 보였고, 서버 오류로 오진해
+   * 원인을 찾는 데 오래 걸렸다. 협상 실패는 클라이언트 오류이므로 상태와 코드로 그렇게 말해야 한다.
+   */
+  @ExceptionHandler(HttpMediaTypeNotAcceptableException.class)
+  ResponseEntity<ApiErrorResponse<Void>> handleHttpMediaTypeNotAcceptableException(
+      HttpMediaTypeNotAcceptableException exception) {
+    ErrorCode errorCode = CommonErrorCode.NOT_ACCEPTABLE;
     logClientError(errorCode);
     return response(errorCode);
   }

@@ -129,6 +129,23 @@ public class NotificationDeviceToken {
     this.active = true;
   }
 
+  /**
+   * 이 Token 행의 소유자와 설치 식별자를 바꾼다.
+   *
+   * <p>{@code token_hash}에 전역 유니크 제약이 걸려 있어(V3 {@code uk_notification_device_tokens_hash}) 같은
+   * Token으로 행을 하나 더 만들 수 없다. 그래서 같은 기기가 다른 계정으로 다시 등록할 때는 행을 새로 만들지 않고 이 행을 옮겨 쓴다.
+   *
+   * <p>호출 전에 <b>이전 소유자의 등록이 해제된 상태인지</b> 반드시 확인해야 한다. 활성 상태에서 옮기면 이전 사용자에게 갈 알림이 새 사용자 기기로 배달된다 —
+   * 계약(`notification-inbox-contract.md` §3)이 소유권 자동 이전을 금지한 이유가 그것이다.
+   *
+   * @param userId 새 소유 사용자 ID
+   * @param deviceId 새 설치 식별자
+   */
+  public void transferTo(Long userId, String deviceId) {
+    this.userId = userId;
+    this.deviceId = deviceId;
+  }
+
   /** 기기 Token을 비활성화한다. 발송 대상에서 제외되며 행은 남긴다. */
   public void deactivate() {
     this.active = false;

@@ -22,11 +22,11 @@ export default function OnboardingPage() {
   }, [router]);
 
   return (
-    <main className="flex min-h-dvh items-center justify-center bg-neutral-50 px-6 py-12">
+    <main className="onboarding-page">
       {user != null ? (
         <OnboardingFlow user={user} />
       ) : (
-        <p className="text-sm text-neutral-400">불러오는 중…</p>
+        <p className="onboarding-loading">불러오는 중…</p>
       )}
     </main>
   );

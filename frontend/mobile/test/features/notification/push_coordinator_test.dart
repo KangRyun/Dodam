@@ -236,6 +236,38 @@ void main() {
     expect(tokenRepository.unregisterCount, 1);
     expect(presenter.shown, isEmpty);
   });
+
+  test('두 번 중지해도 Token 해제는 한 번만 요청한다', () async {
+    // 로그아웃 진입점이 두 곳이라 이 메서드가 두 번 불릴 수 있다. 두 번째 요청은
+    // 세션이 이미 지워진 뒤라 401로 실패해 오류 로그만 남긴다(S15P11B209-869).
+    final coordinator = build();
+    await coordinator.start();
+
+    await coordinator.stop();
+    await coordinator.stop();
+
+    expect(tokenRepository.unregisterCount, 1);
+  });
+
+  test('시작하지 않은 상태에서 중지하면 서버를 호출하지 않는다', () async {
+    final coordinator = build();
+
+    await coordinator.stop();
+
+    expect(tokenRepository.unregisterCount, 0);
+  });
+
+  test('중지한 뒤 다시 시작하면 해제와 등록이 각각 한 번씩 일어난다', () async {
+    gateway.token = 'fcm-token';
+    final coordinator = build();
+
+    await coordinator.start();
+    await coordinator.stop();
+    await coordinator.start();
+
+    expect(tokenRepository.unregisterCount, 1);
+    expect(tokenRepository.registered, ['fcm-token', 'fcm-token']);
+  });
 }
 
 final class _FakeGateway implements PushGateway {

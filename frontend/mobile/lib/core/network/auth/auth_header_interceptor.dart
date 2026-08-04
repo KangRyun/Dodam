@@ -3,6 +3,13 @@ import 'package:dio/dio.dart';
 import 'access_token_provider.dart';
 import 'token_refresher.dart';
 
+/// 이 요청에서 Access Token 재발급으로 재시도하면 안 되는 Backend 오류 코드 목록.
+///
+/// 인증된 API도 401을 업무 오류로 사용할 수 있다. 호출자가 이 extra에 코드 목록을
+/// 넣으면 그 코드만 원 요청을 그대로 실패시켜 업무 요청의 중복 실행을 막는다.
+const authRetryExcludedErrorCodesExtraKey =
+    'auth-token-retry-excluded-error-codes';
+
 /// 현재 Access Token을 인증 요청 헤더에 첨부
 final class AuthHeaderInterceptor extends Interceptor {
   AuthHeaderInterceptor(this._tokenProvider);
@@ -39,9 +46,15 @@ final class AuthTokenRetryInterceptor extends Interceptor {
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) async {
     final request = err.requestOptions;
+    final responseCode = _responseCode(err.response?.data);
+    final excludedCodes =
+        request.extra[authRetryExcludedErrorCodesExtraKey]
+            as Iterable<Object?>?;
     final canRefresh =
         err.response?.statusCode == 401 &&
         request.extra[_retriedKey] != true &&
+        (responseCode == null ||
+            excludedCodes?.contains(responseCode) != true) &&
         !_isAuthRequest(request.path);
 
     if (!canRefresh) {
@@ -82,4 +95,10 @@ final class AuthTokenRetryInterceptor extends Interceptor {
     final authIndex = segments.indexOf('auth');
     return authIndex >= 0 && authIndex + 1 < segments.length;
   }
+
+  String? _responseCode(Object? body) => switch (body) {
+    Map<Object?, Object?> map when map['code'] is String =>
+      map['code']! as String,
+    _ => null,
+  };
 }

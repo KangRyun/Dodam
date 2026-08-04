@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../../../../design_system/design_system.dart';
+import '../../application/camera_brightness.dart';
 import '../../data/device_photo_permission_service.dart';
 import '../../domain/photo_permission_service.dart';
 import '../../domain/photo_picker_adapter.dart';
@@ -24,6 +25,11 @@ abstract interface class GuidedCameraController {
   Future<void> setFocusPoint(Offset point);
   Future<void> setExposurePoint(Offset point);
   Future<PickedPhoto> takePicture();
+
+  /// 프리뷰 프레임의 평균 휘도(0~255)를 주기적으로 [onLuma]로 전달한다.
+  /// 밝기 안내 전용이라 실패해도 촬영 흐름에 영향을 주지 않아야 한다.
+  Future<void> startLumaStream(void Function(double luma) onLuma);
+  Future<void> stopLumaStream();
 }
 
 abstract interface class GuidedCameraPlatform {
@@ -54,10 +60,14 @@ final class _PluginGuidedCameraController implements GuidedCameraController {
         description,
         ResolutionPreset.high,
         enableAudio: false,
-        imageFormatGroup: ImageFormatGroup.jpeg,
+        // 밝기 안내를 위해 프리뷰 프레임을 YUV로 받는다. takePicture는
+        // imageFormatGroup과 무관하게 JPEG 파일을 반환한다.
+        imageFormatGroup: ImageFormatGroup.yuv420,
       );
 
   final CameraController _controller;
+  bool _streaming = false;
+  DateTime _lastLumaSample = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   bool get isInitialized => _controller.value.isInitialized;
@@ -68,7 +78,36 @@ final class _PluginGuidedCameraController implements GuidedCameraController {
   @override
   Future<void> initialize() => _controller.initialize();
   @override
-  Future<void> dispose() => _controller.dispose();
+  Future<void> dispose() async {
+    await stopLumaStream();
+    await _controller.dispose();
+  }
+
+  @override
+  Future<void> startLumaStream(void Function(double luma) onLuma) async {
+    if (_streaming) return;
+    _streaming = true;
+    await _controller.startImageStream((image) {
+      // 카메라 fps 그대로 계산하면 과하므로 ~280ms 간격으로만 표본을 낸다.
+      final now = DateTime.now();
+      if (now.difference(_lastLumaSample).inMilliseconds < 280) return;
+      _lastLumaSample = now;
+      if (image.planes.isEmpty) return;
+      onLuma(averageLumaFromYPlane(image.planes.first.bytes));
+    });
+  }
+
+  @override
+  Future<void> stopLumaStream() async {
+    if (!_streaming) return;
+    _streaming = false;
+    try {
+      await _controller.stopImageStream();
+    } on Object {
+      // 이미 정지·정리된 스트림 중지 실패는 무시한다.
+    }
+  }
+
   @override
   Future<void> setFlashMode(FlashMode mode) => _controller.setFlashMode(mode);
   @override
@@ -156,6 +195,8 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen>
   bool _detached = false;
   bool _disposed = false;
   FlashMode _flashMode = FlashMode.off;
+  final BrightnessClassifier _brightnessClassifier = BrightnessClassifier();
+  CaptureBrightness _brightness = CaptureBrightness.ok;
   int _generation = 0;
   int? _requestedInitializationGeneration;
   Future<void> _operations = Future<void>.value();
@@ -325,15 +366,18 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen>
       final previous = _controller;
       final initialized = candidate;
       candidate = null;
+      _brightnessClassifier.reset();
       setState(() {
         _controller = initialized;
         _initializing = false;
         _failure = null;
         _tutorialVisible = !hidden;
+        _brightness = CaptureBrightness.ok;
       });
       if (previous != null && !identical(previous, initialized)) {
         await _disposeSafely(previous);
       }
+      unawaited(_startBrightnessStream(initialized, generation));
     } on Object catch (error) {
       if (candidate != null) await _disposeSafely(candidate);
       if (_isCurrent(generation)) {
@@ -412,11 +456,13 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen>
     _requestedInitializationGeneration = null;
     final controller = _controller;
     _controller = null;
+    _brightnessClassifier.reset();
     if (mounted) {
       setState(() {
         _initializing = false;
         _capturing = false;
         _tutorialVisible = false;
+        _brightness = CaptureBrightness.ok;
       });
     }
     if (controller != null) {
@@ -440,6 +486,38 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen>
     if (_isCurrent(generation)) {
       setState(() => _tutorialVisible = false);
     }
+  }
+
+  Future<void> _startBrightnessStream(
+    GuidedCameraController controller,
+    int generation,
+  ) async {
+    try {
+      await controller.startLumaStream(
+        (luma) => _onLuma(controller, generation, luma),
+      );
+    } on Object {
+      // 밝기 안내는 부가 기능이라 스트림 실패가 촬영을 막지 않게 한다.
+    }
+  }
+
+  Future<void> _stopBrightnessStream(GuidedCameraController controller) async {
+    try {
+      await controller.stopLumaStream();
+    } on Object {
+      // 이미 정지된 스트림 중지 실패는 무시한다.
+    }
+  }
+
+  void _onLuma(
+    GuidedCameraController controller,
+    int generation,
+    double luma,
+  ) {
+    if (!_isControllerCurrent(controller, generation) || _capturing) return;
+    final level = _brightnessClassifier.classify(luma);
+    if (level == _brightness) return;
+    setState(() => _brightness = level);
   }
 
   Future<void> _toggleFlash() async {
@@ -468,6 +546,9 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen>
     }
     final generation = _generation;
     setState(() => _capturing = true);
+    // 일부 기기에서 image stream과 촬영 동시 사용이 불안정하므로 촬영 직전
+    // 밝기 스트림을 멈춘다. 실패 시에는 다시 켠다.
+    await _stopBrightnessStream(controller);
     try {
       final photo = await controller.takePicture();
       if (!mounted || !_isControllerCurrent(controller, generation)) return;
@@ -477,6 +558,7 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('사진을 찍지 못했어요. 잠시 후 다시 시도해 주세요.')),
         );
+        unawaited(_startBrightnessStream(controller, generation));
       }
     } finally {
       if (_isControllerCurrent(controller, generation)) {
@@ -621,6 +703,12 @@ class _GuidedCameraScreenState extends State<GuidedCameraScreen>
                           currentSubject: widget.drawingSubject,
                         ),
                       ),
+                      if (_brightness != CaptureBrightness.ok)
+                        Positioned(
+                          top: 14,
+                          left: 14,
+                          child: _BrightnessBanner(level: _brightness),
+                        ),
                       Align(
                         alignment: Alignment.bottomCenter,
                         child: Container(
@@ -873,6 +961,54 @@ class _HtpStepPanel extends StatelessWidget {
               ),
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// 프리뷰 밝기가 촬영에 부적절할 때 아이 친화 문구로 안내하는 배너.
+/// 촬영을 막지 않고 경고만 한다(S15P11B209-867).
+class _BrightnessBanner extends StatelessWidget {
+  const _BrightnessBanner({required this.level});
+
+  final CaptureBrightness level;
+
+  @override
+  Widget build(BuildContext context) {
+    final (icon, message) = switch (level) {
+      CaptureBrightness.tooDark => (
+        Icons.brightness_low_rounded,
+        '조금 더 밝은 곳에서 찍어요',
+      ),
+      CaptureBrightness.tooBright => (
+        Icons.brightness_high_rounded,
+        '너무 밝아요. 그림자 지지 않게 해요',
+      ),
+      CaptureBrightness.ok => (Icons.check_rounded, ''),
+    };
+    return Semantics(
+      liveRegion: true,
+      label: message,
+      child: ExcludeSemantics(
+        child: Container(
+          key: const ValueKey('guided-camera-brightness'),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.62),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: AppColors.sunshine, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                message,
+                style: const TextStyle(color: Colors.white, fontSize: 13),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }

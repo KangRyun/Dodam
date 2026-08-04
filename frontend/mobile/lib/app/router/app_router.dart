@@ -16,6 +16,7 @@ import '../../features/child/presentation/screens/child_registration_screen.dart
 import '../../features/community/presentation/screens/community_webview_screen.dart';
 import '../../features/drawing/application/drawing_session_start_controller.dart';
 import '../../features/drawing/data/dto/drawing_dtos.dart';
+import '../../features/drawing/domain/pending_htp_photo.dart';
 import '../../features/drawing/domain/repositories/drawing_repository.dart';
 import '../../features/drawing/presentation/screens/drawing_activity_selection_screen.dart';
 import '../../features/drawing/presentation/screens/input_method_select_screen.dart';
@@ -35,8 +36,10 @@ import '../../features/consent/presentation/screens/consent_management_screen.da
 import '../../features/consent/presentation/screens/consent_terms_screen.dart';
 import '../../features/settings/domain/repositories/account_withdrawal_repository.dart';
 import '../../features/settings/domain/repositories/data_retention_repository.dart';
+import '../../features/settings/domain/repositories/notification_settings_repository.dart';
 import '../../features/settings/presentation/screens/account_withdrawal_screen.dart';
 import '../../features/settings/presentation/screens/data_retention_screen.dart';
+import '../../features/settings/presentation/screens/notification_settings_screen.dart';
 import '../../features/settings/presentation/screens/settings_main_screen.dart';
 import '../../features/settings/presentation/screens/guardian_profile_screen.dart';
 import '../state/guardian_child_controller.dart';
@@ -71,6 +74,7 @@ abstract final class AppRouter {
     ConsentRepository? consentRepository,
     AccountWithdrawalRepository? accountWithdrawalRepository,
     DataRetentionRepository? dataRetentionRepository,
+    NotificationSettingsRepository? notificationSettingsRepository,
     Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider,
     ConversationRepository? conversationRepository,
     ConversationEndRepository? conversationEndRepository,
@@ -86,6 +90,7 @@ abstract final class AppRouter {
     int? basisAnalysisId,
     bool insideShell = false,
     bool htpPhotoUploadEnabled = false,
+    PendingHtpPhotoStore? pendingHtpPhotoStore,
   }) {
     final location = settings.name ?? AppRoutes.guardianHome;
     final segments = Uri.tryParse(location)?.pathSegments ?? const <String>[];
@@ -333,6 +338,10 @@ abstract final class AppRouter {
       ['guardian', 'settings', 'data-retention']
           when dataRetentionRepository != null =>
         DataRetentionScreen(repository: dataRetentionRepository),
+      // 알림 수신 설정 조회·편집. 대상 사용자는 토큰에서 해석한다(S15P11B209-455).
+      ['guardian', 'settings', 'notifications']
+          when notificationSettingsRepository != null =>
+        NotificationSettingsScreen(repository: notificationSettingsRepository),
       // 커뮤니티는 웹 전용(CLAUDE.md 6절). 웹앱을 웹뷰로 띄우고 로그인 토큰을
       // localStorage에 주입한다. URL은 COMMUNITY_WEB_URL dart-define로 교체 가능.
       ['guardian', 'community'] => CommunityWebViewScreen(
@@ -353,6 +362,7 @@ abstract final class AppRouter {
           drawingRepository: drawingRepository,
           completionSnapshotProvider: drawingCompletionSnapshotProvider,
           htpPhotoUploadEnabled: htpPhotoUploadEnabled,
+          pendingHtpPhotoStore: pendingHtpPhotoStore,
           // 아동이 고른 캐릭터를 그 아이의 preferredCharacter로 저장해 프로필
           // 이미지에 반영한다(S15P11B209-505).
           onCharacterSelected: childController.updateChildCharacter,
@@ -387,6 +397,7 @@ abstract final class AppRouter {
                   .initialActivityCode,
           completionSnapshotProvider: drawingCompletionSnapshotProvider,
           htpPhotoUploadEnabled: htpPhotoUploadEnabled,
+          pendingHtpPhotoStore: pendingHtpPhotoStore,
         ),
       ['child', final childId, 'activity', 'input-method']
           when _hasChildContext(childController, childId) &&
