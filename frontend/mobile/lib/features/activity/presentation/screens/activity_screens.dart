@@ -1978,60 +1978,10 @@ class _DrawingScreenState extends State<DrawingScreen>
     },
     child: Scaffold(
       backgroundColor: AppColors.childCanvas,
-      appBar: AppTopBar(
-        title: _activityTitle,
-        onBack: () => unawaited(_stopTtsAndPop()),
-        actions: [
-          if (_canvasTutorialController case final tutorialController?)
-            AnimatedBuilder(
-              animation: tutorialController,
-              builder: (context, _) => IconButton.filledTonal(
-                key: const ValueKey('canvas-tutorial-help'),
-                tooltip: '그림 도구 다시 보기',
-                onPressed: tutorialController.isBusy
-                    ? null
-                    : tutorialController.replay,
-                icon: const Icon(Icons.help_outline_rounded),
-                style: IconButton.styleFrom(
-                  minimumSize: const Size.square(AppSizes.iconButton),
-                ),
-              ),
-            ),
-          IconButton.filledTonal(
-            key: const ValueKey('redo-action'),
-            tooltip: _activeStroke != null
-                ? '그리는 중에는 다시 실행할 수 없어요'
-                : '취소한 그림 획 다시 실행',
-            onPressed: _activeStroke == null && _documentController.canRedo
-                ? _redoLastStroke
-                : null,
-            icon: const Icon(Icons.redo_rounded),
-            style: IconButton.styleFrom(
-              minimumSize: const Size.square(AppSizes.iconButton),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.md),
-            child: IconButton.filledTonal(
-              key: const ValueKey('undo-action'),
-              tooltip: _activeStroke != null
-                  ? '그리는 중에는 실행 취소할 수 없어요'
-                  : '마지막 그림 획 실행 취소',
-              onPressed: _activeStroke == null && _completedStrokes.isNotEmpty
-                  ? _undoLastStroke
-                  : null,
-              icon: const Icon(Icons.undo_rounded),
-              style: IconButton.styleFrom(
-                minimumSize: const Size.square(AppSizes.iconButton),
-              ),
-            ),
-          ),
-        ],
-      ),
       body: Stack(
         children: [
+          // 크레용 툴바가 화면 맨 위에 오므로 상태 표시줄 아래로 내려야 한다.
           SafeArea(
-            top: false,
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final restoreStatus = _draftRestoreController.status;
@@ -2225,6 +2175,72 @@ class _DrawingScreenState extends State<DrawingScreen>
                               ),
                             ),
                           ),
+                          // HTP 는 지금 몇 단계에서 무엇을 그리는지가 아이에게
+                          // 필요한 정보다. 상단 바를 없앴으므로 캔버스 왼쪽 위에
+                          // 남겨 둔다. 자유 그림은 안내가 필요 없어 띄우지 않는다.
+                          if (widget.activityContext.isHtp)
+                            Positioned(
+                              left: frameInset + AppSpacing.md,
+                              top: frameInset + AppSpacing.md,
+                              child: IgnorePointer(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: AppColors.canvasWarm.withValues(
+                                      alpha: .92,
+                                    ),
+                                    borderRadius: BorderRadius.circular(
+                                      AppRadius.sm,
+                                    ),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: AppSpacing.sm,
+                                      vertical: AppSpacing.xs,
+                                    ),
+                                    child: Text(
+                                      _activityTitle,
+                                      key: const ValueKey(
+                                        'drawing-activity-title',
+                                      ),
+                                      style: const TextStyle(
+                                        color: AppColors.canvasInk,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          // 도구 사용법 다시 보기. 툴바(위)·쓰다미(오른쪽 아래)와
+                          // 겹치지 않으면서 손이 닿기 쉬운 왼쪽 아래에 둔다.
+                          if (_canvasTutorialController
+                              case final tutorialController?)
+                            Positioned(
+                              left: frameInset + AppSpacing.md,
+                              bottom: frameInset + AppSpacing.md,
+                              child: AnimatedBuilder(
+                                animation: tutorialController,
+                                builder: (context, _) =>
+                                    IconButton.filledTonal(
+                                      key: const ValueKey(
+                                        'canvas-tutorial-help',
+                                      ),
+                                      tooltip: '그림 도구 다시 보기',
+                                      onPressed: tutorialController.isBusy
+                                          ? null
+                                          : tutorialController.replay,
+                                      icon: const Icon(
+                                        Icons.help_outline_rounded,
+                                      ),
+                                      style: IconButton.styleFrom(
+                                        minimumSize: const Size.square(
+                                          AppSizes.iconButton,
+                                        ),
+                                      ),
+                                    ),
+                              ),
+                            ),
                           // 보여줄 질문·오류가 있을 때만 띄운다. 빈 상자를 겹쳐 두면
                           // 그 아래 캔버스와 복원 안내가 탭을 받지 못한다.
                           if (hasStageChrome &&
