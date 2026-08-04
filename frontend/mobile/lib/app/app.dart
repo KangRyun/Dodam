@@ -140,6 +140,9 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
   final _pushRegistrationStatus = PushRegistrationStatusController();
   AuthSession? _currentSession;
 
+  /// 로그아웃 정리가 진행 중인지. 로그아웃 진입점이 두 곳이라 재진입을 막는다.
+  bool _isSigningOut = false;
+
   /// 보호자 셸이 지금 보여주는 탭의 라우트 이름. 셸이 알려 준다.
   String? _guardianTabRoute;
 
@@ -353,7 +356,22 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
   }
 
   // 인증 세션과 보호자 선택 상태 초기화
+  //
+  // 로그아웃 버튼은 두 곳에 있다(보호자 홈 헤더의 LogoutActionButton, 설정 화면).
+  // 각 위젯은 자기 화면 안에서만 중복 탭을 막으므로, 여기서 한 번 더 막는다.
+  // 재진입하면 정리 작업이 두 번 실행돼 이미 만료된 세션으로 서버를 호출한다 —
+  // 기기 Token 해제가 401로 실패하던 경로가 그것이다(S15P11B209-869).
   Future<void> _signOut() async {
+    if (_isSigningOut) return;
+    _isSigningOut = true;
+    try {
+      await _runSignOut();
+    } finally {
+      _isSigningOut = false;
+    }
+  }
+
+  Future<void> _runSignOut() async {
     final provider = _currentSession?.user.provider;
     // 아래 정리에는 await가 여럿이고 그 사이에도 푸시 탭이 들어온다. 세션 표시를
     // 먼저 내려야 정리 도중 도착한 탭이 이동으로 이어지지 않는다. Token 해제
