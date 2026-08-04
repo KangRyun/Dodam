@@ -1941,11 +1941,10 @@ class _DrawingScreenState extends State<DrawingScreen>
     _pendingCompletionMetadata = null;
   }
 
-  List<DrawingStroke> get _visibleStrokes {
-    final strokes = [..._completedStrokes];
-    if (_activeStroke case final stroke?) strokes.add(stroke);
-    return List.unmodifiable(strokes);
-  }
+  /// 아직 확정되지 않아 transient 층에만 그려야 하는 획이다. 확정된 획은
+  /// [DrawingDocumentController.actions] 로 이미 한 번 그려진다.
+  List<DrawingStroke> get _transientStrokes =>
+      List.unmodifiable([?_activeStroke]);
 
   Future<void> _stopTtsAndPop() async {
     if (_isLeaving || _isCompleting) return;
@@ -2018,7 +2017,9 @@ class _DrawingScreenState extends State<DrawingScreen>
                   cursorController: _cursorController,
                   onPointerHover: _handleCanvasHover,
                   onPointerExit: _handleCanvasExit,
-                  strokes: _visibleStrokes,
+                  // 확정된 획은 actions 로 한 번만 그린다. 여기에 _visibleStrokes
+                  // 를 넘기면 같은 획이 transient 층에도 겹쳐 두 번 그려진다.
+                  strokes: _transientStrokes,
                   onPointerDown: _startStroke,
                   onPointerMove: _extendStroke,
                   onPointerUp: _endStroke,
