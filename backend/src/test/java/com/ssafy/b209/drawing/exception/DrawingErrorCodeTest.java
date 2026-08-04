@@ -70,7 +70,7 @@ class DrawingErrorCodeTest {
         new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_008", "현재 상태에서는 그림 초안을 저장할 수 없습니다."));
     expected.put(
         DrawingErrorCode.DRAWING_DRAFT_VERSION_CONFLICT,
-        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_009", "같은 순서의 그림 초안이 이미 저장되어 있습니다."));
+        new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_009", "같은 버전의 그림 초안이 이미 저장되어 있습니다."));
     expected.put(
         DrawingErrorCode.STALE_DRAWING_DRAFT_VERSION,
         new ErrorContract(HttpStatus.CONFLICT, "DRAWING_409_010", "더 최근의 그림 초안이 이미 저장되어 있습니다."));

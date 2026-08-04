@@ -26,6 +26,7 @@ import com.ssafy.b209.storage.image.StoredImage;
 import java.io.ByteArrayInputStream;
 import java.time.Clock;
 import java.time.Instant;
+import java.time.LocalDateTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.util.Optional;
@@ -107,6 +108,20 @@ class DrawingDraftServiceTest {
   }
 
   @Test
+  void storesSnapshotOnlyDraftWithZeroEventSequence() {
+    allowSession();
+    given(drawingAssetRepository.findLatestDraft(SESSION_ID)).willReturn(Optional.empty());
+    given(imageStorage.store(preview)).willReturn(storedImage());
+    given(drawingAssetRepository.saveAndFlush(any(DrawingAsset.class)))
+        .willAnswer(invocation -> saved(invocation.getArgument(0), 20L));
+
+    DrawingDraftResponse response = service.save(SESSION_ID, preview, request(0));
+
+    assertThat(response.lastEventSequence()).isZero();
+    assertThat(response.assetVersion()).isEqualTo(1);
+  }
+
+  @Test
   void incrementsVersionWhenNewerEventSequenceArrives() {
     allowSession();
     given(drawingAssetRepository.findLatestDraft(SESSION_ID))
@@ -122,68 +137,128 @@ class DrawingDraftServiceTest {
   }
 
   @Test
-  void rejectsOlderEventSequenceAndOlderSnapshotBeforeStoringFile() {
+  void rejectsSameAndOlderEventSequenceBeforeStoringFile() {
     allowSession();
     given(drawingAssetRepository.findLatestDraft(SESSION_ID))
         .willReturn(Optional.of(draft(3, 30, 19L)));
 
     assertError(
-        () -> service.save(SESSION_ID, preview, request(29)),
-        DrawingErrorCode.STALE_DRAWING_DRAFT_VERSION);
+        () -> service.save(SESSION_ID, preview, request(30, NOW.atOffset(ZoneOffset.UTC))),
+        DrawingErrorCode.DRAWING_DRAFT_VERSION_CONFLICT);
     assertError(
-        () -> service.save(SESSION_ID, preview, request(30, "2026-07-22T05:30:00Z")),
+        () -> service.save(SESSION_ID, preview, request(29)),
         DrawingErrorCode.STALE_DRAWING_DRAFT_VERSION);
     verifyNoInteractions(imageStorage);
   }
 
   @Test
-  void rejectsSameEventSequenceCapturedAtTheSameMomentAsDuplicate() {
+  void acceptsSameSequenceOnlyWhenClientSavedAtIsStrictlyNewer() {
     allowSession();
     given(drawingAssetRepository.findLatestDraft(SESSION_ID))
-        .willReturn(Optional.of(draft(3, 30, 19L)));
+        .willReturn(
+            Optional.of(
+                draft(
+                    3,
+                    30,
+                    19L,
+                    OffsetDateTime.parse("2026-07-22T05:30:00.123456Z").toLocalDateTime())));
+    given(imageStorage.store(preview)).willReturn(storedImage());
+    given(drawingAssetRepository.saveAndFlush(any(DrawingAsset.class)))
+        .willAnswer(invocation -> saved(invocation.getArgument(0), 20L));
+
+    DrawingDraftResponse response =
+        service.save(
+            SESSION_ID,
+            preview,
+            request(30, OffsetDateTime.parse("2026-07-22T14:30:00.123457789+09:00")));
+
+    assertThat(response.assetVersion()).isEqualTo(4);
+    assertThat(response.lastEventSequence()).isEqualTo(30);
+    assertThat(response.clientSavedAt()).isEqualTo("2026-07-22T05:30:00.123457Z");
+  }
+
+  @Test
+  void rejectsSameSequenceAndSameNormalizedTimestampAsConflict() {
+    allowSession();
+    given(drawingAssetRepository.findLatestDraft(SESSION_ID))
+        .willReturn(
+            Optional.of(
+                draft(
+                    3,
+                    30,
+                    19L,
+                    OffsetDateTime.parse("2026-07-22T05:30:00.123456Z").toLocalDateTime())));
 
     assertError(
-        () -> service.save(SESSION_ID, preview, requestCapturedWithLatest(30)),
+        () ->
+            service.save(
+                SESSION_ID,
+                preview,
+                request(30, OffsetDateTime.parse("2026-07-22T14:30:00.123456999+09:00"))),
         DrawingErrorCode.DRAWING_DRAFT_VERSION_CONFLICT);
     verifyNoInteractions(imageStorage);
   }
 
   @Test
-  void storesNewerSnapshotThatKeepsTheSameEventSequence() {
+  void rejectsSameSequenceWithOlderTimestampAsStale() {
     allowSession();
     given(drawingAssetRepository.findLatestDraft(SESSION_ID))
-        .willReturn(Optional.of(draft(3, 30, 19L)));
-    given(imageStorage.store(preview)).willReturn(storedImage());
-    given(drawingAssetRepository.saveAndFlush(any(DrawingAsset.class)))
-        .willAnswer(invocation -> saved(invocation.getArgument(0), 21L));
+        .willReturn(
+            Optional.of(
+                draft(
+                    3,
+                    30,
+                    19L,
+                    OffsetDateTime.parse("2026-07-22T05:30:00.123456Z").toLocalDateTime())));
 
-    DrawingDraftResponse response =
-        service.save(SESSION_ID, preview, request(30, "2026-07-22T05:30:02Z"));
-
-    assertThat(response.assetVersion()).isEqualTo(4);
-    assertThat(response.lastEventSequence()).isEqualTo(30);
+    assertError(
+        () ->
+            service.save(
+                SESSION_ID,
+                preview,
+                request(30, OffsetDateTime.parse("2026-07-22T14:30:00.123455999+09:00"))),
+        DrawingErrorCode.STALE_DRAWING_DRAFT_VERSION);
+    verifyNoInteractions(imageStorage);
   }
 
   @Test
-  void storesDocumentThatHasNoDrawingEvents() {
+  void rejectsLowerSequenceEvenWhenTimestampIsLater() {
+    allowSession();
+    given(drawingAssetRepository.findLatestDraft(SESSION_ID))
+        .willReturn(
+            Optional.of(
+                draft(
+                    3,
+                    30,
+                    19L,
+                    OffsetDateTime.parse("2026-07-22T05:30:00.123456Z").toLocalDateTime())));
+
+    assertError(
+        () ->
+            service.save(
+                SESSION_ID,
+                preview,
+                request(29, OffsetDateTime.parse("2026-07-23T14:30:00+09:00"))),
+        DrawingErrorCode.STALE_DRAWING_DRAFT_VERSION);
+    verifyNoInteractions(imageStorage);
+  }
+
+  @Test
+  void normalizesClientSavedAtToUtcMicrosecondsBeforePersisting() {
     allowSession();
     given(drawingAssetRepository.findLatestDraft(SESSION_ID)).willReturn(Optional.empty());
     given(imageStorage.store(preview)).willReturn(storedImage());
     given(drawingAssetRepository.saveAndFlush(any(DrawingAsset.class)))
-        .willAnswer(invocation -> saved(invocation.getArgument(0), 22L));
+        .willAnswer(invocation -> saved(invocation.getArgument(0), 20L));
 
-    DrawingDraftResponse response = service.save(SESSION_ID, preview, request(0));
+    DrawingDraftResponse response =
+        service.save(
+            SESSION_ID,
+            preview,
+            request(1, OffsetDateTime.parse("2026-07-22T14:30:00.123456789+09:00")));
 
-    assertThat(response.assetVersion()).isEqualTo(1);
-    assertThat(response.lastEventSequence()).isZero();
-  }
-
-  @Test
-  void rejectsNegativeEventSequenceBeforeStoringFile() {
-    assertError(
-        () -> service.save(SESSION_ID, preview, request(-1)),
-        DrawingErrorCode.DRAWING_DRAFT_METADATA_INVALID);
-    verifyNoInteractions(imageStorage);
+    assertThat(response.clientSavedAt()).isEqualTo("2026-07-22T05:30:00.123456Z");
+    assertThat(response.canvasState().clientSavedAt()).isEqualTo("2026-07-22T05:30:00.123456Z");
   }
 
   @Test
@@ -258,20 +333,19 @@ class DrawingDraftServiceTest {
   }
 
   private SaveDrawingDraftRequest request(long lastEventSequence) {
-    return new SaveDrawingDraftRequest(
-        lastEventSequence, OffsetDateTime.parse("2026-07-22T14:30:00+09:00"));
+    return request(lastEventSequence, OffsetDateTime.parse("2026-07-22T14:30:00+09:00"));
   }
 
-  private SaveDrawingDraftRequest request(long lastEventSequence, String clientSavedAt) {
-    return new SaveDrawingDraftRequest(lastEventSequence, OffsetDateTime.parse(clientSavedAt));
-  }
-
-  /** 저장된 최신 초안과 클라이언트 저장 시각이 같은 요청이다. */
-  private SaveDrawingDraftRequest requestCapturedWithLatest(long lastEventSequence) {
-    return new SaveDrawingDraftRequest(lastEventSequence, NOW.atOffset(ZoneOffset.UTC));
+  private SaveDrawingDraftRequest request(long lastEventSequence, OffsetDateTime clientSavedAt) {
+    return new SaveDrawingDraftRequest(lastEventSequence, clientSavedAt);
   }
 
   private DrawingAsset draft(int version, long lastEventSequence, long id) {
+    return draft(version, lastEventSequence, id, NOW.atOffset(ZoneOffset.UTC).toLocalDateTime());
+  }
+
+  private DrawingAsset draft(
+      int version, long lastEventSequence, long id, LocalDateTime capturedAt) {
     DrawingAsset asset =
         DrawingAsset.draft(
             drawingSession,
@@ -281,7 +355,7 @@ class DrawingDraftServiceTest {
             10,
             "a".repeat(64),
             lastEventSequence,
-            NOW.atOffset(ZoneOffset.UTC).toLocalDateTime(),
+            capturedAt,
             NOW.atOffset(ZoneOffset.UTC).toLocalDateTime());
     return saved(asset, id);
   }
