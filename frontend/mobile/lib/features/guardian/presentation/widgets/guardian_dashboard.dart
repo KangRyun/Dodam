@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../../design_system/design_system.dart';
 import '../../../../app/router/app_navigation.dart';
 import '../../../../app/router/app_router.dart';
 import '../../../../app/router/app_routes.dart';
@@ -110,34 +111,40 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
     return Container(
       key: const ValueKey('child-list-success'),
       padding: const EdgeInsets.fromLTRB(30, 24, 30, 22),
-      child: LayoutBuilder(
-        builder: (context, constraints) {
-          final bodySliver = _buildBodySliver(
-            maxWidth: constraints.maxWidth,
-            scaleAllowance: scaleAllowance,
-          );
-          // 헤더 블록만으로도 화면을 넘기는 극단 조합(아주 낮은 높이 + 큰 글자 배율
-          // + 푸시 안내 띠)에서는 헤더를 스크롤 밖에 두면 헤더가 넘치고 본문 몫이
-          // 0이 된다. 그때만 헤더까지 같은 스크롤에 넣는다.
-          if (constraints.maxHeight < _headerOutsideMinHeight(scaleAllowance)) {
-            return CustomScrollView(
-              slivers: [
-                SliverToBoxAdapter(child: _buildHeader()),
-                bodySliver,
+      // 넓은 태블릿에서 헤더·2열 그리드가 화면 끝까지 늘어나지 않도록 본문을
+      // 최대 폭으로 가두고 가운데 정렬한다(S15P11B209-787). 이 상한(1120)은
+      // 2열 최소 폭(720)보다 넉넉해 좁은 화면에선 아무 영향이 없다.
+      child: ResponsiveContent(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final bodySliver = _buildBodySliver(
+              maxWidth: constraints.maxWidth,
+              scaleAllowance: scaleAllowance,
+            );
+            // 헤더 블록만으로도 화면을 넘기는 극단 조합(아주 낮은 높이 + 큰 글자 배율
+            // + 푸시 안내 띠)에서는 헤더를 스크롤 밖에 두면 헤더가 넘치고 본문 몫이
+            // 0이 된다. 그때만 헤더까지 같은 스크롤에 넣는다.
+            if (constraints.maxHeight <
+                _headerOutsideMinHeight(scaleAllowance)) {
+              return CustomScrollView(
+                slivers: [
+                  SliverToBoxAdapter(child: _buildHeader()),
+                  bodySliver,
+                ],
+              );
+            }
+            // 평소에는 헤더와 푸시 안내를 스크롤 밖에 두어 항상 보이고 본문만
+            // 스크롤한다. 본문에 남은 높이가 최소 높이보다 작을 때만 스크롤이
+            // 생긴다 — 여유가 있는 화면에서는 스크롤 범위가 0이라 기존 배치와 같다.
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                _buildHeader(),
+                Expanded(child: CustomScrollView(slivers: [bodySliver])),
               ],
             );
-          }
-          // 평소에는 헤더와 푸시 안내를 스크롤 밖에 두어 항상 보이고 본문만
-          // 스크롤한다. 본문에 남은 높이가 최소 높이보다 작을 때만 스크롤이
-          // 생긴다 — 여유가 있는 화면에서는 스크롤 범위가 0이라 기존 배치와 같다.
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              _buildHeader(),
-              Expanded(child: CustomScrollView(slivers: [bodySliver])),
-            ],
-          );
-        },
+          },
+        ),
       ),
     );
   }

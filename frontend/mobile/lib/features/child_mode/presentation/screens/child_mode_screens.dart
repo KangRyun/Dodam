@@ -1407,22 +1407,23 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     final held = await _loadHeldHtpPhoto(subject);
     if (held != null) {
       if (!mounted) return;
-      final advanced = await Navigator.of(context).push<DrawingSessionResolution>(
-        MaterialPageRoute(
-          builder: (_) => InputMethodSelectScreen(
-            childId: widget.child.childId,
-            drawingTypeId: 0,
-            title: _htpSubjectTitle(subject),
-            description: '미리 찍어 둔 사진을 올릴게요.',
-            icon: icon,
-            accentColor: accentColor,
-            repository: widget.drawingRepository,
-            existingDrawingSessionId: resolution.sessionId,
-            restoredActivityContext: resolution.activityContext,
-            pendingPhoto: _heldPhotoToValidated(held),
-          ),
-        ),
-      );
+      final advanced = await Navigator.of(context)
+          .push<DrawingSessionResolution>(
+            MaterialPageRoute(
+              builder: (_) => InputMethodSelectScreen(
+                childId: widget.child.childId,
+                drawingTypeId: 0,
+                title: _htpSubjectTitle(subject),
+                description: '미리 찍어 둔 사진을 올릴게요.',
+                icon: icon,
+                accentColor: accentColor,
+                repository: widget.drawingRepository,
+                existingDrawingSessionId: resolution.sessionId,
+                restoredActivityContext: resolution.activityContext,
+                pendingPhoto: _heldPhotoToValidated(held),
+              ),
+            ),
+          );
       if (advanced != null) {
         await widget.pendingHtpPhotoStore?.remove(
           widget.child.childId,
@@ -1816,54 +1817,60 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
   }
 
   /// 태블릿(넓은 화면): 캐릭터는 언덕 위에 서고 이젤은 오른쪽에 세운다.
-  Widget _wideBody(BuildContext context) => Column(
-    key: const ValueKey('child-home-wide-body'),
-    children: [
-      _title(context),
-      const SizedBox(height: AppSpacing.md),
-      Expanded(
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Expanded(
-              child: Align(
-                alignment: Alignment.bottomCenter,
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 440),
-                  child: _carousel(),
+  ///
+  /// 배경 장면은 바깥 Stack에서 화면 전체를 채우고(full-bleed), 상호작용 본문만
+  /// 최대 폭으로 가둬 큰 태블릿에서 캐릭터·이젤이 양 끝으로 벌어지지 않게
+  /// 가운데로 모은다(S15P11B209-787).
+  Widget _wideBody(BuildContext context) => ResponsiveContent(
+    child: Column(
+      key: const ValueKey('child-home-wide-body'),
+      children: [
+        _title(context),
+        const SizedBox(height: AppSpacing.md),
+        Expanded(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: Align(
+                  alignment: Alignment.bottomCenter,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 440),
+                    child: _carousel(),
+                  ),
                 ),
               ),
-            ),
-            const SizedBox(width: AppSpacing.lg),
-            Expanded(
-              child: Align(
-                // 하단 정렬 + 살짝 왼쪽으로 당겨 캐릭터와 균형을 맞추고
-                // 오른쪽 나무와 겹치지 않게 한다.
-                alignment: const Alignment(-0.6, 1),
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: AppSpacing.xl),
-                  // 이젤(고정 높이)+지난 그림 카드가 짧은 화면에서 넘치지 않도록
-                  // 필요할 때만 살짝 축소한다(큰 태블릿에선 원본 크기 유지).
-                  child: FittedBox(
-                    fit: BoxFit.scaleDown,
-                    // 이젤·지난 그림 카드는 둘 다 폭 300으로 고정돼 좌우 가장자리가 맞는다.
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _buildDrawSection(),
-                        // 이젤 다리(bottom -16)를 지나 secondary와 시각적 간격을 준다.
-                        const SizedBox(height: 34),
-                        _pastDrawings(),
-                      ],
+              const SizedBox(width: AppSpacing.lg),
+              Expanded(
+                child: Align(
+                  // 하단 정렬 + 살짝 왼쪽으로 당겨 캐릭터와 균형을 맞추고
+                  // 오른쪽 나무와 겹치지 않게 한다.
+                  alignment: const Alignment(-0.6, 1),
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: AppSpacing.xl),
+                    // 이젤(고정 높이)+지난 그림 카드가 짧은 화면에서 넘치지 않도록
+                    // 필요할 때만 살짝 축소한다(큰 태블릿에선 원본 크기 유지).
+                    child: FittedBox(
+                      fit: BoxFit.scaleDown,
+                      // 이젤·지난 그림 카드는 둘 다 폭 300으로 고정돼 좌우 가장자리가 맞는다.
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _buildDrawSection(),
+                          // 이젤 다리(bottom -16)를 지나 secondary와 시각적 간격을 준다.
+                          const SizedBox(height: 34),
+                          _pastDrawings(),
+                        ],
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
-      ),
-    ],
+      ],
+    ),
   );
 
   /// 좁은 화면: 세로로 쌓고 스크롤한다(오버플로 방지).

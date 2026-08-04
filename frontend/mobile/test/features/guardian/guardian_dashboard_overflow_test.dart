@@ -379,6 +379,10 @@ const _layouts = <_Layout>[
   (label: '휴대폰 가로 844×390', size: Size(844, 390)),
   (label: '태블릿 세로 800×1280', size: Size(800, 1280)),
   (label: 'Pixel Tablet 가로 1600×1000', size: Size(1600, 1000)),
+  // 태블릿 가로 폭 범위 양끝(S15P11B209-787): ResponsiveContent 상한 도입 뒤에도
+  // 최소·최대 폭에서 overflow가 없고 본문에 닿을 수 있어야 한다.
+  (label: '태블릿 최소 폭 600×900', size: Size(600, 900)),
+  (label: '태블릿 최대 폭 1400×900', size: Size(1400, 900)),
 ];
 
 void _expectNoOverflow(WidgetTester tester) {
