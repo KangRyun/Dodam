@@ -1741,12 +1741,11 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
   }
 
-  /// 문서 밖으로 나간 포인터는 커서를 숨긴다. 터치는 손가락이 가려서 안 그린다.
+  /// 문서 밖으로 나간 포인터는 커서를 숨긴다.
+  ///
+  /// 터치도 그리는 동안에는 커서를 보여 준다. 손을 떼고 나면 [_endStroke] 가
+  /// 숨기므로 손가락이 없는데 커서만 남는 일은 없다.
   void _updateCursor(PointerEvent event) {
-    if (event.kind == ui.PointerDeviceKind.touch) {
-      _cursorController.hide();
-      return;
-    }
     final documentBounds = Offset.zero & DrawingCanvasGeometry.documentSize;
     if (!documentBounds.contains(event.localPosition)) {
       _cursorController.hide();
