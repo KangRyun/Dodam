@@ -23,8 +23,28 @@ function requireEnv(name: string): string {
   return value;
 }
 
+/**
+ * Client ID(공개값)를 반환한다.
+ *
+ * ⚠️ 반드시 **정적** `process.env.NEXT_PUBLIC_*` 참조여야 한다. Next.js 는 빌드 시
+ *    이 형태만 리터럴로 인라인한다. `process.env[변수]` 같은 동적 접근은 인라인되지
+ *    않고 런타임 env 에 의존하는데, standalone 배포 파드에는 NEXT_PUBLIC_* 이 런타임
+ *    env 로 없어 undefined 가 된다(dev 는 .env.local 을 런타임 로드해 우연히 동작 →
+ *    이 버그가 배포에서만 터졌다. S15P11B209-817).
+ */
 function clientId(provider: AuthProviderId): string {
-  return requireEnv(`NEXT_PUBLIC_${provider.toUpperCase()}_CLIENT_ID`);
+  const value =
+    provider === "kakao"
+      ? process.env.NEXT_PUBLIC_KAKAO_CLIENT_ID
+      : provider === "google"
+        ? process.env.NEXT_PUBLIC_GOOGLE_CLIENT_ID
+        : process.env.NEXT_PUBLIC_NAVER_CLIENT_ID;
+  if (!value) {
+    throw new OAuthConfigError(
+      `NEXT_PUBLIC_${provider.toUpperCase()}_CLIENT_ID 환경변수가 설정되지 않았습니다.`,
+    );
+  }
+  return value;
 }
 
 async function postForm(
