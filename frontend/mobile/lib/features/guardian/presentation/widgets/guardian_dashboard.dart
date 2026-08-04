@@ -67,17 +67,19 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
     return page.content;
   }
 
-  /// 2단 그리드가 더는 줄어들 수 없는 최소 세로 높이(글자 배율 1.0 기준).
+  /// 2단 그리드와 마음 달력이 더는 줄어들 수 없는 최소 세로 높이.
   ///
-  /// 마음카드는 도담이 이미지·CTA·리포트 버튼이 고정이라 압축되지 않고, 최근 활동
-  /// 카드도 헤더·간격·카드 패딩만으로 최소 높이를 요구한다. 남은 높이가 이보다
-  /// 작으면 최근 활동 카드가 그 부족분을 전부 흡수해 RenderFlex가 넘쳤다
-  /// (S15P11B209-848). 이 높이를 보장하고 부족한 만큼 화면을 스크롤한다.
-  ///
-  /// 실측 하한은 약 472다(470을 주면 2.3px 넘친다). 여유를 크게 잡으면 지금까지
-  /// 넘치지 않던 화면(예: 800×600은 헤더 72를 뺀 482가 남는다)까지 스크롤로 바뀌어
-  /// 헤더가 밀려나므로, 하한 바로 위에 붙여 둔다.
+  /// 왼쪽 마음카드가 아이 chip 개수만큼 커질 때는 이 값에 억지로 맞추지 않고
+  /// [_buildTwoColumnBody]가 자연 높이로 더 커진다. 부모 CustomScrollView가 그
+  /// 증가분을 스크롤하므로 최근 활동 카드가 남은 높이를 떠안지 않는다.
   static const double _bodyMinHeight = 480;
+
+  /// 2단 배치에서 최근 활동 카드가 보장받는 최소 높이.
+  ///
+  /// 카드 상하 padding 36 + 48dp header CTA + 간격 8 + 활동 한 줄 62 = 154다.
+  /// 소수점 글꼴 metric 여유 6을 더해 160으로 둔다. 실기기에서는 카드가 52px로
+  /// 압축되어 내부 16px에 약 30px짜리 header+gap이 들어가 14px 넘쳤다.
+  static const double _twoColumnRecentMinHeight = 160;
 
   /// 글자 배율이 커질 때 카드 안 텍스트·버튼이 함께 커지는 만큼의 추가 여유.
   ///
@@ -164,16 +166,20 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
         child: _buildStackedBody(scaleAllowance: scaleAllowance),
       );
     }
-    // `hasScrollBody: false`는 남은 높이와 자식의 최대 intrinsic 높이 중 큰 값으로
-    // 자식을 **tight**하게 배치한다. 아래 SizedBox가 tight height라 intrinsic
-    // 질의가 마음 달력의 LayoutBuilder까지 내려가지 않으면서도, 2단 그리드는 항상
-    // 유한한 높이를 받아 Expanded 계약을 유지한다.
-    return SliverFillRemaining(
-      hasScrollBody: false,
-      child: SizedBox(
-        height: _bodyMinHeight + _bodyTextScaleAllowance * scaleAllowance,
-        child: _buildTwoColumnBody(),
-      ),
+    return SliverLayoutBuilder(
+      builder: (context, constraints) {
+        final viewportRemainder =
+            constraints.viewportMainAxisExtent -
+            constraints.precedingScrollExtent;
+        final baseHeight =
+            _bodyMinHeight + _bodyTextScaleAllowance * scaleAllowance;
+        final minHeight = viewportRemainder > baseHeight
+            ? viewportRemainder
+            : baseHeight;
+        return SliverToBoxAdapter(
+          child: _buildTwoColumnBody(minHeight: minHeight),
+        );
+      },
     );
   }
 
@@ -192,14 +198,15 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
     ],
   );
 
-  Widget _buildTwoColumnBody() {
+  Widget _buildTwoColumnBody({required double minHeight}) {
     final selected = widget.controller.selectedChild;
     return Row(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Expanded(
           flex: 92,
           child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
               _HeroCard(
                 controller: widget.controller,
@@ -207,17 +214,23 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
                 recentFuture: _recentFuture,
               ),
               const SizedBox(height: 16),
-              Expanded(child: _RecentActivityCard(recentFuture: _recentFuture)),
+              SizedBox(
+                height: _twoColumnRecentMinHeight,
+                child: _RecentActivityCard(recentFuture: _recentFuture),
+              ),
             ],
           ),
         ),
         const SizedBox(width: 18),
         Expanded(
           flex: 108,
-          child: _CalendarSection(
-            childId: selected?.childId,
-            childName: selected?.nickname,
-            repository: widget.activityRepository,
+          child: SizedBox(
+            height: minHeight,
+            child: _CalendarSection(
+              childId: selected?.childId,
+              childName: selected?.nickname,
+              repository: widget.activityRepository,
+            ),
           ),
         ),
       ],
@@ -495,7 +508,7 @@ class _IconBtn extends StatelessWidget {
 
 // ── 카드 공통 ────────────────────────────────────────────────────────
 class _Card extends StatelessWidget {
-  const _Card({required this.child});
+  const _Card({required this.child, super.key});
   final Widget child;
 
   @override
@@ -937,6 +950,7 @@ class _RecentActivityCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => _Card(
+    key: const ValueKey('recent-activity-card'),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -952,27 +966,33 @@ class _RecentActivityCard extends StatelessWidget {
                 ),
               ),
             ),
-            InkWell(
-              key: const ValueKey('activity-history-entry'),
-              onTap: () =>
-                  AppNavigation.pushNamed(context, AppRoutes.activityHistory),
-              child: const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    '전체',
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w700,
-                      color: DodamHome.inkSoft,
-                    ),
+            ConstrainedBox(
+              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              child: InkWell(
+                key: const ValueKey('activity-history-entry'),
+                onTap: () =>
+                    AppNavigation.pushNamed(context, AppRoutes.activityHistory),
+                child: const Align(
+                  alignment: Alignment.centerRight,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '전체',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: DodamHome.inkSoft,
+                        ),
+                      ),
+                      Icon(
+                        Icons.chevron_right_rounded,
+                        size: 15,
+                        color: DodamHome.inkSoft,
+                      ),
+                    ],
                   ),
-                  Icon(
-                    Icons.chevron_right_rounded,
-                    size: 15,
-                    color: DodamHome.inkSoft,
-                  ),
-                ],
+                ),
               ),
             ),
           ],
