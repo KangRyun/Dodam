@@ -177,7 +177,7 @@ void main() {
       'keeps save, thickness, and complete labels readable without scaling text down',
       (tester) async {
         const expectedStatusInks = <DrawingSaveStatus, Color>{
-          DrawingSaveStatus.localOnly: Color(0xFF2F2D24),
+          DrawingSaveStatus.localOnly: AppColors.canvasStatusLocalInk,
           DrawingSaveStatus.saving: Color(0xFF655194),
           DrawingSaveStatus.saved: Color(0xFF3D7A55),
           DrawingSaveStatus.failed: Color(0xFFB33A3A),

@@ -390,10 +390,8 @@ final class _ToolbarSaveStatus extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (label, color) = switch (status) {
-      DrawingSaveStatus.localOnly => (
-        '그림을 안전하게 담고 있어요',
-        AppColors.canvasStatusLocalInk,
-      ),
+      // 툴바 폭이 좁아 긴 문장은 잘린다. 상태는 짧게 적고 자세한 안내는 하지 않는다.
+      DrawingSaveStatus.localOnly => ('저장 대기', AppColors.canvasStatusLocalInk),
       DrawingSaveStatus.saving => ('저장 중...', AppColors.canvasStatusSavingInk),
       DrawingSaveStatus.saved => ('저장됨', AppColors.canvasStatusSavedInk),
       DrawingSaveStatus.failed => (
