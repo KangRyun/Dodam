@@ -19,6 +19,8 @@ class CharacterCarouselSpotlight extends StatefulWidget {
     required this.accent,
     required this.busy,
     required this.showNudge,
+    required this.confirmationLabel,
+    required this.onConfirm,
     this.messageKey,
     super.key,
   });
@@ -36,13 +38,17 @@ class CharacterCarouselSpotlight extends StatefulWidget {
   /// 강조 색. 실패 상태에서는 호출자가 오류 색을 넘긴다.
   final Color accent;
 
-  /// 기존 debounce PATCH가 진행 중인지. 코치마크 안에 비차단 progress만 띄운다.
-  ///
-  /// 저장은 캐러셀 조작이 곧바로 예약한다(S843). 별도 확정 버튼은 두지 않는다.
+  /// 명시적 완료 CTA가 시작한 PATCH가 진행 중인지.
   final bool busy;
 
   /// pulse ring과 좌우 유도 화살표를 보일지. 조작을 마친 뒤에는 낮춘다.
   final bool showNudge;
+
+  /// 첫 실제 변경 뒤 표시하는 완료 CTA 문구. null이면 CTA를 그리지 않는다.
+  final String? confirmationLabel;
+
+  /// null이면 저장 중인 CTA를 disabled 상태로 유지한다.
+  final VoidCallback? onConfirm;
 
   /// 코치마크에 붙일 key. 기존 안내 key를 그대로 옮겨오기 위해 받는다.
   final Key? messageKey;
@@ -152,12 +158,17 @@ class _CharacterCarouselSpotlightState extends State<CharacterCarouselSpotlight>
 
         // 코치마크가 필요한 대략 높이(본문 + 보조 + 여백). 정확한 측정 없이도
         // 아래에 둘 자리가 있는지 판단할 수 있게 글자 배율만 반영한다.
+        final hasConfirmation = widget.confirmationLabel != null;
         final coachReserve =
             (widget.secondaryMessage.isEmpty ? 64.0 : 92.0) *
-            textScale.clamp(1.0, 2.0);
+                textScale.clamp(1.0, 2.0) +
+            (hasConfirmation ? 64.0 * textScale.clamp(1.0, 2.0) : 0);
         final belowTop = hole.bottom + AppSpacing.sm;
         final bottomLimit = size.height - safe.bottom - AppSpacing.xs;
         final fitsBelow = belowTop + coachReserve <= bottomLimit;
+        final aboveBottom = hole.top - AppSpacing.sm;
+        final fitsAbove =
+            aboveBottom - coachReserve >= safe.top + AppSpacing.xs;
         // 아래에 자리가 없으면 위로 올리되, 화면·SafeArea 밖으로 나가지 않게
         // 가둔다. 짧은 화면에서 위로 밀면 코치마크가 잘려 읽을 수 없다.
         final minTop = safe.top + AppSpacing.xs;
@@ -165,7 +176,11 @@ class _CharacterCarouselSpotlightState extends State<CharacterCarouselSpotlight>
             ? minTop
             : bottomLimit - coachReserve;
         final coachTop =
-            (fitsBelow ? belowTop : hole.top - AppSpacing.sm - coachReserve)
+            (fitsBelow
+                    ? belowTop
+                    : fitsAbove
+                    ? aboveBottom - coachReserve
+                    : hole.top - AppSpacing.sm - coachReserve)
                 .clamp(minTop, maxTop);
 
         return Stack(
@@ -211,15 +226,18 @@ class _CharacterCarouselSpotlightState extends State<CharacterCarouselSpotlight>
             // ── 좌우 유도 화살표 (장식)
             if (widget.showNudge) ..._guideArrows(hole),
 
-            // ── 코치마크
+            // ── 코치마크 + 명시적 완료 CTA
             //
-            // 안내 문구만 담고 조작 요소가 없다. 짧은 화면에서는 hole과 겹칠 수
-            // 밖에 없으므로 pointer를 통과시켜 캐러셀 조작을 절대 막지 않는다.
-            Positioned(
-              top: coachTop,
-              left: AppSpacing.md,
-              right: AppSpacing.md,
-              child: IgnorePointer(child: _coachMark(pointerOnTop: fitsBelow)),
+            // 세로 공간이 없으면 hole 좌우의 넓은 쪽을 사용한다. CTA는 barrier
+            // 뒤가 아니라 이 마지막 층에서만 입력을 받고, 안내 문구는 계속
+            // IgnorePointer라 캐러셀 swipe를 가로채지 않는다.
+            ..._coachPlacement(
+              size: size,
+              safe: safe,
+              hole: hole,
+              coachTop: coachTop,
+              fitsBelow: fitsBelow,
+              fitsAbove: fitsAbove,
             ),
           ],
         );
@@ -305,6 +323,47 @@ class _CharacterCarouselSpotlightState extends State<CharacterCarouselSpotlight>
     ];
   }
 
+  List<Widget> _coachPlacement({
+    required Size size,
+    required EdgeInsets safe,
+    required Rect hole,
+    required double coachTop,
+    required bool fitsBelow,
+    required bool fitsAbove,
+  }) {
+    const gap = AppSpacing.sm;
+    const minimumSideWidth = 180.0;
+    final leftSpace = hole.left - safe.left - gap * 2;
+    final rightSpace = size.width - safe.right - hole.right - gap * 2;
+    final useSide =
+        !fitsBelow &&
+        !fitsAbove &&
+        (leftSpace >= minimumSideWidth || rightSpace >= minimumSideWidth);
+    final card = _coachMark(pointerOnTop: fitsBelow);
+
+    if (useSide) {
+      final useRight = rightSpace >= leftSpace;
+      return [
+        Positioned(
+          top: safe.top + AppSpacing.xs,
+          bottom: safe.bottom + AppSpacing.xs,
+          left: useRight ? hole.right + gap : safe.left + gap,
+          right: useRight ? safe.right + gap : size.width - hole.left + gap,
+          child: Align(alignment: Alignment.center, child: card),
+        ),
+      ];
+    }
+
+    return [
+      Positioned(
+        top: coachTop,
+        left: safe.left + AppSpacing.md,
+        right: safe.right + AppSpacing.md,
+        child: card,
+      ),
+    ];
+  }
+
   Widget _guideArrow(
     Key key,
     IconData icon, {
@@ -348,82 +407,130 @@ class _CharacterCarouselSpotlightState extends State<CharacterCarouselSpotlight>
     ),
   );
 
-  Widget _coachMark({required bool pointerOnTop}) => Semantics(
-    key: widget.messageKey,
-    container: true,
-    liveRegion: true,
-    label: widget.secondaryMessage.isEmpty
-        ? widget.message
-        : '${widget.message} ${widget.secondaryMessage}',
-    child: ExcludeSemantics(
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 460),
-          child: Container(
-            key: const ValueKey('character-spotlight-coach'),
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.md,
-              vertical: AppSpacing.sm,
+  Widget _coachMark({required bool pointerOnTop}) => Center(
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 460),
+      child: Container(
+        key: const ValueKey('character-spotlight-coach'),
+        padding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.sm,
+        ),
+        decoration: BoxDecoration(
+          color: AppColors.surface,
+          borderRadius: BorderRadius.circular(AppRadius.lg),
+          border: Border.all(color: widget.accent, width: 2),
+          boxShadow: [
+            BoxShadow(
+              color: AppColors.ink.withValues(alpha: 0.25),
+              blurRadius: 18,
+              offset: Offset(0, pointerOnTop ? 6 : -6),
             ),
-            decoration: BoxDecoration(
-              color: AppColors.surface,
-              borderRadius: BorderRadius.circular(AppRadius.lg),
-              border: Border.all(color: widget.accent, width: 2),
-              boxShadow: [
-                BoxShadow(
-                  color: AppColors.ink.withValues(alpha: 0.25),
-                  blurRadius: 18,
-                  offset: Offset(0, pointerOnTop ? 6 : -6),
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    if (widget.busy) ...[
-                      SizedBox.square(
-                        dimension: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.5,
-                          color: widget.accent,
-                        ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IgnorePointer(
+              child: Semantics(
+                key: widget.messageKey,
+                container: true,
+                liveRegion: true,
+                label: widget.secondaryMessage.isEmpty
+                    ? widget.message
+                    : '${widget.message} ${widget.secondaryMessage}',
+                child: ExcludeSemantics(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          if (widget.busy) ...[
+                            Semantics(
+                              label: '캐릭터 선택 저장 중',
+                              child: SizedBox.square(
+                                dimension: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2.5,
+                                  color: widget.accent,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: AppSpacing.sm),
+                          ],
+                          Flexible(
+                            child: Text(
+                              widget.message,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: widget.accent == AppColors.error
+                                    ? AppColors.error
+                                    : AppColors.ink,
+                                fontSize: 17,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: AppSpacing.sm),
+                      if (widget.secondaryMessage.isNotEmpty) ...[
+                        const SizedBox(height: AppSpacing.xxs),
+                        Text(
+                          widget.secondaryMessage,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: AppColors.inkMuted,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
                     ],
-                    Flexible(
-                      child: Text(
-                        widget.message,
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: widget.accent == AppColors.error
-                              ? AppColors.error
-                              : AppColors.ink,
-                          fontSize: 17,
-                          fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ),
+            ),
+            if (widget.confirmationLabel case final label?) ...[
+              const SizedBox(height: AppSpacing.sm),
+              Semantics(
+                button: true,
+                enabled: widget.onConfirm != null,
+                label: '$label 캐릭터 선택 확정',
+                child: ExcludeSemantics(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minHeight: 48,
+                      minWidth: 180,
+                    ),
+                    child: FilledButton(
+                      key: const ValueKey('character-guide-confirm'),
+                      onPressed: widget.onConfirm,
+                      style: FilledButton.styleFrom(
+                        backgroundColor: widget.accent,
+                        foregroundColor: AppColors.surface,
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: AppSpacing.md,
+                          vertical: AppSpacing.sm,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadius.pill),
                         ),
                       ),
-                    ),
-                  ],
-                ),
-                if (widget.secondaryMessage.isNotEmpty) ...[
-                  const SizedBox(height: AppSpacing.xxs),
-                  Text(
-                    widget.secondaryMessage,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(
-                      color: AppColors.inkMuted,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
+                      child: Text(
+                        label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontWeight: FontWeight.w900),
+                      ),
                     ),
                   ),
-                ],
-              ],
-            ),
-          ),
+                ),
+              ),
+            ],
+          ],
         ),
       ),
     ),
