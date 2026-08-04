@@ -274,9 +274,11 @@ void main() {
 
     // 다음 캐릭터로 넘기면 base -> princess.
     await tester.tap(find.byKey(const ValueKey('costume-next')));
-    await tester.pumpAndSettle();
-    // 디바운스가 지나야 저장 알림이 나간다(스와이프마다 보내지 않는다).
-    await tester.pump(const Duration(milliseconds: 700));
+    await tester.pump();
+    // 가이드가 끝난 일반 변경의 기존 debounce는 정확히 유지한다.
+    await tester.pump(const Duration(milliseconds: 599));
+    expect(selections, isEmpty);
+    await tester.pump(const Duration(milliseconds: 1));
 
     expect(selections, [(_child.childId, 'PRINCESS')]);
   });
@@ -422,6 +424,32 @@ void main() {
 
     _expectCurrentCostume(tester, DodamCostume.base);
     expect(selections, isEmpty);
+  });
+
+  testWidgets('가이드 완료 사용자의 일반 pending 선택은 dispose에서 정확히 한 번 flush한다', (
+    tester,
+  ) async {
+    final selections = <String>[];
+    final save = Completer<bool>();
+    await _pumpCarouselHome(
+      tester,
+      onCharacterSelected: (_, code) {
+        selections.add(code);
+        return save.future;
+      },
+    );
+
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pump(const Duration(milliseconds: 599));
+    expect(selections, isEmpty);
+
+    await tester.pumpWidget(const SizedBox.shrink());
+    expect(selections, ['PRINCESS']);
+    save.complete(true);
+    await tester.pump(const Duration(seconds: 1));
+
+    expect(selections, ['PRINCESS']);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('저장 in-flight 중 새 선택은 직렬화되고 늦은 실패가 최신 선택을 덮지 않는다', (
@@ -802,7 +830,7 @@ void main() {
     );
   });
 
-  testWidgets('친구 골라보기는 실제 다음 화살표 저장 성공 뒤에만 intro를 완료한다', (tester) async {
+  testWidgets('친구 골라보기는 화살표 탐색 중 저장하지 않고 CTA 저장 성공 뒤에만 완료한다', (tester) async {
     final store = _FakeIntroStore();
     final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
     final save = Completer<bool>();
@@ -840,12 +868,16 @@ void main() {
     );
 
     await tester.tap(find.byKey(const ValueKey('costume-next')));
-    await tester.pump(const Duration(milliseconds: 599));
+    await tester.pump(const Duration(seconds: 30));
     expect(patches, isEmpty);
     expect(store.marked, isEmpty);
     _expectCurrentCostume(tester, DodamCostume.princess);
+    expect(find.text('공주 도담이로 할래!'), findsOneWidget);
+    expect(find.text('마음에 드는 도담이를 골라봐!'), findsOneWidget);
+    expect(find.text('더 넘겨봐도 좋아요'), findsOneWidget);
 
-    await tester.pump(const Duration(milliseconds: 1));
+    await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
+    await tester.pump();
     expect(patches, ['PRINCESS']);
     expect(find.text('친구를 정하고 있어요'), findsOneWidget);
     expect(store.marked, isEmpty);
@@ -857,7 +889,7 @@ void main() {
     expect(find.text('새 친구와 함께 시작해 볼까?'), findsOneWidget);
   });
 
-  testWidgets('가이드는 실제 이전 화살표의 원형 순환과 PageView swipe를 저장한다', (tester) async {
+  testWidgets('가이드는 이전 화살표와 swipe를 로컬 탐색하고 각각 CTA로 확정한다', (tester) async {
     final store = _FakeIntroStore();
     final patches = <String>[];
     final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
@@ -879,9 +911,12 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('costume-prev')));
-    await tester.pump(const Duration(milliseconds: 600));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(seconds: 5));
     _expectCurrentCostume(tester, DodamCostume.octopus);
+    expect(patches, isEmpty);
+    expect(find.text('문어 도담이로 할래!'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
+    await tester.pumpAndSettle();
     expect(patches, ['OCTOPUS']);
     expect(store.marked, [7]);
 
@@ -910,10 +945,11 @@ void main() {
       const Offset(-320, 0),
     );
     await tester.pumpAndSettle();
-    await tester.pump(const Duration(milliseconds: 600));
-    await tester.pumpAndSettle();
 
     _expectCurrentCostume(tester, DodamCostume.princess);
+    expect(patches, isEmpty);
+    await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
+    await tester.pumpAndSettle();
     expect(patches, ['PRINCESS']);
     expect(swipeStore.marked, [7]);
   });
@@ -942,7 +978,8 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const ValueKey('costume-next')));
-    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
     await tester.pumpAndSettle();
     _expectCurrentCostume(tester, DodamCostume.base);
     expect(store.marked, isEmpty);
@@ -950,23 +987,29 @@ void main() {
     expect(find.text('친구를 정하지 못했어요. 다시 골라볼까요?'), findsWidgets);
 
     shouldSucceed = true;
-    await tester.tap(find.byKey(const ValueKey('costume-prev')));
-    await tester.pump(const Duration(milliseconds: 600));
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
     await tester.pumpAndSettle();
-    expect(patches, ['PRINCESS', 'OCTOPUS']);
+    expect(patches, ['PRINCESS', 'PRINCESS']);
     expect(store.marked, [7]);
-    _expectCurrentCostume(tester, DodamCostume.octopus);
+    _expectCurrentCostume(tester, DodamCostume.princess);
   });
 
   testWidgets('안내와 가이드의 system back은 현재 진입만 닫고 완료를 저장하지 않는다', (tester) async {
     final store = _FakeIntroStore();
     final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+    final patches = <String>[];
     await tester.pumpWidget(
       _wrap(
         ChildModeHomeScreen(
           child: _child,
           drawingRepository: repository,
           introStore: store,
+          onCharacterSelected: (_, code) async {
+            patches.add(code);
+            return true;
+          },
         ),
       ),
     );
@@ -1004,6 +1047,10 @@ void main() {
           child: _child,
           drawingRepository: repository,
           introStore: store,
+          onCharacterSelected: (_, code) async {
+            patches.add(code);
+            return true;
+          },
         ),
       ),
     );
@@ -1015,14 +1062,19 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('child-character-guide')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pump();
+    _expectCurrentCostume(tester, DodamCostume.princess);
 
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('child-character-guide')), findsNothing);
     expect(store.marked, isEmpty);
+    expect(patches, isEmpty);
+    _expectCurrentCostume(tester, DodamCostume.base);
   });
 
-  testWidgets('가이드 저장 중 dispose와 이전 child의 늦은 성공은 intro를 완료하지 않는다', (
+  testWidgets('가이드 CTA 저장 중 dispose와 이전 child의 늦은 성공은 intro를 완료하지 않는다', (
     tester,
   ) async {
     final store = _FakeIntroStore();
@@ -1043,7 +1095,9 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('costume-next')));
-    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
+    await tester.pump();
 
     await tester.pumpWidget(const SizedBox.shrink());
     save.complete(true);
@@ -1083,6 +1137,7 @@ void main() {
     expect(patches, isEmpty);
     expect(store.marked, isEmpty);
     expect(find.byKey(const ValueKey('child-character-guide')), findsOneWidget);
+    expect(find.byKey(const ValueKey('character-guide-confirm')), findsNothing);
   });
 
   testWidgets('childId 전환은 이전 아이의 늦은 저장 성공을 버리고 intro 상태를 분리한다', (
@@ -1116,7 +1171,9 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('costume-next')));
-    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
+    await tester.pump();
 
     child.value = otherChild;
     await tester.pump();
@@ -1147,6 +1204,52 @@ void main() {
     await tester.pumpAndSettle();
     expect(store.marked, [8]);
     expect(store.seen, {8});
+  });
+
+  testWidgets('CTA 미확정 선택은 childId 전환 시 PATCH 없이 폐기하고 새 아이 확정값을 쓴다', (
+    tester,
+  ) async {
+    final patches = <(int, String)>[];
+    final child = ValueNotifier<ChildSummaryDto>(_child);
+    addTearDown(child.dispose);
+    final otherChild = _childWith(
+      childId: 8,
+      nickname: '새봄',
+      preferredCharacter: 'DINO',
+    );
+
+    await tester.pumpWidget(
+      _wrap(
+        ValueListenableBuilder<ChildSummaryDto>(
+          valueListenable: child,
+          builder: (_, value, _) => ChildModeHomeScreen(
+            child: value,
+            drawingRepository: _FakeDrawingRepository(
+              drawingTypes: const [_artDiary],
+            ),
+            introStore: _FakeIntroStore(),
+            onCharacterSelected: (childId, code) async {
+              patches.add((childId, code));
+              return true;
+            },
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('pick-character-from-intro')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('costume-next')));
+    await tester.pump(const Duration(seconds: 5));
+    expect(patches, isEmpty);
+    _expectCurrentCostume(tester, DodamCostume.princess);
+
+    child.value = otherChild;
+    await tester.pumpAndSettle();
+
+    expect(patches, isEmpty);
+    _expectCurrentCostume(tester, DodamCostume.dino);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('intro 저장 실패는 홈을 막지 않고 다음 정상 진입에서 안내를 다시 표시한다', (tester) async {
@@ -2073,8 +2176,8 @@ void main() {
 
   // ── S15P11B209-850 Spotlight ─────────────────────────────────────────
   //
-  // 저장 방식은 S843 그대로다(조작 → 600ms debounce → PATCH → 성공 시 안내 완료).
-  // 여기서는 spotlight·coach mark·조작 피드백만 검증한다.
+  // S863: 가이드 탐색은 로컬 미리보기이며 명시적 CTA만 PATCH한다. 가이드가
+  // 끝난 일반 캐릭터 변경의 600ms debounce는 위 회귀 테스트에서 유지한다.
   group('캐릭터 선택 Spotlight', () {
     const spotlight = ValueKey('character-carousel-spotlight');
     const scrim = ValueKey('character-spotlight-scrim');
@@ -2246,7 +2349,11 @@ void main() {
       expect(find.byKey(coach), findsOneWidget);
       expect(find.text('화살표를 눌러 함께할 도담이를 골라봐!'), findsOneWidget);
       expect(find.text('좌우로 넘겨볼 수도 있어요'), findsOneWidget);
-      // 확정 버튼은 두지 않는다. 저장은 조작이 곧바로 예약한다.
+      // 실제 선택 변경 전에는 완료 CTA가 없다.
+      expect(
+        find.byKey(const ValueKey('character-guide-confirm')),
+        findsNothing,
+      );
       expect(find.text('선택한 친구를 저장하고 있어요'), findsNothing);
       expect(patches, isEmpty);
 
@@ -2284,7 +2391,7 @@ void main() {
       expect(find.byKey(const ValueKey('costume-prev')), findsOneWidget);
     });
 
-    testWidgets('다음 화살표 실제 tap이 문구를 저장 중으로 바꾸고 debounce 뒤 PATCH한다', (
+    testWidgets('다음 tap 후 30초 동안 PATCH하지 않고 CTA tap만 최신 선택을 저장한다', (
       tester,
     ) async {
       final patches = <String>[];
@@ -2300,18 +2407,40 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('costume-next')));
       await tester.pump();
 
-      expect(find.text('마음에 드는 도담이를 골랐구나!'), findsOneWidget);
-      expect(find.text('선택한 친구를 저장하고 있어요'), findsOneWidget);
+      expect(find.text('마음에 드는 도담이를 골라봐!'), findsOneWidget);
+      expect(find.text('더 넘겨봐도 좋아요'), findsOneWidget);
+      expect(find.text('공주 도담이로 할래!'), findsOneWidget);
       _expectCurrentCostume(tester, DodamCostume.princess);
 
-      // 기존 debounce 계약: 600ms 전에는 PATCH가 나가지 않는다.
+      // 가이드에서는 599ms·600ms·5초·30초 어느 시점에도 자동 저장하지 않는다.
       await tester.pump(const Duration(milliseconds: 599));
       expect(patches, isEmpty);
       expect(store.marked, isEmpty);
-
       await tester.pump(const Duration(milliseconds: 1));
+      expect(patches, isEmpty);
+      await tester.pump(const Duration(milliseconds: 4400));
+      expect(patches, isEmpty);
+      await tester.pump(const Duration(seconds: 25));
+      expect(patches, isEmpty);
+      expect(find.byKey(spotlight), findsOneWidget);
+      expect(find.text('친구를 정하고 있어요'), findsNothing);
+
+      final confirm = find.byKey(const ValueKey('character-guide-confirm'));
+      expect(tester.getSize(confirm).height, greaterThanOrEqualTo(48));
+      final semantics = tester.getSemantics(confirm);
+      expect(semantics.label, contains('공주 도담이'));
+      expect(semantics.flagsCollection.isButton, isTrue);
+
+      final center = tester.getCenter(confirm);
+      final firstTap = await tester.startGesture(center, pointer: 1);
+      final secondTap = await tester.startGesture(center, pointer: 2);
+      await firstTap.up();
+      await secondTap.up();
+      await tester.pump();
       expect(patches, ['PRINCESS']);
       expect(find.text('친구를 정하고 있어요'), findsOneWidget);
+      expect(find.text('선택한 친구를 저장하고 있어요'), findsOneWidget);
+      expect(tester.widget<FilledButton>(confirm).onPressed, isNull);
       // PATCH 성공 전에는 안내를 완료하지 않는다.
       expect(store.marked, isEmpty);
       expect(find.byKey(spotlight), findsOneWidget);
@@ -2324,7 +2453,52 @@ void main() {
       expect(find.text('새 친구와 함께 시작해 볼까?'), findsOneWidget);
     });
 
-    testWidgets('이전 화살표 실제 tap도 조작으로 인정한다', (tester) async {
+    testWidgets('CTA 저장 중에는 화살표·swipe·중복 CTA를 막고 활동이나 navigation을 시작하지 않는다', (
+      tester,
+    ) async {
+      final patches = <String>[];
+      final save = Completer<bool>();
+      final store = await enterSpotlight(
+        tester,
+        onCharacterSelected: (_, code) {
+          patches.add(code);
+          return save.future;
+        },
+      );
+
+      await tester.tap(find.byKey(const ValueKey('costume-next')));
+      await tester.pump();
+      final confirm = find.byKey(const ValueKey('character-guide-confirm'));
+      await tester.tap(confirm);
+      await tester.pump();
+      await tester.tap(confirm);
+      await tester.tap(find.byKey(const ValueKey('costume-next')));
+      await tester.drag(
+        find.byKey(const ValueKey('costume-carousel')),
+        const Offset(-400, 0),
+      );
+      await tester.pump(const Duration(seconds: 1));
+
+      expect(patches, ['PRINCESS']);
+      _expectCurrentCostume(tester, DodamCostume.princess);
+      expect(
+        tester
+            .getSemantics(find.byKey(const ValueKey('costume-next')))
+            .flagsCollection
+            .isEnabled,
+        ui.Tristate.isFalse,
+      );
+      expect(store.marked, isEmpty);
+      expect(find.byKey(const ValueKey('activity-guide-start')), findsNothing);
+      expect(find.byType(ChildModeHomeScreen), findsOneWidget);
+
+      save.complete(true);
+      await tester.pumpAndSettle();
+      expect(store.marked, [7]);
+      expect(patches, ['PRINCESS']);
+    });
+
+    testWidgets('이전 화살표 실제 tap도 로컬 탐색 후 CTA로 확정한다', (tester) async {
       final patches = <String>[];
       await enterSpotlight(
         tester,
@@ -2337,9 +2511,12 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('costume-prev')));
       await tester.pump();
 
-      expect(find.text('마음에 드는 도담이를 골랐구나!'), findsOneWidget);
+      expect(find.text('마음에 드는 도담이를 골라봐!'), findsOneWidget);
       _expectCurrentCostume(tester, DodamCostume.octopus);
+      await tester.pump(const Duration(seconds: 5));
+      expect(patches, isEmpty);
 
+      await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
       await tester.pumpAndSettle();
       expect(patches, ['OCTOPUS']);
     });
@@ -2358,18 +2535,20 @@ void main() {
         find.byKey(const ValueKey('costume-carousel')),
         const Offset(-400, 0),
       );
-      // debounce(600ms)가 지나기 전의 전이 상태를 먼저 본다. settle까지 가면
-      // 이미 저장이 끝나 spotlight가 걷히고 문구가 사라진다.
       await tester.pump();
       await tester.pump(const Duration(milliseconds: 300));
-      expect(find.text('마음에 드는 도담이를 골랐구나!'), findsOneWidget);
+      expect(find.text('마음에 드는 도담이를 골라봐!'), findsOneWidget);
       expect(patches, isEmpty);
 
       await tester.pumpAndSettle();
-      expect(patches, isNotEmpty);
+      await tester.pump(const Duration(seconds: 5));
+      expect(patches, isEmpty);
+      await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
+      await tester.pumpAndSettle();
+      expect(patches, hasLength(1));
     });
 
-    testWidgets('빠른 연속 조작은 마지막 선택만 PATCH한다', (tester) async {
+    testWidgets('빠른 연속 조작은 중간값을 저장하지 않고 CTA가 마지막 선택만 PATCH한다', (tester) async {
       final patches = <String>[];
       await enterSpotlight(
         tester,
@@ -2385,6 +2564,10 @@ void main() {
       }
       expect(patches, isEmpty);
 
+      await tester.pump(const Duration(seconds: 5));
+      expect(patches, isEmpty);
+      expect(find.text('${DodamCostume.values[3].label}로 할래!'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
       await tester.pumpAndSettle();
       expect(patches, hasLength(1));
       expect(patches.single, DodamCostume.values[3].code);
@@ -2404,6 +2587,8 @@ void main() {
       );
 
       await tester.tap(find.byKey(const ValueKey('costume-next')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
       await tester.pumpAndSettle();
 
       expect(patches, ['PRINCESS']);
@@ -2418,6 +2603,8 @@ void main() {
 
       fail = false;
       await tester.tap(find.byKey(const ValueKey('costume-next')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
       await tester.pumpAndSettle();
       expect(patches, ['PRINCESS', 'PRINCESS']);
       expect(store.marked, [7]);
@@ -2452,7 +2639,7 @@ void main() {
       // 반면 hole 안쪽 실제 화살표는 그대로 동작한다.
       await tapArrow(tester, const ValueKey('costume-next'));
       await tester.pump();
-      expect(find.text('마음에 드는 도담이를 골랐구나!'), findsOneWidget);
+      expect(find.text('마음에 드는 도담이를 골라봐!'), findsOneWidget);
       _expectCurrentCostume(tester, DodamCostume.princess);
     });
 
@@ -2527,11 +2714,13 @@ void main() {
       await enterSpotlight(tester, onCharacterSelected: (_, _) async => true);
       await tapArrow(tester, const ValueKey('costume-next'));
       await tester.pump();
-      expect(find.text('마음에 드는 도담이를 골랐구나!'), findsOneWidget);
+      expect(find.text('마음에 드는 도담이를 골라봐!'), findsOneWidget);
+      expect(find.text('공주 도담이로 할래!'), findsOneWidget);
 
       await tester.pump();
       expect(find.byKey(spotlight), findsOneWidget);
-      expect(find.text('마음에 드는 도담이를 골랐구나!'), findsOneWidget);
+      expect(find.text('마음에 드는 도담이를 골라봐!'), findsOneWidget);
+      expect(find.text('공주 도담이로 할래!'), findsOneWidget);
     });
 
     testWidgets('화면 크기가 바뀌면 AnimatedScale까지 반영해 rect를 다시 잰다', (tester) async {
@@ -2565,9 +2754,7 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('spotlight 도중 dispose되어도 늦은 저장 성공이 예외를 만들지 않는다', (
-      tester,
-    ) async {
+    testWidgets('CTA 저장 도중 dispose되어도 늦은 성공이 예외를 만들지 않는다', (tester) async {
       final save = Completer<bool>();
       final store = await enterSpotlight(
         tester,
@@ -2575,7 +2762,9 @@ void main() {
       );
 
       await tester.tap(find.byKey(const ValueKey('costume-next')));
-      await tester.pump(const Duration(milliseconds: 600));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
+      await tester.pump();
 
       await tester.pumpWidget(const SizedBox.shrink());
       save.complete(true);
@@ -2585,40 +2774,29 @@ void main() {
       expect(tester.takeException(), isNull);
     });
 
-    testWidgets('dispose 시 대기 중 선택은 정확히 한 번만 flush되고 defunct setState가 없다', (
-      tester,
-    ) async {
+    testWidgets('CTA를 누르지 않은 선택은 dispose해도 PATCH하지 않고 예외가 없다', (tester) async {
       final patches = <String>[];
-      final save = Completer<bool>();
       final store = await enterSpotlight(
         tester,
-        onCharacterSelected: (_, code) {
+        onCharacterSelected: (_, code) async {
           patches.add(code);
-          return save.future;
+          return true;
         },
       );
 
       await tapArrow(tester, const ValueKey('costume-next'));
-      // debounce가 아직 살아 있는 상태에서 화면을 떠난다.
       await tester.pump();
       expect(patches, isEmpty);
 
       await tester.pumpWidget(const SizedBox.shrink());
-      // dispose가 마지막 선택을 flush한다(S843 계약). 저장은 취소되지 않는다.
-      expect(patches, ['PRINCESS']);
+      await tester.pump(const Duration(seconds: 5));
 
-      save.complete(true);
-      await tester.pump();
-      await tester.pump(const Duration(milliseconds: 200));
-
-      // 중복 PATCH 없음, defunct element setState 없음.
-      expect(patches, ['PRINCESS']);
+      expect(patches, isEmpty);
       expect(tester.takeException(), isNull);
-      // 화면이 사라진 뒤에는 안내를 완료하지 않는다(기존 S843 계약 그대로).
       expect(store.marked, isEmpty);
     });
 
-    testWidgets('dispose 이후 저장 실패도 rollback setState 없이 조용히 끝난다', (
+    testWidgets('CTA 요청의 dispose 이후 실패도 rollback setState 없이 조용히 끝난다', (
       tester,
     ) async {
       final patches = <String>[];
@@ -2632,6 +2810,8 @@ void main() {
       );
 
       await tapArrow(tester, const ValueKey('costume-next'));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
       await tester.pump();
       await tester.pumpWidget(const SizedBox.shrink());
       expect(patches, ['PRINCESS']);
@@ -2642,6 +2822,32 @@ void main() {
 
       expect(patches, ['PRINCESS']);
       expect(store.marked, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('CTA 요청 중 system back 뒤 늦은 실패가 spotlight를 되살리지 않는다', (
+      tester,
+    ) async {
+      final save = Completer<bool>();
+      final store = await enterSpotlight(
+        tester,
+        onCharacterSelected: (_, _) => save.future,
+      );
+
+      await tapArrow(tester, const ValueKey('costume-next'));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('character-guide-confirm')));
+      await tester.pump();
+      await tester.binding.handlePopRoute();
+      await tester.pump();
+      expect(find.byKey(spotlight), findsNothing);
+
+      save.complete(false);
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(spotlight), findsNothing);
+      expect(store.marked, isEmpty);
+      expect(find.text('친구를 정하지 못했어요. 다시 골라볼까요?'), findsNothing);
       expect(tester.takeException(), isNull);
     });
 
@@ -2738,6 +2944,36 @@ void main() {
             greaterThanOrEqualTo(48),
           );
         }
+
+        // 실제 화살표 조작 뒤 나타나는 CTA도 SafeArea 안에 있고 캐러셀 입력을
+        // 덮지 않으며, 현재 캐릭터 이름을 semantics로 제공한다.
+        await tapArrow(tester, const ValueKey('costume-next'));
+        await tester.pump(const Duration(milliseconds: 200));
+        final confirm = find.byKey(const ValueKey('character-guide-confirm'));
+        expect(confirm, findsOneWidget);
+        expect(tester.getSize(confirm).height, greaterThanOrEqualTo(48));
+        final confirmRect = tester.getRect(confirm);
+        expect(confirmRect.top, greaterThanOrEqualTo(0));
+        expect(
+          confirmRect.bottom,
+          lessThanOrEqualTo(tester.view.physicalSize.height),
+        );
+        expect(
+          confirmRect.overlaps(
+            tester.getRect(find.byKey(const ValueKey('costume-prev'))),
+          ),
+          isFalse,
+        );
+        expect(
+          confirmRect.overlaps(
+            tester.getRect(find.byKey(const ValueKey('costume-next'))),
+          ),
+          isFalse,
+        );
+        expect(tester.getSemantics(confirm).label, contains('공주 도담이'));
+        await tester.tap(confirm);
+        await tester.pumpAndSettle();
+
         // 제약에 맞는 layout이 선택됐는지 key로 확정한다.
         final wide = find.byKey(const ValueKey('child-home-wide-body'));
         final narrow = find.byKey(const ValueKey('child-home-narrow-body'));

@@ -309,8 +309,12 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
   void dispose() {
     _disposed = true;
     WidgetsBinding.instance.removeObserver(this);
-    // 아직 저장 안 된 마지막 선택이 있으면 나가기 전에 보낸다.
-    if (_persistCharacterTimer?.isActive ?? false) _flushPersistCharacter();
+    // 일반 선택은 기존처럼 마지막 debounce를 flush한다. 캐릭터 가이드의 로컬
+    // 미리보기는 CTA로 확정하기 전에는 절대 저장하지 않는다(S15P11B209-863).
+    if (_characterGuideStatus == _CharacterGuideStatus.inactive &&
+        (_persistCharacterTimer?.isActive ?? false)) {
+      _flushPersistCharacter();
+    }
     _finishCharacterSettlements(false);
     _persistCharacterTimer?.cancel();
     _costumeController.dispose();
@@ -445,25 +449,59 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     }
   }
 
-  /// 캐러셀에서 캐릭터가 바뀌면 상태·로컬 저장을 즉시 반영하고, 프로필에 반영할
-  /// `preferredCharacter` 저장은 디바운스로 마지막 선택만 보낸다(S15P11B209-505).
+  /// 캐러셀에서 캐릭터가 바뀌면 화면을 즉시 갱신한다.
+  ///
+  /// 일반 선택은 기존 600ms debounce로 저장한다. 최초 선택 가이드에서는 로컬
+  /// 미리보기만 바꾸고 명시적 완료 CTA를 누를 때까지 timer·PATCH·로컬 저장을
+  /// 만들지 않는다(S15P11B209-863).
   void _onCostumeSelected(int index) {
     final costumes = widget.availableCostumes;
     if (index < 0 || index >= costumes.length) return;
+    if (_characterGuideStatus == _CharacterGuideStatus.saving) return;
     final costume = costumes[index];
     if (costume == _costume) return;
+    final guideActive =
+        _characterGuideStatus != _CharacterGuideStatus.inactive &&
+        _characterGuideChildId == widget.child.childId;
     HapticFeedback.selectionClick();
     _costumeSelectionGeneration++;
     setState(() {
       _costume = costume;
-      if (_characterGuideStatus != _CharacterGuideStatus.inactive &&
-          _characterGuideChildId == widget.child.childId) {
-        _characterGuideInteracted = true;
+      if (guideActive) {
+        _characterGuideInteracted = costume != _confirmedCostume;
         _characterGuideStatus = _CharacterGuideStatus.choosing;
       }
     });
+    if (guideActive) {
+      _persistCharacterTimer?.cancel();
+      _persistCharacterTimer = null;
+      _pendingCharacterCode = null;
+      return;
+    }
     unawaited(_costumeStore.write(widget.child.childId, costume.code));
     _schedulePersistCharacter(costume.code);
+  }
+
+  /// 최초 선택 가이드의 명시적 완료 CTA.
+  ///
+  /// CTA tap 순간의 최신 선택과 generation을 기존 single-flight 저장 경로에
+  /// 넘긴다. 활동 생성·navigation은 하지 않으며, 성공한 저장만 안내 완료로
+  /// 이어진다.
+  void _confirmCharacterGuide() {
+    final childId = widget.child.childId;
+    if (_disposed ||
+        _characterSaveInFlight ||
+        _characterGuideChildId != childId ||
+        (_characterGuideStatus != _CharacterGuideStatus.choosing &&
+            _characterGuideStatus != _CharacterGuideStatus.failure) ||
+        !_characterGuideInteracted ||
+        _costume == _confirmedCostume) {
+      return;
+    }
+    _persistCharacterTimer?.cancel();
+    _persistCharacterTimer = null;
+    _pendingCharacterCode = null;
+    unawaited(_persistCharacter(_costume.code, guideConfirmation: true));
   }
 
   void _schedulePersistCharacter(String code) {
@@ -498,9 +536,12 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     unawaited(_persistCharacter(code));
   }
 
-  Future<void> _persistCharacter(String code) async {
+  Future<void> _persistCharacter(
+    String code, {
+    bool guideConfirmation = false,
+  }) async {
     if (_characterSaveInFlight) {
-      _pendingCharacterCode = code;
+      if (!guideConfirmation) _pendingCharacterCode = code;
       return;
     }
     _characterSaveInFlight = true;
@@ -509,6 +550,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     final childId = widget.child.childId;
     final requested = _costumeFromCode(code);
     final guideRequest =
+        guideConfirmation &&
         _characterGuideStatus != _CharacterGuideStatus.inactive &&
         _characterGuideChildId == childId &&
         _characterGuideInteracted;
@@ -534,6 +576,7 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     if (succeeded) {
       _confirmedCostume = requested;
       _activityCompanion = requested;
+      unawaited(_costumeStore.write(childId, requested.code));
       if (guideRequest &&
           queuedCode == null &&
           selectionGeneration == _costumeSelectionGeneration &&
@@ -546,23 +589,35 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
         );
       }
     } else if (queuedCode == null || queuedCode == requested.code) {
-      setState(() {
-        _costume = _confirmedCostume;
-        if (guideRequest) {
-          _characterGuideStatus = _CharacterGuideStatus.failure;
-        }
-      });
+      final guideStillActive =
+          guideRequest &&
+          _characterGuideChildId == childId &&
+          _characterGuideStatus != _CharacterGuideStatus.inactive;
+      // CTA 요청 뒤 system back으로 가이드를 닫았다면 늦은 실패가 spotlight를
+      // 되살리거나 오류 메시지를 띄우지 않는다. 일반 저장 실패와 현재 가이드의
+      // 실패만 화면에 반영한다.
+      if (!guideRequest || guideStillActive) {
+        setState(() {
+          _costume = _confirmedCostume;
+          if (guideStillActive) {
+            _characterGuideStatus = _CharacterGuideStatus.failure;
+            _characterGuideInteracted = false;
+          }
+        });
+      }
       unawaited(
         _costumeStore.write(widget.child.childId, _confirmedCostume.code),
       );
       _jumpToCostume(_confirmedCostume);
-      showAppMessage(
-        context,
-        message: guideRequest
-            ? '친구를 정하지 못했어요. 다시 골라볼까요?'
-            : '친구를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.',
-        type: AppMessageType.error,
-      );
+      if (!guideRequest || guideStillActive) {
+        showAppMessage(
+          context,
+          message: guideRequest
+              ? '친구를 정하지 못했어요. 다시 골라볼까요?'
+              : '친구를 바꾸지 못했어요. 잠시 후 다시 시도해 주세요.',
+          type: AppMessageType.error,
+        );
+      }
     }
 
     if (queuedCode != null &&
@@ -648,6 +703,9 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
 
   void _startCharacterGuide(int childId) {
     if (!mounted || childId != widget.child.childId) return;
+    _persistCharacterTimer?.cancel();
+    _persistCharacterTimer = null;
+    _pendingCharacterCode = null;
     setState(() {
       _characterGuideStatus = _CharacterGuideStatus.choosing;
       _characterGuideChildId = childId;
@@ -679,12 +737,20 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
 
   void _dismissCharacterGuide() {
     if (_characterGuideStatus == _CharacterGuideStatus.inactive) return;
+    _persistCharacterTimer?.cancel();
+    _persistCharacterTimer = null;
+    _pendingCharacterCode = null;
     setState(() {
+      _costume = _confirmedCostume;
       _characterGuideStatus = _CharacterGuideStatus.inactive;
       _characterGuideChildId = null;
       _characterGuideInteracted = false;
       _spotlightRect = null;
     });
+    unawaited(
+      _costumeStore.write(widget.child.childId, _confirmedCostume.code),
+    );
+    _jumpToCostume(_confirmedCostume);
   }
 
   Future<void> _markCurrentCharacterIntroSeen(int childId) async {
@@ -1435,27 +1501,25 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
         controller: _costumeController,
         costumes: widget.availableCostumes,
         selected: _costume,
+        enabled: _characterGuideStatus != _CharacterGuideStatus.saving,
         onSelected: _onCostumeSelected,
         onStep: _stepCostume,
       ),
     ),
   );
 
-  /// 코치마크 문구. 실제 조작 여부로만 갈린다.
-  ///
-  /// 저장은 조작이 곧바로 예약한다(기존 600ms debounce). 확정 버튼을 두지 않으므로
-  /// 조작 직후 문구가 바로 "저장 중" 맥락으로 넘어간다.
+  /// 코치마크 문구. 가이드 탐색은 로컬 미리보기이고 CTA를 눌러야 저장한다.
   String get _guideMessage => switch (_characterGuideStatus) {
     _CharacterGuideStatus.inactive => '',
     _CharacterGuideStatus.choosing =>
-      _characterGuideInteracted ? '마음에 드는 도담이를 골랐구나!' : '화살표를 눌러 함께할 도담이를 골라봐!',
+      _characterGuideInteracted ? '마음에 드는 도담이를 골라봐!' : '화살표를 눌러 함께할 도담이를 골라봐!',
     _CharacterGuideStatus.saving => '친구를 정하고 있어요',
     _CharacterGuideStatus.failure => '친구를 정하지 못했어요. 다시 골라볼까요?',
   };
 
   String get _guideSecondaryMessage => switch (_characterGuideStatus) {
     _CharacterGuideStatus.choosing =>
-      _characterGuideInteracted ? '선택한 친구를 저장하고 있어요' : '좌우로 넘겨볼 수도 있어요',
+      _characterGuideInteracted ? '더 넘겨봐도 좋아요' : '좌우로 넘겨볼 수도 있어요',
     _CharacterGuideStatus.saving => '선택한 친구를 저장하고 있어요',
     _ => '',
   };
@@ -1482,15 +1546,19 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     accent: _characterGuideStatus == _CharacterGuideStatus.failure
         ? AppColors.error
         : AppColors.sunshine,
-    // 조작 직후부터 PATCH가 예약돼 있어 비차단 progress를 함께 켠다.
-    busy:
-        _characterGuideStatus == _CharacterGuideStatus.saving ||
-        (_characterGuideStatus == _CharacterGuideStatus.choosing &&
-            _characterGuideInteracted),
+    busy: _characterGuideStatus == _CharacterGuideStatus.saving,
     // 조작을 마치면 유도 표시를 낮춘다.
     showNudge:
         _characterGuideStatus == _CharacterGuideStatus.choosing &&
         !_characterGuideInteracted,
+    confirmationLabel: _characterGuideInteracted
+        ? '${_costume.label}로 할래!'
+        : null,
+    onConfirm:
+        _characterGuideInteracted &&
+            _characterGuideStatus != _CharacterGuideStatus.saving
+        ? _confirmCharacterGuide
+        : null,
     messageKey: const ValueKey('child-character-guide'),
   );
 
@@ -1868,6 +1936,7 @@ class _CostumeCarousel extends StatelessWidget {
     required this.controller,
     required this.costumes,
     required this.selected,
+    required this.enabled,
     required this.onSelected,
     required this.onStep,
   });
@@ -1875,6 +1944,7 @@ class _CostumeCarousel extends StatelessWidget {
   final PageController controller;
   final List<DodamCostume> costumes;
   final DodamCostume selected;
+  final bool enabled;
   final ValueChanged<int> onSelected;
   final ValueChanged<int> onStep;
 
@@ -1905,7 +1975,10 @@ class _CostumeCarousel extends StatelessWidget {
                 PageView.builder(
                   key: const ValueKey('costume-carousel'),
                   controller: controller,
-                  onPageChanged: onSelected,
+                  physics: enabled
+                      ? const PageScrollPhysics()
+                      : const NeverScrollableScrollPhysics(),
+                  onPageChanged: enabled ? onSelected : null,
                   itemCount: costumes.length,
                   itemBuilder: (context, i) => _CostumeStage(
                     key: ValueKey('costume-stage-${costumes[i].code}'),
@@ -1918,7 +1991,7 @@ class _CostumeCarousel extends StatelessWidget {
                     key: const ValueKey('costume-prev'),
                     icon: Icons.chevron_left_rounded,
                     semanticLabel: '이전 친구',
-                    onTap: () => onStep(-1),
+                    onTap: enabled ? () => onStep(-1) : null,
                   ),
                 ),
                 Positioned(
@@ -1927,7 +2000,7 @@ class _CostumeCarousel extends StatelessWidget {
                     key: const ValueKey('costume-next'),
                     icon: Icons.chevron_right_rounded,
                     semanticLabel: '다음 친구',
-                    onTap: () => onStep(1),
+                    onTap: enabled ? () => onStep(1) : null,
                   ),
                 ),
               ],
@@ -2036,12 +2109,12 @@ class _CostumeChevron extends StatelessWidget {
 
   final IconData icon;
   final String semanticLabel;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) => Semantics(
     button: true,
-    enabled: true,
+    enabled: onTap != null,
     label: semanticLabel,
     child: ExcludeSemantics(
       child: _Pressable(
