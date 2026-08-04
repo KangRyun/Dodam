@@ -291,6 +291,16 @@ final class DrawingToolbar extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 8),
+        // 굵기 프리셋은 슬라이더 바로 옆에 둔다. 팔레트 뒤에 두면 툴바가 좁은
+        // 기기에서 스크롤 밖으로 밀려 아이 눈에 보이지 않는다.
+        for (final (label, width) in _thicknessPresets)
+          _ThicknessPresetButton(
+            key: ValueKey('drawing-thickness-$label'),
+            label: label,
+            selected: toolState.width == width,
+            onPressed: () => onWidthChanged(width),
+          ),
+        const SizedBox(width: 8),
         SizedBox.square(
           key: const ValueKey('drawing-thickness-preview'),
           dimension: 48,
@@ -318,14 +328,6 @@ final class DrawingToolbar extends StatelessWidget {
             onPressed: onOpenPalette,
           ),
         ),
-        const SizedBox(width: 8),
-        for (final (label, width) in _thicknessPresets)
-          _ThicknessPresetButton(
-            key: ValueKey('drawing-thickness-$label'),
-            label: label,
-            selected: toolState.width == width,
-            onPressed: () => onWidthChanged(width),
-          ),
       ],
     ),
   );
