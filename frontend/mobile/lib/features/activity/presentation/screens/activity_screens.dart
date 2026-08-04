@@ -26,6 +26,7 @@ import '../../../drawing/application/htp_response_flow_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
+import '../../../drawing/presentation/models/drawing_tool_state.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 import '../../../drawing/presentation/widgets/canvas_tool_tutorial_overlay.dart';
 import '../../../conversation/conversation.dart';
@@ -232,9 +233,16 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 관리하므로 이 화면은 목록을 따로 들고 있지 않는다.
   List<DrawingStroke> get _completedStrokes => _documentController.visibleStrokes;
   DrawingStroke? _activeStroke;
-  DrawingTool _tool = DrawingTool.pen;
-  Color _color = AppColors.drawingInk;
-  double _thickness = _regular;
+  /// 현재 선택된 도구·색·굵기다. 크레용 캔버스는 도구를 펜/지우개 두 갈래가 아니라
+  /// 크레용·연필·붓·채우기·지우개로 나누므로 한 상태로 묶어 다룬다.
+  DrawingToolState _toolState = const DrawingToolState(
+    color: AppColors.drawingInk,
+    width: _regular,
+  );
+
+  DrawingTool get _tool => _toolState.wireTool ?? DrawingTool.pen;
+  Color get _color => _toolState.color;
+  double get _thickness => _toolState.width;
   int? _activePointer;
   final GlobalKey _canvasBoundaryKey = GlobalKey();
   late final DrawingSyncCoordinator _syncCoordinator;
@@ -1915,10 +1923,32 @@ class _DrawingScreenState extends State<DrawingScreen>
                   selectedTool: _tool,
                   selectedColor: _color,
                   selectedThickness: _thickness,
-                  onToolChanged: (tool) => setState(() => _tool = tool),
-                  onColorChanged: (color) => setState(() => _color = color),
-                  onThicknessChanged: (value) =>
-                      setState(() => _thickness = value),
+                  onToolChanged: (tool) => setState(() {
+                    _toolState = DrawingToolState(
+                      instrument: tool == DrawingTool.eraser
+                          ? DrawingInstrument.eraser
+                          : DrawingInstrument.crayon,
+                      eraserMode: DrawingEraserMode.area,
+                      color: _toolState.color,
+                      width: _toolState.width,
+                    );
+                  }),
+                  onColorChanged: (color) => setState(() {
+                    _toolState = DrawingToolState(
+                      instrument: _toolState.instrument,
+                      eraserMode: _toolState.eraserMode,
+                      color: color,
+                      width: _toolState.width,
+                    );
+                  }),
+                  onThicknessChanged: (value) => setState(() {
+                    _toolState = DrawingToolState(
+                      instrument: _toolState.instrument,
+                      eraserMode: _toolState.eraserMode,
+                      color: _toolState.color,
+                      width: value,
+                    );
+                  }),
                   canComplete:
                       !_canvasLocked &&
                       !_isCompleting &&
