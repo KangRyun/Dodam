@@ -14,6 +14,8 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.HexFormat;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,9 +28,12 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class DeviceTokenService {
 
+  private static final Logger log = LoggerFactory.getLogger(DeviceTokenService.class);
+
   private static final Set<String> ALLOWED_PLATFORMS = Set.of("ANDROID", "IOS", "WEB");
   private static final int MAX_DEVICE_ID_LENGTH = 100;
   private static final int MAX_APP_VERSION_LENGTH = 20;
+  private static final int HASH_PREFIX_LENGTH = 8;
 
   /**
    * 현재는 iOS도 Firebase가 발급한 등록 Token을 사용하므로 Provider를 FCM으로 고정한다. APNs 직접 연동을 도입하면 Platform에 따라
@@ -72,8 +77,16 @@ public class DeviceTokenService {
     String appVersion = normalizeAppVersion(request.appVersion());
 
     String tokenHash = hash(pushToken);
-    rejectTokenOwnedByAnotherUser(userId, tokenHash);
+    NotificationDeviceToken tokenOwner =
+        deviceTokenRepository.findByTokenHash(tokenHash).orElse(null);
+    rejectTokenActiveOnAnotherUser(userId, tokenOwner);
     String ciphertext = cipher.encrypt(pushToken);
+
+    if (tokenOwner != null && !isSameRegistration(tokenOwner, userId, deviceId)) {
+      return response(
+          claimToken(tokenOwner, userId, deviceId, ciphertext, tokenHash, platform, appVersion),
+          true);
+    }
 
     NotificationDeviceToken saved =
         deviceTokenRepository
@@ -121,14 +134,68 @@ public class DeviceTokenService {
     deviceTokenRepository.saveAndFlush(deviceToken);
   }
 
-  private void rejectTokenOwnedByAnotherUser(Long userId, String tokenHash) {
-    deviceTokenRepository
-        .findByTokenHash(tokenHash)
-        .filter(existing -> !existing.getUserId().equals(userId))
-        .ifPresent(
-            existing -> {
-              throw new BusinessException(NotificationErrorCode.DEVICE_TOKEN_ALREADY_REGISTERED);
-            });
+  /**
+   * 같은 Token이 <b>다른 계정에서 활성 상태로</b> 쓰이고 있으면 등록을 거부한다.
+   *
+   * <p>이전에는 활성 여부를 보지 않아, 계정 A가 해제(NOTI-02)한 뒤에도 A의 비활성 행이 그 {@code token_hash}를 영구 점유했다. {@code
+   * token_hash}는 전역 유니크이므로 이후 그 기기에서 로그인하는 다른 계정은 영원히 409를 받고 푸시를 받지 못했다(S15P11B209-862 실기기 실측).
+   * 계약(`notification-inbox-contract.md` §3·§0-4)은 "로그아웃 시 해제 → 다음 계정 등록"을 정상 경로로 확정했는데 코드가 그 경로를 막고
+   * 있던 것이다.
+   *
+   * <p>해제하지 않은 활성 등록은 계약대로 계속 409다. 그 상태에서 소유권을 옮기면 이전 사용자에게 갈 알림이 새 사용자 기기로 배달된다.
+   */
+  private void rejectTokenActiveOnAnotherUser(Long userId, NotificationDeviceToken tokenOwner) {
+    if (tokenOwner == null || tokenOwner.getUserId().equals(userId)) {
+      return;
+    }
+    if (tokenOwner.isActive()) {
+      throw new BusinessException(NotificationErrorCode.DEVICE_TOKEN_ALREADY_REGISTERED);
+    }
+  }
+
+  /** 이 Token 행이 요청자의 같은 설치에 대한 등록인지. 그렇다면 평소의 upsert 경로로 갱신한다. */
+  private boolean isSameRegistration(
+      NotificationDeviceToken tokenOwner, Long userId, String deviceId) {
+    return tokenOwner.getUserId().equals(userId) && tokenOwner.getDeviceId().equals(deviceId);
+  }
+
+  /**
+   * 이미 존재하는 Token 행을 요청자의 등록으로 가져온다.
+   *
+   * <p>{@code token_hash} 유니크 제약 때문에 행을 새로 만들 수 없어 기존 행을 옮겨 쓴다. 두 경우를 함께 처리한다.
+   *
+   * <ol>
+   *   <li>다른 계정이 <b>해제한</b> Token — 위 {@link #rejectTokenActiveOnAnotherUser}를 통과한 비활성 행이다.
+   *   <li>같은 계정이지만 <b>설치 식별자가 다른</b> 경우 — 앱 재설치로 {@code deviceId}는 새로 생겼는데 FCM Token은 그대로인 상황이다.
+   *       이전에는 이 경로에서 새 행을 만들려다 유니크 제약을 위반해 500이 났다.
+   * </ol>
+   */
+  private NotificationDeviceToken claimToken(
+      NotificationDeviceToken tokenOwner,
+      Long userId,
+      String deviceId,
+      String ciphertext,
+      String tokenHash,
+      String platform,
+      String appVersion) {
+    if (!tokenOwner.getUserId().equals(userId)) {
+      // Token 원문·hash 전문은 남기지 않는다(계약 §5.4). 소유자 식별자와 hash 앞 8자만 남긴다.
+      log.info(
+          "해제된 기기 Token의 소유권을 이전합니다. previousUserId={}, newUserId={}, tokenHashPrefix={}",
+          tokenOwner.getUserId(),
+          userId,
+          hashPrefix(tokenHash));
+    }
+    tokenOwner.transferTo(userId, deviceId);
+    tokenOwner.refresh(ciphertext, tokenHash, platform, PUSH_PROVIDER, appVersion);
+    return deviceTokenRepository.saveAndFlush(tokenOwner);
+  }
+
+  private String hashPrefix(String tokenHash) {
+    if (tokenHash == null || tokenHash.length() < HASH_PREFIX_LENGTH) {
+      return "unknown";
+    }
+    return tokenHash.substring(0, HASH_PREFIX_LENGTH);
   }
 
   private String requireDeviceId(RegisterDeviceTokenRequest request) {

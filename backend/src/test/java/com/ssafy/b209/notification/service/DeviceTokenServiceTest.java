@@ -116,6 +116,85 @@ class DeviceTokenServiceTest {
   }
 
   @Test
+  void claimsTokenReleasedByAnotherAccountInsteadOfBlockingItForever() {
+    // 계정 A가 NOTI-02로 해제한 뒤 계정 B가 같은 기기에서 등록하는 경로다. 계약 §3이 정상 경로로
+    // 확정했는데, 활성 여부를 보지 않던 이전 구현은 A의 비활성 행이 token_hash를 영구 점유해
+    // B를 영원히 409로 막았다(S15P11B209-862).
+    NotificationDeviceToken releasedToken =
+        NotificationDeviceToken.register(
+            OTHER_USER_ID,
+            "other-device",
+            "old-ciphertext",
+            "hash",
+            "ANDROID",
+            "FCM",
+            "0.9.0",
+            LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
+    releasedToken.deactivate();
+    given(deviceTokenRepository.findByTokenHash(any())).willReturn(Optional.of(releasedToken));
+    given(deviceTokenRepository.saveAndFlush(releasedToken)).willReturn(releasedToken);
+
+    DeviceTokenResponse response = service.register(USER_ID, request("fcm-token", "ANDROID"));
+
+    assertThat(response.active()).isTrue();
+    assertThat(response.registered()).isTrue();
+    assertThat(releasedToken.getUserId()).isEqualTo(USER_ID);
+    assertThat(releasedToken.getDeviceId()).isEqualTo(DEVICE_ID);
+    assertThat(releasedToken.isActive()).isTrue();
+    assertThat(releasedToken.getAppVersion()).isEqualTo("1.0.0");
+    // 행을 새로 만들지 않는다. token_hash 가 전역 유니크라 두 행이 공존할 수 없다.
+    verify(deviceTokenRepository, never()).findByUserIdAndDeviceId(any(), any());
+  }
+
+  @Test
+  void keepsRejectingTokenStillActiveOnAnotherAccount() {
+    // 해제하지 않고 계정만 전환한 경우다. 계약 §3이 소유권 자동 이전을 금지했으므로 그대로 409다.
+    NotificationDeviceToken activeToken =
+        NotificationDeviceToken.register(
+            OTHER_USER_ID,
+            "other-device",
+            "ciphertext",
+            "hash",
+            "ANDROID",
+            "FCM",
+            null,
+            LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
+    given(deviceTokenRepository.findByTokenHash(any())).willReturn(Optional.of(activeToken));
+
+    assertError(
+        () -> service.register(USER_ID, request("fcm-token", "ANDROID")),
+        NotificationErrorCode.DEVICE_TOKEN_ALREADY_REGISTERED);
+
+    assertThat(activeToken.getUserId()).isEqualTo(OTHER_USER_ID);
+    verify(deviceTokenRepository, never()).saveAndFlush(any(NotificationDeviceToken.class));
+  }
+
+  @Test
+  void movesOwnTokenToTheNewInstallationIdentifierWithoutViolatingTheHashConstraint() {
+    // 앱을 재설치하면 deviceId 는 새로 생기는데 FCM Token 은 그대로일 수 있다. 이전 구현은 이때
+    // 새 행을 만들려다 token_hash 유니크 제약을 위반했다.
+    NotificationDeviceToken sameUsersToken =
+        NotificationDeviceToken.register(
+            USER_ID,
+            "previous-installation",
+            "old-ciphertext",
+            "hash",
+            "ANDROID",
+            "FCM",
+            "0.9.0",
+            LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
+    given(deviceTokenRepository.findByTokenHash(any())).willReturn(Optional.of(sameUsersToken));
+    given(deviceTokenRepository.saveAndFlush(sameUsersToken)).willReturn(sameUsersToken);
+
+    DeviceTokenResponse response = service.register(USER_ID, request("fcm-token", "ANDROID"));
+
+    assertThat(response.deviceId()).isEqualTo(DEVICE_ID);
+    assertThat(sameUsersToken.getDeviceId()).isEqualTo(DEVICE_ID);
+    assertThat(sameUsersToken.getUserId()).isEqualTo(USER_ID);
+    verify(deviceTokenRepository, never()).findByUserIdAndDeviceId(any(), any());
+  }
+
+  @Test
   void rejectsMissingBodyBlankFieldsAndUnknownPlatformWithTheSameCode() {
     assertError(() -> service.register(USER_ID, null), NotificationErrorCode.DEVICE_TOKEN_INVALID);
     assertError(
