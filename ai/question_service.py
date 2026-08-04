@@ -878,6 +878,20 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
                 alert.reason_code,
                 request_id,
             )
+        else:
+            # 보호자에게 자동 전달하지 않는 사유(학대 진술 등)는 안내가 없다 — 그렇다고 신호를
+            # 조용히 흘리면 아무도 모른다. 전문가 검토 경로로 남긴다는 사실을 로그에 남긴다
+            # (S15P11B209-890). 여기서도 아이 발화 원문은 남기지 않는다.
+            note = crisis_guidance.expert_note_for(crisis_reason)
+            if note is not None:
+                logger.warning(
+                    "보호자 자동 안내 보류 — 전문가 검토 경로: severity=%s reason=%s "
+                    "expert_review=%s request_id=%s",
+                    note.severity,
+                    note.reason_code,
+                    note.requires_expert_review,
+                    request_id,
+                )
         # ⚠️ 임시 검증용(출시 전 제거: S15P11B209-689) — 어떤 발화가 위기로 걸렸는지 원문 확인.
         child_texts = [
             m.text
