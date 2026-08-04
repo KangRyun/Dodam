@@ -24,7 +24,7 @@ export function CommunityPostCard({ post }: { post: CommunityPost }) {
 
   return (
     <Link className="community-post-link" href={`/community/posts/${post.id}`}>
-      <article className="community-post-card">
+      <article className="community-post-card" data-category={post.category}>
         <div className="community-post-copy">
           <div className="community-post-badges">
             <span
