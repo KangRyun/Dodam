@@ -22,6 +22,9 @@ public enum CommonErrorCode implements ErrorCode {
   /** 요청한 HTTP Method를 지원하지 않는 경우다. */
   METHOD_NOT_ALLOWED(HttpStatus.METHOD_NOT_ALLOWED, "COMMON_405_001", "지원하지 않는 HTTP 메서드입니다."),
 
+  /** 클라이언트가 {@code Accept} 로 요구한 표현을 서버가 만들 수 없는 경우다 (S15P11B209-860). */
+  NOT_ACCEPTABLE(HttpStatus.NOT_ACCEPTABLE, "COMMON_406_001", "요청한 응답 형식을 제공할 수 없습니다."),
+
   /** 요청이 데이터 무결성 조건과 충돌한 경우다. */
   DATA_INTEGRITY_VIOLATION(HttpStatus.CONFLICT, "COMMON_409_001", "요청이 현재 데이터 상태와 충돌합니다."),
 
