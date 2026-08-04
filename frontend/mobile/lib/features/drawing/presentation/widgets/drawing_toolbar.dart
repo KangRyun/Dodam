@@ -299,17 +299,30 @@ final class DrawingToolbar extends StatelessWidget {
           key: const ValueKey('drawing-thickness-preview'),
           dimension: 48,
           child: Center(
+            // 굵기 점만 두면 얇을 때 먼지처럼 보인다. 크기가 변하지 않는 자리를
+            // 두고 그 안에서 점이 커지게 해야 어느 정도인지 견줄 수 있다.
             child: DecoratedBox(
               decoration: BoxDecoration(
-                color: toolState.color,
+                color: AppColors.canvasWarm,
                 shape: BoxShape.circle,
-                border: Border.all(color: AppColors.canvasInk),
+                border: Border.all(color: AppColors.canvasBorderStrong),
               ),
               child: SizedBox.square(
-                dimension: DrawingStrokeRenderer.footprintFor(
-                  toolState.brushProfile,
-                  toolState.width,
-                ).clamp(4, 40),
+                dimension: 40,
+                child: Center(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: toolState.color,
+                      shape: BoxShape.circle,
+                    ),
+                    child: SizedBox.square(
+                      dimension: DrawingStrokeRenderer.footprintFor(
+                        toolState.brushProfile,
+                        toolState.width,
+                      ).clamp(3, 32),
+                    ),
+                  ),
+                ),
               ),
             ),
           ),
@@ -622,33 +635,32 @@ final class _CrayonSelectionRingPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final center = size.center(Offset.zero);
-    final outerPaint = Paint()
-      ..color = AppColors.canvasInk
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.7
-      ..strokeCap = StrokeCap.round;
-    final innerPaint = Paint()
-      ..color = AppColors.canvasInk
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.1
-      ..strokeCap = StrokeCap.round;
-
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: center.translate(-0.35, 0.2),
-        width: size.width - 3,
-        height: size.height - 3.8,
-      ),
-      outerPaint,
-    );
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: center.translate(0.45, -0.3),
-        width: size.width - 7.2,
-        height: size.height - 6.4,
-      ),
-      innerPaint,
-    );
+    // 검은 견본 위에서도 링이 견본과 붙어 덩어리로 보이지 않도록, 밝은 띠를
+    // 안쪽에 한 겹 두고 그 바깥에 잉크 선을 한 줄만 그린다.
+    canvas
+      ..drawOval(
+        Rect.fromCenter(
+          center: center,
+          width: size.width - 6,
+          height: size.height - 6,
+        ),
+        Paint()
+          ..color = AppColors.canvasWarm
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 2.6,
+      )
+      ..drawOval(
+        Rect.fromCenter(
+          center: center.translate(-0.3, 0.2),
+          width: size.width - 3,
+          height: size.height - 3.6,
+        ),
+        Paint()
+          ..color = AppColors.canvasInk
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1.5
+          ..strokeCap = StrokeCap.round,
+      );
   }
 
   @override

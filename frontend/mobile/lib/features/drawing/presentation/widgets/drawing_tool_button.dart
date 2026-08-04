@@ -30,6 +30,10 @@ const double _buttonSize = 48;
 /// 도구 그림 크기다. 승인 시안의 버튼:그림 비율(62:47)을 따른다.
 const double _artworkSize = 36;
 
+/// 선택 받침 크기다. 크레용·붓처럼 비스듬히 놓인 그림은 상자 모서리까지 꽉 차서,
+/// 받침이 버튼과 같은 크기면 그림이 받침 밖으로 삐져나온 것처럼 보인다.
+const double _plateSize = 56;
+
 final class _DrawingToolButtonState extends State<DrawingToolButton> {
   bool _hovered = false;
   bool _focused = false;
@@ -71,13 +75,17 @@ final class _DrawingToolButtonState extends State<DrawingToolButton> {
                   // 읽힌다. 그림보다 조금만 크면 뒤에 낀 상자처럼 보인다.
                   if (widget.selected)
                     IgnorePointer(
-                      child: Image.asset(
-                        'assets/canvas/frame/selected_tool.png',
-                        width: _buttonSize,
-                        height: _buttonSize,
-                        fit: BoxFit.fill,
-                        filterQuality: FilterQuality.high,
-                        excludeFromSemantics: true,
+                      child: OverflowBox(
+                        maxWidth: _plateSize,
+                        maxHeight: _plateSize,
+                        child: Image.asset(
+                          'assets/canvas/frame/selected_tool.png',
+                          width: _plateSize,
+                          height: _plateSize,
+                          fit: BoxFit.fill,
+                          filterQuality: FilterQuality.high,
+                          excludeFromSemantics: true,
+                        ),
                       ),
                     ),
                   AnimatedScale(
