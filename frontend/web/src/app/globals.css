@@ -143,6 +143,90 @@ a {
   outline-offset: 3px;
 }
 
+/* 로그아웃 상태의 로그인/회원가입 진입 버튼 — 프로필 버튼과 같은 오른쪽 칼럼에 놓는다. */
+.community-login-button {
+  display: inline-flex;
+  align-items: center;
+  justify-self: end;
+  height: 48px;
+  padding: 0 20px;
+  border-radius: 15px;
+  background: #5f9270;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  white-space: nowrap;
+}
+
+.community-login-button:hover {
+  background: #547f63;
+}
+
+.community-login-button:focus-visible {
+  outline: 3px solid rgb(108 163 124 / 35%);
+  outline-offset: 3px;
+}
+
+/* 마운트 전 자리표시 — 프로필/로그인 버튼과 같은 크기로 레이아웃 흔들림을 막는다. */
+.community-auth-slot {
+  justify-self: end;
+  width: 48px;
+  height: 48px;
+}
+
+/* 로그인 상태의 계정 메뉴(프로필 버튼 + 드롭다운). */
+.community-account {
+  position: relative;
+  justify-self: end;
+}
+
+.community-account-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  min-width: 172px;
+  padding: 6px;
+  border: 1px solid #e3e7df;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 12px 28px rgb(41 50 61 / 12%);
+}
+
+.community-account-menu-item {
+  display: block;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #29323d;
+  font-size: 14px;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+
+.community-account-menu-item:hover {
+  background: #f1f5ef;
+}
+
+.community-account-menu-item:focus-visible {
+  outline: 3px solid rgb(108 163 124 / 35%);
+  outline-offset: -2px;
+}
+
+.community-account-logout {
+  color: #c0453b;
+}
+
+.community-account-logout:hover {
+  background: #fbeceb;
+}
+
 .community-main {
   display: grid;
   grid-template-columns: minmax(0, 3fr) minmax(260px, 1fr);
@@ -529,6 +613,105 @@ a {
 
 .community-switch input:checked + span::after {
   transform: translateX(24px);
+}
+
+/* 내 프로필 화면 */
+.community-profile-hero {
+  gap: 18px;
+  justify-content: flex-start;
+}
+
+.community-profile-hero .community-profile-avatar {
+  width: 60px;
+  height: 60px;
+  font-size: 28px;
+}
+
+.community-profile-hero h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.community-profile-links {
+  display: flex;
+  flex-direction: column;
+  margin-top: 18px;
+  border: 1px solid #dfe4dc;
+  border-radius: 22px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.community-profile-links > a {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 1px solid #e8ebe5;
+  color: #45505b;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.community-profile-links > a:last-child {
+  border-bottom: 0;
+}
+
+.community-profile-links > a:hover,
+.community-profile-links > a:focus-visible {
+  color: #5f9f73;
+  background: #f7faf6;
+}
+
+.community-profile-links > a > span:last-child {
+  color: #a5ada5;
+  font-size: 20px;
+}
+
+/* 설정 — 위험 동작(회원 탈퇴) */
+.community-settings-danger {
+  align-items: flex-start;
+  border-color: #efd6d3;
+}
+
+.community-settings-danger h2 {
+  color: #b8564f;
+}
+
+.community-settings-error {
+  margin-top: 10px;
+  color: #b8564f;
+  font-weight: 600;
+}
+
+.community-settings-confirm {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 14px;
+  background: #fbe9e7;
+}
+
+.community-settings-confirm p {
+  margin: 0 0 12px;
+  color: #8a3f39;
+}
+
+.community-settings-confirm-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.community-button-danger {
+  border-color: #b8564f;
+  background: #b8564f;
+  color: #fff;
+}
+
+.community-button-danger:hover:not(:disabled) {
+  background: #a24a44;
+  border-color: #a24a44;
 }
 
 .community-empty-state {
@@ -1625,4 +1808,481 @@ a {
   .community-report-reasons {
     grid-template-columns: 1fr;
   }
+}
+
+/* ── 로그인 화면 — 앱 소셜 로그인과 동일 컨셉 (S15P11B209-817) ───────────────
+   넓은 화면: 좌 브랜드 패널(골드 그라디언트 + 워드마크 + 손그림 + 도담이) + 우 폼.
+   좁은 화면: 상단 히어로 + 아래 폼 세로 스택. 색상은 앱 디자인 토큰과 맞춘다. */
+.login {
+  display: grid;
+  grid-template-columns: 46fr 54fr;
+  min-height: 100dvh;
+  background: #fff;
+}
+
+.login-brand {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(135deg, #f4cc58, #d98745);
+}
+
+.login-wordmark {
+  position: absolute;
+  top: 48px;
+  left: 40px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.login-wordmark-title {
+  color: #5a3712;
+  font-size: 40px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -0.035em;
+}
+
+.login-wordmark-tagline {
+  color: #8a5a1c;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.login-mascot {
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  z-index: 1;
+  width: 82%;
+  max-width: 440px;
+  height: auto;
+  transform: translateX(-50%);
+  object-fit: contain;
+}
+
+.login-doodle {
+  position: absolute;
+  z-index: 0;
+  height: auto;
+}
+
+.login-doodle-tree {
+  top: 16%;
+  left: 44%;
+  width: 13%;
+}
+
+.login-doodle-dino {
+  top: 27%;
+  left: 2%;
+  width: 28%;
+}
+
+.login-doodle-sun {
+  top: 37%;
+  left: 58%;
+  width: 34%;
+}
+
+.login-panel {
+  display: grid;
+  place-items: center;
+  padding: 48px 40px;
+  background: #fff;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 400px;
+}
+
+.login-welcome-title {
+  color: #27313a;
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.login-welcome-sub {
+  margin-top: 6px;
+  color: #68737d;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.login-error {
+  margin-top: 20px;
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: #fbe9e7;
+  color: #b8564f;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.login-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 28px 0 16px;
+  color: #68737d;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.login-divider::before,
+.login-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: #dde2dc;
+}
+
+.login-signup-note {
+  margin-top: 16px;
+  color: #68737d;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+}
+
+.login-policy {
+  margin-top: 16px;
+  color: #68737d;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: center;
+}
+
+.login-policy a {
+  color: #27313a;
+  font-weight: 700;
+  text-decoration: underline;
+}
+
+@media (max-width: 767px) {
+  .login {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+
+  .login-brand {
+    height: 240px;
+  }
+
+  .login-wordmark {
+    top: 28px;
+    left: 24px;
+  }
+
+  .login-wordmark-title {
+    font-size: 32px;
+  }
+
+  .login-wordmark-tagline {
+    font-size: 13px;
+  }
+
+  .login-mascot {
+    width: 58%;
+    max-width: 240px;
+  }
+
+  .login-doodle-dino {
+    width: 24%;
+  }
+
+  .login-doodle-tree {
+    width: 12%;
+  }
+
+  .login-doodle-sun {
+    width: 30%;
+  }
+
+  .login-panel {
+    padding: 28px 20px 40px;
+  }
+
+  .login-welcome-title {
+    font-size: 26px;
+  }
+}
+
+/* ── 온보딩/약관 동의 — 앱 온보딩과 동일 컨셉 (S15P11B209-817) ───────────────
+   canvas 배경 위 카드형. 역할 선택·전체 동의·필수 배지·"동의하고 시작하기 →". */
+.onboarding-page {
+  display: flex;
+  min-height: 100dvh;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 24px;
+  background: #fffcf5;
+}
+
+.onboarding-card {
+  width: 100%;
+  max-width: 600px;
+  padding: 32px;
+  border: 1px solid #dde2dc;
+  border-radius: 20px;
+  background: #fff;
+}
+
+.onboarding-progress {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #68737d;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.onboarding-progress span:first-child {
+  color: #5f9e73;
+}
+
+.onboarding-title {
+  margin-top: 18px;
+  color: #27313a;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+
+.onboarding-subtitle {
+  margin-top: 8px;
+  color: #68737d;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.onboarding-fields {
+  display: flex;
+  flex-direction: column;
+  margin-top: 24px;
+}
+
+.onboarding-roles {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.onboarding-role {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 16px;
+  border: 1px solid #dde2dc;
+  border-radius: 14px;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    background 0.15s;
+}
+
+.onboarding-role:hover {
+  border-color: #bfc8c0;
+}
+
+.onboarding-role.is-selected {
+  border-color: #5f9e73;
+  background: #eaf5ec;
+}
+
+.onboarding-role-label {
+  color: #27313a;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.onboarding-role-desc {
+  color: #68737d;
+  font-size: 13px;
+}
+
+.onboarding-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 24px;
+}
+
+.onboarding-field-label {
+  color: #414b54;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.onboarding-input {
+  height: 48px;
+  padding: 0 14px;
+  border: 1px solid #dde2dc;
+  border-radius: 14px;
+  background: #fff;
+  color: #27313a;
+  font-size: 15px;
+  outline: 0;
+}
+
+.onboarding-input:focus {
+  border-color: #5f9e73;
+  box-shadow: 0 0 0 3px rgb(95 158 115 / 15%);
+}
+
+.onboarding-field-hint {
+  color: #8a949e;
+  font-size: 12px;
+}
+
+.onboarding-consent {
+  margin-top: 24px;
+}
+
+.onboarding-consent-all {
+  border: 1px solid #dde2dc;
+  border-radius: 14px;
+  background: #eaf5ec;
+}
+
+.onboarding-consent-list {
+  margin-top: 12px;
+  overflow: hidden;
+  border: 1px solid #dde2dc;
+  border-radius: 14px;
+  background: #f6f7f2;
+}
+
+.onboarding-consent-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  cursor: pointer;
+}
+
+.onboarding-consent-list .onboarding-consent-row + .onboarding-consent-row {
+  border-top: 1px solid #dde2dc;
+}
+
+.onboarding-consent-row input[type="checkbox"] {
+  flex: 0 0 auto;
+  width: 20px;
+  height: 20px;
+  accent-color: #5f9e73;
+}
+
+.onboarding-consent-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.onboarding-consent-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: #27313a;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* 필수 표시 — 앱과 동일하게 제목 뒤 tangerine 인라인 텍스트(pill 아님). 선택 항목엔 없음. */
+.onboarding-required {
+  color: #d98745;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.onboarding-consent-desc {
+  color: #68737d;
+  font-size: 13px;
+}
+
+/* 우측 상세 화살표 — 앱의 "›" 상세 보기. */
+.onboarding-consent-chevron {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  color: #9aa4ac;
+  font-size: 28px;
+  line-height: 1;
+  text-decoration: none;
+}
+
+.onboarding-consent-note {
+  margin-top: 12px;
+  color: #68737d;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.onboarding-loading {
+  color: #8a949e;
+  font-size: 14px;
+}
+
+.onboarding-error {
+  margin-top: 16px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: #fbe9e7;
+  color: #b8564f;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.onboarding-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.onboarding-button {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 52px;
+  border: 0;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.onboarding-button-ghost {
+  border: 1px solid #dde2dc;
+  background: #fff;
+  color: #414b54;
+}
+
+.onboarding-button-ghost:hover {
+  border-color: #bfc8c0;
+}
+
+.onboarding-button-primary {
+  background: #5f9e73;
+  color: #fff;
+}
+
+.onboarding-button-primary:hover {
+  background: #477d59;
+}
+
+.onboarding-button-primary:disabled {
+  background: #d9ddd8;
+  color: #909892;
+  cursor: not-allowed;
 }

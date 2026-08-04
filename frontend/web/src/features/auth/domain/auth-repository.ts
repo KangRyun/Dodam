@@ -31,6 +31,12 @@ export interface AuthRepository {
   /** 세션을 종료한다(`POST /auth/logout`). */
   logout(input: { refreshToken: string; deviceId: string }): Promise<void>;
 
+  /** 현재 로그인 사용자를 회원 탈퇴 처리한다(`DELETE /users/me`). */
+  deleteAccount(input: {
+    refreshToken: string;
+    deviceId: string;
+  }): Promise<void>;
+
   /** 동의할 약관 목록을 조회한다(`GET /consents/terms?targetScope=USER`). */
   getTerms(): Promise<ConsentTerm[]>;
 
