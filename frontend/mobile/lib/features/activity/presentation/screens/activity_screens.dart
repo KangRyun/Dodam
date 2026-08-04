@@ -27,6 +27,8 @@ import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/models/drawing_tool_state.dart';
+import '../../../drawing/presentation/widgets/drawing_crayon_frame.dart';
+import '../../../drawing/presentation/widgets/drawing_cursor_overlay.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 import '../../../drawing/presentation/widgets/canvas_tool_tutorial_overlay.dart';
 import '../../../conversation/conversation.dart';
@@ -233,6 +235,23 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 관리하므로 이 화면은 목록을 따로 들고 있지 않는다.
   List<DrawingStroke> get _completedStrokes => _documentController.visibleStrokes;
   DrawingStroke? _activeStroke;
+  /// 툴바에 늘 떠 있는 기본 8색이다. 상세 팔레트를 열지 않아도 바로 고를 수 있다.
+  static const _quickColors = <Color>[
+    AppColors.drawingRed,
+    AppColors.drawingOrange,
+    AppColors.drawingYellow,
+    AppColors.drawingGreen,
+    AppColors.drawingTeal,
+    AppColors.drawingBlue,
+    AppColors.drawingPurple,
+    AppColors.drawingCharcoal,
+  ];
+
+  /// 태블릿에서 상세 팔레트 팝오버를 팔레트 버튼 옆에 붙이기 위한 기준점이다.
+  final LayerLink _paletteAnchorLink = LayerLink();
+
+  late final DrawingCursorController _cursorController;
+
   /// 현재 선택된 도구·색·굵기다. 크레용 캔버스는 도구를 펜/지우개 두 갈래가 아니라
   /// 크레용·연필·붓·채우기·지우개로 나누므로 한 상태로 묶어 다룬다.
   DrawingToolState _toolState = const DrawingToolState(
@@ -351,6 +370,16 @@ class _DrawingScreenState extends State<DrawingScreen>
     _ownsDocumentController = widget.documentController == null;
     _documentController = widget.documentController ?? DrawingDocumentController();
     _documentController.addListener(_handleDocumentChanged);
+    _cursorController = DrawingCursorController(
+      DrawingCursorState(
+        visible: false,
+        documentPosition: Offset.zero,
+        instrument: _toolState.instrument,
+        eraserMode: _toolState.eraserMode,
+        documentWidth: _toolState.width,
+        deviceKind: ui.PointerDeviceKind.touch,
+      ),
+    );
     _companionSnapshot = widget.companion;
     final parsedChildId = int.tryParse(widget.childId);
     final tutorialApplicable =
@@ -567,6 +596,65 @@ class _DrawingScreenState extends State<DrawingScreen>
     if (mounted) setState(() {});
   }
 
+  /// 화면 크기로 캔버스 레이아웃 종류를 정한다. 툴바 배치와 프레임 여백이 이 값에
+  /// 따라 달라진다.
+  DrawingCanvasDeviceClass _deviceClassFor(Size size) {
+    if (size.width >= 900 && size.height > 520) {
+      return DrawingCanvasDeviceClass.tablet;
+    }
+    if (size.width >= 640 && size.height <= 520) {
+      return DrawingCanvasDeviceClass.mobileLandscape;
+    }
+    return DrawingCanvasDeviceClass.mobilePortrait;
+  }
+
+  /// 커서가 보이는 중이면 바뀐 도구·굵기를 즉시 반영한다.
+  void _refreshVisibleCursor() {
+    final cursor = _cursorController.value;
+    if (!cursor.visible) return;
+    _cursorController.update(
+      documentPosition: cursor.documentPosition,
+      toolState: _toolState,
+      deviceKind: cursor.deviceKind,
+    );
+  }
+
+  void _setInstrument(DrawingInstrument instrument) {
+    setState(() {
+      _toolState = DrawingToolState(
+        instrument: instrument,
+        eraserMode: _toolState.eraserMode,
+        color: _toolState.color,
+        width: _toolState.width,
+      );
+    });
+    _refreshVisibleCursor();
+  }
+
+  void _setColor(Color color) {
+    setState(() {
+      _toolState = DrawingToolState(
+        instrument: _toolState.instrument,
+        eraserMode: _toolState.eraserMode,
+        color: color,
+        width: _toolState.width,
+      );
+    });
+    _refreshVisibleCursor();
+  }
+
+  void _setThickness(double thickness) {
+    setState(() {
+      _toolState = DrawingToolState(
+        instrument: _toolState.instrument,
+        eraserMode: _toolState.eraserMode,
+        color: _toolState.color,
+        width: thickness,
+      );
+    });
+    _refreshVisibleCursor();
+  }
+
   void _rememberExistingQuestions(
     Iterable<ActivityConversationMessageDto> messages,
   ) {
@@ -581,6 +669,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     _cancelNoResponseTimer();
     _documentController.removeListener(_handleDocumentChanged);
     if (_ownsDocumentController) _documentController.dispose();
+    _cursorController.dispose();
     if (_ownsCanvasTutorialController) _canvasTutorialController?.dispose();
     _syncCoordinator.removeListener(_handleSyncChanged);
     _draftRestoreController.removeListener(_handleDraftRestoreChanged);
