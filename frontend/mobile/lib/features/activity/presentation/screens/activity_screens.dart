@@ -27,8 +27,10 @@ import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/models/drawing_tool_state.dart';
+import '../../../drawing/presentation/widgets/drawing_color_palette.dart';
 import '../../../drawing/presentation/widgets/drawing_crayon_frame.dart';
 import '../../../drawing/presentation/widgets/drawing_cursor_overlay.dart';
+import '../../../drawing/presentation/widgets/drawing_toolbar.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 import '../../../drawing/presentation/widgets/canvas_tool_tutorial_overlay.dart';
 import '../../../conversation/conversation.dart';
@@ -641,6 +643,112 @@ class _DrawingScreenState extends State<DrawingScreen>
       );
     });
     _refreshVisibleCursor();
+  }
+
+  void _setEraserMode(DrawingEraserMode mode) {
+    setState(() {
+      _toolState = DrawingToolState(
+        instrument: DrawingInstrument.eraser,
+        eraserMode: mode,
+        color: _toolState.color,
+        width: _toolState.width,
+      );
+    });
+    _refreshVisibleCursor();
+  }
+
+  void _handleEraserMenuAction(DrawingEraserMenuAction action) {
+    switch (action) {
+      case DrawingEraserMenuAction.selectStroke:
+        _setEraserMode(DrawingEraserMode.stroke);
+      case DrawingEraserMenuAction.selectArea:
+        _setEraserMode(DrawingEraserMode.area);
+      case DrawingEraserMenuAction.clearAll:
+        unawaited(_confirmClearAll());
+    }
+  }
+
+  /// 전체 지우기는 되돌릴 수 있지만 아이에게는 큰 변화라 한 번 확인한다.
+  Future<void> _confirmClearAll() async {
+    final confirmed = await showAppConfirmDialog(
+      context: context,
+      title: '그림을 모두 지울까요?',
+      message: '되돌리기로 다시 살릴 수 있어요.',
+      confirmLabel: '모두 지우기',
+      cancelLabel: '계속 그리기',
+      isDanger: true,
+    );
+    if (confirmed != true || !mounted) return;
+    _invalidatePendingCompletion();
+    setState(_documentController.clearAll);
+    // 전체 지우기는 그림 이벤트를 만들지 않으므로 스냅샷 변경으로 알린다.
+    _syncCoordinator.recordSnapshotChange();
+  }
+
+  /// 상세 색상 팔레트를 연다. 태블릿은 팔레트 버튼 옆 팝오버, 모바일은 바텀 시트다.
+  Future<void> _openColorPalette(DrawingCanvasDeviceClass deviceClass) async {
+    var value = HSVColor.fromColor(_toolState.color);
+    final previousColor = _toolState.color;
+
+    Widget palette(StateSetter setPaletteState) => DrawingColorPalette(
+      value: value,
+      previousColor: previousColor,
+      onChanged: (next) {
+        setPaletteState(() => value = next);
+        _setColor(next.toColor());
+      },
+    );
+
+    if (deviceClass == DrawingCanvasDeviceClass.tablet) {
+      await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: '색상 팔레트 닫기',
+        barrierColor: Colors.black26,
+        transitionDuration: const Duration(milliseconds: 150),
+        pageBuilder: (routeContext, _, _) => Stack(
+          children: [
+            CompositedTransformFollower(
+              link: _paletteAnchorLink,
+              showWhenUnlinked: false,
+              targetAnchor: Alignment.bottomRight,
+              followerAnchor: Alignment.topRight,
+              offset: const Offset(0, AppSpacing.sm),
+              child: Material(
+                key: const ValueKey('drawing-tablet-palette-popover'),
+                elevation: 12,
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(20),
+                clipBehavior: Clip.antiAlias,
+                child: SizedBox(
+                  width: 380,
+                  child: StatefulBuilder(
+                    builder: (context, setPaletteState) =>
+                        palette(setPaletteState),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isDismissible: true,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => ConstrainedBox(
+        key: const ValueKey('drawing-mobile-palette-sheet'),
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: StatefulBuilder(
+          builder: (context, setPaletteState) => palette(setPaletteState),
+        ),
+      ),
+    );
   }
 
   void _setThickness(double thickness) {
@@ -2009,6 +2117,8 @@ class _DrawingScreenState extends State<DrawingScreen>
                   sttResultController: _sttResultController,
                 );
                 final sidePanel = _DrawingSidePanel(
+                  // 도구·색·굵기·완료는 상단 크레용 툴바가 맡는다.
+                  showToolControls: false,
                   selectedTool: _tool,
                   selectedColor: _color,
                   selectedThickness: _thickness,
@@ -2057,48 +2167,83 @@ class _DrawingScreenState extends State<DrawingScreen>
                   stageErrorAnchorKey: _stageErrorAnchorKey,
                 );
                 final screenSize = MediaQuery.sizeOf(context);
-                final useCompactLandscape =
-                    screenSize.width >= 640 && screenSize.height <= 520;
-                final useTabletLayout =
-                    !useCompactLandscape && screenSize.width >= 900;
-                if (useCompactLandscape || useTabletLayout) {
-                  final padding = useCompactLandscape
-                      ? AppSpacing.sm
-                      : AppSpacing.lg;
-                  final panelWidth = useCompactLandscape ? 240.0 : 320.0;
-                  return Padding(
-                    key: ValueKey(
-                      useCompactLandscape
-                          ? 'drawing-layout-compact-landscape'
-                          : 'drawing-layout-tablet',
+                final deviceClass = _deviceClassFor(screenSize);
+                final toolbar = DrawingToolbar(
+                  toolState: _toolState,
+                  quickColors: _quickColors,
+                  paletteAnchorLink: _paletteAnchorLink,
+                  onBack: () => unawaited(_stopTtsAndPop()),
+                  canUndo: _activeStroke == null && _documentController.canUndo,
+                  canRedo: _activeStroke == null && _documentController.canRedo,
+                  canComplete:
+                      !_canvasLocked &&
+                      !_isCompleting &&
+                      _activeStroke == null &&
+                      _hasDrawingContent,
+                  isCompleting: _isCompleting,
+                  saveStatus: _syncCoordinator.saveStatus,
+                  onUndo: _undoLastStroke,
+                  onRedo: _redoLastStroke,
+                  onRetrySave: () => unawaited(_syncCoordinator.retry()),
+                  onInstrumentChanged: _setInstrument,
+                  onEraserMenuAction: _handleEraserMenuAction,
+                  onColorChanged: _setColor,
+                  onWidthChanged: _setThickness,
+                  onOpenPalette: () =>
+                      unawaited(_openColorPalette(deviceClass)),
+                  onComplete: () => unawaited(_confirmAndComplete()),
+                );
+                final frameInset = switch (deviceClass) {
+                  DrawingCanvasDeviceClass.mobilePortrait => AppSpacing.sm,
+                  DrawingCanvasDeviceClass.mobileLandscape => AppSpacing.xs,
+                  DrawingCanvasDeviceClass.tablet => AppSpacing.md,
+                };
+                final layoutKey = switch (deviceClass) {
+                  DrawingCanvasDeviceClass.mobilePortrait =>
+                    'drawing-shell-mobile-portrait',
+                  DrawingCanvasDeviceClass.mobileLandscape =>
+                    'drawing-shell-mobile-landscape',
+                  DrawingCanvasDeviceClass.tablet => 'drawing-shell-tablet',
+                };
+                return Column(
+                  key: ValueKey(layoutKey),
+                  children: [
+                    toolbar,
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: Padding(
+                              padding: EdgeInsets.all(frameInset),
+                              child: DrawingCrayonFrame(
+                                deviceClass: deviceClass,
+                                child: canvas,
+                              ),
+                            ),
+                          ),
+                          if (constraints.maxWidth > frameInset * 2)
+                            Positioned(
+                              top: frameInset + AppSpacing.sm,
+                              right: frameInset + AppSpacing.sm,
+                              child: ConstrainedBox(
+                                key: const ValueKey('drawing-stage-chrome'),
+                                constraints: BoxConstraints(
+                                  maxWidth: min(
+                                    360,
+                                    constraints.maxWidth - frameInset * 2,
+                                  ),
+                                  maxHeight: max(
+                                    96,
+                                    constraints.maxHeight * .65,
+                                  ),
+                                ),
+                                child: sidePanel,
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                    padding: EdgeInsets.all(padding),
-                    child: Row(
-                      children: [
-                        Expanded(flex: 3, child: canvas),
-                        SizedBox(
-                          width: useCompactLandscape
-                              ? AppSpacing.sm
-                              : AppSpacing.lg,
-                        ),
-                        SizedBox(width: panelWidth, child: sidePanel),
-                      ],
-                    ),
-                  );
-                }
-                final canvasHeight = constraints.maxWidth >= 720
-                    ? min(520.0, max(420.0, constraints.maxHeight * 0.55))
-                    : 420.0;
-                return SingleChildScrollView(
-                  key: const ValueKey('drawing-layout-stacked'),
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  child: Column(
-                    children: [
-                      SizedBox(height: canvasHeight, child: canvas),
-                      const SizedBox(height: AppSpacing.md),
-                      sidePanel,
-                    ],
-                  ),
+                  ],
                 );
               },
             ),
@@ -2412,6 +2557,7 @@ class _DraftRestoreOverlay extends StatelessWidget {
 
 class _DrawingSidePanel extends StatelessWidget {
   const _DrawingSidePanel({
+    this.showToolControls = true,
     required this.selectedTool,
     required this.selectedColor,
     required this.selectedThickness,
@@ -2457,6 +2603,10 @@ class _DrawingSidePanel extends StatelessWidget {
 
   /// 오류 카드를 화면 안으로 스크롤하기 위한 앵커.
   final GlobalKey stageErrorAnchorKey;
+
+  /// 도구·색상·굵기와 완료 버튼을 이 패널에서 그릴지 여부다. 크레용 셸에서는 이것들이
+  /// 상단 툴바로 올라가므로 `false`로 두고 질문·오류 카드만 담는다.
+  final bool showToolControls;
 
   static const _colors = <(String, Color)>[
     ('검정', AppColors.drawingInk),
@@ -2506,6 +2656,7 @@ class _DrawingSidePanel extends StatelessWidget {
               ),
             ],
           ),
+          if (showToolControls) ...[
           const SizedBox(height: AppSpacing.lg),
           const _ToolHeading(icon: Icons.edit_rounded, label: '도구'),
           const SizedBox(height: AppSpacing.xs),
@@ -2567,6 +2718,7 @@ class _DrawingSidePanel extends StatelessWidget {
               ],
             ),
           ),
+          ],
           const SizedBox(height: AppSpacing.lg),
           // 오류 카드가 붙는 자리. 실패 시 이 지점을 화면 안으로 스크롤한다.
           SizedBox.shrink(key: stageErrorAnchorKey),
@@ -2604,24 +2756,26 @@ class _DrawingSidePanel extends StatelessWidget {
               retryKey: const ValueKey('htp-advance-retry'),
             ),
           ],
-          const SizedBox(height: AppSpacing.lg),
-          _SaveStatusIndicator(
-            status: saveStatus,
-            canRetry: canRetrySave,
-            onRetry: onRetrySave,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          AppButton(
-            key: const ValueKey('drawing-complete'),
-            label: '다 그렸어요!',
-            variant: AppButtonVariant.child,
-            isLoading: isCompleting,
-            onPressed: canComplete ? onComplete : null,
-          ),
-          const SizedBox(
-            key: ValueKey('drawing-complete-bottom-space'),
-            height: AppSpacing.md,
-          ),
+          if (showToolControls) ...[
+            const SizedBox(height: AppSpacing.lg),
+            _SaveStatusIndicator(
+              status: saveStatus,
+              canRetry: canRetrySave,
+              onRetry: onRetrySave,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            AppButton(
+              key: const ValueKey('drawing-complete'),
+              label: '다 그렸어요!',
+              variant: AppButtonVariant.child,
+              isLoading: isCompleting,
+              onPressed: canComplete ? onComplete : null,
+            ),
+            const SizedBox(
+              key: ValueKey('drawing-complete-bottom-space'),
+              height: AppSpacing.md,
+            ),
+          ],
         ],
       ),
     ),
