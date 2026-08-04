@@ -470,5 +470,38 @@ class FormatHistoryTest(unittest.TestCase):
         self.assertEqual(formatted, f"{llm_client.CHARACTER_NAME}: 안녕!\n아이: 안녕 도담아.")
 
 
+class BankAndVariantConsistencyTest(unittest.TestCase):
+    """질문 뱅크 서문·활동 프롬프트가 서로 어긋나지 않는지 (S15P11B209-871)."""
+
+    def _bank(self) -> str:
+        return llm_client._load("htp_question_bank")
+
+    def test_preamble_admits_items_that_ask_the_child(self):
+        """서문이 "대상은 그림 속 인물이지 아이가 아니다"라고 단언했는데 목록엔 아이 본인
+        문항이 8줄 있었다. 811의 guardrails 완화 근거가 그 단언이라 사실과 맞춰야 한다."""
+        bank = self._bank()
+        self.assertNotIn("아이 본인이 아니다", bank)
+        self.assertIn("아이 본인의 생각·취향을 묻는 문항도", bank)
+        # 물어도 되지만 평가로 넘어가지 않는다는 선은 유지한다.
+        self.assertIn("평가하거나 성격으로 옮겨 말하지는 마", bank)
+
+    def test_tone_rules_outrank_bank_wording(self):
+        """유아 말투는 "어떤" 회피를 요구하는데 뱅크엔 "어떤~" 문항이 6개다 — 우선순위를 못박는다."""
+        self.assertIn("[연령별 말하기 규칙]이 피하라는 표현", self._bank())
+
+    def test_outside_the_drawing_is_defined_the_same_way(self):
+        """'그림 밖'을 첫 질문은 넓게, 이어가기는 좁게 적어 뱅크 문항의 허용 여부가 갈렸다."""
+        first = llm_client._load("first_question_htp")
+        nxt = llm_client._load("conversations_htp")
+        for text in (first, nxt):
+            self.assertIn("그림 밖 이야기(오늘 있었던 일·다른 날 이야기)", text)
+
+    def test_unclear_objects_may_still_be_asked_about(self):
+        """"뻔하게 되묻지 마"가 넓어서 conversation_common의 "이건 뭐야?"와 부딪혔다."""
+        first = llm_client._load("first_question_htp")
+        self.assertIn("이름을 분명히 적어 둔 것을 그대로 되묻지 마", first)
+        self.assertIn('확실히 적지 못한 부분은 "이건 뭐야?"로 물어도 좋다', first)
+
+
 if __name__ == "__main__":
     unittest.main()

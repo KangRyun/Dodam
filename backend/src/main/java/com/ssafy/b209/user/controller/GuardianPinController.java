@@ -64,7 +64,7 @@ public class GuardianPinController {
         description = "조회 성공"),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "401",
-        description = "Access Token 누락 또는 검증 오류",
+        description = "Access Token 누락 또는 검증 오류(AUTH_401_006)",
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "503",
@@ -93,11 +93,19 @@ public class GuardianPinController {
         description = "설정 성공"),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "400",
-        description = "PIN 형식 오류(PIN_INVALID)",
+        description = "PIN 형식 위반(COMMON_400_001, data 에 fieldErrors) 또는 본문 파싱 실패(COMMON_400_003)",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류(AUTH_401_006)",
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "409",
         description = "이미 설정됨(PIN_ALREADY_CONFIGURED)",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "503",
+        description = "PIN 기능 미구성(PIN_UNAVAILABLE)",
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
   })
   @PostMapping
@@ -122,8 +130,12 @@ public class GuardianPinController {
         responseCode = "200",
         description = "변경 성공"),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "PIN 형식 위반(COMMON_400_001, data 에 fieldErrors) 또는 본문 파싱 실패(COMMON_400_003)",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "401",
-        description = "현재 PIN 불일치(PIN_MISMATCH)",
+        description = "현재 PIN 불일치(PIN_MISMATCH). data 에 남은 시도 횟수 포함. Access Token 오류는 AUTH_401_006",
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "409",
@@ -131,7 +143,11 @@ public class GuardianPinController {
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "423",
-        description = "잠금 중(PIN_LOCKED)",
+        description = "잠금 중(PIN_LOCKED). data 에 retryAfterSeconds·lockedUntil 포함",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "503",
+        description = "PIN 기능 미구성(PIN_UNAVAILABLE)",
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
   })
   @PatchMapping
@@ -162,8 +178,12 @@ public class GuardianPinController {
         responseCode = "200",
         description = "검증 성공"),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "400",
+        description = "PIN 형식 위반(COMMON_400_001, data 에 fieldErrors) 또는 본문 파싱 실패(COMMON_400_003)",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "401",
-        description = "PIN 불일치(PIN_MISMATCH). data 에 남은 시도 횟수 포함",
+        description = "PIN 불일치(PIN_MISMATCH). data 에 남은 시도 횟수 포함. Access Token 오류는 AUTH_401_006",
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "409",
@@ -172,6 +192,10 @@ public class GuardianPinController {
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "423",
         description = "잠금 중(PIN_LOCKED). data 에 retryAfterSeconds·lockedUntil 포함",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "503",
+        description = "PIN 기능 미구성(PIN_UNAVAILABLE)",
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
   })
   @PostMapping("/verifications")
@@ -196,8 +220,20 @@ public class GuardianPinController {
         responseCode = "200",
         description = "초기화 성공"),
     @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "401",
+        description = "Access Token 누락 또는 검증 오류(AUTH_401_006)",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "404",
+        description = "사용자 없음(USER_404_001)",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
         responseCode = "409",
         description = "소셜 재인증 필요(PIN_RESET_REQUIRED)",
+        content = @Content(schema = @Schema(implementation = ApiErrorResponse.class))),
+    @io.swagger.v3.oas.annotations.responses.ApiResponse(
+        responseCode = "503",
+        description = "PIN 기능 미구성(PIN_UNAVAILABLE)",
         content = @Content(schema = @Schema(implementation = ApiErrorResponse.class)))
   })
   @DeleteMapping

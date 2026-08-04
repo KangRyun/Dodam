@@ -97,6 +97,8 @@ def run_layer_b(repeat: int) -> list[tuple[str, int, list[Finding]]]:
             try:
                 resp = question_service.generate(case.request, f"eval-{case.id}-{n}")
                 found = checks.check_question_response(case, resp)
+                # 대화 품질 (S15P11B209-858) — 안전과 별개로 '아이에게 좋은 대화인가'를 본다.
+                found += checks.check_conversation_quality(case, resp)
                 found.append(
                     Finding("B", "생성 문장", True, resp.question_text)
                 )
@@ -157,15 +159,20 @@ def render_markdown(
         "",
     ]
 
-    a_fail = sum(1 for _, fs in layer_a for f in fs if not f.ok)
-    b_fail = sum(1 for _, _, fs in layer_b for f in fs if not f.ok)
+    a_fail = sum(1 for _, fs in layer_a for f in fs if f.is_failure)
+    b_fail = sum(1 for _, _, fs in layer_b for f in fs if f.is_failure)
+    a_warn = sum(1 for _, fs in layer_a for f in fs if f.mark == "WARN")
+    b_warn = sum(1 for _, _, fs in layer_b for f in fs if f.mark == "WARN")
     lines += [
         "## 요약",
         "",
-        "| 층 | 검증 | 실패 |",
-        "|---|---|---|",
-        f"| A. 조립(무료·결정적) | {sum(len(fs) for _, fs in layer_a)} | **{a_fail}** |",
-        f"| B. 준수(GMS 실호출) | {sum(len(fs) for _, _, fs in layer_b)} | **{b_fail}** |",
+        "| 층 | 검증 | 실패 | 경고 |",
+        "|---|---|---|---|",
+        f"| A. 조립(무료·결정적) | {sum(len(fs) for _, fs in layer_a)} | **{a_fail}** | {a_warn} |",
+        f"| B. 준수(GMS 실호출) | {sum(len(fs) for _, _, fs in layer_b)} | **{b_fail}** | {b_warn} |",
+        "",
+        "> WARN 은 기계적으로 정확히 판정하기 어려운 규칙이라 실패로 세지 않는다(S15P11B209-858).",
+        "> 종료 코드에도 반영되지 않으니, 눈으로 읽고 판단할 것.",
         "",
     ]
 
@@ -223,11 +230,15 @@ def main() -> int:
         out = docs / f"prompt-eval-{datetime.now().strftime('%Y%m%d-%H%M')}.md"
     out.write_text(md, encoding="utf-8")
 
-    fails = sum(1 for _, fs in layer_a for f in fs if not f.ok) + sum(
-        1 for _, _, fs in layer_b for f in fs if not f.ok
+    # 경고 등급(warn_only)은 종료 코드에 넣지 않는다 — 회귀 게이트는 확실한 위반만 센다.
+    fails = sum(1 for _, fs in layer_a for f in fs if f.is_failure) + sum(
+        1 for _, _, fs in layer_b for f in fs if f.is_failure
+    )
+    warns = sum(1 for _, fs in layer_a for f in fs if f.mark == "WARN") + sum(
+        1 for _, _, fs in layer_b for f in fs if f.mark == "WARN"
     )
     print(f"결과: {out}")
-    print(f"실패 {fails}건")
+    print(f"실패 {fails}건 · 경고 {warns}건")
     return fails
 
 

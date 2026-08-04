@@ -113,12 +113,18 @@ public class GuardianPinService {
    *
    * <p>현재 PIN 확인은 검증과 같은 규칙을 따른다 — 틀리면 실패로 세고 상한에 닿으면 잠근다. 변경 경로를 무한 시도 창구로 열어 두면 검증 잠금이 우회된다.
    *
+   * <p>{@code noRollbackFor} 를 두는 이유는 {@link #verify} 와 같다. 여기서 커밋이 안전한 근거는 <b>호출 순서</b>다 — 현재 PIN
+   * 이 틀리면 {@link #failVerification} 이 {@code pin.changeTo(...)} <b>이전에</b> 던지므로 새 PIN 해시는 영속 컨텍스트에
+   * 올라가지 않는다. 커밋되는 변경은 실패 카운터 한 건뿐이다. 이 순서를 뒤집으면 현재 PIN 을 모르는 요청으로 PIN 이 교체된다.
+   *
    * @param userId 인증된 보호자 사용자 ID
    * @param currentPin 현재 PIN
    * @param newPin 새 PIN
    * @return 변경 후 상태
+   * @throws GuardianPinException 현재 PIN 불일치·잠금. 응답 {@code data} 에 남은 시도·해제 시각을 함께 싣는다
+   * @throws BusinessException 형식 위반, 설정된 PIN 없음, pepper 미구성
    */
-  @Transactional
+  @Transactional(noRollbackFor = GuardianPinException.class)
   public GuardianPinStatusResponse change(Long userId, String currentPin, String newPin) {
     requireAvailable();
     requireFormat(currentPin);
@@ -138,12 +144,33 @@ public class GuardianPinService {
   /**
    * PIN 을 검증한다.
    *
+   * <p><b>{@code noRollbackFor} 가 왜 필요한가.</b> 불일치면 실패를 기록한 뒤 {@link GuardianPinException} 을 던지는데, 그
+   * 예외는 {@code RuntimeException} 이라 기본 규칙대로면 이미 flush 한 UPDATE 까지 함께 롤백된다. 그러면 {@code
+   * failed_attempt_count}·{@code lockout_level}·{@code locked_until} 이 요청 사이에 누적되지 않아 5회 잠금과 지수
+   * 백오프가 영구히 동작하지 않고, 응답 {@code remainingAttempts} 도 항상 4로 고정된다 — 4자리 PIN 의 10,000개 조합을 무제한으로 시도할 수
+   * 있게 된다 (S15P11B209-879 결함).
+   *
+   * <p><b>왜 실패 기록을 별 트랜잭션({@code REQUIRES_NEW})으로 빼지 않는가.</b> 이 시점에는 {@link
+   * UserGuardianPinRepository#findByUserIdForUpdate} 가 그 행에 {@code SELECT ... FOR UPDATE} 배타 락을 이미
+   * 잡고 있다. 안쪽 트랜잭션이 같은 행을 UPDATE 하려면 바깥 트랜잭션의 락을 기다려야 하고, 바깥은 안쪽이 돌아오기를 기다린다. InnoDB 교착 감지기는 바깥이 락이
+   * 아니라 애플리케이션 코드를 기다리는 것을 보지 못해 순환을 찾지 못하고, {@code innodb_lock_wait_timeout}(기본 50초)까지 매달린 뒤 실패한다.
+   * PIN 을 한 번 잘못 입력한 것이 50초 지연이 된다.
+   *
+   * <p><b>커밋해도 안전한 근거(불변식).</b> 이 예외가 던져지는 시점에 대기 중인 변경은 {@link UserGuardianPin#recordFailure} 가
+   * 건드린 그 행 하나뿐이다. 불일치 경로는 실패 기록 외에 아무것도 쓰지 않는다. 잠금 조회 단계에서 던지는 {@code PIN_LOCKED} 는 쓴 것이 없어 빈
+   * 커밋이고, {@code PIN_NOT_CONFIGURED}·{@code PIN_INVALID}·{@code PIN_UNAVAILABLE} 은 {@link
+   * BusinessException} 이라 이 예외 규칙에 걸리지 않고 그대로 롤백된다(롤백할 변경도 없다).
+   *
+   * <p><b>이 메서드나 {@link #change} 에 다른 쓰기를 추가하면 위 불변식이 깨진다.</b> 불일치로 빠지는 경로에 쓰기가 하나라도 늘면 그 쓰기까지 함께
+   * 커밋된다. 추가할 때는 {@code GuardianPinServiceIntegrationTest} 가 고정한 단언(변경 실패 시 {@code pin_hash} 불변 등)을
+   * 함께 확장해야 한다.
+   *
    * @param userId 인증된 보호자 사용자 ID
    * @param rawPin 입력 PIN
    * @return 검증 성공 시 초기화된 상태
    * @throws GuardianPinException 불일치·잠금. 응답 {@code data} 에 남은 시도·해제 시각을 함께 싣는다
    */
-  @Transactional
+  @Transactional(noRollbackFor = GuardianPinException.class)
   public GuardianPinStatusResponse verify(Long userId, String rawPin) {
     requireAvailable();
     requireFormat(rawPin);
@@ -214,7 +241,13 @@ public class GuardianPinService {
     return pin;
   }
 
-  /** 실패를 기록하고 현재 상태와 함께 거부한다. 잠기면 코드가 {@code PIN_LOCKED} 로 바뀐다. */
+  /**
+   * 실패를 기록하고 현재 상태와 함께 거부한다. 잠기면 코드가 {@code PIN_LOCKED} 로 바뀐다.
+   *
+   * <p>여기서 던지는 예외는 호출부의 {@code noRollbackFor} 덕에 실패 기록을 롤백하지 않는다(근거는 {@link #verify} 참고). 응답에 실을
+   * {@link GuardianPinStatusResponse} 를 던지기 <b>전에</b> 만들어 두므로, 커밋 후 영속 컨텍스트가 닫혀 엔티티가 detach 되어도 응답
+   * 값은 영향받지 않는다.
+   */
   private GuardianPinStatusResponse failVerification(UserGuardianPin pin, LocalDateTime now) {
     pin.recordFailure(now);
     pinRepository.saveAndFlush(pin);
@@ -237,6 +270,16 @@ public class GuardianPinService {
     }
   }
 
+  /**
+   * PIN 이 숫자 4자리인지 본다.
+   *
+   * <p><b>HTTP 경로에서는 여기서 던지는 {@code PIN_INVALID} 가 응답으로 나가지 않는다.</b> {@code
+   * GuardianPinRequest}·{@code GuardianPinChangeRequest} 의 {@code @NotBlank @Pattern("^\\d{4}$")} 와
+   * Controller 의 {@code @Valid} 가 먼저 걸러 {@code GlobalExceptionHandler} 가 {@code COMMON_400_001} +
+   * {@code ValidationErrorData} 로 응답한다 (그 사실을 {@code GuardianPinServiceIntegrationTest} 가 고정한다). 이
+   * 가드는 Bean Validation 을 거치지 않는 서비스 내부 직접 호출에 대해서만 유효하며, 그래도 남겨 둔다 — 형식 검사 없이 해시 비교로 내려가면 잘못된 입력이
+   * 실패 카운터를 소모한다.
+   */
   private void requireFormat(String rawPin) {
     if (rawPin == null || !PIN_PATTERN.matcher(rawPin).matches()) {
       throw new BusinessException(GuardianPinErrorCode.PIN_INVALID);
