@@ -11,6 +11,7 @@ import 'package:dodam/features/child_mode/data/child_home_intro_store.dart';
 import 'package:dodam/features/child_mode/domain/dodam_costume.dart';
 import 'package:dodam/features/child_mode/presentation/screens/child_mode_screens.dart';
 import 'package:dodam/features/child_mode/presentation/widgets/activity_guide_dialog.dart';
+import 'package:dodam/features/child_mode/presentation/widgets/character_carousel_spotlight.dart';
 import 'package:dodam/features/drawing/application/drawing_session_start_controller.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/drawing/domain/repositories/drawing_repository.dart';
@@ -2068,6 +2069,694 @@ void main() {
 
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('activity-guide-start')), findsOneWidget);
+  });
+
+  // ── S15P11B209-850 Spotlight ─────────────────────────────────────────
+  //
+  // 저장 방식은 S843 그대로다(조작 → 600ms debounce → PATCH → 성공 시 안내 완료).
+  // 여기서는 spotlight·coach mark·조작 피드백만 검증한다.
+  group('캐릭터 선택 Spotlight', () {
+    const spotlight = ValueKey('character-carousel-spotlight');
+    const scrim = ValueKey('character-spotlight-scrim');
+    const ring = ValueKey('character-spotlight-ring');
+    const coach = ValueKey('character-spotlight-coach');
+    const guideKey = ValueKey('child-character-guide');
+
+    /// subpixel 오차만 허용하는 rect 비교.
+    bool rectNearlyEquals(Rect a, Rect b, double epsilon) =>
+        (a.left - b.left).abs() <= epsilon &&
+        (a.top - b.top).abs() <= epsilon &&
+        (a.right - b.right).abs() <= epsilon &&
+        (a.bottom - b.bottom).abs() <= epsilon;
+
+    /// 캐러셀이 자동 스크롤을 마치고 **위치가 안정될 때까지** 제한적으로 pump한다.
+    ///
+    /// 유한 pulse가 계속 frame을 예약하므로 `pumpAndSettle`에 의존할 수 없고,
+    /// 고정 sleep은 기기·레이아웃에 따라 깨진다. 연속 두 표본이 epsilon 이내로
+    /// 같아지면 안정으로 보고, 그 뒤 한 frame을 더 흘려 ScrollEnd가 예약한
+    /// spotlight 재측정까지 반영한다.
+    Future<Rect> waitForStableCarouselRect(
+      WidgetTester tester, {
+      Duration step = const Duration(milliseconds: 100),
+      int maxSteps = 30,
+      double epsilon = 0.5,
+    }) async {
+      final carousel = find.byKey(const ValueKey('costume-carousel'));
+      final history = <Rect>[];
+      Rect? previous;
+      var stableSamples = 0;
+
+      for (var index = 0; index < maxSteps; index++) {
+        await tester.pump(step);
+        final current = tester.getRect(carousel);
+        history.add(current);
+
+        if (previous != null && rectNearlyEquals(previous, current, epsilon)) {
+          stableSamples++;
+          if (stableSamples >= 2) {
+            // ScrollEnd 이후 예약된 재측정이 반영되도록 한 frame 더.
+            await tester.pump();
+            return tester.getRect(carousel);
+          }
+        } else {
+          stableSamples = 0;
+        }
+        previous = current;
+      }
+
+      fail('캐러셀 rect가 안정화되지 않음: $history');
+    }
+
+    Rect holeOf(WidgetTester tester) {
+      final widget = tester.widget<CharacterCarouselSpotlight>(
+        find.byKey(spotlight),
+      );
+      final rect = widget.targetRect!;
+      return Rect.fromLTRB(
+        rect.left - CharacterCarouselSpotlight.holePadding,
+        rect.top - CharacterCarouselSpotlight.holePadding,
+        rect.right + CharacterCarouselSpotlight.holePadding,
+        rect.bottom + CharacterCarouselSpotlight.holePadding,
+      );
+    }
+
+    /// 안내 팝업에서 `친구 골라보기`를 눌러 spotlight 단계까지 들어간다.
+    Future<_FakeIntroStore> enterSpotlight(
+      WidgetTester tester, {
+      Future<bool> Function(int childId, String code)? onCharacterSelected,
+      Size size = const Size(390, 844),
+      double textScale = 1,
+      bool disableAnimations = false,
+    }) async {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final store = _FakeIntroStore();
+      // MediaQuery를 MaterialApp 바깥에 두면 MaterialApp이 view 기준으로 자체
+      // MediaQuery를 다시 삽입해 무효가 된다. 기존 S843 하네스와 같은 트리를
+      // 유지하기 위해 화면 바로 위(home 하위)에서 덮어쓴다.
+      await tester.pumpWidget(
+        _wrap(
+          MediaQuery(
+            data: MediaQueryData(
+              textScaler: TextScaler.linear(textScale),
+              disableAnimations: disableAnimations,
+            ),
+            child: ChildModeHomeScreen(
+              child: _child,
+              drawingRepository: _FakeDrawingRepository(
+                drawingTypes: const [_secondType, _artDiary],
+              ),
+              introStore: store,
+              onCharacterSelected: onCharacterSelected,
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // 좁은 화면·큰 글자에서는 안내 팝업 본문이 스크롤된다. 기존 S843 하네스와
+      // 같이 버튼을 화면에 올린 뒤 눌러야 탭이 빗나가지 않는다.
+      final pick = find.byKey(const ValueKey('pick-character-from-intro'));
+      await tester.ensureVisible(pick);
+      await tester.pump();
+      await tester.tap(pick);
+      // 안내 팝업이 닫혔는지는 다이얼로그 자체로 확인한다. `ModalBarrier`는 home
+      // route가 항상 만드는 투명·비차단 barrier까지 잡혀 신호로 쓸 수 없다.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+      expect(
+        find.byKey(const ValueKey('child-character-intro-dialog')),
+        findsNothing,
+      );
+      // 안내 진입은 포커스 요청과 ensureVisible로 캐러셀을 화면에 올린다. 그
+      // 자동 스크롤이 끝나기 전에 단정·탭하면 좌표가 어긋나므로, 시간이 아니라
+      // **위치가 안정될 때까지** 기다린다.
+      await waitForStableCarouselRect(tester);
+      return store;
+    }
+
+    bool holeContains(Rect hole, Rect rect) =>
+        hole.left <= rect.left &&
+        hole.top <= rect.top &&
+        hole.right >= rect.right &&
+        hole.bottom >= rect.bottom;
+
+    /// 캐러셀 위치가 안정되고 화살표가 hole 안에 있음을 확인한 뒤 실제로 누른다.
+    ///
+    /// 좌표를 임의로 만들지 않고 production finder와 실제 tap을 그대로 쓴다.
+    /// hole 밖이면 barrier에 막히는 상태이므로 조용히 넘기지 않고 실패시킨다.
+    Future<void> tapArrow(WidgetTester tester, Key arrowKey) async {
+      // 다른 요소로 스크롤했다면 화살표가 viewport 밖일 수 있다. 사용자와 같은
+      // 방식으로 다시 화면에 올린 뒤 위치가 안정될 때까지 기다린다.
+      await tester.ensureVisible(find.byKey(arrowKey));
+      await tester.pump();
+      await waitForStableCarouselRect(tester);
+      // 캐러셀이 멈춘 뒤에도 production의 ScrollEnd 재측정이 한 frame 늦게
+      // 반영될 수 있다. hole이 화살표를 품을 때까지 제한적으로 기다린다.
+      var hole = holeOf(tester);
+      var arrow = tester.getRect(find.byKey(arrowKey));
+      final history = <String>[];
+      for (var i = 0; i < 10 && !hole.contains(arrow.center); i++) {
+        history.add('hole=$hole arrow=${arrow.center}');
+        await tester.pump(const Duration(milliseconds: 100));
+        hole = holeOf(tester);
+        arrow = tester.getRect(find.byKey(arrowKey));
+      }
+      expect(
+        hole.contains(arrow.center),
+        isTrue,
+        reason: '화살표 중심이 spotlight hole 밖이다: $arrow vs $hole (이력: $history)',
+      );
+      await tester.tap(find.byKey(arrowKey));
+    }
+
+    testWidgets('scrim·hole·흰 outline·노란 ring·코치마크가 함께 나타난다', (tester) async {
+      final patches = <String>[];
+      await enterSpotlight(
+        tester,
+        onCharacterSelected: (_, code) async {
+          patches.add(code);
+          return true;
+        },
+      );
+
+      expect(find.byKey(spotlight), findsOneWidget);
+      expect(find.byKey(coach), findsOneWidget);
+      expect(find.text('화살표를 눌러 함께할 도담이를 골라봐!'), findsOneWidget);
+      expect(find.text('좌우로 넘겨볼 수도 있어요'), findsOneWidget);
+      // 확정 버튼은 두지 않는다. 저장은 조작이 곧바로 예약한다.
+      expect(find.text('선택한 친구를 저장하고 있어요'), findsNothing);
+      expect(patches, isEmpty);
+
+      final scrimPainter =
+          tester.widget<CustomPaint>(find.byKey(scrim)).painter!
+              as SpotlightScrimPainter;
+      expect(scrimPainter.hole, holeOf(tester));
+      expect(scrimPainter.radius, CharacterCarouselSpotlight.holeRadius);
+      final ringPainter =
+          tester.widget<CustomPaint>(find.byKey(ring)).painter!
+              as SpotlightPulseRingPainter;
+      expect(ringPainter.color, AppColors.sunshine);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('spotlight hole이 실제 캐러셀 전체를 감싸고 복제하지 않는다', (tester) async {
+      await enterSpotlight(tester);
+
+      final hole = holeOf(tester);
+      for (final target in [
+        find.byKey(const ValueKey('costume-carousel')),
+        find.byKey(const ValueKey('costume-prev')),
+        find.byKey(const ValueKey('costume-next')),
+        find.byKey(const ValueKey('costume-indicator-BASE')),
+      ]) {
+        expect(
+          holeContains(hole, tester.getRect(target)),
+          isTrue,
+          reason: 'spotlight 밖에 있다: ${tester.getRect(target)} vs $hole',
+        );
+      }
+      expect(hole.isEmpty, isFalse);
+      // 캐러셀은 하나만 존재한다(오버레이가 복제하지 않는다).
+      expect(find.byKey(const ValueKey('costume-carousel')), findsOneWidget);
+      expect(find.byKey(const ValueKey('costume-prev')), findsOneWidget);
+    });
+
+    testWidgets('다음 화살표 실제 tap이 문구를 저장 중으로 바꾸고 debounce 뒤 PATCH한다', (
+      tester,
+    ) async {
+      final patches = <String>[];
+      final save = Completer<bool>();
+      final store = await enterSpotlight(
+        tester,
+        onCharacterSelected: (_, code) {
+          patches.add(code);
+          return save.future;
+        },
+      );
+
+      await tester.tap(find.byKey(const ValueKey('costume-next')));
+      await tester.pump();
+
+      expect(find.text('마음에 드는 도담이를 골랐구나!'), findsOneWidget);
+      expect(find.text('선택한 친구를 저장하고 있어요'), findsOneWidget);
+      _expectCurrentCostume(tester, DodamCostume.princess);
+
+      // 기존 debounce 계약: 600ms 전에는 PATCH가 나가지 않는다.
+      await tester.pump(const Duration(milliseconds: 599));
+      expect(patches, isEmpty);
+      expect(store.marked, isEmpty);
+
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(patches, ['PRINCESS']);
+      expect(find.text('친구를 정하고 있어요'), findsOneWidget);
+      // PATCH 성공 전에는 안내를 완료하지 않는다.
+      expect(store.marked, isEmpty);
+      expect(find.byKey(spotlight), findsOneWidget);
+
+      save.complete(true);
+      await tester.pumpAndSettle();
+      expect(store.marked, [7]);
+      expect(find.byKey(spotlight), findsNothing);
+      expect(find.byKey(guideKey), findsNothing);
+      expect(find.text('새 친구와 함께 시작해 볼까?'), findsOneWidget);
+    });
+
+    testWidgets('이전 화살표 실제 tap도 조작으로 인정한다', (tester) async {
+      final patches = <String>[];
+      await enterSpotlight(
+        tester,
+        onCharacterSelected: (_, code) async {
+          patches.add(code);
+          return true;
+        },
+      );
+
+      await tester.tap(find.byKey(const ValueKey('costume-prev')));
+      await tester.pump();
+
+      expect(find.text('마음에 드는 도담이를 골랐구나!'), findsOneWidget);
+      _expectCurrentCostume(tester, DodamCostume.octopus);
+
+      await tester.pumpAndSettle();
+      expect(patches, ['OCTOPUS']);
+    });
+
+    testWidgets('swipe 실제 동작도 조작으로 인정한다', (tester) async {
+      final patches = <String>[];
+      await enterSpotlight(
+        tester,
+        onCharacterSelected: (_, code) async {
+          patches.add(code);
+          return true;
+        },
+      );
+
+      await tester.drag(
+        find.byKey(const ValueKey('costume-carousel')),
+        const Offset(-400, 0),
+      );
+      // debounce(600ms)가 지나기 전의 전이 상태를 먼저 본다. settle까지 가면
+      // 이미 저장이 끝나 spotlight가 걷히고 문구가 사라진다.
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.text('마음에 드는 도담이를 골랐구나!'), findsOneWidget);
+      expect(patches, isEmpty);
+
+      await tester.pumpAndSettle();
+      expect(patches, isNotEmpty);
+    });
+
+    testWidgets('빠른 연속 조작은 마지막 선택만 PATCH한다', (tester) async {
+      final patches = <String>[];
+      await enterSpotlight(
+        tester,
+        onCharacterSelected: (_, code) async {
+          patches.add(code);
+          return true;
+        },
+      );
+
+      for (var i = 0; i < 3; i++) {
+        await tester.tap(find.byKey(const ValueKey('costume-next')));
+        await tester.pump(const Duration(milliseconds: 60));
+      }
+      expect(patches, isEmpty);
+
+      await tester.pumpAndSettle();
+      expect(patches, hasLength(1));
+      expect(patches.single, DodamCostume.values[3].code);
+    });
+
+    testWidgets('저장 실패는 rollback하고 spotlight를 유지하며 다시 조작할 수 있다', (
+      tester,
+    ) async {
+      final patches = <String>[];
+      var fail = true;
+      final store = await enterSpotlight(
+        tester,
+        onCharacterSelected: (_, code) async {
+          patches.add(code);
+          return !fail;
+        },
+      );
+
+      await tester.tap(find.byKey(const ValueKey('costume-next')));
+      await tester.pumpAndSettle();
+
+      expect(patches, ['PRINCESS']);
+      expect(store.marked, isEmpty);
+      expect(find.byKey(spotlight), findsOneWidget);
+      expect(find.text('친구를 정하지 못했어요. 다시 골라볼까요?'), findsWidgets);
+      _expectCurrentCostume(tester, DodamCostume.base);
+
+      // 실패 코치마크가 캐러셀을 가리거나 입력을 막지 않는다.
+      final hole = holeOf(tester);
+      expect(hole.overlaps(tester.getRect(find.byKey(coach))), isFalse);
+
+      fail = false;
+      await tester.tap(find.byKey(const ValueKey('costume-next')));
+      await tester.pumpAndSettle();
+      expect(patches, ['PRINCESS', 'PRINCESS']);
+      expect(store.marked, [7]);
+      expect(find.byKey(spotlight), findsNothing);
+    });
+
+    testWidgets('spotlight 밖 배경 CTA는 막고 안쪽 캐러셀 입력은 통과한다', (tester) async {
+      // 스크롤 없이 배경 CTA와 캐러셀이 함께 보이는 넓은 화면에서 본다. 스크롤로
+      // 위치를 흔들면 무엇이 막혔는지가 아니라 좌표 문제가 섞인다.
+      final store = await enterSpotlight(
+        tester,
+        size: const Size(1600, 1000),
+        onCharacterSelected: (_, _) async => true,
+      );
+
+      final drawEntry = find.byKey(const ValueKey('draw-entry'));
+      expect(drawEntry, findsOneWidget);
+      final hole = holeOf(tester);
+      final entryRect = tester.getRect(drawEntry);
+      // 전제: 배경 CTA는 spotlight 바깥에 있다.
+      expect(hole.overlaps(entryRect), isFalse);
+
+      await tester.tap(drawEntry);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+
+      // barrier가 흡수했으므로 활동 안내 팝업도, 세션 생성도 일어나지 않는다.
+      expect(find.byKey(const ValueKey('activity-guide-start')), findsNothing);
+      expect(find.byKey(spotlight), findsOneWidget);
+      expect(store.marked, isEmpty);
+
+      // 반면 hole 안쪽 실제 화살표는 그대로 동작한다.
+      await tapArrow(tester, const ValueKey('costume-next'));
+      await tester.pump();
+      expect(find.text('마음에 드는 도담이를 골랐구나!'), findsOneWidget);
+      _expectCurrentCostume(tester, DodamCostume.princess);
+    });
+
+    testWidgets('지금 도담이로 시작할래는 spotlight와 PATCH 없이 기존 동작을 유지한다', (
+      tester,
+    ) async {
+      final patches = <String>[];
+      final store = _FakeIntroStore();
+      await tester.pumpWidget(
+        _wrap(
+          ChildModeHomeScreen(
+            child: _child,
+            drawingRepository: _FakeDrawingRepository(
+              drawingTypes: const [_secondType, _artDiary],
+            ),
+            introStore: store,
+            onCharacterSelected: (_, code) async {
+              patches.add(code);
+              return true;
+            },
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('choose-character-later')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(spotlight), findsNothing);
+      expect(find.byKey(scrim), findsNothing);
+      expect(patches, isEmpty);
+      expect(store.marked, [7]);
+    });
+
+    testWidgets('active session 진입은 spotlight 안내보다 우선한다', (tester) async {
+      final store = _FakeIntroStore();
+      await tester.pumpWidget(
+        _wrap(
+          ChildModeHomeScreen(
+            child: _child,
+            drawingRepository: _FakeDrawingRepository(
+              drawingTypes: const [_secondType, _artDiary],
+              activeSession: const ActiveDrawingSessionDto(
+                drawingSessionId: 41,
+                childId: 7,
+                drawingType: DrawingTypeSummaryDto(
+                  drawingTypeId: 5,
+                  code: 'ART_DIARY',
+                  name: '그림일기',
+                ),
+                inputMethod: 'CANVAS',
+                sessionStatus: 'IN_PROGRESS',
+                currentStage: 'DRAWING',
+                startedAt: '2026-07-26T01:00:00Z',
+                latestDraft: null,
+              ),
+            ),
+            introStore: store,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('child-character-intro-dialog')),
+        findsNothing,
+      );
+      expect(find.byKey(spotlight), findsNothing);
+      expect(store.marked, isEmpty);
+    });
+
+    testWidgets('같은 아이로 rebuild해도 조작 상태가 초기화되지 않는다', (tester) async {
+      await enterSpotlight(tester, onCharacterSelected: (_, _) async => true);
+      await tapArrow(tester, const ValueKey('costume-next'));
+      await tester.pump();
+      expect(find.text('마음에 드는 도담이를 골랐구나!'), findsOneWidget);
+
+      await tester.pump();
+      expect(find.byKey(spotlight), findsOneWidget);
+      expect(find.text('마음에 드는 도담이를 골랐구나!'), findsOneWidget);
+    });
+
+    testWidgets('화면 크기가 바뀌면 AnimatedScale까지 반영해 rect를 다시 잰다', (tester) async {
+      await enterSpotlight(tester);
+      final before = holeOf(tester);
+
+      tester.view.physicalSize = const Size(1280, 800);
+      await tester.pumpAndSettle();
+
+      final after = holeOf(tester);
+      expect(after, isNot(before));
+      expect(
+        holeContains(
+          after,
+          tester.getRect(find.byKey(const ValueKey('costume-carousel'))),
+        ),
+        isTrue,
+      );
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('동일 rect가 유지되면 추가 setState로 rebuild하지 않는다', (tester) async {
+      await enterSpotlight(tester);
+      final first = holeOf(tester);
+
+      // 크기 변화 없이 여러 frame을 흘려도 rect가 그대로다.
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.pump(const Duration(milliseconds: 400));
+
+      expect(holeOf(tester), first);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('spotlight 도중 dispose되어도 늦은 저장 성공이 예외를 만들지 않는다', (
+      tester,
+    ) async {
+      final save = Completer<bool>();
+      final store = await enterSpotlight(
+        tester,
+        onCharacterSelected: (_, _) => save.future,
+      );
+
+      await tester.tap(find.byKey(const ValueKey('costume-next')));
+      await tester.pump(const Duration(milliseconds: 600));
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      save.complete(true);
+      await tester.pumpAndSettle();
+
+      expect(store.marked, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('dispose 시 대기 중 선택은 정확히 한 번만 flush되고 defunct setState가 없다', (
+      tester,
+    ) async {
+      final patches = <String>[];
+      final save = Completer<bool>();
+      final store = await enterSpotlight(
+        tester,
+        onCharacterSelected: (_, code) {
+          patches.add(code);
+          return save.future;
+        },
+      );
+
+      await tapArrow(tester, const ValueKey('costume-next'));
+      // debounce가 아직 살아 있는 상태에서 화면을 떠난다.
+      await tester.pump();
+      expect(patches, isEmpty);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      // dispose가 마지막 선택을 flush한다(S843 계약). 저장은 취소되지 않는다.
+      expect(patches, ['PRINCESS']);
+
+      save.complete(true);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      // 중복 PATCH 없음, defunct element setState 없음.
+      expect(patches, ['PRINCESS']);
+      expect(tester.takeException(), isNull);
+      // 화면이 사라진 뒤에는 안내를 완료하지 않는다(기존 S843 계약 그대로).
+      expect(store.marked, isEmpty);
+    });
+
+    testWidgets('dispose 이후 저장 실패도 rollback setState 없이 조용히 끝난다', (
+      tester,
+    ) async {
+      final patches = <String>[];
+      final save = Completer<bool>();
+      final store = await enterSpotlight(
+        tester,
+        onCharacterSelected: (_, code) {
+          patches.add(code);
+          return save.future;
+        },
+      );
+
+      await tapArrow(tester, const ValueKey('costume-next'));
+      await tester.pump();
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(patches, ['PRINCESS']);
+
+      save.complete(false);
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 200));
+
+      expect(patches, ['PRINCESS']);
+      expect(store.marked, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('조작 없이 화면을 떠나면 PATCH를 만들지 않는다', (tester) async {
+      final patches = <String>[];
+      final store = await enterSpotlight(
+        tester,
+        onCharacterSelected: (_, code) async {
+          patches.add(code);
+          return true;
+        },
+      );
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(milliseconds: 800));
+
+      expect(patches, isEmpty);
+      expect(store.marked, isEmpty);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('disableAnimations에서는 처음부터 정적 강조로 표시한다', (tester) async {
+      await enterSpotlight(tester, disableAnimations: true);
+
+      expect(find.byKey(scrim), findsOneWidget);
+      expect(find.byKey(coach), findsOneWidget);
+      final painter =
+          tester.widget<CustomPaint>(find.byKey(ring)).painter!
+              as SpotlightPulseRingPainter;
+      expect(painter.animating, isFalse);
+      expect(painter.progress, 0);
+      // 정적 강조라도 spotlight 자체는 사라지지 않는다.
+      expect(find.byKey(spotlight), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    testWidgets('유한 pulse가 끝나도 spotlight와 안내는 유지된다', (tester) async {
+      await enterSpotlight(tester);
+
+      // 6회(1400ms×6)를 넉넉히 넘겨도 안내가 사라지지 않는다.
+      await tester.pump(const Duration(seconds: 12));
+
+      expect(find.byKey(spotlight), findsOneWidget);
+      expect(find.byKey(coach), findsOneWidget);
+      expect(find.text('화살표를 눌러 함께할 도담이를 골라봐!'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+
+    for (final layout in const <({String label, Size size, double scale})>[
+      (label: '320x640', size: Size(320, 640), scale: 1),
+      (label: '390x844', size: Size(390, 844), scale: 1),
+      (label: '휴대폰 가로 844x390', size: Size(844, 390), scale: 1),
+      (label: 'Pixel Tablet 가로 1600x1000', size: Size(1600, 1000), scale: 1),
+      (label: '태블릿 세로 800x1280', size: Size(800, 1280), scale: 1),
+      (label: '태블릿 가로 1280x800', size: Size(1280, 800), scale: 1),
+      (label: 'text scale 2.0', size: Size(390, 844), scale: 2),
+      (label: '휴대폰 가로 844x390 + textScale 2.0', size: Size(844, 390), scale: 2),
+    ]) {
+      testWidgets('${layout.label}에서 spotlight가 overflow 없이 배치된다', (
+        tester,
+      ) async {
+        await enterSpotlight(
+          tester,
+          size: layout.size,
+          textScale: layout.scale,
+          onCharacterSelected: (_, _) async => true,
+        );
+
+        expect(find.byKey(scrim), findsOneWidget);
+        expect(find.byKey(coach), findsOneWidget);
+        final hole = holeOf(tester);
+        expect(
+          holeContains(
+            hole,
+            tester.getRect(find.byKey(const ValueKey('costume-carousel'))),
+          ),
+          isTrue,
+        );
+
+        // 코치마크는 화면 안에 놓이고, 겹치더라도 캐러셀 입력을 막지 않는다.
+        final coachRect = tester.getRect(find.byKey(coach));
+        expect(coachRect.top, greaterThanOrEqualTo(0));
+        expect(
+          coachRect.bottom,
+          lessThanOrEqualTo(tester.view.physicalSize.height),
+        );
+
+        for (final arrow in [
+          const ValueKey('costume-prev'),
+          const ValueKey('costume-next'),
+        ]) {
+          expect(
+            tester.getSize(find.byKey(arrow)).height,
+            greaterThanOrEqualTo(48),
+          );
+        }
+        // 제약에 맞는 layout이 선택됐는지 key로 확정한다.
+        final wide = find.byKey(const ValueKey('child-home-wide-body'));
+        final narrow = find.byKey(const ValueKey('child-home-narrow-body'));
+        expect(wide.evaluate().length + narrow.evaluate().length, 1);
+        expect(tester.takeException(), isNull);
+      });
+    }
+
+    testWidgets('코치마크는 liveRegion으로 안내하고 장식은 중복 낭독하지 않는다', (tester) async {
+      await enterSpotlight(tester);
+
+      final semantics = tester.getSemantics(find.byKey(guideKey));
+      expect(semantics.label, contains('화살표를 눌러 함께할 도담이를 골라봐!'));
+      expect(semantics.label, contains('좌우로 넘겨볼 수도 있어요'));
+      // 실제 조작 대상은 캐러셀 화살표 하나뿐이다.
+      expect(find.bySemanticsLabel('이전 친구'), findsOneWidget);
+      expect(find.bySemanticsLabel('다음 친구'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
   });
 }
 
