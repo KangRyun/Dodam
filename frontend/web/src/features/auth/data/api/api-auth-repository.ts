@@ -69,6 +69,19 @@ export class ApiAuthRepository implements AuthRepository {
     });
   }
 
+  async deleteAccount(input: {
+    refreshToken: string;
+    deviceId: string;
+  }): Promise<void> {
+    await apiRequest<void>("users/me", {
+      method: "DELETE",
+      body: JSON.stringify({
+        refreshToken: input.refreshToken,
+        deviceId: input.deviceId,
+      }),
+    });
+  }
+
   async getTerms(): Promise<ConsentTerm[]> {
     const terms = await apiRequest<ConsentTermDto[]>(
       "consents/terms?targetScope=USER",

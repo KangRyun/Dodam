@@ -615,6 +615,105 @@ a {
   transform: translateX(24px);
 }
 
+/* 내 프로필 화면 */
+.community-profile-hero {
+  gap: 18px;
+  justify-content: flex-start;
+}
+
+.community-profile-hero .community-profile-avatar {
+  width: 60px;
+  height: 60px;
+  font-size: 28px;
+}
+
+.community-profile-hero h2 {
+  margin: 0 0 6px;
+  font-size: 22px;
+}
+
+.community-profile-links {
+  display: flex;
+  flex-direction: column;
+  margin-top: 18px;
+  border: 1px solid #dfe4dc;
+  border-radius: 22px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.community-profile-links > a {
+  display: flex;
+  min-height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 1px solid #e8ebe5;
+  color: #45505b;
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.community-profile-links > a:last-child {
+  border-bottom: 0;
+}
+
+.community-profile-links > a:hover,
+.community-profile-links > a:focus-visible {
+  color: #5f9f73;
+  background: #f7faf6;
+}
+
+.community-profile-links > a > span:last-child {
+  color: #a5ada5;
+  font-size: 20px;
+}
+
+/* 설정 — 위험 동작(회원 탈퇴) */
+.community-settings-danger {
+  align-items: flex-start;
+  border-color: #efd6d3;
+}
+
+.community-settings-danger h2 {
+  color: #b8564f;
+}
+
+.community-settings-error {
+  margin-top: 10px;
+  color: #b8564f;
+  font-weight: 600;
+}
+
+.community-settings-confirm {
+  margin-top: 16px;
+  padding: 16px;
+  border-radius: 14px;
+  background: #fbe9e7;
+}
+
+.community-settings-confirm p {
+  margin: 0 0 12px;
+  color: #8a3f39;
+}
+
+.community-settings-confirm-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.community-button-danger {
+  border-color: #b8564f;
+  background: #b8564f;
+  color: #fff;
+}
+
+.community-button-danger:hover:not(:disabled) {
+  background: #a24a44;
+  border-color: #a24a44;
+}
+
 .community-empty-state {
   display: grid;
   min-height: 420px;

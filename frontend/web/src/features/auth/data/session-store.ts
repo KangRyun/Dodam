@@ -1,4 +1,7 @@
-import type { AuthSession } from "@/features/auth/domain/auth-models";
+import type {
+  AuthProviderId,
+  AuthSession,
+} from "@/features/auth/domain/auth-models";
 import { ACCESS_TOKEN_STORAGE_KEY } from "@/lib/api/api-client";
 
 /**
@@ -11,6 +14,11 @@ import { ACCESS_TOKEN_STORAGE_KEY } from "@/lib/api/api-client";
  */
 const REFRESH_TOKEN_STORAGE_KEY = "dodam.refreshToken";
 const DEVICE_ID_STORAGE_KEY = "dodam.deviceId";
+/**
+ * 로그인에 사용한 소셜 제공자. 백엔드가 연결된 제공자를 내려주지 않아, 설정 화면의
+ * "계정 연결" 표시를 위해 로그인 완료 시점에 클라이언트가 직접 보관한다.
+ */
+const AUTH_PROVIDER_STORAGE_KEY = "dodam.authProvider";
 
 function browserStorage(): Storage | null {
   if (typeof window === "undefined") return null;
@@ -43,6 +51,21 @@ export function clearSession(): void {
   if (storage == null) return;
   storage.removeItem(ACCESS_TOKEN_STORAGE_KEY);
   storage.removeItem(REFRESH_TOKEN_STORAGE_KEY);
+  // 계정에 종속된 값이라 다른 계정으로 남지 않도록 함께 지운다.
+  storage.removeItem(AUTH_PROVIDER_STORAGE_KEY);
+}
+
+/** 로그인 완료 시 사용한 소셜 제공자를 보관한다(설정 "계정 연결" 표시용). */
+export function saveAuthProvider(provider: AuthProviderId): void {
+  browserStorage()?.setItem(AUTH_PROVIDER_STORAGE_KEY, provider);
+}
+
+/** 보관된 로그인 제공자를 읽는다. 없거나 알 수 없으면 `null`. */
+export function readAuthProvider(): AuthProviderId | null {
+  const value = browserStorage()?.getItem(AUTH_PROVIDER_STORAGE_KEY) ?? null;
+  return value === "kakao" || value === "google" || value === "naver"
+    ? value
+    : null;
 }
 
 /**

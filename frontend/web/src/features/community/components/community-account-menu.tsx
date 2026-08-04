@@ -18,6 +18,7 @@ import { useAuthStore } from "@/features/auth/hooks/use-auth-store";
  *  로그아웃 UI 자체도 없었다 — S15P11B209-817.)
  */
 const MENU_LINKS = [
+  { href: "/community/profile", label: "내 프로필" },
   { href: "/community/my-posts", label: "내 글" },
   { href: "/community/liked-posts", label: "좋아요한 글" },
   { href: "/community/settings", label: "설정" },
