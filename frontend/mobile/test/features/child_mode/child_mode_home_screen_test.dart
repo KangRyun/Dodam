@@ -1558,6 +1558,42 @@ void main() {
     }
   });
 
+  testWidgets('태블릿 가로 폭 양끝(600·1400)에서 홈 본문이 overflow 없이 배치된다', (
+    tester,
+  ) async {
+    // 반응형 상한(ResponsiveContent) 도입 뒤에도 폭 범위 양끝에서 넘침이 없어야
+    // 한다(S15P11B209-787). 600은 좁아 narrow 스택, 1400은 wide 본문으로 갈린다.
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    for (final size in const [Size(600, 900), Size(1400, 900)]) {
+      await tester.binding.setSurfaceSize(size);
+      await tester.pumpWidget(
+        _wrap(
+          ChildModeHomeScreen(
+            child: _child,
+            drawingRepository: _FakeDrawingRepository(
+              drawingTypes: const [_artDiary],
+            ),
+            // 안내 팝업을 건너뛰고 홈 본문을 바로 본다.
+            introStore: _FakeIntroStore(seen: {_child.childId}),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final wide = find.byKey(const ValueKey('child-home-wide-body'));
+      final narrow = find.byKey(const ValueKey('child-home-narrow-body'));
+      expect(
+        wide.evaluate().length + narrow.evaluate().length,
+        1,
+        reason: '$size',
+      );
+      expect(tester.takeException(), isNull, reason: '$size');
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump();
+    }
+  });
+
   testWidgets('그림 유형을 불러오는 동안 로딩 상태를 보여준다', (tester) async {
     final completer = Completer<ApiPage<DrawingTypeDto>>();
     final repository = _FakeDrawingRepository(typesCompleter: completer);
