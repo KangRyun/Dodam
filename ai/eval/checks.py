@@ -38,16 +38,32 @@ _REASON_QUESTION = re.compile(
 
 @dataclass(frozen=True)
 class Finding:
-    """판정 결과 한 건. ok=False면 회귀 후보다."""
+    """판정 결과 한 건. ok=False면 회귀 후보다.
+
+    warn_only=True 는 '기계적으로 정확히 판정하기 어려운 규칙'이다(S15P11B209-858).
+    걸려도 실패로 세지 않고 WARN 으로만 남긴다 — 사람이 산출물을 읽을 때 눈에 띄게 하되
+    회귀 게이트(종료 코드)는 흔들지 않는다.
+
+    이 등급을 둔 이유: 2026-08-04 평가에서 '건너뛴 질문 미반복' 실패 3건 중 2건이 과탐이었다.
+    애매한 규칙을 실패로 세면 실패 목록이 노이즈로 차서 진짜 회귀를 못 본다.
+    """
 
     layer: str  # "A" | "B"
     rule: str
     ok: bool
     detail: str = ""
+    warn_only: bool = False
 
     @property
     def mark(self) -> str:
-        return "PASS" if self.ok else "FAIL"
+        if self.ok:
+            return "PASS"
+        return "WARN" if self.warn_only else "FAIL"
+
+    @property
+    def is_failure(self) -> bool:
+        """회귀 게이트가 세는 실패인가. 경고 등급은 세지 않는다."""
+        return not self.ok and not self.warn_only
 
 
 def _signature_lines(name: str) -> set[str]:
@@ -158,6 +174,129 @@ def _contains_any(text: str, needles: list[str]) -> list[str]:
     return [n for n in needles if n in text]
 
 
+# ── 대화 품질 (S15P11B209-858) ──────────────────────────────────
+# 아래 다섯은 안전이 아니라 '대화가 아이에게 좋은가'를 본다. 판정 난이도가 제각각이라
+# 확실히 셀 수 있는 것만 실패로 세고, 애매한 것은 warn_only 로 남긴다.
+
+# 난이도별 문장 길이 상한. conversation_tone.txt 가 정한 몫을 숫자로 옮긴 것이라,
+# 그 파일을 고치면 여기도 같이 본다(두 벌이 되면 한쪽만 고쳐져 어긋난다).
+_LENGTH_LIMIT = {
+    "PRESCHOOL": 60,
+    "LOWER_ELEMENTARY": 80,
+    "UPPER_ELEMENTARY": 110,
+    "SUPPORT": 60,
+}
+
+# 아이 답변에 반응한 뒤 질문하는지 볼 때 쓰는 표지. 리액션·호응·되받기 어휘다.
+# ⚠️ 이 목록에 없다고 공감이 없는 것은 아니다 — 그래서 이 규칙은 warn_only 다.
+_EMPATHY_MARKERS = (
+    "좋아", "그렇구나", "그랬구나", "재밌", "재미있", "멋지", "우와", "와!", "예쁘",
+    "고마워", "반가", "신나", "대단", "정말", "많이", "힘들었", "속상", "기뻤",
+)
+
+
+# 새 질문을 여는 의문사. 뒤따르는 물음표 조각에 이게 없으면 앞 질문의 선택지로 본다.
+_INTERROGATIVE = re.compile(r"뭐|무엇|무슨|누구|누가|어디|언제|어떻게|어떤|어느|왜|몇|얼마")
+
+
+def _extra_questions(text: str) -> list[str]:
+    """앞 질문과 별개인 '두 번째 질문' 조각들.
+
+    한 턴에 서로 다른 것을 두 개 물으면 아이가 무엇에 답할지 모른다. 다만 물음표 개수를
+    그대로 세면 선택지 제시를 오탐한다 — "어떤 느낌일까? 시끌시끌해, 아니면 조용해?"는
+    질문 하나에 고를 거리를 붙인 것이고, OPTION 응답 모드를 쓰는 설계와도 맞다.
+    그래서 첫 물음표 뒤의 조각 중 '새 의문사를 가진 것'만 별개 질문으로 센다.
+    """
+    parts = [p.strip() for p in re.split(r"[?？]", text) if p.strip()]
+    # 첫 조각은 첫 질문이다. 그 뒤부터가 후보.
+    return [p for p in parts[1:] if _INTERROGATIVE.search(p)]
+
+
+def check_conversation_quality(case, resp: QuestionResponse) -> list[Finding]:
+    """대화 품질 판정 (S15P11B209-858 — 외부 피드백 8번).
+
+    실패로 세는 것(기계적으로 확실):
+      - 한 번에 한 질문: 물음표 개수
+      - 문장 길이: 난이도별 상한
+      - 민감정보 반복: 아이가 흘린 고유명사의 재등장
+
+    경고로만 남기는 것(정확한 판정 불가):
+      - 공감 선행: 어휘 목록으로는 공감의 유무를 정확히 못 가른다
+      - 장기 맥락: 앞 내용과의 모순 판정은 의미 이해가 필요하다
+
+    종료 품질은 S15P11B209-852(대화 종료 계약)가 없어 판정 대상이 아직 없다 — 852 이후 추가.
+    """
+    text = resp.question_text
+    meta = case.meta
+    out: list[Finding] = []
+
+    # 1) 한 번에 한 질문 — 실패 등급. 선택지 제시는 세지 않는다(_extra_questions 주석 참고).
+    extra = _extra_questions(text)
+    out.append(
+        Finding(
+            "B",
+            "한 번에 한 질문",
+            not extra,
+            f"별개 질문 추가: {extra}" if extra else "",
+        )
+    )
+
+    # 2) 문장 길이 — 실패 등급
+    limit = _LENGTH_LIMIT.get(case.request.difficulty)
+    if limit is not None:
+        length = len(text.strip())
+        out.append(
+            Finding(
+                "B",
+                f"문장 길이(≤{limit}자)",
+                length <= limit,
+                f"{length}자" if length > limit else "",
+            )
+        )
+
+    # 3) 민감정보 반복 — 실패 등급. 아이가 먼저 흘린 고유명사를 되받아 말하면
+    #    대화 기록에 한 번 더 남고, 아이가 더 말하도록 부추기는 셈이 된다(S15P11B209-857).
+    if "leaked_personal_terms" in meta:
+        echoed = _contains_any(text, meta["leaked_personal_terms"])
+        out.append(
+            Finding(
+                "B",
+                "민감정보 미반복",
+                not echoed,
+                f"재진술: {echoed}" if echoed else "",
+            )
+        )
+
+    # 4) 공감 선행 — 경고 등급. 첫 질문은 반응할 답변이 없으므로 제외한다.
+    if meta.get("expects_empathy"):
+        has_marker = any(m in text for m in _EMPATHY_MARKERS)
+        out.append(
+            Finding(
+                "B",
+                "공감 선행",
+                has_marker,
+                "" if has_marker else "리액션 표지 없이 질문만 한 것으로 보임",
+                warn_only=True,
+            )
+        )
+
+    # 5) 장기 맥락 — 경고 등급. 앞선 대화에서 이미 다룬 초점을 또 꺼내는지만 본다.
+    #    '모순'까지는 못 잡는다 — 그건 의미 이해가 필요하다.
+    if "prior_focus_terms" in meta:
+        revisited = _contains_any(text, meta["prior_focus_terms"])
+        out.append(
+            Finding(
+                "B",
+                "장기 맥락 유지",
+                not revisited,
+                f"앞서 다룬 초점 재등장: {revisited}" if revisited else "",
+                warn_only=True,
+            )
+        )
+
+    return out
+
+
 def check_question_response(case, resp: QuestionResponse) -> list[Finding]:
     """질문 응답이 프롬프트 규칙을 지켰는지 판정한다."""
     text = resp.question_text
@@ -235,14 +374,31 @@ def check_question_response(case, resp: QuestionResponse) -> list[Finding]:
         )
 
     # 명시적으로 건너뛴 질문은 표현만 바꿔 되묻지 않고 다른 방향으로 전환해야 한다(831).
+    #
+    # ⚠️ 과탐 보정 (S15P11B209-858): 구 판정은 초점 어휘가 하나라도 재등장하면 실패였다.
+    #    2026-08-04 평가에서 실패 3건 중 2건이 이 방식의 오탐이었다 —
+    #    지붕 색을 건너뛰자 "문은 어떤 색이야?"(대상이 바뀜), 두 사람 행동을 건너뛰자
+    #    "두 사람은 어떤 표정이야?"(속성이 바뀜). 둘 다 방향을 실제로 튼 것이다.
+    #    그래서 '대상'과 '속성'을 갈라 받아, 둘이 함께 재등장할 때만 되물은 것으로 본다.
+    #    한쪽만 겹치는 것은 정상적인 전환이다.
     if "skipped_focus_terms" in meta:
-        repeated = _contains_any(text, meta["skipped_focus_terms"])
+        subjects = meta.get("skipped_subject_terms")
+        attributes = meta.get("skipped_attribute_terms")
+        if subjects is not None and attributes is not None:
+            same_subject = _contains_any(text, subjects)
+            same_attribute = _contains_any(text, attributes)
+            repeated = (
+                same_subject + same_attribute if (same_subject and same_attribute) else []
+            )
+        else:
+            # 대상·속성을 나눠 적지 않은 케이스는 구 방식을 그대로 쓴다.
+            repeated = _contains_any(text, meta["skipped_focus_terms"])
         out.append(
             Finding(
                 "B",
                 "건너뛴 질문 미반복",
                 not repeated,
-                f"직전 질문 초점 재등장: {repeated}" if repeated else "",
+                f"대상·속성이 함께 재등장: {repeated}" if repeated else "",
             )
         )
 
@@ -391,4 +547,44 @@ def check_report_result(case, result: ObservationGenerationResult) -> list[Findi
     out.append(
         Finding("B", "개수 규약(1~3)", not bad, f"위반: {bad}" if bad else str(counts))
     )
+
+    # 보호자 화면에 실제로 도달하는 셋은 비면 화면이 무너진다(report_common 17행).
+    #   followUpGuides 가 비면 '이런 질문으로 대화해 보세요' 영역이 통째로 사라진다.
+    #   2026-08-04 평가에서 그림일기 3회 중 1회 실제로 0개가 나왔다 — 개수 규약과 겹치지만
+    #   원인과 영향이 달라 따로 세운다(0개는 상한 초과와 달리 화면 결손이다).
+    guardian_facing = {
+        "activityNotes": result.activity_notes,
+        "followUpGuides": [g.guidance for g in result.follow_up_guides],
+        "conversationSummary.summaryText": [result.conversation_summary.summary_text],
+    }
+    empty = [
+        name
+        for name, values in guardian_facing.items()
+        if not values or not all(str(v).strip() for v in values)
+    ]
+    out.append(
+        Finding(
+            "B",
+            "보호자 화면 필드 비지 않음",
+            not empty,
+            f"빈 값: {empty}" if empty else "",
+        )
+    )
+
+    # 블록이 밝혀 둔 범위 표현을 지운 채 단정하지 않는가 (S15P11B209-838·839·840).
+    #   프롬프트는 "약"·"추정값"·"1% 미만"·"확실하지 않아요"를 그대로 옮기라고 한다.
+    #   수치만 빼 오면 추정값이 확정 사실이 되어 관찰 근거 자리에 잘못 놓인다.
+    for spec in meta.get("hedged_numbers", []):
+        number, hedges = spec["number"], spec["hedges"]
+        if number not in blob:
+            continue  # 그 수치를 아예 안 쓴 것은 위반이 아니다
+        kept = any(h in blob for h in hedges)
+        out.append(
+            Finding(
+                "B",
+                f"범위 표현 유지({number})",
+                kept,
+                "" if kept else f"{number}를 {hedges} 없이 단정",
+            )
+        )
     return out
