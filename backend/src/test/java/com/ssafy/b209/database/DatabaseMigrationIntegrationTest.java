@@ -2,6 +2,7 @@ package com.ssafy.b209.database;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.catchThrowable;
 
 import com.ssafy.b209.auth.domain.UserRole;
 import com.ssafy.b209.community.domain.PostFeed;
@@ -49,7 +50,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("35");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("36");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     assertThat(tableCount()).isEqualTo(76);
     assertThat(tableExists("refresh_tokens")).isFalse();
@@ -61,6 +62,13 @@ class DatabaseMigrationIntegrationTest {
         .isTrue();
     assertThat(checkConstraintContains("children", "ck_children_preferred_character", "OCTOPUS"))
         .isTrue();
+    // V36 — 캐릭터 캐러셀 신규 3종(S15P11B209-866). 기존 4종도 계속 허용해야 한다.
+    for (String code :
+        new String[] {"BASE", "PRINCESS", "DINO", "OCTOPUS", "EXPLORER", "RIBBON", "PRINCE"}) {
+      assertThat(checkConstraintContains("children", "ck_children_preferred_character", code))
+          .as("ck_children_preferred_character가 %s를 허용해야 한다", code)
+          .isTrue();
+    }
     // V32 — AI 재현성 태그(현재 76~78자)가 VARCHAR(50)을 넘겨 리포트 저장이 통째로 실패했다(815).
     assertThat(characterLengthOf("analyses", "model_version")).isEqualTo(255);
     assertThat(characterLengthOf("analysis_observation_results", "generated_model_version"))
@@ -577,6 +585,74 @@ class DatabaseMigrationIntegrationTest {
                     + "WHERE question_template_id = ? AND (option_key = '' OR label = '')",
                 templateId))
         .isEmpty();
+  }
+
+  /**
+   * V36 — 캐릭터 캐러셀 신규 3종을 실제로 저장할 수 있고 목록 밖 값은 계속 거부한다(S15P11B209-866).
+   *
+   * <p>check_clause 문자열 검사만으로는 제약이 실제로 동작하는지 알 수 없어 INSERT로 확인한다.
+   */
+  @Test
+  void storesEveryPreferredCharacterCodeAndRejectsUnknownOnes() {
+    long id = 9_866L;
+    for (String code :
+        new String[] {"BASE", "PRINCESS", "DINO", "OCTOPUS", "EXPLORER", "RIBBON", "PRINCE"}) {
+      long rowId = id++;
+      jdbcTemplate.update(
+          "INSERT INTO children (id, nickname, birth_date, preferred_character) "
+              + "VALUES (?, ?, '2019-03-15', ?)",
+          rowId,
+          "별이",
+          code);
+      assertThat(
+              jdbcTemplate.queryForObject(
+                  "SELECT preferred_character FROM children WHERE id = ?", String.class, rowId))
+          .isEqualTo(code);
+    }
+
+    // 캐릭터를 고르지 않은 아이는 계속 NULL로 남을 수 있다.
+    long nullRowId = id++;
+    jdbcTemplate.update(
+        "INSERT INTO children (id, nickname, birth_date, preferred_character) "
+            + "VALUES (?, '별이', '2019-03-15', NULL)",
+        nullRowId);
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT preferred_character FROM children WHERE id = ?", String.class, nullRowId))
+        .isNull();
+
+    for (String rejected :
+        new String[] {
+          "MONGLE", "BOY", "GIRL", "KING", "UNKNOWN", "", " ", "PRINCE ", "PRINCESS|DINO"
+        }) {
+      long rejectedId = id++;
+      Throwable thrown =
+          catchThrowable(
+              () ->
+                  jdbcTemplate.update(
+                      "INSERT INTO children (id, nickname, birth_date, preferred_character) "
+                          + "VALUES (?, '별이', '2019-03-15', ?)",
+                      rejectedId,
+                      rejected));
+      assertThat(thrown)
+          .as("[%s]는 ck_children_preferred_character가 거부해야 한다", rejected)
+          .isInstanceOf(org.springframework.dao.DataAccessException.class);
+    }
+
+    // children은 utf8mb4_0900_ai_ci(대소문자 무시)라 CHECK 자체는 소문자를 통과시킨다.
+    // API는 @Pattern이 대소문자를 구분해 400으로 막으므로 실제 유입 경로는 없다.
+    // 여기서는 그 사실을 명시적으로 고정해, 나중에 collation이 바뀌면 드러나게 한다.
+    long lowerId = id++;
+    jdbcTemplate.update(
+        "INSERT INTO children (id, nickname, birth_date, preferred_character) "
+            + "VALUES (?, '별이', '2019-03-15', 'base')",
+        lowerId);
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT preferred_character FROM children WHERE id = ?", String.class, lowerId))
+        .isEqualTo("base");
+
+    jdbcTemplate.update("DELETE FROM children WHERE id >= 9866 AND id < ?", id);
   }
 
   private boolean columnExists(String tableName, String columnName) {

@@ -35,8 +35,16 @@ public record RegisterChildRequest(
     @Schema(
             description = "선호 캐릭터 코드",
             example = "BASE",
-            allowableValues = {"BASE", "PRINCESS", "DINO", "OCTOPUS"})
-        @Pattern(regexp = "BASE|PRINCESS|DINO|OCTOPUS")
+            allowableValues = {
+              "BASE",
+              "PRINCESS",
+              "DINO",
+              "OCTOPUS",
+              "EXPLORER",
+              "RIBBON",
+              "PRINCE"
+            })
+        @Pattern(regexp = "BASE|PRINCESS|DINO|OCTOPUS|EXPLORER|RIBBON|PRINCE")
         String preferredCharacter,
     @Schema(description = "대화 질문 난이도", example = "LOWER_ELEMENTARY") @NotNull
         QuestionDifficulty questionDifficulty,
