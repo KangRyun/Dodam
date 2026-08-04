@@ -242,14 +242,14 @@ class _DrawingScreenState extends State<DrawingScreen>
   DrawingStroke? _activeStroke;
   /// 툴바에 늘 떠 있는 기본 8색이다. 상세 팔레트를 열지 않아도 바로 고를 수 있다.
   static const _quickColors = <Color>[
-    AppColors.drawingRed,
-    AppColors.drawingOrange,
-    AppColors.drawingYellow,
-    AppColors.drawingGreen,
-    AppColors.drawingTeal,
-    AppColors.drawingBlue,
-    AppColors.drawingPurple,
-    AppColors.drawingCharcoal,
+    AppColors.canvasSwatchRed,
+    AppColors.canvasSwatchOrange,
+    AppColors.canvasSwatchYellow,
+    AppColors.canvasSwatchGreen,
+    AppColors.canvasSwatchTeal,
+    AppColors.canvasSwatchBlue,
+    AppColors.canvasSwatchPurple,
+    AppColors.canvasSwatchCharcoal,
   ];
 
   /// 태블릿에서 상세 팔레트 팝오버를 팔레트 버튼 옆에 붙이기 위한 기준점이다.
@@ -260,7 +260,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 현재 선택된 도구·색·굵기다. 크레용 캔버스는 도구를 펜/지우개 두 갈래가 아니라
   /// 크레용·연필·붓·채우기·지우개로 나누므로 한 상태로 묶어 다룬다.
   DrawingToolState _toolState = const DrawingToolState(
-    color: AppColors.drawingInk,
+    color: AppColors.canvasSwatchCharcoal,
     width: _regular,
   );
 
@@ -1997,7 +1997,7 @@ class _DrawingScreenState extends State<DrawingScreen>
       if (!didPop) unawaited(_stopTtsAndPop());
     },
     child: Scaffold(
-      backgroundColor: AppColors.childCanvas,
+      backgroundColor: AppColors.canvasBackdrop,
       body: Stack(
         children: [
           // 크레용 툴바가 화면 맨 위에 오므로 상태 표시줄 아래로 내려야 한다.
