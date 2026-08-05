@@ -1,6 +1,6 @@
 import Image from "next/image";
 
-import { CHAR, DOWNLOAD_HREF } from "../constants";
+import { CHAR } from "../constants";
 
 export function LandingCta() {
   return (
@@ -19,9 +19,9 @@ export function LandingCta() {
           </h2>
           {/* 실제 흐름은 로그인 → 프로필 선택 → 아이 등록 → 활동이라 "바로"라고 하지 않는다. */}
           <p>앱을 설치하고 아이 프로필을 만들면 첫 그림 활동을 시작할 수 있어요.</p>
-          {/* /download/ 는 nginx 정적 페이지 — next/link 대상이 아니다 */}
-          <a className="landing-btn landing-btn-primary" href={DOWNLOAD_HREF}>
-            도담 시작하기
+          {/* 페이지 최상단(#top)으로 스크롤 */}
+          <a className="landing-btn landing-btn-primary" href="#top">
+            맨 위로
           </a>
         </div>
       </div>

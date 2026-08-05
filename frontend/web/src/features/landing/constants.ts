@@ -3,11 +3,11 @@
  *
  * 링크 계약은 S15P11B209-769에서 확립된 루트 계약을 그대로 잇는다.
  * `/download/`·`/legal/*` 는 Next 라우터 밖의 nginx 정적 페이지라 next/link 를 쓰지 않는다.
- * `/community` 만 Next 내부 route 이므로 next/link 로 이동한다.
- * 로그인 전용 route 는 연결하지 않는다.
+ * `/community`·`/login` 은 Next 내부 route 이므로 next/link 로 이동한다.
  */
 export const DOWNLOAD_HREF = "/download/";
 export const COMMUNITY_HREF = "/community";
+export const LOGIN_HREF = "/login";
 export const FLOW_HREF = "#flow";
 
 export const LEGAL_LINKS: ReadonlyArray<{ href: string; label: string }> = [
@@ -19,7 +19,6 @@ export const NAV_ITEMS: ReadonlyArray<{ href: string; label: string }> = [
   { href: "#about", label: "도담 소개" },
   { href: FLOW_HREF, label: "이용 방법" },
   { href: "#report", label: "그림 활동 기록" },
-  { href: COMMUNITY_HREF, label: "커뮤니티" },
 ];
 
 /**

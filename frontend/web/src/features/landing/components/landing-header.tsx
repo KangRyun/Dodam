@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { CHAR, DOWNLOAD_HREF, NAV_ITEMS } from "../constants";
+import { CHAR, LOGIN_HREF, NAV_ITEMS } from "../constants";
 
 function NavLink({ href, children }: { href: string; children: ReactNode }) {
   // 내부 라우트(/…)는 next/link, 같은 페이지 앵커(#…)는 일반 앵커
@@ -36,9 +36,9 @@ export function LandingHeader() {
           ))}
         </nav>
 
-        <a className="landing-btn landing-btn-primary landing-header-cta" href={DOWNLOAD_HREF}>
-          도담 시작하기
-        </a>
+        <Link className="landing-btn landing-btn-primary landing-header-cta" href={LOGIN_HREF}>
+          로그인
+        </Link>
 
         <details className="landing-menu">
           <summary aria-label="메뉴 열기">
@@ -61,9 +61,9 @@ export function LandingHeader() {
                 {item.label}
               </NavLink>
             ))}
-            <a className="landing-btn landing-btn-primary" href={DOWNLOAD_HREF}>
-              도담 시작하기
-            </a>
+            <Link className="landing-btn landing-btn-primary" href={LOGIN_HREF}>
+              로그인
+            </Link>
           </div>
         </details>
       </div>
