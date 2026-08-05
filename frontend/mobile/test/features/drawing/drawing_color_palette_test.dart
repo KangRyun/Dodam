@@ -117,6 +117,28 @@ void main() {
     expect(changes.last.value, closeTo(.4, .03));
   });
 
+  testWidgets('exposes separate cancel and confirm actions', (tester) async {
+    var cancelled = 0;
+    var confirmed = 0;
+    await _pumpPalette(
+      tester,
+      initial: initial,
+      previous: previous,
+      onCancel: () => cancelled++,
+      onConfirm: () => confirmed++,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('drawing-color-cancel')));
+    await tester.pump();
+    expect(cancelled, 1);
+    expect(confirmed, 0);
+
+    await tester.tap(find.byKey(const ValueKey('drawing-color-confirm')));
+    await tester.pump();
+    expect(cancelled, 1);
+    expect(confirmed, 1);
+  });
+
   testWidgets('HSV controls support semantics and directional keyboard input', (
     tester,
   ) async {
@@ -157,7 +179,7 @@ void main() {
     semantics.dispose();
   });
 
-  testWidgets('shows at most ten recent colours and selects one immediately', (
+  testWidgets('recent colour tap updates only the draft preview', (
     tester,
   ) async {
     final recent = List<Color>.generate(
@@ -188,6 +210,14 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('drawing-recent-color-9')));
     await tester.pump();
     expect(changes.last.toColor().toARGB32(), recent[9].toARGB32());
+    expect(
+      tester
+          .widget<DrawingColorPalette>(find.byType(DrawingColorPalette))
+          .value
+          .toColor()
+          .toARGB32(),
+      recent[9].toARGB32(),
+    );
   });
 
   testWidgets('palette body fits compact bottom sheets and anchored popovers', (
@@ -218,6 +248,8 @@ Future<void> _pumpPalette(
   double hostWidth = 360,
   List<Color> recentColors = const [],
   ValueChanged<HSVColor>? onChanged,
+  VoidCallback? onCancel,
+  VoidCallback? onConfirm,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -230,6 +262,8 @@ Future<void> _pumpPalette(
               previous: previous,
               recentColors: recentColors,
               onChanged: onChanged,
+              onCancel: onCancel,
+              onConfirm: onConfirm,
             ),
           ),
         ),
@@ -245,12 +279,16 @@ final class _PaletteHarness extends StatefulWidget {
     required this.previous,
     this.recentColors = const [],
     this.onChanged,
+    this.onCancel,
+    this.onConfirm,
   });
 
   final HSVColor initial;
   final Color previous;
   final List<Color> recentColors;
   final ValueChanged<HSVColor>? onChanged;
+  final VoidCallback? onCancel;
+  final VoidCallback? onConfirm;
 
   @override
   State<_PaletteHarness> createState() => _PaletteHarnessState();
@@ -264,6 +302,8 @@ final class _PaletteHarnessState extends State<_PaletteHarness> {
     value: value,
     previousColor: widget.previous,
     recentColors: widget.recentColors,
+    onCancel: widget.onCancel ?? () {},
+    onConfirm: widget.onConfirm ?? () {},
     onChanged: (next) {
       widget.onChanged?.call(next);
       setState(() => value = next);
