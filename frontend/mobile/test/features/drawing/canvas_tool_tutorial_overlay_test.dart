@@ -9,7 +9,7 @@ void main() {
     final controller = _replayController();
     await _pump(tester, controller);
 
-    expect(find.text('연필로 그려요'), findsOneWidget);
+    expect(find.text('도구를 골라 그려요'), findsOneWidget);
     expect(find.text('1 / 6'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('tutorial-next')));
@@ -36,7 +36,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const ValueKey('tutorial-previous')));
     await tester.pump();
-    expect(find.text('연필로 그려요'), findsOneWidget);
+    expect(find.text('도구를 골라 그려요'), findsOneWidget);
 
     await tester.tap(find.byKey(const ValueKey('tutorial-skip')));
     await tester.pump();

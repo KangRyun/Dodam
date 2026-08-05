@@ -5,6 +5,7 @@ import '../../application/drawing_sync_coordinator.dart';
 import '../models/drawing_tool_state.dart';
 import '../rendering/drawing_stroke_renderer.dart';
 import 'canvas_tool_asset_icon.dart';
+import 'canvas_tutorial_target_registry.dart';
 import 'drawing_crayon_frame.dart';
 import 'drawing_tool_button.dart';
 
@@ -26,6 +27,7 @@ final class DrawingToolbar extends StatelessWidget {
     required this.onWidthChanged,
     required this.onOpenPalette,
     this.pencilOnly = false,
+    this.tutorialTargets,
     super.key,
   });
 
@@ -45,6 +47,16 @@ final class DrawingToolbar extends StatelessWidget {
   final ValueChanged<double> onWidthChanged;
   final VoidCallback onOpenPalette;
   final bool pencilOnly;
+
+  /// 도구 안내가 가리킬 자리를 심어 둘 곳이다. 배치와 모양은 바뀌지 않는다.
+  final CanvasTutorialTargetRegistry? tutorialTargets;
+
+  /// 안내가 이 위젯의 화면 위 위치를 읽을 수 있게 key 만 덧씌운다.
+  Widget _tutorialTarget(CanvasTutorialTargetId id, String slot, Widget child) {
+    final registry = tutorialTargets;
+    if (registry == null) return child;
+    return KeyedSubtree(key: registry.key(id, slot), child: child);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -139,19 +151,27 @@ final class DrawingToolbar extends StatelessWidget {
         tooltip: '뒤로 가기',
         onPressed: onBack,
       ),
-      _ToolbarAssetAction(
-        key: const ValueKey('undo-action'),
-        assetPath: 'assets/canvas/frame/undo.png',
-        semanticLabel: '실행 취소',
-        tooltip: '실행 취소',
-        onPressed: canUndo ? onUndo : null,
+      _tutorialTarget(
+        CanvasTutorialTargetId.history,
+        'undo',
+        _ToolbarAssetAction(
+          key: const ValueKey('undo-action'),
+          assetPath: 'assets/canvas/frame/undo.png',
+          semanticLabel: '실행 취소',
+          tooltip: '실행 취소',
+          onPressed: canUndo ? onUndo : null,
+        ),
       ),
-      _ToolbarAssetAction(
-        key: const ValueKey('redo-action'),
-        assetPath: 'assets/canvas/frame/redo.png',
-        semanticLabel: '다시 실행',
-        tooltip: '다시 실행',
-        onPressed: canRedo ? onRedo : null,
+      _tutorialTarget(
+        CanvasTutorialTargetId.history,
+        'redo',
+        _ToolbarAssetAction(
+          key: const ValueKey('redo-action'),
+          assetPath: 'assets/canvas/frame/redo.png',
+          semanticLabel: '다시 실행',
+          tooltip: '다시 실행',
+          onPressed: canRedo ? onRedo : null,
+        ),
       ),
       _instrumentButton(
         instrument: DrawingInstrument.crayon,
@@ -168,18 +188,22 @@ final class DrawingToolbar extends StatelessWidget {
         artwork: CanvasToolArtwork.brush,
         label: '브러시',
       ),
-      Builder(
-        builder: (anchorContext) => DrawingToolButton(
-          key: const ValueKey('drawing-tool-eraser'),
-          artwork: CanvasToolArtwork.eraser,
-          pointColor: toolState.color,
-          selected: toolState.instrument == DrawingInstrument.eraser,
-          semanticLabel: '지우개 도구',
-          tooltip: '지우개',
-          onPressed: () {
-            onInstrumentChanged(DrawingInstrument.eraser);
-            _showEraserMenu(anchorContext);
-          },
+      _tutorialTarget(
+        CanvasTutorialTargetId.eraser,
+        'main',
+        Builder(
+          builder: (anchorContext) => DrawingToolButton(
+            key: const ValueKey('drawing-tool-eraser'),
+            artwork: CanvasToolArtwork.eraser,
+            pointColor: toolState.color,
+            selected: toolState.instrument == DrawingInstrument.eraser,
+            semanticLabel: '지우개 도구',
+            tooltip: '지우개',
+            onPressed: () {
+              onInstrumentChanged(DrawingInstrument.eraser);
+              _showEraserMenu(anchorContext);
+            },
+          ),
         ),
       ),
       _instrumentButton(
@@ -198,7 +222,7 @@ final class DrawingToolbar extends StatelessWidget {
     required CanvasToolArtwork artwork,
     required String label,
   }) {
-    final button = DrawingToolButton(
+    final Widget button = DrawingToolButton(
       key: ValueKey('drawing-tool-${instrument.name}'),
       artwork: artwork,
       pointColor: toolState.color,
@@ -207,8 +231,14 @@ final class DrawingToolbar extends StatelessWidget {
       tooltip: label,
       onPressed: () => onInstrumentChanged(instrument),
     );
-    if (instrument != DrawingInstrument.crayon) return button;
-    return KeyedSubtree(key: const ValueKey('drawing-tool-pen'), child: button);
+    // 그리기 도구 안내는 지우개를 뺀 그리기·칠하기 도구를 함께 가리킨다.
+    final target = _tutorialTarget(
+      CanvasTutorialTargetId.tools,
+      instrument.name,
+      button,
+    );
+    if (instrument != DrawingInstrument.crayon) return target;
+    return KeyedSubtree(key: const ValueKey('drawing-tool-pen'), child: target);
   }
 
   Future<void> _showEraserMenu(BuildContext context) async {
@@ -250,49 +280,57 @@ final class DrawingToolbar extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (!pencilOnly) ...[
-          Row(
-            key: const ValueKey('drawing-quick-colors'),
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var index = 0; index < quickColors.length; index++)
-                KeyedSubtree(
-                  key: index < _quickColorNames.length
-                      ? ValueKey('color-${_quickColorNames[index]}')
-                      : null,
-                  child: _QuickColorButton(
-                    key: ValueKey('drawing-quick-color-$index'),
-                    index: index,
-                    assetPath: _quickColorAssetPaths[index],
-                    selected:
-                        quickColors[index].toARGB32() ==
-                        toolState.color.toARGB32(),
-                    onPressed: () => onColorChanged(quickColors[index]),
+          _tutorialTarget(
+            CanvasTutorialTargetId.colors,
+            'quick',
+            Row(
+              key: const ValueKey('drawing-quick-colors'),
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                for (var index = 0; index < quickColors.length; index++)
+                  KeyedSubtree(
+                    key: index < _quickColorNames.length
+                        ? ValueKey('color-${_quickColorNames[index]}')
+                        : null,
+                    child: _QuickColorButton(
+                      key: ValueKey('drawing-quick-color-$index'),
+                      index: index,
+                      assetPath: _quickColorAssetPaths[index],
+                      selected:
+                          quickColors[index].toARGB32() ==
+                          toolState.color.toARGB32(),
+                      onPressed: () => onColorChanged(quickColors[index]),
+                    ),
                   ),
-                ),
-            ],
+              ],
+            ),
           ),
           const SizedBox(width: 8),
         ],
-        SizedBox(
-          key: const ValueKey('drawing-thickness-slider'),
-          width: 116,
-          height: 48,
-          child: Semantics(
-            label: '선 굵기',
-            value: toolState.width.toStringAsFixed(0),
-            child: SliderTheme(
-              data: const SliderThemeData(
-                trackHeight: 6,
-                overlayShape: RoundSliderOverlayShape(overlayRadius: 14),
-                activeTrackColor: AppColors.canvasInk,
-                inactiveTrackColor: AppColors.canvasBorderStrong,
-                thumbColor: AppColors.canvasInk,
-              ),
-              child: Slider(
-                value: toolState.width.clamp(1, 40),
-                min: 1,
-                max: 40,
-                onChanged: onWidthChanged,
+        _tutorialTarget(
+          CanvasTutorialTargetId.thickness,
+          'slider',
+          SizedBox(
+            key: const ValueKey('drawing-thickness-slider'),
+            width: 116,
+            height: 48,
+            child: Semantics(
+              label: '선 굵기',
+              value: toolState.width.toStringAsFixed(0),
+              child: SliderTheme(
+                data: const SliderThemeData(
+                  trackHeight: 6,
+                  overlayShape: RoundSliderOverlayShape(overlayRadius: 14),
+                  activeTrackColor: AppColors.canvasInk,
+                  inactiveTrackColor: AppColors.canvasBorderStrong,
+                  thumbColor: AppColors.canvasInk,
+                ),
+                child: Slider(
+                  value: toolState.width.clamp(1, 40),
+                  min: 1,
+                  max: 40,
+                  onChanged: onWidthChanged,
+                ),
               ),
             ),
           ),
@@ -301,32 +339,36 @@ final class DrawingToolbar extends StatelessWidget {
         // 슬라이더를 움직이면 이 원이 같이 커진다. 얇게·보통·굵게 같은 글자
         // 단계보다 아이가 굵기를 바로 알아본다. 캔버스 커서와 같은 계산을 써서
         // 여기 보이는 크기가 실제로 찍히는 자국 크기와 같다.
-        SizedBox.square(
-          key: const ValueKey('drawing-thickness-preview'),
-          dimension: 48,
-          child: Center(
-            // 굵기 점만 두면 얇을 때 먼지처럼 보인다. 크기가 변하지 않는 자리를
-            // 두고 그 안에서 점이 커지게 해야 어느 정도인지 견줄 수 있다.
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                // 툴바보다 밝으면 자리 자체가 튀어 보인다. 종이 톤으로 낮춘다.
-                color: AppColors.canvasStage,
-                shape: BoxShape.circle,
-                border: Border.all(color: AppColors.canvasBorder),
-              ),
-              child: SizedBox.square(
-                dimension: 40,
-                child: Center(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: toolState.color,
-                      shape: BoxShape.circle,
-                    ),
-                    child: SizedBox.square(
-                      dimension: DrawingStrokeRenderer.footprintFor(
-                        toolState.brushProfile,
-                        toolState.width,
-                      ).clamp(3, 32),
+        _tutorialTarget(
+          CanvasTutorialTargetId.thickness,
+          'preview',
+          SizedBox.square(
+            key: const ValueKey('drawing-thickness-preview'),
+            dimension: 48,
+            child: Center(
+              // 굵기 점만 두면 얇을 때 먼지처럼 보인다. 크기가 변하지 않는 자리를
+              // 두고 그 안에서 점이 커지게 해야 어느 정도인지 견줄 수 있다.
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  // 툴바보다 밝으면 자리 자체가 튀어 보인다. 종이 톤으로 낮춘다.
+                  color: AppColors.canvasStage,
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppColors.canvasBorder),
+                ),
+                child: SizedBox.square(
+                  dimension: 40,
+                  child: Center(
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: toolState.color,
+                        shape: BoxShape.circle,
+                      ),
+                      child: SizedBox.square(
+                        dimension: DrawingStrokeRenderer.footprintFor(
+                          toolState.brushProfile,
+                          toolState.width,
+                        ).clamp(3, 32),
+                      ),
                     ),
                   ),
                 ),
@@ -340,16 +382,20 @@ final class DrawingToolbar extends StatelessWidget {
   );
 
   /// 팔레트는 색을 고르는 버튼이라 도구 줄 끝, 색 견본 바로 앞에 둔다.
-  Widget _paletteButton() => CompositedTransformTarget(
-    link: paletteAnchorLink,
-    child: DrawingToolButton(
-      key: const ValueKey('drawing-palette-button'),
-      artwork: CanvasToolArtwork.palette,
-      pointColor: toolState.color,
-      selected: false,
-      semanticLabel: '색상 팔레트 버튼',
-      tooltip: '색상 팔레트',
-      onPressed: onOpenPalette,
+  Widget _paletteButton() => _tutorialTarget(
+    CanvasTutorialTargetId.colors,
+    'palette',
+    CompositedTransformTarget(
+      link: paletteAnchorLink,
+      child: DrawingToolButton(
+        key: const ValueKey('drawing-palette-button'),
+        artwork: CanvasToolArtwork.palette,
+        pointColor: toolState.color,
+        selected: false,
+        semanticLabel: '색상 팔레트 버튼',
+        tooltip: '색상 팔레트',
+        onPressed: onOpenPalette,
+      ),
     ),
   );
 

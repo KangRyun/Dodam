@@ -131,6 +131,7 @@ flutter:
     - assets/canvas/tools/purple/
     - assets/canvas/tools/charcoal/
     - assets/canvas/brushes/
+    - assets/canvas/tutorial/
 
   fonts:
     - family: NanumSquareNeo

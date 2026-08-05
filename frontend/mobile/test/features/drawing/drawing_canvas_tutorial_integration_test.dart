@@ -11,7 +11,7 @@ void main() {
     await _pumpDrawing(tester, controller);
 
     expect(find.byKey(const ValueKey('canvas-tool-tutorial')), findsOneWidget);
-    expect(find.text('연필로 그려요'), findsOneWidget);
+    expect(find.text('도구를 골라 그려요'), findsOneWidget);
   });
 
   testWidgets('완료한 아동은 자동 노출하지 않고 도움말로 다시 본다', (tester) async {
@@ -22,7 +22,7 @@ void main() {
     expect(find.byKey(const ValueKey('canvas-tool-tutorial')), findsNothing);
     await tester.tap(find.byKey(const ValueKey('canvas-tutorial-help')));
     await tester.pump();
-    expect(find.text('연필로 그려요'), findsOneWidget);
+    expect(find.text('도구를 골라 그려요'), findsOneWidget);
   });
 
   testWidgets('튜토리얼 저장소가 없으면 기존 Canvas 동작과 상단 버튼을 유지한다', (tester) async {
