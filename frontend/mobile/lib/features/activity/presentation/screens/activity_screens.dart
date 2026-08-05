@@ -798,18 +798,18 @@ class _DrawingScreenState extends State<DrawingScreen>
     var value = HSVColor.fromColor(_toolState.color);
     final previousColor = _toolState.color;
 
-    Widget palette(StateSetter setPaletteState) => DrawingColorPalette(
-      value: value,
-      previousColor: previousColor,
-      recentColors: _recentColors,
-      onChanged: (next) {
-        setPaletteState(() => value = next);
-        _setColor(next.toColor());
-      },
-    );
+    Widget palette(BuildContext paletteContext, StateSetter setPaletteState) =>
+        DrawingColorPalette(
+          value: value,
+          previousColor: previousColor,
+          recentColors: _recentColors,
+          onChanged: (next) => setPaletteState(() => value = next),
+          onCancel: () => Navigator.of(paletteContext).pop(),
+          onConfirm: () => Navigator.of(paletteContext).pop(value.toColor()),
+        );
 
     if (deviceClass == DrawingCanvasDeviceClass.tablet) {
-      await showGeneralDialog<void>(
+      final selectedColor = await showGeneralDialog<Color>(
         context: context,
         barrierDismissible: true,
         barrierLabel: '색상 팔레트 닫기',
@@ -833,7 +833,7 @@ class _DrawingScreenState extends State<DrawingScreen>
                   width: 380,
                   child: StatefulBuilder(
                     builder: (context, setPaletteState) =>
-                        palette(setPaletteState),
+                        palette(context, setPaletteState),
                   ),
                 ),
               ),
@@ -841,10 +841,11 @@ class _DrawingScreenState extends State<DrawingScreen>
           ],
         ),
       );
+      if (selectedColor != null && mounted) _setColor(selectedColor);
       return;
     }
 
-    await showModalBottomSheet<void>(
+    final selectedColor = await showModalBottomSheet<Color>(
       context: context,
       isDismissible: true,
       isScrollControlled: true,
@@ -854,10 +855,12 @@ class _DrawingScreenState extends State<DrawingScreen>
         key: const ValueKey('drawing-mobile-palette-sheet'),
         constraints: const BoxConstraints(maxWidth: 480),
         child: StatefulBuilder(
-          builder: (context, setPaletteState) => palette(setPaletteState),
+          builder: (context, setPaletteState) =>
+              palette(context, setPaletteState),
         ),
       ),
     );
+    if (selectedColor != null && mounted) _setColor(selectedColor);
   }
 
   void _setThickness(double thickness) {

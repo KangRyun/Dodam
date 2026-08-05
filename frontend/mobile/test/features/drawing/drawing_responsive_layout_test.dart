@@ -1,5 +1,6 @@
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
 import 'package:dodam/features/conversation/conversation.dart';
+import 'package:dodam/features/drawing/presentation/widgets/drawing_color_palette.dart';
 import 'package:dodam/features/drawing/presentation/widgets/drawing_crayon_frame.dart';
 import 'package:dodam/features/drawing/presentation/widgets/drawing_toolbar.dart';
 import 'package:flutter/material.dart';
@@ -138,6 +139,95 @@ void main() {
       },
     );
 
+    testWidgets(
+      'tablet palette applies its draft only after confirm and remembers it once',
+      (tester) async {
+        await _pumpDrawing(tester, size: const Size(1194, 834));
+        final originalColor = _toolbarColor(tester);
+
+        await tester.tap(find.byKey(const ValueKey('drawing-palette-button')));
+        await tester.pumpAndSettle();
+        await _chooseDraftColor(tester);
+
+        final draftColor = tester
+            .widget<DrawingColorPalette>(find.byType(DrawingColorPalette))
+            .value
+            .toColor();
+        expect(draftColor.toARGB32(), isNot(originalColor.toARGB32()));
+        expect(_toolbarColor(tester).toARGB32(), originalColor.toARGB32());
+
+        await tester.ensureVisible(
+          find.byKey(const ValueKey('drawing-color-confirm')),
+        );
+        await tester.tap(find.byKey(const ValueKey('drawing-color-confirm')));
+        await tester.pumpAndSettle();
+
+        expect(find.byType(DrawingColorPalette), findsNothing);
+        expect(_toolbarColor(tester).toARGB32(), draftColor.toARGB32());
+
+        await tester.tap(find.byKey(const ValueKey('drawing-palette-button')));
+        await tester.pumpAndSettle();
+        final reopened = tester.widget<DrawingColorPalette>(
+          find.byType(DrawingColorPalette),
+        );
+        expect(reopened.recentColors, hasLength(2));
+        expect(reopened.recentColors.first.toARGB32(), draftColor.toARGB32());
+      },
+    );
+
+    testWidgets('mobile palette discards its draft when close is pressed', (
+      tester,
+    ) async {
+      await _pumpDrawing(tester, size: const Size(390, 844));
+      final originalColor = _toolbarColor(tester);
+
+      final paletteButton = find.byKey(
+        const ValueKey('drawing-palette-button'),
+      );
+      await tester.ensureVisible(paletteButton);
+      await tester.tap(paletteButton);
+      await tester.pumpAndSettle();
+      await _chooseDraftColor(tester);
+
+      expect(_toolbarColor(tester).toARGB32(), originalColor.toARGB32());
+      await tester.ensureVisible(
+        find.byKey(const ValueKey('drawing-color-cancel')),
+      );
+      await tester.tap(find.byKey(const ValueKey('drawing-color-cancel')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DrawingColorPalette), findsNothing);
+      expect(_toolbarColor(tester).toARGB32(), originalColor.toARGB32());
+
+      await tester.ensureVisible(paletteButton);
+      await tester.tap(paletteButton);
+      await tester.pumpAndSettle();
+      final reopened = tester.widget<DrawingColorPalette>(
+        find.byType(DrawingColorPalette),
+      );
+      expect(reopened.recentColors, hasLength(1));
+      expect(reopened.recentColors.single.toARGB32(), originalColor.toARGB32());
+    });
+
+    testWidgets('tablet palette discards its draft on barrier dismiss', (
+      tester,
+    ) async {
+      const size = Size(1194, 834);
+      await _pumpDrawing(tester, size: size);
+      final originalColor = _toolbarColor(tester);
+
+      await tester.tap(find.byKey(const ValueKey('drawing-palette-button')));
+      await tester.pumpAndSettle();
+      await _chooseDraftColor(tester);
+      expect(_toolbarColor(tester).toARGB32(), originalColor.toARGB32());
+
+      await tester.tapAt(Offset(24, size.height - 24));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(DrawingColorPalette), findsNothing);
+      expect(_toolbarColor(tester).toARGB32(), originalColor.toARGB32());
+    });
+
     for (final size in const [Size(1194, 834), Size(1600, 900)]) {
       testWidgets(
         'tablet palette at $size stays anchored to its trigger outside capture',
@@ -232,6 +322,18 @@ void main() {
       },
     );
   });
+}
+
+Color _toolbarColor(WidgetTester tester) =>
+    tester.widget<DrawingToolbar>(find.byType(DrawingToolbar)).toolState.color;
+
+Future<void> _chooseDraftColor(WidgetTester tester) async {
+  final plane = find.byKey(const ValueKey('hsv-saturation-value-plane'));
+  final rect = tester.getRect(plane);
+  await tester.tapAt(
+    Offset(rect.left + rect.width * .82, rect.top + rect.height * .28),
+  );
+  await tester.pump();
 }
 
 double _horizontalIntervalGap(Rect first, Rect second) {
