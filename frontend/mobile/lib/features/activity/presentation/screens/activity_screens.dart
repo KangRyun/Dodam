@@ -31,6 +31,7 @@ import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/models/drawing_canvas_action.dart';
 import '../../../drawing/presentation/models/drawing_tool_state.dart';
 import '../../../drawing/presentation/widgets/drawing_color_palette.dart';
+import '../../../drawing/presentation/widgets/drawing_complete_cta.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas_viewport.dart';
 import '../../../drawing/presentation/widgets/drawing_crayon_frame.dart';
 import '../../../drawing/presentation/widgets/drawing_cursor_overlay.dart';
@@ -239,8 +240,10 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   /// 화면에 보이는 완결된 획이다. 문서 컨트롤러가 획·채우기·지우기를 한 이력으로
   /// 관리하므로 이 화면은 목록을 따로 들고 있지 않는다.
-  List<DrawingStroke> get _completedStrokes => _documentController.visibleStrokes;
+  List<DrawingStroke> get _completedStrokes =>
+      _documentController.visibleStrokes;
   DrawingStroke? _activeStroke;
+
   /// 툴바에 늘 떠 있는 기본 8색이다. 상세 팔레트를 열지 않아도 바로 고를 수 있다.
   static const _quickColors = <Color>[
     AppColors.canvasSwatchRed,
@@ -329,17 +332,23 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 이 뒤로 세션은 `CONVERSING`이므로 캔버스 저장은 막히고 대화만 진행한다.
   bool _drawingStageFinished = false;
 
+  /// 캔버스 왼쪽 위에 띄우는 안내다. 무엇을 그리는 시간인지 아이가 언제든
+  /// 확인할 수 있어야 한다. HTP 는 집·나무·사람을 순서대로 그리므로 몇 번째인지
+  /// 함께 알려 준다.
   String get _activityTitle {
     final activity = widget.activityContext;
-    if (!activity.isHtp) return '그림 활동';
+    if (!activity.isHtp) return '그림일기';
     final subject = switch (activity.drawingSubject) {
       'HOUSE' => '집 그리기',
       'TREE' => '나무 그리기',
       'PERSON' => '사람 그리기',
       _ => 'HTP 그림',
     };
-    return '${activity.stepOrder ?? 1}단계 · $subject';
+    return '${activity.stepOrder ?? 1}/$_htpStepCount단계 · $subject';
   }
+
+  /// HTP 는 집·나무·사람 세 단계다.
+  static const _htpStepCount = 3;
 
   bool _movedToReflection = false;
   bool _automaticConversationEndStarted = false;
@@ -393,7 +402,8 @@ class _DrawingScreenState extends State<DrawingScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _ownsDocumentController = widget.documentController == null;
-    _documentController = widget.documentController ?? DrawingDocumentController();
+    _documentController =
+        widget.documentController ?? DrawingDocumentController();
     _documentController.addListener(_handleDocumentChanged);
     _cursorController = DrawingCursorController(
       DrawingCursorState(
@@ -1647,10 +1657,7 @@ class _DrawingScreenState extends State<DrawingScreen>
       _activePointer = null;
     });
     if (completed) {
-      _syncCoordinator.recordStroke(
-        stroke,
-        _documentSize,
-      );
+      _syncCoordinator.recordStroke(stroke, _documentSize);
       _endDrawingInput();
     }
     if (event is PointerCancelEvent ||
@@ -1674,10 +1681,7 @@ class _DrawingScreenState extends State<DrawingScreen>
           fallbackStroke: _strokeEraseFallbackActive ? _activeStroke : null,
         );
         if (change.wireStroke case final wireStroke?) {
-          _syncCoordinator.recordStroke(
-            wireStroke,
-            _documentSize,
-          );
+          _syncCoordinator.recordStroke(wireStroke, _documentSize);
         }
       }
       if (mounted) {
@@ -1875,10 +1879,7 @@ class _DrawingScreenState extends State<DrawingScreen>
       _activePointer = null;
     });
     if (canvasSize != null) {
-      _syncCoordinator.recordStroke(
-        stroke,
-        _documentSize,
-      );
+      _syncCoordinator.recordStroke(stroke, _documentSize);
       _objectDetectionController?.onDrawingInputEnded();
     }
   }
@@ -2339,6 +2340,27 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
   }
 
+  /// 다 그렸다고 알리는 오른쪽 아래 버튼이다.
+  ///
+  /// 질문 말풍선도 같은 자리에 뜬다. 겹치면 이 버튼이 답변·녹음 버튼을 덮으므로
+  /// 말풍선이 보이는 동안에는 만들지 않는다. 질문에 답하는 동안에는 캔버스가
+  /// 잠겨 그림도 더 그릴 수 없어, 지금 완료할 이유도 없다.
+  Widget? _buildCompleteCta(BuildContext context) {
+    final questionBubbleVisible =
+        _questionDisplayController.isVisible &&
+        _activePointer == null &&
+        (_canvasLocked || _draftRestoreController.canDraw);
+    if (questionBubbleVisible) return null;
+    return DrawingCompleteCta(
+      enabled: !_canvasLocked && _activeStroke == null && _hasDrawingContent,
+      isCompleting: _isCompleting,
+      compact:
+          _deviceClassFor(MediaQuery.sizeOf(context)) !=
+          DrawingCanvasDeviceClass.tablet,
+      onPressed: () => unawaited(_confirmAndComplete()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: false,
@@ -2347,12 +2369,17 @@ class _DrawingScreenState extends State<DrawingScreen>
     },
     child: Scaffold(
       backgroundColor: AppColors.canvasBackdrop,
+      // 다 그렸다고 알리는 버튼은 Scaffold 자리를 쓴다. 직접 Stack 아래쪽에
+      // 두면 저장 실패 SnackBar 가 그대로 버튼을 덮어 다시 누를 수 없다.
+      floatingActionButton: _buildCompleteCta(context),
       body: Stack(
         children: [
           // 크레용 툴바가 화면 맨 위에 오므로 상태 표시줄 아래로 내려야 한다.
           SafeArea(
             child: LayoutBuilder(
               builder: (context, constraints) {
+                final screenSize = MediaQuery.sizeOf(context);
+                final deviceClass = _deviceClassFor(screenSize);
                 final restoreStatus = _draftRestoreController.status;
                 final autoRestoreInProgress =
                     widget.autoRestoreDraft &&
@@ -2362,7 +2389,6 @@ class _DrawingScreenState extends State<DrawingScreen>
                             DrawingDraftRestoreStatus.loadingImage);
                 final canvas = _CanvasPanel(
                   repaintBoundaryKey: _canvasBoundaryKey,
-                  companion: _companionSnapshot,
                   actions: _documentController.actions,
                   cursorController: _cursorController,
                   onPointerHover: _handleCanvasHover,
@@ -2390,31 +2416,39 @@ class _DrawingScreenState extends State<DrawingScreen>
                   onStartNew: _draftRestoreController.startNewDrawing,
                   onRetryQuery: () => unawaited(_draftRestoreController.load()),
                   onRetryImage: _draftRestoreController.retryImage,
+                  sttResultController: _sttResultController,
+                );
+                // 말풍선은 종이가 아니라 화면 전체를 기준으로 놓는다. 종이 안에
+                // 두면 툴바·활동명이 커질 때마다 종이가 줄어들어 답변 버튼이
+                // 화면 밖으로 밀려난다.
+                final questionBubble = AiQuestionBubbleOverlay(
+                  companion: _companionSnapshot,
+                  compact: deviceClass != DrawingCanvasDeviceClass.tablet,
                   question: _questionDisplayController.visibleQuestion,
-                  showQuestion:
+                  visible:
                       _questionDisplayController.isVisible &&
                       _activePointer == null &&
                       (_canvasLocked || _draftRestoreController.canDraw),
-                  selectedQuestionOptionId:
+                  selectedOptionId:
                       _questionSelectionController.selectedOptionId,
-                  onQuestionOptionSelected: (optionId) {
+                  onOptionSelected: (optionId) {
                     unawaited(_selectQuestionOption(optionId));
                   },
-                  answerSubmissionStatus:
+                  showResponseActions:
+                      _questionSelectionController.optionsVisible,
+                  submissionStatus:
                       _answerSubmissionController?.status ??
                       OptionAnswerSubmissionStatus.idle,
-                  questionSkipStatus:
+                  skipStatus:
                       _questionSkipController?.status ??
                       QuestionSkipStatus.idle,
-                  conversationEndStatus:
-                      _conversationEndController?.status ??
-                      ConversationEndStatus.idle,
-                  showQuestionResponseActions:
-                      _questionSelectionController.optionsVisible,
-                  onQuestionSkip: () {
+                  onSkip: () {
                     unawaited(_skipQuestion());
                   },
-                  onConversationEnd: () {
+                  endStatus:
+                      _conversationEndController?.status ??
+                      ConversationEndStatus.idle,
+                  onEnd: () {
                     unawaited(_confirmAndEndConversation());
                   },
                   voiceRecordingController: _voiceRecordingController,
@@ -2439,7 +2473,6 @@ class _DrawingScreenState extends State<DrawingScreen>
                       _conversationEndController?.canRetry == true,
                   voiceRetryable:
                       _voiceAnswerUploadController?.canRetry ?? false,
-                  sttResultController: _sttResultController,
                 );
                 final sidePanel = _DrawingSidePanel(
                   // 도구·색·굵기·완료는 상단 크레용 툴바가 맡는다.
@@ -2491,8 +2524,6 @@ class _DrawingScreenState extends State<DrawingScreen>
                   onRetryHtpAdvance: () => unawaited(_retryHtpAdvance()),
                   stageErrorAnchorKey: _stageErrorAnchorKey,
                 );
-                final screenSize = MediaQuery.sizeOf(context);
-                final deviceClass = _deviceClassFor(screenSize);
                 // 캔버스 위 말풍선이 질문을 보여 주는 동안에는 사이드 패널을
                 // 띄우지 않는다. 같은 질문을 두 번 보여 줄 뿐 아니라, 패널이
                 // 말풍선의 녹음·답변 버튼을 덮어 탭이 닿지 않는다.
@@ -2530,12 +2561,6 @@ class _DrawingScreenState extends State<DrawingScreen>
                   onBack: () => unawaited(_stopTtsAndPop()),
                   canUndo: _activeStroke == null && _documentController.canUndo,
                   canRedo: _activeStroke == null && _documentController.canRedo,
-                  canComplete:
-                      !_canvasLocked &&
-                      !_isCompleting &&
-                      _activeStroke == null &&
-                      _hasDrawingContent,
-                  isCompleting: _isCompleting,
                   saveStatus: _syncCoordinator.saveStatus,
                   onUndo: _undoLastStroke,
                   onRedo: _redoLastStroke,
@@ -2546,7 +2571,6 @@ class _DrawingScreenState extends State<DrawingScreen>
                   onWidthChanged: _setThickness,
                   onOpenPalette: () =>
                       unawaited(_openColorPalette(deviceClass)),
-                  onComplete: () => unawaited(_confirmAndComplete()),
                 );
                 final frameInset = switch (deviceClass) {
                   DrawingCanvasDeviceClass.mobilePortrait => AppSpacing.sm,
@@ -2563,108 +2587,125 @@ class _DrawingScreenState extends State<DrawingScreen>
                 return Column(
                   key: ValueKey(layoutKey),
                   children: [
+                    // 무엇을 그리는 시간인지 화면 맨 위에 글씨로 둔다. 캔버스
+                    // 위에 창처럼 띄우면 그림을 가린다.
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        frameInset + AppSpacing.sm,
+                        AppSpacing.xs,
+                        frameInset + AppSpacing.sm,
+                        AppSpacing.xxs,
+                      ),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _activityTitle,
+                          key: const ValueKey('drawing-activity-title'),
+                          // 큰 글자 설정에서 여러 줄로 접히면 안내 한 줄이
+                          // 화면 높이의 3분의 1을 먹는다. 종이와 답변 버튼이
+                          // 밀려나므로 한 줄로 자른다.
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.canvasInk,
+                            fontSize: 26,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
                     toolbar,
                     Expanded(
-                      child: Stack(
-                        children: [
-                          Positioned.fill(
-                            child: Padding(
-                              padding: EdgeInsets.all(frameInset),
-                              child: DrawingCrayonFrame(
-                                deviceClass: deviceClass,
-                                child: canvas,
-                              ),
-                            ),
-                          ),
-                          // HTP 는 지금 몇 단계에서 무엇을 그리는지가 아이에게
-                          // 필요한 정보다. 상단 바를 없앴으므로 캔버스 왼쪽 위에
-                          // 남겨 둔다. 자유 그림은 안내가 필요 없어 띄우지 않는다.
-                          if (widget.activityContext.isHtp)
-                            Positioned(
-                              left: frameInset + AppSpacing.md,
-                              top: frameInset + AppSpacing.md,
-                              child: IgnorePointer(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    color: AppColors.canvasWarm.withValues(
-                                      alpha: .92,
-                                    ),
-                                    borderRadius: BorderRadius.circular(
-                                      AppRadius.sm,
-                                    ),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: AppSpacing.sm,
-                                      vertical: AppSpacing.xs,
-                                    ),
-                                    child: Text(
-                                      _activityTitle,
-                                      key: const ValueKey(
-                                        'drawing-activity-title',
-                                      ),
-                                      style: const TextStyle(
-                                        color: AppColors.canvasInk,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ),
+                      // 말풍선이 종이 위로 넘쳐 그려질 수 있어야 한다.
+                      child: LayoutBuilder(
+                        builder: (context, stageConstraints) => Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Positioned.fill(
+                              child: Padding(
+                                padding: EdgeInsets.all(frameInset),
+                                child: DrawingCrayonFrame(
+                                  deviceClass: deviceClass,
+                                  child: canvas,
                                 ),
                               ),
                             ),
-                          // 도구 사용법 다시 보기. 툴바(위)·쓰다미(오른쪽 아래)와
-                          // 겹치지 않으면서 손이 닿기 쉬운 왼쪽 아래에 둔다.
-                          if (_canvasTutorialController
-                              case final tutorialController?)
-                            Positioned(
-                              left: frameInset + AppSpacing.md,
-                              bottom: frameInset + AppSpacing.md,
-                              child: AnimatedBuilder(
-                                animation: tutorialController,
-                                builder: (context, _) =>
-                                    IconButton.filledTonal(
-                                      key: const ValueKey(
-                                        'canvas-tutorial-help',
-                                      ),
-                                      tooltip: '그림 도구 다시 보기',
-                                      onPressed: tutorialController.isBusy
-                                          ? null
-                                          : tutorialController.replay,
-                                      icon: const Icon(
-                                        Icons.help_outline_rounded,
-                                      ),
-                                      style: IconButton.styleFrom(
-                                        minimumSize: const Size.square(
-                                          AppSizes.iconButton,
+                            // 말풍선은 종이보다 커질 수 있다. 종이 안에 가두면
+                            // 활동명·툴바가 커질 때마다 종이가 줄어들어 답변
+                            // 버튼이 화면 밖으로 밀려난다. 아래를 종이에 붙인
+                            // 채 위로만 넘겨 화면 높이까지 쓴다.
+                            Positioned.fill(
+                              child: OverflowBox(
+                                alignment: Alignment.bottomRight,
+                                maxHeight: max(
+                                  1,
+                                  constraints.maxHeight - frameInset,
+                                ),
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [questionBubble],
+                                ),
+                              ),
+                            ),
+                            // 도구 사용법 다시 보기. 툴바(위)·쓰다미(오른쪽 아래)와
+                            // 겹치지 않으면서 손이 닿기 쉬운 왼쪽 아래에 둔다.
+                            if (_canvasTutorialController
+                                case final tutorialController?)
+                              Positioned(
+                                left: frameInset + AppSpacing.md,
+                                bottom: frameInset + AppSpacing.md,
+                                child: AnimatedBuilder(
+                                  animation: tutorialController,
+                                  builder: (context, _) =>
+                                      IconButton.filledTonal(
+                                        key: const ValueKey(
+                                          'canvas-tutorial-help',
+                                        ),
+                                        tooltip: '그림 도구 다시 보기',
+                                        onPressed: tutorialController.isBusy
+                                            ? null
+                                            : tutorialController.replay,
+                                        icon: const Icon(
+                                          Icons.help_outline_rounded,
+                                        ),
+                                        style: IconButton.styleFrom(
+                                          minimumSize: const Size.square(
+                                            AppSizes.iconButton,
+                                          ),
                                         ),
                                       ),
-                                    ),
-                              ),
-                            ),
-                          // 보여줄 질문·오류가 있을 때만 띄운다. 빈 상자를 겹쳐 두면
-                          // 그 아래 캔버스와 복원 안내가 탭을 받지 못한다.
-                          if (hasStageChrome &&
-                              constraints.maxWidth > frameInset * 2)
-                            Positioned(
-                              top: frameInset + AppSpacing.sm,
-                              right: frameInset + AppSpacing.sm,
-                              child: ConstrainedBox(
-                                key: const ValueKey('drawing-stage-chrome'),
-                                constraints: BoxConstraints(
-                                  maxWidth: min(
-                                    360,
-                                    constraints.maxWidth - frameInset * 2,
-                                  ),
-                                  maxHeight: max(
-                                    96,
-                                    constraints.maxHeight * .65,
-                                  ),
                                 ),
-                                child: sidePanel,
                               ),
-                            ),
-                        ],
+                            // 보여줄 질문·오류가 있을 때만 띄운다. 빈 상자를 겹쳐 두면
+                            // 그 아래 캔버스와 복원 안내가 탭을 받지 못한다.
+                            if (hasStageChrome &&
+                                stageConstraints.maxWidth > frameInset * 2)
+                              Positioned(
+                                top: frameInset + AppSpacing.sm,
+                                right: frameInset + AppSpacing.sm,
+                                child: ConstrainedBox(
+                                  key: const ValueKey('drawing-stage-chrome'),
+                                  // 종이 영역을 기준으로 잡는다. 화면 높이로 잡으면
+                                  // 활동명·툴바만큼 아래에서 시작하는 만큼 그대로
+                                  // 화면 밖으로 넘어가, 안내 카드의 재시도 버튼이
+                                  // 손에 닿지 않는다.
+                                  constraints: BoxConstraints(
+                                    maxWidth: min(
+                                      360,
+                                      stageConstraints.maxWidth -
+                                          frameInset * 2,
+                                    ),
+                                    maxHeight: max(
+                                      96,
+                                      stageConstraints.maxHeight -
+                                          (frameInset + AppSpacing.sm) * 2,
+                                    ),
+                                  ),
+                                  child: sidePanel,
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -2703,30 +2744,10 @@ class _CanvasPanel extends StatelessWidget {
     required this.onStartNew,
     required this.onRetryQuery,
     required this.onRetryImage,
-    required this.question,
-    required this.showQuestion,
-    required this.selectedQuestionOptionId,
-    required this.onQuestionOptionSelected,
-    required this.answerSubmissionStatus,
-    required this.questionSkipStatus,
-    required this.conversationEndStatus,
-    required this.showQuestionResponseActions,
-    required this.onQuestionSkip,
-    required this.onConversationEnd,
-    required this.voiceRecordingController,
-    required this.voiceAnswerUploadStatus,
-    required this.onRetryVoiceAnswerUpload,
-    required this.answerRetryable,
-    required this.answerOptionsEnabled,
-    required this.skipRetryable,
-    required this.endRetryable,
-    required this.voiceRetryable,
     required this.sttResultController,
-    required this.companion,
   });
 
   final GlobalKey repaintBoundaryKey;
-  final DodamCostume companion;
 
   /// 채우기·지우기까지 포함한 문서 변경 이력이다. 획만으로는 캔버스를 다시 그릴 수 없다.
   final List<DrawingCanvasAction> actions;
@@ -2753,26 +2774,6 @@ class _CanvasPanel extends StatelessWidget {
   final VoidCallback onStartNew;
   final VoidCallback onRetryQuery;
   final VoidCallback onRetryImage;
-  final AiQuestion? question;
-  final bool showQuestion;
-  final String? selectedQuestionOptionId;
-  final ValueChanged<String> onQuestionOptionSelected;
-  final OptionAnswerSubmissionStatus answerSubmissionStatus;
-  final QuestionSkipStatus questionSkipStatus;
-  final ConversationEndStatus conversationEndStatus;
-  final bool showQuestionResponseActions;
-  final VoidCallback onQuestionSkip;
-  final VoidCallback onConversationEnd;
-  final VoiceRecordingController? voiceRecordingController;
-  final VoiceAnswerUploadStatus voiceAnswerUploadStatus;
-  final VoidCallback onRetryVoiceAnswerUpload;
-
-  /// 실패한 조작을 같은 버튼으로 다시 시도해도 되는지(Overlay로 그대로 전달).
-  final bool answerRetryable;
-  final bool answerOptionsEnabled;
-  final bool skipRetryable;
-  final bool endRetryable;
-  final bool voiceRetryable;
   final SttResultController? sttResultController;
 
   @override
@@ -2818,27 +2819,6 @@ class _CanvasPanel extends StatelessWidget {
                     builder: (context, state, child) =>
                         DrawingCursorOverlay(state: state, metrics: metrics),
                   ),
-            ),
-            AiQuestionBubbleOverlay(
-              companion: companion,
-              question: question,
-              visible: showQuestion,
-              selectedOptionId: selectedQuestionOptionId,
-              onOptionSelected: onQuestionOptionSelected,
-              showResponseActions: showQuestionResponseActions,
-              submissionStatus: answerSubmissionStatus,
-              skipStatus: questionSkipStatus,
-              onSkip: onQuestionSkip,
-              endStatus: conversationEndStatus,
-              onEnd: onConversationEnd,
-              voiceRecordingController: voiceRecordingController,
-              voiceAnswerUploadStatus: voiceAnswerUploadStatus,
-              onRetryVoiceAnswerUpload: onRetryVoiceAnswerUpload,
-              answerRetryable: answerRetryable,
-              answerOptionsEnabled: answerOptionsEnabled,
-              skipRetryable: skipRetryable,
-              endRetryable: endRetryable,
-              voiceRetryable: voiceRetryable,
             ),
             if (sttResultController case final controller?)
               Positioned(
@@ -3109,67 +3089,67 @@ class _DrawingSidePanel extends StatelessWidget {
               ],
             ),
           if (showToolControls) ...[
-          const SizedBox(height: AppSpacing.lg),
-          const _ToolHeading(icon: Icons.edit_rounded, label: '도구'),
-          const SizedBox(height: AppSpacing.xs),
-          Row(
-            children: [
-              Expanded(
-                child: _ToolChoice(
-                  key: const ValueKey('drawing-tool-pen'),
-                  label: '펜',
-                  icon: Icons.edit_rounded,
-                  selected: selectedTool == DrawingTool.pen,
-                  onTap: () => onToolChanged(DrawingTool.pen),
-                ),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: _ToolChoice(
-                  key: const ValueKey('drawing-tool-eraser'),
-                  label: '지우개',
-                  icon: Icons.auto_fix_normal_rounded,
-                  selected: selectedTool == DrawingTool.eraser,
-                  onTap: () => onToolChanged(DrawingTool.eraser),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          const _ToolHeading(icon: Icons.palette_outlined, label: '색상'),
-          const SizedBox(height: AppSpacing.xs),
-          Wrap(
-            spacing: AppSpacing.sm,
-            runSpacing: AppSpacing.sm,
-            children: [
-              for (final (name, color) in _colors)
-                _ColorChoice(
-                  name: name,
-                  color: color,
-                  selected: selectedColor == color,
-                  onTap: () => onColorChanged(color),
-                ),
-            ],
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          const _ToolHeading(icon: Icons.line_weight_rounded, label: '굵기'),
-          const SizedBox(height: AppSpacing.xs),
-          LayoutBuilder(
-            builder: (context, constraints) => Wrap(
-              spacing: AppSpacing.xs,
-              runSpacing: AppSpacing.xs,
-              alignment: WrapAlignment.center,
+            const SizedBox(height: AppSpacing.lg),
+            const _ToolHeading(icon: Icons.edit_rounded, label: '도구'),
+            const SizedBox(height: AppSpacing.xs),
+            Row(
               children: [
-                for (final (label, value) in _thicknesses)
-                  _ThicknessChoice(
-                    key: ValueKey('drawing-thickness-$label'),
-                    label: label,
-                    selected: selectedThickness == value,
-                    onTap: () => onThicknessChanged(value),
+                Expanded(
+                  child: _ToolChoice(
+                    key: const ValueKey('drawing-tool-pen'),
+                    label: '펜',
+                    icon: Icons.edit_rounded,
+                    selected: selectedTool == DrawingTool.pen,
+                    onTap: () => onToolChanged(DrawingTool.pen),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: _ToolChoice(
+                    key: const ValueKey('drawing-tool-eraser'),
+                    label: '지우개',
+                    icon: Icons.auto_fix_normal_rounded,
+                    selected: selectedTool == DrawingTool.eraser,
+                    onTap: () => onToolChanged(DrawingTool.eraser),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.lg),
+            const _ToolHeading(icon: Icons.palette_outlined, label: '색상'),
+            const SizedBox(height: AppSpacing.xs),
+            Wrap(
+              spacing: AppSpacing.sm,
+              runSpacing: AppSpacing.sm,
+              children: [
+                for (final (name, color) in _colors)
+                  _ColorChoice(
+                    name: name,
+                    color: color,
+                    selected: selectedColor == color,
+                    onTap: () => onColorChanged(color),
                   ),
               ],
             ),
-          ),
+            const SizedBox(height: AppSpacing.lg),
+            const _ToolHeading(icon: Icons.line_weight_rounded, label: '굵기'),
+            const SizedBox(height: AppSpacing.xs),
+            LayoutBuilder(
+              builder: (context, constraints) => Wrap(
+                spacing: AppSpacing.xs,
+                runSpacing: AppSpacing.xs,
+                alignment: WrapAlignment.center,
+                children: [
+                  for (final (label, value) in _thicknesses)
+                    _ThicknessChoice(
+                      key: ValueKey('drawing-thickness-$label'),
+                      label: label,
+                      selected: selectedThickness == value,
+                      onTap: () => onThicknessChanged(value),
+                    ),
+                ],
+              ),
+            ),
           ],
           const SizedBox(height: AppSpacing.lg),
           // 오류 카드가 붙는 자리. 실패 시 이 지점을 화면 안으로 스크롤한다.

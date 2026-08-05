@@ -291,3 +291,7 @@ double _noise(int value) {
   mixed = (mixed ^ (mixed >> 16)) & 0xffffffff;
   return mixed / 0x100000000;
 }
+
+/// 제본 띠가 차지하는 높이다. 띠 아래에 무언가를 놓아야 하는 쪽이 참고한다.
+double drawingBindingHeightOf(DrawingCanvasDeviceClass deviceClass) =>
+    _FrameMetrics.of(deviceClass).bindingHeight;

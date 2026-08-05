@@ -35,6 +35,7 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
     this.endRetryable = true,
     this.voiceRetryable = true,
     this.companion = DodamCostume.base,
+    this.compact = false,
     super.key,
   });
 
@@ -66,6 +67,13 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
   /// 활동 시작 시 서버 확정 preferredCharacter에서 만든 immutable snapshot.
   final DodamCostume companion;
 
+  /// 좁은 화면용 촘촘한 배치를 쓸지 여부다.
+  ///
+  /// 담긴 상자의 높이로 스스로 판단하지 않는다. 말풍선은 종이 위로 넘쳐 그려질
+  /// 수 있어 상자 높이가 화면 여유와 다르고, 그 차이 때문에 배치가 화면 종류와
+  /// 무관하게 뒤집힌 적이 있다. 화면 종류를 아는 쪽에서 넘긴다.
+  final bool compact;
+
   @override
   Widget build(BuildContext context) {
     final currentQuestion = question;
@@ -74,7 +82,6 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
     return Positioned.fill(
       child: LayoutBuilder(
         builder: (context, constraints) {
-          final compact = constraints.maxHeight <= 480;
           final inset = compact ? AppSpacing.sm : AppSpacing.lg;
           final maxWidth = min(
             compact ? 280.0 : 300.0,
