@@ -48,6 +48,7 @@ class ConversationQuestionServiceTest {
   @Mock private AiQuestionClient aiQuestionClient;
   @Mock private QuestionPersistenceService questionPersistenceService;
   @Mock private AnalysisObservationResultRepository observationResultRepository;
+  @Mock private ChildRequestConversationEndService childRequestConversationEndService;
 
   private ConversationQuestionService service;
   private ConversationSession session;
@@ -61,7 +62,8 @@ class ConversationQuestionServiceTest {
             questionTemplateOptionRepository,
             aiQuestionClient,
             questionPersistenceService,
-            observationResultRepository);
+            observationResultRepository,
+            childRequestConversationEndService);
     session = mock(ConversationSession.class);
     lenient().when(session.getDrawingSessionId()).thenReturn(9L);
     lenient().when(session.getDifficulty()).thenReturn(QuestionDifficulty.LOWER_ELEMENTARY);
@@ -197,7 +199,17 @@ class ConversationQuestionServiceTest {
     given(aiQuestionClient.generate(any(), any()))
         .willReturn(
             new AiQuestionResponse(
-                "질문", "FOLLOW_UP", List.of(), null, false, passed(), "model", "v1", "p1", 1));
+                "질문",
+                "FOLLOW_UP",
+                List.of(),
+                null,
+                false,
+                passed(),
+                "model",
+                "v1",
+                "p1",
+                1,
+                false));
     given(questionTemplateRepository.findFirstByTemplateTypeAndActiveTrueOrderByIdAsc("FALLBACK"))
         .willReturn(Optional.of(template));
     given(questionPersistenceService.save(eq(1L), any()))
@@ -320,6 +332,58 @@ class ConversationQuestionServiceTest {
     verify(questionPersistenceService, never()).save(any(), any());
   }
 
+  // ── 아이가 말로 그만하겠다고 확인한 경우 — S15P11B209-947 ─────────────────
+  @Test
+  void endsConversationByChildRequestWhenAiConfirmsTheChildAskedToStop() {
+    given(aiQuestionClient.generate(any(), any())).willReturn(endConfirmedResponse());
+
+    assertBusinessError(
+        () -> service.generateQuestion(command(List.of(ResponseMode.VOICE, ResponseMode.OPTION))),
+        ConversationErrorCode.CONVERSATION_ALREADY_COMPLETED);
+
+    verify(childRequestConversationEndService).endByChildRequest(1L);
+    // 아이가 답할 질문이 아니므로 저장하지 않는다. 질문 수도 저장 경로에서만 올라간다.
+    verify(questionPersistenceService, never()).save(any(), any());
+  }
+
+  @Test
+  void doesNotFallBackToATemplateQuestionWhenTheChildConfirmedTheEnd() {
+    // 되묻기 응답은 선택지를 담지 않을 수 있다. 계약 미달로 폴백 질문을 저장하면 아이에게 같은 되묻기를 또 하게 된다.
+    given(aiQuestionClient.generate(any(), any()))
+        .willReturn(
+            new AiQuestionResponse(
+                "그래, 이야기는 여기까지 할까?",
+                "FOLLOW_UP",
+                null,
+                null,
+                false,
+                passed(),
+                "mock-model",
+                "1.0",
+                "prompt-1",
+                12,
+                true));
+
+    assertBusinessError(
+        () -> service.generateQuestion(command(List.of(ResponseMode.OPTION))),
+        ConversationErrorCode.CONVERSATION_ALREADY_COMPLETED);
+
+    verify(childRequestConversationEndService).endByChildRequest(1L);
+    verify(questionPersistenceService, never()).save(any(), any());
+  }
+
+  @Test
+  void keepsAskingWhenTheAiDidNotConfirmTheEnd() {
+    given(aiQuestionClient.generate(any(), any())).willReturn(validResponse());
+    given(questionPersistenceService.save(eq(1L), any()))
+        .willReturn(new GeneratedQuestion(21L, "무엇을 그리고 있니?", false));
+
+    service.generateQuestion(command(List.of(ResponseMode.VOICE, ResponseMode.OPTION)));
+
+    verify(childRequestConversationEndService, never()).endByChildRequest(any());
+    verify(questionPersistenceService).save(eq(1L), any());
+  }
+
   private GenerateQuestionCommand command(List<ResponseMode> responseModes) {
     return command(responseModes, null);
   }
@@ -409,7 +473,23 @@ class ConversationQuestionServiceTest {
         "mock-model",
         "1.0",
         "prompt-1",
-        12);
+        12,
+        false);
+  }
+
+  private AiQuestionResponse endConfirmedResponse() {
+    return new AiQuestionResponse(
+        "그래, 이야기는 여기까지 할까?",
+        "FOLLOW_UP",
+        List.of(new QuestionOption("STOP_TALK", "이야기만 그만할래")),
+        null,
+        false,
+        passed(),
+        "mock-model",
+        "1.0",
+        "prompt-1",
+        12,
+        true);
   }
 
   private SafetyResult passed() {

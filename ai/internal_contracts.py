@@ -222,6 +222,17 @@ class QuestionResponse(_CamelModel):
     model_version: str
     prompt_version: str
     processing_time_ms: int
+    # 아이가 대화를 그만하겠다고 확인해 준 턴이면 true (S15P11B209-947).
+    #
+    # ⚠️ AI는 대화를 끝내지 않는다 — 세션 상태의 주인은 BE다. 이 값은 '아이가 확인했다'는
+    #    사실을 전할 뿐이고, 실제 종료(CHILD_REQUEST)는 BE가 한다. 786이 정한 "턴 제어는
+    #    AI 소유가 아니다"를 지키면서 말로 끝낼 길을 여는 유일한 방법이다.
+    # ⚠️ BE가 이 필드를 아직 안 읽어도 안전하다. 그때는 questionText(되묻기)가 그대로
+    #    전달되어 아이는 지금과 똑같이 칩을 누르면 된다 — 회귀가 없다. 그래서 AI를 먼저
+    #    배포할 수 있다(BE의 AiQuestionResponse는 모르는 필드를 무시한다).
+    # ⚠️ 그림 활동 완료에는 쓰지 않는다. BE가 대신할 수 없는 일이라(회고 저장·다음 단계는
+    #    FE가 쥔다) 그쪽은 화면 버튼을 누르도록 안내한다.
+    conversation_end_confirmed: bool = False
 
 
 # ── 관찰 리포트 생성 계약 (S15P11B209-180) ──────────────────────

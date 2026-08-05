@@ -214,10 +214,17 @@ abstract final class AppRouter {
                     title: '활동 기록',
                     description: '활동 기록을 불러올 준비가 아직 되지 않았어요.',
                   )
-                : ActivityHistoryScreen(
-                    childController: childController,
-                    repository: activityRepository,
-                    embedded: true,
+                // 알림·설정 탭처럼 상단 페이지 타이틀을 둔다. 화면은
+                // `embedded`를 유지해 자체 헤더·뒤로가기를 겹치지 않게 한다
+                // (S15P11B209-948).
+                : Scaffold(
+                    backgroundColor: AppColors.canvas,
+                    appBar: const AppTopBar(title: '활동 기록'),
+                    body: ActivityHistoryScreen(
+                      childController: childController,
+                      repository: activityRepository,
+                      embedded: true,
+                    ),
                   ),
           ),
           GuardianNavItem(

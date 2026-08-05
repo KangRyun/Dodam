@@ -620,7 +620,8 @@ class MvpFlowIntegrationTest {
         "mock-question-model",
         "1.0",
         "prompt-2026.07",
-        12);
+        12,
+        false);
   }
 
   private void resetTables() {

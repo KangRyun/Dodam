@@ -1755,6 +1755,24 @@ class StopIntentTest(unittest.TestCase):
             ["CHIP_END_ACTIVITY", "CHIP_KEEP_GOING"], [o.code for o in resp.options]
         )
 
+    def test_drawing_branch_names_the_complete_button(self):
+        """그림 완료는 칩을 눌러야 실행된다 — 말로 답한 아이에게 다음 행동을 알려 준다.
+
+        (S15P11B209-947) 화면 버튼에 적힌 글자를 그대로 써야 아이가 화면과 말을 잇는다.
+        FE 라벨(drawing_complete_cta.dart)을 바꾸면 여기도 같이 고쳐야 한다.
+        """
+        for utterance in ("그림 그만 그릴래", "이제 그만할래"):
+            with self.subTest(utterance=utterance):
+                resp, _ = self._generate(self._req(utterance))
+                self.assertIn(question_service.COMPLETE_BUTTON_LABEL, resp.question_text)
+                # 안내를 넣더라도 칩은 남는다 — 탭으로도 끝낼 수 있어야 한다.
+                self.assertIn("CHIP_END_ACTIVITY", [o.code for o in resp.options])
+
+    def test_conversation_branch_has_no_button_guidance(self):
+        """대화 종료는 칩으로 바로 끝난다 — 버튼을 찾게 할 이유가 없다."""
+        resp, _ = self._generate(self._req("이야기 그만할래"))
+        self.assertNotIn(question_service.COMPLETE_BUTTON_LABEL, resp.question_text)
+
     def test_conversation_stop_skips_the_question(self):
         resp, _ = self._generate(self._req("이야기 그만할래"))
         self.assertEqual(question_service.STOP_ASK_CONVERSATION, resp.question_text)
@@ -1849,6 +1867,104 @@ class StopIntentTest(unittest.TestCase):
         resp, _ = self._generate(req)
         self.assertEqual(question_service.STOP_ASK_BOTH, resp.question_text)
         self.assertIsNone(resp.options)  # 빈 배열도 계약 위반이다
+
+    def test_voice_confirmation_sets_end_flag(self):
+        """되묻기에 말로 답한 경우 — 칩을 못 눌러도 BE가 끝낼 수 있게 신호를 싣는다(947)."""
+        req = _request(
+            activity_type="ART_DIARY",
+            current_question_count=3,
+            allowed_response_modes=["VOICE", "OPTION"],
+            detected_objects=[_detected("PERSON", "사람", 0.9)],
+            drawing_description="가운데에 사람이 한 명 서 있어요.",
+            recent_messages=[
+                RecentMessage(
+                    sender_type="AI",
+                    message_type="QUESTION",
+                    text=question_service.STOP_ASK_CONVERSATION,
+                ),
+                RecentMessage(sender_type="CHILD", message_type="ANSWER", text="응"),
+            ],
+        )
+        resp, client = self._generate(req)
+        self.assertTrue(resp.conversation_end_confirmed)
+        client.chat.completions.create.assert_not_called()
+        # 문장은 되묻기 그대로다 — BE가 필드를 아직 안 읽어도 화면이 어색해지지 않아야 한다.
+        self.assertEqual(question_service.STOP_ASK_CONVERSATION, resp.question_text)
+
+    def test_declining_does_not_set_end_flag(self):
+        req = _request(
+            activity_type="ART_DIARY",
+            current_question_count=3,
+            allowed_response_modes=["VOICE", "OPTION"],
+            detected_objects=[_detected("PERSON", "사람", 0.9)],
+            drawing_description="가운데에 사람이 한 명 서 있어요.",
+            recent_messages=[
+                RecentMessage(
+                    sender_type="AI",
+                    message_type="QUESTION",
+                    text=question_service.STOP_ASK_CONVERSATION,
+                ),
+                RecentMessage(
+                    sender_type="CHILD", message_type="ANSWER", text="아니, 더 할래"
+                ),
+            ],
+        )
+        resp, _ = self._generate(req)
+        self.assertFalse(resp.conversation_end_confirmed)
+
+    def test_affirmative_without_preceding_confirmation_is_ignored(self):
+        """평범한 맞장구가 대화를 끊으면 안 된다 — 직전 질문이 종료 확인일 때만 본다."""
+        req = self._req("응", codes=None)
+        resp, client = self._generate(req)
+        self.assertFalse(resp.conversation_end_confirmed)
+        client.chat.completions.create.assert_called()  # 평범한 답변으로 흘러간다
+
+    def test_three_way_reask_needs_an_explicit_choice(self):
+        """3지선다에 '응'이라고만 답한 것은 확인이 아니다 — 무엇을 끝낼지 모른다."""
+        req = _request(
+            activity_type="ART_DIARY",
+            current_question_count=3,
+            allowed_response_modes=["VOICE", "OPTION"],
+            detected_objects=[_detected("PERSON", "사람", 0.9)],
+            drawing_description="가운데에 사람이 한 명 서 있어요.",
+            recent_messages=[
+                RecentMessage(
+                    sender_type="AI",
+                    message_type="QUESTION",
+                    text=question_service.STOP_ASK_BOTH,
+                ),
+                RecentMessage(sender_type="CHILD", message_type="ANSWER", text="응"),
+            ],
+        )
+        resp, _ = self._generate(req)
+        self.assertFalse(resp.conversation_end_confirmed)
+
+    def test_three_way_reask_accepts_a_spoken_choice(self):
+        """3지선다에 '이야기만 그만할래'라고 말하면 그건 확인이다."""
+        req = _request(
+            activity_type="ART_DIARY",
+            current_question_count=3,
+            allowed_response_modes=["VOICE", "OPTION"],
+            detected_objects=[_detected("PERSON", "사람", 0.9)],
+            drawing_description="가운데에 사람이 한 명 서 있어요.",
+            recent_messages=[
+                RecentMessage(
+                    sender_type="AI",
+                    message_type="QUESTION",
+                    text=question_service.STOP_ASK_BOTH,
+                ),
+                RecentMessage(
+                    sender_type="CHILD", message_type="ANSWER", text="이야기만 그만할래"
+                ),
+            ],
+        )
+        resp, _ = self._generate(req)
+        self.assertTrue(resp.conversation_end_confirmed)
+
+    def test_first_stop_utterance_is_not_a_confirmation(self):
+        """처음 '그만할래'라고 한 것은 되묻기 대상이지 확인이 아니다."""
+        resp, _ = self._generate(self._req("이제 그만 할래"))
+        self.assertFalse(resp.conversation_end_confirmed)
 
     def test_reason_logged_without_raw_utterance(self):
         with self.assertLogs("question_service", level="INFO") as logs:

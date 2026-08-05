@@ -20,6 +20,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# 결정적 응답(그만하기 되묻기)의 기대 문구는 상수를 그대로 참조한다 — 여기에 베껴 적으면
+# 문구를 고칠 때마다 평가셋이 따로 깨진다(S15P11B209-947에서 실제로 겪었다).
+import question_service
 from internal_contracts import (
     BehaviorMetrics,
     BoundingBox,
@@ -952,7 +955,7 @@ Q24_STOP_UNSPECIFIED = QuestionCase(
         activity_type="ART_DIARY",
     ),
     calls_gms=False,
-    meta={"fixed_question_text": "그래! 그림을 그만 그릴까, 아니면 이야기만 그만할까?"},
+    meta={"fixed_question_text": question_service.STOP_ASK_BOTH},
 )
 
 
@@ -978,7 +981,7 @@ Q25_STOP_CONVERSATION = QuestionCase(
         activity_type="ART_DIARY",
     ),
     calls_gms=False,
-    meta={"fixed_question_text": "그래, 이야기는 여기까지 할까?"},
+    meta={"fixed_question_text": question_service.STOP_ASK_CONVERSATION},
 )
 
 
@@ -1005,7 +1008,7 @@ Q26_STOP_HTP = QuestionCase(
         drawing_subject="HOUSE",
     ),
     calls_gms=False,
-    meta={"fixed_question_text": "그래, 이야기는 여기까지 할까?"},
+    meta={"fixed_question_text": question_service.STOP_ASK_CONVERSATION},
 )
 
 
