@@ -395,9 +395,13 @@ class _MonthGrid extends StatelessWidget {
         final colW = c.maxWidth / 7;
         final rowH = c.maxHeight / rows;
         // 셀 = 날짜숫자(~13) + 여백 + 원. 남는 공간에 맞춰 원 지름 상한 42.
+        // 폭(칸)과 높이(줄) 안에서 겹치지 않는 최대 지름. 상한을 넉넉히 열어
+        // 넓은 태블릿에서 최대한 크게 채운다. 날짜 글자 몫은 글자 배율에 비례해
+        // 빼야 고배율에서도 셀이 넘치지 않는다.
+        final textRoom = 10 * MediaQuery.textScalerOf(context).scale(1) * 1.35 + 8;
         final diameter = math
-            .min(colW - 6, rowH - 20)
-            .clamp(12.0, 42.0)
+            .min(colW - 10, rowH - textRoom)
+            .clamp(12.0, 108.0)
             .toDouble();
         return Column(
           children: [

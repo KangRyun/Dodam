@@ -433,7 +433,7 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   /// 사람·나무·집 그림에서 안내를 위해 도구·색상을 잠시 열어 둔 상태다.
   ///
-  /// HTP 검사는 연필·검정으로만 그린다. 그런데 아이가 처음 만나는 캔버스가 HTP 이면
+  /// 집·나무·사람 그림은 연필·검정으로만 그린다. 그런데 아이가 처음 만나는 캔버스가 HTP 이면
   /// 색과 다른 도구를 한 번도 못 보고 지나간다. 안내 동안에는 툴바를 그림일기와
   /// 똑같이 열어 눌러 보게 하고, 안내가 끝나면 다시 연필·검정으로 되돌린다.
   /// 안내 중에는 캔버스 입력이 막혀 있어 이 사이에 색이 있는 자국이 남지는 않는다.
@@ -496,6 +496,7 @@ class _DrawingScreenState extends State<DrawingScreen>
       _questionTtsController = AiQuestionTtsController(
         ttsRepository,
         playerFactory(),
+        request: QuestionTtsRequest(voice: _companionSnapshot.ttsVoice),
       );
     }
     _questionDisplayController = AiQuestionDisplayController()
@@ -4318,7 +4319,7 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
                 padding: EdgeInsets.all(outerPadding),
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1040),
+                    constraints: const BoxConstraints(maxWidth: 1440),
                     child: Container(
                       padding: EdgeInsets.all(
                         viewportConstraints.maxWidth < 480

@@ -106,6 +106,9 @@ class ObservationReportPersistenceServiceTest {
 
   @Mock private com.ssafy.b209.report.repository.ReportParentGuideRepository parentGuideRepository;
   @Mock private com.ssafy.b209.report.repository.ReportCrisisAlertRepository crisisAlertRepository;
+  @Mock private com.ssafy.b209.report.repository.ReportSubjectRepository subjectRepository;
+  @Mock private com.ssafy.b209.report.repository.ReportReferenceRepository referenceRepository;
+
   private final com.ssafy.b209.report.safety.InterpretationSafetyVerifier safetyVerifier =
       new com.ssafy.b209.report.safety.InterpretationSafetyVerifier();
   private final InterpretationCandidateAdapter candidateAdapter =
@@ -131,6 +134,11 @@ class ObservationReportPersistenceServiceTest {
   @Captor private ArgumentCaptor<List<ReportKeyConversation>> keyConversationsCaptor;
   @Captor private ArgumentCaptor<List<ReportGuardianQuestion>> guardianQuestionsCaptor;
 
+  @Captor private ArgumentCaptor<List<com.ssafy.b209.report.domain.ReportSubject>> subjectsCaptor;
+
+  @Captor
+  private ArgumentCaptor<List<com.ssafy.b209.report.domain.ReportReference>> referencesCaptor;
+
   private ObservationReportPersistenceService service;
 
   @BeforeEach
@@ -148,6 +156,8 @@ class ObservationReportPersistenceServiceTest {
             evidenceItemRepository,
             parentGuideRepository,
             crisisAlertRepository,
+            subjectRepository,
+            referenceRepository,
             safetyVerifier,
             candidateAdapter,
             observedFeatureRepository,
@@ -954,6 +964,175 @@ class ObservationReportPersistenceServiceTest {
         .when(detection.getConfidence())
         .thenReturn(confidence == null ? null : new BigDecimal(confidence));
     return detection;
+  }
+
+  @Test
+  void savesSubjectReportsInContractOrderWithBeOwnedQaPairsAndSessions() {
+    // 875 §5. AI 는 관찰 서술·참조만 보내고 그림과 문답은 BE 가 채운다(941). 두 출처가 주제로 합쳐지는지,
+    //   그리고 AI 가 순서를 섞어 보내도 HOUSE→TREE→PERSON 으로 굳는지를 본다 — 순서가 곧 계약이다.
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.complete(
+        htpContext(),
+        resultWithSubjectReports(
+            // 일부러 계약 순서와 다르게 보낸다.
+            List.of(
+                new ObservationGenerationResult.SubjectReportDraft(
+                    "PERSON", List.of("사람을 오른쪽에 그렸어요."), List.of()),
+                new ObservationGenerationResult.SubjectReportDraft(
+                    "HOUSE", List.of("집을 가운데 크게 그렸어요.", "창문을 여러 개 그렸어요."), List.of()),
+                new ObservationGenerationResult.SubjectReportDraft(
+                    "TREE", List.of("나무를 왼쪽에 그렸어요."), List.of()))));
+
+    verify(subjectRepository).saveAll(subjectsCaptor.capture());
+    List<com.ssafy.b209.report.domain.ReportSubject> subjects = subjectsCaptor.getValue();
+    assertThat(subjects)
+        .extracting(com.ssafy.b209.report.domain.ReportSubject::getSubjectType)
+        .containsExactly("HOUSE", "TREE", "PERSON");
+    assertThat(subjects)
+        .extracting(com.ssafy.b209.report.domain.ReportSubject::getDisplayOrder)
+        .containsExactly(0, 1, 2);
+    // 그림 URL 을 발급할 근거인 세션이 주제마다 제자리에 붙어야 한다.
+    assertThat(subjects)
+        .extracting(com.ssafy.b209.report.domain.ReportSubject::getDrawingSessionId)
+        .containsExactly(DRAWING_SESSION_ID, 201L, 202L);
+
+    com.ssafy.b209.report.domain.ReportSubject house = subjects.get(0);
+    assertThat(house.getObservations())
+        .extracting(com.ssafy.b209.report.domain.ReportSubjectObservation::getObservationText)
+        .containsExactly("집을 가운데 크게 그렸어요.", "창문을 여러 개 그렸어요.");
+    // 문답은 AI 응답이 아니라 BE 맥락에서 온다 — 아이 발화 원문이 그대로 남는지 본다.
+    assertThat(house.getQaPairs())
+        .extracting(com.ssafy.b209.report.domain.ReportSubjectQaPair::getQuestionText)
+        .containsExactly("집에 누가 살아?");
+    assertThat(house.getQaPairs().get(0).getAnswerText()).isEqualTo("우리 가족이요");
+    assertThat(house.getQaPairs().get(0).getAnswerState()).isEqualTo("ANSWERED");
+    assertThat(house.getQaPairs().get(0).isRepresentative()).isTrue();
+
+    // 답하지 않은 문답은 상태로 구분하고 대표로 올리지 않는다(875 §6).
+    com.ssafy.b209.report.domain.ReportSubject tree = subjects.get(1);
+    assertThat(tree.getQaPairs().get(0).getAnswerState()).isEqualTo("SKIPPED");
+    assertThat(tree.getQaPairs().get(0).getAnswerText()).isNull();
+    assertThat(tree.getQaPairs().get(0).isRepresentative()).isFalse();
+  }
+
+  @Test
+  void linksSubjectInterpretationRefsToPublishedCardsOnly() {
+    // 875 §5-1. AI 가 보내는 참조는 자기 응답 배열의 인덱스다. 서버 검증에서 빠진 카드까지 연결하면
+    //   보호자 응답에 없는 카드를 가리키게 된다 — 공개된 카드에만 연결되는지 본다.
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.complete(
+        htpContext(),
+        resultWithSubjectReports(
+            List.of(
+                new ObservationGenerationResult.SubjectReportDraft(
+                    "HOUSE", List.of("집을 크게 그렸어요."), List.of(0, 99)))));
+
+    verify(subjectRepository).saveAll(subjectsCaptor.capture());
+    com.ssafy.b209.report.domain.ReportSubject house = subjectsCaptor.getValue().get(0);
+    // 근거를 갖추지 못한 카드는 공개되지 않으므로 참조도 생기지 않는다. 존재하지 않는 인덱스(99)도 버린다.
+    assertThat(house.getInterpretations()).isEmpty();
+  }
+
+  @Test
+  void storesInterpretationsGuidesAndReferencesThroughComplete() {
+    // 902 가 만든 저장 메서드가 complete() 에서 호출되지 않아 경향 해석·가이드가 한 건도 저장된 적이
+    //   없었다. 저장 메서드 단위 테스트는 이 공백을 잡지 못한다 — 완료 경로가 실제로 부르는지를 본다.
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.complete(htpContext(), resultWithSubjectReports(List.of()));
+
+    verify(interpretationRepository).saveAll(any());
+    verify(evidenceItemRepository).saveAll(any());
+    verify(parentGuideRepository).saveAll(any());
+    verify(referenceRepository).saveAll(referencesCaptor.capture());
+    // 출처 표시는 라이선스 의무(KOGL-1)라 받은 것을 버리지 않는다. 같은 자료는 한 줄로 합친다.
+    assertThat(referencesCaptor.getValue())
+        .extracting(com.ssafy.b209.report.domain.ReportReference::getTitle)
+        .containsExactly("아동 미술 관찰 안내");
+    assertThat(referencesCaptor.getValue().get(0).getUrl()).isNull();
+  }
+
+  /** HOUSE·TREE·PERSON 세 주제를 담은 생성 맥락이다. 주제마다 세션과 문답이 다르다. */
+  private ObservationGenerationContext htpContext() {
+    return new ObservationGenerationContext(
+        ANALYSIS_ID,
+        DRAWING_SESSION_ID,
+        REPORT_ID,
+        null,
+        "NORMAL",
+        3,
+        2,
+        1,
+        0,
+        List.of("HAPPY"),
+        "행복했어요",
+        List.of(keyLine(0)),
+        List.of(
+            subjectContext("HOUSE", DRAWING_SESSION_ID, "집에 누가 살아?", "우리 가족이요"),
+            subjectContext("TREE", 201L, "이 나무는 어떤 나무야?", null),
+            subjectContext("PERSON", 202L, "이 사람은 누구야?", "엄마요")),
+        List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
+        List.of(DRAWING_SESSION_ID, 201L, 202L));
+  }
+
+  private ObservationGenerationContext.SubjectContext subjectContext(
+      String subject, Long sessionId, String question, String answer) {
+    return new ObservationGenerationContext.SubjectContext(
+        subject,
+        subject + " 관찰 서술",
+        List.of(),
+        List.of(
+            new ObservationGenerationContext.KeyConversationLine(
+                1L, question, 2L, answer, "OPTION_ANSWER", false)),
+        null,
+        List.of(),
+        sessionId);
+  }
+
+  private ObservationGenerationResult resultWithSubjectReports(
+      List<ObservationGenerationResult.SubjectReportDraft> subjectReports) {
+    ObservationGenerationResult base = validResult();
+    return new ObservationGenerationResult(
+        base.requestId(),
+        base.modelName(),
+        base.modelVersion(),
+        base.confidence(),
+        base.observationDraft(),
+        base.conversationSummary(),
+        base.activityNotes(),
+        base.followUpGuides(),
+        base.guardianQuestions(),
+        base.limitationsText(),
+        base.drawnItems(),
+        List.of(
+            new ObservationGenerationResult.PublicInterpretationDraft(
+                "RELATIONSHIP",
+                "가족과의 연결",
+                "가족에게 의지하려는 경향이 보일 수 있습니다.",
+                "이번 활동에서 나타난 가능성입니다.",
+                "집에서 함께 있는 시간을 살펴봐 주세요.",
+                List.of(1L))),
+        List.of(),
+        List.of(
+            new ObservationGenerationResult.ParentGuideDraft(
+                "DRAWING_CONVERSATION", List.of("그림을 함께 보며 이야기해 보세요."))),
+        null,
+        subjectReports,
+        List.of(
+            // 같은 자료의 청크 두 건이 하나의 출처로 합쳐지는지 함께 본다.
+            new ObservationGenerationResult.RagReferenceDraft("kogl-001", "아동 미술 관찰 안내"),
+            new ObservationGenerationResult.RagReferenceDraft("kogl-001#2", "아동 미술 관찰 안내")));
   }
 
   private DrawingAnalysis pendingAnalysis() {

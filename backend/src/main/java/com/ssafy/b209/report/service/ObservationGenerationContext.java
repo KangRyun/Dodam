@@ -121,6 +121,9 @@ public record ObservationGenerationContext(
    * @param detectedObjects 탐지 객체를 행 식별자·정규화 기하와 함께 담은 목록이다 (S15P11B209-906/837). <b>{@code
    *     detectedObjectCodes}와 개수가 다를 수 있다</b> — 코드 목록은 탐지 전부를 담지만 이쪽은 정규화 좌표가 있는 행만 담는다. 픽셀 좌표뿐인
    *     그림은 빈 목록이 되고, 그래도 코드 목록은 관찰 서술 재료로 그대로 쓰인다
+   * @param drawingSessionId 이 주제의 그림 활동 세션 식별자다 (S15P11B209-960). 주제별 관찰의 완성 그림 URL 을 조회 시점에 발급하려면
+   *     어느 세션의 자산인지 알아야 한다 — {@code activitySessionIds}는 순서만 같을 뿐 서술·문답이 모두 빈 주제를 걸러낸 이 목록과 길이가 달라
+   *     인덱스로 짝지을 수 없다
    */
   public record SubjectContext(
       String drawingSubject,
@@ -128,5 +131,36 @@ public record ObservationGenerationContext(
       List<String> detectedObjectCodes,
       List<KeyConversationLine> qaPairs,
       Long observationResultId,
-      List<DetectedObjectRef> detectedObjects) {}
+      List<DetectedObjectRef> detectedObjects,
+      Long drawingSessionId) {
+
+    /**
+     * 세션 식별자가 없던 형태로 만든다 (S15P11B209-960 이전 호출부용).
+     *
+     * <p>세션을 모르면 주제별 완성 그림 URL 이 {@code null}이 될 뿐, 관찰 서술·문답은 그대로 실린다.
+     *
+     * @param drawingSubject HTP 주제이며 그림일기는 {@code null}
+     * @param drawingDescription 그림의 VLM 관찰 서술이며 없으면 {@code null}
+     * @param detectedObjectCodes 탐지된 객체 내부 코드 목록
+     * @param qaPairs 그림 대화의 질문·답변 목록
+     * @param observationResultId 관찰 서술 출처 행 식별자이며 없으면 {@code null}
+     * @param detectedObjects 탐지 객체를 행 식별자·정규화 기하와 함께 담은 목록
+     */
+    public SubjectContext(
+        String drawingSubject,
+        String drawingDescription,
+        List<String> detectedObjectCodes,
+        List<KeyConversationLine> qaPairs,
+        Long observationResultId,
+        List<DetectedObjectRef> detectedObjects) {
+      this(
+          drawingSubject,
+          drawingDescription,
+          detectedObjectCodes,
+          qaPairs,
+          observationResultId,
+          detectedObjects,
+          null);
+    }
+  }
 }

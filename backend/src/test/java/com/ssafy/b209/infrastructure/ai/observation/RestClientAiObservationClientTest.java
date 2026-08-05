@@ -403,6 +403,75 @@ class RestClientAiObservationClientTest {
         600_000L, 240_000L, 4, 2, 3, 1, 5, true, null, false);
   }
 
+  @Test
+  void bindsSubjectReportsAndRagReferences() {
+    // 이 두 필드는 AI 가 보내고 있었는데 수신 DTO 에 자리가 없어 Jackson 이 조용히 버렸다
+    //   (FAIL_ON_UNKNOWN_PROPERTIES 기본값 false). 응답을 파싱해 실제로 값이 들어오는지 본다 —
+    //   저장·조회만 검증하면 재료가 비어 있어도 전부 초록이다(S15P11B209-960).
+    server
+        .expect(requestTo(ENDPOINT_URL))
+        .andRespond(
+            withSuccess(
+                subjectReportResponse("request-1"),
+                org.springframework.http.MediaType.APPLICATION_JSON));
+
+    ObservationGenerationResult result = client.generate(validRequest());
+
+    assertThat(result.subjectReports())
+        .extracting(ObservationGenerationResult.SubjectReportDraft::subjectType)
+        .containsExactly("HOUSE", "TREE");
+    assertThat(result.subjectReports().get(0).visionObservations())
+        .containsExactly("집을 가운데 크게 그렸어요.");
+    // category 가 아니라 publicInterpretations 배열 인덱스다(875 §5-1).
+    assertThat(result.subjectReports().get(0).interpretationRefs()).containsExactly(0);
+    assertThat(result.subjectReports().get(1).interpretationRefs()).isEmpty();
+    // 출처 표시는 라이선스 의무(KOGL-1)라 버려지면 안 된다.
+    assertThat(result.ragReferences())
+        .extracting(ObservationGenerationResult.RagReferenceDraft::title)
+        .containsExactly("아동 미술 관찰 안내");
+    server.verify();
+  }
+
+  @Test
+  void keepsSubjectReportsEmptyWhenAiOmitsTheField() {
+    // 필드 단위 롤아웃 안전 — 구 AI 배포본이 필드를 안 보내도 나머지 경로는 그대로 살아야 한다.
+    server
+        .expect(requestTo(ENDPOINT_URL))
+        .andRespond(
+            withSuccess(
+                successResponse("request-1"), org.springframework.http.MediaType.APPLICATION_JSON));
+
+    ObservationGenerationResult result = client.generate(validRequest());
+
+    assertThat(result.subjectReports()).isEmpty();
+    assertThat(result.ragReferences()).isEmpty();
+    server.verify();
+  }
+
+  private String subjectReportResponse(String requestId) {
+    return successResponse(requestId)
+        .replace(
+            "\"limitationsText\": \"제한된 활동 데이터를 바탕으로 한 관찰 기록입니다.\"",
+            """
+            "limitationsText": "제한된 활동 데이터를 바탕으로 한 관찰 기록입니다.",
+            "subjectReports": [
+              {
+                "subjectType": "HOUSE",
+                "visionObservations": ["집을 가운데 크게 그렸어요."],
+                "interpretationRefs": [0]
+              },
+              {
+                "subjectType": "TREE",
+                "visionObservations": ["나무를 왼쪽에 그렸어요."],
+                "interpretationRefs": []
+              }
+            ],
+            "ragReferences": [
+              { "sourceId": "kogl-001", "title": "아동 미술 관찰 안내" }
+            ]\
+            """);
+  }
+
   private String successResponse(String requestId) {
     return """
         {

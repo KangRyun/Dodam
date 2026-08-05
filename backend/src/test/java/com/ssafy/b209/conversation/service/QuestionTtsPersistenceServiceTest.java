@@ -12,6 +12,7 @@ import com.ssafy.b209.conversation.exception.QuestionTtsErrorCode;
 import com.ssafy.b209.conversation.repository.QuestionTtsMessageRepository;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.lang.reflect.Constructor;
+import java.math.BigDecimal;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,6 +26,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 class QuestionTtsPersistenceServiceTest {
   private static final Long MESSAGE_ID = 803L;
   private static final String STORAGE_KEY = "2026/07/24/2f0b8f5e-tts.mp3";
+  private static final BigDecimal SPEED = new BigDecimal("0.95");
 
   @Mock private QuestionTtsMessageRepository messageRepository;
 
@@ -38,32 +40,33 @@ class QuestionTtsPersistenceServiceTest {
   @Test
   void returnsCacheHitWhenSuccessAudioExists() {
     when(messageRepository.findById(MESSAGE_ID))
-        .thenReturn(Optional.of(message("SUCCESS", STORAGE_KEY)));
+        .thenReturn(Optional.of(message("SUCCESS", STORAGE_KEY, "FABLE", SPEED)));
 
-    QuestionTtsClaimResult result = service.claim(MESSAGE_ID);
+    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED);
 
     assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.CACHE_HIT);
     assertThat(result.audioStorageKey()).isEqualTo(STORAGE_KEY);
-    verify(messageRepository, never()).claimForSynthesis(MESSAGE_ID);
+    verify(messageRepository, never()).claimForSynthesis(MESSAGE_ID, "FABLE", SPEED);
   }
 
   @Test
   void returnsInProgressWhenProcessing() {
     when(messageRepository.findById(MESSAGE_ID))
-        .thenReturn(Optional.of(message("PROCESSING", null)));
+        .thenReturn(Optional.of(message("PROCESSING", null, "FABLE", SPEED)));
 
-    QuestionTtsClaimResult result = service.claim(MESSAGE_ID);
+    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED);
 
     assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.IN_PROGRESS);
-    verify(messageRepository, never()).claimForSynthesis(MESSAGE_ID);
+    verify(messageRepository, never()).claimForSynthesis(MESSAGE_ID, "FABLE", SPEED);
   }
 
   @Test
   void claimsWhenStatusEmpty() {
-    when(messageRepository.findById(MESSAGE_ID)).thenReturn(Optional.of(message(null, null)));
-    when(messageRepository.claimForSynthesis(MESSAGE_ID)).thenReturn(1);
+    when(messageRepository.findById(MESSAGE_ID))
+        .thenReturn(Optional.of(message(null, null, null, null)));
+    when(messageRepository.claimForSynthesis(MESSAGE_ID, "FABLE", SPEED)).thenReturn(1);
 
-    QuestionTtsClaimResult result = service.claim(MESSAGE_ID);
+    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED);
 
     assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.CLAIMED);
     assertThat(result.subtitle()).isEqualTo("이 그림에서 무엇이 보이니?");
@@ -72,11 +75,11 @@ class QuestionTtsPersistenceServiceTest {
   @Test
   void returnsCacheHitWhenLostRaceToSuccess() {
     when(messageRepository.findById(MESSAGE_ID))
-        .thenReturn(Optional.of(message("FAILED", null)))
-        .thenReturn(Optional.of(message("SUCCESS", STORAGE_KEY)));
-    when(messageRepository.claimForSynthesis(MESSAGE_ID)).thenReturn(0);
+        .thenReturn(Optional.of(message("FAILED", null, null, null)))
+        .thenReturn(Optional.of(message("SUCCESS", STORAGE_KEY, "FABLE", SPEED)));
+    when(messageRepository.claimForSynthesis(MESSAGE_ID, "FABLE", SPEED)).thenReturn(0);
 
-    QuestionTtsClaimResult result = service.claim(MESSAGE_ID);
+    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED);
 
     assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.CACHE_HIT);
   }
@@ -84,11 +87,11 @@ class QuestionTtsPersistenceServiceTest {
   @Test
   void returnsInProgressWhenLostRaceToProcessing() {
     when(messageRepository.findById(MESSAGE_ID))
-        .thenReturn(Optional.of(message(null, null)))
-        .thenReturn(Optional.of(message("PROCESSING", null)));
-    when(messageRepository.claimForSynthesis(MESSAGE_ID)).thenReturn(0);
+        .thenReturn(Optional.of(message(null, null, null, null)))
+        .thenReturn(Optional.of(message("PROCESSING", null, "FABLE", SPEED)));
+    when(messageRepository.claimForSynthesis(MESSAGE_ID, "FABLE", SPEED)).thenReturn(0);
 
-    QuestionTtsClaimResult result = service.claim(MESSAGE_ID);
+    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED);
 
     assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.IN_PROGRESS);
   }
@@ -97,7 +100,7 @@ class QuestionTtsPersistenceServiceTest {
   void throwsNotFoundWhenMissing() {
     when(messageRepository.findById(MESSAGE_ID)).thenReturn(Optional.empty());
 
-    assertThatThrownBy(() -> service.claim(MESSAGE_ID))
+    assertThatThrownBy(() -> service.claim(MESSAGE_ID, "FABLE", SPEED))
         .isInstanceOf(BusinessException.class)
         .extracting("errorCode")
         .isEqualTo(ConversationMessageStatusErrorCode.CONVERSATION_MESSAGE_NOT_FOUND);
@@ -105,12 +108,12 @@ class QuestionTtsPersistenceServiceTest {
 
   @Test
   void throwsNotApplicableWhenNotAiQuestion() {
-    QuestionTtsMessage optionAnswer = message(null, null);
+    QuestionTtsMessage optionAnswer = message(null, null, null, null);
     ReflectionTestUtils.setField(optionAnswer, "senderType", "CHILD");
     ReflectionTestUtils.setField(optionAnswer, "messageType", "OPTION_ANSWER");
     when(messageRepository.findById(MESSAGE_ID)).thenReturn(Optional.of(optionAnswer));
 
-    assertThatThrownBy(() -> service.claim(MESSAGE_ID))
+    assertThatThrownBy(() -> service.claim(MESSAGE_ID, "FABLE", SPEED))
         .isInstanceOf(BusinessException.class)
         .extracting("errorCode")
         .isEqualTo(QuestionTtsErrorCode.TTS_NOT_APPLICABLE);
@@ -118,19 +121,45 @@ class QuestionTtsPersistenceServiceTest {
 
   @Test
   void completeSuccessReportsAppliedUpdate() {
-    when(messageRepository.completeSuccess(MESSAGE_ID, STORAGE_KEY, "/url")).thenReturn(1);
+    when(messageRepository.completeSuccess(MESSAGE_ID, STORAGE_KEY, "/url", "FABLE", SPEED))
+        .thenReturn(1);
 
-    assertThat(service.completeSuccess(MESSAGE_ID, STORAGE_KEY, "/url")).isTrue();
+    assertThat(service.completeSuccess(MESSAGE_ID, STORAGE_KEY, "/url", "FABLE", SPEED)).isTrue();
   }
 
   @Test
   void completeSuccessReportsLostUpdate() {
-    when(messageRepository.completeSuccess(MESSAGE_ID, STORAGE_KEY, "/url")).thenReturn(0);
+    when(messageRepository.completeSuccess(MESSAGE_ID, STORAGE_KEY, "/url", "FABLE", SPEED))
+        .thenReturn(0);
 
-    assertThat(service.completeSuccess(MESSAGE_ID, STORAGE_KEY, "/url")).isFalse();
+    assertThat(service.completeSuccess(MESSAGE_ID, STORAGE_KEY, "/url", "FABLE", SPEED)).isFalse();
   }
 
-  private QuestionTtsMessage message(String speechStatus, String audioStorageKey) {
+  @Test
+  void replacesCacheWhenExistingAudioWasGeneratedWithAnotherVoice() {
+    when(messageRepository.findById(MESSAGE_ID))
+        .thenReturn(Optional.of(message("SUCCESS", STORAGE_KEY, "FABLE", SPEED)));
+    when(messageRepository.claimForSynthesis(MESSAGE_ID, "NOVA", SPEED)).thenReturn(1);
+
+    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "NOVA", SPEED);
+
+    assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.CLAIMED);
+  }
+
+  @Test
+  void replacesCacheWhenExistingAudioWasGeneratedAtAnotherSpeed() {
+    BigDecimal fasterSpeed = new BigDecimal("1.00");
+    when(messageRepository.findById(MESSAGE_ID))
+        .thenReturn(Optional.of(message("SUCCESS", STORAGE_KEY, "FABLE", SPEED)));
+    when(messageRepository.claimForSynthesis(MESSAGE_ID, "FABLE", fasterSpeed)).thenReturn(1);
+
+    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", fasterSpeed);
+
+    assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.CLAIMED);
+  }
+
+  private QuestionTtsMessage message(
+      String speechStatus, String audioStorageKey, String ttsVoice, BigDecimal ttsSpeed) {
     QuestionTtsMessage message = instantiate(QuestionTtsMessage.class);
     ReflectionTestUtils.setField(message, "id", MESSAGE_ID);
     ReflectionTestUtils.setField(message, "conversationSessionId", 800L);
@@ -139,6 +168,8 @@ class QuestionTtsPersistenceServiceTest {
     ReflectionTestUtils.setField(message, "rawText", "이 그림에서 무엇이 보이니?");
     ReflectionTestUtils.setField(message, "audioStorageKey", audioStorageKey);
     ReflectionTestUtils.setField(message, "speechStatus", speechStatus);
+    ReflectionTestUtils.setField(message, "ttsVoice", ttsVoice);
+    ReflectionTestUtils.setField(message, "ttsSpeed", ttsSpeed);
     return message;
   }
 

@@ -32,8 +32,13 @@ SERVICE_VOICE_TO_PROVIDER = {
     "CHILD_FRIENDLY_01": "fable",
     "FABLE": "fable",
     "ALLOY": "alloy",
+    "ASH": "ash",
+    "BALLAD": "ballad",
     "NOVA": "nova",
     "CORAL": "coral",
+    "ECHO": "echo",
+    "SAGE": "sage",
+    "VERSE": "verse",
 }
 
 

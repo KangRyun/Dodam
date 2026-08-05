@@ -382,6 +382,11 @@ def _activity_block(
         # 부위가 대상이면 '누구 것인지'가 아니라 '어떻게 보이는지'를 묻게 한다(S15P11B209-918).
         if _is_person_part(target):
             lines.append(_block("PERSON_PART", target=target_name))
+        # 이 주제의 첫마디는 주제에서 출발하게 한다(S15P11B209-959). 대상·전체 지시 뒤에
+        # 두는 이유: 무엇을 물을지는 위 블록이 이미 정했고, 여기서 더하는 것은 "주제를
+        # 이미 안다"는 사실 하나다. 앞에 두면 위 지시와 겹쳐 서로 밀어낸다.
+        if _is_htp_opening(req):
+            lines.append(_block("HTP_OPENING", subject=subject_ko))
     elif req.activity_type == "ART_DIARY":
         # 그림일기 탐지 모델(sketch)은 오탐이 잦다 — 이름의 근거는 탐지 목록이 아니라
         # 그림 서술과 아이 말이다(788 B, 활동별 판단).
@@ -547,6 +552,25 @@ def _is_expression_question(text: str) -> bool:
     return any(marker in text for marker in _EMOTION_QUESTION_MARKERS)
 
 
+def _is_htp_opening(req: QuestionRequest) -> bool:
+    """HTP에서 이 주제 그림의 '첫마디'인가(S15P11B209-959).
+
+    HTP는 주제(집·나무·사람)마다 그림을 마친 뒤 대화가 새로 열리므로, 질문 수가 0이라는
+    것은 곧 '이 주제의 첫 질문'이라는 뜻이다. 질문 수는 921이 그림일기에 쓴 판정과 같은
+    조건이라 BE·FE 계약을 건드리지 않는다.
+
+    ⚠️ 아이 발화가 없다는 조건을 함께 본다. 이 판정은 프롬프트에 '첫마디' 지시를 넣을지를
+       가르는데, 프롬프트 갈래 자체는 질문 수가 아니라 아이 발화 유무로 정해진다
+       (_build_messages의 last_child). 질문 수만 보면 질문 수가 0인 채 아이가 먼저 말한
+       경로(FE 복원)에서 '아이 말을 따라가'는 지시와 '이번이 첫마디야'가 함께 실린다.
+    """
+    return (
+        req.activity_type == "HTP"
+        and req.current_question_count == 0
+        and _last_child_index(req) is None
+    )
+
+
 def _target_for_purpose(req: QuestionRequest, purpose: str) -> DetectedObject | None:
     """대상 객체는 특정 객체를 묻는 OBJECT_DESCRIPTION일 때만 붙인다(목적과 정합).
 
@@ -586,6 +610,15 @@ def _target_for_purpose(req: QuestionRequest, purpose: str) -> DetectedObject | 
             for o in available
             if o.object_code == subject or o.object_code.startswith(f"{subject}_")
         ]
+        if not subject_objs and _is_htp_opening(req):
+            # 이 주제의 첫 질문은 주제 밖으로 내보내지 않는다(S15P11B209-959). 집 그림에
+            # 배경 나무가 잡히면 폴백이 그 나무를 대상으로 삼고, TARGET_FIRST가 "이 하나에
+            # 대해서만"을 강제해 첫 질문이 통째로 나무 질문이 됐다 — 아이는 방금 집을
+            # 그렸는데 첫마디가 나무다. None을 돌려 주제 전체를 여는 질문으로 보낸다.
+            #
+            # 첫 질문에만 건다. 대화가 시작된 뒤에는 주제 객체가 떨어졌을 때 배경으로
+            # 넓히는 편이 낫다(713의 '주제 우선·소진 후 배경'을 그대로 둔다).
+            return None
         pool = subject_objs or available
         if subject == "PERSON":
             whole = [o for o in pool if o.object_code == "PERSON"]

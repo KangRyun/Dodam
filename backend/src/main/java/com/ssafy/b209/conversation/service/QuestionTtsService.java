@@ -95,34 +95,45 @@ public class QuestionTtsService {
       throw new BusinessException(QuestionTtsErrorCode.TTS_NOT_APPLICABLE);
     }
 
-    QuestionTtsClaimResult claim = persistenceService.claim(messageId);
+    QuestionTtsClaimResult claim =
+        persistenceService.claim(messageId, request.voice(), request.speed());
     return switch (claim.action()) {
       case CACHE_HIT -> new TtsGenerateResponse(audioUrl(messageId), null, null, claim.subtitle());
       case IN_PROGRESS ->
           throw new BusinessException(QuestionTtsErrorCode.TTS_GENERATION_IN_PROGRESS);
-      case CLAIMED -> synthesizeAndStore(messageId, claim.subtitle(), request);
+      case CLAIMED -> synthesizeAndStore(messageId, claim, request);
     };
   }
 
   private TtsGenerateResponse synthesizeAndStore(
-      Long messageId, String subtitle, TtsGenerateRequest request) {
+      Long messageId, QuestionTtsClaimResult claim, TtsGenerateRequest request) {
     StoredAudio stored;
     try {
       TtsSynthesis synthesis =
           aiTtsClient.synthesize(
-              new TtsSynthesisCommand(subtitle, request.voice(), request.speed()));
+              new TtsSynthesisCommand(claim.subtitle(), request.voice(), request.speed()));
       stored = store(synthesis);
     } catch (RuntimeException exception) {
-      persistenceService.markFailed(messageId);
+      persistenceService.markFailed(messageId, request.voice(), request.speed());
       throw new BusinessException(QuestionTtsErrorCode.TTS_FAILED, exception);
     }
 
     String audioUrl = audioUrl(messageId);
-    if (!persistenceService.completeSuccess(messageId, stored.storageKey(), audioUrl)) {
+    if (!persistenceService.completeSuccess(
+        messageId, stored.storageKey(), audioUrl, request.voice(), request.speed())) {
       audioStorage.delete(stored.storageKey());
       throw new BusinessException(QuestionTtsErrorCode.TTS_GENERATION_IN_PROGRESS);
     }
-    return new TtsGenerateResponse(audioUrl, null, stored.durationMillis(), subtitle);
+    deleteReplacedAudio(claim.audioStorageKey(), stored.storageKey());
+    return new TtsGenerateResponse(audioUrl, null, stored.durationMillis(), claim.subtitle());
+  }
+
+  private void deleteReplacedAudio(String previousStorageKey, String newStorageKey) {
+    if (previousStorageKey != null
+        && !previousStorageKey.isBlank()
+        && !previousStorageKey.equals(newStorageKey)) {
+      audioStorage.delete(previousStorageKey);
+    }
   }
 
   private StoredAudio store(TtsSynthesis synthesis) {

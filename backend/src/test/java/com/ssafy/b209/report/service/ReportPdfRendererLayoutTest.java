@@ -121,6 +121,143 @@ class ReportPdfRendererLayoutTest {
         .doesNotThrowAnyException();
   }
 
+  @Test
+  void writesEverySubjectSectionInContractOrder() throws Exception {
+    // 875 §11 은 "화면엔 있고 PDF 엔 없는 데이터 금지"다. 주제가 세 개일 때 세 개가 다 실리는지,
+    //   계약 순서대로 실리는지, 관찰 서술과 문답이 함께 나오는지를 본다.
+    byte[] pdf = renderer.render(htpReport());
+
+    try (PDDocument document = Loader.loadPDF(pdf)) {
+      String text = new PDFTextStripper().getText(document);
+      assertThat(text).contains("주제별 관찰").contains("집").contains("나무").contains("사람");
+      assertThat(text.indexOf("집을 가운데 크게 그렸어요."))
+          .isGreaterThan(0)
+          .isLessThan(text.indexOf("나무를 왼쪽에 그렸어요."));
+      assertThat(text.indexOf("나무를 왼쪽에 그렸어요.")).isLessThan(text.indexOf("사람을 오른쪽에 그렸어요."));
+      // 문답도 함께 실린다.
+      assertThat(text).contains("집에 누가 살아?").contains("우리 가족이요");
+      // 건너뛴 질문은 "-" 가 아니라 화면과 같은 문구로 낸다(875 §6).
+      assertThat(text).contains("이 질문은 건너뛰었어요");
+      // 미확정 음성은 발화를 지우지 않고 확인 요청만 덧붙인다(875 §6-1).
+      assertThat(text).contains("엄마요").contains("음성 인식 내용을 확인해 주세요");
+    }
+  }
+
+  @Test
+  void usesNeutralTitlesAndScreenOrderForHtpReports() throws Exception {
+    // CLAUDE.md 5절 — 집·나무·사람을 'HTP 검사'로 표현하지 않는다. 화면만 바꾸고 PDF 를 두면
+    //   보호자가 저장해 남기는 쪽에만 검사 투가 남는다(계약 §11 "화면과 PDF 동일").
+    byte[] pdf = renderer.render(htpActivityReport());
+
+    try (PDDocument document = Loader.loadPDF(pdf)) {
+      String text = new PDFTextStripper().getText(document);
+      assertThat(text)
+          .contains("집·나무·사람, 세 그림 이야기")
+          .contains("한눈에 보는 이번 활동")
+          .contains("집·나무·사람, 하나씩 살펴봐요")
+          .contains("함께 살펴보면 좋을 이야기")
+          .contains("그리는 동안 있었던 일")
+          // 읽는 법을 관찰 문장보다 먼저 둔다. 문단은 폭에 맞춰 줄이 나뉘므로 한 줄에 남는 조각으로 본다.
+          .contains("아이와 함께 다시 펼쳐 볼 이야깃거리예요");
+      // 검사 투 제목은 남지 않는다.
+      assertThat(text).doesNotContain("주요 심리 경향").doesNotContain("주제별 관찰").doesNotContain("검사");
+      // 화면 순서: 주제 묶음이 경향 이야기보다 앞이다.
+      assertThat(text.indexOf("집·나무·사람, 하나씩 살펴봐요"))
+          .isGreaterThan(0)
+          .isLessThan(text.indexOf("함께 살펴보면 좋을 이야기"));
+      assertThat(text.indexOf("함께 살펴보면 좋을 이야기")).isLessThan(text.indexOf("그리는 동안 있었던 일"));
+    }
+  }
+
+  @Test
+  void keepsNonHtpTitlesUnchanged() throws Exception {
+    // 그림일기 문구 정리는 별도 범위다. HTP 분기가 비HTP 경로를 건드리지 않았는지 고정한다.
+    byte[] pdf = renderer.render(fullReport());
+
+    try (PDDocument document = Loader.loadPDF(pdf)) {
+      String text = new PDFTextStripper().getText(document);
+      assertThat(text).contains("활동 정보").contains("주요 심리 경향").contains("주제별 관찰").contains("활동 기록");
+      assertThat(text).doesNotContain("집·나무·사람, 하나씩 살펴봐요");
+    }
+  }
+
+  /** 활동 코드가 HTP 인 리포트다. 표시명이 아니라 코드로 분기하는지 함께 본다. */
+  private ReportDetailResponse htpActivityReport() {
+    ReportDetailResponse base = htpReport();
+    return new ReportDetailResponse(
+        base.reportId(),
+        base.reportVersion(),
+        base.reportStatus(),
+        base.drawingSession(),
+        base.drawing(),
+        base.childExpression(),
+        base.observedFeatures(),
+        base.activityFacts(),
+        base.conversationSummary(),
+        base.guardianConversationGuide(),
+        base.limitations(),
+        base.expertReview(),
+        base.createdAt(),
+        base.nonDiagnosticNotice(),
+        base.publicInterpretations(),
+        base.evidenceItems(),
+        base.subjectReports(),
+        base.parentGuides(),
+        base.crisisAlert(),
+        base.references(),
+        "HTP",
+        "민준");
+  }
+
+  /** 집·나무·사람 세 주제를 담은 리포트다. */
+  private ReportDetailResponse htpReport() {
+    ReportDetailResponse base = fullReport();
+    return new ReportDetailResponse(
+        base.reportId(),
+        base.reportVersion(),
+        base.reportStatus(),
+        base.drawingSession(),
+        base.drawing(),
+        base.childExpression(),
+        base.observedFeatures(),
+        base.activityFacts(),
+        base.conversationSummary(),
+        base.guardianConversationGuide(),
+        base.limitations(),
+        base.expertReview(),
+        base.createdAt(),
+        base.nonDiagnosticNotice(),
+        base.publicInterpretations(),
+        base.evidenceItems(),
+        List.of(
+            new ReportSubjectResponse(
+                "HOUSE",
+                null,
+                List.of("집을 가운데 크게 그렸어요."),
+                List.of(
+                    new ReportQaPairResponse(
+                        "집에 누가 살아?", "우리 가족이요", "ANSWERED", "TEXT", false, true)),
+                List.of(0)),
+            new ReportSubjectResponse(
+                "TREE",
+                null,
+                List.of("나무를 왼쪽에 그렸어요."),
+                List.of(
+                    new ReportQaPairResponse(
+                        "이 나무는 어떤 나무야?", null, "SKIPPED", "TEXT", false, false)),
+                List.of()),
+            new ReportSubjectResponse(
+                "PERSON",
+                null,
+                List.of("사람을 오른쪽에 그렸어요."),
+                List.of(
+                    new ReportQaPairResponse("이 사람은 누구야?", "엄마요", "ANSWERED", "VOICE", true, true)),
+                List.of())),
+        base.parentGuides(),
+        base.crisisAlert(),
+        base.references());
+  }
+
   private ReportDetailResponse fullReport() {
     return new ReportDetailResponse(
         134L,

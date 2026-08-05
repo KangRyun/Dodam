@@ -169,9 +169,11 @@ void main() {
     expect(find.byKey(const ValueKey('activity-history-list')), findsOneWidget);
   });
 
-  testWidgets('뒤로가기는 Guardian Home으로 복귀한다', (tester) async {
+  testWidgets('기록 탭에서 홈 탭으로 돌아올 수 있다', (tester) async {
+    // 활동 기록은 대시보드 개편으로 사이드바 '기록' 탭이 됐다. '홈' 탭을 다시
+    // 누르면 보호자 홈으로 돌아온다.
     await _openHistory(tester, _ActivityRepository());
-    await tester.binding.handlePopRoute();
+    await tester.tap(find.text('홈').first);
     await tester.pumpAndSettle();
     expect(find.text('보호자 홈'), findsWidgets);
   });
@@ -583,12 +585,9 @@ Future<void> _openHistory(
   // 개편된 보호자 홈은 최근 활동·마음 달력용으로 같은 레포에 활동을 미리 조회한다.
   // 이력 화면의 조회만 세도록 진입 직전에 카운터를 초기화한다.
   repository.reset();
-  // 예전 '활동 이력 보기' 버튼은 대시보드 개편으로 사라졌다. 지금은 "최근 활동"
-  // 카드의 "전체"가 같은 화면으로 보낸다.
-  final entry = find.ancestor(
-    of: find.text('전체'),
-    matching: find.byType(InkWell),
-  );
+  // 예전 '활동 이력 보기'·'전체' 진입점은 대시보드 개편으로 사라졌다. 지금은
+  // 사이드바 '기록' 탭이 같은 활동 기록 화면으로 보낸다.
+  final entry = find.text('기록').first;
   await tester.ensureVisible(entry);
   await tester.tap(entry);
   await tester.pumpAndSettle();

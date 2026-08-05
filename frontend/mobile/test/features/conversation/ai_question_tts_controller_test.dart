@@ -32,6 +32,19 @@ void main() {
     expect(player.playCount, 0);
   });
 
+  test('활동 캐릭터 음성 코드를 TTS 요청에 유지한다', () async {
+    final repository = _FakeTtsRepository();
+    final controller = AiQuestionTtsController(
+      repository,
+      _FakeQuestionAudioPlayer(),
+      request: const QuestionTtsRequest(voice: 'BALLAD'),
+    );
+
+    await controller.playQuestion(_question(1));
+
+    expect(repository.requests.single.voice, 'BALLAD');
+  });
+
   test('새 질문은 이전 재생을 중단하고 새 음성을 재생한다', () async {
     final repository = _FakeTtsRepository();
     final player = _FakeQuestionAudioPlayer();
@@ -118,6 +131,7 @@ final class _FakeTtsRepository implements QuestionTtsRepository {
   final Future<QuestionTtsAudio>? firstResponse;
   final Object? failure;
   final List<int> messageIds = [];
+  final List<QuestionTtsRequest> requests = [];
 
   @override
   Future<QuestionTtsAudio> loadQuestionAudio(
@@ -125,6 +139,7 @@ final class _FakeTtsRepository implements QuestionTtsRepository {
     QuestionTtsRequest request = const QuestionTtsRequest(),
   }) async {
     messageIds.add(messageId);
+    requests.add(request);
     if (failure case final caught?) throw caught;
     if (messageId == 1 && firstResponse != null) return firstResponse!;
     return _audio;
