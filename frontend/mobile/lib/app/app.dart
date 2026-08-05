@@ -22,6 +22,9 @@ import '../features/drawing/data/repositories/mock_drawing_repository.dart';
 import '../features/drawing/domain/pending_htp_photo.dart';
 import '../features/drawing/domain/repositories/drawing_repository.dart';
 import '../features/conversation/conversation.dart';
+import '../features/guardian_pin/data/repositories/mock_guardian_pin_repository.dart';
+import '../features/guardian_pin/domain/repositories/guardian_pin_repository.dart';
+import '../features/guardian_pin/presentation/widgets/guardian_reauth_sheet.dart';
 import '../features/notification/application/notification_badge_controller.dart';
 import '../features/notification/application/push_registration_status_controller.dart';
 import '../features/notification/domain/entities/push_message.dart';
@@ -46,6 +49,7 @@ import 'router/app_routes.dart';
 import 'router/current_route_observer.dart';
 import 'router/notification_route_resolver.dart';
 import 'state/guardian_child_controller.dart';
+import 'state/guardian_unlock_controller.dart';
 
 class DodamApp extends StatefulWidget {
   const DodamApp({
@@ -79,6 +83,8 @@ class DodamApp extends StatefulWidget {
     this.notificationInboxRepository,
     this.htpPhotoUploadEnabled = false,
     this.pendingHtpPhotoStore,
+    this.guardianPinRepository,
+    this.guardianPinGateEnabled = false,
     this.initialRoute = AppRoutes.guardianHome,
     super.key,
   });
@@ -129,6 +135,16 @@ class DodamApp extends StatefulWidget {
   /// HTP 선촬영 사진 보관 저장소(S15P11B209-872). 주입하지 않으면 기기 문서
   /// 디렉터리 기반 디스크 저장소를 쓴다(테스트는 메모리 구현을 주입).
   final PendingHtpPhotoStore? pendingHtpPhotoStore;
+
+  /// 보호자 PIN 경계(S15P11B209-874). 주입하지 않으면 메모리 Mock을 쓴다.
+  final GuardianPinRepository? guardianPinRepository;
+
+  /// 보호자 홈 진입 앞에 PIN gate를 세울지(S15P11B209-874, 기본 꺼짐).
+  ///
+  /// 서버에 `GUARDIAN_PIN_PEPPER`가 주입돼 PIN API가 `PIN_UNAVAILABLE` 없이
+  /// 응답하는 것이 확인된 뒤에 켠다. 확인 전에는 꺼 두는 것이 올바른 대응이다 —
+  /// gate 안에서 장애를 우회시키면 보안 장치가 사라진다.
+  final bool guardianPinGateEnabled;
   final String initialRoute;
 
   @override
@@ -142,6 +158,13 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       widget.pendingHtpPhotoStore ??
       DiskPendingHtpPhotoStore(rootDirectory: getApplicationDocumentsDirectory);
   late final GuardianChildController _childController;
+
+  /// 보호자 PIN 경계. 주입이 없으면 메모리 Mock을 쓴다(S15P11B209-874).
+  late final GuardianPinRepository _guardianPinRepository =
+      widget.guardianPinRepository ?? MockGuardianPinRepository();
+
+  /// 보호자 PIN gate의 세션 단위 잠금 해제 상태.
+  final _guardianUnlock = GuardianUnlockController();
   late final AuthRepository _authRepository;
   late final SocialLoginService _socialLoginService;
   late final KakaoLoginClient _kakaoLoginClient;
@@ -151,7 +174,12 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
   late final GoogleLoginCoordinator _googleLoginCoordinator;
   late final NaverLoginCoordinator _naverLoginCoordinator;
   final _navigatorKey = GlobalKey<NavigatorState>();
-  final _routeObserver = CurrentRouteObserver();
+
+  /// 아동 모드로 들어가면 보호자 잠금을 되돌린다(재잠금 트리거 b). 아이가 쓰던
+  /// 기기를 그대로 넘겨받아도 보호자 화면은 PIN을 다시 묻는다.
+  late final _routeObserver = CurrentRouteObserver(
+    onChildModeEntered: _guardianUnlock.lock,
+  );
   PushCoordinator? _pushCoordinator;
   NotificationBadgeController? _notificationBadgeController;
 
@@ -247,10 +275,45 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
 
   /// 포그라운드로 돌아오면 미열람 수를 다시 센다. 백그라운드에서 받은 푸시는
   /// 앱이 떠 있을 때의 수신 스트림을 타지 않아 배지가 뒤처진다.
+  ///
+  /// 화면이 가려지는 순간 보호자 잠금을 되돌리고, 보호자 화면을 보던 중이었다면
+  /// 그 자리에서 gate로 돌려보낸다(재잠금 트리거 a, S15P11B209-874).
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _relockGuardian();
+      return;
+    }
     if (state != AppLifecycleState.resumed) return;
     _refreshNotificationBadge();
+  }
+
+  /// 보호자 잠금을 되돌리고, 떠 있던 보호자 화면을 gate로 바꿔 둔다.
+  ///
+  /// 잠그기만 하면 이미 떠 있는 화면은 그대로 남는다 — gate는 라우트를 다시
+  /// 만들 때만 서기 때문이다. 보호자 홈 위에 쌓인 화면(리포트·설정 등)도 같은
+  /// 보호자 영역이라 함께 되돌린다.
+  ///
+  /// 되돌리기를 복귀(`resumed`)가 아니라 나가는 순간(`paused`)에 하는 이유:
+  /// 복귀 뒤에 옮기면 앱 전환기 미리보기와 복귀 직후 첫 프레임에 보호자 화면이
+  /// 그대로 남는다. 실기기 확인에서도 복귀 시점 이동은 gate를 다시 세우지
+  /// 못했다.
+  ///
+  /// 아동 모드·로그인처럼 보호자 영역 밖일 때는 건드리지 않는다. 그 화면들은
+  /// 보호자 홈으로 돌아오는 길에 gate를 지난다. flag가 꺼져 있으면 잠금도 이동도
+  /// 하지 않는다 — gate가 없는 구성에서 이동만 일어나면 안 된다.
+  void _relockGuardian() {
+    if (!widget.guardianPinGateEnabled) return;
+    final wasUnlocked = _guardianUnlock.isUnlocked;
+    _guardianUnlock.lock();
+    if (!wasUnlocked) return;
+    if (_routeObserver.currentRouteName?.startsWith('/guardian') != true) {
+      return;
+    }
+    final navigator = _navigatorKey.currentState;
+    if (navigator == null) return;
+    AppNavigation.resetToOn(navigator, AppRoutes.guardianHome);
   }
 
   /// 푸시가 가리키는 화면을 열어도 되는 세션인지.
@@ -303,17 +366,69 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
     return _guardianTabRoute ?? current;
   }
 
+  // Provider별 SDK 로그인. 세션 표시는 건드리지 않는다 — 채택 여부는 호출자가
+  // 정한다(로그인 화면은 결과를 그대로 받고, 재인증은 계정을 대조한 뒤 받는다).
+  Future<AuthState> _providerSignIn(AuthProvider provider) =>
+      switch (provider) {
+        AuthProvider.kakao => _kakaoLoginCoordinator.signIn(),
+        AuthProvider.google => _googleLoginCoordinator.signIn(),
+        AuthProvider.naver => _naverLoginCoordinator.signIn(),
+      };
+
   // Provider별 로그인 실행
   Future<AuthState> _signIn(AuthProvider provider) async {
-    final state = await switch (provider) {
-      AuthProvider.kakao => _kakaoLoginCoordinator.signIn(),
-      AuthProvider.google => _googleLoginCoordinator.signIn(),
-      AuthProvider.naver => _naverLoginCoordinator.signIn(),
-    };
+    final state = await _providerSignIn(provider);
     _currentSession = state.session;
     await _onGuardianSessionReady(state.session);
     return state;
   }
+
+  /// PIN 재설정 앞에 세우는 본인확인(S15P11B209-874).
+  ///
+  /// 백엔드 `DELETE users/me/guardian-pin`은 현재 PIN도 별도 확인도 요구하지
+  /// 않고 로그인 세션만으로 PIN을 지운다. 그대로 노출하면 기기를 넘겨받은 아이가
+  /// 재설정을 눌러 새 PIN을 정하고 gate를 지나간다. 그래서 소셜 재로그인을 태우고
+  /// **같은 계정**일 때만 초기화를 허용한다.
+  ///
+  /// 알려진 한계: 기기에 소셜 세션이 남아 있으면 제공자 SDK가 SSO로 조용히
+  /// 통과시킬 수 있어 이 재인증이 항상 강한 본인확인은 아니다. 그래도 (a) 제공자
+  /// SDK를 반드시 태우고 (b) 계정 동일성을 검사해 "무확인 초기화"와 "남의 계정
+  /// PIN 삭제"는 막는다. 더 강한 확인(이메일 OTP 등)은 백엔드(S879)에 reset 전용
+  /// 검증이 생겨야 가능하다.
+  Future<bool> _reauthenticateGuardian(BuildContext context) async {
+    final beforeId = _currentSession?.user.id;
+    if (beforeId == null) return false;
+
+    final selected = await showGuardianReauthSheet(context);
+    if (selected == null) return false;
+
+    final AuthState state;
+    try {
+      state = await _providerSignIn(_authProviderFor(selected));
+    } on Object {
+      // 실패 원인에는 제공자 토큰이 섞일 수 있어 남기지 않는다.
+      return false;
+    }
+
+    final session = state.session;
+    // 취소·실패는 저장된 세션을 건드리지 않는다. 여기서 세션을 비우면 재인증을
+    // 그만둔 보호자가 로그아웃된 것처럼 보인다.
+    if (session == null) return false;
+
+    // 다른 계정으로 로그인됐다면 토큰 저장소는 이미 그 계정 것이다. 표시 세션도
+    // 실제와 맞춰 둬야 이후 요청이 엉뚱한 계정으로 나가지 않는다. 다만 초기화는
+    // 허용하지 않는다 — 그 계정의 PIN을 다시 세우려면 한 번 더 본인확인을 지난다.
+    _currentSession = session;
+    await _onGuardianSessionReady(session);
+    return session.user.id == beforeId;
+  }
+
+  static AuthProvider _authProviderFor(SocialLoginProvider provider) =>
+      switch (provider) {
+        SocialLoginProvider.kakao => AuthProvider.kakao,
+        SocialLoginProvider.google => AuthProvider.google,
+        SocialLoginProvider.naver => AuthProvider.naver,
+      };
 
   Future<AuthSession> _completeOnboarding(NewUserOnboardingInput input) async {
     final session = await _authRepository.completeOnboarding(input);
@@ -452,6 +567,7 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
     _notificationBadgeController?.dispose();
     _pushRegistrationStatus.dispose();
     _childController.dispose();
+    _guardianUnlock.dispose();
     super.dispose();
   }
 
@@ -519,6 +635,10 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       basisAnalysisId: widget.basisAnalysisId,
       htpPhotoUploadEnabled: widget.htpPhotoUploadEnabled,
       pendingHtpPhotoStore: _pendingHtpPhotoStore,
+      guardianUnlock: _guardianUnlock,
+      guardianPinRepository: _guardianPinRepository,
+      guardianPinGateEnabled: widget.guardianPinGateEnabled,
+      onReauthenticateGuardian: _reauthenticateGuardian,
     ),
   );
 }
