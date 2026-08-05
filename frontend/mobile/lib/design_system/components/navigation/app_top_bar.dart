@@ -9,6 +9,7 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
     this.onBack,
     this.actions = const [],
     this.centerTitle = false,
+    this.titleLeading,
     super.key,
   });
 
@@ -16,6 +17,9 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback? onBack;
   final List<Widget> actions;
   final bool centerTitle;
+
+  /// 제목 앞에 붙는 장식 위젯. 주지 않으면 제목만 그린다(기존 동작).
+  final Widget? titleLeading;
 
   @override
   Size get preferredSize => const Size.fromHeight(64);
@@ -44,18 +48,30 @@ class AppTopBar extends StatelessWidget implements PreferredSizeWidget {
               ),
             ),
           ),
-    title: Text(
-      title,
-      style: const TextStyle(
-        color: AppColors.ink,
-        fontSize: 21,
-        fontWeight: FontWeight.w800,
-      ),
-    ),
+    title: titleLeading == null
+        ? _title()
+        : Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              titleLeading!,
+              const SizedBox(width: AppSpacing.xs),
+              // 좁은 폭에서 제목이 아이콘을 밀어내지 않게 남는 폭만 쓰게 한다.
+              Flexible(child: _title()),
+            ],
+          ),
     actions: actions,
     bottom: const PreferredSize(
       preferredSize: Size.fromHeight(1),
       child: Divider(height: 1, color: AppColors.surfaceSoft),
+    ),
+  );
+
+  Widget _title() => Text(
+    title,
+    style: const TextStyle(
+      color: AppColors.ink,
+      fontSize: 21,
+      fontWeight: FontWeight.w800,
     ),
   );
 }

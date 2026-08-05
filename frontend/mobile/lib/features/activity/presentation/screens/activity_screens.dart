@@ -139,6 +139,9 @@ const defaultConversationMaxQuestionCount = 10;
 const _endTalkOptionId = 'CHIP_END_TALK';
 const _endActivityOptionId = 'CHIP_END_ACTIVITY';
 
+/// 앱이 실제 종료로 옮길 수 있는 confirmedStopTarget 값 (S15P11B209-951).
+const _confirmedStopTargets = {confirmedStopConversation, confirmedStopActivity};
+
 class DrawingScreen extends StatefulWidget {
   const DrawingScreen({
     required this.childId,
@@ -1248,6 +1251,16 @@ class _DrawingScreenState extends State<DrawingScreen>
       _noResponseRequestSourceQuestion = null;
     }
     _lastQuestionMessageId = question.messageId;
+    // 아이가 되묻기에 **말로** 그만하겠다고 확인했으면 이 메시지는 질문이 아니라 맺음말이다
+    // (S15P11B209-951). 화면에 띄워 답을 기다리지 않고 곧바로 끝낸다. 맺음말 자체는 서버가
+    // 대화 기록의 마지막 AI 메시지로 저장해 두므로 리포트에는 남는다.
+    // 모르는 값은 평범한 질문으로 다룬다. 서버가 새 종료 대상을 먼저 배포하더라도 구버전
+    // 앱이 질문을 삼켜 대화가 멈추는 것보다 그대로 이어지는 편이 낫다.
+    final stopTarget = question.confirmedStopTarget;
+    if (stopTarget != null && _confirmedStopTargets.contains(stopTarget)) {
+      unawaited(_handleConfirmedStopTarget(stopTarget));
+      return;
+    }
     // 하위 상태 UI의 빌드 중 알림과 겹치지 않도록 다음 프레임에 반영
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
@@ -1269,6 +1282,24 @@ class _DrawingScreenState extends State<DrawingScreen>
         }
       }
     });
+  }
+
+  /// 말로 확인한 그만하기를 실제 종료로 옮긴다 (S15P11B209-951).
+  ///
+  /// 칩 선택(938)과 **같은 경로**를 탄다. 대화 종료는 아이가 방금 확인했으므로 다시 묻지
+  /// 않고, 그림 활동 완료는 기존 '다 그렸어요!' 확인·회고 흐름을 그대로 태운다 — 새 경로를
+  /// 만들면 회고 저장 단계를 건너뛴다.
+  ///
+  /// 호출부가 [_confirmedStopTargets]로 걸러 아는 값만 넘긴다.
+  Future<void> _handleConfirmedStopTarget(String target) async {
+    switch (target) {
+      case confirmedStopConversation:
+        await _completeConversationAutomatically(
+          ConversationCompletionReason.childRequest,
+        );
+      case confirmedStopActivity:
+        await _confirmAndComplete();
+    }
   }
 
   Future<void> _prepareNoResponseTimerAfterTts(AiQuestion question) async {

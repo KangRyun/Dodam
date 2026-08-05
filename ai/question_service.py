@@ -864,19 +864,56 @@ _CHIP_END_ACTIVITY = QuestionOption(code="CHIP_END_ACTIVITY", label="그림 다 
 _CHIP_END_TALK = QuestionOption(code="CHIP_END_TALK", label="이야기만 그만할래")
 _CHIP_KEEP_GOING = QuestionOption(code="CHIP_KEEP_GOING", label="아니, 더 할래")
 
+# ── 말로 답한 확인 (S15P11B209-951) ────────────────────────────
+# 938은 종료를 칩으로만 갈 수 있게 두어, 되묻기에 말로 "응"이라고 답하면 아무 일도 일어나지
+# 않았다. 마이크로 대화하는 아이에게는 말로 답하는 쪽이 자연스럽다.
+#
+# ⚠️ AI는 여전히 끝내지 않는다. confirmedStopTarget은 "아이가 확인했다"는 관찰 보고이고
+#    실제 종료는 FE가 한다 — 786 원칙 그대로다.
+STOP_CLOSING_CONVERSATION = "그래, 오늘 이야기 재미있었어. 그림은 계속 그려도 돼!"
+STOP_CLOSING_ACTIVITY = "그래, 오늘 그림 정말 멋졌어. 다음에 또 그리자!"
+
+# 되묻기 갈래 → 확인됐을 때 FE에 알릴 종료 대상. STOP_ASK_BOTH는 여기 없다 —
+# 대상이 불분명한 채로 되돌릴 수 없는 활동 완료를 추측해 실행하지 않는다.
+_REASK_CONFIRMED_TARGET = {
+    STOP_ASK_DRAWING: "ACTIVITY",
+    STOP_ASK_CONVERSATION: "CONVERSATION",
+}
+_REASK_TEXTS = frozenset({STOP_ASK_BOTH, STOP_ASK_DRAWING, STOP_ASK_CONVERSATION})
+
 
 def _detect_stop_intent(req: QuestionRequest) -> str | None:
     """가장 최근 아이 발화에서 그만하기 의사를 찾는다(없으면 None).
 
-    아이가 직전 턴에 '아니, 더 할래'를 골랐으면 되묻지 않는다 — 계속 물으면 그만두라고
-    떠미는 것처럼 들린다(718의 연속 부정 처리와 같은 결).
+    ⚠️ 칩으로 답한 메시지는 스캔하지 않는다(S15P11B209-950). BE는 선택형 답변의 문맥
+    텍스트로 **아이의 말이 아니라 칩 라벨**을 싣는데
+    (ConversationNextQuestionService.resolveContextText), 되묻기 칩의 라벨 자체가
+    그만하기 문구다 — "이야기만 그만할래"는 STOP_CONVERSATION으로, "그림 다 그렸어"는
+    STOP_DRAWING으로 다시 걸린다. 그대로 스캔하면 AI가 **자기가 낸 문구**에 재감지되어
+    같은 되묻기를 무한 반복한다. 그만두겠다고 고른 아이일수록 갇히는 구조였다.
+
+    칩 코드를 열거해 막지 않는 이유: 새 칩이 생길 때마다 같은 사고가 되살아난다.
+    원인 계층은 '칩 라벨은 아이가 한 말이 아니다'이므로 거기서 끊는다. 기존
+    CHIP_KEEP_GOING 특례(718의 연속 부정 처리와 같은 결)도 이 검사에 흡수된다.
+
+    칩 답변이면 **더 과거 발화로 거슬러 올라가지 않는다.** 올라가면 이미 되물어 응답까지
+    받은 옛 발화가 되살아나 같은 루프가 다른 모양으로 난다.
+
+    음성·직접입력 답변에는 선택 코드가 없다(BE loadSelectedOptionContexts는 선택형
+    답변만 담는다). 그래서 말로 그만하겠다고 한 최초 감지 경로는 그대로다.
+
+    혼합 답변("Label / directText")에서는 아이가 덧붙인 말의 그만하기 의사를 이 턴에
+    놓친다. 감수하는 쪽을 골랐다 — 다음 턴에 다시 말하면 잡히지만, 루프는 아이가 스스로
+    빠져나올 수 없다. 다만 이 판단은 **되반응 계열에만** 적용된다. 인젝션 검사는 놓쳤을
+    때의 대가가 커서 혼합 답변도 계속 스캔한다(_detect_injection 참고).
     """
-    if _CHIP_KEEP_GOING.code in _last_child_selected_codes(req):
-        return None
     index = _last_child_index(req)
     if index is None:
         return None
-    return conversation_stop_intent.scan(req.recent_messages[index].text or "")
+    message = req.recent_messages[index]
+    if message.selected_option_codes:
+        return None
+    return conversation_stop_intent.scan(message.text or "")
 
 
 def _stop_intent_offers(req: QuestionRequest, verdict: str) -> tuple[str, list[QuestionOption]]:
@@ -938,9 +975,9 @@ def _stop_intent_response(
 
     목적은 FOLLOW_UP이다. 아이가 방금 한 말에 이어 묻는 것이고, 대상 객체는 붙지 않는다.
 
-    end_confirmed면 conversationEndConfirmed를 실어 BE가 대화를 끝낼 수 있게 한다.
-    문장은 그대로 되묻기를 쓴다 — BE가 이 필드를 아직 안 읽어도 아이 화면이 어색해지지
-    않아야 한다(작별 인사를 내보냈는데 대화가 이어지면 그게 더 나쁘다).
+    OPTION이 허용되지 않으면 칩 없이 되묻기 문장만 나간다. 950에서는 이것이 막다른 길이라
+    되묻기 자체를 막았지만, 951이 말로 답하는 길을 열어 다시 되물을 수 있게 됐다 —
+    칩이 없어도 다음 턴의 _stop_confirmation_response가 받는다.
     """
     text, offers = _stop_intent_offers(req, verdict)
     option_allowed = "OPTION" in req.allowed_response_modes
@@ -956,6 +993,93 @@ def _stop_intent_response(
         ),
         model_name=config.LLM_MODEL,
         # GMS를 호출하지 않았으므로 파생 모델 ID가 없다 — 엔진명으로 대신 기록한다.
+        model_version=config.LLM_MODEL,
+        prompt_version=PROMPT_VERSION,
+        processing_time_ms=int((time.monotonic() - started) * 1000),
+    )
+
+
+def _last_reask_branch(req: QuestionRequest) -> str | None:
+    """마지막 아이 발화 **직전**의 AI 메시지가 되묻기였으면 그 되묻기 문장(아니면 None).
+
+    아무 때나 "응"을 종료로 읽지 않기 위한 자물쇠다(S15P11B209-951). 평범한 질문에 짧게
+    긍정하는 일은 흔하고, 그것까지 종료로 읽으면 대화가 예고 없이 끊긴다. 되묻기 문장은
+    우리가 낸 고정 문구라 문자열 대조로 충분하다.
+    """
+    index = _last_child_index(req)
+    if index is None:
+        return None
+    for position in range(index - 1, -1, -1):
+        message = req.recent_messages[position]
+        if (message.sender_type or "").upper() != "AI":
+            continue
+        text = (message.text or "").strip()
+        return text if text in _REASK_TEXTS else None
+    return None
+
+
+def _stop_confirmation_response(
+    req: QuestionRequest, started: float, reask: str | None
+) -> QuestionResponse | None:
+    """되묻기에 **말로** 그만하겠다고 답했으면 확인 신호를 실어 보낸다(S15P11B209-951).
+
+    해당하지 않으면 None을 돌려 평소 질문 흐름으로 넘긴다. 부정("아니, 더 할래")과 애매한
+    답이 모두 여기에 포함된다 — 애매한 답으로 대화를 끝내지 않는다.
+
+    칩으로 답한 경우는 여기서 다루지 않는다. FE가 칩 코드를 보고 이미 끝내며(938),
+    그 라벨을 다시 읽지 않는 것이 950이 고친 지점이다.
+    """
+    if reask is None:
+        return None
+    index = _last_child_index(req)
+    if index is None:
+        return None
+    message = req.recent_messages[index]
+    if message.selected_option_codes:
+        return None
+    utterance = message.text or ""
+    confirmation = conversation_stop_intent.scan_confirmation(utterance)
+    if confirmation == conversation_stop_intent.CONFIRM_NO:
+        return None
+
+    if reask == STOP_ASK_BOTH:
+        # 3지선다에 답한 경우다. "응"은 그만하겠다는 뜻이지만 **무엇을** 그만할지는 말하지
+        # 않았다. 여기서 활동 완료를 추측하면 이야기만 그만하려던 아이의 그림이 통째로
+        # 끝난다 — 되돌릴 수 없다. 그래서 대상을 말한 경우에만 그 갈래로 간다.
+        #
+        # 대상을 말했다면 그 자체가 답이므로 긍정 낱말을 따로 요구하지 않는다
+        # ("그림 그만 그릴래"에는 '응'이 없다).
+        named = conversation_stop_intent.scan(utterance)
+        target = {
+            conversation_stop_intent.STOP_DRAWING: "ACTIVITY",
+            conversation_stop_intent.STOP_CONVERSATION: "CONVERSATION",
+        }.get(named or "")
+        if target is None:
+            if confirmation != conversation_stop_intent.CONFIRM_YES:
+                return None
+            # 그만두겠다는 것은 분명한데 대상이 아직 불분명하다. 되돌릴 수 없는 쪽을
+            # 추측하는 대신 가벼운 쪽으로 좁혀 한 번 더 묻는다. 갈래가 BOTH에서
+            # CONVERSATION으로 바뀌므로 이 좁히기는 한 번만 일어나고 되풀이되지 않는다.
+            return _stop_intent_response(
+                req, started, conversation_stop_intent.STOP_CONVERSATION
+            )
+    else:
+        if confirmation != conversation_stop_intent.CONFIRM_YES:
+            return None
+        target = _REASK_CONFIRMED_TARGET[reask]
+
+    closing = STOP_CLOSING_ACTIVITY if target == "ACTIVITY" else STOP_CLOSING_CONVERSATION
+    return QuestionResponse(
+        question_text=closing,
+        question_purpose="FOLLOW_UP",
+        options=None,  # 질문이 아니라 맺음말이다 — 고를 것이 없다.
+        confirmed_stop_target=target,
+        target_object=None,
+        fallback_used=False,
+        safety_result=SafetyResult(
+            status="PASSED", rule_version=req.safety_rule_version, block_reason_code=None
+        ),
+        model_name=config.LLM_MODEL,
         model_version=config.LLM_MODEL,
         prompt_version=PROMPT_VERSION,
         processing_time_ms=int((time.monotonic() - started) * 1000),
@@ -1254,9 +1378,26 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
     # 아이가 그만하고 싶다고 말했으면 다음 질문을 만들지 않고 무엇을 그만할지 되묻는다
     # (S15P11B209-938). 위기·인젝션 뒤에 두는 이유: "다 싫어, 그만할래"는 그만하기 의사일
     # 수도 위기 신호일 수도 있다. 이 분기를 위기 검사 앞에 두면 위기 신호를 조용히 삼킨다.
-    stop_verdict = _detect_stop_intent(req)
-    end_confirmed = _is_conversation_end_confirmed(req, stop_verdict)
-    if stop_verdict or end_confirmed:
+    # 되묻기에 말로 답한 확인이 먼저다(S15P11B209-951). 뒤에 두면 "응, 그만할래"가 아래
+    # _detect_stop_intent에 다시 걸려 같은 되묻기를 반복한다 — 950이 칩에서 고친 자가 트리거가
+    # 음성 경로로 되살아난다. 위기·인젝션보다는 뒤다(938과 같은 이유).
+    just_reasked = _last_reask_branch(req)
+    confirmed = _stop_confirmation_response(req, started, just_reasked)
+    if confirmed is not None:
+        # ⚠️ 아이 발화 원문은 남기지 않는다 — 대상 코드만.
+        logger.info(
+            "그만하기 확인(음성) — target=%s request_id=%s",
+            confirmed.confirmed_stop_target or "NARROWED",
+            request_id,
+        )
+        return confirmed
+
+    # 방금 되물었는데 확인도 부정도 아닌 답이 왔으면 **같은 되묻기를 반복하지 않는다.**
+    # 반복하면 950이 칩에서 고친 자가 트리거가 음성 경로로 되살아나고, 계속 물으면
+    # 그만두라고 떠미는 것처럼 들린다(718과 같은 결). 평소 흐름으로 돌아가고, 아이가
+    # 다시 그만하겠다고 말하면 그때 새로 되묻는다.
+    stop_verdict = None if just_reasked else _detect_stop_intent(req)
+    if stop_verdict:
         # ⚠️ 아이 발화 원문은 남기지 않는다 — 판정 코드만.
         logger.info(
             "그만하기 의사 감지 — 되묻기: verdict=%s endConfirmed=%s activityType=%s "
