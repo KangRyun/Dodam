@@ -16,6 +16,9 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from unittest import mock  # noqa: E402
+
+from eval import checks  # noqa: E402
 from eval.checks import _MAX_QUESTIONS, _question_count  # noqa: E402
 
 
@@ -74,6 +77,35 @@ class LimitIsTwoTest(unittest.TestCase):
 
     def test_two_is_allowed(self):
         self.assertEqual(2, _MAX_QUESTIONS)
+
+
+class ToneBandsDifferTest(unittest.TestCase):
+    """연령 구간 길이 규칙 붕괴 감지 (S15P11B209-895).
+
+    786이 만든 실패는 '규칙은 넷인데 제약은 하나'였다. 그게 808 실측까지 안 보였다.
+    음성 대조군(negative control)을 함께 둬야 이 검사가 무엇이든 통과시키지 않음을 확인할 수 있다.
+    """
+
+    def test_current_file_passes(self):
+        f = checks.check_tone_bands_differ()
+        self.assertTrue(f.ok, f.detail)
+
+    def test_collapsed_bands_are_flagged(self):
+        # 786 직후 상태 재현 — 문구는 다르지만 제약이 사실상 같던 시절.
+        collapsed = {
+            "PRESCHOOL": "- 길이: 반응 한 문장 + 질문 한 문장까지.",
+            "LOWER_ELEMENTARY": "- 길이: 반응 한 문장 + 질문 한 문장까지.",
+            "UPPER_ELEMENTARY": "- 길이: 반응 한 문장 + 질문 한 문장까지.",
+            "SUPPORT": "- 길이: 반응 한 문장 + 질문 한 문장까지.",
+        }
+        with mock.patch.object(
+            checks.prompts_registry, "sections", return_value=collapsed
+        ):
+            f = checks.check_tone_bands_differ()
+        self.assertFalse(f.ok)
+        # 제품 판단이 걸린 규칙이라 게이트를 흔들지는 않는다.
+        self.assertEqual("WARN", f.mark)
+        self.assertFalse(f.is_failure)
 
 
 if __name__ == "__main__":
