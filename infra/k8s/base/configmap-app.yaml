@@ -48,6 +48,25 @@ data:
   AI_OBSERVATION_MODE: "mock"
   AI_IMAGE_ACCESS_TOKEN_TTL: "60s"
 
+  # ── 시각 (S15P11B209-736 후속) ───────────────────────────────────────
+  # 컨테이너의 로그 시각을 KST 로 맞춘다. envFrom 으로 backend·ai 가 함께 받는다.
+  #
+  # ⚠️ 이것이 바꾸는 것은 **로그뿐**이다. 애플리케이션 시각 계산과 API 응답은
+  #   영향받지 않는다 — 근거:
+  #     · 코드가 `Clock.systemUTC()` 를 명시적으로 쓴다(systemDefaultZone 사용 0건)
+  #     · 인자 없는 now() 8건은 전부 `Instant.now()` 로 시간대 개념이 없는 절대시각
+  #     · Jackson 기본 타임존이 UTC 라 응답은 규약 S15P11B209-822 대로 ISO-8601 `Z` 유지
+  #   즉 앱·웹 파서는 무영향이다. 응답까지 KST(+09:00) 로 바꾸는 것은 822 계약 개정이
+  #   필요한 **별개 작업**이며 여기서 하지 않는다.
+  #
+  # DB 안의 값은 이미 KST 다(736 이 JDBC 에 sessionVariables=time_zone='+09:00' 를
+  # 넣어 앱 기록분·DB 기본값분을 통일했다). 이 항목은 남아 있던 로그 계층을 맞춘다.
+  #
+  # 📌 ConfigMap 은 envFrom 이라 값만 바꿔서는 **기존 파드에 반영되지 않는다**
+  #   (kustomize 해시 접미사가 붙지 않는 평범한 ConfigMap 이다). 적용 후
+  #   `kubectl -n dodam rollout restart deploy/backend deploy/ai` 가 필요하다.
+  TZ: "Asia/Seoul"
+
   # ── 저장소 ──────────────────────────────────────────────────────────
   # ⚠️ MinIO 컷오버(S15P11B209-368~374, 2026-07-28 완료) 이후 s3 가 정상값이다.
   #    local 로 두면 파일이 파드 로컬 디스크로 떨어져 재시작마다 유실된다.

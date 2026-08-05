@@ -58,6 +58,9 @@ spec:
           #    않으므로 백엔드 컨텍스트 /api/v1 을 포함한다.
           env:
             - { name: NODE_ENV, value: production }
+            # 로그 시각을 KST 로 (S15P11B209-736 후속). web 은 dodam-config 를
+            # envFrom 하지 않아 여기서 직접 준다 — backend·ai 는 그 ConfigMap 으로 받는다.
+            - { name: TZ, value: "Asia/Seoul" }
             - { name: API_BASE_URL, value: "http://backend:8080/api/v1" }
             # 소셜 로그인 Client Secret(서버 전용) — dodam-secrets 의 동일 키를 참조한다.
             #   optional: true 인 이유: 값이 아직 동기화 전이어도 web 파드는 떠서 커뮤니티는 정상
