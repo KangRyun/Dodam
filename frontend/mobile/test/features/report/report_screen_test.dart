@@ -11,6 +11,7 @@ import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/report/data/dto/report_dtos.dart';
 import 'package:dodam/features/report/domain/repositories/report_repository.dart';
 import 'package:dodam/features/report/domain/services/report_file_actions.dart';
+import 'package:dodam/features/report/presentation/services/report_snapshot_pdf.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -87,8 +88,13 @@ void main() {
     // 줄글만 담긴 서버 PDF 를 더 내려받지 않는다.
     expect(repository.exportCalls, isEmpty);
     expect(repository.downloadUrls, isEmpty);
-    // 화면 밖으로 흐르는 본문까지 담아야 하므로 캡처 높이가 화면 높이보다 크다.
-    expect(composer.capturedSizes.single.height, greaterThan(600));
+    // 섹션마다 따로 떠 간다. 카드 중간에서 잘리지 않게 하는 전제다.
+    expect(composer.capturedSections.length, greaterThan(4));
+    // 화면 밖으로 흐르는 섹션도 배치돼 있어 높이를 갖는다.
+    expect(
+      composer.capturedSections.every((section) => section.size.height > 0),
+      isTrue,
+    );
     expect(fileActions.savedFileNames, ['dodam-report-501.pdf']);
     expect(fileActions.savedBytes.single, _pdfBytes);
     expect(find.text('PDF를 저장했어요.'), findsOneWidget);
@@ -102,22 +108,16 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('report-save-pdf')));
     await tester.pumpAndSettle();
 
-    final captured = composer.capturedBoundaries.single;
-    expect(
-      _isInside(
-        tester.renderObject(find.byKey(const ValueKey('report-save-pdf'))),
-        captured,
-      ),
-      isFalse,
+    final captured = composer.capturedSections;
+    final saveButton = tester.renderObject(
+      find.byKey(const ValueKey('report-save-pdf')),
     );
-    // 본문은 담긴다.
-    expect(
-      _isInside(
-        tester.renderObject(find.byKey(const ValueKey('report-activity-info'))),
-        captured,
-      ),
-      isTrue,
+    expect(captured.any((section) => _isInside(saveButton, section)), isFalse);
+    // 본문 섹션은 담긴다.
+    final activityInfo = tester.renderObject(
+      find.byKey(const ValueKey('report-activity-info')),
     );
+    expect(captured.any((section) => _isInside(activityInfo, section)), isTrue);
   });
 
   testWidgets('완료 리포트 PDF 파일을 시스템 공유 화면으로 전달한다', (tester) async {
@@ -149,7 +149,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('report-share-pdf')));
     await tester.pump();
 
-    expect(composer.capturedSizes, hasLength(1));
+    expect(composer.requests, hasLength(1));
     pending.complete(_pdfBytes);
     await tester.pumpAndSettle();
     expect(fileActions.savedFileNames, ['dodam-report-501.pdf']);
@@ -177,7 +177,7 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('report-save-pdf')));
     await tester.pumpAndSettle();
 
-    expect(composer.capturedSizes, hasLength(2));
+    expect(composer.requests, hasLength(2));
     expect(fileActions.savedFileNames, ['dodam-report-501.pdf']);
   });
 
@@ -927,12 +927,14 @@ final class _PdfComposer {
   final Completer<Uint8List>? pending;
   Object? error;
   final Uint8List bytes;
-  final List<Size> capturedSizes = [];
-  final List<RenderRepaintBoundary> capturedBoundaries = [];
+  final List<ReportPdfRequest> requests = [];
 
-  Future<Uint8List> call(RenderRepaintBoundary boundary) async {
-    capturedSizes.add(boundary.size);
-    capturedBoundaries.add(boundary);
+  /// 요청마다 넘어온 섹션 경계다. 마지막 요청 것만 보면 충분하다.
+  List<RenderRepaintBoundary> get capturedSections =>
+      requests.isEmpty ? const [] : requests.last.sections;
+
+  Future<Uint8List> call(ReportPdfRequest request) async {
+    requests.add(request);
     if (error case final failure?) throw failure;
     return pending?.future ?? bytes;
   }

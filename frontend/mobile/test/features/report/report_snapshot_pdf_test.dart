@@ -1,5 +1,4 @@
 import 'dart:typed_data';
-import 'dart:ui' as ui;
 
 import 'package:dodam/features/report/presentation/services/report_snapshot_pdf.dart';
 import 'package:flutter/material.dart';
@@ -8,113 +7,121 @@ import 'package:flutter_test/flutter_test.dart';
 
 /// 실제 캡처는 프레임을 읽으므로 [WidgetTester.runAsync] 안에서만 완료된다.
 void main() {
-  testWidgets('스크롤 밖 내용까지 담아 여러 장의 PDF로 만든다', (tester) async {
-    tester.view.physicalSize = const Size(400, 600);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final key = GlobalKey();
-    await tester.pumpWidget(_TallReport(snapshotKey: key));
-    await tester.pumpAndSettle();
-
-    final boundary =
-        key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-    // 화면(600)보다 훨씬 긴 본문이 한 경계에 들어 있어야 한다.
-    expect(boundary.size.height, greaterThan(2000));
+  testWidgets('짧은 섹션 여러 개는 한 장에 모아 담는다', (tester) async {
+    final keys = await _pumpSections(
+      tester,
+      // 세 섹션을 합쳐도 A4 한 장(폭의 약 1.3배 높이)에 들어간다.
+      heights: const [120, 140, 130],
+    );
 
     late final Uint8List bytes;
-    late final List<Uint8List> pages;
     await tester.runAsync(() async {
-      bytes = await ReportSnapshotPdf.compose(boundary, pixelRatio: 1);
-      final image = await boundary.toImage();
-      pages = await ReportSnapshotPdf.sliceToPages(image);
-      image.dispose();
+      bytes = await ReportSnapshotPdf.compose(
+        ReportPdfRequest(sections: _boundaries(keys), title: '도담 관찰 리포트'),
+        pixelRatio: 1,
+      );
     });
 
     expect(bytes.sublist(0, 5), [0x25, 0x50, 0x44, 0x46, 0x2D]);
-    // 폭 400 이면 A4 비율 한 장이 약 566px 다. 2400px 본문은 여러 장으로 나뉜다.
-    expect(pages.length, greaterThan(3));
-    for (final page in pages) {
-      // 각 장은 PNG 로 굽는다.
-      expect(page.sublist(0, 4), [0x89, 0x50, 0x4E, 0x47]);
-    }
+    expect(_pageCount(bytes), 1);
   });
 
-  testWidgets('한 장에 담기는 짧은 화면은 한 페이지로 만든다', (tester) async {
-    tester.view.physicalSize = const Size(400, 300);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.reset);
-    final key = GlobalKey();
-    await tester.pumpWidget(
-      _TallReport(snapshotKey: key, sectionCount: 1, sectionHeight: 120),
-    );
-    await tester.pumpAndSettle();
+  testWidgets('한 장에 안 들어가는 섹션은 자르지 않고 다음 장으로 넘긴다', (tester) async {
+    // 각 섹션이 한 장의 3분의 2를 차지해 두 개가 한 장에 못 들어간다.
+    final keys = await _pumpSections(tester, heights: const [360, 360, 360]);
 
-    final boundary =
-        key.currentContext!.findRenderObject()! as RenderRepaintBoundary;
-    late final List<Uint8List> pages;
+    late final Uint8List bytes;
     await tester.runAsync(() async {
-      final image = await boundary.toImage();
-      pages = await ReportSnapshotPdf.sliceToPages(image);
-      image.dispose();
+      bytes = await ReportSnapshotPdf.compose(
+        ReportPdfRequest(sections: _boundaries(keys), title: '도담 관찰 리포트'),
+        pixelRatio: 1,
+      );
     });
 
-    expect(pages, hasLength(1));
+    // 섹션을 쪼개지 않으므로 한 장에 하나씩 들어가 세 장이 된다.
+    expect(_pageCount(bytes), 3);
   });
 
-  test('빈 이미지도 최소 한 장은 만든다', () async {
-    final recorder = ui.PictureRecorder();
-    Canvas(recorder).drawRect(
-      const Rect.fromLTWH(0, 0, 10, 1),
-      Paint()..color = const Color(0xFFFFFFFF),
-    );
-    final picture = recorder.endRecording();
-    final image = await picture.toImage(10, 1);
-    picture.dispose();
+  testWidgets('한 장보다 긴 섹션만 그 섹션을 나눈다', (tester) async {
+    final keys = await _pumpSections(tester, heights: const [1600]);
 
-    final pages = await ReportSnapshotPdf.sliceToPages(image);
-    image.dispose();
+    late final Uint8List bytes;
+    await tester.runAsync(() async {
+      bytes = await ReportSnapshotPdf.compose(
+        ReportPdfRequest(sections: _boundaries(keys), title: '도담 관찰 리포트'),
+        pixelRatio: 1,
+      );
+    });
 
-    expect(pages, hasLength(1));
+    expect(_pageCount(bytes), greaterThan(1));
+  });
+
+  testWidgets('배치되지 않은 섹션은 건너뛴다', (tester) async {
+    final keys = await _pumpSections(tester, heights: const [200]);
+    final sections = [
+      ..._boundaries(keys),
+      // 화면에서 떨어진 경계가 섞여도 저장이 실패하면 안 된다.
+      RenderRepaintBoundary(),
+    ];
+
+    late final Uint8List bytes;
+    await tester.runAsync(() async {
+      bytes = await ReportSnapshotPdf.compose(
+        ReportPdfRequest(sections: sections, title: '도담 관찰 리포트'),
+        pixelRatio: 1,
+      );
+    });
+
+    expect(_pageCount(bytes), 1);
   });
 }
 
-/// 실제 리포트처럼 스크롤 밖으로 흐르는 본문이다.
-class _TallReport extends StatelessWidget {
-  const _TallReport({
-    required this.snapshotKey,
-    this.sectionCount = 8,
-    this.sectionHeight = 300,
-  });
-
-  final GlobalKey snapshotKey;
-  final int sectionCount;
-  final double sectionHeight;
-
-  @override
-  Widget build(BuildContext context) => MaterialApp(
-    home: Scaffold(
-      body: SingleChildScrollView(
-        child: RepaintBoundary(
-          key: snapshotKey,
-          child: ColoredBox(
-            color: const Color(0xFFFFFDF7),
-            child: Column(
-              children: [
-                for (var index = 0; index < sectionCount; index++)
-                  Container(
-                    height: sectionHeight,
-                    margin: const EdgeInsets.all(8),
-                    color: index.isEven
-                        ? const Color(0xFFEAD98A)
-                        : const Color(0xFFB9D3A0),
-                    alignment: Alignment.center,
-                    child: Text('섹션 $index'),
+/// 섹션마다 캡처 경계를 두고 화면에 올린다. 실제 리포트 화면과 같은 구조다.
+Future<List<GlobalKey>> _pumpSections(
+  WidgetTester tester, {
+  required List<double> heights,
+}) async {
+  tester.view.physicalSize = const Size(400, 700);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  final keys = [
+    for (var index = 0; index < heights.length; index++) GlobalKey(),
+  ];
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: Column(
+            children: [
+              for (final (index, height) in heights.indexed)
+                RepaintBoundary(
+                  key: keys[index],
+                  child: ColoredBox(
+                    color: const Color(0xFFFFFDF7),
+                    child: SizedBox(
+                      height: height,
+                      width: double.infinity,
+                      child: Center(child: Text('섹션 $index')),
+                    ),
                   ),
-              ],
-            ),
+                ),
+            ],
           ),
         ),
       ),
     ),
   );
+  await tester.pumpAndSettle();
+  return keys;
+}
+
+List<RenderRepaintBoundary> _boundaries(List<GlobalKey> keys) => [
+  for (final key in keys)
+    key.currentContext!.findRenderObject()! as RenderRepaintBoundary,
+];
+
+/// PDF 안의 `/Type /Page` 개수를 센다. 페이지 트리를 파싱하지 않고 세는 값이라 충분하다.
+int _pageCount(Uint8List bytes) {
+  final text = String.fromCharCodes(bytes);
+  return RegExp(r'/Type\s*/Page[^s]').allMatches(text).length;
 }
