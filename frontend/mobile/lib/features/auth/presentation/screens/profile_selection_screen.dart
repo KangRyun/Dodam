@@ -48,40 +48,160 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
   int? _navigatingChildId;
   bool _settingsSheetOpen = false;
 
+  /// 편집 모드에서 삭제하려고 고른 아이들. 컨트롤러의 "활동 대상 아동" 선택과는
+  /// 완전히 별개다 — 그쪽은 다음 활동을 누구로 시작할지를 가리킨다.
+  final Set<int> _selectedForDelete = <int>{};
+
+  /// 삭제가 진행 중인지. 여러 건을 순차로 지우는 동안 재탭·다른 이동을 막는다.
+  bool _deleting = false;
+
   bool get _isChildListReady =>
       widget.controller.status == ChildListStatus.success ||
       widget.controller.status == ChildListStatus.empty;
 
+  /// 편집 모드로 들어갈 수 있는 구성인지. 설정 sheet의 "프로필 편집"이 실제로
+  /// 모드를 켜는 조건과 같게 둔다.
+  bool get _canEditProfiles => widget.onEditChild != null;
+
+  bool get _isBusy =>
+      _guardianNavigationStarted || _navigatingChildId != null || _deleting;
+
   void _selectGuardian() {
-    if (!_isChildListReady ||
-        _guardianNavigationStarted ||
-        _navigatingChildId != null) {
-      return;
-    }
+    if (!_isChildListReady || _isBusy) return;
     _guardianNavigationStarted = true;
     widget.onGuardianSelected(context);
   }
 
   void _selectChild(ChildSummaryDto child) {
-    if (!_isChildListReady ||
-        _guardianNavigationStarted ||
-        _navigatingChildId != null) {
-      return;
-    }
-    if (_isEditingProfiles && widget.onEditChild != null) {
-      widget.onEditChild!(context, child);
+    if (!_isChildListReady || _isBusy) return;
+    // 편집 모드의 탭은 삭제 대상 고르기다. 개별 편집은 카드의 연필로 간다.
+    if (_isEditingProfiles) {
+      _toggleDeleteSelection(child);
       return;
     }
     _navigatingChildId = child.childId;
     widget.onChildSelected(context, child);
   }
 
+  /// 카드를 길게 눌러 편집 모드로 들어가며 그 아이를 바로 고른다(사진앱 관례).
+  void _longPressChild(ChildSummaryDto child) {
+    if (!_isChildListReady || _isBusy || !_canEditProfiles) return;
+    if (_isEditingProfiles) {
+      _toggleDeleteSelection(child);
+      return;
+    }
+    setState(() {
+      _isEditingProfiles = true;
+      _selectedForDelete
+        ..clear()
+        ..add(child.childId);
+    });
+  }
+
+  void _toggleDeleteSelection(ChildSummaryDto child) {
+    setState(() {
+      if (!_selectedForDelete.remove(child.childId)) {
+        _selectedForDelete.add(child.childId);
+      }
+    });
+  }
+
+  void _editChild(ChildSummaryDto child) {
+    if (_isBusy) return;
+    widget.onEditChild?.call(context, child);
+  }
+
   void _toggleProfileEditing() {
-    if (widget.onEditChild != null) {
-      setState(() => _isEditingProfiles = !_isEditingProfiles);
+    if (_canEditProfiles) {
+      setState(() {
+        _isEditingProfiles = !_isEditingProfiles;
+        if (!_isEditingProfiles) _selectedForDelete.clear();
+      });
       return;
     }
     widget.onEditProfiles?.call(context);
+  }
+
+  void _finishEditing() {
+    if (_deleting) return;
+    setState(() {
+      _isEditingProfiles = false;
+      _selectedForDelete.clear();
+    });
+  }
+
+  /// 고른 아이들을 확인 뒤 순차로 지운다.
+  ///
+  /// 순차로 도는 이유: [GuardianChildController.deleteChild]가 등록 상태를
+  /// single-flight로 잠그기 때문에 동시에 부르면 뒤엣것이 그대로 실패한다.
+  /// 각 삭제가 목록까지 갱신하므로 따로 새로고침하지 않는다.
+  Future<void> _deleteSelectedProfiles() async {
+    if (_deleting || _selectedForDelete.isEmpty) return;
+    final targets = widget.controller.children
+        .where((child) => _selectedForDelete.contains(child.childId))
+        .toList(growable: false);
+    if (targets.isEmpty) return;
+    if (!await _confirmDelete(targets) || !mounted) return;
+
+    setState(() => _deleting = true);
+    var failed = 0;
+    for (final target in targets) {
+      final deleted = await widget.controller.deleteChild(target.childId);
+      if (!mounted) return;
+      if (deleted) {
+        _selectedForDelete.remove(target.childId);
+      } else {
+        failed += 1;
+      }
+    }
+    setState(() {
+      _deleting = false;
+      // 남은 아이가 없으면 편집할 대상도 없다.
+      if (widget.controller.children.isEmpty) {
+        _isEditingProfiles = false;
+        _selectedForDelete.clear();
+      }
+    });
+    if (failed == 0) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          failed == targets.length
+              ? '아이 프로필을 삭제하지 못했어요. 다시 시도해 주세요.'
+              : '$failed명의 프로필을 삭제하지 못했어요. 다시 시도해 주세요.',
+        ),
+      ),
+    );
+  }
+
+  Future<bool> _confirmDelete(List<ChildSummaryDto> targets) async {
+    final single = targets.length == 1;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        key: const ValueKey('delete-profiles-dialog'),
+        title: const Text('아이 프로필을 삭제할까요?'),
+        content: Text(
+          single
+              ? '${targets.single.nickname}의 그림과 대화, 활동 기록도 함께 삭제되며 되돌릴 수 없어요.'
+              : '선택한 ${targets.length}명의 프로필을 삭제할까요? '
+                    '그림·대화·활동 기록도 함께 삭제되며 되돌릴 수 없어요.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('취소'),
+          ),
+          TextButton(
+            key: const ValueKey('delete-profiles-confirm'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            style: TextButton.styleFrom(foregroundColor: AppColors.error),
+            child: const Text('삭제'),
+          ),
+        ],
+      ),
+    );
+    return confirmed ?? false;
   }
 
   Future<void> _showSettings() async {
@@ -139,10 +259,7 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
                       _ProfileTopBar(onSettings: _showSettings),
                       const SizedBox(height: AppSpacing.lg),
                       _ProfileHeader(
-                        guardianEnabled:
-                            _isChildListReady &&
-                            !_guardianNavigationStarted &&
-                            _navigatingChildId == null,
+                        guardianEnabled: _isChildListReady && !_isBusy,
                         onGuardianSelected: _selectGuardian,
                       ),
                       const SizedBox(height: AppSpacing.xl),
@@ -150,10 +267,18 @@ class _ProfileSelectionScreenState extends State<ProfileSelectionScreen> {
                         controller: widget.controller,
                         imageFetcher: widget.imageFetcher,
                         isEditing: _isEditingProfiles,
-                        navigationEnabled:
-                            !_guardianNavigationStarted &&
-                            _navigatingChildId == null,
+                        navigationEnabled: !_isBusy,
+                        selectedForDelete: _selectedForDelete,
+                        deleting: _deleting,
                         onChildSelected: _selectChild,
+                        onChildLongPressed: _canEditProfiles
+                            ? _longPressChild
+                            : null,
+                        onEditChild: widget.onEditChild == null
+                            ? null
+                            : _editChild,
+                        onDeleteSelected: _deleteSelectedProfiles,
+                        onFinishEditing: _finishEditing,
                         onAddChild: widget.onAddChild == null
                             ? null
                             : () => widget.onAddChild!(context),
@@ -387,7 +512,13 @@ class _ChildProfileSection extends StatelessWidget {
     required this.imageFetcher,
     required this.isEditing,
     required this.navigationEnabled,
+    required this.selectedForDelete,
+    required this.deleting,
     required this.onChildSelected,
+    required this.onDeleteSelected,
+    required this.onFinishEditing,
+    this.onChildLongPressed,
+    this.onEditChild,
     this.onAddChild,
   });
 
@@ -395,7 +526,13 @@ class _ChildProfileSection extends StatelessWidget {
   final ImageByteFetcher? imageFetcher;
   final bool isEditing;
   final bool navigationEnabled;
+  final Set<int> selectedForDelete;
+  final bool deleting;
   final ValueChanged<ChildSummaryDto> onChildSelected;
+  final VoidCallback onDeleteSelected;
+  final VoidCallback onFinishEditing;
+  final ValueChanged<ChildSummaryDto>? onChildLongPressed;
+  final ValueChanged<ChildSummaryDto>? onEditChild;
   final VoidCallback? onAddChild;
 
   @override
@@ -421,6 +558,13 @@ class _ChildProfileSection extends StatelessWidget {
                 fontWeight: FontWeight.w700,
               ),
             ),
+          ),
+          const SizedBox(height: AppSpacing.md),
+          _EditingActionBar(
+            selectedCount: selectedForDelete.length,
+            deleting: deleting,
+            onDeleteSelected: onDeleteSelected,
+            onFinishEditing: onFinishEditing,
           ),
           const SizedBox(height: AppSpacing.md),
         ],
@@ -508,13 +652,86 @@ class _ChildProfileSection extends StatelessWidget {
               isSelected:
                   controller.hasExplicitChildSelection &&
                   controller.selectedChildId == child.childId,
+              isEditing: isEditing,
+              deleteSelected: selectedForDelete.contains(child.childId),
               enabled: navigationEnabled,
               sortOrder: 2 + (index / 100),
               onTap: () => onChildSelected(child),
+              onLongPress: onChildLongPressed == null
+                  ? null
+                  : () => onChildLongPressed!(child),
+              onEdit: isEditing && onEditChild != null
+                  ? () => onEditChild!(child)
+                  : null,
             );
           },
         ),
       ),
+    );
+  }
+}
+
+/// 편집 모드에서 고른 아이들에 대한 일괄 동작 줄.
+class _EditingActionBar extends StatelessWidget {
+  const _EditingActionBar({
+    required this.selectedCount,
+    required this.deleting,
+    required this.onDeleteSelected,
+    required this.onFinishEditing,
+  });
+
+  final int selectedCount;
+  final bool deleting;
+  final VoidCallback onDeleteSelected;
+  final VoidCallback onFinishEditing;
+
+  @override
+  Widget build(BuildContext context) {
+    final canDelete = selectedCount > 0 && !deleting;
+    return Row(
+      children: [
+        Expanded(
+          child: SizedBox(
+            height: AppSizes.minTouchTarget,
+            child: FilledButton.icon(
+              key: const ValueKey('delete-selected-profiles'),
+              onPressed: canDelete ? onDeleteSelected : null,
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.error,
+                foregroundColor: Colors.white,
+              ),
+              icon: const Icon(Icons.delete_outline_rounded, size: 20),
+              // 진행 표시로 무한 스피너를 두지 않는다 — 비활성 상태로만 알린다.
+              label: Text(
+                deleting
+                    ? '삭제하는 중'
+                    : selectedCount == 0
+                    ? '삭제할 아이를 선택해 주세요'
+                    : '선택한 $selectedCount명 삭제',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w800),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        SizedBox(
+          height: AppSizes.minTouchTarget,
+          child: TextButton(
+            key: const ValueKey('finish-profile-editing'),
+            onPressed: deleting ? null : onFinishEditing,
+            child: const Text(
+              '완료',
+              maxLines: 1,
+              style: TextStyle(
+                color: _ProfileColors.orangeDark,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
@@ -524,18 +741,28 @@ class _ChildProfileCard extends StatelessWidget {
     required this.child,
     required this.imageFetcher,
     required this.isSelected,
+    required this.isEditing,
+    required this.deleteSelected,
     required this.enabled,
     required this.sortOrder,
     required this.onTap,
+    this.onLongPress,
+    this.onEdit,
     super.key,
   });
 
   final ChildSummaryDto child;
   final ImageByteFetcher? imageFetcher;
+
+  /// 컨트롤러가 가리키는 활동 대상 아동인지(삭제 선택과 별개).
   final bool isSelected;
+  final bool isEditing;
+  final bool deleteSelected;
   final bool enabled;
   final double sortOrder;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
+  final VoidCallback? onEdit;
 
   String get _label {
     final nickname = child.nickname.trim();
@@ -549,26 +776,74 @@ class _ChildProfileCard extends StatelessWidget {
     semanticLabel: '${child.nickname} 도담이',
   );
 
+  /// 편집 모드에서는 탭이 "삭제 대상 고르기"라 안내도 그렇게 읽혀야 한다.
+  String get _semanticsLabel {
+    if (isEditing) {
+      return '$_label 삭제 선택${deleteSelected ? ', 선택됨' : ''}';
+    }
+    return '$_label 아이 프로필 선택${isSelected ? ', 선택됨' : ''}';
+  }
+
   @override
-  Widget build(BuildContext context) => Semantics(
+  Widget build(BuildContext context) {
+    final card = _buildCard(context);
+    if (onEdit == null) return card;
+    // 연필은 카드와 형제 노드로 둔다. 카드 semantics 안에 넣으면 "프로필 선택"
+    // 라벨에 편집 버튼이 합쳐져 무엇을 누르는지 읽히지 않는다.
+    return Stack(
+      children: [
+        Positioned.fill(child: card),
+        Positioned(right: 0, bottom: 0, child: _buildEditButton()),
+      ],
+    );
+  }
+
+  Widget _buildEditButton() => Semantics(
+    sortKey: OrdinalSortKey(sortOrder + 0.001),
+    button: true,
+    label: '${child.nickname.trim()} 프로필 편집',
+    excludeSemantics: true,
+    child: SizedBox.square(
+      dimension: AppSizes.minTouchTarget,
+      child: IconButton(
+        key: ValueKey('child-profile-edit-${child.childId}'),
+        tooltip: '프로필 편집',
+        onPressed: onEdit,
+        style: IconButton.styleFrom(
+          backgroundColor: AppColors.surface,
+          foregroundColor: _ProfileColors.orangeDark,
+          side: const BorderSide(color: _ProfileColors.orange),
+          padding: EdgeInsets.zero,
+        ),
+        icon: const Icon(Icons.edit_outlined, size: 18),
+      ),
+    ),
+  );
+
+  Widget _buildCard(BuildContext context) => Semantics(
     sortKey: OrdinalSortKey(sortOrder),
     button: true,
     enabled: enabled,
-    selected: isSelected,
-    label: '$_label 아이 프로필 선택${isSelected ? ', 선택됨' : ''}',
+    selected: isEditing ? deleteSelected : isSelected,
+    label: _semanticsLabel,
     child: Material(
       color: Colors.transparent,
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadius.lg),
         onTap: enabled ? onTap : null,
+        onLongPress: enabled ? onLongPress : null,
         child: Container(
           padding: const EdgeInsets.all(AppSpacing.sm),
           decoration: BoxDecoration(
             color: AppColors.surface.withValues(alpha: 0.88),
             borderRadius: BorderRadius.circular(AppRadius.lg),
             border: Border.all(
-              color: isSelected ? _ProfileColors.orange : AppColors.outline,
-              width: isSelected ? 3 : 1,
+              color: deleteSelected
+                  ? AppColors.error
+                  : isSelected
+                  ? _ProfileColors.orange
+                  : AppColors.outline,
+              width: deleteSelected || isSelected ? 3 : 1,
             ),
           ),
           child: LayoutBuilder(
@@ -617,6 +892,29 @@ class _ChildProfileCard extends StatelessWidget {
                             height: 30,
                             decoration: const BoxDecoration(
                               color: _ProfileColors.orange,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.check_rounded,
+                              color: Colors.white,
+                              size: 21,
+                            ),
+                          ),
+                        ),
+                      // 삭제 선택 표시는 활동 대상 표시(주황·오른쪽)와 색도 자리도
+                      // 겹치지 않게 둔다. 두 표시가 같이 켜질 수 있다.
+                      if (deleteSelected)
+                        Positioned(
+                          top: -4,
+                          left: -4,
+                          child: Container(
+                            key: ValueKey(
+                              'child-profile-delete-selected-${child.childId}',
+                            ),
+                            width: 30,
+                            height: 30,
+                            decoration: const BoxDecoration(
+                              color: AppColors.error,
                               shape: BoxShape.circle,
                             ),
                             child: const Icon(
