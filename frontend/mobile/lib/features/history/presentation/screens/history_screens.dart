@@ -647,7 +647,11 @@ class _ArchiveHero extends StatelessWidget {
                       Semantics(
                         header: true,
                         child: Text(
-                          '활동 기록',
+                          // 셸 탭(`embedded`)에는 상단 페이지 타이틀 "활동 기록"이
+                          // 이미 있으므로 배너 큰 제목은 설정·알림 탭처럼 서술형으로
+                          // 둔다. 단독 라우트에는 그 타이틀이 없어 배너가 화면
+                          // 이름을 대신 말해야 한다(S15P11B209-948).
+                          embedded ? '기록을 한 권씩 살펴봐요' : '활동 기록',
                           style: TextStyle(
                             color: _ArchiveColors.heroForest,
                             fontSize: compact ? 23 : 27,
@@ -1340,14 +1344,17 @@ class _PreviewPaneState extends State<_PreviewPane> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
+                // 히어로 배너와 같은 세이지+짙은 초록 조합을 쓴다. 배너는 밝고
+                // 이 헤더만 짙은 초록이라 같은 화면에서 두 결이 부딪혔다
+                // (S15P11B209-948). 대비는 배너에서 이미 AA를 넘긴 짝이다.
                 Container(
-                  color: _ArchiveColors.forest,
+                  color: _ArchiveColors.heroSage,
                   padding: const EdgeInsets.all(AppSpacing.md),
                   child: Row(
                     children: [
                       const Icon(
                         Icons.menu_book_rounded,
-                        color: _ArchiveColors.brassSoft,
+                        color: _ArchiveColors.heroWalnut,
                         size: 28,
                       ),
                       const SizedBox(width: AppSpacing.sm),
@@ -1358,7 +1365,7 @@ class _PreviewPaneState extends State<_PreviewPane> {
                             const Text(
                               '펼친 기록서',
                               style: TextStyle(
-                                color: _ArchiveColors.brassSoft,
+                                color: _ArchiveColors.heroForest,
                                 fontSize: 12,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -1369,7 +1376,7 @@ class _PreviewPaneState extends State<_PreviewPane> {
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                color: Colors.white,
+                                color: _ArchiveColors.heroForest,
                                 fontSize: 20,
                                 height: 1.25,
                                 fontWeight: FontWeight.w900,

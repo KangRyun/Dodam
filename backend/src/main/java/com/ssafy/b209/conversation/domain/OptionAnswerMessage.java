@@ -38,6 +38,16 @@ public class OptionAnswerMessage {
   @Column(name = "needs_guardian_confirmation", nullable = false)
   private boolean needsGuardianConfirmation;
 
+  /**
+   * 음성 답변 행의 STT 처리 상태이며 이 Entity는 읽기만 한다.
+   *
+   * <p>OPTION_ANSWER 행은 이 값을 쓰지 않으므로 {@code insertable=false}·{@code updatable=false}로 두어 저장 경로를
+   * 그대로 유지한다. 중복 답변 판정에서 실패한 음성 답변을 제외하려고 매핑만 추가했다({@code
+   * OptionAnswerMessageRepository.existsAnswerForQuestion}).
+   */
+  @Column(name = "speech_status", insertable = false, updatable = false)
+  private String speechStatus;
+
   @Column(name = "is_skipped", nullable = false)
   private boolean skipped;
 

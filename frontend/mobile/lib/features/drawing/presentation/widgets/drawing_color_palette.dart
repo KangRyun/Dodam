@@ -105,6 +105,8 @@ final class DrawingColorPalette extends StatelessWidget {
     required this.value,
     required this.previousColor,
     required this.onChanged,
+    required this.onCancel,
+    required this.onConfirm,
     this.recentColors = const [],
     super.key,
   });
@@ -112,6 +114,8 @@ final class DrawingColorPalette extends StatelessWidget {
   final HSVColor value;
   final Color previousColor;
   final ValueChanged<HSVColor> onChanged;
+  final VoidCallback onCancel;
+  final VoidCallback onConfirm;
   final List<Color> recentColors;
 
   static const _horizontalPadding = 16.0;
@@ -138,56 +142,79 @@ final class DrawingColorPalette extends StatelessWidget {
           );
           final planeHeight = math.min(220.0, planeWidth * .75);
 
-          return Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _SaturationValuePlane(
-                    value: value,
-                    width: planeWidth,
-                    height: planeHeight,
-                    onChanged: onChanged,
-                  ),
-                  const SizedBox(width: _controlGap),
-                  _HueBar(
-                    value: value,
-                    height: planeHeight,
-                    onChanged: onChanged,
+          return SingleChildScrollView(
+            key: const ValueKey('drawing-color-scroll'),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _SaturationValuePlane(
+                      value: value,
+                      width: planeWidth,
+                      height: planeHeight,
+                      onChanged: onChanged,
+                    ),
+                    const SizedBox(width: _controlGap),
+                    _HueBar(
+                      value: value,
+                      height: planeHeight,
+                      onChanged: onChanged,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                _ChannelSliders(value: value, onChanged: onChanged),
+                if (recentColors.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  _RecentColors(
+                    colors: recentColors.take(10).toList(growable: false),
+                    selectedColor: value.toColor(),
+                    onSelected: (color) => onChanged(HSVColor.fromColor(color)),
                   ),
                 ],
-              ),
-              const SizedBox(height: 12),
-              _ChannelSliders(value: value, onChanged: onChanged),
-              if (recentColors.isNotEmpty) ...[
-                const SizedBox(height: 12),
-                _RecentColors(
-                  colors: recentColors.take(10).toList(growable: false),
-                  selectedColor: value.toColor(),
-                  onSelected: (color) => onChanged(HSVColor.fromColor(color)),
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    _ColorPreview(
+                      key: const ValueKey('drawing-color-current'),
+                      label: '현재 색상',
+                      roleLabel: '현재',
+                      color: value.toColor(),
+                    ),
+                    const SizedBox(width: 12),
+                    _ColorPreview(
+                      key: const ValueKey('drawing-color-previous'),
+                      label: '이전 색상',
+                      roleLabel: '이전',
+                      color: previousColor,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        key: const ValueKey('drawing-color-cancel'),
+                        onPressed: onCancel,
+                        child: const Text('닫기'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: FilledButton(
+                        key: const ValueKey('drawing-color-confirm'),
+                        onPressed: onConfirm,
+                        child: const Text('선택'),
+                      ),
+                    ),
+                  ],
                 ),
               ],
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  _ColorPreview(
-                    key: const ValueKey('drawing-color-current'),
-                    label: '현재 색상',
-                    roleLabel: '현재',
-                    color: value.toColor(),
-                  ),
-                  const SizedBox(width: 12),
-                  _ColorPreview(
-                    key: const ValueKey('drawing-color-previous'),
-                    label: '이전 색상',
-                    roleLabel: '이전',
-                    color: previousColor,
-                  ),
-                ],
-              ),
-            ],
+            ),
           );
         },
       ),

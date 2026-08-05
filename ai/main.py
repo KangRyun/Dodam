@@ -299,12 +299,33 @@ async def internal_speech_stt(
         ) as tmp:
             tmp.write(await file.read())
             tmp_path = tmp.name
-        text = stt_client.transcribe(tmp_path)
+        result = stt_client.transcribe_detailed(tmp_path)
+        # status·failureReason·needsConfirmation은 정본 §19.6이 요구하는 필드이며 기존
+        #   as-built 응답(text·confidence·modelName·processingTimeMs)에 **덧붙인다.**
+        #   구 BE가 배포돼 있어도 모르는 필드는 무시하므로 배포 순서에 제약이 없다.
+        #   confidence는 계속 null이다 — verbose_json의 avg_logprob는 확률이 아니라 로그
+        #   확률이고, 0~1로 환산하면 우리가 만들어낸 수치가 DB에 남는다(지어내지 않는다).
         return {
-            "text": text,
+            "text": result.text,
             "confidence": None,
             "modelName": config.STT_MODEL,
             "processingTimeMs": int((time.monotonic() - started_at) * 1000),
+            "status": result.status,
+            "failureReason": result.failure_reason,
+            "needsConfirmation": result.needs_confirmation,
+        }
+    except stt_client.SttAudioError as e:
+        # 오디오 자체 문제(형식·시간 초과)는 상류 장애가 아니다. 200 + status=FAILED로
+        #   알려 BE가 재시도 없이 FAILED로 끝내고 앱이 선택지를 띄우게 한다(정본 §19.6).
+        #   RuntimeError 하위라 아래 502 분기보다 **먼저** 와야 한다.
+        return {
+            "text": "",
+            "confidence": None,
+            "modelName": config.STT_MODEL,
+            "processingTimeMs": int((time.monotonic() - started_at) * 1000),
+            "status": "FAILED",
+            "failureReason": e.failure_reason,
+            "needsConfirmation": False,
         }
     except (RuntimeError, OSError):
         # OSError까지 잡는다. 임시파일·디스크 오류가 500으로 누출되면 BE가 상류 장애로

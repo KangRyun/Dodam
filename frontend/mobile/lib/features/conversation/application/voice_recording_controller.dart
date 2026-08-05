@@ -29,6 +29,7 @@ final class VoiceRecordingController extends ChangeNotifier {
     this.maximumDuration = const Duration(minutes: 1),
     this.amplitudeSampleInterval = const Duration(milliseconds: 200),
     this.speechThreshold = -35,
+    this.speechConfirmSamples = 3,
     this.beforeStart,
   });
 
@@ -39,6 +40,15 @@ final class VoiceRecordingController extends ChangeNotifier {
   final Duration maximumDuration;
   final Duration amplitudeSampleInterval;
   final double speechThreshold;
+
+  /// 발화로 확정하기까지 필요한 연속 초과 샘플 수.
+  ///
+  /// 한 샘플만 임계를 넘어도 발화로 확정하면 에어컨·문 닫는 소리·형제 목소리 같은
+  /// 순간 잡음이 "아이가 말했다"가 된다. 그러면 무음 타임아웃(선택지 노출) 경로가
+  /// 막히고, 잡음만 담긴 녹음이 업로드돼 STT가 학습 데이터 정형구를 만들어낸다
+  /// (2026-08-05 실측: 무음 녹음이 "구독, 좋아요 …"로 저장됨).
+  /// 기본 3샘플 = 600ms 연속 — 말소리는 이보다 길고, 순간 잡음은 이보다 짧다.
+  final int speechConfirmSamples;
   final Future<void> Function()? beforeStart;
   final Stopwatch _stopwatch = Stopwatch();
   Timer? _ticker;
@@ -49,6 +59,7 @@ final class VoiceRecordingController extends ChangeNotifier {
   VoiceRecording? _recording;
   Object? _lastError;
   bool _hasDetectedSpeech = false;
+  int _consecutiveSpeechSamples = 0;
   Duration? _lastSpeechAt;
   DateTime? _startedAt;
 
@@ -92,6 +103,7 @@ final class VoiceRecordingController extends ChangeNotifier {
     _recording = null;
     _lastError = null;
     _hasDetectedSpeech = false;
+    _consecutiveSpeechSamples = 0;
     _lastSpeechAt = null;
     _startedAt = null;
     _status = VoiceRecordingStatus.idle;
@@ -130,6 +142,7 @@ final class VoiceRecordingController extends ChangeNotifier {
     _recording = null;
     _lastError = null;
     _hasDetectedSpeech = false;
+    _consecutiveSpeechSamples = 0;
     _lastSpeechAt = null;
     notifyListeners();
     try {
@@ -245,11 +258,18 @@ final class VoiceRecordingController extends ChangeNotifier {
       final amplitude = await _recorder.readAmplitude();
       final elapsed = _stopwatch.elapsed;
       if (amplitude >= speechThreshold) {
-        _lastSpeechAt = elapsed;
-        if (!_hasDetectedSpeech) {
-          _hasDetectedSpeech = true;
-          notifyListeners();
+        _consecutiveSpeechSamples += 1;
+        // 연속 초과가 기준을 채운 뒤에만 '말했다'로 본다. 그 전 샘플은 잡음일 수 있어
+        // 침묵 종료 판정(_lastSpeechAt)에도 쓰지 않는다 — 쓰면 잡음이 녹음을 늘린다.
+        if (_consecutiveSpeechSamples >= speechConfirmSamples) {
+          _lastSpeechAt = elapsed;
+          if (!_hasDetectedSpeech) {
+            _hasDetectedSpeech = true;
+            notifyListeners();
+          }
         }
+      } else {
+        _consecutiveSpeechSamples = 0;
       }
       if (!_hasDetectedSpeech && elapsed >= noSpeechTimeout) {
         await _moveToChoice();

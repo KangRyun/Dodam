@@ -22,6 +22,22 @@ GMS_BASE_URL = os.environ.get(
 # ── 모델 이름(엔진) ─────────────────────────────────────────────
 LLM_MODEL = os.environ.get("LLM_MODEL", "gpt-4o-mini")
 STT_MODEL = os.environ.get("STT_MODEL", "whisper-1")
+
+# ── STT 무음·저신뢰 판정 임계값 (2026-08-05) ─────────────────────
+# reason: whisper는 무음·잡음 구간에 학습 데이터 정형구("구독, 좋아요 …")를 만들어낸다.
+#   그 문장이 아이 답변으로 저장되면 하지 않은 말이 대화 기록과 리포트 근거가 된다(실측).
+#   verbose_json 세그먼트 지표로 무음·저신뢰를 걸러 실패로 돌린다(정본 §19.6·§25).
+#
+# 기준값은 whisper 디코더가 쓰는 관례값과 같다 — no_speech_threshold 0.6 /
+#   logprob_threshold -1.0. 우리는 이를 세그먼트 길이 가중 평균에 적용한다(stt_verdict).
+#   판정을 두 규칙으로 나눈 이유: 무음 확률과 인식 신뢰도는 서로 다른 실패를 말한다
+#   (들을 말이 없었다 vs 들었지만 못 알아들었다). 아이에게 줄 안내도 달라야 한다.
+STT_NO_SPEECH_PROB_MAX = float(os.environ.get("STT_NO_SPEECH_PROB_MAX", "0.6"))
+STT_AVG_LOGPROB_FAIL_MAX = float(os.environ.get("STT_AVG_LOGPROB_FAIL_MAX", "-1.0"))
+# 실패는 아니지만 확정하지도 않는 구간 — 보호자 확인 대상으로 넘긴다(정본 §25).
+STT_AVG_LOGPROB_CONFIRM_MAX = float(
+    os.environ.get("STT_AVG_LOGPROB_CONFIRM_MAX", "-0.6")
+)
 # TTS는 지시형(gpt-4o-mini-tts) — "어떻게 말할지"를 instructions로 지정 가능(곰돌이 톤).
 TTS_MODEL = os.environ.get("TTS_MODEL", "gpt-4o-mini-tts")
 TTS_VOICE = os.environ.get("TTS_VOICE", "fable")  # fable=만화적·개성 / nova=밝음 / coral=친근

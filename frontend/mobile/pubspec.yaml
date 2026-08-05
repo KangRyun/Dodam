@@ -53,6 +53,7 @@ dependencies:
   flutter_local_notifications: ^22.2.0
   webview_flutter: ^4.10.0
   camera: ^0.12.0+2
+  pdf: ^3.13.0
 
 dev_dependencies:
   flutter_test:
@@ -117,6 +118,7 @@ flutter:
     - assets/characters/emotions/
     - assets/characters/htp/
     - assets/images/role_selection/
+    - assets/images/child_register/
     - assets/scene/
     - assets/canvas/
     - assets/canvas/frame/
@@ -132,6 +134,7 @@ flutter:
     - assets/canvas/tools/purple/
     - assets/canvas/tools/charcoal/
     - assets/canvas/brushes/
+    - assets/canvas/tutorial/
 
   fonts:
     - family: NanumSquareNeo

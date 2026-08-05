@@ -9,6 +9,7 @@ import '../../../drawing/domain/photo_picker_adapter.dart';
 import '../../data/dto/child_consent_dtos.dart';
 import '../../data/dto/child_dtos.dart';
 import '../../domain/repositories/child_profile_image_repository.dart';
+import '../widgets/crayon_form_kit.dart';
 
 class ChildRegistrationScreen extends StatefulWidget {
   const ChildRegistrationScreen({
@@ -63,10 +64,12 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
     'OTHER': '기타',
   };
 
+  /// 난이도 항목. 순서가 곧 단계라 채우기 미터의 칸 수로 그대로 쓰인다.
+  /// (예전에는 앞에 이모지를 붙였지만 지금은 미터가 단계를 보여준다.)
   static const _difficulties = [
-    ('PRESCHOOL', '유아형 (만 4–6세)', '짧고 쉬운 말로 천천히 물어봐요', '🌱'),
-    ('LOWER_ELEMENTARY', '초등 저학년형 (만 7–9세)', '생각을 조금 더 끌어내는 질문을 해요', '🌿'),
-    ('UPPER_ELEMENTARY', '초등 고학년형 (만 10–12세)', '구체적인 이야기와 선택지를 함께 제시해요', '☘️'),
+    ('PRESCHOOL', '유아형 (만 4–6세)', '짧고 쉬운 말로 천천히 물어봐요'),
+    ('LOWER_ELEMENTARY', '초등 저학년형 (만 7–9세)', '생각을 조금 더 끌어내는 질문을 해요'),
+    ('UPPER_ELEMENTARY', '초등 고학년형 (만 10–12세)', '구체적인 이야기와 선택지를 함께 제시해요'),
   ];
 
   @override
@@ -558,6 +561,16 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
     backgroundColor: AppColors.canvas,
     appBar: AppTopBar(
       title: _isEditing ? '아이 프로필 편집' : '아이 등록',
+      // 등록은 도장, 편집은 렌치. 장식이므로 semantics에서 빼고 의미는 제목이
+      // 그대로 전달한다(S15P11B209-943).
+      titleLeading: Image.asset(
+        _isEditing
+            ? 'assets/images/child_register/crayon_wrench.png'
+            : 'assets/images/child_register/crayon_stamp.png',
+        height: 28,
+        fit: BoxFit.contain,
+        excludeFromSemantics: true,
+      ),
       onBack: () => Navigator.of(context).maybePop(),
     ),
     body: SafeArea(
@@ -573,29 +586,44 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _ProfilePhotoEditor(
-                    selectedPhoto: _selectedPhoto,
-                    existingUrl: _removeExistingPhoto
-                        ? null
-                        : widget.child?.profileImageUrl,
-                    imageFetcher:
-                        widget.profileImageRepository?.downloadProfileImage,
-                    isPicking: _pickingPhoto,
-                    isUploading: _uploadingPhoto,
-                    uploadProgress: _uploadProgress,
-                    errorText: _photoError,
-                    onPick: _pickProfilePhoto,
-                    onCancelSelection: _cancelSelectedPhoto,
-                    onRemove: _removePhoto,
+                  CrayonCard(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: AppSpacing.md,
+                      vertical: AppSpacing.lg,
+                    ),
+                    child: _ProfilePhotoEditor(
+                      selectedPhoto: _selectedPhoto,
+                      existingUrl: _removeExistingPhoto
+                          ? null
+                          : widget.child?.profileImageUrl,
+                      imageFetcher:
+                          widget.profileImageRepository?.downloadProfileImage,
+                      isPicking: _pickingPhoto,
+                      isUploading: _uploadingPhoto,
+                      uploadProgress: _uploadProgress,
+                      errorText: _photoError,
+                      onPick: _pickProfilePhoto,
+                      onCancelSelection: _cancelSelectedPhoto,
+                      onRemove: _removePhoto,
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.xl),
-                  AppTextField(
-                    key: const ValueKey('child-nickname'),
-                    controller: _nicknameController,
-                    label: '이름 / 애칭 *',
-                    hintText: '예: 민지',
-                    errorText: _nicknameError,
-                    textInputAction: TextInputAction.next,
+                  const CrayonSectionTitle('기본 정보'),
+                  const SizedBox(height: AppSpacing.sm),
+                  CrayonCard(
+                    borderColor: _nicknameError == null
+                        ? CrayonPalette.outline
+                        : AppColors.error,
+                    child: TextField(
+                      key: const ValueKey('child-nickname'),
+                      controller: _nicknameController,
+                      textInputAction: TextInputAction.next,
+                      style: AppTypography.body,
+                      decoration: _crayonFieldDecoration(
+                        label: '이름 / 애칭 *',
+                        errorText: _nicknameError,
+                      ).copyWith(hintText: '예: 민지'),
+                    ),
                   ),
                   const SizedBox(height: AppSpacing.md),
                   if (!_isEditing) ...[
@@ -605,40 +633,43 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                       onTap: _pickBirthDate,
                     ),
                     const SizedBox(height: AppSpacing.md),
-                    DropdownButtonFormField<String>(
-                      key: const ValueKey('guardian-relationship'),
-                      initialValue: _relationshipType,
-                      decoration: const InputDecoration(labelText: '아이와의 관계 *'),
-                      items: _relationships.entries
-                          .map(
-                            (entry) => DropdownMenuItem(
-                              value: entry.key,
-                              child: Text(entry.value),
-                            ),
-                          )
-                          .toList(growable: false),
-                      onChanged: (value) {
-                        if (value != null) {
-                          setState(() => _relationshipType = value);
-                        }
-                      },
+                    CrayonCard(
+                      child: DropdownButtonFormField<String>(
+                        key: const ValueKey('guardian-relationship'),
+                        initialValue: _relationshipType,
+                        isExpanded: true,
+                        decoration: _crayonFieldDecoration(label: '아이와의 관계 *'),
+                        style: AppTypography.body,
+                        items: _relationships.entries
+                            .map(
+                              (entry) => DropdownMenuItem(
+                                value: entry.key,
+                                child: Text(entry.value),
+                              ),
+                            )
+                            .toList(growable: false),
+                        onChanged: (value) {
+                          if (value != null) {
+                            setState(() => _relationshipType = value);
+                          }
+                        },
+                      ),
                     ),
                   ],
                   const SizedBox(height: AppSpacing.xl),
+                  const CrayonSectionTitle('질문 난이도'),
+                  const SizedBox(height: AppSpacing.xs),
                   const Text(
-                    '질문 난이도',
-                    style: TextStyle(
-                      color: AppColors.inkMuted,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w600,
-                    ),
+                    '아이 나이에 맞춰 도담이가 건네는 질문의 눈높이를 골라요.',
+                    style: TextStyle(color: AppColors.inkMuted, fontSize: 13),
                   ),
                   const SizedBox(height: AppSpacing.sm),
-                  for (final difficulty in _difficulties) ...[
-                    AppChoiceCard(
+                  for (final (level, difficulty) in _difficulties.indexed) ...[
+                    _DifficultyChoiceCard(
                       key: ValueKey('difficulty-${difficulty.$1}'),
-                      label: '${difficulty.$4} ${difficulty.$2}',
+                      label: difficulty.$2,
                       description: difficulty.$3,
+                      level: level,
                       isSelected: _questionDifficulty == difficulty.$1,
                       onTap: () =>
                           setState(() => _questionDifficulty = difficulty.$1),
@@ -664,7 +695,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                     ),
                   ],
                   const SizedBox(height: AppSpacing.lg),
-                  AppButton(
+                  CrayonButton(
                     key: const ValueKey('submit-child-registration'),
                     label: _isEditing ? '저장하기' : '등록하기',
                     isLoading:
@@ -694,6 +725,164 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   );
 }
 
+/// 크레용 카드가 테두리를 그리므로 Material 기본 밑줄·채움은 걷어낸다.
+/// 라벨·오류 문구는 그대로 둬서 검증 표시와 접근성 연결이 유지된다.
+InputDecoration _crayonFieldDecoration({
+  required String label,
+  String? errorText,
+}) => InputDecoration(
+  labelText: label,
+  errorText: errorText,
+  isDense: true,
+  contentPadding: EdgeInsets.zero,
+  border: InputBorder.none,
+  enabledBorder: InputBorder.none,
+  focusedBorder: InputBorder.none,
+  errorBorder: InputBorder.none,
+  focusedErrorBorder: InputBorder.none,
+  disabledBorder: InputBorder.none,
+  labelStyle: const TextStyle(
+    color: AppColors.inkMuted,
+    fontWeight: FontWeight.w700,
+  ),
+  floatingLabelStyle: const TextStyle(
+    color: AppColors.inkMuted,
+    fontWeight: FontWeight.w700,
+  ),
+  errorStyle: const TextStyle(
+    color: AppColors.error,
+    fontSize: 13,
+    fontWeight: FontWeight.w700,
+  ),
+);
+
+/// 난이도 선택 카드. 단계를 채우기 미터의 칸 수로 보여준다.
+///
+/// 색만으로 단계를 구분하지 않도록 (a) 채운 칸 수와 (b) 텍스트 라벨을 함께
+/// 유지한다. 미터는 장식이라 semantics에서 빼고, 카드가 라벨·설명·선택 상태를
+/// 한 번에 읽어 준다.
+class _DifficultyChoiceCard extends StatelessWidget {
+  const _DifficultyChoiceCard({
+    required this.label,
+    required this.description,
+    required this.level,
+    required this.isSelected,
+    required this.onTap,
+    super.key,
+  });
+
+  final String label;
+  final String description;
+  final int level;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  static const _fills = [
+    CrayonPalette.easyFill,
+    CrayonPalette.midFill,
+    CrayonPalette.hardFill,
+  ];
+  static const _strongs = [
+    CrayonPalette.easyStrong,
+    CrayonPalette.midStrong,
+    CrayonPalette.hardStrong,
+  ];
+  static const _tints = [
+    CrayonPalette.easyTint,
+    CrayonPalette.midTint,
+    CrayonPalette.hardTint,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    final strong = _strongs[level];
+    return Semantics(
+      button: true,
+      selected: isSelected,
+      label: '$label. $description',
+      excludeSemantics: true,
+      child: Material(
+        color: isSelected ? _tints[level] : CrayonPalette.cardFill,
+        shape: RoundedRectangleBorder(
+          borderRadius: crayonCardRadius,
+          side: BorderSide(
+            color: isSelected ? strong : CrayonPalette.outline,
+            width: isSelected ? 3 : 2.5,
+          ),
+        ),
+        child: InkWell(
+          onTap: onTap,
+          customBorder: const RoundedRectangleBorder(
+            borderRadius: crayonCardRadius,
+          ),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              minHeight: AppSizes.minTouchTarget,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
+              child: Row(
+                children: [
+                  CrayonMeter(
+                    filled: level + 1,
+                    total: _fills.length,
+                    color: _fills[level],
+                    strongColor: strong,
+                  ),
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          label,
+                          style: const TextStyle(
+                            color: AppColors.ink,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          description,
+                          style: const TextStyle(
+                            color: AppColors.inkMuted,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (isSelected) ...[
+                    const SizedBox(width: AppSpacing.sm),
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: strong,
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.check_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 아동 데이터 사용 동의 섹션.
 ///
 /// 서버가 발행한 약관을 그대로 보여주고 필수/선택 표시도 서버 값을 따른다. 기본값은
@@ -717,14 +906,7 @@ class _ConsentSection extends StatelessWidget {
   Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const Text(
-        '아이 데이터 사용 동의',
-        style: TextStyle(
-          color: AppColors.inkMuted,
-          fontSize: 15,
-          fontWeight: FontWeight.w600,
-        ),
-      ),
+      const CrayonSectionTitle('아이 데이터 사용 동의'),
       const SizedBox(height: AppSpacing.xs),
       const Text(
         '음성으로 답하기는 음성 처리 동의가 있어야 사용할 수 있어요. '
@@ -817,10 +999,11 @@ class _ProfilePhotoEditor extends StatelessWidget {
 
   bool get _hasPhoto => selectedPhoto != null || existingUrl != null;
 
+  /// 사진이 없을 때의 자리표시. 회색 인물 아이콘 대신 크레용 팔레트를 둔다.
   Widget _placeholder(BuildContext context) => const ColoredBox(
-    color: AppColors.surfaceSoft,
+    color: Color(0xFFFEF6DF),
     child: Center(
-      child: Icon(Icons.person_rounded, color: AppColors.inkMuted, size: 64),
+      child: Icon(Icons.palette_rounded, color: Color(0xFFE2B74E), size: 56),
     ),
   );
 
@@ -844,27 +1027,29 @@ class _ProfilePhotoEditor extends StatelessWidget {
           style: TextStyle(color: AppColors.inkMuted, fontSize: 13),
         ),
         const SizedBox(height: AppSpacing.md),
-        ClipOval(
-          child: SizedBox(
-            key: const ValueKey('child-profile-photo-preview'),
-            width: 132,
-            height: 132,
-            child: switch ((selectedPhoto, existingUrl, imageFetcher)) {
-              (final selected?, _, _) => Image.memory(
-                selected.photo.bytes,
-                fit: BoxFit.cover,
-                gaplessPlayback: true,
-                semanticLabel: '선택한 아이 프로필 사진',
-              ),
-              (null, final url?, final fetcher?) => AuthenticatedImage(
-                url: url,
-                fetcher: fetcher,
-                fit: BoxFit.cover,
-                semanticLabel: '현재 아이 프로필 사진',
-                placeholderBuilder: _placeholder,
-              ),
-              _ => _placeholder(context),
-            },
+        CrayonPhotoRing(
+          child: ClipOval(
+            child: SizedBox(
+              key: const ValueKey('child-profile-photo-preview'),
+              width: 132,
+              height: 132,
+              child: switch ((selectedPhoto, existingUrl, imageFetcher)) {
+                (final selected?, _, _) => Image.memory(
+                  selected.photo.bytes,
+                  fit: BoxFit.cover,
+                  gaplessPlayback: true,
+                  semanticLabel: '선택한 아이 프로필 사진',
+                ),
+                (null, final url?, final fetcher?) => AuthenticatedImage(
+                  url: url,
+                  fetcher: fetcher,
+                  fit: BoxFit.cover,
+                  semanticLabel: '현재 아이 프로필 사진',
+                  placeholderBuilder: _placeholder,
+                ),
+                _ => _placeholder(context),
+              },
+            ),
           ),
         ),
         const SizedBox(height: AppSpacing.md),
@@ -873,16 +1058,13 @@ class _ProfilePhotoEditor extends StatelessWidget {
           spacing: AppSpacing.sm,
           runSpacing: AppSpacing.sm,
           children: [
-            OutlinedButton.icon(
+            CrayonButton(
               key: const ValueKey('pick-child-profile-photo'),
+              variant: CrayonButtonVariant.outline,
+              isLoading: isPicking,
+              icon: const Icon(Icons.photo_library_outlined),
+              label: _hasPhoto ? '다시 선택' : '앨범에서 선택',
               onPressed: isPicking || isUploading ? null : onPick,
-              icon: isPicking
-                  ? const SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.photo_library_outlined),
-              label: Text(_hasPhoto ? '다시 선택' : '앨범에서 선택'),
             ),
             if (selectedPhoto != null)
               TextButton(
@@ -937,23 +1119,37 @@ class _BirthDateField extends StatelessWidget {
   final VoidCallback onTap;
 
   @override
-  Widget build(BuildContext context) => InkWell(
-    key: const ValueKey('child-birth-date'),
-    onTap: onTap,
-    borderRadius: BorderRadius.circular(AppRadius.md),
-    child: InputDecorator(
-      decoration: InputDecoration(
-        labelText: '생년월일 *',
-        errorText: errorText,
-        suffixIcon: const Icon(Icons.calendar_month_rounded),
-      ),
-      child: Text(
-        value == null
-            ? '생년월일을 선택해 주세요'
-            : '${value!.year}년 ${value!.month}월 ${value!.day}일',
-        style: TextStyle(
-          color: value == null ? AppColors.inkMuted : AppColors.ink,
-          fontSize: 16,
+  Widget build(BuildContext context) => CrayonCard(
+    padding: EdgeInsets.zero,
+    borderColor: errorText == null ? CrayonPalette.outline : AppColors.error,
+    child: Material(
+      color: Colors.transparent,
+      child: InkWell(
+        key: const ValueKey('child-birth-date'),
+        onTap: onTap,
+        customBorder: const RoundedRectangleBorder(
+          borderRadius: crayonCardRadius,
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
+          child: InputDecorator(
+            decoration: _crayonFieldDecoration(
+              label: '생년월일 *',
+              errorText: errorText,
+            ).copyWith(suffixIcon: const Icon(Icons.calendar_month_rounded)),
+            child: Text(
+              value == null
+                  ? '생년월일을 선택해 주세요'
+                  : '${value!.year}년 ${value!.month}월 ${value!.day}일',
+              style: TextStyle(
+                color: value == null ? AppColors.inkMuted : AppColors.ink,
+                fontSize: 16,
+              ),
+            ),
+          ),
         ),
       ),
     ),

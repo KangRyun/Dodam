@@ -73,7 +73,7 @@ public class ConversationQuestionService {
    *
    * @param command 대화·그림·분석·난이도 문맥, 허용 응답 방식, 최근 메시지와 부모 답변 식별자
    * @return 새로 저장된 AI 질문 및 Snapshot
-   * @throws BusinessException 세션 상태·질문 상한·안전 정책·폴백 템플릿 계약을 위반한 경우
+   * @throws BusinessException 세션 상태·질문 상한·안전 정책·폴백 템플릿 계약을 위반했거나한 경우
    */
   public GeneratedQuestion generateQuestion(GenerateQuestionCommand command) {
     validateCommand(command);
@@ -107,15 +107,19 @@ public class ConversationQuestionService {
             command.allowedResponseModes(),
             command.previousAnswerMessageId());
       }
-      return questionPersistenceService.save(
-          command.conversationId(),
-          new QuestionCandidate(
-              response.questionText(),
-              response.options(),
-              response.targetObject(),
-              null,
-              response.fallbackUsed(),
-              command.previousAnswerMessageId()));
+      // 종료 확인 신호는 저장하지 않고 이번 응답에만 싣는다(S15P11B209-951). 질문 메시지에
+      // 남길 내용이 아니라 "아이가 방금 확인했다"는 관찰 보고이며, 실제 종료는 FE가 한다.
+      return questionPersistenceService
+          .save(
+              command.conversationId(),
+              new QuestionCandidate(
+                  response.questionText(),
+                  response.options(),
+                  response.targetObject(),
+                  null,
+                  response.fallbackUsed(),
+                  command.previousAnswerMessageId()))
+          .withConfirmedStopTarget(response.confirmedStopTarget());
     } catch (AiQuestionClientException exception) {
       if (exception.getType() == AiQuestionClientException.Type.SAFETY_POLICY_BLOCKED) {
         throw new BusinessException(ConversationErrorCode.AI_SAFETY_POLICY_BLOCKED, exception);
