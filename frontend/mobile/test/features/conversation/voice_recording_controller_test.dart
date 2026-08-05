@@ -159,16 +159,21 @@ void main() {
   });
 
   test('음성이 감지되면 대기 시간이 지나도 선택지를 표시하지 않는다', () async {
+    // 발화 확정(연속 3샘플 = 30ms)과 무음 타임아웃이 같은 순간에 걸리면 안 된다.
+    // 둘을 30ms 로 똑같이 두면 CI 부하로 타이머가 조금만 밀려도 확정 전에 타임아웃이
+    // 먼저 걸려 선택지로 빠진다(실측: develop #269 이 스테이지 flaky 실패).
+    // 확정에 필요한 시간(약 30ms)보다 타임아웃을 넉넉히 크게 잡아 경계를 분리하고,
+    // 대기 시간을 지나도 선택지가 안 뜨는지 보려고 그보다 더 오래 기다린다.
     final recorder = _FakeVoiceRecorder(amplitude: -20);
     final controller = VoiceRecordingController(
       recorder,
-      noSpeechTimeout: const Duration(milliseconds: 30),
+      noSpeechTimeout: const Duration(milliseconds: 300),
       amplitudeSampleInterval: const Duration(milliseconds: 10),
     );
     addTearDown(controller.dispose);
 
     await controller.start();
-    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await Future<void>.delayed(const Duration(milliseconds: 500));
 
     expect(controller.hasDetectedSpeech, isTrue);
     expect(controller.status, VoiceRecordingStatus.recording);
