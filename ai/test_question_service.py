@@ -1699,6 +1699,115 @@ class DiaryOpeningQuestionTest(unittest.TestCase):
         self.assertEqual("집을 크게 그렸네! 지붕은 무슨 색이야?", resp.question_text)
 
 
+class StopIntentTest(unittest.TestCase):
+    """그만하기 의사를 되묻는다 (S15P11B209-938).
+
+    AI는 끝내지 않는다 — 무엇을 그만할지 되묻고, 실제 종료는 FE가 칩 선택을 보고 한다.
+    """
+
+    def _req(self, utterance: str, *, activity="ART_DIARY", codes=None, **overrides):
+        base = {
+            "activity_type": activity,
+            "current_question_count": 2,
+            "allowed_response_modes": ["VOICE", "OPTION"],
+            "detected_objects": [_detected("PERSON", "사람", 0.9)],
+            "drawing_description": "가운데에 사람이 한 명 서 있어요.",
+            "recent_messages": [
+                RecentMessage(
+                    sender_type="AI", message_type="QUESTION", text="이 사람은 누구야?"
+                ),
+                RecentMessage(
+                    sender_type="CHILD",
+                    message_type="ANSWER",
+                    text=utterance,
+                    selected_option_codes=codes,
+                ),
+            ],
+        }
+        if activity == "HTP":
+            base["drawing_subject"] = "PERSON"
+        base.update(overrides)
+        return _request(**base)
+
+    def _generate(self, req):
+        client = _mock_client({}, reply="다른 질문이야")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-938")
+        return resp, client
+
+    def test_unspecified_stop_asks_which_one(self):
+        resp, client = self._generate(self._req("이제 그만할래"))
+        self.assertEqual(question_service.STOP_ASK_BOTH, resp.question_text)
+        self.assertEqual(
+            ["CHIP_END_ACTIVITY", "CHIP_END_TALK", "CHIP_KEEP_GOING"],
+            [o.code for o in resp.options],
+        )
+        client.chat.completions.create.assert_not_called()  # GMS 미호출
+        self.assertEqual("FOLLOW_UP", resp.question_purpose)
+        self.assertIsNone(resp.target_object)
+        self.assertEqual("PASSED", resp.safety_result.status)
+
+    def test_drawing_stop_skips_the_question(self):
+        resp, _ = self._generate(self._req("그림 그만 그릴래"))
+        self.assertEqual(question_service.STOP_ASK_DRAWING, resp.question_text)
+        self.assertEqual(
+            ["CHIP_END_ACTIVITY", "CHIP_KEEP_GOING"], [o.code for o in resp.options]
+        )
+
+    def test_conversation_stop_skips_the_question(self):
+        resp, _ = self._generate(self._req("이야기 그만할래"))
+        self.assertEqual(question_service.STOP_ASK_CONVERSATION, resp.question_text)
+        self.assertEqual(
+            ["CHIP_END_TALK", "CHIP_KEEP_GOING"], [o.code for o in resp.options]
+        )
+
+    def test_htp_never_offers_to_end_the_drawing(self):
+        """HTP는 주제 그림을 완료한 뒤에야 대화가 시작된다 — 그림 갈래가 성립하지 않는다."""
+        for utterance in ("이제 그만할래", "그림 그만 그릴래"):
+            with self.subTest(utterance=utterance):
+                resp, _ = self._generate(self._req(utterance, activity="HTP"))
+                codes = [o.code for o in resp.options]
+                self.assertNotIn("CHIP_END_ACTIVITY", codes)
+                self.assertEqual(["CHIP_END_TALK", "CHIP_KEEP_GOING"], codes)
+
+    def test_unknown_activity_does_not_offer_activity_end(self):
+        """무엇을 하는 중인지 모르면 되돌릴 수 없는 쪽을 권하지 않는다(구 BE 요청)."""
+        resp, _ = self._generate(self._req("이제 그만할래", activity=None))
+        self.assertNotIn("CHIP_END_ACTIVITY", [o.code for o in resp.options])
+
+    def test_keep_going_choice_stops_the_reask(self):
+        """계속 되물으면 그만두라고 떠미는 것처럼 들린다."""
+        req = self._req("이제 그만할래", codes=["CHIP_KEEP_GOING"])
+        resp, client = self._generate(req)
+        self.assertEqual("다른 질문이야", resp.question_text)
+        client.chat.completions.create.assert_called()
+
+    def test_skip_intent_is_not_treated_as_stop(self):
+        """831 건너뛰기 회귀 방어 — 아이는 다음 질문을 원한 것이다."""
+        resp, client = self._generate(self._req("이건 말하기 싫어. 다른 질문 해줘"))
+        self.assertEqual("다른 질문이야", resp.question_text)
+        client.chat.completions.create.assert_called()
+
+    def test_crisis_wins_over_stop_intent(self):
+        """'다 싫어, 그만할래'는 위기 신호일 수 있다 — 위기 경로가 먼저다."""
+        req = self._req("다 그만하고 싶어. 죽고 싶어.")
+        resp, client = self._generate(req)
+        self.assertEqual(question_service.CRISIS_SAFE_QUESTION, resp.question_text)
+        client.chat.completions.create.assert_not_called()
+
+    def test_options_omitted_when_option_not_allowed(self):
+        req = self._req("이제 그만할래", allowed_response_modes=["VOICE"])
+        resp, _ = self._generate(req)
+        self.assertIsNone(resp.options)  # 빈 배열도 계약 위반이다
+
+    def test_reason_logged_without_raw_utterance(self):
+        with self.assertLogs("question_service", level="INFO") as logs:
+            self._generate(self._req("이제 그만할래"))
+        joined = "\n".join(logs.output)
+        self.assertIn("STOP_UNSPECIFIED", joined)
+        self.assertNotIn("그만할래", joined)  # 아이 발화 원문은 로그 금지
+
+
 class AskedQuestionRepetitionTest(unittest.TestCase):
     """이미 물어본 질문을 프롬프트에 나열해 반복을 막는다 (S15P11B209-921)."""
 
