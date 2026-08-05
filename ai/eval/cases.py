@@ -178,7 +178,11 @@ Q2_FIRST_DIARY = QuestionCase(
         child_age=8,
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
-        current_question_count=0,
+        # 1: 완전 첫 질문(count=0)은 921이 고정 문구로 가로채 GMS를 부르지 않는다.
+        #    이 케이스가 재는 것은 '그림일기 첫 질문 프롬프트가 HTP 틀로 새지 않는가'(786
+        #    치명 결함 1번)라, 0으로 두면 그 감시가 통째로 사라진다. 아이 발화가 없으므로
+        #    프롬프트는 그대로 첫 질문 변형을 탄다.
+        current_question_count=1,
         max_question_count=5,
         detected_objects=[_obj("PERSON", "사람", 0.91), _obj("SUN", "해", 0.77)],
         drawing_description=(
@@ -215,7 +219,7 @@ Q3_FIRST_NO_DETECTION = QuestionCase(
         child_age=8,
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
-        current_question_count=0,
+        current_question_count=1,  # Q2와 같은 이유(921 고정 첫 질문 분기를 지나 보낸다)
         max_question_count=5,
         detected_objects=[],
         drawing_description=None,
@@ -643,7 +647,7 @@ Q16_DIARY_MISDETECTION = QuestionCase(
         child_age=7,
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
-        current_question_count=0,
+        current_question_count=1,  # Q2와 같은 이유(921 고정 첫 질문 분기를 지나 보낸다)
         max_question_count=5,
         # 덤불이 최고 신뢰도다 — 구 규칙은 이걸 그대로 질문 대상으로 못 박았다.
         detected_objects=[
@@ -801,6 +805,118 @@ Q20_DIARY_MISDETECTION_CORRECTION = QuestionCase(
 )
 
 
+# ── 21~23) 첫 질문 고정 · 반복 · 지어낸 두 번째 대상 (S15P11B209-921) ──
+# 세 케이스가 한 줄기다. 그림일기는 그리기를 멈출 때마다 질문을 새로 요청하므로(922),
+# 아이가 답하기 전에도 두 번째·세 번째 질문이 만들어진다. 그 자리에서 무엇이 무너지는가:
+#   ① 첫 질문을 AI가 추측으로 열면 918의 오탐 단정이 된다 → 고정 문구로 아이에게 직접 묻는다
+#   ② 이력이 안 실려 방금 한 질문을 또 한다
+#   ③ "새로운 것을 물어봐"가 '다른 물건'으로 읽혀 없는 두 번째 대상을 지어낸다
+
+Q21_DIARY_OPENING = QuestionCase(
+    id="Q21_diary_opening",
+    title="그림일기 · 완전 첫 질문(GMS 미호출)",
+    why="무엇을 그렸는지 AI가 추측하지 않고 아이에게 직접 묻는가. 탐지 이름이 새지 않는가.",
+    request=QuestionRequest(
+        conversation_id=9021,
+        drawing_session_id=8021,
+        child_age=8,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=0,  # 이 값이 곧 '완전 첫 질문' 신호다
+        max_question_count=5,
+        # 오탐이 섞여 있어도 첫 질문은 이름을 하나도 쓰지 않아야 한다.
+        detected_objects=[_obj("BUSH", "덤불", 0.86), _obj("MOON", "달", 0.72)],
+        drawing_description="화면 가운데에 사람이 한 명 서 있어요.",
+        recent_messages=[],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="ART_DIARY",
+    ),
+    calls_gms=False,
+    meta={
+        "fixed_question_text": "오늘 뭐 그린 건지 설명해줄래?",
+        "misdetected_terms": ["덤불", "달"],
+    },
+)
+
+
+Q22_UNANSWERED_SECOND = QuestionCase(
+    id="Q22_unanswered_second",
+    title="그림일기 · 아이가 답하기 전 두 번째 질문",
+    why="이미 건넨 질문을 표현만 바꿔 되묻지 않는가(그리기 재개로 질문이 다시 요청된 상황).",
+    request=QuestionRequest(
+        conversation_id=9022,
+        drawing_session_id=8022,
+        child_age=8,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=1,
+        max_question_count=5,
+        detected_objects=[_obj("PERSON", "사람", 0.9), _obj("BALL", "공", 0.82)],
+        drawing_description=(
+            "화면 가운데에 사람이 한 명 서 있고 그 아래에 파란 공이 하나 있어요."
+        ),
+        # 아이는 아직 아무 말도 하지 않았다 — 그림을 더 그리다 멈춰 질문이 다시 요청됐다.
+        recent_messages=[_dodam("공은 무슨 색으로 칠했어?")],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="ART_DIARY",
+    ),
+    meta={
+        # 직전 질문의 대상+속성이 함께 다시 나오면 되물은 것이다(858 과탐 보정과 같은 방식).
+        "previous_question_subject_terms": ["공"],
+        "previous_question_attribute_terms": ["무슨 색", "어떤 색", "색으로", "색깔"],
+        "giveup_phrases": ["잘 보이지 않", "알아볼 수 없", "무엇인지 모르겠"],
+    },
+)
+
+
+Q23_SINGLE_PERSON = QuestionCase(
+    id="Q23_single_person",
+    title="HTP 사람 · 그림에 사람 한 명뿐",
+    why="대상이 하나뿐인데 '옆에 있는 것'·'또 그린 것'처럼 없는 두 번째 대상을 지어내지 않는가.",
+    request=QuestionRequest(
+        conversation_id=9023,
+        drawing_session_id=8023,
+        child_age=8,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=2,
+        max_question_count=5,
+        # 사람 전체 + 부위 = 한 대상이다. 신뢰도만 보면 세 건이라 '여러 개'로 착각하기 쉽다.
+        detected_objects=[
+            _obj("PERSON", "사람", 0.90),
+            _obj("PERSON_HEAD", "머리", 0.88),
+            _obj("PERSON_HAIR", "머리카락", 0.85),
+        ],
+        drawing_description=(
+            "화면 가운데에 사람이 한 명 서 있고 웃는 입 모양이에요. "
+            "머리카락은 검은색으로 칠했고 팔은 양옆으로 벌리고 있어요."
+        ),
+        recent_messages=[
+            _dodam("이 사람은 지금 뭐 하고 있어?"),
+            _child("인사하는 거야."),
+        ],
+        # 사람을 이미 물어봤다 — 여기서 "새로운 것을 물어봐"가 '다른 물건'으로 읽히면
+        # 그림에 없는 두 번째 대상이 튀어나온다(921 재현 조건).
+        asked_object_codes=["PERSON"],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="HTP",
+        drawing_subject="PERSON",
+    ),
+    meta={
+        "second_target_terms": [
+            "옆에",
+            "또 그린",
+            "또 다른",
+            "다른 사람",
+            "다른 것도",
+            "다른 건",
+        ],
+        "off_subject_terms": ["집", "나무"],
+        "expects_empathy": True,
+    },
+)
+
+
 QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q1_FIRST_HTP,
     Q2_FIRST_DIARY,
@@ -820,6 +936,9 @@ QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q18_HTP_PERSON_PART,
     Q19_HTP_PERSON_NO_DESCRIPTION,
     Q20_DIARY_MISDETECTION_CORRECTION,
+    Q21_DIARY_OPENING,
+    Q22_UNANSWERED_SECOND,
+    Q23_SINGLE_PERSON,
 )
 
 
