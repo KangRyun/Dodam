@@ -54,7 +54,8 @@ class UserGuardianPinRepositoryIntegrationTest {
 
   @Test
   void savesAndReadsPinThroughRealSchema() {
-    repository.saveAndFlush(UserGuardianPin.create(userId, "hash-value", "HMAC_SHA256+BCRYPT", NOW));
+    repository.saveAndFlush(
+        UserGuardianPin.create(userId, "hash-value", "HMAC_SHA256+BCRYPT", NOW));
 
     UserGuardianPin found = repository.findById(userId).orElseThrow();
 

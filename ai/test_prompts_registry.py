@@ -162,14 +162,20 @@ class VersionManifestTest(unittest.TestCase):
     def test_report_manifest_resolves_to_composites(self):
         import report_client
 
+        # 자체검토 프롬프트(report_review)도 한 번의 리포트 생성을 이루므로 조합에 들어간다 —
+        # 검토 기준이 바뀌면 어떤 리포트가 보호자에게 열리는지가 바뀐다(2026-08-05).
         manifest = report_client.version_manifest()
         self.assertEqual(
             manifest[report_client._generation_version(True).split("prompt=")[1]],
-            prompts_registry.composite_version("report_common", "report_htp"),
+            prompts_registry.composite_version(
+                "report_common", "report_htp", "report_review"
+            ),
         )
         self.assertEqual(
             manifest[report_client._generation_version(False).split("prompt=")[1]],
-            prompts_registry.composite_version("report_common", "report_diary"),
+            prompts_registry.composite_version(
+                "report_common", "report_diary", "report_review"
+            ),
         )
 
     def test_question_manifest_resolves_to_composites(self):
@@ -202,7 +208,11 @@ class ClientVersionWiringTest(unittest.TestCase):
         self.assertEqual(
             report_client.PROMPT_VERSION,
             prompts_registry.short_version(
-                "report-all", "report_common", "report_htp", "report_diary"
+                "report-all",
+                "report_common",
+                "report_htp",
+                "report_diary",
+                "report_review",
             ),
         )
 

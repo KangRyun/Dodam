@@ -53,9 +53,6 @@ void main() {
       final json = _fullJson()
         ..['keyConversations'] = [
           {'question': 'q', 'answer': 'a', 'answerType': 'VOICE'},
-        ]
-        ..['observedFeatures'] = [
-          {'label': 'l', 'description': 'd', 'evidenceRef': 'e'},
         ];
 
       final report = ReportDetailDto.fromJson(json);
@@ -128,14 +125,156 @@ void main() {
     test('신규 필드가 없으면 빈 목록·null로 하위 호환된다', () {
       final report = ReportDetailDto.fromJson(_fullJson());
 
+      expect(report.activityType, isNull);
+      expect(report.childDisplayName, isNull);
       expect(report.nonDiagnosticNotice, isNull);
       expect(report.publicInterpretations, isEmpty);
       expect(report.evidenceItems, isEmpty);
       expect(report.subjectReports, isEmpty);
+      expect(report.observedFeatures, isEmpty);
       expect(report.parentGuides, isEmpty);
       expect(report.references, isEmpty);
       expect(report.orderedParentGuides, isEmpty);
       expect(report.orderedSubjectReports, isEmpty);
+      expect(report.subjectDrawings, isEmpty);
+      expect(report.subjectDetails, isEmpty);
+    });
+
+    test('activityType·childDisplayName을 읽고 HTP를 판정한다', () {
+      final report = ReportDetailDto.fromJson(
+        _fullJson()
+          ..['activityType'] = 'HTP'
+          ..['childDisplayName'] = '민준',
+      );
+
+      expect(report.activityType, 'HTP');
+      expect(report.childDisplayName, '민준');
+      expect(report.isHtpActivity, isTrue);
+    });
+
+    test('activityType이 없으면 구형 drawingTypeCode로 HTP를 판정한다', () {
+      final base = _fullJson();
+      expect(ReportDetailDto.fromJson(base).isHtpActivity, isFalse);
+
+      final htp = _fullJson()
+        ..['drawingSession'] = {
+          ...Map<String, dynamic>.from(base['drawingSession'] as Map),
+          'drawingTypeCode': 'htp',
+        };
+
+      expect(ReportDetailDto.fromJson(htp).isHtpActivity, isTrue);
+    });
+
+    test('observedFeatures를 계약 §2-1 필드명으로 읽는다', () {
+      final json = _fullJson()
+        ..['observedFeatures'] = [
+          {
+            'title': '집을 크게 그렸어요',
+            'description': '종이 가운데에 집을 크게 그렸어요.',
+            'evidenceSummary': '그림에서 확인했어요.',
+          },
+          {'title': null, 'description': '나무를 여러 번 덧칠했어요.'},
+        ];
+
+      final features = ReportDetailDto.fromJson(json).observedFeatures;
+
+      expect(features, hasLength(2));
+      expect(features.first.title, '집을 크게 그렸어요');
+      expect(features.first.description, '종이 가운데에 집을 크게 그렸어요.');
+      expect(features.first.evidenceSummary, '그림에서 확인했어요.');
+      expect(features.first.isEmpty, isFalse);
+      expect(features.last.title, isNull);
+      expect(features.last.evidenceSummary, isNull);
+    });
+
+    test('observedFeatures의 공백·비문자열 값은 값 없음으로 다룬다', () {
+      final json = _fullJson()
+        ..['observedFeatures'] = [
+          {'title': '   ', 'description': 7, 'evidenceSummary': ''},
+        ];
+
+      final feature = ReportDetailDto.fromJson(json).observedFeatures.single;
+
+      expect(feature.title, isNull);
+      expect(feature.description, isNull);
+      expect(feature.evidenceSummary, isNull);
+      expect(feature.isEmpty, isTrue);
+    });
+
+    test('subjectDrawings·subjectDetails가 계약 순서로 나뉜다', () {
+      final json = _fullJson()
+        ..['subjectReports'] = [
+          {'subjectType': 'PERSON', 'imageUrl': 'https://cdn.example/p.png'},
+          {
+            'subjectType': 'TREE',
+            'imageUrl': '   ',
+            'visionObservations': ['나무가 커요.'],
+          },
+          {'subjectType': 'HOUSE', 'imageUrl': 'https://cdn.example/h.png'},
+        ];
+
+      final report = ReportDetailDto.fromJson(json);
+
+      expect(
+        report.subjectDrawings.map((item) => item.subjectType),
+        ['HOUSE', 'PERSON'],
+      );
+      expect(report.subjectDetails.map((item) => item.subjectType), ['TREE']);
+      // 공백뿐인 URL은 그림이 없는 것으로 본다.
+      expect(report.orderedSubjectReports[1].imageUrl, isNull);
+    });
+
+    test('evidenceItems의 sourceRef·derivedFrom 같은 모르는 키는 무시한다', () {
+      final json = _fullJson()
+        ..['evidenceItems'] = [
+          {
+            'evidenceId': 101,
+            'sourceType': 'CHILD_ANSWER',
+            'text': '가족이 산대요.',
+            'sourceRef': {'kind': 'QA_ANSWER', 'id': '202'},
+            'derivedFrom': null,
+          },
+        ]
+        ..['unknownFutureSection'] = {'anything': true};
+
+      final report = ReportDetailDto.fromJson(json);
+
+      expect(report.evidenceItems.single.evidenceId, 101);
+      expect(report.evidenceItems.single.text, '가족이 산대요.');
+    });
+
+    test('observedFeatures나 주제별 문답이 있으면 관찰 없음으로 보지 않는다', () {
+      Map<String, dynamic> emptyReport() =>
+          _fullJson()
+            ..['childExpression'] = null
+            ..['activityFacts'] = null
+            ..['conversationSummary'] = null
+            ..['guardianConversationGuide'] = <String>[];
+
+      expect(ReportDetailDto.fromJson(emptyReport()).hasNoObservations, isTrue);
+      expect(
+        ReportDetailDto.fromJson(
+          emptyReport()
+            ..['observedFeatures'] = [
+              {'description': '집을 크게 그렸어요.'},
+            ],
+        ).hasNoObservations,
+        isFalse,
+      );
+      expect(
+        ReportDetailDto.fromJson(
+          emptyReport()
+            ..['subjectReports'] = [
+              {
+                'subjectType': 'HOUSE',
+                'qaPairs': [
+                  {'question': '누가 살아요?', 'answer': '가족이요'},
+                ],
+              },
+            ],
+        ).hasNoObservations,
+        isFalse,
+      );
     });
 
     test('publicInterpretations·evidenceItems·subjectReports를 파싱한다', () {

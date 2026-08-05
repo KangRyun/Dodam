@@ -4,7 +4,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessRepository;
@@ -18,8 +20,10 @@ import com.ssafy.b209.report.domain.ReportDrawingEmotionView;
 import com.ssafy.b209.report.domain.ReportDrawingSessionView;
 import com.ssafy.b209.report.domain.ReportDrawingTypeView;
 import com.ssafy.b209.report.domain.ReportDrawnItem;
+import com.ssafy.b209.report.domain.ReportFeatureVisibility;
 import com.ssafy.b209.report.domain.ReportFollowUpGuideView;
 import com.ssafy.b209.report.domain.ReportKeyConversationView;
+import com.ssafy.b209.report.domain.ReportObservedFeatureView;
 import com.ssafy.b209.report.domain.ReportStatus;
 import com.ssafy.b209.report.dto.ReportDetailResponse;
 import com.ssafy.b209.report.exception.ReportDetailErrorCode;
@@ -36,6 +40,7 @@ import com.ssafy.b209.report.repository.ReportDrawingTypeViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideViewRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationViewRepository;
+import com.ssafy.b209.report.repository.ReportObservedFeatureViewRepository;
 import java.lang.reflect.Constructor;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -80,6 +85,7 @@ class ReportDetailQueryServiceTest {
   @Mock private ReportConversationSummaryViewRepository conversationSummaryRepository;
   @Mock private ReportDetectedObjectViewRepository detectedObjectRepository;
   @Mock private ReportDrawnItemRepository drawnItemRepository;
+  @Mock private ReportObservedFeatureViewRepository observedFeatureRepository;
 
   @Mock
   private com.ssafy.b209.report.repository.ReportPublicInterpretationRepository
@@ -115,6 +121,7 @@ class ReportDetailQueryServiceTest {
             conversationSummaryRepository,
             detectedObjectRepository,
             drawnItemRepository,
+            observedFeatureRepository,
             interpretationRepository,
             evidenceItemRepository,
             parentGuideRepository,
@@ -383,6 +390,52 @@ class ReportDetailQueryServiceTest {
     assertThat(response.activityFacts().detectedObjects()).isEmpty();
   }
 
+  @Test
+  void returnsObservedFeaturesThatPassedReviewInDisplayOrder() {
+    // 열리는 경로를 확인하는 검증이다. "노출되지 않는지"만 보는 검증만 있으면, 관찰 특징이 전부 숨겨진 채
+    //   배포돼도 테스트는 전부 통과한다 — 실제로 그렇게 운영 리포트 97건이 아무에게도 도달하지 않았다.
+    givenAccessibleReport();
+    when(observedFeatureRepository.findByReportIdAndVisibilityScopeOrderByDisplayOrderAsc(
+            REPORT_ID, ReportFeatureVisibility.REVIEWED_GUARDIAN))
+        .thenReturn(
+            List.of(
+                observedFeature("집을 크게 그렸어요", "종이 가운데에 집을 크게 그렸어요.", "그림에서 확인했어요.", (short) 0),
+                observedFeature(
+                    "색을 여러 번 바꿨어요", "그리는 동안 색을 여러 번 바꿨어요.", "활동 기록에서 확인했어요.", (short) 1)));
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.observedFeatures())
+        .extracting(feature -> feature.title())
+        .containsExactly("집을 크게 그렸어요", "색을 여러 번 바꿨어요");
+    assertThat(response.observedFeatures().getFirst().evidenceSummary()).isEqualTo("그림에서 확인했어요.");
+  }
+
+  @Test
+  void neverQueriesObservedFeaturesOutsideTheGuardianScope() {
+    // EXPERT_ONLY 를 읽고 나서 거르는 방식이면 다음 사람이 필터를 빠뜨릴 수 있다. 아예 조회하지 않는다.
+    givenAccessibleReport();
+
+    service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    verify(observedFeatureRepository)
+        .findByReportIdAndVisibilityScopeOrderByDisplayOrderAsc(
+            REPORT_ID, ReportFeatureVisibility.REVIEWED_GUARDIAN);
+    verifyNoMoreInteractions(observedFeatureRepository);
+  }
+
+  @Test
+  void returnsEmptyObservedFeaturesWhenNothingPassedReview() {
+    givenAccessibleReport();
+    when(observedFeatureRepository.findByReportIdAndVisibilityScopeOrderByDisplayOrderAsc(
+            REPORT_ID, ReportFeatureVisibility.REVIEWED_GUARDIAN))
+        .thenReturn(List.of());
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.observedFeatures()).isEmpty();
+  }
+
   private void givenAccessibleReport() {
     when(reportRepository.findById(REPORT_ID))
         .thenReturn(Optional.of(report(ReportStatus.COMPLETED, "한계 문구")));
@@ -453,6 +506,19 @@ class ReportDetailQueryServiceTest {
     ReflectionTestUtils.setField(summary, "conversationSkippedCount", 1);
     ReflectionTestUtils.setField(summary, "conversationSummary", "아이가 편안하게 대화했습니다");
     return summary;
+  }
+
+  private ReportObservedFeatureView observedFeature(
+      String title, String description, String evidenceSummary, short order) {
+    ReportObservedFeatureView feature = instantiate(ReportObservedFeatureView.class);
+    ReflectionTestUtils.setField(feature, "reportId", REPORT_ID);
+    ReflectionTestUtils.setField(feature, "title", title);
+    ReflectionTestUtils.setField(feature, "description", description);
+    ReflectionTestUtils.setField(feature, "evidenceSummary", evidenceSummary);
+    ReflectionTestUtils.setField(
+        feature, "visibilityScope", ReportFeatureVisibility.REVIEWED_GUARDIAN);
+    ReflectionTestUtils.setField(feature, "displayOrder", order);
+    return feature;
   }
 
   private ReportActivityNoteView note(String text, short order) {

@@ -4,6 +4,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.PositiveOrZero;
+import java.math.BigDecimal;
 import java.util.List;
 
 /**
@@ -26,6 +27,7 @@ import java.util.List;
  * @param subjectSummaries 주제별 그림 서술·문답 묶음이며 HTP는 최대 3건(집·나무·사람), 그림일기는 1건 (S15P11B209-740)
  * @param selectedEmotionRefs 선택 감정을 <strong>서버가 발급한 행 식별자</strong>와 함께 담은 목록이다. {@code
  *     selectedEmotions}와 같은 재료이며 AI가 근거({@code sourceRef})로 가리킬 수 있는 형태다 (S15P11B209-906)
+ * @param behaviorMetrics 캔버스 과정에서 집계한 형식 지표이며 집계하지 못했으면 {@code null} (S15P11B209-837)
  */
 public record ObservationGenerationRequest(
     @NotBlank String requestId,
@@ -41,7 +43,8 @@ public record ObservationGenerationRequest(
     String expressedEmotionText,
     String representativeUtterance,
     List<SubjectSummary> subjectSummaries,
-    List<SelectedEmotionRef> selectedEmotionRefs) {
+    List<SelectedEmotionRef> selectedEmotionRefs,
+    BehaviorMetrics behaviorMetrics) {
 
   /** 목록 필드가 {@code null}로 만들어져도 빈 목록으로 정규화한다(계약: optional·기본 빈 목록). */
   public ObservationGenerationRequest {
@@ -49,6 +52,97 @@ public record ObservationGenerationRequest(
     selectedEmotionRefs =
         selectedEmotionRefs == null ? List.of() : List.copyOf(selectedEmotionRefs);
   }
+
+  /**
+   * 837 이전 형태로 요청을 만드는 호출부와의 호환용 생성자다. 행동 지표 없이 보낸다.
+   *
+   * @param requestId 호출 추적과 응답 연결에 사용하는 요청 식별자
+   * @param analysisId 최종 분석 식별자
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @param analysisType 수행할 분석 유형
+   * @param questionDifficulty 질문 난이도 Snapshot
+   * @param questionCount 실제 제시한 질문 수
+   * @param answeredCount 실제 응답한 답변 수
+   * @param skippedCount 건너뛴 질문 수
+   * @param unrecognizedSpeechCount 음성 인식에 실패한 답변 수
+   * @param selectedEmotions 아동이 선택한 감정 코드 목록
+   * @param expressedEmotionText 아동이 직접 표현한 감정 문구
+   * @param representativeUtterance 대표 발화
+   * @param subjectSummaries 주제별 그림 서술·문답 묶음
+   * @param selectedEmotionRefs 선택 감정과 행 식별자 쌍 목록
+   */
+  public ObservationGenerationRequest(
+      String requestId,
+      Long analysisId,
+      Long drawingSessionId,
+      String analysisType,
+      String questionDifficulty,
+      int questionCount,
+      int answeredCount,
+      int skippedCount,
+      int unrecognizedSpeechCount,
+      List<String> selectedEmotions,
+      String expressedEmotionText,
+      String representativeUtterance,
+      List<SubjectSummary> subjectSummaries,
+      List<SelectedEmotionRef> selectedEmotionRefs) {
+    this(
+        requestId,
+        analysisId,
+        drawingSessionId,
+        analysisType,
+        questionDifficulty,
+        questionCount,
+        answeredCount,
+        skippedCount,
+        unrecognizedSpeechCount,
+        selectedEmotions,
+        expressedEmotionText,
+        representativeUtterance,
+        subjectSummaries,
+        selectedEmotionRefs,
+        null);
+  }
+
+  /**
+   * 캔버스 과정에서 집계한 형식 지표다 (S15P11B209-837).
+   *
+   * <p>AI 계약 {@code BehaviorMetrics}({@code ai/internal_contracts.py})와 <b>필드 1:1</b>이며 JSON 은
+   * camelCase 다. 필드를 늘리거나 이름을 바꾸면 양쪽을 함께 고쳐야 한다.
+   *
+   * <p><b>이 객체 자체가 {@code null} 이면 "집계하지 못했다"는 뜻이고, AI 는 {@code [형식적 분석]} 블록을 아예 만들지 않는다.</b> HTP 세
+   * 단계 중 하나라도 집계할 수 없으면(예: 사진 업로드 단계) 부분 합을 보내지 않고 전체를 {@code null} 로 둔다 — 두 단계만 더한 값이 활동 전체의 기록으로
+   * 프롬프트에 실리면 AI 가 그것을 관찰 사실로 문장에 옮긴다.
+   *
+   * <p>🔴 <b>개별 항목의 {@code null} 과 {@code 0} 은 다른 뜻이다.</b> {@code null} 은 "집계하지 못함"이라 AI 가 그 줄을 빼고,
+   * {@code 0} 은 "0회"라는 관찰 사실이라 그대로 적는다. 집계 실패를 0으로 채우면 <b>"멈춤 없이 몰입해서 그렸다"는 없는 관찰</b>이 리포트에 실린다.
+   * Wrapper Type 을 쓰는 이유가 이것이며 절대 기본형으로 바꾸지 말 것 — {@link
+   * com.ssafy.b209.drawing.service.StrokeBehaviorSummary} javadoc 과 AI 쪽 docstring 이 같은 원칙을 양쪽에서
+   * 못박고 있다.
+   *
+   * @param drawingDurationMs 그림 전체 경과 시간(ms)이며 집계하지 못했으면 {@code null}
+   * @param activeDrawingMs 실제로 획을 그린 시간의 합(ms)이며 집계하지 못했으면 {@code null}
+   * @param pauseCount 멈춤 횟수이며 집계하지 못했으면 {@code null}
+   * @param undoCount 실행 취소 횟수이며 집계하지 못했으면 {@code null}
+   * @param eraseCount 지우기 횟수이며 집계하지 못했으면 {@code null}
+   * @param toolChangeCount 도구를 바꾼 횟수이며 집계하지 못했으면 {@code null}
+   * @param colorChangeCount 색을 바꾼 횟수이며 집계하지 못했으면 {@code null}
+   * @param pressureAvailable 필압 데이터가 저장돼 있는지 여부다. <b>측정 가능 여부일 뿐 필압의 강약도 감정 근거도 아니다</b>
+   * @param averagePressure 평균 필압이며 <b>현재 항상 {@code null}</b> 이다. 집계기가 이 값을 만들지 않는다 — 자리만 계약에 맞춰 두고
+   *     값을 지어내지 않는다
+   * @param truncated 배치 수 상한에 걸려 세션 앞부분만 집계했는지 여부. {@code true}면 위 값 전부가 부분 집계다
+   */
+  public record BehaviorMetrics(
+      Long drawingDurationMs,
+      Long activeDrawingMs,
+      Integer pauseCount,
+      Integer undoCount,
+      Integer eraseCount,
+      Integer toolChangeCount,
+      Integer colorChangeCount,
+      boolean pressureAvailable,
+      BigDecimal averagePressure,
+      boolean truncated) {}
 
   /**
    * 주제(집/나무/사람 또는 그림일기 단일 그림) 하나의 관찰 서술·문답 묶음이다 (S15P11B209-740).
@@ -59,17 +153,17 @@ public record ObservationGenerationRequest(
    * @param drawingDescription 해당 그림의 VLM 관찰 서술이며 없으면 {@code null}
    * @param detectedObjectCodes 탐지 객체 내부 코드 목록(프롬프트 참고용)
    * @param qaPairs 해당 그림 대화에서 나눈 질문·답변 목록
-   * @param observationEvidenceSourceId 관찰 서술의 출처인 {@code analysis_observation_results} 행 식별자이며 서술이
-   *     없으면 {@code null}이다 (S15P11B209-906)
-   * @param detectedObjects 탐지 객체를 행 식별자와 함께 담은 목록이다. {@code detectedObjectCodes}와 같은 재료이며 근거 참조가
-   *     가능한 형태다 (S15P11B209-906)
+   * @param observationEvidenceSourceId 관찰 서술의 출처인 {@code analysis_observation_results} 행 식별자를 문자열로
+   *     담은 값이며 서술이 없으면 {@code null}이다. AI 계약이 {@code str} 이라 숫자로 보내면 422 다 (S15P11B209-906/837)
+   * @param detectedObjects 탐지 객체를 행 식별자·정규화 기하와 함께 담은 목록이다 (S15P11B209-906/837). <b>{@code
+   *     detectedObjectCodes}와 개수가 다를 수 있다</b> — 코드 목록은 탐지 전부를 담고 이쪽은 정규화 좌표가 있는 행만 담는다
    */
   public record SubjectSummary(
       String drawingSubject,
       String drawingDescription,
       List<String> detectedObjectCodes,
       List<SubjectQaPair> qaPairs,
-      Long observationEvidenceSourceId,
+      String observationEvidenceSourceId,
       List<SubjectDetectedObject> detectedObjects) {
 
     public SubjectSummary {
@@ -81,23 +175,46 @@ public record ObservationGenerationRequest(
   }
 
   /**
-   * 탐지 객체 하나를 <strong>서버가 발급한 행 식별자</strong>와 함께 보낸다 (S15P11B209-906).
+   * 탐지 객체 하나를 <strong>서버가 발급한 행 식별자·정규화 기하</strong>와 함께 보낸다 (S15P11B209-906/837).
    *
    * <p>코드값만 보내면 AI가 근거를 가리킬 때 조합키를 조립할 수밖에 없다. 그러면 서버가 "서로 독립된 근거 2건"을 검증할 수 없어 공개 게이트가 생성자의 자기 신고로
    * 무력해진다(계약 §4에서 조합키 금지).
    *
-   * @param evidenceSourceId 탐지 객체 행 식별자
+   * <p><b>기하는 정규화 좌표(0~1)뿐이다.</b> AI 는 캔버스 원본 크기를 모르므로 픽셀 좌표로는 용지 점유율을 계산할 수 없다 — 그래서 서버가 {@code
+   * PIXEL} 행을 아예 싣지 않고, 픽셀 결과뿐인 주제는 이 목록이 빈 채로 나간다(계약 합의 사항).
+   *
+   * <p><b>식별자는 문자열이다.</b> AI 계약이 {@code evidence_source_id: str} 이라 숫자로 보내면 요청 전체가 422 로 거부된다 — 실제로
+   * 그렇게 운영 리포트 생성이 전량 실패했다(2026-08-05). 다른 근거 식별자도 같은 규칙이다.
+   *
+   * @param evidenceSourceId 탐지 객체 행 식별자를 문자열로 담은 값
    * @param objectCode 탐지 객체 내부 코드
+   * @param x 0~1 정규화 좌측 상단 X 좌표
+   * @param y 0~1 정규화 좌측 상단 Y 좌표
+   * @param width 0~1 정규화 너비
+   * @param height 0~1 정규화 높이
+   * @param areaRatio 전체 그림에서 객체가 차지하는 비율이며 저장돼 있지 않으면 {@code null}. <b>{@code width * height} 로 계산해
+   *     채우지 않는다</b> — AI 계약이 명시한다. 추정값을 관찰 사실로 적으면 근거가 아닌 것이 근거 자리에 들어간다
+   * @param confidence 0~1 탐지 신뢰도이며 없으면 {@code null}
    */
-  public record SubjectDetectedObject(Long evidenceSourceId, String objectCode) {}
+  public record SubjectDetectedObject(
+      String evidenceSourceId,
+      String objectCode,
+      BigDecimal x,
+      BigDecimal y,
+      BigDecimal width,
+      BigDecimal height,
+      BigDecimal areaRatio,
+      BigDecimal confidence) {}
 
   /**
    * 선택 감정 하나를 <strong>서버가 발급한 행 식별자</strong>와 함께 보낸다 (S15P11B209-906).
    *
-   * @param evidenceSourceId {@code drawing_session_emotions} 행 식별자
+   * <p>식별자는 문자열이다 — AI 계약이 {@code evidence_source_id: str} 이다.
+   *
+   * @param evidenceSourceId {@code drawing_session_emotions} 행 식별자를 문자열로 담은 값
    * @param emotionCode 감정 코드
    */
-  public record SelectedEmotionRef(Long evidenceSourceId, String emotionCode) {}
+  public record SelectedEmotionRef(String evidenceSourceId, String emotionCode) {}
 
   /**
    * 주제별 문답 한 쌍이다.

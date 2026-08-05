@@ -11,9 +11,11 @@ import com.ssafy.b209.report.domain.ReportDrawingAssetView;
 import com.ssafy.b209.report.domain.ReportDrawingEmotionView;
 import com.ssafy.b209.report.domain.ReportDrawingSessionView;
 import com.ssafy.b209.report.domain.ReportDrawingTypeView;
+import com.ssafy.b209.report.domain.ReportFeatureVisibility;
 import com.ssafy.b209.report.domain.ReportInterpretationDisclosureState;
 import com.ssafy.b209.report.domain.ReportKeyConversationView;
 import com.ssafy.b209.report.domain.ReportMessageConfirmationView;
+import com.ssafy.b209.report.domain.ReportObservedFeatureView;
 import com.ssafy.b209.report.dto.ReportActivityFactsResponse;
 import com.ssafy.b209.report.dto.ReportChildExpressionResponse;
 import com.ssafy.b209.report.dto.ReportConversationSummaryResponse;
@@ -24,6 +26,7 @@ import com.ssafy.b209.report.dto.ReportDrawingResponse;
 import com.ssafy.b209.report.dto.ReportDrawingSessionResponse;
 import com.ssafy.b209.report.dto.ReportEvidenceItemResponse;
 import com.ssafy.b209.report.dto.ReportExpertReviewResponse;
+import com.ssafy.b209.report.dto.ReportObservedFeatureResponse;
 import com.ssafy.b209.report.dto.ReportParentGuideResponse;
 import com.ssafy.b209.report.dto.ReportPublicInterpretationResponse;
 import com.ssafy.b209.report.dto.ReportUtteranceResponse;
@@ -44,6 +47,7 @@ import com.ssafy.b209.report.repository.ReportEvidenceItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideViewRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationViewRepository;
 import com.ssafy.b209.report.repository.ReportMessageConfirmationViewRepository;
+import com.ssafy.b209.report.repository.ReportObservedFeatureViewRepository;
 import com.ssafy.b209.report.repository.ReportParentGuideRepository;
 import com.ssafy.b209.report.repository.ReportPublicInterpretationRepository;
 import java.math.BigDecimal;
@@ -60,8 +64,12 @@ import org.springframework.transaction.annotation.Transactional;
  * REPORT-02 보호자용 관찰 리포트 상세 조회의 소유권 검증과 정규화된 리포트 데이터 조립을 담당하는 읽기 전용 서비스다.
  *
  * <p>리포트가 연결된 그림 활동 세션의 아동에 대한 보호자 접근 권한을 확인한 뒤, 리포트와 활동·대화·분석 하위 데이터를 읽기 전용 프로젝션으로 조립한다. 보호자 안전
- * 규칙에 따라 AI 추정 감정·확률, 위험도 점수, 전문가 전용 관찰 특징({@code report_observed_features}), 내부 프롬프트·지표는 조회 대상에서
- * 제외해 응답에 노출하지 않는다.
+ * 규칙에 따라 AI 추정 감정·확률, 위험도 점수, 내부 프롬프트·지표는 조회 대상에서 제외해 응답에 노출하지 않는다.
+ *
+ * <p><b>관찰 특징({@code report_observed_features})은 노출 범위로 나뉜다.</b> 이전에는 이 테이블을 통째로 조회 대상에서 제외했는데, 검토를
+ * 통과시킬 상태값 자체가 없어 <b>모든 행이 {@code EXPERT_ONLY} 로만 저장됐기</b> 때문이다(운영 실측 97건 전부). 읽는 쪽도 쓰는 쪽도 없는 데이터를
+ * 계속 만들고 있었다는 뜻이다. 지금은 AI 자체 검토를 통과한 리포트가 {@code REVIEWED_GUARDIAN} 항목을 남기므로 <b>그 항목만</b> 조회해 응답에
+ * 싣는다. {@code EXPERT_ONLY} 는 여전히 조회하지 않는다 — FE 가 숨기는 것이 아니라 응답에 없어야 한다.
  */
 @Service
 @Transactional(readOnly = true)
@@ -85,6 +93,7 @@ public class ReportDetailQueryService {
   private final ReportConversationSummaryViewRepository conversationSummaryRepository;
   private final ReportDetectedObjectViewRepository detectedObjectRepository;
   private final ReportDrawnItemRepository drawnItemRepository;
+  private final ReportObservedFeatureViewRepository observedFeatureRepository;
   private final ReportPublicInterpretationRepository interpretationRepository;
   private final ReportEvidenceItemRepository evidenceItemRepository;
   private final ReportParentGuideRepository parentGuideRepository;
@@ -108,6 +117,7 @@ public class ReportDetailQueryService {
    * @param conversationSummaryRepository 대화 요약 대체 출처 조회 경계
    * @param detectedObjectRepository 과거 리포트의 탐지 객체명 폴백 조회 경계
    * @param drawnItemRepository 최신 AI 관찰 서술 기반 '그린 것' 조회 경계
+   * @param observedFeatureRepository 보호자에게 열린 관찰 특징 조회 경계
    * @param fileUrlFactory 인증된 그림 파일 조회 URL 생성기
    */
   public ReportDetailQueryService(
@@ -124,6 +134,7 @@ public class ReportDetailQueryService {
       ReportConversationSummaryViewRepository conversationSummaryRepository,
       ReportDetectedObjectViewRepository detectedObjectRepository,
       ReportDrawnItemRepository drawnItemRepository,
+      ReportObservedFeatureViewRepository observedFeatureRepository,
       ReportPublicInterpretationRepository interpretationRepository,
       ReportEvidenceItemRepository evidenceItemRepository,
       ReportParentGuideRepository parentGuideRepository,
@@ -143,6 +154,7 @@ public class ReportDetailQueryService {
     this.conversationSummaryRepository = conversationSummaryRepository;
     this.detectedObjectRepository = detectedObjectRepository;
     this.drawnItemRepository = drawnItemRepository;
+    this.observedFeatureRepository = observedFeatureRepository;
     this.interpretationRepository = interpretationRepository;
     this.evidenceItemRepository = evidenceItemRepository;
     this.parentGuideRepository = parentGuideRepository;
@@ -187,6 +199,7 @@ public class ReportDetailQueryService {
         buildDrawingSession(session),
         buildDrawing(session.getId()),
         buildChildExpression(report, session),
+        buildObservedFeatures(report.getId()),
         buildActivityFacts(report),
         buildConversationSummary(report),
         buildGuardianConversationGuide(report.getId()),
@@ -284,6 +297,34 @@ public class ReportDetailQueryService {
     }
     return new ReportChildExpressionResponse(
         selectedEmotions, session.getExpressedEmotionText(), utterances);
+  }
+
+  /**
+   * 보호자에게 열린 관찰 특징만 조회해 응답 형태로 옮긴다.
+   *
+   * <p>조회 자체를 {@link ReportFeatureVisibility#REVIEWED_GUARDIAN} 로 좁힌다. {@code EXPERT_ONLY} 행은 읽지도
+   * 않으므로 필터를 빠뜨려 새어 나갈 경로가 없다.
+   *
+   * <p>{@code description} 이 비어 있는 행은 담지 않는다 — 제목만 있고 내용이 없는 카드는 보호자 화면에서 빈 칸으로 보인다. 저장 시점에 비어 있을 수
+   * 없는 값이지만(도메인 불변식) 읽는 쪽에서도 확인한다.
+   *
+   * @param reportId 리포트 식별자
+   * @return 노출 순서대로 정렬된 관찰 특징 목록이며 열린 항목이 없으면 빈 목록
+   */
+  private List<ReportObservedFeatureResponse> buildObservedFeatures(Long reportId) {
+    List<ReportObservedFeatureResponse> features = new ArrayList<>();
+    for (ReportObservedFeatureView feature :
+        observedFeatureRepository.findByReportIdAndVisibilityScopeOrderByDisplayOrderAsc(
+            reportId, ReportFeatureVisibility.REVIEWED_GUARDIAN)) {
+      String description = feature.getDescription();
+      if (description == null || description.isBlank()) {
+        continue;
+      }
+      features.add(
+          new ReportObservedFeatureResponse(
+              feature.getTitle(), description, feature.getEvidenceSummary()));
+    }
+    return features;
   }
 
   private String deriveSource(String answerType) {

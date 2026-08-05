@@ -390,6 +390,89 @@ void main() {
       isTrue,
     );
   });
+
+  test('도구·색·굵기·전체지우기 event를 좌표 없이 그대로 전송한다', () async {
+    final queue = _queue();
+    queue.addEvents(const [
+      StrokeEventDto(seq: 91, t: 100, type: 'TOOL_CHANGE', tool: 'PENCIL'),
+      StrokeEventDto(seq: 92, t: 200, type: 'COLOR_CHANGE', color: '#FF0000'),
+      StrokeEventDto(seq: 93, t: 300, type: 'THICKNESS_CHANGE', thickness: 14),
+      StrokeEventDto(seq: 94, t: 400, type: 'CANVAS_CLEAR'),
+    ]);
+
+    await queue.flush();
+
+    final request = queue.pendingBatches.single.request;
+    expect(request.events.map((event) => event.eventType), [
+      'TOOL_CHANGE',
+      'COLOR_CHANGE',
+      'THICKNESS_CHANGE',
+      'CANVAS_CLEAR',
+    ]);
+    expect(request.events.map((event) => event.points), everyElement(isEmpty));
+    expect(request.events[0].tool, 'PENCIL');
+    expect(request.events[1].color, '#FF0000');
+    expect(request.events[2].width, 14);
+    expect(request.firstEventSequence, 91);
+    expect(request.lastEventSequence, 94);
+    expect(request.metrics.toJson(), {
+      'undoCountDelta': 0,
+      'redoCountDelta': 0,
+      'eraseCountDelta': 0,
+      'pauseDurationMsDelta': 0,
+    });
+  });
+
+  test('FILL은 찍은 자리 한 점과 색을 함께 전송한다', () async {
+    final queue = _queue();
+    queue.addEvents(const [
+      StrokeEventDto(
+        seq: 95,
+        t: 500,
+        type: 'FILL',
+        x: 0.25,
+        y: 0.75,
+        color: '#00FF00',
+      ),
+    ]);
+
+    await queue.flush();
+
+    final fill = queue.pendingBatches.single.request.events.single;
+    expect(fill.eventType, 'FILL');
+    expect(fill.color, '#00FF00');
+    expect(fill.points.single.x, 0.25);
+    expect(fill.points.single.y, 0.75);
+    // 이벤트 안의 t는 이벤트 시작 기준 상대 시간이라 단일 좌표는 0이다.
+    expect(fill.points.single.t, 0);
+  });
+
+  test('PAUSE~RESUME 짝의 길이만 pauseDurationMsDelta로 집계한다', () async {
+    final queue = _queue();
+    queue.addEvents([
+      ..._stroke(startSeq: 101, endSeq: 103, startTime: 0),
+      const StrokeEventDto(seq: 104, t: 20, type: 'PAUSE'),
+      const StrokeEventDto(seq: 105, t: 4520, type: 'RESUME'),
+      ..._stroke(startSeq: 106, endSeq: 108, startTime: 4520),
+      const StrokeEventDto(seq: 109, t: 4540, type: 'PAUSE'),
+      const StrokeEventDto(seq: 110, t: 7540, type: 'RESUME'),
+    ]);
+
+    await queue.flush();
+
+    final request = queue.pendingBatches.single.request;
+    expect(request.events.map((event) => event.eventType), [
+      'STROKE',
+      'PAUSE',
+      'RESUME',
+      'STROKE',
+      'PAUSE',
+      'RESUME',
+    ]);
+    // 멈춤 횟수는 event가, 길이는 지표가 맡는다. 같은 짝에서 계산하므로 어긋날 수 없다.
+    expect(request.metrics.pauseDurationMsDelta, 4500 + 3000);
+    expect(request.metrics.undoCountDelta, 0);
+  });
 }
 
 StrokeBatchQueue _queue() => StrokeBatchQueue(

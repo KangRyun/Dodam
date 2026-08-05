@@ -14,6 +14,7 @@ from unittest import mock
 
 from openai import OpenAIError
 
+import config
 import internal_contracts as contracts
 import prompts_registry
 import report_client
@@ -64,6 +65,49 @@ def _llm_json(**overrides) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+# 자체검토(2-pass)가 '지적 없음'으로 통과하는 응답. 2026-08-05부터 generate()는 GMS를
+# 두 번 부른다(생성 → 자체검토).
+_REVIEW_PASS = json.dumps({"findings": []}, ensure_ascii=False)
+
+
+def _review_findings(*findings: dict) -> str:
+    """자체검토가 지적을 낸 응답 JSON."""
+    return json.dumps({"findings": list(findings)}, ensure_ascii=False)
+
+
+def _capture_generation(
+    captured: dict, generation: str | None = None, review: str = _REVIEW_PASS, *, model=None
+):
+    """생성 → 자체검토 순서로 응답하는 side_effect. **첫 호출(생성) 인자만** captured 에 남긴다.
+
+    덮어쓰면 검토 프롬프트가 잡혀 "생성 프롬프트에 이 블록이 실렸나"를 보는 검증이 헛돈다.
+    검토 호출 인자는 별도 키(review_messages)로 남긴다.
+    """
+    payloads = [generation if generation is not None else _llm_json(), review]
+    calls = {"n": 0}
+
+    def create(**kwargs):
+        index = calls["n"]
+        calls["n"] += 1
+        if index == 0:
+            captured["model"] = kwargs.get("model")
+            captured["messages"] = kwargs["messages"]
+        else:
+            captured["review_messages"] = kwargs["messages"]
+        return _fake_response(payloads[min(index, len(payloads) - 1)], model=model)
+
+    return create
+
+
+def _fake_client(generation: str | None = None, review: str = _REVIEW_PASS, *, model=None):
+    """generate() 한 번을 온전히 흉내 내는 가짜 GMS 클라이언트(captured 불필요할 때)."""
+    client = mock.Mock()
+    client.chat.completions.create.side_effect = _capture_generation(
+        {}, generation, review, model=model
+    )
+    return client
+
+
 def _sample_request(**overrides) -> contracts.ObservationGenerationRequest:
     base = {
         "request_id": "req-1",
@@ -106,13 +150,8 @@ class GenerateTest(unittest.TestCase):
     def test_assembles_contract_result_with_server_owned_fields(self):
         captured = {}
 
-        def fake_create(*, model, messages, **_kwargs):
-            captured["model"] = model
-            captured["messages"] = messages
-            return _fake_response(_llm_json())
-
         fake_client = mock.Mock()
-        fake_client.chat.completions.create.side_effect = fake_create
+        fake_client.chat.completions.create.side_effect = _capture_generation(captured)
 
         req = _sample_request()
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
@@ -129,7 +168,8 @@ class GenerateTest(unittest.TestCase):
         # _sample_request()는 subject_summaries가 없어 그림일기(비 HTP) 경로다.
         self.assertEqual(result.model_version, report_client._generation_version(False))
         self.assertIsNone(result.confidence)
-        self.assertEqual(result.observation_draft.status, "AI_DRAFT")
+        # 자체검토가 지적 없이 통과한 리포트라 AI_REVIEWED(2026-08-05).
+        self.assertEqual(result.observation_draft.status, "AI_REVIEWED")
         self.assertEqual(result.observation_draft.disclaimer, report_client.DISCLAIMER)
         self.assertEqual(result.limitations_text, report_client.LIMITATIONS)
 
@@ -153,15 +193,37 @@ class GenerateTest(unittest.TestCase):
         self.assertIn("가운데에 집이 크게", user_msg)
         self.assertIn("[그림 관찰 서술]", user_msg)
 
+    def test_absent_utterance_stays_none_and_is_not_invented(self):
+        """대표 발화가 없으면 None 이다 — 무난한 문장으로 채우지 않는다.
+
+        아이가 한 말이 없는데 "재미있었어요." 같은 기본값을 넣으면, 아이가 한 적 없는 말이
+        대표 발화로 저장된다. 폐지 시점 운영 실측으로 analysis_conversation_summaries
+        51건 중 34건(67%)이 그 기본값이었다. 지금은 아무도 읽지 않는 컬럼이지만 읽는 기능이
+        생기면 그대로 가짜 인용이 되므로, 없는 것은 없는 대로 둔다(confidence=None 과 같은 원칙).
+        """
+        captured = {}
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = _capture_generation(captured)
+
+        req = _sample_request(representative_utterance=None)
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(
+                req,
+                drawing_description="가운데에 집이 크게 그려져 있어요.",
+                model="test-model",
+            )
+
+        self.assertIsNone(result.conversation_summary.representative_utterance)
+        self.assertNotIn(
+            "재미있었어요",
+            json.dumps(result.model_dump(by_alias=True), ensure_ascii=False),
+        )
+
     def test_behavior_metrics_injected_into_prompt(self):
         captured = {}
 
-        def fake_create(*, model, messages, **_kwargs):
-            captured["messages"] = messages
-            return _fake_response(_llm_json())
-
         fake_client = mock.Mock()
-        fake_client.chat.completions.create.side_effect = fake_create
+        fake_client.chat.completions.create.side_effect = _capture_generation(captured)
 
         behavior = contracts.BehaviorMetrics(
             drawing_duration_ms=600_000,
@@ -187,9 +249,7 @@ class GenerateTest(unittest.TestCase):
         """
         captured = {}
         fake_client = mock.Mock()
-        fake_client.chat.completions.create.side_effect = lambda **k: captured.update(
-            messages=k["messages"]
-        ) or _fake_response(_llm_json())
+        fake_client.chat.completions.create.side_effect = _capture_generation(captured)
 
         behavior = contracts.BehaviorMetrics(
             pressure_available=True, average_pressure=None, erase_count=1
@@ -212,9 +272,7 @@ class BehaviorMetricsContractTest(unittest.TestCase):
     def _capture_prompt(self, req) -> str:
         captured = {}
         fake_client = mock.Mock()
-        fake_client.chat.completions.create.side_effect = lambda **k: captured.update(
-            messages=k["messages"]
-        ) or _fake_response(_llm_json())
+        fake_client.chat.completions.create.side_effect = _capture_generation(captured)
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             report_client.generate(req, model="m")
         return captured["messages"][1]["content"]
@@ -255,9 +313,7 @@ class BehaviorMetricsContractTest(unittest.TestCase):
         req.behavior_metrics = contracts.BehaviorMetrics(drawing_duration_ms=60_000)
         captured = {}
         fake_client = mock.Mock()
-        fake_client.chat.completions.create.side_effect = lambda **k: captured.update(
-            messages=k["messages"]
-        ) or _fake_response(_llm_json())
+        fake_client.chat.completions.create.side_effect = _capture_generation(captured)
 
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             report_client.generate(
@@ -381,8 +437,11 @@ class BehaviorBlockWordingTest(unittest.TestCase):
 
         self.assertEqual("", block)
 
-    def test_tool_and_color_changes_are_not_rendered(self):
-        """계약으로 받되 이번 단계에서는 블록에 싣지 않는다."""
+    def test_tool_and_color_changes_are_rendered(self):
+        """계약으로 받아 놓고 버리던 두 값을 싣는다 (2026-08-05).
+
+        받고도 안 실으면 프롬프트 1행이 약속한 지표 목록과 실제 블록이 계속 어긋난다.
+        """
         block = report_client._format_behavior(
             contracts.BehaviorMetrics(
                 erase_count=1, tool_change_count=3, color_change_count=5
@@ -390,8 +449,22 @@ class BehaviorBlockWordingTest(unittest.TestCase):
         )
 
         self.assertIn("지우기 횟수: 1회", block)
-        self.assertNotIn("도구", block)
-        self.assertNotIn("색", block)
+        self.assertIn("도구 바꾼 횟수: 3회", block)
+        self.assertIn("색 바꾼 횟수: 5회", block)
+
+    def test_tool_and_color_changes_keep_the_zero_none_split(self):
+        """None은 '집계 못 함'이라 줄을 빼고, 0은 '0회'라는 관찰 사실이라 적는다."""
+        none_block = report_client._format_behavior(
+            contracts.BehaviorMetrics(erase_count=1)
+        )
+        self.assertNotIn("도구 바꾼 횟수", none_block)
+        self.assertNotIn("색 바꾼 횟수", none_block)
+
+        zero_block = report_client._format_behavior(
+            contracts.BehaviorMetrics(tool_change_count=0, color_change_count=0)
+        )
+        self.assertIn("도구 바꾼 횟수: 0회", zero_block)
+        self.assertIn("색 바꾼 횟수: 0회", zero_block)
 
 
 def _house_summary(**overrides) -> contracts.SubjectSummary:
@@ -465,6 +538,77 @@ class GeometryBlockTest(unittest.TestCase):
         self.assertNotIn("종이의", block)
         self.assertNotIn("%", block)
         self.assertIn("화면", block)  # 위치는 좌표만으로 말할 수 있다
+
+    # ── 기하 없는 탐지 (2026-08-05 운영 결함) ──
+    def test_detection_without_geometry_is_skipped(self):
+        """좌표가 없으면 그 항목을 블록에서 뺀다 — 없는 근거를 지어내지 않는다.
+
+        BE 906 배포본이 {evidenceSourceId, objectCode} 만 보낸다. 코드 이름만으로 크기·위치
+        블록에 줄을 세우면 '관찰된 수치'가 있는 것처럼 읽힌다.
+        """
+        summary = _house_summary(
+            detectedObjects=[{"objectCode": "HOUSE_DOOR", "evidenceSourceId": 10}]
+        )
+
+        self.assertEqual("", report_client._format_geometry(summary, "집 그림"))
+
+    def test_block_disappears_entirely_when_no_item_has_geometry(self):
+        """빈 블록을 실으면 모델이 채우려 든다(_format_behavior 와 같은 원칙)."""
+        summary = _house_summary(
+            detectedObjects=[
+                {"objectCode": "HOUSE", "evidenceSourceId": 1},
+                {"objectCode": "HOUSE_DOOR", "evidenceSourceId": 2},
+            ]
+        )
+
+        block = report_client._format_geometry(summary, "집 그림")
+
+        self.assertEqual("", block)
+        self.assertNotIn("크기·위치", block)
+
+    def test_items_with_geometry_survive_alongside_items_without(self):
+        """섞여 와도 있는 것만 싣는다 — 하나가 비었다고 블록을 통째로 버리지 않는다."""
+        summary = _house_summary(
+            detectedObjects=[
+                {"objectCode": "HOUSE_DOOR", "evidenceSourceId": 10},  # 기하 없음
+                {
+                    "objectCode": "HOUSE",
+                    "x": 0.21,
+                    "y": 0.18,
+                    "width": 0.55,
+                    "height": 0.60,
+                    "areaRatio": 0.33,
+                    "confidence": 0.94,
+                },
+            ]
+        )
+
+        block = report_client._format_geometry(summary, "집 그림")
+
+        self.assertIn("HOUSE:", block)
+        self.assertIn("종이의 약 33%", block)
+        self.assertNotIn("HOUSE_DOOR", block)
+
+    def test_partial_box_is_not_completed_with_zeros(self):
+        """네 값 중 하나라도 없으면 위치를 말하지 않는다 — 빠진 값을 0으로 치면 위치를 지어낸다."""
+        summary = _house_summary(
+            detectedObjects=[
+                {
+                    "objectCode": "HOUSE",
+                    "x": 0.2,
+                    "y": 0.2,
+                    "width": 0.5,
+                    "height": None,  # 하나만 비어도 위치는 계산할 수 없다
+                    "areaRatio": 0.33,
+                    "confidence": 0.9,
+                }
+            ]
+        )
+
+        block = report_client._format_geometry(summary, "집 그림")
+
+        self.assertIn("종이의 약 33%", block)  # 주어진 사실은 그대로 쓴다
+        self.assertNotIn("화면", block)  # 위치는 지어내지 않는다
 
     def test_low_confidence_detection_is_dropped(self):
         """탐지 임계값(0.20)은 박스를 남길 기준이지 문장의 근거 기준이 아니다."""
@@ -563,9 +707,7 @@ class GeometryBlockTest(unittest.TestCase):
     def test_geometry_block_reaches_the_prompt(self):
         captured = {}
         fake_client = mock.Mock()
-        fake_client.chat.completions.create.side_effect = lambda **k: captured.update(
-            messages=k["messages"]
-        ) or _fake_response(_llm_json())
+        fake_client.chat.completions.create.side_effect = _capture_generation(captured)
         req = _sample_request()
         req.subject_summaries = [_house_summary()]
 
@@ -626,6 +768,149 @@ class DetectedObjectContractTest(unittest.TestCase):
         # areaRatio 가 없으면 None 그대로 — width*height 로 보정하지 않는다(BE 명시).
         self.assertIsNone(summary.detected_objects[1].area_ratio)
 
+    # ── 운영 결함 회귀: 906 페이로드가 422로 100% 실패했다 (2026-08-05) ──
+    def test_production_payload_without_geometry_is_accepted(self):
+        """운영 재현 payload — 이게 422를 내던 그 모양이다.
+
+        836이 x·y·width·height 를 **기본값 없는 필수 필드**로 둔 탓에, 906 배포본이
+        {evidenceSourceId, objectCode} 만 실어 보내자 POST /internal/v1/observations 가
+        운영에서 2건 중 2건 422로 실패했다(성공 0건). 탐지 객체가 하나라도 있으면 전량 실패라
+        리포트 파이프라인이 통째로 멈췄다.
+
+        구 오류 5건: x·y·width·height 각 "Field required" +
+                     evidenceSourceId "Input should be a valid string"(BE는 Long 숫자로 보냄).
+
+        이 계약의 롤아웃 원칙("구 BE가 안 보내면 기존 경로가 그대로 동작한다" — 740·836 주석)을
+        836이 자기 모델에서만 어긴 것이 근인이다. 배포 순서에 무관해야 한다.
+        """
+        req = contracts.ObservationGenerationRequest.model_validate(
+            {
+                "requestId": "r-1",
+                "analysisId": 1,
+                "drawingSessionId": 1,
+                "analysisType": "FINAL",
+                "subjectSummaries": [
+                    {
+                        "drawingSubject": "HOUSE",
+                        "drawingDescription": "집이 있어요.",
+                        "detectedObjectCodes": ["HOUSE_DOOR"],
+                        "detectedObjects": [
+                            {"evidenceSourceId": 10, "objectCode": "HOUSE_DOOR"}
+                        ],
+                    }
+                ],
+            }
+        )
+
+        obj = req.subject_summaries[0].detected_objects[0]
+        self.assertEqual("HOUSE_DOOR", obj.object_code)
+        self.assertIsNone(obj.x)
+        self.assertIsNone(obj.area_ratio)
+
+    def test_numeric_evidence_source_id_is_normalized_to_string(self):
+        """BE는 DB 행 ID(Long)를 숫자로 보낸다. 받아들이되 **문자열로** 보관한다.
+
+        정규화가 검증 통과보다 중요하다 — _allowed_evidence_refs 가 (kind, id) 튜플로
+        대조하는데 한쪽이 int 로 남으면 형식은 통과해도 대조에서 어긋나 그 근거가 조용히
+        사라진다(422보다 알아채기 어려운 실패다).
+        """
+        req = contracts.ObservationGenerationRequest.model_validate(
+            {
+                "requestId": "r-1",
+                "analysisId": 1,
+                "drawingSessionId": 1,
+                "analysisType": "FINAL",
+                "subjectSummaries": [
+                    {
+                        "drawingSubject": "HOUSE",
+                        "observationEvidenceSourceId": 77,
+                        "detectedObjects": [
+                            {"evidenceSourceId": 10, "objectCode": "HOUSE_DOOR"}
+                        ],
+                    }
+                ],
+                "selectedEmotionRefs": [{"emotionCode": "JOY", "evidenceSourceId": 42}],
+                "activityMetricSourceId": "9",
+            }
+        )
+
+        summary = req.subject_summaries[0]
+        self.assertEqual("10", summary.detected_objects[0].evidence_source_id)
+        self.assertEqual("77", summary.observation_evidence_source_id)
+        self.assertEqual("42", req.selected_emotion_refs[0].evidence_source_id)
+        # 근거 대조 집합에 문자열로 들어가야 LLM이 되돌려 준 id 와 맞는다.
+        self.assertIn(
+            ("DETECTED_OBJECT", "10"), report_client._allowed_evidence_refs(req)
+        )
+        self.assertIn(
+            ("EMOTION_SELECTION", "42"), report_client._allowed_evidence_refs(req)
+        )
+
+    def test_string_evidence_source_id_still_works(self):
+        """BE가 문자열로 보내던 경로도 그대로 — 정규화가 기존 동작을 바꾸지 않는다."""
+        req = contracts.ObservationGenerationRequest.model_validate(
+            {
+                "requestId": "r-1",
+                "analysisId": 1,
+                "drawingSessionId": 1,
+                "analysisType": "FINAL",
+                "subjectSummaries": [
+                    {
+                        "drawingSubject": "HOUSE",
+                        "detectedObjects": [
+                            {
+                                "objectCode": "HOUSE",
+                                "x": 0.2,
+                                "y": 0.2,
+                                "width": 0.5,
+                                "height": 0.5,
+                                "areaRatio": 0.25,
+                                "confidence": 0.9,
+                                "evidenceSourceId": "abc-1",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+        self.assertEqual(
+            "abc-1", req.subject_summaries[0].detected_objects[0].evidence_source_id
+        )
+
+    def test_geometry_still_parses_when_present(self):
+        """기하가 실려 오는 경로는 그대로 동작한다(BE가 채우기 시작해도 회귀 없음)."""
+        req = contracts.ObservationGenerationRequest.model_validate(
+            {
+                "requestId": "r-1",
+                "analysisId": 1,
+                "drawingSessionId": 1,
+                "analysisType": "FINAL",
+                "subjectSummaries": [
+                    {
+                        "drawingSubject": "HOUSE",
+                        "detectedObjects": [
+                            {
+                                "objectCode": "HOUSE",
+                                "x": 0.21,
+                                "y": 0.18,
+                                "width": 0.55,
+                                "height": 0.60,
+                                "areaRatio": 0.33,
+                                "confidence": 0.94,
+                                "evidenceSourceId": 5,
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+
+        summary = req.subject_summaries[0]
+        block = report_client._format_geometry(summary, "집 그림")
+        self.assertIn("종이의 약 33%", block)
+        self.assertIn("화면 한가운데", block)
+
     def test_missing_detected_objects_defaults_to_empty(self):
         """구 BE(그리고 PIXEL 결과만 있는 주제)는 빈 목록으로 들어온다."""
         req = contracts.ObservationGenerationRequest.model_validate(
@@ -643,12 +928,8 @@ class DetectedObjectContractTest(unittest.TestCase):
     def test_without_description_prompts_placeholder(self):
         captured = {}
 
-        def fake_create(*, model, messages, **_kwargs):
-            captured["messages"] = messages
-            return _fake_response(_llm_json())
-
         fake_client = mock.Mock()
-        fake_client.chat.completions.create.side_effect = fake_create
+        fake_client.chat.completions.create.side_effect = _capture_generation(captured)
 
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             report_client.generate(_sample_request(), model="m")
@@ -686,13 +967,17 @@ class DetectedObjectContractTest(unittest.TestCase):
 
 
 class DefinitiveDiagnosisQuarantineTest(unittest.TestCase):
-    """단정적 진단 표현 격리 — 전문가 검토 + EXPERT_ONLY 강등 (S15P11B209-591)."""
+    """단정적 진단 표현 격리 — 자체검토 실패 + EXPERT_ONLY 강등 (S15P11B209-591).
+
+    ⚠️ 2026-08-05에 담는 곳이 바뀌었다. 구 구현은 규칙 적중을 expertReviewRequired 로 올렸는데,
+    그건 '사람 상담을 권할 신호'(아이 이야기)라 '리포트에 진단어가 섞였다'(품질 실패)와 뜻이 다르다.
+    이제 품질 실패는 status 로 간다 — 격리가 약해진 게 아니라 강해졌다:
+    구 불리언은 BE Report.expertReviewRecommended 컬럼에만 저장되고 읽는 곳이 없었던 반면,
+    status 는 BE가 관찰 카드를 보호자에게 열지 정하는 데 실제로 쓴다.
+    """
 
     def _generate(self, **overrides):
-        fake_client = mock.Mock()
-        fake_client.chat.completions.create.return_value = _fake_response(
-            _llm_json(**overrides)
-        )
+        fake_client = _fake_client(_llm_json(**overrides))
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             return report_client.generate(_sample_request(), model="m")
 
@@ -711,8 +996,8 @@ class DefinitiveDiagnosisQuarantineTest(unittest.TestCase):
         self.assertEqual(
             result.observation_draft.features[0].visibility_scope, "EXPERT_ONLY"
         )
-        # 보호자 노출 내용에 단정 진단이 있으면 전문가 검토를 강제한다.
-        self.assertTrue(result.observation_draft.expert_review_required)
+        # 보호자 노출 내용에 단정 진단이 있으면 자체검토를 통과시키지 않는다.
+        self.assertEqual(result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT)
 
     def test_hedged_concern_feature_stays_guardian_visible(self):
         result = self._generate(
@@ -732,22 +1017,21 @@ class DefinitiveDiagnosisQuarantineTest(unittest.TestCase):
         )
         self.assertFalse(result.observation_draft.expert_review_required)
 
-    def test_diagnosis_in_overall_summary_forces_expert_review(self):
+    def test_diagnosis_in_overall_summary_fails_self_review(self):
         result = self._generate(
             expertReviewRequired=False,
             overallSummary="이 아이는 우울증이 있어 보입니다.",  # 장애명 단정
         )
-        self.assertTrue(result.observation_draft.expert_review_required)
+        self.assertEqual(result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT)
+        # 품질 실패를 '사람 상담 권유'로 둔갑시키지 않는다 — 축이 다르다.
+        self.assertFalse(result.observation_draft.expert_review_required)
 
 
 class OverinferenceQuarantineTest(unittest.TestCase):
     """감정·성격 과잉 추론 격리 — 전문가 검토 + EXPERT_ONLY 강등 (S15P11B209-592)."""
 
     def _generate(self, **overrides):
-        fake_client = mock.Mock()
-        fake_client.chat.completions.create.return_value = _fake_response(
-            _llm_json(**overrides)
-        )
+        fake_client = _fake_client(_llm_json(**overrides))
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             return report_client.generate(_sample_request(), model="m")
 
@@ -766,14 +1050,15 @@ class OverinferenceQuarantineTest(unittest.TestCase):
         self.assertEqual(
             result.observation_draft.features[0].visibility_scope, "EXPERT_ONLY"
         )
-        self.assertTrue(result.observation_draft.expert_review_required)
+        self.assertEqual(result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT)
 
-    def test_overinference_in_overall_summary_forces_expert_review(self):
+    def test_overinference_in_overall_summary_fails_self_review(self):
         result = self._generate(
             expertReviewRequired=False,
             overallSummary="정서적으로 불안한 아이입니다.",  # 정체성 규정
         )
-        self.assertTrue(result.observation_draft.expert_review_required)
+        self.assertEqual(result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT)
+        self.assertFalse(result.observation_draft.expert_review_required)
 
     def test_behavioral_observation_stays_guardian_visible(self):
         result = self._generate(
@@ -798,10 +1083,7 @@ class UngroundedInterpretationTest(unittest.TestCase):
     """관찰 사실 ↔ AI 해석 분리 — 근거 없는 해석은 보호자 노출 불가 (S15P11B209-600)."""
 
     def _generate(self, **overrides):
-        fake_client = mock.Mock()
-        fake_client.chat.completions.create.return_value = _fake_response(
-            _llm_json(**overrides)
-        )
+        fake_client = _fake_client(_llm_json(**overrides))
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             return report_client.generate(_sample_request(), model="m")
 
@@ -901,10 +1183,7 @@ class FollowUpAndDisclaimerTest(unittest.TestCase):
     """진단 표현 제거·한계 고지·후속 질문 생성 보장 (S15P11B209-601)."""
 
     def _generate(self, **overrides):
-        fake_client = mock.Mock()
-        fake_client.chat.completions.create.return_value = _fake_response(
-            _llm_json(**overrides)
-        )
+        fake_client = _fake_client(_llm_json(**overrides))
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             return report_client.generate(_sample_request(), model="m")
 
@@ -996,12 +1275,8 @@ class SubjectSummariesTest(unittest.TestCase):
     def _capture_user_msg(self, req, **generate_kwargs) -> str:
         captured = {}
 
-        def fake_create(*, model, messages, **_kwargs):
-            captured["messages"] = messages
-            return _fake_response(_llm_json())
-
         fake_client = mock.Mock()
-        fake_client.chat.completions.create.side_effect = fake_create
+        fake_client.chat.completions.create.side_effect = _capture_generation(captured)
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             report_client.generate(req, model="m", **generate_kwargs)
         return captured["messages"][1]["content"]
@@ -1154,12 +1429,8 @@ class RagInjectionTest(unittest.TestCase):
     def _generate(self, req, *, chunks=None, unavailable=False, **kwargs):
         captured = {}
 
-        def fake_create(*, model, messages, **_kwargs):
-            captured["messages"] = messages
-            return _fake_response(_llm_json())
-
         fake_client = mock.Mock()
-        fake_client.chat.completions.create.side_effect = fake_create
+        fake_client.chat.completions.create.side_effect = _capture_generation(captured)
 
         if unavailable:
             retrieve_patch = mock.patch.object(
@@ -1316,11 +1587,7 @@ class RagSkippedReasonTest(unittest.TestCase):
         # 사유가 응답(ragSkippedReason)까지 흐르는지 — 미배포 시나리오로 종단 확인.
         from rag import RagUnavailableError
 
-        def fake_create(*, model, messages, **_kwargs):
-            return _fake_response(_llm_json())
-
-        fake_client = mock.Mock()
-        fake_client.chat.completions.create.side_effect = fake_create
+        fake_client = _fake_client()
         with mock.patch.object(
             report_client,
             "retrieve",
@@ -1338,11 +1605,7 @@ class RagSkippedReasonTest(unittest.TestCase):
             chunk_id="s#0", source_id="s", title="제목", text="본문", score=0.9
         )
 
-        def fake_create(*, model, messages, **_kwargs):
-            return _fake_response(_llm_json())
-
-        fake_client = mock.Mock()
-        fake_client.chat.completions.create.side_effect = fake_create
+        fake_client = _fake_client()
         with mock.patch.object(
             report_client, "retrieve", return_value=[chunk]
         ), mock.patch.object(
@@ -1357,17 +1620,21 @@ class ActivityPromptSplitTest(unittest.TestCase):
     """리포트 프롬프트 HTP/그림일기 분리 — 근거 화이트리스트·RAG 적용 범위."""
 
     def _generate(self, req):
-        """generate()를 돌리고 (결과, system 프롬프트, retrieve 스파이)를 돌려준다."""
+        """generate()를 돌리고 (결과, system 프롬프트, retrieve 스파이)를 돌려준다.
+
+        ⚠️ generate()는 생성 다음에 자체검토를 한 번 더 부른다 — call_args(마지막 호출)를 보면
+        검토 프롬프트가 잡힌다. 첫 호출만 기록하는 헬퍼로 생성 프롬프트를 잡는다.
+        """
+        captured = {}
         fake_client = mock.Mock()
-        fake_client.chat.completions.create.return_value = _fake_response(_llm_json())
+        fake_client.chat.completions.create.side_effect = _capture_generation(captured)
         with mock.patch.object(
             report_client, "retrieve", return_value=[]
         ) as retrieve_spy, mock.patch.object(
             report_client, "get_client", return_value=fake_client
         ):
             result = report_client.generate(req, model="m")
-        system = fake_client.chat.completions.create.call_args.kwargs["messages"][0]
-        return result, system["content"], retrieve_spy
+        return result, captured["messages"][0]["content"], retrieve_spy
 
     def test_htp_request_selects_htp_prompt(self):
         _, system, _ = self._generate(_htp_request())
@@ -1441,12 +1708,19 @@ class ReportCommonContradictionTest(unittest.TestCase):
         self.text = prompts_registry.load("report_common")
 
     # ── E: 걱정 신호 배출구 ──
-    def test_two_expert_channels_are_defined_with_distinct_roles(self):
-        self.assertIn("전문가 채널 두 곳", self.text)
+    def test_two_concern_outlets_are_defined_with_distinct_roles(self):
+        """배출구는 여전히 둘이지만 2026-08-05에 독자가 갈렸다.
+
+        EXPERT_ONLY 관찰 카드 = 보호자에게 열지 않고 사람 상담·안전 경로로만.
+        attentionPoints = 보호자가 다음에 더 지켜볼 점(구: 전문가가 추가 확인할 것).
+        """
+        self.assertIn("걱정 신호를 담는 자리 두 곳", self.text)
         self.assertIn("같은 내용을 양쪽에 중복해 적지 마", self.text)
-        # 관찰 카드 = EXPERT_ONLY feature / 추가 확인 지점 = attentionPoints
         self.assertIn("관찰 카드", self.text)
-        self.assertIn("무엇을 더 확인하면 좋을지", self.text)
+        self.assertIn("다음에 무엇을 더 지켜보면 좋을지", self.text)
+        # 존재하지 않는 '전문가 독자'를 다시 들이지 않는다.
+        self.assertNotIn("전문가 채널 두 곳", self.text)
+        self.assertNotIn("전문가 검토용으로만 저장", self.text)
 
     def test_attention_points_is_no_longer_the_only_outlet(self):
         """구 문구는 걱정 신호를 attentionPoints '로만' 옮기라고 해서, 코드가 전제하는
@@ -1667,10 +1941,7 @@ class PublicInterpretationAssemblyTest(unittest.TestCase):
     """
 
     def _generate(self, **overrides):
-        fake_client = mock.Mock()
-        fake_client.chat.completions.create.return_value = _fake_response(
-            _llm_json(**overrides)
-        )
+        fake_client = _fake_client(_llm_json(**overrides))
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             return report_client.generate(_request_with_evidence_refs(), model="m")
 
@@ -1765,7 +2036,7 @@ class PublicInterpretationAssemblyTest(unittest.TestCase):
         )
         self.assertEqual(result.public_interpretations, [])
 
-    def test_labeling_card_is_dropped_and_raises_expert_review(self):
+    def test_labeling_card_is_dropped_and_fails_self_review(self):
         """낙인 표현은 카드에 EXPERT_ONLY 자리가 없어 제외하고, 신호는 남긴다.
 
         여지 표현이 붙어 있어도(=단정 어조 검사는 통과) 고정 특질 규정은 걸러야 한다.
@@ -1778,9 +2049,9 @@ class PublicInterpretationAssemblyTest(unittest.TestCase):
             ],
         )
         self.assertEqual(result.public_interpretations, [])
-        self.assertTrue(result.observation_draft.expert_review_required)
+        self.assertEqual(result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT)
 
-    def test_unsafe_card_raises_expert_review_even_if_malformed(self):
+    def test_unsafe_card_signal_survives_even_if_malformed(self):
         """구조까지 어긋난 카드라도 진단 표현이 있었다는 신호는 사라지지 않아야 한다.
 
         안전 검사가 구조 검사보다 뒤에 있으면 이 신호가 조용히 없어진다(검사 순서 회귀 방지).
@@ -1793,7 +2064,7 @@ class PublicInterpretationAssemblyTest(unittest.TestCase):
             ],
         )
         self.assertEqual(result.public_interpretations, [])
-        self.assertTrue(result.observation_draft.expert_review_required)
+        self.assertEqual(result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT)
 
     def test_unknown_category_is_dropped(self):
         result = self._generate(
@@ -1890,10 +2161,7 @@ class FabricatedIdentifierTest(unittest.TestCase):
     """지어낸 식별자는 형식이 맞아도 통과하지 못한다 (S15P11B209-886)."""
 
     def _generate(self, **overrides):
-        fake_client = mock.Mock()
-        fake_client.chat.completions.create.return_value = _fake_response(
-            _llm_json(**overrides)
-        )
+        fake_client = _fake_client(_llm_json(**overrides))
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             return report_client.generate(_request_with_evidence_refs(), model="m")
 
@@ -1940,10 +2208,7 @@ class InterpretationGateWiringTest(unittest.TestCase):
     """
 
     def _generate(self, **overrides):
-        fake_client = mock.Mock()
-        fake_client.chat.completions.create.return_value = _fake_response(
-            _llm_json(**overrides)
-        )
+        fake_client = _fake_client(_llm_json(**overrides))
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             return report_client.generate(_request_with_evidence_refs(), model="m")
 
@@ -2001,10 +2266,7 @@ class ParentGuideAssemblyTest(unittest.TestCase):
     """보호자 가이드 — 검토 대상 유형은 LLM이 채우지 못한다 (S15P11B209-887)."""
 
     def _generate(self, **overrides):
-        fake_client = mock.Mock()
-        fake_client.chat.completions.create.return_value = _fake_response(
-            _llm_json(**overrides)
-        )
+        fake_client = _fake_client(_llm_json(**overrides))
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
             return report_client.generate(_request_with_evidence_refs(), model="m")
 
@@ -2222,11 +2484,16 @@ class RoutingSingleOwnerTest(unittest.TestCase):
         self.assertIn("features", rule)
         self.assertIn("REVIEWED_GUARDIAN", rule)
 
-    def test_visibility_scope_is_described_as_classification(self):
-        """지금은 어느 쪽이든 보호자 화면에 안 나간다 — '분류'지 '노출 전환'이 아니다."""
+    def test_visibility_scope_is_described_as_the_gate(self):
+        """2026-08-05 — 사후 분류값이 아니라 보호자 도달을 실제로 가르는 값이 됐다.
+
+        구 문구는 "지금 화면 도달 여부를 바꾸지 않는다 … 나중에 열릴 때를 대비한 분류값"이었다.
+        사람 전문가 독자가 없다는 것이 확인된 뒤로는 자체검토가 그 관문이라, 값이 실효를 갖는다.
+        """
         expert = self.text.split("[2]", 1)[1].split("[3]", 1)[0]
         self.assertIn("visibilityScope", expert)
-        self.assertIn("분류값", expert)
+        self.assertNotIn("분류값", expert)
+        self.assertIn("보호자 도달 여부를 실제로 가른다", expert)
 
     def test_activity_notes_count_floor_is_stated(self):
         """스키마에서 '불릿' 표시를 걷어내자 activityNotes 가 평균 2.67 → 1.00 으로 줄었다.
@@ -2235,6 +2502,661 @@ class RoutingSingleOwnerTest(unittest.TestCase):
         한다. 이 줄이 빠지면 보호자 '활동 기록' 카드가 한 줄짜리가 된다(실측 회귀).
         """
         self.assertIn("activityNotes 는 **2~3개**를 채운다(3개를 넘기지 마)", self.text)
+
+
+class SelfReviewTest(unittest.TestCase):
+    """AI 자체검토(2-pass, 2026-08-05).
+
+    이 서비스에는 리포트를 읽는 사람 전문가가 없다(실측: ObservationReviewStatus 값이 AI_DRAFT
+    하나뿐 · 전이 코드 0건 · EXPERT 읽기 경로 0건 · 운영 관찰 특징 97건 전량 EXPERT_ONLY).
+    그 관문을 AI가 대신하므로, 여기서 고정하는 것은 **무엇이 보호자에게 열리는가**다.
+    """
+
+    def _run(self, review: str, generation: str | None = None, *, req=None):
+        captured = {}
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = _capture_generation(
+            captured, generation, review
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(req or _sample_request(), model="m")
+        return result, captured
+
+    # ── 통과 경로 ──
+    def test_clean_report_is_marked_reviewed(self):
+        result, captured = self._run(_REVIEW_PASS)
+
+        self.assertEqual(
+            result.observation_draft.status, report_client.REVIEW_STATUS_REVIEWED
+        )
+        # 검토는 별도 호출이고 검토 프롬프트를 쓴다.
+        self.assertIn("검토하는 검토자", captured["review_messages"][0]["content"])
+
+    def test_review_payload_carries_facts_and_ids(self):
+        """검토자는 '관찰 사실'과 id 붙은 '검토 대상'을 받는다 — id 는 코드가 발급한다."""
+        _, captured = self._run(_REVIEW_PASS)
+
+        payload = json.loads(captured["review_messages"][1]["content"])
+        ids = {item["id"] for item in payload["검토 대상"]}
+        self.assertIn("draft.overallSummary", ids)
+        self.assertIn("feature.0", ids)
+        self.assertTrue(payload["관찰 사실"])
+
+    def test_evidence_summary_is_reviewed_not_only_pooled(self):
+        """근거 자리에 해석이 섞이면 다른 문장들이 그걸 사실로 알고 기댄다 — 빠지면 안 된다."""
+        _, captured = self._run(_REVIEW_PASS)
+
+        payload = json.loads(captured["review_messages"][1]["content"])
+        ids = {item["id"] for item in payload["검토 대상"]}
+        self.assertIn("draft.evidenceSummary", ids)
+
+    def test_child_quotes_are_not_listed_as_review_targets(self):
+        """근거 인용은 '해석'으로 잡을 자리가 아니다 — 근거 풀로만 넘긴다."""
+        generation = _llm_json(
+            evidenceItems=[_evidence(1), _evidence(2, ref="318")],
+            publicInterpretations=[_card([1, 2])],
+        )
+        _, captured = self._run(
+            _REVIEW_PASS, generation, req=_request_with_evidence_refs()
+        )
+
+        payload = json.loads(captured["review_messages"][1]["content"])
+        ids = {item["id"] for item in payload["검토 대상"]}
+        self.assertFalse({i for i in ids if i.startswith("evidence")})
+        self.assertIn("card.0", ids)
+
+    def test_review_runs_at_temperature_zero(self):
+        """판정이 회차마다 흔들리면 같은 리포트가 열렸다 닫혔다 한다."""
+        calls = []
+
+        def create(**kwargs):
+            calls.append(kwargs)
+            return _fake_response(_llm_json() if len(calls) == 1 else _REVIEW_PASS)
+
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = create
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            report_client.generate(_sample_request(), model="m")
+
+        self.assertEqual(calls[1]["temperature"], 0)
+
+    def test_review_call_is_time_boxed(self):
+        """생성+검토 두 번이 BE read timeout(30s) 안에 끝나야 한다 — 넘기면 생성까지 버려진다."""
+        calls = []
+
+        def create(**kwargs):
+            calls.append(kwargs)
+            return _fake_response(_llm_json() if len(calls) == 1 else _REVIEW_PASS)
+
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = create
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            report_client.generate(_sample_request(), model="m")
+
+        self.assertEqual(calls[1]["timeout"], config.REPORT_REVIEW_TIMEOUT_SEC)
+        self.assertLess(config.REPORT_REVIEW_TIMEOUT_SEC, 30)
+
+    # ── 담아낼 수 있는 지적: 항목만 가리고 리포트는 연다 ──
+    def test_flagged_feature_is_demoted_not_deleted(self):
+        result, _ = self._run(
+            _review_findings({"target": "feature.0", "issue": "NO_EVIDENCE"})
+        )
+
+        self.assertEqual(
+            result.observation_draft.features[0].visibility_scope, "EXPERT_ONLY"
+        )
+        # 내용은 보존한다 — 격리지 폐기가 아니다.
+        self.assertIn("가운데", result.observation_draft.features[0].description)
+        self.assertEqual(
+            result.observation_draft.status, report_client.REVIEW_STATUS_REVIEWED
+        )
+
+    def test_flagged_card_is_dropped_with_its_orphaned_evidence(self):
+        generation = _llm_json(
+            evidenceItems=[_evidence(1), _evidence(2, ref="318")],
+            publicInterpretations=[_card([1, 2])],
+        )
+        result, _ = self._run(
+            _review_findings({"target": "card.0", "issue": "OVERREACH"}),
+            generation,
+            req=_request_with_evidence_refs(),
+        )
+
+        self.assertEqual(result.public_interpretations, [])
+        # 화면에 쓰이지 않는 아이 발화 인용이 응답에 남지 않게 함께 솎는다(최소 노출).
+        self.assertEqual(result.evidence_items, [])
+        self.assertEqual(
+            result.observation_draft.status, report_client.REVIEW_STATUS_REVIEWED
+        )
+
+    # ── 담아낼 수 없는 지적: 리포트 전체를 열지 않는다 ──
+    def test_flagged_narrative_field_fails_the_whole_report(self):
+        result, _ = self._run(
+            _review_findings({"target": "draft.overallSummary", "issue": "DIAGNOSTIC"})
+        )
+
+        self.assertEqual(
+            result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT
+        )
+        # 문장을 다시 쓰거나 비우지 않는다 — 비우면 보호자 화면이 무너지고, 고치면 2차 생성이다.
+        self.assertIn("즐겁게", result.observation_draft.overall_summary)
+
+    def test_flagged_activity_note_fails_the_whole_report(self):
+        result, _ = self._run(
+            _review_findings({"target": "activityNote.0", "issue": "OVERREACH"})
+        )
+
+        self.assertEqual(
+            result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT
+        )
+        self.assertTrue(result.activity_notes)  # [1] 필수 필드는 비우지 않는다
+
+    def test_rule_filter_hit_blocks_even_when_review_passes(self):
+        """1층(정규식)과 2층(LLM)은 합쳐진다 — 한쪽만 통과해도 열지 않는다."""
+        result, _ = self._run(
+            _REVIEW_PASS,
+            _llm_json(overallSummary="이 아이는 우울증이 있어 보입니다."),
+        )
+
+        self.assertEqual(
+            result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT
+        )
+
+    def test_attention_points_now_passes_through_the_rule_filter(self):
+        """2026-08-05에 보호자가 읽는 자리가 됐다 — 검사 면제를 남겨 두면 구멍이다."""
+        result, _ = self._run(
+            _REVIEW_PASS, _llm_json(attentionPoints="이 아이는 ADHD로 진단됩니다.")
+        )
+
+        self.assertEqual(
+            result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT
+        )
+
+    # ── 검토를 믿지 않는 부분 ──
+    def test_unknown_target_and_issue_are_ignored(self):
+        """모델이 지어낸 id·코드로 리포트를 떨어뜨리지 못하게 한다(886의 식별자 대조와 같은 결)."""
+        result, _ = self._run(
+            _review_findings(
+                {"target": "draft.nope", "issue": "DIAGNOSTIC"},
+                {"target": "feature.0", "issue": "NOT_A_CODE"},
+                {"target": "feature.99", "issue": "STIGMA"},
+            )
+        )
+
+        self.assertEqual(
+            result.observation_draft.status, report_client.REVIEW_STATUS_REVIEWED
+        )
+        self.assertEqual(
+            result.observation_draft.features[0].visibility_scope, "REVIEWED_GUARDIAN"
+        )
+
+    def test_expert_only_features_are_not_sent_for_review(self):
+        """이미 보호자에게 안 나가는 카드다 — 넣으면 '무거운 관찰'을 또 잡아 전체를 떨어뜨린다."""
+        generation = _llm_json(
+            features=[
+                {
+                    "featureCode": "X",
+                    "title": "관찰",
+                    "description": "안전이 걱정되는 신호가 보여요.",
+                    "evidenceSummary": "e",
+                    "visibilityScope": "EXPERT_ONLY",
+                }
+            ]
+        )
+        _, captured = self._run(_REVIEW_PASS, generation)
+
+        payload = json.loads(captured["review_messages"][1]["content"])
+        self.assertNotIn(
+            "feature.0", {item["id"] for item in payload["검토 대상"]}
+        )
+
+    # ── 실패는 차단이 아니라 기능 저하 ──
+    def test_review_call_failure_leaves_report_unreviewed(self):
+        calls = []
+
+        def create(**kwargs):
+            calls.append(kwargs)
+            if len(calls) == 1:
+                return _fake_response(_llm_json())
+            raise OpenAIError("boom")
+
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = create
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(_sample_request(), model="m")
+
+        # 리포트 자체는 나간다. 다만 '검토 못 했으니 열지 않는다'가 보수적인 쪽이다.
+        self.assertEqual(
+            result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT
+        )
+        self.assertIn("즐겁게", result.observation_draft.overall_summary)
+
+    def test_unparseable_review_leaves_report_unreviewed(self):
+        result, _ = self._run("검토 결과를 알려드릴게요")
+
+        self.assertEqual(
+            result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT
+        )
+
+    def test_generation_failure_still_raises(self):
+        """생성 실패는 여전히 차단이다 — 검토 실패와 뜻이 다르다."""
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = OpenAIError("boom")
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            with self.assertRaises(RuntimeError):
+                report_client.generate(_sample_request(), model="m")
+
+    # ── 축 분리 ──
+    def test_consult_signal_is_owned_by_the_model_not_the_filters(self):
+        """expertReviewRequired = 사람 상담을 권할 신호. 품질 실패로 켜지지 않는다."""
+        flagged, _ = self._run(
+            _review_findings({"target": "draft.overallSummary", "issue": "STIGMA"}),
+            _llm_json(expertReviewRequired=False),
+        )
+        self.assertFalse(flagged.observation_draft.expert_review_required)
+
+        concerned, _ = self._run(
+            _REVIEW_PASS, _llm_json(expertReviewRequired=True)
+        )
+        self.assertTrue(concerned.observation_draft.expert_review_required)
+        # 상담 권유가 필요한 리포트여도 문장이 안전하면 보호자에게는 열린다 — 축이 다르다.
+        self.assertEqual(
+            concerned.observation_draft.status, report_client.REVIEW_STATUS_REVIEWED
+        )
+
+
+class SelfReviewPromptTest(unittest.TestCase):
+    """report_review.txt 가 '과탐지로 리포트를 죽이지 않게' 쓰였는지.
+
+    이 검토자의 실패 모드는 두 방향이다. 놓치면 진단·낙인이 보호자에게 나가고, 과하게 잡으면
+    보호자가 볼 것이 통째로 사라진다. 후자가 실제로 더 자주 나므로 문구로 고정한다.
+    """
+
+    def setUp(self):
+        self.text = prompts_registry.load("report_review")
+
+    def test_hedged_interpretation_is_explicitly_allowed(self):
+        self.assertIn("애매하면 잡지 않는다", self.text)
+        self.assertIn("근거가 있는데 부드럽게 쓴 것은 통과시킨다", self.text)
+
+    def test_heavy_topics_are_not_a_reason_to_flag(self):
+        """무거운 주제를 잡으면 보호자에게서 관찰을 감추는 일이 된다(report_common 2.0.0과 같은 결)."""
+        self.assertIn("주제가 무겁다는 이유로 잡지 마라", self.text)
+
+    def test_reviewer_does_not_rewrite(self):
+        """고치기 시작하면 2차 생성이라 안전 검증을 처음부터 다시 받아야 한다."""
+        self.assertIn("문장을 고치지 않는다", self.text)
+        self.assertIn("품질 첨삭은 하지 않는다", self.text)
+
+    def test_issue_codes_match_the_code(self):
+        for code in report_client._REVIEW_ISSUES:
+            self.assertIn(code, self.text, f"프롬프트에 없는 코드: {code}")
+
+    def test_child_utterances_are_not_echoed_into_notes(self):
+        self.assertIn("아이의 말이나 개인적인 내용을 그대로 옮겨 적지 마", self.text)
+
+
+# ── 주제별 관찰 (875 §5) ─────────────────────────────────────────
+def _htp_subject(subject, description="집이 가운데에 크게 그려져 있어요.", **overrides):
+    """주제 하나의 요청 블록. 근거 식별자를 함께 실어 경향 카드 검증에도 쓸 수 있게 한다."""
+    base = {
+        "drawing_subject": subject,
+        "drawing_description": description,
+        "observation_evidence_source_id": f"obs-{subject}",
+    }
+    base.update(overrides)
+    return contracts.SubjectSummary(**base)
+
+
+def _htp_three_subject_request(**overrides):
+    """집·나무·사람 세 장 + 근거 식별자가 실린 HTP 요청.
+
+    ⚠️ 주제를 **일부러 나무→사람→집 순서로** 넣는다. 875 §5의 표시 순서(집→나무→사람)는
+       요청 순서가 아니라 계약이므로, 요청이 뒤섞여 와도 출력이 고정되는지 봐야 한다.
+    """
+    overrides.setdefault(
+        "subject_summaries",
+        [
+            _htp_subject("TREE", "나무가 왼쪽에 서 있어요."),
+            _htp_subject(
+                "PERSON",
+                "사람 두 명이 나란히 서 있어요.",
+                qa_pairs=[
+                    contracts.SubjectQaPair(
+                        question="이 사람은 누구야?",
+                        answer_text="엄마랑 나",
+                        answer_message_id=202,
+                    )
+                ],
+            ),
+            _htp_subject("HOUSE"),
+        ],
+    )
+    overrides.setdefault(
+        "selected_emotion_refs",
+        [contracts.SelectedEmotionRef(emotion_code="JOY", evidence_source_id="e5")],
+    )
+    overrides.setdefault("activity_metric_source_id", "m1")
+    return _sample_request(**overrides)
+
+
+def _subject_report(subject, observations, refs=None):
+    return {
+        "subjectType": subject,
+        "visionObservations": observations,
+        "interpretationRefs": refs if refs is not None else [],
+    }
+
+
+class SubjectReportsTest(unittest.TestCase):
+    """주제별 관찰 조립 — 875 §5.
+
+    HTP는 집·나무·사람 세 장을 그리는데 출력에 주제 구분이 남지 않아 보호자 화면의
+    '주제별 관찰 사실과 문답' 섹션을 만들 재료가 없었다. 여기서 보는 것은 세 가지다:
+    골격이 **요청**에서 나오는가 · 순서가 계약대로인가 · 카드 참조가 재매핑되는가.
+    """
+
+    def _generate(self, req=None, review=_REVIEW_PASS, **overrides):
+        fake_client = _fake_client(_llm_json(**overrides), review)
+        # RAG는 이 검증의 관심사가 아니다 — HTP 경로라 검색을 타므로 비워서 막는다.
+        with mock.patch.object(report_client, "get_client", return_value=fake_client), \
+                mock.patch.object(report_client, "retrieve", return_value=[]):
+            return report_client.generate(req or _htp_three_subject_request(), model="m")
+
+    def test_subject_order_is_house_tree_person_regardless_of_input_order(self):
+        """요청도 모델 출력도 뒤섞여 있어도 표시 순서는 계약이 정한다(875 §5)."""
+        result = self._generate(
+            subjectReports=[
+                _subject_report("PERSON", ["사람 두 명이 나란히 서 있어요."]),
+                _subject_report("HOUSE", ["집이 가운데에 크게 그려져 있어요."]),
+                _subject_report("TREE", ["나무가 왼쪽에 서 있어요."]),
+            ]
+        )
+        self.assertEqual(
+            [r.subject_type for r in result.subject_reports], ["HOUSE", "TREE", "PERSON"]
+        )
+
+    def test_skeleton_comes_from_the_request_not_the_model(self):
+        """모델이 주제를 빠뜨려도 그 그림이 리포트에서 사라지지 않는다."""
+        result = self._generate(
+            subjectReports=[_subject_report("HOUSE", ["집이 가운데에 크게 그려져 있어요."])]
+        )
+        self.assertEqual(
+            [r.subject_type for r in result.subject_reports], ["HOUSE", "TREE", "PERSON"]
+        )
+        by_subject = {r.subject_type: r for r in result.subject_reports}
+        self.assertEqual(by_subject["HOUSE"].vision_observations, ["집이 가운데에 크게 그려져 있어요."])
+        self.assertEqual(by_subject["TREE"].vision_observations, [])
+
+    def test_subject_that_was_not_drawn_is_dropped(self):
+        """요청에 없는 주제는 그리지 않은 그림이다 — 모델이 지어내도 싣지 않는다."""
+        req = _sample_request(subject_summaries=[_htp_subject("HOUSE")])
+        result = self._generate(
+            req=req,
+            subjectReports=[
+                _subject_report("HOUSE", ["집이 가운데에 크게 그려져 있어요."]),
+                _subject_report("PERSON", ["사람을 그렸어요."]),
+            ],
+        )
+        self.assertEqual([r.subject_type for r in result.subject_reports], ["HOUSE"])
+
+    def test_observation_needs_a_description_to_lean_on(self):
+        """관찰 서술이 없는 그림에 관찰 사실을 적는 것은 관찰이 아니라 창작이다."""
+        req = _sample_request(subject_summaries=[_htp_subject("HOUSE", description="")])
+        result = self._generate(
+            req=req, subjectReports=[_subject_report("HOUSE", ["집을 크게 그렸어요."])]
+        )
+        self.assertEqual(result.subject_reports[0].vision_observations, [])
+
+    def test_unsafe_expression_drops_the_sentence_and_keeps_report_unreviewed(self):
+        """사실 자리에 낙인이 섞이면 다른 문장들이 그걸 사실로 알고 기댄다 — 문장은 빼고 닫는다."""
+        result = self._generate(
+            subjectReports=[
+                _subject_report(
+                    "HOUSE", ["자존감이 낮습니다.", "집이 가운데에 크게 그려져 있어요."]
+                )
+            ]
+        )
+        by_subject = {r.subject_type: r for r in result.subject_reports}
+        self.assertEqual(
+            by_subject["HOUSE"].vision_observations, ["집이 가운데에 크게 그려져 있어요."]
+        )
+        self.assertEqual(result.observation_draft.status, "AI_DRAFT")
+
+    def test_observations_are_capped_per_subject(self):
+        result = self._generate(
+            subjectReports=[_subject_report("HOUSE", [f"관찰 {i}" for i in range(9)])]
+        )
+        by_subject = {r.subject_type: r for r in result.subject_reports}
+        self.assertEqual(
+            len(by_subject["HOUSE"].vision_observations),
+            report_client._VISION_OBSERVATIONS_PER_SUBJECT_MAX,
+        )
+
+    def test_legacy_request_without_subjects_stays_empty(self):
+        """구 BE(주제 블록 미전달)는 지금까지와 똑같이 동작한다 — 롤아웃 안전."""
+        fake_client = _fake_client(
+            _llm_json(subjectReports=[_subject_report("HOUSE", ["집을 그렸어요."])])
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(_sample_request(), model="m")
+        self.assertEqual(result.subject_reports, [])
+
+    def test_model_silence_keeps_every_other_field_intact(self):
+        """모델이 subjectReports 를 아예 안 보내도 기존 경로는 그대로다(필드 단위 롤아웃 안전)."""
+        result = self._generate()
+        self.assertEqual(
+            [r.subject_type for r in result.subject_reports], ["HOUSE", "TREE", "PERSON"]
+        )
+        self.assertTrue(all(not r.vision_observations for r in result.subject_reports))
+        self.assertIn("즐겁게", result.observation_draft.overall_summary)
+        self.assertEqual(result.observation_draft.status, "AI_REVIEWED")
+
+
+class SubjectInterpretationRefsTest(unittest.TestCase):
+    """interpretationRefs 재매핑 — 875 §5-1.
+
+    참조는 카드 **배열 위치**다. 게이트·자체검토가 카드를 뺄 때마다 뒤 카드가 앞으로 당겨지는데,
+    참조를 그대로 두면 조용히 다른 카드를 가리킨다. 875가 "재정렬하지 마라"로 경고한 사고다.
+    """
+
+    def _generate(self, review=_REVIEW_PASS, **overrides):
+        fake_client = _fake_client(_llm_json(**overrides), review)
+        with mock.patch.object(report_client, "get_client", return_value=fake_client), \
+                mock.patch.object(report_client, "retrieve", return_value=[]):
+            return report_client.generate(_htp_three_subject_request(), model="m")
+
+    def _two_good_evidences(self):
+        # QA_ANSWER + EMOTION_SELECTION → 독립 근거 2건·아이 표현 1건(888 게이트 통과).
+        return [
+            _evidence(1),
+            _evidence(2, source_type="SELECTED_EMOTION", kind="EMOTION_SELECTION", ref="e5"),
+        ]
+
+    def test_ref_survives_when_card_survives(self):
+        result = self._generate(
+            evidenceItems=self._two_good_evidences(),
+            publicInterpretations=[_card([1, 2])],
+            subjectReports=[_subject_report("HOUSE", ["집을 크게 그렸어요."], refs=[0])],
+        )
+        self.assertEqual(len(result.public_interpretations), 1)
+        by_subject = {r.subject_type: r for r in result.subject_reports}
+        self.assertEqual(by_subject["HOUSE"].interpretation_refs, [0])
+
+    def test_ref_is_remapped_when_an_earlier_card_fails_the_gate(self):
+        """0번 카드가 근거 부족으로 빠지면 1번이 0번이 된다 — 참조도 함께 옮겨야 한다."""
+        result = self._generate(
+            evidenceItems=self._two_good_evidences(),
+            publicInterpretations=[
+                _card([1], category="EMOTION"),  # 독립 근거 1건 → 게이트 탈락
+                _card([1, 2]),
+            ],
+            subjectReports=[_subject_report("HOUSE", ["집을 크게 그렸어요."], refs=[1])],
+        )
+        self.assertEqual(len(result.public_interpretations), 1)
+        self.assertEqual(result.public_interpretations[0].category, "RELATIONSHIP")
+        by_subject = {r.subject_type: r for r in result.subject_reports}
+        self.assertEqual(by_subject["HOUSE"].interpretation_refs, [0])
+
+    def test_ref_to_a_dropped_card_disappears(self):
+        result = self._generate(
+            evidenceItems=self._two_good_evidences(),
+            publicInterpretations=[_card([1], category="EMOTION")],  # 게이트 탈락
+            subjectReports=[_subject_report("HOUSE", ["집을 크게 그렸어요."], refs=[0])],
+        )
+        self.assertEqual(result.public_interpretations, [])
+        by_subject = {r.subject_type: r for r in result.subject_reports}
+        self.assertEqual(by_subject["HOUSE"].interpretation_refs, [])
+
+    def test_ref_is_remapped_when_self_review_removes_an_earlier_card(self):
+        """자체검토가 카드를 빼는 경로에서도 같은 재매핑이 필요하다."""
+        result = self._generate(
+            review=_review_findings({"target": "card.0", "issue": "NO_EVIDENCE"}),
+            evidenceItems=self._two_good_evidences(),
+            publicInterpretations=[_card([1, 2], category="EMOTION"), _card([1, 2])],
+            subjectReports=[_subject_report("HOUSE", ["집을 크게 그렸어요."], refs=[0, 1])],
+        )
+        self.assertEqual(len(result.public_interpretations), 1)
+        self.assertEqual(result.public_interpretations[0].category, "RELATIONSHIP")
+        by_subject = {r.subject_type: r for r in result.subject_reports}
+        # 빠진 0번 참조는 사라지고, 살아남은 1번이 0번으로 당겨진다.
+        self.assertEqual(by_subject["HOUSE"].interpretation_refs, [0])
+
+    def test_unknown_ref_is_dropped(self):
+        result = self._generate(
+            evidenceItems=self._two_good_evidences(),
+            publicInterpretations=[_card([1, 2])],
+            subjectReports=[
+                _subject_report("HOUSE", ["집을 크게 그렸어요."], refs=[0, 7, "x"])
+            ],
+        )
+        by_subject = {r.subject_type: r for r in result.subject_reports}
+        self.assertEqual(by_subject["HOUSE"].interpretation_refs, [0])
+
+
+class SubjectObservationSelfReviewTest(unittest.TestCase):
+    """주제별 관찰이 자체검토를 통과하는 경로 (2-pass).
+
+    사실 자리에 해석이 섞이는 것(MIXED_EVIDENCE)은 정규식으로 잡히지 않아 검토자가 맡는다.
+    지적은 **그 문장만** 빼서 담아내므로 리포트를 막지 않는다.
+    """
+
+    def _generate(self, review=_REVIEW_PASS, **overrides):
+        fake_client = _fake_client(_llm_json(**overrides), review)
+        with mock.patch.object(report_client, "get_client", return_value=fake_client), \
+                mock.patch.object(report_client, "retrieve", return_value=[]):
+            return report_client.generate(_htp_three_subject_request(), model="m")
+
+    def test_observations_are_offered_to_the_reviewer_as_fact_slots(self):
+        captured = {}
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = _capture_generation(
+            captured,
+            _llm_json(
+                subjectReports=[_subject_report("HOUSE", ["집이 가운데에 크게 그려져 있어요."])]
+            ),
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client), \
+                mock.patch.object(report_client, "retrieve", return_value=[]):
+            report_client.generate(_htp_three_subject_request(), model="m")
+
+        payload = json.loads(captured["review_messages"][1]["content"])
+        targets = {t["id"]: t for t in payload["검토 대상"]}
+        self.assertIn("subject.0.0", targets)
+        self.assertEqual(targets["subject.0.0"]["자리"], report_client._FACT_SLOT_LABEL)
+        # 근거로도 함께 넘긴다 — 안 넘기면 이 관찰에 기댄 문장이 NO_EVIDENCE 로 오탐된다.
+        self.assertIn("집이 가운데에 크게 그려져 있어요.", payload["관찰 사실"])
+
+    def test_flagged_observation_is_removed_but_report_still_opens(self):
+        fake_client = _fake_client(
+            _llm_json(
+                subjectReports=[
+                    _subject_report(
+                        "HOUSE", ["집이 가운데에 크게 그려져 있어요.", "차분하게 몰입했어요."]
+                    )
+                ]
+            ),
+            _review_findings({"target": "subject.0.1", "issue": "MIXED_EVIDENCE"}),
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client), \
+                mock.patch.object(report_client, "retrieve", return_value=[]):
+            result = report_client.generate(_htp_three_subject_request(), model="m")
+
+        by_subject = {r.subject_type: r for r in result.subject_reports}
+        self.assertEqual(
+            by_subject["HOUSE"].vision_observations, ["집이 가운데에 크게 그려져 있어요."]
+        )
+        # 담아낼 수 있는 지적이라 리포트 전체를 막지 않는다(feature·card와 같은 처리).
+        self.assertEqual(result.observation_draft.status, "AI_REVIEWED")
+
+    def test_prompt_forbids_interpretation_in_the_fact_slot(self):
+        text = prompts_registry.load("report_common")
+        self.assertIn("subjectReports", text)
+        self.assertIn("눈으로 확인된 사실", text)
+        self.assertIn("interpretationRefs", text)
+
+    def test_review_prompt_knows_the_fact_slot_label(self):
+        self.assertIn(
+            report_client._FACT_SLOT_LABEL, prompts_registry.load("report_review")
+        )
+
+
+class SubjectReportContractTest(unittest.TestCase):
+    """계약 모델 — BE가 1:1로 맞춰야 하는 형태. 신설 필드는 전부 기본값이 있다.
+
+    ⚠️ 2026-08-05 운영에서 신설 필드를 필수로 둔 탓에 요청이 전량 422로 떨어진 적이 있다(933).
+       롤아웃 안전은 목록이 아니라 **필드 단위**로 지킨다.
+    """
+
+    def test_result_is_constructible_without_the_new_field(self):
+        result = contracts.ObservationGenerationResult(
+            request_id="r",
+            model_name="m",
+            model_version="v",
+            observation_draft=contracts.ObservationDraft(
+                overall_summary="요약",
+                positive_signals="긍정",
+                attention_points="특이 관찰 사항 없음",
+                evidence_summary="근거",
+                guardian_guidance="안내",
+                follow_up_question="질문?",
+                disclaimer=report_client.DISCLAIMER,
+            ),
+            conversation_summary=contracts.ConversationSummaryDraft(
+                summary_text="대화",
+                main_topic="주제",
+                expressed_emotion="즐거움",
+                emotion_source="SELECTED",
+                representative_utterance="응",
+            ),
+            limitations_text=report_client.LIMITATIONS,
+        )
+        self.assertEqual(result.subject_reports, [])
+
+    def test_subject_report_defaults_are_empty(self):
+        draft = contracts.SubjectReportDraft()
+        self.assertIsNone(draft.subject_type)
+        self.assertEqual(draft.vision_observations, [])
+        self.assertEqual(draft.interpretation_refs, [])
+
+    def test_serialises_with_the_875_field_names(self):
+        payload = contracts.SubjectReportDraft(
+            subject_type="HOUSE", vision_observations=["집"], interpretation_refs=[0]
+        ).model_dump(by_alias=True)
+        self.assertEqual(
+            payload,
+            {
+                "subjectType": "HOUSE",
+                "visionObservations": ["집"],
+                "interpretationRefs": [0],
+            },
+        )
+
+    def test_image_url_and_qa_pairs_are_not_ai_owned(self):
+        """875 §5의 나머지 둘은 BE가 채운다 — 아이 발화를 LLM에 되돌려 받지 않는다."""
+        fields = contracts.SubjectReportDraft.model_fields
+        self.assertNotIn("image_url", fields)
+        self.assertNotIn("qa_pairs", fields)
 
 
 if __name__ == "__main__":

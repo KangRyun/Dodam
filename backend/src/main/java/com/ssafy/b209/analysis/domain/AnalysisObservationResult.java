@@ -83,6 +83,7 @@ public class AnalysisObservationResult {
       String guardianGuidance,
       String followUpQuestion,
       boolean expertReviewRequired,
+      ObservationReviewStatus reviewStatus,
       String disclaimerText,
       String generatedModelVersion,
       LocalDateTime createdAt) {
@@ -98,7 +99,7 @@ public class AnalysisObservationResult {
     this.guardianGuidance = guardianGuidance;
     this.followUpQuestion = followUpQuestion;
     this.expertReviewRequired = expertReviewRequired;
-    this.reviewStatus = ObservationReviewStatus.AI_DRAFT;
+    this.reviewStatus = Objects.requireNonNull(reviewStatus, "reviewStatus must not be null");
     this.disclaimerText = requireText(disclaimerText, "disclaimerText");
     this.generatedModelVersion = generatedModelVersion;
     this.createdAt = Objects.requireNonNull(createdAt, "createdAt must not be null");
@@ -115,7 +116,7 @@ public class AnalysisObservationResult {
    * @param evidenceSummary 관찰 근거 요약
    * @param guardianGuidance 보호자 안내 문구
    * @param followUpQuestion 보호자가 활용할 후속 질문
-   * @param expertReviewRequired 전문가 검토 필요 여부
+   * @param expertReviewRequired 사람 상담 권유가 필요한 신호가 잡혔는지 여부
    * @param disclaimerText 진단이 아님을 알리는 필수 주의 문구
    * @param generatedModelVersion 관찰 결과를 생성한 Model 버전
    * @param createdAt 서버가 결과를 저장한 UTC 시각
@@ -135,6 +136,59 @@ public class AnalysisObservationResult {
       String disclaimerText,
       String generatedModelVersion,
       LocalDateTime createdAt) {
+    return of(
+        analysis,
+        resultVersion,
+        overallSummary,
+        positiveSignals,
+        attentionPoints,
+        evidenceSummary,
+        guardianGuidance,
+        followUpQuestion,
+        expertReviewRequired,
+        ObservationReviewStatus.AI_DRAFT,
+        disclaimerText,
+        generatedModelVersion,
+        createdAt);
+  }
+
+  /**
+   * AI 가 실어 보낸 검토 상태 그대로 관찰 결과를 생성한다.
+   *
+   * <p>{@link #aiDraft}와 달리 검토 상태를 호출부가 정한다. AI 자체 검토를 통과한 결과({@link
+   * ObservationReviewStatus#AI_REVIEWED})만 관찰 특징이 보호자에게 열리므로, 이 값은 <b>AI 응답에서만</b> 와야 하고 서버가 임의로
+   * 올려서는 안 된다. 해석 불가능한 값을 초안으로 떨어뜨리는 책임은 {@link ObservationReviewStatus#fromAiStatus(String)}에 있다.
+   *
+   * @param analysis 관찰 결과가 속한 최종 분석
+   * @param resultVersion 1부터 시작하는 관찰 결과 버전
+   * @param overallSummary 보호자에게 노출 가능한 전체 관찰 요약
+   * @param positiveSignals 관찰된 긍정 신호
+   * @param attentionPoints 보호자에게 바로 노출하지 않는 내부 검토용 관찰 필요 지점
+   * @param evidenceSummary 관찰 근거 요약
+   * @param guardianGuidance 보호자 안내 문구
+   * @param followUpQuestion 보호자가 활용할 후속 질문
+   * @param expertReviewRequired 사람 상담 권유가 필요한 신호가 잡혔는지 여부
+   * @param reviewStatus 검토 상태
+   * @param disclaimerText 진단이 아님을 알리는 필수 주의 문구
+   * @param generatedModelVersion 관찰 결과를 생성한 Model 버전
+   * @param createdAt 서버가 결과를 저장한 UTC 시각
+   * @return 저장 가능한 관찰 결과
+   * @throws IllegalArgumentException 필수 값이 비었거나 버전이 양수가 아닌 경우
+   */
+  public static AnalysisObservationResult of(
+      DrawingAnalysis analysis,
+      int resultVersion,
+      String overallSummary,
+      String positiveSignals,
+      String attentionPoints,
+      String evidenceSummary,
+      String guardianGuidance,
+      String followUpQuestion,
+      boolean expertReviewRequired,
+      ObservationReviewStatus reviewStatus,
+      String disclaimerText,
+      String generatedModelVersion,
+      LocalDateTime createdAt) {
     return new AnalysisObservationResult(
         analysis,
         resultVersion,
@@ -145,6 +199,7 @@ public class AnalysisObservationResult {
         guardianGuidance,
         followUpQuestion,
         expertReviewRequired,
+        reviewStatus,
         disclaimerText,
         generatedModelVersion,
         createdAt);
@@ -214,7 +269,13 @@ public class AnalysisObservationResult {
   }
 
   /**
-   * @return 전문가 검토 필요 여부
+   * 사람 상담 권유가 필요한 신호가 잡혔는지를 돌려준다.
+   *
+   * <p><b>의미가 재정의된 값이다.</b> 사람 전문가 검토 워크플로가 없으므로 "전문가가 이 리포트를 검토해야 한다"는 뜻이 아니다 — 그런 대기열은 존재하지 않는다.
+   * 이 값이 참이면 보호자에게 <b>사람 상담을 권유하는 경로</b>로 이어져야 한다는 신호다. 노출 판정({@link #getReviewStatus()})과는 별개의
+   * 축이다.
+   *
+   * @return 사람 상담 권유가 필요한 신호가 잡혔으면 {@code true}
    */
   public Boolean getExpertReviewRequired() {
     return expertReviewRequired;

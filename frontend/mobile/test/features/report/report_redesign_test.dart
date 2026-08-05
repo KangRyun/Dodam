@@ -238,6 +238,91 @@ void main() {
     expect(find.byKey(const ValueKey('report-small-layout')), findsOneWidget);
   });
 
+  testWidgets('새 섹션까지 포함한 시각적 순서가 계약 §11과 일치한다', (tester) async {
+    _setViewport(tester, const Size(390, 844));
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        publicInterpretations: const [
+          ReportInterpretationDto(
+            category: 'RELATIONSHIP',
+            title: '가족과의 연결',
+            tendencyText: '가족에게 의지하려는 경향이 보일 수 있습니다.',
+            scopeText: '이번 그림에서 나타난 가능성입니다.',
+            homeObservationGuide: '보호자의 확인을 구하는지 살펴봐 주세요.',
+            evidenceRefs: [101],
+          ),
+        ],
+        evidenceItems: const [
+          ReportEvidenceItemDto(
+            evidenceId: 101,
+            sourceType: 'CHILD_ANSWER',
+            text: '집에는 우리 가족이 산다고 답했어요.',
+          ),
+        ],
+        subjectReports: const [
+          ReportSubjectReportDto(
+            subjectType: 'HOUSE',
+            imageUrl: '/api/v1/drawing-assets/house/file',
+            visionObservations: ['지붕이 커요.'],
+            qaPairs: [],
+            interpretationRefs: [0],
+          ),
+        ],
+        observedFeatures: const [
+          ReportObservedFeatureDto(
+            title: '집을 크게 그렸어요',
+            description: '종이 가운데에 집을 크게 그렸어요.',
+            evidenceSummary: '그림에서 확인했어요.',
+          ),
+        ],
+        parentGuides: const [
+          ReportParentGuideDto(
+            guideType: 'DRAWING_CONVERSATION',
+            items: ['그림에서 무엇을 그렸는지 물어봐 주세요.'],
+          ),
+          ReportParentGuideDto(
+            guideType: 'DAILY_PARENTING',
+            items: ['하루 한 번 이야기를 들어 주세요.'],
+          ),
+          ReportParentGuideDto(
+            guideType: 'HOME_OBSERVATION',
+            items: ['새로운 곳에서 어떻게 반응하는지 살펴봐 주세요.'],
+          ),
+        ],
+        references: const [
+          ReportReferenceDto(title: '그림 심리의 이해', url: null),
+        ],
+      ),
+    );
+
+    // 표지·비진단 → 한눈에 → 주요 경향 → 집·나무·사람 그림 → 주제별 관찰과 문답
+    // → 아이의 표현·대화 요약 → 이런 모습이 보였어요 → 객관 기록
+    // → 그림 대화·육아 조언·가정 관찰 → 한계·참고 → PDF.
+    final keys = [
+      'report-mascot-intro',
+      'report-non-diagnostic-notice',
+      'report-activity-info',
+      'report-interpretations',
+      'report-drawings-section',
+      'report-subject-observations',
+      'report-child-expression',
+      'report-conversation-summary',
+      'report-observed-features',
+      'report-activity-facts',
+      'report-parent-guide-DRAWING_CONVERSATION',
+      'report-parent-guide-DAILY_PARENTING',
+      'report-parent-guide-HOME_OBSERVATION',
+      'report-limitations',
+      'report-save-pdf',
+    ];
+    final tops = [
+      for (final key in keys) tester.getTopLeft(find.byKey(ValueKey(key))).dy,
+    ];
+    expect(tops, orderedEquals([...tops]..sort()));
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('900px breakpoint는 wide key와 단일 세로 섹션 순서를 유지한다', (
     tester,
   ) async {
@@ -403,6 +488,196 @@ void main() {
     expect(find.textContaining('이 질문은 건너뛰었어요'), findsOneWidget);
     expect(find.text('음성 인식 내용을 확인해 주세요'), findsOneWidget);
     expect(find.text('사람을 크게 그렸어요.'), findsOneWidget);
+  });
+
+  testWidgets('subjectReports 이미지가 있으면 세 장을 계약 순서로 보여주고 활동기록을 조회하지 않는다', (
+    tester,
+  ) async {
+    final activityRepository = _ActivityRepository(
+      activities: [_htpActivity()],
+    );
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        isHtp: true,
+        subjectReports: const [
+          ReportSubjectReportDto(
+            subjectType: 'PERSON',
+            imageUrl: '/api/v1/drawing-assets/person/file',
+            visionObservations: [],
+            qaPairs: [],
+            interpretationRefs: [],
+          ),
+          ReportSubjectReportDto(
+            subjectType: 'HOUSE',
+            imageUrl: '/api/v1/drawing-assets/house/file',
+            visionObservations: [],
+            qaPairs: [],
+            interpretationRefs: [],
+          ),
+          ReportSubjectReportDto(
+            subjectType: 'TREE',
+            imageUrl: '/api/v1/drawing-assets/tree/file',
+            visionObservations: [],
+            qaPairs: [],
+            interpretationRefs: [],
+          ),
+        ],
+      ),
+      activityRepository: activityRepository,
+    );
+
+    expect(find.byKey(const ValueKey('report-subject-gallery')), findsOneWidget);
+    final tops = [
+      for (final subject in ['HOUSE', 'TREE', 'PERSON'])
+        tester
+            .getTopLeft(find.byKey(ValueKey('report-subject-image-$subject')))
+            .dy,
+    ];
+    expect(tops, orderedEquals([...tops]..sort()));
+    // 계약 데이터가 있으면 활동기록 우회 조회도, 단일 preview도 쓰지 않는다.
+    expect(activityRepository.requests, isEmpty);
+    expect(find.byKey(const ValueKey('htp-report-gallery')), findsNothing);
+    expect(find.byKey(const ValueKey('report-image')), findsNothing);
+    expect(find.text('집·나무·사람 그림'), findsOneWidget);
+  });
+
+  testWidgets('subjectReports에 이미지가 없으면 기존 HTP 활동기록 gallery로 물러난다', (
+    tester,
+  ) async {
+    final activityRepository = _ActivityRepository(
+      activities: [_htpActivity()],
+    );
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        isHtp: true,
+        subjectReports: const [
+          ReportSubjectReportDto(
+            subjectType: 'HOUSE',
+            imageUrl: null,
+            visionObservations: ['지붕이 커요.'],
+            qaPairs: [],
+            interpretationRefs: [],
+          ),
+        ],
+      ),
+      activityRepository: activityRepository,
+    );
+
+    expect(find.byKey(const ValueKey('report-subject-gallery')), findsNothing);
+    expect(find.byKey(const ValueKey('htp-report-gallery')), findsOneWidget);
+    // 그림이 없어도 관찰·문답 섹션은 그대로 뜬다.
+    expect(find.text('지붕이 커요.'), findsOneWidget);
+  });
+
+  testWidgets('interpretationRefs는 화면 정렬이 아니라 응답 배열 인덱스로 푼다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        // 응답 순서: [0]=EMOTION, [1]=RELATIONSHIP. 화면은 RELATIONSHIP을
+        // 먼저 그리므로, 인덱스를 화면 순서로 풀면 참조가 뒤바뀐다.
+        publicInterpretations: const [
+          ReportInterpretationDto(
+            category: 'EMOTION',
+            title: '감정 표현',
+            tendencyText: '감정을 드러내는 경향이 보일 수 있습니다.',
+            scopeText: '이번 활동에서 나타난 가능성입니다.',
+            homeObservationGuide: '집에서도 살펴봐 주세요.',
+            evidenceRefs: [],
+          ),
+          ReportInterpretationDto(
+            category: 'RELATIONSHIP',
+            title: '가족과의 연결',
+            tendencyText: '가족에게 의지하려는 경향이 보일 수 있습니다.',
+            scopeText: '이번 그림에서 나타난 가능성입니다.',
+            homeObservationGuide: '보호자의 확인을 구하는지 살펴봐 주세요.',
+            evidenceRefs: [],
+          ),
+        ],
+        subjectReports: const [
+          ReportSubjectReportDto(
+            subjectType: 'HOUSE',
+            imageUrl: null,
+            visionObservations: ['지붕이 커요.'],
+            qaPairs: [],
+            interpretationRefs: [0, 9, -1],
+          ),
+        ],
+      ),
+    );
+
+    final card = find.byKey(const ValueKey('report-subject-HOUSE'));
+    expect(
+      find.descendant(of: card, matching: find.text('감정 표현')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: card, matching: find.text('가족과의 연결')),
+      findsNothing,
+    );
+    // 범위를 벗어난 참조는 조용히 버린다.
+    expect(tester.takeException(), isNull);
+    // 경향 문구는 카드 밖(주제 섹션)으로 새어 나오지 않는다.
+    expect(
+      find.descendant(
+        of: card,
+        matching: find.textContaining('경향이 보일 수 있습니다'),
+      ),
+      findsNothing,
+    );
+  });
+
+  testWidgets('observedFeatures는 "이런 모습이 보였어요" 섹션으로 뜬다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        observedFeatures: const [
+          ReportObservedFeatureDto(
+            title: '집을 크게 그렸어요',
+            description: '종이 가운데에 집을 크게 그렸어요.',
+            evidenceSummary: '그림에서 확인했어요.',
+          ),
+        ],
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('report-observed-features')),
+      findsOneWidget,
+    );
+    expect(find.text('이런 모습이 보였어요'), findsOneWidget);
+    expect(find.text('집을 크게 그렸어요'), findsOneWidget);
+    expect(find.text('종이 가운데에 집을 크게 그렸어요.'), findsOneWidget);
+    expect(find.text('그림에서 확인했어요.'), findsOneWidget);
+  });
+
+  testWidgets('observedFeatures가 비면 섹션이 조용히 숨고 안내 문구를 만들지 않는다', (
+    tester,
+  ) async {
+    await _pumpReport(tester, report: _fullReport());
+
+    expect(
+      find.byKey(const ValueKey('report-observed-features')),
+      findsNothing,
+    );
+    expect(find.text('이런 모습이 보였어요'), findsNothing);
+    // 빈 배열은 오류가 아니라 숨김이다 — "데이터 없음" 같은 문구를 띄우지 않는다.
+    expect(find.textContaining('데이터'), findsNothing);
+    expect(find.textContaining('없어요'), findsNothing);
+  });
+
+  testWidgets('childDisplayName이 있으면 표지에 표시한다', (tester) async {
+    await _pumpReport(tester, report: _fullReport(childDisplayName: '민준'));
+
+    expect(find.text('민준'), findsOneWidget);
+  });
+
+  testWidgets('childDisplayName이 없으면 표지 pill이 빠진다', (tester) async {
+    await _pumpReport(tester, report: _fullReport());
+
+    expect(find.text('민준'), findsNothing);
+    expect(find.text('리포트 v2'), findsOneWidget);
   });
 
   testWidgets('parentGuides는 guideType별 제목으로 정렬해 나눈다', (tester) async {
@@ -603,8 +878,10 @@ ReportDetailDto _fullReport({
   List<ReportInterpretationDto> publicInterpretations = const [],
   List<ReportEvidenceItemDto> evidenceItems = const [],
   List<ReportSubjectReportDto> subjectReports = const [],
+  List<ReportObservedFeatureDto> observedFeatures = const [],
   List<ReportParentGuideDto> parentGuides = const [],
   List<ReportReferenceDto> references = const [],
+  String? childDisplayName,
 }) => ReportDetailDto(
   reportId: 501,
   reportVersion: 2,
@@ -629,10 +906,13 @@ ReportDetailDto _fullReport({
   conversationSummary: conversation,
   guardianConversationGuide: guide,
   limitations: limitations,
+  activityType: isHtp ? 'HTP' : 'ART_DIARY',
+  childDisplayName: childDisplayName,
   nonDiagnosticNotice: nonDiagnosticNotice,
   publicInterpretations: publicInterpretations,
   evidenceItems: evidenceItems,
   subjectReports: subjectReports,
+  observedFeatures: observedFeatures,
   parentGuides: parentGuides,
   references: references,
   expertReview: const ReportExpertReviewDto(

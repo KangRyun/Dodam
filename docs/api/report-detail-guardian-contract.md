@@ -46,14 +46,15 @@
 | conversationSummary.summary | `report_activity_summaries.conversation_summary` 또는 `analysis_conversation_summaries.summary_text` |
 | guardianConversationGuide | `report_follow_up_guides.guidance`(display_order 순) |
 | limitations | `reports.limitations_text`(줄 분리) 또는 관찰 결과 disclaimer 계열 |
-| expertReview | 전문가 리뷰 워크플로 미구현 → 기본값 §5-d3 |
+| expertReview | 사람 전문가 리뷰 워크플로 없음 → 항상 기본값 §5-d3 |
+| observedFeatures | `report_observed_features` 중 `visibility_scope='REVIEWED_GUARDIAN'`(display_order 순) — §4-2 결정 2 개정 |
 | createdAt | `reports.created_at` |
 
 ## 4. 안전 규칙 (보호자 금지 필드 — 반드시 응답에서 제외, §13.4)
 - `observedEmotion`, `emotionConfidence`(AI 추정 감정·확률) 노출 금지.
 - 질환·장애·성격 분류/점수 금지.
 - **전문가 검토 전 `attentionPoints`, raw risk score, 내부 프롬프트 금지.**
-- `report_observed_features` 중 **`visibility_scope != 'REVIEWED_GUARDIAN'`(즉 EXPERT_ONLY)** 는 보호자 응답에 절대 포함하지 않는다. (§13.4 보호자 스키마엔 observedFeatures 필드 자체가 없으므로 기본은 미노출; 만약 노출 필드를 둔다면 REVIEWED_GUARDIAN만.)
+- `report_observed_features` 중 **`visibility_scope != 'REVIEWED_GUARDIAN'`(즉 EXPERT_ONLY)** 는 보호자 응답에 절대 포함하지 않는다. **개정(2026-08-05):** 반대로 `REVIEWED_GUARDIAN`인 항목은 **공개 대상이며 최상위 `observedFeatures[]`로 싣는다**(S15P11B209-875 §2-1). 조회 자체를 `REVIEWED_GUARDIAN`으로 좁혀 EXPERT_ONLY 행은 읽지도 않는다 — 읽고 나서 거르는 방식은 다음 사람이 필터를 빠뜨릴 여지를 남긴다.
 - RAG 문헌 직접 적용 문장·모델 내부 지표 금지.
 - 행동 수치는 객관적 기록으로만("멈춤 4회" O, 해석 X).
 
@@ -68,7 +69,9 @@
 > 3. **`scopeText`(해석 범위 안내) 동반**, 그리고 `category`가 성격 분류가 아닌 **관찰 관점 라벨**(RELATIONSHIP·EMOTION·SELF_EXPRESSION·ACTIVITY_STYLE·ADAPTATION).
 > 4. **구조적 공개 게이트와 표현 안전 필터를 모두 통과**(§4-3).
 
-**적용 범위:** 이 예외는 **경향 해석(`publicInterpretations`) 경로에만** 적용된다. 기존 `report_observed_features`(`features`)·`attentionPoints`는 종전 규칙(EXPERT_ONLY 강등)을 **그대로 유지**한다.
+**적용 범위:** 이 예외는 **경향 해석(`publicInterpretations`) 경로에만** 적용된다. `attentionPoints`는 종전대로 보호자 응답에서 제외한다.
+
+> **개정(2026-08-05) — `features`(`report_observed_features`)는 더 이상 "전부 강등"이 아니다.** 아래 §4-2 결정 2를 개정했다. AI 자체 검토(`AI_REVIEWED`)를 통과한 리포트의 `REVIEWED_GUARDIAN` 항목은 공개한다(S15P11B209-875 §2-1). 경향 해석 예외와는 **별개의 경로**이며 서로 대체하지 않는다.
 
 **예외 대상이 아닌 것(유지 금지):**
 
@@ -85,7 +88,7 @@
 근거(2026-08-05 실코드 확인):
 
 ```java
-// report/service/ObservationReportPersistenceService.java:592
+// 2026-08-05 개정 전 (report/service/ObservationReportPersistenceService.java)
 private static ReportFeatureVisibility resolveVisibility(String value, boolean expertReviewed) {
   if (expertReviewed && "REVIEWED_GUARDIAN".equals(value)) {
     return ReportFeatureVisibility.REVIEWED_GUARDIAN;
@@ -93,13 +96,35 @@ private static ReportFeatureVisibility resolveVisibility(String value, boolean e
   return ReportFeatureVisibility.EXPERT_ONLY;   // 그 외 전부 강등
 }
 
-// 같은 파일 :415
 boolean expertReviewed = observation.getReviewStatus() != ObservationReviewStatus.AI_DRAFT;
+// ↑ ObservationReviewStatus 값이 AI_DRAFT 하나뿐이라 이 식은 컴파일 시점부터 항상 false 였다.
 ```
 
-`ObservationReviewStatus`를 세팅하는 곳은 `analysis/domain/AnalysisObservationResult.java`의 `AI_DRAFT` 고정 대입 한 군데뿐이고 다른 상태로 전이시키는 코드가 없다(전문가 검토 워크플로 미구현) → **`expertReviewed`는 항상 false**다. 따라서 경향 해석을 이 경로에 실으면 **구현은 끝났는데 보호자 화면에는 아무것도 나오지 않고, 기존 테스트는 전부 통과한다**(전부 "노출되지 않는지"만 검증하므로). §7의 긍정 케이스가 이 실패를 잡는다.
+개정 후에는 판정이 enum 한 곳에 모인다(사람 검토 상태가 생기면 여기에만 추가한다).
 
-**결정 2 — 기존 `features`·`attentionPoints`의 EXPERT_ONLY 정책은 변경 없음.** `resolveVisibility()`의 강등 규칙을 완화해서 문제를 해결하지 않는다(전문가 검토 전 관찰 특징이 보호자에게 새는 회귀가 된다).
+```java
+// analysis/domain/ObservationReviewStatus.java
+public enum ObservationReviewStatus { AI_DRAFT, AI_REVIEWED;
+  public boolean isReviewed() { return this != AI_DRAFT; }
+  public static ObservationReviewStatus fromAiStatus(String value) { /* 모르는 값 → AI_DRAFT */ }
+}
+
+// report/service/ObservationReportPersistenceService.java
+boolean reviewed = observation.getReviewStatus().isReviewed();
+```
+
+`ObservationReviewStatus`를 세팅하는 곳은 `analysis/domain/AnalysisObservationResult.java`의 `AI_DRAFT` 고정 대입 한 군데뿐이고 다른 상태로 전이시키는 코드가 없었다(전문가 검토 워크플로 미구현) → **`expertReviewed`는 항상 false**였다. 따라서 경향 해석을 이 경로에 실으면 **구현은 끝났는데 보호자 화면에는 아무것도 나오지 않고, 기존 테스트는 전부 통과한다**(전부 "노출되지 않는지"만 검증하므로). §7의 긍정 케이스가 이 실패를 잡는다.
+
+**결정 1은 그대로 유효하다** — 경향 해석은 별도 저장·별도 노출 판단을 쓴다.
+
+**결정 2 — 개정(2026-08-05).** 원문은 "기존 `features`의 EXPERT_ONLY 정책은 변경 없음"이었다. 그러나 위 진단이 드러낸 것은 "정책이 엄격하다"가 아니라 **통과가 구조적으로 불가능했다**는 것이다. 열어 줄 주체(사람 전문가)가 없는데 "검토 후 공개" 규칙만 남아 있어, 운영 `report_observed_features` 97건이 전부 `EXPERT_ONLY`로 쌓였고 읽는 경로는 0건이었다.
+
+개정 내용:
+
+- `ObservationReviewStatus`에 **`AI_REVIEWED`** 를 추가하고, AI가 자체 검토를 통과시킨 결과에 이 상태를 실어 보낸다. 서버는 AI가 보낸 값을 해석만 하고 임의로 올리지 않는다. **모르는 값·누락은 `AI_DRAFT`** 로 떨어뜨린다(실패는 닫히는 쪽으로만).
+- `resolveVisibility()`의 **강등 규칙 자체는 완화하지 않는다.** 두 조건(리포트 검토 통과 + 항목이 `REVIEWED_GUARDIAN`)을 여전히 모두 요구한다. 바뀐 것은 첫 조건이 이제 **참이 될 수 있다**는 점뿐이다.
+- **소급 적용 없음.** 기존 97건은 `EXPERT_ONLY`로 남는다 — 검토를 거치지 않은 과거 리포트를 여는 셈이 되기 때문이다.
+- `expertReviewRequired`의 뜻은 **"사람 상담 권유가 필요한 신호"** 로 재정의한다. 사람 검토 대기열이 아니므로 응답의 `expertReview`는 계속 `NOT_REQUESTED`·`available=false`다.
 
 ### 4-3. 서버 안전 검증 2단 (성질이 다르므로 분리한다)
 
@@ -170,7 +195,8 @@ boolean expertReviewed = observation.getReviewStatus() != ObservationReviewStatu
 ### 7-1. 경향 해석 예외 검증 (§4-1~§4-4 추가분)
 
 - **(긍정·필수) 네 조건을 충족한 경향 카드가 보호자 응답에 실제로 포함된다.** 독립 원본 근거 2건 + 아이 표현 근거 1건 + `scopeText`·`homeObservationGuide` 동반 + 두 단 통과인 카드를 넣고 응답에 나오는지 본다. **이 케이스가 없으면 §4-2의 실패(전부 숨겨진 채 배포)를 아무도 잡지 못한다** — 기존 검증은 모두 "노출되지 않는지"만 보므로 전부 통과한다. PDF 내보내기에도 같은 카드가 실리는지 함께 본다(875 §11: 화면엔 있고 PDF엔 없는 데이터 금지).
-- **(회귀) 기존 `features`는 여전히 EXPERT_ONLY로 강등된다** — 경향 해석 예외가 기존 정책에 새지 않았음을 확인(결정 2).
+- **(긍정) 검토를 통과한 `features`가 `observedFeatures[]`로 실제로 노출된다** — 닫힘만 보는 검증은 전부 숨겨진 채 배포돼도 통과한다(결정 2 개정).
+- **(회귀) `AI_DRAFT`·해석 불가 상태의 `features`는 여전히 EXPERT_ONLY로 강등된다** — 실패 방향이 닫히는 쪽인지 확인.
 - (유지) 진단명·점수·고정 특질 표현이 보호자 응답에 없다(부정형).
 - (유지) `visibility_scope != 'REVIEWED_GUARDIAN'` 데이터가 새지 않는다.
 - **구조 게이트 계수** — 같은 `sourceType`이라도 다른 원본이면 2건으로 인정 / 파생 근거와 그 원본이 함께 실리면 1건 / 감정 근거만 2건이면 미공개 / 아이 표현 근거 없으면 미공개 / 해석 불가·미제공 참조는 미공개.

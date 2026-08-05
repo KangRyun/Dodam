@@ -8,6 +8,7 @@ import com.ssafy.b209.report.dto.ReportConversationSummaryResponse;
 import com.ssafy.b209.report.dto.ReportDetailResponse;
 import com.ssafy.b209.report.dto.ReportDrawingSessionResponse;
 import com.ssafy.b209.report.dto.ReportExpertReviewResponse;
+import com.ssafy.b209.report.dto.ReportObservedFeatureResponse;
 import com.ssafy.b209.report.dto.ReportUtteranceResponse;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -31,6 +32,8 @@ class ReportPdfRendererTest {
           .contains("도담 관찰 리포트")
           .contains("그림 일기")
           .contains("친구와 함께 있어서 행복했어")
+          .contains("이런 모습이 보였어요")
+          .contains("사람 둘을 나란히 그렸어요")
           .contains("진단 자료가 아닙니다");
     }
   }
@@ -55,6 +58,7 @@ class ReportPdfRendererTest {
             List.of("HAPPY"),
             "즐거웠어",
             List.of(new ReportUtteranceResponse(30L, "친구와 함께 있어서 행복했어", "STT", false))),
+        List.of(new ReportObservedFeatureResponse("친구를 함께 그렸어요", "사람 둘을 나란히 그렸어요.", "그림에서 확인했어요.")),
         new ReportActivityFactsResponse(
             List.of("사람", "나무"), 580_000L, 2, 1, false, List.of("필압 정보 없음")),
         new ReportConversationSummaryResponse(4, 4, 0, "아이는 친구와의 놀이를 이야기했습니다."),

@@ -46,7 +46,15 @@ void main() {
       await _pumpUntil(tester, () => harness.repository.draftCalls == 1);
 
       expect(harness.document.visibleStrokes, isEmpty);
-      expect(harness.sync.journal.events, hasLength(eventCountBeforeErase));
+      // 획 지우개가 지운 결과는 여전히 event 로 표현되지 않는다. 새로 늘어난 하나는
+      // 지우개를 고른 도구 전환뿐이다(S15P11B209-772 후속).
+      final addedEvents = harness.sync.journal.events
+          .skip(eventCountBeforeErase)
+          .toList();
+      expect(addedEvents.map((event) => event.type), [
+        DrawingEventTypes.toolChange,
+      ]);
+      expect(addedEvents.single.tool, 'ERASER_STROKE');
       expect(harness.repository.draftCalls, 1);
       expect(harness.document.canUndo, isTrue);
 
@@ -87,7 +95,14 @@ void main() {
 
       expect(harness.document.visibleStrokes, hasLength(1));
       expect(harness.document.visibleStrokes.single.tool, DrawingTool.pen);
-      expect(harness.sync.journal.events, hasLength(6));
+      // 획 4개 + 지우개·크레용 도구 전환 2개.
+      expect(harness.sync.journal.events, hasLength(8));
+      expect(
+        harness.sync.journal.events
+            .where((event) => event.type == DrawingEventTypes.toolChange)
+            .map((event) => event.tool),
+        ['ERASER_STROKE', 'CRAYON'],
+      );
 
       harness.repository.completeHeldDraft(0);
       await _pumpUntil(tester, () => harness.repository.draftCalls == 2);
@@ -115,12 +130,16 @@ void main() {
     await tester.pump();
 
     final events = harness.sync.journal.events;
+    // 지우개를 고른 도구 전환이 획보다 먼저 굳는다. 메뉴를 여닫는 중간 값은 마지막
+    // 하나로 합쳐져 TOOL_CHANGE 는 한 번만 남는다.
     expect(events.map((event) => event.type), [
+      DrawingEventTypes.toolChange,
       DrawingEventTypes.strokeStart,
       DrawingEventTypes.strokeMove,
       DrawingEventTypes.strokeEnd,
     ]);
     expect(events.first.tool, 'ERASER');
+    expect(events[1].tool, 'ERASER');
     expect(harness.document.visibleStrokes.single.tool, DrawingTool.eraser);
     expect(harness.document.hasVisibleContent, isFalse);
   });
@@ -146,7 +165,17 @@ void main() {
 
     expect(harness.document.actions, hasLength(1));
     expect(harness.document.actions.single, isA<DrawingFillAction>());
-    expect(harness.sync.journal.events, isEmpty);
+    // 채우기는 이미지를 통째로 바꾸지만 행동 자체는 FILL 이벤트로 남는다. 찍은 자리
+    // 좌표와 고른 색을 함께 싣는다.
+    final events = harness.sync.journal.events;
+    expect(events.map((event) => event.type), [
+      DrawingEventTypes.toolChange,
+      DrawingEventTypes.fill,
+    ]);
+    expect(events.first.tool, 'FILL');
+    expect(events.last.x, isNotNull);
+    expect(events.last.y, isNotNull);
+    expect(events.last.color, isNotNull);
     expect(harness.sync.documentRevision, 1);
     expect(harness.sync.hasUnsavedSnapshot, isFalse);
   });
@@ -174,11 +203,13 @@ void main() {
 
       final events = harness.sync.journal.events;
       expect(events.map((event) => event.type), [
+        DrawingEventTypes.toolChange,
         DrawingEventTypes.strokeStart,
         DrawingEventTypes.strokeMove,
         DrawingEventTypes.strokeEnd,
       ]);
-      expect(events.first.tool, 'ERASER');
+      expect(events.first.tool, 'ERASER_STROKE');
+      expect(events[1].tool, 'ERASER');
       expect(harness.document.visibleStrokes.single.tool, DrawingTool.eraser);
       expect(harness.restore.backgroundImage, isNotNull);
     },
@@ -263,7 +294,6 @@ void main() {
       expect(undone.changed, isTrue);
       harness.sync.recordUndo();
       await tester.pump();
-      final cutoffBeforeClear = harness.sync.journal.lastEventSequence;
 
       await _openClearConfirmation(tester);
       expect(find.byType(AlertDialog), findsOneWidget);
@@ -303,7 +333,11 @@ void main() {
         find.byKey(const ValueKey('draft-background-image')),
         findsNothing,
       );
-      expect(harness.repository.lastEventSequence, cutoffBeforeClear);
+      // 전체 지우기는 이제 CANVAS_CLEAR 이벤트를 남긴다. 초안의 replay cutoff 는
+      // 그 이벤트까지 포함해야 이어그리기가 같은 순번을 다시 쓰지 않는다.
+      final events = harness.sync.journal.events;
+      expect(events.last.type, DrawingEventTypes.canvasClear);
+      expect(harness.repository.lastEventSequence, events.last.seq);
       expect(harness.repository.savedPreview?.bytes, isNotEmpty);
     },
   );

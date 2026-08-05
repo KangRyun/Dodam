@@ -55,6 +55,26 @@ class UnspecifiedStopTest(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(stop.STOP_UNSPECIFIED, stop.scan(text))
 
+    def test_spacing_variants(self):
+        """STT의 띄어쓰기는 들쭉날쭉하다 — 같은 말이 한쪽만 잡히면 아이는 무시당한다.
+
+        2026-08-05 실사용에서 "그만 할래"가 이 이유로 통째로 새어 나갔다.
+        """
+        for text in ("그만할래", "그만 할래", "그만하고싶어", "그만 하고 싶어"):
+            with self.subTest(text=text):
+                self.assertEqual(stop.STOP_UNSPECIFIED, stop.scan(text))
+
+    def test_one_word_and_punctuation(self):
+        """아이는 문장을 다 만들지 않고 한 마디로 끊는다."""
+        for text in ("그만", "그만.", "그만!", "그만…", "그만해", "끝", "안녕"):
+            with self.subTest(text=text):
+                self.assertEqual(stop.STOP_UNSPECIFIED, stop.scan(text))
+
+    def test_refusal_and_farewell(self):
+        for text in ("안 할래", "이제 안 할래", "더 안 할래", "하기 싫어", "바이바이"):
+            with self.subTest(text=text):
+                self.assertEqual(stop.STOP_UNSPECIFIED, stop.scan(text))
+
 
 class NotStopIntentTest(unittest.TestCase):
     """중단으로 읽으면 안 되는 것들 — 과탐 방어."""
@@ -82,6 +102,18 @@ class NotStopIntentTest(unittest.TestCase):
             "엄마랑 나야",
             "공놀이 하고 있었어",
             "이거 우리 집이야",
+        ):
+            with self.subTest(text=text):
+                self.assertIsNone(stop.scan(text))
+
+    def test_lookalike_words_are_not_stop(self):
+        """'그만'을 한 마디로 잡되 다른 낱말의 앞 조각으로는 걸리지 않아야 한다."""
+        for text in (
+            "이만큼 그만큼 컸어",
+            "그만큼 컸어",
+            "끝에 집이 있어",
+            "안녕하세요 하고 있어",
+            "친구랑 인사하는 그림이야",
         ):
             with self.subTest(text=text):
                 self.assertIsNone(stop.scan(text))
