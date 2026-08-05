@@ -41,8 +41,6 @@ void main() {
           'drawing-tool-fill',
           'drawing-palette-button',
           'drawing-save-status',
-          'drawing-complete',
-          'drawing-complete-button',
         ];
         for (final key in actionKeys) {
           final size = tester.getSize(find.byKey(ValueKey(key)));
@@ -178,7 +176,7 @@ void main() {
     );
 
     testWidgets(
-      'keeps save, thickness, and complete labels readable without scaling text down',
+      'keeps save and thickness labels readable without scaling text down',
       (tester) async {
         const expectedStatusInks = <DrawingSaveStatus, Color>{
           DrawingSaveStatus.localOnly: AppColors.canvasStatusLocalInk,
@@ -231,18 +229,6 @@ void main() {
         final thin = previewDiameter();
         await _pumpToolbar(tester, quickColors: quickColors, width: 24);
         expect(previewDiameter(), greaterThan(thin));
-
-        await _pumpToolbar(tester, quickColors: quickColors, textScale: 2);
-        final complete = find.byKey(const ValueKey('drawing-complete'));
-        expect(tester.getSize(complete).width, greaterThanOrEqualTo(64));
-        expect(
-          find.descendant(of: complete, matching: find.byType(FittedBox)),
-          findsNothing,
-        );
-        final completeText = tester.widget<Text>(
-          find.descendant(of: complete, matching: find.byType(Text)),
-        );
-        expect(completeText.style?.fontSize, greaterThanOrEqualTo(13));
       },
     );
 
@@ -357,14 +343,13 @@ void main() {
     );
 
     testWidgets(
-      'semantic taps activate tool, quick color, undo, and complete exactly once',
+      'semantic taps activate tool, quick color, undo, and back exactly once',
       (tester) async {
         final semantics = tester.ensureSemantics();
         final instruments = <DrawingInstrument>[];
         final colors = <Color>[];
         var undoCount = 0;
         var backCount = 0;
-        var completeCount = 0;
         await _pumpToolbar(
           tester,
           quickColors: quickColors,
@@ -372,16 +357,9 @@ void main() {
           onBack: () => backCount++,
           onInstrumentChanged: instruments.add,
           onColorChanged: colors.add,
-          onComplete: () => completeCount++,
         );
 
-        for (final label in <String>[
-          '뒤로 가기',
-          '연필 도구',
-          '빠른 색상 2',
-          '실행 취소',
-          '그림 완료',
-        ]) {
+        for (final label in <String>['뒤로 가기', '연필 도구', '빠른 색상 2', '실행 취소']) {
           final target = find.semantics.byLabel(label);
           expect(target, findsOne, reason: label);
           expect(target, isSemantics(hasTapAction: true), reason: label);
@@ -393,7 +371,6 @@ void main() {
         expect(colors, [quickColors[1]]);
         expect(undoCount, 1);
         expect(backCount, 1);
-        expect(completeCount, 1);
         semantics.dispose();
       },
     );
@@ -423,72 +400,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(actions, [DrawingEraserMenuAction.clearAll]);
     });
-
-    testWidgets(
-      'completion has one real disabled or loading action and preserves both public keys',
-      (tester) async {
-        final semantics = tester.ensureSemantics();
-        var completeCount = 0;
-
-        await _pumpToolbar(
-          tester,
-          quickColors: quickColors,
-          canComplete: false,
-          onComplete: () => completeCount++,
-        );
-
-        final actual = find.byKey(const ValueKey('drawing-complete'));
-        final compatibility = find.byKey(
-          const ValueKey('drawing-complete-button'),
-        );
-        expect(actual, findsOneWidget);
-        expect(
-          find.descendant(of: compatibility, matching: actual),
-          findsOneWidget,
-        );
-        expect(
-          tester
-              .widget<InkWell>(
-                find.descendant(of: actual, matching: find.byType(InkWell)),
-              )
-              .onTap,
-          isNull,
-        );
-        expect(
-          tester
-              .getSemantics(actual)
-              .getSemanticsData()
-              .hasAction(SemanticsAction.tap),
-          isFalse,
-        );
-        await tester.tap(actual);
-        expect(completeCount, 0);
-
-        await _pumpToolbar(
-          tester,
-          quickColors: quickColors,
-          isCompleting: true,
-          onComplete: () => completeCount++,
-        );
-        expect(
-          find.descendant(
-            of: actual,
-            matching: find.byType(CircularProgressIndicator),
-          ),
-          findsOneWidget,
-        );
-        expect(
-          tester
-              .widget<InkWell>(
-                find.descendant(of: actual, matching: find.byType(InkWell)),
-              )
-              .onTap,
-          isNull,
-        );
-        expect(completeCount, 0);
-        semantics.dispose();
-      },
-    );
 
     testWidgets('failed save status exposes one fixed retry action', (
       tester,
@@ -520,9 +431,9 @@ void main() {
       tester,
     ) async {
       const cases = <(Size, double)>[
-        (Size(390, 844), 112),
-        (Size(844, 390), 60),
-        (Size(1194, 834), 72),
+        (Size(390, 844), 128),
+        (Size(844, 390), 68),
+        (Size(1194, 834), 84),
       ];
 
       for (final (size, expectedHeight) in cases) {
@@ -538,10 +449,6 @@ void main() {
           tester.getSize(find.byKey(const ValueKey('drawing-toolbar'))).height,
           expectedHeight,
           reason: '$size',
-        );
-        expect(
-          find.byKey(const ValueKey('drawing-complete-button')),
-          findsOneWidget,
         );
         for (final instrument in DrawingInstrument.values) {
           expect(
@@ -599,9 +506,7 @@ void main() {
       expect(
         find.descendant(
           of: find.byKey(const ValueKey('drawing-crayon-frame-exterior')),
-          matching: find.byKey(
-            const ValueKey('drawing-crayon-frame-spirals'),
-          ),
+          matching: find.byKey(const ValueKey('drawing-crayon-frame-spirals')),
         ),
         findsWidgets,
       );
@@ -632,9 +537,6 @@ Future<void> _pumpToolbar(
   VoidCallback? onUndo,
   ValueChanged<DrawingInstrument>? onInstrumentChanged,
   ValueChanged<Color>? onColorChanged,
-  VoidCallback? onComplete,
-  bool canComplete = true,
-  bool isCompleting = false,
   DrawingSaveStatus saveStatus = DrawingSaveStatus.localOnly,
   VoidCallback? onRetrySave,
   double width = 8,
@@ -663,8 +565,6 @@ Future<void> _pumpToolbar(
             onBack: onBack ?? () {},
             canUndo: true,
             canRedo: true,
-            canComplete: canComplete,
-            isCompleting: isCompleting,
             saveStatus: saveStatus,
             onUndo: onUndo ?? () {},
             onRedo: () {},
@@ -674,13 +574,12 @@ Future<void> _pumpToolbar(
             onColorChanged: onColorChanged ?? (_) {},
             onWidthChanged: (_) {},
             onOpenPalette: () {},
-            onComplete: onComplete ?? () {},
           ),
         ),
       ),
     ),
   );
-  if (isCompleting || saveStatus == DrawingSaveStatus.saving) {
+  if (saveStatus == DrawingSaveStatus.saving) {
     await tester.pump();
   } else {
     await tester.pumpAndSettle();

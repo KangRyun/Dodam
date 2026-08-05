@@ -63,8 +63,15 @@ abstract final class AppNavigation {
     BuildContext context,
     String routeName, {
     bool rootNavigator = true,
-  }) {
-    final navigator = Navigator.of(context, rootNavigator: rootNavigator);
+  }) =>
+      resetToOn(Navigator.of(context, rootNavigator: rootNavigator), routeName);
+
+  /// [BuildContext] 없이 스택을 비우고 이동한다.
+  ///
+  /// 앱 생명주기 전환처럼 위젯 밖에서 시작되는 이동에 쓴다([pushNamedOn]과 같은
+  /// 이유다). 화면에서 시작한 [resetTo]와 같은 자리를 지나 판정기도 함께
+  /// 비워진다.
+  static void resetToOn(NavigatorState navigator, String routeName) {
     // 스택이 비워지면 직전 이동 기록은 의미가 없다. 남겨 두면 새 스택의 첫
     // 이동이 근거 없이 막힌다.
     guardFor(navigator).reset();

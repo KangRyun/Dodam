@@ -21,6 +21,7 @@ from dataclasses import dataclass
 import answer_check
 import llm_client
 import prompts_registry
+import question_quality
 import relationship_guard
 from internal_contracts import ObservationGenerationResult, QuestionResponse
 
@@ -420,6 +421,31 @@ def check_question_response(case, resp: QuestionResponse) -> list[Finding]:
                 honest,
                 "" if honest else "사람이 아니라는 답이 보이지 않음",
                 warn_only=True,
+            )
+        )
+
+    # 문맥상 어색한 소유격 질문 — 전 케이스 공통(S15P11B209-918).
+    #   ⚠️ question_service가 이 패턴을 잡으면 문장을 교체하므로, 평가에는 교체된 문장이
+    #      온다. 그래도 재는 이유는 관계 위험 규칙과 같다 — 아이 화면에 실제로 도달하는
+    #      문장이 이 축을 지키는지가 관심사이고, 교체 로직이 빠지거나 패턴이 좁아지면
+    #      여기서 드러난다.
+    awkward = question_quality.find_awkward(text)
+    out.append(
+        Finding("B", "소유격 질문 없음", not awkward, f"사유: {awkward}" if awkward else "")
+    )
+
+    # 서술이 뒷받침하지 않는 탐지 이름을 실제 대상으로 단정하지 않는가(S15P11B209-918).
+    #   자유 그림 탐지(sketch)는 임계값 0.20이라 오탐이 후보에 그대로 남는다. 이름이
+    #   질문에 등장하는 순간 아이에게는 확정 사실이 된다 — 아이가 부정할 수는 있지만,
+    #   부정하게 만드는 것 자체가 대화를 망친다.
+    if "misdetected_terms" in meta:
+        named = _contains_any(text, meta["misdetected_terms"])
+        out.append(
+            Finding(
+                "B",
+                "오탐 이름 미사용",
+                not named,
+                f"근거 없는 이름 사용: {named}" if named else "",
             )
         )
 

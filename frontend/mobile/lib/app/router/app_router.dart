@@ -22,6 +22,8 @@ import '../../features/drawing/presentation/screens/drawing_activity_selection_s
 import '../../features/drawing/presentation/screens/input_method_select_screen.dart';
 import '../../features/conversation/conversation.dart';
 import '../../features/guardian/presentation/screens/guardian_screens.dart';
+import '../../features/guardian_pin/domain/repositories/guardian_pin_repository.dart';
+import '../../features/guardian_pin/presentation/screens/guardian_pin_gate_screen.dart';
 import '../../features/history/presentation/screens/history_screens.dart';
 import '../../features/notification/application/notification_badge_controller.dart';
 import '../../features/notification/application/push_registration_status_controller.dart';
@@ -43,6 +45,7 @@ import '../../features/settings/presentation/screens/notification_settings_scree
 import '../../features/settings/presentation/screens/settings_main_screen.dart';
 import '../../features/settings/presentation/screens/guardian_profile_screen.dart';
 import '../state/guardian_child_controller.dart';
+import '../state/guardian_unlock_controller.dart';
 import '../widgets/app_placeholder_scaffold.dart';
 import '../widgets/guardian_sidebar_shell.dart';
 import 'app_navigation.dart';
@@ -91,9 +94,39 @@ abstract final class AppRouter {
     bool insideShell = false,
     bool htpPhotoUploadEnabled = false,
     PendingHtpPhotoStore? pendingHtpPhotoStore,
+    GuardianUnlockController? guardianUnlock,
+    GuardianPinRepository? guardianPinRepository,
+    bool guardianPinGateEnabled = false,
+    Future<bool> Function(BuildContext context)? onReauthenticateGuardian,
   }) {
     final location = settings.name ?? AppRoutes.guardianHome;
     final segments = Uri.tryParse(location)?.pathSegments ?? const <String>[];
+
+    // 보호자 홈으로 가는 길은 넷(프로필 선택·활동 완료 넘기기·아동 모드 복귀·
+    // 오류 화면 재시도)이고 cold start도 여기로 모인다. 모두 이 라우트를 지나므로
+    // gate는 라우트 생성 지점 한 곳에만 둔다(S15P11B209-874). 호출처마다 거는
+    // 방식은 새 진입점이 생길 때 조용히 빠진다.
+    if (_isGuardianHomeRoute(segments) &&
+        _guardianPinGateRequired(
+          enabled: guardianPinGateEnabled,
+          repository: guardianPinRepository,
+          unlock: guardianUnlock,
+        )) {
+      return MaterialPageRoute<void>(
+        settings: settings,
+        builder: (_) => GuardianPinGateScreen(
+          repository: guardianPinRepository!,
+          // 배선이 없으면 gate 화면이 재설정 진입점을 숨긴다. 여기서 gate 자체를
+          // 건너뛰면 복구 경로가 빠진 구성에서 보호자 홈이 열려 버린다.
+          onReauthenticate: onReauthenticateGuardian,
+          onUnlocked: (context) {
+            guardianUnlock!.unlock();
+            // 같은 라우트로 다시 들어가면 이번에는 gate가 통과시킨다.
+            AppNavigation.resetTo(context, AppRoutes.guardianHome);
+          },
+        ),
+      );
+    }
 
     final screen = switch (segments) {
       ['auth', 'bootstrap'] when authRestoreSession != null =>
@@ -575,6 +608,23 @@ abstract final class AppRouter {
     notificationBadgeController: notificationBadgeController,
     pushRegistrationStatus: pushRegistrationStatus,
   );
+
+  static bool _isGuardianHomeRoute(List<String> segments) => switch (segments) {
+    ['guardian', 'home'] => true,
+    _ => false,
+  };
+
+  /// gate를 세울지 판정한다.
+  ///
+  /// rollout flag가 꺼져 있거나 PIN 경계를 주입받지 못했으면 gate를 세우지
+  /// 않는다. 반대로 켜져 있는데 서버가 `PIN_UNAVAILABLE`을 돌려주는 상황은 gate
+  /// 안에서 오류로 보여 준다 — 여기서 열어 주면 보안 장치가 서버 장애에 맞춰
+  /// 사라진다.
+  static bool _guardianPinGateRequired({
+    required bool enabled,
+    required GuardianPinRepository? repository,
+    required GuardianUnlockController? unlock,
+  }) => enabled && repository != null && unlock != null && !unlock.isUnlocked;
 
   static bool _hasChildContext(
     GuardianChildController? controller,

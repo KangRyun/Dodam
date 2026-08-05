@@ -38,6 +38,9 @@ public class ReportDetailView {
   @Column(name = "hidden_at")
   private LocalDateTime hiddenAt;
 
+  @Column(name = "has_drawn_items", nullable = false)
+  private boolean hasDrawnItems;
+
   @Column(name = "created_at", nullable = false)
   private LocalDateTime createdAt;
 
@@ -90,6 +93,13 @@ public class ReportDetailView {
    */
   public LocalDateTime getCreatedAt() {
     return createdAt;
+  }
+
+  /**
+   * @return 최신 AI 관찰 서술 기반 drawnItems를 저장한 리포트이면 {@code true}
+   */
+  public boolean hasDrawnItems() {
+    return hasDrawnItems;
   }
 
   /**

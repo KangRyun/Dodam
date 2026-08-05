@@ -11,17 +11,17 @@ void main() {
       (
         size: Size(390, 844),
         layoutKey: 'drawing-shell-mobile-portrait',
-        toolbarHeight: 112,
+        toolbarHeight: 128,
       ),
       (
         size: Size(844, 390),
         layoutKey: 'drawing-shell-mobile-landscape',
-        toolbarHeight: 60,
+        toolbarHeight: 68,
       ),
       (
         size: Size(1194, 834),
         layoutKey: 'drawing-shell-tablet',
-        toolbarHeight: 72,
+        toolbarHeight: 84,
       ),
     ];
 

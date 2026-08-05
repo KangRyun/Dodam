@@ -303,6 +303,25 @@ void main() {
       _expectNoOverflow(tester);
     });
 
+    testWidgets('최근 활동 항목을 누르면 활동 상세가 아닌 관찰 리포트로 이동한다', (tester) async {
+      final routes = <String>[];
+      await _pumpDashboard(
+        tester,
+        size: const Size(390, 844),
+        activities: _many(4),
+        onPushRoute: routes.add,
+      );
+
+      // activityId 11 항목만 완료된 리포트(reportId 11)를 갖는다.
+      final row = find.byKey(const ValueKey('activity-row-11'));
+      await _reveal(tester, row);
+      await tester.tap(row);
+      await tester.pumpAndSettle();
+
+      expect(routes, ['/guardian/reports/11']);
+      _expectNoOverflow(tester);
+    });
+
     testWidgets('HTP 활동 버튼은 소개 팝업을 그대로 열고 system back으로 닫힌다', (tester) async {
       await _pumpDashboard(
         tester,

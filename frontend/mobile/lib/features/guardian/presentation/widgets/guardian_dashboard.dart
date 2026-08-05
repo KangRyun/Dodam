@@ -1051,10 +1051,8 @@ class _ActivityRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final status = _statusOf(activity);
     return InkWell(
-      onTap: () => AppNavigation.pushNamed(
-        context,
-        AppRoutes.activityDetail(activity.activityId.toString()),
-      ),
+      key: ValueKey('activity-row-${activity.activityId}'),
+      onTap: () => _openReport(context, activity),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 9),
         child: Row(
@@ -1108,6 +1106,26 @@ class _ActivityRow extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  /// 최근 활동 항목 탭 → 해당 활동의 관찰 리포트로 이동한다.
+  ///
+  /// 리포트가 아직 없으면(분석 중·실패) 불필요한 활동 상세로 보내지 않고 안내만 한다.
+  /// 리포트 화면([ReportScreen])이 생성 중·완료·실패 등 상태를 스스로 처리한다.
+  static void _openReport(BuildContext context, ActivitySummaryDto activity) {
+    final report = activity.report;
+    if (report != null) {
+      AppNavigation.pushNamed(
+        context,
+        AppRoutes.report(report.reportId.toString()),
+      );
+      return;
+    }
+    _Header._snack(context, switch (_statusOf(activity)) {
+      _Status.fail => '분석에 실패해 리포트를 볼 수 없어요.',
+      _Status.ing => '아직 분석 중이에요. 리포트가 완료되면 볼 수 있어요.',
+      _Status.done => '아직 리포트가 준비되지 않았어요.',
+    });
   }
 
   static _Status _statusOf(ActivitySummaryDto a) {
