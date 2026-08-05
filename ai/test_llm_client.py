@@ -203,12 +203,35 @@ class ConversationPromptRulesTest(unittest.TestCase):
             self.assertNotIn("[질문 건너뛰기 의사 처리]", self._first(activity))
 
     def test_prompts_consume_visual_detail_from_description(self):
-        """VLM 서술의 색·표정·위치 세부를 실제로 골라 묻게 한다(대화 품질의 핵심).
+        """VLM 서술의 눈에 보이는 세부를 실제로 골라 묻게 한다(대화 품질의 핵심).
 
         서술만 넣고 쓰라는 지시가 없으면 모델이 "뭘 그렸어?" 수준으로 돌아간다.
+        세부 목록은 활동마다 다르다 — HTP는 색을 뺀다(아래 테스트가 그 금지를 고정한다).
         """
         for system in self._all():
+            self.assertIn("표정·크기·위치·개수", system)
+        for activity in ("HTP", "ART_DIARY"):
+            for system in (self._first(activity), self._next(activity)):
+                self.assertIn("눈에 보이는 세부", system)
+
+    def test_htp_never_asks_about_color(self):
+        """HTP 대화에서는 색을 묻지 않는다.
+
+        금지를 HTP 파일에 둔 이유: conversation_common·conversation_tone 은 그림일기와
+        공유하는 파일이라 거기서 색을 없애면 그림일기의 색 질문까지 사라진다. 대신 두 공통
+        파일에 남아 있던 '색을 묻는 예시'는 중립 예시로 바꿨다 — 예시가 남아 있으면 금지와
+        충돌하고, 같은 프롬프트 안의 상충 지시는 어느 쪽이 이길지 알 수 없다(786 과 같은 함정).
+        """
+        for system in (self._first("HTP"), self._next("HTP")):
+            self.assertIn("색은 묻지", system)
+            self.assertNotIn("무슨 색이야", system)
+            self.assertNotIn("무슨 색으로 칠했어", system)
+            self.assertNotIn("이 색이 좋았어", system)
+
+        # 그림일기는 계속 색을 물을 수 있다 — 금지는 HTP 한정이다.
+        for system in (self._first("ART_DIARY"), self._next("ART_DIARY")):
             self.assertIn("색·표정·크기·위치·개수", system)
+            self.assertNotIn("색은 묻지", system)
 
     def test_child_owns_object_names_in_every_variant(self):
         """탐지 이름보다 아이 말이 우선 — 공통 규칙이라 네 조합 모두에 실려야 한다."""
