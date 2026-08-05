@@ -90,32 +90,29 @@ final class DrawingCrayonFrame extends StatelessWidget {
             height: spiralHeight,
             child: IgnorePointer(
               key: const ValueKey('drawing-crayon-frame-spirals'),
-              child: ClipRect(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final tileCount = constraints.maxWidth <= 0
-                        ? 0
-                        : (constraints.maxWidth / spiralWidth).ceil();
-                    return OverflowBox(
-                      alignment: Alignment.topLeft,
-                      maxWidth: double.infinity,
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: List.generate(
-                          tileCount,
-                          (_) => Image.asset(
-                            spiralAsset,
-                            width: spiralWidth,
-                            height: spiralHeight,
-                            fit: BoxFit.fill,
-                            filterQuality: FilterQuality.high,
-                            excludeFromSemantics: true,
-                          ),
-                        ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  // 들어가는 만큼만 온전히 놓고 남는 폭은 사이사이로 나눈다.
+                  // 잘라 내면 오른쪽 끝 스프링이 반토막 난 채로 남는다.
+                  final tileCount = constraints.maxWidth <= 0
+                      ? 0
+                      : (constraints.maxWidth / spiralWidth).floor();
+                  if (tileCount <= 0) return const SizedBox.shrink();
+                  return Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: List.generate(
+                      tileCount,
+                      (_) => Image.asset(
+                        spiralAsset,
+                        width: spiralWidth,
+                        height: spiralHeight,
+                        fit: BoxFit.fill,
+                        filterQuality: FilterQuality.high,
+                        excludeFromSemantics: true,
                       ),
-                    );
-                  },
-                ),
+                    ),
+                  );
+                },
               ),
             ),
           ),

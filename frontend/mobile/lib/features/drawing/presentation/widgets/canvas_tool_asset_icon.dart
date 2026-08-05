@@ -8,7 +8,7 @@ final class CanvasToolAssetIcon extends StatelessWidget {
     required this.artwork,
     required this.pointColor,
     this.size = 40,
-    this.filterQuality = FilterQuality.medium,
+    this.filterQuality = FilterQuality.high,
     super.key,
   });
 
@@ -47,20 +47,19 @@ final class CanvasToolAssetIcon extends StatelessWidget {
               errorBuilder: (context, error, stackTrace) => _fallback(),
             ),
             if (maskPath != null)
-              ShaderMask(
-                blendMode: BlendMode.srcIn,
-                shaderCallback: (bounds) => LinearGradient(
-                  colors: [pointColor, pointColor],
-                ).createShader(bounds),
-                child: Image.asset(
-                  maskPath,
-                  key: ValueKey('canvas-tool-mask-${artwork.name}'),
-                  fit: BoxFit.contain,
-                  alignment: Alignment.center,
-                  filterQuality: filterQuality,
-                  errorBuilder: (context, error, stackTrace) =>
-                      const SizedBox.shrink(),
-                ),
+              // 원화 규격대로 마스크의 명암은 두고 선택 색을 곱한다. 색으로
+              // 덮어쓰면 도구가 단색 덩어리가 되고, 밑그림 색이 가장자리로
+              // 비쳐 나와 테두리에 분홍 띠가 생긴다.
+              Image.asset(
+                maskPath,
+                key: ValueKey('canvas-tool-mask-${artwork.name}'),
+                fit: BoxFit.contain,
+                alignment: Alignment.center,
+                filterQuality: filterQuality,
+                color: pointColor,
+                colorBlendMode: BlendMode.modulate,
+                errorBuilder: (context, error, stackTrace) =>
+                    const SizedBox.shrink(),
               ),
           ],
         ),

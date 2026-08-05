@@ -27,7 +27,9 @@ void main() {
       find.byKey(const ValueKey('canvas-tool-mask-crayon')),
       findsOneWidget,
     );
-    expect(find.byType(ShaderMask), findsOneWidget);
+    // 원화 규격대로 마스크의 명암을 두고 선택 색을 곱한다(S15P11B209-806).
+    // 색으로 덮어쓰면 도구가 단색 덩어리가 되고 밑그림이 가장자리로 비친다.
+    expect(find.byType(ShaderMask), findsNothing);
 
     final base = tester.widget<Image>(
       find.byKey(const ValueKey('canvas-tool-base-crayon')),
@@ -49,6 +51,9 @@ void main() {
     expect(mask.alignment, Alignment.center);
     expect(base.filterQuality, FilterQuality.high);
     expect(mask.filterQuality, FilterQuality.high);
+    expect(base.color, isNull);
+    expect(mask.color, Colors.red);
+    expect(mask.colorBlendMode, BlendMode.modulate);
   });
 
   testWidgets(

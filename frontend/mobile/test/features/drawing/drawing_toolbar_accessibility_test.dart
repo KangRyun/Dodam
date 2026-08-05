@@ -116,7 +116,8 @@ void main() {
             ),
           );
         }
-        expect(baseSizes.toSet(), {const Size(28, 28)});
+        // 견본이 상자 안에서 도구 그림과 같은 비율로 차야 툴바 리듬이 맞는다.
+        expect(baseSizes.toSet(), {const Size(34, 34)});
 
         const expectedSwatchAssets = <String>[
           'assets/canvas/swatches/red.png',
@@ -201,7 +202,7 @@ void main() {
           );
           expect(text.style?.color, entry.value);
           expect(
-            _contrastRatio(entry.value, AppColors.canvasWarm),
+            _contrastRatio(entry.value, AppColors.canvasToolbarSurface),
             greaterThanOrEqualTo(4.5),
           );
           expect(
