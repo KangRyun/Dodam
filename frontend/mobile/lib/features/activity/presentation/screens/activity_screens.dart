@@ -130,6 +130,14 @@ const aiQuestionNoResponseTimeout = Duration(seconds: 10);
 /// Backend 대화 생성 계약의 생략 시 기본 질문 상한과 같은 값이다.
 const defaultConversationMaxQuestionCount = 10;
 
+/// 아이가 그만하겠다고 말했을 때 AI 가 되묻는 선택지의 식별자다 (S15P11B209-938).
+///
+/// AI 서버가 정하는 값이며(ai/question_service.py), 응답 계약에서는 option code 로 실려
+/// 오다가 BE 를 지나며 optionId 가 된다. 화면은 이 둘만 종료 신호로 다루고 나머지 칩은
+/// 평범한 답변으로 취급한다 — 값이 바뀌면 양쪽을 함께 고쳐야 한다.
+const _endTalkOptionId = 'CHIP_END_TALK';
+const _endActivityOptionId = 'CHIP_END_ACTIVITY';
+
 class DrawingScreen extends StatefulWidget {
   const DrawingScreen({
     required this.childId,
@@ -1475,7 +1483,33 @@ class _DrawingScreenState extends State<DrawingScreen>
         _skipConversationEndAndContinue();
         return;
       }
+      // 아이가 그만하겠다고 고른 칩이면 다음 질문을 요청하지 않는다(S15P11B209-938).
+      // AI 는 무엇을 그만할지 되묻기만 하고, 실제로 끝내는 것은 여기서 한다.
+      if (await _handleStopIntentOption(optionId)) return;
       await _requestFollowingQuestion(controller.answerMessageId);
+    }
+  }
+
+  /// AI 되묻기(S15P11B209-938)에 아이가 답한 칩을 실제 종료로 옮긴다.
+  ///
+  /// 두 종료는 무게가 다르다. 대화 종료는 그림을 계속 그릴 수 있어 가볍지만, 그림 활동
+  /// 완료는 회고 저장과 다음 단계로 이어져 되돌릴 수 없다. 그래서 대화 종료는 바로
+  /// 처리하고(아이가 방금 골랐으므로 다시 묻지 않는다), 활동 완료는 기존 '다 그렸어요!'
+  /// 확인·회고 흐름을 그대로 태운다 — 새 경로를 만들면 회고 저장 단계를 건너뛴다.
+  ///
+  /// @return 종료를 처리해 다음 질문 요청을 건너뛰어야 하면 true
+  Future<bool> _handleStopIntentOption(String optionId) async {
+    switch (optionId) {
+      case _endTalkOptionId:
+        await _completeConversationAutomatically(
+          ConversationCompletionReason.childRequest,
+        );
+        return true;
+      case _endActivityOptionId:
+        await _confirmAndComplete();
+        return true;
+      default:
+        return false;
     }
   }
 
