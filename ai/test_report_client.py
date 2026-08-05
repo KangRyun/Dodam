@@ -1642,11 +1642,12 @@ class PublicInterpretationAssemblyTest(unittest.TestCase):
         self.assertEqual(result.public_interpretations, [])
 
     def test_unknown_ref_is_filtered_but_card_survives_with_valid_ones(self):
+        # 근거는 2건 준다 — 1건만 주면 888 구조 게이트에서 카드가 빠져 이 검증이 무의미해진다.
         result = self._generate(
-            evidenceItems=[_evidence(1)],
-            publicInterpretations=[_card([1, 99])],
+            evidenceItems=[_evidence(1), _evidence(2, ref="318")],
+            publicInterpretations=[_card([1, 2, 99])],
         )
-        self.assertEqual(result.public_interpretations[0].evidence_refs, [1])
+        self.assertEqual(result.public_interpretations[0].evidence_refs, [1, 2])
 
     def test_evidence_without_identifier_is_dropped(self):
         """식별자 없는 근거는 서버가 독립성을 검증할 수 없다 — 버린다(계약 §4)."""
@@ -1752,18 +1753,92 @@ class PublicInterpretationAssemblyTest(unittest.TestCase):
     def test_unreferenced_evidence_is_not_shipped(self):
         """카드가 쓰지 않는 근거는 싣지 않는다 — 화면에 쓰이지 않는 발화 인용을 남기지 않는다."""
         result = self._generate(
-            evidenceItems=[_evidence(1), _evidence(2, ref="318")],
-            publicInterpretations=[_card([1])],
+            evidenceItems=[
+                _evidence(1),
+                _evidence(2, ref="318"),
+                _evidence(3, ref="777"),  # 어느 카드도 참조하지 않는다
+            ],
+            publicInterpretations=[_card([1, 2])],
         )
-        self.assertEqual([i.evidence_id for i in result.evidence_items], [1])
+        self.assertEqual([i.evidence_id for i in result.evidence_items], [1, 2])
 
     def test_duplicate_evidence_id_keeps_first_only(self):
         result = self._generate(
-            evidenceItems=[_evidence(1), _evidence(1, ref="999")],
+            evidenceItems=[
+                _evidence(1),
+                _evidence(1, ref="999"),  # 같은 번호 재사용 — 참조가 모호해진다
+                _evidence(2, ref="318"),
+            ],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual([i.evidence_id for i in result.evidence_items], [1, 2])
+        first = next(i for i in result.evidence_items if i.evidence_id == 1)
+        self.assertEqual(first.source_ref.id, "202")
+
+
+class InterpretationGateWiringTest(unittest.TestCase):
+    """구조 게이트가 응답 조립에 실제로 걸려 있는지 (S15P11B209-888).
+
+    게이트 로직 자체는 test_interpretation_gate.py가 검증한다. 여기서는 배선만 본다 —
+    모듈이 있어도 호출되지 않으면 규칙이 없는 것과 같다.
+    """
+
+    def _generate(self, **overrides):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(
+            _llm_json(**overrides)
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            return report_client.generate(_sample_request(), model="m")
+
+    def test_single_evidence_card_is_dropped_by_the_gate(self):
+        result = self._generate(
+            evidenceItems=[_evidence(1)],
             publicInterpretations=[_card([1])],
         )
-        self.assertEqual(len(result.evidence_items), 1)
-        self.assertEqual(result.evidence_items[0].source_ref.id, "202")
+        self.assertEqual(result.public_interpretations, [])
+
+    def test_two_independent_origins_pass_the_gate(self):
+        result = self._generate(
+            evidenceItems=[_evidence(1), _evidence(2, ref="318")],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual(len(result.public_interpretations), 1)
+
+    def test_card_without_child_expression_is_dropped(self):
+        """그림 관찰·활동 지표만으로 만든 카드는 공개하지 않는다."""
+        result = self._generate(
+            evidenceItems=[
+                _evidence(1, source_type="VISION", kind="DETECTED_OBJECT", ref="d1"),
+                _evidence(
+                    2, source_type="ACTIVITY_METRIC", kind="ACTIVITY_METRIC", ref="m1"
+                ),
+            ],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual(result.public_interpretations, [])
+
+    def test_gate_failure_does_not_downgrade_features(self):
+        """게이트 실패는 제외이고 강등이 아니다 — features 노출 범위를 건드리지 않는다."""
+        result = self._generate(
+            expertReviewRequired=False,
+            evidenceItems=[_evidence(1)],
+            publicInterpretations=[_card([1])],
+            features=[
+                {
+                    "featureCode": "X",
+                    "title": "관찰",
+                    "description": "차분히 그린 모습이 보여요.",
+                    "evidenceSummary": "약 10분간 그렸어요.",
+                    "visibilityScope": "REVIEWED_GUARDIAN",
+                }
+            ],
+        )
+        self.assertEqual(result.public_interpretations, [])
+        self.assertEqual(
+            result.observation_draft.features[0].visibility_scope, "REVIEWED_GUARDIAN"
+        )
+        self.assertFalse(result.observation_draft.expert_review_required)
 
 
 class ParentGuideAssemblyTest(unittest.TestCase):

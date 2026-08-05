@@ -36,6 +36,7 @@ from prometheus_client import Counter as PrometheusCounter
 
 import config
 import internal_contracts as contracts
+import interpretation_gate  # 경향 카드 구조 게이트 (S15P11B209-888)
 import prompts_registry  # 프롬프트 파일 로딩·버전 관리 중앙화 (S15P11B209-595)
 import report_safety
 from gms import get_client
@@ -809,7 +810,7 @@ def _assemble(
     ]
     needs_expert_review = report_safety.has_unsafe_expression(*guardian_texts)
 
-    # ── 경향 해석 (S15P11B209-887) ─────────────────────────────
+    # ── 경향 해석 (S15P11B209-887 조립 + 888 구조 게이트) ────────
     # 근거 풀을 먼저 만들고, 카드는 그 풀에 실제로 있는 근거만 참조하게 한다.
     evidence_items = _evidence_items(data)
     known_ids = {item.evidence_id for item in evidence_items}
@@ -830,6 +831,15 @@ def _assemble(
         card = _public_interpretation(raw, known_ids)
         if card is not None:
             interpretations.append(card)
+    # 구조적 공개 게이트(S15P11B209-888) — 값싼 결정적 검사라 표현 필터보다 먼저 돌린다.
+    # 실패한 카드는 EXPERT_ONLY로 강등하지 않고 **제외**한다(근거 자체가 없다).
+    # blocked_refs: 미확정 STT(886)·위기 발화(889)가 채운다. 지금은 비어 있어 아무것도 막지 않는다.
+    interpretations, gate_reasons = interpretation_gate.apply(
+        interpretations, evidence_items, blocked_refs=frozenset()
+    )
+    if gate_reasons:
+        # 사유 코드만 남긴다 — 카드 문장·아이 발화는 로그에 담지 않는다.
+        logger.info("경향 카드 게이트 제외 %d건: %s", len(gate_reasons), sorted(set(gate_reasons)))
     # 아무 카드도 참조하지 않는 근거는 싣지 않는다 — 화면에 쓰이지 않는 아이 발화 인용이
     # 응답에 남는 것을 막는다(최소 노출).
     referenced = {ref for card in interpretations for ref in card.evidence_refs}
