@@ -20,6 +20,12 @@ import java.util.List;
  * @param followUpGuides 보호자 후속 안내 목록
  * @param guardianQuestions 보호자 질문 목록
  * @param limitationsText 리포트 해석 한계 문구
+ * @param publicInterpretations 보호자에게 공개할 수 있는 비진단 경향 해석 카드 목록이다. AI 가 이미 구조 게이트를 통과시킨 것만 보내지만 BE 가
+ *     다시 검증한다(이중 방어, S15P11B209-901)
+ * @param evidenceItems 카드가 참조하는 근거 풀이다. {@code evidenceId} 는 <strong>이 응답 안에서만 유일한 로컬 번호</strong>다
+ * @param parentGuides 유형별 보호자 가이드 목록이며 유형마다 문장이 여러 개일 수 있다
+ * @param crisisAlert 위기 대응 안내이며 위기 신호가 없으면 {@code null}이다. 전부 사전 검토 템플릿이며 LLM 이 만들지 않는다. {@code
+ *     ABUSE_DISCLOSURE}는 가해자가 보호자일 수 있어 <strong>항상 {@code null}</strong>이다(S15P11B209-889·890)
  * @param drawnItems 아이가 그린 것 목록이다. <strong>출처는 VLM 관찰 서술이며 탐지 라벨이 아니다</strong> — AI 가 서술 원문과 대조해 걸러
  *     보낸다(S15P11B209-911). optional 이며 AI 가 싣지 않으면 빈 목록이다
  */
@@ -34,7 +40,72 @@ public record ObservationGenerationResult(
     List<FollowUpGuideDraft> followUpGuides,
     List<GuardianQuestionDraft> guardianQuestions,
     String limitationsText,
-    List<DrawnItemDraft> drawnItems) {
+    List<DrawnItemDraft> drawnItems,
+    List<PublicInterpretationDraft> publicInterpretations,
+    List<EvidenceItemDraft> evidenceItems,
+    List<ParentGuideDraft> parentGuides,
+    CrisisAlertDraft crisisAlert) {
+
+  /**
+   * 경향 해석 계열 목록만 빈 목록으로 정규화한다.
+   *
+   * <p>{@code drawnItems}는 정규화하지 않는다 — 필드 생략과 의도적 빈 배열을 구분해야 하고(S15P11B209-912) 그 판단은 {@link
+   * #hasDrawnItems()}가 한다. 경향 해석 계열은 그 구분이 필요 없다(빈 배열은 근거 부족이라는 정상 결과다, 875 §10).
+   */
+  public ObservationGenerationResult {
+    publicInterpretations =
+        publicInterpretations == null ? List.of() : List.copyOf(publicInterpretations);
+    evidenceItems = evidenceItems == null ? List.of() : List.copyOf(evidenceItems);
+    parentGuides = parentGuides == null ? List.of() : List.copyOf(parentGuides);
+  }
+
+  /**
+   * 경향 해석 확장 이전 형태로 만든다.
+   *
+   * <p>{@code drawnItems}까지만 있던 호출부(주로 테스트)를 그대로 두기 위한 생성자다. 경향 해석 계열은 빈 목록, 위기 안내는 {@code null}로
+   * 둔다.
+   *
+   * @param requestId 요청 식별자
+   * @param modelName Model 이름
+   * @param modelVersion Model 버전
+   * @param confidence 신뢰도이며 없으면 {@code null}
+   * @param observationDraft 관찰 초안
+   * @param conversationSummary 대화 요약 초안
+   * @param activityNotes 활동 주의사항 목록
+   * @param followUpGuides 보호자 후속 안내 목록
+   * @param guardianQuestions 보호자 질문 목록
+   * @param limitationsText 한계 문구
+   * @param drawnItems 그린 것 목록이며 필드 생략을 표현하려면 {@code null}
+   */
+  public ObservationGenerationResult(
+      String requestId,
+      String modelName,
+      String modelVersion,
+      BigDecimal confidence,
+      ObservationDraft observationDraft,
+      ConversationSummaryDraft conversationSummary,
+      List<String> activityNotes,
+      List<FollowUpGuideDraft> followUpGuides,
+      List<GuardianQuestionDraft> guardianQuestions,
+      String limitationsText,
+      List<DrawnItemDraft> drawnItems) {
+    this(
+        requestId,
+        modelName,
+        modelVersion,
+        confidence,
+        observationDraft,
+        conversationSummary,
+        activityNotes,
+        followUpGuides,
+        guardianQuestions,
+        limitationsText,
+        drawnItems,
+        List.of(),
+        List.of(),
+        List.of(),
+        null);
+  }
 
   /**
    * 기존 AI 배포본이 필드를 생략한 경우와, 최신 AI가 의도적으로 빈 배열을 보낸 경우를 구분한다.
@@ -77,6 +148,10 @@ public record ObservationGenerationResult(
         followUpGuides,
         guardianQuestions,
         limitationsText,
+        null,
+        List.of(),
+        List.of(),
+        List.of(),
         null);
   }
 
@@ -165,4 +240,115 @@ public record ObservationGenerationResult(
    * @param questionPurpose 질문 목적
    */
   public record GuardianQuestionDraft(String questionText, String questionPurpose) {}
+
+  /**
+   * 보호자에게 공개할 수 있는 비진단 경향 해석 카드 한 건이다 (875 §3).
+   *
+   * <p>필드명은 875 계약을 그대로 쓴다 — FE 가 이미 그 이름으로 DTO·화면을 구현해 병합했고, 중간에 매핑 계층을 두면 그 표가 틀릴 때 필드가 조용히 사라진다.
+   *
+   * @param category 관찰 관점 라벨
+   * @param title 카드 제목
+   * @param tendencyText 가능성 어조의 경향 문장
+   * @param scopeText 해석 범위 안내이며 비면 공개 조건 미달이다
+   * @param homeObservationGuide 가정에서 살펴볼 점이며 비면 공개 조건 미달이다
+   * @param evidenceRefs 참조하는 근거의 로컬 번호 목록
+   */
+  public record PublicInterpretationDraft(
+      String category,
+      String title,
+      String tendencyText,
+      String scopeText,
+      String homeObservationGuide,
+      List<Long> evidenceRefs) {
+
+    /** 참조 목록이 {@code null}로 와도 빈 목록으로 정규화한다. */
+    public PublicInterpretationDraft {
+      evidenceRefs = evidenceRefs == null ? List.of() : List.copyOf(evidenceRefs);
+    }
+  }
+
+  /**
+   * 카드가 참조하는 근거 한 건이다 (875 §4).
+   *
+   * <p>{@code sourceRef}(원본)와 {@code derivedFrom}(파생) 중 <strong>정확히 하나</strong>만 갖는다. 참조 식별자는 서버가
+   * 발급한 값이며 조합키는 허용하지 않는다 — 생성자가 만들 수 있는 식별자면 독립 근거 검증이 자기 신고가 된다.
+   *
+   * @param evidenceId 이 응답 안에서만 유일한 로컬 번호
+   * @param sourceType 근거 종류
+   * @param text 근거 문장
+   * @param sourceRef 원본 참조이며 파생 근거면 {@code null}
+   * @param derivedFrom 파생 근거의 원본 참조 목록이며 원본 근거면 빈 목록
+   * @param sttNeedsConfirmation 음성 인식 확인이 필요한 발화에서 온 근거인지 여부
+   */
+  public record EvidenceItemDraft(
+      Long evidenceId,
+      String sourceType,
+      String text,
+      EvidenceSourceRefDraft sourceRef,
+      List<EvidenceSourceRefDraft> derivedFrom,
+      boolean sttNeedsConfirmation) {
+
+    /** 파생 목록이 {@code null}로 와도 빈 목록으로 정규화한다. */
+    public EvidenceItemDraft {
+      derivedFrom = derivedFrom == null ? List.of() : List.copyOf(derivedFrom);
+    }
+  }
+
+  /**
+   * 원본 근거를 가리키는 참조다.
+   *
+   * @param kind 원본 근거의 종류
+   * @param id 서버가 발급한 식별자
+   */
+  public record EvidenceSourceRefDraft(String kind, String id) {}
+
+  /**
+   * 유형별 보호자 가이드다 (875 §7).
+   *
+   * <p>{@code PROFESSIONAL_SUPPORT}는 상시 노출되는 일반 상담 안내이며 위기 문구·긴급 연락처를 담지 않는다.
+   *
+   * @param guideType 가이드 유형
+   * @param items 유형 안의 문장 목록
+   */
+  public record ParentGuideDraft(String guideType, List<String> items) {
+
+    /** 문장 목록이 {@code null}로 와도 빈 목록으로 정규화한다. */
+    public ParentGuideDraft {
+      items = items == null ? List.of() : List.copyOf(items);
+    }
+  }
+
+  /**
+   * 위기 대응 안내다 (875 §7-1). 보호자 가이드와 다른 필드이며 전부 사전 검토 템플릿이다.
+   *
+   * @param reasonCode 위기 사유 코드
+   * @param severity 심각도
+   * @param title 안내 제목
+   * @param message 안내 본문
+   * @param actionSteps 보호자가 취할 행동 목록
+   * @param resources 상담·신고 자원 목록
+   */
+  public record CrisisAlertDraft(
+      String reasonCode,
+      String severity,
+      String title,
+      String message,
+      List<String> actionSteps,
+      List<CrisisResourceDraft> resources) {
+
+    /** 목록이 {@code null}로 와도 빈 목록으로 정규화한다. */
+    public CrisisAlertDraft {
+      actionSteps = actionSteps == null ? List.of() : List.copyOf(actionSteps);
+      resources = resources == null ? List.of() : List.copyOf(resources);
+    }
+  }
+
+  /**
+   * 위기 안내에 함께 싣는 상담·신고 자원이다.
+   *
+   * @param name 자원 이름
+   * @param contact 연락처
+   * @param note 보충 설명이며 없으면 빈 문자열
+   */
+  public record CrisisResourceDraft(String name, String contact, String note) {}
 }

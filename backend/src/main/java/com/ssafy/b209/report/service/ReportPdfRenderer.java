@@ -2,13 +2,17 @@ package com.ssafy.b209.report.service;
 
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.dto.ReportDetailResponse;
+import com.ssafy.b209.report.dto.ReportParentGuideResponse;
+import com.ssafy.b209.report.dto.ReportPublicInterpretationResponse;
 import com.ssafy.b209.report.exception.ReportExportErrorCode;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -114,6 +118,32 @@ public class ReportPdfRenderer {
                   : report.drawingSession().startedAt().format(DATE_TIME_FORMATTER)));
     }
     add(lines, "");
+    // 875 §11 순서 1 — 표지 다음이 비진단 고지다. 경향 문장보다 먼저 나와야 한다.
+    if (report.nonDiagnosticNotice() != null) {
+      add(lines, report.nonDiagnosticNotice());
+      add(lines, "");
+    }
+    // 875 §11 순서 3 — 주요 심리 경향. 경향 문장만 단독으로 싣지 않고 범위 안내와 근거를 함께 낸다(875 §3).
+    if (!report.publicInterpretations().isEmpty()) {
+      add(lines, "[주요 심리 경향]");
+      Map<Integer, String> evidenceTexts = new LinkedHashMap<>();
+      report
+          .evidenceItems()
+          .forEach(evidence -> evidenceTexts.put(evidence.evidenceId(), evidence.text()));
+      for (ReportPublicInterpretationResponse card : report.publicInterpretations()) {
+        add(lines, "• " + value(card.title()));
+        add(lines, "  " + value(card.tendencyText()));
+        add(lines, "  범위: " + value(card.scopeText()));
+        add(lines, "  살펴볼 점: " + value(card.homeObservationGuide()));
+        for (Integer evidenceRef : card.evidenceRefs()) {
+          String evidenceText = evidenceTexts.get(evidenceRef);
+          if (evidenceText != null) {
+            add(lines, "  근거: " + evidenceText);
+          }
+        }
+      }
+      add(lines, "");
+    }
     add(lines, "[아이의 표현]");
     if (report.childExpression() != null) {
       add(lines, "선택 감정: " + String.join(", ", report.childExpression().selectedEmotions()));
@@ -126,8 +156,9 @@ public class ReportPdfRenderer {
     add(lines, "");
     add(lines, "[활동 기록]");
     if (report.activityFacts() != null) {
-      add(lines, "탐지 객체: " + String.join(", ", report.activityFacts().detectedObjects()));
-      add(lines, "그리기 시간(ms): " + value(report.activityFacts().drawingDurationMs()));
+      // 값의 출처가 VLM 관찰 서술로 바뀌었다(S15P11B209-912). 라벨도 화면과 같은 표현을 쓴다.
+      add(lines, "그린 것: " + String.join(", ", report.activityFacts().detectedObjects()));
+      add(lines, "그리기 시간(초): " + value(report.activityFacts().drawingDurationSec()));
       add(lines, "멈춤 횟수: " + value(report.activityFacts().pauseCount()));
       add(lines, "지우기 횟수: " + value(report.activityFacts().eraseCount()));
       report.activityFacts().notes().forEach(note -> add(lines, "참고: " + note));
@@ -141,8 +172,33 @@ public class ReportPdfRenderer {
     add(lines, "[보호자 대화 안내]");
     report.guardianConversationGuide().forEach(guide -> add(lines, "• " + guide));
     add(lines, "");
+    // 875 §11 순서 8~10 — 유형별 보호자 가이드.
+    for (ReportParentGuideResponse guide : report.parentGuides()) {
+      add(lines, "[" + value(guide.guideType()) + "]");
+      guide.items().forEach(item -> add(lines, "• " + item));
+      add(lines, "");
+    }
+    // 위기 안내는 인쇄물이 제3자에게 노출될 수 있어 본문에 싣지 않는다. 필요 여부만 남긴다.
+    if (report.crisisAlert() != null) {
+      add(lines, "[안전 안내]");
+      add(lines, "보호자 화면에서 안전 안내를 확인해 주세요.");
+      add(lines, "");
+    }
     add(lines, "[주의 사항]");
     report.limitations().forEach(limitation -> add(lines, "• " + limitation));
+    if (!report.references().isEmpty()) {
+      add(lines, "");
+      add(lines, "[참고 자료]");
+      report
+          .references()
+          .forEach(
+              reference ->
+                  add(
+                      lines,
+                      "• "
+                          + value(reference.title())
+                          + (reference.url() == null ? "" : " (" + reference.url() + ")")));
+    }
     return lines;
   }
 

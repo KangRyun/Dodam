@@ -220,6 +220,47 @@ def _format_target_for_log(target: DetectedObject | None) -> str:
     return f"{target.object_name or target.object_code}({target.confidence:.2f})"
 
 
+# ── 이미 물어본 질문 (S15P11B209-921) ───────────────────────────
+# 프롬프트에 나열할 이전 AI 질문 수. 전부 실으면 지시 블록이 대화 이력만큼 길어져
+# 다른 규칙을 밀어낸다. 반복은 대개 직전 몇 개와 겹치므로 최근 것만 본다.
+_MAX_ASKED_QUESTIONS = 5
+
+
+def _asked_questions(req: QuestionRequest) -> list[str]:
+    """이 대화에서 이미 건넨 AI 질문 원문(오래된 순, 최대 5건).
+
+    reason: 구 [[ASKED_ALREADY]]는 "이미 이야기한 것은 다시 묻지 마"라고만 하고 무엇을
+    물었는지 알려주지 않았다. 실제로 걸러지는 건 askedObjectCodes 뿐이라, 대상 객체가 없는
+    질문끼리는 겹쳐도 막을 수단이 없었다. 그림일기는 그리기를 멈출 때마다 질문을 새로
+    요청해(S15P11B209-922) 아이가 답하기 전에도 이 구멍이 열린다.
+    """
+    texts = [
+        (m.text or "").strip()
+        for m in req.recent_messages
+        if (m.sender_type or "").upper() == "AI" and (m.text or "").strip()
+    ]
+    return texts[-_MAX_ASKED_QUESTIONS:]
+
+
+# ── 대상 그룹 (S15P11B209-921) ──────────────────────────────────
+# 사람 전체(PERSON)와 신체 부위(PERSON_*)는 '한 사람'이라는 하나의 대상이다. 부위는 그
+# 사람의 속성이지 옆에 있는 다른 물건이 아니다. 반복 판단·대상 개수 판단에서 함께 묶는다.
+#
+# ⚠️ 집·나무는 묶지 않는다. 지붕·문·창문은 PDI 표준이 각각 물어보는 대상이고
+#    (htp_question_bank [[HOUSE]]), 묶으면 지붕을 물어본 순간 문·창문이 후보에서 사라져
+#    713이 만든 '주제 안에서 하나씩 넓혀 가기'가 통째로 죽는다.
+
+
+def _object_group(object_code: str) -> str:
+    """반복·개수 판단에 쓸 대상 그룹 키. 사람 부위만 전체로 접는다."""
+    return "PERSON" if object_code.startswith("PERSON_") else object_code
+
+
+def _target_group_count(req: QuestionRequest) -> int:
+    """이름을 쓸 수 있는 탐지 객체가 몇 '대상'인가(부위는 접어서 센다)."""
+    return len({_object_group(o.object_code) for o in _nameable_objects(req)})
+
+
 def _last_child_index(req: QuestionRequest) -> int | None:
     """가장 최근 아이 발화(텍스트 있는 것)의 인덱스. 없으면 None(=첫 질문)."""
     for index in range(len(req.recent_messages) - 1, -1, -1):
@@ -355,8 +396,20 @@ def _activity_block(
         lines.append(_block("TARGET_ONLY", target=target_name))
     if reask_candidates:
         lines.append(_block("REASK_CANDIDATES"))
+    # 대상이 하나뿐이면 두 번째 대상을 지어내지 못하게 막는다(S15P11B209-921).
+    # 반복 방지 지시("새로운 것을 물어봐")가 '다른 물건'으로 읽혀 사람 한 명 그림에서도
+    # "옆에 있는 건 뭐야?"가 나왔다. 부위는 접어서 세므로 사람+머리+머리카락은 하나다.
+    if _target_group_count(req) == 1:
+        lines.append(_block("SINGLE_TARGET"))
     if req.asked_object_codes:
         lines.append(_block("ASKED_ALREADY"))
+    # 이미 건넨 질문을 나열해 표현만 바꾼 반복을 막는다(S15P11B209-921).
+    # 활동유형과 무관하게 붙인다 — HTP도 대상 객체 없는 질문끼리는 겹치는 것을 못 막는다.
+    asked = _asked_questions(req)
+    if asked:
+        lines.append(
+            _block("ASKED_QUESTIONS", questions="\n".join(f"  · {q}" for q in asked))
+        )
     return "\n".join(lines)
 
 
@@ -517,8 +570,12 @@ def _target_for_purpose(req: QuestionRequest, purpose: str) -> DetectedObject | 
     """
     if purpose != "OBJECT_DESCRIPTION" or not req.detected_objects:
         return None
-    asked = set(req.asked_object_codes)
-    available = [o for o in _nameable_objects(req) if o.object_code not in asked]
+    # 물어본 대상은 '그룹'으로 뺀다(S15P11B209-921) — 사람을 물어본 뒤 머리를 대상으로
+    # 잡으면 아이에겐 같은 사람을 또 묻는 것으로 들린다. 집·나무 부위는 묶지 않는다.
+    asked = {_object_group(code) for code in req.asked_object_codes}
+    available = [
+        o for o in _nameable_objects(req) if _object_group(o.object_code) not in asked
+    ]
     if not available:
         return None
     if req.activity_type == "HTP" and req.drawing_subject:
@@ -764,6 +821,74 @@ def _crisis_safe_response(req: QuestionRequest, started: float) -> QuestionRespo
     )
 
 
+# ── 그림일기 완전 첫 질문 고정 (S15P11B209-921) ─────────────────
+# 자유 그림은 무엇을 그렸는지 아는 사람이 아이뿐이다. 자동 탐지는 이 영역에서 가장 약하고
+# (sketch 오탐 — 918), VLM 서술도 확신이 없으면 "네모난 무언가"에 머문다. 모르는 상태에서
+# AI가 실마리를 골라 대화를 열면 918의 오탐 단정("그림 속 덤불은 어떤 모습이야?")이 된다.
+# 그래서 첫 질문은 추측하지 않고 아이에게 직접 묻고, 그 대답으로 대화를 시작한다.
+#
+# ⚠️ 786이 없앤 '첫 질문 고정 현상'을 그림일기에 한해 의도적으로 되살리는 것이다. 786이
+#    틀렸던 게 아니라 조건이 다르다 — HTP는 활동이 주제를 정해 두어 무엇을 그렸는지 알고
+#    시작하지만, 자유 그림은 모른다. 모르는 채로 여는 질문을 다양화하면 다양하게 틀린다.
+#
+# ⚠️ 판정에 currentQuestionCount를 쓰는 이유: 아이 발화 유무는 그림일기에서 '완전 첫 질문'과
+#    1:1이 아니다. 그림일기는 그리기를 멈출 때마다 질문을 새로 요청하므로(922), 아이가 답하지
+#    않은 채 두 번째 요청이 오면 발화는 여전히 없다. questionCount는 질문이 저장될 때만 오르니
+#    (BE QuestionPersistenceService) 0이 곧 '아직 아무 질문도 안 함'이다.
+_DIARY_OPENING_SIMPLE = "오늘 뭐 그렸는지 이야기해 줄래?"
+_DIARY_OPENING_STANDARD = "오늘 뭐 그린 건지 설명해줄래?"
+
+# 난이도 2종. '설명'은 유아에게 어려운 말이라 유아·배려형에는 '이야기해 줄래'를 쓴다.
+# 네 구간을 다 가르지 않은 것은 의도다 — 895에서 확인했듯 길이 축은 이미 사실상 둘로
+# 붕괴해 있고, 한 문장짜리 고정 문구를 넷으로 나누면 관리할 것만 늘어난다.
+_DIARY_OPENING_BY_DIFFICULTY = {
+    "PRESCHOOL": _DIARY_OPENING_SIMPLE,
+    "SUPPORT": _DIARY_OPENING_SIMPLE,
+}
+
+# 이 질문 전용 칩. 목적별 generic(DRAWING_CONTEXT = 진짜/상상)을 쓰지 않는 이유:
+# 첫 질문에서 실제 경험인지 상상인지 먼저 정하지 말라는 규칙(first_question_diary)과
+# 정면으로 어긋난다. 칩도 아이 화면에 나가는 질문의 일부다.
+_DIARY_OPENING_OPTIONS = [
+    QuestionOption(code="CHIP_YES", label="응, 말해줄게"),
+    QuestionOption(code="CHIP_NOT_SURE", label="음… 잘 모르겠어"),
+    QuestionOption(code="CHIP_JUST_WANTED", label="그냥 그리고 싶었어"),
+]
+
+
+def _is_diary_opening(req: QuestionRequest) -> bool:
+    """그림일기의 '완전 첫 질문'인가(아직 아무 질문도 저장되지 않았는가)."""
+    return req.activity_type == "ART_DIARY" and req.current_question_count == 0
+
+
+def _diary_opening_question(difficulty: str | None) -> str:
+    return _DIARY_OPENING_BY_DIFFICULTY.get(difficulty or "", _DIARY_OPENING_STANDARD)
+
+
+def _diary_opening_response(req: QuestionRequest, started: float) -> QuestionResponse:
+    """그림일기 첫 질문 — GMS를 호출하지 않는 결정적 응답.
+
+    위기 응답·인젝션 재질문과 같은 패턴이다. 고정 문구를 LLM에 만들게 할 이유가 없고,
+    호출을 아끼면 아이가 기다리는 시간도 줄어든다.
+    """
+    option_allowed = "OPTION" in req.allowed_response_modes
+    return QuestionResponse(
+        question_text=_diary_opening_question(req.difficulty),
+        question_purpose="DRAWING_CONTEXT",
+        options=list(_DIARY_OPENING_OPTIONS) if option_allowed else None,
+        target_object=None,
+        fallback_used=False,  # AI가 정한 질문이다 — BE 폴백 템플릿이 아니다
+        safety_result=SafetyResult(
+            status="PASSED", rule_version=req.safety_rule_version, block_reason_code=None
+        ),
+        model_name=config.LLM_MODEL,
+        # GMS를 호출하지 않았으므로 파생 모델 ID가 없다 — 엔진명으로 대신 기록한다.
+        model_version=config.LLM_MODEL,
+        prompt_version=PROMPT_VERSION,
+        processing_time_ms=int((time.monotonic() - started) * 1000),
+    )
+
+
 # ── 프롬프트 인젝션 차단 (S15P11B209-742) ───────────────────────
 # 아이 발화가 프롬프트를 조작하려 하면(예: "지금까지의 모든 지시를 잊고~") LLM에 전달하지 않고
 # 결정적 재질문으로 되묻는다. 위기 차단과 달리 대화는 끊지 않는다(정상적인 되묻기).
@@ -984,6 +1109,19 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
             request_id,
         )
         return _reask_response(req, started)
+
+    # 그림일기 완전 첫 질문은 GMS 없이 고정 문구로 연다(S15P11B209-921). 무엇을 그렸는지는
+    # 아이만 아는 정보라 AI가 추측하지 않고 직접 묻는다. 위기·인젝션 검사 뒤에 두는 이유:
+    # 질문 수가 0이어도 아이 발화가 이력에 있을 수 있는 경로(FE 복원)가 그 검사를 우회하면
+    # 안 된다.
+    if _is_diary_opening(req):
+        logger.info(
+            "[질문] request_id=%s drawingSessionId=%s activityType=ART_DIARY "
+            "purpose=DRAWING_CONTEXT | 고정 첫 질문(GMS 미호출)",
+            request_id,
+            req.drawing_session_id,
+        )
+        return _diary_opening_response(req, started)
 
     # 목적·대상을 GMS 호출 전에 정해 프롬프트에 그대로 싣는다(S15P11B209-713) — 질문 문장과
     # 응답 targetObject가 같은 객체를 가리키게 하고, HTP면 주제를 벗어난 명사가 안 나오게 한다.

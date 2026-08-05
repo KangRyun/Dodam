@@ -94,6 +94,20 @@ class ObservationReportPersistenceServiceTest {
   @Mock private ReportActivitySummaryRepository activitySummaryRepository;
   @Mock private ReportActivityNoteRepository activityNoteRepository;
   @Mock private ReportDrawnItemRepository drawnItemRepository;
+
+  @Mock
+  private com.ssafy.b209.report.repository.ReportPublicInterpretationRepository
+      interpretationRepository;
+
+  @Mock
+  private com.ssafy.b209.report.repository.ReportEvidenceItemRepository evidenceItemRepository;
+
+  @Mock private com.ssafy.b209.report.repository.ReportParentGuideRepository parentGuideRepository;
+  @Mock private com.ssafy.b209.report.repository.ReportCrisisAlertRepository crisisAlertRepository;
+  private final com.ssafy.b209.report.safety.InterpretationSafetyVerifier safetyVerifier =
+      new com.ssafy.b209.report.safety.InterpretationSafetyVerifier();
+  private final InterpretationCandidateAdapter candidateAdapter =
+      new InterpretationCandidateAdapter();
   @Mock private ReportObservedFeatureRepository observedFeatureRepository;
   @Mock private ReportKeyConversationRepository keyConversationRepository;
   @Mock private ReportFollowUpGuideRepository followUpGuideRepository;
@@ -128,6 +142,12 @@ class ObservationReportPersistenceServiceTest {
             activitySummaryRepository,
             activityNoteRepository,
             drawnItemRepository,
+            interpretationRepository,
+            evidenceItemRepository,
+            parentGuideRepository,
+            crisisAlertRepository,
+            safetyVerifier,
+            candidateAdapter,
             observedFeatureRepository,
             keyConversationRepository,
             followUpGuideRepository,
@@ -272,7 +292,10 @@ class ObservationReportPersistenceServiceTest {
 
     verify(drawnItemRepository).saveAll(drawnItemsCaptor.capture());
     assertThat(drawnItemsCaptor.getValue())
-        .extracting(ReportDrawnItem::getDisplayOrder, ReportDrawnItem::getDrawingSubject, ReportDrawnItem::getName)
+        .extracting(
+            ReportDrawnItem::getDisplayOrder,
+            ReportDrawnItem::getDrawingSubject,
+            ReportDrawnItem::getName)
         .containsExactly(
             org.assertj.core.groups.Tuple.tuple(0, "HOUSE", "집"),
             org.assertj.core.groups.Tuple.tuple(1, "HOUSE", "빨간 지붕"),
