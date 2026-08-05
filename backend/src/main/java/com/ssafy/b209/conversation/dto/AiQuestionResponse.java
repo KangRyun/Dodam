@@ -24,7 +24,40 @@ public record AiQuestionResponse(
     String modelVersion,
     String promptVersion,
     int processingTimeMs,
-    boolean conversationEndConfirmed) {
+    String confirmedStopTarget) {
+
+  /** 아이가 되묻기에 말로 그만하겠다고 확인한 대상이다(S15P11B209-951). */
+  private static final Set<String> STOP_TARGETS = Set.of("CONVERSATION", "ACTIVITY");
+
+  /**
+   * 종료 확인 신호가 없는 기존 응답을 생성한다.
+   *
+   * <p>951 이전 형태를 그대로 쓰는 호출부(테스트·구 목 클라이언트)를 위한 것이다.
+   */
+  public AiQuestionResponse(
+      String questionText,
+      String questionPurpose,
+      List<QuestionOption> options,
+      DetectedObject targetObject,
+      boolean fallbackUsed,
+      SafetyResult safetyResult,
+      String modelName,
+      String modelVersion,
+      String promptVersion,
+      int processingTimeMs) {
+    this(
+        questionText,
+        questionPurpose,
+        options,
+        targetObject,
+        fallbackUsed,
+        safetyResult,
+        modelName,
+        modelVersion,
+        promptVersion,
+        processingTimeMs,
+        null);
+  }
 
   public boolean isContractValidFor(Set<ResponseMode> allowedResponseModes) {
     if (isBlank(questionText)
@@ -43,8 +76,16 @@ public record AiQuestionResponse(
     if (targetObject != null && !isDetectedObjectValid(targetObject)) {
       return false;
     }
+    if (confirmedStopTarget != null && !STOP_TARGETS.contains(confirmedStopTarget)) {
+      // 모르는 종료 대상으로 대화를 끝내지 않는다. 계약 위반으로 보고 폴백 질문으로 간다.
+      return false;
+    }
     boolean optionAllowed = allowedResponseModes.contains(ResponseMode.OPTION);
     if (!optionAllowed) {
+      return options == null;
+    }
+    if (confirmedStopTarget != null) {
+      // 종료 확인 응답은 질문이 아니라 맺음말이라 고를 것이 없다(S15P11B209-951).
       return options == null;
     }
     return options != null && !options.isEmpty() && optionsAreValid(options);

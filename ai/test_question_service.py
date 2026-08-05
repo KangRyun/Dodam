@@ -17,6 +17,7 @@ from unittest import mock
 
 import child_screen_guard
 import config
+import conversation_stop_intent
 import crisis_guidance
 import llm_client
 import question_safety
@@ -1800,6 +1801,49 @@ class StopIntentTest(unittest.TestCase):
         self.assertEqual("다른 질문이야", resp.question_text)
         client.chat.completions.create.assert_called()
 
+    def test_stop_chip_labels_do_not_retrigger_the_reask(self):
+        """되묻기 칩을 고르면 그 라벨이 다시 그만하기로 읽히면 안 된다(S15P11B209-950).
+
+        BE는 선택형 답변의 문맥 텍스트로 칩 라벨을 그대로 싣는다. 그 라벨 자체가
+        그만하기 문구라("이야기만 그만할래"·"그림 다 그렸어") 스캔하면 AI가 자기가 낸
+        문구에 재감지되어 되묻기를 무한 반복했다 — 그만두겠다고 고른 아이가 갇혔다.
+        """
+        for label, code in (
+            ("이야기만 그만할래", "CHIP_END_TALK"),
+            ("그림 다 그렸어", "CHIP_END_ACTIVITY"),
+        ):
+            with self.subTest(code=code):
+                # 라벨 자체는 그만하기로 판정되는 문구다 — 재감지 방어가 없으면 루프가 난다.
+                self.assertIsNotNone(conversation_stop_intent.scan(label))
+                resp, client = self._generate(self._req(label, codes=[code]))
+                self.assertEqual("다른 질문이야", resp.question_text)
+                client.chat.completions.create.assert_called()
+
+    def test_chip_answer_does_not_revive_the_earlier_utterance(self):
+        """칩으로 답했으면 이미 되물은 옛 발화로 거슬러 올라가지 않는다(S15P11B209-950)."""
+        req = self._req(
+            "이야기만 그만할래",
+            codes=["CHIP_END_TALK"],
+            recent_messages=[
+                RecentMessage(
+                    sender_type="CHILD", message_type="ANSWER", text="이제 그만할래"
+                ),
+                RecentMessage(
+                    sender_type="AI",
+                    message_type="QUESTION",
+                    text=question_service.STOP_ASK_BOTH,
+                ),
+                RecentMessage(
+                    sender_type="CHILD",
+                    message_type="ANSWER",
+                    text="이야기만 그만할래",
+                    selected_option_codes=["CHIP_END_TALK"],
+                ),
+            ],
+        )
+        resp, _ = self._generate(req)
+        self.assertEqual("다른 질문이야", resp.question_text)
+
     def test_skip_intent_is_not_treated_as_stop(self):
         """831 건너뛰기 회귀 방어 — 아이는 다음 질문을 원한 것이다."""
         resp, client = self._generate(self._req("이건 말하기 싫어. 다른 질문 해줘"))
@@ -1814,8 +1858,14 @@ class StopIntentTest(unittest.TestCase):
         client.chat.completions.create.assert_not_called()
 
     def test_options_omitted_when_option_not_allowed(self):
+        """칩을 낼 수 없으면 되묻기 문장만 나간다.
+
+        950에서는 이것이 막다른 길이라 되묻기 자체를 막았지만, 951이 말로 답하는 길을 열어
+        다시 되물을 수 있게 됐다 — 다음 턴을 StopConfirmationTest가 본다.
+        """
         req = self._req("이제 그만할래", allowed_response_modes=["VOICE"])
         resp, _ = self._generate(req)
+        self.assertEqual(question_service.STOP_ASK_BOTH, resp.question_text)
         self.assertIsNone(resp.options)  # 빈 배열도 계약 위반이다
 
     def test_voice_confirmation_sets_end_flag(self):
@@ -1922,6 +1972,140 @@ class StopIntentTest(unittest.TestCase):
         joined = "\n".join(logs.output)
         self.assertIn("STOP_UNSPECIFIED", joined)
         self.assertNotIn("그만할래", joined)  # 아이 발화 원문은 로그 금지
+
+
+class StopConfirmationTest(unittest.TestCase):
+    """되묻기에 말로 답해도 대화가 끝난다 (S15P11B209-951).
+
+    AI는 여전히 끝내지 않는다 — confirmedStopTarget은 "아이가 확인했다"는 관찰 보고이고
+    실제 종료는 FE가 한다(786 원칙).
+    """
+
+    def _req(self, reask: str, answer: str, *, codes=None, activity="ART_DIARY", **over):
+        base = {
+            "activity_type": activity,
+            "current_question_count": 3,
+            "allowed_response_modes": ["VOICE", "OPTION"],
+            "detected_objects": [_detected("PERSON", "사람", 0.9)],
+            "drawing_description": "가운데에 사람이 한 명 서 있어요.",
+            "recent_messages": [
+                RecentMessage(
+                    sender_type="AI", message_type="QUESTION", text="이 사람은 누구야?"
+                ),
+                RecentMessage(
+                    sender_type="CHILD", message_type="ANSWER", text="이제 그만할래"
+                ),
+                RecentMessage(sender_type="AI", message_type="QUESTION", text=reask),
+                RecentMessage(
+                    sender_type="CHILD",
+                    message_type="ANSWER",
+                    text=answer,
+                    selected_option_codes=codes,
+                ),
+            ],
+        }
+        base.update(over)
+        return _request(**base)
+
+    def _generate(self, req):
+        client = _mock_client({}, reply="다른 질문이야")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-951")
+        return resp, client
+
+    def test_yes_after_conversation_reask_ends_the_conversation(self):
+        resp, client = self._generate(
+            self._req(question_service.STOP_ASK_CONVERSATION, "응")
+        )
+        self.assertEqual("CONVERSATION", resp.confirmed_stop_target)
+        self.assertEqual(question_service.STOP_CLOSING_CONVERSATION, resp.question_text)
+        self.assertIsNone(resp.options)  # 질문이 아니라 맺음말이다
+        client.chat.completions.create.assert_not_called()  # GMS 미호출
+
+    def test_yes_after_drawing_reask_ends_the_activity(self):
+        resp, _ = self._generate(self._req(question_service.STOP_ASK_DRAWING, "응"))
+        self.assertEqual("ACTIVITY", resp.confirmed_stop_target)
+        self.assertEqual(question_service.STOP_CLOSING_ACTIVITY, resp.question_text)
+
+    def test_bare_yes_after_both_reask_narrows_instead_of_guessing(self):
+        """되돌릴 수 없는 활동 완료를 추측으로 실행하지 않는다."""
+        resp, _ = self._generate(self._req(question_service.STOP_ASK_BOTH, "응"))
+        self.assertIsNone(resp.confirmed_stop_target)
+        self.assertEqual(question_service.STOP_ASK_CONVERSATION, resp.question_text)
+
+    def test_named_target_after_both_reask_is_honored(self):
+        for answer, target in (
+            ("그림 그만 그릴래", "ACTIVITY"),
+            ("이야기만 그만할래", "CONVERSATION"),
+        ):
+            with self.subTest(answer=answer):
+                resp, _ = self._generate(
+                    self._req(question_service.STOP_ASK_BOTH, answer)
+                )
+                self.assertEqual(target, resp.confirmed_stop_target)
+
+    def test_refusal_returns_to_the_normal_flow(self):
+        for answer in ("아니", "아니, 더 할래", "조금 더 그릴래"):
+            with self.subTest(answer=answer):
+                resp, client = self._generate(
+                    self._req(question_service.STOP_ASK_CONVERSATION, answer)
+                )
+                self.assertIsNone(resp.confirmed_stop_target)
+                self.assertEqual("다른 질문이야", resp.question_text)
+                client.chat.completions.create.assert_called()
+
+    def test_ambiguous_answer_does_not_end_anything(self):
+        """애매한 답으로 대화를 끝내지 않는다 — 이 오탐은 되돌리기 어렵다."""
+        for answer in ("몰라", "안 할래", "응 근데 하나만 더"):
+            with self.subTest(answer=answer):
+                resp, _ = self._generate(
+                    self._req(question_service.STOP_ASK_CONVERSATION, answer)
+                )
+                self.assertIsNone(resp.confirmed_stop_target)
+                self.assertEqual("다른 질문이야", resp.question_text)
+
+    def test_yes_to_a_normal_question_is_not_an_ending(self):
+        """평범한 질문에 짧게 긍정하는 일은 흔하다 — 되묻기 직후에만 종료로 읽는다."""
+        resp, _ = self._generate(self._req("지붕은 뾰족해?", "응"))
+        self.assertIsNone(resp.confirmed_stop_target)
+        self.assertEqual("다른 질문이야", resp.question_text)
+
+    def test_chip_answer_is_left_to_the_app(self):
+        """칩은 FE가 코드로 처리한다(938) — 라벨을 다시 읽지 않는다(950)."""
+        resp, _ = self._generate(
+            self._req(
+                question_service.STOP_ASK_CONVERSATION,
+                "이야기만 그만할래",
+                codes=["CHIP_END_TALK"],
+            )
+        )
+        self.assertIsNone(resp.confirmed_stop_target)
+        self.assertEqual("다른 질문이야", resp.question_text)
+
+    def test_voice_only_conversation_can_still_end(self):
+        """칩을 낼 수 없어도 말로 끝낼 수 있다 — 950이 남긴 막다른 길을 951이 연다."""
+        resp, _ = self._generate(
+            self._req(
+                question_service.STOP_ASK_CONVERSATION,
+                "응",
+                allowed_response_modes=["VOICE"],
+            )
+        )
+        self.assertEqual("CONVERSATION", resp.confirmed_stop_target)
+
+    def test_repeated_stop_utterance_confirms_instead_of_reasking(self):
+        """되묻기에 같은 말로 답하는 것도 확인이다 — 음성 경로의 되묻기 루프를 막는다."""
+        resp, _ = self._generate(
+            self._req(question_service.STOP_ASK_CONVERSATION, "응 그만할래")
+        )
+        self.assertEqual("CONVERSATION", resp.confirmed_stop_target)
+
+    def test_reason_logged_without_raw_utterance(self):
+        with self.assertLogs("question_service", level="INFO") as logs:
+            self._generate(self._req(question_service.STOP_ASK_CONVERSATION, "응"))
+        joined = "\n".join(logs.output)
+        self.assertIn("CONVERSATION", joined)
+        self.assertNotIn("응", joined)  # 아이 발화 원문은 로그 금지
 
 
 class AskedQuestionRepetitionTest(unittest.TestCase):

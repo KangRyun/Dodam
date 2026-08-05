@@ -400,6 +400,68 @@ class ConversationQuestionServiceTest {
         "safety-2026-07");
   }
 
+  @Test
+  void carriesConfirmedStopTargetWithoutPersistingIt() {
+    // 아이가 되묻기에 말로 그만하겠다고 확인한 응답이다(S15P11B209-951). 맺음말이라 선택 칩이
+    // 없지만 OPTION 허용에서도 계약 위반이 아니다 — 질문이 아니라 대화를 닫는 말이기 때문이다.
+    given(aiQuestionClient.generate(any(), any()))
+        .willReturn(
+            new AiQuestionResponse(
+                "그래, 오늘 이야기 재미있었어. 그림은 계속 그려도 돼!",
+                "FOLLOW_UP",
+                null,
+                null,
+                false,
+                passed(),
+                "mock-model",
+                "1.0",
+                "prompt-1",
+                12,
+                "CONVERSATION"));
+    given(questionPersistenceService.save(eq(1L), any()))
+        .willReturn(new GeneratedQuestion(31L, "그래, 오늘 이야기 재미있었어. 그림은 계속 그려도 돼!", false));
+
+    GeneratedQuestion generated =
+        service.generateQuestion(command(List.of(ResponseMode.VOICE, ResponseMode.OPTION)));
+
+    assertThat(generated.confirmedStopTarget()).isEqualTo("CONVERSATION");
+    // 저장 계층은 이 신호를 모른다 — 질문 메시지에 남길 내용이 아니라 이번 응답에만 실린다.
+    verify(questionPersistenceService).save(eq(1L), any(QuestionCandidate.class));
+  }
+
+  @Test
+  void fallsBackWhenConfirmedStopTargetIsUnknown() {
+    // 모르는 종료 대상으로 대화를 끝내지 않는다. 계약 위반으로 보고 폴백 질문으로 간다.
+    AiQuestionTemplate template = mock(AiQuestionTemplate.class);
+    given(template.getId()).willReturn(7L);
+    given(template.getQuestionText()).willReturn("이 그림에서 무엇이 가장 눈에 띄니?");
+    given(aiQuestionClient.generate(any(), any()))
+        .willReturn(
+            new AiQuestionResponse(
+                "맺음말",
+                "FOLLOW_UP",
+                null,
+                null,
+                false,
+                passed(),
+                "mock-model",
+                "1.0",
+                "prompt-1",
+                12,
+                "EVERYTHING"));
+    given(questionTemplateRepository.findFirstByTemplateTypeAndActiveTrueOrderByIdAsc("FALLBACK"))
+        .willReturn(Optional.of(template));
+    given(questionPersistenceService.save(eq(1L), any()))
+        .willReturn(new GeneratedQuestion(22L, "이 그림에서 무엇이 가장 눈에 띄니?", true));
+
+    service.generateQuestion(command(List.of(ResponseMode.VOICE)));
+
+    ArgumentCaptor<QuestionCandidate> candidateCaptor =
+        ArgumentCaptor.forClass(QuestionCandidate.class);
+    verify(questionPersistenceService).save(eq(1L), candidateCaptor.capture());
+    assertThat(candidateCaptor.getValue().fallbackUsed()).isTrue();
+  }
+
   private AiQuestionResponse validResponse() {
     return new AiQuestionResponse(
         "무엇을 그리고 있니?",

@@ -125,15 +125,19 @@ public class ConversationQuestionService {
             command.allowedResponseModes(),
             command.previousAnswerMessageId());
       }
-      return questionPersistenceService.save(
-          command.conversationId(),
-          new QuestionCandidate(
-              response.questionText(),
-              response.options(),
-              response.targetObject(),
-              null,
-              response.fallbackUsed(),
-              command.previousAnswerMessageId()));
+      // 종료 확인 신호는 저장하지 않고 이번 응답에만 싣는다(S15P11B209-951). 질문 메시지에
+      // 남길 내용이 아니라 "아이가 방금 확인했다"는 관찰 보고이며, 실제 종료는 FE가 한다.
+      return questionPersistenceService
+          .save(
+              command.conversationId(),
+              new QuestionCandidate(
+                  response.questionText(),
+                  response.options(),
+                  response.targetObject(),
+                  null,
+                  response.fallbackUsed(),
+                  command.previousAnswerMessageId()))
+          .withConfirmedStopTarget(response.confirmedStopTarget());
     } catch (AiQuestionClientException exception) {
       if (exception.getType() == AiQuestionClientException.Type.SAFETY_POLICY_BLOCKED) {
         throw new BusinessException(ConversationErrorCode.AI_SAFETY_POLICY_BLOCKED, exception);
