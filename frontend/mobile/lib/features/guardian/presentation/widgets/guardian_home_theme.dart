@@ -17,6 +17,15 @@ abstract final class DodamHome {
   static const line = Color(0xFFECE4D2);
   static const green = Color(0xFF5E9A6E);
   static const greenSoft = Color(0xFFE6F1E6);
+
+  /// 알림(소식함) 배너에서 쓰는 차분한 세이지 톤. 활동 카드 배경으로 재사용.
+  static const sage = Color(0xFFDDEAD5);
+  static const sageSoft = Color(0xFFEEF5E9);
+  static const forest = Color(0xFF315B49);
+
+  /// 메인 CTA 버튼 전용 선명한 초록(참고 이미지 기준). hover 시 한 톤 진하게.
+  static const ctaGreen = Color(0xFF64A079);
+  static const ctaGreenDeep = Color(0xFF548A66);
   static const blue = Color(0xFF4E82CE);
   static const blueSoft = Color(0xFFE7EFFB);
   static const coral = Color(0xFFDE7160);

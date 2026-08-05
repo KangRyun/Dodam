@@ -73,20 +73,13 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
   /// 왼쪽 마음카드가 아이 chip 개수만큼 커질 때는 이 값에 억지로 맞추지 않고
   /// [_buildTwoColumnBody]가 자연 높이로 더 커진다. 부모 CustomScrollView가 그
   /// 증가분을 스크롤하므로 최근 활동 카드가 남은 높이를 떠안지 않는다.
-  static const double _bodyMinHeight = 480;
-
-  /// 2단 배치에서 최근 활동 카드가 보장받는 최소 높이.
-  ///
-  /// 카드 상하 padding 36 + 48dp header CTA + 간격 8 + 활동 한 줄 62 = 154다.
-  /// 소수점 글꼴 metric 여유 6을 더해 160으로 둔다. 실기기에서는 카드가 52px로
-  /// 압축되어 내부 16px에 약 30px짜리 header+gap이 들어가 14px 넘쳤다.
-  static const double _twoColumnRecentMinHeight = 160;
+  static const double _bodyMinHeight = 740;
 
   /// 글자 배율이 커질 때 카드 안 텍스트·버튼이 함께 커지는 만큼의 추가 여유.
   ///
   /// 마음 달력의 날짜 셀은 `날짜 글자 + 3 + 원(최소 지름 12)`이 하한이라 글자
   /// 배율에 따라 6줄 전체가 함께 커진다. 배율 2.0까지 그 증가분을 덮는다.
-  static const double _bodyTextScaleAllowance = 280;
+  static const double _bodyTextScaleAllowance = 540;
 
   /// 2단 그리드를 유지할 수 있는 최소 본문 폭.
   ///
@@ -94,56 +87,64 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
   /// Row와 달력 셀이 가로로 넘친다. 좁은 화면은 한 열로 쌓아 폭을 온전히 준다.
   static const double _twoColumnMinWidth = 720;
 
-  /// 한 열로 쌓을 때 최근 활동 카드에 주는 높이(글자 배율 1.0 기준).
-  static const double _stackedRecentHeight = 280;
-
   /// 한 열로 쌓을 때 마음 달력에 주는 높이(글자 배율 1.0 기준).
   ///
   /// 달력은 머리말·요약·요일·범례가 고정이고 날짜 격자만 늘어난다. 6줄 × 날짜 셀
   /// 하한(약 29)을 격자에 남겨야 셀이 잘리지 않는다.
   static const double _stackedCalendarHeight = 440;
 
+  /// 보호자 홈 전체 글자 확대 배수. 화면 전반(헤더·프로필·카드·달력)을 균일하게
+  /// 키우기 위해 서브트리의 텍스트 스케일러에 곱한다.
+  static const double _uiTextScale = 1.4;
+
   @override
   Widget build(BuildContext context) {
-    final textScale = MediaQuery.textScalerOf(context).scale(1);
+    final baseFactor = MediaQuery.textScalerOf(context).scale(1);
+    final scaledFactor = baseFactor * _uiTextScale;
     // 글자 배율이 커지면 카드 안 텍스트·버튼이 함께 커져 최소 높이도 늘어난다.
-    final scaleAllowance = (textScale - 1).clamp(0.0, 1.0);
-    return Container(
-      key: const ValueKey('child-list-success'),
-      padding: const EdgeInsets.fromLTRB(30, 24, 30, 22),
-      // 넓은 태블릿에서 헤더·2열 그리드가 화면 끝까지 늘어나지 않도록 본문을
-      // 최대 폭으로 가두고 가운데 정렬한다(S15P11B209-787). 이 상한(1120)은
-      // 2열 최소 폭(720)보다 넉넉해 좁은 화면에선 아무 영향이 없다.
-      child: ResponsiveContent(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final bodySliver = _buildBodySliver(
-              maxWidth: constraints.maxWidth,
-              scaleAllowance: scaleAllowance,
-            );
-            // 헤더 블록만으로도 화면을 넘기는 극단 조합(아주 낮은 높이 + 큰 글자 배율
-            // + 푸시 안내 띠)에서는 헤더를 스크롤 밖에 두면 헤더가 넘치고 본문 몫이
-            // 0이 된다. 그때만 헤더까지 같은 스크롤에 넣는다.
-            if (constraints.maxHeight <
-                _headerOutsideMinHeight(scaleAllowance)) {
-              return CustomScrollView(
-                slivers: [
-                  SliverToBoxAdapter(child: _buildHeader()),
-                  bodySliver,
+    // 기본 1.4배 위에 OS 접근성 배율까지 얹힐 수 있어 상한을 넉넉히 잡는다.
+    final scaleAllowance = (scaledFactor - 1).clamp(0.0, 1.8);
+    return MediaQuery(
+      data: MediaQuery.of(
+        context,
+      ).copyWith(textScaler: TextScaler.linear(scaledFactor)),
+      child: Container(
+        key: const ValueKey('child-list-success'),
+        padding: const EdgeInsets.fromLTRB(30, 24, 30, 22),
+        // 넓은 태블릿에서 헤더·2열 그리드가 화면 끝까지 늘어나지 않도록 본문을
+        // 최대 폭으로 가두고 가운데 정렬한다(S15P11B209-787). 이 상한(1120)은
+        // 2열 최소 폭(720)보다 넉넉해 좁은 화면에선 아무 영향이 없다.
+        child: ResponsiveContent(
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final bodySliver = _buildBodySliver(
+                maxWidth: constraints.maxWidth,
+                scaleAllowance: scaleAllowance,
+              );
+              // 헤더 블록만으로도 화면을 넘기는 극단 조합(아주 낮은 높이 + 큰 글자 배율
+              // + 푸시 안내 띠)에서는 헤더를 스크롤 밖에 두면 헤더가 넘치고 본문 몫이
+              // 0이 된다. 그때만 헤더까지 같은 스크롤에 넣는다.
+              if (constraints.maxHeight <
+                  _headerOutsideMinHeight(scaleAllowance)) {
+                return CustomScrollView(
+                  slivers: [
+                    SliverToBoxAdapter(child: _buildHeader()),
+                    bodySliver,
+                  ],
+                );
+              }
+              // 평소에는 헤더와 푸시 안내를 스크롤 밖에 두어 항상 보이고 본문만
+              // 스크롤한다. 본문에 남은 높이가 최소 높이보다 작을 때만 스크롤이
+              // 생긴다 — 여유가 있는 화면에서는 스크롤 범위가 0이라 기존 배치와 같다.
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  _buildHeader(),
+                  Expanded(child: CustomScrollView(slivers: [bodySliver])),
                 ],
               );
-            }
-            // 평소에는 헤더와 푸시 안내를 스크롤 밖에 두어 항상 보이고 본문만
-            // 스크롤한다. 본문에 남은 높이가 최소 높이보다 작을 때만 스크롤이
-            // 생긴다 — 여유가 있는 화면에서는 스크롤 범위가 0이라 기존 배치와 같다.
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                _buildHeader(),
-                Expanded(child: CustomScrollView(slivers: [bodySliver])),
-              ],
-            );
-          },
+            },
+          ),
         ),
       ),
     );
@@ -212,20 +213,15 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
       children: [
         Expanded(
           flex: 92,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              _HeroCard(
-                controller: widget.controller,
-                selected: selected,
-                recentFuture: _recentFuture,
-              ),
-              const SizedBox(height: 16),
-              SizedBox(
-                height: _twoColumnRecentMinHeight,
-                child: _RecentActivityCard(recentFuture: _recentFuture),
-              ),
-            ],
+          child: SizedBox(
+            // 오른쪽 마음 달력과 같은 높이로 맞추고, 늘어난 만큼을 CTA가 흡수한다.
+            height: minHeight,
+            child: _HeroCard(
+              controller: widget.controller,
+              selected: selected,
+              recentFuture: _recentFuture,
+              fillHeight: true,
+            ),
           ),
         ),
         const SizedBox(width: 18),
@@ -257,12 +253,6 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
           controller: widget.controller,
           selected: selected,
           recentFuture: _recentFuture,
-        ),
-        const SizedBox(height: 16),
-        SizedBox(
-          height:
-              _stackedRecentHeight + _bodyTextScaleAllowance * scaleAllowance,
-          child: _RecentActivityCard(recentFuture: _recentFuture),
         ),
         const SizedBox(height: 16),
         SizedBox(
@@ -515,7 +505,7 @@ class _IconBtn extends StatelessWidget {
 
 // ── 카드 공통 ────────────────────────────────────────────────────────
 class _Card extends StatelessWidget {
-  const _Card({required this.child, super.key});
+  const _Card({required this.child});
   final Widget child;
 
   @override
@@ -537,10 +527,15 @@ class _HeroCard extends StatelessWidget {
     required this.controller,
     required this.selected,
     required this.recentFuture,
+    this.fillHeight = false,
   });
   final GuardianChildController controller;
   final ChildSummaryDto? selected;
   final Future<List<ActivitySummaryDto>>? recentFuture;
+
+  /// 2열 배치에서 카드가 마음 달력 높이만큼 늘어날 때 true.
+  /// 남는 세로 공간을 CTA가 흡수해 크게 보이도록 한다.
+  final bool fillHeight;
 
   static const _heroAsset = 'assets/characters/dodami_yellow.png';
 
@@ -595,35 +590,57 @@ class _HeroCard extends StatelessWidget {
           ],
           const SizedBox(height: 6),
           _MoodPill(child: child, recentFuture: recentFuture),
-          const SizedBox(height: 12),
-          _Cta(
-            enabled: child != null,
-            onTap: child == null
-                ? null
-                : () async {
-                    // 활동을 시작하기 전에 HTP 소개 팝업을 먼저 띄우고,
-                    // "시작하기"를 눌렀을 때만 기존 활동 흐름으로 넘어간다
-                    // (S15P11B209-462).
-                    final start = await showHtpIntroDialog(context);
-                    if (start != true || !context.mounted) return;
-                    AppNavigation.pushNamed(
-                      context,
-                      AppRoutes.drawingActivitySelection(
-                        child.childId.toString(),
-                      ),
-                      arguments: const DrawingActivitySelectionRouteArguments(
-                        initialActivityCode: 'HTP',
-                      ),
-                      rootNavigator: true,
-                    );
-                  },
-          ),
+          // 마음 pill과 활동 카드 사이를 벌려 녹색 블록의 세로 길이를 줄인다.
+          const SizedBox(height: 44),
+          // 두 버튼(CTA·리포트)은 배경 카드 폭에 꽉 차게 같은 가로 크기로 둔다.
+          // 2열 배치에서는 남은 세로 공간을 CTA가 모두 차지해 크게 보인다.
+          if (fillHeight)
+            Expanded(
+              child: SizedBox(
+                width: double.infinity,
+                child: _buildCta(context, child, tall: true),
+              ),
+            )
+          else
+            SizedBox(
+              width: double.infinity,
+              child: _buildCta(context, child, tall: false),
+            ),
           const SizedBox(height: 8),
-          _ReportButton(recentFuture: recentFuture),
+          SizedBox(
+            width: double.infinity,
+            child: _ReportButton(recentFuture: recentFuture),
+          ),
         ],
       ),
     );
   }
+
+  Widget _buildCta(
+    BuildContext context,
+    ChildSummaryDto? child, {
+    required bool tall,
+  }) => _ActivityCard(
+    enabled: child != null,
+    tall: tall,
+    onTap: child == null
+        ? null
+        : () async {
+            // 활동을 시작하기 전에 HTP 소개 팝업을 먼저 띄우고,
+            // "시작하기"를 눌렀을 때만 기존 활동 흐름으로 넘어간다
+            // (S15P11B209-462).
+            final start = await showHtpIntroDialog(context);
+            if (start != true || !context.mounted) return;
+            AppNavigation.pushNamed(
+              context,
+              AppRoutes.drawingActivitySelection(child.childId.toString()),
+              arguments: const DrawingActivitySelectionRouteArguments(
+                initialActivityCode: 'HTP',
+              ),
+              rootNavigator: true,
+            );
+          },
+  );
 }
 
 class _MiniSwitch extends StatelessWidget {
@@ -813,46 +830,232 @@ class _MoodPill extends StatelessWidget {
   }
 }
 
-class _Cta extends StatelessWidget {
-  const _Cta({required this.enabled, required this.onTap});
+/// 집·나무·사람 그림 활동 카드.
+///
+/// 세로 흐름: 제목 → 안내 문구 → 집·나무·사람 일러스트 → 하단 full-width 초록
+/// CTA. 카드 배경은 알림 톤의 세이지, CTA만 선명한 초록을 쓴다. 카드가 마음 달력
+/// 높이만큼 늘어나면([tall]) 일러스트를 크게 키우고 버튼을 아래로 고정한다.
+class _ActivityCard extends StatelessWidget {
+  const _ActivityCard({
+    required this.enabled,
+    required this.onTap,
+    this.tall = false,
+  });
   final bool enabled;
   final VoidCallback? onTap;
+  final bool tall;
 
   @override
-  Widget build(BuildContext context) => Opacity(
-    opacity: enabled ? 1 : 0.5,
-    child: Material(
-      key: const ValueKey('start-child-mode'),
-      color: DodamHome.point,
-      borderRadius: BorderRadius.circular(15),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(15),
-        onTap: onTap,
-        child: const SizedBox(
-          height: 48,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+  Widget build(BuildContext context) {
+    final ts = MediaQuery.textScalerOf(context).scale(1);
+    return Container(
+      decoration: BoxDecoration(
+        color: DodamHome.sage,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: DodamHome.forest.withValues(alpha: 0.14)),
+      ),
+      padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 집·나무·사람 일러스트는 남은 높이·폭에 맞춰 키우되 상한을 둔다.
+          // 좁으면 줄이거나 감춰 overflow를 막는다. 예약 높이는 제목·안내·버튼 등
+          // 고정 콘텐츠 실측에 맞춰 잡아, 일러스트가 채우고 버튼과의 간격이 벌어지지
+          // 않게 한다. 글자 배율이 커지면 텍스트가 커지므로 배율만큼 더한다.
+          final reserved = 165.0 + 30.0 * ts;
+          final capByWidth = (constraints.maxWidth - 28) / 3;
+          final capByKind = tall ? 150.0 : 92.0;
+          final illoMax = (capByWidth < capByKind ? capByWidth : capByKind)
+              .clamp(0.0, 200.0);
+          final illo =
+              (constraints.maxHeight.isFinite
+                      ? constraints.maxHeight - reserved
+                      : illoMax)
+                  .clamp(0.0, illoMax);
+          final showIllo = illo > 44;
+          return Column(
+            mainAxisSize: tall ? MainAxisSize.max : MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Icon(Icons.edit_outlined, size: 20, color: DodamHome.onPoint),
-              SizedBox(width: 8),
-              Flexible(
-                child: Text(
-                  '집·나무·사람 그림 활동하기',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w800,
-                    color: DodamHome.onPoint,
-                  ),
+              const Text(
+                '집·나무·사람 그림 활동',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: DodamHome.ink,
                 ),
               ),
+              const SizedBox(height: 8),
+              const Text(
+                '그림을 통해 아이의 마음을 천천히 들여다봐요.',
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: 13.5,
+                  fontWeight: FontWeight.w600,
+                  color: DodamHome.inkSoft,
+                ),
+              ),
+              if (showIllo) ...[
+                const SizedBox(height: 18),
+                _HtpIllustrations(size: illo),
+              ],
+              if (tall) const Spacer() else const SizedBox(height: 20),
+              _StartActivityButton(
+                enabled: enabled,
+                onTap: onTap,
+                compact: !tall,
+              ),
             ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+/// 집·나무·사람(HTP) 손그림 일러스트를 순서대로 한 줄에 배치한다.
+/// 각 이미지는 원본 비율을 유지한 채 정사각 박스 안에 담는다.
+class _HtpIllustrations extends StatelessWidget {
+  const _HtpIllustrations({required this.size});
+  final double size;
+
+  static const _items = <(String, String)>[
+    ('assets/characters/htp/htp_house.png', '집'),
+    ('assets/characters/htp/htp_tree.png', '나무'),
+    ('assets/characters/htp/htp_person.png', '사람'),
+  ];
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisAlignment: MainAxisAlignment.center,
+    children: [
+      for (var i = 0; i < _items.length; i++) ...[
+        if (i > 0) const SizedBox(width: 14),
+        SizedBox(
+          width: size,
+          height: size,
+          child: Image.asset(
+            _items[i].$1,
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.medium,
+            semanticLabel: _items[i].$2,
+            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+          ),
+        ),
+      ],
+    ],
+  );
+}
+
+/// 하단 메인 CTA 버튼. 선명한 초록 채움 + 흰 글자, hover 시 진해지고 화살표가
+/// 살짝 이동하며, press·focus 상태를 함께 처리한다. 접근성을 위해 모션 축소를
+/// 존중한다. 활동 진입 라우팅과 테스트 식별자(start-child-mode)를 유지한다.
+class _StartActivityButton extends StatefulWidget {
+  const _StartActivityButton({
+    required this.enabled,
+    required this.onTap,
+    this.compact = false,
+  });
+  final bool enabled;
+  final VoidCallback? onTap;
+  final bool compact;
+
+  @override
+  State<_StartActivityButton> createState() => _StartActivityButtonState();
+}
+
+class _StartActivityButtonState extends State<_StartActivityButton> {
+  bool _hovering = false;
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final reduceMotion =
+        MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    final motion = reduceMotion
+        ? Duration.zero
+        : const Duration(milliseconds: 180);
+    final hovering = widget.enabled && _hovering;
+    final bg = hovering ? DodamHome.ctaGreenDeep : DodamHome.ctaGreen;
+    final arrowGap = (hovering && !reduceMotion) ? 10.0 : 6.0;
+
+    // 눌림 피드백은 InkWell 기본 하이라이트/스플래시로 처리한다(별도 Transform은
+    // 좌표 기반 탭 테스트를 방해하므로 쓰지 않는다). hover 시 색을 진하게 하고
+    // 화살표를 살짝 이동, focus 시 링을 그린다.
+    return Semantics(
+      button: true,
+      enabled: widget.enabled,
+      label: '집 나무 사람 그림 활동 시작하기',
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          // 단일 InkWell만 제스처를 잡아 탭 라우팅과 hover/focus를 모두 처리한다.
+          key: const ValueKey('start-child-mode'),
+          borderRadius: BorderRadius.circular(16),
+          canRequestFocus: widget.enabled,
+          mouseCursor: widget.enabled
+              ? SystemMouseCursors.click
+              : SystemMouseCursors.basic,
+          highlightColor: DodamHome.forest.withValues(alpha: 0.12),
+          onTap: widget.enabled ? widget.onTap : null,
+          onHover: (v) => setState(() => _hovering = v),
+          onFocusChange: (v) => setState(() => _focused = v),
+          child: AnimatedContainer(
+            duration: motion,
+            curve: Curves.easeOut,
+            // 세로 1.8배(52→94, 56→101)로 키워 클릭 영역을 크게 한다.
+            constraints: BoxConstraints(minHeight: widget.compact ? 94 : 101),
+            alignment: Alignment.center,
+            padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+            decoration: BoxDecoration(
+              color: widget.enabled
+                  ? bg
+                  : DodamHome.ctaGreen.withValues(alpha: 0.45),
+              borderRadius: BorderRadius.circular(16),
+              boxShadow: _focused
+                  ? [
+                      BoxShadow(
+                        color: DodamHome.forest.withValues(alpha: 0.9),
+                        spreadRadius: 2.5,
+                      ),
+                    ]
+                  : null,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Flexible(
+                  child: Text(
+                    '집 나무 사람 그림 활동 시작하기',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                AnimatedContainer(
+                  duration: motion,
+                  curve: Curves.easeOut,
+                  width: arrowGap,
+                ),
+                const Icon(
+                  Icons.arrow_forward_rounded,
+                  size: 20,
+                  color: Colors.white,
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class _ReportButton extends StatelessWidget {
@@ -879,45 +1082,47 @@ class _ReportButton extends StatelessWidget {
           break;
         }
       }
+      // 버튼2 — 큰 CTA 아래 보조 버튼. 연한 초록 채움으로 CTA와 계열을 맞추되
+      // 크기·채도를 낮춰 위계를 유지한다.
+      final enabled = reportId != null;
       return Material(
-        color: hasNew ? DodamHome.pointSoft : DodamHome.surface,
-        borderRadius: BorderRadius.circular(13),
+        // 밝은 크림 배경 — 초록 CTA와 대비해 보조 동선임을 드러낸다.
+        color: DodamHome.heroTop,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: const BorderSide(color: DodamHome.line),
+        ),
         child: InkWell(
           // 리포트가 있을 때만 키를 단다 — 키의 존재가 곧 "진입 가능"을 뜻하도록.
-          key: reportId == null
-              ? null
-              : ValueKey('guardian-latest-report-$reportId'),
-          borderRadius: BorderRadius.circular(13),
-          onTap: reportId == null
-              ? null
-              : () => AppNavigation.pushNamed(
+          key: enabled ? ValueKey('guardian-latest-report-$reportId') : null,
+          borderRadius: BorderRadius.circular(14),
+          onTap: enabled
+              ? () => AppNavigation.pushNamed(
                   context,
-                  AppRoutes.report(reportId.toString()),
-                ),
-          child: Container(
-            height: 44,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(13),
-              border: Border.all(
-                color: hasNew ? DodamHome.pointDeep : DodamHome.line,
-                width: 1.5,
-              ),
-            ),
+                  AppRoutes.report(reportId!.toString()),
+                )
+              : null,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(
+                Icon(
                   Icons.description_outlined,
                   size: 18,
-                  color: DodamHome.ink,
+                  color: enabled ? DodamHome.forest : DodamHome.inkFaint,
                 ),
                 const SizedBox(width: 8),
-                const Text(
-                  '최신 리포트 보기',
-                  style: TextStyle(
-                    fontSize: 13.5,
-                    fontWeight: FontWeight.w800,
-                    color: DodamHome.ink,
+                Flexible(
+                  child: Text(
+                    '최신 리포트 보기',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: enabled ? DodamHome.forest : DodamHome.inkFaint,
+                    ),
                   ),
                 ),
                 if (hasNew) ...[
@@ -950,230 +1155,6 @@ class _ReportButton extends StatelessWidget {
   );
 }
 
-// ── 최근 활동 ────────────────────────────────────────────────────────
-class _RecentActivityCard extends StatelessWidget {
-  const _RecentActivityCard({required this.recentFuture});
-  final Future<List<ActivitySummaryDto>>? recentFuture;
-
-  @override
-  Widget build(BuildContext context) => _Card(
-    key: const ValueKey('recent-activity-card'),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            const Expanded(
-              child: Text(
-                '최근 활동',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w800,
-                  color: DodamHome.ink,
-                ),
-              ),
-            ),
-            ConstrainedBox(
-              constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
-              child: InkWell(
-                key: const ValueKey('activity-history-entry'),
-                onTap: () =>
-                    AppNavigation.pushNamed(context, AppRoutes.activityHistory),
-                child: const Align(
-                  alignment: Alignment.centerRight,
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        '전체',
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: DodamHome.inkSoft,
-                        ),
-                      ),
-                      Icon(
-                        Icons.chevron_right_rounded,
-                        size: 15,
-                        color: DodamHome.inkSoft,
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Expanded(
-          child: FutureBuilder<List<ActivitySummaryDto>>(
-            future: recentFuture,
-            builder: (context, snapshot) {
-              if (snapshot.hasError) {
-                return const Center(
-                  child: Text(
-                    '활동을 불러오지 못했어요.',
-                    style: TextStyle(color: DodamHome.inkSoft),
-                  ),
-                );
-              }
-              final activities = snapshot.data ?? const <ActivitySummaryDto>[];
-              if (snapshot.connectionState == ConnectionState.done &&
-                  activities.isEmpty) {
-                return const Center(
-                  child: Text(
-                    '아직 활동 기록이 없어요.',
-                    style: TextStyle(color: DodamHome.inkSoft),
-                  ),
-                );
-              }
-              return ListView.separated(
-                padding: EdgeInsets.zero,
-                itemCount: activities.length,
-                separatorBuilder: (_, _) =>
-                    const Divider(height: 1, color: DodamHome.line),
-                itemBuilder: (context, i) =>
-                    _ActivityRow(activity: activities[i]),
-              );
-            },
-          ),
-        ),
-      ],
-    ),
-  );
-}
-
-class _ActivityRow extends StatelessWidget {
-  const _ActivityRow({required this.activity});
-  final ActivitySummaryDto activity;
-
-  @override
-  Widget build(BuildContext context) {
-    final status = _statusOf(activity);
-    return InkWell(
-      key: ValueKey('activity-row-${activity.activityId}'),
-      onTap: () => _openReport(context, activity),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 9),
-        child: Row(
-          children: [
-            Container(
-              width: 44,
-              height: 44,
-              decoration: BoxDecoration(
-                color: DodamHome.warm,
-                border: Border.all(color: DodamHome.line),
-                borderRadius: BorderRadius.circular(13),
-              ),
-              child: const Icon(
-                Icons.draw_outlined,
-                size: 24,
-                color: DodamHome.inkSoft,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    activity.title ?? activity.drawingType.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: DodamHome.ink,
-                    ),
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    '${_dateOf(activity.startedAt)} · ${activity.drawingType.name}',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w600,
-                      color: DodamHome.inkSoft,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            _StatusBadge(status: status),
-          ],
-        ),
-      ),
-    );
-  }
-
-  /// 최근 활동 항목 탭 → 해당 활동의 관찰 리포트로 이동한다.
-  ///
-  /// 리포트가 아직 없으면(분석 중·실패) 불필요한 활동 상세로 보내지 않고 안내만 한다.
-  /// 리포트 화면([ReportScreen])이 생성 중·완료·실패 등 상태를 스스로 처리한다.
-  static void _openReport(BuildContext context, ActivitySummaryDto activity) {
-    final report = activity.report;
-    if (report != null) {
-      AppNavigation.pushNamed(
-        context,
-        AppRoutes.report(report.reportId.toString()),
-      );
-      return;
-    }
-    _Header._snack(context, switch (_statusOf(activity)) {
-      _Status.fail => '분석에 실패해 리포트를 볼 수 없어요.',
-      _Status.ing => '아직 분석 중이에요. 리포트가 완료되면 볼 수 있어요.',
-      _Status.done => '아직 리포트가 준비되지 않았어요.',
-    });
-  }
-
-  static _Status _statusOf(ActivitySummaryDto a) {
-    if (a.sessionStatus == 'FAILED' || a.analysisStatus == 'FAILED') {
-      return _Status.fail;
-    }
-    if (a.analysisStatus == 'SUCCESS' ||
-        a.analysisStatus == 'COMPLETED' ||
-        a.sessionStatus == 'COMPLETED') {
-      return _Status.done;
-    }
-    return _Status.ing;
-  }
-
-  static String _dateOf(String iso) {
-    final at = DateTime.tryParse(iso)?.toLocal();
-    if (at == null) return iso;
-    return '${at.month}월 ${at.day}일';
-  }
-}
-
-enum _Status { ing, done, fail }
-
-class _StatusBadge extends StatelessWidget {
-  const _StatusBadge({required this.status});
-  final _Status status;
-
-  @override
-  Widget build(BuildContext context) {
-    final (label, bg, fg) = switch (status) {
-      _Status.ing => ('분석중', DodamHome.blueSoft, DodamHome.blue),
-      _Status.done => ('완료', DodamHome.greenSoft, DodamHome.green),
-      _Status.fail => ('실패', DodamHome.coralSoft, DodamHome.coral),
-    };
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 5),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: fg),
-      ),
-    );
-  }
-}
-
 // ── 우측 달력 ────────────────────────────────────────────────────────
 class _CalendarSection extends StatelessWidget {
   const _CalendarSection({
@@ -1189,12 +1170,24 @@ class _CalendarSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final id = childId;
     final repo = repository;
-    if (id == null || repo == null) return const _Card(child: SizedBox());
-    return MindCalendarCard(
-      key: ValueKey('mind-calendar-$id'),
-      childId: id,
-      childName: childName,
-      repository: repo,
+    final Widget card = (id == null || repo == null)
+        ? const _Card(child: SizedBox())
+        : MindCalendarCard(
+            key: ValueKey('mind-calendar-$id'),
+            childId: id,
+            childName: childName,
+            repository: repo,
+          );
+    // 달력은 날짜 격자가 조밀해 화면 전체 확대 배수를 그대로 받으면 셀이 넘친다.
+    // 이 카드만 기본 배율로 되돌려 설계된 크기를 유지한다.
+    final factor = MediaQuery.textScalerOf(context).scale(1);
+    return MediaQuery(
+      data: MediaQuery.of(context).copyWith(
+        textScaler: TextScaler.linear(
+          factor / _GuardianDashboardState._uiTextScale,
+        ),
+      ),
+      child: card,
     );
   }
 }

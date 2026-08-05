@@ -422,7 +422,26 @@ void main() {
 
 Future<void> _tapAfterScroll(WidgetTester tester, Key key) async {
   final target = find.byKey(key);
+  // 홈이 완전히 자리잡은 뒤 스크롤러블을 찾는다(아이 선택 직후 재조회로 잠시
+  // 로딩 상태일 수 있다).
+  await tester.pumpAndSettle();
+  // 활동 카드가 커지면서 CTA가 본문 스크롤 아래로 내려갈 수 있다. 사용자와 같은
+  // 방식으로 본문을 스크롤해 확실히 화면에 올린 뒤 탭한다.
+  final scrollable = find.descendant(
+    of: find.byKey(const ValueKey('child-list-success')),
+    matching: find.byType(Scrollable),
+  );
+  if (scrollable.evaluate().isNotEmpty) {
+    await tester.scrollUntilVisible(
+      target,
+      120,
+      scrollable: scrollable.first,
+      maxScrolls: 20,
+    );
+    await tester.pumpAndSettle();
+  }
   await tester.ensureVisible(target);
+  await tester.pumpAndSettle();
   await tester.tap(target);
 }
 

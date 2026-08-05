@@ -34,6 +34,10 @@ void main() {
     // 존재만으로는 부족하다 — 실제로 눌러서 넘어갈 수 있어야 한다.
     expect(tester.widget<InkWell>(entry).onTap, isNotNull);
 
+    // 활동 카드가 커지면서 리포트 버튼이 스크롤 아래로 내려갈 수 있어 먼저 올린다.
+    await tester.ensureVisible(entry);
+    await tester.pumpAndSettle();
+
     // 눌렀을 때 "그 리포트 1장의 단일 상세(ReportScreen, id 501)"로 이동해야 한다.
     // 전체 목록(ReportListScreen)이 아니어야 한다.
     await tester.tap(entry);
