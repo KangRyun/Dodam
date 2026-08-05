@@ -4116,37 +4116,37 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
                           const SizedBox(height: AppSpacing.lg),
                           LayoutBuilder(
                             builder: (context, contentConstraints) {
-                              final textScale = MediaQuery.textScalerOf(
-                                context,
-                              ).scale(1);
-                              final useWideLayout =
-                                  contentConstraints.maxWidth >= 680 &&
-                                  textScale <= 1.3;
-                              final previewHeight = useWideLayout
-                                  ? (contentConstraints.maxWidth * 0.42)
-                                        .clamp(280.0, 420.0)
-                                        .toDouble()
-                                  : (contentConstraints.maxWidth * 0.56)
-                                        .clamp(140.0, 240.0)
-                                        .toDouble();
-                              final preview = CompletedDrawingPreview(
-                                completedDrawingImage:
-                                    widget.activityContext.isHtp
-                                    ? null
-                                    : widget.completedDrawingImage,
-                                height: previewHeight,
-                              );
                               final assessmentId =
                                   widget.activityContext.htpAssessmentId;
-                              final previewWidget =
-                                  widget.activityContext.isHtp &&
-                                      assessmentId != null
-                                  ? HtpEmotionPreviewGallery(
-                                      childId: widget.childId,
-                                      assessmentId: assessmentId,
-                                      repository: widget.activityRepository,
-                                    )
-                                  : preview;
+                              final Widget previewWidget;
+                              if (widget.activityContext.isHtp &&
+                                  assessmentId != null) {
+                                // HTP: 집·나무·사람 3개 그림을 가로로 나란히 보여준다.
+                                previewWidget = HtpEmotionPreviewGallery(
+                                  childId: widget.childId,
+                                  assessmentId: assessmentId,
+                                  repository: widget.activityRepository,
+                                );
+                              } else {
+                                // 그림일기: 그림이 1개이므로 HTP 카드 한 칸과 비슷한
+                                // 크기로 중앙에 정렬한다(S15P11B209-919).
+                                final previewWidth =
+                                    (contentConstraints.maxWidth * 0.32)
+                                        .clamp(220.0, 380.0)
+                                        .toDouble();
+                                previewWidget = Center(
+                                  child: SizedBox(
+                                    width: previewWidth,
+                                    child: CompletedDrawingPreview(
+                                      completedDrawingImage:
+                                          widget.completedDrawingImage,
+                                      height: (previewWidth * 0.75)
+                                          .clamp(160.0, 300.0)
+                                          .toDouble(),
+                                    ),
+                                  ),
+                                );
+                              }
                               final controls = _buildEmotionControls(
                                 selectedPresentation: selectedPresentation,
                                 lockedSubmissionKind: lockedSubmissionKind,
@@ -4156,33 +4156,14 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
                                 hasSaveContract: hasSaveContract,
                                 reflectionInputLocked: reflectionInputLocked,
                               );
-                              if (!useWideLayout ||
-                                  widget.activityContext.isHtp) {
-                                return Column(
-                                  key: const ValueKey('emotion-compact-layout'),
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    previewWidget,
-                                    const SizedBox(height: AppSpacing.lg),
-                                    controls,
-                                  ],
-                                );
-                              }
-                              final previewWidth =
-                                  (contentConstraints.maxWidth * 0.38)
-                                      .clamp(260.0, 380.0)
-                                      .toDouble();
-                              return Row(
-                                key: const ValueKey('emotion-wide-layout'),
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                              // 그림일기·HTP 모두 동일 레이아웃: 그림(위) + 감정(아래).
+                              return Column(
+                                key: const ValueKey('emotion-compact-layout'),
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  SizedBox(
-                                    width: previewWidth,
-                                    child: previewWidget,
-                                  ),
-                                  const SizedBox(width: AppSpacing.lg),
-                                  Expanded(child: controls),
+                                  previewWidget,
+                                  const SizedBox(height: AppSpacing.lg),
+                                  controls,
                                 ],
                               );
                             },

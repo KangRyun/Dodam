@@ -2072,7 +2072,20 @@ void main() {
     tester,
   ) async {
     await _pumpEmotion(tester, size: const Size(1200, 600));
-    expect(find.byKey(const ValueKey('emotion-wide-layout')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('emotion-compact-layout')),
+      findsOneWidget,
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('emotion-기쁨')),
+      220,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('emotion-screen-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
@@ -2125,13 +2138,29 @@ void main() {
     );
 
     await _pumpEmotion(tester, size: const Size(800, 1280));
-    expect(find.byKey(const ValueKey('emotion-wide-layout')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('emotion-compact-layout')),
+      findsOneWidget,
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const ValueKey('emotion-편안')),
+      220,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const ValueKey('emotion-screen-scroll')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     await tester.tap(find.byKey(const ValueKey('emotion-편안')));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
 
     await _pumpEmotion(tester, size: const Size(1280, 800));
-    expect(find.byKey(const ValueKey('emotion-wide-layout')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('emotion-compact-layout')),
+      findsOneWidget,
+    );
     expect(
       tester
           .widget<Image>(
