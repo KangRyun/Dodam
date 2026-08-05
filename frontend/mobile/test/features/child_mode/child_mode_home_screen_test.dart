@@ -243,13 +243,15 @@ void main() {
 
     expect(find.byKey(const ValueKey('costume-carousel')), findsOneWidget);
     expect(find.byKey(const ValueKey('draw-entry')), findsOneWidget);
-    expect(find.text('그림 그리기'), findsOneWidget);
+    expect(find.text('새로 그리기'), findsOneWidget);
     // 새 활동 시작은 그림일기만 — HTP 카드는 홈에 없다.
     expect(find.byKey(const ValueKey('activity-9')), findsNothing);
     expect(find.text('집·나무·사람 그림'), findsNothing);
-    // 지난 그림 보기(과거 그림 다시 보기) 입구는 그림 그리기 옆 secondary로 노출한다.
+    // 지난 그림 보기·이어 그리기 입구는 새로 그리기 아래 secondary로 상시 노출한다.
     expect(find.byKey(const ValueKey('past-drawings-entry')), findsOneWidget);
     expect(find.text('지난 그림 보기'), findsOneWidget);
+    expect(find.byKey(const ValueKey('child-resume-drawing')), findsOneWidget);
+    expect(find.text('이어 그리기'), findsOneWidget);
   });
 
   testWidgets('캐릭터를 고르면 그 아이의 preferredCharacter로 저장하도록 알린다', (tester) async {
@@ -1309,10 +1311,11 @@ void main() {
     );
   });
 
-  testWidgets('active session dialog을 닫아도 최초 캐릭터 안내를 뒤이어 열지 않는다', (
+  testWidgets('active session이 있어도 진입 팝업 없이 이어 그리기 버튼을 노출한다', (
     tester,
   ) async {
-    final store = _FakeIntroStore();
+    // 안내를 이미 본 아이라 인트로는 뜨지 않는다 — 진입 팝업 제거만 본다.
+    final store = _FakeIntroStore(seen: {7});
     final repository = _FakeDrawingRepository(
       drawingTypes: const [_artDiary],
       activeSession: const ActiveDrawingSessionDto(
@@ -1341,19 +1344,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('이어 그리기'), findsOneWidget);
+    // 옛 진입 팝업("그리던 그림이 있어요")은 더 이상 뜨지 않는다.
+    expect(find.text('그리던 그림이 있어요'), findsNothing);
+    // 이어 그리기 버튼은 상시 노출되고, 캔버스로 곧장 열리지도 않는다.
+    expect(find.byKey(const ValueKey('child-resume-drawing')), findsOneWidget);
+    expect(find.textContaining('drawing-session-'), findsNothing);
     expect(
       find.byKey(const ValueKey('child-character-intro-dialog')),
       findsNothing,
     );
-    expect(store.readChildIds, isEmpty);
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-    expect(
-      find.byKey(const ValueKey('child-character-intro-dialog')),
-      findsNothing,
-    );
-    expect(store.readChildIds, isEmpty);
   });
 
   testWidgets('prepared UPLOAD 자동 진입은 intro 조회보다 먼저 대화 route를 연다', (
@@ -1758,10 +1757,11 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // 진행 중 활동 확인은 활동 종류를 선택하기 전에 한 번만 수행한다.
+    // 진행 중 활동 확인은 홈 진입 시 한 번만 수행한다. 진입 팝업 없이 이어 그리기
+    // 버튼으로 재개한다.
     expect(find.byKey(const ValueKey('activity-guide-start')), findsNothing);
-    expect(find.text('이어 그리기'), findsOneWidget);
-    await tester.tap(find.text('이어 그리기'));
+    expect(find.byKey(const ValueKey('child-resume-drawing')), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('child-resume-drawing')));
     await tester.pumpAndSettle();
 
     expect(repository.createCalls, 0);
@@ -1773,13 +1773,13 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('leave-drawing')));
     await tester.pumpAndSettle();
 
-    // 캔버스에서 뒤로 나오면 활성 세션을 다시 조회하고 같은 팝업을 복원한다.
+    // 캔버스에서 뒤로 나오면 활성 세션을 다시 조회해 이어 그리기 대상을 갱신한다.
     expect(repository.getActiveSessionCalls, 2);
-    expect(find.text('이어 그리기'), findsOneWidget);
+    expect(find.byKey(const ValueKey('child-resume-drawing')), findsOneWidget);
     expect(find.text('새로 그리기'), findsOneWidget);
   });
 
-  testWidgets('전시관 등 다른 화면이 홈 위에 있으면 이어 그리기 팝업을 띄우지 않는다', (tester) async {
+  testWidgets('다른 화면이 홈 위에 있어도 진입 확인은 팝업 없이 안전하다', (tester) async {
     final completer = Completer<ActiveDrawingSessionDto?>();
     final repository = _FakeDrawingRepository(
       drawingTypes: const [_artDiary],
@@ -1824,10 +1824,12 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // 홈이 최상단이 아니므로 이어 그리기 팝업이 그 화면 위에 뜨지 않는다.
+    // 진입 팝업을 아예 만들지 않으므로 다른 화면 위에 무엇도 덮이지 않고, 캔버스로
+    // 자동 진입하지도 않는다. 이어 그리기 대상은 홈에 조용히 보관된다.
     expect(find.text('상단-화면'), findsOneWidget);
-    expect(find.text('이어 그리기'), findsNothing);
     expect(find.text('그리던 그림이 있어요'), findsNothing);
+    expect(find.textContaining('drawing-session-'), findsNothing);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('저장된 초안이 없는 활성 세션도 재개와 새 활동을 선택한다', (tester) async {
@@ -1855,10 +1857,10 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const ValueKey('activity-guide-start')), findsNothing);
-    expect(find.text('이어 그리기'), findsOneWidget);
+    expect(find.byKey(const ValueKey('child-resume-drawing')), findsOneWidget);
     expect(repository.createCalls, 0);
 
-    await tester.tap(find.text('이어 그리기'));
+    await tester.tap(find.byKey(const ValueKey('child-resume-drawing')));
     await tester.pumpAndSettle();
 
     expect(
@@ -1867,7 +1869,9 @@ void main() {
     );
   });
 
-  testWidgets('새로 그리기를 고른 뒤 그림일기를 선택하면 새 캔버스로 이동한다', (tester) async {
+  testWidgets('진행 중 세션이 있으면 새로 그리기가 그 세션을 대체하고 새 캔버스로 이동한다', (
+    tester,
+  ) async {
     final repository = _FakeDrawingRepository(
       drawingTypes: const [_artDiary, _secondType],
       activeSession: const ActiveDrawingSessionDto(
@@ -1891,9 +1895,8 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    // 이젤 라벨이 "새로 그리기"이고, 진행 중 세션이 있으면 대체(replaceActive)한다.
     expect(find.text('새로 그리기'), findsOneWidget);
-    await tester.tap(find.text('새로 그리기'));
-    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('draw-entry')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
@@ -1912,11 +1915,56 @@ void main() {
     );
   });
 
+  testWidgets('이어 그리기 대상이 없으면 빈-상태 팝업을 띄우고 새로 그리기로 잇는다', (tester) async {
+    final repository = _FakeDrawingRepository(drawingTypes: const [_artDiary]);
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: repository,
+          introStore: _FakeIntroStore(seen: {7}),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // 진행 중 세션이 없으니 이어 그리기 탭은 친근한 빈-상태 팝업을 띄운다.
+    await tester.tap(find.byKey(const ValueKey('child-resume-drawing')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('resume-empty-dialog')), findsOneWidget);
+    expect(find.text('앗, 그리던 그림이 없어요!'), findsOneWidget);
+    expect(find.text('새로 그려볼까요?'), findsOneWidget);
+    expect(repository.createCalls, 0);
+
+    // 닫기는 세션을 만들지 않고 홈에 남는다.
+    await tester.tap(find.byKey(const ValueKey('resume-empty-close')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('resume-empty-dialog')), findsNothing);
+    expect(repository.createCalls, 0);
+
+    // 다시 열어 "새로 그리기"를 누르면 그림일기 안내로 이어지고, 대체 없이 시작한다.
+    await tester.tap(find.byKey(const ValueKey('child-resume-drawing')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('resume-empty-start-new')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('resume-empty-dialog')), findsNothing);
+    expect(find.byKey(const ValueKey('activity-guide-start')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('activity-guide-start')));
+    await tester.pumpAndSettle();
+    expect(repository.createCalls, 1);
+    expect(repository.lastCreateRequest?.replaceActive, isFalse);
+    expect(
+      find.text('drawing-session-900-resume-false-auto-false-fresh-true'),
+      findsOneWidget,
+    );
+  });
+
   group('HTP 재진입 복구', () {
     Future<void> resumeActive(WidgetTester tester) async {
       await tester.pumpAndSettle();
-      expect(find.text('이어 그리기'), findsOneWidget);
-      await tester.tap(find.text('이어 그리기'));
+      expect(find.byKey(const ValueKey('child-resume-drawing')), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('child-resume-drawing')));
       await tester.pumpAndSettle();
     }
 
@@ -2727,7 +2775,11 @@ void main() {
       expect(store.marked, [7]);
     });
 
-    testWidgets('active session 진입은 spotlight 안내보다 우선한다', (tester) async {
+    testWidgets('active session이 있어도 진입 팝업 없이 최초 캐릭터 안내를 띄운다', (
+      tester,
+    ) async {
+      // 진입 팝업을 없앤 뒤에는 홈에 머물므로, 안내를 못 본 아이에게는 인트로가
+      // 그대로 뜬다. 이어 그리기 대상은 버튼 뒤에 조용히 보관된다(S15P11B209-916).
       final store = _FakeIntroStore();
       await tester.pumpWidget(
         _wrap(
@@ -2756,12 +2808,16 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      // 옛 진입 팝업은 사라지고 인트로가 뜬다. spotlight는 아직 고르기 전이라 없다.
+      expect(find.text('그리던 그림이 있어요'), findsNothing);
       expect(
         find.byKey(const ValueKey('child-character-intro-dialog')),
-        findsNothing,
+        findsOneWidget,
       );
       expect(find.byKey(spotlight), findsNothing);
       expect(store.marked, isEmpty);
+      // 캔버스로 자동 진입하지 않는다.
+      expect(find.textContaining('drawing-session-'), findsNothing);
     });
 
     testWidgets('같은 아이로 rebuild해도 조작 상태가 초기화되지 않는다', (tester) async {
