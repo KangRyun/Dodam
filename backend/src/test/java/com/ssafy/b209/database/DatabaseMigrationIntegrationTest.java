@@ -50,9 +50,11 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("39");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("40");
     assertThat(tableExists("flyway_schema_history")).isTrue();
-    assertThat(tableCount()).isEqualTo(85);
+    // V40이 주제별 관찰 4종(report_subjects·observations·qa_pairs·interpretations)과
+    // report_references 를 더해 85 → 90 이 됐다(S15P11B209-960).
+    assertThat(tableCount()).isEqualTo(90);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
     assertThat(tableExists("child_profile_image_files")).isTrue();
