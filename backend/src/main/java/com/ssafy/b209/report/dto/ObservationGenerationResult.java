@@ -28,6 +28,10 @@ import java.util.List;
  *     ABUSE_DISCLOSURE}는 가해자가 보호자일 수 있어 <strong>항상 {@code null}</strong>이다(S15P11B209-889·890)
  * @param drawnItems 아이가 그린 것 목록이다. <strong>출처는 VLM 관찰 서술이며 탐지 라벨이 아니다</strong> — AI 가 서술 원문과 대조해 걸러
  *     보낸다(S15P11B209-911). optional 이며 AI 가 싣지 않으면 빈 목록이다
+ * @param subjectReports 주제(집·나무·사람)별 관찰 묶음이다 (875 §5 / S15P11B209-960). <strong>AI 는 다섯 필드 중 셋만
+ *     보낸다</strong> — {@code imageUrl}·{@code qaPairs}는 BE 소유라 서버가 채운다. HTP 가 아닌 활동은 비거나 1건이다
+ * @param ragReferences 리포트가 근거로 참조한 전문 자료 출처다 (S15P11B209-614). 보호자 응답의 {@code references[]}로 나가며
+ *     <strong>출처 표시는 라이선스 의무(KOGL-1)</strong>라 받은 것을 버리면 안 된다
  */
 public record ObservationGenerationResult(
     String requestId,
@@ -44,19 +48,83 @@ public record ObservationGenerationResult(
     List<PublicInterpretationDraft> publicInterpretations,
     List<EvidenceItemDraft> evidenceItems,
     List<ParentGuideDraft> parentGuides,
-    CrisisAlertDraft crisisAlert) {
+    CrisisAlertDraft crisisAlert,
+    List<SubjectReportDraft> subjectReports,
+    List<RagReferenceDraft> ragReferences) {
 
   /**
    * 경향 해석 계열 목록만 빈 목록으로 정규화한다.
    *
    * <p>{@code drawnItems}는 정규화하지 않는다 — 필드 생략과 의도적 빈 배열을 구분해야 하고(S15P11B209-912) 그 판단은 {@link
    * #hasDrawnItems()}가 한다. 경향 해석 계열은 그 구분이 필요 없다(빈 배열은 근거 부족이라는 정상 결과다, 875 §10).
+   *
+   * <p>{@code subjectReports}·{@code ragReferences}도 같은 이유로 빈 목록이 정상이다 — 그림일기는 주제가 나뉘지 않고, 검색이 실패해도
+   * 리포트는 나간다(검색 실패는 차단이 아니다).
    */
   public ObservationGenerationResult {
     publicInterpretations =
         publicInterpretations == null ? List.of() : List.copyOf(publicInterpretations);
     evidenceItems = evidenceItems == null ? List.of() : List.copyOf(evidenceItems);
     parentGuides = parentGuides == null ? List.of() : List.copyOf(parentGuides);
+    subjectReports = subjectReports == null ? List.of() : List.copyOf(subjectReports);
+    ragReferences = ragReferences == null ? List.of() : List.copyOf(ragReferences);
+  }
+
+  /**
+   * 주제별 관찰·참고 자료 확장 이전 형태로 만든다 (S15P11B209-960).
+   *
+   * <p>위기 안내까지만 있던 호출부(주로 테스트)를 그대로 두기 위한 생성자다.
+   *
+   * @param requestId 요청 식별자
+   * @param modelName Model 이름
+   * @param modelVersion Model 버전
+   * @param confidence 신뢰도이며 없으면 {@code null}
+   * @param observationDraft 관찰 초안
+   * @param conversationSummary 대화 요약 초안
+   * @param activityNotes 활동 주의사항 목록
+   * @param followUpGuides 보호자 후속 안내 목록
+   * @param guardianQuestions 보호자 질문 목록
+   * @param limitationsText 한계 문구
+   * @param drawnItems 그린 것 목록이며 필드 생략을 표현하려면 {@code null}
+   * @param publicInterpretations 경향 해석 카드 목록
+   * @param evidenceItems 근거 목록
+   * @param parentGuides 보호자 가이드 목록
+   * @param crisisAlert 위기 안내이며 없으면 {@code null}
+   */
+  public ObservationGenerationResult(
+      String requestId,
+      String modelName,
+      String modelVersion,
+      BigDecimal confidence,
+      ObservationDraft observationDraft,
+      ConversationSummaryDraft conversationSummary,
+      List<String> activityNotes,
+      List<FollowUpGuideDraft> followUpGuides,
+      List<GuardianQuestionDraft> guardianQuestions,
+      String limitationsText,
+      List<DrawnItemDraft> drawnItems,
+      List<PublicInterpretationDraft> publicInterpretations,
+      List<EvidenceItemDraft> evidenceItems,
+      List<ParentGuideDraft> parentGuides,
+      CrisisAlertDraft crisisAlert) {
+    this(
+        requestId,
+        modelName,
+        modelVersion,
+        confidence,
+        observationDraft,
+        conversationSummary,
+        activityNotes,
+        followUpGuides,
+        guardianQuestions,
+        limitationsText,
+        drawnItems,
+        publicInterpretations,
+        evidenceItems,
+        parentGuides,
+        crisisAlert,
+        List.of(),
+        List.of());
   }
 
   /**
@@ -166,6 +234,48 @@ public record ObservationGenerationResult(
    * @param name 보호자 화면에 그대로 나가는 한국어 표현
    */
   public record DrawnItemDraft(String drawingSubject, String name) {}
+
+  /**
+   * 주제(집·나무·사람) 하나의 관찰 묶음이다 (875 §5 / AI 계약 {@code SubjectReportDraft}).
+   *
+   * <p><strong>875 §5 의 다섯 필드 중 셋만 온다.</strong> 나머지 둘은 BE 소유라 AI 가 의도적으로 보내지 않는다(S15P11B209-941):
+   *
+   * <ul>
+   *   <li>{@code imageUrl} — BE 가 가진 자산 URL 이다. AI 가 만들 수 있는 값이 아니다
+   *   <li>{@code qaPairs} — 요청에 실려 온 아이 발화 원문이다. LLM 을 통과시켜 되돌려 받으면 아이 말이 바뀔 여지만 생긴다
+   * </ul>
+   *
+   * <p>{@code interpretationRefs}는 <strong>AI 응답의 {@code publicInterpretations} 배열
+   * 인덱스</strong>(0-based)이며 {@code category} 값이 아니다(875 §5-1). BE 는 이 인덱스를 저장한 카드 행으로 바꿔 두고, 응답을 낼
+   * 때 <b>공개된 카드 목록에서의 위치</b>로 다시 계산한다 — 인덱스를 그대로 저장하면 서버 검증에서 카드 하나가 빠질 때 참조가 조용히 다른 카드를 가리킨다.
+   *
+   * @param subjectType 주제({@code HOUSE|TREE|PERSON})이며 주제가 나뉘지 않는 활동은 {@code null}
+   * @param visionObservations 그 그림에서 눈으로 확인된 사실 문장 목록이며 해석은 담지 않는다
+   * @param interpretationRefs 이 그림의 관찰이 근거가 된 경향 해석 카드의 배열 인덱스 목록
+   */
+  public record SubjectReportDraft(
+      String subjectType, List<String> visionObservations, List<Integer> interpretationRefs) {
+
+    /** 목록이 {@code null}로 와도 빈 목록으로 정규화한다. */
+    public SubjectReportDraft {
+      visionObservations = visionObservations == null ? List.of() : List.copyOf(visionObservations);
+      interpretationRefs = interpretationRefs == null ? List.of() : List.copyOf(interpretationRefs);
+    }
+  }
+
+  /**
+   * 리포트가 근거로 참조한 전문 자료 출처다 (S15P11B209-614, 875 §9).
+   *
+   * <p>보호자 응답의 {@code references[]}로 나간다. 출처 표시는 <strong>라이선스 의무(KOGL-1)</strong>이자 보호자 신뢰 재료라 받은
+   * 것을 버리지 않는다. 청크 텍스트는 오지 않는다 — {@code sourceId}·제목이면 추적에 충분하다.
+   *
+   * <p>URL 은 오지 않으므로 응답의 {@code references[].url}은 {@code null}이다. 875 §9 가 nullable 을 유지하기로 한 이유가
+   * 이 경우다(자체 저작 자료는 URL 이 없다).
+   *
+   * @param sourceId 자료 출처 식별자
+   * @param title 자료 제목
+   */
+  public record RagReferenceDraft(String sourceId, String title) {}
 
   /**
    * AI 가 만든 관찰 초안이다.

@@ -102,6 +102,14 @@ class ReportDetailQueryServiceTest {
   private com.ssafy.b209.report.repository.ReportMessageConfirmationViewRepository
       messageConfirmationRepository;
 
+  @Mock private com.ssafy.b209.report.repository.ReportSubjectRepository subjectRepository;
+
+  @Mock private com.ssafy.b209.report.repository.ReportReferenceRepository referenceRepository;
+
+  @Mock private com.ssafy.b209.report.repository.ReportHtpStepViewRepository htpStepRepository;
+
+  @Mock private com.ssafy.b209.report.repository.ReportChildViewRepository childRepository;
+
   private ReportDetailQueryService service;
 
   @BeforeEach
@@ -127,6 +135,10 @@ class ReportDetailQueryServiceTest {
             parentGuideRepository,
             crisisAlertRepository,
             messageConfirmationRepository,
+            subjectRepository,
+            referenceRepository,
+            htpStepRepository,
+            childRepository,
             new DrawingAssetFileUrlFactory());
   }
 
@@ -442,6 +454,113 @@ class ReportDetailQueryServiceTest {
     when(guardianAccessRepository.hasDrawingSessionAccess(GUARDIAN_ID, SESSION_ID))
         .thenReturn(true);
     when(drawingSessionRepository.findById(SESSION_ID)).thenReturn(Optional.of(session()));
+  }
+
+  @Test
+  void assemblesSubjectReportsInContractOrderWithResolvedInterpretationIndexes() {
+    // 875 §5. 저장된 주제 스냅샷이 상세 응답에 HOUSE→TREE→PERSON 으로 실제로 나오는지 본다 —
+    //   저장 쪽만 검증하면 조회가 List.of() 를 그대로 두고 있어도 초록이다(계약 §12-1 마지막 항목).
+    when(reportRepository.findById(REPORT_ID))
+        .thenReturn(Optional.of(report(ReportStatus.COMPLETED, null)));
+    when(guardianAccessRepository.hasDrawingSessionAccess(GUARDIAN_ID, SESSION_ID))
+        .thenReturn(true);
+    when(drawingSessionRepository.findById(SESSION_ID)).thenReturn(Optional.of(session()));
+    when(drawingTypeRepository.findById(TYPE_ID))
+        .thenReturn(Optional.of(drawingType("HTP", "집-나무-사람")));
+    when(assetRepository.findByDrawingSessionIdAndAssetTypeInOrderByAssetVersionAsc(any(), any()))
+        .thenReturn(List.of(asset(11L, "FINAL", 1)));
+    when(htpStepRepository.countStepsSharingAssessment(SESSION_ID)).thenReturn(3L);
+
+    // 공개 카드 두 장. 주제는 두 번째 카드만 가리킨다 — 응답 배열 인덱스로 1 이 나와야 한다.
+    com.ssafy.b209.report.domain.ReportPublicInterpretation firstCard =
+        publishedCard(901L, "EMOTION", "감정 표현");
+    com.ssafy.b209.report.domain.ReportPublicInterpretation secondCard =
+        publishedCard(902L, "RELATIONSHIP", "가족과의 연결");
+    when(interpretationRepository.findByReportIdAndDisclosureStateOrderByDisplayOrderAsc(
+            REPORT_ID, com.ssafy.b209.report.domain.ReportInterpretationDisclosureState.PUBLISHED))
+        .thenReturn(List.of(firstCard, secondCard));
+    when(subjectRepository.findByReportIdOrderByDisplayOrderAsc(REPORT_ID))
+        .thenReturn(
+            List.of(
+                subject(0, "HOUSE", SESSION_ID, List.of("집을 가운데 크게 그렸어요."), secondCard),
+                subject(1, "TREE", TREE_SESSION_ID, List.of("나무를 왼쪽에 그렸어요."), null),
+                subject(2, "PERSON", PERSON_SESSION_ID, List.of(), null)));
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.subjectReports())
+        .extracting(com.ssafy.b209.report.dto.ReportSubjectResponse::subjectType)
+        .containsExactly("HOUSE", "TREE", "PERSON");
+    assertThat(response.subjectReports().get(0).visionObservations())
+        .containsExactly("집을 가운데 크게 그렸어요.");
+    // category 가 아니라 publicInterpretations 배열의 인덱스다(875 §5-1).
+    assertThat(response.subjectReports().get(0).interpretationRefs()).containsExactly(1);
+    assertThat(response.publicInterpretations().get(1).category()).isEqualTo("RELATIONSHIP");
+    assertThat(response.subjectReports().get(1).interpretationRefs()).isEmpty();
+    // 완성 그림 URL 은 주제의 세션에서 조회 시점에 발급한다.
+    assertThat(response.subjectReports().get(0).imageUrl()).isNotNull();
+    // 세 활동을 합친 기록임을 밝힌다(875 §8).
+    assertThat(response.activityFacts().aggregatedHtp()).isTrue();
+    assertThat(response.activityType()).isEqualTo("HTP");
+  }
+
+  @Test
+  void omitsChildDisplayNameForDeletedChild() {
+    // 보관 기간·탈퇴로 아동 데이터를 지웠는데 리포트 표지에 이름이 남으면 삭제가 끝나지 않은 것이 된다.
+    when(reportRepository.findById(REPORT_ID))
+        .thenReturn(Optional.of(report(ReportStatus.COMPLETED, null)));
+    when(guardianAccessRepository.hasDrawingSessionAccess(GUARDIAN_ID, SESSION_ID))
+        .thenReturn(true);
+    when(drawingSessionRepository.findById(SESSION_ID)).thenReturn(Optional.of(session()));
+    when(childRepository.findById(CHILD_ID)).thenReturn(Optional.of(child("민준", true)));
+
+    assertThat(service.getReport(GUARDIAN_ID, REPORT_ID).childDisplayName()).isNull();
+
+    when(childRepository.findById(CHILD_ID)).thenReturn(Optional.of(child("민준", false)));
+    assertThat(service.getReport(GUARDIAN_ID, REPORT_ID).childDisplayName()).isEqualTo("민준");
+  }
+
+  private com.ssafy.b209.report.domain.ReportChildView child(String nickname, boolean deleted) {
+    com.ssafy.b209.report.domain.ReportChildView view =
+        instantiate(com.ssafy.b209.report.domain.ReportChildView.class);
+    ReflectionTestUtils.setField(view, "id", CHILD_ID);
+    ReflectionTestUtils.setField(view, "nickname", nickname);
+    ReflectionTestUtils.setField(view, "deletedAt", deleted ? CREATED_AT : null);
+    return view;
+  }
+
+  private com.ssafy.b209.report.domain.ReportPublicInterpretation publishedCard(
+      Long id, String category, String title) {
+    com.ssafy.b209.report.domain.ReportPublicInterpretation card =
+        com.ssafy.b209.report.domain.ReportPublicInterpretation.create(
+            org.mockito.Mockito.mock(com.ssafy.b209.report.domain.Report.class),
+            0,
+            com.ssafy.b209.report.domain.ReportInterpretationCategory.valueOf(category),
+            title,
+            "그런 경향이 보일 수 있습니다.",
+            "이번 활동에서 나타난 가능성입니다.",
+            "가정에서 살펴봐 주세요.");
+    ReflectionTestUtils.setField(card, "id", id);
+    return card;
+  }
+
+  private com.ssafy.b209.report.domain.ReportSubject subject(
+      int order,
+      String subjectType,
+      Long sessionId,
+      List<String> observations,
+      com.ssafy.b209.report.domain.ReportPublicInterpretation card) {
+    com.ssafy.b209.report.domain.ReportSubject subject =
+        com.ssafy.b209.report.domain.ReportSubject.create(
+            org.mockito.Mockito.mock(com.ssafy.b209.report.domain.Report.class),
+            order,
+            subjectType,
+            sessionId);
+    observations.forEach(subject::addObservation);
+    if (card != null) {
+      subject.referenceInterpretation(card);
+    }
+    return subject;
   }
 
   private ReportDetailView report(ReportStatus status, String limitationsText) {

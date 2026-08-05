@@ -37,12 +37,16 @@ import com.ssafy.b209.report.domain.ReportFeatureVisibility;
 import com.ssafy.b209.report.domain.ReportFollowUpGuide;
 import com.ssafy.b209.report.domain.ReportGuardianQuestion;
 import com.ssafy.b209.report.domain.ReportInterpretationCategory;
+import com.ssafy.b209.report.domain.ReportInterpretationDisclosureState;
 import com.ssafy.b209.report.domain.ReportKeyConversation;
 import com.ssafy.b209.report.domain.ReportObservedFeature;
 import com.ssafy.b209.report.domain.ReportParentGuide;
 import com.ssafy.b209.report.domain.ReportParentGuideType;
 import com.ssafy.b209.report.domain.ReportPublicInterpretation;
+import com.ssafy.b209.report.domain.ReportReference;
 import com.ssafy.b209.report.domain.ReportStatus;
+import com.ssafy.b209.report.domain.ReportSubject;
+import com.ssafy.b209.report.domain.ReportSubjectQaPair;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummaryDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DrawnItemDraft;
@@ -62,7 +66,9 @@ import com.ssafy.b209.report.repository.ReportKeyConversationRepository;
 import com.ssafy.b209.report.repository.ReportObservedFeatureRepository;
 import com.ssafy.b209.report.repository.ReportParentGuideRepository;
 import com.ssafy.b209.report.repository.ReportPublicInterpretationRepository;
+import com.ssafy.b209.report.repository.ReportReferenceRepository;
 import com.ssafy.b209.report.repository.ReportRepository;
+import com.ssafy.b209.report.repository.ReportSubjectRepository;
 import com.ssafy.b209.report.safety.InterpretationCandidate;
 import com.ssafy.b209.report.safety.InterpretationSafetyOutcome;
 import com.ssafy.b209.report.safety.InterpretationSafetyVerifier;
@@ -71,9 +77,12 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.context.ApplicationEventPublisher;
@@ -95,6 +104,13 @@ public class ObservationReportPersistenceService {
       LoggerFactory.getLogger(ObservationReportPersistenceService.class);
 
   private static final int MAX_KEY_CONVERSATIONS = 5;
+
+  /** 화면이 먼저 펼치는 대표 문답 수다 (875 §6). 나머지는 "대화 더 보기"로 접힌다. */
+  private static final int MAX_REPRESENTATIVE_QA_PAIRS = 3;
+
+  /** 875 §5 가 보장하는 주제 노출 순서다. 순서가 곧 계약이라 상수로 고정한다. */
+  private static final List<String> SUBJECT_ORDER = List.of("HOUSE", "TREE", "PERSON");
+
   private static final String FAILED_LIMITATIONS = "리포트 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.";
 
   // AI 응답이 들어가는 VARCHAR 컬럼의 문자 수 상한이다. 값 하나가 상한을 넘겨도 리포트 전체가 실패하지 않도록
@@ -127,6 +143,8 @@ public class ObservationReportPersistenceService {
   private final ReportEvidenceItemRepository evidenceItemRepository;
   private final ReportParentGuideRepository parentGuideRepository;
   private final ReportCrisisAlertRepository crisisAlertRepository;
+  private final ReportSubjectRepository subjectRepository;
+  private final ReportReferenceRepository referenceRepository;
   private final InterpretationSafetyVerifier safetyVerifier;
   private final InterpretationCandidateAdapter candidateAdapter;
   private final ReportObservedFeatureRepository observedFeatureRepository;
@@ -165,6 +183,8 @@ public class ObservationReportPersistenceService {
    * @param conversationMessageRepository 대화 메시지 집계 저장소
    * @param emotionRepository 그림 활동 선택 감정 저장소
    * @param htpAssessmentRepository HTP 묶음의 세 세션 집계와 상태 전이 저장소
+   * @param subjectRepository 주제(집·나무·사람)별 관찰 묶음 저장소 (S15P11B209-960)
+   * @param referenceRepository 리포트 참고 자료 저장소 (S15P11B209-960)
    * @param behaviorSummaryService 저장된 Stroke 배치에서 그리기 행동 수치를 집계하는 경계 (S15P11B209-870)
    * @param eventPublisher 완료 커밋 후 분석 완료 알림을 요청할 이벤트 발행기
    * @param clock 저장 시각을 제공하는 UTC 시계
@@ -181,6 +201,8 @@ public class ObservationReportPersistenceService {
       ReportEvidenceItemRepository evidenceItemRepository,
       ReportParentGuideRepository parentGuideRepository,
       ReportCrisisAlertRepository crisisAlertRepository,
+      ReportSubjectRepository subjectRepository,
+      ReportReferenceRepository referenceRepository,
       InterpretationSafetyVerifier safetyVerifier,
       InterpretationCandidateAdapter candidateAdapter,
       ReportObservedFeatureRepository observedFeatureRepository,
@@ -205,6 +227,8 @@ public class ObservationReportPersistenceService {
     this.evidenceItemRepository = evidenceItemRepository;
     this.parentGuideRepository = parentGuideRepository;
     this.crisisAlertRepository = crisisAlertRepository;
+    this.subjectRepository = subjectRepository;
+    this.referenceRepository = referenceRepository;
     this.safetyVerifier = safetyVerifier;
     this.candidateAdapter = candidateAdapter;
     this.observedFeatureRepository = observedFeatureRepository;
@@ -352,7 +376,8 @@ public class ObservationReportPersistenceService {
                 detectedObjectCodes,
                 subjectQaPairs,
                 observationResultId,
-                detectedObjects));
+                detectedObjects,
+                contextSessionId));
       }
     }
 
@@ -535,6 +560,15 @@ public class ObservationReportPersistenceService {
       saveKeyConversations(report, context.keyConversations());
       saveFollowUpGuides(report, safeList(result.followUpGuides()));
       saveGuardianQuestions(report, safeList(result.guardianQuestions()));
+      // 875 §3·§4·§7·§7-1·§5·§9. 저장 메서드는 902 가 만들었지만 호출되지 않은 채였다 — 그래서
+      //   경향 해석·근거·보호자 가이드·위기 안내가 한 건도 저장된 적이 없다. 주제별 관찰은 카드가
+      //   저장된 뒤에 참조를 걸어야 하므로 반드시 이 순서다.
+      Map<Integer, ReportPublicInterpretation> savedCards =
+          savePublicInterpretations(report, result);
+      saveParentGuides(report, safeList(result.parentGuides()));
+      saveCrisisAlert(report, result.crisisAlert());
+      saveSubjects(report, context, result, savedCards);
+      saveReferences(report, safeList(result.ragReferences()));
 
       report.complete(draft.expertReviewRequired(), result.limitationsText(), now);
       Optional<HtpAssessment> htpAssessment =
@@ -661,6 +695,175 @@ public class ObservationReportPersistenceService {
     report.markDrawnItemsStored();
   }
 
+  /**
+   * 주제(집·나무·사람)별 관찰 묶음을 저장한다 (875 §5 / S15P11B209-960).
+   *
+   * <p><b>소유가 갈린 자리다.</b> 관찰 서술과 경향 해석 참조는 AI 가 보내고({@code subjectReports}), 완성 그림과 문답은 BE 가 채운다 —
+   * AI 는 그림 URL 을 만들 수 없고, 아이 발화를 LLM 에 되돌려 받으면 원문이 바뀌기 때문이다(S15P11B209-941). 그래서 두 출처를 주제 키로 합친다.
+   *
+   * <p><b>주제 목록의 기준은 BE 다.</b> 어떤 주제를 실제로 그렸는지는 서버가 알고, AI 는 서술을 붙일 뿐이다. AI 만 아는 주제가 오면 함께 담되(서술을
+   * 버리지 않는다) 서버가 아는 주제를 AI 응답 때문에 빠뜨리지는 않는다.
+   *
+   * <p><b>순서는 계약이다</b> — 875 §5 가 {@code HOUSE → TREE → PERSON}을 보장한다.
+   *
+   * @param report 묶음이 속한 리포트
+   * @param context 주제별 세션·문답을 담은 생성 맥락
+   * @param result AI 응답
+   * @param savedCards AI 응답 배열 인덱스를 Key 로 하는 저장된 경향 해석 카드
+   */
+  private void saveSubjects(
+      Report report,
+      ObservationGenerationContext context,
+      ObservationGenerationResult result,
+      Map<Integer, ReportPublicInterpretation> savedCards) {
+    Map<String, SubjectMergeEntry> merged = new LinkedHashMap<>();
+    for (ObservationGenerationContext.SubjectContext subject :
+        safeList(context.subjectContexts())) {
+      if (subject == null) {
+        continue;
+      }
+      merged
+          .computeIfAbsent(subjectKey(subject.drawingSubject()), key -> new SubjectMergeEntry())
+          .bindContext(subject);
+    }
+    for (ObservationGenerationResult.SubjectReportDraft draft : safeList(result.subjectReports())) {
+      if (draft == null) {
+        continue;
+      }
+      merged
+          .computeIfAbsent(subjectKey(draft.subjectType()), key -> new SubjectMergeEntry())
+          .bindDraft(draft);
+    }
+    if (merged.isEmpty()) {
+      return;
+    }
+
+    List<Map.Entry<String, SubjectMergeEntry>> ordered = new ArrayList<>(merged.entrySet());
+    ordered.sort(Comparator.comparingInt(entry -> subjectRank(entry.getKey())));
+
+    List<ReportSubject> entities = new ArrayList<>();
+    for (Map.Entry<String, SubjectMergeEntry> entry : ordered) {
+      SubjectMergeEntry value = entry.getValue();
+      // 그림도 서술도 문답도 없는 주제는 담지 않는다 — 화면에 빈 카드만 남는다(875 §10).
+      if (value.isEmpty()) {
+        continue;
+      }
+      ReportSubject subject =
+          ReportSubject.create(
+              report, entities.size(), emptyToNull(entry.getKey()), value.drawingSessionId);
+      for (String observation : value.visionObservations) {
+        if (observation != null && !observation.isBlank()) {
+          subject.addObservation(observation);
+        }
+      }
+      int representativeCount = 0;
+      for (ObservationGenerationContext.KeyConversationLine line : value.qaPairs) {
+        if (line == null || line.questionText() == null || line.questionText().isBlank()) {
+          continue;
+        }
+        boolean answered = line.answerText() != null && !line.answerText().isBlank();
+        // 대표 문답은 화면이 먼저 펼치는 최대 3개다(875 §6). 답하지 않은 문답을 대표로 올리지 않는다.
+        boolean representative = answered && representativeCount < MAX_REPRESENTATIVE_QA_PAIRS;
+        if (representative) {
+          representativeCount++;
+        }
+        subject.addQaPair(
+            line.questionText(),
+            line.answerText(),
+            answered ? ReportSubjectQaPair.STATE_ANSWERED : ReportSubjectQaPair.STATE_SKIPPED,
+            line.answerType(),
+            line.sttNeedsConfirmation(),
+            representative);
+      }
+      // 참조는 공개된 카드에만 건다. 제외·강등 카드는 보호자 응답 배열에 없으므로 참조가 가리킬 자리가 없다.
+      for (Integer ref : value.interpretationRefs) {
+        ReportPublicInterpretation card = ref == null ? null : savedCards.get(ref);
+        if (card != null
+            && card.getDisclosureState() == ReportInterpretationDisclosureState.PUBLISHED) {
+          subject.referenceInterpretation(card);
+        }
+      }
+      entities.add(subject);
+    }
+    subjectRepository.saveAll(entities);
+  }
+
+  /**
+   * 리포트가 참조한 전문 자료 출처를 저장한다 (875 §9, S15P11B209-614).
+   *
+   * <p>출처 표시는 라이선스 의무(KOGL-1)라 받은 것을 버리지 않는다. AI 는 링크를 보내지 않으므로 {@code url}은 항상 {@code null}이다.
+   *
+   * @param report 자료가 속한 리포트
+   * @param drafts AI 가 보낸 출처 목록
+   */
+  private void saveReferences(
+      Report report, List<ObservationGenerationResult.RagReferenceDraft> drafts) {
+    List<ReportReference> entities = new ArrayList<>();
+    Set<String> seenTitles = new LinkedHashSet<>();
+    for (ObservationGenerationResult.RagReferenceDraft draft : drafts) {
+      if (draft == null || draft.title() == null || draft.title().isBlank()) {
+        continue;
+      }
+      // 같은 자료의 여러 청크가 하나의 출처로 오므로 제목이 겹친다. 목록에 같은 줄을 두 번 싣지 않는다.
+      if (!seenTitles.add(draft.title())) {
+        continue;
+      }
+      entities.add(
+          ReportReference.create(
+              report,
+              entities.size(),
+              ColumnTextLimiter.fit(
+                  draft.sourceId(),
+                  ReportReference.SOURCE_ID_MAX_LENGTH,
+                  "report_references.source_id"),
+              ColumnTextLimiter.fit(
+                  draft.title(), ReportReference.TITLE_MAX_LENGTH, "report_references.title"),
+              null));
+    }
+    referenceRepository.saveAll(entities);
+  }
+
+  /** 주제별 관찰의 두 출처(BE 맥락·AI 응답)를 주제 키로 합치는 중간 값이다. */
+  private static final class SubjectMergeEntry {
+    private Long drawingSessionId;
+    private List<ObservationGenerationContext.KeyConversationLine> qaPairs = List.of();
+    private List<String> visionObservations = List.of();
+    private List<Integer> interpretationRefs = List.of();
+
+    private void bindContext(ObservationGenerationContext.SubjectContext subject) {
+      this.drawingSessionId = subject.drawingSessionId();
+      this.qaPairs = safeList(subject.qaPairs());
+    }
+
+    private void bindDraft(ObservationGenerationResult.SubjectReportDraft draft) {
+      this.visionObservations = safeList(draft.visionObservations());
+      this.interpretationRefs = safeList(draft.interpretationRefs());
+    }
+
+    private boolean isEmpty() {
+      return drawingSessionId == null && qaPairs.isEmpty() && visionObservations.isEmpty();
+    }
+  }
+
+  /** 주제 키를 정규화한다. 주제가 없는 활동(그림일기)은 빈 문자열 하나로 모인다. */
+  private static String subjectKey(String subjectType) {
+    if (subjectType == null || subjectType.isBlank()) {
+      return "";
+    }
+    String normalized = subjectType.trim().toUpperCase(Locale.ROOT);
+    return SUBJECT_ORDER.contains(normalized) ? normalized : "";
+  }
+
+  /** 875 §5 가 보장하는 노출 순서다. 주제가 없는 활동은 뒤로 보낸다. */
+  private static int subjectRank(String subjectKey) {
+    int rank = SUBJECT_ORDER.indexOf(subjectKey);
+    return rank < 0 ? SUBJECT_ORDER.size() : rank;
+  }
+
+  private static String emptyToNull(String value) {
+    return value == null || value.isEmpty() ? null : value;
+  }
+
   private static boolean isDisplayableDrawnItemName(String name) {
     return name != null
         && !name.isBlank()
@@ -678,12 +881,15 @@ public class ObservationReportPersistenceService {
    *
    * @param report 카드가 속한 리포트
    * @param result AI 응답
+   * @return AI 응답 배열 인덱스를 Key 로 하는 저장된 카드 Map 이다. 주제별 관찰의 {@code interpretationRefs}가 이 인덱스로 오므로
+   *     참조를 카드 행으로 바꾸려면 이 Map 이 필요하다 (S15P11B209-960)
    */
-  private void savePublicInterpretations(Report report, ObservationGenerationResult result) {
+  private Map<Integer, ReportPublicInterpretation> savePublicInterpretations(
+      Report report, ObservationGenerationResult result) {
     List<ObservationGenerationResult.PublicInterpretationDraft> cardDrafts =
         safeList(result.publicInterpretations());
     if (cardDrafts.isEmpty()) {
-      return;
+      return Map.of();
     }
     List<ObservationGenerationResult.EvidenceItemDraft> evidenceDrafts =
         safeList(result.evidenceItems());
@@ -741,6 +947,7 @@ public class ObservationReportPersistenceService {
     }
 
     interpretationRepository.saveAll(cards.values());
+    return cards;
   }
 
   /**
