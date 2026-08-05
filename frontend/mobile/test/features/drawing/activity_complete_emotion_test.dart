@@ -814,11 +814,11 @@ void main() {
           )
           .toList(),
       [
+        ('HAPPY', '기쁨'),
+        ('CALM', '편안'),
+        ('SAD', '슬픔'),
         ('SCARED', '불안'),
         ('ANGRY', '화남'),
-        ('SAD', '슬픔'),
-        ('CALM', '편안'),
-        ('HAPPY', '기쁨'),
       ],
     );
     for (final presentation in emotionChoicePresentations) {
