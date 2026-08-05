@@ -2,7 +2,11 @@ import type {
   AuthProviderId,
   AuthSession,
 } from "@/features/auth/domain/auth-models";
-import { ACCESS_TOKEN_STORAGE_KEY } from "@/lib/api/api-client";
+import {
+  ACCESS_TOKEN_STORAGE_KEY,
+  DEVICE_ID_STORAGE_KEY,
+  REFRESH_TOKEN_STORAGE_KEY,
+} from "@/lib/api/api-client";
 
 /**
  * 브라우저 로컬 세션 저장소.
@@ -12,8 +16,6 @@ import { ACCESS_TOKEN_STORAGE_KEY } from "@/lib/api/api-client";
  * 웹뷰와 달리 브라우저는 스스로 토큰을 재발급해야 하므로 리프레시 토큰과
  * 재발급/로그아웃에 필요한 deviceId도 함께 보관한다.
  */
-const REFRESH_TOKEN_STORAGE_KEY = "dodam.refreshToken";
-const DEVICE_ID_STORAGE_KEY = "dodam.deviceId";
 /**
  * 로그인에 사용한 소셜 제공자. 백엔드가 연결된 제공자를 내려주지 않아, 설정 화면의
  * "계정 연결" 표시를 위해 로그인 완료 시점에 클라이언트가 직접 보관한다.

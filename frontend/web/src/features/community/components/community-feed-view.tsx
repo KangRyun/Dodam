@@ -13,6 +13,12 @@ import type {
   CommunityPostCategory,
   CommunityPostSort,
 } from "@/features/community/domain/community-models";
+import { ApiClientError } from "@/lib/api/api-client";
+
+/** 인증 만료(401) 여부. 재발급까지 실패해 로그인이 필요한 상태다. */
+function isAuthError(error: unknown): boolean {
+  return error instanceof ApiClientError && error.status === 401;
+}
 
 export function CommunityFeedView({
   category,
@@ -84,16 +90,19 @@ export function CommunityFeedView({
 
       {isPending && <CommunityFeedStatus message="이야기를 불러오는 중이에요…" />}
 
-      {isError && (
-        <CommunityFeedStatus
-          message={
-            error instanceof Error
-              ? error.message
-              : "이야기를 불러오지 못했어요."
-          }
-          onRetry={() => void refetch()}
-        />
-      )}
+      {isError &&
+        (isAuthError(error) ? (
+          <CommunityFeedStatus
+            message="로그인이 필요해요. 다시 로그인해 주세요."
+            actionHref="/login"
+            actionLabel="로그인 하기"
+          />
+        ) : (
+          <CommunityFeedStatus
+            message="이야기를 불러오지 못했어요. 잠시 후 다시 시도해 주세요."
+            onRetry={() => void refetch()}
+          />
+        ))}
 
       {data && <CommunityFeed posts={data.posts} />}
     </CommunityShell>
@@ -103,13 +112,25 @@ export function CommunityFeedView({
 function CommunityFeedStatus({
   message,
   onRetry,
+  actionHref,
+  actionLabel,
 }: {
   message: string;
   onRetry?: () => void;
+  actionHref?: string;
+  actionLabel?: string;
 }) {
   return (
     <section className="community-feed-status" aria-live="polite">
       <p>{message}</p>
+      {actionHref && actionLabel && (
+        <Link
+          className="community-button community-button-primary"
+          href={actionHref}
+        >
+          {actionLabel}
+        </Link>
+      )}
       {onRetry && (
         <button
           type="button"
