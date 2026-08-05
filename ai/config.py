@@ -134,13 +134,6 @@ QUESTION_DESCRIPTION_MAX_CHARS = int(
     os.environ.get("QUESTION_DESCRIPTION_MAX_CHARS", "300")
 )
 
-# ⚠️ 임시(출시 전 제거: S15P11B209-689) — 안전 파이프라인 검증용 원문 디버그 로그 스위치.
-# 정확히 "true"일 때만 차단된 원문(아이 발화·질문)을 로그로 남긴다. 기본은 꺼짐(운영 유출 방지).
-# AI_INTERNAL_AUTH_DISABLED와 같은 '명시적 opt-in' 규약 — 배포 환경엔 이 변수를 절대 주입하지 않는다.
-SAFETY_DEBUG_LOG_RAW = (
-    os.environ.get("SAFETY_DEBUG_LOG_RAW", "").strip().lower() == "true"
-)
-
 # 탐지 진단 로그 상세도(S15P11B209-710). 정확히 "true"일 때만 라벨·신뢰도까지 남긴다.
 #   기본(꺼짐)은 개수·주제·warnings 요약만 남긴다 — 탐지 라벨은 아동 그림 내용을 서술하므로
 #   운영에서는 필요할 때만 켠다. 이미지 원본·경로·아이 발화는 어느 모드에서도 남기지 않는다.
