@@ -51,6 +51,24 @@ spec:
           args:
             - --character-set-server=utf8mb4
             - --collation-server=utf8mb4_unicode_ci
+            # 서버 기본 시간대를 KST 로 (S15P11B209-736 후속).
+            #
+            # 왜 필요한가: 736 이 JDBC URL 에 sessionVariables=time_zone='+09:00' 를 넣어
+            # **앱 커넥션**은 이미 KST 다. 하지만 세션 시간대를 지정하지 않고 붙는 경로
+            # (`mysql` CLI·백업 스크립트·수동 조회)는 서버 기본값(UTC)을 본다. 그래서 같은
+            # 행을 앱은 09:38, CLI 는 00:38 로 읽는다. 실제로 이것 때문에 2026-08-05 조사에서
+            # "알림이 조치 이후 생성됐는가"를 잘못 읽을 뻔했다.
+            #
+            # 왜 이름(Asia/Seoul)이 아니라 오프셋(+09:00)인가: 이름을 쓰려면 mysql 시간대
+            # 테이블(`mysql_tzinfo_to_sql`)이 적재돼 있어야 하는데 이 이미지엔 없다. 없는
+            # 이름을 주면 **서버가 기동하지 못한다.** 한국은 서머타임이 없어 고정 오프셋으로
+            # 충분하다.
+            #
+            # ⚠️ 이 인자는 기동 옵션이라 반영에 **MySQL 재시작**이 필요하고, mysql-0 은
+            #   단일 레플리카라 그동안 서비스 전체가 DB 를 잃는다. 그래서 즉시 반영은
+            #   무중단인 `SET GLOBAL time_zone='+09:00'` 로 하고, 이 줄은 **다음 재시작
+            #   이후에도 값이 유지되게** 하는 몫이다(런타임 수정만 하면 재시작에 되돌아간다).
+            - --default-time-zone=+09:00
           env:
             # 값은 Secret 에서만 온다. 이 파일에 비밀은 한 글자도 없다.
             - { name: MYSQL_ROOT_PASSWORD, valueFrom: { secretKeyRef: { name: dodam-secrets, key: MYSQL_ROOT_PASSWORD } } }

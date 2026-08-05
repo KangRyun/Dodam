@@ -169,7 +169,8 @@ public class MockObservationReportGenerationService {
         context.selectedEmotions(),
         context.expressedEmotionText(),
         context.representativeUtterance(),
-        toSubjectSummaries(context));
+        toSubjectSummaries(context),
+        toSelectedEmotionRefs(context));
   }
 
   /**
@@ -191,8 +192,39 @@ public class MockObservationReportGenerationService {
                         .map(
                             line ->
                                 new ObservationGenerationRequest.SubjectQaPair(
-                                    line.questionText(), line.answerText(), line.answerType()))
+                                    line.questionText(),
+                                    line.answerText(),
+                                    line.answerType(),
+                                    line.questionMessageId(),
+                                    line.answerMessageId(),
+                                    line.sttNeedsConfirmation()))
+                        .toList(),
+                    subject.observationResultId(),
+                    subject.detectedObjects().stream()
+                        .map(
+                            detected ->
+                                new ObservationGenerationRequest.SubjectDetectedObject(
+                                    detected.detectedObjectId(), detected.objectCode()))
                         .toList()))
+        .toList();
+  }
+
+  /**
+   * 선택 감정을 근거로 참조할 수 있는 형태로 옮긴다 (S15P11B209-906).
+   *
+   * <p>코드 목록({@code selectedEmotions})은 프롬프트 재료로 그대로 남기고, 근거 참조용 행 식별자를 함께 보낸다. AI 는 서버가 발급한 식별자만
+   * {@code sourceRef} 로 쓰므로(조합키 금지) 이 값이 없으면 감정 근거가 공개 게이트를 통과할 수 없다.
+   *
+   * @param context 리포트 생성 맥락
+   * @return 행 식별자와 감정 코드 쌍 목록
+   */
+  private List<ObservationGenerationRequest.SelectedEmotionRef> toSelectedEmotionRefs(
+      ObservationGenerationContext context) {
+    return context.selectedEmotionRefs().stream()
+        .map(
+            emotion ->
+                new ObservationGenerationRequest.SelectedEmotionRef(
+                    emotion.emotionId(), emotion.emotionCode()))
         .toList();
   }
 

@@ -2045,6 +2045,129 @@ class ParentGuideAssemblyTest(unittest.TestCase):
         self.assertEqual(result.parent_guides[0].items, ["무엇을 하고 싶은지 물어보세요."])
 
 
+class DrawnItemsAssemblyTest(unittest.TestCase):
+    """'그린 것' — 관찰 서술에 실제로 있는 이름만 남는다 (S15P11B209-911).
+
+    보호자 리포트의 그 줄은 지금까지 BE가 탐지 라벨(YOLO)을 그대로 나열해 채웠다. 탐지
+    임계값은 0.20이고 그 목록엔 신뢰도 필터가 없어 오탐이 확정 사실로 나갔다.
+    여기서 검증하는 것은 "프롬프트에 부탁하는 게 아니라 코드가 서술 원문과 대조해 막는다"다.
+    """
+
+    def _generate(self, request=None, **overrides):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(
+            _llm_json(**overrides)
+        )
+        with mock.patch.object(
+            report_client, "retrieve", return_value=[]
+        ), mock.patch.object(report_client, "get_client", return_value=fake_client):
+            return report_client.generate(
+                request if request is not None else _request_with_evidence_refs(),
+                model="m",
+            )
+
+    @staticmethod
+    def _request(*subjects):
+        """(drawingSubject, 관찰 서술) 쌍으로 요청을 만든다."""
+        return _request_with_evidence_refs(
+            subject_summaries=[
+                contracts.SubjectSummary(
+                    drawing_subject=subject, drawing_description=description
+                )
+                for subject, description in subjects
+            ]
+        )
+
+    def test_name_present_in_description_is_kept(self):
+        result = self._generate(drawnItems=[{"drawingSubject": None, "name": "집"}])
+        self.assertEqual(
+            [(i.drawing_subject, i.name) for i in result.drawn_items], [(None, "집")]
+        )
+
+    def test_name_absent_from_description_is_dropped(self):
+        """탐지 코드 줄에만 있는 이름은 근거가 아니다.
+
+        기본 요청의 탐지 객체는 HOUSE 하나이고 서술은 '집이 가운데에 크게 그려져 있어요.'다.
+        모델이 서술에 없는 대상을 덧붙이면 여기서 사라져야 한다.
+        """
+        result = self._generate(
+            drawnItems=[
+                {"drawingSubject": None, "name": "울타리"},
+                {"drawingSubject": None, "name": "집"},
+            ]
+        )
+        self.assertEqual([i.name for i in result.drawn_items], ["집"])
+
+    def test_unknown_subject_is_dropped(self):
+        """그리지 않은 그림의 항목 — 요청에 없는 주제는 대조할 서술이 없다."""
+        result = self._generate(drawnItems=[{"drawingSubject": "TREE", "name": "집"}])
+        self.assertEqual(result.drawn_items, [])
+
+    def test_duplicate_name_in_same_subject_is_collapsed(self):
+        result = self._generate(
+            drawnItems=[
+                {"drawingSubject": None, "name": "집"},
+                {"drawingSubject": None, "name": "집"},
+            ]
+        )
+        self.assertEqual([i.name for i in result.drawn_items], ["집"])
+
+    def test_name_over_length_limit_is_dropped(self):
+        """상한을 넘으면 BE 컬럼에서 조용히 잘려 이름이 중간에서 끊긴다.
+
+        서술 원문에 그대로 있는 문구라도 길면 이름이 아니다 — 서술 한 구절을 옮긴 것이다.
+        """
+        long_name = "화면 가운데에 빨간 지붕을 얹은 커다란 이층집"
+        self.assertGreater(len(long_name), report_client._DRAWN_ITEM_NAME_MAX)
+        request = self._request((None, f"{long_name}이 서 있어요."))
+        result = self._generate(
+            request, drawnItems=[{"drawingSubject": None, "name": long_name}]
+        )
+        self.assertEqual(result.drawn_items, [])
+
+    def test_per_subject_count_is_capped(self):
+        """서술은 2~4문장이라, 그보다 많으면 서술이 아니라 탐지 코드 목록을 옮긴 것이다."""
+        request = self._request((None, "집과 나무와 해와 구름과 새가 함께 그려져 있어요."))
+        result = self._generate(
+            request,
+            drawnItems=[
+                {"drawingSubject": None, "name": name}
+                for name in ("집", "나무", "해", "구름", "새")
+            ],
+        )
+        self.assertEqual(
+            [i.name for i in result.drawn_items], ["집", "나무", "해", "구름"]
+        )
+
+    def test_subject_order_follows_the_request(self):
+        """BE가 이름을 쉼표로 이어 한 줄로 보이므로 순서가 곧 문장이다."""
+        request = self._request(
+            ("HOUSE", "집이 있어요."),
+            ("TREE", "나무가 있어요."),
+            ("PERSON", "사람이 있어요."),
+        )
+        result = self._generate(
+            request,
+            drawnItems=[
+                {"drawingSubject": "PERSON", "name": "사람"},
+                {"drawingSubject": "HOUSE", "name": "집"},
+                {"drawingSubject": "TREE", "name": "나무"},
+            ],
+        )
+        self.assertEqual([i.name for i in result.drawn_items], ["집", "나무", "사람"])
+
+    def test_missing_field_is_empty_list(self):
+        """구 BE·FE 동작 불변 — 모델이 안 주면 빈 목록이고 그것이 정상이다."""
+        self.assertEqual(self._generate().drawn_items, [])
+
+    def test_prompt_states_the_description_is_the_only_source(self):
+        """문구가 빠지면 모델이 탐지 코드 줄을 옮겨 적는다(코드가 막지만 매번 버려진다)."""
+        text = prompts_registry.load("report_common")
+        self.assertIn("'탐지된 요소 코드' 줄은 이 목록의 근거가 **아니다.**", text)
+        # 908에서 확인: 새 필드는 스키마 예시에 있어야 채워진다(지시문보다 예시가 세다).
+        self.assertIn('"drawnItems"', text.split("출력 형식:", 1)[1])
+
+
 class CrisisAlertOwnershipTest(unittest.TestCase):
     """위기 안내는 LLM이 만들지 않는다 — 889가 검토된 템플릿으로 채운다 (S15P11B209-887)."""
 

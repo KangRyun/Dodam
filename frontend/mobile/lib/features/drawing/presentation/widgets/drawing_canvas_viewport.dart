@@ -1,5 +1,3 @@
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 abstract final class DrawingCanvasGeometry {
@@ -45,41 +43,26 @@ final class DrawingCanvasViewport extends StatelessWidget {
   Widget build(BuildContext context) => LayoutBuilder(
     builder: (context, constraints) {
       final availableSize = constraints.biggest;
-      final documentSize = DrawingCanvasGeometry.documentSize;
-      final scale = math.min(
-        availableSize.width / documentSize.width,
-        availableSize.height / documentSize.height,
-      );
-      final paintedSize = documentSize * scale;
+      // 종이 전체가 그릴 수 있는 자리여야 한다. 문서를 고정 크기로 두고 가운데
+      // 맞추면 남는 가장자리가 칠해지지 않는 흰 자리로 남는다.
+      final documentSize = availableSize.isEmpty
+          ? DrawingCanvasGeometry.documentSize
+          : availableSize;
       final metrics = DrawingViewportMetrics(
         availableSize: availableSize,
         documentSize: documentSize,
-        scale: scale,
-        origin: Offset(
-          (availableSize.width - paintedSize.width) / 2,
-          (availableSize.height - paintedSize.height) / 2,
-        ),
+        scale: 1,
+        origin: Offset.zero,
       );
 
       return Stack(
         fit: StackFit.expand,
         children: [
-          Center(
-            child: SizedBox.fromSize(
-              size: availableSize,
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: KeyedSubtree(
-                  key: const ValueKey('drawing-document-marker'),
-                  child: RepaintBoundary(
-                    key: repaintBoundaryKey,
-                    child: SizedBox.fromSize(
-                      size: DrawingCanvasGeometry.documentSize,
-                      child: canvas,
-                    ),
-                  ),
-                ),
-              ),
+          KeyedSubtree(
+            key: const ValueKey('drawing-document-marker'),
+            child: RepaintBoundary(
+              key: repaintBoundaryKey,
+              child: SizedBox.fromSize(size: documentSize, child: canvas),
             ),
           ),
           overlayBuilder(context, metrics),

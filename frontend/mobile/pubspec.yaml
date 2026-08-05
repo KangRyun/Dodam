@@ -122,6 +122,14 @@ flutter:
     - assets/canvas/swatches/
     - assets/canvas/tools/
     - assets/canvas/tools/masks/
+    - assets/canvas/tools/red/
+    - assets/canvas/tools/orange/
+    - assets/canvas/tools/yellow/
+    - assets/canvas/tools/green/
+    - assets/canvas/tools/teal/
+    - assets/canvas/tools/blue/
+    - assets/canvas/tools/purple/
+    - assets/canvas/tools/charcoal/
     - assets/canvas/brushes/
 
   fonts:

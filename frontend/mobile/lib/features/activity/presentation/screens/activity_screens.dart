@@ -1649,7 +1649,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     if (completed) {
       _syncCoordinator.recordStroke(
         stroke,
-        DrawingCanvasGeometry.documentSize,
+        _documentSize,
       );
       _endDrawingInput();
     }
@@ -1676,7 +1676,7 @@ class _DrawingScreenState extends State<DrawingScreen>
         if (change.wireStroke case final wireStroke?) {
           _syncCoordinator.recordStroke(
             wireStroke,
-            DrawingCanvasGeometry.documentSize,
+            _documentSize,
           );
         }
       }
@@ -1740,7 +1740,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 터치도 그리는 동안에는 커서를 보여 준다. 손을 떼고 나면 [_endStroke] 가
   /// 숨기므로 손가락이 없는데 커서만 남는 일은 없다.
   void _updateCursor(PointerEvent event) {
-    final documentBounds = Offset.zero & DrawingCanvasGeometry.documentSize;
+    final documentBounds = Offset.zero & _documentSize;
     if (!documentBounds.contains(event.localPosition)) {
       _cursorController.hide();
       return;
@@ -1877,7 +1877,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     if (canvasSize != null) {
       _syncCoordinator.recordStroke(
         stroke,
-        DrawingCanvasGeometry.documentSize,
+        _documentSize,
       );
       _objectDetectionController?.onDrawingInputEnded();
     }
@@ -2283,6 +2283,14 @@ class _DrawingScreenState extends State<DrawingScreen>
     _pendingCompletionMetadata = null;
   }
 
+  /// 지금 그리고 있는 종이의 크기다.
+  ///
+  /// 종이는 기기·방향마다 크기가 달라서 획 좌표를 이 크기로 나눠 저장한다.
+  /// 아직 배치 전이라 크기를 모를 때만 기준 크기를 쓴다.
+  Size get _documentSize =>
+      _canvasBoundaryKey.currentContext?.size ??
+      DrawingCanvasGeometry.documentSize;
+
   /// 아직 확정되지 않아 transient 층에만 그려야 하는 획이다. 확정된 획은
   /// [DrawingDocumentController.actions] 로 이미 한 번 그려진다.
   List<DrawingStroke> get _transientStrokes =>
@@ -2504,8 +2512,15 @@ class _DrawingScreenState extends State<DrawingScreen>
                     _questionController?.question != null ||
                     _questionController?.error != null ||
                     _questionDisplayController.visibleQuestion != null;
+                // 대화가 끝나면 패널이 보여 줄 것이 없다. 마지막 질문이 남아
+                // 있다고 그대로 두면 빈 흰 상자가 캔버스를 가린다.
+                final conversationOver =
+                    _questionController?.status ==
+                    AiQuestionStatus.conversationComplete;
                 final hasStageChrome =
-                    (hasQuestionToShow && !bubbleShowsCurrentQuestion) ||
+                    (hasQuestionToShow &&
+                        !bubbleShowsCurrentQuestion &&
+                        !conversationOver) ||
                     _conversationStartError != null ||
                     _htpAdvanceError != null;
                 final toolbar = DrawingToolbar(
@@ -3051,15 +3066,21 @@ class _DrawingSidePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(AppSpacing.lg),
-    decoration: BoxDecoration(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(AppRadius.lg),
-    ),
+    // 도구를 담지 않을 때는 안내 카드만 띄운다. 흰 판을 함께 깔면 보여 줄 것이
+    // 한 줄뿐이어도 종이를 넓게 가린다.
+    decoration: showToolControls
+        ? BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+          )
+        : null,
     child: SingleChildScrollView(
       key: const ValueKey('drawing-tool-panel-scroll'),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: showToolControls
+            ? CrossAxisAlignment.stretch
+            : CrossAxisAlignment.end,
         children: [
           // 도구를 툴바로 옮긴 뒤에는 이 머리말이 가리키는 것이 없다. 질문·오류만
           // 담은 패널 위에 남겨 두면 빈 인사말만 캔버스에 떠 있게 된다.

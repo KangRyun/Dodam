@@ -65,10 +65,15 @@ final class DrawingToolbar extends StatelessWidget {
               height: 56,
               child: _ToolbarChrome(
                 deviceClass: deviceClass,
-                child: Row(
-                  key: const ValueKey('drawing-toolbar-primary-row'),
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: primaryActions.take(6).toList(growable: false),
+                // 좁은 화면에서는 도구가 한 줄에 다 안 들어간다. 넘치면 잘리는
+                // 대신 옆으로 밀어 볼 수 있게 한다.
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    key: const ValueKey('drawing-toolbar-primary-row'),
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: primaryActions.take(7).toList(growable: false),
+                  ),
                 ),
               ),
             ),
@@ -78,7 +83,7 @@ final class DrawingToolbar extends StatelessWidget {
                 deviceClass: deviceClass,
                 child: Row(
                   children: [
-                    ...primaryActions.skip(6),
+                    ...primaryActions.skip(7),
                     Expanded(child: _secondaryControls()),
                     _ToolbarSaveStatus(
                       status: saveStatus,
@@ -187,6 +192,7 @@ final class DrawingToolbar extends StatelessWidget {
       artwork: CanvasToolArtwork.fill,
       label: '채우기',
     ),
+    _paletteButton(),
   ];
 
   Widget _instrumentButton({
@@ -329,19 +335,21 @@ final class DrawingToolbar extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 4),
-        CompositedTransformTarget(
-          link: paletteAnchorLink,
-          child: DrawingToolButton(
-            key: const ValueKey('drawing-palette-button'),
-            artwork: CanvasToolArtwork.palette,
-            pointColor: toolState.color,
-            selected: false,
-            semanticLabel: '색상 팔레트 버튼',
-            tooltip: '색상 팔레트',
-            onPressed: onOpenPalette,
-          ),
-        ),
       ],
+    ),
+  );
+
+  /// 팔레트는 색을 고르는 버튼이라 도구 줄 끝, 색 견본 바로 앞에 둔다.
+  Widget _paletteButton() => CompositedTransformTarget(
+    link: paletteAnchorLink,
+    child: DrawingToolButton(
+      key: const ValueKey('drawing-palette-button'),
+      artwork: CanvasToolArtwork.palette,
+      pointColor: toolState.color,
+      selected: false,
+      semanticLabel: '색상 팔레트 버튼',
+      tooltip: '색상 팔레트',
+      onPressed: onOpenPalette,
     ),
   );
 
@@ -509,6 +517,18 @@ final class _ToolbarChrome extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
+        // 테두리 원화 안쪽은 비어 있다. 여기에 면을 깔지 않으면 바깥 배경이
+        // 그대로 비쳐 툴바가 배경과 한 덩어리로 보인다.
+        Padding(
+          padding: const EdgeInsets.all(_toolbarBorderInset),
+          child: DecoratedBox(
+            key: const ValueKey('drawing-toolbar-surface'),
+            decoration: BoxDecoration(
+              color: AppColors.canvasToolbarSurface,
+              borderRadius: BorderRadius.circular(tablet ? 14 : 10),
+            ),
+          ),
+        ),
         IgnorePointer(
           child: Image.asset(
             tablet
@@ -602,14 +622,14 @@ final class _QuickColorButtonState extends State<_QuickColorButton> {
                             key: ValueKey(
                               'drawing-quick-color-selection-ring-${widget.index}',
                             ),
-                            size: const Size.square(36),
+                            size: const Size.square(42),
                             painter: const _CrayonSelectionRingPainter(),
                           ),
                         SizedBox.square(
                           key: ValueKey(
                             'drawing-quick-color-swatch-${widget.index}',
                           ),
-                          dimension: 28,
+                          dimension: 34,
                           child: Image.asset(
                             widget.assetPath,
                             fit: BoxFit.contain,
@@ -773,3 +793,7 @@ final class _ToolbarAssetActionState extends State<_ToolbarAssetAction> {
     );
   }
 }
+
+/// 툴바 테두리 선이 원화 가장자리에서 안쪽으로 들어간 만큼이다. 면을 이만큼
+/// 비워야 색이 선 밖으로 새지 않는다.
+const double _toolbarBorderInset = 5;

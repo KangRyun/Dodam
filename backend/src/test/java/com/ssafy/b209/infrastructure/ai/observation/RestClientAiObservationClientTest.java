@@ -147,6 +147,7 @@ class RestClientAiObservationClientTest {
             List.of("HAPPY"),
             null,
             null,
+            List.of(),
             List.of());
 
     assertThatThrownBy(() -> client.generate(intermediate))
@@ -198,6 +199,7 @@ class RestClientAiObservationClientTest {
         List.of("HAPPY"),
         "행복했어요",
         null,
+        List.of(),
         List.of());
   }
 

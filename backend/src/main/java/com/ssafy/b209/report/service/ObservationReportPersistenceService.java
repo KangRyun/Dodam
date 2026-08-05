@@ -4,7 +4,6 @@ import com.ssafy.b209.analysis.domain.AnalysisConversationSummary;
 import com.ssafy.b209.analysis.domain.AnalysisObservationResult;
 import com.ssafy.b209.analysis.domain.ConversationEmotionSource;
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
-import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
 import com.ssafy.b209.analysis.domain.ObservationReviewStatus;
 import com.ssafy.b209.analysis.repository.AnalysisConversationSummaryRepository;
 import com.ssafy.b209.analysis.repository.AnalysisObservationResultRepository;
@@ -244,7 +243,8 @@ public class ObservationReportPersistenceService {
                   source.getQuestionText(),
                   source.getAnswerMessageId(),
                   source.getAnswerText(),
-                  source.getAnswerType());
+                  source.getAnswerType(),
+                  source.getAnswerNeedsGuardianConfirmation());
           subjectQaPairs.add(line);
           if (keyConversations.size() < MAX_KEY_CONVERSATIONS) {
             keyConversations.add(line);
@@ -257,12 +257,22 @@ public class ObservationReportPersistenceService {
           observationResultRepository.findLatestByDrawingSessionId(contextSessionId).orElse(null);
       String drawingDescription =
           subjectObservation == null ? null : subjectObservation.getOverallSummary();
-      List<String> detectedObjectCodes =
+      // 코드만 뽑아 버리면 AI 가 근거를 가리킬 때 조합키를 조립할 수밖에 없다(계약 §4에서 금지).
+      // 같은 재료를 행 식별자와 함께 담아 참조 가능한 형태로 보낸다 (S15P11B209-906).
+      List<ObservationGenerationContext.DetectedObjectRef> detectedObjects =
           subjectObservation == null
               ? List.of()
               : subjectObservation.getAnalysis().getDetections().stream()
-                  .map(DrawingDetectedObject::getLabel)
+                  .map(
+                      detection ->
+                          new ObservationGenerationContext.DetectedObjectRef(
+                              detection.getId(), detection.getLabel()))
                   .toList();
+      List<String> detectedObjectCodes =
+          detectedObjects.stream()
+              .map(ObservationGenerationContext.DetectedObjectRef::objectCode)
+              .toList();
+      Long observationResultId = subjectObservation == null ? null : subjectObservation.getId();
       // 서술·코드·문답이 전부 비면 담지 않는다 — 빈 항목은 AI 프롬프트에 노이즈만 더한다.
       if (drawingDescription != null
           || !detectedObjectCodes.isEmpty()
@@ -272,7 +282,9 @@ public class ObservationReportPersistenceService {
                 contextSession.drawingSubject(),
                 drawingDescription,
                 detectedObjectCodes,
-                subjectQaPairs));
+                subjectQaPairs,
+                observationResultId,
+                detectedObjects));
       }
     }
 
@@ -283,8 +295,17 @@ public class ObservationReportPersistenceService {
             : emotionRepository
                 .findByDrawingSessionIdInOrderByDrawingSessionIdAscSelectionOrderAscIdAsc(
                     contextSessionIds);
+    List<ObservationGenerationContext.SelectedEmotionRef> selectedEmotionRefs =
+        emotionSources.stream()
+            .map(
+                emotion ->
+                    new ObservationGenerationContext.SelectedEmotionRef(
+                        emotion.getId(), emotion.getEmotionCode().name()))
+            .toList();
     List<String> selectedEmotions =
-        emotionSources.stream().map(DrawingSessionEmotion::getEmotionCode).map(Enum::name).toList();
+        selectedEmotionRefs.stream()
+            .map(ObservationGenerationContext.SelectedEmotionRef::emotionCode)
+            .toList();
 
     return Optional.of(
         new ObservationGenerationContext(
@@ -301,6 +322,7 @@ public class ObservationReportPersistenceService {
             expressedEmotionText,
             keyConversations,
             subjectContexts,
+            selectedEmotionRefs,
             contextSessionIds));
   }
 

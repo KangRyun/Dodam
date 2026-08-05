@@ -3,17 +3,22 @@ import 'dart:ui' as ui;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+/// 선택 색을 따라가는 도구는 색마다 그림이 따로 있다(S15P11B209-806).
+const _toolColors = <String>[
+  'red',
+  'orange',
+  'yellow',
+  'green',
+  'teal',
+  'blue',
+  'purple',
+  'charcoal',
+];
+const _tintedTools = <String>['crayon', 'pencil', 'brush', 'fill'];
+
 const _assetPaths = <String>[
-  'assets/canvas/tools/brush_base.png',
-  'assets/canvas/tools/crayon_base.png',
   'assets/canvas/tools/eraser_base.png',
-  'assets/canvas/tools/fill_base.png',
   'assets/canvas/tools/palette_base.png',
-  'assets/canvas/tools/pencil_base.png',
-  'assets/canvas/tools/masks/brush_point.png',
-  'assets/canvas/tools/masks/crayon_point.png',
-  'assets/canvas/tools/masks/fill_point.png',
-  'assets/canvas/tools/masks/pencil_point.png',
   'assets/canvas/swatches/red.png',
   'assets/canvas/swatches/orange.png',
   'assets/canvas/swatches/yellow.png',
@@ -80,12 +85,23 @@ void main() {
         await rootBundle.load(path);
       }
 
+      // 선택색 8종 x 도구 4종이 모두 있어야 색을 바꿔도 그림이 빠지지 않는다.
+      for (final color in _toolColors) {
+        for (final tool in _tintedTools) {
+          final path = 'assets/canvas/tools/$color/$tool.png';
+          final image = await _decodeAsset(tester, path);
+          expect(image.width, 96, reason: path);
+          expect(image.height, 96, reason: path);
+          image.dispose();
+        }
+      }
+
       for (final path in _assetPaths.where(
         (path) => path.contains('/tools/') && path.endsWith('.png'),
       )) {
         final image = await _decodeAsset(tester, path);
-        expect(image.width, 256, reason: path);
-        expect(image.height, 256, reason: path);
+        expect(image.width, 96, reason: path);
+        expect(image.height, 96, reason: path);
         image.dispose();
       }
 

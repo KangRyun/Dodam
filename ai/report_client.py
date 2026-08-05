@@ -840,6 +840,80 @@ def _parent_guides(data: dict) -> list[contracts.ReportParentGuide]:
     return guides
 
 
+# '그린 것' 이름 길이 상한 (S15P11B209-911). 화면에서 쉼표로 이어 붙는 짧은 명사구 자리이고,
+#   BE 컬럼 폭을 넘기면 조용히 잘려 이름이 중간에서 끊긴다.
+_DRAWN_ITEM_NAME_MAX = 20
+# 주제 하나당 상한. 관찰 서술은 2~4문장이라 그보다 많이 나오면 서술이 아니라 탐지 코드 목록을
+#   옮겨 적은 것이다(그쪽은 이 목록의 근거가 아니다).
+_DRAWN_ITEMS_PER_SUBJECT_MAX = 4
+
+
+def _drawn_items(
+    data: dict, req: contracts.ObservationGenerationRequest
+) -> list[contracts.DrawnItem]:
+    """'그린 것' 목록 — VLM 관찰 서술에 실제로 등장한 표현만 남긴다 (S15P11B209-911).
+
+    보호자 리포트의 '그린 것' 줄은 지금까지 BE가 탐지 라벨(YOLO)을 그대로 나열해 채웠다.
+    탐지 임계값은 0.20이고 그 목록엔 신뢰도 필터가 없어, 겨우 통과한 오탐 라벨이 보호자에게
+    확정 사실로 나갔다. 이 목록이 그 자리를 대신한다(BE 배선은 S15P11B209-912).
+
+    ⚠️ 프롬프트에 맡기지 않고 **코드가 서술 원문과 대조**한다(886의 식별자 대조와 같은 결).
+       서술에 없는 이름은 버린다 — 모델이 '탐지된 요소 코드' 줄을 옮겨 적어도 통과하지 못한다.
+       "쓰지 마"라고 부탁하는 것보다 통과시키지 않는 편이 확실하다.
+       대조는 부분 문자열 포함이다. 한국어는 조사가 붙어 오므로("집이"·"문은") 어절 경계로
+       맞출 수 없고, 그래서 짧은 이름이 다른 낱말의 조각으로도 통과할 수 있다("창문"만
+       적힌 서술에서 "문"). 막는 대상은 **없는 대상을 지어내는 것**이라 이 느슨함은 감수한다 —
+       조각 이름은 오분류일 뿐이고, 서술에 아예 없는 대상은 여기서 걸린다.
+
+    주제 순서는 요청의 subject_summaries 순서를 따른다 — BE가 이 이름들을 쉼표로 이어 한 줄로
+    보이므로 순서가 곧 문장이다.
+
+    subject_summaries 가 없는 레거시 draft 경로(drawing_description 인자)는 대조할 원문이
+    _assemble 에 없어 빈 목록이 된다. 운영 경로는 항상 주제별 블록으로 온다.
+    """
+    descriptions = {
+        summary.drawing_subject: summary.drawing_description or ""
+        for summary in req.subject_summaries
+    }
+    subject_order = {
+        summary.drawing_subject: index
+        for index, summary in enumerate(req.subject_summaries)
+    }
+    items: list[contracts.DrawnItem] = []
+    seen: set[tuple[str | None, str]] = set()
+    counts: dict[str | None, int] = {}
+    dropped = 0
+    for raw in data.get("drawnItems") or []:
+        if not isinstance(raw, dict):
+            dropped += 1
+            continue
+        name = str(raw.get("name", "")).strip()
+        subject = str(raw.get("drawingSubject") or "").strip().upper() or None
+        # 요청에 없는 주제는 그리지 않은 그림이다. 서술이 빈 주제는 대조할 원문이 없다.
+        description = descriptions.get(subject)
+        if not name or len(name) > _DRAWN_ITEM_NAME_MAX or not description:
+            dropped += 1
+            continue
+        if name not in description:
+            dropped += 1
+            continue
+        if (subject, name) in seen:
+            continue
+        if counts.get(subject, 0) >= _DRAWN_ITEMS_PER_SUBJECT_MAX:
+            dropped += 1
+            continue
+        seen.add((subject, name))
+        counts[subject] = counts.get(subject, 0) + 1
+        items.append(contracts.DrawnItem(drawing_subject=subject, name=name))
+    if dropped:
+        # ⚠️ 이름 값은 남기지 않는다 — 서술에 없던 값이 로그에 쌓일 이유가 없다.
+        logger.info("'그린 것' 항목 %d건 제외 — 관찰 서술에 없는 이름·초과분", dropped)
+    # sorted 는 안정 정렬이라 주제 안의 모델 출력 순서는 그대로 유지된다.
+    return sorted(
+        items, key=lambda item: subject_order.get(item.drawing_subject, len(subject_order))
+    )
+
+
 def _generation_version(is_htp: bool) -> str:
     """리포트 재현성 버전 태그 — 프롬프트·파이프라인 버전을 함께 기록한다(S15P11B209-602).
 
@@ -1004,6 +1078,8 @@ def _assemble(
         public_interpretations=interpretations,
         evidence_items=evidence_items,
         parent_guides=parent_guides,
+        # '그린 것'(S15P11B209-911). 서술 원문과 대조해 통과한 이름만 실린다.
+        drawn_items=_drawn_items(data, req),
         # 위기 안내는 S15P11B209-889이 채운다 — LLM 결과에서 만들지 않는다.
         crisis_alert=None,
     )

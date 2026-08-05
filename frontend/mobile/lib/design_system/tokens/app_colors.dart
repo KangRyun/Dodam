@@ -53,6 +53,10 @@ abstract final class AppColors {
   static const Color canvasPrimaryPressed = Color(0xFFE5C84F);
   static const Color canvasInk = Color(0xFF3A3832);
   static const Color canvasWarm = Color(0xFFFFFDF5);
+
+  /// 도구 툴바가 놓이는 면이다. 테두리 원화 안쪽은 비어 있어 이 색을 깔지
+  /// 않으면 바깥 배경이 그대로 비친다.
+  static const Color canvasToolbarSurface = Color(0xFFFBF5E8);
   static const Color canvasBorder = Color(0xFFE5DFC8);
   static const Color canvasBorderStrong = Color(0xFFC9BF99);
 
@@ -75,8 +79,20 @@ abstract final class AppColors {
   static const Color canvasSwatchPurple = Color(0xFF7650AD);
   static const Color canvasSwatchCharcoal = Color(0xFF3A3832);
 
+  /// 스케치북·툴바 테두리를 그리는 크레용 색이다.
+  static const Color canvasFrameInk = Color(0xFF67655B);
+
+  /// 스케치북 위쪽 제본 띠 색이다. 스프링이 이 띠를 물고 있다.
+  static const Color canvasBindingBand = Color(0xFFF4C64C);
+
+  /// 제본 띠를 감는 스프링 철사 색이다.
+  static const Color canvasBindingWire = Color(0xFFFDF8EC);
+
   /// 캔버스 화면의 바깥 배경과 스케치북이 놓이는 면이다.
-  static const Color canvasBackdrop = Color(0xFFE6E2D8);
+  ///
+  /// 배경은 앱 포인트 옐로를 옅게 푼 톤이다. 흰 종이와 대비를 두면서도 아이
+  /// 화면답게 따뜻하다.
+  static const Color canvasBackdrop = Color(0xFFFCEEC4);
   static const Color canvasStage = Color(0xFFF5F1E6);
 
   static const Color drawingCharcoal = canvasSwatchCharcoal;
