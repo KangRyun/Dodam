@@ -111,7 +111,9 @@ class DatabaseMigrationIntegrationTest {
     assertThat(characterLengthOf("report_drawn_items", "name")).isEqualTo(100);
     assertThat(indexExists("report_drawn_items", "uk_report_drawn_items_report_order", true))
         .isTrue();
-    assertThat(foreignKeyDeleteRuleIs("report_drawn_items", "fk_report_drawn_items_report_id", "CASCADE"))
+    assertThat(
+            foreignKeyDeleteRuleIs(
+                "report_drawn_items", "fk_report_drawn_items_report_id", "CASCADE"))
         .isTrue();
     for (String subject : new String[] {"HOUSE", "TREE", "PERSON"}) {
       assertThat(

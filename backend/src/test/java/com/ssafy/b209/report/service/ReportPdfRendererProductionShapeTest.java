@@ -57,6 +57,7 @@ class ReportPdfRendererProductionShapeTest {
             null,
             null,
             null,
+            null,
             List.of(),
             List.of(),
             ReportExpertReviewResponse.notRequested(),
@@ -99,6 +100,8 @@ class ReportPdfRendererProductionShapeTest {
             List.of(
                 new ReportUtteranceResponse(698L, "이거 달 아니고 피자인데", "STT", false),
                 new ReportUtteranceResponse(700L, "아 피자는 빨간색이니까 빨간색으로 그렸어", "STT", false))),
+        // 운영 report 54 는 검토를 통과한 관찰 특징이 없어 빈 목록이다.
+        List.of(),
         new ReportActivityFactsResponse(
             List.of("달", "달", "달", "정원", "잔디"),
             null,

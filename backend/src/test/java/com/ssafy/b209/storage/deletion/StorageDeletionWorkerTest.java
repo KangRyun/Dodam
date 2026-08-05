@@ -6,10 +6,10 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.BDDMockito.then;
 import static org.mockito.BDDMockito.willAnswer;
 import static org.mockito.BDDMockito.willThrow;
 import static org.mockito.Mockito.never;
-import static org.mockito.BDDMockito.then;
 
 import java.time.Duration;
 import java.util.List;
@@ -23,8 +23,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 /**
  * 워커의 결과 분기 검증 (S15P11B209-780).
  *
- * <p>여기서 지키려는 것은 "실패한 삭제가 조용히 사라지지 않는다"이다. 잡이 COMPLETED 로 지워지면 어떤 아동 파일이 안 지워졌는지 알 방법이 없다(가드레일
- * 9절).
+ * <p>여기서 지키려는 것은 "실패한 삭제가 조용히 사라지지 않는다"이다. 잡이 COMPLETED 로 지워지면 어떤 아동 파일이 안 지워졌는지 알 방법이 없다(가드레일 9절).
  */
 @ExtendWith(MockitoExtension.class)
 class StorageDeletionWorkerTest {
@@ -95,17 +94,14 @@ class StorageDeletionWorkerTest {
 
     worker.deletePendingObjects();
 
-    then(jobRepository)
-        .should()
-        .markFailed(1L, StorageDeletionRouter.UNMAPPED_RESOURCE_TYPE);
+    then(jobRepository).should().markFailed(1L, StorageDeletionRouter.UNMAPPED_RESOURCE_TYPE);
     then(jobRepository).should(never()).markRetry(anyLong(), anyString());
   }
 
   @Test
   @DisplayName("한 건이 실패해도 배치의 나머지를 계속 처리한다")
   void continuesAfterIndividualFailure() {
-    given(jobRepository.claim(anyInt()))
-        .willReturn(List.of(job(1L, 0), job(2L, 0), job(3L, 0)));
+    given(jobRepository.claim(anyInt())).willReturn(List.of(job(1L, 0), job(2L, 0), job(3L, 0)));
     // 특정 인자만 스텁하면 strict stubs 가 나머지 호출에 PotentialStubbingProblem 을 던지고,
     // 워커가 그걸 일반 실패로 잡아 1·3번까지 재시도로 떨어진다. any() 로 받아 안에서 갈라준다.
     willAnswer(

@@ -42,11 +42,27 @@ class ReportDetailResponseJsonTest {
   }
 
   @Test
+  void carriesObservedFeaturesThatPassedReview() throws Exception {
+    // 검토를 통과한 관찰 특징은 보호자 응답에 실제로 실려야 한다. 이 검증이 없으면
+    //   "전부 숨겨진 채 배포"(관찰 카드가 아무에게도 도달하지 않던 상태)를 아무도 잡지 못한다.
+    ObjectNode node = (ObjectNode) objectMapper.readTree(objectMapper.writeValueAsString(sample()));
+
+    assertThat(node.get("observedFeatures")).hasSize(1);
+    assertThat(node.get("observedFeatures").get(0).get("title").asText()).isEqualTo("집을 크게 그렸어요");
+    assertThat(node.get("observedFeatures").get(0).get("description").asText())
+        .isEqualTo("종이 가운데에 집을 크게 그렸어요.");
+    assertThat(node.get("observedFeatures").get(0).get("evidenceSummary").asText())
+        .isEqualTo("그림에서 확인했어요.");
+    // 내부 코드와 노출 범위는 응답에 담지 않는다.
+    assertThat(node.get("observedFeatures").get(0).has("featureCode")).isFalse();
+    assertThat(node.get("observedFeatures").get(0).has("visibilityScope")).isFalse();
+  }
+
+  @Test
   void doesNotExposeGuardianForbiddenFields() throws Exception {
     String json = objectMapper.writeValueAsString(sample());
     ObjectNode node = (ObjectNode) objectMapper.readTree(json);
 
-    assertThat(node.has("observedFeatures")).isFalse();
     assertThat(node.has("observedEmotion")).isFalse();
     assertThat(node.has("emotionConfidence")).isFalse();
     assertThat(node.has("attentionPoints")).isFalse();
@@ -80,6 +96,8 @@ class ReportDetailResponseJsonTest {
             List.of("HAPPY"),
             "행복한 하루였어요",
             List.of(new ReportUtteranceResponse(804L, "친구랑 있어서 좋아", "STT", false))),
+        List.of(
+            new ReportObservedFeatureResponse("집을 크게 그렸어요", "종이 가운데에 집을 크게 그렸어요.", "그림에서 확인했어요.")),
         new ReportActivityFactsResponse(List.of("집"), 295000L, 4, 2, true, List.of("멈춤 4회 관찰")),
         new ReportConversationSummaryResponse(5, 4, 1, "아이가 편안하게 대화했습니다"),
         List.of("오늘 그림에 대해 함께 이야기해 보세요"),

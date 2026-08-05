@@ -646,6 +646,21 @@ def check_report_result(case, result: ObservationGenerationResult) -> list[Findi
         )
     )
 
+    # 자체검토 통과 여부 (2026-08-05). 이제 이 값이 '보호자가 이 리포트를 보는가'를 가른다 —
+    #   AI_DRAFT 가 쌓이면 리포트가 만들어져도 아무도 못 보는 상태가 된다.
+    #   ⚠️ 경고 등급이다. 검토자가 근거 없는 단정을 제대로 잡아 떨어뜨린 것도 AI_DRAFT 라,
+    #      실패로 세면 '검토가 일한 회차'가 회귀로 잡힌다. 비율은 사람이 읽고 판단한다.
+    status = result.observation_draft.status
+    out.append(
+        Finding(
+            "B",
+            "자체검토 통과",
+            status == "AI_REVIEWED",
+            f"status={status}",
+            warn_only=True,
+        )
+    )
+
     # 필드 개수 규약(report_common: features·activityNotes 등 1~3개).
     counts = {
         "features": len(result.observation_draft.features),

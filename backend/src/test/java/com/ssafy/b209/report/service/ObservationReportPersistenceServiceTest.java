@@ -13,7 +13,9 @@ import com.ssafy.b209.analysis.domain.AnalysisConversationSummary;
 import com.ssafy.b209.analysis.domain.AnalysisObservationResult;
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
 import com.ssafy.b209.analysis.domain.DrawingAnalysisState;
+import com.ssafy.b209.analysis.domain.DrawingCoordinateSpace;
 import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
+import com.ssafy.b209.analysis.domain.ObservationReviewStatus;
 import com.ssafy.b209.analysis.dto.DrawingAnalysisType;
 import com.ssafy.b209.analysis.repository.AnalysisConversationSummaryRepository;
 import com.ssafy.b209.analysis.repository.AnalysisObservationResultRepository;
@@ -272,7 +274,10 @@ class ObservationReportPersistenceServiceTest {
 
     verify(drawnItemRepository).saveAll(drawnItemsCaptor.capture());
     assertThat(drawnItemsCaptor.getValue())
-        .extracting(ReportDrawnItem::getDisplayOrder, ReportDrawnItem::getDrawingSubject, ReportDrawnItem::getName)
+        .extracting(
+            ReportDrawnItem::getDisplayOrder,
+            ReportDrawnItem::getDrawingSubject,
+            ReportDrawnItem::getName)
         .containsExactly(
             org.assertj.core.groups.Tuple.tuple(0, "HOUSE", "집"),
             org.assertj.core.groups.Tuple.tuple(1, "HOUSE", "빨간 지붕"),
@@ -576,6 +581,65 @@ class ObservationReportPersistenceServiceTest {
   }
 
   @Test
+  void opensReviewedGuardianFeaturesWhenAiSelfReviewPassed() {
+    // 이 검증이 없으면 "열리는 경로"를 아무도 확인하지 않는다. 기존 검증은 전부 "닫혀 있는지"만 봤고,
+    //   그래서 관찰 특징이 아무에게도 도달하지 않는 상태로 오래 배포돼 있었다(운영 97건 전부 EXPERT_ONLY).
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.complete(emptyConversationContext(), resultWithReviewStatus("AI_REVIEWED"));
+
+    verify(observationResultRepository).save(observationCaptor.capture());
+    assertThat(observationCaptor.getValue().getReviewStatus())
+        .isEqualTo(ObservationReviewStatus.AI_REVIEWED);
+    verify(observedFeatureRepository).saveAll(featuresCaptor.capture());
+    assertThat(featuresCaptor.getValue())
+        .extracting(ReportObservedFeature::getVisibilityScope)
+        // AI 가 REVIEWED_GUARDIAN 으로 표시한 것만 열리고 EXPERT_ONLY 표시는 그대로 닫힌다.
+        .containsExactly(
+            ReportFeatureVisibility.REVIEWED_GUARDIAN, ReportFeatureVisibility.EXPERT_ONLY);
+  }
+
+  @Test
+  void keepsFeaturesClosedWhenReviewStatusCannotBeInterpreted() {
+    // 모르는 상태값을 통과로 취급하면 검토받지 않은 관찰이 보호자에게 열린다. 실패는 닫히는 쪽으로만 기울어야 한다.
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.complete(emptyConversationContext(), resultWithReviewStatus("EXPERT_APPROVED"));
+
+    verify(observationResultRepository).save(observationCaptor.capture());
+    assertThat(observationCaptor.getValue().getReviewStatus())
+        .isEqualTo(ObservationReviewStatus.AI_DRAFT);
+    verify(observedFeatureRepository).saveAll(featuresCaptor.capture());
+    assertThat(featuresCaptor.getValue())
+        .extracting(ReportObservedFeature::getVisibilityScope)
+        .containsOnly(ReportFeatureVisibility.EXPERT_ONLY);
+  }
+
+  @Test
+  void keepsFeaturesClosedWhenReviewStatusIsMissing() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.complete(emptyConversationContext(), resultWithReviewStatus(null));
+
+    verify(observationResultRepository).save(observationCaptor.capture());
+    assertThat(observationCaptor.getValue().getReviewStatus())
+        .isEqualTo(ObservationReviewStatus.AI_DRAFT);
+    verify(observedFeatureRepository).saveAll(featuresCaptor.capture());
+    assertThat(featuresCaptor.getValue())
+        .extracting(ReportObservedFeature::getVisibilityScope)
+        .containsOnly(ReportFeatureVisibility.EXPERT_ONLY);
+  }
+
+  @Test
   void completesStoresZeroCountsForEmptyConversation() {
     DrawingAnalysis analysis = pendingAnalysis();
     Report report = generatingReport(analysis);
@@ -703,6 +767,173 @@ class ObservationReportPersistenceServiceTest {
     service.markFailed(ANALYSIS_ID, REPORT_ID, "TIMEOUT", "생성 실패");
 
     assertThat(analysis.getState()).isEqualTo(DrawingAnalysisState.SUCCESS);
+  }
+
+  @Test
+  void sendsOnlyNormalizedDetectionGeometryAndKeepsEveryCode() {
+    // AI 는 캔버스 원본 크기를 모르므로 픽셀 좌표로는 용지 점유율을 계산할 수 없다(계약 합의 사항).
+    //   픽셀값을 0~1 비율인 척 넘기면 "종이의 대부분을 차지한다" 같은 없는 관찰이 만들어진다.
+    givenSingleSessionWithDetections(
+        List.of(
+            detection(
+                910L,
+                "HOUSE_DOOR",
+                DrawingCoordinateSpace.NORMALIZED,
+                "0.100000",
+                "0.200000",
+                "0.300000",
+                "0.400000",
+                "0.120000",
+                "0.9100"),
+            detection(
+                911L,
+                "HOUSE_ROOF",
+                DrawingCoordinateSpace.PIXEL,
+                "120.000000",
+                "80.000000",
+                "300.000000",
+                "200.000000",
+                null,
+                "0.8800")));
+
+    ObservationGenerationContext context = service.loadContext(ANALYSIS_ID).orElseThrow();
+    ObservationGenerationContext.SubjectContext subject = context.subjectContexts().getFirst();
+
+    // 코드 목록은 좌표계와 무관하게 전부 담는다 — 관찰 서술의 재료라서다.
+    assertThat(subject.detectedObjectCodes()).containsExactly("HOUSE_DOOR", "HOUSE_ROOF");
+    // 기하는 정규화 행만 나간다.
+    assertThat(subject.detectedObjects())
+        .extracting(ObservationGenerationContext.DetectedObjectRef::objectCode)
+        .containsExactly("HOUSE_DOOR");
+    ObservationGenerationContext.DetectedObjectRef ref = subject.detectedObjects().getFirst();
+    assertThat(ref.x()).isEqualByComparingTo("0.100000");
+    assertThat(ref.y()).isEqualByComparingTo("0.200000");
+    assertThat(ref.width()).isEqualByComparingTo("0.300000");
+    assertThat(ref.height()).isEqualByComparingTo("0.400000");
+    assertThat(ref.areaRatio()).isEqualByComparingTo("0.120000");
+    assertThat(ref.confidence()).isEqualByComparingTo("0.9100");
+  }
+
+  @Test
+  void sendsEmptyGeometryListWhenEveryDetectionIsPixelOnly() {
+    givenSingleSessionWithDetections(
+        List.of(
+            detection(
+                912L,
+                "TREE_TRUNK",
+                DrawingCoordinateSpace.PIXEL,
+                "10.000000",
+                "20.000000",
+                "30.000000",
+                "40.000000",
+                null,
+                "0.7700")));
+
+    ObservationGenerationContext context = service.loadContext(ANALYSIS_ID).orElseThrow();
+    ObservationGenerationContext.SubjectContext subject = context.subjectContexts().getFirst();
+
+    assertThat(subject.detectedObjects()).isEmpty();
+    // 기하를 못 보내도 코드 목록은 남아 관찰 서술 재료로 계속 쓰인다.
+    assertThat(subject.detectedObjectCodes()).containsExactly("TREE_TRUNK");
+  }
+
+  @Test
+  void keepsAreaRatioNullInsteadOfDerivingItFromWidthAndHeight() {
+    // 🔴 width * height 로 채우면 추정값이 관찰 사실 자리에 들어간다(AI 계약 명시).
+    givenSingleSessionWithDetections(
+        List.of(
+            detection(
+                913L,
+                "PERSON_FACE",
+                DrawingCoordinateSpace.NORMALIZED,
+                "0.100000",
+                "0.200000",
+                "0.300000",
+                "0.400000",
+                null,
+                "0.9000")));
+
+    ObservationGenerationContext context = service.loadContext(ANALYSIS_ID).orElseThrow();
+
+    assertThat(context.subjectContexts().getFirst().detectedObjects().getFirst().areaRatio())
+        .isNull();
+  }
+
+  @Test
+  void dropsNormalizedDetectionThatIsMissingPartOfItsGeometry() {
+    // 부분 좌표로는 위치도 크기도 말할 수 없다. 반쪽 기하를 보내느니 그 행을 빼는 편이 옳다.
+    givenSingleSessionWithDetections(
+        List.of(
+            detection(
+                914L,
+                "HOUSE_WINDOW",
+                DrawingCoordinateSpace.NORMALIZED,
+                "0.100000",
+                "0.200000",
+                null,
+                "0.400000",
+                null,
+                "0.9000")));
+
+    ObservationGenerationContext context = service.loadContext(ANALYSIS_ID).orElseThrow();
+    ObservationGenerationContext.SubjectContext subject = context.subjectContexts().getFirst();
+
+    assertThat(subject.detectedObjects()).isEmpty();
+    assertThat(subject.detectedObjectCodes()).containsExactly("HOUSE_WINDOW");
+  }
+
+  /** 단일(비 HTP) 세션 하나에 지정한 탐지 결과만 매달아 loadContext 를 돌릴 수 있게 한다. */
+  private void givenSingleSessionWithDetections(List<DrawingDetectedObject> detections) {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findById(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByAnalysisId(ANALYSIS_ID)).willReturn(Optional.of(report));
+    given(htpAssessmentRepository.findStepByDrawingSessionId(DRAWING_SESSION_ID))
+        .willReturn(Optional.empty());
+
+    AnalysisObservationResult observation =
+        org.mockito.Mockito.mock(AnalysisObservationResult.class);
+    DrawingAnalysis detectionAnalysis = org.mockito.Mockito.mock(DrawingAnalysis.class);
+    given(observation.getOverallSummary()).willReturn("그림 관찰 서술입니다.");
+    given(observation.getAnalysis()).willReturn(detectionAnalysis);
+    given(detectionAnalysis.getDetections()).willReturn(detections);
+    given(observationResultRepository.findLatestByDrawingSessionId(DRAWING_SESSION_ID))
+        .willReturn(Optional.of(observation));
+    given(conversationSessionRepository.findByDrawingSessionId(DRAWING_SESSION_ID))
+        .willReturn(Optional.empty());
+    given(
+            emotionRepository.findAllByDrawingSessionIdOrderBySelectionOrderAscIdAsc(
+                DRAWING_SESSION_ID))
+        .willReturn(List.of());
+  }
+
+  private static DrawingDetectedObject detection(
+      Long id,
+      String label,
+      DrawingCoordinateSpace coordinateSpace,
+      String x,
+      String y,
+      String width,
+      String height,
+      String areaRatio,
+      String confidence) {
+    DrawingDetectedObject detection = org.mockito.Mockito.mock(DrawingDetectedObject.class);
+    lenient().when(detection.getId()).thenReturn(id);
+    lenient().when(detection.getLabel()).thenReturn(label);
+    lenient().when(detection.getCoordinateSpace()).thenReturn(coordinateSpace);
+    lenient().when(detection.getX()).thenReturn(x == null ? null : new BigDecimal(x));
+    lenient().when(detection.getY()).thenReturn(y == null ? null : new BigDecimal(y));
+    lenient().when(detection.getWidth()).thenReturn(width == null ? null : new BigDecimal(width));
+    lenient()
+        .when(detection.getHeight())
+        .thenReturn(height == null ? null : new BigDecimal(height));
+    lenient()
+        .when(detection.getAreaRatio())
+        .thenReturn(areaRatio == null ? null : new BigDecimal(areaRatio));
+    lenient()
+        .when(detection.getConfidence())
+        .thenReturn(confidence == null ? null : new BigDecimal(confidence));
+    return detection;
   }
 
   private DrawingAnalysis pendingAnalysis() {
@@ -905,6 +1136,33 @@ class ObservationReportPersistenceServiceTest {
         List.of(),
         List.of(),
         "한계 문구");
+  }
+
+  /** 검토 상태만 바꾼 결과다. 관찰 특징은 {@code REVIEWED_GUARDIAN} 한 건 + {@code EXPERT_ONLY} 한 건으로 고정한다. */
+  private ObservationGenerationResult resultWithReviewStatus(String reviewStatus) {
+    ObservationGenerationResult source = validResult();
+    ObservationDraft draft = source.observationDraft();
+    return new ObservationGenerationResult(
+        source.requestId(),
+        source.modelName(),
+        source.modelVersion(),
+        source.confidence(),
+        new ObservationDraft(
+            reviewStatus,
+            draft.overallSummary(),
+            draft.positiveSignals(),
+            draft.attentionPoints(),
+            draft.evidenceSummary(),
+            draft.guardianGuidance(),
+            draft.followUpQuestion(),
+            draft.expertReviewRequired(),
+            draft.disclaimer(),
+            draft.features()),
+        source.conversationSummary(),
+        source.activityNotes(),
+        source.followUpGuides(),
+        source.guardianQuestions(),
+        source.limitationsText());
   }
 
   private ObservationGenerationResult resultWithReviewedGuardianFeature() {

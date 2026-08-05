@@ -126,6 +126,15 @@ QUESTION_LLM_TIMEOUT_SEC = float(os.environ.get("QUESTION_LLM_TIMEOUT_SEC", "4.0
 QUESTION_LLM_MAX_RETRIES = int(os.environ.get("QUESTION_LLM_MAX_RETRIES", "2"))
 QUESTION_LLM_BACKOFF_BASE_SEC = float(os.environ.get("QUESTION_LLM_BACKOFF_BASE_SEC", "0.5"))
 
+# 리포트 AI 자체검토(2-pass) 호출의 개별 timeout (2026-08-05).
+# reason: 자체검토가 붙으면서 리포트 한 건이 GMS를 **두 번** 부른다. BE read timeout은 30초인데
+#   (application.yml AI_OBSERVATION_READ_TIMEOUT), 공용 GMS timeout은 60초라(gms.py) 그대로 두면
+#   AI가 아직 검토 중일 때 BE가 먼저 포기해 리포트 생성이 통째로 실패할 수 있다 —
+#   생성은 끝났는데 검토 때문에 버리는 셈이라 최악의 실패 모드다.
+#   검토 응답은 findings 목록뿐이라 생성보다 훨씬 짧다. 넘기면 '검토 못 함'으로 떨어뜨리고
+#   리포트는 그대로 내보낸다(status=AI_DRAFT) — 차단이 아니라 기능 저하.
+REPORT_REVIEW_TIMEOUT_SEC = float(os.environ.get("REPORT_REVIEW_TIMEOUT_SEC", "10.0"))
+
 # 질문 프롬프트에 넣는 그림 서술(VLM)의 길이 상한 (S15P11B209-704).
 # VLM 프롬프트가 2~4문장을 지시하므로 정상 범위는 그대로 통과한다. 이 값은 모델이
 # 길게 답해 프롬프트의 다른 지시가 묻히는 경우만 막는 안전판이다.

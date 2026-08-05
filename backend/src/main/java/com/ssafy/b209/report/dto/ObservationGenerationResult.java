@@ -14,7 +14,7 @@ import java.util.List;
  * @param modelName 결과를 생성한 Model 이름
  * @param modelVersion 결과를 생성한 Model 버전
  * @param confidence 0 이상 1 이하의 신뢰도이며 없으면 {@code null}
- * @param observationDraft 전문가 검토 전 관찰 초안
+ * @param observationDraft 관찰 초안이며 검토 상태를 함께 싣는다
  * @param conversationSummary 대화 요약 초안
  * @param activityNotes 객관적 활동 주의사항 목록
  * @param followUpGuides 보호자 후속 안내 목록
@@ -93,16 +93,19 @@ public record ObservationGenerationResult(
   public record DrawnItemDraft(String drawingSubject, String name) {}
 
   /**
-   * 전문가 검토 전 관찰 초안이다.
+   * AI 가 만든 관찰 초안이다.
    *
-   * @param status 검토 상태이며 초안은 {@code AI_DRAFT}
+   * @param status 검토 상태이며 {@code AI_DRAFT}(검토 안 함) 또는 {@code AI_REVIEWED}(AI 자체 검토 통과). 이 값이 {@code
+   *     AI_REVIEWED}일 때만 {@code features}의 {@code REVIEWED_GUARDIAN} 항목이 보호자에게 열린다. 모르는 값은 서버가
+   *     {@code AI_DRAFT}로 떨어뜨린다
    * @param overallSummary 보호자에게 노출 가능한 전체 관찰 요약
    * @param positiveSignals 관찰된 긍정 신호
-   * @param attentionPoints 전문가 내부 검토용 관찰 필요 지점
+   * @param attentionPoints 보호자에게 바로 노출하지 않는 내부 검토용 관찰 필요 지점
    * @param evidenceSummary 관찰 근거 요약
    * @param guardianGuidance 보호자 안내 문구
    * @param followUpQuestion 보호자가 활용할 후속 질문
-   * @param expertReviewRequired 전문가 검토 필요 여부
+   * @param expertReviewRequired <b>사람 상담 권유가 필요한 신호</b>인지 여부다. 사람 전문가 검토 대기열은 존재하지 않으므로 "전문가가 검토해야
+   *     한다"는 뜻이 아니다
    * @param disclaimer 진단이 아님을 알리는 필수 주의 문구
    * @param features 관찰 특징 목록
    */
@@ -125,7 +128,9 @@ public record ObservationGenerationResult(
    * @param title 관찰 제목
    * @param description 관찰 내용
    * @param evidenceSummary 관찰 근거 요약
-   * @param visibilityScope 노출 범위이며 {@code EXPERT_ONLY} 또는 {@code REVIEWED_GUARDIAN}
+   * @param visibilityScope 노출 범위이며 {@code EXPERT_ONLY}(보호자에게 바로 열지 않음) 또는 {@code
+   *     REVIEWED_GUARDIAN}(보호자 응답에 포함). 후자는 {@code ObservationDraft.status}가 {@code AI_REVIEWED}일
+   *     때만 실제로 열린다
    */
   public record ObservedFeatureDraft(
       String featureCode,
