@@ -38,6 +38,39 @@ void main() {
       expect(controller.displayedMessageIds, {101, 102});
     });
 
+    test('음성 답변이 무효가 된 질문은 다시 표시할 수 있다', () {
+      // receive는 같은 messageId를 두 번 받지 않는다. 무음·거절로 답변이 무효가 되면
+      // 새 질문을 만들지 않고 표시만 되살려 선택지로 답할 기회를 준다.
+      final controller = AiQuestionDisplayController();
+      controller.receive(_question(101, '이 집에는 누가 있어?'));
+      controller.dismiss();
+
+      controller.restore();
+
+      expect(controller.isVisible, isTrue);
+      expect(controller.visibleQuestion?.messageId, 101);
+    });
+
+    test('받은 질문이 없으면 복원하지 않는다', () {
+      final controller = AiQuestionDisplayController();
+
+      controller.restore();
+
+      expect(controller.isVisible, isFalse);
+      expect(controller.visibleQuestion, isNull);
+    });
+
+    test('이미 보이는 질문 복원은 알림을 만들지 않는다', () {
+      final controller = AiQuestionDisplayController();
+      controller.receive(_question(101, '이 집에는 누가 있어?'));
+      var notificationCount = 0;
+      controller.addListener(() => notificationCount++);
+
+      controller.restore();
+
+      expect(notificationCount, 0);
+    });
+
     test('화면 상태 알림이 반복되어도 같은 질문 알림은 한 번만 발생한다', () {
       final controller = AiQuestionDisplayController();
       var notificationCount = 0;

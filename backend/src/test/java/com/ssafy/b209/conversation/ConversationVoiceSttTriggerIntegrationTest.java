@@ -109,7 +109,7 @@ class ConversationVoiceSttTriggerIntegrationTest {
   @Test
   void startsSttFromUploadAloneAndExposesTranscriptThroughPolling() throws Exception {
     given(aiSttClient.transcribe(any()))
-        .willReturn(new AiSttResponse("파란 집을 그렸어요", null, "whisper-1", 120L));
+        .willReturn(AiSttResponse.legacy("파란 집을 그렸어요", "whisper-1", 120L));
 
     long messageId = uploadVoiceAnswer("stt-trigger-key-001");
 
