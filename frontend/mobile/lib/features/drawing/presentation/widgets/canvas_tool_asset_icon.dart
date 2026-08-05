@@ -78,21 +78,64 @@ final class CanvasToolAssetIcon extends StatelessWidget {
   String get _assetPath {
     final tool = _tinted[artwork];
     if (tool == null) return _fixed[artwork]!;
-    return 'assets/canvas/tools/${variantFor(pointColor)}/$tool.png';
+    return 'assets/canvas/tools/${tool}_base.png';
   }
+
+  String? get _maskPath {
+    final tool = _tinted[artwork];
+    return tool == null ? null : 'assets/canvas/tools/masks/${tool}_point.png';
+  }
+
+  double get _visualScale => switch (artwork) {
+    CanvasToolArtwork.crayon => 1.12,
+    CanvasToolArtwork.pencil => 1.04,
+    CanvasToolArtwork.brush => 1.04,
+    CanvasToolArtwork.fill => 1.03,
+    CanvasToolArtwork.eraser || CanvasToolArtwork.palette => 1.12,
+  };
+
+  Offset get _visualOffset => switch (artwork) {
+    CanvasToolArtwork.eraser ||
+    CanvasToolArtwork.palette => Offset(0, size * .10),
+    CanvasToolArtwork.crayon => Offset(0, size * .015),
+    _ => Offset.zero,
+  };
 
   @override
   Widget build(BuildContext context) => SizedBox.square(
     dimension: size,
     child: RepaintBoundary(
       key: ValueKey('canvas-tool-boundary-${artwork.name}'),
-      child: Image.asset(
-        _assetPath,
-        key: ValueKey('canvas-tool-base-${artwork.name}'),
-        fit: BoxFit.contain,
-        alignment: Alignment.center,
-        filterQuality: filterQuality,
-        errorBuilder: (context, error, stackTrace) => _fallback(),
+      child: Transform.translate(
+        offset: _visualOffset,
+        child: Transform.scale(
+          scale: _visualScale,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Image.asset(
+                _assetPath,
+                key: ValueKey('canvas-tool-base-${artwork.name}'),
+                fit: BoxFit.contain,
+                alignment: Alignment.center,
+                filterQuality: filterQuality,
+                errorBuilder: (context, error, stackTrace) => _fallback(),
+              ),
+              if (_maskPath case final maskPath?)
+                ColorFiltered(
+                  colorFilter: ColorFilter.mode(pointColor, BlendMode.srcIn),
+                  child: Image.asset(
+                    maskPath,
+                    key: ValueKey('canvas-tool-mask-${artwork.name}'),
+                    fit: BoxFit.contain,
+                    alignment: Alignment.center,
+                    filterQuality: filterQuality,
+                    errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                  ),
+                ),
+            ],
+          ),
+        ),
       ),
     ),
   );

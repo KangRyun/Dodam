@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../../../../design_system/design_system.dart';
@@ -65,7 +67,8 @@ class _DrawingCompleteCtaState extends State<DrawingCompleteCta> {
               key: const ValueKey('drawing-complete'),
               color: AppColors.canvasSwatchGreen,
               borderRadius: BorderRadius.circular(AppRadius.lg),
-              elevation: 0,
+              elevation: 4,
+              shadowColor: AppColors.canvasInk.withValues(alpha: .18),
               child: InkWell(
                 borderRadius: BorderRadius.circular(AppRadius.lg),
                 excludeFromSemantics: true,
@@ -93,30 +96,40 @@ class _DrawingCompleteCtaState extends State<DrawingCompleteCta> {
                     borderRadius: BorderRadius.circular(AppRadius.lg),
                     border: Border.all(color: AppColors.canvasInk, width: 2),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (widget.isCompleting) ...[
-                        const SizedBox.square(
-                          dimension: 22,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2.5,
+                  child: CustomPaint(
+                    key: const ValueKey('drawing-complete-crayon-texture'),
+                    foregroundPainter: const _CrayonButtonTexturePainter(),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (widget.isCompleting) ...[
+                          const SizedBox.square(
+                            dimension: 22,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: AppColors.surface,
+                            ),
+                          ),
+                          const SizedBox(width: AppSpacing.sm),
+                        ],
+                        Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
                             color: AppColors.surface,
+                            fontSize: widget.compact ? 19 : 24,
+                            fontWeight: FontWeight.w900,
+                            shadows: const [
+                              Shadow(
+                                color: Color(0x33000000),
+                                offset: Offset(0, 1),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(width: AppSpacing.sm),
                       ],
-                      Text(
-                        label,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: AppColors.surface,
-                          fontSize: widget.compact ? 19 : 24,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ],
+                    ),
                   ),
                 ),
               ),
@@ -126,4 +139,37 @@ class _DrawingCompleteCtaState extends State<DrawingCompleteCta> {
       ),
     );
   }
+}
+
+final class _CrayonButtonTexturePainter extends CustomPainter {
+  const _CrayonButtonTexturePainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final clip = RRect.fromRectAndRadius(
+      Offset.zero & size,
+      const Radius.circular(AppRadius.lg - 2),
+    );
+    canvas.save();
+    canvas.clipRRect(clip);
+    final light = Paint()
+      ..color = AppColors.surface.withValues(alpha: .16)
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    final shade = Paint()
+      ..color = AppColors.canvasInk.withValues(alpha: .08)
+      ..strokeWidth = 1.4
+      ..strokeCap = StrokeCap.round;
+    for (var index = 0; index < 16; index++) {
+      final y = 4.0 + (index * 11.0) % size.height;
+      final x = (index * 23.0) % math.max(size.width - 24, 1);
+      final paint = index.isEven ? light : shade;
+      canvas.drawLine(Offset(x, y), Offset(x + 20, y - 4), paint);
+    }
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _CrayonButtonTexturePainter oldDelegate) =>
+      false;
 }

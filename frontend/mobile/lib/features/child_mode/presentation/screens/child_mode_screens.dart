@@ -34,8 +34,6 @@ const Color _treeTrunk = Color(0xFFC79A66);
 
 enum _ActivityLoadStatus { loading, loaded, empty, error }
 
-enum _DrawingStartChoice { resume, startNew }
-
 enum _CharacterIntroChoice { useCurrent, pick, dismissed }
 
 enum _CharacterGuideStatus { inactive, choosing, saving, failure }
@@ -184,6 +182,11 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
   bool _replaceActiveOnSelection = false;
   DrawingSessionResolution? _preparedResolution;
 
+  /// 진입 시 발견한 진행 중 세션(S15P11B209-916). 팝업 없이 여기 보관해 두고,
+  /// 항상 노출되는 "이어 그리기" 버튼이 이 값으로 재개한다. 없으면(null) 버튼은
+  /// 친근한 빈-상태 팝업을 띄운다.
+  ActiveDrawingSessionDto? _resumableSession;
+
   late final CostumePreferenceStore _costumeStore;
   late final ChildHomeIntroStore _introStore;
   late final PageController _costumeController;
@@ -250,6 +253,10 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     _preparedResolution = widget.preparedResolution;
     // 자동 시작(이어 그리기)은 홈을 "확인 중" 상태로 두고 곧바로 캔버스를 연다.
     _entryResolved = _preparedResolution != null && !widget.autoStartPrepared;
+    // HTP 등 부모가 준비해 넘긴 활동으로 홈에 머무는 진입에서도 최초 캐릭터 선택
+    // 가이드를 허용한다(S15P11B209-916 후속 — 그림일기·HTP 어느 경로든 최초 1회).
+    // 자동 시작(캔버스 직행)은 _entryResolved=false라 여전히 가이드가 뜨지 않는다.
+    _introAllowedForResolvedEntry = _entryResolved;
     unawaited(_loadCostume());
     unawaited(_loadDrawingTypes());
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -283,6 +290,8 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     _characterGuideInteracted = false;
     _costumeSelectionGeneration++;
     _spotlightRect = null;
+    _resumableSession = null;
+    _replaceActiveOnSelection = false;
 
     final costume = _costumeFromCode(widget.child.preferredCharacter);
     _costume = costume;
@@ -799,41 +808,15 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
         childId: widget.child.childId,
       );
       if (!mounted) return;
-      if (activeSession == null) {
-        setState(() {
-          _entryResolved = true;
-          _introAllowedForResolvedEntry = true;
-        });
-        unawaited(_maybeShowCharacterIntro());
-        return;
-      }
-
-      // 홈 위에 다른 화면(그림 전시관 등)이 올라와 있으면 "이어 그리기" 팝업을 그
-      // 화면 위에 띄우지 않는다. _entryResolved 를 확정하지 않으므로 홈으로 돌아오면
-      // (_openPastDrawings 복귀 처리에서) 다시 확인해 그때 띄운다.
-      if (!(ModalRoute.of(context)?.isCurrent ?? true)) {
-        return;
-      }
-
-      // 팝업 뒤 화면은 정적인 활동 목록으로 유지해 불필요한 로딩 애니메이션을
-      // 계속 실행하지 않는다. 팝업이 입력을 막으므로 활동 중복 시작은 발생하지 않는다.
-      setState(() => _entryResolved = true);
-      final choice = await _showDrawingStartDialog();
-      if (!mounted) return;
-      if (choice == _DrawingStartChoice.startNew) {
-        setState(() {
-          _replaceActiveOnSelection = true;
-          _entryResolved = true;
-          _introAllowedForResolvedEntry = true;
-        });
-        return;
-      }
-      if (choice == _DrawingStartChoice.resume) {
-        await _openResolution(
-          controller.resume(activeSession),
-          autoRestoreDraft: true,
-        );
-      }
+      // 진입 팝업을 띄우지 않는다(S15P11B209-916). 진행 중 세션은 보관만 하고
+      // 홈에 머문다 — 상시 노출되는 "이어 그리기" 버튼이 이 값으로 재개한다.
+      // 캐릭터 인트로는 홈에 남으므로 그대로 허용한다.
+      setState(() {
+        _resumableSession = activeSession;
+        _entryResolved = true;
+        _introAllowedForResolvedEntry = true;
+      });
+      unawaited(_maybeShowCharacterIntro());
     } on Object {
       if (mounted) {
         showAppMessage(
@@ -884,7 +867,6 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
         !_entryResolved ||
         !_introAllowedForResolvedEntry ||
         _checkingActiveSession ||
-        _preparedResolution != null ||
         _startingDrawingTypeId != null ||
         !(ModalRoute.of(context)?.isCurrent ?? false)) {
       return;
@@ -903,7 +885,6 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
         !_entryResolved ||
         !_introAllowedForResolvedEntry ||
         _checkingActiveSession ||
-        _preparedResolution != null ||
         !(ModalRoute.of(context)?.isCurrent ?? false)) {
       return;
     }
@@ -1029,100 +1010,133 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     );
   }
 
-  Future<_DrawingStartChoice?> _showDrawingStartDialog() {
-    return showDialog<_DrawingStartChoice>(
+  /// 상시 노출되는 "이어 그리기" 버튼(S15P11B209-916).
+  ///
+  /// 보관해 둔 진행 중 세션이 있으면 그대로 재개하고, 없으면 친근한 빈-상태
+  /// 팝업으로 새 그림을 권한다.
+  Future<void> _onResumeDrawing() async {
+    if (_startingDrawingTypeId != null) return;
+    final session = _resumableSession;
+    if (session == null) {
+      await _showResumeEmptyDialog();
+      return;
+    }
+    try {
+      await _openResolution(
+        DrawingSessionStartController(
+          repository: widget.drawingRepository,
+        ).resume(session),
+        autoRestoreDraft: true,
+      );
+    } on Object {
+      if (mounted) {
+        showAppMessage(
+          context,
+          message: '이어 그리기를 열지 못했어요. 다시 시도해 주세요.',
+          type: AppMessageType.error,
+        );
+      }
+    }
+  }
+
+  /// 이어 그릴 그림이 없을 때의 친근한 안내(S15P11B209-916). "새로 그리기"는
+  /// 팝업을 닫고 그림일기 시작 경로로 이어진다.
+  Future<void> _showResumeEmptyDialog() async {
+    final startNew = await showDialog<bool>(
       context: context,
-      barrierDismissible: false,
-      builder: (dialogContext) => PopScope(
-        canPop: false,
-        child: Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(28),
-          ),
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(32, 30, 32, 28),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 88,
-                    height: 88,
-                    decoration: const BoxDecoration(
-                      color: AppColors.childCanvas,
-                      shape: BoxShape.circle,
-                    ),
-                    alignment: Alignment.center,
-                    child: const Text('✏️', style: TextStyle(fontSize: 42)),
+      builder: (dialogContext) => Dialog(
+        key: const ValueKey('resume-empty-dialog'),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(28),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.fromLTRB(32, 30, 32, 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 88,
+                  height: 88,
+                  decoration: const BoxDecoration(
+                    color: AppColors.childCanvas,
+                    shape: BoxShape.circle,
                   ),
-                  const SizedBox(height: 22),
-                  Text(
-                    '그리던 그림이 있어요',
-                    style: Theme.of(dialogContext).textTheme.headlineSmall
-                        ?.copyWith(fontWeight: FontWeight.w800),
-                  ),
-                  const SizedBox(height: 14),
-                  Text(
-                    '그림을 그리다 멈췄어요.\n이어서 그릴까요?',
-                    textAlign: TextAlign.center,
-                    style: Theme.of(dialogContext).textTheme.bodyLarge
-                        ?.copyWith(color: AppColors.inkMuted, height: 1.45),
-                  ),
-                  const SizedBox(height: 28),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 58,
-                    child: FilledButton(
-                      onPressed: () => Navigator.of(
-                        dialogContext,
-                      ).pop(_DrawingStartChoice.resume),
-                      style: FilledButton.styleFrom(
-                        backgroundColor: AppColors.leaf,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
+                  alignment: Alignment.center,
+                  child: const Text('🎨', style: TextStyle(fontSize: 42)),
+                ),
+                const SizedBox(height: 22),
+                Text(
+                  '앗, 그리던 그림이 없어요!',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(dialogContext).textTheme.headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.w800),
+                ),
+                const SizedBox(height: 14),
+                Text(
+                  '새로 그려볼까요?',
+                  textAlign: TextAlign.center,
+                  style: Theme.of(dialogContext).textTheme.bodyLarge
+                      ?.copyWith(color: AppColors.inkMuted, height: 1.45),
+                ),
+                const SizedBox(height: 28),
+                SizedBox(
+                  width: double.infinity,
+                  height: 58,
+                  child: FilledButton(
+                    key: const ValueKey('resume-empty-start-new'),
+                    onPressed: () => Navigator.of(dialogContext).pop(true),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.leaf,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      child: const Text(
-                        '이어 그리기',
-                        style: TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w700,
-                        ),
+                    ),
+                    child: const Text(
+                      '새로 그리기',
+                      style: TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 58,
-                    child: OutlinedButton(
-                      onPressed: () => Navigator.of(
-                        dialogContext,
-                      ).pop(_DrawingStartChoice.startNew),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: AppColors.ink,
-                        side: const BorderSide(color: AppColors.outline),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(16),
-                        ),
+                ),
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  height: 58,
+                  child: OutlinedButton(
+                    key: const ValueKey('resume-empty-close'),
+                    onPressed: () => Navigator.of(dialogContext).pop(false),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: AppColors.ink,
+                      side: const BorderSide(color: AppColors.outline),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
                       ),
-                      child: const Text(
-                        '새로 그리기',
-                        style: TextStyle(
-                          fontSize: 19,
-                          fontWeight: FontWeight.w700,
-                        ),
+                    ),
+                    child: const Text(
+                      '닫기',
+                      style: TextStyle(
+                        fontSize: 19,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           ),
         ),
       ),
     );
+    if (startNew != true || !mounted) return;
+    final artDiary = _artDiaryType;
+    if (artDiary == null) return;
+    // 이어 그릴 세션이 없으므로 대체 없이 새 그림일기를 시작한다.
+    _replaceActiveOnSelection = false;
+    await _selectActivity(artDiary);
   }
 
   Future<void> _selectActivity(DrawingTypeDto type) async {
@@ -1579,11 +1593,16 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
         return _DrawEntryButton(
           key: const ValueKey('draw-entry'),
           onTap: _startingDrawingTypeId == null
-              ? () => unawaited(
-                  _preparedResolution == null
-                      ? _selectActivity(artDiary)
-                      : _openPreparedActivity(),
-                )
+              ? () {
+                  // 진행 중 세션이 있으면 "새로 그리기"가 그 세션을 대체한다
+                  // (S15P11B209-916). 없으면 그냥 새 그림일기를 시작한다.
+                  _replaceActiveOnSelection = _resumableSession != null;
+                  unawaited(
+                    _preparedResolution == null
+                        ? _selectActivity(artDiary)
+                        : _openPreparedActivity(),
+                  );
+                }
               : null,
         );
     }
@@ -1667,10 +1686,43 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     messageKey: const ValueKey('child-character-guide'),
   );
 
-  /// 이젤 아래 secondary 입구. 활동 로딩 상태와 무관하게 항상 보여준다.
-  Widget _pastDrawings() => _PastDrawingsButton(
+  /// 이젤 아래 secondary 입구(지난 그림 보기 · 이어 그리기). 활동 로딩 상태와
+  /// 무관하게 항상 나란히 보여준다.
+  Widget _secondaryEntries() => Row(
+    mainAxisSize: MainAxisSize.min,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      _pastDrawings(),
+      const SizedBox(width: AppSpacing.sm),
+      _resumeDrawing(),
+    ],
+  );
+
+  /// 지난 그림 보기 — 아이의 "그림 전시관"으로 이동한다.
+  Widget _pastDrawings() => _SecondaryEntryTile(
     key: const ValueKey('past-drawings-entry'),
+    icon: Icons.collections_rounded,
+    iconColor: AppColors.lavender,
+    iconBackground: AppColors.lavenderSoft,
+    borderColor: AppColors.lavender.withValues(alpha: 0.35),
+    label: '지난 그림 보기',
+    semanticsLabel: '지난 그림 보기. 내가 그린 그림들을 다시 봐요.',
     onTap: () => unawaited(_openPastDrawings()),
+  );
+
+  /// 이어 그리기 — 상시 노출(대상 영속성). 보관한 진행 중 세션을 재개하거나,
+  /// 없으면 빈-상태 팝업을 띄운다(S15P11B209-916).
+  Widget _resumeDrawing() => _SecondaryEntryTile(
+    key: const ValueKey('child-resume-drawing'),
+    icon: Icons.play_circle_fill_rounded,
+    iconColor: AppColors.tangerine,
+    iconBackground: AppColors.tangerineSoft,
+    borderColor: AppColors.tangerine.withValues(alpha: 0.4),
+    label: '이어 그리기',
+    semanticsLabel: '이어 그리기. 그리던 그림을 이어서 그려요.',
+    onTap: _startingDrawingTypeId == null
+        ? () => unawaited(_onResumeDrawing())
+        : null,
   );
 
   /// 지난 그림 보기 — 아이의 "그림 전시관"으로 이동한다.
@@ -1827,13 +1879,15 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
       children: [
         _title(context),
         const SizedBox(height: AppSpacing.md),
+        // 좌=캐릭터, 우=[새로 그리기 / 지난 그림·이어 그리기]. 둘 다 가운데 밴드에
+        // 같은 눈높이로 정렬한다(S15P11B209-916 — 기존엔 바닥 정렬이라 캐릭터가 낮았다).
         Expanded(
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
               Expanded(
                 child: Align(
-                  alignment: Alignment.bottomCenter,
+                  alignment: Alignment.center,
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 440),
                     child: _carousel(),
@@ -1843,25 +1897,18 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
               const SizedBox(width: AppSpacing.lg),
               Expanded(
                 child: Align(
-                  // 하단 정렬 + 살짝 왼쪽으로 당겨 캐릭터와 균형을 맞추고
-                  // 오른쪽 나무와 겹치지 않게 한다.
-                  alignment: const Alignment(-0.6, 1),
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: AppSpacing.xl),
-                    // 이젤(고정 높이)+지난 그림 카드가 짧은 화면에서 넘치지 않도록
-                    // 필요할 때만 살짝 축소한다(큰 태블릿에선 원본 크기 유지).
-                    child: FittedBox(
-                      fit: BoxFit.scaleDown,
-                      // 이젤·지난 그림 카드는 둘 다 폭 300으로 고정돼 좌우 가장자리가 맞는다.
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          _buildDrawSection(),
-                          // 이젤 다리(bottom -16)를 지나 secondary와 시각적 간격을 준다.
-                          const SizedBox(height: 34),
-                          _pastDrawings(),
-                        ],
-                      ),
+                  // 오른쪽 나무 장식과 겹치지 않게 살짝 왼쪽으로 당기되, 세로는 가운데.
+                  alignment: const Alignment(-0.6, 0),
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _buildDrawSection(),
+                        // 이젤 다리(bottom -16)를 지나 secondary와 시각적 간격을 준다.
+                        const SizedBox(height: 34),
+                        _secondaryEntries(),
+                      ],
                     ),
                   ),
                 ),
@@ -1889,7 +1936,8 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
             const SizedBox(height: AppSpacing.xl),
             _buildDrawSection(),
             const SizedBox(height: AppSpacing.xl),
-            _pastDrawings(),
+            // 좁은 화면에서 secondary Row(합 300)가 좁은 폭을 넘지 않도록 축소한다.
+            FittedBox(fit: BoxFit.scaleDown, child: _secondaryEntries()),
           ],
         ),
       ),
@@ -2275,7 +2323,7 @@ class _DrawEntryButton extends StatelessWidget {
   Widget build(BuildContext context) => Semantics(
     button: true,
     enabled: onTap != null,
-    label: '그림 그리기. 오늘 있었던 일을 그려볼까?',
+    label: '새로 그리기. 오늘 있었던 일을 그려볼까?',
     child: ExcludeSemantics(
       child: _Pressable(
         onTap: onTap,
@@ -2286,9 +2334,11 @@ class _DrawEntryButton extends StatelessWidget {
             Positioned(bottom: -16, left: 40, child: _leg(0.26)),
             Positioned(bottom: -16, right: 40, child: _leg(-0.26)),
             Container(
+              // secondary Row(지난 그림 보기 172 + 이어 그리기 172 + 간격 12 = 356)과
+              // 좌우 가장자리를 맞춘다(S15P11B209-916).
               constraints: const BoxConstraints(
-                minWidth: 300,
-                maxWidth: 300,
+                minWidth: 356,
+                maxWidth: 356,
                 minHeight: 300,
               ),
               padding: const EdgeInsets.fromLTRB(26, 22, 26, 26),
@@ -2318,7 +2368,7 @@ class _DrawEntryButton extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.sm),
                   const Text(
-                    '그림 그리기',
+                    '새로 그리기',
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       color: AppColors.ink,
@@ -2346,34 +2396,51 @@ class _DrawEntryButton extends StatelessWidget {
   );
 }
 
-/// 이젤(그림 그리기) 아래 secondary CTA — 아이가 그린 지난 그림을 다시 보는 입구.
+/// 이젤(새로 그리기) 아래 secondary CTA 타일 — 지난 그림 보기·이어 그리기가
+/// 공유하는 동일한 위계·결.
 ///
-/// "그림 그리기"가 노란 이젤로 primary라, 여기는 한 단계 낮은 위계로 둔다: 흰 pill에
-/// 차분한 라벤더(노랑의 보색) 액센트를 얹어, 큰 노란 이젤과 명확히 구분되면서도
-/// 같은 둥근 손그림 결을 유지한다. 눌림 피드백은 이젤과 같은 [_Pressable]을 공유한다.
-class _PastDrawingsButton extends StatelessWidget {
-  const _PastDrawingsButton({required this.onTap, super.key});
+/// "새로 그리기"가 노란 이젤로 primary라, 여기는 한 단계 낮은 위계로 둔다: 흰
+/// 카드에 차분한 원색 액센트를 얹어, 큰 노란 이젤과 명확히 구분되면서도 같은 둥근
+/// 손그림 결을 유지한다. 둘을 나란히 놓았을 때 폭이 맞도록 고정 폭 타일이며, 합이
+/// 이젤 폭(300)과 맞는다. 눌림 피드백은 이젤과 같은 [_Pressable]을 공유한다.
+class _SecondaryEntryTile extends StatelessWidget {
+  const _SecondaryEntryTile({
+    required this.icon,
+    required this.iconColor,
+    required this.iconBackground,
+    required this.borderColor,
+    required this.label,
+    required this.semanticsLabel,
+    required this.onTap,
+    super.key,
+  });
 
+  final IconData icon;
+  final Color iconColor;
+  final Color iconBackground;
+  final Color borderColor;
+  final String label;
+  final String semanticsLabel;
   final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) => Semantics(
     button: true,
     enabled: onTap != null,
-    label: '지난 그림 보기. 내가 그린 그림들을 다시 봐요.',
+    label: semanticsLabel,
     child: ExcludeSemantics(
       child: _Pressable(
         onTap: onTap,
         child: Container(
-          constraints: const BoxConstraints(minWidth: 300, maxWidth: 300),
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          // 폭을 넓혀 '지난 그림 보기'가 한 줄에 들어오게 한다(S15P11B209-916).
+          // 둘(172*2 + 간격 12 = 356)의 합이 이젤 폭(356)과 맞아 가장자리가 정렬된다.
+          width: 172,
+          constraints: const BoxConstraints(minHeight: 132),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
           decoration: BoxDecoration(
             color: AppColors.surface.withValues(alpha: 0.94),
             borderRadius: BorderRadius.circular(26),
-            border: Border.all(
-              color: AppColors.lavender.withValues(alpha: 0.35),
-              width: 3,
-            ),
+            border: Border.all(color: borderColor, width: 3),
             boxShadow: [
               BoxShadow(
                 color: AppColors.ink.withValues(alpha: 0.10),
@@ -2382,60 +2449,33 @@ class _PastDrawingsButton extends StatelessWidget {
               ),
             ],
           ),
-          child: const Row(
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              _PastDrawingsIcon(),
-              SizedBox(width: 14),
-              Flexible(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '지난 그림 보기',
-                      style: TextStyle(
-                        color: AppColors.ink,
-                        fontSize: 21,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      '내가 그린 그림 다시 보기',
-                      style: TextStyle(
-                        color: AppColors.inkMuted,
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
+              Container(
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: iconBackground,
+                  shape: BoxShape.circle,
+                ),
+                alignment: Alignment.center,
+                child: Icon(icon, color: iconColor, size: 28),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                label,
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: AppColors.ink,
+                  fontSize: 19,
+                  fontWeight: FontWeight.w900,
                 ),
               ),
             ],
           ),
         ),
       ),
-    ),
-  );
-}
-
-class _PastDrawingsIcon extends StatelessWidget {
-  const _PastDrawingsIcon();
-
-  @override
-  Widget build(BuildContext context) => Container(
-    width: 54,
-    height: 54,
-    decoration: const BoxDecoration(
-      color: AppColors.lavenderSoft,
-      shape: BoxShape.circle,
-    ),
-    alignment: Alignment.center,
-    child: const Icon(
-      Icons.collections_rounded,
-      color: AppColors.lavender,
-      size: 28,
     ),
   );
 }

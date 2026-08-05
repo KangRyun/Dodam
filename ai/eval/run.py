@@ -4,6 +4,8 @@
     cd ai && python -m eval.run              # A층(무료) + B층(GMS 실호출)
     cd ai && python -m eval.run --layer a    # 조립 검증만 — 키 없이 돌고 비용 0
     cd ai && python -m eval.run --repeat 3   # 표본 3회(LLM은 비결정적이라 1회는 근거가 얇다)
+    cd ai && python -m eval.run --layer b --case Q16_diary_misdetection --repeat 5
+                                            # 한 축만 파고들 때 — 전건을 곱하지 않는다
 
 산출: docs/ai/prompt-eval-<날짜시각>.md + 표준출력 요약. 종료 코드는 실패 수(회귀 게이트용).
 
@@ -89,11 +91,20 @@ def run_layer_a() -> list[tuple[str, list[Finding]]]:
 
 
 # ── B층: 실호출 준수 검증 ───────────────────────────────────────
-def run_layer_b(repeat: int) -> list[tuple[str, int, list[Finding]]]:
-    """GMS를 실제로 호출해 모델이 규칙을 지키는지 판정한다."""
+def run_layer_b(
+    repeat: int, only: set[str] | None = None
+) -> list[tuple[str, int, list[Finding]]]:
+    """GMS를 실제로 호출해 모델이 규칙을 지키는지 판정한다.
+
+    only 를 주면 그 케이스 id 만 돈다(S15P11B209-918). 새 케이스를 여러 표본으로 확인할 때
+    전건을 같은 횟수로 돌리면 비용이 그만큼 곱해진다 — 회귀 게이트로 전건을 돌리는 것과,
+    한 축을 파고들어 확인하는 것은 목적이 다르다.
+    """
     results: list[tuple[str, int, list[Finding]]] = []
 
     for case in cases.QUESTION_CASES:
+        if only is not None and case.id not in only:
+            continue
         # 인젝션 케이스는 GMS 이전에 결정적으로 처리되므로 반복해도 같은 답이다.
         turns = 1 if not case.calls_gms else repeat
         for n in range(1, turns + 1):
@@ -114,6 +125,8 @@ def run_layer_b(repeat: int) -> list[tuple[str, int, list[Finding]]]:
             results.append((case.id, n, found))
 
     for case in cases.REPORT_CASES:
+        if only is not None and case.id not in only:
+            continue
         for n in range(1, repeat + 1):
             try:
                 result = report_client.generate(
@@ -210,7 +223,21 @@ def main() -> int:
     p.add_argument("--layer", choices=["a", "b", "all"], default="all")
     p.add_argument("--repeat", type=int, default=1, help="B층 표본 수(기본 1)")
     p.add_argument("--out", type=Path, default=None, help="결과 마크다운 경로")
+    p.add_argument(
+        "--case",
+        default=None,
+        help="B층에서 돌릴 케이스 id 목록(쉼표 구분). 생략하면 전건",
+    )
     args = p.parse_args()
+
+    only = (
+        {c.strip() for c in args.case.split(",") if c.strip()} if args.case else None
+    )
+    if only is not None:
+        known = {c.id for c in (*cases.QUESTION_CASES, *cases.REPORT_CASES)}
+        unknown = sorted(only - known)
+        if unknown:
+            p.error(f"모르는 케이스 id: {', '.join(unknown)}")
 
     layer_a = run_layer_a() if args.layer in ("a", "all") else []
 
@@ -220,7 +247,7 @@ def main() -> int:
             print("GMS_KEY가 비어 있어 B층을 건너뜁니다(.env 확인). A층만 실행했습니다.")
         else:
             try:
-                layer_b = run_layer_b(args.repeat)
+                layer_b = run_layer_b(args.repeat, only)
             except Exception:  # noqa: BLE001
                 traceback.print_exc()
                 print("B층 실행 중 복구 불가 오류 — A층 결과만 남깁니다.")

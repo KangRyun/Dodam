@@ -130,6 +130,14 @@ const aiQuestionNoResponseTimeout = Duration(seconds: 10);
 /// Backend 대화 생성 계약의 생략 시 기본 질문 상한과 같은 값이다.
 const defaultConversationMaxQuestionCount = 10;
 
+/// 아이가 그만하겠다고 말했을 때 AI 가 되묻는 선택지의 식별자다 (S15P11B209-938).
+///
+/// AI 서버가 정하는 값이며(ai/question_service.py), 응답 계약에서는 option code 로 실려
+/// 오다가 BE 를 지나며 optionId 가 된다. 화면은 이 둘만 종료 신호로 다루고 나머지 칩은
+/// 평범한 답변으로 취급한다 — 값이 바뀌면 양쪽을 함께 고쳐야 한다.
+const _endTalkOptionId = 'CHIP_END_TALK';
+const _endActivityOptionId = 'CHIP_END_ACTIVITY';
+
 class DrawingScreen extends StatefulWidget {
   const DrawingScreen({
     required this.childId,
@@ -267,6 +275,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     color: AppColors.canvasSwatchCharcoal,
     width: _regular,
   );
+  final List<Color> _recentColors = [AppColors.canvasSwatchCharcoal];
 
   DrawingTool get _tool => _toolState.wireTool ?? DrawingTool.pen;
   Color get _color => _toolState.color;
@@ -390,6 +399,15 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 대화만 진행한다.
   bool get _canvasLocked => widget.resumeConversation || _drawingStageFinished;
 
+  /// AI 질문이 화면에 떠 있는 동안에는 그림보다 대화에만 집중한다.
+  ///
+  /// 진행 중인 획은 끝까지 확정한 뒤 잠근다. 말풍선이 실제로 표시되는 조건과
+  /// 동일하게 유지해야 보이지 않는 오버레이가 입력을 막지 않는다.
+  bool get _isConversationFocusMode =>
+      _questionDisplayController.isVisible &&
+      _activePointer == null &&
+      (_canvasLocked || _draftRestoreController.canDraw);
+
   /// 새 획 또는 복원된 Draft 배경이 있으면 완료 가능한 그림으로 본다.
   bool get _hasDrawingContent =>
       _completedStrokes.isNotEmpty || _draftRestoreController.draft != null;
@@ -400,6 +418,13 @@ class _DrawingScreenState extends State<DrawingScreen>
   @override
   void initState() {
     super.initState();
+    if (widget.activityContext.isHtp) {
+      _toolState = const DrawingToolState(
+        instrument: DrawingInstrument.pencil,
+        color: AppColors.canvasSwatchCharcoal,
+        width: _regular,
+      );
+    }
     WidgetsBinding.instance.addObserver(this);
     _ownsDocumentController = widget.documentController == null;
     _documentController =
@@ -666,6 +691,11 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _setInstrument(DrawingInstrument instrument) {
+    if (widget.activityContext.isHtp &&
+        instrument != DrawingInstrument.pencil &&
+        instrument != DrawingInstrument.eraser) {
+      return;
+    }
     setState(() {
       _toolState = DrawingToolState(
         instrument: instrument,
@@ -679,13 +709,23 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _setColor(Color color) {
+    final nextColor = widget.activityContext.isHtp
+        ? AppColors.canvasSwatchCharcoal
+        : color;
     setState(() {
       _toolState = DrawingToolState(
         instrument: _toolState.instrument,
         eraserMode: _toolState.eraserMode,
-        color: color,
+        color: nextColor,
         width: _toolState.width,
       );
+      _recentColors.removeWhere(
+        (recent) => recent.toARGB32() == nextColor.toARGB32(),
+      );
+      _recentColors.insert(0, nextColor);
+      if (_recentColors.length > 10) {
+        _recentColors.removeRange(10, _recentColors.length);
+      }
     });
     // 팔레트를 끄는 동안 매 프레임 호출된다. journal이 마지막 값 하나로 합친다.
     _syncCoordinator.recordColorChange(color);
@@ -694,6 +734,10 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   /// 마우스·스타일러스가 캔버스 위를 지나면 현재 도구와 굵기를 커서로 보여 준다.
   void _handleCanvasHover(PointerHoverEvent event) {
+    if (_isConversationFocusMode) {
+      _cursorController.hide();
+      return;
+    }
     _cursorController.update(
       documentPosition: event.localPosition,
       toolState: _cursorToolState,
@@ -755,12 +799,14 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   /// 상세 색상 팔레트를 연다. 태블릿은 팔레트 버튼 옆 팝오버, 모바일은 바텀 시트다.
   Future<void> _openColorPalette(DrawingCanvasDeviceClass deviceClass) async {
+    if (widget.activityContext.isHtp) return;
     var value = HSVColor.fromColor(_toolState.color);
     final previousColor = _toolState.color;
 
     Widget palette(StateSetter setPaletteState) => DrawingColorPalette(
       value: value,
       previousColor: previousColor,
+      recentColors: _recentColors,
       onChanged: (next) {
         setPaletteState(() => value = next);
         _setColor(next.toColor());
@@ -1312,6 +1358,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _handleQuestionDisplayChanged() {
+    if (_isConversationFocusMode) _cursorController.hide();
     if (mounted) setState(() {});
   }
 
@@ -1443,7 +1490,33 @@ class _DrawingScreenState extends State<DrawingScreen>
         _skipConversationEndAndContinue();
         return;
       }
+      // 아이가 그만하겠다고 고른 칩이면 다음 질문을 요청하지 않는다(S15P11B209-938).
+      // AI 는 무엇을 그만할지 되묻기만 하고, 실제로 끝내는 것은 여기서 한다.
+      if (await _handleStopIntentOption(optionId)) return;
       await _requestFollowingQuestion(controller.answerMessageId);
+    }
+  }
+
+  /// AI 되묻기(S15P11B209-938)에 아이가 답한 칩을 실제 종료로 옮긴다.
+  ///
+  /// 두 종료는 무게가 다르다. 대화 종료는 그림을 계속 그릴 수 있어 가볍지만, 그림 활동
+  /// 완료는 회고 저장과 다음 단계로 이어져 되돌릴 수 없다. 그래서 대화 종료는 바로
+  /// 처리하고(아이가 방금 골랐으므로 다시 묻지 않는다), 활동 완료는 기존 '다 그렸어요!'
+  /// 확인·회고 흐름을 그대로 태운다 — 새 경로를 만들면 회고 저장 단계를 건너뛴다.
+  ///
+  /// @return 종료를 처리해 다음 질문 요청을 건너뛰어야 하면 true
+  Future<bool> _handleStopIntentOption(String optionId) async {
+    switch (optionId) {
+      case _endTalkOptionId:
+        await _completeConversationAutomatically(
+          ConversationCompletionReason.childRequest,
+        );
+        return true;
+      case _endActivityOptionId:
+        await _confirmAndComplete();
+        return true;
+      default:
+        return false;
     }
   }
 
@@ -1534,7 +1607,8 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _startStroke(PointerDownEvent event) {
-    if (_activePointer != null ||
+    if (_isConversationFocusMode ||
+        _activePointer != null ||
         _voiceRecordingController?.isRecording == true) {
       _cursorController.hide();
       return;
@@ -1754,6 +1828,10 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 터치도 그리는 동안에는 커서를 보여 준다. 손을 떼고 나면 [_endStroke] 가
   /// 숨기므로 손가락이 없는데 커서만 남는 일은 없다.
   void _updateCursor(PointerEvent event) {
+    if (_isConversationFocusMode) {
+      _cursorController.hide();
+      return;
+    }
     final documentBounds = Offset.zero & _documentSize;
     if (!documentBounds.contains(event.localPosition)) {
       _cursorController.hide();
@@ -2372,18 +2450,20 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 말풍선이 보이는 동안에는 만들지 않는다. 질문에 답하는 동안에는 캔버스가
   /// 잠겨 그림도 더 그릴 수 없어, 지금 완료할 이유도 없다.
   Widget? _buildCompleteCta(BuildContext context) {
-    final questionBubbleVisible =
-        _questionDisplayController.isVisible &&
-        _activePointer == null &&
-        (_canvasLocked || _draftRestoreController.canDraw);
-    if (questionBubbleVisible) return null;
-    return DrawingCompleteCta(
-      enabled: !_canvasLocked && _activeStroke == null && _hasDrawingContent,
-      isCompleting: _isCompleting,
-      compact:
-          _deviceClassFor(MediaQuery.sizeOf(context)) !=
-          DrawingCanvasDeviceClass.tablet,
-      onPressed: () => unawaited(_confirmAndComplete()),
+    if (_isConversationFocusMode) return null;
+    return Padding(
+      padding: const EdgeInsets.only(
+        right: AppSpacing.sm,
+        bottom: AppSpacing.sm,
+      ),
+      child: DrawingCompleteCta(
+        enabled: !_canvasLocked && _activeStroke == null && _hasDrawingContent,
+        isCompleting: _isCompleting,
+        compact:
+            _deviceClassFor(MediaQuery.sizeOf(context)) !=
+            DrawingCanvasDeviceClass.tablet,
+        onPressed: () => unawaited(_confirmAndComplete()),
+      ),
     );
   }
 
@@ -2428,6 +2508,7 @@ class _DrawingScreenState extends State<DrawingScreen>
                   backgroundImage: _draftRestoreController.backgroundImage,
                   inputEnabled:
                       !_canvasLocked &&
+                      !_isConversationFocusMode &&
                       !_isCompleting &&
                       !_isLeaving &&
                       _draftRestoreController.canDraw,
@@ -2451,10 +2532,7 @@ class _DrawingScreenState extends State<DrawingScreen>
                   companion: _companionSnapshot,
                   compact: deviceClass != DrawingCanvasDeviceClass.tablet,
                   question: _questionDisplayController.visibleQuestion,
-                  visible:
-                      _questionDisplayController.isVisible &&
-                      _activePointer == null &&
-                      (_canvasLocked || _draftRestoreController.canDraw),
+                  visible: _isConversationFocusMode,
                   selectedOptionId:
                       _questionSelectionController.selectedOptionId,
                   onOptionSelected: (optionId) {
@@ -2542,10 +2620,7 @@ class _DrawingScreenState extends State<DrawingScreen>
                 // 캔버스 위 말풍선이 질문을 보여 주는 동안에는 사이드 패널을
                 // 띄우지 않는다. 같은 질문을 두 번 보여 줄 뿐 아니라, 패널이
                 // 말풍선의 녹음·답변 버튼을 덮어 탭이 닿지 않는다.
-                final questionBubbleVisible =
-                    _questionDisplayController.isVisible &&
-                    _activePointer == null &&
-                    (_canvasLocked || _draftRestoreController.canDraw);
+                final questionBubbleVisible = _isConversationFocusMode;
                 // 말풍선이 지금 질문을 그대로 보여 주고 있을 때만 패널을 접는다.
                 // 말풍선이 이전 질문에 머물러 있으면 새 질문을 볼 곳이 없어진다.
                 final bubbleShowsCurrentQuestion =
@@ -2570,6 +2645,7 @@ class _DrawingScreenState extends State<DrawingScreen>
                     _conversationStartError != null ||
                     _htpAdvanceError != null;
                 final toolbar = DrawingToolbar(
+                  pencilOnly: widget.activityContext.isHtp,
                   toolState: _toolState,
                   quickColors: _quickColors,
                   paletteAnchorLink: _paletteAnchorLink,
@@ -2629,7 +2705,11 @@ class _DrawingScreenState extends State<DrawingScreen>
                         ),
                       ),
                     ),
-                    toolbar,
+                    AbsorbPointer(
+                      key: const ValueKey('drawing-conversation-input-lock'),
+                      absorbing: _isConversationFocusMode,
+                      child: toolbar,
+                    ),
                     Expanded(
                       // 말풍선이 종이 위로 넘쳐 그려질 수 있어야 한다.
                       child: LayoutBuilder(
@@ -2669,26 +2749,29 @@ class _DrawingScreenState extends State<DrawingScreen>
                               Positioned(
                                 left: frameInset + AppSpacing.md,
                                 bottom: frameInset + AppSpacing.md,
-                                child: AnimatedBuilder(
-                                  animation: tutorialController,
-                                  builder: (context, _) =>
-                                      IconButton.filledTonal(
-                                        key: const ValueKey(
-                                          'canvas-tutorial-help',
-                                        ),
-                                        tooltip: '그림 도구 다시 보기',
-                                        onPressed: tutorialController.isBusy
-                                            ? null
-                                            : tutorialController.replay,
-                                        icon: const Icon(
-                                          Icons.help_outline_rounded,
-                                        ),
-                                        style: IconButton.styleFrom(
-                                          minimumSize: const Size.square(
-                                            AppSizes.iconButton,
+                                child: AbsorbPointer(
+                                  absorbing: _isConversationFocusMode,
+                                  child: AnimatedBuilder(
+                                    animation: tutorialController,
+                                    builder: (context, _) =>
+                                        IconButton.filledTonal(
+                                          key: const ValueKey(
+                                            'canvas-tutorial-help',
+                                          ),
+                                          tooltip: '그림 도구 다시 보기',
+                                          onPressed: tutorialController.isBusy
+                                              ? null
+                                              : tutorialController.replay,
+                                          icon: const Icon(
+                                            Icons.help_outline_rounded,
+                                          ),
+                                          style: IconButton.styleFrom(
+                                            minimumSize: const Size.square(
+                                              AppSizes.iconButton,
+                                            ),
                                           ),
                                         ),
-                                      ),
+                                  ),
                                 ),
                               ),
                             // 보여줄 질문·오류가 있을 때만 띄운다. 빈 상자를 겹쳐 두면
@@ -4131,37 +4214,37 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
                           const SizedBox(height: AppSpacing.lg),
                           LayoutBuilder(
                             builder: (context, contentConstraints) {
-                              final textScale = MediaQuery.textScalerOf(
-                                context,
-                              ).scale(1);
-                              final useWideLayout =
-                                  contentConstraints.maxWidth >= 680 &&
-                                  textScale <= 1.3;
-                              final previewHeight = useWideLayout
-                                  ? (contentConstraints.maxWidth * 0.42)
-                                        .clamp(280.0, 420.0)
-                                        .toDouble()
-                                  : (contentConstraints.maxWidth * 0.56)
-                                        .clamp(140.0, 240.0)
-                                        .toDouble();
-                              final preview = CompletedDrawingPreview(
-                                completedDrawingImage:
-                                    widget.activityContext.isHtp
-                                    ? null
-                                    : widget.completedDrawingImage,
-                                height: previewHeight,
-                              );
                               final assessmentId =
                                   widget.activityContext.htpAssessmentId;
-                              final previewWidget =
-                                  widget.activityContext.isHtp &&
-                                      assessmentId != null
-                                  ? HtpEmotionPreviewGallery(
-                                      childId: widget.childId,
-                                      assessmentId: assessmentId,
-                                      repository: widget.activityRepository,
-                                    )
-                                  : preview;
+                              final Widget previewWidget;
+                              if (widget.activityContext.isHtp &&
+                                  assessmentId != null) {
+                                // HTP: 집·나무·사람 3개 그림을 가로로 나란히 보여준다.
+                                previewWidget = HtpEmotionPreviewGallery(
+                                  childId: widget.childId,
+                                  assessmentId: assessmentId,
+                                  repository: widget.activityRepository,
+                                );
+                              } else {
+                                // 그림일기: 그림이 1개이므로 HTP 카드 한 칸과 비슷한
+                                // 크기로 중앙에 정렬한다(S15P11B209-919).
+                                final previewWidth =
+                                    (contentConstraints.maxWidth * 0.32)
+                                        .clamp(220.0, 380.0)
+                                        .toDouble();
+                                previewWidget = Center(
+                                  child: SizedBox(
+                                    width: previewWidth,
+                                    child: CompletedDrawingPreview(
+                                      completedDrawingImage:
+                                          widget.completedDrawingImage,
+                                      height: (previewWidth * 0.75)
+                                          .clamp(160.0, 300.0)
+                                          .toDouble(),
+                                    ),
+                                  ),
+                                );
+                              }
                               final controls = _buildEmotionControls(
                                 selectedPresentation: selectedPresentation,
                                 lockedSubmissionKind: lockedSubmissionKind,
@@ -4171,33 +4254,14 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
                                 hasSaveContract: hasSaveContract,
                                 reflectionInputLocked: reflectionInputLocked,
                               );
-                              if (!useWideLayout ||
-                                  widget.activityContext.isHtp) {
-                                return Column(
-                                  key: const ValueKey('emotion-compact-layout'),
-                                  crossAxisAlignment:
-                                      CrossAxisAlignment.stretch,
-                                  children: [
-                                    previewWidget,
-                                    const SizedBox(height: AppSpacing.lg),
-                                    controls,
-                                  ],
-                                );
-                              }
-                              final previewWidth =
-                                  (contentConstraints.maxWidth * 0.38)
-                                      .clamp(260.0, 380.0)
-                                      .toDouble();
-                              return Row(
-                                key: const ValueKey('emotion-wide-layout'),
-                                crossAxisAlignment: CrossAxisAlignment.start,
+                              // 그림일기·HTP 모두 동일 레이아웃: 그림(위) + 감정(아래).
+                              return Column(
+                                key: const ValueKey('emotion-compact-layout'),
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  SizedBox(
-                                    width: previewWidth,
-                                    child: previewWidget,
-                                  ),
-                                  const SizedBox(width: AppSpacing.lg),
-                                  Expanded(child: controls),
+                                  previewWidget,
+                                  const SizedBox(height: AppSpacing.lg),
+                                  controls,
                                 ],
                               );
                             },

@@ -822,11 +822,12 @@ class SubjectPromptAndTargetTest(unittest.TestCase):
                 asked_object_codes=["HOUSE"],
             )
         )[0]["content"]
-        self.assertIn("다시 묻지 말", with_asked)
+        # 921에서 "다시 묻지 말고, 새로운 것을" → "다시 묻지 마."로 갈랐다(뒤 문장이 분리됐다).
+        self.assertIn("다시 묻지 마", with_asked)
         without_asked = question_service._build_messages(
             self._htp(detected_objects=[_detected("HOUSE", "집", 0.9)])
         )[0]["content"]
-        self.assertNotIn("다시 묻지 말", without_asked)
+        self.assertNotIn("다시 묻지 마", without_asked)
 
 
 class SubjectPinningScopeTest(unittest.TestCase):
@@ -1389,6 +1390,540 @@ class AnswerChipQualityTest(unittest.TestCase):
             ["놀아요", "먹어요", "자요", "더 이야기해 줄래"],
         )
         self.assertEqual(client.chat.completions.create.call_count, 2)
+
+
+class DetectionNameEvidenceTest(unittest.TestCase):
+    """탐지 이름은 그림 서술이 뒷받침할 때만 쓴다 (S15P11B209-918).
+
+    자유 그림 탐지(sketch)는 임계값 0.20이라 오탐이 후보에 그대로 남는다. 이름이 프롬프트에
+    들어가면 모델은 그걸 실제 대상으로 단정한다 — 2026-08-05 실측에서 '덤불' 10/10.
+    """
+
+    def _diary(self, **overrides):
+        # current_question_count=1: 완전 첫 질문은 921이 고정 문구로 가로채 GMS를 부르지
+        # 않는다. 여기서 재는 것은 그 뒤의 이름 근거 대조라 첫 질문 분기를 지나 보낸다.
+        base = {"activity_type": "ART_DIARY", "current_question_count": 1}
+        base.update(overrides)
+        return _request(**base)
+
+    def test_unmentioned_name_is_not_selected_as_target(self):
+        req = self._diary(
+            detected_objects=[
+                _detected("BUSH", "덤불", 0.86),
+                _detected("PERSON", "사람", 0.79),
+            ],
+            drawing_description="가운데에 사람이 서 있고 검은색 머리카락이 크게 있어요.",
+        )
+        target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        self.assertEqual(target.object_code, "PERSON")  # 신뢰도 최고인 덤불이 아니다
+
+    def test_unmentioned_name_is_not_in_prompt(self):
+        """대상만 막으면 모델이 '그림에서 찾은 것' 목록에서 이름을 집어 온다(918 '달' 경로)."""
+        req = self._diary(
+            detected_objects=[
+                _detected("BUSH", "덤불", 0.86),
+                _detected("MOON", "달", 0.72),
+                _detected("PERSON", "사람", 0.79),
+            ],
+            drawing_description="가운데에 사람이 서 있어요.",
+        )
+        # 프롬프트 전체가 아니라 '그림 분석 결과' 재료만 본다 — '달'은 가드레일 문장의
+        # 다른 낱말("말해 달라고")에도 들어 있어 전체 검색으로는 판정할 수 없다.
+        material = question_service._drawing_analysis_text(req)
+        self.assertNotIn("덤불", material)
+        self.assertNotIn("달", material)
+        self.assertIn("사람", material)
+        self.assertIn(material, question_service._build_messages(req)[0]["content"])
+
+    def test_no_description_leaves_no_nameable_object(self):
+        """서술이 없으면 아무 이름도 뒷받침되지 않는다 → 그림 전체를 여는 질문으로."""
+        req = self._diary(
+            detected_objects=[_detected("BUSH", "덤불", 0.86)],
+            drawing_description=None,
+        )
+        self.assertEqual([], question_service._nameable_objects(req))
+        capture: dict = {}
+        client = _mock_client(capture, reply="오늘은 어떤 이야기를 그린 거야?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-918")
+        self.assertEqual("DRAWING_CONTEXT", resp.question_purpose)
+        self.assertIsNone(resp.target_object)
+        self.assertNotIn("덤불", capture["system"])
+        # 이름을 못 쓰게만 하면 모델이 할 일이 없다 — 대신 무엇을 물을지 지시해야 한다.
+        self.assertIn("열린 질문", capture["system"])
+
+    def test_htp_keeps_detection_names_without_description(self):
+        """HTP는 대조하지 않는다 — 주제가 정해져 있고 표시명이 서술 표현과 다를 수 있다."""
+        req = _request(
+            activity_type="HTP",
+            drawing_subject="HOUSE",
+            detected_objects=[_detected("HOUSE_DOOR", "집의 문", 0.71)],
+            drawing_description="가운데에 네모난 것이 하나 있어요.",
+        )
+        target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        self.assertEqual("HOUSE_DOOR", target.object_code)
+
+    def test_name_inside_another_word_does_not_count(self):
+        """부분 문자열만 보면 '해'가 "칠해져 있어요"에 걸린다 — 앞 글자가 한글이면 제외."""
+        self.assertFalse(question_service._mentioned_in("해", "지붕을 빨갛게 칠해져 있어요."))
+        self.assertTrue(question_service._mentioned_in("해", "왼쪽 위에 노란 해가 있어요."))
+
+    def test_open_block_not_added_after_child_spoke(self):
+        """아이가 말한 뒤에는 '열린 질문을 해'와 '아이 말을 따라가'가 서로 밀어낸다."""
+        req = self._diary(
+            detected_objects=[_detected("BUSH", "덤불", 0.86)],
+            drawing_description=None,
+            recent_messages=[
+                RecentMessage(sender_type="AI", message_type="QUESTION", text="뭘 그렸어?"),
+                RecentMessage(sender_type="CHILD", message_type="ANSWER", text="이거 나야."),
+            ],
+        )
+        block = question_service._activity_block(req, None)
+        self.assertNotIn("열린 질문", block)
+
+
+class PersonPartTargetTest(unittest.TestCase):
+    """HTP 사람 그림의 부위 취급 (S15P11B209-918)."""
+
+    def _person(self, **overrides):
+        base = {"activity_type": "HTP", "drawing_subject": "PERSON"}
+        base.update(overrides)
+        return _request(**base)
+
+    def test_whole_person_wins_over_higher_confidence_part(self):
+        req = self._person(
+            detected_objects=[
+                _detected("PERSON_HEAD", "머리", 0.95),
+                _detected("PERSON_HAIR", "머리카락", 0.91),
+                _detected("PERSON", "사람", 0.84),
+            ]
+        )
+        target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        self.assertEqual("PERSON", target.object_code)
+
+    def test_part_is_used_when_whole_person_is_absent(self):
+        req = self._person(
+            detected_objects=[
+                _detected("PERSON_HEAD", "머리", 0.95),
+                _detected("PERSON_ARM", "팔", 0.72),
+            ]
+        )
+        target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        self.assertEqual("PERSON_HEAD", target.object_code)
+
+    def test_part_target_adds_visual_only_instruction(self):
+        req = self._person(detected_objects=[_detected("PERSON_HEAD", "머리", 0.95)])
+        target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        block = question_service._activity_block(req, target)
+        self.assertIn("누구 것인지", block)
+        self.assertIn("모양·크기·색", block)
+
+    def test_whole_person_target_has_no_part_instruction(self):
+        req = self._person(detected_objects=[_detected("PERSON", "사람", 0.9)])
+        target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        self.assertNotIn("누구 것인지", question_service._activity_block(req, target))
+
+    def test_house_subject_keeps_confidence_order(self):
+        """집·나무는 부위가 PDI 표준 문항의 대상이라 그대로 둔다 — 713 규칙 회귀 방어."""
+        req = _request(
+            activity_type="HTP",
+            drawing_subject="HOUSE",
+            detected_objects=[
+                _detected("HOUSE_ROOF", "지붕", 0.94),
+                _detected("HOUSE", "집", 0.60),
+            ],
+        )
+        target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        self.assertEqual("HOUSE_ROOF", target.object_code)
+
+
+class AwkwardQuestionReplacementTest(unittest.TestCase):
+    """어색한 소유격 질문은 차단하지 않고 교체한다 (S15P11B209-918).
+
+    차단(422)하면 BE가 폴백 템플릿으로 대체해 대화가 더 나빠진다 — 안전 위반이 아니라
+    품질 결함이라 대화를 끊을 이유가 없다.
+    """
+
+    def _person_req(self, **overrides):
+        base = {
+            "activity_type": "HTP",
+            "drawing_subject": "PERSON",
+            "detected_objects": [_detected("PERSON_HEAD", "머리", 0.95)],
+            "allowed_response_modes": ["VOICE", "OPTION"],
+        }
+        base.update(overrides)
+        return _request(**base)
+
+    def test_possessive_question_is_replaced_not_blocked(self):
+        capture: dict = {}
+        client = _mock_client(capture, reply="이 머리는 누구의 머리야?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(self._person_req(), "req-918")
+        self.assertNotIn("누구", resp.question_text)
+        self.assertIn("머리", resp.question_text)  # 대상은 유지된다
+        self.assertEqual("PASSED", resp.safety_result.status)
+        self.assertEqual("PERSON_HEAD", resp.target_object.object_code)
+
+    def test_replacement_uses_correct_particle(self):
+        capture: dict = {}
+        client = _mock_client(capture, reply="머리카락은 누구 거야?")
+        req = self._person_req(
+            detected_objects=[_detected("PERSON_HAIR", "머리카락", 0.95)]
+        )
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-918")
+        self.assertEqual("그림 속 머리카락은 어떤 모양이야?", resp.question_text)
+
+    def test_replacement_without_target_opens_the_whole_drawing(self):
+        capture: dict = {}
+        client = _mock_client(capture, reply="누구의 발이야?")
+        req = _request(
+            activity_type="ART_DIARY",
+            allowed_response_modes=["VOICE", "OPTION"],
+            detected_objects=[_detected("BUSH", "덤불", 0.86)],
+            drawing_description=None,  # 이름 근거가 없어 대상이 붙지 않는다
+            current_question_count=1,  # 완전 첫 질문은 921이 고정 문구로 가로챈다
+        )
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-918")
+        self.assertEqual(question_service.QUALITY_OPEN_QUESTION, resp.question_text)
+        self.assertEqual("DRAWING_CONTEXT", resp.question_purpose)
+        self.assertIsNone(resp.target_object)
+        # 방금 억누른 오탐 이름이 칩으로 다시 올라오면 안 된다.
+        self.assertNotIn("덤불", [o.label for o in resp.options])
+
+    def test_normal_question_is_untouched(self):
+        capture: dict = {}
+        client = _mock_client(capture, reply="그림 속 사람은 지금 뭐 하고 있어?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(self._person_req(), "req-918")
+        self.assertEqual("그림 속 사람은 지금 뭐 하고 있어?", resp.question_text)
+
+    def test_replacement_reason_logged_without_raw_question(self):
+        capture: dict = {}
+        client = _mock_client(capture, reply="이 머리는 누구의 머리야?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            with self.assertLogs("question_service", level="WARNING") as logs:
+                question_service.generate(self._person_req(), "req-918")
+        joined = "\n".join(logs.output)
+        self.assertIn("POSSESSIVE_BODY_PART", joined)
+        self.assertNotIn("누구의 머리야", joined)  # 질문 원문은 로그 금지
+
+
+class DiaryOpeningQuestionTest(unittest.TestCase):
+    """그림일기 완전 첫 질문 고정 (S15P11B209-921).
+
+    무엇을 그렸는지는 아이만 아는 정보다. 자유 그림에서 AI가 실마리를 추측해 대화를 열면
+    918의 오탐 단정이 된다 — 첫 질문은 추측하지 않고 직접 묻는다.
+    """
+
+    def _opening_req(self, **overrides):
+        base = {
+            "activity_type": "ART_DIARY",
+            "current_question_count": 0,
+            "allowed_response_modes": ["VOICE", "OPTION"],
+            "detected_objects": [_detected("BUSH", "덤불", 0.86)],
+        }
+        base.update(overrides)
+        return _request(**base)
+
+    def test_opening_is_fixed_and_skips_gms(self):
+        client = _mock_client({}, reply="이 덤불은 어떤 모습이야?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(self._opening_req(), "req-921")
+        self.assertEqual("오늘 뭐 그렸는지 이야기해 줄래?", resp.question_text)  # PRESCHOOL
+        client.chat.completions.create.assert_not_called()
+        self.assertEqual("DRAWING_CONTEXT", resp.question_purpose)
+        self.assertIsNone(resp.target_object)
+        self.assertEqual("PASSED", resp.safety_result.status)
+        self.assertFalse(resp.fallback_used)  # AI가 정한 질문이다 — BE 폴백이 아니다
+
+    def test_opening_wording_differs_by_difficulty(self):
+        for difficulty, expected in (
+            ("PRESCHOOL", "오늘 뭐 그렸는지 이야기해 줄래?"),
+            ("SUPPORT", "오늘 뭐 그렸는지 이야기해 줄래?"),
+            ("LOWER_ELEMENTARY", "오늘 뭐 그린 건지 설명해줄래?"),
+            ("UPPER_ELEMENTARY", "오늘 뭐 그린 건지 설명해줄래?"),
+        ):
+            with self.subTest(difficulty=difficulty):
+                client = _mock_client({})
+                with mock.patch.object(
+                    question_service, "get_client", return_value=client
+                ):
+                    resp = question_service.generate(
+                        self._opening_req(difficulty=difficulty), "req-921"
+                    )
+                self.assertEqual(expected, resp.question_text)
+
+    def test_opening_uses_dedicated_chips(self):
+        client = _mock_client({})
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(self._opening_req(), "req-921")
+        self.assertEqual(
+            ["응, 말해줄게", "음… 잘 모르겠어", "그냥 그리고 싶었어"],
+            [o.label for o in resp.options],
+        )
+        # 첫 질문에서 실제·상상을 먼저 정하지 말라는 규칙과 어긋나는 generic 칩은 안 쓴다.
+        self.assertNotIn("상상해서 그렸어", [o.label for o in resp.options])
+
+    def test_opening_omits_options_when_option_not_allowed(self):
+        client = _mock_client({})
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(
+                self._opening_req(allowed_response_modes=["VOICE"]), "req-921"
+            )
+        self.assertIsNone(resp.options)  # 빈 배열도 계약 위반이다
+
+    def test_second_question_is_not_fixed(self):
+        capture: dict = {}
+        client = _mock_client(capture, reply="그다음엔 뭘 그렸어?")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(
+                self._opening_req(current_question_count=1), "req-921"
+            )
+        self.assertEqual("그다음엔 뭘 그렸어?", resp.question_text)
+        client.chat.completions.create.assert_called()
+
+    def test_htp_first_question_is_not_fixed(self):
+        """HTP는 활동이 주제를 정해 두어 무엇을 그렸는지 알고 시작한다 — 그대로 GPT가 만든다."""
+        capture: dict = {}
+        client = _mock_client(capture, reply="집을 크게 그렸네! 지붕은 무슨 색이야?")
+        req = _request(
+            activity_type="HTP",
+            drawing_subject="HOUSE",
+            current_question_count=0,
+            detected_objects=[_detected("HOUSE", "집", 0.9)],
+        )
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-921")
+        self.assertEqual("집을 크게 그렸네! 지붕은 무슨 색이야?", resp.question_text)
+
+
+class StopIntentTest(unittest.TestCase):
+    """그만하기 의사를 되묻는다 (S15P11B209-938).
+
+    AI는 끝내지 않는다 — 무엇을 그만할지 되묻고, 실제 종료는 FE가 칩 선택을 보고 한다.
+    """
+
+    def _req(self, utterance: str, *, activity="ART_DIARY", codes=None, **overrides):
+        base = {
+            "activity_type": activity,
+            "current_question_count": 2,
+            "allowed_response_modes": ["VOICE", "OPTION"],
+            "detected_objects": [_detected("PERSON", "사람", 0.9)],
+            "drawing_description": "가운데에 사람이 한 명 서 있어요.",
+            "recent_messages": [
+                RecentMessage(
+                    sender_type="AI", message_type="QUESTION", text="이 사람은 누구야?"
+                ),
+                RecentMessage(
+                    sender_type="CHILD",
+                    message_type="ANSWER",
+                    text=utterance,
+                    selected_option_codes=codes,
+                ),
+            ],
+        }
+        if activity == "HTP":
+            base["drawing_subject"] = "PERSON"
+        base.update(overrides)
+        return _request(**base)
+
+    def _generate(self, req):
+        client = _mock_client({}, reply="다른 질문이야")
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-938")
+        return resp, client
+
+    def test_unspecified_stop_asks_which_one(self):
+        resp, client = self._generate(self._req("이제 그만할래"))
+        self.assertEqual(question_service.STOP_ASK_BOTH, resp.question_text)
+        self.assertEqual(
+            ["CHIP_END_ACTIVITY", "CHIP_END_TALK", "CHIP_KEEP_GOING"],
+            [o.code for o in resp.options],
+        )
+        client.chat.completions.create.assert_not_called()  # GMS 미호출
+        self.assertEqual("FOLLOW_UP", resp.question_purpose)
+        self.assertIsNone(resp.target_object)
+        self.assertEqual("PASSED", resp.safety_result.status)
+
+    def test_drawing_stop_skips_the_question(self):
+        resp, _ = self._generate(self._req("그림 그만 그릴래"))
+        self.assertEqual(question_service.STOP_ASK_DRAWING, resp.question_text)
+        self.assertEqual(
+            ["CHIP_END_ACTIVITY", "CHIP_KEEP_GOING"], [o.code for o in resp.options]
+        )
+
+    def test_conversation_stop_skips_the_question(self):
+        resp, _ = self._generate(self._req("이야기 그만할래"))
+        self.assertEqual(question_service.STOP_ASK_CONVERSATION, resp.question_text)
+        self.assertEqual(
+            ["CHIP_END_TALK", "CHIP_KEEP_GOING"], [o.code for o in resp.options]
+        )
+
+    def test_htp_never_offers_to_end_the_drawing(self):
+        """HTP는 주제 그림을 완료한 뒤에야 대화가 시작된다 — 그림 갈래가 성립하지 않는다."""
+        for utterance in ("이제 그만할래", "그림 그만 그릴래"):
+            with self.subTest(utterance=utterance):
+                resp, _ = self._generate(self._req(utterance, activity="HTP"))
+                codes = [o.code for o in resp.options]
+                self.assertNotIn("CHIP_END_ACTIVITY", codes)
+                self.assertEqual(["CHIP_END_TALK", "CHIP_KEEP_GOING"], codes)
+
+    def test_unknown_activity_does_not_offer_activity_end(self):
+        """무엇을 하는 중인지 모르면 되돌릴 수 없는 쪽을 권하지 않는다(구 BE 요청)."""
+        resp, _ = self._generate(self._req("이제 그만할래", activity=None))
+        self.assertNotIn("CHIP_END_ACTIVITY", [o.code for o in resp.options])
+
+    def test_keep_going_choice_stops_the_reask(self):
+        """계속 되물으면 그만두라고 떠미는 것처럼 들린다."""
+        req = self._req("이제 그만할래", codes=["CHIP_KEEP_GOING"])
+        resp, client = self._generate(req)
+        self.assertEqual("다른 질문이야", resp.question_text)
+        client.chat.completions.create.assert_called()
+
+    def test_skip_intent_is_not_treated_as_stop(self):
+        """831 건너뛰기 회귀 방어 — 아이는 다음 질문을 원한 것이다."""
+        resp, client = self._generate(self._req("이건 말하기 싫어. 다른 질문 해줘"))
+        self.assertEqual("다른 질문이야", resp.question_text)
+        client.chat.completions.create.assert_called()
+
+    def test_crisis_wins_over_stop_intent(self):
+        """'다 싫어, 그만할래'는 위기 신호일 수 있다 — 위기 경로가 먼저다."""
+        req = self._req("다 그만하고 싶어. 죽고 싶어.")
+        resp, client = self._generate(req)
+        self.assertEqual(question_service.CRISIS_SAFE_QUESTION, resp.question_text)
+        client.chat.completions.create.assert_not_called()
+
+    def test_options_omitted_when_option_not_allowed(self):
+        req = self._req("이제 그만할래", allowed_response_modes=["VOICE"])
+        resp, _ = self._generate(req)
+        self.assertIsNone(resp.options)  # 빈 배열도 계약 위반이다
+
+    def test_reason_logged_without_raw_utterance(self):
+        with self.assertLogs("question_service", level="INFO") as logs:
+            self._generate(self._req("이제 그만할래"))
+        joined = "\n".join(logs.output)
+        self.assertIn("STOP_UNSPECIFIED", joined)
+        self.assertNotIn("그만할래", joined)  # 아이 발화 원문은 로그 금지
+
+
+class AskedQuestionRepetitionTest(unittest.TestCase):
+    """이미 물어본 질문을 프롬프트에 나열해 반복을 막는다 (S15P11B209-921)."""
+
+    def test_previous_ai_questions_are_listed(self):
+        req = _request(
+            activity_type="ART_DIARY",
+            current_question_count=2,
+            detected_objects=[_detected("PERSON", "사람", 0.9)],
+            drawing_description="가운데에 사람이 한 명 서 있어요.",
+            recent_messages=[
+                RecentMessage(
+                    sender_type="AI", message_type="QUESTION", text="이 사람은 누구야?"
+                ),
+                RecentMessage(
+                    sender_type="AI", message_type="QUESTION", text="어떤 옷을 입고 있어?"
+                ),
+            ],
+        )
+        block = question_service._activity_block(req, None)
+        self.assertIn("이 사람은 누구야?", block)
+        self.assertIn("어떤 옷을 입고 있어?", block)
+        self.assertIn("표현만 바꿔 다시 묻지 마", block)
+
+    def test_no_block_when_no_previous_question(self):
+        req = _request(
+            activity_type="ART_DIARY",
+            current_question_count=1,
+            detected_objects=[_detected("PERSON", "사람", 0.9)],
+            drawing_description="가운데에 사람이 한 명 서 있어요.",
+        )
+        self.assertNotIn("이미 이렇게 물어봤어", question_service._activity_block(req, None))
+
+    def test_only_recent_questions_are_listed(self):
+        """전부 실으면 지시 블록이 대화 이력만큼 길어져 다른 규칙을 밀어낸다."""
+        req = _request(
+            recent_messages=[
+                RecentMessage(
+                    sender_type="AI", message_type="QUESTION", text=f"질문{i}?"
+                )
+                for i in range(8)
+            ],
+        )
+        asked = question_service._asked_questions(req)
+        self.assertEqual(5, len(asked))
+        self.assertEqual("질문3?", asked[0])  # 오래된 것부터 잘린다
+        self.assertEqual("질문7?", asked[-1])
+
+
+class SingleTargetTest(unittest.TestCase):
+    """대상이 하나뿐이면 두 번째 대상을 지어내지 못하게 한다 (S15P11B209-921).
+
+    구 [[ASKED_ALREADY]]의 "새로운 것을 물어봐"가 '다른 물건'으로 읽혀, 사람 한 명만 있는
+    그림에서도 "옆에 있는 건 뭐야?"가 나왔다.
+    """
+
+    def _person(self, **overrides):
+        base = {"activity_type": "HTP", "drawing_subject": "PERSON"}
+        base.update(overrides)
+        return _request(**base)
+
+    def test_person_and_parts_count_as_one_target(self):
+        req = self._person(
+            detected_objects=[
+                _detected("PERSON", "사람", 0.9),
+                _detected("PERSON_HEAD", "머리", 0.88),
+                _detected("PERSON_HAIR", "머리카락", 0.85),
+            ]
+        )
+        self.assertEqual(1, question_service._target_group_count(req))
+        self.assertIn("대상이 하나뿐", question_service._activity_block(req, None))
+
+    def test_house_parts_count_separately(self):
+        """지붕·문·창문은 PDI가 각각 묻는 대상이라 묶지 않는다 — 713 회귀 방어."""
+        req = _request(
+            activity_type="HTP",
+            drawing_subject="HOUSE",
+            detected_objects=[
+                _detected("HOUSE_ROOF", "지붕", 0.9),
+                _detected("HOUSE_DOOR", "문", 0.85),
+            ],
+        )
+        self.assertEqual(2, question_service._target_group_count(req))
+        self.assertNotIn("대상이 하나뿐", question_service._activity_block(req, None))
+
+    def test_asked_person_excludes_its_parts_from_target(self):
+        """사람을 물어본 뒤 머리를 대상으로 잡으면 같은 사람을 또 묻는 것으로 들린다."""
+        req = self._person(
+            detected_objects=[
+                _detected("PERSON", "사람", 0.9),
+                _detected("PERSON_HEAD", "머리", 0.88),
+            ],
+            asked_object_codes=["PERSON"],
+        )
+        self.assertIsNone(
+            question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        )
+
+    def test_asked_house_part_keeps_other_parts(self):
+        req = _request(
+            activity_type="HTP",
+            drawing_subject="HOUSE",
+            detected_objects=[
+                _detected("HOUSE_ROOF", "지붕", 0.9),
+                _detected("HOUSE_DOOR", "문", 0.85),
+            ],
+            asked_object_codes=["HOUSE_ROOF"],
+        )
+        target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        self.assertEqual("HOUSE_DOOR", target.object_code)
+
+    def test_prompt_forbids_second_target_wording(self):
+        req = self._person(detected_objects=[_detected("PERSON", "사람", 0.9)])
+        block = question_service._activity_block(req, None)
+        self.assertIn("두 번째 대상이 있다고 전제하는 말은 쓰지 마", block)
+        # 금지 예시 문장을 적으면 그 자체가 앵커가 된다(808) — 낱말만 짚는다.
+        self.assertNotIn("옆에 있는 건 뭐야?", block)
 
 
 if __name__ == "__main__":

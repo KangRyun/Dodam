@@ -1,0 +1,1598 @@
+/* 루트 랜딩(`/`) 전용 스타일(S15P11B209-880).
+ *
+ * 모든 규칙을 `.landing` wrapper 안으로 한정한다. 이 파일은 루트 page가 import하므로
+ * 한 번 로드되면 client 이동 뒤에도 문서에 남는다 — 전역 selector를 두면 /community 등
+ * 다른 route까지 오염된다. `box-sizing`·`body`·`.sr-only` 는 globals.css가 이미 전역으로
+ * 제공하므로 여기서 다시 정의하지 않는다.
+ *
+ * 색은 앱과 공유하는 토큰을 쓴다 — 초록(보호자) 계열은 Flutter `AppColors.leaf`(#5F9E73)·
+ * `leafPressed`(#477D59)·`leafSoft`(#EAF5EC), 아동 계열은 `childCanvas`(#FFF6D9),
+ * 중립선은 `outline`(#DDE2DC), 본문은 `ink`(#27313A)·`inkMuted`(#68737D)와 같은 값이다.
+ *
+ * 위계는 크기·간격·색으로 만든다. 제목 700, 본문 400~500을 넘기지 않는다. */
+.landing {
+  --l-ivory: #fff9ef;
+  --l-cream: #fffdf7;
+  --l-yellow: #ffd84d;
+  --l-yellow-deep: #f0c02f;
+  --l-child-canvas: #fff6d9;
+  --l-green: #5f9e73;
+  --l-green-deep: #477d59;
+  --l-green-ink: #315b49;
+  --l-green-soft: #eaf5ec;
+  --l-text: #27313a;
+  --l-text-soft: #4e5862;
+  --l-text-mute: #68737d;
+  --l-line: #e6dcc8;
+  --l-line-neutral: #dde2dc;
+  --l-card: #fff;
+
+  /* 선·그림자 — 굵은 검정 테두리와 강한 오프셋 그림자를 절제한다. */
+  --l-border: 1.5px solid var(--l-line);
+  --l-border-strong: 1.5px solid #cfc3aa;
+  --l-shadow: 0 10px 28px rgb(120 95 40 / 10%);
+  --l-shadow-sm: 0 4px 14px rgb(120 95 40 / 8%);
+
+  /* 간격 — 카드 그리드, 그룹 사이, 섹션 사이를 각각 토큰으로 둔다. */
+  --l-gap: 32px;
+  --l-group-gap: 52px;
+  --l-section-y: 96px;
+
+  --l-radius: 18px;
+  --l-radius-lg: 24px;
+  --l-maxw: 1200px;
+  --l-header-h: 68px;
+
+  min-height: 100vh;
+  color: var(--l-text);
+  line-height: 1.7;
+  font-family:
+    Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic",
+    system-ui, sans-serif;
+  background:
+    radial-gradient(720px 340px at 88% -4%, #fff3d6 0, transparent 60%),
+    radial-gradient(620px 320px at 4% 8%, #eaf3fb 0, transparent 58%),
+    var(--l-ivory);
+}
+
+.landing,
+.landing * {
+  box-sizing: border-box;
+}
+
+.landing [id] {
+  scroll-margin-top: calc(var(--l-header-h) + 18px);
+}
+
+.landing-container {
+  width: min(100% - 40px, var(--l-maxw));
+  margin-inline: auto;
+}
+
+.landing h2 {
+  margin: 0;
+  font-size: clamp(23px, 3vw, 31px);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+
+.landing p {
+  margin: 0;
+}
+
+.landing-eyebrow {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 15px;
+  border-radius: 999px;
+  background: #fff4cf;
+  border: 1px solid #f0dfa4;
+  color: #8a6c12;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+/* 히어로 둘째 줄 — 주황→코랄→분홍 그라데이션. background-clip 미지원 브라우저는
+ * fallback color 로 읽히게 색을 먼저 둔다. */
+.landing-grad {
+  color: #ef7f52;
+  background: linear-gradient(90deg, #f2a63a 0, #ff8f6b 55%, #ff7a9c 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+}
+
+@supports (-webkit-text-fill-color: transparent) {
+  .landing-grad {
+    -webkit-text-fill-color: transparent;
+  }
+}
+
+.landing-section {
+  padding: clamp(var(--l-section-y-sm, 64px), 8vw, var(--l-section-y)) 0;
+}
+
+.landing-section-head {
+  max-width: 620px;
+  margin: 0 auto var(--l-gap);
+  text-align: center;
+}
+
+.landing-section-head p {
+  margin-top: 12px;
+  color: var(--l-text-soft);
+  font-size: 16px;
+}
+
+/* 버튼 */
+.landing-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 54px;
+  padding: 15px 26px;
+  border: none;
+  border-radius: 16px;
+  font-size: 16px;
+  font-weight: 700;
+  font-family: inherit;
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    transform 0.14s ease,
+    box-shadow 0.16s ease,
+    background-color 0.16s ease;
+}
+
+/* 투명 테두리를 같은 두께로 둬 secondary 와 border-box 높이를 정확히 맞춘다. */
+.landing-btn-primary {
+  background: linear-gradient(180deg, var(--l-yellow), var(--l-yellow-deep));
+  color: #5a4406;
+  border: 1.5px solid transparent;
+  box-shadow: 0 8px 18px rgb(240 192 47 / 38%);
+}
+
+.landing-btn-arrow {
+  flex: none;
+  width: 18px;
+  height: 18px;
+}
+
+/* 커뮤니티 버튼 — 흰 배경 + 옅은 파란 테두리 + 청회색 글자. primary 와 같은 높이. */
+.landing-btn-secondary {
+  background: #fff;
+  color: #3e6fb1;
+  border: 1.5px solid #cfe0f2;
+}
+
+.landing-btn:focus-visible {
+  outline: 3px solid rgb(95 158 115 / 45%);
+  outline-offset: 3px;
+}
+
+/* 헤더 */
+.landing-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  min-height: var(--l-header-h);
+  background: rgb(255 249 239 / 88%);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--l-line);
+}
+
+.landing-header-inner {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  min-height: var(--l-header-h);
+}
+
+.landing-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--l-text);
+  text-decoration: none;
+}
+
+.landing-logo-img {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.landing-nav {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.landing-nav a {
+  padding: 8px 13px;
+  border-radius: 999px;
+  color: var(--l-text-soft);
+  font-size: 15px;
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.landing-nav a:hover {
+  background: #fff4cf;
+  color: #8a6c12;
+}
+
+.landing-header-cta {
+  margin-left: 6px;
+  min-height: 42px;
+  padding: 10px 18px;
+  font-size: 15px;
+}
+
+.landing-menu {
+  position: relative;
+  margin-left: auto;
+  display: none;
+}
+
+.landing-menu > summary {
+  list-style: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: var(--l-border);
+  border-radius: 12px;
+  background: #fff;
+  font-weight: 600;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.landing-menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.landing-menu-icon {
+  width: 18px;
+  height: 18px;
+  color: var(--l-text-soft);
+}
+
+.landing-menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 10px);
+  width: 240px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px;
+  background: #fff;
+  border: 1px solid var(--l-line);
+  border-radius: 16px;
+  box-shadow: var(--l-shadow);
+}
+
+.landing-menu-panel a {
+  padding: 12px 14px;
+  border-radius: 10px;
+  color: var(--l-text);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.landing-menu-panel a:hover {
+  background: #fff6da;
+}
+
+.landing-menu-panel .landing-btn {
+  margin-top: 6px;
+}
+
+/* Hero */
+.landing-hero {
+  padding: clamp(32px, 6vw, 64px) 0 clamp(48px, 7vw, 80px);
+}
+
+.landing-hero-grid {
+  display: grid;
+  grid-template-columns: 1.05fr 0.95fr;
+  align-items: center;
+  gap: clamp(28px, 5vw, 56px);
+}
+
+/* 히어로 h1 만 800 을 허용한다 — 첫 화면 위계를 세우는 유일한 예외이고,
+ * 나머지 제목·본문은 700 이하를 유지한다. */
+.landing-hero-title {
+  margin: 18px 0 0;
+  font-size: clamp(30px, 5.2vw, 50px);
+  font-weight: 800;
+  line-height: 1.22;
+  letter-spacing: -0.02em;
+}
+
+.landing-hero-desc {
+  margin-top: 18px;
+  max-width: 520px;
+  color: var(--l-text-soft);
+  font-size: clamp(15px, 1.3vw, 17px);
+}
+
+.landing-hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 28px;
+}
+
+.landing-hero-trust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 26px;
+  padding: 0;
+  list-style: none;
+}
+
+.landing-hero-trust li {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--l-text-mute);
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.landing-hero-trust li::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--l-green);
+}
+
+/* Hero 캐릭터 — 원형 halo·반짝임 대신 옅은 종이 면 하나만 뒤에 둔다. */
+.landing-hero-visual {
+  position: relative;
+  display: grid;
+  place-items: center;
+  min-height: 300px;
+}
+
+.landing-hero-paper {
+  position: absolute;
+  inset: 8% 6%;
+  border-radius: 46% 54% 50% 50% / 52% 48% 52% 48%;
+  background: linear-gradient(180deg, #fff8e4, #fdf1d8);
+  z-index: 0;
+}
+
+.landing-hero-img {
+  position: relative;
+  z-index: 2;
+  width: 100%;
+  max-width: 380px;
+  height: auto;
+  filter: drop-shadow(0 8px 16px rgb(120 95 40 / 12%));
+}
+
+/* 아이 손그림 — 크기·각도를 서로 다르게 둬 비대칭으로 얹는다. 장식이므로
+ * 읽히지 않고 입력도 받지 않는다. hero visual 안에만 있어 좌측 열을 넘지 않는다. */
+.landing-doodle {
+  position: absolute;
+  z-index: 1;
+  height: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.landing-doodle-sun {
+  top: -2%;
+  right: -1%;
+  width: 27%;
+  transform: rotate(6deg);
+  opacity: 0.9;
+}
+
+.landing-doodle-tree {
+  right: 2%;
+  bottom: 4%;
+  width: 15%;
+  transform: rotate(-4deg);
+  opacity: 0.92;
+}
+
+.landing-doodle-dino {
+  left: -3%;
+  bottom: -2%;
+  width: 33%;
+  transform: rotate(-7deg);
+}
+
+/* 크레용 밑줄·강조 — 디자인 정체성이라 유지한다. */
+.crayon-underline {
+  position: relative;
+  display: inline-block;
+}
+
+.crayon-underline::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -12px;
+  transform: translateX(-50%) rotate(-1.2deg);
+  width: 68px;
+  height: 5px;
+  border-radius: 5px;
+  background: linear-gradient(90deg, #ffd84d, #ff9e7a);
+}
+
+.crayon-mark {
+  text-decoration: underline wavy #e0a92e;
+  text-decoration-thickness: 2.5px;
+  text-underline-offset: 6px;
+}
+
+/* "잘 그릴 필요 없다" 안심 문구 + 지우개 친구. 지우개는 이 한 곳에만 쓴다. */
+.landing-reassure {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  max-width: 620px;
+  margin: 0 auto var(--l-gap);
+  text-align: left;
+}
+
+.landing-reassure-img {
+  flex: none;
+  width: 76px;
+  height: 76px;
+  object-fit: contain;
+}
+
+.landing-reassure p {
+  color: var(--l-text-soft);
+  font-size: 16px;
+}
+
+/* 공감 노트 */
+.crayon-empathy {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--l-gap);
+  margin-top: 4px;
+}
+
+.crayon-note {
+  position: relative;
+  background: #fff;
+  border: var(--l-border-strong);
+  border-radius: 18px 20px 16px 22px;
+  padding: 26px 24px;
+  box-shadow: var(--l-shadow-sm);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.crayon-note.n1 {
+  transform: rotate(-0.8deg);
+}
+
+.crayon-note.n2 {
+  transform: rotate(0.4deg);
+}
+
+.crayon-note.n3 {
+  transform: rotate(0.8deg);
+}
+
+.crayon-note:hover {
+  transform: rotate(0) translateY(-3px);
+  box-shadow: var(--l-shadow);
+}
+
+.crayon-note h3 {
+  margin: 12px 0 6px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.crayon-note p {
+  color: var(--l-text-soft);
+  font-size: 15px;
+}
+
+.crayon-icon-img {
+  width: 60px;
+  height: 60px;
+  object-fit: contain;
+  display: block;
+  margin-bottom: 4px;
+}
+
+/* 핵심 가치 카드 */
+.crayon-cards {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--l-gap);
+  margin-top: 4px;
+  align-items: stretch;
+}
+
+.crayon-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: var(--l-border-strong);
+  border-radius: 20px 18px 22px 16px;
+  padding: 20px;
+  box-shadow: var(--l-shadow-sm);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.crayon-card:nth-child(1) {
+  transform: rotate(-0.8deg);
+}
+
+.crayon-card:nth-child(3) {
+  transform: rotate(0.8deg);
+}
+
+.crayon-card.is-hero {
+  transform: translateY(-10px);
+  border-color: #e0b25f;
+  box-shadow: var(--l-shadow);
+  z-index: 2;
+}
+
+.crayon-card:hover {
+  transform: translateY(-5px) rotate(0);
+  box-shadow: var(--l-shadow);
+}
+
+.crayon-card-top {
+  height: 170px;
+  border-radius: 14px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  margin-bottom: 16px;
+  overflow: hidden;
+  padding: 12px 12px 0;
+}
+
+.crayon-card-top.t-yellow {
+  background: linear-gradient(180deg, #fff6da, #ffefb8);
+}
+
+.crayon-card-top.t-blue {
+  background: linear-gradient(180deg, #f2f8f3, #e4efe6);
+}
+
+.crayon-card-top.t-green {
+  background: linear-gradient(180deg, #eef5e4, #e3efd3);
+}
+
+.crayon-card-top img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+}
+
+.crayon-kicker {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--l-green-deep);
+}
+
+.crayon-card h3 {
+  margin: 6px 0 8px;
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.crayon-card p {
+  color: var(--l-text-soft);
+  font-size: 15px;
+  flex: 1;
+}
+
+/* 아이·보호자 영역 — 구조는 같게, 역할은 색으로 구분한다. */
+.crayon-audiences {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--l-gap);
+  margin-top: 4px;
+}
+
+.crayon-aud {
+  position: relative;
+  border-radius: 24px;
+  padding: 30px 28px;
+  box-shadow: var(--l-shadow-sm);
+  text-align: center;
+}
+
+.crayon-aud.child {
+  background: linear-gradient(180deg, #fffaea, var(--l-child-canvas));
+  border: 1.5px solid #ecd9a4;
+}
+
+.crayon-aud.guardian {
+  background: linear-gradient(180deg, #f4faf5, var(--l-green-soft));
+  border: 1.5px solid #cadfce;
+}
+
+/* 캐릭터 받침 — 점선 원 대신 옅은 종이 면 하나. 캐릭터를 크게 둔다. */
+.crayon-aud-stage {
+  width: min(220px, 62%);
+  aspect-ratio: 1;
+  margin: 0 auto 16px;
+  display: grid;
+  place-items: center;
+  border-radius: 48% 52% 46% 54% / 52% 46% 54% 48%;
+}
+
+.crayon-aud-stage.s-yellow {
+  background: linear-gradient(180deg, #fff7de, #ffeeb8);
+}
+
+.crayon-aud-stage.s-green {
+  background: linear-gradient(180deg, #eff7f0, #dcecdf);
+}
+
+.crayon-aud-stage img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: drop-shadow(0 6px 12px rgb(80 70 40 / 12%));
+}
+
+.crayon-aud-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.crayon-aud.child .crayon-aud-label {
+  color: #96701a;
+}
+
+.crayon-aud.guardian .crayon-aud-label {
+  color: var(--l-green-ink);
+}
+
+.crayon-aud h3 {
+  margin: 6px 0 6px;
+  font-size: 21px;
+  font-weight: 700;
+}
+
+.crayon-aud.guardian h3 {
+  color: var(--l-green-ink);
+}
+
+.crayon-aud > p {
+  color: var(--l-text-soft);
+  font-size: 15px;
+}
+
+.crayon-list {
+  margin: 20px auto 0;
+  padding: 0;
+  list-style: none;
+  display: inline-grid;
+  gap: 10px;
+  text-align: left;
+}
+
+.crayon-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  font-size: 15px;
+}
+
+/* 반복되는 연필 이모지 대신 짧은 크레용 선 하나. */
+.crayon-list li::before {
+  content: "";
+  flex: none;
+  width: 14px;
+  height: 3px;
+  margin-top: 11px;
+  border-radius: 3px;
+}
+
+.crayon-aud.child .crayon-list li::before {
+  background: var(--l-yellow-deep);
+}
+
+.crayon-aud.guardian .crayon-list li::before {
+  background: var(--l-green);
+}
+
+/* 이용 흐름 */
+.landing-flow {
+  background: linear-gradient(180deg, #fffdf6, #fff4d9);
+}
+
+.landing-flow-guide {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 4px;
+}
+
+.landing-flow-guide-img {
+  width: 100%;
+  max-width: 260px;
+  height: auto;
+}
+
+/* 스트링에 매달린 도화지 카드. 흐름을 잇는 선이라 유지한다. */
+.crayon-flow {
+  position: relative;
+  margin-top: 44px;
+  padding-top: 20px;
+}
+
+.crayon-flow::before {
+  content: "";
+  position: absolute;
+  top: 4px;
+  left: 6%;
+  right: 6%;
+  height: 3px;
+  border-radius: 3px;
+  background: repeating-linear-gradient(
+    90deg,
+    #e3bd66 0 14px,
+    #d7ad4c 14px 17px
+  );
+  z-index: 0;
+}
+
+/* stretch + 카드 내부 column — 본문 줄 수가 달라도 카드 높이가 같아지고
+ * 캐릭터를 아래로 밀어 네 카드의 바닥선이 맞는다. */
+.crayon-steps {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: stretch;
+  gap: 44px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.crayon-paper {
+  position: relative;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  background: #fffdf7;
+  border: var(--l-border-strong);
+  border-radius: 12px 14px 10px 16px;
+  padding: 30px 22px 24px;
+  box-shadow: var(--l-shadow-sm);
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.crayon-paper:nth-child(odd) {
+  transform: rotate(-0.8deg);
+}
+
+.crayon-paper:nth-child(even) {
+  transform: rotate(0.7deg);
+}
+
+.crayon-paper:hover {
+  transform: rotate(0) translateY(-3px);
+  box-shadow: var(--l-shadow);
+}
+
+.crayon-peg {
+  position: absolute;
+  top: -14px;
+  left: 50%;
+  transform: translateX(-50%) rotate(-7deg);
+  width: 15px;
+  height: 22px;
+  border-radius: 5px;
+  background: linear-gradient(180deg, #f4c94e, #e0a92e);
+  border: 1.5px solid #c79a34;
+  z-index: 3;
+}
+
+.crayon-paper .snum {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border: 1.5px solid #d9bd6c;
+  border-radius: 54% 46% 55% 45%;
+  background: #ffeeb4;
+  font-weight: 700;
+  font-size: 18px;
+  color: #8a6c12;
+  margin-bottom: 14px;
+}
+
+.crayon-paper h3 {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.crayon-paper p {
+  margin: 0;
+  color: var(--l-text-soft);
+  font-size: 14.5px;
+}
+
+/* 단계 카드의 캐릭터 자리 — 네 카드가 같은 높이 박스를 써서 시각 크기와
+ * 바닥선이 맞는다. 원본은 모두 정사각이라 contain 으로 담아도 비율이 안 변한다.
+ * 캐릭터가 본문보다 커지지 않도록 박스 높이를 글자 크기에 맞춰 제한한다. */
+.crayon-paper-art {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  height: 96px;
+  margin-top: auto;
+  padding-top: 14px;
+  color: #c2ab72;
+}
+
+.crayon-paper-friend {
+  width: auto;
+  height: 100%;
+  max-width: 100%;
+  object-fit: contain;
+  object-position: center bottom;
+}
+
+.crayon-paper-icon {
+  width: 34px;
+  height: 34px;
+  margin-bottom: 8px;
+}
+
+.crayon-paper:not(:first-child)::before {
+  content: "»";
+  position: absolute;
+  left: -34px;
+  top: 52%;
+  transform: translateY(-50%);
+  font-size: 26px;
+  font-weight: 700;
+  color: #dcb15c;
+  z-index: 2;
+}
+
+/* 활동 기록 섹션 */
+.landing-report {
+  background: linear-gradient(180deg, #f4f8f4, #eaf2eb);
+}
+
+.landing-report-grid {
+  display: grid;
+  grid-template-columns: 0.9fr 1.1fr;
+  align-items: center;
+  gap: clamp(28px, 5vw, 52px);
+}
+
+.landing-report-visual {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: #fffdf7;
+  border: 1px solid #d9e5da;
+  border-radius: var(--l-radius-lg);
+  box-shadow: var(--l-shadow-sm);
+}
+
+.landing-report-img {
+  width: 100%;
+  max-width: 300px;
+  height: auto;
+}
+
+.landing-report h2 {
+  color: #26332c;
+}
+
+.landing-report-desc {
+  margin-top: 14px;
+  color: var(--l-text-soft);
+  font-size: 16px;
+  max-width: 520px;
+}
+
+.landing-report-list {
+  margin: 20px 0 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.landing-report-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 16px;
+  background: #fff;
+  border: 1px solid #dde7de;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.landing-report-list li img {
+  width: 44px;
+  height: 44px;
+  object-fit: contain;
+  flex: none;
+}
+
+/* AI 한계 안내 — 세이지 계열, 절제된 테두리, 본문 전체 bold 금지.
+ * `.landing p{margin:0}` 이 specificity 로 이기므로 클래스를 두 번 겹쳐 위로 올린다. */
+.landing p.landing-notice {
+  margin-top: var(--l-group-gap);
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  color: var(--l-text-soft);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.landing-notice-icon {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  color: var(--l-green-deep);
+}
+
+/* 캐릭터 소개 */
+.landing-characters-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--l-gap);
+  margin-top: 4px;
+}
+
+.landing-character-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 20px 22px;
+  background: var(--l-card);
+  border: var(--l-border);
+  border-radius: var(--l-radius-lg);
+  box-shadow: var(--l-shadow-sm);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.landing-character-frame {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  display: grid;
+  place-items: center;
+  padding: 14px;
+  border-radius: 44% 56% 50% 50% / 52% 48% 52% 48%;
+  margin-bottom: 14px;
+}
+
+.landing-character-frame.f-prince {
+  background: linear-gradient(180deg, #fff7de, #ffeeb4);
+}
+
+.landing-character-frame.f-princess {
+  background: linear-gradient(180deg, #fdeef2, #f8dfe7);
+}
+
+.landing-character-frame.f-trumpeter {
+  background: linear-gradient(180deg, #f1f7f2, #dfece1);
+}
+
+.landing-character-img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.landing-character-name {
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.landing-characters-note {
+  text-align: center;
+  margin-top: 22px;
+  color: var(--l-text-mute);
+  font-size: 13px;
+}
+
+@media (min-width: 901px) {
+  .landing-characters-grid .landing-character-card:nth-child(1) {
+    transform: rotate(-1deg);
+  }
+
+  .landing-characters-grid .landing-character-card:nth-child(3) {
+    transform: rotate(1deg);
+  }
+
+  .landing-characters-grid .landing-character-card:nth-child(2) {
+    transform: translateY(-10px);
+    box-shadow: var(--l-shadow);
+    z-index: 2;
+  }
+
+  .landing-characters-grid .landing-character-card:hover {
+    transform: translateY(-5px) rotate(0);
+    box-shadow: var(--l-shadow);
+    z-index: 3;
+  }
+}
+
+/* 약속 노트 (인터랙티브 safety) */
+.landing-safety {
+  background: linear-gradient(180deg, #f5f8f1, #ecf2e3);
+}
+
+.promise {
+  display: grid;
+  grid-template-columns: 1.35fr 1fr;
+  gap: var(--l-gap);
+  align-items: stretch;
+  margin-top: 4px;
+}
+
+.promise-note {
+  position: relative;
+  background: linear-gradient(180deg, #fffdf4, #fdf7e6);
+  border: var(--l-border-strong);
+  border-radius: 20px;
+  box-shadow: var(--l-shadow-sm);
+  min-height: 330px;
+  padding: 30px 34px;
+  overflow: hidden;
+}
+
+.promise-note::before {
+  content: "";
+  position: absolute;
+  left: 22px;
+  top: 18px;
+  bottom: 18px;
+  width: 2px;
+  background: repeating-linear-gradient(
+    180deg,
+    rgb(120 95 50 / 16%) 0 6px,
+    transparent 6px 12px
+  );
+}
+
+.promise-clip {
+  position: absolute;
+  top: -10px;
+  right: 34px;
+  width: 15px;
+  height: 28px;
+  border-radius: 6px;
+  background: linear-gradient(180deg, #f4c94e, #e0a92e);
+  border: 1.5px solid #c79a34;
+  transform: rotate(8deg);
+}
+
+.promise-page {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 14px;
+}
+
+.promise-page[hidden] {
+  display: none;
+}
+
+.promise-page:focus-visible {
+  outline: 3px solid rgb(95 158 115 / 40%);
+  outline-offset: 6px;
+  border-radius: 8px;
+}
+
+.promise-num {
+  font-size: 34px;
+  font-weight: 700;
+  line-height: 1;
+  opacity: 0.45;
+}
+
+.promise-page.p1 {
+  --acc: #e0a92e;
+}
+
+.promise-page.p2 {
+  --acc: #d98745;
+}
+
+.promise-page.p3 {
+  --acc: #5f9e73;
+}
+
+.promise-page .promise-num {
+  color: var(--acc);
+}
+
+.promise-page h3 {
+  margin: 2px 0 0;
+  font-size: 21px;
+  font-weight: 700;
+  color: #3c3a33;
+}
+
+.promise-page p {
+  margin: 0;
+  font-size: 16px;
+  color: var(--l-text-soft);
+  max-width: 440px;
+}
+
+.promise-art {
+  margin-top: 12px;
+  height: 148px;
+  border-radius: 14px;
+  border: 1px solid rgb(120 95 50 / 16%);
+  background: #fffef9;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px;
+}
+
+.promise-art svg {
+  width: 100%;
+  height: 100%;
+}
+
+.draw-line {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 0;
+}
+
+.promise-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.promise-tab {
+  position: relative;
+  text-align: left;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 15px;
+  color: #3c3a33;
+  cursor: pointer;
+  background: #fffdf7;
+  border: var(--l-border-strong);
+  border-radius: 14px;
+  padding: 15px 18px 18px;
+  box-shadow: var(--l-shadow-sm);
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    background 0.15s ease;
+}
+
+.promise-tab .pt-num {
+  font-size: 16px;
+  color: #a99a86;
+  flex: none;
+}
+
+.promise-tab:hover {
+  transform: translateY(-2px);
+}
+
+.promise-tab:focus-visible {
+  outline: 3px solid rgb(95 158 115 / 50%);
+  outline-offset: 2px;
+}
+
+.promise-tab.t1 {
+  --acc: #e0a92e;
+}
+
+.promise-tab.t2 {
+  --acc: #d98745;
+}
+
+.promise-tab.t3 {
+  --acc: #5f9e73;
+}
+
+.promise-tab.is-active {
+  background: #fff;
+  transform: translateX(3px);
+  box-shadow: var(--l-shadow);
+}
+
+.promise-tab.is-active .pt-num {
+  color: var(--acc);
+}
+
+.promise-tab.is-active::after {
+  content: "";
+  position: absolute;
+  left: 18px;
+  bottom: 8px;
+  width: 44px;
+  height: 4px;
+  border-radius: 4px;
+  background: var(--acc);
+  transform: rotate(-1deg);
+}
+
+/* 마무리 CTA */
+.landing-final {
+  padding: clamp(56px, 8vw, var(--l-section-y)) 0 clamp(64px, 9vw, 104px);
+}
+
+.landing-final-card {
+  text-align: center;
+  padding: clamp(32px, 5vw, 52px) 24px;
+  border-radius: var(--l-radius-lg);
+  background: linear-gradient(180deg, #fff, #fff8ea);
+  border: var(--l-border);
+  box-shadow: var(--l-shadow);
+}
+
+.landing-final-img {
+  width: 100%;
+  max-width: 520px;
+  height: auto;
+  margin: 0 auto 4px;
+  display: block;
+}
+
+.landing-final h2 {
+  margin-top: 8px;
+  font-size: clamp(23px, 3.2vw, 32px);
+}
+
+.landing-final p {
+  margin: 14px auto 0;
+  max-width: 540px;
+  color: var(--l-text-soft);
+  font-size: 16px;
+}
+
+.landing-final .landing-btn {
+  margin-top: 26px;
+  padding: 16px 32px;
+  font-size: 17px;
+}
+
+/* Footer */
+.landing-footer {
+  padding: 30px 0 46px;
+  border-top: 1px solid var(--l-line);
+  color: var(--l-text-mute);
+  font-size: 13px;
+  text-align: center;
+}
+
+.landing-footer p + p {
+  margin-top: 6px;
+}
+
+.landing-footer-links {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 18px;
+  margin-bottom: 10px;
+}
+
+.landing-footer-links a {
+  color: var(--l-text-soft);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.landing-footer-links a:hover {
+  color: var(--l-green-ink);
+}
+
+/* 모션 — reduced-motion 계약 유지. 기본은 정지, no-preference 에서만 움직인다. */
+@media (prefers-reduced-motion: no-preference) {
+  html:has(.landing) {
+    scroll-behavior: smooth;
+  }
+
+  .landing-hero-img {
+    animation: landing-float 6s ease-in-out infinite;
+  }
+
+  .landing-btn:hover {
+    transform: translateY(-2px);
+  }
+
+  .promise-page.anim {
+    animation: promise-in 0.5s cubic-bezier(0.2, 0.8, 0.3, 1);
+  }
+
+  .promise-page.anim.from-left {
+    animation-name: promise-in-left;
+  }
+
+  .promise-page.anim .draw-line {
+    stroke-dashoffset: 1;
+    animation: draw-line 0.85s ease 0.12s forwards;
+  }
+
+  .promise-page.anim .promise-bubble {
+    transform-box: fill-box;
+    transform-origin: center;
+    animation: bubble-in 0.5s ease 0.15s both;
+  }
+
+  .promise-page.anim .promise-boundary {
+    transform-box: fill-box;
+    transform-origin: top;
+    animation: grow-y 0.6s ease 0.15s both;
+  }
+}
+
+@keyframes landing-float {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+
+  50% {
+    transform: translateY(-8px);
+  }
+}
+
+@keyframes promise-in {
+  from {
+    opacity: 0;
+    transform: translateX(16px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes promise-in-left {
+  from {
+    opacity: 0;
+    transform: translateX(-16px);
+  }
+
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes draw-line {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@keyframes bubble-in {
+  from {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes grow-y {
+  from {
+    transform: scaleY(0);
+  }
+
+  to {
+    transform: scaleY(1);
+  }
+}
+
+/* 반응형 — 간격 토큰만 좁히고 구조는 유지한다. */
+@media (max-width: 1024px) {
+  .landing {
+    --l-gap: 22px;
+    --l-group-gap: 44px;
+    --l-section-y: 84px;
+  }
+
+  .landing-report-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-report-visual {
+    max-width: 420px;
+    margin: 0 auto;
+  }
+}
+
+@media (max-width: 900px) {
+  .landing {
+    --l-gap: 18px;
+    --l-group-gap: 40px;
+    --l-section-y: 72px;
+    --l-section-y-sm: 56px;
+  }
+
+  .landing-nav,
+  .landing-header-cta {
+    display: none;
+  }
+
+  .landing-menu {
+    display: block;
+  }
+
+  .landing-hero-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-hero-visual {
+    order: 2;
+    min-height: 0;
+    margin-top: 8px;
+  }
+
+  /* 모바일은 장식을 밀어 넣지 않는다 — 도담이와 종이 면만 남긴다. */
+  .landing-doodle-sun,
+  .landing-doodle-tree {
+    display: none;
+  }
+
+  .landing-doodle-dino {
+    width: 26%;
+    left: 0;
+    bottom: 0;
+  }
+
+  .landing-hero-copy {
+    order: 1;
+  }
+
+  .crayon-empathy,
+  .crayon-cards,
+  .crayon-audiences {
+    grid-template-columns: 1fr;
+  }
+
+  .landing-report-list {
+    grid-template-columns: 1fr;
+  }
+
+  .crayon-note,
+  .crayon-card,
+  .crayon-paper {
+    transform: none !important;
+  }
+
+  .crayon-card.is-hero {
+    transform: none !important;
+  }
+
+  .crayon-steps {
+    flex-direction: column;
+    gap: 40px;
+  }
+
+  /* 단계 카드가 세로로 쌓이면 캐릭터가 본문보다 커 보이지 않게 줄인다. */
+  .crayon-paper-art {
+    height: 76px;
+  }
+
+  .crayon-flow::before {
+    display: none;
+  }
+
+  .crayon-paper:not(:first-child)::before {
+    left: 50%;
+    top: -30px;
+    transform: translateX(-50%) rotate(90deg);
+  }
+
+  .promise {
+    grid-template-columns: 1fr;
+  }
+
+  .promise-tabs {
+    flex-direction: row;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 6px;
+  }
+
+  .promise-tab {
+    flex: 0 0 78%;
+    scroll-snap-align: start;
+  }
+}
+
+@media (max-width: 560px) {
+  .landing-container {
+    width: min(100% - 32px, var(--l-maxw));
+  }
+
+  .crayon-aud-stage {
+    width: min(200px, 68%);
+  }
+
+  /* 좁은 화면에서는 안심 문구가 두 줄이 되므로 지우개를 더 작게 둔다. */
+  .landing-reassure {
+    gap: 10px;
+  }
+
+  .landing-reassure-img {
+    width: 56px;
+    height: 56px;
+  }
+
+  .landing-reassure p {
+    font-size: 15px;
+  }
+
+  .landing-characters-grid {
+    grid-template-columns: none;
+    grid-auto-flow: column;
+    grid-auto-columns: 78%;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    padding-bottom: 8px;
+  }
+
+  .landing-character-card {
+    scroll-snap-align: center;
+  }
+
+  /* 좁은 화면에서 두 버튼을 나란히 두면 글자가 줄바꿈되며 높이가 어긋난다.
+   * 한 줄에 하나씩 꽉 채워 높이를 같게 맞춘다. */
+  .landing-hero-actions .landing-btn {
+    flex: 1 1 100%;
+  }
+}

@@ -5,27 +5,36 @@ import com.ssafy.b209.drawing.service.DrawingAssetFileUrlFactory;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.ReportActivitySummaryView;
 import com.ssafy.b209.report.domain.ReportConversationSummaryView;
+import com.ssafy.b209.report.domain.ReportCrisisAlert;
 import com.ssafy.b209.report.domain.ReportDetailView;
 import com.ssafy.b209.report.domain.ReportDrawingAssetView;
 import com.ssafy.b209.report.domain.ReportDrawingEmotionView;
 import com.ssafy.b209.report.domain.ReportDrawingSessionView;
 import com.ssafy.b209.report.domain.ReportDrawingTypeView;
 import com.ssafy.b209.report.domain.ReportFeatureVisibility;
+import com.ssafy.b209.report.domain.ReportInterpretationDisclosureState;
 import com.ssafy.b209.report.domain.ReportKeyConversationView;
+import com.ssafy.b209.report.domain.ReportMessageConfirmationView;
 import com.ssafy.b209.report.domain.ReportObservedFeatureView;
 import com.ssafy.b209.report.dto.ReportActivityFactsResponse;
 import com.ssafy.b209.report.dto.ReportChildExpressionResponse;
 import com.ssafy.b209.report.dto.ReportConversationSummaryResponse;
+import com.ssafy.b209.report.dto.ReportCrisisAlertResponse;
+import com.ssafy.b209.report.dto.ReportCrisisResourceResponse;
 import com.ssafy.b209.report.dto.ReportDetailResponse;
 import com.ssafy.b209.report.dto.ReportDrawingResponse;
 import com.ssafy.b209.report.dto.ReportDrawingSessionResponse;
+import com.ssafy.b209.report.dto.ReportEvidenceItemResponse;
 import com.ssafy.b209.report.dto.ReportExpertReviewResponse;
 import com.ssafy.b209.report.dto.ReportObservedFeatureResponse;
+import com.ssafy.b209.report.dto.ReportParentGuideResponse;
+import com.ssafy.b209.report.dto.ReportPublicInterpretationResponse;
 import com.ssafy.b209.report.dto.ReportUtteranceResponse;
 import com.ssafy.b209.report.exception.ReportDetailErrorCode;
 import com.ssafy.b209.report.repository.ReportActivityNoteViewRepository;
 import com.ssafy.b209.report.repository.ReportActivitySummaryViewRepository;
 import com.ssafy.b209.report.repository.ReportConversationSummaryViewRepository;
+import com.ssafy.b209.report.repository.ReportCrisisAlertRepository;
 import com.ssafy.b209.report.repository.ReportDetailViewRepository;
 import com.ssafy.b209.report.repository.ReportDetectedObjectRow;
 import com.ssafy.b209.report.repository.ReportDetectedObjectViewRepository;
@@ -34,15 +43,20 @@ import com.ssafy.b209.report.repository.ReportDrawingEmotionViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingSessionViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingTypeViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
+import com.ssafy.b209.report.repository.ReportEvidenceItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideViewRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationViewRepository;
+import com.ssafy.b209.report.repository.ReportMessageConfirmationViewRepository;
 import com.ssafy.b209.report.repository.ReportObservedFeatureViewRepository;
+import com.ssafy.b209.report.repository.ReportParentGuideRepository;
+import com.ssafy.b209.report.repository.ReportPublicInterpretationRepository;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -80,6 +94,11 @@ public class ReportDetailQueryService {
   private final ReportDetectedObjectViewRepository detectedObjectRepository;
   private final ReportDrawnItemRepository drawnItemRepository;
   private final ReportObservedFeatureViewRepository observedFeatureRepository;
+  private final ReportPublicInterpretationRepository interpretationRepository;
+  private final ReportEvidenceItemRepository evidenceItemRepository;
+  private final ReportParentGuideRepository parentGuideRepository;
+  private final ReportCrisisAlertRepository crisisAlertRepository;
+  private final ReportMessageConfirmationViewRepository messageConfirmationRepository;
   private final DrawingAssetFileUrlFactory fileUrlFactory;
 
   /**
@@ -116,6 +135,11 @@ public class ReportDetailQueryService {
       ReportDetectedObjectViewRepository detectedObjectRepository,
       ReportDrawnItemRepository drawnItemRepository,
       ReportObservedFeatureViewRepository observedFeatureRepository,
+      ReportPublicInterpretationRepository interpretationRepository,
+      ReportEvidenceItemRepository evidenceItemRepository,
+      ReportParentGuideRepository parentGuideRepository,
+      ReportCrisisAlertRepository crisisAlertRepository,
+      ReportMessageConfirmationViewRepository messageConfirmationRepository,
       DrawingAssetFileUrlFactory fileUrlFactory) {
     this.guardianAccessRepository = guardianAccessRepository;
     this.reportRepository = reportRepository;
@@ -131,6 +155,11 @@ public class ReportDetailQueryService {
     this.detectedObjectRepository = detectedObjectRepository;
     this.drawnItemRepository = drawnItemRepository;
     this.observedFeatureRepository = observedFeatureRepository;
+    this.interpretationRepository = interpretationRepository;
+    this.evidenceItemRepository = evidenceItemRepository;
+    this.parentGuideRepository = parentGuideRepository;
+    this.crisisAlertRepository = crisisAlertRepository;
+    this.messageConfirmationRepository = messageConfirmationRepository;
     this.fileUrlFactory = fileUrlFactory;
   }
 
@@ -176,7 +205,15 @@ public class ReportDetailQueryService {
         buildGuardianConversationGuide(report.getId()),
         splitLimitations(report.getLimitationsText()),
         ReportExpertReviewResponse.notRequested(),
-        report.getCreatedAt());
+        report.getCreatedAt(),
+        ReportDetailResponse.NON_DIAGNOSTIC_NOTICE,
+        buildPublicInterpretations(report.getId()),
+        buildEvidenceItems(report.getId()),
+        // 주제별 관찰 묶음은 후속 범위다. 빈 목록이면 화면·PDF 가 섹션을 숨긴다(875 §10).
+        List.of(),
+        buildParentGuides(report.getId()),
+        buildCrisisAlert(report.getId()),
+        List.of());
   }
 
   private ReportDrawingSessionResponse buildDrawingSession(ReportDrawingSessionView session) {
@@ -236,9 +273,21 @@ public class ReportDetailQueryService {
       selectedEmotions.add(emotion.getEmotionCode());
     }
 
+    List<ReportKeyConversationView> conversations =
+        keyConversationRepository.findByReportIdOrderByDisplayOrderAsc(report.getId());
+    // 음성 인식 확인 필요 여부는 원 메시지에만 있다. 종전에는 리터럴 false 를 넘겨
+    // "미확정 발화는 대표 발화에서 제외한다"는 규칙(계약 §4-4)이 조용히 무효였다.
+    Set<Long> needsConfirmation = loadMessagesNeedingConfirmation(conversations);
     List<ReportUtteranceResponse> utterances = new ArrayList<>();
-    for (ReportKeyConversationView conversation :
-        keyConversationRepository.findByReportIdOrderByDisplayOrderAsc(report.getId())) {
+    for (ReportKeyConversationView conversation : conversations) {
+      boolean unconfirmed =
+          conversation.getAnswerMessageId() != null
+              && needsConfirmation.contains(conversation.getAnswerMessageId());
+      if (unconfirmed) {
+        // 문답 표시에는 남기지만 대표 발화에서는 제외한다 — 아이 말을 지우는 것이 아니라
+        // 확인되지 않은 인식 결과를 보호자 인용으로 쓰지 않는 것이다.
+        continue;
+      }
       utterances.add(
           new ReportUtteranceResponse(
               conversation.getAnswerMessageId(),
@@ -294,13 +343,25 @@ public class ReportDetailQueryService {
         .findByReportIdOrderByDisplayOrderAsc(report.getId())
         .forEach(note -> notes.add(note.getNoteText()));
 
+    Long drawingDurationMs = summary == null ? null : summary.getDrawingDurationMs();
     return new ReportActivityFactsResponse(
         buildDetectedObjects(report),
-        summary == null ? null : summary.getDrawingDurationMs(),
+        drawingDurationMs,
         summary == null ? null : summary.getPauseCount(),
         summary == null ? null : summary.getEraseCount(),
         summary != null && summary.isPressureAvailable(),
-        notes);
+        notes,
+        // 875 는 초 단위를 쓴다. 기존 밀리초 필드는 지우지 않는다 — FE 가 두 형태를 모두 읽는다.
+        ReportActivityFactsResponse.toSeconds(drawingDurationMs),
+        ReportActivityFactsResponse.toSeconds(drawingDurationMs),
+        null,
+        summary == null ? null : summary.getConversationQuestionCount(),
+        summary == null ? null : summary.getConversationAnsweredCount(),
+        summary == null ? null : summary.getConversationSkippedCount(),
+        null,
+        null,
+        false,
+        false);
   }
 
   /** 최신 리포트는 관찰 서술 항목을, 이전 리포트는 신뢰도 보정된 탐지 라벨만 사용한다. */
@@ -339,6 +400,122 @@ public class ReportDetailQueryService {
       }
     }
     return detectedObjects;
+  }
+
+  /**
+   * 공개 판정을 통과한 경향 해석만 노출 순서대로 담는다 (계약 §4-1·§4-3).
+   *
+   * <p>제외·강등 카드는 저장돼 있어도 담지 않는다. 그리고 {@code resolveVisibility()}·{@code expertReviewed} 경로를 타지 않는다
+   * — 그 경로는 전문가 검토 전 항목을 전부 EXPERT_ONLY 로 강등하고 검토 상태 전이가 없어 항상 미검토이므로, 통과한 카드까지 숨긴다(계약 §4-2 결정 1).
+   *
+   * @param reportId 리포트 식별자
+   * @return 공개 카드 목록이며 통과분이 없으면 빈 목록
+   */
+  private List<ReportPublicInterpretationResponse> buildPublicInterpretations(Long reportId) {
+    return interpretationRepository
+        .findByReportIdAndDisclosureStateOrderByDisplayOrderAsc(
+            reportId, ReportInterpretationDisclosureState.PUBLISHED)
+        .stream()
+        .map(
+            card ->
+                new ReportPublicInterpretationResponse(
+                    card.getCategory().name(),
+                    card.getTitle(),
+                    card.getTendencyText(),
+                    card.getScopeText(),
+                    card.getHomeObservationGuide(),
+                    card.getEvidences().stream()
+                        .map(link -> link.getEvidenceItem().getEvidenceNumber())
+                        .toList()))
+        .toList();
+  }
+
+  /**
+   * 카드가 참조하는 근거 풀을 담는다 (875 §4).
+   *
+   * <p>원본 참조({@code sourceRef})는 담지 않는다 — 서버가 발급한 행 식별자를 보호자 응답으로 내보낼 이유가 없다.
+   *
+   * @param reportId 리포트 식별자
+   * @return 근거 번호 순서 목록
+   */
+  private List<ReportEvidenceItemResponse> buildEvidenceItems(Long reportId) {
+    return evidenceItemRepository.findByReportIdOrderByEvidenceNumberAsc(reportId).stream()
+        .map(
+            item ->
+                new ReportEvidenceItemResponse(
+                    item.getEvidenceNumber(), item.getSourceType().name(), item.getText()))
+        .toList();
+  }
+
+  /**
+   * 보호자 가이드를 유형별로 묶는다 (875 §7).
+   *
+   * <p>저장은 문장 단위 행이고 응답은 유형별 문장 목록이다. 유형 순서와 유형 안의 순서를 모두 보존한다.
+   *
+   * @param reportId 리포트 식별자
+   * @return 유형별 가이드 목록
+   */
+  private List<ReportParentGuideResponse> buildParentGuides(Long reportId) {
+    Map<String, List<String>> byType = new LinkedHashMap<>();
+    parentGuideRepository
+        .findByReportIdOrderByGuideTypeAscDisplayOrderAsc(reportId)
+        .forEach(
+            guide ->
+                byType
+                    .computeIfAbsent(guide.getGuideType().name(), key -> new ArrayList<>())
+                    .add(guide.getGuidance()));
+    return byType.entrySet().stream()
+        .map(entry -> new ReportParentGuideResponse(entry.getKey(), entry.getValue()))
+        .toList();
+  }
+
+  /**
+   * 위기 대응 안내를 담는다 (875 §7-1).
+   *
+   * <p>{@code null}이 곧 위기 신호 없음이다. {@code ABUSE_DISCLOSURE}는 저장 단계에서 막혀 있어 여기로 올 수 없다.
+   *
+   * @param reportId 리포트 식별자
+   * @return 위기 안내이며 없으면 {@code null}
+   */
+  private ReportCrisisAlertResponse buildCrisisAlert(Long reportId) {
+    ReportCrisisAlert alert = crisisAlertRepository.findById(reportId).orElse(null);
+    if (alert == null) {
+      return null;
+    }
+    return new ReportCrisisAlertResponse(
+        alert.getReasonCode(),
+        alert.getSeverity(),
+        alert.getTitle(),
+        alert.getMessage(),
+        alert.getSteps().stream().map(step -> step.getStepText()).toList(),
+        alert.getResources().stream()
+            .map(
+                resource ->
+                    new ReportCrisisResourceResponse(
+                        resource.getResourceName(), resource.getContact(), resource.getNote()))
+            .toList());
+  }
+
+  /**
+   * 대표 대화의 답변 메시지 중 음성 인식 확인이 필요한 식별자를 배치로 읽는다.
+   *
+   * @param conversations 대표 대화 목록
+   * @return 확인이 필요한 답변 메시지 식별자 집합
+   */
+  private Set<Long> loadMessagesNeedingConfirmation(List<ReportKeyConversationView> conversations) {
+    List<Long> answerIds =
+        conversations.stream()
+            .map(ReportKeyConversationView::getAnswerMessageId)
+            .filter(id -> id != null)
+            .distinct()
+            .toList();
+    if (answerIds.isEmpty()) {
+      return Set.of();
+    }
+    return messageConfirmationRepository.findByIdIn(answerIds).stream()
+        .filter(ReportMessageConfirmationView::isNeedsGuardianConfirmation)
+        .map(ReportMessageConfirmationView::getId)
+        .collect(java.util.stream.Collectors.toSet());
   }
 
   private ReportConversationSummaryResponse buildConversationSummary(ReportDetailView report) {

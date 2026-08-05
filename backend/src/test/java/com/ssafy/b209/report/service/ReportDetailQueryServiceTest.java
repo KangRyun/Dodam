@@ -87,6 +87,21 @@ class ReportDetailQueryServiceTest {
   @Mock private ReportDrawnItemRepository drawnItemRepository;
   @Mock private ReportObservedFeatureViewRepository observedFeatureRepository;
 
+  @Mock
+  private com.ssafy.b209.report.repository.ReportPublicInterpretationRepository
+      interpretationRepository;
+
+  @Mock
+  private com.ssafy.b209.report.repository.ReportEvidenceItemRepository evidenceItemRepository;
+
+  @Mock private com.ssafy.b209.report.repository.ReportParentGuideRepository parentGuideRepository;
+
+  @Mock private com.ssafy.b209.report.repository.ReportCrisisAlertRepository crisisAlertRepository;
+
+  @Mock
+  private com.ssafy.b209.report.repository.ReportMessageConfirmationViewRepository
+      messageConfirmationRepository;
+
   private ReportDetailQueryService service;
 
   @BeforeEach
@@ -107,6 +122,11 @@ class ReportDetailQueryServiceTest {
             detectedObjectRepository,
             drawnItemRepository,
             observedFeatureRepository,
+            interpretationRepository,
+            evidenceItemRepository,
+            parentGuideRepository,
+            crisisAlertRepository,
+            messageConfirmationRepository,
             new DrawingAssetFileUrlFactory());
   }
 

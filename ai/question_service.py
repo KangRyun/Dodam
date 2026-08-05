@@ -31,11 +31,13 @@ import time
 from openai import APIConnectionError, APIStatusError, OpenAIError
 
 import config
+import conversation_stop_intent
 import crisis_detection
 import crisis_guidance
 import llm_client
 import prompt_injection
 import prompts_registry  # 답변 칩 프롬프트 로딩·버전 추적 (S15P11B209-788)
+import question_quality
 import question_safety
 from gms import get_client
 from internal_contracts import (
@@ -113,6 +115,59 @@ def _truncate_description(text: str | None) -> str | None:
     return stripped[:limit].rstrip() + "…"
 
 
+# ── 탐지 이름의 근거 대조 (S15P11B209-918) ──────────────────────
+# 자유 그림(sketch 가중치)은 오탐이 잦다. 탐지 문턱은 YOLO_CONF_THRESHOLD=0.20 이라
+# 머리카락이 '덤불'로, 머리가 '달'로 잡힌 채 후보에 남는다. 그 이름이 프롬프트에 들어가면
+# 모델은 그것을 실제 대상으로 단정한다(2026-08-05 실측: 덤불 10/10, 달 5/5).
+#
+# 이름의 근거는 탐지 목록이 아니라 그림 서술이다 — activity_block [[ART_DIARY]]가 이미
+# 그렇게 적어 두었는데, 정작 코드는 서술과 대조하지 않고 신뢰도만 보고 이름을 실었다.
+# 이제 자유 그림에서는 **서술 원문에 실제로 등장하는 이름만** 프롬프트에 싣는다.
+#
+# ⚠️ HTP에는 적용하지 않는다. 주제가 활동으로 정해져 있고 HTP 전용 가중치는 sketch보다
+#    정확하다. 게다가 표시명이 서술 표현과 다른 정상 케이스가 있다('집의 문' vs "네모난 것").
+
+
+def _hangul(char: str) -> bool:
+    return "가" <= char <= "힣"
+
+
+def _mentioned_in(name: str | None, description: str | None) -> bool:
+    """탐지 표시명이 서술 문장에 실제로 등장하는가.
+
+    단순 부분 문자열이면 '해'가 "칠해져 있어요"에 걸린다. 앞 글자가 한글이면 다른 낱말의
+    일부로 보고 세지 않는다 — 탐지 이름은 명사라 문장에서 띄어쓰기나 문장 첫머리에 온다.
+    (뒤쪽은 조사가 붙으므로 경계를 두지 않는다: "해가"·"머리카락은")
+    """
+    if not name or not description:
+        return False
+    needle = name.strip()
+    if not needle:
+        return False
+    start = description.find(needle)
+    while start != -1:
+        if start == 0 or not _hangul(description[start - 1]):
+            return True
+        start = description.find(needle, start + 1)
+    return False
+
+
+def _nameable_objects(req: QuestionRequest) -> list[DetectedObject]:
+    """프롬프트에 이름을 실어도 되는 탐지 객체(S15P11B209-918).
+
+    자유 그림은 서술이 뒷받침하는 이름만 남긴다. 서술이 없으면 아무것도 뒷받침하지 못하므로
+    빈 목록이 된다 — 이때는 이름을 단정하는 대신 그림 전체를 여는 질문으로 간다.
+    """
+    if req.activity_type != "ART_DIARY":
+        return list(req.detected_objects)
+    description = _truncate_description(req.drawing_description)
+    return [
+        o
+        for o in req.detected_objects
+        if _mentioned_in(o.object_name or o.object_code, description)
+    ]
+
+
 def _drawing_analysis_text(req: QuestionRequest) -> str | None:
     """첫 질문 프롬프트의 {drawing_analysis} 재료를 만든다.
 
@@ -123,12 +178,14 @@ def _drawing_analysis_text(req: QuestionRequest) -> str | None:
       둘을 함께 주는 이유는 서술이 놓친 객체를 목록이 보완하고, 목록이 설명하지 못하는
       맥락을 서술이 채우기 때문이다.
     ⚠️ 서술이 없으면(BE 미전달·분석 실패) 기존 객체 목록 동작을 그대로 유지한다.
+    ⚠️ 자유 그림의 목록은 서술이 뒷받침하는 이름만 남는다(S15P11B209-918). 대상 선택
+       (_target_for_purpose)과 같은 규칙을 쓴다 — 프롬프트가 이름을 볼 수 있는데 대상만
+       막으면, 모델은 목록에서 이름을 집어 온다(918 재현의 '달' 경로가 그랬다).
     """
     description = _truncate_description(req.drawing_description)
+    nameable = _nameable_objects(req)
     objects = (
-        ", ".join(o.object_name or o.object_code for o in req.detected_objects)
-        if req.detected_objects
-        else None
+        ", ".join(o.object_name or o.object_code for o in nameable) if nameable else None
     )
     if description and objects:
         return f"{description}\n(그림에서 찾은 것: {objects})"
@@ -162,6 +219,47 @@ def _format_target_for_log(target: DetectedObject | None) -> str:
     if not config.DETECTION_LOG_DETAIL:
         return target.object_code
     return f"{target.object_name or target.object_code}({target.confidence:.2f})"
+
+
+# ── 이미 물어본 질문 (S15P11B209-921) ───────────────────────────
+# 프롬프트에 나열할 이전 AI 질문 수. 전부 실으면 지시 블록이 대화 이력만큼 길어져
+# 다른 규칙을 밀어낸다. 반복은 대개 직전 몇 개와 겹치므로 최근 것만 본다.
+_MAX_ASKED_QUESTIONS = 5
+
+
+def _asked_questions(req: QuestionRequest) -> list[str]:
+    """이 대화에서 이미 건넨 AI 질문 원문(오래된 순, 최대 5건).
+
+    reason: 구 [[ASKED_ALREADY]]는 "이미 이야기한 것은 다시 묻지 마"라고만 하고 무엇을
+    물었는지 알려주지 않았다. 실제로 걸러지는 건 askedObjectCodes 뿐이라, 대상 객체가 없는
+    질문끼리는 겹쳐도 막을 수단이 없었다. 그림일기는 그리기를 멈출 때마다 질문을 새로
+    요청해(S15P11B209-922) 아이가 답하기 전에도 이 구멍이 열린다.
+    """
+    texts = [
+        (m.text or "").strip()
+        for m in req.recent_messages
+        if (m.sender_type or "").upper() == "AI" and (m.text or "").strip()
+    ]
+    return texts[-_MAX_ASKED_QUESTIONS:]
+
+
+# ── 대상 그룹 (S15P11B209-921) ──────────────────────────────────
+# 사람 전체(PERSON)와 신체 부위(PERSON_*)는 '한 사람'이라는 하나의 대상이다. 부위는 그
+# 사람의 속성이지 옆에 있는 다른 물건이 아니다. 반복 판단·대상 개수 판단에서 함께 묶는다.
+#
+# ⚠️ 집·나무는 묶지 않는다. 지붕·문·창문은 PDI 표준이 각각 물어보는 대상이고
+#    (htp_question_bank [[HOUSE]]), 묶으면 지붕을 물어본 순간 문·창문이 후보에서 사라져
+#    713이 만든 '주제 안에서 하나씩 넓혀 가기'가 통째로 죽는다.
+
+
+def _object_group(object_code: str) -> str:
+    """반복·개수 판단에 쓸 대상 그룹 키. 사람 부위만 전체로 접는다."""
+    return "PERSON" if object_code.startswith("PERSON_") else object_code
+
+
+def _target_group_count(req: QuestionRequest) -> int:
+    """이름을 쓸 수 있는 탐지 객체가 몇 '대상'인가(부위는 접어서 센다)."""
+    return len({_object_group(o.object_code) for o in _nameable_objects(req)})
 
 
 def _last_child_index(req: QuestionRequest) -> int | None:
@@ -281,18 +379,38 @@ def _activity_block(
             if target_name
             else _block("HTP_WHOLE", subject=subject_ko)
         )
+        # 부위가 대상이면 '누구 것인지'가 아니라 '어떻게 보이는지'를 묻게 한다(S15P11B209-918).
+        if _is_person_part(target):
+            lines.append(_block("PERSON_PART", target=target_name))
     elif req.activity_type == "ART_DIARY":
         # 그림일기 탐지 모델(sketch)은 오탐이 잦다 — 이름의 근거는 탐지 목록이 아니라
         # 그림 서술과 아이 말이다(788 B, 활동별 판단).
         lines.append(_block("ART_DIARY"))
         if target_name:
             lines.append(_target_line(req, target_name))
+        elif _last_child_index(req) is None:
+            # 첫 질문인데 이름을 뒷받침할 근거가 없다 — 이름을 지어 부르지 말고 열린 질문을
+            # 하게 한다(S15P11B209-918). 아이가 이미 말한 뒤라면 붙이지 않는다: 그 턴의
+            # 지시는 "아이 말을 따라가"이고, 여기에 '열린 질문을 해'를 겹치면 서로 밀어낸다.
+            lines.append(_block("ART_DIARY_OPEN"))
     elif target_name:
         lines.append(_block("TARGET_ONLY", target=target_name))
     if reask_candidates:
         lines.append(_block("REASK_CANDIDATES"))
+    # 대상이 하나뿐이면 두 번째 대상을 지어내지 못하게 막는다(S15P11B209-921).
+    # 반복 방지 지시("새로운 것을 물어봐")가 '다른 물건'으로 읽혀 사람 한 명 그림에서도
+    # "옆에 있는 건 뭐야?"가 나왔다. 부위는 접어서 세므로 사람+머리+머리카락은 하나다.
+    if _target_group_count(req) == 1:
+        lines.append(_block("SINGLE_TARGET"))
     if req.asked_object_codes:
         lines.append(_block("ASKED_ALREADY"))
+    # 이미 건넨 질문을 나열해 표현만 바꾼 반복을 막는다(S15P11B209-921).
+    # 활동유형과 무관하게 붙인다 — HTP도 대상 객체 없는 질문끼리는 겹치는 것을 못 막는다.
+    asked = _asked_questions(req)
+    if asked:
+        lines.append(
+            _block("ASKED_QUESTIONS", questions="\n".join(f"  · {q}" for q in asked))
+        )
     return "\n".join(lines)
 
 
@@ -441,11 +559,24 @@ def _target_for_purpose(req: QuestionRequest, purpose: str) -> DetectedObject | 
       배경(SCENERY) 등 나머지에서 고른다(결정: 주제 우선·소진 후 배경). 집 단계에서 배경 나무가
       대뜸 대상이 되어 "이 나무는?"이 나오던 709 경로가 이걸로 대부분 사라진다.
     - 남은 후보 중 신뢰도 최고를 고른다. 후보가 없으면 None(호출부가 그림 전체 질문으로 전환).
+
+    선택 규칙 추가(S15P11B209-918):
+    - 자유 그림은 서술이 뒷받침하는 이름만 후보가 된다(_nameable_objects). 근거 없는 이름을
+      대상으로 못 박으면 오탐이 확정 사실로 아이에게 나간다.
+    - HTP 사람은 전체(PERSON)를 부위(PERSON_*)보다 먼저 고른다. 사람 그림은 부위 라벨이
+      열댓 개라 신뢰도만 보면 부위가 뽑히는데, 부위 하나로 좁힌 지시가 사람 질문 뱅크의
+      "누구를 생각하면서 그렸어?" 방향과 만나 "이 머리는 누구의 머리야?"가 됐다.
+      집·나무는 그대로 둔다 — 지붕·문·창문은 PDI 표준 문항의 대상이고, 소유격 문제를
+      만드는 것은 신체 부위다.
     """
     if purpose != "OBJECT_DESCRIPTION" or not req.detected_objects:
         return None
-    asked = set(req.asked_object_codes)
-    available = [o for o in req.detected_objects if o.object_code not in asked]
+    # 물어본 대상은 '그룹'으로 뺀다(S15P11B209-921) — 사람을 물어본 뒤 머리를 대상으로
+    # 잡으면 아이에겐 같은 사람을 또 묻는 것으로 들린다. 집·나무 부위는 묶지 않는다.
+    asked = {_object_group(code) for code in req.asked_object_codes}
+    available = [
+        o for o in _nameable_objects(req) if _object_group(o.object_code) not in asked
+    ]
     if not available:
         return None
     if req.activity_type == "HTP" and req.drawing_subject:
@@ -456,9 +587,17 @@ def _target_for_purpose(req: QuestionRequest, purpose: str) -> DetectedObject | 
             if o.object_code == subject or o.object_code.startswith(f"{subject}_")
         ]
         pool = subject_objs or available
+        if subject == "PERSON":
+            whole = [o for o in pool if o.object_code == "PERSON"]
+            pool = whole or pool
     else:
         pool = available
     return max(pool, key=lambda o: o.confidence)
+
+
+def _is_person_part(target: DetectedObject | None) -> bool:
+    """대상이 사람 그림의 '부위'인가(전체 PERSON은 아니다). S15P11B209-918."""
+    return target is not None and target.object_code.startswith("PERSON_")
 
 
 # ── 탐지 부정 시 후보 칩 재질문 (S15P11B209-718) ──────────────────
@@ -683,6 +822,152 @@ def _crisis_safe_response(req: QuestionRequest, started: float) -> QuestionRespo
     )
 
 
+# ── 그만하기 의사 되묻기 (S15P11B209-938) ───────────────────────
+# 아이가 말로 "이제 그만할래"라고 해도 지금까지는 그 말이 그림에 대한 답으로 다뤄져 다음
+# 질문이 만들어졌다. 건너뛰기 의사는 존중하면서(831) 그보다 분명한 '그만하기'는 듣지 않았다.
+#
+# ⚠️ 무엇을 그만할지 되묻는 이유: 그림일기는 그리면서 동시에 대화한다. 두 종료는 무게가
+#    전혀 다르다 — 대화 종료는 그림을 계속 그릴 수 있어 가볍지만, 그림 활동 완료는 회고
+#    저장과 다음 단계로 이어져 되돌릴 수 없다. 뭉뚱그리면 이야기만 그만하고 싶었던 아이의
+#    그림이 통째로 끝난다.
+#
+# ⚠️ AI는 끝내지 않는다. 되묻기만 하고 실제 종료는 FE가 칩 선택을 보고 한다 — 786이 정한
+#    "턴 제어는 AI 소유가 아니다"를 그대로 지킨다.
+STOP_ASK_BOTH = "그래! 그림을 그만 그릴까, 아니면 이야기만 그만할까?"
+STOP_ASK_DRAWING = "그림 다 그렸구나! 이제 그만 그릴까?"
+STOP_ASK_CONVERSATION = "그래, 이야기는 여기까지 할까?"
+
+# FE가 이 코드를 보고 무엇을 끝낼지 정한다(activity_screens._selectQuestionOption).
+_CHIP_END_ACTIVITY = QuestionOption(code="CHIP_END_ACTIVITY", label="그림 다 그렸어")
+_CHIP_END_TALK = QuestionOption(code="CHIP_END_TALK", label="이야기만 그만할래")
+_CHIP_KEEP_GOING = QuestionOption(code="CHIP_KEEP_GOING", label="아니, 더 할래")
+
+
+def _detect_stop_intent(req: QuestionRequest) -> str | None:
+    """가장 최근 아이 발화에서 그만하기 의사를 찾는다(없으면 None).
+
+    아이가 직전 턴에 '아니, 더 할래'를 골랐으면 되묻지 않는다 — 계속 물으면 그만두라고
+    떠미는 것처럼 들린다(718의 연속 부정 처리와 같은 결).
+    """
+    if _CHIP_KEEP_GOING.code in _last_child_selected_codes(req):
+        return None
+    index = _last_child_index(req)
+    if index is None:
+        return None
+    return conversation_stop_intent.scan(req.recent_messages[index].text or "")
+
+
+def _stop_intent_offers(req: QuestionRequest, verdict: str) -> tuple[str, list[QuestionOption]]:
+    """되물을 문장과 선택 칩을 고른다.
+
+    HTP에서는 그림 갈래를 내지 않는다 — HTP는 주제 그림을 완료한 뒤에야 대화가 시작되므로
+    (FE _handleObjectDetectionChanged가 isHtp이면 즉시 return) '그림을 그만 그린다'가
+    성립하지 않는다. activityType이 없는 구 BE 요청도 같게 다룬다: 무엇을 하는 중인지
+    모르면 되돌릴 수 없는 쪽(활동 완료)을 권하지 않는다.
+    """
+    can_end_activity = req.activity_type == "ART_DIARY"
+    if verdict == conversation_stop_intent.STOP_DRAWING and can_end_activity:
+        return STOP_ASK_DRAWING, [_CHIP_END_ACTIVITY, _CHIP_KEEP_GOING]
+    if verdict == conversation_stop_intent.STOP_UNSPECIFIED and can_end_activity:
+        return STOP_ASK_BOTH, [_CHIP_END_ACTIVITY, _CHIP_END_TALK, _CHIP_KEEP_GOING]
+    # 대화를 지목했거나, 그림 갈래를 낼 수 없는 활동이면 대화 종료만 묻는다.
+    return STOP_ASK_CONVERSATION, [_CHIP_END_TALK, _CHIP_KEEP_GOING]
+
+
+def _stop_intent_response(
+    req: QuestionRequest, started: float, verdict: str
+) -> QuestionResponse:
+    """그만하기 의사 되묻기 — GMS를 호출하지 않는 결정적 응답.
+
+    목적은 FOLLOW_UP이다. 아이가 방금 한 말에 이어 묻는 것이고, 대상 객체는 붙지 않는다.
+    """
+    text, offers = _stop_intent_offers(req, verdict)
+    option_allowed = "OPTION" in req.allowed_response_modes
+    return QuestionResponse(
+        question_text=text,
+        question_purpose="FOLLOW_UP",
+        options=list(offers) if option_allowed else None,
+        target_object=None,
+        fallback_used=False,
+        safety_result=SafetyResult(
+            status="PASSED", rule_version=req.safety_rule_version, block_reason_code=None
+        ),
+        model_name=config.LLM_MODEL,
+        # GMS를 호출하지 않았으므로 파생 모델 ID가 없다 — 엔진명으로 대신 기록한다.
+        model_version=config.LLM_MODEL,
+        prompt_version=PROMPT_VERSION,
+        processing_time_ms=int((time.monotonic() - started) * 1000),
+    )
+
+
+# ── 그림일기 완전 첫 질문 고정 (S15P11B209-921) ─────────────────
+# 자유 그림은 무엇을 그렸는지 아는 사람이 아이뿐이다. 자동 탐지는 이 영역에서 가장 약하고
+# (sketch 오탐 — 918), VLM 서술도 확신이 없으면 "네모난 무언가"에 머문다. 모르는 상태에서
+# AI가 실마리를 골라 대화를 열면 918의 오탐 단정("그림 속 덤불은 어떤 모습이야?")이 된다.
+# 그래서 첫 질문은 추측하지 않고 아이에게 직접 묻고, 그 대답으로 대화를 시작한다.
+#
+# ⚠️ 786이 없앤 '첫 질문 고정 현상'을 그림일기에 한해 의도적으로 되살리는 것이다. 786이
+#    틀렸던 게 아니라 조건이 다르다 — HTP는 활동이 주제를 정해 두어 무엇을 그렸는지 알고
+#    시작하지만, 자유 그림은 모른다. 모르는 채로 여는 질문을 다양화하면 다양하게 틀린다.
+#
+# ⚠️ 판정에 currentQuestionCount를 쓰는 이유: 아이 발화 유무는 그림일기에서 '완전 첫 질문'과
+#    1:1이 아니다. 그림일기는 그리기를 멈출 때마다 질문을 새로 요청하므로(922), 아이가 답하지
+#    않은 채 두 번째 요청이 오면 발화는 여전히 없다. questionCount는 질문이 저장될 때만 오르니
+#    (BE QuestionPersistenceService) 0이 곧 '아직 아무 질문도 안 함'이다.
+_DIARY_OPENING_SIMPLE = "오늘 뭐 그렸는지 이야기해 줄래?"
+_DIARY_OPENING_STANDARD = "오늘 뭐 그린 건지 설명해줄래?"
+
+# 난이도 2종. '설명'은 유아에게 어려운 말이라 유아·배려형에는 '이야기해 줄래'를 쓴다.
+# 네 구간을 다 가르지 않은 것은 의도다 — 895에서 확인했듯 길이 축은 이미 사실상 둘로
+# 붕괴해 있고, 한 문장짜리 고정 문구를 넷으로 나누면 관리할 것만 늘어난다.
+_DIARY_OPENING_BY_DIFFICULTY = {
+    "PRESCHOOL": _DIARY_OPENING_SIMPLE,
+    "SUPPORT": _DIARY_OPENING_SIMPLE,
+}
+
+# 이 질문 전용 칩. 목적별 generic(DRAWING_CONTEXT = 진짜/상상)을 쓰지 않는 이유:
+# 첫 질문에서 실제 경험인지 상상인지 먼저 정하지 말라는 규칙(first_question_diary)과
+# 정면으로 어긋난다. 칩도 아이 화면에 나가는 질문의 일부다.
+_DIARY_OPENING_OPTIONS = [
+    QuestionOption(code="CHIP_YES", label="응, 말해줄게"),
+    QuestionOption(code="CHIP_NOT_SURE", label="음… 잘 모르겠어"),
+    QuestionOption(code="CHIP_JUST_WANTED", label="그냥 그리고 싶었어"),
+]
+
+
+def _is_diary_opening(req: QuestionRequest) -> bool:
+    """그림일기의 '완전 첫 질문'인가(아직 아무 질문도 저장되지 않았는가)."""
+    return req.activity_type == "ART_DIARY" and req.current_question_count == 0
+
+
+def _diary_opening_question(difficulty: str | None) -> str:
+    return _DIARY_OPENING_BY_DIFFICULTY.get(difficulty or "", _DIARY_OPENING_STANDARD)
+
+
+def _diary_opening_response(req: QuestionRequest, started: float) -> QuestionResponse:
+    """그림일기 첫 질문 — GMS를 호출하지 않는 결정적 응답.
+
+    위기 응답·인젝션 재질문과 같은 패턴이다. 고정 문구를 LLM에 만들게 할 이유가 없고,
+    호출을 아끼면 아이가 기다리는 시간도 줄어든다.
+    """
+    option_allowed = "OPTION" in req.allowed_response_modes
+    return QuestionResponse(
+        question_text=_diary_opening_question(req.difficulty),
+        question_purpose="DRAWING_CONTEXT",
+        options=list(_DIARY_OPENING_OPTIONS) if option_allowed else None,
+        target_object=None,
+        fallback_used=False,  # AI가 정한 질문이다 — BE 폴백 템플릿이 아니다
+        safety_result=SafetyResult(
+            status="PASSED", rule_version=req.safety_rule_version, block_reason_code=None
+        ),
+        model_name=config.LLM_MODEL,
+        # GMS를 호출하지 않았으므로 파생 모델 ID가 없다 — 엔진명으로 대신 기록한다.
+        model_version=config.LLM_MODEL,
+        prompt_version=PROMPT_VERSION,
+        processing_time_ms=int((time.monotonic() - started) * 1000),
+    )
+
+
 # ── 프롬프트 인젝션 차단 (S15P11B209-742) ───────────────────────
 # 아이 발화가 프롬프트를 조작하려 하면(예: "지금까지의 모든 지시를 잊고~") LLM에 전달하지 않고
 # 결정적 재질문으로 되묻는다. 위기 차단과 달리 대화는 끊지 않는다(정상적인 되묻기).
@@ -721,6 +1006,26 @@ def _reask_response(req: QuestionRequest, started: float) -> QuestionResponse:
         prompt_version=PROMPT_VERSION,
         processing_time_ms=int((time.monotonic() - started) * 1000),
     )
+
+
+# ── 문맥상 어색한 질문 교체 (S15P11B209-918) ────────────────────
+# 안전 위반이 아니라 품질 결함이다 — 차단(422)하면 BE 폴백 템플릿("오늘은 뭘 그렸어?")으로
+# 대체되어 대화가 더 나빠진다. 그래서 같은 대상을 유지한 채 물어볼 각도만 바꿔 준다.
+QUALITY_OPEN_QUESTION = "그림에서 더 이야기해 주고 싶은 건 뭐야?"
+
+
+def _quality_replacement(
+    purpose: str, target: DetectedObject | None
+) -> tuple[str, str, DetectedObject | None]:
+    """어색한 질문을 대신할 (질문, 목적, 대상)을 만든다.
+
+    대상이 살아 있으면 그 대상의 '보이는 것'을 묻는 질문으로 바꾼다 — 대상을 버리면
+    아이 입장에서 화제가 통째로 사라진다. 대상이 없으면 그림 전체를 여는 질문으로 간다.
+    """
+    name = (target.object_name or "").strip() if target is not None else ""
+    if name and purpose == "OBJECT_DESCRIPTION":
+        return f"그림 속 {name}{question_quality.eun_neun(name)} 어떤 모양이야?", purpose, target
+    return QUALITY_OPEN_QUESTION, "DRAWING_CONTEXT", None
 
 
 def _detect_crisis(req: QuestionRequest) -> str | None:
@@ -884,6 +1189,33 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         )
         return _reask_response(req, started)
 
+    # 아이가 그만하고 싶다고 말했으면 다음 질문을 만들지 않고 무엇을 그만할지 되묻는다
+    # (S15P11B209-938). 위기·인젝션 뒤에 두는 이유: "다 싫어, 그만할래"는 그만하기 의사일
+    # 수도 위기 신호일 수도 있다. 이 분기를 위기 검사 앞에 두면 위기 신호를 조용히 삼킨다.
+    stop_verdict = _detect_stop_intent(req)
+    if stop_verdict:
+        # ⚠️ 아이 발화 원문은 남기지 않는다 — 판정 코드만.
+        logger.info(
+            "그만하기 의사 감지 — 되묻기: verdict=%s activityType=%s request_id=%s",
+            stop_verdict,
+            req.activity_type or "-",
+            request_id,
+        )
+        return _stop_intent_response(req, started, stop_verdict)
+
+    # 그림일기 완전 첫 질문은 GMS 없이 고정 문구로 연다(S15P11B209-921). 무엇을 그렸는지는
+    # 아이만 아는 정보라 AI가 추측하지 않고 직접 묻는다. 위기·인젝션 검사 뒤에 두는 이유:
+    # 질문 수가 0이어도 아이 발화가 이력에 있을 수 있는 경로(FE 복원)가 그 검사를 우회하면
+    # 안 된다.
+    if _is_diary_opening(req):
+        logger.info(
+            "[질문] request_id=%s drawingSessionId=%s activityType=ART_DIARY "
+            "purpose=DRAWING_CONTEXT | 고정 첫 질문(GMS 미호출)",
+            request_id,
+            req.drawing_session_id,
+        )
+        return _diary_opening_response(req, started)
+
     # 목적·대상을 GMS 호출 전에 정해 프롬프트에 그대로 싣는다(S15P11B209-713) — 질문 문장과
     # 응답 targetObject가 같은 객체를 가리키게 하고, HTP면 주제를 벗어난 명사가 안 나오게 한다.
     option_allowed = "OPTION" in req.allowed_response_modes
@@ -930,6 +1262,20 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         # 정화 후 남는 게 없으면(기호뿐이었으면) 빈 출력 — 폴백 템플릿에 맡긴다.
         raise UpstreamError("AI_EMPTY_COMPLETION", "EmptyCompletion")
 
+    # 문맥상 어색한 질문(그림 속 부위의 소유자를 묻는 등)은 차단하지 않고 교체한다
+    # (S15P11B209-918). 안전 판정 뒤에 두는 이유: 교체 문장은 우리가 쓴 것이라 다시
+    # 판정할 필요가 없고, 안전 차단이 먼저 걸리는 문장은 애초에 여기 오지 않는다.
+    quality_replaced = False
+    quality_reason = question_quality.find_awkward(text)
+    if quality_reason:
+        # ⚠️ 질문 원문은 남기지 않는다 — 사유 코드만(안전 차단 로그와 같은 규칙).
+        logger.warning(
+            "질문 품질 교체: reason=%s request_id=%s", quality_reason, request_id
+        )
+        text, purpose, target = _quality_replacement(purpose, target)
+        quality_replaced = True
+        candidate_options = None
+
     # 생성된 질문이 마음·느낌을 묻는 문장이면 EXPRESSION으로 재분류해 감정 칩을 붙인다
     # (S15P11B209-650: 칩을 '질문 내용'과 맞춘다). 목적은 생성 전에 정하지만 감정 질문 여부는
     # 문장을 봐야 알 수 있어 여기서 보정한다. 부정 후보 재질문(718) 중에는 그 칩을 유지한다.
@@ -941,6 +1287,10 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
     # OPTION 비허용이면 반드시 null — 빈 배열도 계약 위반이다(isContractValidFor).
     if not option_allowed:
         options = None  # OPTION 비허용 → 칩 없음(빈 배열도 계약 위반)
+    elif quality_replaced and target is None:
+        # 교체된 열린 질문에 탐지 후보 칩(747의 '무엇→후보' 규칙)을 붙이면, 방금 억누른
+        # 오탐 이름이 칩으로 아이 화면에 다시 올라온다(S15P11B209-918). 목적별 generic을 쓴다.
+        options = _options_for_purpose(purpose)
     elif candidate_options is not None:
         options = candidate_options  # 부정 재질문 후보(718)
     elif _NEGATION_CODE in selected_codes or _ESCAPE_CODE in selected_codes:
@@ -966,9 +1316,12 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
     # 분석 로그의 [필터] 줄과 drawingSessionId로 이어붙일 수 있게 한다.
     # activityType·drawingSubject를 함께 남겨 어느 HTP 단계였는지 로그만으로 판별한다
     # (S15P11B209-712). 값이 없으면(그림일기·주제 미전달 요청) "-"로 남긴다.
+    # unnamed: 서술이 뒷받침하지 못해 프롬프트에서 뺀 탐지 이름의 수(S15P11B209-918).
+    # 개수만 남긴다 — 이름 자체는 아동 그림 내용이라 상세 로그 규칙을 따른다. 이 값이 크면
+    # 탐지와 서술이 크게 어긋난 그림이라, 나중에 오탐 경향을 코드 없이 되짚을 수 있다.
     logger.info(
         "[질문] request_id=%s drawingSessionId=%s basisAnalysisId=%s "
-        "activityType=%s drawingSubject=%s purpose=%s target=%s | %s",
+        "activityType=%s drawingSubject=%s purpose=%s target=%s unnamed=%d | %s",
         request_id,
         req.drawing_session_id,
         req.basis_analysis_id if req.basis_analysis_id is not None else "-",
@@ -976,6 +1329,7 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         req.drawing_subject or "-",
         purpose,
         _format_target_for_log(target),
+        len(req.detected_objects) - len(_nameable_objects(req)),
         _format_objects_for_log(req),
     )
 

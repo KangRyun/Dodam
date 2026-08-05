@@ -16,6 +16,7 @@ import 'features/consent/data/repositories/remote_consent_repository.dart';
 import 'features/conversation/conversation.dart';
 import 'features/drawing/data/repositories/mock_drawing_repository.dart';
 import 'features/drawing/data/repositories/remote_drawing_repository.dart';
+import 'features/guardian_pin/data/repositories/remote_guardian_pin_repository.dart';
 import 'features/notification/data/repositories/remote_push_token_repository.dart';
 import 'features/notification/data/repositories/remote_notification_inbox_repository.dart';
 import 'features/notification/data/services/device_push_permission_service.dart';
@@ -96,9 +97,19 @@ DodamApp createDefaultApp({
     'HTP_PHOTO_UPLOAD_ENABLED',
     defaultValue: true,
   );
+  // 보호자 홈 진입 PIN gate(S15P11B209-874). 배포 클러스터에
+  // `GUARDIAN_PIN_PEPPER`가 주입돼 PIN API가 `PIN_UNAVAILABLE` 없이 응답하는
+  // 것이 확인되기 전까지 기본 꺼짐 —
+  // flutter run --dart-define=GUARDIAN_PIN_GATE_ENABLED=true 로 켠다.
+  const guardianPinGateEnabled = bool.fromEnvironment(
+    'GUARDIAN_PIN_GATE_ENABLED',
+    defaultValue: false,
+  );
 
   return DodamApp(
     htpPhotoUploadEnabled: htpPhotoUploadEnabled,
+    guardianPinGateEnabled: guardianPinGateEnabled,
+    guardianPinRepository: RemoteGuardianPinRepository(apiClient),
     authRepository: authRepository,
     activityRepository: RemoteActivityRepository(apiClient),
     childRepository: RemoteChildRepository(apiClient),
