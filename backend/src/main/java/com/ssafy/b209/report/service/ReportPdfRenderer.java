@@ -37,6 +37,12 @@ public class ReportPdfRenderer {
 
   private static final Logger log = LoggerFactory.getLogger(ReportPdfRenderer.class);
 
+  /** 건너뛴 문답 상태다 (875 §6). */
+  private static final String SKIPPED_STATE = "SKIPPED";
+
+  /** 집·나무·사람 활동 코드다. <b>사람이 읽는 표시명이 아니라 코드로만 분기한다.</b> */
+  private static final String HTP_ACTIVITY_CODE = "HTP";
+
   private static final String REGULAR_FONT = "/fonts/NanumSquareNeo-Regular.ttf";
   private static final String BOLD_FONT = "/fonts/NanumSquareNeo-Bold.ttf";
   private static final DateTimeFormatter DATE_TIME_FORMATTER =
@@ -92,6 +98,10 @@ public class ReportPdfRenderer {
 
   /** 화면(875 §11)과 같은 순서로 섹션을 쌓는다. 비어 있는 섹션은 그리지 않는다 — 오류가 아니다. */
   private void writeReport(ReportPdfWriter writer, ReportDetailResponse report) throws IOException {
+    if (isHtpActivity(report)) {
+      writeHtpReport(writer, report);
+      return;
+    }
     writer.cover("도담 관찰 리포트", coverMeta(report));
     if (report.nonDiagnosticNotice() != null && !report.nonDiagnosticNotice().isBlank()) {
       writer.notice(report.nonDiagnosticNotice());
@@ -113,6 +123,83 @@ public class ReportPdfRenderer {
     }
     writer.section("주의 사항", bulletRows(report.limitations()));
     writer.section("참고 자료", referenceRows(report));
+  }
+
+  /**
+   * 집·나무·사람 활동을 앱 화면과 같은 제목·순서로 쌓는다 (S15P11B209-960/961).
+   *
+   * <p><b>제목이 검사 투에서 벗어나 있다.</b> CLAUDE.md 5절이 "집·나무·사람 그리기를 활용하더라도 'HTP 검사'로 표현·해석하지 않는다"를 명시한다.
+   * 화면만 바꾸고 PDF 를 두면 <b>인쇄물에만 검사 투가 남아</b> 계약 §11("화면과 PDF 동일")이 깨진다 — 보호자가 저장해 남기는 쪽이 오히려 PDF 다.
+   *
+   * <p>비HTP 경로는 건드리지 않는다. 그림일기 문구 정리는 별도 범위다.
+   */
+  private void writeHtpReport(ReportPdfWriter writer, ReportDetailResponse report)
+      throws IOException {
+    writer.cover("도담 관찰 리포트", htpCoverMeta(report));
+    if (report.nonDiagnosticNotice() != null && !report.nonDiagnosticNotice().isBlank()) {
+      writer.notice(report.nonDiagnosticNotice());
+    }
+    writer.section("한눈에 보는 이번 활동", activityInfoRows(report));
+    // 그림·관찰·문답을 한 묶음으로 낸다 — 세 그림을 따로 흩어 놓으면 한 장씩 견주어 읽게 된다.
+    writer.section("집·나무·사람, 하나씩 살펴봐요", htpSubjectRows(report));
+    writer.section("아이의 표현과 대화 요약", expressionRows(report));
+    writer.section("대화 요약", conversationRows(report));
+    writer.section("이런 모습이 보였어요", observedFeatureRows(report));
+    writer.section("함께 살펴보면 좋을 이야기", interpretationRows(report));
+    writer.section("그리는 동안 있었던 일", activityFactRows(report));
+    writer.section("보호자 대화 안내", bulletRows(report.guardianConversationGuide()));
+    for (ReportParentGuideResponse guide : report.parentGuides()) {
+      writer.section(guideTitle(guide.guideType()), bulletRows(guide.items()));
+    }
+    if (report.crisisAlert() != null) {
+      writer.section("안전 안내", List.of(new ReportPdfRow.Text("보호자 화면에서 안전 안내를 확인해 주세요.")));
+    }
+    writer.section("주의 사항", bulletRows(report.limitations()));
+    writer.section("참고 자료", referenceRows(report));
+  }
+
+  /**
+   * 집·나무·사람 활동인지 판정한다.
+   *
+   * <p>앱과 <b>같은 기준</b>을 쓴다({@code report_dtos.dart} {@code isHtpActivity}) — 계약 §2 의 최상위 {@code
+   * activityType}이 정본이고, 그 필드가 없는 구형 응답은 세션의 활동 코드로 판정한다. 두 곳이 다른 기준을 쓰면 같은 리포트가 화면과 PDF 에서 다른 서식으로
+   * 나온다.
+   *
+   * <p><b>코드값으로만 판정한다.</b> 표시명은 사람이 읽는 문구라 바뀔 수 있고, 문구로 분기하면 이름을 다듬는 순간 서식이 조용히 무너진다.
+   */
+  private boolean isHtpActivity(ReportDetailResponse report) {
+    if (HTP_ACTIVITY_CODE.equalsIgnoreCase(report.activityType())) {
+      return true;
+    }
+    return report.drawingSession() != null
+        && HTP_ACTIVITY_CODE.equalsIgnoreCase(report.drawingSession().drawingTypeCode());
+  }
+
+  private List<String> htpCoverMeta(ReportDetailResponse report) {
+    List<String> meta = new ArrayList<>();
+    meta.add("집·나무·사람, 세 그림 이야기");
+    meta.addAll(coverMeta(report));
+    return meta;
+  }
+
+  /**
+   * 주제 묶음 앞에 읽는 법을 먼저 둔다.
+   *
+   * <p>안내문이 없으면 관찰 문장이 곧바로 평가처럼 읽힌다. 문구는 앱 화면과 같은 것을 쓴다.
+   */
+  private List<ReportPdfRow> htpSubjectRows(ReportDetailResponse report) {
+    List<ReportPdfRow> subjectRows = subjectRows(report);
+    if (subjectRows.isEmpty()) {
+      // 안내문만 남은 빈 섹션을 그리지 않는다(875 §10).
+      return List.of();
+    }
+    List<ReportPdfRow> rows = new ArrayList<>();
+    rows.add(
+        new ReportPdfRow.Text(
+            "세 가지를 그리는 동안 아이가 무엇을 그렸고 어떤 이야기를 들려줬는지 모았어요."
+                + " 잘 그렸는지 가리거나 결과를 매기는 자리가 아니라, 아이와 함께 다시 펼쳐 볼 이야깃거리예요."));
+    rows.addAll(subjectRows);
+    return rows;
   }
 
   private List<String> coverMeta(ReportDetailResponse report) {
@@ -168,7 +255,17 @@ public class ReportPdfRenderer {
           .forEach(
               pair -> {
                 rows.add(new ReportPdfRow.Text("Q " + value(pair.question())));
-                rows.add(new ReportPdfRow.Caption("A " + value(pair.answer())));
+                // 건너뛴 질문을 "-" 로 두면 답을 못 읽은 것인지 안 한 것인지 구분되지 않는다.
+                //   화면과 같은 문구를 쓴다(875 §6).
+                if (SKIPPED_STATE.equals(pair.state()) || pair.answer() == null) {
+                  rows.add(new ReportPdfRow.Caption("A 이 질문은 건너뛰었어요"));
+                } else {
+                  rows.add(new ReportPdfRow.Caption("A " + pair.answer()));
+                  // 미확정 음성은 발화를 지우지 않고 확인 요청만 덧붙인다(875 §6-1).
+                  if (pair.sttNeedsConfirmation()) {
+                    rows.add(new ReportPdfRow.Caption("음성 인식 내용을 확인해 주세요"));
+                  }
+                }
               });
     }
     return rows;
