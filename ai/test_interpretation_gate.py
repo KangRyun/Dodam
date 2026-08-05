@@ -1,0 +1,245 @@
+"""interpretation_gate 단위 테스트 — 경향 카드 구조적 공개 게이트 (S15P11B209-888).
+
+정본: docs/S15P11B209-875-report-api-contract.md §4-1.
+
+여기서 못 박는 것:
+- 독립 근거는 **말단 원본 참조의 합집합 크기**다. 근거 항목 개수가 아니다.
+- 같은 sourceType이라도 원본이 다르면 독립이다(집 답변 + 사람 답변 = 2건).
+- 파생 근거와 그 원본이 함께 실리면 1건이다.
+- 감정 근거 계열·활동 지표는 각각 합쳐 1건이다.
+- 아이 표현 근거가 없으면 공개하지 않는다.
+- 실패는 **제외**이고 EXPERT_ONLY 강등이 아니다.
+"""
+
+from __future__ import annotations
+
+import unittest
+
+import internal_contracts as contracts
+import interpretation_gate as gate
+
+
+def _ref(kind="QA_ANSWER", ref_id="202"):
+    return contracts.EvidenceSourceRef(kind=kind, id=ref_id)
+
+
+def _item(evidence_id, source_type="CHILD_ANSWER", ref=None, derived=None):
+    return contracts.ReportEvidenceItem(
+        evidence_id=evidence_id,
+        source_type=source_type,
+        text=f"근거 {evidence_id}",
+        source_ref=None if derived else (ref or _ref()),
+        derived_from=derived,
+    )
+
+
+def _card(refs):
+    return contracts.PublicInterpretation(
+        category="RELATIONSHIP",
+        title="가족과의 정서적 연결",
+        tendency_text="가족에게 의지하려는 경향이 보일 수 있습니다.",
+        scope_text="이번 그림 활동에서 나타난 가능성입니다.",
+        home_observation_guide="새로운 상황에서도 비슷한지 살펴봐 주세요.",
+        evidence_refs=refs,
+    )
+
+
+def _evaluate(items, refs, blocked=frozenset()):
+    return gate.evaluate(_card(refs), {i.evidence_id: i for i in items}, blocked)
+
+
+class IndependentCountTest(unittest.TestCase):
+    def test_two_different_origins_pass(self):
+        """같은 sourceType이라도 원본이 다르면 독립이다 — 대표 예시가 통과해야 한다."""
+        items = [
+            _item(1, ref=_ref(ref_id="202")),  # 집 그림 답변
+            _item(2, ref=_ref(ref_id="318")),  # 사람 그림 답변
+        ]
+        result = _evaluate(items, [1, 2])
+        self.assertTrue(result.passed)
+        self.assertEqual(result.independent_count, 2)
+
+    def test_same_origin_counts_once(self):
+        """같은 메시지를 두 번 인용해도 1건이다."""
+        items = [_item(1, ref=_ref(ref_id="202")), _item(2, ref=_ref(ref_id="202"))]
+        result = _evaluate(items, [1, 2])
+        self.assertFalse(result.passed)
+        self.assertEqual(result.independent_count, 1)
+        self.assertEqual(result.reason, gate.NOT_ENOUGH_INDEPENDENT_EVIDENCE)
+
+    def test_single_evidence_fails(self):
+        result = _evaluate([_item(1)], [1])
+        self.assertFalse(result.passed)
+        self.assertEqual(result.reason, gate.NOT_ENOUGH_INDEPENDENT_EVIDENCE)
+
+    def test_no_reference_fails(self):
+        self.assertEqual(_evaluate([_item(1)], []).reason, gate.NO_EVIDENCE)
+
+    def test_unknown_reference_does_not_pad_the_count(self):
+        """존재하지 않는 근거는 셈에서 빠진다 — 없는 근거로 2건을 채우지 못한다."""
+        result = _evaluate([_item(1)], [1, 99])
+        self.assertEqual(result.independent_count, 1)  # 유효한 1건만
+        self.assertFalse(result.passed)
+        self.assertEqual(result.reason, gate.NOT_ENOUGH_INDEPENDENT_EVIDENCE)
+
+    def test_derived_and_its_origin_count_once(self):
+        """파생 근거와 그 원본이 함께 실려도 같은 말단은 한 번만 센다."""
+        origin_a, origin_b = _ref(ref_id="202"), _ref(ref_id="318")
+        items = [
+            _item(1, source_type="REPEATED_SUBJECT", derived=[origin_a, origin_b]),
+            _item(2, ref=origin_a),  # 파생의 원본 중 하나
+        ]
+        result = _evaluate(items, [1, 2])
+        self.assertTrue(result.passed)
+        self.assertEqual(result.independent_count, 2)  # 3이 아니다
+
+    def test_derived_alone_can_pass_with_two_origins(self):
+        """파생 근거 하나가 서로 다른 원본 둘을 담으면 2건이다(그게 파생의 뜻이다)."""
+        items = [
+            _item(
+                1,
+                source_type="REPEATED_SUBJECT",
+                derived=[_ref(ref_id="202"), _ref(ref_id="318")],
+            )
+        ]
+        result = _evaluate(items, [1])
+        self.assertTrue(result.passed)
+        self.assertEqual(result.independent_count, 2)
+
+
+class MergeFamilyTest(unittest.TestCase):
+    def test_emotion_family_merges_to_one(self):
+        """고른 감정 + 말한 감정은 합쳐 1건 — 감정 근거만으로는 통과할 수 없다."""
+        items = [
+            _item(1, source_type="SELECTED_EMOTION", ref=_ref("EMOTION_SELECTION", "5")),
+            _item(2, source_type="STATED_EMOTION", ref=_ref(ref_id="202")),
+        ]
+        result = _evaluate(items, [1, 2])
+        self.assertFalse(result.passed)
+        self.assertEqual(result.independent_count, 1)
+        self.assertEqual(result.reason, gate.NOT_ENOUGH_INDEPENDENT_EVIDENCE)
+
+    def test_emotion_plus_other_origin_passes(self):
+        items = [
+            _item(1, source_type="SELECTED_EMOTION", ref=_ref("EMOTION_SELECTION", "5")),
+            _item(2, source_type="CHILD_ANSWER", ref=_ref(ref_id="202")),
+        ]
+        self.assertTrue(_evaluate(items, [1, 2]).passed)
+
+    def test_activity_metrics_merge_to_one(self):
+        items = [
+            _item(1, source_type="ACTIVITY_METRIC", ref=_ref("ACTIVITY_METRIC", "m1")),
+            _item(2, source_type="ACTIVITY_METRIC", ref=_ref("ACTIVITY_METRIC", "m2")),
+            _item(3, source_type="ACTIVITY_METRIC", ref=_ref("ACTIVITY_METRIC", "m3")),
+        ]
+        result = _evaluate(items, [1, 2, 3])
+        self.assertEqual(result.independent_count, 1)
+        self.assertFalse(result.passed)
+
+
+class ChildExpressionRequiredTest(unittest.TestCase):
+    def test_vision_and_metric_only_is_blocked(self):
+        """그림 관찰과 활동 지표만으로 심리 경향을 만들지 못한다(상징 단독 해석 방지)."""
+        items = [
+            _item(1, source_type="VISION", ref=_ref("DETECTED_OBJECT", "d1")),
+            _item(2, source_type="ACTIVITY_METRIC", ref=_ref("ACTIVITY_METRIC", "m1")),
+        ]
+        result = _evaluate(items, [1, 2])
+        self.assertFalse(result.passed)
+        self.assertEqual(result.reason, gate.NO_CHILD_EXPRESSION)
+        self.assertEqual(result.independent_count, 2)  # 개수는 찼지만 종류가 모자라다
+
+    def test_vision_plus_child_answer_passes(self):
+        items = [
+            _item(1, source_type="VISION", ref=_ref("DETECTED_OBJECT", "d1")),
+            _item(2, source_type="CHILD_ANSWER", ref=_ref(ref_id="202")),
+        ]
+        self.assertTrue(_evaluate(items, [1, 2]).passed)
+
+    def test_derived_from_child_origin_counts_as_child_expression(self):
+        """파생 근거는 말단 원본이 아이 표현이면 충족으로 본다(§4-1 조건 2)."""
+        items = [
+            _item(
+                1,
+                source_type="REPEATED_SUBJECT",
+                derived=[_ref(ref_id="202"), _ref(ref_id="318")],
+            )
+        ]
+        result = _evaluate(items, [1])
+        self.assertTrue(result.passed)
+        self.assertTrue(result.child_expression)
+
+    def test_derived_from_vision_only_is_not_child_expression(self):
+        items = [
+            _item(
+                1,
+                source_type="LONGITUDINAL",
+                derived=[_ref("DETECTED_OBJECT", "d1"), _ref("VLM_OBSERVATION", "v1")],
+            )
+        ]
+        result = _evaluate(items, [1])
+        self.assertFalse(result.passed)
+        self.assertEqual(result.reason, gate.NO_CHILD_EXPRESSION)
+
+
+class BlockedEvidenceTest(unittest.TestCase):
+    """미확정 STT·위기 발화는 근거가 될 수 없다 (875 §6-1). 886·889가 목록을 채운다."""
+
+    def test_blocked_origin_fails_before_counting(self):
+        items = [_item(1, ref=_ref(ref_id="202")), _item(2, ref=_ref(ref_id="318"))]
+        result = _evaluate(items, [1, 2], blocked=frozenset({("QA_ANSWER", "318")}))
+        self.assertFalse(result.passed)
+        self.assertEqual(result.reason, gate.BLOCKED_EVIDENCE)
+        self.assertIn(("QA_ANSWER", "318"), result.blocked)
+
+    def test_blocked_origin_inside_derived_evidence_also_fails(self):
+        items = [
+            _item(
+                1,
+                source_type="REPEATED_SUBJECT",
+                derived=[_ref(ref_id="202"), _ref(ref_id="318")],
+            )
+        ]
+        result = _evaluate(items, [1], blocked=frozenset({("QA_ANSWER", "318")}))
+        self.assertEqual(result.reason, gate.BLOCKED_EVIDENCE)
+
+    def test_unrelated_block_does_not_affect(self):
+        items = [_item(1, ref=_ref(ref_id="202")), _item(2, ref=_ref(ref_id="318"))]
+        result = _evaluate(items, [1, 2], blocked=frozenset({("QA_ANSWER", "999")}))
+        self.assertTrue(result.passed)
+
+
+class ApplyTest(unittest.TestCase):
+    def test_only_failing_card_is_removed(self):
+        """리포트 전체를 실패시키지 않고 문제 카드만 뺀다."""
+        items = [_item(1, ref=_ref(ref_id="202")), _item(2, ref=_ref(ref_id="318"))]
+        good, bad = _card([1, 2]), _card([1])
+        passed, reasons = gate.apply([good, bad], items)
+        self.assertEqual(passed, [good])
+        self.assertEqual(reasons, [gate.NOT_ENOUGH_INDEPENDENT_EVIDENCE])
+
+    def test_all_failing_yields_empty_list(self):
+        """통과가 없으면 빈 목록이다 — 그것이 정상이다(875 §10)."""
+        passed, reasons = gate.apply([_card([1])], [_item(1)])
+        self.assertEqual(passed, [])
+        self.assertEqual(len(reasons), 1)
+
+    def test_no_cards_is_fine(self):
+        self.assertEqual(gate.apply([], []), ([], []))
+
+
+class GateIsNotADowngradeTest(unittest.TestCase):
+    """구조 게이트 실패는 제외이고 강등이 아니다 — 두 검사의 성질이 다르다.
+
+    강등(EXPERT_ONLY)은 "표현을 다듬으면 공개할 수 있다"는 뜻인데, 근거가 없는 카드는
+    문장을 고쳐도 공개 대상이 아니다. 이 모듈이 visibility 값을 다루지 않는 것으로 못 박는다.
+    """
+
+    def test_gate_result_carries_no_visibility_scope(self):
+        result = _evaluate([_item(1)], [1])
+        self.assertFalse(hasattr(result, "visibility_scope"))
+        self.assertNotIn("EXPERT_ONLY", str(result.reason))
+
+
+if __name__ == "__main__":
+    unittest.main()
