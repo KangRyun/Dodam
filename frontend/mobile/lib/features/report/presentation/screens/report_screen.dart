@@ -426,23 +426,46 @@ class _ReportContent extends StatelessWidget {
       final pagePadding = constraints.maxWidth < 360
           ? AppSpacing.sm
           : AppSpacing.lg;
-      // 계약 §11의 확정 섹션 순서를 그대로 세로로 쌓는다. 데이터가 없는 섹션은
-      // 각 빌더가 null을 돌려주어 자연스럽게 빠진다(오류 아님).
+      // 데이터가 없는 섹션은 각 빌더가 null을 돌려주어 자연스럽게 빠진다(오류 아님).
+      //
+      // 활동에 따라 섹션 구성이 갈린다. 그림일기·자유 그림은 계약 §11의 확정
+      // 순서를 그대로 쓰고, HTP는 아래 [_htpSections]의 전용 순서를 쓴다.
+      final isHtp = report.isHtpActivity;
+      final drawings = _ReportDrawings(
+        report: report,
+        imageFetcher: imageFetcher,
+        activityRepository: activityRepository,
+      );
+      // HTP 리포트의 고유 가치는 "집·나무·사람 각각에서 무엇을 보았고 어떤
+      // 이야기를 나눴는가"다. 계약은 그림(§11-4)과 주제별 관찰(§11-5)을 따로
+      // 두지만, 그렇게 하면 세 그림이 갤러리로만 붙고 이야기는 멀리 떨어진다.
+      // HTP에서만 주제 단위로 묶어 맨 앞에 세운다.
+      final htpStory = isHtp
+          ? _htpSubjectStorySection(report, imageFetcher)
+          : null;
       final sections = <Widget>[
         _ReportHero(report: report),
         ?_nonDiagnosticNoticeSection(report),
         ?_overviewSection(report),
-        ?_interpretationsSection(report),
-        _ReportDrawings(
-          report: report,
-          imageFetcher: imageFetcher,
-          activityRepository: activityRepository,
-        ),
-        ?_subjectObservationsSection(report),
-        ?_childExpressionSection(report, playbackController),
-        ?_conversationSummarySection(report),
-        ?_observedFeaturesSection(report),
-        ?_activityFactsSection(report),
+        if (isHtp) ...[
+          // 계약 §5 주제별 그림이 아직 없는 응답에서는 기존 그림 섹션(활동기록
+          // 갤러리 우회)을 그대로 남겨 세 그림을 잃지 않는다.
+          if (htpStory == null || report.subjectDrawings.isEmpty) drawings,
+          ?htpStory,
+          ?_childExpressionSection(report, playbackController),
+          ?_conversationSummarySection(report),
+          ?_observedFeaturesSection(report),
+          ?_interpretationsSection(report, isHtp: true),
+          ?_activityFactsSection(report, isHtp: true),
+        ] else ...[
+          ?_interpretationsSection(report),
+          drawings,
+          ?_subjectObservationsSection(report),
+          ?_childExpressionSection(report, playbackController),
+          ?_conversationSummarySection(report),
+          ?_observedFeaturesSection(report),
+          ?_activityFactsSection(report),
+        ],
         ..._parentGuideSections(report),
         ?_legacyGuideSection(report),
         if (report.hasNoObservations) _noObservationsCard,
@@ -545,10 +568,14 @@ class _ReportHero extends StatelessWidget {
           children: [
             Semantics(
               header: true,
-              child: const Text(
-                '그림 속 이야기를 함께 돌아볼까요?',
+              child: Text(
+                // HTP는 세 그림을 함께 본다는 것을 표지에서부터 알린다. 검사
+                // 이름·결과 표현은 쓰지 않는다(CLAUDE.md 5절).
+                report.isHtpActivity
+                    ? '집·나무·사람, 세 그림 이야기'
+                    : '그림 속 이야기를 함께 돌아볼까요?',
                 textAlign: TextAlign.start,
-                style: TextStyle(
+                style: const TextStyle(
                   color: AppColors.ink,
                   fontSize: 27,
                   height: 1.25,
@@ -557,9 +584,11 @@ class _ReportHero extends StatelessWidget {
               ),
             ),
             const SizedBox(height: AppSpacing.sm),
-            const Text(
-              '돌아보기 친구가 아이의 그림과 이야기를 차근차근 정리했어요.',
-              style: TextStyle(color: AppColors.inkMuted, height: 1.5),
+            Text(
+              report.isHtpActivity
+                  ? '집과 나무와 사람을 그리면서 아이가 들려준 이야기를 모았어요.'
+                  : '돌아보기 친구가 아이의 그림과 이야기를 차근차근 정리했어요.',
+              style: const TextStyle(color: AppColors.inkMuted, height: 1.5),
             ),
             const SizedBox(height: AppSpacing.md),
             Wrap(
@@ -985,8 +1014,14 @@ const _interpretationOrder = <String>[
   'ADAPTATION',
 ];
 
-/// §3 주요 심리 경향 — publicInterpretations 카드. 배열이 비면 숨긴다.
-Widget? _interpretationsSection(ReportDetailDto report) {
+/// §3 publicInterpretations 카드. 배열이 비면 숨긴다.
+///
+/// [isHtp]이면 제목을 검사 판정 어휘("주요 심리 경향")에서 대화 소재 표현으로
+/// 바꾼다. HTP를 검사로 표현·해석하지 않는다는 원칙(CLAUDE.md 5절) 때문이다.
+Widget? _interpretationsSection(
+  ReportDetailDto report, {
+  bool isHtp = false,
+}) {
   if (report.publicInterpretations.isEmpty) return null;
   int rank(ReportInterpretationDto item) {
     final index = _interpretationOrder.indexOf(item.category ?? '');
@@ -1000,7 +1035,7 @@ Widget? _interpretationsSection(ReportDetailDto report) {
   };
   return _ReportSection(
     key: const ValueKey('report-interpretations'),
-    title: '주요 심리 경향',
+    title: isHtp ? '함께 살펴보면 좋을 이야기' : '주요 심리 경향',
     backgroundColor: AppColors.lavenderSoft,
     accentColor: AppColors.lavender,
     children: [
@@ -1035,6 +1070,139 @@ Widget? _subjectObservationsSection(ReportDetailDto report) {
         ),
     ],
   );
+}
+
+/// HTP 전용 중심 섹션 — 집·나무·사람을 하나씩, 그 그림과 그 그림에서 나온
+/// 이야기를 한 장에 묶어 본다.
+///
+/// 그림일기 경로는 계약 §11 순서(그림 → 주제별 관찰·문답)를 그대로 쓰지만,
+/// HTP는 "어떤 그림에서 무슨 이야기가 나왔는지"가 리포트의 본체라 주제 단위로
+/// 묶지 않으면 보호자가 그림과 이야기를 이어 읽을 수 없다.
+///
+/// 보여줄 주제가 하나도 없으면 null을 돌려주고, 호출부가 기존 그림 섹션으로
+/// 물러난다(§10 — 빈 섹션은 숨김).
+Widget? _htpSubjectStorySection(
+  ReportDetailDto report,
+  ImageByteFetcher imageFetcher,
+) {
+  final subjects = [
+    for (final subject in report.orderedSubjectReports)
+      if (subject.hasImage || subject.hasDetails) subject,
+  ];
+  if (subjects.isEmpty) return null;
+  return _ReportSection(
+    key: const ValueKey('report-htp-subject-stories'),
+    title: '집·나무·사람, 하나씩 살펴봐요',
+    backgroundColor: const Color(0xFFEAF6FA),
+    accentColor: const Color(0xFF8CC6D8),
+    children: [
+      const Text(
+        '세 가지를 그리는 동안 아이가 무엇을 그렸고 어떤 이야기를 들려줬는지 모았어요. '
+        '잘 그렸는지 가리거나 결과를 매기는 자리가 아니라, 아이와 함께 다시 펼쳐 볼 이야깃거리예요.',
+        style: TextStyle(color: AppColors.inkMuted, height: 1.55),
+      ),
+      const SizedBox(height: AppSpacing.md),
+      for (final subject in subjects)
+        _HtpSubjectStoryCard(
+          subject: subject,
+          imageFetcher: imageFetcher,
+          linkedTitles: _linkedInterpretationTitles(report, subject),
+        ),
+    ],
+  );
+}
+
+/// HTP 한 주제(집/나무/사람)의 그림 + 관찰 + 문답을 한 장에 담는다.
+///
+/// 그림일기 경로가 쓰는 [_SubjectDrawingCard](그림만)·[_SubjectReportCard]
+/// (관찰·문답만)를 대체하는 HTP 전용 카드다.
+class _HtpSubjectStoryCard extends StatelessWidget {
+  const _HtpSubjectStoryCard({
+    required this.subject,
+    required this.imageFetcher,
+    required this.linkedTitles,
+  });
+
+  final ReportSubjectReportDto subject;
+  final ImageByteFetcher imageFetcher;
+
+  /// `interpretationRefs`가 가리킨 카드의 **제목**만 담는다. 경향 문구는 근거·
+  /// 범위 없이 떠돌지 않도록 여기에 싣지 않는다(§3).
+  final List<String> linkedTitles;
+
+  @override
+  Widget build(BuildContext context) {
+    final label = _subjectLabel(subject.subjectType);
+    final code = subject.subjectType ?? 'UNKNOWN';
+    return Container(
+      key: ValueKey('report-htp-subject-$code'),
+      margin: const EdgeInsets.only(bottom: AppSpacing.md),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.outline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(
+            header: true,
+            child: Text(
+              '$label 그림',
+              style: const TextStyle(
+                color: AppColors.ink,
+                fontSize: 17,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          if (subject.hasImage) ...[
+            const SizedBox(height: AppSpacing.sm),
+            AspectRatio(
+              aspectRatio: 4 / 3,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                child: AuthenticatedImage(
+                  key: ValueKey('report-htp-subject-image-$code'),
+                  url: subject.imageUrl,
+                  fetcher: imageFetcher,
+                  fit: BoxFit.contain,
+                  semanticLabel: '$label 완성 그림',
+                  placeholderBuilder: (_) => const _ImagePlaceholder(),
+                ),
+              ),
+            ),
+          ],
+          if (subject.visionObservations.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            const Text('그림에서 보이는 것', style: AppTypography.label),
+            const SizedBox(height: AppSpacing.xxs),
+            for (final observation in subject.visionObservations)
+              _Bullet(title: observation),
+          ],
+          if (subject.qaPairs.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            const Text('이 그림에서 나눈 이야기', style: AppTypography.label),
+            const SizedBox(height: AppSpacing.xxs),
+            _QaPairList(pairs: subject.qaPairs),
+          ],
+          if (linkedTitles.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            const Text('이어서 이야기해 보면 좋아요', style: AppTypography.label),
+            const SizedBox(height: AppSpacing.xxs),
+            Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xs,
+              children: [
+                for (final title in linkedTitles) Chip(label: Text(title)),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
 }
 
 /// §5-1 `interpretationRefs`는 같은 응답 `publicInterpretations`의 **배열
@@ -1157,8 +1325,11 @@ Widget? _conversationSummarySection(ReportDetailDto report) {
   );
 }
 
-/// §7 객관적인 활동 기록 — activityFacts. 수치만, 심리 해석을 붙이지 않는다.
-Widget? _activityFactsSection(ReportDetailDto report) {
+/// §7 activityFacts — 수치만, 심리 해석을 붙이지 않는다.
+///
+/// [isHtp]이면 제목에서 측정·지표 뉘앙스("객관적인")를 빼고 그리는 동안 실제로
+/// 있었던 일을 가리키는 말로 바꾼다.
+Widget? _activityFactsSection(ReportDetailDto report, {bool isHtp = false}) {
   final facts = report.activityFacts;
   // 필압이 기록됐다는 사실만 있고(값 없음) 나머지 수치가 비어도 섹션을 보여준다
   // (S15P11B209-870의 "필압 정보: 기록됨" 표시를 잃지 않기 위함).
@@ -1202,7 +1373,7 @@ Widget? _activityFactsSection(ReportDetailDto report) {
   ];
   return _ReportSection(
     key: const ValueKey('report-activity-facts'),
-    title: '객관적인 활동 기록',
+    title: isHtp ? '그리는 동안 있었던 일' : '객관적인 활동 기록',
     backgroundColor: AppColors.leafSoft,
     accentColor: AppColors.leaf,
     children: [

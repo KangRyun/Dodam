@@ -490,7 +490,7 @@ void main() {
     expect(find.text('사람을 크게 그렸어요.'), findsOneWidget);
   });
 
-  testWidgets('subjectReports 이미지가 있으면 세 장을 계약 순서로 보여주고 활동기록을 조회하지 않는다', (
+  testWidgets('HTP는 세 그림을 갤러리가 아니라 주제별 이야기 카드로 계약 순서대로 보여준다', (
     tester,
   ) async {
     final activityRepository = _ActivityRepository(
@@ -527,19 +527,251 @@ void main() {
       activityRepository: activityRepository,
     );
 
-    expect(find.byKey(const ValueKey('report-subject-gallery')), findsOneWidget);
+    // HTP는 그림만 모아 둔 갤러리 대신 주제별 이야기 카드를 쓴다(S15P11B209-961).
+    expect(
+      find.byKey(const ValueKey('report-htp-subject-stories')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('report-subject-gallery')), findsNothing);
     final tops = [
       for (final subject in ['HOUSE', 'TREE', 'PERSON'])
-        tester
-            .getTopLeft(find.byKey(ValueKey('report-subject-image-$subject')))
-            .dy,
+        tester.getTopLeft(find.byKey(ValueKey('report-htp-subject-$subject'))).dy,
     ];
     expect(tops, orderedEquals([...tops]..sort()));
     // 계약 데이터가 있으면 활동기록 우회 조회도, 단일 preview도 쓰지 않는다.
     expect(activityRepository.requests, isEmpty);
     expect(find.byKey(const ValueKey('htp-report-gallery')), findsNothing);
     expect(find.byKey(const ValueKey('report-image')), findsNothing);
-    expect(find.text('집·나무·사람 그림'), findsOneWidget);
+    expect(find.text('집·나무·사람, 하나씩 살펴봐요'), findsOneWidget);
+  });
+
+  testWidgets('HTP 주제 카드는 그림·관찰·문답을 한 장에 함께 싣는다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        isHtp: true,
+        subjectReports: const [
+          ReportSubjectReportDto(
+            subjectType: 'HOUSE',
+            imageUrl: '/api/v1/drawing-assets/house/file',
+            visionObservations: ['지붕이 크고 창문이 두 개예요.'],
+            qaPairs: [
+              ReportQaPairDto(
+                question: '이 집에는 누가 살아요?',
+                answer: '엄마랑 나랑 살아요',
+                state: 'ANSWERED',
+                inputType: 'TEXT',
+                sttNeedsConfirmation: false,
+                isRepresentative: true,
+              ),
+            ],
+            interpretationRefs: [],
+          ),
+        ],
+      ),
+    );
+
+    final card = find.byKey(const ValueKey('report-htp-subject-HOUSE'));
+    expect(card, findsOneWidget);
+    // 그림·관찰·문답이 흩어지지 않고 같은 카드 안에 있어야 "이 그림에서 무슨
+    // 이야기가 나왔는지"를 이어 읽을 수 있다.
+    expect(
+      find.descendant(
+        of: card,
+        matching: find.byKey(const ValueKey('report-htp-subject-image-HOUSE')),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: card, matching: find.text('지붕이 크고 창문이 두 개예요.')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: card, matching: find.text('Q. 이 집에는 누가 살아요?')),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(of: card, matching: find.text('A. 엄마랑 나랑 살아요')),
+      findsOneWidget,
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('HTP는 주제별 이야기를 경향·활동기록보다 앞에 세운다', (tester) async {
+    _setViewport(tester, const Size(390, 844));
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        isHtp: true,
+        publicInterpretations: const [
+          ReportInterpretationDto(
+            category: 'EMOTION',
+            title: '편안한 마음',
+            tendencyText: '편안함을 표현했을 수 있어요.',
+            scopeText: '이번 그림에서 나타난 가능성입니다.',
+            homeObservationGuide: '집에서도 편안해 보이는지 살펴봐 주세요.',
+            evidenceRefs: [],
+          ),
+        ],
+        subjectReports: const [
+          ReportSubjectReportDto(
+            subjectType: 'HOUSE',
+            imageUrl: '/api/v1/drawing-assets/house/file',
+            visionObservations: ['지붕이 커요.'],
+            qaPairs: [],
+            interpretationRefs: [],
+          ),
+        ],
+      ),
+    );
+
+    // 그림일기(계약 §11)는 경향 → 그림 → 주제별 순이지만, HTP는 주제별 이야기가
+    // 리포트의 중심이라 앞에 온다(S15P11B209-961).
+    final keys = [
+      'report-activity-info',
+      'report-htp-subject-stories',
+      'report-interpretations',
+      'report-activity-facts',
+    ];
+    final tops = [
+      for (final key in keys) tester.getTopLeft(find.byKey(ValueKey(key))).dy,
+    ];
+    expect(tops, orderedEquals([...tops]..sort()));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('HTP는 검사 투 제목 대신 대화 소재 문구를 쓴다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        isHtp: true,
+        publicInterpretations: _copyProbeInterpretations,
+      ),
+    );
+
+    expect(find.text('함께 살펴보면 좋을 이야기'), findsOneWidget);
+    expect(find.text('그리는 동안 있었던 일'), findsOneWidget);
+    expect(find.text('주요 심리 경향'), findsNothing);
+    expect(find.text('객관적인 활동 기록'), findsNothing);
+  });
+
+  // 902의 savePublicInterpretations·saveParentGuides가 960에서 처음 배선돼,
+  // 이 섹션들이 실제로 채워진 HTP 리포트는 지금까지 화면에 뜬 적이 없다.
+  // 좁은 화면·큰 글자에서 레이아웃이 버티는지 함께 확인한다.
+  for (final config in const [
+    (name: '작은 휴대폰 textScale 2.0', size: Size(320, 640), scale: 2.0),
+    (name: '태블릿 세로', size: Size(800, 1200), scale: 1.0),
+  ]) {
+    testWidgets('${config.name}에서 채워진 HTP 리포트가 overflow 없이 렌더된다', (
+      tester,
+    ) async {
+      _setViewport(tester, config.size);
+      await _pumpReport(
+        tester,
+        textScale: config.scale,
+        report: _fullReport(
+          isHtp: true,
+          publicInterpretations: const [
+            ReportInterpretationDto(
+              category: 'EMOTION',
+              title: '편안한 마음',
+              tendencyText: '편안함을 표현했을 수 있어요.',
+              scopeText: '이번 그림에서 나타난 가능성입니다.',
+              homeObservationGuide: '집에서도 편안해 보이는지 살펴봐 주세요.',
+              evidenceRefs: [101],
+            ),
+          ],
+          evidenceItems: const [
+            ReportEvidenceItemDto(
+              evidenceId: 101,
+              sourceType: 'CHILD_ANSWER',
+              text: '집에는 우리 가족이 모두 산다고 이야기했어요.',
+            ),
+          ],
+          subjectReports: const [
+            ReportSubjectReportDto(
+              subjectType: 'HOUSE',
+              imageUrl: '/api/v1/drawing-assets/house/file',
+              visionObservations: ['지붕이 크고 창문이 두 개예요.'],
+              qaPairs: [
+                ReportQaPairDto(
+                  question: '이 집에는 누가 살아요?',
+                  answer: '엄마랑 나랑 살아요',
+                  state: 'ANSWERED',
+                  inputType: 'TEXT',
+                  sttNeedsConfirmation: false,
+                  isRepresentative: true,
+                ),
+              ],
+              interpretationRefs: [0],
+            ),
+          ],
+          parentGuides: const [
+            ReportParentGuideDto(
+              guideType: 'DRAWING_CONVERSATION',
+              items: ['그림에서 무엇을 그렸는지 물어봐 주세요.'],
+            ),
+          ],
+        ),
+      );
+
+      expect(
+        find.byKey(const ValueKey('report-htp-subject-stories')),
+        findsOneWidget,
+      );
+      expect(find.text('함께 살펴보면 좋을 이야기'), findsOneWidget);
+      // 근거 확장(ExpansionTile)을 실제로 펼쳐도 넘치지 않아야 한다.
+      await tester.ensureVisible(find.text('근거 보기'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('근거 보기'));
+      await tester.pumpAndSettle();
+      expect(find.text('집에는 우리 가족이 모두 산다고 이야기했어요.'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
+
+  testWidgets('그림일기는 계약 §11 제목을 그대로 유지한다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(publicInterpretations: _copyProbeInterpretations),
+    );
+
+    expect(find.text('주요 심리 경향'), findsOneWidget);
+    expect(find.text('객관적인 활동 기록'), findsOneWidget);
+    expect(find.text('함께 살펴보면 좋을 이야기'), findsNothing);
+    expect(find.text('그리는 동안 있었던 일'), findsNothing);
+  });
+
+  testWidgets('HTP 주제에 문답만 있고 그림이 없으면 활동기록 gallery로 세 그림을 함께 채운다', (
+    tester,
+  ) async {
+    final activityRepository = _ActivityRepository(
+      activities: [_htpActivity()],
+    );
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        isHtp: true,
+        subjectReports: const [
+          ReportSubjectReportDto(
+            subjectType: 'HOUSE',
+            imageUrl: null,
+            visionObservations: ['지붕이 커요.'],
+            qaPairs: [],
+            interpretationRefs: [],
+          ),
+        ],
+      ),
+      activityRepository: activityRepository,
+    );
+
+    // 관찰은 새 카드로, 그림은 기존 우회 경로로 — 둘 중 하나도 잃지 않는다.
+    expect(
+      find.byKey(const ValueKey('report-htp-subject-stories')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('htp-report-gallery')), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('subjectReports에 이미지가 없으면 기존 HTP 활동기록 gallery로 물러난다', (
@@ -841,6 +1073,18 @@ Future<void> _pumpReport(
   await tester.pumpAndSettle();
 }
 
+/// 제목 문구만 확인하는 테스트용 — 경향 섹션이 뜨게 하는 최소 카드 1장.
+const _copyProbeInterpretations = [
+  ReportInterpretationDto(
+    category: 'EMOTION',
+    title: '편안한 마음',
+    tendencyText: '편안함을 표현했을 수 있어요.',
+    scopeText: '이번 그림에서 나타난 가능성입니다.',
+    homeObservationGuide: '집에서도 편안해 보이는지 살펴봐 주세요.',
+    evidenceRefs: [],
+  ),
+];
+
 ReportDetailDto _fullReport({
   bool isHtp = false,
   ReportChildExpressionDto? expression = const ReportChildExpressionDto(
@@ -890,7 +1134,7 @@ ReportDetailDto _fullReport({
     drawingSessionId: 120,
     childId: 3,
     drawingTypeCode: isHtp ? 'HTP' : 'ART_DIARY',
-    drawingTypeName: isHtp ? 'HTP 검사' : '그림일기',
+    drawingTypeName: isHtp ? '집·나무·사람 그림' : '그림일기',
     title: '우리 가족',
     inputMethod: isHtp ? 'UPLOAD' : 'CANVAS',
     startedAt: '2026-08-03T09:40:00Z',
