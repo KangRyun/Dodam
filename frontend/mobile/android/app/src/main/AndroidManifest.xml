@@ -35,12 +35,16 @@
         android:label="도담"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+        <!-- 태블릿 가로 고정(S15P11B209-864): MainActivity를 고정 방향 + 비리사이즈로
+             두어 세로로 들어도 회전하지 않고 가로 레터박스로 표시한다. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity="${applicationId}"
             android:theme="@style/LaunchTheme"
+            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="false"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
             android:hardwareAccelerated="true"
             android:windowSoftInputMode="adjustResize">
