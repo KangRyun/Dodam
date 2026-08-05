@@ -3066,15 +3066,21 @@ class _DrawingSidePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(AppSpacing.lg),
-    decoration: BoxDecoration(
-      color: AppColors.surface,
-      borderRadius: BorderRadius.circular(AppRadius.lg),
-    ),
+    // 도구를 담지 않을 때는 안내 카드만 띄운다. 흰 판을 함께 깔면 보여 줄 것이
+    // 한 줄뿐이어도 종이를 넓게 가린다.
+    decoration: showToolControls
+        ? BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+          )
+        : null,
     child: SingleChildScrollView(
       key: const ValueKey('drawing-tool-panel-scroll'),
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+        crossAxisAlignment: showToolControls
+            ? CrossAxisAlignment.stretch
+            : CrossAxisAlignment.end,
         children: [
           // 도구를 툴바로 옮긴 뒤에는 이 머리말이 가리키는 것이 없다. 질문·오류만
           // 담은 패널 위에 남겨 두면 빈 인사말만 캔버스에 떠 있게 된다.
