@@ -17,6 +17,7 @@ from unittest import mock
 
 import child_screen_guard
 import config
+import conversation_stop_intent
 import crisis_guidance
 import llm_client
 import question_safety
@@ -1782,6 +1783,49 @@ class StopIntentTest(unittest.TestCase):
         self.assertEqual("다른 질문이야", resp.question_text)
         client.chat.completions.create.assert_called()
 
+    def test_stop_chip_labels_do_not_retrigger_the_reask(self):
+        """되묻기 칩을 고르면 그 라벨이 다시 그만하기로 읽히면 안 된다(S15P11B209-950).
+
+        BE는 선택형 답변의 문맥 텍스트로 칩 라벨을 그대로 싣는다. 그 라벨 자체가
+        그만하기 문구라("이야기만 그만할래"·"그림 다 그렸어") 스캔하면 AI가 자기가 낸
+        문구에 재감지되어 되묻기를 무한 반복했다 — 그만두겠다고 고른 아이가 갇혔다.
+        """
+        for label, code in (
+            ("이야기만 그만할래", "CHIP_END_TALK"),
+            ("그림 다 그렸어", "CHIP_END_ACTIVITY"),
+        ):
+            with self.subTest(code=code):
+                # 라벨 자체는 그만하기로 판정되는 문구다 — 재감지 방어가 없으면 루프가 난다.
+                self.assertIsNotNone(conversation_stop_intent.scan(label))
+                resp, client = self._generate(self._req(label, codes=[code]))
+                self.assertEqual("다른 질문이야", resp.question_text)
+                client.chat.completions.create.assert_called()
+
+    def test_chip_answer_does_not_revive_the_earlier_utterance(self):
+        """칩으로 답했으면 이미 되물은 옛 발화로 거슬러 올라가지 않는다(S15P11B209-950)."""
+        req = self._req(
+            "이야기만 그만할래",
+            codes=["CHIP_END_TALK"],
+            recent_messages=[
+                RecentMessage(
+                    sender_type="CHILD", message_type="ANSWER", text="이제 그만할래"
+                ),
+                RecentMessage(
+                    sender_type="AI",
+                    message_type="QUESTION",
+                    text=question_service.STOP_ASK_BOTH,
+                ),
+                RecentMessage(
+                    sender_type="CHILD",
+                    message_type="ANSWER",
+                    text="이야기만 그만할래",
+                    selected_option_codes=["CHIP_END_TALK"],
+                ),
+            ],
+        )
+        resp, _ = self._generate(req)
+        self.assertEqual("다른 질문이야", resp.question_text)
+
     def test_skip_intent_is_not_treated_as_stop(self):
         """831 건너뛰기 회귀 방어 — 아이는 다음 질문을 원한 것이다."""
         resp, client = self._generate(self._req("이건 말하기 싫어. 다른 질문 해줘"))
@@ -1795,10 +1839,18 @@ class StopIntentTest(unittest.TestCase):
         self.assertEqual(question_service.CRISIS_SAFE_QUESTION, resp.question_text)
         client.chat.completions.create.assert_not_called()
 
-    def test_options_omitted_when_option_not_allowed(self):
+    def test_no_reask_when_option_not_allowed(self):
+        """칩을 낼 수 없으면 되묻지 않는다(S15P11B209-950).
+
+        종료는 FE가 칩 코드를 보고 실행한다. 칩 없이 되물으면 아이가 말로 그만하겠다고
+        답할수록 다시 걸려 갇힐 뿐 종료로 갈 길이 없다. 말로 답해도 끝낼 수 있게 하는
+        것은 계약 확장이 필요해 S15P11B209-951이 맡는다.
+        """
         req = self._req("이제 그만할래", allowed_response_modes=["VOICE"])
-        resp, _ = self._generate(req)
+        resp, client = self._generate(req)
+        self.assertEqual("다른 질문이야", resp.question_text)
         self.assertIsNone(resp.options)  # 빈 배열도 계약 위반이다
+        client.chat.completions.create.assert_called()
 
     def test_reason_logged_without_raw_utterance(self):
         with self.assertLogs("question_service", level="INFO") as logs:

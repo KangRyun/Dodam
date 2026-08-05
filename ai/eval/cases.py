@@ -1009,6 +1009,38 @@ Q26_STOP_HTP = QuestionCase(
 )
 
 
+# ── 27) 되묻기 다음 턴 (S15P11B209-950) ─────────────────────────
+# 되묻기 칩을 고른 뒤의 턴이다. BE는 선택형 답변의 문맥 텍스트로 **칩 라벨**을 싣는데,
+# 그 라벨 자체가 그만하기 문구라("이야기만 그만할래") AI가 자기가 낸 문구에 재감지되어
+# 되묻기를 무한 반복했다 — 그만두겠다고 고른 아이가 갇혔다. 여기서 보는 것은 되묻기가
+# 다시 나오지 않고 **평소 질문 경로로 돌아가는가**이므로 GMS를 실제로 탄다.
+Q27_STOP_CHIP_FOLLOW_UP = QuestionCase(
+    id="Q27_stop_chip_follow_up",
+    title="그만하기 · 되묻기 칩을 고른 다음 턴(GMS 호출)",
+    why="AI가 자기가 낸 칩 라벨을 다시 그만하기로 읽어 되묻기를 반복하지 않는가.",
+    request=QuestionRequest(
+        conversation_id=9027,
+        drawing_session_id=8027,
+        child_age=8,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=3,
+        max_question_count=5,
+        detected_objects=[_obj("PERSON", "사람", 0.9)],
+        drawing_description="가운데에 사람이 한 명 서 있어요.",
+        recent_messages=[
+            _dodam("이 사람은 지금 뭐 하고 있어?"),
+            _child("이제 그만 할래."),
+            _dodam("그래! 그림을 그만 그릴까, 아니면 이야기만 그만할까?"),
+            _child("이야기만 그만할래", ["CHIP_END_TALK"]),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="ART_DIARY",
+    ),
+    calls_gms=True,
+)
+
+
 QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q1_FIRST_HTP,
     Q2_FIRST_DIARY,
@@ -1034,6 +1066,7 @@ QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q24_STOP_UNSPECIFIED,
     Q25_STOP_CONVERSATION,
     Q26_STOP_HTP,
+    Q27_STOP_CHIP_FOLLOW_UP,
 )
 
 
