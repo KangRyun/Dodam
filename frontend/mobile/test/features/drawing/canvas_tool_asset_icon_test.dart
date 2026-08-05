@@ -5,14 +5,14 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('crayon layers its registered point mask over the base artwork', (
+  testWidgets('crayon uses the artwork drawn for the selected colour', (
     tester,
   ) async {
     await tester.pumpWidget(
       const MaterialApp(
         home: CanvasToolAssetIcon(
           artwork: CanvasToolArtwork.crayon,
-          pointColor: Colors.red,
+          pointColor: AppColors.canvasSwatchRed,
           size: 64,
           filterQuality: FilterQuality.high,
         ),
@@ -23,32 +23,32 @@ void main() {
       find.byKey(const ValueKey('canvas-tool-base-crayon')),
       findsOneWidget,
     );
+    // 색을 코드에서 덧칠하지 않는다(S15P11B209-806). 한 장에 색을 씌우면
+    // 마스크가 못 덮는 가장자리로 밑그림이 비쳐 다른 색 띠가 생긴다.
+    expect(find.byType(ShaderMask), findsNothing);
     expect(
       find.byKey(const ValueKey('canvas-tool-mask-crayon')),
-      findsOneWidget,
+      findsNothing,
     );
-    expect(find.byType(ShaderMask), findsOneWidget);
 
     final base = tester.widget<Image>(
       find.byKey(const ValueKey('canvas-tool-base-crayon')),
     );
-    final mask = tester.widget<Image>(
-      find.byKey(const ValueKey('canvas-tool-mask-crayon')),
-    );
     expect(
       (base.image as AssetImage).assetName,
-      'assets/canvas/tools/crayon_base.png',
-    );
-    expect(
-      (mask.image as AssetImage).assetName,
-      'assets/canvas/tools/masks/crayon_point.png',
+      'assets/canvas/tools/red/crayon.png',
     );
     expect(base.fit, BoxFit.contain);
-    expect(mask.fit, BoxFit.contain);
     expect(base.alignment, Alignment.center);
-    expect(mask.alignment, Alignment.center);
     expect(base.filterQuality, FilterQuality.high);
-    expect(mask.filterQuality, FilterQuality.high);
+    expect(base.color, isNull);
+  });
+
+  test('a colour off the quick palette falls back to the nearest artwork', () {
+    expect(CanvasToolAssetIcon.variantFor(AppColors.canvasSwatchTeal), 'teal');
+    // 팔레트에서 고른 중간색도 가장 가까운 그림을 쓴다.
+    expect(CanvasToolAssetIcon.variantFor(const Color(0xFF1F6FD0)), 'blue');
+    expect(CanvasToolAssetIcon.variantFor(const Color(0xFF101010)), 'charcoal');
   });
 
   testWidgets(
@@ -91,7 +91,7 @@ void main() {
     },
   );
 
-  testWidgets('changing point color keeps the crayon base path and geometry', (
+  testWidgets('changing point color swaps in that colour artwork', (
     tester,
   ) async {
     Future<void> pump(Color color) => tester.pumpWidget(
@@ -105,32 +105,28 @@ void main() {
       ),
     );
 
-    await pump(Colors.red);
+    await pump(AppColors.canvasSwatchRed);
     final redBase = tester.widget<Image>(
       find.byKey(const ValueKey('canvas-tool-base-crayon')),
     );
-    final redMask = tester.widget<Image>(
-      find.byKey(const ValueKey('canvas-tool-mask-crayon')),
-    );
 
-    await pump(Colors.blue);
+    await pump(AppColors.canvasSwatchBlue);
     final blueBase = tester.widget<Image>(
       find.byKey(const ValueKey('canvas-tool-base-crayon')),
     );
-    final blueMask = tester.widget<Image>(
-      find.byKey(const ValueKey('canvas-tool-mask-crayon')),
-    );
 
+    // 색마다 그림이 다르지만 놓이는 방식은 같아야 아이콘이 흔들리지 않는다.
+    expect(
+      (redBase.image as AssetImage).assetName,
+      'assets/canvas/tools/red/crayon.png',
+    );
     expect(
       (blueBase.image as AssetImage).assetName,
-      (redBase.image as AssetImage).assetName,
+      'assets/canvas/tools/blue/crayon.png',
     );
     expect(blueBase.fit, redBase.fit);
     expect(blueBase.alignment, redBase.alignment);
     expect(blueBase.filterQuality, redBase.filterQuality);
-    expect(blueMask.fit, redMask.fit);
-    expect(blueMask.alignment, redMask.alignment);
-    expect(blueMask.filterQuality, redMask.filterQuality);
   });
 
   testWidgets(

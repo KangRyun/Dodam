@@ -1,4 +1,3 @@
-import 'dart:math' as math;
 import 'dart:ui' show PointerDeviceKind;
 
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
@@ -20,7 +19,9 @@ void main() {
       Size(844, 390),
       Size(1194, 834),
     ]) {
-      testWidgets('keeps a 1024x768 document boundary in a $hostSize host', (
+      // 종이 전체가 그릴 수 있는 자리다(S15P11B209-801). 문서를 고정 크기로
+      // 두면 남는 가장자리가 칠해지지 않는 흰 자리로 남는다.
+      testWidgets('fills the whole $hostSize host with the document', (
         tester,
       ) async {
         final boundaryKey = GlobalKey();
@@ -51,21 +52,22 @@ void main() {
         final boundary =
             boundaryKey.currentContext!.findRenderObject()!
                 as RenderRepaintBoundary;
-        expect(boundary.size, DrawingCanvasGeometry.documentSize);
-        expect(metrics.documentSize, const Size(1024, 768));
-        expect(metrics.scale, closeTo(_expectedScale(hostSize), 1e-9));
+        expect(boundary.size, hostSize);
+        expect(metrics.documentSize, hostSize);
+        expect(metrics.scale, 1);
+        expect(metrics.origin, Offset.zero);
 
         final image = await tester.runAsync(
           () => boundary.toImage(pixelRatio: 1),
         );
         addTearDown(image!.dispose);
-        expect(image.width, 1024);
-        expect(image.height, 768);
+        expect(image.width, hostSize.width.round());
+        expect(image.height, hostSize.height.round());
       });
     }
 
     testWidgets(
-      'large host paints the document and cursor at the reported contain scale',
+      'large host paints the document and cursor one-to-one with the host',
       (tester) async {
         final boundaryKey = GlobalKey();
         late DrawingViewportMetrics metrics;
@@ -98,17 +100,19 @@ void main() {
             boundaryKey.currentContext!.findRenderObject()! as RenderBox;
         final topLeft = boundary.localToGlobal(Offset.zero);
         final bottomRight = boundary.localToGlobal(
-          DrawingCanvasGeometry.documentSize.bottomRight(Offset.zero),
+          metrics.documentSize.bottomRight(Offset.zero),
         );
-        expect(metrics.scale, 1.0859375);
-        expect(topLeft, const Offset(41, 0));
-        expect(bottomRight, const Offset(1153, 834));
+        // 종이가 곧 문서라 배율도 여백도 없다.
+        expect(metrics.scale, 1);
+        expect(metrics.documentSize, const Size(1194, 834));
+        expect(topLeft, Offset.zero);
+        expect(bottomRight, const Offset(1194, 834));
 
         final transformedWidth =
             (boundary.localToGlobal(const Offset(544, 384)) -
                     boundary.localToGlobal(const Offset(480, 384)))
                 .distance;
-        expect(transformedWidth, closeTo(69.5, 1e-9));
+        expect(transformedWidth, closeTo(64, 1e-9));
         // 커서는 선 굵기가 아니라 실제로 찍히는 자국 크기를 보여 준다.
         final footprint = DrawingStrokeRenderer.footprintFor(
           DrawingInstrument.brush.brushProfile,
@@ -225,20 +229,28 @@ void main() {
       );
       await tester.pumpAndSettle();
 
+      Size documentSize() =>
+          tester.getSize(find.byKey(const ValueKey('drawing-canvas')));
+
       await _tapDocumentCenter(tester);
+      final portraitSize = documentSize();
       final portraitPoint =
           documentController.visibleStrokes.single.points.first.position;
 
       await _setHostSize(tester, const Size(844, 390));
       await tester.pumpAndSettle();
       await _tapDocumentCenter(tester);
+      final landscapeSize = documentSize();
       final landscapePoint =
           documentController.visibleStrokes.last.points.first.position;
 
-      expect(portraitPoint.dx, closeTo(512, 0.01));
-      expect(portraitPoint.dy, closeTo(384, 0.01));
-      expect(landscapePoint.dx, closeTo(512, 0.01));
-      expect(landscapePoint.dy, closeTo(384, 0.01));
+      // 종이가 곧 문서라 크기는 방향마다 달라진다. 종이 한가운데를 찍으면 언제나
+      // 문서 한가운데가 찍혀야 한다(S15P11B209-801).
+      expect(landscapeSize, isNot(portraitSize));
+      expect(portraitPoint.dx, closeTo(portraitSize.width / 2, 0.01));
+      expect(portraitPoint.dy, closeTo(portraitSize.height / 2, 0.01));
+      expect(landscapePoint.dx, closeTo(landscapeSize.width / 2, 0.01));
+      expect(landscapePoint.dy, closeTo(landscapeSize.height / 2, 0.01));
       await tester.pumpWidget(const SizedBox.shrink());
       syncCoordinator.dispose();
       documentController.dispose();
@@ -281,9 +293,6 @@ void main() {
     });
   });
 }
-
-double _expectedScale(Size availableSize) =>
-    math.min(availableSize.width / 1024, availableSize.height / 768);
 
 Future<void> _setHostSize(WidgetTester tester, Size size) async {
   tester.view.physicalSize = size;

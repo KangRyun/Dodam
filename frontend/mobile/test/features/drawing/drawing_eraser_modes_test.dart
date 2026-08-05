@@ -27,8 +27,8 @@ void main() {
     'stroke eraser removes every intersected pen stroke as one snapshot-only undo group',
     (tester) async {
       final harness = await _pumpScreen(tester);
-      _addSyncedStroke(harness, const Offset(460, 350));
-      _addSyncedStroke(harness, const Offset(460, 390));
+      _addSyncedStroke(harness, _nearCentre(tester, const Offset(-52, -34)));
+      _addSyncedStroke(harness, _nearCentre(tester, const Offset(-52, 6)));
       await tester.pump();
       final eventCountBeforeErase = harness.sync.journal.events.length;
 
@@ -59,8 +59,8 @@ void main() {
     'pen input remains usable during a stroke-erase snapshot upload',
     (tester) async {
       final harness = await _pumpScreen(tester, holdDraft: true);
-      _addSyncedStroke(harness, const Offset(460, 350));
-      _addSyncedStroke(harness, const Offset(460, 390));
+      _addSyncedStroke(harness, _nearCentre(tester, const Offset(-52, -34)));
+      _addSyncedStroke(harness, _nearCentre(tester, const Offset(-52, 6)));
       await tester.pump();
       await _selectEraserMode(tester, DrawingEraserMode.stroke);
       final canvasRect = tester.getRect(
@@ -188,7 +188,7 @@ void main() {
     tester,
   ) async {
     final harness = await _pumpScreen(tester);
-    _addSyncedStroke(harness, const Offset(460, 370));
+    _addSyncedStroke(harness, _nearCentre(tester, const Offset(-52, -14)));
     await tester.pump();
     final eventCountBeforeCancel = harness.sync.journal.events.length;
 
@@ -212,7 +212,7 @@ void main() {
     'metrics change cancels stroke erasure and releases its mutation guard',
     (tester) async {
       final harness = await _pumpScreen(tester);
-      _addSyncedStroke(harness, const Offset(460, 350));
+      _addSyncedStroke(harness, _nearCentre(tester, const Offset(-52, -34)));
       await tester.pump();
       await _selectEraserMode(tester, DrawingEraserMode.stroke);
       final center = tester.getCenter(
@@ -257,8 +257,8 @@ void main() {
     'clear-all waits for confirmation then clears actions redo and restored pixels and saves blank',
     (tester) async {
       final harness = await _pumpScreen(tester, restoreDraft: true);
-      _addSyncedStroke(harness, const Offset(460, 350));
-      _addSyncedStroke(harness, const Offset(460, 390));
+      _addSyncedStroke(harness, _nearCentre(tester, const Offset(-52, -34)));
+      _addSyncedStroke(harness, _nearCentre(tester, const Offset(-52, 6)));
       final undone = harness.document.undo();
       expect(undone.changed, isTrue);
       harness.sync.recordUndo();
@@ -635,3 +635,13 @@ final class _EraserRepository implements DrawingRepository {
 final Uint8List _validOnePixelPng = base64Decode(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR42mP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC',
 );
+
+/// 종이 한가운데를 기준으로 한 문서 좌표다.
+///
+/// 종이가 곧 문서라 크기가 기기마다 다르다(S15P11B209-801). 좌표를 박아 두면
+/// 지우개가 지나가는 자리와 획이 어긋난다.
+Offset _nearCentre(WidgetTester tester, Offset delta) =>
+    tester
+        .getSize(find.byKey(const ValueKey('drawing-canvas')))
+        .center(Offset.zero) +
+    delta;
