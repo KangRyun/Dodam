@@ -526,6 +526,23 @@ class CrisisAlert(_CamelModel):
     resources: list[CrisisResource] = Field(default_factory=list)
 
 
+class DrawnItem(_CamelModel):
+    """'그린 것' 한 건 (S15P11B209-911).
+
+    ⚠️ 출처는 **VLM 관찰 서술**이다. 탐지 라벨(YOLO)은 근거가 아니다 — 탐지 임계값
+       (config.YOLO_CONF_THRESHOLD=0.20)은 '박스를 남길지'의 기준이라, 그 라벨을 확정 사실로
+       보호자에게 적을 수 없다. 서술은 실제 이미지를 보고 쓰며 "목록에 있어도 이미지에서
+       안 보이면 쓰지 마"가 강제된다(prompts/drawing_description_htp.txt).
+       report_client._drawn_items 가 name 이 서술 원문에 실제로 있는지 대조해 걸러낸다.
+
+    drawing_subject: HOUSE | TREE | PERSON | None(그림일기)
+    name: 보호자 화면에 그대로 나가는 한국어 표현.
+    """
+
+    drawing_subject: str | None = None
+    name: str
+
+
 class ObservationGenerationResult(_CamelModel):
     """BE ObservationGenerationResult와 1:1. disclaimer·limitations_text는 필수.
 
@@ -553,6 +570,10 @@ class ObservationGenerationResult(_CamelModel):
     public_interpretations: list[PublicInterpretation] = Field(default_factory=list)
     evidence_items: list[ReportEvidenceItem] = Field(default_factory=list)
     parent_guides: list[ReportParentGuide] = Field(default_factory=list)
+    # '그린 것' 목록 (S15P11B209-911) — VLM 관찰 서술 기반. BE가 이 값으로
+    #   activityFacts.detectedObjects 를 채운다(S15P11B209-912). 지금 그 줄은 탐지 라벨을
+    #   그대로 나열해 신뢰도 필터 없이 보호자에게 나간다. 비면 구 동작과 같다.
+    drawn_items: list[DrawnItem] = Field(default_factory=list)
     # 위기 안내는 S15P11B209-889이 채운다. 여기서는 자리만 두고 항상 None으로 둔다 —
     #   문구는 crisis_guidance 의 검토된 템플릿 소유이고 LLM이 만들지 않는다.
     crisis_alert: CrisisAlert | None = None
