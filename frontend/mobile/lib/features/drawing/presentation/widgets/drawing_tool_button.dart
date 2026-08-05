@@ -28,11 +28,11 @@ final class DrawingToolButton extends StatefulWidget {
 const double _buttonSize = 48;
 
 /// 도구 그림 크기다. 승인 시안의 버튼:그림 비율(62:47)을 따른다.
-const double _artworkSize = 36;
+const double _artworkSize = 42;
 
 /// 선택 받침 크기다. 크레용·붓처럼 비스듬히 놓인 그림은 상자 모서리까지 꽉 차서,
 /// 받침이 버튼과 같은 크기면 그림이 받침 밖으로 삐져나온 것처럼 보인다.
-const double _plateSize = 56;
+const double _plateSize = 66;
 
 final class _DrawingToolButtonState extends State<DrawingToolButton> {
   bool _hovered = false;
