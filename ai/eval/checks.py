@@ -449,6 +449,53 @@ def check_question_response(case, resp: QuestionResponse) -> list[Finding]:
             )
         )
 
+    # 고정 첫 질문 — 그림일기 완전 첫 질문은 AI가 추측하지 않고 아이에게 직접 묻는다
+    # (S15P11B209-921). 문구가 흔들리면 분기가 깨졌거나 난이도 표가 어긋난 것이다.
+    if "fixed_question_text" in meta:
+        expected = meta["fixed_question_text"]
+        out.append(
+            Finding(
+                "B",
+                "고정 첫 질문",
+                text.strip() == expected,
+                "" if text.strip() == expected else f"기대 {expected!r} / 실제 {text!r}",
+            )
+        )
+
+    # 이미 건넨 질문을 표현만 바꿔 되묻지 않는가(S15P11B209-921).
+    #   대상·속성을 갈라 받아 둘이 함께 재등장할 때만 반복으로 본다 — 858이 '건너뛴 질문
+    #   미반복'에서 겪은 과탐을 여기서 되풀이하지 않으려는 것이다. 대상만 겹치거나
+    #   속성만 겹치는 것은 정상적인 전환이다.
+    if "previous_question_subject_terms" in meta:
+        same_subject = _contains_any(text, meta["previous_question_subject_terms"])
+        same_attribute = _contains_any(
+            text, meta.get("previous_question_attribute_terms", [])
+        )
+        repeated = same_subject + same_attribute if (same_subject and same_attribute) else []
+        out.append(
+            Finding(
+                "B",
+                "직전 질문 미반복",
+                not repeated,
+                f"대상·속성이 함께 재등장: {repeated}" if repeated else "",
+            )
+        )
+
+    # 없는 두 번째 대상을 지어내지 않는가(S15P11B209-921).
+    #   반복 방지 지시("아직 이야기하지 않은 새로운 것")가 '다른 물건'으로 읽히면, 사람
+    #   한 명뿐인 그림에서도 "옆에 있는 건 뭐야?"가 나온다. 아이는 그리지도 않은 것을
+    #   설명해야 하는 자리에 놓인다.
+    if "second_target_terms" in meta:
+        invented = _contains_any(text, meta["second_target_terms"])
+        out.append(
+            Finding(
+                "B",
+                "없는 대상 미가정",
+                not invented,
+                f"두 번째 대상 전제: {invented}" if invented else "",
+            )
+        )
+
     # 개인정보 캐묻기 — 전 케이스 공통(가드레일 9절).
     probes = _contains_any(text, meta.get("probe_patterns", []))
     if "probe_patterns" in meta:
