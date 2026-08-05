@@ -63,6 +63,9 @@ public class Report {
   @Column(name = "failed_at")
   private LocalDateTime failedAt;
 
+  @Column(name = "has_drawn_items", nullable = false)
+  private boolean hasDrawnItems;
+
   @Column(name = "created_at", nullable = false)
   private LocalDateTime createdAt;
 
@@ -119,6 +122,15 @@ public class Report {
     this.expertReviewRecommended = expertReviewRecommended;
     this.limitationsText = requireText(limitationsText, "limitationsText");
     this.updatedAt = Objects.requireNonNull(updatedAt, "updatedAt must not be null");
+  }
+
+  /**
+   * 최신 AI 응답의 {@code drawnItems} 필드(빈 배열 포함)를 저장했음을 표시한다.
+   *
+   * <p>이 표식이 없는 리포트만 과거 YOLO 조회 폴백 대상이다. 행이 0개인 것만으로는 최신 AI의 유효한 빈 결과와 과거 리포트를 구별할 수 없다.
+   */
+  public void markDrawnItemsStored() {
+    this.hasDrawnItems = true;
   }
 
   /**
@@ -228,6 +240,13 @@ public class Report {
    */
   public LocalDateTime getFailedAt() {
     return failedAt;
+  }
+
+  /**
+   * @return 최신 AI 관찰 서술 기반 drawnItems 필드를 저장했으면 {@code true}
+   */
+  public boolean hasDrawnItems() {
+    return hasDrawnItems;
   }
 
   /**

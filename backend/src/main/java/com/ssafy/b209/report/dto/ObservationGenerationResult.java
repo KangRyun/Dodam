@@ -1,6 +1,8 @@
 package com.ssafy.b209.report.dto;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -18,6 +20,8 @@ import java.util.List;
  * @param followUpGuides 보호자 후속 안내 목록
  * @param guardianQuestions 보호자 질문 목록
  * @param limitationsText 리포트 해석 한계 문구
+ * @param drawnItems 아이가 그린 것 목록이다. <strong>출처는 VLM 관찰 서술이며 탐지 라벨이 아니다</strong> — AI 가 서술 원문과 대조해 걸러
+ *     보낸다(S15P11B209-911). optional 이며 AI 가 싣지 않으면 빈 목록이다
  */
 public record ObservationGenerationResult(
     String requestId,
@@ -29,7 +33,64 @@ public record ObservationGenerationResult(
     List<String> activityNotes,
     List<FollowUpGuideDraft> followUpGuides,
     List<GuardianQuestionDraft> guardianQuestions,
-    String limitationsText) {
+    String limitationsText,
+    List<DrawnItemDraft> drawnItems) {
+
+  /**
+   * 기존 AI 배포본이 필드를 생략한 경우와, 최신 AI가 의도적으로 빈 배열을 보낸 경우를 구분한다.
+   *
+   * <p>전자는 과거 리포트와 같은 0.50 YOLO 폴백 대상이고, 후자는 관찰 서술에 남은 대상이 없다는 확정 결과라 빈 목록을 유지한다.
+   */
+  public boolean hasDrawnItems() {
+    return drawnItems != null;
+  }
+
+  /**
+   * @return 필드가 생략됐거나 빈 배열이면 빈 목록, 아니면 방어 복사한 항목 목록
+   */
+  public List<DrawnItemDraft> drawnItemsOrEmpty() {
+    return drawnItems == null
+        ? List.of()
+        : Collections.unmodifiableList(new ArrayList<>(drawnItems));
+  }
+
+  /** 911 이전 응답을 만드는 기존 호출부와의 호환용 생성자다. */
+  public ObservationGenerationResult(
+      String requestId,
+      String modelName,
+      String modelVersion,
+      BigDecimal confidence,
+      ObservationDraft observationDraft,
+      ConversationSummaryDraft conversationSummary,
+      List<String> activityNotes,
+      List<FollowUpGuideDraft> followUpGuides,
+      List<GuardianQuestionDraft> guardianQuestions,
+      String limitationsText) {
+    this(
+        requestId,
+        modelName,
+        modelVersion,
+        confidence,
+        observationDraft,
+        conversationSummary,
+        activityNotes,
+        followUpGuides,
+        guardianQuestions,
+        limitationsText,
+        null);
+  }
+
+  /**
+   * 아이가 그린 것 한 건이다 (S15P11B209-912 / AI 계약 S15P11B209-911).
+   *
+   * <p>보호자 리포트 '그린 것' 줄의 재료다. AI 는 <strong>관찰 서술 문장에 실제로 등장한 대상만</strong> 담아 보내고, 서술 원문과 대조해 통과하지
+   * 못한 항목은 AI 쪽 코드가 버린다. 탐지 라벨(YOLO)은 근거가 아니다 — 탐지 임계값 0.20 은 "박스를 남길지"의 기준이라 그 이름을 보호자에게 확정 사실로 적을
+   * 수 없다.
+   *
+   * @param drawingSubject HTP 주제({@code HOUSE|TREE|PERSON})이며 그림일기는 {@code null}
+   * @param name 보호자 화면에 그대로 나가는 한국어 표현
+   */
+  public record DrawnItemDraft(String drawingSubject, String name) {}
 
   /**
    * 전문가 검토 전 관찰 초안이다.
