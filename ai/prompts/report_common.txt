@@ -113,7 +113,9 @@
     "음성 인식 확인이 필요한 답변이라 근거로 쓸 수 없어요"라고 적힌 문답도 근거로 쓰지 마.
   · ⚠️ 식별자는 참조용 값이다. **리포트 문장에는 절대 쓰지 마** — 요소 코드와 같은 규칙이다.
   · REPEATED_SUBJECT·LONGITUDINAL 은 sourceRef 대신 derivedFrom 에 원본 식별자 목록을 담는다.
-- 그다음 카드를 쓴다. 카드 하나는 아래를 모두 지켜야 한다. 못 지키면 그 카드는 쓰지 마.
+- 그다음 카드를 쓴다. **아래 조건을 갖춘 관찰이 있으면 카드를 쓴다** — 조건을 갖췄는데도 비워 두는 것은
+  관찰한 것을 버리는 것이다. 모은 근거로 이을 수 있는 만큼 쓴다(보통 1~3장).
+  조건을 못 지키는 카드만 쓰지 않는다.
   · **서로 다른 원본에서 온 근거 2건 이상**을 evidenceRefs 로 잇는다. 같은 답변을 두 번 세지 마.
   · 그중 **아이 자신의 표현이 최소 1건**(CHILD_ANSWER·SELECTED_EMOTION·STATED_EMOTION).
     그림 관찰과 활동 기록만으로는 카드를 만들지 마.
@@ -124,13 +126,27 @@
   EMOTION(이번 활동의 정서) · SELF_EXPRESSION(표현 방식) · ACTIVITY_STYLE(에너지·충동의 표현 방식) ·
   ADAPTATION(새로운 상황에 대한 적응).
   ⚠️ 라벨을 풀어 쓸 때 "애정결핍"·"자존감이 낮습니다"·"공격적인 성향" 같은 말은 쓰지 마 — 낙인이다.
-- **근거가 모자라면 publicInterpretations 를 빈 배열로 두라.** 빈 배열은 정상이고, 억지로 채운 카드보다 낫다.
-  대화가 없었던 활동은 카드 없이 관찰 사실만 남는다.
+- **근거가 모자랄 때만 publicInterpretations 를 빈 배열로 둔다.** 대화가 없었던 활동, 아이 표현이
+  하나도 없는 활동이 그렇다. 그럴 때 빈 배열은 정상이고, 억지로 채운 카드보다 낫다.
+  반대로 조건을 갖춘 근거가 있는데 비워 두면 보호자가 볼 것이 사라진다 — 둘 다 잘못이다.
+
+- 근거 두 건을 카드 한 장으로 잇는 예(형식만 보고, **문장은 그대로 옮기지 마** — 이번 활동에서
+  실제로 관찰된 것으로 네 말로 써야 한다):
+  · 근거 A(CHILD_ANSWER): "블록을 한참 다시 세웠다고 말했어요."
+  · 근거 B(SELECTED_EMOTION): "'뿌듯함'을 골랐어요."
+  · 카드 → category "ACTIVITY_STYLE" / tendencyText "마음에 들 때까지 다시 해 보려는 모습이
+    나타났을 수 있습니다." / scopeText "이번 활동에서 나타난 가능성입니다." /
+    homeObservationGuide "집에서도 잘 안 될 때 다시 시도하는지 살펴봐 주세요." / evidenceRefs [A, B]
 
 '보호자 가이드' 쓰는 법 (parentGuides) — 위 followUpGuides 와 다른 자리다:
 - guideType 별로 문장을 묶어 낸다. 한 유형에 여러 문장을 items 배열로 담는다.
-  · DRAWING_CONVERSATION: 이 그림·아이 답변을 소재로 보호자가 그대로 물어볼 질문
-  · HOME_OBSERVATION: 이번에 보인 모습이 일상에서도 반복되는지 확인하는 방법
+- **아래 두 유형은 매 리포트에 각각 1건 이상 채운다**(경향 카드와 달리 근거 조건이 없다):
+  · DRAWING_CONVERSATION: 이 그림·아이 답변을 소재로 보호자가 **그대로 물어볼 질문**
+  · HOME_OBSERVATION: 이번에 보인 모습이 일상에서도 반복되는지 **언제 무엇을 살펴볼지**
+- 두 유형은 서로 다른 것이다. HOME_OBSERVATION 에 질문을 쓰지 마 —
+  "~를 물어보세요"·"이야기를 나눠보세요"는 DRAWING_CONVERSATION 자리다.
+  HOME_OBSERVATION 은 관찰할 **상황**을 짚어 준다: "새로운 장소에 갈 때 보호자를 자주 찾는지
+  살펴봐 주세요"·"혼자 놀이를 할 때도 비슷한 모습이 나오는지 봐 주세요"처럼.
 - DAILY_PARENTING(일상 육아 조언)과 PROFESSIONAL_SUPPORT(상담 안내)는 **네가 쓰지 마.**
   검토된 문장을 서버가 채운다 — 그 두 유형은 목록에서 빼고 응답한다.
 
@@ -143,6 +159,7 @@
 - 아래 값은 비어 있으면 안 된다(빈 문자열·빈 목록 금지). 저장 시스템이 필수로 요구하고,
   비면 보호자 화면에 빈 줄로 나가거나 영역이 통째로 사라진다:
   · followUpGuides — 목록 자체와 각 항목의 guidance
+  · parentGuides — DRAWING_CONVERSATION 과 HOME_OBSERVATION 두 유형(각 items 1건 이상)
   · guardianQuestions 각 항목의 questionText
   · features 각 항목의 description 과 visibilityScope
   · activityNotes 각 항목
@@ -201,6 +218,7 @@
     }
   ],
   "parentGuides": [
-    {"guideType": "DRAWING_CONVERSATION", "items": ["보호자가 그대로 물어볼 질문 한 문장"]}
+    {"guideType": "DRAWING_CONVERSATION", "items": ["보호자가 그대로 물어볼 질문 한 문장"]},
+    {"guideType": "HOME_OBSERVATION", "items": ["일상에서 살펴볼 방법 한 문장"]}
   ]
 }
