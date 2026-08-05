@@ -14,6 +14,7 @@ final class DrawingBrushProfile {
     required this.pressureWidthFactor,
     required this.texturePasses,
     this.stampSpacing = 0,
+    this.widthScale = 1,
     this.stampScale = 1,
     this.stampScaleJitter = 0,
     this.stampAngleJitter = 0,
@@ -27,6 +28,9 @@ final class DrawingBrushProfile {
 
   /// 스탬프를 찍는 간격이다. 굵기에 대한 비율이라 굵어져도 결이 유지된다.
   final double stampSpacing;
+
+  /// Gives each physical tool a recognisable footprint at the same slider value.
+  final double widthScale;
 
   /// 굵기 대비 스탬프 크기다. 자국이 선보다 조금 넓게 번지는 도구가 있다.
   final double stampScale;
@@ -64,25 +68,27 @@ abstract final class DrawingStrokeRenderer {
   /// 연필은 자국이 가늘고 촘촘하며 흑연 알갱이가 성글게 남는다.
   static const pencil = DrawingBrushProfile(
     id: DrawingBrushProfileId.pencil,
-    opacity: .38,
+    opacity: .48,
     pressureWidthFactor: .35,
     texturePasses: 1,
-    stampSpacing: .14,
-    stampScale: 1.05,
-    stampScaleJitter: .12,
+    stampSpacing: .20,
+    widthScale: .56,
+    stampScale: .92,
+    stampScaleJitter: .18,
     stampAngleJitter: math.pi,
   );
 
   /// 붓은 자국이 넓고 매끄럽게 이어지며 붓끝이 진행 방향으로 눕는다.
   static const brush = DrawingBrushProfile(
     id: DrawingBrushProfileId.brush,
-    opacity: .60,
+    opacity: .72,
     pressureWidthFactor: .65,
     texturePasses: 1,
-    stampSpacing: .10,
+    stampSpacing: .065,
+    widthScale: 1.16,
     stampScale: 1.45,
-    stampScaleJitter: .08,
-    stampAngleJitter: .18,
+    stampScaleJitter: .035,
+    stampAngleJitter: .08,
     stampFollowsDirection: true,
   );
 
@@ -100,7 +106,9 @@ abstract final class DrawingStrokeRenderer {
   /// 값을 써야 아이가 보는 원과 실제로 찍히는 자국이 맞는다.
   static double footprintFor(DrawingBrushProfileId id, double thickness) {
     final profile = profileFor(id);
-    return profile.isStamped ? thickness * profile.stampScale : thickness;
+    return profile.isStamped
+        ? thickness * profile.widthScale * profile.stampScale
+        : thickness * profile.widthScale;
   }
 
   static void paint(Canvas canvas, DrawingStroke stroke) {
@@ -121,7 +129,7 @@ abstract final class DrawingStrokeRenderer {
     }
     if (stroke.points.length == 1) {
       final width = _widthFor(
-        stroke.thickness,
+        stroke.thickness * profile.widthScale,
         stroke.points.single.pressure ?? 1,
         profile.pressureWidthFactor,
       );
@@ -138,7 +146,7 @@ abstract final class DrawingStrokeRenderer {
       final end = stroke.points[segmentIndex + 1];
       final pressure = ((start.pressure ?? 1) + (end.pressure ?? 1)) / 2;
       final width = _widthFor(
-        stroke.thickness,
+        stroke.thickness * profile.widthScale,
         pressure,
         profile.pressureWidthFactor,
       );
@@ -201,7 +209,11 @@ abstract final class DrawingStrokeRenderer {
         paint,
         profile,
         point.position,
-        _widthFor(stroke.thickness, point.pressure ?? 1, profile.pressureWidthFactor),
+        _widthFor(
+          stroke.thickness * profile.widthScale,
+          point.pressure ?? 1,
+          profile.pressureWidthFactor,
+        ),
         0,
         seed,
       );
@@ -217,7 +229,7 @@ abstract final class DrawingStrokeRenderer {
       final length = delta.distance;
       final pressure = ((start.pressure ?? 1) + (end.pressure ?? 1)) / 2;
       final width = _widthFor(
-        stroke.thickness,
+        stroke.thickness * profile.widthScale,
         pressure,
         profile.pressureWidthFactor,
       );
@@ -274,7 +286,9 @@ abstract final class DrawingStrokeRenderer {
     final size =
         width *
         profile.stampScale *
-        (1 - profile.stampScaleJitter + profile.stampScaleJitter * 2 * sizeSample);
+        (1 -
+            profile.stampScaleJitter +
+            profile.stampScaleJitter * 2 * sizeSample);
     canvas
       ..save()
       ..translate(position.dx, position.dy)

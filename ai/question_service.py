@@ -31,6 +31,7 @@ import time
 from openai import APIConnectionError, APIStatusError, OpenAIError
 
 import config
+import conversation_stop_intent
 import crisis_detection
 import crisis_guidance
 import llm_client
@@ -821,6 +822,84 @@ def _crisis_safe_response(req: QuestionRequest, started: float) -> QuestionRespo
     )
 
 
+# ── 그만하기 의사 되묻기 (S15P11B209-938) ───────────────────────
+# 아이가 말로 "이제 그만할래"라고 해도 지금까지는 그 말이 그림에 대한 답으로 다뤄져 다음
+# 질문이 만들어졌다. 건너뛰기 의사는 존중하면서(831) 그보다 분명한 '그만하기'는 듣지 않았다.
+#
+# ⚠️ 무엇을 그만할지 되묻는 이유: 그림일기는 그리면서 동시에 대화한다. 두 종료는 무게가
+#    전혀 다르다 — 대화 종료는 그림을 계속 그릴 수 있어 가볍지만, 그림 활동 완료는 회고
+#    저장과 다음 단계로 이어져 되돌릴 수 없다. 뭉뚱그리면 이야기만 그만하고 싶었던 아이의
+#    그림이 통째로 끝난다.
+#
+# ⚠️ AI는 끝내지 않는다. 되묻기만 하고 실제 종료는 FE가 칩 선택을 보고 한다 — 786이 정한
+#    "턴 제어는 AI 소유가 아니다"를 그대로 지킨다.
+STOP_ASK_BOTH = "그래! 그림을 그만 그릴까, 아니면 이야기만 그만할까?"
+STOP_ASK_DRAWING = "그림 다 그렸구나! 이제 그만 그릴까?"
+STOP_ASK_CONVERSATION = "그래, 이야기는 여기까지 할까?"
+
+# FE가 이 코드를 보고 무엇을 끝낼지 정한다(activity_screens._selectQuestionOption).
+_CHIP_END_ACTIVITY = QuestionOption(code="CHIP_END_ACTIVITY", label="그림 다 그렸어")
+_CHIP_END_TALK = QuestionOption(code="CHIP_END_TALK", label="이야기만 그만할래")
+_CHIP_KEEP_GOING = QuestionOption(code="CHIP_KEEP_GOING", label="아니, 더 할래")
+
+
+def _detect_stop_intent(req: QuestionRequest) -> str | None:
+    """가장 최근 아이 발화에서 그만하기 의사를 찾는다(없으면 None).
+
+    아이가 직전 턴에 '아니, 더 할래'를 골랐으면 되묻지 않는다 — 계속 물으면 그만두라고
+    떠미는 것처럼 들린다(718의 연속 부정 처리와 같은 결).
+    """
+    if _CHIP_KEEP_GOING.code in _last_child_selected_codes(req):
+        return None
+    index = _last_child_index(req)
+    if index is None:
+        return None
+    return conversation_stop_intent.scan(req.recent_messages[index].text or "")
+
+
+def _stop_intent_offers(req: QuestionRequest, verdict: str) -> tuple[str, list[QuestionOption]]:
+    """되물을 문장과 선택 칩을 고른다.
+
+    HTP에서는 그림 갈래를 내지 않는다 — HTP는 주제 그림을 완료한 뒤에야 대화가 시작되므로
+    (FE _handleObjectDetectionChanged가 isHtp이면 즉시 return) '그림을 그만 그린다'가
+    성립하지 않는다. activityType이 없는 구 BE 요청도 같게 다룬다: 무엇을 하는 중인지
+    모르면 되돌릴 수 없는 쪽(활동 완료)을 권하지 않는다.
+    """
+    can_end_activity = req.activity_type == "ART_DIARY"
+    if verdict == conversation_stop_intent.STOP_DRAWING and can_end_activity:
+        return STOP_ASK_DRAWING, [_CHIP_END_ACTIVITY, _CHIP_KEEP_GOING]
+    if verdict == conversation_stop_intent.STOP_UNSPECIFIED and can_end_activity:
+        return STOP_ASK_BOTH, [_CHIP_END_ACTIVITY, _CHIP_END_TALK, _CHIP_KEEP_GOING]
+    # 대화를 지목했거나, 그림 갈래를 낼 수 없는 활동이면 대화 종료만 묻는다.
+    return STOP_ASK_CONVERSATION, [_CHIP_END_TALK, _CHIP_KEEP_GOING]
+
+
+def _stop_intent_response(
+    req: QuestionRequest, started: float, verdict: str
+) -> QuestionResponse:
+    """그만하기 의사 되묻기 — GMS를 호출하지 않는 결정적 응답.
+
+    목적은 FOLLOW_UP이다. 아이가 방금 한 말에 이어 묻는 것이고, 대상 객체는 붙지 않는다.
+    """
+    text, offers = _stop_intent_offers(req, verdict)
+    option_allowed = "OPTION" in req.allowed_response_modes
+    return QuestionResponse(
+        question_text=text,
+        question_purpose="FOLLOW_UP",
+        options=list(offers) if option_allowed else None,
+        target_object=None,
+        fallback_used=False,
+        safety_result=SafetyResult(
+            status="PASSED", rule_version=req.safety_rule_version, block_reason_code=None
+        ),
+        model_name=config.LLM_MODEL,
+        # GMS를 호출하지 않았으므로 파생 모델 ID가 없다 — 엔진명으로 대신 기록한다.
+        model_version=config.LLM_MODEL,
+        prompt_version=PROMPT_VERSION,
+        processing_time_ms=int((time.monotonic() - started) * 1000),
+    )
+
+
 # ── 그림일기 완전 첫 질문 고정 (S15P11B209-921) ─────────────────
 # 자유 그림은 무엇을 그렸는지 아는 사람이 아이뿐이다. 자동 탐지는 이 영역에서 가장 약하고
 # (sketch 오탐 — 918), VLM 서술도 확신이 없으면 "네모난 무언가"에 머문다. 모르는 상태에서
@@ -1109,6 +1188,20 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
             request_id,
         )
         return _reask_response(req, started)
+
+    # 아이가 그만하고 싶다고 말했으면 다음 질문을 만들지 않고 무엇을 그만할지 되묻는다
+    # (S15P11B209-938). 위기·인젝션 뒤에 두는 이유: "다 싫어, 그만할래"는 그만하기 의사일
+    # 수도 위기 신호일 수도 있다. 이 분기를 위기 검사 앞에 두면 위기 신호를 조용히 삼킨다.
+    stop_verdict = _detect_stop_intent(req)
+    if stop_verdict:
+        # ⚠️ 아이 발화 원문은 남기지 않는다 — 판정 코드만.
+        logger.info(
+            "그만하기 의사 감지 — 되묻기: verdict=%s activityType=%s request_id=%s",
+            stop_verdict,
+            req.activity_type or "-",
+            request_id,
+        )
+        return _stop_intent_response(req, started, stop_verdict)
 
     # 그림일기 완전 첫 질문은 GMS 없이 고정 문구로 연다(S15P11B209-921). 무엇을 그렸는지는
     # 아이만 아는 정보라 AI가 추측하지 않고 직접 묻는다. 위기·인젝션 검사 뒤에 두는 이유:

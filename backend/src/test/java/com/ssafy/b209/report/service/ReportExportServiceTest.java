@@ -81,6 +81,7 @@ class ReportExportServiceTest {
         null,
         null,
         null,
+        List.of(),
         null,
         null,
         List.of(),

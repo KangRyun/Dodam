@@ -21,13 +21,23 @@ final class MockReportRepository implements ReportRepository {
     'expertReviewAvailable': false,
   };
 
-  /// REPORT-02 보호자 공개 계약(§13.4)과 같은 모양의 개발용 표본.
+  /// REPORT-02 보호자 공개 계약(§13.4) + 재구성 계약
+  /// (`docs/S15P11B209-875-report-api-contract.md`)과 같은 모양의 개발용 표본.
   /// 서버는 공통 봉투로 감싸 보내지만, DTO가 봉투 없는 본문도 받으므로
   /// 여기서는 `data` 페이로드만 담는다.
+  ///
+  /// 그림일기 표본이라 §5의 "HTP가 아닌 활동"에 해당해 `subjectReports`가
+  /// 한 건(전체 그림)이다. 서버 없이도 §11 섹션 순서를 눈으로 확인할 수 있게
+  /// 각 신규 섹션을 한 건씩 채워 뒀다.
   static const _detail = {
     'reportId': 501,
     'reportVersion': 1,
     'reportStatus': 'COMPLETED',
+    'activityType': 'ART_DIARY',
+    'childDisplayName': '민준',
+    'nonDiagnosticNotice':
+        '이 리포트는 아이가 그림을 그리고 대화한 과정에서 나타난 특징과 심리적 경향을 정리한 자료입니다. '
+        '아이의 평소 성격이나 심리 상태를 확정하거나 진단하는 결과는 아닙니다.',
     'drawingSession': {
       'drawingSessionId': 120,
       'childId': 3,
@@ -61,12 +71,28 @@ final class MockReportRepository implements ReportRepository {
         },
       ],
     },
+    'observedFeatures': [
+      {
+        'title': '가족을 가운데에 그렸어요',
+        'description': '종이 가운데에 가족을 크게 그렸어요.',
+        'evidenceSummary': '그림에서 확인했어요.',
+      },
+    ],
     'activityFacts': {
       'detectedObjects': ['사람', '집', '해'],
+      'totalDurationSec': 1380,
       'drawingDurationMs': 1320000,
+      'drawingDurationSec': 1320,
       'pauseCount': 4,
       'eraseCount': 2,
+      'undoCount': 2,
+      'questionCount': 5,
+      'answerCount': 4,
+      'skipCount': 1,
+      'detectedElementCount': 3,
       'pressureAvailable': false,
+      'truncated': false,
+      'aggregatedHtp': false,
       'notes': ['멈춤 4회 관찰'],
     },
     'conversationSummary': {
@@ -75,6 +101,71 @@ final class MockReportRepository implements ReportRepository {
       'skippedCount': 1,
       'summary': '가족과 함께 있는 장면을 이야기하며 편안하게 대화했어요.',
     },
+    'publicInterpretations': [
+      {
+        'category': 'RELATIONSHIP',
+        'title': '가족과의 정서적 연결',
+        'tendencyText': '가족에게 정서적으로 의지하려는 경향이 보일 수 있습니다.',
+        'scopeText': '이번 그림 활동에서 나타난 가능성입니다.',
+        'homeObservationGuide': '새로운 상황에서도 보호자의 확인을 반복해서 구하는지 살펴봐 주세요.',
+        'evidenceRefs': [101, 102],
+      },
+    ],
+    'evidenceItems': [
+      {
+        'evidenceId': 101,
+        'sourceType': 'CHILD_ANSWER',
+        'text': '집에는 우리 가족이 산다고 답했어요.',
+      },
+      {'evidenceId': 102, 'sourceType': 'VISION', 'text': '가족을 서로 가깝게 그렸어요.'},
+    ],
+    'subjectReports': [
+      {
+        'subjectType': 'DRAWING',
+        'imageUrl': '/api/v1/drawing-assets/120/file',
+        'visionObservations': ['가족을 서로 가깝게 그렸어요.'],
+        'qaPairs': [
+          {
+            'question': '이 그림에는 누가 있어요?',
+            'answer': '우리 가족이요',
+            'state': 'ANSWERED',
+            'inputType': 'VOICE',
+            'sttNeedsConfirmation': false,
+            'isRepresentative': true,
+          },
+          {
+            'question': '해는 왜 그렸어요?',
+            'answer': null,
+            'state': 'SKIPPED',
+            'inputType': 'TEXT',
+            'sttNeedsConfirmation': false,
+            'isRepresentative': false,
+          },
+        ],
+        'interpretationRefs': [0],
+      },
+    ],
+    'parentGuides': [
+      {
+        'guideType': 'DRAWING_CONVERSATION',
+        'items': ['그림에서 가장 마음에 드는 부분을 아이에게 물어봐 주세요.'],
+      },
+      {
+        'guideType': 'DAILY_PARENTING',
+        'items': ['하루 한 번은 아이의 이야기를 끝까지 들어 주세요.'],
+      },
+      {
+        'guideType': 'HOME_OBSERVATION',
+        'items': ['새로운 상황에서 아이가 어떻게 반응하는지 살펴봐 주세요.'],
+      },
+      {
+        'guideType': 'PROFESSIONAL_SUPPORT',
+        'items': ['더 이야기 나누고 싶을 때는 전문가 상담을 참고할 수 있어요.'],
+      },
+    ],
+    'references': [
+      {'title': '아이 그림과 대화 이해하기', 'url': null},
+    ],
     'guardianConversationGuide': ['오늘 그린 그림에서 제일 좋아하는 부분은 어디야?'],
     'limitations': ['이 리포트는 의료적·심리학적 진단이 아니며, 아이와의 대화를 돕기 위한 관찰 참고 자료입니다.'],
     'expertReview': {'status': 'NOT_REQUESTED', 'available': false},

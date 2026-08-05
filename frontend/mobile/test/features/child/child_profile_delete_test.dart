@@ -439,9 +439,11 @@ Future<void> _bootProfileEditing(
 }
 
 Future<void> _openEditor(WidgetTester tester, {required int childId}) async {
-  final card = find.byKey(ValueKey('child-profile-$childId'));
-  await tester.ensureVisible(card);
-  await tester.tap(card);
+  // 편집 모드의 카드 탭은 삭제 대상 고르기라, 편집 화면은 카드의 연필로 연다
+  // (S15P11B209-920).
+  final editButton = find.byKey(ValueKey('child-profile-edit-$childId'));
+  await tester.ensureVisible(editButton);
+  await tester.tap(editButton);
   await tester.pumpAndSettle();
   expect(find.text('아이 프로필 편집'), findsOneWidget);
 }

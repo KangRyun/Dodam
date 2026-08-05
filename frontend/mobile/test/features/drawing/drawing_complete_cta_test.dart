@@ -5,6 +5,24 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('DrawingCompleteCta', () {
+    testWidgets('keeps a coloured crayon surface with a white label', (
+      tester,
+    ) async {
+      await _pump(tester);
+
+      final material = tester.widget<Material>(
+        find.byKey(const ValueKey('drawing-complete')),
+      );
+      final label = tester.widget<Text>(find.text('다 그렸어요!'));
+
+      expect(material.color, isNot(Colors.white));
+      expect(label.style?.color, Colors.white);
+      expect(
+        find.byKey(const ValueKey('drawing-complete-crayon-texture')),
+        findsOneWidget,
+      );
+    });
+
     testWidgets('아이가 읽을 문구와 48px 이상 터치 영역을 제공한다', (tester) async {
       await _pump(tester);
 

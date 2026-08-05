@@ -253,6 +253,10 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     _preparedResolution = widget.preparedResolution;
     // 자동 시작(이어 그리기)은 홈을 "확인 중" 상태로 두고 곧바로 캔버스를 연다.
     _entryResolved = _preparedResolution != null && !widget.autoStartPrepared;
+    // HTP 등 부모가 준비해 넘긴 활동으로 홈에 머무는 진입에서도 최초 캐릭터 선택
+    // 가이드를 허용한다(S15P11B209-916 후속 — 그림일기·HTP 어느 경로든 최초 1회).
+    // 자동 시작(캔버스 직행)은 _entryResolved=false라 여전히 가이드가 뜨지 않는다.
+    _introAllowedForResolvedEntry = _entryResolved;
     unawaited(_loadCostume());
     unawaited(_loadDrawingTypes());
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -863,7 +867,6 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
         !_entryResolved ||
         !_introAllowedForResolvedEntry ||
         _checkingActiveSession ||
-        _preparedResolution != null ||
         _startingDrawingTypeId != null ||
         !(ModalRoute.of(context)?.isCurrent ?? false)) {
       return;
@@ -882,7 +885,6 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
         !_entryResolved ||
         !_introAllowedForResolvedEntry ||
         _checkingActiveSession ||
-        _preparedResolution != null ||
         !(ModalRoute.of(context)?.isCurrent ?? false)) {
       return;
     }

@@ -543,7 +543,11 @@ Q13_DIARY_VERBAL_SKIP = QuestionCase(
         # 건너뛴 질문은 '두 사람의 행동'. 표정·이름을 묻는 것은 속성 전환이라 정상이고,
         # 공을 묻는 것은 대상 전환이라 정상이다 (858 과탐 보정).
         "skipped_subject_terms": ["두 사람", "사람들은"],
-        "skipped_attribute_terms": ["무엇을 하고", "뭘 하고", "하고 있어"],
+        # "하고 있어"는 뺐다 — 술어 조각이라 속성이 실제로 바뀐 문장까지 잡는다.
+        #   2026-08-05 실측: "그 두 사람은 어떤 표정을 하고 있어?"가 걸렸다. 이건 858이
+        #   정상 전환이라고 못박은 바로 그 예("행동을 건너뛰자 표정을 묻는다")다.
+        #   대신 같은 뜻의 표기 변형("뭐 하고")을 넣어 진짜 반복은 그대로 잡는다.
+        "skipped_attribute_terms": ["무엇을 하고", "뭘 하고", "뭐 하고"],
         "expects_empathy": True,
     },
 )
@@ -917,6 +921,94 @@ Q23_SINGLE_PERSON = QuestionCase(
 )
 
 
+# ── 24~26) 그만하기 의사 (S15P11B209-938) ───────────────────────
+# 아이가 말로 그만하겠다고 하면 다음 질문을 만들지 않고 무엇을 그만할지 되묻는다.
+# 세 케이스 모두 GMS를 타지 않는다 — 배선 회귀 검사다(Q6 인젝션과 같은 성격).
+#
+# ⚠️ 여기서 가장 무서운 것은 과탐이다. 건너뛰기(831)를 그만하기로 읽으면 "다른 질문 해줘"라고
+#    한 아이가 대화를 끝낼지 묻는 화면을 본다. 그래서 건너뛰기 케이스(Q13)를 함께 본다.
+
+Q24_STOP_UNSPECIFIED = QuestionCase(
+    id="Q24_stop_unspecified",
+    title="그만하기 · 대상이 불분명(GMS 미호출)",
+    why="그림·대화 중 무엇을 그만할지 되묻는가. 임의로 하나를 골라 끝내지 않는가.",
+    request=QuestionRequest(
+        conversation_id=9024,
+        drawing_session_id=8024,
+        child_age=8,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=3,
+        max_question_count=5,
+        detected_objects=[_obj("PERSON", "사람", 0.9)],
+        drawing_description="가운데에 사람이 한 명 서 있어요.",
+        recent_messages=[
+            _dodam("이 사람은 지금 뭐 하고 있어?"),
+            # 띄어쓴 형태로 둔다. 2026-08-05 실사용에서 "그만 할래"가 붙여쓰기만 전제한
+            # 정규식에 걸리지 않아 통째로 새어 나갔다 — 그 형태를 케이스로 고정한다.
+            _child("이제 그만 할래."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="ART_DIARY",
+    ),
+    calls_gms=False,
+    meta={"fixed_question_text": "그래! 그림을 그만 그릴까, 아니면 이야기만 그만할까?"},
+)
+
+
+Q25_STOP_CONVERSATION = QuestionCase(
+    id="Q25_stop_conversation",
+    title="그만하기 · 대화를 지목(GMS 미호출)",
+    why="아이가 이미 대상을 말했으면 되묻지 않고 그 갈래로 가는가.",
+    request=QuestionRequest(
+        conversation_id=9025,
+        drawing_session_id=8025,
+        child_age=8,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=3,
+        max_question_count=5,
+        detected_objects=[_obj("PERSON", "사람", 0.9)],
+        drawing_description="가운데에 사람이 한 명 서 있어요.",
+        recent_messages=[
+            _dodam("이 사람은 지금 뭐 하고 있어?"),
+            _child("이야기 그만할래. 그림은 더 그릴 거야."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="ART_DIARY",
+    ),
+    calls_gms=False,
+    meta={"fixed_question_text": "그래, 이야기는 여기까지 할까?"},
+)
+
+
+Q26_STOP_HTP = QuestionCase(
+    id="Q26_stop_htp",
+    title="그만하기 · HTP(GMS 미호출)",
+    why="HTP는 그림을 이미 완료한 뒤라 '그림을 그만 그린다'가 성립하지 않는다.",
+    request=QuestionRequest(
+        conversation_id=9026,
+        drawing_session_id=8026,
+        child_age=8,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=3,
+        max_question_count=5,
+        detected_objects=[_obj("HOUSE", "집", 0.9)],
+        drawing_description="가운데에 집이 크게 있어요.",
+        recent_messages=[
+            _dodam("이 집에는 누가 살아?"),
+            _child("이제 그만할래."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="HTP",
+        drawing_subject="HOUSE",
+    ),
+    calls_gms=False,
+    meta={"fixed_question_text": "그래, 이야기는 여기까지 할까?"},
+)
+
+
 QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q1_FIRST_HTP,
     Q2_FIRST_DIARY,
@@ -939,6 +1031,9 @@ QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q21_DIARY_OPENING,
     Q22_UNANSWERED_SECOND,
     Q23_SINGLE_PERSON,
+    Q24_STOP_UNSPECIFIED,
+    Q25_STOP_CONVERSATION,
+    Q26_STOP_HTP,
 )
 
 

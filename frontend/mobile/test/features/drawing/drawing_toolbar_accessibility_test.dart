@@ -25,6 +25,37 @@ void main() {
 
   group('DrawingToolbar accessibility', () {
     testWidgets(
+      'pencil-only mode keeps eraser and thickness but hides colour tools',
+      (tester) async {
+        await _pumpToolbar(tester, quickColors: quickColors, pencilOnly: true);
+
+        expect(
+          find.byKey(const ValueKey('drawing-tool-pencil')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('drawing-tool-eraser')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const ValueKey('drawing-thickness-slider')),
+          findsOneWidget,
+        );
+        expect(find.byKey(const ValueKey('drawing-tool-crayon')), findsNothing);
+        expect(find.byKey(const ValueKey('drawing-tool-brush')), findsNothing);
+        expect(find.byKey(const ValueKey('drawing-tool-fill')), findsNothing);
+        expect(
+          find.byKey(const ValueKey('drawing-palette-button')),
+          findsNothing,
+        );
+        expect(
+          find.byKey(const ValueKey('drawing-quick-colors')),
+          findsNothing,
+        );
+      },
+    );
+
+    testWidgets(
       'keeps every primary action at 48px and renders tools with approved artwork',
       (tester) async {
         final semantics = tester.ensureSemantics();
@@ -540,6 +571,7 @@ Future<void> _pumpToolbar(
   DrawingSaveStatus saveStatus = DrawingSaveStatus.localOnly,
   VoidCallback? onRetrySave,
   double width = 8,
+  bool pencilOnly = false,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -559,6 +591,7 @@ Future<void> _pumpToolbar(
         body: Align(
           alignment: Alignment.topCenter,
           child: DrawingToolbar(
+            pencilOnly: pencilOnly,
             toolState: DrawingToolState(width: width),
             quickColors: quickColors,
             paletteAnchorLink: LayerLink(),

@@ -563,6 +563,43 @@ void main() {
       expect(answers.keys.toSet(), hasLength(1));
     });
   });
+
+  group('S15P11B209-915 AI 대화 집중 모드', () {
+    testWidgets('AI 질문이 보이는 동안 캔버스 입력을 막고 대화 입력만 유지한다', (tester) async {
+      final answers = _AnswerRepository(pending: Completer<int>());
+      await _pumpConversation(tester, answerRepository: answers);
+
+      expect(
+        find.byKey(const ValueKey('ai-question-option-1')),
+        findsOneWidget,
+      );
+
+      expect(
+        tester
+            .widget<Listener>(find.byKey(const ValueKey('drawing-canvas')))
+            .onPointerDown,
+        isNull,
+        reason: 'AI 질문이 보이는 동안 캔버스 입력 자체가 비활성화되어야 한다',
+      );
+      expect(
+        tester
+            .widget<AbsorbPointer>(
+              find.byKey(const ValueKey('drawing-conversation-input-lock')),
+            )
+            .absorbing,
+        isTrue,
+      );
+
+      await _tap(tester, const ValueKey('ai-question-option-1'));
+      expect(
+        find.byKey(const ValueKey('ai-question-answer-submitting')),
+        findsOneWidget,
+      );
+
+      answers.pending!.complete(9101);
+      await tester.pumpAndSettle();
+    });
+  });
 }
 
 /// 객체 탐지를 실제 경로로 성공시켜 새 분석 ID의 대화 생성을 유도한다.

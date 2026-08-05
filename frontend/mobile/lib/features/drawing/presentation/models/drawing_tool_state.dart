@@ -36,6 +36,22 @@ final class DrawingToolState {
 
   DrawingBrushProfileId get brushProfile => instrument.brushProfile;
 
+  /// 도구 전환 이벤트(`TOOL_CHANGE`)에 싣는 코드다.
+  ///
+  /// 획에 실리는 [wireTool]은 PEN/ERASER 두 갈래라 크레용→연필 같은 전환이 사라진다.
+  /// 아이가 실제로 고른 도구를 남기려고 여기서는 좁히지 않는다. 지우개는 획을 골라
+  /// 지우는 모드와 문질러 지우는 모드가 서로 다른 행동이라 나눠 적는다.
+  /// 백엔드 계약의 도구 코드 정규식(`[A-Z][A-Z0-9_]*`, 30자)을 지킨다.
+  String get wireToolCode => switch (instrument) {
+    DrawingInstrument.crayon => 'CRAYON',
+    DrawingInstrument.pencil => 'PENCIL',
+    DrawingInstrument.brush => 'BRUSH',
+    DrawingInstrument.eraser when eraserMode == DrawingEraserMode.stroke =>
+      'ERASER_STROKE',
+    DrawingInstrument.eraser => 'ERASER',
+    DrawingInstrument.fill => 'FILL',
+  };
+
   DrawingTool? get wireTool => switch (instrument) {
     DrawingInstrument.crayon ||
     DrawingInstrument.pencil ||

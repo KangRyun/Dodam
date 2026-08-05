@@ -215,8 +215,7 @@ class StrokeBatchServiceTest {
   void keepsPointPressureInTheStoredDocument() {
     stubCanvasSession();
 
-    service.save(
-        100L, requestWithPointPressure(new BigDecimal("0.0"), new BigDecimal("0.7")));
+    service.save(100L, requestWithPointPressure(new BigDecimal("0.0"), new BigDecimal("0.7")));
 
     ArgumentCaptor<StrokeBatchDocument> captor = ArgumentCaptor.forClass(StrokeBatchDocument.class);
     verify(strokeBatchDocumentRepository).insert(captor.capture());
@@ -248,8 +247,7 @@ class StrokeBatchServiceTest {
   @Test
   void rejectsAPressureOnlyDifferenceReusingTheSameBatchSequence() {
     stubCanvasSession();
-    service.save(
-        100L, requestWithPointPressure(new BigDecimal("0.30"), new BigDecimal("0.70")));
+    service.save(100L, requestWithPointPressure(new BigDecimal("0.30"), new BigDecimal("0.70")));
     ArgumentCaptor<StrokeBatchDocument> captor = ArgumentCaptor.forClass(StrokeBatchDocument.class);
     verify(strokeBatchDocumentRepository).insert(captor.capture());
     when(strokeBatchDocumentRepository.findBySessionIdAndBatchSeq(100L, 3))
@@ -259,8 +257,7 @@ class StrokeBatchServiceTest {
     assertThatThrownBy(
             () ->
                 service.save(
-                    100L,
-                    requestWithPointPressure(new BigDecimal("0.30"), new BigDecimal("0.71"))))
+                    100L, requestWithPointPressure(new BigDecimal("0.30"), new BigDecimal("0.71"))))
         .isInstanceOf(BusinessException.class)
         .extracting("errorCode")
         .isEqualTo(DrawingErrorCode.STROKE_BATCH_CONFLICT);

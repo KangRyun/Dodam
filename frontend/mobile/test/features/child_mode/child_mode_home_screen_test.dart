@@ -1396,6 +1396,44 @@ void main() {
     expect(store.readChildIds, isEmpty);
   });
 
+  testWidgets('prepared CANVAS(HTP·자동시작 아님) 진입도 홈에 머물면 최초 캐릭터 가이드를 띄운다', (
+    tester,
+  ) async {
+    // 부모가 준비해 넘긴 새 CANVAS 활동으로 홈에 머무는 진입에서도 최초 1회 캐릭터
+    // 선택 가이드가 떠야 한다(S15P11B209-916 후속 — 그림일기·HTP 어느 경로든).
+    final store = _FakeIntroStore();
+    const prepared = DrawingSessionResolution(
+      sessionId: 900,
+      currentStage: 'DRAWING',
+      inputMethod: 'CANVAS',
+      activityContext: DrawingActivityContextDto(
+        activityKind: 'HTP',
+        htpAssessmentId: 90,
+        stepOrder: 1,
+        drawingSubject: 'HOUSE',
+      ),
+    );
+    await tester.pumpWidget(
+      _wrap(
+        ChildModeHomeScreen(
+          child: _child,
+          drawingRepository: _FakeDrawingRepository(
+            drawingTypes: const [_artDiary],
+          ),
+          introStore: store,
+          preparedResolution: prepared,
+          // autoStartPrepared 기본 false — 홈에 머문다.
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      find.byKey(const ValueKey('child-character-intro-dialog')),
+      findsOneWidget,
+    );
+  });
+
   testWidgets('rebuild·background·resume에도 최초 dialog를 중복 생성하지 않는다', (
     tester,
   ) async {

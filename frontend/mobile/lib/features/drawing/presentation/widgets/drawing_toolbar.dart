@@ -25,6 +25,7 @@ final class DrawingToolbar extends StatelessWidget {
     required this.onColorChanged,
     required this.onWidthChanged,
     required this.onOpenPalette,
+    this.pencilOnly = false,
     super.key,
   });
 
@@ -43,6 +44,7 @@ final class DrawingToolbar extends StatelessWidget {
   final ValueChanged<Color> onColorChanged;
   final ValueChanged<double> onWidthChanged;
   final VoidCallback onOpenPalette;
+  final bool pencilOnly;
 
   @override
   Widget build(BuildContext context) {
@@ -128,64 +130,68 @@ final class DrawingToolbar extends StatelessWidget {
     ),
   );
 
-  List<Widget> _primaryActions(BuildContext context) => [
-    _ToolbarAssetAction(
-      key: const ValueKey('drawing-back'),
-      assetPath: 'assets/canvas/frame/back.png',
-      semanticLabel: '뒤로 가기',
-      tooltip: '뒤로 가기',
-      onPressed: onBack,
-    ),
-    _ToolbarAssetAction(
-      key: const ValueKey('undo-action'),
-      assetPath: 'assets/canvas/frame/undo.png',
-      semanticLabel: '실행 취소',
-      tooltip: '실행 취소',
-      onPressed: canUndo ? onUndo : null,
-    ),
-    _ToolbarAssetAction(
-      key: const ValueKey('redo-action'),
-      assetPath: 'assets/canvas/frame/redo.png',
-      semanticLabel: '다시 실행',
-      tooltip: '다시 실행',
-      onPressed: canRedo ? onRedo : null,
-    ),
-    _instrumentButton(
-      instrument: DrawingInstrument.crayon,
-      artwork: CanvasToolArtwork.crayon,
-      label: '크레용',
-    ),
-    _instrumentButton(
-      instrument: DrawingInstrument.pencil,
-      artwork: CanvasToolArtwork.pencil,
-      label: '연필',
-    ),
-    _instrumentButton(
-      instrument: DrawingInstrument.brush,
-      artwork: CanvasToolArtwork.brush,
-      label: '브러시',
-    ),
-    Builder(
-      builder: (anchorContext) => DrawingToolButton(
-        key: const ValueKey('drawing-tool-eraser'),
-        artwork: CanvasToolArtwork.eraser,
-        pointColor: toolState.color,
-        selected: toolState.instrument == DrawingInstrument.eraser,
-        semanticLabel: '지우개 도구',
-        tooltip: '지우개',
-        onPressed: () {
-          onInstrumentChanged(DrawingInstrument.eraser);
-          _showEraserMenu(anchorContext);
-        },
+  List<Widget> _primaryActions(BuildContext context) {
+    final actions = <Widget>[
+      _ToolbarAssetAction(
+        key: const ValueKey('drawing-back'),
+        assetPath: 'assets/canvas/frame/back.png',
+        semanticLabel: '뒤로 가기',
+        tooltip: '뒤로 가기',
+        onPressed: onBack,
       ),
-    ),
-    _instrumentButton(
-      instrument: DrawingInstrument.fill,
-      artwork: CanvasToolArtwork.fill,
-      label: '채우기',
-    ),
-    _paletteButton(),
-  ];
+      _ToolbarAssetAction(
+        key: const ValueKey('undo-action'),
+        assetPath: 'assets/canvas/frame/undo.png',
+        semanticLabel: '실행 취소',
+        tooltip: '실행 취소',
+        onPressed: canUndo ? onUndo : null,
+      ),
+      _ToolbarAssetAction(
+        key: const ValueKey('redo-action'),
+        assetPath: 'assets/canvas/frame/redo.png',
+        semanticLabel: '다시 실행',
+        tooltip: '다시 실행',
+        onPressed: canRedo ? onRedo : null,
+      ),
+      _instrumentButton(
+        instrument: DrawingInstrument.crayon,
+        artwork: CanvasToolArtwork.crayon,
+        label: '크레용',
+      ),
+      _instrumentButton(
+        instrument: DrawingInstrument.pencil,
+        artwork: CanvasToolArtwork.pencil,
+        label: '연필',
+      ),
+      _instrumentButton(
+        instrument: DrawingInstrument.brush,
+        artwork: CanvasToolArtwork.brush,
+        label: '브러시',
+      ),
+      Builder(
+        builder: (anchorContext) => DrawingToolButton(
+          key: const ValueKey('drawing-tool-eraser'),
+          artwork: CanvasToolArtwork.eraser,
+          pointColor: toolState.color,
+          selected: toolState.instrument == DrawingInstrument.eraser,
+          semanticLabel: '지우개 도구',
+          tooltip: '지우개',
+          onPressed: () {
+            onInstrumentChanged(DrawingInstrument.eraser);
+            _showEraserMenu(anchorContext);
+          },
+        ),
+      ),
+      _instrumentButton(
+        instrument: DrawingInstrument.fill,
+        artwork: CanvasToolArtwork.fill,
+        label: '채우기',
+      ),
+      _paletteButton(),
+    ];
+    if (!pencilOnly) return actions;
+    return [actions[0], actions[1], actions[2], actions[4], actions[6]];
+  }
 
   Widget _instrumentButton({
     required DrawingInstrument instrument,
@@ -243,28 +249,30 @@ final class DrawingToolbar extends StatelessWidget {
     child: Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Row(
-          key: const ValueKey('drawing-quick-colors'),
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            for (var index = 0; index < quickColors.length; index++)
-              KeyedSubtree(
-                key: index < _quickColorNames.length
-                    ? ValueKey('color-${_quickColorNames[index]}')
-                    : null,
-                child: _QuickColorButton(
-                  key: ValueKey('drawing-quick-color-$index'),
-                  index: index,
-                  assetPath: _quickColorAssetPaths[index],
-                  selected:
-                      quickColors[index].toARGB32() ==
-                      toolState.color.toARGB32(),
-                  onPressed: () => onColorChanged(quickColors[index]),
+        if (!pencilOnly) ...[
+          Row(
+            key: const ValueKey('drawing-quick-colors'),
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              for (var index = 0; index < quickColors.length; index++)
+                KeyedSubtree(
+                  key: index < _quickColorNames.length
+                      ? ValueKey('color-${_quickColorNames[index]}')
+                      : null,
+                  child: _QuickColorButton(
+                    key: ValueKey('drawing-quick-color-$index'),
+                    index: index,
+                    assetPath: _quickColorAssetPaths[index],
+                    selected:
+                        quickColors[index].toARGB32() ==
+                        toolState.color.toARGB32(),
+                    onPressed: () => onColorChanged(quickColors[index]),
+                  ),
                 ),
-              ),
-          ],
-        ),
-        const SizedBox(width: 8),
+            ],
+          ),
+          const SizedBox(width: 8),
+        ],
         SizedBox(
           key: const ValueKey('drawing-thickness-slider'),
           width: 116,
