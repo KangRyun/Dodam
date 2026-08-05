@@ -29,6 +29,25 @@ class _CamelModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
+def _evidence_id_to_str(value):
+    """근거 식별자를 문자열로 정규화한다 (2026-08-05 운영 결함 수정).
+
+    BE는 이 값들이 **DB 행 ID(Long)** 라 JSON 숫자로 보낸다. 계약 타입만 str 로 적어 둔 탓에
+    906 배포본에서 `detectedObjects[].evidenceSourceId: 10` 이 422로 튕겼다.
+    숫자를 거부할 이유가 없다 — AI는 이 값을 **되돌려 줄 참조 문자열로만** 쓴다.
+
+    ⚠️ 문자열로 정규화하는 것이 검증 통과보다 중요하다. `report_client._allowed_evidence_refs`
+       가 (kind, id) 튜플로 대조하는데, 한쪽이 int 로 남으면 형식은 통과해도 대조에서 어긋나
+       **그 근거가 조용히 사라진다**(422보다 알아채기 어려운 실패다).
+    bool 은 int 의 하위 타입이라 따로 막는다 — True 가 "True" 가 되면 안 된다.
+    """
+    if isinstance(value, bool):
+        return value  # 타입 검증에서 걸리게 그대로 넘긴다
+    if isinstance(value, int):
+        return str(value)
+    return value
+
+
 # ── 공용 (요청·응답 양쪽에서 사용) ───────────────────────────────
 class BoundingBox(_CamelModel):
     """캔버스 크기에 대해 0~1로 정규화한 사각형 좌표(BE BoundingBox와 동일).
@@ -244,18 +263,33 @@ class SubjectDetectedObject(_CamelModel):
 
     ⚠️ area_ratio 가 None이면 그대로 둔다 — width*height 로 대체 계산하지 않는다(BE 명시).
        추정값을 관찰 사실로 적으면 근거가 아닌 것이 근거 자리에 들어간다.
+
+    ⚠️ 기하 4필드는 **전부 optional** 이다(2026-08-05 운영 결함 수정). 836이 이 넷을 기본값 없는
+       필수 필드로 둔 탓에, 906 배포본이 {evidenceSourceId, objectCode} 만 실어 보내자
+       POST /internal/v1/observations 가 **422로 100% 실패**했다(운영 2건 중 2건).
+       탐지 객체가 하나라도 있으면 전량 실패라 리포트 파이프라인이 통째로 멈췄다.
+
+       이건 단순 버그가 아니라 **원칙 위반**이었다. 이 계약은 곳곳에서 롤아웃 안전 패턴을 쓴다 —
+       "구 BE가 안 보내면 빈 목록이라 기존 경로가 그대로 동작한다"(740·836 주석). 836이 자기
+       모델에서만 그 원칙을 어겨, BE·AI 배포 순서가 어긋나는 순간 파이프라인이 멈추게 만들었다.
+       → 없는 값은 None 으로 받고, **없는 값으로 관찰 사실을 지어내지 않는다**
+         (report_client._geometry_facts 가 좌표 없는 항목을 블록에서 건너뛴다).
     """
 
     object_code: str
-    x: float
-    y: float
-    width: float
-    height: float
+    x: float | None = None
+    y: float | None = None
+    width: float | None = None
+    height: float | None = None
     area_ratio: float | None = None
     confidence: float | None = None
     # 근거 식별자 (S15P11B209-886) — sourceRef {kind: "DETECTED_OBJECT", id: <이 값>}.
     #   없으면 이 탐지 결과는 공개 해석의 근거로 쓸 수 없다(관찰 서술 재료로는 계속 쓰인다).
     evidence_source_id: str | None = None
+
+    _normalize_id = field_validator("evidence_source_id", mode="before")(
+        _evidence_id_to_str
+    )
 
 
 class SubjectSummary(_CamelModel):
@@ -275,6 +309,11 @@ class SubjectSummary(_CamelModel):
     # 근거 식별자 (S15P11B209-886) — 이 그림의 VLM 관찰 서술 레코드 ID.
     #   sourceRef {kind: "VLM_OBSERVATION", id: <이 값>}. 없으면 서술을 근거로 쓸 수 없다.
     observation_evidence_source_id: str | None = None
+
+    # BE가 DB 행 ID(Long)를 숫자로 보낸다 — detectedObjects 에서 실제로 422를 낸 것과 같은 값이다.
+    _normalize_id = field_validator("observation_evidence_source_id", mode="before")(
+        _evidence_id_to_str
+    )
 
 
 class BehaviorMetrics(_CamelModel):
@@ -315,6 +354,11 @@ class SelectedEmotionRef(_CamelModel):
     emotion_code: str
     evidence_source_id: str
 
+    # BE가 DB 행 ID(Long)를 숫자로 보낸다 — detectedObjects 에서 실제로 422를 낸 것과 같은 값이다.
+    _normalize_id = field_validator("evidence_source_id", mode="before")(
+        _evidence_id_to_str
+    )
+
 
 class ObservationGenerationRequest(_CamelModel):
     """BE ObservationGenerationRequest와 1:1. 집계 수치·비민감 맥락만 담는다.
@@ -353,7 +397,13 @@ class ObservationGenerationRequest(_CamelModel):
 
 
 class ObservedFeatureDraft(_CamelModel):
-    """관찰 특징 초안(BE ObservedFeatureDraft). visibility_scope로 노출 범위를 나눈다."""
+    """관찰 특징 초안(BE ObservedFeatureDraft). visibility_scope로 노출 범위를 나눈다.
+
+    ⚠️ 어휘는 그대로지만 **뜻이 재정의됐다**(2026-08-05). DB 마이그레이션을 피하려 값 이름을
+    유지했을 뿐, 사람 전문가 독자는 존재한 적이 없다:
+    - REVIEWED_GUARDIAN = AI 자체검토를 통과해 **보호자에게 열리는** 카드.
+    - EXPERT_ONLY = 보호자에게 바로 열지 않고 **사람 상담 권유·안전 경로 전용**으로 보내는 카드.
+    """
 
     feature_code: str
     title: str
@@ -363,10 +413,17 @@ class ObservedFeatureDraft(_CamelModel):
 
 
 class ObservationDraft(_CamelModel):
-    """전문가 검토 전 관찰 초안(BE ObservationDraft). status는 항상 AI_DRAFT.
+    """관찰 초안(BE ObservationDraft). disclaimer(진단 아님)는 필수.
 
-    attention_points는 전문가 내부 검토용 — 보호자에게 바로 노출하지 않는다.
-    disclaimer(진단 아님)는 필수.
+    status(2026-08-05):
+    - "AI_DRAFT" — 자체검토를 통과하지 못했거나 검토하지 못한 초안. 보호자 경로를 열지 않는다.
+    - "AI_REVIEWED" — 자체검토를 통과했다. 관찰 카드가 visibility_scope 대로 노출된다.
+    ⚠️ BE ObservationReviewStatus enum 에 AI_REVIEWED 가 추가되고 AnalysisObservationResult 가
+       하드코딩 대신 이 값을 받아야 실효가 생긴다. 그 전까지는 BE가 AI_DRAFT 로 저장하므로
+       동작이 지금과 같다 — 배포 순서 무관.
+
+    attention_points 는 **보호자가 다음에 더 지켜볼 점**이다(구: 전문가가 추가 확인할 것).
+    expert_review_required 는 **사람 상담을 권할 신호**다 — 리포트 품질 실패는 status 로 간다.
     """
 
     status: str = "AI_DRAFT"

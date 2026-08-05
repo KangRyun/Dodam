@@ -77,9 +77,9 @@
 | `drawingDurationMs` · `activeDrawingMs` | X | 없으면 `null`. **0으로 채우지 않는다** |
 | `pauseCount` | X | 배치 경계 기반 **추정값** — 리포트는 "약 N번"으로 완화 표기 |
 | `undoCount` · `eraseCount` | X | |
-| `toolChangeCount` · `colorChangeCount` | X | 계약으로 받되 현재 프롬프트 블록에는 싣지 않는다 |
+| `toolChangeCount` · `colorChangeCount` | X | **2026-08-05부터 프롬프트 블록에 실린다**("도구 바꾼 횟수 N회"·"색 바꾼 횟수 N회"). 관찰 사실로만 적히고, 해석은 `[형식적 분석]` 전체를 신호 하나로 세는 규칙을 따른다 |
 | `pressureAvailable` | O | **측정 가능 여부일 뿐** 필압의 강약도 감정 근거도 아니다 |
-| `averagePressure` | X | 이번 단계 항상 `null`(BE 확정). 값 도입은 후속 |
+| `averagePressure` | X | **구조적으로 항상 `null`** — BE record `StrokeBehaviorSummary` 에 이 필드 자체가 없다. 필압 줄은 운영에서 한 번도 나온 적이 없고 나올 수도 없다. AI 쪽 분기는 계약 확장 대비로만 남아 있다. 값 도입은 BE 계약 확장이 선행 |
 | `truncated` | O | `true`면 "저장된 캔버스 입력 구간 기준" — 활동 전체를 완전 집계한 것처럼 표현 금지 |
 
 **`null` 과 `0` 은 다른 뜻이다.** `null`은 '집계하지 못함'이라 프롬프트 블록에서 항목을 빼고,
@@ -106,13 +106,43 @@
 | 필드 | 필수 | 설명 |
 |---|---|---|
 | `objectCode` | O | `analysis_detected_objects.object_code`. 리포트 문장에 원문 노출 금지(기존 규칙) |
-| `x` `y` `width` `height` | O | **NORMALIZED(0~1) 만** 전달 |
+| `x` `y` `width` `height` | **X** | **NORMALIZED(0~1) 만** 전달. 없으면 `null` — 아래 결함 이력 참조 |
 | `areaRatio` | X | 없으면 `null`. **AI에서 `width*height` 로 보정하지 않는다** |
 | `confidence` | X | 낮은 신뢰도 탐지를 확정 사실처럼 표현하지 않기 위한 값 |
+| `evidenceSourceId` | X | DB 행 ID. **숫자(Long)·문자열 모두 받는다** — AI가 문자열로 정규화해 보관 |
 
 **좌표계는 `NORMALIZED` 만.** AI는 캔버스 원본 크기를 모르므로 픽셀 좌표로는 용지 점유율을
 계산할 수 없다. `coordinateSpace == PIXEL` 인 결과뿐이면 그 주제는 **빈 목록**으로 보낸다
 (부분 전달 금지 — 좌표계가 섞이면 판단 불가).
+
+#### ⚠️ 결함 이력 — 기하 필수 지정으로 인한 운영 전량 실패 (2026-08-05)
+
+836이 `x·y·width·height` 를 **기본값 없는 필수 필드**로 뒀는데, 906 배포본이 실어 보내는 항목은
+`{evidenceSourceId, objectCode}` 뿐이었다. 결과: `POST /internal/v1/observations` 가 운영에서
+**2건 중 2건 422**(성공 0건). 탐지 객체가 하나라도 있으면 전량 실패라 리포트 파이프라인이 멈췄다.
+
+오류 5건 — `x`·`y`·`width`·`height` 각 `Field required` +
+`evidenceSourceId` `Input should be a valid string`(BE는 Long 숫자로 보냄).
+
+**근인은 원칙 위반이다.** 이 계약은 곳곳에서 롤아웃 안전 패턴을 쓴다(§2.5 — "구 BE가 안 보내면
+기존 경로가 그대로 동작한다"). 836이 자기 모델에서만 그 원칙을 어겨, BE·AI 배포 순서가 어긋나는
+순간 파이프라인이 통째로 멈추게 만들었다.
+
+수정(AI 쪽 — 배포 순서 무관하게):
+
+1. 기하 4필드 전부 optional(`null` 허용).
+2. 근거 식별자는 **숫자도 받아 문자열로 정규화**한다. `detectedObjects[].evidenceSourceId` ·
+   `subjectSummaries[].observationEvidenceSourceId` · `selectedEmotionRefs[].evidenceSourceId`
+   모두 같은 처리 — 전부 DB 행 ID라 같은 노출을 갖는다.
+   ⚠️ 정규화가 검증 통과보다 중요하다. `_allowed_evidence_refs` 가 `(kind, id)` 튜플로 대조하는데
+   한쪽이 int 로 남으면 형식은 통과해도 대조에서 어긋나 **그 근거가 조용히 사라진다**(422보다 나쁘다).
+3. **기하가 없는 항목은 `[OO 크기·위치]` 블록에서 건너뛴다.** 좌표 없이 코드 이름만으로 줄을 세우면
+   '관찰된 수치'가 있는 것처럼 읽힌다. 네 값 중 하나라도 없으면 위치를 계산하지 않는다
+   (빠진 값을 0으로 치지 않는다 — `areaRatio` 를 `width*height` 로 보정하지 말라는 것과 같은 원칙).
+   그 항목은 '탐지된 요소 코드' 줄로만 남고, 근거 식별자도 그대로 살아 있다.
+4. 한 주제의 탐지가 **전부** 기하 없음이면 `[OO 크기·위치]` 블록 자체를 싣지 않는다
+   (`_format_behavior` 가 적을 지표가 없을 때 빈 문자열을 돌려주는 것과 같은 원칙 — 빈 블록을
+   실으면 모델이 채우려 든다).
 
 가드레일: 크기·위치는 **관찰 사실로만** 쓴다. 단일 기하 신호 단정, 아동의 평소 성격·발달로의
 일반화, 진단명·점수 생성, 낮은 신뢰도 탐지의 확정 표현은 프롬프트가 금지한다.
@@ -120,6 +150,7 @@
 ### 2.5 롤아웃 호환 (양방향)
 
 - **전 필드 optional + 기본 빈 목록/`null`.** 구 BE가 안 보내면 기존(집계+대표 발화) 경로로 동일 동작 — `QuestionRequest.activityType`(713)과 같은 패턴. 836의 두 필드도 같다: `behaviorMetrics`가 없으면 `[형식적 분석]` 블록이 실리지 않고, `detectedObjects`가 비면 기존 코드 목록 경로가 그대로 쓰인다. 배포 순서 제약 없음.
+- ⚠️ **이 원칙은 목록 단위가 아니라 필드 단위로 지켜야 한다.** `detectedObjects` 를 optional 로 두고도 그 **안의** 기하를 필수로 두면 원칙이 깨진다 — 목록이 비었을 때만 안전하고, 항목이 하나라도 있으면 전량 422다. 실제로 그렇게 났다(§2.4 결함 이력). 부분 전달을 받아 **부분만 쓰는** 것이 이 계약의 기본값이다.
 - `subjectSummaries`가 비어 있지 않으면 프롬프트의 `[그림 관찰 서술]` 단일 블록 **대신** 주제별 블록(`[집 그림 관찰]`·`[집 그림 문답]` …)이 실린다. 레거시 `drawing_description` 인자(draft 경로 전용)와 동시 제공 시 주제별 블록이 우선.
 
 ## 3. 응답 — RAG 확장 (S15P11B209-614·615, 전부 optional — 구 BE는 무시)
@@ -145,6 +176,73 @@
 **RAG 적용 범위: HTP 리포트만.** 그림일기 프롬프트는 `[전문 자료 근거]`를 근거 화이트리스트에 두지 않으므로 검색해도 쓰이지 않는다. 코퍼스 자체는 활동유형 중립이지만(`docs/ai/rag-corpus-policy.md` §1-2 — HTP를 점수화·해석하지 않는다), 전문 자료 어휘가 필요한 쪽은 '검사처럼 읽히기 쉬운' HTP 리포트다. 판별은 `subjectSummaries[].drawingSubject` 유무 — 계약에 `activityType` 필드가 없어 추론한다(HTP는 항상 채워지고, 그림일기는 `null`, 구 BE는 빈 목록).
 
 운영 관측: 검색 결과 비율은 Prometheus `dodam_rag_search_total{outcome=used|no_query|no_index|unavailable|low_score|not_applicable}` 카운터로 본다.
+
+## 3-1. 응답 — 검토 상태·노출 범위 재정의 (2026-08-05, **BE 반영 필요**)
+
+> ⚠️ **계약 초안이다.** AI 쪽은 아래대로 내보내지만, 실효는 BE 반영에 달려 있다. BE 미반영 상태에서도
+> **동작은 지금과 같다**(BE가 `status`를 무시하고 `AI_DRAFT`로 저장 → 모든 관찰 카드 `EXPERT_ONLY`) —
+> 배포 순서 제약은 없다.
+
+**배경(4계층 실측).** "전문가가 리포트를 검토한다"는 독자는 존재한 적이 없다.
+
+- `ObservationReviewStatus` enum 값이 `AI_DRAFT` 하나뿐 · 다른 상태로 가는 전이 코드 0건
+- `AnalysisObservationResult` 가 생성 시 `reviewStatus = AI_DRAFT` 로 **하드코딩** — AI가 보낸 `status`를 안 읽는다
+- 그래서 `ObservationReportPersistenceService` 의 `expertReviewed` 가 항상 `false` → `resolveVisibility` 가 항상 `EXPERT_ONLY`
+- `report/` 패키지에 EXPERT 읽기 경로 0건 · 운영 `report_observed_features` 97건 **전량 `EXPERT_ONLY`**
+
+결과적으로 프롬프트가 "전문가 검토용이니 공들여 쓰라"고 지시하던 7개 필드가 매번 통째로 버려지고 있었다.
+→ 사람 전문가 대신 **AI 자체검토(2-pass)** 를 관문으로 두고, 통과분을 보호자에게 연다.
+
+### 필드 의미 (어휘 유지 · 뜻만 재정의 — DB 마이그레이션 회피)
+
+| 필드 | 값 | 새 의미 |
+|---|---|---|
+| `observationDraft.status` | `AI_DRAFT` | 자체검토를 통과하지 못했거나 검토하지 못함. **보호자 경로를 열지 않는다** |
+| | `AI_REVIEWED` | 자체검토 통과. 관찰 카드가 `visibilityScope` 대로 노출된다 |
+| `features[].visibilityScope` | `REVIEWED_GUARDIAN` | 자체검토 통과 시 **보호자에게 실제로 노출** |
+| | `EXPERT_ONLY` | 보호자에게 바로 열지 않음 — **사람 상담 권유·안전 경로 전용** |
+| `observationDraft.attentionPoints` | 문자열 | **보호자가 다음에 더 지켜볼 점**(구: 전문가가 추가 확인할 것). 보호자가 그대로 읽는다 |
+| `observationDraft.expertReviewRequired` | bool | **사람 상담을 권할 신호**(아이 이야기). 리포트 품질 실패는 여기 오지 않는다 — 그건 `status`로 간다 |
+
+### BE가 맞춰야 하는 것
+
+1. `ObservationReviewStatus` enum에 `AI_REVIEWED` 추가.
+2. `AnalysisObservationResult` 생성 시 하드코딩(`AI_DRAFT`) 대신 **AI가 보낸 `status`를 반영**.
+   모르는 값이 오면 보수적으로 `AI_DRAFT`.
+3. `resolveVisibility`의 `expertReviewed = reviewStatus != AI_DRAFT` 는 **그대로 두면 맞는다**(변경 불필요).
+4. 보호자 조회(`ReportDetailQueryService`)가 `REVIEWED_GUARDIAN` 관찰 특징을 읽도록 확장 — 이게 없으면
+   `AI_REVIEWED`가 저장돼도 화면에는 아무것도 안 열린다.
+5. `Report.expertReviewRecommended` 는 뜻이 '사람 상담 권유'로 확정됐다. 현재 저장만 되고 읽는 곳이 없다 —
+   화면에 노출한다면 '검토 대기'가 아니라 '상담 권유' 문구여야 한다.
+
+### AI 쪽 판정 규칙 (as-built)
+
+1. **1층 규칙 필터**(`report_safety`, 정규식) — 진단명·단정 종결·고정 특질 규정. 개별 feature는 `EXPERT_ONLY`로
+   강등하고, 경향 카드는 제외한다(카드에는 `EXPERT_ONLY` 자리가 없다). 하나라도 걸리면 통과시키지 않는다.
+2. **2층 자체검토**(`report_review.txt`, LLM, temperature=0) — 규칙으로 못 잡는 층:
+   `DIAGNOSTIC` · `STIGMA` · `NO_EVIDENCE` · `OVERREACH` · `MIXED_EVIDENCE`.
+   - 관찰 카드 지적 → 그 카드만 `EXPERT_ONLY` 강등 (리포트는 통과)
+   - 경향 카드 지적 → 그 카드만 제외 + 고아 근거 정리 (리포트는 통과)
+   - 서술 필드·활동 기록·조언 지적 → **담을 자리가 없어 리포트 전체를 `AI_DRAFT`** 로 남긴다
+   - 모르는 `target`·`issue` 는 버린다(지어낸 값으로 리포트를 떨어뜨리지 못하게)
+3. **검토 호출 실패는 차단이 아니라 기능 저하** — 리포트는 그대로 반환하되 `status`는 `AI_DRAFT`.
+4. 위기 대응은 **AI가 대신하지 않는다.** `crisis_detection`·`crisis_guidance`·`DISCLAIMER`는 변경 없음.
+
+운영 관측: `dodam_report_self_review_total{outcome=passed|contained|failed|unavailable}`.
+재현성: 자체검토 프롬프트(`report_review`)가 `modelVersion`의 프롬프트 조합 다이제스트에 포함된다 —
+검토 기준이 바뀌면 태그가 움직인다.
+
+### ⚠️ 지연 예산 (BE와 함께 봐야 하는 값)
+
+리포트 한 건이 이제 GMS를 **두 번** 부른다(생성 + 검토). BE `AI_OBSERVATION_READ_TIMEOUT` 은 **30초**이고
+AI 공용 GMS timeout 은 60초라(`gms.py`), 두면 AI가 아직 검토 중일 때 BE가 먼저 포기해 **생성까지 버려진다.**
+
+- AI 쪽 방어: 검토 호출에만 별도 timeout `REPORT_REVIEW_TIMEOUT_SEC`(기본 **10초**)을 건다.
+  넘기면 '검토 못 함'으로 떨어뜨리고 리포트는 그대로 내보낸다(`status=AI_DRAFT`) — 차단이 아니라 기능 저하.
+- **운영 투입 후 실측 필요:** 생성 p95가 20초를 넘으면 10초를 더해도 30초를 넘긴다.
+  그때는 `AI_OBSERVATION_READ_TIMEOUT` 을 올리거나 `REPORT_REVIEW_TIMEOUT_SEC` 을 줄인다.
+  ⚠️ 이 값은 실측 전이라 **추정치다.** 배포 후 `dodam_report_self_review_total{outcome=unavailable}`
+  비율이 높으면 timeout이 짧은 것이고, 그러면 리포트가 계속 `AI_DRAFT`로 남아 아무것도 안 열린다.
 
 ## 4. 가드레일 (9절)
 
