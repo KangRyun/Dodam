@@ -16,8 +16,6 @@ final class DrawingToolbar extends StatelessWidget {
     required this.onBack,
     required this.canUndo,
     required this.canRedo,
-    required this.canComplete,
-    required this.isCompleting,
     required this.saveStatus,
     required this.onUndo,
     required this.onRedo,
@@ -27,7 +25,6 @@ final class DrawingToolbar extends StatelessWidget {
     required this.onColorChanged,
     required this.onWidthChanged,
     required this.onOpenPalette,
-    required this.onComplete,
     super.key,
   });
 
@@ -37,8 +34,6 @@ final class DrawingToolbar extends StatelessWidget {
   final VoidCallback onBack;
   final bool canUndo;
   final bool canRedo;
-  final bool canComplete;
-  final bool isCompleting;
   final DrawingSaveStatus saveStatus;
   final VoidCallback onUndo;
   final VoidCallback onRedo;
@@ -48,7 +43,6 @@ final class DrawingToolbar extends StatelessWidget {
   final ValueChanged<Color> onColorChanged;
   final ValueChanged<double> onWidthChanged;
   final VoidCallback onOpenPalette;
-  final VoidCallback onComplete;
 
   @override
   Widget build(BuildContext context) {
@@ -90,7 +84,6 @@ final class DrawingToolbar extends StatelessWidget {
                       onRetry: onRetrySave,
                       width: 112,
                     ),
-                    _completeButton(),
                   ],
                 ),
               ),
@@ -130,7 +123,6 @@ final class DrawingToolbar extends StatelessWidget {
             onRetry: onRetrySave,
             width: deviceClass == DrawingCanvasDeviceClass.tablet ? 128 : 116,
           ),
-          _completeButton(),
         ],
       ),
     ),
@@ -373,29 +365,6 @@ final class DrawingToolbar extends StatelessWidget {
     'assets/canvas/swatches/purple.png',
     'assets/canvas/swatches/charcoal.png',
   ];
-
-  Widget _completeButton() => KeyedSubtree(
-    key: const ValueKey('drawing-complete-button'),
-    child: _ToolbarAssetAction(
-      key: const ValueKey('drawing-complete'),
-      assetPath: 'assets/canvas/frame/button_green.png',
-      semanticLabel: isCompleting ? '그림 완료 처리 중' : '그림 완료',
-      tooltip: isCompleting ? '완료 처리 중' : '완료',
-      onPressed: canComplete && !isCompleting ? onComplete : null,
-      isLoading: isCompleting,
-      width: 72,
-      // 승인 디자인의 문구다. 아이에게는 '완료'보다 해낸 느낌을 준다.
-      foreground: const Text(
-        '완성!',
-        maxLines: 1,
-        style: TextStyle(
-          color: AppColors.canvasInk,
-          fontSize: 13,
-          fontWeight: FontWeight.w800,
-        ),
-      ),
-    ),
-  );
 }
 
 final class _ToolbarSaveStatus extends StatelessWidget {
@@ -695,9 +664,6 @@ final class _ToolbarAssetAction extends StatefulWidget {
     required this.semanticLabel,
     required this.tooltip,
     required this.onPressed,
-    this.foreground,
-    this.isLoading = false,
-    this.width = 48,
     super.key,
   });
 
@@ -705,9 +671,6 @@ final class _ToolbarAssetAction extends StatefulWidget {
   final String semanticLabel;
   final String tooltip;
   final VoidCallback? onPressed;
-  final Widget? foreground;
-  final bool isLoading;
-  final double width;
 
   @override
   State<_ToolbarAssetAction> createState() => _ToolbarAssetActionState();
@@ -733,7 +696,7 @@ final class _ToolbarAssetActionState extends State<_ToolbarAssetAction> {
         onTap: widget.onPressed,
         excludeSemantics: true,
         child: SizedBox(
-          width: widget.width,
+          width: 48,
           height: 48,
           child: Material(
             color: Colors.transparent,
@@ -758,29 +721,14 @@ final class _ToolbarAssetActionState extends State<_ToolbarAssetAction> {
                   curve: Curves.easeOut,
                   scale: emphasized ? 1.06 : 1,
                   child: Opacity(
-                    opacity: widget.isLoading || enabled ? 1 : .45,
+                    opacity: enabled ? 1 : .45,
                     child: SizedBox(
-                      width: widget.width - 8,
+                      width: 40,
                       height: 40,
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Image.asset(
-                            widget.assetPath,
-                            fit: BoxFit.contain,
-                            excludeFromSemantics: true,
-                          ),
-                          if (widget.isLoading)
-                            const SizedBox.square(
-                              dimension: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                color: AppColors.canvasInk,
-                              ),
-                            )
-                          else if (widget.foreground != null)
-                            widget.foreground!,
-                        ],
+                      child: Image.asset(
+                        widget.assetPath,
+                        fit: BoxFit.contain,
+                        excludeFromSemantics: true,
                       ),
                     ),
                   ),

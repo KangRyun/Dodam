@@ -31,6 +31,7 @@ import '../../../drawing/presentation/models/drawing_stroke.dart';
 import '../../../drawing/presentation/models/drawing_canvas_action.dart';
 import '../../../drawing/presentation/models/drawing_tool_state.dart';
 import '../../../drawing/presentation/widgets/drawing_color_palette.dart';
+import '../../../drawing/presentation/widgets/drawing_complete_cta.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas_viewport.dart';
 import '../../../drawing/presentation/widgets/drawing_crayon_frame.dart';
 import '../../../drawing/presentation/widgets/drawing_cursor_overlay.dart';
@@ -2339,6 +2340,27 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
   }
 
+  /// 다 그렸다고 알리는 오른쪽 아래 버튼이다.
+  ///
+  /// 질문 말풍선도 같은 자리에 뜬다. 겹치면 이 버튼이 답변·녹음 버튼을 덮으므로
+  /// 말풍선이 보이는 동안에는 만들지 않는다. 질문에 답하는 동안에는 캔버스가
+  /// 잠겨 그림도 더 그릴 수 없어, 지금 완료할 이유도 없다.
+  Widget? _buildCompleteCta(BuildContext context) {
+    final questionBubbleVisible =
+        _questionDisplayController.isVisible &&
+        _activePointer == null &&
+        (_canvasLocked || _draftRestoreController.canDraw);
+    if (questionBubbleVisible) return null;
+    return DrawingCompleteCta(
+      enabled: !_canvasLocked && _activeStroke == null && _hasDrawingContent,
+      isCompleting: _isCompleting,
+      compact:
+          _deviceClassFor(MediaQuery.sizeOf(context)) !=
+          DrawingCanvasDeviceClass.tablet,
+      onPressed: () => unawaited(_confirmAndComplete()),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => PopScope(
     canPop: false,
@@ -2347,6 +2369,9 @@ class _DrawingScreenState extends State<DrawingScreen>
     },
     child: Scaffold(
       backgroundColor: AppColors.canvasBackdrop,
+      // 다 그렸다고 알리는 버튼은 Scaffold 자리를 쓴다. 직접 Stack 아래쪽에
+      // 두면 저장 실패 SnackBar 가 그대로 버튼을 덮어 다시 누를 수 없다.
+      floatingActionButton: _buildCompleteCta(context),
       body: Stack(
         children: [
           // 크레용 툴바가 화면 맨 위에 오므로 상태 표시줄 아래로 내려야 한다.
@@ -2536,12 +2561,6 @@ class _DrawingScreenState extends State<DrawingScreen>
                   onBack: () => unawaited(_stopTtsAndPop()),
                   canUndo: _activeStroke == null && _documentController.canUndo,
                   canRedo: _activeStroke == null && _documentController.canRedo,
-                  canComplete:
-                      !_canvasLocked &&
-                      !_isCompleting &&
-                      _activeStroke == null &&
-                      _hasDrawingContent,
-                  isCompleting: _isCompleting,
                   saveStatus: _syncCoordinator.saveStatus,
                   onUndo: _undoLastStroke,
                   onRedo: _redoLastStroke,
@@ -2552,7 +2571,6 @@ class _DrawingScreenState extends State<DrawingScreen>
                   onWidthChanged: _setThickness,
                   onOpenPalette: () =>
                       unawaited(_openColorPalette(deviceClass)),
-                  onComplete: () => unawaited(_confirmAndComplete()),
                 );
                 final frameInset = switch (deviceClass) {
                   DrawingCanvasDeviceClass.mobilePortrait => AppSpacing.sm,
