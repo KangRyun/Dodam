@@ -1075,6 +1075,35 @@ Q28_STOP_CONFIRMED_BY_VOICE = QuestionCase(
 )
 
 
+Q29_HTP_OPENING_BACKGROUND_ONLY = QuestionCase(
+    id="Q29_htp_opening_background_only",
+    title="HTP 집 · 첫마디인데 배경만 탐지됨",
+    why="집을 그렸는데 배경 나무만 잡혔을 때, 첫마디가 나무로 새지 않고 주제에서 출발하는가.",
+    request=QuestionRequest(
+        conversation_id=9029,
+        drawing_session_id=8029,
+        child_age=7,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=0,  # 이 값과 빈 recent_messages가 '첫마디' 신호다
+        max_question_count=5,
+        # 959 재현 조건 — 주제 객체가 하나도 없고 배경만 잡힌 상태. 폴백이 이 나무를
+        # 대상으로 삼으면 TARGET_FIRST가 걸려 첫마디가 통째로 나무 질문이 됐다.
+        detected_objects=[_obj("SCENERY_TREE", "(배경) 나무", 0.62)],
+        drawing_description="종이 왼쪽에 지붕이 있는 큰 건물이 있고, 오른쪽 끝에 작은 나무가 있어요.",
+        recent_messages=[],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="HTP",
+        drawing_subject="HOUSE",
+    ),
+    meta={
+        "off_subject_terms": ["나무", "사람"],
+        "forbid_asking_what_was_drawn": True,
+        "forbid_reason_question": True,
+    },
+)
+
+
 QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q1_FIRST_HTP,
     Q2_FIRST_DIARY,
@@ -1102,6 +1131,7 @@ QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q26_STOP_HTP,
     Q27_STOP_CHIP_FOLLOW_UP,
     Q28_STOP_CONFIRMED_BY_VOICE,
+    Q29_HTP_OPENING_BACKGROUND_ONLY,
 )
 
 

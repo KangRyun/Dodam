@@ -722,9 +722,55 @@ class SubjectPromptAndTargetTest(unittest.TestCase):
 
     def test_falls_back_to_background_when_subject_exhausted(self):
         # 주제(집) 객체가 없으면 배경도 후보로 삼는다(결정 B: 주제 소진 후 배경).
+        # 첫마디가 지난 뒤의 이야기다 — 959가 첫 질문에만 이 폴백을 막는다.
+        req = self._htp(
+            detected_objects=[_detected("SCENERY_TREE", "(배경) 나무", 0.5)],
+            current_question_count=1,
+            recent_messages=[
+                RecentMessage(sender_type="AI", message_type="QUESTION", text="집을 그렸구나!"),
+                RecentMessage(sender_type="CHILD", message_type="ANSWER", text="응"),
+            ],
+        )
+        target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        self.assertEqual(target.object_code, "SCENERY_TREE")
+
+    def test_opening_does_not_fall_back_outside_the_subject(self):
+        """이 주제의 첫마디는 주제 밖 객체를 대상으로 삼지 않는다(S15P11B209-959).
+
+        집을 그렸는데 탐지가 배경 나무만 잡은 경우다. 폴백이 그 나무를 대상으로 삼으면
+        TARGET_FIRST("이 하나에 대해서만")가 걸려 첫마디가 통째로 나무 질문이 된다 —
+        아이는 방금 집을 그렸는데 도담이의 첫마디가 나무다. 대상을 비워 주제 전체를
+        여는 질문(HTP_WHOLE)으로 보낸다.
+        """
         req = self._htp(
             detected_objects=[_detected("SCENERY_TREE", "(배경) 나무", 0.5)]
         )
+        self.assertTrue(question_service._is_htp_opening(req))
+        self.assertIsNone(
+            question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        )
+
+    def test_opening_still_prefers_subject_object_when_present(self):
+        """주제 객체가 있으면 첫마디에서도 그것을 고른다 — 811의 세부 질문을 죽이지 않는다."""
+        req = self._htp(
+            detected_objects=[
+                _detected("HOUSE_WINDOW", "창문", 0.7),
+                _detected("SCENERY_TREE", "(배경) 나무", 0.95),
+            ]
+        )
+        target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
+        self.assertEqual(target.object_code, "HOUSE_WINDOW")
+
+    def test_opening_requires_no_child_utterance_yet(self):
+        """아이가 먼저 말한 턴은 첫마디가 아니다 — 프롬프트 갈래가 발화 유무로 갈린다."""
+        req = self._htp(
+            detected_objects=[_detected("SCENERY_TREE", "(배경) 나무", 0.5)],
+            recent_messages=[
+                RecentMessage(sender_type="CHILD", message_type="ANSWER", text="이거 봐")
+            ],
+        )
+        self.assertFalse(question_service._is_htp_opening(req))
+        # 첫마디가 아니므로 713의 폴백이 그대로 산다.
         target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
         self.assertEqual(target.object_code, "SCENERY_TREE")
 
@@ -867,6 +913,40 @@ class SubjectPinningScopeTest(unittest.TestCase):
         self.assertIn('"이건 집 아니야"', block)
         self.assertIn("우기지 마", block)
         self.assertIn("나무·사람 이야기로 넘어가지 마", block)
+
+    def test_opening_block_says_the_subject_is_already_known(self):
+        """첫마디 프롬프트는 '무엇을 그렸는지 모르는 척 묻지 마'를 싣는다(S15P11B209-959)."""
+        block = question_service._activity_block(self._htp(), None)
+        self.assertIn("첫마디", block)
+        self.assertIn("모르는 척 묻지 마", block)
+        # 주제 뱅크 방향 선택이 오프닝에서는 조건부가 아니라 필수다.
+        self.assertIn("반드시 그중 지금 그림에 맞는 방향을 하나 골라", block)
+
+    def test_opening_block_is_absent_once_the_talk_has_started(self):
+        """첫마디가 지나면 오프닝 지시를 싣지 않는다 — '아이 말을 따라가'와 부딪친다."""
+        req = self._htp(
+            current_question_count=1,
+            recent_messages=[
+                RecentMessage(
+                    sender_type="AI", message_type="QUESTION", text="집을 그렸구나!"
+                ),
+                RecentMessage(sender_type="CHILD", message_type="ANSWER", text="응"),
+            ],
+        )
+        block = question_service._activity_block(req, None)
+        self.assertNotIn("첫마디", block)
+        # 주제 고정 자체는 계속 살아 있다.
+        self.assertIn("그리는 순서야", block)
+
+    def test_opening_block_carries_no_ready_made_question(self):
+        """문장을 박아두지 않는다 — 완성문 예시는 모델이 그대로 복사한다(808 F-1)."""
+        block = question_service._activity_block(self._htp(), None)
+        # 금지 예시로 든 문장 외에 물음표로 끝나는 완성 질문이 지시로 들어 있으면 안 된다.
+        opening = block.split("첫마디", 1)[1]
+        for line in opening.splitlines():
+            if "묻지 마" in line or "물으면" in line:
+                continue  # 금지 예시는 '쓰지 말라'는 맥락이라 앵커가 아니다
+            self.assertNotIn("?", line, f"완성 질문이 지시에 섞였다: {line}")
 
     def test_no_contradiction_with_common_child_first_rule(self):
         """조립된 프롬프트 안에서 '아이 말 우선'과 '주제 고정'이 함께 성립한다."""
