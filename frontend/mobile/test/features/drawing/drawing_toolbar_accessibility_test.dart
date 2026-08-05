@@ -93,11 +93,13 @@ void main() {
       (tester) async {
         await _pumpToolbar(tester, quickColors: quickColors);
 
+        // 팔레트는 색을 고르는 버튼이라 도구 줄 끝, 색 견본 앞에 둔다
+        // (S15P11B209-807).
         final ordered = <Finder>[
+          find.byKey(const ValueKey('drawing-palette-button')),
           find.byKey(const ValueKey('drawing-quick-colors')),
           find.byKey(const ValueKey('drawing-thickness-slider')),
           find.byKey(const ValueKey('drawing-thickness-preview')),
-          find.byKey(const ValueKey('drawing-palette-button')),
         ];
         for (var index = 0; index < ordered.length - 1; index++) {
           final current = tester.getRect(ordered[index]);
@@ -170,7 +172,8 @@ void main() {
           find.bySemanticsLabel('빠른 색상 8'),
         );
         expect(selectedSemantics.flagsCollection.isSelected, Tristate.isTrue);
-        expect(tester.getSize(ordered[2]), const Size(48, 48)); // 굵기 미리보기 원은 다른 툴바 버튼과 같은 상자를 쓴다.
+        // 굵기 미리보기 원은 다른 툴바 버튼과 같은 상자를 쓴다.
+        expect(tester.getSize(ordered[3]), const Size(48, 48));
       },
     );
 
@@ -551,7 +554,7 @@ void main() {
   });
 
   testWidgets(
-    'DrawingCrayonFrame uses graphite nine-slice art over white document and warm exterior',
+    'DrawingCrayonFrame draws its own crayon border over a white document',
     (tester) async {
       await tester.pumpWidget(
         const MaterialApp(
@@ -574,28 +577,30 @@ void main() {
       final document = tester.widget<ColoredBox>(
         find.byKey(const ValueKey('drawing-crayon-document')),
       );
-      final frame = tester.widget<Image>(
-        find.byKey(const ValueKey('drawing-crayon-frame-nine-slice')),
-      );
       final spiralOverlay = tester.widget<IgnorePointer>(
-        find.byKey(const ValueKey('drawing-crayon-frame-spirals')),
+        find
+            .ancestor(
+              of: find.byKey(const ValueKey('drawing-crayon-frame-spirals')),
+              matching: find.byType(IgnorePointer),
+            )
+            .first,
       );
 
       // 테두리 밖은 화면 배경이 그대로 보여야 한다.
       expect(exterior.color, Colors.transparent);
       expect(document.color, Colors.white);
+      // 테두리는 그림 파일을 늘여 붙이지 않고 직접 그린다(S15P11B209-806).
+      // 파일을 늘이면 종이 모서리가 선 밖으로 삐져나오는 자리가 생긴다.
       expect(
-        (frame.image as AssetImage).assetName,
-        'assets/canvas/frame/canvas_frame_mobile.png',
+        find.byKey(const ValueKey('drawing-crayon-frame-border')),
+        findsOneWidget,
       );
-      expect(frame.centerSlice, isNotNull);
-      expect(frame.fit, BoxFit.fill);
       expect(spiralOverlay.ignoring, isTrue);
       expect(
         find.descendant(
-          of: find.byKey(const ValueKey('drawing-crayon-frame-spirals')),
-          matching: find.image(
-            const AssetImage('assets/canvas/frame/spiral_mobile.png'),
+          of: find.byKey(const ValueKey('drawing-crayon-frame-exterior')),
+          matching: find.byKey(
+            const ValueKey('drawing-crayon-frame-spirals'),
           ),
         ),
         findsWidgets,

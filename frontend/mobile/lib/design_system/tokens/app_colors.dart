@@ -79,6 +79,15 @@ abstract final class AppColors {
   static const Color canvasSwatchPurple = Color(0xFF7650AD);
   static const Color canvasSwatchCharcoal = Color(0xFF3A3832);
 
+  /// 스케치북·툴바 테두리를 그리는 크레용 색이다.
+  static const Color canvasFrameInk = Color(0xFF67655B);
+
+  /// 스케치북 위쪽 제본 띠 색이다. 스프링이 이 띠를 물고 있다.
+  static const Color canvasBindingBand = Color(0xFFF4C64C);
+
+  /// 제본 띠를 감는 스프링 철사 색이다.
+  static const Color canvasBindingWire = Color(0xFFFDF8EC);
+
   /// 캔버스 화면의 바깥 배경과 스케치북이 놓이는 면이다.
   ///
   /// 배경은 앱 포인트 옐로를 옅게 푼 톤이다. 흰 종이와 대비를 두면서도 아이

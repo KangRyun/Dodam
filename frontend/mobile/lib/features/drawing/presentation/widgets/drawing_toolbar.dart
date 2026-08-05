@@ -65,10 +65,15 @@ final class DrawingToolbar extends StatelessWidget {
               height: 56,
               child: _ToolbarChrome(
                 deviceClass: deviceClass,
-                child: Row(
-                  key: const ValueKey('drawing-toolbar-primary-row'),
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: primaryActions.take(6).toList(growable: false),
+                // 좁은 화면에서는 도구가 한 줄에 다 안 들어간다. 넘치면 잘리는
+                // 대신 옆으로 밀어 볼 수 있게 한다.
+                child: SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: Row(
+                    key: const ValueKey('drawing-toolbar-primary-row'),
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: primaryActions.take(7).toList(growable: false),
+                  ),
                 ),
               ),
             ),
@@ -78,7 +83,7 @@ final class DrawingToolbar extends StatelessWidget {
                 deviceClass: deviceClass,
                 child: Row(
                   children: [
-                    ...primaryActions.skip(6),
+                    ...primaryActions.skip(7),
                     Expanded(child: _secondaryControls()),
                     _ToolbarSaveStatus(
                       status: saveStatus,
@@ -187,6 +192,7 @@ final class DrawingToolbar extends StatelessWidget {
       artwork: CanvasToolArtwork.fill,
       label: '채우기',
     ),
+    _paletteButton(),
   ];
 
   Widget _instrumentButton({
@@ -329,19 +335,21 @@ final class DrawingToolbar extends StatelessWidget {
           ),
         ),
         const SizedBox(width: 4),
-        CompositedTransformTarget(
-          link: paletteAnchorLink,
-          child: DrawingToolButton(
-            key: const ValueKey('drawing-palette-button'),
-            artwork: CanvasToolArtwork.palette,
-            pointColor: toolState.color,
-            selected: false,
-            semanticLabel: '색상 팔레트 버튼',
-            tooltip: '색상 팔레트',
-            onPressed: onOpenPalette,
-          ),
-        ),
       ],
+    ),
+  );
+
+  /// 팔레트는 색을 고르는 버튼이라 도구 줄 끝, 색 견본 바로 앞에 둔다.
+  Widget _paletteButton() => CompositedTransformTarget(
+    link: paletteAnchorLink,
+    child: DrawingToolButton(
+      key: const ValueKey('drawing-palette-button'),
+      artwork: CanvasToolArtwork.palette,
+      pointColor: toolState.color,
+      selected: false,
+      semanticLabel: '색상 팔레트 버튼',
+      tooltip: '색상 팔레트',
+      onPressed: onOpenPalette,
     ),
   );
 
