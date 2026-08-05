@@ -50,9 +50,9 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("36");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("37");
     assertThat(tableExists("flyway_schema_history")).isTrue();
-    assertThat(tableCount()).isEqualTo(76);
+    assertThat(tableCount()).isEqualTo(81);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
     assertThat(tableExists("child_profile_image_files")).isTrue();
@@ -82,6 +82,32 @@ class DatabaseMigrationIntegrationTest {
     assertThat(
             checkConstraintContains(
                 "user_guardian_pins", "ck_user_guardian_pins_counters", "failed_attempt_count"))
+        .isTrue();
+    // V37 — 경향 해석 저장 구조(S15P11B209-900). 기존 report_observed_features 를 재사용하지 않기로 한
+    // 결정(계약 §4-2)이 별도 테이블로 남아 있는지, 두 실패(미공개/강등)를 구분해 담는 상태값이 있는지 확인한다.
+    assertThat(tableExists("report_public_interpretations")).isTrue();
+    assertThat(tableExists("report_evidence_items")).isTrue();
+    assertThat(tableExists("report_evidence_derivations")).isTrue();
+    assertThat(tableExists("report_interpretation_evidences")).isTrue();
+    assertThat(tableExists("report_parent_guides")).isTrue();
+    for (String state : new String[] {"PUBLISHED", "WITHHELD", "EXPERT_ONLY"}) {
+      assertThat(
+              checkConstraintContains(
+                  "report_public_interpretations", "ck_report_public_interpretations_state", state))
+          .as("공개 판정 결과에 %s가 있어야 한다", state)
+          .isTrue();
+    }
+    // 원본 참조는 종류와 식별자가 함께 있어야 한다 — 한쪽만 있으면 해석할 수 없는 참조가 된다.
+    assertThat(
+            checkConstraintContains(
+                "report_evidence_items",
+                "ck_report_evidence_items_source_ref_pair",
+                "source_ref_kind"))
+        .isTrue();
+    // 카드↔근거를 FK 로 묶어 존재하지 않는 근거 참조를 DB 에서 막는다.
+    assertThat(
+            indexExists(
+                "report_interpretation_evidences", "uk_report_interpretation_evidences_pair", true))
         .isTrue();
     assertThat(columnExists("expert_profiles", "target_age_min")).isTrue();
     assertThat(columnExists("expert_profiles", "target_age_max")).isTrue();
