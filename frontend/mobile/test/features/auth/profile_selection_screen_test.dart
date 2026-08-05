@@ -211,7 +211,8 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('edit-child-profiles')));
     await tester.pumpAndSettle();
     expect(find.text('수정하거나 삭제할 아이를 선택해 주세요.'), findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('child-profile-3')));
+    // 편집 모드의 카드 탭은 삭제 대상 고르기라, 개별 편집은 카드의 연필로 간다.
+    await tester.tap(find.byKey(const ValueKey('child-profile-edit-3')));
     expect(editedChildId, 3);
 
     await tester.tap(find.byKey(const ValueKey('profile-selection-settings')));
@@ -549,7 +550,236 @@ void main() {
       isTrue,
     );
   });
+
+  group('다중 선택 삭제', () {
+    testWidgets('길게 누르면 편집 모드로 들어가며 그 아이가 선택된다', (tester) async {
+      final controller = await _loadedController([
+        _child(id: 3),
+        _child(id: 7),
+      ]);
+      addTearDown(controller.dispose);
+      var startedChildId = 0;
+      await _pumpScreen(
+        tester,
+        controller: controller,
+        onEditChild: (_, _) {},
+        onChildSelected: (_, child) => startedChildId = child.childId,
+      );
+
+      await tester.longPress(find.byKey(const ValueKey('child-profile-3')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('수정하거나 삭제할 아이를 선택해 주세요.'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('child-profile-delete-selected-3')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('child-profile-delete-selected-7')),
+        findsNothing,
+      );
+      expect(find.text('선택한 1명 삭제'), findsOneWidget);
+      // 길게 누르기가 활동 시작을 겸하면 안 된다.
+      expect(startedChildId, 0);
+    });
+
+    testWidgets('편집 모드 탭은 선택을 토글하고 삭제 버튼 활성 상태를 바꾼다', (tester) async {
+      final controller = await _loadedController([
+        _child(id: 3),
+        _child(id: 7),
+      ]);
+      addTearDown(controller.dispose);
+      await _pumpScreen(tester, controller: controller, onEditChild: (_, _) {});
+
+      await tester.longPress(find.byKey(const ValueKey('child-profile-3')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('child-profile-7')));
+      await tester.pump();
+
+      expect(find.text('선택한 2명 삭제'), findsOneWidget);
+      expect(_deleteButton(tester).onPressed, isNotNull);
+
+      // 같은 카드를 다시 누르면 선택이 풀린다.
+      await tester.tap(find.byKey(const ValueKey('child-profile-3')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('child-profile-7')));
+      await tester.pump();
+
+      expect(find.text('삭제할 아이를 선택해 주세요'), findsOneWidget);
+      expect(_deleteButton(tester).onPressed, isNull);
+    });
+
+    testWidgets('삭제를 확인하면 고른 수만큼 지우고 목록을 갱신한다', (tester) async {
+      final repository = _FakeChildRepository(
+        children: [_child(id: 3), _child(id: 7), _child(id: 11)],
+      );
+      final controller = GuardianChildController(repository);
+      addTearDown(controller.dispose);
+      await controller.loadChildren();
+      await _pumpScreen(tester, controller: controller, onEditChild: (_, _) {});
+
+      await tester.longPress(find.byKey(const ValueKey('child-profile-3')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('child-profile-7')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('delete-selected-profiles')));
+      await tester.pumpAndSettle();
+
+      expect(
+        find.byKey(const ValueKey('delete-profiles-dialog')),
+        findsOneWidget,
+      );
+      expect(find.textContaining('선택한 2명의 프로필을 삭제할까요?'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('delete-profiles-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(repository.deletedChildIds, [3, 7]);
+      expect(controller.children.map((child) => child.childId), [11]);
+      expect(find.byKey(const ValueKey('child-profile-3')), findsNothing);
+      expect(find.byKey(const ValueKey('child-profile-7')), findsNothing);
+      expect(find.byKey(const ValueKey('child-profile-11')), findsOneWidget);
+    });
+
+    testWidgets('한 명만 고르면 기존 연쇄 삭제 경고 문구를 그대로 쓴다', (tester) async {
+      final controller = await _loadedController([
+        _child(id: 3, nickname: '민재'),
+      ]);
+      addTearDown(controller.dispose);
+      await _pumpScreen(tester, controller: controller, onEditChild: (_, _) {});
+
+      await tester.longPress(find.byKey(const ValueKey('child-profile-3')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('delete-selected-profiles')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('아이 프로필을 삭제할까요?'), findsOneWidget);
+      expect(
+        find.text('민재의 그림과 대화, 활동 기록도 함께 삭제되며 되돌릴 수 없어요.'),
+        findsOneWidget,
+      );
+    });
+
+    testWidgets('확인을 취소하면 아무것도 지우지 않고 선택을 유지한다', (tester) async {
+      final repository = _FakeChildRepository(
+        children: [_child(id: 3), _child(id: 7)],
+      );
+      final controller = GuardianChildController(repository);
+      addTearDown(controller.dispose);
+      await controller.loadChildren();
+      await _pumpScreen(tester, controller: controller, onEditChild: (_, _) {});
+
+      await tester.longPress(find.byKey(const ValueKey('child-profile-3')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('delete-selected-profiles')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('취소'));
+      await tester.pumpAndSettle();
+
+      expect(repository.deletedChildIds, isEmpty);
+      expect(find.byKey(const ValueKey('child-profile-3')), findsOneWidget);
+      expect(find.text('선택한 1명 삭제'), findsOneWidget);
+    });
+
+    testWidgets('일부만 실패하면 성공분만 사라지고 실패 수를 알린다', (tester) async {
+      final repository = _FakeChildRepository(
+        children: [_child(id: 3), _child(id: 7)],
+      )..deleteFailures = {7};
+      final controller = GuardianChildController(repository);
+      addTearDown(controller.dispose);
+      await controller.loadChildren();
+      await _pumpScreen(tester, controller: controller, onEditChild: (_, _) {});
+
+      await tester.longPress(find.byKey(const ValueKey('child-profile-3')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('child-profile-7')));
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('delete-selected-profiles')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('delete-profiles-confirm')));
+      await tester.pumpAndSettle();
+
+      expect(repository.deletedChildIds, [3, 7]);
+      expect(find.byKey(const ValueKey('child-profile-3')), findsNothing);
+      expect(find.byKey(const ValueKey('child-profile-7')), findsOneWidget);
+      expect(find.text('1명의 프로필을 삭제하지 못했어요. 다시 시도해 주세요.'), findsOneWidget);
+      // 실패한 아이는 골라진 채로 남아 바로 재시도할 수 있다.
+      expect(find.text('선택한 1명 삭제'), findsOneWidget);
+    });
+
+    testWidgets('편집을 끝내면 모드와 선택이 함께 풀린다', (tester) async {
+      final controller = await _loadedController([_child(id: 3)]);
+      addTearDown(controller.dispose);
+      var startedChildId = 0;
+      await _pumpScreen(
+        tester,
+        controller: controller,
+        onEditChild: (_, _) {},
+        onChildSelected: (_, child) => startedChildId = child.childId,
+      );
+
+      await tester.longPress(find.byKey(const ValueKey('child-profile-3')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const ValueKey('finish-profile-editing')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('수정하거나 삭제할 아이를 선택해 주세요.'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('child-profile-delete-selected-3')),
+        findsNothing,
+      );
+      // 편집이 끝났으니 탭은 다시 활동 시작이다.
+      await tester.tap(find.byKey(const ValueKey('child-profile-3')));
+      expect(startedChildId, 3);
+    });
+
+    testWidgets('편집 배선이 없으면 길게 눌러도 편집 모드로 가지 않는다', (tester) async {
+      final controller = await _loadedController([_child(id: 3)]);
+      addTearDown(controller.dispose);
+      await _pumpScreen(tester, controller: controller);
+
+      await tester.longPress(find.byKey(const ValueKey('child-profile-3')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('수정하거나 삭제할 아이를 선택해 주세요.'), findsNothing);
+      expect(
+        find.byKey(const ValueKey('delete-selected-profiles')),
+        findsNothing,
+      );
+    });
+
+    testWidgets('좁은 폭과 큰 글자에서도 편집 액션 줄이 overflow하지 않는다', (tester) async {
+      final controller = await _loadedController([
+        _child(id: 3),
+        _child(id: 7),
+      ]);
+      addTearDown(controller.dispose);
+      await _pumpScreen(
+        tester,
+        controller: controller,
+        onEditChild: (_, _) {},
+        size: const Size(390, 844),
+        textScale: 2,
+      );
+
+      await tester.longPress(find.byKey(const ValueKey('child-profile-3')));
+      await tester.pumpAndSettle();
+
+      expect(tester.takeException(), isNull);
+      expect(
+        find.byKey(const ValueKey('delete-selected-profiles')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('finish-profile-editing')),
+        findsOneWidget,
+      );
+    });
+  });
 }
+
+FilledButton _deleteButton(WidgetTester tester) => tester.widget<FilledButton>(
+  find.byKey(const ValueKey('delete-selected-profiles')),
+);
 
 Future<void> _pumpScreen(
   WidgetTester tester, {
@@ -631,6 +861,12 @@ final class _FakeChildRepository implements ChildRepository {
   Completer<List<ChildSummaryDto>>? pending;
   int getChildrenCalls = 0;
 
+  /// 삭제가 요청된 순서. 호출 횟수와 대상을 함께 본다.
+  final List<int> deletedChildIds = [];
+
+  /// 서버 삭제가 실패하는 아이들. 부분 실패를 재현한다.
+  Set<int> deleteFailures = <int>{};
+
   @override
   Future<List<ChildSummaryDto>> getChildren() async {
     getChildrenCalls += 1;
@@ -644,7 +880,15 @@ final class _FakeChildRepository implements ChildRepository {
       throw UnimplementedError();
 
   @override
-  Future<void> deleteChild(int childId) => throw UnimplementedError();
+  Future<void> deleteChild(int childId) async {
+    deletedChildIds.add(childId);
+    if (deleteFailures.contains(childId)) {
+      throw StateError('아이 프로필 삭제 실패');
+    }
+    children = children
+        .where((child) => child.childId != childId)
+        .toList(growable: false);
+  }
 
   @override
   Future<ChildDetailDto> getChild(int childId) => throw UnimplementedError();
