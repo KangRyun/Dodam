@@ -1435,9 +1435,13 @@ class _DrawingScreenState extends State<DrawingScreen>
         );
       }
     } else if (uploadController?.status ==
-            VoiceAnswerUploadStatus.consentRequired &&
-        kDebugMode) {
-      debugPrint('[VOICE_UPLOAD] rejected reason=VOICE_CONSENT_REQUIRED');
+        VoiceAnswerUploadStatus.consentRequired) {
+      // 음성 답변이 거절됐으면 아이에게 남은 수단은 선택지뿐이다. 여기서 띄우지 않으면
+      // "골라서 답해도 돼" 안내만 보이고 고를 것이 없다.
+      _questionSelectionController.revealOptions();
+      if (kDebugMode) {
+        debugPrint('[VOICE_UPLOAD] rejected reason=VOICE_CONSENT_REQUIRED');
+      }
     }
     if (mounted) setState(() {});
   }
@@ -1451,7 +1455,25 @@ class _DrawingScreenState extends State<DrawingScreen>
       _lastFollowUpAnswerMessageId = answerMessageId;
       unawaited(_requestFollowingQuestion(answerMessageId));
     }
+    // STT가 실패(무음·저신뢰)했거나 지연되면 아이는 답을 보내지 못한 상태다. 질문을 다시
+    // 보여주고 선택지를 띄워 대화를 이어가게 한다 — 그러지 않으면 화면이 멈춘 것처럼 된다.
+    if (controller?.status == SttResultStatus.failure ||
+        controller?.status == SttResultStatus.delayed) {
+      _revealOptionsForPendingQuestion();
+    }
     if (mounted) setState(() {});
+  }
+
+  /// 답변 수단을 잃은 질문에 선택지를 다시 띄운다.
+  ///
+  /// 업로드 성공 시 [_questionDisplayController]를 dismiss했으므로 다시 보이게 해야 한다.
+  /// 같은 messageId는 [AiQuestionDisplayController.receive]가 두 번 받지 않으니 표시
+  /// 플래그만 되살린다.
+  void _revealOptionsForPendingQuestion() {
+    final question = _questionDisplayController.visibleQuestion;
+    if (question == null || question.options.isEmpty) return;
+    _questionDisplayController.restore();
+    _questionSelectionController.revealOptions();
   }
 
   void _retryVoiceAnswerUpload() {
