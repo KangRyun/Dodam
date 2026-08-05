@@ -6,6 +6,7 @@ import com.ssafy.b209.drawing.document.StrokePointDocument;
 import com.ssafy.b209.drawing.repository.StrokeBatchDocumentRepository;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Objects;
@@ -28,9 +29,22 @@ import org.springframework.stereotype.Service;
  * <p><b>정렬 기준은 {@code batchSeq}다.</b> 같은 이유로 수신 순서를 믿을 수 없다. 배치 순번은 클라이언트가 그린 순서대로 증가시키므로 이것이 유일한
  * 재생 순서다.
  *
- * <p><b>한계 — {@code pauseCount}는 추정값이며 상한도 하한도 아니다.</b> 한 배치 <i>안</i>의 획 사이 간격을 잴 수 없어 {@link
- * #PAUSE_THRESHOLD_MS} 규칙을 배치 경계에서만 적용하는데, 경계 시각인 {@code clientCreatedAt}은 "획이 끝난 시각"이 아니라 "flush가
- * 일어난 시각"이다. 여기서 오차가 세 방향으로 생긴다 (S15P11B209-772 QA 실측).
+ * <p><b>같은 행동을 두 번 세지 않는다 — 명시 이벤트가 있으면 그것만 센다.</b> 앱은 도구·색 변경, 멈춤, 지우기를 <i>두 가지 방식</i>으로 알릴 수 있다.
+ * ① {@code TOOL_CHANGE}·{@code COLOR_CHANGE}·{@code PAUSE}·{@code ERASE} 같은 <b>명시 이벤트</b>를 보내거나, ②
+ * 아무 이벤트도 없이 {@code STROKE} 의 속성 변화·배치 경계 시각으로 <b>드러내거나</b>. 두 방식을 모두 세면 한 번의 행동이 두 번 잡혀 수치가 그대로 두
+ * 배가 된다.
+ *
+ * <p>그래서 집계 전에 세션 전체를 한 번 훑어 <b>어떤 명시 이벤트가 실제로 왔는지</b>를 먼저 판정하고, 온 종류는 명시 이벤트만 세고 오지 않은 종류만 추론으로
+ * 폴백한다. 판정은 배치 단위가 아니라 <b>세션 단위</b>다 — 앱은 세션 도중에 알림 방식을 바꾸지 않으므로, 세션 앞부분은 추론하고 뒷부분은 명시로 세면 같은 세션
+ * 안에서 기준이 갈린다.
+ *
+ * <p>이 폴백이 필요한 이유는 <b>구버전 앱과 신버전 앱이 한동안 함께 붙어 있기</b> 때문이다. 명시 이벤트를 보내지 않는 구버전 세션에서 추론을 없애면 그 세션의
+ * 수치가 통째로 0이 된다.
+ *
+ * <p><b>한계 — 추론으로 얻은 {@code pauseCount}는 추정값이며 상한도 하한도 아니다.</b> 앱이 {@code PAUSE} 를 보내면 이 한계는 사라지고
+ * 아래 오차도 적용되지 않는다. 한 배치 <i>안</i>의 획 사이 간격을 잴 수 없어 {@link #PAUSE_THRESHOLD_MS} 규칙을 배치 경계에서만 적용하는데,
+ * 경계 시각인 {@code clientCreatedAt}은 "획이 끝난 시각"이 아니라 "flush가 일어난 시각"이다. 여기서 오차가 세 방향으로 생긴다
+ * (S15P11B209-772 QA 실측).
  *
  * <ul>
  *   <li><b>과다</b> — 획이 flush 주기를 가로지르면 미완결이라 그 배치에 실리지 못하고 다음 배치로 이월된다. 그러면 획의 앞뒤 flush 대기 시간이 유휴로
@@ -40,8 +54,11 @@ import org.springframework.stereotype.Service;
  *   <li><b>접힘</b> — 한 경계 구간 안에 멈춤이 여러 번 있어도 1회로 접힌다
  * </ul>
  *
- * <p>정확히 세려면 FE가 {@code PAUSE} 이벤트를 보내거나 STROKE 이벤트에 절대 시각을 실어야 하며, 둘 다 계약 변경 사안이라 여기서 다루지 않는다. 값을
- * 쓰는 쪽은 "대략 이 정도로 멈췄다"는 지표로만 취급해야 한다.
+ * <p>추론값을 쓰는 쪽은 "대략 이 정도로 멈췄다"는 지표로만 취급해야 한다.
+ *
+ * <p><b>여기서 세지 않는 이벤트.</b> {@code REDO}·{@code THICKNESS_CHANGE}·{@code CANVAS_CLEAR}·{@code
+ * FILL}·{@code RESUME} 은 읽고 지나간다. {@link StrokeBehaviorSummary} 와 AI 계약({@code BehaviorSummary})에
+ * 담을 자리가 없어서이며, 자리를 만들려면 양쪽 계약을 함께 바꿔야 한다. {@code RESUME} 은 {@code PAUSE} 와 짝이라 따로 세면 멈춤이 두 번 잡힌다.
  */
 @Service
 public class StrokeBehaviorSummaryService {
@@ -91,13 +108,23 @@ public class StrokeBehaviorSummaryService {
   /**
    * 명세 §10.5가 독립 이벤트로 정의한 지우기 코드다.
    *
-   * <p>현재 앱은 이 이벤트를 보내지 않고 지우개 획을 {@code tool=ERASER}인 STROKE로 보낸다. 두 형태를 모두 세어 계약과 실제 전송을 함께
-   * 만족시킨다.
-   *
-   * <p>⚠️ FE가 장차 지우개 획과 {@code ERASE} 이벤트를 <b>함께</b> 보내기 시작하면 같은 행동이 양쪽에서 세어져 {@code eraseCount}가 두
-   * 배가 된다. 그때는 둘 중 한쪽만 세도록 고쳐야 한다.
+   * <p>현재 앱은 이 이벤트를 보내지 않고 지우개 획을 {@code tool=ERASER}인 STROKE로 보낸다. 그래서 이 이벤트가 <b>하나도 없는</b> 세션에서만
+   * 지우개 획을 지우기로 센다. 둘이 함께 오면 명시 이벤트만 센다 — 두 형태를 모두 세면 한 번의 지우기가 두 번 잡힌다.
    */
   private static final String ERASE_EVENT_TYPE = "ERASE";
+
+  /** 앱이 도구를 바꿀 때 보내는 명시 이벤트 코드다. 좌표가 없어 {@code points} 는 빈 목록으로 온다. */
+  private static final String TOOL_CHANGE_EVENT_TYPE = "TOOL_CHANGE";
+
+  /** 앱이 색을 바꿀 때 보내는 명시 이벤트 코드다. 좌표가 없어 {@code points} 는 빈 목록으로 온다. */
+  private static final String COLOR_CHANGE_EVENT_TYPE = "COLOR_CHANGE";
+
+  /**
+   * 앱이 멈춤을 알릴 때 보내는 명시 이벤트 코드다.
+   *
+   * <p>짝이 되는 {@code RESUME} 은 세지 않는다. 멈춤 한 번은 {@code PAUSE} 하나로 이미 세어졌고, 재개까지 세면 같은 멈춤이 두 번 잡힌다.
+   */
+  private static final String PAUSE_EVENT_TYPE = "PAUSE";
 
   /** 앱이 지우개 획에 실어 보내는 도구 코드다. */
   private static final String ERASER_TOOL = "ERASER";
@@ -162,6 +189,10 @@ public class StrokeBehaviorSummaryService {
    * <p>배치가 하나도 없는 세션은 조용히 건너뛴다. 모든 세션이 비면 빈 값을 돌려주고, 호출부는 수치를 {@code null}로 남긴다 — 측정하지 못한 값을 0으로
    * 채우면 "한 번도 멈추지 않았다"는 관찰로 읽힌다.
    *
+   * <p>⚠️ <b>AI 요청에는 이 메서드를 쓰지 마라.</b> 여기서는 빈 세션을 건너뛰므로 결과가 <b>부분 집계일 수 있고</b>, 그 사실이 값에 드러나지 않는다.
+   * 보호자 화면에는 일부라도 보여 주는 편이 낫지만 AI 는 수치를 관찰 사실로 옮겨 적으므로 부분 합이 전체 활동에 대한 서술이 된다. AI 경로는 {@link
+   * #summarizeAllOrNone(List)} 를 쓴다.
+   *
    * @param drawingSessionIds 합칠 그림 활동 세션 식별자 목록이며 {@code null}·빈 목록이면 빈 값
    * @return 합산된 행동 요약, 집계할 배치가 하나도 없으면 빈 값
    */
@@ -169,38 +200,91 @@ public class StrokeBehaviorSummaryService {
     if (drawingSessionIds == null || drawingSessionIds.isEmpty()) {
       return Optional.empty();
     }
-
-    List<StrokeBehaviorSummary> summaries =
-        drawingSessionIds.stream()
-            .filter(Objects::nonNull)
-            .distinct()
+    return merge(
+        distinctSessionIds(drawingSessionIds).stream()
             .map(this::summarize)
             .flatMap(Optional::stream)
-            .toList();
-    if (summaries.isEmpty()) {
+            .toList());
+  }
+
+  /**
+   * 모든 세션을 집계할 수 있을 때만 합산한다 — 한 세션이라도 비면 전체를 빈 값으로 돌려준다 (S15P11B209-837).
+   *
+   * <p><b>{@link #summarizeAll} 과 의도적으로 다르다.</b> 그쪽은 집계되는 세션만 모아 더하고 빈 세션은 건너뛴다. 보호자 리포트의 활동 기록은
+   * 일부라도 보여 주는 편이 낫기 때문이다(S15P11B209-870 — 세션 하나만 쓰면 그리기 시간이 3분의 1로 줄던 문제).
+   *
+   * <p>반면 <b>AI 에 보내는 수치는 그러면 안 된다.</b> HTP 세 단계 중 하나가 사진 업로드(UPLOAD)라 캔버스 과정이 아예 없거나 배치가 유실되면, 두
+   * 단계만 더한 합이 "이 활동 전체의 기록"으로 프롬프트에 실린다. AI 는 그 수치를 <b>관찰 사실로 문장에 옮기므로</b> 부분 집계가 전체 활동에 대한 서술이 된다
+   * — 실제보다 짧게 그렸고 덜 멈췄다는, 아이에 대한 없는 관찰이 만들어진다. 그래서 이 경로는 전부 아니면 전무다. AI 계약({@code BehaviorMetrics}
+   * docstring)이 같은 규칙을 반대편에 적어 두었다.
+   *
+   * <p>빈 값이면 호출부는 {@code behaviorMetrics} 를 {@code null} 로 보내고, AI 는 {@code [형식적 분석]} 블록 자체를 만들지
+   * 않는다. 그것이 "집계하지 못했다"의 올바른 표현이다 — 0으로 채우는 것이 아니다.
+   *
+   * @param drawingSessionIds 합칠 그림 활동 세션 식별자 목록이며 {@code null}·빈 목록이면 빈 값
+   * @return 모든 세션을 집계했을 때의 합산 결과, 한 세션이라도 집계할 배치가 없으면 빈 값
+   */
+  public Optional<StrokeBehaviorSummary> summarizeAllOrNone(List<Long> drawingSessionIds) {
+    if (drawingSessionIds == null || drawingSessionIds.isEmpty()) {
+      return Optional.empty();
+    }
+    List<Long> sessionIds = distinctSessionIds(drawingSessionIds);
+    if (sessionIds.isEmpty()) {
+      return Optional.empty();
+    }
+    List<StrokeBehaviorSummary> summaries = new ArrayList<>(sessionIds.size());
+    for (Long sessionId : sessionIds) {
+      Optional<StrokeBehaviorSummary> summary = summarize(sessionId);
+      if (summary.isEmpty()) {
+        return Optional.empty();
+      }
+      summaries.add(summary.get());
+    }
+    return merge(summaries);
+  }
+
+  private static List<Long> distinctSessionIds(List<Long> drawingSessionIds) {
+    return drawingSessionIds.stream().filter(Objects::nonNull).distinct().toList();
+  }
+
+  /**
+   * 세션별 요약을 하나로 합친다.
+   *
+   * <p>합치는 규칙은 값의 성격에 따라 다르다. 시간·횟수는 <b>더하고</b>, {@code pressureAvailable}·{@code truncated}는
+   * <b>OR</b>다. 한 세션이라도 절단됐으면 합계 전체가 부분 집계이고, 한 세션에서라도 필압이 저장돼 있으면 필압 데이터는 존재한다.
+   *
+   * <p>🔴 <b>{@code null} 이 섞이면 그 항목의 합계도 {@code null} 이다.</b> 이전에는 {@code null} 을 0으로 바꿔 더했는데, 그러면
+   * "측정하지 못한 세션"이 "0회인 세션"으로 둔갑해 나머지 세션의 값만으로 만든 합이 전체 합인 것처럼 나간다. 모르는 값을 더할 수는 없다. 지금 집계기가 항상 구체값을
+   * 채우므로 이 분기는 동작하지 않지만, 나중에 {@code null} 을 만드는 경로가 생겼을 때 조용히 0으로 무너지지 않게 여기서 막는다.
+   *
+   * @param summaries 합칠 세션별 요약 목록
+   * @return 합산 결과, 목록이 비면 빈 값
+   */
+  static Optional<StrokeBehaviorSummary> merge(List<StrokeBehaviorSummary> summaries) {
+    if (summaries == null || summaries.isEmpty()) {
       return Optional.empty();
     }
     if (summaries.size() == 1) {
       return Optional.of(summaries.get(0));
     }
 
-    long drawingDurationMs = 0;
-    long activeDrawingMs = 0;
-    int pauseCount = 0;
-    int undoCount = 0;
-    int eraseCount = 0;
-    int toolChangeCount = 0;
-    int colorChangeCount = 0;
+    Long drawingDurationMs = 0L;
+    Long activeDrawingMs = 0L;
+    Integer pauseCount = 0;
+    Integer undoCount = 0;
+    Integer eraseCount = 0;
+    Integer toolChangeCount = 0;
+    Integer colorChangeCount = 0;
     boolean pressureAvailable = false;
     boolean truncated = false;
     for (StrokeBehaviorSummary summary : summaries) {
-      drawingDurationMs += summary.drawingDurationMs() == null ? 0 : summary.drawingDurationMs();
-      activeDrawingMs += summary.activeDrawingMs() == null ? 0 : summary.activeDrawingMs();
-      pauseCount += summary.pauseCount() == null ? 0 : summary.pauseCount();
-      undoCount += summary.undoCount() == null ? 0 : summary.undoCount();
-      eraseCount += summary.eraseCount() == null ? 0 : summary.eraseCount();
-      toolChangeCount += summary.toolChangeCount() == null ? 0 : summary.toolChangeCount();
-      colorChangeCount += summary.colorChangeCount() == null ? 0 : summary.colorChangeCount();
+      drawingDurationMs = add(drawingDurationMs, summary.drawingDurationMs());
+      activeDrawingMs = add(activeDrawingMs, summary.activeDrawingMs());
+      pauseCount = add(pauseCount, summary.pauseCount());
+      undoCount = add(undoCount, summary.undoCount());
+      eraseCount = add(eraseCount, summary.eraseCount());
+      toolChangeCount = add(toolChangeCount, summary.toolChangeCount());
+      colorChangeCount = add(colorChangeCount, summary.colorChangeCount());
       pressureAvailable |= summary.pressureAvailable();
       truncated |= summary.truncated();
     }
@@ -217,8 +301,21 @@ public class StrokeBehaviorSummaryService {
             truncated));
   }
 
+  /** 한쪽이라도 측정되지 않았으면 합도 측정되지 않은 값이다. */
+  private static Long add(Long accumulated, Long value) {
+    return accumulated == null || value == null ? null : accumulated + value;
+  }
+
+  /** 한쪽이라도 측정되지 않았으면 합도 측정되지 않은 값이다. */
+  private static Integer add(Integer accumulated, Integer value) {
+    return accumulated == null || value == null ? null : accumulated + value;
+  }
+
   /**
    * 배치 목록에서 행동 요약을 계산한다.
+   *
+   * <p>세션에 실제로 온 명시 이벤트 종류를 먼저 판정하고({@link ExplicitEventTypes#scan}), 온 종류는 명시 이벤트만 세고 오지 않은 종류만
+   * STROKE 속성·배치 경계로 추론한다. 근거는 이 클래스 javadoc.
    *
    * @param batches 한 세션의 Stroke 배치 목록
    * @param truncated 배치 수 상한에 걸려 앞부분만 넘어왔는지 여부
@@ -230,6 +327,7 @@ public class StrokeBehaviorSummaryService {
     if (ordered.isEmpty()) {
       return Optional.empty();
     }
+    ExplicitEventTypes explicit = ExplicitEventTypes.scan(ordered);
 
     long activeDrawingMs = 0;
     int pauseCount = 0;
@@ -255,21 +353,36 @@ public class StrokeBehaviorSummaryService {
           undoCount++;
           continue;
         }
+        // 아래 세 종류는 그 이벤트가 온 세션에서만 존재하므로, 여기 도달했다는 것 자체가 명시 집계 대상이라는 뜻이다.
+        //   같은 행동의 추론 경로는 아래에서 explicit 판정으로 꺼진다.
         if (ERASE_EVENT_TYPE.equals(eventType)) {
           eraseCount++;
           continue;
         }
+        if (TOOL_CHANGE_EVENT_TYPE.equals(eventType)) {
+          toolChangeCount++;
+          continue;
+        }
+        if (COLOR_CHANGE_EVENT_TYPE.equals(eventType)) {
+          colorChangeCount++;
+          continue;
+        }
+        if (PAUSE_EVENT_TYPE.equals(eventType)) {
+          pauseCount++;
+          continue;
+        }
         if (!STROKE_EVENT_TYPE.equals(eventType)) {
+          // REDO·RESUME·THICKNESS_CHANGE·CANVAS_CLEAR·FILL 등 담을 자리가 없는 이벤트는 지나간다.
           continue;
         }
         batchActiveMs += strokeDurationMs(event);
         String tool = event.tool();
         if (tool != null) {
-          if (previousTool != null && !previousTool.equals(tool)) {
+          if (!explicit.toolChange() && previousTool != null && !previousTool.equals(tool)) {
             toolChangeCount++;
           }
           previousTool = tool;
-          if (ERASER_TOOL.equals(tool)) {
+          if (!explicit.erase() && ERASER_TOOL.equals(tool)) {
             eraseCount++;
           }
         }
@@ -279,7 +392,9 @@ public class StrokeBehaviorSummaryService {
           //   색 변경 2회로도 잡혀 같은 행동이 두 번 계산된다. 색을 고른 획끼리만 비교한다.
           // 대소문자를 무시하는 이유: 계약의 색 정규식이 소문자 hex도 허용해서(StrokeEventRequest)
           //   #ff0000과 #FF0000이 섞여 들어오면 같은 색이 변경으로 잡힌다.
-          if (previousColor != null && !previousColor.equalsIgnoreCase(color)) {
+          if (!explicit.colorChange()
+              && previousColor != null
+              && !previousColor.equalsIgnoreCase(color)) {
             colorChangeCount++;
           }
           previousColor = color;
@@ -287,7 +402,10 @@ public class StrokeBehaviorSummaryService {
       }
       activeDrawingMs += batchActiveMs;
       Instant createdAt = batch.clientCreatedAt();
-      if (previousCreatedAt != null
+      // 앱이 PAUSE 를 보내면 배치 경계 추론을 하지 않는다. 둘을 함께 세면 같은 멈춤이 두 번 잡히고,
+      //   추론 쪽은 flush 시점 오차 때문에 없던 멈춤까지 만들어 낸다(이 클래스 javadoc의 과다·과소·접힘).
+      if (!explicit.pause()
+          && previousCreatedAt != null
           && createdAt != null
           && isPause(previousCreatedAt, createdAt, batchActiveMs)) {
         pauseCount++;
@@ -308,6 +426,57 @@ public class StrokeBehaviorSummaryService {
             colorChangeCount,
             pressureAvailable,
             truncated));
+  }
+
+  /**
+   * 한 세션에 명시 이벤트가 실제로 왔는지를 종류별로 담는다.
+   *
+   * <p><b>왜 세션 전체를 미리 훑는가.</b> 명시 이벤트는 그 행동이 일어난 배치에만 들어 있다. 배치를 하나씩 보며 그때그때 판단하면, 도구를 처음 바꾸기 전까지의
+   * 배치는 "명시 이벤트가 없는 세션"으로 보여 추론이 돌고 그 뒤로는 명시가 도는 <b>기준이 갈린 집계</b>가 된다. 세션 하나의 수치는 하나의 기준으로 세야 한다.
+   *
+   * <p>비용은 이벤트 수만큼의 추가 순회 한 번이다. 배치는 이미 메모리에 올라와 있고({@link #MAX_AGGREGATED_BATCHES} 로 제한) 저장소를 다시
+   * 읽지 않는다.
+   *
+   * @param toolChange {@code TOOL_CHANGE} 가 하나라도 왔는지
+   * @param colorChange {@code COLOR_CHANGE} 가 하나라도 왔는지
+   * @param erase {@code ERASE} 가 하나라도 왔는지
+   * @param pause {@code PAUSE} 가 하나라도 왔는지
+   */
+  private record ExplicitEventTypes(
+      boolean toolChange, boolean colorChange, boolean erase, boolean pause) {
+
+    /**
+     * 세션의 모든 이벤트를 훑어 어떤 명시 이벤트가 왔는지 판정한다.
+     *
+     * @param ordered 순서화된 배치 목록
+     * @return 종류별 수신 여부
+     */
+    static ExplicitEventTypes scan(List<StrokeBatchDocument> ordered) {
+      boolean toolChange = false;
+      boolean colorChange = false;
+      boolean erase = false;
+      boolean pause = false;
+      for (StrokeBatchDocument batch : ordered) {
+        List<StrokeEventDocument> strokes = batch.strokes();
+        if (strokes == null) {
+          continue;
+        }
+        for (StrokeEventDocument event : strokes) {
+          if (event == null) {
+            continue;
+          }
+          String eventType = event.eventType();
+          toolChange |= TOOL_CHANGE_EVENT_TYPE.equals(eventType);
+          colorChange |= COLOR_CHANGE_EVENT_TYPE.equals(eventType);
+          erase |= ERASE_EVENT_TYPE.equals(eventType);
+          pause |= PAUSE_EVENT_TYPE.equals(eventType);
+        }
+        if (toolChange && colorChange && erase && pause) {
+          return new ExplicitEventTypes(true, true, true, true);
+        }
+      }
+      return new ExplicitEventTypes(toolChange, colorChange, erase, pause);
+    }
   }
 
   /**

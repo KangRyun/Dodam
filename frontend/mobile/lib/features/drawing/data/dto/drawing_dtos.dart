@@ -415,6 +415,21 @@ final class StrokeEventDto {
   final String type;
   final double? x, y, thickness, pressure;
   final String? tool, color;
+
+  /// 순번만 바꾼 사본이다. 좌표 변환은 순번을 쓰기 전에 끝나고, 앞서 굳혀야 할
+  /// 설정 변경·멈춤 이벤트가 먼저 순번을 가져가므로 마지막에 붙인다.
+  StrokeEventDto withSequence(int seq) => StrokeEventDto(
+    seq: seq,
+    t: t,
+    type: type,
+    x: x,
+    y: y,
+    tool: tool,
+    color: color,
+    thickness: thickness,
+    pressure: pressure,
+  );
+
   Map<String, dynamic> toJson() => {
     'seq': seq,
     't': t,

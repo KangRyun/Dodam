@@ -123,7 +123,8 @@ class StrokeMongoIntegrationTest extends IntegrationTestSupport {
     assertThat(point.x()).isNull();
     assertThat(point.y()).isNull();
     // 배치 단위 값도 그대로다
-    assertThat(loaded.getFirst().clientCreatedAt()).isEqualTo(Instant.parse("2026-07-21T02:32:10Z"));
+    assertThat(loaded.getFirst().clientCreatedAt())
+        .isEqualTo(Instant.parse("2026-07-21T02:32:10Z"));
     assertThat(loaded.getFirst().strokes().getFirst().tool()).isEqualTo("PEN");
   }
 

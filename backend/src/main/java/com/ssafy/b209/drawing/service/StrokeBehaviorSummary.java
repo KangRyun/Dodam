@@ -9,13 +9,18 @@ package com.ssafy.b209.drawing.service;
  * <p>필드 Type이 모두 Wrapper인 것은 <b>장차</b> 측정 불가능한 값이 생겼을 때 0이 아니라 {@code null}로 내보내기 위해서다. 없는 데이터를 0으로
  * 채우면 AI가 "0회"라는 관찰 결과로 읽는다. 다만 <b>현재 집계기는 8개 값을 항상 구체값으로 채우며 {@code null}을 만드는 실행 경로가 없다.</b>
  *
+ * <p><b>횟수 넷은 출처가 두 가지다.</b> 앱이 {@code PAUSE}·{@code ERASE}·{@code TOOL_CHANGE}·{@code
+ * COLOR_CHANGE} 명시 이벤트를 보낸 세션에서는 <b>그 이벤트를 센 정확한 값</b>이고, 보내지 않은 세션에서는 {@code STROKE} 속성 변화·배치 경계
+ * 시각으로 <b>추론한 값</b>이다. 둘을 함께 세지 않는 이유와 판정 규칙은 {@link StrokeBehaviorSummaryService} javadoc 에 있다. 값만
+ * 보고는 어느 쪽인지 알 수 없으므로, 쓰는 쪽은 어느 경우에도 <b>단정적인 관찰</b>로 옮기지 말아야 한다.
+ *
  * @param drawingDurationMs 그림 전체 경과 시간이며 중단 후 재개 구간은 제외한 추정값
  * @param activeDrawingMs 실제로 획을 그린 시간의 합
- * @param pauseCount 멈춤 횟수의 추정값이며 상한도 하한도 아니다
- * @param undoCount 실행 취소 횟수
- * @param eraseCount 지우기 횟수
- * @param toolChangeCount 도구를 바꾼 횟수
- * @param colorChangeCount 색을 바꾼 횟수
+ * @param pauseCount 멈춤 횟수. {@code PAUSE} 이벤트를 받은 세션은 정확한 값이고, 아니면 배치 경계 추정값이라 상한도 하한도 아니다
+ * @param undoCount 실행 취소 횟수. {@code UNDO} 이벤트만 세며 {@code REDO} 로 상계하지 않는다
+ * @param eraseCount 지우기 횟수. {@code ERASE} 이벤트를 받은 세션은 그 이벤트만, 아니면 {@code tool=ERASER} 획을 센다
+ * @param toolChangeCount 도구를 바꾼 횟수. {@code TOOL_CHANGE} 이벤트를 받은 세션은 그 이벤트만, 아니면 획의 도구 변화를 센다
+ * @param colorChangeCount 색을 바꾼 횟수. {@code COLOR_CHANGE} 이벤트를 받은 세션은 그 이벤트만, 아니면 획의 색 변화를 센다
  * @param pressureAvailable 필압 데이터가 실제로 저장돼 있는지 여부
  * @param truncated 배치 수 상한에 걸려 세션 앞부분만 집계했는지 여부. {@code true}면 위 값 전부가 부분 집계다
  */
