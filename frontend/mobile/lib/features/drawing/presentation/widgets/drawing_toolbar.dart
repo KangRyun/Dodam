@@ -58,11 +58,11 @@ final class DrawingToolbar extends StatelessWidget {
     return switch (deviceClass) {
       DrawingCanvasDeviceClass.mobilePortrait => SizedBox(
         key: const ValueKey('drawing-toolbar'),
-        height: 112,
+        height: 128,
         child: Column(
           children: [
             SizedBox(
-              height: 56,
+              height: 64,
               child: _ToolbarChrome(
                 deviceClass: deviceClass,
                 // 좁은 화면에서는 도구가 한 줄에 다 안 들어간다. 넘치면 잘리는
@@ -78,7 +78,7 @@ final class DrawingToolbar extends StatelessWidget {
               ),
             ),
             SizedBox(
-              height: 56,
+              height: 64,
               child: _ToolbarChrome(
                 deviceClass: deviceClass,
                 child: Row(
@@ -101,12 +101,12 @@ final class DrawingToolbar extends StatelessWidget {
       DrawingCanvasDeviceClass.mobileLandscape => _singleRow(
         context,
         deviceClass: deviceClass,
-        height: 60,
+        height: 68,
       ),
       DrawingCanvasDeviceClass.tablet => _singleRow(
         context,
         deviceClass: deviceClass,
-        height: 72,
+        height: 84,
       ),
     };
   }

@@ -329,17 +329,23 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 이 뒤로 세션은 `CONVERSING`이므로 캔버스 저장은 막히고 대화만 진행한다.
   bool _drawingStageFinished = false;
 
+  /// 캔버스 왼쪽 위에 띄우는 안내다. 무엇을 그리는 시간인지 아이가 언제든
+  /// 확인할 수 있어야 한다. HTP 는 집·나무·사람을 순서대로 그리므로 몇 번째인지
+  /// 함께 알려 준다.
   String get _activityTitle {
     final activity = widget.activityContext;
-    if (!activity.isHtp) return '그림 활동';
+    if (!activity.isHtp) return '그림일기';
     final subject = switch (activity.drawingSubject) {
       'HOUSE' => '집 그리기',
       'TREE' => '나무 그리기',
       'PERSON' => '사람 그리기',
       _ => 'HTP 그림',
     };
-    return '${activity.stepOrder ?? 1}단계 · $subject';
+    return '${activity.stepOrder ?? 1}/$_htpStepCount단계 · $subject';
   }
+
+  /// HTP 는 집·나무·사람 세 단계다.
+  static const _htpStepCount = 3;
 
   bool _movedToReflection = false;
   bool _automaticConversationEndStarted = false;
@@ -2578,9 +2584,8 @@ class _DrawingScreenState extends State<DrawingScreen>
                           ),
                           // HTP 는 지금 몇 단계에서 무엇을 그리는지가 아이에게
                           // 필요한 정보다. 상단 바를 없앴으므로 캔버스 왼쪽 위에
-                          // 남겨 둔다. 자유 그림은 안내가 필요 없어 띄우지 않는다.
-                          if (widget.activityContext.isHtp)
-                            Positioned(
+                          // 남겨 둔다. 그림일기도 무슨 시간인지 알려 준다.
+                          Positioned(
                               left: frameInset + AppSpacing.md,
                               top: frameInset + AppSpacing.md,
                               child: IgnorePointer(

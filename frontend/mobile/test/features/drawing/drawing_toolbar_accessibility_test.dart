@@ -520,9 +520,9 @@ void main() {
       tester,
     ) async {
       const cases = <(Size, double)>[
-        (Size(390, 844), 112),
-        (Size(844, 390), 60),
-        (Size(1194, 834), 72),
+        (Size(390, 844), 128),
+        (Size(844, 390), 68),
+        (Size(1194, 834), 84),
       ];
 
       for (final (size, expectedHeight) in cases) {
