@@ -90,6 +90,14 @@ List<int> _intList(Object? value) => value is List
       ]
     : const [];
 
+/// 문자열 값을 방어적으로 읽는다. 문자열이 아니거나 공백뿐이면 null이라
+/// 화면에 빈 줄이 남지 않는다(계약 §10 — 빈 값은 오류가 아니라 숨김).
+String? _text(Object? value) {
+  if (value is! String) return null;
+  final trimmed = value.trim();
+  return trimmed.isEmpty ? null : trimmed;
+}
+
 /// `data.drawingSession` — 리포트가 가리키는 그림 활동 세션.
 ///
 /// 세션이 없으면 서버가 404를 주므로 상세 응답에서는 객체 자체가 비지 않지만,
@@ -417,6 +425,30 @@ final class ReportQaPairDto {
   final bool sttNeedsConfirmation, isRepresentative;
 }
 
+/// `observedFeatures[]` — "이런 모습이 보였어요"(계약 §2-1).
+///
+/// AI 자체 검토를 통과한 항목(`AI_REVIEWED` + `REVIEWED_GUARDIAN`)만 서버가
+/// 싣는다. 보호자에게 열지 않는 항목은 **응답에 아예 오지 않으므로** 화면이
+/// 거르지 않는다. 내부 코드(`featureCode`)·공개 범위(`visibilityScope`)는
+/// 계약상 응답에 없으며, 설령 실려 와도 이 DTO가 읽지 않아 노출되지 않는다.
+final class ReportObservedFeatureDto {
+  const ReportObservedFeatureDto({
+    required this.title,
+    required this.description,
+    required this.evidenceSummary,
+  });
+  factory ReportObservedFeatureDto.fromJson(Map<String, dynamic> json) =>
+      ReportObservedFeatureDto(
+        title: _text(json['title']),
+        description: _text(json['description']),
+        evidenceSummary: _text(json['evidenceSummary']),
+      );
+  final String? title, description, evidenceSummary;
+
+  bool get isEmpty =>
+      title == null && description == null && evidenceSummary == null;
+}
+
 /// `subjectReports[]` — 집·나무·사람 주제별 보고(계약 §5).
 ///
 /// 순서는 서버가 HOUSE→TREE→PERSON으로 보장하지만, 화면에서도 한 번 더
@@ -432,7 +464,7 @@ final class ReportSubjectReportDto {
   factory ReportSubjectReportDto.fromJson(Map<String, dynamic> json) =>
       ReportSubjectReportDto(
         subjectType: json['subjectType'] as String?,
-        imageUrl: json['imageUrl'] as String?,
+        imageUrl: _text(json['imageUrl']),
         visionObservations: _stringList(json['visionObservations']),
         qaPairs: _objectList(json['qaPairs'], ReportQaPairDto.fromJson),
         interpretationRefs: _intList(json['interpretationRefs']),
@@ -443,7 +475,17 @@ final class ReportSubjectReportDto {
   final String? imageUrl;
   final List<String> visionObservations;
   final List<ReportQaPairDto> qaPairs;
+
+  /// 같은 응답 `publicInterpretations`의 **배열 인덱스**(0-based)다(계약 §5-1).
+  /// category 값이 아니며, 화면 정렬 결과가 아니라 서버가 준 원래 순서에 대고
+  /// 풀어야 다른 카드를 가리키지 않는다.
   final List<int> interpretationRefs;
+
+  /// 이 주제의 완성 그림을 실제로 보여줄 수 있는지.
+  bool get hasImage => imageUrl != null;
+
+  /// 이 주제에 표시할 관찰 문장이나 문답이 있는지(§10 — 없으면 카드 숨김).
+  bool get hasDetails => visionObservations.isNotEmpty || qaPairs.isNotEmpty;
 }
 
 /// `parentGuides[]` — 보호자 가이드(계약 §7). guideType별로 섹션이 나뉜다.
@@ -486,9 +528,14 @@ final class ReportExpertReviewDto {
 
 /// REPORT-02 `GET /reports/{reportId}`의 `data` 페이로드.
 ///
-/// 보호자 공개 계약(`docs/api/report-detail-guardian-contract.md` §2)만 담는다.
-/// 서버가 내려주지 않는 값(analysisId·modelVersion·observedFeatures 등)은
-/// 화면에서 지어내지 않도록 DTO에도 두지 않는다.
+/// 보호자 공개 계약(`docs/api/report-detail-guardian-contract.md` §2 +
+/// `docs/S15P11B209-875-report-api-contract.md`)만 담는다. 서버가 내려주지
+/// 않는 값(analysisId·modelVersion·attentionPoints 등)은 화면에서 지어내지
+/// 않도록 DTO에도 두지 않는다.
+///
+/// `observedFeatures`는 §2-1 개정으로 보호자 공개 대상이 되어 읽는다. 반면
+/// `evidenceItems[].sourceRef`·`derivedFrom`은 서버 검증용이라 화면이 쓸 일이
+/// 없으므로 일부러 읽지 않는다 — 모르는 키는 조용히 무시된다.
 final class ReportDetailDto {
   const ReportDetailDto({
     required this.reportId,
@@ -503,10 +550,13 @@ final class ReportDetailDto {
     required this.limitations,
     required this.expertReview,
     required this.createdAt,
+    this.activityType,
+    this.childDisplayName,
     this.nonDiagnosticNotice,
     this.publicInterpretations = const [],
     this.evidenceItems = const [],
     this.subjectReports = const [],
+    this.observedFeatures = const [],
     this.parentGuides = const [],
     this.references = const [],
   });
@@ -540,7 +590,9 @@ final class ReportDetailDto {
             ? ReportExpertReviewDto.fromJson(_map(json['expertReview']))
             : null,
         createdAt: json['createdAt'] as String?,
-        nonDiagnosticNotice: json['nonDiagnosticNotice'] as String?,
+        activityType: _text(json['activityType']),
+        childDisplayName: _text(json['childDisplayName']),
+        nonDiagnosticNotice: _text(json['nonDiagnosticNotice']),
         publicInterpretations: _objectList(
           json['publicInterpretations'],
           ReportInterpretationDto.fromJson,
@@ -552,6 +604,10 @@ final class ReportDetailDto {
         subjectReports: _objectList(
           json['subjectReports'],
           ReportSubjectReportDto.fromJson,
+        ),
+        observedFeatures: _objectList(
+          json['observedFeatures'],
+          ReportObservedFeatureDto.fromJson,
         ),
         parentGuides: _objectList(
           json['parentGuides'],
@@ -575,12 +631,24 @@ final class ReportDetailDto {
 
   /// 계약 §2·§10 추가 필드. 서버가 아직 내려주지 않으면 각각 null·빈 목록이라
   /// 해당 섹션이 숨는다(하위 호환).
+  ///
+  /// [activityType]은 `HTP | ART_DIARY | FREE_DRAWING` 등 기존 활동 코드,
+  /// [childDisplayName]은 표지용 아이 이름이다.
+  final String? activityType;
+  final String? childDisplayName;
   final String? nonDiagnosticNotice;
   final List<ReportInterpretationDto> publicInterpretations;
   final List<ReportEvidenceItemDto> evidenceItems;
   final List<ReportSubjectReportDto> subjectReports;
+  final List<ReportObservedFeatureDto> observedFeatures;
   final List<ReportParentGuideDto> parentGuides;
   final List<ReportReferenceDto> references;
+
+  /// HTP(집·나무·사람) 활동인지. 계약 §2의 최상위 `activityType`이 정본이고,
+  /// 아직 그 필드를 주지 않는 구형 응답은 세션의 `drawingTypeCode`로 판정한다.
+  bool get isHtpActivity =>
+      activityType?.toUpperCase() == 'HTP' ||
+      drawingSession?.drawingTypeCode?.toUpperCase() == 'HTP';
 
   /// 계약 §7의 4종 가이드를 화면 순서(그림 대화→일상 육아→가정 관찰→전문 도움)로
   /// 정렬해 돌려준다. 알 수 없는 유형은 뒤에 둔다.
@@ -611,16 +679,36 @@ final class ReportDetailDto {
     return [...subjectReports]..sort((a, b) => rank(a).compareTo(rank(b)));
   }
 
+  /// 완성 그림 URL이 실제로 있는 주제만 계약 순서대로 돌려준다(계약 §5).
+  /// HTP가 아니면 0~1개일 수 있으므로 화면은 개수를 가정하지 않는다.
+  List<ReportSubjectReportDto> get subjectDrawings => [
+    for (final subject in orderedSubjectReports)
+      if (subject.hasImage) subject,
+  ];
+
+  /// 관찰 문장이나 문답이 있는 주제만 계약 순서대로 돌려준다(계약 §5·§10).
+  List<ReportSubjectReportDto> get subjectDetails => [
+    for (final subject in orderedSubjectReports)
+      if (subject.hasDetails) subject,
+  ];
+
   /// 관찰 섹션이 하나도 없어 "표시할 기록 없음"을 보여줘야 하는 상태(계약 §10):
   /// publicInterpretations + childExpression + activityFacts +
   /// conversationSummary + parentGuides가 모두 비었을 때만 참.
+  ///
+  /// 계약이 열거한 5종 외에 §2-1 `observedFeatures`와 §5 주제별 관찰·문답도
+  /// 함께 본다. 둘 중 하나라도 화면에 실려 있는데 "표시할 기록이 없다"고
+  /// 적으면 사실과 어긋나기 때문이며, 조건을 더하는 방향이라 계약이 정한
+  /// "모두 비었을 때만" 규칙을 위반하지 않는다.
   bool get hasNoObservations =>
       publicInterpretations.isEmpty &&
       (childExpression?.isEmpty ?? true) &&
       (activityFacts?.isEmpty ?? true) &&
       (conversationSummary?.isEmpty ?? true) &&
       guardianConversationGuide.isEmpty &&
-      orderedParentGuides.isEmpty;
+      orderedParentGuides.isEmpty &&
+      observedFeatures.every((feature) => feature.isEmpty) &&
+      subjectDetails.isEmpty;
 }
 
 /// REPORT-04 리포트 PDF 내보내기 접수 결과.
