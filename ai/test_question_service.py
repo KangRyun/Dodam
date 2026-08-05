@@ -1869,7 +1869,17 @@ class StopIntentTest(unittest.TestCase):
         self.assertIsNone(resp.options)  # 빈 배열도 계약 위반이다
 
     def test_voice_confirmation_sets_end_flag(self):
-        """되묻기에 말로 답한 경우 — 칩을 못 눌러도 BE가 끝낼 수 있게 신호를 싣는다(947)."""
+        """되묻기에 말로 답한 경우 — 칩을 못 눌러도 BE가 끝낼 수 있게 신호를 싣는다(947).
+
+        947은 이 응답의 문장을 되묻기 그대로 두었다. 근거는 "BE가 이 필드를 아직 안 읽어도
+        화면이 어색해지지 않아야 한다"였는데, 955가 BE에 읽는 쪽을 붙이면서 그 전제가
+        사라졌다. BE는 이 신호를 보면 질문을 저장하지 않고 409로 끝내므로 questionText는
+        아이에게 닿지도 않는다.
+
+        되묻기 문장을 그대로 남기는 쪽이 오히려 위험하다 — _last_reask_branch가 다음 턴에
+        그것을 '직전 되묻기'로 읽어, 950이 칩에서 막은 자가 트리거가 음성 경로로 되살아난다.
+        그래서 문장은 951의 맺음말로 통일한다.
+        """
         req = _request(
             activity_type="ART_DIARY",
             current_question_count=3,
@@ -1888,8 +1898,9 @@ class StopIntentTest(unittest.TestCase):
         resp, client = self._generate(req)
         self.assertTrue(resp.conversation_end_confirmed)
         client.chat.completions.create.assert_not_called()
-        # 문장은 되묻기 그대로다 — BE가 필드를 아직 안 읽어도 화면이 어색해지지 않아야 한다.
-        self.assertEqual(question_service.STOP_ASK_CONVERSATION, resp.question_text)
+        # 대화만 끝내는 확인이므로 BE가 실행한다 — 활동 종료 신호는 함께 싣지 않는다.
+        self.assertEqual("CONVERSATION", resp.confirmed_stop_target)
+        self.assertEqual(question_service.STOP_CLOSING_CONVERSATION, resp.question_text)
 
     def test_declining_does_not_set_end_flag(self):
         req = _request(
@@ -2018,6 +2029,8 @@ class StopConfirmationTest(unittest.TestCase):
             self._req(question_service.STOP_ASK_CONVERSATION, "응")
         )
         self.assertEqual("CONVERSATION", resp.confirmed_stop_target)
+        # 대화 세션의 주인은 BE다 — 대화만 끝내는 확인은 BE가 실행한다(947·955).
+        self.assertTrue(resp.conversation_end_confirmed)
         self.assertEqual(question_service.STOP_CLOSING_CONVERSATION, resp.question_text)
         self.assertIsNone(resp.options)  # 질문이 아니라 맺음말이다
         client.chat.completions.create.assert_not_called()  # GMS 미호출
@@ -2026,12 +2039,18 @@ class StopConfirmationTest(unittest.TestCase):
         resp, _ = self._generate(self._req(question_service.STOP_ASK_DRAWING, "응"))
         self.assertEqual("ACTIVITY", resp.confirmed_stop_target)
         self.assertEqual(question_service.STOP_CLOSING_ACTIVITY, resp.question_text)
+        # 🔴 활동 종료에 BE 종료 신호를 함께 실으면 안 된다. BE는 대화만 끊을 수 있고
+        #    회고 저장·다음 단계는 FE가 쥐고 있어, 대화가 먼저 끊기면 아이가 활동을
+        #    완료하지 못한 채 남는다(DRAWING_CONVERSATION_NOT_COMPLETED).
+        self.assertFalse(resp.conversation_end_confirmed)
 
     def test_bare_yes_after_both_reask_narrows_instead_of_guessing(self):
         """되돌릴 수 없는 활동 완료를 추측으로 실행하지 않는다."""
         resp, _ = self._generate(self._req(question_service.STOP_ASK_BOTH, "응"))
         self.assertIsNone(resp.confirmed_stop_target)
         self.assertEqual(question_service.STOP_ASK_CONVERSATION, resp.question_text)
+        # 좁혀 되묻는 중이다 — 아직 확인이 아니므로 BE가 끝내서는 안 된다.
+        self.assertFalse(resp.conversation_end_confirmed)
 
     def test_named_target_after_both_reask_is_honored(self):
         for answer, target in (
