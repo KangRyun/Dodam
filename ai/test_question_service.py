@@ -1754,6 +1754,24 @@ class StopIntentTest(unittest.TestCase):
             ["CHIP_END_ACTIVITY", "CHIP_KEEP_GOING"], [o.code for o in resp.options]
         )
 
+    def test_drawing_branch_names_the_complete_button(self):
+        """그림 완료는 칩을 눌러야 실행된다 — 말로 답한 아이에게 다음 행동을 알려 준다.
+
+        (S15P11B209-947) 화면 버튼에 적힌 글자를 그대로 써야 아이가 화면과 말을 잇는다.
+        FE 라벨(drawing_complete_cta.dart)을 바꾸면 여기도 같이 고쳐야 한다.
+        """
+        for utterance in ("그림 그만 그릴래", "이제 그만할래"):
+            with self.subTest(utterance=utterance):
+                resp, _ = self._generate(self._req(utterance))
+                self.assertIn(question_service.COMPLETE_BUTTON_LABEL, resp.question_text)
+                # 안내를 넣더라도 칩은 남는다 — 탭으로도 끝낼 수 있어야 한다.
+                self.assertIn("CHIP_END_ACTIVITY", [o.code for o in resp.options])
+
+    def test_conversation_branch_has_no_button_guidance(self):
+        """대화 종료는 칩으로 바로 끝난다 — 버튼을 찾게 할 이유가 없다."""
+        resp, _ = self._generate(self._req("이야기 그만할래"))
+        self.assertNotIn(question_service.COMPLETE_BUTTON_LABEL, resp.question_text)
+
     def test_conversation_stop_skips_the_question(self):
         resp, _ = self._generate(self._req("이야기 그만할래"))
         self.assertEqual(question_service.STOP_ASK_CONVERSATION, resp.question_text)

@@ -833,8 +833,24 @@ def _crisis_safe_response(req: QuestionRequest, started: float) -> QuestionRespo
 #
 # ⚠️ AI는 끝내지 않는다. 되묻기만 하고 실제 종료는 FE가 칩 선택을 보고 한다 — 786이 정한
 #    "턴 제어는 AI 소유가 아니다"를 그대로 지킨다.
-STOP_ASK_BOTH = "그래! 그림을 그만 그릴까, 아니면 이야기만 그만할까?"
-STOP_ASK_DRAWING = "그림 다 그렸구나! 이제 그만 그릴까?"
+# ⚠️ 그림 갈래는 '묻기'가 아니라 '안내'다(S15P11B209-947). 그림 활동 완료는 회고 저장과
+#    다음 단계로 이어져 되돌릴 수 없는데, 아이가 말로 답하면 칩 선택이 없어 아무 일도
+#    일어나지 않는다. 그래서 화면 버튼을 누르라고 알려 준다 — 되돌릴 수 없는 동작을 아이가
+#    직접 누르게 하는 편이 안전하기도 하다(938이 '기존 확인 흐름을 그대로 태운다'고 정한 것과
+#    같은 판단). 칩은 그대로 두어 탭으로도 끝낼 수 있다.
+#
+# ⚠️ 버튼에 적힌 글자를 그대로 쓴다. 도담이 말하는 낱말과 화면 글자가 다르면 아이가 잇지
+#    못한다. FE 라벨은 drawing_complete_cta.dart 의 '다 그렸어요!' 다 — 그쪽을 바꾸면
+#    여기도 같이 고쳐야 한다.
+COMPLETE_BUTTON_LABEL = "다 그렸어요!"
+
+STOP_ASK_BOTH = (
+    f"그래! 그림도 다 그렸으면 '{COMPLETE_BUTTON_LABEL}' 단추를 눌러 줘. "
+    "이야기만 그만하고 싶으면 알려 줄래?"
+)
+STOP_ASK_DRAWING = (
+    f"그림 다 그렸구나! 그럼 '{COMPLETE_BUTTON_LABEL}' 단추를 눌러 줄래?"
+)
 STOP_ASK_CONVERSATION = "그래, 이야기는 여기까지 할까?"
 
 # FE가 이 코드를 보고 무엇을 끝낼지 정한다(activity_screens._selectQuestionOption).
