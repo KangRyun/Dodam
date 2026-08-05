@@ -157,6 +157,39 @@ void main() {
     semantics.dispose();
   });
 
+  testWidgets('shows at most ten recent colours and selects one immediately', (
+    tester,
+  ) async {
+    final recent = List<Color>.generate(
+      12,
+      (index) => Color(0xFF100000 + index * 0x000A0A),
+    );
+    final changes = <HSVColor>[];
+    await _pumpPalette(
+      tester,
+      initial: initial,
+      previous: previous,
+      recentColors: recent,
+      onChanged: changes.add,
+    );
+
+    expect(find.byKey(const ValueKey('drawing-recent-colors')), findsOneWidget);
+    await tester.drag(
+      find.byKey(const ValueKey('drawing-recent-colors')),
+      const Offset(-500, 0),
+    );
+    await tester.pumpAndSettle();
+    expect(
+      find.byKey(const ValueKey('drawing-recent-color-9')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('drawing-recent-color-10')), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('drawing-recent-color-9')));
+    await tester.pump();
+    expect(changes.last.toColor().toARGB32(), recent[9].toARGB32());
+  });
+
   testWidgets('palette body fits compact bottom sheets and anchored popovers', (
     tester,
   ) async {
@@ -183,6 +216,7 @@ Future<void> _pumpPalette(
   required HSVColor initial,
   required Color previous,
   double hostWidth = 360,
+  List<Color> recentColors = const [],
   ValueChanged<HSVColor>? onChanged,
 }) async {
   await tester.pumpWidget(
@@ -194,6 +228,7 @@ Future<void> _pumpPalette(
             child: _PaletteHarness(
               initial: initial,
               previous: previous,
+              recentColors: recentColors,
               onChanged: onChanged,
             ),
           ),
@@ -208,11 +243,13 @@ final class _PaletteHarness extends StatefulWidget {
   const _PaletteHarness({
     required this.initial,
     required this.previous,
+    this.recentColors = const [],
     this.onChanged,
   });
 
   final HSVColor initial;
   final Color previous;
+  final List<Color> recentColors;
   final ValueChanged<HSVColor>? onChanged;
 
   @override
@@ -226,6 +263,7 @@ final class _PaletteHarnessState extends State<_PaletteHarness> {
   Widget build(BuildContext context) => DrawingColorPalette(
     value: value,
     previousColor: widget.previous,
+    recentColors: widget.recentColors,
     onChanged: (next) {
       widget.onChanged?.call(next);
       setState(() => value = next);

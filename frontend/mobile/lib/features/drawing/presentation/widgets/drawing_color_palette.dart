@@ -90,9 +90,10 @@ final class _ChannelSlider extends StatelessWidget {
         child: Text(
           readout,
           textAlign: TextAlign.end,
-          style: const TextStyle(fontSize: 12, fontFeatures: [
-            FontFeature.tabularFigures(),
-          ]),
+          style: const TextStyle(
+            fontSize: 12,
+            fontFeatures: [FontFeature.tabularFigures()],
+          ),
         ),
       ),
     ],
@@ -104,12 +105,14 @@ final class DrawingColorPalette extends StatelessWidget {
     required this.value,
     required this.previousColor,
     required this.onChanged,
+    this.recentColors = const [],
     super.key,
   });
 
   final HSVColor value;
   final Color previousColor;
   final ValueChanged<HSVColor> onChanged;
+  final List<Color> recentColors;
 
   static const _horizontalPadding = 16.0;
   static const _hueTargetWidth = 48.0;
@@ -157,6 +160,14 @@ final class DrawingColorPalette extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               _ChannelSliders(value: value, onChanged: onChanged),
+              if (recentColors.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                _RecentColors(
+                  colors: recentColors.take(10).toList(growable: false),
+                  selectedColor: value.toColor(),
+                  onSelected: (color) => onChanged(HSVColor.fromColor(color)),
+                ),
+              ],
               const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -181,6 +192,66 @@ final class DrawingColorPalette extends StatelessWidget {
         },
       ),
     ),
+  );
+}
+
+final class _RecentColors extends StatelessWidget {
+  const _RecentColors({
+    required this.colors,
+    required this.selectedColor,
+    required this.onSelected,
+  });
+
+  final List<Color> colors;
+  final Color selectedColor;
+  final ValueChanged<Color> onSelected;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    key: const ValueKey('drawing-recent-colors'),
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      const Text(
+        '최근 사용한 색상',
+        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+      ),
+      const SizedBox(height: 8),
+      SizedBox(
+        height: 42,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: colors.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 7),
+          itemBuilder: (context, index) {
+            final color = colors[index];
+            final selected = color.toARGB32() == selectedColor.toARGB32();
+            return Semantics(
+              label: '최근 색상 ${index + 1}',
+              button: true,
+              selected: selected,
+              child: InkResponse(
+                key: ValueKey('drawing-recent-color-$index'),
+                radius: 24,
+                onTap: () => onSelected(color),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 120),
+                  width: selected ? 42 : 36,
+                  height: selected ? 42 : 36,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: selected ? Colors.black87 : Colors.black38,
+                      width: selected ? 3 : 1.5,
+                    ),
+                  ),
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    ],
   );
 }
 

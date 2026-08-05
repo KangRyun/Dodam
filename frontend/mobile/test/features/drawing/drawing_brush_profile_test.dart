@@ -69,6 +69,25 @@ void main() {
     expect(third.points, hasLength(3));
   });
 
+  test('pencil, crayon, and brush expose clearly separated footprints', () {
+    const thickness = 12.0;
+    final pencil = DrawingStrokeRenderer.footprintFor(
+      DrawingBrushProfileId.pencil,
+      thickness,
+    );
+    final crayon = DrawingStrokeRenderer.footprintFor(
+      DrawingBrushProfileId.crayon,
+      thickness,
+    );
+    final brush = DrawingStrokeRenderer.footprintFor(
+      DrawingBrushProfileId.brush,
+      thickness,
+    );
+
+    expect(pencil, lessThan(crayon * .7));
+    expect(brush, greaterThan(crayon * 1.08));
+  });
+
   testWidgets('a seeded crayon stroke renders identical RGBA bytes', (
     tester,
   ) async {

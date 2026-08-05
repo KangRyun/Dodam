@@ -267,6 +267,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     color: AppColors.canvasSwatchCharcoal,
     width: _regular,
   );
+  final List<Color> _recentColors = [AppColors.canvasSwatchCharcoal];
 
   DrawingTool get _tool => _toolState.wireTool ?? DrawingTool.pen;
   Color get _color => _toolState.color;
@@ -409,6 +410,13 @@ class _DrawingScreenState extends State<DrawingScreen>
   @override
   void initState() {
     super.initState();
+    if (widget.activityContext.isHtp) {
+      _toolState = const DrawingToolState(
+        instrument: DrawingInstrument.pencil,
+        color: AppColors.canvasSwatchCharcoal,
+        width: _regular,
+      );
+    }
     WidgetsBinding.instance.addObserver(this);
     _ownsDocumentController = widget.documentController == null;
     _documentController =
@@ -675,6 +683,11 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _setInstrument(DrawingInstrument instrument) {
+    if (widget.activityContext.isHtp &&
+        instrument != DrawingInstrument.pencil &&
+        instrument != DrawingInstrument.eraser) {
+      return;
+    }
     setState(() {
       _toolState = DrawingToolState(
         instrument: instrument,
@@ -687,13 +700,23 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _setColor(Color color) {
+    final nextColor = widget.activityContext.isHtp
+        ? AppColors.canvasSwatchCharcoal
+        : color;
     setState(() {
       _toolState = DrawingToolState(
         instrument: _toolState.instrument,
         eraserMode: _toolState.eraserMode,
-        color: color,
+        color: nextColor,
         width: _toolState.width,
       );
+      _recentColors.removeWhere(
+        (recent) => recent.toARGB32() == nextColor.toARGB32(),
+      );
+      _recentColors.insert(0, nextColor);
+      if (_recentColors.length > 10) {
+        _recentColors.removeRange(10, _recentColors.length);
+      }
     });
     _refreshVisibleCursor();
   }
@@ -763,12 +786,14 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   /// 상세 색상 팔레트를 연다. 태블릿은 팔레트 버튼 옆 팝오버, 모바일은 바텀 시트다.
   Future<void> _openColorPalette(DrawingCanvasDeviceClass deviceClass) async {
+    if (widget.activityContext.isHtp) return;
     var value = HSVColor.fromColor(_toolState.color);
     final previousColor = _toolState.color;
 
     Widget palette(StateSetter setPaletteState) => DrawingColorPalette(
       value: value,
       previousColor: previousColor,
+      recentColors: _recentColors,
       onChanged: (next) {
         setPaletteState(() => value = next);
         _setColor(next.toColor());
@@ -2366,13 +2391,19 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 잠겨 그림도 더 그릴 수 없어, 지금 완료할 이유도 없다.
   Widget? _buildCompleteCta(BuildContext context) {
     if (_isConversationFocusMode) return null;
-    return DrawingCompleteCta(
-      enabled: !_canvasLocked && _activeStroke == null && _hasDrawingContent,
-      isCompleting: _isCompleting,
-      compact:
-          _deviceClassFor(MediaQuery.sizeOf(context)) !=
-          DrawingCanvasDeviceClass.tablet,
-      onPressed: () => unawaited(_confirmAndComplete()),
+    return Padding(
+      padding: const EdgeInsets.only(
+        right: AppSpacing.sm,
+        bottom: AppSpacing.sm,
+      ),
+      child: DrawingCompleteCta(
+        enabled: !_canvasLocked && _activeStroke == null && _hasDrawingContent,
+        isCompleting: _isCompleting,
+        compact:
+            _deviceClassFor(MediaQuery.sizeOf(context)) !=
+            DrawingCanvasDeviceClass.tablet,
+        onPressed: () => unawaited(_confirmAndComplete()),
+      ),
     );
   }
 
@@ -2565,6 +2596,7 @@ class _DrawingScreenState extends State<DrawingScreen>
                     _conversationStartError != null ||
                     _htpAdvanceError != null;
                 final toolbar = DrawingToolbar(
+                  pencilOnly: widget.activityContext.isHtp,
                   toolState: _toolState,
                   quickColors: _quickColors,
                   paletteAnchorLink: _paletteAnchorLink,

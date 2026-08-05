@@ -5,44 +5,49 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  testWidgets('crayon uses the artwork drawn for the selected colour', (
-    tester,
-  ) async {
-    await tester.pumpWidget(
-      const MaterialApp(
-        home: CanvasToolAssetIcon(
-          artwork: CanvasToolArtwork.crayon,
-          pointColor: AppColors.canvasSwatchRed,
-          size: 64,
-          filterQuality: FilterQuality.high,
+  testWidgets(
+    'crayon tints only its point mask with the exact selected colour',
+    (tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: CanvasToolAssetIcon(
+            artwork: CanvasToolArtwork.crayon,
+            pointColor: AppColors.canvasSwatchRed,
+            size: 64,
+            filterQuality: FilterQuality.high,
+          ),
         ),
-      ),
-    );
+      );
 
-    expect(
-      find.byKey(const ValueKey('canvas-tool-base-crayon')),
-      findsOneWidget,
-    );
-    // 색을 코드에서 덧칠하지 않는다(S15P11B209-806). 한 장에 색을 씌우면
-    // 마스크가 못 덮는 가장자리로 밑그림이 비쳐 다른 색 띠가 생긴다.
-    expect(find.byType(ShaderMask), findsNothing);
-    expect(
-      find.byKey(const ValueKey('canvas-tool-mask-crayon')),
-      findsNothing,
-    );
+      expect(
+        find.byKey(const ValueKey('canvas-tool-base-crayon')),
+        findsOneWidget,
+      );
+      // 색을 코드에서 덧칠하지 않는다(S15P11B209-806). 한 장에 색을 씌우면
+      // 마스크가 못 덮는 가장자리로 밑그림이 비쳐 다른 색 띠가 생긴다.
+      expect(find.byType(ColorFiltered), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('canvas-tool-mask-crayon')),
+        findsOneWidget,
+      );
 
-    final base = tester.widget<Image>(
-      find.byKey(const ValueKey('canvas-tool-base-crayon')),
-    );
-    expect(
-      (base.image as AssetImage).assetName,
-      'assets/canvas/tools/red/crayon.png',
-    );
-    expect(base.fit, BoxFit.contain);
-    expect(base.alignment, Alignment.center);
-    expect(base.filterQuality, FilterQuality.high);
-    expect(base.color, isNull);
-  });
+      final base = tester.widget<Image>(
+        find.byKey(const ValueKey('canvas-tool-base-crayon')),
+      );
+      expect(
+        (base.image as AssetImage).assetName,
+        'assets/canvas/tools/crayon_base.png',
+      );
+      expect(base.fit, BoxFit.contain);
+      expect(base.alignment, Alignment.center);
+      expect(base.filterQuality, FilterQuality.high);
+      final filter = tester.widget<ColorFiltered>(find.byType(ColorFiltered));
+      expect(
+        filter.colorFilter,
+        const ColorFilter.mode(AppColors.canvasSwatchRed, BlendMode.srcIn),
+      );
+    },
+  );
 
   test('a colour off the quick palette falls back to the nearest artwork', () {
     expect(CanvasToolAssetIcon.variantFor(AppColors.canvasSwatchTeal), 'teal');
@@ -91,43 +96,41 @@ void main() {
     },
   );
 
-  testWidgets('changing point color swaps in that colour artwork', (
-    tester,
-  ) async {
-    Future<void> pump(Color color) => tester.pumpWidget(
-      MaterialApp(
-        home: CanvasToolAssetIcon(
-          artwork: CanvasToolArtwork.crayon,
-          pointColor: color,
-          size: 64,
-          filterQuality: FilterQuality.low,
+  testWidgets(
+    'changing point color keeps geometry and retints its point mask',
+    (tester) async {
+      Future<void> pump(Color color) => tester.pumpWidget(
+        MaterialApp(
+          home: CanvasToolAssetIcon(
+            artwork: CanvasToolArtwork.crayon,
+            pointColor: color,
+            size: 64,
+            filterQuality: FilterQuality.low,
+          ),
         ),
-      ),
-    );
+      );
 
-    await pump(AppColors.canvasSwatchRed);
-    final redBase = tester.widget<Image>(
-      find.byKey(const ValueKey('canvas-tool-base-crayon')),
-    );
+      await pump(AppColors.canvasSwatchRed);
+      final redFilter = tester.widget<ColorFiltered>(
+        find.byType(ColorFiltered),
+      );
 
-    await pump(AppColors.canvasSwatchBlue);
-    final blueBase = tester.widget<Image>(
-      find.byKey(const ValueKey('canvas-tool-base-crayon')),
-    );
+      await pump(AppColors.canvasSwatchBlue);
+      final blueFilter = tester.widget<ColorFiltered>(
+        find.byType(ColorFiltered),
+      );
 
-    // 색마다 그림이 다르지만 놓이는 방식은 같아야 아이콘이 흔들리지 않는다.
-    expect(
-      (redBase.image as AssetImage).assetName,
-      'assets/canvas/tools/red/crayon.png',
-    );
-    expect(
-      (blueBase.image as AssetImage).assetName,
-      'assets/canvas/tools/blue/crayon.png',
-    );
-    expect(blueBase.fit, redBase.fit);
-    expect(blueBase.alignment, redBase.alignment);
-    expect(blueBase.filterQuality, redBase.filterQuality);
-  });
+      // 색마다 그림이 다르지만 놓이는 방식은 같아야 아이콘이 흔들리지 않는다.
+      expect(
+        redFilter.colorFilter,
+        const ColorFilter.mode(AppColors.canvasSwatchRed, BlendMode.srcIn),
+      );
+      expect(
+        blueFilter.colorFilter,
+        const ColorFilter.mode(AppColors.canvasSwatchBlue, BlendMode.srcIn),
+      );
+    },
+  );
 
   testWidgets(
     'a failed base decode uses the artwork-specific monochrome fallback',
