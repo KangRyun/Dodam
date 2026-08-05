@@ -383,6 +383,112 @@ class RagReference(_CamelModel):
     title: str
 
 
+# ── 경향 해석 (S15P11B209-887) ───────────────────────────────────
+# 정본: docs/S15P11B209-875-report-api-contract.md (정본 v1.1) + 안전 예외는
+#   docs/api/report-detail-guardian-contract.md §4-1~§4-4 (S15P11B209-885).
+#
+# ⚠️ 필드명은 875 계약을 **그대로** 쓴다. FE가 이미 그 이름으로 DTO·화면을 구현해 병합했고
+#    (report_dtos.dart), 중간에 매핑 계층을 두면 그 표가 틀릴 때 필드가 조용히 사라진다.
+#    그래서 여기 이름은 다른 계약(camelCase 별칭)과 달리 875 문구를 1:1로 따른다.
+# ⚠️ 전 필드 optional·기본 빈 목록/None — 구 BE는 unknown 필드를 무시하므로 배포 순서 무관.
+
+
+class EvidenceSourceRef(_CamelModel):
+    """근거의 원본 참조 (875 §4). id는 **BE가 발급한 식별자**만 쓴다.
+
+    AI가 조합키(analysisId+objectCode+detectionOrder 같은)를 조립하면 서버가 독립성을 검증할 수
+    없어 게이트가 자기 신고로 무력해진다 — 그래서 받은 것만 참조한다.
+
+    kind: QA_ANSWER | DETECTED_OBJECT | VLM_OBSERVATION | EMOTION_SELECTION |
+          ACTIVITY_METRIC | PRIOR_ACTIVITY
+    ⚠️ PRIOR_ACTIVITY 는 이전 **AI 해석 결과**를 가리킬 수 없다(순환 추론 차단) — 이전 활동의
+       원본 관찰 레코드나 확인된 아동 표현 메시지만.
+    """
+
+    kind: str
+    id: str
+
+
+class ReportEvidenceItem(_CamelModel):
+    """근거 풀 한 건 (875 §4). 카드가 evidence_refs 로 참조한다.
+
+    evidence_id 는 **이 응답 안에서만 유일한 로컬 정수**다(1,2,3…). BE가 저장 시 최종 ID로
+    재매핑하고 evidence_refs 도 함께 갱신한다 — 외부 키로 쓰지 않는다(재생성 시 값이 달라진다).
+
+    배타 규칙: source_ref(원본 근거)와 derived_from(파생 근거) 중 **정확히 하나**만 갖는다.
+    파생 근거는 REPEATED_SUBJECT·LONGITUDINAL 처럼 자체 원본이 없는 경우다.
+
+    text 는 아이 발화 인용이 섞일 수 있어 repr에서 감춘다(로그 유출 방지).
+    """
+
+    evidence_id: int
+    source_type: str
+    text: str = Field(repr=False)
+    source_ref: EvidenceSourceRef | None = None
+    derived_from: list[EvidenceSourceRef] | None = None
+
+
+class PublicInterpretation(_CamelModel):
+    """보호자에게 공개하는 경향 해석 카드 (875 §3).
+
+    tendency_text 는 반드시 가능성 어조("~일 수 있습니다")다 — 단정·진단 어조 금지.
+    scope_text·home_observation_guide 가 비면 공개 조건 미달이라 카드가 제외된다(875 §4-1).
+    evidence_refs 는 ReportEvidenceItem.evidence_id 참조.
+    """
+
+    category: str
+    title: str
+    tendency_text: str
+    scope_text: str
+    home_observation_guide: str
+    evidence_refs: list[int] = Field(default_factory=list)
+
+
+# ⚠️ subjectReports(875 §5)는 이 응답에 없다. imageUrl·visionObservations·qaPairs 는 BE가 이미
+#    가진 데이터라 BE가 조립한다. interpretationRefs(주제↔카드 연결)도 LLM에게 묻지 않는다 —
+#    카드의 근거 sourceRef(QA_ANSWER 메시지 ID 등)가 어느 주제에서 왔는지 BE가 결정적으로 알 수
+#    있어, 물어보는 쪽이 오히려 틀릴 여지를 만든다.
+
+
+class ReportParentGuide(_CamelModel):
+    """보호자 가이드 (875 §7). guide_type 별로 문장을 묶어 낸다.
+
+    guide_type: DRAWING_CONVERSATION | DAILY_PARENTING | HOME_OBSERVATION | PROFESSIONAL_SUPPORT
+    ⚠️ PROFESSIONAL_SUPPORT 는 상시 노출되는 **일반 상담 안내**이며 고정 템플릿을 쓴다 —
+       crisis_guidance 의 문구·연락처를 재사용하지 않고 신고·긴급 번호를 담지 않는다(875 §7-1).
+    """
+
+    guide_type: str
+    items: list[str] = Field(default_factory=list)
+
+
+class CrisisResource(_CamelModel):
+    """위기 안내에 함께 싣는 공식 상담·신고 자원 (crisis_guidance.CrisisResource와 1:1)."""
+
+    name: str
+    contact: str
+    note: str = ""
+
+
+class CrisisAlert(_CamelModel):
+    """위기 대응 안내 (875 §7-1). 보호자 가이드와 **다른 필드**다.
+
+    전부 사전 검토 템플릿이며 LLM이 생성하지 않는다(crisis_guidance 소유).
+    None 이 기본값이고 "위기 신호 없음"을 뜻한다 — 별도 플래그를 두지 않는다.
+
+    ⚠️ ABUSE_DISCLOSURE 는 이 값을 만들지 않는다(항상 None). 가해자가 보호자일 수 있어 자동
+       통지가 아이를 더 위험하게 한다 — EXPERT_ONLY 보존 + expert_review_required 로 돌린다
+       (S15P11B209-890에서 crisis_guidance 반영 완료).
+    """
+
+    reason_code: str
+    severity: str  # HIGH | ELEVATED
+    title: str
+    message: str
+    action_steps: list[str] = Field(default_factory=list)
+    resources: list[CrisisResource] = Field(default_factory=list)
+
+
 class ObservationGenerationResult(_CamelModel):
     """BE ObservationGenerationResult와 1:1. disclaimer·limitations_text는 필수.
 
@@ -404,6 +510,15 @@ class ObservationGenerationResult(_CamelModel):
     limitations_text: str
     rag_references: list[RagReference] = Field(default_factory=list)
     knowledge_base_version: str | None = None
+    # ── 경향 해석 (S15P11B209-887, 875 계약 정본 v1.1) ─────────────
+    # 전부 optional·기본 빈 목록/None → 구 BE는 무시하고, 빈 목록이면 현행 동작과 동일하다.
+    # 빈 배열은 오류가 아니라 정상이다(875 §10) — 근거가 부족하면 억지로 채우지 않는다.
+    public_interpretations: list[PublicInterpretation] = Field(default_factory=list)
+    evidence_items: list[ReportEvidenceItem] = Field(default_factory=list)
+    parent_guides: list[ReportParentGuide] = Field(default_factory=list)
+    # 위기 안내는 S15P11B209-889이 채운다. 여기서는 자리만 두고 항상 None으로 둔다 —
+    #   문구는 crisis_guidance 의 검토된 템플릿 소유이고 LLM이 만들지 않는다.
+    crisis_alert: CrisisAlert | None = None
     # RAG 근거를 싣지 못한 사유 (S15P11B209-615, optional — 구 BE 무시).
     #   RAG_NO_INDEX(인덱스 미배포) | RAG_UNAVAILABLE(임베딩 등 검색 장애) |
     #   RAG_LOW_SCORE(전부 임계값 미달) | RAG_NO_QUERY(관찰 재료 없음).

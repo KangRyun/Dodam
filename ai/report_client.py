@@ -569,6 +569,178 @@ def _feature(item: dict) -> contracts.ObservedFeatureDraft:
     )
 
 
+# ── 경향 해석 조립 (S15P11B209-887) ──────────────────────────────
+# 정본: docs/S15P11B209-875-report-api-contract.md v1.1 · 안전 예외는 보호자 계약 §4-1~§4-4(885).
+#
+# 여기서 하는 것은 **조립 위생**이다: 계약이 허용한 값인지, 참조가 실제로 존재하는지, 보호자에게
+# 나갈 문장에 진단·낙인 표현이 없는지. 값을 고쳐 통과시키지 않고 **못 쓰는 것은 버린다.**
+# ⚠️ "독립 근거 2건·아이 표현 1건" 같은 계수 게이트는 S15P11B209-888이 별도 모듈로 붙인다.
+#    그때까지 이 조립은 카드 개수를 늘리는 방향으로 관대하지 않다(참조 없는 카드는 버린다).
+_EVIDENCE_SOURCE_TYPES = frozenset(
+    {
+        "VISION",
+        "CHILD_ANSWER",
+        "SELECTED_EMOTION",
+        "STATED_EMOTION",
+        "ACTIVITY_METRIC",
+        "REPEATED_SUBJECT",
+        "LONGITUDINAL",
+    }
+)
+_EVIDENCE_REF_KINDS = frozenset(
+    {
+        "QA_ANSWER",
+        "DETECTED_OBJECT",
+        "VLM_OBSERVATION",
+        "EMOTION_SELECTION",
+        "ACTIVITY_METRIC",
+        "PRIOR_ACTIVITY",
+    }
+)
+_INTERPRETATION_CATEGORIES = frozenset(
+    {
+        "RELATIONSHIP",
+        "EMOTION",
+        "SELF_EXPRESSION",
+        "ACTIVITY_STYLE",
+        "ADAPTATION",
+    }
+)
+# LLM이 만들어도 되는 가이드 유형. DAILY_PARENTING(일상 육아 조언)·PROFESSIONAL_SUPPORT(상담 안내)는
+#   검토된 문장 세트·고정 템플릿 소유라 여기 없다(875 §7-1 · S15P11B209-892). 오면 버린다 —
+#   검토되지 않은 육아 조언·상담 안내가 보호자에게 나가는 것이 이 필드의 유일한 사고 유형이다.
+_AI_GENERATED_GUIDE_TYPES = frozenset({"DRAWING_CONVERSATION", "HOME_OBSERVATION"})
+# 가능성 어조 표지. 하나도 없으면 단정으로 읽히므로 카드를 내지 않는다(875 §3 "가능성 어조").
+_TENTATIVE_MARKERS = ("수 있", "보입니다", "보여요", "경향", "듯", "가능성")
+
+
+def _source_ref(raw) -> contracts.EvidenceSourceRef | None:
+    """{kind, id} 하나를 계약 모델로. 모르는 kind·빈 id는 버린다(조합키·창작 차단)."""
+    if not isinstance(raw, dict):
+        return None
+    kind = str(raw.get("kind", "")).strip()
+    ref_id = str(raw.get("id", "")).strip()
+    if kind not in _EVIDENCE_REF_KINDS or not ref_id:
+        return None
+    return contracts.EvidenceSourceRef(kind=kind, id=ref_id)
+
+
+def _evidence_item(raw) -> contracts.ReportEvidenceItem | None:
+    """근거 한 건을 계약 모델로. 배타 규칙(source_ref XOR derived_from)을 지키지 않으면 버린다.
+
+    식별자가 없는 근거는 서버가 독립성을 검증할 수 없어 게이트를 무력화한다 → 버린다.
+    """
+    if not isinstance(raw, dict):
+        return None
+    try:
+        evidence_id = int(raw.get("evidenceId"))
+    except (TypeError, ValueError):
+        return None
+    source_type = str(raw.get("sourceType", "")).strip()
+    text = str(raw.get("text", "")).strip()
+    if source_type not in _EVIDENCE_SOURCE_TYPES or not text:
+        return None
+    source_ref = _source_ref(raw.get("sourceRef"))
+    derived = [
+        ref
+        for ref in (_source_ref(d) for d in raw.get("derivedFrom") or [])
+        if ref is not None
+    ]
+    # 배타 규칙: 정확히 하나. 둘 다 있거나 둘 다 없으면 무효(875 §4).
+    if bool(source_ref) == bool(derived):
+        return None
+    return contracts.ReportEvidenceItem(
+        evidence_id=evidence_id,
+        source_type=source_type,
+        text=text,
+        source_ref=source_ref,
+        derived_from=derived or None,
+    )
+
+
+def _evidence_items(data: dict) -> list[contracts.ReportEvidenceItem]:
+    """근거 풀. evidence_id 중복은 첫 건만 남긴다(참조가 어느 쪽을 가리키는지 모호해진다)."""
+    items: list[contracts.ReportEvidenceItem] = []
+    seen: set[int] = set()
+    for raw in data.get("evidenceItems") or []:
+        item = _evidence_item(raw)
+        if item is None or item.evidence_id in seen:
+            continue
+        seen.add(item.evidence_id)
+        items.append(item)
+    return items
+
+
+def _public_interpretation(
+    raw, known_ids: set[int]
+) -> contracts.PublicInterpretation | None:
+    """경향 해석 카드 하나를 계약 모델로. 아래에 걸리면 카드를 **내지 않는다**.
+
+    - category가 계약 밖 / 필수 서술이 빔 / tendencyText가 단정 어조
+    - 존재하지 않는 evidenceId 참조만 남음 → 근거 없는 카드가 된다
+    표현 안전 필터(591·592)에 걸리면 카드를 빼고 전문가 검토를 올린다 — features와 달리
+    카드에는 EXPERT_ONLY 자리가 없어서(875 §3) 강등할 곳이 없다. 조용히 사라지지 않게
+    expertReviewRequired 로 신호를 남기는 것은 호출부(_assemble)가 한다.
+    """
+    if not isinstance(raw, dict):
+        return None
+    category = str(raw.get("category", "")).strip()
+    title = str(raw.get("title", "")).strip()
+    tendency = str(raw.get("tendencyText", "")).strip()
+    scope = str(raw.get("scopeText", "")).strip()
+    guide = str(raw.get("homeObservationGuide", "")).strip()
+    if category not in _INTERPRETATION_CATEGORIES:
+        return None
+    if not (title and tendency and scope and guide):
+        return None
+    if not any(marker in tendency for marker in _TENTATIVE_MARKERS):
+        logger.warning("경향 카드 단정 어조 — 카드 제외(category=%s)", category)
+        return None
+    refs = []
+    for value in raw.get("evidenceRefs") or []:
+        try:
+            ref = int(value)
+        except (TypeError, ValueError):
+            continue
+        if ref in known_ids and ref not in refs:
+            refs.append(ref)
+    if not refs:
+        logger.warning("경향 카드 근거 참조 없음 — 카드 제외(category=%s)", category)
+        return None
+    return contracts.PublicInterpretation(
+        category=category,
+        title=title,
+        tendency_text=tendency,
+        scope_text=scope,
+        home_observation_guide=guide,
+        evidence_refs=refs,
+    )
+
+
+def _parent_guides(data: dict) -> list[contracts.ReportParentGuide]:
+    """보호자 가이드. AI가 만들어도 되는 유형만 남기고 문장 단위로 안전 검사한다."""
+    guides: list[contracts.ReportParentGuide] = []
+    for raw in data.get("parentGuides") or []:
+        if not isinstance(raw, dict):
+            continue
+        guide_type = str(raw.get("guideType", "")).strip()
+        if guide_type not in _AI_GENERATED_GUIDE_TYPES:
+            if guide_type:
+                # 검토된 문장 세트·고정 템플릿 자리를 LLM이 채우려 한 경우다.
+                logger.warning("검토 대상 가이드 유형을 LLM이 생성 — 제외(%s)", guide_type)
+            continue
+        items = [
+            text
+            for text in (str(i).strip() for i in raw.get("items") or [])
+            if text and not report_safety.has_unsafe_expression(text)
+        ]
+        if items:
+            guides.append(
+                contracts.ReportParentGuide(guide_type=guide_type, items=items)
+            )
+    return guides
+
+
 def _generation_version(is_htp: bool) -> str:
     """리포트 재현성 버전 태그 — 프롬프트·파이프라인 버전을 함께 기록한다(S15P11B209-602).
 
@@ -637,6 +809,33 @@ def _assemble(
     ]
     needs_expert_review = report_safety.has_unsafe_expression(*guardian_texts)
 
+    # ── 경향 해석 (S15P11B209-887) ─────────────────────────────
+    # 근거 풀을 먼저 만들고, 카드는 그 풀에 실제로 있는 근거만 참조하게 한다.
+    evidence_items = _evidence_items(data)
+    known_ids = {item.evidence_id for item in evidence_items}
+    interpretations: list[contracts.PublicInterpretation] = []
+    for raw in data.get("publicInterpretations") or []:
+        # 표현 안전 검사를 **구조 검사보다 먼저** 원문에 돌린다. 순서를 바꾸면 형식까지 어긋난
+        # 카드가 구조 검사에서 먼저 걸러져, 진단·낙인 표현이 있었다는 신호가 사라진다.
+        # 카드에는 EXPERT_ONLY 자리가 없어(875 §3) 강등할 곳이 없다 — 빼고 신호를 남긴다.
+        if isinstance(raw, dict) and report_safety.has_unsafe_expression(
+            *(
+                str(raw.get(key, ""))
+                for key in ("title", "tendencyText", "scopeText", "homeObservationGuide")
+            )
+        ):
+            logger.warning("경향 카드 과도 규정·단정 표현 — 카드 제외·전문가 검토 상향")
+            needs_expert_review = True
+            continue
+        card = _public_interpretation(raw, known_ids)
+        if card is not None:
+            interpretations.append(card)
+    # 아무 카드도 참조하지 않는 근거는 싣지 않는다 — 화면에 쓰이지 않는 아이 발화 인용이
+    # 응답에 남는 것을 막는다(최소 노출).
+    referenced = {ref for card in interpretations for ref in card.evidence_refs}
+    evidence_items = [i for i in evidence_items if i.evidence_id in referenced]
+    parent_guides = _parent_guides(data)
+
     observation = contracts.ObservationDraft(
         status="AI_DRAFT",
         overall_summary=str(data.get("overallSummary", "")),
@@ -692,6 +891,12 @@ def _assemble(
             rag_knowledge_base_version() if rag_chunks else None
         ),
         rag_skipped_reason=rag_skipped_reason,
+        # 경향 해석(S15P11B209-887). 근거가 모자라면 빈 목록이고, 그것이 정상이다(875 §10).
+        public_interpretations=interpretations,
+        evidence_items=evidence_items,
+        parent_guides=parent_guides,
+        # 위기 안내는 S15P11B209-889이 채운다 — LLM 결과에서 만들지 않는다.
+        crisis_alert=None,
     )
 
 
