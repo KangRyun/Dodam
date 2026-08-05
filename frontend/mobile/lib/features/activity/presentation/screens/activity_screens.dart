@@ -496,6 +496,7 @@ class _DrawingScreenState extends State<DrawingScreen>
       _questionTtsController = AiQuestionTtsController(
         ttsRepository,
         playerFactory(),
+        request: QuestionTtsRequest(voice: _companionSnapshot.ttsVoice),
       );
     }
     _questionDisplayController = AiQuestionDisplayController()

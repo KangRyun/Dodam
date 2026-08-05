@@ -1,6 +1,6 @@
 # AI 음성 STT/TTS 내부 요청·응답 계약
 
-> Jira: `S15P11B209-289`, `S15P11B209-179`, `S15P11B209-744`(무음·실패 상태 처리)
+> Jira: `S15P11B209-289`, `S15P11B209-179`, `S15P11B209-744`(무음·실패 상태 처리), `S15P11B209-963`(캐릭터별 TTS 음성)
 > **정본: `docs/api/API_명세서_최종.md`** (S15P11B209-400)
 > 상태: 운영 중 (as-built, 2026-07-23 확정 · **2026-08-05 STT 실패 상태 필드 추가**) — 정본 §19.1과 경로 차이 있음
 > 범위: Spring Boot와 FastAPI AI 서버 사이의 음성 변환(STT)·합성(TTS) 내부 계약
@@ -39,7 +39,7 @@
 
 ### 전환 방침
 
-STT는 배포된 BE(`RestClientAiSttClient`)가 경로를 하드코딩해 호출 중이라 바꾸면 즉시 실패한다. TTS는 아직 BE 소비자(S15P11B209-299)가 착수 전이라 여유가 있다 — **TTS를 먼저 정본에 맞추고 STT를 나중에 옮기는 순서**가 위험이 적다.
+STT는 배포된 BE(`RestClientAiSttClient`)가 경로를 하드코딩해 호출 중이라 바꾸면 즉시 실패한다. TTS BE 소비자(S15P11B209-299)는 이미 운영 중이다. 경로·응답 형식 정합화는 기존 TTS 캐시·재생 경로와 함께 별도 이슈에서 단계적으로 진행한다.
 
 정합화는 BE·AI 동시 수정이 필요한 2단계 작업이며, 정본 §21이 허용한 방식(새 경로 추가 → BE 전환 확인 → 구 경로 제거)으로 진행한다. 인증 헤더는 이미 AI 서버가 두 헤더를 함께 수용하도록 바뀌어 있다(S15P11B209-398).
 
@@ -151,15 +151,20 @@ AI 서버가 받는 값은 **서비스 voice 코드**이며, GMS provider voice 
 
 | 서비스 코드 | 실제 목소리 |
 | --- | --- |
-| `CHILD_FRIENDLY_01` | fable (기본 곰돌이 톤) |
-| `FABLE` | fable |
+| `CHILD_FRIENDLY_01` | fable (이전 클라이언트 호환 기본값) |
+| `FABLE` | fable (BASE·도담이) |
+| `NOVA` | nova (PRINCESS·공주) |
+| `ASH` | ash (DINO·공룡) |
+| `BALLAD` | ballad (OCTOPUS·문어) |
+| `VERSE` | verse (EXPLORER·탐험가) |
+| `SAGE` | sage (RIBBON·리본) |
+| `ECHO` | echo (PRINCE·왕자) |
 | `ALLOY` | alloy |
-| `NOVA` | nova |
 | `CORAL` | coral |
 
 - **모르는 코드는 거절하지 않고 서버 기본값(`TTS_VOICE`, 기본 `fable`)으로 대체한다.** 목소리 코드 하나 때문에 아이와의 대화에서 음성이 아예 나오지 않는 것을 피하기 위한 선택이며, 대체 시 AI 로그에 경고를 남긴다.
 - 이 규칙 이전에는 받은 값을 GMS에 그대로 넘겨, 명세 예시 값(`CHILD_FRIENDLY_01`)을 포함한 모든 대문자 코드가 `BadRequestError` → 502로 실패했다(2026-07-27 실측).
-- `speed`는 이 운영 계약의 요청 필드가 **아니다**. 정본 §19.7에는 있으나 아직 반영되지 않았으므로 보내도 무시된다.
+- `speed`는 AI 서버 호출에는 아직 반영되지 않아 보내도 합성 속도는 바뀌지 않는다. 다만 Spring은 공개 API 계약에 따라 `messageId`·`voice`·`speed` 조합으로 캐시를 구분한다.
 
 ## 저장·상태 전이
 

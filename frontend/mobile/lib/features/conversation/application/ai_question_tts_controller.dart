@@ -3,16 +3,22 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../domain/models/ai_question.dart';
+import '../domain/models/question_tts.dart';
 import '../domain/repositories/question_tts_repository.dart';
 import '../domain/services/question_audio_player.dart';
 
 enum AiQuestionTtsStatus { idle, loading, playing, failure }
 
 final class AiQuestionTtsController extends ChangeNotifier {
-  AiQuestionTtsController(this._repository, this._player);
+  AiQuestionTtsController(
+    this._repository,
+    this._player, {
+    this.request = const QuestionTtsRequest(),
+  });
 
   final QuestionTtsRepository _repository;
   final QuestionAudioPlayer _player;
+  final QuestionTtsRequest request;
   final Set<int> _handledMessageIds = <int>{};
 
   AiQuestionTtsStatus status = AiQuestionTtsStatus.idle;
@@ -39,7 +45,10 @@ final class AiQuestionTtsController extends ChangeNotifier {
     if (!_isCurrent(generation, question.messageId)) return;
 
     try {
-      final audio = await _repository.loadQuestionAudio(question.messageId);
+      final audio = await _repository.loadQuestionAudio(
+        question.messageId,
+        request: request,
+      );
       if (!_isCurrent(generation, question.messageId)) return;
       await _player.play(audio.bytes, mimeType: audio.mimeType);
       if (!_isCurrent(generation, question.messageId)) {

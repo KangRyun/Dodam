@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 
 /**
  * AI 질문 행의 TTS 음성 상태와 저장 위치만 선점·갱신하는 CONV-04 전용 읽기·갱신 Entity다.
@@ -38,6 +39,12 @@ public class QuestionTtsMessage {
   @Column(name = "speech_status")
   private String speechStatus;
 
+  @Column(name = "tts_voice")
+  private String ttsVoice;
+
+  @Column(name = "tts_speed")
+  private BigDecimal ttsSpeed;
+
   protected QuestionTtsMessage() {}
 
   public Long getId() {
@@ -70,6 +77,14 @@ public class QuestionTtsMessage {
 
   public String getSpeechStatus() {
     return speechStatus;
+  }
+
+  public String getTtsVoice() {
+    return ttsVoice;
+  }
+
+  public BigDecimal getTtsSpeed() {
+    return ttsSpeed;
   }
 
   /**
