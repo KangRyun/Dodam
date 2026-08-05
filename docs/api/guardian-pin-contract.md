@@ -131,7 +131,7 @@
 
 - `fieldErrors[].field` 는 요청 필드명(`pin`·`currentPin`·`newPin`)이다. `message` 는 Bean Validation 기본 메시지이며 **요청한 PIN 원문을 포함하지 않는다.**
 - 형식 오류는 서비스에 닿지 않으므로 **실패 카운터가 늘지 않는다.** 오타로 잠금이 다가오지 않는다.
-- 클라이언트는 `PIN_INVALID` 가 아니라 `COMMON_400_001` 로 분기해야 한다. Swagger 의 PIN-02 설명은 이 `400` 을 "PIN 형식 오류(PIN_INVALID)"로 잘못 적고 있었고, **이 브랜치에서 실제 동작(`COMMON_400_001`·`data.fieldErrors`)에 맞게 정정했다.** 같은 점검에서 `@Valid` 가 걸린 PIN-03·04 에 `400` 문서가 없고 PIN-02·03·04·05 에 `503`, PIN-05 에 `401`·`404` 가 빠져 있던 것도 §4 표에 맞춰 채웠다.
+- 클라이언트는 `PIN_INVALID` 가 아니라 `COMMON_400_001` 로 분기해야 한다. Swagger 의 PIN-02 설명은 이 `400` 을 "PIN 형식 오류(PIN_INVALID)"로 잘못 적고 있었고, **`58a9bd06` 에서 실제 동작(`COMMON_400_001`·`data.fieldErrors`)에 맞게 정정했다.** 같은 점검에서 `@Valid` 가 걸린 PIN-03·04 에 `400` 문서가 없고 PIN-02·03·04·05 에 `503`, PIN-05 에 `401`·`404` 가 빠져 있던 것도 §4 표에 맞춰 채웠다.
 
 ## 5. 잠금 규칙 (지수 백오프)
 
@@ -201,16 +201,20 @@
 - PIN 원문은 어디에도 저장하지 않는다. 4자리는 조합이 10,000개뿐이라 DB 만 유출돼도 전수 시도가 가능한데, `pepper` 키가 DB 밖(시크릿)에 있어 해시만으로는 복원할 수 없다.
 - 사용자 탈퇴 시 FK CASCADE 로 PIN 이 함께 지워진다.
 
-## 9. 배포 게이트 (미해결)
+## 9. 배포 게이트 — 배선 완료, 값 주입은 리포로 확인 불가 (2026-08-05 갱신)
 
-**현재 상태로 배포하면 PIN API 5개 전부 `503 PIN_UNAVAILABLE` 이다.**
+`pepper` 는 `app.security.guardian-pin.pepper` = `${GUARDIAN_PIN_PEPPER:}` 로 `backend/src/main/resources/application.yml:119` 에 정의된다. 기본값이 빈 문자열이고, 빈 문자열이면 `GuardianPinHasher.isConfigured()` 가 false 라 **PIN API 5개 전부 `503 PIN_UNAVAILABLE`** 이다(부팅·다른 API·Healthcheck 는 정상 — 설계상 의도).
 
-- `pepper` 는 `app.security.guardian-pin.pepper` = `${GUARDIAN_PIN_PEPPER:}` 로 `backend/src/main/resources/application.yml:119` 에만 정의돼 있다. 기본값이 빈 문자열이고, 빈 문자열이면 `GuardianPinHasher.isConfigured()` 가 false 라 모든 호출이 503 이다.
-- `GUARDIAN_PIN_PEPPER` 는 `infra/.env.example` 과 `infra/k8s/base/backend.yaml` 의 env 목록에 **둘 다 없다**(2026-08-04 확인). 같은 성격의 `PUSH_DEVICE_TOKEN_ENCRYPTION_KEY` 는 두 파일에 모두 등재돼 있어 대조가 된다.
-- 필요한 조치(**인프라 담당 작업 대기 중**, 이 계약 작업에서는 `infra/` 를 수정하지 않았다):
-  1. `infra/.env.example` 에 `GUARDIAN_PIN_PEPPER` 항목 추가(값 생성 방법 주석 포함)
-  2. `infra/k8s/base/backend.yaml` 의 backend env 에 `dodam-secrets` 참조 추가
-  3. 시크릿에 실제 값 주입
+**env 배선은 끝났다.** `38a30a49 feat(infra): [S15P11B209-879] 보호자 PIN pepper 주입과 시크릿 절차 정정`(병합 `942882fa`)이 두 파일을 채웠다:
+
+- `infra/.env.example:74` — `GUARDIAN_PIN_PEPPER=CHANGE_ME_base64_32`(`openssl rand -base64 32`, 기본 빈값→503 주석 포함)
+- `infra/k8s/base/backend.yaml:118` — `{ name: GUARDIAN_PIN_PEPPER, valueFrom: { secretKeyRef: { name: dodam-secrets, key: GUARDIAN_PIN_PEPPER, optional: true } } }`
+
+> 이 문서의 이전 판(2026-08-04)은 "두 파일에 **둘 다 없다**, 인프라 담당 작업 대기 중"이라고 적었다. 그 서술은 `5abed68f` 시점 사실이었고 지금은 낡았다 — 위 커밋으로 해소됐다.
+
+🔴 **다만 "배선됨"과 "값이 들어감"은 다르다.** `secretKeyRef` 에 `optional: true` 가 붙어 있어 **`dodam-secrets` 에 `GUARDIAN_PIN_PEPPER` 키가 없어도 pod 는 정상 기동하고, 그 경우 env 가 비어 여전히 503** 이다. 클러스터 시크릿에 실제 값이 주입됐는지는 **리포지토리로 확인할 수 없다**(`sudo sync-secrets.sh` 실행 여부는 서버에서 확인). 남은 확인 항목은 **하나**다 — 시크릿에 실제 값이 들어갔는지. 배포 서버에서 env 존재를 보거나, PIN API 를 호출해 `503` 이 아닌지로 판별한다.
+
+⚠️ **주입 전까지 이 기능은 동작하지 않는다.** 실패 횟수 누적·5회 잠금·지수 백오프(§6)도 pepper 가 들어와야 비로소 실제로 검증된다 — `requireAvailable()` 이 해시 비교 이전에 503 으로 거부하므로 잠금 로직에 도달조차 하지 않는다.
 - **키를 바꾸면 기존 PIN 은 전부 검증 실패한다**(pepper 가 해시 입력에 들어간다). 운영 투입 후에는 키를 교체할 수 없고, 교체가 필요하면 전체 PIN 초기화가 동반된다.
 - 별도 설정: `GUARDIAN_PIN_HASH_STRENGTH`(기본 12), `GUARDIAN_PIN_RESET_WINDOW_MINUTES`(기본 5). 둘 다 기본값으로 동작하므로 배포 차단 요인은 아니다.
 
