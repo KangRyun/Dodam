@@ -27,7 +27,36 @@ final class EmotionChoicePresentation {
   final String response;
 }
 
+// 표정 카드 노출 순서: 기쁨·편안·슬픔·불안·화남. 그림일기와 HTP가 같은 목록을
+// 공유하므로 두 화면의 감정 순서가 항상 동일하다(S15P11B209-919).
 const emotionChoicePresentations = <EmotionChoicePresentation>[
+  EmotionChoicePresentation(
+    emotion: DrawingEmotionType.happy,
+    label: '기쁨',
+    assetPath: 'assets/characters/emotions/dodam_emotion_joy.png',
+    accent: Color(0xFF925E00),
+    softBackground: Color(0xFFFCF0C7),
+    canvasBackground: Color(0xFFF7E6AD),
+    response: '기쁜 마음을 골랐구나.',
+  ),
+  EmotionChoicePresentation(
+    emotion: DrawingEmotionType.calm,
+    label: '편안',
+    assetPath: 'assets/characters/emotions/dodam_emotion_calm.png',
+    accent: Color(0xFF3F7448),
+    softBackground: Color(0xFFE7F2E5),
+    canvasBackground: Color(0xFFDFEFDD),
+    response: '편안한 마음을 골랐구나.',
+  ),
+  EmotionChoicePresentation(
+    emotion: DrawingEmotionType.sad,
+    label: '슬픔',
+    assetPath: 'assets/characters/emotions/dodam_emotion_sad.png',
+    accent: Color(0xFF3E77B2),
+    softBackground: Color(0xFFE5F0FA),
+    canvasBackground: Color(0xFFDCEAF7),
+    response: '슬픈 마음을 골랐구나. 도담이가 잘 기억해 둘게.',
+  ),
   EmotionChoicePresentation(
     emotion: DrawingEmotionType.scared,
     label: '불안',
@@ -45,33 +74,6 @@ const emotionChoicePresentations = <EmotionChoicePresentation>[
     softBackground: Color(0xFFFBE5DE),
     canvasBackground: Color(0xFFF4DDD5),
     response: '화난 마음을 골랐구나. 그런 마음도 괜찮아.',
-  ),
-  EmotionChoicePresentation(
-    emotion: DrawingEmotionType.sad,
-    label: '슬픔',
-    assetPath: 'assets/characters/emotions/dodam_emotion_sad.png',
-    accent: Color(0xFF3E77B2),
-    softBackground: Color(0xFFE5F0FA),
-    canvasBackground: Color(0xFFDCEAF7),
-    response: '슬픈 마음을 골랐구나. 도담이가 잘 기억해 둘게.',
-  ),
-  EmotionChoicePresentation(
-    emotion: DrawingEmotionType.calm,
-    label: '편안',
-    assetPath: 'assets/characters/emotions/dodam_emotion_calm.png',
-    accent: Color(0xFF3F7448),
-    softBackground: Color(0xFFE7F2E5),
-    canvasBackground: Color(0xFFDFEFDD),
-    response: '편안한 마음을 골랐구나.',
-  ),
-  EmotionChoicePresentation(
-    emotion: DrawingEmotionType.happy,
-    label: '기쁨',
-    assetPath: 'assets/characters/emotions/dodam_emotion_joy.png',
-    accent: Color(0xFF925E00),
-    softBackground: Color(0xFFFCF0C7),
-    canvasBackground: Color(0xFFF7E6AD),
-    response: '기쁜 마음을 골랐구나.',
   ),
 ];
 
