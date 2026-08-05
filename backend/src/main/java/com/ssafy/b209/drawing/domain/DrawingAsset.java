@@ -279,7 +279,7 @@ public class DrawingAsset {
    * @param capturedAt 클라이언트가 초안을 저장한 UTC 시각
    * @param createdAt 서버가 Metadata를 생성한 UTC 시각
    * @return 영속화 전 초안 Metadata
-   * @throws IllegalArgumentException 버전이나 마지막 이벤트 순서가 양수가 아닌 경우
+   * @throws IllegalArgumentException 버전이 양수가 아니거나 마지막 이벤트 순서가 음수인 경우
    */
   public static DrawingAsset draft(
       DrawingSession drawingSession,
@@ -296,8 +296,8 @@ public class DrawingAsset {
     if (assetVersion <= 0) {
       throw new IllegalArgumentException("assetVersion must be positive");
     }
-    if (lastEventSequence <= 0) {
-      throw new IllegalArgumentException("lastEventSequence must be positive");
+    if (lastEventSequence < 0) {
+      throw new IllegalArgumentException("lastEventSequence must not be negative");
     }
     DrawingAsset asset =
         new DrawingAsset(

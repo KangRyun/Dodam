@@ -3,6 +3,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
@@ -17,14 +18,23 @@ import '../../../drawing/application/activity_completion_controller.dart';
 import '../../../drawing/application/canvas_tutorial_controller.dart';
 import '../../../drawing/application/drawing_object_detection_controller.dart';
 import '../../../drawing/application/drawing_activity_completion_controller.dart';
+import '../../../drawing/application/drawing_document_controller.dart';
 import '../../../drawing/application/drawing_pressure_policy.dart';
 import '../../../drawing/application/drawing_session_start_controller.dart';
 import '../../../drawing/application/drawing_sync_coordinator.dart';
 import '../../../drawing/application/drawing_draft_restore_controller.dart';
+import '../../../drawing/application/drawing_fill_engine.dart';
 import '../../../drawing/application/htp_response_flow_controller.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart';
 import '../../../drawing/domain/repositories/drawing_repository.dart';
 import '../../../drawing/presentation/models/drawing_stroke.dart';
+import '../../../drawing/presentation/models/drawing_canvas_action.dart';
+import '../../../drawing/presentation/models/drawing_tool_state.dart';
+import '../../../drawing/presentation/widgets/drawing_color_palette.dart';
+import '../../../drawing/presentation/widgets/drawing_canvas_viewport.dart';
+import '../../../drawing/presentation/widgets/drawing_crayon_frame.dart';
+import '../../../drawing/presentation/widgets/drawing_cursor_overlay.dart';
+import '../../../drawing/presentation/widgets/drawing_toolbar.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 import '../../../drawing/presentation/widgets/canvas_tool_tutorial_overlay.dart';
 import '../../../conversation/conversation.dart';
@@ -126,6 +136,7 @@ class DrawingScreen extends StatefulWidget {
     this.drawingRepository,
     this.syncPolicy = const DrawingSyncPolicy(),
     this.syncCoordinator,
+    this.documentController,
     this.objectDetectionController,
     this.draftRestoreController,
     this.draftImageProviderFactory,
@@ -171,6 +182,12 @@ class DrawingScreen extends StatefulWidget {
   final DrawingRepository? drawingRepository;
   final DrawingSyncPolicy syncPolicy;
   final DrawingSyncCoordinator? syncCoordinator;
+
+  /// 캔버스 문서(획·채우기·지우기 이력)를 들고 있는 컨트롤러다.
+  ///
+  /// 주지 않으면 화면이 직접 만들어 쓰고 dispose 까지 책임진다. 테스트는 문서 상태를
+  /// 직접 들여다보기 위해 주입한다.
+  final DrawingDocumentController? documentController;
   final DrawingObjectDetectionController? objectDetectionController;
   final DrawingDraftRestoreController? draftRestoreController;
   final DraftImageProviderFactory? draftImageProviderFactory;
@@ -217,13 +234,60 @@ class _DrawingScreenState extends State<DrawingScreen>
   static const _regular = 8.0;
   static const _thick = 14.0;
 
-  final List<DrawingStroke> _completedStrokes = [];
-  final List<DrawingStroke> _redoStrokes = [];
+  late final DrawingDocumentController _documentController;
+  bool _ownsDocumentController = false;
+
+  /// 화면에 보이는 완결된 획이다. 문서 컨트롤러가 획·채우기·지우기를 한 이력으로
+  /// 관리하므로 이 화면은 목록을 따로 들고 있지 않는다.
+  List<DrawingStroke> get _completedStrokes => _documentController.visibleStrokes;
   DrawingStroke? _activeStroke;
-  DrawingTool _tool = DrawingTool.pen;
-  Color _color = AppColors.drawingInk;
-  double _thickness = _regular;
+  /// 툴바에 늘 떠 있는 기본 8색이다. 상세 팔레트를 열지 않아도 바로 고를 수 있다.
+  static const _quickColors = <Color>[
+    AppColors.canvasSwatchRed,
+    AppColors.canvasSwatchOrange,
+    AppColors.canvasSwatchYellow,
+    AppColors.canvasSwatchGreen,
+    AppColors.canvasSwatchTeal,
+    AppColors.canvasSwatchBlue,
+    AppColors.canvasSwatchPurple,
+    AppColors.canvasSwatchCharcoal,
+  ];
+
+  /// 태블릿에서 상세 팔레트 팝오버를 팔레트 버튼 옆에 붙이기 위한 기준점이다.
+  final LayerLink _paletteAnchorLink = LayerLink();
+
+  late final DrawingCursorController _cursorController;
+
+  /// 현재 선택된 도구·색·굵기다. 크레용 캔버스는 도구를 펜/지우개 두 갈래가 아니라
+  /// 크레용·연필·붓·채우기·지우개로 나누므로 한 상태로 묶어 다룬다.
+  DrawingToolState _toolState = const DrawingToolState(
+    color: AppColors.canvasSwatchCharcoal,
+    width: _regular,
+  );
+
+  DrawingTool get _tool => _toolState.wireTool ?? DrawingTool.pen;
+  Color get _color => _toolState.color;
+  double get _thickness => _toolState.width;
   int? _activePointer;
+
+  /// 채우기·획 지우개·전체 지우기처럼 그림 이미지를 통째로 바꾸는 중인지다.
+  /// 이 동안에는 입력을 막아 캡처와 그림이 어긋나지 않게 한다.
+  bool _isApplyingRasterMutation = false;
+
+  /// 캡처가 끝나 업로드만 남았을 때 참이 된다. 업로드를 기다리는 동안에도
+  /// 아이가 계속 그릴 수 있어야 한다.
+  bool _rasterMutationAllowsDrawing = false;
+  bool _isStrokeEraseGestureActive = false;
+  bool _strokeEraseFallbackActive = false;
+
+  /// 오래 걸리는 채우기 계산이 끝났을 때 그 사이 다른 변경이 있었는지 가린다.
+  int _snapshotMutationGeneration = 0;
+  final DrawingFillEngine _fillEngine = const ScanlineDrawingFillEngine();
+
+  static const _noDocumentChange = DrawingDocumentChange(
+    changed: false,
+    wireEffect: DrawingWireEffect.none,
+  );
   final GlobalKey _canvasBoundaryKey = GlobalKey();
   late final DrawingSyncCoordinator _syncCoordinator;
   late final bool _ownsSyncCoordinator;
@@ -328,6 +392,19 @@ class _DrawingScreenState extends State<DrawingScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _ownsDocumentController = widget.documentController == null;
+    _documentController = widget.documentController ?? DrawingDocumentController();
+    _documentController.addListener(_handleDocumentChanged);
+    _cursorController = DrawingCursorController(
+      DrawingCursorState(
+        visible: false,
+        documentPosition: Offset.zero,
+        instrument: _toolState.instrument,
+        eraserMode: _toolState.eraserMode,
+        documentWidth: _toolState.width,
+        deviceKind: ui.PointerDeviceKind.touch,
+      ),
+    );
     _companionSnapshot = widget.companion;
     final parsedChildId = int.tryParse(widget.childId);
     final tutorialApplicable =
@@ -538,6 +615,207 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
   }
 
+  /// 문서가 바뀌면 화면을 다시 그린다. 채우기·지우기처럼 이 화면 바깥에서 일어난
+  /// 변경도 같은 경로로 반영된다.
+  void _handleDocumentChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// 화면 크기로 캔버스 레이아웃 종류를 정한다. 툴바 배치와 프레임 여백이 이 값에
+  /// 따라 달라진다.
+  DrawingCanvasDeviceClass _deviceClassFor(Size size) {
+    if (size.width >= 900 && size.height > 520) {
+      return DrawingCanvasDeviceClass.tablet;
+    }
+    if (size.width >= 640 && size.height <= 520) {
+      return DrawingCanvasDeviceClass.mobileLandscape;
+    }
+    return DrawingCanvasDeviceClass.mobilePortrait;
+  }
+
+  /// 커서에 보여 줄 도구 상태다. 지울 획이 없어 영역 지우개로 넘어간 동안에는
+  /// 실제로 하는 일과 같게 영역 지우개 커서를 보여 준다.
+  DrawingToolState get _cursorToolState => _strokeEraseFallbackActive
+      ? DrawingToolState(
+          instrument: DrawingInstrument.eraser,
+          eraserMode: DrawingEraserMode.area,
+          color: _toolState.color,
+          width: _toolState.width,
+        )
+      : _toolState;
+
+  /// 커서가 보이는 중이면 바뀐 도구·굵기를 즉시 반영한다.
+  void _refreshVisibleCursor() {
+    final cursor = _cursorController.value;
+    if (!cursor.visible) return;
+    _cursorController.update(
+      documentPosition: cursor.documentPosition,
+      toolState: _cursorToolState,
+      deviceKind: cursor.deviceKind,
+    );
+  }
+
+  void _setInstrument(DrawingInstrument instrument) {
+    setState(() {
+      _toolState = DrawingToolState(
+        instrument: instrument,
+        eraserMode: _toolState.eraserMode,
+        color: _toolState.color,
+        width: _toolState.width,
+      );
+    });
+    _refreshVisibleCursor();
+  }
+
+  void _setColor(Color color) {
+    setState(() {
+      _toolState = DrawingToolState(
+        instrument: _toolState.instrument,
+        eraserMode: _toolState.eraserMode,
+        color: color,
+        width: _toolState.width,
+      );
+    });
+    _refreshVisibleCursor();
+  }
+
+  /// 마우스·스타일러스가 캔버스 위를 지나면 현재 도구와 굵기를 커서로 보여 준다.
+  void _handleCanvasHover(PointerHoverEvent event) {
+    _cursorController.update(
+      documentPosition: event.localPosition,
+      toolState: _cursorToolState,
+      deviceKind: event.kind,
+    );
+  }
+
+  void _handleCanvasExit(PointerEvent event) => _cursorController.hide();
+
+  void _setEraserMode(DrawingEraserMode mode) {
+    setState(() {
+      _toolState = DrawingToolState(
+        instrument: DrawingInstrument.eraser,
+        eraserMode: mode,
+        color: _toolState.color,
+        width: _toolState.width,
+      );
+    });
+    _refreshVisibleCursor();
+  }
+
+  void _handleEraserMenuAction(DrawingEraserMenuAction action) {
+    switch (action) {
+      case DrawingEraserMenuAction.selectStroke:
+        _setEraserMode(DrawingEraserMode.stroke);
+      case DrawingEraserMenuAction.selectArea:
+        _setEraserMode(DrawingEraserMode.area);
+      case DrawingEraserMenuAction.clearAll:
+        unawaited(_confirmClearAll());
+    }
+  }
+
+  /// 전체 지우기는 되돌릴 수 없어 아이에게 큰 변화라 한 번 확인한다.
+  Future<void> _confirmClearAll() async {
+    if (_isApplyingRasterMutation) return;
+    final confirmed = await showAppConfirmDialog(
+      context: context,
+      title: '그림을 모두 지울까요?',
+      message: '지운 그림은 되돌릴 수 없어요.',
+      confirmLabel: '모두 지우기',
+      cancelLabel: '계속 그리기',
+      isDanger: true,
+    );
+    if (confirmed != true || !mounted) return;
+    await _runSnapshotMutation((_) async {
+      // 복원된 그림만 남아 있어도 지울 것이 있는 상태다.
+      final hadRestoredPixels = _draftRestoreController.backgroundImage != null;
+      final localChange = _documentController.clearAll();
+      if (!localChange.changed && !hadRestoredPixels) return _noDocumentChange;
+      if (hadRestoredPixels) _draftRestoreController.startNewDrawing();
+      return const DrawingDocumentChange(
+        changed: true,
+        wireEffect: DrawingWireEffect.none,
+      );
+    });
+  }
+
+  /// 상세 색상 팔레트를 연다. 태블릿은 팔레트 버튼 옆 팝오버, 모바일은 바텀 시트다.
+  Future<void> _openColorPalette(DrawingCanvasDeviceClass deviceClass) async {
+    var value = HSVColor.fromColor(_toolState.color);
+    final previousColor = _toolState.color;
+
+    Widget palette(StateSetter setPaletteState) => DrawingColorPalette(
+      value: value,
+      previousColor: previousColor,
+      onChanged: (next) {
+        setPaletteState(() => value = next);
+        _setColor(next.toColor());
+      },
+    );
+
+    if (deviceClass == DrawingCanvasDeviceClass.tablet) {
+      await showGeneralDialog<void>(
+        context: context,
+        barrierDismissible: true,
+        barrierLabel: '색상 팔레트 닫기',
+        barrierColor: Colors.black26,
+        transitionDuration: const Duration(milliseconds: 150),
+        pageBuilder: (routeContext, _, _) => Stack(
+          children: [
+            CompositedTransformFollower(
+              link: _paletteAnchorLink,
+              showWhenUnlinked: false,
+              targetAnchor: Alignment.bottomRight,
+              followerAnchor: Alignment.topRight,
+              offset: const Offset(0, AppSpacing.sm),
+              child: Material(
+                key: const ValueKey('drawing-tablet-palette-popover'),
+                elevation: 12,
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(20),
+                clipBehavior: Clip.antiAlias,
+                child: SizedBox(
+                  width: 380,
+                  child: StatefulBuilder(
+                    builder: (context, setPaletteState) =>
+                        palette(setPaletteState),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isDismissible: true,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: Colors.transparent,
+      builder: (sheetContext) => ConstrainedBox(
+        key: const ValueKey('drawing-mobile-palette-sheet'),
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: StatefulBuilder(
+          builder: (context, setPaletteState) => palette(setPaletteState),
+        ),
+      ),
+    );
+  }
+
+  void _setThickness(double thickness) {
+    setState(() {
+      _toolState = DrawingToolState(
+        instrument: _toolState.instrument,
+        eraserMode: _toolState.eraserMode,
+        color: _toolState.color,
+        width: thickness,
+      );
+    });
+    _refreshVisibleCursor();
+  }
+
   void _rememberExistingQuestions(
     Iterable<ActivityConversationMessageDto> messages,
   ) {
@@ -550,6 +828,9 @@ class _DrawingScreenState extends State<DrawingScreen>
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     _cancelNoResponseTimer();
+    _documentController.removeListener(_handleDocumentChanged);
+    if (_ownsDocumentController) _documentController.dispose();
+    _cursorController.dispose();
     if (_ownsCanvasTutorialController) _canvasTutorialController?.dispose();
     _syncCoordinator.removeListener(_handleSyncChanged);
     _draftRestoreController.removeListener(_handleDraftRestoreChanged);
@@ -583,6 +864,12 @@ class _DrawingScreenState extends State<DrawingScreen>
     _sttResultController?.removeListener(_handleSttResultChanged);
     _sttResultController?.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeMetrics() {
+    _finishActiveStrokeForLayoutChange();
+    super.didChangeMetrics();
   }
 
   @override
@@ -1232,49 +1519,348 @@ class _DrawingScreenState extends State<DrawingScreen>
   void _startStroke(PointerDownEvent event) {
     if (_activePointer != null ||
         _voiceRecordingController?.isRecording == true) {
+      _cursorController.hide();
       return;
     }
-    _invalidatePendingCompletion();
-    _invalidateNoResponseRequest();
-    // 새 입력은 진행 중인 객체 탐지 결과를 현재 그림에서 제외
-    _objectDetectionController?.onDrawingInputStarted();
-    // 그림 입력이 시작되면 질문 오버레이 숨김
-    _questionDisplayController.dismiss();
+    // 스냅샷을 만드는 중에는 새 입력을 받지 않는다. 업로드가 시작된 뒤에는
+    // 아이가 기다리지 않도록 다시 그릴 수 있게 풀어 준다.
+    if (_isApplyingRasterMutation && !_rasterMutationAllowsDrawing) {
+      _cursorController.hide();
+      return;
+    }
+    _updateCursor(event);
+    switch (_toolState.instrument) {
+      case DrawingInstrument.crayon:
+      case DrawingInstrument.pencil:
+      case DrawingInstrument.brush:
+        _beginSupportedStroke(event, DrawingTool.pen);
+      case DrawingInstrument.eraser
+          when _toolState.eraserMode == DrawingEraserMode.area:
+        _beginSupportedStroke(event, DrawingTool.eraser);
+      case DrawingInstrument.eraser:
+        if (_isApplyingRasterMutation) return;
+        _beginStrokeEraseGesture(event);
+      case DrawingInstrument.fill:
+        if (_isApplyingRasterMutation) return;
+        unawaited(_applyFill(event.localPosition));
+    }
+  }
+
+  void _beginSupportedStroke(PointerDownEvent event, DrawingTool tool) {
+    _beginDrawingInput();
     setState(() {
       _activePointer = event.pointer;
       _activeStroke = DrawingStroke(
         points: [_pointFrom(event)],
-        color: _color,
-        thickness: _thickness,
-        tool: _tool,
+        color: _toolState.color,
+        thickness: _toolState.width,
+        tool: tool,
+        brushProfile: _toolState.brushProfile,
       );
     });
   }
 
+  /// 획 지우개는 지운 결과를 event 로 표현할 수 없어 스냅샷으로만 남는다.
+  /// 제스처 한 번이 undo 한 번이 되도록 컨트롤러에 묶음을 열어 둔다.
+  void _beginStrokeEraseGesture(PointerDownEvent event) {
+    setState(() {
+      _isApplyingRasterMutation = true;
+      _rasterMutationAllowsDrawing = false;
+      _isStrokeEraseGestureActive = true;
+      _strokeEraseFallbackActive = false;
+      _activePointer = event.pointer;
+      _activeStroke = null;
+    });
+    _beginDrawingInput();
+    _documentController.beginStrokeEraseGesture();
+    try {
+      _eraseStrokeOrStartFallback(event);
+    } on Object {
+      _cancelStrokeEraseGesture();
+      rethrow;
+    }
+  }
+
+  /// 지울 획이 없고 복원된 그림만 남아 있으면 그 위를 영역 지우개로 문지른다.
+  void _eraseStrokeOrStartFallback(PointerEvent event) {
+    if (_strokeEraseFallbackActive) {
+      setState(() {
+        _activeStroke = _activeStroke!.addPoint(_pointFrom(event));
+      });
+      _updateCursor(event);
+      return;
+    }
+    final removed = _documentController.eraseStrokeAt(
+      event.localPosition,
+      radius: _toolState.width / 2,
+    );
+    if (removed || _draftRestoreController.backgroundImage == null) return;
+    setState(() {
+      _strokeEraseFallbackActive = true;
+      _activeStroke = DrawingStroke(
+        points: [_pointFrom(event)],
+        color: _toolState.color,
+        thickness: _toolState.width,
+        tool: DrawingTool.eraser,
+      );
+    });
+    _updateCursor(event);
+  }
+
   void _extendStroke(PointerMoveEvent event) {
-    if (_activePointer != event.pointer || _activeStroke == null) return;
+    if (_activePointer != event.pointer) {
+      _cursorController.hide();
+      return;
+    }
+    _updateCursor(event);
+    if (_isStrokeEraseGestureActive && !_rasterMutationAllowsDrawing) {
+      try {
+        _eraseStrokeOrStartFallback(event);
+      } on Object {
+        _cancelStrokeEraseGesture();
+        rethrow;
+      }
+      return;
+    }
+    if (_activeStroke == null) return;
     setState(() {
       _activeStroke = _activeStroke!.addPoint(_pointFrom(event));
     });
   }
 
   void _endStroke(PointerEvent event) {
-    if (_activePointer != event.pointer) return;
+    if (_activePointer != event.pointer) {
+      _cursorController.hide();
+      return;
+    }
+    if (_isStrokeEraseGestureActive && !_rasterMutationAllowsDrawing) {
+      unawaited(_finishStrokeEraseGesture(event));
+      return;
+    }
     final stroke = _activeStroke;
     final completed = event is PointerUpEvent && stroke != null;
     setState(() {
       if (completed) {
-        _completedStrokes.add(stroke);
-        _redoStrokes.clear();
+        _documentController.addStroke(stroke);
       }
       _activeStroke = null;
       _activePointer = null;
     });
-    final canvasSize = _canvasBoundaryKey.currentContext?.size;
-    if (completed && canvasSize != null) {
-      _syncCoordinator.recordStroke(stroke, canvasSize);
-      _objectDetectionController?.onDrawingInputEnded();
+    if (completed) {
+      _syncCoordinator.recordStroke(
+        stroke,
+        DrawingCanvasGeometry.documentSize,
+      );
+      _endDrawingInput();
     }
+    if (event is PointerCancelEvent ||
+        event.kind == ui.PointerDeviceKind.touch) {
+      _cursorController.hide();
+    } else {
+      _updateCursor(event);
+    }
+  }
+
+  Future<void> _finishStrokeEraseGesture(PointerEvent event) async {
+    var change = const DrawingDocumentChange(
+      changed: false,
+      wireEffect: DrawingWireEffect.none,
+    );
+    try {
+      if (event is PointerCancelEvent) {
+        _documentController.cancelStrokeEraseGesture();
+      } else {
+        change = _documentController.endStrokeEraseGesture(
+          fallbackStroke: _strokeEraseFallbackActive ? _activeStroke : null,
+        );
+        if (change.wireStroke case final wireStroke?) {
+          _syncCoordinator.recordStroke(
+            wireStroke,
+            DrawingCanvasGeometry.documentSize,
+          );
+        }
+      }
+      if (mounted) {
+        setState(() {
+          _activeStroke = null;
+          _activePointer = null;
+        });
+      } else {
+        _activeStroke = null;
+        _activePointer = null;
+      }
+      if (change.changed) {
+        await _persistRasterChange(
+          change,
+          revisionAlreadyRecorded: change.wireStroke != null,
+        );
+      }
+    } on Object {
+      _documentController.cancelStrokeEraseGesture();
+      rethrow;
+    } finally {
+      _releaseStrokeEraseGesture(event);
+    }
+  }
+
+  void _cancelStrokeEraseGesture() {
+    _documentController.cancelStrokeEraseGesture();
+    _activeStroke = null;
+    _activePointer = null;
+    _releaseStrokeEraseGesture(null);
+  }
+
+  void _releaseStrokeEraseGesture(PointerEvent? event) {
+    if (!_isStrokeEraseGestureActive) return;
+    _endDrawingInput();
+    if (!mounted) {
+      _isStrokeEraseGestureActive = false;
+      _strokeEraseFallbackActive = false;
+      _isApplyingRasterMutation = false;
+      _rasterMutationAllowsDrawing = false;
+      return;
+    }
+    setState(() {
+      _isStrokeEraseGestureActive = false;
+      _strokeEraseFallbackActive = false;
+      _isApplyingRasterMutation = false;
+      _rasterMutationAllowsDrawing = false;
+    });
+    if (event == null ||
+        event is PointerCancelEvent ||
+        event.kind == ui.PointerDeviceKind.touch) {
+      _cursorController.hide();
+    } else {
+      _updateCursor(event);
+    }
+  }
+
+  /// 문서 밖으로 나간 포인터는 커서를 숨긴다.
+  ///
+  /// 터치도 그리는 동안에는 커서를 보여 준다. 손을 떼고 나면 [_endStroke] 가
+  /// 숨기므로 손가락이 없는데 커서만 남는 일은 없다.
+  void _updateCursor(PointerEvent event) {
+    final documentBounds = Offset.zero & DrawingCanvasGeometry.documentSize;
+    if (!documentBounds.contains(event.localPosition)) {
+      _cursorController.hide();
+      return;
+    }
+    _cursorController.update(
+      documentPosition: event.localPosition,
+      toolState: _cursorToolState,
+      deviceKind: event.kind,
+    );
+  }
+
+  void _beginDrawingInput() {
+    _invalidatePendingCompletion();
+    _invalidateNoResponseRequest();
+    // 새 입력은 진행 중인 객체 탐지 결과를 현재 그림에서 제외
+    _objectDetectionController?.onDrawingInputStarted();
+    // 그림 입력이 시작되면 질문 오버레이 숨김
+    _questionDisplayController.dismiss();
+  }
+
+  void _endDrawingInput() => _objectDetectionController?.onDrawingInputEnded();
+
+  Future<ui.Image> _captureRawDocumentImage() async {
+    final boundary = _canvasBoundaryKey.currentContext?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary) {
+      throw StateError('Drawing document is not ready to capture.');
+    }
+    return boundary.toImage(pixelRatio: 1);
+  }
+
+  /// 찍은 자리와 이어진 같은 색 영역을 현재 색으로 채운다.
+  Future<void> _applyFill(Offset documentPoint) async {
+    await _runSnapshotMutation((mutationGeneration) async {
+      final source = await _captureRawDocumentImage();
+      try {
+        final patch = await _fillEngine.createPatch(
+          source: source,
+          seed: documentPoint,
+          replacement: _toolState.color,
+        );
+        if (patch == null) return _noDocumentChange;
+        var transferred = false;
+        try {
+          // 채우기를 계산하는 사이에 화면이 사라졌거나 다른 변경이 끼어들었으면
+          // 낡은 결과를 문서에 넣지 않는다.
+          if (!mounted || mutationGeneration != _snapshotMutationGeneration) {
+            return _noDocumentChange;
+          }
+          final change = _documentController.addFill(
+            patch: patch.image,
+            documentSize: patch.documentSize,
+          );
+          transferred = true;
+          return change;
+        } finally {
+          if (!transferred) patch.image.dispose();
+        }
+      } finally {
+        source.dispose();
+      }
+    });
+  }
+
+  /// 콜백은 자신이 시작될 때의 세대를 받는다. 오래 걸리는 계산이 끝났을 때
+  /// [_snapshotMutationGeneration] 이 달라졌으면 그 사이 문서가 바뀐 것이다.
+  Future<void> _runSnapshotMutation(
+    Future<DrawingDocumentChange> Function(int mutationGeneration) mutate,
+  ) async {
+    if (_isApplyingRasterMutation) return;
+    final mutationGeneration = ++_snapshotMutationGeneration;
+    setState(() {
+      _isApplyingRasterMutation = true;
+      _rasterMutationAllowsDrawing = false;
+    });
+    _beginDrawingInput();
+    try {
+      final change = await mutate(mutationGeneration);
+      await _persistRasterChange(change);
+    } finally {
+      _endDrawingInput();
+      if (mounted) {
+        setState(() {
+          _isApplyingRasterMutation = false;
+          _rasterMutationAllowsDrawing = false;
+        });
+      } else {
+        _isApplyingRasterMutation = false;
+        _rasterMutationAllowsDrawing = false;
+      }
+    }
+  }
+
+  /// event 를 만들지 않는 변경을 초안으로 곧바로 올린다.
+  ///
+  /// 한 프레임을 기다려 바뀐 그림이 실제로 그려진 뒤에 캡처해야 서버에 옛 그림이
+  /// 올라가지 않는다. 캡처가 끝나면 업로드를 기다리지 않고 다시 그릴 수 있다.
+  Future<void> _persistRasterChange(
+    DrawingDocumentChange change, {
+    bool revisionAlreadyRecorded = false,
+  }) async {
+    if (!change.changed || !mounted) return;
+    _invalidatePendingCompletion();
+    if (!revisionAlreadyRecorded) _syncCoordinator.recordSnapshotChange();
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    setState(() => _rasterMutationAllowsDrawing = true);
+    await _syncCoordinator.saveDraftNow();
+  }
+
+  /// 화면 크기·방향이 바뀌면 진행 중인 입력은 좌표 기준이 달라져 이어 갈 수 없다.
+  ///
+  /// 그리던 획은 현재 점까지 완결하고, 아직 확정되지 않은 획 지우기는 되돌린다.
+  void _finishActiveStrokeForLayoutChange() {
+    if (_isStrokeEraseGestureActive && !_rasterMutationAllowsDrawing) {
+      _cancelStrokeEraseGesture();
+      return;
+    }
+    if (_activeStroke == null) return;
+    _finishActiveStrokeForSave();
+    _cursorController.hide();
   }
 
   /// lifecycle·route 경계에서 pointer up을 더 이상 받을 수 없는 active stroke를
@@ -1284,33 +1870,35 @@ class _DrawingScreenState extends State<DrawingScreen>
     if (stroke == null) return;
     final canvasSize = _canvasBoundaryKey.currentContext?.size;
     setState(() {
-      _completedStrokes.add(stroke);
-      _redoStrokes.clear();
+      _documentController.addStroke(stroke);
       _activeStroke = null;
       _activePointer = null;
     });
     if (canvasSize != null) {
-      _syncCoordinator.recordStroke(stroke, canvasSize);
+      _syncCoordinator.recordStroke(
+        stroke,
+        DrawingCanvasGeometry.documentSize,
+      );
       _objectDetectionController?.onDrawingInputEnded();
     }
   }
 
   void _undoLastStroke() {
-    if (_activeStroke != null || _completedStrokes.isEmpty) return;
+    if (_activeStroke != null || !_documentController.canUndo) return;
     _invalidatePendingCompletion();
     _objectDetectionController?.onDrawingInputStarted();
     // Rebuilding the vector action list also restores pixels removed from a
     // recovered Draft by the last local eraser stroke.
-    setState(() => _redoStrokes.add(_completedStrokes.removeLast()));
+    setState(_documentController.undo);
     _syncCoordinator.recordUndo();
     _objectDetectionController?.onDrawingInputEnded();
   }
 
   void _redoLastStroke() {
-    if (_activeStroke != null || _redoStrokes.isEmpty) return;
+    if (_activeStroke != null || !_documentController.canRedo) return;
     _invalidatePendingCompletion();
     _objectDetectionController?.onDrawingInputStarted();
-    setState(() => _completedStrokes.add(_redoStrokes.removeLast()));
+    setState(_documentController.redo);
     _syncCoordinator.recordRedo();
     _objectDetectionController?.onDrawingInputEnded();
   }
@@ -1695,11 +2283,10 @@ class _DrawingScreenState extends State<DrawingScreen>
     _pendingCompletionMetadata = null;
   }
 
-  List<DrawingStroke> get _visibleStrokes {
-    final strokes = [..._completedStrokes];
-    if (_activeStroke case final stroke?) strokes.add(stroke);
-    return List.unmodifiable(strokes);
-  }
+  /// 아직 확정되지 않아 transient 층에만 그려야 하는 획이다. 확정된 획은
+  /// [DrawingDocumentController.actions] 로 이미 한 번 그려진다.
+  List<DrawingStroke> get _transientStrokes =>
+      List.unmodifiable([?_activeStroke]);
 
   Future<void> _stopTtsAndPop() async {
     if (_isLeaving || _isCompleting) return;
@@ -1751,61 +2338,11 @@ class _DrawingScreenState extends State<DrawingScreen>
       if (!didPop) unawaited(_stopTtsAndPop());
     },
     child: Scaffold(
-      backgroundColor: AppColors.childCanvas,
-      appBar: AppTopBar(
-        title: _activityTitle,
-        onBack: () => unawaited(_stopTtsAndPop()),
-        actions: [
-          if (_canvasTutorialController case final tutorialController?)
-            AnimatedBuilder(
-              animation: tutorialController,
-              builder: (context, _) => IconButton.filledTonal(
-                key: const ValueKey('canvas-tutorial-help'),
-                tooltip: '그림 도구 다시 보기',
-                onPressed: tutorialController.isBusy
-                    ? null
-                    : tutorialController.replay,
-                icon: const Icon(Icons.help_outline_rounded),
-                style: IconButton.styleFrom(
-                  minimumSize: const Size.square(AppSizes.iconButton),
-                ),
-              ),
-            ),
-          IconButton.filledTonal(
-            key: const ValueKey('redo-action'),
-            tooltip: _activeStroke != null
-                ? '그리는 중에는 다시 실행할 수 없어요'
-                : '취소한 그림 획 다시 실행',
-            onPressed: _activeStroke == null && _redoStrokes.isNotEmpty
-                ? _redoLastStroke
-                : null,
-            icon: const Icon(Icons.redo_rounded),
-            style: IconButton.styleFrom(
-              minimumSize: const Size.square(AppSizes.iconButton),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(right: AppSpacing.md),
-            child: IconButton.filledTonal(
-              key: const ValueKey('undo-action'),
-              tooltip: _activeStroke != null
-                  ? '그리는 중에는 실행 취소할 수 없어요'
-                  : '마지막 그림 획 실행 취소',
-              onPressed: _activeStroke == null && _completedStrokes.isNotEmpty
-                  ? _undoLastStroke
-                  : null,
-              icon: const Icon(Icons.undo_rounded),
-              style: IconButton.styleFrom(
-                minimumSize: const Size.square(AppSizes.iconButton),
-              ),
-            ),
-          ),
-        ],
-      ),
+      backgroundColor: AppColors.canvasBackdrop,
       body: Stack(
         children: [
+          // 크레용 툴바가 화면 맨 위에 오므로 상태 표시줄 아래로 내려야 한다.
           SafeArea(
-            top: false,
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final restoreStatus = _draftRestoreController.status;
@@ -1818,7 +2355,13 @@ class _DrawingScreenState extends State<DrawingScreen>
                 final canvas = _CanvasPanel(
                   repaintBoundaryKey: _canvasBoundaryKey,
                   companion: _companionSnapshot,
-                  strokes: _visibleStrokes,
+                  actions: _documentController.actions,
+                  cursorController: _cursorController,
+                  onPointerHover: _handleCanvasHover,
+                  onPointerExit: _handleCanvasExit,
+                  // 확정된 획은 actions 로 한 번만 그린다. 여기에 _visibleStrokes
+                  // 를 넘기면 같은 획이 transient 층에도 겹쳐 두 번 그려진다.
+                  strokes: _transientStrokes,
                   onPointerDown: _startStroke,
                   onPointerMove: _extendStroke,
                   onPointerUp: _endStroke,
@@ -1891,13 +2434,37 @@ class _DrawingScreenState extends State<DrawingScreen>
                   sttResultController: _sttResultController,
                 );
                 final sidePanel = _DrawingSidePanel(
+                  // 도구·색·굵기·완료는 상단 크레용 툴바가 맡는다.
+                  showToolControls: false,
                   selectedTool: _tool,
                   selectedColor: _color,
                   selectedThickness: _thickness,
-                  onToolChanged: (tool) => setState(() => _tool = tool),
-                  onColorChanged: (color) => setState(() => _color = color),
-                  onThicknessChanged: (value) =>
-                      setState(() => _thickness = value),
+                  onToolChanged: (tool) => setState(() {
+                    _toolState = DrawingToolState(
+                      instrument: tool == DrawingTool.eraser
+                          ? DrawingInstrument.eraser
+                          : DrawingInstrument.crayon,
+                      eraserMode: DrawingEraserMode.area,
+                      color: _toolState.color,
+                      width: _toolState.width,
+                    );
+                  }),
+                  onColorChanged: (color) => setState(() {
+                    _toolState = DrawingToolState(
+                      instrument: _toolState.instrument,
+                      eraserMode: _toolState.eraserMode,
+                      color: color,
+                      width: _toolState.width,
+                    );
+                  }),
+                  onThicknessChanged: (value) => setState(() {
+                    _toolState = DrawingToolState(
+                      instrument: _toolState.instrument,
+                      eraserMode: _toolState.eraserMode,
+                      color: _toolState.color,
+                      width: value,
+                    );
+                  }),
                   canComplete:
                       !_canvasLocked &&
                       !_isCompleting &&
@@ -1917,48 +2484,175 @@ class _DrawingScreenState extends State<DrawingScreen>
                   stageErrorAnchorKey: _stageErrorAnchorKey,
                 );
                 final screenSize = MediaQuery.sizeOf(context);
-                final useCompactLandscape =
-                    screenSize.width >= 640 && screenSize.height <= 520;
-                final useTabletLayout =
-                    !useCompactLandscape && screenSize.width >= 900;
-                if (useCompactLandscape || useTabletLayout) {
-                  final padding = useCompactLandscape
-                      ? AppSpacing.sm
-                      : AppSpacing.lg;
-                  final panelWidth = useCompactLandscape ? 240.0 : 320.0;
-                  return Padding(
-                    key: ValueKey(
-                      useCompactLandscape
-                          ? 'drawing-layout-compact-landscape'
-                          : 'drawing-layout-tablet',
+                final deviceClass = _deviceClassFor(screenSize);
+                // 캔버스 위 말풍선이 질문을 보여 주는 동안에는 사이드 패널을
+                // 띄우지 않는다. 같은 질문을 두 번 보여 줄 뿐 아니라, 패널이
+                // 말풍선의 녹음·답변 버튼을 덮어 탭이 닿지 않는다.
+                final questionBubbleVisible =
+                    _questionDisplayController.isVisible &&
+                    _activePointer == null &&
+                    (_canvasLocked || _draftRestoreController.canDraw);
+                // 말풍선이 지금 질문을 그대로 보여 주고 있을 때만 패널을 접는다.
+                // 말풍선이 이전 질문에 머물러 있으면 새 질문을 볼 곳이 없어진다.
+                final bubbleShowsCurrentQuestion =
+                    questionBubbleVisible &&
+                    _questionDisplayController.visibleQuestion?.messageId ==
+                        _questionController?.question?.messageId;
+                // 컨트롤러만 있고 아직 보여 줄 질문도 오류도 없으면 패널을 띄우지
+                // 않는다. 빈 상자가 캔버스 위에 떠 있게 된다.
+                final hasQuestionToShow =
+                    _questionController?.question != null ||
+                    _questionController?.error != null ||
+                    _questionDisplayController.visibleQuestion != null;
+                final hasStageChrome =
+                    (hasQuestionToShow && !bubbleShowsCurrentQuestion) ||
+                    _conversationStartError != null ||
+                    _htpAdvanceError != null;
+                final toolbar = DrawingToolbar(
+                  toolState: _toolState,
+                  quickColors: _quickColors,
+                  paletteAnchorLink: _paletteAnchorLink,
+                  onBack: () => unawaited(_stopTtsAndPop()),
+                  canUndo: _activeStroke == null && _documentController.canUndo,
+                  canRedo: _activeStroke == null && _documentController.canRedo,
+                  canComplete:
+                      !_canvasLocked &&
+                      !_isCompleting &&
+                      _activeStroke == null &&
+                      _hasDrawingContent,
+                  isCompleting: _isCompleting,
+                  saveStatus: _syncCoordinator.saveStatus,
+                  onUndo: _undoLastStroke,
+                  onRedo: _redoLastStroke,
+                  onRetrySave: () => unawaited(_syncCoordinator.retry()),
+                  onInstrumentChanged: _setInstrument,
+                  onEraserMenuAction: _handleEraserMenuAction,
+                  onColorChanged: _setColor,
+                  onWidthChanged: _setThickness,
+                  onOpenPalette: () =>
+                      unawaited(_openColorPalette(deviceClass)),
+                  onComplete: () => unawaited(_confirmAndComplete()),
+                );
+                final frameInset = switch (deviceClass) {
+                  DrawingCanvasDeviceClass.mobilePortrait => AppSpacing.sm,
+                  DrawingCanvasDeviceClass.mobileLandscape => AppSpacing.xs,
+                  DrawingCanvasDeviceClass.tablet => AppSpacing.md,
+                };
+                final layoutKey = switch (deviceClass) {
+                  DrawingCanvasDeviceClass.mobilePortrait =>
+                    'drawing-shell-mobile-portrait',
+                  DrawingCanvasDeviceClass.mobileLandscape =>
+                    'drawing-shell-mobile-landscape',
+                  DrawingCanvasDeviceClass.tablet => 'drawing-shell-tablet',
+                };
+                return Column(
+                  key: ValueKey(layoutKey),
+                  children: [
+                    toolbar,
+                    Expanded(
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
+                            child: Padding(
+                              padding: EdgeInsets.all(frameInset),
+                              child: DrawingCrayonFrame(
+                                deviceClass: deviceClass,
+                                child: canvas,
+                              ),
+                            ),
+                          ),
+                          // HTP 는 지금 몇 단계에서 무엇을 그리는지가 아이에게
+                          // 필요한 정보다. 상단 바를 없앴으므로 캔버스 왼쪽 위에
+                          // 남겨 둔다. 자유 그림은 안내가 필요 없어 띄우지 않는다.
+                          if (widget.activityContext.isHtp)
+                            Positioned(
+                              left: frameInset + AppSpacing.md,
+                              top: frameInset + AppSpacing.md,
+                              child: IgnorePointer(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: AppColors.canvasWarm.withValues(
+                                      alpha: .92,
+                                    ),
+                                    borderRadius: BorderRadius.circular(
+                                      AppRadius.sm,
+                                    ),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: AppSpacing.sm,
+                                      vertical: AppSpacing.xs,
+                                    ),
+                                    child: Text(
+                                      _activityTitle,
+                                      key: const ValueKey(
+                                        'drawing-activity-title',
+                                      ),
+                                      style: const TextStyle(
+                                        color: AppColors.canvasInk,
+                                        fontSize: 14,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          // 도구 사용법 다시 보기. 툴바(위)·쓰다미(오른쪽 아래)와
+                          // 겹치지 않으면서 손이 닿기 쉬운 왼쪽 아래에 둔다.
+                          if (_canvasTutorialController
+                              case final tutorialController?)
+                            Positioned(
+                              left: frameInset + AppSpacing.md,
+                              bottom: frameInset + AppSpacing.md,
+                              child: AnimatedBuilder(
+                                animation: tutorialController,
+                                builder: (context, _) =>
+                                    IconButton.filledTonal(
+                                      key: const ValueKey(
+                                        'canvas-tutorial-help',
+                                      ),
+                                      tooltip: '그림 도구 다시 보기',
+                                      onPressed: tutorialController.isBusy
+                                          ? null
+                                          : tutorialController.replay,
+                                      icon: const Icon(
+                                        Icons.help_outline_rounded,
+                                      ),
+                                      style: IconButton.styleFrom(
+                                        minimumSize: const Size.square(
+                                          AppSizes.iconButton,
+                                        ),
+                                      ),
+                                    ),
+                              ),
+                            ),
+                          // 보여줄 질문·오류가 있을 때만 띄운다. 빈 상자를 겹쳐 두면
+                          // 그 아래 캔버스와 복원 안내가 탭을 받지 못한다.
+                          if (hasStageChrome &&
+                              constraints.maxWidth > frameInset * 2)
+                            Positioned(
+                              top: frameInset + AppSpacing.sm,
+                              right: frameInset + AppSpacing.sm,
+                              child: ConstrainedBox(
+                                key: const ValueKey('drawing-stage-chrome'),
+                                constraints: BoxConstraints(
+                                  maxWidth: min(
+                                    360,
+                                    constraints.maxWidth - frameInset * 2,
+                                  ),
+                                  maxHeight: max(
+                                    96,
+                                    constraints.maxHeight * .65,
+                                  ),
+                                ),
+                                child: sidePanel,
+                              ),
+                            ),
+                        ],
+                      ),
                     ),
-                    padding: EdgeInsets.all(padding),
-                    child: Row(
-                      children: [
-                        Expanded(flex: 3, child: canvas),
-                        SizedBox(
-                          width: useCompactLandscape
-                              ? AppSpacing.sm
-                              : AppSpacing.lg,
-                        ),
-                        SizedBox(width: panelWidth, child: sidePanel),
-                      ],
-                    ),
-                  );
-                }
-                final canvasHeight = constraints.maxWidth >= 720
-                    ? min(520.0, max(420.0, constraints.maxHeight * 0.55))
-                    : 420.0;
-                return SingleChildScrollView(
-                  key: const ValueKey('drawing-layout-stacked'),
-                  padding: const EdgeInsets.all(AppSpacing.md),
-                  child: Column(
-                    children: [
-                      SizedBox(height: canvasHeight, child: canvas),
-                      const SizedBox(height: AppSpacing.md),
-                      sidePanel,
-                    ],
-                  ),
+                  ],
                 );
               },
             ),
@@ -1974,6 +2668,10 @@ class _DrawingScreenState extends State<DrawingScreen>
 class _CanvasPanel extends StatelessWidget {
   const _CanvasPanel({
     required this.repaintBoundaryKey,
+    required this.actions,
+    required this.cursorController,
+    required this.onPointerHover,
+    required this.onPointerExit,
     required this.strokes,
     required this.onPointerDown,
     required this.onPointerMove,
@@ -2014,6 +2712,12 @@ class _CanvasPanel extends StatelessWidget {
 
   final GlobalKey repaintBoundaryKey;
   final DodamCostume companion;
+
+  /// 채우기·지우기까지 포함한 문서 변경 이력이다. 획만으로는 캔버스를 다시 그릴 수 없다.
+  final List<DrawingCanvasAction> actions;
+  final DrawingCursorController cursorController;
+  final ValueChanged<PointerHoverEvent> onPointerHover;
+  final ValueChanged<PointerEvent> onPointerExit;
   final List<DrawingStroke> strokes;
   final ValueChanged<PointerDownEvent> onPointerDown;
   final ValueChanged<PointerMoveEvent> onPointerMove;
@@ -2078,18 +2782,27 @@ class _CanvasPanel extends StatelessWidget {
         return Stack(
           fit: StackFit.expand,
           children: [
-            RepaintBoundary(
-              key: repaintBoundaryKey,
-              child: DrawingCanvas(
+            DrawingCanvasViewport(
+              repaintBoundaryKey: repaintBoundaryKey,
+              canvas: DrawingCanvas(
                 strokes: strokes,
+                actions: actions,
                 onPointerDown: onPointerDown,
                 onPointerMove: onPointerMove,
                 onPointerUp: onPointerUp,
+                onPointerHover: onPointerHover,
+                onPointerExit: onPointerExit,
                 backgroundImage: backgroundImage,
                 inputEnabled: inputEnabled,
                 onBackgroundLoaded: onBackgroundLoaded,
                 onBackgroundError: onBackgroundError,
               ),
+              overlayBuilder: (context, metrics) =>
+                  ValueListenableBuilder<DrawingCursorState>(
+                    valueListenable: cursorController,
+                    builder: (context, state, child) =>
+                        DrawingCursorOverlay(state: state, metrics: metrics),
+                  ),
             ),
             AiQuestionBubbleOverlay(
               companion: companion,
@@ -2272,6 +2985,7 @@ class _DraftRestoreOverlay extends StatelessWidget {
 
 class _DrawingSidePanel extends StatelessWidget {
   const _DrawingSidePanel({
+    this.showToolControls = true,
     required this.selectedTool,
     required this.selectedColor,
     required this.selectedThickness,
@@ -2318,6 +3032,10 @@ class _DrawingSidePanel extends StatelessWidget {
   /// 오류 카드를 화면 안으로 스크롤하기 위한 앵커.
   final GlobalKey stageErrorAnchorKey;
 
+  /// 도구·색상·굵기와 완료 버튼을 이 패널에서 그릴지 여부다. 크레용 셸에서는 이것들이
+  /// 상단 툴바로 올라가므로 `false`로 두고 질문·오류 카드만 담는다.
+  final bool showToolControls;
+
   static const _colors = <(String, Color)>[
     ('검정', AppColors.drawingInk),
     ('빨강', AppColors.drawingRed),
@@ -2343,29 +3061,33 @@ class _DrawingSidePanel extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Row(
-            children: [
-              CircleAvatar(
-                radius: 26,
-                backgroundColor: AppColors.tangerineSoft,
-                child: Icon(
-                  Icons.emoji_nature_rounded,
-                  color: AppColors.tangerine,
-                ),
-              ),
-              SizedBox(width: AppSpacing.sm),
-              Expanded(
-                child: Text(
-                  '자유롭게 그려 보자!',
-                  style: TextStyle(
-                    color: AppColors.ink,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
+          // 도구를 툴바로 옮긴 뒤에는 이 머리말이 가리키는 것이 없다. 질문·오류만
+          // 담은 패널 위에 남겨 두면 빈 인사말만 캔버스에 떠 있게 된다.
+          if (showToolControls)
+            const Row(
+              children: [
+                CircleAvatar(
+                  radius: 26,
+                  backgroundColor: AppColors.tangerineSoft,
+                  child: Icon(
+                    Icons.emoji_nature_rounded,
+                    color: AppColors.tangerine,
                   ),
                 ),
-              ),
-            ],
-          ),
+                SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    '자유롭게 그려 보자!',
+                    style: TextStyle(
+                      color: AppColors.ink,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          if (showToolControls) ...[
           const SizedBox(height: AppSpacing.lg),
           const _ToolHeading(icon: Icons.edit_rounded, label: '도구'),
           const SizedBox(height: AppSpacing.xs),
@@ -2427,6 +3149,7 @@ class _DrawingSidePanel extends StatelessWidget {
               ],
             ),
           ),
+          ],
           const SizedBox(height: AppSpacing.lg),
           // 오류 카드가 붙는 자리. 실패 시 이 지점을 화면 안으로 스크롤한다.
           SizedBox.shrink(key: stageErrorAnchorKey),
@@ -2464,24 +3187,26 @@ class _DrawingSidePanel extends StatelessWidget {
               retryKey: const ValueKey('htp-advance-retry'),
             ),
           ],
-          const SizedBox(height: AppSpacing.lg),
-          _SaveStatusIndicator(
-            status: saveStatus,
-            canRetry: canRetrySave,
-            onRetry: onRetrySave,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          AppButton(
-            key: const ValueKey('drawing-complete'),
-            label: '다 그렸어요!',
-            variant: AppButtonVariant.child,
-            isLoading: isCompleting,
-            onPressed: canComplete ? onComplete : null,
-          ),
-          const SizedBox(
-            key: ValueKey('drawing-complete-bottom-space'),
-            height: AppSpacing.md,
-          ),
+          if (showToolControls) ...[
+            const SizedBox(height: AppSpacing.lg),
+            _SaveStatusIndicator(
+              status: saveStatus,
+              canRetry: canRetrySave,
+              onRetry: onRetrySave,
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            AppButton(
+              key: const ValueKey('drawing-complete'),
+              label: '다 그렸어요!',
+              variant: AppButtonVariant.child,
+              isLoading: isCompleting,
+              onPressed: canComplete ? onComplete : null,
+            ),
+            const SizedBox(
+              key: ValueKey('drawing-complete-bottom-space'),
+              height: AppSpacing.md,
+            ),
+          ],
         ],
       ),
     ),

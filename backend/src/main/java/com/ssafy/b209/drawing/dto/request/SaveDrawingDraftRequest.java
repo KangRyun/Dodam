@@ -1,7 +1,7 @@
 package com.ssafy.b209.drawing.dto.request;
 
 import jakarta.validation.constraints.NotNull;
-import jakarta.validation.constraints.Positive;
+import jakarta.validation.constraints.PositiveOrZero;
 import java.time.OffsetDateTime;
 
 /**
@@ -11,4 +11,4 @@ import java.time.OffsetDateTime;
  * @param clientSavedAt Offset을 포함한 클라이언트 저장 시각
  */
 public record SaveDrawingDraftRequest(
-    @Positive long lastEventSequence, @NotNull OffsetDateTime clientSavedAt) {}
+    @NotNull @PositiveOrZero Long lastEventSequence, @NotNull OffsetDateTime clientSavedAt) {}

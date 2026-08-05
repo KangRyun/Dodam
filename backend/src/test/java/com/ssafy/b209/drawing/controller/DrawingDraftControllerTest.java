@@ -102,6 +102,68 @@ class DrawingDraftControllerTest {
   }
 
   @Test
+  void acceptsExplicitZeroEventSequence() throws Exception {
+    given(imageStorageProperties.maxSize()).willReturn(10_485_760L);
+    given(currentUserResolver.requireUserId()).willReturn(1L);
+    given(
+            idempotencyStore.execute(
+                eq(1L),
+                eq(10L),
+                eq("draft-key-zero"),
+                any(byte[].class),
+                any(SaveDrawingDraftRequest.class),
+                any()))
+        .willReturn(response());
+
+    mockMvc
+        .perform(
+            multipart("/api/v1/drawing-sessions/{id}/draft", 10L)
+                .file(preview())
+                .file(canvasState(0, true))
+                .header("Idempotency-Key", "draft-key-zero")
+                .with(
+                    request -> {
+                      request.setMethod("PUT");
+                      return request;
+                    }))
+        .andExpect(status().isOk());
+  }
+
+  @Test
+  void rejectsMissingEventSequence() throws Exception {
+    mockMvc
+        .perform(
+            multipart("/api/v1/drawing-sessions/{id}/draft", 10L)
+                .file(preview())
+                .file(canvasState("{\"clientSavedAt\":\"2026-07-22T14:30:00+09:00\"}"))
+                .header("Idempotency-Key", "draft-key-missing")
+                .with(
+                    request -> {
+                      request.setMethod("PUT");
+                      return request;
+                    }))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
+  @Test
+  void rejectsNegativeEventSequence() throws Exception {
+    mockMvc
+        .perform(
+            multipart("/api/v1/drawing-sessions/{id}/draft", 10L)
+                .file(preview())
+                .file(canvasState(-1, true))
+                .header("Idempotency-Key", "draft-key-negative")
+                .with(
+                    request -> {
+                      request.setMethod("PUT");
+                      return request;
+                    }))
+        .andExpect(status().isBadRequest())
+        .andExpect(jsonPath("$.code").value("COMMON_400_001"));
+  }
+
+  @Test
   void returnsLatestDraftMetadata() throws Exception {
     given(drawingDraftService.getLatest(10L)).willReturn(response());
 
@@ -135,6 +197,10 @@ class DrawingDraftControllerTest {
                 + sequence
                 + ",\"clientSavedAt\":\"2026-07-22T14:30:00+09:00\"}"
             : "{\"lastEventSequence\":" + sequence + "}";
+    return canvasState(json);
+  }
+
+  private MockMultipartFile canvasState(String json) {
     return new MockMultipartFile(
         "canvasState", "canvas-state.json", MediaType.APPLICATION_JSON_VALUE, json.getBytes());
   }

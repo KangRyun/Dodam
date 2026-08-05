@@ -49,6 +49,11 @@ final class DrawingEventJournal {
   int get elapsedMilliseconds => _sessionClock.elapsedMilliseconds;
   List<StrokeEventDto> get events => List.unmodifiable(_events);
   int? get lastEventSequence => _events.lastOrNull?.seq;
+  int get snapshotCutoffSequence {
+    final cutoff = _sequenceAllocator.nextValue - 1;
+    return cutoff < 0 ? 0 : cutoff;
+  }
+
   int get undoableStrokeCount => _undoableStrokeCount;
   int get redoableStrokeCount => _redoableStrokeCount;
 

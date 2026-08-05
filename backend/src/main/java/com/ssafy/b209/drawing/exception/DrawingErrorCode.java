@@ -50,10 +50,10 @@ public enum DrawingErrorCode implements ErrorCode {
   DRAWING_DRAFT_NOT_FOUND(HttpStatus.NOT_FOUND, "DRAWING_404_004", "저장된 그림 초안이 없습니다."),
   /** 현재 세션 상태나 단계에서 초안을 저장할 수 없는 경우다. */
   DRAWING_DRAFT_NOT_ALLOWED(HttpStatus.CONFLICT, "DRAWING_409_008", "현재 상태에서는 그림 초안을 저장할 수 없습니다."),
-  /** 마지막 이벤트 순서가 현재 초안과 같은 경우다. */
+  /** 마지막 이벤트 순서와 클라이언트 저장 시각이 현재 초안과 모두 같은 경우다. */
   DRAWING_DRAFT_VERSION_CONFLICT(
-      HttpStatus.CONFLICT, "DRAWING_409_009", "같은 순서의 그림 초안이 이미 저장되어 있습니다."),
-  /** 마지막 이벤트 순서가 현재 초안보다 이전인 경우다. */
+      HttpStatus.CONFLICT, "DRAWING_409_009", "같은 버전의 그림 초안이 이미 저장되어 있습니다."),
+  /** 마지막 이벤트 순서가 이전이거나 같은 순서에서 저장 시각이 이전인 경우다. */
   STALE_DRAWING_DRAFT_VERSION(HttpStatus.CONFLICT, "DRAWING_409_010", "더 최근의 그림 초안이 이미 저장되어 있습니다."),
   /** 동시 요청으로 초안 Metadata 저장이 충돌한 경우다. */
   DRAWING_DRAFT_SAVE_CONFLICT(HttpStatus.CONFLICT, "DRAWING_409_011", "그림 초안 저장 요청이 충돌했습니다."),

@@ -117,6 +117,12 @@ flutter:
     - assets/characters/emotions/
     - assets/images/role_selection/
     - assets/scene/
+    - assets/canvas/
+    - assets/canvas/frame/
+    - assets/canvas/swatches/
+    - assets/canvas/tools/
+    - assets/canvas/tools/masks/
+    - assets/canvas/brushes/
 
   fonts:
     - family: NanumSquareNeo

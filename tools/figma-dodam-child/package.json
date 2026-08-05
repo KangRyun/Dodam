@@ -1,0 +1,12 @@
+{
+  "name": "dodam-child-ui-generator",
+  "private": true,
+  "scripts": {
+    "build": "node build.mjs",
+    "check": "tsc --noEmit && node validate.mjs"
+  },
+  "devDependencies": {
+    "@figma/plugin-typings": "1.131.0",
+    "typescript": "5.9.3"
+  }
+}
