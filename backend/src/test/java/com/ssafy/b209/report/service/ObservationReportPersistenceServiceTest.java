@@ -703,6 +703,7 @@ class ObservationReportPersistenceServiceTest {
         "행복했어요",
         keyConversations,
         List.of(),
+        List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
         List.of(DRAWING_SESSION_ID));
   }
 
@@ -721,12 +722,18 @@ class ObservationReportPersistenceServiceTest {
         null,
         List.of(),
         List.of(),
+        List.of(),
         List.of(DRAWING_SESSION_ID));
   }
 
   private ObservationGenerationContext.KeyConversationLine keyLine(int index) {
     return new ObservationGenerationContext.KeyConversationLine(
-        (long) (index + 1), "질문 " + index, (long) (index + 100), "답변 " + index, "OPTION_ANSWER");
+        (long) (index + 1),
+        "질문 " + index,
+        (long) (index + 100),
+        "답변 " + index,
+        "OPTION_ANSWER",
+        false);
   }
 
   private ObservationGenerationResult validResult() {
