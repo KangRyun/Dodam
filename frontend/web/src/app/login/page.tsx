@@ -52,6 +52,11 @@ export default async function LoginPage({
       </section>
 
       <section className="login-panel">
+        {/* 로그인하지 않고 서비스 소개(랜딩)를 다시 보려는 사용자를 위한 경로 */}
+        <a className="login-back" href="/">
+          <span aria-hidden="true">←</span> 도담 소개로 돌아가기
+        </a>
+
         <div className="login-form">
           <div className="login-welcome">
             <h1 className="login-welcome-title">반가워요</h1>

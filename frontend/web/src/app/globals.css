@@ -1452,265 +1452,6 @@ a {
   gap: 10px;
 }
 
-/* ── 랜딩 페이지 (S15P11B209-769) ─────────────────────────────────────────
-   커뮤니티 화면과 같은 시맨틱 클래스 관용구·팔레트(#6ca37c 계열)를 따른다.
-   모션 원칙(emil-design-eng): transform·opacity 만 애니메이션, 커스텀 ease-out,
-   진입 stagger 60ms, hover 는 (hover:hover) 게이팅, reduced-motion 은 opacity 만. */
-
-.landing {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 0 20px;
-}
-
-.landing-hero {
-  padding-top: 88px;
-  text-align: center;
-}
-
-.landing-eyebrow {
-  display: inline-block;
-  margin: 0 0 16px;
-  padding: 6px 14px;
-  border-radius: 999px;
-  background: #edf5ed;
-  color: #5c9070;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-}
-
-.landing-title {
-  margin: 0 auto;
-  max-width: 15em;
-  font-size: clamp(32px, 6vw, 52px);
-  line-height: 1.2;
-  letter-spacing: -0.02em;
-  color: #29323d;
-}
-
-.landing-subtitle {
-  margin: 18px auto 0;
-  max-width: 34em;
-  font-size: 17px;
-  line-height: 1.7;
-  color: #4e5862;
-}
-
-.landing-cta-row {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
-  margin-top: 30px;
-}
-
-.landing-cta {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 48px;
-  padding: 0 26px;
-  border: 1px solid transparent;
-  border-radius: 12px;
-  font-size: 16px;
-  font-weight: 600;
-  text-decoration: none;
-  /* transition: all 금지 — 정확한 속성만. 누르는 즉시 반응해야 하므로 ease-out. */
-  transition: transform 160ms cubic-bezier(0.23, 1, 0.32, 1);
-}
-
-/* 눌림 피드백 — 인터페이스가 듣고 있다는 신호. scale 은 0.95~0.98 사이 미세하게. */
-.landing-cta:active {
-  transform: scale(0.97);
-}
-
-.landing-cta-primary {
-  background: #6ca37c;
-  color: #fff;
-}
-
-.landing-cta-ghost {
-  border-color: #dfe4dc;
-  background: #fff;
-  color: #4e5862;
-}
-
-.landing-steps {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 16px;
-  margin-top: 72px;
-}
-
-@media (max-width: 720px) {
-  .landing-steps {
-    grid-template-columns: 1fr;
-  }
-}
-
-.landing-step-card {
-  padding: 26px 24px;
-  border: 1px solid #dfe4dc;
-  border-radius: 16px;
-  background: #fff;
-  transition:
-    transform 200ms cubic-bezier(0.23, 1, 0.32, 1),
-    box-shadow 200ms cubic-bezier(0.23, 1, 0.32, 1),
-    border-color 200ms cubic-bezier(0.23, 1, 0.32, 1);
-}
-
-.landing-step-icon {
-  display: block;
-  font-size: 30px;
-  line-height: 1;
-}
-
-.landing-step-title {
-  margin: 14px 0 8px;
-  font-size: 18px;
-  color: #29323d;
-}
-
-.landing-step-desc {
-  margin: 0;
-  font-size: 15px;
-  line-height: 1.65;
-  color: #4e5862;
-}
-
-.landing-notice {
-  margin-top: 72px;
-  padding: 28px 30px;
-  border-radius: 16px;
-  background: #f4eee6;
-}
-
-.landing-notice-title {
-  margin: 0 0 10px;
-  font-size: 16px;
-  color: #29323d;
-}
-
-.landing-notice-body {
-  margin: 0;
-  font-size: 15px;
-  line-height: 1.7;
-  color: #4e5862;
-}
-
-.landing-footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 80px;
-  padding: 24px 0 40px;
-  border-top: 1px solid #e5e8e2;
-  font-size: 13px;
-  color: #7a848d;
-}
-
-.landing-footer-links {
-  display: flex;
-  gap: 18px;
-}
-
-.landing-footer-links a {
-  color: inherit;
-  text-decoration: none;
-}
-
-/* ── 진입 모션 ──
-   첫 방문 1회성이므로 딜라이트 허용 구간. scale(0) 금지 — 살짝 아래에서 떠오른다.
-   keyframes 를 쓰는 이유: 진입 전용이라 중단·재타게팅될 일이 없다. */
-@keyframes landing-rise {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.landing-hero > *,
-.landing-step-card {
-  animation: landing-rise 480ms cubic-bezier(0.23, 1, 0.32, 1) backwards;
-}
-
-/* stagger 60ms — 30~80ms 사이. 길면 페이지가 느려 보인다. */
-.landing-hero > :nth-child(2) {
-  animation-delay: 60ms;
-}
-
-.landing-hero > :nth-child(3) {
-  animation-delay: 120ms;
-}
-
-.landing-hero > :nth-child(4) {
-  animation-delay: 180ms;
-}
-
-.landing-steps > :nth-child(1) {
-  animation-delay: 240ms;
-}
-
-.landing-steps > :nth-child(2) {
-  animation-delay: 300ms;
-}
-
-.landing-steps > :nth-child(3) {
-  animation-delay: 360ms;
-}
-
-/* hover 는 진짜 포인터에서만 — 터치 기기의 탭-호버 오발동 방지 */
-@media (hover: hover) and (pointer: fine) {
-  .landing-cta-primary:hover {
-    background: #5c9070;
-  }
-
-  .landing-cta-ghost:hover {
-    border-color: #bfc9be;
-  }
-
-  .landing-step-card:hover {
-    border-color: #bfc9be;
-    box-shadow: 0 10px 28px rgb(43 53 47 / 7%);
-    transform: translateY(-2px);
-  }
-
-  .landing-footer-links a:hover {
-    text-decoration: underline;
-  }
-}
-
-/* 움직임 최소화 — 이동은 없애되 이해를 돕는 opacity 페이드는 유지한다 */
-@media (prefers-reduced-motion: reduce) {
-  .landing-hero > *,
-  .landing-step-card {
-    animation: landing-fade 200ms ease backwards;
-  }
-
-  .landing-cta,
-  .landing-step-card {
-    transition: none;
-  }
-}
-
-@keyframes landing-fade {
-  from {
-    opacity: 0;
-  }
-
-  to {
-    opacity: 1;
-  }
-}
-
 /* --- 댓글 작성·수정·삭제 (S15P11B209-520) --- */
 
 .community-comment-composer {
@@ -2044,10 +1785,40 @@ a {
 }
 
 .login-panel {
+  position: relative;
   display: grid;
   place-items: center;
   padding: 48px 40px;
   background: #fff;
+}
+
+.login-back {
+  position: absolute;
+  top: 24px;
+  right: 28px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: #4b5560;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.login-back:hover {
+  color: #27313a;
+  background: #f2f4f1;
+}
+
+.login-back:focus-visible {
+  outline: 2px solid #4b5560;
+  outline-offset: 2px;
 }
 
 .login-form {
@@ -2169,6 +1940,12 @@ a {
 
   .login-welcome-title {
     font-size: 26px;
+  }
+
+  .login-back {
+    top: 16px;
+    right: 16px;
+    font-size: 12px;
   }
 }
 
