@@ -39,7 +39,7 @@
 | childExpression.selectedEmotions | `drawing_session_emotions` |
 | childExpression.expressedEmotionText | `analysis_conversation_summaries.expressed_emotion`/관련 텍스트 (없으면 null) |
 | childExpression.representativeUtterances | `report_key_conversations`(question/answer_message_id, text, answer_type) — source(STT/TEXT)·sttNeedsConfirmation은 원 메시지 기준, 불명이면 보수적 기본값 |
-| activityFacts.detectedObjects | 분석 detections(그림 객체명) |
+| activityFacts.detectedObjects | 최신 리포트는 `report_drawn_items.name`(AI VLM 관찰 서술에서 실제 등장한 대상만, `display_order` 순). `has_drawn_items=false`인 과거 리포트만 YOLO 탐지 객체명을 confidence 0.50 이상으로 폴백한다. 필드명·타입은 하위 호환을 위해 유지한다. |
 | activityFacts.drawingDurationMs/pauseCount/eraseCount/pressureAvailable | `report_activity_summaries` |
 | activityFacts.notes | `report_activity_notes`(display_order 순) |
 | conversationSummary.questionCount/answeredCount/skippedCount | `report_activity_summaries` |
