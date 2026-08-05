@@ -116,6 +116,7 @@ flutter:
     - assets/characters/costumes/
     - assets/characters/emotions/
     - assets/images/role_selection/
+    - assets/images/child_register/
     - assets/scene/
     - assets/canvas/
     - assets/canvas/frame/
