@@ -73,13 +73,13 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
   /// 왼쪽 마음카드가 아이 chip 개수만큼 커질 때는 이 값에 억지로 맞추지 않고
   /// [_buildTwoColumnBody]가 자연 높이로 더 커진다. 부모 CustomScrollView가 그
   /// 증가분을 스크롤하므로 최근 활동 카드가 남은 높이를 떠안지 않는다.
-  static const double _bodyMinHeight = 740;
+  static const double _bodyMinHeight = 600;
 
   /// 글자 배율이 커질 때 카드 안 텍스트·버튼이 함께 커지는 만큼의 추가 여유.
   ///
   /// 마음 달력의 날짜 셀은 `날짜 글자 + 3 + 원(최소 지름 12)`이 하한이라 글자
   /// 배율에 따라 6줄 전체가 함께 커진다. 배율 2.0까지 그 증가분을 덮는다.
-  static const double _bodyTextScaleAllowance = 540;
+  static const double _bodyTextScaleAllowance = 380;
 
   /// 2단 그리드를 유지할 수 있는 최소 본문 폭.
   ///
@@ -112,9 +112,11 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
         key: const ValueKey('child-list-success'),
         padding: const EdgeInsets.fromLTRB(30, 24, 30, 22),
         // 넓은 태블릿에서 헤더·2열 그리드가 화면 끝까지 늘어나지 않도록 본문을
-        // 최대 폭으로 가두고 가운데 정렬한다(S15P11B209-787). 이 상한(1120)은
-        // 2열 최소 폭(720)보다 넉넉해 좁은 화면에선 아무 영향이 없다.
+        // 최대 폭으로 가두고 가운데 정렬한다(S15P11B209-787). 다만 2열 배치는
+        // 폭을 넉넉히 써야 좌우 여백이 어색하지 않으므로, 이 화면만 상한을 넓게
+        // 잡는다(갤럭시 탭 S10 Ultra 등 초광폭 태블릿 대응).
         child: ResponsiveContent(
+          maxWidth: 1440,
           child: LayoutBuilder(
             builder: (context, constraints) {
               final bodySliver = _buildBodySliver(
@@ -214,7 +216,7 @@ class _GuardianDashboardState extends State<GuardianDashboard> {
         Expanded(
           flex: 92,
           child: SizedBox(
-            // 오른쪽 마음 달력과 같은 높이로 맞추고, 늘어난 만큼을 CTA가 흡수한다.
+            // 오른쪽 마음 달력과 같은 높이로 맞추고, 남는 높이는 활동 카드가 채운다.
             height: minHeight,
             child: _HeroCard(
               controller: widget.controller,
@@ -590,10 +592,8 @@ class _HeroCard extends StatelessWidget {
           ],
           const SizedBox(height: 6),
           _MoodPill(child: child, recentFuture: recentFuture),
-          // 마음 pill과 활동 카드 사이를 벌려 녹색 블록의 세로 길이를 줄인다.
-          const SizedBox(height: 44),
-          // 두 버튼(CTA·리포트)은 배경 카드 폭에 꽉 차게 같은 가로 크기로 둔다.
-          // 2열 배치에서는 남은 세로 공간을 CTA가 모두 차지해 크게 보인다.
+          const SizedBox(height: 16),
+          // 활동 카드가 남는 세로 공간을 채워 왼쪽 블록을 달력 높이에 맞춘다.
           if (fillHeight)
             Expanded(
               child: SizedBox(
@@ -847,7 +847,6 @@ class _ActivityCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ts = MediaQuery.textScalerOf(context).scale(1);
     return Container(
       decoration: BoxDecoration(
         color: DodamHome.sage,
@@ -857,21 +856,19 @@ class _ActivityCard extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(18, 20, 18, 18),
       child: LayoutBuilder(
         builder: (context, constraints) {
-          // 집·나무·사람 일러스트는 남은 높이·폭에 맞춰 키우되 상한을 둔다.
-          // 좁으면 줄이거나 감춰 overflow를 막는다. 예약 높이는 제목·안내·버튼 등
-          // 고정 콘텐츠 실측에 맞춰 잡아, 일러스트가 채우고 버튼과의 간격이 벌어지지
-          // 않게 한다. 글자 배율이 커지면 텍스트가 커지므로 배율만큼 더한다.
-          final reserved = 165.0 + 30.0 * ts;
+          // 카드는 콘텐츠에 맞는 자연 높이(min)로 두어 블록을 짧게 유지한다.
+          // 일러스트는 폭에만 맞춰 크기를 정하고, 이미지 자체의 위·아래 여백은
+          // Transform으로 살짝 겹쳐 문구·버튼과의 간격을 좁힌다.
+          // 일러스트는 3칸이라 폭 상한(카드폭/3)을 넘으면 겹치므로 그 안에서
+          // 최대한 키운다. 스트레치(2열)에서는 남는 높이만큼도 키운다.
           final capByWidth = (constraints.maxWidth - 28) / 3;
-          final capByKind = tall ? 150.0 : 92.0;
-          final illoMax = (capByWidth < capByKind ? capByWidth : capByKind)
-              .clamp(0.0, 200.0);
-          final illo =
-              (constraints.maxHeight.isFinite
-                      ? constraints.maxHeight - reserved
-                      : illoMax)
-                  .clamp(0.0, illoMax);
-          final showIllo = illo > 44;
+          final capByKind = tall ? 200.0 : 92.0;
+          final capW = capByWidth < capByKind ? capByWidth : capByKind;
+          const reservedFixed = 180.0; // 제목·안내·버튼·간격 실측 여유
+          final byHeight = constraints.maxHeight.isFinite
+              ? constraints.maxHeight - reservedFixed
+              : capW;
+          final illo = (byHeight < capW ? byHeight : capW).clamp(0.0, 200.0);
           return Column(
             mainAxisSize: tall ? MainAxisSize.max : MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -885,7 +882,7 @@ class _ActivityCard extends StatelessWidget {
                   color: DodamHome.ink,
                 ),
               ),
-              const SizedBox(height: 8),
+              const SizedBox(height: 6),
               const Text(
                 '그림을 통해 아이의 마음을 천천히 들여다봐요.',
                 textAlign: TextAlign.center,
@@ -897,15 +894,19 @@ class _ActivityCard extends StatelessWidget {
                   color: DodamHome.inkSoft,
                 ),
               ),
-              if (showIllo) ...[
-                const SizedBox(height: 18),
+              if (tall)
+                Expanded(child: Center(child: _HtpIllustrations(size: illo)))
+              else ...[
+                const SizedBox(height: 6),
                 _HtpIllustrations(size: illo),
               ],
-              if (tall) const Spacer() else const SizedBox(height: 20),
-              _StartActivityButton(
-                enabled: enabled,
-                onTap: onTap,
-                compact: !tall,
+              Transform.translate(
+                offset: Offset(0, tall ? -8 : -18),
+                child: _StartActivityButton(
+                  enabled: enabled,
+                  onTap: onTap,
+                  compact: !tall,
+                ),
               ),
             ],
           );
@@ -1170,24 +1171,14 @@ class _CalendarSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final id = childId;
     final repo = repository;
-    final Widget card = (id == null || repo == null)
-        ? const _Card(child: SizedBox())
-        : MindCalendarCard(
-            key: ValueKey('mind-calendar-$id'),
-            childId: id,
-            childName: childName,
-            repository: repo,
-          );
-    // 달력은 날짜 격자가 조밀해 화면 전체 확대 배수를 그대로 받으면 셀이 넘친다.
-    // 이 카드만 기본 배율로 되돌려 설계된 크기를 유지한다.
-    final factor = MediaQuery.textScalerOf(context).scale(1);
-    return MediaQuery(
-      data: MediaQuery.of(context).copyWith(
-        textScaler: TextScaler.linear(
-          factor / _GuardianDashboardState._uiTextScale,
-        ),
-      ),
-      child: card,
+    // 달력도 왼쪽 블록과 같은 글자 배율(1.4배)을 그대로 받는다. 날짜 원 지름은
+    // 글자 몫(줄 높이 -22)을 빼고 계산하므로 배율이 커져도 넘치지 않는다.
+    if (id == null || repo == null) return const _Card(child: SizedBox());
+    return MindCalendarCard(
+      key: ValueKey('mind-calendar-$id'),
+      childId: id,
+      childName: childName,
+      repository: repo,
     );
   }
 }

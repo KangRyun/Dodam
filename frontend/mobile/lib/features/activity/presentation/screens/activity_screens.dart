@@ -4180,7 +4180,7 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
                 padding: EdgeInsets.all(outerPadding),
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1040),
+                    constraints: const BoxConstraints(maxWidth: 1440),
                     child: Container(
                       padding: EdgeInsets.all(
                         viewportConstraints.maxWidth < 480
