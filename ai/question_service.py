@@ -853,6 +853,12 @@ STOP_ASK_DRAWING = (
 )
 STOP_ASK_CONVERSATION = "그래, 이야기는 여기까지 할까?"
 
+# 우리가 방금 종료 확인을 했는지 알아보는 데 쓴다. 아이 발화를 '확인에 대한 답'으로
+# 읽어도 되는지는 직전 우리 말이 무엇이었는지에 달려 있다(S15P11B209-947).
+_STOP_CONFIRM_TEXTS = frozenset(
+    {STOP_ASK_BOTH, STOP_ASK_DRAWING, STOP_ASK_CONVERSATION}
+)
+
 # FE가 이 코드를 보고 무엇을 끝낼지 정한다(activity_screens._selectQuestionOption).
 _CHIP_END_ACTIVITY = QuestionOption(code="CHIP_END_ACTIVITY", label="그림 다 그렸어")
 _CHIP_END_TALK = QuestionOption(code="CHIP_END_TALK", label="이야기만 그만할래")
@@ -890,16 +896,56 @@ def _stop_intent_offers(req: QuestionRequest, verdict: str) -> tuple[str, list[Q
     return STOP_ASK_CONVERSATION, [_CHIP_END_TALK, _CHIP_KEEP_GOING]
 
 
+def _asked_stop_confirmation(req: QuestionRequest) -> str | None:
+    """직전에 우리가 건넨 말이 종료 확인이었으면 그 문장을 돌려준다(아니면 None)."""
+    for message in reversed(req.recent_messages):
+        if (message.sender_type or "").upper() != "AI":
+            continue
+        text = (message.text or "").strip()
+        return text if text in _STOP_CONFIRM_TEXTS else None
+    return None
+
+
+def _is_conversation_end_confirmed(req: QuestionRequest, verdict: str | None) -> bool:
+    """아이가 '대화를 그만한다'를 말로 확인해 줬는가 (S15P11B209-947).
+
+    ⚠️ 직전 AI 질문이 종료 확인이었을 때만 본다. 그 조건 없이 "응"을 종료로 읽으면
+       평범한 맞장구가 대화를 끊는다.
+    ⚠️ 그림 갈래는 여기에 넣지 않는다. 활동 완료는 BE가 대신할 수 없어(회고 저장·다음
+       단계는 FE가 쥔다) 화면 버튼을 누르도록 안내한다.
+    ⚠️ 3지선다 되묻기(STOP_ASK_BOTH)에 "응"이라고만 답한 것은 확인으로 보지 않는다 —
+       그림인지 대화인지 고르지 않은 것이라 무엇을 끝낼지 알 수 없다.
+    """
+    asked = _asked_stop_confirmation(req)
+    if asked is None:
+        return False
+    # 되묻기 뒤에 대화를 지목해 말한 경우 — 3지선다에 말로 답한 것도 여기 걸린다.
+    if verdict == conversation_stop_intent.STOP_CONVERSATION:
+        return True
+    # 대화 종료만 물어본 뒤의 "응" — 그 자리에서 긍정은 종료 동의 말고 뜻할 것이 없다.
+    if asked != STOP_ASK_CONVERSATION:
+        return False
+    index = _last_child_index(req)
+    if index is None:
+        return False
+    return conversation_stop_intent.is_affirmative(req.recent_messages[index].text or "")
+
+
 def _stop_intent_response(
-    req: QuestionRequest, started: float, verdict: str
+    req: QuestionRequest, started: float, verdict: str, *, end_confirmed: bool = False
 ) -> QuestionResponse:
     """그만하기 의사 되묻기 — GMS를 호출하지 않는 결정적 응답.
 
     목적은 FOLLOW_UP이다. 아이가 방금 한 말에 이어 묻는 것이고, 대상 객체는 붙지 않는다.
+
+    end_confirmed면 conversationEndConfirmed를 실어 BE가 대화를 끝낼 수 있게 한다.
+    문장은 그대로 되묻기를 쓴다 — BE가 이 필드를 아직 안 읽어도 아이 화면이 어색해지지
+    않아야 한다(작별 인사를 내보냈는데 대화가 이어지면 그게 더 나쁘다).
     """
     text, offers = _stop_intent_offers(req, verdict)
     option_allowed = "OPTION" in req.allowed_response_modes
     return QuestionResponse(
+        conversation_end_confirmed=end_confirmed,
         question_text=text,
         question_purpose="FOLLOW_UP",
         options=list(offers) if option_allowed else None,
@@ -1209,15 +1255,23 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
     # (S15P11B209-938). 위기·인젝션 뒤에 두는 이유: "다 싫어, 그만할래"는 그만하기 의사일
     # 수도 위기 신호일 수도 있다. 이 분기를 위기 검사 앞에 두면 위기 신호를 조용히 삼킨다.
     stop_verdict = _detect_stop_intent(req)
-    if stop_verdict:
+    end_confirmed = _is_conversation_end_confirmed(req, stop_verdict)
+    if stop_verdict or end_confirmed:
         # ⚠️ 아이 발화 원문은 남기지 않는다 — 판정 코드만.
         logger.info(
-            "그만하기 의사 감지 — 되묻기: verdict=%s activityType=%s request_id=%s",
-            stop_verdict,
+            "그만하기 의사 감지 — 되묻기: verdict=%s endConfirmed=%s activityType=%s "
+            "request_id=%s",
+            stop_verdict or "-",
+            end_confirmed,
             req.activity_type or "-",
             request_id,
         )
-        return _stop_intent_response(req, started, stop_verdict)
+        return _stop_intent_response(
+            req,
+            started,
+            stop_verdict or conversation_stop_intent.STOP_CONVERSATION,
+            end_confirmed=end_confirmed,
+        )
 
     # 그림일기 완전 첫 질문은 GMS 없이 고정 문구로 연다(S15P11B209-921). 무엇을 그렸는지는
     # 아이만 아는 정보라 AI가 추측하지 않고 직접 묻는다. 위기·인젝션 검사 뒤에 두는 이유:
