@@ -171,6 +171,43 @@ def check_prompt_assembly(
     return out
 
 
+# conversation_tone 각 구간의 '길이' 항목 첫 줄. 자수 상한이 여기 적힌다.
+_TONE_LENGTH_LINE = re.compile(r"^-\s*길이:\s*(.+)$", re.M)
+
+# 길이가 같아도 되는 구간 — SUPPORT는 연령축이 아니라 배려형이라 유아형과 길이를 공유한다.
+# 그래서 네 구간이 있어도 서로 다른 규칙은 셋이면 충분하다.
+_MIN_DISTINCT_TONE_RULES = 3
+
+
+def check_tone_bands_differ() -> Finding:
+    """연령 구간의 길이 규칙이 서로 다른 말을 하는지 (S15P11B209-895).
+
+    786이 말투를 코드에서 프롬프트로 옮기며 네 구간을 만들었는데, 문구가 달랐을 뿐
+    제약은 전부 "반응 + 질문 = 두 문장 이내"로 같았다. **규칙은 넷인데 결과는 하나**인
+    상태가 808 실측까지 드러나지 않았고, 그동안 다음 수정자는 구간이 갈린다고 믿었다.
+
+    같은 붕괴를 GMS 실호출 없이 잡는다 — 파일만 읽으면 되니 공짜다.
+
+    경고 등급인 이유: '길이로 갈라야 하는가' 자체가 제품 판단이라, 나중에 "길이는
+    공통으로 두고 어휘로만 가른다"고 정할 수 있다. 그 결정을 게이트가 막으면 안 된다.
+    """
+    rules = {
+        band: (m.group(1).strip() if (m := _TONE_LENGTH_LINE.search(body)) else "")
+        for band, body in prompts_registry.sections("conversation_tone").items()
+    }
+    distinct = {r for r in rules.values() if r}
+    ok = len(distinct) >= _MIN_DISTINCT_TONE_RULES
+    return Finding(
+        "A",
+        f"연령 구간 길이 규칙 구분(≥{_MIN_DISTINCT_TONE_RULES}종)",
+        ok,
+        f"{len(distinct)}종 / 구간 {len(rules)}개"
+        if ok
+        else f"서로 다른 규칙이 {len(distinct)}종뿐 — 구간이 사실상 하나로 붕괴",
+        warn_only=True,
+    )
+
+
 def check_subject_pinned(system_prompt: str, subject_ko: str) -> Finding:
     """HTP는 주제를 확정 사실로 못박아야 다른 주제로 새지 않는다(713)."""
     ok = "[이 그림의 주제]" in system_prompt and subject_ko in system_prompt

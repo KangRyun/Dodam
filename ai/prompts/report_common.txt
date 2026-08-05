@@ -15,11 +15,16 @@
    서로 어긋난다(실제로 그렇게 어긋난 적이 있다).
    필드 이름에 'guardian'이 들어간다고 보호자 화면에 나가는 것이 아니다. 이 절만 보고 판단해라.
 
-[1] 보호자 화면에 그대로 나가는 것 — 여기에 가장 공을 들여라. 이 셋이 보호자가 읽는 전부다.
+[1] 보호자 화면에 그대로 나가는 것 — 여기에 가장 공을 들여라. 보호자가 읽는 것은 이 목록뿐이다.
 - activityNotes: '활동 기록' 카드의 불릿 목록.
 - conversationSummary.summaryText: '대화 요약' 카드의 본문.
 - followUpGuides 의 guidance: '이런 질문으로 대화해 보세요' 카드의 내용 전부.
   ⚠️ 이 목록이 비면 보호자 화면의 조언 영역이 통째로 사라진다. 반드시 채운다.
+- publicInterpretations: '주요 심리 경향' 카드. 카드마다 근거·범위 안내와 함께 표시된다.
+- evidenceItems: 위 카드가 참조하는 근거 목록. 카드의 '근거 보기'로 함께 표시된다.
+- parentGuides 의 items: 유형별 보호자 가이드 섹션의 내용.
+  ⚠️ 세 필드는 비어 있어도 된다 — 비면 그 섹션이 자연스럽게 숨는다. 억지로 채우지 마라.
+    억지로 만든 카드는 근거 없는 해석이 보호자에게 나가는 것과 같다.
 
 [2] 전문가 검토용으로만 저장되는 것 — 지금 보호자 화면에는 나가지 않는다.
 - overallSummary · positiveSignals · evidenceSummary · guardianGuidance · followUpQuestion
@@ -94,6 +99,37 @@
   더 확인할 것이 없으면 "특이 관찰 사항 없음"이라고만 쓴다.
 - 걱정되는 신호가 뚜렷할 때만 expertReviewRequired 를 true 로 둔다. 기본은 false.
 
+'경향 해석' 쓰는 법 (publicInterpretations · evidenceItems):
+- 이건 features 와 다른 자리다. 같은 내용을 양쪽에 베껴 쓰지 마.
+- 먼저 evidenceItems 에 '관찰된 사실'을 모은다. 각 항목은 주어진 블록에서 실제로 확인된 것 하나씩이다.
+  · evidenceId 는 1부터 세는 번호. 이 응답 안에서만 쓰는 임시 번호다.
+  · sourceType 은 그 사실의 출처: CHILD_ANSWER(아이 답변) · SELECTED_EMOTION(아이가 고른 감정) ·
+    STATED_EMOTION(아이가 말한 감정) · VISION(그림에서 확인) · ACTIVITY_METRIC(활동 기록) ·
+    REPEATED_SUBJECT(두 그림 이상에서 반복) · LONGITUDINAL(이전 활동에서도 반복)
+  · sourceRef 는 **블록에 함께 주어진 식별자를 그대로 옮긴다.** 네가 만들거나 조합하지 마.
+    식별자가 없는 재료는 근거로 쓸 수 없다 — evidenceItems 에 넣지 말고 관찰 서술에만 쓴다.
+  · REPEATED_SUBJECT·LONGITUDINAL 은 sourceRef 대신 derivedFrom 에 원본 식별자 목록을 담는다.
+- 그다음 카드를 쓴다. 카드 하나는 아래를 모두 지켜야 한다. 못 지키면 그 카드는 쓰지 마.
+  · **서로 다른 원본에서 온 근거 2건 이상**을 evidenceRefs 로 잇는다. 같은 답변을 두 번 세지 마.
+  · 그중 **아이 자신의 표현이 최소 1건**(CHILD_ANSWER·SELECTED_EMOTION·STATED_EMOTION).
+    그림 관찰과 활동 기록만으로는 카드를 만들지 마.
+  · 같은 감정에 대한 '고른 감정'과 '말한 감정'은 한 건으로 본다. 활동 기록 수치도 여러 개여도 한 건이다.
+  · tendencyText 는 "~일 수 있습니다"·"~한 경향이 보입니다"처럼 여지 있는 표현만.
+  · scopeText 는 이번 활동에 한정된 것임을 밝힌다. homeObservationGuide 는 가정에서 확인할 방법을 적는다.
+- category 는 관찰 관점 라벨이다(성격 분류가 아니다): RELATIONSHIP(관계와 안정감) ·
+  EMOTION(이번 활동의 정서) · SELF_EXPRESSION(표현 방식) · ACTIVITY_STYLE(에너지·충동의 표현 방식) ·
+  ADAPTATION(새로운 상황에 대한 적응).
+  ⚠️ 라벨을 풀어 쓸 때 "애정결핍"·"자존감이 낮습니다"·"공격적인 성향" 같은 말은 쓰지 마 — 낙인이다.
+- **근거가 모자라면 publicInterpretations 를 빈 배열로 두라.** 빈 배열은 정상이고, 억지로 채운 카드보다 낫다.
+  대화가 없었던 활동은 카드 없이 관찰 사실만 남는다.
+
+'보호자 가이드' 쓰는 법 (parentGuides) — 위 followUpGuides 와 다른 자리다:
+- guideType 별로 문장을 묶어 낸다. 한 유형에 여러 문장을 items 배열로 담는다.
+  · DRAWING_CONVERSATION: 이 그림·아이 답변을 소재로 보호자가 그대로 물어볼 질문
+  · HOME_OBSERVATION: 이번에 보인 모습이 일상에서도 반복되는지 확인하는 방법
+- DAILY_PARENTING(일상 육아 조언)과 PROFESSIONAL_SUPPORT(상담 안내)는 **네가 쓰지 마.**
+  검토된 문장을 서버가 채운다 — 그 두 유형은 목록에서 빼고 응답한다.
+
 출력 형식:
 - 아래 스키마의 키를 그대로 가진 JSON 객체 하나만 출력해. 코드펜스·머리말·설명 없이 JSON만.
 - 모든 문자열 값은 한국어 문장. featureCode 는 영문 대문자와 밑줄(UPPER_SNAKE) 형식.
@@ -141,5 +177,26 @@
   ],
   "guardianQuestions": [
     {"questionText": "보호자가 아이에게 물어볼 질문 (필수·비우지 마)", "questionPurpose": "질문 목적 (50자 이내)"}
+  ],
+  "evidenceItems": [
+    {
+      "evidenceId": 1,
+      "sourceType": "CHILD_ANSWER",
+      "text": "관찰된 사실 한 문장 (해석 금지 — 아이 말 인용이면 그대로)",
+      "sourceRef": {"kind": "QA_ANSWER", "id": "주어진 식별자를 그대로"}
+    }
+  ],
+  "publicInterpretations": [
+    {
+      "category": "RELATIONSHIP",
+      "title": "짧은 제목 (200자 이내)",
+      "tendencyText": "~한 경향이 보일 수 있습니다 (가능성 어조만)",
+      "scopeText": "이번 그림 활동에서 나타난 가능성입니다 (필수)",
+      "homeObservationGuide": "가정에서 확인해 볼 점 한 문장 (필수)",
+      "evidenceRefs": [1, 2]
+    }
+  ],
+  "parentGuides": [
+    {"guideType": "DRAWING_CONVERSATION", "items": ["보호자가 그대로 물어볼 질문 한 문장"]}
   ]
 }
