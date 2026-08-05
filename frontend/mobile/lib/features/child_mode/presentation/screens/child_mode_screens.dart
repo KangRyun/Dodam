@@ -1873,10 +1873,17 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
   /// 배경 장면은 바깥 Stack에서 화면 전체를 채우고(full-bleed), 상호작용 본문만
   /// 최대 폭으로 가둬 큰 태블릿에서 캐릭터·이젤이 양 끝으로 벌어지지 않게
   /// 가운데로 모은다(S15P11B209-787).
-  Widget _wideBody(BuildContext context) => ResponsiveContent(
-    child: Column(
-      key: const ValueKey('child-home-wide-body'),
-      children: [
+  Widget _wideBody(BuildContext context) => Center(
+    // 참고 화면 밀도를 고정 디자인 크기로 잡고 화면에 맞춰 통째로 스케일한다.
+    // 큰 태블릿(S10 Ultra)에선 확대되어 꽉 차고, 작은 화면에선 축소되어 넘치지 않는다.
+    child: FittedBox(
+      fit: BoxFit.contain,
+      child: SizedBox(
+        width: 1120,
+        height: 720,
+        child: Column(
+          key: const ValueKey('child-home-wide-body'),
+          children: [
         _title(context),
         const SizedBox(height: AppSpacing.md),
         // 좌=캐릭터, 우=[새로 그리기 / 지난 그림·이어 그리기]. 둘 다 가운데 밴드에
@@ -1917,6 +1924,8 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
           ),
         ),
       ],
+        ),
+      ),
     ),
   );
 
