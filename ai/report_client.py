@@ -6,8 +6,17 @@ BE 계약(report.dto.ObservationGenerationRequest → ObservationGenerationResul
 
 역할 분담:
 - LLM(GMS)이 생성하는 것: 정성적 관찰 문구(요약·긍정신호·주의점·근거·안내·후속질문·특징·대화요약·안내·질문).
-- 서버가 고정으로 채우는 것: status(AI_DRAFT)·disclaimer·limitations(안전 문구는 LLM에 맡기지 않는다)·
+- 서버가 고정으로 채우는 것: disclaimer·limitations(안전 문구는 LLM에 맡기지 않는다)·
   model 정보·request_id 에코·emotion_source(요청에서 결정)·representative_utterance 에코.
+- 코드가 판정하는 것: status. 조립은 언제나 AI_DRAFT 로 두고, 2차 패스(_self_review)를 통과한
+  리포트만 AI_REVIEWED 로 올린다.
+
+AI 자체검토(2026-08-05): 이 서비스에는 리포트를 읽는 사람 전문가가 없다 — 실측으로 확인했다
+(ObservationReviewStatus 값이 AI_DRAFT 하나뿐 · 다른 상태로 가는 전이 코드 0건 ·
+report 패키지에 EXPERT 읽기 경로 0건 · 운영 report_observed_features 97건 전량 EXPERT_ONLY).
+그 자리를 AI 스스로가 대신한다: 생성 → 규칙 필터(report_safety) → LLM 자체검토 → 통과분만
+AI_REVIEWED. 사람이 필요한 자리(위기 대응·상담 권유)는 그대로 사람에게 남긴다 —
+crisis_detection·crisis_guidance 와 expertReviewRequired 가 그 경로다.
 
 가드레일:
 - 진단·점수화 금지는 프롬프트가 강제하고, 안전 문구(disclaimer/limitations)는 코드가 상수로 보장한다.
@@ -57,16 +66,19 @@ logger = logging.getLogger(__name__)
 _REPORT_COMMON = "report_common"
 _REPORT_HTP = "report_htp"
 _REPORT_DIARY = "report_diary"
+# AI 자체검토(2-pass) 프롬프트. 생성 프롬프트와 함께 '한 번의 리포트 생성'을 이루므로
+# 버전 조합에도 함께 들어간다 — 검토 기준이 바뀌면 결과가 바뀌는데 태그가 그대로면 재현이 깨진다.
+_REPORT_REVIEW = "report_review"
 
 # 활동 변형별 조합 — 라벨은 저장 태그에 그대로 실리는 고정 어휘다(S15P11B209-819).
 _COMBOS: dict[str, tuple[str, ...]] = {
-    "htp": (_REPORT_COMMON, _REPORT_HTP),
-    "diary": (_REPORT_COMMON, _REPORT_DIARY),
+    "htp": (_REPORT_COMMON, _REPORT_HTP, _REPORT_REVIEW),
+    "diary": (_REPORT_COMMON, _REPORT_DIARY, _REPORT_REVIEW),
 }
 
 # 두 변형과 공통부를 함께 담은 통합 버전 — 어떤 파일 조합으로 생성됐는지 한 문자열로 남긴다.
 PROMPT_VERSION = prompts_registry.short_version(
-    "report-all", _REPORT_COMMON, _REPORT_HTP, _REPORT_DIARY
+    "report-all", _REPORT_COMMON, _REPORT_HTP, _REPORT_DIARY, _REPORT_REVIEW
 )
 
 
@@ -97,12 +109,21 @@ LIMITATIONS = (
     "본 리포트는 제한된 활동 데이터를 바탕으로 한 관찰 기록이며, "
     "아동의 발달 상태를 단정하지 않습니다."
 )
-# 대표 발화가 비어 있을 때의 중립 기본값(진단·해석 없는 무난한 문장).
-DEFAULT_UTTERANCE = "재미있었어요."
-
 # 후속 질문이 비었거나 진단성 표현이 섞였을 때 대체할 안전 기본값(S15P11B209-601).
 # 보호자가 아이에게 그대로 건네도 무해한, 진단이 아닌 '집에서 나눌 대화'용 질문.
 DEFAULT_FOLLOW_UP_QUESTION = "오늘 그림에서 어떤 부분이 제일 마음에 들었어?"
+
+# ── 검토 상태 (2026-08-05) ───────────────────────────────────────
+# 이 서비스에는 리포트를 읽는 사람 전문가가 없다(4계층 실측: ObservationReviewStatus 값이
+# AI_DRAFT 하나뿐 · 전이 코드 0건 · EXPERT 읽기 경로 0건 · 운영 관찰 특징 97건 전량 EXPERT_ONLY).
+# 그 자리를 AI 자체검토가 대신한다 — 통과분만 AI_REVIEWED 로 올려 보호자 경로를 연다.
+#
+# ⚠️ BE 계약 의존: BE ObservationReviewStatus enum 에 AI_REVIEWED 가 추가되고,
+#    AnalysisObservationResult 가 하드코딩(AI_DRAFT) 대신 이 값을 받아야 실효가 생긴다.
+#    그 전까지 AI_REVIEWED 를 보내도 BE는 AI_DRAFT 로 저장하므로 **동작은 지금과 같다**
+#    (모든 관찰 카드가 EXPERT_ONLY 로 강등된 채 저장된다) — 배포 순서에 안전하다.
+REVIEW_STATUS_DRAFT = "AI_DRAFT"
+REVIEW_STATUS_REVIEWED = "AI_REVIEWED"
 
 _VALID_SCOPES = {"EXPERT_ONLY", "REVIEWED_GUARDIAN"}
 
@@ -185,14 +206,21 @@ def _format_behavior(
     None인 항목은 줄 자체를 넣지 않는다 — 0("0번")과 구분하기 위해서다. 집계하지 못한 값을
     0으로 적으면 "멈춤 없이 그렸다"는 관찰 사실로 읽힌다(BE StrokeBehaviorSummary 와 같은 원칙).
 
+    도구·색 변경(2026-08-05): 계약으로 받고도 싣지 않던 두 값을 싣는다. 앱이 도구·색 변경을
+    보내기 시작해 BE 집계에 실제 값이 담기게 됐고, 받아 놓고 버리면 프롬프트 1행이 약속한
+    지표 목록과 실제 블록이 계속 어긋난다. 대신 해석 남용은 프롬프트가 세 조항으로 막는다 —
+    관찰 사실로만 적기 · [형식적 분석] 전체를 신호 하나로 세기 · 0이 몰린 것을 해석하지 않기
+    (report_common 2.1.0). 이 블록만으로 "독립 신호 2개" 조건이 채워지지 않게 하는 것이 핵심이다.
+
     필압은 강약 값(average_pressure)이 있을 때만 적는다. pressure_available 은 기기가 필압을
     측정할 수 있는지일 뿐 아이에 대한 관찰이 아니라서, "측정됨"·"측정 불가(미지원 기기)"를
     적으면 관찰 내용이 0인 줄이 해석 재료처럼 놓인다. BE도 이 필드를 감정 근거로 쓰지 말라고
-    명시했다. 현재 average_pressure 는 항상 None이라 실질적으로 필압 줄은 나오지 않는다.
-
-    tool_change_count·color_change_count 는 계약으로 받되 싣지 않는다 — "색을 5번 바꿨다"의
-    관찰 의미가 불분명하고, 블록 항목이 늘수록 프롬프트 규칙끼리 충돌해 왔다(788·808).
-    실제 값 분포를 본 뒤 후속에서 판단한다.
+    명시했다.
+    ⚠️ average_pressure 는 **구조적으로 항상 None** 이다 — BE record StrokeBehaviorSummary 에
+       그 필드 자체가 없다(drawingDurationMs·activeDrawingMs·pauseCount·undoCount·eraseCount·
+       toolChangeCount·colorChangeCount·pressureAvailable·truncated 뿐). 즉 필압 줄은 운영에서
+       한 번도 나온 적이 없고 나올 수도 없다. 아래 분기는 스모크/계약 확장 대비로만 남긴다.
+       프롬프트가 필압을 약속하던 문구와 "측정 불가면 언급하지 않는다"는 죽은 규칙은 지웠다.
     """
     if behavior is None:
         return ""
@@ -222,6 +250,10 @@ def _format_behavior(
         lines.append(f"- 지우기 횟수: {behavior.erase_count}회")
     if behavior.undo_count is not None:
         lines.append(f"- 되돌리기 횟수: {behavior.undo_count}회")
+    if behavior.tool_change_count is not None:
+        lines.append(f"- 도구 바꾼 횟수: {behavior.tool_change_count}회")
+    if behavior.color_change_count is not None:
+        lines.append(f"- 색 바꾼 횟수: {behavior.color_change_count}회")
     if behavior.average_pressure is not None:
         lines.append(f"- 필압: 평균 {behavior.average_pressure:.2f} (0~1)")
 
@@ -259,8 +291,22 @@ def _third(value: float) -> int:
     return 2
 
 
+def _has_box(obj: contracts.SubjectDetectedObject) -> bool:
+    """위치를 말할 수 있는 탐지인가 — bbox 네 값이 **전부** 있어야 한다.
+
+    2026-08-05 운영 결함 이후 기하 4필드가 optional 이 됐다(BE 906이 {evidenceSourceId,
+    objectCode} 만 보내 422가 났다). 일부만 있는 경우도 위치를 말할 수 없다 —
+    빠진 값을 0으로 치거나 있는 값만으로 추정하면 **없는 근거가 근거 자리에 들어간다**
+    (area_ratio 를 width*height 로 대체 계산하지 말라는 BE 명시와 같은 원칙).
+    """
+    return None not in (obj.x, obj.y, obj.width, obj.height)
+
+
 def _position_label(obj: contracts.SubjectDetectedObject) -> str:
-    """bbox 중심점의 9분할 위치를 한국어로. 중앙이면 '한가운데'."""
+    """bbox 중심점의 9분할 위치를 한국어로. 중앙이면 '한가운데'.
+
+    ⚠️ 호출 전에 _has_box 로 걸러야 한다 — 좌표가 없으면 위치를 지어낼 방법이 없다.
+    """
     col = _POSITION_COLS[_third(obj.x + obj.width / 2)]
     row = _POSITION_ROWS[_third(obj.y + obj.height / 2)]
     if col == "가운데" and row == "가운데":
@@ -287,24 +333,42 @@ def _whole_object(
     )
 
 
-def _geometry_line(
+def _geometry_facts(
     obj: contracts.SubjectDetectedObject,
     whole: contracts.SubjectDetectedObject | None,
     subject_name: str,
-) -> str:
-    """탐지 하나 → 크기·위치 한 줄.
+) -> list[str]:
+    """이 탐지에 대해 **실제로 주어진** 관찰 사실만 모은다. 없으면 빈 목록.
 
-    신뢰도가 확정 구간 미만이면 완화 문구를 앞에 붙인다 — 겨우 통과한 탐지가 확정 사실로
-    적혀 보호자에게 나가면 안 된다(BE 요청). confidence 가 아예 없으면 판단할 근거가 없으므로
-    완화하지도 제외하지도 않는다(구 detectedObjectCodes 경로와 같은 취급).
+    ⚠️ 값이 없으면 만들지 않는다. 좌표가 없으면 위치를 적지 않고, area_ratio 가 없으면
+       크기를 적지 않는다(width*height 로 대체 계산 금지 — BE 명시).
+       빈 목록이면 호출부가 그 항목을 블록에서 통째로 뺀다.
     """
-    facts = []
+    facts: list[str] = []
     if obj.area_ratio is not None:
         facts.append(f"종이의 {_percent(obj.area_ratio)}")
         # 부위:주제 비율 — '집에 비해 문이 작다' 같은 관계를 수치로 남긴다.
         if whole is not None and whole is not obj and whole.area_ratio:
             facts.append(f"{subject_name} 전체의 {_percent(obj.area_ratio / whole.area_ratio)}")
-    facts.append(_position_label(obj))
+    if _has_box(obj):
+        facts.append(_position_label(obj))
+    return facts
+
+
+def _geometry_line(
+    obj: contracts.SubjectDetectedObject,
+    whole: contracts.SubjectDetectedObject | None,
+    subject_name: str,
+) -> str | None:
+    """탐지 하나 → 크기·위치 한 줄. 적을 관찰 사실이 없으면 None(그 항목을 빼라는 뜻).
+
+    신뢰도가 확정 구간 미만이면 완화 문구를 앞에 붙인다 — 겨우 통과한 탐지가 확정 사실로
+    적혀 보호자에게 나가면 안 된다(BE 요청). confidence 가 아예 없으면 판단할 근거가 없으므로
+    완화하지도 제외하지도 않는다(구 detectedObjectCodes 경로와 같은 취급).
+    """
+    facts = _geometry_facts(obj, whole, subject_name)
+    if not facts:
+        return None
 
     hedge = ""
     if (
@@ -318,21 +382,27 @@ def _geometry_line(
 def _format_geometry(summary: contracts.SubjectSummary, label: str) -> str:
     """주제 하나의 [OO 크기·위치] 블록. 쓸 탐지가 없으면 빈 문자열.
 
-    신뢰도가 REPORT_GEOMETRY_MIN_CONF 미만인 탐지는 아예 뺀다 — 탐지 임계값(0.20)은
-    '박스를 남길지'의 기준이라 리포트 문장의 근거 기준으로 쓰기엔 낮다.
+    두 가지를 뺀다:
+    - 신뢰도가 REPORT_GEOMETRY_MIN_CONF 미만인 탐지 — 탐지 임계값(0.20)은 '박스를 남길지'의
+      기준이라 리포트 문장의 근거 기준으로 쓰기엔 낮다.
+    - **기하가 없는 탐지**(2026-08-05) — BE가 {evidenceSourceId, objectCode} 만 보내는 경우다.
+      코드 이름만으로 크기·위치 블록에 줄을 세우면 '관찰된 수치'가 있는 것처럼 읽힌다.
+      그 항목은 '탐지된 요소 코드' 줄로만 남고, 이 블록에는 오르지 않는다.
+
+    전부 빠지면 블록 자체를 싣지 않는다 — _format_behavior 가 적을 지표가 없을 때
+    빈 문자열을 돌려주는 것과 같은 원칙이다(빈 블록을 실으면 모델이 채우려 든다).
     """
-    usable = [
-        obj
-        for obj in summary.detected_objects
-        if obj.confidence is None or obj.confidence >= config.REPORT_GEOMETRY_MIN_CONF
-    ]
-    if not usable:
-        return ""
     whole = _whole_object(summary)
     subject_name = _SUBJECT_KO.get(summary.drawing_subject or "", "그림")
-    lines = [f"[{label} 크기·위치]"]
-    lines.extend(_geometry_line(obj, whole, subject_name) for obj in usable)
-    return "\n".join(lines)
+    lines = [
+        line
+        for obj in summary.detected_objects
+        if obj.confidence is None or obj.confidence >= config.REPORT_GEOMETRY_MIN_CONF
+        if (line := _geometry_line(obj, whole, subject_name)) is not None
+    ]
+    if not lines:
+        return ""
+    return "\n".join([f"[{label} 크기·위치]", *lines])
 
 
 def _format_subject_blocks(req: contracts.ObservationGenerationRequest) -> str:
@@ -914,6 +984,122 @@ def _drawn_items(
     )
 
 
+# ── 주제별 관찰 (875 §5 · S15P11B209-HTP 주제 분리) ──────────────
+# 그림 한 장당 관찰 문장 상한. VLM 관찰 서술 자체가 2~4문장이라 그보다 많이 나오면 서술에 없는
+#   것을 늘려 쓴 것이다(_DRAWN_ITEMS_PER_SUBJECT_MAX 와 같은 결).
+_VISION_OBSERVATIONS_PER_SUBJECT_MAX = 4
+# 875 §5 가 못 박은 표시 순서. **요청 순서가 아니라 이 순서가 계약이다** —
+#   BE가 스냅샷을 그대로 쓰므로 여기서 어긋나면 화면에서 나무가 집보다 먼저 나온다.
+_SUBJECT_REPORT_ORDER = ("HOUSE", "TREE", "PERSON")
+
+
+def _kept_positions(before: list, after: list) -> list[int]:
+    """after(순서를 지킨 부분집합)의 각 원소가 before 의 몇 번째였는지.
+
+    경향 카드가 게이트·자체검토에서 빠질 때마다 배열 위치가 앞으로 당겨진다. 주제별 관찰의
+    interpretation_refs 는 그 **위치**를 가리키므로(875 §5-1), 다시 매핑하지 않으면 참조가
+    조용히 다른 카드를 가리킨다 — 875가 "재정렬하지 마라"로 경고한 바로 그 사고다.
+    값 비교(==)가 아니라 **동일성(is)** 으로 맞춘다. 같은 내용의 카드가 두 장이면 값 비교는
+    앞 카드에 붙어 매핑이 어긋난다.
+    """
+    positions: list[int] = []
+    remaining = iter(enumerate(before))
+    for item in after:
+        for index, candidate in remaining:
+            if candidate is item:
+                positions.append(index)
+                break
+    return positions
+
+
+def _subject_reports(
+    data: dict,
+    req: contracts.ObservationGenerationRequest,
+    ref_map: dict[int, int],
+) -> tuple[list[contracts.SubjectReportDraft], bool]:
+    """주제별 관찰 묶음 (875 §5). 두 번째 반환값은 '규칙 필터가 문장을 걸렀는가'다.
+
+    HTP는 집·나무·사람 세 장을 그리는데 지금까지 응답에는 주제 구분이 남지 않았다.
+    이 목록이 '주제별 관찰 사실과 문답' 섹션(875 §11-5)의 AI 몫이다 —
+    image_url·qa_pairs 는 BE가 자기 데이터로 채운다(계약 모델 docstring 참조).
+
+    ⚠️ **골격은 요청이 정한다.** 모델이 주제를 빠뜨리거나 순서를 뒤집어도 그 그림이 리포트에서
+       사라지지 않게, req.subject_summaries 의 주제마다 한 칸씩 만들고 거기에 모델 내용을 얹는다.
+       순서는 HOUSE → TREE → PERSON 고정(875 §5). 요청에 없는 주제는 그리지 않은 그림이라 버린다.
+
+    ⚠️ 관찰 서술이 없는 그림은 문장을 받지 않는다. 대조할 원본이 없는데 관찰 사실을 적으면
+       그건 관찰이 아니라 창작이다(_drawn_items 가 서술 원문과 대조하는 것과 같은 원칙).
+
+    ref_map: LLM이 적은 카드 순번(자기 출력 기준) → 게이트를 통과한 최종 배열 위치.
+    """
+    if not req.subject_summaries:
+        # 레거시 draft 경로(subject_summaries 없음) — 주제가 없으니 만들 것도 없다.
+        return [], False
+
+    descriptions: dict[str | None, str] = {}
+    order: list[str | None] = []
+    for summary in req.subject_summaries:
+        if summary.drawing_subject in descriptions:
+            continue
+        descriptions[summary.drawing_subject] = (summary.drawing_description or "").strip()
+        order.append(summary.drawing_subject)
+    # 안정 정렬이라 계약에 없는 주제(그림일기의 None)는 요청 순서를 지킨 채 뒤로 밀린다.
+    order.sort(
+        key=lambda subject: (
+            _SUBJECT_REPORT_ORDER.index(subject)
+            if subject in _SUBJECT_REPORT_ORDER
+            else len(_SUBJECT_REPORT_ORDER)
+        )
+    )
+
+    raw_by_subject: dict[str | None, dict] = {}
+    for raw in data.get("subjectReports") or []:
+        if not isinstance(raw, dict):
+            continue
+        subject = str(raw.get("subjectType") or "").strip().upper() or None
+        if subject not in descriptions or subject in raw_by_subject:
+            continue
+        raw_by_subject[subject] = raw
+
+    flagged = False
+    reports: list[contracts.SubjectReportDraft] = []
+    for subject in order:
+        raw = raw_by_subject.get(subject) or {}
+        observations: list[str] = []
+        if descriptions.get(subject):
+            for value in raw.get("visionObservations") or []:
+                if len(observations) >= _VISION_OBSERVATIONS_PER_SUBJECT_MAX:
+                    break
+                text = str(value).strip()
+                if not text or text in observations:
+                    continue
+                if report_safety.has_unsafe_expression(text):
+                    # ⚠️ 원문은 남기지 않는다 — 관찰 문장에 아이 표현이 섞일 수 있다.
+                    # 관찰 '사실' 자리에 단정·낙인이 섞이면 다른 문장들이 그걸 사실로 알고
+                    # 기대게 된다 — 문장만 빼고 리포트는 미검토(AI_DRAFT)로 남긴다.
+                    logger.warning("주제별 관찰 사실 단정·낙인 표현 — 문장 제외·자체검토 실패")
+                    flagged = True
+                    continue
+                observations.append(text)
+        refs: list[int] = []
+        for value in raw.get("interpretationRefs") or []:
+            try:
+                index = int(value)
+            except (TypeError, ValueError):
+                continue
+            mapped = ref_map.get(index)
+            if mapped is not None and mapped not in refs:
+                refs.append(mapped)
+        reports.append(
+            contracts.SubjectReportDraft(
+                subject_type=subject,
+                vision_observations=observations,
+                interpretation_refs=refs,
+            )
+        )
+    return reports, flagged
+
+
 def _generation_version(is_htp: bool) -> str:
     """리포트 재현성 버전 태그 — 프롬프트·파이프라인 버전을 함께 기록한다(S15P11B209-602).
 
@@ -928,7 +1114,11 @@ def _generation_version(is_htp: bool) -> str:
     길어져 BE 컬럼을 넘긴다. 정본은 version_manifest()로 되짚는다.
     """
     label = "htp" if is_htp else "diary"
-    prompt = prompts_registry.short_version(label, *_prompt_names(is_htp))
+    # 자체검토 프롬프트도 조합에 넣는다 — 검토 기준이 바뀌면 어떤 리포트가 보호자에게 열리는지가
+    # 바뀌는데 태그가 그대로면 "같은 버전인데 결과가 다른" 상태가 된다(832와 같은 사고 유형).
+    prompt = prompts_registry.short_version(
+        label, *_prompt_names(is_htp), _REPORT_REVIEW
+    )
     return f"pipeline={config.PIPELINE_VERSION};prompt={prompt}"
 
 
@@ -956,11 +1146,18 @@ def _assemble(
     rag_chunks: list[Chunk] | None = None,
     rag_skipped_reason: str | None = None,
     is_htp: bool | None = None,
-) -> contracts.ObservationGenerationResult:
-    """LLM 정성 결과(data) + 서버 고정 필드를 합쳐 계약 결과를 만든다.
+) -> tuple[contracts.ObservationGenerationResult, bool]:
+    """LLM 정성 결과(data) + 서버 고정 필드를 합쳐 (계약 결과, 규칙 위반 여부)를 만든다.
 
     rag_chunks(614)가 있으면 출처 목록과 KB Version을 함께 싣는다 — 출처 표시는
     라이선스 의무이자 리포트 재현성 재료(어떤 지식 근거로 생성됐나).
+
+    두 번째 반환값은 **규칙 필터(report_safety)가 무언가를 걸렀는가**다. 이건 리포트 품질
+    실패이지 '아이가 걱정된다'는 신호가 아니라서 expert_review_required 로 올리지 않는다
+    (2026-08-05 계약: expertReviewRequired = 사람 상담을 권할 신호). 대신 자체검토 실패로
+    이어져 status 가 AI_DRAFT 로 남고, BE는 그 리포트의 관찰 카드를 보호자에게 열지 않는다.
+    ⚠️ 강등·제외가 이미 끝난 결과만으로는 이 사실을 되짚을 수 없어(제외된 카드는 사라진다)
+       조립 시점에 함께 돌려준다 — 신호를 잃지 않기 위한 것이다.
     """
     if is_htp is None:
         is_htp = _is_htp(req)
@@ -968,10 +1165,15 @@ def _assemble(
     features = [_feature(f) for f in data.get("features", []) if isinstance(f, dict)]
 
     # 단정적 진단(591)이나 감정·성격 과잉 추론(592) 표현이 보호자 노출 문장·특징에 하나라도
-    # 있으면 전문가 검토를 강제한다. attentionPoints는 전문가 전용 채널이라 검사 대상에서 제외한다.
+    # 있으면 자체검토 실패로 처리한다(status=AI_DRAFT). attentionPoints는 여기 없는데, 이제
+    # 그것도 보호자가 읽는 자리다 — 아래에서 따로 검사해 합친다.
     guardian_texts = [
         str(data.get("overallSummary", "")),
         str(data.get("positiveSignals", "")),
+        # attentionPoints 는 2026-08-05 계약에서 '보호자가 다음에 더 지켜볼 점'이 됐다.
+        # 전문가 전용 채널이던 시절의 검사 면제를 그대로 두면, 보호자가 읽는 자리 하나가
+        # 규칙 필터 밖에 남는다.
+        str(data.get("attentionPoints", "")),
         str(data.get("evidenceSummary", "")),
         str(data.get("guardianGuidance", "")),
         str(data.get("followUpQuestion", "")),
@@ -980,7 +1182,7 @@ def _assemble(
         str(conv.get("expressedEmotion", "")),
         *(f"{f.title} {f.description} {f.evidence_summary}" for f in features),
     ]
-    needs_expert_review = report_safety.has_unsafe_expression(*guardian_texts)
+    rule_flagged = report_safety.has_unsafe_expression(*guardian_texts)
 
     # ── 경향 해석 (S15P11B209-887 조립 + 888 구조 게이트) ────────
     # 근거 풀을 먼저 만들고, 카드는 그 풀에 실제로 있는 근거만 참조하게 한다.
@@ -988,7 +1190,11 @@ def _assemble(
     evidence_items = _evidence_items(data, _allowed_evidence_refs(req))
     known_ids = {item.evidence_id for item in evidence_items}
     interpretations: list[contracts.PublicInterpretation] = []
-    for raw in data.get("publicInterpretations") or []:
+    # 주제별 관찰(875 §5)의 interpretation_refs 가 가리킬 '원래 순번'을 기억해 둔다 —
+    # 아래에서 카드가 빠질 때마다 배열 위치가 당겨지므로, 모델이 자기 출력 기준으로 적은
+    # 순번을 최종 위치로 다시 매핑해야 참조가 어긋나지 않는다(875 §5-1).
+    raw_index_of: list[int] = []
+    for raw_index, raw in enumerate(data.get("publicInterpretations") or []):
         # 표현 안전 검사를 **구조 검사보다 먼저** 원문에 돌린다. 순서를 바꾸면 형식까지 어긋난
         # 카드가 구조 검사에서 먼저 걸러져, 진단·낙인 표현이 있었다는 신호가 사라진다.
         # 카드에는 EXPERT_ONLY 자리가 없어(875 §3) 강등할 곳이 없다 — 빼고 신호를 남긴다.
@@ -998,18 +1204,25 @@ def _assemble(
                 for key in ("title", "tendencyText", "scopeText", "homeObservationGuide")
             )
         ):
-            logger.warning("경향 카드 과도 규정·단정 표현 — 카드 제외·전문가 검토 상향")
-            needs_expert_review = True
+            logger.warning("경향 카드 과도 규정·단정 표현 — 카드 제외·자체검토 실패")
+            rule_flagged = True
             continue
         card = _public_interpretation(raw, known_ids)
         if card is not None:
             interpretations.append(card)
+            raw_index_of.append(raw_index)
     # 구조적 공개 게이트(S15P11B209-888) — 값싼 결정적 검사라 표현 필터보다 먼저 돌린다.
     # 실패한 카드는 EXPERT_ONLY로 강등하지 않고 **제외**한다(근거 자체가 없다).
     # blocked_refs: 미확정 STT(886)를 배제한다. 위기 발화(889)가 같은 집합에 합쳐진다.
+    parsed_cards = interpretations
     interpretations, gate_reasons = interpretation_gate.apply(
-        interpretations, evidence_items, blocked_refs=_blocked_evidence_refs(req)
+        parsed_cards, evidence_items, blocked_refs=_blocked_evidence_refs(req)
     )
+    # 모델이 적은 카드 순번 → 최종 배열 위치. 빠진 카드를 가리키던 참조는 매핑에 없어 사라진다.
+    ref_map = {
+        raw_index_of[position]: final
+        for final, position in enumerate(_kept_positions(parsed_cards, interpretations))
+    }
     if gate_reasons:
         # 사유 코드만 남긴다 — 카드 문장·아이 발화는 로그에 담지 않는다.
         logger.info("경향 카드 게이트 제외 %d건: %s", len(gate_reasons), sorted(set(gate_reasons)))
@@ -1018,9 +1231,13 @@ def _assemble(
     referenced = {ref for card in interpretations for ref in card.evidence_refs}
     evidence_items = [i for i in evidence_items if i.evidence_id in referenced]
     parent_guides = _parent_guides(data)
+    # 주제별 관찰(875 §5). 카드 매핑이 끝난 뒤에 만든다 — 순번을 최종 배열 기준으로 적어야 한다.
+    subject_reports, subject_flagged = _subject_reports(data, req, ref_map)
+    rule_flagged = rule_flagged or subject_flagged
 
     observation = contracts.ObservationDraft(
-        status="AI_DRAFT",
+        # 조립 단계는 언제나 '미검토'다 — 자체검토(_self_review)만 AI_REVIEWED 로 올릴 수 있다.
+        status=REVIEW_STATUS_DRAFT,
         overall_summary=str(data.get("overallSummary", "")),
         positive_signals=str(data.get("positiveSignals", "")),
         attention_points=str(data.get("attentionPoints", "")),
@@ -1029,8 +1246,13 @@ def _assemble(
         # 후속 질문은 비었거나 진단성 표현이 섞이면 안전 기본값으로 대체·보장한다(S15P11B209-601).
         # raw를 그대로 넘긴다 — 객체({questionText,...})로 와도 _safe_follow_up이 questionText를 뽑는다.
         follow_up_question=_safe_follow_up(data.get("followUpQuestion", "")),
-        expert_review_required=bool(data.get("expertReviewRequired", False))
-        or needs_expert_review,
+        # 2026-08-05 계약: expertReviewRequired = '사람 상담을 권할 신호'(아이 이야기)다.
+        # 예전에는 여기에 규칙 필터 적중(rule_flagged)을 OR 로 얹었는데, 그건 '리포트에 진단어가
+        # 섞였다'는 품질 실패라 뜻이 다르다 — 둘을 합치면 문장 사고가 상담 권유로 둔갑한다.
+        # 품질 실패는 status(AI_DRAFT)로 간다. 담는 곳이 갈렸을 뿐 격리가 약해지지는 않는다:
+        # 구 경로에서 이 불리언은 BE Report.expertReviewRecommended 컬럼에만 저장되고 읽는 곳이
+        # 없었던 반면, status 는 BE가 관찰 카드 공개 여부를 정하는 데 실제로 쓴다.
+        expert_review_required=bool(data.get("expertReviewRequired", False)),
         disclaimer=DISCLAIMER,
         features=features,
     )
@@ -1039,9 +1261,13 @@ def _assemble(
         main_topic=str(conv.get("mainTopic", "")),
         expressed_emotion=str(conv.get("expressedEmotion", "")),
         emotion_source=_emotion_source(req),
-        representative_utterance=(req.representative_utterance or DEFAULT_UTTERANCE),
+        # 아이가 실제로 한 말만 싣는다. 없으면 None — 무난한 문장으로 채우지 않는다.
+        #   폐지된 기본값("재미있었어요.")은 운영 51건 중 34건을 차지했다. 아무도 읽지 않는
+        #   컬럼이었지만, 나중에 읽는 기능이 생기면 그대로 가짜 인용이 된다.
+        #   바로 아래 confidence=None 과 같은 원칙이다(지어내지 않는다).
+        representative_utterance=req.representative_utterance,
     )
-    return contracts.ObservationGenerationResult(
+    result = contracts.ObservationGenerationResult(
         request_id=req.request_id,
         # 재현성(S15P11B209-602): model_name=실제 서빙 모델, model_version=프롬프트+파이프라인 버전.
         model_name=model,
@@ -1078,11 +1304,274 @@ def _assemble(
         public_interpretations=interpretations,
         evidence_items=evidence_items,
         parent_guides=parent_guides,
+        # 주제별 관찰(875 §5). HTP 세 장의 구분이 여기서만 남는다 — 비면 지금까지와 같다.
+        subject_reports=subject_reports,
         # '그린 것'(S15P11B209-911). 서술 원문과 대조해 통과한 이름만 실린다.
         drawn_items=_drawn_items(data, req),
         # 위기 안내는 S15P11B209-889이 채운다 — LLM 결과에서 만들지 않는다.
         crisis_alert=None,
     )
+    return result, rule_flagged
+
+
+# ── AI 자체검토 (2-pass, 2026-08-05) ─────────────────────────────
+# 사람 전문가 검토자가 없는 자리를 AI가 대신한다. 통과분만 AI_REVIEWED 로 올려 보호자 경로를 연다.
+#
+# 층을 나눈 이유(중복 구현 아님):
+#   1층 report_safety(정규식) — 형태가 정해진 표현(장애명·단정 종결·고정 특질 규정). 값싸고 결정적이라
+#      먼저 돌고, 개별 feature 강등·카드 제외는 조립 단계에서 이미 끝난다.
+#   2층 여기(LLM) — 규칙으로 못 잡는 것만 맡는다: 근거 없는 단정, 활동 밖 확대, 근거 칸에 섞인 해석.
+#      문장을 읽어야 판정되는 것들이라 정규식으로는 원리적으로 잡히지 않는다.
+# 그래서 2층은 1층을 다시 돌리지 않고, 1층 결과(rule_flagged)를 그대로 이어받아 합친다.
+#
+# 실패는 차단이 아니라 기능 저하다(RAG·548과 같은 정책) — 검토 호출이 실패하면 리포트는 그대로
+# 반환하되 status 를 AI_DRAFT 로 남긴다. '검토 못 했으니 열지 않는다'가 보수적인 쪽이다.
+_REVIEW_ISSUES = frozenset(
+    {"DIAGNOSTIC", "STIGMA", "NO_EVIDENCE", "OVERREACH", "MIXED_EVIDENCE"}
+)
+# 검토 결과를 담을 수 있는 자리 — 지적당한 항목만 빼고 나머지는 살린다.
+_FEATURE_TARGET_PREFIX = "feature."
+_CARD_TARGET_PREFIX = "card."
+_SUBJECT_TARGET_PREFIX = "subject."
+# 검토 대상 중 '관찰 사실을 적는 자리'임을 검토자에게 알리는 표시. 해석 자리와 판정 기준이
+#   다르다(사실 자리에 해석이 섞이면 MIXED_EVIDENCE) — report_review.txt 가 이 값을 읽는다.
+_FACT_SLOT_LABEL = "관찰 사실"
+
+# 자체검토 결과 카운터. outcome: passed | contained | failed | unavailable.
+#   contained = 지적이 있었지만 관찰 카드 강등·경향 카드 제외로 담아내고 통과시킨 경우.
+#   ⚠️ 지적 내용(note)·원문은 어디에도 남기지 않는다 — 아이 표현이 섞일 수 있다(가드레일 9절).
+_SELF_REVIEW_COUNTER = PrometheusCounter(
+    "dodam_report_self_review_total",
+    "관찰 리포트 AI 자체검토 결과 (outcome별 누적)",
+    labelnames=("outcome",),
+)
+
+
+def _review_facts(result: contracts.ObservationGenerationResult) -> list[str]:
+    """검토자에게 줄 [관찰 사실] 목록 — 해석이 근거를 갖췄는지 판정하는 기준이다.
+
+    근거 풀(evidenceItems)·활동 기록(activityNotes)·초안의 근거 요약을 모은다.
+    ⚠️ 근거 식별자는 넣지 않는다. 검토자는 참조 정합을 보지 않고(그건 886 코드 대조가 한다)
+       '이 해석을 뒷받침하는 관찰이 있었나'만 본다.
+    """
+    facts = [result.observation_draft.evidence_summary, *result.activity_notes]
+    facts.extend(item.text for item in result.evidence_items)
+    facts.extend(f.evidence_summary for f in result.observation_draft.features)
+    # 주제별 관찰(875 §5)도 이번 활동에서 확인된 사실이다. 여기 넣지 않으면 그 관찰에 기댄
+    # 문장들이 '근거가 어디에도 없다'로 잘못 잡힌다(NO_EVIDENCE 오탐).
+    facts.extend(
+        text for report in result.subject_reports for text in report.vision_observations
+    )
+    return [text.strip() for text in facts if text and text.strip()]
+
+
+def _review_targets(
+    result: contracts.ObservationGenerationResult,
+) -> list[dict[str, str]]:
+    """검토 대상 항목 목록. id 는 코드가 발급하고, 모델은 그대로 되돌려 주기만 한다.
+
+    보호자에게 닿는 글 중 **해석이 실릴 수 있는 것**만 담는다 — 검토는 '보호자 노출 전 관문'이지
+    전수 감사가 아니고, 대상이 늘수록 한 건의 지적이 리포트 전체를 떨어뜨릴 확률만 는다.
+    빠진 것과 이유:
+    - drawnItems: 서버가 관찰 서술 원문과 대조해 이미 버린다(911). 해석이 실릴 자리가 아니다.
+    - parentGuides: 질문·관찰 안내라 해석을 거의 담지 않고, 규칙 필터가 항목 단위로 이미 거른다.
+      대신 개별 항목을 뺄 수 없어(두 유형 각 1건 이상 필수) 지적당하면 리포트가 통째로 막힌다.
+    - evidenceItems: 아이 발화 인용 그대로다. 인용을 '해석'으로 잡을 자리가 아니다(근거 풀로만 넘긴다).
+    """
+    draft = result.observation_draft
+    targets: list[dict[str, str]] = []
+    named = {
+        "draft.overallSummary": draft.overall_summary,
+        "draft.positiveSignals": draft.positive_signals,
+        "draft.attentionPoints": draft.attention_points,
+        # 근거 풀이면서 동시에 검토 대상이다. 여기 해석이 섞이면(MIXED_EVIDENCE) 다른 문장들이
+        # 그걸 사실로 알고 기대게 되므로, 근거 자리야말로 검토에서 빠지면 안 된다.
+        "draft.evidenceSummary": draft.evidence_summary,
+        "draft.guardianGuidance": draft.guardian_guidance,
+        "draft.followUpQuestion": draft.follow_up_question,
+        "conversation.summaryText": result.conversation_summary.summary_text,
+    }
+    for target_id, text in named.items():
+        if text and text.strip():
+            targets.append({"id": target_id, "글": text.strip()})
+    for index, note in enumerate(result.activity_notes):
+        if note and note.strip():
+            targets.append({"id": f"activityNote.{index}", "글": note.strip()})
+    for index, guide in enumerate(result.follow_up_guides):
+        if guide.guidance and guide.guidance.strip():
+            targets.append({"id": f"followUpGuide.{index}", "글": guide.guidance.strip()})
+    for index, feature in enumerate(draft.features):
+        # 이미 EXPERT_ONLY 인 카드는 보호자에게 나가지 않으므로 검토 대상이 아니다 —
+        # 넣으면 검토자가 '무거운 관찰'을 또 잡아 리포트 전체를 떨어뜨린다.
+        if feature.visibility_scope == "EXPERT_ONLY":
+            continue
+        targets.append(
+            {
+                "id": f"{_FEATURE_TARGET_PREFIX}{index}",
+                "글": f"{feature.title} / {feature.description}".strip(" /"),
+                "근거": feature.evidence_summary,
+            }
+        )
+    for index, card in enumerate(result.public_interpretations):
+        targets.append(
+            {
+                "id": f"{_CARD_TARGET_PREFIX}{index}",
+                "글": f"{card.title} / {card.tendency_text}".strip(" /"),
+                "근거": card.scope_text,
+            }
+        )
+    # 주제별 관찰(875 §5) — 보호자가 그대로 읽는 **사실 자리**다. draft.evidenceSummary 를
+    # 검토 대상에 넣은 것과 같은 이유로 넣는다: 여기 해석이 섞이면(MIXED_EVIDENCE) 카드·요약이
+    # 그걸 사실로 알고 기댄다. 지적당해도 그 문장 하나만 빠지므로 리포트를 막지 않는다.
+    for subject_index, report in enumerate(result.subject_reports):
+        for text_index, text in enumerate(report.vision_observations):
+            targets.append(
+                {
+                    "id": f"{_SUBJECT_TARGET_PREFIX}{subject_index}.{text_index}",
+                    "글": text,
+                    "자리": _FACT_SLOT_LABEL,
+                }
+            )
+    return targets
+
+
+def _review_payload(result: contracts.ObservationGenerationResult) -> str:
+    """검토 user 메시지. JSON 한 덩어리로 넘겨 id 대응이 어긋나지 않게 한다.
+
+    가드레일: 여기 실리는 것은 **방금 생성 호출에 이미 나갔던 재료의 부분집합**이다(같은 GMS).
+    새로운 노출면을 만들지 않는다 — 원본 이미지·음성·식별 정보는 애초에 계약에 없고,
+    근거 식별자도 싣지 않는다(검토자는 참조 정합을 보지 않는다).
+    ⚠️ 이 문자열은 로그로 남기지 않는다. 아이 발화 인용이 섞일 수 있다.
+    """
+    return json.dumps(
+        {"관찰 사실": _review_facts(result), "검토 대상": _review_targets(result)},
+        ensure_ascii=False,
+    )
+
+
+def _parse_findings(data: dict, known_ids: set[str]) -> list[tuple[str, str]]:
+    """검토 응답 → [(target, issue)]. 모르는 id·모르는 issue 는 버린다.
+
+    ⚠️ note 는 읽지 않는다 — 아이 표현이 섞일 수 있어 결과에도 로그에도 남기지 않는다.
+    """
+    findings: list[tuple[str, str]] = []
+    for raw in data.get("findings") or []:
+        if not isinstance(raw, dict):
+            continue
+        target = str(raw.get("target", "")).strip()
+        issue = str(raw.get("issue", "")).strip().upper()
+        if target in known_ids and issue in _REVIEW_ISSUES:
+            findings.append((target, issue))
+    return findings
+
+
+def _apply_findings(
+    result: contracts.ObservationGenerationResult, findings: list[tuple[str, str]]
+) -> bool:
+    """지적을 결과에 반영하고 '리포트를 열어도 되는가'를 돌려준다.
+
+    담아낼 수 있는 지적과 없는 지적을 가른다:
+    - 관찰 카드(feature) → EXPERT_ONLY 로 강등. 그 카드만 보호자에게서 가려진다.
+    - 경향 카드(card) → 제외. 카드에는 EXPERT_ONLY 자리가 없어(875 §3) 강등할 곳이 없다.
+    - 주제별 관찰 문장(subject) → 그 문장만 제외. 나머지 관찰과 문답은 그대로 남는다.
+    - 그 밖(요약·활동 기록·조언 등) → **담아낼 자리가 없다.** 문장을 다시 쓰는 것은 2차 생성이라
+      안전 검증을 처음부터 다시 받아야 하고, 비우면 보호자 화면이 무너진다(필수 필드).
+      그래서 리포트 전체를 미검토(AI_DRAFT)로 남긴다.
+    """
+    flagged = {target for target, _ in findings}
+    blocking = False
+    for index, feature in enumerate(result.observation_draft.features):
+        if f"{_FEATURE_TARGET_PREFIX}{index}" in flagged:
+            feature.visibility_scope = "EXPERT_ONLY"
+    kept_positions = [
+        index
+        for index in range(len(result.public_interpretations))
+        if f"{_CARD_TARGET_PREFIX}{index}" not in flagged
+    ]
+    kept_cards = [result.public_interpretations[index] for index in kept_positions]
+    result.public_interpretations = kept_cards
+    # 카드가 빠지면 그 카드만 참조하던 근거는 화면에 쓰이지 않는다 — 아이 발화 인용을
+    # 응답에 남기지 않기 위해 조립 때와 같은 규칙으로 다시 솎는다(최소 노출).
+    referenced = {ref for card in kept_cards for ref in card.evidence_refs}
+    result.evidence_items = [
+        item for item in result.evidence_items if item.evidence_id in referenced
+    ]
+    # 카드가 빠지면 뒤 카드의 배열 위치가 당겨진다 — 주제별 관찰의 참조를 함께 옮기지 않으면
+    # 조용히 다른 카드를 가리킨다(875 §5-1). 빠진 카드를 가리키던 참조는 여기서 사라진다.
+    new_index_of = {old: new for new, old in enumerate(kept_positions)}
+    for subject_index, report in enumerate(result.subject_reports):
+        report.interpretation_refs = [
+            new_index_of[ref] for ref in report.interpretation_refs if ref in new_index_of
+        ]
+        report.vision_observations = [
+            text
+            for text_index, text in enumerate(report.vision_observations)
+            if f"{_SUBJECT_TARGET_PREFIX}{subject_index}.{text_index}" not in flagged
+        ]
+    for target in flagged:
+        if not target.startswith(
+            (_FEATURE_TARGET_PREFIX, _CARD_TARGET_PREFIX, _SUBJECT_TARGET_PREFIX)
+        ):
+            blocking = True
+    return not blocking
+
+
+def _self_review(
+    result: contracts.ObservationGenerationResult,
+    *,
+    rule_flagged: bool,
+    model: str,
+) -> contracts.ObservationGenerationResult:
+    """생성된 리포트를 스스로 검토해 status 를 정한다(2-pass).
+
+    Args:
+        result: 조립이 끝난 계약 결과(1층 규칙 필터는 이미 적용된 상태).
+        rule_flagged: 1층 규칙 필터가 무언가를 걸렀는가. True 면 LLM 검토 결과와 무관하게
+            통과시키지 않는다 — 이미 진단·낙인 표현이 있었다는 뜻이다.
+        model: 검토에 쓸 모델. 생성과 같은 모델을 쓴다(같은 프롬프트 자산·같은 버전 태그).
+
+    Returns:
+        status 가 정해진 결과. 통과하면 AI_REVIEWED, 아니면 AI_DRAFT.
+    """
+    targets = _review_targets(result)
+    if not targets:
+        # 검토할 문장이 하나도 없다 = 열 것도 없다. 통과로 올리지 않는다.
+        _SELF_REVIEW_COUNTER.labels(outcome="failed").inc()
+        return result
+    try:
+        resp = get_client().chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": _load(_REPORT_REVIEW)},
+                {"role": "user", "content": _review_payload(result)},
+            ],
+            temperature=0,  # 판정은 흔들리면 안 된다 — 생성(0.4)보다 낮춘다.
+            response_format={"type": "json_object"},
+            # 생성 + 검토 두 번이 BE read timeout(30s) 안에 끝나야 한다. 넘기면 생성까지 버려진다.
+            timeout=config.REPORT_REVIEW_TIMEOUT_SEC,
+        )
+        data = _extract_json(resp.choices[0].message.content or "")
+    except (OpenAIError, RuntimeError) as e:
+        # ⚠️ 응답 본문은 로그로 남기지 않는다 — 에러 유형만. 검토 실패는 차단이 아니라 기능 저하다.
+        logger.warning("리포트 자체검토 실패 — 미검토로 남김: %s", type(e).__name__)
+        _SELF_REVIEW_COUNTER.labels(outcome="unavailable").inc()
+        return result
+
+    findings = _parse_findings(data, {t["id"] for t in targets})
+    passed = _apply_findings(result, findings)
+    if findings:
+        # 사유 코드만 남긴다 — 지적 문장·아이 발화는 담지 않는다.
+        logger.info(
+            "리포트 자체검토 지적 %d건: %s",
+            len(findings),
+            sorted({issue for _, issue in findings}),
+        )
+    if not passed or rule_flagged:
+        _SELF_REVIEW_COUNTER.labels(outcome="failed").inc()
+        return result
+    _SELF_REVIEW_COUNTER.labels(outcome="contained" if findings else "passed").inc()
+    result.observation_draft.status = REVIEW_STATUS_REVIEWED
+    return result
 
 
 def generate(
@@ -1143,7 +1632,12 @@ def generate(
     data = _extract_json(resp.choices[0].message.content or "")
     # 재현성: GMS가 실제 서빙한 모델 ID를 기록한다(예: gpt-4o-mini-2024-07-18). 없으면 요청 모델명.
     served_model = getattr(resp, "model", "") or used_model
-    return _assemble(req, data, served_model, rag_chunks, rag_skipped_reason, is_htp)
+    result, rule_flagged = _assemble(
+        req, data, served_model, rag_chunks, rag_skipped_reason, is_htp
+    )
+    # 2차 패스: 스스로 검토해 보호자에게 열지 말지를 정한다. 실패해도 리포트는 그대로 나간다
+    # (status 가 AI_DRAFT 로 남아 관찰 카드가 보호자에게 열리지 않을 뿐이다).
+    return _self_review(result, rule_flagged=rule_flagged, model=used_model)
 
 
 if __name__ == "__main__":

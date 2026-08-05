@@ -177,8 +177,9 @@ class StorageDeletionJobRepositoryIntegrationTest {
     insertPending("2026/08/a.png", "DRAWING_ASSET");
 
     assertThat(repository.claim(0)).isEmpty();
-    assertThat(jdbcTemplate.queryForObject(
-            "select deletion_status from storage_deletion_jobs", String.class))
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "select deletion_status from storage_deletion_jobs", String.class))
         .isEqualTo("PENDING");
   }
 }

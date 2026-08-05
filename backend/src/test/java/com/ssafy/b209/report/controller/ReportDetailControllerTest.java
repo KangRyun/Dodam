@@ -94,6 +94,7 @@ class ReportDetailControllerTest {
             300000L),
         new ReportDrawingResponse("https://cdn.example/final.png", "https://cdn.example/thumb.png"),
         new ReportChildExpressionResponse(List.of("HAPPY"), "행복한 하루였어요", List.of()),
+        List.of(),
         new ReportActivityFactsResponse(List.of("집"), 295000L, 4, 2, true, List.of("멈춤 4회 관찰")),
         new ReportConversationSummaryResponse(5, 4, 1, "아이가 편안하게 대화했습니다"),
         List.of("오늘 그림에 대해 함께 이야기해 보세요"),

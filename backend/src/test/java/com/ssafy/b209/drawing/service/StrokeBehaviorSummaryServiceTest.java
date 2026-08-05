@@ -171,7 +171,21 @@ class StrokeBehaviorSummaryServiceTest {
   }
 
   @Test
-  void countsEraserStrokesAndStandaloneEraseEvents() {
+  void countsEraserStrokesWhenNoExplicitEraseEventArrives() {
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "ERASER", null, 0, 100),
+            stroke(2, "ERASER", null, 0, 100),
+            stroke(3, "PEN", "#FF0000", 0, 100)));
+
+    assertThat(summarize().eraseCount()).isEqualTo(2);
+  }
+
+  @Test
+  void countsOnlyExplicitEraseEventsWhenTheyArriveAlongsideEraserStrokes() {
+    // 지우개 획과 ERASE 이벤트를 함께 세면 한 번의 지우기가 두 번 잡혀 수치가 두 배가 된다.
     givenBatches(
         batch(
             1,
@@ -180,9 +194,105 @@ class StrokeBehaviorSummaryServiceTest {
             marker(2, "ERASE"),
             stroke(3, "PEN", "#FF0000", 0, 100)));
 
+    assertThat(summarize().eraseCount()).isEqualTo(1);
+  }
+
+  @Test
+  void countsOnlyExplicitToolChangeEventsWhenTheyArrive() {
+    // 앱이 TOOL_CHANGE 를 보내면서 획의 tool 도 바꿔 실으면, 한 번의 도구 변경이 양쪽에서 잡힌다.
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "PEN", "#FF0000", 0, 100),
+            marker(2, "TOOL_CHANGE"),
+            stroke(3, "ERASER", null, 0, 100)));
+
+    assertThat(summarize().toolChangeCount()).isEqualTo(1);
+  }
+
+  @Test
+  void countsOnlyExplicitColorChangeEventsWhenTheyArrive() {
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "PEN", "#FF0000", 0, 100),
+            marker(2, "COLOR_CHANGE"),
+            stroke(3, "PEN", "#00FF00", 0, 100)));
+
+    assertThat(summarize().colorChangeCount()).isEqualTo(1);
+  }
+
+  @Test
+  void countsExplicitPauseEventsInsteadOfInferringFromBatchBoundaries() {
+    // 배치 경계 추론은 flush 시점 오차 때문에 없던 멈춤까지 만든다. 아래는 경계가 둘이라 추론이면 2회로 잡히지만,
+    //   앱이 실제로 알린 멈춤은 1회다. PAUSE 가 오면 추론을 끄고 그것만 센다.
+    givenBatches(
+        batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 0), marker(2, "PAUSE")),
+        batch(2, BASE.plusMillis(60_000), stroke(3, "PEN", "#FF0000", 0, 0)),
+        batch(3, BASE.plusMillis(120_000), stroke(4, "PEN", "#FF0000", 0, 0)));
+
+    assertThat(summarize().pauseCount()).isEqualTo(1);
+  }
+
+  @Test
+  void appliesExplicitCountingToTheWholeSessionNotJustTheBatchThatCarriesTheEvent() {
+    // 배치 단위로 판단하면 첫 배치는 추론(도구 변경 1회), 둘째 배치는 명시로 세어 기준이 갈린다.
+    //   세션 하나의 수치는 하나의 기준으로 세야 한다.
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "PEN", "#FF0000", 0, 100),
+            stroke(2, "ERASER", null, 0, 100),
+            stroke(3, "PEN", "#FF0000", 0, 100)),
+        batch(2, BASE.plusMillis(1_000), marker(4, "TOOL_CHANGE")));
+
+    assertThat(summarize().toolChangeCount()).isEqualTo(1);
+  }
+
+  @Test
+  void ignoresEventTypesThatHaveNoFieldToLandIn() {
+    // REDO·RESUME·THICKNESS_CHANGE·CANVAS_CLEAR·FILL 은 담을 자리가 없다. 다른 수치를 흔들어서는 안 된다.
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "PEN", "#FF0000", 0, 100),
+            marker(2, "REDO"),
+            marker(3, "RESUME"),
+            marker(4, "THICKNESS_CHANGE"),
+            marker(5, "CANVAS_CLEAR"),
+            marker(6, "FILL")));
+
     StrokeBehaviorSummary summary = summarize();
 
-    assertThat(summary.eraseCount()).isEqualTo(2);
+    assertThat(summary.undoCount()).isZero();
+    assertThat(summary.eraseCount()).isZero();
+    assertThat(summary.toolChangeCount()).isZero();
+    assertThat(summary.colorChangeCount()).isZero();
+    assertThat(summary.pauseCount()).isZero();
+    assertThat(summary.activeDrawingMs()).isEqualTo(100L);
+  }
+
+  @Test
+  void keepsInferringForEventTypesTheSessionNeverSent() {
+    // 구버전 앱과 신버전 앱이 함께 붙어 있는 기간이 있다. 한 종류가 왔다고 나머지 추론까지 끄면
+    //   그 종류를 보내지 않는 클라이언트의 수치가 통째로 0이 된다.
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "PEN", "#FF0000", 0, 100),
+            marker(2, "TOOL_CHANGE"),
+            stroke(3, "PEN", "#00FF00", 0, 100)));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    assertThat(summary.toolChangeCount()).isEqualTo(1);
+    // COLOR_CHANGE 는 오지 않았으므로 색 변경은 계속 획 속성으로 추론한다.
+    assertThat(summary.colorChangeCount()).isEqualTo(1);
   }
 
   @Test
@@ -460,6 +570,82 @@ class StrokeBehaviorSummaryServiceTest {
   void summarizeAllRejectsNothingToAggregate() {
     assertThat(service.summarizeAll(null)).isEmpty();
     assertThat(service.summarizeAll(List.of())).isEmpty();
+  }
+
+  @Test
+  void summarizeAllOrNoneDropsEverythingWhenOneSessionCannotBeAggregated() {
+    // HTP 한 단계가 사진 업로드라 캔버스 과정이 없거나 배치가 유실되면, 두 단계만 더한 합이
+    //   "이 활동 전체의 기록"으로 AI 프롬프트에 실린다. AI 는 그 수치를 관찰 사실로 문장에 옮긴다.
+    givenBatchesFor(101L, batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 100)));
+    givenBatchesFor(102L, batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 100)));
+    givenBatchesFor(103L, List.of());
+
+    assertThat(service.summarizeAllOrNone(List.of(101L, 102L, 103L))).isEmpty();
+  }
+
+  @Test
+  void summarizeAllOrNoneSumsWhenEverySessionAggregates() {
+    givenBatchesFor(101L, batch(1, BASE, marker(1, "ERASE")));
+    givenBatchesFor(102L, batch(1, BASE, marker(1, "UNDO")));
+
+    StrokeBehaviorSummary summary = service.summarizeAllOrNone(List.of(101L, 102L)).orElseThrow();
+
+    assertThat(summary.eraseCount()).isEqualTo(1);
+    assertThat(summary.undoCount()).isEqualTo(1);
+  }
+
+  @Test
+  void summarizeAllOrNoneIgnoresNullAndDuplicateSessionIds() {
+    givenBatchesFor(101L, batch(1, BASE, marker(1, "ERASE")));
+
+    StrokeBehaviorSummary summary =
+        service.summarizeAllOrNone(Arrays.asList(101L, null, 101L)).orElseThrow();
+
+    assertThat(summary.eraseCount()).isEqualTo(1);
+  }
+
+  @Test
+  void summarizeAllOrNoneRejectsNothingToAggregate() {
+    assertThat(service.summarizeAllOrNone(null)).isEmpty();
+    assertThat(service.summarizeAllOrNone(List.of())).isEmpty();
+  }
+
+  @Test
+  void summarizeAllStillSkipsEmptySessionsForTheGuardianReport() {
+    // 보호자 화면은 일부라도 보여 주는 편이 낫다(S15P11B209-870). AI 경로와 의도적으로 다르다.
+    givenBatchesFor(101L, batch(1, BASE, marker(1, "ERASE")));
+    givenBatchesFor(102L, List.of());
+
+    assertThat(service.summarizeAll(List.of(101L, 102L)).orElseThrow().eraseCount()).isEqualTo(1);
+  }
+
+  @Test
+  void mergeKeepsNullWhenOneSessionDidNotMeasureThatValue() {
+    // 🔴 null 을 0으로 바꿔 더하면 "측정하지 못한 세션"이 "0회인 세션"으로 둔갑하고,
+    //   나머지 세션 값만으로 만든 합이 전체 합인 것처럼 나간다. 모르는 값은 더할 수 없다.
+    StrokeBehaviorSummary measured =
+        new StrokeBehaviorSummary(1_000L, 500L, 2, 1, 3, 4, 5, true, false);
+    StrokeBehaviorSummary partly =
+        new StrokeBehaviorSummary(1_000L, null, null, 1, 3, 4, 5, false, false);
+
+    StrokeBehaviorSummary merged =
+        StrokeBehaviorSummaryService.merge(List.of(measured, partly)).orElseThrow();
+
+    assertThat(merged.drawingDurationMs()).isEqualTo(2_000L);
+    assertThat(merged.activeDrawingMs()).isNull();
+    assertThat(merged.pauseCount()).isNull();
+    assertThat(merged.undoCount()).isEqualTo(2);
+    // 한 세션에서라도 필압이 저장돼 있으면 필압 데이터는 존재한다.
+    assertThat(merged.pressureAvailable()).isTrue();
+  }
+
+  @Test
+  void mergeMarksTheWholeSumTruncatedWhenAnySessionWasTruncated() {
+    StrokeBehaviorSummary whole = new StrokeBehaviorSummary(1L, 1L, 0, 0, 0, 0, 0, false, false);
+    StrokeBehaviorSummary cut = new StrokeBehaviorSummary(1L, 1L, 0, 0, 0, 0, 0, false, true);
+
+    assertThat(StrokeBehaviorSummaryService.merge(List.of(whole, cut)).orElseThrow().truncated())
+        .isTrue();
   }
 
   private void givenBatchesFor(Long sessionId, StrokeBatchDocument... batches) {

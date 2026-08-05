@@ -6,6 +6,8 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import com.ssafy.b209.drawing.service.StrokeBehaviorSummary;
+import com.ssafy.b209.drawing.service.StrokeBehaviorSummaryService;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClient;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClientException;
@@ -37,6 +39,7 @@ class MockObservationReportGenerationServiceTest {
 
   @Mock private ObservationReportPersistenceService persistenceService;
   @Mock private AiObservationClient observationClient;
+  @Mock private StrokeBehaviorSummaryService behaviorSummaryService;
   @Captor private ArgumentCaptor<ObservationGenerationRequest> requestCaptor;
 
   private MockObservationReportGenerationService service;
@@ -45,7 +48,7 @@ class MockObservationReportGenerationServiceTest {
   void setUp() {
     service =
         new MockObservationReportGenerationService(
-            persistenceService, observationClient, () -> REQUEST_UUID);
+            persistenceService, observationClient, behaviorSummaryService, () -> REQUEST_UUID);
   }
 
   @Test
@@ -90,8 +93,7 @@ class MockObservationReportGenerationServiceTest {
                         new ObservationGenerationContext.KeyConversationLine(
                             1L, "이 집에는 누가 살아?", 2L, "엄마랑 나!", "VOICE_ANSWER", false)),
                     900L,
-                    List.of(
-                        new ObservationGenerationContext.DetectedObjectRef(910L, "HOUSE_DOOR"))),
+                    List.of(houseDoorRef())),
                 new ObservationGenerationContext.SubjectContext(
                     null, "공룡이 풍선을 들고 있어요.", List.of(), List.of(), 901L, List.of())),
             List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
@@ -134,13 +136,22 @@ class MockObservationReportGenerationServiceTest {
     ObservationGenerationRequest request = requestCaptor.getValue();
     ObservationGenerationRequest.SubjectSummary summary = request.subjectSummaries().getFirst();
 
+    // AI 계약의 근거 식별자는 전부 str 이다. 숫자로 보내면 요청 전체가 422 로 거부된다.
     org.assertj.core.api.Assertions.assertThat(summary.observationEvidenceSourceId())
-        .isEqualTo(900L);
+        .isEqualTo("900");
     org.assertj.core.api.Assertions.assertThat(summary.detectedObjects())
         .containsExactly(
-            new ObservationGenerationRequest.SubjectDetectedObject(910L, "HOUSE_DOOR"));
+            new ObservationGenerationRequest.SubjectDetectedObject(
+                "910",
+                "HOUSE_DOOR",
+                new BigDecimal("0.100000"),
+                new BigDecimal("0.200000"),
+                new BigDecimal("0.300000"),
+                new BigDecimal("0.400000"),
+                new BigDecimal("0.120000"),
+                new BigDecimal("0.9100")));
     org.assertj.core.api.Assertions.assertThat(request.selectedEmotionRefs())
-        .containsExactly(new ObservationGenerationRequest.SelectedEmotionRef(920L, "HAPPY"));
+        .containsExactly(new ObservationGenerationRequest.SelectedEmotionRef("920", "HAPPY"));
     org.assertj.core.api.Assertions.assertThat(summary.qaPairs())
         .extracting(
             ObservationGenerationRequest.SubjectQaPair::questionMessageId,
@@ -204,7 +215,7 @@ class MockObservationReportGenerationServiceTest {
                     new ObservationGenerationContext.KeyConversationLine(
                         1L, "이 집에는 누가 살아?", 2L, "엄마랑 나!", "VOICE_ANSWER", false)),
                 900L,
-                List.of(new ObservationGenerationContext.DetectedObjectRef(910L, "HOUSE_DOOR")))),
+                List.of(houseDoorRef()))),
         List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
         List.of(100L));
   }
@@ -318,6 +329,153 @@ class MockObservationReportGenerationServiceTest {
 
     verify(persistenceService)
         .markFailed(eq(ANALYSIS_ID), eq(REPORT_ID), eq("REPORT_STORAGE_CONFLICT"), any());
+  }
+
+  @Test
+  void sendsAggregatedBehaviorMetricsToTheAi() {
+    // 계약에 자리는 있었지만 서버가 채우지 않아 AI 프롬프트의 [형식적 분석] 블록이 운영에서 한 번도 만들어지지 않았다.
+    given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
+    given(behaviorSummaryService.summarizeAllOrNone(List.of(100L)))
+        .willReturn(
+            Optional.of(new StrokeBehaviorSummary(600_000L, 240_000L, 4, 2, 3, 1, 5, true, false)));
+    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+
+    service.generate(ANALYSIS_ID);
+
+    verify(observationClient).generate(requestCaptor.capture());
+    ObservationGenerationRequest.BehaviorMetrics metrics =
+        requestCaptor.getValue().behaviorMetrics();
+    org.assertj.core.api.Assertions.assertThat(metrics)
+        .isEqualTo(
+            new ObservationGenerationRequest.BehaviorMetrics(
+                600_000L, 240_000L, 4, 2, 3, 1, 5, true, null, false));
+  }
+
+  @Test
+  void sumsEveryHtpStepBeforeSendingBehaviorMetrics() {
+    // HTP 리포트는 집·나무·사람 세 활동이다. 한 세션만 보내면 AI 가 받는 그리기 시간이 3분의 1이 된다.
+    ObservationGenerationContext htpContext = contextWithSessions(List.of(100L, 101L, 102L));
+    given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(htpContext));
+    given(behaviorSummaryService.summarizeAllOrNone(List.of(100L, 101L, 102L)))
+        .willReturn(
+            Optional.of(new StrokeBehaviorSummary(900_000L, 300_000L, 9, 3, 6, 2, 7, false, true)));
+    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+
+    service.generate(ANALYSIS_ID);
+
+    verify(observationClient).generate(requestCaptor.capture());
+    org.assertj.core.api.Assertions.assertThat(
+            requestCaptor.getValue().behaviorMetrics().drawingDurationMs())
+        .isEqualTo(900_000L);
+    org.assertj.core.api.Assertions.assertThat(
+            requestCaptor.getValue().behaviorMetrics().truncated())
+        .isTrue();
+  }
+
+  @Test
+  void sendsNullBehaviorMetricsWhenAggregationHasNothingToReport() {
+    // 집계 결과가 없으면 0으로 채우지 않는다. AI 는 null 을 받아 [형식적 분석] 블록을 아예 만들지 않는다.
+    given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
+    given(behaviorSummaryService.summarizeAllOrNone(List.of(100L))).willReturn(Optional.empty());
+    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+
+    service.generate(ANALYSIS_ID);
+
+    verify(observationClient).generate(requestCaptor.capture());
+    org.assertj.core.api.Assertions.assertThat(requestCaptor.getValue().behaviorMetrics()).isNull();
+    verify(persistenceService, never()).markFailed(any(), any(), any(), any());
+  }
+
+  @Test
+  void keepsGeneratingWhenBehaviorAggregationFails() {
+    // 형식 지표는 관찰의 부가 재료다. MongoDB 장애로 리포트 전체를 잃는 것은 균형에 맞지 않는다.
+    given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
+    given(behaviorSummaryService.summarizeAllOrNone(List.of(100L)))
+        .willThrow(new IllegalStateException("mongo down"));
+    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+
+    service.generate(ANALYSIS_ID);
+
+    verify(observationClient).generate(requestCaptor.capture());
+    org.assertj.core.api.Assertions.assertThat(requestCaptor.getValue().behaviorMetrics()).isNull();
+    verify(persistenceService).complete(any(ObservationGenerationContext.class), any());
+  }
+
+  @Test
+  void neverTurnsAnUnmeasuredCountIntoZero() {
+    // 🔴 이 작업에서 가장 중요한 성질이다. null(집계 못 함)을 0으로 채우면 AI 가 "멈춤 없이 몰입해 그렸다"는
+    //   없는 관찰을 리포트에 적는다. 매핑은 값을 옮기기만 하고 만들지 않는다.
+    given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
+    given(behaviorSummaryService.summarizeAllOrNone(List.of(100L)))
+        .willReturn(
+            Optional.of(
+                new StrokeBehaviorSummary(null, null, null, null, null, null, null, false, false)));
+    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+
+    service.generate(ANALYSIS_ID);
+
+    verify(observationClient).generate(requestCaptor.capture());
+    ObservationGenerationRequest.BehaviorMetrics metrics =
+        requestCaptor.getValue().behaviorMetrics();
+    org.assertj.core.api.Assertions.assertThat(metrics.drawingDurationMs()).isNull();
+    org.assertj.core.api.Assertions.assertThat(metrics.activeDrawingMs()).isNull();
+    org.assertj.core.api.Assertions.assertThat(metrics.pauseCount()).isNull();
+    org.assertj.core.api.Assertions.assertThat(metrics.undoCount()).isNull();
+    org.assertj.core.api.Assertions.assertThat(metrics.eraseCount()).isNull();
+    org.assertj.core.api.Assertions.assertThat(metrics.toolChangeCount()).isNull();
+    org.assertj.core.api.Assertions.assertThat(metrics.colorChangeCount()).isNull();
+  }
+
+  @Test
+  void neverInventsAnAveragePressureValue() {
+    // 계약에 자리가 있지만 집계기가 만들지 않는 값이다. 자리를 채우려고 지어내면 없는 측정이 관찰 재료가 된다.
+    given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
+    given(behaviorSummaryService.summarizeAllOrNone(List.of(100L)))
+        .willReturn(Optional.of(new StrokeBehaviorSummary(1L, 1L, 0, 0, 0, 0, 0, true, false)));
+    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+
+    service.generate(ANALYSIS_ID);
+
+    verify(observationClient).generate(requestCaptor.capture());
+    org.assertj.core.api.Assertions.assertThat(
+            requestCaptor.getValue().behaviorMetrics().averagePressure())
+        .isNull();
+    // pressureAvailable 은 측정 가능 여부라 0회 집계와 무관하게 그대로 전달된다.
+    org.assertj.core.api.Assertions.assertThat(
+            requestCaptor.getValue().behaviorMetrics().pressureAvailable())
+        .isTrue();
+  }
+
+  /** 정규화 기하를 갖춘 탐지 참조. 실제 저장 값처럼 BigDecimal scale 을 유지한다. */
+  private static ObservationGenerationContext.DetectedObjectRef houseDoorRef() {
+    return new ObservationGenerationContext.DetectedObjectRef(
+        910L,
+        "HOUSE_DOOR",
+        new BigDecimal("0.100000"),
+        new BigDecimal("0.200000"),
+        new BigDecimal("0.300000"),
+        new BigDecimal("0.400000"),
+        new BigDecimal("0.120000"),
+        new BigDecimal("0.9100"));
+  }
+
+  private ObservationGenerationContext contextWithSessions(List<Long> activitySessionIds) {
+    return new ObservationGenerationContext(
+        ANALYSIS_ID,
+        100L,
+        REPORT_ID,
+        50L,
+        "NORMAL",
+        3,
+        2,
+        1,
+        0,
+        List.of("HAPPY"),
+        "행복했어요",
+        List.of(),
+        List.of(),
+        List.of(),
+        activitySessionIds);
   }
 
   private ObservationGenerationContext context() {

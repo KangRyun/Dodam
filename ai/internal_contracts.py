@@ -29,6 +29,25 @@ class _CamelModel(BaseModel):
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
 
 
+def _evidence_id_to_str(value):
+    """근거 식별자를 문자열로 정규화한다 (2026-08-05 운영 결함 수정).
+
+    BE는 이 값들이 **DB 행 ID(Long)** 라 JSON 숫자로 보낸다. 계약 타입만 str 로 적어 둔 탓에
+    906 배포본에서 `detectedObjects[].evidenceSourceId: 10` 이 422로 튕겼다.
+    숫자를 거부할 이유가 없다 — AI는 이 값을 **되돌려 줄 참조 문자열로만** 쓴다.
+
+    ⚠️ 문자열로 정규화하는 것이 검증 통과보다 중요하다. `report_client._allowed_evidence_refs`
+       가 (kind, id) 튜플로 대조하는데, 한쪽이 int 로 남으면 형식은 통과해도 대조에서 어긋나
+       **그 근거가 조용히 사라진다**(422보다 알아채기 어려운 실패다).
+    bool 은 int 의 하위 타입이라 따로 막는다 — True 가 "True" 가 되면 안 된다.
+    """
+    if isinstance(value, bool):
+        return value  # 타입 검증에서 걸리게 그대로 넘긴다
+    if isinstance(value, int):
+        return str(value)
+    return value
+
+
 # ── 공용 (요청·응답 양쪽에서 사용) ───────────────────────────────
 class BoundingBox(_CamelModel):
     """캔버스 크기에 대해 0~1로 정규화한 사각형 좌표(BE BoundingBox와 동일).
@@ -244,18 +263,33 @@ class SubjectDetectedObject(_CamelModel):
 
     ⚠️ area_ratio 가 None이면 그대로 둔다 — width*height 로 대체 계산하지 않는다(BE 명시).
        추정값을 관찰 사실로 적으면 근거가 아닌 것이 근거 자리에 들어간다.
+
+    ⚠️ 기하 4필드는 **전부 optional** 이다(2026-08-05 운영 결함 수정). 836이 이 넷을 기본값 없는
+       필수 필드로 둔 탓에, 906 배포본이 {evidenceSourceId, objectCode} 만 실어 보내자
+       POST /internal/v1/observations 가 **422로 100% 실패**했다(운영 2건 중 2건).
+       탐지 객체가 하나라도 있으면 전량 실패라 리포트 파이프라인이 통째로 멈췄다.
+
+       이건 단순 버그가 아니라 **원칙 위반**이었다. 이 계약은 곳곳에서 롤아웃 안전 패턴을 쓴다 —
+       "구 BE가 안 보내면 빈 목록이라 기존 경로가 그대로 동작한다"(740·836 주석). 836이 자기
+       모델에서만 그 원칙을 어겨, BE·AI 배포 순서가 어긋나는 순간 파이프라인이 멈추게 만들었다.
+       → 없는 값은 None 으로 받고, **없는 값으로 관찰 사실을 지어내지 않는다**
+         (report_client._geometry_facts 가 좌표 없는 항목을 블록에서 건너뛴다).
     """
 
     object_code: str
-    x: float
-    y: float
-    width: float
-    height: float
+    x: float | None = None
+    y: float | None = None
+    width: float | None = None
+    height: float | None = None
     area_ratio: float | None = None
     confidence: float | None = None
     # 근거 식별자 (S15P11B209-886) — sourceRef {kind: "DETECTED_OBJECT", id: <이 값>}.
     #   없으면 이 탐지 결과는 공개 해석의 근거로 쓸 수 없다(관찰 서술 재료로는 계속 쓰인다).
     evidence_source_id: str | None = None
+
+    _normalize_id = field_validator("evidence_source_id", mode="before")(
+        _evidence_id_to_str
+    )
 
 
 class SubjectSummary(_CamelModel):
@@ -275,6 +309,11 @@ class SubjectSummary(_CamelModel):
     # 근거 식별자 (S15P11B209-886) — 이 그림의 VLM 관찰 서술 레코드 ID.
     #   sourceRef {kind: "VLM_OBSERVATION", id: <이 값>}. 없으면 서술을 근거로 쓸 수 없다.
     observation_evidence_source_id: str | None = None
+
+    # BE가 DB 행 ID(Long)를 숫자로 보낸다 — detectedObjects 에서 실제로 422를 낸 것과 같은 값이다.
+    _normalize_id = field_validator("observation_evidence_source_id", mode="before")(
+        _evidence_id_to_str
+    )
 
 
 class BehaviorMetrics(_CamelModel):
@@ -315,6 +354,11 @@ class SelectedEmotionRef(_CamelModel):
     emotion_code: str
     evidence_source_id: str
 
+    # BE가 DB 행 ID(Long)를 숫자로 보낸다 — detectedObjects 에서 실제로 422를 낸 것과 같은 값이다.
+    _normalize_id = field_validator("evidence_source_id", mode="before")(
+        _evidence_id_to_str
+    )
+
 
 class ObservationGenerationRequest(_CamelModel):
     """BE ObservationGenerationRequest와 1:1. 집계 수치·비민감 맥락만 담는다.
@@ -353,7 +397,13 @@ class ObservationGenerationRequest(_CamelModel):
 
 
 class ObservedFeatureDraft(_CamelModel):
-    """관찰 특징 초안(BE ObservedFeatureDraft). visibility_scope로 노출 범위를 나눈다."""
+    """관찰 특징 초안(BE ObservedFeatureDraft). visibility_scope로 노출 범위를 나눈다.
+
+    ⚠️ 어휘는 그대로지만 **뜻이 재정의됐다**(2026-08-05). DB 마이그레이션을 피하려 값 이름을
+    유지했을 뿐, 사람 전문가 독자는 존재한 적이 없다:
+    - REVIEWED_GUARDIAN = AI 자체검토를 통과해 **보호자에게 열리는** 카드.
+    - EXPERT_ONLY = 보호자에게 바로 열지 않고 **사람 상담 권유·안전 경로 전용**으로 보내는 카드.
+    """
 
     feature_code: str
     title: str
@@ -363,10 +413,17 @@ class ObservedFeatureDraft(_CamelModel):
 
 
 class ObservationDraft(_CamelModel):
-    """전문가 검토 전 관찰 초안(BE ObservationDraft). status는 항상 AI_DRAFT.
+    """관찰 초안(BE ObservationDraft). disclaimer(진단 아님)는 필수.
 
-    attention_points는 전문가 내부 검토용 — 보호자에게 바로 노출하지 않는다.
-    disclaimer(진단 아님)는 필수.
+    status(2026-08-05):
+    - "AI_DRAFT" — 자체검토를 통과하지 못했거나 검토하지 못한 초안. 보호자 경로를 열지 않는다.
+    - "AI_REVIEWED" — 자체검토를 통과했다. 관찰 카드가 visibility_scope 대로 노출된다.
+    ⚠️ BE ObservationReviewStatus enum 에 AI_REVIEWED 가 추가되고 AnalysisObservationResult 가
+       하드코딩 대신 이 값을 받아야 실효가 생긴다. 그 전까지는 BE가 AI_DRAFT 로 저장하므로
+       동작이 지금과 같다 — 배포 순서 무관.
+
+    attention_points 는 **보호자가 다음에 더 지켜볼 점**이다(구: 전문가가 추가 확인할 것).
+    expert_review_required 는 **사람 상담을 권할 신호**다 — 리포트 품질 실패는 status 로 간다.
     """
 
     status: str = "AI_DRAFT"
@@ -386,13 +443,19 @@ class ConversationSummaryDraft(_CamelModel):
 
     representative_utterance는 아이 발화일 수 있어 repr에서 감춘다.
     집계 수치(질문/응답/건너뜀 수)는 여기 없다 — BE가 요청 값으로 채운다.
+
+    ⚠️ representative_utterance 는 **아이가 실제로 한 말**이다. 없으면 None 이고, 무난한
+       문장으로 채우지 않는다. 예전에는 비면 "재미있었어요."로 채웠는데, 운영 실측 결과
+       analysis_conversation_summaries 51건 중 34건(67%)이 그 문장이었다 — 아이가 한 적
+       없는 말이 대표 발화로 저장돼 있었다는 뜻이다. 같은 이유로 confidence 도 None 이다
+       (지어내지 않는다). BE 컬럼은 nullable 이고 검증 애너테이션도 없다.
     """
 
     summary_text: str
     main_topic: str
     expressed_emotion: str
     emotion_source: Literal["SELECTED", "STATED", "INFERRED"]
-    representative_utterance: str = Field(repr=False)
+    representative_utterance: str | None = Field(default=None, repr=False)
 
 
 class FollowUpGuideDraft(_CamelModel):
@@ -481,10 +544,33 @@ class PublicInterpretation(_CamelModel):
     evidence_refs: list[int] = Field(default_factory=list)
 
 
-# ⚠️ subjectReports(875 §5)는 이 응답에 없다. imageUrl·visionObservations·qaPairs 는 BE가 이미
-#    가진 데이터라 BE가 조립한다. interpretationRefs(주제↔카드 연결)도 LLM에게 묻지 않는다 —
-#    카드의 근거 sourceRef(QA_ANSWER 메시지 ID 등)가 어느 주제에서 왔는지 BE가 결정적으로 알 수
-#    있어, 물어보는 쪽이 오히려 틀릴 여지를 만든다.
+class SubjectReportDraft(_CamelModel):
+    """주제(집·나무·사람) 하나의 관찰 묶음 (875 §5 SubjectReport의 **부분**).
+
+    HTP는 그림 세 장을 그리는데 지금까지 응답에는 주제 구분이 남지 않았다 — overall_summary
+    하나·evidence_summary 하나로 뭉개져, BE·FE가 '주제별 관찰 사실과 문답' 섹션(875 §11-5)을
+    조립할 재료가 없었다. 이 모델이 그 자리다.
+
+    ⚠️ 875 §5 의 다섯 필드 중 **셋만** 싣는다. 나머지 둘은 BE가 채운다:
+    - image_url — BE가 가진 자산 URL이다. AI가 만들 수 있는 값이 아니다.
+    - qa_pairs — 요청에 실려 온 아이 발화 그대로다. LLM을 통과시켜 되돌려 받으면 아이 말이
+      바뀔 여지만 생긴다(원문 보존이 인용의 전제다). BE가 자기 데이터를 그대로 쓴다.
+    필드명은 875 문구를 1:1로 따른다(subject_type → "subjectType") — 887이 정한 규칙과 같다.
+    ⚠️ DrawnItem 은 같은 개념을 drawing_subject 로 부른다. 그쪽은 BE가 activityFacts 로
+       옮겨 담는 값이라 이름이 갈렸다. 이 모델은 subjectReports[] 로 **그대로 나가는** 자리라
+       875 이름을 쓴다.
+
+    subject_type: HOUSE | TREE | PERSON | None(주제가 나뉘지 않는 활동)
+    vision_observations: 그 그림에서 눈으로 확인된 **사실** 문장. 해석은 담지 않는다.
+    interpretation_refs: 이 그림의 관찰이 근거가 된 public_interpretations 의 **배열 인덱스**
+        (0-based). category 값이 아니다(875 §5-1). 리포트 스냅샷 안에서 카드 배열을 재정렬하면
+        참조가 조용히 다른 카드를 가리키므로, 카드가 빠질 때마다 서버가 다시 매핑한다
+        (report_client._subject_reports · _apply_findings).
+    """
+
+    subject_type: str | None = None
+    vision_observations: list[str] = Field(default_factory=list)
+    interpretation_refs: list[int] = Field(default_factory=list)
 
 
 class ReportParentGuide(_CamelModel):
@@ -570,6 +656,10 @@ class ObservationGenerationResult(_CamelModel):
     public_interpretations: list[PublicInterpretation] = Field(default_factory=list)
     evidence_items: list[ReportEvidenceItem] = Field(default_factory=list)
     parent_guides: list[ReportParentGuide] = Field(default_factory=list)
+    # 주제별 관찰 (875 §5). public_interpretations 와 **형제**로 둔다 — 875 §2 에서 셋 다
+    #   ReportDetail 최상위 필드이고, 하나만 observation_draft 안에 넣으면 BE가 같은 계층의
+    #   데이터를 두 곳에서 꺼내게 된다. 비면 지금과 같은 동작이다(구 BE는 무시).
+    subject_reports: list[SubjectReportDraft] = Field(default_factory=list)
     # '그린 것' 목록 (S15P11B209-911) — VLM 관찰 서술 기반. BE가 이 값으로
     #   activityFacts.detectedObjects 를 채운다(S15P11B209-912). 지금 그 줄은 탐지 라벨을
     #   그대로 나열해 신뢰도 필터 없이 보호자에게 나간다. 비면 구 동작과 같다.
