@@ -69,8 +69,18 @@ class _ReportScreenState extends State<ReportScreen>
   VoiceAnswerPlaybackController? _playbackController;
   int _loadGeneration = 0;
 
-  /// 저장·공유할 때 그대로 떠 갈 리포트 본문이다. 저장 버튼 줄은 이 밖에 둔다.
-  final GlobalKey _snapshotKey = GlobalKey();
+  /// 저장·공유할 때 떠 갈 섹션들이다. 저장 버튼 줄은 여기에 넣지 않는다.
+  ///
+  /// 본문 전체를 한 장의 긴 이미지로 뜨면 종이 크기로 자를 때 카드 중간이 잘린다. 섹션마다
+  /// 따로 떠 두면 들어갈 자리가 있는 섹션만 그 장에 채울 수 있다.
+  final List<GlobalKey> _snapshotKeys = [];
+
+  GlobalKey _snapshotKeyAt(int index) {
+    while (_snapshotKeys.length <= index) {
+      _snapshotKeys.add(GlobalKey(debugLabel: 'report-snapshot-$index'));
+    }
+    return _snapshotKeys[index];
+  }
 
   @override
   void initState() {
@@ -281,11 +291,17 @@ class _ReportScreenState extends State<ReportScreen>
     // 저장 버튼이 진행 표시로 바뀐 프레임까지 그려진 뒤에 떠야 한다. 그 전에 캡처하면
     // 아직 배치 전인 경계를 읽어 실패한다.
     await WidgetsBinding.instance.endOfFrame;
-    final boundary = _snapshotKey.currentContext?.findRenderObject();
-    if (boundary is! RenderRepaintBoundary) {
-      throw const _ReportExportNotReady();
+    final sections = <RenderRepaintBoundary>[];
+    for (final key in _snapshotKeys) {
+      final boundary = key.currentContext?.findRenderObject();
+      if (boundary is RenderRepaintBoundary && boundary.attached) {
+        sections.add(boundary);
+      }
     }
-    return widget.pdfComposer(boundary);
+    if (sections.isEmpty) throw const _ReportExportNotReady();
+    return widget.pdfComposer(
+      ReportPdfRequest(sections: sections, title: '도담 관찰 리포트'),
+    );
   }
 
   Rect? _currentScreenRect() {
@@ -349,7 +365,7 @@ class _ReportScreenState extends State<ReportScreen>
     ),
     _ReportViewStatus.completed => _ReportContent(
       report: _report!,
-      snapshotKey: _snapshotKey,
+      snapshotKeyAt: _snapshotKeyAt,
       pdfAction: _pdfAction,
       onSavePdf: () => _handlePdf(_ReportPdfAction.save),
       onSharePdf: () => _handlePdf(_ReportPdfAction.share),
@@ -400,7 +416,7 @@ class _ReportStateWithHome extends StatelessWidget {
 class _ReportContent extends StatelessWidget {
   const _ReportContent({
     required this.report,
-    required this.snapshotKey,
+    required this.snapshotKeyAt,
     required this.pdfAction,
     required this.onSavePdf,
     required this.onSharePdf,
@@ -410,8 +426,8 @@ class _ReportContent extends StatelessWidget {
   });
   final ReportDetailDto report;
 
-  /// 저장·공유가 그대로 떠 갈 본문 경계다.
-  final GlobalKey snapshotKey;
+  /// 섹션 순서대로 캡처 경계 key 를 내준다. 저장·공유가 이 단위로 떠 간다.
+  final GlobalKey Function(int index) snapshotKeyAt;
   final _ReportPdfAction? pdfAction;
   final VoidCallback onSavePdf;
   final VoidCallback onSharePdf;
@@ -482,22 +498,16 @@ class _ReportContent extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // 저장·공유는 이 경계만 떠 간다. 저장 버튼 줄은 파일에 담지 않는다.
-                RepaintBoundary(
-                  key: snapshotKey,
-                  child: ColoredBox(
-                    color: AppColors.canvas,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        for (final (index, section) in sections.indexed) ...[
-                          if (index > 0) const SizedBox(height: AppSpacing.lg),
-                          section,
-                        ],
-                      ],
-                    ),
+                // 섹션마다 따로 떠 간다. 본문을 한 장의 긴 이미지로 뜨면 종이 크기로 자를
+                // 때 카드 중간이 잘린다. 저장 버튼 줄은 경계 밖이라 파일에 담기지 않는다.
+                for (final (index, section) in sections.indexed) ...[
+                  if (index > 0) const SizedBox(height: AppSpacing.lg),
+                  RepaintBoundary(
+                    key: snapshotKeyAt(index),
+                    // 투명한 곳이 있으면 PDF 뷰어가 검게 보여 준다. 종이색을 깔아 둔다.
+                    child: ColoredBox(color: AppColors.canvas, child: section),
                   ),
-                ),
+                ],
                 const SizedBox(height: AppSpacing.lg),
                 _ReportActionSection(
                   pdfAction: pdfAction,

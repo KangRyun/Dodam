@@ -2,93 +2,146 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/rendering.dart';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
-/// 리포트 화면을 그대로 담은 PDF 를 만드는 함수 모양이다.
+/// PDF 로 만들 리포트다. 본문을 섹션 단위로 받는다.
+@immutable
+final class ReportPdfRequest {
+  const ReportPdfRequest({required this.sections, required this.title});
+
+  /// 화면에 쌓인 순서대로의 섹션 경계다. 카드 하나가 한 장을 넘지 않게 이 단위로 자른다.
+  final List<RenderRepaintBoundary> sections;
+
+  /// PDF 파일 정보에 넣을 제목이다. 본문 제목은 캡처 안에 이미 들어 있다.
+  final String title;
+}
+
+/// 화면에 보이는 리포트를 그대로 담은 PDF 를 만드는 함수 모양이다.
 ///
 /// 테스트가 실제 GPU 캡처 없이 저장·공유 흐름만 확인할 수 있도록 화면에서 분리한다.
 typedef ReportPdfComposer =
-    Future<Uint8List> Function(RenderRepaintBoundary boundary);
+    Future<Uint8List> Function(ReportPdfRequest request);
 
-/// 화면에 보이는 리포트를 그대로 종이 크기로 잘라 PDF 로 굽는다.
+/// 화면에 보이는 리포트를 섹션이 잘리지 않게 PDF 로 굽는다.
 ///
 /// 서버가 만드는 PDF 는 줄글만 담아 카드·색·그림·감정이 전부 빠진다. 보호자가 화면에서 본
 /// 리포트와 저장한 파일이 다르면 저장한 쪽을 신뢰할 수 없다. 그래서 위젯을 이미지로 떠서
 /// 그대로 싣는다.
 ///
-/// ⚠️ 스크롤 밖 내용까지 담기려면 리포트 본문이 한 번에 배치되어 있어야 한다. 현재 화면은
-/// `SingleChildScrollView` + `Column` 이라 자식 전체가 그려지므로 경계 하나로 전부 담긴다.
-/// 본문을 `ListView` 같은 지연 목록으로 바꾸면 보이는 만큼만 저장된다.
+/// ⚠️ 본문 전체를 한 장의 긴 이미지로 떠서 종이 크기로 자르면 자르는 자리가 카드 중간이 되어
+/// 글줄과 카드가 매 장 잘린다. 그래서 섹션마다 따로 떠서, 들어갈 자리가 있는 섹션만 그 장에
+/// 채우고 남으면 다음 장으로 넘긴다. 한 섹션이 한 장보다 길 때만 그 섹션을 나눈다.
 abstract final class ReportSnapshotPdf {
-  /// 세로 A4 한 장의 높이·폭 비율이다. 이미지를 이 비율로 잘라 한 장에 담는다.
-  static final double _pageAspectRatio =
-      PdfPageFormat.a4.height / PdfPageFormat.a4.width;
+  /// 종이 여백이다. 캡처를 가장자리까지 붙이면 인쇄할 때 잘린다.
+  static const double _marginHorizontal = 24;
+  static const double _marginTop = 24;
+  static const double _marginBottom = 30;
 
-  /// 화면 밀도 그대로면 글자가 흐리다. 두 배로 떠서 확대해도 읽히게 한다.
-  static const double _defaultPixelRatio = 2;
+  /// 섹션 사이 간격이다. 화면의 섹션 간격과 비슷하게 둔다.
+  static const double _sectionGap = 10;
 
-  /// 캡처 이미지 한 장의 상한이다.
+  /// 화면 밀도 그대로면 확대했을 때 글자가 흐리다. 섹션마다 따로 뜨므로 한 장이 크지 않아
+  /// 세 배까지 올릴 수 있다.
+  static const double _defaultPixelRatio = 3;
+
+  /// 캡처 한 장의 픽셀 상한이다.
   ///
-  /// 리포트는 섹션이 많아 화면 높이의 열 배를 넘기도 한다. 밀도를 그대로 곱하면 한 번에
-  /// 잡는 픽셀이 수천만 개가 되어 저사양 기기에서 캡처가 실패한다. 상한을 넘으면 밀도를
-  /// 낮춰 저장을 성공시키는 쪽을 고른다 — 저장 실패보다 조금 흐린 저장이 낫다.
+  /// 섹션이 아주 길면(문답 목록 등) 밀도를 그대로 곱한 픽셀이 수천만 개가 되어 저사양 기기에서
+  /// 캡처가 실패한다. 상한을 넘으면 밀도를 낮춰 저장을 성공시키는 쪽을 고른다 — 저장 실패보다
+  /// 조금 흐린 저장이 낫다.
   static const int _maxCapturePixels = 24000000;
 
-  /// 종이 가장자리 여백이다. 캡처를 가장자리까지 붙이면 인쇄 시 잘린다.
-  static const double _pageMargin = 16;
+  /// 종이에 실제로 그림이 들어가는 폭이다.
+  static double get _contentWidth =>
+      PdfPageFormat.a4.width - _marginHorizontal * 2;
 
-  /// [boundary] 가 그리는 화면을 PDF 바이트로 만든다.
+  /// 한 장에 들어가는 본문 높이다. 쪽번호 자리를 뺀다.
+  static double get _contentHeight =>
+      PdfPageFormat.a4.height - _marginTop - _marginBottom - _footerHeight;
+
+  static const double _footerHeight = 16;
+
+  /// 이 비율(높이/폭)을 넘는 섹션은 한 장에 못 들어간다. 그 섹션만 나눈다.
   ///
-  /// @param pixelRatio 캡처 배율. 기본값은 화면 밀도의 두 배다.
+  /// 섹션 아래 간격까지 빼야 한다. 딱 한 장 높이로 자르면 간격이 더해져 한 장을 넘고, 그러면
+  /// 배치가 실패해 저장 자체가 안 된다.
+  static double get _maxSectionAspectRatio =>
+      (_contentHeight - _sectionGap) / _contentWidth;
+
+  /// 앱과 같은 글꼴이다. 쪽번호와 파일 정보에 쓴다.
+  static const String _fontAsset = 'assets/fonts/NanumSquareNeo-Regular.ttf';
+
+  /// [request] 의 섹션들을 순서대로 담은 PDF 바이트를 만든다.
   static Future<Uint8List> compose(
-    RenderRepaintBoundary boundary, {
+    ReportPdfRequest request, {
     double pixelRatio = _defaultPixelRatio,
   }) async {
-    final image = await boundary.toImage(
-      pixelRatio: _fitPixelRatio(boundary.size, pixelRatio),
+    final pieces = <_Piece>[];
+    for (final section in request.sections) {
+      pieces.addAll(await _capture(section, pixelRatio));
+    }
+    return _document(request.title, pieces);
+  }
+
+  /// 섹션 하나를 뜬다. 한 장보다 길면 그 섹션만 여러 조각으로 나눈다.
+  static Future<List<_Piece>> _capture(
+    RenderRepaintBoundary section,
+    double pixelRatio,
+  ) async {
+    if (!section.attached || section.size.isEmpty) return const [];
+    final image = await section.toImage(
+      pixelRatio: _fitPixelRatio(section.size, pixelRatio),
     );
     try {
-      return await _document(await sliceToPages(image));
+      return await _split(image);
     } finally {
       image.dispose();
     }
+  }
+
+  static Future<List<_Piece>> _split(ui.Image image) async {
+    final width = image.width;
+    final aspectRatio = image.height / width;
+    if (aspectRatio <= _maxSectionAspectRatio) {
+      final bytes = await _encode(image);
+      return bytes == null
+          ? const []
+          : [_Piece(bytes: bytes, aspectRatio: aspectRatio)];
+    }
+    // 한 장보다 긴 섹션이다. 이 섹션만 장 높이에 맞춰 나눈다. 자르는 자리가 글줄일 수 있지만
+    // 다른 섹션까지 함께 잘리는 것보다 낫다.
+    final chunkHeight = math.max(1, (width * _maxSectionAspectRatio).floor());
+    final pieces = <_Piece>[];
+    for (var top = 0; top < image.height; top += chunkHeight) {
+      final height = math.min(chunkHeight, image.height - top);
+      if (height <= 0) break;
+      final chunk = await _crop(image, top: top, width: width, height: height);
+      try {
+        final bytes = await _encode(chunk);
+        if (bytes != null) {
+          pieces.add(_Piece(bytes: bytes, aspectRatio: height / width));
+        }
+      } finally {
+        chunk.dispose();
+      }
+    }
+    return pieces;
   }
 
   /// 캡처 배율을 [_maxCapturePixels] 안으로 낮춘다. 여유가 있으면 요청값을 그대로 쓴다.
   static double _fitPixelRatio(Size size, double requested) {
     final area = size.width * size.height;
     if (area <= 0) return requested;
-    final requestedPixels = area * requested * requested;
-    if (requestedPixels <= _maxCapturePixels) return requested;
+    if (area * requested * requested <= _maxCapturePixels) return requested;
     return math.sqrt(_maxCapturePixels / area);
   }
 
-  /// 긴 캡처를 A4 비율의 여러 장으로 자른다.
-  ///
-  /// 자르는 자리가 글줄 가운데일 수 있다. 그래도 내용을 빠뜨리지 않는 쪽을 골랐다 — 섹션
-  /// 경계를 찾아 자르려면 화면 구조를 캡처가 알아야 하고, 그러면 화면을 바꿀 때마다 저장이
-  /// 깨진다.
-  @visibleForTesting
-  static Future<List<Uint8List>> sliceToPages(ui.Image image) async {
-    final width = image.width;
-    final pageHeight = math.max(1, (width * _pageAspectRatio).round());
-    final pageCount = math.max(1, (image.height / pageHeight).ceil());
-    final pages = <Uint8List>[];
-    for (var index = 0; index < pageCount; index++) {
-      final top = index * pageHeight;
-      final height = math.min(pageHeight, image.height - top);
-      if (height <= 0) break;
-      final slice = await _crop(image, top: top, width: width, height: height);
-      try {
-        final encoded = await slice.toByteData(format: ui.ImageByteFormat.png);
-        if (encoded != null) pages.add(encoded.buffer.asUint8List());
-      } finally {
-        slice.dispose();
-      }
-    }
-    return pages;
+  static Future<Uint8List?> _encode(ui.Image image) async {
+    final data = await image.toByteData(format: ui.ImageByteFormat.png);
+    return data?.buffer.asUint8List();
   }
 
   static Future<ui.Image> _crop(
@@ -117,23 +170,65 @@ abstract final class ReportSnapshotPdf {
     }
   }
 
-  static Future<Uint8List> _document(List<Uint8List> pages) async {
-    final document = pw.Document(title: '도담 관찰 리포트');
-    for (final page in pages) {
-      final image = pw.MemoryImage(page);
-      document.addPage(
-        pw.Page(
-          pageFormat: PdfPageFormat.a4,
-          margin: const pw.EdgeInsets.all(_pageMargin),
-          build: (context) => pw.Image(
-            image,
-            fit: pw.BoxFit.fitWidth,
-            // 마지막 장은 짧다. 가운데 두면 앞 장과 글줄 위치가 어긋나 보인다.
-            alignment: pw.Alignment.topCenter,
+  /// 앱과 같은 글꼴을 실어 둔다.
+  ///
+  /// PDF 기본 글꼴(Helvetica)은 한글을 그리지 못한다. 지금 그리는 글자는 쪽번호뿐이지만,
+  /// 글꼴이 없으면 파일 정보의 한글 제목에서도 경고가 난다. 읽지 못하면 기본 글꼴로 둔다 —
+  /// 글꼴 때문에 저장이 실패하는 것이 더 나쁘다.
+  static Future<pw.ThemeData?> _theme() async {
+    try {
+      final data = await rootBundle.load(_fontAsset);
+      return pw.ThemeData.withFont(base: pw.Font.ttf(data));
+    } on Object {
+      return null;
+    }
+  }
+
+  /// 조각들을 순서대로 흘려 담는다. 한 장에 다 못 들어가는 조각은 다음 장에서 시작한다.
+  ///
+  /// 쪽번호 말고는 글자를 넣지 않는다. 한글을 그리려면 폰트를 함께 실어야 하는데, 제목·본문은
+  /// 이미 캡처 안에 있어 다시 그릴 이유가 없다.
+  static Future<Uint8List> _document(String title, List<_Piece> pieces) async {
+    final document = pw.Document(title: title, theme: await _theme());
+    document.addPage(
+      pw.MultiPage(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.fromLTRB(
+          _marginHorizontal,
+          _marginTop,
+          _marginHorizontal,
+          _marginBottom,
+        ),
+        footer: (context) => pw.Container(
+          height: _footerHeight,
+          alignment: pw.Alignment.center,
+          child: pw.Text(
+            '${context.pageNumber} / ${context.pagesCount}',
+            style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
           ),
         ),
-      );
-    }
+        build: (context) => [
+          for (final piece in pieces)
+            pw.Padding(
+              padding: const pw.EdgeInsets.only(bottom: _sectionGap),
+              child: pw.Image(
+                pw.MemoryImage(piece.bytes),
+                width: _contentWidth,
+                height: _contentWidth * piece.aspectRatio,
+              ),
+            ),
+        ],
+      ),
+    );
     return document.save();
   }
+}
+
+/// 종이에 붙일 이미지 한 조각이다. 대개 섹션 하나이고, 긴 섹션만 여러 조각이 된다.
+@immutable
+final class _Piece {
+  const _Piece({required this.bytes, required this.aspectRatio});
+
+  final Uint8List bytes;
+  final double aspectRatio;
 }
