@@ -36,6 +36,7 @@ import crisis_guidance
 import llm_client
 import prompt_injection
 import prompts_registry  # 답변 칩 프롬프트 로딩·버전 추적 (S15P11B209-788)
+import question_quality
 import question_safety
 from gms import get_client
 from internal_contracts import (
@@ -113,6 +114,59 @@ def _truncate_description(text: str | None) -> str | None:
     return stripped[:limit].rstrip() + "…"
 
 
+# ── 탐지 이름의 근거 대조 (S15P11B209-918) ──────────────────────
+# 자유 그림(sketch 가중치)은 오탐이 잦다. 탐지 문턱은 YOLO_CONF_THRESHOLD=0.20 이라
+# 머리카락이 '덤불'로, 머리가 '달'로 잡힌 채 후보에 남는다. 그 이름이 프롬프트에 들어가면
+# 모델은 그것을 실제 대상으로 단정한다(2026-08-05 실측: 덤불 10/10, 달 5/5).
+#
+# 이름의 근거는 탐지 목록이 아니라 그림 서술이다 — activity_block [[ART_DIARY]]가 이미
+# 그렇게 적어 두었는데, 정작 코드는 서술과 대조하지 않고 신뢰도만 보고 이름을 실었다.
+# 이제 자유 그림에서는 **서술 원문에 실제로 등장하는 이름만** 프롬프트에 싣는다.
+#
+# ⚠️ HTP에는 적용하지 않는다. 주제가 활동으로 정해져 있고 HTP 전용 가중치는 sketch보다
+#    정확하다. 게다가 표시명이 서술 표현과 다른 정상 케이스가 있다('집의 문' vs "네모난 것").
+
+
+def _hangul(char: str) -> bool:
+    return "가" <= char <= "힣"
+
+
+def _mentioned_in(name: str | None, description: str | None) -> bool:
+    """탐지 표시명이 서술 문장에 실제로 등장하는가.
+
+    단순 부분 문자열이면 '해'가 "칠해져 있어요"에 걸린다. 앞 글자가 한글이면 다른 낱말의
+    일부로 보고 세지 않는다 — 탐지 이름은 명사라 문장에서 띄어쓰기나 문장 첫머리에 온다.
+    (뒤쪽은 조사가 붙으므로 경계를 두지 않는다: "해가"·"머리카락은")
+    """
+    if not name or not description:
+        return False
+    needle = name.strip()
+    if not needle:
+        return False
+    start = description.find(needle)
+    while start != -1:
+        if start == 0 or not _hangul(description[start - 1]):
+            return True
+        start = description.find(needle, start + 1)
+    return False
+
+
+def _nameable_objects(req: QuestionRequest) -> list[DetectedObject]:
+    """프롬프트에 이름을 실어도 되는 탐지 객체(S15P11B209-918).
+
+    자유 그림은 서술이 뒷받침하는 이름만 남긴다. 서술이 없으면 아무것도 뒷받침하지 못하므로
+    빈 목록이 된다 — 이때는 이름을 단정하는 대신 그림 전체를 여는 질문으로 간다.
+    """
+    if req.activity_type != "ART_DIARY":
+        return list(req.detected_objects)
+    description = _truncate_description(req.drawing_description)
+    return [
+        o
+        for o in req.detected_objects
+        if _mentioned_in(o.object_name or o.object_code, description)
+    ]
+
+
 def _drawing_analysis_text(req: QuestionRequest) -> str | None:
     """첫 질문 프롬프트의 {drawing_analysis} 재료를 만든다.
 
@@ -123,12 +177,14 @@ def _drawing_analysis_text(req: QuestionRequest) -> str | None:
       둘을 함께 주는 이유는 서술이 놓친 객체를 목록이 보완하고, 목록이 설명하지 못하는
       맥락을 서술이 채우기 때문이다.
     ⚠️ 서술이 없으면(BE 미전달·분석 실패) 기존 객체 목록 동작을 그대로 유지한다.
+    ⚠️ 자유 그림의 목록은 서술이 뒷받침하는 이름만 남는다(S15P11B209-918). 대상 선택
+       (_target_for_purpose)과 같은 규칙을 쓴다 — 프롬프트가 이름을 볼 수 있는데 대상만
+       막으면, 모델은 목록에서 이름을 집어 온다(918 재현의 '달' 경로가 그랬다).
     """
     description = _truncate_description(req.drawing_description)
+    nameable = _nameable_objects(req)
     objects = (
-        ", ".join(o.object_name or o.object_code for o in req.detected_objects)
-        if req.detected_objects
-        else None
+        ", ".join(o.object_name or o.object_code for o in nameable) if nameable else None
     )
     if description and objects:
         return f"{description}\n(그림에서 찾은 것: {objects})"
@@ -281,12 +337,20 @@ def _activity_block(
             if target_name
             else _block("HTP_WHOLE", subject=subject_ko)
         )
+        # 부위가 대상이면 '누구 것인지'가 아니라 '어떻게 보이는지'를 묻게 한다(S15P11B209-918).
+        if _is_person_part(target):
+            lines.append(_block("PERSON_PART", target=target_name))
     elif req.activity_type == "ART_DIARY":
         # 그림일기 탐지 모델(sketch)은 오탐이 잦다 — 이름의 근거는 탐지 목록이 아니라
         # 그림 서술과 아이 말이다(788 B, 활동별 판단).
         lines.append(_block("ART_DIARY"))
         if target_name:
             lines.append(_target_line(req, target_name))
+        elif _last_child_index(req) is None:
+            # 첫 질문인데 이름을 뒷받침할 근거가 없다 — 이름을 지어 부르지 말고 열린 질문을
+            # 하게 한다(S15P11B209-918). 아이가 이미 말한 뒤라면 붙이지 않는다: 그 턴의
+            # 지시는 "아이 말을 따라가"이고, 여기에 '열린 질문을 해'를 겹치면 서로 밀어낸다.
+            lines.append(_block("ART_DIARY_OPEN"))
     elif target_name:
         lines.append(_block("TARGET_ONLY", target=target_name))
     if reask_candidates:
@@ -441,11 +505,20 @@ def _target_for_purpose(req: QuestionRequest, purpose: str) -> DetectedObject | 
       배경(SCENERY) 등 나머지에서 고른다(결정: 주제 우선·소진 후 배경). 집 단계에서 배경 나무가
       대뜸 대상이 되어 "이 나무는?"이 나오던 709 경로가 이걸로 대부분 사라진다.
     - 남은 후보 중 신뢰도 최고를 고른다. 후보가 없으면 None(호출부가 그림 전체 질문으로 전환).
+
+    선택 규칙 추가(S15P11B209-918):
+    - 자유 그림은 서술이 뒷받침하는 이름만 후보가 된다(_nameable_objects). 근거 없는 이름을
+      대상으로 못 박으면 오탐이 확정 사실로 아이에게 나간다.
+    - HTP 사람은 전체(PERSON)를 부위(PERSON_*)보다 먼저 고른다. 사람 그림은 부위 라벨이
+      열댓 개라 신뢰도만 보면 부위가 뽑히는데, 부위 하나로 좁힌 지시가 사람 질문 뱅크의
+      "누구를 생각하면서 그렸어?" 방향과 만나 "이 머리는 누구의 머리야?"가 됐다.
+      집·나무는 그대로 둔다 — 지붕·문·창문은 PDI 표준 문항의 대상이고, 소유격 문제를
+      만드는 것은 신체 부위다.
     """
     if purpose != "OBJECT_DESCRIPTION" or not req.detected_objects:
         return None
     asked = set(req.asked_object_codes)
-    available = [o for o in req.detected_objects if o.object_code not in asked]
+    available = [o for o in _nameable_objects(req) if o.object_code not in asked]
     if not available:
         return None
     if req.activity_type == "HTP" and req.drawing_subject:
@@ -456,9 +529,17 @@ def _target_for_purpose(req: QuestionRequest, purpose: str) -> DetectedObject | 
             if o.object_code == subject or o.object_code.startswith(f"{subject}_")
         ]
         pool = subject_objs or available
+        if subject == "PERSON":
+            whole = [o for o in pool if o.object_code == "PERSON"]
+            pool = whole or pool
     else:
         pool = available
     return max(pool, key=lambda o: o.confidence)
+
+
+def _is_person_part(target: DetectedObject | None) -> bool:
+    """대상이 사람 그림의 '부위'인가(전체 PERSON은 아니다). S15P11B209-918."""
+    return target is not None and target.object_code.startswith("PERSON_")
 
 
 # ── 탐지 부정 시 후보 칩 재질문 (S15P11B209-718) ──────────────────
@@ -723,6 +804,26 @@ def _reask_response(req: QuestionRequest, started: float) -> QuestionResponse:
     )
 
 
+# ── 문맥상 어색한 질문 교체 (S15P11B209-918) ────────────────────
+# 안전 위반이 아니라 품질 결함이다 — 차단(422)하면 BE 폴백 템플릿("오늘은 뭘 그렸어?")으로
+# 대체되어 대화가 더 나빠진다. 그래서 같은 대상을 유지한 채 물어볼 각도만 바꿔 준다.
+QUALITY_OPEN_QUESTION = "그림에서 더 이야기해 주고 싶은 건 뭐야?"
+
+
+def _quality_replacement(
+    purpose: str, target: DetectedObject | None
+) -> tuple[str, str, DetectedObject | None]:
+    """어색한 질문을 대신할 (질문, 목적, 대상)을 만든다.
+
+    대상이 살아 있으면 그 대상의 '보이는 것'을 묻는 질문으로 바꾼다 — 대상을 버리면
+    아이 입장에서 화제가 통째로 사라진다. 대상이 없으면 그림 전체를 여는 질문으로 간다.
+    """
+    name = (target.object_name or "").strip() if target is not None else ""
+    if name and purpose == "OBJECT_DESCRIPTION":
+        return f"그림 속 {name}{question_quality.eun_neun(name)} 어떤 모양이야?", purpose, target
+    return QUALITY_OPEN_QUESTION, "DRAWING_CONTEXT", None
+
+
 def _detect_crisis(req: QuestionRequest) -> str | None:
     """아이 발화에서 자해·학대·위기 신호를 탐지한다(S15P11B209-593).
 
@@ -930,6 +1031,20 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         # 정화 후 남는 게 없으면(기호뿐이었으면) 빈 출력 — 폴백 템플릿에 맡긴다.
         raise UpstreamError("AI_EMPTY_COMPLETION", "EmptyCompletion")
 
+    # 문맥상 어색한 질문(그림 속 부위의 소유자를 묻는 등)은 차단하지 않고 교체한다
+    # (S15P11B209-918). 안전 판정 뒤에 두는 이유: 교체 문장은 우리가 쓴 것이라 다시
+    # 판정할 필요가 없고, 안전 차단이 먼저 걸리는 문장은 애초에 여기 오지 않는다.
+    quality_replaced = False
+    quality_reason = question_quality.find_awkward(text)
+    if quality_reason:
+        # ⚠️ 질문 원문은 남기지 않는다 — 사유 코드만(안전 차단 로그와 같은 규칙).
+        logger.warning(
+            "질문 품질 교체: reason=%s request_id=%s", quality_reason, request_id
+        )
+        text, purpose, target = _quality_replacement(purpose, target)
+        quality_replaced = True
+        candidate_options = None
+
     # 생성된 질문이 마음·느낌을 묻는 문장이면 EXPRESSION으로 재분류해 감정 칩을 붙인다
     # (S15P11B209-650: 칩을 '질문 내용'과 맞춘다). 목적은 생성 전에 정하지만 감정 질문 여부는
     # 문장을 봐야 알 수 있어 여기서 보정한다. 부정 후보 재질문(718) 중에는 그 칩을 유지한다.
@@ -941,6 +1056,10 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
     # OPTION 비허용이면 반드시 null — 빈 배열도 계약 위반이다(isContractValidFor).
     if not option_allowed:
         options = None  # OPTION 비허용 → 칩 없음(빈 배열도 계약 위반)
+    elif quality_replaced and target is None:
+        # 교체된 열린 질문에 탐지 후보 칩(747의 '무엇→후보' 규칙)을 붙이면, 방금 억누른
+        # 오탐 이름이 칩으로 아이 화면에 다시 올라온다(S15P11B209-918). 목적별 generic을 쓴다.
+        options = _options_for_purpose(purpose)
     elif candidate_options is not None:
         options = candidate_options  # 부정 재질문 후보(718)
     elif _NEGATION_CODE in selected_codes or _ESCAPE_CODE in selected_codes:
@@ -966,9 +1085,12 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
     # 분석 로그의 [필터] 줄과 drawingSessionId로 이어붙일 수 있게 한다.
     # activityType·drawingSubject를 함께 남겨 어느 HTP 단계였는지 로그만으로 판별한다
     # (S15P11B209-712). 값이 없으면(그림일기·주제 미전달 요청) "-"로 남긴다.
+    # unnamed: 서술이 뒷받침하지 못해 프롬프트에서 뺀 탐지 이름의 수(S15P11B209-918).
+    # 개수만 남긴다 — 이름 자체는 아동 그림 내용이라 상세 로그 규칙을 따른다. 이 값이 크면
+    # 탐지와 서술이 크게 어긋난 그림이라, 나중에 오탐 경향을 코드 없이 되짚을 수 있다.
     logger.info(
         "[질문] request_id=%s drawingSessionId=%s basisAnalysisId=%s "
-        "activityType=%s drawingSubject=%s purpose=%s target=%s | %s",
+        "activityType=%s drawingSubject=%s purpose=%s target=%s unnamed=%d | %s",
         request_id,
         req.drawing_session_id,
         req.basis_analysis_id if req.basis_analysis_id is not None else "-",
@@ -976,6 +1098,7 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         req.drawing_subject or "-",
         purpose,
         _format_target_for_log(target),
+        len(req.detected_objects) - len(_nameable_objects(req)),
         _format_objects_for_log(req),
     )
 
