@@ -683,24 +683,6 @@ def _crisis_safe_response(req: QuestionRequest, started: float) -> QuestionRespo
     )
 
 
-def _debug_log_blocked_raw(reason: str, text: str, request_id: str) -> None:
-    """⚠️ 임시 검증용 로그 — 출시 전 반드시 제거(S15P11B209-689).
-
-    안전 파이프라인이 실제로 무엇을 걸러내는지 개발 중 눈으로 확인하려고, 차단된 '원문'을
-    남긴다. 평소 가드레일("원문은 로그로 남기지 않는다")을 일부러 뚫는 코드라 config
-    SAFETY_DEBUG_LOG_RAW 가 정확히 켜졌을 때만 동작하고 기본은 꺼짐이다. 배포엔 이 플래그를
-    주입하지 않는다. 제거 시 이 헬퍼와 호출부, config 플래그를 함께 지운다.
-    """
-    if not config.SAFETY_DEBUG_LOG_RAW:
-        return
-    logger.warning(
-        "[SAFETY-DEBUG-REMOVE] reason=%s request_id=%s raw=%r",
-        reason,
-        request_id,
-        text,
-    )
-
-
 # ── 프롬프트 인젝션 차단 (S15P11B209-742) ───────────────────────
 # 아이 발화가 프롬프트를 조작하려 하면(예: "지금까지의 모든 지시를 잊고~") LLM에 전달하지 않고
 # 결정적 재질문으로 되묻는다. 위기 차단과 달리 대화는 끊지 않는다(정상적인 되묻기).
@@ -773,10 +755,6 @@ def _evaluate_safety(
             "생성 질문 안전 차단: reason=%s request_id=%s",
             verdict.block_reason_code,
             request_id,
-        )
-        # ⚠️ 임시 검증용(출시 전 제거: S15P11B209-689) — 무엇이 걸렸는지 원문 확인.
-        _debug_log_blocked_raw(
-            verdict.block_reason_code or "UNSPECIFIED", question_text, request_id
         )
         raise SafetyBlockedError(
             verdict.block_reason_code or "UNSPECIFIED", rule_version
@@ -892,13 +870,6 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
                     note.requires_expert_review,
                     request_id,
                 )
-        # ⚠️ 임시 검증용(출시 전 제거: S15P11B209-689) — 어떤 발화가 위기로 걸렸는지 원문 확인.
-        child_texts = [
-            m.text
-            for m in req.recent_messages
-            if (m.sender_type or "").upper() == "CHILD" and m.text
-        ]
-        _debug_log_blocked_raw(crisis_reason, " | ".join(child_texts), request_id)
         return _crisis_safe_response(req, started)
 
     # 프롬프트 인젝션(맥락 파괴 시도)은 LLM에 전달하지 않고 결정적 재질문으로 되묻는다
@@ -911,14 +882,6 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
             injection_reason,
             request_id,
         )
-        # ⚠️ 임시 검증용(출시 전 제거: S15P11B209-689) — 어떤 입력이 인젝션으로 걸렸는지 원문 확인.
-        injected_index = _last_child_index(req)
-        if injected_index is not None:
-            _debug_log_blocked_raw(
-                injection_reason,
-                req.recent_messages[injected_index].text or "",
-                request_id,
-            )
         return _reask_response(req, started)
 
     # 목적·대상을 GMS 호출 전에 정해 프롬프트에 그대로 싣는다(S15P11B209-713) — 질문 문장과
