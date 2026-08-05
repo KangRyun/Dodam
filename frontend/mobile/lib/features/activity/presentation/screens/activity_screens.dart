@@ -390,6 +390,15 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 대화만 진행한다.
   bool get _canvasLocked => widget.resumeConversation || _drawingStageFinished;
 
+  /// AI 질문이 화면에 떠 있는 동안에는 그림보다 대화에만 집중한다.
+  ///
+  /// 진행 중인 획은 끝까지 확정한 뒤 잠근다. 말풍선이 실제로 표시되는 조건과
+  /// 동일하게 유지해야 보이지 않는 오버레이가 입력을 막지 않는다.
+  bool get _isConversationFocusMode =>
+      _questionDisplayController.isVisible &&
+      _activePointer == null &&
+      (_canvasLocked || _draftRestoreController.canDraw);
+
   /// 새 획 또는 복원된 Draft 배경이 있으면 완료 가능한 그림으로 본다.
   bool get _hasDrawingContent =>
       _completedStrokes.isNotEmpty || _draftRestoreController.draft != null;
@@ -691,6 +700,10 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   /// 마우스·스타일러스가 캔버스 위를 지나면 현재 도구와 굵기를 커서로 보여 준다.
   void _handleCanvasHover(PointerHoverEvent event) {
+    if (_isConversationFocusMode) {
+      _cursorController.hide();
+      return;
+    }
     _cursorController.update(
       documentPosition: event.localPosition,
       toolState: _cursorToolState,
@@ -1305,6 +1318,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _handleQuestionDisplayChanged() {
+    if (_isConversationFocusMode) _cursorController.hide();
     if (mounted) setState(() {});
   }
 
@@ -1527,7 +1541,8 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _startStroke(PointerDownEvent event) {
-    if (_activePointer != null ||
+    if (_isConversationFocusMode ||
+        _activePointer != null ||
         _voiceRecordingController?.isRecording == true) {
       _cursorController.hide();
       return;
@@ -1744,6 +1759,10 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 터치도 그리는 동안에는 커서를 보여 준다. 손을 떼고 나면 [_endStroke] 가
   /// 숨기므로 손가락이 없는데 커서만 남는 일은 없다.
   void _updateCursor(PointerEvent event) {
+    if (_isConversationFocusMode) {
+      _cursorController.hide();
+      return;
+    }
     final documentBounds = Offset.zero & _documentSize;
     if (!documentBounds.contains(event.localPosition)) {
       _cursorController.hide();
@@ -2346,11 +2365,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 말풍선이 보이는 동안에는 만들지 않는다. 질문에 답하는 동안에는 캔버스가
   /// 잠겨 그림도 더 그릴 수 없어, 지금 완료할 이유도 없다.
   Widget? _buildCompleteCta(BuildContext context) {
-    final questionBubbleVisible =
-        _questionDisplayController.isVisible &&
-        _activePointer == null &&
-        (_canvasLocked || _draftRestoreController.canDraw);
-    if (questionBubbleVisible) return null;
+    if (_isConversationFocusMode) return null;
     return DrawingCompleteCta(
       enabled: !_canvasLocked && _activeStroke == null && _hasDrawingContent,
       isCompleting: _isCompleting,
@@ -2402,6 +2417,7 @@ class _DrawingScreenState extends State<DrawingScreen>
                   backgroundImage: _draftRestoreController.backgroundImage,
                   inputEnabled:
                       !_canvasLocked &&
+                      !_isConversationFocusMode &&
                       !_isCompleting &&
                       !_isLeaving &&
                       _draftRestoreController.canDraw,
@@ -2425,10 +2441,7 @@ class _DrawingScreenState extends State<DrawingScreen>
                   companion: _companionSnapshot,
                   compact: deviceClass != DrawingCanvasDeviceClass.tablet,
                   question: _questionDisplayController.visibleQuestion,
-                  visible:
-                      _questionDisplayController.isVisible &&
-                      _activePointer == null &&
-                      (_canvasLocked || _draftRestoreController.canDraw),
+                  visible: _isConversationFocusMode,
                   selectedOptionId:
                       _questionSelectionController.selectedOptionId,
                   onOptionSelected: (optionId) {
@@ -2527,10 +2540,7 @@ class _DrawingScreenState extends State<DrawingScreen>
                 // 캔버스 위 말풍선이 질문을 보여 주는 동안에는 사이드 패널을
                 // 띄우지 않는다. 같은 질문을 두 번 보여 줄 뿐 아니라, 패널이
                 // 말풍선의 녹음·답변 버튼을 덮어 탭이 닿지 않는다.
-                final questionBubbleVisible =
-                    _questionDisplayController.isVisible &&
-                    _activePointer == null &&
-                    (_canvasLocked || _draftRestoreController.canDraw);
+                final questionBubbleVisible = _isConversationFocusMode;
                 // 말풍선이 지금 질문을 그대로 보여 주고 있을 때만 패널을 접는다.
                 // 말풍선이 이전 질문에 머물러 있으면 새 질문을 볼 곳이 없어진다.
                 final bubbleShowsCurrentQuestion =
@@ -2614,7 +2624,11 @@ class _DrawingScreenState extends State<DrawingScreen>
                         ),
                       ),
                     ),
-                    toolbar,
+                    AbsorbPointer(
+                      key: const ValueKey('drawing-conversation-input-lock'),
+                      absorbing: _isConversationFocusMode,
+                      child: toolbar,
+                    ),
                     Expanded(
                       // 말풍선이 종이 위로 넘쳐 그려질 수 있어야 한다.
                       child: LayoutBuilder(
@@ -2654,26 +2668,29 @@ class _DrawingScreenState extends State<DrawingScreen>
                               Positioned(
                                 left: frameInset + AppSpacing.md,
                                 bottom: frameInset + AppSpacing.md,
-                                child: AnimatedBuilder(
-                                  animation: tutorialController,
-                                  builder: (context, _) =>
-                                      IconButton.filledTonal(
-                                        key: const ValueKey(
-                                          'canvas-tutorial-help',
-                                        ),
-                                        tooltip: '그림 도구 다시 보기',
-                                        onPressed: tutorialController.isBusy
-                                            ? null
-                                            : tutorialController.replay,
-                                        icon: const Icon(
-                                          Icons.help_outline_rounded,
-                                        ),
-                                        style: IconButton.styleFrom(
-                                          minimumSize: const Size.square(
-                                            AppSizes.iconButton,
+                                child: AbsorbPointer(
+                                  absorbing: _isConversationFocusMode,
+                                  child: AnimatedBuilder(
+                                    animation: tutorialController,
+                                    builder: (context, _) =>
+                                        IconButton.filledTonal(
+                                          key: const ValueKey(
+                                            'canvas-tutorial-help',
+                                          ),
+                                          tooltip: '그림 도구 다시 보기',
+                                          onPressed: tutorialController.isBusy
+                                              ? null
+                                              : tutorialController.replay,
+                                          icon: const Icon(
+                                            Icons.help_outline_rounded,
+                                          ),
+                                          style: IconButton.styleFrom(
+                                            minimumSize: const Size.square(
+                                              AppSizes.iconButton,
+                                            ),
                                           ),
                                         ),
-                                      ),
+                                  ),
                                 ),
                               ),
                             // 보여줄 질문·오류가 있을 때만 띄운다. 빈 상자를 겹쳐 두면
