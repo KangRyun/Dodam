@@ -1,6 +1,8 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../app/widgets/app_failure_view.dart';
@@ -13,6 +15,7 @@ import '../../data/services/platform_report_file_actions.dart';
 import '../../domain/repositories/report_repository.dart';
 import '../../domain/services/report_file_actions.dart';
 import '../format/activity_duration_format.dart';
+import '../services/report_snapshot_pdf.dart';
 import '../widgets/htp_report_gallery.dart';
 import '../widgets/report_mascot.dart';
 
@@ -34,15 +37,20 @@ class ReportScreen extends StatefulWidget {
     required this.repository,
     this.activityRepository,
     ReportFileActions? fileActions,
+    ReportPdfComposer? pdfComposer,
     this.voiceAnswerPlaybackRepository,
     this.voiceAnswerAudioPlayerFactory,
     super.key,
-  }) : fileActions = fileActions ?? const PlatformReportFileActions();
+  }) : fileActions = fileActions ?? const PlatformReportFileActions(),
+       pdfComposer = pdfComposer ?? ReportSnapshotPdf.compose;
 
   final String reportId;
   final ReportRepository repository;
   final ActivityRepository? activityRepository;
   final ReportFileActions fileActions;
+
+  /// 화면을 PDF 로 굽는 경계다. 테스트는 실제 캡처 없이 저장·공유 흐름만 확인한다.
+  final ReportPdfComposer pdfComposer;
   final VoiceAnswerPlaybackRepository? voiceAnswerPlaybackRepository;
   final VoiceAnswerAudioPlayerFactory? voiceAnswerAudioPlayerFactory;
 
@@ -60,6 +68,9 @@ class _ReportScreenState extends State<ReportScreen>
   bool _isRegenerating = false;
   VoiceAnswerPlaybackController? _playbackController;
   int _loadGeneration = 0;
+
+  /// 저장·공유할 때 그대로 떠 갈 리포트 본문이다. 저장 버튼 줄은 이 밖에 둔다.
+  final GlobalKey _snapshotKey = GlobalKey();
 
   @override
   void initState() {
@@ -218,17 +229,7 @@ class _ReportScreenState extends State<ReportScreen>
 
     setState(() => _pdfAction = action);
     try {
-      final export = await widget.repository.requestExport(
-        report.reportId,
-        idempotencyKey: 'report-export-${report.reportId}',
-      );
-      if (!export.isReady ||
-          export.reportId != report.reportId ||
-          export.downloadUrl !=
-              '/api/v1/reports/${report.reportId}/exports/${export.exportId}/file') {
-        throw const _ReportExportNotReady();
-      }
-      final bytes = await widget.repository.downloadExport(export.downloadUrl!);
+      final bytes = await _composeSnapshotPdf();
       if (!_isPdf(bytes)) {
         throw const _ReportExportNotReady();
       }
@@ -270,6 +271,21 @@ class _ReportScreenState extends State<ReportScreen>
         setState(() => _pdfAction = null);
       }
     }
+  }
+
+  /// 화면에 보이는 리포트를 그대로 PDF 로 만든다.
+  ///
+  /// 서버 PDF 는 줄글만 담아 카드·색·그림·감정이 빠진다. 보호자가 화면에서 본 것과 저장한
+  /// 파일이 다르면 저장한 쪽을 믿을 수 없으므로 화면을 그대로 싣는다.
+  Future<Uint8List> _composeSnapshotPdf() async {
+    // 저장 버튼이 진행 표시로 바뀐 프레임까지 그려진 뒤에 떠야 한다. 그 전에 캡처하면
+    // 아직 배치 전인 경계를 읽어 실패한다.
+    await WidgetsBinding.instance.endOfFrame;
+    final boundary = _snapshotKey.currentContext?.findRenderObject();
+    if (boundary is! RenderRepaintBoundary) {
+      throw const _ReportExportNotReady();
+    }
+    return widget.pdfComposer(boundary);
   }
 
   Rect? _currentScreenRect() {
@@ -333,6 +349,7 @@ class _ReportScreenState extends State<ReportScreen>
     ),
     _ReportViewStatus.completed => _ReportContent(
       report: _report!,
+      snapshotKey: _snapshotKey,
       pdfAction: _pdfAction,
       onSavePdf: () => _handlePdf(_ReportPdfAction.save),
       onSharePdf: () => _handlePdf(_ReportPdfAction.share),
@@ -383,6 +400,7 @@ class _ReportStateWithHome extends StatelessWidget {
 class _ReportContent extends StatelessWidget {
   const _ReportContent({
     required this.report,
+    required this.snapshotKey,
     required this.pdfAction,
     required this.onSavePdf,
     required this.onSharePdf,
@@ -391,6 +409,9 @@ class _ReportContent extends StatelessWidget {
     required this.activityRepository,
   });
   final ReportDetailDto report;
+
+  /// 저장·공유가 그대로 떠 갈 본문 경계다.
+  final GlobalKey snapshotKey;
   final _ReportPdfAction? pdfAction;
   final VoidCallback onSavePdf;
   final VoidCallback onSharePdf;
@@ -426,11 +447,6 @@ class _ReportContent extends StatelessWidget {
         ?_legacyGuideSection(report),
         if (report.hasNoObservations) _noObservationsCard,
         ?_limitationsReferencesSection(report),
-        _ReportActionSection(
-          pdfAction: pdfAction,
-          onSavePdf: onSavePdf,
-          onSharePdf: onSharePdf,
-        ),
       ];
       return SingleChildScrollView(
         key: ValueKey(isWide ? 'report-wide-layout' : 'report-small-layout'),
@@ -443,10 +459,28 @@ class _ReportContent extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                for (final (index, section) in sections.indexed) ...[
-                  if (index > 0) const SizedBox(height: AppSpacing.lg),
-                  section,
-                ],
+                // 저장·공유는 이 경계만 떠 간다. 저장 버튼 줄은 파일에 담지 않는다.
+                RepaintBoundary(
+                  key: snapshotKey,
+                  child: ColoredBox(
+                    color: AppColors.canvas,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final (index, section) in sections.indexed) ...[
+                          if (index > 0) const SizedBox(height: AppSpacing.lg),
+                          section,
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.lg),
+                _ReportActionSection(
+                  pdfAction: pdfAction,
+                  onSavePdf: onSavePdf,
+                  onSharePdf: onSharePdf,
+                ),
               ],
             ),
           ),
@@ -1065,7 +1099,9 @@ Widget? _childExpressionSection(
         Wrap(
           spacing: AppSpacing.xs,
           runSpacing: AppSpacing.xs,
-          children: [for (final word in expression.keywords) Chip(label: Text(word))],
+          children: [
+            for (final word in expression.keywords) Chip(label: Text(word)),
+          ],
         ),
         const SizedBox(height: AppSpacing.sm),
       ],
@@ -1175,7 +1211,11 @@ Widget? _activityFactsSection(ReportDetailDto report) {
       ...durationLines,
       if (tiles.isNotEmpty) ...[
         const SizedBox(height: AppSpacing.xs),
-        Wrap(spacing: AppSpacing.sm, runSpacing: AppSpacing.sm, children: tiles),
+        Wrap(
+          spacing: AppSpacing.sm,
+          runSpacing: AppSpacing.sm,
+          children: tiles,
+        ),
       ],
       if (facts.notes.isNotEmpty) ...[
         const SizedBox(height: AppSpacing.md),
@@ -1258,7 +1298,8 @@ Widget? _limitationsReferencesSection(ReportDetailDto report) {
         const SizedBox(height: AppSpacing.sm),
         const Text('참고 자료', style: TextStyle(color: AppColors.inkMuted)),
         const SizedBox(height: AppSpacing.xs),
-        for (final reference in references) _ReferenceLine(reference: reference),
+        for (final reference in references)
+          _ReferenceLine(reference: reference),
       ],
     ],
   );
@@ -1380,10 +1421,7 @@ class _InterpretationCard extends StatelessWidget {
             const SizedBox(height: AppSpacing.sm),
             Text(
               tendency,
-              style: const TextStyle(
-                color: AppColors.ink,
-                height: 1.65,
-              ),
+              style: const TextStyle(color: AppColors.ink, height: 1.65),
             ),
           ],
           if (interpretation.scopeText case final scope?) ...[
@@ -1421,10 +1459,7 @@ class _InterpretationCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       guide,
-                      style: const TextStyle(
-                        color: AppColors.ink,
-                        height: 1.5,
-                      ),
+                      style: const TextStyle(color: AppColors.ink, height: 1.5),
                     ),
                   ),
                 ],

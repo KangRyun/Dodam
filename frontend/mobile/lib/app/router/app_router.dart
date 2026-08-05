@@ -33,6 +33,7 @@ import '../../features/report/presentation/screens/report_screen.dart';
 import '../../features/report/presentation/screens/report_list_screen.dart';
 import '../../features/report/domain/repositories/report_repository.dart';
 import '../../features/report/domain/services/report_file_actions.dart';
+import '../../features/report/presentation/services/report_snapshot_pdf.dart';
 import '../../features/consent/domain/repositories/consent_repository.dart';
 import '../../features/consent/presentation/screens/consent_management_screen.dart';
 import '../../features/consent/presentation/screens/consent_terms_screen.dart';
@@ -70,6 +71,7 @@ abstract final class AppRouter {
     DrawingRepository? drawingRepository,
     ReportRepository? reportRepository,
     ReportFileActions? reportFileActions,
+    ReportPdfComposer? reportPdfComposer,
     NotificationInboxRepository? notificationInboxRepository,
     NotificationBadgeController? notificationBadgeController,
     PushRegistrationStatusController? pushRegistrationStatus,
@@ -335,6 +337,7 @@ abstract final class AppRouter {
           repository: reportRepository,
           activityRepository: activityRepository,
           fileActions: reportFileActions,
+          pdfComposer: reportPdfComposer,
           voiceAnswerPlaybackRepository: voiceAnswerPlaybackRepository,
           voiceAnswerAudioPlayerFactory: voiceAnswerAudioPlayerFactory,
         ),
