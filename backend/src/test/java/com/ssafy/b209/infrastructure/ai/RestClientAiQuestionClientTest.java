@@ -161,46 +161,6 @@ class RestClientAiQuestionClientTest {
     }
   }
 
-  // ── 아동 종료 확인 필드 — S15P11B209-947 ─────────────────────────────
-  @Test
-  void readsTheChildConfirmedEndFlagAndDefaultsToFalseWhenAbsent() {
-    RestClient.Builder builder = RestClient.builder().baseUrl("http://ai.test");
-    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-    server
-        .expect(requestTo("http://ai.test/internal/ai/v1/conversations/question"))
-        .andRespond(
-            withSuccess(
-                questionBody(",\"conversationEndConfirmed\":true"),
-                org.springframework.http.MediaType.APPLICATION_JSON));
-    server
-        .expect(requestTo("http://ai.test/internal/ai/v1/conversations/question"))
-        .andRespond(
-            withSuccess(questionBody(""), org.springframework.http.MediaType.APPLICATION_JSON));
-
-    RestClientAiQuestionClient client =
-        new RestClientAiQuestionClient(builder.build(), "token", new ObjectMapper());
-
-    org.assertj.core.api.Assertions.assertThat(
-            client.generate(request(), "request-1").conversationEndConfirmed())
-        .isTrue();
-    // AI 가 필드를 보내지 않는 응답도 그대로 동작해야 한다. 종료 확인은 기본 false 다.
-    org.assertj.core.api.Assertions.assertThat(
-            client.generate(request(), "request-2").conversationEndConfirmed())
-        .isFalse();
-    server.verify();
-  }
-
-  private String questionBody(String extraFields) {
-    return "{\"questionText\":\"그래, 이야기는 여기까지 할까?\","
-        + "\"questionPurpose\":\"FOLLOW_UP\",\"options\":null,\"targetObject\":null,"
-        + "\"fallbackUsed\":false,\"safetyResult\":{\"status\":\"PASSED\","
-        + "\"ruleVersion\":\"safety-2026-07\",\"blockReasonCode\":null},"
-        + "\"modelName\":\"m\",\"modelVersion\":\"v\",\"promptVersion\":\"p\","
-        + "\"processingTimeMs\":1"
-        + extraFields
-        + "}";
-  }
-
   private AiQuestionRequest request() {
     return new AiQuestionRequest(
         1L,

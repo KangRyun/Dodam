@@ -39,8 +39,6 @@ public class ConversationQuestionService {
   private final QuestionPersistenceService questionPersistenceService;
   // 그림 서술(VLM) 조회용 — 질문 생성 입력을 채운다(S15P11B209-704).
   private final AnalysisObservationResultRepository observationResultRepository;
-  // 아이가 말로 그만하겠다고 확인해 준 경우의 종료 경계다(S15P11B209-947).
-  private final ChildRequestConversationEndService childRequestConversationEndService;
 
   /**
    * AI 질문 생성·폴백·저장 흐름의 의존성을 생성한다.
@@ -51,7 +49,6 @@ public class ConversationQuestionService {
    * @param aiQuestionClient 최신 내부 AI 계약 호출 경계
    * @param questionPersistenceService 세션 잠금 기반 원자 저장 경계
    * @param observationResultRepository 그림 서술(VLM) 조회 경계 (S15P11B209-704)
-   * @param childRequestConversationEndService 아동 요청 종료 경계 (S15P11B209-947)
    */
   public ConversationQuestionService(
       ConversationSessionRepository conversationSessionRepository,
@@ -59,15 +56,13 @@ public class ConversationQuestionService {
       AiQuestionTemplateOptionRepository questionTemplateOptionRepository,
       AiQuestionClient aiQuestionClient,
       QuestionPersistenceService questionPersistenceService,
-      AnalysisObservationResultRepository observationResultRepository,
-      ChildRequestConversationEndService childRequestConversationEndService) {
+      AnalysisObservationResultRepository observationResultRepository) {
     this.conversationSessionRepository = conversationSessionRepository;
     this.questionTemplateRepository = questionTemplateRepository;
     this.questionTemplateOptionRepository = questionTemplateOptionRepository;
     this.aiQuestionClient = aiQuestionClient;
     this.questionPersistenceService = questionPersistenceService;
     this.observationResultRepository = observationResultRepository;
-    this.childRequestConversationEndService = childRequestConversationEndService;
   }
 
   /**
@@ -76,13 +71,9 @@ public class ConversationQuestionService {
    * <p>AI 요청에는 계약에 정의된 {@code recentMessages}만 전달하며, 외부의 {@code previousAnswerMessageId}는 JSON 필드로
    * 추가하지 않고 저장 시 부모 메시지로만 전달한다. 안전 정책 차단은 저장하지 않고 422로 종료하며, schema·연결·timeout 오류는 활성 폴백 템플릿을 저장한다.
    *
-   * <p>AI가 {@code conversationEndConfirmed}로 아동의 종료 확인을 전하면 질문을 저장하지 않고 대화를 {@code CHILD_REQUEST}로
-   * 끝낸 뒤 {@link ConversationErrorCode#CONVERSATION_ALREADY_COMPLETED}로 알린다. 질문 수도 올리지 않는다 — 아이가 답할
-   * 질문이 아니기 때문이다(S15P11B209-947).
-   *
    * @param command 대화·그림·분석·난이도 문맥, 허용 응답 방식, 최근 메시지와 부모 답변 식별자
    * @return 새로 저장된 AI 질문 및 Snapshot
-   * @throws BusinessException 세션 상태·질문 상한·안전 정책·폴백 템플릿 계약을 위반했거나, 아동이 대화 종료를 확인해 세션을 끝낸 경우
+   * @throws BusinessException 세션 상태·질문 상한·안전 정책·폴백 템플릿 계약을 위반했거나한 경우
    */
   public GeneratedQuestion generateQuestion(GenerateQuestionCommand command) {
     validateCommand(command);
@@ -108,15 +99,6 @@ public class ConversationQuestionService {
     AiQuestionRequest request = toAiRequest(command, session);
     try {
       AiQuestionResponse response = aiQuestionClient.generate(request, requestId);
-      if (response != null && response.conversationEndConfirmed()) {
-        // 아이가 "여기까지 할까?"에 그만하겠다고 확인해 준 응답이다. 질문을 저장하지 않고 세션만 끝낸다.
-        // 문구·선택지 계약은 따지지 않는다 — 저장하지 않을 질문이고, 확인을 폴백 질문으로 덮으면
-        // "응"이라고 답한 아이에게 같은 되묻기를 다시 하게 된다.
-        log.info("Child confirmed conversation end. conversationId={}", command.conversationId());
-        childRequestConversationEndService.endByChildRequest(command.conversationId());
-        // 저장할 질문이 없다. FE 는 이 코드를 이미 대화 완료로 처리한다.
-        throw new BusinessException(ConversationErrorCode.CONVERSATION_ALREADY_COMPLETED);
-      }
       if (response == null
           || !response.isContractValidFor(Set.copyOf(command.allowedResponseModes()))) {
         log.warn("AI question response schema invalid. requestId={}", requestId);
