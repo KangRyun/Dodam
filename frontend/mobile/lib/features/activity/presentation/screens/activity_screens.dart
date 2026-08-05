@@ -2569,6 +2569,28 @@ class _DrawingScreenState extends State<DrawingScreen>
                 return Column(
                   key: ValueKey(layoutKey),
                   children: [
+                    // 무엇을 그리는 시간인지 화면 맨 위에 글씨로 둔다. 캔버스
+                    // 위에 창처럼 띄우면 그림을 가린다.
+                    Padding(
+                      padding: EdgeInsets.fromLTRB(
+                        frameInset + AppSpacing.sm,
+                        AppSpacing.xs,
+                        frameInset + AppSpacing.sm,
+                        AppSpacing.xxs,
+                      ),
+                      child: Align(
+                        alignment: Alignment.centerLeft,
+                        child: Text(
+                          _activityTitle,
+                          key: const ValueKey('drawing-activity-title'),
+                          style: const TextStyle(
+                            color: AppColors.canvasInk,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ),
                     toolbar,
                     Expanded(
                       child: Stack(
@@ -2582,42 +2604,6 @@ class _DrawingScreenState extends State<DrawingScreen>
                               ),
                             ),
                           ),
-                          // HTP 는 지금 몇 단계에서 무엇을 그리는지가 아이에게
-                          // 필요한 정보다. 상단 바를 없앴으므로 캔버스 왼쪽 위에
-                          // 남겨 둔다. 그림일기도 무슨 시간인지 알려 준다.
-                          Positioned(
-                              left: frameInset + AppSpacing.md,
-                              top: frameInset + AppSpacing.md,
-                              child: IgnorePointer(
-                                child: DecoratedBox(
-                                  decoration: BoxDecoration(
-                                    color: AppColors.canvasWarm.withValues(
-                                      alpha: .92,
-                                    ),
-                                    borderRadius: BorderRadius.circular(
-                                      AppRadius.sm,
-                                    ),
-                                  ),
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(
-                                      horizontal: AppSpacing.sm,
-                                      vertical: AppSpacing.xs,
-                                    ),
-                                    child: Text(
-                                      _activityTitle,
-                                      key: const ValueKey(
-                                        'drawing-activity-title',
-                                      ),
-                                      style: const TextStyle(
-                                        color: AppColors.canvasInk,
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w800,
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ),
                           // 도구 사용법 다시 보기. 툴바(위)·쓰다미(오른쪽 아래)와
                           // 겹치지 않으면서 손이 닿기 쉬운 왼쪽 아래에 둔다.
                           if (_canvasTutorialController
