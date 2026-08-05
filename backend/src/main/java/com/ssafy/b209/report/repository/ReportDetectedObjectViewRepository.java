@@ -25,7 +25,7 @@ public interface ReportDetectedObjectViewRepository
    */
   @Query(
       "select new com.ssafy.b209.report.repository.ReportDetectedObjectRow("
-          + "analysis.drawingSessionId, analysis.id, detected.objectName) "
+          + "analysis.drawingSessionId, analysis.id, detected.objectName, detected.confidenceScore) "
           + "from ReportDetectedObjectView detected "
           + "join ReportAnalysisView analysis on analysis.id = detected.analysisId "
           + "left join ReportHtpStepView step on step.drawingSessionId = analysis.drawingSessionId "

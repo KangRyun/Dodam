@@ -50,9 +50,9 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("37");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("38");
     assertThat(tableExists("flyway_schema_history")).isTrue();
-    assertThat(tableCount()).isEqualTo(81);
+    assertThat(tableCount()).isEqualTo(82);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
     assertThat(tableExists("child_profile_image_files")).isTrue();
@@ -104,6 +104,21 @@ class DatabaseMigrationIntegrationTest {
                 "ck_report_evidence_items_source_ref_pair",
                 "source_ref_kind"))
         .isTrue();
+    // V38 — '그린 것'은 AI 관찰 서술의 N개 항목과 노출 순서를 따로 보존한다. 빈 배열도 최신 결과로 구분해야 하므로
+    // reports 표식이 있어야 과거 YOLO 폴백을 새 빈 결과에 적용하지 않는다.
+    assertThat(tableExists("report_drawn_items")).isTrue();
+    assertThat(columnExists("reports", "has_drawn_items")).isTrue();
+    assertThat(characterLengthOf("report_drawn_items", "name")).isEqualTo(100);
+    assertThat(indexExists("report_drawn_items", "uk_report_drawn_items_report_order", true))
+        .isTrue();
+    assertThat(foreignKeyDeleteRuleIs("report_drawn_items", "fk_report_drawn_items_report_id", "CASCADE"))
+        .isTrue();
+    for (String subject : new String[] {"HOUSE", "TREE", "PERSON"}) {
+      assertThat(
+              checkConstraintContains(
+                  "report_drawn_items", "ck_report_drawn_items_subject", subject))
+          .isTrue();
+    }
     // 카드↔근거를 FK 로 묶어 존재하지 않는 근거 참조를 DB 에서 막는다.
     assertThat(
             indexExists(

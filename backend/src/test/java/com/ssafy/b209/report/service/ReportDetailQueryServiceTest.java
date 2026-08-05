@@ -3,6 +3,8 @@ package com.ssafy.b209.report.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessRepository;
@@ -15,6 +17,7 @@ import com.ssafy.b209.report.domain.ReportDrawingAssetView;
 import com.ssafy.b209.report.domain.ReportDrawingEmotionView;
 import com.ssafy.b209.report.domain.ReportDrawingSessionView;
 import com.ssafy.b209.report.domain.ReportDrawingTypeView;
+import com.ssafy.b209.report.domain.ReportDrawnItem;
 import com.ssafy.b209.report.domain.ReportFollowUpGuideView;
 import com.ssafy.b209.report.domain.ReportKeyConversationView;
 import com.ssafy.b209.report.domain.ReportStatus;
@@ -26,6 +29,7 @@ import com.ssafy.b209.report.repository.ReportConversationSummaryViewRepository;
 import com.ssafy.b209.report.repository.ReportDetailViewRepository;
 import com.ssafy.b209.report.repository.ReportDetectedObjectRow;
 import com.ssafy.b209.report.repository.ReportDetectedObjectViewRepository;
+import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportDrawingAssetViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingEmotionViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingSessionViewRepository;
@@ -33,6 +37,7 @@ import com.ssafy.b209.report.repository.ReportDrawingTypeViewRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideViewRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationViewRepository;
 import java.lang.reflect.Constructor;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
@@ -74,6 +79,7 @@ class ReportDetailQueryServiceTest {
   @Mock private ReportFollowUpGuideViewRepository followUpGuideRepository;
   @Mock private ReportConversationSummaryViewRepository conversationSummaryRepository;
   @Mock private ReportDetectedObjectViewRepository detectedObjectRepository;
+  @Mock private ReportDrawnItemRepository drawnItemRepository;
 
   private ReportDetailQueryService service;
 
@@ -93,6 +99,7 @@ class ReportDetailQueryServiceTest {
             followUpGuideRepository,
             conversationSummaryRepository,
             detectedObjectRepository,
+            drawnItemRepository,
             new DrawingAssetFileUrlFactory());
   }
 
@@ -281,6 +288,41 @@ class ReportDetailQueryServiceTest {
   }
 
   @Test
+  void usesVlmDrawnItemsInStoredOrderAndDoesNotReadYoloLabels() {
+    givenAccessibleReport();
+    ReportDetailView report = report(ReportStatus.COMPLETED, "한계 문구");
+    ReflectionTestUtils.setField(report, "hasDrawnItems", true);
+    when(reportRepository.findById(REPORT_ID)).thenReturn(Optional.of(report));
+    ReportDrawnItem house = mock(ReportDrawnItem.class);
+    ReportDrawnItem roof = mock(ReportDrawnItem.class);
+    ReportDrawnItem tree = mock(ReportDrawnItem.class);
+    when(house.getName()).thenReturn("집");
+    when(roof.getName()).thenReturn("빨간 지붕");
+    when(tree.getName()).thenReturn("나무");
+    when(drawnItemRepository.findByReportIdOrderByDisplayOrderAsc(REPORT_ID))
+        .thenReturn(List.of(house, roof, tree));
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.activityFacts().detectedObjects()).containsExactly("집", "빨간 지붕", "나무");
+    verifyNoInteractions(detectedObjectRepository);
+  }
+
+  @Test
+  void keepsAnExplicitEmptyVlmResultEmptyWithoutYoloFallback() {
+    givenAccessibleReport();
+    ReportDetailView report = report(ReportStatus.COMPLETED, "한계 문구");
+    ReflectionTestUtils.setField(report, "hasDrawnItems", true);
+    when(reportRepository.findById(REPORT_ID)).thenReturn(Optional.of(report));
+    when(drawnItemRepository.findByReportIdOrderByDisplayOrderAsc(REPORT_ID)).thenReturn(List.of());
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.activityFacts().detectedObjects()).isEmpty();
+    verifyNoInteractions(detectedObjectRepository);
+  }
+
+  @Test
   void keepsOnlyTheLatestDetectionAnalysisOfEachSession() {
     givenAccessibleReport();
     when(detectedObjectRepository.findActivityDetectedObjects(SESSION_ID))
@@ -421,12 +463,13 @@ class ReportDetailQueryServiceTest {
   }
 
   private ReportDetectedObjectRow detectedObject(Long drawingSessionId, String name) {
-    return new ReportDetectedObjectRow(drawingSessionId, DETECTION_ANALYSIS_ID, name);
+    return new ReportDetectedObjectRow(
+        drawingSessionId, DETECTION_ANALYSIS_ID, name, new BigDecimal("0.80"));
   }
 
   private ReportDetectedObjectRow detectedObject(
       Long drawingSessionId, Long analysisId, String name) {
-    return new ReportDetectedObjectRow(drawingSessionId, analysisId, name);
+    return new ReportDetectedObjectRow(drawingSessionId, analysisId, name, new BigDecimal("0.80"));
   }
 
   private static <T> T instantiate(Class<T> type) {

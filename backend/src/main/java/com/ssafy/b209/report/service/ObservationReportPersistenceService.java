@@ -25,6 +25,7 @@ import com.ssafy.b209.global.support.ColumnTextLimiter;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportActivityNote;
 import com.ssafy.b209.report.domain.ReportActivitySummary;
+import com.ssafy.b209.report.domain.ReportDrawnItem;
 import com.ssafy.b209.report.domain.ReportFeatureVisibility;
 import com.ssafy.b209.report.domain.ReportFollowUpGuide;
 import com.ssafy.b209.report.domain.ReportGuardianQuestion;
@@ -33,6 +34,7 @@ import com.ssafy.b209.report.domain.ReportObservedFeature;
 import com.ssafy.b209.report.domain.ReportStatus;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummaryDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DrawnItemDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.FollowUpGuideDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.GuardianQuestionDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ObservationDraft;
@@ -40,6 +42,7 @@ import com.ssafy.b209.report.dto.ObservationGenerationResult.ObservedFeatureDraf
 import com.ssafy.b209.report.exception.MockObservationReportErrorCode;
 import com.ssafy.b209.report.repository.ReportActivityNoteRepository;
 import com.ssafy.b209.report.repository.ReportActivitySummaryRepository;
+import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideRepository;
 import com.ssafy.b209.report.repository.ReportGuardianQuestionRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationRepository;
@@ -92,6 +95,7 @@ public class ObservationReportPersistenceService {
   private final AnalysisConversationSummaryRepository conversationSummaryRepository;
   private final ReportActivitySummaryRepository activitySummaryRepository;
   private final ReportActivityNoteRepository activityNoteRepository;
+  private final ReportDrawnItemRepository drawnItemRepository;
   private final ReportObservedFeatureRepository observedFeatureRepository;
   private final ReportKeyConversationRepository keyConversationRepository;
   private final ReportFollowUpGuideRepository followUpGuideRepository;
@@ -113,6 +117,7 @@ public class ObservationReportPersistenceService {
    * @param conversationSummaryRepository 대화 요약 저장소
    * @param activitySummaryRepository 리포트 활동 요약 저장소
    * @param activityNoteRepository 리포트 활동 주의사항 저장소
+   * @param drawnItemRepository 리포트 '그린 것' 저장소
    * @param observedFeatureRepository 리포트 관찰 특징 저장소
    * @param keyConversationRepository 리포트 주요 대화 저장소
    * @param followUpGuideRepository 리포트 후속 안내 저장소
@@ -132,6 +137,7 @@ public class ObservationReportPersistenceService {
       AnalysisConversationSummaryRepository conversationSummaryRepository,
       ReportActivitySummaryRepository activitySummaryRepository,
       ReportActivityNoteRepository activityNoteRepository,
+      ReportDrawnItemRepository drawnItemRepository,
       ReportObservedFeatureRepository observedFeatureRepository,
       ReportKeyConversationRepository keyConversationRepository,
       ReportFollowUpGuideRepository followUpGuideRepository,
@@ -149,6 +155,7 @@ public class ObservationReportPersistenceService {
     this.conversationSummaryRepository = conversationSummaryRepository;
     this.activitySummaryRepository = activitySummaryRepository;
     this.activityNoteRepository = activityNoteRepository;
+    this.drawnItemRepository = drawnItemRepository;
     this.observedFeatureRepository = observedFeatureRepository;
     this.keyConversationRepository = keyConversationRepository;
     this.followUpGuideRepository = followUpGuideRepository;
@@ -436,6 +443,7 @@ public class ObservationReportPersistenceService {
 
       boolean expertReviewed = observation.getReviewStatus() != ObservationReviewStatus.AI_DRAFT;
       saveActivityNotes(report, safeList(result.activityNotes()));
+      saveDrawnItems(report, result);
       saveObservedFeatures(report, draft.features(), expertReviewed);
       saveKeyConversations(report, context.keyConversations());
       saveFollowUpGuides(report, safeList(result.followUpGuides()));
@@ -542,6 +550,34 @@ public class ObservationReportPersistenceService {
       }
     }
     activityNoteRepository.saveAll(entities);
+  }
+
+  /**
+   * AI가 명시적으로 보낸 관찰 서술 기반 항목만 저장한다.
+   *
+   * <p>필드 자체가 없는 이전 AI 응답은 표식을 남기지 않아 과거 리포트의 0.50 YOLO 폴백을 유지한다. 반대로 빈 배열은 정상 결과이므로 표식을 남겨 폴백하지
+   * 않는다. 계약상 20자를 넘거나 이름이 비었거나 항목이 null인 응답 조각은 리포트 전체를 실패시키지 않고 버린다.
+   */
+  private void saveDrawnItems(Report report, ObservationGenerationResult result) {
+    if (!result.hasDrawnItems()) {
+      return;
+    }
+    List<ReportDrawnItem> entities = new ArrayList<>();
+    for (DrawnItemDraft item : result.drawnItemsOrEmpty()) {
+      if (item == null || !isDisplayableDrawnItemName(item.name())) {
+        continue;
+      }
+      entities.add(
+          ReportDrawnItem.create(report, entities.size(), item.drawingSubject(), item.name()));
+    }
+    drawnItemRepository.saveAll(entities);
+    report.markDrawnItemsStored();
+  }
+
+  private static boolean isDisplayableDrawnItemName(String name) {
+    return name != null
+        && !name.isBlank()
+        && name.codePointCount(0, name.length()) <= ReportDrawnItem.DISPLAY_NAME_MAX_CODE_POINTS;
   }
 
   private void saveObservedFeatures(
