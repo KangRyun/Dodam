@@ -5,12 +5,21 @@ import { Suspense, useSyncExternalStore, type FormEvent } from "react";
 
 import { readAccessToken } from "@/features/auth/data/session-store";
 import { CommunityAccountMenu } from "@/features/community/components/community-account-menu";
+import { AUTH_CHANGED_EVENT } from "@/lib/api/api-client";
 
-/** 다른 탭의 로그인/로그아웃(localStorage 변경)에도 헤더가 반응하도록 구독한다. */
+/**
+ * 헤더가 인증 상태 변화에 반응하도록 구독한다.
+ * - `storage`: 다른 탭의 로그인/로그아웃
+ * - `AUTH_CHANGED_EVENT`: 같은 탭의 재발급 성공/세션 정리(401 처리)
+ */
 function subscribeAuth(onChange: () => void): () => void {
   if (typeof window === "undefined") return () => {};
   window.addEventListener("storage", onChange);
-  return () => window.removeEventListener("storage", onChange);
+  window.addEventListener(AUTH_CHANGED_EVENT, onChange);
+  return () => {
+    window.removeEventListener("storage", onChange);
+    window.removeEventListener(AUTH_CHANGED_EVENT, onChange);
+  };
 }
 
 export function CommunityHeader() {
