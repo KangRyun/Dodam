@@ -203,28 +203,51 @@ _EMPATHY_MARKERS = (
 )
 
 
-# 새 질문을 여는 의문사. 뒤따르는 물음표 조각에 이게 없으면 앞 질문의 선택지로 본다.
+# 답을 요구하는 질문임을 알아보는 의문사. 이게 없는 물음표 조각은 질문으로 세지 않는다.
 _INTERROGATIVE = re.compile(r"뭐|무엇|무슨|누구|누가|어디|언제|어떻게|어떤|어느|왜|몇|얼마")
 
+# 물음표로 끝나는 조각만 후보로 삼는다. 마지막 물음표 뒤에 남는 꼬리(평서문)는 제외된다.
+_QUESTION_FRAGMENT = re.compile(r"[^?？]*[?？]")
 
-def _extra_questions(text: str) -> list[str]:
-    """앞 질문과 별개인 '두 번째 질문' 조각들.
+# 한 턴에 허용하는 질문 수(2026-08-05 결정 · S15P11B209-899).
+#   ⚠️ conversation_tone.txt 는 난이도 전 구간에서 "한 번에 한 가지만 물어봐"라고 한다.
+#      프롬프트의 목표는 1개, 이 게이트의 하한은 2개다 — 일부러 벌려 뒀다.
+#      아이가 둘까지는 무리 없이 답한다고 보고, 회귀 게이트는 명백한 저하만 잡게 한다.
+#      (두 벌이 어긋난 게 아니라 '목표'와 '하한'이라 역할이 다르다.)
+_MAX_QUESTIONS = 2
 
-    한 턴에 서로 다른 것을 두 개 물으면 아이가 무엇에 답할지 모른다. 다만 물음표 개수를
-    그대로 세면 선택지 제시를 오탐한다 — "어떤 느낌일까? 시끌시끌해, 아니면 조용해?"는
-    질문 하나에 고를 거리를 붙인 것이고, OPTION 응답 모드를 쓰는 설계와도 맞다.
-    그래서 첫 물음표 뒤의 조각 중 '새 의문사를 가진 것'만 별개 질문으로 센다.
+
+def _question_count(text: str) -> int:
+    """아이가 답해야 하는 질문이 몇 개인가.
+
+    물음표 개수를 그대로 세지 않는다. 아이 화면 문장에는 답을 요구하지 않는 물음표가
+    두 종류 섞이는데, 둘 다 **의문사가 없다**는 공통점이 있다:
+
+      - 선택지: "어떤 느낌일까? 시끌시끌해, 아니면 조용해?"
+        뒤엣것은 고를 거리다. OPTION 응답 모드를 쓰는 설계와도 맞다(858이 이미 처리).
+      - 전환구: "그럼 그림 이야기 계속해 볼까? 집 안은 어떤 느낌일까?"
+        앞엣것은 화제 전환 신호다. 구 판정은 첫 조각을 무조건 '첫 질문'으로 봐서,
+        전환구가 그 자리를 먹으면 진짜 질문 하나가 '두 번째'로 밀려 위반이 됐다.
+        856이 정체 고지를 시키면서 이 오탐이 늘었다 — 고지 뒤에 전환구가 붙는다.
+
+    그래서 '물음표로 끝나고 의문사를 가진 조각'만 센다. 마지막 물음표 뒤의 꼬리
+    ("… 어떤 공이야? 무슨 일이 있던 공인지 궁금해.")는 물음표가 없어 애초에 후보가 아니다.
+
+    의문사 없는 예·아니오 질문("빨간색 좋아해?")만 있는 문장은 1개로 본다 — 0으로 세면
+    질문이 아예 없는 문장과 구분이 안 된다. 이런 질문 여럿을 정확히 가르지는 못한다.
     """
-    parts = [p.strip() for p in re.split(r"[?？]", text) if p.strip()]
-    # 첫 조각은 첫 질문이다. 그 뒤부터가 후보.
-    return [p for p in parts[1:] if _INTERROGATIVE.search(p)]
+    fragments = [f.strip() for f in _QUESTION_FRAGMENT.findall(text) if f.strip()]
+    counted = [f for f in fragments if _INTERROGATIVE.search(f)]
+    if counted:
+        return len(counted)
+    return 1 if fragments else 0
 
 
 def check_conversation_quality(case, resp: QuestionResponse) -> list[Finding]:
     """대화 품질 판정 (S15P11B209-858 — 외부 피드백 8번).
 
     실패로 세는 것(기계적으로 확실):
-      - 한 번에 한 질문: 물음표 개수
+      - 질문 개수: 한 턴에 _MAX_QUESTIONS 개까지
       - 문장 길이: 난이도별 상한
       - 민감정보 반복: 아이가 흘린 고유명사의 재등장
 
@@ -238,14 +261,14 @@ def check_conversation_quality(case, resp: QuestionResponse) -> list[Finding]:
     meta = case.meta
     out: list[Finding] = []
 
-    # 1) 한 번에 한 질문 — 실패 등급. 선택지 제시는 세지 않는다(_extra_questions 주석 참고).
-    extra = _extra_questions(text)
+    # 1) 질문 개수 — 실패 등급. 무엇을 질문으로 세는지는 _question_count 주석 참고.
+    count = _question_count(text)
     out.append(
         Finding(
             "B",
-            "한 번에 한 질문",
-            not extra,
-            f"별개 질문 추가: {extra}" if extra else "",
+            f"질문 개수(≤{_MAX_QUESTIONS})",
+            count <= _MAX_QUESTIONS,
+            f"{count}개" if count > _MAX_QUESTIONS else "",
         )
     )
 
