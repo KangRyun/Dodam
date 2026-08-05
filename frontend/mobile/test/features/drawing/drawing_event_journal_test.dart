@@ -6,6 +6,33 @@ import 'package:dodam/features/drawing/presentation/models/drawing_stroke.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  group('snapshot cutoff sequence', () {
+    test('starts at zero before the session allocates an event', () {
+      final journal = DrawingEventJournal();
+
+      expect(journal.snapshotCutoffSequence, 0);
+    });
+
+    test('keeps the restored cutoff while the journal has no events', () {
+      final journal = DrawingEventJournal();
+
+      expect(journal.resumeEventSequence(1106), isTrue);
+
+      expect(journal.events, isEmpty);
+      expect(journal.snapshotCutoffSequence, 1105);
+    });
+
+    test('tracks the allocator cutoff after recording new events', () {
+      final journal = DrawingEventJournal(
+        sequenceAllocator: SessionSequenceAllocator(startValue: 41),
+      );
+
+      journal.recordStroke(_stroke(10), const Size(100, 100));
+
+      expect(journal.snapshotCutoffSequence, 42);
+    });
+  });
+
   test('stroke를 START MOVE END로 변환하고 좌표와 속성을 보존한다', () {
     final allocator = SessionSequenceAllocator(startValue: 41);
     final events = DrawingStrokeEventConverter.convert(

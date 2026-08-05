@@ -1578,6 +1578,337 @@ class ReportContractAlignmentTest(unittest.TestCase):
                 self.assertRegex(block + self.text, rf"{field}[^\n]*{limit}|{limit}[^\n]*{field}")
 
 
+def _evidence(evidence_id, source_type="CHILD_ANSWER", kind="QA_ANSWER", ref="202"):
+    return {
+        "evidenceId": evidence_id,
+        "sourceType": source_type,
+        "text": f"근거 {evidence_id}",
+        "sourceRef": {"kind": kind, "id": ref},
+    }
+
+
+def _card(refs, **overrides):
+    card = {
+        "category": "RELATIONSHIP",
+        "title": "가족과의 정서적 연결",
+        "tendencyText": "가족에게 의지하려는 경향이 보일 수 있습니다.",
+        "scopeText": "이번 그림 활동에서 나타난 가능성입니다.",
+        "homeObservationGuide": "새로운 상황에서도 비슷한지 살펴봐 주세요.",
+        "evidenceRefs": refs,
+    }
+    card.update(overrides)
+    return card
+
+
+class PublicInterpretationAssemblyTest(unittest.TestCase):
+    """경향 해석 조립 — 875 계약 정본 v1.1 (S15P11B209-887).
+
+    여기서 검증하는 것은 '조립 위생'이다: 계약 허용값·참조 정합·배타 규칙·표현 안전.
+    독립 근거 계수 게이트(2건·아이 표현 1건)는 S15P11B209-888이 별도 모듈로 붙인다.
+    """
+
+    def _generate(self, **overrides):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(
+            _llm_json(**overrides)
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            return report_client.generate(_sample_request(), model="m")
+
+    def test_card_and_referenced_evidence_are_carried(self):
+        result = self._generate(
+            evidenceItems=[_evidence(1), _evidence(2, ref="318")],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual(len(result.public_interpretations), 1)
+        card = result.public_interpretations[0]
+        self.assertEqual(card.category, "RELATIONSHIP")
+        self.assertEqual(card.evidence_refs, [1, 2])
+        self.assertEqual({i.evidence_id for i in result.evidence_items}, {1, 2})
+        self.assertEqual(result.evidence_items[0].source_ref.kind, "QA_ANSWER")
+
+    def test_empty_is_normal_when_model_gives_nothing(self):
+        """근거가 없으면 빈 배열이 정상이다 — 리포트 생성은 성공한다(875 §10)."""
+        result = self._generate()
+        self.assertEqual(result.public_interpretations, [])
+        self.assertEqual(result.evidence_items, [])
+
+    def test_dangling_reference_drops_the_card(self):
+        """존재하지 않는 근거만 가리키는 카드는 근거 없는 카드다 — 내지 않는다."""
+        result = self._generate(
+            evidenceItems=[_evidence(1)],
+            publicInterpretations=[_card([99])],
+        )
+        self.assertEqual(result.public_interpretations, [])
+
+    def test_unknown_ref_is_filtered_but_card_survives_with_valid_ones(self):
+        # 근거는 2건 준다 — 1건만 주면 888 구조 게이트에서 카드가 빠져 이 검증이 무의미해진다.
+        result = self._generate(
+            evidenceItems=[_evidence(1), _evidence(2, ref="318")],
+            publicInterpretations=[_card([1, 2, 99])],
+        )
+        self.assertEqual(result.public_interpretations[0].evidence_refs, [1, 2])
+
+    def test_evidence_without_identifier_is_dropped(self):
+        """식별자 없는 근거는 서버가 독립성을 검증할 수 없다 — 버린다(계약 §4)."""
+        result = self._generate(
+            evidenceItems=[
+                {"evidenceId": 1, "sourceType": "CHILD_ANSWER", "text": "근거"}
+            ],
+            publicInterpretations=[_card([1])],
+        )
+        self.assertEqual(result.evidence_items, [])
+        self.assertEqual(result.public_interpretations, [])
+
+    def test_fabricated_ref_kind_is_dropped(self):
+        result = self._generate(
+            evidenceItems=[_evidence(1, kind="MADE_UP_KIND")],
+            publicInterpretations=[_card([1])],
+        )
+        self.assertEqual(result.evidence_items, [])
+
+    def test_both_source_ref_and_derived_from_is_invalid(self):
+        """배타 규칙 — 정확히 하나여야 한다(875 §4)."""
+        item = _evidence(1)
+        item["derivedFrom"] = [{"kind": "QA_ANSWER", "id": "318"}]
+        result = self._generate(
+            evidenceItems=[item], publicInterpretations=[_card([1])]
+        )
+        self.assertEqual(result.evidence_items, [])
+
+    def test_derived_evidence_uses_derived_from_only(self):
+        result = self._generate(
+            evidenceItems=[
+                {
+                    "evidenceId": 1,
+                    "sourceType": "REPEATED_SUBJECT",
+                    "text": "집과 사람 그림 모두에서 가족을 언급했어요.",
+                    "derivedFrom": [
+                        {"kind": "QA_ANSWER", "id": "202"},
+                        {"kind": "QA_ANSWER", "id": "318"},
+                    ],
+                },
+                _evidence(2, ref="318"),
+            ],
+            publicInterpretations=[_card([1, 2])],
+        )
+        derived = result.evidence_items[0]
+        self.assertIsNone(derived.source_ref)
+        self.assertEqual(len(derived.derived_from), 2)
+
+    def test_definitive_tone_card_is_dropped(self):
+        """단정 어조는 가능성 어조 규칙 위반이다 — 카드를 내지 않는다(875 §3)."""
+        result = self._generate(
+            evidenceItems=[_evidence(1), _evidence(2, ref="318")],
+            publicInterpretations=[
+                _card([1, 2], tendencyText="가족 의존성이 매우 높습니다.")
+            ],
+        )
+        self.assertEqual(result.public_interpretations, [])
+
+    def test_labeling_card_is_dropped_and_raises_expert_review(self):
+        """낙인 표현은 카드에 EXPERT_ONLY 자리가 없어 제외하고, 신호는 남긴다.
+
+        여지 표현이 붙어 있어도(=단정 어조 검사는 통과) 고정 특질 규정은 걸러야 한다.
+        """
+        result = self._generate(
+            expertReviewRequired=False,
+            evidenceItems=[_evidence(1), _evidence(2, ref="318")],
+            publicInterpretations=[
+                _card([1, 2], tendencyText="애정결핍이 있을 수 있습니다.", title="애정")
+            ],
+        )
+        self.assertEqual(result.public_interpretations, [])
+        self.assertTrue(result.observation_draft.expert_review_required)
+
+    def test_unsafe_card_raises_expert_review_even_if_malformed(self):
+        """구조까지 어긋난 카드라도 진단 표현이 있었다는 신호는 사라지지 않아야 한다.
+
+        안전 검사가 구조 검사보다 뒤에 있으면 이 신호가 조용히 없어진다(검사 순서 회귀 방지).
+        """
+        result = self._generate(
+            expertReviewRequired=False,
+            evidenceItems=[_evidence(1)],
+            publicInterpretations=[
+                _card([], category="NOPE", tendencyText="애정결핍이 있을 수 있습니다.")
+            ],
+        )
+        self.assertEqual(result.public_interpretations, [])
+        self.assertTrue(result.observation_draft.expert_review_required)
+
+    def test_unknown_category_is_dropped(self):
+        result = self._generate(
+            evidenceItems=[_evidence(1)],
+            publicInterpretations=[_card([1], category="ATTACHMENT_STYLE")],
+        )
+        self.assertEqual(result.public_interpretations, [])
+
+    def test_missing_scope_text_drops_the_card(self):
+        result = self._generate(
+            evidenceItems=[_evidence(1)],
+            publicInterpretations=[_card([1], scopeText="")],
+        )
+        self.assertEqual(result.public_interpretations, [])
+
+    def test_unreferenced_evidence_is_not_shipped(self):
+        """카드가 쓰지 않는 근거는 싣지 않는다 — 화면에 쓰이지 않는 발화 인용을 남기지 않는다."""
+        result = self._generate(
+            evidenceItems=[
+                _evidence(1),
+                _evidence(2, ref="318"),
+                _evidence(3, ref="777"),  # 어느 카드도 참조하지 않는다
+            ],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual([i.evidence_id for i in result.evidence_items], [1, 2])
+
+    def test_duplicate_evidence_id_keeps_first_only(self):
+        result = self._generate(
+            evidenceItems=[
+                _evidence(1),
+                _evidence(1, ref="999"),  # 같은 번호 재사용 — 참조가 모호해진다
+                _evidence(2, ref="318"),
+            ],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual([i.evidence_id for i in result.evidence_items], [1, 2])
+        first = next(i for i in result.evidence_items if i.evidence_id == 1)
+        self.assertEqual(first.source_ref.id, "202")
+
+
+class InterpretationGateWiringTest(unittest.TestCase):
+    """구조 게이트가 응답 조립에 실제로 걸려 있는지 (S15P11B209-888).
+
+    게이트 로직 자체는 test_interpretation_gate.py가 검증한다. 여기서는 배선만 본다 —
+    모듈이 있어도 호출되지 않으면 규칙이 없는 것과 같다.
+    """
+
+    def _generate(self, **overrides):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(
+            _llm_json(**overrides)
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            return report_client.generate(_sample_request(), model="m")
+
+    def test_single_evidence_card_is_dropped_by_the_gate(self):
+        result = self._generate(
+            evidenceItems=[_evidence(1)],
+            publicInterpretations=[_card([1])],
+        )
+        self.assertEqual(result.public_interpretations, [])
+
+    def test_two_independent_origins_pass_the_gate(self):
+        result = self._generate(
+            evidenceItems=[_evidence(1), _evidence(2, ref="318")],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual(len(result.public_interpretations), 1)
+
+    def test_card_without_child_expression_is_dropped(self):
+        """그림 관찰·활동 지표만으로 만든 카드는 공개하지 않는다."""
+        result = self._generate(
+            evidenceItems=[
+                _evidence(1, source_type="VISION", kind="DETECTED_OBJECT", ref="d1"),
+                _evidence(
+                    2, source_type="ACTIVITY_METRIC", kind="ACTIVITY_METRIC", ref="m1"
+                ),
+            ],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual(result.public_interpretations, [])
+
+    def test_gate_failure_does_not_downgrade_features(self):
+        """게이트 실패는 제외이고 강등이 아니다 — features 노출 범위를 건드리지 않는다."""
+        result = self._generate(
+            expertReviewRequired=False,
+            evidenceItems=[_evidence(1)],
+            publicInterpretations=[_card([1])],
+            features=[
+                {
+                    "featureCode": "X",
+                    "title": "관찰",
+                    "description": "차분히 그린 모습이 보여요.",
+                    "evidenceSummary": "약 10분간 그렸어요.",
+                    "visibilityScope": "REVIEWED_GUARDIAN",
+                }
+            ],
+        )
+        self.assertEqual(result.public_interpretations, [])
+        self.assertEqual(
+            result.observation_draft.features[0].visibility_scope, "REVIEWED_GUARDIAN"
+        )
+        self.assertFalse(result.observation_draft.expert_review_required)
+
+
+class ParentGuideAssemblyTest(unittest.TestCase):
+    """보호자 가이드 — 검토 대상 유형은 LLM이 채우지 못한다 (S15P11B209-887)."""
+
+    def _generate(self, **overrides):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(
+            _llm_json(**overrides)
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            return report_client.generate(_sample_request(), model="m")
+
+    def test_ai_generated_types_are_kept(self):
+        result = self._generate(
+            parentGuides=[
+                {"guideType": "DRAWING_CONVERSATION", "items": ["무엇을 하고 싶은지 물어보세요."]},
+                {"guideType": "HOME_OBSERVATION", "items": ["비슷한 모습이 반복되는지 살펴봐 주세요."]},
+            ]
+        )
+        self.assertEqual(
+            [g.guide_type for g in result.parent_guides],
+            ["DRAWING_CONVERSATION", "HOME_OBSERVATION"],
+        )
+
+    def test_reviewed_types_from_llm_are_dropped(self):
+        """DAILY_PARENTING·PROFESSIONAL_SUPPORT 는 검토된 문장·고정 템플릿 소유다(875 §7-1).
+
+        LLM이 채우면 미검토 육아 조언·상담 안내가 보호자에게 나간다 — 이 필드의 유일한 사고 유형.
+        """
+        result = self._generate(
+            parentGuides=[
+                {"guideType": "DAILY_PARENTING", "items": ["이렇게 하세요."]},
+                {"guideType": "PROFESSIONAL_SUPPORT", "items": ["상담을 받으세요."]},
+            ]
+        )
+        self.assertEqual(result.parent_guides, [])
+
+    def test_unsafe_item_is_dropped(self):
+        result = self._generate(
+            parentGuides=[
+                {
+                    "guideType": "DRAWING_CONVERSATION",
+                    "items": ["이 아이는 불안장애로 보입니다.", "무엇을 하고 싶은지 물어보세요."],
+                }
+            ]
+        )
+        self.assertEqual(result.parent_guides[0].items, ["무엇을 하고 싶은지 물어보세요."])
+
+
+class CrisisAlertOwnershipTest(unittest.TestCase):
+    """위기 안내는 LLM이 만들지 않는다 — 889가 검토된 템플릿으로 채운다 (S15P11B209-887)."""
+
+    def test_crisis_alert_is_not_built_from_llm_output(self):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(
+            _llm_json(
+                crisisAlert={
+                    "reasonCode": "SELF_HARM_RISK",
+                    "severity": "HIGH",
+                    "title": "지어낸 위기 안내",
+                    "message": "LLM이 만든 문구",
+                }
+            )
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(_sample_request(), model="m")
+        self.assertIsNone(result.crisis_alert)
+
+
 class RoutingSingleOwnerTest(unittest.TestCase):
     """표시 위치를 [1]/[2]/[3] 절만 말하는지 (S15P11B209-871).
 

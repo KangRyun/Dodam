@@ -41,6 +41,9 @@ def run_layer_a() -> list[tuple[str, list[Finding]]]:
     """GMS 호출 없이 프롬프트 조립만 검증한다(결정적·무료)."""
     results: list[tuple[str, list[Finding]]] = []
 
+    # 케이스에 매이지 않는 프롬프트 전역 점검 (S15P11B209-895).
+    results.append(("PROMPTS", [checks.check_tone_bands_differ()]))
+
     for case in cases.QUESTION_CASES:
         req = case.request
         # _build_messages는 private이지만 docstring이 "테스트 편의용" 직접 호출을 명시한다
@@ -133,6 +136,8 @@ def run_layer_b(repeat: int) -> list[tuple[str, int, list[Finding]]]:
 
 # ── 리포트 ─────────────────────────────────────────────────────
 def _case_title(case_id: str) -> tuple[str, str]:
+    if case_id == "PROMPTS":
+        return "프롬프트 전역 점검", "케이스 입력과 무관하게 프롬프트 파일 자체를 본다."
     for c in (*cases.QUESTION_CASES, *cases.REPORT_CASES):
         if c.id == case_id:
             return c.title, c.why

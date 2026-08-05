@@ -46,4 +46,42 @@ abstract final class AppColors {
   static const Color errorSoft = Color(0xFFFBE9E7);
   static const Color disabled = Color(0xFFD9DDD8);
   static const Color onDisabled = Color(0xFF909892);
+
+  /// 크레용 캔버스 화면 전용 색이다(S15P11B209-797~807). 종이 질감과 크레용 도구
+  /// 위에서 대비를 확보하도록 고른 값이라 일반 화면 토큰과 구분해 둔다.
+  static const Color canvasPrimary = brandYellow;
+  static const Color canvasPrimaryPressed = Color(0xFFE5C84F);
+  static const Color canvasInk = Color(0xFF3A3832);
+  static const Color canvasWarm = Color(0xFFFFFDF5);
+  static const Color canvasBorder = Color(0xFFE5DFC8);
+  static const Color canvasBorderStrong = Color(0xFFC9BF99);
+
+  /// 캔버스 우측 상단 저장 상태 문구 색이다. 저장 단계를 색으로도 구분한다.
+  static const Color canvasStatusLocalInk = canvasInk;
+  static const Color canvasStatusSavingInk = Color(0xFF655194);
+  static const Color canvasStatusSavedInk = Color(0xFF3D7A55);
+  static const Color canvasStatusFailedInk = Color(0xFFB33A3A);
+
+  /// 캔버스 팔레트가 제공하는 그리기 색이다.
+  ///
+  /// 값은 승인 디자인(`prototype/styles.css`)의 swatch 와 같다. 일반 화면이 쓰는
+  /// drawingRed·drawingYellow·drawingBlue 와는 톤이 달라 캔버스 전용으로 따로 둔다.
+  static const Color canvasSwatchRed = Color(0xFFC74D3F);
+  static const Color canvasSwatchOrange = Color(0xFFED741A);
+  static const Color canvasSwatchYellow = Color(0xFFEFC63F);
+  static const Color canvasSwatchGreen = Color(0xFF6C9E3A);
+  static const Color canvasSwatchTeal = Color(0xFF59A7A1);
+  static const Color canvasSwatchBlue = Color(0xFF2D77C7);
+  static const Color canvasSwatchPurple = Color(0xFF7650AD);
+  static const Color canvasSwatchCharcoal = Color(0xFF3A3832);
+
+  /// 캔버스 화면의 바깥 배경과 스케치북이 놓이는 면이다.
+  static const Color canvasBackdrop = Color(0xFFE6E2D8);
+  static const Color canvasStage = Color(0xFFF5F1E6);
+
+  static const Color drawingCharcoal = canvasSwatchCharcoal;
+  static const Color drawingOrange = canvasSwatchOrange;
+  static const Color drawingGreen = canvasSwatchGreen;
+  static const Color drawingTeal = canvasSwatchTeal;
+  static const Color drawingPurple = canvasSwatchPurple;
 }

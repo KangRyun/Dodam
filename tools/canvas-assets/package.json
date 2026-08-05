@@ -1,0 +1,11 @@
+{
+  "type": "module",
+  "scripts": {
+    "materialize": "node materialize.mjs",
+    "materialize:check": "node materialize.mjs --check",
+    "test": "node --test materialize.test.mjs"
+  },
+  "devDependencies": {
+    "sharp": "0.34.3"
+  }
+}

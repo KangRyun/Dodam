@@ -71,4 +71,38 @@ class DrawingAssetDomainTest {
                     LocalDateTime.now(),
                     LocalDateTime.now()));
   }
+
+  @Test
+  void acceptsZeroEventSequenceForSnapshotOnlyDraft() {
+    DrawingAsset asset =
+        DrawingAsset.draft(
+            mock(DrawingSession.class),
+            1,
+            "draft.png",
+            "image/png",
+            1,
+            "a".repeat(64),
+            0,
+            LocalDateTime.of(2026, 8, 3, 9, 0),
+            LocalDateTime.of(2026, 8, 3, 9, 1));
+
+    assertThat(asset.getLastEventSequence()).isZero();
+  }
+
+  @Test
+  void rejectsNegativeEventSequenceForDraft() {
+    assertThatIllegalArgumentException()
+        .isThrownBy(
+            () ->
+                DrawingAsset.draft(
+                    mock(DrawingSession.class),
+                    1,
+                    "draft.png",
+                    "image/png",
+                    1,
+                    "a".repeat(64),
+                    -1,
+                    LocalDateTime.now(),
+                    LocalDateTime.now()));
+  }
 }

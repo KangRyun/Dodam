@@ -338,6 +338,33 @@ class HtpQuestionBankTest(unittest.TestCase):
         )
         self.assertIn("이건 무슨 나무야?", system)
 
+    def test_evidence_axes_are_present_in_each_subject(self):
+        """아이 표현 근거를 얻을 축이 주제마다 남아 있어야 한다 (S15P11B209-893).
+
+        경향 해석 공개 조건이 "독립 근거 2건 + 그중 아이 표현 1건 이상"(885·888)이라, 아이가
+        말한 내용이 없으면 해석이 아예 만들어지지 않는다. 아래 축이 뱅크에서 사라지면 근거를
+        채울 재료가 줄어드는데 테스트 없이는 조용히 사라진다 — 축 단위로 못 박는다.
+        """
+        axes = {
+            "HOUSE": ["어디에 있어", "주변에는 뭐가 있어", "계절"],
+            "TREE": ["누가 생각나", "기분", "어디에 서 있어"],
+            "PERSON": ["건강해", "필요한 게", "기분이 어떤 것 같아"],
+        }
+        for subject, keywords in axes.items():
+            bank = llm_client.question_bank_block("HTP", subject)
+            for keyword in keywords:
+                with self.subTest(subject=subject, keyword=keyword):
+                    self.assertIn(keyword, bank)
+
+    def test_added_axes_ask_about_the_drawing_not_the_child(self):
+        """추가 문항은 그림 속 대상에게 묻는다 — 아이 본인을 심문하는 형태가 아니다."""
+        for subject in ("HOUSE", "TREE", "PERSON"):
+            bank = llm_client.question_bank_block("HTP", subject)
+            with self.subTest(subject=subject):
+                self.assertNotIn("너는 건강해", bank)
+                self.assertNotIn("너한테 필요한", bank)
+                self.assertNotIn("네 집은 어디", bank)
+
 
 class FirstQuestionHtpRegressionTest(unittest.TestCase):
     """808 F-1: HTP 첫 질문이 12/12 "오늘은 뭘 그렸어?"로 고정되던 회귀 (S15P11B209-811)."""

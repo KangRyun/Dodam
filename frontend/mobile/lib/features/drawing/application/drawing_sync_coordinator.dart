@@ -102,12 +102,17 @@ final class _DraftSaveAttempt {
     required this.preview,
     required this.canvasState,
     required this.generation,
+    required this.documentRevision,
   });
 
   final String idempotencyKey;
   final BinaryUploadDto preview;
   final DraftCanvasStateDto canvasState;
   final int generation;
+
+  /// 이 시도가 담고 있는 문서 변경 횟수다. 이벤트를 만들지 않는 변경까지 세므로
+  /// 저장 성공 시 어디까지 반영됐는지 이벤트 순서만으로 판단하지 않아도 된다.
+  final int documentRevision;
 }
 
 BinaryUploadDto _immutablePreview(BinaryUploadDto preview) => BinaryUploadDto(
@@ -516,11 +521,22 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
   int _savedGeneration = 0;
   int _failedGeneration = 0;
   int? _savedEventSequence;
+  int _documentRevision = 0;
+  int _savedDocumentRevision = 0;
   bool _started = false;
   bool _paused = false;
   bool _stopped = false;
   bool _completing = false;
   bool _disposed = false;
+
+  /// 지금까지 캔버스 문서에 일어난 변경 횟수다.
+  ///
+  /// 획뿐 아니라 채우기·영역 지우개·전체 지우기처럼 그림 이벤트를 만들지 않는 변경도
+  /// 센다. 이벤트 순서만으로는 이런 변경을 구분할 수 없어 저장 여부 판단에 함께 쓴다.
+  int get documentRevision => _documentRevision;
+
+  /// 서버에 아직 반영되지 않은 캔버스 변경이 남아 있는지 여부다.
+  bool get hasUnsavedSnapshot => _savedDocumentRevision < _documentRevision;
 
   int get elapsedMilliseconds => journal.elapsedMilliseconds;
   bool get isDisposed => _disposed;
@@ -659,8 +675,19 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
     return event;
   }
 
+  /// 그림 이벤트를 만들지 않는 문서 변경을 저장 대상으로 기록한다.
+  ///
+  /// 채우기·영역 지우개·전체 지우기는 journal event 없이 캔버스 이미지만 바꾸므로,
+  /// 이벤트 순서가 그대로여도 새 초안을 올려야 한다. 가짜 event를 만들지 않고
+  /// 문서 revision만 올려 replay cutoff 의미를 지킨다.
+  void recordSnapshotChange() {
+    if (_disposed) return;
+    _markDirty();
+  }
+
   void _markDirty() {
     _dirtyGeneration += 1;
+    _documentRevision += 1;
     if (_draftStatus == DrawingSaveStatus.saved) {
       _draftStatus = DrawingSaveStatus.localOnly;
     }
@@ -682,7 +709,7 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
   /// stroke batch를 먼저 보낸 뒤 같은 event sequence의 Draft를 저장한다.
   Future<bool> flushAndSaveDraft() async {
     if (_disposed || _stopped || _completing) return false;
-    if (journal.events.isEmpty) return true;
+    if (journal.events.isEmpty && !hasUnsavedSnapshot) return true;
     await saveDraftNow();
     if (_disposed || batchQueue.hasFailure) return false;
     return _savedEventSequence == journal.lastEventSequence;
@@ -695,7 +722,9 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
         sessionId == null ||
         repository == null ||
         _snapshotProvider == null ||
-        journal.events.isEmpty) {
+        // 채우기·전체 지우기는 event 없이 그림만 바꾼다. event 유무만 보면 이런
+        // 변경이 영영 저장되지 않으므로 스냅샷 변경도 저장 사유로 인정한다.
+        (journal.events.isEmpty && !hasUnsavedSnapshot)) {
       return Future.value(null);
     }
     final existing = _saveInFlight;
@@ -768,7 +797,8 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
       }
 
       if (_dirtyGeneration <= _savedGeneration &&
-          _savedEventSequence == journal.lastEventSequence) {
+          _savedEventSequence == journal.lastEventSequence &&
+          !hasUnsavedSnapshot) {
         return latest;
       }
 
@@ -776,9 +806,11 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
       if (_disposed || batchQueue.hasFailure) return null;
 
       final generation = _dirtyGeneration;
-      final lastEventSequence = journal.lastEventSequence;
-      if (lastEventSequence == null) return latest;
-      if (_savedEventSequence == lastEventSequence) {
+      final documentRevision = _documentRevision;
+      // 이벤트가 하나도 없는 문서는 replay cutoff가 0이다. 채우기만 한 문서도 이
+      // 값으로 저장·복원할 수 있으며 가짜 event를 만들지 않는다.
+      final lastEventSequence = journal.lastEventSequence ?? 0;
+      if (_savedEventSequence == lastEventSequence && !hasUnsavedSnapshot) {
         _savedGeneration = generation;
         _draftStatus = DrawingSaveStatus.saved;
         _safeNotify();
@@ -812,6 +844,7 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
           ),
         ),
         generation: generation,
+        documentRevision: documentRevision,
       );
       final response = await _uploadAttempt(attempt);
       if (response == null || _disposed) {
@@ -857,6 +890,9 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
         _latestDraftResponse = response;
         _savedGeneration = attempt.generation;
         _savedEventSequence = attempt.canvasState.lastEventSequence;
+        if (_savedDocumentRevision < attempt.documentRevision) {
+          _savedDocumentRevision = attempt.documentRevision;
+        }
         _failedAttempt = null;
         _failedGeneration = 0;
         _draftFailure = null;

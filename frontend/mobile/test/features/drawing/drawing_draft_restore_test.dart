@@ -468,10 +468,14 @@ void main() {
     restore.markImageLoaded();
     await tester.pump();
 
-    final button = tester.widget<AppButton>(
-      find.byKey(const ValueKey('drawing-complete')),
+    // 완료 버튼은 사이드 패널이 아니라 크레용 툴바에 있다(S15P11B209-805).
+    final button = tester.widget<InkWell>(
+      find.descendant(
+        of: find.byKey(const ValueKey('drawing-complete')),
+        matching: find.byType(InkWell),
+      ),
     );
-    expect(button.onPressed, isNotNull);
+    expect(button.onTap, isNotNull);
 
     await tester.pumpWidget(const SizedBox.shrink());
     sync.dispose();
