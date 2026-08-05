@@ -32,7 +32,9 @@ void main() {
     );
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const ValueKey('child-nickname')), '새봄');
-    await tester.tap(find.byKey(const ValueKey('child-birth-date')));
+    final birthDate = find.byKey(const ValueKey('child-birth-date'));
+    await tester.ensureVisible(birthDate);
+    await tester.tap(birthDate);
     await tester.pumpAndSettle();
     await tester.tap(find.text('선택'));
     await tester.pumpAndSettle();
