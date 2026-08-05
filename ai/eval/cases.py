@@ -543,7 +543,11 @@ Q13_DIARY_VERBAL_SKIP = QuestionCase(
         # 건너뛴 질문은 '두 사람의 행동'. 표정·이름을 묻는 것은 속성 전환이라 정상이고,
         # 공을 묻는 것은 대상 전환이라 정상이다 (858 과탐 보정).
         "skipped_subject_terms": ["두 사람", "사람들은"],
-        "skipped_attribute_terms": ["무엇을 하고", "뭘 하고", "하고 있어"],
+        # "하고 있어"는 뺐다 — 술어 조각이라 속성이 실제로 바뀐 문장까지 잡는다.
+        #   2026-08-05 실측: "그 두 사람은 어떤 표정을 하고 있어?"가 걸렸다. 이건 858이
+        #   정상 전환이라고 못박은 바로 그 예("행동을 건너뛰자 표정을 묻는다")다.
+        #   대신 같은 뜻의 표기 변형("뭐 하고")을 넣어 진짜 반복은 그대로 잡는다.
+        "skipped_attribute_terms": ["무엇을 하고", "뭘 하고", "뭐 하고"],
         "expects_empathy": True,
     },
 )
@@ -940,7 +944,9 @@ Q24_STOP_UNSPECIFIED = QuestionCase(
         drawing_description="가운데에 사람이 한 명 서 있어요.",
         recent_messages=[
             _dodam("이 사람은 지금 뭐 하고 있어?"),
-            _child("이제 그만할래."),
+            # 띄어쓴 형태로 둔다. 2026-08-05 실사용에서 "그만 할래"가 붙여쓰기만 전제한
+            # 정규식에 걸리지 않아 통째로 새어 나갔다 — 그 형태를 케이스로 고정한다.
+            _child("이제 그만 할래."),
         ],
         safety_rule_version=SAFETY_RULE_VERSION,
         activity_type="ART_DIARY",
