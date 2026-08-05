@@ -69,7 +69,10 @@ android {
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
-        targetSdk = flutter.targetSdkVersion
+        // 태블릿 가로 고정(S15P11B209-864). Android 15+(SDK 35+)는 대화면에서 앱의
+        // 방향 제한을 무시한다. SDK 34를 타깃하면 이 정책이 적용되지 않아, 아래
+        // MainActivity의 고정 방향이 존중된다(세로로 들면 가로 레터박스로 표시).
+        targetSdk = 34
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         manifestPlaceholders["kakaoScheme"] = "kakao${oauthValue("KAKAO_NATIVE_APP_KEY")}"
