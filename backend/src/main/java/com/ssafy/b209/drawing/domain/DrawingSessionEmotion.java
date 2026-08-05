@@ -60,6 +60,17 @@ public class DrawingSessionEmotion {
   }
 
   /**
+   * 선택 감정 행 식별자를 반환한다.
+   *
+   * <p>AI 리포트 요청에서 이 감정을 근거로 가리킬 때 쓴다 — AI 는 서버가 발급한 식별자만 참조하고 조합키 조립은 금지된다(계약 §4, S15P11B209-906).
+   *
+   * @return 선택 감정 식별자이며 저장 전이면 {@code null}
+   */
+  public Long getId() {
+    return id;
+  }
+
+  /**
    * 감정을 선택한 그림 활동 세션을 반환한다.
    *
    * @return 감정이 속한 그림 활동 세션

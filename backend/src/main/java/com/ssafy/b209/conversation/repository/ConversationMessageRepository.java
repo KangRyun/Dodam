@@ -130,7 +130,9 @@ public interface ConversationMessageRepository extends JpaRepository<Conversatio
       value =
           "SELECT q.id AS questionMessageId, q.raw_text AS questionText, "
               + "a.id AS answerMessageId, COALESCE(a.stt_text, a.raw_text) AS answerText, "
-              + "a.message_type AS answerType "
+              + "a.message_type AS answerType, "
+              // 미확정 STT 를 근거·대표 발화에서 제외하려면 원 메시지 값이 필요하다(계약 §4-4).
+              + "a.needs_guardian_confirmation AS answerNeedsGuardianConfirmation "
               + "FROM conversation_messages q "
               + "JOIN conversation_messages a "
               + "ON a.parent_message_id = q.id "

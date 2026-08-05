@@ -88,9 +88,13 @@ class MockObservationReportGenerationServiceTest {
                     List.of("HOUSE_DOOR"),
                     List.of(
                         new ObservationGenerationContext.KeyConversationLine(
-                            1L, "이 집에는 누가 살아?", 2L, "엄마랑 나!", "VOICE_ANSWER"))),
+                            1L, "이 집에는 누가 살아?", 2L, "엄마랑 나!", "VOICE_ANSWER", false)),
+                    900L,
+                    List.of(
+                        new ObservationGenerationContext.DetectedObjectRef(910L, "HOUSE_DOOR"))),
                 new ObservationGenerationContext.SubjectContext(
-                    null, "공룡이 풍선을 들고 있어요.", List.of(), List.of())),
+                    null, "공룡이 풍선을 들고 있어요.", List.of(), List.of(), 901L, List.of())),
+            List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
             List.of(100L));
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context));
     given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
@@ -110,9 +114,129 @@ class MockObservationReportGenerationServiceTest {
     org.assertj.core.api.Assertions.assertThat(summaries.get(0).qaPairs())
         .containsExactly(
             new ObservationGenerationRequest.SubjectQaPair(
-                "이 집에는 누가 살아?", "엄마랑 나!", "VOICE_ANSWER"));
+                "이 집에는 누가 살아?", "엄마랑 나!", "VOICE_ANSWER", 1L, 2L, false));
     // 그림일기 항목 — 주제 없음(null)이 그대로 전달된다.
     org.assertj.core.api.Assertions.assertThat(summaries.get(1).drawingSubject()).isNull();
+  }
+
+  @Test
+  void sendsServerIssuedEvidenceIdentifiersSoGateCanVerifyIndependence() {
+    // AI 는 서버가 발급한 식별자만 근거(sourceRef)로 쓴다 — 조합키 조립은 계약 §4에서 금지된다.
+    // 이 값들을 보내지 않으면 구조 게이트가 NO_EVIDENCE 로 모든 카드를 탈락시켜
+    // publicInterpretations 가 항상 빈 배열이 된다(S15P11B209-906).
+    given(persistenceService.loadContext(ANALYSIS_ID))
+        .willReturn(Optional.of(contextWithIdentifiers()));
+    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+
+    service.generate(ANALYSIS_ID);
+
+    verify(observationClient).generate(requestCaptor.capture());
+    ObservationGenerationRequest request = requestCaptor.getValue();
+    ObservationGenerationRequest.SubjectSummary summary = request.subjectSummaries().getFirst();
+
+    org.assertj.core.api.Assertions.assertThat(summary.observationEvidenceSourceId())
+        .isEqualTo(900L);
+    org.assertj.core.api.Assertions.assertThat(summary.detectedObjects())
+        .containsExactly(
+            new ObservationGenerationRequest.SubjectDetectedObject(910L, "HOUSE_DOOR"));
+    org.assertj.core.api.Assertions.assertThat(request.selectedEmotionRefs())
+        .containsExactly(new ObservationGenerationRequest.SelectedEmotionRef(920L, "HAPPY"));
+    org.assertj.core.api.Assertions.assertThat(summary.qaPairs())
+        .extracting(
+            ObservationGenerationRequest.SubjectQaPair::questionMessageId,
+            ObservationGenerationRequest.SubjectQaPair::answerMessageId)
+        .containsExactly(org.assertj.core.groups.Tuple.tuple(1L, 2L));
+  }
+
+  @Test
+  void carriesSttConfirmationFlagFromOriginalMessage() {
+    // 미확정 STT 는 근거·보호자 인용에서 제외돼야 한다(계약 §4-4). 이 값이 상수면 조건이 절대
+    // 참이 되지 않아 규칙 전체가 조용히 무효가 되므로, 원 메시지 값이 그대로 실리는지 고정한다.
+    given(persistenceService.loadContext(ANALYSIS_ID))
+        .willReturn(Optional.of(contextWithUnconfirmedSpeech()));
+    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+
+    service.generate(ANALYSIS_ID);
+
+    verify(observationClient).generate(requestCaptor.capture());
+    org.assertj.core.api.Assertions.assertThat(
+            requestCaptor.getValue().subjectSummaries().getFirst().qaPairs())
+        .extracting(ObservationGenerationRequest.SubjectQaPair::sttNeedsConfirmation)
+        .containsExactly(true, false);
+  }
+
+  @Test
+  void sendsEmptyIdentifiersWithoutFailingWhenSourceRowsAreMissing() {
+    // 식별자를 못 구했다고 요청을 실패시키지 않는다. 억지로 만들면(조합키) 게이트가 무의미해지므로
+    // 빈 값으로 보내고 그 근거는 게이트가 판단한다.
+    given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
+    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+
+    service.generate(ANALYSIS_ID);
+
+    verify(observationClient).generate(requestCaptor.capture());
+    org.assertj.core.api.Assertions.assertThat(requestCaptor.getValue().selectedEmotionRefs())
+        .isEmpty();
+    org.assertj.core.api.Assertions.assertThat(requestCaptor.getValue().subjectSummaries())
+        .isEmpty();
+  }
+
+  private ObservationGenerationContext contextWithIdentifiers() {
+    return new ObservationGenerationContext(
+        ANALYSIS_ID,
+        100L,
+        REPORT_ID,
+        50L,
+        "NORMAL",
+        3,
+        2,
+        1,
+        0,
+        List.of("HAPPY"),
+        "행복했어요",
+        List.of(),
+        List.of(
+            new ObservationGenerationContext.SubjectContext(
+                "HOUSE",
+                "가운데에 집이 크게 그려져 있어요.",
+                List.of("HOUSE_DOOR"),
+                List.of(
+                    new ObservationGenerationContext.KeyConversationLine(
+                        1L, "이 집에는 누가 살아?", 2L, "엄마랑 나!", "VOICE_ANSWER", false)),
+                900L,
+                List.of(new ObservationGenerationContext.DetectedObjectRef(910L, "HOUSE_DOOR")))),
+        List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
+        List.of(100L));
+  }
+
+  private ObservationGenerationContext contextWithUnconfirmedSpeech() {
+    return new ObservationGenerationContext(
+        ANALYSIS_ID,
+        100L,
+        REPORT_ID,
+        50L,
+        "NORMAL",
+        2,
+        2,
+        0,
+        1,
+        List.of(),
+        null,
+        List.of(),
+        List.of(
+            new ObservationGenerationContext.SubjectContext(
+                "TREE",
+                "나무가 화면 밖으로 나갔어요.",
+                List.of(),
+                List.of(
+                    new ObservationGenerationContext.KeyConversationLine(
+                        3L, "이 나무는 몇 살이야?", 4L, "잘 안 들렸어요", "VOICE_ANSWER", true),
+                    new ObservationGenerationContext.KeyConversationLine(
+                        5L, "누가 심었어?", 6L, "내가 심었어", "OPTION_ANSWER", false)),
+                901L,
+                List.of())),
+        List.of(),
+        List.of(100L));
   }
 
   @Test
@@ -209,6 +333,7 @@ class MockObservationReportGenerationServiceTest {
         0,
         List.of("HAPPY"),
         "행복했어요",
+        List.of(),
         List.of(),
         List.of(),
         List.of(100L));
