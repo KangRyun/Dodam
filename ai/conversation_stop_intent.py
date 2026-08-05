@@ -123,6 +123,36 @@ def scan(text: str) -> str | None:
     return None
 
 
+# ── 종료 확인에 대한 긍정 판정 (S15P11B209-947) ─────────────────
+# 되묻기("이야기는 여기까지 할까?")에 아이가 말로 답하는 경우를 읽는다. 칩을 눌러야만
+# 끝나면, 말로 답한 아이는 같은 되묻기를 다시 보게 된다.
+#
+# ⚠️ 아주 좁게 본다. 이 판정은 **직전 AI 질문이 종료 확인이었을 때만** 쓰인다
+#    (question_service가 그 조건을 건다). 그 자리에서 "응"은 종료 동의 말고 뜻할 것이 없다.
+_AFFIRMATIVE = [
+    rf"^{_S}(응|어|엉|네|예|그래|좋아|맞아|당연|그러자|그럴래|알겠어)[.!~…]*{_S}$",
+    rf"^{_S}(응|어|네|그래)[,\s]+",  # "응, 그만할래" 처럼 앞에 붙는 경우
+]
+# 부정이 섞이면 긍정으로 보지 않는다. "응 아니야"·"아니 더 할래" 같은 말.
+_NEGATIVE = [r"아니|싫어|더\s*할래|계속|안\s*끝|아직"]
+
+_AFFIRMATIVE_RX = _compile(_AFFIRMATIVE)
+_NEGATIVE_RX = _compile(_NEGATIVE)
+
+
+def is_affirmative(text: str) -> bool:
+    """종료 확인 질문에 대한 긍정 답인가.
+
+    ⚠️ 이 함수만으로 대화를 끝내지 않는다. 직전 AI 질문이 종료 확인이었는지는 호출자가
+       확인한다 — 그 조건 없이 "응"을 종료로 읽으면 평범한 맞장구가 대화를 끊는다.
+    """
+    if not text or not text.strip():
+        return False
+    if any(rx.search(text) for rx in _NEGATIVE_RX):
+        return False
+    return any(rx.search(text) for rx in _AFFIRMATIVE_RX)
+
+
 if __name__ == "__main__":
     # 스모크 테스트:  cd ai && python conversation_stop_intent.py
     samples = [
