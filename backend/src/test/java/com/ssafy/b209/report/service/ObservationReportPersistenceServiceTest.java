@@ -35,6 +35,7 @@ import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportActivityNote;
 import com.ssafy.b209.report.domain.ReportActivitySummary;
+import com.ssafy.b209.report.domain.ReportDrawnItem;
 import com.ssafy.b209.report.domain.ReportFeatureVisibility;
 import com.ssafy.b209.report.domain.ReportGuardianQuestion;
 import com.ssafy.b209.report.domain.ReportKeyConversation;
@@ -42,6 +43,7 @@ import com.ssafy.b209.report.domain.ReportObservedFeature;
 import com.ssafy.b209.report.domain.ReportStatus;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummaryDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DrawnItemDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.FollowUpGuideDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.GuardianQuestionDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ObservationDraft;
@@ -49,6 +51,7 @@ import com.ssafy.b209.report.dto.ObservationGenerationResult.ObservedFeatureDraf
 import com.ssafy.b209.report.exception.MockObservationReportErrorCode;
 import com.ssafy.b209.report.repository.ReportActivityNoteRepository;
 import com.ssafy.b209.report.repository.ReportActivitySummaryRepository;
+import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideRepository;
 import com.ssafy.b209.report.repository.ReportGuardianQuestionRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationRepository;
@@ -90,6 +93,7 @@ class ObservationReportPersistenceServiceTest {
   @Mock private AnalysisConversationSummaryRepository conversationSummaryRepository;
   @Mock private ReportActivitySummaryRepository activitySummaryRepository;
   @Mock private ReportActivityNoteRepository activityNoteRepository;
+  @Mock private ReportDrawnItemRepository drawnItemRepository;
   @Mock private ReportObservedFeatureRepository observedFeatureRepository;
   @Mock private ReportKeyConversationRepository keyConversationRepository;
   @Mock private ReportFollowUpGuideRepository followUpGuideRepository;
@@ -106,6 +110,7 @@ class ObservationReportPersistenceServiceTest {
   @Captor private ArgumentCaptor<AnalysisConversationSummary> conversationCaptor;
   @Captor private ArgumentCaptor<ReportActivitySummary> activitySummaryCaptor;
   @Captor private ArgumentCaptor<List<ReportActivityNote>> notesCaptor;
+  @Captor private ArgumentCaptor<List<ReportDrawnItem>> drawnItemsCaptor;
   @Captor private ArgumentCaptor<List<ReportObservedFeature>> featuresCaptor;
   @Captor private ArgumentCaptor<List<ReportKeyConversation>> keyConversationsCaptor;
   @Captor private ArgumentCaptor<List<ReportGuardianQuestion>> guardianQuestionsCaptor;
@@ -122,6 +127,7 @@ class ObservationReportPersistenceServiceTest {
             conversationSummaryRepository,
             activitySummaryRepository,
             activityNoteRepository,
+            drawnItemRepository,
             observedFeatureRepository,
             keyConversationRepository,
             followUpGuideRepository,
@@ -246,6 +252,53 @@ class ObservationReportPersistenceServiceTest {
         .containsExactly(0, 1);
 
     verify(eventPublisher).publishEvent(new AnalysisCompletedEvent(REPORT_ID));
+  }
+
+  @Test
+  void storesVlmDrawnItemsInResponseOrderAndMarksAnExplicitEmptyResultAsPresent() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+    ObservationGenerationResult result =
+        resultWithDrawnItems(
+            List.of(
+                new DrawnItemDraft("HOUSE", "집"),
+                new DrawnItemDraft("HOUSE", "빨간 지붕"),
+                new DrawnItemDraft("TREE", "나무"),
+                new DrawnItemDraft("PERSON", "웃는 사람")));
+
+    service.complete(context(List.of()), result);
+
+    verify(drawnItemRepository).saveAll(drawnItemsCaptor.capture());
+    assertThat(drawnItemsCaptor.getValue())
+        .extracting(ReportDrawnItem::getDisplayOrder, ReportDrawnItem::getDrawingSubject, ReportDrawnItem::getName)
+        .containsExactly(
+            org.assertj.core.groups.Tuple.tuple(0, "HOUSE", "집"),
+            org.assertj.core.groups.Tuple.tuple(1, "HOUSE", "빨간 지붕"),
+            org.assertj.core.groups.Tuple.tuple(2, "TREE", "나무"),
+            org.assertj.core.groups.Tuple.tuple(3, "PERSON", "웃는 사람"));
+    assertThat(report.hasDrawnItems()).isTrue();
+  }
+
+  @Test
+  void discardsInvalidDrawnItemsButKeepsExplicitEmptyResultFromLegacyFallback() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+    ObservationGenerationResult result =
+        resultWithDrawnItems(
+            java.util.Arrays.asList(
+                new DrawnItemDraft("HOUSE", " "),
+                null,
+                new DrawnItemDraft("TREE", "가".repeat(21))));
+
+    service.complete(context(List.of()), result);
+
+    verify(drawnItemRepository).saveAll(drawnItemsCaptor.capture());
+    assertThat(drawnItemsCaptor.getValue()).isEmpty();
+    assertThat(report.hasDrawnItems()).isTrue();
   }
 
   @Test
@@ -761,6 +814,22 @@ class ObservationReportPersistenceServiceTest {
         List.of(new FollowUpGuideDraft("개방형 질문을 해보세요.", "정답을 요구하지 마세요.")),
         List.of(new GuardianQuestionDraft("어떤 기분이었어?", "감정 표현 유도")),
         "한계 문구");
+  }
+
+  private ObservationGenerationResult resultWithDrawnItems(List<DrawnItemDraft> drawnItems) {
+    ObservationGenerationResult source = validResult();
+    return new ObservationGenerationResult(
+        source.requestId(),
+        source.modelName(),
+        source.modelVersion(),
+        source.confidence(),
+        source.observationDraft(),
+        source.conversationSummary(),
+        source.activityNotes(),
+        source.followUpGuides(),
+        source.guardianQuestions(),
+        source.limitationsText(),
+        drawnItems);
   }
 
   private ObservationGenerationResult resultWithModelVersion(String modelVersion) {

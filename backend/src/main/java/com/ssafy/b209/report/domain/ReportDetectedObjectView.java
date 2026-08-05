@@ -8,7 +8,7 @@ import jakarta.persistence.Table;
 /**
  * REPORT-02 보호자용 리포트 상세 조회 전용으로 {@code analysis_detected_objects} 한 행을 읽는 읽기 모델이다.
  *
- * <p>보호자에게는 객관적 사실인 탐지 객체명과 탐지 순서만 읽어 노출하며, 신뢰도 점수나 좌표 등 해석성 수치는 읽지 않는다.
+ * <p>보호자에게는 객체명만 노출한다. 신뢰도는 새 리포트에 노출하지 않고, VLM drawnItems가 없는 과거 리포트의 0.50 폴백 판정에만 사용한다.
  */
 @Entity
 @Table(name = "analysis_detected_objects")
@@ -26,6 +26,9 @@ public class ReportDetectedObjectView {
 
   @Column(name = "detection_order")
   private Integer detectionOrder;
+
+  @Column(name = "confidence_score")
+  private java.math.BigDecimal confidenceScore;
 
   protected ReportDetectedObjectView() {}
 

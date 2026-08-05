@@ -30,8 +30,10 @@ import com.ssafy.b209.report.repository.ReportDrawingAssetViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingEmotionViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingSessionViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingTypeViewRepository;
+import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideViewRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationViewRepository;
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -54,6 +56,7 @@ public class ReportDetailQueryService {
   private static final String FINAL_ASSET_TYPE = "FINAL";
   private static final String THUMBNAIL_ASSET_TYPE = "THUMBNAIL";
   private static final String UPLOADED_ASSET_TYPE = "UPLOADED";
+  private static final BigDecimal LEGACY_DETECTION_MIN_CONFIDENCE = new BigDecimal("0.50");
 
   private final GuardianResourceAccessRepository guardianAccessRepository;
   private final ReportDetailViewRepository reportRepository;
@@ -67,6 +70,7 @@ public class ReportDetailQueryService {
   private final ReportFollowUpGuideViewRepository followUpGuideRepository;
   private final ReportConversationSummaryViewRepository conversationSummaryRepository;
   private final ReportDetectedObjectViewRepository detectedObjectRepository;
+  private final ReportDrawnItemRepository drawnItemRepository;
   private final DrawingAssetFileUrlFactory fileUrlFactory;
 
   /**
@@ -83,7 +87,8 @@ public class ReportDetailQueryService {
    * @param keyConversationRepository 대표 대화 Snapshot 조회 경계
    * @param followUpGuideRepository 보호자 후속 안내 조회 경계
    * @param conversationSummaryRepository 대화 요약 대체 출처 조회 경계
-   * @param detectedObjectRepository 탐지 객체명 조회 경계
+   * @param detectedObjectRepository 과거 리포트의 탐지 객체명 폴백 조회 경계
+   * @param drawnItemRepository 최신 AI 관찰 서술 기반 '그린 것' 조회 경계
    * @param fileUrlFactory 인증된 그림 파일 조회 URL 생성기
    */
   public ReportDetailQueryService(
@@ -99,6 +104,7 @@ public class ReportDetailQueryService {
       ReportFollowUpGuideViewRepository followUpGuideRepository,
       ReportConversationSummaryViewRepository conversationSummaryRepository,
       ReportDetectedObjectViewRepository detectedObjectRepository,
+      ReportDrawnItemRepository drawnItemRepository,
       DrawingAssetFileUrlFactory fileUrlFactory) {
     this.guardianAccessRepository = guardianAccessRepository;
     this.reportRepository = reportRepository;
@@ -112,6 +118,7 @@ public class ReportDetailQueryService {
     this.followUpGuideRepository = followUpGuideRepository;
     this.conversationSummaryRepository = conversationSummaryRepository;
     this.detectedObjectRepository = detectedObjectRepository;
+    this.drawnItemRepository = drawnItemRepository;
     this.fileUrlFactory = fileUrlFactory;
   }
 
@@ -247,7 +254,7 @@ public class ReportDetailQueryService {
         .forEach(note -> notes.add(note.getNoteText()));
 
     return new ReportActivityFactsResponse(
-        buildDetectedObjects(report.getDrawingSessionId()),
+        buildDetectedObjects(report),
         summary == null ? null : summary.getDrawingDurationMs(),
         summary == null ? null : summary.getPauseCount(),
         summary == null ? null : summary.getEraseCount(),
@@ -255,13 +262,24 @@ public class ReportDetailQueryService {
         notes);
   }
 
+  /** 최신 리포트는 관찰 서술 항목을, 이전 리포트는 신뢰도 보정된 탐지 라벨만 사용한다. */
+  private List<String> buildDetectedObjects(ReportDetailView report) {
+    if (report.hasDrawnItems()) {
+      return drawnItemRepository.findByReportIdOrderByDisplayOrderAsc(report.getId()).stream()
+          .map(item -> item.getName())
+          .filter(name -> name != null && !name.isBlank())
+          .toList();
+    }
+    return buildLegacyDetectedObjects(report.getDrawingSessionId());
+  }
+
   /**
-   * 활동에서 탐지된 객체명을 노출 순서대로 모은다.
+   * 기존 리포트의 YOLO 라벨을 0.50 이상으로 제한해 반환한다.
    *
    * <p>조회 결과는 이미 주제 순서와 세션별 분석 최신순으로 정렬돼 있어, 세션마다 처음 만난 분석의 행만 남기면 세션당 최신 한 건이 된다. 탐지 결과가 없는 세션은 행이
    * 없어 자연히 건너뛴다.
    */
-  private List<String> buildDetectedObjects(Long drawingSessionId) {
+  private List<String> buildLegacyDetectedObjects(Long drawingSessionId) {
     List<String> detectedObjects = new ArrayList<>();
     Map<Long, Long> latestAnalysisBySession = new HashMap<>();
     for (ReportDetectedObjectRow row :
@@ -272,7 +290,10 @@ public class ReportDetailQueryService {
         continue;
       }
       String name = row.objectName();
-      if (name != null && !name.isBlank()) {
+      if (name != null
+          && !name.isBlank()
+          && row.confidenceScore() != null
+          && row.confidenceScore().compareTo(LEGACY_DETECTION_MIN_CONFIDENCE) >= 0) {
         detectedObjects.add(name);
       }
     }
