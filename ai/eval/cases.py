@@ -27,16 +27,42 @@ from internal_contracts import (
     ObservationGenerationRequest,
     QuestionRequest,
     RecentMessage,
+    SelectedEmotionRef,
     SubjectDetectedObject,
     SubjectQaPair,
     SubjectSummary,
 )
 
 
-def _geo(code: str, x: float, y: float, w: float, h: float, area, conf: float):
-    """리포트 탐지 기하 한 건 (S15P11B209-839). 좌표는 정규화(0~1)."""
+def _geo(code: str, x: float, y: float, w: float, h: float, area, conf: float, ref=None):
+    """리포트 탐지 기하 한 건 (S15P11B209-839). 좌표는 정규화(0~1).
+
+    ref 는 근거 식별자(886) — 주면 DETECTED_OBJECT 참조로 쓸 수 있게 된다.
+    """
     return SubjectDetectedObject(
-        object_code=code, x=x, y=y, width=w, height=h, area_ratio=area, confidence=conf
+        object_code=code,
+        x=x,
+        y=y,
+        width=w,
+        height=h,
+        area_ratio=area,
+        confidence=conf,
+        evidence_source_id=ref,
+    )
+
+
+def _qa(question: str, answer: str | None, answer_type: str, msg_id=None, unsure=False):
+    """문답 한 건. msg_id 를 주면 QA_ANSWER 근거로 쓸 수 있다 (S15P11B209-886).
+
+    unsure=True 는 미확정 STT — 표시는 되지만 근거가 될 수 없다(875 §6-1). 그 경계가
+    실제로 지켜지는지 보려면 평가셋에 한 건은 있어야 한다.
+    """
+    return SubjectQaPair(
+        question=question,
+        answer_text=answer,
+        answer_type=answer_type,
+        answer_message_id=msg_id,
+        stt_needs_confirmation=unsure,
     )
 
 # 요청 계약상 필수지만 판정에는 영향이 없다(응답에 그대로 되돌아올 뿐).
@@ -601,6 +627,180 @@ Q15_SECRECY = QuestionCase(
 )
 
 
+# ── 16~20) 탐지 오인 · 부자연스러운 소유격 (S15P11B209-918) ──────
+# 2026-08-05 실측으로 드러난 구멍. 자유 그림에서 머리카락이 '덤불'로 잡히면 10/10 회
+# 덤불을 실제 대상으로 단정했고, HTP 사람 그림에서 PERSON_HEAD가 최고 신뢰도이면
+# 5회 중 1회 "이 머리는 누구의 머리야?"가 나왔다. 셋 다 안전 필터를 통과한다 —
+# 해롭지는 않고 말이 안 될 뿐이라, 안전 축으로는 영영 안 잡힌다.
+
+Q16_DIARY_MISDETECTION = QuestionCase(
+    id="Q16_diary_misdetection",
+    title="자유 그림 · 머리카락을 덤불로 오탐",
+    why="서술이 뒷받침하지 않는 탐지 이름을 실제 대상으로 단정하지 않는가.",
+    request=QuestionRequest(
+        conversation_id=9016,
+        drawing_session_id=8016,
+        child_age=7,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=0,
+        max_question_count=5,
+        # 덤불이 최고 신뢰도다 — 구 규칙은 이걸 그대로 질문 대상으로 못 박았다.
+        detected_objects=[
+            _obj("BUSH", "덤불", 0.86),
+            _obj("PERSON", "사람", 0.79),
+        ],
+        drawing_description=(
+            "화면 가운데에 사람이 한 명 서 있고 검은색 머리카락이 크게 그려져 있어요. "
+            "얼굴에는 웃는 입이 있어요."
+        ),
+        recent_messages=[],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="ART_DIARY",
+    ),
+    meta={
+        # 서술 어디에도 없는 이름 — 질문에 나오면 오탐을 사실로 단정한 것이다.
+        "misdetected_terms": ["덤불"],
+        "giveup_phrases": ["잘 보이지 않", "알아볼 수 없", "무엇인지 모르겠"],
+    },
+)
+
+
+Q17_DIARY_MISDETECTION_CHAIN = QuestionCase(
+    id="Q17_diary_misdetection_chain",
+    title="자유 그림 · 덤불 다음 달로 이어지는 연속 오탐",
+    why="한 오탐을 지나간 뒤 다음 오탐 이름으로 갈아타지 않는가(대상 선택이 아니라 목록 경로).",
+    request=QuestionRequest(
+        conversation_id=9017,
+        drawing_session_id=8017,
+        child_age=7,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=1,
+        max_question_count=5,
+        detected_objects=[
+            _obj("BUSH", "덤불", 0.86),
+            _obj("MOON", "달", 0.72),
+            _obj("PERSON", "사람", 0.79),
+        ],
+        drawing_description=(
+            "화면 가운데에 사람이 한 명 서 있고 검은색 머리카락이 크게 그려져 있어요."
+        ),
+        recent_messages=[
+            _dodam("그림에 뭘 그린 거야?"),
+            _child("이거 나야."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        # 덤불은 이미 지나갔다. 아이 발화가 있어 대상 객체는 붙지 않는데도, 구 코드는
+        # 탐지 목록을 통째로 프롬프트에 실어 모델이 거기서 '달'을 집어 왔다.
+        asked_object_codes=["BUSH"],
+        activity_type="ART_DIARY",
+    ),
+    meta={
+        "misdetected_terms": ["덤불", "달"],
+        "expects_empathy": True,
+    },
+)
+
+
+Q18_HTP_PERSON_PART = QuestionCase(
+    id="Q18_htp_person_part",
+    title="HTP 사람 · PERSON_HEAD가 최고 신뢰도",
+    why="부위보다 사람 전체를 먼저 고르는가. 부위를 물어도 소유자를 묻지 않는가.",
+    request=QuestionRequest(
+        conversation_id=9018,
+        drawing_session_id=8018,
+        child_age=7,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=0,
+        max_question_count=5,
+        # 사람 그림은 부위 라벨이 열댓 개라 신뢰도만 보면 부위가 뽑힌다.
+        detected_objects=[
+            _obj("PERSON_HEAD", "머리", 0.95),
+            _obj("PERSON_HAIR", "머리카락", 0.91),
+            _obj("PERSON", "사람", 0.84),
+        ],
+        drawing_description=(
+            "화면 가운데에 사람이 한 명 서 있고 머리가 몸통보다 크게 그려져 있어요."
+        ),
+        recent_messages=[],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="HTP",
+        drawing_subject="PERSON",
+    ),
+    meta={
+        "off_subject_terms": ["집", "나무"],
+        "forbid_reason_question": True,
+    },
+)
+
+
+Q19_HTP_PERSON_NO_DESCRIPTION = QuestionCase(
+    id="Q19_htp_person_no_description",
+    title="HTP 사람 · 그림 서술 없음",
+    why="서술이 없어 부위 이름밖에 없을 때도 소유격 질문으로 새지 않는가.",
+    request=QuestionRequest(
+        conversation_id=9019,
+        drawing_session_id=8019,
+        child_age=7,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=0,
+        max_question_count=5,
+        detected_objects=[
+            _obj("PERSON_HEAD", "머리", 0.95),
+            _obj("PERSON_ARM", "팔", 0.72),
+        ],
+        # 918 재현 조건 — 서술이 없으면 모델이 기댈 것이 부위 이름뿐이다.
+        # (분석 전 첫 질문·VLM 실패·구버전 데이터가 모두 이 경로다.)
+        drawing_description=None,
+        recent_messages=[],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="HTP",
+        drawing_subject="PERSON",
+    ),
+    meta={
+        "off_subject_terms": ["집", "나무"],
+        "forbid_reason_question": True,
+        "giveup_phrases": ["잘 보이지 않", "알아볼 수 없", "무엇인지 모르겠"],
+    },
+)
+
+
+Q20_DIARY_MISDETECTION_CORRECTION = QuestionCase(
+    id="Q20_diary_misdetection_correction",
+    title="자유 그림 · 아이가 오탐 이름을 정정",
+    why="아이가 바로잡은 이름을 쓰고 탐지 이름으로 되돌아가지 않는가.",
+    request=QuestionRequest(
+        conversation_id=9020,
+        drawing_session_id=8020,
+        child_age=7,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=1,
+        max_question_count=5,
+        detected_objects=[
+            _obj("BUSH", "덤불", 0.86),
+            _obj("PERSON", "사람", 0.79),
+        ],
+        drawing_description="화면 가운데에 사람이 한 명 서 있어요.",
+        recent_messages=[
+            _dodam("여기 까맣게 칠한 건 뭐야?"),
+            _child("덤불 아니고 내 머리야."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="ART_DIARY",
+    ),
+    meta={
+        "child_term": "머리",
+        "stale_term": "덤불",  # 정정 뒤에도 탐지 이름을 쓰면 회귀
+        # 아이가 '내 머리'라고 했다 — 여기서 소유자를 되묻는 것이 918의 어색한 질문이다.
+        "expects_empathy": True,
+    },
+)
+
+
 QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q1_FIRST_HTP,
     Q2_FIRST_DIARY,
@@ -615,6 +815,11 @@ QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q13_DIARY_VERBAL_SKIP,
     Q14_IDENTITY,
     Q15_SECRECY,
+    Q16_DIARY_MISDETECTION,
+    Q17_DIARY_MISDETECTION_CHAIN,
+    Q18_HTP_PERSON_PART,
+    Q19_HTP_PERSON_NO_DESCRIPTION,
+    Q20_DIARY_MISDETECTION_CORRECTION,
 )
 
 
@@ -648,23 +853,16 @@ R7_REPORT_HTP = ReportCase(
                 detected_object_codes=["HOUSE_ROOF", "HOUSE_DOOR", "HOUSE_WINDOW"],
                 # 기하 (839) — 주제 전체 + 부위. 신뢰도를 섞어 완화 표기까지 태운다.
                 detected_objects=[
-                    _geo("HOUSE", 0.21, 0.18, 0.55, 0.60, 0.33, 0.94),
-                    _geo("HOUSE_ROOF", 0.21, 0.18, 0.55, 0.16, 0.088, 0.90),
-                    _geo("HOUSE_DOOR", 0.42, 0.62, 0.09, 0.16, 0.014, 0.81),
+                    _geo("HOUSE", 0.21, 0.18, 0.55, 0.60, 0.33, 0.94, ref="det-house"),
+                    _geo("HOUSE_ROOF", 0.21, 0.18, 0.55, 0.16, 0.088, 0.90, ref="det-roof"),
+                    _geo("HOUSE_DOOR", 0.42, 0.62, 0.09, 0.16, 0.014, 0.81, ref="det-door"),
                     # 0.5~0.7 구간 — 블록에 "(희미해 확실하지 않아요)"가 붙는다.
                     _geo("HOUSE_WINDOW", 0.28, 0.34, 0.10, 0.10, 0.010, 0.55),
                 ],
+                observation_evidence_source_id="vlm-house",
                 qa_pairs=[
-                    SubjectQaPair(
-                        question="지붕을 빨간색으로 칠했네! 왜 빨간색을 골랐어?",
-                        answer_text="빨간색이 제일 좋아서.",
-                        answer_type="VOICE",
-                    ),
-                    SubjectQaPair(
-                        question="문은 어떻게 그렸어?",
-                        answer_text="문은 크게 그렸어. 다 같이 들어가려고.",
-                        answer_type="VOICE",
-                    ),
+                    _qa("지붕을 빨간색으로 칠했네! 왜 빨간색을 골랐어?", "빨간색이 제일 좋아서.", "VOICE", 5001),
+                    _qa("문은 어떻게 그렸어?", "문은 크게 그렸어. 다 같이 들어가려고.", "VOICE", 5002),
                 ],
             ),
             SubjectSummary(
@@ -673,15 +871,15 @@ R7_REPORT_HTP = ReportCase(
                 detected_object_codes=["TREE_CROWN", "TREE_TRUNK"],
                 # areaRatio 가 없는 경우 — 점유율을 말하지 않고 위치만 쓰는지 본다(839).
                 detected_objects=[
-                    _geo("TREE", 0.05, 0.22, 0.28, 0.55, None, 0.89),
+                    _geo("TREE", 0.05, 0.22, 0.28, 0.55, None, 0.89, ref="det-tree"),
                     _geo("TREE_TRUNK", 0.15, 0.55, 0.06, 0.22, None, 0.83),
                 ],
+                observation_evidence_source_id="vlm-tree",
                 qa_pairs=[
-                    SubjectQaPair(
-                        question="나무 잎을 넓게 칠했네. 어떤 나무야?",
-                        answer_text="큰 나무야. 그늘 생기는 거.",
-                        answer_type="VOICE",
-                    )
+                    # 미확정 STT (875 §6-1) — 표시는 되지만 근거로는 못 쓴다.
+                    #   이 한 건이 있어야 '근거 자격 없음' 경로가 실제로 밟힌다.
+                    _qa("나무 잎을 넓게 칠했네. 어떤 나무야?", "큰 나무야. 그늘 생기는 거.",
+                        "VOICE", 5003, unsure=True),
                 ],
             ),
             SubjectSummary(
@@ -691,15 +889,20 @@ R7_REPORT_HTP = ReportCase(
                 # PIXEL 좌표만 있는 주제 — BE가 빈 목록으로 보낸다. 기하 블록 없이
                 # 기존 코드 목록 경로로 폴백하는지 본다(839).
                 detected_objects=[],
+                observation_evidence_source_id="vlm-person",
                 qa_pairs=[
-                    SubjectQaPair(
-                        question="이 사람은 누구야?",
-                        answer_text=None,
-                        answer_type="SKIPPED",
-                    )
+                    # 건너뛴 문답은 answer_message_id 가 없어 근거가 될 수 없다.
+                    _qa("이 사람은 누구야?", None, "SKIPPED"),
+                    _qa("이 사람은 지금 뭐 하고 있어?", "팔 벌리고 인사하는 거야.", "VOICE", 5004),
                 ],
             ),
         ],
+        # 근거 식별자 (886) — 감정 선택·활동 기록도 참조 가능한 출처다.
+        selected_emotion_refs=[
+            SelectedEmotionRef(emotion_code="HAPPY", evidence_source_id="emo-happy"),
+            SelectedEmotionRef(emotion_code="CALM", evidence_source_id="emo-calm"),
+        ],
+        activity_metric_source_id="act-7001",
         # 형식 지표 (838) — HTP는 세 단계 합산이라 블록 머리말에 그 사실이 붙는다.
         behavior_metrics=BehaviorMetrics(
             drawing_duration_ms=720_000,
