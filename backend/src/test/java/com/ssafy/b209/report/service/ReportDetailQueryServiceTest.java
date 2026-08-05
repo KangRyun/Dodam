@@ -29,11 +29,11 @@ import com.ssafy.b209.report.repository.ReportConversationSummaryViewRepository;
 import com.ssafy.b209.report.repository.ReportDetailViewRepository;
 import com.ssafy.b209.report.repository.ReportDetectedObjectRow;
 import com.ssafy.b209.report.repository.ReportDetectedObjectViewRepository;
-import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportDrawingAssetViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingEmotionViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingSessionViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingTypeViewRepository;
+import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideViewRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationViewRepository;
 import java.lang.reflect.Constructor;
@@ -81,6 +81,21 @@ class ReportDetailQueryServiceTest {
   @Mock private ReportDetectedObjectViewRepository detectedObjectRepository;
   @Mock private ReportDrawnItemRepository drawnItemRepository;
 
+  @Mock
+  private com.ssafy.b209.report.repository.ReportPublicInterpretationRepository
+      interpretationRepository;
+
+  @Mock
+  private com.ssafy.b209.report.repository.ReportEvidenceItemRepository evidenceItemRepository;
+
+  @Mock private com.ssafy.b209.report.repository.ReportParentGuideRepository parentGuideRepository;
+
+  @Mock private com.ssafy.b209.report.repository.ReportCrisisAlertRepository crisisAlertRepository;
+
+  @Mock
+  private com.ssafy.b209.report.repository.ReportMessageConfirmationViewRepository
+      messageConfirmationRepository;
+
   private ReportDetailQueryService service;
 
   @BeforeEach
@@ -100,6 +115,11 @@ class ReportDetailQueryServiceTest {
             conversationSummaryRepository,
             detectedObjectRepository,
             drawnItemRepository,
+            interpretationRepository,
+            evidenceItemRepository,
+            parentGuideRepository,
+            crisisAlertRepository,
+            messageConfirmationRepository,
             new DrawingAssetFileUrlFactory());
   }
 
