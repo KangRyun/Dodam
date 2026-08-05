@@ -4,6 +4,8 @@ import com.ssafy.b209.analysis.domain.AnalysisConversationSummary;
 import com.ssafy.b209.analysis.domain.AnalysisObservationResult;
 import com.ssafy.b209.analysis.domain.ConversationEmotionSource;
 import com.ssafy.b209.analysis.domain.DrawingAnalysis;
+import com.ssafy.b209.analysis.domain.DrawingCoordinateSpace;
+import com.ssafy.b209.analysis.domain.DrawingDetectedObject;
 import com.ssafy.b209.analysis.domain.ObservationReviewStatus;
 import com.ssafy.b209.analysis.repository.AnalysisConversationSummaryRepository;
 import com.ssafy.b209.analysis.repository.AnalysisObservationResultRepository;
@@ -313,20 +315,30 @@ public class ObservationReportPersistenceService {
           observationResultRepository.findLatestByDrawingSessionId(contextSessionId).orElse(null);
       String drawingDescription =
           subjectObservation == null ? null : subjectObservation.getOverallSummary();
-      // 코드만 뽑아 버리면 AI 가 근거를 가리킬 때 조합키를 조립할 수밖에 없다(계약 §4에서 금지).
-      // 같은 재료를 행 식별자와 함께 담아 참조 가능한 형태로 보낸다 (S15P11B209-906).
-      List<ObservationGenerationContext.DetectedObjectRef> detectedObjects =
-          subjectObservation == null
-              ? List.of()
-              : subjectObservation.getAnalysis().getDetections().stream()
-                  .map(
-                      detection ->
-                          new ObservationGenerationContext.DetectedObjectRef(
-                              detection.getId(), detection.getLabel()))
-                  .toList();
+      List<DrawingDetectedObject> detections =
+          subjectObservation == null ? List.of() : subjectObservation.getAnalysis().getDetections();
+      // 코드 목록은 탐지 전부를 담는다 — 좌표계와 무관하게 관찰 서술의 재료이기 때문이다.
       List<String> detectedObjectCodes =
-          detectedObjects.stream()
-              .map(ObservationGenerationContext.DetectedObjectRef::objectCode)
+          detections.stream().map(DrawingDetectedObject::getLabel).toList();
+      // 코드만 뽑아 버리면 AI 가 근거를 가리킬 때 조합키를 조립할 수밖에 없다(계약 §4에서 금지).
+      // 같은 재료를 행 식별자·정규화 기하와 함께 담아 참조 가능한 형태로 보낸다 (S15P11B209-906/837).
+      //   PIXEL 행을 거르는 이유는 아래 isNormalized javadoc.
+      List<ObservationGenerationContext.DetectedObjectRef> detectedObjects =
+          detections.stream()
+              .filter(ObservationReportPersistenceService::isNormalized)
+              .map(
+                  detection ->
+                      new ObservationGenerationContext.DetectedObjectRef(
+                          detection.getId(),
+                          detection.getLabel(),
+                          detection.getX(),
+                          detection.getY(),
+                          detection.getWidth(),
+                          detection.getHeight(),
+                          // areaRatio 는 저장된 값만 쓴다. width * height 로 채우지 않는다 —
+                          //   추정값을 관찰 사실로 적으면 근거가 아닌 것이 근거 자리에 들어간다(AI 계약 명시).
+                          detection.getAreaRatio(),
+                          detection.getConfidence()))
               .toList();
       Long observationResultId = subjectObservation == null ? null : subjectObservation.getId();
       // 서술·코드·문답이 전부 비면 담지 않는다 — 빈 항목은 AI 프롬프트에 노이즈만 더한다.
@@ -382,6 +394,29 @@ public class ObservationReportPersistenceService {
             contextSessionIds));
   }
 
+  /**
+   * 이 탐지 행의 좌표를 AI 에 보낼 수 있는지 판정한다 (S15P11B209-837).
+   *
+   * <p><b>정규화 좌표계만 통과시킨다.</b> AI 는 캔버스 원본 크기를 모르므로 픽셀 좌표로는 용지 점유율을 계산할 수 없다(계약 합의 사항). 픽셀값을 0~1 비율인
+   * 것처럼 넘기면 <b>"종이의 대부분을 차지한다"</b> 같은 없는 관찰이 만들어진다 — 좌표 하나가 관찰 문장이 되는 경로라 좌표계를 틀리면 그대로 아이에 대한 거짓
+   * 서술이 된다.
+   *
+   * <p>그래서 픽셀 행은 <b>변환하지 않고 뺀다.</b> 변환하려면 캔버스 원본 크기가 필요한데 탐지 행에도 자산 메타에도 없다. 없는 값을 추정해 채우느니 그 그림의
+   * 기하를 보내지 않는 편이 옳다 — 코드 목록({@code detectedObjectCodes})은 그대로 실리므로 관찰 서술 재료는 잃지 않는다.
+   *
+   * <p>좌표가 하나라도 비어 있으면 역시 뺀다. 부분 좌표로는 위치도 크기도 말할 수 없다.
+   *
+   * @param detection 탐지 행
+   * @return 정규화 좌표 네 값이 모두 있으면 {@code true}
+   */
+  private static boolean isNormalized(DrawingDetectedObject detection) {
+    return detection.getCoordinateSpace() == DrawingCoordinateSpace.NORMALIZED
+        && detection.getX() != null
+        && detection.getY() != null
+        && detection.getWidth() != null
+        && detection.getHeight() != null;
+  }
+
   /** 주제별 수집 대상 세션과 HTP 주제의 쌍이다 (S15P11B209-741). 그림일기·단독 세션은 주제가 {@code null}. */
   private record SubjectSessionRef(Long drawingSessionId, String drawingSubject) {}
 
@@ -423,8 +458,10 @@ public class ObservationReportPersistenceService {
           result.confidence(),
           now);
 
+      // AI 가 실어 보낸 검토 상태를 그대로 저장한다. 모르는 값·null 은 fromAiStatus 가 초안으로 떨어뜨리므로
+      //   해석 실패는 "공개하지 않는다" 쪽으로만 기운다.
       AnalysisObservationResult observation =
-          AnalysisObservationResult.aiDraft(
+          AnalysisObservationResult.of(
               analysis,
               1,
               draft.overallSummary(),
@@ -434,6 +471,7 @@ public class ObservationReportPersistenceService {
               draft.guardianGuidance(),
               draft.followUpQuestion(),
               draft.expertReviewRequired(),
+              ObservationReviewStatus.fromAiStatus(draft.status()),
               draft.disclaimer(),
               ColumnTextLimiter.fit(
                   result.modelVersion(),
@@ -490,10 +528,10 @@ public class ObservationReportPersistenceService {
               context.skippedCount(),
               summary == null ? null : summary.summaryText()));
 
-      boolean expertReviewed = observation.getReviewStatus() != ObservationReviewStatus.AI_DRAFT;
+      boolean reviewed = observation.getReviewStatus().isReviewed();
       saveActivityNotes(report, safeList(result.activityNotes()));
       saveDrawnItems(report, result);
-      saveObservedFeatures(report, draft.features(), expertReviewed);
+      saveObservedFeatures(report, draft.features(), reviewed);
       saveKeyConversations(report, context.keyConversations());
       saveFollowUpGuides(report, safeList(result.followUpGuides()));
       saveGuardianQuestions(report, safeList(result.guardianQuestions()));
@@ -893,8 +931,19 @@ public class ObservationReportPersistenceService {
     }
   }
 
+  /**
+   * 관찰 특징을 노출 범위와 함께 저장한다 (S15P11B209-931).
+   *
+   * <p>위 {@code savePublicInterpretations} 와 저장·노출 경로가 다르다. 경향 해석은 계약 §4-2 대로 {@code
+   * resolveVisibility()} 를 타지 않지만, 관찰 특징은 이 경로를 그대로 쓰되 판단 재료인 검토 상태에 {@code AI_REVIEWED} 가 생겨 비로소
+   * 통과 가능해졌다 — 그전에는 전이 경로가 없어 항상 미검토였고, 그래서 97건 전부가 EXPERT_ONLY 였다.
+   *
+   * @param report 대상 리포트
+   * @param features AI 가 보낸 관찰 특징 초안 목록
+   * @param reviewed 이 리포트의 관찰 결과가 검토를 통과했는지 여부
+   */
   private void saveObservedFeatures(
-      Report report, List<ObservedFeatureDraft> features, boolean expertReviewed) {
+      Report report, List<ObservedFeatureDraft> features, boolean reviewed) {
     List<ReportObservedFeature> entities = new ArrayList<>();
     List<ObservedFeatureDraft> source = safeList(features);
     for (int index = 0; index < source.size(); index++) {
@@ -910,7 +959,7 @@ public class ObservationReportPersistenceService {
                   feature.title(), FEATURE_TITLE_LIMIT, "report_observed_features.title"),
               feature.description(),
               feature.evidenceSummary(),
-              resolveVisibility(feature.visibilityScope(), expertReviewed),
+              resolveVisibility(feature.visibilityScope(), reviewed),
               index));
     }
     observedFeatureRepository.saveAll(entities);
@@ -960,8 +1009,26 @@ public class ObservationReportPersistenceService {
     guardianQuestionRepository.saveAll(entities);
   }
 
-  private static ReportFeatureVisibility resolveVisibility(String value, boolean expertReviewed) {
-    if (expertReviewed && "REVIEWED_GUARDIAN".equals(value)) {
+  /**
+   * 관찰 특징 하나의 노출 범위를 확정한다.
+   *
+   * <p><b>두 조건을 모두 만족해야 보호자에게 열린다.</b> ① 리포트의 관찰 결과가 검토를 통과했고({@link
+   * ObservationReviewStatus#isReviewed()}), ② AI 가 그 특징을 {@code REVIEWED_GUARDIAN} 으로 표시했다. 리포트 단위
+   * 판정과 항목 단위 판정이 따로 있는 이유는, 검토를 통과한 리포트 안에서도 개별 항목은 보호자에게 바로 열지 않는 편이 나은 것이 섞이기 때문이다.
+   *
+   * <p>{@code AI_REVIEWED} 가 생기기 전에는 ①이 <b>구조적으로 항상 거짓</b>이어서 모든 특징이 {@code EXPERT_ONLY} 로 떨어졌다.
+   * 그리고 <b>기존 테스트는 전부 통과했다</b> — 전부 "노출되지 않는지"만 확인했기 때문이다. 이 함수를 고칠 때는 <b>열리는 경로를 검증하는 테스트</b>가 반드시
+   * 함께 있어야 한다.
+   *
+   * <p>{@code EXPERT_ONLY} 는 이제 "사람 전문가 대기열"이 아니라 <b>보호자에게 바로 열지 않는다</b>는 뜻이다 — 사람 상담 권유·위기 경로에서만
+   * 쓴다.
+   *
+   * @param value AI 가 보낸 노출 범위 문자열
+   * @param reviewed 리포트의 관찰 결과가 검토를 통과했는지 여부
+   * @return 확정된 노출 범위이며 판정할 수 없으면 {@link ReportFeatureVisibility#EXPERT_ONLY}
+   */
+  private static ReportFeatureVisibility resolveVisibility(String value, boolean reviewed) {
+    if (reviewed && "REVIEWED_GUARDIAN".equals(value)) {
       return ReportFeatureVisibility.REVIEWED_GUARDIAN;
     }
     return ReportFeatureVisibility.EXPERT_ONLY;

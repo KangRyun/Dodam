@@ -753,6 +753,7 @@ class _DrawingScreenState extends State<DrawingScreen>
         width: _toolState.width,
       );
     });
+    _syncCoordinator.recordToolChange(_toolState.wireToolCode);
     _refreshVisibleCursor();
   }
 
@@ -776,6 +777,8 @@ class _DrawingScreenState extends State<DrawingScreen>
         _recentColors.removeRange(10, _recentColors.length);
       }
     });
+    // 팔레트를 끄는 동안 매 프레임 호출된다. journal이 마지막 값 하나로 합친다.
+    _syncCoordinator.recordColorChange(color);
     _refreshVisibleCursor();
   }
 
@@ -803,6 +806,7 @@ class _DrawingScreenState extends State<DrawingScreen>
         width: _toolState.width,
       );
     });
+    _syncCoordinator.recordToolChange(_toolState.wireToolCode);
     _refreshVisibleCursor();
   }
 
@@ -836,11 +840,12 @@ class _DrawingScreenState extends State<DrawingScreen>
       final localChange = _documentController.clearAll();
       if (!localChange.changed && !hadRestoredPixels) return _noDocumentChange;
       if (hadRestoredPixels) _draftRestoreController.startNewDrawing();
+      _syncCoordinator.recordCanvasClear();
       return const DrawingDocumentChange(
         changed: true,
         wireEffect: DrawingWireEffect.none,
       );
-    });
+    }, revisionAlreadyRecorded: true);
   }
 
   /// 상세 색상 팔레트를 연다. 태블릿은 팔레트 버튼 옆 팝오버, 모바일은 바텀 시트다.
@@ -924,6 +929,8 @@ class _DrawingScreenState extends State<DrawingScreen>
         width: thickness,
       );
     });
+    // 슬라이더를 끄는 동안 매 프레임 호출된다. journal이 마지막 값 하나로 합친다.
+    _syncCoordinator.recordThicknessChange(thickness);
     _refreshVisibleCursor();
   }
 
@@ -1828,6 +1835,9 @@ class _DrawingScreenState extends State<DrawingScreen>
         await _persistRasterChange(
           change,
           revisionAlreadyRecorded: change.wireStroke != null,
+          // 획 지우개 제스처는 이벤트를 남기지 않지만 문서에서는 되돌릴 수 있는
+          // 변경 하나다. journal이 이를 모르면 뒤이은 UNDO가 이벤트로 나가지 않는다.
+          undoableSnapshotChange: true,
         );
       }
     } on Object {
@@ -1912,7 +1922,9 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   /// 찍은 자리와 이어진 같은 색 영역을 현재 색으로 채운다.
   Future<void> _applyFill(Offset documentPoint) async {
-    await _runSnapshotMutation((mutationGeneration) async {
+    await _runSnapshotMutation(revisionAlreadyRecorded: true, (
+      mutationGeneration,
+    ) async {
       final source = await _captureRawDocumentImage();
       try {
         final patch = await _fillEngine.createPatch(
@@ -1933,6 +1945,13 @@ class _DrawingScreenState extends State<DrawingScreen>
             documentSize: patch.documentSize,
           );
           transferred = true;
+          // 채우기는 획이 아니라 이미지를 통째로 바꾸지만, 아이가 "여기를 이 색으로
+          // 칠했다"는 행동 자체는 관찰 대상이다. 찍은 자리와 고른 색을 함께 남긴다.
+          _syncCoordinator.recordFill(
+            color: _toolState.color,
+            documentPoint: documentPoint,
+            canvasSize: _documentSize,
+          );
           return change;
         } finally {
           if (!transferred) patch.image.dispose();
@@ -1946,8 +1965,9 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 콜백은 자신이 시작될 때의 세대를 받는다. 오래 걸리는 계산이 끝났을 때
   /// [_snapshotMutationGeneration] 이 달라졌으면 그 사이 문서가 바뀐 것이다.
   Future<void> _runSnapshotMutation(
-    Future<DrawingDocumentChange> Function(int mutationGeneration) mutate,
-  ) async {
+    Future<DrawingDocumentChange> Function(int mutationGeneration) mutate, {
+    bool revisionAlreadyRecorded = false,
+  }) async {
     if (_isApplyingRasterMutation) return;
     final mutationGeneration = ++_snapshotMutationGeneration;
     setState(() {
@@ -1957,7 +1977,10 @@ class _DrawingScreenState extends State<DrawingScreen>
     _beginDrawingInput();
     try {
       final change = await mutate(mutationGeneration);
-      await _persistRasterChange(change);
+      await _persistRasterChange(
+        change,
+        revisionAlreadyRecorded: revisionAlreadyRecorded,
+      );
     } finally {
       _endDrawingInput();
       if (mounted) {
@@ -1979,10 +2002,13 @@ class _DrawingScreenState extends State<DrawingScreen>
   Future<void> _persistRasterChange(
     DrawingDocumentChange change, {
     bool revisionAlreadyRecorded = false,
+    bool undoableSnapshotChange = false,
   }) async {
     if (!change.changed || !mounted) return;
     _invalidatePendingCompletion();
-    if (!revisionAlreadyRecorded) _syncCoordinator.recordSnapshotChange();
+    if (!revisionAlreadyRecorded) {
+      _syncCoordinator.recordSnapshotChange(undoable: undoableSnapshotChange);
+    }
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted) return;
     setState(() => _rasterMutationAllowsDrawing = true);
@@ -2632,32 +2658,21 @@ class _DrawingScreenState extends State<DrawingScreen>
                   selectedTool: _tool,
                   selectedColor: _color,
                   selectedThickness: _thickness,
-                  onToolChanged: (tool) => setState(() {
-                    _toolState = DrawingToolState(
-                      instrument: tool == DrawingTool.eraser
-                          ? DrawingInstrument.eraser
-                          : DrawingInstrument.crayon,
-                      eraserMode: DrawingEraserMode.area,
-                      color: _toolState.color,
-                      width: _toolState.width,
-                    );
-                  }),
-                  onColorChanged: (color) => setState(() {
-                    _toolState = DrawingToolState(
-                      instrument: _toolState.instrument,
-                      eraserMode: _toolState.eraserMode,
-                      color: color,
-                      width: _toolState.width,
-                    );
-                  }),
-                  onThicknessChanged: (value) => setState(() {
-                    _toolState = DrawingToolState(
-                      instrument: _toolState.instrument,
-                      eraserMode: _toolState.eraserMode,
-                      color: _toolState.color,
-                      width: value,
-                    );
-                  }),
+                  onToolChanged: (tool) {
+                    setState(() {
+                      _toolState = DrawingToolState(
+                        instrument: tool == DrawingTool.eraser
+                            ? DrawingInstrument.eraser
+                            : DrawingInstrument.crayon,
+                        eraserMode: DrawingEraserMode.area,
+                        color: _toolState.color,
+                        width: _toolState.width,
+                      );
+                    });
+                    _syncCoordinator.recordToolChange(_toolState.wireToolCode);
+                  },
+                  onColorChanged: _setColor,
+                  onThicknessChanged: _setThickness,
                   canComplete:
                       !_canvasLocked &&
                       !_isCompleting &&

@@ -16,8 +16,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 /**
  * 유형별 라우팅 검증 (S15P11B209-780).
  *
- * <p>그림과 음성은 같은 버킷에 프리픽스로만 갈리므로, 잘못된 저장소를 부르면 엉뚱한 경로를 지우고도 성공으로 보고된다. 그래서 "어느 저장소를 불렀는가"를
- * 유형마다 못 박는다.
+ * <p>그림과 음성은 같은 버킷에 프리픽스로만 갈리므로, 잘못된 저장소를 부르면 엉뚱한 경로를 지우고도 성공으로 보고된다. 그래서 "어느 저장소를 불렀는가"를 유형마다 못
+ * 박는다.
  */
 @ExtendWith(MockitoExtension.class)
 class StorageDeletionRouterTest {

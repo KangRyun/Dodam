@@ -153,6 +153,22 @@ public class ReportPdfRenderer {
           .representativeUtterances()
           .forEach(utterance -> add(lines, "대표 발화: " + value(utterance.text())));
     }
+    // 화면에 실리는 공개 데이터는 PDF 에도 실린다(계약 S15P11B209-875 §11 — 화면엔 있고 PDF엔 없는 데이터 금지).
+    //   여기 담기는 것은 이미 보호자에게 열린 항목뿐이라 별도 노출 판정을 다시 하지 않는다.
+    if (report.observedFeatures() != null && !report.observedFeatures().isEmpty()) {
+      add(lines, "");
+      add(lines, "[이런 모습이 보였어요]");
+      report
+          .observedFeatures()
+          .forEach(
+              feature -> {
+                add(lines, "• " + value(feature.title()));
+                add(lines, "  " + value(feature.description()));
+                if (feature.evidenceSummary() != null && !feature.evidenceSummary().isBlank()) {
+                  add(lines, "  근거: " + feature.evidenceSummary());
+                }
+              });
+    }
     add(lines, "");
     add(lines, "[활동 기록]");
     if (report.activityFacts() != null) {

@@ -26,9 +26,10 @@ AI 파트가 별도로 보낸 "관찰 리포트 정책 및 API 변경 요청"과
 | ③ | 미확정 STT·위기 발화 — 표시와 근거 분리 | §6-1 |
 | ④ | `crisisAlert` 유형별 분기(`ABUSE_DISCLOSURE` 생성 금지) | §7-1 |
 | ⑤ | 서버 검증 2단 분리(구조 게이트 / 표현 필터) | §4-2 |
-| ⑥ | 기존 EXPERT_ONLY 강등 경로를 타지 않음 | §4-3 |
+| ⑥ | 기존 EXPERT_ONLY 강등 경로를 타지 않음 | §4-3 (2026-08-05 개정) |
 | ⑦ | 보호자 계약 §4 예외 개정 | `docs/api/report-detail-guardian-contract.md` §4-1~§4-4 (S15P11B209-885) |
 | ⑧ | 이 문서 자체 보완 4건 | §2·§5-1·§8-1·§9 |
+| ⑨ | **관찰 특징 공개 재정의** — `AI_REVIEWED` 신설, `observedFeatures[]` 추가 | §2-1 (2026-08-05) |
 
 관련 이슈: **885**(계약 §4 예외 — 이 문서 §0 확정 포함) · **886**(AI 요청 계약에 근거 식별자 수용) ·
 **887**(AI 응답 생성) · **888**(AI 구조 게이트) · **889**(AI 위기 재검사) · **890**(완료 — `crisis_guidance`
@@ -66,6 +67,7 @@ AI 파트가 별도로 보낸 "관찰 리포트 정책 및 API 변경 요청"과
   "evidenceItems":         [ /* EvidenceItem */ ],    // 4. 근거 풀(카드가 evidenceRefs로 참조)
   "subjectReports":        [ /* SubjectReport */ ],   // 5. HTP 그림
   "childExpression":       { /* ChildExpression */ } | null, // 아이의 표현 요약
+  "observedFeatures":      [ /* ObservedFeature */ ],  // 이런 모습이 보였어요(검토 통과분만) — §2-1
   "conversationSummary":   { /* ConversationSummary */ } | null,
   "activityFacts":         { /* ActivityFacts */ } | null,    // 객관 수치
   "parentGuides":          [ /* ParentGuide */ ],     // 보호자 가이드(4종)
@@ -74,8 +76,40 @@ AI 파트가 별도로 보낸 "관찰 리포트 정책 및 API 변경 요청"과
 }
 ```
 
-> **EXPERT_ONLY 데이터는 이 응답에 포함하지 않는다.** `attentionPoints`,
-> 전문가 전용 해석 등은 보호자 공개 응답에서 제외한다(FE가 숨기는 게 아니라 **응답에 없어야** 함).
+> **EXPERT_ONLY 데이터는 이 응답에 포함하지 않는다.** `attentionPoints`, 보호자에게 바로 열지 않기로 한 관찰
+> 특징 등은 보호자 공개 응답에서 제외한다(FE가 숨기는 게 아니라 **응답에 없어야** 함).
+> 다만 `visibilityScope`가 `REVIEWED_GUARDIAN`인 관찰 특징은 **공개 대상이며 `observedFeatures[]`로 실린다** —
+> 아래 §2-1.
+
+### 2-1. ObservedFeature (`observedFeatures[]`) — "이런 모습이 보였어요" (2026-08-05 개정)
+
+```jsonc
+{
+  "title": "집을 크게 그렸어요",              // 없으면 null
+  "description": "종이 가운데에 집을 크게 그렸어요.",
+  "evidenceSummary": "그림에서 확인했어요."    // 없으면 null
+}
+```
+
+**무엇이 바뀌었나.** 이전 계약은 관찰 특징(`report_observed_features`)을 통째로 보호자 응답에서 제외했다. 전제는
+"전문가가 검토해야 열린다"였는데 **그 전문가 검토 워크플로가 이 서비스에 존재하지 않았다.** `ObservationReviewStatus`
+값이 `AI_DRAFT` 하나뿐이라 `resolveVisibility()`의 검토 통과 판정이 구조적으로 항상 거짓이었고, 그래서 **저장된 97건이
+전부 `EXPERT_ONLY`** 였다. AI가 만든 관찰 카드가 **아무에게도 도달하지 않았다.**
+
+**결정(2026-08-05): 사람 전문가 없이 AI가 그 역할을 대신한다.**
+
+- `ObservationReviewStatus`에 **`AI_REVIEWED`** 를 추가한다. AI가 자체 검토를 통과시킨 결과에 이 상태를 실어 보낸다.
+  서버가 임의로 올리지 않으며, **모르는 값·누락은 `AI_DRAFT`로 떨어뜨린다**(실패는 닫히는 쪽으로만).
+- `visibilityScope` **어휘는 그대로 두고 뜻만 바꾼다**(DB 마이그레이션 회피).
+  - `REVIEWED_GUARDIAN` = AI 자체 검토 통과 → **보호자 응답에 포함**
+  - `EXPERT_ONLY` = 보호자에게 바로 열지 않음 → **사람 상담 권유·위기 경로 전용**
+- 한 항목이 열리려면 **리포트 단위**(`status = AI_REVIEWED`)와 **항목 단위**(`REVIEWED_GUARDIAN`)를 **둘 다** 만족해야 한다.
+- `expertReviewRequired`의 뜻도 재정의한다 = **"사람 상담 권유가 필요한 신호"**. 사람 검토 대기열이 아니므로
+  최상위 `expertReview`는 계속 `NOT_REQUESTED`·`available=false`다(오지 않을 결과를 보호자가 기다리게 하지 않는다).
+- **소급 적용하지 않는다.** 기존 97건은 `EXPERT_ONLY`로 남는다 — 검토를 거치지 않은 과거 리포트를 여는 셈이 되기 때문이다.
+  신규 생성분부터 적용된다.
+- 내부 코드 `featureCode`(예: `HOUSE_CENTER`)는 **응답에 담지 않는다.** 화면에 쓰지 않고, 실리면 표시될 여지만 생긴다.
+- 비진단 원칙은 그대로다. 검토 주체가 AI이므로 한계 고지(`limitations`·`nonDiagnosticNotice`)를 항상 함께 낸다.
 
 **보완(델타 ⑧-1):** 초안 §2에는 `evidenceItems`가 빠져 있었지만 §4는 "최상위에 근거 풀을 둔다"고 적고 있었고,
 FE DTO는 이미 최상위 `evidenceItems`를 읽는다(`report_dtos.dart:508`·`548`). 실제 구현을 기준으로 위 스키마에
@@ -181,8 +215,14 @@ AI 자기 신고가 되어 게이트가 무력해진다.
 보호자 화면에는 아무것도 나오지 않는다.** 그리고 **기존 테스트는 전부 통과한다**(모두 "노출되지 않는지"만 보므로).
 
 - `publicInterpretations`·`evidenceItems`는 **별도 저장**(`report_public_interpretations` 등)·**별도 노출 판단**을
-  쓰고 `resolveVisibility()`·`expertReviewed` 경로를 타지 않는다. 노출 여부는 §4-2의 1단 결과로 정한다.
-- 기존 `features`·`attentionPoints`의 EXPERT_ONLY 강등 규칙은 **그대로 둔다**(완화해서 해결하지 않는다).
+  쓰고 `resolveVisibility()`·검토 통과 판정 경로를 타지 않는다. 노출 여부는 §4-2의 1단 결과로 정한다.
+- `attentionPoints`는 계속 보호자 응답에서 제외한다.
+- **개정(2026-08-05):** 여기 적혀 있던 "기존 `features`의 EXPERT_ONLY 강등 규칙은 그대로 둔다"는 폐기한다.
+  그 규칙은 완화 대상이 아니라 **처음부터 통과가 불가능한 규칙**이었다 — 검토 통과 상태값 자체가 없었기 때문이다.
+  §2-1대로 `AI_REVIEWED` + `REVIEWED_GUARDIAN`인 항목은 `observedFeatures[]`로 공개한다.
+  `EXPERT_ONLY` 강등 자체(§4-2 2단 표현 안전 필터의 실패 처리)는 **그대로 유지**한다 — 강등된 항목은 응답에 실리지 않는다.
+- 이 문서의 원래 경고는 여전히 유효하다: **"노출되지 않는지"만 보는 검증은 전부 숨겨진 채 배포돼도 통과한다.**
+  그래서 `features` 쪽에도 **열리는 경로를 확인하는 검증**을 함께 두었다(§12-1 마지막 항목과 같은 취지).
 - 보호자 안전 규칙 쪽 근거·예외 조항은 `docs/api/report-detail-guardian-contract.md` §4-1~§4-4(S15P11B209-885).
 
 `sourceType` → 화면 라벨(FE 매핑):
@@ -375,6 +415,7 @@ HTP 세 그림 / 주요 경향 / 경향별 근거 / 그림 문답 / 일상 육�
 - [ ] `nonDiagnosticNotice` 고정 문구
 - [ ] `reportVersion` 재생성 시 증가
 - [ ] **EXPERT_ONLY(attentionPoints 등)는 공개 응답에서 제외**
+- [ ] `observedFeatures[]` — `AI_REVIEWED` + `REVIEWED_GUARDIAN` 항목만, `featureCode`·`visibilityScope` 미포함 (§2-1)
 - [ ] 모든 배열 빈 값 허용(오류 아님), tendency/guide 문구는 비진단·중립 어조
 
 ### 12-1. 안전 장치 체크리스트 (2026-08-05 델타 추가분)
@@ -389,7 +430,9 @@ HTP 세 그림 / 주요 경향 / 경향별 근거 / 그림 문답 / 일상 육�
 - [ ] 표현 안전 필터 **신규 구현**, 기준을 `ai/report_safety.py`와 일치
 - [ ] 구조 게이트 실패 = **미공개** / 표현 필터 실패 = **강등** — 다르게 처리
 - [ ] `publicInterpretations`가 `resolveVisibility()`·`expertReviewed` 경로를 **타지 않음**
-- [ ] 기존 `features`는 여전히 EXPERT_ONLY로 강등됨(**회귀 검증**)
+- [ ] 검토를 통과한 `features`가 상세 API와 PDF에 **실제로 노출됨**(§2-1 — 닫힘만 보는 검증은 전부 숨겨져도 통과한다)
+- [ ] 모르는·누락된 `status`가 `AI_DRAFT`로 떨어져 **닫히는지**(실패 방향 고정)
+- [ ] 기존 97건은 소급 공개되지 **않는지**
 - [ ] 활동 수치 ms→초 변환에서 `null`/`0` 구분
 - [ ] `interpretationRefs`는 같은 응답의 배열 인덱스이며 버전 스냅샷 안에서 순서 재정렬 금지
 - [ ] **(긍정 검증·필수)** 조건을 충족한 경향 카드가 상세 API와 **PDF에 실제로 노출됨**

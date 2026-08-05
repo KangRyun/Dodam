@@ -24,7 +24,7 @@ final class DrawingObjectDetectionController extends ChangeNotifier {
   DrawingObjectDetectionController({
     required this.saveDraft,
     required this.requestDetection,
-    this.debounceDuration = const Duration(seconds: 3),
+    this.debounceDuration = const Duration(seconds: 6),
   });
 
   final DraftSaveForDetection saveDraft;
@@ -56,7 +56,7 @@ final class DrawingObjectDetectionController extends ChangeNotifier {
     _setStatus(DrawingObjectDetectionStatus.idle);
   }
 
-  /// 마지막 입력 이후 3초 동안 추가 입력이 없을 때 탐지 흐름을 시작한다.
+  /// 마지막 입력 이후 6초 동안 추가 입력이 없을 때 탐지 흐름을 시작한다.
   void onDrawingInputEnded() {
     if (_disposed) return;
     _debounceTimer?.cancel();

@@ -239,6 +239,7 @@ final class StrokeBatchQueue {
             undoCountDelta: conversion.undoCount,
             redoCountDelta: conversion.redoCount,
             eraseCountDelta: conversion.eraseCount,
+            pauseDurationMsDelta: conversion.pauseDurationMs,
           ),
         );
         _buffer.removeRange(0, conversion.consumedRawEventCount);
@@ -338,6 +339,7 @@ final class StrokeBatchConversion {
     required this.undoCount,
     required this.redoCount,
     required this.eraseCount,
+    this.pauseDurationMs = 0,
   });
 
   final List<StrokeBatchEventDto> events;
@@ -345,6 +347,10 @@ final class StrokeBatchConversion {
   final int undoCount;
   final int redoCount;
   final int eraseCount;
+
+  /// 이 배치에 담긴 PAUSE~RESUME 짝의 합이다. 배치 이벤트에는 절대 시각 필드가
+  /// 없어 멈춤 길이를 실을 곳이 지표뿐이다.
+  final int pauseDurationMs;
 }
 
 abstract final class StrokeBatchEventConverter {
@@ -353,6 +359,8 @@ abstract final class StrokeBatchEventConverter {
     var undoCount = 0;
     var redoCount = 0;
     var eraseCount = 0;
+    var pauseDurationMs = 0;
+    int? openPauseAt;
     var index = 0;
     var previousSequence = 0;
 
@@ -362,19 +370,24 @@ abstract final class StrokeBatchEventConverter {
         throw StateError('Stroke event sequence must be strictly increasing.');
       }
 
-      if (event.type == DrawingEventTypes.undo ||
-          event.type == DrawingEventTypes.redo) {
-        converted.add(
-          StrokeBatchEventDto(
-            sequence: event.seq,
-            eventType: event.type,
-            points: const [],
-          ),
-        );
-        if (event.type == DrawingEventTypes.undo) {
-          undoCount += 1;
-        } else {
-          redoCount += 1;
+      // 획을 이루지 않는 이벤트는 좌표를 합칠 것이 없어 그대로 내보낸다.
+      if (!DrawingEventTypes.isStrokePart(event.type)) {
+        converted.add(_convertStandalone(event));
+        switch (event.type) {
+          case DrawingEventTypes.undo:
+            undoCount += 1;
+          case DrawingEventTypes.redo:
+            redoCount += 1;
+          case DrawingEventTypes.pause:
+            openPauseAt = event.t;
+          case DrawingEventTypes.resume:
+            if (openPauseAt case final start?) {
+              final elapsed = event.t - start;
+              if (elapsed > 0) pauseDurationMs += elapsed;
+              openPauseAt = null;
+            }
+          default:
+            break;
         }
         previousSequence = event.seq;
         index += 1;
@@ -383,7 +396,7 @@ abstract final class StrokeBatchEventConverter {
 
       if (event.type != DrawingEventTypes.strokeStart) {
         throw StateError(
-          'Stroke batch must start with STROKE_START, UNDO, or REDO.',
+          'Stroke batch must start with STROKE_START or a standalone event.',
         );
       }
 
@@ -406,6 +419,7 @@ abstract final class StrokeBatchEventConverter {
           undoCount: undoCount,
           redoCount: redoCount,
           eraseCount: eraseCount,
+          pauseDurationMs: pauseDurationMs,
         );
       }
 
@@ -432,6 +446,29 @@ abstract final class StrokeBatchEventConverter {
       undoCount: undoCount,
       redoCount: redoCount,
       eraseCount: eraseCount,
+      pauseDurationMs: pauseDurationMs,
+    );
+  }
+
+  /// 획이 아닌 이벤트를 그대로 배치 이벤트로 옮긴다.
+  ///
+  /// UNDO·PAUSE처럼 좌표가 없는 이벤트는 빈 목록으로 나가고(백엔드 계약이
+  /// `points`를 `@NotNull`로만 요구한다), FILL처럼 실제로 찍은 자리가 있는
+  /// 이벤트만 좌표 한 점을 싣는다. 없는 좌표를 지어내지 않는다.
+  static StrokeBatchEventDto _convertStandalone(StrokeEventDto event) {
+    final x = event.x;
+    final y = event.y;
+    return StrokeBatchEventDto(
+      sequence: event.seq,
+      eventType: event.type,
+      tool: event.tool,
+      color: event.color,
+      width: event.thickness,
+      points: x == null || y == null
+          ? const []
+          : List.unmodifiable([
+              StrokePointDto(x: x, y: y, t: 0, pressure: event.pressure),
+            ]),
     );
   }
 
@@ -591,7 +628,7 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
     if (_disposed || !_started || _paused || _stopped) return;
     _flushTimer ??= Timer.periodic(
       policy.flushInterval,
-      (_) => unawaited(batchQueue.flush()),
+      (_) => unawaited(_flushBatchQueue()),
     );
     if (sessionId != null && repository != null) {
       _autosaveTimer ??= Timer.periodic(
@@ -614,6 +651,9 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
   void resume() {
     if (_disposed || _stopped || !_started) return;
     _paused = false;
+    // 앱이 가려져 있던 시간은 캔버스 앞에서 망설인 시간이 아니다. 멈춤 기준 시각을
+    // 재개 시점으로 옮겨 백그라운드 구간이 멈춤으로 기록되지 않게 한다.
+    journal.resetIdleClock();
     _startTimers();
   }
 
@@ -632,6 +672,9 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
   Future<void> beginCompletion() async {
     if (_disposed || _stopped) return;
     _completing = true;
+    // 마지막 획 뒤에 손을 놓고 그대로 완료를 누른 구간은 여기서만 닫을 수 있다.
+    journal.closeTrailingPause();
+    _enqueueJournalEvents();
     pause();
     final saving = _saveInFlight;
     if (saving != null) await saving;
@@ -652,37 +695,108 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
 
   List<StrokeEventDto> recordStroke(DrawingStroke stroke, Size canvasSize) {
     final events = journal.recordStroke(stroke, canvasSize);
-    batchQueue.addEvents(events);
-    if (events.isNotEmpty) _markDirty();
+    _enqueueJournalEvents();
     return events;
   }
 
   StrokeEventDto? recordUndo() {
     final event = journal.recordUndo();
-    if (event != null) {
-      batchQueue.addEvents([event]);
-      _markDirty();
-    }
+    _enqueueJournalEvents();
     return event;
   }
 
   StrokeEventDto? recordRedo() {
     final event = journal.recordRedo();
-    if (event != null) {
-      batchQueue.addEvents([event]);
-      _markDirty();
-    }
+    _enqueueJournalEvents();
     return event;
   }
 
+  /// 전체 지우기를 이벤트로 남긴다.
+  StrokeEventDto recordCanvasClear() {
+    final event = journal.recordCanvasClear();
+    _enqueueJournalEvents();
+    return event;
+  }
+
+  /// 영역 채우기를 이벤트로 남긴다. 채운 자리 좌표까지 함께 보낸다.
+  StrokeEventDto recordFill({
+    required Color color,
+    required Offset documentPoint,
+    required Size canvasSize,
+  }) {
+    final event = journal.recordFill(
+      color: color,
+      documentPoint: documentPoint,
+      canvasSize: canvasSize,
+    );
+    _enqueueJournalEvents();
+    return event;
+  }
+
+  /// 도구 전환을 남긴다. 값은 다음 캔버스 행동이나 배치 전송 직전에 굳는다.
+  void recordToolChange(String toolCode) {
+    if (_settingsRecordingBlocked) return;
+    journal.recordToolChange(toolCode);
+    _enqueueJournalEvents();
+  }
+
+  /// 색 변경을 남긴다. 팔레트를 끄는 동안의 중간 값은 마지막 하나로 합쳐진다.
+  void recordColorChange(Color color) {
+    if (_settingsRecordingBlocked) return;
+    journal.recordColorChange(color);
+    _enqueueJournalEvents();
+  }
+
+  /// 굵기 변경을 남긴다. 슬라이더를 끄는 동안의 중간 값은 마지막 하나로 합쳐진다.
+  void recordThicknessChange(double thickness) {
+    if (_settingsRecordingBlocked) return;
+    journal.recordThicknessChange(thickness);
+    _enqueueJournalEvents();
+  }
+
+  /// 완료 요청이 시작된 뒤의 도구 조작은 기록하지 않는다.
+  ///
+  /// 완료 metadata의 `lastEventSequence`는 완료 직전 journal 값으로 굳는다. 그 뒤에
+  /// 새 이벤트가 늘어나면 재시도 때 같은 metadata가 실제 event 순서보다 뒤처져
+  /// 서버가 보는 두 값이 어긋난다. 완료 확인 창을 띄운 동안의 도구 조작은 그림 행동도
+  /// 아니므로 아예 남기지 않는다. [cancelCompletion] 뒤에는 다시 기록한다.
+  bool get _settingsRecordingBlocked => _disposed || _stopped || _completing;
+
   /// 그림 이벤트를 만들지 않는 문서 변경을 저장 대상으로 기록한다.
   ///
-  /// 채우기·영역 지우개·전체 지우기는 journal event 없이 캔버스 이미지만 바꾸므로,
+  /// 획 지우개 제스처는 지운 결과를 event 로 표현할 수 없어 캔버스 이미지만 바꾸므로,
   /// 이벤트 순서가 그대로여도 새 초안을 올려야 한다. 가짜 event를 만들지 않고
   /// 문서 revision만 올려 replay cutoff 의미를 지킨다.
-  void recordSnapshotChange() {
+  ///
+  /// [undoable]은 그 변경이 문서의 실행 취소 대상인지다. 참이면 journal의 되돌리기
+  /// 가능 수를 함께 올려, 뒤이은 UNDO가 이벤트로 나가지 않고 사라지는 일을 막는다.
+  void recordSnapshotChange({bool undoable = false}) {
     if (_disposed) return;
+    if (undoable) journal.noteUndoableDocumentChange();
     _markDirty();
+  }
+
+  /// journal이 새로 만든 이벤트를 배치 큐로 넘긴다.
+  ///
+  /// 기록 하나가 설정 변경·멈춤·획을 한꺼번에 만들 수 있어 반환값만으로는 전부
+  /// 전달되지 않는다. 새 이벤트가 하나라도 있으면 초안의 `lastEventSequence`가
+  /// 뒤처지므로 저장 대상으로도 표시한다.
+  bool _enqueueJournalEvents() {
+    if (_disposed) return false;
+    final events = journal.drainPendingEvents();
+    if (events.isEmpty) return false;
+    batchQueue.addEvents(events);
+    _markDirty();
+    return true;
+  }
+
+  /// 배치를 보내기 전에 대기 중인 설정 변경을 이벤트로 굳힌다.
+  Future<void> _flushBatchQueue() async {
+    if (!_disposed) {
+      journal.commitPendingSettings();
+      _enqueueJournalEvents();
+    }
+    await batchQueue.flush();
   }
 
   void _markDirty() {
@@ -694,7 +808,7 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
     _safeNotify();
   }
 
-  Future<void> flushEvents() => batchQueue.flush();
+  Future<void> flushEvents() => _flushBatchQueue();
 
   /// 완료용 snapshot을 만들기 전에 모든 완결 event batch가 서버에 도착했는지 확인한다.
   Future<bool> flushStrokeBatches() async {
@@ -702,7 +816,7 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
     final saving = _saveInFlight;
     if (saving != null) await saving;
     if (_disposed) return false;
-    await batchQueue.flush();
+    await _flushBatchQueue();
     return !batchQueue.hasFailure;
   }
 
@@ -802,7 +916,7 @@ final class DrawingSyncCoordinator extends ChangeNotifier {
         return latest;
       }
 
-      await batchQueue.flush();
+      await _flushBatchQueue();
       if (_disposed || batchQueue.hasFailure) return null;
 
       final generation = _dirtyGeneration;

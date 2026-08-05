@@ -417,8 +417,10 @@ class _ReportContent extends StatelessWidget {
           imageFetcher: imageFetcher,
           activityRepository: activityRepository,
         ),
+        ?_subjectObservationsSection(report),
         ?_childExpressionSection(report, playbackController),
         ?_conversationSummarySection(report),
+        ?_observedFeaturesSection(report),
         ?_activityFactsSection(report),
         ..._parentGuideSections(report),
         ?_legacyGuideSection(report),
@@ -530,6 +532,9 @@ class _ReportHero extends StatelessWidget {
               spacing: AppSpacing.xs,
               runSpacing: AppSpacing.xs,
               children: [
+                // 계약 §2 childDisplayName — 표지용. 없으면 pill 자체가 빠진다.
+                if (report.childDisplayName case final name?)
+                  _MetadataPill(label: name),
                 if (report.createdAt case final createdAt?)
                   _MetadataPill(label: _date(createdAt)),
                 _MetadataPill(label: '리포트 v${report.reportVersion}'),
@@ -589,7 +594,12 @@ class _MetadataPill extends StatelessWidget {
   );
 }
 
-/// 계약 §4·§5: 집·나무·사람 완성 그림과 주제별 관찰·문답.
+/// 계약 §11-4: 집·나무·사람 완성 그림.
+///
+/// 그림의 정본은 계약 §5 `subjectReports[].imageUrl`이다. 이전에는 상세 응답의
+/// `drawing`이 단수라 HTP인데도 한 장만 보였고, 그 공백을 활동기록 조회
+/// ([HtpReportGallery])로 메워 왔다. 이제 계약 데이터가 있으면 그것을 쓰고,
+/// 아직 주지 않는 구형 응답에서만 기존 우회 경로로 물러난다.
 class _ReportDrawings extends StatelessWidget {
   const _ReportDrawings({
     required this.report,
@@ -603,7 +613,7 @@ class _ReportDrawings extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final session = report.drawingSession;
-    final isHtp = session?.drawingTypeCode?.toUpperCase() == 'HTP';
+    final isHtp = report.isHtpActivity;
     // 서버는 완성본이 없으면 finalImageUrl을 비우므로 썸네일로 물러난다.
     final imageUrl =
         report.drawing?.finalImageUrl ?? report.drawing?.thumbnailUrl;
@@ -611,20 +621,27 @@ class _ReportDrawings extends StatelessWidget {
       imageUrl: imageUrl,
       imageFetcher: imageFetcher,
     );
-    final preview = isHtp
-        ? HtpReportGallery(
-            childId: session?.childId ?? -1,
-            reportDrawingSessionId: session?.drawingSessionId ?? -1,
-            repository: activityRepository,
-            fallback: singleImagePreview,
-          )
-        : singleImagePreview;
-
-    final subjectReports = report.orderedSubjectReports;
+    final subjectDrawings = report.subjectDrawings;
+    final Widget preview;
+    if (subjectDrawings.isNotEmpty) {
+      preview = _SubjectDrawingGallery(
+        subjects: subjectDrawings,
+        imageFetcher: imageFetcher,
+      );
+    } else if (isHtp) {
+      preview = HtpReportGallery(
+        childId: session?.childId ?? -1,
+        reportDrawingSessionId: session?.drawingSessionId ?? -1,
+        repository: activityRepository,
+        fallback: singleImagePreview,
+      );
+    } else {
+      preview = singleImagePreview;
+    }
 
     return _ReportSection(
       key: const ValueKey('report-drawings-section'),
-      title: '완성한 그림',
+      title: isHtp ? '집·나무·사람 그림' : '완성한 그림',
       backgroundColor: const Color(0xFFEAF6FA),
       accentColor: const Color(0xFF8CC6D8),
       children: [
@@ -667,33 +684,126 @@ class _ReportDrawings extends StatelessWidget {
             );
           },
         ),
-        if (subjectReports.isNotEmpty) ...[
-          const SizedBox(height: AppSpacing.md),
-          for (final subject in subjectReports)
-            _SubjectReportCard(
-              report: subject,
-              imageFetcher: imageFetcher,
-            ),
-        ],
       ],
     );
   }
 }
 
-/// 계약 §5·§6: 한 주제(집/나무/사람)의 완성 그림·관찰 사실·문답.
-class _SubjectReportCard extends StatelessWidget {
-  const _SubjectReportCard({required this.report, required this.imageFetcher});
+/// 계약 §5의 주제별 완성 그림을 HOUSE→TREE→PERSON 순서로 나란히 보여준다.
+/// 주제 수를 가정하지 않으므로 HTP가 아닌 1장짜리 응답도 그대로 처리된다.
+class _SubjectDrawingGallery extends StatelessWidget {
+  const _SubjectDrawingGallery({
+    required this.subjects,
+    required this.imageFetcher,
+  });
 
-  final ReportSubjectReportDto report;
+  final List<ReportSubjectReportDto> subjects;
+  final ImageByteFetcher imageFetcher;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    key: const ValueKey('report-subject-gallery'),
+    builder: (context, constraints) {
+      final maxColumns = switch (constraints.maxWidth) {
+        >= 720 => 3,
+        >= 440 => 2,
+        _ => 1,
+      };
+      final columns = maxColumns < subjects.length
+          ? maxColumns
+          : subjects.length;
+      const gap = AppSpacing.md;
+      final width = (constraints.maxWidth - gap * (columns - 1)) / columns;
+      return Wrap(
+        spacing: gap,
+        runSpacing: gap,
+        children: [
+          for (final subject in subjects)
+            SizedBox(
+              width: width,
+              child: _SubjectDrawingCard(
+                subject: subject,
+                imageFetcher: imageFetcher,
+              ),
+            ),
+        ],
+      );
+    },
+  );
+}
+
+class _SubjectDrawingCard extends StatelessWidget {
+  const _SubjectDrawingCard({
+    required this.subject,
+    required this.imageFetcher,
+  });
+
+  final ReportSubjectReportDto subject;
   final ImageByteFetcher imageFetcher;
 
   @override
   Widget build(BuildContext context) {
+    final label = _subjectLabel(subject.subjectType);
+    return Container(
+      key: ValueKey('report-subject-image-${subject.subjectType ?? 'UNKNOWN'}'),
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.lg),
+        border: Border.all(color: AppColors.outline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(
+            header: true,
+            label: '$label 그림',
+            child: ExcludeSemantics(
+              child: Text(
+                label,
+                textAlign: TextAlign.center,
+                style: AppTypography.label,
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpacing.xs),
+          AspectRatio(
+            aspectRatio: 4 / 3,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(AppRadius.md),
+              child: AuthenticatedImage(
+                url: subject.imageUrl,
+                fetcher: imageFetcher,
+                fit: BoxFit.contain,
+                semanticLabel: '$label 완성 그림',
+                placeholderBuilder: (_) => const _ImagePlaceholder(),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 계약 §5·§6: 한 주제(집/나무/사람)의 관찰 사실과 문답.
+///
+/// 완성 그림은 §11-4 섹션에서 이미 보여줬으므로 여기서 다시 싣지 않는다.
+class _SubjectReportCard extends StatelessWidget {
+  const _SubjectReportCard({required this.report, required this.linkedTitles});
+
+  final ReportSubjectReportDto report;
+
+  /// `interpretationRefs`가 가리킨 경향 카드의 **제목**만 담는다. 경향 문구
+  /// (`tendencyText`)는 근거·범위 없이 떠돌지 않도록 여기에 싣지 않는다(§3).
+  final List<String> linkedTitles;
+
+  @override
+  Widget build(BuildContext context) {
     final label = _subjectLabel(report.subjectType);
-    final imageUrl = report.imageUrl;
     return Container(
       key: ValueKey('report-subject-${report.subjectType ?? 'UNKNOWN'}'),
-      margin: const EdgeInsets.only(top: AppSpacing.sm),
+      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
       padding: const EdgeInsets.all(AppSpacing.md),
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -714,22 +824,6 @@ class _SubjectReportCard extends StatelessWidget {
               ),
             ),
           ),
-          if (imageUrl != null) ...[
-            const SizedBox(height: AppSpacing.sm),
-            AspectRatio(
-              aspectRatio: 4 / 3,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(AppRadius.sm),
-                child: AuthenticatedImage(
-                  url: imageUrl,
-                  fetcher: imageFetcher,
-                  fit: BoxFit.contain,
-                  semanticLabel: '$label 완성 그림',
-                  placeholderBuilder: (_) => const _ImagePlaceholder(),
-                ),
-              ),
-            ),
-          ],
           if (report.visionObservations.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.sm),
             for (final observation in report.visionObservations)
@@ -738,6 +832,18 @@ class _SubjectReportCard extends StatelessWidget {
           if (report.qaPairs.isNotEmpty) ...[
             const SizedBox(height: AppSpacing.xs),
             _QaPairList(pairs: report.qaPairs),
+          ],
+          if (linkedTitles.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.xs),
+            const Text('이 그림과 이어지는 이야기', style: AppTypography.label),
+            const SizedBox(height: AppSpacing.xxs),
+            Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: AppSpacing.xs,
+              children: [
+                for (final title in linkedTitles) Chip(label: Text(title)),
+              ],
+            ),
           ],
         ],
       ),
@@ -798,7 +904,12 @@ Widget? _overviewSection(ReportDetailDto report) {
   final lines = <Widget>[
     if (session?.title case final title?)
       _InfoLine(label: '활동 이름', value: title),
-    if ((session?.drawingTypeName ?? session?.drawingTypeCode) case final type?)
+    // 세션의 표시 이름이 없으면 계약 §2 최상위 activityType을 한국어 라벨로
+    // 바꿔 쓴다. 둘 다 없으면 줄 자체가 빠진다.
+    if ((session?.drawingTypeName ??
+            session?.drawingTypeCode ??
+            _activityTypeLabel(report.activityType))
+        case final type?)
       _InfoLine(label: '활동 유형', value: type),
     if (session?.inputMethod case final inputMethod?)
       _InfoLine(label: '입력 방식', value: inputMethod),
@@ -867,6 +978,65 @@ Widget? _interpretationsSection(ReportDetailDto report) {
           evidenceById: evidenceById,
         ),
       ],
+    ],
+  );
+}
+
+/// §5 주제별 관찰 사실과 문답 — 그림은 앞 섹션에서 이미 보여줬으므로 여기서는
+/// 관찰 문장·문답만 싣는다. 표시할 내용이 있는 주제만 남기고, 하나도 없으면
+/// 섹션 자체를 숨긴다(§10).
+Widget? _subjectObservationsSection(ReportDetailDto report) {
+  final subjects = report.subjectDetails;
+  if (subjects.isEmpty) return null;
+  return _ReportSection(
+    key: const ValueKey('report-subject-observations'),
+    title: '주제별 관찰과 문답',
+    backgroundColor: const Color(0xFFEAF6FA),
+    accentColor: const Color(0xFF8CC6D8),
+    children: [
+      for (final subject in subjects)
+        _SubjectReportCard(
+          report: subject,
+          linkedTitles: _linkedInterpretationTitles(report, subject),
+        ),
+    ],
+  );
+}
+
+/// §5-1 `interpretationRefs`는 같은 응답 `publicInterpretations`의 **배열
+/// 인덱스**(0-based)다 — category 값이 아니다. 화면이 카테고리 순으로 정렬한
+/// 결과가 아니라 **서버가 준 원래 순서**에 대고 풀어야 다른 카드를 가리키지
+/// 않는다. 범위를 벗어난 값은 조용히 버린다.
+List<String> _linkedInterpretationTitles(
+  ReportDetailDto report,
+  ReportSubjectReportDto subject,
+) {
+  final source = report.publicInterpretations;
+  final titles = <String>[];
+  for (final ref in subject.interpretationRefs) {
+    if (ref < 0 || ref >= source.length) continue;
+    final title = _interpretationTitle(source[ref]);
+    if (!titles.contains(title)) titles.add(title);
+  }
+  return titles;
+}
+
+/// §2-1 "이런 모습이 보였어요" — AI 자체 검토를 통과해 보호자에게 열린 관찰
+/// 특징만 서버가 싣는다. 화면은 중립 색·중립 문구만 쓰고, 수치·확률·내부
+/// 코드는 표시하지 않는다.
+Widget? _observedFeaturesSection(ReportDetailDto report) {
+  final features = [
+    for (final feature in report.observedFeatures)
+      if (!feature.isEmpty) feature,
+  ];
+  if (features.isEmpty) return null;
+  return _ReportSection(
+    key: const ValueKey('report-observed-features'),
+    title: '이런 모습이 보였어요',
+    backgroundColor: AppColors.lavenderSoft,
+    accentColor: AppColors.lavender,
+    children: [
+      for (final feature in features) _ObservedFeatureTile(feature: feature),
     ],
   );
 }
@@ -1140,6 +1310,15 @@ String _evidenceSourceLabel(String? sourceType) => switch (sourceType) {
   _ => '관찰 근거',
 };
 
+/// 계약 §2 `activityType` 코드를 화면 문구로 바꾼다. 모르는 코드는 화면에
+/// 코드값을 흘리지 않도록 null(줄 숨김)로 둔다.
+String? _activityTypeLabel(String? activityType) => switch (activityType) {
+  'HTP' => '집·나무·사람 그림',
+  'ART_DIARY' => '그림일기',
+  'FREE_DRAWING' => '자유 그림',
+  _ => null,
+};
+
 String _subjectLabel(String? subjectType) => switch (subjectType) {
   'HOUSE' => '집',
   'TREE' => '나무',
@@ -1397,6 +1576,63 @@ class _QaPairTile extends StatelessWidget {
       ),
     );
   }
+}
+
+/// §2-1 관찰 특징 한 건. 제목·내용·근거 요약을 위아래로 쌓고, 근거는 라벨 없이
+/// 조용한 보조 문장으로 둔다(경고·위험 표현 금지).
+class _ObservedFeatureTile extends StatelessWidget {
+  const _ObservedFeatureTile({required this.feature});
+
+  final ReportObservedFeatureDto feature;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Padding(
+          padding: EdgeInsets.only(top: 4),
+          child: Icon(
+            Icons.visibility_outlined,
+            size: 18,
+            color: AppColors.lavender,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (feature.title case final title?)
+                Text(
+                  title,
+                  style: const TextStyle(
+                    color: AppColors.ink,
+                    height: 1.5,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              if (feature.description case final description?)
+                Text(
+                  description,
+                  style: const TextStyle(color: AppColors.ink, height: 1.55),
+                ),
+              if (feature.evidenceSummary case final evidence?)
+                Text(
+                  evidence,
+                  style: const TextStyle(
+                    color: AppColors.inkMuted,
+                    height: 1.45,
+                    fontSize: 13,
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ],
+    ),
+  );
 }
 
 class _ReferenceLine extends StatelessWidget {
