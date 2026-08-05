@@ -5,6 +5,7 @@ import com.ssafy.b209.conversation.exception.ConversationMessageStatusErrorCode;
 import com.ssafy.b209.conversation.exception.QuestionTtsErrorCode;
 import com.ssafy.b209.conversation.repository.QuestionTtsMessageRepository;
 import com.ssafy.b209.global.exception.BusinessException;
+import java.math.BigDecimal;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,26 +30,28 @@ public class QuestionTtsPersistenceService {
   }
 
   /**
-   * 성공 음성이 없는 AI 질문 하나만 PROCESSING으로 원자 선점한다.
+   * 같은 음색의 성공 캐시가 없는 AI 질문 하나만 PROCESSING으로 원자 선점한다.
    *
    * @param messageId TTS 대상 AI 질문 메시지 ID
+   * @param voice 이번 활동 캐릭터에 대응하는 서비스 음성 코드
+   * @param speed 이번 합성에 사용할 재생 속도
    * @return 캐시 히트·선점·진행 중 여부와 자막·저장 key snapshot
    * @throws BusinessException 메시지가 없거나(404) 음성을 생성할 AI 질문이 아닌 경우(400)
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public QuestionTtsClaimResult claim(Long messageId) {
+  public QuestionTtsClaimResult claim(Long messageId, String voice, BigDecimal speed) {
     QuestionTtsMessage message = loadAiQuestion(messageId);
-    if (hasCachedAudio(message)) {
+    if (hasCachedAudioForRequest(message, voice, speed)) {
       return QuestionTtsClaimResult.of(QuestionTtsClaimResult.Action.CACHE_HIT, message);
     }
     if ("PROCESSING".equals(message.getSpeechStatus())) {
       return QuestionTtsClaimResult.of(QuestionTtsClaimResult.Action.IN_PROGRESS, message);
     }
-    if (messageRepository.claimForSynthesis(messageId) == 1) {
+    if (messageRepository.claimForSynthesis(messageId, voice, speed) == 1) {
       return QuestionTtsClaimResult.of(QuestionTtsClaimResult.Action.CLAIMED, message);
     }
     QuestionTtsMessage current = loadAiQuestion(messageId);
-    if (hasCachedAudio(current)) {
+    if (hasCachedAudioForRequest(current, voice, speed)) {
       return QuestionTtsClaimResult.of(QuestionTtsClaimResult.Action.CACHE_HIT, current);
     }
     return QuestionTtsClaimResult.of(QuestionTtsClaimResult.Action.IN_PROGRESS, current);
@@ -60,27 +63,36 @@ public class QuestionTtsPersistenceService {
    * @param messageId 대상 메시지 ID
    * @param storageKey 승격된 음성의 Root-relative 저장 key
    * @param audioUrl 재생 프록시 상대 경로
+   * @param voice 이번 합성에 사용한 서비스 음성 코드
+   * @param speed 이번 합성에 사용한 재생 속도
    * @return 성공 갱신이 실제로 반영되면 {@code true}
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public boolean completeSuccess(Long messageId, String storageKey, String audioUrl) {
-    return messageRepository.completeSuccess(messageId, storageKey, audioUrl) == 1;
+  public boolean completeSuccess(
+      Long messageId, String storageKey, String audioUrl, String voice, BigDecimal speed) {
+    return messageRepository.completeSuccess(messageId, storageKey, audioUrl, voice, speed) == 1;
   }
 
   /**
    * PROCESSING으로 선점된 질문을 실패 상태로 끝낸다.
    *
    * @param messageId 대상 메시지 ID
+   * @param voice 이번 합성에 사용한 서비스 음성 코드
+   * @param speed 이번 합성에 사용한 재생 속도
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public void markFailed(Long messageId) {
-    messageRepository.markFailed(messageId);
+  public void markFailed(Long messageId, String voice, BigDecimal speed) {
+    messageRepository.markFailed(messageId, voice, speed);
   }
 
-  private boolean hasCachedAudio(QuestionTtsMessage message) {
+  private boolean hasCachedAudioForRequest(
+      QuestionTtsMessage message, String voice, BigDecimal speed) {
     return "SUCCESS".equals(message.getSpeechStatus())
         && message.getAudioStorageKey() != null
-        && !message.getAudioStorageKey().isBlank();
+        && !message.getAudioStorageKey().isBlank()
+        && voice.equals(message.getTtsVoice())
+        && message.getTtsSpeed() != null
+        && message.getTtsSpeed().compareTo(speed) == 0;
   }
 
   private QuestionTtsMessage loadAiQuestion(Long messageId) {

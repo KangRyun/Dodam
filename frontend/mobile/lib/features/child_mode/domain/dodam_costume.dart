@@ -9,31 +9,45 @@
 /// 추가할 때는 서버로 나가는 허용 목록(`supportedPreferredCharacters`)도 같은
 /// commit에서 함께 넓혀야 한다 — 빠뜨리면 PATCH가 조용히 `BASE`로 정규화된다.
 enum DodamCostume {
-  base('BASE', '도담이', 'assets/characters/costumes/dodam_base.png'),
+  base('BASE', '도담이', 'assets/characters/costumes/dodam_base.png', 'FABLE'),
   princess(
     'PRINCESS',
     '공주 도담이',
     'assets/characters/costumes/dodam_princess.png',
+    'NOVA',
   ),
-  dino('DINO', '공룡 도담이', 'assets/characters/costumes/dodam_dino.png'),
-  octopus('OCTOPUS', '문어 도담이', 'assets/characters/costumes/dodam_octopus.png'),
+  dino(
+    'DINO',
+    '공룡 도담이',
+    'assets/characters/costumes/dodam_dino.png',
+    'ASH',
+  ),
+  octopus(
+    'OCTOPUS',
+    '문어 도담이',
+    'assets/characters/costumes/dodam_octopus.png',
+    'BALLAD',
+  ),
   explorer(
     'EXPLORER',
     '탐험가 도담이',
     'assets/characters/costumes/dodami_explorer_profile.png',
+    'VERSE',
   ),
   ribbon(
     'RIBBON',
     '리본 도담이',
     'assets/characters/costumes/dodami_ribbon_profile.png',
+    'SAGE',
   ),
   prince(
     'PRINCE',
     '왕자 도담이',
     'assets/characters/costumes/dodami_prince_profile.png',
+    'ECHO',
   );
 
-  const DodamCostume(this.code, this.label, this.asset);
+  const DodamCostume(this.code, this.label, this.asset, this.ttsVoice);
 
   /// 로컬 저장·복원용 코드.
   final String code;
@@ -43,6 +57,9 @@ enum DodamCostume {
 
   /// 캐릭터 이미지 에셋 경로.
   final String asset;
+
+  /// 활동 중 AI 질문을 읽을 때 사용할 서비스 음성 코드다.
+  final String ttsVoice;
 
   /// 저장된 코드로 코스튬을 복원한다. 알 수 없는 값은 기본 도담이로 대체한다.
   static DodamCostume fromCode(String? code) => values.firstWhere(
