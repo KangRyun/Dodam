@@ -443,13 +443,19 @@ class ConversationSummaryDraft(_CamelModel):
 
     representative_utterance는 아이 발화일 수 있어 repr에서 감춘다.
     집계 수치(질문/응답/건너뜀 수)는 여기 없다 — BE가 요청 값으로 채운다.
+
+    ⚠️ representative_utterance 는 **아이가 실제로 한 말**이다. 없으면 None 이고, 무난한
+       문장으로 채우지 않는다. 예전에는 비면 "재미있었어요."로 채웠는데, 운영 실측 결과
+       analysis_conversation_summaries 51건 중 34건(67%)이 그 문장이었다 — 아이가 한 적
+       없는 말이 대표 발화로 저장돼 있었다는 뜻이다. 같은 이유로 confidence 도 None 이다
+       (지어내지 않는다). BE 컬럼은 nullable 이고 검증 애너테이션도 없다.
     """
 
     summary_text: str
     main_topic: str
     expressed_emotion: str
     emotion_source: Literal["SELECTED", "STATED", "INFERRED"]
-    representative_utterance: str = Field(repr=False)
+    representative_utterance: str | None = Field(default=None, repr=False)
 
 
 class FollowUpGuideDraft(_CamelModel):
@@ -538,10 +544,33 @@ class PublicInterpretation(_CamelModel):
     evidence_refs: list[int] = Field(default_factory=list)
 
 
-# ⚠️ subjectReports(875 §5)는 이 응답에 없다. imageUrl·visionObservations·qaPairs 는 BE가 이미
-#    가진 데이터라 BE가 조립한다. interpretationRefs(주제↔카드 연결)도 LLM에게 묻지 않는다 —
-#    카드의 근거 sourceRef(QA_ANSWER 메시지 ID 등)가 어느 주제에서 왔는지 BE가 결정적으로 알 수
-#    있어, 물어보는 쪽이 오히려 틀릴 여지를 만든다.
+class SubjectReportDraft(_CamelModel):
+    """주제(집·나무·사람) 하나의 관찰 묶음 (875 §5 SubjectReport의 **부분**).
+
+    HTP는 그림 세 장을 그리는데 지금까지 응답에는 주제 구분이 남지 않았다 — overall_summary
+    하나·evidence_summary 하나로 뭉개져, BE·FE가 '주제별 관찰 사실과 문답' 섹션(875 §11-5)을
+    조립할 재료가 없었다. 이 모델이 그 자리다.
+
+    ⚠️ 875 §5 의 다섯 필드 중 **셋만** 싣는다. 나머지 둘은 BE가 채운다:
+    - image_url — BE가 가진 자산 URL이다. AI가 만들 수 있는 값이 아니다.
+    - qa_pairs — 요청에 실려 온 아이 발화 그대로다. LLM을 통과시켜 되돌려 받으면 아이 말이
+      바뀔 여지만 생긴다(원문 보존이 인용의 전제다). BE가 자기 데이터를 그대로 쓴다.
+    필드명은 875 문구를 1:1로 따른다(subject_type → "subjectType") — 887이 정한 규칙과 같다.
+    ⚠️ DrawnItem 은 같은 개념을 drawing_subject 로 부른다. 그쪽은 BE가 activityFacts 로
+       옮겨 담는 값이라 이름이 갈렸다. 이 모델은 subjectReports[] 로 **그대로 나가는** 자리라
+       875 이름을 쓴다.
+
+    subject_type: HOUSE | TREE | PERSON | None(주제가 나뉘지 않는 활동)
+    vision_observations: 그 그림에서 눈으로 확인된 **사실** 문장. 해석은 담지 않는다.
+    interpretation_refs: 이 그림의 관찰이 근거가 된 public_interpretations 의 **배열 인덱스**
+        (0-based). category 값이 아니다(875 §5-1). 리포트 스냅샷 안에서 카드 배열을 재정렬하면
+        참조가 조용히 다른 카드를 가리키므로, 카드가 빠질 때마다 서버가 다시 매핑한다
+        (report_client._subject_reports · _apply_findings).
+    """
+
+    subject_type: str | None = None
+    vision_observations: list[str] = Field(default_factory=list)
+    interpretation_refs: list[int] = Field(default_factory=list)
 
 
 class ReportParentGuide(_CamelModel):
@@ -627,6 +656,10 @@ class ObservationGenerationResult(_CamelModel):
     public_interpretations: list[PublicInterpretation] = Field(default_factory=list)
     evidence_items: list[ReportEvidenceItem] = Field(default_factory=list)
     parent_guides: list[ReportParentGuide] = Field(default_factory=list)
+    # 주제별 관찰 (875 §5). public_interpretations 와 **형제**로 둔다 — 875 §2 에서 셋 다
+    #   ReportDetail 최상위 필드이고, 하나만 observation_draft 안에 넣으면 BE가 같은 계층의
+    #   데이터를 두 곳에서 꺼내게 된다. 비면 지금과 같은 동작이다(구 BE는 무시).
+    subject_reports: list[SubjectReportDraft] = Field(default_factory=list)
     # '그린 것' 목록 (S15P11B209-911) — VLM 관찰 서술 기반. BE가 이 값으로
     #   activityFacts.detectedObjects 를 채운다(S15P11B209-912). 지금 그 줄은 탐지 라벨을
     #   그대로 나열해 신뢰도 필터 없이 보호자에게 나간다. 비면 구 동작과 같다.

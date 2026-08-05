@@ -109,9 +109,6 @@ LIMITATIONS = (
     "본 리포트는 제한된 활동 데이터를 바탕으로 한 관찰 기록이며, "
     "아동의 발달 상태를 단정하지 않습니다."
 )
-# 대표 발화가 비어 있을 때의 중립 기본값(진단·해석 없는 무난한 문장).
-DEFAULT_UTTERANCE = "재미있었어요."
-
 # 후속 질문이 비었거나 진단성 표현이 섞였을 때 대체할 안전 기본값(S15P11B209-601).
 # 보호자가 아이에게 그대로 건네도 무해한, 진단이 아닌 '집에서 나눌 대화'용 질문.
 DEFAULT_FOLLOW_UP_QUESTION = "오늘 그림에서 어떤 부분이 제일 마음에 들었어?"
@@ -987,6 +984,122 @@ def _drawn_items(
     )
 
 
+# ── 주제별 관찰 (875 §5 · S15P11B209-HTP 주제 분리) ──────────────
+# 그림 한 장당 관찰 문장 상한. VLM 관찰 서술 자체가 2~4문장이라 그보다 많이 나오면 서술에 없는
+#   것을 늘려 쓴 것이다(_DRAWN_ITEMS_PER_SUBJECT_MAX 와 같은 결).
+_VISION_OBSERVATIONS_PER_SUBJECT_MAX = 4
+# 875 §5 가 못 박은 표시 순서. **요청 순서가 아니라 이 순서가 계약이다** —
+#   BE가 스냅샷을 그대로 쓰므로 여기서 어긋나면 화면에서 나무가 집보다 먼저 나온다.
+_SUBJECT_REPORT_ORDER = ("HOUSE", "TREE", "PERSON")
+
+
+def _kept_positions(before: list, after: list) -> list[int]:
+    """after(순서를 지킨 부분집합)의 각 원소가 before 의 몇 번째였는지.
+
+    경향 카드가 게이트·자체검토에서 빠질 때마다 배열 위치가 앞으로 당겨진다. 주제별 관찰의
+    interpretation_refs 는 그 **위치**를 가리키므로(875 §5-1), 다시 매핑하지 않으면 참조가
+    조용히 다른 카드를 가리킨다 — 875가 "재정렬하지 마라"로 경고한 바로 그 사고다.
+    값 비교(==)가 아니라 **동일성(is)** 으로 맞춘다. 같은 내용의 카드가 두 장이면 값 비교는
+    앞 카드에 붙어 매핑이 어긋난다.
+    """
+    positions: list[int] = []
+    remaining = iter(enumerate(before))
+    for item in after:
+        for index, candidate in remaining:
+            if candidate is item:
+                positions.append(index)
+                break
+    return positions
+
+
+def _subject_reports(
+    data: dict,
+    req: contracts.ObservationGenerationRequest,
+    ref_map: dict[int, int],
+) -> tuple[list[contracts.SubjectReportDraft], bool]:
+    """주제별 관찰 묶음 (875 §5). 두 번째 반환값은 '규칙 필터가 문장을 걸렀는가'다.
+
+    HTP는 집·나무·사람 세 장을 그리는데 지금까지 응답에는 주제 구분이 남지 않았다.
+    이 목록이 '주제별 관찰 사실과 문답' 섹션(875 §11-5)의 AI 몫이다 —
+    image_url·qa_pairs 는 BE가 자기 데이터로 채운다(계약 모델 docstring 참조).
+
+    ⚠️ **골격은 요청이 정한다.** 모델이 주제를 빠뜨리거나 순서를 뒤집어도 그 그림이 리포트에서
+       사라지지 않게, req.subject_summaries 의 주제마다 한 칸씩 만들고 거기에 모델 내용을 얹는다.
+       순서는 HOUSE → TREE → PERSON 고정(875 §5). 요청에 없는 주제는 그리지 않은 그림이라 버린다.
+
+    ⚠️ 관찰 서술이 없는 그림은 문장을 받지 않는다. 대조할 원본이 없는데 관찰 사실을 적으면
+       그건 관찰이 아니라 창작이다(_drawn_items 가 서술 원문과 대조하는 것과 같은 원칙).
+
+    ref_map: LLM이 적은 카드 순번(자기 출력 기준) → 게이트를 통과한 최종 배열 위치.
+    """
+    if not req.subject_summaries:
+        # 레거시 draft 경로(subject_summaries 없음) — 주제가 없으니 만들 것도 없다.
+        return [], False
+
+    descriptions: dict[str | None, str] = {}
+    order: list[str | None] = []
+    for summary in req.subject_summaries:
+        if summary.drawing_subject in descriptions:
+            continue
+        descriptions[summary.drawing_subject] = (summary.drawing_description or "").strip()
+        order.append(summary.drawing_subject)
+    # 안정 정렬이라 계약에 없는 주제(그림일기의 None)는 요청 순서를 지킨 채 뒤로 밀린다.
+    order.sort(
+        key=lambda subject: (
+            _SUBJECT_REPORT_ORDER.index(subject)
+            if subject in _SUBJECT_REPORT_ORDER
+            else len(_SUBJECT_REPORT_ORDER)
+        )
+    )
+
+    raw_by_subject: dict[str | None, dict] = {}
+    for raw in data.get("subjectReports") or []:
+        if not isinstance(raw, dict):
+            continue
+        subject = str(raw.get("subjectType") or "").strip().upper() or None
+        if subject not in descriptions or subject in raw_by_subject:
+            continue
+        raw_by_subject[subject] = raw
+
+    flagged = False
+    reports: list[contracts.SubjectReportDraft] = []
+    for subject in order:
+        raw = raw_by_subject.get(subject) or {}
+        observations: list[str] = []
+        if descriptions.get(subject):
+            for value in raw.get("visionObservations") or []:
+                if len(observations) >= _VISION_OBSERVATIONS_PER_SUBJECT_MAX:
+                    break
+                text = str(value).strip()
+                if not text or text in observations:
+                    continue
+                if report_safety.has_unsafe_expression(text):
+                    # ⚠️ 원문은 남기지 않는다 — 관찰 문장에 아이 표현이 섞일 수 있다.
+                    # 관찰 '사실' 자리에 단정·낙인이 섞이면 다른 문장들이 그걸 사실로 알고
+                    # 기대게 된다 — 문장만 빼고 리포트는 미검토(AI_DRAFT)로 남긴다.
+                    logger.warning("주제별 관찰 사실 단정·낙인 표현 — 문장 제외·자체검토 실패")
+                    flagged = True
+                    continue
+                observations.append(text)
+        refs: list[int] = []
+        for value in raw.get("interpretationRefs") or []:
+            try:
+                index = int(value)
+            except (TypeError, ValueError):
+                continue
+            mapped = ref_map.get(index)
+            if mapped is not None and mapped not in refs:
+                refs.append(mapped)
+        reports.append(
+            contracts.SubjectReportDraft(
+                subject_type=subject,
+                vision_observations=observations,
+                interpretation_refs=refs,
+            )
+        )
+    return reports, flagged
+
+
 def _generation_version(is_htp: bool) -> str:
     """리포트 재현성 버전 태그 — 프롬프트·파이프라인 버전을 함께 기록한다(S15P11B209-602).
 
@@ -1077,7 +1190,11 @@ def _assemble(
     evidence_items = _evidence_items(data, _allowed_evidence_refs(req))
     known_ids = {item.evidence_id for item in evidence_items}
     interpretations: list[contracts.PublicInterpretation] = []
-    for raw in data.get("publicInterpretations") or []:
+    # 주제별 관찰(875 §5)의 interpretation_refs 가 가리킬 '원래 순번'을 기억해 둔다 —
+    # 아래에서 카드가 빠질 때마다 배열 위치가 당겨지므로, 모델이 자기 출력 기준으로 적은
+    # 순번을 최종 위치로 다시 매핑해야 참조가 어긋나지 않는다(875 §5-1).
+    raw_index_of: list[int] = []
+    for raw_index, raw in enumerate(data.get("publicInterpretations") or []):
         # 표현 안전 검사를 **구조 검사보다 먼저** 원문에 돌린다. 순서를 바꾸면 형식까지 어긋난
         # 카드가 구조 검사에서 먼저 걸러져, 진단·낙인 표현이 있었다는 신호가 사라진다.
         # 카드에는 EXPERT_ONLY 자리가 없어(875 §3) 강등할 곳이 없다 — 빼고 신호를 남긴다.
@@ -1093,12 +1210,19 @@ def _assemble(
         card = _public_interpretation(raw, known_ids)
         if card is not None:
             interpretations.append(card)
+            raw_index_of.append(raw_index)
     # 구조적 공개 게이트(S15P11B209-888) — 값싼 결정적 검사라 표현 필터보다 먼저 돌린다.
     # 실패한 카드는 EXPERT_ONLY로 강등하지 않고 **제외**한다(근거 자체가 없다).
     # blocked_refs: 미확정 STT(886)를 배제한다. 위기 발화(889)가 같은 집합에 합쳐진다.
+    parsed_cards = interpretations
     interpretations, gate_reasons = interpretation_gate.apply(
-        interpretations, evidence_items, blocked_refs=_blocked_evidence_refs(req)
+        parsed_cards, evidence_items, blocked_refs=_blocked_evidence_refs(req)
     )
+    # 모델이 적은 카드 순번 → 최종 배열 위치. 빠진 카드를 가리키던 참조는 매핑에 없어 사라진다.
+    ref_map = {
+        raw_index_of[position]: final
+        for final, position in enumerate(_kept_positions(parsed_cards, interpretations))
+    }
     if gate_reasons:
         # 사유 코드만 남긴다 — 카드 문장·아이 발화는 로그에 담지 않는다.
         logger.info("경향 카드 게이트 제외 %d건: %s", len(gate_reasons), sorted(set(gate_reasons)))
@@ -1107,6 +1231,9 @@ def _assemble(
     referenced = {ref for card in interpretations for ref in card.evidence_refs}
     evidence_items = [i for i in evidence_items if i.evidence_id in referenced]
     parent_guides = _parent_guides(data)
+    # 주제별 관찰(875 §5). 카드 매핑이 끝난 뒤에 만든다 — 순번을 최종 배열 기준으로 적어야 한다.
+    subject_reports, subject_flagged = _subject_reports(data, req, ref_map)
+    rule_flagged = rule_flagged or subject_flagged
 
     observation = contracts.ObservationDraft(
         # 조립 단계는 언제나 '미검토'다 — 자체검토(_self_review)만 AI_REVIEWED 로 올릴 수 있다.
@@ -1134,7 +1261,11 @@ def _assemble(
         main_topic=str(conv.get("mainTopic", "")),
         expressed_emotion=str(conv.get("expressedEmotion", "")),
         emotion_source=_emotion_source(req),
-        representative_utterance=(req.representative_utterance or DEFAULT_UTTERANCE),
+        # 아이가 실제로 한 말만 싣는다. 없으면 None — 무난한 문장으로 채우지 않는다.
+        #   폐지된 기본값("재미있었어요.")은 운영 51건 중 34건을 차지했다. 아무도 읽지 않는
+        #   컬럼이었지만, 나중에 읽는 기능이 생기면 그대로 가짜 인용이 된다.
+        #   바로 아래 confidence=None 과 같은 원칙이다(지어내지 않는다).
+        representative_utterance=req.representative_utterance,
     )
     result = contracts.ObservationGenerationResult(
         request_id=req.request_id,
@@ -1173,6 +1304,8 @@ def _assemble(
         public_interpretations=interpretations,
         evidence_items=evidence_items,
         parent_guides=parent_guides,
+        # 주제별 관찰(875 §5). HTP 세 장의 구분이 여기서만 남는다 — 비면 지금까지와 같다.
+        subject_reports=subject_reports,
         # '그린 것'(S15P11B209-911). 서술 원문과 대조해 통과한 이름만 실린다.
         drawn_items=_drawn_items(data, req),
         # 위기 안내는 S15P11B209-889이 채운다 — LLM 결과에서 만들지 않는다.
@@ -1199,6 +1332,10 @@ _REVIEW_ISSUES = frozenset(
 # 검토 결과를 담을 수 있는 자리 — 지적당한 항목만 빼고 나머지는 살린다.
 _FEATURE_TARGET_PREFIX = "feature."
 _CARD_TARGET_PREFIX = "card."
+_SUBJECT_TARGET_PREFIX = "subject."
+# 검토 대상 중 '관찰 사실을 적는 자리'임을 검토자에게 알리는 표시. 해석 자리와 판정 기준이
+#   다르다(사실 자리에 해석이 섞이면 MIXED_EVIDENCE) — report_review.txt 가 이 값을 읽는다.
+_FACT_SLOT_LABEL = "관찰 사실"
 
 # 자체검토 결과 카운터. outcome: passed | contained | failed | unavailable.
 #   contained = 지적이 있었지만 관찰 카드 강등·경향 카드 제외로 담아내고 통과시킨 경우.
@@ -1220,6 +1357,11 @@ def _review_facts(result: contracts.ObservationGenerationResult) -> list[str]:
     facts = [result.observation_draft.evidence_summary, *result.activity_notes]
     facts.extend(item.text for item in result.evidence_items)
     facts.extend(f.evidence_summary for f in result.observation_draft.features)
+    # 주제별 관찰(875 §5)도 이번 활동에서 확인된 사실이다. 여기 넣지 않으면 그 관찰에 기댄
+    # 문장들이 '근거가 어디에도 없다'로 잘못 잡힌다(NO_EVIDENCE 오탐).
+    facts.extend(
+        text for report in result.subject_reports for text in report.vision_observations
+    )
     return [text.strip() for text in facts if text and text.strip()]
 
 
@@ -1278,6 +1420,18 @@ def _review_targets(
                 "근거": card.scope_text,
             }
         )
+    # 주제별 관찰(875 §5) — 보호자가 그대로 읽는 **사실 자리**다. draft.evidenceSummary 를
+    # 검토 대상에 넣은 것과 같은 이유로 넣는다: 여기 해석이 섞이면(MIXED_EVIDENCE) 카드·요약이
+    # 그걸 사실로 알고 기댄다. 지적당해도 그 문장 하나만 빠지므로 리포트를 막지 않는다.
+    for subject_index, report in enumerate(result.subject_reports):
+        for text_index, text in enumerate(report.vision_observations):
+            targets.append(
+                {
+                    "id": f"{_SUBJECT_TARGET_PREFIX}{subject_index}.{text_index}",
+                    "글": text,
+                    "자리": _FACT_SLOT_LABEL,
+                }
+            )
     return targets
 
 
@@ -1319,6 +1473,7 @@ def _apply_findings(
     담아낼 수 있는 지적과 없는 지적을 가른다:
     - 관찰 카드(feature) → EXPERT_ONLY 로 강등. 그 카드만 보호자에게서 가려진다.
     - 경향 카드(card) → 제외. 카드에는 EXPERT_ONLY 자리가 없어(875 §3) 강등할 곳이 없다.
+    - 주제별 관찰 문장(subject) → 그 문장만 제외. 나머지 관찰과 문답은 그대로 남는다.
     - 그 밖(요약·활동 기록·조언 등) → **담아낼 자리가 없다.** 문장을 다시 쓰는 것은 2차 생성이라
       안전 검증을 처음부터 다시 받아야 하고, 비우면 보호자 화면이 무너진다(필수 필드).
       그래서 리포트 전체를 미검토(AI_DRAFT)로 남긴다.
@@ -1328,11 +1483,12 @@ def _apply_findings(
     for index, feature in enumerate(result.observation_draft.features):
         if f"{_FEATURE_TARGET_PREFIX}{index}" in flagged:
             feature.visibility_scope = "EXPERT_ONLY"
-    kept_cards = [
-        card
-        for index, card in enumerate(result.public_interpretations)
+    kept_positions = [
+        index
+        for index in range(len(result.public_interpretations))
         if f"{_CARD_TARGET_PREFIX}{index}" not in flagged
     ]
+    kept_cards = [result.public_interpretations[index] for index in kept_positions]
     result.public_interpretations = kept_cards
     # 카드가 빠지면 그 카드만 참조하던 근거는 화면에 쓰이지 않는다 — 아이 발화 인용을
     # 응답에 남기지 않기 위해 조립 때와 같은 규칙으로 다시 솎는다(최소 노출).
@@ -1340,8 +1496,22 @@ def _apply_findings(
     result.evidence_items = [
         item for item in result.evidence_items if item.evidence_id in referenced
     ]
+    # 카드가 빠지면 뒤 카드의 배열 위치가 당겨진다 — 주제별 관찰의 참조를 함께 옮기지 않으면
+    # 조용히 다른 카드를 가리킨다(875 §5-1). 빠진 카드를 가리키던 참조는 여기서 사라진다.
+    new_index_of = {old: new for new, old in enumerate(kept_positions)}
+    for subject_index, report in enumerate(result.subject_reports):
+        report.interpretation_refs = [
+            new_index_of[ref] for ref in report.interpretation_refs if ref in new_index_of
+        ]
+        report.vision_observations = [
+            text
+            for text_index, text in enumerate(report.vision_observations)
+            if f"{_SUBJECT_TARGET_PREFIX}{subject_index}.{text_index}" not in flagged
+        ]
     for target in flagged:
-        if not target.startswith((_FEATURE_TARGET_PREFIX, _CARD_TARGET_PREFIX)):
+        if not target.startswith(
+            (_FEATURE_TARGET_PREFIX, _CARD_TARGET_PREFIX, _SUBJECT_TARGET_PREFIX)
+        ):
             blocking = True
     return not blocking
 
