@@ -97,6 +97,10 @@ public final class MockAiObservationClient implements AiObservationClient {
             new GuardianQuestionDraft("이 그림을 그릴 때 어떤 기분이었어?", "감정 표현 유도"),
             new GuardianQuestionDraft("여기 이 부분은 무엇을 그린 거야?", "표현 확장")),
         LIMITATIONS,
-        List.of());
+        List.of(),
+        List.of(),
+        List.of(),
+        List.of(),
+        null);
   }
 }

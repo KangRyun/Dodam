@@ -50,9 +50,9 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("38");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("39");
     assertThat(tableExists("flyway_schema_history")).isTrue();
-    assertThat(tableCount()).isEqualTo(82);
+    assertThat(tableCount()).isEqualTo(85);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
     assertThat(tableExists("child_profile_image_files")).isTrue();
@@ -111,7 +111,9 @@ class DatabaseMigrationIntegrationTest {
     assertThat(characterLengthOf("report_drawn_items", "name")).isEqualTo(100);
     assertThat(indexExists("report_drawn_items", "uk_report_drawn_items_report_order", true))
         .isTrue();
-    assertThat(foreignKeyDeleteRuleIs("report_drawn_items", "fk_report_drawn_items_report_id", "CASCADE"))
+    assertThat(
+            foreignKeyDeleteRuleIs(
+                "report_drawn_items", "fk_report_drawn_items_report_id", "CASCADE"))
         .isTrue();
     for (String subject : new String[] {"HOUSE", "TREE", "PERSON"}) {
       assertThat(
@@ -124,6 +126,20 @@ class DatabaseMigrationIntegrationTest {
             indexExists(
                 "report_interpretation_evidences", "uk_report_interpretation_evidences_pair", true))
         .isTrue();
+    // V39 — 위기 대응 안내(S15P11B209-902). ABUSE_DISCLOSURE 를 CHECK 목록에서 빼 저장 자체를 막는다.
+    // 가해자가 보호자일 수 있어 자동 통지가 아이를 위험하게 하므로, AI 매핑이 되돌아가도 새지 않게 DB 에서 한 번 더 막는다.
+    assertThat(tableExists("report_crisis_alerts")).isTrue();
+    assertThat(tableExists("report_crisis_alert_steps")).isTrue();
+    assertThat(tableExists("report_crisis_alert_resources")).isTrue();
+    assertThat(
+            checkConstraintContains(
+                "report_crisis_alerts", "ck_report_crisis_alerts_reason", "SELF_HARM_RISK"))
+        .isTrue();
+    assertThat(
+            checkConstraintContains(
+                "report_crisis_alerts", "ck_report_crisis_alerts_reason", "ABUSE_DISCLOSURE"))
+        .as("학대 신호는 보호자 통지 대상이 아니므로 저장 자체를 허용하지 않는다")
+        .isFalse();
     assertThat(columnExists("expert_profiles", "target_age_min")).isTrue();
     assertThat(columnExists("expert_profiles", "target_age_max")).isTrue();
     assertThat(tableExists("expert_verification_reviews")).isTrue();

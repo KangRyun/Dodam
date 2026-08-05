@@ -25,12 +25,21 @@ import com.ssafy.b209.global.support.ColumnTextLimiter;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportActivityNote;
 import com.ssafy.b209.report.domain.ReportActivitySummary;
+import com.ssafy.b209.report.domain.ReportCrisisAlert;
 import com.ssafy.b209.report.domain.ReportDrawnItem;
+import com.ssafy.b209.report.domain.ReportEvidenceItem;
+import com.ssafy.b209.report.domain.ReportEvidenceSourceKind;
+import com.ssafy.b209.report.domain.ReportEvidenceSourceRef;
+import com.ssafy.b209.report.domain.ReportEvidenceSourceType;
 import com.ssafy.b209.report.domain.ReportFeatureVisibility;
 import com.ssafy.b209.report.domain.ReportFollowUpGuide;
 import com.ssafy.b209.report.domain.ReportGuardianQuestion;
+import com.ssafy.b209.report.domain.ReportInterpretationCategory;
 import com.ssafy.b209.report.domain.ReportKeyConversation;
 import com.ssafy.b209.report.domain.ReportObservedFeature;
+import com.ssafy.b209.report.domain.ReportParentGuide;
+import com.ssafy.b209.report.domain.ReportParentGuideType;
+import com.ssafy.b209.report.domain.ReportPublicInterpretation;
 import com.ssafy.b209.report.domain.ReportStatus;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummaryDraft;
@@ -42,17 +51,26 @@ import com.ssafy.b209.report.dto.ObservationGenerationResult.ObservedFeatureDraf
 import com.ssafy.b209.report.exception.MockObservationReportErrorCode;
 import com.ssafy.b209.report.repository.ReportActivityNoteRepository;
 import com.ssafy.b209.report.repository.ReportActivitySummaryRepository;
+import com.ssafy.b209.report.repository.ReportCrisisAlertRepository;
 import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
+import com.ssafy.b209.report.repository.ReportEvidenceItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideRepository;
 import com.ssafy.b209.report.repository.ReportGuardianQuestionRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationRepository;
 import com.ssafy.b209.report.repository.ReportObservedFeatureRepository;
+import com.ssafy.b209.report.repository.ReportParentGuideRepository;
+import com.ssafy.b209.report.repository.ReportPublicInterpretationRepository;
 import com.ssafy.b209.report.repository.ReportRepository;
+import com.ssafy.b209.report.safety.InterpretationCandidate;
+import com.ssafy.b209.report.safety.InterpretationSafetyOutcome;
+import com.ssafy.b209.report.safety.InterpretationSafetyVerifier;
 import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -78,6 +96,13 @@ public class ObservationReportPersistenceService {
   private static final String FAILED_LIMITATIONS = "리포트 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.";
 
   // AI 응답이 들어가는 VARCHAR 컬럼의 문자 수 상한이다. 값 하나가 상한을 넘겨도 리포트 전체가 실패하지 않도록
+  private static final int EVIDENCE_TEXT_LIMIT = 1000;
+  private static final int INTERPRETATION_TITLE_LIMIT = 200;
+  private static final int CRISIS_TITLE_LIMIT = 200;
+  private static final int CRISIS_RESOURCE_NAME_LIMIT = 100;
+  private static final int CRISIS_CONTACT_LIMIT = 100;
+  private static final int CRISIS_NOTE_LIMIT = 300;
+
   // 저장 직전에 ColumnTextLimiter로 맞춘다(S15P11B209-815). TEXT 컬럼은 상한이 없어 대상이 아니다.
   private static final int MODEL_NAME_LIMIT = 100;
   private static final int MODEL_VERSION_LIMIT = 255;
@@ -96,6 +121,12 @@ public class ObservationReportPersistenceService {
   private final ReportActivitySummaryRepository activitySummaryRepository;
   private final ReportActivityNoteRepository activityNoteRepository;
   private final ReportDrawnItemRepository drawnItemRepository;
+  private final ReportPublicInterpretationRepository interpretationRepository;
+  private final ReportEvidenceItemRepository evidenceItemRepository;
+  private final ReportParentGuideRepository parentGuideRepository;
+  private final ReportCrisisAlertRepository crisisAlertRepository;
+  private final InterpretationSafetyVerifier safetyVerifier;
+  private final InterpretationCandidateAdapter candidateAdapter;
   private final ReportObservedFeatureRepository observedFeatureRepository;
   private final ReportKeyConversationRepository keyConversationRepository;
   private final ReportFollowUpGuideRepository followUpGuideRepository;
@@ -118,6 +149,12 @@ public class ObservationReportPersistenceService {
    * @param activitySummaryRepository 리포트 활동 요약 저장소
    * @param activityNoteRepository 리포트 활동 주의사항 저장소
    * @param drawnItemRepository 리포트 '그린 것' 저장소
+   * @param interpretationRepository 경향 해석 저장소
+   * @param evidenceItemRepository 경향 해석 근거 저장소
+   * @param parentGuideRepository 보호자 가이드 저장소
+   * @param crisisAlertRepository 위기 대응 안내 저장소
+   * @param safetyVerifier 경향 해석 2단 안전 검증기
+   * @param candidateAdapter AI 응답을 검증기 입력으로 옮기는 Adapter
    * @param observedFeatureRepository 리포트 관찰 특징 저장소
    * @param keyConversationRepository 리포트 주요 대화 저장소
    * @param followUpGuideRepository 리포트 후속 안내 저장소
@@ -138,6 +175,12 @@ public class ObservationReportPersistenceService {
       ReportActivitySummaryRepository activitySummaryRepository,
       ReportActivityNoteRepository activityNoteRepository,
       ReportDrawnItemRepository drawnItemRepository,
+      ReportPublicInterpretationRepository interpretationRepository,
+      ReportEvidenceItemRepository evidenceItemRepository,
+      ReportParentGuideRepository parentGuideRepository,
+      ReportCrisisAlertRepository crisisAlertRepository,
+      InterpretationSafetyVerifier safetyVerifier,
+      InterpretationCandidateAdapter candidateAdapter,
       ReportObservedFeatureRepository observedFeatureRepository,
       ReportKeyConversationRepository keyConversationRepository,
       ReportFollowUpGuideRepository followUpGuideRepository,
@@ -156,6 +199,12 @@ public class ObservationReportPersistenceService {
     this.activitySummaryRepository = activitySummaryRepository;
     this.activityNoteRepository = activityNoteRepository;
     this.drawnItemRepository = drawnItemRepository;
+    this.interpretationRepository = interpretationRepository;
+    this.evidenceItemRepository = evidenceItemRepository;
+    this.parentGuideRepository = parentGuideRepository;
+    this.crisisAlertRepository = crisisAlertRepository;
+    this.safetyVerifier = safetyVerifier;
+    this.candidateAdapter = candidateAdapter;
     this.observedFeatureRepository = observedFeatureRepository;
     this.keyConversationRepository = keyConversationRepository;
     this.followUpGuideRepository = followUpGuideRepository;
@@ -578,6 +627,270 @@ public class ObservationReportPersistenceService {
     return name != null
         && !name.isBlank()
         && name.codePointCount(0, name.length()) <= ReportDrawnItem.DISPLAY_NAME_MAX_CODE_POINTS;
+  }
+
+  /**
+   * 경향 해석과 근거를 2단 검증 결과에 따라 저장한다 (S15P11B209-902).
+   *
+   * <p>기존 관찰 특징({@code report_observed_features}) 경로를 쓰지 않는다 — 그쪽은 {@code resolveVisibility()}가 전문가
+   * 검토 전 항목을 전부 EXPERT_ONLY 로 강등하고 그 판단에 쓰는 검토 상태는 전이 경로가 없어 항상 미검토다. 실으면 구현이 끝나도 보호자 화면이 빈다(계약
+   * §4-2 결정 1).
+   *
+   * <p>AI 도 자체 게이트를 통과시킨 카드만 보내지만 여기서 다시 검증한다 — 이중 방어이며, 서버가 발급하지 않은 참조나 근거 부족을 서버 쪽에서 확정한다.
+   *
+   * @param report 카드가 속한 리포트
+   * @param result AI 응답
+   */
+  private void savePublicInterpretations(Report report, ObservationGenerationResult result) {
+    List<ObservationGenerationResult.PublicInterpretationDraft> cardDrafts =
+        safeList(result.publicInterpretations());
+    if (cardDrafts.isEmpty()) {
+      return;
+    }
+    List<ObservationGenerationResult.EvidenceItemDraft> evidenceDrafts =
+        safeList(result.evidenceItems());
+
+    List<InterpretationCandidate> candidates = candidateAdapter.toCandidates(cardDrafts);
+    InterpretationSafetyOutcome outcome =
+        safetyVerifier.verify(candidates, candidateAdapter.toEvidenceCandidates(evidenceDrafts));
+
+    // 근거는 공개 여부와 무관하게 저장한다 — 제외·강등 카드도 왜 그렇게 됐는지 되짚어야 한다.
+    Map<Long, ReportEvidenceItem> savedEvidence = saveEvidenceItems(report, evidenceDrafts);
+
+    Map<Integer, ReportPublicInterpretation> cards = new LinkedHashMap<>();
+    int order = 0;
+    for (InterpretationSafetyOutcome.PublishedInterpretation published : outcome.published()) {
+      cards.put(published.sourceIndex(), newInterpretation(report, order++, published.candidate()));
+    }
+    for (InterpretationSafetyOutcome.DemotedInterpretation demoted : outcome.demoted()) {
+      cards.put(demoted.sourceIndex(), newInterpretation(report, order++, demoted.candidate()));
+    }
+    for (InterpretationSafetyOutcome.ExcludedInterpretation excluded : outcome.excluded()) {
+      cards.put(excluded.sourceIndex(), newInterpretation(report, order++, excluded.candidate()));
+    }
+
+    // 근거 연결은 판정과 무관하게 붙인다. 참조가 남아 있어야 사유를 검증할 수 있다.
+    for (Map.Entry<Integer, ReportPublicInterpretation> entry : cards.entrySet()) {
+      InterpretationCandidate candidate = candidateAt(candidates, entry.getKey());
+      if (candidate == null) {
+        continue;
+      }
+      for (Long evidenceRef : candidate.evidenceRefs()) {
+        ReportEvidenceItem evidenceItem = savedEvidence.get(evidenceRef);
+        if (evidenceItem != null) {
+          entry.getValue().referenceEvidence(evidenceItem);
+        }
+      }
+    }
+
+    for (InterpretationSafetyOutcome.PublishedInterpretation published : outcome.published()) {
+      ReportPublicInterpretation card = cards.get(published.sourceIndex());
+      if (card != null && !card.getEvidences().isEmpty()) {
+        card.publish();
+      }
+    }
+    for (InterpretationSafetyOutcome.DemotedInterpretation demoted : outcome.demoted()) {
+      ReportPublicInterpretation card = cards.get(demoted.sourceIndex());
+      if (card != null) {
+        card.restrictToExpert(demoted.reason().name());
+      }
+    }
+    for (InterpretationSafetyOutcome.ExcludedInterpretation excluded : outcome.excluded()) {
+      ReportPublicInterpretation card = cards.get(excluded.sourceIndex());
+      if (card != null) {
+        card.withhold(firstReason(excluded));
+      }
+    }
+
+    interpretationRepository.saveAll(cards.values());
+  }
+
+  /**
+   * 근거 풀을 저장하고 AI 로컬 번호로 찾을 수 있는 Map 을 돌려준다.
+   *
+   * <p>AI 의 {@code evidenceId}는 응답 안에서만 유일한 로컬 번호이므로 그대로 {@code evidence_number}로 보존한다. 카드의 {@code
+   * evidenceRefs}가 이 번호를 가리키기 때문이다.
+   *
+   * @param report 근거가 속한 리포트
+   * @param drafts AI 가 보낸 근거 목록
+   * @return AI 로컬 번호를 Key 로 하는 저장된 근거 Map
+   */
+  private Map<Long, ReportEvidenceItem> saveEvidenceItems(
+      Report report, List<ObservationGenerationResult.EvidenceItemDraft> drafts) {
+    Map<Long, ReportEvidenceItem> saved = new LinkedHashMap<>();
+    for (ObservationGenerationResult.EvidenceItemDraft draft : drafts) {
+      if (draft == null || draft.evidenceId() == null || draft.text() == null) {
+        continue;
+      }
+      ReportEvidenceSourceType sourceType =
+          parseEnum(ReportEvidenceSourceType.class, draft.sourceType());
+      if (sourceType == null) {
+        continue;
+      }
+      int evidenceNumber = draft.evidenceId().intValue();
+      if (evidenceNumber <= 0 || saved.containsKey(draft.evidenceId())) {
+        continue;
+      }
+      String text =
+          ColumnTextLimiter.fit(draft.text(), EVIDENCE_TEXT_LIMIT, "report_evidence_items.text");
+      try {
+        ReportEvidenceItem item =
+            sourceType.isDerived()
+                ? ReportEvidenceItem.derived(
+                    report,
+                    evidenceNumber,
+                    sourceType,
+                    text,
+                    toDomainRefs(draft.derivedFrom()),
+                    draft.sttNeedsConfirmation())
+                : ReportEvidenceItem.original(
+                    report,
+                    evidenceNumber,
+                    sourceType,
+                    text,
+                    domainKind(draft.sourceRef()),
+                    domainRefId(draft.sourceRef()),
+                    draft.sttNeedsConfirmation());
+        saved.put(draft.evidenceId(), item);
+      } catch (IllegalArgumentException | NullPointerException exception) {
+        // 배타 규칙·식별자 형식을 지키지 않은 근거는 버린다. 근거 한 건 때문에 리포트를 죽이지 않는다.
+        log.info("경향 해석 근거를 저장하지 않았다. evidenceId={}", draft.evidenceId());
+      }
+    }
+    evidenceItemRepository.saveAll(saved.values());
+    return saved;
+  }
+
+  /**
+   * 유형별 보호자 가이드를 저장한다. AI 는 유형마다 문장 목록을 보내므로 행으로 펼친다.
+   *
+   * @param report 가이드가 속한 리포트
+   * @param drafts AI 가 보낸 가이드 목록
+   */
+  private void saveParentGuides(
+      Report report, List<ObservationGenerationResult.ParentGuideDraft> drafts) {
+    List<ReportParentGuide> entities = new ArrayList<>();
+    for (ObservationGenerationResult.ParentGuideDraft draft : drafts) {
+      if (draft == null) {
+        continue;
+      }
+      ReportParentGuideType guideType = parseEnum(ReportParentGuideType.class, draft.guideType());
+      if (guideType == null) {
+        continue;
+      }
+      int order = 0;
+      for (String item : draft.items()) {
+        if (item == null || item.isBlank()) {
+          continue;
+        }
+        entities.add(ReportParentGuide.create(report, guideType, order++, item));
+      }
+    }
+    parentGuideRepository.saveAll(entities);
+  }
+
+  /**
+   * 위기 대응 안내를 저장한다.
+   *
+   * <p>{@code ABUSE_DISCLOSURE}는 저장하지 않는다 — 가해자가 보호자일 수 있어 자동 통지가 아이를 위험하게 한다. AI 가 이미 만들지
+   * 않지만(S15P11B209-890) 여기서도 막아 매핑이 되돌아가도 보호자 노출 경로로 새지 않게 한다.
+   *
+   * @param report 안내가 속한 리포트
+   * @param draft AI 가 보낸 위기 안내이며 없으면 {@code null}
+   */
+  private void saveCrisisAlert(Report report, ObservationGenerationResult.CrisisAlertDraft draft) {
+    if (draft == null || !ReportCrisisAlert.isStorableReason(draft.reasonCode())) {
+      return;
+    }
+    try {
+      ReportCrisisAlert alert =
+          ReportCrisisAlert.create(
+              report,
+              draft.reasonCode(),
+              draft.severity(),
+              ColumnTextLimiter.fit(
+                  draft.title(), CRISIS_TITLE_LIMIT, "report_crisis_alerts.title"),
+              draft.message());
+      for (String step : draft.actionSteps()) {
+        if (step != null && !step.isBlank()) {
+          alert.addStep(step);
+        }
+      }
+      for (ObservationGenerationResult.CrisisResourceDraft resource : draft.resources()) {
+        if (resource == null) {
+          continue;
+        }
+        alert.addResource(
+            ColumnTextLimiter.fit(
+                resource.name(),
+                CRISIS_RESOURCE_NAME_LIMIT,
+                "report_crisis_alert_resources.resource_name"),
+            ColumnTextLimiter.fit(
+                resource.contact(), CRISIS_CONTACT_LIMIT, "report_crisis_alert_resources.contact"),
+            ColumnTextLimiter.fit(
+                resource.note(), CRISIS_NOTE_LIMIT, "report_crisis_alert_resources.note"));
+      }
+      crisisAlertRepository.save(alert);
+    } catch (IllegalArgumentException | NullPointerException exception) {
+      log.info("위기 대응 안내를 저장하지 않았다. reasonCode={}", draft.reasonCode());
+    }
+  }
+
+  private ReportPublicInterpretation newInterpretation(
+      Report report, int displayOrder, InterpretationCandidate candidate) {
+    return ReportPublicInterpretation.create(
+        report,
+        displayOrder,
+        ReportInterpretationCategory.valueOf(candidate.category().name()),
+        ColumnTextLimiter.fit(
+            candidate.title(), INTERPRETATION_TITLE_LIMIT, "report_public_interpretations.title"),
+        candidate.tendencyText(),
+        candidate.scopeText(),
+        candidate.homeObservationGuide());
+  }
+
+  private static InterpretationCandidate candidateAt(
+      List<InterpretationCandidate> candidates, int index) {
+    return index >= 0 && index < candidates.size() ? candidates.get(index) : null;
+  }
+
+  private static String firstReason(InterpretationSafetyOutcome.ExcludedInterpretation excluded) {
+    return excluded.reasons().stream()
+        .findFirst()
+        .map(Enum::name)
+        .orElse(ReportPublicInterpretation.PENDING_VERIFICATION);
+  }
+
+  private static List<ReportEvidenceSourceRef> toDomainRefs(
+      List<ObservationGenerationResult.EvidenceSourceRefDraft> refs) {
+    List<ReportEvidenceSourceRef> domainRefs = new ArrayList<>();
+    for (ObservationGenerationResult.EvidenceSourceRefDraft ref : refs) {
+      ReportEvidenceSourceKind kind = domainKind(ref);
+      if (kind != null && ref.id() != null && !ref.id().isBlank()) {
+        domainRefs.add(new ReportEvidenceSourceRef(kind, ref.id()));
+      }
+    }
+    return domainRefs;
+  }
+
+  private static ReportEvidenceSourceKind domainKind(
+      ObservationGenerationResult.EvidenceSourceRefDraft ref) {
+    return ref == null ? null : parseEnum(ReportEvidenceSourceKind.class, ref.kind());
+  }
+
+  private static String domainRefId(ObservationGenerationResult.EvidenceSourceRefDraft ref) {
+    return ref == null ? null : ref.id();
+  }
+
+  private static <E extends Enum<E>> E parseEnum(Class<E> type, String value) {
+    if (value == null || value.isBlank()) {
+      return null;
+    }
+    try {
+      return Enum.valueOf(type, value.trim().toUpperCase(java.util.Locale.ROOT));
+    } catch (IllegalArgumentException exception) {
+      return null;
+    }
   }
 
   private void saveObservedFeatures(
