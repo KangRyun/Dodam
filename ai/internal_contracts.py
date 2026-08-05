@@ -199,6 +199,11 @@ class QuestionResponse(_CamelModel):
     - targetObject가 있으면 objectCode 비어 있지 않고 confidence 0~1·boundingBox 정규화
     - safetyResult.status == "PASSED" 그리고 blockReasonCode == null
     - processingTimeMs >= 0
+    - confirmedStopTarget가 있으면 질문이 아니라 맺음말이므로 OPTION 허용이어도 options 없음 가능
+
+    confirmedStopTarget(S15P11B209-951)는 **명령이 아니라 관찰 보고**다. "아이가 그만하겠다고
+    확인했다"는 사실만 싣고, 실제 종료는 지금과 같이 FE가 수행한다 — AI는 턴·활동을 제어하지
+    않는다는 786 원칙은 그대로다.
     """
 
     question_text: str
@@ -206,6 +211,10 @@ class QuestionResponse(_CamelModel):
         "OBJECT_DESCRIPTION", "DRAWING_CONTEXT", "EXPRESSION", "FOLLOW_UP"
     ]
     options: list[QuestionOption] | None = None
+    # 아이가 되묻기에 말로 그만하겠다고 확인한 대상. 확인이 없으면 None이다(S15P11B209-951).
+    #   CONVERSATION — 대화만 끝낸다. 그림은 계속 그릴 수 있어 되돌리기 쉽다.
+    #   ACTIVITY     — 그림 활동까지 끝낸다. 회고 저장·다음 단계로 이어져 되돌릴 수 없다.
+    confirmed_stop_target: Literal["CONVERSATION", "ACTIVITY"] | None = None
     target_object: DetectedObject | None = None
     fallback_used: bool = False
     safety_result: SafetyResult

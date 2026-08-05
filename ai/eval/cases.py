@@ -1041,6 +1041,37 @@ Q27_STOP_CHIP_FOLLOW_UP = QuestionCase(
 )
 
 
+# ── 28) 되묻기에 말로 답한 확인 (S15P11B209-951) ────────────────
+# 938은 종료를 칩으로만 갈 수 있게 두어, 되묻기에 말로 "응"이라고 답하면 아무 일도 일어나지
+# 않았다. 여기서 보는 것은 맺음말이 GMS 없이 나가고 confirmedStopTarget이 실리는가다.
+Q28_STOP_CONFIRMED_BY_VOICE = QuestionCase(
+    id="Q28_stop_confirmed_by_voice",
+    title="그만하기 · 되묻기에 말로 확인(GMS 미호출)",
+    why="말로 답해도 대화가 끝나는가. 되묻기를 또 반복하지 않는가.",
+    request=QuestionRequest(
+        conversation_id=9028,
+        drawing_session_id=8028,
+        child_age=8,
+        difficulty="LOWER_ELEMENTARY",
+        allowed_response_modes=["VOICE", "OPTION"],
+        current_question_count=3,
+        max_question_count=5,
+        detected_objects=[_obj("PERSON", "사람", 0.9)],
+        drawing_description="가운데에 사람이 한 명 서 있어요.",
+        recent_messages=[
+            _dodam("이 사람은 지금 뭐 하고 있어?"),
+            _child("이야기 그만할래."),
+            _dodam("그래, 이야기는 여기까지 할까?"),
+            _child("응."),
+        ],
+        safety_rule_version=SAFETY_RULE_VERSION,
+        activity_type="ART_DIARY",
+    ),
+    calls_gms=False,
+    meta={"fixed_question_text": "그래, 오늘 이야기 재미있었어. 그림은 계속 그려도 돼!"},
+)
+
+
 QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q1_FIRST_HTP,
     Q2_FIRST_DIARY,
@@ -1067,6 +1098,7 @@ QUESTION_CASES: tuple[QuestionCase, ...] = (
     Q25_STOP_CONVERSATION,
     Q26_STOP_HTP,
     Q27_STOP_CHIP_FOLLOW_UP,
+    Q28_STOP_CONFIRMED_BY_VOICE,
 )
 
 

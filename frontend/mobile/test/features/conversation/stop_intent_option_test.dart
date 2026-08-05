@@ -4,12 +4,61 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// 아이가 말로 그만하겠다고 하면 AI 가 무엇을 그만할지 되묻고, 그 답을 실제 종료로
-/// 옮기는 흐름을 검사한다 (S15P11B209-938).
+/// 옮기는 흐름을 검사한다 (S15P11B209-938 칩 · S15P11B209-951 음성).
 ///
 /// 두 종료는 무게가 다르다. 대화 종료는 그림을 계속 그릴 수 있어 가볍지만, 그림 활동
 /// 완료는 되돌릴 수 없다. 그래서 칩 하나가 잘못 연결되면 아이가 이야기만 그만하려다
 /// 그림까지 끝내 버린다 — 여기서 잡는다.
 void main() {
+  testWidgets('말로 확인한 대화 종료는 화면에 띄우지 않고 대화를 끝낸다', (tester) async {
+    // 되묻기에 "응"이라고 말하면 서버가 맺음말에 confirmedStopTarget 을 실어 보낸다(951).
+    // 이건 질문이 아니라 대화를 닫는 말이므로 답을 기다리지 않는다.
+    final repository = _ConversationRepository([_conversationClosing]);
+    final ends = _EndRepository();
+    await _pumpConversation(
+      tester,
+      repository: repository,
+      endRepository: ends,
+      awaitQuestion: false,
+    );
+
+    await _pumpUntilCall(() => ends.requests.isNotEmpty, tester);
+    expect(ends.requests.single.reason, ConversationCompletionReason.childRequest);
+    expect(find.text(_conversationClosing.text), findsNothing);
+    // 종료했으니 다음 질문을 더 만들지 않는다(최초 1건 그대로).
+    expect(repository.requests, hasLength(1));
+  });
+
+  testWidgets('말로 확인한 활동 완료는 대화 종료 API 를 직접 부르지 않는다', (tester) async {
+    // 활동 완료는 기존 '다 그렸어요!' 확인·회고 흐름을 그대로 탄다 — 칩 경로와 같다.
+    final repository = _ConversationRepository([_activityClosing]);
+    final ends = _EndRepository();
+    await _pumpConversation(
+      tester,
+      repository: repository,
+      endRepository: ends,
+      awaitQuestion: false,
+    );
+    await tester.pump(const Duration(milliseconds: 50));
+
+    expect(ends.requests, isEmpty);
+    expect(repository.requests, hasLength(1));
+  });
+
+  testWidgets('모르는 종료 대상은 평범한 질문으로 다룬다', (tester) async {
+    // 서버가 새 대상을 먼저 배포해도 구버전 앱이 엉뚱한 것을 끝내지 않는다.
+    final repository = _ConversationRepository([_unknownTargetQuestion]);
+    final ends = _EndRepository();
+    await _pumpConversation(
+      tester,
+      repository: repository,
+      endRepository: ends,
+      initialQuestion: _unknownTargetQuestion,
+    );
+
+    expect(ends.requests, isEmpty);
+  });
+
   testWidgets('이야기만 그만할래 칩은 대화를 종료하고 다음 질문을 요청하지 않는다', (tester) async {
     final repository = _ConversationRepository([_stopAskQuestion]);
     final ends = _EndRepository();
@@ -87,6 +136,7 @@ Future<void> _pumpConversation(
   required _ConversationRepository repository,
   required _EndRepository endRepository,
   AiQuestion? initialQuestion,
+  bool awaitQuestion = true,
 }) async {
   await tester.pumpWidget(
     MaterialApp(
@@ -108,6 +158,13 @@ Future<void> _pumpConversation(
     ),
   );
   await tester.pump();
+  if (!awaitQuestion) {
+    // 맺음말은 화면에 뜨지 않으므로 텍스트를 기다리면 안 된다 — 몇 프레임만 돌린다.
+    for (var frame = 0; frame < 10; frame++) {
+      await tester.pump(const Duration(milliseconds: 1));
+    }
+    return;
+  }
   await _pumpUntil(
     tester,
     find.text((initialQuestion ?? _stopAskQuestion).text),
@@ -263,6 +320,40 @@ final _stopAskQuestion = AiQuestion(
   ],
   ttsAvailable: false,
   createdAt: DateTime.utc(2026, 8, 5),
+);
+
+/// 아이가 되묻기에 말로 "응"이라고 답해 서버가 보낸 맺음말 (S15P11B209-951).
+final _conversationClosing = AiQuestion(
+  messageId: 9011,
+  conversationId: 8001,
+  sequence: 1,
+  text: '그래, 오늘 이야기 재미있었어. 그림은 계속 그려도 돼!',
+  options: const [],
+  ttsAvailable: false,
+  createdAt: DateTime.utc(2026, 8, 5),
+  confirmedStopTarget: confirmedStopConversation,
+);
+
+final _activityClosing = AiQuestion(
+  messageId: 9012,
+  conversationId: 8001,
+  sequence: 1,
+  text: '그래, 오늘 그림 정말 멋졌어. 다음에 또 그리자!',
+  options: const [],
+  ttsAvailable: false,
+  createdAt: DateTime.utc(2026, 8, 5),
+  confirmedStopTarget: confirmedStopActivity,
+);
+
+final _unknownTargetQuestion = AiQuestion(
+  messageId: 9013,
+  conversationId: 8001,
+  sequence: 1,
+  text: '이 나무는 몇 살이야?',
+  options: const [],
+  ttsAvailable: false,
+  createdAt: DateTime.utc(2026, 8, 5),
+  confirmedStopTarget: 'EVERYTHING',
 );
 
 final _ordinaryQuestion = AiQuestion(

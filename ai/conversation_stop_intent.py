@@ -92,6 +92,39 @@ _UNSPECIFIED = [
 ]
 
 
+# ── 되묻기에 대한 답 (S15P11B209-951) ──────────────────────────
+# 938은 되묻기 뒤 종료를 **칩으로만** 갈 수 있게 두었다. 그래서 아이가 말로 "응"이라고
+# 답해도 아무 일도 일어나지 않았다. 마이크로 대화하는 아이에게 "그만할래"는 말로 하는 것이
+# 자연스러운데, 되묻고 나서 말로 답할 길을 막아 두면 결국 화면을 눌러야만 빠져나갈 수 있다.
+#
+# ⚠️ 여기서는 오탐의 대가가 위쪽 scan()과 다르다. scan()의 오탐은 되묻기 한 번이라 가볍지만,
+#    이 판정의 오탐은 **대화를 실제로 끝낸다.** 그래서 확신이 서는 형태만 잡고 애매하면
+#    아무 신호도 내지 않는다(None). 놓쳐도 아이는 한 번 더 말하거나 칩을 누르면 된다.
+CONFIRM_YES = "CONFIRM_YES"
+CONFIRM_NO = "CONFIRM_NO"
+
+# 부정을 먼저 본다 — "아니, 더 할래"에는 긍정 낱말이 섞이지 않지만, 순서를 고정해 두면
+# 나중에 규칙이 늘어도 부정이 긍정에 먹히지 않는다.
+_CONFIRM_NO = [
+    rf"^{_S}(아니|아냐|아니야|아니요|아뇨|싫어|시러)[.!?…~]*{_S}$",
+    rf"(아니|안){_S}(그만|끝)",
+    rf"(더|계속|조금{_S}더|좀{_S}더){_S}(할래|하고{_S}싶|그릴래|얘기할래|이야기할래|할{_S}거야)",
+    rf"(계속|더){_S}(하자|해|해요)",
+    rf"^{_S}아직[.!?…~]*{_S}$",
+]
+
+# 한 마디 긍정이 대부분이다. 아이는 "응."·"어~"처럼 짧게 끊는다.
+# '그만' 계열을 함께 넣는 이유: 되묻기에 같은 말로 다시 답하는 것도 분명한 확인이다
+# ("그만할래" → "그래, 이야기는 여기까지 할까?" → "응 그만할래").
+_CONFIRM_YES = [
+    rf"^{_S}(응+|어+|웅+|엉+|네+|넹|예|그래|그럼|맞아|좋아|알겠어|알았어|그러자|그럴래|ㅇㅇ+)"
+    rf"[.!?…~]*{_S}$",
+    rf"(응|어|그래|네|좋아|그럼){_S}[,.]?{_S}(그만|끝낼래|끝내자|안{_S}할래)",
+    rf"그만{_S}(할래|하고{_S}싶|할게|하자|해)",
+    r"(끝낼래|끝내자|끝내고\s*싶)",
+]
+
+
 def _compile(patterns: list[str]) -> list[re.Pattern]:
     return [re.compile(p) for p in patterns]
 
@@ -120,6 +153,33 @@ def scan(text: str) -> str | None:
     for verdict, patterns in _RULES:
         if any(rx.search(text) for rx in patterns):
             return verdict
+    return None
+
+
+_CONFIRM_NO_RX = _compile(_CONFIRM_NO)
+_CONFIRM_YES_RX = _compile(_CONFIRM_YES)
+
+
+def scan_confirmation(text: str) -> str | None:
+    """되묻기("그만할까?")에 대한 답이 긍정인지 부정인지 판정한다 (S15P11B209-951).
+
+    ⚠️ **되묻기 직후 턴에서만 불러야 한다.** 평범한 질문에 "응"이라고 답하는 일은 흔하고,
+    그것까지 종료로 읽으면 대화가 아무 때나 끊긴다. 직전 AI 메시지가 되묻기였는지 확인하는
+    것은 호출부(question_service)의 책임이다.
+
+    긍정·부정 어디에도 걸리지 않으면 None이다. 애매한 답으로 대화를 끝내지 않는다 —
+    이 판정의 오탐은 scan()과 달리 되돌리기 어렵다. 예를 들어 "안 할래"는 '이제 안 하겠다'와
+    '그만두지 않겠다'로 모두 읽혀 어느 쪽으로도 판정하지 않는다.
+
+    Returns:
+        CONFIRM_YES | CONFIRM_NO | None. 판정 '코드'라 로그에 남겨도 발화가 새지 않는다.
+    """
+    if not text or not text.strip():
+        return None
+    if any(rx.search(text) for rx in _CONFIRM_NO_RX):
+        return CONFIRM_NO
+    if any(rx.search(text) for rx in _CONFIRM_YES_RX):
+        return CONFIRM_YES
     return None
 
 

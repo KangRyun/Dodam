@@ -417,7 +417,8 @@ public class ConversationNextQuestionService {
         options,
         toTargetResponse(generated.targetObject()),
         ttsAvailable,
-        clock.instant());
+        clock.instant(),
+        generated.confirmedStopTarget());
   }
 
   private NextQuestionOptionResponse toOptionResponse(QuestionOption option) {
