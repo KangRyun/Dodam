@@ -352,10 +352,22 @@ def _format_subject_blocks(req: contracts.ObservationGenerationRequest) -> str:
             "(관찰 서술이 제공되지 않았어요)"
         )
         lines = [f"[{label} 관찰]", description]
+        # 근거 식별자(886) — 이 서술을 근거로 쓸 때 옮겨 적을 값. 없으면 근거로 쓸 수 없다.
+        if summary.observation_evidence_source_id:
+            lines.append(
+                f"- 근거 식별자: VLM_OBSERVATION:{summary.observation_evidence_source_id}"
+            )
         if summary.detected_object_codes:
             lines.append(
                 "- 탐지된 요소 코드(참고용): " + ", ".join(summary.detected_object_codes)
             )
+        detected_refs = [
+            f"{obj.object_code}={obj.evidence_source_id}"
+            for obj in summary.detected_objects
+            if obj.evidence_source_id
+        ]
+        if detected_refs:
+            lines.append("- 요소별 근거 식별자(DETECTED_OBJECT): " + ", ".join(detected_refs))
         parts.append("\n".join(lines))
         geometry = _format_geometry(summary, label)
         if geometry:
@@ -368,7 +380,15 @@ def _format_subject_blocks(req: contracts.ObservationGenerationRequest) -> str:
                     answer = "(건너뛴 질문)"
                 else:
                     answer = (qa.answer_text or "").strip() or "(답하지 않았어요)"
-                qa_lines.append(f"- 질문: {qa.question}\n  답변: {answer}")
+                line = f"- 질문: {qa.question}\n  답변: {answer}"
+                # 근거 식별자(886) — 이 답변을 경향 카드 근거로 쓸 때 그대로 옮겨 적을 값이다.
+                # 미확정 STT는 식별자를 싣지 않는다: 표시는 유지하되 근거로는 쓸 수 없게 만든다
+                # (875 §6-1). "쓰지 마"라고 문장으로 부탁하는 것보다 재료를 주지 않는 편이 확실하다.
+                if qa.answer_message_id is not None and not qa.stt_needs_confirmation:
+                    line += f"\n  근거 식별자: QA_ANSWER:{qa.answer_message_id}"
+                elif qa.stt_needs_confirmation:
+                    line += "\n  (음성 인식 확인이 필요한 답변이라 근거로 쓸 수 없어요)"
+                qa_lines.append(line)
             parts.append("\n".join(qa_lines))
     return "\n\n".join(parts) + "\n\n"
 
@@ -389,7 +409,26 @@ def _format_activity(
     subject_summaries(740)가 있으면 단일 [그림 관찰 서술] 대신 주제별 블록을 쓴다 —
     drawing_description(레거시 draft 경로 인자)과 동시에 오면 주제별 블록이 우선한다.
     """
-    emotions = ", ".join(req.selected_emotions) if req.selected_emotions else "없음"
+    # 선택 감정은 코드 목록으로 실리는데, 근거로 쓰려면 어느 레코드에서 왔는지 알아야 한다(886).
+    # 식별자가 함께 온 감정만 "코드(식별자)"로 적는다 — 없는 감정은 근거가 되지 못한다.
+    emotion_ref_by_code = {
+        ref.emotion_code: ref.evidence_source_id for ref in req.selected_emotion_refs
+    }
+    emotions = (
+        ", ".join(
+            f"{code}(EMOTION_SELECTION:{emotion_ref_by_code[code]})"
+            if code in emotion_ref_by_code
+            else code
+            for code in req.selected_emotions
+        )
+        if req.selected_emotions
+        else "없음"
+    )
+    metric_ref_line = (
+        f"- 활동 기록 근거 식별자: ACTIVITY_METRIC:{req.activity_metric_source_id}\n"
+        if req.activity_metric_source_id
+        else ""
+    )
     if req.subject_summaries:
         observation_block = _format_subject_blocks(req)
     else:
@@ -409,7 +448,8 @@ def _format_activity(
         f"- 음성 인식 실패 수: {req.unrecognized_speech_count}\n"
         f"- 아이가 선택한 감정: {emotions}\n"
         f"- 아이가 말한 감정: {req.expressed_emotion_text or '없음'}\n"
-        f"- 대표 발화: {req.representative_utterance or '없음'}\n\n"
+        f"- 대표 발화: {req.representative_utterance or '없음'}\n"
+        f"{metric_ref_line}\n"
         "이 데이터로 규칙에 맞는 관찰 기록 JSON을 만들어줘."
     )
 
@@ -615,18 +655,74 @@ _AI_GENERATED_GUIDE_TYPES = frozenset({"DRAWING_CONVERSATION", "HOME_OBSERVATION
 _TENTATIVE_MARKERS = ("수 있", "보입니다", "보여요", "경향", "듯", "가능성")
 
 
-def _source_ref(raw) -> contracts.EvidenceSourceRef | None:
-    """{kind, id} 하나를 계약 모델로. 모르는 kind·빈 id는 버린다(조합키·창작 차단)."""
+def _allowed_evidence_refs(
+    req: contracts.ObservationGenerationRequest,
+) -> frozenset[tuple[str, str]]:
+    """요청에 실려 온 근거 식별자 집합 (S15P11B209-886).
+
+    **AI가 참조할 수 있는 것은 여기 있는 것뿐이다.** kind 형식만 검사하면 그럴듯한 번호를
+    지어내도 통과하므로, 실제로 받은 식별자인지 대조한다 — 이게 "BE 발급 ID만"의 실효 장치다.
+
+    미확정 STT 문답은 애초에 넣지 않는다(875 §6-1) — 표시는 유지하되 근거가 될 수 없다.
+    """
+    refs: set[tuple[str, str]] = set()
+    for summary in req.subject_summaries:
+        if summary.observation_evidence_source_id:
+            refs.add(("VLM_OBSERVATION", summary.observation_evidence_source_id))
+        for obj in summary.detected_objects:
+            if obj.evidence_source_id:
+                refs.add(("DETECTED_OBJECT", obj.evidence_source_id))
+        for qa in summary.qa_pairs:
+            if qa.answer_message_id is not None and not qa.stt_needs_confirmation:
+                refs.add(("QA_ANSWER", str(qa.answer_message_id)))
+    for emotion in req.selected_emotion_refs:
+        refs.add(("EMOTION_SELECTION", emotion.evidence_source_id))
+    if req.activity_metric_source_id:
+        refs.add(("ACTIVITY_METRIC", req.activity_metric_source_id))
+    return frozenset(refs)
+
+
+def _blocked_evidence_refs(
+    req: contracts.ObservationGenerationRequest,
+) -> frozenset[tuple[str, str]]:
+    """근거로 쓸 수 없는 참조 (S15P11B209-886). 게이트가 개수를 세기 전에 걸러낸다.
+
+    미확정 STT 발화가 여기 들어간다 — 식별자를 프롬프트에서 빼는 것만으로도 대부분 막히지만,
+    모델이 다른 곳에서 본 번호를 옮겨 적을 수 있어 이중으로 막는다.
+    위기 발화(889)는 같은 집합에 합쳐진다.
+    """
+    return frozenset(
+        ("QA_ANSWER", str(qa.answer_message_id))
+        for summary in req.subject_summaries
+        for qa in summary.qa_pairs
+        if qa.answer_message_id is not None and qa.stt_needs_confirmation
+    )
+
+
+def _source_ref(
+    raw, allowed: frozenset[tuple[str, str]] | None = None
+) -> contracts.EvidenceSourceRef | None:
+    """{kind, id} 하나를 계약 모델로. 모르는 kind·빈 id는 버린다(조합키·창작 차단).
+
+    allowed 가 주어지면 **요청에 실려 온 식별자인지 대조**한다(886). 지어낸 번호는 형식이
+    맞아도 통과하지 못한다.
+    """
     if not isinstance(raw, dict):
         return None
     kind = str(raw.get("kind", "")).strip()
     ref_id = str(raw.get("id", "")).strip()
     if kind not in _EVIDENCE_REF_KINDS or not ref_id:
         return None
+    if allowed is not None and (kind, ref_id) not in allowed:
+        # ⚠️ 식별자 값은 로그로 남기지 않는다 — 종류만.
+        logger.warning("요청에 없는 근거 식별자 참조 — 근거 제외(kind=%s)", kind)
+        return None
     return contracts.EvidenceSourceRef(kind=kind, id=ref_id)
 
 
-def _evidence_item(raw) -> contracts.ReportEvidenceItem | None:
+def _evidence_item(
+    raw, allowed: frozenset[tuple[str, str]] | None = None
+) -> contracts.ReportEvidenceItem | None:
     """근거 한 건을 계약 모델로. 배타 규칙(source_ref XOR derived_from)을 지키지 않으면 버린다.
 
     식별자가 없는 근거는 서버가 독립성을 검증할 수 없어 게이트를 무력화한다 → 버린다.
@@ -641,10 +737,10 @@ def _evidence_item(raw) -> contracts.ReportEvidenceItem | None:
     text = str(raw.get("text", "")).strip()
     if source_type not in _EVIDENCE_SOURCE_TYPES or not text:
         return None
-    source_ref = _source_ref(raw.get("sourceRef"))
+    source_ref = _source_ref(raw.get("sourceRef"), allowed)
     derived = [
         ref
-        for ref in (_source_ref(d) for d in raw.get("derivedFrom") or [])
+        for ref in (_source_ref(d, allowed) for d in raw.get("derivedFrom") or [])
         if ref is not None
     ]
     # 배타 규칙: 정확히 하나. 둘 다 있거나 둘 다 없으면 무효(875 §4).
@@ -659,12 +755,14 @@ def _evidence_item(raw) -> contracts.ReportEvidenceItem | None:
     )
 
 
-def _evidence_items(data: dict) -> list[contracts.ReportEvidenceItem]:
+def _evidence_items(
+    data: dict, allowed: frozenset[tuple[str, str]] | None = None
+) -> list[contracts.ReportEvidenceItem]:
     """근거 풀. evidence_id 중복은 첫 건만 남긴다(참조가 어느 쪽을 가리키는지 모호해진다)."""
     items: list[contracts.ReportEvidenceItem] = []
     seen: set[int] = set()
     for raw in data.get("evidenceItems") or []:
-        item = _evidence_item(raw)
+        item = _evidence_item(raw, allowed)
         if item is None or item.evidence_id in seen:
             continue
         seen.add(item.evidence_id)
@@ -812,7 +910,8 @@ def _assemble(
 
     # ── 경향 해석 (S15P11B209-887 조립 + 888 구조 게이트) ────────
     # 근거 풀을 먼저 만들고, 카드는 그 풀에 실제로 있는 근거만 참조하게 한다.
-    evidence_items = _evidence_items(data)
+    # 요청에 실려 온 식별자만 근거로 인정한다(886) — 형식만 맞는 창작 번호를 막는다.
+    evidence_items = _evidence_items(data, _allowed_evidence_refs(req))
     known_ids = {item.evidence_id for item in evidence_items}
     interpretations: list[contracts.PublicInterpretation] = []
     for raw in data.get("publicInterpretations") or []:
@@ -833,9 +932,9 @@ def _assemble(
             interpretations.append(card)
     # 구조적 공개 게이트(S15P11B209-888) — 값싼 결정적 검사라 표현 필터보다 먼저 돌린다.
     # 실패한 카드는 EXPERT_ONLY로 강등하지 않고 **제외**한다(근거 자체가 없다).
-    # blocked_refs: 미확정 STT(886)·위기 발화(889)가 채운다. 지금은 비어 있어 아무것도 막지 않는다.
+    # blocked_refs: 미확정 STT(886)를 배제한다. 위기 발화(889)가 같은 집합에 합쳐진다.
     interpretations, gate_reasons = interpretation_gate.apply(
-        interpretations, evidence_items, blocked_refs=frozenset()
+        interpretations, evidence_items, blocked_refs=_blocked_evidence_refs(req)
     )
     if gate_reasons:
         # 사유 코드만 남긴다 — 카드 문장·아이 발화는 로그에 담지 않는다.

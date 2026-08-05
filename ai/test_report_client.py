@@ -1578,6 +1578,65 @@ class ReportContractAlignmentTest(unittest.TestCase):
                 self.assertRegex(block + self.text, rf"{field}[^\n]*{limit}|{limit}[^\n]*{field}")
 
 
+def _request_with_evidence_refs(**overrides):
+    """근거 식별자가 실려 온 요청 (S15P11B209-886).
+
+    AI는 **요청에 실려 온 식별자만** 근거로 참조할 수 있다. 식별자가 없으면 근거가 전부 버려지므로,
+    경향 카드 조립·게이트를 검증하는 테스트는 이 요청을 써야 한다.
+    drawing_subject 는 None으로 둔다 — HTP로 판별되면 RAG 검색 경로까지 타서 검증 범위가 넓어진다.
+    """
+    overrides.setdefault(
+        "subject_summaries",
+        [
+            contracts.SubjectSummary(
+                drawing_subject=None,
+                drawing_description="집이 가운데에 크게 그려져 있어요.",
+                observation_evidence_source_id="obs-1",
+                detected_objects=[
+                    contracts.SubjectDetectedObject(
+                        object_code="HOUSE",
+                        x=0.2,
+                        y=0.2,
+                        width=0.5,
+                        height=0.5,
+                        evidence_source_id="d1",
+                    )
+                ],
+                qa_pairs=[
+                    contracts.SubjectQaPair(
+                        question="이 집에는 누가 살아?",
+                        answer_text="우리 가족",
+                        answer_message_id=202,
+                    ),
+                    contracts.SubjectQaPair(
+                        question="이 사람은 뭐 하고 있어?",
+                        answer_text="가족을 기다려요",
+                        answer_message_id=318,
+                    ),
+                    contracts.SubjectQaPair(
+                        question="더 그리고 싶은 게 있어?",
+                        answer_text="목도리",
+                        answer_message_id=777,
+                    ),
+                    # 미확정 STT — 식별자가 실리지 않아 근거가 될 수 없다(875 §6-1).
+                    contracts.SubjectQaPair(
+                        question="기분이 어땠어?",
+                        answer_text="조은데 무서워",
+                        answer_message_id=555,
+                        stt_needs_confirmation=True,
+                    ),
+                ],
+            )
+        ],
+    )
+    overrides.setdefault(
+        "selected_emotion_refs",
+        [contracts.SelectedEmotionRef(emotion_code="JOY", evidence_source_id="e5")],
+    )
+    overrides.setdefault("activity_metric_source_id", "m1")
+    return _sample_request(**overrides)
+
+
 def _evidence(evidence_id, source_type="CHILD_ANSWER", kind="QA_ANSWER", ref="202"):
     return {
         "evidenceId": evidence_id,
@@ -1613,7 +1672,7 @@ class PublicInterpretationAssemblyTest(unittest.TestCase):
             _llm_json(**overrides)
         )
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
-            return report_client.generate(_sample_request(), model="m")
+            return report_client.generate(_request_with_evidence_refs(), model="m")
 
     def test_card_and_referenced_evidence_are_carried(self):
         result = self._generate(
@@ -1776,6 +1835,103 @@ class PublicInterpretationAssemblyTest(unittest.TestCase):
         self.assertEqual(first.source_ref.id, "202")
 
 
+class EvidenceIdentifierTest(unittest.TestCase):
+    """근거 식별자 수용·강제 (S15P11B209-886).
+
+    AI가 참조할 수 있는 것은 **요청에 실려 온 식별자뿐**이다. kind 형식만 검사하면 그럴듯한
+    번호를 지어내도 통과하므로, 실제로 받은 값인지 대조한다 — 그게 "BE 발급 ID만"의 실효 장치다.
+    """
+
+    def _blocks(self, req):
+        return report_client._format_subject_blocks(req)
+
+    def test_qa_identifier_is_offered_to_the_model(self):
+        blocks = self._blocks(_request_with_evidence_refs())
+        self.assertIn("근거 식별자: QA_ANSWER:202", blocks)
+
+    def test_unconfirmed_stt_gets_no_identifier(self):
+        """미확정 STT는 표시는 유지하되 식별자를 주지 않는다 — 재료를 안 주는 편이 확실하다."""
+        blocks = self._blocks(_request_with_evidence_refs())
+        self.assertIn("조은데 무서워", blocks)  # 표시는 유지
+        self.assertNotIn("QA_ANSWER:555", blocks)  # 근거로는 쓸 수 없다
+        self.assertIn("근거로 쓸 수 없어요", blocks)
+
+    def test_observation_and_object_identifiers_are_offered(self):
+        blocks = self._blocks(_request_with_evidence_refs())
+        self.assertIn("VLM_OBSERVATION:obs-1", blocks)
+        self.assertIn("HOUSE=d1", blocks)
+
+    def test_emotion_and_metric_identifiers_are_offered(self):
+        prompt = report_client._format_activity(
+            _request_with_evidence_refs(), drawing_description=None
+        )
+        self.assertIn("EMOTION_SELECTION:e5", prompt)
+        self.assertIn("ACTIVITY_METRIC:m1", prompt)
+
+    def test_allowed_and_blocked_sets_are_derived_from_the_request(self):
+        req = _request_with_evidence_refs()
+        allowed = report_client._allowed_evidence_refs(req)
+        blocked = report_client._blocked_evidence_refs(req)
+        self.assertIn(("QA_ANSWER", "202"), allowed)
+        self.assertIn(("VLM_OBSERVATION", "obs-1"), allowed)
+        self.assertIn(("DETECTED_OBJECT", "d1"), allowed)
+        self.assertIn(("EMOTION_SELECTION", "e5"), allowed)
+        self.assertIn(("ACTIVITY_METRIC", "m1"), allowed)
+        # 미확정 STT는 허용 목록에 없고 배제 목록에 있다(이중 방어).
+        self.assertNotIn(("QA_ANSWER", "555"), allowed)
+        self.assertIn(("QA_ANSWER", "555"), blocked)
+
+    def test_request_without_identifiers_yields_no_evidence(self):
+        """구 BE(식별자 없음)는 200으로 동작하고 카드만 비운다 — 리포트 본문은 유지된다."""
+        self.assertEqual(report_client._allowed_evidence_refs(_sample_request()), frozenset())
+
+
+class FabricatedIdentifierTest(unittest.TestCase):
+    """지어낸 식별자는 형식이 맞아도 통과하지 못한다 (S15P11B209-886)."""
+
+    def _generate(self, **overrides):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response(
+            _llm_json(**overrides)
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            return report_client.generate(_request_with_evidence_refs(), model="m")
+
+    def test_unknown_identifier_is_dropped(self):
+        result = self._generate(
+            evidenceItems=[_evidence(1, ref="999"), _evidence(2, ref="318")],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual(result.evidence_items, [])  # 카드가 빠지며 근거도 함께 빠진다
+        self.assertEqual(result.public_interpretations, [])
+
+    def test_unconfirmed_stt_identifier_cannot_become_evidence(self):
+        """모델이 다른 곳에서 본 번호를 옮겨 적어도 근거가 되지 못한다."""
+        result = self._generate(
+            evidenceItems=[_evidence(1, ref="555"), _evidence(2, ref="202")],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual(result.public_interpretations, [])
+
+    def test_real_identifiers_survive(self):
+        result = self._generate(
+            evidenceItems=[_evidence(1, ref="202"), _evidence(2, ref="318")],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual(len(result.public_interpretations), 1)
+
+    def test_mixed_kind_identifiers_pass_when_provided(self):
+        """서로 다른 종류를 섞어도 요청에 있으면 통과한다 — 아이 표현 1건 조건은 지켜야 한다."""
+        result = self._generate(
+            evidenceItems=[
+                _evidence(1, ref="202"),
+                _evidence(2, source_type="VISION", kind="DETECTED_OBJECT", ref="d1"),
+            ],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual(len(result.public_interpretations), 1)
+
+
 class InterpretationGateWiringTest(unittest.TestCase):
     """구조 게이트가 응답 조립에 실제로 걸려 있는지 (S15P11B209-888).
 
@@ -1789,7 +1945,7 @@ class InterpretationGateWiringTest(unittest.TestCase):
             _llm_json(**overrides)
         )
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
-            return report_client.generate(_sample_request(), model="m")
+            return report_client.generate(_request_with_evidence_refs(), model="m")
 
     def test_single_evidence_card_is_dropped_by_the_gate(self):
         result = self._generate(
@@ -1850,7 +2006,7 @@ class ParentGuideAssemblyTest(unittest.TestCase):
             _llm_json(**overrides)
         )
         with mock.patch.object(report_client, "get_client", return_value=fake_client):
-            return report_client.generate(_sample_request(), model="m")
+            return report_client.generate(_request_with_evidence_refs(), model="m")
 
     def test_ai_generated_types_are_kept(self):
         result = self._generate(

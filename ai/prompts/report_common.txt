@@ -106,8 +106,12 @@
   · sourceType 은 그 사실의 출처: CHILD_ANSWER(아이 답변) · SELECTED_EMOTION(아이가 고른 감정) ·
     STATED_EMOTION(아이가 말한 감정) · VISION(그림에서 확인) · ACTIVITY_METRIC(활동 기록) ·
     REPEATED_SUBJECT(두 그림 이상에서 반복) · LONGITUDINAL(이전 활동에서도 반복)
-  · sourceRef 는 **블록에 함께 주어진 식별자를 그대로 옮긴다.** 네가 만들거나 조합하지 마.
+  · sourceRef 는 **블록의 '근거 식별자' 줄에 적힌 값을 그대로 옮긴다**("QA_ANSWER:202" → kind
+    "QA_ANSWER", id "202"). 네가 만들거나 조합하거나 번호를 바꾸지 마 — 주어지지 않은 식별자는
+    버려지고 그 근거는 사라진다.
     식별자가 없는 재료는 근거로 쓸 수 없다 — evidenceItems 에 넣지 말고 관찰 서술에만 쓴다.
+    "음성 인식 확인이 필요한 답변이라 근거로 쓸 수 없어요"라고 적힌 문답도 근거로 쓰지 마.
+  · ⚠️ 식별자는 참조용 값이다. **리포트 문장에는 절대 쓰지 마** — 요소 코드와 같은 규칙이다.
   · REPEATED_SUBJECT·LONGITUDINAL 은 sourceRef 대신 derivedFrom 에 원본 식별자 목록을 담는다.
 - 그다음 카드를 쓴다. 카드 하나는 아래를 모두 지켜야 한다. 못 지키면 그 카드는 쓰지 마.
   · **서로 다른 원본에서 온 근거 2건 이상**을 evidenceRefs 로 잇는다. 같은 답변을 두 번 세지 마.

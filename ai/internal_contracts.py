@@ -218,6 +218,17 @@ class SubjectQaPair(_CamelModel):
     question: str
     answer_text: str | None = Field(default=None, repr=False)
     answer_type: str | None = None
+    # ── 근거 식별자 (S15P11B209-886) ─────────────────────────────
+    # 경향 해석의 근거는 BE가 발급한 식별자만 참조할 수 있다(875 §4). AI가 조립하면 서버가
+    # 독립성을 검증할 수 없어 게이트가 자기 신고로 무력해진다.
+    #   answer_message_id → sourceRef {kind: "QA_ANSWER", id: <이 값>}
+    # 롤아웃 안전: optional 이라 구 BE가 안 보내도 200으로 동작한다. 다만 **식별자가 없는 문답은
+    #   공개 해석의 근거로 쓸 수 없다** — 관찰 서술·문답 블록에는 계속 실려 리포트 본문은 유지된다.
+    answer_message_id: int | None = None
+    question_message_id: int | None = None
+    # 음성 인식 확인이 필요한 답변인지(BE만 아는 값). True면 **표시는 유지**하되 근거·대표 발화로는
+    #   쓰지 않는다(875 §6-1) — 오인식 문장이 해석의 근거가 되면 잘못된 해석에 확정 근거가 붙는다.
+    stt_needs_confirmation: bool = False
 
 
 class SubjectDetectedObject(_CamelModel):
@@ -242,6 +253,9 @@ class SubjectDetectedObject(_CamelModel):
     height: float
     area_ratio: float | None = None
     confidence: float | None = None
+    # 근거 식별자 (S15P11B209-886) — sourceRef {kind: "DETECTED_OBJECT", id: <이 값>}.
+    #   없으면 이 탐지 결과는 공개 해석의 근거로 쓸 수 없다(관찰 서술 재료로는 계속 쓰인다).
+    evidence_source_id: str | None = None
 
 
 class SubjectSummary(_CamelModel):
@@ -258,6 +272,9 @@ class SubjectSummary(_CamelModel):
     #   빈 목록이라 기존 코드 목록 경로가 그대로 동작한다(740 롤아웃 패턴과 동일).
     detected_objects: list[SubjectDetectedObject] = Field(default_factory=list)
     qa_pairs: list[SubjectQaPair] = Field(default_factory=list)
+    # 근거 식별자 (S15P11B209-886) — 이 그림의 VLM 관찰 서술 레코드 ID.
+    #   sourceRef {kind: "VLM_OBSERVATION", id: <이 값>}. 없으면 서술을 근거로 쓸 수 없다.
+    observation_evidence_source_id: str | None = None
 
 
 class BehaviorMetrics(_CamelModel):
@@ -288,6 +305,17 @@ class BehaviorMetrics(_CamelModel):
     truncated: bool = False
 
 
+class SelectedEmotionRef(_CamelModel):
+    """아이가 고른 감정 하나와 그 레코드 식별자 (S15P11B209-886).
+
+    selected_emotions(코드 목록)와 병렬로 실린다 — 코드만으로는 어느 행에서 왔는지 알 수 없어
+    sourceRef 를 만들 수 없다. sourceRef {kind: "EMOTION_SELECTION", id: evidence_source_id}.
+    """
+
+    emotion_code: str
+    evidence_source_id: str
+
+
 class ObservationGenerationRequest(_CamelModel):
     """BE ObservationGenerationRequest와 1:1. 집계 수치·비민감 맥락만 담는다.
 
@@ -313,6 +341,15 @@ class ObservationGenerationRequest(_CamelModel):
     # 그리기 형식 지표 (S15P11B209-836). 구 BE가 안 보내면 None이라 [형식적 분석] 블록이
     #   실리지 않는다 — 확장 전과 동일 동작.
     behavior_metrics: BehaviorMetrics | None = None
+    # ── 근거 식별자 (S15P11B209-886) ─────────────────────────────
+    # 문답·탐지 객체·VLM 서술의 식별자는 각 하위 모델에 있고, 아래 둘은 요청 단위다.
+    # 전부 optional — 없으면 그 종류는 공개 해석의 근거가 되지 못한다(관찰 재료로는 계속 쓰인다).
+    selected_emotion_refs: list[SelectedEmotionRef] = Field(default_factory=list)
+    # 활동 지표 스냅샷 식별자 — sourceRef {kind: "ACTIVITY_METRIC", id: <이 값>}.
+    #   지표가 여러 개여도 스냅샷 하나가 원본이다(게이트도 계열 전체를 1건으로 센다).
+    activity_metric_source_id: str | None = None
+    # ⚠️ PRIOR_ACTIVITY(이전 활동)는 이번 계약에 재료가 없다 — 이전 활동의 원본 관찰·발화가
+    #    요청에 실리지 않으므로 LONGITUDINAL 근거는 만들 수 없다. 확장은 후속.
 
 
 class ObservedFeatureDraft(_CamelModel):
