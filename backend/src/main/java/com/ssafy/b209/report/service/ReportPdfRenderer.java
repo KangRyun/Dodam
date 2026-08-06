@@ -1,52 +1,77 @@
 package com.ssafy.b209.report.service;
 
+import com.openhtmltopdf.outputdevice.helper.BaseRendererBuilder;
+import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
+import com.ssafy.b209.drawing.service.DrawingAssetFileUrlFactory;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.dto.ReportDetailResponse;
-import com.ssafy.b209.report.dto.ReportEvidenceItemResponse;
-import com.ssafy.b209.report.dto.ReportParentGuideResponse;
-import com.ssafy.b209.report.dto.ReportPublicInterpretationResponse;
 import com.ssafy.b209.report.dto.ReportSubjectResponse;
 import com.ssafy.b209.report.exception.ReportExportErrorCode;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.font.PDType0Font;
+import java.util.Optional;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 /**
- * 보호자에게 공개 가능한 리포트 상세 DTO를 화면과 같은 서식의 한글 PDF로 렌더링한다.
+ * 보호자에게 공개 가능한 리포트 상세 DTO를 문서 서식의 한글 PDF로 렌더링한다.
  *
  * <p>입력 DTO 자체가 보호자 안전 필드를 선별하므로 AI 내부 지표나 전문가 전용 관찰값을 별도로 조회하지 않는다.
  *
- * <p>예전에는 모든 내용을 한 가지 크기의 줄글로 찍어, 화면의 표지·카드·감정 칩·라벨 구분이 사라진 목록만 남았다. 지금은 {@link ReportPdfWriter}가 앱
- * 디자인 토큰과 같은 색·계층으로 카드를 그린다. 담는 데이터와 섹션 순서는 계약(S15P11B209-875 §11)을 그대로 지킨다 — 화면엔 있고 PDF엔 없는 데이터를
- * 만들지 않는다.
+ * <h2>이 클래스가 하는 일</h2>
  *
- * <p>그림 이미지는 싣지 않는다. 그림 URL은 인증이 필요한 상대 경로이고 이 구성 요소는 저장소 의존이 없다(S15P11B209-957).
+ * <p>세 가지뿐이다 — 문서에 실을 <b>그림을 미리 읽고</b>, {@link ReportPdfTemplate}에게 <b>XHTML을 받아</b>,
+ * openhtmltopdf로 <b>PDF를 굽는다</b>. 서식·문구·페이지 분할 규칙은 전부 템플릿에 있다.
+ *
+ * <p>예전에는 PDFBox로 좌표를 직접 계산해 카드를 그렸다({@code ReportPdfWriter}). 카드가 장 경계에서 잘리지 않게 하려면 남은 높이를 매번 손으로
+ * 재야 했고, 표지·요약 배치를 바꿀 때마다 그 계산이 따라 붙었다. 지금은 CSS가 그 일을 한다(ADR-0003, S15P11B209-968).
+ *
+ * <h2>그림을 왜 여기서 읽는가</h2>
+ *
+ * <p>리포트 응답은 그림을 <b>인증이 필요한 상대 URL</b>로만 노출한다(계약). 서버가 그 URL을 HTTP로 다시 부르면 스스로 토큰을 만들어야 하고 자기 호출이
+ * 실패 지점이 된다. 그래서 URL에서 식별자만 되읽어 {@link ReportAssetResolver}로 저장소에서 직접 읽는다(S15P11B209-966).
+ *
+ * <p>그림을 못 읽으면 그림 없이 문서를 만든다. 그림 한 장 때문에 내보내기 전체가 실패하면 보호자는 아무것도 받지 못한다.
+ *
+ * <h2>결과를 저장하지 않는다</h2>
+ *
+ * <p>요청마다 새로 만든다. 이미지를 포함한 5장 이상 문서가 약 100ms 에 나오고(S15P11B209-967 실측), 다운로드는 보호자가 직접 누르는 동기 동작이라
+ * 체감되지 않는다. 저장하면 리포트 버전이 오르거나 공개 범위가 바뀔 때 <b>무효화 책임</b>이 생기고, 놓치면 보호자가 낡은 문서를 받는다 — 100ms 보다 나쁘다.
+ * {@code ReportPdfStatus} 를 살릴 조건은 ADR-0003 에 적어 두었다.
  */
 @Component
 public class ReportPdfRenderer {
 
   private static final Logger log = LoggerFactory.getLogger(ReportPdfRenderer.class);
 
-  /** 건너뛴 문답 상태다 (875 §6). */
-  private static final String SKIPPED_STATE = "SKIPPED";
-
-  /** 집·나무·사람 활동 코드다. <b>사람이 읽는 표시명이 아니라 코드로만 분기한다.</b> */
-  private static final String HTP_ACTIVITY_CODE = "HTP";
-
   private static final String REGULAR_FONT = "/fonts/NanumSquareNeo-Regular.ttf";
   private static final String BOLD_FONT = "/fonts/NanumSquareNeo-Bold.ttf";
-  private static final DateTimeFormatter DATE_TIME_FORMATTER =
-      DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm");
+
+  /** CSS {@code font-weight} 값이다. 굵은 글씨가 없으면 제목과 본문의 층이 사라진다. */
+  private static final int REGULAR_WEIGHT = 400;
+
+  private static final int BOLD_WEIGHT = 700;
+
+  private final ReportAssetResolver assetResolver;
+  private final DrawingAssetFileUrlFactory fileUrlFactory;
+
+  /**
+   * 리포트 PDF 렌더러를 구성한다.
+   *
+   * @param assetResolver 문서에 실을 그림을 저장소에서 읽는 경계
+   * @param fileUrlFactory 그림 URL과 식별자를 서로 옮기는 경계
+   */
+  public ReportPdfRenderer(
+      ReportAssetResolver assetResolver, DrawingAssetFileUrlFactory fileUrlFactory) {
+    this.assetResolver = assetResolver;
+    this.fileUrlFactory = fileUrlFactory;
+  }
 
   /**
    * 보호자용 리포트 상세를 PDF 바이트로 변환한다.
@@ -62,16 +87,9 @@ public class ReportPdfRenderer {
    * @throws BusinessException 폰트 또는 PDF 문서를 생성할 수 없는 경우
    */
   public byte[] render(ReportDetailResponse report) {
-    try (PDDocument document = new PDDocument()) {
-      PDType0Font regular = loadFont(document, REGULAR_FONT);
-      PDType0Font bold = loadFont(document, BOLD_FONT);
-      try (ReportPdfWriter writer = new ReportPdfWriter(document, regular, bold)) {
-        writeReport(writer, report);
-        writer.finish();
-      }
-      ByteArrayOutputStream output = new ByteArrayOutputStream();
-      document.save(output);
-      return output.toByteArray();
+    try {
+      String html = new ReportPdfTemplate(report, resolveImages(report)).build();
+      return renderHtml(html);
     } catch (BusinessException exception) {
       throw exception;
     } catch (IOException | RuntimeException exception) {
@@ -86,300 +104,76 @@ public class ReportPdfRenderer {
     }
   }
 
-  private PDType0Font loadFont(PDDocument document, String resource) throws IOException {
-    try (InputStream fontStream = ReportPdfRenderer.class.getResourceAsStream(resource)) {
-      if (fontStream == null) {
-        log.error("리포트 PDF 폰트 리소스를 찾을 수 없습니다. resource={}", resource);
-        throw new BusinessException(ReportExportErrorCode.REPORT_EXPORT_FAILED);
-      }
-      return PDType0Font.load(document, fontStream);
-    }
-  }
-
-  /** 화면(875 §11)과 같은 순서로 섹션을 쌓는다. 비어 있는 섹션은 그리지 않는다 — 오류가 아니다. */
-  private void writeReport(ReportPdfWriter writer, ReportDetailResponse report) throws IOException {
-    if (isHtpActivity(report)) {
-      writeHtpReport(writer, report);
-      return;
-    }
-    writer.cover("도담 관찰 리포트", coverMeta(report));
-    if (report.nonDiagnosticNotice() != null && !report.nonDiagnosticNotice().isBlank()) {
-      writer.notice(report.nonDiagnosticNotice());
-    }
-    writer.section("활동 정보", activityInfoRows(report));
-    writer.section("주요 심리 경향", interpretationRows(report));
-    writer.section("주제별 관찰", subjectRows(report));
-    writer.section("아이의 표현", expressionRows(report));
-    writer.section("이런 모습이 보였어요", observedFeatureRows(report));
-    writer.section("활동 기록", activityFactRows(report));
-    writer.section("대화 요약", conversationRows(report));
-    writer.section("보호자 대화 안내", bulletRows(report.guardianConversationGuide()));
-    for (ReportParentGuideResponse guide : report.parentGuides()) {
-      writer.section(guideTitle(guide.guideType()), bulletRows(guide.items()));
-    }
-    // 위기 안내는 인쇄물이 제3자에게 노출될 수 있어 본문에 싣지 않는다. 확인 경로만 남긴다.
-    if (report.crisisAlert() != null) {
-      writer.section("안전 안내", List.of(new ReportPdfRow.Text("보호자 화면에서 안전 안내를 확인해 주세요.")));
-    }
-    writer.section("주의 사항", bulletRows(report.limitations()));
-    writer.section("참고 자료", referenceRows(report));
+  private byte[] renderHtml(String html) throws IOException {
+    ByteArrayOutputStream output = new ByteArrayOutputStream();
+    PdfRendererBuilder builder = new PdfRendererBuilder();
+    // 빠른 렌더 경로다. 느린 경로는 우리가 쓰지 않는 SVG·MathML 확장을 위한 것이다.
+    builder.useFastMode();
+    useFont(builder, REGULAR_FONT, REGULAR_WEIGHT);
+    useFont(builder, BOLD_FONT, BOLD_WEIGHT);
+    // 기준 URL을 주지 않는다. 문서는 이미지·폰트를 모두 품고 있어 바깥을 볼 이유가 없고,
+    //   준다면 문서 내용이 서버에서 파일을 읽는 경로가 된다.
+    builder.withHtmlContent(html, null);
+    builder.toStream(output);
+    builder.run();
+    return output.toByteArray();
   }
 
   /**
-   * 집·나무·사람 활동을 앱 화면과 같은 제목·순서로 쌓는다 (S15P11B209-960/961).
+   * 폰트를 문서에 임베드한다.
    *
-   * <p><b>제목이 검사 투에서 벗어나 있다.</b> CLAUDE.md 5절이 "집·나무·사람 그리기를 활용하더라도 'HTP 검사'로 표현·해석하지 않는다"를 명시한다.
-   * 화면만 바꾸고 PDF 를 두면 <b>인쇄물에만 검사 투가 남아</b> 계약 §11("화면과 PDF 동일")이 깨진다 — 보호자가 저장해 남기는 쪽이 오히려 PDF 다.
-   *
-   * <p>비HTP 경로는 건드리지 않는다. 그림일기 문구 정리는 별도 범위다.
+   * <p>운영 이미지에는 한글 폰트가 없다. OS 폰트를 찾게 두면 로컬에서는 나오고 배포에서는 글자가 빠진다. 리소스에서 직접 읽어 항상 같은 글꼴을 쓴다.
    */
-  private void writeHtpReport(ReportPdfWriter writer, ReportDetailResponse report)
-      throws IOException {
-    writer.cover("도담 관찰 리포트", htpCoverMeta(report));
-    if (report.nonDiagnosticNotice() != null && !report.nonDiagnosticNotice().isBlank()) {
-      writer.notice(report.nonDiagnosticNotice());
-    }
-    writer.section("한눈에 보는 이번 활동", activityInfoRows(report));
-    // 그림·관찰·문답을 한 묶음으로 낸다 — 세 그림을 따로 흩어 놓으면 한 장씩 견주어 읽게 된다.
-    writer.section("집·나무·사람, 하나씩 살펴봐요", htpSubjectRows(report));
-    writer.section("아이의 표현과 대화 요약", expressionRows(report));
-    writer.section("대화 요약", conversationRows(report));
-    writer.section("이런 모습이 보였어요", observedFeatureRows(report));
-    writer.section("함께 살펴보면 좋을 이야기", interpretationRows(report));
-    writer.section("그리는 동안 있었던 일", activityFactRows(report));
-    writer.section("보호자 대화 안내", bulletRows(report.guardianConversationGuide()));
-    for (ReportParentGuideResponse guide : report.parentGuides()) {
-      writer.section(guideTitle(guide.guideType()), bulletRows(guide.items()));
-    }
-    if (report.crisisAlert() != null) {
-      writer.section("안전 안내", List.of(new ReportPdfRow.Text("보호자 화면에서 안전 안내를 확인해 주세요.")));
-    }
-    writer.section("주의 사항", bulletRows(report.limitations()));
-    writer.section("참고 자료", referenceRows(report));
+  private void useFont(PdfRendererBuilder builder, String resource, int weight) {
+    builder.useFont(
+        () -> {
+          InputStream stream = ReportPdfRenderer.class.getResourceAsStream(resource);
+          if (stream == null) {
+            log.error("리포트 PDF 폰트 리소스를 찾을 수 없습니다. resource={}", resource);
+            throw new BusinessException(ReportExportErrorCode.REPORT_EXPORT_FAILED);
+          }
+          return stream;
+        },
+        ReportPdfTemplate.FONT_FAMILY,
+        weight,
+        BaseRendererBuilder.FontStyle.NORMAL,
+        true);
   }
 
   /**
-   * 집·나무·사람 활동인지 판정한다.
+   * 문서에 실을 그림을 미리 읽어 URL로 찾을 수 있게 모은다.
    *
-   * <p>앱과 <b>같은 기준</b>을 쓴다({@code report_dtos.dart} {@code isHtpActivity}) — 계약 §2 의 최상위 {@code
-   * activityType}이 정본이고, 그 필드가 없는 구형 응답은 세션의 활동 코드로 판정한다. 두 곳이 다른 기준을 쓰면 같은 리포트가 화면과 PDF 에서 다른 서식으로
-   * 나온다.
+   * <p>같은 URL이 여러 번 나와도 한 번만 읽는다.
    *
-   * <p><b>코드값으로만 판정한다.</b> 표시명은 사람이 읽는 문구라 바뀔 수 있고, 문구로 분기하면 이름을 다듬는 순간 서식이 조용히 무너진다.
+   * @param report 리포트 상세
+   * @return 그림 URL로 찾는 이미지이며 실을 그림이 없으면 빈 Map
    */
-  private boolean isHtpActivity(ReportDetailResponse report) {
-    if (HTP_ACTIVITY_CODE.equalsIgnoreCase(report.activityType())) {
-      return true;
+  private Map<String, ReportImageAsset> resolveImages(ReportDetailResponse report) {
+    if (report == null) return Map.of();
+    List<String> urls = new ArrayList<>();
+    if (report.drawing() != null) {
+      urls.add(report.drawing().finalImageUrl());
     }
-    return report.drawingSession() != null
-        && HTP_ACTIVITY_CODE.equalsIgnoreCase(report.drawingSession().drawingTypeCode());
-  }
-
-  private List<String> htpCoverMeta(ReportDetailResponse report) {
-    List<String> meta = new ArrayList<>();
-    meta.add("집·나무·사람, 세 그림 이야기");
-    meta.addAll(coverMeta(report));
-    return meta;
-  }
-
-  /**
-   * 주제 묶음 앞에 읽는 법을 먼저 둔다.
-   *
-   * <p>안내문이 없으면 관찰 문장이 곧바로 평가처럼 읽힌다. 문구는 앱 화면과 같은 것을 쓴다.
-   */
-  private List<ReportPdfRow> htpSubjectRows(ReportDetailResponse report) {
-    List<ReportPdfRow> subjectRows = subjectRows(report);
-    if (subjectRows.isEmpty()) {
-      // 안내문만 남은 빈 섹션을 그리지 않는다(875 §10).
-      return List.of();
-    }
-    List<ReportPdfRow> rows = new ArrayList<>();
-    rows.add(
-        new ReportPdfRow.Text(
-            "세 가지를 그리는 동안 아이가 무엇을 그렸고 어떤 이야기를 들려줬는지 모았어요."
-                + " 잘 그렸는지 가리거나 결과를 매기는 자리가 아니라, 아이와 함께 다시 펼쳐 볼 이야깃거리예요."));
-    rows.addAll(subjectRows);
-    return rows;
-  }
-
-  private List<String> coverMeta(ReportDetailResponse report) {
-    List<String> meta = new ArrayList<>();
-    meta.add("리포트 " + value(report.reportId()) + " · 버전 " + report.reportVersion());
-    if (report.drawingSession() != null && report.drawingSession().startedAt() != null) {
-      meta.add("활동 일시 " + report.drawingSession().startedAt().format(DATE_TIME_FORMATTER));
-    }
-    return meta;
-  }
-
-  private List<ReportPdfRow> activityInfoRows(ReportDetailResponse report) {
-    if (report.drawingSession() == null) return List.of();
-    List<ReportPdfRow> rows = new ArrayList<>();
-    rows.add(new ReportPdfRow.KeyValue("활동", value(report.drawingSession().drawingTypeName())));
-    rows.add(new ReportPdfRow.KeyValue("제목", value(report.drawingSession().title())));
-    rows.add(new ReportPdfRow.KeyValue("입력 방식", value(report.drawingSession().inputMethod())));
-    rows.add(new ReportPdfRow.KeyValue("생성 상태", value(report.reportStatus())));
-    return rows;
-  }
-
-  private List<ReportPdfRow> interpretationRows(ReportDetailResponse report) {
-    if (report.publicInterpretations().isEmpty()) return List.of();
-    Map<Integer, String> evidenceTexts = new LinkedHashMap<>();
-    for (ReportEvidenceItemResponse evidence : report.evidenceItems()) {
-      evidenceTexts.put(evidence.evidenceId(), evidence.text());
-    }
-    List<ReportPdfRow> rows = new ArrayList<>();
-    for (ReportPublicInterpretationResponse card : report.publicInterpretations()) {
-      rows.add(new ReportPdfRow.Subtitle(value(card.title())));
-      rows.add(new ReportPdfRow.Text(value(card.tendencyText())));
-      // 경향 문장만 단독으로 싣지 않는다(875 §3). 범위와 살펴볼 점을 함께 낸다.
-      rows.add(new ReportPdfRow.Caption("범위 " + value(card.scopeText())));
-      rows.add(new ReportPdfRow.Caption("살펴볼 점 " + value(card.homeObservationGuide())));
-      for (Integer evidenceRef : card.evidenceRefs()) {
-        String evidenceText = evidenceTexts.get(evidenceRef);
-        if (evidenceText != null) rows.add(new ReportPdfRow.Caption("근거 " + evidenceText));
+    if (report.subjectReports() != null) {
+      for (ReportSubjectResponse subject : report.subjectReports()) {
+        urls.add(subject.imageUrl());
       }
     }
-    return rows;
-  }
-
-  private List<ReportPdfRow> subjectRows(ReportDetailResponse report) {
-    if (report.subjectReports().isEmpty()) return List.of();
-    List<ReportPdfRow> rows = new ArrayList<>();
-    for (ReportSubjectResponse subject : report.subjectReports()) {
-      rows.add(new ReportPdfRow.Subtitle(subjectTitle(subject.subjectType())));
-      subject
-          .visionObservations()
-          .forEach(observation -> rows.add(new ReportPdfRow.Bullet(value(observation))));
-      subject
-          .qaPairs()
-          .forEach(
-              pair -> {
-                rows.add(new ReportPdfRow.Text("Q " + value(pair.question())));
-                // 건너뛴 질문을 "-" 로 두면 답을 못 읽은 것인지 안 한 것인지 구분되지 않는다.
-                //   화면과 같은 문구를 쓴다(875 §6).
-                if (SKIPPED_STATE.equals(pair.state()) || pair.answer() == null) {
-                  rows.add(new ReportPdfRow.Caption("A 이 질문은 건너뛰었어요"));
-                } else {
-                  rows.add(new ReportPdfRow.Caption("A " + pair.answer()));
-                  // 미확정 음성은 발화를 지우지 않고 확인 요청만 덧붙인다(875 §6-1).
-                  if (pair.sttNeedsConfirmation()) {
-                    rows.add(new ReportPdfRow.Caption("음성 인식 내용을 확인해 주세요"));
-                  }
-                }
-              });
+    Map<String, ReportImageAsset> images = new LinkedHashMap<>();
+    for (String url : urls) {
+      if (url == null || url.isBlank() || images.containsKey(url)) continue;
+      resolve(url).ifPresent(asset -> images.put(url, asset));
     }
-    return rows;
+    return images;
   }
 
-  private List<ReportPdfRow> expressionRows(ReportDetailResponse report) {
-    if (report.childExpression() == null) return List.of();
-    List<ReportPdfRow> rows = new ArrayList<>();
-    if (!report.childExpression().selectedEmotions().isEmpty()) {
-      rows.add(new ReportPdfRow.Chips(report.childExpression().selectedEmotions()));
+  private Optional<ReportImageAsset> resolve(String fileUrl) {
+    Optional<Long> assetId = fileUrlFactory.parseAssetId(fileUrl);
+    if (assetId.isEmpty()) {
+      // URL 형식이 바뀌었거나 다른 곳에서 만든 URL이다. 그림만 빼고 문서는 만든다.
+      log.warn("리포트 그림 URL에서 식별자를 읽지 못했습니다. fileUrl={}", fileUrl);
+      return Optional.empty();
     }
-    if (report.childExpression().expressedEmotionText() != null
-        && !report.childExpression().expressedEmotionText().isBlank()) {
-      rows.add(new ReportPdfRow.Text(report.childExpression().expressedEmotionText()));
-    }
-    report
-        .childExpression()
-        .representativeUtterances()
-        .forEach(utterance -> rows.add(new ReportPdfRow.Bullet(value(utterance.text()))));
-    return rows;
-  }
-
-  private List<ReportPdfRow> observedFeatureRows(ReportDetailResponse report) {
-    if (report.observedFeatures() == null || report.observedFeatures().isEmpty()) return List.of();
-    List<ReportPdfRow> rows = new ArrayList<>();
-    report
-        .observedFeatures()
-        .forEach(
-            feature -> {
-              rows.add(new ReportPdfRow.Subtitle(value(feature.title())));
-              rows.add(new ReportPdfRow.Text(value(feature.description())));
-              if (feature.evidenceSummary() != null && !feature.evidenceSummary().isBlank()) {
-                rows.add(new ReportPdfRow.Caption("근거 " + feature.evidenceSummary()));
-              }
-            });
-    return rows;
-  }
-
-  private List<ReportPdfRow> activityFactRows(ReportDetailResponse report) {
-    if (report.activityFacts() == null) return List.of();
-    List<ReportPdfRow> rows = new ArrayList<>();
-    if (!report.activityFacts().detectedObjects().isEmpty()) {
-      rows.add(new ReportPdfRow.Chips(report.activityFacts().detectedObjects()));
-    }
-    // 값의 출처가 VLM 관찰 서술로 바뀌었다(S15P11B209-912). 라벨도 화면과 같은 표현을 쓴다.
-    rows.add(
-        new ReportPdfRow.KeyValue(
-            "그린 시간", durationText(report.activityFacts().drawingDurationSec())));
-    rows.add(new ReportPdfRow.KeyValue("멈춤 횟수", countText(report.activityFacts().pauseCount())));
-    rows.add(new ReportPdfRow.KeyValue("지우기 횟수", countText(report.activityFacts().eraseCount())));
-    report.activityFacts().notes().forEach(note -> rows.add(new ReportPdfRow.Caption(note)));
-    return rows;
-  }
-
-  private List<ReportPdfRow> conversationRows(ReportDetailResponse report) {
-    if (report.conversationSummary() == null
-        || report.conversationSummary().summary() == null
-        || report.conversationSummary().summary().isBlank()) {
-      return List.of();
-    }
-    return List.of(new ReportPdfRow.Text(report.conversationSummary().summary()));
-  }
-
-  private List<ReportPdfRow> referenceRows(ReportDetailResponse report) {
-    if (report.references().isEmpty()) return List.of();
-    List<ReportPdfRow> rows = new ArrayList<>();
-    report
-        .references()
-        .forEach(
-            reference -> {
-              rows.add(new ReportPdfRow.Bullet(value(reference.title())));
-              if (reference.url() != null && !reference.url().isBlank()) {
-                rows.add(new ReportPdfRow.Caption(reference.url()));
-              }
-            });
-    return rows;
-  }
-
-  private List<ReportPdfRow> bulletRows(List<String> items) {
-    if (items == null || items.isEmpty()) return List.of();
-    List<ReportPdfRow> rows = new ArrayList<>();
-    items.forEach(item -> rows.add(new ReportPdfRow.Bullet(value(item))));
-    return rows;
-  }
-
-  private String subjectTitle(String subjectType) {
-    return switch (subjectType == null ? "" : subjectType) {
-      case "HOUSE" -> "집";
-      case "TREE" -> "나무";
-      case "PERSON" -> "사람";
-      default -> "그림";
-    };
-  }
-
-  private String guideTitle(String guideType) {
-    return switch (guideType == null ? "" : guideType) {
-      case "DRAWING_CONVERSATION" -> "그림으로 대화하기";
-      case "DAILY_PARENTING" -> "일상에서 해볼 것";
-      case "HOME_OBSERVATION" -> "집에서 살펴볼 점";
-      default -> value(guideType);
-    };
-  }
-
-  private String durationText(Integer durationSec) {
-    if (durationSec == null || durationSec <= 0) return "-";
-    int minutes = durationSec / 60;
-    return minutes > 0 ? minutes + "분" : durationSec + "초";
-  }
-
-  private String countText(Integer count) {
-    return count == null ? "-" : count + "회";
-  }
-
-  private String value(Object value) {
-    return value == null || value.toString().isBlank() ? "-" : value.toString();
+    return assetResolver.resolveDrawingImage(assetId.get());
   }
 }

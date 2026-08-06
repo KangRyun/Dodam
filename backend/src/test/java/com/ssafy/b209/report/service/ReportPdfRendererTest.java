@@ -2,6 +2,7 @@ package com.ssafy.b209.report.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.ssafy.b209.drawing.service.DrawingAssetFileUrlFactory;
 import com.ssafy.b209.report.dto.ReportActivityFactsResponse;
 import com.ssafy.b209.report.dto.ReportChildExpressionResponse;
 import com.ssafy.b209.report.dto.ReportConversationSummaryResponse;
@@ -12,6 +13,7 @@ import com.ssafy.b209.report.dto.ReportObservedFeatureResponse;
 import com.ssafy.b209.report.dto.ReportUtteranceResponse;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -19,7 +21,9 @@ import org.junit.jupiter.api.Test;
 
 class ReportPdfRendererTest {
 
-  private final ReportPdfRenderer renderer = new ReportPdfRenderer();
+  // 그림 없이 서식만 본다. 그림 삽입은 ReportPdfRendererDrawingTest 가 따로 고정한다.
+  private final ReportPdfRenderer renderer =
+      new ReportPdfRenderer(assetId -> Optional.empty(), new DrawingAssetFileUrlFactory());
 
   @Test
   void embedsReadableKoreanReportContent() throws Exception {
