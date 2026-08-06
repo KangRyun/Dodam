@@ -38,6 +38,12 @@ dependencies {
     implementation 'com.google.firebase:firebase-admin:9.2.0'
     implementation 'com.drewnoakes:metadata-extractor:2.21.0'
     implementation 'org.apache.pdfbox:pdfbox:3.0.5'
+    // 리포트 PDF 를 XHTML/CSS 로 그린다(S15P11B209-967 검증 → 968 전환, ADR-0003).
+    // 브라우저를 띄우지 않는 순수 Java 라 런타임 이미지(eclipse-temurin JRE)에 Chromium 을
+    // 넣지 않아도 되고, page-break-inside 로 카드 단위 페이지 분할을 CSS 로 표현한다.
+    // SVG·MathML 모듈은 붙이지 않는다 — Batik(AWT)은 슬림 JRE 에서 폰트 의존이 걸리고,
+    // 아이콘은 PNG 로 싣는다.
+    implementation 'io.github.openhtmltopdf:openhtmltopdf-pdfbox:1.1.34'
 
     runtimeOnly 'com.mysql:mysql-connector-j'
     runtimeOnly 'org.flywaydb:flyway-mysql'
