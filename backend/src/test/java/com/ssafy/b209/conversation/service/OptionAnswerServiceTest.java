@@ -59,6 +59,7 @@ class OptionAnswerServiceTest {
   @Mock private ConversationStartDrawingSession drawingSession;
   @Mock private ConversationMessageOption option;
   @Mock private OptionAnswerMessage savedMessage;
+  @Mock private ConversationEventRecorder eventRecorder;
 
   private OptionAnswerService service;
 
@@ -72,6 +73,7 @@ class OptionAnswerServiceTest {
             messageRepository,
             optionRepository,
             selectedOptionRepository,
+            eventRecorder,
             new ObjectMapper(),
             Clock.fixed(Instant.parse("2026-07-23T00:00:00Z"), ZoneOffset.UTC));
   }

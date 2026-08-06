@@ -52,6 +52,7 @@ public class VoiceAnswerService {
   private final VoiceAnswerAuthorizationRepository authorizationRepository;
   private final VoiceAnswerMessageRepository messageRepository;
   private final AudioStorage audioStorage;
+  private final ConversationEventRecorder eventRecorder;
   private final ObjectMapper objectMapper;
   private final Clock clock;
   private final ApplicationEventPublisher eventPublisher;
@@ -64,6 +65,7 @@ public class VoiceAnswerService {
    * @param authorizationRepository 보호자 관계·필수/음성 동의 조회 경계
    * @param messageRepository QUESTION parent 검증·순번·답변 저장 경계
    * @param audioStorage 음성 전용 임시 검증·최종 저장 경계
+   * @param eventRecorder 대화 행동 이벤트 적재기
    * @param objectMapper metadata fingerprint 직렬화 도구
    * @param clock 서버 생성 시각 기준
    * @param eventPublisher 커밋 후 STT 처리를 요청하는 이벤트 발행 경계
@@ -74,6 +76,7 @@ public class VoiceAnswerService {
       VoiceAnswerAuthorizationRepository authorizationRepository,
       VoiceAnswerMessageRepository messageRepository,
       AudioStorage audioStorage,
+      ConversationEventRecorder eventRecorder,
       ObjectMapper objectMapper,
       Clock clock,
       ApplicationEventPublisher eventPublisher) {
@@ -82,6 +85,7 @@ public class VoiceAnswerService {
     this.authorizationRepository = authorizationRepository;
     this.messageRepository = messageRepository;
     this.audioStorage = audioStorage;
+    this.eventRecorder = eventRecorder;
     this.objectMapper = objectMapper;
     this.clock = clock;
     this.eventPublisher = eventPublisher;
@@ -161,7 +165,7 @@ public class VoiceAnswerService {
               .findByIdForUpdate(conversationId)
               .orElseThrow(
                   () -> new BusinessException(VoiceAnswerErrorCode.CONVERSATION_NOT_FOUND));
-      validateAccessAndState(guardianUserId, session);
+      Long childId = validateAccessAndState(guardianUserId, session);
       messageRepository
           .findQuestionByIdAndConversationSessionId(metadata.questionMessageId(), conversationId)
           .orElseThrow(
@@ -193,6 +197,15 @@ public class VoiceAnswerService {
               saved.isNeedsGuardianConfirmation(),
               saved.getCreatedAt());
       eventPublisher.publishEvent(new VoiceAnswerStoredEvent(saved.getId()));
+      // 녹음 길이·종료 사유만 넘긴다. 전사 결과(sttText)는 커밋 후 289가 채우는 아이의 발화라 행동 로그에 넣지 않는다
+      //   (S15P11B209-973 · CLAUDE.md 9절).
+      eventRecorder.recordVoiceAnswer(
+          new ConversationEventContext(conversationId, childId, session.getDrawingSessionId()),
+          metadata.questionMessageId(),
+          saved.getMessageSequence(),
+          metadata.clientStartedAt(),
+          metadata.clientEndedAt(),
+          metadata.stopReason() == null ? null : metadata.stopReason().name());
       return ResponseEntity.status(HttpStatus.CREATED)
           .body(ApiResponse.of(CommonSuccessCode.CREATED, response));
     } catch (DataIntegrityViolationException exception) {
@@ -225,7 +238,15 @@ public class VoiceAnswerService {
         .orElseThrow(() -> new BusinessException(VoiceAnswerErrorCode.QUESTION_MESSAGE_NOT_FOUND));
   }
 
-  private void validateAccessAndState(Long guardianUserId, ConversationSession session) {
+  /**
+   * 보호자 관계·필수/음성 동의·세션 상태를 검증하고, 이 대화가 어느 아동의 것인지 확정한다.
+   *
+   * @param guardianUserId JWT Authentication의 보호자 ID
+   * @param session 대화 세션
+   * @return 대화가 속한 아동 ID
+   * @throws BusinessException 권한·동의·세션 상태 검증에 실패한 경우
+   */
+  private Long validateAccessAndState(Long guardianUserId, ConversationSession session) {
     ConversationStartDrawingSession drawingSession =
         drawingSessionRepository
             .findById(session.getDrawingSessionId())
@@ -241,6 +262,7 @@ public class VoiceAnswerService {
     if (!session.isConversing()) {
       throw new BusinessException(VoiceAnswerErrorCode.CONVERSATION_NOT_CONVERSING);
     }
+    return childId;
   }
 
   private void registerRollbackCompensation(String storageKey) {

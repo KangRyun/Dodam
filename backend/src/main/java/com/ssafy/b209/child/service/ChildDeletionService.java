@@ -3,6 +3,7 @@ package com.ssafy.b209.child.service;
 import com.ssafy.b209.child.dto.request.DeleteChildRequest;
 import com.ssafy.b209.child.exception.ChildErrorCode;
 import com.ssafy.b209.child.repository.ChildDeletionRepository;
+import com.ssafy.b209.conversation.service.ConversationEventDeletionService;
 import com.ssafy.b209.drawing.service.StrokeBatchDeletionService;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
@@ -20,6 +21,9 @@ import org.springframework.transaction.annotation.Transactional;
  * <p><b>2026-07-30 추가 (S15P11B209-365)</b>: 그리기 과정 데이터(스트로크)가 MongoDB로 옮겨갔다. MySQL 행은 Soft Delete 로
  * 남지만 Mongo 문서는 그 개념이 없으므로 Commit 이후 실제로 지운다. 이 호출이 빠지면 삭제된 아동의 그리기 기록이 보관 기간(TTL)까지 남는다 — 가드레일 9절의
  * "회원 탈퇴 시 아동 데이터 함께 삭제"에 어긋난다.
+ *
+ * <p><b>2026-08-06 추가 (S15P11B209-973)</b>: 대화 행동 이벤트도 같은 이유로 MongoDB에 있다. 스트로크와 나란히 지운다 — 한쪽만 지우면
+ * 삭제된 아동의 "언제 무엇을 했는가"가 보관 기간까지 남는다.
  */
 @Service
 public class ChildDeletionService {
@@ -28,6 +32,7 @@ public class ChildDeletionService {
 
   private final ChildDeletionRepository childDeletionRepository;
   private final StrokeBatchDeletionService strokeBatchDeletionService;
+  private final ConversationEventDeletionService conversationEventDeletionService;
   private final Clock clock;
 
   /**
@@ -35,20 +40,28 @@ public class ChildDeletionService {
    *
    * @param childDeletionRepository 아동 상태 변경과 Storage 삭제 예약 저장소
    * @param strokeBatchDeletionService MongoDB Stroke 배치 동반 삭제 Service
+   * @param conversationEventDeletionService MongoDB 대화 행동 이벤트 동반 삭제 Service
    */
   @Autowired
   public ChildDeletionService(
       ChildDeletionRepository childDeletionRepository,
-      StrokeBatchDeletionService strokeBatchDeletionService) {
-    this(childDeletionRepository, strokeBatchDeletionService, Clock.systemUTC());
+      StrokeBatchDeletionService strokeBatchDeletionService,
+      ConversationEventDeletionService conversationEventDeletionService) {
+    this(
+        childDeletionRepository,
+        strokeBatchDeletionService,
+        conversationEventDeletionService,
+        Clock.systemUTC());
   }
 
   ChildDeletionService(
       ChildDeletionRepository childDeletionRepository,
       StrokeBatchDeletionService strokeBatchDeletionService,
+      ConversationEventDeletionService conversationEventDeletionService,
       Clock clock) {
     this.childDeletionRepository = childDeletionRepository;
     this.strokeBatchDeletionService = strokeBatchDeletionService;
+    this.conversationEventDeletionService = conversationEventDeletionService;
     this.clock = clock;
   }
 
@@ -79,6 +92,7 @@ public class ChildDeletionService {
     childDeletionRepository.markDeleted(childId, deletedAt);
     childDeletionRepository.scheduleStorageDeletions(childId);
     strokeBatchDeletionService.deleteByChild(childId);
+    conversationEventDeletionService.deleteByChild(childId);
   }
 
   /**
@@ -107,6 +121,7 @@ public class ChildDeletionService {
       childDeletionRepository.markDeleted(childId, deletedAt);
       childDeletionRepository.scheduleStorageDeletions(childId);
       strokeBatchDeletionService.deleteByChild(childId);
+      conversationEventDeletionService.deleteByChild(childId);
       deleted++;
     }
     return deleted;

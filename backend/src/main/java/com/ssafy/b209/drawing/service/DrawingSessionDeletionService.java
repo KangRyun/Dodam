@@ -2,6 +2,7 @@ package com.ssafy.b209.drawing.service;
 
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessValidator;
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
+import com.ssafy.b209.conversation.service.ConversationEventDeletionService;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.dto.request.DeleteDrawingSessionRequest;
 import com.ssafy.b209.drawing.exception.DrawingErrorCode;
@@ -29,6 +30,7 @@ public class DrawingSessionDeletionService {
   private final DrawingSessionRepository drawingSessionRepository;
   private final DrawingSessionDeletionRepository deletionRepository;
   private final StrokeBatchDeletionService strokeBatchDeletionService;
+  private final ConversationEventDeletionService conversationEventDeletionService;
   private final Clock clock;
 
   /**
@@ -39,6 +41,7 @@ public class DrawingSessionDeletionService {
    * @param drawingSessionRepository 세션 잠금과 상태 저장 Repository
    * @param deletionRepository Storage 삭제 작업 등록 Repository
    * @param strokeBatchDeletionService MongoDB Stroke 배치 동반 삭제 Service
+   * @param conversationEventDeletionService MongoDB 대화 행동 이벤트 동반 삭제 Service
    * @param clock 서버 삭제 시각을 제공하는 UTC Clock
    */
   public DrawingSessionDeletionService(
@@ -47,12 +50,14 @@ public class DrawingSessionDeletionService {
       DrawingSessionRepository drawingSessionRepository,
       DrawingSessionDeletionRepository deletionRepository,
       StrokeBatchDeletionService strokeBatchDeletionService,
+      ConversationEventDeletionService conversationEventDeletionService,
       Clock clock) {
     this.currentUserResolver = currentUserResolver;
     this.accessValidator = accessValidator;
     this.drawingSessionRepository = drawingSessionRepository;
     this.deletionRepository = deletionRepository;
     this.strokeBatchDeletionService = strokeBatchDeletionService;
+    this.conversationEventDeletionService = conversationEventDeletionService;
     this.clock = clock;
   }
 
@@ -80,5 +85,8 @@ public class DrawingSessionDeletionService {
     // 그리기 과정 데이터는 MongoDB 에 있고 Soft Delete 대상이 아니다 — Commit 이후 실제로 지운다
     //   (S15P11B209-365). MySQL 의 stroke_* 테이블에 남은 옛 데이터는 세션 FK 의 CASCADE 를 그대로 둔다.
     strokeBatchDeletionService.deleteByDrawingSession(drawingSessionId);
+    // 대화 행동 이벤트도 같은 이유로 Mongo 에 있다 (S15P11B209-973). 아동 ID 를 함께 넘겨 인덱스를 타게 한다.
+    conversationEventDeletionService.deleteByDrawingSession(
+        session.getChild().getId(), drawingSessionId);
   }
 }

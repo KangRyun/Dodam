@@ -17,6 +17,7 @@ import com.ssafy.b209.conversation.dto.SkipQuestionResponse;
 import com.ssafy.b209.conversation.exception.QuestionSkipErrorCode;
 import com.ssafy.b209.conversation.repository.ConversationEndAuthorizationRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
+import com.ssafy.b209.conversation.repository.ConversationStartDrawingSessionRepository;
 import com.ssafy.b209.conversation.repository.SkippableQuestionMessageRepository;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.util.Optional;
@@ -40,6 +41,8 @@ class QuestionSkipServiceTest {
   @Mock private ConversationSessionRepository conversationRepository;
   @Mock private SkippableQuestionMessageRepository questionRepository;
   @Mock private ConversationSession conversation;
+  @Mock private ConversationStartDrawingSessionRepository drawingSessionRepository;
+  @Mock private ConversationEventRecorder eventRecorder;
 
   private QuestionSkipService service;
 
@@ -50,7 +53,9 @@ class QuestionSkipServiceTest {
             currentUserResolver,
             authorizationRepository,
             conversationRepository,
-            questionRepository);
+            questionRepository,
+            drawingSessionRepository,
+            eventRecorder);
   }
 
   @Test

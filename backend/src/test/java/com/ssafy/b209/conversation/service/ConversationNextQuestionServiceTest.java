@@ -85,6 +85,7 @@ class ConversationNextQuestionServiceTest {
   @Mock private ConversationStartDrawingSession drawingSession;
   @Mock private DrawingSession drawingSessionDetail;
   @Mock private Child child;
+  @Mock private ConversationEventRecorder eventRecorder;
 
   private ConversationNextQuestionService service;
 
@@ -105,6 +106,7 @@ class ConversationNextQuestionServiceTest {
             childRepository,
             drawingAnalysisRepository,
             questionService,
+            eventRecorder,
             Clock.fixed(Instant.parse("2026-07-22T00:00:00Z"), ZoneOffset.UTC));
   }
 
@@ -435,6 +437,28 @@ class ConversationNextQuestionServiceTest {
     assertBusinessError(
         () -> service.generate(3L, 11L, request()),
         ConversationErrorCode.CONVERSATION_ACCESS_DENIED);
+  }
+
+  /**
+   * 질문이 나갈 때 대화 행동 이벤트 훅이 실제로 불리는지 확인한다 (S15P11B209-973).
+   *
+   * <p><b>왜 이 테스트가 필요한가</b>: 적재기가 잘 저장하는지는 {@code ConversationEventMongoIntegrationTest}가 본다. 여기서
+   * 지키는 것은 다른 것이다 — <b>이 흐름이 적재기를 부르는가.</b> S15P11B209-902 에서는 저장 메서드가 멀쩡히 동작했지만 아무도 부르지 않아 몇 주간
+   * 데이터가 비었다. 그때 없던 것이 정확히 이 단언이다. 이 흐름은 AI Client를 끼고 있어 관통 테스트로 옮기기 어려우므로 호출부를 여기서 못박는다.
+   *
+   * <p>질문 <b>본문</b>은 넘기지 않는다는 것도 함께 확인한다 — 인자 목록이 곧 개인정보 방어선이다 (CLAUDE.md 9절).
+   */
+  @Test
+  void recordsAQuestionShownEventWithTheConversationChildAndActivityCoordinates() {
+    stubAuthorizedConversation(false, true, true);
+    stubChildContext();
+    given(questionService.generateQuestion(any()))
+        .willReturn(new GeneratedQuestion(906L, "무엇을 그리고 있니?", false, 4, List.of(), null));
+
+    service.generate(3L, 11L, request());
+
+    org.mockito.Mockito.verify(eventRecorder)
+        .recordQuestionShown(new ConversationEventContext(11L, 7L, 101L), 906L, 4);
   }
 
   private void stubAuthorizedConversation(boolean completed, boolean conversing, boolean canAsk) {

@@ -1,6 +1,7 @@
 package com.ssafy.b209.conversation.service;
 
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
+import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.conversation.domain.ConversationMessage;
 import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.dto.EndConversationRequest;
@@ -32,6 +33,7 @@ public class ConversationEndService {
   private final ConversationSessionRepository conversationRepository;
   private final DrawingSessionRepository drawingRepository;
   private final ConversationMessageRepository messageRepository;
+  private final ConversationEventRecorder eventRecorder;
   private final Clock clock;
 
   /**
@@ -42,6 +44,7 @@ public class ConversationEndService {
    * @param conversationRepository 대화 세션 잠금 조회 저장소
    * @param drawingRepository 연결된 그림 세션 잠금 조회 저장소
    * @param messageRepository 최신 질문 조회 저장소
+   * @param eventRecorder 대화 행동 이벤트 적재기
    */
   @Autowired
   public ConversationEndService(
@@ -49,13 +52,15 @@ public class ConversationEndService {
       ConversationEndAuthorizationRepository authorizationRepository,
       ConversationSessionRepository conversationRepository,
       DrawingSessionRepository drawingRepository,
-      ConversationMessageRepository messageRepository) {
+      ConversationMessageRepository messageRepository,
+      ConversationEventRecorder eventRecorder) {
     this(
         currentUserResolver,
         authorizationRepository,
         conversationRepository,
         drawingRepository,
         messageRepository,
+        eventRecorder,
         Clock.systemUTC());
   }
 
@@ -65,12 +70,14 @@ public class ConversationEndService {
       ConversationSessionRepository conversationRepository,
       DrawingSessionRepository drawingRepository,
       ConversationMessageRepository messageRepository,
+      ConversationEventRecorder eventRecorder,
       Clock clock) {
     this.currentUserResolver = currentUserResolver;
     this.authorizationRepository = authorizationRepository;
     this.conversationRepository = conversationRepository;
     this.drawingRepository = drawingRepository;
     this.messageRepository = messageRepository;
+    this.eventRecorder = eventRecorder;
     this.clock = clock;
   }
 
@@ -114,12 +121,39 @@ public class ConversationEndService {
     }
 
     conversation.complete(request.reason(), LocalDateTime.now(clock));
+    recordEnded(conversation, drawingSession, request);
     DrawingStage nextStage = drawingSession.getCurrentStage();
     if (nextStage == DrawingStage.CONVERSING || nextStage == DrawingStage.REFLECTION) {
       drawingSession.enterReflection();
       nextStage = DrawingStage.REFLECTION;
     }
     return toResponse(conversation, nextStage);
+  }
+
+  /**
+   * 대화 종료를 행동 이벤트로 남긴다 (S15P11B209-973).
+   *
+   * <p>이미 종료된 대화는 위에서 그대로 반환하고 여기 오지 않으므로 종료 이벤트는 대화당 한 번만 남는다.
+   *
+   * <p>아동을 확정하지 못하면 기록을 건너뛴다. 여기까지 왔다는 것은 종료가 이미 성립했다는 뜻이라, 관측용 좌표가 비었다고 종료 응답을 실패로 만들 이유가 없다.
+   *
+   * @param conversation 방금 종료한 대화 세션
+   * @param drawingSession 연결된 그림 활동 세션
+   * @param request 종료 요청
+   */
+  private void recordEnded(
+      ConversationSession conversation,
+      DrawingSession drawingSession,
+      EndConversationRequest request) {
+    Child child = drawingSession.getChild();
+    if (child == null || child.getId() == null) {
+      return;
+    }
+    eventRecorder.recordSessionEnd(
+        new ConversationEventContext(
+            conversation.getId(), child.getId(), conversation.getDrawingSessionId()),
+        request.reason().name(),
+        conversation.getQuestionCount());
   }
 
   private void validateLastQuestion(Long conversationId, Long lastQuestionMessageId) {

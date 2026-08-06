@@ -160,6 +160,14 @@ app:
       #   (upsert 라 데이터는 안 깨지지만 매 기동마다 전량 스캔한다).
       enabled: ${STROKE_MONGO_BACKFILL:false}
       batch-size: ${STROKE_MONGO_BACKFILL_BATCH_SIZE:200}
+  conversation-event:
+    # 대화 행동 이벤트 보관 기간(일). MongoDB `conversation_events` 의 TTL 인덱스가 쓰는
+    # expireAt = occurredAt + 이 값 으로 계산된다 (S15P11B209-973).
+    #   ⚠️ 스트로크와 같은 주의: 이 값을 바꿔도 **이미 저장된 문서의 expireAt 은 바뀌지 않는다.**
+    #      TTL 인덱스는 문서에 적힌 시각만 보기 때문이다.
+    #   그리기 과정 데이터와 같은 활동에서 나온 같은 성격의 관측 로그이므로 보관 기간을 스트로크와 맞춘다.
+    #   보관 정책(564/565) 확정 전까지 쓰는 임시 기준값이다.
+    retention-days: ${CONVERSATION_EVENT_RETENTION_DAYS:180}
   idempotency:
     drawing-draft:
       processing-ttl: ${DRAWING_DRAFT_IDEMPOTENCY_PROCESSING_TTL:30s}

@@ -64,6 +64,7 @@ class VoiceAnswerServiceTest {
   @Mock private VoiceAnswerMessage question;
   @Mock private VoiceAnswerMessage savedMessage;
   @Mock private StagedAudio stagedAudio;
+  @Mock private ConversationEventRecorder eventRecorder;
 
   private VoiceAnswerService service;
 
@@ -76,6 +77,7 @@ class VoiceAnswerServiceTest {
             authorizationRepository,
             messageRepository,
             audioStorage,
+            eventRecorder,
             new ObjectMapper(),
             Clock.fixed(Instant.parse("2026-07-23T00:00:00Z"), ZoneOffset.UTC),
             eventPublisher);
@@ -224,6 +226,42 @@ class VoiceAnswerServiceTest {
     }
 
     verify(audioStorage).delete(STORAGE_KEY);
+  }
+
+  /**
+   * 음성 답변이 저장될 때 대화 행동 이벤트 훅이 실제로 불리는지 확인한다 (S15P11B209-973).
+   *
+   * <p><b>왜 이 테스트가 필요한가</b>: 적재기가 잘 저장하는지는 {@code ConversationEventMongoIntegrationTest}가 본다. 여기서
+   * 지키는 것은 <b>이 흐름이 적재기를 부르는가</b>다. S15P11B209-902 에서는 저장 메서드가 동작했는데 아무도 부르지 않아 몇 주간 데이터가 비었고, 그때
+   * 없던 것이 정확히 이 단언이다. 이 흐름은 음성 파일 저장소를 끼고 있어 관통 테스트로 옮기기 어려우므로 호출부를 여기서 못박는다.
+   *
+   * <p>넘기는 값이 <b>녹음 시각과 종료 사유뿐</b>인 것도 함께 확인한다. 전사 결과(sttText)는 커밋 후 289가 채우는 아이의 발화이며 행동 로그로 새면 안
+   * 된다 (CLAUDE.md 9절).
+   */
+  @Test
+  void recordsAVoiceAnswerEventWithRecordingWindowAndStopReasonOnly() {
+    givenAuthorizedLockedSession();
+    given(messageRepository.findQuestionByIdAndConversationSessionId(QUESTION_ID, CONVERSATION_ID))
+        .willReturn(Optional.of(question));
+    given(messageRepository.findMaxMessageSequenceByConversationSessionId(CONVERSATION_ID))
+        .willReturn(4);
+    given(audioStorage.promote(stagedAudio)).willReturn(storedAudio());
+    given(savedMessage.getId()).willReturn(60L);
+    given(savedMessage.getMessageSequence()).willReturn(5);
+    // 응답 조립이 이 값으로 공개 유형을 매핑한다. 비우면 매퍼의 switch 가 NPE 로 죽어, 검증 대상과 무관한 곳에서 실패한다.
+    given(savedMessage.getMessageType()).willReturn("VOICE_ANSWER");
+    given(messageRepository.saveAndFlush(any(VoiceAnswerMessage.class))).willReturn(savedMessage);
+
+    service.persist(GUARDIAN_ID, CONVERSATION_ID, metadata(), stagedAudio);
+
+    verify(eventRecorder)
+        .recordVoiceAnswer(
+            new ConversationEventContext(CONVERSATION_ID, CHILD_ID, DRAWING_SESSION_ID),
+            QUESTION_ID,
+            5,
+            Instant.parse("2026-07-23T00:00:00Z"),
+            Instant.parse("2026-07-23T00:00:01Z"),
+            "USER_FINISH");
   }
 
   private void givenAuthorizedLockedSession() {

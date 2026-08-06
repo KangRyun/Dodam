@@ -47,6 +47,7 @@ public class OptionAnswerService {
   private final OptionAnswerMessageRepository messageRepository;
   private final ConversationMessageOptionRepository optionRepository;
   private final ConversationMessageSelectedOptionRepository selectedOptionRepository;
+  private final ConversationEventRecorder eventRecorder;
   private final ObjectMapper objectMapper;
   private final Clock clock;
 
@@ -59,6 +60,7 @@ public class OptionAnswerService {
    * @param messageRepository 질문 검증·중복 답변 확인·순번·답변 저장 경계
    * @param optionRepository 질문 선택지 Snapshot 조회 경계
    * @param selectedOptionRepository 선택 응답 저장 경계
+   * @param eventRecorder 대화 행동 이벤트 적재기
    * @param objectMapper 요청 fingerprint 직렬화 도구
    * @param clock 서버 생성 시각 기준
    */
@@ -69,6 +71,7 @@ public class OptionAnswerService {
       OptionAnswerMessageRepository messageRepository,
       ConversationMessageOptionRepository optionRepository,
       ConversationMessageSelectedOptionRepository selectedOptionRepository,
+      ConversationEventRecorder eventRecorder,
       ObjectMapper objectMapper,
       Clock clock) {
     this.conversationSessionRepository = conversationSessionRepository;
@@ -77,6 +80,7 @@ public class OptionAnswerService {
     this.messageRepository = messageRepository;
     this.optionRepository = optionRepository;
     this.selectedOptionRepository = selectedOptionRepository;
+    this.eventRecorder = eventRecorder;
     this.objectMapper = objectMapper;
     this.clock = clock;
   }
@@ -113,7 +117,7 @@ public class OptionAnswerService {
         conversationSessionRepository
             .findByIdForUpdate(conversationId)
             .orElseThrow(() -> new BusinessException(OptionAnswerErrorCode.CONVERSATION_NOT_FOUND));
-    validateAccessAndState(guardianUserId, session);
+    Long childId = validateAccessAndState(guardianUserId, session);
 
     Long questionMessageId = request.questionMessageId();
     if (!messageRepository.existsQuestion(questionMessageId, conversationId)) {
@@ -148,13 +152,29 @@ public class OptionAnswerService {
       }
       selectedOptionRepository.saveAll(selections);
       selectedOptionRepository.flush();
+      // 고른 칩의 "개수"와 직접 입력 "유무"만 넘긴다. 라벨·본문은 아이가 한 말이라 행동 로그에 넣지 않는다
+      //   (S15P11B209-973 · CLAUDE.md 9절).
+      eventRecorder.recordOptionAnswer(
+          new ConversationEventContext(conversationId, childId, session.getDrawingSessionId()),
+          questionMessageId,
+          saved.getMessageSequence(),
+          matched.size(),
+          directText != null);
       return buildResponse(saved, conversationId, request.selectedOptions(), directText);
     } catch (DataIntegrityViolationException exception) {
       throw new BusinessException(OptionAnswerErrorCode.OPTION_ANSWER_STORAGE_CONFLICT, exception);
     }
   }
 
-  private void validateAccessAndState(Long guardianUserId, ConversationSession session) {
+  /**
+   * 보호자 관계·필수 동의·세션 상태를 검증하고, 이 대화가 어느 아동의 것인지 확정한다.
+   *
+   * @param guardianUserId 인증에서 해석한 보호자 ID
+   * @param session 잠근 대화 세션
+   * @return 대화가 속한 아동 ID
+   * @throws BusinessException 권한·동의·세션 상태 검증에 실패한 경우
+   */
+  private Long validateAccessAndState(Long guardianUserId, ConversationSession session) {
     ConversationStartDrawingSession drawingSession =
         drawingSessionRepository
             .findById(session.getDrawingSessionId())
@@ -172,6 +192,7 @@ public class OptionAnswerService {
     if (!session.isConversing()) {
       throw new BusinessException(OptionAnswerErrorCode.CONVERSATION_NOT_CONVERSING);
     }
+    return childId;
   }
 
   private List<ConversationMessageOption> matchSelectedOptions(
