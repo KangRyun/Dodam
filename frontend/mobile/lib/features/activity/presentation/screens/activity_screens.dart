@@ -630,11 +630,20 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   Future<void> _restoreConversationQuestion() async {
-    await _ensureConversationStarted(null);
+    // 사진 업로드로 막 완료돼 대화를 처음 여는 경우 완료 응답의 분석 ID가
+    // basisAnalysisId로 들어온다. 이때는 캔버스처럼 그 분석 ID로 대화를 시작하고
+    // 첫 질문을 생성한다. 이미 진행 중이던 대화 재개는 값이 없어 기존 경로를
+    // 그대로 탄다(S15P11B209-942).
+    final analysisId = widget.basisAnalysisId;
+    await _ensureConversationStarted(analysisId);
     if (!mounted) return;
     await _restoreExistingQuestionCount();
     if (!mounted) return;
-    await _questionController?.load();
+    if (analysisId != null) {
+      await _questionController?.loadForAnalysis(analysisId);
+    } else {
+      await _questionController?.load();
+    }
   }
 
   Future<void> _restoreExistingQuestionCount() async {
@@ -1191,7 +1200,10 @@ class _DrawingScreenState extends State<DrawingScreen>
       _noResponseRequestSourceQuestion = null;
     }
     _lastQuestionMessageId = question.messageId;
-    // 하위 상태 UI의 빌드 중 알림과 겹치지 않도록 다음 프레임에 반영
+    // 하위 상태 UI의 빌드 중 알림과 겹치지 않도록 다음 프레임에 반영한다. 다만
+    // 네트워크 응답이 유휴 상태에서 도착하면 예약된 프레임이 없어 이 콜백이 다음
+    // 사용자 입력(예: 도구 변경)까지 실행되지 않아 말풍선이 늦게 뜨는 문제가
+    // 있었다(S15P11B209-942). 그래서 프레임을 명시적으로 예약한다.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       final accepted = _questionDisplayController.receive(question);
@@ -1212,6 +1224,8 @@ class _DrawingScreenState extends State<DrawingScreen>
         }
       }
     });
+    // 위 postFrame 콜백이 실제로 실행되도록 프레임이 없으면 새로 예약한다.
+    WidgetsBinding.instance.ensureVisualUpdate();
   }
 
   Future<void> _prepareNoResponseTimerAfterTts(AiQuestion question) async {

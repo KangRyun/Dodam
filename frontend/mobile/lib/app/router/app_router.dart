@@ -485,7 +485,12 @@ abstract final class AppRouter {
           conversationAnswerRepository: conversationAnswerRepository,
           questionSkipRepository: questionSkipRepository,
           conversationId: conversationId,
-          basisAnalysisId: basisAnalysisId,
+          // 사진 업로드 완료로 넘어온 분석 ID가 있으면 그것을 대화 첫 질문의
+          // 기준으로 쓴다(S15P11B209-942).
+          basisAnalysisId:
+              (settings.arguments! as DrawingRouteArguments)
+                  .conversationAnalysisId ??
+              basisAnalysisId,
           resumeConversation:
               (settings.arguments! as DrawingRouteArguments).resumeConversation,
           autoRestoreDraft:
@@ -720,6 +725,7 @@ final class DrawingRouteArguments {
     this.startFresh = false,
     this.activityContext = const DrawingActivityContextDto.general(),
     this.inputMethod,
+    this.conversationAnalysisId,
     this.companion = DodamCostume.base,
   });
 
@@ -742,6 +748,10 @@ final class DrawingRouteArguments {
   /// 주제 선택 뒤 생성한 새 활동은 Draft 확인 없이 빈 캔버스를 연다.
   final bool startFresh;
   final DrawingActivityContextDto activityContext;
+
+  /// 사진 업로드로 막 완료된 세션의 분석 ID(대화 첫 질문 생성 기준,
+  /// S15P11B209-942). 재개 등 그 외 진입에서는 `null`.
+  final int? conversationAnalysisId;
 }
 
 /// 캔버스가 상위 활동 진입 화면에 전달하는 종료 결과.

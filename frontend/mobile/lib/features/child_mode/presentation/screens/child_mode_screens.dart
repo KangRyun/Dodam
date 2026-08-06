@@ -1372,6 +1372,9 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
         startFresh: startFresh,
         activityContext: resolution.activityContext,
         inputMethod: resolution.inputMethod,
+        // 사진 업로드로 막 완료된 세션의 분석 ID — 대화 첫 질문 생성 기준
+        // (S15P11B209-942).
+        conversationAnalysisId: resolution.conversationAnalysisId,
         companion: companionSnapshot,
       ),
     );
