@@ -3,6 +3,7 @@ package com.ssafy.b209.report.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
+import com.ssafy.b209.drawing.service.DrawingAssetFileUrlFactory;
 import com.ssafy.b209.report.dto.ReportActivityFactsResponse;
 import com.ssafy.b209.report.dto.ReportChildExpressionResponse;
 import com.ssafy.b209.report.dto.ReportConversationSummaryResponse;
@@ -20,9 +21,11 @@ import com.ssafy.b209.report.dto.ReportUtteranceResponse;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
+import org.apache.pdfbox.text.TextPosition;
 import org.junit.jupiter.api.Test;
 
 /**
@@ -33,7 +36,9 @@ import org.junit.jupiter.api.Test;
  */
 class ReportPdfRendererLayoutTest {
 
-  private final ReportPdfRenderer renderer = new ReportPdfRenderer();
+  // 그림 없이 서식만 본다. 그림 삽입은 ReportPdfRendererDrawingTest 가 따로 고정한다.
+  private final ReportPdfRenderer renderer =
+      new ReportPdfRenderer(assetId -> Optional.empty(), new DrawingAssetFileUrlFactory());
 
   @Test
   void writesScreenSectionTitlesAndLabels() throws Exception {
@@ -69,15 +74,41 @@ class ReportPdfRendererLayoutTest {
   }
 
   @Test
+  void putsTitleNoticeAndSummaryOnTheCoverPageAndStartsBodyAfterIt() throws Exception {
+    // 표지 겸 요약 페이지다(S15P11B209-968). 제목만 있는 표지는 첫 장을 비우고, 표지가 없으면
+    //   비진단 고지가 본문 사이에 섞인다 — 보호자가 첫 장에서 "진단이 아니다"를 먼저 읽어야 한다.
+    byte[] pdf = renderer.render(fullReport());
+
+    try (PDDocument document = Loader.loadPDF(pdf)) {
+      String cover = pageText(document, 1);
+      assertThat(cover)
+          .contains("도담 관찰 리포트")
+          .contains("진단이 아닌 관찰 참고 자료")
+          .contains("한눈에 보기")
+          // 요약은 본문에 이미 있는 값을 앞에 세운 것이다 — 새 데이터를 만들지 않는다.
+          .contains("그린 시간")
+          .contains("편안함")
+          .contains("편안하게 대화했어요");
+      // 본문은 표지 다음 장에서 시작한다.
+      assertThat(cover).doesNotContain("주요 심리 경향");
+      assertThat(pageText(document, 2)).contains("활동 정보");
+    }
+  }
+
+  @Test
   void paginatesLongReportsAndNumbersEveryPage() throws Exception {
     byte[] pdf = renderer.render(longReport());
 
     try (PDDocument document = Loader.loadPDF(pdf)) {
-      assertThat(document.getNumberOfPages()).isGreaterThan(1);
+      int pages = document.getNumberOfPages();
+      assertThat(pages).isGreaterThan(1);
+      // 쪽번호는 모든 장에 있어야 한다. 마지막 장만 빠지는 실수가 흔하다.
+      for (int page = 1; page <= pages; page++) {
+        assertThat(pageText(document, page)).as("%d 쪽 번호", page).contains(page + " / " + pages);
+      }
+      // 한 장보다 긴 내용도 잘리지 않고 끝까지 실린다.
       String text = new PDFTextStripper().getText(document);
-      assertThat(text).contains("1 / " + document.getNumberOfPages());
-      // 한 장에 못 들어간 카드는 다음 장에 이어 붙는다.
-      assertThat(text).contains("(이어서)");
+      assertThat(text).contains("(0)").contains("(59)");
     }
   }
 
@@ -179,6 +210,49 @@ class ReportPdfRendererLayoutTest {
       assertThat(text).contains("활동 정보").contains("주요 심리 경향").contains("주제별 관찰").contains("활동 기록");
       assertThat(text).doesNotContain("집·나무·사람, 하나씩 살펴봐요");
     }
+  }
+
+  @Test
+  void printsPageNumberInsideTheBottomMarginNotBehindContent() throws Exception {
+    // 쪽번호를 본문 박스 밖으로 밀어내면(position: fixed; bottom: 음수) 글자가 PDF 에 남지만
+    //   렌더링 때 클립되어 보이지 않는다. 텍스트 추출만 확인하면 그 상태로도 통과한다 —
+    //   실제로 967 스파이크가 그랬다. 그래서 위치까지 본다.
+    byte[] pdf = renderer.render(longReport());
+
+    try (PDDocument document = Loader.loadPDF(pdf)) {
+      float pageHeight = document.getPage(0).getMediaBox().getHeight();
+      // A4 아래 여백 18mm = 51pt. 쪽번호는 본문이 끝나는 자리와 종이 끝 사이에 있어야 한다.
+      float contentBottom = pageHeight - 51f;
+      float numberY = textY(document, "1 / " + document.getNumberOfPages());
+
+      assertThat(numberY).isGreaterThan(contentBottom).isLessThan(pageHeight);
+    }
+  }
+
+  /** 첫 장에서 [marker] 가 그려진 세로 위치를 종이 위에서부터 재어 준다. */
+  private float textY(PDDocument document, String marker) throws java.io.IOException {
+    float[] found = {-1};
+    PDFTextStripper stripper =
+        new PDFTextStripper() {
+          @Override
+          protected void writeString(String text, java.util.List<TextPosition> positions) {
+            if (found[0] < 0 && text.contains(marker) && !positions.isEmpty()) {
+              found[0] = positions.get(0).getYDirAdj();
+            }
+          }
+        };
+    stripper.setStartPage(1);
+    stripper.setEndPage(1);
+    stripper.getText(document);
+    assertThat(found[0]).as("첫 장에서 %s 를 찾지 못했습니다", marker).isPositive();
+    return found[0];
+  }
+
+  private String pageText(PDDocument document, int page) throws java.io.IOException {
+    PDFTextStripper stripper = new PDFTextStripper();
+    stripper.setStartPage(page);
+    stripper.setEndPage(page);
+    return stripper.getText(document);
   }
 
   /** 활동 코드가 HTP 인 리포트다. 표시명이 아니라 코드로 분기하는지 함께 본다. */

@@ -143,15 +143,17 @@ class ReportPdfHtmlSpikeTest {
   /**
    * PDF 전용 XHTML 이다.
    *
-   * <p>openhtmltopdf 는 브라우저가 아니라 flex·grid 를 쓰지 않는다. 쪽번호는 {@code position: fixed} 요소가 모든 장에 반복되는
-   * 성질과 {@code counter(page)} 를 함께 쓴다.
+   * <p>openhtmltopdf 는 브라우저가 아니라 flex·grid 를 쓰지 않는다. 쪽번호는 페이지 여백 박스({@code @bottom-center})와 {@code
+   * counter(page)} 를 함께 쓴다.
    */
   private String document(String body) {
     return """
         <?xml version="1.0" encoding="UTF-8"?>
         <html xmlns="http://www.w3.org/1999/xhtml">
         <head><meta charset="UTF-8" /><style>
-          @page { size: A4; margin: 15mm 14mm 18mm; }
+          @page { size: A4; margin: 15mm 14mm 18mm;
+                  @bottom-center { content: counter(page) " / " counter(pages);
+                                   font-family: '%s'; font-size: 8pt; color: #68737D; } }
           body { font-family: '%s'; font-size: 10.5pt; color: #27313A; line-height: 1.55; }
           .card { border: 1px solid #DDE2DC; border-radius: 10px; padding: 10px 12px;
                   margin-bottom: 10px; }
@@ -159,15 +161,15 @@ class ReportPdfHtmlSpikeTest {
           .card h2 { font-size: 12pt; font-weight: bold; margin: 0 0 6px 0;
                      border-left: 4px solid #8F83DD; padding-left: 8px; }
           .card p { margin: 0 0 4px 0; }
-          #footer { position: fixed; bottom: -12mm; left: 0; right: 0; text-align: center;
-                    font-size: 8pt; color: #68737D; }
-          #footer::after { content: counter(page) " / " counter(pages); }
+          /* 처음에는 쪽번호를 `position: fixed; bottom: -12mm` 로 뒀다. 글자는 PDF 에 남아 텍스트
+             추출로는 확인됐지만 본문 박스에 클립되어 화면·인쇄에서 보이지 않았다(968 에서 페이지를
+             이미지로 그려 확인). 여백 박스를 쓰면 여백 안에 정상으로 그려진다. */
           img { display: block; width: 100%%; }
         </style></head>
-        <body><div id="footer"></div>%s</body>
+        <body>%s</body>
         </html>
         """
-        .formatted(FONT_FAMILY, body);
+        .formatted(FONT_FAMILY, FONT_FAMILY, body);
   }
 
   private String card(String title, String text, boolean keepTogether) {
