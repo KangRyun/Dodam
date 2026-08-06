@@ -109,6 +109,8 @@ final class MockReportRepository implements ReportRepository {
         'scopeText': '이번 그림 활동에서 나타난 가능성입니다.',
         'homeObservationGuide': '새로운 상황에서도 보호자의 확인을 반복해서 구하는지 살펴봐 주세요.',
         'evidenceRefs': [101, 102],
+        // 아이 발화(101)가 직접 뒷받침하므로 서버가 STRONG 으로 계산한 카드다.
+        'confidence': 'STRONG',
       },
     ],
     'evidenceItems': [

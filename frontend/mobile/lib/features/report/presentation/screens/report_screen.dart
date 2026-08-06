@@ -1475,6 +1475,33 @@ Color _categoryColor(String? category) => switch (category) {
   _ => AppColors.lavender,
 };
 
+/// 계약 §3 `confidence` 를 보호자가 읽을 문구로 바꾼다(S15P11B209-982).
+///
+/// "확신도 강"이 아니라 "근거가 강해요"로 쓴다. 무엇에 대한 확신인지 —
+/// 아이 발화가 직접 뒷받침하는지, 그림 하나만 보고 말하는 것인지 — 가
+/// 드러나야 보호자가 무게를 가늠할 수 있다.
+///
+/// 모르는 코드는 `null` 을 돌려주어 배지를 그리지 않는다. 등급 체계가 늘어도
+/// 앱이 낯선 값을 그대로 노출하지 않는다.
+String? _confidenceLabel(String? confidence) => switch (confidence) {
+  'STRONG' => '근거가 강해요',
+  'MODERATE' => '근거가 어느 정도 있어요',
+  'WEAK' => '근거가 약해요',
+  _ => null,
+};
+
+/// 확신도 배지 색이다.
+///
+/// **경고색을 쓰지 않는다.** 근거가 약한 것은 나쁜 소식이 아니라 "덜 확신한다"는
+/// 표시일 뿐인데, 빨강을 쓰면 보호자가 아이에게 문제가 있다는 신호로 읽는다.
+/// 강함은 초록, 그 아래는 따뜻한 중립색과 회색으로 세기만 낮춘다.
+({Color fg, Color bg}) _confidenceColors(String? confidence) =>
+    switch (confidence) {
+      'STRONG' => (fg: AppColors.leaf, bg: AppColors.leafSoft),
+      'MODERATE' => (fg: AppColors.tangerine, bg: AppColors.tangerineSoft),
+      _ => (fg: AppColors.inkMuted, bg: AppColors.surfaceSoft),
+    };
+
 String _evidenceSourceLabel(String? sourceType) => switch (sourceType) {
   'VISION' => '그림에서 확인',
   'CHILD_ANSWER' => '아이의 답변',
@@ -1552,6 +1579,20 @@ class _InterpretationCard extends StatelessWidget {
               ),
             ],
           ),
+          // 확신도는 경향 문장 **바로 위**에 둔다. 문장을 읽기 전에 어느 정도
+          // 무게로 받아들일지 먼저 알려야 한다(CLAUDE.md 9절). 등급이 없으면
+          // 배지만 빠지고 카드는 그대로 나온다.
+          if (_confidenceLabel(interpretation.confidence) case final label?) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _ConfidenceBadge(
+                index: index,
+                label: label,
+                confidence: interpretation.confidence,
+              ),
+            ),
+          ],
           if (interpretation.tendencyText case final tendency?) ...[
             const SizedBox(height: AppSpacing.sm),
             Text(
@@ -1602,6 +1643,56 @@ class _InterpretationCard extends StatelessWidget {
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// 해석 카드의 확신도 배지(S15P11B209-982).
+///
+/// 근거 종류로 서버가 계산한 등급을 그대로 보여준다 — 앱은 판정하지 않는다.
+/// 확신도를 감추면 아이 발화가 직접 뒷받침하는 해석과 그림 한 장에서 나온
+/// 추측이 같은 무게로 읽힌다(CLAUDE.md 9절).
+class _ConfidenceBadge extends StatelessWidget {
+  const _ConfidenceBadge({
+    required this.index,
+    required this.label,
+    required this.confidence,
+  });
+
+  final int index;
+  final String label;
+  final String? confidence;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = _confidenceColors(confidence);
+    return Semantics(
+      // 배지만 따로 읽히면 무엇의 근거인지 알 수 없다. 스크린 리더에는 대상을
+      // 붙여 읽어 준다.
+      label: '이 해석의 $label',
+      excludeSemantics: true,
+      child: DecoratedBox(
+        key: ValueKey('report-interpretation-$index-confidence'),
+        decoration: BoxDecoration(
+          color: colors.bg,
+          borderRadius: BorderRadius.circular(AppRadius.pill),
+          border: Border.all(color: colors.fg.withValues(alpha: 0.35)),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.sm,
+            vertical: AppSpacing.xs,
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: colors.fg,
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+        ),
       ),
     );
   }
