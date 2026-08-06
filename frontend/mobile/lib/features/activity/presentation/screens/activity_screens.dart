@@ -128,9 +128,6 @@ String _createIdempotencyKey() {
 /// 질문 음성 재생이 끝난 뒤 아동의 응답을 기다리는 기본 시간이다.
 const aiQuestionNoResponseTimeout = Duration(seconds: 10);
 
-/// Backend 대화 생성 계약의 생략 시 기본 질문 상한과 같은 값이다.
-const defaultConversationMaxQuestionCount = 10;
-
 /// 아이가 그만하겠다고 말했을 때 AI 가 되묻는 선택지의 식별자다 (S15P11B209-938).
 ///
 /// AI 서버가 정하는 값이며(ai/question_service.py), 응답 계약에서는 option code 로 실려
@@ -166,7 +163,6 @@ class DrawingScreen extends StatefulWidget {
     this.voiceNoSpeechTimeout = const Duration(seconds: 3),
     this.questionOptionRevealDelay = const Duration(milliseconds: 2500),
     this.noResponseTimeout = aiQuestionNoResponseTimeout,
-    this.maxQuestionCount = defaultConversationMaxQuestionCount,
     this.voiceAnswerRepository,
     this.sttResultRepository,
     this.activityRepository,
@@ -181,7 +177,7 @@ class DrawingScreen extends StatefulWidget {
     this.childRepository,
     this.canvasTutorialController,
     super.key,
-  }) : assert(maxQuestionCount > 0 && maxQuestionCount <= 10);
+  });
 
   final String childId;
   final int? sessionId;
@@ -217,7 +213,6 @@ class DrawingScreen extends StatefulWidget {
   final Duration voiceNoSpeechTimeout;
   final Duration questionOptionRevealDelay;
   final Duration noResponseTimeout;
-  final int maxQuestionCount;
   final VoiceAnswerRepository? voiceAnswerRepository;
   final SttResultRepository? sttResultRepository;
   final ActivityRepository? activityRepository;
@@ -394,6 +389,18 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   /// 대화 생성 요청 세대. 이전 analysis의 늦은 응답이 새 요청을 덮지 않게 한다.
   int _conversationStartGeneration = 0;
+
+  /// 서버가 이 대화에 허용한 질문 수 (S15P11B209-976).
+  ///
+  /// 예전에는 앱 상수 10을 들고 그 값을 시작 요청에 실어 보냈다 — 정책의 주인이 앱이었다.
+  /// 지금은 서버가 활동 유형(HTP 주제당 3 · 그림일기 5)으로 정하고, 화면은 시작 응답에
+  /// 실려 온 값을 무응답 자동 진행 게이트에만 쓴다.
+  ///
+  /// `null`이면 상한을 모르는 것이고, 그때는 로컬에서 막지 않는다. 진행 중 대화를
+  /// 이어받으면(409 ACTIVE_CONVERSATION_EXISTS) 응답에 이 값이 없기 때문이다. 임의의
+  /// 기본값을 지어내 서버보다 먼저 대화를 끊는 대신, 상한 도달은 next-question의
+  /// `CONVERSATION_409_001`로 확인한다(AiQuestionController가 종료로 처리한다).
+  int? _serverMaxQuestionCount;
 
   /// 서버가 이미 종료됐다고 응답한 대화인지. 감정·완료 화면까지 전달한다.
   bool _conversationAlreadyEnded = false;
@@ -1115,10 +1122,9 @@ class _DrawingScreenState extends State<DrawingScreen>
         (widget.idempotencyKeyProvider ?? _createIdempotencyKey)();
     final generation = _conversationStartGeneration;
     try {
-      final conversationId = await conversationRepository.startConversation(
+      final started = await conversationRepository.startConversation(
         drawingSessionId: sessionId,
         analysisId: analysisId,
-        maxQuestionCount: widget.maxQuestionCount,
         idempotencyKey: key,
       );
       // 이전 analysis의 늦은 성공이 새 요청의 대화 ID를 덮어쓰면 안 된다.
@@ -1127,7 +1133,11 @@ class _DrawingScreenState extends State<DrawingScreen>
         _conversationStartError = null;
         _conversationStartIdentity = null;
         _conversationStartIdempotencyKey = null;
-        _setupConversationControllers(conversationId);
+        // 질문 상한은 서버가 정한다 — 앱은 시작 응답에 실려 온 값을 그대로 쓴다
+        // (S15P11B209-976). 진행 중 대화를 이어받은 409 응답에는 이 값이 없어
+        // null 로 남는다.
+        _serverMaxQuestionCount = started.maxQuestionCount;
+        _setupConversationControllers(started.conversationId);
       });
       return _questionController != null;
     } on Object catch (error) {
@@ -1378,7 +1388,14 @@ class _DrawingScreenState extends State<DrawingScreen>
       _isVisibleCurrentQuestion(question) &&
       !_noResponseRequestInFlight &&
       !_noResponseHandledQuestionMessageIds.contains(question.messageId) &&
-      _knownQuestionMessageIds.length < widget.maxQuestionCount;
+      _withinServerQuestionLimit;
+
+  /// 서버가 알려준 상한 안인가. 상한을 모르면(null) 로컬에서 막지 않는다 — 판단 근거가
+  /// 없는 채로 대화를 끊느니 서버의 `CONVERSATION_409_001`을 기다린다(S15P11B209-976).
+  bool get _withinServerQuestionLimit {
+    final limit = _serverMaxQuestionCount;
+    return limit == null || _knownQuestionMessageIds.length < limit;
+  }
 
   void _scheduleNoResponseTimer(AiQuestion question) {
     _cancelNoResponseTimer();

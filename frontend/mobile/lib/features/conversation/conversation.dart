@@ -27,6 +27,7 @@ export 'data/repositories/remote_conversation_repository.dart';
 export 'data/repositories/remote_question_tts_repository.dart';
 export 'data/services/device_question_audio_player.dart';
 export 'domain/models/ai_question.dart';
+export 'domain/models/conversation_start.dart';
 export 'domain/models/question_tts.dart';
 export 'domain/models/conversation_end.dart';
 export 'domain/models/option_answer.dart';

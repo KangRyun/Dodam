@@ -151,7 +151,6 @@ Future<void> _pumpConversation(
         resumeConversation: true,
         questionOptionRevealDelay: Duration.zero,
         noResponseTimeout: const Duration(seconds: 30),
-        maxQuestionCount: 10,
         voiceRecorder: _VoiceRecorder(),
         microphonePermissionService: const _GrantedMicrophonePermission(),
       ),
@@ -200,12 +199,14 @@ final class _ConversationRepository implements ConversationRepository {
   final List<NextQuestionRequest> requests = [];
 
   @override
-  Future<int> startConversation({
+  Future<ConversationStartResult> startConversation({
     required int drawingSessionId,
     int? analysisId,
-    int? maxQuestionCount,
     required String idempotencyKey,
-  }) async => 8001;
+  }) async => const ConversationStartResult(
+    conversationId: 8001,
+    maxQuestionCount: 5,
+  );
 
   @override
   Future<AiQuestion> requestNextQuestion({

@@ -417,12 +417,14 @@ final class _CursorConversationRepository implements ConversationRepository {
   const _CursorConversationRepository();
 
   @override
-  Future<int> startConversation({
+  Future<ConversationStartResult> startConversation({
     required int drawingSessionId,
     int? analysisId,
-    int? maxQuestionCount,
     required String idempotencyKey,
-  }) async => 8001;
+  }) async => const ConversationStartResult(
+    conversationId: 8001,
+    maxQuestionCount: 5,
+  );
 
   @override
   Future<AiQuestion> requestNextQuestion({
