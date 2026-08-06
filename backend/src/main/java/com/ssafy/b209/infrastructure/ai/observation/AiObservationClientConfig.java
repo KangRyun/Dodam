@@ -1,5 +1,6 @@
 package com.ssafy.b209.infrastructure.ai.observation;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Validator;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -46,6 +47,7 @@ public class AiObservationClientConfig {
    * @param properties 검증된 관찰 리포트 생성 Client 설정
    * @param internalToken BE↔AI 내부 계약 인증 토큰
    * @param validator 요청·응답 계약 검증기
+   * @param objectMapper 응답 원문을 계약 스키마로 읽는 Mapper
    * @return RestClient 기반 관찰 리포트 생성 Client
    */
   @Bean
@@ -54,15 +56,17 @@ public class AiObservationClientConfig {
       @Qualifier("observationRestClient") RestClient restClient,
       AiObservationClientProperties properties,
       @Value("${AI_INTERNAL_TOKEN:}") String internalToken,
-      Validator validator) {
+      Validator validator,
+      ObjectMapper objectMapper) {
     return new RestClientAiObservationClient(
-        restClient, properties.endpointPath(), internalToken, validator);
+        restClient, properties.endpointPath(), internalToken, validator, objectMapper);
   }
 
   /**
    * 외부 네트워크를 사용하지 않는 개발용 관찰 리포트 생성 Client를 생성한다.
    *
    * @param validator 관찰 생성 요청 계약 검증기
+   * @param objectMapper Mock 결과를 원문 JSON 으로 직렬화할 Mapper
    * @return 결정적인 결과를 반환하는 Mock 관찰 리포트 생성 Client
    */
   @Bean
@@ -71,7 +75,8 @@ public class AiObservationClientConfig {
       name = "mode",
       havingValue = "mock",
       matchIfMissing = true)
-  public AiObservationClient mockAiObservationClient(Validator validator) {
-    return new MockAiObservationClient(validator);
+  public AiObservationClient mockAiObservationClient(
+      Validator validator, ObjectMapper objectMapper) {
+    return new MockAiObservationClient(validator, objectMapper);
   }
 }

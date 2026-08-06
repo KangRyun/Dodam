@@ -1,5 +1,8 @@
 package com.ssafy.b209.infrastructure.ai.observation;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ssafy.b209.report.dto.ObservationGeneration;
 import com.ssafy.b209.report.dto.ObservationGenerationRequest;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummaryDraft;
@@ -30,9 +33,11 @@ public final class MockAiObservationClient implements AiObservationClient {
   private static final String DEFAULT_UTTERANCE = "재미있었어요.";
 
   private final Validator validator;
+  private final ObjectMapper objectMapper;
 
-  MockAiObservationClient(Validator validator) {
+  MockAiObservationClient(Validator validator, ObjectMapper objectMapper) {
     this.validator = Objects.requireNonNull(validator);
+    this.objectMapper = Objects.requireNonNull(objectMapper);
   }
 
   /**
@@ -43,7 +48,20 @@ public final class MockAiObservationClient implements AiObservationClient {
    * @throws AiObservationClientException 요청 계약이 유효하지 않은 경우
    */
   @Override
-  public ObservationGenerationResult generate(ObservationGenerationRequest request) {
+  public ObservationGeneration generate(ObservationGenerationRequest request) {
+    ObservationGenerationResult result = result(request);
+    // Mock 은 스키마 밖 필드를 만들지 않으므로 원문은 자기 결과를 직렬화한 것과 같다. 그래도 채워
+    //   두어야 개발 환경에서도 원문 화면이 빈 채로 남지 않는다.
+    String rawJson;
+    try {
+      rawJson = objectMapper.writeValueAsString(result);
+    } catch (JsonProcessingException exception) {
+      rawJson = null;
+    }
+    return new ObservationGeneration(result, rawJson);
+  }
+
+  private ObservationGenerationResult result(ObservationGenerationRequest request) {
     if (request == null
         || !"FINAL".equals(request.analysisType())
         || !validator.validate(request).isEmpty()) {

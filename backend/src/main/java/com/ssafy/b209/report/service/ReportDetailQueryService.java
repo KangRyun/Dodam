@@ -1,5 +1,8 @@
 package com.ssafy.b209.report.service;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessRepository;
 import com.ssafy.b209.drawing.service.DrawingAssetFileUrlFactory;
 import com.ssafy.b209.global.exception.BusinessException;
@@ -68,6 +71,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -90,6 +96,11 @@ public class ReportDetailQueryService {
   private static final String THUMBNAIL_ASSET_TYPE = "THUMBNAIL";
   private static final String UPLOADED_ASSET_TYPE = "UPLOADED";
   private static final BigDecimal LEGACY_DETECTION_MIN_CONFIDENCE = new BigDecimal("0.50");
+
+  /** 집·나무·사람 활동 코드다. AI 원문은 이 활동에서만 응답에 싣는다 (S15P11B209-980). */
+  private static final String HTP_ACTIVITY_CODE = "HTP";
+
+  private static final Logger log = LoggerFactory.getLogger(ReportDetailQueryService.class);
 
   private final GuardianResourceAccessRepository guardianAccessRepository;
   private final ReportDetailViewRepository reportRepository;
@@ -115,6 +126,14 @@ public class ReportDetailQueryService {
   private final ReportHtpStepViewRepository htpStepRepository;
   private final ReportChildViewRepository childRepository;
   private final DrawingAssetFileUrlFactory fileUrlFactory;
+  private final ObjectMapper objectMapper;
+
+  /**
+   * AI 원문을 응답에 실을지 여부다 (S15P11B209-980).
+   *
+   * <p>원문은 보호자 안전 선별을 거치지 않은 값이라 <b>끌 수 있어야 한다</b>. 지금은 화면 대조를 위해 기본으로 켜 둔다.
+   */
+  private final boolean aiRawReportExposed;
 
   /**
    * 리포트 상세 조회 Use Case 의존성을 생성한다.
@@ -138,6 +157,8 @@ public class ReportDetailQueryService {
    * @param htpStepRepository 활동 수치가 여러 활동 합산인지 판정하는 HTP 단계 조회 경계 (S15P11B209-960)
    * @param childRepository 표지용 아동 표시명 조회 경계이며 별명만 읽는다 (S15P11B209-960)
    * @param fileUrlFactory 인증된 그림 파일 조회 URL 생성기
+   * @param objectMapper 보관해 둔 AI 원문을 응답에 그대로 싣기 위한 Mapper (S15P11B209-980)
+   * @param aiRawReportExposed AI 원문 노출 여부이며 기본은 켜짐
    */
   public ReportDetailQueryService(
       GuardianResourceAccessRepository guardianAccessRepository,
@@ -163,7 +184,11 @@ public class ReportDetailQueryService {
       ReportReferenceRepository referenceRepository,
       ReportHtpStepViewRepository htpStepRepository,
       ReportChildViewRepository childRepository,
-      DrawingAssetFileUrlFactory fileUrlFactory) {
+      DrawingAssetFileUrlFactory fileUrlFactory,
+      ObjectMapper objectMapper,
+      @Value("${app.report.ai-raw-report.exposed:true}") boolean aiRawReportExposed) {
+    this.objectMapper = objectMapper;
+    this.aiRawReportExposed = aiRawReportExposed;
     this.guardianAccessRepository = guardianAccessRepository;
     this.reportRepository = reportRepository;
     this.drawingSessionRepository = drawingSessionRepository;
@@ -254,7 +279,41 @@ public class ReportDetailQueryService {
         buildCrisisAlert(report.getId()),
         buildReferences(report.getId()),
         resolveActivityType(session),
-        resolveChildDisplayName(session));
+        resolveChildDisplayName(session),
+        resolveAiRawReport(report, resolveActivityType(session)));
+  }
+
+  /**
+   * 집·나무·사람 활동이면 보관해 둔 AI 응답 원문을 그대로 실어 준다 (S15P11B209-980).
+   *
+   * <p>목적은 <b>고정 스키마가 무엇을 버리는지 나란히 보는 것</b>이다. 그래서 스키마 검증도 필터도 하지 않는다 — 줄이면 이 필드를 두는 이유가 없어진다.
+   *
+   * <p>⚠️ <b>이 값만은 보호자 안전 선별을 거치지 않는다.</b> 응답의 다른 필드는 {@code EXPERT_ONLY} 관찰, 위기 심각도, AI 추정 감정,
+   * 신뢰도를 의도적으로 걸러 내는데(CLAUDE.md 9절, 계약 §4) 원문에는 그것들이 들어 있다. 실사용자 공개 전에 <b>노출 대상을 좁히거나 이 필드를 제거해야
+   * 한다</b> — 지금은 화면 대조를 위해 켜 둔 상태이고, {@code app.report.ai-raw-report.exposed=false} 로 끌 수 있다.
+   *
+   * <p>집·나무·사람이 아닌 활동은 지시대로 아무것도 바꾸지 않는다. 원문 보관 이전에 만든 리포트는 비어 있다 — 오류가 아니다.
+   *
+   * @param report 리포트 읽기 모델
+   * @param activityType 활동 유형 코드
+   * @return 원문 JSON 이며 대상이 아니거나 보관하지 않았거나 읽을 수 없으면 {@code null}
+   */
+  private JsonNode resolveAiRawReport(ReportDetailView report, String activityType) {
+    if (!aiRawReportExposed || !HTP_ACTIVITY_CODE.equalsIgnoreCase(activityType)) {
+      return null;
+    }
+    String rawJson = report.getAiRawReport();
+    if (rawJson == null || rawJson.isBlank()) {
+      return null;
+    }
+    try {
+      return objectMapper.readTree(rawJson);
+    } catch (JsonProcessingException exception) {
+      // 원문이 JSON 이 아니면 실을 방법이 없다. 리포트 조회 자체는 성공시킨다 — 원문 한 덩어리
+      //   때문에 보호자가 리포트를 못 보는 것이 더 나쁘다. 원문은 로그에도 남기지 않는다.
+      log.warn("리포트 AI 원문을 JSON 으로 읽지 못했습니다. reportId={}", report.getId());
+      return null;
+    }
   }
 
   /**

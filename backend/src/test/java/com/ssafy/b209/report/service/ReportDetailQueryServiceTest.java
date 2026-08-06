@@ -9,6 +9,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ssafy.b209.auth.authorization.GuardianResourceAccessRepository;
 import com.ssafy.b209.drawing.service.DrawingAssetFileUrlFactory;
 import com.ssafy.b209.global.exception.BusinessException;
@@ -139,7 +140,9 @@ class ReportDetailQueryServiceTest {
             referenceRepository,
             htpStepRepository,
             childRepository,
-            new DrawingAssetFileUrlFactory());
+            new DrawingAssetFileUrlFactory(),
+            new ObjectMapper(),
+            true);
   }
 
   @Test
@@ -518,6 +521,98 @@ class ReportDetailQueryServiceTest {
 
     when(childRepository.findById(CHILD_ID)).thenReturn(Optional.of(child("민준", false)));
     assertThat(service.getReport(GUARDIAN_ID, REPORT_ID).childDisplayName()).isEqualTo("민준");
+  }
+
+  @Test
+  void passesTheStoredAiRawReportThroughForHtpActivities() {
+    // 고정 스키마가 무엇을 버리는지 나란히 보려는 필드다(S15P11B209-980). 검증도 필터도 하지 않고
+    //   저장해 둔 원문을 그대로 싣는다 — 줄이면 이 필드를 두는 이유가 없어진다.
+    String rawJson = "{\"집 그림\":{\"관찰\":[\"창문을 크게 그렸어요\"]},\"스키마에 없는 필드\":\"버려지던 서술\"}";
+    givenHtpReportWithRawJson(rawJson);
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.aiRawReport()).isNotNull();
+    assertThat(response.aiRawReport().get("스키마에 없는 필드").asText()).isEqualTo("버려지던 서술");
+    assertThat(response.aiRawReport().get("집 그림").get("관찰").get(0).asText())
+        .isEqualTo("창문을 크게 그렸어요");
+  }
+
+  @Test
+  void omitsTheAiRawReportForNonHtpActivities() {
+    // 지시대로 집·나무·사람이 아닌 활동은 아무것도 바뀌지 않는다.
+    givenHtpReportWithRawJson("{\"topic\":\"집 그림\"}");
+    when(drawingTypeRepository.findById(TYPE_ID))
+        .thenReturn(Optional.of(drawingType("ART_DIARY", "그림일기")));
+
+    assertThat(service.getReport(GUARDIAN_ID, REPORT_ID).aiRawReport()).isNull();
+  }
+
+  @Test
+  void omitsTheAiRawReportWhenNothingWasStored() {
+    // 원문 보관 이전에 만든 리포트다. 비어 있는 것이 정상이며 조회는 그대로 성공한다.
+    givenHtpReportWithRawJson(null);
+
+    assertThat(service.getReport(GUARDIAN_ID, REPORT_ID).aiRawReport()).isNull();
+  }
+
+  @Test
+  void keepsServingTheReportWhenTheStoredRawIsNotJson() {
+    // 원문 한 덩어리 때문에 보호자가 리포트를 못 보는 것이 더 나쁘다.
+    givenHtpReportWithRawJson("이건 JSON 이 아니다");
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.aiRawReport()).isNull();
+    assertThat(response.reportId()).isEqualTo(REPORT_ID);
+  }
+
+  @Test
+  void omitsTheAiRawReportWhenExposureIsTurnedOff() {
+    // 원문은 보호자 안전 선별을 거치지 않은 값이라 끌 수 있어야 한다.
+    service =
+        new ReportDetailQueryService(
+            guardianAccessRepository,
+            reportRepository,
+            drawingSessionRepository,
+            drawingTypeRepository,
+            assetRepository,
+            emotionRepository,
+            activitySummaryRepository,
+            activityNoteRepository,
+            keyConversationRepository,
+            followUpGuideRepository,
+            conversationSummaryRepository,
+            detectedObjectRepository,
+            drawnItemRepository,
+            observedFeatureRepository,
+            interpretationRepository,
+            evidenceItemRepository,
+            parentGuideRepository,
+            crisisAlertRepository,
+            messageConfirmationRepository,
+            subjectRepository,
+            referenceRepository,
+            htpStepRepository,
+            childRepository,
+            new DrawingAssetFileUrlFactory(),
+            new ObjectMapper(),
+            false);
+    givenHtpReportWithRawJson("{\"topic\":\"집 그림\"}");
+
+    assertThat(service.getReport(GUARDIAN_ID, REPORT_ID).aiRawReport()).isNull();
+  }
+
+  /** 집·나무·사람 리포트 하나를 원문 [rawJson] 과 함께 읽히도록 준비한다. */
+  private void givenHtpReportWithRawJson(String rawJson) {
+    ReportDetailView report = report(ReportStatus.COMPLETED, null);
+    ReflectionTestUtils.setField(report, "aiRawReport", rawJson);
+    when(reportRepository.findById(REPORT_ID)).thenReturn(Optional.of(report));
+    when(guardianAccessRepository.hasDrawingSessionAccess(GUARDIAN_ID, SESSION_ID))
+        .thenReturn(true);
+    when(drawingSessionRepository.findById(SESSION_ID)).thenReturn(Optional.of(session()));
+    when(drawingTypeRepository.findById(TYPE_ID))
+        .thenReturn(Optional.of(drawingType("HTP", "집·나무·사람")));
   }
 
   private com.ssafy.b209.report.domain.ReportChildView child(String nickname, boolean deleted) {

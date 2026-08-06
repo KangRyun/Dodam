@@ -3,6 +3,7 @@ package com.ssafy.b209.infrastructure.ai.observation;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.ssafy.b209.report.dto.ObservationGenerationRequest;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
@@ -15,12 +16,13 @@ import org.junit.jupiter.api.Test;
 class MockAiObservationClientTest {
 
   private final Validator validator = Validation.buildDefaultValidatorFactory().getValidator();
-  private final MockAiObservationClient client = new MockAiObservationClient(validator);
+  private final MockAiObservationClient client =
+      new MockAiObservationClient(validator, new ObjectMapper());
   private final JsonMapper objectMapper = JsonMapper.builder().build();
 
   @Test
   void returnsDeterministicNonDiagnosticObservationDraft() {
-    ObservationGenerationResult result = client.generate(validRequest());
+    ObservationGenerationResult result = client.generate(validRequest()).result();
 
     assertThat(result.requestId()).isEqualTo("request-1");
     assertThat(result.modelName()).isEqualTo("mock-observation-generator");
@@ -34,7 +36,7 @@ class MockAiObservationClientTest {
 
   @Test
   void keepsAllDraftFeaturesExpertOnly() {
-    ObservationGenerationResult result = client.generate(validRequest());
+    ObservationGenerationResult result = client.generate(validRequest()).result();
 
     List<ObservedFeatureDraft> features = result.observationDraft().features();
     assertThat(features).isNotEmpty();
@@ -65,15 +67,15 @@ class MockAiObservationClientTest {
             List.of(),
             List.of());
 
-    ObservationGenerationResult result = client.generate(request);
+    ObservationGenerationResult result = client.generate(request).result();
 
     assertThat(result.conversationSummary().representativeUtterance()).isEqualTo("즐거웠어요");
   }
 
   @Test
   void returnsTheSameResultForTheSameRequest() {
-    ObservationGenerationResult first = client.generate(validRequest());
-    ObservationGenerationResult second = client.generate(validRequest());
+    ObservationGenerationResult first = client.generate(validRequest()).result();
+    ObservationGenerationResult second = client.generate(validRequest()).result();
 
     assertThat(second).isEqualTo(first);
   }
@@ -137,7 +139,7 @@ class MockAiObservationClientTest {
 
   @Test
   void serializesResultWithoutSensitivePaths() throws Exception {
-    ObservationGenerationResult result = client.generate(validRequest());
+    ObservationGenerationResult result = client.generate(validRequest()).result();
 
     String json = objectMapper.writeValueAsString(result);
     ObservationGenerationResult restored =

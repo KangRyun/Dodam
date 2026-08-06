@@ -13,6 +13,7 @@ import com.ssafy.b209.drawing.service.SubjectStrokeSession;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClient;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClientException;
+import com.ssafy.b209.report.dto.ObservationGeneration;
 import com.ssafy.b209.report.dto.ObservationGenerationRequest;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummaryDraft;
@@ -57,7 +58,8 @@ class MockObservationReportGenerationServiceTest {
   @Test
   void generatesAndPersistsWhenContextIsPending() {
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -102,7 +104,8 @@ class MockObservationReportGenerationServiceTest {
             List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
             List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)));
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context));
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -131,7 +134,8 @@ class MockObservationReportGenerationServiceTest {
     // publicInterpretations 가 항상 빈 배열이 된다(S15P11B209-906).
     given(persistenceService.loadContext(ANALYSIS_ID))
         .willReturn(Optional.of(contextWithIdentifiers()));
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -168,7 +172,8 @@ class MockObservationReportGenerationServiceTest {
     // 참이 되지 않아 규칙 전체가 조용히 무효가 되므로, 원 메시지 값이 그대로 실리는지 고정한다.
     given(persistenceService.loadContext(ANALYSIS_ID))
         .willReturn(Optional.of(contextWithUnconfirmedSpeech()));
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -184,7 +189,8 @@ class MockObservationReportGenerationServiceTest {
     // 식별자를 못 구했다고 요청을 실패시키지 않는다. 억지로 만들면(조합키) 게이트가 무의미해지므로
     // 빈 값으로 보내고 그 근거는 게이트가 판단한다.
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -280,7 +286,8 @@ class MockObservationReportGenerationServiceTest {
   void marksFailedWhenDisclaimerIsMissing() {
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
     given(observationClient.generate(any()))
-        .willReturn(resultWithoutDisclaimer(REQUEST_UUID.toString()));
+        .willReturn(
+            new ObservationGeneration(resultWithoutDisclaimer(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -292,7 +299,8 @@ class MockObservationReportGenerationServiceTest {
   @Test
   void marksFailedWhenRequestIdDoesNotMatch() {
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
-    given(observationClient.generate(any())).willReturn(validResult("other-request-id"));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult("other-request-id"), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -304,7 +312,8 @@ class MockObservationReportGenerationServiceTest {
   @Test
   void marksFailedWhenPersistenceThrows() {
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
     org.mockito.BDDMockito.willThrow(new RuntimeException("db down"))
         .given(persistenceService)
         .complete(any(), any());
@@ -320,7 +329,8 @@ class MockObservationReportGenerationServiceTest {
     // S15P11B209-815: 저장 계층이 분류한 실패를 REPORT_STORAGE_FAILED로 덮으면
     // generation-status의 failureReason이 실제 원인과 무관해진다.
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
     org.mockito.BDDMockito.willThrow(
             new BusinessException(
                 MockObservationReportErrorCode.REPORT_STORAGE_CONFLICT,
@@ -354,7 +364,8 @@ class MockObservationReportGenerationServiceTest {
                         Set.of("#ff0000", "#00ff00", "#0000ff"),
                         true,
                         false))));
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -383,7 +394,8 @@ class MockObservationReportGenerationServiceTest {
                         new StrokeBehaviorAggregate.SubjectDuration("TREE", 250_000L, 90_000L),
                         new StrokeBehaviorAggregate.SubjectDuration(
                             "PERSON", 150_000L, 50_000L)))));
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -402,7 +414,8 @@ class MockObservationReportGenerationServiceTest {
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
     given(behaviorSummaryService.summarizeAllOrNoneBySubject(diarySessions()))
         .willReturn(Optional.empty());
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -417,7 +430,8 @@ class MockObservationReportGenerationServiceTest {
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
     given(behaviorSummaryService.summarizeAllOrNoneBySubject(diarySessions()))
         .willThrow(new IllegalStateException("mongo down"));
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -437,7 +451,8 @@ class MockObservationReportGenerationServiceTest {
                 aggregate(
                     new StrokeBehaviorSummary(
                         null, null, null, null, null, null, null, null, null, false, false))));
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -465,7 +480,8 @@ class MockObservationReportGenerationServiceTest {
             Optional.of(
                 aggregate(
                     new StrokeBehaviorSummary(1L, 1L, 0, 0, 0, 0, 0, 0, Set.of(), true, false))));
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -495,7 +511,8 @@ class MockObservationReportGenerationServiceTest {
                         new StrokeBehaviorAggregate.SubjectDuration("TREE", 250_000L, 90_000L),
                         new StrokeBehaviorAggregate.SubjectDuration(
                             "PERSON", 150_000L, 50_000L)))));
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 
@@ -521,7 +538,8 @@ class MockObservationReportGenerationServiceTest {
     org.assertj.core.api.Assertions.assertThat(htpContext.subjectContexts()).isEmpty();
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(htpContext));
     given(behaviorSummaryService.summarizeAllOrNoneBySubject(any())).willReturn(Optional.empty());
-    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+    given(observationClient.generate(any()))
+        .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
 
     service.generate(ANALYSIS_ID);
 

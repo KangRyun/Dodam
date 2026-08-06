@@ -50,7 +50,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("42");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("43");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     // V40이 주제별 관찰 4종(report_subjects·observations·qa_pairs·interpretations)과
     // report_references 를 더해 85 → 90 이 됐다(S15P11B209-960).
@@ -75,6 +75,10 @@ class DatabaseMigrationIntegrationTest {
           .as("ck_conversation_messages_tts_tone_profile가 %s를 허용해야 한다", toneProfile)
           .isTrue();
     }
+    // V43 — 계약 스키마로 읽으면 사라지는 AI 서술을 확인할 수 있도록 응답 원문을 보관한다
+    //   (S15P11B209-983). 원문은 주제별 서술이 길어 TEXT(64KB)로는 잘릴 수 있다.
+    assertThat(columnExists("reports", "ai_raw_report")).isTrue();
+    assertThat(columnIsNullable("reports", "ai_raw_report")).isTrue();
     assertThat(tableExists("child_profile_image_files")).isTrue();
     assertThat(
             checkConstraintContains(
