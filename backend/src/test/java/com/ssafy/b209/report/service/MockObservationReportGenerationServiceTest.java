@@ -6,8 +6,10 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
+import com.ssafy.b209.drawing.service.StrokeBehaviorAggregate;
 import com.ssafy.b209.drawing.service.StrokeBehaviorSummary;
 import com.ssafy.b209.drawing.service.StrokeBehaviorSummaryService;
+import com.ssafy.b209.drawing.service.SubjectStrokeSession;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClient;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClientException;
@@ -20,6 +22,7 @@ import com.ssafy.b209.report.exception.MockObservationReportErrorCode;
 import java.math.BigDecimal;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -97,7 +100,7 @@ class MockObservationReportGenerationServiceTest {
                 new ObservationGenerationContext.SubjectContext(
                     null, "공룡이 풍선을 들고 있어요.", List.of(), List.of(), 901L, List.of())),
             List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
-            List.of(100L));
+            List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)));
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context));
     given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
 
@@ -217,7 +220,7 @@ class MockObservationReportGenerationServiceTest {
                 900L,
                 List.of(houseDoorRef()))),
         List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
-        List.of(100L));
+        List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)));
   }
 
   private ObservationGenerationContext contextWithUnconfirmedSpeech() {
@@ -247,7 +250,7 @@ class MockObservationReportGenerationServiceTest {
                 901L,
                 List.of())),
         List.of(),
-        List.of(100L));
+        List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)));
   }
 
   @Test
@@ -335,9 +338,22 @@ class MockObservationReportGenerationServiceTest {
   void sendsAggregatedBehaviorMetricsToTheAi() {
     // 계약에 자리는 있었지만 서버가 채우지 않아 AI 프롬프트의 [형식적 분석] 블록이 운영에서 한 번도 만들어지지 않았다.
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
-    given(behaviorSummaryService.summarizeAllOrNone(List.of(100L)))
+    given(behaviorSummaryService.summarizeAllOrNoneBySubject(diarySessions()))
         .willReturn(
-            Optional.of(new StrokeBehaviorSummary(600_000L, 240_000L, 4, 2, 3, 1, 5, true, false)));
+            Optional.of(
+                aggregate(
+                    new StrokeBehaviorSummary(
+                        600_000L,
+                        240_000L,
+                        42,
+                        4,
+                        2,
+                        3,
+                        1,
+                        5,
+                        Set.of("#ff0000", "#00ff00", "#0000ff"),
+                        true,
+                        false))));
     given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
 
     service.generate(ANALYSIS_ID);
@@ -348,17 +364,25 @@ class MockObservationReportGenerationServiceTest {
     org.assertj.core.api.Assertions.assertThat(metrics)
         .isEqualTo(
             new ObservationGenerationRequest.BehaviorMetrics(
-                600_000L, 240_000L, 4, 2, 3, 1, 5, true, null, false));
+                600_000L, 240_000L, 42, 4, 2, 3, 1, 5, 3, true, null, false, List.of()));
   }
 
   @Test
   void sumsEveryHtpStepBeforeSendingBehaviorMetrics() {
     // HTP 리포트는 집·나무·사람 세 활동이다. 한 세션만 보내면 AI 가 받는 그리기 시간이 3분의 1이 된다.
-    ObservationGenerationContext htpContext = contextWithSessions(List.of(100L, 101L, 102L));
+    ObservationGenerationContext htpContext = contextWithSessions(htpActivitySessions());
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(htpContext));
-    given(behaviorSummaryService.summarizeAllOrNone(List.of(100L, 101L, 102L)))
+    given(behaviorSummaryService.summarizeAllOrNoneBySubject(htpSessions()))
         .willReturn(
-            Optional.of(new StrokeBehaviorSummary(900_000L, 300_000L, 9, 3, 6, 2, 7, false, true)));
+            Optional.of(
+                new StrokeBehaviorAggregate(
+                    new StrokeBehaviorSummary(
+                        900_000L, 300_000L, 90, 9, 3, 6, 2, 7, Set.of("#ff0000"), false, true),
+                    List.of(
+                        new StrokeBehaviorAggregate.SubjectDuration("HOUSE", 500_000L, 160_000L),
+                        new StrokeBehaviorAggregate.SubjectDuration("TREE", 250_000L, 90_000L),
+                        new StrokeBehaviorAggregate.SubjectDuration(
+                            "PERSON", 150_000L, 50_000L)))));
     given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
 
     service.generate(ANALYSIS_ID);
@@ -376,7 +400,8 @@ class MockObservationReportGenerationServiceTest {
   void sendsNullBehaviorMetricsWhenAggregationHasNothingToReport() {
     // 집계 결과가 없으면 0으로 채우지 않는다. AI 는 null 을 받아 [형식적 분석] 블록을 아예 만들지 않는다.
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
-    given(behaviorSummaryService.summarizeAllOrNone(List.of(100L))).willReturn(Optional.empty());
+    given(behaviorSummaryService.summarizeAllOrNoneBySubject(diarySessions()))
+        .willReturn(Optional.empty());
     given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
 
     service.generate(ANALYSIS_ID);
@@ -390,7 +415,7 @@ class MockObservationReportGenerationServiceTest {
   void keepsGeneratingWhenBehaviorAggregationFails() {
     // 형식 지표는 관찰의 부가 재료다. MongoDB 장애로 리포트 전체를 잃는 것은 균형에 맞지 않는다.
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
-    given(behaviorSummaryService.summarizeAllOrNone(List.of(100L)))
+    given(behaviorSummaryService.summarizeAllOrNoneBySubject(diarySessions()))
         .willThrow(new IllegalStateException("mongo down"));
     given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
 
@@ -406,10 +431,12 @@ class MockObservationReportGenerationServiceTest {
     // 🔴 이 작업에서 가장 중요한 성질이다. null(집계 못 함)을 0으로 채우면 AI 가 "멈춤 없이 몰입해 그렸다"는
     //   없는 관찰을 리포트에 적는다. 매핑은 값을 옮기기만 하고 만들지 않는다.
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
-    given(behaviorSummaryService.summarizeAllOrNone(List.of(100L)))
+    given(behaviorSummaryService.summarizeAllOrNoneBySubject(diarySessions()))
         .willReturn(
             Optional.of(
-                new StrokeBehaviorSummary(null, null, null, null, null, null, null, false, false)));
+                aggregate(
+                    new StrokeBehaviorSummary(
+                        null, null, null, null, null, null, null, null, null, false, false))));
     given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
 
     service.generate(ANALYSIS_ID);
@@ -424,14 +451,20 @@ class MockObservationReportGenerationServiceTest {
     org.assertj.core.api.Assertions.assertThat(metrics.eraseCount()).isNull();
     org.assertj.core.api.Assertions.assertThat(metrics.toolChangeCount()).isNull();
     org.assertj.core.api.Assertions.assertThat(metrics.colorChangeCount()).isNull();
+    org.assertj.core.api.Assertions.assertThat(metrics.strokeCount()).isNull();
+    // 색 집합을 집계하지 못했으면 가짓수도 모른다 — 0가지로 세면 "색을 쓰지 않았다"가 된다.
+    org.assertj.core.api.Assertions.assertThat(metrics.colorsUsedCount()).isNull();
   }
 
   @Test
   void neverInventsAnAveragePressureValue() {
     // 계약에 자리가 있지만 집계기가 만들지 않는 값이다. 자리를 채우려고 지어내면 없는 측정이 관찰 재료가 된다.
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context()));
-    given(behaviorSummaryService.summarizeAllOrNone(List.of(100L)))
-        .willReturn(Optional.of(new StrokeBehaviorSummary(1L, 1L, 0, 0, 0, 0, 0, true, false)));
+    given(behaviorSummaryService.summarizeAllOrNoneBySubject(diarySessions()))
+        .willReturn(
+            Optional.of(
+                aggregate(
+                    new StrokeBehaviorSummary(1L, 1L, 0, 0, 0, 0, 0, 0, Set.of(), true, false))));
     given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
 
     service.generate(ANALYSIS_ID);
@@ -444,6 +477,82 @@ class MockObservationReportGenerationServiceTest {
     org.assertj.core.api.Assertions.assertThat(
             requestCaptor.getValue().behaviorMetrics().pressureAvailable())
         .isTrue();
+  }
+
+  @Test
+  void sendsPerSubjectDurationsSoTheAiCanCompareTheThreeDrawings() {
+    // 🔴 S15P11B209-975 의 핵심. 합계만 보내면 "집을 그릴 때 가장 오래 머물렀어요" 같은 관찰을 만들 재료가 없다.
+    ObservationGenerationContext htpContext = contextWithSessions(htpActivitySessions());
+    given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(htpContext));
+    given(behaviorSummaryService.summarizeAllOrNoneBySubject(htpSessions()))
+        .willReturn(
+            Optional.of(
+                new StrokeBehaviorAggregate(
+                    new StrokeBehaviorSummary(
+                        900_000L, 300_000L, 90, 9, 3, 6, 2, 7, Set.of("#ff0000"), false, false),
+                    List.of(
+                        new StrokeBehaviorAggregate.SubjectDuration("HOUSE", 500_000L, 160_000L),
+                        new StrokeBehaviorAggregate.SubjectDuration("TREE", 250_000L, 90_000L),
+                        new StrokeBehaviorAggregate.SubjectDuration(
+                            "PERSON", 150_000L, 50_000L)))));
+    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+
+    service.generate(ANALYSIS_ID);
+
+    verify(observationClient).generate(requestCaptor.capture());
+    org.assertj.core.api.Assertions.assertThat(
+            requestCaptor.getValue().behaviorMetrics().subjectDurations())
+        .extracting(
+            ObservationGenerationRequest.SubjectDuration::drawingSubject,
+            ObservationGenerationRequest.SubjectDuration::drawingDurationMs)
+        .containsExactly(
+            org.assertj.core.api.Assertions.tuple("HOUSE", 500_000L),
+            org.assertj.core.api.Assertions.tuple("TREE", 250_000L),
+            org.assertj.core.api.Assertions.tuple("PERSON", 150_000L));
+  }
+
+  @Test
+  void asksTheAggregatorForEverySessionEvenWhenASubjectHasNoObservationOrConversation() {
+    // 🔴 주제 매핑을 subjectContexts 로 하면 이 세션이 빠진다 — 그쪽은 서술·탐지 코드·문답이 모두 빈
+    //   주제를 걸러낸 목록이라, 그리기만 하고 대화를 하지 않은 그림이 사라진다. 그러면 남은 둘만으로
+    //   "가장 오래 머문 그림"이 정해져 아이에 대한 없는 관찰이 만들어진다. 필터링 전 목록을 써야 한다.
+    ObservationGenerationContext htpContext = contextWithSessions(htpActivitySessions());
+    // subjectContexts 는 비어 있다 — 세 주제 모두 서술·문답이 없는 상태를 재현한다.
+    org.assertj.core.api.Assertions.assertThat(htpContext.subjectContexts()).isEmpty();
+    given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(htpContext));
+    given(behaviorSummaryService.summarizeAllOrNoneBySubject(any())).willReturn(Optional.empty());
+    given(observationClient.generate(any())).willReturn(validResult(REQUEST_UUID.toString()));
+
+    service.generate(ANALYSIS_ID);
+
+    // 집계기에 세 세션이 주제와 함께 그대로 전달되는지 — 이음매를 이음매에서 검증한다.
+    verify(behaviorSummaryService).summarizeAllOrNoneBySubject(htpSessions());
+  }
+
+  /** 그림일기·단독 세션 하나. 주제가 없다. */
+  private static List<SubjectStrokeSession> diarySessions() {
+    return List.of(new SubjectStrokeSession(100L, null));
+  }
+
+  /** HTP 세 단계의 (세션, 주제) 쌍이다. */
+  private static List<SubjectStrokeSession> htpSessions() {
+    return List.of(
+        new SubjectStrokeSession(100L, "HOUSE"),
+        new SubjectStrokeSession(101L, "TREE"),
+        new SubjectStrokeSession(102L, "PERSON"));
+  }
+
+  /** 위와 같은 세 단계를 생성 맥락 형태로 담은 것이다. */
+  private static List<ObservationGenerationContext.ActivitySessionRef> htpActivitySessions() {
+    return List.of(
+        new ObservationGenerationContext.ActivitySessionRef(100L, "HOUSE"),
+        new ObservationGenerationContext.ActivitySessionRef(101L, "TREE"),
+        new ObservationGenerationContext.ActivitySessionRef(102L, "PERSON"));
+  }
+
+  /** 주제 구분이 없는 활동의 집계 결과 — 주제별 내역은 빈 목록이다. */
+  private static StrokeBehaviorAggregate aggregate(StrokeBehaviorSummary total) {
+    return new StrokeBehaviorAggregate(total, List.of());
   }
 
   /** 정규화 기하를 갖춘 탐지 참조. 실제 저장 값처럼 BigDecimal scale 을 유지한다. */
@@ -459,7 +568,8 @@ class MockObservationReportGenerationServiceTest {
         new BigDecimal("0.9100"));
   }
 
-  private ObservationGenerationContext contextWithSessions(List<Long> activitySessionIds) {
+  private ObservationGenerationContext contextWithSessions(
+      List<ObservationGenerationContext.ActivitySessionRef> activitySessions) {
     return new ObservationGenerationContext(
         ANALYSIS_ID,
         100L,
@@ -475,7 +585,7 @@ class MockObservationReportGenerationServiceTest {
         List.of(),
         List.of(),
         List.of(),
-        activitySessionIds);
+        activitySessions);
   }
 
   private ObservationGenerationContext context() {
@@ -494,7 +604,7 @@ class MockObservationReportGenerationServiceTest {
         List.of(),
         List.of(),
         List.of(),
-        List.of(100L));
+        List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)));
   }
 
   private ObservationGenerationResult validResult(String requestId) {

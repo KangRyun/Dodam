@@ -269,7 +269,9 @@ public class ObservationReportPersistenceService {
     String expressedEmotionText = session.getExpressedEmotionText();
     // HTP면 (세션, 주제) 3쌍 — 주제별 서술·문답 수집(S15P11B209-741)에 주제가 필요하다.
     // 그림일기·단독 세션은 주제 없는 1쌍.
-    List<SubjectSessionRef> contextSessions =
+    // ⚠️ 이 목록은 아래에서 걸러지는 subjectContexts 와 달리 **모든 세션**을 담는다. 주제별
+    //    그리기 시간(S15P11B209-975)의 이름표라 하나라도 빠지면 비교 관찰이 거짓이 된다.
+    List<ObservationGenerationContext.ActivitySessionRef> contextSessions =
         htpAssessmentRepository
             .findStepByDrawingSessionId(drawingSessionId)
             .map(
@@ -278,13 +280,19 @@ public class ObservationReportPersistenceService {
                         .sorted(Comparator.comparingInt(HtpAssessmentStep::getStepOrder))
                         .map(
                             htpStep ->
-                                new SubjectSessionRef(
+                                new ObservationGenerationContext.ActivitySessionRef(
                                     htpStep.getDrawingSession().getId(),
                                     htpStep.getDrawingSubject().name()))
                         .toList())
-            .orElseGet(() -> List.of(new SubjectSessionRef(drawingSessionId, null)));
+            .orElseGet(
+                () ->
+                    List.of(
+                        new ObservationGenerationContext.ActivitySessionRef(
+                            drawingSessionId, null)));
     List<Long> contextSessionIds =
-        contextSessions.stream().map(SubjectSessionRef::drawingSessionId).toList();
+        contextSessions.stream()
+            .map(ObservationGenerationContext.ActivitySessionRef::drawingSessionId)
+            .toList();
 
     ConversationSession representativeConversation =
         conversationSessionRepository.findByDrawingSessionId(drawingSessionId).orElse(null);
@@ -301,7 +309,7 @@ public class ObservationReportPersistenceService {
     int unrecognizedSpeechCount = 0;
     List<ObservationGenerationContext.KeyConversationLine> keyConversations = new ArrayList<>();
     List<ObservationGenerationContext.SubjectContext> subjectContexts = new ArrayList<>();
-    for (SubjectSessionRef contextSession : contextSessions) {
+    for (ObservationGenerationContext.ActivitySessionRef contextSession : contextSessions) {
       Long contextSessionId = contextSession.drawingSessionId();
       // 주제별 문답(S15P11B209-741) — keyConversations(리포트 저장용 평탄 목록)와 같은 소스를
       // 쓰되, MAX_KEY_CONVERSATIONS 상한과 무관하게 주제 단위로 담는다(상한에 걸리면 뒤 주제의
@@ -416,7 +424,7 @@ public class ObservationReportPersistenceService {
             keyConversations,
             subjectContexts,
             selectedEmotionRefs,
-            contextSessionIds));
+            contextSessions));
   }
 
   /**
@@ -441,9 +449,6 @@ public class ObservationReportPersistenceService {
         && detection.getWidth() != null
         && detection.getHeight() != null;
   }
-
-  /** 주제별 수집 대상 세션과 HTP 주제의 쌍이다 (S15P11B209-741). 그림일기·단독 세션은 주제가 {@code null}. */
-  private record SubjectSessionRef(Long drawingSessionId, String drawingSubject) {}
 
   /**
    * 검증된 관찰 결과를 정규화 테이블에 저장하고 분석·리포트·그림 활동 세션을 완료 상태로 전이한다.

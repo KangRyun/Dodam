@@ -19,6 +19,7 @@ import java.net.URI;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
@@ -42,6 +43,10 @@ class DrawingAnalysisBehaviorRequestTest {
           "eraseCount",
           "toolChangeCount",
           "colorChangeCount",
+          // 획 수·색 가짓수 (S15P11B209-975) — 리포트 경로의 BehaviorMetrics 와 같은 집계값의
+          //   두 번째 거울이라 한쪽에만 늘리면 같은 활동이 경로에 따라 다르게 보인다.
+          "strokeCount",
+          "colorsUsedCount",
           "pressureAvailable");
 
   private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
@@ -72,7 +77,7 @@ class DrawingAnalysisBehaviorRequestTest {
   }
 
   @Test
-  void sendsExactlyTheEightContractedSummaryFieldsAndNothingElse() {
+  void sendsExactlyTheContractedSummaryFieldsAndNothingElse() {
     DrawingAnalysisClient client = clientReturning(Optional.of(summary()));
     server
         .expect(requestTo(ENDPOINT_URL))
@@ -111,7 +116,7 @@ class DrawingAnalysisBehaviorRequestTest {
   @Test
   void keepsUnknownSummaryFieldsAsExplicitNullInsteadOfOmittingThem() {
     StrokeBehaviorSummary partial =
-        new StrokeBehaviorSummary(null, 420_000L, null, 2, 3, null, null, true, false);
+        new StrokeBehaviorSummary(null, 420_000L, null, null, 2, 3, null, null, null, true, false);
     DrawingAnalysisClient client = clientReturning(Optional.of(partial));
     server
         .expect(requestTo(ENDPOINT_URL))
@@ -161,7 +166,7 @@ class DrawingAnalysisBehaviorRequestTest {
   }
 
   /**
-   * 요청 body의 {@code behavior.summary} 키 집합이 계약 8필드와 정확히 같은지 확인한다.
+   * 요청 body의 {@code behavior.summary} 키 집합이 계약 필드와 정확히 같은지 확인한다.
    *
    * <p>개별 키에 {@code doesNotExist()}를 거는 방식은 계약 Record에 없는 이름을 지목하면 <b>어떤 변경으로도 실패할 수 없다.</b> 존재하는 키
    * 전체를 비교해야 필드 추가·삭제·오타를 모두 잡는다.
@@ -201,7 +206,8 @@ class DrawingAnalysisBehaviorRequestTest {
   }
 
   private static StrokeBehaviorSummary summary() {
-    return new StrokeBehaviorSummary(600_000L, 420_000L, 4, 2, 3, 5, 6, false, false);
+    return new StrokeBehaviorSummary(
+        600_000L, 420_000L, 48, 4, 2, 3, 5, 6, Set.of("#ff0000", "#00ff00"), false, false);
   }
 
   private static DrawingAnalysisClientCommand command(DrawingAnalysisScope scope) {

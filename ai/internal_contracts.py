@@ -352,6 +352,23 @@ class SubjectSummary(_CamelModel):
     )
 
 
+class SubjectDuration(_CamelModel):
+    """HTP 한 주제(집·나무·사람)에 머문 시간 (S15P11B209-975).
+
+    ⚠️ **이 목록은 비교 관찰의 재료다.** "어느 그림에 시간을 더 썼는가"는 세 주제가 모두
+       있을 때만 참이다. 그래서 BE는 behavior_metrics 전체를 채울 수 있을 때만 — 즉 세 단계가
+       전부 캔버스이고 전부 집계 가능할 때만 — 이 목록을 보낸다. 한 단계라도 UPLOAD 이거나
+       집계 불가면 behavior_metrics 자체가 None 이 되어 이 목록도 함께 사라진다.
+       부분 목록으로 순위를 매기면 아이에 대한 없는 관찰이 만들어진다(§2.3, BE 837 규칙).
+
+    그림일기는 주제 구분이 없어 빈 목록이다.
+    """
+
+    drawing_subject: str | None = None
+    drawing_duration_ms: int | None = None
+    active_drawing_ms: int | None = None
+
+
 class BehaviorMetrics(_CamelModel):
     """그리기 과정의 형식 지표 (S15P11B209-836). BE StrokeBehaviorSummary 와 필드 1:1.
 
@@ -366,18 +383,31 @@ class BehaviorMetrics(_CamelModel):
     집계한 것처럼 표현하면 안 된다.
     average_pressure 는 이번 단계에서 항상 None이다(BE 확정) — pressure_available 은
     측정 가능 여부일 뿐 필압의 강약도 감정 근거도 아니다.
+
+    stroke_count·colors_used_count·subject_durations 는 S15P11B209-975 확장이다.
+    ⚠️ stroke_count 는 **지우개 획도 포함한** 전체 획 수라 erase_count 와 세는 대상이 겹친다.
+       두 값으로 '지우기 비율' 같은 파생 수치를 만들면 안 된다 — 계약이 파생 필드를 싣지 않는
+       이유가 이것이고, 프롬프트도 같은 규칙을 건다(report_common).
+    ⚠️ colors_used_count 는 실제로 획을 그린 색의 **가짓수**(합집합 크기)다. color_change_count
+       (색을 바꾼 횟수)와 다른 값이며, HTP 합산에서도 세 단계의 색을 합집합으로 세므로
+       같은 색을 두 번 세지 않는다.
     """
 
     drawing_duration_ms: int | None = None
     active_drawing_ms: int | None = None
+    stroke_count: int | None = None
     pause_count: int | None = None
     undo_count: int | None = None
     erase_count: int | None = None
     tool_change_count: int | None = None
     color_change_count: int | None = None
+    colors_used_count: int | None = None
     pressure_available: bool = False
     average_pressure: float | None = None
     truncated: bool = False
+    # 롤아웃 안전: 구 BE가 안 보내면 빈 목록이라 주제별 시간 줄이 실리지 않는다(§2.5 필드 단위
+    #   optional — 836이 이 원칙을 어겨 2026-08-05 운영 전량 422를 냈다).
+    subject_durations: list[SubjectDuration] = Field(default_factory=list)
 
 
 class SelectedEmotionRef(_CamelModel):
@@ -782,15 +812,23 @@ class BehaviorSummary(_CamelModel):
     """캔버스 과정 데이터 요약. BE가 stroke 배치에서 집계해 넘긴다.
 
     pressure_available=False면 필압 통계를 만들지 않는다 — 0으로 대체 금지(§25 계약 테스트).
+
+    ⚠️ BehaviorMetrics(리포트 경로)와 **같은 BE record(StrokeBehaviorSummary)의 두 번째
+       거울**이다. 한쪽에만 필드를 더하면 같은 집계값이 경로에 따라 다르게 보인다 —
+       stroke_count·colors_used_count 를 함께 넣는 이유가 이것이다(S15P11B209-975).
+       주제별 시간(subject_durations)은 리포트 전용이라 여기 없다. 이 경로는 세션 하나를
+       분석하므로 주제 간 비교가 성립하지 않는다.
     """
 
     drawing_duration_ms: int | None = None
     active_drawing_ms: int | None = None
+    stroke_count: int | None = None
     pause_count: int | None = None
     undo_count: int | None = None
     erase_count: int | None = None
     tool_change_count: int | None = None
     color_change_count: int | None = None
+    colors_used_count: int | None = None
     pressure_available: bool = False
 
 

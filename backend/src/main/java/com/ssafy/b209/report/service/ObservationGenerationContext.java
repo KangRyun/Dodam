@@ -21,8 +21,12 @@ import java.util.List;
  * @param subjectContexts 주제(그림)별 관찰 서술·탐지 코드·문답 묶음이며 HTP는 최대 3건, 그림일기는 1건 (S15P11B209-741)
  * @param selectedEmotionRefs 선택 감정을 행 식별자와 함께 담은 목록이다. {@code selectedEmotions}와 같은 재료이며 근거 참조가 가능한
  *     형태다 (S15P11B209-906)
- * @param activitySessionIds 이 리포트가 다루는 그림 활동 세션 식별자 목록이다. HTP는 집·나무·사람 세 건, 그림일기·단독 세션은 한 건이다. 행동
- *     요약(S15P11B209-870)을 세션별로 집계해 합칠 때 쓴다 — HTP 리포트는 세 활동을 합친 기록이다
+ * @param activitySessions 이 리포트가 다루는 그림 활동 세션과 그 <b>주제</b> 목록이다. HTP는 집·나무·사람 세 건, 그림일기·단독 세션은 주제
+ *     없는 한 건이다. 행동 요약(S15P11B209-870)을 세션별로 집계해 합칠 때 쓰고, 주제별 그리기 시간(S15P11B209-975)의 이름표가 된다 — HTP
+ *     리포트는 세 활동을 합친 기록이다.
+ *     <p>🔴 <b>{@code subjectContexts} 와 길이가 다르다.</b> 그쪽은 서술·탐지 코드·문답이 <b>모두 빈</b> 주제를 걸어낸 목록이라,
+ *     그리기만 하고 관찰·문답이 없는 세션이 빠져 있다. 주제별 시간을 그 목록으로 매핑하면 실제로 그린 그림 하나가 통째로 사라지고 남은 둘만으로 "가장 오래 머문
+ *     그림"이 정해진다. 필터링 전인 이 목록이 세션·주제의 정본이다
  */
 public record ObservationGenerationContext(
     Long analysisId,
@@ -39,7 +43,12 @@ public record ObservationGenerationContext(
     List<KeyConversationLine> keyConversations,
     List<SubjectContext> subjectContexts,
     List<SelectedEmotionRef> selectedEmotionRefs,
-    List<Long> activitySessionIds) {
+    List<ActivitySessionRef> activitySessions) {
+
+  /** 목록이 {@code null}로 만들어져도 빈 목록으로 정규화한다. */
+  public ObservationGenerationContext {
+    activitySessions = activitySessions == null ? List.of() : List.copyOf(activitySessions);
+  }
 
   /**
    * 대표 답변 중 첫 발화를 반환한다.
@@ -49,6 +58,27 @@ public record ObservationGenerationContext(
   public String representativeUtterance() {
     return keyConversations.isEmpty() ? null : keyConversations.get(0).answerText();
   }
+
+  /**
+   * 이 리포트가 다루는 세션 식별자만 뽑는다.
+   *
+   * <p>주제가 필요 없는 호출부(보호자 화면용 행동 요약 등)를 위한 파생값이며 {@code activitySessions} 와 순서·개수가 같다.
+   *
+   * @return 세션 식별자 목록
+   */
+  public List<Long> activitySessionIds() {
+    return activitySessions.stream().map(ActivitySessionRef::drawingSessionId).toList();
+  }
+
+  /**
+   * 이 리포트가 다루는 그림 활동 세션 하나와 그 주제다 (S15P11B209-975).
+   *
+   * <p>서술·문답 유무와 <b>무관하게</b> 담긴다. 아이가 그림만 그리고 대화를 하지 않아도 그 시간은 실제로 그린 시간이라 주제별 기록에서 빠지면 안 된다.
+   *
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @param drawingSubject HTP 주제({@code HOUSE|TREE|PERSON})이며 그림일기·단독 세션은 {@code null}
+   */
+  public record ActivitySessionRef(Long drawingSessionId, String drawingSubject) {}
 
   /**
    * 리포트 대표 대화를 구성하는 질문·답변 Snapshot 원본이다.

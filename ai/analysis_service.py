@@ -178,11 +178,15 @@ def _behavior_features(
     features: dict[str, int | bool | None] = {
         "drawingDurationMs": summary.drawing_duration_ms,
         "activeDrawingMs": summary.active_drawing_ms,
+        # 획 수·색 가짓수(S15P11B209-975). 받아 놓고 버리면 리포트 경로와 같은 집계값이
+        #   이쪽에서만 사라진다 — 두 거울을 함께 움직인다.
+        "strokeCount": summary.stroke_count,
         "pauseCount": summary.pause_count,
         "undoCount": summary.undo_count,
         "eraseCount": summary.erase_count,
         "toolChangeCount": summary.tool_change_count,
         "colorChangeCount": summary.color_change_count,
+        "colorsUsedCount": summary.colors_used_count,
         "pressureAvailable": summary.pressure_available,
         # 필압 통계는 지원 기기에서만 만든다 — 미지원이면 null 고정.
         "pressureMean": None,

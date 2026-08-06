@@ -212,6 +212,15 @@ def _format_behavior(
     관찰 사실로만 적기 · [형식적 분석] 전체를 신호 하나로 세기 · 0이 몰린 것을 해석하지 않기
     (report_common 2.1.0). 이 블록만으로 "독립 신호 2개" 조건이 채워지지 않게 하는 것이 핵심이다.
 
+    획 수·색 가짓수·주제별 시간(S15P11B209-975): 캔버스 과정 데이터가 이미 쌓여 있는데
+    리포트에 닿지 않던 지표를 싣는다. 지표가 늘면 해석 재료도 늘어 위험이 함께 커지므로,
+    새 지표의 금지 규칙은 report_common 2.3.0 에 카테고리 서술로 적었다 — 여기(코드 문자열)에
+    지시문을 적으면 prompts_registry 버전 추적 밖이라 "크게 고쳤는데 promptVersion 그대로"가
+    재발한다(323 교훈). 이 함수가 만드는 것은 **데이터 줄뿐이다.**
+    ⚠️ stroke_count 는 지우개 획을 포함한 전체 획 수라 erase_count 와 세는 대상이 겹친다.
+       그래서 여기서 비율을 계산해 적지 않는다 — 두 실측값을 그대로 놓고, 표현은 모델이
+       프롬프트 규칙 안에서 한다(파생 필드를 계약에 싣지 않는 것과 같은 원칙).
+
     필압은 강약 값(average_pressure)이 있을 때만 적는다. pressure_available 은 기기가 필압을
     측정할 수 있는지일 뿐 아이에 대한 관찰이 아니라서, "측정됨"·"측정 불가(미지원 기기)"를
     적으면 관찰 내용이 0인 줄이 해석 재료처럼 놓인다. BE도 이 필드를 감정 근거로 쓰지 말라고
@@ -239,6 +248,11 @@ def _format_behavior(
         lines.append(f"- 총 소요시간: {total}")
     if active:
         lines.append(f"- 실제 그린 시간: {active}")
+    subjects = _format_subject_durations(behavior.subject_durations)
+    if subjects:
+        lines.append(subjects)
+    if behavior.stroke_count is not None:
+        lines.append(f"- 전체 획 수: {behavior.stroke_count}획 (지우개로 그은 획 포함)")
     if behavior.pause_count is not None:
         # 배치 경계로 세는 추정값이라 상한도 하한도 아니다(BE javadoc) — 단정 표기를 피한다.
         # 0에 "약"을 붙이면 문장이 이상해지므로 그때만 숫자를 그대로 쓴다.
@@ -254,6 +268,8 @@ def _format_behavior(
         lines.append(f"- 도구 바꾼 횟수: {behavior.tool_change_count}회")
     if behavior.color_change_count is not None:
         lines.append(f"- 색 바꾼 횟수: {behavior.color_change_count}회")
+    if behavior.colors_used_count is not None:
+        lines.append(f"- 사용한 색: {behavior.colors_used_count}가지")
     if behavior.average_pressure is not None:
         lines.append(f"- 필압: 평균 {behavior.average_pressure:.2f} (0~1)")
 
@@ -272,6 +288,35 @@ def _subject_label(subject: str | None) -> str:
     """주제 라벨. HTP는 '집 그림'·'나무 그림'·'사람 그림', 그림일기(None)는 '그림'."""
     name = _SUBJECT_KO.get(subject or "")
     return f"{name} 그림" if name else "그림"
+
+
+def _format_subject_durations(
+    durations: list[contracts.SubjectDuration],
+) -> str | None:
+    """주제별 그리기 시간 한 줄 (S15P11B209-975). 비교가 성립하지 않으면 None.
+
+    ⚠️ **전부 아니면 전무다.** 이 줄의 쓸모는 "어느 그림에 시간을 더 썼는가"라는 비교인데,
+       비교는 실린 주제가 전부일 때만 참이다. 세 장 중 두 장만 실린 줄을 보고 모델이
+       "집을 가장 오래 그렸어요"라고 적으면 그건 관찰이 아니라 없는 사실이다. 그래서 한
+       항목이라도 라벨을 모르거나 시간이 없으면 **남은 것만 적지 않고 줄 전체를 뺀다.**
+       BE도 같은 이유로 세 단계를 다 집계했을 때만 이 목록을 보낸다(837 전부-아니면-전무).
+
+    시간은 drawing_duration_ms(그 주제에 머문 전체 시간)만 쓴다. 없을 때 active_drawing_ms 로
+    대체하지 않는다 — 한 줄 안에서 두 가지 다른 측정이 섞이면 그 비교는 이미 거짓이다.
+
+    그림일기는 목록이 비어 있어 None 이 된다(주제 구분 자체가 없다).
+    """
+    if not durations:
+        return None
+
+    parts = []
+    for duration in durations:
+        name = _SUBJECT_KO.get(duration.drawing_subject or "")
+        minutes = _fmt_minutes(duration.drawing_duration_ms)
+        if not name or not minutes:
+            return None
+        parts.append(f"{name} {minutes}")
+    return "- 주제별 그리기 시간: " + " · ".join(parts)
 
 
 # ── 탐지 기하 → 관찰 사실 (S15P11B209-839) ─────────────────────

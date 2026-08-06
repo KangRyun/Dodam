@@ -18,6 +18,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -611,6 +612,100 @@ class StrokeBehaviorSummaryServiceTest {
   }
 
   @Test
+  void countsEveryStrokeIncludingEraserStrokes() {
+    // 지우개로 긋는 것도 획이다. 도구로 세는 대상을 가르면 "전체 획 수"가 아니게 된다.
+    //   그래서 eraseCount 와 겹치며, 두 값으로 비율을 만들면 안 된다는 것이 계약의 규칙이다.
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "PEN", "#FF0000", 0, 100),
+            stroke(2, "PEN", "#FF0000", 0, 100),
+            stroke(3, "ERASER", null, 0, 100)));
+
+    StrokeBehaviorSummary summary = summarize();
+
+    assertThat(summary.strokeCount()).isEqualTo(3);
+    assertThat(summary.eraseCount()).isEqualTo(1);
+  }
+
+  @Test
+  void collectsColorsActuallyDrawnWithAsACaseInsensitiveSet() {
+    // 계약의 색 정규식이 소문자 hex 도 허용해 #FF0000 과 #ff0000 이 섞여 들어온다. 정규화하지 않으면
+    //   같은 색이 두 가지로 세어진다(colorChangeCount 가 대소문자를 무시하는 것과 같은 이유).
+    givenBatches(
+        batch(
+            1,
+            BASE,
+            stroke(1, "PEN", "#FF0000", 0, 100),
+            stroke(2, "PEN", "#ff0000", 0, 100),
+            stroke(3, "PEN", "#00FF00", 0, 100),
+            // 지우개 획은 색을 싣지 않는다 — 색 가짓수에 들어가면 안 된다.
+            stroke(4, "ERASER", null, 0, 100)));
+
+    assertThat(summarize().colorsUsed()).containsExactlyInAnyOrder("#ff0000", "#00ff00");
+  }
+
+  @Test
+  void bySubjectLabelsEachSessionDurationWithItsSubject() {
+    // 🔴 이 이슈의 핵심. 합계만으로는 "어느 그림에 더 오래 머물렀는가"를 말할 수 없다.
+    givenBatchesFor(101L, batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 5_000)));
+    givenBatchesFor(102L, batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 3_000)));
+    givenBatchesFor(103L, batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 1_000)));
+
+    StrokeBehaviorAggregate aggregate =
+        service
+            .summarizeAllOrNoneBySubject(
+                List.of(
+                    new SubjectStrokeSession(101L, "HOUSE"),
+                    new SubjectStrokeSession(102L, "TREE"),
+                    new SubjectStrokeSession(103L, "PERSON")))
+            .orElseThrow();
+
+    assertThat(aggregate.subjectDurations())
+        .extracting(
+            StrokeBehaviorAggregate.SubjectDuration::drawingSubject,
+            StrokeBehaviorAggregate.SubjectDuration::activeDrawingMs)
+        .containsExactly(
+            org.assertj.core.api.Assertions.tuple("HOUSE", 5_000L),
+            org.assertj.core.api.Assertions.tuple("TREE", 3_000L),
+            org.assertj.core.api.Assertions.tuple("PERSON", 1_000L));
+    // 합계는 그대로 세 세션의 합이다 — 주제별 내역이 합계를 대체하지 않는다.
+    assertThat(aggregate.total().activeDrawingMs()).isEqualTo(9_000L);
+  }
+
+  @Test
+  void bySubjectDropsSubjectDurationsTooWhenOneSessionCannotBeAggregated() {
+    // 🔴 한 주제가 사진 업로드면 "집을 그릴 때 가장 오래 머물렀어요" 같은 비교 관찰이 거짓이 된다.
+    //   부분 목록이 만들어질 수 없도록 합계와 내역을 함께 버린다.
+    givenBatchesFor(101L, batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 5_000)));
+    givenBatchesFor(102L, batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 3_000)));
+    givenBatchesFor(103L, List.of());
+
+    assertThat(
+            service.summarizeAllOrNoneBySubject(
+                List.of(
+                    new SubjectStrokeSession(101L, "HOUSE"),
+                    new SubjectStrokeSession(102L, "TREE"),
+                    new SubjectStrokeSession(103L, "PERSON"))))
+        .isEmpty();
+  }
+
+  @Test
+  void bySubjectLeavesSubjectDurationsEmptyWhenTheActivityHasNoSubject() {
+    // 그림일기는 주제 구분이 없다. 이름 없는 시간은 비교에 쓸 수 없고 합계에 이미 들어 있다.
+    givenBatchesFor(101L, batch(1, BASE, stroke(1, "PEN", "#FF0000", 0, 5_000)));
+
+    StrokeBehaviorAggregate aggregate =
+        service
+            .summarizeAllOrNoneBySubject(List.of(new SubjectStrokeSession(101L, null)))
+            .orElseThrow();
+
+    assertThat(aggregate.subjectDurations()).isEmpty();
+    assertThat(aggregate.total().activeDrawingMs()).isEqualTo(5_000L);
+  }
+
+  @Test
   void summarizeAllStillSkipsEmptySessionsForTheGuardianReport() {
     // 보호자 화면은 일부라도 보여 주는 편이 낫다(S15P11B209-870). AI 경로와 의도적으로 다르다.
     givenBatchesFor(101L, batch(1, BASE, marker(1, "ERASE")));
@@ -624,9 +719,10 @@ class StrokeBehaviorSummaryServiceTest {
     // 🔴 null 을 0으로 바꿔 더하면 "측정하지 못한 세션"이 "0회인 세션"으로 둔갑하고,
     //   나머지 세션 값만으로 만든 합이 전체 합인 것처럼 나간다. 모르는 값은 더할 수 없다.
     StrokeBehaviorSummary measured =
-        new StrokeBehaviorSummary(1_000L, 500L, 2, 1, 3, 4, 5, true, false);
+        new StrokeBehaviorSummary(
+            1_000L, 500L, 10, 2, 1, 3, 4, 5, Set.of("#ff0000", "#00ff00"), true, false);
     StrokeBehaviorSummary partly =
-        new StrokeBehaviorSummary(1_000L, null, null, 1, 3, 4, 5, false, false);
+        new StrokeBehaviorSummary(1_000L, null, null, null, 1, 3, 4, 5, null, false, false);
 
     StrokeBehaviorSummary merged =
         StrokeBehaviorSummaryService.merge(List.of(measured, partly)).orElseThrow();
@@ -635,14 +731,41 @@ class StrokeBehaviorSummaryServiceTest {
     assertThat(merged.activeDrawingMs()).isNull();
     assertThat(merged.pauseCount()).isNull();
     assertThat(merged.undoCount()).isEqualTo(2);
+    assertThat(merged.strokeCount()).isNull();
+    // 한 세션의 색을 모르면 합집합의 가짓수도 알 수 없다 — 아는 세션의 색만으로 세면
+    //   그 가짓수가 활동 전체의 가짓수인 것처럼 나간다.
+    assertThat(merged.colorsUsed()).isNull();
     // 한 세션에서라도 필압이 저장돼 있으면 필압 데이터는 존재한다.
     assertThat(merged.pressureAvailable()).isTrue();
   }
 
   @Test
+  void mergeUnionsColorsInsteadOfAddingThePerSessionCounts() {
+    // 🔴 색은 세션 경계에서 겹친다. 세션별 '가짓수'를 더하면 집·나무·사람 세 장에 모두 쓴 빨강이
+    //   3가지로 계수돼, 세 가지 색을 쓴 활동이 "다섯 가지 색을 썼다"가 된다. 합집합이어야 한다.
+    StrokeBehaviorSummary house =
+        new StrokeBehaviorSummary(
+            1L, 1L, 3, 0, 0, 0, 0, 0, Set.of("#ff0000", "#00ff00"), false, false);
+    StrokeBehaviorSummary tree =
+        new StrokeBehaviorSummary(
+            1L, 1L, 3, 0, 0, 0, 0, 0, Set.of("#ff0000", "#0000ff"), false, false);
+    StrokeBehaviorSummary person =
+        new StrokeBehaviorSummary(1L, 1L, 3, 0, 0, 0, 0, 0, Set.of("#ff0000"), false, false);
+
+    StrokeBehaviorSummary merged =
+        StrokeBehaviorSummaryService.merge(List.of(house, tree, person)).orElseThrow();
+
+    assertThat(merged.colorsUsed()).containsExactlyInAnyOrder("#ff0000", "#00ff00", "#0000ff");
+    // 획 수는 세션끼리 겹치지 않는 값이라 그대로 더한다 — 합치는 규칙이 값의 성격마다 다르다는 것이 요점이다.
+    assertThat(merged.strokeCount()).isEqualTo(9);
+  }
+
+  @Test
   void mergeMarksTheWholeSumTruncatedWhenAnySessionWasTruncated() {
-    StrokeBehaviorSummary whole = new StrokeBehaviorSummary(1L, 1L, 0, 0, 0, 0, 0, false, false);
-    StrokeBehaviorSummary cut = new StrokeBehaviorSummary(1L, 1L, 0, 0, 0, 0, 0, false, true);
+    StrokeBehaviorSummary whole =
+        new StrokeBehaviorSummary(1L, 1L, 0, 0, 0, 0, 0, 0, Set.of(), false, false);
+    StrokeBehaviorSummary cut =
+        new StrokeBehaviorSummary(1L, 1L, 0, 0, 0, 0, 0, 0, Set.of(), false, true);
 
     assertThat(StrokeBehaviorSummaryService.merge(List.of(whole, cut)).orElseThrow().truncated())
         .isTrue();
