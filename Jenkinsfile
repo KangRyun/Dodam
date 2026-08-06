@@ -210,6 +210,29 @@ pipeline {
       }
     }
 
+    stage('Migration Preflight') {
+      // when 없음 = 모든 브랜치. MR 빌드에서 잡아야 의미가 있다 — 머지된 뒤에 알면 늦다.
+      // reason: Flyway 는 같은 버전이 둘이면 마이그레이션이 아니라 **애플리케이션 기동**이 실패한다
+      //   (`Found more than one migration with version N`). 그런데 파일명이 다르므로 git 은 충돌로
+      //   보지 않는다 — 양쪽 다 "새 파일 추가"라 조용히 병합된다.
+      //   실제 사고 2026-08-06: 982 와 983 이 각각 V43 을 만들었고, 텍스트 충돌은 테스트 주석
+      //   한 줄에서만 났다. 정작 위험한 중복은 아무 경고 없이 통과했다.
+      //   DatabaseMigrationIntegrationTest 가 결국 잡지만 그건 Testcontainers 를 띄우는 무거운
+      //   테스트라 로컬에서 잘 안 돌리고, 무엇보다 develop 에 머지된 뒤에 터진다.
+      // ※ 구조적으로 재발한다: 번호는 브랜치를 딸 때 정해지는데 머지는 며칠 뒤라,
+      //   분기 시점에 비어 있던 번호가 머지 시점에는 차 있다.
+      steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }
+        // origin/develop 이 없으면 스크립트가 교차 검사를 건너뛰고 경고만 남긴다(브랜치 내부
+        //   중복 검사는 그대로 수행). 얕은 클론에서 파이프라인이 죽지 않게 하려는 것이다.
+        sh '''
+          git fetch --no-tags --quiet origin develop:refs/remotes/origin/develop 2>/dev/null || true
+          chmod +x infra/scripts/check-migration-versions.sh
+          infra/scripts/check-migration-versions.sh
+        '''
+      }
+    }
+
     stage('Build & Test — backend') {
       steps {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
