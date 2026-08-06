@@ -277,8 +277,9 @@ void main() {
       await tester.pump();
 
       expect(
-        harness.document.visibleStrokes
-            .where((stroke) => stroke.tool == DrawingTool.eraser),
+        harness.document.visibleStrokes.where(
+          (stroke) => stroke.tool == DrawingTool.eraser,
+        ),
         hasLength(1),
       );
     },
@@ -296,7 +297,7 @@ void main() {
       await tester.pump();
 
       await _openClearConfirmation(tester);
-      expect(find.byType(AlertDialog), findsOneWidget);
+      expect(find.byType(DodamDialog), findsOneWidget);
       expect(harness.document.actions, isNotEmpty);
       expect(harness.document.canRedo, isTrue);
       expect(harness.restore.backgroundImage, isNotNull);
@@ -304,8 +305,8 @@ void main() {
       await tester.tap(
         find
             .descendant(
-              of: find.byType(AlertDialog),
-              matching: find.byType(AppButton),
+              of: find.byType(DodamDialog),
+              matching: find.byType(DodamDialogButton),
             )
             .first,
       );
@@ -318,8 +319,8 @@ void main() {
       await tester.tap(
         find
             .descendant(
-              of: find.byType(AlertDialog),
-              matching: find.byType(AppButton),
+              of: find.byType(DodamDialog),
+              matching: find.byType(DodamDialogButton),
             )
             .last,
       );
@@ -351,8 +352,8 @@ void main() {
     await tester.tap(
       find
           .descendant(
-            of: find.byType(AlertDialog),
-            matching: find.byType(AppButton),
+            of: find.byType(DodamDialog),
+            matching: find.byType(DodamDialogButton),
           )
           .last,
     );

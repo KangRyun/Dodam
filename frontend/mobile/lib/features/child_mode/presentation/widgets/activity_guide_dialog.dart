@@ -19,6 +19,8 @@ Future<T?> showActivityGuideDialog<T>({
   String cancelLabel = '취소',
 }) => showDialog<T>(
   context: context,
+  barrierDismissible: true,
+  barrierColor: dodamDialogScrim,
   builder: (dialogContext) => ActivityGuideDialog<T>(
     title: title,
     description: description,
@@ -77,104 +79,115 @@ class _ActivityGuideDialogState<T> extends State<ActivityGuideDialog<T>> {
     final isLoading = _status == _ActivityGuideStatus.loading;
     final isError = _status == _ActivityGuideStatus.error;
 
-    return AlertDialog(
+    return DodamDialog(
       scrollable: true,
-      backgroundColor: AppColors.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(AppRadius.lg),
+      illustration: _ActivityGuideIllustration(
+        icon: widget.icon,
+        accentColor: widget.accentColor,
       ),
-      contentPadding: const EdgeInsets.all(AppSpacing.lg),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 420),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ExcludeSemantics(
-              child: Container(
-                width: 96,
-                height: 96,
-                decoration: BoxDecoration(
-                  color: widget.accentColor.withValues(alpha: 0.16),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(widget.icon, size: 52, color: widget.accentColor),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              widget.title,
-              textAlign: TextAlign.center,
-              style: AppTypography.titleLg,
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            Text(
-              widget.description,
-              textAlign: TextAlign.center,
-              style: AppTypography.body.copyWith(color: AppColors.inkMuted),
-            ),
-            if (isError) ...[
-              const SizedBox(height: AppSpacing.md),
-              Semantics(
-                liveRegion: true,
-                label: '활동을 시작하지 못했어요. 다시 시도해 주세요.',
-                child: ExcludeSemantics(
-                  child: Container(
-                    key: const ValueKey('activity-guide-error'),
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(AppSpacing.sm),
-                    decoration: BoxDecoration(
-                      color: AppColors.errorSoft,
-                      borderRadius: BorderRadius.circular(AppRadius.md),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(
-                          Icons.error_outline_rounded,
-                          color: AppColors.error,
-                          size: AppIconSize.lg,
-                        ),
-                        const SizedBox(width: AppSpacing.xs),
-                        Expanded(
-                          child: Text(
-                            '활동을 시작하지 못했어요. 다시 시도해 주세요.',
-                            style: AppTypography.bodySm.copyWith(
-                              color: AppColors.error,
-                            ),
+      title: widget.title,
+      message: widget.description,
+      extra: isError
+          ? Semantics(
+              liveRegion: true,
+              label: '활동을 시작하지 못했어요. 다시 시도해 주세요.',
+              child: ExcludeSemantics(
+                child: Container(
+                  key: const ValueKey('activity-guide-error'),
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(AppSpacing.sm),
+                  decoration: BoxDecoration(
+                    color: AppColors.errorSoft,
+                    borderRadius: BorderRadius.circular(AppRadius.md),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(
+                        Icons.error_outline_rounded,
+                        color: AppColors.error,
+                        size: AppIconSize.lg,
+                      ),
+                      const SizedBox(width: AppSpacing.xs),
+                      Expanded(
+                        child: Text(
+                          '활동을 시작하지 못했어요. 다시 시도해 주세요.',
+                          style: AppTypography.bodySm.copyWith(
+                            color: AppColors.error,
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                 ),
               ),
-            ],
-            const SizedBox(height: AppSpacing.lg),
-            Row(
-              children: [
-                Expanded(
-                  child: AppButton(
-                    key: const ValueKey('activity-guide-cancel'),
-                    label: widget.cancelLabel,
-                    variant: AppButtonVariant.secondary,
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: AppButton(
-                    key: const ValueKey('activity-guide-start'),
-                    label: isError ? '다시 시도' : widget.startLabel,
-                    variant: AppButtonVariant.child,
-                    isLoading: isLoading,
-                    onPressed: isLoading ? null : _handleStart,
-                  ),
-                ),
-              ],
-            ),
-          ],
+            )
+          : null,
+      actions: [
+        DodamDialogButton(
+          key: const ValueKey('activity-guide-cancel'),
+          label: widget.cancelLabel,
+          kind: DodamDialogButtonKind.secondary,
+          onPressed: () => Navigator.of(context).pop(),
         ),
-      ),
+        DodamDialogButton(
+          key: const ValueKey('activity-guide-start'),
+          label: isError ? '다시 시도' : widget.startLabel,
+          loading: isLoading,
+          onPressed: isLoading ? null : _handleStart,
+        ),
+      ],
     );
   }
+}
+
+class _ActivityGuideIllustration extends StatelessWidget {
+  const _ActivityGuideIllustration({
+    required this.icon,
+    required this.accentColor,
+  });
+
+  final IconData icon;
+  final Color accentColor;
+
+  @override
+  Widget build(BuildContext context) => SizedBox(
+    width: 248,
+    height: 142,
+    child: Stack(
+      alignment: Alignment.center,
+      children: [
+        DecoratedBox(
+          decoration: BoxDecoration(
+            color: accentColor.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(AppRadius.lg),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(AppSpacing.xxs),
+            child: Image.asset(
+              DodamDialogAssets.diary,
+              key: const ValueKey('activity-guide-diary-illustration'),
+              width: 236,
+              height: 134,
+              fit: BoxFit.contain,
+            ),
+          ),
+        ),
+        Positioned(
+          right: AppSpacing.xs,
+          top: AppSpacing.xs,
+          child: Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: const Color(0xFFFFF9EF),
+              shape: BoxShape.circle,
+              border: Border.all(color: accentColor.withValues(alpha: 0.45)),
+            ),
+            child: Icon(icon, size: 24, color: accentColor),
+          ),
+        ),
+      ],
+    ),
+  );
 }
