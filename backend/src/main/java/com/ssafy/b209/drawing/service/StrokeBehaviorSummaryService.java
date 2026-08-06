@@ -8,9 +8,13 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.PageRequest;
@@ -225,26 +229,77 @@ public class StrokeBehaviorSummaryService {
    * @return 모든 세션을 집계했을 때의 합산 결과, 한 세션이라도 집계할 배치가 없으면 빈 값
    */
   public Optional<StrokeBehaviorSummary> summarizeAllOrNone(List<Long> drawingSessionIds) {
-    if (drawingSessionIds == null || drawingSessionIds.isEmpty()) {
+    if (drawingSessionIds == null) {
       return Optional.empty();
     }
-    List<Long> sessionIds = distinctSessionIds(drawingSessionIds);
-    if (sessionIds.isEmpty()) {
+    return summarizeAllOrNoneBySubject(
+            drawingSessionIds.stream().map(id -> new SubjectStrokeSession(id, null)).toList())
+        .map(StrokeBehaviorAggregate::total);
+  }
+
+  /**
+   * 모든 세션을 집계할 수 있을 때만 합산하고, 주제별 시간 내역을 함께 돌려준다 (S15P11B209-975).
+   *
+   * <p>{@link #summarizeAllOrNone(List)} 와 같은 전부-아니면-전무 규칙에 <b>주제 라벨</b>이 붙은 형태다. 실제로 그쪽이 이 메서드를
+   * 호출한다 — 규칙이 두 벌이 되면 한쪽만 고쳐진다.
+   *
+   * <p><b>왜 합계와 주제별 내역을 함께 돌려주는가.</b> 주제별 시간은 "어느 그림에 더 오래 머물렀는가"라는 비교의 재료이고, 비교는 대상이 전부 있을 때만 참이다.
+   * 한 세션이라도 집계할 수 없으면 여기서 <b>전체가 빈 값</b>이 되므로 부분 목록이 만들어질 수 없다. 근거는 {@link StrokeBehaviorAggregate}
+   * javadoc.
+   *
+   * <p>주제가 {@code null}인 세션(그림일기·단독 세션)은 내역에 담지 않는다. 이름 없는 시간은 비교에 쓸 수 없고, 그 값은 합계에 이미 들어 있다.
+   *
+   * @param sessions 집계할 세션과 주제 목록이며 {@code null}·빈 목록이면 빈 값
+   * @return 합계와 주제별 내역이며, 한 세션이라도 집계할 배치가 없으면 빈 값
+   */
+  public Optional<StrokeBehaviorAggregate> summarizeAllOrNoneBySubject(
+      List<SubjectStrokeSession> sessions) {
+    if (sessions == null || sessions.isEmpty()) {
       return Optional.empty();
     }
-    List<StrokeBehaviorSummary> summaries = new ArrayList<>(sessionIds.size());
-    for (Long sessionId : sessionIds) {
-      Optional<StrokeBehaviorSummary> summary = summarize(sessionId);
+    List<SubjectStrokeSession> targets = distinctSessions(sessions);
+    if (targets.isEmpty()) {
+      return Optional.empty();
+    }
+    List<StrokeBehaviorSummary> summaries = new ArrayList<>(targets.size());
+    List<StrokeBehaviorAggregate.SubjectDuration> durations = new ArrayList<>(targets.size());
+    for (SubjectStrokeSession target : targets) {
+      Optional<StrokeBehaviorSummary> summary = summarize(target.drawingSessionId());
       if (summary.isEmpty()) {
         return Optional.empty();
       }
       summaries.add(summary.get());
+      if (target.drawingSubject() != null) {
+        durations.add(
+            new StrokeBehaviorAggregate.SubjectDuration(
+                target.drawingSubject(),
+                summary.get().drawingDurationMs(),
+                summary.get().activeDrawingMs()));
+      }
     }
-    return merge(summaries);
+    return merge(summaries).map(total -> new StrokeBehaviorAggregate(total, durations));
   }
 
   private static List<Long> distinctSessionIds(List<Long> drawingSessionIds) {
     return drawingSessionIds.stream().filter(Objects::nonNull).distinct().toList();
+  }
+
+  /**
+   * 세션 식별자 기준으로 중복을 없앤다. 같은 세션이 두 번 오면 <b>먼저 온 주제</b>를 남긴다.
+   *
+   * <p>합계를 두 번 더하지 않기 위해서다 — 중복을 그대로 두면 같은 세션의 시간이 두 배로 실린다.
+   */
+  private static List<SubjectStrokeSession> distinctSessions(List<SubjectStrokeSession> sessions) {
+    List<SubjectStrokeSession> distinct = new ArrayList<>(sessions.size());
+    Set<Long> seen = new HashSet<>();
+    for (SubjectStrokeSession session : sessions) {
+      if (session != null
+          && session.drawingSessionId() != null
+          && seen.add(session.drawingSessionId())) {
+        distinct.add(session);
+      }
+    }
+    return distinct;
   }
 
   /**
@@ -253,9 +308,14 @@ public class StrokeBehaviorSummaryService {
    * <p>합치는 규칙은 값의 성격에 따라 다르다. 시간·횟수는 <b>더하고</b>, {@code pressureAvailable}·{@code truncated}는
    * <b>OR</b>다. 한 세션이라도 절단됐으면 합계 전체가 부분 집계이고, 한 세션에서라도 필압이 저장돼 있으면 필압 데이터는 존재한다.
    *
+   * <p>🔴 <b>{@code colorsUsed} 만은 합이 아니라 합집합이다</b> (S15P11B209-975). 세션별 색 <i>가짓수</i>를 더하면 집·나무·사람
+   * 세 장에 모두 쓴 빨강이 3가지로 계수돼, 실제로는 네 가지 색을 쓴 활동이 "열 가지 색을 썼다"가 된다. 색은 집합이라 세션 경계에서 겹칠 수 있고, 겹치는 것을
+   * 더하면 없는 관찰이 만들어진다. 그래서 집합을 그대로 합치고 가짓수는 계약 경계에서 한 번만 센다.
+   *
    * <p>🔴 <b>{@code null} 이 섞이면 그 항목의 합계도 {@code null} 이다.</b> 이전에는 {@code null} 을 0으로 바꿔 더했는데, 그러면
    * "측정하지 못한 세션"이 "0회인 세션"으로 둔갑해 나머지 세션의 값만으로 만든 합이 전체 합인 것처럼 나간다. 모르는 값을 더할 수는 없다. 지금 집계기가 항상 구체값을
-   * 채우므로 이 분기는 동작하지 않지만, 나중에 {@code null} 을 만드는 경로가 생겼을 때 조용히 0으로 무너지지 않게 여기서 막는다.
+   * 채우므로 이 분기는 동작하지 않지만, 나중에 {@code null} 을 만드는 경로가 생겼을 때 조용히 0으로 무너지지 않게 여기서 막는다. 색 집합도 같다 — 한 세션의
+   * 색을 모르면 합집합의 가짓수도 모른다.
    *
    * @param summaries 합칠 세션별 요약 목록
    * @return 합산 결과, 목록이 비면 빈 값
@@ -270,21 +330,25 @@ public class StrokeBehaviorSummaryService {
 
     Long drawingDurationMs = 0L;
     Long activeDrawingMs = 0L;
+    Integer strokeCount = 0;
     Integer pauseCount = 0;
     Integer undoCount = 0;
     Integer eraseCount = 0;
     Integer toolChangeCount = 0;
     Integer colorChangeCount = 0;
+    Set<String> colorsUsed = new LinkedHashSet<>();
     boolean pressureAvailable = false;
     boolean truncated = false;
     for (StrokeBehaviorSummary summary : summaries) {
       drawingDurationMs = add(drawingDurationMs, summary.drawingDurationMs());
       activeDrawingMs = add(activeDrawingMs, summary.activeDrawingMs());
+      strokeCount = add(strokeCount, summary.strokeCount());
       pauseCount = add(pauseCount, summary.pauseCount());
       undoCount = add(undoCount, summary.undoCount());
       eraseCount = add(eraseCount, summary.eraseCount());
       toolChangeCount = add(toolChangeCount, summary.toolChangeCount());
       colorChangeCount = add(colorChangeCount, summary.colorChangeCount());
+      colorsUsed = union(colorsUsed, summary.colorsUsed());
       pressureAvailable |= summary.pressureAvailable();
       truncated |= summary.truncated();
     }
@@ -292,11 +356,13 @@ public class StrokeBehaviorSummaryService {
         new StrokeBehaviorSummary(
             drawingDurationMs,
             activeDrawingMs,
+            strokeCount,
             pauseCount,
             undoCount,
             eraseCount,
             toolChangeCount,
             colorChangeCount,
+            colorsUsed,
             pressureAvailable,
             truncated));
   }
@@ -309,6 +375,20 @@ public class StrokeBehaviorSummaryService {
   /** 한쪽이라도 측정되지 않았으면 합도 측정되지 않은 값이다. */
   private static Integer add(Integer accumulated, Integer value) {
     return accumulated == null || value == null ? null : accumulated + value;
+  }
+
+  /**
+   * 색 집합을 합친다 — <b>더하지 않고 합집합을 만든다.</b>
+   *
+   * <p>한쪽이라도 집계되지 않았으면({@code null}) 합집합도 알 수 없다. 모르는 세션의 색을 빈 집합으로 치면 나머지 세션의 색만으로 만든 가짓수가 활동 전체의
+   * 가짓수인 것처럼 나간다.
+   */
+  private static Set<String> union(Set<String> accumulated, Set<String> value) {
+    if (accumulated == null || value == null) {
+      return null;
+    }
+    accumulated.addAll(value);
+    return accumulated;
   }
 
   /**
@@ -330,11 +410,13 @@ public class StrokeBehaviorSummaryService {
     ExplicitEventTypes explicit = ExplicitEventTypes.scan(ordered);
 
     long activeDrawingMs = 0;
+    int strokeCount = 0;
     int pauseCount = 0;
     int undoCount = 0;
     int eraseCount = 0;
     int toolChangeCount = 0;
     int colorChangeCount = 0;
+    Set<String> colorsUsed = new LinkedHashSet<>();
     boolean pressureAvailable = false;
     String previousTool = null;
     String previousColor = null;
@@ -375,6 +457,9 @@ public class StrokeBehaviorSummaryService {
           // REDO·RESUME·THICKNESS_CHANGE·CANVAS_CLEAR·FILL 등 담을 자리가 없는 이벤트는 지나간다.
           continue;
         }
+        // 지우개 획도 센다 — 지우개로 긋는 것도 획이고, 도구로 대상을 가르면 "전체 획 수"가 아니게 된다.
+        //   그래서 eraseCount 와 세는 대상이 겹치며, 두 값으로 비율을 만들면 안 된다(record javadoc).
+        strokeCount++;
         batchActiveMs += strokeDurationMs(event);
         String tool = event.tool();
         if (tool != null) {
@@ -398,6 +483,10 @@ public class StrokeBehaviorSummaryService {
             colorChangeCount++;
           }
           previousColor = color;
+          // 실제로 획을 그린 색만 담는다 (S15P11B209-975). COLOR_CHANGE 이벤트의 색을 담지 않는
+          //   이유는 '고른 색'과 '쓴 색'이 다르기 때문이다 — 골랐다가 한 획도 긋지 않고 다시 바꾼 색은
+          //   "사용한 색"이 아니다. 정규화는 colorChangeCount 와 같은 이유다(#ff0000과 #FF0000은 같은 색).
+          colorsUsed.add(color.toLowerCase(Locale.ROOT));
         }
       }
       activeDrawingMs += batchActiveMs;
@@ -419,11 +508,13 @@ public class StrokeBehaviorSummaryService {
         new StrokeBehaviorSummary(
             drawingDurationMs(ordered, activeDrawingMs),
             activeDrawingMs,
+            strokeCount,
             pauseCount,
             undoCount,
             eraseCount,
             toolChangeCount,
             colorChangeCount,
+            colorsUsed,
             pressureAvailable,
             truncated));
   }

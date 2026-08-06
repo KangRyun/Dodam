@@ -66,6 +66,7 @@ import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -182,7 +183,9 @@ class ObservationReportPersistenceServiceTest {
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
     given(behaviorSummaryService.summarizeAll(List.of(DRAWING_SESSION_ID)))
         .willReturn(
-            Optional.of(new StrokeBehaviorSummary(261_000L, 180_000L, 4, 2, 5, 1, 3, true, false)));
+            Optional.of(
+                new StrokeBehaviorSummary(
+                    261_000L, 180_000L, 37, 4, 2, 5, 1, 3, Set.of("#ff0000"), true, false)));
 
     service.complete(context(List.of(keyLine(0))), validResult());
 
@@ -1083,7 +1086,10 @@ class ObservationReportPersistenceServiceTest {
             subjectContext("TREE", 201L, "이 나무는 어떤 나무야?", null),
             subjectContext("PERSON", 202L, "이 사람은 누구야?", "엄마요")),
         List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
-        List.of(DRAWING_SESSION_ID, 201L, 202L));
+        List.of(
+            new ObservationGenerationContext.ActivitySessionRef(DRAWING_SESSION_ID, "HOUSE"),
+            new ObservationGenerationContext.ActivitySessionRef(201L, "TREE"),
+            new ObservationGenerationContext.ActivitySessionRef(202L, "PERSON")));
   }
 
   private ObservationGenerationContext.SubjectContext subjectContext(
@@ -1187,7 +1193,7 @@ class ObservationReportPersistenceServiceTest {
         keyConversations,
         List.of(),
         List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
-        List.of(DRAWING_SESSION_ID));
+        List.of(new ObservationGenerationContext.ActivitySessionRef(DRAWING_SESSION_ID, null)));
   }
 
   private ObservationGenerationContext emptyConversationContext() {
@@ -1206,7 +1212,7 @@ class ObservationReportPersistenceServiceTest {
         List.of(),
         List.of(),
         List.of(),
-        List.of(DRAWING_SESSION_ID));
+        List.of(new ObservationGenerationContext.ActivitySessionRef(DRAWING_SESSION_ID, null)));
   }
 
   private ObservationGenerationContext.KeyConversationLine keyLine(int index) {

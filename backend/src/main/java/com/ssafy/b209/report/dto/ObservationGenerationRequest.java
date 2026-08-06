@@ -122,27 +122,61 @@ public record ObservationGenerationRequest(
    *
    * @param drawingDurationMs 그림 전체 경과 시간(ms)이며 집계하지 못했으면 {@code null}
    * @param activeDrawingMs 실제로 획을 그린 시간의 합(ms)이며 집계하지 못했으면 {@code null}
+   * @param strokeCount 그은 획의 수이며 집계하지 못했으면 {@code null} (S15P11B209-975). <b>지우개 획을 포함하므로 {@code
+   *     eraseCount} 와 세는 대상이 겹친다</b> — 두 값으로 지우기 비율 같은 파생 수치를 만들지 말 것. 계약에 파생 필드를 싣지 않고 실측값 둘만 보내는
+   *     이유가 이것이다
    * @param pauseCount 멈춤 횟수이며 집계하지 못했으면 {@code null}
    * @param undoCount 실행 취소 횟수이며 집계하지 못했으면 {@code null}
    * @param eraseCount 지우기 횟수이며 집계하지 못했으면 {@code null}
    * @param toolChangeCount 도구를 바꾼 횟수이며 집계하지 못했으면 {@code null}
    * @param colorChangeCount 색을 바꾼 횟수이며 집계하지 못했으면 {@code null}
+   * @param colorsUsedCount 실제로 획을 그린 색의 <b>가짓수</b>이며 집계하지 못했으면 {@code null} (S15P11B209-975). 색을 바꾼
+   *     <i>횟수</i>({@code colorChangeCount})와 다른 값이다. HTP 합산에서도 세 단계의 색을 <b>합집합</b>으로 세므로 세 장에 모두 쓴
+   *     색이 3가지로 계수되지 않는다. 색 코드 자체는 관찰 재료가 아니라 보내지 않는다
    * @param pressureAvailable 필압 데이터가 저장돼 있는지 여부다. <b>측정 가능 여부일 뿐 필압의 강약도 감정 근거도 아니다</b>
    * @param averagePressure 평균 필압이며 <b>현재 항상 {@code null}</b> 이다. 집계기가 이 값을 만들지 않는다 — 자리만 계약에 맞춰 두고
    *     값을 지어내지 않는다
    * @param truncated 배치 수 상한에 걸려 세션 앞부분만 집계했는지 여부. {@code true}면 위 값 전부가 부분 집계다
+   * @param subjectDurations HTP 주제별 그리기 시간 내역이며 그림일기·단독 세션은 <b>빈 목록</b>이다 (S15P11B209-975). 이 목록이
+   *     실린다는 것은 <b>세 주제를 모두 집계했다</b>는 뜻이다 — 부분 목록은 만들어질 수 없다. 근거는 {@link
+   *     com.ssafy.b209.drawing.service.StrokeBehaviorAggregate} javadoc
    */
   public record BehaviorMetrics(
       Long drawingDurationMs,
       Long activeDrawingMs,
+      Integer strokeCount,
       Integer pauseCount,
       Integer undoCount,
       Integer eraseCount,
       Integer toolChangeCount,
       Integer colorChangeCount,
+      Integer colorsUsedCount,
       boolean pressureAvailable,
       BigDecimal averagePressure,
-      boolean truncated) {}
+      boolean truncated,
+      List<SubjectDuration> subjectDurations) {
+
+    /** 목록이 {@code null}로 만들어져도 빈 목록으로 정규화한다(계약: optional·기본 빈 목록). */
+    public BehaviorMetrics {
+      subjectDurations = subjectDurations == null ? List.of() : List.copyOf(subjectDurations);
+    }
+  }
+
+  /**
+   * HTP 주제 하나에 머문 시간이다 (S15P11B209-975).
+   *
+   * <p>AI 계약 {@code SubjectDuration}({@code ai/internal_contracts.py})과 필드 1:1이며 JSON 은 camelCase
+   * 다.
+   *
+   * <p><b>비교 관찰의 재료다.</b> "어느 그림에 더 오래 머물렀는가"는 주제가 전부 실렸을 때만 참이므로, 한 단계라도 집계할 수 없으면 {@code
+   * behaviorMetrics} 전체가 {@code null} 이 되어 이 목록도 함께 사라진다. 부분 목록으로 순위를 매기면 아이에 대한 없는 관찰이 만들어진다.
+   *
+   * @param drawingSubject HTP 주제({@code HOUSE|TREE|PERSON})
+   * @param drawingDurationMs 그 주제에 머문 전체 경과 시간(ms)이며 집계하지 못했으면 {@code null}
+   * @param activeDrawingMs 그 주제에서 실제로 획을 그린 시간의 합(ms)이며 집계하지 못했으면 {@code null}
+   */
+  public record SubjectDuration(
+      String drawingSubject, Long drawingDurationMs, Long activeDrawingMs) {}
 
   /**
    * 주제(집/나무/사람 또는 그림일기 단일 그림) 하나의 관찰 서술·문답 묶음이다 (S15P11B209-740).

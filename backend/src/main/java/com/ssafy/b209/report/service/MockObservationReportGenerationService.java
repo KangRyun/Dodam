@@ -1,7 +1,9 @@
 package com.ssafy.b209.report.service;
 
+import com.ssafy.b209.drawing.service.StrokeBehaviorAggregate;
 import com.ssafy.b209.drawing.service.StrokeBehaviorSummary;
 import com.ssafy.b209.drawing.service.StrokeBehaviorSummaryService;
+import com.ssafy.b209.drawing.service.SubjectStrokeSession;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.response.ErrorCode;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClient;
@@ -187,8 +189,12 @@ public class MockObservationReportGenerationService {
    * <p><b>이 값이 없으면 AI 프롬프트의 {@code [형식적 분석]} 블록이 통째로 만들어지지 않는다.</b> 계약에는 자리가 있었지만 서버가 채우지 않아 운영에서 한
    * 번도 실린 적이 없던 지표다.
    *
-   * <p>{@link StrokeBehaviorSummaryService#summarizeAllOrNone(java.util.List)} 를 쓴다 — 보호자 화면용
-   * {@code summarizeAll} 과 달리 <b>한 세션이라도 집계할 수 없으면 전체를 버린다.</b> 근거는 그 메서드 javadoc.
+   * <p>{@link StrokeBehaviorSummaryService#summarizeAllOrNoneBySubject(java.util.List)} 를 쓴다 — 보호자
+   * 화면용 {@code summarizeAll} 과 달리 <b>한 세션이라도 집계할 수 없으면 전체를 버린다.</b> 근거는 그 메서드 javadoc.
+   *
+   * <p>세션 목록은 {@code activitySessions} 에서 온다 (S15P11B209-975). 🔴 <b>{@code subjectContexts} 를 쓰면 안
+   * 된다</b> — 그쪽은 서술·탐지 코드·문답이 모두 빈 주제를 걸러낸 목록이라, 그리기만 하고 관찰·문답이 없는 세션이 빠진다. 그 목록으로 주제별 시간을 만들면 실제로
+   * 그린 그림 하나가 사라진 채 "가장 오래 머문 그림"이 정해진다.
    *
    * <p>Transaction 밖에서 호출한다. 읽는 곳이 MongoDB 라 JPA 와 별개로 실패할 수 있고, 그때 리포트 생성 전체를 죽이는 것은 균형에 맞지 않는다 —
    * 형식 지표는 관찰의 부가 재료다. 실패하면 경고만 남기고 {@code null} 로 보내 AI 가 해당 블록 없이 리포트를 만든다.
@@ -200,12 +206,24 @@ public class MockObservationReportGenerationService {
    */
   private ObservationGenerationRequest.BehaviorMetrics behaviorMetrics(
       ObservationGenerationContext context) {
-    List<Long> sessionIds = context.activitySessionIds();
-    if (sessionIds == null || sessionIds.isEmpty()) {
-      sessionIds = List.of(context.drawingSessionId());
+    List<ObservationGenerationContext.ActivitySessionRef> sessions = context.activitySessions();
+    if (sessions == null || sessions.isEmpty()) {
+      sessions =
+          List.of(
+              new ObservationGenerationContext.ActivitySessionRef(
+                  context.drawingSessionId(), null));
     }
+    List<SubjectStrokeSession> targets =
+        sessions.stream()
+            .map(
+                session ->
+                    new SubjectStrokeSession(session.drawingSessionId(), session.drawingSubject()))
+            .toList();
     try {
-      return behaviorSummaryService.summarizeAllOrNone(sessionIds).map(Metrics::of).orElse(null);
+      return behaviorSummaryService
+          .summarizeAllOrNoneBySubject(targets)
+          .map(Metrics::of)
+          .orElse(null);
     } catch (RuntimeException exception) {
       log.warn(
           "[837] 형식 지표 집계에 실패해 behaviorMetrics 없이 관찰 리포트를 요청한다: analysisId={}, exceptionType={}",
@@ -220,24 +238,39 @@ public class MockObservationReportGenerationService {
    *
    * <p>도메인 Record 를 계약 Record 로 바꾸기만 하며 <b>값을 만들지도 채우지도 않는다.</b> {@code null} 은 {@code null} 그대로 간다
    * — 여기서 0을 채우면 "집계하지 못함"이 "0회"라는 관찰 사실로 바뀐다.
+   *
+   * <p>유일한 계산은 색 <b>가짓수</b>다 (S15P11B209-975). 도메인은 색 집합을 들고 있고 계약 경계로는 크기만 나간다 — 색 코드 자체는 관찰 재료가
+   * 아니고, 집합을 여기까지 들고 와야 여러 세션의 색을 합집합으로 셀 수 있다. 세션별 가짓수를 더하면 같은 색이 중복 계수된다.
    */
   private static final class Metrics {
 
     private Metrics() {}
 
-    static ObservationGenerationRequest.BehaviorMetrics of(StrokeBehaviorSummary summary) {
+    static ObservationGenerationRequest.BehaviorMetrics of(StrokeBehaviorAggregate aggregate) {
+      StrokeBehaviorSummary summary = aggregate.total();
       return new ObservationGenerationRequest.BehaviorMetrics(
           summary.drawingDurationMs(),
           summary.activeDrawingMs(),
+          summary.strokeCount(),
           summary.pauseCount(),
           summary.undoCount(),
           summary.eraseCount(),
           summary.toolChangeCount(),
           summary.colorChangeCount(),
+          // 집계하지 못한 색 집합(null)은 가짓수도 알 수 없다 — 0으로 세지 않는다.
+          summary.colorsUsed() == null ? null : summary.colorsUsed().size(),
           summary.pressureAvailable(),
           // averagePressure — 집계기가 만들지 않는 값이다. 계약에 자리가 있다고 지어내지 않는다.
           null,
-          summary.truncated());
+          summary.truncated(),
+          aggregate.subjectDurations().stream()
+              .map(
+                  duration ->
+                      new ObservationGenerationRequest.SubjectDuration(
+                          duration.drawingSubject(),
+                          duration.drawingDurationMs(),
+                          duration.activeDrawingMs()))
+              .toList());
     }
   }
 

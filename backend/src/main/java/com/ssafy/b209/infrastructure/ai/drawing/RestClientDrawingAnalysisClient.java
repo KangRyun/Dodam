@@ -199,11 +199,14 @@ public final class RestClientDrawingAnalysisClient implements DrawingAnalysisCli
         new AiDrawingAnalysisRequest.BehaviorSummary(
             summary.drawingDurationMs(),
             summary.activeDrawingMs(),
+            summary.strokeCount(),
             summary.pauseCount(),
             summary.undoCount(),
             summary.eraseCount(),
             summary.toolChangeCount(),
             summary.colorChangeCount(),
+            // 집계하지 못한 색 집합(null)은 가짓수도 알 수 없다 — 0으로 세지 않는다.
+            summary.colorsUsed() == null ? null : summary.colorsUsed().size(),
             summary.pressureAvailable()));
   }
 

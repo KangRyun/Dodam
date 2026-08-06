@@ -156,6 +156,8 @@ class RestClientAiObservationClientTest {
     assertThat(metrics.get("eraseCount").asInt()).isEqualTo(3);
     assertThat(metrics.get("toolChangeCount").asInt()).isEqualTo(1);
     assertThat(metrics.get("colorChangeCount").asInt()).isEqualTo(5);
+    assertThat(metrics.get("strokeCount").asInt()).isEqualTo(42);
+    assertThat(metrics.get("colorsUsedCount").asInt()).isEqualTo(3);
     assertThat(metrics.get("pressureAvailable").asBoolean()).isTrue();
     assertThat(metrics.get("truncated").asBoolean()).isFalse();
     // AI BehaviorMetrics 와 필드 1:1 — 여기 없는 키를 보내면 계약이 어긋난 것이다.
@@ -169,9 +171,12 @@ class RestClientAiObservationClientTest {
             "eraseCount",
             "toolChangeCount",
             "colorChangeCount",
+            "strokeCount",
+            "colorsUsedCount",
             "pressureAvailable",
             "averagePressure",
-            "truncated");
+            "truncated",
+            "subjectDurations");
     server.verify();
   }
 
@@ -187,7 +192,7 @@ class RestClientAiObservationClientTest {
     client.generate(
         requestWith(
             new ObservationGenerationRequest.BehaviorMetrics(
-                null, null, null, null, 0, null, null, false, null, false)));
+                null, null, null, null, null, 0, null, null, null, false, null, false, List.of())));
 
     JsonNode metrics = body[0].get("behaviorMetrics");
     assertThat(metrics.get("pauseCount").isNull()).isTrue();
@@ -343,6 +348,46 @@ class RestClientAiObservationClientTest {
     };
   }
 
+  @Test
+  void serializesSubjectDurationsAsCamelCaseJson() {
+    // 주제별 시간(S15P11B209-975)은 중첩 Record 라 별칭이 어긋나면 목록은 실리는데 값이 전부
+    //   기본값으로 떨어진다 — 그러면 AI 포매터가 줄 전체를 빼고 아무도 알아채지 못한다.
+    JsonNode[] body = new JsonNode[1];
+    server
+        .expect(requestTo(ENDPOINT_URL))
+        .andExpect(captureBody(body))
+        .andRespond(withSuccess(successResponse("request-1"), MediaType.APPLICATION_JSON));
+
+    client.generate(
+        requestWith(
+            new ObservationGenerationRequest.BehaviorMetrics(
+                900_000L,
+                300_000L,
+                90,
+                9,
+                3,
+                6,
+                2,
+                7,
+                3,
+                false,
+                null,
+                false,
+                List.of(
+                    new ObservationGenerationRequest.SubjectDuration("HOUSE", 500_000L, 160_000L),
+                    new ObservationGenerationRequest.SubjectDuration("TREE", 250_000L, 90_000L)))));
+
+    JsonNode durations = body[0].get("behaviorMetrics").get("subjectDurations");
+    assertThat(durations).hasSize(2);
+    assertThat(durations.get(0).get("drawingSubject").asText()).isEqualTo("HOUSE");
+    assertThat(durations.get(0).get("drawingDurationMs").asLong()).isEqualTo(500_000L);
+    assertThat(durations.get(0).get("activeDrawingMs").asLong()).isEqualTo(160_000L);
+    assertThat(durations.get(0).fieldNames())
+        .toIterable()
+        .containsExactlyInAnyOrder("drawingSubject", "drawingDurationMs", "activeDrawingMs");
+    server.verify();
+  }
+
   private ObservationGenerationRequest requestWith(
       ObservationGenerationRequest.BehaviorMetrics metrics) {
     return new ObservationGenerationRequest(
@@ -400,7 +445,7 @@ class RestClientAiObservationClientTest {
 
   private ObservationGenerationRequest.BehaviorMetrics behaviorMetrics() {
     return new ObservationGenerationRequest.BehaviorMetrics(
-        600_000L, 240_000L, 4, 2, 3, 1, 5, true, null, false);
+        600_000L, 240_000L, 42, 4, 2, 3, 1, 5, 3, true, null, false, List.of());
   }
 
   @Test

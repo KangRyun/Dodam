@@ -61,26 +61,38 @@
 "behaviorMetrics": {              // optional, 기본 null
   "drawingDurationMs": 720000,
   "activeDrawingMs":   480000,
+  "strokeCount":       42,        // 975 신설
   "pauseCount":        4,
   "undoCount":         2,
   "eraseCount":        3,
   "toolChangeCount":   1,
   "colorChangeCount":  5,
+  "colorsUsedCount":   4,         // 975 신설
   "pressureAvailable": true,
   "averagePressure":   null,      // 이번 단계에서 항상 null
-  "truncated":         false
+  "truncated":         false,
+  "subjectDurations": [           // 975 신설. optional, 기본 빈 목록
+    { "drawingSubject": "HOUSE",  "drawingDurationMs": 480000, "activeDrawingMs": 160000 },
+    { "drawingSubject": "TREE",   "drawingDurationMs": 240000, "activeDrawingMs":  90000 },
+    { "drawingSubject": "PERSON", "drawingDurationMs": 180000, "activeDrawingMs":  50000 }
+  ]
 }
 ```
 
 | 필드 | 필수 | 설명 |
 |---|---|---|
 | `drawingDurationMs` · `activeDrawingMs` | X | 없으면 `null`. **0으로 채우지 않는다** |
+| `strokeCount` | X | 그은 획의 수(S15P11B209-975). ⚠️ **지우개 획을 포함하므로 `eraseCount` 와 세는 대상이 겹친다** — 두 값으로 '지우기 비율' 같은 파생 수치를 만들면 안 된다. 계약이 파생 필드를 싣지 않고 실측값 둘만 보내는 이유가 이것이고, 프롬프트도 같은 규칙을 건다. 블록 텍스트가 "(지우개로 그은 획 포함)"으로 겹침을 스스로 밝힌다 |
 | `pauseCount` | X | 배치 경계 기반 **추정값** — 리포트는 "약 N번"으로 완화 표기 |
 | `undoCount` · `eraseCount` | X | |
 | `toolChangeCount` · `colorChangeCount` | X | **2026-08-05부터 프롬프트 블록에 실린다**("도구 바꾼 횟수 N회"·"색 바꾼 횟수 N회"). 관찰 사실로만 적히고, 해석은 `[형식적 분석]` 전체를 신호 하나로 세는 규칙을 따른다 |
+| `colorsUsedCount` | X | 실제로 획을 그린 색의 **가짓수**(S15P11B209-975). 색을 바꾼 *횟수*와 다른 값이다. 고르기만 하고 한 획도 긋지 않은 색은 세지 않는다. ⚠️ HTP 합산은 세 단계의 색을 **합집합**으로 센다 — 세션별 가짓수를 더하면 세 장에 모두 쓴 색이 3가지로 계수된다. 색 코드 자체는 관찰 재료가 아니라 보내지 않는다 |
 | `pressureAvailable` | O | **측정 가능 여부일 뿐** 필압의 강약도 감정 근거도 아니다 |
 | `averagePressure` | X | **구조적으로 항상 `null`** — BE record `StrokeBehaviorSummary` 에 이 필드 자체가 없다. 필압 줄은 운영에서 한 번도 나온 적이 없고 나올 수도 없다. AI 쪽 분기는 계약 확장 대비로만 남아 있다. 값 도입은 BE 계약 확장이 선행 |
 | `truncated` | O | `true`면 "저장된 캔버스 입력 구간 기준" — 활동 전체를 완전 집계한 것처럼 표현 금지 |
+| `subjectDurations[]` | X | HTP 주제별 그리기 시간(S15P11B209-975). 그림일기·단독 세션은 **빈 목록**. 아래 전부-아니면-전무 규칙 참조 |
+| `subjectDurations[].drawingSubject` | X | `HOUSE|TREE|PERSON` |
+| `subjectDurations[].drawingDurationMs` · `activeDrawingMs` | X | 그 주제 **한 세션**의 값이며 합계가 아니다. 뜻과 한계는 위 동명 필드와 같다 |
 
 **`null` 과 `0` 은 다른 뜻이다.** `null`은 '집계하지 못함'이라 프롬프트 블록에서 항목을 빼고,
 `0`은 '0회'라는 관찰 사실이라 그대로 적는다. 멈춤 없이 몰입해 그린 활동(`pauseCount=0`)과
@@ -88,7 +100,32 @@
 
 **HTP는 세 단계 합산값이다.** HOUSE·TREE·PERSON 이 모두 CANVAS 이고 집계 가능할 때만 합산해
 보내고, UPLOAD 가 섞이거나 한 단계라도 집계 불가면 **전체를 `null`** 로 보낸다 — 부분 집계를
-전체 활동으로 오인시키지 않기 위해서다. 주제별 행동 지표는 이번 범위 밖.
+전체 활동으로 오인시키지 않기 위해서다.
+
+#### `subjectDurations` — 비교 관찰의 재료 (S15P11B209-975)
+
+836이 범위 밖으로 미뤄 뒀던 주제별 지표다. 합계만으로는 "어느 그림에 더 오래 머물렀는가"를
+말할 수 없어, 세션별 값에 주제 이름을 붙여 보낸다.
+
+🔴 **전부 아니면 전무다.** 이 목록의 쓸모는 **비교**이고, 비교는 대상이 전부 있을 때만 참이다.
+한 주제가 사진 업로드라 빠지면 남은 둘로 "집을 그릴 때 가장 오래 머물렀어요"가 만들어지는데,
+그것은 관찰이 아니라 없는 사실이다. 그래서 `behaviorMetrics` **전체가 `null` 이 아닐 때만**
+채워진다 — 위의 전부-아니면-전무 규칙이 이 조건을 이미 보장하므로 부분 목록은 구조적으로
+만들어질 수 없다(BE `StrokeBehaviorAggregate` 가 합계와 내역을 한 값에 담아 타입으로 막는다).
+
+AI 쪽도 같은 규칙을 반대편에서 한 번 더 건다: 한 항목이라도 라벨을 모르거나 시간이 없으면
+**남은 것만 적지 않고 줄 전체를 뺀다**(`report_client._format_subject_durations`).
+시간은 `drawingDurationMs` 만 쓰고 없을 때 `activeDrawingMs` 로 대체하지 않는다 — 한 줄 안에서
+서로 다른 측정이 섞이면 그 비교는 이미 거짓이다.
+
+⚠️ **BE 구현 주의 — 주제 매핑의 출처.** 주제 라벨은 `subjectContexts`(서술·탐지 코드·문답이
+모두 빈 주제를 걸러낸 목록)가 아니라 **필터링 전** 세션 목록에서 와야 한다. 걸러진 목록을 쓰면
+그리기만 하고 대화가 없던 그림이 통째로 빠진 채 순위가 정해진다.
+
+가드레일: 주제별 시간은 "어느 그림에 시간을 더 썼다"는 **활동 기록**으로만 쓴다. 오래 머문 그림을
+'더 중요한/애착이 큰 그림'으로 읽는 것과, 오래·짧게 그린 **이유**를 심리 상태로 채우는 것을
+프롬프트가 금지한다(`report_common` 2.3.0). 획 수·색 가짓수도 같다 — 많고 적음을 에너지·충동성·
+집중력·성격과 잇지 않는다.
 
 ### 2.4 `subjectSummaries[].detectedObjects` — 탐지 기하 (S15P11B209-836 신설)
 
@@ -150,6 +187,8 @@
 ### 2.5 롤아웃 호환 (양방향)
 
 - **전 필드 optional + 기본 빈 목록/`null`.** 구 BE가 안 보내면 기존(집계+대표 발화) 경로로 동일 동작 — `QuestionRequest.activityType`(713)과 같은 패턴. 836의 두 필드도 같다: `behaviorMetrics`가 없으면 `[형식적 분석]` 블록이 실리지 않고, `detectedObjects`가 비면 기존 코드 목록 경로가 그대로 쓰인다. 배포 순서 제약 없음.
+- 975의 세 필드도 같다: `strokeCount`·`colorsUsedCount`는 기본 `null`, `subjectDurations`는 기본
+  빈 목록이라, 구 BE가 안 보내면 해당 줄만 블록에서 빠지고 나머지는 그대로 실린다. 배포 순서 제약 없음.
 - ⚠️ **이 원칙은 목록 단위가 아니라 필드 단위로 지켜야 한다.** `detectedObjects` 를 optional 로 두고도 그 **안의** 기하를 필수로 두면 원칙이 깨진다 — 목록이 비었을 때만 안전하고, 항목이 하나라도 있으면 전량 422다. 실제로 그렇게 났다(§2.4 결함 이력). 부분 전달을 받아 **부분만 쓰는** 것이 이 계약의 기본값이다.
 - `subjectSummaries`가 비어 있지 않으면 프롬프트의 `[그림 관찰 서술]` 단일 블록 **대신** 주제별 블록(`[집 그림 관찰]`·`[집 그림 문답]` …)이 실린다. 레거시 `drawing_description` 인자(draft 경로 전용)와 동시 제공 시 주제별 블록이 우선.
 
@@ -249,6 +288,12 @@ AI 공용 GMS timeout 은 60초라(`gms.py`), 두면 AI가 아직 검토 중일 
 - `qaPairs.answerText`는 아이 발화 — `repr=False`, 로그·예외 메시지에 원문 금지 (기존 `representativeUtterance` 정책과 동일).
 - 주제별 문답은 '관찰된 사실'로만 프롬프트에 실리고, 그림 간 차이의 심리 단정(교차 비교 해석)은 프롬프트가 금지한다.
 - 진단 표현 강등(`_feature`)·disclaimer 상수 보장은 기존 그대로 적용 — 입력이 늘어도 출력 안전 규칙 불변.
+- 행동 데이터(`behaviorMetrics`)는 **관찰 프레임만** 허용된다 (S15P11B209-975). "집을 그릴 때 가장
+  오래 머물렀어요"·"여러 색을 바꿔가며 그렸어요"는 관찰이지만, 지우기·획·시간을 불안·우울·충동성 같은
+  심리 상태의 신호로 잇는 것은 진단이다. 07/17 방향 전환(검사·해석하지 않는다)과 같은 선이며,
+  규칙은 `ai/prompts/report_common.txt`(버전 추적 대상)에 카테고리 서술로 적는다 — 코드 문자열에
+  적으면 promptVersion 밖이라 "크게 고쳤는데 버전 그대로"가 재발하고(323), 금지 예시문을 적으면
+  앵커가 되어 모델이 복사한다(808).
 - 요청에 아동 실명·생년월일 등 식별 정보는 여전히 없다 — 추가 금지.
 
 ## 5. 절차 기록

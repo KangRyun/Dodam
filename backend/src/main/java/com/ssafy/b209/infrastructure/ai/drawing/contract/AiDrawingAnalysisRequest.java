@@ -227,23 +227,31 @@ public record AiDrawingAnalysisRequest(
   /**
    * 그림 과정에서 계산된 통계다.
    *
+   * <p>⚠️ 관찰 리포트 계약의 {@code ObservationGenerationRequest.BehaviorMetrics} 와 <b>같은 집계값 ({@link
+   * com.ssafy.b209.drawing.service.StrokeBehaviorSummary})의 두 번째 거울</b>이다. 한쪽에만 필드를 더하면 같은 활동이 경로에
+   * 따라 다르게 보인다 — 늘릴 때는 양쪽을 함께 늘린다 (S15P11B209-975).
+   *
    * @param drawingDurationMs 전체 그림 시간
    * @param activeDrawingMs 실제 입력 시간
+   * @param strokeCount 그은 획의 수이며 <b>지우개 획을 포함</b>해 {@code eraseCount} 와 세는 대상이 겹친다 (S15P11B209-975)
    * @param pauseCount 일시 정지 횟수
    * @param undoCount 실행 취소 횟수
    * @param eraseCount 지우기 횟수
    * @param toolChangeCount 도구 변경 횟수
    * @param colorChangeCount 색상 변경 횟수
+   * @param colorsUsedCount 실제로 획을 그린 색의 가짓수이며 색을 바꾼 <i>횟수</i>와 다른 값이다 (S15P11B209-975)
    * @param pressureAvailable 필압 데이터 사용 가능 여부
    */
   public record BehaviorSummary(
       Long drawingDurationMs,
       Long activeDrawingMs,
+      Integer strokeCount,
       Integer pauseCount,
       Integer undoCount,
       Integer eraseCount,
       Integer toolChangeCount,
       Integer colorChangeCount,
+      Integer colorsUsedCount,
       boolean pressureAvailable) {}
 
   /**

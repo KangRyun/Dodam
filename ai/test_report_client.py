@@ -469,6 +469,210 @@ class BehaviorBlockWordingTest(unittest.TestCase):
         self.assertIn("색 바꾼 횟수: 0회", zero_block)
 
 
+class StrokeBehaviorBlockTest(unittest.TestCase):
+    """획 수·색 가짓수·주제별 시간 (S15P11B209-975).
+
+    strokes 에 과정 데이터가 쌓여 있는데도 리포트에 닿지 않던 지표들이다.
+    """
+
+    def test_stroke_count_is_rendered_with_its_overlap_stated(self):
+        """지우개 획을 포함한다는 사실을 블록이 스스로 밝힌다.
+
+        밝히지 않으면 모델이 획 수와 지우기 횟수를 서로 배타적인 값으로 읽어 비율을 만든다.
+        """
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(stroke_count=42, erase_count=3)
+        )
+
+        self.assertIn("전체 획 수: 42획", block)
+        self.assertIn("지우개로 그은 획 포함", block)
+
+    def test_colors_used_count_is_rendered(self):
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(colors_used_count=4)
+        )
+
+        self.assertIn("사용한 색: 4가지", block)
+
+    def test_new_metrics_keep_the_zero_none_split(self):
+        """None은 '집계 못 함'이라 줄을 빼고, 0은 관찰 사실이라 적는다(기존 지표와 같은 규칙)."""
+        none_block = report_client._format_behavior(
+            contracts.BehaviorMetrics(erase_count=1)
+        )
+        self.assertNotIn("전체 획 수", none_block)
+        self.assertNotIn("사용한 색", none_block)
+
+        zero_block = report_client._format_behavior(
+            contracts.BehaviorMetrics(stroke_count=0, colors_used_count=0)
+        )
+        self.assertIn("전체 획 수: 0획", zero_block)
+        self.assertIn("사용한 색: 0가지", zero_block)
+
+    def test_subject_durations_render_as_one_comparable_line(self):
+        """"어느 그림에 더 오래 머물렀는가"의 재료 — 이 이슈의 핵심."""
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(
+                subject_durations=[
+                    contracts.SubjectDuration(
+                        drawing_subject="HOUSE", drawing_duration_ms=480_000
+                    ),
+                    contracts.SubjectDuration(
+                        drawing_subject="TREE", drawing_duration_ms=240_000
+                    ),
+                    contracts.SubjectDuration(
+                        drawing_subject="PERSON", drawing_duration_ms=180_000
+                    ),
+                ]
+            ),
+            is_htp=True,
+        )
+
+        self.assertIn(
+            "주제별 그리기 시간: 집 약 8분 · 나무 약 4분 · 사람 약 3분",
+            block,
+        )
+
+    def test_partial_subject_durations_drop_the_whole_line(self):
+        """🔴 부분 목록으로 순위를 매기면 아이에 대한 없는 관찰이 만들어진다.
+
+        한 주제의 시간이 없으면 남은 둘만 적지 않고 줄 자체를 뺀다 — 남겨 두면
+        "집을 가장 오래 그렸어요"가 실제로는 거짓일 수 있다.
+        """
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(
+                drawing_duration_ms=720_000,
+                subject_durations=[
+                    contracts.SubjectDuration(
+                        drawing_subject="HOUSE", drawing_duration_ms=480_000
+                    ),
+                    contracts.SubjectDuration(
+                        drawing_subject="TREE", drawing_duration_ms=None
+                    ),
+                ],
+            )
+        )
+
+        self.assertNotIn("주제별 그리기 시간", block)
+        # 나머지 지표는 그대로 실린다 — 한 줄의 문제로 블록 전체를 버리지는 않는다.
+        self.assertIn("총 소요시간", block)
+
+    def test_unknown_subject_code_drops_the_whole_line(self):
+        """라벨을 모르는 주제가 섞여도 같은 이유로 비교가 성립하지 않는다."""
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(
+                drawing_duration_ms=720_000,
+                subject_durations=[
+                    contracts.SubjectDuration(
+                        drawing_subject="HOUSE", drawing_duration_ms=480_000
+                    ),
+                    contracts.SubjectDuration(
+                        drawing_subject="MYSTERY", drawing_duration_ms=250_000
+                    ),
+                ],
+            )
+        )
+
+        self.assertNotIn("주제별 그리기 시간", block)
+
+    def test_diary_has_no_subject_duration_line(self):
+        """그림일기는 주제 구분이 없어 목록이 비어 있다."""
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(drawing_duration_ms=720_000)
+        )
+
+        self.assertNotIn("주제별 그리기 시간", block)
+
+    def test_new_metrics_alone_do_not_create_an_empty_block(self):
+        """적을 관찰이 없으면 빈 블록을 싣지 않는다는 기존 규칙이 새 지표에도 걸린다."""
+        block = report_client._format_behavior(
+            contracts.BehaviorMetrics(
+                subject_durations=[
+                    contracts.SubjectDuration(
+                        drawing_subject="HOUSE", drawing_duration_ms=None
+                    )
+                ]
+            )
+        )
+
+        self.assertEqual("", block)
+
+    def test_be_payload_reaches_the_block(self):
+        """🔴 이음매 검증 — BE 가 보내는 camelCase JSON 그대로 파싱해 블록까지 간다.
+
+        902 교훈: 단위 테스트가 통과해도 이음매가 이어져 있지 않으면 값이 도착하지 않는다.
+        여기서 별칭(camelCase)이 어긋나면 필드가 조용히 기본값으로 남는다.
+        """
+        req = contracts.ObservationGenerationRequest.model_validate(
+            {
+                "requestId": "req-975",
+                "analysisId": 1,
+                "drawingSessionId": 2,
+                "analysisType": "FINAL",
+                "behaviorMetrics": {
+                    "drawingDurationMs": 900000,
+                    "activeDrawingMs": 300000,
+                    "strokeCount": 90,
+                    "eraseCount": 6,
+                    "colorsUsedCount": 3,
+                    "pressureAvailable": True,
+                    "averagePressure": None,
+                    "truncated": False,
+                    "subjectDurations": [
+                        {
+                            "drawingSubject": "HOUSE",
+                            "drawingDurationMs": 480000,
+                            "activeDrawingMs": 160000,
+                        },
+                        {
+                            "drawingSubject": "TREE",
+                            "drawingDurationMs": 240000,
+                            "activeDrawingMs": 90000,
+                        },
+                        {
+                            "drawingSubject": "PERSON",
+                            "drawingDurationMs": 180000,
+                            "activeDrawingMs": 50000,
+                        },
+                    ],
+                },
+            }
+        )
+
+        self.assertEqual(90, req.behavior_metrics.stroke_count)
+        self.assertEqual(3, req.behavior_metrics.colors_used_count)
+
+        block = report_client._format_behavior(req.behavior_metrics, is_htp=True)
+        self.assertIn("전체 획 수: 90획", block)
+        self.assertIn("사용한 색: 3가지", block)
+        self.assertIn("주제별 그리기 시간: 집 약 8분 · 나무 약 4분 · 사람 약 3분", block)
+
+    def test_old_backend_without_the_new_fields_still_works(self):
+        """롤아웃 안전 — 구 BE 가 안 보내면 새 줄만 빠지고 나머지는 그대로다(§2.5)."""
+        req = contracts.ObservationGenerationRequest.model_validate(
+            {
+                "requestId": "req-975",
+                "analysisId": 1,
+                "drawingSessionId": 2,
+                "analysisType": "FINAL",
+                "behaviorMetrics": {
+                    "drawingDurationMs": 720000,
+                    "pauseCount": 4,
+                    "pressureAvailable": False,
+                    "truncated": False,
+                },
+            }
+        )
+
+        self.assertIsNone(req.behavior_metrics.stroke_count)
+        self.assertIsNone(req.behavior_metrics.colors_used_count)
+        self.assertEqual([], req.behavior_metrics.subject_durations)
+
+        block = report_client._format_behavior(req.behavior_metrics)
+        self.assertIn("총 소요시간: 약 12분", block)
+        self.assertNotIn("전체 획 수", block)
+        self.assertNotIn("주제별 그리기 시간", block)
+
+
 def _house_summary(**overrides) -> contracts.SubjectSummary:
     """집 그림 한 장의 주제 요약. detected_objects 를 overrides 로 갈아끼운다."""
     payload = {
