@@ -203,16 +203,23 @@ class ConversationPromptRulesTest(unittest.TestCase):
             self.assertNotIn("[질문 건너뛰기 의사 처리]", self._first(activity))
 
     def test_prompts_consume_visual_detail_from_description(self):
-        """VLM 서술의 눈에 보이는 세부를 실제로 골라 묻게 한다(대화 품질의 핵심).
+        """VLM 서술의 눈에 보이는 세부를 프롬프트가 실제로 소비한다.
 
         서술만 넣고 쓰라는 지시가 없으면 모델이 "뭘 그렸어?" 수준으로 돌아간다.
         세부 목록은 활동마다 다르다 — HTP는 색을 뺀다(아래 테스트가 그 금지를 고정한다).
+
+        ⚠️ '소비하는 방식'이 활동마다 갈린다(S15P11B209-954). HTP는 그 세부를 **질문 소재**로
+           쓴다(지붕 모양·나무 크기는 PDI 표준 문항이다). 그림일기는 반대로 **이미 아는
+           정보**로 써서 되묻지 않게 한다 — 아이가 "머리를 그렸어"라고 한 뒤 "어떤 모양이야?"가
+           나오던 경로가 여기였다.
         """
         for system in self._all():
             self.assertIn("표정·크기·위치·개수", system)
-        for activity in ("HTP", "ART_DIARY"):
-            for system in (self._first(activity), self._next(activity)):
-                self.assertIn("눈에 보이는 세부", system)
+        for system in (self._first("HTP"), self._next("HTP")):
+            self.assertIn("눈에 보이는 세부", system)
+        for system in (self._first("ART_DIARY"), self._next("ART_DIARY")):
+            self.assertIn("네가 이미 아는 정보야", system)
+            self.assertIn("되묻지 마", system)
 
     def test_htp_never_asks_about_color(self):
         """HTP 대화에서는 색을 묻지 않는다.

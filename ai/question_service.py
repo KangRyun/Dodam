@@ -405,10 +405,16 @@ def _activity_block(
     # 대상이 하나뿐이면 두 번째 대상을 지어내지 못하게 막는다(S15P11B209-921).
     # 반복 방지 지시("새로운 것을 물어봐")가 '다른 물건'으로 읽혀 사람 한 명 그림에서도
     # "옆에 있는 건 뭐야?"가 나왔다. 부위는 접어서 세므로 사람+머리+머리카락은 하나다.
+    #
+    # ⚠️ 두 구획은 활동별로 갈린다(S15P11B209-954). 원래 문구가 "같은 대상의 아직 이야기하지
+    #    않은 모양·색을 물어봐"라 **시각 속성 질문을 대놓고 권했다.** HTP에서는 그게 맞다 —
+    #    지붕 모양·나무 크기는 PDI 표준이 실제로 묻는 항목이다. 그러나 자유 그림에서는 그림에
+    #    이미 보이는 것이라 물을 것이 아니다. 그래서 그림일기만 _DIARY 변형을 싣는다.
+    diary = req.activity_type == "ART_DIARY"
     if _target_group_count(req) == 1:
-        lines.append(_block("SINGLE_TARGET"))
+        lines.append(_block("SINGLE_TARGET_DIARY" if diary else "SINGLE_TARGET"))
     if req.asked_object_codes:
-        lines.append(_block("ASKED_ALREADY"))
+        lines.append(_block("ASKED_ALREADY_DIARY" if diary else "ASKED_ALREADY"))
     # 이미 건넨 질문을 나열해 표현만 바꾼 반복을 막는다(S15P11B209-921).
     # 활동유형과 무관하게 붙인다 — HTP도 대상 객체 없는 질문끼리는 겹치는 것을 못 막는다.
     asked = _asked_questions(req)
@@ -1200,16 +1206,100 @@ QUALITY_OPEN_QUESTION = "그림에서 더 이야기해 주고 싶은 건 뭐야?
 
 
 def _quality_replacement(
-    purpose: str, target: DetectedObject | None
+    req: QuestionRequest, purpose: str, target: DetectedObject | None
 ) -> tuple[str, str, DetectedObject | None]:
     """어색한 질문을 대신할 (질문, 목적, 대상)을 만든다.
 
-    대상이 살아 있으면 그 대상의 '보이는 것'을 묻는 질문으로 바꾼다 — 대상을 버리면
-    아이 입장에서 화제가 통째로 사라진다. 대상이 없으면 그림 전체를 여는 질문으로 간다.
+    HTP는 대상이 살아 있으면 그 대상의 '보이는 것'을 묻는 질문으로 바꾼다 — 대상을 버리면
+    아이 입장에서 화제가 통째로 사라지고, 지붕 모양·나무 크기는 PDI가 실제로 묻는 항목이다.
+    그림일기는 그 교체 문장이 곧 954가 없애려는 버그라, 그림만 보고는 알 수 없는 축으로 옮긴다.
+    대상이 없으면 그림 전체를 여는 질문으로 간다.
     """
     name = (target.object_name or "").strip() if target is not None else ""
     if name and purpose == "OBJECT_DESCRIPTION":
+        if req.activity_type == "ART_DIARY":
+            return _diary_axis_replacement(req, target)
         return f"그림 속 {name}{question_quality.eun_neun(name)} 어떤 모양이야?", purpose, target
+    return QUALITY_OPEN_QUESTION, "DRAWING_CONTEXT", None
+
+
+# ── 이미 아는 것을 되묻는 질문의 교체 (S15P11B209-954) ────────────
+# 그림만 보고는 알 수 없는 축을 우선순위대로 둔다. 위에서부터 **이 대화에서 아직 다루지
+# 않은** 첫 축을 고른다. 색·모양·크기·위치는 여기 없다 — 그림에 이미 보이는 것이라
+# 물어볼 것이 없기 때문이다(이슈의 핵심).
+#
+# (축 이름, 이미 다뤘는지 알아볼 표지어, 건넬 질문, 사람 대상일 때만 쓸 것인가)
+#
+# ⚠️ 표지어는 우리가 물어본 말투와 **아이가 답한 말투를 함께** 담는다. 우리 질문 어투만
+#    보면("누구"), 아이가 먼저 "내 동생이야"라고 말해 준 경우를 놓쳐 정체를 또 묻게 된다.
+_DIARY_AXES = (
+    (
+        "IDENTITY",
+        (
+            "누구", "누가", "엄마", "아빠", "동생", "친구", "누나", "형",
+            "언니", "오빠", "선생님", "할머니", "할아버지",
+        ),
+        "그림 속 이 사람은 누구야?",
+        True,
+    ),
+    ("RELATION", ("사이", "누구랑", "함께", "같이"), "이 사람은 너와 어떤 사이야?", True),
+    (
+        "EVENT",
+        ("무슨 일", "뭐 하", "뭐 했", "놀았", "갔어", "했어", "먹었", "봤어"),
+        "여기서 무슨 일이 있었어?",
+        False,
+    ),
+    ("MEMORY", ("기억",), "이 장면에서 가장 기억나는 건 뭐야?", False),
+)
+
+# 사람 축(정체·관계)을 쓸 수 있는지 판단할 어휘. 사람이 아닌 그림에 "이 사람은 누구야?"를
+# 얹으면 918이 막으려던 '없는 것 단정'을 우리가 직접 저지르는 셈이 된다.
+_PERSON_WORDS = (
+    "사람", "얼굴", "머리", "몸", "팔", "다리", "손", "발", "아이",
+    "엄마", "아빠", "친구", "동생", "형", "누나", "언니", "오빠", "선생님",
+)
+
+
+def _child_texts(req: QuestionRequest) -> list[str]:
+    """이 대화에서 아이가 한 말(텍스트 있는 것만)."""
+    return [
+        (m.text or "").strip()
+        for m in req.recent_messages
+        if (m.sender_type or "").upper() == "CHILD" and (m.text or "").strip()
+    ]
+
+
+def _is_person_drawing(req: QuestionRequest, target: DetectedObject | None) -> bool:
+    """사람에 대해 물어도 되는 그림인가 — 탐지 대상·그림 서술·아이 말을 함께 본다."""
+    if target is not None and target.object_code.startswith("PERSON"):
+        return True
+    material = " ".join(
+        [_truncate_description(req.drawing_description) or "", *_child_texts(req)]
+    )
+    return any(word in material for word in _PERSON_WORDS)
+
+
+def _diary_axis_replacement(
+    req: QuestionRequest, target: DetectedObject | None
+) -> tuple[str, str, DetectedObject | None]:
+    """이미 아는 것을 되묻는 질문을 '아직 안 나온 축'의 질문 하나로 바꾼다.
+
+    이미 다뤘는지는 우리가 건넨 질문(_asked_questions)과 아이가 한 말을 함께 본다 —
+    아이가 먼저 "동생이야"라고 말했으면 정체는 이미 나온 것이라 다시 물을 이유가 없다.
+
+    대상 객체는 떼고 돌려준다. 축을 옮긴 질문이라 그 대상 하나를 가리키지 않고, 붙여 두면
+    918이 억눌러 둔 오탐 이름이 targetObject·칩으로 다시 아이 화면에 올라온다.
+    """
+    covered = " ".join([*_asked_questions(req), *_child_texts(req)])
+    person = _is_person_drawing(req, target)
+    purpose = "FOLLOW_UP" if _last_child_index(req) is not None else "DRAWING_CONTEXT"
+    for _axis, markers, question, person_only in _DIARY_AXES:
+        if person_only and not person:
+            continue
+        if any(marker in covered for marker in markers):
+            continue
+        return question, purpose, None
+    # 축을 다 썼으면 아이가 고르게 열어 둔다.
     return QUALITY_OPEN_QUESTION, "DRAWING_CONTEXT", None
 
 
@@ -1467,17 +1557,44 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         # 정화 후 남는 게 없으면(기호뿐이었으면) 빈 출력 — 폴백 템플릿에 맡긴다.
         raise UpstreamError("AI_EMPTY_COMPLETION", "EmptyCompletion")
 
+    # 한 응답에 질문이 둘이면 아이가 무엇에 답할지 고르지 못한다 — 앞의 반응과 첫 질문만
+    # 남긴다(S15P11B209-954). 교체가 아니라 잘라내기라 활동유형과 무관하게 적용한다.
+    if question_quality.find_multiple_questions(text):
+        # ⚠️ 질문 원문은 남기지 않는다 — 사유 코드만.
+        logger.warning(
+            "질문 여러 개 — 하나로 축소: reason=%s request_id=%s",
+            question_quality.MULTIPLE_QUESTIONS,
+            request_id,
+        )
+        text = question_quality.to_single_question(
+            text,
+            drawing_description=_truncate_description(req.drawing_description),
+            child_texts=_child_texts(req),
+        )
+
     # 문맥상 어색한 질문(그림 속 부위의 소유자를 묻는 등)은 차단하지 않고 교체한다
     # (S15P11B209-918). 안전 판정 뒤에 두는 이유: 교체 문장은 우리가 쓴 것이라 다시
     # 판정할 필요가 없고, 안전 차단이 먼저 걸리는 문장은 애초에 여기 오지 않는다.
     quality_replaced = False
     quality_reason = question_quality.find_awkward(text)
+    # 그림·아이 말로 이미 답을 아는 질문도 같은 방식으로 교체한다(S15P11B209-954).
+    # ⚠️ 그림일기에서만 본다. HTP는 지붕 모양·나무 크기가 PDI 표준 문항이라, 여기서 걸러
+    #    내면 htp_question_bank가 통째로 죽는다.
+    if not quality_reason and req.activity_type == "ART_DIARY":
+        quality_reason = question_quality.find_redundant(
+            text,
+            drawing_description=_truncate_description(req.drawing_description),
+            child_texts=_child_texts(req),
+        )
     if quality_reason:
         # ⚠️ 질문 원문은 남기지 않는다 — 사유 코드만(안전 차단 로그와 같은 규칙).
         logger.warning(
             "질문 품질 교체: reason=%s request_id=%s", quality_reason, request_id
         )
-        text, purpose, target = _quality_replacement(purpose, target)
+        if quality_reason == question_quality.REDUNDANT_VISUAL:
+            text, purpose, target = _diary_axis_replacement(req, target)
+        else:
+            text, purpose, target = _quality_replacement(req, purpose, target)
         quality_replaced = True
         candidate_options = None
 
@@ -1494,8 +1611,14 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
         options = None  # OPTION 비허용 → 칩 없음(빈 배열도 계약 위반)
     elif quality_replaced and target is None:
         # 교체된 열린 질문에 탐지 후보 칩(747의 '무엇→후보' 규칙)을 붙이면, 방금 억누른
-        # 오탐 이름이 칩으로 아이 화면에 다시 올라온다(S15P11B209-918). 목적별 generic을 쓴다.
-        options = _options_for_purpose(purpose)
+        # 오탐 이름이 칩으로 아이 화면에 다시 올라온다(S15P11B209-918). 우리가 쥔 큐레이션
+        # 라벨만 쓴다 — 정체를 묻는 교체 질문(954)에는 사람 칩이, 그 밖에는 목적별 generic이
+        # 붙는다. 어느 쪽도 탐지 이름을 화면에 올리지 않는다.
+        options = (
+            _labeled_chips(_WHO_CHIPS, escape="다른 사람이야")
+            if _RE_WHO.search(text)
+            else _options_for_purpose(purpose)
+        )
     elif candidate_options is not None:
         options = candidate_options  # 부정 재질문 후보(718)
     elif _NEGATION_CODE in selected_codes or _ESCAPE_CODE in selected_codes:

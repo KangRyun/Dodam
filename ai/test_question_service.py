@@ -20,6 +20,7 @@ import config
 import conversation_stop_intent
 import crisis_guidance
 import llm_client
+import question_quality
 import question_safety
 import question_service
 from pydantic import ValidationError
@@ -2323,6 +2324,212 @@ class SingleTargetTest(unittest.TestCase):
         self.assertIn("두 번째 대상이 있다고 전제하는 말은 쓰지 마", block)
         # 금지 예시 문장을 적으면 그 자체가 앵커가 된다(808) — 낱말만 짚는다.
         self.assertNotIn("옆에 있는 건 뭐야?", block)
+
+
+class RedundantVisualQuestionTest(unittest.TestCase):
+    """이미 보이는 것을 다시 묻지 않는다 (S15P11B209-954).
+
+    VLM 서술과 아이 발화는 '이미 아는 정보'다. 그런데 프롬프트가 그 세부를 '질문 소재'로
+    권해 왔고("색·표정·크기·위치·개수 … 실마리로 써도 좋아"), 그 결과 아이가 "머리를
+    그렸어"라고 말하면 "어떤 머리를 그린 거야?"가 돌아왔다 — 방금 한 말을 다시 설명하라는
+    요구다.
+
+    ⚠️ 차단(422)이 아니라 교체다. 918과 같은 판단 — 폴백 템플릿으로 떨어지면 대화가 더
+       나빠진다. 대신 그림만 보고는 알 수 없는 축(정체·관계·사건·기억)으로 옮긴다.
+    """
+
+    PERSON_DESC = "검은색 곱슬머리를 한 사람이 있어요."
+    HOUSE_DESC = "빨간 지붕의 집이 있어요."
+
+    def _diary(self, *, said, reply, description, **overrides):
+        """아이가 한 마디 한 뒤의 그림일기 요청 + 그 답으로 reply를 내는 가짜 GMS."""
+        base = {
+            "activity_type": "ART_DIARY",
+            "allowed_response_modes": ["VOICE", "OPTION"],
+            "drawing_description": description,
+            # 완전 첫 질문은 921이 고정 문구로 가로챈다 — 그 뒤 턴을 본다.
+            "current_question_count": 1,
+            "recent_messages": [
+                RecentMessage(
+                    sender_type="CHILD", message_type="VOICE_ANSWER", text=said
+                ),
+            ],
+        }
+        base.update(overrides)
+        capture: dict = {}
+        client = _mock_client(capture, reply=reply)
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            return question_service.generate(_request(**base), "req-954"), capture
+
+    def _assert_no_visual_question(self, text):
+        for banned in ("어떤 모양", "무슨 색", "어떤 색", "어떻게 생겼", "어떤 모습", "몇 개"):
+            self.assertNotIn(banned, text)
+
+    # ── 필수 사례 ①: 사람·머리 ──────────────────────────────────
+    def test_child_said_head_so_shape_and_color_are_not_asked_back(self):
+        for reply in ("어떤 머리를 그린 거야?", "머리는 어떤 모양이야?", "머리는 무슨 색이야?"):
+            with self.subTest(reply=reply):
+                resp, _ = self._diary(
+                    said="머리를 그렸어",
+                    reply=reply,
+                    description=self.PERSON_DESC,
+                    detected_objects=[_detected("PERSON", "사람", 0.9)],
+                )
+                self._assert_no_visual_question(resp.question_text)
+                # 그림만 보고는 알 수 없는 것을 묻는다 — 여기서는 인물의 정체.
+                self.assertIn("누구", resp.question_text)
+                self.assertEqual("PASSED", resp.safety_result.status)
+                self.assertFalse(resp.fallback_used)
+
+    # ── 필수 사례 ②: 빨간 지붕의 집 ─────────────────────────────
+    def test_house_color_and_shape_are_not_asked_back(self):
+        for reply in ("무슨 색이야?", "어떤 모양이야?", "집은 무슨 색이야?"):
+            with self.subTest(reply=reply):
+                resp, _ = self._diary(
+                    said="집을 그렸어",
+                    reply=reply,
+                    description=self.HOUSE_DESC,
+                    detected_objects=[_detected("HOUSE", "집", 0.9)],
+                )
+                self._assert_no_visual_question(resp.question_text)
+                # 사람 그림이 아니라 정체·관계 축은 건너뛰고 장면의 이야기를 묻는다.
+                self.assertIn("무슨 일이 있었어", resp.question_text)
+
+    # ── 필수 사례 ③: 아이가 길게 설명한 뒤 ──────────────────────
+    def test_long_utterance_is_not_re_asked_in_other_words(self):
+        resp, _ = self._diary(
+            said="여기 검은 머리 사람은 내 동생이고 우리 같이 공원에서 뛰어놀았어",
+            reply="동생은 어떤 모습이야?",
+            description=self.PERSON_DESC,
+            detected_objects=[_detected("PERSON", "사람", 0.9)],
+        )
+        self._assert_no_visual_question(resp.question_text)
+        # 정체("동생")·관계("같이")·사건("뛰어놀았어")이 이미 다 나왔다 —
+        # 아직 안 나온 축(기억)으로 옮겨야 한다.
+        self.assertNotIn("누구야", resp.question_text)
+        self.assertNotIn("무슨 일이 있었어", resp.question_text)
+        self.assertIn("기억나는", resp.question_text)
+
+    # ── 필수 사례 ④: 아이가 탐지를 말로 정정 ────────────────────
+    def test_corrected_name_does_not_come_back_in_question_or_chips(self):
+        resp, _ = self._diary(
+            said="아니야, 이건 집이야",
+            reply="이 덤불은 어떤 모양이야?",
+            description="화면 가운데에 덤불이 있어요.",
+            detected_objects=[_detected("BUSH", "덤불", 0.86)],
+        )
+        self._assert_no_visual_question(resp.question_text)
+        self.assertNotIn("덤불", resp.question_text)
+        # 방금 억누른 오탐 이름이 칩으로 다시 올라오면 안 된다(918과 같은 방어).
+        self.assertNotIn("덤불", [o.label for o in resp.options])
+        self.assertIsNone(resp.target_object)
+
+    # ── 필수 사례 ⑤: 질문이 둘 ──────────────────────────────────
+    def test_two_questions_are_reduced_to_one(self):
+        resp, _ = self._diary(
+            said="머리를 그렸어",
+            reply="머리를 그렸구나! 이 사람은 누구야? 이름이 뭐야?",
+            description=self.PERSON_DESC,
+            detected_objects=[_detected("PERSON", "사람", 0.9)],
+        )
+        self.assertEqual(1, resp.question_text.count("?"))
+        # 앞의 공감은 남기고 첫 질문만 남긴다(수용 기준 7).
+        self.assertIn("머리를 그렸구나", resp.question_text)
+        self.assertIn("이 사람은 누구야?", resp.question_text)
+        self.assertNotIn("이름이 뭐야", resp.question_text)
+
+    # ── 과탐 방어 ───────────────────────────────────────────────
+    def test_good_question_is_untouched(self):
+        """그림만 보고는 알 수 없는 질문은 그대로 나간다 — 교체가 남발되면 안 된다."""
+        for reply in (
+            "머리를 그렸구나! 이 사람은 누구야?",
+            "여기서 무슨 일이 있었어?",
+            "그때 기분이 어땠어?",
+        ):
+            with self.subTest(reply=reply):
+                resp, _ = self._diary(
+                    said="머리를 그렸어",
+                    reply=reply,
+                    description=self.PERSON_DESC,
+                    detected_objects=[_detected("PERSON", "사람", 0.9)],
+                )
+                self.assertEqual(reply, resp.question_text)
+
+    def test_htp_visual_questions_are_kept(self):
+        """HTP는 지붕 모양·나무 크기가 PDI 표준 문항이다 — 여기서 걸러 내면 뱅크가 죽는다."""
+        capture: dict = {}
+        client = _mock_client(capture, reply="지붕은 어떤 모양이야?")
+        req = _request(
+            activity_type="HTP",
+            drawing_subject="HOUSE",
+            allowed_response_modes=["VOICE", "OPTION"],
+            drawing_description="빨간 지붕의 집이 있어요.",
+            detected_objects=[_detected("HOUSE_ROOF", "지붕", 0.9)],
+            current_question_count=1,
+            recent_messages=[
+                RecentMessage(
+                    sender_type="CHILD", message_type="VOICE_ANSWER", text="집을 그렸어"
+                ),
+            ],
+        )
+        with mock.patch.object(question_service, "get_client", return_value=client):
+            resp = question_service.generate(req, "req-954")
+        self.assertEqual("지붕은 어떤 모양이야?", resp.question_text)
+
+    def test_replacement_reason_logged_without_raw_question(self):
+        with self.assertLogs("question_service", level="WARNING") as logs:
+            self._diary(
+                said="머리를 그렸어",
+                reply="머리는 어떤 모양이야?",
+                description=self.PERSON_DESC,
+                detected_objects=[_detected("PERSON", "사람", 0.9)],
+            )
+        joined = "\n".join(logs.output)
+        self.assertIn(question_quality.REDUNDANT_VISUAL, joined)
+        self.assertNotIn("어떤 모양이야", joined)  # 질문 원문은 로그 금지
+
+    def test_prompt_states_the_principle(self):
+        """프롬프트가 1차 방어다 — 판정기는 뚫렸을 때의 그물이다."""
+        req = _request(
+            activity_type="ART_DIARY",
+            drawing_description="빨간 지붕의 집이 있어요.",
+            recent_messages=[
+                RecentMessage(
+                    sender_type="CHILD", message_type="VOICE_ANSWER", text="집을 그렸어"
+                ),
+            ],
+        )
+        system = question_service._build_messages(req)[0]["content"]
+        self.assertIn("[이미 보이는 것을 다시 묻지 않기]", system)
+        self.assertIn("이미 알고 있는 정보야", system)
+        self.assertIn("표현만 바꿔 되묻지 마", system)
+        self.assertIn("[무엇을 물어볼까 - 우선순위]", system)
+        self.assertIn("분석보다 아이 말을 우선해", system)
+
+    def test_diary_activity_block_does_not_invite_visual_questions(self):
+        """[[SINGLE_TARGET]]·[[ASKED_ALREADY]]가 '모양·색을 물어봐'라고 권하던 경로."""
+        req = _request(
+            activity_type="ART_DIARY",
+            drawing_description="빨간 지붕의 집이 있어요.",
+            detected_objects=[_detected("HOUSE", "집", 0.9)],
+            asked_object_codes=["HOUSE"],
+        )
+        block = question_service._activity_block(req, None)
+        self.assertIn("대상이 하나뿐", block)
+        self.assertNotIn("모양·색·행동·표정", block)
+        self.assertIn("정체·관계·사건·경험·기억", block)
+
+        # HTP는 그대로 둔다 — 같은 구획을 활동으로 가른다.
+        htp = question_service._activity_block(
+            _request(
+                activity_type="HTP",
+                drawing_subject="HOUSE",
+                detected_objects=[_detected("HOUSE", "집전체", 0.9)],
+                asked_object_codes=["HOUSE"],
+            ),
+            None,
+        )
+        self.assertIn("모양·색·행동·표정", htp)
 
 
 if __name__ == "__main__":
