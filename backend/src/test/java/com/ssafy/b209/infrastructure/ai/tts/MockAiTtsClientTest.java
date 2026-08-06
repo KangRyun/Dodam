@@ -3,6 +3,7 @@ package com.ssafy.b209.infrastructure.ai.tts;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.ssafy.b209.conversation.dto.TtsToneProfile;
 import com.ssafy.b209.storage.audio.AudioStorageProperties;
 import com.ssafy.b209.storage.audio.LocalAudioStorage;
 import com.ssafy.b209.storage.audio.StagedAudio;
@@ -25,7 +26,12 @@ class MockAiTtsClientTest {
   @Test
   void synthesizesPlayableMp3(@TempDir Path storageRoot) {
     TtsSynthesis synthesis =
-        client.synthesize(new TtsSynthesisCommand("이 그림에서 무엇이 보이니?", "CHILD_FRIENDLY_01", speed()));
+        client.synthesize(
+            new TtsSynthesisCommand(
+                "이 그림에서 무엇이 보이니?",
+                "CHILD_FRIENDLY_01",
+                speed(),
+                TtsToneProfile.CHARACTER_DEFAULT_V1));
 
     assertThat(synthesis.audioFormat()).isEqualTo("mp3");
     assertThat(synthesis.audio()).isNotEmpty();
@@ -53,7 +59,11 @@ class MockAiTtsClientTest {
 
   @Test
   void rejectsBlankText() {
-    assertThatThrownBy(() -> client.synthesize(new TtsSynthesisCommand("  ", "V", speed())))
+    assertThatThrownBy(
+            () ->
+                client.synthesize(
+                    new TtsSynthesisCommand(
+                        "  ", "V", speed(), TtsToneProfile.CHARACTER_DEFAULT_V1)))
         .isInstanceOf(AiTtsClientException.class);
   }
 

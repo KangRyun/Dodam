@@ -337,6 +337,8 @@ class _DrawingScreenState extends State<DrawingScreen>
   bool _awaitingNoResponseQuestion = false;
   AiQuestion? _noResponseRequestSourceQuestion;
   int? _noResponseTtsReadyQuestionMessageId;
+  QuestionTtsToneProfile _nextQuestionToneProfile =
+      QuestionTtsToneProfile.characterDefault;
   final Set<int> _knownQuestionMessageIds = <int>{};
   final Set<int> _noResponseHandledQuestionMessageIds = <int>{};
 
@@ -1222,6 +1224,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     final questionController = _questionController;
     if (questionController?.status == AiQuestionStatus.conversationComplete) {
       _cancelNoResponseTimer();
+      _clearPendingNoResponseToneProfile();
       _noResponseRequestInFlight = false;
       _awaitingNoResponseQuestion = false;
       _noResponseRequestSourceQuestion = null;
@@ -1240,7 +1243,10 @@ class _DrawingScreenState extends State<DrawingScreen>
     if (questionController?.status != AiQuestionStatus.success) {
       _cancelNoResponseTimer();
       if (questionController?.status != AiQuestionStatus.loading) {
+        _clearPendingNoResponseToneProfile();
         _noResponseRequestInFlight = false;
+        _awaitingNoResponseQuestion = false;
+        _noResponseRequestSourceQuestion = null;
       }
       if (mounted) setState(() {});
       return;
@@ -1289,9 +1295,19 @@ class _DrawingScreenState extends State<DrawingScreen>
         _questionSkipController?.beginQuestion(question.messageId);
         _voiceAnswerUploadController?.beginQuestion(question.messageId);
         if (_voiceAnswerUploadController == null) {
-          unawaited(_prepareNoResponseTimerAfterTts(question));
+          unawaited(
+            _prepareNoResponseTimerAfterTts(
+              question,
+              toneProfile: _consumeNextQuestionToneProfile(),
+            ),
+          );
         } else {
-          unawaited(_prepareVoiceAnswerForQuestion(question));
+          unawaited(
+            _prepareVoiceAnswerForQuestion(
+              question,
+              toneProfile: _consumeNextQuestionToneProfile(),
+            ),
+          );
         }
       }
     });
@@ -1317,8 +1333,21 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
   }
 
-  Future<void> _prepareNoResponseTimerAfterTts(AiQuestion question) async {
-    await _questionTtsController?.playQuestion(question);
+  QuestionTtsToneProfile _consumeNextQuestionToneProfile() {
+    final toneProfile = _nextQuestionToneProfile;
+    _nextQuestionToneProfile = QuestionTtsToneProfile.characterDefault;
+    return toneProfile;
+  }
+
+  Future<void> _prepareNoResponseTimerAfterTts(
+    AiQuestion question, {
+    QuestionTtsToneProfile toneProfile =
+        QuestionTtsToneProfile.characterDefault,
+  }) async {
+    await _questionTtsController?.playQuestion(
+      question,
+      toneProfile: toneProfile,
+    );
     if (!_isVisibleCurrentQuestion(question)) return;
     _markNoResponseTtsReady(question);
   }
@@ -1372,6 +1401,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     _cancelNoResponseTimer();
     if (!_noResponseRequestInFlight && !_awaitingNoResponseQuestion) return;
     final sourceQuestion = _noResponseRequestSourceQuestion;
+    _clearPendingNoResponseToneProfile();
     _noResponseRequestInFlight = false;
     _awaitingNoResponseQuestion = false;
     _noResponseRequestSourceQuestion = null;
@@ -1381,6 +1411,14 @@ class _DrawingScreenState extends State<DrawingScreen>
       // restore()의 generation 증가를 이용해 이미 전송된 요청의 늦은 결과가
       // 사용자 입력이나 lifecycle 전환 뒤 화면을 덮어쓰지 못하게 한다.
       _questionController?.restore(sourceQuestion);
+    }
+  }
+
+  void _clearPendingNoResponseToneProfile() {
+    if (_noResponseRequestInFlight ||
+        _awaitingNoResponseQuestion ||
+        _noResponseRequestSourceQuestion != null) {
+      _nextQuestionToneProfile = QuestionTtsToneProfile.characterDefault;
     }
   }
 
@@ -1412,6 +1450,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     _awaitingNoResponseQuestion = true;
     _noResponseRequestSourceQuestion = question;
     _noResponseHandledQuestionMessageIds.add(question.messageId);
+    _nextQuestionToneProfile = QuestionTtsToneProfile.characterEncouraging;
     await _questionTtsController?.stop();
     await _voiceRecordingController?.cancel();
     if (!mounted ||
@@ -1427,7 +1466,11 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   // 질문 음성 재생이 끝나면 별도 버튼 없이 새 답변 녹음을 시작한다.
-  Future<void> _prepareVoiceAnswerForQuestion(AiQuestion question) async {
+  Future<void> _prepareVoiceAnswerForQuestion(
+    AiQuestion question, {
+    QuestionTtsToneProfile toneProfile =
+        QuestionTtsToneProfile.characterDefault,
+  }) async {
     final recordingController = _voiceRecordingController;
     if (recordingController == null) return;
 
@@ -1436,7 +1479,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     try {
       // 오디오 완료 이벤트가 유실되어도 자동 녹음 시작이 막히지 않게 제한시간을 둔다.
       await _questionTtsController
-          ?.playQuestion(question)
+          ?.playQuestion(question, toneProfile: toneProfile)
           .timeout(const Duration(seconds: 20));
     } on TimeoutException {
       await _questionTtsController?.stop();
@@ -1556,7 +1599,12 @@ class _DrawingScreenState extends State<DrawingScreen>
         answerMessageId != null &&
         _lastFollowUpAnswerMessageId != answerMessageId) {
       _lastFollowUpAnswerMessageId = answerMessageId;
-      unawaited(_requestFollowingQuestion(answerMessageId));
+      unawaited(
+        _requestFollowingQuestion(
+          answerMessageId,
+          toneProfile: QuestionTtsToneProfile.characterCelebrating,
+        ),
+      );
     }
     // STT가 실패(무음·저신뢰)했거나 지연되면 아이는 답을 보내지 못한 상태다. 질문을 다시
     // 보여주고 선택지를 띄워 대화를 이어가게 한다 — 그러지 않으면 화면이 멈춘 것처럼 된다.
@@ -1618,7 +1666,10 @@ class _DrawingScreenState extends State<DrawingScreen>
       // 아이가 그만하겠다고 고른 칩이면 다음 질문을 요청하지 않는다(S15P11B209-938).
       // AI 는 무엇을 그만할지 되묻기만 하고, 실제로 끝내는 것은 여기서 한다.
       if (await _handleStopIntentOption(optionId)) return;
-      await _requestFollowingQuestion(controller.answerMessageId);
+      await _requestFollowingQuestion(
+        controller.answerMessageId,
+        toneProfile: QuestionTtsToneProfile.characterCelebrating,
+      );
     }
   }
 
@@ -1662,13 +1713,18 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   /// 저장된 응답을 문맥으로 전달해 같은 그림의 다음 질문을 요청한다.
-  Future<void> _requestFollowingQuestion(int? previousAnswerMessageId) async {
+  Future<void> _requestFollowingQuestion(
+    int? previousAnswerMessageId, {
+    QuestionTtsToneProfile toneProfile =
+        QuestionTtsToneProfile.characterDefault,
+  }) async {
     _invalidateNoResponseRequest();
     if (!mounted ||
         _conversationEndController?.completed == true ||
         _automaticConversationEndStarted) {
       return;
     }
+    _nextQuestionToneProfile = toneProfile;
     await _questionController?.loadNext(
       previousAnswerMessageId: previousAnswerMessageId,
     );

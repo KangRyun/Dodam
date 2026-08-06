@@ -1,6 +1,7 @@
 package com.ssafy.b209.infrastructure.ai.tts;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
+import com.ssafy.b209.conversation.dto.TtsToneProfile;
 import java.math.BigDecimal;
 import java.net.SocketTimeoutException;
 import java.net.http.HttpTimeoutException;
@@ -57,7 +58,9 @@ public final class RestClientAiTtsClient implements AiTtsClient {
               .header("X-Internal-Token", internalToken)
               .header("X-Request-Id", UUID.randomUUID().toString())
               .contentType(MediaType.APPLICATION_JSON)
-              .body(new SynthesisHttpRequest(command.text(), command.voice(), command.speed()))
+              .body(
+                  new SynthesisHttpRequest(
+                      command.text(), command.voice(), command.speed(), command.toneProfile()))
               .retrieve()
               .onStatus(
                   status -> !status.is2xxSuccessful(),
@@ -109,7 +112,8 @@ public final class RestClientAiTtsClient implements AiTtsClient {
     return false;
   }
 
-  private record SynthesisHttpRequest(String text, String voice, BigDecimal speed) {}
+  private record SynthesisHttpRequest(
+      String text, String voice, BigDecimal speed, TtsToneProfile toneProfile) {}
 
   @JsonIgnoreProperties(ignoreUnknown = true)
   private record SynthesisHttpResponse(String audioBase64, String audioFormat) {}

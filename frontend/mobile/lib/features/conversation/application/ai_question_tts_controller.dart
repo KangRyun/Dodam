@@ -29,7 +29,11 @@ final class AiQuestionTtsController extends ChangeNotifier {
 
   Set<int> get handledMessageIds => Set.unmodifiable(_handledMessageIds);
 
-  Future<void> playQuestion(AiQuestion question) async {
+  Future<void> playQuestion(
+    AiQuestion question, {
+    QuestionTtsToneProfile toneProfile =
+        QuestionTtsToneProfile.characterDefault,
+  }) async {
     if (_disposed ||
         !question.ttsAvailable ||
         !_handledMessageIds.add(question.messageId)) {
@@ -47,7 +51,7 @@ final class AiQuestionTtsController extends ChangeNotifier {
     try {
       final audio = await _repository.loadQuestionAudio(
         question.messageId,
-        request: request,
+        request: request.copyWith(toneProfile: toneProfile),
       );
       if (!_isCurrent(generation, question.messageId)) return;
       await _player.play(audio.bytes, mimeType: audio.mimeType);

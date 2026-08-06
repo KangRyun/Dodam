@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -13,6 +14,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.ssafy.b209.auth.exception.AuthErrorCode;
 import com.ssafy.b209.conversation.dto.TtsGenerateRequest;
 import com.ssafy.b209.conversation.dto.TtsGenerateResponse;
+import com.ssafy.b209.conversation.dto.TtsToneProfile;
 import com.ssafy.b209.conversation.exception.ConversationMessageStatusErrorCode;
 import com.ssafy.b209.conversation.service.GuardianUserResolver;
 import com.ssafy.b209.conversation.service.QuestionTtsService;
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -108,6 +111,11 @@ class QuestionTtsControllerTest {
         .andExpect(status().isOk())
         .andExpect(jsonPath("$.success").value(true))
         .andExpect(jsonPath("$.data.audioUrl").value(AUDIO_URL));
+    ArgumentCaptor<TtsGenerateRequest> requestCaptor =
+        ArgumentCaptor.forClass(TtsGenerateRequest.class);
+    verify(questionTtsService).generate(eq(10L), eq(803L), requestCaptor.capture());
+    assertThat(requestCaptor.getValue().toneProfile())
+        .isEqualTo(TtsToneProfile.CHARACTER_DEFAULT_V1);
 
     mockMvc
         .perform(json("803", "{\"voice\":\"CHILD_FRIENDLY_01\",\"speed\":1.2}"))

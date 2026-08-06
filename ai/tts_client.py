@@ -17,11 +17,29 @@ from gms import get_client
 
 logger = logging.getLogger(__name__)
 
-# 곰돌이 캐릭터 말투 지시(steer). 실제 대사 '내용'은 아니고 '어떻게 말할지'만.
-BEAR_INSTRUCTIONS = (
-    "너는 아이와 이야기하는 따뜻하고 다정한 곰돌이야. "
-    "밝고 부드럽게, 조금 천천히, 쉬운 말로 말해. 과장 없이 친근하게."
-)
+TONE_PROFILES = {
+    "CHARACTER_DEFAULT_V1",
+    "CHARACTER_CELEBRATING_V1",
+    "CHARACTER_ENCOURAGING_V1",
+}
+
+# 지시는 텍스트나 요청의 자유 입력에서 만들지 않는다. voice는 아래 고정 표의 키 선택에만 쓰고,
+# 알 수 없는 값은 BASE로 수렴한다. 그래서 아이 발화나 임의 문자열이 모델 지시가 될 수 없다.
+CHARACTER_INSTRUCTIONS = {
+    "BASE": "포근하고 믿음직한 도담이 친구처럼, 밝고 부드럽고 쉬운 말로 말해.",
+    "PRINCESS": "다정하고 자신감 있는 공주 친구처럼, 반짝이되 차분하게 말해.",
+    "DINO": "호기심 많은 공룡 친구처럼, 활기차되 너무 빠르지 않게 말해.",
+    "OCTOPUS": "장난스럽고 리듬감 있는 문어 친구처럼, 또렷하고 친근하게 말해.",
+    "EXPLORER": "함께 발견하는 탐험가 친구처럼, 기대감을 담아 따뜻하게 말해.",
+    "RIBBON": "경쾌하고 사랑스러운 리본 친구처럼, 밝은 격려를 담아 말해.",
+    "PRINCE": "차분하고 예의 바른 왕자 친구처럼, 든든하고 부드럽게 말해.",
+}
+
+SCENARIO_INSTRUCTIONS = {
+    "CHARACTER_DEFAULT_V1": "기본 목소리와 말의 속도를 유지해 자연스럽게 이어 가.",
+    "CHARACTER_CELEBRATING_V1": "아이가 발견하거나 해낸 순간에는 기쁜 마음을 조금 더 담되, 들뜨거나 과장하지 마.",
+    "CHARACTER_ENCOURAGING_V1": "아이가 망설이거나 생각할 때는 속도를 조금 낮추고, 짧고 안정적으로 응원해.",
+}
 
 # 서비스 voice 코드 → GMS provider voice id.
 #   BE 공개 API는 명세 예시(voice="CHILD_FRIENDLY_01")에 맞춰 대문자 코드를 받는데, GMS는
@@ -39,6 +57,19 @@ SERVICE_VOICE_TO_PROVIDER = {
     "ECHO": "echo",
     "SAGE": "sage",
     "VERSE": "verse",
+}
+
+SERVICE_VOICE_TO_CHARACTER = {
+    "CHILD_FRIENDLY_01": "BASE",
+    "FABLE": "BASE",
+    "NOVA": "PRINCESS",
+    "ASH": "DINO",
+    "BALLAD": "OCTOPUS",
+    "VERSE": "EXPLORER",
+    "SAGE": "RIBBON",
+    "ECHO": "PRINCE",
+    "ALLOY": "BASE",
+    "CORAL": "BASE",
 }
 
 
@@ -64,18 +95,27 @@ def resolve_voice(voice: str | None) -> str:
     return resolved
 
 
+def compose_instructions(voice: str | None, tone_profile: str) -> str:
+    """서버 고정 캐릭터·상황 표만 조합해 GMS 지시를 만든다."""
+    if tone_profile not in TONE_PROFILES:
+        raise ValueError("unsupported tone profile")
+    voice_code = voice.strip().upper() if voice and voice.strip() else ""
+    character = SERVICE_VOICE_TO_CHARACTER.get(voice_code, "BASE")
+    return f"{CHARACTER_INSTRUCTIONS[character]} {SCENARIO_INSTRUCTIONS[tone_profile]}"
+
+
 def synthesize(
     text: str,
     *,
     voice: str | None = None,
-    instructions: str | None = None,
+    tone_profile: str = "CHARACTER_DEFAULT_V1",
 ) -> bytes:
     """텍스트를 음성(mp3 bytes)으로 변환한다.
 
     Args:
         text: 읽을 텍스트(캐릭터 대사).
         voice: 서비스 voice 코드 또는 provider id. 미지정·미지 코드는 config.TTS_VOICE(fable).
-        instructions: 말투 지시. 미지정 시 곰돌이 기본(BEAR_INSTRUCTIONS).
+        tone_profile: 서버 고정 캐릭터·상황 말투 프로필. 목록 밖의 값은 거절한다.
 
     Returns:
         mp3 오디오 bytes.
@@ -84,12 +124,13 @@ def synthesize(
         RuntimeError: GMS 호출 실패 시.
     """
     used_voice = resolve_voice(voice)
+    instructions = compose_instructions(voice, tone_profile)
     try:
         resp = get_client().audio.speech.create(
             model=config.TTS_MODEL,
             voice=used_voice,
             input=text,
-            instructions=instructions or BEAR_INSTRUCTIONS,  # gpt-4o-mini-tts 전용
+            instructions=instructions,  # gpt-4o-mini-tts 전용
             response_format="mp3",
         )
     except OpenAIError as e:

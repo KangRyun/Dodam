@@ -7,6 +7,7 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.ssafy.b209.conversation.domain.QuestionTtsMessage;
+import com.ssafy.b209.conversation.dto.TtsToneProfile;
 import com.ssafy.b209.conversation.exception.ConversationMessageStatusErrorCode;
 import com.ssafy.b209.conversation.exception.QuestionTtsErrorCode;
 import com.ssafy.b209.conversation.repository.QuestionTtsMessageRepository;
@@ -27,6 +28,7 @@ class QuestionTtsPersistenceServiceTest {
   private static final Long MESSAGE_ID = 803L;
   private static final String STORAGE_KEY = "2026/07/24/2f0b8f5e-tts.mp3";
   private static final BigDecimal SPEED = new BigDecimal("0.95");
+  private static final TtsToneProfile TONE_PROFILE = TtsToneProfile.CHARACTER_DEFAULT_V1;
 
   @Mock private QuestionTtsMessageRepository messageRepository;
 
@@ -42,11 +44,11 @@ class QuestionTtsPersistenceServiceTest {
     when(messageRepository.findById(MESSAGE_ID))
         .thenReturn(Optional.of(message("SUCCESS", STORAGE_KEY, "FABLE", SPEED)));
 
-    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED);
+    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED, TONE_PROFILE);
 
     assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.CACHE_HIT);
     assertThat(result.audioStorageKey()).isEqualTo(STORAGE_KEY);
-    verify(messageRepository, never()).claimForSynthesis(MESSAGE_ID, "FABLE", SPEED);
+    verify(messageRepository, never()).claimForSynthesis(MESSAGE_ID, "FABLE", SPEED, TONE_PROFILE.name());
   }
 
   @Test
@@ -54,19 +56,20 @@ class QuestionTtsPersistenceServiceTest {
     when(messageRepository.findById(MESSAGE_ID))
         .thenReturn(Optional.of(message("PROCESSING", null, "FABLE", SPEED)));
 
-    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED);
+    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED, TONE_PROFILE);
 
     assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.IN_PROGRESS);
-    verify(messageRepository, never()).claimForSynthesis(MESSAGE_ID, "FABLE", SPEED);
+    verify(messageRepository, never()).claimForSynthesis(MESSAGE_ID, "FABLE", SPEED, TONE_PROFILE.name());
   }
 
   @Test
   void claimsWhenStatusEmpty() {
     when(messageRepository.findById(MESSAGE_ID))
         .thenReturn(Optional.of(message(null, null, null, null)));
-    when(messageRepository.claimForSynthesis(MESSAGE_ID, "FABLE", SPEED)).thenReturn(1);
+    when(messageRepository.claimForSynthesis(MESSAGE_ID, "FABLE", SPEED, TONE_PROFILE.name()))
+        .thenReturn(1);
 
-    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED);
+    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED, TONE_PROFILE);
 
     assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.CLAIMED);
     assertThat(result.subtitle()).isEqualTo("이 그림에서 무엇이 보이니?");
@@ -77,9 +80,10 @@ class QuestionTtsPersistenceServiceTest {
     when(messageRepository.findById(MESSAGE_ID))
         .thenReturn(Optional.of(message("FAILED", null, null, null)))
         .thenReturn(Optional.of(message("SUCCESS", STORAGE_KEY, "FABLE", SPEED)));
-    when(messageRepository.claimForSynthesis(MESSAGE_ID, "FABLE", SPEED)).thenReturn(0);
+    when(messageRepository.claimForSynthesis(MESSAGE_ID, "FABLE", SPEED, TONE_PROFILE.name()))
+        .thenReturn(0);
 
-    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED);
+    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED, TONE_PROFILE);
 
     assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.CACHE_HIT);
   }
@@ -89,9 +93,10 @@ class QuestionTtsPersistenceServiceTest {
     when(messageRepository.findById(MESSAGE_ID))
         .thenReturn(Optional.of(message(null, null, null, null)))
         .thenReturn(Optional.of(message("PROCESSING", null, "FABLE", SPEED)));
-    when(messageRepository.claimForSynthesis(MESSAGE_ID, "FABLE", SPEED)).thenReturn(0);
+    when(messageRepository.claimForSynthesis(MESSAGE_ID, "FABLE", SPEED, TONE_PROFILE.name()))
+        .thenReturn(0);
 
-    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED);
+    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", SPEED, TONE_PROFILE);
 
     assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.IN_PROGRESS);
   }
@@ -100,7 +105,7 @@ class QuestionTtsPersistenceServiceTest {
   void throwsNotFoundWhenMissing() {
     when(messageRepository.findById(MESSAGE_ID)).thenReturn(Optional.empty());
 
-    assertThatThrownBy(() -> service.claim(MESSAGE_ID, "FABLE", SPEED))
+    assertThatThrownBy(() -> service.claim(MESSAGE_ID, "FABLE", SPEED, TONE_PROFILE))
         .isInstanceOf(BusinessException.class)
         .extracting("errorCode")
         .isEqualTo(ConversationMessageStatusErrorCode.CONVERSATION_MESSAGE_NOT_FOUND);
@@ -113,7 +118,7 @@ class QuestionTtsPersistenceServiceTest {
     ReflectionTestUtils.setField(optionAnswer, "messageType", "OPTION_ANSWER");
     when(messageRepository.findById(MESSAGE_ID)).thenReturn(Optional.of(optionAnswer));
 
-    assertThatThrownBy(() -> service.claim(MESSAGE_ID, "FABLE", SPEED))
+    assertThatThrownBy(() -> service.claim(MESSAGE_ID, "FABLE", SPEED, TONE_PROFILE))
         .isInstanceOf(BusinessException.class)
         .extracting("errorCode")
         .isEqualTo(QuestionTtsErrorCode.TTS_NOT_APPLICABLE);
@@ -121,27 +126,36 @@ class QuestionTtsPersistenceServiceTest {
 
   @Test
   void completeSuccessReportsAppliedUpdate() {
-    when(messageRepository.completeSuccess(MESSAGE_ID, STORAGE_KEY, "/url", "FABLE", SPEED))
+    when(messageRepository.completeSuccess(
+            MESSAGE_ID, STORAGE_KEY, "/url", "FABLE", SPEED, TONE_PROFILE.name()))
         .thenReturn(1);
 
-    assertThat(service.completeSuccess(MESSAGE_ID, STORAGE_KEY, "/url", "FABLE", SPEED)).isTrue();
+    assertThat(
+            service.completeSuccess(
+                MESSAGE_ID, STORAGE_KEY, "/url", "FABLE", SPEED, TONE_PROFILE))
+        .isTrue();
   }
 
   @Test
   void completeSuccessReportsLostUpdate() {
-    when(messageRepository.completeSuccess(MESSAGE_ID, STORAGE_KEY, "/url", "FABLE", SPEED))
+    when(messageRepository.completeSuccess(
+            MESSAGE_ID, STORAGE_KEY, "/url", "FABLE", SPEED, TONE_PROFILE.name()))
         .thenReturn(0);
 
-    assertThat(service.completeSuccess(MESSAGE_ID, STORAGE_KEY, "/url", "FABLE", SPEED)).isFalse();
+    assertThat(
+            service.completeSuccess(
+                MESSAGE_ID, STORAGE_KEY, "/url", "FABLE", SPEED, TONE_PROFILE))
+        .isFalse();
   }
 
   @Test
   void replacesCacheWhenExistingAudioWasGeneratedWithAnotherVoice() {
     when(messageRepository.findById(MESSAGE_ID))
         .thenReturn(Optional.of(message("SUCCESS", STORAGE_KEY, "FABLE", SPEED)));
-    when(messageRepository.claimForSynthesis(MESSAGE_ID, "NOVA", SPEED)).thenReturn(1);
+    when(messageRepository.claimForSynthesis(MESSAGE_ID, "NOVA", SPEED, TONE_PROFILE.name()))
+        .thenReturn(1);
 
-    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "NOVA", SPEED);
+    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "NOVA", SPEED, TONE_PROFILE);
 
     assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.CLAIMED);
   }
@@ -151,9 +165,32 @@ class QuestionTtsPersistenceServiceTest {
     BigDecimal fasterSpeed = new BigDecimal("1.00");
     when(messageRepository.findById(MESSAGE_ID))
         .thenReturn(Optional.of(message("SUCCESS", STORAGE_KEY, "FABLE", SPEED)));
-    when(messageRepository.claimForSynthesis(MESSAGE_ID, "FABLE", fasterSpeed)).thenReturn(1);
+    when(
+            messageRepository.claimForSynthesis(
+                MESSAGE_ID, "FABLE", fasterSpeed, TONE_PROFILE.name()))
+        .thenReturn(1);
 
-    QuestionTtsClaimResult result = service.claim(MESSAGE_ID, "FABLE", fasterSpeed);
+    QuestionTtsClaimResult result =
+        service.claim(MESSAGE_ID, "FABLE", fasterSpeed, TONE_PROFILE);
+
+    assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.CLAIMED);
+  }
+
+  @Test
+  void replacesCacheWhenExistingAudioWasGeneratedWithAnotherToneProfile() {
+    when(messageRepository.findById(MESSAGE_ID))
+        .thenReturn(Optional.of(message("SUCCESS", STORAGE_KEY, "FABLE", SPEED)));
+    when(
+            messageRepository.claimForSynthesis(
+                MESSAGE_ID,
+                "FABLE",
+                SPEED,
+                TtsToneProfile.CHARACTER_CELEBRATING_V1.name()))
+        .thenReturn(1);
+
+    QuestionTtsClaimResult result =
+        service.claim(
+            MESSAGE_ID, "FABLE", SPEED, TtsToneProfile.CHARACTER_CELEBRATING_V1);
 
     assertThat(result.action()).isEqualTo(QuestionTtsClaimResult.Action.CLAIMED);
   }
@@ -170,6 +207,7 @@ class QuestionTtsPersistenceServiceTest {
     ReflectionTestUtils.setField(message, "speechStatus", speechStatus);
     ReflectionTestUtils.setField(message, "ttsVoice", ttsVoice);
     ReflectionTestUtils.setField(message, "ttsSpeed", ttsSpeed);
+    ReflectionTestUtils.setField(message, "ttsToneProfile", TONE_PROFILE.name());
     return message;
   }
 

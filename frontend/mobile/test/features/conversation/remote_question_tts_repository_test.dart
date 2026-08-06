@@ -37,7 +37,11 @@ void main() {
     final post = adapter.requests[0];
     expect(post.method, 'POST');
     expect(post.uri.path, '/api/v1/conversation-messages/803/tts');
-    expect(post.data, {'voice': 'CHILD_FRIENDLY_01', 'speed': 1.0});
+    expect(post.data, {
+      'voice': 'CHILD_FRIENDLY_01',
+      'speed': 1.0,
+      'toneProfile': 'CHARACTER_DEFAULT_V1',
+    });
     expect(post.headers['Authorization'], 'Bearer test-token');
     expect(post.headers.containsKey('Idempotency-Key'), isFalse);
     final get = adapter.requests[1];

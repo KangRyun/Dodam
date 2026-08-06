@@ -43,6 +43,30 @@ void main() {
     await controller.playQuestion(_question(1));
 
     expect(repository.requests.single.voice, 'BALLAD');
+    expect(
+      repository.requests.single.toneProfile,
+      QuestionTtsToneProfile.characterDefault,
+    );
+  });
+
+  test('명시된 상황 프리셋만 다음 TTS 요청에 적용한다', () async {
+    final repository = _FakeTtsRepository();
+    final controller = AiQuestionTtsController(
+      repository,
+      _FakeQuestionAudioPlayer(),
+      request: const QuestionTtsRequest(voice: 'NOVA'),
+    );
+
+    await controller.playQuestion(
+      _question(1),
+      toneProfile: QuestionTtsToneProfile.characterCelebrating,
+    );
+
+    expect(repository.requests.single.voice, 'NOVA');
+    expect(
+      repository.requests.single.toneProfile,
+      QuestionTtsToneProfile.characterCelebrating,
+    );
   });
 
   test('새 질문은 이전 재생을 중단하고 새 음성을 재생한다', () async {

@@ -143,7 +143,9 @@ Content-Type: application/json
 X-Internal-Token: <AI_INTERNAL_TOKEN>
 ```
 
-요청은 필수 `text`와 선택 `voice`를 사용한다. 성공 응답은 `audioBase64`, `audioFormat`(`mp3`), `voice`, `modelName`, `processingTimeMs`를 포함한다. 캐릭터 말투 정책은 AI 서버 소유이며 계약으로 노출하지 않는다.
+요청은 필수 `text`와 선택 `voice`·`toneProfile`을 사용한다. 성공 응답은 `audioBase64`, `audioFormat`(`mp3`), `voice`, `modelName`, `processingTimeMs`를 포함한다. `toneProfile`은 생략하면 `CHARACTER_DEFAULT_V1`이며, 허용 값은 `CHARACTER_DEFAULT_V1`, `CHARACTER_CELEBRATING_V1`, `CHARACTER_ENCOURAGING_V1`뿐이다.
+
+AI 서버는 `voice`를 고정 캐릭터 표로, `toneProfile`을 고정 상황 표로만 해석해 TTS `instructions`를 조합한다. `text`, 아동 발화, 임의 voice 문자열은 지시문을 만들거나 바꾸지 못한다. 프로필은 음성 출력 자체를 바꾸므로 Spring은 메시지·voice·speed·toneProfile을 모두 TTS 캐시 식별자로 저장한다.
 
 ### `voice` 허용 값 (2026-07-27 추가)
 
@@ -164,7 +166,7 @@ AI 서버가 받는 값은 **서비스 voice 코드**이며, GMS provider voice 
 
 - **모르는 코드는 거절하지 않고 서버 기본값(`TTS_VOICE`, 기본 `fable`)으로 대체한다.** 목소리 코드 하나 때문에 아이와의 대화에서 음성이 아예 나오지 않는 것을 피하기 위한 선택이며, 대체 시 AI 로그에 경고를 남긴다.
 - 이 규칙 이전에는 받은 값을 GMS에 그대로 넘겨, 명세 예시 값(`CHILD_FRIENDLY_01`)을 포함한 모든 대문자 코드가 `BadRequestError` → 502로 실패했다(2026-07-27 실측).
-- `speed`는 AI 서버 호출에는 아직 반영되지 않아 보내도 합성 속도는 바뀌지 않는다. 다만 Spring은 공개 API 계약에 따라 `messageId`·`voice`·`speed` 조합으로 캐시를 구분한다.
+- `speed`는 AI 서버 호출에는 아직 반영되지 않아 보내도 합성 속도는 바뀌지 않는다. 다만 Spring은 공개 API 계약에 따라 `messageId`·`voice`·`speed`·`toneProfile` 조합으로 캐시를 구분한다.
 
 ## 저장·상태 전이
 
