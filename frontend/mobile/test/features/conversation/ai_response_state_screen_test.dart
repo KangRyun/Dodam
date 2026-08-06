@@ -453,7 +453,7 @@ void main() {
     });
 
     testWidgets('이전 분석의 늦은 성공이 새 분석 상태를 덮지 않는다', (tester) async {
-      final completer = Completer<int>();
+      final completer = Completer<ConversationStartResult>();
       final conversations = _ConversationRepository(pendingStart: completer);
       final detection = _detectionController();
       await _pumpConversation(
@@ -471,7 +471,9 @@ void main() {
       conversations.pendingStart = null;
       await _detectAnalysis(tester, detection, 702);
 
-      completer.complete(9999);
+      completer.complete(
+        const ConversationStartResult(conversationId: 9999, maxQuestionCount: 5),
+      );
       await tester.pumpAndSettle();
 
       // 늦게 도착한 이전 대화 ID로 질문을 요청하지 않는다.
@@ -766,23 +768,25 @@ final class _ConversationRepository implements ConversationRepository {
 
   Object? startFailure;
   Object? nextFailure;
-  Completer<int>? pendingStart;
+  Completer<ConversationStartResult>? pendingStart;
   final List<String> startKeys = [];
   final List<int?> analysisIds = [];
   final List<int> questionConversationIds = [];
 
   @override
-  Future<int> startConversation({
+  Future<ConversationStartResult> startConversation({
     required int drawingSessionId,
     int? analysisId,
-    int? maxQuestionCount,
     required String idempotencyKey,
   }) async {
     startKeys.add(idempotencyKey);
     analysisIds.add(analysisId);
     if (pendingStart case final completer?) return completer.future;
     if (startFailure case final caught?) throw caught;
-    return 8001;
+    return const ConversationStartResult(
+      conversationId: 8001,
+      maxQuestionCount: 5,
+    );
   }
 
   @override

@@ -422,6 +422,11 @@ def _activity_block(
         lines.append(
             _block("ASKED_QUESTIONS", questions="\n".join(f"  · {q}" for q in asked))
         )
+    # 마지막 차례면 맺음말 성격을 준다(S15P11B209-976). 맨 뒤에 붙이는 이유는 HTP_OPENING과
+    # 같다 — 무엇을 물을지는 위 블록들이 이미 정했고, 이 구획이 더하는 것은 '어떻게 맺을지'
+    # 하나다. 앞에 두면 대상 지시와 겹쳐 서로 밀어낸다.
+    if _is_last_question(req):
+        lines.append(_block("LAST_QUESTION"))
     return "\n".join(lines)
 
 
@@ -575,6 +580,23 @@ def _is_htp_opening(req: QuestionRequest) -> bool:
         and req.current_question_count == 0
         and _last_child_index(req) is None
     )
+
+
+def _is_last_question(req: QuestionRequest) -> bool:
+    """이번 차례가 이 대화의 마지막 질문인가(S15P11B209-976).
+
+    max_question_count 는 계약에 오래 있었지만(internal_contracts) 페이싱에는 한 번도 쓰이지
+    않았다 — 모델은 자기가 몇 번 더 물을 수 있는지 모른 채 매 턴 새 소재를 열었고, 상한에
+    닿는 순간 대화가 문장 중간에서 끊기듯 끝났다.
+
+    current_question_count 는 '이미 저장된 질문 수'라(BE QuestionPersistenceService),
+    지금 만들 질문의 번호는 그 값 + 1 이다. 따라서 마지막 차례는 count == max - 1.
+
+    ⚠️ 등호가 아니라 >= 로 본다. 상한을 넘긴 요청은 BE가 409로 막지만(ConversationSession
+       .canAskQuestion), 그 방어가 무너져 들어온 요청까지 '마지막이 아닌 것'으로 취급하면
+       대화가 끝없이 열린 채로 이어진다.
+    """
+    return req.current_question_count >= req.max_question_count - 1
 
 
 def _target_for_purpose(req: QuestionRequest, purpose: str) -> DetectedObject | None:

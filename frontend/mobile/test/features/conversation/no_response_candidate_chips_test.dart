@@ -205,12 +205,11 @@ void main() {
     final repository = _ConversationRepository([
       _initialQuestion,
       _secondQuestion,
-    ]);
+    ], maxQuestionCount: 2);
     await _pumpConversation(
       tester,
       repository: repository,
       timeout: const Duration(seconds: 5),
-      maxQuestionCount: 2,
       answerRepository: answers,
     );
     await tester.pump(const Duration(milliseconds: 2500));
@@ -468,14 +467,14 @@ void main() {
     expect(repository.requests, hasLength(2));
   });
 
-  testWidgets('최대 질문 수에 도달하면 자동 요청을 만들지 않는다', (tester) async {
-    final repository = _ConversationRepository([_initialQuestion]);
-    await _pumpConversation(
-      tester,
-      repository: repository,
-      maxQuestionCount: 1,
-    );
+  testWidgets('서버가 알려준 최대 질문 수에 도달하면 자동 요청을 만들지 않는다', (tester) async {
+    // 상한은 앱 상수가 아니라 시작 응답이 실어 온 값이다(S15P11B209-976).
+    final repository = _ConversationRepository([
+      _initialQuestion,
+    ], maxQuestionCount: 1);
+    await _pumpConversation(tester, repository: repository);
     await tester.pump(const Duration(seconds: 1));
+    expect(repository.startCallCount, 1);
     expect(repository.requests, hasLength(1));
   });
 
@@ -610,23 +609,18 @@ void main() {
     expect(find.text(_candidateQuestion.text), findsNothing);
   });
 
-  testWidgets('대화 생성에는 화면이 사용하는 maxQuestionCount를 전달한다', (tester) async {
-    final repository = _ConversationRepository([_initialQuestion]);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: DrawingScreen(
-          childId: '1',
-          sessionId: 100,
-          conversationRepository: repository,
-          resumeConversation: true,
-          maxQuestionCount: 4,
-          noResponseTimeout: const Duration(seconds: 30),
-        ),
-      ),
-    );
-    await tester.pump();
-    await _pumpUntil(tester, find.text(_initialQuestion.text));
-    expect(repository.startedMaxQuestionCounts, [4]);
+  testWidgets('상한을 모르는 대화에서는 로컬로 자동 요청을 막지 않는다', (tester) async {
+    // 진행 중 대화를 이어받으면(409) 응답에 maxQuestionCount 가 없다. 앱이 기본값을
+    // 지어내 서버보다 먼저 대화를 끊는 대신, 상한 도달은 next-question 이 알려준다
+    // (S15P11B209-976).
+    final repository = _ConversationRepository([
+      _initialQuestion,
+      _candidateQuestion,
+    ], maxQuestionCount: null);
+    await _pumpConversation(tester, repository: repository);
+    await tester.pump(const Duration(milliseconds: 100));
+    await _pumpUntil(tester, find.text(_candidateQuestion.text));
+    expect(repository.requests, hasLength(2));
   });
 }
 
@@ -635,7 +629,6 @@ Future<void> _pumpConversation(
   required _ConversationRepository repository,
   AiQuestion? initialQuestion,
   Duration timeout = const Duration(milliseconds: 100),
-  int maxQuestionCount = 10,
   _AnswerRepository? answerRepository,
   _SkipRepository? skipRepository,
   QuestionTtsRepository? ttsRepository,
@@ -649,7 +642,6 @@ Future<void> _pumpConversation(
       home: _screen(
         repository: repository,
         timeout: timeout,
-        maxQuestionCount: maxQuestionCount,
         answerRepository: answerRepository,
         skipRepository: skipRepository,
         ttsRepository: ttsRepository,
@@ -670,7 +662,6 @@ Future<void> _pumpConversation(
 Widget _screen({
   required _ConversationRepository repository,
   required Duration timeout,
-  int maxQuestionCount = 10,
   _AnswerRepository? answerRepository,
   _SkipRepository? skipRepository,
   QuestionTtsRepository? ttsRepository,
@@ -685,11 +676,11 @@ Widget _screen({
   conversationAnswerRepository: answerRepository ?? _AnswerRepository(),
   questionSkipRepository: skipRepository ?? _SkipRepository(),
   conversationEndRepository: const _EndRepository(),
-  conversationId: 8001,
+  // conversationId 를 주지 않는다 — 화면이 실제로 대화를 시작해야 서버가 정한
+  // 상한이 응답을 타고 게이트까지 도달하는지 볼 수 있다(S15P11B209-976).
   resumeConversation: true,
   questionOptionRevealDelay: Duration.zero,
   noResponseTimeout: timeout,
-  maxQuestionCount: maxQuestionCount,
   voiceNoSpeechTimeout: voiceNoSpeechTimeout,
   voiceAnswerRepository: voiceAnswerRepository,
   questionTtsRepository: ttsRepository,
@@ -721,22 +712,29 @@ Future<void> _pumpUntilCall(
 }
 
 final class _ConversationRepository implements ConversationRepository {
-  _ConversationRepository(this.outcomes);
+  _ConversationRepository(this.outcomes, {this.maxQuestionCount = 5});
 
   final List<Object> outcomes;
+
+  /// 서버가 정하는 질문 수 상한 (S15P11B209-976). 화면은 이 값을 시작 응답에서 받아
+  /// 무응답 자동 진행 게이트에 쓴다 — 예전에는 앱이 자기 상수를 요청에 실어 보냈다.
+  /// `null`은 진행 중 대화를 이어받아 상한을 모르는 상태다.
+  final int? maxQuestionCount;
   final List<NextQuestionRequest> requests = [];
   final List<String> idempotencyKeys = [];
-  final List<int?> startedMaxQuestionCounts = [];
+  int startCallCount = 0;
 
   @override
-  Future<int> startConversation({
+  Future<ConversationStartResult> startConversation({
     required int drawingSessionId,
     int? analysisId,
-    int? maxQuestionCount,
     required String idempotencyKey,
   }) async {
-    startedMaxQuestionCounts.add(maxQuestionCount);
-    return 8001;
+    startCallCount += 1;
+    return ConversationStartResult(
+      conversationId: 8001,
+      maxQuestionCount: maxQuestionCount,
+    );
   }
 
   @override

@@ -346,12 +346,14 @@ final class _RecordingConversationRepository implements ConversationRepository {
   final List<int?> previousAnswerMessageIds = [];
 
   @override
-  Future<int> startConversation({
+  Future<ConversationStartResult> startConversation({
     required int drawingSessionId,
     int? analysisId,
-    int? maxQuestionCount,
     required String idempotencyKey,
-  }) async => 800;
+  }) async => const ConversationStartResult(
+    conversationId: 800,
+    maxQuestionCount: 5,
+  );
 
   @override
   Future<AiQuestion> requestNextQuestion({

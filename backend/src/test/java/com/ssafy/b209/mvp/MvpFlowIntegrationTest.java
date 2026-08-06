@@ -446,13 +446,18 @@ class MvpFlowIntegrationTest {
                     .with(bearer(accessToken))
                     .header("Idempotency-Key", "mvp-conversation-start-key")
                     .contentType(MediaType.APPLICATION_JSON)
+                    // 앱과 같이 상한을 보내지 않는다 — 이 흐름이 정하는 주체가 서버임을 확인하는 자리다
+                    // (S15P11B209-976).
                     .content(
                         """
-                        {"analysisId":%d,"maxQuestionCount":5}
+                        {"analysisId":%d}
                         """
                             .formatted(analysisId)))
             .andExpect(status().isCreated())
             .andExpect(jsonPath("$.data.status").value("CONVERSING"))
+            // 이 흐름의 활동 유형은 ART_DIARY다(findDrawingTypeId가 code를 확인한다).
+            // 설정값이 실제 세션에 실려 응답까지 나오는지를 실 DB·실 HTTP로 관통 확인한다.
+            .andExpect(jsonPath("$.data.maxQuestionCount").value(5))
             .andReturn()
             .getResponse()
             .getContentAsString(StandardCharsets.UTF_8);

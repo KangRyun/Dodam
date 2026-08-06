@@ -168,6 +168,18 @@ app:
     #   그리기 과정 데이터와 같은 활동에서 나온 같은 성격의 관측 로그이므로 보관 기간을 스트로크와 맞춘다.
     #   보관 정책(564/565) 확정 전까지 쓰는 임시 기준값이다.
     retention-days: ${CONVERSATION_EVENT_RETENTION_DAYS:180}
+  conversation:
+    question-limit:
+      # 대화 한 세션이 아이에게 던질 수 있는 질문 수 상한 (S15P11B209-976).
+      #   단위는 **그림 한 장**이다. HTP는 주제(집·나무·사람)마다 그림 세션과 대화가 따로 열리므로
+      #   HTP 1회 활동의 실제 상한은 htp-per-subject × 3 이다.
+      #   ⚠️ 세션 생성 시 conversation_sessions.max_question_count 로 복사되는 Snapshot이라
+      #      값을 바꿔도 **이미 만들어진 대화에는 소급되지 않는다.**
+      #   왜 이 숫자인가: 운영 392세션 실측에서 평균 질문 수는 2.60, 상한(10) 도달은 2.0%였고
+      #      종료의 70.7%가 아이의 그만하기 요청이었다. 상한 10은 사실상 작동한 적이 없는 설정이라
+      #      실제 대화 길이에 맞춰 내렸다. HTP를 더 짧게 두는 것은 주제가 3번 반복되기 때문이다.
+      htp-per-subject: ${CONVERSATION_QUESTION_LIMIT_HTP_PER_SUBJECT:3}
+      art-diary: ${CONVERSATION_QUESTION_LIMIT_ART_DIARY:5}
   idempotency:
     drawing-draft:
       processing-ttl: ${DRAWING_DRAFT_IDEMPOTENCY_PROCESSING_TTL:30s}

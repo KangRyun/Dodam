@@ -44,7 +44,7 @@
 | `childAge` | 양의 integer. 생년월일은 전달하지 않는다. |
 | `difficulty` | `PRESCHOOL`, `ELEMENTARY`, `DEVELOPMENTAL_SUPPORT`, `CUSTOM` 중 하나 |
 | `allowedResponseModes` | 중복 없는 비어 있지 않은 `VOICE`/`OPTION` 배열 |
-| `currentQuestionCount`, `maxQuestionCount` | 0 이상의 integer, 전자는 후자 이하여야 한다. 질문 여유가 없으면 AI를 호출하지 않는다. |
+| `currentQuestionCount`, `maxQuestionCount` | 0 이상의 integer, 전자는 후자 이하여야 한다. 질문 여유가 없으면 AI를 호출하지 않는다. AI는 `currentQuestionCount == maxQuestionCount - 1`을 '이번이 마지막 질문'으로 읽어 프롬프트에 마무리 지시를 싣는다(S15P11B209-976). 상한 자체는 BE가 활동 유형별로 정한다 — HTP는 주제(그림 한 장)당 3, 그림일기는 5. |
 | `detectedObjects` | 빈 배열 가능. 항목은 `objectCode`, `objectName`, `confidence`, `boundingBox`를 가진다. |
 | `drawingDescription` | string 또는 `null`. 분석에서 만든 2~4문장 한국어 그림 서술(VLM). BE가 `basisAnalysisId`로 `analysis_observation_results.overall_summary`를 찾아 채운다. **선택 필드** — 없으면 AI는 `detectedObjects`만으로 기존과 동일하게 동작한다. |
 | `recentMessages` | 빈 배열 가능. 항목은 `messageId`, `senderType`, `messageType`, `text`, 선택형 답변에만 쓰는 선택 필드 `selectedOptionCodes`를 가진다. `text`는 최소 문맥만 보내며 로그·오류 응답에 포함하지 않는다. |
