@@ -84,7 +84,14 @@ data:
   OAUTH_READ_TIMEOUT: "5s"
 
   # ── AI 모델 ─────────────────────────────────────────────────────────
-  LLM_MODEL: "gpt-4o-mini"
+  # 대화와 리포트는 요구가 정반대라 모델을 나눴다(S15P11B209-972).
+  #   LLM_MODEL(대화)  : 아이가 화면 앞에서 기다리는 경로 — 지연이 곧 UX라 경량 모델.
+  #   REPORT_LLM_MODEL : 그림 서술 + 대화 전체 + 형식 지표를 한 번에 종합하고 자체검토까지
+  #                      도는, 이 서비스에서 가장 무거운 추론 — 보호자가 읽는 최종 문서라 큰 모델.
+  # ⚠️ REPORT_LLM_MODEL 을 빼면 LLM_MODEL 로 폴백한다(ai/config.py). 즉 키가 누락돼도 기동은
+  #   되고 리포트만 조용히 경량 모델로 생성된다 — 위 SKETCH_MODEL_PATH 와 같은 '짝' 계열 함정이다.
+  LLM_MODEL: "gpt-5.4-mini"
+  REPORT_LLM_MODEL: "gpt-5.4"
   STT_MODEL: "whisper-1"
   TTS_MODEL: "gpt-4o-mini-tts"
   TTS_VOICE: "fable"

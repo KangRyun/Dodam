@@ -171,7 +171,10 @@ def render_markdown(
         f"- 대화 프롬프트 버전(HTP): `{llm_client.prompt_version_for('HTP')}`",
         f"- 대화 프롬프트 버전(그림일기): `{llm_client.prompt_version_for('ART_DIARY')}`",
         f"- 리포트 프롬프트 버전: `{report_client.PROMPT_VERSION}`",
-        f"- 모델: `{config.LLM_MODEL}`",
+        # 두 층(질문·리포트)이 서로 다른 모델을 쓴다(S15P11B209-972). 한 줄로 적으면
+        # B층 결과가 어느 모델의 성적인지 알 수 없다 — 평가 결과의 재현 정보라 나눠 적는다.
+        f"- 대화 모델: `{config.LLM_MODEL}`",
+        f"- 리포트 모델: `{config.REPORT_LLM_MODEL}`",
         "",
         "> 입력은 전부 합성 데이터다(가드레일 9절 — 아동 실데이터는 평가셋에 넣지 않는다).",
         "",
