@@ -85,37 +85,58 @@ spec:
             #      실행한다. 이미 데이터가 있으면 조용히 건너뛴다 — 스크립트를 고쳐도 반영 안 된다.
             #      운영 중 변경은 634 의 인덱스 관리 절차로 별도 적용할 것.
             - { name: initdb, mountPath: /docker-entrypoint-initdb.d, readOnly: true }
-          # mongosh 로 ping. --auth 를 켰으므로 인증 없이도 되는 hello 명령을 쓴다.
-          #   startupProbe 가 핵심 — 최초 기동은 데이터 디렉터리 초기화 + init 스크립트 실행으로
-          #   수십 초가 걸린다. 이게 없으면 liveness 가 먼저 실패해 크래시 루프에 빠진다(mysql 과 동일).
+          # ★ 프로브 역할 분담 (S15P11B209-987 — 2026-08-06 실장애로 재설계)
+          #
+          #   mongosh 는 **startupProbe 에서만** 쓴다. Node.js CLI 라 프로세스를 새로 띄우는
+          #   것만으로 수 초가 걸리고, 그 비용을 상시 프로브에 물리면 서버가 멀쩡한데도
+          #   프로브가 잘린다. mysql(mysqladmin)·redis(redis-cli)가 멀쩡한 이유는 그쪽
+          #   프로브가 C 바이너리라 기동이 사실상 공짜이기 때문이다 — mongodb 만 유별났다.
+          #
+          #   2026-08-06 실장애: readiness(5s)·liveness(5s)가 CPU 경합 중 동시에 잘리면서
+          #   6시간 동안 42회 재시작. readiness 실패가 엔드포인트를 지우자 backend 의
+          #   DNS 조회가 UnknownHostException 으로 떨어져 **그림 저장이 500 으로 실패**했다:
+          #     StrokeBatchService.save → MongoSocketException: mongodb: Name or service not known
+          #   서버는 한 번도 죽지 않았다(exit=0, kubelet 이 죽였다). 프로브가 장애의 원인이었다.
+          #
+          #   07-30 컷오버 때 같은 원인(mongosh 가 느리다)으로 startupProbe 가 터졌는데,
+          #   그때는 timeoutSeconds 만 붙이고 readiness·liveness 의 5초는 그대로 뒀다.
+          #   같은 사고를 두 번 냈으므로 이번에는 **프로브 도구 자체를 바꾼다.**
           startupProbe:
-            exec: { command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"] }
-            periodSeconds: 5
-            failureThreshold: 30       # 최대 150초
-            # ★ timeoutSeconds 를 반드시 준다 (2026-07-30 컷오버에서 CrashLoopBackOff 로 발견).
-            #   기본값은 **1초**다. mongosh 는 Node.js CLI 라 프로세스 기동만으로 1초를 넘겨,
-            #   서버는 멀쩡한데 프로브가 매번 잘린다:
-            #     Startup probe failed: command timed out ... timed out after 1s
-            #   30회 실패(150초) 후 컨테이너가 죽고 다시 뜨기를 반복했다(재시작 9회).
-            #   ⚠️ 아래 readiness·liveness 에는 timeoutSeconds 가 있는데 여기만 빠져 있었다.
-            #   staging-min 이 mongodb 를 replicas 0 으로 두는 바람에 **한 번도 드러나지 않았다.**
-            timeoutSeconds: 10
-          readinessProbe:
+            # 기동 완료 판정은 실제 명령이 도는지 봐야 한다 — 최초 기동은 데이터 디렉터리
+            # 초기화 + init 스크립트로 수십 초가 걸리고, 포트만 열린 상태와 구분해야 한다.
+            # 여기서만 mongosh 를 쓰고, 대신 시간을 넉넉히 준다(최대 300초).
             exec: { command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"] }
             periodSeconds: 10
+            failureThreshold: 30       # 최대 300초
+            # 기본값은 1초다. mongosh 는 Node.js CLI 라 기동만으로 그것을 넘긴다.
+            timeoutSeconds: 30
+          readinessProbe:
+            # startup 이 통과한 뒤에는 소켓 생존만 본다. 이 프로브가 실패하면 엔드포인트가
+            # 지워지고 **mongodb 라는 이름 자체가 DNS 에서 사라진다** — 오탐 비용이 가장 큰
+            # 자리라 가장 가벼운 검사를 둔다.
+            tcpSocket: { port: 27017 }
+            periodSeconds: 10
             timeoutSeconds: 5
+            failureThreshold: 3
           livenessProbe:
-            exec: { command: ["mongosh", "--quiet", "--eval", "db.adminCommand('ping')"] }
-            periodSeconds: 20
+            # 재시작을 유발하는 자리다. 오탐 한 번이 곧 커넥션 단절이므로 소켓 검사로 두고
+            # 실패 임계도 넉넉히 준다(5회 × 30초 = 2.5분 무응답이어야 재시작).
+            tcpSocket: { port: 27017 }
+            periodSeconds: 30
             timeoutSeconds: 5
             failureThreshold: 5
           # 실사용 예측: 문서가 append 되는 만큼 캐시가 늘지만 위에서 0.4GB 로 묶어 뒀다.
           #   나머지는 연결·인덱스·힙. DB 는 OOMKill 이 가장 위험하므로 캐시 상한보다 여유를 둔다.
           #   ⚠️ limits 를 올릴 때는 --wiredTigerCacheSizeGB 도 함께 본다. 한쪽만 올리면
           #      "메모리를 줬는데 캐시는 그대로"이거나 "캐시가 상한을 넘겨 죽는" 상태가 된다.
+          #
+          #   ⚠️ cpu 상한은 프로브와 함께 봐야 한다 (987). 4코어 노드에서 500m 는 1/8 이라,
+          #      노드가 바쁠 때 mongosh 기동이 상한에 눌려 startupProbe 까지 잘렸다.
+          #      1500m 는 평소 쓰지 않는 상한이고(요청은 100m 그대로), 기동·경합 구간에서만
+          #      숨통을 틔우는 값이다.
           resources:
             requests: { memory: 384Mi, cpu: 100m }
-            limits:   { memory: 1Gi,   cpu: 500m }
+            limits:   { memory: 1Gi,   cpu: 1500m }
       volumes:
         - name: initdb
           configMap:
