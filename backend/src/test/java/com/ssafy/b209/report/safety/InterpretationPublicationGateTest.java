@@ -108,7 +108,8 @@ class InterpretationPublicationGateTest {
             TENDENCY_TEXT,
             "   ",
             HOME_GUIDE,
-            List.of(1L, 2L));
+            List.of(1L, 2L),
+            null);
 
     InterpretationPublicationGate.Decision decision =
         gate.inspect(noScope, pool(childAnswer(1L, "202"), vision(2L, "71")));
@@ -126,7 +127,8 @@ class InterpretationPublicationGateTest {
             TENDENCY_TEXT,
             SCOPE_TEXT,
             null,
-            List.of(1L, 2L));
+            List.of(1L, 2L),
+            null);
 
     InterpretationPublicationGate.Decision decision =
         gate.inspect(noGuide, pool(childAnswer(1L, "202"), vision(2L, "71")));
@@ -144,7 +146,8 @@ class InterpretationPublicationGateTest {
             TENDENCY_TEXT,
             SCOPE_TEXT,
             HOME_GUIDE,
-            List.of(1L, 2L));
+            List.of(1L, 2L),
+            null);
 
     InterpretationPublicationGate.Decision decision =
         gate.inspect(unknownCategory, pool(childAnswer(1L, "202"), vision(2L, "71")));

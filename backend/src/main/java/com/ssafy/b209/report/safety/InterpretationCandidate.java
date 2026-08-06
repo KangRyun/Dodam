@@ -1,5 +1,6 @@
 package com.ssafy.b209.report.safety;
 
+import com.ssafy.b209.report.domain.ReportInterpretationConfidence;
 import java.util.List;
 import java.util.stream.Stream;
 
@@ -15,6 +16,11 @@ import java.util.stream.Stream;
  * @param scopeText 해석 범위 안내 문장이며 비어 있으면 공개하지 않는다
  * @param homeObservationGuide 가정 관찰 안내 문장이며 비어 있으면 공개하지 않는다
  * @param evidenceRefs 이 카드가 근거로 가리키는 {@code evidenceId} 목록
+ * @param confidence 근거 종류로 계산한 확신 등급이며 없으면 {@code null} (S15P11B209-982). <strong>검증기는 이 값을 읽지
+ *     않는다</strong> — 판정에 쓰이지 않고 저장까지 실려 가기만 하는 통과 필드다. {@link InterpretationCategory}처럼 자기 입력
+ *     enum 을 따로 두지 않고 저장용 {@link ReportInterpretationConfidence}를 그대로 쓰는 이유가 그것이다. 판정에 안 쓰는 값을 위해
+ *     매핑 계층을 한 번 더 두면, 그 계층이 값을 조용히 떨어뜨렸을 때 아무 검증도 걸리지 않는다(902 에서 저장 메서드가 호출되지 않은 채 몇 주를 보낸 것과 같은
+ *     모양이다)
  */
 public record InterpretationCandidate(
     InterpretationCategory category,
@@ -22,7 +28,8 @@ public record InterpretationCandidate(
     String tendencyText,
     String scopeText,
     String homeObservationGuide,
-    List<Long> evidenceRefs) {
+    List<Long> evidenceRefs,
+    ReportInterpretationConfidence confidence) {
 
   /**
    * 카드에 실린 사람이 읽는 문장을 모아 돌려준다.

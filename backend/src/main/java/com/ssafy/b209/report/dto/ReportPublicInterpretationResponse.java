@@ -16,6 +16,9 @@ import java.util.List;
  * @param scopeText 해석 범위 안내
  * @param homeObservationGuide 가정에서 살펴볼 점
  * @param evidenceRefs 근거 번호 목록이며 {@code evidenceItems[].evidenceId}를 가리킨다
+ * @param confidence 근거 종류로 계산한 확신 등급({@code STRONG}·{@code MODERATE}·{@code WEAK})이며 등급이 없으면
+ *     {@code null} (S15P11B209-982). <strong>FE 는 이 값이 {@code null}일 수 있다는 전제로 그린다</strong> — V43
+ *     이전 카드와 AI 가 등급을 싣지 않은 카드가 모두 {@code null}로 나가므로, 등급이 없으면 배지를 그리지 않을 뿐 카드는 정상 노출한다
  */
 public record ReportPublicInterpretationResponse(
     String category,
@@ -23,4 +26,5 @@ public record ReportPublicInterpretationResponse(
     String tendencyText,
     String scopeText,
     String homeObservationGuide,
-    List<Integer> evidenceRefs) {}
+    List<Integer> evidenceRefs,
+    String confidence) {}

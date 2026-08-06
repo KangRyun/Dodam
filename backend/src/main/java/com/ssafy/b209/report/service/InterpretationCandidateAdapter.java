@@ -1,5 +1,6 @@
 package com.ssafy.b209.report.service;
 
+import com.ssafy.b209.report.domain.ReportInterpretationConfidence;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.safety.EvidenceCandidate;
 import com.ssafy.b209.report.safety.EvidenceSourceKind;
@@ -20,6 +21,10 @@ import org.springframework.stereotype.Component;
  *
  * <p>알 수 없는 enum 값은 <strong>버린다.</strong> 문자열을 그대로 통과시키면 검증기가 판정할 수 없는 값을 만나고, 예외로 던지면 항목 하나 때문에
  * 리포트 저장 전체가 실패한다. 버린 항목은 근거 풀에 없으므로 그 근거를 참조한 카드는 구조 게이트에서 자연히 탈락한다.
+ *
+ * <p><strong>확신 등급({@code confidence})만 예외다</strong> (S15P11B209-982). 카테고리·근거 종류는 판정에 쓰이는 값이라 해석
+ * 실패가 곧 "판정할 수 없음"이지만, 등급은 판정에 쓰이지 않는 보조 표시다. 그래서 해석하지 못한 등급 때문에 카드를 버리지 않고 등급만 {@code null}로 떨어뜨린다
+ * — AI 가 등급 이름을 하나 바꾸면 보호자 리포트에서 카드가 통째로 사라지는 결합은 만들지 않는다.
  */
 @Component
 public class InterpretationCandidateAdapter {
@@ -28,7 +33,8 @@ public class InterpretationCandidateAdapter {
    * 경향 해석 카드를 검증기 입력으로 옮긴다.
    *
    * @param drafts AI 가 보낸 카드 목록
-   * @return 검증 가능한 카드 목록이며 카테고리를 해석할 수 없는 카드는 제외한다
+   * @return 검증 가능한 카드 목록이며 카테고리를 해석할 수 없는 카드는 제외한다. 확신 등급을 해석할 수 없는 카드는 등급만 {@code null}로 두고 남긴다
+   *     (S15P11B209-982)
    */
   public List<InterpretationCandidate> toCandidates(
       List<ObservationGenerationResult.PublicInterpretationDraft> drafts) {
@@ -48,7 +54,9 @@ public class InterpretationCandidateAdapter {
               draft.tendencyText(),
               draft.scopeText(),
               draft.homeObservationGuide(),
-              draft.evidenceRefs()));
+              draft.evidenceRefs(),
+              // 여기서 continue 하지 않는다 — 등급은 카드의 존재 조건이 아니다(위 클래스 주석 참고).
+              parseConfidence(draft.confidence())));
     }
     return candidates;
   }
@@ -116,6 +124,10 @@ public class InterpretationCandidateAdapter {
 
   private static InterpretationCategory parseCategory(String value) {
     return parseEnum(InterpretationCategory.class, value);
+  }
+
+  private static ReportInterpretationConfidence parseConfidence(String value) {
+    return parseEnum(ReportInterpretationConfidence.class, value);
   }
 
   private static EvidenceSourceType parseSourceType(String value) {

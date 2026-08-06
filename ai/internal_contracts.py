@@ -600,6 +600,12 @@ class PublicInterpretation(_CamelModel):
     tendency_text 는 반드시 가능성 어조("~일 수 있습니다")다 — 단정·진단 어조 금지.
     scope_text·home_observation_guide 가 비면 공개 조건 미달이라 카드가 제외된다(875 §4-1).
     evidence_refs 는 ReportEvidenceItem.evidence_id 참조.
+
+    ⚠️ confidence 는 **LLM이 채우는 자리가 아니다**(S15P11B209-982). 값이 무엇이든 조립 단계에서
+       버려지고, interpretation_gate 가 근거의 '종류'로 다시 계산해 덮어쓴다. 모델에게 등급
+       판정권을 주면 근거가 약한 해석도 STRONG 이라 주장해 등급 체계 전체가 장식이 된다 —
+       근거를 대는 것(evidence_refs)까지가 모델의 몫이고, 그 근거가 얼마나 센지는 코드가 정한다.
+       프롬프트도 이 필드를 요구하지 않는다(어휘 자체를 주지 않는 것이 1차 방어다).
     """
 
     category: str
@@ -608,6 +614,9 @@ class PublicInterpretation(_CamelModel):
     scope_text: str
     home_observation_guide: str
     evidence_refs: list[int] = Field(default_factory=list)
+    # STRONG | MODERATE | WEAK. 기본 None — 구 BE는 unknown 필드를 무시하므로 배포 순서 무관하고,
+    #   게이트를 거치지 않은 카드(테스트·중간 조립)는 등급이 '아직 없음'으로 남는다(875 §3-1).
+    confidence: str | None = None
 
 
 class SubjectReportDraft(_CamelModel):

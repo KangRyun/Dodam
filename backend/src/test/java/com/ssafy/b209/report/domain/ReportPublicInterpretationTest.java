@@ -29,6 +29,25 @@ class ReportPublicInterpretationTest {
   }
 
   @Test
+  void treatsConfidenceGradeAsOptional() {
+    // 836·837 재발 방지. 등급은 있으면 싣고 없으면 없는 대로 둔다 — 제목·경향 문장과 달리 빈 값 검사를
+    //   붙이지 않는다. 여기에 requireText 류를 끼우면 등급을 못 받은 카드 하나가 리포트 전체를 죽인다.
+    ReportPublicInterpretation graded =
+        ReportPublicInterpretation.create(
+            report,
+            0,
+            ReportInterpretationCategory.EMOTION,
+            "제목",
+            "경향이 보일 수 있습니다.",
+            null,
+            null,
+            ReportInterpretationConfidence.STRONG);
+
+    assertThat(graded.getConfidence()).isEqualTo(ReportInterpretationConfidence.STRONG);
+    assertThat(card(1).getConfidence()).isNull();
+  }
+
+  @Test
   void publishesOnlyWhenEvidenceIsReferenced() {
     ReportPublicInterpretation card = card(0);
 
@@ -88,13 +107,13 @@ class ReportPublicInterpretationTest {
     assertThatThrownBy(
             () ->
                 ReportPublicInterpretation.create(
-                    report, 0, ReportInterpretationCategory.EMOTION, " ", "경향", null, null))
+                    report, 0, ReportInterpretationCategory.EMOTION, " ", "경향", null, null, null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("title");
     assertThatThrownBy(
             () ->
                 ReportPublicInterpretation.create(
-                    report, 0, ReportInterpretationCategory.EMOTION, "제목", " ", null, null))
+                    report, 0, ReportInterpretationCategory.EMOTION, "제목", " ", null, null, null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("tendencyText");
   }
@@ -104,7 +123,7 @@ class ReportPublicInterpretationTest {
     assertThatThrownBy(
             () ->
                 ReportPublicInterpretation.create(
-                    report, -1, ReportInterpretationCategory.EMOTION, "제목", "경향", null, null))
+                    report, -1, ReportInterpretationCategory.EMOTION, "제목", "경향", null, null, null))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("displayOrder");
   }
@@ -226,7 +245,8 @@ class ReportPublicInterpretationTest {
         "가족과의 정서적 연결",
         "가족에게 정서적으로 의지하려는 경향이 보일 수 있습니다.",
         "이번 그림 활동에서 나타난 가능성입니다.",
-        "새로운 상황에서도 보호자의 확인을 반복해서 구하는지 살펴봐 주세요.");
+        "새로운 상황에서도 보호자의 확인을 반복해서 구하는지 살펴봐 주세요.",
+        null);
   }
 
   private ReportEvidenceItem original(int evidenceNumber) {

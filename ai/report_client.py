@@ -921,6 +921,11 @@ def _public_interpretation(
     if not refs:
         logger.warning("경향 카드 근거 참조 없음 — 카드 제외(category=%s)", category)
         return None
+    if "confidence" in raw:
+        # 모델이 등급을 자칭했다. 값은 읽지 않고 버린다 — 확신도는 근거의 종류로 코드가 정한다
+        # (982, interpretation_gate.confidence_for). 프롬프트가 요구하지 않는 키라 이게 뜨면
+        # 프롬프트가 밀린 신호이므로 남긴다. ⚠️ 값은 로그에 적지 않는다(등급도 판정 정보다).
+        logger.warning("경향 카드에 모델이 확신도를 자칭 — 무시(category=%s)", category)
     return contracts.PublicInterpretation(
         category=category,
         title=title,
@@ -928,6 +933,8 @@ def _public_interpretation(
         scope_text=scope,
         home_observation_guide=guide,
         evidence_refs=refs,
+        # confidence 는 여기서 채우지 않는다. 게이트(interpretation_gate.apply)가 통과 카드에만
+        # 찍는다 — 조립 단계에서 채우면 게이트에 걸려 빠질 카드에도 등급이 붙는다.
     )
 
 
@@ -1263,6 +1270,23 @@ def _assemble(
     interpretations, gate_reasons = interpretation_gate.apply(
         parsed_cards, evidence_items, blocked_refs=_blocked_evidence_refs(req)
     )
+    # 확신도 대비 과장 검사(982) — **게이트 뒤에** 돈다. 등급은 게이트가 찍으므로 그 전에는
+    # 기준이 없다. 약한 근거로 강하게 말한 카드를 여기서 뺀다("약한 근거 → 강한 주장" 승격 차단).
+    # 주장 문장(title·tendencyText)만 본다 — homeObservationGuide 는 "평소에도 그런지 살펴봐
+    # 주세요"가 정상인 자리라 같은 어휘를 막으면 그 필드를 못 쓴다.
+    overclaimed = [
+        card
+        for card in interpretations
+        if report_safety.has_overclaim(
+            f"{card.title} {card.tendency_text}", card.confidence
+        )
+    ]
+    if overclaimed:
+        # ⚠️ 카드 문장은 로그에 남기지 않는다 — 관점 라벨과 등급만(등급도 값이라 개수만 센다).
+        logger.warning("경향 카드 확신도 대비 과장 — 카드 제외 %d건", len(overclaimed))
+        rule_flagged = True
+        excluded = {id(card) for card in overclaimed}
+        interpretations = [c for c in interpretations if id(c) not in excluded]
     # 모델이 적은 카드 순번 → 최종 배열 위치. 빠진 카드를 가리키던 참조는 매핑에 없어 사라진다.
     ref_map = {
         raw_index_of[position]: final
@@ -1372,7 +1396,9 @@ def _assemble(
 # 실패는 차단이 아니라 기능 저하다(RAG·548과 같은 정책) — 검토 호출이 실패하면 리포트는 그대로
 # 반환하되 status 를 AI_DRAFT 로 남긴다. '검토 못 했으니 열지 않는다'가 보수적인 쪽이다.
 _REVIEW_ISSUES = frozenset(
-    {"DIAGNOSTIC", "STIGMA", "NO_EVIDENCE", "OVERREACH", "MIXED_EVIDENCE"}
+    # OVERCLAIM(982) = 확신도에 비해 세게 말한 문장. 규칙 필터(report_safety.find_overclaim)가
+    #   고정 어휘로 잡는 층 위에, 문장을 읽어야 아는 층을 검토자가 맡는다.
+    {"DIAGNOSTIC", "STIGMA", "NO_EVIDENCE", "OVERCLAIM", "OVERREACH", "MIXED_EVIDENCE"}
 )
 # 검토 결과를 담을 수 있는 자리 — 지적당한 항목만 빼고 나머지는 살린다.
 _FEATURE_TARGET_PREFIX = "feature."
@@ -1458,13 +1484,17 @@ def _review_targets(
             }
         )
     for index, card in enumerate(result.public_interpretations):
-        targets.append(
-            {
-                "id": f"{_CARD_TARGET_PREFIX}{index}",
-                "글": f"{card.title} / {card.tendency_text}".strip(" /"),
-                "근거": card.scope_text,
-            }
-        )
+        target = {
+            "id": f"{_CARD_TARGET_PREFIX}{index}",
+            "글": f"{card.title} / {card.tendency_text}".strip(" /"),
+            "근거": card.scope_text,
+        }
+        # 확신도를 검토자에게 함께 준다(982) — '이 글이 근거에 비해 세게 말하는가'(OVERCLAIM)는
+        # 등급을 모르면 판정할 수 없다. 등급 자체는 코드가 정한 값이라 검토자가 바꾸지 못한다:
+        # 검토자는 issue 코드만 돌려주고, 이 값을 되돌려 받아 쓰는 경로가 없다.
+        if card.confidence:
+            target["확신도"] = card.confidence
+        targets.append(target)
     # 주제별 관찰(875 §5) — 보호자가 그대로 읽는 **사실 자리**다. draft.evidenceSummary 를
     # 검토 대상에 넣은 것과 같은 이유로 넣는다: 여기 해석이 섞이면(MIXED_EVIDENCE) 카드·요약이
     # 그걸 사실로 알고 기댄다. 지적당해도 그 문장 하나만 빠지므로 리포트를 막지 않는다.

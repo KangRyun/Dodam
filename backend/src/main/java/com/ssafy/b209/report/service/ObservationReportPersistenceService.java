@@ -903,6 +903,10 @@ public class ObservationReportPersistenceService {
    *
    * <p>AI 도 자체 게이트를 통과시킨 카드만 보내지만 여기서 다시 검증한다 — 이중 방어이며, 서버가 발급하지 않은 참조나 근거 부족을 서버 쪽에서 확정한다.
    *
+   * <p>확신 등급(S15P11B209-982)은 이 메서드가 따로 다루지 않는다. 어댑터가 카드마다 등급을 실어 두고 {@code
+   * newInterpretation} 이 그대로 Entity 에 옮기므로, 공개·강등·제외 어느 판정을 받든 등급은 함께 저장된다 — 판정과 등급은 서로 다른 축이라 한쪽
+   * 때문에 다른 쪽을 버리지 않는다.
+   *
    * @param report 카드가 속한 리포트
    * @param result AI 응답
    * @return AI 응답 배열 인덱스를 Key 로 하는 저장된 카드 Map 이다. 주제별 관찰의 {@code interpretationRefs}가 이 인덱스로 오므로
@@ -1115,7 +1119,10 @@ public class ObservationReportPersistenceService {
             candidate.title(), INTERPRETATION_TITLE_LIMIT, "report_public_interpretations.title"),
         candidate.tendencyText(),
         candidate.scopeText(),
-        candidate.homeObservationGuide());
+        candidate.homeObservationGuide(),
+        // 어댑터가 이미 해석했으므로 여기서 다시 파싱하지 않는다. 해석 실패는 null 로 와 있고,
+        // null 은 "등급 없음"이라는 유효한 값이라 그대로 저장한다 (S15P11B209-982).
+        candidate.confidence());
   }
 
   private static InterpretationCandidate candidateAt(

@@ -1,8 +1,16 @@
-"""경향 해석 카드의 구조적 공개 게이트 (S15P11B209-888).
+"""경향 해석 카드의 구조적 판정 — 공개 게이트(S15P11B209-888) + 확신도 등급(S15P11B209-982).
 
 보호자에게 경향 해석을 내보내려면 "근거 2건 이상"을 **결정적으로** 판정해야 한다. 규칙이 모호하면
 LLM이 스스로 "근거 2건입니다"라고 주장하는 것과 다를 바 없어져 게이트가 무력해진다.
-정본: docs/S15P11B209-875-report-api-contract.md §4-1 · 보호자 계약 §4-1~§4-4(S15P11B209-885).
+정본: docs/S15P11B209-875-report-api-contract.md §4-1·§3-1 · 보호자 계약 §4-1~§4-4(S15P11B209-885).
+
+이 모듈이 소유하는 것은 **근거의 구조로 결정되는 모든 판정**이다. 두 가지가 여기 함께 있다:
+
+    공개 여부(888)   근거가 충분한가 → 부족하면 카드를 뺀다.
+    확신도 등급(982) 근거가 어느 통로에서 왔나 → 등급을 매겨 보호자에게 그대로 보여 준다.
+
+둘을 한 모듈에 둔 이유: 같은 입력(카드 + 근거 풀)에 같은 '말단 참조 펼치기'(_leaf_refs)를 쓴다.
+나눠 두면 펼치기 구현이 둘로 갈리고, 한쪽만 고쳐졌을 때 등급과 공개 판정이 조용히 어긋난다.
 
 이 모듈이 report_safety와 다른 점 — 섞으면 안 되는 이유:
 
@@ -61,6 +69,45 @@ BLOCKED_EVIDENCE = "BLOCKED_EVIDENCE"  # 미확정 STT·위기 발화를 근거�
 BlockedRefs = frozenset
 
 
+# ── 확신도 등급 (S15P11B209-982) ─────────────────────────────────
+# 등급은 **근거의 종류로만** 정한다. LLM은 "무엇을 근거로 삼았는지"(evidence_refs)까지만 대고,
+# 얼마나 센 근거인지는 여기서 계산한다. 모델에게 등급 판정권을 주면 근거가 약한 해석도
+# STRONG 이라 주장해 체계 전체가 장식이 된다 — 그래서 모델이 보낸 값은 읽지도 않는다.
+CONFIDENCE_STRONG = "STRONG"
+CONFIDENCE_MODERATE = "MODERATE"
+CONFIDENCE_WEAK = "WEAK"
+
+# 근거가 들어온 '통로'. 등급은 어느 통로가 섞였는지로 갈리고, **몇 건인지는 보지 않는다.**
+#   개수를 세면 약한 근거를 여러 개 모아 등급을 올리는 길이 열린다 — HTP 해석이 실제로 무너진
+#   경로가 지표 합산이라, 이 함수는 집합만 보고 크기를 보지 않는다(규칙 2).
+_UTTERANCE = "UTTERANCE"  # 아이가 말이나 문장으로 표현한 것 — 최상위 근거
+_CHOICE = "CHOICE"  # 아이가 고른 것(감정 칩). 아이 자신의 표현이지만 발화는 아니다
+_DRAWING = "DRAWING"  # 그림에서 확인된 것
+_BEHAVIOR = "BEHAVIOR"  # 활동 지표(행동 기록)
+
+# source_type → 통로. 파생 근거(REPEATED_SUBJECT·LONGITUDINAL)는 자체 통로가 없어 여기 없다 —
+#   말단 원본의 kind 로 판단한다(아래 _REF_KIND_CHANNELS).
+_SOURCE_TYPE_CHANNELS = {
+    "CHILD_ANSWER": _UTTERANCE,
+    "STATED_EMOTION": _UTTERANCE,
+    "SELECTED_EMOTION": _CHOICE,
+    "VISION": _DRAWING,
+    "ACTIVITY_METRIC": _BEHAVIOR,
+}
+_REF_KIND_CHANNELS = {
+    "QA_ANSWER": _UTTERANCE,
+    "EMOTION_SELECTION": _CHOICE,
+    "DETECTED_OBJECT": _DRAWING,
+    "VLM_OBSERVATION": _DRAWING,
+    "ACTIVITY_METRIC": _BEHAVIOR,
+    # PRIOR_ACTIVITY 는 이전 활동의 원본 관찰·확인된 발화를 가리킨다. 어느 쪽인지 kind 만으로는
+    #   알 수 없어 통로를 주지 않는다 — 통로가 없으면 등급을 올리지 못하고 WEAK 쪽으로 남는다.
+}
+
+# 그림·행동은 '아이가 말하지 않은 것'이다. 발화와 함께 쓰이면 교차 추론이라 한 등급 낮춘다.
+_INFERRED_CHANNELS = frozenset({_DRAWING, _BEHAVIOR})
+
+
 @dataclass(frozen=True)
 class GateResult:
     """카드 한 건의 판정 결과. 실패 사유는 코드로만 남긴다(원문 비노출)."""
@@ -89,6 +136,51 @@ def _is_child_expression(item: contracts.ReportEvidenceItem) -> bool:
     if item.source_type in CHILD_EXPRESSION_SOURCE_TYPES:
         return True
     return any(kind in CHILD_EXPRESSION_REF_KINDS for kind, _ in _leaf_refs(item))
+
+
+def _channels(item: contracts.ReportEvidenceItem) -> set[str]:
+    """근거 한 건이 지나온 통로. 원본 근거는 source_type, 파생 근거는 말단 kind 로 정한다."""
+    channel = _SOURCE_TYPE_CHANNELS.get(item.source_type)
+    if channel is not None:
+        return {channel}
+    return {
+        c
+        for kind, _ in _leaf_refs(item)
+        if (c := _REF_KIND_CHANNELS.get(kind)) is not None
+    }
+
+
+def confidence_for(
+    card: contracts.PublicInterpretation,
+    evidence_by_id: dict[int, contracts.ReportEvidenceItem],
+) -> str | None:
+    """카드의 확신도 등급. 근거가 하나도 해석되지 않으면 None(등급을 매길 수 없다).
+
+    판정(계약 §3-1 · CLAUDE.md 2절):
+
+        발화만(감정 선택이 함께여도)        → STRONG    아이가 직접 말한 것 위에 얹힌 해석
+        발화 + 그림/행동                    → MODERATE  교차 추론이라 한 걸음 멀다
+        발화 없음(그림·행동·감정 선택만)     → WEAK      아이 말이 없으면 그 이상 올릴 수 없다
+
+    ⚠️ 등급 표에는 "아이 발화가 포함되면 STRONG"과 "그림+발화면 MODERATE"가 나란히 적혀 있어
+       그대로 읽으면 뒤 줄이 영영 안 걸린다. 표의 '직접 근거'(STRONG)와 '교차 일치'(MODERATE)
+       쪽을 정본으로 삼아 위처럼 갈랐다 — 아이가 말하지 않은 것을 그림에서 미뤄 짐작한 해석은
+       아이가 말한 것을 그대로 옮긴 해석보다 약하다.
+    ⚠️ 감정 선택(칩 탭)이 발화와 함께 있어도 등급을 낮추지 않는다. 둘 다 아이 자신의 표현이라
+       추론 단계가 늘지 않는다. 반대로 감정 선택'만'으로는 STRONG 이 될 수 없다 — 칩 하나는
+       문장만큼 말해 주지 않는다.
+    ⚠️ 근거 **개수는 보지 않는다.** 약한 근거를 아무리 모아도 등급이 오르지 않게 하는 장치다.
+    ⚠️ 카드가 들고 온 confidence 값은 읽지 않는다 — 모델이 무엇을 적었든 여기 계산이 정답이다.
+    """
+    items = [evidence_by_id[ref] for ref in card.evidence_refs if ref in evidence_by_id]
+    channels = {channel for item in items for channel in _channels(item)}
+    if not channels:
+        return None
+    if _UTTERANCE not in channels:
+        return CONFIDENCE_WEAK
+    if channels & _INFERRED_CHANNELS:
+        return CONFIDENCE_MODERATE
+    return CONFIDENCE_STRONG
 
 
 def _merge_families(
@@ -165,11 +257,14 @@ def apply(
     evidence_items: list[contracts.ReportEvidenceItem],
     blocked_refs: frozenset[tuple[str, str]] = frozenset(),
 ) -> tuple[list[contracts.PublicInterpretation], list[str]]:
-    """카드 목록에 게이트를 적용한다.
+    """카드 목록에 게이트를 적용하고, 통과한 카드에 확신도를 **찍어서** 돌려준다.
 
     반환: (공개할 카드, 미공개 사유 코드 목록). 리포트 전체를 실패시키지 않고 문제 카드만 뺀다.
     ⚠️ 실패한 카드를 EXPERT_ONLY로 강등하지 않는다 — 근거가 없는 것이라 표현을 다듬어도
        공개 대상이 아니다. 강등은 report_safety(표현 필터)의 처리다.
+    ⚠️ 확신도를 여기서 찍는 것이 요점이다(982). 이 함수를 통과하지 않고 공개되는 카드는 없으므로,
+       '등급이 비어 있는 공개 카드'라는 상태가 원리적으로 생기지 않는다. 모델이 보낸 값이
+       남아 있었더라도 여기서 계산 결과로 덮인다 — 등급을 흔들 수 있는 경로가 없다.
     """
     evidence_by_id = {item.evidence_id: item for item in evidence_items}
     passed: list[contracts.PublicInterpretation] = []
@@ -177,6 +272,13 @@ def apply(
     for card in cards:
         result = evaluate(card, evidence_by_id, blocked_refs)
         if result.passed:
+            # 게이트를 통과한 카드는 근거가 2건 이상 해석된 상태라 등급이 None 일 수 없다.
+            # ⚠️ **제자리에서** 찍는다(model_copy 로 새 객체를 만들지 않는다). 호출부의
+            #    _kept_positions 가 카드 배열의 앞뒤를 **동일성(is)** 으로 맞춰 주제별 관찰의
+            #    interpretationRefs 를 다시 매핑하는데, 사본을 돌려주면 그 매핑이 전부 실패해
+            #    참조가 조용히 사라진다(875 §5-1). 값은 같고 아무 테스트도 깨지지 않는 종류의 사고라
+            #    여기 못 박아 둔다.
+            card.confidence = confidence_for(card, evidence_by_id)
             passed.append(card)
             continue
         reasons.append(result.reason or NO_EVIDENCE)

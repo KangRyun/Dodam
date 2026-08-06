@@ -9,6 +9,7 @@ import com.ssafy.b209.report.domain.ReportEvidenceSourceKind;
 import com.ssafy.b209.report.domain.ReportEvidenceSourceRef;
 import com.ssafy.b209.report.domain.ReportEvidenceSourceType;
 import com.ssafy.b209.report.domain.ReportInterpretationCategory;
+import com.ssafy.b209.report.domain.ReportInterpretationConfidence;
 import com.ssafy.b209.report.domain.ReportInterpretationDisclosureState;
 import com.ssafy.b209.report.domain.ReportParentGuide;
 import com.ssafy.b209.report.domain.ReportParentGuideType;
@@ -111,6 +112,50 @@ class ReportInterpretationStorageIntegrationTest extends IntegrationTestSupport 
     assertThat(found.getWithheldReasonCode()).isNull();
     assertThat(found.getEvidences()).hasSize(2);
     assertThat(found.getEvidences().getFirst().getEvidenceItem().getEvidenceNumber()).isEqualTo(1);
+  }
+
+  @Test
+  @Transactional
+  void storesConfidenceGradeAndAllowsCardsWithoutOne() {
+    // V43. 등급 컬럼은 NULL 을 허용해야 한다 — 이 마이그레이션 이전에 저장된 카드에는 등급이 없고,
+    //   AI 가 등급을 싣지 않아도 카드는 저장돼야 한다(S15P11B209-982, 836 재발 방지).
+    ReportEvidenceItem answer = saveOriginal(1, ReportEvidenceSourceType.CHILD_ANSWER, "202");
+    ReportPublicInterpretation graded = newCard(0, ReportInterpretationConfidence.WEAK);
+    graded.referenceEvidence(answer);
+    ReportPublicInterpretation ungraded = newCard(1, null);
+    interpretationRepository.saveAllAndFlush(List.of(graded, ungraded));
+    // 영속성 컨텍스트를 비워 실제 DB 에서 다시 읽는다 — 등급이 컬럼에 실제로 내려갔는지 보려면
+    //   재적재해야 한다. 메모리 안의 객체만 확인하면 컬럼이 없어도 통과한다.
+    entityManager.clear();
+
+    List<ReportPublicInterpretation> found =
+        interpretationRepository.findByReportIdOrderByDisplayOrderAsc(REPORT_ID);
+    assertThat(found).hasSize(2);
+    assertThat(found.getFirst().getConfidence()).isEqualTo(ReportInterpretationConfidence.WEAK);
+    assertThat(found.get(1).getConfidence()).isNull();
+    // 숫자가 아니라 enum 이름이 그대로 들어가야 CHECK 제약과 맞는다.
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT confidence FROM report_public_interpretations "
+                    + "WHERE report_id = ? AND display_order = 0",
+                String.class,
+                REPORT_ID))
+        .isEqualTo("WEAK");
+  }
+
+  @Test
+  void rejectsConfidenceGradeOutsideTheAllowedList() {
+    // 등급 이름을 DB 가 직접 막는다. BE 를 우회한 경로로도 알 수 없는 등급이 들어가면 안 된다.
+    assertThatThrownBy(
+            () ->
+                jdbcTemplate.update(
+                    "INSERT INTO report_public_interpretations "
+                        + "(report_id, display_order, category, title, tendency_text, "
+                        + "disclosure_state, withheld_reason_code, confidence) "
+                        + "VALUES (?, 0, 'RELATIONSHIP', '제목', '경향이 보일 수 있습니다.', "
+                        + "'WITHHELD', 'PENDING_VERIFICATION', 'VERY_STRONG')",
+                    REPORT_ID))
+        .isInstanceOf(DataAccessException.class);
   }
 
   @Test
@@ -293,6 +338,11 @@ class ReportInterpretationStorageIntegrationTest extends IntegrationTestSupport 
   }
 
   private ReportPublicInterpretation newCard(int displayOrder) {
+    return newCard(displayOrder, null);
+  }
+
+  private ReportPublicInterpretation newCard(
+      int displayOrder, ReportInterpretationConfidence confidence) {
     return ReportPublicInterpretation.create(
         report,
         displayOrder,
@@ -300,7 +350,8 @@ class ReportInterpretationStorageIntegrationTest extends IntegrationTestSupport 
         "가족과의 정서적 연결",
         "가족에게 정서적으로 의지하려는 경향이 보일 수 있습니다.",
         "이번 그림 활동에서 나타난 가능성입니다.",
-        "새로운 상황에서도 보호자의 확인을 반복해서 구하는지 살펴봐 주세요.");
+        "새로운 상황에서도 보호자의 확인을 반복해서 구하는지 살펴봐 주세요.",
+        confidence);
   }
 
   private int countOf(String table) {

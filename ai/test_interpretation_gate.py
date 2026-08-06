@@ -241,5 +241,187 @@ class GateIsNotADowngradeTest(unittest.TestCase):
         self.assertNotIn("EXPERT_ONLY", str(result.reason))
 
 
+# ── 확신도 등급 (S15P11B209-982) ─────────────────────────────────
+
+
+def _confidence(items, refs, **card_overrides):
+    card = _card(refs)
+    for key, value in card_overrides.items():
+        setattr(card, key, value)
+    return gate.confidence_for(card, {i.evidence_id: i for i in items})
+
+
+def _vision(evidence_id, ref_id="d1"):
+    return _item(
+        evidence_id,
+        source_type="VISION",
+        ref=_ref(kind="DETECTED_OBJECT", ref_id=ref_id),
+    )
+
+
+def _metric(evidence_id, ref_id="m1"):
+    return _item(
+        evidence_id,
+        source_type="ACTIVITY_METRIC",
+        ref=_ref(kind="ACTIVITY_METRIC", ref_id=ref_id),
+    )
+
+
+def _chosen_emotion(evidence_id, ref_id="e5"):
+    return _item(
+        evidence_id,
+        source_type="SELECTED_EMOTION",
+        ref=_ref(kind="EMOTION_SELECTION", ref_id=ref_id),
+    )
+
+
+class ConfidenceGradeTest(unittest.TestCase):
+    """등급은 근거의 **종류**로 정해진다 — 정본: 875 §3-1 · CLAUDE.md 2절.
+
+    여기서 못 박는 것:
+    - 아이 발화만 → STRONG / 발화 + 그림·행동 → MODERATE / 발화 없음 → WEAK
+    - 감정 선택은 아이 표현이지만 발화가 아니다 — 단독으로는 STRONG 이 될 수 없다.
+    - 등급은 근거 **개수와 무관하다**(약한 근거를 모아 올릴 수 없다).
+    """
+
+    def test_child_utterance_only_is_strong(self):
+        items = [_item(1, ref=_ref(ref_id="202")), _item(2, ref=_ref(ref_id="318"))]
+        self.assertEqual(_confidence(items, [1, 2]), gate.CONFIDENCE_STRONG)
+
+    def test_utterance_with_drawing_is_moderate(self):
+        """그림과 발화를 이어 붙인 해석은 교차 추론이라 한 등급 낮다."""
+        self.assertEqual(
+            _confidence([_item(1), _vision(2)], [1, 2]), gate.CONFIDENCE_MODERATE
+        )
+
+    def test_utterance_with_activity_metric_is_moderate(self):
+        self.assertEqual(
+            _confidence([_item(1), _metric(2)], [1, 2]), gate.CONFIDENCE_MODERATE
+        )
+
+    def test_drawing_only_is_weak(self):
+        self.assertEqual(
+            _confidence([_vision(1), _vision(2, "d2")], [1, 2]), gate.CONFIDENCE_WEAK
+        )
+
+    def test_activity_metric_only_is_weak(self):
+        self.assertEqual(
+            _confidence([_metric(1), _metric(2, "m2")], [1, 2]), gate.CONFIDENCE_WEAK
+        )
+
+    def test_selected_emotion_alone_is_weak(self):
+        """칩 하나는 문장만큼 말해 주지 않는다 — 아이 표현이어도 발화가 아니다."""
+        self.assertEqual(
+            _confidence([_chosen_emotion(1), _vision(2)], [1, 2]), gate.CONFIDENCE_WEAK
+        )
+
+    def test_selected_emotion_does_not_downgrade_utterance(self):
+        """둘 다 아이 자신의 표현이라 추론 단계가 늘지 않는다 — STRONG 을 유지한다."""
+        self.assertEqual(
+            _confidence([_item(1), _chosen_emotion(2)], [1, 2]), gate.CONFIDENCE_STRONG
+        )
+
+    def test_stated_emotion_counts_as_utterance(self):
+        items = [
+            _item(1, source_type="STATED_EMOTION"),
+            _item(2, ref=_ref(ref_id="318")),
+        ]
+        self.assertEqual(_confidence(items, [1, 2]), gate.CONFIDENCE_STRONG)
+
+    def test_derived_evidence_uses_leaf_kind(self):
+        """파생 근거(REPEATED_SUBJECT)는 말단 원본이 발화면 발화로 센다."""
+        derived = _item(
+            1,
+            source_type="REPEATED_SUBJECT",
+            derived=[_ref(ref_id="202"), _ref(ref_id="318")],
+        )
+        self.assertEqual(_confidence([derived], [1]), gate.CONFIDENCE_STRONG)
+
+    def test_no_resolvable_evidence_has_no_grade(self):
+        """근거가 하나도 해석되지 않으면 등급을 매길 수 없다 — 지어내지 않고 None."""
+        self.assertIsNone(_confidence([_item(1)], [99]))
+
+
+class ConfidenceIsNotEarnedByCountTest(unittest.TestCase):
+    """약한 근거를 여러 개 모아 강한 주장으로 승격하지 못한다 (규칙 2).
+
+    지표 합산으로 경향을 만드는 것이 HTP 해석이 실제로 무너진 경로다. 등급 계산이 통로의
+    **집합**만 보고 크기를 보지 않는다는 것을 개수를 늘려 가며 고정한다.
+    """
+
+    def test_many_drawing_evidences_stay_weak(self):
+        items = [_vision(i, f"d{i}") for i in range(1, 8)]
+        self.assertEqual(
+            _confidence(items, [i.evidence_id for i in items]), gate.CONFIDENCE_WEAK
+        )
+
+    def test_mixed_weak_channels_stay_weak(self):
+        """그림 여러 건 + 행동 여러 건 + 감정 선택을 모아도 발화가 없으면 WEAK 다."""
+        items = [
+            _vision(1),
+            _vision(2, "d2"),
+            _metric(3),
+            _metric(4, "m2"),
+            _chosen_emotion(5),
+        ]
+        self.assertEqual(_confidence(items, [1, 2, 3, 4, 5]), gate.CONFIDENCE_WEAK)
+
+    def test_many_drawings_do_not_lift_moderate_to_strong(self):
+        items = [_item(1)] + [_vision(i, f"d{i}") for i in range(2, 9)]
+        self.assertEqual(
+            _confidence(items, [i.evidence_id for i in items]),
+            gate.CONFIDENCE_MODERATE,
+        )
+
+
+class ModelCannotSetConfidenceTest(unittest.TestCase):
+    """등급 판정권은 코드에 있다 — 모델이 무엇을 주장하든 근거가 정한다.
+
+    모델이 스스로 등급을 매기면 근거가 약한 해석도 STRONG 이라 우겨 체계 전체가 장식이 된다.
+    그래서 카드가 들고 온 값을 **읽지 않는다**는 것을 여기서 고정한다.
+    """
+
+    def test_model_claimed_strong_is_overwritten_to_weak(self):
+        """근거가 그림 단독이면 모델이 STRONG 이라 우겨도 WEAK 로 내려간다."""
+        items = [_vision(1), _vision(2, "d2")]
+        graded = _confidence(items, [1, 2], confidence="STRONG")
+        self.assertEqual(graded, gate.CONFIDENCE_WEAK)
+
+    def test_apply_stamps_confidence_over_model_value(self):
+        """게이트를 통과해 나오는 카드의 등급은 언제나 코드 계산값이다."""
+        card = _card([1, 2])
+        card.confidence = "STRONG"  # 모델이 우긴 값
+        passed, _ = gate.apply([card], [_chosen_emotion(1), _vision(2)])
+        self.assertEqual(len(passed), 1)
+        self.assertEqual(passed[0].confidence, gate.CONFIDENCE_WEAK)
+
+    def test_every_published_card_carries_a_grade(self):
+        """등급 없는 공개 카드라는 상태가 생기지 않는다 — apply 가 유일한 출구다."""
+        cards = [_card([1, 2]), _card([3, 4])]
+        items = [
+            _item(1, ref=_ref(ref_id="202")),
+            _item(2, ref=_ref(ref_id="318")),
+            _chosen_emotion(3),
+            _vision(4),
+        ]
+        passed, _ = gate.apply(cards, items)
+        self.assertEqual(len(passed), 2)
+        self.assertEqual([c.confidence for c in passed], ["STRONG", "WEAK"])
+
+    def test_apply_preserves_card_identity(self):
+        """사본을 돌려주면 호출부의 순번 재매핑(_kept_positions, is 비교)이 조용히 깨진다."""
+        card = _card([1, 2])
+        passed, _ = gate.apply([card], [_item(1), _item(2, ref=_ref(ref_id="318"))])
+        self.assertIs(passed[0], card)
+
+    def test_excluded_card_is_not_graded(self):
+        """게이트에서 빠진 카드에는 등급을 찍지 않는다 — 공개되지 않는 카드다."""
+        card = _card([1])
+        passed, reasons = gate.apply([card], [_item(1)])
+        self.assertEqual(passed, [])
+        self.assertEqual(len(reasons), 1)
+        self.assertIsNone(card.confidence)
+
+
 if __name__ == "__main__":
     unittest.main()

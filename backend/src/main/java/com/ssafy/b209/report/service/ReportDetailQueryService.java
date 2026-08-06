@@ -656,7 +656,10 @@ public class ReportDetailQueryService {
                     card.getHomeObservationGuide(),
                     card.getEvidences().stream()
                         .map(link -> link.getEvidenceItem().getEvidenceNumber())
-                        .toList()))
+                        .toList(),
+                    // 등급이 없는 카드(V43 이전 저장분·AI 미전송·해석 실패)는 null 로 내보낸다. 여기서
+                    // 기본값을 채우면 계산된 적 없는 등급이 보호자 화면에 사실처럼 뜬다 (S15P11B209-982).
+                    card.getConfidence() == null ? null : card.getConfidence().name()))
         .toList();
   }
 
