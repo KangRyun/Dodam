@@ -5,6 +5,10 @@
 > 관련 문서: 백업·복원은 [DB백업-복원.md](DB백업-복원.md), 저장소 설계는 [../database/저장소-아키텍처.md](../database/저장소-아키텍처.md)
 > ⚠️ **이 DB의 내용 = 아동의 그림·대화·감정 기록.** 조회 자체가 민감정보 열람이다. (CLAUDE.md 9절 가드레일)
 
+> **2026-08-06 갱신 (S15P11B209-970):** 07-31 에 열었던 **MySQL 외부 개방(NodePort 30306)을 회수했다.**
+> 이제 네 저장소 모두 외부 노출이 0 이고, 사람의 접속은 전부 SSH 를 거친다. GUI 절차는 §1-a.
+> 30306 으로 저장해 둔 연결 설정은 더 이상 동작하지 않는다.
+
 > **2026-07-30 갱신 (S15P11B209-739):** 360 컷오버로 운영이 k3s 로 옮겨갔다. 이 문서는 그 기준이다.
 > ⚠️ **정지된 compose 컨테이너(`dodam-mysql` 등)를 다시 켜지 말 것.** 2026-07-29 23:55 에 멈춘
 > 그 컨테이너들은 **컷오버 이전 데이터**를 갖고 있다. 켜면 조회는 되는데 내용이 과거다 —
@@ -35,18 +39,15 @@ export KUBECONFIG=$HOME/.kube/config
 
 ## 1. 전제 — 무엇이 열려 있고 무엇이 닫혀 있는가
 
-> **2026-07-31 변경:** **MySQL 만 외부에 개방했다**(사용자 지시). 나머지 저장소는 종전대로 노출 0 이다.
-> 매니페스트는 `infra/k8s/overlays/prod/mysql-nodeport.yaml`, 경위·되돌리는 법은 그 파일 머리주석에 있다.
+> **2026-08-06 (S15P11B209-970):** **네 저장소 모두 외부 노출이 0 이다.** 07-31~08-06 사이에만
+> MySQL 이 예외였고(`mysql-ext`, NodePort 30306), 그 예외는 회수했다. 경위는 §1-a 하단.
 
-Redis·MinIO·MongoDB Service 는 여전히 **headless ClusterIP**(`clusterIP: None`) 이고 NodePort 도
-hostPort 도 없다. 이 셋에 대한 외부 직접 접속은 **설계상 불가능하며, 뚫지 않는다.**
-MySQL 은 headless `mysql`(파드 DNS·앱 접속용) 은 그대로 두고 **`mysql-ext`(NodePort 30306) 이라는
-입구를 하나 더** 낸 형태다.
+MySQL·Redis·MinIO·MongoDB Service 는 전부 **headless ClusterIP**(`clusterIP: None`) 이고 NodePort 도
+hostPort 도 없다. 이 넷에 대한 외부 직접 접속은 **설계상 불가능하며, 뚫지 않는다.**
 
 ```
-$ kubectl -n dodam get svc mysql mysql-ext redis minio mongodb
-mysql       ClusterIP   None                    # 앱·파드용 (변경 없음)
-mysql-ext   NodePort    <cluster-ip>  3306:30306/TCP   # ← 외부 개방
+$ kubectl -n dodam get svc mysql redis minio mongodb
+mysql       ClusterIP   None      # 앱·파드용. 외부 입구 없음
 redis       ClusterIP   None
 minio       ClusterIP   None
 mongodb     ClusterIP   None
@@ -54,10 +55,9 @@ mongodb     ClusterIP   None
 
 | 결정 | 이유 |
 |------|------|
-| **MySQL 외부 개방** (2026-07-31) | 외부 도구에서 직접 붙기 위해 사용자가 결정. **대가**: 인터넷 전체가 로그인 시도 가능 — 계정·비밀번호가 유일한 방어선이 된다. 아래 §1-a 의 위험을 알고 쓴다 |
-| **Redis·MinIO·Mongo 노출 0 유지** | 개방 요청 범위가 MySQL 뿐이다. 노출면은 필요한 만큼만 넓힌다 |
+| **네 저장소 모두 노출 0** | 안에 든 것이 아동의 그림·대화·감정 기록이다. 외부에 열린 포트는 gateway 의 80/443 과 SSH 의 22 뿐이다 |
 | **파드 간 통신은 클러스터 DNS** | backend 는 `mysql:3306` · `redis:6379` · `minio:9000` · `mongodb:27017` 으로만 접근한다. Service 이름을 compose 서비스명과 똑같이 유지해서 앱 설정을 하나도 바꾸지 않았다 |
-| **사람의 접속은 SSH 를 거친다** (MySQL 제외) | 접근 경로를 SSH 계정 하나로 좁혀 인증·감사 지점을 단일화. 서버에 들어간 뒤 `kubectl exec`, 또는 `kubectl port-forward` + SSH 터널로 GUI 툴 연결. **MySQL 은 2026-07-31 부터 이 원칙에서 빠졌다** — SSH 없이 바로 붙는다 |
+| **사람의 접속은 SSH 를 거친다** | 접근 경로를 SSH 계정 하나로 좁혀 인증·감사 지점을 단일화. 서버에 들어간 뒤 `kubectl exec`(§2), 또는 SSH 터널로 GUI 툴 연결(§1-a·§3) |
 | **비밀번호는 파드 env 를 재사용** | 아래 명령들은 비밀번호를 **입력하지도, 호스트에 남기지도 않는다.** 셸 히스토리·`ps` 노출을 원천 차단(백업 스크립트와 동일 원칙) |
 
 접속 정보(계정·비밀번호)의 원본은 서버의 `infra/.env`(git 비추적) → Secret `dodam-secrets`, 그리고
@@ -72,39 +72,27 @@ Jenkins 크리덴셜 `dodam-env` 뿐이다. **어떤 값도 문서·이슈·메�
 
 ---
 
-## 1-a. 🌐 MySQL 외부 직접 접속 (2026-07-31 개방)
+## 1-a. 🔐 GUI 툴에서 MySQL 붙기 — SSH 터널 (2026-08-06, S15P11B209-970)
 
-SSH 터널 없이 GUI 툴·CLI 에서 바로 붙는다.
-
-| 항목 | 값 |
-|------|-----|
-| Host | `i15b209.p.ssafy.io` |
-| Port | **30306** (컨테이너 3306 → NodePort 30306) |
-| Database | `b209` |
-| User / Password | `dodam` / `.env` 의 `MYSQL_PASSWORD` |
-
-### ⚠️ TLS 는 선택이 아니다 (2026-07-31 실측)
+DBeaver·IntelliJ·Workbench 같은 GUI 는 **내장 SSH 터널**로 붙는다. DB 트래픽이 SSH(22) 안으로
+흐르므로 새 포트를 열 필요가 없고, 서버 밖에서 MySQL 포트가 보이지 않는다.
 
 ```
-tls_version               TLSv1.2,TLSv1.3     ← 서버는 TLS 를 할 수 있고
-require_secure_transport  OFF                 ← 평문 접속도 그대로 받는다
+내 PC (GUI) ──SSH:22──▶ 서버 ──▶ 127.0.0.1:3307 ──port-forward──▶ mysql-0:3306
+                              └─ 여기부터는 서버 안이다. 밖에서 닿을 수 없다.
 ```
 
-**클라이언트가 TLS 를 켜지 않으면 평문으로 붙는다.** 클러스터 안에서만 오갈 때는 문제가
-아니었지만, 이제 비밀번호와 아동 데이터가 인터넷을 건넌다. 그래서 아래 모든 설정에
-`sslMode=REQUIRED` 가 들어간다 — **빼먹으면 조용히 평문이 된다.**
+### 설정값
 
-```bash
-mysql -h i15b209.p.ssafy.io -P 30306 -u dodam -p b209 --ssl-mode=REQUIRED
-```
+| 탭 | 항목 | 값 |
+|----|------|-----|
+| **SSH** | Host / Port | `i15b209.p.ssafy.io` / `22` |
+| **SSH** | User / 인증 | 각자 계정(`woo`·`domingo`·`jhp`·`bg`·`kr`·`yj`) / 비밀번호 (`PasswordAuthentication yes`) |
+| **Main** | Host / Port | `127.0.0.1` / **`3307`** ← **서버 기준 주소다.** 내 PC 의 3307 이 아니다 |
+| **Main** | Database | `b209` |
+| **Main** | User / Password | `dodam` / `.env` 의 `MYSQL_PASSWORD` |
 
-> 서버에서 `require_secure_transport=ON` 으로 막는 편이 근본적이다. **다만 지금 켜면 백엔드가 죽는다** —
-> `application-local.yml:15` 의 JDBC URL 이 `useSSL=false` 로 명시돼 있다. 순서는
-> ① 백엔드를 `sslMode=REQUIRED` 로 고쳐 배포 → ② 서버 스위치 ON. 포트를 오래 열어 둘 거면 해 둔다.
-
-### GUI 툴 설정 (DBeaver · Workbench · IntelliJ)
-
-접속 정보는 위 표와 같고, **드라이버 속성 두 개**를 반드시 넣는다.
+**드라이버 속성 두 개**를 함께 넣는다. 넣는 곳은 툴마다 다르다.
 
 ```
 sslMode            = REQUIRED
@@ -113,64 +101,92 @@ connectionTimeZone = Asia/Seoul
 
 | 툴 | 넣는 곳 |
 |----|---------|
-| DBeaver | 새 연결 → MySQL → **Driver properties** 탭 |
-| MySQL Workbench | Standard TCP/IP → **SSL** 탭에서 `Use SSL: Require` |
-| IntelliJ Database | URL `jdbc:mysql://i15b209.p.ssafy.io:30306/b209` → **Advanced** 탭 |
+| DBeaver | 새 연결 → MySQL → **Driver properties** 탭 (SSH 는 **SSH** 탭) |
+| MySQL Workbench | Connection Method: **Standard TCP/IP over SSH** |
+| IntelliJ Database | URL `jdbc:mysql://127.0.0.1:3307/b209` → **SSH/SSL** 탭에서 SSH 켜기 |
 
-#### GUI 함정 셋
+### 왜 서버 루프백 3307 에 무언가 떠 있는가
+
+`kubectl port-forward` 를 systemd 가 상시 유지한다 — `infra/k3s/dodam-mysql-tunnel.service`.
+GUI 내장 SSH 터널은 "서버에 들어간 뒤 **서버 기준 주소**로 붙는" 구조라, 서버 루프백에 듣고
+있는 것이 없으면 성립하지 않는다. 07-31~08-06 에는 NodePort 30306 이 그 역할을 했고,
+그것을 회수하면서 같은 편의를 **노출 없이** 되돌려 준 것이 이 유닛이다.
+
+```bash
+# 살아 있는지
+systemctl status dodam-mysql-tunnel
+ss -tlnp | grep 3307        # 반드시 127.0.0.1:3307. 0.0.0.0 이면 사고다
+```
+
+⚠️ **유닛의 `--address 127.0.0.1` 을 `0.0.0.0` 으로 바꾸지 말 것.** 그 한 글자가 970 에서 닫은
+구멍을 그대로 다시 연다. 게다가 매니페스트에 안 남아서 `kubectl get svc` 로는 보이지도 않는다.
+
+### GUI 함정 셋
 
 1. **`Public Key Retrieval is not allowed` 가 뜨면 `allowPublicKeyRetrieval=true` 로 끄지 말 것.**
    그 에러는 "권한이 모자라다"가 아니라 **TLS 가 꺼졌다**는 신호다. MySQL 8.4 의 기본 인증
-   플러그인(`caching_sha2_password`)은 평문 연결일 때 서버 공개키를 따로 받아와야 하는데,
+   플러그인(`caching_sha2_password`)은 평문 연결이면 서버 공개키를 따로 받아와야 하는데,
    그 요청이 기본 거부라서 나는 것이다. `sslMode=REQUIRED` 를 제대로 넣으면 애초에 뜨지 않는다.
-   백엔드 설정에 `allowPublicKeyRetrieval=true` 가 있는 것은 **파드 간 통신이라 그런 것이고,
-   인터넷 경유 설정에 그대로 베끼면 평문 접속이 된다.**
+   SSH 터널 안이라 도청 위험은 없지만, **끄는 습관이 남으면 다음에 터널 밖에서도 끈다.**
+   백엔드 설정에 `allowPublicKeyRetrieval=true` 가 있는 것은 파드 간 통신이라 그런 것이다.
 2. **시각을 변환하지 말 것.** DB 값은 이미 KST 다(§1-b). `connectionTimeZone` 을 안 잡으면
    드라이버가 저장값을 UTC 로 착각해 화면에서 **9시간 밀어** 보여 준다.
 3. **읽기 전용으로 걸어 둘 것.** 운영 DB 직접 DML/DDL 은 §4 금지 사항이다. DBeaver 는 연결 편집
    창에서 `Connection type: Production` + `Read-only connection` 체크(메뉴 위치는 버전마다 다르다).
    실수로 `UPDATE` 를 커밋하는 사고를 **구조적으로** 막는 편이 조심하는 것보다 낫다.
 
-### GUI 내장 SSH 터널 — 보안그룹이 막혀 있어도 되는 경로
+### 터미널이 편하면 (GUI 내장 터널을 안 쓰는 경우)
 
-30306 이 밖에서 안 열리면 GUI 의 **SSH 탭**을 쓴다. 22 번만 타므로 보안그룹과 무관하고,
-SSH 가 암호화하므로 TLS 설정도 필요 없다.
+서버에 상시 터널이 있으므로 로컬 포트포워딩 한 줄이면 된다. `port-forward` 를 따로 띄울
+필요가 없다 — 그게 3307 이 존재하는 이유다.
 
-| 탭 | 항목 | 값 |
-|----|------|-----|
-| SSH | Host / Port | `i15b209.p.ssafy.io` / `22` |
-| SSH | User / 인증 | `kr` / 비밀번호 (`PasswordAuthentication yes`) |
-| Main | Host / Port | `127.0.0.1` / `30306` ← **서버 기준 주소다** |
+```bash
+# 이 창은 켜 둔 채로 (13306 은 내 PC 쪽 임의 포트 — 로컬 MySQL 과 안 겹치게)
+ssh -N -L 13306:127.0.0.1:3307 <내계정>@i15b209.p.ssafy.io
 
-> `mysql-ext` 가 생긴 뒤로 이 경로에 **`kubectl port-forward` 가 필요 없어졌다.** 서버 루프백에서
-> 30306 이 바로 잡히기 때문이다. §3 의 port-forward 절차는 Redis·MinIO·Mongo 에만 해당한다.
+# 다른 창에서
+mysql -h 127.0.0.1 -P 13306 -u dodam -p b209
+```
 
-### 관문이 셋이다 — 안 닿으면 순서대로 짚는다
+---
 
-`timeout` 이 나면 어디서 막혔는지부터 가른다. **세 관문 중 하나만 닫혀도 증상은 똑같다.**
+### 📌 07-31 의 외부 개방과 그 회수 (기록)
 
-| # | 관문 | 확인 | 여는 법 |
-|---|------|------|---------|
-| ① | k8s Service | `kubectl -n dodam get svc mysql-ext` | `kubectl apply -k infra/k8s/overlays/prod` |
-| ② | EC2 UFW | `sudo ufw status \| grep 30306` | `sudo ufw allow 30306/tcp comment 'mysql 외부개방'` |
-| ③ | SSAFY 보안그룹 | 외부 PC 에서 `nc -vz i15b209.p.ssafy.io 30306` | **우리 권한 밖.** 막혀 있으면 SSAFY 에 요청해야 한다 |
+2026-07-31, 외부 도구에서 바로 붙기 위해 `mysql-ext`(NodePort 30306)로 **운영 MySQL 을 인터넷에
+직접 열었다.** 2026-08-06 재점검에서 회수했다(970). 같은 요구가 다시 올 때 판단을 되풀이하지
+않도록 근거를 남긴다.
 
-①②가 모두 열렸는데도 밖에서 timeout 이면 원인은 ③ 하나뿐이다. 그때는 서버 안에서
-`mysql -h 127.0.0.1 -P 30306` 이 되는지로 ①을 실증해 두면 오진을 피한다
-(서버에서 **자기 공인 IP** 로 붙는 시험은 INPUT 체인을 타지 않아 ②③의 증거가 되지 않는다).
+**🔴 UFW 는 NodePort 를 막지 못한다.** 이 문서는 예전에 관문을 `① k8s Service → ② UFW →
+③ 보안그룹` 셋으로 적어 두었는데, **②는 관문이 아니었다.**
 
-### ⚠️ 열어 둔 대가 — 알고 쓴다
+```
+패킷 도착 (dst = 노드IP:30306)
+  → nat PREROUTING → KUBE-NODEPORTS → DNAT (dst 를 파드 IP:3306 으로 변경)
+  → 목적지가 파드 IP라 로컬이 아님 → INPUT 이 아니라 FORWARD 로 감
+  → kube-proxy 가 FORWARD 맨 앞에 -I 로 넣은 KUBE-FORWARD 가 먼저 ACCEPT
+  → ufw-before-forward 는 평가되지 않음
+```
 
-- **인터넷 전체가 로그인 프롬프트에 닿는다.** 이제 `MYSQL_PASSWORD`·`MYSQL_ROOT_PASSWORD` 가
-  아동 데이터의 **유일한** 방어선이다. 비밀번호 유출 = 데이터 유출이 직결된다.
-- **`root` 도 원격에서 붙는다.** mysql 공식 이미지는 `root@'%'` 를 만든다(`MYSQL_ROOT_HOST` 기본값 `%`).
-  좁히려면 `RENAME USER 'root'@'%' TO 'root'@'localhost';` 를 검토한다 — 단 **백업·복원 스크립트가
-  파드 안에서 root 를 쓰므로**(`kubectl exec` 경로) 그 영향부터 확인할 것.
-- **무차별 대입은 조용하다.** 실패 로그를 보려면 파드에서
-  `SELECT user, host FROM performance_schema.accounts;` · `SHOW GLOBAL STATUS LIKE 'Aborted_connects';`
-  를 주기적으로 본다. 급증하면 닫는 것을 먼저 고려한다.
-- **닫는 건 30초면 된다** — `mysql-nodeport.yaml` 머리주석의 되돌리기 절차. 쓸 일이 끝나면 닫는다.
+UFW 규칙은 filter 테이블 **INPUT** 체인에 있다. DNAT 때문에 이 트래픽은 INPUT 에 도달하지
+않는다. Docker 의 `-p` 퍼블리시가 UFW 를 우회하는 것과 같은 구조다. 즉 `ufw status` 에 30306 이
+없어도 밖에서 붙을 수 있었고, 실질적으로 SSAFY 보안그룹만이 막고 있었을 수 있다.
 
+**소스 IP 화이트리스트로 좁히는 것도 불가능했다.**
+
+| 계층 | 가능? | 이유 |
+|------|-------|------|
+| UFW `allow from <IP>` | ❌ | 위 구조로 우회 |
+| iptables `raw` PREROUTING | ✅ | `nat` 보다 먼저 평가된다. 단 재부팅·k3s 재시작 영속화가 필요 |
+| NetworkPolicy | △ | `externalTrafficPolicy: Cluster` 라 소스 IP 가 노드 IP 로 SNAT 된다. `Local` 로 바꿔야 원본이 보인다 |
+| MySQL 계정 `host` 제한 | ❌ | 같은 SNAT 이유로 DB 에는 전부 노드 IP 로 보인다 |
+| NodePort 자체 | ❌ | 특정 IP 바인딩 불가. `loadBalancerSourceRanges` 도 NodePort 엔 적용되지 않는다 |
+
+팀원 접속 IP 가 대부분 유동 IP 라, 화이트리스트를 유지하는 손이 SSH 터널 설정보다 컸다.
+**SSH 계정 보유자만 접근**이 가장 강한 화이트리스트이고 노출면이 0 이 된다 — 그래서 회수했다.
+
+> 다시 열자는 요구가 오면: 이 표를 먼저 보고, "어느 계층에서 누구를 막을 것인가"에 답이
+> 나온 뒤에 연다. NodePort 를 그냥 되살리는 것은 **인터넷 전체에 로그인 프롬프트를 여는 것**과
+> 같고, 그때 계정 비밀번호가 아동 데이터의 유일한 방어선이 된다.
 ---
 
 ## 1-b. ⏰ MySQL 의 시각은 **KST** 로 저장된다 (2026-07-30, S15P11B209-736)
@@ -384,10 +400,12 @@ MONGO_APP_PASSWORD='<로컬 mongo 앱 계정 비밀번호>' ./gradlew bootRun
 
 ## 3. 로컬 GUI 툴에서 접속 (port-forward + SSH 터널)
 
-DBeaver·MySQL Workbench·IntelliJ Database 등에서 붙고 싶을 때.
+Redis·MinIO·MongoDB 처럼 **외부 입구가 없는 저장소**를 GUI·CLI 로 볼 때 쓴다.
 
-> **MySQL 은 이 절이 필요 없다**(2026-07-31). `mysql-ext`(NodePort 30306) 가 생겨서 직접 접속이든
-> GUI 내장 SSH 터널이든 **§1-a** 로 끝난다. 아래 `port-forward` 절차는 **Redis·MinIO·MongoDB** 용이다.
+> **MySQL 은 이 절이 필요 없다**(2026-08-06, S15P11B209-970). 서버 루프백 3307 에 상시 터널이
+> 이미 떠 있어서 **§1-a** 로 끝난다.
+> ⚠️ 그리고 여기서 `sts/mysql 3307:3306` 을 다시 띄우려 하면 `address already in use` 로 실패한다 —
+> 그 포트는 `dodam-mysql-tunnel` 유닛이 잡고 있다. 다른 포트를 쓰거나, 그냥 §1-a 를 쓸 것.
 
 compose 시절에는 `docker inspect` 로 컨테이너 IP 를 뽑아 그 IP 로 터널을 뚫었다.
 **k3s 에서는 그럴 필요가 없다** — `kubectl port-forward` 가 파드를 서버의 루프백에 붙여 준다.
@@ -396,33 +414,26 @@ compose 시절에는 `docker inspect` 로 컨테이너 IP 를 뽑아 그 IP 로 
 ```bash
 # 서버에서: 파드 → 서버 루프백 (이 창은 켜 둔 채로)
 ssh kr@i15b209.p.ssafy.io
-kubectl -n dodam port-forward sts/mysql 3307:3306
+kubectl -n dodam port-forward sts/redis 6380:6379
 ```
 
 ```bash
 # 로컬에서: 서버 루프백 → 내 PC (별도 창)
-ssh -N -L 3307:127.0.0.1:3307 kr@i15b209.p.ssafy.io
+ssh -N -L 6380:127.0.0.1:6380 kr@i15b209.p.ssafy.io
 ```
 
 한 줄로 합칠 수도 있다:
 
 ```bash
-ssh -N -L 3307:127.0.0.1:3307 kr@i15b209.p.ssafy.io \
-  -o "RemoteCommand kubectl -n dodam port-forward sts/mysql 3307:3306" -t
+ssh -N -L 6380:127.0.0.1:6380 kr@i15b209.p.ssafy.io \
+  -o "RemoteCommand kubectl -n dodam port-forward sts/redis 6380:6379" -t
 ```
 
-GUI 툴 접속 설정 (위 터널 기준):
+접속 (위 터널 기준 — 주소는 **내 PC** 의 127.0.0.1 이다):
 
-| 항목 | 값 |
-|------|-----|
-| Host / Port | `127.0.0.1` / `3307` ← **내 PC 기준** |
-| Database | `b209` |
-| User | `dodam` (`MYSQL_USER`) |
-| Password | `.env` 의 `MYSQL_PASSWORD` |
-
-> MySQL 예시는 **구조를 보여 주려고 남겨 둔다.** 실제로 MySQL 에 붙을 때는 §1-a 가 더 짧다
-> (창을 켜 둘 필요도, 파드 재생성 때 터널이 끊길 일도 없다). 이 절의 값어치는
-> **Redis·MinIO·Mongo 처럼 외부 입구가 없는 저장소**에 있다.
+```bash
+redis-cli -h 127.0.0.1 -p 6380 -a "<REDIS_PASSWORD>" --no-auth-warning
+```
 
 같은 방식으로 다른 저장소도 (포트만 바꿔서):
 
@@ -451,11 +462,13 @@ kubectl -n dodam port-forward deploy/prometheus 9091:9090  # Prometheus UI
 ## 4. ⚠️ 가드레일 (타협 불가)
 
 - **조회 = 민감정보 열람.** 필요한 범위만 본다. 아동 그림·대화·리포트 본문을 화면 밖(캡처·복사·메신저 공유)으로 내보내지 않는다.
-- **MySQL 외의 저장소는 외부에 열지 않는다.** Redis·MinIO·MongoDB 를 `NodePort`/`LoadBalancer` 로
-  바꾸거나 `hostPort` 를 추가하거나 `port-forward --address 0.0.0.0` 을 쓰는 것 전부 금지.
+- **네 저장소 어느 것도 외부에 열지 않는다.** MySQL·Redis·MinIO·MongoDB 를 `NodePort`/`LoadBalancer`
+  로 바꾸거나 `hostPort` 를 추가하거나 `port-forward --address 0.0.0.0` 을 쓰는 것 전부 금지.
   불가피하면 루프백 바인딩만, 그리고 작업 후 즉시 되돌린다.
-  MySQL 은 2026-07-31 사용자 결정으로 이 원칙에서 빠졌다(§1-a) — **예외이지 새 기본값이 아니다.**
-  다른 저장소를 열자는 근거로 인용하지 않는다.
+  MySQL 은 2026-07-31~08-06 사이 예외였으나 **회수했다**(S15P11B209-970). 그 기간을
+  "전례가 있다"는 근거로 인용하지 않는다 — 왜 되돌렸는지가 §1-a 하단에 있다.
+  ⚠️ 특히 `dodam-mysql-tunnel.service` 의 `--address 127.0.0.1` 은 **바꾸면 안 되는 값**이다.
+  거기서 새는 노출은 `kubectl get svc` 에 안 보여서 더 오래 살아남는다.
 - **비밀번호를 명령줄에 직접 쓰지 않는다.** 위 명령들처럼 파드 env 를 재사용한다.
   히스토리에 남은 경우 `history -d` 로 지운다.
 - **운영 DB 에 직접 DML/DDL 을 치지 않는다.** 스키마 변경은 Flyway 마이그레이션으로만.
@@ -479,7 +492,9 @@ kubectl -n dodam port-forward deploy/prometheus 9091:9090  # Prometheus UI
 | Mongo 가 `test` DB 에 붙고 `requires authentication` | Secret 키 이름(`$MONGO_ROOT_USERNAME`)을 파드 안에서 썼다 → 빈 값. **`$MONGO_INITDB_ROOT_USERNAME`** 을 쓸 것 (2-4). `ping` 은 인증 없이도 성공하므로 접속된 것처럼 보인다 |
 | MongoDB 조회가 "사용자 없음" | `--authenticationDatabase` 누락·불일치. root=`admin`, 앱 계정=`dodam` (2-4) |
 | GUI 에서 `Public Key Retrieval is not allowed` | **TLS 가 꺼진 상태**라는 신호다. `allowPublicKeyRetrieval=true` 로 끄지 말고 `sslMode=REQUIRED` 를 넣는다 (§1-a GUI 함정 1) |
-| 외부 30306 이 timeout | 관문 3개를 순서대로: `kubectl get svc mysql-ext` → `sudo ufw status` → 보안그룹(우리 권한 밖). 서버 안에서 `127.0.0.1:30306` 이 되면 ①은 정상이다 (§1-a) |
+| 외부에서 `i15b209.p.ssafy.io:30306` 이 timeout | **정상이다.** 2026-08-06 에 닫았다(970). GUI 는 §1-a 의 SSH 터널로 붙는다 |
+| GUI SSH 터널이 `Connection refused` (3307) | 서버의 상시 터널이 죽었다. `systemctl status dodam-mysql-tunnel` → `sudo systemctl restart dodam-mysql-tunnel`. 유닛 자체가 없으면 `infra/k3s/dodam-mysql-tunnel.service` 배치부터 (§1-a) |
+| GUI 가 `Unknown database 'b209'` 또는 빈 목록 | Main 탭 Host 를 **내 PC 기준**으로 적었다. GUI 내장 SSH 터널의 Host 는 **서버 기준** `127.0.0.1:3307` 이다 (§1-a) |
 | 시각이 9시간 어긋나 보인다 | **DB 값은 KST 다**(1-b). 변환하지 말 것. 앱 로그·API 는 UTC 이므로 그 둘을 비교할 때만 9시간을 감안한다 |
 | 새로 넣은 행만 UTC 로 들어갔다 | `mysql` CLI 세션이 UTC 라서다. `SET SESSION time_zone='+09:00'` 후 재시도 (1-b 마지막) |
 

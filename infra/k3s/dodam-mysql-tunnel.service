@@ -1,0 +1,58 @@
+# /etc/systemd/system/dodam-mysql-tunnel.service
+# MySQL 로컬 터널 — 파드 3306 을 서버 루프백 3307 에 붙인다 (S15P11B209-970)
+#
+# 배치 (root 필요):
+#   sudo cp infra/k3s/dodam-mysql-tunnel.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now dodam-mysql-tunnel
+#   sudo systemctl status dodam-mysql-tunnel     # active (running) 확인
+#
+# 왜 필요한가 — 2026-08-06, NodePort 를 회수하면서
+#   07-31 에 `mysql-ext`(NodePort 30306) 로 운영 MySQL 을 인터넷에 직접 열어 두었다.
+#   그것을 닫으면서(970) **GUI 툴의 접속 경로도 같이 사라진다.** DBeaver·IntelliJ 의
+#   내장 SSH 터널은 "서버에 들어간 뒤 서버 기준 주소로 붙는" 구조라, 서버 루프백에
+#   무언가 듣고 있어야 한다. 30306 이 바로 그 역할을 하고 있었다.
+#
+#   그래서 같은 편의를 **노출 없이** 되돌려 준다:
+#     팀원 GUI --SSH(22)--> 서버 --> 127.0.0.1:3307 --> port-forward --> mysql-0:3306
+#
+#   30306 과 결정적으로 다른 점은 바인딩 주소다. 30306 은 노드의 **모든** 인터페이스에서
+#   받았고(NodePort 는 특정 IP 바인딩이 불가능하다), 3307 은 루프백에서만 받는다.
+#   즉 SSH 로 서버에 들어오지 못하면 이 포트에 닿을 방법이 없다.
+#
+# ⚠️ `--address 0.0.0.0` 으로 바꾸지 말 것
+#   그 한 글자가 970 에서 닫은 구멍을 그대로 다시 연다. 심지어 더 나쁘다 —
+#   NodePort 와 달리 이건 매니페스트에 안 남아서 `kubectl get svc` 로는 보이지 않는다.
+#   외부 접속이 필요하다는 요구가 다시 오면 여기를 고치지 말고 970 을 다시 열 것.
+#
+# ⚠️ 왜 `sts/mysql` 이고 `mysql-0` 이 아닌가
+#   파드가 재생성되면 port-forward 는 끊긴다(파드 이름이 같아도 연결은 죽는다).
+#   워크로드를 가리키면 Restart=always 와 합쳐져 재생성 후 자동으로 다시 붙는다.
+#
+# 확인
+#   서버에서: mysql -h 127.0.0.1 -P 3307 -u dodam -p b209
+#   포트만  : ss -tlnp | grep 3307     ← 127.0.0.1:3307 이어야 한다. 0.0.0.0 이면 사고다
+
+[Unit]
+Description=dodam MySQL local tunnel (k3s sts/mysql -> 127.0.0.1:3307)
+Documentation=https://ssafy.atlassian.net/browse/S15P11B209-970
+# k3s 가 떠야 kubectl 이 의미가 있다. 다만 부팅 순서를 완전히 보장하지는 못하므로
+# (API 서버가 준비되기까지 시간이 더 걸린다) 실패 시 Restart 가 최종 안전망이다.
+After=k3s.service network-online.target
+Wants=k3s.service
+
+[Service]
+# kr 의 kubeconfig 로 이미 클러스터 관리자 권한이 나온다. root 로 돌릴 이유가 없다.
+User=kr
+Group=kr
+# systemd 는 로그인 셸을 거치지 않는다 → ~/.zshrc 의 KUBECONFIG 가 들어오지 않는다.
+# 명시하지 않으면 "Unable to read /etc/rancher/k3s/k3s.yaml" 로 죽는다.
+Environment=KUBECONFIG=/home/kr/.kube/config
+ExecStart=/usr/local/bin/kubectl -n dodam port-forward --address 127.0.0.1 sts/mysql 3307:3306
+# port-forward 는 파드 재생성·유휴 끊김 때 **정상 종료 코드로** 빠지는 경우가 있다.
+# on-failure 로 두면 그때 다시 붙지 않아 조용히 죽은 채로 남는다 — always 여야 한다.
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

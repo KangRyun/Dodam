@@ -19,9 +19,12 @@ namespace: dodam
 
 resources:
   - ../../base
-  # ⚠️ 운영 MySQL 을 인터넷에 직접 노출한다(2026-07-31, 사용자 지시). 노출면 0 원칙의 예외이며
-  #   경위·관문 3개(k8s·UFW·보안그룹)·되돌리는 법은 파일 머리주석에 있다.
-  - mysql-nodeport.yaml
+  # 저장소를 외부에 여는 리소스는 여기 없다 — 그것이 기본값이다(S15P11B209-970).
+  #   2026-07-31~08-06 사이에는 `mysql-nodeport.yaml`(NodePort 30306) 이 여기 있었다.
+  #   운영 MySQL 을 인터넷에 직접 노출하던 것이고, 970 에서 회수했다.
+  #   사람이 GUI 로 붙는 경로는 SSH 터널로 대체했다 — `infra/k3s/dodam-mysql-tunnel.service`
+  #   와 `docs/인프라/DB접속.md` §1-a. 다시 열자는 요구가 오면 그 문서의
+  #   "왜 화이트리스트가 불가능한가"부터 읽을 것.
 
 images:
   # 태그는 Jenkins 가 커밋 SHA 로 덮어쓴다(359). latest 를 쓰지 않는 이유는
