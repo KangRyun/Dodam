@@ -163,5 +163,133 @@ class FindDefinitiveDiagnosisTest(unittest.TestCase):
         )
 
 
+# ── 역할 전환 이후 (S15P11B209-982) ──────────────────────────────
+
+
+class DiagnosisBlockingSurvivesTheReversalTest(unittest.TestCase):
+    """방침이 '해석한다'로 바뀌어도 **진단 차단은 그대로다** — 유지가 결정이다.
+
+    해석을 제공하는 것과 진단이라고 말하는 것은 다르다. 이 축이 느슨해지면 리포트가
+    의료적 판단으로 읽히고, 한계 고지가 있어도 보호자는 그렇게 받아들인다(CLAUDE.md 9절).
+    """
+
+    def test_disorder_names_are_still_blocked(self):
+        for text in ("불안장애가 있어 보여요.", "ADHD 경향이 보입니다.", "우울증입니다."):
+            with self.subTest(text=text):
+                self.assertTrue(report_safety.has_unsafe_expression(text))
+
+    def test_stigma_is_still_blocked(self):
+        for text in ("자존감이 낮습니다.", "공격적인 성향이 있어요.", "소심한 아이예요."):
+            with self.subTest(text=text):
+                self.assertTrue(report_safety.has_unsafe_expression(text))
+
+    def test_hedged_interpretation_still_passes(self):
+        """해석을 담기로 했으므로 근거에 기댄 조심스러운 해석은 통과해야 한다."""
+        for text in (
+            "가족에게 의지하려는 경향이 보일 수 있습니다.",
+            "새로운 상황을 조심스럽게 살피는 모습이 보여요.",
+        ):
+            with self.subTest(text=text):
+                self.assertFalse(report_safety.has_unsafe_expression(text))
+
+
+class BlocksScoringTest(unittest.TestCase):
+    """점수화·등급은 해석을 허용한 뒤에도 금지다 (982).
+
+    지표를 합산해 영역 점수를 내는 형태가 문헌이 가장 직접적으로 반증한 구간이다.
+    """
+
+    def test_scored_expressions_are_detected(self):
+        for text in (
+            "정서 영역에 점수를 매기면 보통 수준이에요.",
+            "안정감이 3점 만점에 해당해요.",
+            "또래 대비 백분위 40 정도예요.",
+            "사회성은 중 등급으로 보입니다.",
+            "불안할 확률이 70% 정도로 보입니다.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(report_safety.find_scored_claim(text))
+                self.assertTrue(report_safety.has_unsafe_expression(text))
+
+    def test_plain_counts_are_not_scores(self):
+        """관찰 수치는 점수가 아니다 — 활동 기록을 적는 자리를 막으면 안 된다."""
+        for text in (
+            "약 10분간 그렸고 색을 다섯 번 바꿨어요.",
+            "창문을 두 개 그렸어요.",
+            "지우기는 3회였어요.",
+        ):
+            with self.subTest(text=text):
+                self.assertEqual(report_safety.find_scored_claim(text), [])
+
+
+class BlocksForbiddenAxisTest(unittest.TestCase):
+    """필압은 쓰지 않는 축이다 (982).
+
+    스타일러스 입력에만 있어 기기 의존적이고, 계약상 average_pressure 는 항상 None 이라
+    문장에 등장하면 창작이다.
+    """
+
+    def test_pressure_mentions_are_detected(self):
+        for text in (
+            "필압이 약한 편이에요.",
+            "누르는 힘이 세게 느껴집니다.",
+            "필기 압력이 고른 편이에요.",
+        ):
+            with self.subTest(text=text):
+                self.assertTrue(report_safety.find_forbidden_axis(text))
+                self.assertTrue(report_safety.has_unsafe_expression(text))
+
+    def test_ordinary_drawing_description_passes(self):
+        for text in ("선을 길게 그었어요.", "진한 색으로 칠했어요."):
+            with self.subTest(text=text):
+                self.assertEqual(report_safety.find_forbidden_axis(text), [])
+
+
+class OverclaimIsGradedTest(unittest.TestCase):
+    """확신도에 따라 말할 수 있는 폭이 다르다 (982 규칙 2·3).
+
+    같은 문장이 등급에 따라 통과하기도 걸리기도 한다는 것이 이 검사의 요점이다 —
+    등급이 장식이 아니라 실제로 무언가를 가른다.
+    """
+
+    def test_generalization_blocked_only_at_weak(self):
+        text = "평소에도 가족에게 의지하려는 경향이 보일 수 있습니다."
+        self.assertTrue(report_safety.has_overclaim(text, "WEAK"))
+        self.assertFalse(report_safety.has_overclaim(text, "MODERATE"))
+        self.assertFalse(report_safety.has_overclaim(text, "STRONG"))
+
+    def test_certainty_blocked_at_every_grade(self):
+        """확정 어휘는 근거가 아무리 세도 막는다 — 이 리포트에 단정할 자리는 없다.
+
+        STRONG↔MODERATE 의 구분은 의미 판단이라 고정 어휘로 잡히지 않는다. 그 계단은
+        2층 자체검토(OVERCLAIM)가 맡는다 — 정규식 층은 두 계단만 나눈다.
+        """
+        text = "분명히 가족에게 의지하려는 경향이 보입니다."
+        for grade in ("STRONG", "MODERATE", "WEAK", None):
+            with self.subTest(grade=grade):
+                self.assertTrue(report_safety.has_overclaim(text, grade))
+
+    def test_careful_wording_passes_at_every_grade(self):
+        text = "이번 활동에서는 가족 이야기를 즐겁게 나누는 모습이 보였어요."
+        for grade in ("STRONG", "MODERATE", "WEAK", None):
+            with self.subTest(grade=grade):
+                self.assertFalse(report_safety.has_overclaim(text, grade))
+
+    def test_unknown_grade_is_treated_as_strictest(self):
+        """등급을 모르면 관대하게 여는 쪽이 위험하다 — WEAK 와 같게 본다."""
+        text = "평소에도 그런 경향이 보일 수 있습니다."
+        self.assertTrue(report_safety.has_overclaim(text, None))
+
+    def test_empty_text_has_no_match(self):
+        self.assertEqual(report_safety.find_overclaim("", "WEAK"), [])
+
+    def test_returns_patterns_not_raw_text(self):
+        """반환값은 패턴이라 로그에 남겨도 아이 표현이 새지 않는다."""
+        matches = report_safety.find_overclaim("평소에도 그렇습니다.", "WEAK")
+        self.assertTrue(matches)
+        for pattern in matches:
+            self.assertNotIn("평소에도 그렇습니다", pattern)
+
+
 if __name__ == "__main__":
     unittest.main()

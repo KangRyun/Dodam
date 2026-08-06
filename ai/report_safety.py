@@ -1,6 +1,24 @@
-"""리포트 관찰 텍스트가 아이를 '과도하게 규정·진단하는 표현'을 규칙으로 걸러 전문가 검토로 격리한다.
+"""리포트 문장의 표현을 규칙(정규식)으로 걸러 보호자 노출을 막고 전문가 검토로 격리한다.
 
-역할 분담(팀 원칙): 해석·판정은 룰 기반, LLM은 문장화만. 이 모듈은 LLM이 만든 리포트
+⚠️ **역할 전환 (2026-08-06, S15P11B209-982).** 이 모듈은 원래 "해석하지 않는 서비스"의
+   진단성 표현 차단기였다. 방침이 바뀌어 이제 리포트는 **해석(판단)을 담는다**(CLAUDE.md 2·9절).
+   그래서 막는 대상이 '해석했다'가 아니라 **'근거에 비해 세게 말했다'** 로 옮겨갔다:
+
+       유지  진단명·의료적 단정·낙인    해석을 하는 것과 진단이라 말하는 것은 다르다.
+                                      한계 고지 유지도 함께 결정됐다(9절).
+       신설  점수화·등급·확률          문헌이 가장 직접적으로 반증한 형태다. 해석은 허용해도
+                                      수치로 환산하는 순간 '검사'가 된다.
+       신설  필압                      데이터가 스타일러스 입력에만 있어 기기 의존적이다
+                                      ("약하게 그렸어요"가 "손가락으로 그렸어요"일 수 있다).
+                                      계약상 average_pressure 는 항상 None 이라 언급 자체가 창작이다.
+       신설  확신도 대비 과장          근거가 약한데 강하게 말하는 것. 등급별로 기준이 다르다
+                                      (find_overclaim).
+
+   ⚠️ 이 모듈이 못 하는 것: **근거가 실제로 있는지**는 정규식이 볼 수 없다(문장만 받는다).
+      그건 구조 게이트(interpretation_gate, 근거 참조를 센다)와 2층 자체검토(report_review.txt,
+      관찰 사실 목록과 대조)가 맡는다. 세 층의 분담이 어긋나면 구멍이 생기므로 여기 적어 둔다.
+
+역할 분담(팀 원칙): 근거·등급 판정은 룰 기반, LLM은 문장화만. 이 모듈은 LLM이 만든 리포트
 문장에서 부적절한 표현을 규칙(정규식)으로 탐지해 보호자 노출을 막고 전문가 검토로 돌린다.
 두 클래스를 잡는다:
 
@@ -116,6 +134,100 @@ _OVERINFERENCE_PATTERNS = [
 _OVERINF_COMPILED = [re.compile(p) for p in _OVERINFERENCE_PATTERNS]
 
 
+# ── 차단 대상: 점수화·등급·확률 — S15P11B209-982 (해석 허용 후에도 금지) ──
+# 해석을 담기로 했어도 **수치로 환산하는 것**은 별개다. 지표를 합산해 영역 점수를 내는 형태가
+# 문헌이 가장 직접적으로 반증한 구간이라, 해석 허용과 함께 이 축을 명시적으로 닫는다.
+# 고정 어휘만 잡는다 — 정규식이 잘하는 일이고, 오탐이 나면 카드가 통째로 사라지기 때문이다.
+_SCORING_PATTERNS = [
+    r"(점수|등급|순위)(를|을|이|가|는|은)?\s*(매기|산출|부여|환산|나누|계산|내렸|매겼)",
+    r"(백분위|표준\s*점수|T\s*점수|편차치|지능\s*지수|IQ|발달\s*지수)",
+    r"\d+\s*점\s*(만점|척도|입니다|이에요|예요|이다|을\s*받|으로\s*나타)",
+    r"(상|중|하|[A-DF])\s*등급",
+    # 확률 표기는 어순이 둘 다 쓰인다("70% 확률" / "확률이 70%") — 양쪽을 잡는다.
+    r"\d+\s*(%|퍼센트)\s*(의\s*)?(확률|가능성|수준)",
+    r"(확률|가능성)(이|은|는|을|를)?\s*.{0,6}\d+\s*(%|퍼센트)",
+    r"(척도|지표)\s*(상|으로|로)\s*.{0,10}(높|낮|상위|하위)",
+]
+_SCORING_COMPILED = [re.compile(p) for p in _SCORING_PATTERNS]
+
+# ── 차단 대상: 쓰지 않기로 한 축 — 필압 (S15P11B209-982) ──
+# 필압은 48/171 세션(28%)에만 있고 스타일러스 입력에만 존재해 기기 의존적이다. 계약상
+# average_pressure 는 항상 None 이므로(internal_contracts) 문장에 등장하면 창작이다.
+_FORBIDDEN_AXIS_PATTERNS = [
+    r"필압",
+    r"필기\s*압력",
+    r"누르는\s*(힘|세기|정도|강도)",
+]
+_FORBIDDEN_AXIS_COMPILED = [re.compile(p) for p in _FORBIDDEN_AXIS_PATTERNS]
+
+# ── 차단 대상: 확신도 대비 과장 — S15P11B209-982 ──
+# 등급이 낮을수록 말할 수 있는 폭이 좁다. 정규식 층은 두 계단으로 나눈다(자세한 이유는 find_overclaim):
+#   확정 어휘   — **등급과 무관하게** 막는다. 근거가 아무리 세도 이 리포트에 단정할 자리는 없다.
+#   일반화 어휘 — 이번 활동을 넘어 '평소·늘 그렇다'로 넓히는 말. 가장 약한 근거(WEAK)에서만 금지한다.
+#                 약한 신호를 항구적 특성으로 바꾸는 것이 "약한 근거 → 강한 주장" 승격의 실제 형태다.
+# ⚠️ 이 검사는 **주장 문장(title·tendencyText)에만** 건다. homeObservationGuide 는 "평소에도
+#    그런지 살펴봐 주세요"가 정상인 자리라 같은 어휘를 막으면 그 필드가 못 쓰게 된다.
+_CERTAINTY_PATTERNS = [
+    r"확실히|분명히|틀림없이|명백히|반드시|의심의\s*여지|단언|장담",
+    r"(임이|것이)\s*(분명|확실|명백)",
+]
+_GENERALIZATION_PATTERNS = [
+    r"평소(에|에도|부터)",
+    r"(늘|항상|언제나|매번)\s",
+    r"일상\s*(에서도|생활|적으로)",
+    r"전반적으로|전반적인",
+    r"일관되게|한결같이",
+    r"모든\s*(상황|장면|경우)",
+]
+_CERTAINTY_COMPILED = [re.compile(p) for p in _CERTAINTY_PATTERNS]
+_GENERALIZATION_COMPILED = [re.compile(p) for p in _GENERALIZATION_PATTERNS]
+
+
+def find_scored_claim(text: str) -> list[str]:
+    """점수·등급·확률로 환산한 표현을 찾아 매칭된 '패턴' 목록을 반환한다(S15P11B209-982)."""
+    if not text:
+        return []
+    return [rx.pattern for rx in _SCORING_COMPILED if rx.search(text)]
+
+
+def find_forbidden_axis(text: str) -> list[str]:
+    """쓰지 않기로 한 축(필압)에 기댄 표현을 찾아 매칭된 '패턴' 목록을 반환한다(S15P11B209-982)."""
+    if not text:
+        return []
+    return [rx.pattern for rx in _FORBIDDEN_AXIS_COMPILED if rx.search(text)]
+
+
+def find_overclaim(text: str, confidence: str | None) -> list[str]:
+    """확신도에 비해 과장된 표현을 찾아 매칭된 '패턴' 목록을 반환한다(S15P11B209-982).
+
+    confidence 는 interpretation_gate 가 근거의 종류로 계산한 등급이다(STRONG|MODERATE|WEAK).
+
+    ⚠️ **정규식 층은 두 계단만 나눈다.** 등급은 셋인데 여기는 둘이다 — 의도적이다:
+       · 확정 어휘 — 등급과 무관하게 막는다. 근거가 아무리 세도 이 리포트는 참고 자료라
+         단정할 자리가 아니고, 애초에 카드는 가능성 어조가 필수다(report_client._TENTATIVE_MARKERS).
+       · 일반화 어휘 — WEAK 에서만 막는다. 아이 말이 근거에 없는데 '평소에도 그렇다'로 넓히는 것이
+         "약한 근거 → 강한 주장" 승격의 실제 형태다.
+       STRONG 과 MODERATE 를 가르는 것은 '아이가 직접 말한 것처럼 적었는가' 같은 의미 판단이라
+       고정 어휘로 잡히지 않는다. 그 계단은 2층 자체검토(report_review.txt 의 OVERCLAIM)가 맡는다 —
+       각 층이 잘하는 일만 하게 두는 것이 세 층 분담의 원칙이다.
+    ⚠️ 등급을 **모를 때(None)는 가장 엄격하게** 본다. 등급이 없다는 것은 게이트를 거치지 않았거나
+       근거를 해석하지 못했다는 뜻이라, 관대하게 여는 쪽이 위험하다.
+    ⚠️ 주장 문장에만 적용한다 — 호출부가 title·tendencyText 만 넘긴다(위 주석 참고).
+    """
+    if not text:
+        return []
+    hits = [rx.pattern for rx in _CERTAINTY_COMPILED if rx.search(text)]
+    if confidence in ("STRONG", "MODERATE"):
+        return hits
+    # WEAK 또는 등급 없음: 이번 활동 밖으로 넓히는 말까지 막는다.
+    return hits + [rx.pattern for rx in _GENERALIZATION_COMPILED if rx.search(text)]
+
+
+def has_overclaim(text: str, confidence: str | None) -> bool:
+    """주장 문장이 확신도에 비해 과장됐으면 True."""
+    return bool(find_overclaim(text, confidence))
+
+
 def find_definitive_diagnosis(text: str) -> list[str]:
     """단정적 진단 표현을 찾아 매칭된 '패턴' 목록을 반환한다(없으면 빈 목록).
 
@@ -147,8 +259,18 @@ def has_overinference(*texts: str) -> bool:
 
 
 def find_unsafe_expression(text: str) -> list[str]:
-    """리포트에서 격리해야 할 표현(단정 진단 591 + 감정·성격 과잉 추론 592)을 함께 탐지한다."""
-    return find_definitive_diagnosis(text) + find_overinference(text)
+    """리포트에서 격리해야 할 표현을 함께 탐지한다.
+
+    단정 진단(591) + 감정·성격 과잉 추론(592) + 점수화·등급(982) + 쓰지 않는 축(982).
+    ⚠️ 확신도 대비 과장(find_overclaim)은 **여기 없다** — 등급을 인자로 받아야 판정할 수 있어
+       카드 전용 호출부에서 따로 돈다. 등급이 없는 자리(요약·가이드 등)에는 적용하지 않는다.
+    """
+    return (
+        find_definitive_diagnosis(text)
+        + find_overinference(text)
+        + find_scored_claim(text)
+        + find_forbidden_axis(text)
+    )
 
 
 def has_unsafe_expression(*texts: str) -> bool:

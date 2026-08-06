@@ -2468,6 +2468,195 @@ class InterpretationGateWiringTest(unittest.TestCase):
         self.assertFalse(result.observation_draft.expert_review_required)
 
 
+class ConfidenceWiringTest(unittest.TestCase):
+    """확신도가 **응답까지 실제로 도달하는지** (S15P11B209-982).
+
+    등급 규칙 자체는 test_interpretation_gate.py 가 검증한다. 여기서 보는 것은 이음매다 —
+    902에서 저장 메서드를 만들어 두고 아무도 부르지 않아 몇 주간 빈 화면이었고, 그때도
+    단위 테스트는 전부 통과했다. 계산이 맞는지와 값이 도착하는지는 다른 질문이다.
+    """
+
+    def _generate(self, **overrides):
+        fake_client = _fake_client(_llm_json(**overrides))
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            return report_client.generate(_request_with_evidence_refs(), model="m")
+
+    def test_published_card_reaches_the_response_with_a_grade(self):
+        """아이 답변 두 건 → STRONG 이 응답 카드에 실려 나온다."""
+        result = self._generate(
+            evidenceItems=[_evidence(1), _evidence(2, ref="318")],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual(len(result.public_interpretations), 1)
+        self.assertEqual(result.public_interpretations[0].confidence, "STRONG")
+
+    def test_grade_reflects_evidence_kind_not_model_wish(self):
+        """감정 선택 + 그림이면 발화가 없다 — 모델이 STRONG 이라 적어 보내도 WEAK 다."""
+        result = self._generate(
+            evidenceItems=[
+                _evidence(
+                    1, source_type="SELECTED_EMOTION", kind="EMOTION_SELECTION", ref="e5"
+                ),
+                _evidence(2, source_type="VISION", kind="DETECTED_OBJECT", ref="d1"),
+            ],
+            publicInterpretations=[_card([1, 2], confidence="STRONG")],
+        )
+        self.assertEqual(len(result.public_interpretations), 1)
+        self.assertEqual(result.public_interpretations[0].confidence, "WEAK")
+
+    def test_utterance_plus_drawing_is_moderate_end_to_end(self):
+        result = self._generate(
+            evidenceItems=[
+                _evidence(1),
+                _evidence(2, source_type="VISION", kind="DETECTED_OBJECT", ref="d1"),
+            ],
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual(result.public_interpretations[0].confidence, "MODERATE")
+
+    def test_grade_is_serialized_for_be(self):
+        """BE 로 나가는 JSON에 confidence 가 실린다 — 필드가 계약 밖이면 화면까지 못 간다."""
+        result = self._generate(
+            evidenceItems=[_evidence(1), _evidence(2, ref="318")],
+            publicInterpretations=[_card([1, 2])],
+        )
+        payload = result.model_dump(by_alias=True)
+        self.assertEqual(payload["publicInterpretations"][0]["confidence"], "STRONG")
+
+    def test_confidence_is_given_to_the_self_reviewer(self):
+        """검토자가 OVERCLAIM 을 판정하려면 등급을 알아야 한다 — 검토 payload 에 실린다."""
+        captured: dict = {}
+        client = mock.Mock()
+        client.chat.completions.create.side_effect = _capture_generation(
+            captured,
+            _llm_json(
+                evidenceItems=[_evidence(1), _evidence(2, ref="318")],
+                publicInterpretations=[_card([1, 2])],
+            ),
+        )
+        with mock.patch.object(report_client, "get_client", return_value=client):
+            report_client.generate(_request_with_evidence_refs(), model="m")
+        review_text = json.dumps(captured["review_messages"], ensure_ascii=False)
+        self.assertIn("확신도", review_text)
+        self.assertIn("STRONG", review_text)
+
+
+class OverclaimExclusionTest(unittest.TestCase):
+    """확신도 대비 과장은 카드를 뺀다 (S15P11B209-982 규칙 2).
+
+    약한 근거를 강한 주장으로 승격하는 마지막 통로가 **문장의 세기**다. 등급은 코드가 정해도
+    문장이 등급을 넘어서면 보호자는 약한 추측을 강한 근거로 읽는다.
+    """
+
+    def _generate(self, **overrides):
+        fake_client = _fake_client(_llm_json(**overrides))
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            return report_client.generate(_request_with_evidence_refs(), model="m")
+
+    def _weak_evidence(self):
+        # 감정 선택 + 그림 → 게이트는 통과하지만(아이 표현 1건) 발화가 없어 WEAK.
+        return [
+            _evidence(
+                1, source_type="SELECTED_EMOTION", kind="EMOTION_SELECTION", ref="e5"
+            ),
+            _evidence(2, source_type="VISION", kind="DETECTED_OBJECT", ref="d1"),
+        ]
+
+    def test_weak_card_generalizing_beyond_the_activity_is_dropped(self):
+        """WEAK 인데 '평소에도 그렇다'로 넓힌 카드는 뺀다."""
+        result = self._generate(
+            evidenceItems=self._weak_evidence(),
+            publicInterpretations=[
+                _card(
+                    [1, 2],
+                    tendencyText="평소에도 가족에게 의지하려는 경향이 보일 수 있습니다.",
+                )
+            ],
+        )
+        self.assertEqual(result.public_interpretations, [])
+
+    def test_weak_card_written_carefully_survives(self):
+        """등급이 낮다는 이유만으로 빼지 않는다 — WEAK 도 조심스러우면 보호자에게 간다."""
+        result = self._generate(
+            evidenceItems=self._weak_evidence(),
+            publicInterpretations=[_card([1, 2])],
+        )
+        self.assertEqual(len(result.public_interpretations), 1)
+        self.assertEqual(result.public_interpretations[0].confidence, "WEAK")
+
+    def test_certainty_wording_is_dropped(self):
+        """확정 어휘는 등급과 무관하게 뺀다 — 이 리포트에 단정할 자리는 없다."""
+        result = self._generate(
+            evidenceItems=self._weak_evidence(),
+            publicInterpretations=[
+                _card(
+                    [1, 2],
+                    tendencyText="분명히 가족에게 의지하려는 경향이 보일 수 있습니다.",
+                )
+            ],
+        )
+        self.assertEqual(result.public_interpretations, [])
+
+    def test_overclaim_does_not_fail_the_whole_report(self):
+        """문제 카드만 빠지고 리포트는 살아난다 — 전체 실패는 보호자 화면을 통째로 지운다."""
+        result = self._generate(
+            evidenceItems=self._weak_evidence(),
+            publicInterpretations=[
+                _card([1, 2], tendencyText="평소에도 그런 경향이 보일 수 있습니다.")
+            ],
+        )
+        self.assertEqual(result.public_interpretations, [])
+        self.assertTrue(result.observation_draft.overall_summary)
+        self.assertTrue(result.limitations_text)
+
+    def test_home_observation_guide_may_say_pyeongso(self):
+        """'평소에도 살펴봐 주세요'는 가정 관찰 안내의 정상 문구다 — 주장 문장만 검사한다."""
+        result = self._generate(
+            evidenceItems=self._weak_evidence(),
+            publicInterpretations=[
+                _card(
+                    [1, 2],
+                    homeObservationGuide="평소에도 비슷한 모습이 있는지 살펴봐 주세요.",
+                )
+            ],
+        )
+        self.assertEqual(len(result.public_interpretations), 1)
+
+
+class ReportWithoutInterpretationTest(unittest.TestCase):
+    """해석이 한 건도 없는 세션에서도 리포트는 정상 생성된다 (875 §10 · 982).
+
+    빈 카드가 정상 출력임을 계약과 프롬프트 양쪽에 적었다. 그 약속이 코드에서도 지켜지는지 —
+    빈 배열을 실패로 다루기 시작하면 모델이 근거를 지어내는 압력으로 돌아온다.
+    """
+
+    def _generate(self, **overrides):
+        fake_client = _fake_client(_llm_json(**overrides))
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            return report_client.generate(_request_with_evidence_refs(), model="m")
+
+    def test_no_cards_still_produces_a_complete_report(self):
+        result = self._generate(publicInterpretations=[], evidenceItems=[])
+        self.assertEqual(result.public_interpretations, [])
+        self.assertEqual(result.evidence_items, [])
+        # 리포트의 나머지는 온전하다 — 카드가 없다고 실패가 아니다.
+        self.assertTrue(result.observation_draft.overall_summary)
+        self.assertTrue(result.observation_draft.disclaimer)
+        self.assertTrue(result.limitations_text)
+        self.assertTrue(result.activity_notes)
+        self.assertEqual(result.observation_draft.status, "AI_REVIEWED")
+
+    def test_all_cards_failing_the_gate_still_produces_a_report(self):
+        """근거가 모자라 카드가 전부 빠져도 리포트는 성공한다."""
+        result = self._generate(
+            evidenceItems=[_evidence(1)],
+            publicInterpretations=[_card([1])],
+        )
+        self.assertEqual(result.public_interpretations, [])
+        self.assertTrue(result.observation_draft.overall_summary)
+        self.assertTrue(result.limitations_text)
+
+
 class ParentGuideAssemblyTest(unittest.TestCase):
     """보호자 가이드 — 검토 대상 유형은 LLM이 채우지 못한다 (S15P11B209-887)."""
 
