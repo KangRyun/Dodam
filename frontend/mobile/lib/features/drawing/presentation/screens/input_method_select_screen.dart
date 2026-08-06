@@ -782,6 +782,9 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
           currentStage: completed.currentStage,
           activityContext: initial.activityContext,
           inputMethod: 'UPLOAD',
+          // 업로드 완료 분석 ID를 대화 화면까지 넘겨 첫 질문을 생성하게 한다
+          // (S15P11B209-942).
+          conversationAnalysisId: completed.analysis.analysisId,
         ),
       );
     } on Object catch (error) {
@@ -908,6 +911,7 @@ class _InputMethodSelectScreenState extends State<InputMethodSelectScreen> {
               currentStage: completed.currentStage,
               activityContext: initial.activityContext,
               inputMethod: 'UPLOAD',
+              conversationAnalysisId: completed.analysis.analysisId,
             ),
           );
           return;

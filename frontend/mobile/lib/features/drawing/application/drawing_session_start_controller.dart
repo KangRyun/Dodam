@@ -14,6 +14,7 @@ final class DrawingSessionResolution {
     required this.currentStage,
     this.activityContext = const DrawingActivityContextDto.general(),
     this.inputMethod,
+    this.conversationAnalysisId,
   });
 
   final int sessionId;
@@ -26,6 +27,14 @@ final class DrawingSessionResolution {
   /// 다닌다(`DrawingActivityContextDto`는 서버 `activityContext` JSON을 그대로
   /// 반영하는 자리라 여기에 새 필드를 얹지 않는다).
   final String? inputMethod;
+
+  /// 사진 업로드로 그림 단계를 막 끝냈을 때, 그 완료 응답이 내려준 분석 ID.
+  ///
+  /// 대화를 이 분석 기준으로 시작·첫 질문 생성하도록 넘긴다. 캔버스는 완료 화면
+  /// 안에서 곧장 넘기지만, 업로드는 완료가 별도 화면에서 일어나 이 값을 downstream
+  /// 대화 화면까지 관통시켜야 첫 질문이 만들어진다(S15P11B209-942). 재개(resume)
+  /// 처럼 이미 대화가 있는 경우엔 `null`이다.
+  final int? conversationAnalysisId;
 
   /// 그림 저장·획 전송이 허용되는 단계인지 나타낸다.
   bool get isDrawingStage => currentStage == 'DRAWING';
