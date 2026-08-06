@@ -942,7 +942,7 @@ Widget? _overviewSection(ReportDetailDto report) {
         case final type?)
       _InfoLine(label: '활동 유형', value: type),
     if (session?.inputMethod case final inputMethod?)
-      _InfoLine(label: '입력 방식', value: inputMethod),
+      _InfoLine(label: '입력 방식', value: _inputMethodLabel(inputMethod)),
     if (formatActivityDuration(session?.durationMs) case final duration?)
       _InfoLine(label: '활동 시간', value: duration),
     if (session?.completedAt case final completedAt?)
@@ -2292,6 +2292,19 @@ class _ImagePlaceholder extends StatelessWidget {
 String _date(String isoDate) => isoDate.length >= 10
     ? isoDate.substring(0, 10).replaceAll('-', '.')
     : isoDate;
+
+/// 입력 방식 코드를 보호자가 읽을 수 있는 말로 바꾼다.
+///
+/// `CANVAS`·`UPLOAD` 는 서버 코드다. 그대로 보여 주면 보호자는 뜻을 알 수 없다. 서버가
+/// PDF 에 쓰는 문구와 같은 말을 쓴다(`ReportPdfTemplate.inputMethodText`) — 화면과 저장한
+/// 파일이 같은 값을 다르게 부르면 같은 활동인지 알기 어렵다.
+///
+/// 모르는 값은 감추지 않고 그대로 낸다. 새 입력 방식이 생겼을 때 조용히 사라지는 편이 더 나쁘다.
+String _inputMethodLabel(String inputMethod) => switch (inputMethod) {
+  'CANVAS' => '앱에서 그리기',
+  'UPLOAD' => '그린 그림 올리기',
+  _ => inputMethod,
+};
 
 String _emotionLabel(String emotion) => switch (emotion) {
   'HAPPY' || 'JOY' => '기쁨',
