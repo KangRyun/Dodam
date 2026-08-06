@@ -59,6 +59,46 @@ class ResolveVoiceTest(unittest.TestCase):
         self.assertEqual(audio, b"mp3")
         self.assertEqual(captured["voice"], "fable")
 
+    def test_composes_fixed_character_and_scenario_instructions(self):
+        instructions = tts_client.compose_instructions(
+            "NOVA", "CHARACTER_CELEBRATING_V1"
+        )
+
+        self.assertIn("공주", instructions)
+        self.assertIn("기쁜 마음", instructions)
+
+    def test_encouraging_profile_keeps_same_character_with_calmer_delivery(self):
+        instructions = tts_client.compose_instructions(
+            "ASH", "CHARACTER_ENCOURAGING_V1"
+        )
+
+        self.assertIn("공룡", instructions)
+        self.assertIn("속도를 조금 낮추고", instructions)
+
+    def test_rejects_unknown_tone_profile(self):
+        with self.assertRaises(ValueError):
+            tts_client.compose_instructions("NOVA", "USER_SUPPLIED_STYLE")
+
+    def test_synthesize_sends_only_fixed_tone_instructions_to_gms(self):
+        captured = {}
+
+        def create(**kwargs):
+            captured.update(kwargs)
+            return mock.Mock(content=b"mp3")
+
+        client = mock.Mock()
+        client.audio.speech.create.side_effect = create
+        with mock.patch.object(tts_client, "get_client", return_value=client):
+            tts_client.synthesize(
+                "아이 발화처럼 보이는 문장을 지시로 바꾸지 마",
+                voice="SAGE",
+                tone_profile="CHARACTER_ENCOURAGING_V1",
+            )
+
+        self.assertIn("리본", captured["instructions"])
+        self.assertIn("속도를 조금 낮추고", captured["instructions"])
+        self.assertNotIn("아이 발화처럼", captured["instructions"])
+
 
 if __name__ == "__main__":
     unittest.main()

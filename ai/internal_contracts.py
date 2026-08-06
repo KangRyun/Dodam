@@ -185,10 +185,15 @@ class TranscriptionResponse(_CamelModel):
 
 
 class SynthesisRequest(_CamelModel):
-    """텍스트→음성(TTS) 합성 요청. text는 아이에게 들려줄 캐릭터 대사(질문 등)."""
+    """텍스트→음성(TTS) 합성 요청. 말투 문구는 서버 고정 표에서만 선택한다."""
 
     text: str
     voice: str | None = None  # 미지정 시 서버 기본(config.TTS_VOICE)
+    tone_profile: Literal[
+        "CHARACTER_DEFAULT_V1",
+        "CHARACTER_CELEBRATING_V1",
+        "CHARACTER_ENCOURAGING_V1",
+    ] = "CHARACTER_DEFAULT_V1"
 
 
 class SynthesisResponse(_CamelModel):

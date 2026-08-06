@@ -45,6 +45,9 @@ public class QuestionTtsMessage {
   @Column(name = "tts_speed")
   private BigDecimal ttsSpeed;
 
+  @Column(name = "tts_tone_profile")
+  private String ttsToneProfile;
+
   protected QuestionTtsMessage() {}
 
   public Long getId() {
@@ -85,6 +88,10 @@ public class QuestionTtsMessage {
 
   public BigDecimal getTtsSpeed() {
     return ttsSpeed;
+  }
+
+  public String getTtsToneProfile() {
+    return ttsToneProfile;
   }
 
   /**

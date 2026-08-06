@@ -56,6 +56,33 @@ void main() {
     expect(repository.requests, hasLength(2));
   });
 
+  testWidgets('무응답으로 생성된 다음 질문은 격려 톤으로 읽는다', (tester) async {
+    final ttsRepository = _QuestionTtsRepository();
+    final repository = _ConversationRepository([
+      _initialQuestionWithTts,
+      _candidateQuestionWithTts,
+    ]);
+    await _pumpConversation(
+      tester,
+      repository: repository,
+      timeout: const Duration(milliseconds: 100),
+      ttsRepository: ttsRepository,
+      player: _QuestionPlayer(),
+    );
+
+    await tester.pump(const Duration(milliseconds: 2500));
+    await _pumpUntil(tester, find.text(_candidateQuestionWithTts.text));
+    await _pumpUntilCall(() => ttsRepository.requests.length == 2, tester);
+
+    expect(
+      ttsRepository.requests.map((request) => request.toneProfile),
+      [
+        QuestionTtsToneProfile.characterDefault,
+        QuestionTtsToneProfile.characterEncouraging,
+      ],
+    );
+  });
+
   for (final scenario in ['failure', 'unsupported']) {
     testWidgets('TTS $scenario 상태에서도 timeout을 시작한다', (tester) async {
       final repository = _ConversationRepository([
@@ -465,12 +492,18 @@ void main() {
   });
 
   testWidgets('자동 요청 실패는 기존 오류와 같은 Key 재시도 흐름을 유지한다', (tester) async {
+    final ttsRepository = _QuestionTtsRepository();
     final repository = _ConversationRepository([
-      _initialQuestion,
+      _initialQuestionWithTts,
       const ApiTransportFailure(type: ApiTransportFailureType.connection),
-      _candidateQuestion,
+      _candidateQuestionWithTts,
     ]);
-    await _pumpConversation(tester, repository: repository);
+    await _pumpConversation(
+      tester,
+      repository: repository,
+      ttsRepository: ttsRepository,
+      player: _QuestionPlayer(),
+    );
     await tester.pump(const Duration(milliseconds: 100));
     await _pumpUntil(tester, find.byKey(const ValueKey('ai-question-error')));
     expect(find.textContaining('서버'), findsNothing);
@@ -478,9 +511,14 @@ void main() {
     final retry = find.byKey(const ValueKey('ai-question-retry'));
     await tester.ensureVisible(retry);
     await tester.tap(retry);
-    await _pumpUntil(tester, find.text(_candidateQuestion.text));
+    await _pumpUntil(tester, find.text(_candidateQuestionWithTts.text));
+    await _pumpUntilCall(() => ttsRepository.requests.length == 2, tester);
     expect(repository.requests, hasLength(3));
     expect(repository.idempotencyKeys[1], repository.idempotencyKeys[2]);
+    expect(
+      ttsRepository.requests.last.toneProfile,
+      QuestionTtsToneProfile.characterDefault,
+    );
   });
 
   testWidgets('시스템 back은 timer를 취소하고 route를 한 번만 pop한다', (tester) async {
@@ -537,12 +575,18 @@ void main() {
 
   testWidgets('늦은 자동 응답은 사용자가 만든 새 질문을 덮어쓰지 않는다', (tester) async {
     final pending = Completer<AiQuestion>();
+    final ttsRepository = _QuestionTtsRepository();
     final repository = _ConversationRepository([
-      _initialQuestion,
+      _initialQuestionWithTts,
       pending.future,
-      _secondQuestion,
+      _secondQuestionWithTts,
     ]);
-    await _pumpConversation(tester, repository: repository);
+    await _pumpConversation(
+      tester,
+      repository: repository,
+      ttsRepository: ttsRepository,
+      player: _QuestionPlayer(),
+    );
     await tester.pump(const Duration(milliseconds: 100));
     await _pumpUntilCall(() => repository.requests.length == 2, tester);
     await tester.pump(const Duration(milliseconds: 2500));
@@ -550,14 +594,19 @@ void main() {
     final option = find.byKey(const ValueKey('ai-question-option-ORIG_1'));
     await tester.ensureVisible(option);
     await tester.tap(option);
-    await _pumpUntil(tester, find.text(_secondQuestion.text));
+    await _pumpUntil(tester, find.text(_secondQuestionWithTts.text));
+    await _pumpUntilCall(() => ttsRepository.requests.length == 2, tester);
     expect(repository.requests, hasLength(3));
+    expect(
+      ttsRepository.requests.last.toneProfile,
+      QuestionTtsToneProfile.characterCelebrating,
+    );
 
     pending.complete(_candidateQuestion);
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 200));
 
-    expect(find.text(_secondQuestion.text), findsOneWidget);
+    expect(find.text(_secondQuestionWithTts.text), findsOneWidget);
     expect(find.text(_candidateQuestion.text), findsNothing);
   });
 
@@ -782,12 +831,14 @@ final class _QuestionTtsRepository implements QuestionTtsRepository {
   _QuestionTtsRepository({this.failure});
 
   final Object? failure;
+  final List<QuestionTtsRequest> requests = [];
 
   @override
   Future<QuestionTtsAudio> loadQuestionAudio(
     int messageId, {
     QuestionTtsRequest request = const QuestionTtsRequest(),
   }) async {
+    requests.add(request);
     if (failure case final caught?) throw caught;
     return QuestionTtsAudio(
       bytes: Uint8List.fromList([1, 2, 3]),
@@ -925,6 +976,16 @@ final _candidateQuestion = AiQuestion(
   createdAt: DateTime.utc(2026, 8, 3),
 );
 
+final _candidateQuestionWithTts = AiQuestion(
+  messageId: _candidateQuestion.messageId,
+  conversationId: _candidateQuestion.conversationId,
+  sequence: _candidateQuestion.sequence,
+  text: _candidateQuestion.text,
+  options: _candidateQuestion.options,
+  ttsAvailable: true,
+  createdAt: _candidateQuestion.createdAt,
+);
+
 final _secondQuestion = AiQuestion(
   messageId: 9003,
   conversationId: 8001,
@@ -933,4 +994,14 @@ final _secondQuestion = AiQuestion(
   options: const [],
   ttsAvailable: false,
   createdAt: DateTime.utc(2026, 8, 3),
+);
+
+final _secondQuestionWithTts = AiQuestion(
+  messageId: _secondQuestion.messageId,
+  conversationId: _secondQuestion.conversationId,
+  sequence: _secondQuestion.sequence,
+  text: _secondQuestion.text,
+  options: _secondQuestion.options,
+  ttsAvailable: true,
+  createdAt: _secondQuestion.createdAt,
 );

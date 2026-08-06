@@ -50,7 +50,7 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("41");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("42");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     // V40이 주제별 관찰 4종(report_subjects·observations·qa_pairs·interpretations)과
     // report_references 를 더해 85 → 90 이 됐다(S15P11B209-960).
@@ -60,6 +60,21 @@ class DatabaseMigrationIntegrationTest {
     // V41 — 캐릭터별 질문 TTS 캐시가 다른 음성·속도 결과를 재사용하지 않도록 요청 조합을 보관한다.
     assertThat(columnExists("conversation_messages", "tts_voice")).isTrue();
     assertThat(columnExists("conversation_messages", "tts_speed")).isTrue();
+    assertThat(columnExists("conversation_messages", "tts_tone_profile")).isTrue();
+    for (String toneProfile :
+        new String[] {
+          "CHARACTER_DEFAULT_V1",
+          "CHARACTER_CELEBRATING_V1",
+          "CHARACTER_ENCOURAGING_V1"
+        }) {
+      assertThat(
+              checkConstraintContains(
+                  "conversation_messages",
+                  "ck_conversation_messages_tts_tone_profile",
+                  toneProfile))
+          .as("ck_conversation_messages_tts_tone_profile가 %s를 허용해야 한다", toneProfile)
+          .isTrue();
+    }
     assertThat(tableExists("child_profile_image_files")).isTrue();
     assertThat(
             checkConstraintContains(

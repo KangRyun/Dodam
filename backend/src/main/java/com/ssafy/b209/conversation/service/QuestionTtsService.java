@@ -96,7 +96,7 @@ public class QuestionTtsService {
     }
 
     QuestionTtsClaimResult claim =
-        persistenceService.claim(messageId, request.voice(), request.speed());
+        persistenceService.claim(messageId, request.voice(), request.speed(), request.toneProfile());
     return switch (claim.action()) {
       case CACHE_HIT -> new TtsGenerateResponse(audioUrl(messageId), null, null, claim.subtitle());
       case IN_PROGRESS ->
@@ -111,16 +111,23 @@ public class QuestionTtsService {
     try {
       TtsSynthesis synthesis =
           aiTtsClient.synthesize(
-              new TtsSynthesisCommand(claim.subtitle(), request.voice(), request.speed()));
+              new TtsSynthesisCommand(
+                  claim.subtitle(), request.voice(), request.speed(), request.toneProfile()));
       stored = store(synthesis);
     } catch (RuntimeException exception) {
-      persistenceService.markFailed(messageId, request.voice(), request.speed());
+      persistenceService.markFailed(
+          messageId, request.voice(), request.speed(), request.toneProfile());
       throw new BusinessException(QuestionTtsErrorCode.TTS_FAILED, exception);
     }
 
     String audioUrl = audioUrl(messageId);
     if (!persistenceService.completeSuccess(
-        messageId, stored.storageKey(), audioUrl, request.voice(), request.speed())) {
+        messageId,
+        stored.storageKey(),
+        audioUrl,
+        request.voice(),
+        request.speed(),
+        request.toneProfile())) {
       audioStorage.delete(stored.storageKey());
       throw new BusinessException(QuestionTtsErrorCode.TTS_GENERATION_IN_PROGRESS);
     }

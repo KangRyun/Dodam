@@ -408,7 +408,9 @@ def internal_speech_synthesis(
         )
     started = time.monotonic()
     try:
-        audio = tts_client.synthesize(req.text, voice=req.voice)
+        audio = tts_client.synthesize(
+            req.text, voice=req.voice, tone_profile=req.tone_profile
+        )
     except (RuntimeError, OSError):
         # transcription과 동일 — 상류(GMS) 장애와 예상 못한 OS 오류를 502로 매핑한다.
         return JSONResponse(status_code=502, content={"errorCode": "AI_UPSTREAM_ERROR"})

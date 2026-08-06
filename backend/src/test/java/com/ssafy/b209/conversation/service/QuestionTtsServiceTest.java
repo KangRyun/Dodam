@@ -13,6 +13,7 @@ import com.ssafy.b209.conversation.domain.ConversationSession;
 import com.ssafy.b209.conversation.domain.ConversationStartDrawingSession;
 import com.ssafy.b209.conversation.dto.TtsGenerateRequest;
 import com.ssafy.b209.conversation.dto.TtsGenerateResponse;
+import com.ssafy.b209.conversation.dto.TtsToneProfile;
 import com.ssafy.b209.conversation.exception.ConversationMessageStatusErrorCode;
 import com.ssafy.b209.conversation.exception.QuestionTtsErrorCode;
 import com.ssafy.b209.conversation.repository.ConversationHistoryMessageRepository;
@@ -35,6 +36,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
+import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -48,6 +50,7 @@ class QuestionTtsServiceTest {
   private static final Long DRAWING_SESSION_ID = 100L;
   private static final Long CHILD_ID = 1L;
   private static final BigDecimal SPEED = new BigDecimal("0.95");
+  private static final TtsToneProfile TONE_PROFILE = TtsToneProfile.CHARACTER_DEFAULT_V1;
   private static final String SUBTITLE = "이 그림에서 무엇이 보이니?";
   private static final String STORAGE_KEY = "2026/07/24/2f0b8f5e-tts.mp3";
   private static final String AUDIO_URL = "/api/v1/conversation-messages/803/audio";
@@ -78,7 +81,7 @@ class QuestionTtsServiceTest {
   @Test
   void returnsCachedMetadataWithoutCallingAi() {
     authorizeQuestion();
-    when(persistenceService.claim(MESSAGE_ID, "CHILD_FRIENDLY_01", SPEED))
+    when(persistenceService.claim(MESSAGE_ID, "CHILD_FRIENDLY_01", SPEED, TONE_PROFILE))
         .thenReturn(
             new QuestionTtsClaimResult(
                 QuestionTtsClaimResult.Action.CACHE_HIT, MESSAGE_ID, SUBTITLE, STORAGE_KEY));
@@ -95,7 +98,7 @@ class QuestionTtsServiceTest {
   @Test
   void synthesizesStoresAndReturnsMetadataOnCacheMiss() {
     authorizeQuestion();
-    when(persistenceService.claim(MESSAGE_ID, "CHILD_FRIENDLY_01", SPEED))
+    when(persistenceService.claim(MESSAGE_ID, "CHILD_FRIENDLY_01", SPEED, TONE_PROFILE))
         .thenReturn(
             new QuestionTtsClaimResult(
                 QuestionTtsClaimResult.Action.CLAIMED, MESSAGE_ID, SUBTITLE, null));
@@ -106,7 +109,7 @@ class QuestionTtsServiceTest {
     when(audioStorage.promote(staged))
         .thenReturn(new StoredAudio(STORAGE_KEY, "audio/mpeg", 3L, "checksum", 1040L));
     when(persistenceService.completeSuccess(
-            MESSAGE_ID, STORAGE_KEY, AUDIO_URL, "CHILD_FRIENDLY_01", SPEED))
+            MESSAGE_ID, STORAGE_KEY, AUDIO_URL, "CHILD_FRIENDLY_01", SPEED, TONE_PROFILE))
         .thenReturn(true);
 
     TtsGenerateResponse response = service.generate(GUARDIAN_ID, MESSAGE_ID, request());
@@ -115,12 +118,16 @@ class QuestionTtsServiceTest {
     assertThat(response.durationMs()).isEqualTo(1040L);
     assertThat(response.subtitle()).isEqualTo(SUBTITLE);
     verify(audioStorage, never()).delete(any());
+    ArgumentCaptor<TtsSynthesisCommand> commandCaptor =
+        ArgumentCaptor.forClass(TtsSynthesisCommand.class);
+    verify(aiTtsClient).synthesize(commandCaptor.capture());
+    assertThat(commandCaptor.getValue().toneProfile()).isEqualTo(TONE_PROFILE);
   }
 
   @Test
   void marksFailedAndReportsTtsFailedWhenAiThrows() {
     authorizeQuestion();
-    when(persistenceService.claim(MESSAGE_ID, "CHILD_FRIENDLY_01", SPEED))
+    when(persistenceService.claim(MESSAGE_ID, "CHILD_FRIENDLY_01", SPEED, TONE_PROFILE))
         .thenReturn(
             new QuestionTtsClaimResult(
                 QuestionTtsClaimResult.Action.CLAIMED, MESSAGE_ID, SUBTITLE, null));
@@ -132,13 +139,13 @@ class QuestionTtsServiceTest {
         .extracting("errorCode")
         .isEqualTo(QuestionTtsErrorCode.TTS_FAILED);
 
-    verify(persistenceService).markFailed(MESSAGE_ID, "CHILD_FRIENDLY_01", SPEED);
+    verify(persistenceService).markFailed(MESSAGE_ID, "CHILD_FRIENDLY_01", SPEED, TONE_PROFILE);
   }
 
   @Test
   void deletesStoredFileAndReportsConflictWhenCompleteLosesRace() {
     authorizeQuestion();
-    when(persistenceService.claim(MESSAGE_ID, "CHILD_FRIENDLY_01", SPEED))
+    when(persistenceService.claim(MESSAGE_ID, "CHILD_FRIENDLY_01", SPEED, TONE_PROFILE))
         .thenReturn(
             new QuestionTtsClaimResult(
                 QuestionTtsClaimResult.Action.CLAIMED, MESSAGE_ID, SUBTITLE, null));
@@ -149,7 +156,7 @@ class QuestionTtsServiceTest {
     when(audioStorage.promote(staged))
         .thenReturn(new StoredAudio(STORAGE_KEY, "audio/mpeg", 3L, "checksum", 1040L));
     when(persistenceService.completeSuccess(
-            MESSAGE_ID, STORAGE_KEY, AUDIO_URL, "CHILD_FRIENDLY_01", SPEED))
+            MESSAGE_ID, STORAGE_KEY, AUDIO_URL, "CHILD_FRIENDLY_01", SPEED, TONE_PROFILE))
         .thenReturn(false);
 
     assertThatThrownBy(() -> service.generate(GUARDIAN_ID, MESSAGE_ID, request()))
@@ -163,7 +170,7 @@ class QuestionTtsServiceTest {
   @Test
   void reportsConflictWhenGenerationInProgress() {
     authorizeQuestion();
-    when(persistenceService.claim(MESSAGE_ID, "CHILD_FRIENDLY_01", SPEED))
+    when(persistenceService.claim(MESSAGE_ID, "CHILD_FRIENDLY_01", SPEED, TONE_PROFILE))
         .thenReturn(
             new QuestionTtsClaimResult(
                 QuestionTtsClaimResult.Action.IN_PROGRESS, MESSAGE_ID, SUBTITLE, null));
@@ -186,7 +193,7 @@ class QuestionTtsServiceTest {
         .extracting("errorCode")
         .isEqualTo(QuestionTtsErrorCode.TTS_NOT_APPLICABLE);
 
-    verify(persistenceService, never()).claim(any(), any(), any());
+    verify(persistenceService, never()).claim(any(), any(), any(), any());
   }
 
   @Test
@@ -202,7 +209,7 @@ class QuestionTtsServiceTest {
         .extracting("errorCode")
         .isEqualTo(ConversationMessageStatusErrorCode.CONVERSATION_ACCESS_DENIED);
 
-    verify(persistenceService, never()).claim(any(), any(), any());
+    verify(persistenceService, never()).claim(any(), any(), any(), any());
   }
 
   @Test

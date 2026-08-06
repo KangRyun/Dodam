@@ -1,6 +1,7 @@
 package com.ssafy.b209.conversation.service;
 
 import com.ssafy.b209.conversation.domain.QuestionTtsMessage;
+import com.ssafy.b209.conversation.dto.TtsToneProfile;
 import com.ssafy.b209.conversation.exception.ConversationMessageStatusErrorCode;
 import com.ssafy.b209.conversation.exception.QuestionTtsErrorCode;
 import com.ssafy.b209.conversation.repository.QuestionTtsMessageRepository;
@@ -39,19 +40,20 @@ public class QuestionTtsPersistenceService {
    * @throws BusinessException 메시지가 없거나(404) 음성을 생성할 AI 질문이 아닌 경우(400)
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public QuestionTtsClaimResult claim(Long messageId, String voice, BigDecimal speed) {
+  public QuestionTtsClaimResult claim(
+      Long messageId, String voice, BigDecimal speed, TtsToneProfile toneProfile) {
     QuestionTtsMessage message = loadAiQuestion(messageId);
-    if (hasCachedAudioForRequest(message, voice, speed)) {
+    if (hasCachedAudioForRequest(message, voice, speed, toneProfile)) {
       return QuestionTtsClaimResult.of(QuestionTtsClaimResult.Action.CACHE_HIT, message);
     }
     if ("PROCESSING".equals(message.getSpeechStatus())) {
       return QuestionTtsClaimResult.of(QuestionTtsClaimResult.Action.IN_PROGRESS, message);
     }
-    if (messageRepository.claimForSynthesis(messageId, voice, speed) == 1) {
+    if (messageRepository.claimForSynthesis(messageId, voice, speed, toneProfile.name()) == 1) {
       return QuestionTtsClaimResult.of(QuestionTtsClaimResult.Action.CLAIMED, message);
     }
     QuestionTtsMessage current = loadAiQuestion(messageId);
-    if (hasCachedAudioForRequest(current, voice, speed)) {
+    if (hasCachedAudioForRequest(current, voice, speed, toneProfile)) {
       return QuestionTtsClaimResult.of(QuestionTtsClaimResult.Action.CACHE_HIT, current);
     }
     return QuestionTtsClaimResult.of(QuestionTtsClaimResult.Action.IN_PROGRESS, current);
@@ -69,8 +71,15 @@ public class QuestionTtsPersistenceService {
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public boolean completeSuccess(
-      Long messageId, String storageKey, String audioUrl, String voice, BigDecimal speed) {
-    return messageRepository.completeSuccess(messageId, storageKey, audioUrl, voice, speed) == 1;
+      Long messageId,
+      String storageKey,
+      String audioUrl,
+      String voice,
+      BigDecimal speed,
+      TtsToneProfile toneProfile) {
+    return messageRepository.completeSuccess(
+            messageId, storageKey, audioUrl, voice, speed, toneProfile.name())
+        == 1;
   }
 
   /**
@@ -81,18 +90,20 @@ public class QuestionTtsPersistenceService {
    * @param speed 이번 합성에 사용한 재생 속도
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public void markFailed(Long messageId, String voice, BigDecimal speed) {
-    messageRepository.markFailed(messageId, voice, speed);
+  public void markFailed(
+      Long messageId, String voice, BigDecimal speed, TtsToneProfile toneProfile) {
+    messageRepository.markFailed(messageId, voice, speed, toneProfile.name());
   }
 
   private boolean hasCachedAudioForRequest(
-      QuestionTtsMessage message, String voice, BigDecimal speed) {
+      QuestionTtsMessage message, String voice, BigDecimal speed, TtsToneProfile toneProfile) {
     return "SUCCESS".equals(message.getSpeechStatus())
         && message.getAudioStorageKey() != null
         && !message.getAudioStorageKey().isBlank()
         && voice.equals(message.getTtsVoice())
         && message.getTtsSpeed() != null
-        && message.getTtsSpeed().compareTo(speed) == 0;
+        && message.getTtsSpeed().compareTo(speed) == 0
+        && toneProfile.name().equals(message.getTtsToneProfile());
   }
 
   private QuestionTtsMessage loadAiQuestion(Long messageId) {

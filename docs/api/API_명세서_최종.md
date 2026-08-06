@@ -1237,12 +1237,15 @@ Header `Idempotency-Key` 필수.
 ```json
 {
   "voice": "CHILD_FRIENDLY_01",
-  "speed": 0.95
+  "speed": 0.95,
+  "toneProfile": "CHARACTER_DEFAULT_V1"
 }
 ```
 
 - `speed`는 `0.8~1.2`.
-- 같은 메시지·voice·speed 결과는 캐시한다.
+- `toneProfile`은 선택 필드이며 누락 또는 `null`이면 `CHARACTER_DEFAULT_V1`로 처리한다. 허용 값은 `CHARACTER_DEFAULT_V1`, `CHARACTER_CELEBRATING_V1`, `CHARACTER_ENCOURAGING_V1`뿐이다.
+- 같은 메시지·voice·speed·toneProfile 결과는 캐시한다. 캐시에서 말투 프로필이 다르면 기존 음성을 재사용하지 않는다.
+- 말투 문구는 클라이언트가 보내지 않는다. AI 서버가 캐릭터 voice와 고정 프로필을 조합하며, 임의 요청 문자열·질문·아이 발화를 지시문으로 사용하지 않는다.
 - 활동 시작 때 확정한 `preferredCharacter`로 `voice`를 선택한다. 매핑은 `BASE`=`FABLE`, `PRINCESS`=`NOVA`, `DINO`=`ASH`, `OCTOPUS`=`BALLAD`, `EXPLORER`=`VERSE`, `RIBBON`=`SAGE`, `PRINCE`=`ECHO`다.
 - `CHILD_FRIENDLY_01`은 이전 클라이언트 호환을 위해 `FABLE`로 처리한다.
 - 응답: `audioUrl`, `expiresAt`, `durationMs`, `subtitle`.
