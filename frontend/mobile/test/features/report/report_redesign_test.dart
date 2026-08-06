@@ -427,6 +427,94 @@ void main() {
     expect(find.textContaining('101'), findsNothing);
   });
 
+  testWidgets('확신도 등급을 보호자가 읽을 문구 배지로 보여준다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        publicInterpretations: const [
+          ReportInterpretationDto(
+            category: 'RELATIONSHIP',
+            title: '가족과의 연결',
+            tendencyText: '가족에게 의지하려는 경향이 보일 수 있습니다.',
+            scopeText: '이번 그림에서 나타난 가능성입니다.',
+            homeObservationGuide: '살펴봐 주세요.',
+            evidenceRefs: [],
+            confidence: 'STRONG',
+          ),
+          ReportInterpretationDto(
+            category: 'EMOTION',
+            title: '감정 표현',
+            tendencyText: '감정을 드러내는 경향이 보일 수 있습니다.',
+            scopeText: '이번 활동에서 나타난 가능성입니다.',
+            homeObservationGuide: '살펴봐 주세요.',
+            evidenceRefs: [],
+            confidence: 'MODERATE',
+          ),
+          ReportInterpretationDto(
+            category: 'SELF_EXPRESSION',
+            title: '자기표현',
+            tendencyText: '자기 생각을 표현하려는 경향이 보일 수 있습니다.',
+            scopeText: '이번 활동에서 나타난 가능성입니다.',
+            homeObservationGuide: '살펴봐 주세요.',
+            evidenceRefs: [],
+            confidence: 'WEAK',
+          ),
+        ],
+      ),
+    );
+
+    expect(find.text('근거가 강해요'), findsOneWidget);
+    expect(find.text('근거가 어느 정도 있어요'), findsOneWidget);
+    expect(find.text('근거가 약해요'), findsOneWidget);
+    // 내부 코드값은 화면에 노출하지 않는다.
+    expect(find.textContaining('STRONG'), findsNothing);
+    expect(find.textContaining('MODERATE'), findsNothing);
+    expect(find.textContaining('WEAK'), findsNothing);
+  });
+
+  testWidgets('확신도가 없거나 모르는 등급이면 배지만 빠지고 카드는 그대로 나온다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        publicInterpretations: const [
+          // 등급이 아예 없는 카드(V43 이전 리포트·AI 미기재).
+          ReportInterpretationDto(
+            category: 'RELATIONSHIP',
+            title: '가족과의 연결',
+            tendencyText: '가족에게 의지하려는 경향이 보일 수 있습니다.',
+            scopeText: '이번 그림에서 나타난 가능성입니다.',
+            homeObservationGuide: '살펴봐 주세요.',
+            evidenceRefs: [],
+          ),
+          // 앱이 모르는 새 등급 — 코드값을 그대로 띄우지 않는다.
+          ReportInterpretationDto(
+            category: 'EMOTION',
+            title: '감정 표현',
+            tendencyText: '감정을 드러내는 경향이 보일 수 있습니다.',
+            scopeText: '이번 활동에서 나타난 가능성입니다.',
+            homeObservationGuide: '살펴봐 주세요.',
+            evidenceRefs: [],
+            confidence: 'VERY_STRONG',
+          ),
+        ],
+      ),
+    );
+
+    expect(
+      find.byKey(const ValueKey('report-interpretation-0-confidence')),
+      findsNothing,
+    );
+    expect(
+      find.byKey(const ValueKey('report-interpretation-1-confidence')),
+      findsNothing,
+    );
+    expect(find.textContaining('VERY_STRONG'), findsNothing);
+    // 배지가 없어도 해석 자체는 살아 있어야 한다.
+    expect(find.text('가족과의 연결'), findsOneWidget);
+    expect(find.text('감정 표현'), findsOneWidget);
+    expect(find.textContaining('가족에게 의지하려는'), findsOneWidget);
+  });
+
   testWidgets('subjectReports는 HOUSE→TREE→PERSON으로 문답 상태 문구를 표시한다', (
     tester,
   ) async {

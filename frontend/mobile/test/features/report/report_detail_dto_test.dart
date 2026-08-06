@@ -288,6 +288,7 @@ void main() {
             'scopeText': '이번 활동에서 나타난 가능성입니다.',
             'homeObservationGuide': '살펴봐 주세요.',
             'evidenceRefs': [101, 102],
+            'confidence': 'STRONG',
           },
         ]
         ..['evidenceItems'] = [
@@ -327,6 +328,7 @@ void main() {
       final interpretation = report.publicInterpretations.single;
       expect(interpretation.category, 'RELATIONSHIP');
       expect(interpretation.evidenceRefs, [101, 102]);
+      expect(interpretation.confidence, 'STRONG');
       expect(report.evidenceItems.single.sourceType, 'CHILD_ANSWER');
       final subject = report.subjectReports.single;
       expect(subject.subjectType, 'HOUSE');
@@ -336,6 +338,28 @@ void main() {
       expect(qa.sttNeedsConfirmation, isTrue);
       expect(report.parentGuides.single.guideType, 'DAILY_PARENTING');
       expect(report.references.single.title, '그림 심리의 이해');
+    });
+
+    test('confidence 키가 없는 해석 카드는 null로 파싱하고 카드는 살아 있다', () {
+      // V43 이전에 만들어진 리포트와 AI가 등급을 싣지 않은 카드가 이 모양으로
+      // 내려온다. 등급이 없다고 카드를 버리면 해석이 통째로 사라진다.
+      final json = _fullJson()
+        ..['publicInterpretations'] = [
+          {
+            'category': 'EMOTION',
+            'title': '감정 표현',
+            'tendencyText': '감정을 드러내는 경향이 보일 수 있습니다.',
+            'scopeText': '이번 활동에서 나타난 가능성입니다.',
+            'homeObservationGuide': '살펴봐 주세요.',
+            'evidenceRefs': <int>[],
+          },
+        ];
+
+      final report = ReportDetailDto.fromJson(json);
+
+      final interpretation = report.publicInterpretations.single;
+      expect(interpretation.confidence, isNull);
+      expect(interpretation.title, '감정 표현');
     });
 
     test('orderedSubjectReports·orderedParentGuides가 계약 순서로 정렬한다', () {

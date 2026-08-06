@@ -360,6 +360,7 @@ final class ReportInterpretationDto {
     required this.scopeText,
     required this.homeObservationGuide,
     required this.evidenceRefs,
+    this.confidence,
   });
   factory ReportInterpretationDto.fromJson(Map<String, dynamic> json) =>
       ReportInterpretationDto(
@@ -369,12 +370,23 @@ final class ReportInterpretationDto {
         scopeText: json['scopeText'] as String?,
         homeObservationGuide: json['homeObservationGuide'] as String?,
         evidenceRefs: _intList(json['evidenceRefs']),
+        confidence: json['confidence'] as String?,
       );
 
   /// RELATIONSHIP|EMOTION|SELF_EXPRESSION|ACTIVITY_STYLE|ADAPTATION.
   final String? category;
   final String? title, tendencyText, scopeText, homeObservationGuide;
   final List<int> evidenceRefs;
+
+  /// 근거 종류로 서버가 계산한 확신 등급 `STRONG`·`MODERATE`·`WEAK`이며 등급이
+  /// 없으면 `null`이다(S15P11B209-982).
+  ///
+  /// **`null`이 정상 값이다.** V43 이전에 만들어진 카드와 AI가 등급을 싣지 않은
+  /// 카드가 모두 `null`로 내려온다. 그런 카드는 배지만 빠질 뿐 카드 자체는 정상
+  /// 노출한다 — 등급이 없다고 숨기면 해석이 통째로 사라진다.
+  ///
+  /// 등급을 매기는 주체는 서버다. 앱은 판정하지 않고 받은 값을 그대로 보여준다.
+  final String? confidence;
 }
 
 /// `evidenceItems[]` — 카드가 참조하는 근거 풀(계약 §4).
