@@ -1158,15 +1158,15 @@ Header `Idempotency-Key` 필수.
 
 ```json
 {
-  "analysisId": 700,
-  "maxQuestionCount": 5
+  "analysisId": 700
 }
 ```
 
 - 현재 단계가 `ANALYZING` 또는 `CONVERSING`일 때만 가능하다.
 - 아동의 `questionDifficulty`를 `difficultySnapshot`으로 저장한다.
-- `maxQuestionCount`는 서버 상한 10을 넘을 수 없다.
-- 기존 진행 중 대화가 있으면 새로 만들지 않고 `409 ACTIVE_CONVERSATION_EXISTS`와 기존 ID를 반환한다.
+- **질문 수 상한은 서버가 정한다(S15P11B209-976).** 클라이언트는 `maxQuestionCount`를 보내지 않는 것이 기본이다. 서버가 저장된 세션 관계로 활동 유형을 확정해 HTP는 주제(그림 한 장)당 3, 그림일기는 5를 적용하고, 적용된 값을 응답의 `maxQuestionCount`로 돌려준다. 값은 설정 `app.conversation.question-limit.htp-per-subject` / `.art-diary`가 갖는다.
+- `maxQuestionCount`를 보내면 **정책값보다 낮출 때만** 반영된다. 더 큰 값은 정책값으로 낮춰진다(구 버전 클라이언트가 보내는 값이 정책을 무력화하지 않게 한다). DTO의 `@Max(10)`은 남겨 둔 안전 상한이다.
+- 기존 진행 중 대화가 있으면 새로 만들지 않고 `409 ACTIVE_CONVERSATION_EXISTS`와 기존 ID를 반환한다. 이 응답에는 `conversationId`만 실려 상한은 알 수 없다 — 상한 도달은 CONV-03의 `409 CONVERSATION_409_001`로 알려진다.
 
 ```json
 {
@@ -1183,7 +1183,7 @@ Header `Idempotency-Key` 필수.
 #### 12.2-A 282번 구현 반영 사항 (문서 기준)
 
 - 구현 기준 경로는 `POST /api/v1/drawing-sessions/{drawingSessionId}/conversations`이다. 구형 단수형 경로(`/conversation`)는 사용하지 않는다.
-- 구현 DTO는 `analysisId`(양의 정수)와 `maxQuestionCount`(양의 정수, 최대 10)를 보유하며, `maxQuestionCount` 생략 시 서버 기본값 10을 적용한다.
+- 구현 DTO는 `analysisId`(양의 정수)와 `maxQuestionCount`(선택, 양의 정수, 최대 10)를 보유한다. `maxQuestionCount`는 생략이 기본이며, 생략하면 활동 유형별 서버 정책(HTP 주제당 3 · 그림일기 5)이 적용된다. 구 문서의 "생략 시 서버 기본값 10"은 폐기됐다 — 앱이 항상 10을 실어 보내고 있어 그 기본값은 한 번도 쓰인 적이 없었다(S15P11B209-976).
 - 성공은 `201 Created`이며 `Location: /api/v1/conversations/{conversationId}`를 반환한다. 응답에는 `conversationId`, `drawingSessionId`, `status`, `difficulty`, `maxQuestionCount`, `questionCount`, `nextAction`, `startedAt`이 포함된다.
 - 기존 진행 대화는 `409 ACTIVE_CONVERSATION_EXISTS`와 `data.conversationId`로 기존 ID를 반환한다. 세션 생성 경합은 `409 CONVERSATION_START_CONFLICT`로 처리한다.
 - `Idempotency-Key`는 구현상 필수다. 동일 보호자·URI·키·Body는 최초 HTTP 응답을 재생하고, 다른 Body 재사용은 `409 IDEMPOTENCY_KEY_REUSED`다. 처리 중 요청은 제한 시간 후 `409 CONVERSATION_START_CONFLICT`가 된다. Redis 장애 시 DB의 `uk_conversation_sessions_drawing_session_id`가 중복 생성을 최종 방어한다.
