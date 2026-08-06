@@ -75,6 +75,45 @@ final class ReportPdfTemplate {
 
   private static final double STRIP_IMAGE_MAX_HEIGHT_MM = 42;
 
+  /**
+   * 섹션의 성격을 나타내는 색·표식이다.
+   *
+   * <p>색은 <b>앱 리포트 화면이 그 섹션에 쓰는 값을 그대로</b> 가져왔다({@code report_screen.dart}). 새로 고르면 같은 서비스의 문서가 앱과
+   * 다른 색을 갖는다.
+   *
+   * <p>칠하는 곳은 <b>제목 띠와 왼쪽 선뿐</b>이다. 화면처럼 카드 전체를 칠하면 종이에서 색 면적이 커져 인쇄가 지저분해지고, 긴 문서에서 눈이 피로해진다. 내용
+   * 카드는 흰 바탕에 얇은 선을 유지한다.
+   *
+   * <p><b>색만으로 구분하지 않는다.</b> 흑백으로 인쇄하면 연한 배경들이 모두 비슷한 회색이 된다. 그래서 제목 앞에 모양이 다른 표식을 함께 둔다 — 채운 사각,
+   * 채운 원, 빈 원, 빈 사각, 알약, 선. 색이 사라져도 모양은 남는다.
+   */
+  private enum Accent {
+    /** 활동 정보 — 앱의 "한눈에 보는 이번 활동"(노랑). */
+    INFO("sec-info", "mark-square"),
+    /** 그림·주제별 관찰 — 앱의 그림 섹션(하늘). */
+    DRAWING("sec-drawing", "mark-circle"),
+    /** 아이의 표현·관찰 특징·경향 해석 — 앱과 같은 라벤더. */
+    EXPRESSION("sec-expression", "mark-ring"),
+    /** 대화 요약 — 앱과 같은 주황. */
+    SUMMARY("sec-summary", "mark-hollow-square"),
+    /**
+     * 보호자 안내 — 앱과 같은 연두.
+     *
+     * <p>보호자가 <b>실제로 해 볼 일</b>이 적힌 자리다. 여기만 내용 카드에도 아주 연한 배경을 둔다.
+     */
+    GUIDE("sec-guide", "mark-pill"),
+    /** 활동 기록·주의 사항·참고 자료 — 사실과 부가 정보(중립 회색). */
+    NEUTRAL("sec-neutral", "mark-dash");
+
+    private final String titleClass;
+    private final String markClass;
+
+    Accent(String titleClass, String markClass) {
+      this.titleClass = titleClass;
+      this.markClass = markClass;
+    }
+  }
+
   /** 화면 표지의 안내 캐릭터다. 앱 자산({@code assets/characters})과 같은 파일을 서버에도 둔다. */
   private static final String MASCOT_RESOURCE = "/images/mascot/report_mascot_intro.png";
 
@@ -315,32 +354,32 @@ final class ReportPdfTemplate {
       // 집·나무·사람은 화면과 같은 제목·순서를 쓴다(S15P11B209-960/961). CLAUDE.md 5절 —
       //   집·나무·사람 그리기를 '검사'로 표현하지 않는다. 화면만 바꾸고 PDF 를 두면 보호자가
       //   저장해 남기는 쪽에만 검사 투가 남는다.
-      section(body, "한눈에 보는 이번 활동", activityInfoCards());
-      section(body, "집·나무·사람, 하나씩 살펴봐요", htpSubjectCards());
-      section(body, "아이의 표현과 대화 요약", expressionCards());
-      section(body, "대화 요약", conversationCards());
-      section(body, "이런 모습이 보였어요", observedFeatureCards());
-      section(body, "함께 살펴보면 좋을 이야기", interpretationCards());
-      section(body, "그리는 동안 있었던 일", activityFactCards());
+      section(body, "한눈에 보는 이번 활동", Accent.INFO, activityInfoCards());
+      section(body, "집·나무·사람, 하나씩 살펴봐요", Accent.DRAWING, htpSubjectCards());
+      section(body, "아이의 표현과 대화 요약", Accent.EXPRESSION, expressionCards());
+      section(body, "대화 요약", Accent.SUMMARY, conversationCards());
+      section(body, "이런 모습이 보였어요", Accent.EXPRESSION, observedFeatureCards());
+      section(body, "함께 살펴보면 좋을 이야기", Accent.EXPRESSION, interpretationCards());
+      section(body, "그리는 동안 있었던 일", Accent.NEUTRAL, activityFactCards());
     } else {
-      section(body, "활동 정보", activityInfoCards());
-      section(body, "주요 심리 경향", interpretationCards());
-      section(body, "주제별 관찰", subjectCards());
-      section(body, "아이의 표현", expressionCards());
-      section(body, "이런 모습이 보였어요", observedFeatureCards());
-      section(body, "활동 기록", activityFactCards());
-      section(body, "대화 요약", conversationCards());
+      section(body, "활동 정보", Accent.INFO, activityInfoCards());
+      section(body, "주요 심리 경향", Accent.EXPRESSION, interpretationCards());
+      section(body, "주제별 관찰", Accent.DRAWING, subjectCards());
+      section(body, "아이의 표현", Accent.EXPRESSION, expressionCards());
+      section(body, "이런 모습이 보였어요", Accent.EXPRESSION, observedFeatureCards());
+      section(body, "활동 기록", Accent.NEUTRAL, activityFactCards());
+      section(body, "대화 요약", Accent.SUMMARY, conversationCards());
     }
-    section(body, "보호자 대화 안내", bulletCards(report.guardianConversationGuide()));
+    section(body, "보호자 대화 안내", Accent.GUIDE, stepCards(report.guardianConversationGuide()));
     for (ReportParentGuideResponse guide : nullSafe(report.parentGuides())) {
-      section(body, guideTitle(guide.guideType()), bulletCards(guide.items()));
+      section(body, guideTitle(guide.guideType()), Accent.GUIDE, stepCards(guide.items()));
     }
     // 위기 안내는 인쇄물이 제3자에게 노출될 수 있어 본문에 싣지 않는다. 확인 경로만 남긴다.
     if (report.crisisAlert() != null) {
-      section(body, "안전 안내", List.of(card("보호자 화면에서 안전 안내를 확인해 주세요.")));
+      section(body, "안전 안내", Accent.NEUTRAL, List.of(card("보호자 화면에서 안전 안내를 확인해 주세요.")));
     }
-    section(body, "주의 사항", bulletCards(report.limitations()));
-    section(body, "참고 자료", referenceCards());
+    section(body, "주의 사항", Accent.NEUTRAL, bulletCards(report.limitations()));
+    section(body, "참고 자료", Accent.NEUTRAL, referenceCards());
     return body.toString();
   }
 
@@ -350,25 +389,46 @@ final class ReportPdfTemplate {
    * <p>제목과 첫 카드를 한 묶음으로 묶는다. 제목만 장 끝에 남으면 다음 장 첫 카드가 무슨 섹션인지 알 수 없다. 나머지 카드는 각자 쪼개지지 않을 뿐, 어느 장에
    * 놓이든 상관없다.
    */
-  private void section(StringBuilder body, String title, List<String> cards) {
+  private void section(StringBuilder body, String title, Accent accent, List<String> cards) {
     if (cards.isEmpty()) return;
-    body.append("<div class=\"section\"><div class=\"keep\">");
-    body.append("<h2 class=\"section-title\">").append(escape(title)).append("</h2>");
-    body.append(cards.get(0)).append("</div>");
+    String heading =
+        "<h2 class=\"section-title %s\"><span class=\"mark %s\"></span>%s</h2>"
+            .formatted(accent.titleClass, accent.markClass, escape(title));
+    body.append("<div class=\"section\">");
+    // 첫 카드가 길어질 수 있는 카드(tallCard)면 제목과 함께 묶지 않는다. 묶으면 카드가 통째로
+    //   다음 장으로 밀려 앞 장 아래가 크게 빈다. 짧은 카드일 때만 제목과 한 덩어리로 유지한다.
+    if (cards.get(0).startsWith("<div class=\"card keep\"")) {
+      body.append("<div class=\"keep\">").append(heading).append(cards.get(0)).append("</div>");
+    } else {
+      body.append(heading).append(cards.get(0));
+    }
     for (int index = 1; index < cards.size(); index++) {
       body.append(cards.get(index));
     }
     body.append("</div>");
   }
 
+  /**
+   * 활동 정보를 낸다. 화면의 같은 섹션과 <b>같은 항목</b>을 담는다({@code _overviewSection}).
+   *
+   * <p>예전에는 화면에 있는 활동 시간·완료일이 빠지고, 화면에 <b>없는</b> {@code 생성 상태 COMPLETED} 가 들어 있었다. 리포트가 완료됐을 때만 내보낼
+   * 수 있으므로 그 값은 언제나 같고, 보호자에게는 뜻도 없는 내부 코드다.
+   */
   private List<String> activityInfoCards() {
     if (report.drawingSession() == null) return List.of();
     List<String[]> rows = new ArrayList<>();
-    rows.add(new String[] {"활동", value(report.drawingSession().drawingTypeName())});
-    rows.add(new String[] {"제목", value(report.drawingSession().title())});
-    rows.add(new String[] {"입력 방식", value(report.drawingSession().inputMethod())});
-    rows.add(new String[] {"생성 상태", value(report.reportStatus())});
-    return List.of(card(keyValueTable(rows, "kv")));
+    rows.add(new String[] {"활동 이름", report.drawingSession().title()});
+    rows.add(new String[] {"활동 유형", report.drawingSession().drawingTypeName()});
+    rows.add(new String[] {"입력 방식", inputMethodText(report.drawingSession().inputMethod())});
+    rows.add(new String[] {"활동 시간", durationText(sessionDurationSec())});
+    rows.add(new String[] {"완료일", dateText(report.drawingSession().completedAt())});
+    String table = keyValueTable(rows, "kv");
+    return table.isEmpty() ? List.of() : List.of(card(table));
+  }
+
+  private Integer sessionDurationSec() {
+    Long durationMs = report.drawingSession().durationMs();
+    return durationMs == null ? null : (int) (durationMs / 1000);
   }
 
   private List<String> interpretationCards() {
@@ -426,23 +486,51 @@ final class ReportPdfTemplate {
       if (!Objects.equals(subject.imageUrl(), heroDrawingUrl())) {
         content.append(image(subject.imageUrl(), SUBJECT_IMAGE_MAX_HEIGHT_MM, null));
       }
-      content.append(bulletList(subject.visionObservations()));
-      for (ReportQaPairResponse pair : nullSafe(subject.qaPairs())) {
-        content.append(qaPair(pair));
+      // 관찰 서술과 문답을 이어 붙이면 빽빽해서 어디까지가 무엇인지 읽히지 않는다. 작은 라벨로 나눈다.
+      String observations = bulletList(subject.visionObservations());
+      if (!observations.isEmpty()) {
+        content.append(subLabel("관찰 내용")).append(observations);
       }
-      cards.add(card(content.toString()));
+      String conversation = qaBlock(subject.qaPairs());
+      if (!conversation.isEmpty()) {
+        content.append(subLabel("아이와 나눈 이야기")).append(conversation);
+      }
+      cards.add(tallCard(content.toString()));
     }
     return cards;
   }
 
+  /**
+   * 문답을 낸다. <b>같은 질문이 같은 결과로 여러 번 있으면 한 번만 내고 횟수를 붙인다.</b>
+   *
+   * <p>대화가 잘 안 풀린 활동에서는 같은 질문이 반복되고 모두 건너뛴 상태로 남는다. 그대로 찍으면 같은 두 줄이 서너 번 되풀이되어, 내용이 있는 것처럼 자리만
+   * 차지한다. 글자가 같으므로 합쳐도 잃는 정보가 없고, 몇 번이었는지는 숫자로 남는다.
+   */
+  private String qaBlock(List<ReportQaPairResponse> pairs) {
+    Map<String, ReportQaPairResponse> unique = new LinkedHashMap<>();
+    Map<String, Integer> counts = new LinkedHashMap<>();
+    for (ReportQaPairResponse pair : nullSafe(pairs)) {
+      String key = value(pair.question()) + " " + value(pair.answer()) + pair.state();
+      unique.putIfAbsent(key, pair);
+      counts.merge(key, 1, Integer::sum);
+    }
+    StringBuilder block = new StringBuilder();
+    for (Map.Entry<String, ReportQaPairResponse> entry : unique.entrySet()) {
+      block.append(qaPair(entry.getValue(), counts.get(entry.getKey())));
+    }
+    return block.toString();
+  }
+
   /** 질문과 답을 한 묶음으로 낸다. 갈라지면 답이 어느 질문의 답인지 알 수 없다. */
-  private String qaPair(ReportQaPairResponse pair) {
+  private String qaPair(ReportQaPairResponse pair, int repeats) {
     StringBuilder qa = new StringBuilder("<div class=\"qa keep\">");
     qa.append("<p class=\"q\">").append(escape(value(pair.question()))).append("</p>");
     // 건너뛴 질문을 "-" 로 두면 답을 못 읽은 것인지 안 한 것인지 구분되지 않는다.
     //   화면과 같은 문구를 쓴다(875 §6).
     if (SKIPPED_STATE.equals(pair.state()) || pair.answer() == null) {
-      qa.append("<p class=\"a skipped\">이 질문은 건너뛰었어요</p>");
+      qa.append("<p class=\"a skipped\">이 질문은 건너뛰었어요");
+      if (repeats > 1) qa.append(" (").append(repeats).append("번)");
+      qa.append("</p>");
     } else {
       qa.append("<p class=\"a\">").append(escape(pair.answer())).append("</p>");
       // 미확정 음성은 발화를 지우지 않고 확인 요청만 덧붙인다(875 §6-1).
@@ -451,6 +539,11 @@ final class ReportPdfTemplate {
       }
     }
     return qa.append("</div>").toString();
+  }
+
+  /** 카드 안에서 내용 묶음을 나누는 작은 라벨이다. */
+  private String subLabel(String text) {
+    return "<div class=\"sub-label\">" + escape(text) + "</div>";
   }
 
   private List<String> expressionCards() {
@@ -518,9 +611,11 @@ final class ReportPdfTemplate {
     rows.add(new String[] {"지우기 횟수", countText(report.activityFacts().eraseCount())});
     content.append(keyValueTable(rows, "kv"));
     for (String note : nullSafe(report.activityFacts().notes())) {
+      if (!has(note)) continue;
       content.append("<p class=\"caption\">").append(escape(note)).append("</p>");
     }
-    return List.of(card(content.toString()));
+    String card = content.toString();
+    return card.isEmpty() ? List.of() : List.of(card(card));
   }
 
   private List<String> conversationCards() {
@@ -547,8 +642,27 @@ final class ReportPdfTemplate {
   }
 
   private List<String> bulletCards(List<String> items) {
-    List<String> values = nullSafe(items);
-    return values.isEmpty() ? List.of() : List.of(card(bulletList(values)));
+    String list = bulletList(items);
+    return list.isEmpty() ? List.of() : List.of(card(list));
+  }
+
+  /**
+   * 보호자가 해 볼 일을 번호 목록으로 낸다.
+   *
+   * <p>점 목록은 "읽을거리"로 보이고 번호 목록은 "해 볼 순서"로 읽힌다. 이 섹션은 리포트에서 보호자가 <b>실제로 행동으로 옮기는</b> 유일한 자리라, 눈에 먼저
+   * 들어와야 한다. 카드에도 아주 연한 배경을 둔다.
+   */
+  private List<String> stepCards(List<String> items) {
+    List<String> steps = new ArrayList<>();
+    for (String item : nullSafe(items)) {
+      if (has(item)) steps.add(item);
+    }
+    if (steps.isEmpty()) return List.of();
+    StringBuilder list = new StringBuilder("<ol class=\"steps\">");
+    for (String step : steps) {
+      list.append("<li>").append(escape(step)).append("</li>");
+    }
+    return List.of("<div class=\"card card-guide keep\">" + list.append("</ol>") + "</div>");
   }
 
   // ── 조각 ────────────────────────────────────────────────────────────
@@ -558,39 +672,54 @@ final class ReportPdfTemplate {
     return "<div class=\"card keep\">" + innerHtml + "</div>";
   }
 
+  /**
+   * 길어질 수 있는 카드다. <b>카드째로 묶지 않는다.</b>
+   *
+   * <p>그림과 문답이 함께 들어가는 주제 카드는 반 장을 넘기기 쉽다. 통째로 묶으면 남은 자리가 모자랄 때 카드 전체가 다음 장으로 밀려 <b>앞 장 아래쪽이 통째로
+   * 빈다</b>. 안에서 이미 그림+설명과 질문+답이 각각 묶여 있으므로, 카드가 나뉘어도 의미가 끊기는 자리에서 잘리지는 않는다.
+   */
+  private String tallCard(String innerHtml) {
+    return "<div class=\"card\">" + innerHtml + "</div>";
+  }
+
   private String cardTitle(String title) {
     return "<h3 class=\"card-title\">" + escape(title) + "</h3>";
   }
 
+  /** 빈 항목은 담지 않는다 — "-" 만 있는 줄은 내용이 있는 것처럼 자리를 차지한다. */
   private String bulletList(List<String> items) {
-    List<String> values = nullSafe(items);
-    if (values.isEmpty()) return "";
-    StringBuilder list = new StringBuilder("<ul class=\"bullets\">");
-    for (String item : values) {
-      list.append("<li>").append(escape(value(item))).append("</li>");
+    StringBuilder list = new StringBuilder();
+    for (String item : nullSafe(items)) {
+      if (!has(item)) continue;
+      list.append("<li>").append(escape(item)).append("</li>");
     }
-    return list.append("</ul>").toString();
+    return list.isEmpty() ? "" : "<ul class=\"bullets\">" + list + "</ul>";
   }
 
   private String chipList(List<String> items) {
-    List<String> values = nullSafe(items);
-    if (values.isEmpty()) return "";
-    StringBuilder chips = new StringBuilder("<div class=\"chips\">");
-    for (String item : values) {
+    StringBuilder chips = new StringBuilder();
+    for (String item : nullSafe(items)) {
+      if (!has(item)) continue;
       chips.append("<span class=\"chip\">").append(escape(item)).append("</span>");
     }
-    return chips.append("</div>").toString();
+    return chips.isEmpty() ? "" : "<div class=\"chips\">" + chips + "</div>";
   }
 
-  /** 라벨과 값을 한 행에 둔다. 표는 행 단위로만 나뉘어 라벨만 장 끝에 남지 않는다. */
+  /**
+   * 라벨과 값을 한 행에 둔다. 표는 행 단위로만 나뉘어 라벨만 장 끝에 남지 않는다.
+   *
+   * <p><b>값이 없는 행은 만들지 않는다.</b> 예전에는 "-" 를 찍었는데, 그런 줄이 여러 개면 카드가 내용 없이 자리만 차지하고 보호자는 무엇이 빠졌는지도 알 수
+   * 없다. 담을 값이 하나도 없으면 표 자체를 만들지 않아 섹션이 통째로 숨는다(계약 §10 — 빈 섹션은 오류가 아니다).
+   */
   private String keyValueTable(List<String[]> rows, String className) {
-    if (rows.isEmpty()) return "";
-    StringBuilder table = new StringBuilder("<table class=\"").append(className).append("\">");
+    StringBuilder body = new StringBuilder();
     for (String[] row : rows) {
-      table.append("<tr><th>").append(escape(row[0])).append("</th>");
-      table.append("<td>").append(escape(value(row[1]))).append("</td></tr>");
+      if (!has(row[1])) continue;
+      body.append("<tr><th>").append(escape(row[0])).append("</th>");
+      body.append("<td>").append(escape(row[1])).append("</td></tr>");
     }
-    return table.append("</table>").toString();
+    if (body.isEmpty()) return "";
+    return "<table class=\"" + className + "\">" + body + "</table>";
   }
 
   /**
@@ -670,14 +799,34 @@ final class ReportPdfTemplate {
     };
   }
 
+  /**
+   * 입력 방식을 보호자가 읽을 수 있는 말로 바꾼다.
+   *
+   * <p>{@code CANVAS}·{@code UPLOAD} 는 코드다. 문서에 코드가 그대로 찍히면 보호자는 뜻을 알 수 없고, 친근한 서비스 문서가 관리 화면처럼
+   * 읽힌다. 모르는 값은 감추지 않고 그대로 낸다 — 새 입력 방식이 생겼을 때 조용히 사라지는 편이 더 나쁘다.
+   */
+  private String inputMethodText(String inputMethod) {
+    return switch (inputMethod == null ? "" : inputMethod) {
+      case "CANVAS" -> "앱에서 그리기";
+      case "UPLOAD" -> "그린 그림 올리기";
+      default -> inputMethod;
+    };
+  }
+
+  /** 표지의 활동 일시와 같은 형식으로 맞춘다. 한 문서 안에서 날짜 표기가 갈리면 다른 값처럼 보인다. */
+  private String dateText(java.time.LocalDateTime dateTime) {
+    return dateTime == null ? "" : dateTime.format(DATE_TIME_FORMATTER);
+  }
+
+  /** 값이 없으면 빈 문자열이다 — 부르는 쪽에서 줄 자체를 만들지 않는다. */
   private String durationText(Integer durationSec) {
-    if (durationSec == null || durationSec <= 0) return "-";
+    if (durationSec == null || durationSec <= 0) return "";
     int minutes = durationSec / 60;
     return minutes > 0 ? minutes + "분" : durationSec + "초";
   }
 
   private String countText(Integer count) {
-    return count == null ? "-" : count + "회";
+    return count == null ? "" : count + "회";
   }
 
   private String value(Object value) {
@@ -760,11 +909,32 @@ final class ReportPdfTemplate {
         .stat-label { font-size: 8.5pt; color: #68737D; }
 
         .section { margin-bottom: 7mm; }
-        .section-title { font-size: 13pt; font-weight: bold; margin: 0 0 3mm 0;
-                         border-left: 3px solid #5F9E73; padding-left: 3mm; }
+        /* 색은 제목 띠와 왼쪽 선에만. 내용 카드는 흰 바탕을 지킨다. */
+        .section-title { font-size: 12.5pt; font-weight: bold; margin: 0 0 3mm 0;
+                         padding: 1.8mm 3mm; border-radius: 4px; border-left: 3.5mm solid;
+                         page-break-after: avoid; }
+        .sec-info { background-color: #FFF7DA; border-left-color: #C7812F; }
+        .sec-drawing { background-color: #EAF6FA; border-left-color: #8CC6D8; }
+        .sec-expression { background-color: #F0ECFF; border-left-color: #8A76C8; }
+        .sec-summary { background-color: #FFEBD8; border-left-color: #D98745; }
+        .sec-guide { background-color: #F2F6E8; border-left-color: #5F9E73; }
+        .sec-neutral { background-color: #F6F7F2; border-left-color: #BFC8C0; }
+
+        /* 흑백 출력에서도 구역이 구분되도록 색과 함께 모양이 다른 표식을 둔다. */
+        .mark { display: inline-block; width: 2.4mm; height: 2.4mm; margin-right: 2mm; }
+        .mark-square { background-color: #C7812F; }
+        .mark-circle { background-color: #8CC6D8; border-radius: 1.2mm; }
+        .mark-ring { border: 0.7mm solid #8A76C8; border-radius: 1.2mm; }
+        .mark-hollow-square { border: 0.7mm solid #D98745; }
+        .mark-pill { width: 4mm; background-color: #5F9E73; border-radius: 1.2mm; }
+        .mark-dash { height: 0.8mm; background-color: #BFC8C0; }
+
         .card { border: 1px solid #DDE2DC; border-radius: 6px; padding: 3.5mm 4mm;
                 margin-bottom: 3mm; }
+        /* 보호자가 실제로 해 볼 일이 적힌 카드만 아주 연한 바탕을 둔다. */
+        .card-guide { background-color: #F7FAF2; border-color: #DCE6CE; }
         .card-title { font-size: 11pt; font-weight: bold; margin: 0 0 2mm 0; }
+        .sub-label { font-size: 9pt; color: #68737D; margin: 2.5mm 0 1mm 0; }
         .lead { color: #68737D; }
         .keep { page-break-inside: avoid; }
 
@@ -777,6 +947,8 @@ final class ReportPdfTemplate {
         .caption { font-size: 9pt; color: #68737D; }
         .url { display: block; }
 
+        .steps { margin: 0; padding-left: 6mm; }
+        .steps li { margin-bottom: 2mm; }
         .bullets { margin: 0; padding-left: 5mm; }
         .bullets li { margin-bottom: 1.5mm; }
 
@@ -796,7 +968,7 @@ final class ReportPdfTemplate {
         .figure { margin: 2mm 0 3mm 0; text-align: center; }
         .drawing { display: block; border: 1px solid #DDE2DC; border-radius: 4px;
                    margin-left: auto; margin-right: auto; }
-        .figure-caption { font-size: 8.5pt; color: #68737D; margin-top: 1.5mm;
+        .figure-caption { font-size: 9pt; color: #4A5852; margin-top: 1.5mm;
                           text-align: center; }
         .strip { width: 100%%; margin: 1.5mm 0 3mm 0; }
         .strip td { width: 33%%; vertical-align: top; padding: 0 1.5mm; }

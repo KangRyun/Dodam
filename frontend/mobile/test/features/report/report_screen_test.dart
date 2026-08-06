@@ -45,7 +45,9 @@ void main() {
     // drawingSession
     expect(find.text('우리 가족'), findsOneWidget);
     expect(find.text('그림일기'), findsOneWidget);
-    expect(find.text('CANVAS'), findsOneWidget);
+    // 입력 방식은 서버 코드가 아니라 보호자가 읽을 수 있는 말로 낸다. PDF 와 같은 문구다.
+    expect(find.text('앱에서 그리기'), findsOneWidget);
+    expect(find.text('CANVAS'), findsNothing);
     expect(find.text('23분'), findsOneWidget);
     // childExpression
     expect(find.text('동생이랑 놀아서 좋았어요'), findsOneWidget);

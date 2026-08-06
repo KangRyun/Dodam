@@ -7,6 +7,7 @@ import com.ssafy.b209.report.dto.ReportDetailResponse;
 import com.ssafy.b209.report.dto.ReportDrawingResponse;
 import com.ssafy.b209.report.dto.ReportDrawingSessionResponse;
 import com.ssafy.b209.report.dto.ReportExpertReviewResponse;
+import com.ssafy.b209.report.dto.ReportQaPairResponse;
 import com.ssafy.b209.report.dto.ReportSubjectResponse;
 import com.ssafy.b209.report.dto.ReportUtteranceResponse;
 import java.time.LocalDateTime;
@@ -59,6 +60,58 @@ class ReportPdfTemplateTest {
     assertThat(html).contains("나 &amp; 동생 &lt;같이&gt; 놀았어").doesNotContain("<같이>");
   }
 
+  @Test
+  void dropsRowsWithoutValueInsteadOfPrintingDash() {
+    // "-" 만 있는 줄은 내용이 있는 것처럼 자리를 차지하고, 보호자는 무엇이 빠졌는지도 모른다.
+    String html = template(base(null, null, List.of())).build();
+
+    // 활동 이름(title)이 없는 표본이다. 라벨 자체가 나오지 않아야 한다.
+    assertThat(html).doesNotContain("활동 이름").contains("활동 유형");
+  }
+
+  @Test
+  void usesFriendlyWordingForTheInputMethodCode() {
+    // CANVAS·UPLOAD 는 서버 코드다. 문서에 코드가 찍히면 보호자는 뜻을 알 수 없다.
+    String html = template(base(null, null, List.of())).build();
+
+    assertThat(html).contains("앱에서 그리기").doesNotContain("CANVAS");
+  }
+
+  @Test
+  void doesNotShowTheInternalReportStatus() {
+    // 생성 상태는 화면에 없고 완료된 리포트만 내보낼 수 있어 언제나 같은 값이다.
+    String html = template(base(null, null, List.of())).build();
+
+    assertThat(html).doesNotContain("생성 상태").doesNotContain("COMPLETED");
+  }
+
+  @Test
+  void groupsRepeatedSkippedQuestionsIntoOneLine() {
+    // 대화가 안 풀린 활동에서는 같은 질문이 반복되고 모두 건너뛴 채 남는다.
+    String html = template(reportWithRepeatedSkippedQuestion()).build();
+
+    assertThat(countOf(html, "오늘 뭐 그렸어?")).isEqualTo(1);
+    assertThat(html).contains("이 질문은 건너뛰었어요 (3번)");
+  }
+
+  @Test
+  void numbersGuardianStepsSoTheyReadAsThingsToDo() {
+    // 점 목록은 읽을거리로, 번호 목록은 해 볼 순서로 읽힌다.
+    String html = template(reportWithGuide()).build();
+
+    assertThat(html).contains("<ol class=\"steps\">").contains("card card-guide");
+  }
+
+  @Test
+  void marksSectionsWithShapeSoStructureSurvivesGrayscalePrinting() {
+    // 흑백으로 인쇄하면 연한 배경이 모두 비슷한 회색이 된다. 모양이 다른 표식이 함께 있어야 한다.
+    String html = template(reportWithGuide()).build();
+
+    assertThat(html).contains("sec-drawing").contains("mark-circle");
+    assertThat(html).contains("sec-guide").contains("mark-pill");
+    assertThat(html).contains("sec-info").contains("mark-square");
+  }
+
   // ── 도구 ────────────────────────────────────────────────────────────
 
   /** 그림 URL 두 개를 모두 읽어 둔 상태로 템플릿을 만든다. */
@@ -96,6 +149,52 @@ class ReportPdfTemplateTest {
 
   private ReportDetailResponse reportWithUtterances(ReportUtteranceResponse... utterances) {
     return base(null, null, List.of(utterances));
+  }
+
+  /** 같은 질문이 세 번 반복되고 모두 건너뛴 리포트다. */
+  private ReportDetailResponse reportWithRepeatedSkippedQuestion() {
+    ReportQaPairResponse skipped =
+        new ReportQaPairResponse("오늘 뭐 그렸어?", null, "SKIPPED", "TEXT", false, false);
+    return withSubjectAndGuide(
+        new ReportSubjectResponse(
+            "DRAWING", null, List.of(), List.of(skipped, skipped, skipped), List.of()),
+        List.of());
+  }
+
+  /** 보호자 안내가 있는 리포트다. */
+  private ReportDetailResponse reportWithGuide() {
+    return withSubjectAndGuide(
+        new ReportSubjectResponse(
+            "DRAWING", DRAWING_URL, List.of("잔디를 그렸어요."), List.of(), List.of()),
+        List.of("오늘 그린 것 중 무엇을 먼저 이야기하고 싶은지 물어봐 주세요."));
+  }
+
+  private ReportDetailResponse withSubjectAndGuide(
+      ReportSubjectResponse subject, List<String> guide) {
+    ReportDetailResponse base = base(null, null, List.of());
+    return new ReportDetailResponse(
+        base.reportId(),
+        base.reportVersion(),
+        base.reportStatus(),
+        base.drawingSession(),
+        base.drawing(),
+        base.childExpression(),
+        base.observedFeatures(),
+        base.activityFacts(),
+        base.conversationSummary(),
+        guide,
+        base.limitations(),
+        base.expertReview(),
+        base.createdAt(),
+        base.nonDiagnosticNotice(),
+        base.publicInterpretations(),
+        base.evidenceItems(),
+        List.of(subject),
+        base.parentGuides(),
+        base.crisisAlert(),
+        base.references(),
+        base.activityType(),
+        base.childDisplayName());
   }
 
   private ReportDetailResponse base(
