@@ -17,6 +17,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
@@ -268,8 +269,20 @@ final class ReportPdfTemplate {
    */
   private String coverDrawing() {
     if (isHtpActivity()) return coverSubjectStrip();
-    if (report.drawing() == null) return "";
-    return image(report.drawing().finalImageUrl(), COVER_IMAGE_MAX_HEIGHT_MM, "아이가 그린 그림");
+    return image(heroDrawingUrl(), COVER_IMAGE_MAX_HEIGHT_MM, "아이가 그린 그림");
+  }
+
+  /**
+   * 표지에 크게 실은 그림의 URL 이다. 없으면 {@code null}.
+   *
+   * <p>주제 카드가 <b>같은 그림을 또 싣지 않도록</b> 판단 기준으로도 쓴다. 그림일기·자유 그림은 완성본 한 장이 주제 그림과 같은 파일이라, 그대로 두면 표지와
+   * 본문에 똑같은 그림이 두 번 나온다.
+   *
+   * <p>집·나무·사람은 이 값을 쓰지 않는다 — 표지는 작은 세 장을 나란히 보여 주는 자리이고, 주제 카드의 확대 그림은 관찰 서술과 함께 읽는 자리라 역할이 다르다.
+   */
+  private String heroDrawingUrl() {
+    if (isHtpActivity() || report.drawing() == null) return null;
+    return report.drawing().finalImageUrl();
   }
 
   /** 주제 그림을 계약 순서(집→나무→사람)대로 나란히 놓는다. 읽어 두지 못한 그림은 칸을 만들지 않는다. */
@@ -409,7 +422,10 @@ final class ReportPdfTemplate {
     for (ReportSubjectResponse subject : report.subjectReports()) {
       StringBuilder content = new StringBuilder();
       content.append(cardTitle(subjectTitle(subject.subjectType())));
-      content.append(image(subject.imageUrl(), SUBJECT_IMAGE_MAX_HEIGHT_MM, null));
+      // 표지에 이미 크게 실은 그림이면 다시 싣지 않는다.
+      if (!Objects.equals(subject.imageUrl(), heroDrawingUrl())) {
+        content.append(image(subject.imageUrl(), SUBJECT_IMAGE_MAX_HEIGHT_MM, null));
+      }
       content.append(bulletList(subject.visionObservations()));
       for (ReportQaPairResponse pair : nullSafe(subject.qaPairs())) {
         content.append(qaPair(pair));
@@ -448,7 +464,10 @@ final class ReportPdfTemplate {
     List<ReportUtteranceResponse> utterances =
         nullSafe(report.childExpression().representativeUtterances());
     for (ReportUtteranceResponse utterance : utterances) {
-      content.append("<p class=\"quote\">").append(escape(value(utterance.text()))).append("</p>");
+      // 말이 비어 있는 대표 발화는 인용하지 않는다. "-" 로 찍으면 아이가 그렇게 말한 것처럼
+      //   보이고, 실제 리포트에서 빈 인용 한 줄이 그렇게 나왔다(리포트 145).
+      if (!has(utterance.text())) continue;
+      content.append("<p class=\"quote\">").append(escape(utterance.text())).append("</p>");
     }
     return content.isEmpty() ? List.of() : List.of(card(content.toString()));
   }
