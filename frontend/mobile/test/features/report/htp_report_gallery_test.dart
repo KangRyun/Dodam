@@ -789,7 +789,7 @@ ReportDetailDto _htpReport({
   childId: childId,
   sessionId: sessionId,
   drawingTypeCode: 'HTP',
-  drawingTypeName: 'HTP 검사',
+  drawingTypeName: '집·나무·사람 그림',
 );
 
 ReportDetailDto _generalReport() => _report(

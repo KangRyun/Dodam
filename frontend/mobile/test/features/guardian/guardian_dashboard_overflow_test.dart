@@ -16,12 +16,11 @@ import 'package:dodam/features/notification/presentation/widgets/push_registrati
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// 보호자 홈 최근 활동 Bottom Overflow(S15P11B209-848).
+/// 보호자 홈 CTA 개편(S15P11B209-917) 이후 overflow·주요 동선 회귀.
 ///
-/// 마음카드가 압축되지 않아 남은 높이를 최근 활동 카드가 모두 흡수하면 카드 내부
-/// RenderFlex가 넘쳤다. 화면 크기·글자 배율·배너·최근 활동 상태를 조합해 production
-/// [GuardianDashboard]에서 overflow가 없고 CTA와 최근 활동에 실제로 닿을 수 있는지
-/// 확인한다.
+/// 최근 활동 블록을 제거하고 "집·나무·사람 그림 활동하기"를 큰 초록 히어로 CTA로
+/// 키웠다. 화면 크기·글자 배율·배너를 조합해 production [GuardianDashboard]에서
+/// overflow가 없고 CTA와 최신 리포트 링크에 실제로 닿을 수 있는지 확인한다.
 void main() {
   group('production 보호자 shell', () {
     testWidgets('Pixel Tablet 실제 viewport와 6개 아이·S842 배너에서 overflow가 없다', (
@@ -56,56 +55,45 @@ void main() {
         const EdgeInsets.only(top: 24, bottom: 32),
       );
       _expectNoOverflow(tester);
-      expect(find.text('최근 활동'), findsOneWidget);
-      expect(
-        tester
-            .getSize(find.byKey(const ValueKey('recent-activity-card')))
-            .height,
-        greaterThanOrEqualTo(160),
-      );
 
-      final entry = find.byKey(const ValueKey('activity-history-entry'));
-      expect(entry, findsOneWidget);
-      expect(tester.getSize(entry).height, greaterThanOrEqualTo(48));
-      await tester.ensureVisible(entry);
-      await tester.tap(entry);
+      final cta = find.byKey(const ValueKey('start-child-mode'));
+      await _reveal(tester, cta);
+      expect(tester.getSize(cta).height, greaterThanOrEqualTo(48));
+
+      final report = find.byKey(const ValueKey('guardian-latest-report-11'));
+      await _reveal(tester, report);
+      await tester.tap(report);
       await tester.pumpAndSettle();
 
-      expect(routes, ['/guardian/activities']);
+      expect(routes, ['/guardian/reports/11']);
       _expectNoOverflow(tester);
     });
   });
 
   group('화면 크기별 overflow', () {
     for (final layout in _layouts) {
-      testWidgets('${layout.label}에서 overflow가 없고 주요 영역에 닿는다', (tester) async {
-        final routes = <String>[];
+      testWidgets('${layout.label}에서 overflow가 없고 CTA에 닿는다', (tester) async {
         await _pumpDashboard(
           tester,
           size: layout.size,
           activities: _many(6),
-          onPushRoute: routes.add,
         );
 
         _expectNoOverflow(tester);
         await _expectReachable(tester);
-        await _tapActivityHistory(tester, routes);
       });
     }
 
     testWidgets('글자 배율 2.0에서도 overflow가 없다', (tester) async {
-      final routes = <String>[];
       await _pumpDashboard(
         tester,
         size: const Size(1280, 800),
         textScale: 2,
         activities: _many(6),
-        onPushRoute: routes.add,
       );
 
       _expectNoOverflow(tester);
       await _expectReachable(tester);
-      await _tapActivityHistory(tester, routes);
     });
 
     testWidgets('낮은 높이 + 글자 배율 2.0 + 푸시 배너를 함께 겪어도 overflow가 없다', (
@@ -113,7 +101,6 @@ void main() {
     ) async {
       final status = _failedPushStatus();
       addTearDown(status.dispose);
-      final routes = <String>[];
 
       await _pumpDashboard(
         tester,
@@ -121,13 +108,11 @@ void main() {
         textScale: 2,
         activities: _many(6),
         pushRegistrationStatus: status,
-        onPushRoute: routes.add,
       );
 
       _expectNoOverflow(tester);
       expect(find.byType(PushRegistrationNotice), findsOneWidget);
       await _expectReachable(tester);
-      await _tapActivityHistory(tester, routes);
     });
 
     testWidgets('긴 보호자·아이 이름이 줄바꿈돼도 overflow가 없다', (tester) async {
@@ -176,7 +161,7 @@ void main() {
     });
   });
 
-  group('최근 활동 상태', () {
+  group('마음카드 상태', () {
     testWidgets('불러오는 중에도 overflow가 없다', (tester) async {
       final pending = Completer<ApiPage<ActivitySummaryDto>>();
       addTearDown(() {
@@ -191,11 +176,10 @@ void main() {
       );
 
       _expectNoOverflow(tester);
-      expect(find.text('아직 활동 기록이 없어요.'), findsNothing);
-      await _expectRecentHeader(tester);
+      await _expectReachable(tester);
     });
 
-    testWidgets('활동이 없으면 안내 문구를 보여주고 overflow가 없다', (tester) async {
+    testWidgets('활동이 없으면 마음카드에 "기록 없음"을 보여주고 overflow가 없다', (tester) async {
       await _pumpDashboard(
         tester,
         size: const Size(1280, 360),
@@ -203,11 +187,11 @@ void main() {
       );
 
       _expectNoOverflow(tester);
-      await _expectRecentHeader(tester);
-      await _expectTextVisible(tester, '아직 활동 기록이 없어요.');
+      await _expectReachable(tester);
+      expect(find.textContaining('기록 없음'), findsWidgets);
     });
 
-    testWidgets('조회가 실패하면 오류 문구를 보여주고 overflow가 없다', (tester) async {
+    testWidgets('조회가 실패해도 CTA가 보이고 overflow가 없다', (tester) async {
       await _pumpDashboard(
         tester,
         size: const Size(1280, 360),
@@ -215,76 +199,11 @@ void main() {
       );
 
       _expectNoOverflow(tester);
-      await _expectRecentHeader(tester);
-      await _expectTextVisible(tester, '활동을 불러오지 못했어요.');
-    });
-
-    testWidgets('최근 활동 1건을 온전히 표시하고 overflow가 없다', (tester) async {
-      await _pumpDashboard(
-        tester,
-        size: const Size(1280, 800),
-        activities: _many(1),
-      );
-
-      _expectNoOverflow(tester);
-      await _expectRecentHeader(tester);
-      expect(find.text('활동 1'), findsOneWidget);
-    });
-
-    testWidgets('활동이 있으면 목록을 보여주고 overflow가 없다', (tester) async {
-      await _pumpDashboard(
-        tester,
-        size: const Size(1280, 800),
-        activities: _many(3),
-      );
-
-      _expectNoOverflow(tester);
-      await _expectRecentHeader(tester);
-      expect(find.text('활동 1'), findsOneWidget);
-    });
-
-    testWidgets('항목이 많아도 카드 안에서만 스크롤하고 overflow가 없다', (tester) async {
-      await _pumpDashboard(
-        tester,
-        size: const Size(1280, 800),
-        activities: _many(20),
-      );
-
-      _expectNoOverflow(tester);
-      await _expectRecentHeader(tester);
-      // 최근 활동 목록은 기존대로 카드 안에서 스크롤한다.
-      final list = find.descendant(
-        of: find.byKey(const ValueKey('activity-history-entry')),
-        matching: find.byType(ListView),
-      );
-      expect(list, findsNothing);
-      final cardList = find.byType(ListView);
-      expect(cardList, findsOneWidget);
-      await tester.drag(cardList, const Offset(0, -200));
-      await tester.pumpAndSettle();
-      _expectNoOverflow(tester);
+      await _expectReachable(tester);
     });
   });
 
   group('스크롤·navigation 회귀', () {
-    testWidgets('낮은 높이에서 스크롤해 최근 활동 진입을 실제로 탭한다', (tester) async {
-      final routes = <String>[];
-      await _pumpDashboard(
-        tester,
-        size: const Size(1280, 360),
-        activities: _many(4),
-        onPushRoute: routes.add,
-      );
-
-      final entry = find.byKey(const ValueKey('activity-history-entry'));
-      await _reveal(tester, entry);
-      await tester.tap(entry);
-      await tester.pumpAndSettle();
-
-      expect(routes, ['/guardian/activities']);
-      _expectNoOverflow(tester);
-    });
-
     testWidgets('낮은 높이에서 스크롤해 최신 리포트 버튼을 실제로 탭한다', (tester) async {
       final routes = <String>[];
       await _pumpDashboard(
@@ -297,25 +216,6 @@ void main() {
       final report = find.byKey(const ValueKey('guardian-latest-report-11'));
       await _reveal(tester, report);
       await tester.tap(report);
-      await tester.pumpAndSettle();
-
-      expect(routes, ['/guardian/reports/11']);
-      _expectNoOverflow(tester);
-    });
-
-    testWidgets('최근 활동 항목을 누르면 활동 상세가 아닌 관찰 리포트로 이동한다', (tester) async {
-      final routes = <String>[];
-      await _pumpDashboard(
-        tester,
-        size: const Size(390, 844),
-        activities: _many(4),
-        onPushRoute: routes.add,
-      );
-
-      // activityId 11 항목만 완료된 리포트(reportId 11)를 갖는다.
-      final row = find.byKey(const ValueKey('activity-row-11'));
-      await _reveal(tester, row);
-      await tester.tap(row);
       await tester.pumpAndSettle();
 
       expect(routes, ['/guardian/reports/11']);
@@ -409,48 +309,16 @@ void _expectNoOverflow(WidgetTester tester) {
   expect(tester.takeException(), isNull);
 }
 
-/// CTA와 최근 활동 영역이 화면에서 실제로 닿을 수 있는지 본다.
+/// 큰 초록 CTA가 화면에서 실제로 닿을 수 있는지 본다.
 ///
 /// 존재만 확인하면 Clip으로 가려도 통과하므로 실제로 스크롤해 화면에 올린 뒤
 /// 크기를 확인한다.
 Future<void> _expectReachable(WidgetTester tester) async {
-  await _expectRecentHeader(tester);
-  for (final target in [
-    find.byKey(const ValueKey('start-child-mode')),
-    find.byKey(const ValueKey('activity-history-entry')),
-    find.text('기록 없음'),
-  ]) {
-    await _reveal(tester, target);
-    expect(tester.getSize(target).height, greaterThan(0));
-  }
-  _expectNoOverflow(tester);
-}
-
-Future<void> _expectRecentHeader(WidgetTester tester) async {
-  final entry = find.byKey(const ValueKey('activity-history-entry'));
-  await _reveal(tester, entry);
-  expect(find.text('최근 활동'), findsOneWidget);
-  expect(tester.getSize(entry).width, greaterThanOrEqualTo(48));
-  expect(tester.getSize(entry).height, greaterThanOrEqualTo(48));
-  _expectNoOverflow(tester);
-}
-
-Future<void> _tapActivityHistory(
-  WidgetTester tester,
-  List<String> routes,
-) async {
-  final entry = find.byKey(const ValueKey('activity-history-entry'));
-  await _reveal(tester, entry);
-  await tester.tap(entry);
-  await tester.pumpAndSettle();
-  expect(routes, ['/guardian/activities']);
-  _expectNoOverflow(tester);
-}
-
-Future<void> _expectTextVisible(WidgetTester tester, String text) async {
-  final finder = find.text(text);
-  await _reveal(tester, finder);
-  expect(tester.getSize(finder).height, greaterThan(0));
+  final cta = find.byKey(const ValueKey('start-child-mode'));
+  await _reveal(tester, cta);
+  expect(tester.getSize(cta).height, greaterThan(0));
+  expect(find.text('집·나무·사람 그림 활동'), findsOneWidget);
+  expect(find.text('집 나무 사람 그림 활동 시작하기'), findsOneWidget);
   _expectNoOverflow(tester);
 }
 
@@ -614,7 +482,7 @@ List<ActivitySummaryDto> _many(int count) => [
       selectedEmotions: const ['HAPPY'],
       thumbnailUrl: null,
       analysisStatus: 'COMPLETED',
-      // 첫 항목만 완료된 리포트를 달아 최신 리포트 버튼 키를 확정한다.
+      // 둘째 항목만 완료된 리포트를 달아 최신 리포트 버튼 키를 확정한다.
       report: i == 1
           ? const ActivityReportSummaryDto(
               reportId: 11,

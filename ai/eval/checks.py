@@ -525,6 +525,23 @@ def check_question_response(case, resp: QuestionResponse) -> list[Finding]:
             Finding("B", "주제 유지", not off, f"이탈 명사: {off}" if off else "")
         )
 
+    # HTP 주제 그림의 첫마디는 무엇을 그렸는지 되묻지 않는다(S15P11B209-959).
+    # 무엇을 그리는 순서인지는 활동이 정해 뒀고 AI도 알고 있다 — 모르는 척 물으면
+    # 아이는 이미 아는 것을 답해야 해서 할 말이 없다. 811이 잡은 F-1("오늘은 뭘
+    # 그렸어?" 고정)이 되살아났는지 보는 눈이기도 하다.
+    if meta.get("forbid_asking_what_was_drawn"):
+        asks_what = _contains_any(
+            text, ["뭘 그렸", "뭐 그렸", "무엇을 그렸", "뭘 그린", "무엇을 그린"]
+        )
+        out.append(
+            Finding(
+                "B",
+                "무엇을 그렸는지 되묻지 않음",
+                not asks_what,
+                f"검출: {asks_what}" if asks_what else "",
+            )
+        )
+
     # 탐지 0건에서 포기 문구로 굳지 않는가.
     if "giveup_phrases" in meta:
         giveup = _contains_any(text, meta["giveup_phrases"])

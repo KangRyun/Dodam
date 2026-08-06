@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:dodam/app/app.dart';
 import 'package:dodam/app/router/app_routes.dart';
 import 'package:dodam/core/network/api_page.dart';
+import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/activity/data/dto/activity_dtos.dart';
 import 'package:dodam/features/activity/domain/repositories/activity_repository.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
@@ -168,9 +169,11 @@ void main() {
     expect(find.byKey(const ValueKey('activity-history-list')), findsOneWidget);
   });
 
-  testWidgets('뒤로가기는 Guardian Home으로 복귀한다', (tester) async {
+  testWidgets('기록 탭에서 홈 탭으로 돌아올 수 있다', (tester) async {
+    // 활동 기록은 대시보드 개편으로 사이드바 '기록' 탭이 됐다. '홈' 탭을 다시
+    // 누르면 보호자 홈으로 돌아온다.
     await _openHistory(tester, _ActivityRepository());
-    await tester.binding.handlePopRoute();
+    await tester.tap(find.text('홈').first);
     await tester.pumpAndSettle();
     expect(find.text('보호자 홈'), findsWidgets);
   });
@@ -441,6 +444,115 @@ void main() {
 
     expect(find.byKey(const ValueKey('activity-300')), findsOneWidget);
   });
+
+  group('상단 타이틀·미리보기 헤더(S15P11B209-948)', () {
+    testWidgets('셸 기록 탭은 상단 타이틀을 두고 배너 제목은 서술형이다', (tester) async {
+      await _openHistoryTab(tester, _ActivityRepository());
+
+      expect(
+        find.descendant(
+          of: find.byType(AppTopBar),
+          matching: find.text('활동 기록'),
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('기록을 한 권씩 살펴봐요'), findsOneWidget);
+      // 상단 타이틀과 배너 제목이 같은 말을 두 번 하지 않는다.
+      expect(find.text('활동 기록'), findsOneWidget);
+      // eyebrow·설명은 그대로 둔다.
+      expect(find.text('보호자 활동 기록'), findsOneWidget);
+      expect(find.text('아이의 그림과 이야기를 한 권씩 소중히 모았어요.'), findsOneWidget);
+    });
+
+    testWidgets('단독 라우트는 상단 타이틀이 없어 배너가 화면 이름을 말한다', (tester) async {
+      await _openHistoryDirect(tester, _ActivityRepository());
+
+      expect(find.byType(AppTopBar), findsNothing);
+      expect(find.text('활동 기록'), findsOneWidget);
+      expect(find.text('기록을 한 권씩 살펴봐요'), findsNothing);
+    });
+
+    testWidgets('미리보기 헤더는 히어로와 같은 밝은 배경에 어두운 글자를 쓴다', (tester) async {
+      tester.view.physicalSize = const Size(1280, 800);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await _openHistoryDirect(
+        tester,
+        _ActivityRepository(activities: [_htpActivity]),
+      );
+      await _revealHistoryWidget(
+        tester,
+        find.byKey(const ValueKey('activity-history-summary')),
+      );
+
+      final heroBackground =
+          (tester
+                      .widget<Container>(
+                        find.byKey(
+                          const ValueKey('activity-history-archive-hero'),
+                        ),
+                      )
+                      .decoration!
+                  as BoxDecoration)
+              .color!;
+      final header = tester.widget<Container>(
+        find
+            .ancestor(of: find.text('펼친 기록서'), matching: find.byType(Container))
+            .first,
+      );
+
+      expect(header.color, heroBackground, reason: '히어로와 같은 배경');
+      expect(header.color!.computeLuminance(), greaterThan(0.5));
+
+      for (final label in const ['펼친 기록서', '집·나무·사람 그림']) {
+        final text = tester.widget<Text>(
+          find.descendant(
+            of: find.byWidget(header),
+            matching: find.text(label),
+          ),
+        );
+        expect(
+          _contrastRatio(text.style!.color!, header.color!),
+          greaterThanOrEqualTo(4.5),
+          reason: '$label 대비',
+        );
+      }
+
+      final icon = tester.widget<Icon>(
+        find.descendant(
+          of: find.byWidget(header),
+          matching: find.byIcon(Icons.menu_book_rounded),
+        ),
+      );
+      expect(
+        _contrastRatio(icon.color!, header.color!),
+        greaterThanOrEqualTo(3),
+        reason: '책 아이콘 대비',
+      );
+    });
+  });
+}
+
+/// 보호자 셸의 '기록' 탭을 연다. 단독 라우트([_openHistoryDirect])와 달리 셸이
+/// 상단 페이지 타이틀을 제공한다.
+Future<void> _openHistoryTab(
+  WidgetTester tester,
+  _ActivityRepository repository,
+) async {
+  tester.view.physicalSize = const Size(1280, 900);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+  await tester.pumpWidget(
+    DodamApp(
+      childRepository: const _ChildRepository(),
+      activityRepository: repository,
+    ),
+  );
+  await tester.pumpAndSettle();
+  await tester.tap(find.widgetWithText(InkWell, '기록'));
+  await tester.pumpAndSettle();
 }
 
 double _contrastRatio(Color foreground, Color background) {
@@ -473,12 +585,9 @@ Future<void> _openHistory(
   // 개편된 보호자 홈은 최근 활동·마음 달력용으로 같은 레포에 활동을 미리 조회한다.
   // 이력 화면의 조회만 세도록 진입 직전에 카운터를 초기화한다.
   repository.reset();
-  // 예전 '활동 이력 보기' 버튼은 대시보드 개편으로 사라졌다. 지금은 "최근 활동"
-  // 카드의 "전체"가 같은 화면으로 보낸다.
-  final entry = find.ancestor(
-    of: find.text('전체'),
-    matching: find.byType(InkWell),
-  );
+  // 예전 '활동 이력 보기'·'전체' 진입점은 대시보드 개편으로 사라졌다. 지금은
+  // 사이드바 '기록' 탭이 같은 활동 기록 화면으로 보낸다.
+  final entry = find.text('기록').first;
   await tester.ensureVisible(entry);
   await tester.tap(entry);
   await tester.pumpAndSettle();

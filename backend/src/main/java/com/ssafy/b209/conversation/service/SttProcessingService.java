@@ -63,16 +63,34 @@ public class SttProcessingService {
     try {
       AiSttResponse response =
           aiSttClient.transcribe(new AiSttRequest(() -> open(claim), UUID.randomUUID().toString()));
+      if (response.failed()) {
+        // 무음·저신뢰는 장애가 아니라 정상적인 결과다. 텍스트를 저장하지 않고 FAILED로 끝내
+        // 앱이 선택지를 띄우게 한다(정본 §19.6·§25). 저장하면 아이가 하지 않은 말이 남는다.
+        logRejected(claim.messageId(), response.resolvedFailureReason());
+        return persistenceService.completeFailure(
+            claim.messageId(), claim.needsGuardianConfirmation());
+      }
       return persistenceService.completeSuccess(
           claim.messageId(),
           response.text(),
           response.confidence(),
-          claim.needsGuardianConfirmation());
+          // 보호자 확인은 한 번 필요해지면 내려가지 않는다 — 기존 값과 OR로 합친다.
+          claim.needsGuardianConfirmation() || response.needsConfirmationOrDefault());
     } catch (RuntimeException exception) {
       logFailure(claim.messageId(), exception);
       return persistenceService.completeFailure(
           claim.messageId(), claim.needsGuardianConfirmation());
     }
+  }
+
+  /**
+   * AI가 인식을 거절한 결과를 비민감 사유만으로 남긴다.
+   *
+   * <p>STT 원문은 기록하지 않는다. 사유 코드는 정본 §19.6 어휘이며, 상태 필드가 없는 구 AI 응답에서는 빈 텍스트를 뜻하는 {@code NO_SPEECH}로
+   * 대체된다.
+   */
+  private void logRejected(Long messageId, String failureReason) {
+    log.info("STT 인식 결과 미채택 messageId={} reason={}", messageId, failureReason);
   }
 
   /**

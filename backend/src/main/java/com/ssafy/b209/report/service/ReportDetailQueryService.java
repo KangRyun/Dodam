@@ -4,6 +4,7 @@ import com.ssafy.b209.auth.authorization.GuardianResourceAccessRepository;
 import com.ssafy.b209.drawing.service.DrawingAssetFileUrlFactory;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.ReportActivitySummaryView;
+import com.ssafy.b209.report.domain.ReportChildView;
 import com.ssafy.b209.report.domain.ReportConversationSummaryView;
 import com.ssafy.b209.report.domain.ReportCrisisAlert;
 import com.ssafy.b209.report.domain.ReportDetailView;
@@ -16,6 +17,9 @@ import com.ssafy.b209.report.domain.ReportInterpretationDisclosureState;
 import com.ssafy.b209.report.domain.ReportKeyConversationView;
 import com.ssafy.b209.report.domain.ReportMessageConfirmationView;
 import com.ssafy.b209.report.domain.ReportObservedFeatureView;
+import com.ssafy.b209.report.domain.ReportPublicInterpretation;
+import com.ssafy.b209.report.domain.ReportSubject;
+import com.ssafy.b209.report.domain.ReportSubjectObservation;
 import com.ssafy.b209.report.dto.ReportActivityFactsResponse;
 import com.ssafy.b209.report.dto.ReportChildExpressionResponse;
 import com.ssafy.b209.report.dto.ReportConversationSummaryResponse;
@@ -29,10 +33,14 @@ import com.ssafy.b209.report.dto.ReportExpertReviewResponse;
 import com.ssafy.b209.report.dto.ReportObservedFeatureResponse;
 import com.ssafy.b209.report.dto.ReportParentGuideResponse;
 import com.ssafy.b209.report.dto.ReportPublicInterpretationResponse;
+import com.ssafy.b209.report.dto.ReportQaPairResponse;
+import com.ssafy.b209.report.dto.ReportReferenceResponse;
+import com.ssafy.b209.report.dto.ReportSubjectResponse;
 import com.ssafy.b209.report.dto.ReportUtteranceResponse;
 import com.ssafy.b209.report.exception.ReportDetailErrorCode;
 import com.ssafy.b209.report.repository.ReportActivityNoteViewRepository;
 import com.ssafy.b209.report.repository.ReportActivitySummaryViewRepository;
+import com.ssafy.b209.report.repository.ReportChildViewRepository;
 import com.ssafy.b209.report.repository.ReportConversationSummaryViewRepository;
 import com.ssafy.b209.report.repository.ReportCrisisAlertRepository;
 import com.ssafy.b209.report.repository.ReportDetailViewRepository;
@@ -45,11 +53,14 @@ import com.ssafy.b209.report.repository.ReportDrawingTypeViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportEvidenceItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideViewRepository;
+import com.ssafy.b209.report.repository.ReportHtpStepViewRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationViewRepository;
 import com.ssafy.b209.report.repository.ReportMessageConfirmationViewRepository;
 import com.ssafy.b209.report.repository.ReportObservedFeatureViewRepository;
 import com.ssafy.b209.report.repository.ReportParentGuideRepository;
 import com.ssafy.b209.report.repository.ReportPublicInterpretationRepository;
+import com.ssafy.b209.report.repository.ReportReferenceRepository;
+import com.ssafy.b209.report.repository.ReportSubjectRepository;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -99,6 +110,10 @@ public class ReportDetailQueryService {
   private final ReportParentGuideRepository parentGuideRepository;
   private final ReportCrisisAlertRepository crisisAlertRepository;
   private final ReportMessageConfirmationViewRepository messageConfirmationRepository;
+  private final ReportSubjectRepository subjectRepository;
+  private final ReportReferenceRepository referenceRepository;
+  private final ReportHtpStepViewRepository htpStepRepository;
+  private final ReportChildViewRepository childRepository;
   private final DrawingAssetFileUrlFactory fileUrlFactory;
 
   /**
@@ -118,6 +133,10 @@ public class ReportDetailQueryService {
    * @param detectedObjectRepository 과거 리포트의 탐지 객체명 폴백 조회 경계
    * @param drawnItemRepository 최신 AI 관찰 서술 기반 '그린 것' 조회 경계
    * @param observedFeatureRepository 보호자에게 열린 관찰 특징 조회 경계
+   * @param subjectRepository 주제(집·나무·사람)별 관찰 스냅샷 조회 경계 (S15P11B209-960)
+   * @param referenceRepository 리포트 참고 자료 조회 경계 (S15P11B209-960)
+   * @param htpStepRepository 활동 수치가 여러 활동 합산인지 판정하는 HTP 단계 조회 경계 (S15P11B209-960)
+   * @param childRepository 표지용 아동 표시명 조회 경계이며 별명만 읽는다 (S15P11B209-960)
    * @param fileUrlFactory 인증된 그림 파일 조회 URL 생성기
    */
   public ReportDetailQueryService(
@@ -140,6 +159,10 @@ public class ReportDetailQueryService {
       ReportParentGuideRepository parentGuideRepository,
       ReportCrisisAlertRepository crisisAlertRepository,
       ReportMessageConfirmationViewRepository messageConfirmationRepository,
+      ReportSubjectRepository subjectRepository,
+      ReportReferenceRepository referenceRepository,
+      ReportHtpStepViewRepository htpStepRepository,
+      ReportChildViewRepository childRepository,
       DrawingAssetFileUrlFactory fileUrlFactory) {
     this.guardianAccessRepository = guardianAccessRepository;
     this.reportRepository = reportRepository;
@@ -160,6 +183,10 @@ public class ReportDetailQueryService {
     this.parentGuideRepository = parentGuideRepository;
     this.crisisAlertRepository = crisisAlertRepository;
     this.messageConfirmationRepository = messageConfirmationRepository;
+    this.subjectRepository = subjectRepository;
+    this.referenceRepository = referenceRepository;
+    this.htpStepRepository = htpStepRepository;
+    this.childRepository = childRepository;
     this.fileUrlFactory = fileUrlFactory;
   }
 
@@ -192,6 +219,19 @@ public class ReportDetailQueryService {
             .findById(report.getDrawingSessionId())
             .orElseThrow(() -> new BusinessException(ReportDetailErrorCode.REPORT_NOT_FOUND));
 
+    // 공개 카드를 한 번만 읽어 응답 배열과 주제별 참조가 같은 목록을 보게 한다. 따로 두 번 읽으면
+    //   그 사이 정렬이 어긋날 때 interpretationRefs 가 조용히 다른 카드를 가리킨다(875 §5-1).
+    List<ReportPublicInterpretation> publishedCards =
+        interpretationRepository.findByReportIdAndDisclosureStateOrderByDisplayOrderAsc(
+            report.getId(), ReportInterpretationDisclosureState.PUBLISHED);
+    Map<Long, Integer> interpretationIndexById = new LinkedHashMap<>();
+    for (int index = 0; index < publishedCards.size(); index++) {
+      interpretationIndexById.put(publishedCards.get(index).getId(), index);
+    }
+
+    boolean aggregatedHtp =
+        htpStepRepository.countStepsSharingAssessment(report.getDrawingSessionId()) > 1;
+
     return new ReportDetailResponse(
         report.getId(),
         report.getReportVersion(),
@@ -200,20 +240,118 @@ public class ReportDetailQueryService {
         buildDrawing(session.getId()),
         buildChildExpression(report, session),
         buildObservedFeatures(report.getId()),
-        buildActivityFacts(report),
+        buildActivityFacts(report, aggregatedHtp),
         buildConversationSummary(report),
         buildGuardianConversationGuide(report.getId()),
         splitLimitations(report.getLimitationsText()),
         ReportExpertReviewResponse.notRequested(),
         report.getCreatedAt(),
         ReportDetailResponse.NON_DIAGNOSTIC_NOTICE,
-        buildPublicInterpretations(report.getId()),
+        buildPublicInterpretations(publishedCards),
         buildEvidenceItems(report.getId()),
-        // 주제별 관찰 묶음은 후속 범위다. 빈 목록이면 화면·PDF 가 섹션을 숨긴다(875 §10).
-        List.of(),
+        buildSubjectReports(report.getId(), interpretationIndexById),
         buildParentGuides(report.getId()),
         buildCrisisAlert(report.getId()),
-        List.of());
+        buildReferences(report.getId()),
+        resolveActivityType(session),
+        resolveChildDisplayName(session));
+  }
+
+  /**
+   * 주제(집·나무·사람)별 관찰 묶음을 조립한다 (875 §5).
+   *
+   * <p>저장된 스냅샷을 그대로 읽는다 — 계약이 "리포트 상세의 스냅샷을 우선 사용(별도 재조립 금지)"이라 조회할 때마다 대화 로그를 다시 훑지 않는다. 순서는 저장
+   * 시점에 {@code HOUSE → TREE → PERSON}으로 굳혀 뒀고 조회도 그 순서로 읽는다.
+   *
+   * <p>{@code interpretationRefs}는 <b>저장된 숫자가 아니라 지금 공개된 카드 목록에서의 위치</b>다. 저장은 카드 행을 FK 로 묶어 두고
+   * 인덱스는 여기서 계산한다 — 그래야 카드 하나가 빠져도 참조가 다른 카드로 밀리지 않는다(875 §5-1).
+   *
+   * @param reportId 리포트 식별자
+   * @param interpretationIndexById 공개 카드 식별자를 응답 배열 인덱스로 옮기는 표
+   * @return 계약 순서대로 정렬된 주제별 관찰 목록이며 주제가 없으면 빈 목록
+   */
+  private List<ReportSubjectResponse> buildSubjectReports(
+      Long reportId, Map<Long, Integer> interpretationIndexById) {
+    List<ReportSubjectResponse> subjects = new ArrayList<>();
+    for (ReportSubject subject : subjectRepository.findByReportIdOrderByDisplayOrderAsc(reportId)) {
+      List<String> observations =
+          subject.getObservations().stream()
+              .map(ReportSubjectObservation::getObservationText)
+              .filter(text -> text != null && !text.isBlank())
+              .toList();
+      List<ReportQaPairResponse> qaPairs =
+          subject.getQaPairs().stream()
+              .map(
+                  pair ->
+                      new ReportQaPairResponse(
+                          pair.getQuestionText(),
+                          pair.getAnswerText(),
+                          pair.getAnswerState(),
+                          pair.getInputType(),
+                          // 미확정 음성은 문답 표시에는 남긴다 — 아이 말을 지우지 않고
+                          //   "확인해 주세요"를 함께 보여 준다(875 §6-1).
+                          pair.isSttNeedsConfirmation(),
+                          pair.isRepresentative()))
+              .toList();
+      List<Integer> interpretationRefs =
+          subject.getInterpretations().stream()
+              .map(link -> interpretationIndexById.get(link.getInterpretation().getId()))
+              .filter(index -> index != null)
+              .toList();
+      subjects.add(
+          new ReportSubjectResponse(
+              subject.getSubjectType(),
+              resolveFinalImageUrl(subject.getDrawingSessionId()),
+              observations,
+              qaPairs,
+              interpretationRefs));
+    }
+    return subjects;
+  }
+
+  /**
+   * 리포트가 참조한 전문 자료 출처를 담는다 (875 §9).
+   *
+   * <p>출처 표시는 라이선스 의무(KOGL-1)라 저장된 것을 빠뜨리지 않는다. {@code url}은 자체 저작 자료가 많아 {@code null}일 수 있다.
+   *
+   * @param reportId 리포트 식별자
+   * @return 노출 순서 참고 자료 목록
+   */
+  private List<ReportReferenceResponse> buildReferences(Long reportId) {
+    return referenceRepository.findByReportIdOrderByDisplayOrderAsc(reportId).stream()
+        .map(reference -> new ReportReferenceResponse(reference.getTitle(), reference.getUrl()))
+        .toList();
+  }
+
+  /**
+   * 활동 유형 코드를 돌려준다 (875 §2 {@code activityType}).
+   *
+   * @param session 리포트가 가리키는 그림 활동 세션
+   * @return 활동 유형 코드이며 유형을 알 수 없으면 {@code null}
+   */
+  private String resolveActivityType(ReportDrawingSessionView session) {
+    ReportDrawingTypeView drawingType =
+        drawingTypeRepository.findById(session.getDrawingTypeId()).orElse(null);
+    return drawingType == null ? null : drawingType.getCode();
+  }
+
+  /**
+   * 리포트 표지에 쓸 아동 표시명을 돌려준다 (875 §2 {@code childDisplayName}).
+   *
+   * <p><b>표시명(별명)만 쓴다.</b> 생년월일 같은 다른 아동 정보는 이 응답에 담지 않는다 — 조회 자체를 {@link ReportChildView}로 좁혀 뒀다.
+   * 삭제된 아동은 {@code null}이다.
+   *
+   * @param session 리포트가 가리키는 그림 활동 세션
+   * @return 아동 표시명이며 없거나 삭제됐으면 {@code null}
+   */
+  private String resolveChildDisplayName(ReportDrawingSessionView session) {
+    if (session.getChildId() == null) {
+      return null;
+    }
+    return childRepository
+        .findById(session.getChildId())
+        .map(ReportChildView::displayName)
+        .orElse(null);
   }
 
   private ReportDrawingSessionResponse buildDrawingSession(ReportDrawingSessionView session) {
@@ -242,6 +380,30 @@ public class ReportDetailQueryService {
    * @return 최종 그림·미리보기 URL이며 그림 파일이 없으면 두 항목 모두 {@code null}
    */
   private ReportDrawingResponse buildDrawing(Long drawingSessionId) {
+    Map<String, ReportDrawingAssetView> latestByType = latestAssetsByType(drawingSessionId);
+    String finalImageUrl = finalImageUrlOf(latestByType);
+    String thumbnailUrl = urlOf(latestByType.get(THUMBNAIL_ASSET_TYPE));
+    return new ReportDrawingResponse(
+        finalImageUrl, thumbnailUrl == null ? finalImageUrl : thumbnailUrl);
+  }
+
+  /**
+   * 주제별 그림 한 장의 완성 이미지 URL 을 확정한다 (875 §5 {@code imageUrl}).
+   *
+   * <p>상세 화면의 대표 그림과 <b>같은 규칙</b>을 쓴다 — 업로드 세션은 {@code FINAL} 자산이 없어 {@code UPLOADED}가 완성 그림이다. 저장할
+   * 때 URL 문자열을 굳히지 않고 세션만 담아 둔 이유가 이것이다: 조회 시점에 발급해야 인증 경로가 바뀌어도 링크가 살아 있다.
+   *
+   * @param drawingSessionId 주제의 그림 활동 세션 식별자이며 없으면 {@code null}
+   * @return 완성 그림 조회 URL 이며 그림이 없으면 {@code null}
+   */
+  private String resolveFinalImageUrl(Long drawingSessionId) {
+    if (drawingSessionId == null) {
+      return null;
+    }
+    return finalImageUrlOf(latestAssetsByType(drawingSessionId));
+  }
+
+  private Map<String, ReportDrawingAssetView> latestAssetsByType(Long drawingSessionId) {
     List<ReportDrawingAssetView> assets =
         assetRepository.findByDrawingSessionIdAndAssetTypeInOrderByAssetVersionAsc(
             drawingSessionId, List.of(FINAL_ASSET_TYPE, THUMBNAIL_ASSET_TYPE, UPLOADED_ASSET_TYPE));
@@ -252,13 +414,12 @@ public class ReportDetailQueryService {
         latestByType.put(asset.getAssetType(), asset);
       }
     }
+    return latestByType;
+  }
+
+  private String finalImageUrlOf(Map<String, ReportDrawingAssetView> latestByType) {
     String finalImageUrl = urlOf(latestByType.get(FINAL_ASSET_TYPE));
-    if (finalImageUrl == null) {
-      finalImageUrl = urlOf(latestByType.get(UPLOADED_ASSET_TYPE));
-    }
-    String thumbnailUrl = urlOf(latestByType.get(THUMBNAIL_ASSET_TYPE));
-    return new ReportDrawingResponse(
-        finalImageUrl, thumbnailUrl == null ? finalImageUrl : thumbnailUrl);
+    return finalImageUrl == null ? urlOf(latestByType.get(UPLOADED_ASSET_TYPE)) : finalImageUrl;
   }
 
   private String urlOf(ReportDrawingAssetView asset) {
@@ -334,7 +495,16 @@ public class ReportDetailQueryService {
     return "TEXT";
   }
 
-  private ReportActivityFactsResponse buildActivityFacts(ReportDetailView report) {
+  /**
+   * 객관 활동 수치를 담는다 (875 §8).
+   *
+   * @param report 리포트 헤더
+   * @param aggregatedHtp 여러 활동을 합친 기록인지 여부다. {@code true}면 화면이 "집·나무·사람 세 활동을 합친 기록입니다"를 덧붙인다 — 합산
+   *     사실을 밝히지 않으면 보호자가 한 장을 그리는 데 걸린 시간으로 읽는다
+   * @return 활동 수치 응답
+   */
+  private ReportActivityFactsResponse buildActivityFacts(
+      ReportDetailView report, boolean aggregatedHtp) {
     ReportActivitySummaryView summary =
         activitySummaryRepository.findById(report.getId()).orElse(null);
 
@@ -361,7 +531,7 @@ public class ReportDetailQueryService {
         null,
         null,
         false,
-        false);
+        aggregatedHtp);
   }
 
   /** 최신 리포트는 관찰 서술 항목을, 이전 리포트는 신뢰도 보정된 탐지 라벨만 사용한다. */
@@ -408,14 +578,15 @@ public class ReportDetailQueryService {
    * <p>제외·강등 카드는 저장돼 있어도 담지 않는다. 그리고 {@code resolveVisibility()}·{@code expertReviewed} 경로를 타지 않는다
    * — 그 경로는 전문가 검토 전 항목을 전부 EXPERT_ONLY 로 강등하고 검토 상태 전이가 없어 항상 미검토이므로, 통과한 카드까지 숨긴다(계약 §4-2 결정 1).
    *
-   * @param reportId 리포트 식별자
+   * <p><b>배열 순서를 여기서 다시 정렬하지 않는다.</b> 주제별 관찰의 {@code interpretationRefs}가 이 배열의 인덱스를 가리키므로, 순서를 바꾸면
+   * 참조가 조용히 다른 카드를 가리킨다(875 §5-1).
+   *
+   * @param publishedCards 노출 순서대로 읽어 둔 공개 카드 목록
    * @return 공개 카드 목록이며 통과분이 없으면 빈 목록
    */
-  private List<ReportPublicInterpretationResponse> buildPublicInterpretations(Long reportId) {
-    return interpretationRepository
-        .findByReportIdAndDisclosureStateOrderByDisplayOrderAsc(
-            reportId, ReportInterpretationDisclosureState.PUBLISHED)
-        .stream()
+  private List<ReportPublicInterpretationResponse> buildPublicInterpretations(
+      List<ReportPublicInterpretation> publishedCards) {
+    return publishedCards.stream()
         .map(
             card ->
                 new ReportPublicInterpretationResponse(

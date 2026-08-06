@@ -27,15 +27,25 @@ public interface OptionAnswerMessageRepository extends JpaRepository<OptionAnswe
   /**
    * 지정 질문에 이미 아동 답변 메시지가 저장돼 있는지 확인한다.
    *
+   * <p>STT가 {@code FAILED}로 끝난 음성 답변은 답변으로 세지 않는다. 무음·저신뢰로 인식이 거절되면 아이 말은 기록에 남지 않고, 앱은 같은 질문에 선택지를
+   * 띄워 다시 답하게 한다(정본 §25 "폴백 선택지 제공"). 그때 이 행을 답변으로 세면 아이가 칩을 눌러도 {@code ANSWER_ALREADY_SUBMITTED}로
+   * 막혀 대화가 끊긴다.
+   *
+   * <p>{@code speech_status}가 {@code NULL}인 음성 답변은 상태를 알 수 없으므로 답변으로 센다 — 판정 불가를 '답변 없음'으로 넘기면 중복
+   * 답변이 열린다.
+   *
    * @param conversationSessionId URL 대화 세션 ID
    * @param questionMessageId 부모 질문 메시지 ID
-   * @return 음성·선택·텍스트 답변 중 하나라도 이미 있으면 {@code true}
+   * @return 인식이 거절되지 않은 음성·선택·텍스트 답변이 하나라도 있으면 {@code true}
    */
   @Query(
       "select count(message) > 0 from OptionAnswerMessage message "
           + "where message.conversationSessionId = :conversationSessionId "
           + "and message.parentMessageId = :questionMessageId "
-          + "and message.messageType in ('VOICE_ANSWER', 'OPTION_ANSWER', 'TEXT_ANSWER')")
+          + "and message.messageType in ('VOICE_ANSWER', 'OPTION_ANSWER', 'TEXT_ANSWER') "
+          + "and (message.messageType <> 'VOICE_ANSWER' "
+          + "or message.speechStatus is null "
+          + "or message.speechStatus <> 'FAILED')")
   boolean existsAnswerForQuestion(
       @Param("conversationSessionId") Long conversationSessionId,
       @Param("questionMessageId") Long questionMessageId);

@@ -38,6 +38,7 @@ import '../../../drawing/presentation/widgets/drawing_cursor_overlay.dart';
 import '../../../drawing/presentation/widgets/drawing_toolbar.dart';
 import '../../../drawing/presentation/widgets/drawing_canvas.dart';
 import '../../../drawing/presentation/widgets/canvas_tool_tutorial_overlay.dart';
+import '../../../drawing/presentation/widgets/canvas_tutorial_target_registry.dart';
 import '../../../conversation/conversation.dart';
 import '../../../child_mode/domain/dodam_costume.dart';
 import '../../data/dto/activity_dtos.dart';
@@ -137,6 +138,9 @@ const defaultConversationMaxQuestionCount = 10;
 /// 평범한 답변으로 취급한다 — 값이 바뀌면 양쪽을 함께 고쳐야 한다.
 const _endTalkOptionId = 'CHIP_END_TALK';
 const _endActivityOptionId = 'CHIP_END_ACTIVITY';
+
+/// 앱이 실제 종료로 옮길 수 있는 confirmedStopTarget 값 (S15P11B209-951).
+const _confirmedStopTargets = {confirmedStopConversation, confirmedStopActivity};
 
 class DrawingScreen extends StatefulWidget {
   const DrawingScreen({
@@ -415,6 +419,26 @@ class _DrawingScreenState extends State<DrawingScreen>
   CanvasTutorialController? _canvasTutorialController;
   late final bool _ownsCanvasTutorialController;
 
+  /// 도구 안내가 가리킬 실제 위젯 자리다. 툴바와 완료 버튼이 여기에 key 를 심고
+  /// 오버레이가 그 key 로 화면 위 위치를 읽는다.
+  final CanvasTutorialTargetRegistry _tutorialTargets =
+      CanvasTutorialTargetRegistry();
+
+  /// 안내받은 도구를 실제로 한 번 써 봤는지 기억한다.
+  final CanvasTutorialPracticeTracker _tutorialPractice =
+      CanvasTutorialPracticeTracker();
+
+  /// 안내가 화면에 떠 있는지. 툴바 제한을 잠시 풀지 판단하는 데 쓴다.
+  bool _isTutorialVisible = false;
+
+  /// 사람·나무·집 그림에서 안내를 위해 도구·색상을 잠시 열어 둔 상태다.
+  ///
+  /// 집·나무·사람 그림은 연필·검정으로만 그린다. 그런데 아이가 처음 만나는 캔버스가 HTP 이면
+  /// 색과 다른 도구를 한 번도 못 보고 지나간다. 안내 동안에는 툴바를 그림일기와
+  /// 똑같이 열어 눌러 보게 하고, 안내가 끝나면 다시 연필·검정으로 되돌린다.
+  /// 안내 중에는 캔버스 입력이 막혀 있어 이 사이에 색이 있는 자국이 남지는 않는다.
+  bool get _htpToolTrial => widget.activityContext.isHtp && _isTutorialVisible;
+
   @override
   void initState() {
     super.initState();
@@ -464,6 +488,7 @@ class _DrawingScreenState extends State<DrawingScreen>
         saveProgress: childRepository.updateTutorialProgress,
       );
     }
+    _canvasTutorialController?.addListener(_handleTutorialChanged);
     unawaited(_canvasTutorialController?.load());
     final ttsRepository = widget.questionTtsRepository;
     final playerFactory = widget.questionAudioPlayerFactory;
@@ -471,6 +496,7 @@ class _DrawingScreenState extends State<DrawingScreen>
       _questionTtsController = AiQuestionTtsController(
         ttsRepository,
         playerFactory(),
+        request: QuestionTtsRequest(voice: _companionSnapshot.ttsVoice),
       );
     }
     _questionDisplayController = AiQuestionDisplayController()
@@ -665,6 +691,27 @@ class _DrawingScreenState extends State<DrawingScreen>
     if (mounted) setState(() {});
   }
 
+  /// 안내가 열리고 닫히는 것에 맞춰 툴바 제한을 풀고 다시 건다.
+  void _handleTutorialChanged() {
+    if (!mounted) return;
+    final visible = _canvasTutorialController?.isVisible ?? false;
+    final closed = _isTutorialVisible && !visible;
+    setState(() {
+      _isTutorialVisible = visible;
+      // 체험이 끝나면 고른 색·도구를 검사 조건으로 되돌린다. 그대로 두면 아이가
+      // 팔레트 없이 빨간 크레용으로 검사 그림을 그리게 된다.
+      if (closed && widget.activityContext.isHtp) {
+        _toolState = DrawingToolState(
+          instrument: DrawingInstrument.pencil,
+          eraserMode: _toolState.eraserMode,
+          color: AppColors.canvasSwatchCharcoal,
+          width: _toolState.width,
+        );
+      }
+    });
+    if (closed) _refreshVisibleCursor();
+  }
+
   /// 화면 크기로 캔버스 레이아웃 종류를 정한다. 툴바 배치와 프레임 여백이 이 값에
   /// 따라 달라진다.
   DrawingCanvasDeviceClass _deviceClassFor(Size size) {
@@ -701,10 +748,16 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   void _setInstrument(DrawingInstrument instrument) {
     if (widget.activityContext.isHtp &&
+        !_htpToolTrial &&
         instrument != DrawingInstrument.pencil &&
         instrument != DrawingInstrument.eraser) {
       return;
     }
+    _tutorialPractice.mark(
+      instrument == DrawingInstrument.eraser
+          ? CanvasTutorialTargetId.eraser
+          : CanvasTutorialTargetId.tools,
+    );
     setState(() {
       _toolState = DrawingToolState(
         instrument: instrument,
@@ -718,9 +771,10 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _setColor(Color color) {
-    final nextColor = widget.activityContext.isHtp
+    final nextColor = widget.activityContext.isHtp && !_htpToolTrial
         ? AppColors.canvasSwatchCharcoal
         : color;
+    _tutorialPractice.mark(CanvasTutorialTargetId.colors);
     setState(() {
       _toolState = DrawingToolState(
         instrument: _toolState.instrument,
@@ -770,6 +824,7 @@ class _DrawingScreenState extends State<DrawingScreen>
   }
 
   void _handleEraserMenuAction(DrawingEraserMenuAction action) {
+    _tutorialPractice.mark(CanvasTutorialTargetId.eraser);
     switch (action) {
       case DrawingEraserMenuAction.selectStroke:
         _setEraserMode(DrawingEraserMode.stroke);
@@ -808,22 +863,22 @@ class _DrawingScreenState extends State<DrawingScreen>
 
   /// 상세 색상 팔레트를 연다. 태블릿은 팔레트 버튼 옆 팝오버, 모바일은 바텀 시트다.
   Future<void> _openColorPalette(DrawingCanvasDeviceClass deviceClass) async {
-    if (widget.activityContext.isHtp) return;
+    if (widget.activityContext.isHtp && !_htpToolTrial) return;
     var value = HSVColor.fromColor(_toolState.color);
     final previousColor = _toolState.color;
 
-    Widget palette(StateSetter setPaletteState) => DrawingColorPalette(
-      value: value,
-      previousColor: previousColor,
-      recentColors: _recentColors,
-      onChanged: (next) {
-        setPaletteState(() => value = next);
-        _setColor(next.toColor());
-      },
-    );
+    Widget palette(BuildContext paletteContext, StateSetter setPaletteState) =>
+        DrawingColorPalette(
+          value: value,
+          previousColor: previousColor,
+          recentColors: _recentColors,
+          onChanged: (next) => setPaletteState(() => value = next),
+          onCancel: () => Navigator.of(paletteContext).pop(),
+          onConfirm: () => Navigator.of(paletteContext).pop(value.toColor()),
+        );
 
     if (deviceClass == DrawingCanvasDeviceClass.tablet) {
-      await showGeneralDialog<void>(
+      final selectedColor = await showGeneralDialog<Color>(
         context: context,
         barrierDismissible: true,
         barrierLabel: '색상 팔레트 닫기',
@@ -847,7 +902,7 @@ class _DrawingScreenState extends State<DrawingScreen>
                   width: 380,
                   child: StatefulBuilder(
                     builder: (context, setPaletteState) =>
-                        palette(setPaletteState),
+                        palette(context, setPaletteState),
                   ),
                 ),
               ),
@@ -855,10 +910,11 @@ class _DrawingScreenState extends State<DrawingScreen>
           ],
         ),
       );
+      if (selectedColor != null && mounted) _setColor(selectedColor);
       return;
     }
 
-    await showModalBottomSheet<void>(
+    final selectedColor = await showModalBottomSheet<Color>(
       context: context,
       isDismissible: true,
       isScrollControlled: true,
@@ -868,13 +924,16 @@ class _DrawingScreenState extends State<DrawingScreen>
         key: const ValueKey('drawing-mobile-palette-sheet'),
         constraints: const BoxConstraints(maxWidth: 480),
         child: StatefulBuilder(
-          builder: (context, setPaletteState) => palette(setPaletteState),
+          builder: (context, setPaletteState) =>
+              palette(context, setPaletteState),
         ),
       ),
     );
+    if (selectedColor != null && mounted) _setColor(selectedColor);
   }
 
   void _setThickness(double thickness) {
+    _tutorialPractice.mark(CanvasTutorialTargetId.thickness);
     setState(() {
       _toolState = DrawingToolState(
         instrument: _toolState.instrument,
@@ -903,7 +962,9 @@ class _DrawingScreenState extends State<DrawingScreen>
     _documentController.removeListener(_handleDocumentChanged);
     if (_ownsDocumentController) _documentController.dispose();
     _cursorController.dispose();
+    _canvasTutorialController?.removeListener(_handleTutorialChanged);
     if (_ownsCanvasTutorialController) _canvasTutorialController?.dispose();
+    _tutorialPractice.dispose();
     _syncCoordinator.removeListener(_handleSyncChanged);
     _draftRestoreController.removeListener(_handleDraftRestoreChanged);
     if (_ownsDraftRestoreController) _draftRestoreController.dispose();
@@ -1200,6 +1261,16 @@ class _DrawingScreenState extends State<DrawingScreen>
       _noResponseRequestSourceQuestion = null;
     }
     _lastQuestionMessageId = question.messageId;
+    // 아이가 되묻기에 **말로** 그만하겠다고 확인했으면 이 메시지는 질문이 아니라 맺음말이다
+    // (S15P11B209-951). 화면에 띄워 답을 기다리지 않고 곧바로 끝낸다. 맺음말 자체는 서버가
+    // 대화 기록의 마지막 AI 메시지로 저장해 두므로 리포트에는 남는다.
+    // 모르는 값은 평범한 질문으로 다룬다. 서버가 새 종료 대상을 먼저 배포하더라도 구버전
+    // 앱이 질문을 삼켜 대화가 멈추는 것보다 그대로 이어지는 편이 낫다.
+    final stopTarget = question.confirmedStopTarget;
+    if (stopTarget != null && _confirmedStopTargets.contains(stopTarget)) {
+      unawaited(_handleConfirmedStopTarget(stopTarget));
+      return;
+    }
     // 하위 상태 UI의 빌드 중 알림과 겹치지 않도록 다음 프레임에 반영한다. 다만
     // 네트워크 응답이 유휴 상태에서 도착하면 예약된 프레임이 없어 이 콜백이 다음
     // 사용자 입력(예: 도구 변경)까지 실행되지 않아 말풍선이 늦게 뜨는 문제가
@@ -1226,6 +1297,24 @@ class _DrawingScreenState extends State<DrawingScreen>
     });
     // 위 postFrame 콜백이 실제로 실행되도록 프레임이 없으면 새로 예약한다.
     WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  /// 말로 확인한 그만하기를 실제 종료로 옮긴다 (S15P11B209-951).
+  ///
+  /// 칩 선택(938)과 **같은 경로**를 탄다. 대화 종료는 아이가 방금 확인했으므로 다시 묻지
+  /// 않고, 그림 활동 완료는 기존 '다 그렸어요!' 확인·회고 흐름을 그대로 태운다 — 새 경로를
+  /// 만들면 회고 저장 단계를 건너뛴다.
+  ///
+  /// 호출부가 [_confirmedStopTargets]로 걸러 아는 값만 넘긴다.
+  Future<void> _handleConfirmedStopTarget(String target) async {
+    switch (target) {
+      case confirmedStopConversation:
+        await _completeConversationAutomatically(
+          ConversationCompletionReason.childRequest,
+        );
+      case confirmedStopActivity:
+        await _confirmAndComplete();
+    }
   }
 
   Future<void> _prepareNoResponseTimerAfterTts(AiQuestion question) async {
@@ -1449,9 +1538,13 @@ class _DrawingScreenState extends State<DrawingScreen>
         );
       }
     } else if (uploadController?.status ==
-            VoiceAnswerUploadStatus.consentRequired &&
-        kDebugMode) {
-      debugPrint('[VOICE_UPLOAD] rejected reason=VOICE_CONSENT_REQUIRED');
+        VoiceAnswerUploadStatus.consentRequired) {
+      // 음성 답변이 거절됐으면 아이에게 남은 수단은 선택지뿐이다. 여기서 띄우지 않으면
+      // "골라서 답해도 돼" 안내만 보이고 고를 것이 없다.
+      _questionSelectionController.revealOptions();
+      if (kDebugMode) {
+        debugPrint('[VOICE_UPLOAD] rejected reason=VOICE_CONSENT_REQUIRED');
+      }
     }
     if (mounted) setState(() {});
   }
@@ -1465,7 +1558,25 @@ class _DrawingScreenState extends State<DrawingScreen>
       _lastFollowUpAnswerMessageId = answerMessageId;
       unawaited(_requestFollowingQuestion(answerMessageId));
     }
+    // STT가 실패(무음·저신뢰)했거나 지연되면 아이는 답을 보내지 못한 상태다. 질문을 다시
+    // 보여주고 선택지를 띄워 대화를 이어가게 한다 — 그러지 않으면 화면이 멈춘 것처럼 된다.
+    if (controller?.status == SttResultStatus.failure ||
+        controller?.status == SttResultStatus.delayed) {
+      _revealOptionsForPendingQuestion();
+    }
     if (mounted) setState(() {});
+  }
+
+  /// 답변 수단을 잃은 질문에 선택지를 다시 띄운다.
+  ///
+  /// 업로드 성공 시 [_questionDisplayController]를 dismiss했으므로 다시 보이게 해야 한다.
+  /// 같은 messageId는 [AiQuestionDisplayController.receive]가 두 번 받지 않으니 표시
+  /// 플래그만 되살린다.
+  void _revealOptionsForPendingQuestion() {
+    final question = _questionDisplayController.visibleQuestion;
+    if (question == null || question.options.isEmpty) return;
+    _questionDisplayController.restore();
+    _questionSelectionController.revealOptions();
   }
 
   void _retryVoiceAnswerUpload() {
@@ -2465,19 +2576,36 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 잠겨 그림도 더 그릴 수 없어, 지금 완료할 이유도 없다.
   Widget? _buildCompleteCta(BuildContext context) {
     if (_isConversationFocusMode) return null;
-    return Padding(
-      padding: const EdgeInsets.only(
-        right: AppSpacing.sm,
-        bottom: AppSpacing.sm,
+    final cta = CanvasTutorialTargetReporter(
+      // 완료 안내는 툴바가 아니라 이 버튼을 가리킨다. Scaffold 가 이 자리를
+      // 바꿀 때 옛 버튼과 새 버튼을 잠시 함께 두므로 GlobalKey 는 쓸 수 없다.
+      registry: _tutorialTargets,
+      id: CanvasTutorialTargetId.complete,
+      child: Padding(
+        padding: const EdgeInsets.only(
+          right: AppSpacing.sm,
+          bottom: AppSpacing.sm,
+        ),
+        child: DrawingCompleteCta(
+          enabled:
+              !_canvasLocked && _activeStroke == null && _hasDrawingContent,
+          isCompleting: _isCompleting,
+          compact:
+              _deviceClassFor(MediaQuery.sizeOf(context)) !=
+              DrawingCanvasDeviceClass.tablet,
+          onPressed: () => unawaited(_confirmAndComplete()),
+        ),
       ),
-      child: DrawingCompleteCta(
-        enabled: !_canvasLocked && _activeStroke == null && _hasDrawingContent,
-        isCompleting: _isCompleting,
-        compact:
-            _deviceClassFor(MediaQuery.sizeOf(context)) !=
-            DrawingCanvasDeviceClass.tablet,
-        onPressed: () => unawaited(_confirmAndComplete()),
-      ),
+    );
+    final tutorialController = _canvasTutorialController;
+    if (tutorialController == null) return cta;
+    // 완료 버튼은 Scaffold 가 body 위에 얹으므로 안내 오버레이가 덮지 못한다.
+    // 안내를 보다가 눌러 활동이 끝나 버리지 않도록 여기서 직접 잠근다.
+    return AnimatedBuilder(
+      animation: tutorialController,
+      builder: (context, child) =>
+          AbsorbPointer(absorbing: tutorialController.isVisible, child: child),
+      child: cta,
     );
   }
 
@@ -2659,7 +2787,9 @@ class _DrawingScreenState extends State<DrawingScreen>
                     _conversationStartError != null ||
                     _htpAdvanceError != null;
                 final toolbar = DrawingToolbar(
-                  pencilOnly: widget.activityContext.isHtp,
+                  // 안내 중에는 HTP 도 도구·색상을 열어 눌러 보게 한다.
+                  pencilOnly: widget.activityContext.isHtp && !_htpToolTrial,
+                  tutorialTargets: _tutorialTargets,
                   toolState: _toolState,
                   quickColors: _quickColors,
                   paletteAnchorLink: _paletteAnchorLink,
@@ -2825,8 +2955,17 @@ class _DrawingScreenState extends State<DrawingScreen>
               },
             ),
           ),
-          if (_canvasTutorialController case final tutorialController?)
-            CanvasToolTutorialOverlay(tutorialController),
+          // AI 질문이 떠 있으면 대화가 먼저다. 안내를 함께 띄우면 말풍선의
+          // 답변·녹음 버튼을 덮는다. 컨트롤러 상태는 그대로 두므로 질문이
+          // 끝나면 같은 단계로 돌아오고 서버 진행도도 움직이지 않는다.
+          if (_canvasTutorialController case final tutorialController?
+              when !_isConversationFocusMode)
+            CanvasToolTutorialOverlay(
+              tutorialController,
+              targets: _tutorialTargets,
+              practice: _tutorialPractice,
+              htpTrial: widget.activityContext.isHtp,
+            ),
         ],
       ),
     ),
@@ -4194,7 +4333,7 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
                 padding: EdgeInsets.all(outerPadding),
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1040),
+                    constraints: const BoxConstraints(maxWidth: 1440),
                     child: Container(
                       padding: EdgeInsets.all(
                         viewportConstraints.maxWidth < 480

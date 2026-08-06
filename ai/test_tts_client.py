@@ -21,6 +21,21 @@ class ResolveVoiceTest(unittest.TestCase):
         self.assertEqual(tts_client.resolve_voice("fable"), "fable")
         self.assertEqual(tts_client.resolve_voice("FABLE"), "fable")
 
+    def test_maps_all_character_voice_codes_to_provider_voices(self):
+        expected = {
+            "FABLE": "fable",
+            "NOVA": "nova",
+            "ASH": "ash",
+            "BALLAD": "ballad",
+            "VERSE": "verse",
+            "SAGE": "sage",
+            "ECHO": "echo",
+        }
+
+        for service_code, provider_voice in expected.items():
+            with self.subTest(service_code=service_code):
+                self.assertEqual(tts_client.resolve_voice(service_code), provider_voice)
+
     def test_falls_back_to_server_default_for_unknown_code(self):
         # 거절하지 않는다. 목소리 코드 하나 때문에 아이가 음성을 못 듣는 쪽이 더 나쁘다.
         self.assertEqual(tts_client.resolve_voice("NO_SUCH_VOICE_9"), config.TTS_VOICE)

@@ -1243,6 +1243,8 @@ Header `Idempotency-Key` 필수.
 
 - `speed`는 `0.8~1.2`.
 - 같은 메시지·voice·speed 결과는 캐시한다.
+- 활동 시작 때 확정한 `preferredCharacter`로 `voice`를 선택한다. 매핑은 `BASE`=`FABLE`, `PRINCESS`=`NOVA`, `DINO`=`ASH`, `OCTOPUS`=`BALLAD`, `EXPLORER`=`VERSE`, `RIBBON`=`SAGE`, `PRINCE`=`ECHO`다.
+- `CHILD_FRIENDLY_01`은 이전 클라이언트 호환을 위해 `FABLE`로 처리한다.
 - 응답: `audioUrl`, `expiresAt`, `durationMs`, `subtitle`.
 - TTS 재생 중 프론트는 마이크를 비활성화하고 재생 종료 후 입력을 활성화한다.
 

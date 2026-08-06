@@ -165,12 +165,23 @@ class SafetyResult(_CamelModel):
 
 
 class TranscriptionResponse(_CamelModel):
-    """음성→텍스트(STT) 응답. text는 아이 발화 원문 — repr에서 감춘다(로그 유출 방지)."""
+    """음성→텍스트(STT) 응답. text는 아이 발화 원문 — repr에서 감춘다(로그 유출 방지).
+
+    status·failure_reason·needs_confirmation은 정본 §19.6이 요구하는 필드다(2026-08-05 추가).
+    무음·저신뢰를 추측 문장 대신 실패로 알려 BE가 텍스트를 저장하지 않게 하고, 앱이 대신
+    선택지를 띄우게 한다(§25). 실패면 text는 **빈 문자열**이다 — null로 바꾸면 처음부터
+    non-null이던 이 필드의 계약이 깨져 구 BE 파서가 schema 오류로 떨어진다.
+    """
 
     text: str = Field(repr=False)
     confidence: float | None = None  # whisper-1은 신뢰도 미제공 — null 고정(스키마 유지용)
     model_name: str
     processing_time_ms: int
+    status: Literal["SUCCESS", "FAILED"] = "SUCCESS"
+    failure_reason: (
+        Literal["NO_SPEECH", "LOW_CONFIDENCE", "UNSUPPORTED_AUDIO", "TIMEOUT"] | None
+    ) = None
+    needs_confirmation: bool = False
 
 
 class SynthesisRequest(_CamelModel):
@@ -199,6 +210,11 @@ class QuestionResponse(_CamelModel):
     - targetObject가 있으면 objectCode 비어 있지 않고 confidence 0~1·boundingBox 정규화
     - safetyResult.status == "PASSED" 그리고 blockReasonCode == null
     - processingTimeMs >= 0
+    - confirmedStopTarget가 있으면 질문이 아니라 맺음말이므로 OPTION 허용이어도 options 없음 가능
+
+    confirmedStopTarget(S15P11B209-951)는 **명령이 아니라 관찰 보고**다. "아이가 그만하겠다고
+    확인했다"는 사실만 싣고, 실제 종료는 지금과 같이 FE가 수행한다 — AI는 턴·활동을 제어하지
+    않는다는 786 원칙은 그대로다.
     """
 
     question_text: str
@@ -206,6 +222,10 @@ class QuestionResponse(_CamelModel):
         "OBJECT_DESCRIPTION", "DRAWING_CONTEXT", "EXPRESSION", "FOLLOW_UP"
     ]
     options: list[QuestionOption] | None = None
+    # 아이가 되묻기에 말로 그만하겠다고 확인한 대상. 확인이 없으면 None이다(S15P11B209-951).
+    #   CONVERSATION — 대화만 끝낸다. 그림은 계속 그릴 수 있어 되돌리기 쉽다.
+    #   ACTIVITY     — 그림 활동까지 끝낸다. 회고 저장·다음 단계로 이어져 되돌릴 수 없다.
+    confirmed_stop_target: Literal["CONVERSATION", "ACTIVITY"] | None = None
     target_object: DetectedObject | None = None
     fallback_used: bool = False
     safety_result: SafetyResult
@@ -213,6 +233,17 @@ class QuestionResponse(_CamelModel):
     model_version: str
     prompt_version: str
     processing_time_ms: int
+    # 아이가 대화를 그만하겠다고 확인해 준 턴이면 true (S15P11B209-947).
+    #
+    # ⚠️ AI는 대화를 끝내지 않는다 — 세션 상태의 주인은 BE다. 이 값은 '아이가 확인했다'는
+    #    사실을 전할 뿐이고, 실제 종료(CHILD_REQUEST)는 BE가 한다. 786이 정한 "턴 제어는
+    #    AI 소유가 아니다"를 지키면서 말로 끝낼 길을 여는 유일한 방법이다.
+    # ⚠️ BE가 이 필드를 아직 안 읽어도 안전하다. 그때는 questionText(되묻기)가 그대로
+    #    전달되어 아이는 지금과 똑같이 칩을 누르면 된다 — 회귀가 없다. 그래서 AI를 먼저
+    #    배포할 수 있다(BE의 AiQuestionResponse는 모르는 필드를 무시한다).
+    # ⚠️ 그림 활동 완료에는 쓰지 않는다. BE가 대신할 수 없는 일이라(회고 저장·다음 단계는
+    #    FE가 쥔다) 그쪽은 화면 버튼을 누르도록 안내한다.
+    conversation_end_confirmed: bool = False
 
 
 # ── 관찰 리포트 생성 계약 (S15P11B209-180) ──────────────────────
