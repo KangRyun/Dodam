@@ -2614,7 +2614,16 @@ class RedundantVisualQuestionTest(unittest.TestCase):
         self.assertNotIn("모양·색·행동·표정", block)
         self.assertIn("정체·관계·사건·경험·기억", block)
 
-        # HTP는 그대로 둔다 — 같은 구획을 활동으로 가른다.
+        # HTP도 같은 규칙을 쓴다 (S15P11B209-988에서 954의 활동별 예외를 되돌렸다).
+        #
+        # 954는 그림일기에서만 시각 질문을 막고 HTP는 "모양·색·행동·표정을 물어도 된다"로
+        # 남겨 뒀다. 운영 실측이 그 예외를 반증했다 — HTP 세션에서 나온 질문이 이랬다:
+        #   집:  문은 어디에 있어? → 지붕은 어때? → 창문은 어디 있어?
+        #   사람: 손은 뭐 하고 있어? → 주먹 쥔 손은? → 그 손은 뭐 하려는 걸까?
+        #   나무: 나무는 어디에 서 있어? → 나무는 어디에 있어?   (사실상 같은 질문)
+        # 위치·개수·모양은 그림에 답이 있어 아이가 "저기" 한 마디로 끝낸다. 발화가 안 나오면
+        # 리포트의 최상위 근거(아이 말)가 비고 해석 카드가 WEAK만 남거나 통째로 빈다.
+        # 활동 종류와 무관하게, 그림에 답이 있는 것은 묻지 않는다.
         htp = question_service._activity_block(
             _request(
                 activity_type="HTP",
@@ -2624,7 +2633,9 @@ class RedundantVisualQuestionTest(unittest.TestCase):
             ),
             None,
         )
-        self.assertIn("모양·색·행동·표정", htp)
+        self.assertNotIn("모양·색·행동·표정", htp)
+        self.assertIn("정체·관계·사건·마음·앞일", htp)
+        self.assertIn("그림에 이미 보이는 색·모양·크기·개수·위치", htp)
 
 
 class ConversationModelSelectionTest(unittest.TestCase):
