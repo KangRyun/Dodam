@@ -213,20 +213,50 @@ def find_multiple_questions(question_text: str) -> str | None:
     return MULTIPLE_QUESTIONS if _conjoined_match(text) else None
 
 
-def to_single_question(question_text: str) -> str:
-    """앞의 반응과 첫 질문 하나만 남긴다(질문이 하나면 그대로)."""
+def to_single_question(
+    question_text: str,
+    *,
+    drawing_description: str | None = None,
+    child_texts=(),
+) -> str:
+    """앞의 반응과 질문 하나만 남긴다(질문이 하나면 그대로).
+
+    ⚠️ 무조건 '첫' 질문을 남기지 않는다. 2026-08-06 gpt-4o-mini 실측에서 모델이 질문을 둘
+    낼 때 **약한 질문을 먼저, 좋은 질문을 뒤에** 두는 경우가 나왔다:
+
+      "그림 속에 있는 집은 어떤 집이야? 여기서 무슨 일이 있었어?"
+
+    앞을 남기면 이미 아는 것을 되묻는 쪽만 살아남아, 이 판정기가 막으려던 것을 우리가
+    직접 골라 내보내는 꼴이 된다. 그래서 이미 답을 아는 질문은 건너뛰고 고른다.
+    """
     text = (question_text or "").strip()
     if not text:
         return text
     if text.count("?") >= 2:
-        kept: list[str] = []
-        for sentence in _SENTENCE_SPLIT.split(text):
-            if not sentence:
-                continue
-            kept.append(sentence)
-            if sentence.rstrip().endswith("?"):
-                break
-        text = " ".join(kept).strip()
+        sentences = [s for s in _SENTENCE_SPLIT.split(text) if s]
+        questions = [s for s in sentences if s.rstrip().endswith("?")]
+        chosen = next(
+            (
+                q
+                for q in questions
+                if find_redundant(
+                    q,
+                    drawing_description=drawing_description,
+                    child_texts=child_texts,
+                )
+                is None
+            ),
+            questions[0] if questions else None,
+        )
+        if chosen is not None:
+            # 반응은 고른 질문 앞의 것만 쓴다 — 뒤쪽 문장은 버린 질문에 딸린 말이다.
+            lead = []
+            for sentence in sentences:
+                if sentence is chosen:
+                    break
+                if not sentence.rstrip().endswith("?"):
+                    lead.append(sentence)
+            text = " ".join([*lead, chosen]).strip()
     match = _conjoined_match(text)
     if match:
         head = match.group("head").rstrip(" ,·")

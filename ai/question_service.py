@@ -1431,7 +1431,11 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
             question_quality.MULTIPLE_QUESTIONS,
             request_id,
         )
-        text = question_quality.to_single_question(text)
+        text = question_quality.to_single_question(
+            text,
+            drawing_description=_truncate_description(req.drawing_description),
+            child_texts=_child_texts(req),
+        )
 
     # 문맥상 어색한 질문(그림 속 부위의 소유자를 묻는 등)은 차단하지 않고 교체한다
     # (S15P11B209-918). 안전 판정 뒤에 두는 이유: 교체 문장은 우리가 쓴 것이라 다시

@@ -163,6 +163,32 @@ class SingleQuestionTest(unittest.TestCase):
             ),
         )
 
+    def test_skips_a_redundant_first_question(self):
+        """약한 질문이 앞, 좋은 질문이 뒤에 오는 실제 출력(2026-08-06 gpt-4o-mini 실측).
+
+        앞을 남기면 이 판정기가 막으려던 문장만 살아남는다.
+        """
+        text = "그림 속에 있는 집은 어떤 집이야? 여기서 무슨 일이 있었어?"
+        self.assertEqual(
+            "여기서 무슨 일이 있었어?",
+            question_quality.to_single_question(
+                text,
+                drawing_description="화면 가운데에 초록색 덤불처럼 보이는 것이 있어요.",
+                child_texts=["아니야, 이건 집이야"],
+            ),
+        )
+
+    def test_keeps_the_first_question_when_none_is_redundant(self):
+        """둘 다 멀쩡하면 앞을 남긴다 — 아이 말에 바로 이어지는 것이 앞이다."""
+        self.assertEqual(
+            "꽃을 그렸구나! 그 꽃 이야기를 좀 더 해줄래?",
+            question_quality.to_single_question(
+                "꽃을 그렸구나! 그 꽃 이야기를 좀 더 해줄래? 여기서 무슨 일이 있었어?",
+                drawing_description="노란 꽃 세 송이가 아래쪽에 피어 있어요.",
+                child_texts=["꽃을 그렸어"],
+            ),
+        )
+
     def test_splits_conjoined_questions_sharing_one_mark(self):
         """물음표는 하나인데 물음이 둘인 경우도 잡는다."""
         text = "이 사람은 누구야, 그리고 뭐 하고 있었어?"
