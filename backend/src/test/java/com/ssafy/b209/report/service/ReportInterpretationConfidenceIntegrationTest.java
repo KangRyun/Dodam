@@ -40,6 +40,9 @@ class ReportInterpretationConfidenceIntegrationTest extends IntegrationTestSuppo
   private static final String SCOPE_TEXT = "이번 그림 활동에서 나타난 가능성입니다.";
   private static final String HOME_GUIDE = "새로운 상황에서도 보호자의 확인을 반복해서 구하는지 살펴봐 주세요.";
 
+  /** 어떤 공개 카드도 가리키지 않는 근거의 아이 발화다 — 이 문자열이 응답에 나오면 985 가 재발한 것이다. */
+  private static final String ORPHAN_UTTERANCE = "아무 카드도 가리키지 않는 아이 말";
+
   @Autowired private ObservationReportPersistenceService persistenceService;
   @Autowired private ReportDetailQueryService queryService;
   @Autowired private JdbcTemplate jdbcTemplate;
@@ -134,6 +137,28 @@ class ReportInterpretationConfidenceIntegrationTest extends IntegrationTestSuppo
     assertThat(card.title()).isEqualTo("가족과의 정서적 연결");
   }
 
+  @Test
+  void doesNotShipEvidenceThatNoPublishedCardReferences() {
+    // S15P11B209-985. 근거는 공개 여부와 무관하게 **저장**된다(미공개 사유 추적). 그러나 **응답**에는
+    //   공개 카드가 참조하는 것만 실려야 한다. 예전에는 리포트의 근거 행을 전부 실어, 안전 검증기가
+    //   내보내지 않기로 한 카드의 근거 — 대개 아이 발화 인용 — 까지 보호자 기기로 전송됐다.
+    //   앱이 조회용 맵으로만 써서 화면엔 안 떴지만, 그건 클라이언트 구현에 기댄 방어다.
+    generateReportWith(cardWithUnreferencedEvidence());
+
+    ReportDetailResponse response = queryService.getReport(GUARDIAN_USER_ID, REPORT_ID);
+
+    assertThat(response.evidenceItems())
+        .as("공개 카드가 참조하는 근거 2건만 실려야 한다")
+        .extracting(item -> item.evidenceId())
+        .containsExactly(1, 2);
+    assertThat(response.evidenceItems())
+        .as("어떤 공개 카드도 가리키지 않는 근거의 아이 발화가 응답에 남으면 안 된다")
+        .noneMatch(item -> item.text().contains(ORPHAN_UTTERANCE));
+    // 거른 뒤에도 카드의 참조가 살아 있어야 한다 — evidenceRefs 와 evidenceId 가 둘 다
+    //   evidenceNumber 값이라 목록에서 일부를 빼도 참조가 어긋나지 않는다는 것을 여기서 고정한다.
+    assertThat(onlyPublishedCard().evidenceRefs()).containsExactly(1, 2);
+  }
+
   /**
    * 리포트 생성 완료 경로를 실제로 태운다 — 저장 메서드를 직접 부르지 않는 것이 이 테스트의 요점이다.
    *
@@ -164,6 +189,43 @@ class ReportInterpretationConfidenceIntegrationTest extends IntegrationTestSuppo
    *
    * @param confidence AI 가 실은 등급 문자열이며 등급을 싣지 않은 경우를 표현하려면 {@code null}
    */
+  /**
+   * 공개 카드가 참조하지 않는 근거를 하나 더 실은 AI 응답을 만든다 (S15P11B209-985).
+   *
+   * <p>3번 근거는 카드의 {@code evidenceRefs}(1, 2)에 없다. 저장은 되지만 보호자 응답에는 실리지 않아야 한다.
+   */
+  private ObservationGenerationResult cardWithUnreferencedEvidence() {
+    ObservationGenerationResult base = cardConfidence("MODERATE");
+    List<ObservationGenerationResult.EvidenceItemDraft> withOrphan =
+        new java.util.ArrayList<>(base.evidenceItems());
+    withOrphan.add(
+        new ObservationGenerationResult.EvidenceItemDraft(
+            3L,
+            "CHILD_ANSWER",
+            "\"" + ORPHAN_UTTERANCE + "\" 라고 답했어요.",
+            new ObservationGenerationResult.EvidenceSourceRefDraft("QA_ANSWER", "203"),
+            List.of(),
+            false));
+    return new ObservationGenerationResult(
+        base.requestId(),
+        base.modelName(),
+        base.modelVersion(),
+        base.confidence(),
+        base.observationDraft(),
+        base.conversationSummary(),
+        base.activityNotes(),
+        base.followUpGuides(),
+        base.guardianQuestions(),
+        base.limitationsText(),
+        base.drawnItems(),
+        base.publicInterpretations(),
+        withOrphan,
+        base.parentGuides(),
+        base.crisisAlert(),
+        base.subjectReports(),
+        base.ragReferences());
+  }
+
   private ObservationGenerationResult cardConfidence(String confidence) {
     return new ObservationGenerationResult(
         "confidence-request",
