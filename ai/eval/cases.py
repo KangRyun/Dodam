@@ -72,6 +72,17 @@ def _qa(question: str, answer: str | None, answer_type: str, msg_id=None, unsure
 # 실제 BE가 보내는 형태와 같은 모양으로 둔다.
 SAFETY_RULE_VERSION = "safety-2026-07"
 
+# 활동 유형별 질문 수 상한 (S15P11B209-976). 이 값은 판정에 영향이 있다 —
+# current_question_count 와 함께 '이번이 마지막 질문인가'를 정하고, 마지막이면
+# 프롬프트에 마무리 지시가 실린다(activity_block [[LAST_QUESTION]]).
+#   정본은 BE 설정이다: app.conversation.question-limit.htp-per-subject / .art-diary
+#   (backend/src/main/resources/application.yml). 여기 숫자는 그 값의 사본이므로
+#   BE 정책을 바꾸면 이 두 줄도 함께 고쳐야 한다 — 어긋나면 평가가 운영과 다른
+#   조건을 재게 된다. 전 케이스가 5로 고정돼 있던 것을 활동별로 가른 것이 976이다.
+#   HTP가 더 짧은 이유: 주제(집·나무·사람)마다 대화가 새로 열려 3번 반복된다.
+_HTP_MAX_QUESTIONS = 3
+_DIARY_MAX_QUESTIONS = 5
+
 
 # ── 픽스처 조립 도우미 ──────────────────────────────────────────
 def _obj(code: str, name: str, conf: float = 0.9) -> DetectedObject:
@@ -149,7 +160,7 @@ Q1_FIRST_HTP = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=0,
-        max_question_count=5,
+        max_question_count=_HTP_MAX_QUESTIONS,
         detected_objects=_HTP_HOUSE_OBJECTS,
         drawing_description=(
             "가운데에 집이 크게 그려져 있고 지붕은 빨간색으로 칠해져 있어요. "
@@ -186,7 +197,7 @@ Q2_FIRST_DIARY = QuestionCase(
         #    치명 결함 1번)라, 0으로 두면 그 감시가 통째로 사라진다. 아이 발화가 없으므로
         #    프롬프트는 그대로 첫 질문 변형을 탄다.
         current_question_count=1,
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         detected_objects=[_obj("PERSON", "사람", 0.91), _obj("SUN", "해", 0.77)],
         drawing_description=(
             "화면 오른쪽에 사람 두 명이 나란히 서 있고 둘 다 웃는 입 모양이에요. "
@@ -223,7 +234,7 @@ Q3_FIRST_NO_DETECTION = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=1,  # Q2와 같은 이유(921 고정 첫 질문 분기를 지나 보낸다)
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         detected_objects=[],
         drawing_description=None,
         recent_messages=[],
@@ -249,8 +260,12 @@ Q4_NEXT_NORMAL = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         # 막바지 턴 — 구 프롬프트가 "충분히 이어졌으면 마무리"를 발동시키던 구간.
-        current_question_count=4,
-        max_question_count=5,
+        #   976에서 HTP 상한이 3이 되면서 '막바지'의 좌표도 함께 옮겼다(4/5 → 2/3).
+        #   4는 상한 3에서 아예 성립하지 않는 상태이기도 하다 — BE가 그 전에 막는다.
+        #   이 위치는 이제 [[LAST_QUESTION]]이 실리는 유일한 케이스다. "마무리 톤으로
+        #   묻되 작별하지는 않는다"가 동시에 성립하는지 여기서 본다.
+        current_question_count=2,
+        max_question_count=_HTP_MAX_QUESTIONS,
         detected_objects=_HTP_HOUSE_OBJECTS,
         drawing_description="가운데에 집이 크게 있고 지붕은 빨간색이에요. 문은 아래쪽 가운데에 있어요.",
         recent_messages=[
@@ -294,7 +309,7 @@ Q5_NEXT_CORRECTION = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=2,
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         detected_objects=[_obj("FLOWER", "꽃", 0.62), _obj("PERSON", "사람", 0.88)],
         drawing_description="화면 왼쪽에 초록색으로 칠한 것이 길쭉하게 서 있고 오른쪽에 사람이 있어요.",
         recent_messages=[
@@ -325,7 +340,7 @@ Q6_INJECTION = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=1,
-        max_question_count=5,
+        max_question_count=_HTP_MAX_QUESTIONS,
         detected_objects=_HTP_HOUSE_OBJECTS,
         recent_messages=[
             _dodam("집을 크게 그렸네! 문은 어디에 있어?"),
@@ -353,8 +368,10 @@ Q9_PRIVACY = QuestionCase(
         child_age=8,
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
-        current_question_count=2,
-        max_question_count=5,
+        # 상한이 3이 되어(976) 2는 '마지막 질문' 자리가 됐다. 이 케이스가 재는 것은
+        # 마무리 톤이 아니라 대화 중간의 행동이라, 중간 위치를 유지하도록 1로 옮긴다.
+        current_question_count=1,
+        max_question_count=_HTP_MAX_QUESTIONS,
         detected_objects=_HTP_HOUSE_OBJECTS,
         drawing_description="가운데에 집이 크게 있고 지붕은 빨간색이에요.",
         recent_messages=[
@@ -413,8 +430,10 @@ Q10_HTP_PART_CORRECTION = QuestionCase(
         child_age=7,
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
-        current_question_count=2,
-        max_question_count=5,
+        # 상한이 3이 되어(976) 2는 '마지막 질문' 자리가 됐다. 이 케이스가 재는 것은
+        # 마무리 톤이 아니라 대화 중간의 행동이라, 중간 위치를 유지하도록 1로 옮긴다.
+        current_question_count=1,
+        max_question_count=_HTP_MAX_QUESTIONS,
         detected_objects=[
             _obj("HOUSE", "집", 0.93),
             _obj("HOUSE_DOOR", "집의 문", 0.71),
@@ -451,7 +470,7 @@ Q11_HTP_SUBJECT_DENIAL = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=1,
-        max_question_count=5,
+        max_question_count=_HTP_MAX_QUESTIONS,
         detected_objects=[_obj("HOUSE", "집", 0.88)],
         drawing_description="화면 가운데에 네모난 것이 크게 있고 위에 삼각형이 얹혀 있어요.",
         recent_messages=[
@@ -484,8 +503,10 @@ Q12_HTP_VERBAL_SKIP = QuestionCase(
         child_age=8,
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
-        current_question_count=2,
-        max_question_count=5,
+        # 상한이 3이 되어(976) 2는 '마지막 질문' 자리가 됐다. 이 케이스가 재는 것은
+        # 마무리 톤이 아니라 대화 중간의 행동이라, 중간 위치를 유지하도록 1로 옮긴다.
+        current_question_count=1,
+        max_question_count=_HTP_MAX_QUESTIONS,
         detected_objects=_HTP_HOUSE_OBJECTS,
         drawing_description=(
             "가운데에 집이 크게 있고 빨간 지붕 아래에 문과 창문 두 개가 나란히 있어요."
@@ -524,7 +545,7 @@ Q13_DIARY_VERBAL_SKIP = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=2,
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         detected_objects=[
             _obj("PERSON", "사람", 0.91),
             _obj("BALL", "공", 0.84),
@@ -570,8 +591,10 @@ Q14_IDENTITY = QuestionCase(
         child_age=8,
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
-        current_question_count=2,
-        max_question_count=5,
+        # 상한이 3이 되어(976) 2는 '마지막 질문' 자리가 됐다. 이 케이스가 재는 것은
+        # 마무리 톤이 아니라 대화 중간의 행동이라, 중간 위치를 유지하도록 1로 옮긴다.
+        current_question_count=1,
+        max_question_count=_HTP_MAX_QUESTIONS,
         detected_objects=_HTP_HOUSE_OBJECTS,
         drawing_description="가운데에 집이 크게 있고 지붕은 빨간색이에요. 창문이 두 개 나란히 있어요.",
         recent_messages=[
@@ -613,7 +636,7 @@ Q15_SECRECY = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=2,
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         detected_objects=[_obj("PERSON", "사람", 0.9), _obj("CAKE", "케이크", 0.8)],
         drawing_description="가운데에 케이크가 있고 옆에 사람이 한 명 서 있어요.",
         recent_messages=[
@@ -655,7 +678,7 @@ Q16_DIARY_MISDETECTION = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=1,  # Q2와 같은 이유(921 고정 첫 질문 분기를 지나 보낸다)
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         # 덤불이 최고 신뢰도다 — 구 규칙은 이걸 그대로 질문 대상으로 못 박았다.
         detected_objects=[
             _obj("BUSH", "덤불", 0.86),
@@ -688,7 +711,7 @@ Q17_DIARY_MISDETECTION_CHAIN = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=1,
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         detected_objects=[
             _obj("BUSH", "덤불", 0.86),
             _obj("MOON", "달", 0.72),
@@ -725,7 +748,7 @@ Q18_HTP_PERSON_PART = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=0,
-        max_question_count=5,
+        max_question_count=_HTP_MAX_QUESTIONS,
         # 사람 그림은 부위 라벨이 열댓 개라 신뢰도만 보면 부위가 뽑힌다.
         detected_objects=[
             _obj("PERSON_HEAD", "머리", 0.95),
@@ -758,7 +781,7 @@ Q19_HTP_PERSON_NO_DESCRIPTION = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=0,
-        max_question_count=5,
+        max_question_count=_HTP_MAX_QUESTIONS,
         detected_objects=[
             _obj("PERSON_HEAD", "머리", 0.95),
             _obj("PERSON_ARM", "팔", 0.72),
@@ -790,7 +813,7 @@ Q20_DIARY_MISDETECTION_CORRECTION = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=1,
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         detected_objects=[
             _obj("BUSH", "덤불", 0.86),
             _obj("PERSON", "사람", 0.79),
@@ -830,7 +853,7 @@ Q21_DIARY_OPENING = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=0,  # 이 값이 곧 '완전 첫 질문' 신호다
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         # 오탐이 섞여 있어도 첫 질문은 이름을 하나도 쓰지 않아야 한다.
         detected_objects=[_obj("BUSH", "덤불", 0.86), _obj("MOON", "달", 0.72)],
         drawing_description="화면 가운데에 사람이 한 명 서 있어요.",
@@ -857,7 +880,7 @@ Q22_UNANSWERED_SECOND = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=1,
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         detected_objects=[_obj("PERSON", "사람", 0.9), _obj("BALL", "공", 0.82)],
         drawing_description=(
             "화면 가운데에 사람이 한 명 서 있고 그 아래에 파란 공이 하나 있어요."
@@ -886,8 +909,10 @@ Q23_SINGLE_PERSON = QuestionCase(
         child_age=8,
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
-        current_question_count=2,
-        max_question_count=5,
+        # 상한이 3이 되어(976) 2는 '마지막 질문' 자리가 됐다. 이 케이스가 재는 것은
+        # 마무리 톤이 아니라 대화 중간의 행동이라, 중간 위치를 유지하도록 1로 옮긴다.
+        current_question_count=1,
+        max_question_count=_HTP_MAX_QUESTIONS,
         # 사람 전체 + 부위 = 한 대상이다. 신뢰도만 보면 세 건이라 '여러 개'로 착각하기 쉽다.
         detected_objects=[
             _obj("PERSON", "사람", 0.90),
@@ -942,7 +967,7 @@ Q24_STOP_UNSPECIFIED = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=3,
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         detected_objects=[_obj("PERSON", "사람", 0.9)],
         drawing_description="가운데에 사람이 한 명 서 있어요.",
         recent_messages=[
@@ -970,7 +995,7 @@ Q25_STOP_CONVERSATION = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=3,
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         detected_objects=[_obj("PERSON", "사람", 0.9)],
         drawing_description="가운데에 사람이 한 명 서 있어요.",
         recent_messages=[
@@ -995,8 +1020,11 @@ Q26_STOP_HTP = QuestionCase(
         child_age=8,
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
-        current_question_count=3,
-        max_question_count=5,
+        # 구 값 3은 상한이 3이 된 뒤(976) 성립하지 않는 상태다 — 질문을 3번 한 세션에는
+        # BE가 더 묻지 못하게 막는다. 이 케이스가 재는 것은 그만하기 신호 처리(GMS 미호출)라
+        # 위치는 판정에 영향이 없어, 유효한 중간 위치로 옮긴다.
+        current_question_count=1,
+        max_question_count=_HTP_MAX_QUESTIONS,
         detected_objects=[_obj("HOUSE", "집", 0.9)],
         drawing_description="가운데에 집이 크게 있어요.",
         recent_messages=[
@@ -1028,7 +1056,7 @@ Q27_STOP_CHIP_FOLLOW_UP = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=3,
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         detected_objects=[_obj("PERSON", "사람", 0.9)],
         drawing_description="가운데에 사람이 한 명 서 있어요.",
         recent_messages=[
@@ -1058,7 +1086,7 @@ Q28_STOP_CONFIRMED_BY_VOICE = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=3,
-        max_question_count=5,
+        max_question_count=_DIARY_MAX_QUESTIONS,
         detected_objects=[_obj("PERSON", "사람", 0.9)],
         drawing_description="가운데에 사람이 한 명 서 있어요.",
         recent_messages=[
@@ -1086,7 +1114,7 @@ Q29_HTP_OPENING_BACKGROUND_ONLY = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         current_question_count=0,  # 이 값과 빈 recent_messages가 '첫마디' 신호다
-        max_question_count=5,
+        max_question_count=_HTP_MAX_QUESTIONS,
         # 959 재현 조건 — 주제 객체가 하나도 없고 배경만 잡힌 상태. 폴백이 이 나무를
         # 대상으로 삼으면 TARGET_FIRST가 걸려 첫마디가 통째로 나무 질문이 됐다.
         detected_objects=[_obj("SCENERY_TREE", "(배경) 나무", 0.62)],

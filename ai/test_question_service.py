@@ -878,6 +878,100 @@ class SubjectPromptAndTargetTest(unittest.TestCase):
         self.assertNotIn("다시 묻지 마", without_asked)
 
 
+class LastQuestionBlockTest(unittest.TestCase):
+    """마지막 질문 차례에는 맺음말 성격을 준다 (S15P11B209-976).
+
+    max_question_count 는 계약에 오래 있었지만 페이싱에 쓰인 적이 없었다. 모델이 몇 번 더
+    물을 수 있는지 모른 채 마지막 턴에도 새 소재를 열면, 상한에 닿는 순간 대화가 끊기듯 끝난다.
+
+    ⚠️ '마무리'와 '작별'은 다른 것이다. 턴 제어는 BE 소유이고(786 치명 결함 2번), AI가
+       작별하면 BE는 그대로 다음 질문을 요청해 대화가 어긋난다.
+    """
+
+    def test_block_appears_on_the_last_turn(self):
+        block = question_service._activity_block(
+            _request(activity_type="ART_DIARY", current_question_count=4), None
+        )
+        self.assertIn("마지막 질문이야", block)
+
+    def test_block_absent_in_the_middle_of_the_talk(self):
+        block = question_service._activity_block(
+            _request(activity_type="ART_DIARY", current_question_count=3), None
+        )
+        self.assertNotIn("마지막 질문이야", block)
+
+    def test_last_turn_follows_the_configured_limit_not_a_fixed_number(self):
+        """'마지막'의 좌표는 요청이 실어 오는 상한이 정한다 — 976이 3·5로 갈랐다."""
+        htp_last = question_service._activity_block(
+            _request(
+                activity_type="HTP",
+                drawing_subject="HOUSE",
+                max_question_count=3,
+                current_question_count=2,
+            ),
+            None,
+        )
+        self.assertIn("마지막 질문이야", htp_last)
+        htp_mid = question_service._activity_block(
+            _request(
+                activity_type="HTP",
+                drawing_subject="HOUSE",
+                max_question_count=3,
+                current_question_count=1,
+            ),
+            None,
+        )
+        self.assertNotIn("마지막 질문이야", htp_mid)
+
+    def test_block_forbids_ending_the_talk_itself(self):
+        """맺되 닫지는 않는다 — 대화 종료권은 AI에게 없다(786)."""
+        block = question_service._activity_block(
+            _request(activity_type="ART_DIARY", current_question_count=4), None
+        )
+        self.assertIn("작별 인사도 하지 마", block)
+        self.assertIn("끝이라는 말은 네가 하지 마", block)
+        # 인사만 남기고 끝내지 못하게 질문을 강제한다.
+        self.assertIn("그래도 질문은 해야 해", block)
+
+    def test_block_carries_no_ready_made_question(self):
+        """완성문 예시를 넣지 않는다 — 예시가 앵커가 되어 그대로 복사된다(808)."""
+        block = question_service._activity_block(
+            _request(activity_type="ART_DIARY", current_question_count=4), None
+        )
+        closing = block.split("마지막 차례", 1)[1]
+        for line in closing.splitlines():
+            self.assertNotIn("?", line, f"완성 질문이 지시에 섞였다: {line}")
+
+    def test_block_comes_after_the_target_instruction(self):
+        """무엇을 물을지는 위 블록이 정하고, 이 구획은 '어떻게 맺을지'만 더한다.
+
+        앞에 두면 "이 하나에 대해서만 물어봐"와 서로 밀어낸다(HTP_OPENING과 같은 이유).
+        """
+        target = _detected("HOUSE_ROOF", "지붕", 0.9)
+        block = question_service._activity_block(
+            _request(
+                activity_type="HTP",
+                drawing_subject="HOUSE",
+                max_question_count=3,
+                current_question_count=2,
+                detected_objects=[target],
+            ),
+            target,
+        )
+        self.assertLess(block.index("지붕"), block.index("마지막 차례"))
+
+    def test_block_reaches_the_assembled_prompt(self):
+        """구획이 실제로 GPT에 나가는 system 프롬프트까지 도달하는지 본다.
+
+        블록을 만들기만 하고 아무도 싣지 않는 상태를 막는다 — 902에서 저장 메서드를 만들고
+        호출부를 붙이지 않아 몇 주간 빈 화면이 나갔다.
+        """
+        system = question_service._build_messages(
+            _request(activity_type="ART_DIARY", current_question_count=4)
+        )[0]["content"]
+        self.assertIn("마지막 질문이야", system)
+
+
 class SubjectPinningScopeTest(unittest.TestCase):
     """못 박는 대상은 '활동 단계'이고 그림 내용의 이름은 아이가 정한다 (S15P11B209-788 B).
 
