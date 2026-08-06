@@ -23,6 +23,12 @@ public final class SharedMongoContainer {
   /** 운영 initdb 가 만드는 Stroke 멱등 인덱스 이름. */
   private static final String STROKE_UNIQUE = "session_batch_unique";
 
+  /** 운영 initdb 가 만드는 대화 행동 이벤트 정렬 인덱스 이름 (S15P11B209-973). */
+  private static final String CONVERSATION_EVENT_SESSION_SEQ = "session_seq";
+
+  /** 대화 행동 이벤트 컬렉션 (S15P11B209-973). */
+  private static final String CONVERSATION_EVENTS = "conversation_events";
+
   private static final MongoDBContainer CONTAINER =
       new MongoDBContainer(DockerImageName.parse("mongo:8.0.4"));
 
@@ -66,9 +72,20 @@ public final class SharedMongoContainer {
           .createIndex(
               new Index().on("sessionId", ASC).on("batchSeq", ASC).unique().named(STROKE_UNIQUE));
       mongoTemplate.indexOps("strokes").createIndex(new Index().on("childId", ASC));
+      // 대화 행동 이벤트도 인덱스는 initdb 소관이다 (S15P11B209-973). 운영에 있는 것을 여기서 재현하지 않으면
+      //   "인덱스 없이도 통과"하는 테스트가 되어, 정렬·삭제가 전체 스캔으로 도는 것을 눈치채지 못한다.
+      mongoTemplate
+          .indexOps(CONVERSATION_EVENTS)
+          .createIndex(
+              new Index()
+                  .on("sessionId", ASC)
+                  .on("seq", ASC)
+                  .named(CONVERSATION_EVENT_SESSION_SEQ));
+      mongoTemplate.indexOps(CONVERSATION_EVENTS).createIndex(new Index().on("childId", ASC));
       indexesCreated = true;
     }
     mongoTemplate.remove(new Query(), "strokes");
+    mongoTemplate.remove(new Query(), CONVERSATION_EVENTS);
     mongoTemplate.remove(new Query(), "counters");
   }
 }

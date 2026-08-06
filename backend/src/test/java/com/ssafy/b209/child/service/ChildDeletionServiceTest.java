@@ -10,6 +10,7 @@ import static org.mockito.Mockito.verify;
 import com.ssafy.b209.child.dto.request.DeleteChildRequest;
 import com.ssafy.b209.child.exception.ChildErrorCode;
 import com.ssafy.b209.child.repository.ChildDeletionRepository;
+import com.ssafy.b209.conversation.service.ConversationEventDeletionService;
 import com.ssafy.b209.drawing.service.StrokeBatchDeletionService;
 import com.ssafy.b209.global.exception.BusinessException;
 import java.time.Clock;
@@ -32,6 +33,7 @@ class ChildDeletionServiceTest {
 
   @Mock private ChildDeletionRepository childDeletionRepository;
   @Mock private StrokeBatchDeletionService strokeBatchDeletionService;
+  @Mock private ConversationEventDeletionService conversationEventDeletionService;
 
   private ChildDeletionService childDeletionService;
 
@@ -39,7 +41,10 @@ class ChildDeletionServiceTest {
   void setUp() {
     childDeletionService =
         new ChildDeletionService(
-            childDeletionRepository, strokeBatchDeletionService, Clock.fixed(NOW, ZoneOffset.UTC));
+            childDeletionRepository,
+            strokeBatchDeletionService,
+            conversationEventDeletionService,
+            Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
   @Test
@@ -56,6 +61,9 @@ class ChildDeletionServiceTest {
     order.verify(childDeletionRepository).scheduleStorageDeletions(CHILD_ID);
     // 삭제된 아동의 그리기 과정 데이터도 함께 지운다 (CLAUDE.md 9절).
     verify(strokeBatchDeletionService).deleteByChild(CHILD_ID);
+    // 대화 행동 이벤트도 같은 이유로 함께 지운다 (S15P11B209-973). 이 호출이 빠지면 삭제된 아동의
+    //   "언제 무엇을 했는가"가 보관 기간(TTL)까지 남는다.
+    verify(conversationEventDeletionService).deleteByChild(CHILD_ID);
   }
 
   @Test
@@ -84,6 +92,8 @@ class ChildDeletionServiceTest {
         .markDeleted(CHILD_ID, NOW.atOffset(ZoneOffset.UTC).toLocalDateTime());
     verify(childDeletionRepository).scheduleStorageDeletions(CHILD_ID);
     verify(strokeBatchDeletionService).deleteByChild(CHILD_ID);
+    // 탈퇴 경로도 개별 삭제와 같은 범위를 지워야 한다 (S15P11B209-973).
+    verify(conversationEventDeletionService).deleteByChild(CHILD_ID);
   }
 
   @Test

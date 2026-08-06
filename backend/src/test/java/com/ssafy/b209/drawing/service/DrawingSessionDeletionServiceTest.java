@@ -11,6 +11,7 @@ import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.child.domain.ChildFixture;
 import com.ssafy.b209.child.domain.ChildProfileStatus;
 import com.ssafy.b209.child.domain.ChildTutorialStatus;
+import com.ssafy.b209.conversation.service.ConversationEventDeletionService;
 import com.ssafy.b209.drawing.domain.DrawingInputMethod;
 import com.ssafy.b209.drawing.domain.DrawingSession;
 import com.ssafy.b209.drawing.domain.DrawingSessionStatus;
@@ -45,6 +46,7 @@ class DrawingSessionDeletionServiceTest {
   @Mock private DrawingSessionRepository drawingSessionRepository;
   @Mock private DrawingSessionDeletionRepository deletionRepository;
   @Mock private StrokeBatchDeletionService strokeBatchDeletionService;
+  @Mock private ConversationEventDeletionService conversationEventDeletionService;
 
   private DrawingSessionDeletionService service;
 
@@ -57,6 +59,7 @@ class DrawingSessionDeletionServiceTest {
             drawingSessionRepository,
             deletionRepository,
             strokeBatchDeletionService,
+            conversationEventDeletionService,
             Clock.fixed(NOW, ZoneOffset.UTC));
   }
 
@@ -73,6 +76,8 @@ class DrawingSessionDeletionServiceTest {
     verify(deletionRepository).scheduleStorageDeletions(SESSION_ID);
     // 그리기 과정 데이터는 MongoDB 에 있고 Soft Delete 개념이 없다 — 동반 삭제가 빠지면 보관 기간까지 남는다.
     verify(strokeBatchDeletionService).deleteByDrawingSession(SESSION_ID);
+    // 대화 행동 이벤트도 같은 이유로 함께 지운다 (S15P11B209-973). 아동 ID 를 함께 넘겨 인덱스를 타게 한다.
+    verify(conversationEventDeletionService).deleteByDrawingSession(1L, SESSION_ID);
     assertThat(session.getSessionStatus()).isEqualTo(DrawingSessionStatus.DELETED);
     assertThat(session.getDeletedAt()).isEqualTo(LocalDateTime.ofInstant(NOW, ZoneOffset.UTC));
   }

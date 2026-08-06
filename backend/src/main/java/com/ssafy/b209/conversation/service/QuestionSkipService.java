@@ -2,12 +2,14 @@ package com.ssafy.b209.conversation.service;
 
 import com.ssafy.b209.auth.service.CurrentAuthenticatedUserResolver;
 import com.ssafy.b209.conversation.domain.ConversationSession;
+import com.ssafy.b209.conversation.domain.ConversationStartDrawingSession;
 import com.ssafy.b209.conversation.domain.SkippableQuestionMessage;
 import com.ssafy.b209.conversation.dto.SkipQuestionRequest;
 import com.ssafy.b209.conversation.dto.SkipQuestionResponse;
 import com.ssafy.b209.conversation.exception.QuestionSkipErrorCode;
 import com.ssafy.b209.conversation.repository.ConversationEndAuthorizationRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
+import com.ssafy.b209.conversation.repository.ConversationStartDrawingSessionRepository;
 import com.ssafy.b209.conversation.repository.SkippableQuestionMessageRepository;
 import com.ssafy.b209.global.exception.BusinessException;
 import org.springframework.stereotype.Service;
@@ -26,6 +28,8 @@ public class QuestionSkipService {
   private final ConversationEndAuthorizationRepository authorizationRepository;
   private final ConversationSessionRepository conversationRepository;
   private final SkippableQuestionMessageRepository questionRepository;
+  private final ConversationStartDrawingSessionRepository drawingSessionRepository;
+  private final ConversationEventRecorder eventRecorder;
 
   /**
    * 질문 건너뛰기 서비스를 구성한다.
@@ -34,16 +38,22 @@ public class QuestionSkipService {
    * @param authorizationRepository 대화 접근 권한 조회 저장소
    * @param conversationRepository 대화 세션 잠금 조회 저장소
    * @param questionRepository 질문 건너뜀 표시 갱신 저장소
+   * @param drawingSessionRepository 대화와 아동을 연결하는 그림 세션 조회 경계
+   * @param eventRecorder 대화 행동 이벤트 적재기
    */
   public QuestionSkipService(
       CurrentAuthenticatedUserResolver currentUserResolver,
       ConversationEndAuthorizationRepository authorizationRepository,
       ConversationSessionRepository conversationRepository,
-      SkippableQuestionMessageRepository questionRepository) {
+      SkippableQuestionMessageRepository questionRepository,
+      ConversationStartDrawingSessionRepository drawingSessionRepository,
+      ConversationEventRecorder eventRecorder) {
     this.currentUserResolver = currentUserResolver;
     this.authorizationRepository = authorizationRepository;
     this.conversationRepository = conversationRepository;
     this.questionRepository = questionRepository;
+    this.drawingSessionRepository = drawingSessionRepository;
+    this.eventRecorder = eventRecorder;
   }
 
   /**
@@ -88,6 +98,12 @@ public class QuestionSkipService {
     question.skip();
     questionRepository.flush();
 
+    if (!alreadySkipped) {
+      // 같은 버튼을 두 번 눌러 들어온 재요청은 기록하지 않는다. 건너뛰기는 이미 한 번 일어났고,
+      //   여기서 또 남기면 소비자가 세는 "건너뛴 질문 수"가 탭 횟수만큼 부풀어 실제보다 산만한 아이로 보인다.
+      recordSkipped(conversation, question.getId(), request);
+    }
+
     return new SkipQuestionResponse(
         conversationId,
         question.getId(),
@@ -95,5 +111,31 @@ public class QuestionSkipService {
         alreadySkipped,
         questionRepository.countByConversationSessionIdAndSkippedTrue(conversationId),
         conversation.getConversationStatus());
+  }
+
+  /**
+   * 건너뛰기를 대화 행동 이벤트로 남긴다 (S15P11B209-973).
+   *
+   * <p>아동을 찾지 못하면 기록을 건너뛴다. 여기까지 왔다는 것은 건너뛰기가 이미 성립했다는 뜻이라, 관측용 좌표를 못 구했다고 아이 화면에 오류를 띄울 이유가 없다.
+   *
+   * @param conversation 잠근 대화 세션
+   * @param questionMessageId 건너뛴 질문 메시지 식별자
+   * @param request 건너뛰기 요청
+   */
+  private void recordSkipped(
+      ConversationSession conversation, Long questionMessageId, SkipQuestionRequest request) {
+    Long childId =
+        drawingSessionRepository
+            .findById(conversation.getDrawingSessionId())
+            .map(ConversationStartDrawingSession::getChildId)
+            .orElse(null);
+    if (childId == null) {
+      return;
+    }
+    eventRecorder.recordSkip(
+        new ConversationEventContext(
+            conversation.getId(), childId, conversation.getDrawingSessionId()),
+        questionMessageId,
+        request.reason() == null ? null : request.reason().name());
   }
 }

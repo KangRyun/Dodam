@@ -71,6 +71,7 @@ public class ConversationNextQuestionService {
   private final ChildRepository childRepository;
   private final DrawingAnalysisRepository drawingAnalysisRepository;
   private final ConversationQuestionService questionService;
+  private final ConversationEventRecorder eventRecorder;
   private final Clock clock;
 
   /**
@@ -89,6 +90,7 @@ public class ConversationNextQuestionService {
    * @param childRepository AI 최소 아동 문맥 조회 경계
    * @param drawingAnalysisRepository 분석 근거와 정규화 객체 조회 경계
    * @param questionService AI 호출·폴백·원자 저장 서비스
+   * @param eventRecorder 대화 행동 이벤트 적재기
    * @param clock 응답 생성 시각 경계
    */
   public ConversationNextQuestionService(
@@ -105,6 +107,7 @@ public class ConversationNextQuestionService {
       ChildRepository childRepository,
       DrawingAnalysisRepository drawingAnalysisRepository,
       ConversationQuestionService questionService,
+      ConversationEventRecorder eventRecorder,
       Clock clock) {
     this.conversationSessionRepository = conversationSessionRepository;
     this.conversationMessageRepository = conversationMessageRepository;
@@ -119,6 +122,7 @@ public class ConversationNextQuestionService {
     this.childRepository = childRepository;
     this.drawingAnalysisRepository = drawingAnalysisRepository;
     this.questionService = questionService;
+    this.eventRecorder = eventRecorder;
     this.clock = clock;
   }
 
@@ -176,6 +180,13 @@ public class ConversationNextQuestionService {
                 activityContext.activityType(),
                 activityContext.drawingSubject(),
                 askedObjectCodes));
+    // 질문 본문은 넘기지 않는다 — 이 이벤트가 남기는 것은 "몇 번째 질문이 언제 나갔는가"이고,
+    //   그 시각이 뒤따르는 답변·건너뛰기의 응답 지연 기준점이 된다 (S15P11B209-973).
+    //   저장 트랜잭션(QuestionPersistenceService)은 이미 커밋된 뒤라 여기서 바로 적재된다.
+    eventRecorder.recordQuestionShown(
+        new ConversationEventContext(conversationId, childId, session.getDrawingSessionId()),
+        generated.messageId(),
+        generated.sequence());
     return toResponse(conversationId, generated, modes.contains(ResponseMode.VOICE));
   }
 

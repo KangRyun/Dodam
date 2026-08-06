@@ -44,6 +44,7 @@ class ConversationEndServiceTest {
   @Mock private DrawingSessionRepository drawingRepository;
   @Mock private ConversationMessageRepository messageRepository;
   @Mock private DrawingSession drawingSession;
+  @Mock private ConversationEventRecorder eventRecorder;
 
   private ConversationEndService service;
 
@@ -56,6 +57,7 @@ class ConversationEndServiceTest {
             conversationRepository,
             drawingRepository,
             messageRepository,
+            eventRecorder,
             CLOCK);
   }
 
