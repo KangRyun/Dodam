@@ -285,6 +285,9 @@ class _ReportScreenState extends State<ReportScreen>
 
   /// 화면에 보이는 리포트를 그대로 PDF 로 만든다.
   ///
+  /// ⚠️ 정본은 서버다(ADR-0003). 이 경로는 서버 템플릿 전환까지만 남기고 제거한다
+  /// (S15P11B209-968·969). 문서 디자인 개선은 서버 템플릿에 넣는다.
+  ///
   /// 서버 PDF 는 줄글만 담아 카드·색·그림·감정이 빠진다. 보호자가 화면에서 본 것과 저장한
   /// 파일이 다르면 저장한 쪽을 믿을 수 없으므로 화면을 그대로 싣는다.
   Future<Uint8List> _composeSnapshotPdf() async {
