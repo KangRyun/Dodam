@@ -93,6 +93,8 @@ def _capture_generation(
             captured["model"] = kwargs.get("model")
             captured["messages"] = kwargs["messages"]
         else:
+            # 검토 호출의 모델도 남긴다 — 생성과 같아야 한다(S15P11B209-972).
+            captured["review_model"] = kwargs.get("model")
             captured["review_messages"] = kwargs["messages"]
         return _fake_response(payloads[min(index, len(payloads) - 1)], model=model)
 
@@ -3157,6 +3159,48 @@ class SubjectReportContractTest(unittest.TestCase):
         fields = contracts.SubjectReportDraft.model_fields
         self.assertNotIn("image_url", fields)
         self.assertNotIn("qa_pairs", fields)
+
+
+class ReportModelSelectionTest(unittest.TestCase):
+    """리포트는 대화와 다른 모델을 쓴다 (S15P11B209-972).
+
+    두 경로가 한 변수를 공유하던 시절엔 리포트 모델을 올리면 대화 지연이 함께 올라갔다.
+    배선이 되돌아가면(다시 config.LLM_MODEL 을 읽으면) 이 테스트가 깨진다 — 두 값이 같은
+    로컬·CI 기본 환경에서는 어느 쪽을 읽든 통과하므로, **일부러 다른 값**을 주입해 본다.
+    """
+
+    def _generate(self, captured: dict, **overrides):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = _capture_generation(captured)
+        with (
+            mock.patch.object(report_client, "get_client", return_value=fake_client),
+            mock.patch.object(config, "LLM_MODEL", "conversation-model"),
+            mock.patch.object(config, "REPORT_LLM_MODEL", "report-model"),
+        ):
+            return report_client.generate(
+                _sample_request(), drawing_description="가운데에 집이 크게 있어요.", **overrides
+            )
+
+    def test_generation_call_uses_report_model_not_conversation_model(self):
+        captured: dict = {}
+        self._generate(captured)
+        self.assertEqual(captured["model"], "report-model")
+        self.assertNotEqual(captured["model"], "conversation-model")
+
+    def test_self_review_uses_the_same_model_as_generation(self):
+        """생성과 검토가 다른 모델이면 버전 태그는 하나인데 열림 기준이 둘이 된다."""
+        captured: dict = {}
+        self._generate(captured)
+        self.assertEqual(captured["review_model"], captured["model"])
+
+    def test_explicit_model_argument_still_wins(self):
+        """draft·스모크가 넘기는 명시 인자는 env 설정보다 우선한다(기존 동작 유지)."""
+        captured: dict = {}
+        result = self._generate(captured, model="explicit-model")
+        self.assertEqual(captured["model"], "explicit-model")
+        self.assertEqual(captured["review_model"], "explicit-model")
+        # 서빙 모델 응답이 없으면 요청 모델명이 재현성 기록으로 남는다.
+        self.assertEqual(result.model_name, "explicit-model")
 
 
 if __name__ == "__main__":

@@ -1590,7 +1590,8 @@ def generate(
         behavior: 소요시간·필압 등 형식적 지표(있으면 관찰 보조 근거로 반영). 생략하면
             req.behavior_metrics 를 쓴다 — 계약으로 들어온 값이 정상 경로이고, 이 인자는
             draft/스모크에서 계약 밖 값을 넣어 보기 위한 덮어쓰기다.
-        model: 미지정 시 config.LLM_MODEL(텍스트 전용 — 이미지 자체는 넘기지 않는다).
+        model: 미지정 시 config.REPORT_LLM_MODEL(텍스트 전용 — 이미지 자체는 넘기지 않는다).
+            리포트는 대화(config.LLM_MODEL)와 다른 모델을 쓴다 — 이유는 config 주석 참조.
 
     Returns:
         ObservationGenerationResult(BE 계약 형태, camelCase 직렬화).
@@ -1598,7 +1599,9 @@ def generate(
     Raises:
         RuntimeError: GMS 호출 실패 또는 응답 JSON 파싱 실패 시(내용은 감추고 유형만 로그).
     """
-    used_model = model or config.LLM_MODEL
+    # 리포트 전용 모델(S15P11B209-972). 자체검토(_self_review)도 같은 모델로 돈다 —
+    # 생성과 판정이 다른 모델이면 "같은 버전 태그인데 열리는 기준이 다른" 상태가 된다.
+    used_model = model or config.REPORT_LLM_MODEL
     # 계약 값(836)이 기본. 인자로 준 값이 있으면 그쪽이 이긴다(draft/스모크 덮어쓰기).
     behavior = behavior if behavior is not None else req.behavior_metrics
     is_htp = _is_htp(req)

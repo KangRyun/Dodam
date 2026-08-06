@@ -41,6 +41,7 @@ def _fake_response(text: str, *, model: str = "gpt-4o-mini-2024-07-18"):
 
 def _mock_client(capture: dict, *, reply: str = "이 집에는 누가 살고 있어?"):
     def fake_create(*, model, messages, **_kwargs):
+        capture["model"] = model  # 대화 경로가 어떤 모델을 부르는지(S15P11B209-972)
         capture["messages"] = messages
         capture["system"] = messages[0]["content"]
         return _fake_response(reply)
@@ -2530,6 +2531,29 @@ class RedundantVisualQuestionTest(unittest.TestCase):
             None,
         )
         self.assertIn("모양·색·행동·표정", htp)
+
+
+class ConversationModelSelectionTest(unittest.TestCase):
+    """대화 질문 생성은 리포트 모델(REPORT_LLM_MODEL)을 쓰지 않는다 (S15P11B209-972).
+
+    이 경로의 예산은 BE read timeout 15초다. 무거운 리포트 모델이 여기로 새면 폴백 템플릿
+    비율이 오르는데, 그건 AI 응답처럼 보여서 조용히 지나간다 — 그래서 배선을 고정한다.
+    두 값이 같은 기본 환경에서는 어느 쪽을 읽어도 통과하므로 일부러 다른 값을 주입한다.
+    """
+
+    def test_generate_calls_conversation_model(self):
+        capture: dict = {}
+        client = _mock_client(capture, reply="이 집에는 누가 살고 있어?")
+        with (
+            mock.patch.object(question_service, "get_client", return_value=client),
+            mock.patch.object(config, "LLM_MODEL", "conversation-model"),
+            mock.patch.object(config, "REPORT_LLM_MODEL", "report-model"),
+        ):
+            resp = question_service.generate(_request(), "req-1")
+        self.assertEqual(capture["model"], "conversation-model")
+        self.assertNotEqual(capture["model"], "report-model")
+        # 재현성 기록도 대화 모델 쪽이어야 한다.
+        self.assertEqual(resp.model_name, "conversation-model")
 
 
 if __name__ == "__main__":
