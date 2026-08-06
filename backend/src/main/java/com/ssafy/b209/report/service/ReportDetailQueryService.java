@@ -71,6 +71,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -273,7 +274,7 @@ public class ReportDetailQueryService {
         report.getCreatedAt(),
         ReportDetailResponse.NON_DIAGNOSTIC_NOTICE,
         buildPublicInterpretations(publishedCards),
-        buildEvidenceItems(report.getId()),
+        buildEvidenceItems(report.getId(), publishedCards),
         buildSubjectReports(report.getId(), interpretationIndexById),
         buildParentGuides(report.getId()),
         buildCrisisAlert(report.getId()),
@@ -668,11 +669,34 @@ public class ReportDetailQueryService {
    *
    * <p>원본 참조({@code sourceRef})는 담지 않는다 — 서버가 발급한 행 식별자를 보호자 응답으로 내보낼 이유가 없다.
    *
+   * <p><b>공개된 카드가 실제로 참조하는 근거만 담는다</b> (S15P11B209-985). 근거는 공개 여부와 무관하게 <i>저장</i>된다 —
+   * 미공개·강등 판정의 사유를 나중에 되짚어야 하기 때문이고, 그 저장 정책은 그대로 둔다. 그러나 <b>응답은 다르다.</b>
+   * 예전에는 리포트의 근거 행을 전부 실어, 안전 검증기가 "내보내지 말자"고 판정한 카드의 근거 —
+   * 대개 <b>아이 발화 인용</b>이다 — 까지 보호자 기기로 전송됐다.
+   *
+   * <p>앱이 이 배열을 조회용 맵으로만 써서 화면에는 뜨지 않았지만, 그것은 <b>클라이언트 구현에 기댄 방어</b>다.
+   * 앱이 바뀌면 조용히 노출된다. 아동 민감정보는 필요한 만큼만 전송한다(CLAUDE.md 9절).
+   *
+   * <p>거르는 것이 안전한 이유: 카드의 {@code evidenceRefs}와 이 배열의 {@code evidenceId}는 <b>둘 다
+   * {@code evidenceNumber} 값</b>이다. 배열 인덱스가 아니므로 목록에서 일부를 빼도 참조가 다른 근거를 가리키지 않는다
+   * (배열 인덱스였다면 960 이 겪은 어긋남이 그대로 재발했을 것이다).
+   *
    * @param reportId 리포트 식별자
-   * @return 근거 번호 순서 목록
+   * @param publishedCards 보호자 응답에 실리는 공개 카드 목록
+   * @return 공개 카드가 참조하는 근거만, 근거 번호 순서로
    */
-  private List<ReportEvidenceItemResponse> buildEvidenceItems(Long reportId) {
+  private List<ReportEvidenceItemResponse> buildEvidenceItems(
+      Long reportId, List<ReportPublicInterpretation> publishedCards) {
+    Set<Integer> referenced =
+        publishedCards.stream()
+            .flatMap(card -> card.getEvidences().stream())
+            .map(link -> link.getEvidenceItem().getEvidenceNumber())
+            .collect(Collectors.toSet());
+    if (referenced.isEmpty()) {
+      return List.of();
+    }
     return evidenceItemRepository.findByReportIdOrderByEvidenceNumberAsc(reportId).stream()
+        .filter(item -> referenced.contains(item.getEvidenceNumber()))
         .map(
             item ->
                 new ReportEvidenceItemResponse(
