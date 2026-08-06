@@ -81,6 +81,14 @@
 - `observedEmotion`·`emotionConfidence` 필드 노출
 - EXPERT_ONLY 데이터·`attentionPoints`의 보호자 노출
 
+> ⚠️ **`publicInterpretations[].confidence`(확신도)는 위 "점수·등급" 금지에 해당하지 않는다**
+> (S15P11B209-982, 2026-08-06). 금지 대상은 **아이를 평가한 값**(점수·또래 대비 등급)이다.
+> `confidence`는 아이가 아니라 **해석이 어떤 종류의 근거 위에 서 있는지**를 밝히는 메타 정보이며,
+> AI 모델이 아니라 **서버가 근거 종류로 산출한다**(875 §3-1). `WEAK`는 '아이가 낮다'가 아니라
+> '근거가 이만큼'이라는 뜻이다.
+> 그래서 **숨기지 않고 보호자에게 그대로 노출한다** — 숨기면 약한 추측과 강한 근거가 같은 무게로
+> 읽혀 근거를 붙인 의미가 사라진다. 단 표기에 위험·경고 색을 쓰지 않는다(875 §3-1).
+
 ### 4-2. 경향 해석은 기존 강등 경로를 타지 않는다 (결정 1·2)
 
 **결정 1 — `publicInterpretations`는 기존 `features` 저장·노출 경로를 재사용하지 않는다.** 별도 저장(`report_public_interpretations` 등)과 **별도 노출 판단**을 쓰고, `ObservationReportPersistenceService.resolveVisibility()`·`expertReviewed` 경로를 **타지 않는다.** 노출 여부는 §4-3의 구조적 공개 게이트 결과로 정한다.
