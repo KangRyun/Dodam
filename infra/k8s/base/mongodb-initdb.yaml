@@ -78,10 +78,19 @@ data:
       { expireAfterSeconds: 0, name: 'ttl_expire_at' },
     );
 
-    // ── conversation_events: 대화 로그 원문
-    //   ⚠️ 이 컬렉션이 대화 원문의 **단일 소스**인지는 아직 미확정이다(365 에서 BE 와 협의).
-    //     MySQL conversation_messages 와 이중 저장하면 어느 쪽이 진실인지 모호해진다.
-    //     확정 전까지 앱이 양쪽에 쓰지 않도록 할 것(ADR 0001 §결과).
+    // ── conversation_events: 대화 **행동 메타데이터** (원문 아님)
+    //   2026-08-06 S15P11B209-973 에서 적재를 구현하며 확정했다. 365 시점의 "대화 로그 원문"
+    //   이라는 이름은 **틀렸다** — 그렇게 읽으면 다음 사람이 여기에 발화를 넣는다.
+    //
+    //   들어가는 것: 무엇을 했는가. 이벤트 종류(QUESTION_SHOWN·ANSWER_VOICE·ANSWER_CHIP·
+    //     SKIP·SESSION_END) · 응답 지연 · 녹음 길이 · 선택한 칩 **개수** · 종료 사유 · 순번.
+    //   들어가지 않는 것: **무슨 말을 했는가.** 음성 전사·답변 텍스트·질문 문장 원문은
+    //     이 컬렉션에 절대 넣지 않는다 (CLAUDE.md 9절 — 아동 민감정보 최소 수집).
+    //
+    //   대화 원문의 단일 소스는 MySQL conversation_messages 다. 이중 저장 금지(ADR 0001 §결과).
+    //   ⚠️ TTL(expireAt)은 "언젠가"지 즉시가 아니다. 동의 철회·탈퇴 시에는 앱이
+    //     child_lookup 인덱스로 즉시 삭제한다(ConversationEventDeletionService) —
+    //     그 즉시 삭제 경로가 이 인덱스의 존재 이유다.
     db.createCollection('conversation_events');
     db.conversation_events.createIndex({ sessionId: 1, seq: 1 }, { name: 'session_seq' });
     db.conversation_events.createIndex({ childId: 1 }, { name: 'child_lookup' });
