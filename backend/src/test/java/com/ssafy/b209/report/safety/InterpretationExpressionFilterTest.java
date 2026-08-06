@@ -87,7 +87,7 @@ class InterpretationExpressionFilterTest {
       String scopeText,
       String homeObservationGuide) {
     return new InterpretationCandidate(
-        category, title, tendencyText, scopeText, homeObservationGuide, List.of(1L, 2L));
+        category, title, tendencyText, scopeText, homeObservationGuide, List.of(1L, 2L), null);
   }
 
   @Test
@@ -116,7 +116,8 @@ class InterpretationExpressionFilterTest {
             "자존감이 낮습니다.",
             SCOPE_TEXT,
             "애정 결핍이 느껴집니다.",
-            List.of(1L, 2L));
+            List.of(1L, 2L),
+            null);
 
     ExpressionVerdict verdict = filter.inspect(multiple);
 

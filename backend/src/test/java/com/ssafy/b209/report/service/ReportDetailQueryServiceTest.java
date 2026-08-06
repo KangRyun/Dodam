@@ -460,6 +460,29 @@ class ReportDetailQueryServiceTest {
   }
 
   @Test
+  void carriesInterpretationConfidenceGradeAndLeavesUngradedCardsNull() {
+    // S15P11B209-982. 등급은 enum 이름 문자열로 나가고, 등급이 없는 카드는 null 로 나가야 한다 —
+    //   여기서 기본값을 채우면 계산된 적 없는 등급이 보호자 화면에 사실처럼 뜬다.
+    givenAccessibleReport();
+    when(interpretationRepository.findByReportIdAndDisclosureStateOrderByDisplayOrderAsc(
+            REPORT_ID, com.ssafy.b209.report.domain.ReportInterpretationDisclosureState.PUBLISHED))
+        .thenReturn(
+            List.of(
+                publishedCard(
+                    901L,
+                    "EMOTION",
+                    "감정 표현",
+                    com.ssafy.b209.report.domain.ReportInterpretationConfidence.WEAK),
+                publishedCard(902L, "RELATIONSHIP", "가족과의 연결")));
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.publicInterpretations())
+        .extracting(com.ssafy.b209.report.dto.ReportPublicInterpretationResponse::confidence)
+        .containsExactly("WEAK", null);
+  }
+
+  @Test
   void assemblesSubjectReportsInContractOrderWithResolvedInterpretationIndexes() {
     // 875 §5. 저장된 주제 스냅샷이 상세 응답에 HOUSE→TREE→PERSON 으로 실제로 나오는지 본다 —
     //   저장 쪽만 검증하면 조회가 List.of() 를 그대로 두고 있어도 초록이다(계약 §12-1 마지막 항목).
@@ -626,6 +649,14 @@ class ReportDetailQueryServiceTest {
 
   private com.ssafy.b209.report.domain.ReportPublicInterpretation publishedCard(
       Long id, String category, String title) {
+    return publishedCard(id, category, title, null);
+  }
+
+  private com.ssafy.b209.report.domain.ReportPublicInterpretation publishedCard(
+      Long id,
+      String category,
+      String title,
+      com.ssafy.b209.report.domain.ReportInterpretationConfidence confidence) {
     com.ssafy.b209.report.domain.ReportPublicInterpretation card =
         com.ssafy.b209.report.domain.ReportPublicInterpretation.create(
             org.mockito.Mockito.mock(com.ssafy.b209.report.domain.Report.class),
@@ -634,7 +665,8 @@ class ReportDetailQueryServiceTest {
             title,
             "그런 경향이 보일 수 있습니다.",
             "이번 활동에서 나타난 가능성입니다.",
-            "가정에서 살펴봐 주세요.");
+            "가정에서 살펴봐 주세요.",
+            confidence);
     ReflectionTestUtils.setField(card, "id", id);
     return card;
   }

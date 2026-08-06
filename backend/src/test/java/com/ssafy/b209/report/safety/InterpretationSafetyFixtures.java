@@ -23,6 +23,12 @@ final class InterpretationSafetyFixtures {
     return cardWithTendency(TENDENCY_TEXT, evidenceRefs);
   }
 
+  /**
+   * 기본 카드다.
+   *
+   * <p>확신 등급은 {@code null}로 둔다 — 검증기는 등급을 읽지 않으므로(S15P11B209-982) 등급 없이도 모든 판정이 그대로 나와야 한다는 것이 이
+   * fixture 의 전제다.
+   */
   static InterpretationCandidate cardWithTendency(String tendencyText, Long... evidenceRefs) {
     return new InterpretationCandidate(
         InterpretationCategory.RELATIONSHIP,
@@ -30,7 +36,8 @@ final class InterpretationSafetyFixtures {
         tendencyText,
         SCOPE_TEXT,
         HOME_GUIDE,
-        Arrays.asList(evidenceRefs));
+        Arrays.asList(evidenceRefs),
+        null);
   }
 
   /** {@code scopeText}만 갈아 끼운 카드다 — 나머지 문장은 안전하므로 판정은 이 필드에서만 나온다. */
@@ -41,7 +48,8 @@ final class InterpretationSafetyFixtures {
         TENDENCY_TEXT,
         scopeText,
         HOME_GUIDE,
-        Arrays.asList(evidenceRefs));
+        Arrays.asList(evidenceRefs),
+        null);
   }
 
   static EvidenceSourceRef answerRef(String messageId) {

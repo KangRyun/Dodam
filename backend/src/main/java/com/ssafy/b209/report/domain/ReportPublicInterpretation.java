@@ -61,6 +61,16 @@ public class ReportPublicInterpretation {
   @Column(name = "home_observation_guide", columnDefinition = "TEXT")
   private String homeObservationGuide;
 
+  /**
+   * 근거 종류로 계산한 확신 등급이며 없으면 {@code null}이다 (S15P11B209-982).
+   *
+   * <p>V43 이전에 저장된 카드에는 등급이 없다. NOT NULL 로 만들거나 기본값을 채우면 "계산된 적 없음"과 "약함"이 같은 값이 되어, 등급을 못 받은 옛 카드가
+   * 보호자 화면에서 근거 없이 강등된 것처럼 보인다.
+   */
+  @Enumerated(EnumType.STRING)
+  @Column(name = "confidence", length = 20)
+  private ReportInterpretationConfidence confidence;
+
   @Enumerated(EnumType.STRING)
   @Column(name = "disclosure_state", nullable = false, length = 20)
   private ReportInterpretationDisclosureState disclosureState;
@@ -86,7 +96,8 @@ public class ReportPublicInterpretation {
       String title,
       String tendencyText,
       String scopeText,
-      String homeObservationGuide) {
+      String homeObservationGuide,
+      ReportInterpretationConfidence confidence) {
     this.report = Objects.requireNonNull(report, "report must not be null");
     if (displayOrder < 0) {
       throw new IllegalArgumentException("displayOrder must not be negative");
@@ -97,6 +108,8 @@ public class ReportPublicInterpretation {
     this.tendencyText = requireText(tendencyText, "tendencyText");
     this.scopeText = scopeText;
     this.homeObservationGuide = homeObservationGuide;
+    // 등급은 검사하지 않는다 — null 이 "등급 없음"이라는 유효한 값이다(S15P11B209-982).
+    this.confidence = confidence;
     // 공개는 두 단 검증을 통과해야 얻는 상태다. 기본값을 공개로 두면 검증을 건너뛴 카드가 노출된다.
     this.disclosureState = ReportInterpretationDisclosureState.WITHHELD;
     this.withheldReasonCode = PENDING_VERIFICATION;
@@ -117,6 +130,7 @@ public class ReportPublicInterpretation {
    * @param tendencyText 가능성 어조의 경향 문장
    * @param scopeText 해석 범위 안내이며 없으면 {@code null}
    * @param homeObservationGuide 가정에서 살펴볼 점이며 없으면 {@code null}
+   * @param confidence 근거 종류로 계산한 확신 등급이며 없으면 {@code null} (S15P11B209-982)
    * @return 보류 상태의 경향 해석 카드
    * @throws IllegalArgumentException 순서가 음수이거나 제목·경향 문장이 빈 경우
    */
@@ -127,9 +141,17 @@ public class ReportPublicInterpretation {
       String title,
       String tendencyText,
       String scopeText,
-      String homeObservationGuide) {
+      String homeObservationGuide,
+      ReportInterpretationConfidence confidence) {
     return new ReportPublicInterpretation(
-        report, displayOrder, category, title, tendencyText, scopeText, homeObservationGuide);
+        report,
+        displayOrder,
+        category,
+        title,
+        tendencyText,
+        scopeText,
+        homeObservationGuide,
+        confidence);
   }
 
   /**
@@ -232,6 +254,13 @@ public class ReportPublicInterpretation {
    */
   public String getHomeObservationGuide() {
     return homeObservationGuide;
+  }
+
+  /**
+   * @return 근거 종류로 계산한 확신 등급이며 없으면 {@code null}
+   */
+  public ReportInterpretationConfidence getConfidence() {
+    return confidence;
   }
 
   /**

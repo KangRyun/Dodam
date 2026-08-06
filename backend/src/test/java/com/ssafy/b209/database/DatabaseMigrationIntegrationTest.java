@@ -50,13 +50,33 @@ class DatabaseMigrationIntegrationTest {
   @Test
   void appliesAllMigrationsWithoutJsonOrRefreshTokenTable() {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("43");
+    // ⚠️ 마이그레이션을 추가하면 이 숫자와 아래 tableCount() 를 함께 확인해야 한다. 960 이 V40 을 더하고
+    //    두 숫자를 안 고쳐 CI 가 깨졌다.
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("44");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     // V40이 주제별 관찰 4종(report_subjects·observations·qa_pairs·interpretations)과
     // report_references 를 더해 85 → 90 이 됐다(S15P11B209-960).
+    // V41~V44 는 컬럼만 더해 테이블 수는 그대로 90 이다 — 버전 숫자와 달리 이 값은 CREATE TABLE 이
+    // 있을 때만 움직인다(S15P11B209-982).
+    // ⚠️ V43 은 983(AI 원문), V44 가 982(확신도)다. 982 는 원래 V43 이었는데 983 이 먼저 머지되며
+    //    같은 번호를 써서 밀었다. **Flyway 는 버전이 겹치면 기동 자체가 실패한다** — 리포트 도메인처럼
+    //    여러 갈래가 동시에 붙는 곳은 머지 직전에 번호를 다시 확인할 것.
     assertThat(tableCount()).isEqualTo(90);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
+    // V44 — 경향 해석 카드의 확신 등급. NULL 허용이어야 한다: 기존 카드에는 등급이 없고, AI 가 등급을
+    // 싣지 않아도 카드는 저장돼야 한다(S15P11B209-982, 836 재발 방지).
+    assertThat(columnExists("report_public_interpretations", "confidence")).isTrue();
+    assertThat(columnIsNullable("report_public_interpretations", "confidence")).isTrue();
+    for (String grade : new String[] {"STRONG", "MODERATE", "WEAK"}) {
+      assertThat(
+              checkConstraintContains(
+                  "report_public_interpretations",
+                  "ck_report_public_interpretations_confidence",
+                  grade))
+          .as("ck_report_public_interpretations_confidence가 %s를 허용해야 한다", grade)
+          .isTrue();
+    }
     // V41 — 캐릭터별 질문 TTS 캐시가 다른 음성·속도 결과를 재사용하지 않도록 요청 조합을 보관한다.
     assertThat(columnExists("conversation_messages", "tts_voice")).isTrue();
     assertThat(columnExists("conversation_messages", "tts_speed")).isTrue();

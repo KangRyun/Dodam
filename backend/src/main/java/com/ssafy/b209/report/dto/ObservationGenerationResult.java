@@ -367,6 +367,11 @@ public record ObservationGenerationResult(
    * @param scopeText 해석 범위 안내이며 비면 공개 조건 미달이다
    * @param homeObservationGuide 가정에서 살펴볼 점이며 비면 공개 조건 미달이다
    * @param evidenceRefs 참조하는 근거의 로컬 번호 목록
+   * @param confidence 근거 종류로 계산한 확신 등급의 <strong>이름 문자열</strong>이며 없으면 {@code null}
+   *     (S15P11B209-982). AI 쪽 코드(LLM 이 아니다)가 계산해 싣는 optional 필드다 — <strong>여기에 Bean Validation
+   *     을 붙이면 안 된다.</strong> {@code RestClientAiObservationClient.generate()}가 응답에 {@code
+   *     validator.validate(response)}를 돌리므로 어노테이션 하나가 곧 리포트 전체 실패다(2026-08-05 관찰 요청 100% 422 장애).
+   *     값이 없거나 해석되지 않으면 "등급 없음"으로 내려앉는 것이 정상이다
    */
   public record PublicInterpretationDraft(
       String category,
@@ -374,9 +379,15 @@ public record ObservationGenerationResult(
       String tendencyText,
       String scopeText,
       String homeObservationGuide,
-      List<Long> evidenceRefs) {
+      List<Long> evidenceRefs,
+      String confidence) {
 
-    /** 참조 목록이 {@code null}로 와도 빈 목록으로 정규화한다. */
+    /**
+     * 참조 목록이 {@code null}로 와도 빈 목록으로 정규화한다.
+     *
+     * <p>{@code confidence}는 손대지 않는다 — {@code null}이 "등급 없음"이라는 유효한 값이므로 여기서 기본값을 채우면 등급이 없다는 사실
+     * 자체가 사라진다.
+     */
     public PublicInterpretationDraft {
       evidenceRefs = evidenceRefs == null ? List.of() : List.copyOf(evidenceRefs);
     }

@@ -358,7 +358,8 @@ class ReportPdfRendererLayoutTest {
                 "가족에게 의지하려는 경향이 보일 수 있습니다.",
                 "이 관찰은 이번 활동 한 번에 한정됩니다.",
                 "집에서 가족과 함께 있는 시간을 살펴봐 주세요.",
-                List.of(1))),
+                List.of(1),
+                null)),
         List.of(new ReportEvidenceItemResponse(1, "DRAWING", "집을 가운데 크게 그렸어요.")),
         List.of(
             new ReportSubjectResponse(
