@@ -57,6 +57,17 @@ public class Report {
   @Column(name = "pdf_status", nullable = false, length = 20)
   private ReportPdfStatus pdfStatus;
 
+  /**
+   * AI 관찰 생성 응답 원문이다 (S15P11B209-980).
+   *
+   * <p>리포트 본문은 계약 스키마({@code ObservationGenerationResult})로 읽은 값만 쓴다. 그 과정에서 스키마에 없는 서술은 사라지는데,
+   * 집·나무·사람 활동에서 <b>무엇이 사라지는지 확인하려면 원문이 남아 있어야</b> 한다. 조회 시점에는 다시 만들 수 없어 생성할 때 함께 저장한다.
+   *
+   * <p>원문 보관 이전에 만든 리포트는 비어 있다 — 오류가 아니다.
+   */
+  @Column(name = "ai_raw_report", columnDefinition = "LONGTEXT")
+  private String aiRawReport;
+
   @Column(name = "failure_reason", length = 100)
   private String failureReason;
 
@@ -131,6 +142,24 @@ public class Report {
    */
   public void markDrawnItemsStored() {
     this.hasDrawnItems = true;
+  }
+
+  /**
+   * AI 관찰 생성 응답 원문을 보관한다 (S15P11B209-980).
+   *
+   * <p>내용을 검증하거나 줄이지 않는다 — <b>줄어드는 그 내용을 보려고</b> 남기는 값이다. 받아 두지 못했으면 비운다.
+   *
+   * @param aiRawReport AI 응답 본문 그대로이며 없으면 {@code null}
+   */
+  public void storeAiRawReport(String aiRawReport) {
+    this.aiRawReport = aiRawReport == null || aiRawReport.isBlank() ? null : aiRawReport;
+  }
+
+  /**
+   * @return AI 관찰 생성 응답 원문이며 보관하지 않았으면 {@code null}
+   */
+  public String getAiRawReport() {
+    return aiRawReport;
   }
 
   /**

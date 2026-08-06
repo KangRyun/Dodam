@@ -6,6 +6,7 @@ import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.global.response.ErrorCode;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClient;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClientException;
+import com.ssafy.b209.report.dto.ObservationGeneration;
 import com.ssafy.b209.report.dto.ObservationGenerationRequest;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.exception.MockObservationReportErrorCode;
@@ -83,9 +84,9 @@ public class MockObservationReportGenerationService {
     String requestId = requestIdSupplier.get().toString();
     ObservationGenerationRequest request = buildRequest(requestId, context);
 
-    ObservationGenerationResult result;
+    ObservationGeneration generation;
     try {
-      result = observationClient.generate(request);
+      generation = observationClient.generate(request);
     } catch (AiObservationClientException exception) {
       log.warn(
           "관찰 리포트 생성 호출에 실패했습니다. analysisId={}, failureType={}", analysisId, exception.getType());
@@ -97,6 +98,7 @@ public class MockObservationReportGenerationService {
       return;
     }
 
+    ObservationGenerationResult result = generation.result();
     String invalidReason = validate(requestId, result);
     if (invalidReason != null) {
       log.warn("관찰 리포트 생성 응답이 유효하지 않습니다. analysisId={}, reason={}", analysisId, invalidReason);
@@ -109,7 +111,7 @@ public class MockObservationReportGenerationService {
     }
 
     try {
-      persistenceService.complete(context, result);
+      persistenceService.complete(context, generation);
     } catch (BusinessException exception) {
       // 저장 계층이 이미 분류한 실패다. 여기서 REPORT_STORAGE_FAILED로 덮으면 generation-status의
       // failureReason이 실제 원인과 무관해진다(S15P11B209-815).

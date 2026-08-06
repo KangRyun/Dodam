@@ -41,6 +41,9 @@ public class ReportDetailView {
   @Column(name = "has_drawn_items", nullable = false)
   private boolean hasDrawnItems;
 
+  @Column(name = "ai_raw_report")
+  private String aiRawReport;
+
   @Column(name = "created_at", nullable = false)
   private LocalDateTime createdAt;
 
@@ -100,6 +103,15 @@ public class ReportDetailView {
    */
   public boolean hasDrawnItems() {
     return hasDrawnItems;
+  }
+
+  /**
+   * 생성 때 보관해 둔 AI 관찰 응답 원문이다 (S15P11B209-980).
+   *
+   * @return AI 응답 원문이며 보관 이전 리포트나 받아 두지 못한 리포트면 {@code null}
+   */
+  public String getAiRawReport() {
+    return aiRawReport;
   }
 
   /**

@@ -2,6 +2,7 @@ package com.ssafy.b209.infrastructure.ai.observation;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.context.runner.ApplicationContextRunner;
 import org.springframework.context.annotation.Bean;
@@ -83,6 +84,12 @@ class AiObservationClientConfigTest {
     @Bean
     LocalValidatorFactoryBean validator() {
       return new LocalValidatorFactoryBean();
+    }
+
+    /** 응답 원문을 계약 스키마로 읽는 Mapper 다. 운영에서는 Boot 가 등록한 Bean 을 쓴다. */
+    @Bean
+    ObjectMapper objectMapper() {
+      return new ObjectMapper();
     }
   }
 }

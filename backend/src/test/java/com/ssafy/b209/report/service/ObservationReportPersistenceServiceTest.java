@@ -43,6 +43,7 @@ import com.ssafy.b209.report.domain.ReportGuardianQuestion;
 import com.ssafy.b209.report.domain.ReportKeyConversation;
 import com.ssafy.b209.report.domain.ReportObservedFeature;
 import com.ssafy.b209.report.domain.ReportStatus;
+import com.ssafy.b209.report.dto.ObservationGeneration;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummaryDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DrawnItemDraft;
@@ -184,7 +185,7 @@ class ObservationReportPersistenceServiceTest {
         .willReturn(
             Optional.of(new StrokeBehaviorSummary(261_000L, 180_000L, 4, 2, 5, 1, 3, true, false)));
 
-    service.complete(context(List.of(keyLine(0))), validResult());
+    service.complete(context(List.of(keyLine(0))), new ObservationGeneration(validResult(), null));
 
     verify(activitySummaryRepository).save(activitySummaryCaptor.capture());
     ReportActivitySummary activitySummary = activitySummaryCaptor.getValue();
@@ -192,6 +193,34 @@ class ObservationReportPersistenceServiceTest {
     assertThat(activitySummary.getPauseCount()).isEqualTo(4);
     assertThat(activitySummary.getEraseCount()).isEqualTo(5);
     assertThat(activitySummary.isPressureAvailable()).isTrue();
+  }
+
+  @Test
+  void storesTheAiResponseRawJsonSoNothingIsLostAtReadTime() {
+    // 계약 스키마로 읽는 순간 스키마 밖 서술이 사라진다. 조회 때는 만들 수 없으니 생성할 때
+    //   원문을 함께 저장해야 한다(S15P11B209-980).
+    String rawJson = "{\"requestId\":\"r-1\",\"스키마에 없는 필드\":\"버려지던 서술\"}";
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.complete(
+        context(List.of(keyLine(0))), new ObservationGeneration(validResult(), rawJson));
+
+    assertThat(report.getAiRawReport()).isEqualTo(rawJson);
+  }
+
+  @Test
+  void leavesTheAiRawReportEmptyWhenTheResponseBodyWasNotCaptured() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.complete(context(List.of(keyLine(0))), new ObservationGeneration(validResult(), " "));
+
+    assertThat(report.getAiRawReport()).isNull();
   }
 
   @Test
@@ -204,7 +233,7 @@ class ObservationReportPersistenceServiceTest {
     given(behaviorSummaryService.summarizeAll(List.of(DRAWING_SESSION_ID)))
         .willReturn(Optional.empty());
 
-    service.complete(context(List.of(keyLine(0))), validResult());
+    service.complete(context(List.of(keyLine(0))), new ObservationGeneration(validResult(), null));
 
     verify(activitySummaryRepository).save(activitySummaryCaptor.capture());
     ReportActivitySummary activitySummary = activitySummaryCaptor.getValue();
@@ -224,7 +253,7 @@ class ObservationReportPersistenceServiceTest {
     given(behaviorSummaryService.summarizeAll(List.of(DRAWING_SESSION_ID)))
         .willThrow(new IllegalStateException("mongo down"));
 
-    service.complete(context(List.of(keyLine(0))), validResult());
+    service.complete(context(List.of(keyLine(0))), new ObservationGeneration(validResult(), null));
 
     assertThat(report.getStatus()).isEqualTo(ReportStatus.COMPLETED);
     verify(activitySummaryRepository).save(activitySummaryCaptor.capture());
@@ -238,7 +267,8 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
 
-    service.complete(context(List.of(keyLine(0), keyLine(1))), validResult());
+    service.complete(
+        context(List.of(keyLine(0), keyLine(1))), new ObservationGeneration(validResult(), null));
 
     assertThat(analysis.getState()).isEqualTo(DrawingAnalysisState.SUCCESS);
     assertThat(analysis.getModelName()).isEqualTo("mock-observation-generator");
@@ -300,7 +330,7 @@ class ObservationReportPersistenceServiceTest {
                 new DrawnItemDraft("TREE", "나무"),
                 new DrawnItemDraft("PERSON", "웃는 사람")));
 
-    service.complete(context(List.of()), result);
+    service.complete(context(List.of()), new ObservationGeneration(result, null));
 
     verify(drawnItemRepository).saveAll(drawnItemsCaptor.capture());
     assertThat(drawnItemsCaptor.getValue())
@@ -329,7 +359,7 @@ class ObservationReportPersistenceServiceTest {
                 null,
                 new DrawnItemDraft("TREE", "가".repeat(21))));
 
-    service.complete(context(List.of()), result);
+    service.complete(context(List.of()), new ObservationGeneration(result, null));
 
     verify(drawnItemRepository).saveAll(drawnItemsCaptor.capture());
     assertThat(drawnItemsCaptor.getValue()).isEmpty();
@@ -345,7 +375,9 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
 
-    service.complete(context(List.of()), resultWithModelVersion(SPLIT_PROMPT_MODEL_VERSION));
+    service.complete(
+        context(List.of()),
+        new ObservationGeneration(resultWithModelVersion(SPLIT_PROMPT_MODEL_VERSION), null));
 
     assertThat(SPLIT_PROMPT_MODEL_VERSION).hasSize(78);
     assertThat(analysis.getModelVersion()).isEqualTo(SPLIT_PROMPT_MODEL_VERSION);
@@ -367,7 +399,8 @@ class ObservationReportPersistenceServiceTest {
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
     String oversized = "p".repeat(400);
 
-    service.complete(context(List.of()), resultWithModelVersion(oversized));
+    service.complete(
+        context(List.of()), new ObservationGeneration(resultWithModelVersion(oversized), null));
 
     assertThat(analysis.getModelVersion()).hasSize(255);
     verify(observationResultRepository).save(observationCaptor.capture());
@@ -384,7 +417,8 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
 
-    service.complete(context(List.of()), resultWithOversizedText());
+    service.complete(
+        context(List.of()), new ObservationGeneration(resultWithOversizedText(), null));
 
     assertThat(analysis.getModelName()).hasSize(100);
     verify(conversationSummaryRepository).save(conversationCaptor.capture());
@@ -412,7 +446,8 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
 
-    service.complete(context(List.of()), resultWithEmotion("😀".repeat(60)));
+    service.complete(
+        context(List.of()), new ObservationGeneration(resultWithEmotion("😀".repeat(60)), null));
 
     verify(conversationSummaryRepository).save(conversationCaptor.capture());
     String emotion = conversationCaptor.getValue().getExpressedEmotion();
@@ -590,7 +625,7 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
 
-    service.complete(emptyConversationContext(), validResult());
+    service.complete(emptyConversationContext(), new ObservationGeneration(validResult(), null));
 
     verify(eventPublisher, never()).publishEvent(any());
   }
@@ -602,7 +637,9 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
 
-    service.complete(emptyConversationContext(), resultWithReviewedGuardianFeature());
+    service.complete(
+        emptyConversationContext(),
+        new ObservationGeneration(resultWithReviewedGuardianFeature(), null));
 
     verify(observedFeatureRepository).saveAll(featuresCaptor.capture());
     assertThat(featuresCaptor.getValue())
@@ -619,7 +656,9 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
 
-    service.complete(emptyConversationContext(), resultWithReviewStatus("AI_REVIEWED"));
+    service.complete(
+        emptyConversationContext(),
+        new ObservationGeneration(resultWithReviewStatus("AI_REVIEWED"), null));
 
     verify(observationResultRepository).save(observationCaptor.capture());
     assertThat(observationCaptor.getValue().getReviewStatus())
@@ -640,7 +679,9 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
 
-    service.complete(emptyConversationContext(), resultWithReviewStatus("EXPERT_APPROVED"));
+    service.complete(
+        emptyConversationContext(),
+        new ObservationGeneration(resultWithReviewStatus("EXPERT_APPROVED"), null));
 
     verify(observationResultRepository).save(observationCaptor.capture());
     assertThat(observationCaptor.getValue().getReviewStatus())
@@ -658,7 +699,8 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
 
-    service.complete(emptyConversationContext(), resultWithReviewStatus(null));
+    service.complete(
+        emptyConversationContext(), new ObservationGeneration(resultWithReviewStatus(null), null));
 
     verify(observationResultRepository).save(observationCaptor.capture());
     assertThat(observationCaptor.getValue().getReviewStatus())
@@ -676,7 +718,7 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
 
-    service.complete(emptyConversationContext(), validResult());
+    service.complete(emptyConversationContext(), new ObservationGeneration(validResult(), null));
 
     verify(conversationSummaryRepository).save(conversationCaptor.capture());
     assertThat(conversationCaptor.getValue().getQuestionCount()).isZero();
@@ -696,7 +738,7 @@ class ObservationReportPersistenceServiceTest {
     given(htpAssessmentRepository.findByStepDrawingSessionIdForUpdate(DRAWING_SESSION_ID))
         .willReturn(Optional.of(assessment));
 
-    service.complete(emptyConversationContext(), validResult());
+    service.complete(emptyConversationContext(), new ObservationGeneration(validResult(), null));
 
     verify(assessment).completeAnalysis(LocalDateTime.now(CLOCK));
     verify(analysis.getDrawingSession(), never()).completeReporting(any());
@@ -708,7 +750,7 @@ class ObservationReportPersistenceServiceTest {
     analysis.succeedFinal("mock", "1.0", null, LocalDateTime.now(CLOCK));
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
 
-    service.complete(emptyConversationContext(), validResult());
+    service.complete(emptyConversationContext(), new ObservationGeneration(validResult(), null));
 
     verify(reportRepository, never()).findByIdForUpdate(anyLong());
     verify(observationResultRepository, never()).save(any());
@@ -722,7 +764,7 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
 
-    service.complete(emptyConversationContext(), validResult());
+    service.complete(emptyConversationContext(), new ObservationGeneration(validResult(), null));
 
     assertThat(analysis.getState()).isEqualTo(DrawingAnalysisState.PENDING);
     verify(observationResultRepository, never()).save(any());
@@ -732,7 +774,10 @@ class ObservationReportPersistenceServiceTest {
   void completeThrowsWhenAnalysisMissing() {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.empty());
 
-    assertThatThrownBy(() -> service.complete(emptyConversationContext(), validResult()))
+    assertThatThrownBy(
+            () ->
+                service.complete(
+                    emptyConversationContext(), new ObservationGeneration(validResult(), null)))
         .isInstanceOfSatisfying(
             BusinessException.class,
             exception ->
@@ -746,7 +791,10 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.empty());
 
-    assertThatThrownBy(() -> service.complete(emptyConversationContext(), validResult()))
+    assertThatThrownBy(
+            () ->
+                service.complete(
+                    emptyConversationContext(), new ObservationGeneration(validResult(), null)))
         .isInstanceOfSatisfying(
             BusinessException.class,
             exception ->
@@ -977,15 +1025,17 @@ class ObservationReportPersistenceServiceTest {
 
     service.complete(
         htpContext(),
-        resultWithSubjectReports(
-            // 일부러 계약 순서와 다르게 보낸다.
-            List.of(
-                new ObservationGenerationResult.SubjectReportDraft(
-                    "PERSON", List.of("사람을 오른쪽에 그렸어요."), List.of()),
-                new ObservationGenerationResult.SubjectReportDraft(
-                    "HOUSE", List.of("집을 가운데 크게 그렸어요.", "창문을 여러 개 그렸어요."), List.of()),
-                new ObservationGenerationResult.SubjectReportDraft(
-                    "TREE", List.of("나무를 왼쪽에 그렸어요."), List.of()))));
+        new ObservationGeneration(
+            resultWithSubjectReports(
+                // 일부러 계약 순서와 다르게 보낸다.
+                List.of(
+                    new ObservationGenerationResult.SubjectReportDraft(
+                        "PERSON", List.of("사람을 오른쪽에 그렸어요."), List.of()),
+                    new ObservationGenerationResult.SubjectReportDraft(
+                        "HOUSE", List.of("집을 가운데 크게 그렸어요.", "창문을 여러 개 그렸어요."), List.of()),
+                    new ObservationGenerationResult.SubjectReportDraft(
+                        "TREE", List.of("나무를 왼쪽에 그렸어요."), List.of()))),
+            null));
 
     verify(subjectRepository).saveAll(subjectsCaptor.capture());
     List<com.ssafy.b209.report.domain.ReportSubject> subjects = subjectsCaptor.getValue();
@@ -1030,10 +1080,12 @@ class ObservationReportPersistenceServiceTest {
 
     service.complete(
         htpContext(),
-        resultWithSubjectReports(
-            List.of(
-                new ObservationGenerationResult.SubjectReportDraft(
-                    "HOUSE", List.of("집을 크게 그렸어요."), List.of(0, 99)))));
+        new ObservationGeneration(
+            resultWithSubjectReports(
+                List.of(
+                    new ObservationGenerationResult.SubjectReportDraft(
+                        "HOUSE", List.of("집을 크게 그렸어요."), List.of(0, 99)))),
+            null));
 
     verify(subjectRepository).saveAll(subjectsCaptor.capture());
     com.ssafy.b209.report.domain.ReportSubject house = subjectsCaptor.getValue().get(0);
@@ -1050,7 +1102,8 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
 
-    service.complete(htpContext(), resultWithSubjectReports(List.of()));
+    service.complete(
+        htpContext(), new ObservationGeneration(resultWithSubjectReports(List.of()), null));
 
     verify(interpretationRepository).saveAll(any());
     verify(evidenceItemRepository).saveAll(any());

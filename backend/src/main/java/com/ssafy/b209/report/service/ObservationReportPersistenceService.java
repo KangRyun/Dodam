@@ -47,6 +47,7 @@ import com.ssafy.b209.report.domain.ReportReference;
 import com.ssafy.b209.report.domain.ReportStatus;
 import com.ssafy.b209.report.domain.ReportSubject;
 import com.ssafy.b209.report.domain.ReportSubjectQaPair;
+import com.ssafy.b209.report.dto.ObservationGeneration;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummaryDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DrawnItemDraft;
@@ -454,7 +455,22 @@ public class ObservationReportPersistenceService {
    * @throws IllegalStateException 그림 활동 세션이 REPORTING 중인 진행 상태가 아닌 경우
    */
   @Transactional(propagation = Propagation.REQUIRES_NEW)
-  public void complete(ObservationGenerationContext context, ObservationGenerationResult result) {
+  public void complete(ObservationGenerationContext context, ObservationGeneration generation) {
+    complete(context, generation.result(), generation.rawJson());
+  }
+
+  /**
+   * 관찰 결과를 저장하고 리포트를 완료 상태로 만든다.
+   *
+   * <p>{@code ObservationGenerationResult} 만 받는 형태를 따로 두지 않는다 — 오버로드가 있으면 {@code complete(any(),
+   * any())} 같은 호출이 어느 쪽인지 모호해진다.
+   *
+   * @param context 생성 맥락
+   * @param result 계약 스키마로 읽은 결과
+   * @param rawJson AI 응답 원문이며 없으면 {@code null}
+   */
+  private void complete(
+      ObservationGenerationContext context, ObservationGenerationResult result, String rawJson) {
     DrawingAnalysis analysis =
         analysisRepository
             .findByIdForUpdate(context.analysisId())
@@ -571,6 +587,9 @@ public class ObservationReportPersistenceService {
       saveReferences(report, safeList(result.ragReferences()));
 
       report.complete(draft.expertReviewRequired(), result.limitationsText(), now);
+      // AI 원문을 그대로 보관한다. 계약 스키마로 읽는 순간 스키마 밖 서술이 사라지므로, 나중에
+      //   "무엇이 버려졌나"를 확인할 방법이 저장뿐이다(S15P11B209-980). 조회 때는 만들 수 없다.
+      report.storeAiRawReport(rawJson);
       Optional<HtpAssessment> htpAssessment =
           htpAssessmentRepository.findByStepDrawingSessionIdForUpdate(
               analysis.getDrawingSession().getId());

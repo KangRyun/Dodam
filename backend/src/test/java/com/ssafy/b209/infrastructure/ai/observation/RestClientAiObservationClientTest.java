@@ -9,6 +9,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.ssafy.b209.report.dto.ObservationGeneration;
 import com.ssafy.b209.report.dto.ObservationGenerationRequest;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import jakarta.validation.Validation;
@@ -41,7 +42,27 @@ class RestClientAiObservationClientTest {
             builder.build(),
             "/internal/v1/observations",
             "internal-token",
-            Validation.buildDefaultValidatorFactory().getValidator());
+            Validation.buildDefaultValidatorFactory().getValidator(),
+            new ObjectMapper());
+  }
+
+  @Test
+  void keepsTheResponseBodyVerbatimIncludingFieldsTheSchemaDoesNotHave() {
+    // 계약 스키마로 곧바로 읽으면 스키마에 없는 필드가 읽는 순간 사라져, 무엇이 버려졌는지 확인할
+    //   방법이 없다. 원문을 함께 들고 나와야 한다(S15P11B209-980).
+    String body =
+        successResponse("request-1")
+            .replaceFirst("\\{", "{\n  \"스키마에 없는 필드\": {\"주제\": \"집 그림\", \"서술\": [\"창문을 크게\"]},");
+    server
+        .expect(requestTo(ENDPOINT_URL))
+        .andRespond(withSuccess(body, MediaType.APPLICATION_JSON));
+
+    ObservationGeneration generation = client.generate(validRequest());
+
+    // 계약 스키마는 그대로 읽히고,
+    assertThat(generation.result().requestId()).isEqualTo("request-1");
+    // 스키마 밖 서술도 원문에 남아 있다.
+    assertThat(generation.rawJson()).contains("스키마에 없는 필드").contains("창문을 크게");
   }
 
   @Test
@@ -52,7 +73,7 @@ class RestClientAiObservationClientTest {
         .andExpect(header("X-Request-Id", "request-1"))
         .andRespond(withSuccess(successResponse("request-1"), MediaType.APPLICATION_JSON));
 
-    ObservationGenerationResult result = client.generate(validRequest());
+    ObservationGenerationResult result = client.generate(validRequest()).result();
 
     assertThat(result.requestId()).isEqualTo("request-1");
     assertThat(result.modelName()).isEqualTo("observation-generator");
@@ -295,7 +316,8 @@ class RestClientAiObservationClientTest {
                     builder.build(),
                     "/internal/v1/observations",
                     " ",
-                    Validation.buildDefaultValidatorFactory().getValidator()))
+                    Validation.buildDefaultValidatorFactory().getValidator(),
+                    new ObjectMapper()))
         .isInstanceOf(IllegalArgumentException.class);
   }
 
@@ -415,7 +437,7 @@ class RestClientAiObservationClientTest {
                 subjectReportResponse("request-1"),
                 org.springframework.http.MediaType.APPLICATION_JSON));
 
-    ObservationGenerationResult result = client.generate(validRequest());
+    ObservationGenerationResult result = client.generate(validRequest()).result();
 
     assertThat(result.subjectReports())
         .extracting(ObservationGenerationResult.SubjectReportDraft::subjectType)
@@ -441,7 +463,7 @@ class RestClientAiObservationClientTest {
             withSuccess(
                 successResponse("request-1"), org.springframework.http.MediaType.APPLICATION_JSON));
 
-    ObservationGenerationResult result = client.generate(validRequest());
+    ObservationGenerationResult result = client.generate(validRequest()).result();
 
     assertThat(result.subjectReports()).isEmpty();
     assertThat(result.ragReferences()).isEmpty();
