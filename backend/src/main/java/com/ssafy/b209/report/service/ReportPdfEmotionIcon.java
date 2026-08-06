@@ -1,12 +1,7 @@
 package com.ssafy.b209.report.service;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.Base64;
 import java.util.Locale;
 import java.util.Optional;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 /**
  * 리포트 PDF 에 실을 감정 아이콘과 표시명이다.
@@ -27,17 +22,12 @@ enum ReportPdfEmotionIcon {
   SCARED("무서움", "/images/emotions/dodam_emotion_anxious.png", "SCARED"),
   CALM("편안함", "/images/emotions/dodam_emotion_calm.png", "CALM");
 
-  private static final Logger log = LoggerFactory.getLogger(ReportPdfEmotionIcon.class);
-
   /** 아이콘이 없는 감정의 표시명이다. */
   private static final String UNKNOWN_LABEL = "잘 모르겠음";
 
   private final String label;
   private final String resource;
   private final String[] codes;
-
-  /** 리소스를 읽어 만든 data URI 다. 못 읽었으면 빈 문자열이라 다시 읽지 않는다. */
-  private volatile String dataUri;
 
   ReportPdfEmotionIcon(String label, String resource, String... codes) {
     this.label = label;
@@ -93,24 +83,6 @@ enum ReportPdfEmotionIcon {
    * @return data URI, 못 읽었으면 {@link Optional#empty()}
    */
   Optional<String> dataUri() {
-    String cached = dataUri;
-    if (cached == null) {
-      cached = load();
-      dataUri = cached;
-    }
-    return cached.isEmpty() ? Optional.empty() : Optional.of(cached);
-  }
-
-  private String load() {
-    try (InputStream stream = ReportPdfEmotionIcon.class.getResourceAsStream(resource)) {
-      if (stream == null) {
-        log.warn("감정 아이콘 리소스를 찾을 수 없습니다. resource={}", resource);
-        return "";
-      }
-      return "data:image/png;base64," + Base64.getEncoder().encodeToString(stream.readAllBytes());
-    } catch (IOException exception) {
-      log.warn("감정 아이콘을 읽지 못했습니다. resource={}", resource, exception);
-      return "";
-    }
+    return ReportPdfResource.pngDataUri(resource);
   }
 }

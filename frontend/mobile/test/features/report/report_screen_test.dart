@@ -11,9 +11,7 @@ import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
 import 'package:dodam/features/report/data/dto/report_dtos.dart';
 import 'package:dodam/features/report/domain/repositories/report_repository.dart';
 import 'package:dodam/features/report/domain/services/report_file_actions.dart';
-import 'package:dodam/features/report/presentation/services/report_snapshot_pdf.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -70,54 +68,23 @@ void main() {
     expect(find.textContaining('진단이 아닌 관찰 참고 자료'), findsOneWidget);
   });
 
-  testWidgets('화면에 보이는 리포트를 그대로 PDF로 저장한다', (tester) async {
+  testWidgets('서버가 만든 리포트 PDF를 내려받아 저장한다', (tester) async {
+    // 문서 정본은 서버다(ADR-0003). 앱은 화면을 떠서 굽지 않고 같은 파일을 받아
+    //   저장·공유만 한다 — 앱과 웹이 다른 문서를 만들지 않게 하는 전제다.
     final repository = _ReportRepository();
     final fileActions = _ReportFileActions();
-    final composer = _PdfComposer();
-    await _openReport(
-      tester,
-      repository,
-      fileActions: fileActions,
-      pdfComposer: composer,
-    );
+    await _openReport(tester, repository, fileActions: fileActions);
 
     await tester.ensureVisible(find.byKey(const ValueKey('report-save-pdf')));
     await tester.tap(find.byKey(const ValueKey('report-save-pdf')));
     await tester.pumpAndSettle();
 
-    // 줄글만 담긴 서버 PDF 를 더 내려받지 않는다.
-    expect(repository.exportCalls, isEmpty);
-    expect(repository.downloadUrls, isEmpty);
-    // 섹션마다 따로 떠 간다. 카드 중간에서 잘리지 않게 하는 전제다.
-    expect(composer.capturedSections.length, greaterThan(4));
-    // 화면 밖으로 흐르는 섹션도 배치돼 있어 높이를 갖는다.
-    expect(
-      composer.capturedSections.every((section) => section.size.height > 0),
-      isTrue,
-    );
+    expect(repository.exportCalls, [501]);
+    expect(repository.exportKeys, ['report-export-501']);
+    expect(repository.downloadUrls, ['/api/v1/reports/501/exports/501/file']);
     expect(fileActions.savedFileNames, ['dodam-report-501.pdf']);
     expect(fileActions.savedBytes.single, _pdfBytes);
     expect(find.text('PDF를 저장했어요.'), findsOneWidget);
-  });
-
-  testWidgets('저장 버튼 줄은 PDF에 담지 않는다', (tester) async {
-    final composer = _PdfComposer();
-    await _openReport(tester, _ReportRepository(), pdfComposer: composer);
-
-    await tester.ensureVisible(find.byKey(const ValueKey('report-save-pdf')));
-    await tester.tap(find.byKey(const ValueKey('report-save-pdf')));
-    await tester.pumpAndSettle();
-
-    final captured = composer.capturedSections;
-    final saveButton = tester.renderObject(
-      find.byKey(const ValueKey('report-save-pdf')),
-    );
-    expect(captured.any((section) => _isInside(saveButton, section)), isFalse);
-    // 본문 섹션은 담긴다.
-    final activityInfo = tester.renderObject(
-      find.byKey(const ValueKey('report-activity-info')),
-    );
-    expect(captured.any((section) => _isInside(activityInfo, section)), isTrue);
   });
 
   testWidgets('완료 리포트 PDF 파일을 시스템 공유 화면으로 전달한다', (tester) async {
@@ -133,15 +100,10 @@ void main() {
   });
 
   testWidgets('PDF 처리 중에는 저장과 공유를 중복 실행하지 않는다', (tester) async {
-    final pending = Completer<Uint8List>();
-    final composer = _PdfComposer(pending: pending);
+    final pending = Completer<ReportExportDto>();
+    final repository = _ReportRepository(exportPending: pending);
     final fileActions = _ReportFileActions();
-    await _openReport(
-      tester,
-      _ReportRepository(),
-      fileActions: fileActions,
-      pdfComposer: composer,
-    );
+    await _openReport(tester, repository, fileActions: fileActions);
 
     await tester.ensureVisible(find.byKey(const ValueKey('report-save-pdf')));
     await tester.tap(find.byKey(const ValueKey('report-save-pdf')));
@@ -149,46 +111,41 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('report-share-pdf')));
     await tester.pump();
 
-    expect(composer.requests, hasLength(1));
-    pending.complete(_pdfBytes);
+    expect(repository.exportCalls, [501]);
+    pending.complete(_completedExport);
     await tester.pumpAndSettle();
     expect(fileActions.savedFileNames, ['dodam-report-501.pdf']);
     expect(fileActions.sharedFileNames, isEmpty);
   });
 
-  testWidgets('PDF 저장 실패를 안내하고 다시 시도할 수 있다', (tester) async {
-    final composer = _PdfComposer(
-      error: ApiTransportFailure(type: ApiTransportFailureType.connection),
+  testWidgets('PDF 저장 실패를 안내하고 같은 멱등성 키로 재시도한다', (tester) async {
+    final repository = _ReportRepository(
+      exportError: ApiTransportFailure(
+        type: ApiTransportFailureType.connection,
+      ),
     );
     final fileActions = _ReportFileActions();
-    await _openReport(
-      tester,
-      _ReportRepository(),
-      fileActions: fileActions,
-      pdfComposer: composer,
-    );
+    await _openReport(tester, repository, fileActions: fileActions);
 
     await tester.ensureVisible(find.byKey(const ValueKey('report-save-pdf')));
     await tester.tap(find.byKey(const ValueKey('report-save-pdf')));
     await tester.pumpAndSettle();
     expect(find.text('PDF를 저장하지 못했어요. 다시 시도해 주세요.'), findsOneWidget);
 
-    composer.error = null;
+    repository.exportError = null;
     await tester.tap(find.byKey(const ValueKey('report-save-pdf')));
     await tester.pumpAndSettle();
 
-    expect(composer.requests, hasLength(2));
+    expect(repository.exportKeys, ['report-export-501', 'report-export-501']);
     expect(fileActions.savedFileNames, ['dodam-report-501.pdf']);
   });
 
-  testWidgets('PDF가 아닌 결과는 저장하지 않고 오류를 안내한다', (tester) async {
-    final fileActions = _ReportFileActions();
-    await _openReport(
-      tester,
-      _ReportRepository(),
-      fileActions: fileActions,
-      pdfComposer: _PdfComposer(bytes: Uint8List.fromList(const [0x7B, 0x7D])),
+  testWidgets('PDF가 아닌 응답은 저장하지 않고 오류를 안내한다', (tester) async {
+    final repository = _ReportRepository(
+      downloadBytes: Uint8List.fromList(const [0x7B, 0x7D]),
     );
+    final fileActions = _ReportFileActions();
+    await _openReport(tester, repository, fileActions: fileActions);
 
     await tester.ensureVisible(find.byKey(const ValueKey('report-save-pdf')));
     await tester.tap(find.byKey(const ValueKey('report-save-pdf')));
@@ -198,16 +155,12 @@ void main() {
     expect(find.text('PDF를 저장하지 못했어요. 다시 시도해 주세요.'), findsOneWidget);
   });
 
-  testWidgets('PDF prefix와 비슷하지만 dash가 없는 결과는 저장하지 않는다', (tester) async {
-    final fileActions = _ReportFileActions();
-    await _openReport(
-      tester,
-      _ReportRepository(),
-      fileActions: fileActions,
-      pdfComposer: _PdfComposer(
-        bytes: Uint8List.fromList(const [0x25, 0x50, 0x44, 0x46, 0x78]),
-      ),
+  testWidgets('PDF prefix와 비슷하지만 dash가 없는 응답은 저장하지 않는다', (tester) async {
+    final repository = _ReportRepository(
+      downloadBytes: Uint8List.fromList(const [0x25, 0x50, 0x44, 0x46, 0x78]),
     );
+    final fileActions = _ReportFileActions();
+    await _openReport(tester, repository, fileActions: fileActions);
 
     await tester.ensureVisible(find.byKey(const ValueKey('report-save-pdf')));
     await tester.tap(find.byKey(const ValueKey('report-save-pdf')));
@@ -791,7 +744,6 @@ Future<void> _openReport(
   WidgetTester tester,
   ReportRepository repository, {
   ReportFileActions? fileActions,
-  _PdfComposer? pdfComposer,
   String reportId = '501',
   bool settle = true,
   double textScale = 1.0,
@@ -804,9 +756,6 @@ Future<void> _openReport(
       child: DodamApp(
         reportRepository: repository,
         reportFileActions: fileActions ?? _ReportFileActions(),
-        // 실제 캡처는 GPU 프레임을 읽어 위젯 테스트에서 돌릴 수 없다. 캡처 결과는
-        // report_snapshot_pdf_test 가 따로 확인하고, 여기서는 저장·공유 흐름만 본다.
-        reportPdfComposer: (pdfComposer ?? _PdfComposer()).call,
         voiceAnswerPlaybackRepository: voicePlaybackRepository,
         voiceAnswerAudioPlayerFactory: voicePlayer == null
             ? null
@@ -823,14 +772,25 @@ Future<void> _openReport(
 }
 
 final class _ReportRepository implements ReportRepository {
-  _ReportRepository({ReportDetailDto? report, this.pending, this.error})
-    : report = report ?? _completed;
+  _ReportRepository({
+    ReportDetailDto? report,
+    this.pending,
+    this.error,
+    this.exportPending,
+    this.exportError,
+    Uint8List? downloadBytes,
+  }) : report = report ?? _completed,
+       downloadBytes = downloadBytes ?? _pdfBytes;
 
   ReportDetailDto report;
   final Completer<ReportDetailDto>? pending;
+  final Completer<ReportExportDto>? exportPending;
   Object? error;
+  Object? exportError;
+  final Uint8List downloadBytes;
   final List<int> calls = [];
   final List<int> exportCalls = [];
+  final List<String> exportKeys = [];
   final List<String> downloadUrls = [];
   ReportGenerationStatusDto generationStatus =
       ReportGenerationStatusDto.fromJson(const {
@@ -889,54 +849,21 @@ final class _ReportRepository implements ReportRepository {
     required String idempotencyKey,
   }) => throw UnimplementedError();
 
-  // 화면은 이제 서버 PDF 를 쓰지 않는다. 호출 여부만 기록해 회귀를 잡는다.
   @override
   Future<ReportExportDto> requestExport(
     int reportId, {
     required String idempotencyKey,
   }) async {
     exportCalls.add(reportId);
-    return _completedExport;
+    exportKeys.add(idempotencyKey);
+    if (exportError case final error?) throw error;
+    return exportPending?.future ?? _completedExport;
   }
 
   @override
   Future<Uint8List> downloadExport(String downloadUrl) async {
     downloadUrls.add(downloadUrl);
-    return _pdfBytes;
-  }
-}
-
-/// [candidate] 가 [ancestor] 안에 그려지는지 본다. 캡처에 담기는 범위를 확인한다.
-bool _isInside(RenderObject candidate, RenderObject ancestor) {
-  RenderObject? node = candidate.parent;
-  while (node != null) {
-    if (node == ancestor) return true;
-    node = node.parent;
-  }
-  return false;
-}
-
-/// 화면 캡처 대신 정해진 바이트를 돌려주는 PDF 합성 경계다.
-///
-/// 실제 캡처는 GPU 프레임을 읽어 위젯 테스트에서 돌아가지 않는다. 어떤 경계를 떠 가는지와
-/// 저장·공유 흐름만 여기서 확인하고, 캡처 결과 자체는 report_snapshot_pdf_test 가 본다.
-final class _PdfComposer {
-  _PdfComposer({this.pending, this.error, Uint8List? bytes})
-    : bytes = bytes ?? _pdfBytes;
-
-  final Completer<Uint8List>? pending;
-  Object? error;
-  final Uint8List bytes;
-  final List<ReportPdfRequest> requests = [];
-
-  /// 요청마다 넘어온 섹션 경계다. 마지막 요청 것만 보면 충분하다.
-  List<RenderRepaintBoundary> get capturedSections =>
-      requests.isEmpty ? const [] : requests.last.sections;
-
-  Future<Uint8List> call(ReportPdfRequest request) async {
-    requests.add(request);
-    if (error case final failure?) throw failure;
-    return pending?.future ?? bytes;
+    return downloadBytes;
   }
 }
 

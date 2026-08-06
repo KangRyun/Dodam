@@ -58,8 +58,13 @@ final class ReportPdfTemplate {
   /** A4 폭에서 좌우 여백을 뺀 본문 폭이다(210 - 14 * 2). 그림 배치 크기를 여기에 맞춘다. */
   private static final double CONTENT_WIDTH_MM = 182;
 
-  /** 표지 대표 그림의 높이 상한이다. 제목·고지·요약과 한 장에 함께 들어가야 한다. */
-  private static final double COVER_IMAGE_MAX_HEIGHT_MM = 92;
+  /**
+   * 표지 대표 그림의 높이 상한이다.
+   *
+   * <p>제목·고지·요약과 <b>한 장에 함께</b> 들어가야 한다. 넘치면 그림이 다음 장으로 밀리고, 표지 뒤에서 장을 넘기므로 그림만 있는 장이 하나 생긴다. 요약
+   * 문장이 길어질 여지까지 보고 여유를 둔 값이다(요약 3줄 기준).
+   */
+  private static final double COVER_IMAGE_MAX_HEIGHT_MM = 54;
 
   /** 주제별 그림의 높이 상한이다. 관찰 서술과 문답이 같은 카드에 이어진다. */
   private static final double SUBJECT_IMAGE_MAX_HEIGHT_MM = 80;
@@ -67,7 +72,15 @@ final class ReportPdfTemplate {
   /** 표지에 세 장을 나란히 놓을 때 한 칸의 폭이다(본문 폭 182 을 셋으로 나누고 사이 여백을 뺀 값). */
   private static final double STRIP_IMAGE_WIDTH_MM = 56;
 
-  private static final double STRIP_IMAGE_MAX_HEIGHT_MM = 50;
+  private static final double STRIP_IMAGE_MAX_HEIGHT_MM = 42;
+
+  /** 화면 표지의 안내 캐릭터다. 앱 자산({@code assets/characters})과 같은 파일을 서버에도 둔다. */
+  private static final String MASCOT_RESOURCE = "/images/mascot/report_mascot_intro.png";
+
+  private static final double MASCOT_WIDTH_MM = 34;
+
+  /** 마스코트 원본 비율(480 x 560)이다. 앱의 {@code ReportMascotImage} 와 같은 값이다. */
+  private static final double MASCOT_ASPECT_RATIO = 560.0 / 480.0;
 
   private static final DateTimeFormatter DATE_TIME_FORMATTER =
       DateTimeFormatter.ofPattern("yyyy년 M월 d일 HH:mm");
@@ -115,14 +128,14 @@ final class ReportPdfTemplate {
   private String cover() {
     StringBuilder cover = new StringBuilder();
     cover.append("<div class=\"cover\">");
-    cover.append("<div class=\"cover-head keep\">");
+    // 제목 묶음과 마스코트를 나란히 둔다. flex 가 없으니 표로 짠다.
+    cover.append("<table class=\"cover-head keep\"><tr><td class=\"cover-copy\">");
     cover.append("<div class=\"brand\">도담</div>");
     cover.append("<h1>도담 관찰 리포트</h1>");
-    if (isHtpActivity()) {
-      cover.append("<div class=\"cover-sub\">집·나무·사람, 세 그림 이야기</div>");
-    }
+    cover.append("<div class=\"cover-sub\">").append(escape(coverHeadline())).append("</div>");
+    cover.append("<p class=\"cover-lead\">").append(escape(coverLead())).append("</p>");
     cover.append(coverMeta());
-    cover.append("</div>");
+    cover.append("</td>").append(coverMascot()).append("</tr></table>");
     if (has(report.nonDiagnosticNotice())) {
       cover.append("<div class=\"notice keep\">").append(escape(report.nonDiagnosticNotice()));
       cover.append("</div>");
@@ -131,6 +144,38 @@ final class ReportPdfTemplate {
     cover.append(coverDrawing());
     cover.append("</div>");
     return cover.toString();
+  }
+
+  /**
+   * 표지 문구는 보호자 화면의 표지 카드와 같은 것을 쓴다({@code report_screen.dart} 의 {@code _ReportHero}).
+   *
+   * <p>화면은 "함께 돌아보자"고 말을 걸고 PDF 는 사무적인 제목만 낸다면, 같은 리포트가 두 인격으로 읽힌다. 집·나무·사람은 검사 이름·결과 표현을 쓰지
+   * 않는다(CLAUDE.md 5절).
+   */
+  private String coverHeadline() {
+    return isHtpActivity() ? "집·나무·사람, 세 그림 이야기" : "그림 속 이야기를 함께 돌아볼까요?";
+  }
+
+  private String coverLead() {
+    return isHtpActivity()
+        ? "집과 나무와 사람을 그리면서 아이가 들려준 이야기를 모았어요."
+        : "돌아보기 친구가 아이의 그림과 이야기를 차근차근 정리했어요.";
+  }
+
+  /**
+   * 화면 표지에 있는 안내 캐릭터를 표지에 함께 둔다.
+   *
+   * <p>장식이다. 못 읽으면 칸 자체를 만들지 않아 제목 묶음이 폭을 다 쓴다 — 빈 칸이 남는 것보다 낫다.
+   */
+  private String coverMascot() {
+    Optional<String> mascot = ReportPdfResource.pngDataUri(MASCOT_RESOURCE);
+    if (mascot.isEmpty()) return "";
+    return String.format(
+        Locale.ROOT,
+        "<td class=\"cover-mascot\"><img style=\"width:%.1fmm;height:%.1fmm\" src=\"%s\" /></td>",
+        MASCOT_WIDTH_MM,
+        MASCOT_WIDTH_MM * MASCOT_ASPECT_RATIO,
+        mascot.get());
   }
 
   /** 표지 정보를 라벨·값 표로 낸다. 라벨과 값은 같은 행이라 갈라지지 않는다. */
@@ -673,10 +718,14 @@ final class ReportPdfTemplate {
         body { font-family: '%s'; font-size: 10pt; color: #27313A; line-height: 1.6; }
         p { margin: 0 0 4px 0; }
         .cover { page-break-after: always; }
+        .cover-head { width: 100%%; }
+        .cover-copy { vertical-align: top; }
+        .cover-mascot { width: 36mm; vertical-align: top; text-align: right; }
         .brand { font-size: 9pt; letter-spacing: 2px; color: #5F9E73; margin-bottom: 4mm; }
         h1 { font-size: 22pt; font-weight: bold; margin: 0; }
-        .cover-sub { font-size: 12pt; color: #68737D; margin-top: 2mm; }
-        .cover-meta { margin-top: 6mm; }
+        .cover-sub { font-size: 13pt; font-weight: bold; color: #27313A; margin-top: 3mm; }
+        .cover-lead { color: #68737D; margin-top: 1.5mm; }
+        .cover-meta { margin-top: 5mm; }
         .cover-meta th, .cover-meta td { padding: 2px 0; }
 
         .notice { margin-top: 6mm; border: 1px solid #DDE2DC; border-left: 3px solid #5F9E73;

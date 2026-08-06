@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../app/widgets/app_failure_view.dart';
@@ -15,7 +13,6 @@ import '../../data/services/platform_report_file_actions.dart';
 import '../../domain/repositories/report_repository.dart';
 import '../../domain/services/report_file_actions.dart';
 import '../format/activity_duration_format.dart';
-import '../services/report_snapshot_pdf.dart';
 import '../widgets/htp_report_gallery.dart';
 import '../widgets/report_mascot.dart';
 
@@ -37,20 +34,15 @@ class ReportScreen extends StatefulWidget {
     required this.repository,
     this.activityRepository,
     ReportFileActions? fileActions,
-    ReportPdfComposer? pdfComposer,
     this.voiceAnswerPlaybackRepository,
     this.voiceAnswerAudioPlayerFactory,
     super.key,
-  }) : fileActions = fileActions ?? const PlatformReportFileActions(),
-       pdfComposer = pdfComposer ?? ReportSnapshotPdf.compose;
+  }) : fileActions = fileActions ?? const PlatformReportFileActions();
 
   final String reportId;
   final ReportRepository repository;
   final ActivityRepository? activityRepository;
   final ReportFileActions fileActions;
-
-  /// 화면을 PDF 로 굽는 경계다. 테스트는 실제 캡처 없이 저장·공유 흐름만 확인한다.
-  final ReportPdfComposer pdfComposer;
   final VoiceAnswerPlaybackRepository? voiceAnswerPlaybackRepository;
   final VoiceAnswerAudioPlayerFactory? voiceAnswerAudioPlayerFactory;
 
@@ -68,19 +60,6 @@ class _ReportScreenState extends State<ReportScreen>
   bool _isRegenerating = false;
   VoiceAnswerPlaybackController? _playbackController;
   int _loadGeneration = 0;
-
-  /// 저장·공유할 때 떠 갈 섹션들이다. 저장 버튼 줄은 여기에 넣지 않는다.
-  ///
-  /// 본문 전체를 한 장의 긴 이미지로 뜨면 종이 크기로 자를 때 카드 중간이 잘린다. 섹션마다
-  /// 따로 떠 두면 들어갈 자리가 있는 섹션만 그 장에 채울 수 있다.
-  final List<GlobalKey> _snapshotKeys = [];
-
-  GlobalKey _snapshotKeyAt(int index) {
-    while (_snapshotKeys.length <= index) {
-      _snapshotKeys.add(GlobalKey(debugLabel: 'report-snapshot-$index'));
-    }
-    return _snapshotKeys[index];
-  }
 
   @override
   void initState() {
@@ -239,7 +218,17 @@ class _ReportScreenState extends State<ReportScreen>
 
     setState(() => _pdfAction = action);
     try {
-      final bytes = await _composeSnapshotPdf();
+      final export = await widget.repository.requestExport(
+        report.reportId,
+        idempotencyKey: 'report-export-${report.reportId}',
+      );
+      if (!export.isReady ||
+          export.reportId != report.reportId ||
+          export.downloadUrl !=
+              '/api/v1/reports/${report.reportId}/exports/${export.exportId}/file') {
+        throw const _ReportExportNotReady();
+      }
+      final bytes = await widget.repository.downloadExport(export.downloadUrl!);
       if (!_isPdf(bytes)) {
         throw const _ReportExportNotReady();
       }
@@ -281,30 +270,6 @@ class _ReportScreenState extends State<ReportScreen>
         setState(() => _pdfAction = null);
       }
     }
-  }
-
-  /// 화면에 보이는 리포트를 그대로 PDF 로 만든다.
-  ///
-  /// ⚠️ 정본은 서버다(ADR-0003). 이 경로는 서버 템플릿 전환까지만 남기고 제거한다
-  /// (S15P11B209-968·969). 문서 디자인 개선은 서버 템플릿에 넣는다.
-  ///
-  /// 서버 PDF 는 줄글만 담아 카드·색·그림·감정이 빠진다. 보호자가 화면에서 본 것과 저장한
-  /// 파일이 다르면 저장한 쪽을 믿을 수 없으므로 화면을 그대로 싣는다.
-  Future<Uint8List> _composeSnapshotPdf() async {
-    // 저장 버튼이 진행 표시로 바뀐 프레임까지 그려진 뒤에 떠야 한다. 그 전에 캡처하면
-    // 아직 배치 전인 경계를 읽어 실패한다.
-    await WidgetsBinding.instance.endOfFrame;
-    final sections = <RenderRepaintBoundary>[];
-    for (final key in _snapshotKeys) {
-      final boundary = key.currentContext?.findRenderObject();
-      if (boundary is RenderRepaintBoundary && boundary.attached) {
-        sections.add(boundary);
-      }
-    }
-    if (sections.isEmpty) throw const _ReportExportNotReady();
-    return widget.pdfComposer(
-      ReportPdfRequest(sections: sections, title: '도담 관찰 리포트'),
-    );
   }
 
   Rect? _currentScreenRect() {
@@ -368,7 +333,6 @@ class _ReportScreenState extends State<ReportScreen>
     ),
     _ReportViewStatus.completed => _ReportContent(
       report: _report!,
-      snapshotKeyAt: _snapshotKeyAt,
       pdfAction: _pdfAction,
       onSavePdf: () => _handlePdf(_ReportPdfAction.save),
       onSharePdf: () => _handlePdf(_ReportPdfAction.share),
@@ -419,7 +383,6 @@ class _ReportStateWithHome extends StatelessWidget {
 class _ReportContent extends StatelessWidget {
   const _ReportContent({
     required this.report,
-    required this.snapshotKeyAt,
     required this.pdfAction,
     required this.onSavePdf,
     required this.onSharePdf,
@@ -428,9 +391,6 @@ class _ReportContent extends StatelessWidget {
     required this.activityRepository,
   });
   final ReportDetailDto report;
-
-  /// 섹션 순서대로 캡처 경계 key 를 내준다. 저장·공유가 이 단위로 떠 간다.
-  final GlobalKey Function(int index) snapshotKeyAt;
   final _ReportPdfAction? pdfAction;
   final VoidCallback onSavePdf;
   final VoidCallback onSharePdf;
@@ -501,15 +461,9 @@ class _ReportContent extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // 섹션마다 따로 떠 간다. 본문을 한 장의 긴 이미지로 뜨면 종이 크기로 자를
-                // 때 카드 중간이 잘린다. 저장 버튼 줄은 경계 밖이라 파일에 담기지 않는다.
                 for (final (index, section) in sections.indexed) ...[
                   if (index > 0) const SizedBox(height: AppSpacing.lg),
-                  RepaintBoundary(
-                    key: snapshotKeyAt(index),
-                    // 투명한 곳이 있으면 PDF 뷰어가 검게 보여 준다. 종이색을 깔아 둔다.
-                    child: ColoredBox(color: AppColors.canvas, child: section),
-                  ),
+                  section,
                 ],
                 const SizedBox(height: AppSpacing.lg),
                 _ReportActionSection(
@@ -1031,10 +985,7 @@ const _interpretationOrder = <String>[
 ///
 /// [isHtp]이면 제목을 검사 판정 어휘("주요 심리 경향")에서 대화 소재 표현으로
 /// 바꾼다. HTP를 검사로 표현·해석하지 않는다는 원칙(CLAUDE.md 5절) 때문이다.
-Widget? _interpretationsSection(
-  ReportDetailDto report, {
-  bool isHtp = false,
-}) {
+Widget? _interpretationsSection(ReportDetailDto report, {bool isHtp = false}) {
   if (report.publicInterpretations.isEmpty) return null;
   int rank(ReportInterpretationDto item) {
     final index = _interpretationOrder.indexOf(item.category ?? '');

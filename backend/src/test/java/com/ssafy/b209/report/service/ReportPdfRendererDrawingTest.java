@@ -3,7 +3,9 @@ package com.ssafy.b209.report.service;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ssafy.b209.drawing.service.DrawingAssetFileUrlFactory;
+import com.ssafy.b209.report.dto.ReportActivityFactsResponse;
 import com.ssafy.b209.report.dto.ReportChildExpressionResponse;
+import com.ssafy.b209.report.dto.ReportConversationSummaryResponse;
 import com.ssafy.b209.report.dto.ReportDetailResponse;
 import com.ssafy.b209.report.dto.ReportDrawingResponse;
 import com.ssafy.b209.report.dto.ReportDrawingSessionResponse;
@@ -41,10 +43,24 @@ class ReportPdfRendererDrawingTest {
 
   @Test
   void embedsResolvedDrawingImage() throws Exception {
-    byte[] pdf = renderer(asset(1200, 900)).render(reportWithDrawing());
+    // 표지 마스코트가 항상 실리므로 "그림이 있다"만으로는 아이 그림이 실렸는지 알 수 없다.
+    //   같은 리포트를 그림 없이 그린 것과 견주어 그림 한 장이 더 들어갔는지 본다.
+    int withDrawing = imageCount(renderer(asset(1200, 900)).render(reportWithDrawing()));
+    int withoutDrawing = imageCount(renderer(null).render(reportWithDrawing()));
+
+    assertThat(withDrawing).isEqualTo(withoutDrawing + 1);
+  }
+
+  @Test
+  void keepsCoverOnOnePageEvenWithALongSummaryAndDrawing() throws Exception {
+    // 표지 뒤에서 장을 넘긴다. 그림이 표지에 안 들어가면 그림 한 장만 있는 장이 생기고 본문이
+    //   셋째 장으로 밀린다. 요약 문장은 AI 가 쓰므로 길이를 보장할 수 없다 — 긴 쪽으로 본다.
+    byte[] pdf = renderer(asset(1024, 768)).render(reportWithLongSummaryAndDrawing());
 
     try (PDDocument document = Loader.loadPDF(pdf)) {
-      assertThat(hasImageXObject(document)).isTrue();
+      assertThat(pageText(document, 1)).contains("한눈에 보기").contains("아이가 그린 그림");
+      // 둘째 장이 곧바로 본문이다.
+      assertThat(pageText(document, 2)).contains("활동 정보");
     }
   }
 
@@ -55,7 +71,6 @@ class ReportPdfRendererDrawingTest {
 
     try (PDDocument document = Loader.loadPDF(pdf)) {
       assertThat(new PDFTextStripper().getText(document)).contains("도담 관찰 리포트");
-      assertThat(hasImageXObject(document)).isFalse();
     }
   }
 
@@ -148,13 +163,32 @@ class ReportPdfRendererDrawingTest {
   }
 
   private boolean hasImageXObject(PDDocument document) throws IOException {
+    return imageCount(document) > 0;
+  }
+
+  private int imageCount(byte[] pdf) throws IOException {
+    try (PDDocument document = Loader.loadPDF(pdf)) {
+      return imageCount(document);
+    }
+  }
+
+  /** 문서에 실린 이미지 수다. 같은 이미지가 여러 장에 쓰이면 장마다 센다. */
+  private int imageCount(PDDocument document) throws IOException {
+    int count = 0;
     for (int page = 0; page < document.getNumberOfPages(); page++) {
       PDResources resources = document.getPage(page).getResources();
       for (COSName name : resources.getXObjectNames()) {
-        if (resources.isImageXObject(name)) return true;
+        if (resources.isImageXObject(name)) count++;
       }
     }
-    return false;
+    return count;
+  }
+
+  private String pageText(PDDocument document, int page) throws IOException {
+    PDFTextStripper stripper = new PDFTextStripper();
+    stripper.setStartPage(page);
+    stripper.setEndPage(page);
+    return stripper.getText(document);
   }
 
   private int pageContaining(PDDocument document, String marker) throws IOException {
@@ -175,6 +209,48 @@ class ReportPdfRendererDrawingTest {
 
   private ReportDetailResponse reportWithDrawingUrl(String fileUrl) {
     return base(new ReportDrawingResponse(fileUrl, fileUrl), null, List.of(), List.of(), null);
+  }
+
+  /** 표지가 가장 빽빽해지는 모양이다 — 감정·수치·긴 요약·대표 그림이 모두 있다. */
+  private ReportDetailResponse reportWithLongSummaryAndDrawing() {
+    ReportDetailResponse base =
+        base(
+            new ReportDrawingResponse(DRAWING_URL, DRAWING_URL),
+            new ReportChildExpressionResponse(
+                List.of("HAPPY", "CALM", "SAD"), "동생이랑 놀아서 좋았어요", List.of()),
+            List.of(),
+            List.of(),
+            null);
+    return new ReportDetailResponse(
+        base.reportId(),
+        base.reportVersion(),
+        base.reportStatus(),
+        base.drawingSession(),
+        base.drawing(),
+        base.childExpression(),
+        base.observedFeatures(),
+        new ReportActivityFactsResponse(
+            List.of("사람", "집"), 560_000L, 2, 1, false, List.of("필압 정보 없음")),
+        new ReportConversationSummaryResponse(
+            4,
+            4,
+            0,
+            "아이는 가족과 함께 있는 장면을 이야기했고 편안한 목소리로 대화를 이어 갔어요."
+                + " 그림을 그리는 동안에도 무엇을 그리는지 스스로 설명했고, 질문을 받으면 잠시 생각한 뒤 자기 말로 답했어요."
+                + " 마지막에는 오늘 그린 그림을 가족에게 보여 주고 싶다고 말했어요."),
+        base.guardianConversationGuide(),
+        base.limitations(),
+        base.expertReview(),
+        base.createdAt(),
+        base.nonDiagnosticNotice(),
+        base.publicInterpretations(),
+        base.evidenceItems(),
+        base.subjectReports(),
+        base.parentGuides(),
+        base.crisisAlert(),
+        base.references(),
+        base.activityType(),
+        base.childDisplayName());
   }
 
   private ReportDetailResponse reportWithEmotions(List<String> emotions) {

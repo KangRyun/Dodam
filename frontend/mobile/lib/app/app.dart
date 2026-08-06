@@ -36,7 +36,6 @@ import '../features/report/data/repositories/mock_report_repository.dart';
 import '../features/report/data/services/platform_report_file_actions.dart';
 import '../features/report/domain/repositories/report_repository.dart';
 import '../features/report/domain/services/report_file_actions.dart';
-import '../features/report/presentation/services/report_snapshot_pdf.dart';
 import '../features/settings/data/repositories/mock_account_withdrawal_repository.dart';
 import '../features/settings/data/repositories/mock_data_retention_repository.dart';
 import '../features/settings/data/repositories/mock_notification_settings_repository.dart';
@@ -65,7 +64,6 @@ class DodamApp extends StatefulWidget {
     this.drawingRepository = const MockDrawingRepository(),
     this.reportRepository = const MockReportRepository(),
     this.reportFileActions = const PlatformReportFileActions(),
-    this.reportPdfComposer,
     this.drawingCompletionSnapshotProvider,
     this.authSessionStore,
     this.authRepository,
@@ -109,9 +107,6 @@ class DodamApp extends StatefulWidget {
   final DrawingRepository drawingRepository;
   final ReportRepository reportRepository;
   final ReportFileActions reportFileActions;
-
-  /// 리포트 화면을 PDF 로 굽는 경계다. 테스트는 실제 캡처 없이 저장 흐름만 확인한다.
-  final ReportPdfComposer? reportPdfComposer;
   final Future<BinaryUploadDto?> Function()? drawingCompletionSnapshotProvider;
   final AuthSessionStore? authSessionStore;
   final AuthRepository? authRepository;
@@ -616,7 +611,6 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       drawingRepository: widget.drawingRepository,
       reportRepository: widget.reportRepository,
       reportFileActions: widget.reportFileActions,
-      reportPdfComposer: widget.reportPdfComposer,
       notificationInboxRepository: widget.notificationInboxRepository,
       notificationBadgeController: _notificationBadgeController,
       pushRegistrationStatus: _pushRegistrationStatus,
