@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 
 import 'package:dodam/app/router/app_routes.dart';
 import 'package:dodam/core/network/api_page.dart';
+import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/activity/data/dto/activity_dtos.dart';
 import 'package:dodam/features/activity/domain/repositories/activity_repository.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
@@ -860,6 +861,140 @@ void main() {
     expect(find.text('활동 기록 자세히 보기'), findsNothing);
   });
 
+  // ── S15P11B209-1004 시각 문법 ─────────────────────────────────────────
+  // 2026-08-07 실기기 판정: HTP는 순서만 바뀌고 시각은 구형 카드 쌓기 그대로라
+  // 사용자가 두 리포트를 나란히 보고 "그림일기처럼 안 바뀌었다"고 했다. 아래
+  // 세 테스트가 그 판정을 코드로 못 박는다 — 배경 카드가 다시 늘어나면 깨진다.
+  testWidgets('HTP 리포트도 한 장 문법을 쓰고 배경 구획은 해석 하나뿐이다', (tester) async {
+    _setViewport(tester, const Size(390, 844));
+    await _pumpReport(tester, report: _visualGrammarHtpReport());
+
+    // 표지·그림 이야기·아이의 말·관찰·가이드는 바깥 한 장 말고 자기 배경이 없다.
+    // (바깥 한 장 = 리포트 전체를 감싸는 종이 1개)
+    for (final key in const [
+      'report-activity-info',
+      'report-htp-subject-stories',
+      'report-child-expression',
+      'report-observed-features',
+      'report-parent-guide-DRAWING_CONVERSATION',
+    ]) {
+      expect(_shellColors(tester, key), [AppColors.surface], reason: key);
+    }
+    // 해석만 자기 배경을 갖는다 — 이야기를 따라오다 도달하는 도착점이라
+    // 유일한 예외로 남겼다. 예외가 둘이 되면 강조가 강조가 아니게 된다.
+    expect(
+      _shellColors(tester, 'report-interpretations'),
+      containsAll(<Color>[AppColors.lavenderSoft, AppColors.surface]),
+    );
+    expect(_shellColors(tester, 'report-interpretations'), hasLength(2));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('HTP 표지가 비진단 안내와 활동 개요를 안으로 품는다', (tester) async {
+    _setViewport(tester, const Size(390, 844));
+    await _pumpReport(tester, report: _visualGrammarHtpReport());
+
+    // 예전에는 표지 아래에 '한눈에 보는 이번 활동' 노란 카드가 따로 붙어 있었다.
+    // 표지가 이야기의 문이 되려면 "어떤 활동이었나"가 표지 안에 있어야 한다
+    // (996이 그림일기에서 한 방식 그대로).
+    final hero = find.byKey(const ValueKey('report-hero'));
+    expect(hero, findsOneWidget);
+    for (final key in const [
+      'report-non-diagnostic-notice',
+      'report-activity-info',
+    ]) {
+      expect(
+        find.descendant(of: hero, matching: find.byKey(ValueKey(key))),
+        findsOneWidget,
+        reason: key,
+      );
+    }
+    // 표지 안에 있어도 활동 개요 내용 자체는 그대로다.
+    expect(find.text('집·나무·사람 그림'), findsOneWidget);
+    expect(find.text('그린 그림 올리기'), findsOneWidget);
+    // 검사 투 제목('한눈에 보는 이번 활동' 카드)은 사라졌다.
+    expect(find.text('한눈에 보는 이번 활동'), findsNothing);
+  });
+
+  testWidgets('HTP 주제 이야기는 아이의 말을 질문보다 앞세워 인용한다', (tester) async {
+    _setViewport(tester, const Size(390, 844));
+    await _pumpReport(tester, report: _visualGrammarHtpReport());
+
+    // 아이 발화가 해석의 최상위 근거다(CLAUDE.md 2절). 대화 전문 모양(질문이
+    // 굵고 답이 흐림)을 그대로 쓰면 근거가 배경으로 밀린다 — 여기서는 뒤집는다.
+    final question = tester.widget<Text>(find.text('Q. 이 집에는 누가 살아요?'));
+    final answer = tester.widget<Text>(find.text('A. 엄마랑 나랑 살아요'));
+    expect(question.style?.color, AppColors.inkMuted);
+    expect(answer.style?.color, AppColors.ink);
+    expect(answer.style?.fontWeight, FontWeight.w700);
+    // 건너뛴 질문은 아이가 한 말이 아니다 — 인용 모양에서도 승격하지 않는다.
+    final skipped = tester.widget<Text>(find.text('A. 이 질문은 건너뛰었어요'));
+    expect(skipped.style?.color, AppColors.inkMuted);
+  });
+
+  // 실데이터 스모크(2026-08-07): 리포트 177은 해석 0건, 178은 EMOTION·
+  // RELATIONSHIP 둘 다 STRONG이다. 한 장 문법으로 옮긴 뒤 두 끝값이 모두
+  // 살아 있는지 본다.
+  testWidgets('해석 0건 HTP 리포트는 빈 안내를 제자리에 그린다', (tester) async {
+    _setViewport(tester, const Size(390, 844));
+    await _pumpReport(
+      tester,
+      report: _fullReport(isHtp: true, publicInterpretations: const []),
+    );
+
+    expect(
+      find.byKey(const ValueKey('report-interpretations-empty')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('해석을 담지 않았어요'), findsOneWidget);
+    // 빈 안내도 해석 자리를 지키는 구획이라 배경을 그대로 갖는다.
+    expect(
+      _shellColors(tester, 'report-interpretations-empty'),
+      containsAll(<Color>[AppColors.lavenderSoft, AppColors.surface]),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('해석 2건 STRONG HTP 리포트는 카드와 배지를 모두 그린다', (tester) async {
+    _setViewport(tester, const Size(390, 844));
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        isHtp: true,
+        publicInterpretations: const [
+          ReportInterpretationDto(
+            category: 'EMOTION',
+            title: '편안한 마음',
+            tendencyText: '편안함을 표현했을 수 있어요.',
+            scopeText: '이번 그림에서 나타난 가능성입니다.',
+            homeObservationGuide: '집에서도 편안해 보이는지 살펴봐 주세요.',
+            evidenceRefs: [],
+            confidence: 'STRONG',
+          ),
+          ReportInterpretationDto(
+            category: 'RELATIONSHIP',
+            title: '가족과의 연결',
+            tendencyText: '가족에게 의지하려는 경향이 보일 수 있습니다.',
+            scopeText: '이번 그림에서 나타난 가능성입니다.',
+            homeObservationGuide: '보호자의 확인을 구하는지 살펴봐 주세요.',
+            evidenceRefs: [],
+            confidence: 'STRONG',
+          ),
+        ],
+      ),
+    );
+
+    expect(find.byKey(const ValueKey('report-interpretation-0')), findsOneWidget);
+    expect(find.byKey(const ValueKey('report-interpretation-1')), findsOneWidget);
+    expect(find.text('근거가 강해요'), findsNWidgets(2));
+    // 정렬은 화면 순서(관계 → 감정)를 따른다 — 한 장으로 옮겨도 그대로다.
+    expect(
+      tester.getTopLeft(find.text('가족과의 연결')).dy,
+      lessThan(tester.getTopLeft(find.text('편안한 마음')).dy),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('HTP는 검사 투 제목 대신 대화 소재 문구를 쓴다', (tester) async {
     await _pumpReport(
       tester,
@@ -1452,6 +1587,81 @@ void main() {
     });
   }
 }
+
+/// 한 구획을 감싸고 있는 **종이(카드)**들의 배경색을, 가까운 것부터 순서대로.
+///
+/// 리포트 카드([_ReportCard])만 그림자를 지므로 그림자 있는 Container 조상을
+/// 세면 "이 구획이 자기 배경을 갖는가"를 그대로 잴 수 있다. 한 장 문법에서
+/// 정상은 길이 1(리포트 전체를 감싸는 종이 하나)이고, 2가 되면 그 구획이
+/// 자기 배경을 하나 더 두른 것이다.
+List<Color?> _shellColors(WidgetTester tester, String key) {
+  // 구획 **안쪽** 첫 글자를 기준점으로 잡는다. 키는 구획 위젯 자신에 달려
+  // 있어서 그 구획의 카드는 키의 **자손**이다 — 키를 기준으로 조상만 세면
+  // 정작 재려던 자기 배경을 놓친다.
+  final anchor = find
+      .descendant(of: find.byKey(ValueKey(key)), matching: find.byType(Text))
+      .first;
+  return [
+    for (final element
+        in find
+            .ancestor(
+              of: anchor,
+              matching: find.byWidgetPredicate((widget) {
+                if (widget is! Container) return false;
+                final decoration = widget.decoration;
+                return decoration is BoxDecoration &&
+                    (decoration.boxShadow?.isNotEmpty ?? false);
+              }),
+            )
+            .evaluate())
+      ((element.widget as Container).decoration! as BoxDecoration).color,
+  ];
+}
+
+/// 시각 문법 검증용 — 인사이트 층이 모두 채워진 HTP 리포트.
+ReportDetailDto _visualGrammarHtpReport() => _fullReport(
+  isHtp: true,
+  publicInterpretations: _copyProbeInterpretations,
+  subjectReports: const [
+    ReportSubjectReportDto(
+      subjectType: 'HOUSE',
+      imageUrl: '/api/v1/drawing-assets/house/file',
+      visionObservations: ['지붕이 크고 창문이 두 개예요.'],
+      qaPairs: [
+        ReportQaPairDto(
+          question: '이 집에는 누가 살아요?',
+          answer: '엄마랑 나랑 살아요',
+          state: 'ANSWERED',
+          inputType: 'TEXT',
+          sttNeedsConfirmation: false,
+          isRepresentative: true,
+        ),
+        ReportQaPairDto(
+          question: '집 앞에는 무엇이 있어요?',
+          answer: null,
+          state: 'SKIPPED',
+          inputType: 'TEXT',
+          sttNeedsConfirmation: false,
+          isRepresentative: true,
+        ),
+      ],
+      interpretationRefs: [0],
+    ),
+  ],
+  observedFeatures: const [
+    ReportObservedFeatureDto(
+      title: '집을 크게 그렸어요',
+      description: '종이 가운데에 집을 크게 그렸어요.',
+      evidenceSummary: '그림에서 확인했어요.',
+    ),
+  ],
+  parentGuides: const [
+    ReportParentGuideDto(
+      guideType: 'DRAWING_CONVERSATION',
+      items: ['그림에서 무엇을 그렸는지 물어봐 주세요.'],
+    ),
+  ],
+);
 
 void _setViewport(WidgetTester tester, Size size) {
   tester.view.physicalSize = size;
