@@ -484,8 +484,15 @@ class _ReportContent extends StatelessWidget {
           : AppSpacing.lg;
       // 데이터가 없는 섹션은 각 빌더가 null을 돌려주어 자연스럽게 빠진다(오류 아님).
       //
-      // 활동에 따라 섹션 구성이 갈린다. 그림일기·자유 그림은 계약 §11의 확정
-      // 순서를 그대로 쓰고, HTP는 아래 [_htpSections]의 전용 순서를 쓴다.
+      // ── 활동별 소유권 (사용자 결정 2026-08-07) ─────────────────────────
+      // 두 활동은 읽는 목적이 다르므로 화면 구조도 다르게 간다.
+      // * **그림일기·자유 그림 = S15P11B209-996 소유.** 가볍게 한 장에 훑는
+      //   하루 기록이다. 표지·활동 요약·관찰·이야기를 카드 없이 한 장
+      //   ([onePage])으로 이어 붙이고, 블럭 안을 두 단([_BlockColumns])으로
+      //   가른다. 이 경로의 순서·레이아웃은 여기서 건드리지 않는다.
+      // * **HTP = S15P11B209-1004 소유.** 이야기형 세로 스크롤이다. 그림
+      //   이야기를 따라가다 해석에 도달하고, 수치는 부록으로 접는다
+      //   ([_ReportDetailsGroup]). 아래 [isHtp] 가지가 그 순서다.
       final isHtp = report.isHtpActivity;
       final drawings = _ReportDrawings(
         report: report,
@@ -499,6 +506,19 @@ class _ReportContent extends StatelessWidget {
       final htpStory = isHtp
           ? _htpSubjectStorySection(report, imageFetcher)
           : null;
+      // HTP 비인사이트 층 — 무슨 일이 있었는지(수치)와 구형 가이드. 해석이
+      // 아니라 근거 열람용이라 기본으로 접는다(S15P11B209-1004). 주제별 관찰은
+      // 이미 인사이트 층의 주제 이야기 카드 안에 들어가므로 여기에 없다.
+      //
+      // 그림일기 한 장 경로는 이 묶음을 쓰지 않는다 — 접힘은 HTP 전용이다.
+      // 한 장짜리 안에 접이식을 넣으면 "한눈에 훑는다"는 성격 자체가 깨진다.
+      final htpDetailSections = isHtp
+          ? <Widget>[
+              ?_conversationSummarySection(report),
+              ?_activityFactsSection(report, isHtp: true),
+              ?_legacyGuideSection(report),
+            ]
+          : const <Widget>[];
       // 가로 화면에서는 블럭을 나란히 세우는 대신 각 블럭 **안**을 두 단으로
       // 가른다(S15P11B209-996).
       final wideBlocks = isWide && !isHtp;
@@ -519,18 +539,22 @@ class _ReportContent extends StatelessWidget {
                 ),
         ),
         if (isHtp) ...[
+          // 이야기 순서(S15P11B209-1004): 활동 개요 → 그림 이야기 → 아이의 말
+          // → 해석 → 관찰 → 가이드. 수치·구형 가이드는 맨 아래 접이식으로.
+          // 한계 고지(§1)는 표지 안([_heroNotice])이라 접힘 밖을 사수한다 —
+          // 아동 민감정보 가드레일이므로 접어서 감출 수 없다(CLAUDE.md 9절).
           ?_overviewSection(report),
           // 계약 §5 주제별 그림이 아직 없는 응답에서는 기존 그림 섹션(활동기록
           // 갤러리 우회)을 그대로 남겨 세 그림을 잃지 않는다.
           if (htpStory == null || report.subjectDrawings.isEmpty) drawings,
           ?htpStory,
+          // 아이의 말이 해석의 최상위 근거다(CLAUDE.md 2절) — 해석 바로 앞에 둔다.
           ?_childExpressionSection(report, playbackController),
-          ?_conversationSummarySection(report),
-          ?_observedFeaturesSection(report),
           ?_interpretationsSection(report, isHtp: true),
-          ?_activityFactsSection(report, isHtp: true),
+          ?_observedFeaturesSection(report),
           ..._parentGuideSections(report),
-          ?_legacyGuideSection(report),
+          if (htpDetailSections.isNotEmpty)
+            _ReportDetailsGroup(sections: htpDetailSections),
         ] else ...[
           // 활동 요약은 표지 안으로 들어갔다(S15P11B209-996).
           ?_observationsSection(report, flat: onePage),
@@ -1258,6 +1282,8 @@ Widget? _interpretationsSection(ReportDetailDto report, {bool isHtp = false}) {
       title: isHtp ? '함께 살펴보면 좋을 이야기' : '주요 심리 경향',
       backgroundColor: AppColors.lavenderSoft,
       accentColor: AppColors.lavender,
+      // 비어 있어도 "이 자리가 리포트의 중심"이라는 신호는 같아야 한다.
+      emphasized: true,
       children: _emptyInterpretationNotice,
     );
   }
@@ -1270,6 +1296,9 @@ Widget? _interpretationsSection(ReportDetailDto report, {bool isHtp = false}) {
     title: isHtp ? '함께 살펴보면 좋을 이야기' : '주요 심리 경향',
     backgroundColor: AppColors.lavenderSoft,
     accentColor: AppColors.lavender,
+    // HTP 리포트에서 가장 무겁게 읽혀야 하는 섹션(S15P11B209-1004). 이야기를
+    // 따라오다 도달하는 자리라 시각적으로도 도착점처럼 보여야 한다.
+    emphasized: true,
     children: [
       for (final (index, interpretation) in interpretations.indexed) ...[
         if (index > 0) const SizedBox(height: AppSpacing.md),
@@ -1681,7 +1710,6 @@ Widget? _observationsSection(ReportDetailDto report, {bool flat = false}) {
             index: index,
             interpretation: interpretation,
             evidenceById: evidenceById,
-            showConfidence: false,
             flat: true,
           ),
         ],
@@ -2061,20 +2089,12 @@ class _InterpretationCard extends StatelessWidget {
     required this.index,
     required this.interpretation,
     required this.evidenceById,
-    this.showConfidence = true,
     this.flat = false,
   });
 
   final int index;
   final ReportInterpretationDto interpretation;
   final Map<int, ReportEvidenceItemDto> evidenceById;
-
-  /// 확신도 배지("근거가 강해요")를 보일지 여부.
-  ///
-  /// 그림일기 리포트에서는 끈다(S15P11B209-996) — 근거는 "근거 보기"에서 실제
-  /// 문장으로 확인할 수 있고, 등급까지 같이 두면 카드가 판정처럼 읽힌다.
-  /// HTP 리포트는 그대로 배지를 쓴다.
-  final bool showConfidence;
 
   /// 흰 카드 테두리 없이 본문에 바로 얹을지 여부.
   ///
@@ -2088,9 +2108,13 @@ class _InterpretationCard extends StatelessWidget {
     final evidence = [
       for (final ref in interpretation.evidenceRefs) ?evidenceById[ref],
     ];
-    final confidenceLabel = showConfidence
-        ? _confidenceLabel(interpretation.confidence)
-        : null;
+    // 확신도 배지는 활동 종류와 무관하게 항상 붙인다(S15P11B209-1004, 2026-08-07
+    // 사용자 결정으로 996의 그림일기 예외를 되돌림). 996은 "근거 보기에서 실제
+    // 문장을 볼 수 있으니 등급까지 두면 판정처럼 읽힌다"는 이유로 그림일기에서
+    // 껐지만, 근거 보기는 기본이 접힘이고 열어도 출처 라벨·문장만 보일 뿐
+    // **강도**를 말하지 않는다. 등급이 없으면 WEAK 추측과 STRONG 해석이 같은
+    // 무게로 읽힌다 — CLAUDE.md 9절이 타협 불가로 못 박은 바로 그 실패다.
+    final confidenceLabel = _confidenceLabel(interpretation.confidence);
     final content = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -2542,6 +2566,7 @@ class _ReportSection extends StatelessWidget {
     this.backgroundColor = AppColors.surface,
     this.accentColor = AppColors.lavender,
     this.flat = false,
+    this.emphasized = false,
     super.key,
   });
   final String title;
@@ -2555,6 +2580,13 @@ class _ReportSection extends StatelessWidget {
   /// 생긴다(S15P11B209-996). 색은 배경이 아니라 제목 글자가 나른다.
   final bool flat;
 
+  /// 리포트에서 가장 먼저 눈에 들어와야 하는 섹션인지(S15P11B209-1004).
+  ///
+  /// 제목을 키우고 제목 아래 강조 선을 둔 뒤 카드 테두리 대비를 올린다. 색은
+  /// 기존 accent 토큰만 쓰고 새 색을 만들지 않는다. 지금은 HTP 해석 카드
+  /// 섹션만 켠다 — 여러 섹션이 함께 강조되면 강조가 아니게 된다.
+  final bool emphasized;
+
   @override
   Widget build(BuildContext context) {
     final body = Column(
@@ -2566,12 +2598,26 @@ class _ReportSection extends StatelessWidget {
             title,
             style: TextStyle(
               color: accentColor,
-              fontSize: 20,
+              fontSize: emphasized ? 23 : 20,
               height: 1.3,
               fontWeight: FontWeight.w900,
             ),
           ),
         ),
+        if (emphasized) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Align(
+            alignment: AlignmentDirectional.centerStart,
+            child: Container(
+              width: 44,
+              height: 4,
+              decoration: BoxDecoration(
+                color: accentColor,
+                borderRadius: BorderRadius.circular(AppRadius.sm),
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: AppSpacing.md),
         ...children,
       ],
@@ -2579,10 +2625,77 @@ class _ReportSection extends StatelessWidget {
     if (flat) return body;
     return _ReportCard(
       backgroundColor: backgroundColor,
-      borderColor: accentColor.withValues(alpha: 0.45),
+      borderColor: accentColor.withValues(alpha: emphasized ? 0.85 : 0.45),
       child: body,
     );
   }
+}
+
+/// HTP 비인사이트 층을 하나로 묶는 접이식 카드(S15P11B209-1004).
+///
+/// 안에 든 것은 해석이 아니라 **근거·기록**이다 — 대화 수치, 그리는 동안의
+/// 활동 기록, 구형 대화 가이드. 보호자가 필요할 때 열어보면 되는 자료라 기본은
+/// 접어 두고, 인사이트 섹션들보다 시각적으로 가장 가볍게(그림자 없음·중립 배경·
+/// 작은 회색 제목) 만든다.
+///
+/// **HTP 전용이다.** 그림일기 한 장 경로(S15P11B209-996)는 접이식을 쓰지 않는다
+/// — 한 장에 훑는 구조 안에 접힘이 들어가면 그 성격이 깨진다(사용자 결정
+/// 2026-08-07).
+///
+/// `maintainState`는 기본값(false)을 쓴다 — 접힌 동안에는 안의 섹션을 아예
+/// 만들지 않아 화면·시맨틱스·빌드 비용에서 모두 빠진다.
+class _ReportDetailsGroup extends StatelessWidget {
+  const _ReportDetailsGroup({required this.sections});
+
+  final List<Widget> sections;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    decoration: BoxDecoration(
+      color: AppColors.surfaceSoft,
+      borderRadius: BorderRadius.circular(AppRadius.lg),
+      border: Border.all(color: AppColors.outline),
+    ),
+    clipBehavior: Clip.antiAlias,
+    child: Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        key: const ValueKey('report-details-expansion'),
+        shape: const Border(),
+        collapsedShape: const Border(),
+        tilePadding: const EdgeInsets.symmetric(
+          horizontal: AppSpacing.md,
+          vertical: AppSpacing.xs,
+        ),
+        childrenPadding: const EdgeInsets.fromLTRB(
+          AppSpacing.sm,
+          0,
+          AppSpacing.sm,
+          AppSpacing.md,
+        ),
+        expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
+        title: const Text(
+          '활동 기록 자세히 보기',
+          style: TextStyle(
+            color: AppColors.inkMuted,
+            fontSize: 16,
+            height: 1.35,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        subtitle: const Text(
+          '대화 수치와 그리는 동안의 기록이에요.',
+          style: TextStyle(color: AppColors.inkMuted, height: 1.4),
+        ),
+        children: [
+          for (final (index, section) in sections.indexed) ...[
+            if (index > 0) const SizedBox(height: AppSpacing.md),
+            section,
+          ],
+        ],
+      ),
+    ),
+  );
 }
 
 class _InfoLine extends StatelessWidget {

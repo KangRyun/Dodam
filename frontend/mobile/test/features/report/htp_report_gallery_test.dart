@@ -229,6 +229,7 @@ void main() {
     expect(reportRepository.downloadedUrls, [
       '/api/v1/drawing-assets/representative/file',
     ]);
+    await _expandReportDetails(tester);
     expect(find.text('오늘 그림 이야기를 들려줄래?'), findsOneWidget);
     expect(find.byKey(const ValueKey('report-home-cta')), findsOneWidget);
   });
@@ -405,6 +406,7 @@ void main() {
     await _pumpImages(tester);
 
     expect(find.textContaining('그림을 불러오지 못했어요.'), findsNWidgets(3));
+    await _expandReportDetails(tester);
     expect(find.text('오늘 그림 이야기를 들려줄래?'), findsOneWidget);
     expect(find.byKey(const ValueKey('report-home-cta')), findsOneWidget);
   });
@@ -429,6 +431,7 @@ void main() {
     expect(reportRepository.downloadedUrls, [
       '/api/v1/drawing-assets/representative/file',
     ]);
+    await _expandReportDetails(tester);
     expect(find.text('오늘 그림 이야기를 들려줄래?'), findsOneWidget);
     expect(find.byKey(const ValueKey('report-home-cta')), findsOneWidget);
   });
@@ -693,6 +696,19 @@ Future<void> _pumpImages(WidgetTester tester) async {
   for (var i = 0; i < 10; i++) {
     await tester.pump(const Duration(milliseconds: 10));
   }
+}
+
+/// S15P11B209-1004 — HTP 리포트의 구형 보호자 가이드('오늘 그림 이야기를
+/// 들려줄래?')는 대화 수치·활동 기록과 함께 'report-details-expansion' 접이식
+/// 묶음 안으로 내려갔다. 접힌 동안에는 자식이 만들어지지 않으므로 먼저 편다.
+/// (그림일기 한 장 경로에는 이 묶음이 없어 tile이 없으면 조용히 빠진다.)
+Future<void> _expandReportDetails(WidgetTester tester) async {
+  final tile = find.byKey(const ValueKey('report-details-expansion'));
+  if (tile.evaluate().isEmpty) return;
+  await tester.ensureVisible(tile);
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('활동 기록 자세히 보기'));
+  await tester.pumpAndSettle();
 }
 
 List<String> _subjectsInOrder(WidgetTester tester) => [
