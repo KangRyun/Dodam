@@ -48,6 +48,8 @@ class ConversationQuestionServiceTest {
   @Mock private AiQuestionClient aiQuestionClient;
   @Mock private QuestionPersistenceService questionPersistenceService;
   @Mock private AnalysisObservationResultRepository observationResultRepository;
+  @Mock private com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository htpAssessmentRepository;
+  @Mock private com.ssafy.b209.conversation.repository.ConversationMessageRepository conversationMessageRepository;
 
   private ConversationQuestionService service;
   private ConversationSession session;
@@ -61,7 +63,9 @@ class ConversationQuestionServiceTest {
             questionTemplateOptionRepository,
             aiQuestionClient,
             questionPersistenceService,
-            observationResultRepository);
+            observationResultRepository,
+            htpAssessmentRepository,
+            conversationMessageRepository);
     session = mock(ConversationSession.class);
     lenient().when(session.getDrawingSessionId()).thenReturn(9L);
     lenient().when(session.getDifficulty()).thenReturn(QuestionDifficulty.LOWER_ELEMENTARY);
@@ -318,6 +322,81 @@ class ConversationQuestionServiceTest {
         ConversationErrorCode.FALLBACK_QUESTION_NOT_FOUND);
 
     verify(questionPersistenceService, never()).save(any(), any());
+  }
+
+  @Test
+  void carriesPreviousSubjectNotesForHtpFollowUpSubjects() {
+    // S15P11B209-989 — 주제마다 대화 세션이 새로 열려 다음 주제가 앞 주제 발화를 모른다.
+    //   앞 단계를 역추적해 아이 답만 압축해 싣는 배선을 고정한다. 이 목록이 조용히 비면
+    //   프롬프트의 [앞 그림에서 아이가 들려준 이야기] 블록 전체가 무효가 된다.
+    var priorDrawingSession = mock(com.ssafy.b209.drawing.domain.DrawingSession.class);
+    lenient().when(priorDrawingSession.getId()).thenReturn(801L);
+    var assessment = mock(com.ssafy.b209.drawing.htp.domain.HtpAssessment.class);
+    lenient().when(assessment.getId()).thenReturn(70L);
+    var currentStep = mock(com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep.class);
+    lenient().when(currentStep.getAssessment()).thenReturn(assessment);
+    lenient().when(currentStep.getStepOrder()).thenReturn(2);
+    var priorStep = mock(com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep.class);
+    lenient().when(priorStep.getDrawingSession()).thenReturn(priorDrawingSession);
+    lenient()
+        .when(priorStep.getDrawingSubject())
+        .thenReturn(com.ssafy.b209.drawing.htp.domain.HtpDrawingSubject.HOUSE);
+    given(htpAssessmentRepository.findStepWithAssessmentByDrawingSessionId(9L))
+        .willReturn(Optional.of(currentStep));
+    given(htpAssessmentRepository.findPriorStepsWithDrawingSession(70L, 2))
+        .willReturn(List.of(priorStep));
+    var priorConversation = mock(ConversationSession.class);
+    lenient().when(priorConversation.getId()).thenReturn(404L);
+    given(conversationSessionRepository.findByDrawingSessionId(801L))
+        .willReturn(Optional.of(priorConversation));
+    given(conversationMessageRepository.findChildAnswerTexts(404L))
+        .willReturn(List.of("우리 가족이랑 강아지 살아"));
+    given(aiQuestionClient.generate(any(), any())).willReturn(validResponse());
+    given(questionPersistenceService.save(eq(1L), any()))
+        .willReturn(new GeneratedQuestion(21L, "이 나무한테는 무슨 일이 있었을까?", false));
+
+    service.generateQuestion(htpCommand());
+
+    ArgumentCaptor<com.ssafy.b209.conversation.dto.AiQuestionRequest> requestCaptor =
+        ArgumentCaptor.forClass(com.ssafy.b209.conversation.dto.AiQuestionRequest.class);
+    verify(aiQuestionClient).generate(requestCaptor.capture(), any());
+    assertThat(requestCaptor.getValue().previousSubjectNotes())
+        .containsExactly(
+            new com.ssafy.b209.conversation.dto.AiQuestionRequest.PreviousSubjectNote(
+                "HOUSE", List.of("우리 가족이랑 강아지 살아")));
+  }
+
+  @Test
+  void previousSubjectNoteFailureDoesNotBlockQuestionGeneration() {
+    // 보조 재료라 역추적이 죽어도 질문 생성은 계속돼야 한다 — 빈 목록으로 진행.
+    given(htpAssessmentRepository.findStepWithAssessmentByDrawingSessionId(9L))
+        .willThrow(new RuntimeException("boom"));
+    given(aiQuestionClient.generate(any(), any())).willReturn(validResponse());
+    given(questionPersistenceService.save(eq(1L), any()))
+        .willReturn(new GeneratedQuestion(21L, "이 나무한테는 무슨 일이 있었을까?", false));
+
+    service.generateQuestion(htpCommand());
+
+    ArgumentCaptor<com.ssafy.b209.conversation.dto.AiQuestionRequest> requestCaptor =
+        ArgumentCaptor.forClass(com.ssafy.b209.conversation.dto.AiQuestionRequest.class);
+    verify(aiQuestionClient).generate(requestCaptor.capture(), any());
+    assertThat(requestCaptor.getValue().previousSubjectNotes()).isEmpty();
+  }
+
+  private GenerateQuestionCommand htpCommand() {
+    return new GenerateQuestionCommand(
+        1L,
+        9L,
+        null,
+        8,
+        List.of(ResponseMode.VOICE, ResponseMode.OPTION),
+        List.of(new DetectedObject("TREE", "나무", 0.9, new BoundingBox(0.1, 0.2, 0.3, 0.4))),
+        List.of(),
+        "safety-2026-07",
+        null,
+        "HTP",
+        "TREE",
+        List.of());
   }
 
   private GenerateQuestionCommand command(List<ResponseMode> responseModes) {

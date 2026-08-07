@@ -45,4 +45,20 @@ public record AiQuestionRequest(
      *
      * <p>대화 전체 메시지에서 중복 없이 모은 값이며, 대상이 없으면 빈 리스트다.
      */
-    List<String> askedObjectCodes) {}
+    List<String> askedObjectCodes,
+    /**
+     * 같은 HTP 활동의 앞 주제에서 아이가 들려준 이야기다 (S15P11B209-989).
+     *
+     * <p>주제마다 대화 세션이 따로 열려 다음 주제는 앞 주제의 발화를 모른다 — 그 단절을 잇는
+     * 압축 재료다. 질문은 싣지 않고 아이 답만 싣는다. 첫 주제·그림일기는 빈 목록이다.
+     */
+    List<PreviousSubjectNote> previousSubjectNotes) {
+
+  /**
+   * 앞 주제 하나의 노트다 (S15P11B209-989).
+   *
+   * @param drawingSubject 앞 주제 이름({@code HOUSE|TREE|PERSON})
+   * @param childUtterances 그 주제 대화에서 아이가 답한 텍스트 목록(대화 순서)
+   */
+  public record PreviousSubjectNote(String drawingSubject, List<String> childUtterances) {}
+}

@@ -14,7 +14,10 @@ import com.ssafy.b209.conversation.exception.ConversationErrorCode;
 import com.ssafy.b209.conversation.exception.ConversationStartErrorCode;
 import com.ssafy.b209.conversation.repository.AiQuestionTemplateOptionRepository;
 import com.ssafy.b209.conversation.repository.AiQuestionTemplateRepository;
+import com.ssafy.b209.conversation.repository.ConversationMessageRepository;
 import com.ssafy.b209.conversation.repository.ConversationSessionRepository;
+import com.ssafy.b209.drawing.htp.domain.HtpAssessmentStep;
+import com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.infrastructure.ai.AiQuestionClient;
 import com.ssafy.b209.infrastructure.ai.AiQuestionClientException;
@@ -29,6 +32,9 @@ import org.springframework.stereotype.Service;
 @Service
 public class ConversationQuestionService {
 
+  /** 앞 주제 노트의 주제당 아이 답변 상한 — 질문 상한(htp-per-subject=5)과 같은 수다(989). */
+  private static final int MAX_UTTERANCES_PER_SUBJECT = 5;
+
   private static final Logger log = LoggerFactory.getLogger(ConversationQuestionService.class);
   private static final String FALLBACK_TEMPLATE_TYPE = "FALLBACK";
 
@@ -39,6 +45,8 @@ public class ConversationQuestionService {
   private final QuestionPersistenceService questionPersistenceService;
   // 그림 서술(VLM) 조회용 — 질문 생성 입력을 채운다(S15P11B209-704).
   private final AnalysisObservationResultRepository observationResultRepository;
+  private final HtpAssessmentRepository htpAssessmentRepository;
+  private final ConversationMessageRepository conversationMessageRepository;
 
   /**
    * AI 질문 생성·폴백·저장 흐름의 의존성을 생성한다.
@@ -56,13 +64,17 @@ public class ConversationQuestionService {
       AiQuestionTemplateOptionRepository questionTemplateOptionRepository,
       AiQuestionClient aiQuestionClient,
       QuestionPersistenceService questionPersistenceService,
-      AnalysisObservationResultRepository observationResultRepository) {
+      AnalysisObservationResultRepository observationResultRepository,
+      HtpAssessmentRepository htpAssessmentRepository,
+      ConversationMessageRepository conversationMessageRepository) {
     this.conversationSessionRepository = conversationSessionRepository;
     this.questionTemplateRepository = questionTemplateRepository;
     this.questionTemplateOptionRepository = questionTemplateOptionRepository;
     this.aiQuestionClient = aiQuestionClient;
     this.questionPersistenceService = questionPersistenceService;
     this.observationResultRepository = observationResultRepository;
+    this.htpAssessmentRepository = htpAssessmentRepository;
+    this.conversationMessageRepository = conversationMessageRepository;
   }
 
   /**
@@ -149,7 +161,70 @@ public class ConversationQuestionService {
         command.safetyRuleVersion(),
         command.activityType(),
         command.drawingSubject(),
-        command.askedObjectCodes());
+        command.askedObjectCodes(),
+        previousSubjectNotes(command));
+  }
+
+  /**
+   * 같은 HTP 활동에서 앞 주제 대화의 아이 답변을 모은다 (S15P11B209-989).
+   *
+   * <p>주제마다 대화 세션이 새로 열려 조회 범위가 세션 안으로 닫혀 있다 — 창 크기를 늘려도
+   * 앞 주제는 한 글자도 넘어오지 않는다. 여기서 {@code htp_assessment_steps}로 역추적해
+   * 앞 단계 대화의 <b>아이 답만</b> 압축해 싣는다(질문까지 실으면 프롬프트가 커진다).
+   *
+   * <p>첫 주제·그림일기·역추적 실패는 전부 빈 목록이다 — 이 재료는 보조라, 조회가 실패해도
+   * 질문 생성 자체는 지금과 똑같이 동작해야 한다. 발화 원문은 로그에 남기지 않는다(9절).
+   *
+   * @param command 질문 생성 명령
+   * @return 앞 주제 노트 목록(단계 순서), 없으면 빈 목록
+   */
+  private List<AiQuestionRequest.PreviousSubjectNote> previousSubjectNotes(
+      GenerateQuestionCommand command) {
+    if (!"HTP".equals(command.activityType())) {
+      return List.of();
+    }
+    try {
+      return htpAssessmentRepository
+          .findStepWithAssessmentByDrawingSessionId(command.drawingSessionId())
+          .map(
+              step ->
+                  htpAssessmentRepository
+                      .findPriorStepsWithDrawingSession(
+                          step.getAssessment().getId(), step.getStepOrder())
+                      .stream()
+                      .map(this::subjectNoteOf)
+                      .filter(note -> !note.childUtterances().isEmpty())
+                      .toList())
+          .orElseGet(List::of);
+    } catch (RuntimeException exception) {
+      // 보조 재료라 실패해도 질문 생성을 막지 않는다. 발화가 섞일 수 있어 예외 유형만 남긴다(9절).
+      log.warn(
+          "[989] 앞 주제 대화 조회 실패 — 노트 없이 진행: conversationId={}, exceptionType={}",
+          command.conversationId(),
+          exception.getClass().getSimpleName());
+      return List.of();
+    }
+  }
+
+  /**
+   * 앞 단계 하나를 노트로 만든다 — 그 단계 대화 세션의 아이 답을 순서대로 담는다.
+   *
+   * @param priorStep 앞 단계(그림 세션 로딩됨)
+   * @return 노트이며 대화가 없으면 발화 목록이 비어 있다
+   */
+  private AiQuestionRequest.PreviousSubjectNote subjectNoteOf(HtpAssessmentStep priorStep) {
+    List<String> utterances =
+        conversationSessionRepository
+            .findByDrawingSessionId(priorStep.getDrawingSession().getId())
+            .map(prior -> conversationMessageRepository.findChildAnswerTexts(prior.getId()))
+            .orElseGet(List::of);
+    // 주제당 질문 상한(5)과 같은 수로 자른다 — 정상 범위면 그대로, 비정상 데이터만 방어한다.
+    List<String> capped =
+        utterances.size() > MAX_UTTERANCES_PER_SUBJECT
+            ? utterances.subList(0, MAX_UTTERANCES_PER_SUBJECT)
+            : utterances;
+    return new AiQuestionRequest.PreviousSubjectNote(
+        priorStep.getDrawingSubject().name(), List.copyOf(capped));
   }
 
   /**
