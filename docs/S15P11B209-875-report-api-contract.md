@@ -212,6 +212,13 @@ BE·FE 유의:
 
 최상위에 근거 풀을 두고, Interpretation이 `evidenceRefs`로 참조한다(중복 근거 재사용).
 
+> **보호자 응답의 근거 풀은 공개 카드가 참조하는 범위다** (2026-08-06, S15P11B209-985).
+> 근거는 공개 여부와 무관하게 전량 **저장**되지만(미공개·강등 사유 추적), **응답**에는
+> 공개(`PUBLISHED`) 카드가 실제로 참조하는 근거만 실린다 — 안전 검증기가 내보내지 않기로
+> 판정한 카드의 근거(대개 아이 발화 인용)가 보호자 기기까지 전송되면 안 된다(9절).
+> `evidenceRefs`·`evidenceId`가 둘 다 `evidenceNumber` 값이라 일부를 걸러도 참조가 어긋나지
+> 않는다. 고정 테스트: `ReportInterpretationConfidenceIntegrationTest.doesNotShipEvidenceThatNoPublishedCardReferences`.
+
 ```jsonc
 {
   "evidenceId": 101,          // 내부 식별자 — 화면 미노출(참조용)
