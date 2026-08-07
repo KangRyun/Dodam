@@ -189,6 +189,17 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('그림을 다 그렸나요?'), findsOneWidget);
+    expect(find.text('조금 더 그릴래요'), findsOneWidget);
+    expect(find.text('다 그렸어요'), findsOneWidget);
+    final thinkingIllustration = tester.widget<Image>(
+      find.byKey(const ValueKey('drawing-complete-thinking-illustration')),
+    );
+    expect(
+      (thinkingIllustration.image as AssetImage).assetName,
+      DodamDialogAssets.completeThinking,
+    );
+    expect(thinkingIllustration.fit, BoxFit.contain);
+    expect(thinkingIllustration.excludeFromSemantics, isTrue);
     await tester.tap(find.text('조금 더 그릴래요'));
     await tester.pumpAndSettle();
 
@@ -1035,6 +1046,75 @@ void main() {
       findsOneWidget,
     );
     expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('activity-complete-actions-row')),
+      findsOneWidget,
+    );
+    final completeIllustration = tester.widget<Image>(
+      find.byKey(const ValueKey('activity-complete-thumbsup-illustration')),
+    );
+    expect(
+      (completeIllustration.image as AssetImage).assetName,
+      DodamDialogAssets.completeThumbsUp,
+    );
+    expect(completeIllustration.fit, BoxFit.contain);
+    expect(completeIllustration.excludeFromSemantics, isTrue);
+  });
+
+  testWidgets('완료 버튼은 넓은 화면에서 파스텔 가로 배치와 48dp 터치 영역을 유지한다', (tester) async {
+    await _pumpComplete(tester, size: const Size(1280, 800));
+
+    final drawAgain = find.byKey(
+      const ValueKey('activity-complete-draw-again'),
+    );
+    final guardian = find.byKey(const ValueKey('guardian-handoff'));
+    expect(
+      find.byKey(const ValueKey('activity-complete-actions-row')),
+      findsOneWidget,
+    );
+    expect(tester.getSize(drawAgain).height, greaterThanOrEqualTo(48));
+    expect(tester.getSize(guardian).height, greaterThanOrEqualTo(48));
+    expect(
+      tester
+          .widget<Material>(
+            find
+                .descendant(of: drawAgain, matching: find.byType(Material))
+                .first,
+          )
+          .color,
+      Colors.white,
+    );
+    expect(
+      tester
+          .widget<Material>(
+            find
+                .descendant(of: guardian, matching: find.byType(Material))
+                .first,
+          )
+          .color,
+      const Color(0xFFFFE2D0),
+    );
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('완료 버튼은 좁은 화면과 큰 글씨에서 세로로 쌓인다', (tester) async {
+    await _pumpComplete(
+      tester,
+      size: const Size(390, 844),
+      textScaler: const TextScaler.linear(2),
+    );
+
+    final drawAgain = find.byKey(
+      const ValueKey('activity-complete-draw-again'),
+    );
+    final guardian = find.byKey(const ValueKey('guardian-handoff'));
+    expect(
+      find.byKey(const ValueKey('activity-complete-actions-column')),
+      findsOneWidget,
+    );
+    expect(tester.getSize(drawAgain).height, greaterThanOrEqualTo(48));
+    expect(tester.getSize(guardian).height, greaterThanOrEqualTo(48));
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('skip 확인은 빈 감정·skipped true로 한 번 저장하고 일반 완료로 이동한다', (
@@ -1121,6 +1201,17 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('guardian-handoff')));
     await tester.pumpAndSettle();
     expect(find.text('보호자 화면으로 이동할까요?'), findsOneWidget);
+    expect(find.text('취소'), findsOneWidget);
+    expect(find.text('확인'), findsOneWidget);
+    final guardianIllustration = tester.widget<Image>(
+      find.byKey(const ValueKey('guardian-handhold-illustration')),
+    );
+    expect(
+      (guardianIllustration.image as AssetImage).assetName,
+      DodamDialogAssets.guardianHandhold,
+    );
+    expect(guardianIllustration.fit, BoxFit.contain);
+    expect(guardianIllustration.excludeFromSemantics, isTrue);
 
     await tester.tap(find.text('취소'));
     await tester.pumpAndSettle();
@@ -2296,6 +2387,7 @@ Future<void> _pumpComplete(
   Duration pollInterval = const Duration(seconds: 2),
   NavigatorObserver? navigatorObserver,
   bool settle = true,
+  TextScaler textScaler = TextScaler.noScaling,
 }) async {
   tester.view.physicalSize = size;
   tester.view.devicePixelRatio = 1;
@@ -2303,6 +2395,10 @@ Future<void> _pumpComplete(
   addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(
     MaterialApp(
+      builder: (context, child) => MediaQuery(
+        data: MediaQuery.of(context).copyWith(textScaler: textScaler),
+        child: child!,
+      ),
       navigatorObservers: [?navigatorObserver],
       routes: {
         AppRoutes.guardianHome: (_) => const Scaffold(body: Text('보호자 홈 테스트')),

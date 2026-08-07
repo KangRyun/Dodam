@@ -11,7 +11,7 @@ void main() {
         find.byKey(const ValueKey('dodam-dialog-card')),
       );
       final decoration = card.decoration as BoxDecoration;
-      expect(decoration.color, const Color(0xFFFFF9EF));
+      expect(decoration.color, Colors.white);
       expect(decoration.border, isNotNull);
       expect(decoration.boxShadow, isNotEmpty);
       expect(
