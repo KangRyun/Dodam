@@ -761,7 +761,14 @@ void main() {
   // S15P11B209-1004의 핵심 계약 — HTP 리포트에서 인사이트가 아래로 밀리지
   // 않는다. 보호자가 먼저 읽어야 할 것(아이의 말·해석·가이드)이 관찰 재진술과
   // 수치 사이에 묻히던 것을 되돌리는 것이 이 재구성의 목적이다.
-  testWidgets('HTP 인사이트 섹션은 모두 접이식 활동 기록 묶음보다 위에 렌더된다', (tester) async {
+  //
+  // 2026-08-07 그림일기 V2 정렬(commit c73047f9)로 수치·대화 요약 부록은
+  // 접이식('report-details-expansion')을 벗고 맨 아래 인라인으로 내려갔다
+  // ("HTP 부록도 접지 않고 펼쳐 인라인으로 둔다" — report_screen 주석 참조).
+  // 접힘은 사라졌지만 "인사이트가 수치보다 위"라는 순서 계약은 그대로여서,
+  // 이제 인라인 수치 블럭의 첫 구획('report-conversation-summary')을 기준으로
+  // 잰다. 관찰·가이드는 한 구획('report-htp-observed-guides')으로 합쳐졌다.
+  testWidgets('HTP 인사이트 섹션은 모두 활동 기록 수치보다 위에 렌더된다', (tester) async {
     _setViewport(tester, const Size(390, 844));
     await _pumpReport(
       tester,
@@ -794,18 +801,18 @@ void main() {
     );
 
     final detailsY = tester
-        .getTopLeft(find.byKey(const ValueKey('report-details-expansion')))
+        .getTopLeft(find.byKey(const ValueKey('report-conversation-summary')))
         .dy;
     for (final key in const [
-      // 비진단 안내는 가드레일이라 표지 안(접힘 밖)을 사수한다(CLAUDE.md 9절).
+      // 비진단 안내는 가드레일이라 표지 안(수치 위)을 사수한다(CLAUDE.md 9절).
       'report-non-diagnostic-notice',
       'report-activity-info',
       'report-htp-subject-stories',
       // 아이의 말은 해석의 최상위 근거라 해석 바로 앞이다(CLAUDE.md 2절).
       'report-child-expression',
       'report-interpretations',
-      'report-observed-features',
-      'report-parent-guide-DRAWING_CONVERSATION',
+      // 관찰·가이드는 그림일기처럼 한 구획으로 합쳐졌다(2026-08-07).
+      'report-htp-observed-guides',
     ]) {
       final sectionY = tester.getTopLeft(find.byKey(ValueKey(key))).dy;
       expect(sectionY, lessThan(detailsY), reason: key);
@@ -813,38 +820,36 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('HTP 활동 기록 묶음은 기본으로 접혀 있고 펼치면 수치가 보인다', (tester) async {
+  // 2026-08-07 그림일기 V2 정렬(commit c73047f9)로 HTP 부록의 접이식은 사라지고
+  // 수치·대화 요약이 맨 아래에 인라인으로 항상 보이게 됐다. 접힘 뒤에 숨기지
+  // 않으므로 펼치는 동작 없이 곧바로 값이 읽혀야 하고, 순서상으로는 여전히
+  // 인사이트 뒤(대화 요약 → 수치 순)에 놓인다.
+  testWidgets('HTP 활동 기록 수치는 접이식 없이 인라인으로 항상 보인다', (tester) async {
     _setViewport(tester, const Size(390, 844));
     await _pumpReport(tester, report: _fullReport(isHtp: true));
 
-    final details = find.byKey(const ValueKey('report-details-expansion'));
-    expect(details, findsOneWidget);
-    // 접힌 동안에는 헤더만 높이를 차지하고, 안의 섹션은 만들어지지도 않는다.
-    final collapsedHeight = tester.getSize(details).height;
-    expect(find.byKey(const ValueKey('report-activity-facts')), findsNothing);
+    // 접이식 부록 UI 자체가 없다 — 그림일기 한 장 문법과 동일.
     expect(
-      find.byKey(const ValueKey('report-conversation-summary')),
+      find.byKey(const ValueKey('report-details-expansion')),
       findsNothing,
     );
+    expect(find.text('활동 기록 자세히 보기'), findsNothing);
 
-    await _expandReportDetails(tester);
-
-    final expandedHeight = tester.getSize(details).height;
-    expect(expandedHeight, greaterThan(collapsedHeight + 200));
+    // 펼치는 동작 없이 수치·대화 요약이 곧바로 렌더된다.
     final facts = find.byKey(const ValueKey('report-activity-facts'));
+    final conversation = find.byKey(
+      const ValueKey('report-conversation-summary'),
+    );
     expect(facts, findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('report-conversation-summary')),
-      findsOneWidget,
-    );
-    // 펼친 수치는 묶음 헤더 아래에 놓인다.
-    expect(
-      tester.getTopLeft(facts).dy,
-      greaterThan(tester.getTopLeft(details).dy),
-    );
+    expect(conversation, findsOneWidget);
     // 실제 값이 보인다 — 멈춤 4회(_fullReport의 activityFacts).
     expect(find.text('멈춤'), findsOneWidget);
     expect(find.text('4회'), findsOneWidget);
+    // 인라인이어도 순서는 대화 요약 → 수치로, 수치는 여전히 뒤다.
+    expect(
+      tester.getTopLeft(facts).dy,
+      greaterThan(tester.getTopLeft(conversation).dy),
+    );
     expect(tester.takeException(), isNull);
   });
 
@@ -863,30 +868,30 @@ void main() {
 
   // ── S15P11B209-1004 시각 문법 ─────────────────────────────────────────
   // 2026-08-07 실기기 판정: HTP는 순서만 바뀌고 시각은 구형 카드 쌓기 그대로라
-  // 사용자가 두 리포트를 나란히 보고 "그림일기처럼 안 바뀌었다"고 했다. 아래
-  // 세 테스트가 그 판정을 코드로 못 박는다 — 배경 카드가 다시 늘어나면 깨진다.
-  testWidgets('HTP 리포트도 한 장 문법을 쓰고 배경 구획은 해석 하나뿐이다', (tester) async {
+  // 사용자가 두 리포트를 나란히 보고 "그림일기처럼 안 바뀌었다"고 했다. 이어서
+  // 같은 날 그림일기 V2 정렬(commit c73047f9)로 마지막 예외였던 해석 강조 카드·
+  // 라벤더 배경마저 flat 라벤더 제목으로 바뀌어("해석 섹션: 강조 카드·라벤더
+  // 배경을 없애고 flat 라벤더 제목으로"), 이제 HTP 한 장 안에는 자기 배경을 가진
+  // 구획이 하나도 없다. 아래 테스트가 그 판정을 코드로 못 박는다 — 어느 구획이든
+  // 배경 카드를 다시 두르면 깨진다.
+  testWidgets('HTP 리포트도 한 장 문법을 쓰고 어느 구획도 배경을 따로 두르지 않는다', (
+    tester,
+  ) async {
     _setViewport(tester, const Size(390, 844));
     await _pumpReport(tester, report: _visualGrammarHtpReport());
 
-    // 표지·그림 이야기·아이의 말·관찰·가이드는 바깥 한 장 말고 자기 배경이 없다.
-    // (바깥 한 장 = 리포트 전체를 감싸는 종이 1개)
+    // 표지·그림 이야기·아이의 말·해석·관찰·가이드 모두 바깥 한 장 말고 자기
+    // 배경이 없다(바깥 한 장 = 리포트 전체를 감싸는 종이 1개). 관찰·가이드는
+    // 한 구획('report-htp-observed-guides')으로 합쳐졌고, 해석도 이제 flat이다.
     for (final key in const [
       'report-activity-info',
       'report-htp-subject-stories',
       'report-child-expression',
-      'report-observed-features',
-      'report-parent-guide-DRAWING_CONVERSATION',
+      'report-interpretations',
+      'report-htp-observed-guides',
     ]) {
       expect(_shellColors(tester, key), [AppColors.surface], reason: key);
     }
-    // 해석만 자기 배경을 갖는다 — 이야기를 따라오다 도달하는 도착점이라
-    // 유일한 예외로 남겼다. 예외가 둘이 되면 강조가 강조가 아니게 된다.
-    expect(
-      _shellColors(tester, 'report-interpretations'),
-      containsAll(<Color>[AppColors.lavenderSoft, AppColors.surface]),
-    );
-    expect(_shellColors(tester, 'report-interpretations'), hasLength(2));
     expect(tester.takeException(), isNull);
   });
 
@@ -947,11 +952,12 @@ void main() {
       findsOneWidget,
     );
     expect(find.textContaining('해석을 담지 않았어요'), findsOneWidget);
-    // 빈 안내도 해석 자리를 지키는 구획이라 배경을 그대로 갖는다.
-    expect(
-      _shellColors(tester, 'report-interpretations-empty'),
-      containsAll(<Color>[AppColors.lavenderSoft, AppColors.surface]),
-    );
+    // 빈 안내도 다른 구획과 같은 한 장 문법을 따른다 — 그림일기 V2 정렬
+    // (commit c73047f9)로 해석 배경 카드가 사라진 뒤엔 자기 배경 없이 바깥 한 장
+    // 위에 그대로 놓인다(flat).
+    expect(_shellColors(tester, 'report-interpretations-empty'), [
+      AppColors.surface,
+    ]);
     expect(tester.takeException(), isNull);
   });
 
