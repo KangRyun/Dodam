@@ -144,9 +144,10 @@ def check_prompt_assembly(
     )
 
     # 3) 연령별 말투 블록 — 난이도에 맞는 구획이 실렸는가.
-    #    conversation_tone은 786이 question_service._DIFFICULTY_RULES에서 옮겨 온 것이라
+    #    말투 규칙은 786이 question_service._DIFFICULTY_RULES에서 옮겨 온 것이라
     #    누락되면 조용히 기본 난이도로 떨어진다(회귀가 눈에 안 띈다).
-    expected_tone = llm_client.tone_block(difficulty)
+    #    993에서 tone이 활동별 파일로 갈렸다 — 활동을 함께 넘겨야 맞는 구획과 비교한다.
+    expected_tone = llm_client.tone_block(difficulty, key)
     out.append(
         Finding(
             "A",
@@ -163,11 +164,13 @@ def check_prompt_assembly(
         Finding("A", "가드레일 포함", guard_hit > 0, f"{guard_hit}/{len(guard_sig)}줄")
     )
 
-    # 5) 공통 규칙 — 대화 종료 금지·이름 규칙·출력 형식의 소유자.
-    common_sig = _signature_lines("conversation_common")
+    # 5) 기반 규칙 — 대화 종료 금지·이름 규칙·출력 형식의 소유자.
+    #    993에서 활동별 파일(conversation_rules_htp/diary)로 갈렸다.
+    rules_name = "conversation_rules_htp" if key == "HTP" else "conversation_rules_diary"
+    common_sig = _signature_lines(rules_name)
     common_hit = sum(1 for line in common_sig if line in system_prompt)
     out.append(
-        Finding("A", "공통 규칙 포함", common_hit > 0, f"{common_hit}/{len(common_sig)}줄")
+        Finding("A", "기반 규칙 포함", common_hit > 0, f"{common_hit}/{len(common_sig)}줄")
     )
     return out
 
@@ -197,9 +200,11 @@ def check_tone_bands_differ() -> Finding:
        밴드 내 표준편차(2.5~4.9자)와 같은 크기였다 — 길이는 신뢰할 만한 구분자가 아니다.
        실제 구분은 어휘·말투가 낸다(conversation_tone 서문).
     """
+    # 993에서 tone이 활동별로 갈렸다. 길이 실측·자수 상한은 두 파일이 같은 값을 물려받았고
+    # 이 검사는 길이 규칙의 '구분 수'만 보므로 HTP 쪽을 대표로 본다.
     rules = {
         band: (m.group(1).strip() if (m := _TONE_LENGTH_LINE.search(body)) else "")
-        for band, body in prompts_registry.sections("conversation_tone").items()
+        for band, body in prompts_registry.sections("conversation_tone_htp").items()
     }
     distinct = {r for r in rules.values() if r}
     ok = len(distinct) >= _MIN_DISTINCT_TONE_RULES

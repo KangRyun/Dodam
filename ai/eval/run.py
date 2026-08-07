@@ -70,7 +70,7 @@ def run_layer_a() -> list[tuple[str, list[Finding]]]:
     for case in cases.REPORT_CASES:
         is_htp = report_client._is_htp(case.request)
         system = report_client._system_prompt(is_htp)
-        variant, common = report_client._prompt_names(is_htp)
+        (variant,) = report_client._prompt_names(is_htp)
         expected_htp = case.meta.get("expects_rag", False)
         found = [
             Finding(
