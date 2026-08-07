@@ -1142,7 +1142,8 @@ class ObservationReportPersistenceServiceTest {
         List.of(
             new ObservationGenerationContext.ActivitySessionRef(DRAWING_SESSION_ID, "HOUSE"),
             new ObservationGenerationContext.ActivitySessionRef(201L, "TREE"),
-            new ObservationGenerationContext.ActivitySessionRef(202L, "PERSON")));
+            new ObservationGenerationContext.ActivitySessionRef(202L, "PERSON")),
+        7);
   }
 
   private ObservationGenerationContext.SubjectContext subjectContext(
@@ -1247,7 +1248,8 @@ class ObservationReportPersistenceServiceTest {
         keyConversations,
         List.of(),
         List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
-        List.of(new ObservationGenerationContext.ActivitySessionRef(DRAWING_SESSION_ID, null)));
+        List.of(new ObservationGenerationContext.ActivitySessionRef(DRAWING_SESSION_ID, null)),
+        7);
   }
 
   private ObservationGenerationContext emptyConversationContext() {
@@ -1266,7 +1268,8 @@ class ObservationReportPersistenceServiceTest {
         List.of(),
         List.of(),
         List.of(),
-        List.of(new ObservationGenerationContext.ActivitySessionRef(DRAWING_SESSION_ID, null)));
+        List.of(new ObservationGenerationContext.ActivitySessionRef(DRAWING_SESSION_ID, null)),
+        7);
   }
 
   private ObservationGenerationContext.KeyConversationLine keyLine(int index) {

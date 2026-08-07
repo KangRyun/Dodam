@@ -68,6 +68,9 @@ class MockObservationReportGenerationServiceTest {
     org.assertj.core.api.Assertions.assertThat(request.analysisType()).isEqualTo("FINAL");
     org.assertj.core.api.Assertions.assertThat(request.questionCount()).isEqualTo(3);
     org.assertj.core.api.Assertions.assertThat(request.answeredCount()).isEqualTo(2);
+    // 연령 규준 축(S15P11B209-1001) — 컨텍스트의 만 나이가 AI 요청까지 흘러야
+    // 프롬프트의 연령 발달 문맥이 실린다. 빠지면 조용히 "나이 없음" 경로가 된다.
+    org.assertj.core.api.Assertions.assertThat(request.childAge()).isEqualTo(7);
     verify(persistenceService).complete(any(ObservationGenerationContext.class), any());
     verify(persistenceService, never()).markFailed(any(), any(), any(), any());
   }
@@ -102,7 +105,8 @@ class MockObservationReportGenerationServiceTest {
                 new ObservationGenerationContext.SubjectContext(
                     null, "공룡이 풍선을 들고 있어요.", List.of(), List.of(), 901L, List.of())),
             List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
-            List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)));
+            List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)),
+        7);
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context));
     given(observationClient.generate(any()))
         .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
@@ -226,7 +230,8 @@ class MockObservationReportGenerationServiceTest {
                 900L,
                 List.of(houseDoorRef()))),
         List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
-        List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)));
+        List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)),
+        7);
   }
 
   private ObservationGenerationContext contextWithUnconfirmedSpeech() {
@@ -256,7 +261,8 @@ class MockObservationReportGenerationServiceTest {
                 901L,
                 List.of())),
         List.of(),
-        List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)));
+        List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)),
+        7);
   }
 
   @Test
@@ -603,7 +609,8 @@ class MockObservationReportGenerationServiceTest {
         List.of(),
         List.of(),
         List.of(),
-        activitySessions);
+        activitySessions,
+        7);
   }
 
   private ObservationGenerationContext context() {
@@ -622,7 +629,8 @@ class MockObservationReportGenerationServiceTest {
         List.of(),
         List.of(),
         List.of(),
-        List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)));
+        List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)),
+        7);
   }
 
   private ObservationGenerationResult validResult(String requestId) {

@@ -442,6 +442,10 @@ class ObservationGenerationRequest(_CamelModel):
     answered_count: int = 0
     skipped_count: int = 0
     unrecognized_speech_count: int = 0
+    # 활동 시점 기준 아동 만 나이 (S15P11B209-1001). 관찰을 연령 발달 문맥으로 설명하는
+    # 축(Lowenfeld 규준 — 982에서 계약 부재로 보류)의 재료다.
+    #   롤아웃 안전: 구 BE가 안 보내면 None — 프롬프트가 연령 언급 자체를 금지한다.
+    child_age: int | None = None
     selected_emotions: list[str] = Field(default_factory=list)
     expressed_emotion_text: str | None = Field(default=None, repr=False)
     representative_utterance: str | None = Field(default=None, repr=False)

@@ -74,6 +74,7 @@ import com.ssafy.b209.report.safety.InterpretationCandidate;
 import com.ssafy.b209.report.safety.InterpretationSafetyOutcome;
 import com.ssafy.b209.report.safety.InterpretationSafetyVerifier;
 import java.time.Clock;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -268,6 +269,7 @@ public class ObservationReportPersistenceService {
     DrawingSession session = analysis.getDrawingSession();
     Long drawingSessionId = session.getId();
     String expressedEmotionText = session.getExpressedEmotionText();
+    Integer childAge = childAgeOf(session);
     // HTP면 (세션, 주제) 3쌍 — 주제별 서술·문답 수집(S15P11B209-741)에 주제가 필요하다.
     // 그림일기·단독 세션은 주제 없는 1쌍.
     // ⚠️ 이 목록은 아래에서 걸러지는 subjectContexts 와 달리 **모든 세션**을 담는다. 주제별
@@ -425,7 +427,24 @@ public class ObservationReportPersistenceService {
             keyConversations,
             subjectContexts,
             selectedEmotionRefs,
-            contextSessions));
+            contextSessions,
+            childAge));
+  }
+
+  /**
+   * 활동 시점 기준 아동 만 나이를 계산한다 (S15P11B209-1001).
+   *
+   * <p>대화 경로({@code GenerateQuestionCommand.childAge})가 이미 보내는 것과 같은 수준의 정보다.
+   * 리포트가 관찰을 연령 발달 문맥으로 설명할 수 있게 한다 — 982에서 계약 부재로 보류했던 축.
+   * 나이 계산은 {@code Child.ageOn}이 소유한다(도메인 규칙 중복 금지). 생년월일은 로그에
+   * 남기지 않는다(가드레일 9절) — 아동 관계가 없으면 조용히 {@code null}로 보내고,
+   * AI 프롬프트는 나이가 없을 때 연령 언급 자체를 금지한다.
+   *
+   * @param session 아동 관계를 가진 그림 활동 세션
+   * @return 만 나이이며 아동 관계가 없으면 {@code null}
+   */
+  private Integer childAgeOf(DrawingSession session) {
+    return session.getChild() == null ? null : session.getChild().ageOn(LocalDate.now(clock));
   }
 
   /**

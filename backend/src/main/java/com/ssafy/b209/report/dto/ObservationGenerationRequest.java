@@ -28,6 +28,7 @@ import java.util.List;
  * @param selectedEmotionRefs 선택 감정을 <strong>서버가 발급한 행 식별자</strong>와 함께 담은 목록이다. {@code
  *     selectedEmotions}와 같은 재료이며 AI가 근거({@code sourceRef})로 가리킬 수 있는 형태다 (S15P11B209-906)
  * @param behaviorMetrics 캔버스 과정에서 집계한 형식 지표이며 집계하지 못했으면 {@code null} (S15P11B209-837)
+ * @param childAge 활동 시점 기준 아동 만 나이이며 없으면 {@code null} (S15P11B209-1001)
  */
 public record ObservationGenerationRequest(
     @NotBlank String requestId,
@@ -44,7 +45,8 @@ public record ObservationGenerationRequest(
     String representativeUtterance,
     List<SubjectSummary> subjectSummaries,
     List<SelectedEmotionRef> selectedEmotionRefs,
-    BehaviorMetrics behaviorMetrics) {
+    BehaviorMetrics behaviorMetrics,
+    Integer childAge) {
 
   /** 목록 필드가 {@code null}로 만들어져도 빈 목록으로 정규화한다(계약: optional·기본 빈 목록). */
   public ObservationGenerationRequest {
@@ -101,6 +103,7 @@ public record ObservationGenerationRequest(
         representativeUtterance,
         subjectSummaries,
         selectedEmotionRefs,
+        null,
         null);
   }
 

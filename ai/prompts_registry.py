@@ -539,14 +539,20 @@ _PROMPT_SEMVER: dict[str, str] = {
     #   흡수하며 HTP 전용으로 좁혔다 — "주제가 나뉘지 않는 활동이면 null" 조건문 2곳을 없애고
     #   subjectType·drawingSubject 를 세 주제 필수로 못 박았다. 주제 간 비교 축·REPEATED_SUBJECT·
     #   주제별 그리기 시간은 HTP 전용 재산이 됐다.
-    "report_htp": "3.0.0",
+    # 3.1.0(S15P11B209-1001): 연령 규준 축 추가 — 982가 계약 부재로 보류했던 축이다.
+    #   childAge가 계약에 실리면서(BE ObservationGenerationContext→Request→AI child_age)
+    #   나이가 있을 때만 관찰을 발달 문맥으로 설명하게 했다. 근거가 아니라 서술의 맥락이고
+    #   (근거 게이트 우회 금지), 또래 비교 판정은 금지 — 규준은 안심이지 잣대가 아니다.
+    #   나이가 없으면 연령 언급 자체를 금지한다(지어내기 압력 차단).
+    "report_htp": "3.1.0",
     # 1.5.0(S15P11B209-840): htp와 같은 이유(요소 코드 범위·크기 위치 취급). 자유 그림은
     #   자동 탐지가 자주 놓치므로 "블록에 없는 것이 그림에 없다고 단정하지 마"를 덧붙였다.
     # 2.0.0(S15P11B209-993 — major, report_common 3.0.0 흡수): 공용 제거로 자기완결 파일이 됐다.
     #   그림 한 장 전제로 좁혔다 — 주제 간 비교 축·REPEATED_SUBJECT 근거·주제별 그리기 시간
     #   불릿을 뺐다(한 장이라 성립 불가). subjectReports 는 subjectType null 한 칸,
     #   drawnItems 는 drawingSubject null 로 못 박아 조건문이 사라졌다.
-    "report_diary": "2.0.0",
+    # 2.1.0(S15P11B209-1001): report_htp 3.1.0과 한 쌍 — 연령 규준 축. 규칙은 각자 소유(993).
+    "report_diary": "2.1.0",
 }
 
 _UNKNOWN_SEMVER = "0.0.0"

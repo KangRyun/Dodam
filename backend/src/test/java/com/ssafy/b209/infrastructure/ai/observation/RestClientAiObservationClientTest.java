@@ -427,7 +427,8 @@ class RestClientAiObservationClientTest {
         null,
         List.of(),
         List.of(),
-        metrics);
+        metrics,
+        null);
   }
 
   private ObservationGenerationRequest requestWithDetection() {
@@ -462,6 +463,7 @@ class RestClientAiObservationClientTest {
                         null,
                         new BigDecimal("0.9100"))))),
         List.of(new ObservationGenerationRequest.SelectedEmotionRef("920", "HAPPY")),
+        null,
         null);
   }
 
