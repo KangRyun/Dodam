@@ -34,6 +34,7 @@ import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryCaregiverQuestionResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryChildVoiceResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryDataQualityResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryDevelopmentalObservationResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryEvidenceRefResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryNarrativeStepResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiarySessionObservationResponse;
@@ -61,6 +62,8 @@ import com.ssafy.b209.report.repository.ReportDetectedObjectRow;
 import com.ssafy.b209.report.repository.ReportDetectedObjectViewRepository;
 import com.ssafy.b209.report.repository.ReportDiaryCaregiverQuestionRepository;
 import com.ssafy.b209.report.repository.ReportDiaryChildVoiceRepository;
+import com.ssafy.b209.report.repository.ReportDiaryDevelopmentSourceRepository;
+import com.ssafy.b209.report.repository.ReportDiaryDevelopmentalObservationRepository;
 import com.ssafy.b209.report.repository.ReportDiaryEvidenceRefRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightAlternativeRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
@@ -138,6 +141,9 @@ public class ReportDetailQueryService {
   private final ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository;
   private final ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository;
   private final ReportDiaryInsightAlternativeRepository diaryAlternativeRepository;
+  private final ReportDiaryDevelopmentalObservationRepository
+      diaryDevelopmentalObservationRepository;
+  private final ReportDiaryDevelopmentSourceRepository diaryDevelopmentSourceRepository;
   private final ReportDiaryUnknownItemRepository diaryUnknownItemRepository;
   private final ReportConversationSummaryViewRepository conversationSummaryRepository;
   private final ReportDetectedObjectViewRepository detectedObjectRepository;
@@ -205,6 +211,8 @@ public class ReportDetailQueryService {
       ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository,
       ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository,
       ReportDiaryInsightAlternativeRepository diaryAlternativeRepository,
+      ReportDiaryDevelopmentalObservationRepository diaryDevelopmentalObservationRepository,
+      ReportDiaryDevelopmentSourceRepository diaryDevelopmentSourceRepository,
       ReportDiaryUnknownItemRepository diaryUnknownItemRepository,
       ReportConversationSummaryViewRepository conversationSummaryRepository,
       ReportDetectedObjectViewRepository detectedObjectRepository,
@@ -241,6 +249,8 @@ public class ReportDetailQueryService {
     this.diaryCaregiverQuestionRepository = diaryCaregiverQuestionRepository;
     this.diaryEvidenceRefRepository = diaryEvidenceRefRepository;
     this.diaryAlternativeRepository = diaryAlternativeRepository;
+    this.diaryDevelopmentalObservationRepository = diaryDevelopmentalObservationRepository;
+    this.diaryDevelopmentSourceRepository = diaryDevelopmentSourceRepository;
     this.diaryUnknownItemRepository = diaryUnknownItemRepository;
     this.conversationSummaryRepository = conversationSummaryRepository;
     this.detectedObjectRepository = detectedObjectRepository;
@@ -950,6 +960,7 @@ public class ReportDetailQueryService {
                                       List.of())))
                       .toList(),
                   insight.getListeningTip(),
+                  buildDiaryDevelopmentalObservations(reportId, refs),
                   diaryUnknownItemRepository.findByReportIdOrderByDisplayOrderAsc(reportId).stream()
                       .map(item -> new DiaryUnknownItemResponse(item.getCode(), item.getText()))
                       .toList(),
@@ -962,6 +973,42 @@ public class ReportDetailQueryService {
                       insight.isVisionSummaryAvailable()));
             })
         .orElse(null);
+  }
+
+  /**
+   * 연령 발달 맥락 관찰을 만든다.
+   *
+   * <p>검수 출처가 비는 것은 정상이라 거르지 않는다 — AI 는 규준 문장(출처 있음)과 '이번 활동에서만 살펴본다'는 문장(규준을 주장하지 않아 출처 없음)을 함께
+   * 보낸다. 출처는 도메인으로 한 번에 읽어 묶는다(관찰마다 조회하면 N+1 이 된다).
+   */
+  private List<DiaryDevelopmentalObservationResponse> buildDiaryDevelopmentalObservations(
+      Long reportId, Map<String, List<DiaryEvidenceRefResponse>> refs) {
+    Map<String, List<String>> sources = new LinkedHashMap<>();
+    diaryDevelopmentSourceRepository
+        .findByReportIdOrderByDomainAscDisplayOrderAsc(reportId)
+        .forEach(
+            source ->
+                sources
+                    .computeIfAbsent(source.getDomain(), key -> new ArrayList<>())
+                    .add(source.getSourceId()));
+    return diaryDevelopmentalObservationRepository
+        .findByReportIdOrderByDisplayOrderAsc(reportId)
+        .stream()
+        .map(
+            observation ->
+                new DiaryDevelopmentalObservationResponse(
+                    observation.getDomain(),
+                    observation.getStatus(),
+                    observation.getAgeContext(),
+                    observation.getObservation(),
+                    observation.getScopeText(),
+                    sources.getOrDefault(observation.getDomain(), List.of()),
+                    refs.getOrDefault(
+                        diaryRefKey(
+                            ReportDiaryEvidenceRef.OWNER_DEVELOPMENTAL_OBSERVATION,
+                            observation.getDisplayOrder()),
+                        List.of())))
+        .toList();
   }
 
   /** 다른 설명을 한 번에 읽어 카드 순서로 묶는다 — 카드마다 조회하면 N+1 이 된다. */

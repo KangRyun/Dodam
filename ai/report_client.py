@@ -1936,6 +1936,18 @@ def _apply_findings(
             for index, step in enumerate(diary.narrative_flow)
             if f"diary.flow.{index}" not in flagged
         ]
+        # 발달 맥락은 흐름 단계를 근거로 조립됐다. 흐름이 잘려 나가면 그 단계를 인용한
+        #   항목은 사라진 근거를 가리킨 채 "이어서 이야기했어요"라고 말한다 — 근거가 없어진
+        #   발달 주장이 남는 것은 이 섹션에서 가장 위험한 실패다. 근거 없는 항목
+        #   (NOT_ASSESSED, 감정 선택)은 애초에 흐름을 인용하지 않아 그대로 남는다.
+        kept_refs = {
+            (ref.kind, ref.id) for step in diary.narrative_flow for ref in step.evidence_refs
+        }
+        diary.developmental_observations = [
+            observation
+            for observation in diary.developmental_observations
+            if all((ref.kind, ref.id) in kept_refs for ref in observation.evidence_refs)
+        ]
         # 핵심 이야기는 다르다. 이야기가 현실 붕괴·시점 과장으로 걸리면 그 이야기를 나눠 적은
         #   흐름과 관찰도 같은 오염을 물려받는다 — 뼈대가 무너지면 통째로 접고 레거시로 간다.
         if "diary.story" in flagged:

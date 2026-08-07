@@ -55,6 +55,17 @@ class DiaryReportV2Body extends StatelessWidget {
             ],
           ),
         ),
+      if (insights.developmentalObservations.isNotEmpty)
+        _DiarySection(
+          title: '연령에 비춰 본 이번 활동',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final observation in insights.developmentalObservations)
+                _DevelopmentalObservationCard(observation: observation),
+            ],
+          ),
+        ),
       if (insights.listeningTip != null)
         _ListeningTipCard(tip: insights.listeningTip!),
       // 확인하지 못한 것을 마지막에 둔다. 섹션이 없으면 보호자는 '문제가 없었다'로 읽는다.
@@ -391,6 +402,74 @@ class _CaregiverQuestionTile extends StatelessWidget {
   );
 }
 
+/// 연령 발달 맥락 카드.
+///
+/// **세 조각을 항상 함께 그린다** — 연령 맥락 → 이번 활동에서 확인된 것 → 범위 고지.
+/// 맥락만 남으면 규준 설명이 되고, 범위 고지가 빠지면 한 회차 활동이 발달 평가로 읽힌다.
+///
+/// 확인하지 못한 도메인도 감추지 않는다. 감추면 남은 것만 보여 '전부 확인했다'로
+/// 읽히고, 보이면 '이번에는 여기까지 봤다'가 된다 — 아이가 못한다는 뜻이 아니다.
+class _DevelopmentalObservationCard extends StatelessWidget {
+  const _DevelopmentalObservationCard({required this.observation});
+
+  final DiaryDevelopmentalObservationDto observation;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: AppSpacing.sm),
+    padding: const EdgeInsets.all(AppSpacing.md),
+    decoration: BoxDecoration(
+      color: AppColors.surfaceSoft,
+      borderRadius: BorderRadius.circular(AppRadius.md),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            _Badge(text: diaryDevelopmentDomainLabel(observation.domain)),
+            const SizedBox(width: AppSpacing.xs),
+            _Badge(text: diaryDevelopmentStatusLabel(observation.status)),
+          ],
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          observation.ageContext,
+          style: const TextStyle(
+            color: AppColors.inkMuted,
+            fontSize: 14,
+            height: 1.55,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          observation.observation,
+          style: const TextStyle(
+            color: AppColors.ink,
+            fontSize: 15,
+            height: 1.55,
+          ),
+        ),
+        // 범위 고지. 이 줄이 빠지면 한 회차가 발달 판정으로 읽힌다.
+        const SizedBox(height: AppSpacing.sm),
+        Text(
+          observation.scopeText,
+          style: const TextStyle(color: AppColors.inkMuted, fontSize: 13),
+        ),
+        // 출처는 있을 때만 밝힌다. 비어 있다는 것은 연령 규준을 주장하지 않는
+        //   문장이라는 뜻이라, 없는 출처를 지어 붙이지 않는다.
+        if (observation.sourceIds.isNotEmpty) ...[
+          const SizedBox(height: 2),
+          Text(
+            '출처 ${observation.sourceIds.join(', ')}',
+            style: const TextStyle(color: AppColors.inkMuted, fontSize: 12),
+          ),
+        ],
+      ],
+    ),
+  );
+}
+
 /// 듣는 방법 한 줄.
 class _ListeningTipCard extends StatelessWidget {
   const _ListeningTipCard({required this.tip});
@@ -535,6 +614,28 @@ String diaryInsightTypeLabel(String insightType) => switch (insightType) {
   'CONFIRMED_EXPRESSION' => '아이가 들려준 것',
   'SESSION_HYPOTHESIS' => '이번 활동에서 볼 수 있는 것',
   _ => '더 확인해 볼 것',
+};
+
+/// 발달 관찰 도메인 코드를 사용자 문구로 바꾼다.
+///
+/// 검사 항목처럼 읽히지 않게 '영역' 대신 아이가 한 일로 적는다.
+String diaryDevelopmentDomainLabel(String domain) => switch (domain) {
+  'NARRATIVE_LANGUAGE' => '이야기로 풀기',
+  'EMOTION_EXPRESSION' => '마음 표현하기',
+  'SOCIAL_UNDERSTANDING' => '함께 있던 사람 이야기하기',
+  'COPING_HELP_SEEKING' => '어려울 때 하기',
+  'SELF_REFLECTION' => '바람과 이유 말하기',
+  _ => '이번 활동',
+};
+
+/// 발달 관찰 상태 코드를 사용자 문구로 바꾼다.
+///
+/// **`NOT_ASSESSED` 를 '못함'으로 옮기면 안 된다.** 이번 활동에서 확인할 자료가
+/// 없었다는 뜻이지 아이가 못한다는 뜻이 아니다 — 모르는 코드도 같은 쪽으로 읽는다.
+String diaryDevelopmentStatusLabel(String status) => switch (status) {
+  'OBSERVED_THIS_SESSION' => '이번에 확인됨',
+  'PARTIALLY_OBSERVED' => '일부 확인됨',
+  _ => '이번에는 확인 안 함',
 };
 
 /// 이야기 단계 코드를 사용자 문구로 바꾼다. 모르는 코드는 표시하지 않는다.

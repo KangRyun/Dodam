@@ -10,6 +10,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Mapping
 
+import developmental_context
 import internal_contracts as contracts
 import report_safety
 
@@ -569,6 +570,143 @@ _UNKNOWN_TEMPLATES: tuple[tuple[str, str], ...] = (
 )
 
 
+def _developmental_observations(
+    req: contracts.ObservationGenerationRequest,
+    *,
+    flow: list[contracts.DiaryNarrativeStep],
+    child_voice: list[contracts.DiaryChildVoiceItem],
+) -> list[contracts.DiaryDevelopmentalObservation]:
+    """연령 발달 맥락 + 이번 활동에서 확인된 표현을 조립한다(4층).
+
+    **서버가 정한다.** 어떤 맥락 문장이 붙을지는 등록부(검수 출처)와 나이가 정하고, 무엇이
+    확인됐는지는 검증된 신호가 정한다 — 모델은 관여하지 않는다. 모델에게 맡기면 "또래보다
+    빠르다" 같은 문장이 곧바로 나온다.
+
+    한 번의 활동을 발달검사처럼 채점하지 않는다. 확인하지 못한 도메인은 ``NOT_ASSESSED`` 로
+    남기고, 그것을 발달 지연으로 읽지 않도록 범위 문구를 항상 함께 보낸다.
+    """
+    spoken = [item for item in child_voice if item.elicitation_type in _CHILD_COMPOSED]
+    # 도메인별로 '이번 활동에서 무엇이 확인됐는가'만 본다. 판정이 아니라 관찰이다.
+    events = [step for step in flow if step.step_type in {"EVENT", "CHILD_ACTION"}]
+    others = [step for step in flow if step.step_type == "OTHER_RESPONSE"]
+    emotions = [step for step in flow if step.step_type == "EMOTION"]
+    wishes = [step for step in flow if step.step_type in {"WISH", "OUTCOME"}]
+    said_emotion = bool((req.expressed_emotion_text or "").strip())
+    chose_emotion = bool(req.selected_emotion_refs)
+
+    findings: list[tuple[str, str, str, list]] = []
+
+    # ① 이야기·언어 — 사건을 몇 단계나 이어 말했는가.
+    if len(events) >= 2:
+        findings.append(
+            (
+                developmental_context.NARRATIVE_LANGUAGE,
+                developmental_context.OBSERVED,
+                "이번 활동에서 아이는 있었던 일과 그다음 행동을 이어서 이야기했어요.",
+                events[:2],
+            )
+        )
+    elif events or spoken:
+        findings.append(
+            (
+                developmental_context.NARRATIVE_LANGUAGE,
+                developmental_context.PARTIAL,
+                "이번 활동에서 아이는 있었던 일 한 가지를 자기 말로 이야기했어요.",
+                events[:1],
+            )
+        )
+    else:
+        findings.append(
+            (
+                developmental_context.NARRATIVE_LANGUAGE,
+                developmental_context.NOT_ASSESSED,
+                developmental_context.NOT_ASSESSED_TEXT,
+                [],
+            )
+        )
+
+    # ② 감정 표현 — 말한 것과 고른 것을 구분한다. 고른 것만으로 '표현했다'고 쓰지 않는다.
+    if emotions or said_emotion:
+        findings.append(
+            (
+                developmental_context.EMOTION_EXPRESSION,
+                developmental_context.OBSERVED,
+                "이번 활동에서 아이는 그때의 마음을 자기 말로 이야기했어요.",
+                emotions[:1],
+            )
+        )
+    elif chose_emotion:
+        findings.append(
+            (
+                developmental_context.EMOTION_EXPRESSION,
+                developmental_context.PARTIAL,
+                "이번 활동에서 아이는 감정을 보기에서 골랐어요. 말로 설명하지는 않았어요.",
+                [],
+            )
+        )
+    else:
+        findings.append(
+            (
+                developmental_context.EMOTION_EXPRESSION,
+                developmental_context.NOT_ASSESSED,
+                developmental_context.NOT_ASSESSED_TEXT,
+                [],
+            )
+        )
+
+    # ③ 사회적 이해 — 함께 있던 사람의 행동·반응을 이야기했는가.
+    findings.append(
+        (
+            developmental_context.SOCIAL_UNDERSTANDING,
+            developmental_context.OBSERVED if others else developmental_context.NOT_ASSESSED,
+            "이번 활동에서 아이는 함께 있던 사람이 한 행동도 이야기했어요."
+            if others
+            else developmental_context.NOT_ASSESSED_TEXT,
+            others[:1],
+        )
+    )
+
+    # ④ 자기 표현 — 바라는 것이나 이야기의 끝을 말했는가.
+    findings.append(
+        (
+            developmental_context.SELF_REFLECTION,
+            developmental_context.OBSERVED if wishes else developmental_context.NOT_ASSESSED,
+            "이번 활동에서 아이는 바라는 것이나 이야기의 끝을 이야기했어요."
+            if wishes
+            else developmental_context.NOT_ASSESSED_TEXT,
+            wishes[:1],
+        )
+    )
+
+    observations: list[contracts.DiaryDevelopmentalObservation] = []
+    for domain, status, text, steps in findings:
+        context = developmental_context.contexts_for(req.child_age, domain)
+        if context is not None:
+            age_context = context.parent_context
+            source_ids = list(context.source_ids)
+        else:
+            # 나이를 모르거나 그 도메인에 검수된 규준이 없다 — 규준 없이 이번 활동만 적는다.
+            #   짐작해 붙이면 지어낸 규준이 된다.
+            fallback = developmental_context.session_only_context(domain)
+            if fallback is None:
+                continue
+            age_context = fallback
+            source_ids = []
+        refs = [ref for step in steps for ref in step.evidence_refs]
+        observations.append(
+            contracts.DiaryDevelopmentalObservation(
+                domain=domain,
+                status=status,
+                age_context=age_context,
+                observation=text,
+                scope_text=developmental_context.SCOPE_TEXT,
+                source_ids=source_ids,
+                evidence_refs=refs[:2],
+            )
+        )
+    return observations
+
+
 def _unknown_items(
     req: contracts.ObservationGenerationRequest,
     *,
@@ -700,6 +838,11 @@ def build_diary_insights(
         session_observations=observations,
         caregiver_questions=questions,
         listening_tip=listening_tip,
+        # 연령 발달 맥락(4층). 어떤 맥락 문장이 붙을지는 검수 등록부와 나이가 정하고,
+        #   무엇이 확인됐는지는 검증된 신호가 정한다 — 모델은 관여하지 않는다.
+        developmental_observations=_developmental_observations(
+            req, flow=flow, child_voice=child_voice
+        ),
         # 확인하지 못한 것은 모델이 아니라 원자료가 정한다. 카드가 비어 나가는 것과
         #   "무엇을 알 수 없었는지"를 적어 보내는 것은 보호자에게 전혀 다르게 읽힌다.
         unknown_items=_unknown_items(

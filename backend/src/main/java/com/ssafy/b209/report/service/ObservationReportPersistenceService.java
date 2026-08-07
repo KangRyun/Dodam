@@ -30,6 +30,8 @@ import com.ssafy.b209.report.domain.ReportActivitySummary;
 import com.ssafy.b209.report.domain.ReportCrisisAlert;
 import com.ssafy.b209.report.domain.ReportDiaryCaregiverQuestion;
 import com.ssafy.b209.report.domain.ReportDiaryChildVoice;
+import com.ssafy.b209.report.domain.ReportDiaryDevelopmentSource;
+import com.ssafy.b209.report.domain.ReportDiaryDevelopmentalObservation;
 import com.ssafy.b209.report.domain.ReportDiaryEvidenceRef;
 import com.ssafy.b209.report.domain.ReportDiaryInsight;
 import com.ssafy.b209.report.domain.ReportDiaryInsightAlternative;
@@ -61,6 +63,7 @@ import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummary
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryCaregiverQuestionDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryChildVoiceItemDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryDataQualityDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryDevelopmentalObservationDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryEvidenceRefDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryInsightsDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryNarrativeStepDraft;
@@ -78,6 +81,8 @@ import com.ssafy.b209.report.repository.ReportActivitySummaryRepository;
 import com.ssafy.b209.report.repository.ReportCrisisAlertRepository;
 import com.ssafy.b209.report.repository.ReportDiaryCaregiverQuestionRepository;
 import com.ssafy.b209.report.repository.ReportDiaryChildVoiceRepository;
+import com.ssafy.b209.report.repository.ReportDiaryDevelopmentSourceRepository;
+import com.ssafy.b209.report.repository.ReportDiaryDevelopmentalObservationRepository;
 import com.ssafy.b209.report.repository.ReportDiaryEvidenceRefRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightAlternativeRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
@@ -184,6 +189,9 @@ public class ObservationReportPersistenceService {
   private final ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository;
   private final ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository;
   private final ReportDiaryInsightAlternativeRepository diaryAlternativeRepository;
+  private final ReportDiaryDevelopmentalObservationRepository
+      diaryDevelopmentalObservationRepository;
+  private final ReportDiaryDevelopmentSourceRepository diaryDevelopmentSourceRepository;
   private final ReportDiaryUnknownItemRepository diaryUnknownItemRepository;
   private final ReportGuardianQuestionRepository guardianQuestionRepository;
   private final ConversationSessionRepository conversationSessionRepository;
@@ -250,6 +258,8 @@ public class ObservationReportPersistenceService {
       ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository,
       ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository,
       ReportDiaryInsightAlternativeRepository diaryAlternativeRepository,
+      ReportDiaryDevelopmentalObservationRepository diaryDevelopmentalObservationRepository,
+      ReportDiaryDevelopmentSourceRepository diaryDevelopmentSourceRepository,
       ReportDiaryUnknownItemRepository diaryUnknownItemRepository,
       ReportGuardianQuestionRepository guardianQuestionRepository,
       ConversationSessionRepository conversationSessionRepository,
@@ -284,6 +294,8 @@ public class ObservationReportPersistenceService {
     this.diaryCaregiverQuestionRepository = diaryCaregiverQuestionRepository;
     this.diaryEvidenceRefRepository = diaryEvidenceRefRepository;
     this.diaryAlternativeRepository = diaryAlternativeRepository;
+    this.diaryDevelopmentalObservationRepository = diaryDevelopmentalObservationRepository;
+    this.diaryDevelopmentSourceRepository = diaryDevelopmentSourceRepository;
     this.diaryUnknownItemRepository = diaryUnknownItemRepository;
     this.guardianQuestionRepository = guardianQuestionRepository;
     this.conversationSessionRepository = conversationSessionRepository;
@@ -1226,6 +1238,10 @@ public class ObservationReportPersistenceService {
     return ref == null ? null : ref.id();
   }
 
+  private static boolean isBlank(String value) {
+    return value == null || value.isBlank();
+  }
+
   private static <E extends Enum<E>> E parseEnum(Class<E> type, String value) {
     if (value == null || value.isBlank()) {
       return null;
@@ -1412,6 +1428,54 @@ public class ObservationReportPersistenceService {
           question.evidenceRefs());
     }
     diaryCaregiverQuestionRepository.saveAll(questions);
+
+    // 연령 발달 맥락. 맥락·관찰·범위 고지가 한 행에 함께 있어야 하므로 셋 중 하나라도 비면
+    //   저장하지 않는다 — 맥락만 남으면 규준 설명이, 범위 고지가 빠지면 발달 평가가 된다.
+    // ⚠️ 검수 출처가 없는 것은 거르지 않는다. AI 는 규준 문장(출처 있음)과 '이번 활동에서만
+    //    살펴본다'는 문장(규준을 주장하지 않아 출처 없음)을 함께 보내는데, 나이를 모르거나
+    //    그 도메인에 검수된 규준이 없으면 뒤쪽이다 — 여기서 거르면 감정·자기표현 도메인이
+    //    거의 모든 리포트에서 통째로 사라진다.
+    List<ReportDiaryDevelopmentalObservation> developments = new ArrayList<>();
+    List<ReportDiaryDevelopmentSource> sources = new ArrayList<>();
+    List<DiaryDevelopmentalObservationDraft> developmentDrafts = draft.developmentalObservations();
+    for (int index = 0; index < developmentDrafts.size(); index++) {
+      DiaryDevelopmentalObservationDraft development = developmentDrafts.get(index);
+      if (isBlank(development.domain())
+          || isBlank(development.status())
+          || isBlank(development.ageContext())
+          || isBlank(development.observation())
+          || isBlank(development.scopeText())) {
+        continue;
+      }
+      developments.add(
+          ReportDiaryDevelopmentalObservation.create(
+              report,
+              development.domain(),
+              development.status(),
+              development.ageContext(),
+              development.observation(),
+              ColumnTextLimiter.fit(
+                  development.scopeText(),
+                  200,
+                  "report_diary_developmental_observations.scope_text"),
+              index));
+      List<String> sourceIds = development.sourceIds();
+      for (int order = 0; order < sourceIds.size(); order++) {
+        String sourceId = sourceIds.get(order);
+        if (!isBlank(sourceId)) {
+          sources.add(
+              ReportDiaryDevelopmentSource.create(report, development.domain(), sourceId, order));
+        }
+      }
+      collectDiaryRefs(
+          report,
+          refs,
+          ReportDiaryEvidenceRef.OWNER_DEVELOPMENTAL_OBSERVATION,
+          index,
+          development.evidenceRefs());
+    }
+    diaryDevelopmentalObservationRepository.saveAll(developments);
+    diaryDevelopmentSourceRepository.saveAll(sources);
 
     diaryEvidenceRefRepository.saveAll(refs);
 

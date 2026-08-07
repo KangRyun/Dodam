@@ -56,6 +56,8 @@ import com.ssafy.b209.report.repository.ReportActivityNoteRepository;
 import com.ssafy.b209.report.repository.ReportActivitySummaryRepository;
 import com.ssafy.b209.report.repository.ReportDiaryCaregiverQuestionRepository;
 import com.ssafy.b209.report.repository.ReportDiaryChildVoiceRepository;
+import com.ssafy.b209.report.repository.ReportDiaryDevelopmentSourceRepository;
+import com.ssafy.b209.report.repository.ReportDiaryDevelopmentalObservationRepository;
 import com.ssafy.b209.report.repository.ReportDiaryEvidenceRefRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightAlternativeRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
@@ -133,6 +135,11 @@ class ObservationReportPersistenceServiceTest {
   @Mock private ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository;
   @Mock private ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository;
   @Mock private ReportDiaryInsightAlternativeRepository diaryAlternativeRepository;
+
+  @Mock
+  private ReportDiaryDevelopmentalObservationRepository diaryDevelopmentalObservationRepository;
+
+  @Mock private ReportDiaryDevelopmentSourceRepository diaryDevelopmentSourceRepository;
   @Mock private ReportDiaryUnknownItemRepository diaryUnknownItemRepository;
   @Mock private ReportGuardianQuestionRepository guardianQuestionRepository;
   @Mock private ConversationSessionRepository conversationSessionRepository;
@@ -188,6 +195,8 @@ class ObservationReportPersistenceServiceTest {
             diaryCaregiverQuestionRepository,
             diaryEvidenceRefRepository,
             diaryAlternativeRepository,
+            diaryDevelopmentalObservationRepository,
+            diaryDevelopmentSourceRepository,
             diaryUnknownItemRepository,
             guardianQuestionRepository,
             conversationSessionRepository,

@@ -36,6 +36,8 @@ import com.ssafy.b209.report.repository.ReportDetectedObjectRow;
 import com.ssafy.b209.report.repository.ReportDetectedObjectViewRepository;
 import com.ssafy.b209.report.repository.ReportDiaryCaregiverQuestionRepository;
 import com.ssafy.b209.report.repository.ReportDiaryChildVoiceRepository;
+import com.ssafy.b209.report.repository.ReportDiaryDevelopmentSourceRepository;
+import com.ssafy.b209.report.repository.ReportDiaryDevelopmentalObservationRepository;
 import com.ssafy.b209.report.repository.ReportDiaryEvidenceRefRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightAlternativeRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
@@ -98,6 +100,11 @@ class ReportDetailQueryServiceTest {
   @Mock private ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository;
   @Mock private ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository;
   @Mock private ReportDiaryInsightAlternativeRepository diaryAlternativeRepository;
+
+  @Mock
+  private ReportDiaryDevelopmentalObservationRepository diaryDevelopmentalObservationRepository;
+
+  @Mock private ReportDiaryDevelopmentSourceRepository diaryDevelopmentSourceRepository;
   @Mock private ReportDiaryUnknownItemRepository diaryUnknownItemRepository;
   @Mock private ReportConversationSummaryViewRepository conversationSummaryRepository;
   @Mock private ReportDetectedObjectViewRepository detectedObjectRepository;
@@ -150,6 +157,8 @@ class ReportDetailQueryServiceTest {
             diaryCaregiverQuestionRepository,
             diaryEvidenceRefRepository,
             diaryAlternativeRepository,
+            diaryDevelopmentalObservationRepository,
+            diaryDevelopmentSourceRepository,
             diaryUnknownItemRepository,
             conversationSummaryRepository,
             detectedObjectRepository,
@@ -636,6 +645,8 @@ class ReportDetailQueryServiceTest {
             diaryCaregiverQuestionRepository,
             diaryEvidenceRefRepository,
             diaryAlternativeRepository,
+            diaryDevelopmentalObservationRepository,
+            diaryDevelopmentSourceRepository,
             diaryUnknownItemRepository,
             conversationSummaryRepository,
             detectedObjectRepository,

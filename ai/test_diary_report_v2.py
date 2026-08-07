@@ -540,6 +540,86 @@ class DiaryReportBuilderTest(unittest.TestCase):
         codes = {item.code for item in insights.unknown_items}
         self.assertFalse({"NO_VOICE_ANSWER", "ONLY_CHOICE_ANSWERS"} <= codes)
 
+    def _development(self, child_age):
+        import diary_report_v2
+
+        req = _diary_request().model_copy(update={"child_age": child_age})
+        insights = diary_report_v2.build_diary_insights(
+            _signals(), req, vision_available=True
+        )
+        return {o.domain: o for o in insights.developmental_observations}
+
+    def test_age_context_comes_from_the_reviewed_registry(self):
+        """연령 맥락 문장은 검수 출처가 있는 것만 쓴다 — 모델이 보충하지 않는다."""
+        got = self._development(5)
+
+        narrative = got["NARRATIVE_LANGUAGE"]
+        self.assertIn("두 사건", narrative.age_context)
+        self.assertTrue(narrative.source_ids, "검수 출처 없는 규준 문장은 나갈 수 없다")
+        self.assertIn("전체 발달 수준을 평가한 결과가 아니에요", narrative.scope_text)
+
+    def test_school_age_gets_no_age_norm(self):
+        """만 6세 이상은 검수된 한국 연령 규준이 없다 — 이번 활동 관찰만 적는다."""
+        got = self._development(8)
+
+        narrative = got["NARRATIVE_LANGUAGE"]
+        self.assertIn("또래와 견주거나 발달 수준을 판단하지 않아요", narrative.age_context)
+        for observation in got.values():
+            self.assertNotIn("또래보다", observation.observation)
+
+    def test_unknown_age_does_not_invent_a_norm(self):
+        """나이를 모르면 규준을 짐작해 붙이지 않는다.
+
+        규준을 붙이지 않는 것과 관찰을 지우는 것은 다르다 — 나이를 몰라도 이번 활동에서
+        무엇을 봤는지는 그대로 적는다. 등록부에 도메인 문장이 빠지면 그 도메인이 화면에서
+        통째로 사라지는데, 보호자에게는 '확인할 것이 없었다'로 보인다.
+        """
+        got = self._development(None)
+
+        self.assertIn("NARRATIVE_LANGUAGE", got)
+        for observation in got.values():
+            self.assertEqual(observation.source_ids, [])
+            self.assertIn("이번 활동", observation.age_context)
+
+    def test_every_produced_domain_has_a_session_only_sentence(self):
+        """나이를 모를 때 쓸 문장이 없으면 그 도메인은 조용히 사라진다."""
+        known = self._development(5).keys()
+        unknown = self._development(None).keys()
+
+        self.assertEqual(set(known), set(unknown))
+
+    def test_missing_data_is_not_assessed_not_a_delay(self):
+        """무응답·건너뜀은 발달 결함이 아니다 — 확인하지 않았다고 적는다."""
+        import diary_report_v2
+
+        req = _diary_request().model_copy(
+            update={"child_age": 5, "selected_emotion_refs": [], "expressed_emotion_text": ""}
+        )
+        insights = diary_report_v2.build_diary_insights(
+            _signals(narrativeFlow=[]), req, vision_available=False
+        )
+        got = {o.domain: o for o in insights.developmental_observations}
+
+        social = got["SOCIAL_UNDERSTANDING"]
+        self.assertEqual(social.status, "NOT_ASSESSED")
+        for word in ("느리", "지연", "부족", "못해", "미달"):
+            self.assertNotIn(word, social.observation)
+
+    def test_chosen_emotion_alone_is_partial_not_observed(self):
+        """감정을 고르기만 한 것을 '자기 말로 표현했다'로 올리지 않는다."""
+        import diary_report_v2
+
+        req = _diary_request().model_copy(
+            update={"child_age": 5, "expressed_emotion_text": ""}
+        )
+        insights = diary_report_v2.build_diary_insights(
+            _signals(narrativeFlow=[]), req, vision_available=True
+        )
+        got = {o.domain: o for o in insights.developmental_observations}
+
+        self.assertEqual(got["EMOTION_EXPRESSION"].status, "PARTIALLY_OBSERVED")
+        self.assertIn("골랐어요", got["EMOTION_EXPRESSION"].observation)
+
     def test_db_answer_type_spellings_are_both_accepted(self):
         """BE 는 DB enum(`OPTION_ANSWER`)을 그대로 보낸다.
 
@@ -1047,6 +1127,57 @@ class ReportClientDiaryV2IntegrationTest(unittest.TestCase):
 
         self.assertIsNotNone(result.diary_insights)
         self.assertEqual(len(result.diary_insights.narrative_flow), step_count - 1)
+
+    def test_flagged_flow_step_takes_its_developmental_claim_with_it(self):
+        """근거가 잘려 나간 발달 주장은 남지 않는다.
+
+        발달 맥락은 흐름 단계를 근거로 조립된다. 흐름이 검토에서 빠졌는데 "이어서
+        이야기했어요"가 그대로 남으면, 사라진 근거를 인용하는 발달 주장이 된다 — 이
+        섹션에서 가장 위험한 실패다. 근거를 인용하지 않는 항목(NOT_ASSESSED, 감정 선택)은
+        영향을 받지 않는다.
+        """
+        payload = json.loads(_generation_payload())
+        steps = payload["diarySignals"]["narrativeFlow"]
+        flagged_refs = {
+            (ref["kind"], ref["id"]) for ref in steps[0].get("evidenceRefs", [])
+        }
+        self.assertTrue(flagged_refs, "근거가 붙은 단계라야 이 검증이 의미가 있다")
+        replies = [
+            json.dumps(payload, ensure_ascii=False),
+            json.dumps(
+                {
+                    "findings": [
+                        {
+                            "target": "diary.flow.0",
+                            "issue": "TIME_SCOPE_OVERCLAIM",
+                            "note": "x",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+        ]
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = (
+            lambda **kwargs: _fake_response(replies.pop(0))
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(_diary_request(), model="m")
+
+        observations = result.diary_insights.developmental_observations
+        domains = {o.domain for o in observations}
+        # 그 단계를 근거로 삼던 항목은 사라진다.
+        self.assertNotIn("NARRATIVE_LANGUAGE", domains)
+        for observation in observations:
+            for ref in observation.evidence_refs:
+                self.assertNotIn(
+                    (ref.kind, ref.id),
+                    flagged_refs,
+                    f"{observation.domain} 이 빠진 단계를 근거로 남았다",
+                )
+        # 다른 근거를 쓰는 항목·근거 없는 항목까지 함께 지워 버리지는 않는다.
+        self.assertIn("EMOTION_EXPRESSION", domains)
+        self.assertIn("SOCIAL_UNDERSTANDING", domains)
 
 
 if __name__ == "__main__":
