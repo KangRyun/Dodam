@@ -107,6 +107,61 @@ class TestFillerPhrases:
         assert not judge("엄마가 구독 좋아요 누르라고 했어").failed
 
 
+class TestHallucinationMarkers:
+    """2026-08-07 실기기 실측 — 아래 셋이 SUCCESS로 저장됐다(지표는 전부 통과).
+
+    지표를 통과했다는 게 핵심이다. 그래서 마커 검사는 지표 없이도, 지표가 좋아도 걸어야 한다.
+    """
+
+    실측_환각 = (
+        "이 영상은 유료광고를 포함하고 있습니다.",
+        "자막제작 by UpTitle http://www.uptitle.co.kr",
+        "오늘도 시청해 주셔서 감사합니다.",
+    )
+
+    def test_실측_환각_셋은_지표가_없어도_무음_실패(self):
+        for text in self.실측_환각:
+            verdict = judge(text)
+            assert verdict.status == stt_verdict.STATUS_FAILED, text
+            assert verdict.failure_reason == stt_verdict.NO_SPEECH, text
+
+    def test_지표가_전부_좋아도_마커가_이긴다(self):
+        # 실측 그대로: no_speech_prob 낮고 avg_logprob 높아 지표만으로는 통과한다.
+        metrics = stt_verdict.SpeechMetrics(no_speech_prob=0.05, avg_logprob=-0.2)
+        for text in self.실측_환각:
+            assert judge(text, metrics).failed, text
+
+    def test_URL은_정규화_기준으로_매칭된다(self):
+        # "www."의 점은 정규화에서 사라진다 — 마커에 점을 넣었다면 여기서 깨진다.
+        assert judge("자막제작 by UpTitle http://www.uptitle.co.kr").failed
+        assert stt_verdict.has_hallucination_marker("http://www.uptitle.co.kr")
+
+    def test_오늘도가_앞에_붙은_변형도_잡는다(self):
+        # 완전 일치 목록("시청해주셔서감사합니다")이 뚫린 실제 경로.
+        assert judge("오늘도 시청해 주셔서 감사합니다.").failed
+
+
+class TestHallucinationMarkerOverreach:
+    """부분 일치의 대가는 진짜 답변 삭제다 — 아래는 전부 살아남아야 한다."""
+
+    def test_일상어_단독은_지우지_않는다(self):
+        for answer in ("감사합니다", "고맙습니다", "안녕하세요", "다음에 또 할래"):
+            assert judge(answer).status == stt_verdict.STATUS_SUCCESS, answer
+
+    def test_구독_알림설정은_마커가_아니다(self):
+        # 아이가 실제로 말할 수 있는 말이다. 완전 일치 목록이 맡고 부분 일치는 하지 않는다.
+        for answer in ("구독 안 해봤어", "엄마가 구독 좋아요 누르라고 했어", "알림설정 어떻게 해?"):
+            assert judge(answer).status == stt_verdict.STATUS_SUCCESS, answer
+
+    def test_주소_영상_광고라는_말_자체는_통과한다(self):
+        for answer in ("우리 집 주소는 몰라", "영상 보고 그렸어", "광고에서 봤어"):
+            assert judge(answer).status == stt_verdict.STATUS_SUCCESS, answer
+
+    def test_마커_없는_문장은_has_marker가_거짓(self):
+        assert not stt_verdict.has_hallucination_marker("이건 우리 집이고 옆은 나무야")
+        assert not stt_verdict.has_hallucination_marker("")
+
+
 class TestNoMetricsFallback:
     def test_지표가_없으면_텍스트만으로_통과시킨다(self):
         # 근거 없이 실패로 만들면 정상 음성 인식을 잃는다.
