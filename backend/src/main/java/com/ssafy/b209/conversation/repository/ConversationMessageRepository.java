@@ -95,6 +95,27 @@ public interface ConversationMessageRepository extends JpaRepository<Conversatio
   long countAnswered(@Param("sessionId") Long conversationSessionId);
 
   /**
+   * 세션에서 아이가 실제로 답한 텍스트를 순서대로 조회한다 (S15P11B209-989).
+   *
+   * <p>앞 주제 대화를 다음 주제 질문 생성에 압축해 싣는 재료다 — 질문은 싣지 않고 아이 답만
+   * 싣는다(프롬프트 크기). 음성 인식 결과가 있으면 그것을, 없으면 원문(선택 칩 라벨·타이핑)을 쓴다.
+   * 건너뛴 질문은 답이 아니라 뺀다.
+   *
+   * @param conversationSessionId 대화 세션 식별자
+   * @return 아이 답변 텍스트 목록(대화 순서), 없으면 빈 목록
+   */
+  @Query(
+      value =
+          "SELECT COALESCE(NULLIF(stt_text, ''), raw_text) FROM conversation_messages "
+              + "WHERE conversation_session_id = :sessionId "
+              + "AND message_type IN ('VOICE_ANSWER', 'OPTION_ANSWER', 'TEXT_ANSWER') "
+              + "AND is_skipped = FALSE "
+              + "AND COALESCE(NULLIF(stt_text, ''), raw_text) IS NOT NULL "
+              + "ORDER BY message_sequence ASC",
+      nativeQuery = true)
+  List<String> findChildAnswerTexts(@Param("sessionId") Long conversationSessionId);
+
+  /**
    * 세션에서 건너뛴 질문 메시지 수를 집계한다.
    *
    * @param conversationSessionId 대화 세션 식별자

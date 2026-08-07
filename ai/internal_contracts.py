@@ -93,6 +93,17 @@ ActivityType = Literal["HTP", "ART_DIARY"]
 DrawingSubject = Literal["HOUSE", "TREE", "PERSON"]
 
 
+class PreviousSubjectNote(_CamelModel):
+    """같은 HTP 활동의 앞 주제에서 아이가 들려준 이야기 (S15P11B209-989).
+
+    주제마다 대화 세션이 따로 열려 다음 주제는 앞 주제 발화를 모른다 — 그 단절을 잇는
+    압축 재료다. child_utterances 는 아이 표현이라 repr 에서 감춘다(로그 유출 방지).
+    """
+
+    drawing_subject: str  # HOUSE | TREE | PERSON
+    child_utterances: list[str] = Field(default_factory=list, repr=False)
+
+
 class QuestionRequest(_CamelModel):
     """BE AiQuestionRequest와 1:1 대응하는 질문 생성 요청."""
 
@@ -122,6 +133,9 @@ class QuestionRequest(_CamelModel):
     drawing_subject: DrawingSubject | None = None
     # 이 대화에서 이미 질문한 대상 objectCode 목록(반복 질문 방지용). 713이 프롬프트에서 소비한다.
     asked_object_codes: list[str] = Field(default_factory=list)
+    # 앞 주제에서 아이가 한 말 (S15P11B209-989). 롤아웃 안전: 구 BE가 안 보내면 빈 목록 —
+    #   첫 주제·그림일기와 같은 경로로 떨어져 기존 동작 그대로다.
+    previous_subject_notes: list[PreviousSubjectNote] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_activity_context(self) -> "QuestionRequest":

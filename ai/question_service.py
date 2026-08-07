@@ -354,6 +354,20 @@ def _target_line(req: QuestionRequest, target_name: str) -> str:
     return _block(req.activity_type, key, target=target_name)
 
 
+def _previous_subject_lines(req: QuestionRequest) -> str:
+    """앞 주제 노트를 프롬프트 줄로 만든다 (S15P11B209-989).
+
+    발화를 따옴표로 감싼다 — 아이 말은 데이터이지 지시가 아니다(742와 같은 결).
+    주제 이름은 한글로 옮긴다(HOUSE 같은 코드가 모델 출력에 새지 않게).
+    """
+    lines = []
+    for note in req.previous_subject_notes:
+        subject_ko = _SUBJECT_KO.get(note.drawing_subject, note.drawing_subject)
+        quoted = " · ".join(f"“{u}”" for u in note.child_utterances)
+        lines.append(f"- {subject_ko} 그림에서: {quoted}")
+    return "\n".join(lines)
+
+
 def _activity_block(
     req: QuestionRequest,
     target: DetectedObject | None,
@@ -400,6 +414,16 @@ def _activity_block(
         # 이미 안다"는 사실 하나다. 앞에 두면 위 지시와 겹쳐 서로 밀어낸다.
         if _is_htp_opening(req):
             lines.append(_block(req.activity_type, "HTP_OPENING", subject=subject_ko))
+        # 앞 주제에서 아이가 한 말 (S15P11B209-989). 주제 고정([[HTP]]) 뒤에 두는 이유:
+        # 참조는 허용하되 화제 전환은 금지 — 고정 지시가 먼저 서야 노트가 그 테두리 안에서 읽힌다.
+        if req.previous_subject_notes:
+            lines.append(
+                _block(
+                    req.activity_type,
+                    "PREVIOUS_SUBJECTS",
+                    notes=_previous_subject_lines(req),
+                )
+            )
     elif req.activity_type == "ART_DIARY":
         # 그림일기 탐지 모델(sketch)은 오탐이 잦다 — 이름의 근거는 탐지 목록이 아니라
         # 그림 서술과 아이 말이다(788 B, 활동별 판단).

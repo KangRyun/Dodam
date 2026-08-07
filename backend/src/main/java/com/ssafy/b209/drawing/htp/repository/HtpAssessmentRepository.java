@@ -43,6 +43,40 @@ public interface HtpAssessmentRepository extends JpaRepository<HtpAssessment, Lo
       @Param("drawingSessionId") Long drawingSessionId);
 
   /**
+   * 대화 질문 생성이 앞 주제 대화를 찾기 위한 현재 단계 조회다 (S15P11B209-989).
+   *
+   * <p>묶음을 fetch join 한다 — 호출부({@code ConversationQuestionService})가 Transaction 밖이라
+   * 지연 로딩 프록시를 건드리면 터진다. 필요한 것은 묶음 식별자와 단계 순서뿐이다.
+   *
+   * @param drawingSessionId 그림 세션 식별자
+   * @return 묶음이 함께 로딩된 단계, 일반 활동 세션이면 빈 값
+   */
+  @Query(
+      "select step from HtpAssessmentStep step "
+          + "join fetch step.assessment "
+          + "where step.drawingSession.id = :drawingSessionId")
+  Optional<HtpAssessmentStep> findStepWithAssessmentByDrawingSessionId(
+      @Param("drawingSessionId") Long drawingSessionId);
+
+  /**
+   * 같은 HTP 묶음에서 현재 단계보다 앞선 단계들을 그림 세션과 함께 조회한다 (S15P11B209-989).
+   *
+   * <p>앞 주제에서 아이가 한 말을 다음 주제 질문 생성에 실마리로 싣기 위한 역추적이다.
+   * 그림 세션을 fetch join 한다 — 호출부가 Transaction 밖이다.
+   *
+   * @param assessmentId HTP 활동 묶음 식별자
+   * @param stepOrder 현재 단계 순서
+   * @return 앞선 단계 목록(단계 순서 오름차순), 첫 단계면 빈 목록
+   */
+  @Query(
+      "select step from HtpAssessmentStep step "
+          + "join fetch step.drawingSession "
+          + "where step.assessment.id = :assessmentId and step.stepOrder < :stepOrder "
+          + "order by step.stepOrder asc")
+  List<HtpAssessmentStep> findPriorStepsWithDrawingSession(
+      @Param("assessmentId") Long assessmentId, @Param("stepOrder") int stepOrder);
+
+  /**
    * 리포트 생성 결과와 HTP 묶음 상태를 같은 Transaction에서 변경하도록 세션 기준 쓰기 잠금 조회한다.
    *
    * @param drawingSessionId HTP 단계 그림 세션 식별자

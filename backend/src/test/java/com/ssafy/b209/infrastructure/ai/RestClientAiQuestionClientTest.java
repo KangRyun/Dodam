@@ -11,6 +11,7 @@ import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.conversation.dto.AiQuestionRequest;
 import com.ssafy.b209.conversation.dto.AiQuestionResponse;
 import java.net.SocketTimeoutException;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -177,7 +178,8 @@ class RestClientAiQuestionClientTest {
         "safety-2026-07",
         null,
         null,
-        java.util.List.of());
+        java.util.List.of(),
+        List.of());
   }
 
   private AiQuestionRequest subjectContextRequest() {
@@ -196,6 +198,7 @@ class RestClientAiQuestionClientTest {
         "safety-2026-07",
         "HTP",
         "HOUSE",
-        java.util.List.of("TREE", "SUN"));
+        java.util.List.of("TREE", "SUN"),
+        List.of());
   }
 }

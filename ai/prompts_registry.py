@@ -238,7 +238,10 @@ _PROMPT_SEMVER: dict[str, str] = {
     #   2026-08-07 — 공용 제거). 954가 _DIARY 접미사 변형을 만들 만큼 두 활동의 내용이 이미
     #   달랐다 — 파일이 갈리며 접미사 키를 없애고 같은 키를 활동별 내용으로 소유한다.
     # 1.0.0: 공용 2.1.0의 HTP 몫(HTP·HTP_WHOLE·HTP_OPENING·PERSON_PART + 공통 기계 구획).
-    "activity_block_htp": "1.0.0",
+    # 1.1.0(S15P11B209-989): [[PREVIOUS_SUBJECTS]] 신설 — 앞 주제에서 아이가 한 말을
+    #   실마리로만 쓰고 화제 전환은 금지한다(709 주제 이탈 재발 방지 — 참조 허용·전환 금지로
+    #   선을 그었다). 주제 고정([[HTP]]) 뒤에 실린다.
+    "activity_block_htp": "1.1.0",
     # 1.0.0: 공용 2.1.0의 그림일기 몫(ART_DIARY·ART_DIARY_OPEN + 공통 기계 구획).
     #   SINGLE_TARGET·ASKED_ALREADY 키에 구 _DIARY 변형의 내용이 담긴다.
     "activity_block_diary": "1.0.0",

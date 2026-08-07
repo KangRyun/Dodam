@@ -28,6 +28,7 @@ from pydantic import ValidationError
 from internal_contracts import (
     BoundingBox,
     DetectedObject,
+    PreviousSubjectNote,
     QuestionRequest,
     RecentMessage,
 )
@@ -1112,6 +1113,61 @@ class TargetLineScopeTest(unittest.TestCase):
         self.assertIn("무리해서 끌어오지 말고", line)
 
 
+class PreviousSubjectNotesTest(unittest.TestCase):
+    """앞 주제 대화 잇기 (S15P11B209-989).
+
+    HTP는 주제마다 대화 세션이 새로 열려 다음 주제가 앞 주제 발화를 모른다.
+    BE가 previousSubjectNotes 로 아이 답을 압축해 보내면 프롬프트에 실마리 블록이 실린다.
+    🔴 참조 허용·화제 전환 금지 — 709(주제 이탈)가 다시 열리지 않게 금지문을 함께 못 박는다.
+    """
+
+    def _htp_request(self, **overrides):
+        base = dict(
+            activity_type="HTP",
+            drawing_subject="TREE",
+            detected_objects=[_detected("TREE", "나무", 0.9)],
+        )
+        base.update(overrides)
+        return _request(**base)
+
+    def _notes(self):
+        return [
+            PreviousSubjectNote(
+                drawing_subject="HOUSE",
+                child_utterances=["우리 가족이랑 강아지 살아", "생일잔치를 했어"],
+            )
+        ]
+
+    def test_notes_are_rendered_with_korean_subject_and_quotes(self):
+        system = question_service._build_messages(
+            self._htp_request(previous_subject_notes=self._notes())
+        )[0]["content"]
+        self.assertIn("[앞 그림에서 아이가 들려준 이야기]", system)
+        self.assertIn("집 그림에서", system)  # HOUSE 코드가 아니라 한글
+        self.assertNotIn("HOUSE 그림에서", system)
+        self.assertIn("“우리 가족이랑 강아지 살아”", system)  # 발화는 따옴표 안(데이터)
+        # 709 재발 방지문이 함께 실린다 — 참조 허용·화제 전환 금지.
+        self.assertIn("이번 질문의 주인공으로 삼지 마", system)
+        self.assertIn("실마리로만", system)
+
+    def test_first_subject_and_diary_render_nothing(self):
+        """첫 주제(노트 없음)·그림일기는 블록 자체가 없다 — 기존 동작 그대로(롤아웃 안전)."""
+        for req in (
+            self._htp_request(),  # 노트 없는 HTP(첫 주제)
+            _request(
+                activity_type="ART_DIARY",
+                detected_objects=[_detected("SUN", "해", 0.9)],
+                previous_subject_notes=[
+                    PreviousSubjectNote(
+                        drawing_subject="HOUSE", child_utterances=["집이야"]
+                    )
+                ],  # 그림일기에 노트가 잘못 실려도 HTP 분기 밖이라 무시된다
+            ),
+        ):
+            system = question_service._build_messages(req)[0]["content"]
+            self.assertNotIn("[앞 그림에서 아이가 들려준 이야기]", system)
+
+
 class PromptMetaLeakTest(unittest.TestCase):
     """모델에 나가는 프롬프트에 내부 메타(파일명·개편 날짜)가 실리지 않는다 (S15P11B209-993).
 
@@ -1192,7 +1248,8 @@ class ActivityBlockVersionTrackingTest(unittest.TestCase):
             "LAST_QUESTION",
         }
         used = {
-            "activity_block_htp": shared | {"HTP", "HTP_WHOLE", "HTP_OPENING", "PERSON_PART"},
+            "activity_block_htp": shared
+            | {"HTP", "HTP_WHOLE", "HTP_OPENING", "PERSON_PART", "PREVIOUS_SUBJECTS"},
             "activity_block_diary": shared | {"ART_DIARY", "ART_DIARY_OPEN"},
         }
         for name, keys in used.items():
