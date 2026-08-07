@@ -35,7 +35,7 @@ void main() {
     });
   });
 
-  testWidgets('completed Report는 일반형 Hero와 세 mascot을 장식으로 표시한다', (
+  testWidgets('completed Report는 일반형 Hero와 두 mascot을 장식으로 표시한다', (
     tester,
   ) async {
     final semantics = tester.ensureSemantics();
@@ -44,7 +44,9 @@ void main() {
     expect(find.text('그림 속 이야기를 함께 돌아볼까요?'), findsOneWidget);
     expect(find.text('돌아보기 친구가 아이의 그림과 이야기를 차근차근 정리했어요.'), findsOneWidget);
     expect(find.byKey(const ValueKey('report-mascot-intro')), findsOneWidget);
-    expect(find.byKey(const ValueKey('report-mascot-observe')), findsOneWidget);
+    // 그림이 '한눈에 보는 활동'으로 옮겨 가면서 관찰 mascot 자리는 없앴다
+    // (S15P11B209-996) — 그림 옆은 이제 활동 정보가 쓴다.
+    expect(find.byKey(const ValueKey('report-mascot-observe')), findsNothing);
     expect(
       find.byKey(const ValueKey('report-mascot-complete')),
       findsOneWidget,
@@ -67,44 +69,41 @@ void main() {
 
     expect(
       find.byKey(const ValueKey('report-mascot-fallback')),
-      findsNWidgets(3),
+      findsNWidgets(2),
     );
     expect(find.text('편안하게 대화했어요.'), findsOneWidget);
     expect(find.byKey(const ValueKey('report-home-cta')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('모든 Report section은 DTO 원문과 flat notes를 그대로 매핑한다', (
-    tester,
-  ) async {
+  testWidgets('그림일기 Report는 남은 섹션의 DTO 원문을 그대로 매핑한다', (tester) async {
     await _pumpReport(tester, report: _fullReport());
 
     expect(find.text('동생이랑 놀아서 좋았어요'), findsOneWidget);
     expect(find.textContaining('우리 동생이야.'), findsOneWidget);
-    expect(find.text('사람, 집'), findsOneWidget);
-    expect(find.text('잠시 멈춘 뒤 다시 그렸어요.'), findsOneWidget);
-    expect(find.text('색을 여러 번 덧칠했어요.'), findsOneWidget);
-    expect(find.text('멈춤'), findsOneWidget);
-    expect(find.text('4회'), findsOneWidget);
-    expect(find.text('지우기'), findsOneWidget);
-    expect(find.text('2회'), findsOneWidget);
-    expect(find.text('평균 필압'), findsOneWidget);
-    expect(find.text('0.62'), findsOneWidget);
-    expect(find.text('질문'), findsOneWidget);
-    expect(find.text('5개'), findsOneWidget);
-    expect(find.text('대답'), findsOneWidget);
-    expect(find.text('4개'), findsOneWidget);
-    expect(find.text('건너뜀'), findsOneWidget);
-    expect(find.text('1개'), findsOneWidget);
     expect(find.text('기쁨'), findsOneWidget);
+    expect(find.text('그림일기'), findsOneWidget);
+    expect(find.text('앱에서 그리기'), findsOneWidget);
     expect(find.text('어떤 부분이 좋아?'), findsOneWidget);
-    expect(find.textContaining('진단이 아닌 관찰 참고 자료'), findsOneWidget);
+    // 대화 요약 한 줄은 그림 설명으로 자리를 옮겼다(S15P11B209-996).
+    expect(find.text('편안하게 대화했어요.'), findsOneWidget);
+    // 표지에는 서버의 비진단 안내만 남긴다. 한계 문장·참고 자료는 같은 말이라
+    // 뺐다(S15P11B209-996).
+    expect(find.textContaining('나타난 특징을 정리한 자료예요'), findsOneWidget);
+    expect(find.textContaining('진단이 아닌 관찰 참고 자료'), findsNothing);
+    // 객관 수치·대화 통계 블럭은 그림일기에서 뺐다.
+    expect(find.text('사람, 집'), findsNothing);
+    expect(find.text('잠시 멈춘 뒤 다시 그렸어요.'), findsNothing);
+    expect(find.text('멈춤'), findsNothing);
+    expect(find.text('평균 필압'), findsNothing);
+    expect(find.text('질문'), findsNothing);
+    expect(find.text('건너뜀'), findsNothing);
     expect(find.textContaining('집에서 관찰'), findsNothing);
     expect(find.textContaining('나무에서 관찰'), findsNothing);
     expect(find.textContaining('사람에서 관찰'), findsNothing);
   });
 
-  testWidgets('통계의 null 값만 숨기고 summary는 유지한다', (tester) async {
+  testWidgets('대화 요약 한 줄은 그림 설명으로 남고 통계는 사라진다', (tester) async {
     await _pumpReport(
       tester,
       report: _fullReport(
@@ -117,11 +116,15 @@ void main() {
       ),
     );
 
-    expect(find.text('질문'), findsOneWidget);
-    expect(find.text('5개'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('report-drawing-caption')),
+      findsOneWidget,
+    );
+    expect(find.text('질문 수만 제공된 요약이에요.'), findsOneWidget);
+    expect(find.text('질문'), findsNothing);
+    expect(find.text('5개'), findsNothing);
     expect(find.text('대답'), findsNothing);
     expect(find.text('건너뜀'), findsNothing);
-    expect(find.text('질문 수만 제공된 요약이에요.'), findsOneWidget);
   });
 
   testWidgets('선택 감정·guide·limitations가 없으면 해당 내용만 숨긴다', (tester) async {
@@ -218,17 +221,15 @@ void main() {
     _setViewport(tester, const Size(390, 844));
     await _pumpReport(tester, report: _fullReport());
 
-    // 계약 §11 확정 섹션 순서(단일 세로 스크롤).
+    // 재구성 후 그림일기 순서(S15P11B209-996). 비진단 안내·한계는 표지 안이라
+    // 표지 mascot보다 뒤, 첫 본문 블럭보다 앞에 온다.
     final keys = [
       'report-mascot-intro',
       'report-non-diagnostic-notice',
       'report-activity-info',
-      'report-drawings-section',
-      'report-child-expression',
-      'report-conversation-summary',
-      'report-activity-facts',
-      'report-conversation-guide',
-      'report-limitations',
+      'report-observed-features',
+      'report-parent-guide-DRAWING_CONVERSATION',
+      'report-drawing-story',
       'report-save-pdf',
     ];
     final tops = [
@@ -296,24 +297,18 @@ void main() {
       ),
     );
 
-    // 표지·비진단 → 한눈에 → 주요 경향 → 집·나무·사람 그림 → 주제별 관찰과 문답
-    // → 아이의 표현·대화 요약 → 이런 모습이 보였어요 → 객관 기록
-    // → 그림 대화·육아 조언·가정 관찰 → 한계·참고 → PDF.
+    // 표지(비진단 안내·한계 포함) → 한눈에 보는 활동 → 이런 모습이 보였어요
+    // → 주요 심리 경향 → 보호자 가이드(4종을 한 블럭에) → 그림과 나눈 이야기
+    // → PDF (S15P11B209-996).
     final keys = [
       'report-mascot-intro',
       'report-non-diagnostic-notice',
       'report-activity-info',
-      'report-interpretations',
-      'report-drawings-section',
-      'report-subject-observations',
-      'report-child-expression',
-      'report-conversation-summary',
       'report-observed-features',
-      'report-activity-facts',
+      'report-interpretations',
       'report-parent-guide-DRAWING_CONVERSATION',
       'report-parent-guide-DAILY_PARENTING',
-      'report-parent-guide-HOME_OBSERVATION',
-      'report-limitations',
+      'report-drawing-story',
       'report-save-pdf',
     ];
     final tops = [
@@ -330,14 +325,14 @@ void main() {
     await _pumpReport(tester, report: _fullReport());
 
     expect(find.byKey(const ValueKey('report-wide-layout')), findsOneWidget);
-    // 재구성 후에는 폭과 무관하게 계약 §11 순서대로 세로로 쌓는다.
+    // 재구성 후에는 폭과 무관하게 같은 순서로 세로로 쌓는다.
     final activityY = tester
         .getTopLeft(find.byKey(const ValueKey('report-activity-info')))
         .dy;
-    final factsY = tester
-        .getTopLeft(find.byKey(const ValueKey('report-activity-facts')))
+    final storyY = tester
+        .getTopLeft(find.byKey(const ValueKey('report-drawing-story')))
         .dy;
-    expect(factsY, greaterThan(activityY));
+    expect(storyY, greaterThan(activityY));
     expect(tester.takeException(), isNull);
   });
 
@@ -427,10 +422,13 @@ void main() {
     expect(find.textContaining('101'), findsNothing);
   });
 
+  // 그림일기는 확신도 배지를 끄므로(S15P11B209-996) 배지 규칙은 배지가 남아
+  // 있는 HTP 리포트에서 확인한다.
   testWidgets('확신도 등급을 보호자가 읽을 문구 배지로 보여준다', (tester) async {
     await _pumpReport(
       tester,
       report: _fullReport(
+        isHtp: true,
         publicInterpretations: const [
           ReportInterpretationDto(
             category: 'RELATIONSHIP',
@@ -476,6 +474,7 @@ void main() {
     await _pumpReport(
       tester,
       report: _fullReport(
+        isHtp: true,
         publicInterpretations: const [
           // 등급이 아예 없는 카드(V43 이전 리포트·AI 미기재).
           ReportInterpretationDto(
@@ -565,17 +564,25 @@ void main() {
       ),
     );
 
-    final houseY = tester
-        .getTopLeft(find.byKey(const ValueKey('report-subject-HOUSE')))
-        .dy;
-    final personY = tester
-        .getTopLeft(find.byKey(const ValueKey('report-subject-PERSON')))
-        .dy;
-    expect(houseY, lessThan(personY));
+    // 그림 서술은 바로 보이고, 문답은 '더보기' 안에 있다(S15P11B209-996).
+    expect(find.text('사람을 크게 그렸어요.'), findsOneWidget);
+    expect(find.textContaining('답하지 않았어요'), findsNothing);
+
+    final toggle = find.byKey(const ValueKey('report-transcript-toggle'));
+    await tester.ensureVisible(toggle);
+    await tester.pumpAndSettle();
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+
     expect(find.textContaining('답하지 않았어요'), findsOneWidget);
     expect(find.textContaining('이 질문은 건너뛰었어요'), findsOneWidget);
     expect(find.text('음성 인식 내용을 확인해 주세요'), findsOneWidget);
-    expect(find.text('사람을 크게 그렸어요.'), findsOneWidget);
+    // 주제 순서(HOUSE→PERSON)는 문답이 실리는 차례에도 그대로 남는다.
+    final houseQuestionY = tester
+        .getTopLeft(find.text('Q. 이 집에는 누가 살아요?'))
+        .dy;
+    final lastQuestionY = tester.getTopLeft(find.text('Q. 누구랑 살아요?')).dy;
+    expect(houseQuestionY, lessThan(lastQuestionY));
   });
 
   testWidgets('HTP는 세 그림을 갤러리가 아니라 주제별 이야기 카드로 계약 순서대로 보여준다', (
@@ -825,9 +832,10 @@ void main() {
     );
 
     expect(find.text('주요 심리 경향'), findsOneWidget);
-    expect(find.text('객관적인 활동 기록'), findsOneWidget);
     expect(find.text('함께 살펴보면 좋을 이야기'), findsNothing);
     expect(find.text('그리는 동안 있었던 일'), findsNothing);
+    // 객관 수치 블럭은 HTP에만 남긴다(S15P11B209-996).
+    expect(find.text('객관적인 활동 기록'), findsNothing);
   });
 
   testWidgets('HTP 주제에 문답만 있고 그림이 없으면 활동기록 gallery로 세 그림을 함께 채운다', (
@@ -891,10 +899,13 @@ void main() {
     expect(find.text('지붕이 커요.'), findsOneWidget);
   });
 
+  // 이어지는 이야기 chip은 그림일기에서 뺐으므로(S15P11B209-996), 인덱스 해석
+  // 규칙은 chip이 남아 있는 HTP 주제 카드에서 확인한다.
   testWidgets('interpretationRefs는 화면 정렬이 아니라 응답 배열 인덱스로 푼다', (tester) async {
     await _pumpReport(
       tester,
       report: _fullReport(
+        isHtp: true,
         // 응답 순서: [0]=EMOTION, [1]=RELATIONSHIP. 화면은 RELATIONSHIP을
         // 먼저 그리므로, 인덱스를 화면 순서로 풀면 참조가 뒤바뀐다.
         publicInterpretations: const [
@@ -927,7 +938,7 @@ void main() {
       ),
     );
 
-    final card = find.byKey(const ValueKey('report-subject-HOUSE'));
+    final card = find.byKey(const ValueKey('report-htp-subject-HOUSE'));
     expect(
       find.descendant(of: card, matching: find.text('감정 표현')),
       findsOneWidget,
@@ -938,7 +949,7 @@ void main() {
     );
     // 범위를 벗어난 참조는 조용히 버린다.
     expect(tester.takeException(), isNull);
-    // 경향 문구는 카드 밖(주제 섹션)으로 새어 나오지 않는다.
+    // 경향 문구는 카드 밖으로 새어 나오지 않는다.
     expect(
       find.descendant(
         of: card,
@@ -972,10 +983,11 @@ void main() {
     expect(find.text('그림에서 확인했어요.'), findsOneWidget);
   });
 
-  testWidgets('observedFeatures가 비면 섹션이 조용히 숨고 안내 문구를 만들지 않는다', (
+  testWidgets('관찰·경향·가이드가 모두 비면 블럭이 조용히 숨고 안내 문구를 만들지 않는다', (
     tester,
   ) async {
-    await _pumpReport(tester, report: _fullReport());
+    // 관찰 특징·경향·가이드가 한 블럭이므로(S15P11B209-996) 셋 다 비어야 숨는다.
+    await _pumpReport(tester, report: _fullReport(guide: const []));
 
     expect(
       find.byKey(const ValueKey('report-observed-features')),
@@ -987,27 +999,77 @@ void main() {
     expect(find.textContaining('없어요'), findsNothing);
   });
 
+  testWidgets('관찰 특징이 없어도 가이드가 있으면 블럭은 남는다', (tester) async {
+    await _pumpReport(tester, report: _fullReport());
+
+    expect(
+      find.byKey(const ValueKey('report-observed-features')),
+      findsOneWidget,
+    );
+    expect(find.text('보호자 대화 가이드'), findsOneWidget);
+  });
+
+  testWidgets('그림일기 경향 카드는 확신도 배지를 쓰지 않는다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        publicInterpretations: const [
+          ReportInterpretationDto(
+            category: 'RELATIONSHIP',
+            title: '가족과의 연결',
+            tendencyText: '가족에게 의지하려는 경향이 보일 수 있습니다.',
+            scopeText: '이번 그림에서 나타난 가능성입니다.',
+            homeObservationGuide: '살펴봐 주세요.',
+            evidenceRefs: [],
+            confidence: 'STRONG',
+          ),
+        ],
+      ),
+    );
+
+    // 카드 본문은 그대로 두고 등급 배지만 뺀다(S15P11B209-996).
+    expect(find.text('가족과의 연결'), findsOneWidget);
+    expect(find.text('가족에게 의지하려는 경향이 보일 수 있습니다.'), findsOneWidget);
+    expect(find.text('근거가 강해요'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('report-interpretation-0-confidence')),
+      findsNothing,
+    );
+  });
+
   testWidgets('childDisplayName이 있으면 표지에 표시한다', (tester) async {
     await _pumpReport(tester, report: _fullReport(childDisplayName: '민준'));
 
     expect(find.text('민준'), findsOneWidget);
   });
 
-  testWidgets('childDisplayName이 없으면 표지 pill이 빠진다', (tester) async {
+  testWidgets('표지 pill은 childDisplayName이 없으면 빠지고 리포트 버전은 쓰지 않는다', (
+    tester,
+  ) async {
     await _pumpReport(tester, report: _fullReport());
 
     expect(find.text('민준'), findsNothing);
-    expect(find.text('리포트 v2'), findsOneWidget);
+    // 보호자에게 의미 없는 내부 버전이라 표지에서 뺐다(S15P11B209-996).
+    expect(find.text('리포트 v2'), findsNothing);
+    expect(find.textContaining('리포트 v'), findsNothing);
   });
 
-  testWidgets('parentGuides는 guideType별 제목으로 정렬해 나눈다', (tester) async {
+  // 보호자 가이드는 계약의 네 유형을 두 묶음으로 접는다(S15P11B209-996):
+  // 그림 대화 + 구형 대화 가이드 / 일상 육아 + 가정 관찰.
+  // 전문 도움(PROFESSIONAL_SUPPORT)은 그림일기 리포트에서 보여주지 않는다.
+  testWidgets('parentGuides는 두 묶음으로 접히고 전문 도움은 빠진다', (tester) async {
     await _pumpReport(
       tester,
       report: _fullReport(
+        guide: const ['오늘 그림에서 제일 좋아하는 부분은 어디야?'],
         parentGuides: const [
           ReportParentGuideDto(
             guideType: 'DAILY_PARENTING',
             items: ['하루 한 번 아이의 이야기를 들어 주세요.'],
+          ),
+          ReportParentGuideDto(
+            guideType: 'HOME_OBSERVATION',
+            items: ['새로운 곳에서 어떻게 반응하는지 살펴봐 주세요.'],
           ),
           ReportParentGuideDto(
             guideType: 'DRAWING_CONVERSATION',
@@ -1021,34 +1083,65 @@ void main() {
       ),
     );
 
-    expect(find.text('그림으로 대화해 보세요'), findsOneWidget);
-    expect(find.text('일상에서 이렇게 도와주세요'), findsOneWidget);
-    expect(find.text('도움이 필요할 때'), findsOneWidget);
-    // DRAWING_CONVERSATION이 DAILY_PARENTING보다 먼저 온다.
-    final drawingY = tester.getTopLeft(find.text('그림으로 대화해 보세요')).dy;
-    final dailyY = tester.getTopLeft(find.text('일상에서 이렇게 도와주세요')).dy;
-    expect(drawingY, lessThan(dailyY));
+    // 가이드는 '이런 모습이 보였어요' 블럭 안에 제목으로만 구분돼 들어간다.
+    expect(
+      find.byKey(const ValueKey('report-observed-features')),
+      findsOneWidget,
+    );
+    expect(find.text('보호자 가이드'), findsNothing);
+    expect(find.text('보호자 대화 가이드'), findsOneWidget);
+    expect(find.text('일상에서 살펴봐 주세요'), findsOneWidget);
+    // 접히기 전 제목은 더 이상 쓰지 않는다.
+    expect(find.text('그림으로 대화해 보세요'), findsNothing);
+    expect(find.text('일상에서 이렇게 도와주세요'), findsNothing);
+    expect(find.text('가정에서 살펴봐 주세요'), findsNothing);
+    // 전문 도움은 제목도 항목도 싣지 않는다.
+    expect(find.text('도움이 필요할 때'), findsNothing);
+    expect(find.text('더 이야기 나누고 싶을 때 상담을 참고할 수 있어요.'), findsNothing);
+
+    // 그림 대화 항목과 구형 대화 가이드가 같은 묶음에 들어간다.
+    expect(find.text('그림에서 무엇을 그렸는지 물어봐 주세요.'), findsOneWidget);
+    expect(find.text('오늘 그림에서 제일 좋아하는 부분은 어디야?'), findsOneWidget);
+    // 일상 육아와 가정 관찰도 한 묶음이다.
+    expect(find.text('하루 한 번 아이의 이야기를 들어 주세요.'), findsOneWidget);
+    expect(find.text('새로운 곳에서 어떻게 반응하는지 살펴봐 주세요.'), findsOneWidget);
+
+    final conversationY = tester.getTopLeft(find.text('보호자 대화 가이드')).dy;
+    final homeY = tester.getTopLeft(find.text('일상에서 살펴봐 주세요')).dy;
+    expect(conversationY, lessThan(homeY));
   });
 
-  testWidgets('references는 §11 섹션에 표시되고 nonDiagnosticNotice가 없으면 카드가 숨는다', (
-    tester,
-  ) async {
+  testWidgets('한계·참고 자료는 어디에도 싣지 않는다', (tester) async {
     await _pumpReport(
       tester,
       report: _fullReport(
-        nonDiagnosticNotice: null,
         references: const [
           ReportReferenceDto(title: '그림 심리의 이해', url: 'https://example.test'),
         ],
       ),
     );
 
+    // 표지 안내는 남지만 한계 문장·참고 자료는 화면에서 뺐다(S15P11B209-996).
+    expect(
+      find.byKey(const ValueKey('report-non-diagnostic-notice')),
+      findsOneWidget,
+    );
+    expect(find.byKey(const ValueKey('report-limitations')), findsNothing);
+    expect(find.text('그림 심리의 이해'), findsNothing);
+    expect(find.text('https://example.test'), findsNothing);
+    expect(find.text('참고 자료'), findsNothing);
+  });
+
+  testWidgets('nonDiagnosticNotice가 없으면 표지 안내 자체가 빠진다', (tester) async {
+    await _pumpReport(
+      tester,
+      report: _fullReport(nonDiagnosticNotice: null),
+    );
+
     expect(
       find.byKey(const ValueKey('report-non-diagnostic-notice')),
       findsNothing,
     );
-    expect(find.byKey(const ValueKey('report-limitations')), findsOneWidget);
-    expect(find.text('그림 심리의 이해'), findsOneWidget);
   });
 
   testWidgets('재구성 화면은 금지어(위험·이상·문제·정상)를 노출하지 않는다', (tester) async {
