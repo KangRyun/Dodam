@@ -247,18 +247,19 @@ class ConversationPromptRulesTest(unittest.TestCase):
             self.assertIn("이름을 못 박지 말고", system)
 
     def test_length_rule_is_owned_only_by_tone_block(self):
-        """문장 수·길이의 소유자는 conversation_tone 하나다(S15P11B209-786).
+        """문장 수·길이의 소유자는 활동별 tone 파일 하나다(S15P11B209-786, 993에서 활동별 분리).
 
         구조상 같은 프롬프트에 "한 문장만"(출력 형식)과 "한두 문장"(난이도 블록)이 함께
-        실려 어느 쪽이 이길지 알 수 없었다. 이제 공통부는 길이를 정하지 않고 위임한다.
+        실려 어느 쪽이 이길지 알 수 없었다. 기반 규칙 파일은 길이를 정하지 않고 위임한다.
         """
         import prompts_registry
 
         self.assertNotIn("1~2문장", prompts_registry.load("guardrails"))
-        common = prompts_registry.load("conversation_common")
-        self.assertIn("[연령별 말하기 규칙]이 정한다", common)
-        for banned in ("한 문장만", "한두 문장만"):
-            self.assertNotIn(banned, common)
+        for name in ("conversation_rules_htp", "conversation_rules_diary"):
+            rules = prompts_registry.load(name)
+            self.assertIn("[연령별 말하기 규칙]이 정한다", rules)
+            for banned in ("한 문장만", "한두 문장만"):
+                self.assertNotIn(banned, rules)
 
 
 class ActivitySplitTest(unittest.TestCase):
@@ -448,7 +449,16 @@ class FirstQuestionHtpRegressionTest(unittest.TestCase):
         self.assertIn("표현을 바꿔도 그린 이유 자체를 묻지 마", htp)
         self.assertIn('"왜"·"이유"·"까닭"이라는 낱말도 쓰지 마', htp)
         self.assertNotIn("왜 빨간색으로 칠했어", htp)
-        self.assertNotIn("왜 그렇게 그렸어", llm_client._load("conversation_common"))
+        self.assertNotIn("왜 그렇게 그렸어", llm_client._load("conversation_rules_htp"))
+        # 993 활동별 분리의 실익을 고정한다: HTP 연령 규칙에는 이유·까닭 허용이 없어야 한다.
+        # 공용 tone의 "이유를 물어도 된다"가 이 금지와 충돌하던 것이 분리 사유다.
+        # 파일 머리말(사유 설명)은 모델에 실리지 않으므로 [[구획]] 본문만 본다.
+        for body in llm_client._tone_sections("HTP").values():
+            self.assertNotIn("이유", body)
+            self.assertNotIn("까닭", body)
+        # 그림일기 쪽은 이유를 따라가는 활동이라 허용이 남아 있어야 한다(지우면 퇴보).
+        diary_bodies = "\n".join(llm_client._tone_sections("ART_DIARY").values())
+        self.assertIn("까닭", diary_bodies)
 
     def test_reason_question_is_only_allowed_after_child_signal(self):
         htp = llm_client._load("conversations_htp")
@@ -495,24 +505,28 @@ class ToneBlockTest(unittest.TestCase):
 
     def test_every_contract_difficulty_has_a_section(self):
         # BE QuestionDifficulty enum 4값 전부에 구획이 있어야 폴백으로 새지 않는다.
-        sections = llm_client._tone_sections()
-        self.assertEqual(
-            set(sections),
-            {"PRESCHOOL", "LOWER_ELEMENTARY", "UPPER_ELEMENTARY", "SUPPORT"},
-        )
-        for body in sections.values():
-            self.assertIn("- 길이:", body)
-            self.assertIn("- 어휘:", body)
-            self.assertIn("- 말투:", body)
+        # 993에서 tone이 활동별로 갈렸다 — 두 파일 모두에서 지켜져야 한다.
+        for activity in ("HTP", "ART_DIARY"):
+            sections = llm_client._tone_sections(activity)
+            self.assertEqual(
+                set(sections),
+                {"PRESCHOOL", "LOWER_ELEMENTARY", "UPPER_ELEMENTARY", "SUPPORT"},
+            )
+            for body in sections.values():
+                self.assertIn("- 길이:", body)
+                self.assertIn("- 어휘:", body)
+                self.assertIn("- 말투:", body)
 
     def test_age_bands_are_stated_in_each_section(self):
-        """유아형 만 4~6세 / 저학년형 만 7~9세 / 고학년형 만 10~12세."""
-        sections = llm_client._tone_sections()
-        self.assertIn("만 4~6세", sections["PRESCHOOL"])
-        self.assertIn("만 7~9세", sections["LOWER_ELEMENTARY"])
-        self.assertIn("만 10~12세", sections["UPPER_ELEMENTARY"])
+        """유아형 만 4~6세 / 저학년형 만 7~9세 / 고학년형 만 10~12세 — 두 활동 파일 모두."""
+        for activity in ("HTP", "ART_DIARY"):
+            sections = llm_client._tone_sections(activity)
+            self.assertIn("만 4~6세", sections["PRESCHOOL"])
+            self.assertIn("만 7~9세", sections["LOWER_ELEMENTARY"])
+            self.assertIn("만 10~12세", sections["UPPER_ELEMENTARY"])
         # SUPPORT는 연령축이 아니다 — 나이로 고르면 안 된다.
-        self.assertIn("연령축이 아니라", llm_client._load("conversation_tone"))
+        for name in ("conversation_tone_htp", "conversation_tone_diary"):
+            self.assertIn("연령축이 아니라", llm_client._load(name))
 
     def test_selected_section_is_the_only_one_in_the_prompt(self):
         system = llm_client.render_first_question_prompt("집", difficulty="PRESCHOOL")

@@ -27,7 +27,8 @@ crisis_detection·crisis_guidance 와 expertReviewRequired 가 그 경로다.
   ⚠️ RAG는 HTP 리포트에서만 검색한다. 그림일기 프롬프트는 [전문 자료 근거]를 근거 목록에
   두지 않으므로 검색해도 쓰이지 않는다 — RAG_NOT_APPLICABLE로 표시하고 건너뛴다.
 
-프롬프트 구성: 활동 변형(report_htp | report_diary) + 공통(report_common)을 이어붙인다.
+프롬프트 구성: 활동별 자기완결 파일 하나(report_htp | report_diary)를 그대로 쓴다
+(2026-08-07 공용 report_common 폐기 — 각 파일이 작성 규칙·JSON 스키마까지 소유).
 활동 판별은 subject_summaries[].drawing_subject 유무로 추론한다(계약에 activityType 없음).
 
 형식 지표(S15P11B209-836): 그리기 소요시간·멈춤·지우기 등은 요청의 behaviorMetrics 로 들어온다.
@@ -61,9 +62,11 @@ logger = logging.getLogger(__name__)
 # 구 report.txt는 근거 화이트리스트가 "[그림 관찰 서술]·[형식적 분석]·[활동 데이터]만"이라
 # 실제로 주입되는 주제별 블록·RAG 블록이 목록에서 빠져 있었다 — 뒤쪽 상세 설명과 정면 모순이라
 # 모델이 화이트리스트를 곧이곧대로 읽으면 RAG 근거와 그림 내용을 통째로 버린다.
-# 공통 규칙·JSON 스키마는 report_common이 소유하고, 변형 파일 뒤에 이어붙인다
-# (JSON 중괄호 때문에 str.format 을 쓸 수 없어 문자열 연결로 조립한다).
-_REPORT_COMMON = "report_common"
+# 작성 규칙·JSON 스키마도 활동별 파일이 각자 소유한다(2026-08-07 사용자 결정, S15P11B209-993) —
+# 공용 report_common은 폐기했다. 한 활동에 맞춘 수정이 다른 활동에 실리는 경로를 구조에서
+# 제거하고, "주제가 나뉘지 않으면 null" 같은 조건문 없이 각 파일이 자기 활동만 말하게 한다.
+# ⚠️ 두 파일의 JSON 스키마는 같은 BE 계약을 향한다 — 키가 어긋나면 안 된다.
+#    test_report_client 의 스키마 일치 테스트가 드리프트를 잡는다.
 _REPORT_HTP = "report_htp"
 _REPORT_DIARY = "report_diary"
 # AI 자체검토(2-pass) 프롬프트. 생성 프롬프트와 함께 '한 번의 리포트 생성'을 이루므로
@@ -72,13 +75,13 @@ _REPORT_REVIEW = "report_review"
 
 # 활동 변형별 조합 — 라벨은 저장 태그에 그대로 실리는 고정 어휘다(S15P11B209-819).
 _COMBOS: dict[str, tuple[str, ...]] = {
-    "htp": (_REPORT_COMMON, _REPORT_HTP, _REPORT_REVIEW),
-    "diary": (_REPORT_COMMON, _REPORT_DIARY, _REPORT_REVIEW),
+    "htp": (_REPORT_HTP, _REPORT_REVIEW),
+    "diary": (_REPORT_DIARY, _REPORT_REVIEW),
 }
 
-# 두 변형과 공통부를 함께 담은 통합 버전 — 어떤 파일 조합으로 생성됐는지 한 문자열로 남긴다.
+# 두 변형을 함께 담은 통합 버전 — 어떤 파일 조합으로 생성됐는지 한 문자열로 남긴다.
 PROMPT_VERSION = prompts_registry.short_version(
-    "report-all", _REPORT_COMMON, _REPORT_HTP, _REPORT_DIARY, _REPORT_REVIEW
+    "report-all", _REPORT_HTP, _REPORT_DIARY, _REPORT_REVIEW
 )
 
 
@@ -144,25 +147,25 @@ def _is_htp(req: contracts.ObservationGenerationRequest) -> bool:
     return any(s.drawing_subject is not None for s in req.subject_summaries)
 
 
-def _prompt_names(is_htp: bool) -> tuple[str, str]:
-    """이번 생성이 쓰는 (변형 프롬프트, 공통 프롬프트) 이름."""
-    return (_REPORT_HTP if is_htp else _REPORT_DIARY), _REPORT_COMMON
+def _prompt_names(is_htp: bool) -> tuple[str, ...]:
+    """이번 생성이 쓰는 프롬프트 이름(자기완결 활동 파일 하나)."""
+    return ((_REPORT_HTP if is_htp else _REPORT_DIARY),)
 
 
 def _system_prompt(is_htp: bool) -> str:
-    """리포트 지침 system 프롬프트 — 활동 변형 + 공통 규칙을 이어붙인다.
+    """리포트 지침 system 프롬프트 — 활동별 자기완결 파일 하나를 그대로 쓴다(993 공용 제거).
 
-    변형이 앞(역할·근거 화이트리스트·블록 사용법), 공통이 뒤(사실/해석 분리·작성 규칙·
-    출력 JSON 스키마)다. 출력 형식을 맨 끝에 두어야 모델이 형식을 놓치지 않는다.
+    파일 안 순서는 이전 조립 순서를 그대로 물려받았다: 역할·근거 화이트리스트·블록
+    사용법이 앞, 사실/해석 분리·작성 규칙·출력 JSON 스키마가 뒤 — 출력 형식을 맨 끝에
+    두어야 모델이 형식을 놓치지 않는다.
 
     ⚠️ 공용 guardrails.txt(대화용)는 append 하지 않는다 — 그 파일은 "정서를 진단·해석하지 마"를
     전제로 한 대화 응답용이라, 리포트의 '요소별 감정 해석' 지침과 충돌한다. 리포트의 안전 기준
     (장애명·진단명·점수·낙인 금지, 과도한 부정 금지, 걱정 신호는 attentionPoints로만)은
-    report_common.txt가 자체적으로 담는다.
-    JSON 스키마 중괄호 때문에 str.format 을 쓰지 않고 문자열을 그대로 이어붙인다.
+    각 활동 파일이 자체적으로 담는다.
     """
-    variant, common = _prompt_names(is_htp)
-    return f"{_load(variant)}\n\n{_load(common)}"
+    (variant,) = _prompt_names(is_htp)
+    return _load(variant)
 
 
 def _emotion_source(req: contracts.ObservationGenerationRequest) -> str:

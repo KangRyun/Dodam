@@ -1858,6 +1858,32 @@ class ActivityPromptSplitTest(unittest.TestCase):
         self.assertIn("그림일기", system)
         self.assertNotIn("HTP(집·나무·사람)", system)
 
+    def test_both_activity_prompts_declare_the_same_output_schema(self):
+        """두 자기완결 파일의 출력 JSON 스키마 키가 같아야 한다 (S15P11B209-993).
+
+        공용 report_common을 활동별로 흡수하면서(사용자 결정 2026-08-07) 스키마가 두 벌이
+        됐다. 두 파일 모두 같은 BE 계약(ObservationGenerationResult)으로 파싱되므로,
+        한쪽 스키마만 고치면 다른 활동의 리포트가 조용히 계약과 어긋난다 —
+        키 집합 일치를 못 박아 드리프트를 배포 전에 잡는다.
+        (예시 값·설명 문구는 활동별로 달라도 된다. 지키는 것은 키다.)
+        """
+        import json as jsonlib
+
+        def schema_keys(name: str) -> dict:
+            text = prompts_registry.load(name)
+            start = text.index('{\n  "overallSummary"')
+            schema = jsonlib.loads(text[start:])
+            nested = {
+                key: sorted(schema[key][0]) if isinstance(schema[key], list)
+                and schema[key] and isinstance(schema[key][0], dict) else None
+                for key in schema
+            }
+            return {"top": sorted(schema), "nested": nested}
+
+        htp, diary = schema_keys("report_htp"), schema_keys("report_diary")
+        self.assertEqual(htp["top"], diary["top"])
+        self.assertEqual(htp["nested"], diary["nested"])
+
     def test_legacy_request_without_summaries_uses_diary_prompt(self):
         # 구 BE(subject_summaries 미전달)도 '단일 그림 + RAG 없음' 경로라 그림일기 쪽이 맞다.
         _, system, _ = self._generate(_sample_request())
@@ -1911,7 +1937,7 @@ class ReportCommonContradictionTest(unittest.TestCase):
     def setUp(self):
         import prompts_registry
 
-        self.text = prompts_registry.load("report_common")
+        self.text = prompts_registry.load("report_htp")
 
     # ── E: 걱정 신호 배출구 ──
     def test_two_concern_outlets_are_defined_with_distinct_roles(self):
@@ -1978,7 +2004,7 @@ class ReportContractAlignmentTest(unittest.TestCase):
     """
 
     def setUp(self):
-        self.text = prompts_registry.load("report_common")
+        self.text = prompts_registry.load("report_htp")
 
     # ── 3. 렌더링 설명이 사실과 맞는가 ──
     def test_guardian_facing_fields_are_named_exactly(self):
@@ -2819,7 +2845,7 @@ class DrawnItemsAssemblyTest(unittest.TestCase):
 
     def test_prompt_states_the_description_is_the_only_source(self):
         """문구가 빠지면 모델이 탐지 코드 줄을 옮겨 적는다(코드가 막지만 매번 버려진다)."""
-        text = prompts_registry.load("report_common")
+        text = prompts_registry.load("report_htp")
         self.assertIn("'탐지된 요소 코드' 줄은 이 목록의 근거가 **아니다.**", text)
         # 908에서 확인: 새 필드는 스키마 예시에 있어야 채워진다(지시문보다 예시가 세다).
         self.assertIn('"drawnItems"', text.split("출력 형식:", 1)[1])
@@ -2855,7 +2881,7 @@ class RoutingSingleOwnerTest(unittest.TestCase):
     """
 
     def setUp(self):
-        self.text = prompts_registry.load("report_common")
+        self.text = prompts_registry.load("report_htp")
         self.schema = self.text[self.text.index("{\n  \"overallSummary\"") :]
 
     def test_routing_ownership_is_declared(self):
@@ -3485,7 +3511,7 @@ class SubjectObservationSelfReviewTest(unittest.TestCase):
         self.assertEqual(result.observation_draft.status, "AI_REVIEWED")
 
     def test_prompt_forbids_interpretation_in_the_fact_slot(self):
-        text = prompts_registry.load("report_common")
+        text = prompts_registry.load("report_htp")
         self.assertIn("subjectReports", text)
         self.assertIn("눈으로 확인된 사실", text)
         self.assertIn("interpretationRefs", text)
