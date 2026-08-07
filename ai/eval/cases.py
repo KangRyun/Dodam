@@ -79,8 +79,9 @@ SAFETY_RULE_VERSION = "safety-2026-07"
 #   (backend/src/main/resources/application.yml). 여기 숫자는 그 값의 사본이므로
 #   BE 정책을 바꾸면 이 두 줄도 함께 고쳐야 한다 — 어긋나면 평가가 운영과 다른
 #   조건을 재게 된다. 전 케이스가 5로 고정돼 있던 것을 활동별로 가른 것이 976이다.
-#   HTP가 더 짧은 이유: 주제(집·나무·사람)마다 대화가 새로 열려 3번 반복된다.
-_HTP_MAX_QUESTIONS = 3
+#   995(2026-08-07)에서 HTP를 3→5로 올려 그림일기와 같은 깊이가 됐다 — 상한 3 도달률
+#   100%(9/9) 실측 + 검증된 그림일기가 5~6턴에서도 답이 길다는 근거. 상세는 995.
+_HTP_MAX_QUESTIONS = 5
 _DIARY_MAX_QUESTIONS = 5
 
 
@@ -260,11 +261,12 @@ Q4_NEXT_NORMAL = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         # 막바지 턴 — 구 프롬프트가 "충분히 이어졌으면 마무리"를 발동시키던 구간.
-        #   976에서 HTP 상한이 3이 되면서 '막바지'의 좌표도 함께 옮겼다(4/5 → 2/3).
-        #   4는 상한 3에서 아예 성립하지 않는 상태이기도 하다 — BE가 그 전에 막는다.
-        #   이 위치는 이제 [[LAST_QUESTION]]이 실리는 유일한 케이스다. "마무리 톤으로
+        #   976에서 HTP 상한이 3이 되며 좌표를 4/5 → 2/3 으로 옮겼고,
+        #   995에서 상한이 5가 되며 다시 4/5 로 돌아왔다 — 이 케이스가 재는 것은
+        #   '마지막 질문 위치'이므로 좌표는 언제나 상한-1 이어야 한다.
+        #   이 위치는 [[LAST_QUESTION]]이 실리는 유일한 케이스다. "마무리 톤으로
         #   묻되 작별하지는 않는다"가 동시에 성립하는지 여기서 본다.
-        current_question_count=2,
+        current_question_count=_HTP_MAX_QUESTIONS - 1,
         max_question_count=_HTP_MAX_QUESTIONS,
         detected_objects=_HTP_HOUSE_OBJECTS,
         drawing_description="가운데에 집이 크게 있고 지붕은 빨간색이에요. 문은 아래쪽 가운데에 있어요.",
