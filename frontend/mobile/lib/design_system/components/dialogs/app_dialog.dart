@@ -7,7 +7,15 @@ import '../../tokens/app_typography.dart';
 const Color dodamDialogScrim = Color(0x80536B5B);
 
 abstract final class DodamDialogAssets {
+  static const String completeThumbsUp =
+      'assets/images/dialogs/dialog_complete_thumbsup.png';
+  static const String completeThinking =
+      'assets/images/dialogs/dialog_complete_thinking.png';
+  static const String conversationStopCrying =
+      'assets/images/dialogs/dialog_conversation_stop_crying.png';
   static const String diary = 'assets/images/dialogs/dialog_diary_pastel.png';
+  static const String guardianHandhold =
+      'assets/images/dialogs/dialog_guardian_handhold.png';
   static const String htp = 'assets/images/dialogs/dialog_htp_pastel.png';
   static const String warning =
       'assets/images/dialogs/dialog_warning_pastel.png';
@@ -59,7 +67,7 @@ class DodamDialog extends StatelessWidget {
         child: DecoratedBox(
           key: const ValueKey('dodam-dialog-card'),
           decoration: BoxDecoration(
-            color: const Color(0xFFFFF9EF),
+            color: Colors.white,
             borderRadius: BorderRadius.circular(AppRadius.lg),
             border: Border.all(color: const Color(0xFFD8C9B5)),
             boxShadow: const [
