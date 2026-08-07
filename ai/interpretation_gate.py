@@ -138,21 +138,39 @@ def _is_child_expression(item: contracts.ReportEvidenceItem) -> bool:
     return any(kind in CHILD_EXPRESSION_REF_KINDS for kind, _ in _leaf_refs(item))
 
 
-def _channels(item: contracts.ReportEvidenceItem) -> set[str]:
-    """근거 한 건이 지나온 통로. 원본 근거는 source_type, 파생 근거는 말단 kind 로 정한다."""
+def _channels(
+    item: contracts.ReportEvidenceItem,
+    chip_answer_refs: frozenset[tuple[str, str]] = frozenset(),
+) -> set[str]:
+    """근거 한 건이 지나온 통로. 원본 근거는 source_type, 파생 근거는 말단 kind 로 정한다.
+
+    chip_answer_refs: 선택형(OPTION) 답변의 말단 참조 (S15P11B209-994). 대화 답변 칩은
+    AI가 만든 보기 문장을 아이가 탭한 것이라 — 감정 칩과 같은 원리로 — 발화(_UTTERANCE)가
+    아니라 고른 것(_CHOICE)으로 센다. 실측(2026-08-07)에서 답변의 25.7%가 칩이었는데
+    전부 발화로 세어져 확신도가 부풀 수 있었다. 아이 표현 인정(_is_child_expression)은
+    그대로다 — 칩만 쓴 아이의 카드가 통째로 사라지지 않게 등급만 낮춘다.
+    """
+    leaves = _leaf_refs(item)
     channel = _SOURCE_TYPE_CHANNELS.get(item.source_type)
     if channel is not None:
+        if channel == _UTTERANCE and leaves and leaves <= chip_answer_refs:
+            return {_CHOICE}
         return {channel}
-    return {
-        c
-        for kind, _ in _leaf_refs(item)
-        if (c := _REF_KIND_CHANNELS.get(kind)) is not None
-    }
+    channels: set[str] = set()
+    for kind, ref_id in leaves:
+        c = _REF_KIND_CHANNELS.get(kind)
+        if c is None:
+            continue
+        if c == _UTTERANCE and (kind, ref_id) in chip_answer_refs:
+            c = _CHOICE
+        channels.add(c)
+    return channels
 
 
 def confidence_for(
     card: contracts.PublicInterpretation,
     evidence_by_id: dict[int, contracts.ReportEvidenceItem],
+    chip_answer_refs: frozenset[tuple[str, str]] = frozenset(),
 ) -> str | None:
     """카드의 확신도 등급. 근거가 하나도 해석되지 않으면 None(등급을 매길 수 없다).
 
@@ -169,11 +187,16 @@ def confidence_for(
     ⚠️ 감정 선택(칩 탭)이 발화와 함께 있어도 등급을 낮추지 않는다. 둘 다 아이 자신의 표현이라
        추론 단계가 늘지 않는다. 반대로 감정 선택'만'으로는 STRONG 이 될 수 없다 — 칩 하나는
        문장만큼 말해 주지 않는다.
+    ⚠️ 선택형(OPTION) 대화 답변도 같은 원리로 발화가 아니라 '고른 것'이다(994) —
+       chip_answer_refs 에 담겨 오면 _CHOICE 로 재분류된다. AI가 쓴 보기 문장을 아이가
+       탭한 것이 '아이가 직접 말한 것'(STRONG)으로 세어지면 확신도가 부풀려진다.
     ⚠️ 근거 **개수는 보지 않는다.** 약한 근거를 아무리 모아도 등급이 오르지 않게 하는 장치다.
     ⚠️ 카드가 들고 온 confidence 값은 읽지 않는다 — 모델이 무엇을 적었든 여기 계산이 정답이다.
     """
     items = [evidence_by_id[ref] for ref in card.evidence_refs if ref in evidence_by_id]
-    channels = {channel for item in items for channel in _channels(item)}
+    channels = {
+        channel for item in items for channel in _channels(item, chip_answer_refs)
+    }
     if not channels:
         return None
     if _UTTERANCE not in channels:
@@ -256,6 +279,7 @@ def apply(
     cards: list[contracts.PublicInterpretation],
     evidence_items: list[contracts.ReportEvidenceItem],
     blocked_refs: frozenset[tuple[str, str]] = frozenset(),
+    chip_answer_refs: frozenset[tuple[str, str]] = frozenset(),
 ) -> tuple[list[contracts.PublicInterpretation], list[str]]:
     """카드 목록에 게이트를 적용하고, 통과한 카드에 확신도를 **찍어서** 돌려준다.
 
@@ -278,7 +302,7 @@ def apply(
             #    interpretationRefs 를 다시 매핑하는데, 사본을 돌려주면 그 매핑이 전부 실패해
             #    참조가 조용히 사라진다(875 §5-1). 값은 같고 아무 테스트도 깨지지 않는 종류의 사고라
             #    여기 못 박아 둔다.
-            card.confidence = confidence_for(card, evidence_by_id)
+            card.confidence = confidence_for(card, evidence_by_id, chip_answer_refs)
             passed.append(card)
             continue
         reasons.append(result.reason or NO_EVIDENCE)
