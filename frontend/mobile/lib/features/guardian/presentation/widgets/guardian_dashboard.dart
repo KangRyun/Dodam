@@ -848,8 +848,9 @@ class _ActivityCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
+      key: const ValueKey('htp-activity-card'),
       decoration: BoxDecoration(
-        color: DodamHome.sage,
+        color: DodamHome.htpCard,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: DodamHome.forest.withValues(alpha: 0.14)),
       ),
@@ -884,7 +885,7 @@ class _ActivityCard extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               const Text(
-                '그림을 통해 아이의 마음을 천천히 들여다봐요.',
+                '그림을 그리고, 아이의 이야기를 들어봐요.',
                 textAlign: TextAlign.center,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
@@ -895,7 +896,9 @@ class _ActivityCard extends StatelessWidget {
                 ),
               ),
               if (tall)
-                Expanded(child: Center(child: _HtpIllustrations(size: illo)))
+                Expanded(
+                  child: Center(child: _HtpIllustrations(size: illo)),
+                )
               else ...[
                 const SizedBox(height: 6),
                 _HtpIllustrations(size: illo),
@@ -916,8 +919,10 @@ class _ActivityCard extends StatelessWidget {
   }
 }
 
-/// 집·나무·사람(HTP) 손그림 일러스트를 순서대로 한 줄에 배치한다.
-/// 각 이미지는 원본 비율을 유지한 채 정사각 박스 안에 담는다.
+/// 집·나무·사람(HTP) 손그림을 번호와 점선으로 연결한다.
+///
+/// 순서 정보는 하나의 Semantics 문구로 제공하고, 번호 마커·점선은
+/// 중복 낭독되지 않도록 장식으로 처리한다.
 class _HtpIllustrations extends StatelessWidget {
   const _HtpIllustrations({required this.size});
   final double size;
@@ -929,25 +934,128 @@ class _HtpIllustrations extends StatelessWidget {
   ];
 
   @override
-  Widget build(BuildContext context) => Row(
-    mainAxisAlignment: MainAxisAlignment.center,
-    children: [
-      for (var i = 0; i < _items.length; i++) ...[
-        if (i > 0) const SizedBox(width: 14),
-        SizedBox(
-          width: size,
-          height: size,
-          child: Image.asset(
-            _items[i].$1,
-            fit: BoxFit.contain,
-            filterQuality: FilterQuality.medium,
-            semanticLabel: _items[i].$2,
-            errorBuilder: (_, _, _) => const SizedBox.shrink(),
+  Widget build(BuildContext context) {
+    final gap = (size * 0.16).clamp(8.0, 14.0);
+    return Semantics(
+      container: true,
+      label: '집, 나무, 사람 순서로 그리는 활동',
+      child: ExcludeSemantics(
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            for (var i = 0; i < _items.length; i++) ...[
+              if (i > 0)
+                SizedBox(
+                  width: gap,
+                  height: size,
+                  child: CustomPaint(
+                    key: ValueKey('htp-sequence-connector-$i'),
+                    painter: const _CrayonDashPainter(),
+                  ),
+                ),
+              SizedBox(
+                width: size,
+                height: size,
+                child: Stack(
+                  clipBehavior: Clip.none,
+                  alignment: Alignment.topCenter,
+                  children: [
+                    Positioned.fill(
+                      top: (size * 0.10).clamp(4.0, 14.0),
+                      child: Image.asset(
+                        _items[i].$1,
+                        key: ValueKey('htp-sequence-image-${i + 1}'),
+                        fit: BoxFit.contain,
+                        filterQuality: FilterQuality.medium,
+                        excludeFromSemantics: true,
+                        errorBuilder: (_, _, _) => const SizedBox.shrink(),
+                      ),
+                    ),
+                    _HtpStepMarker(step: i + 1, size: size),
+                  ],
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _HtpStepMarker extends StatelessWidget {
+  const _HtpStepMarker({required this.step, required this.size});
+
+  final int step;
+  final double size;
+
+  @override
+  Widget build(BuildContext context) {
+    final markerSize = (size * 0.24).clamp(20.0, 28.0);
+    return ExcludeSemantics(
+      child: Container(
+        key: ValueKey('htp-step-marker-$step'),
+        width: markerSize,
+        height: markerSize,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: DodamHome.htpConnector,
+          shape: BoxShape.circle,
+          border: Border.all(color: DodamHome.warm, width: 1.5),
+          boxShadow: [
+            BoxShadow(
+              color: DodamHome.forest.withValues(alpha: 0.16),
+              blurRadius: 3,
+              offset: const Offset(0, 2),
+            ),
+          ],
+        ),
+        child: Text(
+          '$step',
+          style: TextStyle(
+            color: Colors.white,
+            fontSize: markerSize * 0.52,
+            height: 1,
+            fontWeight: FontWeight.w900,
           ),
         ),
-      ],
-    ],
-  );
+      ),
+    );
+  }
+}
+
+class _CrayonDashPainter extends CustomPainter {
+  const _CrayonDashPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (size.isEmpty) return;
+    final path = Path()
+      ..moveTo(0, size.height * 0.56)
+      ..quadraticBezierTo(
+        size.width * 0.5,
+        size.height * 0.68,
+        size.width,
+        size.height * 0.56,
+      );
+    final paint = Paint()
+      ..color = DodamHome.htpConnector
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+
+    for (final metric in path.computeMetrics()) {
+      var start = 0.0;
+      while (start < metric.length) {
+        final end = (start + 4).clamp(0.0, metric.length);
+        canvas.drawPath(metric.extractPath(start, end), paint);
+        start += 7;
+      }
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _CrayonDashPainter oldDelegate) => false;
 }
 
 /// 하단 메인 CTA 버튼. 선명한 초록 채움 + 흰 글자, hover 시 진해지고 화살표가
@@ -970,6 +1078,7 @@ class _StartActivityButton extends StatefulWidget {
 class _StartActivityButtonState extends State<_StartActivityButton> {
   bool _hovering = false;
   bool _focused = false;
+  bool _pressed = false;
 
   @override
   Widget build(BuildContext context) {
@@ -979,7 +1088,12 @@ class _StartActivityButtonState extends State<_StartActivityButton> {
         ? Duration.zero
         : const Duration(milliseconds: 180);
     final hovering = widget.enabled && _hovering;
-    final bg = hovering ? DodamHome.ctaGreenDeep : DodamHome.ctaGreen;
+    final pressed = widget.enabled && _pressed;
+    final bg = pressed
+        ? DodamHome.htpCtaPressed
+        : hovering
+        ? DodamHome.htpCtaHover
+        : DodamHome.htpCta;
     final arrowGap = (hovering && !reduceMotion) ? 10.0 : 6.0;
 
     // 눌림 피드백은 InkWell 기본 하이라이트/스플래시로 처리한다(별도 Transform은
@@ -989,6 +1103,8 @@ class _StartActivityButtonState extends State<_StartActivityButton> {
       button: true,
       enabled: widget.enabled,
       label: '집 나무 사람 그림 활동 시작하기',
+      onTap: widget.enabled ? widget.onTap : null,
+      excludeSemantics: true,
       child: Material(
         color: Colors.transparent,
         child: InkWell(
@@ -1003,7 +1119,9 @@ class _StartActivityButtonState extends State<_StartActivityButton> {
           onTap: widget.enabled ? widget.onTap : null,
           onHover: (v) => setState(() => _hovering = v),
           onFocusChange: (v) => setState(() => _focused = v),
+          onHighlightChanged: (v) => setState(() => _pressed = v),
           child: AnimatedContainer(
+            key: const ValueKey('htp-start-button-surface'),
             duration: motion,
             curve: Curves.easeOut,
             // 세로 1.8배(52→94, 56→101)로 키워 클릭 영역을 크게 한다.
@@ -1013,16 +1131,26 @@ class _StartActivityButtonState extends State<_StartActivityButton> {
             decoration: BoxDecoration(
               color: widget.enabled
                   ? bg
-                  : DodamHome.ctaGreen.withValues(alpha: 0.45),
+                  : DodamHome.htpCta.withValues(alpha: 0.45),
               borderRadius: BorderRadius.circular(16),
-              boxShadow: _focused
-                  ? [
-                      BoxShadow(
-                        color: DodamHome.forest.withValues(alpha: 0.9),
-                        spreadRadius: 2.5,
-                      ),
-                    ]
-                  : null,
+              border: Border.all(
+                color: widget.enabled
+                    ? DodamHome.htpCtaBorder
+                    : DodamHome.htpCtaBorder.withValues(alpha: 0.38),
+                width: 1.75,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: DodamHome.htpCtaBorder.withValues(alpha: 0.28),
+                  blurRadius: pressed ? 2 : 4,
+                  offset: Offset(0, pressed ? 1 : 3),
+                ),
+                if (_focused)
+                  BoxShadow(
+                    color: DodamHome.forest.withValues(alpha: 0.72),
+                    spreadRadius: 2.5,
+                  ),
+              ],
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -1031,7 +1159,7 @@ class _StartActivityButtonState extends State<_StartActivityButton> {
                 const Flexible(
                   child: Text(
                     '집 나무 사람 그림 활동 시작하기',
-                    maxLines: 1,
+                    maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
                       fontSize: 16,

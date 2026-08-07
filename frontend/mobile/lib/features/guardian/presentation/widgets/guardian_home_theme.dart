@@ -26,6 +26,15 @@ abstract final class DodamHome {
   /// 메인 CTA 버튼 전용 선명한 초록(참고 이미지 기준). hover 시 한 톤 진하게.
   static const ctaGreen = Color(0xFF64A079);
   static const ctaGreenDeep = Color(0xFF548A66);
+
+  /// HTP 활동 카드 전용 muted olive-sage 팔레트(S15P11B209-998).
+  /// 보호자 홈의 따뜻한 cream-yellow 배경과 조화를 이루도록 청록기를 낮췄다.
+  static const htpCard = Color(0xFFD4DCC2);
+  static const htpConnector = Color(0xFF6F8057);
+  static const htpCta = Color(0xFF879765);
+  static const htpCtaHover = Color(0xFF78895A);
+  static const htpCtaPressed = Color(0xFF6D7E51);
+  static const htpCtaBorder = Color(0xFF5F7048);
   static const blue = Color(0xFF4E82CE);
   static const blueSoft = Color(0xFFE7EFFB);
   static const coral = Color(0xFFDE7160);

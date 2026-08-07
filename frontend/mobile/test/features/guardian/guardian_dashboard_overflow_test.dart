@@ -1,14 +1,17 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:dodam/app/router/app_routes.dart';
 import 'package:dodam/app/state/guardian_child_controller.dart';
 import 'package:dodam/app/widgets/guardian_sidebar_shell.dart';
 import 'package:dodam/core/network/api_page.dart';
+import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/activity/data/dto/activity_dtos.dart';
 import 'package:dodam/features/activity/domain/repositories/activity_repository.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
 import 'package:dodam/features/child/domain/repositories/child_repository.dart';
 import 'package:dodam/features/guardian/presentation/widgets/guardian_dashboard.dart';
+import 'package:dodam/features/guardian/presentation/widgets/guardian_home_theme.dart';
 import 'package:dodam/features/guardian/presentation/screens/guardian_screens.dart';
 import 'package:dodam/features/notification/application/push_registration_status_controller.dart';
 import 'package:dodam/features/notification/domain/failures/push_token_registration_failure.dart';
@@ -70,14 +73,102 @@ void main() {
     });
   });
 
+  group('HTP 활동 카드 시각 계약', () {
+    testWidgets('집·나무·사람을 번호와 점선으로 순서대로 표시한다', (tester) async {
+      final semantics = tester.ensureSemantics();
+      await _pumpDashboard(
+        tester,
+        size: const Size(1280, 800),
+        activities: _many(3),
+      );
+
+      final card = find.byKey(const ValueKey('htp-activity-card'));
+      await _reveal(tester, card);
+      expect(find.text('그림을 그리고, 아이의 이야기를 들어봐요.'), findsOneWidget);
+      expect(find.bySemanticsLabel('집, 나무, 사람 순서로 그리는 활동'), findsOneWidget);
+
+      final images = [
+        for (var step = 1; step <= 3; step++)
+          find.byKey(ValueKey('htp-sequence-image-$step')),
+      ];
+      for (var step = 1; step <= 3; step++) {
+        expect(find.byKey(ValueKey('htp-step-marker-$step')), findsOneWidget);
+      }
+      expect(
+        find.byKey(const ValueKey('htp-sequence-connector-1')),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(const ValueKey('htp-sequence-connector-2')),
+        findsOneWidget,
+      );
+      expect(
+        tester.getRect(images[0]).left,
+        lessThan(tester.getRect(images[1]).left),
+      );
+      expect(
+        tester.getRect(images[1]).left,
+        lessThan(tester.getRect(images[2]).left),
+      );
+
+      final cardDecoration =
+          tester.widget<Container>(card).decoration! as BoxDecoration;
+      expect(cardDecoration.color, DodamHome.htpCard);
+
+      final cta = find.byKey(const ValueKey('start-child-mode'));
+      final surface = tester.widget<AnimatedContainer>(
+        find.byKey(const ValueKey('htp-start-button-surface')),
+      );
+      final ctaDecoration = surface.decoration! as BoxDecoration;
+      final ctaBorder = ctaDecoration.border! as Border;
+      expect(ctaDecoration.color, DodamHome.htpCta);
+      expect(ctaBorder.top.color, DodamHome.htpCtaBorder);
+      expect(ctaBorder.top.width, 1.75);
+      expect(ctaDecoration.boxShadow, isNotEmpty);
+      expect(ctaDecoration.boxShadow!.first.offset, const Offset(0, 3));
+      expect(tester.getSize(cta).height, greaterThanOrEqualTo(48));
+      expect(find.bySemanticsLabel('집 나무 사람 그림 활동 시작하기'), findsOneWidget);
+      _expectNoOverflow(tester);
+      semantics.dispose();
+    });
+
+    testWidgets('CTA는 눌림 피드백 후 기존 HTP 진입을 한 번만 호출한다', (tester) async {
+      final routes = <String>[];
+      await _pumpDashboard(
+        tester,
+        size: const Size(1280, 800),
+        activities: _many(3),
+        onPushRoute: routes.add,
+      );
+
+      final cta = find.byKey(const ValueKey('start-child-mode'));
+      await _reveal(tester, cta);
+      final gesture = await tester.startGesture(tester.getCenter(cta));
+      await tester.pump(const Duration(milliseconds: 200));
+
+      final pressedSurface = tester.widget<AnimatedContainer>(
+        find.byKey(const ValueKey('htp-start-button-surface')),
+      );
+      final pressedDecoration = pressedSurface.decoration! as BoxDecoration;
+      expect(pressedDecoration.color, DodamHome.htpCtaPressed);
+      expect(pressedDecoration.boxShadow!.first.offset, const Offset(0, 1));
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+      final start = find.byKey(const ValueKey('htp-intro-start'));
+      expect(start, findsOneWidget);
+      tester.widget<DodamDialogButton>(start).onPressed!();
+      await tester.pumpAndSettle();
+
+      expect(routes, [AppRoutes.drawingActivitySelection('3')]);
+      _expectNoOverflow(tester);
+    });
+  });
+
   group('화면 크기별 overflow', () {
     for (final layout in _layouts) {
       testWidgets('${layout.label}에서 overflow가 없고 CTA에 닿는다', (tester) async {
-        await _pumpDashboard(
-          tester,
-          size: layout.size,
-          activities: _many(6),
-        );
+        await _pumpDashboard(tester, size: layout.size, activities: _many(6));
 
         _expectNoOverflow(tester);
         await _expectReachable(tester);
