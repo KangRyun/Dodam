@@ -182,7 +182,8 @@ public class MockObservationReportGenerationService {
         context.representativeUtterance(),
         toSubjectSummaries(context),
         toSelectedEmotionRefs(context),
-        behaviorMetrics(context));
+        behaviorMetrics(context),
+        context.childAge());
   }
 
   /**

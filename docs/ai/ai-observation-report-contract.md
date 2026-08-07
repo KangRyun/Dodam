@@ -23,6 +23,16 @@
 `questionCount` · `answeredCount` · `skippedCount` · `unrecognizedSpeechCount` ·
 `selectedEmotions[]` · `expressedEmotionText?` · `representativeUtterance?`
 
+### 2.1-1 `childAge?` — 활동 시점 만 나이 (S15P11B209-1001 신설)
+
+관찰을 연령 발달 문맥으로 설명하는 축(Lowenfeld 규준 — 982에서 계약 부재로 보류)의 재료다.
+대화 경로 `QuestionRequest.childAge`와 같은 수준의 정보이며, 생년월일이 없으면 `null`.
+
+- AI는 나이가 **있을 때만** "이 시기 아이들에게 자연스러운 표현" 같은 안심 문맥을 쓴다.
+- 연령 문맥은 **근거가 아니다** — `evidenceItems`에 넣지 않고 경향 카드 근거 수에도 세지 않는다.
+- 또래 비교 판정("또래보다 늦다/빠르다") 금지. 나이가 없으면 연령 언급 자체를 금지(지어내기 차단).
+- 구 BE 호환: 필드 부재 시 기존 동작 그대로(연령 문장 없음).
+
 ### 2.2 `subjectSummaries[]` — 주제별 그림 서술·문답 (S15P11B209-740 신설)
 
 목적 흐름 "각 그림을 마칠 때마다 문답 → 문답과 그림을 근거로 리포트"를 계약 수준에서 잇는다.

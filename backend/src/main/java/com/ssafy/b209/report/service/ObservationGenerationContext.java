@@ -21,6 +21,9 @@ import java.util.List;
  * @param subjectContexts 주제(그림)별 관찰 서술·탐지 코드·문답 묶음이며 HTP는 최대 3건, 그림일기는 1건 (S15P11B209-741)
  * @param selectedEmotionRefs 선택 감정을 행 식별자와 함께 담은 목록이다. {@code selectedEmotions}와 같은 재료이며 근거 참조가 가능한
  *     형태다 (S15P11B209-906)
+ * @param childAge 활동 시점 기준 아동 만 나이이며 생년월일이 없으면 {@code null} (S15P11B209-1001). 대화 경로
+ *     {@code GenerateQuestionCommand.childAge}와 같은 수준의 정보다 — 리포트가 관찰을 연령 발달 문맥으로
+ *     설명할 수 있게 한다(Lowenfeld 규준, 982에서 계약 부재로 보류했던 축)
  * @param activitySessions 이 리포트가 다루는 그림 활동 세션과 그 <b>주제</b> 목록이다. HTP는 집·나무·사람 세 건, 그림일기·단독 세션은 주제
  *     없는 한 건이다. 행동 요약(S15P11B209-870)을 세션별로 집계해 합칠 때 쓰고, 주제별 그리기 시간(S15P11B209-975)의 이름표가 된다 — HTP
  *     리포트는 세 활동을 합친 기록이다.
@@ -43,7 +46,8 @@ public record ObservationGenerationContext(
     List<KeyConversationLine> keyConversations,
     List<SubjectContext> subjectContexts,
     List<SelectedEmotionRef> selectedEmotionRefs,
-    List<ActivitySessionRef> activitySessions) {
+    List<ActivitySessionRef> activitySessions,
+    Integer childAge) {
 
   /** 목록이 {@code null}로 만들어져도 빈 목록으로 정규화한다. */
   public ObservationGenerationContext {

@@ -559,7 +559,10 @@ def _format_activity(
         f"{_format_behavior(behavior, is_htp=_is_htp(req))}"
         f"{_format_rag_block(rag_chunks or [])}"
         "[활동 데이터]\n"
-        f"- 질문 난이도: {req.question_difficulty or '정보 없음'}\n"
+        # 나이가 없으면 줄 자체를 뺀다 — "없음"으로 적으면 모델이 나이를 짐작해 채우는
+        # 압력이 된다(1001). 프롬프트도 나이 없을 때 연령 언급을 금지한다.
+        + (f"- 아이 나이: 만 {req.child_age}세\n" if req.child_age is not None else "")
+        + f"- 질문 난이도: {req.question_difficulty or '정보 없음'}\n"
         f"- 제시한 질문 수: {req.question_count}\n"
         f"- 응답한 답변 수: {req.answered_count}\n"
         f"- 건너뛴 질문 수: {req.skipped_count}\n"

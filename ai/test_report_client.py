@@ -355,6 +355,35 @@ class BehaviorMetricsContractTest(unittest.TestCase):
         self.assertFalse(req.behavior_metrics.truncated)
 
 
+class ChildAgeBlockTest(unittest.TestCase):
+    """연령 규준 축의 재료 — [활동 데이터]의 나이 줄 (S15P11B209-1001).
+
+    나이가 있으면 "만 N세"로 실리고, 없으면 **줄 자체가 빠진다** — "없음"으로 적으면
+    모델이 나이를 짐작해 채우는 압력이 된다. 프롬프트의 연령 지시(발달 문맥은 안심용,
+    근거 아님, 또래 비교 금지)와 한 쌍이다.
+    """
+
+    def test_child_age_line_is_included_when_present(self):
+        req = _sample_request(child_age=7)
+        message = report_client._format_activity(req, None, None, None)
+        self.assertIn("- 아이 나이: 만 7세", message)
+
+    def test_child_age_line_is_absent_when_missing(self):
+        req = _sample_request()
+        message = report_client._format_activity(req, None, None, None)
+        self.assertNotIn("아이 나이", message)
+
+    def test_prompts_state_age_is_context_not_evidence(self):
+        """연령 문맥이 근거 게이트를 우회하면 나이 하나로 카드가 만들어진다 — 못 박는다."""
+        for name in ("report_htp", "report_diary"):
+            text = prompts_registry.load(name)
+            with self.subTest(name=name):
+                self.assertIn("발달 문맥으로 설명해도 좋다", text)
+                self.assertIn("연령 문맥은 근거가 아니다", text)
+                self.assertIn("또래보다 늦다·빠르다", text)
+                self.assertIn("나이가 없으면 연령 이야기를 아예 꺼내지 마라", text)
+
+
 class BehaviorBlockWordingTest(unittest.TestCase):
     """[형식적 분석] 블록의 표현 규칙 (S15P11B209-838).
 
