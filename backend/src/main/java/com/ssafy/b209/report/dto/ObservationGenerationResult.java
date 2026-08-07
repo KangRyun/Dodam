@@ -563,6 +563,8 @@ public record ObservationGenerationResult(
    * @param sessionObservations 이번 활동에서만 확인된 표현이며 0~2개다
    * @param caregiverQuestions 보호자가 그대로 이어 물을 수 있는 질문이며 0~2개다
    * @param listeningTip 이번 이야기를 들을 때의 태도 한 문장이며 없으면 {@code null}
+   * @param unknownItems 이번 활동에서 확인하지 못한 것이다. 서버가 원자료에서 정하며, 침묵 대신 이름을 돌려주기 위한 자리다 — 비어 나가면 보호자는
+   *     '문제가 없었다'로 읽는다
    * @param dataQuality 근거가 무엇으로 이루어졌는지 알려 주는 구성 정보
    */
   public record DiaryInsightsDraft(
@@ -572,6 +574,7 @@ public record ObservationGenerationResult(
       List<DiarySessionObservationDraft> sessionObservations,
       List<DiaryCaregiverQuestionDraft> caregiverQuestions,
       String listeningTip,
+      List<DiaryUnknownItemDraft> unknownItems,
       DiaryDataQualityDraft dataQuality) {
 
     /** 목록은 빈 목록으로 정규화한다. 배열이 비는 것은 '그 섹션을 숨긴다'는 정상 신호다. */
@@ -647,20 +650,34 @@ public record ObservationGenerationResult(
    * 이번 활동에서 확인된 표현 한 건이다. '심리 경향'이 아니라 <strong>이번 회차에 한정된 관찰</strong>이다.
    *
    * @param observationCode 관찰 코드
+   * @param insightType 주장의 세기다. {@code CONFIRMED_EXPRESSION}(아이가 한 말)·{@code SESSION_HYPOTHESIS}(다른
+   *     설명이 있어야 성립)·{@code EXPLORE_NEXT}(뜻을 정하지 않은 단서)
+   * @param domain 인사이트 영역
    * @param title 보호자에게 보이는 제목
    * @param description 근거에 묶인 이번 활동 한정 설명
+   * @param hypothesis 이번 회차 한정 가설이며 없으면 {@code null}
+   * @param alternativeExplanations 다르게 볼 수 있는 설명이다. <strong>가설의 필수 짝</strong>이라 비면 AI 가 애초에 가설 카드를
+   *     만들지 않는다 — 하나의 해석만 남으면 결론으로 읽힌다
+   * @param clarificationQuestion 다음에 확인할 질문이며 {@code EXPLORE_NEXT} 에는 반드시 있다
    * @param scopeText 범위를 알리는 문구이며 화면에 함께 나간다
-   * @param evidenceRefs 서로 다른 근거 식별자 2건 이상
+   * @param evidenceRefs 근거 식별자
    */
   public record DiarySessionObservationDraft(
       String observationCode,
+      String insightType,
+      String domain,
       String title,
       String description,
+      String hypothesis,
+      List<String> alternativeExplanations,
+      String clarificationQuestion,
       String scopeText,
       List<DiaryEvidenceRefDraft> evidenceRefs) {
 
-    /** 근거 목록은 빈 목록으로 정규화한다. */
+    /** 목록은 빈 목록으로 정규화한다. */
     public DiarySessionObservationDraft {
+      alternativeExplanations =
+          alternativeExplanations == null ? List.of() : List.copyOf(alternativeExplanations);
       evidenceRefs = evidenceRefs == null ? List.of() : List.copyOf(evidenceRefs);
     }
   }
@@ -706,4 +723,15 @@ public record ObservationGenerationResult(
    * @param id BE 가 발급한 식별자 그대로
    */
   public record DiaryEvidenceRefDraft(String kind, String id) {}
+
+  /**
+   * 이번 활동에서 확인하지 못한 것 한 건이다.
+   *
+   * <p>근거가 없어 카드를 비우면 보호자에게는 '문제가 없었다'로 읽힌다. 침묵 대신 무엇을 알 수 없었는지 이름을 붙여 돌려주는 자리다. 코드와 문구를 <strong>AI
+   * 가 원자료에서 정한다</strong> — 모델에게 맡기면 '모르는 것'조차 지어낸다.
+   *
+   * @param code 서버가 정한 코드
+   * @param text 보호자에게 보이는 문구
+   */
+  public record DiaryUnknownItemDraft(String code, String text) {}
 }

@@ -144,6 +144,11 @@ final class DiarySessionObservationDto {
   const DiarySessionObservationDto({
     required this.title,
     required this.description,
+    this.insightType = 'CONFIRMED_EXPRESSION',
+    this.domain = 'STORY',
+    this.hypothesis,
+    this.alternativeExplanations = const [],
+    this.clarificationQuestion,
     this.observationCode,
     this.scopeText,
     this.evidenceRefs = const [],
@@ -154,10 +159,35 @@ final class DiarySessionObservationDto {
       DiarySessionObservationDto(
         title: json['title'] as String? ?? '',
         description: json['description'] as String? ?? '',
+        insightType: json['insightType'] as String? ?? 'CONFIRMED_EXPRESSION',
+        domain: json['domain'] as String? ?? 'STORY',
+        hypothesis: _text(json['hypothesis']),
+        alternativeExplanations: _texts(json['alternativeExplanations']),
+        clarificationQuestion: _text(json['clarificationQuestion']),
         observationCode: json['observationCode'] as String?,
         scopeText: _text(json['scopeText']),
         evidenceRefs: _refs(json['evidenceRefs']),
       );
+
+  /// 주장의 세기.
+  ///
+  /// `CONFIRMED_EXPRESSION`(아이가 한 말)·`SESSION_HYPOTHESIS`(다른 설명과 함께여야
+  /// 성립)·`EXPLORE_NEXT`(뜻을 정하지 않은 단서). 화면은 이 값으로 카드의 표시를 가른다.
+  final String insightType;
+
+  /// 인사이트 영역.
+  final String domain;
+
+  /// 이번 회차 한정 가설이며 없으면 `null`.
+  final String? hypothesis;
+
+  /// 다르게 볼 수 있는 설명.
+  ///
+  /// **가설과 반드시 함께 보여 준다.** 하나의 해석만 보이면 보호자는 그것을 결론으로 읽는다.
+  final List<String> alternativeExplanations;
+
+  /// 다음에 확인할 질문이며 없으면 `null`.
+  final String? clarificationQuestion;
 
   /// 보호자에게 보이는 제목.
   final String title;
@@ -242,6 +272,24 @@ final class DiaryDataQualityDto {
   final bool visionSummaryAvailable;
 }
 
+/// 이번 활동에서 확인하지 못한 것 한 건.
+final class DiaryUnknownItemDto {
+  const DiaryUnknownItemDto({required this.code, required this.text});
+
+  /// JSON 한 건을 읽는다.
+  factory DiaryUnknownItemDto.fromJson(Map<String, dynamic> json) =>
+      DiaryUnknownItemDto(
+        code: json['code'] as String? ?? '',
+        text: json['text'] as String? ?? '',
+      );
+
+  /// 서버가 정한 코드.
+  final String code;
+
+  /// 보호자에게 보이는 문구.
+  final String text;
+}
+
 /// 그림일기 리포트 V2 묶음.
 final class DiaryInsightsDto {
   const DiaryInsightsDto({
@@ -251,6 +299,7 @@ final class DiaryInsightsDto {
     this.sessionObservations = const [],
     this.caregiverQuestions = const [],
     this.listeningTip,
+    this.unknownItems = const [],
     this.dataQuality = const DiaryDataQualityDto(),
   });
 
@@ -273,6 +322,7 @@ final class DiaryInsightsDto {
           DiaryCaregiverQuestionDto.fromJson,
         ),
         listeningTip: _text(json['listeningTip']),
+        unknownItems: _list(json['unknownItems'], DiaryUnknownItemDto.fromJson),
         dataQuality: json['dataQuality'] is Map
             ? DiaryDataQualityDto.fromJson(
                 Map<String, dynamic>.from(json['dataQuality'] as Map),
@@ -298,6 +348,12 @@ final class DiaryInsightsDto {
   /// 이번 이야기를 들을 때의 태도 한 문장이며 없으면 `null`.
   final String? listeningTip;
 
+  /// 이번 활동에서 확인하지 못한 것.
+  ///
+  /// 섹션이 비어 나가면 보호자는 '문제가 없었다'로 읽는다 — 무엇을 알 수 없었는지
+  /// 이름을 붙여 보여 준다.
+  final List<DiaryUnknownItemDto> unknownItems;
+
   /// 근거 구성 정보.
   final DiaryDataQualityDto dataQuality;
 
@@ -322,6 +378,13 @@ String? _text(Object? value) {
 }
 
 int _int(Object? value) => value is num ? value.toInt() : 0;
+
+List<String> _texts(Object? value) {
+  if (value is! List) return const [];
+  return [
+    for (final item in value) ?_text(item),
+  ];
+}
 
 List<DiaryEvidenceRefDto> _refs(Object? value) =>
     _list(value, DiaryEvidenceRefDto.fromJson);

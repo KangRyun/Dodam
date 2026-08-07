@@ -34,17 +34,19 @@ import com.ssafy.b209.report.repository.ReportConversationSummaryViewRepository;
 import com.ssafy.b209.report.repository.ReportDetailViewRepository;
 import com.ssafy.b209.report.repository.ReportDetectedObjectRow;
 import com.ssafy.b209.report.repository.ReportDetectedObjectViewRepository;
+import com.ssafy.b209.report.repository.ReportDiaryCaregiverQuestionRepository;
+import com.ssafy.b209.report.repository.ReportDiaryChildVoiceRepository;
+import com.ssafy.b209.report.repository.ReportDiaryEvidenceRefRepository;
+import com.ssafy.b209.report.repository.ReportDiaryInsightAlternativeRepository;
+import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
+import com.ssafy.b209.report.repository.ReportDiaryNarrativeStepRepository;
+import com.ssafy.b209.report.repository.ReportDiarySessionObservationRepository;
+import com.ssafy.b209.report.repository.ReportDiaryUnknownItemRepository;
 import com.ssafy.b209.report.repository.ReportDrawingAssetViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingEmotionViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingSessionViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingTypeViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
-import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
-import com.ssafy.b209.report.repository.ReportDiaryNarrativeStepRepository;
-import com.ssafy.b209.report.repository.ReportDiaryChildVoiceRepository;
-import com.ssafy.b209.report.repository.ReportDiarySessionObservationRepository;
-import com.ssafy.b209.report.repository.ReportDiaryCaregiverQuestionRepository;
-import com.ssafy.b209.report.repository.ReportDiaryEvidenceRefRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideViewRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationViewRepository;
 import com.ssafy.b209.report.repository.ReportObservedFeatureViewRepository;
@@ -95,6 +97,8 @@ class ReportDetailQueryServiceTest {
   @Mock private ReportDiarySessionObservationRepository diarySessionObservationRepository;
   @Mock private ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository;
   @Mock private ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository;
+  @Mock private ReportDiaryInsightAlternativeRepository diaryAlternativeRepository;
+  @Mock private ReportDiaryUnknownItemRepository diaryUnknownItemRepository;
   @Mock private ReportConversationSummaryViewRepository conversationSummaryRepository;
   @Mock private ReportDetectedObjectViewRepository detectedObjectRepository;
   @Mock private ReportDrawnItemRepository drawnItemRepository;
@@ -145,6 +149,8 @@ class ReportDetailQueryServiceTest {
             diarySessionObservationRepository,
             diaryCaregiverQuestionRepository,
             diaryEvidenceRefRepository,
+            diaryAlternativeRepository,
+            diaryUnknownItemRepository,
             conversationSummaryRepository,
             detectedObjectRepository,
             drawnItemRepository,
@@ -629,6 +635,8 @@ class ReportDetailQueryServiceTest {
             diarySessionObservationRepository,
             diaryCaregiverQuestionRepository,
             diaryEvidenceRefRepository,
+            diaryAlternativeRepository,
+            diaryUnknownItemRepository,
             conversationSummaryRepository,
             detectedObjectRepository,
             drawnItemRepository,

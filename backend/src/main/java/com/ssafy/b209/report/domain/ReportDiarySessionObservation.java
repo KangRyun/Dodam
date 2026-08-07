@@ -35,11 +35,26 @@ public class ReportDiarySessionObservation {
   @Column(name = "observation_code", nullable = false, length = 60)
   private String observationCode;
 
+  /** 주장의 세기다. 이 값이 없으면 "아이가 이렇게 말했다"와 "이렇게 볼 수도 있다"가 같은 무게로 읽힌다. */
+  @Column(name = "insight_type", nullable = false, length = 30)
+  private String insightType;
+
+  @Column(name = "domain", nullable = false, length = 30)
+  private String domain;
+
   @Column(name = "title", nullable = false, length = 200)
   private String title;
 
   @Column(name = "description", nullable = false, columnDefinition = "TEXT")
   private String description;
+
+  /** 이번 회차 한정 가설이며 확인된 표현·단서에는 {@code null}. */
+  @Column(name = "hypothesis", columnDefinition = "TEXT")
+  private String hypothesis;
+
+  /** 다음에 확인할 질문이며 EXPLORE_NEXT 에는 반드시 있다. */
+  @Column(name = "clarification_question", columnDefinition = "TEXT")
+  private String clarificationQuestion;
 
   @Column(name = "scope_text", nullable = false, length = 200)
   private String scopeText;
@@ -53,13 +68,21 @@ public class ReportDiarySessionObservation {
   private ReportDiarySessionObservation(
       Report report,
       String observationCode,
+      String insightType,
+      String domain,
       String title,
       String description,
+      String hypothesis,
+      String clarificationQuestion,
       String scopeText,
       int displayOrder) {
     this.report = Objects.requireNonNull(report, "report must not be null");
     this.observationCode =
         Objects.requireNonNull(observationCode, "observationCode must not be null");
+    this.insightType = blankTo(insightType, "CONFIRMED_EXPRESSION");
+    this.domain = blankTo(domain, "STORY");
+    this.hypothesis = hypothesis;
+    this.clarificationQuestion = clarificationQuestion;
     this.title = Objects.requireNonNull(title, "title must not be null");
     this.description = Objects.requireNonNull(description, "description must not be null");
     this.scopeText = Objects.requireNonNull(scopeText, "scopeText must not be null");
@@ -71,8 +94,12 @@ public class ReportDiarySessionObservation {
    *
    * @param report 소속 리포트
    * @param observationCode 관찰 코드
+   * @param insightType 주장의 세기이며 비어 있으면 {@code CONFIRMED_EXPRESSION}
+   * @param domain 인사이트 영역이며 비어 있으면 {@code STORY}
    * @param title 보호자에게 보이는 제목
    * @param description 근거에 묶인 이번 활동 한정 설명
+   * @param hypothesis 이번 회차 한정 가설이며 없으면 {@code null}
+   * @param clarificationQuestion 다음에 확인할 질문이며 없으면 {@code null}
    * @param scopeText 범위를 알리는 문구
    * @param displayOrder 노출 순서
    * @return 저장 대기 Entity
@@ -80,12 +107,58 @@ public class ReportDiarySessionObservation {
   public static ReportDiarySessionObservation create(
       Report report,
       String observationCode,
+      String insightType,
+      String domain,
       String title,
       String description,
+      String hypothesis,
+      String clarificationQuestion,
       String scopeText,
       int displayOrder) {
     return new ReportDiarySessionObservation(
-        report, observationCode, title, description, scopeText, displayOrder);
+        report,
+        observationCode,
+        insightType,
+        domain,
+        title,
+        description,
+        hypothesis,
+        clarificationQuestion,
+        scopeText,
+        displayOrder);
+  }
+
+  /** 값이 비면 기본값으로 둔다 — 구 V45 행에는 이 두 값이 없다. */
+  private static String blankTo(String value, String fallback) {
+    return value == null || value.isBlank() ? fallback : value;
+  }
+
+  /**
+   * @return 주장의 세기
+   */
+  public String getInsightType() {
+    return insightType;
+  }
+
+  /**
+   * @return 인사이트 영역
+   */
+  public String getDomain() {
+    return domain;
+  }
+
+  /**
+   * @return 이번 회차 한정 가설이며 없으면 {@code null}
+   */
+  public String getHypothesis() {
+    return hypothesis;
+  }
+
+  /**
+   * @return 다음에 확인할 질문이며 없으면 {@code null}
+   */
+  public String getClarificationQuestion() {
+    return clarificationQuestion;
   }
 
   /**

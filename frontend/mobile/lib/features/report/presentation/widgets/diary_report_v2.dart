@@ -57,6 +57,12 @@ class DiaryReportV2Body extends StatelessWidget {
         ),
       if (insights.listeningTip != null)
         _ListeningTipCard(tip: insights.listeningTip!),
+      // 확인하지 못한 것을 마지막에 둔다. 섹션이 없으면 보호자는 '문제가 없었다'로 읽는다.
+      if (insights.unknownItems.isNotEmpty)
+        _DiarySection(
+          title: '이번에는 확인하지 못했어요',
+          child: _UnknownItemList(items: insights.unknownItems),
+        ),
     ];
 
     return Column(
@@ -279,6 +285,10 @@ class _SessionObservationCard extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // 주장의 세기를 카드 맨 위에 적는다. 이 한 줄이 "아이가 이렇게 말했다"와
+        //   "이렇게 볼 수도 있다"를 가른다 — 없으면 둘이 같은 무게로 읽힌다.
+        _Badge(text: diaryInsightTypeLabel(observation.insightType)),
+        const SizedBox(height: AppSpacing.xs),
         Text(
           observation.title,
           style: const TextStyle(
@@ -297,6 +307,23 @@ class _SessionObservationCard extends StatelessWidget {
             height: 1.55,
           ),
         ),
+        // 가설과 다른 설명은 **함께** 나간다. 가설만 보이면 보호자는 그것을 결론으로 읽는다.
+        if (observation.hypothesis != null) ...[
+          const SizedBox(height: AppSpacing.sm),
+          _LabeledLine(label: '이렇게 볼 수도 있어요', text: observation.hypothesis!),
+        ],
+        if (observation.alternativeExplanations.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.xs),
+          for (final alternative in observation.alternativeExplanations)
+            _LabeledLine(label: '다른 설명', text: alternative),
+        ],
+        if (observation.clarificationQuestion != null) ...[
+          const SizedBox(height: AppSpacing.xs),
+          _LabeledLine(
+            label: '다음에 물어보면',
+            text: observation.clarificationQuestion!,
+          ),
+        ],
         // 범위 문구는 장식이 아니다. 이 한 줄이 없으면 한 번의 활동이 아이의
         //   지속적인 성향으로 읽힌다.
         if (observation.scopeText != null) ...[
@@ -397,6 +424,82 @@ class _ListeningTipCard extends StatelessWidget {
   );
 }
 
+/// 라벨이 붙은 한 줄. 가설·다른 설명·확인 질문이 서로 구분되게 한다.
+class _LabeledLine extends StatelessWidget {
+  const _LabeledLine({required this.label, required this.text});
+
+  final String label;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(top: 4),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppColors.inkMuted,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        Text(
+          text,
+          style: const TextStyle(
+            color: AppColors.ink,
+            fontSize: 15,
+            height: 1.55,
+          ),
+        ),
+      ],
+    ),
+  );
+}
+
+/// 확인하지 못한 것 목록.
+class _UnknownItemList extends StatelessWidget {
+  const _UnknownItemList({required this.items});
+
+  final List<DiaryUnknownItemDto> items;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (final item in items)
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(top: 5),
+                child: Icon(
+                  Icons.remove_circle_outline,
+                  size: 16,
+                  color: AppColors.inkMuted,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  item.text,
+                  style: const TextStyle(
+                    color: AppColors.inkMuted,
+                    fontSize: 15,
+                    height: 1.55,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+    ],
+  );
+}
+
 /// 작은 상태 표시.
 class _Badge extends StatelessWidget {
   const _Badge({required this.text});
@@ -423,6 +526,16 @@ class _Badge extends StatelessWidget {
     ),
   );
 }
+
+/// 주장의 세기를 사용자 문구로 바꾼다.
+///
+/// 이 라벨이 카드의 무게를 정한다 — 아이가 한 말인지, 이번에만 그렇게 볼 수 있다는 것인지,
+/// 아직 뜻을 모르는 단서인지. 모르는 코드는 가장 약한 쪽으로 읽는다.
+String diaryInsightTypeLabel(String insightType) => switch (insightType) {
+  'CONFIRMED_EXPRESSION' => '아이가 들려준 것',
+  'SESSION_HYPOTHESIS' => '이번 활동에서 볼 수 있는 것',
+  _ => '더 확인해 볼 것',
+};
 
 /// 이야기 단계 코드를 사용자 문구로 바꾼다. 모르는 코드는 표시하지 않는다.
 String diaryStepLabel(String stepType) => switch (stepType) {

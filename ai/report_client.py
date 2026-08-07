@@ -1741,10 +1741,24 @@ def _review_targets(
                 }
             )
         for index, observation in enumerate(diary.session_observations):
+            # 가설과 다른 설명도 검토 대상에 함께 넣는다. 가설만 검토하면 "다르게 볼 수도 있다"가
+            #   근거 없는 말로 채워져도 통과한다 — 그 한 줄이 카드를 가설로 남기는 장치라
+            #   그것부터 검토를 받아야 한다.
+            text = " / ".join(
+                part
+                for part in (
+                    observation.title,
+                    observation.description,
+                    observation.hypothesis,
+                    " · ".join(observation.alternative_explanations) or None,
+                )
+                if part
+            )
             targets.append(
                 {
                     "id": f"diary.observation.{index}",
-                    "글": f"{observation.title} / {observation.description}",
+                    "글": text,
+                    "주장 세기": observation.insight_type,
                     "근거": diary_report_v2.evidence_texts_for_ids(
                         req, observation.evidence_refs
                     ),

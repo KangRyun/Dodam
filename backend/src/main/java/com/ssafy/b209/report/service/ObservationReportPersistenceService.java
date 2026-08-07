@@ -32,8 +32,10 @@ import com.ssafy.b209.report.domain.ReportDiaryCaregiverQuestion;
 import com.ssafy.b209.report.domain.ReportDiaryChildVoice;
 import com.ssafy.b209.report.domain.ReportDiaryEvidenceRef;
 import com.ssafy.b209.report.domain.ReportDiaryInsight;
+import com.ssafy.b209.report.domain.ReportDiaryInsightAlternative;
 import com.ssafy.b209.report.domain.ReportDiaryNarrativeStep;
 import com.ssafy.b209.report.domain.ReportDiarySessionObservation;
+import com.ssafy.b209.report.domain.ReportDiaryUnknownItem;
 import com.ssafy.b209.report.domain.ReportDrawnItem;
 import com.ssafy.b209.report.domain.ReportEvidenceItem;
 import com.ssafy.b209.report.domain.ReportEvidenceSourceKind;
@@ -64,6 +66,7 @@ import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryInsightsDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryNarrativeStepDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiarySessionObservationDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryStorySnapshotDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryUnknownItemDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DrawnItemDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.FollowUpGuideDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.GuardianQuestionDraft;
@@ -76,9 +79,11 @@ import com.ssafy.b209.report.repository.ReportCrisisAlertRepository;
 import com.ssafy.b209.report.repository.ReportDiaryCaregiverQuestionRepository;
 import com.ssafy.b209.report.repository.ReportDiaryChildVoiceRepository;
 import com.ssafy.b209.report.repository.ReportDiaryEvidenceRefRepository;
+import com.ssafy.b209.report.repository.ReportDiaryInsightAlternativeRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
 import com.ssafy.b209.report.repository.ReportDiaryNarrativeStepRepository;
 import com.ssafy.b209.report.repository.ReportDiarySessionObservationRepository;
+import com.ssafy.b209.report.repository.ReportDiaryUnknownItemRepository;
 import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportEvidenceItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideRepository;
@@ -178,6 +183,8 @@ public class ObservationReportPersistenceService {
   private final ReportDiarySessionObservationRepository diarySessionObservationRepository;
   private final ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository;
   private final ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository;
+  private final ReportDiaryInsightAlternativeRepository diaryAlternativeRepository;
+  private final ReportDiaryUnknownItemRepository diaryUnknownItemRepository;
   private final ReportGuardianQuestionRepository guardianQuestionRepository;
   private final ConversationSessionRepository conversationSessionRepository;
   private final ConversationMessageRepository conversationMessageRepository;
@@ -242,6 +249,8 @@ public class ObservationReportPersistenceService {
       ReportDiarySessionObservationRepository diarySessionObservationRepository,
       ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository,
       ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository,
+      ReportDiaryInsightAlternativeRepository diaryAlternativeRepository,
+      ReportDiaryUnknownItemRepository diaryUnknownItemRepository,
       ReportGuardianQuestionRepository guardianQuestionRepository,
       ConversationSessionRepository conversationSessionRepository,
       ConversationMessageRepository conversationMessageRepository,
@@ -274,6 +283,8 @@ public class ObservationReportPersistenceService {
     this.diarySessionObservationRepository = diarySessionObservationRepository;
     this.diaryCaregiverQuestionRepository = diaryCaregiverQuestionRepository;
     this.diaryEvidenceRefRepository = diaryEvidenceRefRepository;
+    this.diaryAlternativeRepository = diaryAlternativeRepository;
+    this.diaryUnknownItemRepository = diaryUnknownItemRepository;
     this.guardianQuestionRepository = guardianQuestionRepository;
     this.conversationSessionRepository = conversationSessionRepository;
     this.conversationMessageRepository = conversationMessageRepository;
@@ -1346,6 +1357,7 @@ public class ObservationReportPersistenceService {
     diaryChildVoiceRepository.saveAll(voices);
 
     List<ReportDiarySessionObservation> observations = new ArrayList<>();
+    List<ReportDiaryInsightAlternative> alternatives = new ArrayList<>();
     List<DiarySessionObservationDraft> observationDrafts = draft.sessionObservations();
     for (int index = 0; index < observationDrafts.size(); index++) {
       DiarySessionObservationDraft observation = observationDrafts.get(index);
@@ -1353,12 +1365,24 @@ public class ObservationReportPersistenceService {
           ReportDiarySessionObservation.create(
               report,
               observation.observationCode(),
+              observation.insightType(),
+              observation.domain(),
               ColumnTextLimiter.fit(
                   observation.title(), 200, "report_diary_session_observations.title"),
               observation.description(),
+              observation.hypothesis(),
+              observation.clarificationQuestion(),
               ColumnTextLimiter.fit(
                   observation.scopeText(), 200, "report_diary_session_observations.scope_text"),
               index));
+      // 다른 설명은 가설의 필수 짝이다 — 카드와 같은 순서로 묶어 둔다.
+      List<String> texts = observation.alternativeExplanations();
+      for (int order = 0; order < texts.size(); order++) {
+        String text = texts.get(order);
+        if (text != null && !text.isBlank()) {
+          alternatives.add(ReportDiaryInsightAlternative.create(report, index, text, order));
+        }
+      }
       collectDiaryRefs(
           report,
           refs,
@@ -1367,6 +1391,7 @@ public class ObservationReportPersistenceService {
           observation.evidenceRefs());
     }
     diarySessionObservationRepository.saveAll(observations);
+    diaryAlternativeRepository.saveAll(alternatives);
 
     List<ReportDiaryCaregiverQuestion> questions = new ArrayList<>();
     List<DiaryCaregiverQuestionDraft> questionDrafts = draft.caregiverQuestions();
@@ -1389,6 +1414,19 @@ public class ObservationReportPersistenceService {
     diaryCaregiverQuestionRepository.saveAll(questions);
 
     diaryEvidenceRefRepository.saveAll(refs);
+
+    // 확인하지 못한 것. 비어 나가는 것과 "무엇을 알 수 없었는지" 적어 보내는 것은 보호자에게
+    //   전혀 다르게 읽힌다 — AI 가 원자료에서 정해 보낸 값을 그대로 보관한다.
+    List<ReportDiaryUnknownItem> unknowns = new ArrayList<>();
+    List<DiaryUnknownItemDraft> unknownDrafts = draft.unknownItems();
+    for (int index = 0; index < unknownDrafts.size(); index++) {
+      DiaryUnknownItemDraft unknown = unknownDrafts.get(index);
+      if (unknown.code() == null || unknown.text() == null || unknown.text().isBlank()) {
+        continue;
+      }
+      unknowns.add(ReportDiaryUnknownItem.create(report, unknown.code(), unknown.text(), index));
+    }
+    diaryUnknownItemRepository.saveAll(unknowns);
   }
 
   /** 한 항목의 근거 참조를 모은다. 식별자가 비면 건너뛴다 — 빈 참조는 화면에서 근거 없는 근거로 보인다. */

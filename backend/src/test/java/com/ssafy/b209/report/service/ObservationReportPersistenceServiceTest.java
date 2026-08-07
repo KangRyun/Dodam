@@ -54,13 +54,15 @@ import com.ssafy.b209.report.dto.ObservationGenerationResult.ObservedFeatureDraf
 import com.ssafy.b209.report.exception.MockObservationReportErrorCode;
 import com.ssafy.b209.report.repository.ReportActivityNoteRepository;
 import com.ssafy.b209.report.repository.ReportActivitySummaryRepository;
-import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
+import com.ssafy.b209.report.repository.ReportDiaryCaregiverQuestionRepository;
+import com.ssafy.b209.report.repository.ReportDiaryChildVoiceRepository;
+import com.ssafy.b209.report.repository.ReportDiaryEvidenceRefRepository;
+import com.ssafy.b209.report.repository.ReportDiaryInsightAlternativeRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
 import com.ssafy.b209.report.repository.ReportDiaryNarrativeStepRepository;
-import com.ssafy.b209.report.repository.ReportDiaryChildVoiceRepository;
 import com.ssafy.b209.report.repository.ReportDiarySessionObservationRepository;
-import com.ssafy.b209.report.repository.ReportDiaryCaregiverQuestionRepository;
-import com.ssafy.b209.report.repository.ReportDiaryEvidenceRefRepository;
+import com.ssafy.b209.report.repository.ReportDiaryUnknownItemRepository;
+import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideRepository;
 import com.ssafy.b209.report.repository.ReportGuardianQuestionRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationRepository;
@@ -130,6 +132,8 @@ class ObservationReportPersistenceServiceTest {
   @Mock private ReportDiarySessionObservationRepository diarySessionObservationRepository;
   @Mock private ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository;
   @Mock private ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository;
+  @Mock private ReportDiaryInsightAlternativeRepository diaryAlternativeRepository;
+  @Mock private ReportDiaryUnknownItemRepository diaryUnknownItemRepository;
   @Mock private ReportGuardianQuestionRepository guardianQuestionRepository;
   @Mock private ConversationSessionRepository conversationSessionRepository;
   @Mock private ConversationMessageRepository conversationMessageRepository;
@@ -183,6 +187,8 @@ class ObservationReportPersistenceServiceTest {
             diarySessionObservationRepository,
             diaryCaregiverQuestionRepository,
             diaryEvidenceRefRepository,
+            diaryAlternativeRepository,
+            diaryUnknownItemRepository,
             guardianQuestionRepository,
             conversationSessionRepository,
             conversationMessageRepository,

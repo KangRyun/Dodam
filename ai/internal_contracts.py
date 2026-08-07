@@ -776,13 +776,47 @@ class DiaryChildVoiceItem(_CamelModel):
 
 
 class DiarySessionObservation(_CamelModel):
-    """한 회차에 한정해 근거를 붙여 보여 주는 관찰 카드."""
+    """한 회차에 한정해 근거를 붙여 보여 주는 관찰 카드.
+
+    insight_type 이 이 카드가 무엇을 주장하는지 가른다. 셋을 한 덩어리로 두면 "아이가 이렇게
+    말했다"와 "이렇게 볼 수도 있다"가 같은 무게로 읽힌다.
+
+      CONFIRMED_EXPRESSION  아이가 직접 한 말로 확인된 표현. 추측이 없다.
+      SESSION_HYPOTHESIS    이번 회차에 한정된 가설. **다른 설명을 함께 적어야** 성립한다.
+      EXPLORE_NEXT          지금 근거로는 뜻을 정할 수 없어 다음에 확인할 단서.
+
+    alternative_explanations 는 가설의 필수 짝이다. 하나의 해석만 제시하면 보호자는 그것을
+    결론으로 읽는다 — "다르게 볼 수도 있다"가 카드 안에 함께 있어야 가설로 남는다.
+    """
 
     observation_code: str
+    insight_type: Literal[
+        "CONFIRMED_EXPRESSION", "SESSION_HYPOTHESIS", "EXPLORE_NEXT"
+    ] = "CONFIRMED_EXPRESSION"
+    domain: Literal[
+        "STORY", "EMOTION", "RELATIONSHIP", "SELF_EXPRESSION", "COPING", "ACTIVITY_STYLE"
+    ] = "STORY"
     title: str
     description: str
+    hypothesis: str | None = None
+    alternative_explanations: list[str] = Field(default_factory=list)
+    clarification_question: str | None = None
     scope_text: str = "이번 활동에서 확인된 모습이에요."
     evidence_refs: list[EvidenceSourceRef] = Field(default_factory=list)
+
+
+class DiaryUnknownItem(_CamelModel):
+    """이번 활동에서 **확인하지 못한 것**.
+
+    빈칸을 해석으로 메우지 않기 위한 자리다. 근거가 없으면 침묵하는 것이 지금까지의 규칙이었는데,
+    침묵은 보호자에게 '문제가 없었다'로 읽힌다. 무엇을 알 수 없었는지 이름을 붙여 돌려준다.
+
+    서버가 요청 원자료에서 결정한다 — 모델이 만들지 않는다. 모델에게 맡기면 '확인하지 못한 것'
+    조차 지어낸다.
+    """
+
+    code: str
+    text: str
 
 
 class DiaryCaregiverQuestion(_CamelModel):
@@ -816,6 +850,7 @@ class DiaryInsights(_CamelModel):
     session_observations: list[DiarySessionObservation] = Field(default_factory=list)
     caregiver_questions: list[DiaryCaregiverQuestion] = Field(default_factory=list)
     listening_tip: str | None = None
+    unknown_items: list[DiaryUnknownItem] = Field(default_factory=list)
     data_quality: DiaryDataQuality = Field(default_factory=DiaryDataQuality)
 
 
