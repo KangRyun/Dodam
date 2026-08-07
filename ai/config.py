@@ -49,8 +49,16 @@ STT_MODEL = os.environ.get("STT_MODEL", "whisper-1")
 STT_NO_SPEECH_PROB_MAX = float(os.environ.get("STT_NO_SPEECH_PROB_MAX", "0.6"))
 STT_AVG_LOGPROB_FAIL_MAX = float(os.environ.get("STT_AVG_LOGPROB_FAIL_MAX", "-1.0"))
 # 실패는 아니지만 확정하지도 않는 구간 — 보호자 확인 대상으로 넘긴다(정본 §25).
+# 2026-08-07 완화: -0.6 → -0.85.
+#   근거(실기기 실측): 음성 답변 11건 중 8건(73%)에 needs_confirmation이 붙었는데
+#   플래그된 문장 대부분은 인식이 멀쩡했다. -0.6은 조용한 스튜디오 오디오 기준이고,
+#   실제 아동 오디오(작은 목소리·생활 소음·기기 마이크)는 평균 로그확률이 구조적으로
+#   낮게 나온다. 과탐의 대가가 크다 — 이 플래그가 리포트 근거 식별자를 봉쇄해
+#   해석 카드가 0이 됐다(리포트 169). 확인 요청이 기본값이 되면 아무도 확인하지 않는다.
+# fail 임계(-1.0)는 건드리지 않는다 — "울었어"→"운동했어" 같은 진짜 오인식(실측 1건)의
+#   방어선이다. 완화하는 건 '확정 보류' 구간이지 '실패' 구간이 아니다.
 STT_AVG_LOGPROB_CONFIRM_MAX = float(
-    os.environ.get("STT_AVG_LOGPROB_CONFIRM_MAX", "-0.6")
+    os.environ.get("STT_AVG_LOGPROB_CONFIRM_MAX", "-0.85")
 )
 # TTS는 지시형(gpt-4o-mini-tts) — "어떻게 말할지"를 instructions로 지정 가능(곰돌이 톤).
 TTS_MODEL = os.environ.get("TTS_MODEL", "gpt-4o-mini-tts")

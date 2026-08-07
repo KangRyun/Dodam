@@ -21,6 +21,15 @@ from gms import get_client
 
 logger = logging.getLogger(__name__)
 
+# whisper `prompt`(initial prompt) — 디코딩 문맥을 미리 정해 유튜브 상용구로 흐르는 걸 막는다.
+#   2026-08-07 실측에서 무음 녹음이 "자막제작 by UpTitle …"·"유료광고를 포함하고 있습니다"로
+#   나왔다. whisper는 앞 문맥이 비면 학습 분포에서 가장 흔한 자막체로 떨어지므로, 짧은
+#   한국어 대화라는 문맥을 먼저 깔아 그 경로를 막는다. temperature=0은 폴백 샘플링을 꺼
+#   같은 오디오가 실행마다 다른 문장을 내지 않게 한다(캘리브레이션 재현성).
+#   ⚠️ 이 문장에 아이 이름·질문 내용 같은 실데이터를 넣지 않는다 — 모델이 프롬프트 단어를
+#   그대로 받아쓰는 사례가 있어, 넣는 순간 하지 않은 말이 답변으로 저장될 수 있다.
+_DECODE_PROMPT = "아이가 그림을 그리면서 나눈 대화의 한 마디예요."
+
 
 @dataclass(frozen=True)
 class Transcription:
@@ -69,6 +78,18 @@ def transcribe_detailed(audio_path: str, *, language: str = "ko") -> Transcripti
             _format(metrics.avg_logprob),
         )
         return Transcription("", verdict.status, verdict.failure_reason, False)
+    # 성공도 남긴다. 실패만 로그하면 임계값을 조정할 근거가 한쪽만 쌓인다 — 2026-08-07
+    #   확인 필요 과탐(11건 중 8건)을 실측하고도 플래그된 건들의 avg_logprob 분포를
+    #   몰라 완화 폭을 추정으로 정해야 했다. 여기 남는 값이 다음 캘리브레이션 재료다.
+    #   ⚠️ 인식 텍스트는 넣지 않는다(파일 상단 가드레일) — 아이 발화일 수 있다.
+    logger.info(
+        "STT 판정 status=%s needsConfirmation=%s segments=%d noSpeechProb=%s avgLogprob=%s",
+        verdict.status,
+        verdict.needs_confirmation,
+        metrics.segment_count,
+        _format(metrics.no_speech_prob),
+        _format(metrics.avg_logprob),
+    )
     return Transcription(
         text.strip(), verdict.status, None, verdict.needs_confirmation
     )
@@ -89,6 +110,12 @@ def _request(audio_path: str, language: str) -> tuple[str, list[dict]]:
     reason: `verbose_json`은 whisper-1이 지원하는 형식이지만 우리는 GMS 게이트웨이를
     통해 호출한다. 게이트웨이가 형식을 거절할 때 STT 전체가 실패하면, 무음 판정을
     붙이려다 정상 음성 인식까지 잃는다. 폴백에서는 지표가 없어 텍스트 규칙만 남는다.
+
+    ⚠️ 폴백은 **bare 호출**이어야 한다(model·file·language만). 첫 호출에는
+    response_format 말고도 prompt·temperature가 실려 있고, 게이트웨이가 그중
+    무엇을 거절하든 똑같이 400으로 온다. 폴백에서 거절당한 파라미터를 그대로
+    다시 보내면 두 번째도 400이 되어 STT 전체가 UNSUPPORTED_AUDIO로 죽는다 —
+    오디오는 멀쩡한데 파라미터 때문에 아이 답변을 잃는 실패다.
     """
     try:
         response = _call(audio_path, language, verbose=True)
@@ -115,6 +142,11 @@ def _request(audio_path: str, language: str) -> tuple[str, list[dict]]:
 
 
 def _call(audio_path: str, language: str, *, verbose: bool):
+    """`verbose=False`는 게이트웨이가 확실히 받는 최소 호출이다(폴백 전용).
+
+    선택 파라미터를 전부 `verbose` 하나에 묶어 둔 건 의도다 — 폴백이 bare로 남는 것이
+    분기가 아니라 구조로 보장돼야 한다(위 `_request` 주석).
+    """
     with open(audio_path, "rb") as f:
         kwargs = {
             "model": config.STT_MODEL,
@@ -123,6 +155,8 @@ def _call(audio_path: str, language: str, *, verbose: bool):
         }
         if verbose:
             kwargs["response_format"] = "verbose_json"
+            kwargs["temperature"] = 0
+            kwargs["prompt"] = _DECODE_PROMPT
         return get_client().audio.transcriptions.create(**kwargs)
 
 
