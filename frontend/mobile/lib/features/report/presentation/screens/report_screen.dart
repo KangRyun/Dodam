@@ -13,6 +13,7 @@ import '../../data/services/platform_report_file_actions.dart';
 import '../../domain/repositories/report_repository.dart';
 import '../../domain/services/report_file_actions.dart';
 import '../format/activity_duration_format.dart';
+import '../widgets/diary_report_v2.dart';
 import '../widgets/htp_report_gallery.dart';
 import '../widgets/report_mascot.dart';
 
@@ -520,32 +521,38 @@ class _ReportContent extends StatelessWidget {
       // 아니라 근거 열람용이라 기본으로 접는다(S15P11B209-1004). 주제별 관찰은
       // 이미 인사이트 층의 주제 이야기 카드 안에 들어가므로 여기에 없다.
       //
-      // 그림일기 한 장 경로는 이 묶음을 쓰지 않는다 — 접힘은 HTP 전용이다.
-      // 한 장짜리 안에 접이식을 넣으면 "한눈에 훑는다"는 성격 자체가 깨진다.
+      // 그림일기 한 장 경로는 이 묶음을 쓰지 않는다.
+      //
+      // 구형 대화 가이드([_legacyGuideSection])는 여기에 두지 않는다 — 그 내용
+      // (guardianConversationGuide)은 이미 [_htpObservedGuidesSection]의 가이드
+      // 그룹([_guideGroups])에 '보호자 대화 가이드'로 포함되어, 함께 두면
+      // 중복된다(2026-08-07).
       final htpDetailSections = isHtp
           ? <Widget>[
               ?_conversationSummarySection(report),
               ?_activityFactsSection(report, isHtp: true),
-              ?_legacyGuideSection(report),
             ]
           : const <Widget>[];
-      // 가로 화면에서는 블럭을 나란히 세우는 대신 각 블럭 **안**을 두 단으로
-      // 가른다(S15P11B209-996). HTP는 쓰지 않는다 — 이야기를 따라 내려가는
-      // 세로 스크롤이라 두 단으로 가르면 읽는 줄기가 끊긴다.
-      final wideBlocks = isWide && !isHtp;
+      // 가로 화면에서는 넓은 폭(1120)을 쓰고 각 블럭 **안**을 두 단으로
+      // 가른다(S15P11B209-996). HTP 도 같은 폭·단 배치로 맞춘다 — 예전에는
+      // 좁은 폭(720)으로 가운데 정렬했으나, 그림일기와 크기·배치가 달라 보여
+      // 그림일기 기준으로 통일한다(사용자 결정 2026-08-07).
+      final wideBlocks = isWide;
       final sections = <Widget>[
         _ReportHero(
           key: const ValueKey('report-hero'),
           report: report,
           // 비진단 안내(§1)와 활동 개요(§2)는 "이 리포트를 어떻게 읽는가"를
           // 말하므로 읽기 시작하는 자리인 표지 안에 둔다(S15P11B209-996의 방식).
-          activity: isHtp
-              ? _htpOverviewContent(report)
-              : _activityOverviewContent(
-                  report,
-                  imageFetcher,
-                  activityRepository,
-                ),
+          // 표지 레이아웃 문법은 HTP·그림일기 동일(그림일기 개요). 단 HTP 는
+          // 그림을 싣지 않는다 — 세 장 중 한 장만 미리 보이면 혼란스럽고 아래
+          // 주제 이야기와 중복된다(사용자 결정 2026-08-07).
+          activity: _activityOverviewContent(
+            report,
+            imageFetcher,
+            activityRepository,
+            isHtp: isHtp,
+          ),
         ),
         if (isHtp) ...[
           // 이야기 순서(S15P11B209-1004): 표지(활동 개요 포함) → 그림 이야기
@@ -561,10 +568,16 @@ class _ReportContent extends StatelessWidget {
           // 아이의 말이 해석의 최상위 근거다(CLAUDE.md 2절) — 해석 바로 앞에 둔다.
           ?_childExpressionSection(report, playbackController),
           ?_interpretationsSection(report, isHtp: true),
-          ?_observedFeaturesSection(report),
-          ..._parentGuideSections(report),
-          if (htpDetailSections.isNotEmpty)
-            _ReportDetailsGroup(sections: htpDetailSections),
+          // 관찰·가이드는 그림일기처럼 좌우 2단으로(사용자 결정 2026-08-07).
+          ?_htpObservedGuidesSection(report),
+          // 그림일기 V2 는 접이식이 없다. HTP 부록(수치·기록·구형 가이드)도
+          // 접지 않고 펼쳐 인라인으로 둔다(사용자 결정 2026-08-07).
+          ...htpDetailSections,
+        ] else if (report.diaryInsights?.hasContent ?? false) ...[
+          // 그림일기 리포트 V2 — 서버가 근거와 대조해 구조화한 결과가 있을 때만
+          // 쓴다. 아이 이야기 중심 본문이 기존 관찰·경향 섹션을 대체한다
+          // (diaryInsights 계약: 값이 없으면 아래 기존 화면을 그대로 쓴다).
+          DiaryReportV2Body(insights: report.diaryInsights!),
         ] else ...[
           // 활동 요약은 표지 안으로 들어갔다(S15P11B209-996).
           ?_observationsSection(report),
@@ -598,7 +611,11 @@ class _ReportContent extends StatelessWidget {
                       // 스스로 배경을 가진 구획(해석·부록·빈 안내)은 이미
                       // 자기 경계가 있다. 거기에 선까지 그으면 한 장 안에서
                       // 두 번 나뉜 것처럼 보인다.
-                      if (!_hasOwnShell(sections[index - 1]) &&
+                      //
+                      // HTP 는 구분선을 쓰지 않고 여백만으로 나눈다 — 그림일기 V2
+                      // 문법에 맞춘다(사용자 결정 2026-08-07).
+                      if (!isHtp &&
+                          !_hasOwnShell(sections[index - 1]) &&
                           !_hasOwnShell(section)) ...[
                         const Divider(height: 1, color: AppColors.outline),
                         const SizedBox(height: AppSpacing.lg),
@@ -619,11 +636,10 @@ class _ReportContent extends StatelessWidget {
 /// 한 장 안에서 이 구획이 **자기 배경**을 갖는지.
 ///
 /// 한 장 문법에서는 대부분의 구획이 배경 없이 제목만으로 나뉘므로 구분선이
-/// 필요하다. 배경을 가진 소수(해석 카드 구획·접이식 부록·빈 데이터 안내)는
-/// 이미 경계가 보이므로 앞뒤 구분선을 생략한다.
+/// 필요하다. 배경을 가진 소수(해석 카드 구획·빈 데이터 안내)는 이미 경계가
+/// 보이므로 앞뒤 구분선을 생략한다.
 bool _hasOwnShell(Widget section) =>
     section is _ReportCard ||
-    section is _ReportDetailsGroup ||
     (section is _ReportSection && !section.flat);
 
 const Widget _noObservationsCard = _ReportCard(
@@ -1066,64 +1082,7 @@ class _ReportSingleImagePreview extends StatelessWidget {
 // 쓰고, 경고/위험 아이콘·문구는 쓰지 않는다.
 // ─────────────────────────────────────────────────────────────────────────
 
-/// §2 이번 활동 개요 — HTP 표지 **안에** 들어가는 내용만 돌려준다
-/// (S15P11B209-1004).
-///
-/// 예전에는 '한눈에 보는 이번 활동'이라는 노란 카드가 표지 바로 아래 따로
-/// 붙어 있었다. 리포트를 펼치면 표지와 개요가 두 장으로 갈려, 정작 첫 화면에서
-/// 읽히는 것은 "무슨 활동이었나"가 아니라 카드 두 개였다. 996이 그림일기에서
-/// 한 것과 같이 표지 안으로 넣어 표지 자체가 이야기의 문이 되게 한다.
-///
-/// 그림일기와 달리 그림을 함께 싣지 않는다 — HTP의 그림은 세 장이라 여기서
-/// 한 장만 미리 보여주면 어느 그림인지 되레 헷갈린다. 세 장은 아래 주제
-/// 이야기가 한 장씩 맡는다.
-Widget? _htpOverviewContent(ReportDetailDto report) {
-  final session = report.drawingSession;
-  final emotions = report.childExpression?.selectedEmotions ?? const [];
-  final lines = <Widget>[
-    if (session?.title case final title?)
-      _InfoLine(label: '활동 이름', value: title),
-    // 세션의 표시 이름이 없으면 계약 §2 최상위 activityType을 한국어 라벨로
-    // 바꿔 쓴다. 둘 다 없으면 줄 자체가 빠진다.
-    if ((session?.drawingTypeName ??
-            session?.drawingTypeCode ??
-            _activityTypeLabel(report.activityType))
-        case final type?)
-      _InfoLine(label: '활동 유형', value: type),
-    if (session?.inputMethod case final inputMethod?)
-      _InfoLine(label: '입력 방식', value: _inputMethodLabel(inputMethod)),
-    if (formatActivityDuration(session?.durationMs) case final duration?)
-      _InfoLine(label: '활동 시간', value: duration),
-    if (session?.completedAt case final completedAt?)
-      _InfoLine(label: '완료일', value: _date(completedAt)),
-  ];
-  if (lines.isEmpty && emotions.isEmpty) return null;
-  return KeyedSubtree(
-    key: const ValueKey('report-activity-info'),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        ...lines,
-        if (emotions.isNotEmpty) ...[
-          const SizedBox(height: AppSpacing.xxs),
-          const Text('아이가 선택한 감정', style: TextStyle(color: AppColors.inkMuted)),
-          const SizedBox(height: AppSpacing.xs),
-          Wrap(
-            spacing: AppSpacing.xs,
-            runSpacing: AppSpacing.xs,
-            children: [
-              for (final emotion in emotions)
-                Chip(label: Text(_emotionLabel(emotion))),
-            ],
-          ),
-        ],
-      ],
-    ),
-  );
-}
-
-/// 그림일기·자유 그림의 활동 요약 — 표지 안에 들어갈 내용만 돌려준다.
+/// 활동 요약 — 표지 안에 들어갈 내용만 돌려준다.
 ///
 /// 활동 정보(§2)와 완성 그림(§11-4)이 따로 놓여 있으면 보호자가 "무엇을
 /// 그렸나"와 "어떤 활동이었나"를 두 블럭에서 나눠 읽어야 했다. 그림을 왼쪽에
@@ -1132,11 +1091,17 @@ Widget? _htpOverviewContent(ReportDetailDto report) {
 ///
 /// 대화 요약 한 줄은 그림이 무엇인지 설명하는 문장이라 그림 바로 아래에 붙인다
 /// — 예전 '대화 요약' 블럭은 이 한 줄만 남기고 없앴다.
+///
+/// [isHtp]이면 표지에 그림을 싣지 않고 활동 정보만 세로로 둔다(사용자 결정
+/// 2026-08-07). HTP의 그림은 세 장이라, 표지에 한 장만 미리 보여주면 어느
+/// 그림인지 되레 헷갈리고 아래 '집·나무·사람 이야기' 카드와 중복된다. 표지의
+/// 레이아웃 문법(그림+정보 나란히)은 그림일기와 같게 두되 그림만 뺀다.
 Widget? _activityOverviewContent(
   ReportDetailDto report,
   ImageByteFetcher imageFetcher,
-  ActivityRepository? activityRepository,
-) {
+  ActivityRepository? activityRepository, {
+  bool isHtp = false,
+}) {
   final session = report.drawingSession;
   final emotions = report.childExpression?.selectedEmotions ?? const [];
   final lines = <Widget>[
@@ -1152,6 +1117,38 @@ Widget? _activityOverviewContent(
     if (session?.inputMethod case final inputMethod?)
       _InfoLine(label: '입력 방식', value: _inputMethodLabel(inputMethod)),
   ];
+  final facts = Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      ...lines,
+      if (emotions.isNotEmpty) ...[
+        const SizedBox(height: AppSpacing.xxs),
+        const Text('아이가 선택한 감정', style: TextStyle(color: AppColors.inkMuted)),
+        const SizedBox(height: AppSpacing.xs),
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
+          children: [
+            for (final emotion in emotions)
+              Chip(label: Text(_emotionLabel(emotion))),
+          ],
+        ),
+      ],
+    ],
+  );
+
+  // HTP 표지는 그림을 싣지 않는다 — 세 장 중 한 장만 미리 보이면 혼란스럽고
+  // 아래 주제 이야기와 중복된다. 정보만 세로로 둔다(사용자 결정 2026-08-07).
+  if (isHtp) {
+    if (lines.isEmpty && emotions.isEmpty) return null;
+    return KeyedSubtree(
+      key: const ValueKey('report-activity-info'),
+      child: facts,
+    );
+  }
+
+  // 그림일기·자유 그림은 그림을 함께 싣는다(이미지가 없으면 placeholder).
   final imageUrl =
       report.drawing?.finalImageUrl ?? report.drawing?.thumbnailUrl;
   final hasImage = imageUrl != null || report.subjectDrawings.isNotEmpty;
@@ -1177,26 +1174,6 @@ Widget? _activityOverviewContent(
             height: 1.45,
             fontSize: 13,
           ),
-        ),
-      ],
-    ],
-  );
-  final facts = Column(
-    crossAxisAlignment: CrossAxisAlignment.start,
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      ...lines,
-      if (emotions.isNotEmpty) ...[
-        const SizedBox(height: AppSpacing.xxs),
-        const Text('아이가 선택한 감정', style: TextStyle(color: AppColors.inkMuted)),
-        const SizedBox(height: AppSpacing.xs),
-        Wrap(
-          spacing: AppSpacing.xs,
-          runSpacing: AppSpacing.xs,
-          children: [
-            for (final emotion in emotions)
-              Chip(label: Text(_emotionLabel(emotion))),
-          ],
         ),
       ],
     ],
@@ -1294,8 +1271,10 @@ Widget? _interpretationsSection(ReportDetailDto report, {bool isHtp = false}) {
       title: isHtp ? '함께 살펴보면 좋을 이야기' : '주요 심리 경향',
       backgroundColor: AppColors.lavenderSoft,
       accentColor: AppColors.lavender,
-      // 비어 있어도 "이 자리가 리포트의 중심"이라는 신호는 같아야 한다.
-      emphasized: true,
+      // HTP 를 그림일기 V2 문법에 맞춘다(사용자 결정 2026-08-07). 그림일기는
+      // 해석을 강조 카드가 아니라 flat 라벤더 섹션으로 두므로 HTP 도 같게 한다.
+      flat: isHtp,
+      emphasized: !isHtp,
       children: _emptyInterpretationNotice,
     );
   }
@@ -1308,9 +1287,10 @@ Widget? _interpretationsSection(ReportDetailDto report, {bool isHtp = false}) {
     title: isHtp ? '함께 살펴보면 좋을 이야기' : '주요 심리 경향',
     backgroundColor: AppColors.lavenderSoft,
     accentColor: AppColors.lavender,
-    // HTP 리포트에서 가장 무겁게 읽혀야 하는 섹션(S15P11B209-1004). 이야기를
-    // 따라오다 도달하는 자리라 시각적으로도 도착점처럼 보여야 한다.
-    emphasized: true,
+    // HTP 를 그림일기 V2 문법에 맞춘다(사용자 결정 2026-08-07). 그림일기는
+    // 해석을 강조 카드가 아니라 flat 라벤더 섹션으로 두므로 HTP 도 같게 한다.
+    flat: isHtp,
+    emphasized: !isHtp,
     children: [
       for (final (index, interpretation) in interpretations.indexed) ...[
         if (index > 0) const SizedBox(height: AppSpacing.md),
@@ -1663,27 +1643,7 @@ List<String> _linkedInterpretationTitles(
   return titles;
 }
 
-/// §2-1 "이런 모습이 보였어요" — AI 자체 검토를 통과해 보호자에게 열린 관찰
-/// 특징만 서버가 싣는다. 화면은 중립 색·중립 문구만 쓰고, 수치·확률·내부
-/// 코드는 표시하지 않는다.
-Widget? _observedFeaturesSection(ReportDetailDto report) {
-  final features = [
-    for (final feature in report.observedFeatures)
-      if (!feature.isEmpty) feature,
-  ];
-  if (features.isEmpty) return null;
-  return _ReportSection(
-    key: const ValueKey('report-observed-features'),
-    title: '이런 모습이 보였어요',
-    accentColor: AppColors.lavender,
-    flat: true,
-    children: [
-      for (final feature in features) _ObservedFeatureTile(feature: feature),
-    ],
-  );
-}
-
-/// 그림일기·자유 그림의 통합 "이런 모습이 보였어요"(S15P11B209-996).
+/// 통합 "이런 모습이 보였어요"(S15P11B209-996).
 ///
 /// 관찰 특징(§2-1)과 심리 경향(§3)은 둘 다 "아이에게서 무엇이 보였나"를 말한다.
 /// 카드가 나뉘어 있으면 보호자가 관찰과 해석을 별개의 이야기로 읽게 되는데,
@@ -1757,6 +1717,47 @@ Widget? _observationsSection(ReportDetailDto report) {
   ];
   return _ReportSection(
     key: const ValueKey('report-observed-features'),
+    title: '이런 모습이 보였어요',
+    accentColor: AppColors.lavender,
+    flat: true,
+    children: [_BlockColumns(left: observed, right: guides)],
+  );
+}
+
+/// HTP 관찰·가이드 좌우 2단(사용자 결정 2026-08-07 — 그림일기 배치에 맞춤).
+///
+/// 그림일기 [_observationsSection]과 같은 좌우 2단(양쪽 텍스트) 배치를 HTP 에도
+/// 준다. 해석은 HTP 에서 앞선 별도 섹션([_interpretationsSection])으로 나오므로
+/// 여기 왼쪽에는 관찰만, 오른쪽에는 보호자 가이드를 둔다. 좁은 화면에서는
+/// [_BlockColumns]가 자동으로 위·아래로 쌓는다.
+Widget? _htpObservedGuidesSection(ReportDetailDto report) {
+  final features = [
+    for (final feature in report.observedFeatures)
+      if (!feature.isEmpty) feature,
+  ];
+  final guideGroups = _guideGroups(report);
+  if (features.isEmpty && guideGroups.isEmpty) return null;
+  final observed = <Widget>[
+    for (final feature in features) _ObservedFeatureTile(feature: feature),
+  ];
+  final guides = <Widget>[
+    for (final (index, group) in guideGroups.indexed) ...[
+      if (index > 0) const SizedBox(height: AppSpacing.md),
+      Semantics(
+        header: true,
+        child: Text(
+          group.title,
+          key: ValueKey('report-parent-guide-${group.code}'),
+          style: _groupTitleStyle,
+        ),
+      ),
+      const SizedBox(height: AppSpacing.xs),
+      for (final (order, item) in group.items.indexed)
+        _NumberedBullet(number: order + 1, title: item),
+    ],
+  ];
+  return _ReportSection(
+    key: const ValueKey('report-htp-observed-guides'),
     title: '이런 모습이 보였어요',
     accentColor: AppColors.lavender,
     flat: true,
@@ -1989,38 +1990,6 @@ List<({String code, String title, List<String> items})> _guideGroups(
   ];
 }
 
-/// §8·§9·§10 보호자 가이드 — parentGuides를 guideType별 섹션으로 나눈다.
-/// HTP 전용이다. 그림일기·자유 그림은 [_parentGuideSection]으로 합쳐 보여준다.
-List<Widget> _parentGuideSections(ReportDetailDto report) => [
-  for (final guide in report.orderedParentGuides)
-    _ReportSection(
-      key: ValueKey('report-parent-guide-${guide.guideType ?? 'UNKNOWN'}'),
-      title: _guideTitles[guide.guideType] ?? '보호자 가이드',
-      accentColor: AppColors.leaf,
-      flat: true,
-      children: [
-        for (final (index, item) in guide.items.indexed)
-          _NumberedBullet(number: index + 1, title: item),
-      ],
-    ),
-];
-
-/// 구형 응답 호환 — parentGuides가 없을 때 guardianConversationGuide 섹션.
-Widget? _legacyGuideSection(ReportDetailDto report) {
-  final guide = report.guardianConversationGuide;
-  if (guide.isEmpty) return null;
-  return _ReportSection(
-    key: const ValueKey('report-conversation-guide'),
-    title: '보호자 대화 가이드',
-    accentColor: AppColors.leaf,
-    // 접이식 부록 안이다 — 상자 안 상자를 만들지 않는다.
-    flat: true,
-    children: [
-      for (final (index, question) in guide.indexed)
-        _NumberedBullet(number: index + 1, title: question),
-    ],
-  );
-}
 
 String? _secToDuration(int? seconds) =>
     seconds == null ? null : formatActivityDuration(seconds * 1000);
@@ -2719,73 +2688,6 @@ class _ReportSection extends StatelessWidget {
       child: body,
     );
   }
-}
-
-/// HTP 비인사이트 층을 하나로 묶는 접이식 카드(S15P11B209-1004).
-///
-/// 안에 든 것은 해석이 아니라 **근거·기록**이다 — 대화 수치, 그리는 동안의
-/// 활동 기록, 구형 대화 가이드. 보호자가 필요할 때 열어보면 되는 자료라 기본은
-/// 접어 두고, 인사이트 섹션들보다 시각적으로 가장 가볍게(그림자 없음·중립 배경·
-/// 작은 회색 제목) 만든다.
-///
-/// **HTP 전용이다.** 그림일기 한 장 경로(S15P11B209-996)는 접이식을 쓰지 않는다
-/// — 한 장에 훑는 구조 안에 접힘이 들어가면 그 성격이 깨진다(사용자 결정
-/// 2026-08-07).
-///
-/// `maintainState`는 기본값(false)을 쓴다 — 접힌 동안에는 안의 섹션을 아예
-/// 만들지 않아 화면·시맨틱스·빌드 비용에서 모두 빠진다.
-class _ReportDetailsGroup extends StatelessWidget {
-  const _ReportDetailsGroup({required this.sections});
-
-  final List<Widget> sections;
-
-  @override
-  Widget build(BuildContext context) => Container(
-    decoration: BoxDecoration(
-      color: AppColors.surfaceSoft,
-      borderRadius: BorderRadius.circular(AppRadius.lg),
-      border: Border.all(color: AppColors.outline),
-    ),
-    clipBehavior: Clip.antiAlias,
-    child: Theme(
-      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
-      child: ExpansionTile(
-        key: const ValueKey('report-details-expansion'),
-        shape: const Border(),
-        collapsedShape: const Border(),
-        tilePadding: const EdgeInsets.symmetric(
-          horizontal: AppSpacing.md,
-          vertical: AppSpacing.xs,
-        ),
-        childrenPadding: const EdgeInsets.fromLTRB(
-          AppSpacing.sm,
-          0,
-          AppSpacing.sm,
-          AppSpacing.md,
-        ),
-        expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
-        title: const Text(
-          '활동 기록 자세히 보기',
-          style: TextStyle(
-            color: AppColors.inkMuted,
-            fontSize: 16,
-            height: 1.35,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        subtitle: const Text(
-          '대화 수치와 그리는 동안의 기록이에요.',
-          style: TextStyle(color: AppColors.inkMuted, height: 1.4),
-        ),
-        children: [
-          for (final (index, section) in sections.indexed) ...[
-            if (index > 0) const SizedBox(height: AppSpacing.md),
-            section,
-          ],
-        ],
-      ),
-    ),
-  );
 }
 
 class _InfoLine extends StatelessWidget {
