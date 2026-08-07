@@ -65,6 +65,8 @@ def run_layer_a() -> list[tuple[str, list[Finding]]]:
             found.append(
                 checks.check_subject_pinned(system, _SUBJECT_KO[req.drawing_subject])
             )
+        # 아이 정정을 운영 코드가 어떻게 읽었는지는 GMS 없이도 확정적으로 볼 수 있다(999).
+        found += checks.check_correction_parse(case)
         results.append((case.id, found))
 
     for case in cases.REPORT_CASES:

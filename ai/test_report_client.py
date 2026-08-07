@@ -3190,6 +3190,46 @@ class SelfReviewPromptTest(unittest.TestCase):
     def test_child_utterances_are_not_echoed_into_notes(self):
         self.assertIn("아이의 말이나 개인적인 내용을 그대로 옮겨 적지 마", self.text)
 
+    def test_imagined_story_written_as_fact_is_catchable(self):
+        """상상한 이야기를 있었던 일로 적은 문장 (S15P11B209-999).
+
+        대화 프롬프트가 실제/상상 확인을 "반드시 묻지 않는다"로 바꾸면서, 모르는 채로 넘어온
+        이야기가 정상 경로가 됐다. 초안이 그걸 사실로 적어도 기존 여섯 코드가 가리키는 곳이
+        없었다 — 코드를 늘리지 않고 NO_EVIDENCE 에 귀속시킨다.
+        """
+        self.assertIn("상상한 이야기로 말한 것을 실제로 있었던 일처럼 적은 문장", self.text)
+
+    def test_unstated_time_is_catchable(self):
+        """활동을 한 날짜와 그림 속 일이 일어난 때는 다르다 — OVERREACH 쪽이다."""
+        self.assertIn("아이가 말하지 않은 시점을 정해 적은 문장", self.text)
+
+
+class DiaryRealityAndTimeRulesTest(unittest.TestCase):
+    """그림일기 리포트가 실제/상상·시점을 단정하지 않는다 (S15P11B209-999).
+
+    conversations_diary 4.1.0이 "실제 경험인지 상상인지 반드시 묻지 않는다"로 바뀌었다.
+    아이에게는 그게 맞지만, 리포트 쪽에 지시가 없으면 모델은 **모르는 것을 있었던 일로 적는다.**
+    두 프롬프트가 같은 축을 반대로 다루면 대화에서 지킨 것이 리포트에서 무너진다.
+    """
+
+    def setUp(self):
+        self.text = prompts_registry.load("report_diary")
+
+    def test_unknown_reality_is_left_unknown(self):
+        self.assertIn("둘 중 하나로 정하지 마", self.text)
+
+    def test_imagined_story_is_recorded_as_a_told_story(self):
+        self.assertIn("실제로 있었던 일처럼 적지 마", self.text)
+
+    def test_time_is_not_invented(self):
+        self.assertIn("시점을 말하지 않았으면", self.text)
+        self.assertIn("활동을 한 날짜와 그림 속 일이 일어난 때는 다르다", self.text)
+
+    def test_htp_prompt_is_untouched(self):
+        # 이 규칙은 자유 그림에만 붙인다. HTP는 주제가 정해진 활동이라 축이 다르다.
+        htp = prompts_registry.load("report_htp")
+        self.assertNotIn("상상한 이야기", htp)
+
 
 # ── 주제별 관찰 (875 §5) ─────────────────────────────────────────
 def _htp_subject(subject, description="집이 가운데에 크게 그려져 있어요.", **overrides):
