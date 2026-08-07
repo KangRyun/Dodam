@@ -429,7 +429,9 @@ class DiaryReportBuilderTest(unittest.TestCase):
 
         insights = diary_report_v2.build_diary_insights(raw, req, vision_available=True)
 
-        self.assertEqual(insights.session_observations, [])
+        # 관찰이 빠지고 나면 근거로 검증된 구조가 하나도 남지 않는다 → V2 자체를 열지 않는다.
+        #   아이 발화 목록은 요청 문답에서 그대로 파생돼 늘 채워지므로 '남은 내용'으로 세지 않는다.
+        self.assertIsNone(insights)
 
     def test_raw_evidence_carries_question_elicitation_context(self):
         import diary_report_v2
@@ -818,6 +820,69 @@ class ReportClientDiaryV2IntegrationTest(unittest.TestCase):
             result = report_client.generate(_diary_request(), model="m")
 
         self.assertEqual(result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT)
+
+    def test_generic_listening_tip_drops_only_the_tip(self):
+        """검토기가 듣기 안내 한 줄을 걸어도 이야기는 남아야 한다.
+
+        2026-08-07 실호출에서 이것 때문에 V2 가 3/3 모두 꺼졌다. 검토기가 optional 한 줄인
+        listeningTip 만 GENERIC_GUIDANCE 로 걸었는데, 구 코드가 핵심 이야기·흐름·관찰·질문을
+        통째로 버렸다. 검토기는 문장을 고치지 않고 **문제가 있는 항목만** 빼야 한다.
+        """
+        replies = [
+            _generation_payload(),
+            json.dumps(
+                {
+                    "findings": [
+                        {
+                            "target": "diary.listeningTip",
+                            "issue": "GENERIC_GUIDANCE",
+                            "note": "x",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+        ]
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = (
+            lambda **kwargs: _fake_response(replies.pop(0))
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(_diary_request(), model="m")
+
+        self.assertIsNotNone(result.diary_insights)
+        self.assertIsNone(result.diary_insights.listening_tip)
+        self.assertTrue(result.diary_insights.narrative_flow)
+
+    def test_flagged_flow_step_drops_only_that_step(self):
+        """흐름 한 단계가 걸리면 그 단계만 빠진다."""
+        payload = json.loads(_generation_payload())
+        step_count = len(payload["diarySignals"]["narrativeFlow"])
+        self.assertGreater(step_count, 1, "이 검증은 단계가 둘 이상일 때만 의미가 있다")
+        replies = [
+            json.dumps(payload, ensure_ascii=False),
+            json.dumps(
+                {
+                    "findings": [
+                        {
+                            "target": "diary.flow.0",
+                            "issue": "TIME_SCOPE_OVERCLAIM",
+                            "note": "x",
+                        }
+                    ]
+                },
+                ensure_ascii=False,
+            ),
+        ]
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.side_effect = (
+            lambda **kwargs: _fake_response(replies.pop(0))
+        )
+        with mock.patch.object(report_client, "get_client", return_value=fake_client):
+            result = report_client.generate(_diary_request(), model="m")
+
+        self.assertIsNotNone(result.diary_insights)
+        self.assertEqual(len(result.diary_insights.narrative_flow), step_count - 1)
 
 
 if __name__ == "__main__":

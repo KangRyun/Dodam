@@ -544,11 +544,14 @@ def build_diary_insights(
     # 새 FE는 diaryInsights 존재 여부로 V2 화면을 선택할 수 있다. 원자료나 검증된
     # 신호가 하나도 없는데 dataQuality 기본값만 담긴 객체를 보내면 빈 V2 화면이 열리므로
     # 의미 있는 내용이 없으면 레거시 화면으로 폴백하도록 None을 반환한다.
+    # ⚠️ child_voice 는 세지 않는다. 그 목록은 모델이 만든 것이 아니라 **요청의 문답에서 그대로
+    #    파생**되므로 문답이 하나라도 있으면 언제나 채워진다. 세는 순간 이 방어가 늘 참이 되어
+    #    "빈 V2 를 만들지 않는다"가 무력해진다 — 2026-08-07 실호출에서 핵심 이야기도 흐름도 없이
+    #    발화 목록만 있는 V2 가 실제로 열렸다. 근거로 검증된 구조가 하나는 있어야 한다.
     if not any(
         (
             snapshot is not None,
             bool(flow),
-            bool(child_voice),
             bool(observations),
             bool(questions),
         )

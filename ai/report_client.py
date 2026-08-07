@@ -1910,12 +1910,32 @@ def _apply_findings(
             for index, question in enumerate(diary.caregiver_questions)
             if f"diary.question.{index}" not in flagged
         ]
-        if any(
-            target == "diary.story"
-            or target == "diary.listeningTip"
-            or target.startswith("diary.flow.")
-            for target in flagged
+        # 걸린 항목만 뺀다 — 검토기는 문장을 고치지 않고 문제가 있는 항목만 지적한다.
+        #   ⚠️ 구 코드는 listeningTip·flow 가 걸려도 V2 를 통째로 버렸다. 2026-08-07 실호출에서
+        #      검토기가 **optional 한 줄인 listeningTip 하나만** GENERIC_GUIDANCE 로 걸었는데
+        #      핵심 이야기·흐름 5단계·관찰 1개·질문 2개가 함께 사라졌다(3/3). V2 가 한 번도
+        #      켜지지 않는 상태였고, 단위 테스트는 그 조합을 재지 않아 조용히 지나갔다.
+        if "diary.listeningTip" in flagged:
+            diary.listening_tip = None
+        diary.narrative_flow = [
+            step
+            for index, step in enumerate(diary.narrative_flow)
+            if f"diary.flow.{index}" not in flagged
+        ]
+        # 핵심 이야기는 다르다. 이야기가 현실 붕괴·시점 과장으로 걸리면 그 이야기를 나눠 적은
+        #   흐름과 관찰도 같은 오염을 물려받는다 — 뼈대가 무너지면 통째로 접고 레거시로 간다.
+        if "diary.story" in flagged:
+            result.diary_insights = None
+        elif not any(
+            (
+                diary.story_snapshot is not None,
+                diary.narrative_flow,
+                diary.session_observations,
+                diary.caregiver_questions,
+            )
         ):
+            # 남은 것이 없으면 비운다 — 판단 기준은 build_diary_insights 와 같다.
+            #   듣기 안내 한 줄만 남은 V2 화면은 레거시 화면보다 정보가 적다.
             result.diary_insights = None
 
     contained_prefixes = (

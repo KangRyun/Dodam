@@ -305,10 +305,12 @@ final class DiaryInsightsDto {
   ///
   /// 서버가 근거 부족이면 아예 `null` 을 주지만, 듣기 안내 한 줄만 남는 경우까지
   /// V2 화면을 여는 것은 의미가 없다 — 그때는 기존 화면이 더 많은 정보를 준다.
+  ///
+  /// `childVoiceItems` 는 세지 않는다. 그 목록은 서버가 요청의 문답에서 그대로
+  /// 파생하므로 문답이 있으면 언제나 채워진다 — 세면 이 판단이 늘 참이 된다.
   bool get hasContent =>
       storySnapshot != null ||
       narrativeFlow.isNotEmpty ||
-      childVoiceItems.isNotEmpty ||
       sessionObservations.isNotEmpty ||
       caregiverQuestions.isNotEmpty;
 }

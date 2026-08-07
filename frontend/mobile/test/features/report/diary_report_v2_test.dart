@@ -84,6 +84,18 @@ void main() {
     expect(tipOnly.hasContent, isFalse);
   });
 
+  test('아이 발화만으로는 V2 를 열지 않는다', () {
+    // childVoiceItems 는 서버가 문답에서 그대로 파생한다 — 문답이 있으면 언제나 채워지므로
+    //   이것까지 세면 빈 V2 방지 장치가 늘 참이 되어 무력해진다.
+    const voicesOnly = DiaryInsightsDto(
+      childVoiceItems: [
+        DiaryChildVoiceDto(text: '응', elicitationType: 'YES_NO'),
+      ],
+    );
+
+    expect(voicesOnly.hasContent, isFalse);
+  });
+
   test('모르는 코드는 사용자 문구로 지어내지 않는다', () {
     expect(diaryRealityLabel('SOMETHING_NEW'), isNull);
     expect(diaryTimeScopeLabel('SOMETHING_NEW'), isNull);
