@@ -1,0 +1,55 @@
+// 인덱스 + TTL (S15P11B209-634)
+//
+// ★ TTL 인덱스가 이 프로젝트에서 갖는 의미
+//   "보관 기간이 지나면 자동 삭제"(가드레일 9절)를 **DB 가 강제**하게 만드는 장치다.
+//   앱 코드나 크론에 맡기면 "삭제 잡이 안 돌았는데 아무도 몰랐다"가 가능해진다.
+//   mongod 가 60초마다 백그라운드로 만료 문서를 지운다 — 앱이 빠져도 계속 동작한다.
+//
+// ⚠️ expireAfterSeconds: 0 + 문서의 expireAt 필드 조합으로 쓴다.
+//   "필드에 적힌 시각이 지나면 삭제"라는 뜻이다. 보관 기간이 데이터 종류마다 다르고
+//   동의 철회 시 앞당겨야 할 수도 있어, 기간을 인덱스에 박지 않고 **문서마다** 들고 간다.
+//   (expireAfterSeconds 에 기간을 박으면 정책이 바뀔 때 인덱스를 다시 만들어야 한다.)
+//
+// ⚠️ TTL 은 "언젠가 지운다"이지 즉시가 아니다(최대 60초 + 부하에 따라 더).
+//   동의 철회·회원 탈퇴는 TTL 을 기다리지 않고 deleteMany({ childId }) 를 즉시 실행한다
+//   — 그래서 childId 인덱스가 필요하다. 없으면 전체 스캔이 된다.
+const dbName = process.env.MONGO_INITDB_DATABASE;
+db = db.getSiblingDB(dbName);
+
+// ── strokes: 배치 1건 = 문서 1개 (좌표=문서 금지 — ADR 0001)
+db.createCollection('strokes');
+db.strokes.createIndex(
+  { sessionId: 1, batchSeq: 1 },
+  { unique: true, name: 'session_batch_unique' },
+);
+// unique 인 이유: 네트워크가 불안정한 태블릿에서 같은 배치를 다시 보내는 건 정상 동작이다.
+//   재전송을 앱이 아니라 DB 제약으로 막아, 중복 저장이 구조적으로 불가능하게 한다.
+
+db.strokes.createIndex({ childId: 1 }, { name: 'child_lookup' });
+db.strokes.createIndex(
+  { expireAt: 1 },
+  { expireAfterSeconds: 0, name: 'ttl_expire_at' },
+);
+
+// ── conversation_events: 대화 **행동 메타데이터** (원문 아님)
+//   2026-08-06 S15P11B209-973 에서 적재를 구현하며 확정했다. 365 시점의 "대화 로그 원문"
+//   이라는 이름은 **틀렸다** — 그렇게 읽으면 다음 사람이 여기에 발화를 넣는다.
+//
+//   들어가는 것: 무엇을 했는가. 이벤트 종류(QUESTION_SHOWN·ANSWER_VOICE·ANSWER_CHIP·
+//     SKIP·SESSION_END) · 응답 지연 · 녹음 길이 · 선택한 칩 **개수** · 종료 사유 · 순번.
+//   들어가지 않는 것: **무슨 말을 했는가.** 음성 전사·답변 텍스트·질문 문장 원문은
+//     이 컬렉션에 절대 넣지 않는다 (CLAUDE.md 9절 — 아동 민감정보 최소 수집).
+//
+//   대화 원문의 단일 소스는 MySQL conversation_messages 다. 이중 저장 금지(ADR 0001 §결과).
+//   ⚠️ TTL(expireAt)은 "언젠가"지 즉시가 아니다. 동의 철회·탈퇴 시에는 앱이
+//     child_lookup 인덱스로 즉시 삭제한다(ConversationEventDeletionService) —
+//     그 즉시 삭제 경로가 이 인덱스의 존재 이유다.
+db.createCollection('conversation_events');
+db.conversation_events.createIndex({ sessionId: 1, seq: 1 }, { name: 'session_seq' });
+db.conversation_events.createIndex({ childId: 1 }, { name: 'child_lookup' });
+db.conversation_events.createIndex(
+  { expireAt: 1 },
+  { expireAfterSeconds: 0, name: 'ttl_expire_at' },
+);
+
+print('✅ 인덱스 생성 완료 (strokes 3 · conversation_events 3, TTL 포함)');

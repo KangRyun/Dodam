@@ -1,0 +1,46 @@
+# ============================================================================
+# /etc/cron.d/dodam-compose — 컷백(k3s → docker-compose) 기간 정기작업
+#
+# 설치:
+#   sudo install -m 644 -o root -g root infra/cron/dodam-compose.cron /etc/cron.d/dodam-compose
+#   ⚠️ 파일명에 점(.)이 있으면 cron 이 **조용히 무시한다**. 확장자 없이 dodam-compose 로 둘 것.
+#   ⚠️ 권한이 644 가 아니거나 소유자가 root 가 아니어도 무시된다(로그도 안 남는다).
+# 제거(= k3s 로 롤백할 때):
+#   sudo rm -f /etc/cron.d/dodam-compose
+#
+# ⚠️⚠️ **k8s CronJob 과 동시에 켜지 말 것.**
+#   두 벌이 같은 04:00 에 돌면 부하가 두 배인 것으로 끝나지 않는다. STAMP 형식이 같아
+#   **같은 파일명**을 두고 경쟁하고, 한쪽의 .part → mv 가 다른 쪽 산출물을 덮어쓴다.
+#   (원본 overlays/prod/cronjobs-enable.yaml 의 경고와 같은 사유 — 방향만 반대다)
+#   순서: k3s 정지 → 이 파일 설치 / 이 파일 제거 → k3s 기동.
+#
+# 로그: /var/log/dodam/*.log 에 append. 설치 전에 디렉터리를 만들 것.
+#   sudo install -d -m 750 -o root -g root /var/log/dodam
+#   journald 에도 같은 내용이 남는다 → journalctl -t dodam-db-backup
+# ============================================================================
+
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# CRON_TZ: 이 파일의 스케줄을 KST 로 해석한다. 호스트가 이미 Asia/Seoul 이지만 명시한다 —
+#   k8s CronJob 의 `timeZone: Asia/Seoul` 과 같은 역할이고, 서버 TZ 가 바뀌어도 백업 시각이
+#   9시간 밀리지 않는다(원본 db-backup 주석의 "UTC 로 해석돼 13:00 에 뜬 사건" 참조).
+CRON_TZ=Asia/Seoul
+# 메일 전송기가 없는 서버라 cron 메일은 버린다. 진단은 아래 로그 파일과 journald 로 한다.
+MAILTO=""
+
+# ── 백업 3종 (k8s CronJob db-backup · mongo-backup · minio-backup 과 동일 스케줄) ──
+# MySQL — KST 04:00
+0  4    * * *   root   /opt/dodam/cron/dodam-db-backup.sh    >> /var/log/dodam/backup.log 2>&1
+# MongoDB — KST 04:30 (MySQL 과 30분 간격: 동시 실행 시 I/O·메모리 경합)
+30 4    * * *   root   /opt/dodam/cron/dodam-mongo-backup.sh >> /var/log/dodam/backup.log 2>&1
+# MinIO — KST 00:30 · 06:30 · 12:30 · 18:30 (6시간 주기 — 재생성 불가한 아동 그림·음성)
+30 */6  * * *   root   /opt/dodam/cron/dodam-minio-backup.sh >> /var/log/dodam/backup.log 2>&1
+
+# ── TLS 갱신 (k8s CronJob certbot-renew) ────────────────────────────────────
+# 하루 2회, 정시를 피해 LE 서버 부하 집중을 피한다. 만료 30일 전이 아니면 no-op.
+17 3,15 * * *   root   /opt/dodam/cron/dodam-certbot-renew.sh >> /var/log/dodam/certbot.log 2>&1
+
+# ── 이관하지 않은 것 ────────────────────────────────────────────────────────
+# manifest-drift-check(k8s CronJob)는 **git 매니페스트와 클러스터 상태의 차이**를 감시하는
+# 잡이다. 클러스터가 없는 컷백 기간에는 감시 대상 자체가 존재하지 않으므로 이관하지 않는다.
+# 컷백 동안 이 감시가 꺼져 있다는 사실은 infra/cron/README.md §5 에 적어 두었다.
