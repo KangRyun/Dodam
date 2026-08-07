@@ -563,6 +563,8 @@ public record ObservationGenerationResult(
    * @param sessionObservations 이번 활동에서만 확인된 표현이며 0~2개다
    * @param caregiverQuestions 보호자가 그대로 이어 물을 수 있는 질문이며 0~2개다
    * @param listeningTip 이번 이야기를 들을 때의 태도 한 문장이며 없으면 {@code null}
+   * @param developmentalObservations 연령 발달 맥락과 이번 활동 관찰을 짝지은 항목이다. AI 서버가 검수 등록부와 아이 나이로 정하며
+   *     <strong>LLM 이 만들지 않는다</strong> — 맡기면 '또래보다 빠르다'가 곧바로 나온다
    * @param unknownItems 이번 활동에서 확인하지 못한 것이다. 서버가 원자료에서 정하며, 침묵 대신 이름을 돌려주기 위한 자리다 — 비어 나가면 보호자는
    *     '문제가 없었다'로 읽는다
    * @param dataQuality 근거가 무엇으로 이루어졌는지 알려 주는 구성 정보
@@ -574,6 +576,7 @@ public record ObservationGenerationResult(
       List<DiarySessionObservationDraft> sessionObservations,
       List<DiaryCaregiverQuestionDraft> caregiverQuestions,
       String listeningTip,
+      List<DiaryDevelopmentalObservationDraft> developmentalObservations,
       List<DiaryUnknownItemDraft> unknownItems,
       DiaryDataQualityDraft dataQuality) {
 
@@ -584,6 +587,8 @@ public record ObservationGenerationResult(
       sessionObservations =
           sessionObservations == null ? List.of() : List.copyOf(sessionObservations);
       caregiverQuestions = caregiverQuestions == null ? List.of() : List.copyOf(caregiverQuestions);
+      developmentalObservations =
+          developmentalObservations == null ? List.of() : List.copyOf(developmentalObservations);
     }
   }
 
@@ -723,6 +728,40 @@ public record ObservationGenerationResult(
    * @param id BE 가 발급한 식별자 그대로
    */
   public record DiaryEvidenceRefDraft(String kind, String id) {}
+
+  /**
+   * 연령 발달 맥락 관찰 한 건이다.
+   *
+   * <p>세 조각이 한 항목에 함께 있는 것이 요점이다 — <strong>연령 맥락 → 이번 활동 관찰 → 범위 고지.</strong> 맥락만 보내면 규준 설명이 되고,
+   * 관찰만 보내면 무슨 뜻인지 알 수 없으며, 범위 고지가 빠지면 한 회차가 발달 평가로 읽힌다.
+   *
+   * @param domain {@code NARRATIVE_LANGUAGE}·{@code EMOTION_EXPRESSION}·{@code
+   *     SOCIAL_UNDERSTANDING}·{@code COPING_HELP_SEEKING}·{@code SELF_REFLECTION}
+   * @param status {@code OBSERVED_THIS_SESSION}·{@code PARTIALLY_OBSERVED}·{@code NOT_ASSESSED}.
+   *     <strong>{@code NOT_ASSESSED} 는 '확인하지 않았다'이지 '못한다'가 아니다</strong> — 아이의 무응답·건너뜀·짧은 답은 발달 결함이
+   *     아니다
+   * @param ageContext 검수된 공개 자료에서 온 연령 맥락 한 줄
+   * @param observation 이번 활동에서 확인된 표현
+   * @param scopeText 범위 고지이며 화면에 항상 함께 나간다
+   * @param sourceIds 검수 출처 식별자다. <strong>비는 것이 정상이다</strong> — 나이를 모르거나 그 도메인에 검수된 한국 규준이 없으면 AI 는
+   *     규준 대신 '이번 활동에서만 살펴본다'는 문장을 보내고, 그 문장은 규준을 주장하지 않아 출처가 없다
+   * @param evidenceRefs 이번 활동 관찰의 근거 식별자
+   */
+  public record DiaryDevelopmentalObservationDraft(
+      String domain,
+      String status,
+      String ageContext,
+      String observation,
+      String scopeText,
+      List<String> sourceIds,
+      List<DiaryEvidenceRefDraft> evidenceRefs) {
+
+    /** 목록은 빈 목록으로 정규화한다. */
+    public DiaryDevelopmentalObservationDraft {
+      sourceIds = sourceIds == null ? List.of() : List.copyOf(sourceIds);
+      evidenceRefs = evidenceRefs == null ? List.of() : List.copyOf(evidenceRefs);
+    }
+  }
 
   /**
    * 이번 활동에서 확인하지 못한 것 한 건이다.

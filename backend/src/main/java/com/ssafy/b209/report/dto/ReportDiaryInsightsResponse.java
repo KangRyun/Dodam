@@ -16,6 +16,8 @@ import java.util.List;
  * @param sessionObservations 이번 활동에서만 확인된 표현이며 0~2개다
  * @param caregiverQuestions 보호자가 그대로 이어 물을 질문이며 0~2개다
  * @param listeningTip 이번 이야기를 들을 때의 태도 한 문장이며 없으면 {@code null}
+ * @param developmentalObservations 연령 발달 맥락과 이번 활동 관찰을 짝지은 항목이다. 앱은 <strong>맥락·관찰·범위 고지를 항상
+ *     함께</strong> 보여 준다 — 맥락만 떼면 규준 설명이 되고, 범위 고지를 빼면 한 회차가 발달 평가로 읽힌다
  * @param unknownItems 이번 활동에서 확인하지 못한 것이다. 카드가 비어 나가면 보호자는 '문제가 없었다'로 읽는다 — 침묵 대신 무엇을 알 수 없었는지 이름을
  *     붙여 돌려준다
  * @param dataQuality 근거가 무엇으로 이루어졌는지 알려 주는 구성 정보
@@ -27,6 +29,7 @@ public record ReportDiaryInsightsResponse(
     List<DiarySessionObservationResponse> sessionObservations,
     List<DiaryCaregiverQuestionResponse> caregiverQuestions,
     String listeningTip,
+    List<DiaryDevelopmentalObservationResponse> developmentalObservations,
     List<DiaryUnknownItemResponse> unknownItems,
     DiaryDataQualityResponse dataQuality) {
 
@@ -37,6 +40,8 @@ public record ReportDiaryInsightsResponse(
     sessionObservations =
         sessionObservations == null ? List.of() : List.copyOf(sessionObservations);
     caregiverQuestions = caregiverQuestions == null ? List.of() : List.copyOf(caregiverQuestions);
+    developmentalObservations =
+        developmentalObservations == null ? List.of() : List.copyOf(developmentalObservations);
     unknownItems = unknownItems == null ? List.of() : List.copyOf(unknownItems);
   }
 
@@ -176,6 +181,38 @@ public record ReportDiaryInsightsResponse(
    * @param id BE 가 발급한 식별자 그대로
    */
   public record DiaryEvidenceRefResponse(String kind, String id) {}
+
+  /**
+   * 연령 발달 맥락 관찰 한 건이다.
+   *
+   * <p>앱은 <strong>연령 맥락 → 이번 활동 관찰 → 범위 고지</strong> 세 조각을 항상 함께 보여 준다. 맥락만 보여 주면 규준 설명이 되고, 범위 고지를
+   * 빼면 한 회차가 발달 평가로 읽힌다.
+   *
+   * @param domain {@code NARRATIVE_LANGUAGE}·{@code EMOTION_EXPRESSION}·{@code
+   *     SOCIAL_UNDERSTANDING}·{@code COPING_HELP_SEEKING}·{@code SELF_REFLECTION}
+   * @param status {@code OBSERVED_THIS_SESSION}·{@code PARTIALLY_OBSERVED}·{@code NOT_ASSESSED}.
+   *     <strong>{@code NOT_ASSESSED} 를 '지연'으로 보여 주면 안 된다</strong> — 이번에 확인하지 않았다는 뜻이다
+   * @param ageContext 검수된 공개 자료에서 온 연령 맥락 한 줄
+   * @param observation 이번 활동에서 확인된 표현
+   * @param scopeText 범위 고지이며 화면에 항상 함께 나간다
+   * @param sourceIds 검수 출처 식별자이며 비어 있을 수 있다. 앱은 있을 때만 출처를 밝힌다 — 비었다는 것은 연령 규준을 주장하지 않는 문장이라는 뜻이다
+   * @param evidenceRefs 이번 활동 관찰의 근거 식별자
+   */
+  public record DiaryDevelopmentalObservationResponse(
+      String domain,
+      String status,
+      String ageContext,
+      String observation,
+      String scopeText,
+      List<String> sourceIds,
+      List<DiaryEvidenceRefResponse> evidenceRefs) {
+
+    /** 목록은 빈 목록으로 정규화한다. */
+    public DiaryDevelopmentalObservationResponse {
+      sourceIds = sourceIds == null ? List.of() : List.copyOf(sourceIds);
+      evidenceRefs = evidenceRefs == null ? List.of() : List.copyOf(evidenceRefs);
+    }
+  }
 
   /**
    * 이번 활동에서 확인하지 못한 것 한 건이다.

@@ -272,6 +272,71 @@ final class DiaryDataQualityDto {
   final bool visionSummaryAvailable;
 }
 
+/// 연령 발달 맥락 관찰 한 건.
+///
+/// **세 조각을 항상 함께 보여 준다** — 연령 맥락 → 이번 활동 관찰 → 범위 고지.
+/// 맥락만 떼면 규준 설명이 되고, 범위 고지를 빼면 한 회차 활동이 발달 평가로 읽힌다.
+final class DiaryDevelopmentalObservationDto {
+  const DiaryDevelopmentalObservationDto({
+    required this.domain,
+    required this.status,
+    required this.ageContext,
+    required this.observation,
+    required this.scopeText,
+    this.sourceIds = const [],
+    this.evidenceRefs = const [],
+  });
+
+  /// JSON 한 건을 읽는다.
+  factory DiaryDevelopmentalObservationDto.fromJson(
+    Map<String, dynamic> json,
+  ) => DiaryDevelopmentalObservationDto(
+    domain: json['domain'] as String? ?? '',
+    status: json['status'] as String? ?? 'NOT_ASSESSED',
+    ageContext: json['ageContext'] as String? ?? '',
+    observation: json['observation'] as String? ?? '',
+    scopeText: json['scopeText'] as String? ?? '',
+    sourceIds: _texts(json['sourceIds']),
+    evidenceRefs: _refs(json['evidenceRefs']),
+  );
+
+  /// `NARRATIVE_LANGUAGE`·`EMOTION_EXPRESSION`·`SOCIAL_UNDERSTANDING`·
+  /// `COPING_HELP_SEEKING`·`SELF_REFLECTION`.
+  final String domain;
+
+  /// `OBSERVED_THIS_SESSION`·`PARTIALLY_OBSERVED`·`NOT_ASSESSED`.
+  ///
+  /// **`NOT_ASSESSED` 를 '지연'으로 보여 주면 안 된다.** 이번에 확인하지 않았다는
+  /// 뜻이지 못한다는 뜻이 아니다 — 아이의 무응답·건너뜀·짧은 답은 발달 결함이 아니다.
+  final String status;
+
+  /// 검수된 공개 자료에서 온 연령 맥락 한 줄.
+  final String ageContext;
+
+  /// 이번 활동에서 확인된 표현.
+  final String observation;
+
+  /// 범위 고지. 항목에 항상 함께 보여 준다.
+  final String scopeText;
+
+  /// 검수 출처 식별자이며 **비어 있을 수 있다.**
+  ///
+  /// 서버는 두 종류의 맥락 문장을 보낸다 — 검수 자료에서 온 연령 규준 문장은 출처를
+  /// 달고, 나이를 모르거나 그 도메인에 검수된 규준이 없을 때 쓰는 '이번 활동에서만
+  /// 살펴본다'는 문장은 규준을 주장하지 않아 출처가 없다. 화면은 있을 때만 밝힌다.
+  final List<String> sourceIds;
+
+  /// 이번 활동 관찰의 근거.
+  final List<DiaryEvidenceRefDto> evidenceRefs;
+
+  /// 세 조각이 모두 갖춰졌는가.
+  ///
+  /// 하나라도 비면 보여 주지 않는다 — 맥락만 남으면 규준 설명이 되고, 범위 고지가
+  /// 빠지면 한 회차 활동이 발달 평가로 읽힌다.
+  bool get isDisplayable =>
+      ageContext.isNotEmpty && observation.isNotEmpty && scopeText.isNotEmpty;
+}
+
 /// 이번 활동에서 확인하지 못한 것 한 건.
 final class DiaryUnknownItemDto {
   const DiaryUnknownItemDto({required this.code, required this.text});
@@ -299,6 +364,7 @@ final class DiaryInsightsDto {
     this.sessionObservations = const [],
     this.caregiverQuestions = const [],
     this.listeningTip,
+    this.developmentalObservations = const [],
     this.unknownItems = const [],
     this.dataQuality = const DiaryDataQualityDto(),
   });
@@ -322,6 +388,10 @@ final class DiaryInsightsDto {
           DiaryCaregiverQuestionDto.fromJson,
         ),
         listeningTip: _text(json['listeningTip']),
+        developmentalObservations: _list(
+          json['developmentalObservations'],
+          DiaryDevelopmentalObservationDto.fromJson,
+        ).where((item) => item.isDisplayable).toList(growable: false),
         unknownItems: _list(json['unknownItems'], DiaryUnknownItemDto.fromJson),
         dataQuality: json['dataQuality'] is Map
             ? DiaryDataQualityDto.fromJson(
@@ -347,6 +417,12 @@ final class DiaryInsightsDto {
 
   /// 이번 이야기를 들을 때의 태도 한 문장이며 없으면 `null`.
   final String? listeningTip;
+
+  /// 연령 발달 맥락과 이번 활동 관찰을 짝지은 항목.
+  ///
+  /// 맥락·관찰·범위 고지 중 하나라도 빠진 항목은 파싱 단계에서 버린다 — 셋이 함께
+  /// 있어야만 한 회차 관찰로 읽히고, 범위 고지가 없으면 발달 판정으로 읽힌다.
+  final List<DiaryDevelopmentalObservationDto> developmentalObservations;
 
   /// 이번 활동에서 확인하지 못한 것.
   ///

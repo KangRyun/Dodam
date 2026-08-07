@@ -805,6 +805,37 @@ class DiarySessionObservation(_CamelModel):
     evidence_refs: list[EvidenceSourceRef] = Field(default_factory=list)
 
 
+class DiaryDevelopmentalObservation(_CamelModel):
+    """연령 발달 맥락 + 이번 활동에서 확인된 표현 (그림일기 4층).
+
+    구조가 곧 안전장치다 — **연령 맥락 → 이번 활동 관찰 → 범위 고지** 순서로만 나간다.
+    맥락만 있으면 규준 설명이 되고, 관찰만 있으면 무슨 뜻인지 알 수 없다.
+
+    ``status`` 가 ``NOT_ASSESSED`` 면 "확인하지 않았다"는 뜻이지 "못한다"가 아니다. 아이의
+    무응답·건너뜀·짧은 답은 발달 결함이 아니다.
+
+    ``source_ids`` 는 검수 출처 식별자이며 **비는 것이 정상이다.** 서버는 두 종류의 맥락
+    문장을 만든다 — 검수 자료에서 온 연령 규준 문장은 출처를 달고, 나이를 모르거나 그
+    도메인에 검수된 한국 규준이 없을 때 쓰는 '이번 활동에서만 살펴본다'는 문장은 규준을
+    주장하지 않아 출처가 없다. 즉 **출처 없는 규준 문장이 나가지 않는다는 보장은
+    등록부**(:mod:`developmental_context`)**가 한다.**
+    """
+
+    domain: Literal[
+        "NARRATIVE_LANGUAGE",
+        "EMOTION_EXPRESSION",
+        "SOCIAL_UNDERSTANDING",
+        "COPING_HELP_SEEKING",
+        "SELF_REFLECTION",
+    ]
+    status: Literal["OBSERVED_THIS_SESSION", "PARTIALLY_OBSERVED", "NOT_ASSESSED"]
+    age_context: str
+    observation: str
+    scope_text: str
+    source_ids: list[str] = Field(default_factory=list)
+    evidence_refs: list[EvidenceSourceRef] = Field(default_factory=list)
+
+
 class DiaryUnknownItem(_CamelModel):
     """이번 활동에서 **확인하지 못한 것**.
 
@@ -850,6 +881,9 @@ class DiaryInsights(_CamelModel):
     session_observations: list[DiarySessionObservation] = Field(default_factory=list)
     caregiver_questions: list[DiaryCaregiverQuestion] = Field(default_factory=list)
     listening_tip: str | None = None
+    developmental_observations: list[DiaryDevelopmentalObservation] = Field(
+        default_factory=list
+    )
     unknown_items: list[DiaryUnknownItem] = Field(default_factory=list)
     data_quality: DiaryDataQuality = Field(default_factory=DiaryDataQuality)
 

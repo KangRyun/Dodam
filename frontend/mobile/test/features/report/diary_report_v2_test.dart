@@ -155,6 +155,85 @@ void main() {
     expect(find.textContaining('마음은 이번에 확인하지 않았어요'), findsOneWidget);
   });
 
+  testWidgets('연령 맥락은 이번 활동 관찰·범위 고지와 함께만 보인다', (tester) async {
+    // 셋 중 하나라도 빠지면 규준 설명이나 발달 평가가 된다.
+    await _pump(
+      tester,
+      _insights(
+        developmentalObservations: const [
+          DiaryDevelopmentalObservationDto(
+            domain: 'NARRATIVE_LANGUAGE',
+            status: 'OBSERVED_THIS_SESSION',
+            ageContext: '이 시기에는 들었거나 만든 이야기를 두 사건 이상으로 이어 말하는 표현이 발달해 가요.',
+            observation: '이번 활동에서 아이는 있었던 일과 그다음 행동을 이어서 이야기했어요.',
+            scopeText: '이번 활동에서 확인된 표현이며, 전체 발달 수준을 평가한 결과가 아니에요.',
+            sourceIds: ['CDC_5Y_MILESTONES'],
+          ),
+        ],
+      ),
+    );
+
+    expect(find.text('연령에 비춰 본 이번 활동'), findsOneWidget);
+    expect(find.textContaining('두 사건 이상으로 이어 말하는'), findsOneWidget);
+    expect(find.textContaining('있었던 일과 그다음 행동을 이어서'), findsOneWidget);
+    expect(find.textContaining('전체 발달 수준을 평가한 결과가 아니에요'), findsOneWidget);
+    expect(find.text('출처 CDC_5Y_MILESTONES'), findsOneWidget);
+  });
+
+  testWidgets('확인하지 않은 도메인을 지연으로 보여 주지 않는다', (tester) async {
+    // 무응답·건너뜀은 발달 결함이 아니다. '못함'으로 옮기는 순간 아이 문제가 된다.
+    await _pump(
+      tester,
+      _insights(
+        developmentalObservations: const [
+          DiaryDevelopmentalObservationDto(
+            domain: 'SOCIAL_UNDERSTANDING',
+            status: 'NOT_ASSESSED',
+            ageContext: '함께 있던 사람의 행동이나 반응을 이야기했는지 이번 활동에서만 살펴봐요.',
+            observation: '이번 활동에서는 확인할 만한 이야기가 충분하지 않아 살펴보지 않았어요.',
+            scopeText: '이번 활동에서 확인된 표현이며, 전체 발달 수준을 평가한 결과가 아니에요.',
+          ),
+        ],
+      ),
+    );
+
+    expect(find.text('이번에는 확인 안 함'), findsOneWidget);
+    for (final word in ['지연', '느림', '부족', '못해']) {
+      expect(find.textContaining(word), findsNothing, reason: word);
+    }
+  });
+
+  test('검수 출처가 없는 맥락도 버리지 않는다', () {
+    // 나이를 모르거나 그 도메인에 규준이 없으면 서버는 규준을 주장하지 않는 문장을
+    //   보낸다 — 출처 없음을 이유로 거르면 감정·자기표현이 통째로 사라진다.
+    final parsed = DiaryInsightsDto.fromJson(const {
+      'developmentalObservations': [
+        {
+          'domain': 'EMOTION_EXPRESSION',
+          'status': 'PARTIALLY_OBSERVED',
+          'ageContext': '감정을 말이나 선택으로 표현했는지 이번 활동에서만 살펴봐요.',
+          'observation': '이번 활동에서 아이는 감정을 보기에서 골랐어요.',
+          'scopeText': '이번 활동에서 확인된 표현이며, 전체 발달 수준을 평가한 결과가 아니에요.',
+          'sourceIds': <String>[],
+        },
+        {
+          'domain': 'SELF_REFLECTION',
+          'status': 'NOT_ASSESSED',
+          'ageContext': '',
+          'observation': '이번 활동에서는 살펴보지 않았어요.',
+          'scopeText': '이번 활동에서 확인된 표현이에요.',
+        },
+      ],
+    });
+
+    // 출처가 없어도 남고, 맥락 자체가 빈 항목만 버린다.
+    expect(parsed.developmentalObservations, hasLength(1));
+    expect(
+      parsed.developmentalObservations.single.domain,
+      'EMOTION_EXPRESSION',
+    );
+  });
+
   test('모르는 주장 세기는 가장 약한 쪽으로 읽는다', () {
     expect(diaryInsightTypeLabel('SOMETHING_NEW'), '더 확인해 볼 것');
   });
@@ -164,6 +243,9 @@ void main() {
     expect(diaryTimeScopeLabel('SOMETHING_NEW'), isNull);
     expect(diaryStepLabel('SOMETHING_NEW'), '이야기');
     expect(diaryElicitationLabel('SOMETHING_NEW'), '답변');
+    expect(diaryDevelopmentDomainLabel('SOMETHING_NEW'), '이번 활동');
+    // 모르는 상태도 '못함'이 아니라 '확인 안 함'으로 읽는다.
+    expect(diaryDevelopmentStatusLabel('SOMETHING_NEW'), '이번에는 확인 안 함');
   });
 }
 
@@ -185,8 +267,10 @@ DiaryInsightsDto _insights({
   String timeScope = 'TODAY',
   DiarySessionObservationDto? observation,
   List<DiaryUnknownItemDto> unknownItems = const [],
+  List<DiaryDevelopmentalObservationDto> developmentalObservations = const [],
 }) => DiaryInsightsDto(
   unknownItems: unknownItems,
+  developmentalObservations: developmentalObservations,
   storySnapshot: DiaryStorySnapshotDto(
     headline: '수학시험에서 100점을 받은 날',
     summary: '시험에서 100점을 받고 엄마에게 자랑했어요.',

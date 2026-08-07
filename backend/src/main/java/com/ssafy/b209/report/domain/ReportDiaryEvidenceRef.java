@@ -37,6 +37,9 @@ public class ReportDiaryEvidenceRef {
   /** 보호자가 이어 갈 질문. */
   public static final String OWNER_CAREGIVER_QUESTION = "CAREGIVER_QUESTION";
 
+  /** 연령 발달 맥락 관찰 — 여기 달리는 근거는 '이번 활동에서 확인된 표현' 쪽이지 연령 맥락 문장의 출처가 아니다. */
+  public static final String OWNER_DEVELOPMENTAL_OBSERVATION = "DEVELOPMENTAL_OBSERVATION";
+
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
