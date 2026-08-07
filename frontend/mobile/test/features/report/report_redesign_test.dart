@@ -422,8 +422,9 @@ void main() {
     expect(find.textContaining('101'), findsNothing);
   });
 
-  // 그림일기는 확신도 배지를 끄므로(S15P11B209-996) 배지 규칙은 배지가 남아
-  // 있는 HTP 리포트에서 확인한다.
+  // 등급 3종을 한 번에 대는 자리라 카드가 독립돼 있는 HTP 리포트로 확인한다.
+  // 그림일기에도 배지는 붙는다(아래 '그림일기 경향 카드도 확신도 배지를
+  // 보여준다') — 활동별로 다른 것은 레이아웃이지 확신도 표기 유무가 아니다.
   testWidgets('확신도 등급을 보호자가 읽을 문구 배지로 보여준다', (tester) async {
     await _pumpReport(
       tester,
@@ -738,6 +739,11 @@ void main() {
 
     // 그림일기(계약 §11)는 경향 → 그림 → 주제별 순이지만, HTP는 주제별 이야기가
     // 리포트의 중심이라 앞에 온다(S15P11B209-961).
+    //
+    // S15P11B209-1004 의도 변경: 'report-activity-facts'(수치)는 이제 접이식
+    // 묶음 안이라 접힌 동안 존재하지 않는다. 상대 순서 계약 자체는 그대로여서
+    // 묶음을 편 뒤 같은 목록으로 확인한다 — 수치는 여전히 해석보다 뒤다.
+    await _expandReportDetails(tester);
     final keys = [
       'report-activity-info',
       'report-htp-subject-stories',
@@ -751,6 +757,109 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  // S15P11B209-1004의 핵심 계약 — HTP 리포트에서 인사이트가 아래로 밀리지
+  // 않는다. 보호자가 먼저 읽어야 할 것(아이의 말·해석·가이드)이 관찰 재진술과
+  // 수치 사이에 묻히던 것을 되돌리는 것이 이 재구성의 목적이다.
+  testWidgets('HTP 인사이트 섹션은 모두 접이식 활동 기록 묶음보다 위에 렌더된다', (tester) async {
+    _setViewport(tester, const Size(390, 844));
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        isHtp: true,
+        publicInterpretations: _copyProbeInterpretations,
+        subjectReports: const [
+          ReportSubjectReportDto(
+            subjectType: 'HOUSE',
+            imageUrl: '/api/v1/drawing-assets/house/file',
+            visionObservations: ['지붕이 커요.'],
+            qaPairs: [],
+            interpretationRefs: [],
+          ),
+        ],
+        observedFeatures: const [
+          ReportObservedFeatureDto(
+            title: '집을 크게 그렸어요',
+            description: '종이 가운데에 집을 크게 그렸어요.',
+            evidenceSummary: '그림에서 확인했어요.',
+          ),
+        ],
+        parentGuides: const [
+          ReportParentGuideDto(
+            guideType: 'DRAWING_CONVERSATION',
+            items: ['그림에서 무엇을 그렸는지 물어봐 주세요.'],
+          ),
+        ],
+      ),
+    );
+
+    final detailsY = tester
+        .getTopLeft(find.byKey(const ValueKey('report-details-expansion')))
+        .dy;
+    for (final key in const [
+      // 비진단 안내는 가드레일이라 표지 안(접힘 밖)을 사수한다(CLAUDE.md 9절).
+      'report-non-diagnostic-notice',
+      'report-activity-info',
+      'report-htp-subject-stories',
+      // 아이의 말은 해석의 최상위 근거라 해석 바로 앞이다(CLAUDE.md 2절).
+      'report-child-expression',
+      'report-interpretations',
+      'report-observed-features',
+      'report-parent-guide-DRAWING_CONVERSATION',
+    ]) {
+      final sectionY = tester.getTopLeft(find.byKey(ValueKey(key))).dy;
+      expect(sectionY, lessThan(detailsY), reason: key);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('HTP 활동 기록 묶음은 기본으로 접혀 있고 펼치면 수치가 보인다', (tester) async {
+    _setViewport(tester, const Size(390, 844));
+    await _pumpReport(tester, report: _fullReport(isHtp: true));
+
+    final details = find.byKey(const ValueKey('report-details-expansion'));
+    expect(details, findsOneWidget);
+    // 접힌 동안에는 헤더만 높이를 차지하고, 안의 섹션은 만들어지지도 않는다.
+    final collapsedHeight = tester.getSize(details).height;
+    expect(find.byKey(const ValueKey('report-activity-facts')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('report-conversation-summary')),
+      findsNothing,
+    );
+
+    await _expandReportDetails(tester);
+
+    final expandedHeight = tester.getSize(details).height;
+    expect(expandedHeight, greaterThan(collapsedHeight + 200));
+    final facts = find.byKey(const ValueKey('report-activity-facts'));
+    expect(facts, findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('report-conversation-summary')),
+      findsOneWidget,
+    );
+    // 펼친 수치는 묶음 헤더 아래에 놓인다.
+    expect(
+      tester.getTopLeft(facts).dy,
+      greaterThan(tester.getTopLeft(details).dy),
+    );
+    // 실제 값이 보인다 — 멈춤 4회(_fullReport의 activityFacts).
+    expect(find.text('멈춤'), findsOneWidget);
+    expect(find.text('4회'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  // 접힘은 HTP 전용이다(사용자 결정 2026-08-07) — 그림일기는 한 장에 훑는
+  // 구조라 그 안에 접이식이 들어가면 성격 자체가 깨진다.
+  testWidgets('그림일기 한 장 리포트에는 접이식 활동 기록 묶음이 없다', (tester) async {
+    _setViewport(tester, const Size(390, 844));
+    await _pumpReport(tester, report: _fullReport());
+
+    expect(
+      find.byKey(const ValueKey('report-details-expansion')),
+      findsNothing,
+    );
+    expect(find.text('활동 기록 자세히 보기'), findsNothing);
+  });
+
   testWidgets('HTP는 검사 투 제목 대신 대화 소재 문구를 쓴다', (tester) async {
     await _pumpReport(
       tester,
@@ -761,6 +870,9 @@ void main() {
     );
 
     expect(find.text('함께 살펴보면 좋을 이야기'), findsOneWidget);
+    // '그리는 동안 있었던 일'은 활동 기록 제목 — 접이식 묶음 안이다
+    // (S15P11B209-1004). 카피 계약 자체는 그대로다.
+    await _expandReportDetails(tester);
     expect(find.text('그리는 동안 있었던 일'), findsOneWidget);
     expect(find.text('주요 심리 경향'), findsNothing);
     expect(find.text('객관적인 활동 기록'), findsNothing);
@@ -1025,7 +1137,16 @@ void main() {
     expect(find.text('보호자 대화 가이드'), findsOneWidget);
   });
 
-  testWidgets('그림일기 경향 카드는 확신도 배지를 쓰지 않는다', (tester) async {
+  // ⚠️ 의도 변경(S15P11B209-1004, 사용자 결정 2026-08-07) — 이 테스트는 원래
+  // '그림일기 경향 카드는 확신도 배지를 쓰지 않는다'였다(S15P11B209-996).
+  // 996의 근거는 "근거 보기에서 실제 문장을 볼 수 있으니 등급까지 두면 판정처럼
+  // 읽힌다"였는데, 근거 보기는 기본이 접힘이고 열어도 출처 라벨·문장만 보일 뿐
+  // 근거의 **강도**를 말하지 않는다. 등급을 빼면 WEAK 추측과 STRONG 해석이 같은
+  // 무게로 읽히고, 그것이 CLAUDE.md 9절이 타협 불가로 못 박은 실패다. 배지는
+  // 활동 종류와 무관하게 붙인다(S15P11B209-982의 원래 계약).
+  //
+  // 되돌린 것은 배지 표시뿐이다 — 996의 한 장 레이아웃은 건드리지 않았다.
+  testWidgets('그림일기 경향 카드도 확신도 배지를 보여준다', (tester) async {
     await _pumpReport(
       tester,
       report: _fullReport(
@@ -1043,14 +1164,15 @@ void main() {
       ),
     );
 
-    // 카드 본문은 그대로 두고 등급 배지만 뺀다(S15P11B209-996).
     expect(find.text('가족과의 연결'), findsOneWidget);
     expect(find.text('가족에게 의지하려는 경향이 보일 수 있습니다.'), findsOneWidget);
-    expect(find.text('근거가 강해요'), findsNothing);
+    expect(find.text('근거가 강해요'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('report-interpretation-0-confidence')),
-      findsNothing,
+      findsOneWidget,
     );
+    // 내부 코드값은 그림일기에서도 노출하지 않는다.
+    expect(find.textContaining('STRONG'), findsNothing);
   });
 
   testWidgets('그림 서술 1개·문답 3쌍을 넘으면 더보기로 접고 대표 발화는 남긴다', (
@@ -1336,6 +1458,21 @@ void _setViewport(WidgetTester tester, Size size) {
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
+}
+
+/// S15P11B209-1004 — **HTP 리포트**의 대화 요약·활동 기록 수치·구형 가이드는
+/// 'report-details-expansion' 접이식 묶음 안으로 내려갔다. 접힌 동안에는 자식이
+/// 만들어지지 않으므로 그 내용을 검증하는 테스트는 먼저 편다.
+///
+/// 그림일기 한 장 경로(S15P11B209-996)에는 이 묶음이 없다 — tile을 못 찾으면
+/// 아무 일도 하지 않고 돌아가므로 그림일기 테스트에서 불러도 무해하다.
+Future<void> _expandReportDetails(WidgetTester tester) async {
+  final tile = find.byKey(const ValueKey('report-details-expansion'));
+  if (tile.evaluate().isEmpty) return;
+  await tester.ensureVisible(tile);
+  await tester.pumpAndSettle();
+  await tester.tap(find.text('활동 기록 자세히 보기'));
+  await tester.pumpAndSettle();
 }
 
 Future<void> _pumpReport(
