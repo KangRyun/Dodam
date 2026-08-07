@@ -22,6 +22,7 @@ import answer_check
 import llm_client
 import prompts_registry
 import question_quality
+import question_service
 import relationship_guard
 from internal_contracts import ObservationGenerationResult, QuestionResponse
 
@@ -225,9 +226,58 @@ def check_subject_pinned(system_prompt: str, subject_ko: str) -> Finding:
     return Finding("A", f"주제 고정({subject_ko})", ok, "" if ok else "활동 블록 누락")
 
 
+def check_correction_parse(case) -> list[Finding]:
+    """아이가 바로잡아 준 말을 운영 코드가 어떻게 읽었는지 본다(S15P11B209-999).
+
+    기대값은 케이스 meta에 사람이 손으로 적는다("덤불 아니고 내 머리야" →
+    label=머리·owner=CHILD·type=BODY_PART). ⚠️ 여기서 운영 정규식을 다시 돌려 기대값을
+    만들면 정규식이 틀렸을 때 기대값도 같이 틀려서 판정이 영원히 통과한다 —
+    2026-08-06 측정에서 '정정 명칭 유지 0/12'가 실은 측정 실패였던 것이 그 경로였다.
+    """
+    meta = case.meta or {}
+    if "expected_correction" not in meta:
+        return []
+    expected = meta["expected_correction"]
+    actual = question_service._correction(case.request)
+    got = (
+        None
+        if actual is None
+        else {
+            "label": actual.label,
+            "owner": actual.owner,
+            "type": actual.semantic_type,
+        }
+    )
+    ok = got == expected
+    return [
+        Finding(
+            "A",
+            "정정 해석(label·owner·type)",
+            ok,
+            "" if ok else f"기대 {expected} · 실제 {got}",
+        )
+    ]
+
+
 # ── B층: 모델 출력 준수 ─────────────────────────────────────────
 def _contains_any(text: str, needles: list[str]) -> list[str]:
     return [n for n in needles if n in text]
+
+
+# 장면·사건을 여는 말. 여는 방식이 하나가 아니라 넉넉히 잡는다(S15P11B209-999).
+#   ⚠️ 운영 코드에는 이 정규식이 없다. 평가기가 운영 정규식을 그대로 쓰면 '운영이 스스로를
+#      채점하는' 꼴이라 운영 쪽 누락이 평가에서도 그대로 누락된다.
+_SCENE_OPENING = re.compile(
+    r"무슨\s*일|어떤\s*일|무슨\s*이야기|어떤\s*이야기|뭐\s*하고|무엇을\s*하고|뭘\s*하고"
+    r"|어떻게\s*됐|어떻게\s*된\s*거|어떤\s*하루|있었던\s*일"
+)
+
+# 정체를 되묻는 말. '누구한테·누구랑·누구에게'는 정체 질문이 아니라 **사건 속 상대**를 묻는
+#   말이라 뺀다 — 2026-08-06 측정에서 이 셋이 과탐으로 잡혀 정상 질문이 위반으로 세어졌다.
+_EVAL_IDENTITY = re.compile(
+    r"(?:누구|누가)\s*(?:야|니|예요|일까|였어|인지|인가)|누구\s*(?:의\s*)?이야기"
+    r"|뭐야|뭘까|무엇이야|무엇인지"
+)
 
 
 # ── 대화 품질 (S15P11B209-858) ──────────────────────────────────
@@ -248,6 +298,9 @@ _LENGTH_LIMIT = {
 _EMPATHY_MARKERS = (
     "좋아", "그렇구나", "그랬구나", "재밌", "재미있", "멋지", "우와", "와!", "예쁘",
     "고마워", "반가", "신나", "대단", "정말", "많이", "힘들었", "속상", "기뻤",
+    # 999: "덤불이었구나"·"너구나"처럼 받아들이는 어미를 놓쳐 과탐이 났다. 되받기의 가장
+    #   흔한 형태라 개별 어휘보다 이 어미를 보는 편이 정확하다.
+    "구나", "그래", "그랬어",
 )
 
 
@@ -352,6 +405,12 @@ def check_conversation_quality(case, resp: QuestionResponse) -> list[Finding]:
         )
 
     # 4) 공감 선행 — 경고 등급. 첫 질문은 반응할 답변이 없으므로 제외한다.
+    #
+    # ⚠️ 이 판정을 켜는 자리는 네 가지뿐이다(S15P11B209-999): 아이가 감정을 직접 말한 때,
+    #    질문을 건너뛰겠다고 한 때, 우리 오탐을 바로잡아 준 때, 민감한 이야기를 꺼낸 때.
+    #    중립적인 사건 설명이나 단답, 사건을 잇는 질문에는 수용 표현이 없어도 된다 —
+    #    "엄마." → "엄마는 여기서 뭐 하고 있어?"는 그 자체로 자연스러운 대화다.
+    #    모든 턴에 감탄사를 강제하면 "우와"가 매 턴 붙는 기계적인 말투가 된다.
     if meta.get("expects_empathy"):
         has_marker = any(m in text for m in _EMPATHY_MARKERS)
         out.append(
@@ -605,6 +664,22 @@ def check_question_response(case, resp: QuestionResponse) -> list[Finding]:
                 not repeated,
                 f"대상·속성이 함께 재등장: {repeated}" if repeated else "",
             )
+        )
+
+    # 그림일기 첫 질문은 그림 속 장면·사건을 여는 질문이어야 한다(S15P11B209-999).
+    #   여는 방식은 하나가 아니다 — "무슨 일이 있었어?"·"뭐 하고 있어?"·"어떻게 됐어?"가 모두
+    #   장면을 여는 말이다. 문구 하나만 정답으로 세면 프롬프트가 그 문장을 베끼도록 몰아간다.
+    if meta.get("expects_scene_opening"):
+        opens = bool(_SCENE_OPENING.search(text))
+        out.append(
+            Finding("B", "첫 질문이 장면을 엶", opens, "" if opens else "장면을 여는 말 없음")
+        )
+
+    # 정체 질문("누구야?"·"뭐야?")을 기본 다음 질문으로 쓰지 않는가(S15P11B209-999).
+    if meta.get("forbid_identity_question"):
+        identity = bool(_EVAL_IDENTITY.search(text))
+        out.append(
+            Finding("B", "정체 질문으로 되돌아가지 않음", not identity, "정체 질문 검출" if identity else "")
         )
 
     # 아이 정정 수용 — 아이가 말한 이름을 쓰고, 분석 결과 이름으로 돌아가지 않는가.

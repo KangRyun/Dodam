@@ -472,6 +472,24 @@ void main() {
     expect(find.textContaining('WEAK'), findsNothing);
   });
 
+  testWidgets('해석 카드가 비면 숨기지 않고 왜 비었는지 안내한다', (tester) async {
+    // 빈 카드는 근거 게이트(독립 근거 2건 + 아이 표현 1건, 982)의 정상 출력이다.
+    // 조용히 숨기면 보호자는 해석이 가능했다는 사실 자체를 모른다(S15P11B209-1000).
+    await _pumpReport(
+      tester,
+      report: _fullReport(publicInterpretations: const []),
+    );
+
+    expect(
+      find.byKey(const ValueKey('report-interpretations-empty')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('해석을 담지 않았어요'), findsOneWidget);
+    expect(find.textContaining('이야기를 많이 들려줄수록'), findsOneWidget);
+    // 카드 섹션 본체는 없다 — 안내가 카드 흉내를 내면 안 된다.
+    expect(find.byKey(const ValueKey('report-interpretations')), findsNothing);
+  });
+
   testWidgets('확신도가 없거나 모르는 등급이면 배지만 빠지고 카드는 그대로 나온다', (tester) async {
     await _pumpReport(
       tester,

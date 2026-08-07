@@ -193,7 +193,13 @@ class ConversationPromptRulesTest(unittest.TestCase):
             system = self._next(activity)
             self.assertIn("[질문 건너뛰기 의사 처리]", system)
             self.assertIn("그림 내용에 대한 답이 아니야", system)
-            self.assertIn("같거나 의미상 비슷한 질문", system)
+            # 999: 그림일기는 "같거나 의미상 비슷한 질문" 대신 "같은 목적을 다시 쓰지 마"로
+            #   바꿨다. 실호출에서 건너뛰기 직후 다른 객체를 골라 캐묻는 문장이 나왔는데,
+            #   표현이 달라 옛 문구로는 걸리지 않았다. HTP 문구는 그대로 둔다.
+            self.assertTrue(
+                "같거나 의미상 비슷한 질문" in system or "같은 목적을 다시 쓰지 마" in system,
+                "건너뛰기 직후 같은 질문 반복 금지 규칙이 있어야 한다",
+            )
             self.assertIn("표현만 바꿔 다시 묻지 마", system)
             self.assertIn("이 규칙을 우선해", system)
             self.assertIn('"몰라"라고 한 것만으로', system)
@@ -290,12 +296,18 @@ class ActivitySplitTest(unittest.TestCase):
             self.assertIn("상상", system)
             self.assertNotIn("그림 자체가 궁금해", system)
 
-    def test_diary_starts_with_story_before_reality_check(self):
+    def test_diary_starts_with_story_and_never_forces_reality_check(self):
+        """999: 현실 확인이 '반드시 한 번'에서 '필요할 때만'으로 바뀌었다.
+
+        그림일기에는 오늘 일·다른 날 일·실제에 상상을 더한 이야기·완전한 상상이 섞이는데,
+        옛 규칙은 장면을 들은 뒤 둘 중 하나를 고르라고 강제했다. 첫 질문에서 묻지 않는다는
+        규칙은 그대로다 — 바뀐 것은 후속 대화에서의 강제뿐이다.
+        """
         first = self._first("ART_DIARY")
         next_prompt = self._next("ART_DIARY")
         self.assertIn("그림 속 이야기를 먼저 들은 뒤", first)
         self.assertIn("첫 질문에서는 실제 경험인지 상상인지부터 묻지 마", first)
-        self.assertIn("실제 경험인지 상상인지 한 번만 확인해", next_prompt)
+        self.assertIn("실제 경험인지 상상인지 반드시 묻지 않는다", next_prompt)
         self.assertIn("아이가 이미 말했으면 다시 묻지 마", next_prompt)
         self.assertNotIn("오늘 있었던 일을 이야기하는", first)
         self.assertNotIn("오늘 있었던 일을 이야기하는", next_prompt)

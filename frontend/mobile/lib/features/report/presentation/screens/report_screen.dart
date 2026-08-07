@@ -986,7 +986,32 @@ const _interpretationOrder = <String>[
 /// [isHtp]이면 제목을 검사 판정 어휘("주요 심리 경향")에서 대화 소재 표현으로
 /// 바꾼다. HTP를 검사로 표현·해석하지 않는다는 원칙(CLAUDE.md 5절) 때문이다.
 Widget? _interpretationsSection(ReportDetailDto report, {bool isHtp = false}) {
-  if (report.publicInterpretations.isEmpty) return null;
+  if (report.publicInterpretations.isEmpty) {
+    // 카드가 비는 것은 정상 출력이다(근거 게이트: 독립 근거 2건 + 아이 표현 1건,
+    // S15P11B209-982). 조용히 숨기면 보호자는 해석이 가능했다는 사실 자체를 모른다 —
+    // 빈 상태를 원칙 안내로 바꾼다(S15P11B209-1000). 리포트 전체가 비었을 때는
+    // _noObservationsCard 가 따로 안내하므로 이중으로 말하지 않는다.
+    if (report.hasNoObservations) return null;
+    return _ReportSection(
+      key: const ValueKey('report-interpretations-empty'),
+      title: isHtp ? '함께 살펴보면 좋을 이야기' : '주요 심리 경향',
+      backgroundColor: AppColors.lavenderSoft,
+      accentColor: AppColors.lavender,
+      children: const [
+        Text(
+          '이번 활동에서는 해석을 담지 않았어요. '
+          '아이의 말과 그림이 서로 뒷받침될 만큼 근거가 모였을 때만 해석을 만들어요.',
+          style: TextStyle(color: AppColors.ink, height: 1.55),
+        ),
+        SizedBox(height: AppSpacing.sm),
+        Text(
+          '근거가 부족할 때 억지로 해석하지 않는 것이 도담의 원칙이에요. '
+          '다음 활동에서 아이가 이야기를 많이 들려줄수록 이 자리가 채워져요.',
+          style: TextStyle(color: AppColors.inkMuted, height: 1.55),
+        ),
+      ],
+    );
+  }
   int rank(ReportInterpretationDto item) {
     final index = _interpretationOrder.indexOf(item.category ?? '');
     return index < 0 ? _interpretationOrder.length : index;

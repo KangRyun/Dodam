@@ -26,14 +26,23 @@ import re
 POSSESSIVE_BODY_PART = "POSSESSIVE_BODY_PART"
 REDUNDANT_VISUAL = "REDUNDANT_VISUAL"
 MULTIPLE_QUESTIONS = "MULTIPLE_QUESTIONS"
+# S15P11B209-999: 그림일기 실호출에서 관측된 위반을 사유별로 가른다. 전부 REDUNDANT_VISUAL
+#   하나로 묶으면 무엇 때문에 교체됐는지 알 수 없어 원인별 개선이 막힌다.
+VISUAL_EVALUATION = "VISUAL_EVALUATION"
+CORRECTION_IGNORED = "CORRECTION_IGNORED"
+UNGROUNDED_EMOTION = "UNGROUNDED_EMOTION"
+IDENTITY_FALLBACK = "IDENTITY_FALLBACK"
+BODY_PART_ACTOR = "BODY_PART_ACTOR"
 
 # 그림 속 사람의 부위 이름. htp_labels의 PERSON_* 표시명과 같은 어휘이되, 자유 그림에서
 # 사람 부위가 잡히는 경우도 있어 활동유형과 무관하게 본다.
-_BODY_PARTS = (
+# 부위 이름은 question_service 도 같은 어휘를 쓴다(999) — 두 곳이 갈리면 한쪽만 고쳐진다.
+BODY_PARTS = (
     "머리카락", "머리", "얼굴", "몸통", "상체", "하체", "어깨",
     "팔", "다리", "손", "발", "눈", "코", "입", "귀", "목",
 )
-_PART = "|".join(_BODY_PARTS)
+_BODY_PARTS = BODY_PARTS  # 기존 이름을 쓰던 곳을 위해 남겨 둔다.
+_PART = "|".join(BODY_PARTS)
 
 # 소유격 질문만 좁게 잡는다. 넓게 잡으면 정상 문항까지 걸린다 —
 # htp_question_bank의 "이 나무를 보면 누가 생각나?"·"혹시 누구를 생각하면서 그린 거야?"는
@@ -183,6 +192,100 @@ def find_redundant(
     if any((t or "").strip() for t in (child_texts or ())):
         return REDUNDANT_VISUAL
     return None
+
+
+# ── 그림 칭찬·감정 단정·정정 무시 (S15P11B209-999) ───────────────
+# 실호출에서 나온 문장들이다:
+#   "머리가 까맣게 칠해져서 멋지네! 그때 뭐 하고 있었어?"   → 색 언급 + 그림 평가
+#   "머리가 까맣게 칠해져서 신기하네. 그때 어떤 기분이었어?" → 평가 + 정정 직후 감정 점프
+# 셋 다 프롬프트로 먼저 막지만, 모델이 넘어올 때를 위해 마지막 그물을 둔다.
+
+# 그림·솜씨를 평가하는 말. 아이 자신이나 사건을 두고 하는 말("재밌었겠다")은 여기가 아니다 —
+# 그건 감정 단정 쪽에서 본다.
+_EVALUATION = re.compile(
+    r"(?:멋지|멋있|예쁘|이쁘|귀엽|근사|훌륭|대단|잘\s*그렸|잘\s*했|신기하)"
+)
+
+# 아이가 말하지 않은 마음을 우리가 붙이는 말. 물음이 아니라 단정이라 더 세게 막는다.
+_ASSERTED_EMOTION = re.compile(
+    r"(?:속상|무서웠|무서웠겠|재밌었겠|재미있었겠|슬펐|기뻤|화났|신났|외로웠|힘들었)"
+    r"\s*(?:겠|구나|네|었구나|였구나)"
+)
+
+# 마음을 묻는 말. 그 자체로는 정상이라, 부르는 쪽에서 '지금 물어도 되는 자리인가'를 판단한다.
+_EMOTION_QUESTION = re.compile(r"(?:기분|느낌|마음|어땠어|어땠니)")
+
+# 정체를 묻는 말. 기본 탐색 질문으로 쓰지 않는다(999).
+#   '누구 이야기야?'도 정체 질문이다 — 2026-08-07 실호출에서 아이가 "이거 나야"라고 말한
+#   직후에 돌아왔다. 방금 들은 답을 그대로 되묻는 꼴이라 여기서 함께 본다.
+#   ⚠️ '누구한테·누구랑·누구에게'는 사건 속 상대를 묻는 말이라 걸리지 않는다(뒤에 조사가 온다).
+_IDENTITY_QUESTION = re.compile(
+    r"(?:누구|누가)\s*(?:야|니|일까|였어|예요)|누구\s*(?:의\s*)?이야기|뭐야|무엇이야|뭘까"
+)
+
+
+def find_visual_evaluation(question_text: str) -> str | None:
+    """그림·솜씨를 평가하는 말이 섞였으면 사유 코드를 돌려준다.
+
+    잘 그렸다·못 그렸다를 말하지 않는 것은 공통 규칙이 이미 정하고 있다. 여기서는 그 규칙이
+    지켜지지 않은 문장을 골라낸다 — 평가는 아이가 다음에 할 말을 '잘 그리기'로 옮긴다.
+    """
+    return VISUAL_EVALUATION if _EVALUATION.search(question_text or "") else None
+
+
+def find_asserted_emotion(question_text: str) -> str | None:
+    """아이가 말하지 않은 마음을 단정하면 사유 코드를 돌려준다."""
+    return UNGROUNDED_EMOTION if _ASSERTED_EMOTION.search(question_text or "") else None
+
+
+def is_emotion_question(question_text: str) -> bool:
+    """마음을 묻는 질문인가. 물어도 되는 자리인지는 부르는 쪽이 정한다."""
+    return bool(_EMOTION_QUESTION.search(question_text or ""))
+
+
+def is_identity_question(question_text: str) -> bool:
+    """정체를 묻는 질문인가('누구야'·'뭐야')."""
+    return bool(_IDENTITY_QUESTION.search(question_text or ""))
+
+
+def find_stale_label(question_text: str, stale_labels) -> str | None:
+    """아이가 아니라고 한 탐지 이름을 다시 쓰면 사유 코드를 돌려준다.
+
+    아이가 고쳐 준 이름을 우리가 흘리면, 아이는 자기 말이 전달되지 않았다고 느낀다.
+    """
+    text = question_text or ""
+    for label in stale_labels or ():
+        if label and label in text:
+            return CORRECTION_IGNORED
+    return None
+
+
+# 사건·행동을 묻는 말. 부위 이름 바로 뒤에 붙으면 부위가 이야기의 주인공이 된다.
+_ACTS = (
+    r"뭐\s*하|무엇을\s*하|뭘\s*하|무슨\s*일|어떤\s*일|어떻게\s*됐|무슨\s*이야기"
+    r"|어디\s*갔|뭐\s*했|무엇을\s*했"
+)
+# 부위와 사건 표현 사이에 부사가 끼어도 같은 문장이다("그 머리는 **지금** 뭐 하고 있어?").
+#   문장 부호는 넘지 않는다 — 넘으면 앞 문장의 부위와 뒤 문장의 사건이 엮인다.
+_BODY_PART_ACTOR = re.compile(
+    rf"(?:{_PART})\s*(?:은|는|이|가|로|으로|에서|에게|한테|을|를)?[^.!?]{{0,8}}?(?:{_ACTS})"
+)
+
+
+def find_body_part_actor(question_text: str, part: str | None) -> str | None:
+    """바로잡아 준 신체 부위를 사건의 주인공으로 삼은 질문이면 사유 코드를 돌려준다.
+
+    2026-08-07 실호출: 아이가 "덤불 아니고 내 머리야"라고 바로잡자 "그 머리로 무슨 일이
+    있었어?"·"그 머리는 지금 뭐 하고 있어?"가 돌아왔다. 프롬프트의 정정 처리 규칙
+    ("그 대상이 무엇을 하는지 물어봐")이 부위에도 그대로 적용된 결과다 — 부위는 스스로
+    무엇을 하지 않아서 아이가 답할 수 없다. 이야기는 그 부위를 가진 **사람**에게 붙는다.
+
+    ⚠️ part 가 주어질 때만 본다. 아이가 부위를 바로잡은 그 턴에만 적용한다는 뜻이다 —
+       "손으로 뭐 했어?"처럼 아이가 먼저 연 이야기까지 잡으면 정상 대화가 끊긴다.
+    """
+    if not part or part not in (question_text or ""):
+        return None
+    return BODY_PART_ACTOR if _BODY_PART_ACTOR.search(question_text or "") else None
 
 
 # ── 한 번에 질문 하나 (S15P11B209-954) ───────────────────────────

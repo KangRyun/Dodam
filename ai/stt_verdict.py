@@ -56,6 +56,37 @@ _FILLER_PHRASES = (
     "오늘영상은여기까지입니다",
 )
 
+# 완전 일치로는 못 잡는 환각 표지 — **부분 일치**로 본다.
+#
+# 왜 필요한가(2026-08-07 실기기 실측): 무음·잡음 녹음에서 아래 셋이 SUCCESS로 저장됐다.
+#     "이 영상은 유료광고를 포함하고 있습니다."
+#     "자막제작 by UpTitle http://www.uptitle.co.kr"
+#     "오늘도 시청해 주셔서 감사합니다."
+#   셋 다 verbose_json 지표를 통과했다(실패 판정 0건) — 지표는 whisper가 '자신 있게'
+#   지어낸 문장을 구분하지 못한다. 반면 텍스트에 남은 흔적(URL·자막 크레딧·광고 고지)은
+#   아이 발화에 나올 수 없다. 그래서 이 검사는 지표보다 **먼저** 돈다.
+#   위 목록의 완전 일치는 변형("오늘도…"가 앞에 붙는다) 하나에도 뚫린다.
+#
+# ⚠️ 부분 일치가 안전한 범위는 **URL·자막 크레딧·광고 고지뿐이다.**
+#   "감사합니다"·"구독"·"좋아요"·"알림설정" 같은 일상어는 절대 넣지 않는다. 아이가 실제로
+#   말할 수 있고("엄마가 구독 좋아요 누르라고 했어"), 부분 일치로 지우면 진짜 답변이
+#   사라진다. 그 형태는 위 완전 일치 목록이 이미 맡고 있다.
+#   같은 이유로 "구독좋아요"·"구독과좋아요"·"알림설정"은 후보에서 뺐다 — 실측 3건은
+#   아래 표지만으로 전부 걸리므로 위험을 살 이유가 없다.
+#
+# 비교 대상은 `normalize_for_filler_match()` 결과다(공백·문장부호 제거, 소문자).
+#   그래서 표지에 점을 넣으면 안 된다 — "www."의 점은 정규화에서 사라진다.
+_HALLUCINATION_MARKERS = (
+    "http",
+    "www",
+    "자막제작",
+    "자막제공",
+    "유료광고",
+    "광고포함",
+    "시청해주셔서",
+    "다음영상에서",
+)
+
 
 @dataclass(frozen=True)
 class SpeechMetrics:
@@ -100,6 +131,18 @@ def is_filler_only(text: str) -> bool:
     return normalized in _FILLER_PHRASES
 
 
+def has_hallucination_marker(text: str) -> bool:
+    """아이 발화에 나올 수 없는 표지가 섞여 있는지 본다(부분 일치).
+
+    `is_filler_only`와 달리 문장 어디에 있어도 잡는다 — 표지 목록을 URL·자막 크레딧·
+    광고 고지로 좁혀 두었기 때문에 부분 일치의 대가(진짜 답변 삭제)를 치르지 않는다.
+    """
+    normalized = normalize_for_filler_match(text)
+    if not normalized:
+        return False
+    return any(marker in normalized for marker in _HALLUCINATION_MARKERS)
+
+
 def judge(
     text: str,
     metrics: SpeechMetrics,
@@ -123,9 +166,16 @@ def judge(
     판정 순서에는 이유가 있다. 무음을 먼저 걸러야 한다 — 무음 구간의 신뢰도는
     '무엇을 잘못 들었는지'를 말해줄 뿐이고, 애초에 들을 말이 없었다는 사실이
     더 강한 근거다. 저신뢰보다 무음이 아이에게 보여줄 안내(선택지)도 정확하다.
+
+    환각 표지는 지표보다 **먼저** 본다. 2026-08-07 실측에서 지어낸 문장 셋이 지표를
+    전부 통과했다 — 모델이 확신하며 지어내면 지표는 침묵한다. 텍스트에 남은 URL·자막
+    크레딧은 그 자체로 결정적 증거이므로, 지표가 뭐라 하든 뒤집힐 이유가 없다.
     """
     stripped = (text or "").strip()
     if not stripped:
+        return Verdict(STATUS_FAILED, NO_SPEECH, False)
+
+    if has_hallucination_marker(stripped):
         return Verdict(STATUS_FAILED, NO_SPEECH, False)
 
     if metrics.no_speech_prob is not None and metrics.no_speech_prob >= no_speech_prob_max:
