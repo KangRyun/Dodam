@@ -63,9 +63,12 @@ _GUARDRAILS = "guardrails"
 # HTP 주제별 질문 뱅크(S15P11B209-811). 표준 사후질문(PDI)을 아동용으로 포장한 목록이며,
 # 현재 주제 구획 하나만 싣는다. 그림일기는 쓰지 않는다 — PDI는 HTP 전용 프로토콜이다.
 _HTP_BANK = "htp_question_bank"
-# 활동·주제·대상 지시 블록(S15P11B209-832). question_service가 구획을 골라 조립해
-# 대화 프롬프트에 끼워 넣는다. 원래 코드 안 문자열이라 버전 추적 밖이었다.
-_ACTIVITY_BLOCK = "activity_block"
+# 활동·주제·대상 지시 블록(S15P11B209-832 이관 · 993 활동별 분리). question_service가
+# 구획을 골라 조립해 대화 프롬프트에 끼워 넣는다. 원래 코드 안 문자열이라 버전 추적 밖이었다.
+_ACTIVITY_BLOCK_BY_ACTIVITY = {
+    "HTP": "activity_block_htp",
+    "ART_DIARY": "activity_block_diary",
+}
 
 # 대화 경로가 쓰는 프롬프트 파일 전체의 통합 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
 # 축약 태그로 싣는다(S15P11B209-819) — 대화 경로는 파일이 여섯 개라 정본이 193자다. BE가 아직
@@ -75,9 +78,9 @@ _ALL_NAMES = (
     *_NEXT_BY_ACTIVITY.values(),
     *_RULES_BY_ACTIVITY.values(),
     *_TONE_BY_ACTIVITY.values(),
+    *_ACTIVITY_BLOCK_BY_ACTIVITY.values(),
     _GUARDRAILS,
     _HTP_BANK,
-    _ACTIVITY_BLOCK,
 )
 PROMPT_VERSION = prompts_registry.short_version("conv-all", *_ALL_NAMES)
 
@@ -99,8 +102,8 @@ def prompt_names_for(activity_type: str | None) -> tuple[str, ...]:
         _NEXT_BY_ACTIVITY[key],
         _RULES_BY_ACTIVITY[key],
         _TONE_BY_ACTIVITY[key],
+        _ACTIVITY_BLOCK_BY_ACTIVITY[key],
         _GUARDRAILS,
-        _ACTIVITY_BLOCK,
     )
     return names + (_HTP_BANK,) if key == "HTP" else names
 
