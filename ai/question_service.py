@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+from dataclasses import dataclass
 
 from openai import APIConnectionError, APIStatusError, OpenAIError
 
@@ -406,6 +407,12 @@ def _activity_block(
         lines.append(_block(req.activity_type, "ART_DIARY"))
         if target_name:
             lines.append(_target_line(req, target_name))
+            # 부위가 대상이면 부위 지시를 얹는다(S15P11B209-999). 같은 키지만 HTP 쪽
+            #   [[PERSON_PART]]와 착지가 다르다 — 그쪽은 "그 사람의 생각·기분을 물어봐"로
+            #   내려앉는데, 자유 그림은 부위 탐지 자체가 오탐인 경우가 많아 그 착지가 없는
+            #   사람을 지어내는 쪽으로 샌다. 993이 파일을 가른 덕에 활동별로 나눠 쓸 수 있다.
+            if _is_person_part(target):
+                lines.append(_block(req.activity_type, "PERSON_PART", target=target_name))
         elif _last_child_index(req) is None:
             # 첫 질문인데 이름을 뒷받침할 근거가 없다 — 이름을 지어 부르지 말고 열린 질문을
             # 하게 한다(S15P11B209-918). 아이가 이미 말한 뒤라면 붙이지 않는다: 그 턴의
@@ -632,7 +639,24 @@ def _target_for_purpose(req: QuestionRequest, purpose: str) -> DetectedObject | 
       "누구를 생각하면서 그렸어?" 방향과 만나 "이 머리는 누구의 머리야?"가 됐다.
       집·나무는 그대로 둔다 — 지붕·문·창문은 PDI 표준 문항의 대상이고, 소유격 문제를
       만드는 것은 신체 부위다.
+
+    선택 규칙 추가(S15P11B209-999):
+    - 그림일기에서 아이가 방금 이름을 바로잡았으면 그 말이 탐지보다 앞선다
+      (_retarget_for_correction). HTP는 그대로 둔다 — 그쪽 부위 라벨은 신뢰도 상위라
+      부위를 대상으로 두는 것이 맞고, PDI 문항도 부위를 실제로 묻는다.
     """
+    # ⚠️ 정정 재선택도 목적 안에서만 한다. 밖으로 나가면 FOLLOW_UP 응답에 대상 객체가 붙어
+    #    _is_consistent(계약 사전 방어)가 통째로 실패한다 — 아이는 폴백 템플릿을 받는다.
+    if purpose != "OBJECT_DESCRIPTION":
+        return None
+    target = _select_target(req, purpose)
+    if req.activity_type == "ART_DIARY":
+        return _retarget_for_correction(req, target)
+    return target
+
+
+def _select_target(req: QuestionRequest, purpose: str) -> DetectedObject | None:
+    """탐지 목록에서 대상 하나를 고른다(정정 반영 전의 원래 선택)."""
     if purpose != "OBJECT_DESCRIPTION" or not req.detected_objects:
         return None
     # 물어본 대상은 '그룹'으로 뺀다(S15P11B209-921) — 사람을 물어본 뒤 머리를 대상으로
@@ -1266,7 +1290,21 @@ def _quality_replacement(
 #
 # ⚠️ 표지어는 우리가 물어본 말투와 **아이가 답한 말투를 함께** 담는다. 우리 질문 어투만
 #    보면("누구"), 아이가 먼저 "내 동생이야"라고 말해 준 경우를 놓쳐 정체를 또 묻게 된다.
+#
+# ⚠️ 순서가 정책이다(S15P11B209-999). 원래 IDENTITY가 1순위였는데, 그건 프롬프트에서 걷어낸
+#    옛 6축 우선순위를 코드가 그대로 들고 있던 것이다. 실호출에서 건너뛰기 직후 교체가
+#    걸리자 이 표가 "그림 속 이 사람은 누구야?"를 골라, 프롬프트가 금지한 정체 질문이
+#    가드를 통해 되살아났다. 이제 사건이 먼저고 정체는 마지막이다 — 정체는 대상을 뭐라
+#    불러야 할지 몰라 이야기를 못 이을 때 쓰는 확인 질문이지 기본 탐색 질문이 아니다.
 _DIARY_AXES = (
+    (
+        "EVENT",
+        ("무슨 일", "뭐 하", "뭐 했", "놀았", "갔어", "했어", "먹었", "봤어"),
+        "여기서 무슨 일이 있었어?",
+        False,
+    ),
+    ("MEMORY", ("기억",), "이 장면에서 가장 기억나는 건 뭐야?", False),
+    ("RELATION", ("사이", "누구랑", "함께", "같이"), "이 사람은 너와 어떤 사이야?", True),
     (
         "IDENTITY",
         (
@@ -1276,15 +1314,207 @@ _DIARY_AXES = (
         "그림 속 이 사람은 누구야?",
         True,
     ),
-    ("RELATION", ("사이", "누구랑", "함께", "같이"), "이 사람은 너와 어떤 사이야?", True),
-    (
-        "EVENT",
-        ("무슨 일", "뭐 하", "뭐 했", "놀았", "갔어", "했어", "먹었", "봤어"),
-        "여기서 무슨 일이 있었어?",
-        False,
-    ),
-    ("MEMORY", ("기억",), "이 장면에서 가장 기억나는 건 뭐야?", False),
 )
+
+# 아이가 "이건 말하기 싫어"·"다른 질문 해줘"처럼 지금 질문을 넘기겠다고 한 말.
+#   ⚠️ conversation_stop_intent(그만하기)와 다르다 — 그쪽은 대화를 끝내는 의사다.
+_SKIP_INTENT = re.compile(
+    r"(?:말하기\s*싫|말\s*안\s*할|다른\s*(?:질문|거|것)|건너뛸래|넘어갈래|패스"
+    r"|그건\s*싫|묻지\s*마)"
+)
+
+# ── 아이가 우리 이름을 바로잡는 말 (S15P11B209-999) ──────────────
+# "덤불 아니고 내 머리야" 처럼 소유 표현이 붙으면 이름만 떼어 내야 한다. 실측에서 '내 머리'를
+# 통째로 잡아 정정 자체를 놓쳤다 — 그러면 아이가 고쳐 준 이름을 다음 질문에 쓰지 못한다.
+_CORRECTION = re.compile(
+    r"(?:아니고|아니라|아니야|아냐|말고)\s*(?P<rest>.+?)[\s.!?]*$"
+    r"|^(?:이건|이거|저건|저거|그건|그거)\s*(?P<rest2>.+?)[\s.!?]*$"
+)
+
+# 정정으로 볼 수 없는 꼬리말. "그거 아니야"의 '아니야'를 이름으로 잡으면 없는 대상이 생긴다.
+_NOT_A_LABEL = re.compile(r"^(?:아니|아냐|아니야|안|몰라|없어|맞아|응|아직|그냥|거|것|꺼)$")
+
+# 아이가 자신을 가리킨 말. 그대로 두면 복구 문장이 "아, 나였구나"가 되어 도담이 자기 이야기를
+#   하는 꼴이 된다 — 아이에게 되돌려 부를 말로 바꾼다.
+_SELF_WORDS = ("나", "저", "내", "제")
+
+# 이름이 아니라 서술인 꼬리말. "그거 아니고 밖에서 놀았어"의 '놀았어'는 대상 이름이 아니다.
+_PREDICATE_TAIL = re.compile(r"(?:았어|었어|했어|했다|해요|어요|았다|었다|자|줘|봐|네)$")
+
+# 소유를 나타내는 말 → (코드, 아이에게 부를 때 쓸 말). 부위를 고쳐 준 뒤 '누구의 것인가'가
+#   정해지면 다음 이야기는 부위가 아니라 그 사람으로 옮겨 간다.
+#   ⚠️ 순서가 의미를 가른다. "우리 엄마 머리야"는 엄마 이야기지 아이 이야기가 아니라서,
+#      '나·우리' 계열을 맨 뒤에 둔다 — 앞에 두면 '우리'가 먼저 걸려 소유자가 뒤바뀐다.
+_OWNERS = (
+    ("엄마", "MOTHER", "엄마"),
+    ("어머니", "MOTHER", "엄마"),
+    ("아빠", "FATHER", "아빠"),
+    ("아버지", "FATHER", "아빠"),
+    ("동생", "SIBLING", "동생"),
+    ("형", "SIBLING", "형"),
+    ("누나", "SIBLING", "누나"),
+    ("언니", "SIBLING", "언니"),
+    ("오빠", "SIBLING", "오빠"),
+    ("할머니", "GRANDPARENT", "할머니"),
+    ("할아버지", "GRANDPARENT", "할아버지"),
+    ("선생님", "TEACHER", "선생님"),
+    ("친구", "FRIEND", "친구"),
+    ("내", "CHILD", "너"),
+    ("나", "CHILD", "너"),
+    ("나의", "CHILD", "너"),
+    ("제", "CHILD", "너"),
+    ("우리", "CHILD", "너"),
+)
+
+# 그림 속 사람의 부위. question_quality 와 같은 어휘를 쓴다 — 두 곳이 갈리면 한쪽만 고쳐진다.
+_BODY_PARTS = question_quality.BODY_PARTS
+
+BODY_PART = "BODY_PART"
+OBJECT = "OBJECT"
+
+
+@dataclass(frozen=True)
+class Correction:
+    """아이가 바로잡아 준 대상 (S15P11B209-999).
+
+    label 은 아이가 말한 이름 그대로다. owner 는 그 대상이 누구의 것인지이며 모르면 None.
+    semantic_type 이 BODY_PART 면 그 부위 자체를 다음 이야기의 중심으로 삼지 않는다 —
+    "그 머리에서는 무슨 일이 있어?"는 아이가 답할 수 없는 질문이다.
+    """
+
+    label: str
+    owner: str | None
+    owner_label: str | None
+    semantic_type: str
+
+
+def _owner_of(words: list[str]) -> tuple[str | None, str | None]:
+    """이름 앞에 붙은 말에서 소유자를 읽는다. 못 찾으면 (None, None)."""
+    stems = [re.sub(r"(?:의|가|는|은|이|도)$", "", w) for w in words]
+    for marker, code, display in _OWNERS:
+        if marker in stems:
+            return code, display
+    return None, None
+
+
+def _correction(req: QuestionRequest) -> Correction | None:
+    """아이가 방금 바로잡아 준 대상. 이름이 없는 부정("아니야")은 정정이 아니다."""
+    index = _last_child_index(req)
+    if index is None:
+        return None
+    match = _CORRECTION.search((req.recent_messages[index].text or "").strip())
+    if match is None:
+        return None
+    rest = (match.group("rest") or match.group("rest2") or "").strip()
+    if not rest:
+        return None
+    # 조사·종결어미를 떼고 마지막 낱말을 이름으로 본다. "내 머리야" → 소유 '내' + 이름 '머리'.
+    words = [w for w in re.split(r"\s+", rest) if w]
+    if not words:
+        return None
+    tail = words[-1]
+    if _PREDICATE_TAIL.search(tail):
+        # 이름을 대는 말이 아니라 사건을 잇는 말이다. 여기서 이름을 뽑으면 없는 대상이 생긴다.
+        return None
+    label = re.sub(r"(?:이야|이에요|예요|야|인데|이다|다|요)$", "", tail).strip()
+    if not label or len(label) > 10 or _NOT_A_LABEL.match(label):
+        return None
+    if label in _SELF_WORDS:
+        return Correction(
+            label="너", owner="CHILD", owner_label="너", semantic_type=OBJECT
+        )
+    owner, owner_label = _owner_of(words[:-1])
+    semantic = BODY_PART if any(part in label for part in _BODY_PARTS) else OBJECT
+    return Correction(
+        label=label, owner=owner, owner_label=owner_label, semantic_type=semantic
+    )
+
+
+def _corrected_label(req: QuestionRequest) -> str | None:
+    """아이가 방금 바로잡아 준 이름. 없으면 None."""
+    correction = _correction(req)
+    return correction.label if correction else None
+
+
+def _corrected_detection(
+    req: QuestionRequest, correction: Correction
+) -> DetectedObject | None:
+    """아이가 방금 바로잡은 그 탐지. 아이 말 안에 탐지 이름이 그대로 들어 있을 때만 짚는다."""
+    index = _last_child_index(req)
+    if index is None:
+        return None
+    said = req.recent_messages[index].text or ""
+    for obj in req.detected_objects or []:
+        name = (obj.object_name or "").strip()
+        if name and name != correction.label and name in said:
+            return obj
+    return None
+
+
+def _retarget_for_correction(
+    req: QuestionRequest, target: DetectedObject | None
+) -> DetectedObject | None:
+    """아이가 이름을 바로잡았으면 다음 대화 대상을 다시 고른다(S15P11B209-999).
+
+    부위는 대상으로 두지 않는다. '머리'가 대상인 채로 남으면 [[TARGET_FOLLOW_UP]]이 그 부위
+    하나를 가리키고, 부위에는 물을 것이 겉모습밖에 없어 "머리 무슨 색이야?"로 되돌아간다.
+
+    - 부위 + 소유자를 알겠다 → 그 사람 전체(PERSON 탐지)로 옮긴다. 이야기는 부위가 아니라
+      사람에게 붙는다("엄마는 그때 뭐 하고 있었어?").
+    - 부위 + 소유자를 모르겠다 → 대상을 떼고 그림 전체 이야기로 돌아간다. 사람을 지어내는
+      것보다 낫다.
+    - 부위가 아닌 일반 객체 → 아이가 고쳐 준 **그 탐지**를 대상으로 삼고 아이가 말한 이름으로
+      부른다. 탐지 이름은 이미 틀린 것으로 확인됐다(objectCode는 그대로라 BE의 중복 방지는
+      어긋나지 않는다). 어느 탐지를 고친 것인지 못 짚으면 그림 전체로 돌아간다 — 그때 원래
+      대상을 그냥 새 이름으로 부르면 엉뚱한 탐지에 아이 말이 얹힌다("사람"을 "여우"로 부른다).
+    """
+    correction = _correction(req)
+    if correction is None:
+        return target
+    if correction.semantic_type == OBJECT:
+        corrected = _corrected_detection(req, correction)
+        if corrected is None:
+            return None
+        return corrected.model_copy(update={"object_name": correction.label})
+    if correction.owner_label is None:
+        return None
+    person = next(
+        (o for o in (req.detected_objects or []) if o.object_code == "PERSON"), None
+    )
+    if person is None:
+        # 부위만 잡혔고 사람 전체는 탐지되지 않았다 — 없는 대상을 지어내지 않고 전체로 돌아간다.
+        return None
+    return person.model_copy(update={"object_name": correction.owner_label})
+
+
+# 스스로 움직일 수 있는 대상인지. 정정 뒤 "무엇을 하고 있어?"를 붙여도 되는지 가른다 —
+#   덤불·별처럼 움직이지 않는 것에 행동을 물으면 없는 사건을 지어내라는 말이 된다.
+_ACTOR_WORDS = (
+    "사람", "아이", "엄마", "아빠", "동생", "형", "누나", "언니", "오빠", "친구",
+    "선생님", "할머니", "할아버지", "강아지", "고양이", "여우", "토끼", "곰", "새",
+    "물고기", "다람쥐", "공룡", "말", "소", "돼지", "오리", "나비",
+)
+
+
+def _skip_intent(req: QuestionRequest) -> bool:
+    """아이가 방금 이 질문을 건너뛰겠다고 말했는가."""
+    index = _last_child_index(req)
+    if index is None:
+        return False
+    return bool(_SKIP_INTENT.search(req.recent_messages[index].text or ""))
+
+
+def _yeotguna(word: str) -> str:
+    """'였구나'/'이었구나' — 받침에 맞춘 과거 인정 어미. "손였구나"가 나가지 않게 한다."""
+    return "이었구나" if question_quality.eun_neun(word) == "은" else "였구나"
+
+
+def _stale_labels(req: QuestionRequest) -> list[str]:
+    """아이가 아니라고 한 뒤로는 쓰면 안 되는 탐지 이름들."""
+    if _corrected_label(req) is None:
+        return []
+    return [o.object_name for o in (req.detected_objects or []) if o.object_name]
+
 
 # 사람 축(정체·관계)을 쓸 수 있는지 판단할 어휘. 사람이 아닌 그림에 "이 사람은 누구야?"를
 # 얹으면 918이 막으려던 '없는 것 단정'을 우리가 직접 저지르는 셈이 된다.
@@ -1313,6 +1543,67 @@ def _is_person_drawing(req: QuestionRequest, target: DetectedObject | None) -> b
     return any(word in material for word in _PERSON_WORDS)
 
 
+# 그림일기 전용 사유들 — 복구는 상태별 문장(_diary_situational_replacement)이 맡는다.
+_DIARY_QUALITY_REASONS = frozenset(
+    {
+        question_quality.REDUNDANT_VISUAL,
+        question_quality.VISUAL_EVALUATION,
+        question_quality.CORRECTION_IGNORED,
+        question_quality.UNGROUNDED_EMOTION,
+        question_quality.IDENTITY_FALLBACK,
+        question_quality.BODY_PART_ACTOR,
+    }
+)
+
+
+def _diary_situational_replacement(
+    req: QuestionRequest,
+) -> tuple[str, str, DetectedObject | None] | None:
+    """지금 대화 상태에 맞는 복구 문장을 고른다(S15P11B209-999). 해당 없으면 None.
+
+    가드는 질문을 새로 창작하는 두 번째 모델이 아니다. 상태별로 미리 정해 둔 안전한 문장을
+    고르기만 한다 — 하나의 범용 문장으로 수렴시키면 그 문장이 곧 정책이 되어, 프롬프트에서
+    걷어낸 규칙이 가드를 통해 되살아난다(정체 질문이 실제로 그랬다).
+    """
+    # ① 아이가 건너뛰겠다고 했다 — 다른 대상을 우리가 골라 캐묻지 않고 선택권을 돌려준다.
+    if _skip_intent(req):
+        return "좋아, 그건 건너뛸게. 다른 이야기를 해줄래?", "DRAWING_CONTEXT", None
+    # ② 아이가 이름을 바로잡았다 — 그 이름을 그대로 쓰고 사건으로 잇는다.
+    correction = _correction(req)
+    if correction is not None:
+        label = correction.label
+        if correction.semantic_type == BODY_PART:
+            # 부위에는 물을 것이 겉모습밖에 없다. 소유자를 알면 그 사람의 이야기로 옮기고,
+            #   모르면 사람을 지어내지 말고 그림 전체로 돌아간다(_retarget_for_correction과 같은 판단).
+            owner = correction.owner_label
+            if owner:
+                possessive = "네" if correction.owner == "CHILD" else owner
+                return (
+                    f"아, {possessive} {label}{_yeotguna(label)}. "
+                    f"그때 {owner}{question_quality.eun_neun(owner)} 뭐 하고 있었어?",
+                    "FOLLOW_UP",
+                    None,
+                )
+            return f"아, {label}{_yeotguna(label)}. 이 그림 이야기를 더 들려줄래?", "FOLLOW_UP", None
+        if any(word in label for word in _ACTOR_WORDS):
+            return (
+                f"아, {label}{question_quality.eun_neun(label)} 여기서 뭐 하고 있어?",
+                "FOLLOW_UP",
+                None,
+            )
+        return f"아, {label}{_yeotguna(label)}. 이 그림 이야기를 더 들려줄래?", "FOLLOW_UP", None
+    # ③ 첫마디다 — 장면을 연다.
+    if _last_child_index(req) is None:
+        return "이 그림에서는 무슨 일이 일어나고 있어?", "DRAWING_CONTEXT", None
+    # ④ 아이가 방금 행동·사건을 말했다 — 그 줄기를 잇는다.
+    last = (req.recent_messages[_last_child_index(req)].text or "").strip()
+    if any(marker in last for marker in ("했어", "갔어", "먹었", "놀았", "봤어", "탔어")):
+        return "그러고 나서는 뭐 했어?", "FOLLOW_UP", None
+    if any(marker in last for marker in ("있었", "생겼", "왔어", "됐어", "뒤집")):
+        return "그다음에는 어떻게 됐어?", "FOLLOW_UP", None
+    return None
+
+
 def _diary_axis_replacement(
     req: QuestionRequest, target: DetectedObject | None
 ) -> tuple[str, str, DetectedObject | None]:
@@ -1324,6 +1615,9 @@ def _diary_axis_replacement(
     대상 객체는 떼고 돌려준다. 축을 옮긴 질문이라 그 대상 하나를 가리키지 않고, 붙여 두면
     918이 억눌러 둔 오탐 이름이 targetObject·칩으로 다시 아이 화면에 올라온다.
     """
+    situational = _diary_situational_replacement(req)
+    if situational is not None:
+        return situational
     covered = " ".join([*_asked_questions(req), *_child_texts(req)])
     person = _is_person_drawing(req, target)
     purpose = "FOLLOW_UP" if _last_child_index(req) is not None else "DRAWING_CONTEXT"
@@ -1620,12 +1914,38 @@ def generate(req: QuestionRequest, request_id: str) -> QuestionResponse:
             drawing_description=_truncate_description(req.drawing_description),
             child_texts=_child_texts(req),
         )
+    # 그림일기에서만 보는 위반을 사유별로 가른다(S15P11B209-999). HTP는 제외한다 —
+    #   부위·색·형태 질문이 PDI 표준 문항이고, 감정 질문도 그 축의 정식 항목이다.
+    if not quality_reason and req.activity_type == "ART_DIARY":
+        correction = _correction(req)
+        corrected = correction.label if correction else None
+        # 부위를 바로잡은 턴에서만 '부위가 사건의 주인공'인 문장을 본다(999).
+        part = (
+            corrected
+            if correction is not None and correction.semantic_type == BODY_PART
+            else None
+        )
+        quality_reason = (
+            question_quality.find_visual_evaluation(text)
+            or question_quality.find_asserted_emotion(text)
+            or question_quality.find_stale_label(text, _stale_labels(req))
+            or question_quality.find_body_part_actor(text, part)
+        )
+        # 아이가 방금 이름을 바로잡았거나 건너뛰겠다고 한 직후에는, 마음을 묻거나 정체를
+        #   되묻는 쪽으로 건너뛰지 않는다. 두 자리 모두 이어 갈 이야기가 이미 있다.
+        if not quality_reason and (corrected or _skip_intent(req)):
+            if question_quality.is_emotion_question(text):
+                quality_reason = question_quality.UNGROUNDED_EMOTION
+            elif question_quality.is_identity_question(text):
+                quality_reason = question_quality.IDENTITY_FALLBACK
     if quality_reason:
         # ⚠️ 질문 원문은 남기지 않는다 — 사유 코드만(안전 차단 로그와 같은 규칙).
         logger.warning(
             "질문 품질 교체: reason=%s request_id=%s", quality_reason, request_id
         )
-        if quality_reason == question_quality.REDUNDANT_VISUAL:
+        # 999에서 추가한 그림일기 사유들도 같은 복구 경로를 쓴다 — 상태별 문장을 먼저 고르고,
+        #   해당하는 상태가 없을 때만 축 표로 내려간다.
+        if quality_reason in _DIARY_QUALITY_REASONS:
             text, purpose, target = _diary_axis_replacement(req, target)
         else:
             text, purpose, target = _quality_replacement(req, purpose, target)

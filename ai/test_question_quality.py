@@ -230,5 +230,57 @@ class JosaTest(unittest.TestCase):
         self.assertEqual("는", question_quality.eun_neun("PERSON"))
 
 
+class IdentityQuestionTest(unittest.TestCase):
+    """정체 질문 판정 (S15P11B209-999).
+
+    이 판정은 아이가 이름을 바로잡았거나 건너뛰겠다고 한 직후에만 쓰인다 — 그 자리에서
+    정체를 되묻는 것은 방금 들은 답을 없던 일로 만드는 것이다.
+    """
+
+    IDENTITY = ("이 사람은 누구야?", "이건 뭐야?", "그건 뭘까?", "이건 누구 이야기야?")
+    # 사건 속 상대를 묻는 말이다 — 정체를 되묻는 것이 아니라 이야기를 잇는 질문이다.
+    NOT_IDENTITY = ("누구한테 줬어?", "누구랑 같이 갔어?", "누구에게 말했어?")
+
+    def test_identity_questions(self):
+        for text in self.IDENTITY:
+            with self.subTest(text=text):
+                self.assertTrue(question_quality.is_identity_question(text))
+
+    def test_companion_questions_are_not_identity(self):
+        for text in self.NOT_IDENTITY:
+            with self.subTest(text=text):
+                self.assertFalse(question_quality.is_identity_question(text))
+
+
+class BodyPartActorTest(unittest.TestCase):
+    """부위를 사건의 주인공으로 삼은 질문 (S15P11B209-999).
+
+    2026-08-07 실호출에서 나왔다. 부위는 스스로 무엇을 하지 않아 아이가 답할 수 없다.
+    """
+
+    def test_flags_part_as_the_subject_of_an_event(self):
+        for text in ("그 머리로 무슨 일이 있었어?", "그 머리는 지금 뭐 하고 있어?"):
+            with self.subTest(text=text):
+                self.assertEqual(
+                    question_quality.BODY_PART_ACTOR,
+                    question_quality.find_body_part_actor(text, "머리"),
+                )
+
+    def test_only_applies_on_the_correction_turn(self):
+        self.assertIsNone(question_quality.find_body_part_actor("손으로 뭐 했어?", None))
+
+    def test_does_not_cross_a_sentence_boundary(self):
+        # 앞 문장의 부위와 뒤 문장의 사건을 엮으면 우리 복구 문장이 스스로 걸린다.
+        self.assertIsNone(
+            question_quality.find_body_part_actor(
+                "아, 네 머리였구나. 그때 너는 뭐 하고 있었어?", "머리"
+            )
+        )
+
+    def test_visual_question_is_not_this_reason(self):
+        # 겉모습을 묻는 것은 954(REDUNDANT_VISUAL)가 맡는 축이다.
+        self.assertIsNone(question_quality.find_body_part_actor("머리 무슨 색이야?", "머리"))
+
+
 if __name__ == "__main__":
     unittest.main()

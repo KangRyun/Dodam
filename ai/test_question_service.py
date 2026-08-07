@@ -855,13 +855,21 @@ class SubjectPromptAndTargetTest(unittest.TestCase):
         self.assertIn("지붕", capture["system"])
 
     def test_diary_has_no_subject_constraint(self):
+        """999: "정해진 주제는 없어" 한 줄이 사라졌다 — 고정하려는 규칙은 그대로다.
+
+        그 문구는 그림일기를 '주제 없는 자유 그림'으로만 정의해, 새 질문 후보를 정체·관계·
+        사건·경험·기억으로 나열하는 옛 축과 짝을 이뤘다. 지금은 활동 자체를 "기억에 남은 일
+        또는 상상한 이야기"로 정의한다. **주제를 못 박지 않는다**는 성질은 HTP 전용 잠금
+        문구가 없는 것으로 확인한다 — 그게 이 테스트가 지키려던 것이다.
+        """
         req = _request(
             activity_type="ART_DIARY",
             drawing_subject=None,
             detected_objects=[_detected("UNKNOWN", "강아지", 0.9)],
         )
         system = question_service._build_messages(req)[0]["content"]
-        self.assertIn("정해진 주제는 없어", system)
+        self.assertIn("상상한 이야기를 그림으로 표현한 활동", system)
+        self.assertNotIn("활동에서 정해진 것이라 바뀌지 않아", system)
         self.assertNotIn("이야기로 넘어가지 마", system)
 
     def test_asked_hint_present_only_when_asked_nonempty(self):
@@ -1193,7 +1201,10 @@ class ActivityBlockVersionTrackingTest(unittest.TestCase):
         }
         used = {
             "activity_block_htp": shared | {"HTP", "HTP_WHOLE", "HTP_OPENING", "PERSON_PART"},
-            "activity_block_diary": shared | {"ART_DIARY", "ART_DIARY_OPEN"},
+            # PERSON_PART는 양쪽에 있지만 착지가 다르다(999) — HTP는 그 사람의 생각·기분으로,
+            #   그림일기는 오탐 가능성을 열어 두고 사건으로. 993이 파일을 가른 덕에 가능하다.
+            "activity_block_diary": shared
+            | {"ART_DIARY", "ART_DIARY_OPEN", "PERSON_PART"},
         }
         for name, keys in used.items():
             available = set(prompts_registry.sections(name))
@@ -2533,8 +2544,10 @@ class RedundantVisualQuestionTest(unittest.TestCase):
                     detected_objects=[_detected("PERSON", "사람", 0.9)],
                 )
                 self._assert_no_visual_question(resp.question_text)
-                # 그림만 보고는 알 수 없는 것을 묻는다 — 여기서는 인물의 정체.
-                self.assertIn("누구", resp.question_text)
+                # 999: 축 순서를 바꿔 정체가 1순위에서 마지막으로 내려갔다. 그림만 보고는 알
+                #   수 없는 것을 묻는다는 규칙은 그대로이고, 그 자리를 사건이 가져간다 —
+                #   정체는 대상을 뭐라 불러야 할지 몰라 이야기를 못 이을 때 쓰는 확인 질문이다.
+                self.assertIn("무슨 일이 있었어", resp.question_text)
                 self.assertEqual("PASSED", resp.safety_result.status)
                 self.assertFalse(resp.fallback_used)
 
@@ -2561,11 +2574,12 @@ class RedundantVisualQuestionTest(unittest.TestCase):
             detected_objects=[_detected("PERSON", "사람", 0.9)],
         )
         self._assert_no_visual_question(resp.question_text)
-        # 정체("동생")·관계("같이")·사건("뛰어놀았어")이 이미 다 나왔다 —
-        # 아직 안 나온 축(기억)으로 옮겨야 한다.
+        # 999: 아이가 "뛰어놀았어"로 행동을 열어 둔 자리라, 축 표로 내려가기 전에 상태별
+        #   복구가 그 줄기를 잇는다. 이미 나온 것을 되묻지 않는다는 규칙은 그대로다 —
+        #   바뀐 것은 '어디로 옮기는가'이고, 아이가 방금 연 이야기가 축 목록보다 앞선다.
         self.assertNotIn("누구야", resp.question_text)
         self.assertNotIn("무슨 일이 있었어", resp.question_text)
-        self.assertIn("기억나는", resp.question_text)
+        self.assertIn("그러고 나서는 뭐 했어", resp.question_text)
 
     # ── 필수 사례 ④: 아이가 탐지를 말로 정정 ────────────────────
     def test_corrected_name_does_not_come_back_in_question_or_chips(self):
@@ -2660,7 +2674,9 @@ class RedundantVisualQuestionTest(unittest.TestCase):
         self.assertIn("[이미 보이는 것을 다시 묻지 않기]", system)
         self.assertIn("이미 알고 있는 정보야", system)
         self.assertIn("표현만 바꿔 되묻지 마", system)
-        self.assertIn("[무엇을 물어볼까 - 우선순위]", system)
+        # 999: 6단 고정 우선순위를 걷어내고 "아이가 방금 연 이야기"를 1순위로 두는
+        #   [다음 질문을 고르는 순서]로 바꿨다. 제목이 바뀐 것이지 규칙이 사라진 것이 아니다.
+        self.assertIn("[다음 질문을 고르는 순서]", system)
         self.assertIn("분석보다 아이 말을 우선해", system)
 
     def test_diary_activity_block_does_not_invite_visual_questions(self):
@@ -2674,7 +2690,11 @@ class RedundantVisualQuestionTest(unittest.TestCase):
         block = question_service._activity_block(req, None)
         self.assertIn("대상이 하나뿐", block)
         self.assertNotIn("모양·색·행동·표정", block)
-        self.assertIn("정체·관계·사건·경험·기억", block)
+        # 999: 그림일기 구획의 착지점이 "아직 안 물어본 축(정체·관계·사건·경험·기억)"에서
+        #   "그 대상과 연결된 사건·이야기"로 바뀌었다. 축 목록은 아이가 방금 연 이야기보다
+        #   안 물어본 항목을 위로 올려, 사건을 말하기 시작해도 정체·관계로 되돌렸다.
+        self.assertIn("사건이나 이야기를 이어갈 수 있어", block)
+        self.assertIn("생김새를 반복해서 묻지 마", block)
 
         # HTP도 같은 규칙을 쓴다 (S15P11B209-988에서 954의 활동별 예외를 되돌렸다).
         #
@@ -2698,6 +2718,244 @@ class RedundantVisualQuestionTest(unittest.TestCase):
         self.assertNotIn("모양·색·행동·표정", htp)
         self.assertIn("정체·관계·사건·마음·앞일", htp)
         self.assertIn("그림에 이미 보이는 색·모양·크기·개수·위치", htp)
+
+
+class CorrectionParsingTest(unittest.TestCase):
+    """아이가 바로잡아 준 말을 이름·소유자·종류로 읽는다 (S15P11B209-999).
+
+    구 코드는 정정 뒤 덩어리를 통째로 이름으로 잡았다. "덤불 아니고 내 머리야"에서 이름이
+    '내 머리'가 되어, 그 뒤 어떤 문장에도 그 이름이 들어맞지 않았다 — 정정을 읽어 놓고도
+    다음 질문에 못 쓰는 상태였다(2026-08-06 실측에서 '정정 명칭 유지 0/12').
+
+    소유자를 함께 읽는 이유는 대상을 옮기기 위해서다. 부위에는 물을 것이 겉모습밖에 없고,
+    이야기는 그 부위를 가진 **사람**에게 붙는다.
+    """
+
+    def _req(self, said: str, **overrides):
+        base = {
+            "activity_type": "ART_DIARY",
+            "allowed_response_modes": ["VOICE", "OPTION"],
+            "current_question_count": 1,
+            "detected_objects": [
+                _detected("BUSH", "덤불", 0.86),
+                _detected("PERSON", "사람", 0.79),
+            ],
+            "recent_messages": [
+                RecentMessage(
+                    sender_type="AI", message_type="QUESTION", text="여기 이건 뭐야?"
+                ),
+                RecentMessage(
+                    sender_type="CHILD", message_type="VOICE_ANSWER", text=said
+                ),
+            ],
+        }
+        base.update(overrides)
+        return _request(**base)
+
+    def test_child_body_part_with_own_possessive(self):
+        got = question_service._correction(self._req("덤불 아니고 내 머리야"))
+        self.assertEqual(got.label, "머리")
+        self.assertEqual(got.owner, "CHILD")
+        self.assertEqual(got.semantic_type, question_service.BODY_PART)
+
+    def test_body_part_owned_by_another_person(self):
+        got = question_service._correction(self._req("이거 엄마 머리야"))
+        self.assertEqual(got.label, "머리")
+        self.assertEqual(got.owner, "MOTHER")
+        self.assertEqual(got.semantic_type, question_service.BODY_PART)
+
+    def test_owner_word_order_does_not_flip_to_child(self):
+        # "우리 엄마"는 엄마 이야기다. '우리'가 먼저 걸리면 소유자가 아이로 뒤바뀐다.
+        got = question_service._correction(self._req("덤불 아니고 우리 엄마 머리야"))
+        self.assertEqual(got.owner, "MOTHER")
+
+    def test_plain_object_keeps_child_name_without_owner(self):
+        got = question_service._correction(self._req("강아지 아니고 여우야"))
+        self.assertEqual(got.label, "여우")
+        self.assertIsNone(got.owner)
+        self.assertEqual(got.semantic_type, question_service.OBJECT)
+
+    def test_bare_negation_is_not_a_correction(self):
+        # 이름을 대지 않은 부정이다. 여기서 이름을 뽑으면 없는 대상이 생긴다.
+        for said in ("아니야", "그거 아니야", "이거 아니야."):
+            with self.subTest(said=said):
+                self.assertIsNone(question_service._correction(self._req(said)))
+
+    def test_predicate_tail_is_not_taken_as_a_name(self):
+        # "그거 아니고 밖에서 놀았어" — 이름을 대는 말이 아니라 사건을 잇는 말이다.
+        self.assertIsNone(
+            question_service._correction(self._req("그거 아니고 밖에서 놀았어"))
+        )
+
+    def test_self_reference_is_called_back_to_the_child(self):
+        # "아, 나였구나"는 도담이 자기 이야기를 하는 문장이 된다.
+        got = question_service._correction(self._req("이거 나야"))
+        self.assertEqual(got.label, "너")
+        self.assertEqual(got.owner, "CHILD")
+
+
+class CorrectionRetargetTest(unittest.TestCase):
+    """정정 뒤 다음 대화 대상 (S15P11B209-999).
+
+    부위를 대상으로 남겨 두면 [[TARGET_FOLLOW_UP]]이 그 부위 하나를 가리키고, 부위에는 물을
+    것이 겉모습밖에 없어 954가 막아 둔 "머리 무슨 색이야?"로 되돌아간다.
+    """
+
+    def _req(self, said: str, *, objects):
+        return _request(
+            activity_type="ART_DIARY",
+            allowed_response_modes=["VOICE", "OPTION"],
+            current_question_count=1,
+            detected_objects=objects,
+            drawing_description="화면 가운데에 사람이 한 명 서 있어요.",
+            recent_messages=[
+                RecentMessage(
+                    sender_type="AI", message_type="QUESTION", text="여기 이건 뭐야?"
+                ),
+                RecentMessage(
+                    sender_type="CHILD", message_type="VOICE_ANSWER", text=said
+                ),
+            ],
+        )
+
+    WITH_PERSON = [_detected("BUSH", "덤불", 0.86), _detected("PERSON", "사람", 0.79)]
+    NO_PERSON = [_detected("BUSH", "덤불", 0.86)]
+
+    def test_body_part_with_owner_moves_to_that_person(self):
+        target = question_service._target_for_purpose(
+            self._req("덤불 아니고 엄마 머리야", objects=self.WITH_PERSON),
+            "OBJECT_DESCRIPTION",
+        )
+        self.assertEqual(target.object_code, "PERSON")
+        self.assertEqual(target.object_name, "엄마")
+
+    def test_body_part_without_owner_falls_back_to_whole_scene(self):
+        target = question_service._target_for_purpose(
+            self._req("덤불 아니고 손이야", objects=self.WITH_PERSON),
+            "OBJECT_DESCRIPTION",
+        )
+        self.assertIsNone(target)
+
+    def test_body_part_with_owner_but_no_person_detected_falls_back(self):
+        # 사람 전체가 탐지되지 않았다 — 없는 대상을 지어내지 않고 그림 전체로 돌아간다.
+        target = question_service._target_for_purpose(
+            self._req("덤불 아니고 엄마 머리야", objects=self.NO_PERSON),
+            "OBJECT_DESCRIPTION",
+        )
+        self.assertIsNone(target)
+
+    def test_plain_object_keeps_that_detection_under_the_child_name(self):
+        target = question_service._target_for_purpose(
+            self._req("덤불 아니고 여우야", objects=self.WITH_PERSON),
+            "OBJECT_DESCRIPTION",
+        )
+        self.assertEqual(target.object_code, "BUSH")  # 아이가 고친 그 탐지
+        self.assertEqual(target.object_name, "여우")  # 아이가 부른 이름
+
+    def test_unmatched_correction_does_not_rename_another_detection(self):
+        # 아이가 고친 것이 어느 탐지인지 못 짚으면 대상을 떼어 낸다. 여기서 원래 대상을
+        # 새 이름으로 부르면 '사람'을 '여우'라고 부르게 된다.
+        target = question_service._target_for_purpose(
+            self._req("강아지 아니고 여우야", objects=self.WITH_PERSON),
+            "OBJECT_DESCRIPTION",
+        )
+        self.assertIsNone(target)
+
+    def test_retarget_never_escapes_its_purpose(self):
+        """목적이 OBJECT_DESCRIPTION이 아니면 대상은 붙지 않는다.
+
+        2026-08-07 실호출에서 이걸로 Q20이 3/3 실패했다 — 정정 재선택이 목적 밖에서도 대상을
+        만들어 내 _is_consistent(계약 사전 방어)가 깨졌고, 아이는 폴백 템플릿을 받았다.
+        """
+        req = self._req("덤불 아니고 엄마 머리야", objects=self.WITH_PERSON)
+        for purpose in ("FOLLOW_UP", "DRAWING_CONTEXT", "EXPRESSION"):
+            with self.subTest(purpose=purpose):
+                self.assertIsNone(question_service._target_for_purpose(req, purpose))
+
+    def test_htp_target_selection_is_untouched(self):
+        # HTP 부위 라벨은 신뢰도 상위라 부위를 대상으로 두는 것이 맞다(918·PDI 문항).
+        target = question_service._target_for_purpose(
+            _request(
+                activity_type="HTP",
+                drawing_subject="PERSON",
+                current_question_count=1,
+                detected_objects=[
+                    _detected("PERSON_HEAD", "머리", 0.95),
+                    _detected("PERSON", "사람", 0.80),
+                ],
+                recent_messages=[
+                    RecentMessage(
+                        sender_type="CHILD", message_type="VOICE_ANSWER", text="이거 엄마 머리야"
+                    ),
+                ],
+            ),
+            "OBJECT_DESCRIPTION",
+        )
+        self.assertEqual(target.object_code, "PERSON")
+        self.assertEqual(target.object_name, "사람")
+
+
+class DiaryCorrectionFallbackTest(unittest.TestCase):
+    """정정 직후 품질 가드가 고르는 복구 문장 (S15P11B209-999)."""
+
+    def _req(self, said: str):
+        return _request(
+            activity_type="ART_DIARY",
+            allowed_response_modes=["VOICE", "OPTION"],
+            current_question_count=1,
+            detected_objects=[_detected("BUSH", "덤불", 0.86)],
+            recent_messages=[
+                RecentMessage(
+                    sender_type="AI", message_type="QUESTION", text="이 덤불은 뭐야?"
+                ),
+                RecentMessage(
+                    sender_type="CHILD", message_type="VOICE_ANSWER", text=said
+                ),
+            ],
+        )
+
+    def test_owner_known_asks_about_the_person_not_the_part(self):
+        text, _, target = question_service._diary_situational_replacement(
+            self._req("덤불 아니고 엄마 머리야")
+        )
+        self.assertIn("엄마", text)
+        self.assertIsNone(target)
+        # 부위의 겉모습을 되묻지 않는다.
+        for banned in ("무슨 색", "어떤 모양", "얼마나 커"):
+            self.assertNotIn(banned, text)
+
+    def test_body_part_as_the_actor_is_replaced(self):
+        """"그 머리로 무슨 일이 있었어?" — 부위는 스스로 무엇을 하지 않는다 (999).
+
+        2026-08-07 실호출에서 나온 문장이다. 프롬프트의 정정 처리 규칙("그 대상이 무엇을
+        하는지 물어봐")이 부위에도 그대로 적용됐다. 대상 선택으로는 못 막는다 — 이 턴의
+        목적은 FOLLOW_UP 이라 애초에 대상 객체가 붙지 않는다.
+        """
+        for reply in ("아, 네 머리였구나. 그 머리로 무슨 일이 있었어?", "그 머리는 지금 뭐 하고 있어?"):
+            with self.subTest(reply=reply):
+                capture: dict = {}
+                client = _mock_client(capture, reply=reply)
+                with mock.patch.object(
+                    question_service, "get_client", return_value=client
+                ):
+                    resp = question_service.generate(
+                        self._req("덤불 아니고 내 머리야"), "req-999-part"
+                    )
+                self.assertNotIn("머리로 무슨 일", resp.question_text)
+                self.assertNotIn("머리는 지금 뭐 하고", resp.question_text)
+                # 정정 자체는 받아들인 채로 아이 쪽으로 이야기를 옮긴다.
+                self.assertIn("너", resp.question_text)
+
+    def test_child_opened_story_about_a_part_is_left_alone(self):
+        """아이가 먼저 연 이야기까지 잡으면 정상 대화가 끊긴다 — 정정 턴에만 적용한다."""
+        self.assertIsNone(question_quality.find_body_part_actor("손으로 뭐 했어?", None))
+
+    def test_final_consonant_gets_the_right_ending(self):
+        # "손였구나"가 아이에게 나가면 안 된다.
+        text, _, _ = question_service._diary_situational_replacement(
+            self._req("덤불 아니고 손이야")
+        )
+        self.assertIn("손이었구나", text)
 
 
 class ConversationModelSelectionTest(unittest.TestCase):
