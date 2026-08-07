@@ -16,6 +16,83 @@ import '../format/activity_duration_format.dart';
 import '../widgets/htp_report_gallery.dart';
 import '../widgets/report_mascot.dart';
 
+/// 블럭 사이 간격. 기존 [AppSpacing.lg](24)의 60%다(S15P11B209-996).
+///
+/// 블럭이 많아 한 화면에 두세 개밖에 안 들어오던 것을 좁혔다. 토큰 사이값
+/// (sm 12 · md 16)이라 상수로 둔다 — 카드 **안쪽** 여백은 24 그대로다.
+const double _sectionGap = 14;
+
+/// 가로 화면에서 블럭 안을 두 단으로 가를 때 쓰는 콘텐츠 상한(S15P11B209-996).
+///
+/// 세로 한 단일 때는 [AppSizes.contentMaxWidth](720)로 글줄이 길어지지 않게
+/// 묶지만, 블럭 안에서 다시 반으로 갈리므로 상한을 넓혀야 한 단이 좁아지지
+/// 않는다.
+const double _wideContentMaxWidth = 1120;
+
+/// 블럭 안을 두 단으로 가르는 최소 폭. 이보다 좁으면 한 단으로 쌓는다.
+const double _blockSplitWidth = 640;
+
+/// 블럭 안 소제목(주요 심리 경향·보호자 가이드·대화 전문) 글자 모양.
+const _groupTitleStyle = TextStyle(
+  color: AppColors.ink,
+  fontSize: 16,
+  fontWeight: FontWeight.w800,
+);
+
+/// 블럭 안을 두 단으로 가른다. 좁으면 왼쪽 뒤에 오른쪽을 이어 한 단으로 쌓는다.
+///
+/// 가로 화면에서 블럭이 세로로만 길어지는 것을 막는다(S15P11B209-996). 블럭끼리
+/// 나누면 한쪽만 길어져 아래가 비지만, 안에서 가르면 제목 아래 내용이 균형 있게
+/// 퍼진다. 한 단일 때의 읽는 순서(왼쪽 먼저, 그다음 오른쪽)는 그대로 유지한다.
+class _BlockColumns extends StatelessWidget {
+  const _BlockColumns({required this.left, required this.right});
+
+  final List<Widget> left;
+  final List<Widget> right;
+
+  @override
+  Widget build(BuildContext context) {
+    if (left.isEmpty || right.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [...left, ...right],
+      );
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < _blockSplitWidth) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ...left,
+              const SizedBox(height: AppSpacing.md),
+              ...right,
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: left,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.lg),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: right,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 enum _ReportViewStatus {
   loading,
   completed,
@@ -422,11 +499,27 @@ class _ReportContent extends StatelessWidget {
       final htpStory = isHtp
           ? _htpSubjectStorySection(report, imageFetcher)
           : null;
+      // 가로 화면에서는 블럭을 나란히 세우는 대신 각 블럭 **안**을 두 단으로
+      // 가른다(S15P11B209-996).
+      final wideBlocks = isWide && !isHtp;
+      // 그림일기는 리포트 전체가 한 장이다(S15P11B209-996). 섹션마다 카드를
+      // 두르지 않고 제목만으로 내용을 나눈다 — 색은 배경이 아니라 제목이 나른다.
+      // 비진단 안내와 활동 요약은 표지 안으로 들어간다.
+      final onePage = !isHtp;
       final sections = <Widget>[
-        _ReportHero(report: report),
-        ?_nonDiagnosticNoticeSection(report),
-        ?_overviewSection(report),
+        _ReportHero(
+          report: report,
+          flat: onePage,
+          activity: isHtp
+              ? null
+              : _activityOverviewContent(
+                  report,
+                  imageFetcher,
+                  activityRepository,
+                ),
+        ),
         if (isHtp) ...[
+          ?_overviewSection(report),
           // 계약 §5 주제별 그림이 아직 없는 응답에서는 기존 그림 섹션(활동기록
           // 갤러리 우회)을 그대로 남겨 세 그림을 잃지 않는다.
           if (htpStory == null || report.subjectDrawings.isEmpty) drawings,
@@ -436,43 +529,60 @@ class _ReportContent extends StatelessWidget {
           ?_observedFeaturesSection(report),
           ?_interpretationsSection(report, isHtp: true),
           ?_activityFactsSection(report, isHtp: true),
+          ..._parentGuideSections(report),
+          ?_legacyGuideSection(report),
         ] else ...[
-          ?_interpretationsSection(report),
-          drawings,
-          ?_subjectObservationsSection(report),
-          ?_childExpressionSection(report, playbackController),
-          ?_conversationSummarySection(report),
-          ?_observedFeaturesSection(report),
-          ?_activityFactsSection(report),
+          // 활동 요약은 표지 안으로 들어갔다(S15P11B209-996).
+          ?_observationsSection(report, flat: onePage),
+          ?_drawingStorySection(report, playbackController, flat: onePage),
         ],
-        ..._parentGuideSections(report),
-        ?_legacyGuideSection(report),
         if (report.hasNoObservations) _noObservationsCard,
-        ?_limitationsReferencesSection(report),
+        _ReportActionSection(
+          pdfAction: pdfAction,
+          onSavePdf: onSavePdf,
+          onSharePdf: onSharePdf,
+          flat: onePage,
+        ),
       ];
       return SingleChildScrollView(
         key: ValueKey(isWide ? 'report-wide-layout' : 'report-small-layout'),
         padding: EdgeInsets.all(pagePadding),
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: AppSizes.contentMaxWidth,
+            constraints: BoxConstraints(
+              maxWidth: wideBlocks
+                  ? _wideContentMaxWidth
+                  : AppSizes.contentMaxWidth,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (final (index, section) in sections.indexed) ...[
-                  if (index > 0) const SizedBox(height: AppSpacing.lg),
-                  section,
-                ],
-                const SizedBox(height: AppSpacing.lg),
-                _ReportActionSection(
-                  pdfAction: pdfAction,
-                  onSavePdf: onSavePdf,
-                  onSharePdf: onSharePdf,
-                ),
-              ],
-            ),
+            child: onePage
+                // 한 장짜리 — 섹션 사이는 구분선과 여백으로만 나눈다.
+                ? _ReportCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final (index, section) in sections.indexed) ...[
+                          if (index > 0) ...[
+                            const SizedBox(height: AppSpacing.lg),
+                            const Divider(
+                              height: 1,
+                              color: AppColors.outline,
+                            ),
+                            const SizedBox(height: AppSpacing.lg),
+                          ],
+                          section,
+                        ],
+                      ],
+                    ),
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (final (index, section) in sections.indexed) ...[
+                        if (index > 0) const SizedBox(height: _sectionGap),
+                        section,
+                      ],
+                    ],
+                  ),
           ),
         ),
       );
@@ -511,20 +621,27 @@ bool _isPdf(List<int> bytes) =>
     bytes[4] == 0x2D;
 
 class _ReportHero extends StatelessWidget {
-  const _ReportHero({required this.report});
+  const _ReportHero({required this.report, this.activity, this.flat = false});
 
   final ReportDetailDto report;
 
-  @override
-  Widget build(BuildContext context) => _ReportCard(
-    backgroundColor: AppColors.brandYellowSoft,
-    borderColor: AppColors.sunshine,
-    child: LayoutBuilder(
+  /// 카드 없이 내용만 돌려줄지 여부(S15P11B209-996).
+  final bool flat;
+
+  /// 표지 아래에 이어 붙일 활동 요약(그림 + 활동 정보).
+  ///
+  /// 그림일기·자유 그림은 표지와 활동 요약을 한 장으로 합친다
+  /// (S15P11B209-996). HTP는 활동 정보를 별도 블럭으로 두어 null이다.
+  final Widget? activity;
+
+  Widget _intro(BuildContext context) => LayoutBuilder(
       builder: (context, constraints) {
         final compact = constraints.maxWidth < 520;
+        // 표지 마스코트는 예전 크기의 70%다(S15P11B209-996). 표지가 첫 화면을
+        // 거의 다 먹던 것을 줄인다 — 장식이지 본문이 아니다.
         final mascot = const ReportMascotImage(
           assetPath: ReportMascotAssets.intro,
-          maxWidth: 188,
+          maxWidth: 132,
           mascotKey: ValueKey('report-mascot-intro'),
         );
         final copy = Column(
@@ -550,14 +667,15 @@ class _ReportHero extends StatelessWidget {
                 ),
               ),
             ),
-            const SizedBox(height: AppSpacing.sm),
+            // 표지 글 사이 여백은 기존의 절반이다(12→6, 16→8).
+            const SizedBox(height: 6),
             Text(
               report.isHtpActivity
                   ? '집과 나무와 사람을 그리면서 아이가 들려준 이야기를 모았어요.'
                   : '돌아보기 친구가 아이의 그림과 이야기를 차근차근 정리했어요.',
               style: const TextStyle(color: AppColors.inkMuted, height: 1.5),
             ),
-            const SizedBox(height: AppSpacing.md),
+            const SizedBox(height: AppSpacing.xs),
             Wrap(
               spacing: AppSpacing.xs,
               runSpacing: AppSpacing.xs,
@@ -567,7 +685,6 @@ class _ReportHero extends StatelessWidget {
                   _MetadataPill(label: name),
                 if (report.createdAt case final createdAt?)
                   _MetadataPill(label: _date(createdAt)),
-                _MetadataPill(label: '리포트 v${report.reportVersion}'),
               ],
             ),
           ],
@@ -576,22 +693,96 @@ class _ReportHero extends StatelessWidget {
           return Column(
             children: [
               ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 132),
+                constraints: const BoxConstraints(maxWidth: 92),
                 child: mascot,
               ),
-              const SizedBox(height: AppSpacing.md),
+              const SizedBox(height: AppSpacing.xs),
               copy,
             ],
           );
         }
         return Row(
           children: [
-            SizedBox(width: 172, child: mascot),
-            const SizedBox(width: AppSpacing.xl),
+            SizedBox(width: 120, child: mascot),
+            const SizedBox(width: AppSpacing.lg),
             Expanded(child: copy),
           ],
         );
       },
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final notice = _heroNotice(report);
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _intro(context),
+        ?notice,
+        if (activity case final activity?) ...[
+          const SizedBox(height: AppSpacing.md),
+          activity,
+        ],
+      ],
+    );
+    if (flat) return body;
+    return _ReportCard(
+      backgroundColor: AppColors.brandYellowSoft,
+      borderColor: AppColors.sunshine,
+      // 표지만 위아래 여백을 절반으로 줄인다(24→12). 좌우는 다른 블럭과 맞춘다.
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.sm,
+      ),
+      child: body,
+    );
+  }
+}
+
+/// 표지 아래에 붙는 비진단 안내(S15P11B209-996).
+///
+/// 예전에는 안내가 별도 보라 카드로 떨어져 있었다. "이 리포트를 어떻게 읽어야
+/// 하는가"를 말하므로 읽기 시작하는 자리인 표지에 둔다. 경고가 아니라 안내라
+/// 색을 쓰지 않고 구분선과 낮은 대비의 작은 글씨로만 구분한다.
+///
+/// 계약 §11의 `limitations`·`references`는 여기 싣지 않는다. 서버가 주는
+/// 한계 문장이 이 안내와 거의 같은 말이라 두 번 읽히기 때문이다.
+Widget? _heroNotice(ReportDetailDto report) {
+  final notice = report.nonDiagnosticNotice?.trim();
+  if (notice == null || notice.isEmpty) return null;
+  return Padding(
+    key: const ValueKey('report-non-diagnostic-notice'),
+    padding: const EdgeInsets.only(top: AppSpacing.md),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 1, color: AppColors.sunshine),
+        const SizedBox(height: AppSpacing.sm),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.only(top: 1),
+              child: Icon(
+                Icons.info_outline_rounded,
+                size: 16,
+                color: AppColors.inkMuted,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.xs),
+            Expanded(
+              child: Text(
+                notice,
+                style: const TextStyle(
+                  color: AppColors.inkMuted,
+                  height: 1.45,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
     ),
   );
 }
@@ -816,71 +1007,6 @@ class _SubjectDrawingCard extends StatelessWidget {
   }
 }
 
-/// 계약 §5·§6: 한 주제(집/나무/사람)의 관찰 사실과 문답.
-///
-/// 완성 그림은 §11-4 섹션에서 이미 보여줬으므로 여기서 다시 싣지 않는다.
-class _SubjectReportCard extends StatelessWidget {
-  const _SubjectReportCard({required this.report, required this.linkedTitles});
-
-  final ReportSubjectReportDto report;
-
-  /// `interpretationRefs`가 가리킨 경향 카드의 **제목**만 담는다. 경향 문구
-  /// (`tendencyText`)는 근거·범위 없이 떠돌지 않도록 여기에 싣지 않는다(§3).
-  final List<String> linkedTitles;
-
-  @override
-  Widget build(BuildContext context) {
-    final label = _subjectLabel(report.subjectType);
-    return Container(
-      key: ValueKey('report-subject-${report.subjectType ?? 'UNKNOWN'}'),
-      margin: const EdgeInsets.only(bottom: AppSpacing.sm),
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: AppColors.outline),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Semantics(
-            header: true,
-            child: Text(
-              label,
-              style: const TextStyle(
-                color: AppColors.ink,
-                fontSize: 16,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          if (report.visionObservations.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.sm),
-            for (final observation in report.visionObservations)
-              _Bullet(title: observation),
-          ],
-          if (report.qaPairs.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.xs),
-            _QaPairList(pairs: report.qaPairs),
-          ],
-          if (linkedTitles.isNotEmpty) ...[
-            const SizedBox(height: AppSpacing.xs),
-            const Text('이 그림과 이어지는 이야기', style: AppTypography.label),
-            const SizedBox(height: AppSpacing.xxs),
-            Wrap(
-              spacing: AppSpacing.xs,
-              runSpacing: AppSpacing.xs,
-              children: [
-                for (final title in linkedTitles) Chip(label: Text(title)),
-              ],
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class _ReportSingleImagePreview extends StatelessWidget {
   const _ReportSingleImagePreview({
     required this.imageUrl,
@@ -920,14 +1046,8 @@ class _ReportSingleImagePreview extends StatelessWidget {
 // 쓰고, 경고/위험 아이콘·문구는 쓰지 않는다.
 // ─────────────────────────────────────────────────────────────────────────
 
-/// §1 비진단 안내 — 경고 배너가 아니라 중립 정보 카드.
-Widget? _nonDiagnosticNoticeSection(ReportDetailDto report) {
-  final notice = report.nonDiagnosticNotice?.trim();
-  if (notice == null || notice.isEmpty) return null;
-  return _NoticeCard(lines: [notice]);
-}
-
-/// §2 한눈에 보는 이번 활동 — 활동 정보와 아이가 고른 감정.
+/// §2 한눈에 보는 이번 활동 — 활동 정보와 아이가 고른 감정. HTP 전용이다.
+/// 그림일기·자유 그림은 그림까지 묶은 [_activityOverviewSection]을 쓴다.
 Widget? _overviewSection(ReportDetailDto report) {
   final session = report.drawingSession;
   final emotions = report.childExpression?.selectedEmotions ?? const [];
@@ -973,6 +1093,117 @@ Widget? _overviewSection(ReportDetailDto report) {
   );
 }
 
+/// 그림일기·자유 그림의 활동 요약 — 표지 안에 들어갈 내용만 돌려준다.
+///
+/// 활동 정보(§2)와 완성 그림(§11-4)이 따로 놓여 있으면 보호자가 "무엇을
+/// 그렸나"와 "어떤 활동이었나"를 두 블럭에서 나눠 읽어야 했다. 그림을 왼쪽에
+/// 두고 오른쪽에 활동 정보를 세워 한 눈에 묶고, 다시 표지와 한 장으로 합쳤다
+/// (S15P11B209-996) — 리포트를 펼치면 누구의 어떤 활동인지가 먼저 온다.
+///
+/// 대화 요약 한 줄은 그림이 무엇인지 설명하는 문장이라 그림 바로 아래에 붙인다
+/// — 예전 '대화 요약' 블럭은 이 한 줄만 남기고 없앴다.
+Widget? _activityOverviewContent(
+  ReportDetailDto report,
+  ImageByteFetcher imageFetcher,
+  ActivityRepository? activityRepository,
+) {
+  final session = report.drawingSession;
+  final emotions = report.childExpression?.selectedEmotions ?? const [];
+  final lines = <Widget>[
+    // 세션의 표시 이름이 없으면 계약 §2 최상위 activityType을 한국어 라벨로
+    // 바꿔 쓴다. 둘 다 없으면 줄 자체가 빠진다.
+    if ((session?.drawingTypeName ??
+            session?.drawingTypeCode ??
+            _activityTypeLabel(report.activityType))
+        case final type?)
+      _InfoLine(label: '활동 유형', value: type),
+    if (formatActivityDuration(session?.durationMs) case final duration?)
+      _InfoLine(label: '활동 시간', value: duration),
+    if (session?.inputMethod case final inputMethod?)
+      _InfoLine(label: '입력 방식', value: _inputMethodLabel(inputMethod)),
+  ];
+  final imageUrl =
+      report.drawing?.finalImageUrl ?? report.drawing?.thumbnailUrl;
+  final hasImage = imageUrl != null || report.subjectDrawings.isNotEmpty;
+  if (lines.isEmpty && emotions.isEmpty && !hasImage) return null;
+
+  final caption = report.conversationSummary?.summary?.trim();
+  final drawing = Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      _ReportSingleImagePreview(
+        imageUrl: report.subjectDrawings.isNotEmpty
+            ? report.subjectDrawings.first.imageUrl
+            : imageUrl,
+        imageFetcher: imageFetcher,
+      ),
+      if (caption != null && caption.isNotEmpty) ...[
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          caption,
+          key: const ValueKey('report-drawing-caption'),
+          style: const TextStyle(
+            color: AppColors.inkMuted,
+            height: 1.45,
+            fontSize: 13,
+          ),
+        ),
+      ],
+    ],
+  );
+  final facts = Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      ...lines,
+      if (emotions.isNotEmpty) ...[
+        const SizedBox(height: AppSpacing.xxs),
+        const Text('아이가 선택한 감정', style: TextStyle(color: AppColors.inkMuted)),
+        const SizedBox(height: AppSpacing.xs),
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xs,
+          children: [
+            for (final emotion in emotions)
+              Chip(label: Text(_emotionLabel(emotion))),
+          ],
+        ),
+      ],
+    ],
+  );
+
+  return KeyedSubtree(
+    key: const ValueKey('report-activity-info'),
+    child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 좁으면 나란히 두지 못한다. 그림을 위로 올리고 정보를 아래에 쌓는다.
+          if (constraints.maxWidth < 460) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                drawing,
+                const SizedBox(height: AppSpacing.md),
+                facts,
+              ],
+            );
+          }
+          // 예전 그림 블럭에서 마스코트 옆에 놓이던 폭의 약 75%다. 그림이 여전히
+          // 주인공으로 보이면서, 오른쪽에 [_InfoLine]이 라벨·값을 한 줄로 놓는 데
+          // 필요한 280px이 남는 지점 — 더 키우면 활동 정보가 두 줄로 쪼개진다.
+          final imageWidth = (constraints.maxWidth * 0.55).clamp(240.0, 392.0);
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(width: imageWidth, child: drawing),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(child: facts),
+            ],
+          );
+        },
+    ),
+  );
+}
+
 const _interpretationOrder = <String>[
   'RELATIONSHIP',
   'EMOTION',
@@ -985,40 +1216,52 @@ const _interpretationOrder = <String>[
 ///
 /// [isHtp]이면 제목을 검사 판정 어휘("주요 심리 경향")에서 대화 소재 표현으로
 /// 바꾼다. HTP를 검사로 표현·해석하지 않는다는 원칙(CLAUDE.md 5절) 때문이다.
+/// 계약 §3 카드를 화면 순서(관계→감정→자기표현→활동 방식→적응)로 정렬한다.
+/// 모르는 카테고리는 뒤로 민다.
+List<ReportInterpretationDto> _orderedInterpretations(ReportDetailDto report) {
+  int rank(ReportInterpretationDto item) {
+    final index = _interpretationOrder.indexOf(item.category ?? '');
+    return index < 0 ? _interpretationOrder.length : index;
+  }
+
+  return [...report.publicInterpretations]
+    ..sort((a, b) => rank(a).compareTo(rank(b)));
+}
+
+/// 해석 카드가 비었을 때 그 자리에 놓는 안내(S15P11B209-1000).
+///
+/// 카드가 비는 것은 정상 출력이다(근거 게이트: 독립 근거 2건 + 아이 표현 1건,
+/// S15P11B209-982). 조용히 숨기면 보호자는 해석이 가능했다는 사실 자체를
+/// 모른다. 그림일기는 한 장 구조라 카드 없이 이 내용만 제자리에 넣고
+/// (S15P11B209-996), HTP는 아래에서 카드로 감싼다.
+const _emptyInterpretationNotice = <Widget>[
+  Text(
+    '이번 활동에서는 해석을 담지 않았어요. '
+    '아이의 말과 그림이 서로 뒷받침될 만큼 근거가 모였을 때만 해석을 만들어요.',
+    style: TextStyle(color: AppColors.ink, height: 1.55),
+  ),
+  SizedBox(height: AppSpacing.sm),
+  Text(
+    '근거가 부족할 때 억지로 해석하지 않는 것이 도담의 원칙이에요. '
+    '다음 활동에서 아이가 이야기를 많이 들려줄수록 이 자리가 채워져요.',
+    style: TextStyle(color: AppColors.inkMuted, height: 1.55),
+  ),
+];
+
 Widget? _interpretationsSection(ReportDetailDto report, {bool isHtp = false}) {
   if (report.publicInterpretations.isEmpty) {
-    // 카드가 비는 것은 정상 출력이다(근거 게이트: 독립 근거 2건 + 아이 표현 1건,
-    // S15P11B209-982). 조용히 숨기면 보호자는 해석이 가능했다는 사실 자체를 모른다 —
-    // 빈 상태를 원칙 안내로 바꾼다(S15P11B209-1000). 리포트 전체가 비었을 때는
-    // _noObservationsCard 가 따로 안내하므로 이중으로 말하지 않는다.
+    // 리포트 전체가 비었을 때는 _noObservationsCard 가 따로 안내하므로 이중으로
+    // 말하지 않는다.
     if (report.hasNoObservations) return null;
     return _ReportSection(
       key: const ValueKey('report-interpretations-empty'),
       title: isHtp ? '함께 살펴보면 좋을 이야기' : '주요 심리 경향',
       backgroundColor: AppColors.lavenderSoft,
       accentColor: AppColors.lavender,
-      children: const [
-        Text(
-          '이번 활동에서는 해석을 담지 않았어요. '
-          '아이의 말과 그림이 서로 뒷받침될 만큼 근거가 모였을 때만 해석을 만들어요.',
-          style: TextStyle(color: AppColors.ink, height: 1.55),
-        ),
-        SizedBox(height: AppSpacing.sm),
-        Text(
-          '근거가 부족할 때 억지로 해석하지 않는 것이 도담의 원칙이에요. '
-          '다음 활동에서 아이가 이야기를 많이 들려줄수록 이 자리가 채워져요.',
-          style: TextStyle(color: AppColors.inkMuted, height: 1.55),
-        ),
-      ],
+      children: _emptyInterpretationNotice,
     );
   }
-  int rank(ReportInterpretationDto item) {
-    final index = _interpretationOrder.indexOf(item.category ?? '');
-    return index < 0 ? _interpretationOrder.length : index;
-  }
-
-  final interpretations = [...report.publicInterpretations]
-    ..sort((a, b) => rank(a).compareTo(rank(b)));
+  final interpretations = _orderedInterpretations(report);
   final evidenceById = <int, ReportEvidenceItemDto>{
     for (final item in report.evidenceItems) ?item.evidenceId: item,
   };
@@ -1040,23 +1283,179 @@ Widget? _interpretationsSection(ReportDetailDto report, {bool isHtp = false}) {
   );
 }
 
-/// §5 주제별 관찰 사실과 문답 — 그림은 앞 섹션에서 이미 보여줬으므로 여기서는
-/// 관찰 문장·문답만 싣는다. 표시할 내용이 있는 주제만 남기고, 하나도 없으면
-/// 섹션 자체를 숨긴다(§10).
-Widget? _subjectObservationsSection(ReportDetailDto report) {
+/// 그림일기·자유 그림의 "그림과 나눈 이야기"(S15P11B209-996).
+///
+/// 예전에는 '주제별 관찰과 문답'과 '아이의 표현과 대화 요약'이 따로 있어서,
+/// 같은 대화를 놓고 관찰·요약·문답이 세 군데로 흩어졌다. 하나로 묶어 읽는
+/// 순서를 정한다: 그림에서 보인 것 → 아이가 한 말(들어볼 수 있음) → 대화 전문.
+///
+/// 가로 화면에서는 왼쪽에 관찰·발화를, 오른쪽에 대화 전문을 나란히 편다.
+/// 세로 화면에서는 같은 순서로 이어 쌓는다.
+Widget? _drawingStorySection(
+  ReportDetailDto report,
+  VoiceAnswerPlaybackController? playbackController, {
+  bool flat = false,
+}) {
   final subjects = report.subjectDetails;
-  if (subjects.isEmpty) return null;
+  final expression = report.childExpression;
+  final hasExpression = expression != null && !expression.isEmpty;
+  if (subjects.isEmpty && !hasExpression) return null;
+  final observations = [
+    for (final subject in subjects) ...subject.visionObservations,
+  ];
+  final qaPairs = [
+    for (final subject in subjects) ...subject.qaPairs,
+  ];
   return _ReportSection(
-    key: const ValueKey('report-subject-observations'),
-    title: '주제별 관찰과 문답',
+    key: const ValueKey('report-drawing-story'),
+    title: '그림과 나눈 이야기',
     backgroundColor: const Color(0xFFEAF6FA),
     accentColor: const Color(0xFF8CC6D8),
+    flat: flat,
     children: [
-      for (final subject in subjects)
-        _SubjectReportCard(
-          report: subject,
-          linkedTitles: _linkedInterpretationTitles(report, subject),
+      _DrawingStoryBody(
+        observations: observations,
+        expression: hasExpression ? expression : null,
+        playbackController: playbackController,
+        qaPairs: qaPairs,
+      ),
+    ],
+  );
+}
+
+/// 그림 서술과 대화 전문을 접었다 편다.
+///
+/// 활동이 길수록 문답이 계속 늘어나 오른쪽 단만 길어진다. 두 단 높이를 실제로
+/// 재서 맞추려면 왼쪽의 음성 재생 버튼이 상태마다 높이를 바꿔 내용이 나타났다
+/// 사라진다 — 그래서 높이가 아니라 **개수**로 자른다(S15P11B209-996).
+///
+/// 대표 발화는 자르지 않는다. 서버가 이미 골라 보낸 짧은 목록이고, 재생 가능한
+/// 발화(`STT`)가 앞에 온다는 보장이 없어 잘라내면 아이 목소리가 통째로 숨는다.
+class _DrawingStoryBody extends StatefulWidget {
+  const _DrawingStoryBody({
+    required this.observations,
+    required this.expression,
+    required this.playbackController,
+    required this.qaPairs,
+  });
+
+  final List<String> observations;
+  final ReportChildExpressionDto? expression;
+  final VoiceAnswerPlaybackController? playbackController;
+  final List<ReportQaPairDto> qaPairs;
+
+  /// 접었을 때 보여줄 그림 서술 개수.
+  static const collapsedObservations = 1;
+
+  /// 접었을 때 보여줄 문답 쌍 개수.
+  static const collapsedQaPairs = 3;
+
+  @override
+  State<_DrawingStoryBody> createState() => _DrawingStoryBodyState();
+}
+
+class _DrawingStoryBodyState extends State<_DrawingStoryBody> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final observations = _expanded
+        ? widget.observations
+        : widget.observations
+              .take(_DrawingStoryBody.collapsedObservations)
+              .toList();
+    final qaPairs = _expanded
+        ? widget.qaPairs
+        : widget.qaPairs.take(_DrawingStoryBody.collapsedQaPairs).toList();
+    final hasMore =
+        widget.observations.length > _DrawingStoryBody.collapsedObservations ||
+        widget.qaPairs.length > _DrawingStoryBody.collapsedQaPairs;
+
+    // 왼쪽 — 그림에서 보인 것과 아이가 한 말. 오른쪽 — 대화 전문.
+    final story = <Widget>[
+      for (final observation in observations) _Bullet(title: observation),
+      if (widget.expression case final expression?) ...[
+        if (observations.isNotEmpty) const SizedBox(height: AppSpacing.xs),
+        _ChildExpression(
+          expression: expression,
+          playbackController: widget.playbackController,
         ),
+      ],
+    ];
+    final transcript = <Widget>[
+      if (qaPairs.isNotEmpty) ...[
+        Semantics(
+          header: true,
+          child: const Text(
+            '대화 전문',
+            key: ValueKey('report-transcript'),
+            style: _groupTitleStyle,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        for (final pair in qaPairs) _QaPairTile(pair: pair),
+      ],
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _BlockColumns(left: story, right: transcript),
+        // 두 단을 한꺼번에 여닫는다. 한쪽만 펴지면 짝이 안 맞아 보인다.
+        if (hasMore)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const ValueKey('report-story-more'),
+              onPressed: () => setState(() => _expanded = !_expanded),
+              icon: Icon(
+                _expanded
+                    ? Icons.expand_less_rounded
+                    : Icons.expand_more_rounded,
+              ),
+              label: Text(_expanded ? '접기' : '더보기'),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// 아이의 표현 요약과 대표 발화. 발화는 저장된 음성이 있으면 재생할 수 있다.
+///
+/// 줄 간격을 [_childExpressionSection]보다 좁혀 요약·키워드·발화가 한 덩어리로
+/// 읽히게 한다 — 통합 블럭 안에서는 각 줄이 독립된 문단처럼 보이면 안 된다.
+class _ChildExpression extends StatelessWidget {
+  const _ChildExpression({
+    required this.expression,
+    required this.playbackController,
+  });
+
+  final ReportChildExpressionDto expression;
+  final VoiceAnswerPlaybackController? playbackController;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    key: const ValueKey('report-child-expression'),
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      if (expression.summary case final summary?)
+        Text(summary, style: const TextStyle(color: AppColors.ink, height: 1.5)),
+      if (expression.keywords.isNotEmpty) ...[
+        const SizedBox(height: AppSpacing.xs),
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: AppSpacing.xxs,
+          children: [
+            for (final word in expression.keywords) Chip(label: Text(word)),
+          ],
+        ),
+      ],
+      if (expression.expressedEmotionText case final text?) ...[
+        const SizedBox(height: AppSpacing.xxs),
+        Text(text, style: const TextStyle(color: AppColors.ink, height: 1.5)),
+      ],
+      for (final utterance in expression.representativeUtterances)
+        _Utterance(utterance: utterance, playbackController: playbackController),
     ],
   );
 }
@@ -1229,6 +1628,89 @@ Widget? _observedFeaturesSection(ReportDetailDto report) {
     children: [
       for (final feature in features) _ObservedFeatureTile(feature: feature),
     ],
+  );
+}
+
+/// 그림일기·자유 그림의 통합 "이런 모습이 보였어요"(S15P11B209-996).
+///
+/// 관찰 특징(§2-1)과 심리 경향(§3)은 둘 다 "아이에게서 무엇이 보였나"를 말한다.
+/// 카드가 나뉘어 있으면 보호자가 관찰과 해석을 별개의 이야기로 읽게 되는데,
+/// 실제로는 앞의 관찰이 뒤의 경향을 뒷받침하는 관계다. 한 블럭에 담되 순서를
+/// 지켜 관찰을 먼저 보여준다 — 해석보다 사실이 앞이다.
+Widget? _observationsSection(ReportDetailDto report, {bool flat = false}) {
+  final features = [
+    for (final feature in report.observedFeatures)
+      if (!feature.isEmpty) feature,
+  ];
+  final interpretations = _orderedInterpretations(report);
+  final guideGroups = _guideGroups(report);
+  if (features.isEmpty && interpretations.isEmpty && guideGroups.isEmpty) {
+    return null;
+  }
+  // 해석이 비어도 '주요 심리 경향' 자리를 비워 두지 않는다(S15P11B209-1000).
+  // 리포트 전체가 비었을 때는 _noObservationsCard 가 안내하므로 생략한다.
+  final showEmptyNotice =
+      interpretations.isEmpty && !report.hasNoObservations;
+  final evidenceById = <int, ReportEvidenceItemDto>{
+    for (final item in report.evidenceItems) ?item.evidenceId: item,
+  };
+  // 왼쪽 — 무엇이 보였고 어떤 경향으로 읽히는가.
+  final observed = <Widget>[
+    for (final feature in features) _ObservedFeatureTile(feature: feature),
+    if (interpretations.isNotEmpty || showEmptyNotice) ...[
+      if (features.isNotEmpty) const SizedBox(height: AppSpacing.xs),
+      Semantics(
+        header: true,
+        child: Text(
+          '주요 심리 경향',
+          key: ValueKey(
+            interpretations.isEmpty
+                ? 'report-interpretations-empty'
+                : 'report-interpretations',
+          ),
+          style: _groupTitleStyle,
+        ),
+      ),
+      const SizedBox(height: AppSpacing.sm),
+      if (showEmptyNotice)
+        ..._emptyInterpretationNotice
+      else
+        for (final (index, interpretation) in interpretations.indexed) ...[
+          if (index > 0) const SizedBox(height: AppSpacing.md),
+          _InterpretationCard(
+            index: index,
+            interpretation: interpretation,
+            evidenceById: evidenceById,
+            showConfidence: false,
+            flat: true,
+          ),
+        ],
+    ],
+  ];
+  // 오른쪽 — 그래서 보호자가 무엇을 해 볼 수 있는가.
+  final guides = <Widget>[
+    for (final (index, group) in guideGroups.indexed) ...[
+      if (index > 0) const SizedBox(height: AppSpacing.md),
+      Semantics(
+        header: true,
+        child: Text(
+          group.title,
+          key: ValueKey('report-parent-guide-${group.code}'),
+          style: _groupTitleStyle,
+        ),
+      ),
+      const SizedBox(height: AppSpacing.xs),
+      for (final (order, item) in group.items.indexed)
+        _NumberedBullet(number: order + 1, title: item),
+    ],
+  ];
+  return _ReportSection(
+    key: const ValueKey('report-observed-features'),
+    title: '이런 모습이 보였어요',
+    backgroundColor: AppColors.lavenderSoft,
+    accentColor: AppColors.lavender,
+    flat: flat,
+    children: [_BlockColumns(left: observed, right: guides)],
   );
 }
 
@@ -1406,7 +1888,54 @@ const _guideTitles = <String, String>{
   'PROFESSIONAL_SUPPORT': '도움이 필요할 때',
 };
 
+/// 서버 `guideType`을 화면에 보일 묶음으로 접는다(S15P11B209-996).
+///
+/// 계약은 가이드를 네 갈래로 주지만, 보호자가 읽을 때는 성격이 겹치는 것들이
+/// 있다. 그림을 놓고 나눌 말(`DRAWING_CONVERSATION`)은 구형 응답의 대화 가이드와
+/// 같은 이야기고, 일상 육아(`DAILY_PARENTING`)와 가정 관찰(`HOME_OBSERVATION`)은
+/// 둘 다 "집에서 이렇게 지켜봐 주세요"다. 두 묶음으로 접는다.
+///
+/// 계약에 없는 유형이 와도 잃지 않고 원래 이름으로 뒤에 붙인다.
+List<({String code, String title, List<String> items})> _guideGroups(
+  ReportDetailDto report,
+) {
+  final byType = <String, List<String>>{};
+  for (final guide in report.orderedParentGuides) {
+    byType
+        .putIfAbsent(guide.guideType ?? 'UNKNOWN', () => <String>[])
+        .addAll(guide.items);
+  }
+  List<String> take(String code) => byType.remove(code) ?? const <String>[];
+  final conversation = [
+    ...take('DRAWING_CONVERSATION'),
+    ...report.guardianConversationGuide,
+  ];
+  final home = [...take('DAILY_PARENTING'), ...take('HOME_OBSERVATION')];
+  // '도움이 필요할 때'(전문 도움 안내)는 그림일기 리포트에서 보여주지 않는다.
+  // 아래 미확인 유형 보정에 다시 걸리지 않도록 여기서 확실히 걷어낸다.
+  take('PROFESSIONAL_SUPPORT');
+  return [
+    if (conversation.isNotEmpty)
+      (
+        code: 'DRAWING_CONVERSATION',
+        title: '보호자 대화 가이드',
+        items: conversation,
+      ),
+    if (home.isNotEmpty)
+      (code: 'DAILY_PARENTING', title: '일상에서 살펴봐 주세요', items: home),
+    // 남은 것은 모르는 유형이다. 조용히 버리지 않는다.
+    for (final entry in byType.entries)
+      if (entry.value.isNotEmpty)
+        (
+          code: entry.key,
+          title: _guideTitles[entry.key] ?? '보호자 가이드',
+          items: entry.value,
+        ),
+  ];
+}
+
 /// §8·§9·§10 보호자 가이드 — parentGuides를 guideType별 섹션으로 나눈다.
+/// HTP 전용이다. 그림일기·자유 그림은 [_parentGuideSection]으로 합쳐 보여준다.
 List<Widget> _parentGuideSections(ReportDetailDto report) => [
   for (final guide in report.orderedParentGuides)
     _ReportSection(
@@ -1433,34 +1962,6 @@ Widget? _legacyGuideSection(ReportDetailDto report) {
     children: [
       for (final (index, question) in guide.indexed)
         _NumberedBullet(number: index + 1, title: question),
-    ],
-  );
-}
-
-/// §11 한계와 참고 자료 — limitations + references.
-Widget? _limitationsReferencesSection(ReportDetailDto report) {
-  final limitations = report.limitations;
-  final references = [
-    for (final reference in report.references)
-      if ((reference.title?.trim().isNotEmpty ?? false) ||
-          (reference.url?.trim().isNotEmpty ?? false))
-        reference,
-  ];
-  if (limitations.isEmpty && references.isEmpty) return null;
-  return _ReportSection(
-    key: const ValueKey('report-limitations'),
-    title: '한계와 참고 자료',
-    backgroundColor: AppColors.surfaceSoft,
-    accentColor: AppColors.inkMuted,
-    children: [
-      for (final line in limitations) _Bullet(title: line),
-      if (references.isNotEmpty) ...[
-        const SizedBox(height: AppSpacing.sm),
-        const Text('참고 자료', style: TextStyle(color: AppColors.inkMuted)),
-        const SizedBox(height: AppSpacing.xs),
-        for (final reference in references)
-          _ReferenceLine(reference: reference),
-      ],
     ],
   );
 }
@@ -1560,11 +2061,26 @@ class _InterpretationCard extends StatelessWidget {
     required this.index,
     required this.interpretation,
     required this.evidenceById,
+    this.showConfidence = true,
+    this.flat = false,
   });
 
   final int index;
   final ReportInterpretationDto interpretation;
   final Map<int, ReportEvidenceItemDto> evidenceById;
+
+  /// 확신도 배지("근거가 강해요")를 보일지 여부.
+  ///
+  /// 그림일기 리포트에서는 끈다(S15P11B209-996) — 근거는 "근거 보기"에서 실제
+  /// 문장으로 확인할 수 있고, 등급까지 같이 두면 카드가 판정처럼 읽힌다.
+  /// HTP 리포트는 그대로 배지를 쓴다.
+  final bool showConfidence;
+
+  /// 흰 카드 테두리 없이 본문에 바로 얹을지 여부.
+  ///
+  /// 그림일기 리포트는 관찰·경향·가이드가 한 블럭에 들어가므로, 경향만 흰
+  /// 카드를 두르면 블럭 안에 블럭이 생긴다(S15P11B209-996).
+  final bool flat;
 
   @override
   Widget build(BuildContext context) {
@@ -1572,15 +2088,10 @@ class _InterpretationCard extends StatelessWidget {
     final evidence = [
       for (final ref in interpretation.evidenceRefs) ?evidenceById[ref],
     ];
-    return Container(
-      key: ValueKey('report-interpretation-$index'),
-      padding: const EdgeInsets.all(AppSpacing.md),
-      decoration: BoxDecoration(
-        color: AppColors.surface,
-        borderRadius: BorderRadius.circular(AppRadius.md),
-        border: Border.all(color: color.withValues(alpha: 0.4)),
-      ),
-      child: Column(
+    final confidenceLabel = showConfidence
+        ? _confidenceLabel(interpretation.confidence)
+        : null;
+    final content = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
@@ -1607,7 +2118,7 @@ class _InterpretationCard extends StatelessWidget {
           // 확신도는 경향 문장 **바로 위**에 둔다. 문장을 읽기 전에 어느 정도
           // 무게로 받아들일지 먼저 알려야 한다(CLAUDE.md 9절). 등급이 없으면
           // 배지만 빠지고 카드는 그대로 나온다.
-          if (_confidenceLabel(interpretation.confidence) case final label?) ...[
+          if (confidenceLabel case final label?) ...[
             const SizedBox(height: AppSpacing.sm),
             Align(
               alignment: Alignment.centerLeft,
@@ -1642,33 +2153,71 @@ class _InterpretationCard extends StatelessWidget {
           ],
           if (interpretation.homeObservationGuide case final guide?) ...[
             const SizedBox(height: AppSpacing.sm),
-            Container(
-              padding: const EdgeInsets.all(AppSpacing.sm),
-              decoration: BoxDecoration(
-                color: AppColors.leafSoft,
-                borderRadius: BorderRadius.circular(AppRadius.sm),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(
-                    Icons.visibility_outlined,
-                    size: 18,
-                    color: AppColors.leaf,
-                  ),
-                  const SizedBox(width: AppSpacing.xs),
-                  Expanded(
-                    child: Text(
-                      guide,
-                      style: const TextStyle(color: AppColors.ink, height: 1.5),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            _HomeObservationGuide(text: guide, flat: flat),
           ],
         ],
+    );
+    if (flat) {
+      return KeyedSubtree(
+        key: ValueKey('report-interpretation-$index'),
+        child: content,
+      );
+    }
+    return Container(
+      key: ValueKey('report-interpretation-$index'),
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: color.withValues(alpha: 0.4)),
       ),
+      child: content,
+    );
+  }
+}
+
+/// 경향 카드에 붙는 "집에서 이렇게 살펴봐 주세요" 한 줄.
+///
+/// [flat]이면 상자를 두르지 않고 아이콘 색도 블럭 강조색(라벤더)에 맞춘다.
+/// 그림일기 리포트는 관찰·경향·가이드가 한 블럭이라, 여기만 초록 상자를 두면
+/// 블럭 안에 블럭이 생기고 같은 눈 아이콘이 두 색으로 갈린다(S15P11B209-996).
+/// HTP 리포트는 경향 카드가 독립돼 있어 기존 초록 상자를 그대로 쓴다.
+class _HomeObservationGuide extends StatelessWidget {
+  const _HomeObservationGuide({required this.text, required this.flat});
+
+  final String text;
+  final bool flat;
+
+  @override
+  Widget build(BuildContext context) {
+    final row = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: EdgeInsets.only(top: flat ? 3 : 0),
+          child: Icon(
+            Icons.visibility_outlined,
+            size: 18,
+            color: flat ? AppColors.lavender : AppColors.leaf,
+          ),
+        ),
+        const SizedBox(width: AppSpacing.xs),
+        Expanded(
+          child: Text(
+            text,
+            style: const TextStyle(color: AppColors.ink, height: 1.5),
+          ),
+        ),
+      ],
+    );
+    if (flat) return row;
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.sm),
+      decoration: BoxDecoration(
+        color: AppColors.leafSoft,
+        borderRadius: BorderRadius.circular(AppRadius.sm),
+      ),
+      child: row,
     );
   }
 }
@@ -1724,31 +2273,64 @@ class _ConfidenceBadge extends StatelessWidget {
 }
 
 /// "근거 보기" — 근거를 접었다 펴는 목록. sourceType은 라벨로만 노출한다.
-class _EvidenceExpansion extends StatelessWidget {
+class _EvidenceExpansion extends StatefulWidget {
   const _EvidenceExpansion({required this.index, required this.evidence});
 
   final int index;
   final List<ReportEvidenceItemDto> evidence;
 
   @override
+  State<_EvidenceExpansion> createState() => _EvidenceExpansionState();
+}
+
+class _EvidenceExpansionState extends State<_EvidenceExpansion> {
+  bool _expanded = false;
+
+  @override
   Widget build(BuildContext context) => Theme(
     data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
     child: ExpansionTile(
-      key: ValueKey('report-interpretation-evidence-$index'),
+      key: ValueKey('report-interpretation-evidence-${widget.index}'),
       tilePadding: EdgeInsets.zero,
       childrenPadding: const EdgeInsets.only(bottom: AppSpacing.xs),
-      expandedCrossAxisAlignment: CrossAxisAlignment.start,
+      // expandedAlignment 기본값이 center라 근거 목록이 가운데로 몰린다.
+      // 본문과 같은 왼쪽 기준선에 맞춘다(S15P11B209-996).
+      expandedAlignment: Alignment.centerLeft,
+      expandedCrossAxisAlignment: CrossAxisAlignment.stretch,
       shape: const Border(),
       collapsedShape: const Border(),
-      title: const Text(
-        '근거 보기',
-        style: TextStyle(
-          color: AppColors.lavender,
-          fontWeight: FontWeight.w700,
-        ),
+      onExpansionChanged: (value) => setState(() => _expanded = value),
+      // 기본 trailing은 카드 오른쪽 끝에 붙어 글자와 멀찍이 떨어진다. 화살표를
+      // 글자 바로 옆으로 옮겨 무엇을 펼치는 버튼인지 붙여 읽히게 한다.
+      trailing: const SizedBox.shrink(),
+      title: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedRotation(
+            turns: _expanded ? 0.5 : 0,
+            duration: const Duration(milliseconds: 180),
+            child: const Icon(
+              Icons.expand_more_rounded,
+              size: 20,
+              color: AppColors.lavender,
+            ),
+          ),
+          const SizedBox(width: AppSpacing.xxs),
+          // 큰 글자·좁은 화면에서 글자와 화살표가 폭을 넘기지 않도록 글자가
+          // 먼저 줄어든다. Flexible이 없으면 320px·textScale 2.0에서 넘친다.
+          const Flexible(
+            child: Text(
+              '근거 보기',
+              style: TextStyle(
+                color: AppColors.lavender,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ],
       ),
       children: [
-        for (final item in evidence)
+        for (final item in widget.evidence)
           Padding(
             padding: const EdgeInsets.only(bottom: AppSpacing.xs),
             child: Column(
@@ -1921,46 +2503,22 @@ class _ObservedFeatureTile extends StatelessWidget {
   );
 }
 
-class _ReferenceLine extends StatelessWidget {
-  const _ReferenceLine({required this.reference});
-
-  final ReportReferenceDto reference;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: AppSpacing.xs),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        if (reference.title case final title?)
-          Text(
-            title,
-            style: const TextStyle(
-              color: AppColors.ink,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        if (reference.url case final url?)
-          Text(url, style: AppTypography.caption),
-      ],
-    ),
-  );
-}
-
 class _ReportCard extends StatelessWidget {
   const _ReportCard({
     required this.child,
     this.backgroundColor = AppColors.surface,
     this.borderColor = AppColors.outline,
+    this.padding = const EdgeInsets.all(AppSpacing.lg),
     super.key,
   });
   final Widget child;
   final Color backgroundColor;
   final Color borderColor;
+  final EdgeInsetsGeometry padding;
 
   @override
   Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.all(AppSpacing.lg),
+    padding: padding,
     decoration: BoxDecoration(
       color: backgroundColor,
       borderRadius: BorderRadius.circular(AppRadius.lg),
@@ -1983,6 +2541,7 @@ class _ReportSection extends StatelessWidget {
     required this.children,
     this.backgroundColor = AppColors.surface,
     this.accentColor = AppColors.lavender,
+    this.flat = false,
     super.key,
   });
   final String title;
@@ -1990,11 +2549,15 @@ class _ReportSection extends StatelessWidget {
   final Color backgroundColor;
   final Color accentColor;
 
+  /// 카드 없이 제목과 내용만 돌려줄지 여부.
+  ///
+  /// 그림일기 리포트는 전체가 한 장이라 섹션마다 카드를 두르면 블럭 안에 블럭이
+  /// 생긴다(S15P11B209-996). 색은 배경이 아니라 제목 글자가 나른다.
+  final bool flat;
+
   @override
-  Widget build(BuildContext context) => _ReportCard(
-    backgroundColor: backgroundColor,
-    borderColor: accentColor.withValues(alpha: 0.45),
-    child: Column(
+  Widget build(BuildContext context) {
+    final body = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Semantics(
@@ -2012,8 +2575,14 @@ class _ReportSection extends StatelessWidget {
         const SizedBox(height: AppSpacing.md),
         ...children,
       ],
-    ),
-  );
+    );
+    if (flat) return body;
+    return _ReportCard(
+      backgroundColor: backgroundColor,
+      borderColor: accentColor.withValues(alpha: 0.45),
+      child: body,
+    );
+  }
 }
 
 class _InfoLine extends StatelessWidget {
@@ -2198,6 +2767,9 @@ class _Utterance extends StatelessWidget {
             VoiceAnswerPlaybackControl(
               controller: playbackController!,
               messageId: messageId,
+              // 발화가 줄줄이 이어지는 자리라 "재생이 끝났어요" 줄이 남으면
+              // 문단이 끊긴다. 낭독기 안내는 그대로 나간다(S15P11B209-996).
+              showStatusText: false,
             ),
         ],
       ),
@@ -2217,173 +2789,110 @@ class _ReportActionSection extends StatelessWidget {
     required this.pdfAction,
     required this.onSavePdf,
     required this.onSharePdf,
+    this.flat = false,
   });
 
   final _ReportPdfAction? pdfAction;
   final VoidCallback onSavePdf;
   final VoidCallback onSharePdf;
 
-  @override
-  Widget build(BuildContext context) => _ReportCard(
-    backgroundColor: const Color(0xFFFFF4D5),
-    borderColor: AppColors.sunshine,
-    child: LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 640;
-        final copy = Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Semantics(
-              header: true,
-              child: const Text(
-                '돌아보기를 마쳤어요',
-                style: TextStyle(
-                  color: AppColors.ink,
-                  fontSize: 22,
-                  height: 1.3,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            const Text(
-              '리포트를 저장하거나 공유하고, 보호자 홈에서 다음 활동을 이어가세요.',
-              style: TextStyle(color: AppColors.inkMuted, height: 1.5),
-            ),
-          ],
-        );
-        final intro = Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const SizedBox(
-              width: 108,
-              child: ReportMascotImage(
-                assetPath: ReportMascotAssets.complete,
-                maxWidth: 108,
-                mascotKey: ValueKey('report-mascot-complete'),
-              ),
-            ),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(child: copy),
-          ],
-        );
-        final buttons = _ReportActionButtons(
-          horizontal: !compact,
-          pdfAction: pdfAction,
-          onSavePdf: onSavePdf,
-          onSharePdf: onSharePdf,
-        );
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            intro,
-            const SizedBox(height: AppSpacing.lg),
-            buttons,
-          ],
-        );
-      },
-    ),
-  );
-}
-
-class _ReportActionButtons extends StatelessWidget {
-  const _ReportActionButtons({
-    required this.horizontal,
-    required this.pdfAction,
-    required this.onSavePdf,
-    required this.onSharePdf,
-  });
-
-  final bool horizontal;
-  final _ReportPdfAction? pdfAction;
-  final VoidCallback onSavePdf;
-  final VoidCallback onSharePdf;
+  /// 카드 없이 내용만 돌려줄지 여부(S15P11B209-996).
+  final bool flat;
 
   @override
   Widget build(BuildContext context) {
-    final save = AppButton(
-      key: const ValueKey('report-save-pdf'),
-      label: 'PDF 저장',
-      leading: const Icon(Icons.download_rounded),
-      isLoading: pdfAction == _ReportPdfAction.save,
-      onPressed: pdfAction == null ? onSavePdf : null,
-    );
-    final share = AppButton(
-      key: const ValueKey('report-share-pdf'),
-      label: '공유',
-      leading: const Icon(Icons.ios_share_rounded),
-      variant: AppButtonVariant.secondary,
-      isLoading: pdfAction == _ReportPdfAction.share,
-      onPressed: pdfAction == null ? onSharePdf : null,
-    );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (horizontal)
-          Row(
-            children: [
-              Expanded(child: save),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(child: share),
-            ],
-          )
-        else ...[
-          save,
-          const SizedBox(height: AppSpacing.sm),
-          share,
-        ],
-        const SizedBox(height: AppSpacing.sm),
-        AppButton(
+    final body = LayoutBuilder(
+      builder: (context, constraints) {
+        // 넓으면 제목과 저장·공유 버튼을 한 줄에 세운다(S15P11B209-996).
+        // 버튼이 바로 옆에 있으면 "저장하거나 공유하세요" 설명은 군더더기다.
+        final inline = constraints.maxWidth >= 640;
+        final save = AppButton(
+          key: const ValueKey('report-save-pdf'),
+          label: 'PDF 저장',
+          leading: const Icon(Icons.download_rounded),
+          isLoading: pdfAction == _ReportPdfAction.save,
+          onPressed: pdfAction == null ? onSavePdf : null,
+        );
+        final share = AppButton(
+          key: const ValueKey('report-share-pdf'),
+          label: '공유',
+          leading: const Icon(Icons.ios_share_rounded),
+          variant: AppButtonVariant.secondary,
+          isLoading: pdfAction == _ReportPdfAction.share,
+          onPressed: pdfAction == null ? onSharePdf : null,
+        );
+        final home = AppButton(
           key: const ValueKey('report-home-cta'),
           label: '보호자 홈으로 돌아가기',
           variant: AppButtonVariant.secondary,
           onPressed: () => AppRouter.goGuardianHome(context),
-        ),
-      ],
+        );
+        final title = Semantics(
+          header: true,
+          child: const Text(
+            '돌아보기를 마쳤어요',
+            style: TextStyle(
+              color: AppColors.ink,
+              fontSize: 22,
+              height: 1.3,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        );
+        const mascot = SizedBox(
+          width: 84,
+          child: ReportMascotImage(
+            assetPath: ReportMascotAssets.complete,
+            maxWidth: 84,
+            mascotKey: ValueKey('report-mascot-complete'),
+          ),
+        );
+        if (!inline) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  mascot,
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(child: title),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+              save,
+              const SizedBox(height: AppSpacing.sm),
+              share,
+              const SizedBox(height: AppSpacing.sm),
+              home,
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                mascot,
+                const SizedBox(width: AppSpacing.md),
+                Expanded(flex: 3, child: title),
+                Expanded(flex: 2, child: save),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(flex: 2, child: share),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            home,
+          ],
+        );
+      },
+    );
+    if (flat) return body;
+    return _ReportCard(
+      backgroundColor: const Color(0xFFFFF4D5),
+      borderColor: AppColors.sunshine,
+      child: body,
     );
   }
-}
-
-class _NoticeCard extends StatelessWidget {
-  const _NoticeCard({required this.lines});
-  final List<String> lines;
-  @override
-  Widget build(BuildContext context) => Container(
-    key: const ValueKey('report-non-diagnostic-notice'),
-    padding: const EdgeInsets.all(AppSpacing.md),
-    decoration: BoxDecoration(
-      color: AppColors.lavenderSoft,
-      borderRadius: BorderRadius.circular(AppRadius.md),
-    ),
-    child: Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Icon(Icons.info_outline_rounded, color: AppColors.lavender),
-        const SizedBox(width: AppSpacing.sm),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              for (final line in lines)
-                Padding(
-                  padding: EdgeInsets.only(
-                    bottom: line == lines.last ? 0 : AppSpacing.xs,
-                  ),
-                  child: Text(
-                    line,
-                    style: const TextStyle(
-                      color: AppColors.inkMuted,
-                      height: 1.45,
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ),
-      ],
-    ),
-  );
 }
 
 class _ImagePlaceholder extends StatelessWidget {

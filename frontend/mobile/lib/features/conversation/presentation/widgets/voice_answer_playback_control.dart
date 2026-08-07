@@ -10,11 +10,19 @@ final class VoiceAnswerPlaybackControl extends StatelessWidget {
   const VoiceAnswerPlaybackControl({
     required this.controller,
     required this.messageId,
+    this.showStatusText = true,
     super.key,
   });
 
   final VoiceAnswerPlaybackController controller;
   final int messageId;
+
+  /// 재생을 마치거나 멈춘 뒤 "재생이 끝났어요" 같은 안내 줄을 보일지 여부.
+  ///
+  /// 관찰 리포트처럼 발화가 여러 개 이어지는 자리에서는 이 줄이 매번 남아
+  /// 문단을 끊는다(S15P11B209-996). 끄더라도 화면 낭독기에는 그대로 알린다 —
+  /// 버튼 모양만 바뀌면 보이지 않는 사용자는 재생이 끝난 걸 알 수 없다.
+  final bool showStatusText;
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -57,23 +65,41 @@ final class VoiceAnswerPlaybackControl extends StatelessWidget {
     },
   );
 
-  Widget _ready({required String message, required String label}) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      _status(
-        key: ValueKey('voice-answer-status-$messageId'),
-        message: message,
-      ),
-      const SizedBox(height: AppSpacing.xxs),
-      _button(
-        key: ValueKey('voice-answer-replay-$messageId'),
-        semanticsLabel: '아이 음성 답변 다시 재생',
-        icon: Icons.replay_rounded,
-        label: label,
-        onPressed: () => controller.play(messageId),
-      ),
-    ],
-  );
+  Widget _ready({required String message, required String label}) {
+    final replay = _button(
+      key: ValueKey('voice-answer-replay-$messageId'),
+      semanticsLabel: '아이 음성 답변 다시 재생',
+      icon: Icons.replay_rounded,
+      label: label,
+      onPressed: () => controller.play(messageId),
+    );
+    if (!showStatusText) {
+      // 문구는 감추되 낭독기에는 남긴다 — 빈 Semantics가 liveRegion을 대신 읽는다.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(
+            key: ValueKey('voice-answer-status-$messageId'),
+            liveRegion: true,
+            label: message,
+            child: const SizedBox.shrink(),
+          ),
+          replay,
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _status(
+          key: ValueKey('voice-answer-status-$messageId'),
+          message: message,
+        ),
+        const SizedBox(height: AppSpacing.xxs),
+        replay,
+      ],
+    );
+  }
 
   Widget _failure() {
     final failure = controller.error;

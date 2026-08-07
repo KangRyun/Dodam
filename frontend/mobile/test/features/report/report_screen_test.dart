@@ -42,8 +42,9 @@ void main() {
     await _openReport(tester, repository);
 
     expect(repository.calls, [501]);
-    // drawingSession
-    expect(find.text('우리 가족'), findsOneWidget);
+    // drawingSession — 활동 이름·완료일은 '한눈에 보는 활동'에서 뺐다
+    // (S15P11B209-996). 남는 건 활동 유형·활동 시간·입력 방식이다.
+    expect(find.text('우리 가족'), findsNothing);
     expect(find.text('그림일기'), findsOneWidget);
     // 입력 방식은 서버 코드가 아니라 보호자가 읽을 수 있는 말로 낸다. PDF 와 같은 문구다.
     expect(find.text('앱에서 그리기'), findsOneWidget);
@@ -53,12 +54,11 @@ void main() {
     expect(find.text('동생이랑 놀아서 좋았어요'), findsOneWidget);
     expect(find.textContaining('우리 동생이야.'), findsOneWidget);
     expect(find.text('기쁨'), findsOneWidget);
-    // activityFacts
-    expect(find.text('사람, 집'), findsOneWidget);
-    // 세션 기준 "활동 시간"(23분)과 스트로크 기준 "그린 시간"(22분)은 다른 값이다(S15P11B209-870).
-    expect(find.text('그린 시간'), findsOneWidget);
-    expect(find.text('22분'), findsOneWidget);
-    expect(find.text('4회'), findsOneWidget);
+    // activityFacts 블럭은 그림일기에서 빼고 HTP에만 남겼다(S15P11B209-996).
+    expect(find.text('사람, 집'), findsNothing);
+    expect(find.text('그린 시간'), findsNothing);
+    expect(find.text('22분'), findsNothing);
+    expect(find.text('4회'), findsNothing);
     // conversationSummary
     expect(find.text('편안하게 대화했어요.'), findsOneWidget);
     // guardianConversationGuide + limitations
@@ -67,7 +67,10 @@ void main() {
       find.byKey(const ValueKey('report-non-diagnostic-notice')),
       findsOneWidget,
     );
-    expect(find.textContaining('진단이 아닌 관찰 참고 자료'), findsOneWidget);
+    // 한계 문장과 참고 자료는 표지 안내와 겹쳐 빼고, 서버의 비진단 안내만 남겼다
+    // (S15P11B209-996).
+    expect(find.textContaining('진단이 아닌 관찰 참고 자료'), findsNothing);
+    expect(find.textContaining('나타난 특징을 정리한 자료예요'), findsOneWidget);
   });
 
   testWidgets('서버가 만든 리포트 PDF를 내려받아 저장한다', (tester) async {
@@ -286,7 +289,13 @@ void main() {
 
     await tester.tap(find.byKey(const ValueKey('voice-answer-stop-804')));
     await tester.pumpAndSettle();
-    expect(find.text('재생을 멈췄어요.'), findsOneWidget);
+    // 리포트에서는 상태 문구를 화면에 남기지 않는다(S15P11B209-996).
+    // 다시 재생 버튼과 낭독기용 안내만 남는다.
+    expect(find.text('재생을 멈췄어요.'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('voice-answer-status-804')),
+      findsOneWidget,
+    );
     expect(
       find.byKey(const ValueKey('voice-answer-replay-804')),
       findsOneWidget,
@@ -296,7 +305,11 @@ void main() {
     await tester.tap(find.byKey(const ValueKey('voice-answer-replay-804')));
     await tester.pumpAndSettle();
     expect(playback.messageIds, [804, 804]);
-    expect(find.text('재생이 끝났어요.'), findsOneWidget);
+    expect(find.text('재생이 끝났어요.'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('voice-answer-replay-804')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('다운로드 중에는 loading만 표시하고 화면 이탈 시 취소·dispose한다', (tester) async {
@@ -357,7 +370,7 @@ void main() {
       find.byKey(const ValueKey('voice-answer-retry-804')),
       findsOneWidget,
     );
-    expect(find.text('우리 가족'), findsOneWidget);
+    expect(find.text('그림일기'), findsOneWidget);
     expect(find.textContaining('우리 동생이야.'), findsOneWidget);
     expect(find.byKey(const ValueKey('report-save-pdf')), findsOneWidget);
     expect(find.byKey(const ValueKey('report-share-pdf')), findsOneWidget);
@@ -365,7 +378,10 @@ void main() {
     playback.failure = null;
     await tester.tap(find.byKey(const ValueKey('voice-answer-retry-804')));
     await tester.pumpAndSettle();
-    expect(find.text('재생이 끝났어요.'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('voice-answer-replay-804')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('영구 음성 오류에는 재시도를 표시하지 않는다', (tester) async {
@@ -445,7 +461,11 @@ void main() {
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pumpAndSettle();
-    expect(find.text('재생을 멈췄어요.'), findsOneWidget);
+    expect(find.byKey(const ValueKey('voice-answer-stop-804')), findsNothing);
+    expect(
+      find.byKey(const ValueKey('voice-answer-replay-804')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('작은 화면과 textScale 2.0에서도 음성 버튼 접근성과 48dp를 지킨다', (tester) async {
@@ -616,10 +636,9 @@ void main() {
   });
 
   testWidgets('이미지가 없으면 placeholder를 아이콘과 문구로 표시한다', (tester) async {
-    await _openReport(
-      tester,
-      _ReportRepository(report: _report(sections: false)),
-    );
+    // 활동 정보가 하나도 없으면 '한눈에 보는 활동' 블럭 자체가 숨으므로
+    // (S15P11B209-996), 정보는 있고 그림 URL만 비어 있는 표본으로 확인한다.
+    await _openReport(tester, _ReportRepository());
 
     expect(
       find.byKey(const ValueKey('report-image-placeholder')),
@@ -698,7 +717,7 @@ void main() {
     await _openReport(tester, _ReportRepository(), textScale: 2.0);
 
     expect(tester.takeException(), isNull);
-    expect(find.text('우리 가족'), findsOneWidget);
+    expect(find.text('그림일기'), findsOneWidget);
   });
 
   testWidgets('비진단 안내는 작은 화면과 큰 글자에서도 읽을 수 있다', (tester) async {
@@ -714,7 +733,7 @@ void main() {
     await tester.pump();
 
     expect(notice, findsOneWidget);
-    expect(find.bySemanticsLabel(RegExp('진단이 아닌 관찰 참고 자료')), findsOneWidget);
+    expect(find.textContaining('나타난 특징을 정리한 자료예요'), findsOneWidget);
     expect(tester.takeException(), isNull);
     handle.dispose();
   });
