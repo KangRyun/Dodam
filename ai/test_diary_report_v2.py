@@ -540,6 +540,61 @@ class DiaryReportBuilderTest(unittest.TestCase):
         codes = {item.code for item in insights.unknown_items}
         self.assertFalse({"NO_VOICE_ANSWER", "ONLY_CHOICE_ANSWERS"} <= codes)
 
+    def test_db_answer_type_spellings_are_both_accepted(self):
+        """BE 는 DB enum(`OPTION_ANSWER`)을 그대로 보낸다.
+
+        계약 문서에는 `OPTION` 으로 적혀 있어 짧은 쪽만 보고 있었고, 그래서 **고른 답이 아이의
+        자발 발화로 세어졌다** — 994 가 막으려던 바로 그것이다. 2026-08-07 실호출로 드러났다.
+        """
+        import diary_report_v2
+
+        for spelling in ("OPTION", "OPTION_ANSWER"):
+            with self.subTest(spelling=spelling):
+                self.assertTrue(diary_report_v2.is_option_answer(spelling))
+                self.assertEqual(
+                    diary_report_v2.classify_elicitation("기뻤어?", spelling, "응"),
+                    "MULTIPLE_CHOICE",
+                )
+        for spelling in ("VOICE", "VOICE_ANSWER", "TEXT_ANSWER"):
+            with self.subTest(spelling=spelling):
+                self.assertTrue(diary_report_v2.is_spoken_answer(spelling))
+                self.assertFalse(diary_report_v2.is_option_answer(spelling))
+
+    def test_option_answers_are_counted_as_choices_not_voice(self):
+        """세는 자리도 같은 표기를 봐야 한다 — 아니면 고른 답이 음성 답으로 집계된다."""
+        import diary_report_v2
+
+        req = _diary_request().model_copy(
+            update={
+                "subject_summaries": [
+                    contracts.SubjectSummary(
+                        drawing_description="사람이 보여요.",
+                        observation_evidence_source_id="vision-1",
+                        qa_pairs=[
+                            contracts.SubjectQaPair(
+                                question="기뻤어?",
+                                answer_text="기뻤어",
+                                answer_type="OPTION_ANSWER",
+                                answer_message_id=201,
+                            ),
+                            contracts.SubjectQaPair(
+                                question="그다음엔 뭐 했어?",
+                                answer_text="엄마한테 자랑했어",
+                                answer_type="VOICE_ANSWER",
+                                answer_message_id=202,
+                            ),
+                        ],
+                    )
+                ]
+            }
+        )
+        quality = diary_report_v2._data_quality(
+            req, evidence_count=2, vision_available=True
+        )
+
+        self.assertEqual(quality.option_answer_count, 1)
+        self.assertEqual(quality.confirmed_voice_count, 1)
+
     def test_raw_evidence_carries_question_elicitation_context(self):
         import diary_report_v2
 

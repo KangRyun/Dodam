@@ -124,6 +124,24 @@ def _clean_text(value: object, *, max_len: int | None = None) -> str:
     return text
 
 
+# BE 는 대화 메시지 유형을 그대로 실어 보낸다 — DB enum 이 `OPTION_ANSWER`·`VOICE_ANSWER` 다.
+#   계약 문서에는 `OPTION`·`VOICE` 로 적혀 있어 한동안 짧은 쪽만 보고 있었다. 그 결과
+#   **고른 답이 아이의 자발 발화로 세어졌다**(994 가 막으려던 바로 그것) — 2026-08-07 실호출로
+#   드러났다. 두 표기를 모두 받는다.
+_OPTION_ANSWER_TYPES = frozenset({"OPTION", "OPTION_ANSWER", "CHOICE"})
+_SPOKEN_ANSWER_TYPES = frozenset({"VOICE", "VOICE_ANSWER", "TEXT", "TEXT_ANSWER"})
+
+
+def is_option_answer(answer_type: str | None) -> bool:
+    """선택지에서 고른 답인가. 아이가 자기 말로 만든 문장과 구분하기 위한 판정이다."""
+    return (answer_type or "").upper() in _OPTION_ANSWER_TYPES
+
+
+def is_spoken_answer(answer_type: str | None) -> bool:
+    """아이가 말이나 글로 직접 답했는가."""
+    return (answer_type or "").upper() in _SPOKEN_ANSWER_TYPES
+
+
 def classify_elicitation(question: str, answer_type: str | None, answer_text: str) -> str:
     """질문 방식의 대략적인 출처를 보수적으로 분류한다.
 
@@ -131,10 +149,9 @@ def classify_elicitation(question: str, answer_type: str | None, answer_text: st
     메타데이터다. 정확히 분류할 수 없으면 UNKNOWN으로 둔다.
     """
 
-    kind = (answer_type or "").upper()
-    if kind == "OPTION":
+    if is_option_answer(answer_type):
         return "MULTIPLE_CHOICE"
-    if kind == "SKIPPED":
+    if (answer_type or "").upper() in {"SKIPPED", "SKIPPED_ANSWER"}:
         return "UNKNOWN"
     answer = _clean_text(answer_text)
     if any(marker in answer for marker in _CORRECTION_MARKERS):
@@ -197,7 +214,7 @@ def raw_evidence_texts(
                 continue
             answer = (qa.answer_text or "").strip()
             elicitation = classify_elicitation(qa.question, qa.answer_type, answer)
-            if (qa.answer_type or "").upper() == "OPTION":
+            if is_option_answer(qa.answer_type):
                 answer = f"선택지에서 '{answer}'를 골랐어요."
             question = _clean_text(qa.question)
             facts[("QA_ANSWER", str(qa.answer_message_id))] = (
@@ -624,15 +641,12 @@ def _data_quality(
     confirmed_voice = option_count = stt_confirmation = 0
     skipped = req.skipped_count
     for qa in _iter_qas(req):
-        kind = (qa.answer_type or "").upper()
         if qa.stt_needs_confirmation:
             stt_confirmation += 1
             continue
-        if kind == "OPTION" and (qa.answer_text or "").strip():
+        if is_option_answer(qa.answer_type) and (qa.answer_text or "").strip():
             option_count += 1
-        elif kind in {"VOICE", "VOICE_ANSWER", "TEXT", "TEXT_ANSWER"} and (
-            qa.answer_text or ""
-        ).strip():
+        elif is_spoken_answer(qa.answer_type) and (qa.answer_text or "").strip():
             confirmed_voice += 1
     return contracts.DiaryDataQuality(
         confirmed_voice_count=confirmed_voice,
