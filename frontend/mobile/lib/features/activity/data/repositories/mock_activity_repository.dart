@@ -20,15 +20,38 @@ final class MockActivityRepository implements ActivityRepository {
     'startedAt': '2026-07-20T09:40:00Z',
     'completedAt': '2026-07-20T10:03:00Z',
   };
+
+  // HTP 활동 개발 표본. 기록 서가 목록은 이 리포지토리가 채우므로(리포트
+  // 저장소가 아니다), HTP 리포트를 목록에서 열 수 있게 한 건 둔다. 리포트
+  // 버튼은 report.reportId(502)로 상세를 열고, MockReportRepository 가 502 를
+  // HTP 표본으로 돌려준다.
+  static const _htpSummary = {
+    'activityId': 121,
+    'title': '집·나무·사람 이야기',
+    'drawingType': {'code': 'HTP', 'name': '집-나무-사람'},
+    'inputMethod': 'CANVAS',
+    'sessionStatus': 'COMPLETED',
+    'selectedEmotions': ['JOY'],
+    'thumbnailUrl': '/api/v1/drawing-assets/121/file',
+    'analysisStatus': 'COMPLETED',
+    'report': {'reportId': 502, 'reportStatus': 'COMPLETED'},
+    'startedAt': '2026-07-22T09:40:00Z',
+    'completedAt': '2026-07-22T10:05:00Z',
+  };
   @override
   Future<ApiPage<ActivitySummaryDto>> getActivities(
     int childId, {
     ActivityFilterDto filter = const ActivityFilterDto(),
   }) async => ApiPage(
-    content: [ActivitySummaryDto.fromJson(_summary)],
+    // 그림일기(최신)를 맨 위에, HTP 개발 표본을 아래에 둔다. 홈은 첫 항목을
+    // '최신 리포트'로 쓰므로(guardian_dashboard) 그림일기가 최신으로 유지된다.
+    content: [
+      ActivitySummaryDto.fromJson(_summary),
+      ActivitySummaryDto.fromJson(_htpSummary),
+    ],
     page: 0,
     size: 20,
-    totalElements: 1,
+    totalElements: 2,
     totalPages: 1,
     hasNext: false,
   );
