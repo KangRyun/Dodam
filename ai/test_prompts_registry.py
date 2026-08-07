@@ -29,7 +29,7 @@ class VersionTest(unittest.TestCase):
         # 서로 다른 프롬프트는(내용이 다르므로) 해시가 다르다.
         self.assertNotEqual(
             prompts_registry.content_hash("first_question_htp"),
-            prompts_registry.content_hash("report_common"),
+            prompts_registry.content_hash("report_htp"),
         )
 
     def test_registered_prompt_uses_its_semver(self):
@@ -66,7 +66,7 @@ class ShortVersionTest(unittest.TestCase):
     """저장·전송용 축약 버전 (S15P11B209-819)."""
 
     def test_short_version_format(self):
-        value = prompts_registry.short_version("htp", "report_common", "report_htp")
+        value = prompts_registry.short_version("htp", "report_review", "report_htp")
         self.assertRegex(value, prompts_registry._TAG_PATTERN)
 
     def test_length_is_independent_of_file_count(self):
@@ -75,9 +75,9 @@ class ShortVersionTest(unittest.TestCase):
         정본(composite_version)은 파일당 30자쯤 늘어 786에서 컬럼을 넘겼다. 축약 태그는
         같은 라벨이면 파일 수와 무관하게 길이가 같아야 한다.
         """
-        one = prompts_registry.short_version("x", "report_common")
+        one = prompts_registry.short_version("x", "report_review")
         many = prompts_registry.short_version(
-            "x", "report_common", "report_htp", "report_diary", "guardrails"
+            "x", "report_review", "report_htp", "report_diary", "guardrails"
         )
         self.assertEqual(len(one), len(many))
         # 그래도 조합이 다르면 값은 달라야 한다 — 길이만 같고 구분은 살아 있다.
@@ -86,15 +86,15 @@ class ShortVersionTest(unittest.TestCase):
     def test_digest_reflects_any_member_content(self):
         # 구성원이 하나만 달라도 다이제스트가 달라진다(내용 변경 추적이 끊기지 않게).
         self.assertNotEqual(
-            prompts_registry.composite_digest("report_common", "report_htp"),
-            prompts_registry.composite_digest("report_common", "report_diary"),
+            prompts_registry.composite_digest("report_review", "report_htp"),
+            prompts_registry.composite_digest("report_review", "report_diary"),
         )
 
     def test_semver_is_max_of_members(self):
-        # conversations_htp(2.x) > conversation_common(1.x) — 큰 쪽이 세대를 대표한다.
+        # conversations_htp(4.x) > conversation_rules_htp(1.x) — 큰 쪽이 세대를 대표한다.
         # ⚠️ 기대값을 적어 두지 않고 레지스트리에서 가져온다. 하드코딩하면 프롬프트를
         #    올릴 때마다 이 테스트가 깨져, 규칙이 아니라 숫자를 고치게 된다(856에서 겪음).
-        members = ("conversations_htp", "conversation_common")
+        members = ("conversations_htp", "conversation_rules_htp")
         expected = max(
             (prompts_registry._PROMPT_SEMVER[m] for m in members),
             key=lambda s: tuple(int(p) for p in s.split(".")),
@@ -103,7 +103,7 @@ class ShortVersionTest(unittest.TestCase):
         self.assertTrue(value.startswith(f"conv@{expected}+"), value)
         # 작은 쪽이 대표가 되면 안 된다.
         self.assertNotEqual(
-            expected, prompts_registry._PROMPT_SEMVER["conversation_common"]
+            expected, prompts_registry._PROMPT_SEMVER["conversation_rules_htp"]
         )
 
 
@@ -167,15 +167,11 @@ class VersionManifestTest(unittest.TestCase):
         manifest = report_client.version_manifest()
         self.assertEqual(
             manifest[report_client._generation_version(True).split("prompt=")[1]],
-            prompts_registry.composite_version(
-                "report_common", "report_htp", "report_review"
-            ),
+            prompts_registry.composite_version("report_htp", "report_review"),
         )
         self.assertEqual(
             manifest[report_client._generation_version(False).split("prompt=")[1]],
-            prompts_registry.composite_version(
-                "report_common", "report_diary", "report_review"
-            ),
+            prompts_registry.composite_version("report_diary", "report_review"),
         )
 
     def test_question_manifest_resolves_to_composites(self):
@@ -209,7 +205,6 @@ class ClientVersionWiringTest(unittest.TestCase):
             report_client.PROMPT_VERSION,
             prompts_registry.short_version(
                 "report-all",
-                "report_common",
                 "report_htp",
                 "report_diary",
                 "report_review",
@@ -245,11 +240,14 @@ class ClientVersionWiringTest(unittest.TestCase):
             "first_question_diary",
             "conversations_htp",
             "conversations_diary",
-            "conversation_common",
-            "conversation_tone",
+            "conversation_rules_htp",
+            "conversation_rules_diary",
+            "conversation_tone_htp",
+            "conversation_tone_diary",
+            "activity_block_htp",
+            "activity_block_diary",
             "guardrails",
             "htp_question_bank",
-            "activity_block",
         )
         self.assertEqual(llm_client.PROMPT_VERSION, expected)
         self.assertEqual(question_service.PROMPT_VERSION, expected)
@@ -275,10 +273,15 @@ class ClientVersionWiringTest(unittest.TestCase):
         self.assertNotIn("first_question_diary", htp_names)
         self.assertIn("first_question_diary", diary_names)
         self.assertNotIn("first_question_htp", diary_names)
-        # 공유 파일은 어느 쪽에나 실린다 — 내용이 바뀌면 두 버전 모두 달라져야 한다.
+        # 기반 규칙·말투도 활동별 파일이다(993 — 공용 제거). 서로의 파일이 실리면 안 된다.
+        self.assertIn("conversation_rules_htp", htp_names)
+        self.assertIn("conversation_tone_htp", htp_names)
+        self.assertNotIn("conversation_rules_diary", htp_names)
+        self.assertIn("conversation_rules_diary", diary_names)
+        self.assertIn("conversation_tone_diary", diary_names)
+        self.assertNotIn("conversation_rules_htp", diary_names)
+        # 남은 공유 파일은 guardrails 하나다 — 아동 안전 문구라 두 벌로 가르지 않는다.
         for names in (htp_names, diary_names):
-            self.assertIn("conversation_common", names)
-            self.assertIn("conversation_tone", names)
             self.assertIn("guardrails", names)
         # 질문 뱅크(811)는 HTP 전용 — PDI는 HTP 프로토콜이라 그림일기엔 실리지 않는다.
         self.assertIn("htp_question_bank", htp_names)

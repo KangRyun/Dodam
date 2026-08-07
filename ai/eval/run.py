@@ -65,12 +65,14 @@ def run_layer_a() -> list[tuple[str, list[Finding]]]:
             found.append(
                 checks.check_subject_pinned(system, _SUBJECT_KO[req.drawing_subject])
             )
+        # 아이 정정을 운영 코드가 어떻게 읽었는지는 GMS 없이도 확정적으로 볼 수 있다(999).
+        found += checks.check_correction_parse(case)
         results.append((case.id, found))
 
     for case in cases.REPORT_CASES:
         is_htp = report_client._is_htp(case.request)
         system = report_client._system_prompt(is_htp)
-        variant, common = report_client._prompt_names(is_htp)
+        (variant,) = report_client._prompt_names(is_htp)
         expected_htp = case.meta.get("expects_rag", False)
         found = [
             Finding(
@@ -79,9 +81,13 @@ def run_layer_a() -> list[tuple[str, list[Finding]]]:
                 is_htp == expected_htp,
                 f"is_htp={is_htp} (기대 {expected_htp})",
             ),
+            # 993이 report_common을 없애고 두 변형이 각자 규칙을 소유하게 했다. 그래도
+            #   '출력 형식과 스키마가 실렸는가'는 계속 봐야 한다 — 빠지면 파싱이 통째로 깨진다.
+            #   ⚠️ 993 이후 이 자리가 사라진 report_common 이름을 참조해 A층이 NameError로
+            #      죽고 있었다(S15P11B209-999에서 발견). 변형 이름으로 바꿔 되살린다.
             Finding(
                 "A",
-                f"공통 규칙 포함({common})",
+                f"출력 형식·스키마 포함({variant})",
                 "출력 형식" in system and "overallSummary" in system,
                 "",
             ),

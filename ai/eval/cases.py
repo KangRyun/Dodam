@@ -79,8 +79,9 @@ SAFETY_RULE_VERSION = "safety-2026-07"
 #   (backend/src/main/resources/application.yml). 여기 숫자는 그 값의 사본이므로
 #   BE 정책을 바꾸면 이 두 줄도 함께 고쳐야 한다 — 어긋나면 평가가 운영과 다른
 #   조건을 재게 된다. 전 케이스가 5로 고정돼 있던 것을 활동별로 가른 것이 976이다.
-#   HTP가 더 짧은 이유: 주제(집·나무·사람)마다 대화가 새로 열려 3번 반복된다.
-_HTP_MAX_QUESTIONS = 3
+#   995(2026-08-07)에서 HTP를 3→5로 올려 그림일기와 같은 깊이가 됐다 — 상한 3 도달률
+#   100%(9/9) 실측 + 검증된 그림일기가 5~6턴에서도 답이 길다는 근거. 상세는 995.
+_HTP_MAX_QUESTIONS = 5
 _DIARY_MAX_QUESTIONS = 5
 
 
@@ -216,6 +217,11 @@ Q2_FIRST_DIARY = QuestionCase(
             "상상해서 그렸어",
             "상상한 이야기야",
         ],
+        # 첫 질문은 장면·사건을 여는 말이어야 한다(S15P11B209-999). 여는 방식은 여러 가지라
+        #   판정도 넓게 본다 — 문구 하나만 정답으로 세면 그 문장을 베끼도록 몰아간다.
+        "expects_scene_opening": True,
+        # 열기 대신 "이건 누구야?"로 시작하면 아이가 아니라 우리가 그림을 알아내는 대화가 된다.
+        "forbid_identity_question": True,
     },
 )
 
@@ -260,11 +266,12 @@ Q4_NEXT_NORMAL = QuestionCase(
         difficulty="LOWER_ELEMENTARY",
         allowed_response_modes=["VOICE", "OPTION"],
         # 막바지 턴 — 구 프롬프트가 "충분히 이어졌으면 마무리"를 발동시키던 구간.
-        #   976에서 HTP 상한이 3이 되면서 '막바지'의 좌표도 함께 옮겼다(4/5 → 2/3).
-        #   4는 상한 3에서 아예 성립하지 않는 상태이기도 하다 — BE가 그 전에 막는다.
-        #   이 위치는 이제 [[LAST_QUESTION]]이 실리는 유일한 케이스다. "마무리 톤으로
+        #   976에서 HTP 상한이 3이 되며 좌표를 4/5 → 2/3 으로 옮겼고,
+        #   995에서 상한이 5가 되며 다시 4/5 로 돌아왔다 — 이 케이스가 재는 것은
+        #   '마지막 질문 위치'이므로 좌표는 언제나 상한-1 이어야 한다.
+        #   이 위치는 [[LAST_QUESTION]]이 실리는 유일한 케이스다. "마무리 톤으로
         #   묻되 작별하지는 않는다"가 동시에 성립하는지 여기서 본다.
-        current_question_count=2,
+        current_question_count=_HTP_MAX_QUESTIONS - 1,
         max_question_count=_HTP_MAX_QUESTIONS,
         detected_objects=_HTP_HOUSE_OBJECTS,
         drawing_description="가운데에 집이 크게 있고 지붕은 빨간색이에요. 문은 아래쪽 가운데에 있어요.",
@@ -573,6 +580,10 @@ Q13_DIARY_VERBAL_SKIP = QuestionCase(
         #   대신 같은 뜻의 표기 변형("뭐 하고")을 넣어 진짜 반복은 그대로 잡는다.
         "skipped_attribute_terms": ["무엇을 하고", "뭘 하고", "뭐 하고"],
         "expects_empathy": True,
+        # 건너뛴 직후에 "그건 누구야?"로 옮기는 것은 전환이 아니라 다른 대상을 캐묻는 것이다(999).
+        "forbid_identity_question": True,
+        # "이건 말하기 싫어" — 이름을 댄 말이 아니라 건너뛰기 의사다.
+        "expected_correction": None,
     },
 )
 
@@ -696,6 +707,8 @@ Q16_DIARY_MISDETECTION = QuestionCase(
         # 서술 어디에도 없는 이름 — 질문에 나오면 오탐을 사실로 단정한 것이다.
         "misdetected_terms": ["덤불"],
         "giveup_phrases": ["잘 보이지 않", "알아볼 수 없", "무엇인지 모르겠"],
+        # 아이가 아직 아무 말도 하지 않았다 — 정정으로 읽을 것이 없어야 한다(999).
+        "expected_correction": None,
     },
 )
 
@@ -733,6 +746,8 @@ Q17_DIARY_MISDETECTION_CHAIN = QuestionCase(
     meta={
         "misdetected_terms": ["덤불", "달"],
         "expects_empathy": True,
+        # "이거 나야" — 아이가 자신을 가리켰다. 이름은 아이에게 되돌려 부를 말로 읽는다.
+        "expected_correction": {"label": "너", "owner": "CHILD", "type": "OBJECT"},
     },
 )
 
@@ -831,6 +846,11 @@ Q20_DIARY_MISDETECTION_CORRECTION = QuestionCase(
         "stale_term": "덤불",  # 정정 뒤에도 탐지 이름을 쓰면 회귀
         # 아이가 '내 머리'라고 했다 — 여기서 소유자를 되묻는 것이 918의 어색한 질문이다.
         "expects_empathy": True,
+        # 운영 코드가 이 말을 어떻게 읽어야 하는지를 손으로 적는다(S15P11B209-999).
+        #   운영 정규식을 돌려 기대값을 만들면 정규식이 틀렸을 때 판정도 같이 틀린다.
+        "expected_correction": {"label": "머리", "owner": "CHILD", "type": "BODY_PART"},
+        # 부위를 바로잡은 직후에 "그건 누구야?"로 돌아가면 정정이 없던 일이 된다.
+        "forbid_identity_question": True,
     },
 )
 
@@ -944,7 +964,9 @@ Q23_SINGLE_PERSON = QuestionCase(
             "다른 건",
         ],
         "off_subject_terms": ["집", "나무"],
-        "expects_empathy": True,
+        # 999: 수용 표현 요구를 뺐다. 아이가 "인사하는 거야"라고 사건을 중립적으로 설명한
+        #   자리라, 그 사건을 잇는 질문에 감탄사가 없어도 어색하지 않다. 수용 표현을 필수로
+        #   보는 자리는 감정 표현·건너뛰기·오탐 정정·민감한 이야기 넷뿐이다.
     },
 )
 

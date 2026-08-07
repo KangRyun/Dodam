@@ -35,7 +35,11 @@ logger = logging.getLogger(__name__)
 # 다르기 때문이다 — 같은 문장으로 두 목적을 시키면 어느 쪽도 제대로 안 된다:
 #   - HTP: 그림 자체가 궁금하다. 아이가 그림에 무엇을 담으려 했는지 그림 안에서 좁혀 간다.
 #   - ART_DIARY: 그림 속 이야기에서 시작해 실제 경험인지 상상인지 확인한 뒤 그 흐름과 마음으로 넓혀 간다.
-# 공유 규칙(이름·분석결과 취급·출력 형식)은 conversation_common이 소유하고 뒤에 이어붙인다.
+# 기반 규칙(목적·이름·분석결과 취급·태도·출력 형식)과 연령별 말투도 활동별 파일이 소유한다.
+# 공용 파일(conversation_common·conversation_tone)은 2026-08-07 없앴다(사용자 결정, S15P11B209-993) —
+# 한 활동에 맞춘 수정이 다른 활동을 망치는 경로(939·954)를 구조에서 제거한다.
+# 활동 간에 남은 공유 파일은 guardrails 하나다. 아동 안전 금지 목록이라 두 벌로 가르면
+# 어긋난 채 조용히 벌어진다 — 활동별 '로직'이 아니라 활동 무관 안전 문구라 예외로 남긴다.
 _FIRST_BY_ACTIVITY = {
     "HTP": "first_question_htp",
     "ART_DIARY": "first_question_diary",
@@ -44,18 +48,27 @@ _NEXT_BY_ACTIVITY = {
     "HTP": "conversations_htp",
     "ART_DIARY": "conversations_diary",
 }
+_RULES_BY_ACTIVITY = {
+    "HTP": "conversation_rules_htp",
+    "ART_DIARY": "conversation_rules_diary",
+}
+_TONE_BY_ACTIVITY = {
+    "HTP": "conversation_tone_htp",
+    "ART_DIARY": "conversation_tone_diary",
+}
 # 활동 유형을 못 받은 호출(draft 경로·구 BE)은 HTP로 본다 — vlm_client.DEFAULT_ACTIVITY_TYPE과 같은 기준.
 DEFAULT_ACTIVITY_TYPE = "HTP"
 
-_COMMON = "conversation_common"
-_TONE = "conversation_tone"
 _GUARDRAILS = "guardrails"
 # HTP 주제별 질문 뱅크(S15P11B209-811). 표준 사후질문(PDI)을 아동용으로 포장한 목록이며,
 # 현재 주제 구획 하나만 싣는다. 그림일기는 쓰지 않는다 — PDI는 HTP 전용 프로토콜이다.
 _HTP_BANK = "htp_question_bank"
-# 활동·주제·대상 지시 블록(S15P11B209-832). question_service가 구획을 골라 조립해
-# 대화 프롬프트에 끼워 넣는다. 원래 코드 안 문자열이라 버전 추적 밖이었다.
-_ACTIVITY_BLOCK = "activity_block"
+# 활동·주제·대상 지시 블록(S15P11B209-832 이관 · 993 활동별 분리). question_service가
+# 구획을 골라 조립해 대화 프롬프트에 끼워 넣는다. 원래 코드 안 문자열이라 버전 추적 밖이었다.
+_ACTIVITY_BLOCK_BY_ACTIVITY = {
+    "HTP": "activity_block_htp",
+    "ART_DIARY": "activity_block_diary",
+}
 
 # 대화 경로가 쓰는 프롬프트 파일 전체의 통합 버전(내용이 바뀌면 자동으로 달라진다) — S15P11B209-595.
 # 축약 태그로 싣는다(S15P11B209-819) — 대화 경로는 파일이 여섯 개라 정본이 193자다. BE가 아직
@@ -63,11 +76,11 @@ _ACTIVITY_BLOCK = "activity_block"
 _ALL_NAMES = (
     *_FIRST_BY_ACTIVITY.values(),
     *_NEXT_BY_ACTIVITY.values(),
-    _COMMON,
-    _TONE,
+    *_RULES_BY_ACTIVITY.values(),
+    *_TONE_BY_ACTIVITY.values(),
+    *_ACTIVITY_BLOCK_BY_ACTIVITY.values(),
     _GUARDRAILS,
     _HTP_BANK,
-    _ACTIVITY_BLOCK,
 )
 PROMPT_VERSION = prompts_registry.short_version("conv-all", *_ALL_NAMES)
 
@@ -87,10 +100,10 @@ def prompt_names_for(activity_type: str | None) -> tuple[str, ...]:
     names = (
         _FIRST_BY_ACTIVITY[key],
         _NEXT_BY_ACTIVITY[key],
-        _COMMON,
-        _TONE,
+        _RULES_BY_ACTIVITY[key],
+        _TONE_BY_ACTIVITY[key],
+        _ACTIVITY_BLOCK_BY_ACTIVITY[key],
         _GUARDRAILS,
-        _ACTIVITY_BLOCK,
     )
     return names + (_HTP_BANK,) if key == "HTP" else names
 
@@ -184,8 +197,10 @@ def _load(name: str) -> str:
 
 
 # ── 연령(난이도)별 말하기 규칙 (S15P11B209-786) ──────────────────
-# 구조: conversation_tone.txt 안에 [[PRESCHOOL]] 같은 머리표로 난이도별 구획을 두고, 그중
-# 하나만 골라 싣는다. 한 파일에 모아 둬야 네 단계를 나란히 놓고 어휘·길이 균형을 볼 수 있다.
+# 구조: 활동별 tone 파일 안에 [[PRESCHOOL]] 같은 머리표로 난이도별 구획을 두고, 그중
+# 하나만 골라 싣는다. 한 파일에 네 단계를 모아 둬야 어휘·길이 균형을 나란히 볼 수 있고,
+# 활동별로 파일을 가른 것(993)은 난이도 축과 활동 축이 서로를 밟지 않게 하기 위해서다 —
+# 공용 tone의 "이유를 물어도 된다"가 HTP의 왜·이유·까닭 금지와 충돌하던 것이 실제 사례다.
 # ⚠️ 이 규칙은 원래 question_service._DIFFICULTY_RULES 코드 상수였다. 프롬프트 파일로 옮긴 이유:
 #   ① 아이에게 그대로 들려줄 문구인데 prompts_registry 버전 추적 밖에 있었다,
 #   ② draft 경로(first_question/next_question)에는 아예 안 붙어 연령별 말투가 없었다.
@@ -200,13 +215,17 @@ BANK_BLOCK_TITLE = "[이 주제에서 궁금해할 것]"
 _sections = prompts_registry.sections
 
 
-def _tone_sections() -> dict[str, str]:
-    return _sections(_TONE)
+def _tone_sections(activity_type: str | None = None) -> dict[str, str]:
+    key = activity_type if activity_type in _TONE_BY_ACTIVITY else DEFAULT_ACTIVITY_TYPE
+    return _sections(_TONE_BY_ACTIVITY[key])
 
 
-def tone_block(difficulty: str | None) -> str:
-    """난이도에 맞는 길이·어휘·말투 규칙 블록. 대화 프롬프트 뒤에 덧붙는다."""
-    sections = _tone_sections()
+def tone_block(difficulty: str | None, activity_type: str | None = None) -> str:
+    """난이도에 맞는 길이·어휘·말투 규칙 블록. 대화 프롬프트 뒤에 덧붙는다.
+
+    활동별 tone 파일에서 고른다(993) — 모르는 활동은 기본(HTP)으로 둔다.
+    """
+    sections = _tone_sections(activity_type)
     body = sections.get(difficulty or "") or sections[DEFAULT_DIFFICULTY]
     return f"{TONE_BLOCK_TITLE}\n{body}"
 
@@ -230,21 +249,30 @@ def _assemble(
     activity_block: str,
     difficulty: str | None,
     question_bank: str = "",
+    activity_type: str | None = None,
 ) -> str:
-    """대화 system 프롬프트 조립 — 변형 → 질문 뱅크 → 활동 지시 → 가드레일 → 말투 → 공통.
+    """대화 system 프롬프트 조립 — 변형 → 질문 뱅크 → 활동 지시 → 가드레일 → 말투 → 기반 규칙.
 
+    말투와 기반 규칙도 활동별 파일에서 고른다(993 — 공용 제거).
     순서 근거: 변형이 앞(역할·대화 목표·재료 블록)이라 모델이 먼저 '무슨 대화인지'를 잡고,
-    공통이 맨 뒤(이름 규칙·출력 형식)라 형식 지시를 놓치지 않는다. 말투는 공통의
+    기반 규칙이 맨 뒤(이름 규칙·출력 형식)라 형식 지시를 놓치지 않는다. 말투는 기반 규칙의
     "문장 수·길이는 [연령별 말하기 규칙]이 정한다"가 가리키는 대상이라 바로 앞에 둔다.
     질문 뱅크는 '무엇을 물을지'(방향)라 '지금 이것만 물어라'(activity_block)보다 앞에 둔다 —
     뒤에 오는 활동 지시가 뱅크에서 고른 방향을 현재 대상으로 좁히는 순서가 된다.
     """
+    rules_key = (
+        activity_type if activity_type in _RULES_BY_ACTIVITY else DEFAULT_ACTIVITY_TYPE
+    )
     parts = [variant]
     if question_bank:
         parts.append(question_bank)
     if activity_block:
         parts.append(activity_block)
-    parts += [_load(_GUARDRAILS), tone_block(difficulty), _load(_COMMON)]
+    parts += [
+        _load(_GUARDRAILS),
+        tone_block(difficulty, activity_type),
+        _load(_RULES_BY_ACTIVITY[rules_key]),
+    ]
     return "\n\n".join(parts)
 
 
@@ -323,6 +351,7 @@ def render_first_question_prompt(
         activity_block=activity_block,
         difficulty=difficulty,
         question_bank=question_bank_block(activity_type, drawing_subject),
+        activity_type=activity_type,
     )
 
 
@@ -395,6 +424,7 @@ def render_next_question_prompt(
         activity_block=activity_block,
         difficulty=difficulty,
         question_bank=question_bank_block(activity_type, drawing_subject),
+        activity_type=activity_type,
     )
 
 

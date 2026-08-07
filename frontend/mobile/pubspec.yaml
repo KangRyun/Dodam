@@ -119,6 +119,7 @@ flutter:
     - assets/images/role_selection/
     - assets/images/child_register/
     - assets/images/dialogs/
+    - assets/images/conversation/
     - assets/scene/
     - assets/canvas/
     - assets/canvas/frame/

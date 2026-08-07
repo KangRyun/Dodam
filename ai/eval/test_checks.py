@@ -108,5 +108,63 @@ class ToneBandsDifferTest(unittest.TestCase):
         self.assertFalse(f.is_failure)
 
 
+class IdentityAndSceneOpeningTest(unittest.TestCase):
+    """정체 질문·장면 열기 판정 (S15P11B209-999).
+
+    2026-08-06 측정에서 두 지표가 모두 틀렸다. 정체 질문은 '누구한테·누구랑'까지 세어
+    정상 질문을 위반으로 만들었고, 장면 열기는 문구 하나만 정답으로 세어 실제로 장면을 연
+    질문을 못 알아봤다. 판정이 틀리면 그 지표로 내린 프롬프트 결정도 함께 틀린다.
+    """
+
+    IDENTITY = [
+        "그 사람은 누구야?",
+        "이건 뭐야?",
+        "저기 있는 건 누구니?",
+        "그건 뭘까?",
+        # 2026-08-07 실호출 — 아이가 "이거 나야"라고 답한 직후에 돌아왔다.
+        "이건 누구 이야기야?",
+    ]
+    # 사건 속 상대를 묻는 말이다 — 정체를 되묻는 것이 아니다.
+    NOT_IDENTITY = [
+        "누구한테 줬어?",
+        "누구랑 같이 갔어?",
+        "누구에게 말했어?",
+        "그때 무슨 일이 있었어?",
+    ]
+
+    def test_identity_questions_are_detected(self):
+        for text in self.IDENTITY:
+            with self.subTest(text=text):
+                self.assertTrue(checks._EVAL_IDENTITY.search(text))
+
+    def test_companion_questions_are_not_identity(self):
+        for text in self.NOT_IDENTITY:
+            with self.subTest(text=text):
+                self.assertIsNone(checks._EVAL_IDENTITY.search(text))
+
+    SCENE_OPENING = [
+        "이 그림에서는 무슨 일이 일어나고 있어?",
+        "두 사람은 뭐 하고 있어?",
+        "그다음에는 어떻게 됐어?",
+        "여기서 어떤 일이 있었어?",
+        "이 그림에 어떤 이야기가 있어?",
+    ]
+    NOT_SCENE_OPENING = [
+        "이 공은 무슨 색이야?",
+        "머리는 어떤 모양이야?",
+        "좋아, 그건 건너뛸게.",
+    ]
+
+    def test_scene_opening_is_recognised_in_many_forms(self):
+        for text in self.SCENE_OPENING:
+            with self.subTest(text=text):
+                self.assertTrue(checks._SCENE_OPENING.search(text))
+
+    def test_visual_questions_do_not_count_as_scene_opening(self):
+        for text in self.NOT_SCENE_OPENING:
+            with self.subTest(text=text):
+                self.assertIsNone(checks._SCENE_OPENING.search(text))
+
+
 if __name__ == "__main__":
     unittest.main()

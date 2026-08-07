@@ -13,6 +13,11 @@ import '../../application/voice_answer_upload_controller.dart';
 import '../../domain/models/ai_question.dart';
 import 'voice_recording_control.dart';
 
+const _questionSkipAsset =
+    'assets/images/conversation/question_skip_pastel.png';
+const _questionStopAsset =
+    'assets/images/conversation/question_stop_pastel.png';
+
 // 질문 도착 시 캔버스 위에 표시하는 캐릭터와 말풍선
 final class AiQuestionBubbleOverlay extends StatelessWidget {
   const AiQuestionBubbleOverlay({
@@ -266,6 +271,7 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                                               answerOptionsEnabled,
                                           skipRetryable: skipRetryable,
                                           endRetryable: endRetryable,
+                                          compact: compact,
                                         ),
                                       ),
                                       if (!compact) ...[
@@ -337,6 +343,7 @@ final class _ResponseActions extends StatelessWidget {
     required this.answerOptionsEnabled,
     required this.skipRetryable,
     required this.endRetryable,
+    required this.compact,
     super.key,
   });
 
@@ -353,6 +360,7 @@ final class _ResponseActions extends StatelessWidget {
   final bool answerOptionsEnabled;
   final bool skipRetryable;
   final bool endRetryable;
+  final bool compact;
 
   /// 어느 요청이든 전송 중이면 다른 조작을 막는다.
   bool get _busy =>
@@ -401,52 +409,146 @@ final class _ResponseActions extends StatelessWidget {
                 ? '대화를 끝내지 못했어요. 다시 시도해 주세요.'
                 : '지금은 대화를 끝낼 수 없어요. 조금 더 이야기해 볼까요?',
           ),
-        const SizedBox(height: AppSpacing.xs),
-        TextButton.icon(
-          key: const ValueKey('ai-question-skip'),
+        const SizedBox(height: AppSpacing.sm),
+        _QuestionActionCard(
+          buttonKey: const ValueKey('ai-question-skip'),
+          semanticsLabel: skipStatus == QuestionSkipStatus.submitting
+              ? '현재 질문 건너뛰는 중'
+              : '현재 질문 건너뛰기',
+          label: skipStatus == QuestionSkipStatus.submitting
+              ? '계속 그리기로 돌아가는 중'
+              : '이 질문 건너뛰기',
+          assetPath: _questionSkipAsset,
+          illustrationKey: const ValueKey('ai-question-skip-illustration'),
+          compact: compact,
+          loading: skipStatus == QuestionSkipStatus.submitting,
+          backgroundColor: const Color(0xFFFAF7FF),
+          pressedColor: const Color(0xFFEDE5FA),
+          borderColor: const Color(0xFFD8C9B5),
+          foregroundColor: const Color(0xFF4E3F62),
           onPressed: _busy || !skipRetryable ? null : onSkip,
-          icon: skipStatus == QuestionSkipStatus.submitting
-              ? const SizedBox.square(
-                  dimension: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.sentiment_neutral_rounded),
-          label: Text(
-            skipStatus == QuestionSkipStatus.submitting
-                ? '계속 그리기로 돌아가는 중'
-                : '이 질문은 넘어갈래',
-          ),
-          style: TextButton.styleFrom(
-            foregroundColor: AppColors.inkMuted,
-            backgroundColor: AppColors.surface,
-            minimumSize: const Size.fromHeight(48),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppRadius.md),
-              side: const BorderSide(color: AppColors.outlineStrong),
-            ),
-          ),
         ),
-        const SizedBox(height: AppSpacing.xs),
-        TextButton.icon(
-          key: const ValueKey('ai-conversation-end'),
+        const SizedBox(height: AppSpacing.sm),
+        _QuestionActionCard(
+          buttonKey: const ValueKey('ai-conversation-end'),
+          semanticsLabel: endStatus == ConversationEndStatus.submitting
+              ? 'AI 질문 마무리하는 중'
+              : 'AI 질문 그만 받기',
+          label: endStatus == ConversationEndStatus.submitting
+              ? '대화를 마무리하는 중'
+              : '질문 그만 받기',
+          assetPath: _questionStopAsset,
+          illustrationKey: const ValueKey('ai-question-stop-illustration'),
+          compact: compact,
+          loading: endStatus == ConversationEndStatus.submitting,
+          backgroundColor: const Color(0xFFFFF6F0),
+          pressedColor: const Color(0xFFFBE2D3),
+          borderColor: const Color(0xFFE2BEA4),
+          foregroundColor: const Color(0xFF5A4035),
           onPressed: _busy || !endRetryable ? null : onEnd,
-          icon: endStatus == ConversationEndStatus.submitting
-              ? const SizedBox.square(
-                  dimension: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2),
-                )
-              : const Icon(Icons.stop_circle_outlined),
-          label: Text(
-            endStatus == ConversationEndStatus.submitting
-                ? '대화를 마무리하는 중'
-                : '이제 질문 그만 받을래',
-          ),
-          style: TextButton.styleFrom(
-            foregroundColor: AppColors.inkMuted,
-            minimumSize: const Size(48, 48),
-          ),
         ),
       ],
+    );
+  }
+}
+
+final class _QuestionActionCard extends StatelessWidget {
+  const _QuestionActionCard({
+    required this.buttonKey,
+    required this.semanticsLabel,
+    required this.label,
+    required this.assetPath,
+    required this.illustrationKey,
+    required this.compact,
+    required this.loading,
+    required this.backgroundColor,
+    required this.pressedColor,
+    required this.borderColor,
+    required this.foregroundColor,
+    required this.onPressed,
+  });
+
+  final Key buttonKey;
+  final String semanticsLabel;
+  final String label;
+  final String assetPath;
+  final Key illustrationKey;
+  final bool compact;
+  final bool loading;
+  final Color backgroundColor;
+  final Color pressedColor;
+  final Color borderColor;
+  final Color foregroundColor;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final iconSize = compact ? 26.0 : 30.0;
+    final enabled = onPressed != null && !loading;
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      side: BorderSide(color: enabled ? borderColor : AppColors.outline),
+    );
+
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: semanticsLabel,
+      onTap: enabled ? onPressed : null,
+      excludeSemantics: true,
+      child: TextButton(
+        key: buttonKey,
+        onPressed: enabled ? onPressed : null,
+        style: TextButton.styleFrom(
+          foregroundColor: foregroundColor,
+          disabledForegroundColor: AppColors.onDisabled,
+          backgroundColor: backgroundColor,
+          disabledBackgroundColor: const Color(0xFFF3EFE8),
+          minimumSize: const Size.fromHeight(56),
+          padding: EdgeInsets.symmetric(
+            horizontal: compact ? AppSpacing.sm : AppSpacing.md,
+            vertical: AppSpacing.xs,
+          ),
+          shape: shape,
+        ).copyWith(overlayColor: WidgetStatePropertyAll(pressedColor)),
+        child: Row(
+          children: [
+            if (loading)
+              SizedBox.square(
+                dimension: iconSize,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.4,
+                  color: foregroundColor,
+                ),
+              )
+            else
+              ExcludeSemantics(
+                child: Image.asset(
+                  assetPath,
+                  key: illustrationKey,
+                  width: iconSize,
+                  height: iconSize,
+                  fit: BoxFit.contain,
+                  filterQuality: FilterQuality.high,
+                  excludeFromSemantics: true,
+                ),
+              ),
+            const SizedBox(width: AppSpacing.sm),
+            Expanded(
+              child: Text(
+                label,
+                textAlign: TextAlign.left,
+                style: TextStyle(
+                  color: enabled ? foregroundColor : AppColors.onDisabled,
+                  fontSize: compact ? 14 : 15,
+                  fontWeight: FontWeight.w800,
+                  height: 1.25,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

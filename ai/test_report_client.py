@@ -355,6 +355,97 @@ class BehaviorMetricsContractTest(unittest.TestCase):
         self.assertFalse(req.behavior_metrics.truncated)
 
 
+class ChipAnswerRefsTest(unittest.TestCase):
+    """선택형 답변의 근거 참조 수집 (S15P11B209-994).
+
+    이 집합이 게이트로 넘어가 OPTION 답변을 발화가 아니라 '고른 것'으로 등급 매기게 한다.
+    수집이 조용히 비면 재분류 전체가 무효가 된다 — 배선을 못 박는다.
+    """
+
+    def test_only_option_answers_are_collected(self):
+        req = _sample_request(
+            subject_summaries=[
+                contracts.SubjectSummary(
+                    drawing_subject="HOUSE",
+                    drawing_description="집이 있어요.",
+                    qa_pairs=[
+                        contracts.SubjectQaPair(
+                            question="이 집에서는 무슨 일이 있었어?",
+                            answer_text="생일잔치를 했어",
+                            answer_type="VOICE",
+                            answer_message_id=201,
+                        ),
+                        contracts.SubjectQaPair(
+                            question="이 집 안은 어떤 느낌이야?",
+                            answer_text="따뜻해요",
+                            answer_type="OPTION",
+                            answer_message_id=202,
+                        ),
+                        contracts.SubjectQaPair(
+                            question="답 없는 질문",
+                            answer_type="OPTION",
+                            answer_message_id=None,
+                        ),
+                    ],
+                )
+            ]
+        )
+        self.assertEqual(
+            report_client._chip_answer_refs(req),
+            frozenset({("QA_ANSWER", "202")}),
+        )
+
+    def test_chip_marker_is_rendered_in_qa_block(self):
+        """칩 답변은 재료 단계에서 '(선택지에서 고른 답이에요)'로 표시된다 — 프롬프트 규칙과 한 쌍."""
+        req = _sample_request(
+            subject_summaries=[
+                contracts.SubjectSummary(
+                    drawing_subject="HOUSE",
+                    drawing_description="집이 있어요.",
+                    qa_pairs=[
+                        contracts.SubjectQaPair(
+                            question="이 집 안은 어떤 느낌이야?",
+                            answer_text="따뜻해요",
+                            answer_type="OPTION",
+                            answer_message_id=202,
+                        ),
+                    ],
+                )
+            ]
+        )
+        message = report_client._format_activity(req, None, None, None)
+        self.assertIn("따뜻해요 (선택지에서 고른 답이에요)", message)
+
+
+class ChildAgeBlockTest(unittest.TestCase):
+    """연령 규준 축의 재료 — [활동 데이터]의 나이 줄 (S15P11B209-1001).
+
+    나이가 있으면 "만 N세"로 실리고, 없으면 **줄 자체가 빠진다** — "없음"으로 적으면
+    모델이 나이를 짐작해 채우는 압력이 된다. 프롬프트의 연령 지시(발달 문맥은 안심용,
+    근거 아님, 또래 비교 금지)와 한 쌍이다.
+    """
+
+    def test_child_age_line_is_included_when_present(self):
+        req = _sample_request(child_age=7)
+        message = report_client._format_activity(req, None, None, None)
+        self.assertIn("- 아이 나이: 만 7세", message)
+
+    def test_child_age_line_is_absent_when_missing(self):
+        req = _sample_request()
+        message = report_client._format_activity(req, None, None, None)
+        self.assertNotIn("아이 나이", message)
+
+    def test_prompts_state_age_is_context_not_evidence(self):
+        """연령 문맥이 근거 게이트를 우회하면 나이 하나로 카드가 만들어진다 — 못 박는다."""
+        for name in ("report_htp", "report_diary"):
+            text = prompts_registry.load(name)
+            with self.subTest(name=name):
+                self.assertIn("발달 문맥으로 설명해도 좋다", text)
+                self.assertIn("연령 문맥은 근거가 아니다", text)
+                self.assertIn("또래보다 늦다·빠르다", text)
+                self.assertIn("나이가 없으면 연령 이야기를 아예 꺼내지 마라", text)
+
+
 class BehaviorBlockWordingTest(unittest.TestCase):
     """[형식적 분석] 블록의 표현 규칙 (S15P11B209-838).
 
@@ -1858,6 +1949,32 @@ class ActivityPromptSplitTest(unittest.TestCase):
         self.assertIn("그림일기", system)
         self.assertNotIn("HTP(집·나무·사람)", system)
 
+    def test_both_activity_prompts_declare_the_same_output_schema(self):
+        """두 자기완결 파일의 출력 JSON 스키마 키가 같아야 한다 (S15P11B209-993).
+
+        공용 report_common을 활동별로 흡수하면서(사용자 결정 2026-08-07) 스키마가 두 벌이
+        됐다. 두 파일 모두 같은 BE 계약(ObservationGenerationResult)으로 파싱되므로,
+        한쪽 스키마만 고치면 다른 활동의 리포트가 조용히 계약과 어긋난다 —
+        키 집합 일치를 못 박아 드리프트를 배포 전에 잡는다.
+        (예시 값·설명 문구는 활동별로 달라도 된다. 지키는 것은 키다.)
+        """
+        import json as jsonlib
+
+        def schema_keys(name: str) -> dict:
+            text = prompts_registry.load(name)
+            start = text.index('{\n  "overallSummary"')
+            schema = jsonlib.loads(text[start:])
+            nested = {
+                key: sorted(schema[key][0]) if isinstance(schema[key], list)
+                and schema[key] and isinstance(schema[key][0], dict) else None
+                for key in schema
+            }
+            return {"top": sorted(schema), "nested": nested}
+
+        htp, diary = schema_keys("report_htp"), schema_keys("report_diary")
+        self.assertEqual(htp["top"], diary["top"])
+        self.assertEqual(htp["nested"], diary["nested"])
+
     def test_legacy_request_without_summaries_uses_diary_prompt(self):
         # 구 BE(subject_summaries 미전달)도 '단일 그림 + RAG 없음' 경로라 그림일기 쪽이 맞다.
         _, system, _ = self._generate(_sample_request())
@@ -1911,7 +2028,7 @@ class ReportCommonContradictionTest(unittest.TestCase):
     def setUp(self):
         import prompts_registry
 
-        self.text = prompts_registry.load("report_common")
+        self.text = prompts_registry.load("report_htp")
 
     # ── E: 걱정 신호 배출구 ──
     def test_two_concern_outlets_are_defined_with_distinct_roles(self):
@@ -1978,7 +2095,7 @@ class ReportContractAlignmentTest(unittest.TestCase):
     """
 
     def setUp(self):
-        self.text = prompts_registry.load("report_common")
+        self.text = prompts_registry.load("report_htp")
 
     # ── 3. 렌더링 설명이 사실과 맞는가 ──
     def test_guardian_facing_fields_are_named_exactly(self):
@@ -2819,7 +2936,7 @@ class DrawnItemsAssemblyTest(unittest.TestCase):
 
     def test_prompt_states_the_description_is_the_only_source(self):
         """문구가 빠지면 모델이 탐지 코드 줄을 옮겨 적는다(코드가 막지만 매번 버려진다)."""
-        text = prompts_registry.load("report_common")
+        text = prompts_registry.load("report_htp")
         self.assertIn("'탐지된 요소 코드' 줄은 이 목록의 근거가 **아니다.**", text)
         # 908에서 확인: 새 필드는 스키마 예시에 있어야 채워진다(지시문보다 예시가 세다).
         self.assertIn('"drawnItems"', text.split("출력 형식:", 1)[1])
@@ -2855,7 +2972,7 @@ class RoutingSingleOwnerTest(unittest.TestCase):
     """
 
     def setUp(self):
-        self.text = prompts_registry.load("report_common")
+        self.text = prompts_registry.load("report_htp")
         self.schema = self.text[self.text.index("{\n  \"overallSummary\"") :]
 
     def test_routing_ownership_is_declared(self):
@@ -3190,6 +3307,46 @@ class SelfReviewPromptTest(unittest.TestCase):
     def test_child_utterances_are_not_echoed_into_notes(self):
         self.assertIn("아이의 말이나 개인적인 내용을 그대로 옮겨 적지 마", self.text)
 
+    def test_imagined_story_written_as_fact_is_catchable(self):
+        """상상한 이야기를 있었던 일로 적은 문장 (S15P11B209-999).
+
+        대화 프롬프트가 실제/상상 확인을 "반드시 묻지 않는다"로 바꾸면서, 모르는 채로 넘어온
+        이야기가 정상 경로가 됐다. 초안이 그걸 사실로 적어도 기존 여섯 코드가 가리키는 곳이
+        없었다 — 코드를 늘리지 않고 NO_EVIDENCE 에 귀속시킨다.
+        """
+        self.assertIn("상상한 이야기로 말한 것을 실제로 있었던 일처럼 적은 문장", self.text)
+
+    def test_unstated_time_is_catchable(self):
+        """활동을 한 날짜와 그림 속 일이 일어난 때는 다르다 — OVERREACH 쪽이다."""
+        self.assertIn("아이가 말하지 않은 시점을 정해 적은 문장", self.text)
+
+
+class DiaryRealityAndTimeRulesTest(unittest.TestCase):
+    """그림일기 리포트가 실제/상상·시점을 단정하지 않는다 (S15P11B209-999).
+
+    conversations_diary 4.1.0이 "실제 경험인지 상상인지 반드시 묻지 않는다"로 바뀌었다.
+    아이에게는 그게 맞지만, 리포트 쪽에 지시가 없으면 모델은 **모르는 것을 있었던 일로 적는다.**
+    두 프롬프트가 같은 축을 반대로 다루면 대화에서 지킨 것이 리포트에서 무너진다.
+    """
+
+    def setUp(self):
+        self.text = prompts_registry.load("report_diary")
+
+    def test_unknown_reality_is_left_unknown(self):
+        self.assertIn("둘 중 하나로 정하지 마", self.text)
+
+    def test_imagined_story_is_recorded_as_a_told_story(self):
+        self.assertIn("실제로 있었던 일처럼 적지 마", self.text)
+
+    def test_time_is_not_invented(self):
+        self.assertIn("시점을 말하지 않았으면", self.text)
+        self.assertIn("활동을 한 날짜와 그림 속 일이 일어난 때는 다르다", self.text)
+
+    def test_htp_prompt_is_untouched(self):
+        # 이 규칙은 자유 그림에만 붙인다. HTP는 주제가 정해진 활동이라 축이 다르다.
+        htp = prompts_registry.load("report_htp")
+        self.assertNotIn("상상한 이야기", htp)
+
 
 # ── 주제별 관찰 (875 §5) ─────────────────────────────────────────
 def _htp_subject(subject, description="집이 가운데에 크게 그려져 있어요.", **overrides):
@@ -3485,7 +3642,7 @@ class SubjectObservationSelfReviewTest(unittest.TestCase):
         self.assertEqual(result.observation_draft.status, "AI_REVIEWED")
 
     def test_prompt_forbids_interpretation_in_the_fact_slot(self):
-        text = prompts_registry.load("report_common")
+        text = prompts_registry.load("report_htp")
         self.assertIn("subjectReports", text)
         self.assertIn("눈으로 확인된 사실", text)
         self.assertIn("interpretationRefs", text)

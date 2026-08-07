@@ -193,7 +193,13 @@ class ConversationPromptRulesTest(unittest.TestCase):
             system = self._next(activity)
             self.assertIn("[질문 건너뛰기 의사 처리]", system)
             self.assertIn("그림 내용에 대한 답이 아니야", system)
-            self.assertIn("같거나 의미상 비슷한 질문", system)
+            # 999: 그림일기는 "같거나 의미상 비슷한 질문" 대신 "같은 목적을 다시 쓰지 마"로
+            #   바꿨다. 실호출에서 건너뛰기 직후 다른 객체를 골라 캐묻는 문장이 나왔는데,
+            #   표현이 달라 옛 문구로는 걸리지 않았다. HTP 문구는 그대로 둔다.
+            self.assertTrue(
+                "같거나 의미상 비슷한 질문" in system or "같은 목적을 다시 쓰지 마" in system,
+                "건너뛰기 직후 같은 질문 반복 금지 규칙이 있어야 한다",
+            )
             self.assertIn("표현만 바꿔 다시 묻지 마", system)
             self.assertIn("이 규칙을 우선해", system)
             self.assertIn('"몰라"라고 한 것만으로', system)
@@ -247,18 +253,19 @@ class ConversationPromptRulesTest(unittest.TestCase):
             self.assertIn("이름을 못 박지 말고", system)
 
     def test_length_rule_is_owned_only_by_tone_block(self):
-        """문장 수·길이의 소유자는 conversation_tone 하나다(S15P11B209-786).
+        """문장 수·길이의 소유자는 활동별 tone 파일 하나다(S15P11B209-786, 993에서 활동별 분리).
 
         구조상 같은 프롬프트에 "한 문장만"(출력 형식)과 "한두 문장"(난이도 블록)이 함께
-        실려 어느 쪽이 이길지 알 수 없었다. 이제 공통부는 길이를 정하지 않고 위임한다.
+        실려 어느 쪽이 이길지 알 수 없었다. 기반 규칙 파일은 길이를 정하지 않고 위임한다.
         """
         import prompts_registry
 
         self.assertNotIn("1~2문장", prompts_registry.load("guardrails"))
-        common = prompts_registry.load("conversation_common")
-        self.assertIn("[연령별 말하기 규칙]이 정한다", common)
-        for banned in ("한 문장만", "한두 문장만"):
-            self.assertNotIn(banned, common)
+        for name in ("conversation_rules_htp", "conversation_rules_diary"):
+            rules = prompts_registry.load(name)
+            self.assertIn("[연령별 말하기 규칙]이 정한다", rules)
+            for banned in ("한 문장만", "한두 문장만"):
+                self.assertNotIn(banned, rules)
 
 
 class ActivitySplitTest(unittest.TestCase):
@@ -289,12 +296,18 @@ class ActivitySplitTest(unittest.TestCase):
             self.assertIn("상상", system)
             self.assertNotIn("그림 자체가 궁금해", system)
 
-    def test_diary_starts_with_story_before_reality_check(self):
+    def test_diary_starts_with_story_and_never_forces_reality_check(self):
+        """999: 현실 확인이 '반드시 한 번'에서 '필요할 때만'으로 바뀌었다.
+
+        그림일기에는 오늘 일·다른 날 일·실제에 상상을 더한 이야기·완전한 상상이 섞이는데,
+        옛 규칙은 장면을 들은 뒤 둘 중 하나를 고르라고 강제했다. 첫 질문에서 묻지 않는다는
+        규칙은 그대로다 — 바뀐 것은 후속 대화에서의 강제뿐이다.
+        """
         first = self._first("ART_DIARY")
         next_prompt = self._next("ART_DIARY")
         self.assertIn("그림 속 이야기를 먼저 들은 뒤", first)
         self.assertIn("첫 질문에서는 실제 경험인지 상상인지부터 묻지 마", first)
-        self.assertIn("실제 경험인지 상상인지 한 번만 확인해", next_prompt)
+        self.assertIn("실제 경험인지 상상인지 반드시 묻지 않는다", next_prompt)
         self.assertIn("아이가 이미 말했으면 다시 묻지 마", next_prompt)
         self.assertNotIn("오늘 있었던 일을 이야기하는", first)
         self.assertNotIn("오늘 있었던 일을 이야기하는", next_prompt)
@@ -329,7 +342,7 @@ class HtpQuestionBankTest(unittest.TestCase):
     def test_only_the_current_subject_section_is_loaded(self):
         """셋을 다 실으면 다른 주제로 새는 709 계열이 다시 열린다.
 
-        ⚠️ 991 에서 표식 문장을 바꿨다. 이 테스트가 고정하는 것은 **구획 분리**이지
+        ⚠️ 993 에서 표식 문장을 바꿨다. 이 테스트가 고정하는 것은 **구획 분리**이지
         특정 문항이 아니다 — 표식으로 쓰던 "이 집에는 누가 살아?"·"이건 무슨 나무야?"는
         한 단어로 답이 끝나는 닫힌 질문이라 뱅크에서 열린 형태로 다시 썼다.
         표식만 각 구획의 새 고유 문장으로 옮긴다.
@@ -372,11 +385,11 @@ class HtpQuestionBankTest(unittest.TestCase):
             "우리 집이야", drawing_analysis="집이 크게",
             activity_type="HTP", drawing_subject="TREE",
         )
-        # 표식 문장 교체 사유는 test_only_the_current_subject_section_is_loaded 참조(991).
+        # 표식 문장 교체 사유는 test_only_the_current_subject_section_is_loaded 참조(993).
         self.assertIn("이 나무는 여기서 무엇을 보고 있을까?", system)
 
     def test_every_bank_item_asks_exactly_one_thing(self):
-        """뱅크 문항 하나에 물음이 둘 들어가면 출력 형식 규칙과 부딪힌다 (S15P11B209-991).
+        """뱅크 문항 하나에 물음이 둘 들어가면 출력 형식 규칙과 부딪힌다 (S15P11B209-993).
 
         conversation_common이 "한 번에 질문은 하나만 · 물음표가 두 개 들어가지 않게"를
         지시하는데, 뱅크는 실제 문장을 주므로 앵커가 더 세다. 둘이 부딪히면 결과가
@@ -398,7 +411,7 @@ class HtpQuestionBankTest(unittest.TestCase):
         말한 내용이 없으면 해석이 아예 만들어지지 않는다. 아래 축이 뱅크에서 사라지면 근거를
         채울 재료가 줄어드는데 테스트 없이는 조용히 사라진다 — 축 단위로 못 박는다.
 
-        ⚠️ 991 에서 키워드를 갱신했다. **축은 그대로이고 문구만 바뀌었다** —
+        ⚠️ 993 에서 키워드를 갱신했다. **축은 그대로이고 문구만 바뀌었다** —
         뱅크 문항을 닫힌 형태에서 열린 형태로 다시 썼기 때문이다.
         실측(2026-08-07)에서 "누가/뭐가/어디"로 끝나는 질문에 아이가 8~17자로만 답했다.
         축별 대응: 환경 "어디에 있어"→"둘레에는 어떤 것들이" · 연상 "누가 생각나"→"무엇이 떠올라" ·
@@ -448,7 +461,16 @@ class FirstQuestionHtpRegressionTest(unittest.TestCase):
         self.assertIn("표현을 바꿔도 그린 이유 자체를 묻지 마", htp)
         self.assertIn('"왜"·"이유"·"까닭"이라는 낱말도 쓰지 마', htp)
         self.assertNotIn("왜 빨간색으로 칠했어", htp)
-        self.assertNotIn("왜 그렇게 그렸어", llm_client._load("conversation_common"))
+        self.assertNotIn("왜 그렇게 그렸어", llm_client._load("conversation_rules_htp"))
+        # 993 활동별 분리의 실익을 고정한다: HTP 연령 규칙에는 이유·까닭 허용이 없어야 한다.
+        # 공용 tone의 "이유를 물어도 된다"가 이 금지와 충돌하던 것이 분리 사유다.
+        # 파일 머리말(사유 설명)은 모델에 실리지 않으므로 [[구획]] 본문만 본다.
+        for body in llm_client._tone_sections("HTP").values():
+            self.assertNotIn("이유", body)
+            self.assertNotIn("까닭", body)
+        # 그림일기 쪽은 이유를 따라가는 활동이라 허용이 남아 있어야 한다(지우면 퇴보).
+        diary_bodies = "\n".join(llm_client._tone_sections("ART_DIARY").values())
+        self.assertIn("까닭", diary_bodies)
 
     def test_reason_question_is_only_allowed_after_child_signal(self):
         htp = llm_client._load("conversations_htp")
@@ -495,24 +517,28 @@ class ToneBlockTest(unittest.TestCase):
 
     def test_every_contract_difficulty_has_a_section(self):
         # BE QuestionDifficulty enum 4값 전부에 구획이 있어야 폴백으로 새지 않는다.
-        sections = llm_client._tone_sections()
-        self.assertEqual(
-            set(sections),
-            {"PRESCHOOL", "LOWER_ELEMENTARY", "UPPER_ELEMENTARY", "SUPPORT"},
-        )
-        for body in sections.values():
-            self.assertIn("- 길이:", body)
-            self.assertIn("- 어휘:", body)
-            self.assertIn("- 말투:", body)
+        # 993에서 tone이 활동별로 갈렸다 — 두 파일 모두에서 지켜져야 한다.
+        for activity in ("HTP", "ART_DIARY"):
+            sections = llm_client._tone_sections(activity)
+            self.assertEqual(
+                set(sections),
+                {"PRESCHOOL", "LOWER_ELEMENTARY", "UPPER_ELEMENTARY", "SUPPORT"},
+            )
+            for body in sections.values():
+                self.assertIn("- 길이:", body)
+                self.assertIn("- 어휘:", body)
+                self.assertIn("- 말투:", body)
 
     def test_age_bands_are_stated_in_each_section(self):
-        """유아형 만 4~6세 / 저학년형 만 7~9세 / 고학년형 만 10~12세."""
-        sections = llm_client._tone_sections()
-        self.assertIn("만 4~6세", sections["PRESCHOOL"])
-        self.assertIn("만 7~9세", sections["LOWER_ELEMENTARY"])
-        self.assertIn("만 10~12세", sections["UPPER_ELEMENTARY"])
+        """유아형 만 4~6세 / 저학년형 만 7~9세 / 고학년형 만 10~12세 — 두 활동 파일 모두."""
+        for activity in ("HTP", "ART_DIARY"):
+            sections = llm_client._tone_sections(activity)
+            self.assertIn("만 4~6세", sections["PRESCHOOL"])
+            self.assertIn("만 7~9세", sections["LOWER_ELEMENTARY"])
+            self.assertIn("만 10~12세", sections["UPPER_ELEMENTARY"])
         # SUPPORT는 연령축이 아니다 — 나이로 고르면 안 된다.
-        self.assertIn("연령축이 아니라", llm_client._load("conversation_tone"))
+        for name in ("conversation_tone_htp", "conversation_tone_diary"):
+            self.assertIn("연령축이 아니라", llm_client._load(name))
 
     def test_selected_section_is_the_only_one_in_the_prompt(self):
         system = llm_client.render_first_question_prompt("집", difficulty="PRESCHOOL")
@@ -587,7 +613,7 @@ class BankAndVariantConsistencyTest(unittest.TestCase):
     def test_unclear_objects_may_still_be_asked_about(self):
         """"뻔하게 되묻지 마"가 넓어서 conversation_common의 "이건 뭐야?"와 부딪혔다.
 
-        ⚠️ 991 에서 문구를 갱신했다. 고정하려는 규칙은 그대로다 —
+        ⚠️ 993 에서 문구를 갱신했다. 고정하려는 규칙은 그대로다 —
         **이름이 분명한 것은 되묻지 않고, 분석이 확신하지 못한 것은 아이에게 물어도 된다.**
         다만 예시 문장으로 박아 두던 "이건 뭐야?"를 프롬프트에서 뺐다.
         완성문 예시는 모델이 그대로 베낀다(808). 그리고 그 문장 자체가 한 단어로 답이

@@ -184,10 +184,15 @@ app:
       #   HTP 1회 활동의 실제 상한은 htp-per-subject × 3 이다.
       #   ⚠️ 세션 생성 시 conversation_sessions.max_question_count 로 복사되는 Snapshot이라
       #      값을 바꿔도 **이미 만들어진 대화에는 소급되지 않는다.**
-      #   왜 이 숫자인가: 운영 392세션 실측에서 평균 질문 수는 2.60, 상한(10) 도달은 2.0%였고
-      #      종료의 70.7%가 아이의 그만하기 요청이었다. 상한 10은 사실상 작동한 적이 없는 설정이라
-      #      실제 대화 길이에 맞춰 내렸다. HTP를 더 짧게 두는 것은 주제가 3번 반복되기 때문이다.
-      htp-per-subject: ${CONVERSATION_QUESTION_LIMIT_HTP_PER_SUBJECT:3}
+      #   왜 이 숫자인가 (S15P11B209-995, 2026-08-07 실측으로 976의 3을 교체):
+      #      새 상한(3)으로 만들어진 HTP 대화 9세션 전부가 3문을 다 썼다(도달률 100%) —
+      #      대화를 끝내는 것이 아이가 아니라 상한이었다. 976이 근거로 쓴 "평균 2.60"은
+      #      닫힌 질문 시대(988 이전)의 이탈 데이터라 적정치의 근거가 못 된다.
+      #      검증된 그림일기(상한 5)는 5~6턴에서도 답이 1턴보다 길었다(19→33→20→20→27→29자,
+      #      2026-08-07). 993이 그 질문 설계를 HTP에 이식했으므로 같은 깊이(5)로 맞춘다.
+      #      아이가 그만하고 싶으면 끊는 stop-intent 경로가 따로 있어, 상한이 자르는 것은
+      #      더 갈 수 있었던 아이뿐이다.
+      htp-per-subject: ${CONVERSATION_QUESTION_LIMIT_HTP_PER_SUBJECT:5}
       art-diary: ${CONVERSATION_QUESTION_LIMIT_ART_DIARY:5}
   idempotency:
     drawing-draft:

@@ -1228,8 +1228,39 @@ List<ReportInterpretationDto> _orderedInterpretations(ReportDetailDto report) {
     ..sort((a, b) => rank(a).compareTo(rank(b)));
 }
 
+/// 해석 카드가 비었을 때 그 자리에 놓는 안내(S15P11B209-1000).
+///
+/// 카드가 비는 것은 정상 출력이다(근거 게이트: 독립 근거 2건 + 아이 표현 1건,
+/// S15P11B209-982). 조용히 숨기면 보호자는 해석이 가능했다는 사실 자체를
+/// 모른다. 그림일기는 한 장 구조라 카드 없이 이 내용만 제자리에 넣고
+/// (S15P11B209-996), HTP는 아래에서 카드로 감싼다.
+const _emptyInterpretationNotice = <Widget>[
+  Text(
+    '이번 활동에서는 해석을 담지 않았어요. '
+    '아이의 말과 그림이 서로 뒷받침될 만큼 근거가 모였을 때만 해석을 만들어요.',
+    style: TextStyle(color: AppColors.ink, height: 1.55),
+  ),
+  SizedBox(height: AppSpacing.sm),
+  Text(
+    '근거가 부족할 때 억지로 해석하지 않는 것이 도담의 원칙이에요. '
+    '다음 활동에서 아이가 이야기를 많이 들려줄수록 이 자리가 채워져요.',
+    style: TextStyle(color: AppColors.inkMuted, height: 1.55),
+  ),
+];
+
 Widget? _interpretationsSection(ReportDetailDto report, {bool isHtp = false}) {
-  if (report.publicInterpretations.isEmpty) return null;
+  if (report.publicInterpretations.isEmpty) {
+    // 리포트 전체가 비었을 때는 _noObservationsCard 가 따로 안내하므로 이중으로
+    // 말하지 않는다.
+    if (report.hasNoObservations) return null;
+    return _ReportSection(
+      key: const ValueKey('report-interpretations-empty'),
+      title: isHtp ? '함께 살펴보면 좋을 이야기' : '주요 심리 경향',
+      backgroundColor: AppColors.lavenderSoft,
+      accentColor: AppColors.lavender,
+      children: _emptyInterpretationNotice,
+    );
+  }
   final interpretations = _orderedInterpretations(report);
   final evidenceById = <int, ReportEvidenceItemDto>{
     for (final item in report.evidenceItems) ?item.evidenceId: item,
@@ -1616,33 +1647,44 @@ Widget? _observationsSection(ReportDetailDto report, {bool flat = false}) {
   if (features.isEmpty && interpretations.isEmpty && guideGroups.isEmpty) {
     return null;
   }
+  // 해석이 비어도 '주요 심리 경향' 자리를 비워 두지 않는다(S15P11B209-1000).
+  // 리포트 전체가 비었을 때는 _noObservationsCard 가 안내하므로 생략한다.
+  final showEmptyNotice =
+      interpretations.isEmpty && !report.hasNoObservations;
   final evidenceById = <int, ReportEvidenceItemDto>{
     for (final item in report.evidenceItems) ?item.evidenceId: item,
   };
   // 왼쪽 — 무엇이 보였고 어떤 경향으로 읽히는가.
   final observed = <Widget>[
     for (final feature in features) _ObservedFeatureTile(feature: feature),
-    if (interpretations.isNotEmpty) ...[
+    if (interpretations.isNotEmpty || showEmptyNotice) ...[
       if (features.isNotEmpty) const SizedBox(height: AppSpacing.xs),
       Semantics(
         header: true,
-        child: const Text(
+        child: Text(
           '주요 심리 경향',
-          key: ValueKey('report-interpretations'),
+          key: ValueKey(
+            interpretations.isEmpty
+                ? 'report-interpretations-empty'
+                : 'report-interpretations',
+          ),
           style: _groupTitleStyle,
         ),
       ),
       const SizedBox(height: AppSpacing.sm),
-      for (final (index, interpretation) in interpretations.indexed) ...[
-        if (index > 0) const SizedBox(height: AppSpacing.md),
-        _InterpretationCard(
-          index: index,
-          interpretation: interpretation,
-          evidenceById: evidenceById,
-          showConfidence: false,
-          flat: true,
-        ),
-      ],
+      if (showEmptyNotice)
+        ..._emptyInterpretationNotice
+      else
+        for (final (index, interpretation) in interpretations.indexed) ...[
+          if (index > 0) const SizedBox(height: AppSpacing.md),
+          _InterpretationCard(
+            index: index,
+            interpretation: interpretation,
+            evidenceById: evidenceById,
+            showConfidence: false,
+            flat: true,
+          ),
+        ],
     ],
   ];
   // 오른쪽 — 그래서 보호자가 무엇을 해 볼 수 있는가.

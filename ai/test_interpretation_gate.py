@@ -321,6 +321,64 @@ class ConfidenceGradeTest(unittest.TestCase):
             _confidence([_item(1), _chosen_emotion(2)], [1, 2]), gate.CONFIDENCE_STRONG
         )
 
+    def test_chip_answer_is_choice_not_utterance(self):
+        """선택형(OPTION) 대화 답변은 발화가 아니라 '고른 것'이다 (S15P11B209-994).
+
+        AI가 쓴 보기 문장을 아이가 탭한 것이 '아이가 직접 말한 것'(STRONG)으로 세어지면
+        확신도가 부풀려진다 — 실측에서 답변의 25.7%가 칩이었다. 감정 칩과 같은 원리로
+        _CHOICE 통로가 되어, 칩만으로는 STRONG·MODERATE 에 닿을 수 없다.
+        """
+        chips = frozenset({("QA_ANSWER", "202")})
+        # 칩 답변 + 그림 → 발화 없음 → WEAK (재분류 전에는 MODERATE 였다)
+        self.assertEqual(
+            gate.confidence_for(
+                _card([1, 2]),
+                {1: _item(1, ref=_ref(ref_id="202")), 2: _vision(2)},
+                chip_answer_refs=chips,
+            ),
+            gate.CONFIDENCE_WEAK,
+        )
+        # 칩 답변끼리만 → WEAK
+        self.assertEqual(
+            gate.confidence_for(
+                _card([1, 2]),
+                {
+                    1: _item(1, ref=_ref(ref_id="202")),
+                    2: _item(2, ref=_ref(ref_id="318")),
+                },
+                chip_answer_refs=frozenset(
+                    {("QA_ANSWER", "202"), ("QA_ANSWER", "318")}
+                ),
+            ),
+            gate.CONFIDENCE_WEAK,
+        )
+
+    def test_chip_answer_does_not_downgrade_spoken_answer(self):
+        """말한 답과 칩 답이 함께면 말한 답이 등급을 정한다 — 칩이 끌어내리지 않는다(994)."""
+        chips = frozenset({("QA_ANSWER", "318")})
+        self.assertEqual(
+            gate.confidence_for(
+                _card([1, 2]),
+                {
+                    1: _item(1, ref=_ref(ref_id="202")),  # 말한 답
+                    2: _item(2, ref=_ref(ref_id="318")),  # 칩 답
+                },
+                chip_answer_refs=chips,
+            ),
+            gate.CONFIDENCE_STRONG,
+        )
+
+    def test_chip_answer_still_counts_as_child_expression_for_the_gate(self):
+        """공개 게이트의 아이 표현 인정은 유지한다 (994 — 1안).
+
+        칩을 아이 표현에서 빼면(2안) 칩만 쓴 아이의 리포트가 카드 0으로 통째로 빈다.
+        등급만 낮추고 게이트는 통과시킨다 — 카드는 나오되 WEAK 로 정직하게 표시된다.
+        """
+        items = [_item(1, ref=_ref(ref_id="202")), _vision(2)]
+        result = _evaluate(items, [1, 2])
+        self.assertTrue(result.passed)
+        self.assertTrue(result.child_expression)
+
     def test_stated_emotion_counts_as_utterance(self):
         items = [
             _item(1, source_type="STATED_EMOTION"),
