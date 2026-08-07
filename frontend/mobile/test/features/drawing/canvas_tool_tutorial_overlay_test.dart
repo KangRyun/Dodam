@@ -114,6 +114,76 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.byKey(const ValueKey('canvas-tool-tutorial')), findsOneWidget);
   });
+
+  testWidgets('태블릿에서는 캐릭터가 화면 폭에 비례해 커지고 카드와 겹치지 않는다', (tester) async {
+    tester.view.physicalSize = const Size(1280, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+
+    final controller = _replayController();
+    await _pump(tester, controller);
+
+    final teacher = tester.getRect(
+      find.byKey(const ValueKey('canvas-tutorial-teacher')),
+    );
+    final bubble = tester.getRect(
+      find.byKey(const ValueKey('canvas-tutorial-bubble')),
+    );
+    expect(teacher.width, inInclusiveRange(1280 * 0.24, 1280 * 0.30));
+    expect(teacher.right, lessThanOrEqualTo(bubble.left));
+    expect(teacher.bottom, lessThanOrEqualTo(800));
+
+    final next = tester.getRect(find.byKey(const ValueKey('tutorial-next')));
+    expect(next.height, greaterThanOrEqualTo(48));
+    expect(next.width, lessThan(bubble.width * 0.65));
+    expect(
+      tester.getRect(find.byKey(const ValueKey('canvas-tutorial-dots'))).right,
+      lessThan(next.left),
+    );
+  });
+
+  testWidgets('세 가지 viewport와 2배 글자에서 콘텐츠와 동작이 overflow 없이 유지된다', (
+    tester,
+  ) async {
+    for (final size in const [
+      Size(390, 844),
+      Size(844, 390),
+      Size(1280, 800),
+    ]) {
+      tester.view.physicalSize = size;
+      tester.view.devicePixelRatio = 1;
+      final controller = _replayController();
+      await tester.pumpWidget(
+        MaterialApp(
+          builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(
+              context,
+            ).copyWith(textScaler: const TextScaler.linear(2)),
+            child: child!,
+          ),
+          home: Scaffold(
+            body: Stack(children: [CanvasToolTutorialOverlay(controller)]),
+          ),
+        ),
+      );
+      await tester.pump();
+
+      expect(tester.takeException(), isNull, reason: '$size');
+      expect(find.text('도구를 골라 그려요'), findsOneWidget, reason: '$size');
+      expect(find.text('1 / 6'), findsOneWidget, reason: '$size');
+      expect(
+        find.byKey(const ValueKey('tutorial-next')),
+        findsOneWidget,
+        reason: '$size',
+      );
+      expect(
+        find.byKey(const ValueKey('tutorial-skip')),
+        findsOneWidget,
+        reason: '$size',
+      );
+    }
+    addTearDown(tester.view.reset);
+  });
 }
 
 CanvasTutorialController _replayController() {

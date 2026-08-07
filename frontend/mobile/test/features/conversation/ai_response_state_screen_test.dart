@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dodam/app/router/app_router.dart';
 import 'package:dodam/core/network/network.dart';
+import 'package:dodam/design_system/design_system.dart';
 import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
 import 'package:dodam/features/conversation/conversation.dart';
 import 'package:dodam/features/drawing/application/drawing_object_detection_controller.dart';
@@ -74,6 +75,37 @@ void main() {
   });
 
   group('S486 답변·건너뛰기·종료 실패', () {
+    testWidgets('대화 종료 확인은 울먹이는 도담이와 기존 두 동작을 보여준다', (tester) async {
+      final ends = _EndRepository();
+      await _pumpConversation(
+        tester,
+        endRepository: ends,
+        size: const Size(390, 844),
+        textScale: 2,
+      );
+
+      await _tap(tester, const ValueKey('ai-conversation-end'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('도담이와 대화를 그만할까요?'), findsOneWidget);
+      expect(find.text('조금 더 이야기할래요'), findsOneWidget);
+      expect(find.text('대화 그만하기'), findsOneWidget);
+      final illustration = tester.widget<Image>(
+        find.byKey(const ValueKey('conversation-stop-crying-illustration')),
+      );
+      expect(
+        (illustration.image as AssetImage).assetName,
+        DodamDialogAssets.conversationStopCrying,
+      );
+      expect(illustration.fit, BoxFit.contain);
+      expect(illustration.excludeFromSemantics, isTrue);
+
+      await tester.tap(find.text('조금 더 이야기할래요'));
+      await tester.pumpAndSettle();
+      expect(find.text('도담이와 대화를 그만할까요?'), findsNothing);
+      expect(ends.calls, 0);
+    });
+
     testWidgets('선택형 답변 실패는 안내를 남기고 질문·선택지를 유지한다', (tester) async {
       final answers = _AnswerRepository(failure: _failure(500));
       await _pumpConversation(tester, answerRepository: answers);
@@ -472,7 +504,10 @@ void main() {
       await _detectAnalysis(tester, detection, 702);
 
       completer.complete(
-        const ConversationStartResult(conversationId: 9999, maxQuestionCount: 5),
+        const ConversationStartResult(
+          conversationId: 9999,
+          maxQuestionCount: 5,
+        ),
       );
       await tester.pumpAndSettle();
 

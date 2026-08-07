@@ -172,7 +172,6 @@ final class _CoachMarkState extends State<_CoachMark>
     required bool failed,
   }) {
     final safeArea = MediaQuery.paddingOf(context);
-    final card = _card(context, failed: failed);
     final focus = holes.isEmpty
         ? null
         : holes.reduce((a, b) => a.expandToInclude(b));
@@ -194,7 +193,7 @@ final class _CoachMarkState extends State<_CoachMark>
               bottom: below ? null : size.height - focus.top + _cardGap,
               child: Align(
                 alignment: below ? Alignment.topCenter : Alignment.bottomCenter,
-                child: _constrain(available, card),
+                child: _constrain(context, available, failed: failed),
               ),
             ),
           ],
@@ -215,11 +214,12 @@ final class _CoachMarkState extends State<_CoachMark>
           ),
           child: Center(
             child: _constrain(
+              context,
               math.max(
                 _minCardHeight,
                 size.height - safeArea.vertical - _cardGap * 2,
               ),
-              card,
+              failed: failed,
             ),
           ),
         ),
@@ -228,21 +228,28 @@ final class _CoachMarkState extends State<_CoachMark>
   }
 
   /// 큰 글자 설정에서도 카드가 화면을 넘지 않도록 최대 높이를 주고 안을 스크롤한다.
-  Widget _constrain(double maxHeight, Widget child) => ConstrainedBox(
+  Widget _constrain(
+    BuildContext context,
+    double maxHeight, {
+    required bool failed,
+  }) => ConstrainedBox(
     constraints: BoxConstraints(
-      maxWidth: 520,
+      maxWidth: 1120,
       maxHeight: math.max(_minCardHeight, maxHeight),
     ),
     child: SingleChildScrollView(
       key: const ValueKey('canvas-tutorial-card-scroll'),
-      child: child,
+      child: _card(context, maxHeight: maxHeight, failed: failed),
     ),
   );
 
-  Widget _card(BuildContext context, {required bool failed}) {
+  Widget _card(
+    BuildContext context, {
+    required double maxHeight,
+    required bool failed,
+  }) {
     final reduceMotion =
         MediaQuery.maybeOf(context)?.disableAnimations ?? false;
-    final compact = _isCompact(context);
     return TweenAnimationBuilder<double>(
       tween: Tween(begin: 0, end: 1),
       duration: reduceMotion
@@ -256,51 +263,57 @@ final class _CoachMarkState extends State<_CoachMark>
           child: child,
         ),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          _Teacher(
-            size: compact ? 64 : 96,
-            // 단계가 바뀔 때 한 번만 콩 뛴다. 계속 움직이면 시선을 빼앗는다.
-            hopToken: failed ? -1 : _content.stepNumber,
-            reduceMotion: reduceMotion,
-          ),
-          const SizedBox(width: AppSpacing.xs),
-          Expanded(
-            child: _Bubble(
-              child: failed
-                  ? _TutorialError(widget.controller)
-                  : _TutorialStep(
-                      controller: widget.controller,
-                      content: _content,
-                      practiced:
-                          widget.practice?.isDone(_content.target) ?? false,
-                      showPractice: widget.practice != null,
-                    ),
-            ),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          // 실제 부모 폭의 약 28%, 사용 가능한 높이의 약 76%를 함께 기준으로
+          // 잡는다. 화면 방향이나 기기 종류를 추측하지 않아도 좁은 창부터
+          // 태블릿까지 전신이 자연스럽게 커지고 카드의 터치 영역은 침범하지 않는다.
+          final widthFromParent = constraints.maxWidth * 0.28;
+          final widthFromHeight = maxHeight * 0.76 * (799 / 985);
+          final teacherWidth = math
+              .min(widthFromParent.clamp(76.0, 320.0), widthFromHeight)
+              .toDouble();
+
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _Teacher(
+                width: teacherWidth,
+                // 단계가 바뀔 때 한 번만 콩 뛴다. 계속 움직이면 시선을 빼앗는다.
+                hopToken: failed ? -1 : _content.stepNumber,
+                reduceMotion: reduceMotion,
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: _Bubble(
+                  child: failed
+                      ? _TutorialError(widget.controller)
+                      : _TutorialStep(
+                          controller: widget.controller,
+                          content: _content,
+                          practiced:
+                              widget.practice?.isDone(_content.target) ?? false,
+                          showPractice: widget.practice != null,
+                        ),
+                ),
+              ),
+            ],
+          );
+        },
       ),
     );
-  }
-
-  /// 작은 가로 화면이나 큰 글자 설정에서는 교사 그림을 줄여 글이 들어갈 자리를 준다.
-  bool _isCompact(BuildContext context) {
-    final media = MediaQuery.maybeOf(context);
-    if (media == null) return false;
-    return media.size.height < 480 || media.textScaler.scale(16) > 20;
   }
 }
 
 /// 교사 도다미다. 원본 비율을 지키고 잘리지 않게 담는다.
 final class _Teacher extends StatelessWidget {
   const _Teacher({
-    required this.size,
+    required this.width,
     required this.hopToken,
     required this.reduceMotion,
   });
 
-  final double size;
+  final double width;
 
   /// 이 값이 바뀔 때만 한 번 뛴다. 단계 번호를 넣는다.
   final int hopToken;
@@ -308,11 +321,10 @@ final class _Teacher extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final teacher = Semantics(
-      label: '도담 선생님',
-      image: true,
-      child: SizedBox.square(
-        dimension: size,
+    final teacher = ExcludeSemantics(
+      child: SizedBox(
+        width: width,
+        height: width * (985 / 799),
         child: Image.asset(
           'assets/canvas/tutorial/teacher.png',
           key: const ValueKey('canvas-tutorial-teacher'),
@@ -351,14 +363,14 @@ final class _Bubble extends StatelessWidget {
   Widget build(BuildContext context) => DecoratedBox(
     key: const ValueKey('canvas-tutorial-bubble'),
     decoration: BoxDecoration(
-      color: AppColors.surface,
+      color: Colors.white,
       borderRadius: BorderRadius.circular(AppRadius.lg),
-      border: Border.all(color: AppColors.canvasBorder, width: 2),
-      boxShadow: [
+      border: Border.all(color: const Color(0xFFD8C9B5)),
+      boxShadow: const [
         BoxShadow(
-          color: AppColors.canvasInk.withValues(alpha: .18),
-          blurRadius: 14,
-          offset: const Offset(0, 6),
+          color: Color(0x245A4939),
+          blurRadius: 12,
+          offset: Offset(0, 5),
         ),
       ],
     ),
@@ -428,47 +440,176 @@ final class _TutorialStep extends StatelessWidget {
             _PracticeCheck(label: practiceLabel, done: practiced),
           ],
           const SizedBox(height: AppSpacing.sm),
-          _StepDots(current: content.step.index),
-          const SizedBox(height: AppSpacing.sm),
-          Row(
-            children: [
-              if (!first) ...[
-                Expanded(
-                  child: AppButton(
-                    key: const ValueKey('tutorial-previous'),
-                    label: '이전',
-                    variant: AppButtonVariant.secondary,
-                    onPressed: controller.isBusy
-                        ? null
-                        : () => unawaited(controller.previous()),
-                  ),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-              ],
-              Expanded(
-                child: AppButton(
-                  key: const ValueKey('tutorial-next'),
-                  label: last ? '그림 시작하기' : '다음',
-                  variant: AppButtonVariant.child,
-                  isLoading: controller.isBusy,
-                  onPressed: controller.isBusy
-                      ? null
-                      : () => unawaited(controller.next()),
-                ),
-              ),
-            ],
-          ),
-          Align(
-            alignment: Alignment.centerRight,
-            child: TextButton(
-              key: const ValueKey('tutorial-skip'),
-              onPressed: controller.isBusy
-                  ? null
-                  : () => unawaited(controller.skip()),
-              child: const Text('건너뛰기'),
-            ),
+          _TutorialFooter(
+            current: content.step.index,
+            showPrevious: !first,
+            nextLabel: last ? '그림 시작하기' : '다음',
+            busy: controller.isBusy,
+            onPrevious: () => unawaited(controller.previous()),
+            onNext: () => unawaited(controller.next()),
+            onSkip: () => unawaited(controller.skip()),
           ),
         ],
+      ),
+    );
+  }
+}
+
+final class _TutorialFooter extends StatelessWidget {
+  const _TutorialFooter({
+    required this.current,
+    required this.showPrevious,
+    required this.nextLabel,
+    required this.busy,
+    required this.onPrevious,
+    required this.onNext,
+    required this.onSkip,
+  });
+
+  final int current;
+  final bool showPrevious;
+  final String nextLabel;
+  final bool busy;
+  final VoidCallback onPrevious;
+  final VoidCallback onNext;
+  final VoidCallback onSkip;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final textScale = MediaQuery.textScalerOf(context).scale(1);
+      final stackActions = constraints.maxWidth < 430 || textScale >= 1.6;
+      final actions = Wrap(
+        key: const ValueKey('canvas-tutorial-footer-actions'),
+        alignment: WrapAlignment.end,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: AppSpacing.xxs,
+        runSpacing: AppSpacing.xxs,
+        children: [
+          if (showPrevious)
+            TextButton(
+              key: const ValueKey('tutorial-previous'),
+              onPressed: busy ? null : onPrevious,
+              child: const Text('이전'),
+            ),
+          TextButton(
+            key: const ValueKey('tutorial-skip'),
+            onPressed: busy ? null : onSkip,
+            child: const Text('건너뛰기'),
+          ),
+          _PastelNextButton(
+            label: nextLabel,
+            loading: busy,
+            onPressed: busy ? null : onNext,
+          ),
+        ],
+      );
+
+      if (stackActions) {
+        return Column(
+          key: const ValueKey('canvas-tutorial-footer-stacked'),
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Align(
+              alignment: Alignment.centerLeft,
+              child: _StepDots(current: current),
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Align(alignment: Alignment.centerRight, child: actions),
+          ],
+        );
+      }
+
+      return Row(
+        key: const ValueKey('canvas-tutorial-footer-row'),
+        children: [
+          _StepDots(current: current),
+          const Spacer(),
+          Flexible(child: actions),
+        ],
+      );
+    },
+  );
+}
+
+final class _PastelNextButton extends StatelessWidget {
+  const _PastelNextButton({
+    required this.label,
+    required this.loading,
+    required this.onPressed,
+  });
+
+  final String label;
+  final bool loading;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onPressed != null && !loading;
+    final shape = StadiumBorder(
+      side: BorderSide(
+        color: enabled ? const Color(0xFFD9C98F) : AppColors.outline,
+      ),
+    );
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: label,
+      child: ConstrainedBox(
+        key: const ValueKey('tutorial-next'),
+        constraints: const BoxConstraints(
+          minWidth: AppSizes.minTouchTarget,
+          minHeight: AppSizes.minTouchTarget,
+        ),
+        child: Material(
+          color: enabled ? const Color(0xFFF7E6A2) : AppColors.disabled,
+          shape: shape,
+          clipBehavior: Clip.antiAlias,
+          elevation: 1,
+          shadowColor: const Color(0x335A4939),
+          child: InkWell(
+            onTap: enabled ? onPressed : null,
+            customBorder: shape,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.xs,
+              ),
+              child: ExcludeSemantics(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (loading)
+                      const SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          color: Color(0xFF575033),
+                        ),
+                      )
+                    else ...[
+                      Text(
+                        label,
+                        maxLines: 2,
+                        textAlign: TextAlign.center,
+                        style: AppTypography.button.copyWith(
+                          color: const Color(0xFF575033),
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.xxs),
+                      const Icon(
+                        Icons.arrow_forward_rounded,
+                        size: 20,
+                        color: Color(0xFF575033),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -137,7 +137,10 @@ const _endTalkOptionId = 'CHIP_END_TALK';
 const _endActivityOptionId = 'CHIP_END_ACTIVITY';
 
 /// 앱이 실제 종료로 옮길 수 있는 confirmedStopTarget 값 (S15P11B209-951).
-const _confirmedStopTargets = {confirmedStopConversation, confirmedStopActivity};
+const _confirmedStopTargets = {
+  confirmedStopConversation,
+  confirmedStopActivity,
+};
 
 class DrawingScreen extends StatefulWidget {
   const DrawingScreen({
@@ -1785,14 +1788,22 @@ class _DrawingScreenState extends State<DrawingScreen>
     _invalidateNoResponseRequest();
     final confirmed = await showAppConfirmDialog(
       context: context,
-      title: '도다미와 대화를 그만할까요?',
+      title: '도담이와 대화를 그만할까요?',
       message: '대화를 끝내도 그림은 계속 그릴 수 있어요.',
       confirmLabel: '대화 그만하기',
       cancelLabel: '조금 더 이야기할래요',
-      illustration: const Icon(
-        Icons.chat_bubble_outline_rounded,
-        size: 56,
-        color: AppColors.tangerine,
+      illustration: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 240),
+        child: AspectRatio(
+          aspectRatio: 1,
+          child: Image.asset(
+            DodamDialogAssets.conversationStopCrying,
+            key: const ValueKey('conversation-stop-crying-illustration'),
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.high,
+            excludeFromSemantics: true,
+          ),
+        ),
       ),
     );
     if (confirmed != true || !mounted) return;
@@ -2251,10 +2262,18 @@ class _DrawingScreenState extends State<DrawingScreen>
       message: '완성한 그림을 저장하고 다음으로 넘어갈까요?',
       confirmLabel: '다 그렸어요',
       cancelLabel: '조금 더 그릴래요',
-      illustration: const Icon(
-        Icons.draw_rounded,
-        size: 56,
-        color: AppColors.tangerine,
+      illustration: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 240),
+        child: AspectRatio(
+          aspectRatio: 1,
+          child: Image.asset(
+            DodamDialogAssets.completeThinking,
+            key: const ValueKey('drawing-complete-thinking-illustration'),
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.high,
+            excludeFromSemantics: true,
+          ),
+        ),
       ),
     );
     if (confirmed != true || !mounted) return;
@@ -4674,13 +4693,17 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
       return Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const CircleAvatar(
-            radius: 56,
-            backgroundColor: AppColors.tangerineSoft,
-            child: Icon(
-              Icons.celebration_rounded,
-              color: AppColors.tangerine,
-              size: 60,
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 240),
+            child: AspectRatio(
+              aspectRatio: 1,
+              child: Image.asset(
+                DodamDialogAssets.completeThumbsUp,
+                key: const ValueKey('activity-complete-thumbsup-illustration'),
+                fit: BoxFit.contain,
+                filterQuality: FilterQuality.high,
+                excludeFromSemantics: true,
+              ),
             ),
           ),
           const SizedBox(height: AppSpacing.lg),
@@ -4705,20 +4728,9 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
             ),
           ),
           const SizedBox(height: AppSpacing.xl),
-          AppButton(
-            key: const ValueKey('activity-complete-draw-again'),
-            label: '또 그리기',
-            variant: AppButtonVariant.child,
-            leading: const Icon(Icons.brush_rounded),
-            onPressed: _drawAgain,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          AppButton(
-            key: const ValueKey('guardian-handoff'),
-            label: '보호자에게 건넸어요',
-            variant: AppButtonVariant.secondary,
-            leading: const Icon(Icons.family_restroom_rounded),
-            onPressed: () => _confirmGuardianTransition(context),
+          _CompletionResultActions(
+            onDrawAgain: _drawAgain,
+            onGuardianHandoff: () => _confirmGuardianTransition(context),
           ),
         ],
       );
@@ -4789,10 +4801,18 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
         message: '보호자가 기기를 받았다면 확인을 눌러 주세요.',
         confirmLabel: '확인',
         cancelLabel: '취소',
-        illustration: const Icon(
-          Icons.family_restroom_rounded,
-          color: AppColors.leaf,
-          size: 56,
+        illustration: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 300),
+          child: AspectRatio(
+            aspectRatio: 1448 / 1086,
+            child: Image.asset(
+              DodamDialogAssets.guardianHandhold,
+              key: const ValueKey('guardian-handhold-illustration'),
+              fit: BoxFit.contain,
+              filterQuality: FilterQuality.high,
+              excludeFromSemantics: true,
+            ),
+          ),
         ),
       );
     } finally {
@@ -4802,6 +4822,139 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
     if (confirmed != true || !context.mounted || _isLeaving) return;
     setState(() => _isLeaving = true);
     AppRouter.goGuardianHome(context);
+  }
+}
+
+enum _CompletionResultButtonKind { neutral, peach }
+
+class _CompletionResultActions extends StatelessWidget {
+  const _CompletionResultActions({
+    required this.onDrawAgain,
+    required this.onGuardianHandoff,
+  });
+
+  final VoidCallback onDrawAgain;
+  final VoidCallback onGuardianHandoff;
+
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, constraints) {
+      final textScale = MediaQuery.textScalerOf(context).scale(1);
+      final stack = constraints.maxWidth < 520 || textScale >= 1.6;
+      final drawAgain = _CompletionResultButton(
+        key: const ValueKey('activity-complete-draw-again'),
+        label: '또 그리기',
+        icon: Icons.brush_rounded,
+        kind: _CompletionResultButtonKind.neutral,
+        onPressed: onDrawAgain,
+      );
+      final guardianHandoff = _CompletionResultButton(
+        key: const ValueKey('guardian-handoff'),
+        label: '보호자에게 건넸어요',
+        icon: Icons.family_restroom_rounded,
+        kind: _CompletionResultButtonKind.peach,
+        onPressed: onGuardianHandoff,
+      );
+
+      if (stack) {
+        return Column(
+          key: const ValueKey('activity-complete-actions-column'),
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(width: double.infinity, child: drawAgain),
+            const SizedBox(height: AppSpacing.sm),
+            SizedBox(width: double.infinity, child: guardianHandoff),
+          ],
+        );
+      }
+
+      return Row(
+        key: const ValueKey('activity-complete-actions-row'),
+        children: [
+          Expanded(child: drawAgain),
+          const SizedBox(width: AppSpacing.sm),
+          Expanded(child: guardianHandoff),
+        ],
+      );
+    },
+  );
+}
+
+class _CompletionResultButton extends StatelessWidget {
+  const _CompletionResultButton({
+    required this.label,
+    required this.icon,
+    required this.kind,
+    required this.onPressed,
+    super.key,
+  });
+
+  final String label;
+  final IconData icon;
+  final _CompletionResultButtonKind kind;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final background = switch (kind) {
+      _CompletionResultButtonKind.neutral => Colors.white,
+      _CompletionResultButtonKind.peach => const Color(0xFFFFE2D0),
+    };
+    final border = switch (kind) {
+      _CompletionResultButtonKind.neutral => const Color(0xFFD8C9B5),
+      _CompletionResultButtonKind.peach => const Color(0xFFE8B78F),
+    };
+    final pressed = switch (kind) {
+      _CompletionResultButtonKind.neutral => const Color(0xFFF7F1E7),
+      _CompletionResultButtonKind.peach => const Color(0xFFF6CDB5),
+    };
+    final shape = RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      side: BorderSide(color: border),
+    );
+
+    return Semantics(
+      button: true,
+      label: label,
+      enabled: true,
+      onTap: onPressed,
+      excludeSemantics: true,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: AppSizes.minTouchTarget),
+        child: Material(
+          color: background,
+          shape: shape,
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: onPressed,
+            customBorder: shape,
+            overlayColor: WidgetStatePropertyAll(pressed),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.md,
+                vertical: AppSpacing.sm,
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(icon, size: 20, color: const Color(0xFF493225)),
+                  const SizedBox(width: AppSpacing.xs),
+                  Flexible(
+                    child: Text(
+                      label,
+                      textAlign: TextAlign.center,
+                      style: AppTypography.button.copyWith(
+                        color: const Color(0xFF493225),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
