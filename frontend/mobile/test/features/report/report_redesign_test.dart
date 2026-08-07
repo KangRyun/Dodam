@@ -564,15 +564,13 @@ void main() {
       ),
     );
 
-    // 그림 서술은 바로 보이고, 문답은 '더보기' 안에 있다(S15P11B209-996).
+    // 그림 서술과 대화 전문을 나란히 편다 — 접지 않는다(S15P11B209-996).
     expect(find.text('사람을 크게 그렸어요.'), findsOneWidget);
-    expect(find.textContaining('답하지 않았어요'), findsNothing);
-
-    final toggle = find.byKey(const ValueKey('report-transcript-toggle'));
-    await tester.ensureVisible(toggle);
-    await tester.pumpAndSettle();
-    await tester.tap(toggle);
-    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('report-transcript')), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('report-transcript-toggle')),
+      findsNothing,
+    );
 
     expect(find.textContaining('답하지 않았어요'), findsOneWidget);
     expect(find.textContaining('이 질문은 건너뛰었어요'), findsOneWidget);
@@ -1035,6 +1033,112 @@ void main() {
       find.byKey(const ValueKey('report-interpretation-0-confidence')),
       findsNothing,
     );
+  });
+
+  testWidgets('그림 서술 1개·문답 3쌍을 넘으면 더보기로 접고 대표 발화는 남긴다', (
+    tester,
+  ) async {
+    _setViewport(tester, const Size(1200, 2400));
+    await _pumpReport(
+      tester,
+      report: _fullReport(
+        expression: const ReportChildExpressionDto(
+          selectedEmotions: ['JOY'],
+          expressedEmotionText: '동생이랑 놀아서 좋았어요',
+          representativeUtterances: [
+            ReportUtteranceDto(
+              messageId: 804,
+              text: '첫 번째 발화',
+              source: 'STT',
+              sttNeedsConfirmation: false,
+            ),
+            ReportUtteranceDto(
+              messageId: 805,
+              text: '두 번째 발화',
+              source: 'TEXT',
+              sttNeedsConfirmation: false,
+            ),
+            ReportUtteranceDto(
+              messageId: 806,
+              text: '세 번째 발화',
+              source: 'TEXT',
+              sttNeedsConfirmation: false,
+            ),
+          ],
+        ),
+        subjectReports: const [
+          ReportSubjectReportDto(
+            subjectType: 'DRAWING',
+            imageUrl: null,
+            visionObservations: ['서술 하나', '서술 둘', '서술 셋'],
+            qaPairs: [
+              ReportQaPairDto(
+                question: '질문 1',
+                answer: '답 1',
+                state: 'ANSWERED',
+                inputType: 'TEXT',
+                sttNeedsConfirmation: false,
+                isRepresentative: true,
+              ),
+              ReportQaPairDto(
+                question: '질문 2',
+                answer: '답 2',
+                state: 'ANSWERED',
+                inputType: 'TEXT',
+                sttNeedsConfirmation: false,
+                isRepresentative: false,
+              ),
+              ReportQaPairDto(
+                question: '질문 3',
+                answer: '답 3',
+                state: 'ANSWERED',
+                inputType: 'TEXT',
+                sttNeedsConfirmation: false,
+                isRepresentative: false,
+              ),
+              ReportQaPairDto(
+                question: '질문 4',
+                answer: '답 4',
+                state: 'ANSWERED',
+                inputType: 'TEXT',
+                sttNeedsConfirmation: false,
+                isRepresentative: false,
+              ),
+            ],
+            interpretationRefs: [],
+          ),
+        ],
+      ),
+    );
+
+    // 접힌 상태 — 서술 1개, 문답 3쌍.
+    expect(find.text('서술 하나'), findsOneWidget);
+    expect(find.text('서술 둘'), findsNothing);
+    expect(find.text('Q. 질문 3'), findsOneWidget);
+    expect(find.text('Q. 질문 4'), findsNothing);
+    // 대표 발화는 서버가 이미 추린 목록이라 자르지 않는다.
+    expect(find.textContaining('첫 번째 발화'), findsOneWidget);
+    expect(find.textContaining('두 번째 발화'), findsOneWidget);
+    expect(find.textContaining('세 번째 발화'), findsOneWidget);
+
+    final more = find.byKey(const ValueKey('report-story-more'));
+    expect(more, findsOneWidget);
+    await tester.ensureVisible(more);
+    await tester.pumpAndSettle();
+    await tester.tap(more);
+    await tester.pumpAndSettle();
+
+    // 펼치면 두 단이 한꺼번에 열린다.
+    expect(find.text('서술 둘'), findsOneWidget);
+    expect(find.text('서술 셋'), findsOneWidget);
+    expect(find.text('Q. 질문 4'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('서술 1개·문답 3쌍 이하이면 더보기를 만들지 않는다', (tester) async {
+    await _pumpReport(tester, report: _fullReport());
+
+    expect(find.byKey(const ValueKey('report-story-more')), findsNothing);
   });
 
   testWidgets('childDisplayName이 있으면 표지에 표시한다', (tester) async {

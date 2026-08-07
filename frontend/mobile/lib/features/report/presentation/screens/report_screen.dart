@@ -22,6 +22,77 @@ import '../widgets/report_mascot.dart';
 /// (sm 12 · md 16)이라 상수로 둔다 — 카드 **안쪽** 여백은 24 그대로다.
 const double _sectionGap = 14;
 
+/// 가로 화면에서 블럭 안을 두 단으로 가를 때 쓰는 콘텐츠 상한(S15P11B209-996).
+///
+/// 세로 한 단일 때는 [AppSizes.contentMaxWidth](720)로 글줄이 길어지지 않게
+/// 묶지만, 블럭 안에서 다시 반으로 갈리므로 상한을 넓혀야 한 단이 좁아지지
+/// 않는다.
+const double _wideContentMaxWidth = 1120;
+
+/// 블럭 안을 두 단으로 가르는 최소 폭. 이보다 좁으면 한 단으로 쌓는다.
+const double _blockSplitWidth = 640;
+
+/// 블럭 안 소제목(주요 심리 경향·보호자 가이드·대화 전문) 글자 모양.
+const _groupTitleStyle = TextStyle(
+  color: AppColors.ink,
+  fontSize: 16,
+  fontWeight: FontWeight.w800,
+);
+
+/// 블럭 안을 두 단으로 가른다. 좁으면 왼쪽 뒤에 오른쪽을 이어 한 단으로 쌓는다.
+///
+/// 가로 화면에서 블럭이 세로로만 길어지는 것을 막는다(S15P11B209-996). 블럭끼리
+/// 나누면 한쪽만 길어져 아래가 비지만, 안에서 가르면 제목 아래 내용이 균형 있게
+/// 퍼진다. 한 단일 때의 읽는 순서(왼쪽 먼저, 그다음 오른쪽)는 그대로 유지한다.
+class _BlockColumns extends StatelessWidget {
+  const _BlockColumns({required this.left, required this.right});
+
+  final List<Widget> left;
+  final List<Widget> right;
+
+  @override
+  Widget build(BuildContext context) {
+    if (left.isEmpty || right.isEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [...left, ...right],
+      );
+    }
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < _blockSplitWidth) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ...left,
+              const SizedBox(height: AppSpacing.md),
+              ...right,
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: left,
+              ),
+            ),
+            const SizedBox(width: AppSpacing.lg),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: right,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
 enum _ReportViewStatus {
   loading,
   completed,
@@ -428,10 +499,25 @@ class _ReportContent extends StatelessWidget {
       final htpStory = isHtp
           ? _htpSubjectStorySection(report, imageFetcher)
           : null;
+      // 가로 화면에서는 블럭을 나란히 세우는 대신 각 블럭 **안**을 두 단으로
+      // 가른다(S15P11B209-996).
+      final wideBlocks = isWide && !isHtp;
+      // 그림일기는 리포트 전체가 한 장이다(S15P11B209-996). 섹션마다 카드를
+      // 두르지 않고 제목만으로 내용을 나눈다 — 색은 배경이 아니라 제목이 나른다.
+      // 비진단 안내와 활동 요약은 표지 안으로 들어간다.
+      final onePage = !isHtp;
       final sections = <Widget>[
-        // 비진단 안내·한계·참고 자료는 별도 카드가 아니라 표지 안으로 들어간다
-        // (S15P11B209-996). 리포트를 읽기 전에 한 번에 눈에 들어와야 한다.
-        _ReportHero(report: report),
+        _ReportHero(
+          report: report,
+          flat: onePage,
+          activity: isHtp
+              ? null
+              : _activityOverviewContent(
+                  report,
+                  imageFetcher,
+                  activityRepository,
+                ),
+        ),
         if (isHtp) ...[
           ?_overviewSection(report),
           // 계약 §5 주제별 그림이 아직 없는 응답에서는 기존 그림 섹션(활동기록
@@ -446,37 +532,57 @@ class _ReportContent extends StatelessWidget {
           ..._parentGuideSections(report),
           ?_legacyGuideSection(report),
         ] else ...[
-          // 그림일기·자유 그림은 성격이 겹치던 블럭을 셋으로 합쳤다: 활동 정보와
-          // 그림을 한 장에, 가이드 4종을 한 장에, 관찰·표현·문답을 한 장에.
-          ?_activityOverviewSection(report, imageFetcher, activityRepository),
-          ?_observationsSection(report),
-          ?_drawingStorySection(report, playbackController),
+          // 활동 요약은 표지 안으로 들어갔다(S15P11B209-996).
+          ?_observationsSection(report, flat: onePage),
+          ?_drawingStorySection(report, playbackController, flat: onePage),
         ],
         if (report.hasNoObservations) _noObservationsCard,
+        _ReportActionSection(
+          pdfAction: pdfAction,
+          onSavePdf: onSavePdf,
+          onSharePdf: onSharePdf,
+          flat: onePage,
+        ),
       ];
       return SingleChildScrollView(
         key: ValueKey(isWide ? 'report-wide-layout' : 'report-small-layout'),
         padding: EdgeInsets.all(pagePadding),
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(
-              maxWidth: AppSizes.contentMaxWidth,
+            constraints: BoxConstraints(
+              maxWidth: wideBlocks
+                  ? _wideContentMaxWidth
+                  : AppSizes.contentMaxWidth,
             ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                for (final (index, section) in sections.indexed) ...[
-                  if (index > 0) const SizedBox(height: _sectionGap),
-                  section,
-                ],
-                const SizedBox(height: _sectionGap),
-                _ReportActionSection(
-                  pdfAction: pdfAction,
-                  onSavePdf: onSavePdf,
-                  onSharePdf: onSharePdf,
-                ),
-              ],
-            ),
+            child: onePage
+                // 한 장짜리 — 섹션 사이는 구분선과 여백으로만 나눈다.
+                ? _ReportCard(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final (index, section) in sections.indexed) ...[
+                          if (index > 0) ...[
+                            const SizedBox(height: AppSpacing.lg),
+                            const Divider(
+                              height: 1,
+                              color: AppColors.outline,
+                            ),
+                            const SizedBox(height: AppSpacing.lg),
+                          ],
+                          section,
+                        ],
+                      ],
+                    ),
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      for (final (index, section) in sections.indexed) ...[
+                        if (index > 0) const SizedBox(height: _sectionGap),
+                        section,
+                      ],
+                    ],
+                  ),
           ),
         ),
       );
@@ -515,9 +621,18 @@ bool _isPdf(List<int> bytes) =>
     bytes[4] == 0x2D;
 
 class _ReportHero extends StatelessWidget {
-  const _ReportHero({required this.report});
+  const _ReportHero({required this.report, this.activity, this.flat = false});
 
   final ReportDetailDto report;
+
+  /// 카드 없이 내용만 돌려줄지 여부(S15P11B209-996).
+  final bool flat;
+
+  /// 표지 아래에 이어 붙일 활동 요약(그림 + 활동 정보).
+  ///
+  /// 그림일기·자유 그림은 표지와 활동 요약을 한 장으로 합친다
+  /// (S15P11B209-996). HTP는 활동 정보를 별도 블럭으로 두어 null이다.
+  final Widget? activity;
 
   Widget _intro(BuildContext context) => LayoutBuilder(
       builder: (context, constraints) {
@@ -599,6 +714,18 @@ class _ReportHero extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final notice = _heroNotice(report);
+    final body = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _intro(context),
+        ?notice,
+        if (activity case final activity?) ...[
+          const SizedBox(height: AppSpacing.md),
+          activity,
+        ],
+      ],
+    );
+    if (flat) return body;
     return _ReportCard(
       backgroundColor: AppColors.brandYellowSoft,
       borderColor: AppColors.sunshine,
@@ -607,10 +734,7 @@ class _ReportHero extends StatelessWidget {
         horizontal: AppSpacing.lg,
         vertical: AppSpacing.sm,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [_intro(context), ?notice],
-      ),
+      child: body,
     );
   }
 }
@@ -969,15 +1093,16 @@ Widget? _overviewSection(ReportDetailDto report) {
   );
 }
 
-/// 그림일기·자유 그림의 "한눈에 보는 활동"(S15P11B209-996).
+/// 그림일기·자유 그림의 활동 요약 — 표지 안에 들어갈 내용만 돌려준다.
 ///
 /// 활동 정보(§2)와 완성 그림(§11-4)이 따로 놓여 있으면 보호자가 "무엇을
 /// 그렸나"와 "어떤 활동이었나"를 두 블럭에서 나눠 읽어야 했다. 그림을 왼쪽에
-/// 두고 오른쪽에 활동 정보를 세워 한 눈에 묶는다.
+/// 두고 오른쪽에 활동 정보를 세워 한 눈에 묶고, 다시 표지와 한 장으로 합쳤다
+/// (S15P11B209-996) — 리포트를 펼치면 누구의 어떤 활동인지가 먼저 온다.
 ///
 /// 대화 요약 한 줄은 그림이 무엇인지 설명하는 문장이라 그림 바로 아래에 붙인다
 /// — 예전 '대화 요약' 블럭은 이 한 줄만 남기고 없앴다.
-Widget? _activityOverviewSection(
+Widget? _activityOverviewContent(
   ReportDetailDto report,
   ImageByteFetcher imageFetcher,
   ActivityRepository? activityRepository,
@@ -1047,13 +1172,9 @@ Widget? _activityOverviewSection(
     ],
   );
 
-  return _ReportSection(
+  return KeyedSubtree(
     key: const ValueKey('report-activity-info'),
-    title: '한눈에 보는 활동',
-    backgroundColor: const Color(0xFFFFF7DA),
-    accentColor: AppColors.warning,
-    children: [
-      LayoutBuilder(
+    child: LayoutBuilder(
         builder: (context, constraints) {
           // 좁으면 나란히 두지 못한다. 그림을 위로 올리고 정보를 아래에 쌓는다.
           if (constraints.maxWidth < 460) {
@@ -1079,8 +1200,7 @@ Widget? _activityOverviewSection(
             ],
           );
         },
-      ),
-    ],
+    ),
   );
 }
 
@@ -1138,12 +1258,13 @@ Widget? _interpretationsSection(ReportDetailDto report, {bool isHtp = false}) {
 /// 같은 대화를 놓고 관찰·요약·문답이 세 군데로 흩어졌다. 하나로 묶어 읽는
 /// 순서를 정한다: 그림에서 보인 것 → 아이가 한 말(들어볼 수 있음) → 대화 전문.
 ///
-/// 대화 전문은 길어서 기본으로 접는다. 요약과 대표 발화만으로도 대부분의
-/// 보호자에게 충분하고, 더 보고 싶을 때만 펼치면 된다.
+/// 가로 화면에서는 왼쪽에 관찰·발화를, 오른쪽에 대화 전문을 나란히 편다.
+/// 세로 화면에서는 같은 순서로 이어 쌓는다.
 Widget? _drawingStorySection(
   ReportDetailDto report,
-  VoiceAnswerPlaybackController? playbackController,
-) {
+  VoiceAnswerPlaybackController? playbackController, {
+  bool flat = false,
+}) {
   final subjects = report.subjectDetails;
   final expression = report.childExpression;
   final hasExpression = expression != null && !expression.isEmpty;
@@ -1159,21 +1280,113 @@ Widget? _drawingStorySection(
     title: '그림과 나눈 이야기',
     backgroundColor: const Color(0xFFEAF6FA),
     accentColor: const Color(0xFF8CC6D8),
+    flat: flat,
     children: [
+      _DrawingStoryBody(
+        observations: observations,
+        expression: hasExpression ? expression : null,
+        playbackController: playbackController,
+        qaPairs: qaPairs,
+      ),
+    ],
+  );
+}
+
+/// 그림 서술과 대화 전문을 접었다 편다.
+///
+/// 활동이 길수록 문답이 계속 늘어나 오른쪽 단만 길어진다. 두 단 높이를 실제로
+/// 재서 맞추려면 왼쪽의 음성 재생 버튼이 상태마다 높이를 바꿔 내용이 나타났다
+/// 사라진다 — 그래서 높이가 아니라 **개수**로 자른다(S15P11B209-996).
+///
+/// 대표 발화는 자르지 않는다. 서버가 이미 골라 보낸 짧은 목록이고, 재생 가능한
+/// 발화(`STT`)가 앞에 온다는 보장이 없어 잘라내면 아이 목소리가 통째로 숨는다.
+class _DrawingStoryBody extends StatefulWidget {
+  const _DrawingStoryBody({
+    required this.observations,
+    required this.expression,
+    required this.playbackController,
+    required this.qaPairs,
+  });
+
+  final List<String> observations;
+  final ReportChildExpressionDto? expression;
+  final VoiceAnswerPlaybackController? playbackController;
+  final List<ReportQaPairDto> qaPairs;
+
+  /// 접었을 때 보여줄 그림 서술 개수.
+  static const collapsedObservations = 1;
+
+  /// 접었을 때 보여줄 문답 쌍 개수.
+  static const collapsedQaPairs = 3;
+
+  @override
+  State<_DrawingStoryBody> createState() => _DrawingStoryBodyState();
+}
+
+class _DrawingStoryBodyState extends State<_DrawingStoryBody> {
+  bool _expanded = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final observations = _expanded
+        ? widget.observations
+        : widget.observations
+              .take(_DrawingStoryBody.collapsedObservations)
+              .toList();
+    final qaPairs = _expanded
+        ? widget.qaPairs
+        : widget.qaPairs.take(_DrawingStoryBody.collapsedQaPairs).toList();
+    final hasMore =
+        widget.observations.length > _DrawingStoryBody.collapsedObservations ||
+        widget.qaPairs.length > _DrawingStoryBody.collapsedQaPairs;
+
+    // 왼쪽 — 그림에서 보인 것과 아이가 한 말. 오른쪽 — 대화 전문.
+    final story = <Widget>[
       for (final observation in observations) _Bullet(title: observation),
-      if (hasExpression) ...[
+      if (widget.expression case final expression?) ...[
         if (observations.isNotEmpty) const SizedBox(height: AppSpacing.xs),
         _ChildExpression(
           expression: expression,
-          playbackController: playbackController,
+          playbackController: widget.playbackController,
         ),
       ],
+    ];
+    final transcript = <Widget>[
       if (qaPairs.isNotEmpty) ...[
+        Semantics(
+          header: true,
+          child: const Text(
+            '대화 전문',
+            key: ValueKey('report-transcript'),
+            style: _groupTitleStyle,
+          ),
+        ),
         const SizedBox(height: AppSpacing.xs),
-        _ConversationTranscript(pairs: qaPairs),
+        for (final pair in qaPairs) _QaPairTile(pair: pair),
       ],
-    ],
-  );
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _BlockColumns(left: story, right: transcript),
+        // 두 단을 한꺼번에 여닫는다. 한쪽만 펴지면 짝이 안 맞아 보인다.
+        if (hasMore)
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              key: const ValueKey('report-story-more'),
+              onPressed: () => setState(() => _expanded = !_expanded),
+              icon: Icon(
+                _expanded
+                    ? Icons.expand_less_rounded
+                    : Icons.expand_more_rounded,
+              ),
+              label: Text(_expanded ? '접기' : '더보기'),
+            ),
+          ),
+      ],
+    );
+  }
 }
 
 /// 아이의 표현 요약과 대표 발화. 발화는 저장된 음성이 있으면 재생할 수 있다.
@@ -1212,41 +1425,6 @@ class _ChildExpression extends StatelessWidget {
       ],
       for (final utterance in expression.representativeUtterances)
         _Utterance(utterance: utterance, playbackController: playbackController),
-    ],
-  );
-}
-
-/// 대화 전문을 '더보기'로 여닫는다. 기본은 접힘.
-class _ConversationTranscript extends StatefulWidget {
-  const _ConversationTranscript({required this.pairs});
-
-  final List<ReportQaPairDto> pairs;
-
-  @override
-  State<_ConversationTranscript> createState() =>
-      _ConversationTranscriptState();
-}
-
-class _ConversationTranscriptState extends State<_ConversationTranscript> {
-  bool _expanded = false;
-
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Align(
-        alignment: Alignment.centerLeft,
-        child: TextButton.icon(
-          key: const ValueKey('report-transcript-toggle'),
-          onPressed: () => setState(() => _expanded = !_expanded),
-          icon: Icon(
-            _expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded,
-          ),
-          label: Text(_expanded ? '대화 접기' : '더보기'),
-        ),
-      ),
-      if (_expanded)
-        for (final pair in widget.pairs) _QaPairTile(pair: pair),
     ],
   );
 }
@@ -1428,7 +1606,7 @@ Widget? _observedFeaturesSection(ReportDetailDto report) {
 /// 카드가 나뉘어 있으면 보호자가 관찰과 해석을 별개의 이야기로 읽게 되는데,
 /// 실제로는 앞의 관찰이 뒤의 경향을 뒷받침하는 관계다. 한 블럭에 담되 순서를
 /// 지켜 관찰을 먼저 보여준다 — 해석보다 사실이 앞이다.
-Widget? _observationsSection(ReportDetailDto report) {
+Widget? _observationsSection(ReportDetailDto report, {bool flat = false}) {
   final features = [
     for (final feature in report.observedFeatures)
       if (!feature.isEmpty) feature,
@@ -1441,59 +1619,56 @@ Widget? _observationsSection(ReportDetailDto report) {
   final evidenceById = <int, ReportEvidenceItemDto>{
     for (final item in report.evidenceItems) ?item.evidenceId: item,
   };
-  const groupTitle = TextStyle(
-    color: AppColors.ink,
-    fontSize: 16,
-    fontWeight: FontWeight.w800,
-  );
+  // 왼쪽 — 무엇이 보였고 어떤 경향으로 읽히는가.
+  final observed = <Widget>[
+    for (final feature in features) _ObservedFeatureTile(feature: feature),
+    if (interpretations.isNotEmpty) ...[
+      if (features.isNotEmpty) const SizedBox(height: AppSpacing.xs),
+      Semantics(
+        header: true,
+        child: const Text(
+          '주요 심리 경향',
+          key: ValueKey('report-interpretations'),
+          style: _groupTitleStyle,
+        ),
+      ),
+      const SizedBox(height: AppSpacing.sm),
+      for (final (index, interpretation) in interpretations.indexed) ...[
+        if (index > 0) const SizedBox(height: AppSpacing.md),
+        _InterpretationCard(
+          index: index,
+          interpretation: interpretation,
+          evidenceById: evidenceById,
+          showConfidence: false,
+          flat: true,
+        ),
+      ],
+    ],
+  ];
+  // 오른쪽 — 그래서 보호자가 무엇을 해 볼 수 있는가.
+  final guides = <Widget>[
+    for (final (index, group) in guideGroups.indexed) ...[
+      if (index > 0) const SizedBox(height: AppSpacing.md),
+      Semantics(
+        header: true,
+        child: Text(
+          group.title,
+          key: ValueKey('report-parent-guide-${group.code}'),
+          style: _groupTitleStyle,
+        ),
+      ),
+      const SizedBox(height: AppSpacing.xs),
+      for (final (order, item) in group.items.indexed)
+        _NumberedBullet(number: order + 1, title: item),
+    ],
+  ];
   return _ReportSection(
     key: const ValueKey('report-observed-features'),
     title: '이런 모습이 보였어요',
     backgroundColor: AppColors.lavenderSoft,
     accentColor: AppColors.lavender,
-    children: [
-      for (final feature in features) _ObservedFeatureTile(feature: feature),
-      if (interpretations.isNotEmpty) ...[
-        if (features.isNotEmpty) const SizedBox(height: AppSpacing.xs),
-        Semantics(
-          header: true,
-          child: const Text(
-            '주요 심리 경향',
-            key: ValueKey('report-interpretations'),
-            style: groupTitle,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.sm),
-        for (final (index, interpretation) in interpretations.indexed) ...[
-          if (index > 0) const SizedBox(height: AppSpacing.md),
-          _InterpretationCard(
-            index: index,
-            interpretation: interpretation,
-            evidenceById: evidenceById,
-            showConfidence: false,
-            flat: true,
-          ),
-        ],
-      ],
-      // 보호자 가이드도 같은 블럭에 이어 붙인다(S15P11B209-996). 무엇이 보였는지
-      // 읽은 흐름에서 곧바로 무엇을 해 볼지로 넘어가게 한다.
-      for (final (index, group) in guideGroups.indexed) ...[
-        // 첫 가이드 앞에도 같은 간격을 둔다 — 관찰·경향과 조언 사이를 끊어 준다.
-        if (index > 0 || features.isNotEmpty || interpretations.isNotEmpty)
-          const SizedBox(height: AppSpacing.md),
-        Semantics(
-          header: true,
-          child: Text(
-            group.title,
-            key: ValueKey('report-parent-guide-${group.code}'),
-            style: groupTitle,
-          ),
-        ),
-        const SizedBox(height: AppSpacing.xs),
-        for (final (order, item) in group.items.indexed)
-          _NumberedBullet(number: order + 1, title: item),
-      ],
-    ],
+    flat: flat,
+    children: [_BlockColumns(left: observed, right: guides)],
   );
 }
 
@@ -2324,6 +2499,7 @@ class _ReportSection extends StatelessWidget {
     required this.children,
     this.backgroundColor = AppColors.surface,
     this.accentColor = AppColors.lavender,
+    this.flat = false,
     super.key,
   });
   final String title;
@@ -2331,11 +2507,15 @@ class _ReportSection extends StatelessWidget {
   final Color backgroundColor;
   final Color accentColor;
 
+  /// 카드 없이 제목과 내용만 돌려줄지 여부.
+  ///
+  /// 그림일기 리포트는 전체가 한 장이라 섹션마다 카드를 두르면 블럭 안에 블럭이
+  /// 생긴다(S15P11B209-996). 색은 배경이 아니라 제목 글자가 나른다.
+  final bool flat;
+
   @override
-  Widget build(BuildContext context) => _ReportCard(
-    backgroundColor: backgroundColor,
-    borderColor: accentColor.withValues(alpha: 0.45),
-    child: Column(
+  Widget build(BuildContext context) {
+    final body = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Semantics(
@@ -2353,8 +2533,14 @@ class _ReportSection extends StatelessWidget {
         const SizedBox(height: AppSpacing.md),
         ...children,
       ],
-    ),
-  );
+    );
+    if (flat) return body;
+    return _ReportCard(
+      backgroundColor: backgroundColor,
+      borderColor: accentColor.withValues(alpha: 0.45),
+      child: body,
+    );
+  }
 }
 
 class _InfoLine extends StatelessWidget {
@@ -2561,130 +2747,108 @@ class _ReportActionSection extends StatelessWidget {
     required this.pdfAction,
     required this.onSavePdf,
     required this.onSharePdf,
+    this.flat = false,
   });
 
   final _ReportPdfAction? pdfAction;
   final VoidCallback onSavePdf;
   final VoidCallback onSharePdf;
 
-  @override
-  Widget build(BuildContext context) => _ReportCard(
-    backgroundColor: const Color(0xFFFFF4D5),
-    borderColor: AppColors.sunshine,
-    child: LayoutBuilder(
-      builder: (context, constraints) {
-        final compact = constraints.maxWidth < 640;
-        final copy = Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Semantics(
-              header: true,
-              child: const Text(
-                '돌아보기를 마쳤어요',
-                style: TextStyle(
-                  color: AppColors.ink,
-                  fontSize: 22,
-                  height: 1.3,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xs),
-            const Text(
-              '리포트를 저장하거나 공유하고, 보호자 홈에서 다음 활동을 이어가세요.',
-              style: TextStyle(color: AppColors.inkMuted, height: 1.5),
-            ),
-          ],
-        );
-        final intro = Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
-          children: [
-            const SizedBox(
-              width: 108,
-              child: ReportMascotImage(
-                assetPath: ReportMascotAssets.complete,
-                maxWidth: 108,
-                mascotKey: ValueKey('report-mascot-complete'),
-              ),
-            ),
-            const SizedBox(width: AppSpacing.md),
-            Expanded(child: copy),
-          ],
-        );
-        final buttons = _ReportActionButtons(
-          horizontal: !compact,
-          pdfAction: pdfAction,
-          onSavePdf: onSavePdf,
-          onSharePdf: onSharePdf,
-        );
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            intro,
-            const SizedBox(height: AppSpacing.lg),
-            buttons,
-          ],
-        );
-      },
-    ),
-  );
-}
-
-class _ReportActionButtons extends StatelessWidget {
-  const _ReportActionButtons({
-    required this.horizontal,
-    required this.pdfAction,
-    required this.onSavePdf,
-    required this.onSharePdf,
-  });
-
-  final bool horizontal;
-  final _ReportPdfAction? pdfAction;
-  final VoidCallback onSavePdf;
-  final VoidCallback onSharePdf;
+  /// 카드 없이 내용만 돌려줄지 여부(S15P11B209-996).
+  final bool flat;
 
   @override
   Widget build(BuildContext context) {
-    final save = AppButton(
-      key: const ValueKey('report-save-pdf'),
-      label: 'PDF 저장',
-      leading: const Icon(Icons.download_rounded),
-      isLoading: pdfAction == _ReportPdfAction.save,
-      onPressed: pdfAction == null ? onSavePdf : null,
-    );
-    final share = AppButton(
-      key: const ValueKey('report-share-pdf'),
-      label: '공유',
-      leading: const Icon(Icons.ios_share_rounded),
-      variant: AppButtonVariant.secondary,
-      isLoading: pdfAction == _ReportPdfAction.share,
-      onPressed: pdfAction == null ? onSharePdf : null,
-    );
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        if (horizontal)
-          Row(
-            children: [
-              Expanded(child: save),
-              const SizedBox(width: AppSpacing.sm),
-              Expanded(child: share),
-            ],
-          )
-        else ...[
-          save,
-          const SizedBox(height: AppSpacing.sm),
-          share,
-        ],
-        const SizedBox(height: AppSpacing.sm),
-        AppButton(
+    final body = LayoutBuilder(
+      builder: (context, constraints) {
+        // 넓으면 제목과 저장·공유 버튼을 한 줄에 세운다(S15P11B209-996).
+        // 버튼이 바로 옆에 있으면 "저장하거나 공유하세요" 설명은 군더더기다.
+        final inline = constraints.maxWidth >= 640;
+        final save = AppButton(
+          key: const ValueKey('report-save-pdf'),
+          label: 'PDF 저장',
+          leading: const Icon(Icons.download_rounded),
+          isLoading: pdfAction == _ReportPdfAction.save,
+          onPressed: pdfAction == null ? onSavePdf : null,
+        );
+        final share = AppButton(
+          key: const ValueKey('report-share-pdf'),
+          label: '공유',
+          leading: const Icon(Icons.ios_share_rounded),
+          variant: AppButtonVariant.secondary,
+          isLoading: pdfAction == _ReportPdfAction.share,
+          onPressed: pdfAction == null ? onSharePdf : null,
+        );
+        final home = AppButton(
           key: const ValueKey('report-home-cta'),
           label: '보호자 홈으로 돌아가기',
           variant: AppButtonVariant.secondary,
           onPressed: () => AppRouter.goGuardianHome(context),
-        ),
-      ],
+        );
+        final title = Semantics(
+          header: true,
+          child: const Text(
+            '돌아보기를 마쳤어요',
+            style: TextStyle(
+              color: AppColors.ink,
+              fontSize: 22,
+              height: 1.3,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+        );
+        const mascot = SizedBox(
+          width: 84,
+          child: ReportMascotImage(
+            assetPath: ReportMascotAssets.complete,
+            maxWidth: 84,
+            mascotKey: ValueKey('report-mascot-complete'),
+          ),
+        );
+        if (!inline) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  mascot,
+                  const SizedBox(width: AppSpacing.md),
+                  Expanded(child: title),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.md),
+              save,
+              const SizedBox(height: AppSpacing.sm),
+              share,
+              const SizedBox(height: AppSpacing.sm),
+              home,
+            ],
+          );
+        }
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                mascot,
+                const SizedBox(width: AppSpacing.md),
+                Expanded(flex: 3, child: title),
+                Expanded(flex: 2, child: save),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(flex: 2, child: share),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.sm),
+            home,
+          ],
+        );
+      },
+    );
+    if (flat) return body;
+    return _ReportCard(
+      backgroundColor: const Color(0xFFFFF4D5),
+      borderColor: AppColors.sunshine,
+      child: body,
     );
   }
 }
