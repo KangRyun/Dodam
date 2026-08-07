@@ -355,6 +355,48 @@ class BehaviorMetricsContractTest(unittest.TestCase):
         self.assertFalse(req.behavior_metrics.truncated)
 
 
+class NullDescriptionSubjectTest(unittest.TestCase):
+    """관찰 서술 없는 주제가 요청을 죽이지 않는다 (S15P11B209-1006).
+
+    분석이 검증에서 거절되면(bbox 경계 위반, 735) 그 주제는 서술 없이 문답만 남고
+    BE는 drawingDescription을 null로 보낸다. str 고정 계약이 null을 거부해 요청 전체가
+    422로 죽었다 — 리포트 172 실사고. 필드 생략·null 둘 다 통과해야 한다.
+    """
+
+    def test_null_description_is_accepted(self):
+        req = contracts.ObservationGenerationRequest.model_validate({
+            "requestId": "r", "analysisId": 911, "drawingSessionId": 3633,
+            "analysisType": "FINAL",
+            "subjectSummaries": [{
+                "drawingSubject": "PERSON", "drawingDescription": None,
+                "qaPairs": [{"question": "이 사람은 지금 뭐 하고 있어?"}],
+            }],
+        })
+        self.assertIsNone(req.subject_summaries[0].drawing_description)
+
+    def test_null_description_renders_placeholder_block(self):
+        """None 서술이 프롬프트 조립까지 통과하고, 관찰 블록은 부재 안내로 남는다."""
+        req = _sample_request(
+            subject_summaries=[
+                contracts.SubjectSummary(
+                    drawing_subject="PERSON",
+                    drawing_description=None,
+                    qa_pairs=[
+                        contracts.SubjectQaPair(
+                            question="이 사람은 지금 뭐 하고 있어?",
+                            answer_text="울고 있어",
+                            answer_type="VOICE",
+                            answer_message_id=1,
+                        )
+                    ],
+                )
+            ]
+        )
+        message = report_client._format_activity(req, None, None, None)
+        self.assertIn("[사람 그림 문답]", message)
+        self.assertNotIn("None", message)
+
+
 class ChipAnswerRefsTest(unittest.TestCase):
     """선택형 답변의 근거 참조 수집 (S15P11B209-994).
 

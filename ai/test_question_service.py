@@ -1258,7 +1258,11 @@ class ActivityBlockVersionTrackingTest(unittest.TestCase):
         used = {
             "activity_block_htp": shared
             | {"HTP", "HTP_WHOLE", "HTP_OPENING", "PERSON_PART", "PREVIOUS_SUBJECTS"},
-            "activity_block_diary": shared | {"ART_DIARY", "ART_DIARY_OPEN"},
+            # PERSON_PART: 999가 그림일기 부위 경로를 도입했다(HTP와 착지가 다른 전용 구획 —
+            #   탐지 불신·부위 단독 기분 추측 금지). question_service._activity_block의
+            #   diary 분기가 실제로 고른다.
+            "activity_block_diary": shared
+            | {"ART_DIARY", "ART_DIARY_OPEN", "PERSON_PART"},
         }
         for name, keys in used.items():
             available = set(prompts_registry.sections(name))

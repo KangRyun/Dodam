@@ -350,7 +350,11 @@ class SubjectSummary(_CamelModel):
     """
 
     drawing_subject: DrawingSubject | None = None  # 그림일기는 None
-    drawing_description: str = ""
+    # null 허용(S15P11B209-1006): 분석이 검증에서 거절되면(예: bbox 경계 위반, 735) 그 주제는
+    #   서술 없이 문답만 남는데, BE는 그 자리를 null로 보낸다. str 고정이면 요청 전체가 422로
+    #   죽어 리포트가 통째로 실패한다 — 계약 문서 §2.2도 이 필드를 필수로 두지 않는다.
+    #   사용처(report_client._format_subject_blocks)는 이미 `or ""` 로 None-안전하다.
+    drawing_description: str | None = ""
     detected_object_codes: list[str] = Field(default_factory=list)
     # 탐지 기하 (S15P11B209-836). detected_object_codes 와 병렬로 실린다 — 구 BE가 안 보내면
     #   빈 목록이라 기존 코드 목록 경로가 그대로 동작한다(740 롤아웃 패턴과 동일).

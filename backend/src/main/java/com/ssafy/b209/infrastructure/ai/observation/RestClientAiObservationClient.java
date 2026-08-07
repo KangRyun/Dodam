@@ -1,5 +1,7 @@
 package com.ssafy.b209.infrastructure.ai.observation;
 
+import java.io.IOException;
+import static java.nio.charset.StandardCharsets.UTF_8;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -89,6 +91,22 @@ public final class RestClientAiObservationClient implements AiObservationClient 
               .onStatus(
                   status -> !status.is2xxSuccessful(),
                   (clientRequest, clientResponse) -> {
+                    // 4xx 본문에는 AI가 값 echo 를 지운 위반 필드 위치(loc·type)가 담겨 있다
+                    //   (ai/main.py validation_error_without_echo). 안 읽고 접으면 어느 필드가
+                    //   계약을 어겼는지 알 수 없다 — 리포트 172(1006)가 그렇게 이틀치 진단을
+                    //   헛돌게 했다. 990이 INVALID_RESPONSE 세 경로를 연 것과 같은 결이며,
+                    //   본문은 이미 비식별이라 그대로 남겨도 아이 표현이 새지 않는다.
+                    String body = null;
+                    try {
+                      body = new String(clientResponse.getBody().readAllBytes(), UTF_8);
+                    } catch (IOException ignored) {
+                      // 본문을 못 읽어도 상태 코드 로그는 남긴다.
+                    }
+                    logger.warn(
+                        "관찰 요청 거절 — status={} body={} (requestId={})",
+                        clientResponse.getStatusCode().value(),
+                        body,
+                        request.requestId());
                     throw new AiObservationClientException(
                         clientResponse.getStatusCode().is5xxServerError()
                             ? AiObservationClientException.Type.SERVER_ERROR
