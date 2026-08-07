@@ -1992,13 +1992,10 @@ class ActivityPromptSplitTest(unittest.TestCase):
         self.assertNotIn("HTP(집·나무·사람)", system)
 
     def test_both_activity_prompts_declare_the_same_output_schema(self):
-        """두 자기완결 파일의 출력 JSON 스키마 키가 같아야 한다 (S15P11B209-993).
+        """레거시 계약은 같고 그림일기만 optional diarySignals를 확장한다.
 
-        공용 report_common을 활동별로 흡수하면서(사용자 결정 2026-08-07) 스키마가 두 벌이
-        됐다. 두 파일 모두 같은 BE 계약(ObservationGenerationResult)으로 파싱되므로,
-        한쪽 스키마만 고치면 다른 활동의 리포트가 조용히 계약과 어긋난다 —
-        키 집합 일치를 못 박아 드리프트를 배포 전에 잡는다.
-        (예시 값·설명 문구는 활동별로 달라도 된다. 지키는 것은 키다.)
+        구 BE가 읽는 키는 두 활동에서 계속 같아야 한다. 그림일기 V2는 unknown 필드로
+        안전하게 무시되는 diarySignals 하나만 최상위에 추가한다.
         """
         import json as jsonlib
 
@@ -2014,8 +2011,34 @@ class ActivityPromptSplitTest(unittest.TestCase):
             return {"top": sorted(schema), "nested": nested}
 
         htp, diary = schema_keys("report_htp"), schema_keys("report_diary")
-        self.assertEqual(htp["top"], diary["top"])
-        self.assertEqual(htp["nested"], diary["nested"])
+        self.assertEqual(
+            set(diary["top"]) - set(htp["top"]),
+            {"diarySignals"},
+        )
+        self.assertEqual(set(htp["top"]) - set(diary["top"]), set())
+
+        # 그림일기 V2 가 **일부러 빈 배열로 두는** 자리. 단일 활동을 경향으로 만들지 않으려는
+        #   결정이라 예시가 비는 것이 정상이고, 서버도 이 셋을 강제로 비운다.
+        #   ⚠️ 이 목록에 새 키를 함부로 넣지 마라. 여기 들어간 키는 아래 모양 대조를 건너뛴다.
+        intentionally_empty_in_diary = {
+            "evidenceItems",
+            "publicInterpretations",
+            "parentGuides",
+        }
+        for key in intentionally_empty_in_diary:
+            self.assertIsNone(
+                diary["nested"][key], f"그림일기가 비워야 할 자리에 예시가 있다: {key}"
+            )
+            self.assertIsNotNone(
+                htp["nested"][key], f"HTP 쪽 예시가 사라졌다: {key}"
+            )
+        # 나머지 레거시 키는 두 활동에서 같은 모양이어야 한다 — 구 BE 가 같은 코드로 읽는다.
+        for key in set(htp["top"]) - intentionally_empty_in_diary:
+            self.assertEqual(
+                htp["nested"][key],
+                diary["nested"][key],
+                f"레거시 계약 키가 활동별로 달라짐: {key}",
+            )
 
     def test_legacy_request_without_summaries_uses_diary_prompt(self):
         # 구 BE(subject_summaries 미전달)도 '단일 그림 + RAG 없음' 경로라 그림일기 쪽이 맞다.
@@ -2217,18 +2240,22 @@ class ReportContractAlignmentTest(unittest.TestCase):
                 self.assertRegex(block + self.text, rf"{field}[^\n]*{limit}|{limit}[^\n]*{field}")
 
 
-def _request_with_evidence_refs(**overrides):
+def _request_with_evidence_refs(*, htp: bool = False, **overrides):
     """근거 식별자가 실려 온 요청 (S15P11B209-886).
 
     AI는 **요청에 실려 온 식별자만** 근거로 참조할 수 있다. 식별자가 없으면 근거가 전부 버려지므로,
     경향 카드 조립·게이트를 검증하는 테스트는 이 요청을 써야 한다.
-    drawing_subject 는 None으로 둔다 — HTP로 판별되면 RAG 검색 경로까지 타서 검증 범위가 넓어진다.
+
+    htp: 경향 카드('주요 심리 경향')를 검증하려면 True 로 둔다(그림일기 V2). 그림일기는 단일
+        활동을 경향으로 만들지 않으려고 서버가 카드를 전부 제외하므로, 카드 조립·게이트·확신도를
+        재는 테스트는 그림일기 요청으로는 아무것도 잴 수 없다. 구 기본값(그림일기)일 때 이 검증이
+        조용히 0건을 통과시키던 것을 막는다. True 면 RAG 경로를 타므로 retrieve 를 함께 막아야 한다.
     """
     overrides.setdefault(
         "subject_summaries",
         [
             contracts.SubjectSummary(
-                drawing_subject=None,
+                drawing_subject="HOUSE" if htp else None,
                 drawing_description="집이 가운데에 크게 그려져 있어요.",
                 observation_evidence_source_id="obs-1",
                 detected_objects=[
@@ -2306,9 +2333,15 @@ class PublicInterpretationAssemblyTest(unittest.TestCase):
     """
 
     def _generate(self, **overrides):
+        # 경향 카드를 재는 검증이라 HTP 요청을 쓴다 — 그림일기는 카드를 서버가 전부 제외한다.
         fake_client = _fake_client(_llm_json(**overrides))
-        with mock.patch.object(report_client, "get_client", return_value=fake_client):
-            return report_client.generate(_request_with_evidence_refs(), model="m")
+        with (
+            mock.patch.object(report_client, "get_client", return_value=fake_client),
+            mock.patch.object(report_client, "retrieve", return_value=[]),
+        ):
+            return report_client.generate(
+                _request_with_evidence_refs(htp=True), model="m"
+            )
 
     def test_card_and_referenced_evidence_are_carried(self):
         result = self._generate(
@@ -2526,9 +2559,15 @@ class FabricatedIdentifierTest(unittest.TestCase):
     """지어낸 식별자는 형식이 맞아도 통과하지 못한다 (S15P11B209-886)."""
 
     def _generate(self, **overrides):
+        # 경향 카드를 재는 검증이라 HTP 요청을 쓴다 — 그림일기는 카드를 서버가 전부 제외한다.
         fake_client = _fake_client(_llm_json(**overrides))
-        with mock.patch.object(report_client, "get_client", return_value=fake_client):
-            return report_client.generate(_request_with_evidence_refs(), model="m")
+        with (
+            mock.patch.object(report_client, "get_client", return_value=fake_client),
+            mock.patch.object(report_client, "retrieve", return_value=[]),
+        ):
+            return report_client.generate(
+                _request_with_evidence_refs(htp=True), model="m"
+            )
 
     def test_unknown_identifier_is_dropped(self):
         result = self._generate(
@@ -2573,9 +2612,15 @@ class InterpretationGateWiringTest(unittest.TestCase):
     """
 
     def _generate(self, **overrides):
+        # 경향 카드를 재는 검증이라 HTP 요청을 쓴다 — 그림일기는 카드를 서버가 전부 제외한다.
         fake_client = _fake_client(_llm_json(**overrides))
-        with mock.patch.object(report_client, "get_client", return_value=fake_client):
-            return report_client.generate(_request_with_evidence_refs(), model="m")
+        with (
+            mock.patch.object(report_client, "get_client", return_value=fake_client),
+            mock.patch.object(report_client, "retrieve", return_value=[]),
+        ):
+            return report_client.generate(
+                _request_with_evidence_refs(htp=True), model="m"
+            )
 
     def test_single_evidence_card_is_dropped_by_the_gate(self):
         result = self._generate(
@@ -2636,9 +2681,15 @@ class ConfidenceWiringTest(unittest.TestCase):
     """
 
     def _generate(self, **overrides):
+        # 경향 카드를 재는 검증이라 HTP 요청을 쓴다 — 그림일기는 카드를 서버가 전부 제외한다.
         fake_client = _fake_client(_llm_json(**overrides))
-        with mock.patch.object(report_client, "get_client", return_value=fake_client):
-            return report_client.generate(_request_with_evidence_refs(), model="m")
+        with (
+            mock.patch.object(report_client, "get_client", return_value=fake_client),
+            mock.patch.object(report_client, "retrieve", return_value=[]),
+        ):
+            return report_client.generate(
+                _request_with_evidence_refs(htp=True), model="m"
+            )
 
     def test_published_card_reaches_the_response_with_a_grade(self):
         """아이 답변 두 건 → STRONG 이 응답 카드에 실려 나온다."""
@@ -2708,9 +2759,15 @@ class OverclaimExclusionTest(unittest.TestCase):
     """
 
     def _generate(self, **overrides):
+        # 경향 카드를 재는 검증이라 HTP 요청을 쓴다 — 그림일기는 카드를 서버가 전부 제외한다.
         fake_client = _fake_client(_llm_json(**overrides))
-        with mock.patch.object(report_client, "get_client", return_value=fake_client):
-            return report_client.generate(_request_with_evidence_refs(), model="m")
+        with (
+            mock.patch.object(report_client, "get_client", return_value=fake_client),
+            mock.patch.object(report_client, "retrieve", return_value=[]),
+        ):
+            return report_client.generate(
+                _request_with_evidence_refs(htp=True), model="m"
+            )
 
     def _weak_evidence(self):
         # 감정 선택 + 그림 → 게이트는 통과하지만(아이 표현 1건) 발화가 없어 WEAK.
@@ -2790,9 +2847,15 @@ class ReportWithoutInterpretationTest(unittest.TestCase):
     """
 
     def _generate(self, **overrides):
+        # 경향 카드를 재는 검증이라 HTP 요청을 쓴다 — 그림일기는 카드를 서버가 전부 제외한다.
         fake_client = _fake_client(_llm_json(**overrides))
-        with mock.patch.object(report_client, "get_client", return_value=fake_client):
-            return report_client.generate(_request_with_evidence_refs(), model="m")
+        with (
+            mock.patch.object(report_client, "get_client", return_value=fake_client),
+            mock.patch.object(report_client, "retrieve", return_value=[]),
+        ):
+            return report_client.generate(
+                _request_with_evidence_refs(htp=True), model="m"
+            )
 
     def test_no_cards_still_produces_a_complete_report(self):
         result = self._generate(publicInterpretations=[], evidenceItems=[])
@@ -2820,9 +2883,15 @@ class ParentGuideAssemblyTest(unittest.TestCase):
     """보호자 가이드 — 검토 대상 유형은 LLM이 채우지 못한다 (S15P11B209-887)."""
 
     def _generate(self, **overrides):
+        # 경향 카드를 재는 검증이라 HTP 요청을 쓴다 — 그림일기는 카드를 서버가 전부 제외한다.
         fake_client = _fake_client(_llm_json(**overrides))
-        with mock.patch.object(report_client, "get_client", return_value=fake_client):
-            return report_client.generate(_request_with_evidence_refs(), model="m")
+        with (
+            mock.patch.object(report_client, "get_client", return_value=fake_client),
+            mock.patch.object(report_client, "retrieve", return_value=[]),
+        ):
+            return report_client.generate(
+                _request_with_evidence_refs(htp=True), model="m"
+            )
 
     def test_ai_generated_types_are_kept(self):
         result = self._generate(
@@ -3117,7 +3186,8 @@ class SelfReviewTest(unittest.TestCase):
         payload = json.loads(captured["review_messages"][1]["content"])
         ids = {item["id"] for item in payload["검토 대상"]}
         self.assertFalse({i for i in ids if i.startswith("evidence")})
-        self.assertIn("card.0", ids)
+        # 단일 그림일기는 레거시 '주요 심리 경향' 카드를 서버에서 제외한다.
+        self.assertNotIn("card.0", ids)
 
     def test_review_runs_at_temperature_zero(self):
         """판정이 회차마다 흔들리면 같은 리포트가 열렸다 닫혔다 한다."""
@@ -3183,7 +3253,7 @@ class SelfReviewTest(unittest.TestCase):
             result.observation_draft.status, report_client.REVIEW_STATUS_REVIEWED
         )
 
-    # ── 담아낼 수 없는 지적: 리포트 전체를 열지 않는다 ──
+    # ── 그림일기에서 항목 단위로 담아내는 지적 ──
     def test_flagged_narrative_field_fails_the_whole_report(self):
         result, _ = self._run(
             _review_findings({"target": "draft.overallSummary", "issue": "DIAGNOSTIC"})
@@ -3195,15 +3265,15 @@ class SelfReviewTest(unittest.TestCase):
         # 문장을 다시 쓰거나 비우지 않는다 — 비우면 보호자 화면이 무너지고, 고치면 2차 생성이다.
         self.assertIn("즐겁게", result.observation_draft.overall_summary)
 
-    def test_flagged_activity_note_fails_the_whole_report(self):
+    def test_flagged_diary_activity_note_is_removed_without_blocking_report(self):
         result, _ = self._run(
             _review_findings({"target": "activityNote.0", "issue": "OVERREACH"})
         )
 
         self.assertEqual(
-            result.observation_draft.status, report_client.REVIEW_STATUS_DRAFT
+            result.observation_draft.status, report_client.REVIEW_STATUS_REVIEWED
         )
-        self.assertTrue(result.activity_notes)  # [1] 필수 필드는 비우지 않는다
+        self.assertEqual(result.activity_notes, [])
 
     def test_rule_filter_hit_blocks_even_when_review_passes(self):
         """1층(정규식)과 2층(LLM)은 합쳐진다 — 한쪽만 통과해도 열지 않는다."""
@@ -3342,9 +3412,27 @@ class SelfReviewPromptTest(unittest.TestCase):
         self.assertIn("문장을 고치지 않는다", self.text)
         self.assertIn("품질 첨삭은 하지 않는다", self.text)
 
-    def test_issue_codes_match_the_code(self):
+    def test_issue_codes_match_the_activity_specific_prompts(self):
+        legacy_codes = {
+            "DIAGNOSTIC",
+            "STIGMA",
+            "NO_EVIDENCE",
+            "OVERCLAIM",
+            "OVERREACH",
+            "MIXED_EVIDENCE",
+        }
+        diary_text = prompts_registry.load("report_review_diary")
+        for code in legacy_codes:
+            self.assertIn(code, self.text, f"HTP 검토 프롬프트에 없는 코드: {code}")
         for code in report_client._REVIEW_ISSUES:
-            self.assertIn(code, self.text, f"프롬프트에 없는 코드: {code}")
+            self.assertIn(
+                code,
+                self.text + diary_text,
+                f"활동별 검토 프롬프트 어디에도 없는 코드: {code}",
+            )
+        for code in report_client._REVIEW_ISSUES - legacy_codes:
+            self.assertNotIn(code, self.text)
+            self.assertIn(code, diary_text)
 
     def test_child_utterances_are_not_echoed_into_notes(self):
         self.assertIn("아이의 말이나 개인적인 내용을 그대로 옮겨 적지 마", self.text)

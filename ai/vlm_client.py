@@ -146,15 +146,19 @@ def describe(
     annotated_png: bytes,
     detections,
     *,
+    source_png: bytes | None = None,
     model: str | None = None,
     display_name_of=None,
     activity_type: str | None = None,
 ) -> str:
-    """주석 이미지 + 탐지 목록 → 한국어 관찰 서술.
+    """그림 이미지 + 탐지 목록 → 한국어 관찰 서술.
 
     Args:
         annotated_png: bbox가 그려진 PNG bytes(yolo_client.detect_and_annotate 산출물).
+            ``source_png``가 없을 때만 레거시 폴백으로 업로드한다.
         detections: list[Detection]. 프롬프트에 텍스트로도 함께 제공된다.
+        source_png: 박스·라벨이 없는 원본 이미지 bytes. 있으면 VLM에는 이 이미지를 보내고,
+            탐지 결과는 텍스트 힌트로만 제공한다.
         model: 미지정 시 config.VLM_MODEL.
         display_name_of: 클래스명 → 표시명 변환 함수. 활동 유형에 맞는 라벨 표의 것을
             넘긴다. 없으면 클래스명을 그대로 쓴다(하위 호환).
@@ -168,7 +172,9 @@ def describe(
         RuntimeError: GMS 호출 실패 시(원본 내용은 감추고 에러 유형만 로그).
     """
     used_model = model or config.VLM_MODEL
-    mime, image_b64 = _encode_for_upload(annotated_png)
+    # bbox·라벨은 작은 글씨와 선을 가리고 오탐 이름을 VLM에 시각적으로 각인한다. 원본을
+    # 확보한 운영 경로는 source_png를 쓰고, 구 호출만 annotated_png로 하위 호환한다.
+    mime, image_b64 = _encode_for_upload(source_png if source_png is not None else annotated_png)
     data_url = f"data:{mime};base64,{image_b64}"
     system = _load(prompt_name_for(activity_type)).format(
         detections=_format_detections(detections, display_name_of)

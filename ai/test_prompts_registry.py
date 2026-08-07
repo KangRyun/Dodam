@@ -171,7 +171,7 @@ class VersionManifestTest(unittest.TestCase):
         )
         self.assertEqual(
             manifest[report_client._generation_version(False).split("prompt=")[1]],
-            prompts_registry.composite_version("report_diary", "report_review"),
+            prompts_registry.composite_version("report_diary", "report_review_diary"),
         )
 
     def test_question_manifest_resolves_to_composites(self):
@@ -208,6 +208,7 @@ class ClientVersionWiringTest(unittest.TestCase):
                 "report_htp",
                 "report_diary",
                 "report_review",
+                "report_review_diary",
             ),
         )
 

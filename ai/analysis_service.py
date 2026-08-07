@@ -545,14 +545,14 @@ def analyze(req: contracts.AnalysisRequest, request_id: str = "") -> contracts.A
     # ⚠️ 이 서술은 BE에 overall_summary로 저장돼 두 곳으로 다시 흘러간다:
     #    질문 프롬프트의 {drawing_analysis}(704)와 리포트의 RAG 검색 질의(614,
     #    report_client._build_rag_query). 서술 문구를 바꾸면 그 둘의 품질이 함께 움직인다.
-    # ⚠️ 주석 이미지는 억제 '전' 박스로 그려져 있다(yolo_client가 탐지와 함께 만든 것).
-    #    탐지 목록은 억제 후를 넘기므로 텍스트 근거는 정확하지만, 이미지에는 억제된 박스가
-    #    남아 서술에 섞일 수 있다 — CROSS_SUBJECT_PARTS_SUPPRESSED 경고로 드러낸다.
-    #    억제 후 재렌더링은 추론을 한 번 더 돌려야 해서 후속 과제로 둔다.
+    # 그림일기는 박스가 없는 원본 image_bytes를 보낸다. 탐지 목록은 텍스트 힌트로만
+    # 제공해 오탐 라벨이 자유 그림을 가리는 문제를 피한다. HTP는 담당 영역의 기존 입력
+    # 의미를 보존하기 위해 주석 이미지를 그대로 사용한다.
     try:
         description = vlm_client.describe(
             annotated_png,
             detections,
+            source_png=image_bytes if req.activity_type == "ART_DIARY" else None,
             display_name_of=labels.display_name_of,
             activity_type=req.activity_type,
         )

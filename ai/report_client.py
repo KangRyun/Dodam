@@ -45,6 +45,7 @@ from openai import OpenAIError
 from prometheus_client import Counter as PrometheusCounter
 
 import config
+import diary_report_v2
 import internal_contracts as contracts
 import interpretation_gate  # 경향 카드 구조 게이트 (S15P11B209-888)
 import prompts_registry  # 프롬프트 파일 로딩·버전 관리 중앙화 (S15P11B209-595)
@@ -65,23 +66,26 @@ logger = logging.getLogger(__name__)
 # 작성 규칙·JSON 스키마도 활동별 파일이 각자 소유한다(2026-08-07 사용자 결정, S15P11B209-993) —
 # 공용 report_common은 폐기했다. 한 활동에 맞춘 수정이 다른 활동에 실리는 경로를 구조에서
 # 제거하고, "주제가 나뉘지 않으면 null" 같은 조건문 없이 각 파일이 자기 활동만 말하게 한다.
-# ⚠️ 두 파일의 JSON 스키마는 같은 BE 계약을 향한다 — 키가 어긋나면 안 된다.
-#    test_report_client 의 스키마 일치 테스트가 드리프트를 잡는다.
+# ⚠️ 두 파일의 레거시 JSON 키는 같은 BE 계약을 향한다. 그림일기만 하위호환 가능한
+#    optional diarySignals를 추가하며, 테스트가 그 한 가지 확장만 허용한다.
 _REPORT_HTP = "report_htp"
 _REPORT_DIARY = "report_diary"
 # AI 자체검토(2-pass) 프롬프트. 생성 프롬프트와 함께 '한 번의 리포트 생성'을 이루므로
 # 버전 조합에도 함께 들어간다 — 검토 기준이 바뀌면 결과가 바뀌는데 태그가 그대로면 재현이 깨진다.
 _REPORT_REVIEW = "report_review"
+# 그림일기 V2는 반복·일반론·유도 답 과장까지 추가로 검토한다. HTP 담당 프롬프트와
+# 검토 의미를 바꾸지 않기 위해 별도 자산으로 분리한다.
+_REPORT_REVIEW_DIARY = "report_review_diary"
 
 # 활동 변형별 조합 — 라벨은 저장 태그에 그대로 실리는 고정 어휘다(S15P11B209-819).
 _COMBOS: dict[str, tuple[str, ...]] = {
     "htp": (_REPORT_HTP, _REPORT_REVIEW),
-    "diary": (_REPORT_DIARY, _REPORT_REVIEW),
+    "diary": (_REPORT_DIARY, _REPORT_REVIEW_DIARY),
 }
 
 # 두 변형을 함께 담은 통합 버전 — 어떤 파일 조합으로 생성됐는지 한 문자열로 남긴다.
 PROMPT_VERSION = prompts_registry.short_version(
-    "report-all", _REPORT_HTP, _REPORT_DIARY, _REPORT_REVIEW
+    "report-all", _REPORT_HTP, _REPORT_DIARY, _REPORT_REVIEW, _REPORT_REVIEW_DIARY
 )
 
 
@@ -150,6 +154,11 @@ def _is_htp(req: contracts.ObservationGenerationRequest) -> bool:
 def _prompt_names(is_htp: bool) -> tuple[str, ...]:
     """이번 생성이 쓰는 프롬프트 이름(자기완결 활동 파일 하나)."""
     return ((_REPORT_HTP if is_htp else _REPORT_DIARY),)
+
+
+def _review_prompt_name(is_htp: bool) -> str:
+    """활동별 자체검토 프롬프트. 그림일기 품질 규칙을 HTP에 흘리지 않는다."""
+    return _REPORT_REVIEW if is_htp else _REPORT_REVIEW_DIARY
 
 
 def _system_prompt(is_htp: bool) -> str:
@@ -1197,12 +1206,12 @@ def _generation_version(is_htp: bool) -> str:
     # 자체검토 프롬프트도 조합에 넣는다 — 검토 기준이 바뀌면 어떤 리포트가 보호자에게 열리는지가
     # 바뀌는데 태그가 그대로면 "같은 버전인데 결과가 다른" 상태가 된다(832와 같은 사고 유형).
     prompt = prompts_registry.short_version(
-        label, *_prompt_names(is_htp), _REPORT_REVIEW
+        label, *_prompt_names(is_htp), _review_prompt_name(is_htp)
     )
     return f"pipeline={config.PIPELINE_VERSION};prompt={prompt}"
 
 
-def _safe_follow_up(raw) -> str:
+def _safe_follow_up(raw, *, is_htp: bool = True) -> str:
     """보호자용 후속 질문을 안전하게 보장한다(S15P11B209-601).
 
     비어 있거나 단정 진단·과잉 추론 표현이 섞이면 안전한 기본 질문으로 대체한다. 후속 질문은
@@ -1214,7 +1223,12 @@ def _safe_follow_up(raw) -> str:
     if isinstance(raw, dict):
         raw = raw.get("questionText", "")
     text = str(raw or "").strip()
-    if not text or report_safety.has_unsafe_expression(text):
+    unsafe = (
+        report_safety.has_unsafe_expression(text)
+        if is_htp
+        else diary_report_v2.has_unsafe_diary_expression(text)
+    )
+    if not text or unsafe:
         return DEFAULT_FOLLOW_UP_QUESTION
     return text
 
@@ -1242,11 +1256,25 @@ def _assemble(
     if is_htp is None:
         is_htp = _is_htp(req)
     conv = data.get("conversationSummary") or {}
-    features = [_feature(f) for f in data.get("features", []) if isinstance(f, dict)]
+    all_features = [
+        _feature(f) for f in data.get("features", []) if isinstance(f, dict)
+    ]
+    # 단일 그림일기에서 여러 해석 카드가 반복 노출되지 않도록 레거시 feature는 최대 1개만
+    # 유지한다. 안전 스캔은 아래에서 all_features 전체에 수행해 모델이 만든 위험 문장을 놓치지 않는다.
+    features = all_features if is_htp else all_features[:1]
 
     # 단정적 진단(591)이나 감정·성격 과잉 추론(592) 표현이 보호자 노출 문장·특징에 하나라도
     # 있으면 자체검토 실패로 처리한다(status=AI_DRAFT). attentionPoints는 여기 없는데, 이제
     # 그것도 보호자가 읽는 자리다 — 아래에서 따로 검사해 합친다.
+    diary_signals = data.get("diarySignals") or {}
+    diary_story = diary_signals.get("storySnapshot") if isinstance(diary_signals, dict) else {}
+    diary_flow = diary_signals.get("narrativeFlow") if isinstance(diary_signals, dict) else []
+    diary_observations = (
+        diary_signals.get("sessionObservations") if isinstance(diary_signals, dict) else []
+    )
+    diary_questions = (
+        diary_signals.get("caregiverQuestions") if isinstance(diary_signals, dict) else []
+    )
     guardian_texts = [
         str(data.get("overallSummary", "")),
         str(data.get("positiveSignals", "")),
@@ -1260,9 +1288,52 @@ def _assemble(
         str(conv.get("summaryText", "")),
         str(conv.get("mainTopic", "")),
         str(conv.get("expressedEmotion", "")),
-        *(f"{f.title} {f.description} {f.evidence_summary}" for f in features),
+        *(f"{f.title} {f.description} {f.evidence_summary}" for f in all_features),
+        *(
+            f"{g.get('guidance', '')} {g.get('detailText', '')}"
+            for g in (data.get("followUpGuides") or [])
+            if isinstance(g, dict)
+        ),
+        *(
+            f"{q.get('questionText', '')} {q.get('questionPurpose', '')}"
+            for q in (data.get("guardianQuestions") or [])
+            if isinstance(q, dict)
+        ),
+        *(
+            str(item)
+            for guide in (data.get("parentGuides") or [])
+            if isinstance(guide, dict)
+            for item in (guide.get("items") or [])
+        ),
+        *(
+            str((diary_story or {}).get(key, ""))
+            for key in ("headline", "summary", "mainEvent")
+            if isinstance(diary_story, dict)
+        ),
+        *(
+            str(item.get("text", ""))
+            for item in (diary_flow or [])
+            if isinstance(item, dict)
+        ),
+        *(
+            f"{item.get('title', '')} {item.get('description', '')}"
+            for item in (diary_observations or [])
+            if isinstance(item, dict)
+        ),
+        *(
+            f"{item.get('question', '')} {item.get('purpose', '')}"
+            for item in (diary_questions or [])
+            if isinstance(item, dict)
+        ),
+        str(diary_signals.get("listeningTip", ""))
+        if isinstance(diary_signals, dict)
+        else "",
     ]
-    rule_flagged = report_safety.has_unsafe_expression(*guardian_texts)
+    rule_flagged = (
+        report_safety.has_unsafe_expression(*guardian_texts)
+        if is_htp
+        else diary_report_v2.has_unsafe_diary_expression(*guardian_texts)
+    )
 
     # ── 경향 해석 (S15P11B209-887 조립 + 888 구조 게이트) ────────
     # 근거 풀을 먼저 만들고, 카드는 그 풀에 실제로 있는 근거만 참조하게 한다.
@@ -1274,7 +1345,13 @@ def _assemble(
     # 아래에서 카드가 빠질 때마다 배열 위치가 당겨지므로, 모델이 자기 출력 기준으로 적은
     # 순번을 최종 위치로 다시 매핑해야 참조가 어긋나지 않는다(875 §5-1).
     raw_index_of: list[int] = []
-    for raw_index, raw in enumerate(data.get("publicInterpretations") or []):
+    raw_interpretations = data.get("publicInterpretations") or []
+    # 그림일기 단일 회차에서 레거시 '주요 심리 경향' 카드를 노출하지 않는다. V2의
+    # sessionObservations가 이번 활동 한정 표현을 근거와 함께 대신한다. HTP는 기존 의미를 유지한다.
+    if not is_htp and raw_interpretations:
+        logger.info("그림일기 publicInterpretations %d건 제외", len(raw_interpretations))
+        raw_interpretations = []
+    for raw_index, raw in enumerate(raw_interpretations):
         # 표현 안전 검사를 **구조 검사보다 먼저** 원문에 돌린다. 순서를 바꾸면 형식까지 어긋난
         # 카드가 구조 검사에서 먼저 걸러져, 진단·낙인 표현이 있었다는 신호가 사라진다.
         # 카드에는 EXPERT_ONLY 자리가 없어(875 §3) 강등할 곳이 없다 — 빼고 신호를 남긴다.
@@ -1334,7 +1411,33 @@ def _assemble(
     parent_guides = _parent_guides(data)
     # 주제별 관찰(875 §5). 카드 매핑이 끝난 뒤에 만든다 — 순번을 최종 배열 기준으로 적어야 한다.
     subject_reports, subject_flagged = _subject_reports(data, req, ref_map)
+    if not is_htp:
+        for report in subject_reports:
+            report.vision_observations = report.vision_observations[:2]
     rule_flagged = rule_flagged or subject_flagged
+
+    raw_activity_notes = [str(n) for n in data.get("activityNotes", [])]
+    raw_follow_up_guides = [
+        contracts.FollowUpGuideDraft(
+            guidance=str(g.get("guidance", "")),
+            detail_text=str(g.get("detailText", "")),
+        )
+        for g in data.get("followUpGuides", [])
+        if isinstance(g, dict)
+    ]
+    raw_guardian_questions = [
+        contracts.GuardianQuestionDraft(
+            question_text=str(q.get("questionText", "")),
+            question_purpose=str(q.get("questionPurpose", "")),
+        )
+        for q in data.get("guardianQuestions", [])
+        if isinstance(q, dict)
+    ]
+    activity_notes = raw_activity_notes if is_htp else raw_activity_notes[:2]
+    follow_up_guides = raw_follow_up_guides if is_htp else raw_follow_up_guides[:2]
+    guardian_questions = (
+        raw_guardian_questions if is_htp else raw_guardian_questions[:2]
+    )
 
     observation = contracts.ObservationDraft(
         # 조립 단계는 언제나 '미검토'다 — 자체검토(_self_review)만 AI_REVIEWED 로 올릴 수 있다.
@@ -1346,7 +1449,9 @@ def _assemble(
         guardian_guidance=str(data.get("guardianGuidance", "")),
         # 후속 질문은 비었거나 진단성 표현이 섞이면 안전 기본값으로 대체·보장한다(S15P11B209-601).
         # raw를 그대로 넘긴다 — 객체({questionText,...})로 와도 _safe_follow_up이 questionText를 뽑는다.
-        follow_up_question=_safe_follow_up(data.get("followUpQuestion", "")),
+        follow_up_question=_safe_follow_up(
+            data.get("followUpQuestion", ""), is_htp=is_htp
+        ),
         # 2026-08-05 계약: expertReviewRequired = '사람 상담을 권할 신호'(아이 이야기)다.
         # 예전에는 여기에 규칙 필터 적중(rule_flagged)을 OR 로 얹었는데, 그건 '리포트에 진단어가
         # 섞였다'는 품질 실패라 뜻이 다르다 — 둘을 합치면 문장 사고가 상담 권유로 둔갑한다.
@@ -1376,23 +1481,9 @@ def _assemble(
         confidence=None,  # LLM 서술엔 보정된 신뢰도가 없다 — 지어내지 않고 None.
         observation_draft=observation,
         conversation_summary=conversation_summary,
-        activity_notes=[str(n) for n in data.get("activityNotes", [])],
-        follow_up_guides=[
-            contracts.FollowUpGuideDraft(
-                guidance=str(g.get("guidance", "")),
-                detail_text=str(g.get("detailText", "")),
-            )
-            for g in data.get("followUpGuides", [])
-            if isinstance(g, dict)
-        ],
-        guardian_questions=[
-            contracts.GuardianQuestionDraft(
-                question_text=str(q.get("questionText", "")),
-                question_purpose=str(q.get("questionPurpose", "")),
-            )
-            for q in data.get("guardianQuestions", [])
-            if isinstance(q, dict)
-        ],
+        activity_notes=activity_notes,
+        follow_up_guides=follow_up_guides,
+        guardian_questions=guardian_questions,
         limitations_text=LIMITATIONS,
         rag_references=_rag_references(rag_chunks or []),
         # 근거를 실제로 썼을 때만 KB Version을 싣는다 — 근거 없는 리포트에 버전이 붙으면
@@ -1411,6 +1502,20 @@ def _assemble(
         drawn_items=_drawn_items(data, req),
         # 위기 안내는 S15P11B209-889이 채운다 — LLM 결과에서 만들지 않는다.
         crisis_alert=None,
+        # 그림일기 전용 V2. 근거 식별자를 원본 요청과 대조한 뒤 조립하므로, 모델이 만든
+        # 참조나 실제/상상·시점 추정은 그대로 통과하지 않는다. HTP에서는 None이다.
+        diary_insights=(
+            None
+            if is_htp
+            else diary_report_v2.build_diary_insights(
+                data.get("diarySignals"),
+                req,
+                vision_available=any(
+                    (summary.drawing_description or "").strip()
+                    for summary in req.subject_summaries
+                ),
+            )
+        ),
     )
     return result, rule_flagged
 
@@ -1427,11 +1532,33 @@ def _assemble(
 #
 # 실패는 차단이 아니라 기능 저하다(RAG·548과 같은 정책) — 검토 호출이 실패하면 리포트는 그대로
 # 반환하되 status 를 AI_DRAFT 로 남긴다. '검토 못 했으니 열지 않는다'가 보수적인 쪽이다.
-_REVIEW_ISSUES = frozenset(
-    # OVERCLAIM(982) = 확신도에 비해 세게 말한 문장. 규칙 필터(report_safety.find_overclaim)가
-    #   고정 어휘로 잡는 층 위에, 문장을 읽어야 아는 층을 검토자가 맡는다.
-    {"DIAGNOSTIC", "STIGMA", "NO_EVIDENCE", "OVERCLAIM", "OVERREACH", "MIXED_EVIDENCE"}
+_LEGACY_REVIEW_ISSUES = frozenset(
+    {
+        "DIAGNOSTIC",
+        "STIGMA",
+        "NO_EVIDENCE",
+        "OVERCLAIM",
+        "OVERREACH",
+        "MIXED_EVIDENCE",
+    }
 )
+_DIARY_REVIEW_ISSUES = frozenset(
+    {
+        # 그림일기 V2 품질 문제. 안전 위반뿐 아니라 보호자에게 쓸모없는 반복·일반론과
+        # 자발 발화/실제 경험을 과장하는 문장도 마지막 관문에서 제거한다.
+        "DUPLICATE_CONTENT",
+        "GENERIC_GUIDANCE",
+        "NOT_ACTIONABLE",
+        "UNSUPPORTED_TREND",
+        "ELICITATION_OVERCLAIM",
+        "REALITY_COLLAPSE",
+        "TIME_SCOPE_OVERCLAIM",
+        "VISUAL_UNCERTAINTY_EXPOSED",
+        "CHILD_VOICE_DISTORTION",
+    }
+)
+# 테스트·관측용 전체 코드 목록. 실제 파싱 허용 목록은 활동별로 분리한다.
+_REVIEW_ISSUES = _LEGACY_REVIEW_ISSUES | _DIARY_REVIEW_ISSUES
 # 검토 결과를 담을 수 있는 자리 — 지적당한 항목만 빼고 나머지는 살린다.
 _FEATURE_TARGET_PREFIX = "feature."
 _CARD_TARGET_PREFIX = "card."
@@ -1450,18 +1577,28 @@ _SELF_REVIEW_COUNTER = PrometheusCounter(
 )
 
 
-def _review_facts(result: contracts.ObservationGenerationResult) -> list[str]:
-    """검토자에게 줄 [관찰 사실] 목록 — 해석이 근거를 갖췄는지 판정하는 기준이다.
+def _review_facts(
+    result: contracts.ObservationGenerationResult,
+    req: contracts.ObservationGenerationRequest,
+    *,
+    is_htp: bool,
+    drawing_description: str | None = None,
+) -> list[str]:
+    """검토자에게 줄 [관찰 사실] 목록.
 
-    근거 풀(evidenceItems)·활동 기록(activityNotes)·초안의 근거 요약을 모은다.
-    ⚠️ 근거 식별자는 넣지 않는다. 검토자는 참조 정합을 보지 않고(그건 886 코드 대조가 한다)
-       '이 해석을 뒷받침하는 관찰이 있었나'만 본다.
+    그림일기는 원본 요청에서 확인된 사실만 사용한다. 생성 모델이 만든 evidenceSummary·
+    activityNotes를 다시 사실 풀에 넣으면 첫 호출의 창작이 두 번째 호출에서 자기 근거가 되는
+    순환이 생기기 때문이다. HTP는 다른 담당 영역의 기존 검토 의미를 보존하기 위해 레거시
+    사실 풀을 그대로 유지한다.
     """
+    if not is_htp:
+        return diary_report_v2.raw_review_facts(
+            req, drawing_description=drawing_description
+        )
+
     facts = [result.observation_draft.evidence_summary, *result.activity_notes]
     facts.extend(item.text for item in result.evidence_items)
     facts.extend(f.evidence_summary for f in result.observation_draft.features)
-    # 주제별 관찰(875 §5)도 이번 활동에서 확인된 사실이다. 여기 넣지 않으면 그 관찰에 기댄
-    # 문장들이 '근거가 어디에도 없다'로 잘못 잡힌다(NO_EVIDENCE 오탐).
     facts.extend(
         text for report in result.subject_reports for text in report.vision_observations
     )
@@ -1470,19 +1607,20 @@ def _review_facts(result: contracts.ObservationGenerationResult) -> list[str]:
 
 def _review_targets(
     result: contracts.ObservationGenerationResult,
-) -> list[dict[str, str]]:
+    req: contracts.ObservationGenerationRequest,
+    *,
+    is_htp: bool,
+) -> list[dict[str, object]]:
     """검토 대상 항목 목록. id 는 코드가 발급하고, 모델은 그대로 되돌려 주기만 한다.
 
     보호자에게 닿는 글 중 **해석이 실릴 수 있는 것**만 담는다 — 검토는 '보호자 노출 전 관문'이지
     전수 감사가 아니고, 대상이 늘수록 한 건의 지적이 리포트 전체를 떨어뜨릴 확률만 는다.
-    빠진 것과 이유:
-    - drawnItems: 서버가 관찰 서술 원문과 대조해 이미 버린다(911). 해석이 실릴 자리가 아니다.
-    - parentGuides: 질문·관찰 안내라 해석을 거의 담지 않고, 규칙 필터가 항목 단위로 이미 거른다.
-      대신 개별 항목을 뺄 수 없어(두 유형 각 1건 이상 필수) 지적당하면 리포트가 통째로 막힌다.
-    - evidenceItems: 아이 발화 인용 그대로다. 인용을 '해석'으로 잡을 자리가 아니다(근거 풀로만 넘긴다).
+    drawnItems·evidenceItems는 사실 원본이므로 검토 대상이 아니다. 그림일기에서는 보호자에게
+    바로 노출되는 guardianQuestions·parentGuides·diaryInsights도 항목 단위로 검토한다.
+    HTP에서는 기존 대상 집합을 그대로 유지한다.
     """
     draft = result.observation_draft
-    targets: list[dict[str, str]] = []
+    targets: list[dict[str, object]] = []
     named = {
         "draft.overallSummary": draft.overall_summary,
         "draft.positiveSignals": draft.positive_signals,
@@ -1503,6 +1641,24 @@ def _review_targets(
     for index, guide in enumerate(result.follow_up_guides):
         if guide.guidance and guide.guidance.strip():
             targets.append({"id": f"followUpGuide.{index}", "글": guide.guidance.strip()})
+    if not is_htp:
+        for index, question in enumerate(result.guardian_questions):
+            if question.question_text and question.question_text.strip():
+                targets.append(
+                    {
+                        "id": f"guardianQuestion.{index}",
+                        "글": question.question_text.strip(),
+                    }
+                )
+        for guide_index, guide in enumerate(result.parent_guides):
+            for item_index, text in enumerate(guide.items):
+                if text and text.strip():
+                    targets.append(
+                        {
+                            "id": f"parentGuide.{guide_index}.{item_index}",
+                            "글": text.strip(),
+                        }
+                    )
     for index, feature in enumerate(draft.features):
         # 이미 EXPERT_ONLY 인 카드는 보호자에게 나가지 않으므로 검토 대상이 아니다 —
         # 넣으면 검토자가 '무거운 관찰'을 또 잡아 리포트 전체를 떨어뜨린다.
@@ -1516,10 +1672,27 @@ def _review_targets(
             }
         )
     for index, card in enumerate(result.public_interpretations):
+        if is_htp:
+            card_evidence: object = card.scope_text
+        else:
+            evidence_by_id = {item.evidence_id: item for item in result.evidence_items}
+            raw_evidence: list[str] = []
+            for evidence_id in card.evidence_refs:
+                item = evidence_by_id.get(evidence_id)
+                if item is None:
+                    continue
+                refs = []
+                if item.source_ref is not None:
+                    refs.append(item.source_ref)
+                refs.extend(item.derived_from or [])
+                for text in diary_report_v2.evidence_texts_for_ids(req, refs):
+                    if text not in raw_evidence:
+                        raw_evidence.append(text)
+            card_evidence = raw_evidence
         target = {
             "id": f"{_CARD_TARGET_PREFIX}{index}",
             "글": f"{card.title} / {card.tendency_text}".strip(" /"),
-            "근거": card.scope_text,
+            "근거": card_evidence,
         }
         # 확신도를 검토자에게 함께 준다(982) — '이 글이 근거에 비해 세게 말하는가'(OVERCLAIM)는
         # 등급을 모르면 판정할 수 없다. 등급 자체는 코드가 정한 값이라 검토자가 바꾸지 못한다:
@@ -1539,10 +1712,66 @@ def _review_targets(
                     "자리": _FACT_SLOT_LABEL,
                 }
             )
+    diary = result.diary_insights
+    if not is_htp and diary is not None:
+        if diary.story_snapshot is not None:
+            targets.append(
+                {
+                    "id": "diary.story",
+                    "글": " / ".join(
+                        part
+                        for part in (
+                            diary.story_snapshot.headline,
+                            diary.story_snapshot.summary,
+                            diary.story_snapshot.main_event,
+                        )
+                        if part
+                    ),
+                    "근거": diary_report_v2.evidence_texts_for_ids(
+                        req, diary.story_snapshot.evidence_refs
+                    ),
+                }
+            )
+        for index, step in enumerate(diary.narrative_flow):
+            targets.append(
+                {
+                    "id": f"diary.flow.{index}",
+                    "글": step.text,
+                    "근거": diary_report_v2.evidence_texts_for_ids(req, step.evidence_refs),
+                }
+            )
+        for index, observation in enumerate(diary.session_observations):
+            targets.append(
+                {
+                    "id": f"diary.observation.{index}",
+                    "글": f"{observation.title} / {observation.description}",
+                    "근거": diary_report_v2.evidence_texts_for_ids(
+                        req, observation.evidence_refs
+                    ),
+                }
+            )
+        for index, question in enumerate(diary.caregiver_questions):
+            targets.append(
+                {
+                    "id": f"diary.question.{index}",
+                    "글": f"{question.question} / {question.purpose}".strip(" /"),
+                    "근거": diary_report_v2.evidence_texts_for_ids(
+                        req, question.evidence_refs
+                    ),
+                }
+            )
+        if diary.listening_tip:
+            targets.append({"id": "diary.listeningTip", "글": diary.listening_tip})
     return targets
 
 
-def _review_payload(result: contracts.ObservationGenerationResult) -> str:
+def _review_payload(
+    result: contracts.ObservationGenerationResult,
+    req: contracts.ObservationGenerationRequest,
+    *,
+    is_htp: bool,
+    drawing_description: str | None = None,
+) -> str:
     """검토 user 메시지. JSON 한 덩어리로 넘겨 id 대응이 어긋나지 않게 한다.
 
     가드레일: 여기 실리는 것은 **방금 생성 호출에 이미 나갔던 재료의 부분집합**이다(같은 GMS).
@@ -1551,12 +1780,25 @@ def _review_payload(result: contracts.ObservationGenerationResult) -> str:
     ⚠️ 이 문자열은 로그로 남기지 않는다. 아이 발화 인용이 섞일 수 있다.
     """
     return json.dumps(
-        {"관찰 사실": _review_facts(result), "검토 대상": _review_targets(result)},
+        {
+            "관찰 사실": _review_facts(
+                result,
+                req,
+                is_htp=is_htp,
+                drawing_description=drawing_description,
+            ),
+            "검토 대상": _review_targets(result, req, is_htp=is_htp),
+        },
         ensure_ascii=False,
     )
 
 
-def _parse_findings(data: dict, known_ids: set[str]) -> list[tuple[str, str]]:
+def _parse_findings(
+    data: dict,
+    known_ids: set[str],
+    *,
+    allowed_issues: frozenset[str] = _REVIEW_ISSUES,
+) -> list[tuple[str, str]]:
     """검토 응답 → [(target, issue)]. 모르는 id·모르는 issue 는 버린다.
 
     ⚠️ note 는 읽지 않는다 — 아이 표현이 섞일 수 있어 결과에도 로그에도 남기지 않는다.
@@ -1567,29 +1809,36 @@ def _parse_findings(data: dict, known_ids: set[str]) -> list[tuple[str, str]]:
             continue
         target = str(raw.get("target", "")).strip()
         issue = str(raw.get("issue", "")).strip().upper()
-        if target in known_ids and issue in _REVIEW_ISSUES:
+        if target in known_ids and issue in allowed_issues:
             findings.append((target, issue))
     return findings
 
 
 def _apply_findings(
-    result: contracts.ObservationGenerationResult, findings: list[tuple[str, str]]
+    result: contracts.ObservationGenerationResult,
+    findings: list[tuple[str, str]],
+    *,
+    is_htp: bool,
 ) -> bool:
     """지적을 결과에 반영하고 '리포트를 열어도 되는가'를 돌려준다.
 
-    담아낼 수 있는 지적과 없는 지적을 가른다:
-    - 관찰 카드(feature) → EXPERT_ONLY 로 강등. 그 카드만 보호자에게서 가려진다.
-    - 경향 카드(card) → 제외. 카드에는 EXPERT_ONLY 자리가 없어(875 §3) 강등할 곳이 없다.
-    - 주제별 관찰 문장(subject) → 그 문장만 제외. 나머지 관찰과 문답은 그대로 남는다.
-    - 그 밖(요약·활동 기록·조언 등) → **담아낼 자리가 없다.** 문장을 다시 쓰는 것은 2차 생성이라
-      안전 검증을 처음부터 다시 받아야 하고, 비우면 보호자 화면이 무너진다(필수 필드).
-      그래서 리포트 전체를 미검토(AI_DRAFT)로 남긴다.
+    가능한 한 **항목 단위로 담아낸다**. 질문·안내·관찰 카드 하나가 부적절하다고 리포트
+    전체를 가리는 것은 보호자에게 남은 근거 있는 내용을 함께 잃게 만든다.
+
+    - 관찰 카드(feature) → EXPERT_ONLY 로 강등.
+    - 경향 카드(card) → 제외하고 근거/참조를 재매핑.
+    - 주제별 관찰·활동 기록·질문·가이드 → 해당 항목만 제외.
+    - diary observation/question → 해당 항목만 제외.
+    - diary story/flow/listeningTip → 구조화 V2 전체를 제외하고 레거시 리포트는 유지.
+    - 그 밖의 핵심 요약 문장 → 안전하게 비우거나 다시 쓸 계약이 없어 전체를 AI_DRAFT로 남김.
     """
     flagged = {target for target, _ in findings}
     blocking = False
+
     for index, feature in enumerate(result.observation_draft.features):
         if f"{_FEATURE_TARGET_PREFIX}{index}" in flagged:
             feature.visibility_scope = "EXPERT_ONLY"
+
     kept_positions = [
         index
         for index in range(len(result.public_interpretations))
@@ -1597,14 +1846,11 @@ def _apply_findings(
     ]
     kept_cards = [result.public_interpretations[index] for index in kept_positions]
     result.public_interpretations = kept_cards
-    # 카드가 빠지면 그 카드만 참조하던 근거는 화면에 쓰이지 않는다 — 아이 발화 인용을
-    # 응답에 남기지 않기 위해 조립 때와 같은 규칙으로 다시 솎는다(최소 노출).
     referenced = {ref for card in kept_cards for ref in card.evidence_refs}
     result.evidence_items = [
         item for item in result.evidence_items if item.evidence_id in referenced
     ]
-    # 카드가 빠지면 뒤 카드의 배열 위치가 당겨진다 — 주제별 관찰의 참조를 함께 옮기지 않으면
-    # 조용히 다른 카드를 가리킨다(875 §5-1). 빠진 카드를 가리키던 참조는 여기서 사라진다.
+
     new_index_of = {old: new for new, old in enumerate(kept_positions)}
     for subject_index, report in enumerate(result.subject_reports):
         report.interpretation_refs = [
@@ -1615,19 +1861,111 @@ def _apply_findings(
             for text_index, text in enumerate(report.vision_observations)
             if f"{_SUBJECT_TARGET_PREFIX}{subject_index}.{text_index}" not in flagged
         ]
-    for target in flagged:
-        if not target.startswith(
-            (_FEATURE_TARGET_PREFIX, _CARD_TARGET_PREFIX, _SUBJECT_TARGET_PREFIX)
+
+    if is_htp:
+        for target in flagged:
+            if not target.startswith(
+                (_FEATURE_TARGET_PREFIX, _CARD_TARGET_PREFIX, _SUBJECT_TARGET_PREFIX)
+            ):
+                blocking = True
+        return not blocking
+
+    result.activity_notes = [
+        text
+        for index, text in enumerate(result.activity_notes)
+        if f"activityNote.{index}" not in flagged
+    ]
+    result.follow_up_guides = [
+        guide
+        for index, guide in enumerate(result.follow_up_guides)
+        if f"followUpGuide.{index}" not in flagged
+    ]
+    result.guardian_questions = [
+        question
+        for index, question in enumerate(result.guardian_questions)
+        if f"guardianQuestion.{index}" not in flagged
+    ]
+
+    kept_parent_guides: list[contracts.ReportParentGuide] = []
+    for guide_index, guide in enumerate(result.parent_guides):
+        items = [
+            text
+            for item_index, text in enumerate(guide.items)
+            if f"parentGuide.{guide_index}.{item_index}" not in flagged
+        ]
+        if items:
+            guide.items = items
+            kept_parent_guides.append(guide)
+    result.parent_guides = kept_parent_guides
+
+    diary = result.diary_insights
+    if diary is not None:
+        diary.session_observations = [
+            observation
+            for index, observation in enumerate(diary.session_observations)
+            if f"diary.observation.{index}" not in flagged
+        ]
+        diary.caregiver_questions = [
+            question
+            for index, question in enumerate(diary.caregiver_questions)
+            if f"diary.question.{index}" not in flagged
+        ]
+        # 걸린 항목만 뺀다 — 검토기는 문장을 고치지 않고 문제가 있는 항목만 지적한다.
+        #   ⚠️ 구 코드는 listeningTip·flow 가 걸려도 V2 를 통째로 버렸다. 2026-08-07 실호출에서
+        #      검토기가 **optional 한 줄인 listeningTip 하나만** GENERIC_GUIDANCE 로 걸었는데
+        #      핵심 이야기·흐름 5단계·관찰 1개·질문 2개가 함께 사라졌다(3/3). V2 가 한 번도
+        #      켜지지 않는 상태였고, 단위 테스트는 그 조합을 재지 않아 조용히 지나갔다.
+        if "diary.listeningTip" in flagged:
+            diary.listening_tip = None
+        diary.narrative_flow = [
+            step
+            for index, step in enumerate(diary.narrative_flow)
+            if f"diary.flow.{index}" not in flagged
+        ]
+        # 핵심 이야기는 다르다. 이야기가 현실 붕괴·시점 과장으로 걸리면 그 이야기를 나눠 적은
+        #   흐름과 관찰도 같은 오염을 물려받는다 — 뼈대가 무너지면 통째로 접고 레거시로 간다.
+        if "diary.story" in flagged:
+            result.diary_insights = None
+        elif not any(
+            (
+                diary.story_snapshot is not None,
+                diary.narrative_flow,
+                diary.session_observations,
+                diary.caregiver_questions,
+            )
         ):
-            blocking = True
+            # 남은 것이 없으면 비운다 — 판단 기준은 build_diary_insights 와 같다.
+            #   듣기 안내 한 줄만 남은 V2 화면은 레거시 화면보다 정보가 적다.
+            result.diary_insights = None
+
+    contained_prefixes = (
+        _FEATURE_TARGET_PREFIX,
+        _CARD_TARGET_PREFIX,
+        _SUBJECT_TARGET_PREFIX,
+        "activityNote.",
+        "followUpGuide.",
+        "guardianQuestion.",
+        "parentGuide.",
+        "diary.observation.",
+        "diary.question.",
+        "diary.flow.",
+    )
+    contained_exact = {"diary.story", "diary.listeningTip"}
+    for target in flagged:
+        if target in contained_exact or target.startswith(contained_prefixes):
+            continue
+        blocking = True
     return not blocking
 
 
 def _self_review(
     result: contracts.ObservationGenerationResult,
+    req: contracts.ObservationGenerationRequest,
     *,
     rule_flagged: bool,
     model: str,
+    is_htp: bool,
+    drawing_description: str | None = None,
 ) -> contracts.ObservationGenerationResult:
     """생성된 리포트를 스스로 검토해 status 를 정한다(2-pass).
 
@@ -1640,7 +1978,7 @@ def _self_review(
     Returns:
         status 가 정해진 결과. 통과하면 AI_REVIEWED, 아니면 AI_DRAFT.
     """
-    targets = _review_targets(result)
+    targets = _review_targets(result, req, is_htp=is_htp)
     if not targets:
         # 검토할 문장이 하나도 없다 = 열 것도 없다. 통과로 올리지 않는다.
         _SELF_REVIEW_COUNTER.labels(outcome="failed").inc()
@@ -1649,8 +1987,16 @@ def _self_review(
         resp = get_client().chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": _load(_REPORT_REVIEW)},
-                {"role": "user", "content": _review_payload(result)},
+                {"role": "system", "content": _load(_review_prompt_name(is_htp))},
+                {
+                    "role": "user",
+                    "content": _review_payload(
+                        result,
+                        req,
+                        is_htp=is_htp,
+                        drawing_description=drawing_description,
+                    ),
+                },
             ],
             temperature=0,  # 판정은 흔들리면 안 된다 — 생성(0.4)보다 낮춘다.
             response_format={"type": "json_object"},
@@ -1664,8 +2010,16 @@ def _self_review(
         _SELF_REVIEW_COUNTER.labels(outcome="unavailable").inc()
         return result
 
-    findings = _parse_findings(data, {t["id"] for t in targets})
-    passed = _apply_findings(result, findings)
+    findings = _parse_findings(
+        data,
+        {t["id"] for t in targets},
+        allowed_issues=(
+            _LEGACY_REVIEW_ISSUES
+            if is_htp
+            else _LEGACY_REVIEW_ISSUES | _DIARY_REVIEW_ISSUES
+        ),
+    )
+    passed = _apply_findings(result, findings, is_htp=is_htp)
     if findings:
         # 사유 코드만 남긴다 — 지적 문장·아이 발화는 담지 않는다.
         logger.info(
@@ -1747,7 +2101,14 @@ def generate(
     )
     # 2차 패스: 스스로 검토해 보호자에게 열지 말지를 정한다. 실패해도 리포트는 그대로 나간다
     # (status 가 AI_DRAFT 로 남아 관찰 카드가 보호자에게 열리지 않을 뿐이다).
-    return _self_review(result, rule_flagged=rule_flagged, model=used_model)
+    return _self_review(
+        result,
+        req,
+        rule_flagged=rule_flagged,
+        model=used_model,
+        is_htp=is_htp,
+        drawing_description=drawing_description,
+    )
 
 
 if __name__ == "__main__":

@@ -63,6 +63,27 @@ class DescribeTest(unittest.TestCase):
             image_parts[0]["image_url"]["url"].startswith("data:image/png;base64,")
         )
 
+    def test_source_png_is_encoded_instead_of_annotated_image_when_provided(self):
+        fake_client = mock.Mock()
+        fake_client.chat.completions.create.return_value = _fake_response("서술")
+
+        with (
+            mock.patch.object(vlm_client, "get_client", return_value=fake_client),
+            mock.patch.object(
+                vlm_client,
+                "_encode_for_upload",
+                return_value=("image/png", "encoded"),
+            ) as encode,
+        ):
+            vlm_client.describe(
+                b"annotated",
+                _sample_detections(),
+                source_png=b"original",
+                activity_type="ART_DIARY",
+            )
+
+        encode.assert_called_once_with(b"original")
+
     def test_empty_detections_still_calls_model(self):
         fake_client = mock.Mock()
         fake_client.chat.completions.create.return_value = _fake_response("잘 보이지 않아요.")
@@ -104,7 +125,7 @@ class ActivityPromptSplitTest(unittest.TestCase):
 
     def test_htp_uses_htp_prompt(self):
         system = self._system_for("HTP")
-        self.assertIn("HTP(집·나무·사람)", system)
+        self.assertIn("HTP(집·나무·사람) 그림", system)
         self.assertNotIn("그림일기", system)
 
     def test_art_diary_uses_diary_prompt(self):
@@ -112,26 +133,26 @@ class ActivityPromptSplitTest(unittest.TestCase):
         self.assertIn("그림일기", system)
         self.assertNotIn("HTP(집·나무·사람)", system)
         # 자유 그림은 탐지 목록이 '힌트'다 — 목록에 고정하면 sketch 미탐지 때 서술이 죽는다.
-        self.assertIn("목록에 없더라도 이미지에서 분명히 보이는 것은 묘사해도 좋아", system)
+        self.assertIn("목록에 없더라도 이미지에서 분명히 보이는 중심 대상", system)
 
     def test_unknown_activity_falls_back_to_htp(self):
         # 활동 유형을 안 넘기는 draft 경로는 기본 HTP 가중치를 쓰므로 HTP 서술이 맞다.
-        self.assertIn("HTP(집·나무·사람)", self._system_for(None))
+        self.assertIn("HTP(집·나무·사람) 그림", self._system_for(None))
 
-    def test_both_prompts_require_visible_detail_for_conversation(self):
-        """대화 품질의 원천 — 색·표정·위치 세부를 서술이 내야 질문이 구체해진다.
+    def test_diary_prompt_prioritises_story_relevant_details_without_forcing_filler(self):
+        """그림일기는 중심 이야기·읽을 수 있는 글자를 우선하고 불확실한 세부를 채우지 않는다."""
+        diary = self._system_for("ART_DIARY")
+        self.assertIn("분명히 보이는 중심 대상", diary)
+        self.assertIn("읽을 수 있는 글자", diary)
+        self.assertIn("세부를 억지로 늘리지 마", diary)
+        self.assertNotIn("한두 가지는 꼭 넣어", diary)
 
-        이 세부는 리포트 RAG 질의(report_client._build_rag_query)의 본문이기도 하다.
-        """
-        for activity in ("HTP", "ART_DIARY"):
-            system = self._system_for(activity)
-            self.assertIn("색·표정 모양·방향·개수·서로의 위치 관계", system)
-            self.assertIn("한두 가지는 꼭 넣어", system)
-
-    def test_both_prompts_forbid_mind_reading(self):
-        for activity in ("HTP", "ART_DIARY"):
-            system = self._system_for(activity)
-            self.assertIn("마음·기분을 짐작해 쓰지 마", system)
+    def test_both_prompts_forbid_psychological_mind_reading(self):
+        self.assertIn("심리 해석·진단·평가", self._system_for("HTP"))
+        self.assertIn(
+            "아이의 마음이나 실제 사건을 그림만 보고 짐작하지 마",
+            self._system_for("ART_DIARY"),
+        )
 
 
 class EncodeForUploadTest(unittest.TestCase):

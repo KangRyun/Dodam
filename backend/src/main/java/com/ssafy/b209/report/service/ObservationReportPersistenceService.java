@@ -28,6 +28,12 @@ import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportActivityNote;
 import com.ssafy.b209.report.domain.ReportActivitySummary;
 import com.ssafy.b209.report.domain.ReportCrisisAlert;
+import com.ssafy.b209.report.domain.ReportDiaryCaregiverQuestion;
+import com.ssafy.b209.report.domain.ReportDiaryChildVoice;
+import com.ssafy.b209.report.domain.ReportDiaryEvidenceRef;
+import com.ssafy.b209.report.domain.ReportDiaryInsight;
+import com.ssafy.b209.report.domain.ReportDiaryNarrativeStep;
+import com.ssafy.b209.report.domain.ReportDiarySessionObservation;
 import com.ssafy.b209.report.domain.ReportDrawnItem;
 import com.ssafy.b209.report.domain.ReportEvidenceItem;
 import com.ssafy.b209.report.domain.ReportEvidenceSourceKind;
@@ -50,6 +56,14 @@ import com.ssafy.b209.report.domain.ReportSubjectQaPair;
 import com.ssafy.b209.report.dto.ObservationGeneration;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummaryDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryCaregiverQuestionDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryChildVoiceItemDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryDataQualityDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryEvidenceRefDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryInsightsDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryNarrativeStepDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiarySessionObservationDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryStorySnapshotDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DrawnItemDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.FollowUpGuideDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.GuardianQuestionDraft;
@@ -59,6 +73,12 @@ import com.ssafy.b209.report.exception.MockObservationReportErrorCode;
 import com.ssafy.b209.report.repository.ReportActivityNoteRepository;
 import com.ssafy.b209.report.repository.ReportActivitySummaryRepository;
 import com.ssafy.b209.report.repository.ReportCrisisAlertRepository;
+import com.ssafy.b209.report.repository.ReportDiaryCaregiverQuestionRepository;
+import com.ssafy.b209.report.repository.ReportDiaryChildVoiceRepository;
+import com.ssafy.b209.report.repository.ReportDiaryEvidenceRefRepository;
+import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
+import com.ssafy.b209.report.repository.ReportDiaryNarrativeStepRepository;
+import com.ssafy.b209.report.repository.ReportDiarySessionObservationRepository;
 import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportEvidenceItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideRepository;
@@ -152,6 +172,12 @@ public class ObservationReportPersistenceService {
   private final ReportObservedFeatureRepository observedFeatureRepository;
   private final ReportKeyConversationRepository keyConversationRepository;
   private final ReportFollowUpGuideRepository followUpGuideRepository;
+  private final ReportDiaryInsightRepository diaryInsightRepository;
+  private final ReportDiaryNarrativeStepRepository diaryNarrativeStepRepository;
+  private final ReportDiaryChildVoiceRepository diaryChildVoiceRepository;
+  private final ReportDiarySessionObservationRepository diarySessionObservationRepository;
+  private final ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository;
+  private final ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository;
   private final ReportGuardianQuestionRepository guardianQuestionRepository;
   private final ConversationSessionRepository conversationSessionRepository;
   private final ConversationMessageRepository conversationMessageRepository;
@@ -210,6 +236,12 @@ public class ObservationReportPersistenceService {
       ReportObservedFeatureRepository observedFeatureRepository,
       ReportKeyConversationRepository keyConversationRepository,
       ReportFollowUpGuideRepository followUpGuideRepository,
+      ReportDiaryInsightRepository diaryInsightRepository,
+      ReportDiaryNarrativeStepRepository diaryNarrativeStepRepository,
+      ReportDiaryChildVoiceRepository diaryChildVoiceRepository,
+      ReportDiarySessionObservationRepository diarySessionObservationRepository,
+      ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository,
+      ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository,
       ReportGuardianQuestionRepository guardianQuestionRepository,
       ConversationSessionRepository conversationSessionRepository,
       ConversationMessageRepository conversationMessageRepository,
@@ -236,6 +268,12 @@ public class ObservationReportPersistenceService {
     this.observedFeatureRepository = observedFeatureRepository;
     this.keyConversationRepository = keyConversationRepository;
     this.followUpGuideRepository = followUpGuideRepository;
+    this.diaryInsightRepository = diaryInsightRepository;
+    this.diaryNarrativeStepRepository = diaryNarrativeStepRepository;
+    this.diaryChildVoiceRepository = diaryChildVoiceRepository;
+    this.diarySessionObservationRepository = diarySessionObservationRepository;
+    this.diaryCaregiverQuestionRepository = diaryCaregiverQuestionRepository;
+    this.diaryEvidenceRefRepository = diaryEvidenceRefRepository;
     this.guardianQuestionRepository = guardianQuestionRepository;
     this.conversationSessionRepository = conversationSessionRepository;
     this.conversationMessageRepository = conversationMessageRepository;
@@ -434,11 +472,9 @@ public class ObservationReportPersistenceService {
   /**
    * 활동 시점 기준 아동 만 나이를 계산한다 (S15P11B209-1001).
    *
-   * <p>대화 경로({@code GenerateQuestionCommand.childAge})가 이미 보내는 것과 같은 수준의 정보다.
-   * 리포트가 관찰을 연령 발달 문맥으로 설명할 수 있게 한다 — 982에서 계약 부재로 보류했던 축.
-   * 나이 계산은 {@code Child.ageOn}이 소유한다(도메인 규칙 중복 금지). 생년월일은 로그에
-   * 남기지 않는다(가드레일 9절) — 아동 관계가 없으면 조용히 {@code null}로 보내고,
-   * AI 프롬프트는 나이가 없을 때 연령 언급 자체를 금지한다.
+   * <p>대화 경로({@code GenerateQuestionCommand.childAge})가 이미 보내는 것과 같은 수준의 정보다. 리포트가 관찰을 연령 발달 문맥으로
+   * 설명할 수 있게 한다 — 982에서 계약 부재로 보류했던 축. 나이 계산은 {@code Child.ageOn}이 소유한다(도메인 규칙 중복 금지). 생년월일은 로그에
+   * 남기지 않는다(가드레일 9절) — 아동 관계가 없으면 조용히 {@code null}로 보내고, AI 프롬프트는 나이가 없을 때 연령 언급 자체를 금지한다.
    *
    * @param session 아동 관계를 가진 그림 활동 세션
    * @return 만 나이이며 아동 관계가 없으면 {@code null}
@@ -609,6 +645,9 @@ public class ObservationReportPersistenceService {
       saveCrisisAlert(report, result.crisisAlert());
       saveSubjects(report, context, result, savedCards);
       saveReferences(report, safeList(result.ragReferences()));
+      // 그림일기 V2 구조화. AI 가 근거와 대조해 살아남은 것만 보내고, 남은 게 없으면 아예
+      //   보내지 않는다 — null 이면 저장하지 않고 화면은 레거시 리포트를 연다.
+      saveDiaryInsights(report, result.diaryInsights());
 
       report.complete(draft.expertReviewRequired(), result.limitationsText(), now);
       // AI 원문을 그대로 보관한다. 계약 스키마로 읽는 순간 스키마 밖 서술이 사라지므로, 나중에
@@ -922,9 +961,8 @@ public class ObservationReportPersistenceService {
    *
    * <p>AI 도 자체 게이트를 통과시킨 카드만 보내지만 여기서 다시 검증한다 — 이중 방어이며, 서버가 발급하지 않은 참조나 근거 부족을 서버 쪽에서 확정한다.
    *
-   * <p>확신 등급(S15P11B209-982)은 이 메서드가 따로 다루지 않는다. 어댑터가 카드마다 등급을 실어 두고 {@code
-   * newInterpretation} 이 그대로 Entity 에 옮기므로, 공개·강등·제외 어느 판정을 받든 등급은 함께 저장된다 — 판정과 등급은 서로 다른 축이라 한쪽
-   * 때문에 다른 쪽을 버리지 않는다.
+   * <p>확신 등급(S15P11B209-982)은 이 메서드가 따로 다루지 않는다. 어댑터가 카드마다 등급을 실어 두고 {@code newInterpretation} 이
+   * 그대로 Entity 에 옮기므로, 공개·강등·제외 어느 판정을 받든 등급은 함께 저장된다 — 판정과 등급은 서로 다른 축이라 한쪽 때문에 다른 쪽을 버리지 않는다.
    *
    * @param report 카드가 속한 리포트
    * @param result AI 응답
@@ -1238,6 +1276,141 @@ public class ObservationReportPersistenceService {
               index));
     }
     keyConversationRepository.saveAll(entities);
+  }
+
+  /**
+   * 그림일기 V2 구조화 결과를 저장한다. {@code draft}가 {@code null}이면 아무것도 쓰지 않는다.
+   *
+   * <p>비어 있음과 없음을 가른다 — HTP 이거나 근거가 부족해 AI 가 구조화를 포기하면 행 자체를 만들지 않고, 화면은 행의 유무로 V2 를 열지 말지 정한다. 빈
+   * 껍데기를 저장하면 아이 이야기가 하나도 없는 V2 화면이 열린다.
+   */
+  private void saveDiaryInsights(Report report, DiaryInsightsDraft draft) {
+    if (draft == null) {
+      return;
+    }
+    DiaryStorySnapshotDraft snapshot = draft.storySnapshot();
+    DiaryDataQualityDraft quality = draft.dataQuality();
+    diaryInsightRepository.save(
+        ReportDiaryInsight.create(
+            report,
+            snapshot == null
+                ? null
+                : ColumnTextLimiter.fit(snapshot.headline(), 200, "report_diary_insights.headline"),
+            snapshot == null ? null : snapshot.summary(),
+            snapshot == null ? null : snapshot.realityStatus(),
+            snapshot == null ? null : snapshot.timeScope(),
+            snapshot == null
+                ? null
+                : ColumnTextLimiter.fit(
+                    snapshot.mainEvent(), 300, "report_diary_insights.main_event"),
+            draft.listeningTip(),
+            quality == null ? 0 : quality.confirmedVoiceCount(),
+            quality == null ? 0 : quality.optionAnswerCount(),
+            quality == null ? 0 : quality.skippedCount(),
+            quality == null ? 0 : quality.sttConfirmationCount(),
+            quality == null ? 0 : quality.evidenceCount(),
+            quality != null && quality.visionSummaryAvailable()));
+
+    List<ReportDiaryEvidenceRef> refs = new ArrayList<>();
+    if (snapshot != null) {
+      collectDiaryRefs(
+          report, refs, ReportDiaryEvidenceRef.OWNER_STORY_SNAPSHOT, 0, snapshot.evidenceRefs());
+    }
+
+    List<ReportDiaryNarrativeStep> steps = new ArrayList<>();
+    List<DiaryNarrativeStepDraft> stepDrafts = draft.narrativeFlow();
+    for (int index = 0; index < stepDrafts.size(); index++) {
+      DiaryNarrativeStepDraft step = stepDrafts.get(index);
+      steps.add(ReportDiaryNarrativeStep.create(report, step.stepType(), step.text(), index));
+      collectDiaryRefs(
+          report, refs, ReportDiaryEvidenceRef.OWNER_NARRATIVE_STEP, index, step.evidenceRefs());
+    }
+    diaryNarrativeStepRepository.saveAll(steps);
+
+    List<ReportDiaryChildVoice> voices = new ArrayList<>();
+    List<DiaryChildVoiceItemDraft> voiceDrafts = draft.childVoiceItems();
+    for (int index = 0; index < voiceDrafts.size(); index++) {
+      DiaryChildVoiceItemDraft voice = voiceDrafts.get(index);
+      DiaryEvidenceRefDraft source = voice.sourceRef();
+      voices.add(
+          ReportDiaryChildVoice.create(
+              report,
+              voice.text(),
+              voice.elicitationType(),
+              voice.answerType(),
+              source == null ? null : source.kind(),
+              source == null ? null : source.id(),
+              voice.sttNeedsConfirmation(),
+              index));
+    }
+    diaryChildVoiceRepository.saveAll(voices);
+
+    List<ReportDiarySessionObservation> observations = new ArrayList<>();
+    List<DiarySessionObservationDraft> observationDrafts = draft.sessionObservations();
+    for (int index = 0; index < observationDrafts.size(); index++) {
+      DiarySessionObservationDraft observation = observationDrafts.get(index);
+      observations.add(
+          ReportDiarySessionObservation.create(
+              report,
+              observation.observationCode(),
+              ColumnTextLimiter.fit(
+                  observation.title(), 200, "report_diary_session_observations.title"),
+              observation.description(),
+              ColumnTextLimiter.fit(
+                  observation.scopeText(), 200, "report_diary_session_observations.scope_text"),
+              index));
+      collectDiaryRefs(
+          report,
+          refs,
+          ReportDiaryEvidenceRef.OWNER_SESSION_OBSERVATION,
+          index,
+          observation.evidenceRefs());
+    }
+    diarySessionObservationRepository.saveAll(observations);
+
+    List<ReportDiaryCaregiverQuestion> questions = new ArrayList<>();
+    List<DiaryCaregiverQuestionDraft> questionDrafts = draft.caregiverQuestions();
+    for (int index = 0; index < questionDrafts.size(); index++) {
+      DiaryCaregiverQuestionDraft question = questionDrafts.get(index);
+      questions.add(
+          ReportDiaryCaregiverQuestion.create(
+              report,
+              question.question(),
+              ColumnTextLimiter.fit(
+                  question.purpose(), 300, "report_diary_caregiver_questions.purpose"),
+              index));
+      collectDiaryRefs(
+          report,
+          refs,
+          ReportDiaryEvidenceRef.OWNER_CAREGIVER_QUESTION,
+          index,
+          question.evidenceRefs());
+    }
+    diaryCaregiverQuestionRepository.saveAll(questions);
+
+    diaryEvidenceRefRepository.saveAll(refs);
+  }
+
+  /** 한 항목의 근거 참조를 모은다. 식별자가 비면 건너뛴다 — 빈 참조는 화면에서 근거 없는 근거로 보인다. */
+  private void collectDiaryRefs(
+      Report report,
+      List<ReportDiaryEvidenceRef> sink,
+      String ownerType,
+      int ownerOrder,
+      List<DiaryEvidenceRefDraft> refs) {
+    if (refs == null) {
+      return;
+    }
+    int order = 0;
+    for (DiaryEvidenceRefDraft ref : refs) {
+      if (ref == null || ref.kind() == null || ref.id() == null || ref.id().isBlank()) {
+        continue;
+      }
+      sink.add(
+          ReportDiaryEvidenceRef.create(
+              report, ownerType, ownerOrder, ref.kind(), ref.id(), order));
+      order++;
+    }
   }
 
   private void saveFollowUpGuides(Report report, List<FollowUpGuideDraft> guides) {

@@ -726,6 +726,99 @@ class DrawnItem(_CamelModel):
     name: str
 
 
+class DiaryStorySnapshot(_CamelModel):
+    """그림일기 한 회차의 핵심 이야기 요약.
+
+    reality_status/time_scope 는 아이가 직접 말한 표현으로만 서버가 확정한다. 그림을 그린
+    날짜나 LLM의 추측만으로 값을 올리지 않는다.
+    """
+
+    headline: str
+    summary: str
+    reality_status: Literal["REAL", "IMAGINED", "MIXED", "UNKNOWN"] = "UNKNOWN"
+    time_scope: Literal["TODAY", "YESTERDAY", "RECENT", "PAST", "UNKNOWN"] = "UNKNOWN"
+    main_event: str | None = None
+    evidence_refs: list[EvidenceSourceRef] = Field(default_factory=list)
+
+
+class DiaryNarrativeStep(_CamelModel):
+    """그림일기 이야기 흐름의 한 단계."""
+
+    step_type: Literal[
+        "EVENT",
+        "CHILD_ACTION",
+        "OTHER_RESPONSE",
+        "EMOTION",
+        "WISH",
+        "OUTCOME",
+    ]
+    text: str
+    evidence_refs: list[EvidenceSourceRef] = Field(default_factory=list)
+
+
+class DiaryChildVoiceItem(_CamelModel):
+    """보호자에게 보여 줄 아이의 실제 표현과 질문 유도 방식."""
+
+    text: str = Field(repr=False)
+    elicitation_type: Literal[
+        "SPONTANEOUS",
+        "OPEN_INVITATION",
+        "CUED_INVITATION",
+        "FOCUSED_WH",
+        "YES_NO",
+        "MULTIPLE_CHOICE",
+        "CORRECTION",
+        "UNKNOWN",
+    ] = "UNKNOWN"
+    answer_type: str | None = None
+    source_ref: EvidenceSourceRef | None = None
+    stt_needs_confirmation: bool = False
+
+
+class DiarySessionObservation(_CamelModel):
+    """한 회차에 한정해 근거를 붙여 보여 주는 관찰 카드."""
+
+    observation_code: str
+    title: str
+    description: str
+    scope_text: str = "이번 활동에서 확인된 모습이에요."
+    evidence_refs: list[EvidenceSourceRef] = Field(default_factory=list)
+
+
+class DiaryCaregiverQuestion(_CamelModel):
+    """보호자가 활동 내용에 이어서 그대로 물어볼 수 있는 질문."""
+
+    question: str
+    purpose: str
+    evidence_refs: list[EvidenceSourceRef] = Field(default_factory=list)
+
+
+class DiaryDataQuality(_CamelModel):
+    """해석 점수가 아니라 이번 리포트의 원자료 구성을 알려 주는 메타데이터."""
+
+    confirmed_voice_count: int = 0
+    option_answer_count: int = 0
+    skipped_count: int = 0
+    stt_confirmation_count: int = 0
+    evidence_count: int = 0
+    vision_summary_available: bool = False
+
+
+class DiaryInsights(_CamelModel):
+    """그림일기 전용 보호자 리포트 V2.
+
+    전부 optional 확장이라 구 BE는 무시할 수 있다. HTP 응답에서는 None 이다.
+    """
+
+    story_snapshot: DiaryStorySnapshot | None = None
+    narrative_flow: list[DiaryNarrativeStep] = Field(default_factory=list)
+    child_voice_items: list[DiaryChildVoiceItem] = Field(default_factory=list)
+    session_observations: list[DiarySessionObservation] = Field(default_factory=list)
+    caregiver_questions: list[DiaryCaregiverQuestion] = Field(default_factory=list)
+    listening_tip: str | None = None
+    data_quality: DiaryDataQuality = Field(default_factory=DiaryDataQuality)
+
+
 class ObservationGenerationResult(_CamelModel):
     """BE ObservationGenerationResult와 1:1. disclaimer·limitations_text는 필수.
 
@@ -769,6 +862,8 @@ class ObservationGenerationResult(_CamelModel):
     #   RAG_LOW_SCORE(전부 임계값 미달) | RAG_NO_QUERY(관찰 재료 없음).
     #   근거가 실렸으면 None — "왜 없는가"의 설명이므로 있을 때는 침묵한다.
     rag_skipped_reason: str | None = None
+    # 그림일기 전용 V2. HTP는 None, 구 BE는 unknown 필드로 무시한다.
+    diary_insights: DiaryInsights | None = None
 
 
 # ── 종합 분석 계약 (API_명세서_최종.md §19.3 · §19.4) ────────────
