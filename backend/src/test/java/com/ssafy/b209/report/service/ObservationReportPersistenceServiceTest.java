@@ -55,6 +55,12 @@ import com.ssafy.b209.report.exception.MockObservationReportErrorCode;
 import com.ssafy.b209.report.repository.ReportActivityNoteRepository;
 import com.ssafy.b209.report.repository.ReportActivitySummaryRepository;
 import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
+import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
+import com.ssafy.b209.report.repository.ReportDiaryNarrativeStepRepository;
+import com.ssafy.b209.report.repository.ReportDiaryChildVoiceRepository;
+import com.ssafy.b209.report.repository.ReportDiarySessionObservationRepository;
+import com.ssafy.b209.report.repository.ReportDiaryCaregiverQuestionRepository;
+import com.ssafy.b209.report.repository.ReportDiaryEvidenceRefRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideRepository;
 import com.ssafy.b209.report.repository.ReportGuardianQuestionRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationRepository;
@@ -118,6 +124,12 @@ class ObservationReportPersistenceServiceTest {
   @Mock private ReportObservedFeatureRepository observedFeatureRepository;
   @Mock private ReportKeyConversationRepository keyConversationRepository;
   @Mock private ReportFollowUpGuideRepository followUpGuideRepository;
+  @Mock private ReportDiaryInsightRepository diaryInsightRepository;
+  @Mock private ReportDiaryNarrativeStepRepository diaryNarrativeStepRepository;
+  @Mock private ReportDiaryChildVoiceRepository diaryChildVoiceRepository;
+  @Mock private ReportDiarySessionObservationRepository diarySessionObservationRepository;
+  @Mock private ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository;
+  @Mock private ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository;
   @Mock private ReportGuardianQuestionRepository guardianQuestionRepository;
   @Mock private ConversationSessionRepository conversationSessionRepository;
   @Mock private ConversationMessageRepository conversationMessageRepository;
@@ -165,6 +177,12 @@ class ObservationReportPersistenceServiceTest {
             observedFeatureRepository,
             keyConversationRepository,
             followUpGuideRepository,
+            diaryInsightRepository,
+            diaryNarrativeStepRepository,
+            diaryChildVoiceRepository,
+            diarySessionObservationRepository,
+            diaryCaregiverQuestionRepository,
+            diaryEvidenceRefRepository,
             guardianQuestionRepository,
             conversationSessionRepository,
             conversationMessageRepository,

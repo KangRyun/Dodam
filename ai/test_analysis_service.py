@@ -629,3 +629,41 @@ class DetectionMetadataSchemaTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+@unittest.skipUnless(_CV2_AVAILABLE, "cv2/numpy required")
+class DiaryVlmSourceImageRoutingTest(unittest.TestCase):
+    """자유 그림만 원본 이미지를 VLM에 보내고 HTP의 기존 주석 이미지 경로는 유지한다."""
+
+    @staticmethod
+    def _png() -> bytes:
+        ok, buf = cv2.imencode(".png", np.full((16, 16, 3), 255, dtype=np.uint8))
+        if not ok:
+            raise AssertionError("test PNG encoding failed")
+        return buf.tobytes()
+
+    def _run(self, activity_type: str):
+        payload = {**SPEC_REQUEST, "activityType": activity_type}
+        if activity_type == "HTP":
+            payload["drawingSubject"] = "TREE"
+        req = contracts.AnalysisRequest.model_validate(payload)
+        original = self._png()
+        with (
+            mock.patch.object(svc, "_fetch_drawing", return_value=original),
+            mock.patch.object(
+                svc, "_detect_or_degrade", return_value=([], b"annotated")
+            ),
+            mock.patch.object(svc.vlm_client, "describe", return_value="관찰") as describe,
+        ):
+            svc.analyze(req)
+        return original, describe.call_args
+
+    def test_art_diary_sends_unannotated_source_png(self):
+        original, call = self._run("ART_DIARY")
+        self.assertEqual(call.kwargs["source_png"], original)
+        self.assertEqual(call.kwargs["activity_type"], "ART_DIARY")
+
+    def test_htp_keeps_annotated_image_path(self):
+        _, call = self._run("HTP")
+        self.assertIsNone(call.kwargs["source_png"])
+        self.assertEqual(call.kwargs["activity_type"], "HTP")

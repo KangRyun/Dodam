@@ -60,7 +60,89 @@ public record ReportDetailResponse(
     List<ReportReferenceResponse> references,
     String activityType,
     String childDisplayName,
-    JsonNode aiRawReport) {
+    JsonNode aiRawReport,
+    ReportDiaryInsightsResponse diaryInsights) {
+
+  /**
+   * 그림일기 V2 확장 이전 형태로 만든다.
+   *
+   * <p>{@code diaryInsights} 없이 만들던 호출부를 그대로 두기 위한 생성자다. 그림일기 구조화 결과는 {@code null}로 둔다 — 앱은 그 값이
+   * 없으면 기존 리포트 화면을 연다.
+   *
+   * @param reportId 리포트 식별자
+   * @param reportVersion 리포트 버전
+   * @param reportStatus 리포트 생성 상태
+   * @param drawingSession 그림 활동 세션 요약
+   * @param drawing 그림 URL 묶음
+   * @param childExpression 아이 표현 요약
+   * @param observedFeatures 보호자에게 열린 관찰 특징 목록
+   * @param activityFacts 객관 활동 기록
+   * @param conversationSummary 대화 요약
+   * @param guardianConversationGuide 보호자 대화 안내 목록
+   * @param limitations 한계 문구 목록
+   * @param expertReview 전문가 검토 상태
+   * @param createdAt 생성 시각
+   * @param nonDiagnosticNotice 비진단 고지 문구
+   * @param publicInterpretations 경향 해석 카드 목록
+   * @param evidenceItems 근거 풀
+   * @param subjectReports 주제별 관찰 묶음
+   * @param parentGuides 보호자 가이드 목록
+   * @param crisisAlert 위기 안내이며 없으면 {@code null}
+   * @param references 참고 자료 목록
+   * @param activityType 활동 유형 코드
+   * @param childDisplayName 아동 표시명
+   * @param aiRawReport AI 응답 원문이며 없으면 {@code null}
+   */
+  public ReportDetailResponse(
+      Long reportId,
+      int reportVersion,
+      String reportStatus,
+      ReportDrawingSessionResponse drawingSession,
+      ReportDrawingResponse drawing,
+      ReportChildExpressionResponse childExpression,
+      List<ReportObservedFeatureResponse> observedFeatures,
+      ReportActivityFactsResponse activityFacts,
+      ReportConversationSummaryResponse conversationSummary,
+      List<String> guardianConversationGuide,
+      List<String> limitations,
+      ReportExpertReviewResponse expertReview,
+      LocalDateTime createdAt,
+      String nonDiagnosticNotice,
+      List<ReportPublicInterpretationResponse> publicInterpretations,
+      List<ReportEvidenceItemResponse> evidenceItems,
+      List<ReportSubjectResponse> subjectReports,
+      List<ReportParentGuideResponse> parentGuides,
+      ReportCrisisAlertResponse crisisAlert,
+      List<ReportReferenceResponse> references,
+      String activityType,
+      String childDisplayName,
+      JsonNode aiRawReport) {
+    this(
+        reportId,
+        reportVersion,
+        reportStatus,
+        drawingSession,
+        drawing,
+        childExpression,
+        observedFeatures,
+        activityFacts,
+        conversationSummary,
+        guardianConversationGuide,
+        limitations,
+        expertReview,
+        createdAt,
+        nonDiagnosticNotice,
+        publicInterpretations,
+        evidenceItems,
+        subjectReports,
+        parentGuides,
+        crisisAlert,
+        references,
+        activityType,
+        childDisplayName,
+        aiRawReport,
+        null);
+  }
 
   /**
    * 원문 패스스루 이전 형태로 만든다 (S15P11B209-980 이전 호출부용).
@@ -134,6 +216,7 @@ public record ReportDetailResponse(
         references,
         activityType,
         childDisplayName,
+        null,
         null);
   }
 

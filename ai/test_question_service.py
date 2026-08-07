@@ -1258,7 +1258,10 @@ class ActivityBlockVersionTrackingTest(unittest.TestCase):
         used = {
             "activity_block_htp": shared
             | {"HTP", "HTP_WHOLE", "HTP_OPENING", "PERSON_PART", "PREVIOUS_SUBJECTS"},
-            "activity_block_diary": shared | {"ART_DIARY", "ART_DIARY_OPEN"},
+            # PERSON_PART는 양쪽에 있지만 착지가 다르다(999) — HTP는 그 사람의 생각·기분으로,
+            #   그림일기는 오탐 가능성을 열어 두고 사건으로. 993이 파일을 가른 덕에 가능하다.
+            "activity_block_diary": shared
+            | {"ART_DIARY", "ART_DIARY_OPEN", "PERSON_PART"},
         }
         for name, keys in used.items():
             available = set(prompts_registry.sections(name))

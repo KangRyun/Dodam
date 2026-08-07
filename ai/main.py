@@ -139,8 +139,9 @@ async def analyze_drawing(file: UploadFile = File(...)):
     if file.filename and "." in file.filename:
         ext = "." + file.filename.rsplit(".", 1)[-1]
     # Windows에서 추론기가 경로를 다시 열 수 있게 delete=False로 만들고 finally에서 지운다.
+    source_png = await file.read()
     with tempfile.NamedTemporaryFile(suffix=ext or ".png", delete=False) as tmp:
-        tmp.write(await file.read())
+        tmp.write(source_png)
         tmp_path = tmp.name
     try:
         detections, annotated_png = yolo_client.detect_and_annotate(tmp_path)
@@ -587,11 +588,22 @@ async def analyze_report(
             if file.filename and "." in file.filename:
                 ext = "." + file.filename.rsplit(".", 1)[-1]
             # Windows에서 추론기가 경로를 다시 열 수 있게 delete=False로 만들고 finally에서 지운다.
+            source_png = await file.read()
             with tempfile.NamedTemporaryFile(suffix=ext or ".png", delete=False) as tmp:
-                tmp.write(await file.read())
+                tmp.write(source_png)
                 tmp_path = tmp.name
             detections, annotated_png = yolo_client.detect_and_annotate(tmp_path)
-            drawing_description = vlm_client.describe(annotated_png, detections)
+            is_htp_report = any(
+                summary.drawing_subject is not None
+                for summary in req.subject_summaries
+            )
+            activity_type = "HTP" if is_htp_report else "ART_DIARY"
+            drawing_description = vlm_client.describe(
+                annotated_png,
+                detections,
+                source_png=None if is_htp_report else source_png,
+                activity_type=activity_type,
+            )
         return report_client.generate(req, drawing_description=drawing_description)
     except RuntimeError:
         return JSONResponse(status_code=502, content={"errorCode": "AI_UPSTREAM_ERROR"})

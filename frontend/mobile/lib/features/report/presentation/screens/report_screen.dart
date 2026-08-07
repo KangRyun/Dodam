@@ -13,6 +13,7 @@ import '../../data/services/platform_report_file_actions.dart';
 import '../../domain/repositories/report_repository.dart';
 import '../../domain/services/report_file_actions.dart';
 import '../format/activity_duration_format.dart';
+import '../widgets/diary_report_v2.dart';
 import '../widgets/htp_report_gallery.dart';
 import '../widgets/report_mascot.dart';
 
@@ -487,6 +488,12 @@ class _ReportContent extends StatelessWidget {
       // 활동에 따라 섹션 구성이 갈린다. 그림일기·자유 그림은 계약 §11의 확정
       // 순서를 그대로 쓰고, HTP는 아래 [_htpSections]의 전용 순서를 쓴다.
       final isHtp = report.isHtpActivity;
+      // 그림일기 V2 는 값이 있을 때만 연다. 서버가 근거 부족이면 아예 보내지 않고,
+      //   듣기 안내 한 줄만 남은 경우도 기존 화면이 더 많은 정보를 준다(hasContent).
+      final insights = report.diaryInsights;
+      final diaryInsights = !isHtp && (insights?.hasContent ?? false)
+          ? insights
+          : null;
       final drawings = _ReportDrawings(
         report: report,
         imageFetcher: imageFetcher,
@@ -531,6 +538,13 @@ class _ReportContent extends StatelessWidget {
           ?_activityFactsSection(report, isHtp: true),
           ..._parentGuideSections(report),
           ?_legacyGuideSection(report),
+        ] else if (diaryInsights != null) ...[
+          // 그림일기 V2. 서버가 근거와 대조해 남긴 구조화 결과가 있을 때만 탄다.
+          //   한 회차를 '주요 심리 경향'으로 만들지 않는 것이 이 화면의 목적이라,
+          //   경향 카드 섹션(_observationsSection)은 여기서 쓰지 않는다.
+          DiaryReportV2Body(insights: diaryInsights),
+          // 전체 문답은 아래에 그대로 둔다 — V2 는 요약이지 대체가 아니다.
+          ?_drawingStorySection(report, playbackController, flat: onePage),
         ] else ...[
           // 활동 요약은 표지 안으로 들어갔다(S15P11B209-996).
           ?_observationsSection(report, flat: onePage),

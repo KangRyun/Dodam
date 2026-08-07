@@ -11,6 +11,7 @@ import com.ssafy.b209.report.domain.ReportChildView;
 import com.ssafy.b209.report.domain.ReportConversationSummaryView;
 import com.ssafy.b209.report.domain.ReportCrisisAlert;
 import com.ssafy.b209.report.domain.ReportDetailView;
+import com.ssafy.b209.report.domain.ReportDiaryEvidenceRef;
 import com.ssafy.b209.report.domain.ReportDrawingAssetView;
 import com.ssafy.b209.report.domain.ReportDrawingEmotionView;
 import com.ssafy.b209.report.domain.ReportDrawingSessionView;
@@ -29,6 +30,14 @@ import com.ssafy.b209.report.dto.ReportConversationSummaryResponse;
 import com.ssafy.b209.report.dto.ReportCrisisAlertResponse;
 import com.ssafy.b209.report.dto.ReportCrisisResourceResponse;
 import com.ssafy.b209.report.dto.ReportDetailResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryCaregiverQuestionResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryChildVoiceResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryDataQualityResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryEvidenceRefResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryNarrativeStepResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiarySessionObservationResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryStorySnapshotResponse;
 import com.ssafy.b209.report.dto.ReportDrawingResponse;
 import com.ssafy.b209.report.dto.ReportDrawingSessionResponse;
 import com.ssafy.b209.report.dto.ReportEvidenceItemResponse;
@@ -49,6 +58,12 @@ import com.ssafy.b209.report.repository.ReportCrisisAlertRepository;
 import com.ssafy.b209.report.repository.ReportDetailViewRepository;
 import com.ssafy.b209.report.repository.ReportDetectedObjectRow;
 import com.ssafy.b209.report.repository.ReportDetectedObjectViewRepository;
+import com.ssafy.b209.report.repository.ReportDiaryCaregiverQuestionRepository;
+import com.ssafy.b209.report.repository.ReportDiaryChildVoiceRepository;
+import com.ssafy.b209.report.repository.ReportDiaryEvidenceRefRepository;
+import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
+import com.ssafy.b209.report.repository.ReportDiaryNarrativeStepRepository;
+import com.ssafy.b209.report.repository.ReportDiarySessionObservationRepository;
 import com.ssafy.b209.report.repository.ReportDrawingAssetViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingEmotionViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingSessionViewRepository;
@@ -113,6 +128,12 @@ public class ReportDetailQueryService {
   private final ReportActivityNoteViewRepository activityNoteRepository;
   private final ReportKeyConversationViewRepository keyConversationRepository;
   private final ReportFollowUpGuideViewRepository followUpGuideRepository;
+  private final ReportDiaryInsightRepository diaryInsightRepository;
+  private final ReportDiaryNarrativeStepRepository diaryNarrativeStepRepository;
+  private final ReportDiaryChildVoiceRepository diaryChildVoiceRepository;
+  private final ReportDiarySessionObservationRepository diarySessionObservationRepository;
+  private final ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository;
+  private final ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository;
   private final ReportConversationSummaryViewRepository conversationSummaryRepository;
   private final ReportDetectedObjectViewRepository detectedObjectRepository;
   private final ReportDrawnItemRepository drawnItemRepository;
@@ -172,6 +193,12 @@ public class ReportDetailQueryService {
       ReportActivityNoteViewRepository activityNoteRepository,
       ReportKeyConversationViewRepository keyConversationRepository,
       ReportFollowUpGuideViewRepository followUpGuideRepository,
+      ReportDiaryInsightRepository diaryInsightRepository,
+      ReportDiaryNarrativeStepRepository diaryNarrativeStepRepository,
+      ReportDiaryChildVoiceRepository diaryChildVoiceRepository,
+      ReportDiarySessionObservationRepository diarySessionObservationRepository,
+      ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository,
+      ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository,
       ReportConversationSummaryViewRepository conversationSummaryRepository,
       ReportDetectedObjectViewRepository detectedObjectRepository,
       ReportDrawnItemRepository drawnItemRepository,
@@ -200,6 +227,12 @@ public class ReportDetailQueryService {
     this.activityNoteRepository = activityNoteRepository;
     this.keyConversationRepository = keyConversationRepository;
     this.followUpGuideRepository = followUpGuideRepository;
+    this.diaryInsightRepository = diaryInsightRepository;
+    this.diaryNarrativeStepRepository = diaryNarrativeStepRepository;
+    this.diaryChildVoiceRepository = diaryChildVoiceRepository;
+    this.diarySessionObservationRepository = diarySessionObservationRepository;
+    this.diaryCaregiverQuestionRepository = diaryCaregiverQuestionRepository;
+    this.diaryEvidenceRefRepository = diaryEvidenceRefRepository;
     this.conversationSummaryRepository = conversationSummaryRepository;
     this.detectedObjectRepository = detectedObjectRepository;
     this.drawnItemRepository = drawnItemRepository;
@@ -281,7 +314,8 @@ public class ReportDetailQueryService {
         buildReferences(report.getId()),
         resolveActivityType(session),
         resolveChildDisplayName(session),
-        resolveAiRawReport(report, resolveActivityType(session)));
+        resolveAiRawReport(report, resolveActivityType(session)),
+        buildDiaryInsights(report.getId()));
   }
 
   /**
@@ -669,17 +703,16 @@ public class ReportDetailQueryService {
    *
    * <p>원본 참조({@code sourceRef})는 담지 않는다 — 서버가 발급한 행 식별자를 보호자 응답으로 내보낼 이유가 없다.
    *
-   * <p><b>공개된 카드가 실제로 참조하는 근거만 담는다</b> (S15P11B209-985). 근거는 공개 여부와 무관하게 <i>저장</i>된다 —
-   * 미공개·강등 판정의 사유를 나중에 되짚어야 하기 때문이고, 그 저장 정책은 그대로 둔다. 그러나 <b>응답은 다르다.</b>
-   * 예전에는 리포트의 근거 행을 전부 실어, 안전 검증기가 "내보내지 말자"고 판정한 카드의 근거 —
-   * 대개 <b>아이 발화 인용</b>이다 — 까지 보호자 기기로 전송됐다.
+   * <p><b>공개된 카드가 실제로 참조하는 근거만 담는다</b> (S15P11B209-985). 근거는 공개 여부와 무관하게 <i>저장</i>된다 — 미공개·강등 판정의
+   * 사유를 나중에 되짚어야 하기 때문이고, 그 저장 정책은 그대로 둔다. 그러나 <b>응답은 다르다.</b> 예전에는 리포트의 근거 행을 전부 실어, 안전 검증기가 "내보내지
+   * 말자"고 판정한 카드의 근거 — 대개 <b>아이 발화 인용</b>이다 — 까지 보호자 기기로 전송됐다.
    *
-   * <p>앱이 이 배열을 조회용 맵으로만 써서 화면에는 뜨지 않았지만, 그것은 <b>클라이언트 구현에 기댄 방어</b>다.
-   * 앱이 바뀌면 조용히 노출된다. 아동 민감정보는 필요한 만큼만 전송한다(CLAUDE.md 9절).
+   * <p>앱이 이 배열을 조회용 맵으로만 써서 화면에는 뜨지 않았지만, 그것은 <b>클라이언트 구현에 기댄 방어</b>다. 앱이 바뀌면 조용히 노출된다. 아동 민감정보는
+   * 필요한 만큼만 전송한다(CLAUDE.md 9절).
    *
-   * <p>거르는 것이 안전한 이유: 카드의 {@code evidenceRefs}와 이 배열의 {@code evidenceId}는 <b>둘 다
-   * {@code evidenceNumber} 값</b>이다. 배열 인덱스가 아니므로 목록에서 일부를 빼도 참조가 다른 근거를 가리키지 않는다
-   * (배열 인덱스였다면 960 이 겪은 어긋남이 그대로 재발했을 것이다).
+   * <p>거르는 것이 안전한 이유: 카드의 {@code evidenceRefs}와 이 배열의 {@code evidenceId}는 <b>둘 다 {@code
+   * evidenceNumber} 값</b>이다. 배열 인덱스가 아니므로 목록에서 일부를 빼도 참조가 다른 근거를 가리키지 않는다 (배열 인덱스였다면 960 이 겪은 어긋남이
+   * 그대로 재발했을 것이다).
    *
    * @param reportId 리포트 식별자
    * @param publishedCards 보호자 응답에 실리는 공개 카드 목록
@@ -820,5 +853,114 @@ public class ReportDetailQueryService {
       }
     }
     return limitations;
+  }
+
+  /**
+   * 그림일기 V2 구조화 결과를 만든다. 저장된 것이 없으면 {@code null}을 돌려준다.
+   *
+   * <p>{@code null}과 빈 껍데기를 가르는 것이 이 메서드의 일이다 — 앱은 이 값의 유무로 V2 화면을 열지 정한다. HTP 리포트와, 근거가 부족해 AI 가
+   * 구조화를 포기한 그림일기는 둘 다 저장된 행이 없어 여기서 {@code null}이 나간다.
+   */
+  private ReportDiaryInsightsResponse buildDiaryInsights(Long reportId) {
+    return diaryInsightRepository
+        .findById(reportId)
+        .map(
+            insight -> {
+              Map<String, List<DiaryEvidenceRefResponse>> refs = loadDiaryEvidenceRefs(reportId);
+              return new ReportDiaryInsightsResponse(
+                  new DiaryStorySnapshotResponse(
+                      insight.getHeadline(),
+                      insight.getSummary(),
+                      insight.getRealityStatus(),
+                      insight.getTimeScope(),
+                      insight.getMainEvent(),
+                      refs.getOrDefault(
+                          diaryRefKey(ReportDiaryEvidenceRef.OWNER_STORY_SNAPSHOT, 0), List.of())),
+                  diaryNarrativeStepRepository
+                      .findByReportIdOrderByDisplayOrderAsc(reportId)
+                      .stream()
+                      .map(
+                          step ->
+                              new DiaryNarrativeStepResponse(
+                                  step.getStepType(),
+                                  step.getText(),
+                                  refs.getOrDefault(
+                                      diaryRefKey(
+                                          ReportDiaryEvidenceRef.OWNER_NARRATIVE_STEP,
+                                          step.getDisplayOrder()),
+                                      List.of())))
+                      .toList(),
+                  diaryChildVoiceRepository.findByReportIdOrderByDisplayOrderAsc(reportId).stream()
+                      .map(
+                          voice ->
+                              new DiaryChildVoiceResponse(
+                                  voice.getText(),
+                                  voice.getElicitationType(),
+                                  voice.getAnswerType(),
+                                  voice.getSourceRefId() == null
+                                      ? null
+                                      : new DiaryEvidenceRefResponse(
+                                          voice.getSourceRefKind(), voice.getSourceRefId()),
+                                  voice.isSttNeedsConfirmation()))
+                      .toList(),
+                  diarySessionObservationRepository
+                      .findByReportIdOrderByDisplayOrderAsc(reportId)
+                      .stream()
+                      .map(
+                          observation ->
+                              new DiarySessionObservationResponse(
+                                  observation.getObservationCode(),
+                                  observation.getTitle(),
+                                  observation.getDescription(),
+                                  observation.getScopeText(),
+                                  refs.getOrDefault(
+                                      diaryRefKey(
+                                          ReportDiaryEvidenceRef.OWNER_SESSION_OBSERVATION,
+                                          observation.getDisplayOrder()),
+                                      List.of())))
+                      .toList(),
+                  diaryCaregiverQuestionRepository
+                      .findByReportIdOrderByDisplayOrderAsc(reportId)
+                      .stream()
+                      .map(
+                          question ->
+                              new DiaryCaregiverQuestionResponse(
+                                  question.getQuestion(),
+                                  question.getPurpose(),
+                                  refs.getOrDefault(
+                                      diaryRefKey(
+                                          ReportDiaryEvidenceRef.OWNER_CAREGIVER_QUESTION,
+                                          question.getDisplayOrder()),
+                                      List.of())))
+                      .toList(),
+                  insight.getListeningTip(),
+                  new DiaryDataQualityResponse(
+                      insight.getConfirmedVoiceCount(),
+                      insight.getOptionAnswerCount(),
+                      insight.getSkippedCount(),
+                      insight.getSttConfirmationCount(),
+                      insight.getEvidenceCount(),
+                      insight.isVisionSummaryAvailable()));
+            })
+        .orElse(null);
+  }
+
+  /** 근거 참조를 한 번에 읽어 소유 항목별로 묶는다 — 항목마다 조회하면 N+1 이 된다. */
+  private Map<String, List<DiaryEvidenceRefResponse>> loadDiaryEvidenceRefs(Long reportId) {
+    Map<String, List<DiaryEvidenceRefResponse>> grouped = new LinkedHashMap<>();
+    for (ReportDiaryEvidenceRef ref :
+        diaryEvidenceRefRepository.findByReportIdOrderByOwnerTypeAscOwnerOrderAscDisplayOrderAsc(
+            reportId)) {
+      grouped
+          .computeIfAbsent(
+              diaryRefKey(ref.getOwnerType(), ref.getOwnerOrder()), key -> new ArrayList<>())
+          .add(new DiaryEvidenceRefResponse(ref.getRefKind(), ref.getRefId()));
+    }
+    return grouped;
+  }
+
+  /** 소유 항목 종류와 순서를 묶음 키로 만든다. */
+  private static String diaryRefKey(String ownerType, int ownerOrder) {
+    return ownerType + "#" + ownerOrder;
   }
 }

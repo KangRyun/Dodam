@@ -1,4 +1,5 @@
 import '../../../../core/network/api_page.dart';
+import 'diary_insights_dto.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart' show AnalysisAcceptedDto;
 
 Map<String, dynamic> _map(Object? value) =>
@@ -571,6 +572,7 @@ final class ReportDetailDto {
     this.observedFeatures = const [],
     this.parentGuides = const [],
     this.references = const [],
+    this.diaryInsights,
   });
   factory ReportDetailDto.fromJson(Map<String, dynamic> json) =>
       ReportDetailDto(
@@ -629,6 +631,9 @@ final class ReportDetailDto {
           json['references'],
           ReportReferenceDto.fromJson,
         ),
+        diaryInsights: json['diaryInsights'] is Map
+            ? DiaryInsightsDto.fromJson(_map(json['diaryInsights']))
+            : null,
       );
   final int reportId, reportVersion;
   final String reportStatus;
@@ -655,6 +660,12 @@ final class ReportDetailDto {
   final List<ReportObservedFeatureDto> observedFeatures;
   final List<ReportParentGuideDto> parentGuides;
   final List<ReportReferenceDto> references;
+
+  /// 그림일기 리포트 V2 묶음이며 없으면 `null`.
+  ///
+  /// HTP 이거나, 그림일기지만 근거가 부족해 서버가 구조화를 포기하면 오지 않는다.
+  /// 화면은 이 값의 유무로 V2 와 기존 리포트를 가른다.
+  final DiaryInsightsDto? diaryInsights;
 
   /// HTP(집·나무·사람) 활동인지. 계약 §2의 최상위 `activityType`이 정본이고,
   /// 아직 그 필드를 주지 않는 구형 응답은 세션의 `drawingTypeCode`로 판정한다.

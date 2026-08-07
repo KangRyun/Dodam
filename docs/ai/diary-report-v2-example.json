@@ -1,0 +1,178 @@
+{
+  "diaryInsights": {
+    "storySnapshot": {
+      "headline": "수학시험에서 100점을 받은 이야기",
+      "summary": "아이는 수학시험에서 100점을 받고 엄마에게 자랑했으며, 엄마가 칭찬하고 장난감을 약속했다고 이야기했어요.",
+      "realityStatus": "REAL",
+      "timeScope": "TODAY",
+      "mainEvent": "수학시험에서 100점을 받음",
+      "evidenceRefs": [
+        {
+          "kind": "QA_ANSWER",
+          "id": "101"
+        },
+        {
+          "kind": "QA_ANSWER",
+          "id": "102"
+        },
+        {
+          "kind": "QA_ANSWER",
+          "id": "103"
+        }
+      ]
+    },
+    "narrativeFlow": [
+      {
+        "stepType": "EVENT",
+        "text": "수학시험에서 100점을 받음",
+        "evidenceRefs": [
+          {
+            "kind": "QA_ANSWER",
+            "id": "101"
+          }
+        ]
+      },
+      {
+        "stepType": "CHILD_ACTION",
+        "text": "기쁜 마음으로 엄마에게 자랑함",
+        "evidenceRefs": [
+          {
+            "kind": "QA_ANSWER",
+            "id": "102"
+          }
+        ]
+      },
+      {
+        "stepType": "OTHER_RESPONSE",
+        "text": "엄마가 잘했다고 말하고 장난감을 약속함",
+        "evidenceRefs": [
+          {
+            "kind": "QA_ANSWER",
+            "id": "103"
+          }
+        ]
+      },
+      {
+        "stepType": "WISH",
+        "text": "또봇 장난감을 받고 싶다고 이야기함",
+        "evidenceRefs": [
+          {
+            "kind": "QA_ANSWER",
+            "id": "104"
+          }
+        ]
+      }
+    ],
+    "childVoiceItems": [
+      {
+        "text": "오늘 나 수학시험 봤는데 100점 맞았어",
+        "elicitationType": "OPEN_INVITATION",
+        "answerType": "VOICE",
+        "sourceRef": {
+          "kind": "QA_ANSWER",
+          "id": "101"
+        },
+        "sttNeedsConfirmation": false
+      },
+      {
+        "text": "기분이 너무 좋아서 엄마한테 자랑했어",
+        "elicitationType": "FOCUSED_WH",
+        "answerType": "VOICE",
+        "sourceRef": {
+          "kind": "QA_ANSWER",
+          "id": "102"
+        },
+        "sttNeedsConfirmation": false
+      },
+      {
+        "text": "엄마가 잘했다고 장난감 사준다고 했어",
+        "elicitationType": "FOCUSED_WH",
+        "answerType": "VOICE",
+        "sourceRef": {
+          "kind": "QA_ANSWER",
+          "id": "103"
+        },
+        "sttNeedsConfirmation": false
+      },
+      {
+        "text": "내가 좋아하는 또봇 장난감",
+        "elicitationType": "FOCUSED_WH",
+        "answerType": "VOICE",
+        "sourceRef": {
+          "kind": "QA_ANSWER",
+          "id": "104"
+        },
+        "sttNeedsConfirmation": false
+      }
+    ],
+    "sessionObservations": [
+      {
+        "observationCode": "EVENT_AND_EMOTION_EXPRESSION",
+        "title": "성취한 일과 기쁜 마음을 함께 이야기했어요",
+        "description": "이번 활동에서 아이는 100점을 받은 사건과 그때의 기쁜 마음, 엄마에게 자랑한 행동을 이어서 설명했어요.",
+        "scopeText": "이번 활동에서 확인된 모습이에요.",
+        "evidenceRefs": [
+          {
+            "kind": "QA_ANSWER",
+            "id": "101"
+          },
+          {
+            "kind": "QA_ANSWER",
+            "id": "102"
+          }
+        ]
+      },
+      {
+        "observationCode": "CAREGIVER_RESPONSE_STORY",
+        "title": "엄마의 반응과 이어진 기대를 구체적으로 들려주었어요",
+        "description": "이번 활동에서 아이는 엄마가 해준 말과 앞으로 받고 싶은 장난감까지 이야기했어요.",
+        "scopeText": "이번 활동에서 확인된 모습이에요.",
+        "evidenceRefs": [
+          {
+            "kind": "QA_ANSWER",
+            "id": "103"
+          },
+          {
+            "kind": "QA_ANSWER",
+            "id": "104"
+          }
+        ]
+      }
+    ],
+    "caregiverQuestions": [
+      {
+        "question": "100점을 받고 엄마에게 자랑할 때 어떤 말을 했어?",
+        "purpose": "자랑한 장면을 아이 말로 더 구체적으로 들어보기",
+        "evidenceRefs": [
+          {
+            "kind": "QA_ANSWER",
+            "id": "101"
+          }
+        ]
+      },
+      {
+        "question": "엄마가 잘했다고 말해줬을 때 어떤 말이 제일 좋았어?",
+        "purpose": "아이에게 의미 있었던 보호자의 반응을 들어보기",
+        "evidenceRefs": [
+          {
+            "kind": "QA_ANSWER",
+            "id": "102"
+          },
+          {
+            "kind": "QA_ANSWER",
+            "id": "103"
+          }
+        ]
+      }
+    ],
+    "listeningTip": "점수만 되풀이하기보다 아이가 자랑하고 싶었던 마음과 엄마의 반응을 함께 들어주세요.",
+    "dataQuality": {
+      "confirmedVoiceCount": 5,
+      "optionAnswerCount": 0,
+      "skippedCount": 0,
+      "sttConfirmationCount": 0,
+      "evidenceCount": 8,
+      "visionSummaryAvailable": true
+    }
+  }
+}
