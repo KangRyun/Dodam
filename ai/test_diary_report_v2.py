@@ -433,6 +433,168 @@ class DiaryReportBuilderTest(unittest.TestCase):
         #   아이 발화 목록은 요청 문답에서 그대로 파생돼 늘 채워지므로 '남은 내용'으로 세지 않는다.
         self.assertIsNone(insights)
 
+    def _insight(self, **overrides):
+        """근거 2건 + 아이가 자기 말로 한 답을 가진 인사이트 한 건."""
+        item = {
+            "observationCode": "ACHIEVEMENT_EXPRESSION",
+            "title": "성취 경험과 기쁜 마음을 함께 이야기했어요",
+            "description": "성취한 사건과 그때의 감정을 이어서 설명했어요.",
+            "evidenceRefs": [_ref("QA_ANSWER", "101"), _ref("QA_ANSWER", "103")],
+        }
+        item.update(overrides)
+        import diary_report_v2
+
+        insights = diary_report_v2.build_diary_insights(
+            _signals(sessionObservations=[item]), _diary_request(), vision_available=True
+        )
+        return insights.session_observations if insights else []
+
+    def test_hypothesis_without_an_alternative_is_dropped(self):
+        """다른 설명이 없으면 가설이 아니라 단정이다.
+
+        해석을 하나만 제시하면 보호자는 그것을 결론으로 읽는다. "다르게 볼 수도 있다"가
+        카드 안에 함께 있어야 가설로 남는다 — 없으면 카드를 내보내지 않는다.
+        """
+        got = self._insight(
+            insightType="SESSION_HYPOTHESIS",
+            hypothesis="성취를 인정받고 싶은 마음이 있었을 수 있어요.",
+            alternativeExplanations=[],
+        )
+
+        self.assertEqual(got, [])
+
+    def test_hypothesis_with_an_alternative_survives(self):
+        got = self._insight(
+            insightType="SESSION_HYPOTHESIS",
+            hypothesis="성취를 인정받고 싶은 마음이 있었을 수 있어요.",
+            alternativeExplanations=["엄마와 나누고 싶은 마음이었을 수도 있어요."],
+        )
+
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0].insight_type, "SESSION_HYPOTHESIS")
+        self.assertEqual(len(got[0].alternative_explanations), 1)
+
+    def test_confirmed_expression_carries_no_guesswork(self):
+        """확인된 표현 자리에 추측이 실리면 아이가 한 말과 구분되지 않는다."""
+        got = self._insight(
+            insightType="CONFIRMED_EXPRESSION",
+            hypothesis="사실은 불안했을 수 있어요.",
+            alternativeExplanations=["다른 설명"],
+        )
+
+        self.assertEqual(len(got), 1)
+        self.assertIsNone(got[0].hypothesis)
+        self.assertEqual(got[0].alternative_explanations, [])
+
+    def test_explore_next_needs_a_question_and_no_trait_language(self):
+        # 다음에 확인할 단서는 근거가 약한 대신 주장도 약해야 한다.
+        self.assertEqual(
+            self._insight(insightType="EXPLORE_NEXT", clarificationQuestion=None), []
+        )
+        self.assertEqual(
+            self._insight(
+                insightType="EXPLORE_NEXT",
+                title="조심스러운 성향이 보여요",
+                clarificationQuestion="그때 어떤 마음이었는지 더 들어볼까요?",
+            ),
+            [],
+        )
+        survived = self._insight(
+            insightType="EXPLORE_NEXT",
+            clarificationQuestion="그때 어떤 마음이었는지 더 들어볼까요?",
+        )
+        self.assertEqual(len(survived), 1)
+        self.assertEqual(survived[0].insight_type, "EXPLORE_NEXT")
+
+    def test_legacy_card_without_a_type_is_inferred_not_dropped(self):
+        """구 V2 모양 카드(종류 없음)는 근거 모양에서 읽어 그대로 통과한다."""
+        got = self._insight()
+
+        self.assertEqual(len(got), 1)
+        self.assertEqual(got[0].insight_type, "CONFIRMED_EXPRESSION")
+
+    def test_unknown_items_name_what_was_not_confirmed(self):
+        """확인하지 못한 것은 침묵이 아니라 이름으로 돌려준다.
+
+        카드가 비어 나가면 보호자에게는 '문제가 없었다'로 읽힌다.
+        """
+        import diary_report_v2
+
+        insights = diary_report_v2.build_diary_insights(
+            _signals(), _diary_request(), vision_available=False
+        )
+
+        codes = {item.code for item in insights.unknown_items}
+        self.assertIn("NO_VISION_SUMMARY", codes)
+        for item in insights.unknown_items:
+            self.assertTrue(item.text.strip())
+
+    def test_unknown_items_do_not_say_the_same_thing_twice(self):
+        """'음성 이야기 없음'과 '고른 답만 있음'은 배타다."""
+        import diary_report_v2
+
+        insights = diary_report_v2.build_diary_insights(
+            _signals(), _diary_request(), vision_available=True
+        )
+
+        codes = {item.code for item in insights.unknown_items}
+        self.assertFalse({"NO_VOICE_ANSWER", "ONLY_CHOICE_ANSWERS"} <= codes)
+
+    def test_db_answer_type_spellings_are_both_accepted(self):
+        """BE 는 DB enum(`OPTION_ANSWER`)을 그대로 보낸다.
+
+        계약 문서에는 `OPTION` 으로 적혀 있어 짧은 쪽만 보고 있었고, 그래서 **고른 답이 아이의
+        자발 발화로 세어졌다** — 994 가 막으려던 바로 그것이다. 2026-08-07 실호출로 드러났다.
+        """
+        import diary_report_v2
+
+        for spelling in ("OPTION", "OPTION_ANSWER"):
+            with self.subTest(spelling=spelling):
+                self.assertTrue(diary_report_v2.is_option_answer(spelling))
+                self.assertEqual(
+                    diary_report_v2.classify_elicitation("기뻤어?", spelling, "응"),
+                    "MULTIPLE_CHOICE",
+                )
+        for spelling in ("VOICE", "VOICE_ANSWER", "TEXT_ANSWER"):
+            with self.subTest(spelling=spelling):
+                self.assertTrue(diary_report_v2.is_spoken_answer(spelling))
+                self.assertFalse(diary_report_v2.is_option_answer(spelling))
+
+    def test_option_answers_are_counted_as_choices_not_voice(self):
+        """세는 자리도 같은 표기를 봐야 한다 — 아니면 고른 답이 음성 답으로 집계된다."""
+        import diary_report_v2
+
+        req = _diary_request().model_copy(
+            update={
+                "subject_summaries": [
+                    contracts.SubjectSummary(
+                        drawing_description="사람이 보여요.",
+                        observation_evidence_source_id="vision-1",
+                        qa_pairs=[
+                            contracts.SubjectQaPair(
+                                question="기뻤어?",
+                                answer_text="기뻤어",
+                                answer_type="OPTION_ANSWER",
+                                answer_message_id=201,
+                            ),
+                            contracts.SubjectQaPair(
+                                question="그다음엔 뭐 했어?",
+                                answer_text="엄마한테 자랑했어",
+                                answer_type="VOICE_ANSWER",
+                                answer_message_id=202,
+                            ),
+                        ],
+                    )
+                ]
+            }
+        )
+        quality = diary_report_v2._data_quality(
+            req, evidence_count=2, vision_available=True
+        )
+
+        self.assertEqual(quality.option_answer_count, 1)
+        self.assertEqual(quality.confirmed_voice_count, 1)
+
     def test_raw_evidence_carries_question_elicitation_context(self):
         import diary_report_v2
 
@@ -571,7 +733,9 @@ class DiaryReportPromptV2Test(unittest.TestCase):
     def test_prompt_versions_are_bumped_for_v2(self):
         import prompts_registry
 
-        self.assertEqual(prompts_registry._PROMPT_SEMVER["report_diary"], "3.0.0")
+        # 3.1.0 — 3층 인사이트(insightType 3종 + 다른 설명)를 더했다. 구 V2 모양 카드는
+        #   근거 모양에서 종류를 추론해 그대로 통과하므로 minor 다.
+        self.assertEqual(prompts_registry._PROMPT_SEMVER["report_diary"], "3.1.0")
         self.assertEqual(prompts_registry._PROMPT_SEMVER["report_review"], "2.1.0")
         self.assertEqual(
             prompts_registry._PROMPT_SEMVER["report_review_diary"], "1.0.0"

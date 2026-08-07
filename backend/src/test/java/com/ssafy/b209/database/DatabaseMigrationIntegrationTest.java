@@ -52,7 +52,7 @@ class DatabaseMigrationIntegrationTest {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
     // ⚠️ 마이그레이션을 추가하면 이 숫자와 아래 tableCount() 를 함께 확인해야 한다. 960 이 V40 을 더하고
     //    두 숫자를 안 고쳐 CI 가 깨졌다.
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("45");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("46");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     // V40이 주제별 관찰 4종(report_subjects·observations·qa_pairs·interpretations)과
     // report_references 를 더해 85 → 90 이 됐다(S15P11B209-960).
@@ -60,10 +60,12 @@ class DatabaseMigrationIntegrationTest {
     // 있을 때만 움직인다(S15P11B209-982).
     // V45 가 그림일기 V2 구조화 6종을 더해 90 → 96 이 됐다(report_diary_insights·narrative_steps·
     // child_voices·session_observations·caregiver_questions·evidence_refs).
+    // V46 이 3층 인사이트 2종을 더해 96 → 98 이 됐다(report_diary_insight_alternatives·
+    // report_diary_unknown_items).
     // ⚠️ V43 은 983(AI 원문), V44 가 982(확신도)다. 982 는 원래 V43 이었는데 983 이 먼저 머지되며
     //    같은 번호를 써서 밀었다. **Flyway 는 버전이 겹치면 기동 자체가 실패한다** — 리포트 도메인처럼
     //    여러 갈래가 동시에 붙는 곳은 머지 직전에 번호를 다시 확인할 것.
-    assertThat(tableCount()).isEqualTo(96);
+    assertThat(tableCount()).isEqualTo(98);
     assertThat(tableExists("refresh_tokens")).isFalse();
     assertThat(jsonColumnCount()).isZero();
     // V44 — 경향 해석 카드의 확신 등급. NULL 허용이어야 한다: 기존 카드에는 등급이 없고, AI 가 등급을

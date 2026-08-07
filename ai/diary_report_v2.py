@@ -124,6 +124,24 @@ def _clean_text(value: object, *, max_len: int | None = None) -> str:
     return text
 
 
+# BE 는 대화 메시지 유형을 그대로 실어 보낸다 — DB enum 이 `OPTION_ANSWER`·`VOICE_ANSWER` 다.
+#   계약 문서에는 `OPTION`·`VOICE` 로 적혀 있어 한동안 짧은 쪽만 보고 있었다. 그 결과
+#   **고른 답이 아이의 자발 발화로 세어졌다**(994 가 막으려던 바로 그것) — 2026-08-07 실호출로
+#   드러났다. 두 표기를 모두 받는다.
+_OPTION_ANSWER_TYPES = frozenset({"OPTION", "OPTION_ANSWER", "CHOICE"})
+_SPOKEN_ANSWER_TYPES = frozenset({"VOICE", "VOICE_ANSWER", "TEXT", "TEXT_ANSWER"})
+
+
+def is_option_answer(answer_type: str | None) -> bool:
+    """선택지에서 고른 답인가. 아이가 자기 말로 만든 문장과 구분하기 위한 판정이다."""
+    return (answer_type or "").upper() in _OPTION_ANSWER_TYPES
+
+
+def is_spoken_answer(answer_type: str | None) -> bool:
+    """아이가 말이나 글로 직접 답했는가."""
+    return (answer_type or "").upper() in _SPOKEN_ANSWER_TYPES
+
+
 def classify_elicitation(question: str, answer_type: str | None, answer_text: str) -> str:
     """질문 방식의 대략적인 출처를 보수적으로 분류한다.
 
@@ -131,10 +149,9 @@ def classify_elicitation(question: str, answer_type: str | None, answer_text: st
     메타데이터다. 정확히 분류할 수 없으면 UNKNOWN으로 둔다.
     """
 
-    kind = (answer_type or "").upper()
-    if kind == "OPTION":
+    if is_option_answer(answer_type):
         return "MULTIPLE_CHOICE"
-    if kind == "SKIPPED":
+    if (answer_type or "").upper() in {"SKIPPED", "SKIPPED_ANSWER"}:
         return "UNKNOWN"
     answer = _clean_text(answer_text)
     if any(marker in answer for marker in _CORRECTION_MARKERS):
@@ -197,7 +214,7 @@ def raw_evidence_texts(
                 continue
             answer = (qa.answer_text or "").strip()
             elicitation = classify_elicitation(qa.question, qa.answer_type, answer)
-            if (qa.answer_type or "").upper() == "OPTION":
+            if is_option_answer(qa.answer_type):
                 answer = f"선택지에서 '{answer}'를 골랐어요."
             question = _clean_text(qa.question)
             facts[("QA_ANSWER", str(qa.answer_message_id))] = (
@@ -418,50 +435,172 @@ def _elicitation_by_ref(
     return result
 
 
+# 아이가 자기 말로 내용을 구성한 응답. 선택형·예/아니오는 여기 없다 — AI 가 제시한 틀 안의
+#   답이라 아이의 표현으로 세면 유도한 답이 근거가 된다.
+_CHILD_COMPOSED = frozenset(
+    {"OPEN_INVITATION", "CUED_INVITATION", "FOCUSED_WH", "CORRECTION"}
+)
+
+_INSIGHT_TYPES = frozenset(
+    {"CONFIRMED_EXPRESSION", "SESSION_HYPOTHESIS", "EXPLORE_NEXT"}
+)
+_INSIGHT_DOMAINS = frozenset(
+    {"STORY", "EMOTION", "RELATIONSHIP", "SELF_EXPRESSION", "COPING", "ACTIVITY_STYLE"}
+)
+
+# 다음에 확인할 단서(EXPLORE_NEXT)에 심리 특성을 적으면 근거 없는 진단이 된다. 단서는
+#   "무엇을 더 들어볼지"까지만 말한다.
+_TRAIT_LANGUAGE = re.compile(
+    r"성향|기질|성격|경향이|편이에요|아이는 늘|평소에도|원래|내향|외향|불안정|공격적"
+)
+
+
 def _session_observations(
     raw: object,
     allowed: frozenset[tuple[str, str]],
     req: contracts.ObservationGenerationRequest,
 ) -> list[contracts.DiarySessionObservation]:
+    """이번 회차 인사이트를 종류별 게이트로 걸러 조립한다.
+
+    세 종류는 요구하는 근거가 다르다. 한 게이트로 묶으면 강한 주장과 약한 단서가 같은 조건으로
+    통과한다.
+
+      CONFIRMED_EXPRESSION  아이가 자기 말로 한 근거 1건 이상. 추측을 적지 않는다.
+      SESSION_HYPOTHESIS    자기 말 1건 + 독립 근거 1건 이상, **그리고 다른 설명 1개 이상.**
+                            다른 설명이 없으면 가설이 아니라 단정이라 통과시키지 않는다.
+      EXPLORE_NEXT          근거 1건이면 된다(그림·선택 감정만으로도 가능). 대신 다음 확인
+                            질문이 있어야 하고, 심리 특성을 말하면 버린다.
+    """
     if not isinstance(raw, list):
         return []
+    elicitation = _elicitation_by_ref(req)
     observations: list[contracts.DiarySessionObservation] = []
     for item in raw:
         if not isinstance(item, Mapping):
             continue
         refs = _parse_refs(item.get("evidenceRefs"), allowed)
         unique = {(ref.kind, ref.id) for ref in refs}
-        elicitation = _elicitation_by_ref(req)
-        has_independent_child_expression = any(
-            elicitation.get(key)
-            in {
-                "OPEN_INVITATION",
-                "CUED_INVITATION",
-                "FOCUSED_WH",
-                "CORRECTION",
-            }
-            for key in unique
-        )
-        # 서로 다른 참조가 두 개여도 둘 다 선택형·예/아니오라면 같은 유도 프레임 안의
-        # 답일 수 있다. 최소 한 건은 아이가 자기 말로 내용을 구성한 응답이어야 한다.
-        if len(unique) < 2 or not has_independent_child_expression:
+        if not unique:
             continue
+        domain = _clean_text(item.get("domain")).upper()
+        if domain not in _INSIGHT_DOMAINS:
+            domain = "STORY"
+
         code = re.sub(r"[^A-Z0-9_]", "", _clean_text(item.get("observationCode")).upper())
         title = _safe_public_text(item.get("title"), max_len=160)
         description = _safe_public_text(item.get("description"), max_len=360)
         if not code or not title or not description:
             continue
+
+        hypothesis = _safe_public_text(item.get("hypothesis"), max_len=300) or None
+        alternatives = [
+            text
+            for text in (
+                _safe_public_text(value, max_len=300)
+                for value in (item.get("alternativeExplanations") or [])
+            )
+            if text
+        ][:3]
+        question = (
+            _safe_public_text(item.get("clarificationQuestion"), max_len=200) or None
+        )
+
+        has_child_composed = any(
+            elicitation.get(key) in _CHILD_COMPOSED for key in unique
+        )
+        insight_type = _clean_text(item.get("insightType")).upper()
+        if insight_type not in _INSIGHT_TYPES:
+            # 모델이 종류를 안 적었으면 **가진 근거의 모양**에서 읽는다. 무조건 가장 약한 쪽으로
+            #   내리면 V2 가 이미 통과시키던 정상 카드가 통째로 사라진다.
+            if alternatives:
+                insight_type = "SESSION_HYPOTHESIS"
+            elif has_child_composed and len(unique) >= 2:
+                insight_type = "CONFIRMED_EXPRESSION"
+            else:
+                insight_type = "EXPLORE_NEXT"
+
+        if insight_type == "CONFIRMED_EXPRESSION":
+            # V2 게이트를 그대로 지킨다(참조 2건 + 아이가 자기 말로 한 근거 1건). 이미 배포된
+            #   기준이라 여기서 느슨하게 하면 근거가 약한 카드가 새로 통과한다.
+            if len(unique) < 2 or not has_child_composed:
+                continue
+            # 확인된 표현에는 추측을 싣지 않는다. 가설을 쓰려면 종류를 올려야 한다.
+            hypothesis = None
+            alternatives = []
+        elif insight_type == "SESSION_HYPOTHESIS":
+            # 다른 설명이 없으면 가설이 아니라 단정이다. 그 한 줄이 가설을 가설로 남긴다.
+            if len(unique) < 2 or not has_child_composed or not alternatives:
+                continue
+        else:  # EXPLORE_NEXT — 근거가 약한 대신 주장도 약하다.
+            if not question:
+                continue
+            if _TRAIT_LANGUAGE.search(f"{title} {description} {hypothesis or ''}"):
+                continue
+            hypothesis = None
+
         observations.append(
             contracts.DiarySessionObservation(
                 observation_code=code,
+                insight_type=insight_type,
+                domain=domain,
                 title=title,
                 description=description,
+                hypothesis=hypothesis,
+                alternative_explanations=alternatives,
+                clarification_question=question,
                 evidence_refs=refs,
             )
         )
-        if len(observations) >= 2:
+        if len(observations) >= 3:
             break
     return observations
+
+
+# 확인하지 못한 것의 이름표. 문구까지 서버가 정한다 — 모델에게 맡기면 '모르는 것'조차 지어낸다.
+_UNKNOWN_TEMPLATES: tuple[tuple[str, str], ...] = (
+    ("NO_VOICE_ANSWER", "아이가 음성으로 들려준 이야기가 없어 사건의 흐름은 확인하지 않았어요."),
+    ("ONLY_CHOICE_ANSWERS", "고른 답만 있어 아이가 자기 말로 표현한 내용은 확인하지 않았어요."),
+    ("SKIPPED_QUESTIONS", "아이가 넘긴 질문이 있어 그 부분은 이번에 확인하지 않았어요."),
+    ("STT_UNCONFIRMED", "음성 인식 확인이 필요한 답이 있어 그 내용은 근거로 쓰지 않았어요."),
+    ("NO_EMOTION", "아이가 고르거나 말한 감정이 없어 마음은 이번에 확인하지 않았어요."),
+    ("NO_VISION_SUMMARY", "그림 관찰 서술이 없어 그림 내용은 이번에 확인하지 않았어요."),
+    ("REALITY_UNKNOWN", "실제로 있었던 일인지 상상한 이야기인지는 아이가 말하지 않았어요."),
+    ("TIME_UNKNOWN", "언제 있었던 일인지는 아이가 말하지 않았어요."),
+)
+
+
+def _unknown_items(
+    req: contracts.ObservationGenerationRequest,
+    *,
+    reality: str,
+    time_scope: str,
+    vision_available: bool,
+) -> list[contracts.DiaryUnknownItem]:
+    """이번 활동에서 확인하지 못한 것을 원자료에서 결정한다.
+
+    빈칸을 해석으로 메우지 않으려면 침묵이 아니라 **이름**이 필요하다. 근거가 없어 카드를
+    비우면 보호자에게는 '문제가 없었다'로 읽힌다 — 무엇을 알 수 없었는지 적어 돌려준다.
+    """
+    quality = _data_quality(req, evidence_count=0, vision_available=vision_available)
+    no_voice = quality.confirmed_voice_count == 0
+    flags: dict[str, bool] = {
+        # 둘은 배타다. 음성이 없는데 고른 답도 없으면 '이야기가 없음', 고른 답만 있으면
+        #   '자기 말이 없음'이다 — 같이 나가면 같은 사실을 두 줄로 말하게 된다.
+        "NO_VOICE_ANSWER": no_voice and quality.option_answer_count == 0,
+        "ONLY_CHOICE_ANSWERS": no_voice and quality.option_answer_count > 0,
+        "SKIPPED_QUESTIONS": quality.skipped_count > 0,
+        "STT_UNCONFIRMED": quality.stt_confirmation_count > 0,
+        "NO_EMOTION": not (req.selected_emotion_refs or [])
+        and not (req.expressed_emotion_text or "").strip(),
+        "NO_VISION_SUMMARY": not vision_available,
+        "REALITY_UNKNOWN": reality == "UNKNOWN",
+        "TIME_UNKNOWN": time_scope == "UNKNOWN",
+    }
+    return [
+        contracts.DiaryUnknownItem(code=code, text=text)
+        for code, text in _UNKNOWN_TEMPLATES
+        if flags.get(code)
+    ]
 
 
 def _caregiver_questions(
@@ -502,15 +641,12 @@ def _data_quality(
     confirmed_voice = option_count = stt_confirmation = 0
     skipped = req.skipped_count
     for qa in _iter_qas(req):
-        kind = (qa.answer_type or "").upper()
         if qa.stt_needs_confirmation:
             stt_confirmation += 1
             continue
-        if kind == "OPTION" and (qa.answer_text or "").strip():
+        if is_option_answer(qa.answer_type) and (qa.answer_text or "").strip():
             option_count += 1
-        elif kind in {"VOICE", "VOICE_ANSWER", "TEXT", "TEXT_ANSWER"} and (
-            qa.answer_text or ""
-        ).strip():
+        elif is_spoken_answer(qa.answer_type) and (qa.answer_text or "").strip():
             confirmed_voice += 1
     return contracts.DiaryDataQuality(
         confirmed_voice_count=confirmed_voice,
@@ -564,6 +700,14 @@ def build_diary_insights(
         session_observations=observations,
         caregiver_questions=questions,
         listening_tip=listening_tip,
+        # 확인하지 못한 것은 모델이 아니라 원자료가 정한다. 카드가 비어 나가는 것과
+        #   "무엇을 알 수 없었는지"를 적어 보내는 것은 보호자에게 전혀 다르게 읽힌다.
+        unknown_items=_unknown_items(
+            req,
+            reality=reality,
+            time_scope=time_scope,
+            vision_available=vision_available,
+        ),
         data_quality=_data_quality(
             req, evidence_count=len(allowed), vision_available=vision_available
         ),

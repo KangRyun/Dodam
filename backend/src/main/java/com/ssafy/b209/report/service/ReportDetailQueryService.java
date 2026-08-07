@@ -38,6 +38,7 @@ import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryEvidenceRefRes
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryNarrativeStepResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiarySessionObservationResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryStorySnapshotResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryUnknownItemResponse;
 import com.ssafy.b209.report.dto.ReportDrawingResponse;
 import com.ssafy.b209.report.dto.ReportDrawingSessionResponse;
 import com.ssafy.b209.report.dto.ReportEvidenceItemResponse;
@@ -61,9 +62,11 @@ import com.ssafy.b209.report.repository.ReportDetectedObjectViewRepository;
 import com.ssafy.b209.report.repository.ReportDiaryCaregiverQuestionRepository;
 import com.ssafy.b209.report.repository.ReportDiaryChildVoiceRepository;
 import com.ssafy.b209.report.repository.ReportDiaryEvidenceRefRepository;
+import com.ssafy.b209.report.repository.ReportDiaryInsightAlternativeRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
 import com.ssafy.b209.report.repository.ReportDiaryNarrativeStepRepository;
 import com.ssafy.b209.report.repository.ReportDiarySessionObservationRepository;
+import com.ssafy.b209.report.repository.ReportDiaryUnknownItemRepository;
 import com.ssafy.b209.report.repository.ReportDrawingAssetViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingEmotionViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingSessionViewRepository;
@@ -134,6 +137,8 @@ public class ReportDetailQueryService {
   private final ReportDiarySessionObservationRepository diarySessionObservationRepository;
   private final ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository;
   private final ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository;
+  private final ReportDiaryInsightAlternativeRepository diaryAlternativeRepository;
+  private final ReportDiaryUnknownItemRepository diaryUnknownItemRepository;
   private final ReportConversationSummaryViewRepository conversationSummaryRepository;
   private final ReportDetectedObjectViewRepository detectedObjectRepository;
   private final ReportDrawnItemRepository drawnItemRepository;
@@ -199,6 +204,8 @@ public class ReportDetailQueryService {
       ReportDiarySessionObservationRepository diarySessionObservationRepository,
       ReportDiaryCaregiverQuestionRepository diaryCaregiverQuestionRepository,
       ReportDiaryEvidenceRefRepository diaryEvidenceRefRepository,
+      ReportDiaryInsightAlternativeRepository diaryAlternativeRepository,
+      ReportDiaryUnknownItemRepository diaryUnknownItemRepository,
       ReportConversationSummaryViewRepository conversationSummaryRepository,
       ReportDetectedObjectViewRepository detectedObjectRepository,
       ReportDrawnItemRepository drawnItemRepository,
@@ -233,6 +240,8 @@ public class ReportDetailQueryService {
     this.diarySessionObservationRepository = diarySessionObservationRepository;
     this.diaryCaregiverQuestionRepository = diaryCaregiverQuestionRepository;
     this.diaryEvidenceRefRepository = diaryEvidenceRefRepository;
+    this.diaryAlternativeRepository = diaryAlternativeRepository;
+    this.diaryUnknownItemRepository = diaryUnknownItemRepository;
     this.conversationSummaryRepository = conversationSummaryRepository;
     this.detectedObjectRepository = detectedObjectRepository;
     this.drawnItemRepository = drawnItemRepository;
@@ -867,6 +876,7 @@ public class ReportDetailQueryService {
         .map(
             insight -> {
               Map<String, List<DiaryEvidenceRefResponse>> refs = loadDiaryEvidenceRefs(reportId);
+              Map<Integer, List<String>> alternatives = loadDiaryAlternatives(reportId);
               return new ReportDiaryInsightsResponse(
                   new DiaryStorySnapshotResponse(
                       insight.getHeadline(),
@@ -910,8 +920,14 @@ public class ReportDetailQueryService {
                           observation ->
                               new DiarySessionObservationResponse(
                                   observation.getObservationCode(),
+                                  observation.getInsightType(),
+                                  observation.getDomain(),
                                   observation.getTitle(),
                                   observation.getDescription(),
+                                  observation.getHypothesis(),
+                                  alternatives.getOrDefault(
+                                      observation.getDisplayOrder(), List.of()),
+                                  observation.getClarificationQuestion(),
                                   observation.getScopeText(),
                                   refs.getOrDefault(
                                       diaryRefKey(
@@ -934,6 +950,9 @@ public class ReportDetailQueryService {
                                       List.of())))
                       .toList(),
                   insight.getListeningTip(),
+                  diaryUnknownItemRepository.findByReportIdOrderByDisplayOrderAsc(reportId).stream()
+                      .map(item -> new DiaryUnknownItemResponse(item.getCode(), item.getText()))
+                      .toList(),
                   new DiaryDataQualityResponse(
                       insight.getConfirmedVoiceCount(),
                       insight.getOptionAnswerCount(),
@@ -943,6 +962,19 @@ public class ReportDetailQueryService {
                       insight.isVisionSummaryAvailable()));
             })
         .orElse(null);
+  }
+
+  /** 다른 설명을 한 번에 읽어 카드 순서로 묶는다 — 카드마다 조회하면 N+1 이 된다. */
+  private Map<Integer, List<String>> loadDiaryAlternatives(Long reportId) {
+    Map<Integer, List<String>> grouped = new LinkedHashMap<>();
+    diaryAlternativeRepository
+        .findByReportIdOrderByObservationOrderAscDisplayOrderAsc(reportId)
+        .forEach(
+            alternative ->
+                grouped
+                    .computeIfAbsent(alternative.getObservationOrder(), key -> new ArrayList<>())
+                    .add(alternative.getText()));
+    return grouped;
   }
 
   /** 근거 참조를 한 번에 읽어 소유 항목별로 묶는다 — 항목마다 조회하면 N+1 이 된다. */

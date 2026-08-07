@@ -509,7 +509,7 @@ def _format_subject_blocks(req: contracts.ObservationGenerationRequest) -> str:
                     answer = (qa.answer_text or "").strip() or "(답하지 않았어요)"
                     # 칩 답변은 아이가 보기에서 고른 것이다(994) — 모델이 "~라고 말했어요"로
                     # 옮기지 않도록 재료 단계에서 표시한다. 프롬프트 규칙과 한 쌍.
-                    if (qa.answer_type or "").upper() == "OPTION":
+                    if diary_report_v2.is_option_answer(qa.answer_type):
                         answer += " (선택지에서 고른 답이에요)"
                 line = f"- 질문: {qa.question}\n  답변: {answer}"
                 # 근거 식별자(886) — 이 답변을 경향 카드 근거로 쓸 때 그대로 옮겨 적을 값이다.
@@ -830,7 +830,7 @@ def _chip_answer_refs(
         for summary in req.subject_summaries
         for qa in summary.qa_pairs
         if qa.answer_message_id is not None
-        and (qa.answer_type or "").upper() == "OPTION"
+        and diary_report_v2.is_option_answer(qa.answer_type)
     )
 
 
@@ -1741,10 +1741,24 @@ def _review_targets(
                 }
             )
         for index, observation in enumerate(diary.session_observations):
+            # 가설과 다른 설명도 검토 대상에 함께 넣는다. 가설만 검토하면 "다르게 볼 수도 있다"가
+            #   근거 없는 말로 채워져도 통과한다 — 그 한 줄이 카드를 가설로 남기는 장치라
+            #   그것부터 검토를 받아야 한다.
+            text = " / ".join(
+                part
+                for part in (
+                    observation.title,
+                    observation.description,
+                    observation.hypothesis,
+                    " · ".join(observation.alternative_explanations) or None,
+                )
+                if part
+            )
             targets.append(
                 {
                     "id": f"diary.observation.{index}",
-                    "글": f"{observation.title} / {observation.description}",
+                    "글": text,
+                    "주장 세기": observation.insight_type,
                     "근거": diary_report_v2.evidence_texts_for_ids(
                         req, observation.evidence_refs
                     ),

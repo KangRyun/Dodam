@@ -107,10 +107,27 @@ diarySignals는 그림일기 V2의 핵심이다. 모든 항목은 주어진 근�
 
 3. sessionObservations
 - 제목은 "이번 활동에서 확인된 표현"의 관점으로 쓴다. 심리 경향·성격 제목을 쓰지 마.
-- 서로 다른 원본 근거 2건 이상이 같은 내용을 뒷받침할 때만 쓴다.
-- 그중 최소 1건은 아이 답변 또는 선택 감정이어야 한다.
-- 이번 활동에 한정해 0~2개만 쓴다.
-- 그림 요소 하나나 활동 수치만으로 만들지 마.
+- 이번 활동에 한정해 0~3개만 쓴다.
+- 그림 요소 하나나 활동 수치만으로 강한 주장을 만들지 마.
+- 항목마다 insightType 을 셋 중 하나로 정한다.
+  **주장의 세기가 근거의 세기를 넘지 않게 하는 것이 이 값의 일이다.**
+
+  · CONFIRMED_EXPRESSION — 아이가 자기 말로 한 답에서 확인된 것.
+    서로 다른 근거 2건 이상, 그중 1건은 아이가 자기 말로 구성한 답이어야 한다.
+    추측을 적지 마. hypothesis 와 alternativeExplanations 는 비운다.
+
+  · SESSION_HYPOTHESIS — 이번 활동에 한정해 "이렇게 볼 수도 있다"고 적는 것.
+    위 조건에 더해 **alternativeExplanations 를 1개 이상 반드시 적는다.**
+    다른 설명이 없으면 가설이 아니라 단정이 된다 — 하나만 제시하면 보호자는 그것을 결론으로 읽는다.
+    hypothesis 에는 "~일 수 있어요"처럼 여지 있는 한 문장만 쓴다.
+
+  · EXPLORE_NEXT — 지금 근거로는 뜻을 정할 수 없어 다음에 확인할 단서.
+    근거 1건이면 된다. 그림 관찰이나 선택 감정만 있어도 쓸 수 있다.
+    대신 clarificationQuestion 을 반드시 적고, 심리 특성·성향을 말하지 마.
+    "무엇을 더 들어보면 되는지"까지만 쓴다.
+
+- domain 은 STORY·EMOTION·RELATIONSHIP·SELF_EXPRESSION·COPING·ACTIVITY_STYLE 중 하나.
+- 확인하지 못한 것은 네가 적지 마. 서버가 원자료에서 정한다.
 
 4. caregiverQuestions
 - 보호자가 아이에게 그대로 물을 수 있는 구체적인 질문 0~2개.
@@ -204,8 +221,13 @@ featureCode와 observationCode만 UPPER_SNAKE_CASE를 쓴다.
     "sessionObservations": [
       {
         "observationCode": "SESSION_OBSERVATION_CODE",
+        "insightType": "CONFIRMED_EXPRESSION",
+        "domain": "STORY",
         "title": "이번 활동에서 확인된 표현",
         "description": "서로 다른 원본 근거에 묶인 이번 활동 한정 설명",
+        "hypothesis": null,
+        "alternativeExplanations": [],
+        "clarificationQuestion": null,
         "evidenceRefs": [
           {"kind": "QA_ANSWER", "id": "주어진 식별자 1"},
           {"kind": "QA_ANSWER", "id": "주어진 식별자 2"}

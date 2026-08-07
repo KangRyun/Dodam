@@ -96,6 +96,69 @@ void main() {
     expect(voicesOnly.hasContent, isFalse);
   });
 
+  testWidgets('가설에는 다른 설명이 함께 보인다', (tester) async {
+    // 하나의 해석만 보이면 보호자는 그것을 결론으로 읽는다. 그 한 줄이 가설을 가설로 남긴다.
+    await _pump(
+      tester,
+      _insights(
+        observation: const DiarySessionObservationDto(
+          title: '성취를 나누고 싶어 한 모습',
+          description: '시험 결과를 엄마에게 바로 알렸어요.',
+          insightType: 'SESSION_HYPOTHESIS',
+          hypothesis: '인정받고 싶은 마음이 있었을 수 있어요.',
+          alternativeExplanations: ['기쁨을 함께 나누고 싶었을 수도 있어요.'],
+          scopeText: '이번 활동에서 확인된 모습이에요.',
+        ),
+      ),
+    );
+
+    expect(find.text('이번 활동에서 볼 수 있는 것'), findsOneWidget);
+    expect(find.textContaining('인정받고 싶은 마음'), findsOneWidget);
+    expect(find.textContaining('기쁨을 함께 나누고'), findsOneWidget);
+  });
+
+  testWidgets('확인된 표현과 더 볼 것은 다른 라벨로 보인다', (tester) async {
+    await _pump(tester, _insights());
+    expect(find.text('아이가 들려준 것'), findsOneWidget);
+
+    await _pump(
+      tester,
+      _insights(
+        observation: const DiarySessionObservationDto(
+          title: '밤하늘과 누워 있는 인물을 그렸어요',
+          description: '슬픔을 골랐지만 음성 설명은 없었어요.',
+          insightType: 'EXPLORE_NEXT',
+          clarificationQuestion: '이 그림에서 무슨 일이 있었는지 물어볼까요?',
+          scopeText: '이번 활동에서 확인된 모습이에요.',
+        ),
+      ),
+    );
+    expect(find.text('더 확인해 볼 것'), findsOneWidget);
+    expect(find.textContaining('무슨 일이 있었는지'), findsOneWidget);
+  });
+
+  testWidgets('확인하지 못한 것을 침묵하지 않고 적는다', (tester) async {
+    // 섹션이 없으면 보호자는 '문제가 없었다'로 읽는다.
+    await _pump(
+      tester,
+      _insights(
+        unknownItems: const [
+          DiaryUnknownItemDto(
+            code: 'NO_EMOTION',
+            text: '아이가 고르거나 말한 감정이 없어 마음은 이번에 확인하지 않았어요.',
+          ),
+        ],
+      ),
+    );
+
+    expect(find.text('이번에는 확인하지 못했어요'), findsOneWidget);
+    expect(find.textContaining('마음은 이번에 확인하지 않았어요'), findsOneWidget);
+  });
+
+  test('모르는 주장 세기는 가장 약한 쪽으로 읽는다', () {
+    expect(diaryInsightTypeLabel('SOMETHING_NEW'), '더 확인해 볼 것');
+  });
+
   test('모르는 코드는 사용자 문구로 지어내지 않는다', () {
     expect(diaryRealityLabel('SOMETHING_NEW'), isNull);
     expect(diaryTimeScopeLabel('SOMETHING_NEW'), isNull);
@@ -120,7 +183,10 @@ Future<void> _pump(WidgetTester tester, DiaryInsightsDto insights) async {
 DiaryInsightsDto _insights({
   String realityStatus = 'REAL',
   String timeScope = 'TODAY',
+  DiarySessionObservationDto? observation,
+  List<DiaryUnknownItemDto> unknownItems = const [],
 }) => DiaryInsightsDto(
+  unknownItems: unknownItems,
   storySnapshot: DiaryStorySnapshotDto(
     headline: '수학시험에서 100점을 받은 날',
     summary: '시험에서 100점을 받고 엄마에게 자랑했어요.',
@@ -143,12 +209,13 @@ DiaryInsightsDto _insights({
     ),
     DiaryChildVoiceDto(text: '기뻐', elicitationType: 'MULTIPLE_CHOICE'),
   ],
-  sessionObservations: const [
-    DiarySessionObservationDto(
-      title: '성취한 경험과 그때의 마음을 함께 이야기했어요',
-      description: '시험 결과와 엄마에게 자랑한 행동을 이어서 설명했어요.',
-      scopeText: '이번 활동에서 확인된 모습이에요.',
-    ),
+  sessionObservations: [
+    observation ??
+        const DiarySessionObservationDto(
+          title: '성취한 경험과 그때의 마음을 함께 이야기했어요',
+          description: '시험 결과와 엄마에게 자랑한 행동을 이어서 설명했어요.',
+          scopeText: '이번 활동에서 확인된 모습이에요.',
+        ),
   ],
   caregiverQuestions: const [
     DiaryCaregiverQuestionDto(

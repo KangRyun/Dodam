@@ -16,6 +16,8 @@ import java.util.List;
  * @param sessionObservations 이번 활동에서만 확인된 표현이며 0~2개다
  * @param caregiverQuestions 보호자가 그대로 이어 물을 질문이며 0~2개다
  * @param listeningTip 이번 이야기를 들을 때의 태도 한 문장이며 없으면 {@code null}
+ * @param unknownItems 이번 활동에서 확인하지 못한 것이다. 카드가 비어 나가면 보호자는 '문제가 없었다'로 읽는다 — 침묵 대신 무엇을 알 수 없었는지 이름을
+ *     붙여 돌려준다
  * @param dataQuality 근거가 무엇으로 이루어졌는지 알려 주는 구성 정보
  */
 public record ReportDiaryInsightsResponse(
@@ -25,6 +27,7 @@ public record ReportDiaryInsightsResponse(
     List<DiarySessionObservationResponse> sessionObservations,
     List<DiaryCaregiverQuestionResponse> caregiverQuestions,
     String listeningTip,
+    List<DiaryUnknownItemResponse> unknownItems,
     DiaryDataQualityResponse dataQuality) {
 
   /** 목록은 빈 목록으로 정규화한다. 앱이 null 검사를 섹션마다 하지 않아도 되게 한다. */
@@ -34,6 +37,7 @@ public record ReportDiaryInsightsResponse(
     sessionObservations =
         sessionObservations == null ? List.of() : List.copyOf(sessionObservations);
     caregiverQuestions = caregiverQuestions == null ? List.of() : List.copyOf(caregiverQuestions);
+    unknownItems = unknownItems == null ? List.of() : List.copyOf(unknownItems);
   }
 
   /**
@@ -99,20 +103,34 @@ public record ReportDiaryInsightsResponse(
    * 이번 활동에서 확인된 표현이다. 지속적인 심리 경향이 아니다.
    *
    * @param observationCode 관찰 코드
+   * @param insightType 주장의 세기다. {@code CONFIRMED_EXPRESSION}(아이가 한 말)·{@code SESSION_HYPOTHESIS}(다른
+   *     설명과 함께여야 성립)·{@code EXPLORE_NEXT}(뜻을 정하지 않은 단서). 앱은 이 값으로 카드의 말투와 표시를 가른다
+   * @param domain 인사이트 영역
    * @param title 보호자에게 보이는 제목
    * @param description 근거에 묶인 이번 활동 한정 설명
+   * @param hypothesis 이번 회차 한정 가설이며 없으면 {@code null}
+   * @param alternativeExplanations 다르게 볼 수 있는 설명이다. <strong>가설과 반드시 함께 보여 준다</strong> — 하나의 해석만 보이면
+   *     보호자는 그것을 결론으로 읽는다
+   * @param clarificationQuestion 다음에 확인할 질문이며 없으면 {@code null}
    * @param scopeText 범위를 알리는 문구이며 카드에 함께 보여 준다
-   * @param evidenceRefs 서로 다른 근거 식별자
+   * @param evidenceRefs 근거 식별자
    */
   public record DiarySessionObservationResponse(
       String observationCode,
+      String insightType,
+      String domain,
       String title,
       String description,
+      String hypothesis,
+      List<String> alternativeExplanations,
+      String clarificationQuestion,
       String scopeText,
       List<DiaryEvidenceRefResponse> evidenceRefs) {
 
-    /** 근거 목록은 빈 목록으로 정규화한다. */
+    /** 목록은 빈 목록으로 정규화한다. */
     public DiarySessionObservationResponse {
+      alternativeExplanations =
+          alternativeExplanations == null ? List.of() : List.copyOf(alternativeExplanations);
       evidenceRefs = evidenceRefs == null ? List.of() : List.copyOf(evidenceRefs);
     }
   }
@@ -158,4 +176,12 @@ public record ReportDiaryInsightsResponse(
    * @param id BE 가 발급한 식별자 그대로
    */
   public record DiaryEvidenceRefResponse(String kind, String id) {}
+
+  /**
+   * 이번 활동에서 확인하지 못한 것 한 건이다.
+   *
+   * @param code 서버가 정한 코드
+   * @param text 보호자에게 보이는 문구
+   */
+  public record DiaryUnknownItemResponse(String code, String text) {}
 }
