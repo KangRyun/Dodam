@@ -327,15 +327,21 @@ class HtpQuestionBankTest(unittest.TestCase):
         )
 
     def test_only_the_current_subject_section_is_loaded(self):
-        """셋을 다 실으면 다른 주제로 새는 709 계열이 다시 열린다."""
+        """셋을 다 실으면 다른 주제로 새는 709 계열이 다시 열린다.
+
+        ⚠️ 993 에서 표식 문장을 바꿨다. 이 테스트가 고정하는 것은 **구획 분리**이지
+        특정 문항이 아니다 — 표식으로 쓰던 "이 집에는 누가 살아?"·"이건 무슨 나무야?"는
+        한 단어로 답이 끝나는 닫힌 질문이라 뱅크에서 열린 형태로 다시 썼다.
+        표식만 각 구획의 새 고유 문장으로 옮긴다.
+        """
         system = llm_client.render_first_question_prompt(
             "집이 크게", activity_type="HTP", drawing_subject="HOUSE"
         )
         self.assertIn(llm_client.BANK_BLOCK_TITLE, system)
-        self.assertIn("이 집에는 누가 살아?", system)
+        self.assertIn("이 집에 사는 사람들은 지금 뭐 하고 있어?", system)
         # 다른 주제 구획의 고유 문장은 실리지 않는다.
-        self.assertNotIn("이건 무슨 나무야", system)
-        self.assertNotIn("이 사람은 무슨 일을 해", system)
+        self.assertNotIn("이 나무는 여기서 무엇을 보고 있을까", system)
+        self.assertNotIn("이 사람은 지금 뭐 하고 있어", system)
 
     def test_bank_is_htp_only(self):
         """PDI는 HTP 전용 프로토콜 — 그림일기 대화에는 싣지 않는다."""
@@ -366,7 +372,24 @@ class HtpQuestionBankTest(unittest.TestCase):
             "우리 집이야", drawing_analysis="집이 크게",
             activity_type="HTP", drawing_subject="TREE",
         )
-        self.assertIn("이건 무슨 나무야?", system)
+        # 표식 문장 교체 사유는 test_only_the_current_subject_section_is_loaded 참조(993).
+        self.assertIn("이 나무는 여기서 무엇을 보고 있을까?", system)
+
+    def test_every_bank_item_asks_exactly_one_thing(self):
+        """뱅크 문항 하나에 물음이 둘 들어가면 출력 형식 규칙과 부딪힌다 (S15P11B209-993).
+
+        conversation_common이 "한 번에 질문은 하나만 · 물음표가 두 개 들어가지 않게"를
+        지시하는데, 뱅크는 실제 문장을 주므로 앵커가 더 세다. 둘이 부딪히면 결과가
+        모델 확률에 맡겨진다 — 786·808에서 겪은 것과 같은 함정이다.
+        원래 뱅크에는 "이 나무는 튼튼해? 어떻게 지내고 있어?"처럼 둘씩 담은 문항이 다섯 있었고,
+        앞쪽이 예/아니오라 아이 답이 거기서 끝났다.
+        """
+        for subject in ("HOUSE", "TREE", "PERSON"):
+            for line in llm_client.question_bank_block("HTP", subject).splitlines():
+                if not line.startswith("- "):
+                    continue  # 서문·머리표는 문항이 아니다
+                with self.subTest(subject=subject, line=line):
+                    self.assertLessEqual(line.count("?"), 1)
 
     def test_evidence_axes_are_present_in_each_subject(self):
         """아이 표현 근거를 얻을 축이 주제마다 남아 있어야 한다 (S15P11B209-893).
@@ -374,11 +397,19 @@ class HtpQuestionBankTest(unittest.TestCase):
         경향 해석 공개 조건이 "독립 근거 2건 + 그중 아이 표현 1건 이상"(885·888)이라, 아이가
         말한 내용이 없으면 해석이 아예 만들어지지 않는다. 아래 축이 뱅크에서 사라지면 근거를
         채울 재료가 줄어드는데 테스트 없이는 조용히 사라진다 — 축 단위로 못 박는다.
+
+        ⚠️ 993 에서 키워드를 갱신했다. **축은 그대로이고 문구만 바뀌었다** —
+        뱅크 문항을 닫힌 형태에서 열린 형태로 다시 썼기 때문이다.
+        실측(2026-08-07)에서 "누가/뭐가/어디"로 끝나는 질문에 아이가 8~17자로만 답했다.
+        축별 대응: 환경 "어디에 있어"→"둘레에는 어떤 것들이" · 연상 "누가 생각나"→"무엇이 떠올라" ·
+        건강 "건강해"→"어떻게 지내고 있어".
+        위치를 직접 묻는 축("어디에 있어"·"어디에 서 있어")은 **의도적으로 뺐다** —
+        한 단어로 끝나 근거가 되지 못한다. 환경 축은 '둘레'로 살아 있다.
         """
         axes = {
-            "HOUSE": ["어디에 있어", "주변에는 뭐가 있어", "계절"],
-            "TREE": ["누가 생각나", "기분", "어디에 서 있어"],
-            "PERSON": ["건강해", "필요한 게", "기분이 어떤 것 같아"],
+            "HOUSE": ["둘레에는 어떤 것들이", "사는 사람들은", "계절"],
+            "TREE": ["무엇이 떠올라", "기분", "둘레에는 어떤 것들이"],
+            "PERSON": ["어떻게 지내고 있어", "필요한 것이", "기분이 어떤 것 같아"],
         }
         for subject, keywords in axes.items():
             bank = llm_client.question_bank_block("HTP", subject)
@@ -554,10 +585,17 @@ class BankAndVariantConsistencyTest(unittest.TestCase):
             self.assertIn("그림 밖 이야기(오늘 있었던 일·다른 날 이야기)", text)
 
     def test_unclear_objects_may_still_be_asked_about(self):
-        """"뻔하게 되묻지 마"가 넓어서 conversation_common의 "이건 뭐야?"와 부딪혔다."""
+        """"뻔하게 되묻지 마"가 넓어서 conversation_common의 "이건 뭐야?"와 부딪혔다.
+
+        ⚠️ 993 에서 문구를 갱신했다. 고정하려는 규칙은 그대로다 —
+        **이름이 분명한 것은 되묻지 않고, 분석이 확신하지 못한 것은 아이에게 물어도 된다.**
+        다만 예시 문장으로 박아 두던 "이건 뭐야?"를 프롬프트에서 뺐다.
+        완성문 예시는 모델이 그대로 베낀다(808). 그리고 그 문장 자체가 한 단어로 답이
+        끝나는 닫힌 질문이라, 열린 질문으로 돌리는 이번 개편과 정면으로 부딪힌다.
+        """
         first = llm_client._load("first_question_htp")
-        self.assertIn("이름을 분명히 적어 둔 것을 그대로 되묻지 마", first)
-        self.assertIn('확실히 적지 못한 부분은 "이건 뭐야?"로 물어도 좋다', first)
+        self.assertIn("이름을 분명히 적어 둔 것은 그 이름으로 부르고", first)
+        self.assertIn("확실히 적지 못한 부분은 아이에게 이름을 물어도 좋다", first)
 
 
 if __name__ == "__main__":
