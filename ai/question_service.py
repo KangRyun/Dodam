@@ -318,16 +318,28 @@ def _other_subjects(subject: str | None) -> str:
     return "·".join(name for code, name in _SUBJECT_KO.items() if code != subject)
 
 
-# 지시 문구는 ai/prompts/activity_block.txt가 소유한다(S15P11B209-832). 코드 안 문자열이던
-# 것을 옮긴 이유: GPT에 나가는 지시문인데 prompts_registry 버전 추적 밖이라, 788에서 문구를
-# 크게 고쳐도 promptVersion이 그대로였다(conv-htp@2.1.0+bd5e3622 → 동일). 버전은 같은데
-# 동작이 다른 상태여서 792 평가 하네스로 전후를 구분할 수 없었다.
-ACTIVITY_BLOCK_PROMPT = "activity_block"
+# 지시 문구는 활동별 activity_block 파일이 소유한다(832 이관 · 993 활동별 분리). 코드 안
+# 문자열이던 것을 옮긴 이유: GPT에 나가는 지시문인데 prompts_registry 버전 추적 밖이라,
+# 788에서 문구를 크게 고쳐도 promptVersion이 그대로였다. 993에서 파일을 활동별로 갈랐다 —
+# 한 활동에 맞춘 수정이 다른 활동에 실리지 않게(SINGLE_TARGET 등 같은 키에 활동별 내용).
+ACTIVITY_BLOCK_BY_ACTIVITY = {
+    "HTP": "activity_block_htp",
+    "ART_DIARY": "activity_block_diary",
+}
 
 
-def _block(key: str, **values) -> str:
-    """활동 블록 구획 하나를 치환해 돌려준다."""
-    return prompts_registry.sections(ACTIVITY_BLOCK_PROMPT)[key].format(**values)
+def _activity_block_name(activity_type: str | None) -> str:
+    """이 활동이 쓰는 activity_block 파일 이름. 모르는 값은 기본(HTP)으로 둔다."""
+    return ACTIVITY_BLOCK_BY_ACTIVITY.get(
+        activity_type or "", ACTIVITY_BLOCK_BY_ACTIVITY["HTP"]
+    )
+
+
+def _block(activity_type: str | None, key: str, **values) -> str:
+    """활동 블록 구획 하나를 치환해 돌려준다 — 활동별 파일에서 고른다(993)."""
+    return prompts_registry.sections(_activity_block_name(activity_type))[key].format(
+        **values
+    )
 
 
 def _target_line(req: QuestionRequest, target_name: str) -> str:
@@ -339,7 +351,7 @@ def _target_line(req: QuestionRequest, target_name: str) -> str:
     프롬프트가 스스로 "바꿔라/바꾸지 마라"를 요구한다.
     """
     key = "TARGET_FIRST" if _last_child_index(req) is None else "TARGET_FOLLOW_UP"
-    return _block(key, target=target_name)
+    return _block(req.activity_type, key, target=target_name)
 
 
 def _activity_block(
@@ -369,6 +381,7 @@ def _activity_block(
         # 못 박는 것은 '활동 단계'다 — 그림 내용의 이름이 아니다(788 B).
         lines.append(
             _block(
+                req.activity_type,
                 "HTP",
                 subject=subject_ko,
                 other_subjects=_other_subjects(req.drawing_subject),
@@ -377,56 +390,55 @@ def _activity_block(
         lines.append(
             _target_line(req, target_name)
             if target_name
-            else _block("HTP_WHOLE", subject=subject_ko)
+            else _block(req.activity_type, "HTP_WHOLE", subject=subject_ko)
         )
         # 부위가 대상이면 '누구 것인지'가 아니라 '어떻게 보이는지'를 묻게 한다(S15P11B209-918).
         if _is_person_part(target):
-            lines.append(_block("PERSON_PART", target=target_name))
+            lines.append(_block(req.activity_type, "PERSON_PART", target=target_name))
         # 이 주제의 첫마디는 주제에서 출발하게 한다(S15P11B209-959). 대상·전체 지시 뒤에
         # 두는 이유: 무엇을 물을지는 위 블록이 이미 정했고, 여기서 더하는 것은 "주제를
         # 이미 안다"는 사실 하나다. 앞에 두면 위 지시와 겹쳐 서로 밀어낸다.
         if _is_htp_opening(req):
-            lines.append(_block("HTP_OPENING", subject=subject_ko))
+            lines.append(_block(req.activity_type, "HTP_OPENING", subject=subject_ko))
     elif req.activity_type == "ART_DIARY":
         # 그림일기 탐지 모델(sketch)은 오탐이 잦다 — 이름의 근거는 탐지 목록이 아니라
         # 그림 서술과 아이 말이다(788 B, 활동별 판단).
-        lines.append(_block("ART_DIARY"))
+        lines.append(_block(req.activity_type, "ART_DIARY"))
         if target_name:
             lines.append(_target_line(req, target_name))
         elif _last_child_index(req) is None:
             # 첫 질문인데 이름을 뒷받침할 근거가 없다 — 이름을 지어 부르지 말고 열린 질문을
             # 하게 한다(S15P11B209-918). 아이가 이미 말한 뒤라면 붙이지 않는다: 그 턴의
             # 지시는 "아이 말을 따라가"이고, 여기에 '열린 질문을 해'를 겹치면 서로 밀어낸다.
-            lines.append(_block("ART_DIARY_OPEN"))
+            lines.append(_block(req.activity_type, "ART_DIARY_OPEN"))
     elif target_name:
-        lines.append(_block("TARGET_ONLY", target=target_name))
+        lines.append(_block(req.activity_type, "TARGET_ONLY", target=target_name))
     if reask_candidates:
-        lines.append(_block("REASK_CANDIDATES"))
+        lines.append(_block(req.activity_type, "REASK_CANDIDATES"))
     # 대상이 하나뿐이면 두 번째 대상을 지어내지 못하게 막는다(S15P11B209-921).
     # 반복 방지 지시("새로운 것을 물어봐")가 '다른 물건'으로 읽혀 사람 한 명 그림에서도
     # "옆에 있는 건 뭐야?"가 나왔다. 부위는 접어서 세므로 사람+머리+머리카락은 하나다.
     #
-    # ⚠️ 두 구획은 활동별로 갈린다(S15P11B209-954). 원래 문구가 "같은 대상의 아직 이야기하지
-    #    않은 모양·색을 물어봐"라 **시각 속성 질문을 대놓고 권했다.** HTP에서는 그게 맞다 —
-    #    지붕 모양·나무 크기는 PDI 표준이 실제로 묻는 항목이다. 그러나 자유 그림에서는 그림에
-    #    이미 보이는 것이라 물을 것이 아니다. 그래서 그림일기만 _DIARY 변형을 싣는다.
-    diary = req.activity_type == "ART_DIARY"
+    # ⚠️ 두 구획의 내용은 활동별로 다르다(954에서 갈랐고, 993에서 파일 자체가 갈리며
+    #    _DIARY 접미사 키를 없앴다 — 같은 키(SINGLE_TARGET·ASKED_ALREADY)를 각 파일이
+    #    자기 활동의 내용으로 소유한다). 954의 판단은 그대로다: HTP는 정체·관계·사건·마음·
+    #    앞일로, 자유 그림은 정체·관계·사건·경험·기억으로 잇는다.
     if _target_group_count(req) == 1:
-        lines.append(_block("SINGLE_TARGET_DIARY" if diary else "SINGLE_TARGET"))
+        lines.append(_block(req.activity_type, "SINGLE_TARGET"))
     if req.asked_object_codes:
-        lines.append(_block("ASKED_ALREADY_DIARY" if diary else "ASKED_ALREADY"))
+        lines.append(_block(req.activity_type, "ASKED_ALREADY"))
     # 이미 건넨 질문을 나열해 표현만 바꾼 반복을 막는다(S15P11B209-921).
     # 활동유형과 무관하게 붙인다 — HTP도 대상 객체 없는 질문끼리는 겹치는 것을 못 막는다.
     asked = _asked_questions(req)
     if asked:
         lines.append(
-            _block("ASKED_QUESTIONS", questions="\n".join(f"  · {q}" for q in asked))
+            _block(req.activity_type, "ASKED_QUESTIONS", questions="\n".join(f"  · {q}" for q in asked))
         )
     # 마지막 차례면 맺음말 성격을 준다(S15P11B209-976). 맨 뒤에 붙이는 이유는 HTP_OPENING과
     # 같다 — 무엇을 물을지는 위 블록들이 이미 정했고, 이 구획이 더하는 것은 '어떻게 맺을지'
     # 하나다. 앞에 두면 대상 지시와 겹쳐 서로 밀어낸다.
     if _is_last_question(req):
-        lines.append(_block("LAST_QUESTION"))
+        lines.append(_block(req.activity_type, "LAST_QUESTION"))
     return "\n".join(lines)
 
 

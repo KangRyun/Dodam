@@ -234,7 +234,14 @@ _PROMPT_SEMVER: dict[str, str] = {
     #   으로 돌렸는데, 그 착지점이 HTP 프롬프트의 색 금지·세부 금지와 정면으로 부딪혔다.
     #   사람 그림은 부위 라벨이 신뢰도 상위를 차지해 이 경로가 자주 타는데도 모순이 남아 있었다.
     #   이제 부위는 실마리로만 쓰고 **그림 속 사람**에게 묻는다. 918의 소유격 금지는 그대로다.
-    "activity_block": "2.1.0",
+    # ✝ activity_block은 2.1.0을 끝으로 활동별 파일로 갈랐다(S15P11B209-993, 사용자 결정
+    #   2026-08-07 — 공용 제거). 954가 _DIARY 접미사 변형을 만들 만큼 두 활동의 내용이 이미
+    #   달랐다 — 파일이 갈리며 접미사 키를 없애고 같은 키를 활동별 내용으로 소유한다.
+    # 1.0.0: 공용 2.1.0의 HTP 몫(HTP·HTP_WHOLE·HTP_OPENING·PERSON_PART + 공통 기계 구획).
+    "activity_block_htp": "1.0.0",
+    # 1.0.0: 공용 2.1.0의 그림일기 몫(ART_DIARY·ART_DIARY_OPEN + 공통 기계 구획).
+    #   SINGLE_TARGET·ASKED_ALREADY 키에 구 _DIARY 변형의 내용이 담긴다.
+    "activity_block_diary": "1.0.0",
     # 구 question_service._DIFFICULTY_RULES를 프롬프트 파일로 옮긴 것(버전 추적·draft 경로 반영).
     #   구 PRESCHOOL "10자 안팎"은 대화 프롬프트의 "반응한 다음 질문을 이어줘"와 동시에
     #   만족할 수 없어, 반응/질문 몫을 나눠 "두 문장 이내"로 고쳤다.

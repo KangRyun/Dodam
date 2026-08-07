@@ -244,9 +244,10 @@ class ClientVersionWiringTest(unittest.TestCase):
             "conversation_rules_diary",
             "conversation_tone_htp",
             "conversation_tone_diary",
+            "activity_block_htp",
+            "activity_block_diary",
             "guardrails",
             "htp_question_bank",
-            "activity_block",
         )
         self.assertEqual(llm_client.PROMPT_VERSION, expected)
         self.assertEqual(question_service.PROMPT_VERSION, expected)

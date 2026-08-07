@@ -1112,6 +1112,40 @@ class TargetLineScopeTest(unittest.TestCase):
         self.assertIn("무리해서 끌어오지 말고", line)
 
 
+class PromptMetaLeakTest(unittest.TestCase):
+    """모델에 나가는 프롬프트에 내부 메타(파일명·개편 날짜)가 실리지 않는다 (S15P11B209-993).
+
+    conversation_rules_*·report_* 는 파일 **전체**가 모델에 실린다(tone·activity_block은
+    구획만 추출된다). 993 분리 때 머리말에 적은 엔지니어링 경위 — 파일명·날짜·이슈 경위 —
+    가 그대로 GPT에 나가던 것을 잡았다. 경위는 prompts_registry 주석이 소유하고,
+    모델에 실리는 파일의 머리말은 모델용 문장이어야 한다.
+    """
+
+    _TOKENS = ("conversation_", "report_", "activity_block", "2026-0", ".txt")
+
+    def test_conversation_prompts_carry_no_internal_meta(self):
+        for activity, subject in (("HTP", "HOUSE"), ("ART_DIARY", None)):
+            req = _request(
+                activity_type=activity,
+                drawing_subject=subject,
+                detected_objects=[_detected("SUN", "해", 0.9)],
+            )
+            system = question_service._build_messages(req)[0]["content"]
+            for token in self._TOKENS:
+                with self.subTest(activity=activity, token=token):
+                    self.assertNotIn(token, system)
+
+    def test_report_prompts_carry_no_internal_meta(self):
+        import report_client
+
+        for is_htp in (True, False):
+            system = report_client._system_prompt(is_htp)
+            # "conversation"은 스키마 키(conversationSummary)로 정당하게 실린다 — 제외.
+            for token in ("report_common", "report_htp", "report_diary", "2026-0", "공용"):
+                with self.subTest(is_htp=is_htp, token=token):
+                    self.assertNotIn(token, system)
+
+
 class ActivityBlockVersionTrackingTest(unittest.TestCase):
     """활동 지시 블록이 프롬프트 버전 추적 안에 있는지 (S15P11B209-832).
 
@@ -1133,28 +1167,39 @@ class ActivityBlockVersionTrackingTest(unittest.TestCase):
     def test_block_prompt_is_registered(self):
         import prompts_registry
 
-        self.assertIn(
-            question_service.ACTIVITY_BLOCK_PROMPT, prompts_registry._PROMPT_SEMVER
-        )
+        # 993에서 활동별 파일로 갈렸다 — 둘 다 버전 추적 안에 있어야 한다.
+        for name in question_service.ACTIVITY_BLOCK_BY_ACTIVITY.values():
+            self.assertIn(name, prompts_registry._PROMPT_SEMVER)
         # 표와 파일이 어긋나면 verify_prompt_files가 잡는다.
         self.assertEqual(prompts_registry.verify_prompt_files(), [])
 
     def test_every_section_the_code_uses_exists_in_the_file(self):
-        """코드가 고르는 구획 이름과 파일의 [[KEY]]가 어긋나면 KeyError로 질문 생성이 죽는다."""
+        """코드가 고르는 구획 이름과 파일의 [[KEY]]가 어긋나면 KeyError로 질문 생성이 죽는다.
+
+        993에서 파일이 활동별로 갈렸다 — 각 파일은 자기 활동의 전용 구획 + 공통 기계 구획을
+        가진다. _DIARY 접미사 키는 없앴다(같은 키를 활동별 내용으로 소유).
+        """
         import prompts_registry
 
-        available = set(prompts_registry.sections(question_service.ACTIVITY_BLOCK_PROMPT))
-        used = {
-            "HTP",
-            "HTP_WHOLE",
-            "ART_DIARY",
+        shared = {
             "TARGET_ONLY",
             "TARGET_FIRST",
             "TARGET_FOLLOW_UP",
             "REASK_CANDIDATES",
+            "SINGLE_TARGET",
             "ASKED_ALREADY",
+            "ASKED_QUESTIONS",
+            "LAST_QUESTION",
         }
-        self.assertEqual(used - available, set(), "파일에 없는 구획을 코드가 고른다")
+        used = {
+            "activity_block_htp": shared | {"HTP", "HTP_WHOLE", "HTP_OPENING", "PERSON_PART"},
+            "activity_block_diary": shared | {"ART_DIARY", "ART_DIARY_OPEN"},
+        }
+        for name, keys in used.items():
+            available = set(prompts_registry.sections(name))
+            self.assertEqual(keys - available, set(), f"{name}: 파일에 없는 구획을 코드가 고른다")
+            # 반대 방향도 잡는다 — 파일에만 있고 코드가 안 쓰는 구획은 죽은 문구가 된다.
+            self.assertEqual(available - keys, set(), f"{name}: 코드가 쓰지 않는 구획이 남아 있다")
 
     def test_changing_the_block_moves_prompt_version(self):
         """수용 기준 — 블록 문구를 고치면 promptVersion 값이 달라진다.
@@ -1164,7 +1209,7 @@ class ActivityBlockVersionTrackingTest(unittest.TestCase):
         """
         import prompts_registry
 
-        path = prompts_registry.PROMPT_DIR / f"{question_service.ACTIVITY_BLOCK_PROMPT}.txt"
+        path = prompts_registry.PROMPT_DIR / "activity_block_htp.txt"
         original = path.read_text(encoding="utf-8")
 
         def clear() -> None:
