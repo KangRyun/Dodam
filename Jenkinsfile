@@ -4,12 +4,31 @@
 // 잡 유형: Multibranch Pipeline 권장(브랜치 자동 감지 → env.BRANCH_NAME 세팅). Deploy는 develop에서만.
 // 전제:
 //   - Jenkins 컨트롤러에 docker CLI + compose 플러그인 + 호스트 docker.sock (infra/jenkins/ 이미지)
-//   - 시크릿 .env 는 Jenkins Credentials(secret file, id: dodam-env)로 주입 — 저장소 커밋 금지
+//   - 시크릿 .env 는 Jenkins Credentials(secret file)로 주입 — 저장소 커밋 금지
+//       · dodam-env         : 이미지 **빌드** 인자 (infra/docker-compose.build.yml)
+//       · dodam-env-compose : compose **실행** 정의용 (infra/docker-compose.yml) ← 컷백에서 신설
+//       · dodam-kubeconfig  : k3s 배포용(네임스페이스 한정 ServiceAccount)
 //   - 컨트롤러 인-빌드(별도 에이전트 없음)
 //
 // 흐름: Checkout → [develop만] Secrets Preflight → Build&Test(backend) → [이하 develop만] Docker Build → ai import 스모크 → Deploy → Healthcheck
 //   브랜치(MR) 빌드는 테스트까지만 — 자원 절약 + 모든 브랜치가 :local 태그를 덮어쓰는 레이스 방지.
 // 알림: 빌드 성공/실패를 Mattermost Incoming Webhook으로 전송 (크레덴셜 id: mattermost-webhook)
+//
+// ★★ 배포 대상 스위치 (DEPLOY_TARGET) — 2026-08-07 컷백 대응 ★★
+//   발표 대비로 운영을 k3s → docker-compose 로 **되돌린다**(컷백). 그런데 이 파이프라인의
+//   Deploy 는 `kubectl set image` 였으므로, k3s 를 내리는 순간 배포가 통째로 깨진다.
+//   그래서 **두 경로를 다 남기고 스위치로 고른다.** k3s 경로를 지우지 않은 이유는 하나다:
+//   컷백이 실패해 되돌아갈 때 "파이프라인까지 다시 고치는" 상황을 만들지 않기 위해서다.
+//
+//   고르는 방법(우선순위):
+//     ① 빌드 파라미터 DEPLOY_TARGET = compose | k3s   (일회성 강제)
+//     ② auto(기본) → 파일 /var/jenkins_home/DEPLOY_TARGET 의 내용
+//     ③ 파일도 없으면 **k3s**  ← 이 커밋 시점의 실제 운영 형태
+//   ⚠️ 기본값이 k3s 인 것은 의도다. Multibranch 는 새 파라미터를 "한 번 돌린 뒤"에야 인식하므로
+//     파라미터만으로는 컷오버 직후 첫 빌드를 통제할 수 없다. 컷오버 시 파일을 만들어 전환한다:
+//       전환: docker exec dodam-jenkins sh -c 'echo compose > /var/jenkins_home/DEPLOY_TARGET'
+//       복귀: docker exec dodam-jenkins rm -f /var/jenkins_home/DEPLOY_TARGET
+//     (DEPLOY_FREEZE 플래그와 같은 방식 — 런타임에 읽으므로 즉시 적용되고 재시작해도 남는다)
 
 // 실패 알림에 붙일 "어디서 터졌나" 분석 — 실패 스테이지 + (테스트 실패면) 실패 테스트 요약.
 //   분석이 실패해도 알림 자체는 나가야 하므로 try/catch로 감싼다.
@@ -42,7 +61,10 @@ def notifyMattermost(String emoji, String title) {
       // 프리즈 중에는 "배포됨"이라고 쓰면 안 된다 — 알림만 보고 배포된 줄 아는 게 가장 위험하다.
       def deployed = ''
       if (branch == 'develop' && emoji == '✅') {
-        deployed = (env.DEPLOY_FROZEN == 'true') ? ' · ⏸️ 배포 프리즈(미배포)' : ' · 🚀 서버 배포됨'
+        // 컷백 기간에는 "어디에 배포됐는가"가 배포 여부만큼 중요하다 — 알림에 대상을 함께 적는다.
+        deployed = (env.DEPLOY_FROZEN == 'true')
+          ? ' · ⏸️ 배포 프리즈(미배포)'
+          : " · 🚀 서버 배포됨(${env.DEPLOY_TARGET ?: '?'})"
       }
       // 빌드 링크 — Jenkins가 https://…/jenkins/ 로 공개(S15P11B209-319)되며 클릭 가능해짐.
       //   BUILD_URL은 Manage Jenkins의 "Jenkins URL" 설정 기반으로 생성됨(로그인 필요).
@@ -89,12 +111,35 @@ pipeline {
     )
     // ※ DEPLOY_K8S_STAGING(359)은 제거했다. 컷오버(360) 후 운영 배포 자체가 k3s 로 가므로
     //   "스테이징에만 따로 배포"라는 개념이 사라졌다 — 같은 네임스페이스를 두 번 배포하게 된다.
+
+    // 배포 대상 스위치(컷백). 기본 auto = JENKINS_HOME/DEPLOY_TARGET 파일 값, 없으면 k3s.
+    //   파라미터 인식 지연(위 주석) 때문에 **파일이 실질 스위치**다 — 파일 헤더 설명 참조.
+    choice(
+      name: 'DEPLOY_TARGET',
+      choices: ['auto', 'compose', 'k3s'],
+      description: '배포 대상. auto = /var/jenkins_home/DEPLOY_TARGET 파일 값(없으면 k3s)'
+    )
+    // compose 는 **이미지 참조가 바뀔 때만** 컨테이너를 재생성한다. 같은 SHA 를 다시 배포하면
+    //   재생성이 일어나지 않아 옛 컨테이너가 그대로 남는다. Healthcheck 의 다이제스트 대조가
+    //   그걸 잡아 빌드를 실패시키므로, 그때 이 값을 켜서 다시 돌린다.
+    //   기본 false 인 이유: 매 배포에 강제 재생성을 걸면 불필요한 순단이 늘어난다.
+    booleanParam(
+      name: 'COMPOSE_FORCE_RECREATE',
+      defaultValue: false,
+      description: 'compose 배포 시 --force-recreate 를 붙인다 (같은 SHA 재배포용)'
+    )
   }
 
   environment {
     // 이미지 빌드 전용 compose. 실행 정의는 들어 있지 않다(S15P11B209-791) — 운영은 k3s 소관.
     // (Jenkins 자체 compose `infra/jenkins/docker-compose.yml` 와 다른 파일이다)
     COMPOSE_FILE = 'infra/docker-compose.build.yml'
+    // ★ 컷백 실행 정의(8서비스). 이미지를 굽는 파일과 **역할이 다르다**:
+    //     이미지 굽기 → COMPOSE_FILE(build.yml) · 서비스 실행 → 이 파일
+    //   이 파일은 시크릿을 `${VAR:?}` 로만 참조하므로 dodam-env-compose 크레덴셜과 짝이다.
+    COMPOSE_RUN_FILE = 'infra/docker-compose.yml'
+    // 배포 대상 스위치 파일(파라미터 인식 지연 회피 — 파일 헤더 ★★ 절 참조).
+    DEPLOY_TARGET_FLAG = '/var/jenkins_home/DEPLOY_TARGET'
     // 배포 프리즈 플래그 — 이 파일이 있으면 develop 빌드도 배포하지 않는다(S15P11B209-358).
     //   왜 파라미터가 아니라 파일인가: Multibranch 는 새 파라미터를 "한 번 돌린 뒤"에야 인식한다
     //   (위 parameters 주석 참조). 정작 막아야 할 다음 빌드에 안 먹으므로 프리즈 용도로는 못 쓴다.
@@ -115,7 +160,30 @@ pipeline {
           env.IMAGE_TAG = sh(returnStdout: true, script: 'git rev-parse --short=8 HEAD').trim()
           // 알림용 — 이 브랜치 마지막 커밋의 작성자(= 사실상 푸시한 사람)
           env.GIT_AUTHOR = sh(returnStdout: true, script: 'git log -1 --format=%an').trim()
-          echo "브랜치=${env.BRANCH_NAME ?: 'N/A'} · 이미지태그(SHA)=${env.IMAGE_TAG} · 작성자=${env.GIT_AUTHOR}"
+
+          // ── 배포 대상 결정 (compose | k3s) ────────────────────────────────
+          // 여기서 한 번만 정하고 이후 스테이지는 env.DEPLOY_TARGET 만 본다.
+          //   "어디에 배포되는가"가 로그 첫머리에 반드시 남아야 한다 — 컷백 기간에 가장 흔한
+          //   사고가 "배포는 성공했는데 엉뚱한 런타임에 갔다"이기 때문이다.
+          def target = (params.DEPLOY_TARGET ?: 'auto')
+          if (target == 'auto') {
+            target = 'k3s'                                   // 파일이 없으면 컷백 전 상태로 본다
+            if (fileExists(env.DEPLOY_TARGET_FLAG)) {
+              // 읽기 실패가 빌드를 죽이지 않게 한다(플래그가 root 600 으로 만들어질 수 있다).
+              try {
+                def v = readFile(env.DEPLOY_TARGET_FLAG).trim()
+                if (v) { target = v }
+              } catch (err) {
+                echo "⚠️ DEPLOY_TARGET 플래그를 읽지 못했다(k3s 로 진행): ${err.message}"
+              }
+            }
+          }
+          if (!(target in ['compose', 'k3s'])) {
+            error "알 수 없는 DEPLOY_TARGET='${target}' — compose 또는 k3s 여야 한다 (${env.DEPLOY_TARGET_FLAG} 확인)"
+          }
+          env.DEPLOY_TARGET = target
+
+          echo "브랜치=${env.BRANCH_NAME ?: 'N/A'} · 이미지태그(SHA)=${env.IMAGE_TAG} · 작성자=${env.GIT_AUTHOR} · 배포대상=${env.DEPLOY_TARGET}"
         }
       }
     }
@@ -206,6 +274,56 @@ pipeline {
               echo "✅ web 빌드 인자 3종 확인 — OAuth 클라이언트 ID 채워짐"
             fi
           '''
+        }
+
+        // ── compose 실행 정의용 시크릿 검증 (컷백) ─────────────────────────────
+        // 위 검사는 **이미지 빌드**용 파일(build.yml)을 본다. 791 이후 그 파일에는 `:?` 가드가
+        // 거의 남지 않아 "0개 확인 → 통과"가 정상이다. 그런데 컷백 배포가 실제로 쓰는 것은
+        // `infra/docker-compose.yml` 이고, 이쪽에는 `:?` 가드가 수십 개다(DB 비밀번호·JWT·
+        // AI 모드·PVC 경로 등). 그 파일 기준으로 dodam-env-compose 를 전수 검증한다.
+        //
+        // ★ 여기서 잡지 못하면 어떻게 되나: `docker compose up` 이 **첫 번째 누락 변수 하나만**
+        //   보고하고 죽는다. 배포 중단 상태에서 빌드를 반복하며 하나씩 알아내야 한다
+        //   (2026-07-24 빌드 114~116 이 정확히 그 낭비였다). 목록 전체를 한 번에 보고한다.
+        // ⚠️ 시크릿 값은 절대 출력하지 않는다 — 키 이름과 경로만 다룬다.
+        script {
+          if (env.DEPLOY_TARGET == 'compose') {
+            withCredentials([file(credentialsId: 'dodam-env-compose', variable: 'COMPOSE_ENV_FILE')]) {
+              sh '''
+                required=$(grep -v "^[[:space:]]*#" "$COMPOSE_RUN_FILE" | grep -oE '\\$\\{[A-Z_]+:\\?' | tr -cd 'A-Z_\\n' | sort -u)
+                missing=""
+                for k in $required; do
+                  grep -qE "^${k}=." "$COMPOSE_ENV_FILE" || missing="$missing $k"
+                done
+                if [ -n "$missing" ]; then
+                  echo "❌ dodam-env-compose 시크릿에 필수 키 누락:$missing"
+                  echo "   → 서버의 infra/.env.compose 를 그대로 Jenkins 크레덴셜(dodam-env-compose)로 재업로드할 것."
+                  echo "     두 파일은 **같은 내용이어야 한다** — 갈라지면 사람이 손으로 띄운 스택과"
+                  echo "     파이프라인이 띄운 스택의 설정이 달라진다(가장 찾기 어려운 종류의 사고)."
+                  exit 1
+                fi
+                echo "✅ compose 실행 시크릿 preflight 통과 — 필수 키 $(echo "$required" | wc -w)개 확인"
+
+                # 호스트 마운트 소스로 쓰이는 경로 3종은 **절대경로**여야 한다.
+                #   상대경로면 Jenkins 컨테이너 안 워크스페이스 기준으로 해석되는데 마운트는
+                #   호스트가 한다 → 도커가 빈 디렉터리를 만들어 붙이고 설정이 조용히 사라진다
+                #   (2026-07-22 nginx 빈 conf · 2026-07-26 minio-init exit 127 과 같은 함정).
+                bad=""
+                for k in PVC_ROOT NGINX_CONF_DIR MONGO_INITDB_DIR FCM_CREDENTIALS_HOST_PATH; do
+                  # 값이 홑/겹따옴표로 감싸여 있을 수 있다(.env.compose 는 홑따옴표 스타일).
+                  #   앞쪽 따옴표만 떼면 절대경로 판정에는 충분하다. 값은 출력하지 않는다.
+                  v=$(grep -E "^${k}=" "$COMPOSE_ENV_FILE" | tail -1 | cut -d= -f2- | sed "s/^'//" | sed 's/^"//')
+                  [ -z "$v" ] && continue
+                  case "$v" in /*) : ;; *) bad="$bad $k" ;; esac
+                done
+                if [ -n "$bad" ]; then
+                  echo "❌ 상대경로 값을 가진 키:$bad — 호스트 절대경로여야 한다."
+                  exit 1
+                fi
+                echo "✅ 호스트 경로 키 절대경로 확인"
+              '''
+            }
+          }
         }
       }
     }
@@ -325,10 +443,102 @@ pipeline {
       }
     }
 
-    stage('Deploy (develop only)') {
-      // develop 브랜치에서만 배포 (그 외는 여기까지 = 빌드·테스트만)
+    // ═══════════════════════════════════════════════════════════════════════
+    // Deploy — 대상에 따라 둘 중 하나만 실행된다 (env.DEPLOY_TARGET, 파일 헤더 ★★ 절)
+    // ═══════════════════════════════════════════════════════════════════════
+
+    stage('Deploy — compose (develop only)') {
       when {
         branch 'develop'
+        expression { env.DEPLOY_TARGET == 'compose' }
+        expression { !fileExists(env.DEPLOY_FREEZE_FLAG) }
+      }
+      steps {
+        script { env.CURRENT_STAGE = env.STAGE_NAME }
+        // ⚠️⚠️ **compose 에는 롤링 배포가 없다.** k3s 의 backend 는 replicas 2 + maxUnavailable 0
+        //   + preStop 8s 로 무중단이었지만(362 실증), compose 는 컨테이너를 지우고 다시 만든다.
+        //   즉 **이 스테이지는 반드시 순단을 만든다.** 예상 폭:
+        //     · backend  재기동 → readiness 까지 약 40~120초 (그동안 /api 는 502)
+        //     · web·ai   재기동 → 각 10~60초
+        //     · nginx    재생성 → 1~3초 (연결 리셋)
+        //   없앨 수는 없고 **줄이는 순서**만 고를 수 있다. 아래 3단계가 그 순서다.
+        //   발표·시연 중에는 develop 머지를 하지 말 것(= 이 스테이지가 도는 것이 곧 순단이다).
+        withCredentials([file(credentialsId: 'dodam-env-compose', variable: 'COMPOSE_ENV_FILE')]) {
+          sh '''
+            set -e
+
+            # ── 0. 이미지 → 로컬 레지스트리 ───────────────────────────────────
+            # compose 실행 정의가 `127.0.0.1:5000/dodam-*:${IMAGE_TAG}` 를 참조하므로
+            #   push 는 추적성 문제가 아니라 **배포의 전제**다(이 단계가 빠지면 pull 실패).
+            # :prod 도 함께 갱신한다 — k3s 로 되돌아갔을 때 매니페스트 기본값(:prod)이
+            #   옛 이미지를 가리켜 **조용히 과거로 롤백**되는 것을 막는다(771 과 같은 사유).
+            infra/scripts/push-staging-images.sh --tag "$IMAGE_TAG" --with-ai --with-web
+            infra/scripts/push-staging-images.sh --tag prod         --with-ai --with-web
+
+            # ── 1. 앱 3종(backend·ai·web): 단일 노드형 **블루-그린 무중단 배포** ───────
+            # 각 서비스를 유휴 색으로 새 태그에 띄워 **내부 헬스체크 통과 후** nginx 스위치만
+            #   넘긴다(upstream-active.conf 재작성 + reload). 그 다음 옛 색을 정지한다.
+            #   → 사용자 순단 없음(무중단 *배포*). 상시 이중화는 아니다 — 정상 상태엔 활성 색 1벌.
+            # 실체는 infra/scripts/bluegreen-deploy.sh 하나(사람이 호스트에서 돌리는 것과 동일 로직).
+            #
+            # ⚠️⚠️ DooD — 이 스위치는 반드시 **호스트 파일**을 써야 한다.
+            #   dodam-jenkins 에는 host repo(/home/kr/S15P11B209)가 **안 보인다**(docker.sock +
+            #   jenkins-home 만 마운트). 그런데 스위치가 바꾸는 upstream-active.conf 는 운영 nginx 에
+            #   **라이브 바인드**돼 있고(NGINX_CONF_DIR), .env.active 는 활성 색 상태 파일이다.
+            #   Jenkins 워크스페이스 사본에 쓰면 nginx 에 반영되지 않는다. 그래서 스크립트를
+            #   **host repo 를 절대경로로 bind-mount 한 throwaway 컨테이너** 안에서 실행한다.
+            #   (이미지가 아니라 config 는 호스트가 관리하는 기존 모델 — nginx conf 마운트 — 과 동일.)
+            #   ⚠️ 따라서 블루-그린 로직(스크립트·compose·nginx conf)의 기준은 **호스트 체크아웃**
+            #     이지 이 빌드의 워크스페이스가 아니다. 로직을 바꾸려면 host /home/kr/S15P11B209 갱신.
+            HOST_REPO=/home/kr/S15P11B209
+            HOST_UID=1004; HOST_GID=1004                  # host repo 소유자(kr). `stat -c %u:%g infra` 로 확인.
+            SOCK_GID=$(stat -c '%g' /var/run/docker.sock)  # docker.sock 그룹 — 비-root uid 의 소켓 접근용(현재 988)
+            bg() {   # $@ = bluegreen-deploy.sh 인자 (<서비스> <태그>)
+              docker run --rm \
+                --user "${HOST_UID}:${HOST_GID}" --group-add "$SOCK_GID" \
+                -v /var/run/docker.sock:/var/run/docker.sock \
+                -v "$HOST_REPO/infra":/repo/infra \
+                -e COMPOSE_FILE=/repo/infra/docker-compose.yml \
+                -e ENV_COMPOSE=/repo/infra/.env.compose \
+                -e ENV_ACTIVE=/repo/infra/.env.active \
+                -e UPSTREAM_CONF=/repo/infra/nginx/conf.d.compose/upstream-active.conf \
+                -e IMAGE_TAG="$IMAGE_TAG" \
+                dodam-jenkins:local \
+                bash /repo/infra/scripts/bluegreen-deploy.sh "$@"
+            }
+            # 데이터 계층(mysql·mongo·redis·minio)은 스크립트가 --no-deps 로 절대 건드리지 않는다.
+            bg backend "$IMAGE_TAG"
+            bg ai      "$IMAGE_TAG"
+            bg web     "$IMAGE_TAG"
+
+            # ── 2. nginx 자체: **기존 방식 유지**(블루-그린 대상 아님) ────────────────
+            # nginx 이미지/conf 갱신은 재생성으로 반영한다. 블루-그린 스위치가 이미 upstream 을
+            #   바꿔 reload 했으므로, 이미지가 안 바뀌면 아래 up 은 no-op 이다. 바뀌면 재생성
+            #   (1~3s 순단) — 앱과 달리 nginx 는 단일 인스턴스라 이 짧은 순단은 기존과 동일하게 감수.
+            #   --no-deps 로 데이터·앱 색을 건드리지 않고 nginx 만 다룬다.
+            TAG_ENV=.compose-image-tag.env
+            printf 'IMAGE_TAG=%s\\n' "$IMAGE_TAG" > "$TAG_ENV"
+            RECREATE=""
+            [ "${COMPOSE_FORCE_RECREATE:-false}" = "true" ] && RECREATE="--force-recreate"
+            docker compose -f "$COMPOSE_RUN_FILE" --env-file "$COMPOSE_ENV_FILE" --env-file "$TAG_ENV" \
+              up -d --no-deps $RECREATE nginx
+            # 스위치가 이미 reload 했지만, nginx 가 재생성됐을 수도 있어 한 번 더 reload(무해한 no-op).
+            docker exec dodam-nginx nginx -s reload \
+              && echo "   ✅ nginx reload" \
+              || echo "   ⚠️ nginx reload 실패(설정 오류 가능) — Healthcheck e2e 로 판단한다"
+
+            echo "✅ 블루-그린 배포 완료(backend·ai·web 무중단) + nginx 반영 — 태그 :$IMAGE_TAG"
+          '''
+        }
+      }
+    }
+
+    stage('Deploy — k3s (develop only)') {
+      // ★ 컷백 이후에도 이 스테이지를 **지우지 않는다.** k3s 로 되돌아가는 순간 그대로 되살아나야
+      //   하기 때문이다. 컷백이 실패했을 때 파이프라인까지 다시 고치는 상황을 만들지 않는다.
+      when {
+        branch 'develop'
+        expression { env.DEPLOY_TARGET == 'k3s' }
         expression { !fileExists(env.DEPLOY_FREEZE_FLAG) }
       }
       steps {
@@ -385,32 +595,100 @@ pipeline {
       }
       steps {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
-        // ── ① 파드가 실제로 Ready 인가 ────────────────────────────────────────
-        // ⚠️ rollout status 만으로는 부족하다 — **replicas 0 인 워크로드에서 즉시 성공**한다.
-        //    "롤아웃 성공"과 "떠 있는 파드가 있다"는 다른 말이다(S15P11B209-359 교훈).
-        withCredentials([file(credentialsId: 'dodam-kubeconfig', variable: 'DEPLOYER_KUBECONFIG')]) {
-          sh '''
-            set -e
-            export KUBECONFIG="$DEPLOYER_KUBECONFIG"
-            fail=0
-            for d in backend gateway ai web; do
-              ready="$(kubectl -n dodam get deployment "$d" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
-              ready="${ready:-0}"
-              if [ "$ready" -ge 1 ]; then
-                echo "   ✅ $d readyReplicas=$ready"
-              else
-                echo "   ❌ $d readyReplicas=$ready — 롤아웃은 끝났다지만 Ready 인 파드가 없다"
-                fail=1
-              fi
-            done
-            [ "$fail" = "0" ] || exit 1
-          '''
+        // ── ① 런타임이 실제로 준비됐는가 (대상별로 보는 신호가 다르다) ─────────
+        script {
+          if (env.DEPLOY_TARGET == 'compose') {
+            withCredentials([file(credentialsId: 'dodam-env-compose', variable: 'COMPOSE_ENV_FILE')]) {
+              sh '''
+                set -e
+                TAG_ENV=.compose-image-tag.env
+                printf 'IMAGE_TAG=%s\\n' "$IMAGE_TAG" > "$TAG_ENV"
+                compose() { docker compose -f "$COMPOSE_RUN_FILE" --env-file "$COMPOSE_ENV_FILE" --env-file "$TAG_ENV" "$@"; }
+
+                echo "── docker compose ps ──"
+                compose ps
+
+                fail=0
+                # (a) 앱 — healthy 를 요구한다. "떠 있다"와 "받을 준비가 됐다"는 다르다.
+                #     ★ 블루-그린이라 backend/ai/web 은 **활성 색 컨테이너**를 docker ps 로 찾는다
+                #        (정상 상태엔 색당 1벌만 running · 옛/유휴 색은 정지). nginx 는 단일.
+                for svc in backend ai web; do
+                  c=$(docker ps --filter "name=dodam-${svc}-" --filter "status=running" --format '{{.Names}}' | head -1)
+                  if [ -z "$c" ]; then echo "   ❌ dodam-${svc}-* 활성 색 컨테이너 없음"; fail=1; continue; fi
+                  st=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$c" 2>/dev/null || echo missing)
+                  if [ "$st" = "healthy" ]; then echo "   ✅ $c $st"; else echo "   ❌ $c $st"; fail=1; fi
+                done
+                st=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' dodam-nginx 2>/dev/null || echo missing)
+                if [ "$st" = "healthy" ]; then echo "   ✅ dodam-nginx $st"; else echo "   ❌ dodam-nginx $st"; fail=1; fi
+                # (b) 데이터 4종 — running 이면 된다. 이 스테이지가 배포한 대상이 아니지만,
+                #     하나라도 빠지면 위 앱이 조용히 반쪽으로 동작하므로 함께 단언한다.
+                #     ⚠️ mongodb 는 start_period 300s 라 기동 직후 health=starting 이 정상이다.
+                for c in dodam-mysql dodam-mongodb dodam-redis dodam-minio; do
+                  st=$(docker inspect -f '{{.State.Status}}' "$c" 2>/dev/null || echo missing)
+                  h=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}-{{end}}' "$c" 2>/dev/null || echo -)
+                  if [ "$st" = "running" ]; then echo "   ✅ $c $st(health=$h)"; else echo "   ❌ $c $st"; fail=1; fi
+                done
+                # (c) ★ 태그가 아니라 **다이제스트**로 확인한다.
+                #     "배포가 성공했다"와 "새 이미지가 떠 있다"는 다르다. 재생성을 건너뛰면
+                #     옛 컨테이너가 그대로 남는데, 태그만 보면 드러나지 않는다(2026-08-04 착시).
+                #     블루-그린이라 backend/ai/web 은 **활성 색 컨테이너**로 대조한다.
+                for svc in backend ai web; do
+                  c=$(docker ps --filter "name=dodam-${svc}-" --filter "status=running" --format '{{.Names}}' | head -1)
+                  want=$(docker image inspect -f '{{.Id}}' "127.0.0.1:5000/dodam-$svc:$IMAGE_TAG" 2>/dev/null || echo want-missing)
+                  got=$(docker inspect -f '{{.Image}}' "$c" 2>/dev/null || echo got-missing)
+                  if [ "$want" = "$got" ]; then
+                    echo "   ✅ $c 이미지 다이제스트 일치"
+                  else
+                    echo "   ❌ ${c:-dodam-$svc-?} 이미지 불일치 — 기대=$want 실제=$got"
+                    echo "      → 블루-그린 전환이 새 색을 안 띄웠거나 옛 색이 남았다. 스위치 로그 확인."
+                    fail=1
+                  fi
+                done
+                # nginx(단일) — 기존 방식이라 같은 SHA 재배포 시 재생성이 안 될 수 있다.
+                want=$(docker image inspect -f '{{.Id}}' "127.0.0.1:5000/dodam-nginx:$IMAGE_TAG" 2>/dev/null || echo want-missing)
+                got=$(docker inspect -f '{{.Image}}' dodam-nginx 2>/dev/null || echo got-missing)
+                if [ "$want" = "$got" ]; then
+                  echo "   ✅ dodam-nginx 이미지 다이제스트 일치"
+                else
+                  echo "   ❌ dodam-nginx 이미지 불일치 — 기대=$want 실제=$got"
+                  echo "      → 같은 SHA 재배포로 nginx 재생성이 안 된 경우. COMPOSE_FORCE_RECREATE=true 로 재실행."
+                  fail=1
+                fi
+                [ "$fail" = "0" ] || exit 1
+              '''
+            }
+          } else {
+            // ⚠️ rollout status 만으로는 부족하다 — **replicas 0 인 워크로드에서 즉시 성공**한다.
+            //    "롤아웃 성공"과 "떠 있는 파드가 있다"는 다른 말이다(S15P11B209-359 교훈).
+            withCredentials([file(credentialsId: 'dodam-kubeconfig', variable: 'DEPLOYER_KUBECONFIG')]) {
+              sh '''
+                set -e
+                export KUBECONFIG="$DEPLOYER_KUBECONFIG"
+                fail=0
+                for d in backend gateway ai web; do
+                  ready="$(kubectl -n dodam get deployment "$d" -o jsonpath='{.status.readyReplicas}' 2>/dev/null || true)"
+                  ready="${ready:-0}"
+                  if [ "$ready" -ge 1 ]; then
+                    echo "   ✅ $d readyReplicas=$ready"
+                  else
+                    echo "   ❌ $d readyReplicas=$ready — 롤아웃은 끝났다지만 Ready 인 파드가 없다"
+                    fail=1
+                  fi
+                done
+                [ "$fail" = "0" ] || exit 1
+              '''
+            }
+          }
         }
-        // ── ② 공개 도메인 e2e ────────────────────────────────────────────────
-        // 컷오버 전에는 nginx 컨테이너 안에서 127.0.0.1 을 쳤다. 이제는 **사용자가 실제로
-        // 지나는 경로**(DNS → 공개 IP → hostPort → gateway 파드 → backend/ai)를 통째로 친다.
+        // ── ② 공개 도메인 e2e (대상 공통) ────────────────────────────────────
+        // 컨테이너 안에서 127.0.0.1 을 치지 않는다. **사용자가 실제로 지나는 경로**를 통째로 친다:
+        //   compose : DNS → 공개 IP → 호스트 80/443 → nginx 컨테이너 → backend/ai/web
+        //   k3s     : DNS → 공개 IP → hostPort → gateway 파드 → backend/ai/web
+        // 두 경로 모두 같은 공개 도메인을 지나므로 **이 검사만은 대상과 무관하게 동일**하다.
         //   ⚠️ NodePort(30080/30443)로 검증하지 않는다. 이 호스트에서는 k3s 가 꺼져 있어도
         //      응답이 오기 때문에 스테이징과 운영을 구분하지 못한다(2026-07-29 실측).
+        //   ★ 이 단계가 "배포됐다"와 "동작한다"를 가르는 유일한 관문이다. 컷백 직후에는
+        //      런타임이 통째로 바뀌므로 여기서 처음 드러나는 결함이 있을 수 있다.
         sh '''
           set -e
           base=https://i15b209.p.ssafy.io
@@ -431,8 +709,21 @@ pipeline {
           check /ai/health        200 || fail=1
           check /api/v1/children  401 || fail=1   # 무토큰 차단 = 인증이 살아 있다는 뜻
           check /legal/privacy/   200 || fail=1   # 스토어 심사 URL — 웹 전환 후에도 살아야 한다(383)
+
+          # ── compose 전용 추가 검증 ─────────────────────────────────────────
+          # 내부 계약 스키마(FastAPI 문서)가 외부에 열려 있지 않은지 본다.
+          #   compose 는 conf 를 `infra/nginx/conf.d.compose/` 에서 **마운트**하므로 이 차단이
+          #   이미지가 아니라 파일에 달려 있다 — 파일이 바뀌면 조용히 열릴 수 있다.
+          #   k3s 경로에 걸지 않는 이유: 라이브 ConfigMap 에는 아직 이 블록이 반영돼 있지 않다
+          #   (git 쪽만 앞서 있음). 롤백 시 `kubectl apply -k` 로 반영한 뒤 여기에도 추가할 것.
+          if [ "$DEPLOY_TARGET" = "compose" ]; then
+            check /ai/docs         404 || fail=1
+            check /ai/openapi.json 404 || fail=1
+            check /ai/redoc        404 || fail=1
+          fi
+
           [ "$fail" = "0" ] || { echo "  ✗ 공개 e2e 실패 — 롤백 판단 지점"; exit 1; }
-          echo "✅ k3s 배포 정상 + 공개 경로 e2e 통과"
+          echo "✅ $DEPLOY_TARGET 배포 정상 + 공개 경로 e2e 통과"
         '''
       }
     }

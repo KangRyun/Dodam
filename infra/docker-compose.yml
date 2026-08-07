@@ -1,0 +1,526 @@
+# 도담(dodam) — k3s → docker-compose **컷백(회귀)** 실행 정의
+#
+# ★ 이 파일은 2026-07-29 컷오버(S15P11B209-360)로 걷어냈던 실행 정의를 되살린 것이다.
+#   되살린 이유는 하나뿐이다: 발표 대비로 운영을 compose 로 되돌린다.
+#   빌드 전용 파일(`infra/docker-compose.build.yml`)은 그대로 두고 **역할만 나눈다** —
+#     · 이미지 굽기      → docker-compose.build.yml  (Jenkins 가 쓴다)
+#     · 서비스 실행      → 이 파일                    (컷백 이후의 운영)
+#
+# ⚠️⚠️ **k3s 와 동시에 띄우지 말 것.** 이 파일은 호스트 80/443 을 잡는다.
+#   k8s gateway 가 hostPort 80/443 을 쥔 채로 이걸 올리면 깨끗한 bind 에러가 아니라
+#   CNI portmap DNAT 와 뒤엉킨 **조용한 이상 동작**이 된다(build.yml 상단 경고와 같은 함정).
+#   반드시 k3s 를 먼저 내린다. 절차는 `_workspace/cutback_infra_compose-plan.md`.
+#
+# ⚠️ 데이터는 **옮기지 않는다.** 아래 모든 데이터 볼륨은 k3s local-path PVC 의
+#   호스트 디렉터리를 그대로 bind 마운트한다. 도커 네임드 볼륨을 쓰면 mysql·minio·mongo 가
+#   **빈 디스크**를 물고 올라오고, 아동 그림·음성·대화가 사라진 것처럼 보인다(가드레일 9절).
+#   2026-07-29 컷오버 때 반대 방향으로 같은 함정을 겪었다(그때는 dump→restore 로 넘겼다).
+#
+# 실행 (repo 루트에서):
+#   docker compose -f infra/docker-compose.yml --env-file infra/.env.compose config     # 렌더링 검증
+#   docker compose -f infra/docker-compose.yml --env-file infra/.env.compose up -d      # 컷백 실행
+#
+# 값의 출처: `infra/.env.compose` — **라이브 k3s 의 ConfigMap `dodam-config` + Secret
+#   `dodam-secrets` 를 역이식**해 만든 파일이다(2026-08-07). git 매니페스트가 아니라
+#   라이브가 기준이다. 둘의 차이(드리프트)는 컷백 계획 문서의 표에 기록해 뒀다.
+
+# 프로젝트 이름 고정 — 실행 위치(cwd)와 무관하게 컨테이너/네트워크 이름을 'dodam_*' 로 통일.
+#   ★ 이 값이 'dodam' 이어야 하는 실질적 이유가 있다: 기존 네트워크 `dodam_dodam-net` 이
+#     아직 살아 있고 **거기에 dodam-jenkins 가 붙어 있다**(실측 172.18.0.2, 별칭 dodam-jenkins).
+#     프로젝트명이 달라지면 새 네트워크가 생겨 nginx 의 /jenkins/ 프록시가 이름을 못 찾는다.
+name: dodam
+
+services:
+  # ───────────────────────────────────────────────────────────────
+  # redis — 세션·리프레시 토큰 캐시. AOF 를 쓰므로 디스크가 필요하다.
+  # ───────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7.4.8-alpine          # 라이브 실측 태그(redis-0)
+    container_name: dodam-redis
+    restart: unless-stopped
+    # k8s limits 를 그대로 옮긴다(base/redis.yaml). 실측 4.4MB — AOF 재작성 피크를 감안한 값.
+    mem_limit: 256m
+    cpus: 0.5
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD must be set in infra/.env.compose}
+    # 비밀번호를 command 인자에 리터럴로 박지 않고 셸이 확장하게 한다(k8s redis.yaml 과 동일 방식).
+    #
+    # ⚠️ 이 방식이 감추는 범위를 과장하지 말 것 (2026-08-07 safety review W4).
+    #   감춰지는 것: compose 스펙과 `docker inspect .Config.Cmd` 의 **명령줄**.
+    #   그대로 남는 것:
+    #     · `docker inspect .Config.Env` — REDIS_PASSWORD 가 평문으로 들어 있다
+    #     · 컨테이너 안에서 `ps` — redis-server 프로세스의 argv 에 확장된 비밀번호가 보인다
+    #       (셸이 확장한 뒤 exec 하므로 결국 argv 에 실린다)
+    #     · `.env.compose` 파일 자체(600)
+    #   즉 **실제 통제는 호스트의 docker 그룹 접근 최소화**이지 이 한 줄이 아니다.
+    #   docker 그룹은 사실상 root 와 동등하므로, 그 명단이 이 비밀의 진짜 경계다.
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+    volumes:
+      # PVC data-redis-0 (AOF). 경로는 k3s local-path 실체.
+      - ${PVC_ROOT:?PVC_ROOT must be set}/pvc-bda95ea1-cd8b-42a7-a20a-c7f680ecc460_dodam_data-redis-0:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [dodam-net]
+
+  # ───────────────────────────────────────────────────────────────
+  # mysql — 관계형 원본(사용자·아동·세션·대화 원문·리포트).
+  # ───────────────────────────────────────────────────────────────
+  mysql:
+    # ⚠️ CLAUDE.md 13절은 "MySQL 8.0" 이라고 적혀 있으나 **라이브는 8.4.10 이다**(mysql-0 실측).
+    #    8.0→8.4 데이터 디렉터리 업그레이드는 비가역이라 8.0 으로 되돌리는 선택지는 없다.
+    #    문서 쪽을 고쳐야 한다.
+    image: mysql:8.4.10
+    container_name: dodam-mysql
+    restart: unless-stopped
+    mem_limit: 1g                      # k8s limits(1Gi) 동일. 실측 약 490MB.
+    cpus: 1.0
+    # 데이터 무결성 우선 — 종료 신호를 받으면 InnoDB 가 정리할 시간을 준다
+    # (k8s terminationGracePeriodSeconds: 60 대응).
+    stop_grace_period: 60s
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?}
+      MYSQL_USER: ${MYSQL_USER:?}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      # 서버 기본 시간대 KST (S15P11B209-904). 이름(Asia/Seoul)이 아니라 오프셋인 이유:
+      #   이름을 쓰려면 mysql 시간대 테이블이 적재돼 있어야 하는데 이 이미지엔 없고,
+      #   없는 이름을 주면 **서버가 기동하지 못한다.** 한국은 서머타임이 없어 고정 오프셋으로 충분.
+      #   ⚠️ 이 인자가 빠지면 `mysql` CLI·백업 스크립트가 UTC 로 읽어 앱과 9시간 어긋난다.
+      - --default-time-zone=+09:00
+    volumes:
+      # PVC data-mysql-0 — **운영 데이터 원본**. 이 경로가 틀리면 빈 DB 로 뜬다.
+      - ${PVC_ROOT:?}/pvc-9dd15b52-98fc-4111-8fe1-217739a9832d_dodam_data-mysql-0:/var/lib/mysql
+    # ⚠️ ports 를 열지 않는다 — 아동 민감정보 DB 의 외부 노출면 = 0 (가드레일 9절).
+    #    2026-07-31~08-06 사이 NodePort 30306 으로 열려 있었고 970 에서 회수했다. 반복 금지.
+    #    사람이 붙어야 하면 SSH 터널 — docs/인프라/DB접속.md §1-a.
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s                # k8s startupProbe(최대 150초)에 대응하는 여유
+    networks: [dodam-net]
+
+  # ───────────────────────────────────────────────────────────────
+  # mongodb — 스트로크(그리기 과정) 배치 + 대화 행동 메타데이터. S15P11B209-364·973
+  #
+  # ★ 이 서비스는 **옛 compose 에 존재하지 않았다.** Mongo 는 컷오버 이후 k8s 에만 추가됐다.
+  #   즉 이 블록은 매니페스트(base/mongodb.yaml)를 compose 로 번역한 신규 정의다.
+  # ───────────────────────────────────────────────────────────────
+  mongodb:
+    image: mongo:8.0.4                 # 라이브 실측 태그(mongodb-0)
+    container_name: dodam-mongodb
+    restart: unless-stopped
+    mem_limit: 1g                      # k8s limits(1Gi). 아래 캐시 상한과 **짝**이다.
+    cpus: 1.5                           # k8s limits(1500m) — 987 에서 500m→1500m 로 올린 값
+    stop_grace_period: 60s             # WiredTiger 체크포인트 여유
+    command:
+      # ★ 인증 필수. 없으면 내부망 누구나 무인증으로 붙는다("내부망이니 괜찮다"로 넘기지 않는다).
+      - --auth
+      # WiredTiger 캐시 상한. 기본값은 (RAM-1GB)의 50% 라 호스트 15.6GB 기준 약 7GB 를 잡으려 든다.
+      #   ⚠️ mem_limit 을 바꾸면 이 값도 함께 본다. 캐시가 상한보다 크면 컨테이너가 OOM-kill 된다.
+      - --wiredTigerCacheSizeGB
+      - "0.4"
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:?}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:?}
+      # 앱 전용 최소권한 계정 — 아래 init 스크립트가 이 값으로 계정을 만든다(최초 1회).
+      MONGO_APP_USERNAME: ${MONGO_APP_USERNAME:?}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?}
+    volumes:
+      # PVC data-mongodb-0 — **이미 초기화된 데이터 디렉터리**를 그대로 인계받는다.
+      - ${PVC_ROOT:?}/pvc-839aaeb8-7248-4194-89f5-51c802c332fb_dodam_data-mongodb-0:/data/db
+      # 초기화 스크립트(앱 계정 + TTL 인덱스). k8s 의 ConfigMap `mongodb-initdb` 를 파일로 뺀 것.
+      #   ⚠️ **이 스크립트는 컷백에서 실행되지 않는다 — 그것이 정상이다.**
+      #     mongo 이미지는 /docker-entrypoint-initdb.d 를 데이터 디렉터리가 **비어 있을 때만**
+      #     돌린다. 위 바인드 경로에는 이미 데이터가 있으므로 조용히 건너뛴다.
+      #     여기 두는 이유는 "새 디스크로 다시 세울 때의 재현성" 하나뿐이다. 운영 중 인덱스
+      #     변경은 634 의 관리 절차로 따로 적용한다.
+      - ${MONGO_INITDB_DIR:?MONGO_INITDB_DIR must be an absolute host path}:/docker-entrypoint-initdb.d:ro
+    # ⚠️ ports 미개방 — 아동 그림 좌표·대화 메타가 들어가는 DB. mysql 과 동일 가드레일.
+    # ★ 프로브 번역 (S15P11B209-987, 2026-08-06 실장애 재설계본)
+    #   k8s 는 세 프로브가 역할을 나눠 갖는다. compose 의 healthcheck 는 하나뿐이라
+    #   **가장 비용이 낮은 것(tcpSocket)** 을 택하고, startupProbe 의 시간 예산은
+    #   start_period 로 옮긴다:
+    #     startupProbe (mongosh ping, 최대 300초) → start_period: 300s
+    #     readiness/liveness (tcpSocket 27017)    → 아래 /dev/tcp 검사
+    #   mongosh 를 상시 검사에 쓰지 않는 이유: Node.js CLI 라 기동만으로 수 초가 걸리고,
+    #   CPU 경합 중 그 비용이 타임아웃을 넘겨 **멀쩡한 서버를 6시간 동안 42회 재시작**시켰다.
+    #   ⚠️ 그리고 compose 에는 구조적 안전장치가 하나 더 있다: healthcheck 가 실패해도
+    #     도커는 컨테이너를 **죽이지 않는다**(unhealthy 표시만). 987 의 사고 경로(프로브가
+    #     원인이 되어 DB 가 재시작 → backend DNS 조회 실패 → 그림 저장 500)는 여기서
+    #     구조적으로 재현되지 않는다. 대신 depends_on 이 기동 순서에만 이 값을 쓴다.
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/27017'"]   # bash 존재 실측 확인(/usr/bin/bash)
+      interval: 30s                    # k8s livenessProbe periodSeconds
+      timeout: 5s
+      retries: 5
+      start_period: 300s               # k8s startupProbe 예산(10s × 30)
+    networks: [dodam-net]
+
+  # ───────────────────────────────────────────────────────────────
+  # minio — 오브젝트 스토리지(S3 호환). 아동 그림·음성 파일 원본. 내부망 전용.
+  # ───────────────────────────────────────────────────────────────
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z   # 라이브 실측 태그(minio-0)
+    container_name: dodam-minio
+    restart: unless-stopped
+    mem_limit: 1g                      # k8s limits(1Gi). MinIO 는 여유 메모리를 캐시로 계속 흡수한다.
+    cpus: 1.0
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?}
+      # Prometheus 무인증 스크레이프 허용(S15P11B209-369).
+      #   전제: 9000 을 호스트로 노출하지 않는다. 아래 ports 미개방이 그 전제다.
+      #   ⚠️ 컷백 후 Prometheus 는 k3s 와 함께 내려간다 — 이 값은 무해하게 남는다.
+      MINIO_PROMETHEUS_AUTH_TYPE: public
+    command: ["server", "/data", "--console-address", ":9001"]
+    volumes:
+      # PVC data-minio-0 — 아동 그림·음성 원본. 2026-07-28 이관본이 그대로 들어 있다.
+      - ${PVC_ROOT:?}/pvc-a9eef009-0a29-4425-8023-843492d4a894_dodam_data-minio-0:/data
+    # ⚠️ ports 미개방(9000 S3 API · 9001 콘솔 모두). 콘솔이 필요하면 SSH 터널.
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9000/minio/health/live || exit 1"]  # curl 존재 실측 확인
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks: [dodam-net]
+
+  # ───────────────────────────────────────────────────────────────
+  # backend — Spring Boot(Java 21). 내부망 전용, 외부 진입은 nginx 로만.
+  #
+  # ⚠️ 라이브는 replicas 2 이고 여기는 **1 이다**(compose 에 무중단 롤링이 없으므로 2를 둘
+  #   이유가 없다 — 배포는 어차피 재생성이다). 그 결과 총 처리 용량과 총 메모리 예산이
+  #   절반이 된다. mem_limit 은 **파드 1개분과 동일**하게 뒀다 — JVM 힙은 cgroup 상한에서
+  #   비율로 정해지므로 상한을 바꾸면 힙 크기와 GC 거동이 함께 바뀐다. 라이브에서 검증된
+  #   거동을 그대로 두는 쪽을 택했다. 부하가 모자라면 이 값을 올리는 게 아니라
+  #   replicas 로 푸는 문제다(발표 트래픽에는 1개로 충분하다는 판단).
+  # ───────────────────────────────────────────────────────────────
+  # ★ 블루-그린(단일 노드형) — backend 는 blue/green 두 서비스로 정의한다. 정상 상태에는
+  #   활성 색 1벌만 뜬다(profiles + COMPOSE_PROFILES, 아래 헤더 ★블루-그린 절 참조).
+  #   전체 정의는 &backend-blue 에 한 번만 쓰고, green 은 이미지 태그·컨테이너명·profile 만
+  #   덮어써 병합한다(<<: *backend-blue). 두 색이 설정 드리프트로 갈라지는 것을 구조로 막는다.
+  #   ⚠️ image 태그: 색마다 별도 변수(IMAGE_TAG_BACKEND_{BLUE,GREEN})를 두되 미설정 시
+  #     ${IMAGE_TAG} 로 폴백한다 — 배포 스크립트가 유휴 색만 새 태그로 올리고, 전환 성공 후
+  #     그 태그를 infra/.env.active 에 적어 재부팅에도 활성 색이 옳은 태그로 뜨게 한다.
+  backend-blue: &backend-blue
+    image: 127.0.0.1:5000/dodam-backend:${IMAGE_TAG_BACKEND_BLUE:-${IMAGE_TAG:?IMAGE_TAG must be set (live = 0d62bd59)}}
+    container_name: dodam-backend-blue
+    profiles: ["backend-blue"]
+    restart: unless-stopped
+    mem_limit: 1536m                   # k8s limits(1536Mi) 동일
+    cpus: 2.0
+    stop_grace_period: 30s
+    environment:
+      # ── 아래 값은 전부 라이브 ConfigMap `dodam-config` / Secret `dodam-secrets` 에서 옮겨온 것.
+      #    ⚠️ JAVA_TOOL_OPTIONS 는 **일부러 넣지 않는다.** 라이브 backend 파드에 그 변수가 없고
+      #      (실측), JVM 이 cgroup 상한의 25% 를 힙으로 잡는 기본 동작으로 운영돼 왔다.
+      #      옛 compose 의 -XX:MaxRAMPercentage=60 을 되살리면 힙이 2.4배가 되어
+      #      라이브와 다른 GC 거동이 된다 — 컷백에서 새 변수를 만들지 않는다.
+      TZ: ${TZ:-Asia/Seoul}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-local}
+      # ⚠️ "prod" 가 아니라 "local" 이 맞다. application-prod.yml 이 **존재하지 않는다** —
+      #   DataSource·JPA·Flyway 설정이 전부 application-local.yml 에만 있다. prod 를 주면 기동 실패.
+      DB_HOST: ${DB_HOST:-mysql}
+      DB_PORT: ${DB_PORT:-3306}
+      DB_NAME: ${MYSQL_DATABASE:?}
+      DB_USERNAME: ${MYSQL_USER:?}
+      DB_PASSWORD: ${MYSQL_PASSWORD:?}
+      REDIS_HOST: ${REDIS_HOST:-redis}
+      REDIS_PORT: ${REDIS_PORT:-6379}
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?}
+      # 스트로크·대화 이벤트 저장소 (S15P11B209-365).
+      #   ⚠️ 인증 DB 도 dodam 이다 — 앱 계정은 admin 이 아니라 해당 DB 에 있다(364 initdb).
+      MONGO_HOST: ${MONGO_HOST:-mongodb}
+      MONGO_PORT: ${MONGO_PORT:-27017}
+      MONGO_DATABASE: ${MONGO_DATABASE:?}
+      MONGO_APP_USERNAME: ${MONGO_APP_USERNAME:?}
+      MONGO_APP_PASSWORD: ${MONGO_APP_PASSWORD:?}
+      # BE↔AI 내부 계약 토큰 — ai 서비스와 반드시 같은 값.
+      AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN:?}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set — 없으면 인증 API 전체가 조용히 503}
+      JWT_ISSUER: ${JWT_ISSUER:-dodam-api}
+      JWT_ACCESS_TOKEN_TTL: ${JWT_ACCESS_TOKEN_TTL:-30m}
+      JWT_REFRESH_TOKEN_TTL: ${JWT_REFRESH_TOKEN_TTL:-14d}
+      OAUTH_CONNECT_TIMEOUT: ${OAUTH_CONNECT_TIMEOUT:-3s}
+      OAUTH_READ_TIMEOUT: ${OAUTH_READ_TIMEOUT:-5s}
+      # 모바일 OAuth provider token 검증. 라이브에 APPLE_CLIENT_ID 는 **없다**(미발급) —
+      #   빈 문자열 주입 = 미설정과 동일하게 앱이 처리한다(해당 provider 만 503).
+      KAKAO_APP_ID: ${KAKAO_APP_ID:-}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      APPLE_CLIENT_ID: ${APPLE_CLIENT_ID:-}
+      # ── AI 연동. ★ 전부 http(실 AI) 다. mock 으로 떨어지면 그림분석·리포트·TTS 가
+      #    조용히 가짜가 된다(2026-07-30 컷오버에서 실제로 겪은 회귀 — prod overlay 가 고친 것).
+      AI_BASE_URL: ${AI_BASE_URL:-http://ai:8000}
+      AI_DRAWING_ANALYSIS_MODE: ${AI_DRAWING_ANALYSIS_MODE:?}
+      AI_DRAWING_ANALYSIS_BASE_URL: ${AI_DRAWING_ANALYSIS_BASE_URL:-http://ai:8000}
+      AI_OBSERVATION_MODE: ${AI_OBSERVATION_MODE:?}
+      AI_OBSERVATION_BASE_URL: ${AI_OBSERVATION_BASE_URL:-http://ai:8000}
+      # 관찰 리포트 생성 대기 예산 (S15P11B209-989/990). 앱 기본값 30s 는 HTP(그림 3장 =
+      #   VLM 3회 + 리포트 2패스)에 여유가 없다. ★ 라이브에는 **수동 patch 로만** 들어가 있고
+      #   마지막 `apply -k` 스냅샷에는 없다 — 컷백에서 빠뜨리면 리포트 실패가 재발한다.
+      AI_OBSERVATION_READ_TIMEOUT: ${AI_OBSERVATION_READ_TIMEOUT:?AI_OBSERVATION_READ_TIMEOUT — 라이브 수동 patch 값(990). 누락 금지}
+      AI_TTS_MODE: ${AI_TTS_MODE:?}
+      AI_TTS_BASE_URL: ${AI_TTS_BASE_URL:-http://ai:8000}
+      # AI 가 원본 이미지를 가져갈 일회성 내부 URL. 외부 도메인·nginx 를 거치지 않는다.
+      AI_IMAGE_ACCESS_BASE_URL: ${AI_IMAGE_ACCESS_BASE_URL:-http://backend:8080}
+      AI_IMAGE_ACCESS_TOKEN_TTL: ${AI_IMAGE_ACCESS_TOKEN_TTL:-60s}
+      # AI 모델 이름 — backend 도 이 값을 받는다(라이브 실측). 리포트 메타 표기용.
+      LLM_MODEL: ${LLM_MODEL:?}
+      REPORT_LLM_MODEL: ${REPORT_LLM_MODEL:?}
+      STT_MODEL: ${STT_MODEL:-whisper-1}
+      TTS_MODEL: ${TTS_MODEL:-gpt-4o-mini-tts}
+      TTS_VOICE: ${TTS_VOICE:-fable}
+      YOLO_MODEL_PATH: ${YOLO_MODEL_PATH:-/models/htp_yolo/htp_best.pt}
+      SKETCH_MODEL_PATH: ${SKETCH_MODEL_PATH:-/models/htp_yolo/sketch_base.pt}
+      # ── 파일 저장소. ★ s3 다. local 로 떨어지면 파일이 컨테이너 로컬로 가서
+      #    재생성마다 유실된다(가드레일 9절).
+      STORAGE_MODE: ${STORAGE_MODE:?}
+      S3_ENDPOINT: ${S3_ENDPOINT:-http://minio:9000}
+      S3_REGION: ${S3_REGION:-ap-northeast-2}
+      S3_BUCKET: ${S3_BUCKET:-dodam}
+      MINIO_BE_USER: ${MINIO_BE_USER:?}
+      MINIO_BE_PASSWORD: ${MINIO_BE_PASSWORD:?}
+      # 폴백(로컬 디스크) 경로 — 아래 backend-storage 바인드와 짝이다.
+      LOCAL_IMAGE_STORAGE_ROOT: ${LOCAL_IMAGE_STORAGE_ROOT:-/app/storage/images}
+      LOCAL_AUDIO_STORAGE_ROOT: ${LOCAL_AUDIO_STORAGE_ROOT:-/app/storage/audio}
+      # ── 비차단 시크릿 3종. 미설정이어도 앱은 뜨고 해당 기능만 막힌다(fail-closed-at-use).
+      #   ⚠️ GUARDIAN_PIN_PEPPER 를 바꾸면 저장된 모든 PIN 이 즉시 무효가 된다. 컷백에서
+      #     반드시 라이브와 같은 값이어야 한다 — 다르면 보호자 전원이 PIN 을 잃는다(879).
+      #   ⚠️ PUSH_DEVICE_TOKEN_ENCRYPTION_KEY 도 같다. 바꾸면 저장된 기기 토큰을 복호화할 수
+      #     없어(GCM 인증 실패) 푸시 대상이 통째로 사라진다.
+      GUARDIAN_PIN_PEPPER: ${GUARDIAN_PIN_PEPPER:-}
+      PUSH_DEVICE_TOKEN_ENCRYPTION_KEY: ${PUSH_DEVICE_TOKEN_ENCRYPTION_KEY:-}
+      APP_PUSH_FCM_ENABLED: ${APP_PUSH_FCM_ENABLED:-false}
+      APP_PUSH_FCM_CREDENTIALS_PATH: ${APP_PUSH_FCM_CREDENTIALS_PATH:-/run/secrets/fcm-service-account.json}
+    volumes:
+      # PVC backend-storage — STORAGE_MODE=s3 라 평시엔 거의 쓰이지 않지만 폴백 경로가
+      #   컨테이너 재생성마다 사라지지 않게 붙인다(가드레일 9절).
+      - ${PVC_ROOT:?}/pvc-b00cadf1-2c32-4c20-823c-5d3019010601_dodam_backend-storage:/app/storage
+    secrets:
+      - source: fcm_service_account
+        target: fcm-service-account.json
+    # ⚠️ ports 를 열지 않는다. 8080·9404 모두 내부망 전용.
+    #    9404(actuator/Prometheus)는 nginx 도 프록시하지 않는다 — 일부러 8080 과 분리한 구조다.
+    expose:
+      - "8080"
+      - "9404"
+    depends_on:
+      mysql:    { condition: service_healthy }
+      redis:    { condition: service_healthy }
+      minio:    { condition: service_healthy }
+      mongodb:  { condition: service_healthy }
+    # k8s 는 /actuator/health/readiness (포트 9404) 를 본다. 옛 compose 의 TCP 검사보다
+    #   정확하다 — "포트가 열렸다"와 "요청을 받을 준비가 됐다"는 다르다. curl 존재 실측 확인.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9404/actuator/health/readiness"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 120s               # k8s startupProbe 예산(5s × 24)
+    networks: [dodam-net]
+
+  # backend-green — backend 의 두 번째 색. blue 와 다른 것은 이미지 태그·컨테이너명·profile 뿐.
+  #   나머지(환경변수·볼륨·시크릿·expose·depends_on·healthcheck)는 &backend-blue 를 병합한다.
+  backend-green:
+    <<: *backend-blue
+    image: 127.0.0.1:5000/dodam-backend:${IMAGE_TAG_BACKEND_GREEN:-${IMAGE_TAG:?IMAGE_TAG must be set (live = 0d62bd59)}}
+    container_name: dodam-backend-green
+    profiles: ["backend-green"]
+
+  # ───────────────────────────────────────────────────────────────
+  # ai — FastAPI(Python). 대화 LLM·STT·TTS·그림분석·리포트. 아동 음성·발화가 지나간다.
+  #   ★ 블루-그린: backend 와 동일 원리로 blue/green 두 색. &ai-blue 를 green 이 병합한다.
+  # ───────────────────────────────────────────────────────────────
+  ai-blue: &ai-blue
+    image: 127.0.0.1:5000/dodam-ai:${IMAGE_TAG_AI_BLUE:-${IMAGE_TAG:?}}
+    container_name: dodam-ai-blue
+    profiles: ["ai-blue"]
+    restart: unless-stopped
+    mem_limit: 2g                      # k8s limits(2Gi). 1Gi 는 imgsz 960 추론에서 OOMKilled 됨(609 벤치).
+    cpus: 2.0
+    environment:
+      TZ: ${TZ:-Asia/Seoul}
+      # ⚠️ GMS_KEY 는 비밀 — 하드코딩·로그 금지. 값은 .env.compose 에만 존재.
+      GMS_KEY: ${GMS_KEY:?}
+      GMS_BASE_URL: ${GMS_BASE_URL:?}
+      AI_INTERNAL_TOKEN: ${AI_INTERNAL_TOKEN:?}
+      # 대화와 리포트는 요구가 정반대라 모델을 나눴다(S15P11B209-972).
+      #   ⚠️ REPORT_LLM_MODEL 을 빼면 LLM_MODEL 로 조용히 폴백한다(ai/config.py) —
+      #     기동은 되고 리포트만 경량 모델로 생성된다. 누락이 드러나지 않는 종류의 값이다.
+      LLM_MODEL: ${LLM_MODEL:?}
+      REPORT_LLM_MODEL: ${REPORT_LLM_MODEL:?}
+      STT_MODEL: ${STT_MODEL:-whisper-1}
+      TTS_MODEL: ${TTS_MODEL:-gpt-4o-mini-tts}
+      TTS_VOICE: ${TTS_VOICE:-fable}
+      # ⚠️ 두 가중치 경로는 **짝**이다. 하나만 주면 verify_all_models() 가 죽고
+      #   objectDetection 이 NOT_READY 가 된다(= 그림 분석 전체 정지). 2026-07-29 실사고.
+      YOLO_MODEL_PATH: ${YOLO_MODEL_PATH:-/models/htp_yolo/htp_best.pt}
+      SKETCH_MODEL_PATH: ${SKETCH_MODEL_PATH:-/models/htp_yolo/sketch_base.pt}
+    volumes:
+      # PVC ai-models — YOLO 가중치(*.pt)와 RAG 인덱스(/models/rag, ai/config.py 기본값).
+      #   :ro — 추론만 하므로 쓰기 권한을 주지 않는다(최소권한).
+      - ${PVC_ROOT:?}/pvc-42d390b8-1bce-4423-96aa-2345956542da_dodam_ai-models:/models:ro
+    # ⚠️ ports 미개방 — 외부 진입은 nginx 의 /ai/ 뿐.
+    expose:
+      - "8000"
+    # slim 이미지에 curl 이 없어 python stdlib 로 확인(옛 compose 에서 검증된 명령).
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health').status==200 else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s                # k8s startupProbe 예산(3s × 20) + 가중치 로드 여유
+    networks: [dodam-net]
+
+  # ai-green — ai 의 두 번째 색. 이미지 태그·컨테이너명·profile 만 다르고 나머지는 &ai-blue 병합.
+  ai-green:
+    <<: *ai-blue
+    image: 127.0.0.1:5000/dodam-ai:${IMAGE_TAG_AI_GREEN:-${IMAGE_TAG:?}}
+    container_name: dodam-ai-green
+    profiles: ["ai-green"]
+
+  # ───────────────────────────────────────────────────────────────
+  # web — 커뮤니티 웹(Next.js standalone).
+  #   ★ 블루-그린: blue/green 두 색. &web-blue 를 green 이 병합한다.
+  # ───────────────────────────────────────────────────────────────
+  web-blue: &web-blue
+    image: 127.0.0.1:5000/dodam-web:${IMAGE_TAG_WEB_BLUE:-${IMAGE_TAG:?}}
+    container_name: dodam-web-blue
+    profiles: ["web-blue"]
+    restart: unless-stopped
+    mem_limit: 512m                    # k8s limits(512Mi)
+    cpus: 0.5
+    environment:
+      NODE_ENV: production
+      TZ: ${TZ:-Asia/Seoul}
+      # ⚠️ 이것은 브라우저용 주소가 **아니다.** NEXT_PUBLIC_* 는 빌드 시점에 번들에 구워져
+      #   런타임 env 로 바뀌지 않는다(이미지 재빌드가 필요). 여기 API_BASE_URL 은 소셜 로그인
+      #   code→token 교환을 처리하는 **서버 전용 Route Handler** 가 백엔드를 부를 때 쓰는
+      #   클러스터 내부 절대주소다(서버-사이드 fetch 는 상대경로를 못 쓴다).
+      API_BASE_URL: ${WEB_API_BASE_URL:-http://backend:8080/api/v1}
+      # 소셜 로그인 client secret(서버 전용). 비어 있으면 해당 provider 로그인만 실패하고
+      #   커뮤니티는 정상 서비스한다 — 웹 전체를 secret 하나에 묶지 않는다.
+      KAKAO_CLIENT_SECRET: ${KAKAO_CLIENT_SECRET:-}
+      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+    # ⚠️ ports 미개방. 호스트 3000 은 과거 Grafana 가 점유했었고, 어차피 진입은 nginx 하나다.
+    expose:
+      - "3000"
+    # `/` 는 /community 로 307 리다이렉트한다. k8s httpGet 프로브는 3xx 를 성공으로 보므로
+    #   같은 판정을 내도록 statusCode < 400 으로 검사한다. node 는 이미지에 항상 있다(standalone).
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000/',r=>process.exit(r.statusCode<400?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    networks: [dodam-net]
+
+  # web-green — web 의 두 번째 색. 이미지 태그·컨테이너명·profile 만 다르고 나머지는 &web-blue 병합.
+  web-green:
+    <<: *web-blue
+    image: 127.0.0.1:5000/dodam-web:${IMAGE_TAG_WEB_GREEN:-${IMAGE_TAG:?}}
+    container_name: dodam-web-green
+    profiles: ["web-green"]
+
+  # ───────────────────────────────────────────────────────────────
+  # nginx — 리버스 프록시. ★ 유일하게 외부(호스트)로 열리는 서비스. EC2 UFW 도 80/443 만 허용.
+  # ───────────────────────────────────────────────────────────────
+  nginx:
+    image: 127.0.0.1:5000/dodam-nginx:${IMAGE_TAG:?}
+    container_name: dodam-nginx
+    restart: unless-stopped
+    mem_limit: 128m                    # k8s limits(128Mi). 실사용 약 13MB.
+    cpus: 0.5
+    environment:
+      # 액세스 로그 시각을 KST 로 (S15P11B209-736 후속). 없으면 UTC 로 찍혀 장애 조사 때
+      #   백엔드 로그·DB 와 9시간 어긋난 것을 사람이 매번 암산해야 한다.
+      TZ: ${TZ:-Asia/Seoul}
+    ports:
+      - "80:80"                        # ACME 챌린지 + https 리다이렉트 전용
+      - "443:443"                      # 실서비스 진입점(TLS 종단)
+    volumes:
+      # ★ conf 를 **마운트한다** — 옛 compose 는 이미지에 구운 conf 를 그대로 썼다.
+      #   여기서 방침을 바꾼 이유: 라이브 이미지(dodam-nginx:0d62bd59)에 구워진 conf 에는
+      #   `location /api/oauth/` 블록이 **없다**(그건 k3s ConfigMap 에만 추가됐다).
+      #   ⚠️ 2026-08-07 저녁 재확인: 태그가 4ada1bdf→0d62bd59 로 올라갔지만 dodam-nginx 의
+      #     **amd64 다이제스트는 42d8625f… 로 동일하다**(web 도 63c709b7… 로 동일).
+      #     즉 이미지 내용이 안 바뀌었으므로 이 결함은 그대로 살아 있고 마운트는 여전히 필수다.
+      #   그대로 띄우면 웹 소셜 로그인이 /api/ 로 잡혀 Spring 404 가 된다(817 회귀).
+      #   ⚠️ 가리키는 곳은 `infra/nginx/conf.d.compose` 다 — 이미지 bake 소스인
+      #     `infra/nginx/conf.d` 와 **일부러 분리했다.** 후자는 Jenkins 가 이미지를 구울 때
+      #     COPY 하는 빌드 입력이고, 이 마운트는 컷백 런타임 설정이다. 내용은 라이브
+      #     ConfigMap `gateway-conf` 스냅샷이며 resolver·업스트림 2쌍만 도커용으로 바꿨다.
+      #   ⚠️ 2026-07-22 사고(빈 conf 마운트)의 원인은 "bind 마운트" 자체가 아니라
+      #     **상대경로 + DooD** 였다. 그래서 절대 호스트 경로를 변수로 받는다(:? fail-fast).
+      #     Jenkins 컨테이너 안에서 이 파일을 실행하지 말 것.
+      - ${NGINX_CONF_DIR:?NGINX_CONF_DIR must be an absolute host path}:/etc/nginx/conf.d:ro
+      # PVC letsencrypt — 인증서. 저장소에 커밋 금지(가드레일).
+      - ${PVC_ROOT:?}/pvc-76ba24f5-a8fe-4802-988b-1c87791ec351_dodam_letsencrypt:/etc/letsencrypt:ro
+      # PVC certbot-webroot — ACME HTTP-01 챌린지 토큰 서빙.
+      #   ⚠️ 갱신 주체는 k8s CronJob `certbot-renew` 였다(746). **k3s 를 내리면 갱신이 멈춘다** —
+      #     컷백 기간이 인증서 만료 30일 창에 걸치는지 반드시 확인할 것(계획 문서 참조).
+      - ${PVC_ROOT:?}/pvc-adf7cf32-aa58-49d3-9880-1c9088bab76d_dodam_certbot-webroot:/var/www/certbot:ro
+      # PVC apk-dist — 팀·데모용 APK(docker cp 로 업로드, git 비추적).
+      - ${PVC_ROOT:?}/pvc-cf6427f1-0438-4940-8120-393c1524b2ec_dodam_apk-dist:/var/www/apk
+    # ⚠️ 블루-그린으로 바뀌면서 nginx 는 backend/ai/web 에 **depends_on 을 걸지 않는다.**
+    #   이유가 구조적이다: 활성 색은 상황에 따라 backend-blue 이거나 backend-green 인데,
+    #   depends_on 은 특정 서비스명을 못 박아야 한다. 그런데 profile 이 걸린 색을 무-profile
+    #   서비스(nginx)가 depends_on 하면, 그 색의 profile 이 비활성일 때 compose 가
+    #   "depends on undefined service" 로 프로젝트 전체를 무효화한다(실측 검증).
+    #   → 대신 순서 보장은 두 가지가 대신한다:
+    #     ① 평시엔 활성 색이 이미 떠 있어(upstream-active.conf 가 그 색을 가리킴) nginx 가
+    #        기동 시 그 이름을 정상 해석한다.
+    #     ② 콜드 스타트(전체 up -d/재부팅)에서 nginx 가 활성 색보다 먼저 떠 upstream 이름을
+    #        해석 못 하면 nginx 가 기동 실패하지만, restart: unless-stopped 가 재시도해
+    #        활성 색이 뜬 뒤 수렴한다(수 초의 flap, 데이터 없음). 무중단 배포 경로에서는
+    #        nginx 를 재생성하지 않고 reload 만 하므로 이 flap 이 발생하지 않는다.
+    healthcheck:
+      # k8s 와 같은 판정: 80 포트의 `/`(301). 443 을 치면 인증서 문제로 영원히 unhealthy 가
+      #   될 수 있고, 80 은 인증서와 무관하게 항상 응답한다. 301 은 성공으로 본다.
+      # ⚠️ wget 을 쓰지 않는다 — 이 이미지(dodam-nginx)에는 curl 만 있고 wget 이 없다.
+      #   2026-08-07 컷오버에서 실제로 이것 때문에 nginx 가 계속 unhealthy 였다
+      #   (서비스는 정상인데 검사 명령만 틀린 경우). 바이너리 존재를 확인하고 쓸 것.
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null -w '%{http_code}' http://127.0.0.1/ | grep -qE '^(2|3)'"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks: [dodam-net]
+
+# ───────────────────────────────────────────────────────────────
+# 내부 전용 네트워크.
+#   ⚠️ 정의를 `driver: bridge` 한 줄로 두는 것은 우연이 아니다. 호스트에 이미 존재하는
+#     `dodam_dodam-net`(옛 compose 가 만든 것)의 config-hash 와 맞추기 위한 것이다.
+#     여기에 옵션(ipam·labels 등)을 추가하면 해시가 달라지고, compose 가 네트워크를
+#     재생성하려 든다 — 그런데 **dodam-jenkins 가 붙어 있어 삭제되지 않는다.**
+#     그 경우의 회피책은 계획 문서의 "네트워크 충돌" 항목 참조.
+# ───────────────────────────────────────────────────────────────
+networks:
+  dodam-net:
+    driver: bridge
+
+# ───────────────────────────────────────────────────────────────
+# secrets — 런타임 비밀 파일 주입. 이미지·compose 에 값이 남지 않고 컨테이너 tmpfs 로만 전달.
+#   fcm_service_account: Firebase 푸시 Service Account JSON(개인키). S15P11B209-619.
+#     ⚠️ file: 은 반드시 **호스트 절대경로**. 상대경로 금지 — DooD 경로 함정(641).
+#     라이브 값: /etc/dodam/secrets/fcm-service-account.json (Secret dodam-secrets 의
+#     FCM_CREDENTIALS_HOST_PATH). 파일이 없으면 compose up 이 실패하므로 컷오버 전
+#     존재·권한을 확인할 것(계획 문서 프리플라이트).
+#     기본값 /dev/null 은 미발급 환경에서도 기동이 깨지지 않게 하는 안전판이다.
+# ───────────────────────────────────────────────────────────────
+secrets:
+  fcm_service_account:
+    file: ${FCM_CREDENTIALS_HOST_PATH:-/dev/null}
