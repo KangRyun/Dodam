@@ -1688,12 +1688,29 @@ class PersonPartTargetTest(unittest.TestCase):
         target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
         self.assertEqual("PERSON_HEAD", target.object_code)
 
-    def test_part_target_adds_visual_only_instruction(self):
+    def test_part_target_redirects_to_the_drawn_person(self):
+        """부위가 대상이어도 소유자를 묻지 않고, 눈에 보이는 세부로도 내려가지 않는다.
+
+        ⚠️ 991 에서 착지점을 뒤집었다. 918 은 소유격 질문("이 머리는 누구 머리야?")을
+        막으려고 "그 부분이 눈에 어떻게 보이는지만 물어봐 — 모양·크기·색처럼"으로 돌렸는데,
+        그 착지점이 HTP 프롬프트의 두 규칙과 정면으로 부딪혔다 — 색은 예외 없이 금지이고,
+        보이는 세부는 되묻지 말라고 되어 있다. 사람 그림은 부위 라벨이 신뢰도 상위를
+        차지해 이 경로가 자주 타는데도 모순이 조용히 살아남았다.
+        이제 부위는 실마리로만 쓰고 **그림 속 사람**에게 묻는다.
+
+        세부를 substring으로만 확인하면 금지절에서도 통과해 거짓 통과가 된다 —
+        그 낱말이 들어간 줄이 **지시가 아니라 금지인지**를 줄 단위로 본다.
+        """
         req = self._person(detected_objects=[_detected("PERSON_HEAD", "머리", 0.95)])
         target = question_service._target_for_purpose(req, "OBJECT_DESCRIPTION")
         block = question_service._activity_block(req, target)
-        self.assertIn("누구 것인지", block)
-        self.assertIn("모양·크기·색", block)
+        self.assertIn("누구 것인지", block)  # 918 소유격 금지는 그대로 유지한다
+        self.assertIn("그림 속 사람", block)  # 새 착지점
+
+        detail_lines = [line for line in block.splitlines() if "모양·크기·색" in line]
+        self.assertTrue(detail_lines, "눈에 보이는 세부를 다루는 줄이 통째로 사라졌다")
+        for line in detail_lines:
+            self.assertIn("묻지도 마", line)
 
     def test_whole_person_target_has_no_part_instruction(self):
         req = self._person(detected_objects=[_detected("PERSON", "사람", 0.9)])
