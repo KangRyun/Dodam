@@ -498,6 +498,10 @@ def _format_subject_blocks(req: contracts.ObservationGenerationRequest) -> str:
                     answer = "(건너뛴 질문)"
                 else:
                     answer = (qa.answer_text or "").strip() or "(답하지 않았어요)"
+                    # 칩 답변은 아이가 보기에서 고른 것이다(994) — 모델이 "~라고 말했어요"로
+                    # 옮기지 않도록 재료 단계에서 표시한다. 프롬프트 규칙과 한 쌍.
+                    if (qa.answer_type or "").upper() == "OPTION":
+                        answer += " (선택지에서 고른 답이에요)"
                 line = f"- 질문: {qa.question}\n  답변: {answer}"
                 # 근거 식별자(886) — 이 답변을 경향 카드 근거로 쓸 때 그대로 옮겨 적을 값이다.
                 # 미확정 STT는 식별자를 싣지 않는다: 표시는 유지하되 근거로는 쓸 수 없게 만든다
@@ -801,6 +805,24 @@ def _allowed_evidence_refs(
     if req.activity_metric_source_id:
         refs.add(("ACTIVITY_METRIC", req.activity_metric_source_id))
     return frozenset(refs)
+
+
+def _chip_answer_refs(
+    req: contracts.ObservationGenerationRequest,
+) -> frozenset[tuple[str, str]]:
+    """선택형(OPTION) 답변의 근거 참조 집합 (S15P11B209-994).
+
+    대화 답변 칩은 AI가 만든 보기 문장을 아이가 탭한 것이다 — 아이 표현으로 인정하되
+    (게이트 통과 가능) 확신도에서는 발화가 아니라 '고른 것'(_CHOICE)으로 센다.
+    실측(2026-08-07)에서 답변의 25.7%(131/510)가 칩이었다.
+    """
+    return frozenset(
+        ("QA_ANSWER", str(qa.answer_message_id))
+        for summary in req.subject_summaries
+        for qa in summary.qa_pairs
+        if qa.answer_message_id is not None
+        and (qa.answer_type or "").upper() == "OPTION"
+    )
 
 
 def _blocked_evidence_refs(
@@ -1274,7 +1296,11 @@ def _assemble(
     # blocked_refs: 미확정 STT(886)를 배제한다. 위기 발화(889)가 같은 집합에 합쳐진다.
     parsed_cards = interpretations
     interpretations, gate_reasons = interpretation_gate.apply(
-        parsed_cards, evidence_items, blocked_refs=_blocked_evidence_refs(req)
+        parsed_cards,
+        evidence_items,
+        blocked_refs=_blocked_evidence_refs(req),
+        # 선택형(OPTION) 답변은 발화가 아니라 '고른 것'으로 등급을 매긴다(994).
+        chip_answer_refs=_chip_answer_refs(req),
     )
     # 확신도 대비 과장 검사(982) — **게이트 뒤에** 돈다. 등급은 게이트가 찍으므로 그 전에는
     # 기준이 없다. 약한 근거로 강하게 말한 카드를 여기서 뺀다("약한 근거 → 강한 주장" 승격 차단).

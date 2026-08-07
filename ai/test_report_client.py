@@ -355,6 +355,68 @@ class BehaviorMetricsContractTest(unittest.TestCase):
         self.assertFalse(req.behavior_metrics.truncated)
 
 
+class ChipAnswerRefsTest(unittest.TestCase):
+    """선택형 답변의 근거 참조 수집 (S15P11B209-994).
+
+    이 집합이 게이트로 넘어가 OPTION 답변을 발화가 아니라 '고른 것'으로 등급 매기게 한다.
+    수집이 조용히 비면 재분류 전체가 무효가 된다 — 배선을 못 박는다.
+    """
+
+    def test_only_option_answers_are_collected(self):
+        req = _sample_request(
+            subject_summaries=[
+                contracts.SubjectSummary(
+                    drawing_subject="HOUSE",
+                    drawing_description="집이 있어요.",
+                    qa_pairs=[
+                        contracts.SubjectQaPair(
+                            question="이 집에서는 무슨 일이 있었어?",
+                            answer_text="생일잔치를 했어",
+                            answer_type="VOICE",
+                            answer_message_id=201,
+                        ),
+                        contracts.SubjectQaPair(
+                            question="이 집 안은 어떤 느낌이야?",
+                            answer_text="따뜻해요",
+                            answer_type="OPTION",
+                            answer_message_id=202,
+                        ),
+                        contracts.SubjectQaPair(
+                            question="답 없는 질문",
+                            answer_type="OPTION",
+                            answer_message_id=None,
+                        ),
+                    ],
+                )
+            ]
+        )
+        self.assertEqual(
+            report_client._chip_answer_refs(req),
+            frozenset({("QA_ANSWER", "202")}),
+        )
+
+    def test_chip_marker_is_rendered_in_qa_block(self):
+        """칩 답변은 재료 단계에서 '(선택지에서 고른 답이에요)'로 표시된다 — 프롬프트 규칙과 한 쌍."""
+        req = _sample_request(
+            subject_summaries=[
+                contracts.SubjectSummary(
+                    drawing_subject="HOUSE",
+                    drawing_description="집이 있어요.",
+                    qa_pairs=[
+                        contracts.SubjectQaPair(
+                            question="이 집 안은 어떤 느낌이야?",
+                            answer_text="따뜻해요",
+                            answer_type="OPTION",
+                            answer_message_id=202,
+                        ),
+                    ],
+                )
+            ]
+        )
+        message = report_client._format_activity(req, None, None, None)
+        self.assertIn("따뜻해요 (선택지에서 고른 답이에요)", message)
+
+
 class ChildAgeBlockTest(unittest.TestCase):
     """연령 규준 축의 재료 — [활동 데이터]의 나이 줄 (S15P11B209-1001).
 
