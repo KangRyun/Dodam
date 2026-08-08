@@ -643,6 +643,74 @@ class DiaryReportBuilderTest(unittest.TestCase):
         self.assertEqual(got["EMOTION_EXPRESSION"].status, "PARTIALLY_OBSERVED")
         self.assertIn("골랐어요", got["EMOTION_EXPRESSION"].observation)
 
+    def test_emotion_step_built_from_the_picker_is_not_counted_as_speech(self):
+        """고른 감정으로 만들어진 흐름 단계를 '말했다'로 세지 않는다.
+
+        회귀: 앞 테스트는 흐름을 비워 두고 봐서 이 경우를 지나쳤다. 실제로는 감정을 고르면
+        흐름에 EMOTION 단계가 생기고, 단계가 있다는 것만으로 OBSERVED 가 되어 한 마디도 하지
+        않은 아이에게 "그때의 마음을 자기 말로 이야기했어요"가 붙었다(2026-08-09 실측).
+        """
+        import diary_report_v2
+
+        req = _diary_request().model_copy(
+            update={"child_age": 5, "expressed_emotion_text": ""}
+        )
+        insights = diary_report_v2.build_diary_insights(
+            _signals(
+                narrativeFlow=[
+                    {
+                        "stepType": "EMOTION",
+                        "text": "기쁨을 골랐어요",
+                        "evidenceRefs": [_ref("EMOTION_SELECTION", "emotion-1")],
+                    }
+                ]
+            ),
+            req,
+            vision_available=True,
+        )
+        got = {o.domain: o for o in insights.developmental_observations}
+
+        emotion = got["EMOTION_EXPRESSION"]
+        self.assertEqual(emotion.status, "PARTIALLY_OBSERVED")
+        self.assertIn("골랐어요", emotion.observation)
+        self.assertNotIn("자기 말로", emotion.observation)
+
+    def test_option_only_answers_do_not_claim_the_child_told_the_story(self):
+        """보기로만 답한 아이에게 "자기 말로 이야기했어요"를 붙이지 않는다.
+
+        고른 답도 아이가 준 답이라 흐름의 한 단계가 된다. 그것을 말한 것과 같이 세면, 한 번도
+        문장을 만들지 않은 아이의 기록에 '이야기했다'가 남는다.
+        """
+        import diary_report_v2
+
+        base = _diary_request()
+        subject = base.subject_summaries[0]
+        chosen_only = subject.model_copy(
+            update={
+                "qa_pairs": [
+                    pair.model_copy(update={"answer_type": "OPTION_ANSWER"})
+                    for pair in subject.qa_pairs
+                ]
+            }
+        )
+        req = base.model_copy(
+            update={
+                "child_age": 5,
+                "expressed_emotion_text": "",
+                "representative_utterance": "",
+                "subject_summaries": [chosen_only],
+            }
+        )
+        insights = diary_report_v2.build_diary_insights(
+            _signals(), req, vision_available=True
+        )
+        got = {o.domain: o for o in insights.developmental_observations}
+
+        narrative = got["NARRATIVE_LANGUAGE"]
+        self.assertEqual(narrative.status, "PARTIALLY_OBSERVED")
+        self.assertIn("보기에서 골라", narrative.observation)
+        self.assertNotIn("자기 말로 풀어 이야기했어요", narrative.observation)
+
     def test_db_answer_type_spellings_are_both_accepted(self):
         """BE 는 DB enum(`OPTION_ANSWER`)을 그대로 보낸다.
 

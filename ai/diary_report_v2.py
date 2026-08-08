@@ -570,6 +570,22 @@ _UNKNOWN_TEMPLATES: tuple[tuple[str, str], ...] = (
 )
 
 
+def _is_backed_by_child_words(step: contracts.DiaryNarrativeStep) -> bool:
+    """이 흐름 단계가 아이가 **한 말**에 기대고 있는가.
+
+    감정 선택만으로 만들어진 단계는 근거가 ``EMOTION_SELECTION`` 하나뿐이다. 고른 것을 말한
+    것으로 세면 리포트가 아이가 하지 않은 말을 했다고 적는다 — 보호자가 읽는 문장이라 이 구분이
+    문구 다듬기보다 먼저다.
+
+    근거가 아예 없는 단계도 말한 것으로 세지 않는다. 무엇에 기대고 있는지 모르는 문장을
+    '아이가 말했다'로 올릴 수는 없다.
+    """
+    return any(
+        (ref.kind or "").strip().upper() != "EMOTION_SELECTION"
+        for ref in (step.evidence_refs or [])
+    )
+
+
 def _developmental_observations(
     req: contracts.ObservationGenerationRequest,
     *,
@@ -597,7 +613,11 @@ def _developmental_observations(
     findings: list[tuple[str, str, str, list]] = []
 
     # ① 이야기·언어 — 사건을 몇 단계나 이어 말했는가.
-    if len(events) >= 2:
+    #
+    # ⚠️ "자기 말로"는 아이가 **직접 문장을 만든 답**이 있을 때만 쓴다. 보기에서 고른 답도
+    #    흐름의 한 단계가 되지만, 그건 고른 것이지 말한 것이 아니다. 둘을 섞으면 리포트가
+    #    아이가 하지 않은 말을 했다고 적는다.
+    if spoken and len(events) >= 2:
         findings.append(
             (
                 developmental_context.NARRATIVE_LANGUAGE,
@@ -606,12 +626,21 @@ def _developmental_observations(
                 events[:2],
             )
         )
-    elif events or spoken:
+    elif spoken:
         findings.append(
             (
                 developmental_context.NARRATIVE_LANGUAGE,
                 developmental_context.PARTIAL,
                 "이번 활동에서 아이는 있었던 일 한 가지를 자기 말로 이야기했어요.",
+                events[:1],
+            )
+        )
+    elif events:
+        findings.append(
+            (
+                developmental_context.NARRATIVE_LANGUAGE,
+                developmental_context.PARTIAL,
+                "이번 활동에서 아이는 보기에서 골라 있었던 일을 알려줬어요. 자기 말로 풀어 이야기하지는 않았어요.",
                 events[:1],
             )
         )
@@ -626,16 +655,22 @@ def _developmental_observations(
         )
 
     # ② 감정 표현 — 말한 것과 고른 것을 구분한다. 고른 것만으로 '표현했다'고 쓰지 않는다.
-    if emotions or said_emotion:
+    #
+    # ⚠️ 흐름의 EMOTION 단계는 **고른 감정에서도 만들어진다.** 그래서 단계가 있다는 것만으로
+    #    OBSERVED 로 올리면, 한 마디도 하지 않고 표정을 고르기만 한 아이에게 "자기 말로
+    #    이야기했어요"가 붙는다(2026-08-09 실측 — 같은 화면 아래에 "감정을 고른 기록만 있으니"가
+    #    함께 떠서 서로 어긋났다). 근거가 감정 선택뿐인 단계는 말한 것으로 세지 않는다.
+    spoken_emotions = [step for step in emotions if _is_backed_by_child_words(step)]
+    if spoken_emotions or said_emotion:
         findings.append(
             (
                 developmental_context.EMOTION_EXPRESSION,
                 developmental_context.OBSERVED,
                 "이번 활동에서 아이는 그때의 마음을 자기 말로 이야기했어요.",
-                emotions[:1],
+                spoken_emotions[:1],
             )
         )
-    elif chose_emotion:
+    elif emotions or chose_emotion:
         findings.append(
             (
                 developmental_context.EMOTION_EXPRESSION,
