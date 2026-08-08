@@ -711,6 +711,46 @@ class DiaryReportBuilderTest(unittest.TestCase):
         self.assertIn("보기에서 골라", narrative.observation)
         self.assertNotIn("자기 말로 풀어 이야기했어요", narrative.observation)
 
+    def test_flow_step_that_came_from_the_picture_is_not_the_childs_telling(self):
+        """그림에서 나온 흐름 단계를 아이가 이야기한 것으로 세지 않는다.
+
+        회귀: 아이가 한 마디도 하지 않은 활동인데 흐름에 "가운데에 집 모양을 그렸어요"(그림
+        관찰에서 나온 문장) 하나가 있었고, 그것만으로 "있었던 일 한 가지를 자기 말로
+        이야기했어요"가 붙었다(2026-08-09 실측).
+        """
+        import diary_report_v2
+
+        base = _diary_request()
+        subject = base.subject_summaries[0]
+        no_answers = subject.model_copy(update={"qa_pairs": []})
+        req = base.model_copy(
+            update={
+                "child_age": 5,
+                "expressed_emotion_text": "",
+                "representative_utterance": "",
+                "subject_summaries": [no_answers],
+            }
+        )
+        insights = diary_report_v2.build_diary_insights(
+            _signals(
+                narrativeFlow=[
+                    {
+                        "stepType": "EVENT",
+                        "text": "가운데에 집 모양을 그렸어요",
+                        "evidenceRefs": [_ref("VLM_OBSERVATION", "obs-1")],
+                    }
+                ]
+            ),
+            req,
+            vision_available=True,
+        )
+        got = {o.domain: o for o in insights.developmental_observations}
+
+        narrative = got.get("NARRATIVE_LANGUAGE")
+        if narrative is not None:
+            self.assertNotIn("자기 말로", narrative.observation)
+            self.assertNotIn("보기에서 골라", narrative.observation)
+
     def test_db_answer_type_spellings_are_both_accepted(self):
         """BE 는 DB enum(`OPTION_ANSWER`)을 그대로 보낸다.
 

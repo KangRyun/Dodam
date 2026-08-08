@@ -570,18 +570,20 @@ _UNKNOWN_TEMPLATES: tuple[tuple[str, str], ...] = (
 )
 
 
-def _is_backed_by_child_words(step: contracts.DiaryNarrativeStep) -> bool:
-    """이 흐름 단계가 아이가 **한 말**에 기대고 있는가.
+def _is_backed_by_child_answer(step: contracts.DiaryNarrativeStep) -> bool:
+    """이 흐름 단계가 아이가 **질문에 준 답**에 기대고 있는가.
 
-    감정 선택만으로 만들어진 단계는 근거가 ``EMOTION_SELECTION`` 하나뿐이다. 고른 것을 말한
-    것으로 세면 리포트가 아이가 하지 않은 말을 했다고 적는다 — 보호자가 읽는 문장이라 이 구분이
-    문구 다듬기보다 먼저다.
+    흐름 단계는 아이의 답에서만 오지 않는다. 그림 관찰(``VLM_OBSERVATION``·
+    ``DETECTED_OBJECT``)에서 만들어진 단계도 있고, 감정 선택(``EMOTION_SELECTION``)만으로
+    만들어진 단계도 있다. 그것들을 아이가 이야기한 것으로 세면 **아이가 하지 않은 말을 했다고
+    적게 된다** — 2026-08-09 실측에서 "가운데에 집 모양을 그렸어요"(그림에서 나온 문장) 하나로
+    "있었던 일 한 가지를 자기 말로 이야기했어요"가 붙었다.
 
-    근거가 아예 없는 단계도 말한 것으로 세지 않는다. 무엇에 기대고 있는지 모르는 문장을
-    '아이가 말했다'로 올릴 수는 없다.
+    근거가 아예 없는 단계도 세지 않는다. 무엇에 기대고 있는지 모르는 문장을 아이의 표현으로
+    올릴 수는 없다.
     """
     return any(
-        (ref.kind or "").strip().upper() != "EMOTION_SELECTION"
+        (ref.kind or "").strip().upper() == "QA_ANSWER"
         for ref in (step.evidence_refs or [])
     )
 
@@ -614,9 +616,15 @@ def _developmental_observations(
 
     # ① 이야기·언어 — 사건을 몇 단계나 이어 말했는가.
     #
-    # ⚠️ "자기 말로"는 아이가 **직접 문장을 만든 답**이 있을 때만 쓴다. 보기에서 고른 답도
-    #    흐름의 한 단계가 되지만, 그건 고른 것이지 말한 것이 아니다. 둘을 섞으면 리포트가
-    #    아이가 하지 않은 말을 했다고 적는다.
+    # ⚠️ 흐름 단계가 있다는 것과 아이가 이야기했다는 것은 다르다. 단계는 그림 관찰에서도,
+    #    고른 답에서도 만들어진다. 그래서 세 갈래로 나눈다.
+    #
+    #        아이가 직접 문장을 만든 답이 있다   → "자기 말로 이야기했어요"
+    #        고른 답만 있다                      → "보기에서 골라 알려줬어요"
+    #        둘 다 없다(그림에서만 나온 단계)     → 확인하지 않음
+    #
+    #    셋을 섞으면 리포트가 아이가 하지 않은 말을 했다고 적는다(2026-08-09 실측).
+    answered_events = [step for step in events if _is_backed_by_child_answer(step)]
     if spoken and len(events) >= 2:
         findings.append(
             (
@@ -635,13 +643,13 @@ def _developmental_observations(
                 events[:1],
             )
         )
-    elif events:
+    elif answered_events:
         findings.append(
             (
                 developmental_context.NARRATIVE_LANGUAGE,
                 developmental_context.PARTIAL,
                 "이번 활동에서 아이는 보기에서 골라 있었던 일을 알려줬어요. 자기 말로 풀어 이야기하지는 않았어요.",
-                events[:1],
+                answered_events[:1],
             )
         )
     else:
@@ -660,7 +668,9 @@ def _developmental_observations(
     #    OBSERVED 로 올리면, 한 마디도 하지 않고 표정을 고르기만 한 아이에게 "자기 말로
     #    이야기했어요"가 붙는다(2026-08-09 실측 — 같은 화면 아래에 "감정을 고른 기록만 있으니"가
     #    함께 떠서 서로 어긋났다). 근거가 감정 선택뿐인 단계는 말한 것으로 세지 않는다.
-    spoken_emotions = [step for step in emotions if _is_backed_by_child_words(step)]
+    spoken_emotions = (
+        [step for step in emotions if _is_backed_by_child_answer(step)] if spoken else []
+    )
     if spoken_emotions or said_emotion:
         findings.append(
             (
