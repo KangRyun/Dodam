@@ -15,8 +15,6 @@ public enum ConversationErrorCode implements ErrorCode {
       HttpStatus.UNPROCESSABLE_ENTITY, "PREFERRED_RESPONSE_MODE_INVALID", "지원하지 않는 응답 방식입니다."),
   QUESTION_MESSAGE_NOT_FOUND(
       HttpStatus.NOT_FOUND, "QUESTION_MESSAGE_NOT_FOUND", "질문 메시지를 찾을 수 없습니다."),
-  AI_SAFETY_POLICY_BLOCKED(
-      HttpStatus.UNPROCESSABLE_ENTITY, "AI_SAFETY_POLICY_BLOCKED", "안전한 질문을 생성할 수 없습니다."),
   FALLBACK_QUESTION_NOT_FOUND(
       HttpStatus.SERVICE_UNAVAILABLE, "CONVERSATION_503_001", "질문을 준비할 수 없습니다."),
   QUESTION_STORAGE_CONFLICT(HttpStatus.CONFLICT, "CONVERSATION_409_002", "질문 저장 요청이 충돌했습니다.");

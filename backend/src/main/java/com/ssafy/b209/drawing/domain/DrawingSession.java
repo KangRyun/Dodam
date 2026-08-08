@@ -205,6 +205,32 @@ public class DrawingSession {
   }
 
   /**
+   * 끝난 대화를 이 활동에서 다시 열어도 되는 단계인지 확인한다.
+   *
+   * <p>그림일기는 대화가 질문 상한으로 끝난 뒤에도 아이가 캔버스에 계속 그리고, 새 그림이 붙으면 끝난 대화 세션을 다시 연다. 그 재개를 받아도 되는 활동 단계인지를
+   * 여기서 정한다.
+   *
+   * <p><b>감정 회고로 넘어가기 전 단계만 허용한다.</b> {@link DrawingStage#REFLECTION} 이후는 아이가 감정을 고르고 완료·리포트로 향하는
+   * 구간이라, 여기에 대화 메시지를 더 붙이면 <b>이미 만들어진 리포트에 없는 말이 완료된 활동에 남는다.</b> 대화가 끝난 뒤 뒤늦게 도착하는 질문 요청이 정확히 이
+   * 경로로 들어오므로, 앱 화면 가드와 별개로 서버가 한 번 더 막는다.
+   *
+   * <p>"REFLECTION 이후만 아니면 연다"가 아니라 <b>열 단계를 나열한 화이트리스트</b>로 둔 것은 의도다 — 단계가 하나 늘 때 아무도 결정하지 않은 재개가
+   * 조용히 켜지지 않는다.
+   *
+   * <p>{@link DrawingSessionStatus#IN_PROGRESS}도 함께 본다. {@link #abandon} 은 중단 지점을 남기려고 단계를 그대로 두므로,
+   * 포기된 활동이 DRAWING 단계인 채로 남아 있을 수 있다.
+   *
+   * @return 삭제되지 않은 진행 중 DRAWING·ANALYZING·CONVERSING 단계이면 {@code true}
+   */
+  public boolean canReopenConversation() {
+    return deletedAt == null
+        && sessionStatus == DrawingSessionStatus.IN_PROGRESS
+        && (currentStage == DrawingStage.DRAWING
+            || currentStage == DrawingStage.ANALYZING
+            || currentStage == DrawingStage.CONVERSING);
+  }
+
+  /**
    * 현재 세션이 감정 표현을 최초 저장하거나 수정할 수 있는지 확인한다.
    *
    * @return 삭제되지 않은 진행 중 CONVERSING 또는 REFLECTION 단계이면 {@code true}
