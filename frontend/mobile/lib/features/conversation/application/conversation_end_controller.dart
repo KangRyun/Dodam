@@ -96,6 +96,27 @@ final class ConversationEndController extends ChangeNotifier {
     }
   }
 
+  /// 서버가 대화를 다시 열어 줬을 때 종료 상태를 되돌린다.
+  ///
+  /// 그림일기는 대화가 끝난 뒤에도 아이가 그림을 더 그리면 서버가 새 질문과 함께
+  /// 대화를 다시 연다. 종료 상태를 그대로 두면 화면은 '대화 끝'인 채로 새 질문을
+  /// 받아, 아이가 답하기 전에 그림 활동이 완료돼 마지막 말이 기록에 남지 않는다.
+  ///
+  /// 보류 Key·Body도 함께 버린다. 다음 종료는 마지막 질문 ID가 달라진 다른 요청이라
+  /// 같은 Key로 보내면 백엔드가 `IDEMPOTENCY_KEY_REUSED`(409)로 거절한다.
+  ///
+  /// 실패 상태는 건드리지 않는다 — 그때는 대화가 아직 끝나지 않아 되돌릴 것이 없고,
+  /// 아이·보호자가 다시 시도할 수 있는 오류를 지우면 안 된다.
+  void reopen() {
+    if (_disposed || !completed) return;
+    status = ConversationEndStatus.idle;
+    error = null;
+    nextStage = null;
+    _pendingIdempotencyKey = null;
+    _pendingRequest = null;
+    notifyListeners();
+  }
+
   // 중간 대화는 그림·분석 단계로, 최종 대화는 감정 선택 단계로 돌아간다.
   static const _validNextStages = {'DRAWING', 'ANALYZING', 'REFLECTION'};
 

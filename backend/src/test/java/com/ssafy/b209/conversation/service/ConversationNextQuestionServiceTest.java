@@ -20,6 +20,7 @@ import com.ssafy.b209.analysis.service.DrawingAnalysisActivityContext;
 import com.ssafy.b209.analysis.service.DrawingAnalysisActivityContextResolver;
 import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.child.repository.ChildRepository;
+import com.ssafy.b209.conversation.config.ConversationQuestionLimitProperties;
 import com.ssafy.b209.conversation.domain.ConversationHistoryMessage;
 import com.ssafy.b209.conversation.domain.ConversationHistoryOption;
 import com.ssafy.b209.conversation.domain.ConversationMessage;
@@ -406,6 +407,63 @@ class ConversationNextQuestionServiceTest {
     assertBusinessError(
         () -> service.generate(3L, 11L, request()),
         ConversationErrorCode.CONVERSATION_ALREADY_COMPLETED);
+  }
+
+  @Test
+  void letsALimitReachedConversationThroughSoItCanBeReopened() {
+    // 그림일기는 대화가 끝난 뒤에도 아이가 계속 그리고, 새 그림이 붙으면 FE가 같은 next-question 을
+    //   다시 부른다(새 엔드포인트 없음). 여기서는 통과만 시키고, 상태를 실제로 바꾸는 재개는
+    //   세션 잠금을 쥔 QuestionPersistenceService 에서만 일어난다.
+    stubAuthorizedConversation(true, false, true);
+    given(session.isReopenEligible(ConversationQuestionLimitProperties.ABSOLUTE_MAX))
+        .willReturn(true);
+    stubChildContext();
+    given(questionService.generateQuestion(any()))
+        .willReturn(new GeneratedQuestion(907L, "이번엔 무엇을 그렸어?", false, 6, List.of(), null));
+
+    assertThat(service.generate(3L, 11L, request()).messageId()).isEqualTo(907L);
+
+    verify(questionService).generateQuestion(any());
+  }
+
+  @Test
+  void carriesTheOpenDrawingActivityStageIntoTheQuestionCommand() {
+    // 활동 단계는 활동 유형과 같은 그림 세션 조회에서 이미 확정된다. 재개 판정을 하는 아래 계층이
+    //   같은 조회를 반복하지 않도록 값으로 실어 내린다.
+    stubAuthorizedConversation(true, false, true);
+    given(session.isReopenEligible(ConversationQuestionLimitProperties.ABSOLUTE_MAX))
+        .willReturn(true);
+    stubChildContext();
+    given(drawingSessionDetail.canReopenConversation()).willReturn(true);
+    given(questionService.generateQuestion(any()))
+        .willReturn(new GeneratedQuestion(908L, "이번엔 무엇을 그렸어?", false, 6, List.of(), null));
+
+    service.generate(3L, 11L, request());
+
+    ArgumentCaptor<GenerateQuestionCommand> commandCaptor =
+        ArgumentCaptor.forClass(GenerateQuestionCommand.class);
+    verify(questionService).generateQuestion(commandCaptor.capture());
+    assertThat(commandCaptor.getValue().drawingActivityOpen()).isTrue();
+  }
+
+  @Test
+  void carriesAClosedDrawingActivityStageSoTheConversationIsNotReopened() {
+    // 아이가 이미 감정 회고·리포트·완료로 넘어간 활동이다. 여기서는 세션 상태만 보고 통과시키지만,
+    //   닫힌 단계를 함께 내려보내 아래 계층이 재개를 막는다 — 방어선을 앱 화면 하나에 걸지 않는다.
+    //   (그림 세션 Mock 의 canReopenConversation 기본값이 곧 '닫힘'이다.)
+    stubAuthorizedConversation(true, false, true);
+    given(session.isReopenEligible(ConversationQuestionLimitProperties.ABSOLUTE_MAX))
+        .willReturn(true);
+    stubChildContext();
+    given(questionService.generateQuestion(any()))
+        .willReturn(new GeneratedQuestion(909L, "이번엔 무엇을 그렸어?", false, 6, List.of(), null));
+
+    service.generate(3L, 11L, request());
+
+    ArgumentCaptor<GenerateQuestionCommand> commandCaptor =
+        ArgumentCaptor.forClass(GenerateQuestionCommand.class);
+    verify(questionService).generateQuestion(commandCaptor.capture());
+    assertThat(commandCaptor.getValue().drawingActivityOpen()).isFalse();
   }
 
   @Test

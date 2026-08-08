@@ -418,6 +418,15 @@ class _DrawingScreenState extends State<DrawingScreen>
   /// 서버가 이미 종료됐다고 응답한 대화인지. 감정·완료 화면까지 전달한다.
   bool _conversationAlreadyEnded = false;
 
+  /// 끝난 대화를 새 그림으로 다시 여는 요청이 도는 중인지.
+  ///
+  /// 아이가 누른 조작이 아니라 그림이 바뀌어 생긴 배경 트리거다. 이 요청으로 새
+  /// 질문이 실제로 도착한 순간에만 화면을 '대화 중'으로 되돌린다.
+  bool _conversationResumeInFlight = false;
+
+  /// 재개를 이미 시도한 분석 ID. 같은 그림으로 서버에 반복해 묻지 않는다.
+  int? _resumeAttemptedAnalysisId;
+
   /// 캔버스 입력이 막힌 상태인지 나타낸다.
   ///
   /// 대화 단계 세션으로 복귀했거나(S15P11B209-664) 이번 화면에서 그림 단계를
@@ -1088,11 +1097,17 @@ class _DrawingScreenState extends State<DrawingScreen>
     final detectionController = _objectDetectionController;
     final result = detectionController?.validResult;
     if (detectionController?.status != DrawingObjectDetectionStatus.succeeded ||
-        result == null ||
-        _conversationEndController?.completed == true) {
+        result == null) {
       return;
     }
     final questionController = _questionController;
+    if (_conversationEndController?.completed == true) {
+      // 대화가 끝난 뒤에도 아이가 그림을 더 그렸다. 새 그림을 근거로 다시 물어볼
+      // 수 있는지 서버에 조용히 물어본다.
+      if (questionController == null) return;
+      unawaited(_resumeConversationForNewDrawing(result.drawingAnalysisId));
+      return;
+    }
     if (questionController == null) {
       // 아직 대화가 없으면 탐지 분석 ID로 대화를 생성한 뒤 질문을 요청한다.
       unawaited(
@@ -1106,6 +1121,50 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
     // 최신 탐지 결과의 분석 ID로 질문을 생성해 그림과 질문의 기준을 일치
     unawaited(questionController.loadForAnalysis(result.drawingAnalysisId));
+  }
+
+  /// 끝난 대화를 새 그림 기준으로 다시 연다.
+  ///
+  /// 서버는 "질문 상한으로 끝났고 절대 상한은 아직 남은" 대화만 다시 열어 준다.
+  /// 그 밖의 종료(아이가 그만하기·보호자 종료·절대 상한 도달)는 거절하는데, 이건
+  /// 고장이 아니라 대화가 정말로 끝난 보통의 경우다. 아이가 누른 조작도 아니므로
+  /// 거절을 화면에 알리지 않고 그림만 계속 그리게 둔다 — 요청 자체가
+  /// [AiQuestionController.resumeForAnalysis]로 조용히 나간다.
+  Future<void> _resumeConversationForNewDrawing(int analysisId) async {
+    final questionController = _questionController;
+    if (questionController == null ||
+        _conversationResumeInFlight ||
+        _resumeAttemptedAnalysisId == analysisId) {
+      return;
+    }
+    // 다음 화면으로 넘어가는 중이면 새 질문을 띄울 자리가 없다.
+    if (_canvasLocked || _isCompleting || _isLeaving || _movedToReflection) {
+      return;
+    }
+    _resumeAttemptedAnalysisId = analysisId;
+    _conversationResumeInFlight = true;
+    try {
+      // 성공하면 Controller의 알림을 타고 [_handleQuestionChanged]가 화면을 다시
+      // '대화 중'으로 되돌린다. 질문이 실제로 도착한 순간에만 되돌려야 종료 상태와
+      // 화면이 어긋나지 않는다.
+      await questionController.resumeForAnalysis(analysisId);
+    } finally {
+      _conversationResumeInFlight = false;
+    }
+  }
+
+  /// 서버가 다시 열어 준 대화에 맞춰 화면을 '대화 중'으로 되돌린다.
+  void _reopenConversationForNewQuestion() {
+    final endController = _conversationEndController;
+    if (endController == null || !endController.completed) return;
+    // 새 질문에 답하기 전에 활동이 끝나 버리지 않도록 '그림 완료'를 다시 막는다.
+    endController.reopen();
+    // 다음 상한 도달에서 종료 요청을 한 번 더 보낼 수 있게 자동 종료 기록도 지운다.
+    _automaticConversationEndStarted = false;
+    _conversationAlreadyEnded = false;
+    // 서버가 대화를 다시 열었으므로 앱이 들고 있던 상한은 더 이상 맞지 않는다.
+    // 모르는 상태로 두고 상한 도달은 next-question 응답으로 확인한다(§_withinServerQuestionLimit).
+    _serverMaxQuestionCount = null;
   }
 
   /// 객체 탐지 분석 ID로 대화 세션을 생성하고 대화 컨트롤러를 구성한다.
@@ -1279,10 +1338,12 @@ class _DrawingScreenState extends State<DrawingScreen>
       return;
     }
     final question = _questionController?.question;
-    if (!mounted ||
-        _appInBackground ||
-        _conversationEndController?.completed == true ||
-        question == null) {
+    if (!mounted || question == null) return;
+    // 끝난 대화에 새 질문이 도착했다 — 서버가 새 그림을 보고 대화를 다시 열어 준
+    // 경우다. 화면 상태도 함께 되돌려야 질문 말풍선이 다시 뜨고 '그림 완료'가 다시
+    // 막힌다. 재개 요청이 아닌 경로로 온 질문에는 손대지 않는다.
+    if (_conversationResumeInFlight) _reopenConversationForNewQuestion();
+    if (_appInBackground || _conversationEndController?.completed == true) {
       return;
     }
     _knownQuestionMessageIds.add(question.messageId);

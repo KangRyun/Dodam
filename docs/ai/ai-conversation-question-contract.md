@@ -156,7 +156,9 @@ AI 호출은 DB 트랜잭션 밖에서 수행한다. 실제 제시할 질문이 
 
 - 연결 실패는 동일 `X-Request-Id`로 한 번만 재시도한다.
 - read timeout 뒤에는 재전송하지 않는다. AI 결과나 카운트를 저장하지 않고, 가능한 경우 활성 `FALLBACK` 템플릿 질문만 저장한다.
-- 안전 차단은 `422 AI_SAFETY_POLICY_BLOCKED`, `retryable=false`으로 처리한다.
+- 안전 차단(AI가 자체 차단해 `422 AI_SAFETY_POLICY_BLOCKED`로 응답한 경우)은 **재전송하지 않고 스키마 불일치·연결 오류와 똑같이 활성 `FALLBACK` 템플릿 질문으로 전환한다** (2026-08-08 변경). 차단된 AI 문장은 저장하지도, 아이에게 보여주지도 않는다 — 아이에게 나가는 것은 사전 검증된 템플릿 질문뿐이라 이 전환이 안전 경계를 넓히지 않는다.
+  - 이전 규칙(BE가 `422 AI_SAFETY_POLICY_BLOCKED`, `retryable=false`로 대화를 끝냄)은 폐기했다. 아이가 대화 중 부적절한 말을 하면 그 뒤 AI 응답이 안전 규칙에 걸릴 확률이 올라가고, 걸리는 순간 재시도 경로도 없이 대화가 끊기는 문제가 실사용에서 확인됐다. **BE 공개 오류 코드 `ConversationErrorCode.AI_SAFETY_POLICY_BLOCKED`도 함께 제거했다** — §7의 "안전 차단 오류 코드" 미결 행(API 명세에 이 코드가 없어 기준 확정이 필요하다는 항목)은 이 결정으로 종료한다.
+  - AI→BE 응답의 `errorCode: AI_SAFETY_POLICY_BLOCKED`와 이를 분류하는 클라이언트 계층(`AiQuestionClientException.Type.SAFETY_POLICY_BLOCKED`)은 그대로 유지한다. 바뀐 것은 BE가 그 분류를 받고 하는 일뿐이다.
 - 성공 HTTP 200의 스키마 불일치는 `RESPONSE_SCHEMA_INVALID`로 이력에 남기고 템플릿 폴백으로 전환한다.
 - 활성 폴백 템플릿이 없으면 질문 저장·횟수 증가는 하지 않으며 기술 오류·차단 사유를 아동에게 노출하지 않는다.
 
@@ -178,10 +180,12 @@ AI 호출은 DB 트랜잭션 밖에서 수행한다. 실제 제시할 질문이 
 | 메시지 순번 UNIQUE | PASS | 본 문서 §4 60행·§5 84행; V1 `uk_conversation_messages_session_sequence` (345~346행) | `UNIQUE(conversation_session_id, message_sequence)`가 이미 존재함을 명시하며 추가 migration을 요구하지 않는다. 150번은 세션 잠금과 기존 UNIQUE 충돌 처리만 구현하면 된다. |
 | 질문별 버전 이력 | PASS | 본 문서 §4 62행·72행; V1 전체 스키마 | `ai_question_generation_histories` 또는 질문별 버전 영속 컬럼을 실제 V1 테이블처럼 요구하지 않는다. 본 V1 범위에서는 DB 비영속으로 처리하며 별도 승인 범위로 분리했다. |
 | 현재 AI Mock 호환성 | 미결(별도 작업) | 본 문서 §6 88행; `ai/main.py` 63~88행 | Mock은 현재 `POST /analyze/conversation` 및 `question`/`chips`/`model_id`/`prompt_version`을 사용해 목표 계약과 다르다. 본 문서가 이를 별도 AI 이행 작업으로 명시하므로 150번의 DB 비변경 저장 구현을 차단하지는 않는다. AI 담당자가 목표 endpoint·스키마 이행을 완료하고, 백엔드 생성자가 목표 계약 통합 테스트로 확인한다. |
-| 안전 차단 오류 코드 | 확인 필요(API 명세) | 본 문서 §5 80행; `API_완전_명세서_v1.0.md` AI 오류 표 §3.2 | 본 계약은 `422 AI_SAFETY_POLICY_BLOCKED`를 정하지만, 현행 API 명세 오류 표에는 해당 코드가 없다. DB 저장 매핑과 150번의 DB 비변경 구현을 차단하지는 않으나, 문서 담당자·AI 담당자가 API 명세와 계약 중 어느 문서를 기준으로 확정할지 결정하고 통합 테스트 기대값을 일치시켜야 한다. |
+| 안전 차단 오류 코드 | ~~확인 필요(API 명세)~~ → **종결(2026-08-08, §5)** | 본 문서 §5 80행; `API_완전_명세서_v1.0.md` AI 오류 표 §3.2 | ~~본 계약은 `422 AI_SAFETY_POLICY_BLOCKED`를 정하지만, 현행 API 명세 오류 표에는 해당 코드가 없다. 문서 담당자·AI 담당자가 API 명세와 계약 중 어느 문서를 기준으로 확정할지 결정해야 한다.~~ **→ 2026-08-08 §5로 종결한다.** 안전 차단을 스키마 불일치·연결 오류와 똑같이 폴백 템플릿으로 전환하기로 하면서 BE 공개 오류 코드 `ConversationErrorCode.AI_SAFETY_POLICY_BLOCKED` 자체를 제거했다. 공개 오류 코드가 없어졌으므로 API 명세와 맞출 대상도 없다 — API 명세 오류 표에 해당 코드가 없는 것이 이제 맞는 상태다. (AI→BE 응답의 `errorCode`와 클라이언트 계층 분류는 §5대로 유지한다.) |
 
 ### S15P11B209-150 DB 비변경 구현 판정: PASS
 
 V1 실제 물리 스키마만 사용하면 150번은 DB migration이나 존재하지 않는 테이블·컬럼 없이 구현할 수 있다. 필수 구현 범위는 `drawingSessionId → drawing_session_id`, `targetObject`·`boundingBox → target_object_json`, AI/QUESTION·`raw_text`·`options_json`·`question_template_id` 저장, 기존 세션별 순번 UNIQUE 및 질문 수 CHECK 준수다.
 
-미결 사항은 AI Mock의 별도 endpoint 이행과 안전 차단 오류 코드의 API 명세 정합성이다. 둘 다 DB 저장 매핑의 FAIL 사유는 아니며, AI 담당자·문서 담당자·백엔드 생성자가 후속 통합 테스트 전에 해소한다.
+남은 미결 사항은 AI Mock의 별도 endpoint 이행뿐이다. DB 저장 매핑의 FAIL 사유는 아니며, AI 담당자·백엔드 생성자가 후속 통합 테스트 전에 해소한다.
+
+> 안전 차단 오류 코드는 **2026-08-08 §5로 종결됐다** — BE 공개 오류 코드를 제거해 API 명세와 맞출 대상 자체가 사라졌다. 위 표의 해당 행 참고.

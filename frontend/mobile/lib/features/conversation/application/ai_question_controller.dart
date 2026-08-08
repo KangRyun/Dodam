@@ -6,6 +6,7 @@ import '../../../core/network/network.dart';
 import '../domain/models/conversation_end.dart';
 import '../domain/models/ai_question.dart';
 import '../domain/repositories/conversation_repository.dart';
+import 'conversation_failure_log.dart';
 import 'conversation_retry_policy.dart';
 
 enum AiQuestionStatus {
@@ -50,6 +51,11 @@ final class AiQuestionController extends ChangeNotifier {
   int _generation = 0;
   bool _disposed = false;
 
+  /// 조용한 재개 요청 하나의 Key와 대상 분석. 같은 그림 재시도는 같은 Key를 쓴다.
+  String? _resumeKey;
+  int? _resumeAnalysisId;
+  bool _resumeInFlight = false;
+
   bool get isLoading => status == AiQuestionStatus.loading;
   bool get canRetry =>
       status == AiQuestionStatus.failure &&
@@ -78,6 +84,75 @@ final class AiQuestionController extends ChangeNotifier {
   /// 새 객체 탐지 결과를 기준으로 다음 질문을 요청한다.
   Future<void> loadForAnalysis(int analysisId) =>
       _load(analysisId, previousAnswerMessageId: null);
+
+  /// 끝난 대화를 새 그림 기준으로 다시 열어 달라고 조용히 청한다.
+  ///
+  /// 아이가 누른 조작이 아니라 그림이 바뀌어 생긴 배경 요청이다. 서버는 "질문 상한
+  /// 으로 끝났고 절대 상한은 아직 남은" 대화만 다시 열어 주고, 그 밖의 종료(아이가
+  /// 그만하기·보호자 종료·절대 상한 도달)는 거절한다. 그 거절은 고장이 아니라 정상
+  /// 이므로 실패를 상태에 남기지 않는다 — [status]를 failure로 올리면 그림만 그리고
+  /// 있던 아이 화면에 "질문을 불러오지 못했어요" 카드가 떠 없던 문제를 만든다
+  /// (가드레일 9절).
+  ///
+  /// 그래서 성공했을 때만 상태를 success로 바꾸고 `true`를 돌려준다. 실패는 조용히
+  /// `false`이고 이전 상태(대개 [AiQuestionStatus.conversationComplete])가 그대로
+  /// 남는다.
+  Future<bool> resumeForAnalysis(int analysisId) async {
+    if (_disposed || analysisId <= 0 || isLoading || _resumeInFlight) {
+      return false;
+    }
+    // 같은 그림으로 이미 질문을 받았으면 다시 청하지 않는다.
+    if (status == AiQuestionStatus.success &&
+        _requestBasisAnalysisId == analysisId) {
+      return false;
+    }
+    if (_resumeAnalysisId != analysisId) {
+      _resumeAnalysisId = analysisId;
+      _resumeKey = null;
+    }
+    // 같은 그림 재시도는 같은 Key를 재사용한다 — Body가 같으니 fingerprint도 같다.
+    final key = _resumeKey ??= _idempotencyKeyProvider();
+    // 상태를 건드리지 않으므로 세대도 올리지 않는다. 요청이 도는 사이 다른 경로가
+    // 상태를 바꾸면 세대가 어긋나 이 응답은 버려진다.
+    final generation = _generation;
+    _resumeInFlight = true;
+    try {
+      final loaded = await _repository.requestNextQuestion(
+        conversationId: conversationId,
+        request: NextQuestionRequest(
+          basisAnalysisId: analysisId,
+          previousAnswerMessageId: null,
+        ),
+        idempotencyKey: key,
+      );
+      if (!_isCurrent(generation)) return false;
+      _requestBasisAnalysisId = analysisId;
+      _requestPreviousAnswerMessageId = null;
+      _requestKey = key;
+      _resumeKey = null;
+      _resumeAnalysisId = null;
+      question = loaded;
+      error = null;
+      completionReason = null;
+      conversationAlreadyEnded = false;
+      status = AiQuestionStatus.success;
+      notifyListeners();
+      return true;
+    } on Object catch (caught) {
+      // 화면에는 남기지 않지만 개발 터미널에서는 거절 사유를 구분할 수 있어야 한다.
+      debugConversationFailure(operation: 'conversation_resume', error: caught);
+      // 저장 전 거절이 확정된 실패는 보류 Key를 버려 새 요청을 허용한다.
+      if (!shouldKeepRequestSnapshot(
+        caught,
+        endpoint: ConversationRequestEndpoint.nextQuestion,
+      )) {
+        _resumeKey = null;
+      }
+      return false;
+    } finally {
+      _resumeInFlight = false;
+    }
+  }
 
   /// 저장된 답변 또는 건너뛰기 뒤 같은 그림을 기준으로 후속 질문을 요청한다.
   Future<void> loadNext({int? previousAnswerMessageId}) => _load(

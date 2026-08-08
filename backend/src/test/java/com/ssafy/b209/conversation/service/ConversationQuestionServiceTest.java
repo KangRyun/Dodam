@@ -3,6 +3,7 @@ package com.ssafy.b209.conversation.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.lenient;
@@ -12,6 +13,7 @@ import static org.mockito.Mockito.verify;
 
 import com.ssafy.b209.analysis.repository.AnalysisObservationResultRepository;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
+import com.ssafy.b209.conversation.config.ConversationQuestionLimitProperties;
 import com.ssafy.b209.conversation.domain.AiQuestionTemplate;
 import com.ssafy.b209.conversation.domain.AiQuestionTemplateOption;
 import com.ssafy.b209.conversation.domain.ConversationSession;
@@ -48,8 +50,12 @@ class ConversationQuestionServiceTest {
   @Mock private AiQuestionClient aiQuestionClient;
   @Mock private QuestionPersistenceService questionPersistenceService;
   @Mock private AnalysisObservationResultRepository observationResultRepository;
+
   @Mock private com.ssafy.b209.drawing.htp.repository.HtpAssessmentRepository htpAssessmentRepository;
   @Mock private com.ssafy.b209.conversation.repository.ConversationMessageRepository conversationMessageRepository;
+
+  private static final ConversationQuestionLimitProperties QUESTION_LIMITS =
+      new ConversationQuestionLimitProperties(5, 5);
 
   private ConversationQuestionService service;
   private ConversationSession session;
@@ -65,7 +71,8 @@ class ConversationQuestionServiceTest {
             questionPersistenceService,
             observationResultRepository,
             htpAssessmentRepository,
-            conversationMessageRepository);
+            conversationMessageRepository,
+            QUESTION_LIMITS);
     session = mock(ConversationSession.class);
     lenient().when(session.getDrawingSessionId()).thenReturn(9L);
     lenient().when(session.getDifficulty()).thenReturn(QuestionDifficulty.LOWER_ELEMENTARY);
@@ -73,7 +80,8 @@ class ConversationQuestionServiceTest {
     lenient().when(session.getMaxQuestionCount()).thenReturn(10);
     lenient().when(session.isConversing()).thenReturn(true);
     lenient().when(session.isCompleted()).thenReturn(false);
-    given(session.canAskQuestion()).willReturn(true);
+    // 재개 대상 세션은 상한에 닿아 있어 canAskQuestion 을 아예 부르지 않는다 — lenient 로 둔다.
+    lenient().when(session.canAskQuestion()).thenReturn(true);
     given(conversationSessionRepository.findById(1L)).willReturn(Optional.of(session));
   }
 
@@ -122,7 +130,8 @@ class ConversationQuestionServiceTest {
             null,
             "HTP",
             "HOUSE",
-            List.of("TREE", "SUN")));
+            List.of("TREE", "SUN"),
+            true));
 
     ArgumentCaptor<com.ssafy.b209.conversation.dto.AiQuestionRequest> captor =
         ArgumentCaptor.forClass(com.ssafy.b209.conversation.dto.AiQuestionRequest.class);
@@ -235,17 +244,125 @@ class ConversationQuestionServiceTest {
   }
 
   @Test
-  void doesNotStoreUnsafeAiResponseOrSelectFallbackForSafetyBlock() {
+  void usesActiveFallbackAfterSafetyBlockInsteadOfEndingTheConversation() {
+    // 안전 차단도 timeout·연결 실패와 같은 실패로 다룬다. 예전에는 이것만 422로 대화를 끝냈고,
+    //   아이가 한마디 거칠게 말해 AI 응답이 규칙에 걸리면 재시도 버튼도 없이 대화가 닫혔다.
+    //   ⚠️ 차단된 AI 문장이 아이에게 가는 것이 아니다 — 저장되는 것은 사전 검증된 FALLBACK
+    //      템플릿 질문(questionTemplateId=7)뿐이라는 것을 아래에서 못박는다.
+    AiQuestionTemplate template = mock(AiQuestionTemplate.class);
+    given(template.getId()).willReturn(7L);
+    given(template.getQuestionText()).willReturn("그림 속 이야기를 들려줄래?");
     given(aiQuestionClient.generate(any(), any()))
         .willThrow(
             new AiQuestionClientException(AiQuestionClientException.Type.SAFETY_POLICY_BLOCKED));
+    given(questionTemplateRepository.findFirstByTemplateTypeAndActiveTrueOrderByIdAsc("FALLBACK"))
+        .willReturn(Optional.of(template));
+    given(questionPersistenceService.save(eq(1L), any()))
+        .willReturn(new GeneratedQuestion(24L, "그림 속 이야기를 들려줄래?", true));
+
+    service.generateQuestion(command(List.of(ResponseMode.VOICE)));
+
+    ArgumentCaptor<QuestionCandidate> candidateCaptor =
+        ArgumentCaptor.forClass(QuestionCandidate.class);
+    verify(questionPersistenceService).save(eq(1L), candidateCaptor.capture());
+    assertThat(candidateCaptor.getValue().questionTemplateId()).isEqualTo(7L);
+    assertThat(candidateCaptor.getValue().questionText()).isEqualTo("그림 속 이야기를 들려줄래?");
+    assertThat(candidateCaptor.getValue().fallbackUsed()).isTrue();
+  }
+
+  // ── 그림일기 대화 재개 — 완료 세션 통과 판정 ─────────────────────────────
+  @Test
+  void generatesAgainWhenACompletedDiaryConversationCanBeReopened() {
+    // 그림일기는 대화가 끝난 뒤에도 아이가 계속 그린다. 상한 도달로 끝난 대화는 여기서 막지 않고
+    //   통과시키고, 실제 재개(상한 증가)는 잠금을 쥔 QuestionPersistenceService 가 한다.
+    given(session.isCompleted()).willReturn(true);
+    given(session.isReopenEligible(ConversationQuestionLimitProperties.ABSOLUTE_MAX))
+        .willReturn(true);
+    given(session.reopenedMaxQuestionCount(5, ConversationQuestionLimitProperties.ABSOLUTE_MAX))
+        .willReturn(10);
+    given(aiQuestionClient.generate(any(), any())).willReturn(validResponse());
+    given(questionPersistenceService.save(eq(1L), any()))
+        .willReturn(new GeneratedQuestion(25L, "무엇을 그리고 있니?", false));
+
+    service.generateQuestion(artDiaryCommand(List.of(ResponseMode.VOICE, ResponseMode.OPTION)));
+
+    ArgumentCaptor<com.ssafy.b209.conversation.dto.AiQuestionRequest> requestCaptor =
+        ArgumentCaptor.forClass(com.ssafy.b209.conversation.dto.AiQuestionRequest.class);
+    verify(aiQuestionClient).generate(requestCaptor.capture(), any());
+    // 재개 후 상한을 미리 싣는다. 옛 상한(=이미 던진 질문 수)을 그대로 보내면 AI가 '마지막 차례'로
+    //   읽어, 대화를 다시 여는 바로 그 질문이 맺음말로 나온다.
+    assertThat(requestCaptor.getValue().maxQuestionCount()).isEqualTo(10);
+    ArgumentCaptor<QuestionCandidate> candidateCaptor =
+        ArgumentCaptor.forClass(QuestionCandidate.class);
+    verify(questionPersistenceService).save(eq(1L), candidateCaptor.capture());
+    // 재개 허가를 저장 계층까지 값으로 들려 보낸다 — 잠금 안에서 활동 유형을 다시 조회하지 않는다.
+    assertThat(candidateCaptor.getValue().reopenAllowed()).isTrue();
+  }
+
+  @Test
+  void doesNotCallAiWhenACompletedDiaryConversationCannotBeReopened() {
+    // 아이·보호자가 직접 끝냈거나 이미 절대 상한까지 올라간 대화다 — 그림이 바뀌어도 되살리지 않는다.
+    given(session.isCompleted()).willReturn(true);
+    given(session.isReopenEligible(ConversationQuestionLimitProperties.ABSOLUTE_MAX))
+        .willReturn(false);
 
     assertBusinessError(
-        () -> service.generateQuestion(command(List.of(ResponseMode.VOICE))),
-        ConversationErrorCode.AI_SAFETY_POLICY_BLOCKED);
+        () -> service.generateQuestion(artDiaryCommand(List.of(ResponseMode.VOICE))),
+        ConversationErrorCode.CONVERSATION_ALREADY_COMPLETED);
 
-    verify(questionTemplateRepository, never())
-        .findFirstByTemplateTypeAndActiveTrueOrderByIdAsc(any());
+    verify(aiQuestionClient, never()).generate(any(), any());
+    verify(questionPersistenceService, never()).save(any(), any());
+  }
+
+  @Test
+  void doesNotCallAiWhenTheDrawingActivityHasMovedPastConversation() {
+    // 그림일기지만 아이가 이미 그림을 끝내고 감정 회고·리포트·완료로 넘어간 활동이다. 되살리면
+    //   이미 만들어진 리포트에 없는 말이 완료된 활동에 붙는다. 활동 단계에서 끊기므로 세션 상태
+    //   판정(isReopenEligible)까지 가지 않는다 — 그래서 아래는 그것을 stub 하지 않는다.
+    given(session.isCompleted()).willReturn(true);
+
+    assertBusinessError(
+        () -> service.generateQuestion(artDiaryCommand(List.of(ResponseMode.VOICE), false)),
+        ConversationErrorCode.CONVERSATION_ALREADY_COMPLETED);
+
+    verify(session, never()).isReopenEligible(anyInt());
+    verify(aiQuestionClient, never()).generate(any(), any());
+    verify(questionPersistenceService, never()).save(any(), any());
+  }
+
+  @Test
+  void keepsAnsweringAnOngoingConversationWhateverTheDrawingActivityStageSays() {
+    // 회귀 방지: 단계 가드는 재개 경로에만 걸린다. 진행 중(CONVERSING) 대화의 일반 질문은
+    //   활동 단계 값이 닫혀 있어도 지금까지와 똑같이 생성·저장돼야 한다.
+    given(aiQuestionClient.generate(any(), any())).willReturn(validResponse());
+    given(questionPersistenceService.save(eq(1L), any()))
+        .willReturn(new GeneratedQuestion(26L, "무엇을 그리고 있니?", false));
+
+    service.generateQuestion(
+        artDiaryCommand(List.of(ResponseMode.VOICE, ResponseMode.OPTION), false));
+
+    ArgumentCaptor<QuestionCandidate> candidateCaptor =
+        ArgumentCaptor.forClass(QuestionCandidate.class);
+    verify(aiQuestionClient).generate(any(), any());
+    verify(questionPersistenceService).save(eq(1L), candidateCaptor.capture());
+    // 재개가 아니므로 저장 계층에도 재개 허가를 넘기지 않는다.
+    assertThat(candidateCaptor.getValue().reopenAllowed()).isFalse();
+  }
+
+  @Test
+  void neverReopensACompletedHtpConversationEvenWhenTheSessionStateWouldAllowIt() {
+    // HTP는 주제마다 대화가 열리고 상한을 다 쓰고 끝나는 것이 정상이다(실측 도달률 100%).
+    //   그 대화를 되살리면 '모든 단계 대화가 COMPLETED' 를 요구하는 HTP 검사 완료가 막힌다.
+    //   세션 상태 판정(isReopenEligible)까지 가기 전에 활동 유형에서 끊긴다 — 그래서 아래는
+    //   isReopenEligible 을 아예 stub 하지 않는다(불렸다면 strict stub 검증에서 드러난다).
+    given(session.isCompleted()).willReturn(true);
+
+    assertBusinessError(
+        () -> service.generateQuestion(htpCommand()),
+        ConversationErrorCode.CONVERSATION_ALREADY_COMPLETED);
+
+    verify(session, never()).isReopenEligible(anyInt());
+    verify(aiQuestionClient, never()).generate(any(), any());
     verify(questionPersistenceService, never()).save(any(), any());
   }
 
@@ -396,7 +513,38 @@ class ConversationQuestionServiceTest {
         null,
         "HTP",
         "TREE",
-        List.of());
+        List.of(),
+        true);
+  }
+
+  /** 활동 유형이 그림일기로 확정된 명령 — 대화 재개는 이 유형에서만 허용된다. */
+  private GenerateQuestionCommand artDiaryCommand(List<ResponseMode> responseModes) {
+    return artDiaryCommand(responseModes, true);
+  }
+
+  /**
+   * 그림일기 명령에 활동 단계 판정을 실어 만든다.
+   *
+   * @param responseModes 허용 응답 방식
+   * @param drawingActivityOpen 그림 활동이 아직 대화를 더 받을 수 있는 단계인지 여부
+   * @return 질문 생성 명령
+   */
+  private GenerateQuestionCommand artDiaryCommand(
+      List<ResponseMode> responseModes, boolean drawingActivityOpen) {
+    return new GenerateQuestionCommand(
+        1L,
+        9L,
+        null,
+        8,
+        responseModes,
+        List.of(new DetectedObject("TREE", "나무", 0.9, new BoundingBox(0.1, 0.2, 0.3, 0.4))),
+        List.of(),
+        "safety-2026-07",
+        null,
+        "ART_DIARY",
+        null,
+        List.of(),
+        drawingActivityOpen);
   }
 
   private GenerateQuestionCommand command(List<ResponseMode> responseModes) {

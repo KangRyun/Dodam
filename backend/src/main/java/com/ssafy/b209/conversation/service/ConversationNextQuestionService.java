@@ -9,6 +9,7 @@ import com.ssafy.b209.analysis.service.DrawingAnalysisActivityContext;
 import com.ssafy.b209.analysis.service.DrawingAnalysisActivityContextResolver;
 import com.ssafy.b209.child.domain.Child;
 import com.ssafy.b209.child.repository.ChildRepository;
+import com.ssafy.b209.conversation.config.ConversationQuestionLimitProperties;
 import com.ssafy.b209.conversation.domain.ConversationHistoryMessage;
 import com.ssafy.b209.conversation.domain.ConversationHistoryOption;
 import com.ssafy.b209.conversation.domain.ConversationMessage;
@@ -179,7 +180,8 @@ public class ConversationNextQuestionService {
                 request.previousAnswerMessageId(),
                 activityContext.activityType(),
                 activityContext.drawingSubject(),
-                askedObjectCodes));
+                askedObjectCodes,
+                activityContext.activityOpen()));
     // 질문 본문은 넘기지 않는다 — 이 이벤트가 남기는 것은 "몇 번째 질문이 언제 나갔는가"이고,
     //   그 시각이 뒤따르는 답변·건너뛰기의 응답 지연 기준점이 된다 (S15P11B209-973).
     //   저장 트랜잭션(QuestionPersistenceService)은 이미 커밋된 뒤라 여기서 바로 적재된다.
@@ -191,13 +193,16 @@ public class ConversationNextQuestionService {
   }
 
   /**
-   * 저장된 그림 세션 관계에서 AI에 전달할 활동 유형과 HTP 주제를 확정한다.
+   * 저장된 그림 세션 관계에서 AI에 전달할 활동 유형·HTP 주제와 현재 활동 단계를 확정한다.
    *
    * <p>주제 확정에 실패하면({@link DrawingAnalysisActivityContextResolver}가 {@link BusinessException}을 던지면)
    * 대화를 끊지 않고 두 값을 {@code null}로 둔다. 정상 데이터에서는 발생하지 않는 경로이므로 세션 식별자만 남겨 경고한다.
    *
+   * <p>활동 단계 판정({@link DrawingSession#canReopenConversation()})은 주제 확정과 무관하므로 <b>try 밖에서</b> 미리 읽는다
+   * — 그림 세션은 이미 로딩됐고, 주제 확정이 실패해도 단계는 정확히 알 수 있다. 이 값은 끝난 대화를 다시 여는 판정에만 쓰이며 조회를 하나도 더 하지 않는다.
+   *
    * @param drawingSessionId 현재 대화가 속한 그림 활동 식별자
-   * @return {@code enum.name()} 문자열로 담은 활동 유형·주제, 확정 실패 시 두 값 모두 {@code null}
+   * @return {@code enum.name()} 문자열로 담은 활동 유형·주제와 활동 단계 판정, 유형 확정 실패 시 유형·주제는 {@code null}
    */
   private ActivityContext resolveActivityContext(Long drawingSessionId) {
     DrawingSession drawingSession =
@@ -205,18 +210,21 @@ public class ConversationNextQuestionService {
             .findDetailById(drawingSessionId)
             .orElseThrow(
                 () -> new BusinessException(ConversationErrorCode.CONVERSATION_SESSION_NOT_FOUND));
+    boolean activityOpen = drawingSession.canReopenConversation();
     try {
       DrawingAnalysisActivityContext context = activityContextResolver.resolve(drawingSession);
       return new ActivityContext(
           context.activityType().name(),
-          context.drawingSubject() == null ? null : context.drawingSubject().name());
+          context.drawingSubject() == null ? null : context.drawingSubject().name(),
+          activityOpen);
     } catch (BusinessException exception) {
       log.warn("Failed to resolve drawing subject context. drawingSessionId={}", drawingSessionId);
-      return new ActivityContext(null, null);
+      return new ActivityContext(null, null, activityOpen);
     }
   }
 
-  private record ActivityContext(String activityType, String drawingSubject) {}
+  private record ActivityContext(
+      String activityType, String drawingSubject, boolean activityOpen) {}
 
   /**
    * 세션의 최근 질문·답변을 AI 요청용 최소 문맥으로 조립한다.
@@ -369,9 +377,30 @@ public class ConversationNextQuestionService {
             detection.getHeight().doubleValue()));
   }
 
+  /**
+   * 질문을 더 받을 수 있는 상태인지 확인한다 — 상태는 바꾸지 않는다.
+   *
+   * <p>끝난 대화라도 상한 도달로 끝난 것이면 통과시킨다. 그림일기는 대화가 끝난 뒤에도 아이가 캔버스에 계속 그리고, 새 그림이 붙으면 FE가 같은
+   * next-question 을 다시 부른다. 그림 한 장에 대화 세션은 하나뿐이라 새 세션 대신 이 세션을 다시 여는 방식이며, 실제 재개(상한 증가·상태 되돌리기)는 세션
+   * 잠금을 쥔 {@link QuestionPersistenceService}에서만 일어난다. 여기서 통과시킨 요청도 그 잠금 안에서 다시 검증된다.
+   *
+   * <p>재개 대상일 때 {@code isConversing}·{@code canAskQuestion} 검사를 건너뛰는 것은 의도다 — 지금 상태는 COMPLETED 이고
+   * 질문 수도 상한에 닿아 있어, 두 검사는 재개 가능한 세션을 반드시 오탐한다.
+   *
+   * <p>여기서는 <b>활동 유형도 활동 단계도 보지 않는다</b>. 둘 다 이 검사 뒤에 그림 세션을 조회하며 확정하고(권한·상태를 먼저 보는 순서를 유지한다),
+   * 그림일기만·아직 감정 회고 전 활동만 다시 연다는 규칙은 {@link ConversationQuestionService}가 AI 호출 전에 같은 {@code
+   * CONVERSATION_ALREADY_COMPLETED}로 막고 저장 계층이 잠금 안에서 한 번 더 막는다. 즉 HTP나 이미 회고·리포트로 넘어간 활동이 여기를 통과해도
+   * 밖으로 나가는 응답은 동일한 409다.
+   *
+   * @param session 조회한 대화 세션
+   * @throws BusinessException 다시 열 수 없는 완료 대화·비정상 상태·상한 도달인 경우
+   */
   private void validateCurrentState(ConversationSession session) {
     if (session.isCompleted()) {
-      throw new BusinessException(ConversationErrorCode.CONVERSATION_ALREADY_COMPLETED);
+      if (!session.isReopenEligible(ConversationQuestionLimitProperties.ABSOLUTE_MAX)) {
+        throw new BusinessException(ConversationErrorCode.CONVERSATION_ALREADY_COMPLETED);
+      }
+      return;
     }
     if (!session.isConversing()) {
       throw new BusinessException(ConversationStartErrorCode.INVALID_STATE_TRANSITION);

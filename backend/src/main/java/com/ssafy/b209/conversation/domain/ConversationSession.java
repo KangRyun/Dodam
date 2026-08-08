@@ -178,6 +178,66 @@ public class ConversationSession {
   }
 
   /**
+   * 끝난 대화를 다시 열 수 있는 상태인지 판별한다 — 상태를 바꾸지 않는 읽기 전용 판정이다.
+   *
+   * <p>그림일기는 대화가 끝난 뒤에도 아이가 캔버스에 계속 그린다. 그림 한 장에 대화 세션은 평생 하나뿐이므로({@code
+   * conversation_sessions.drawing_session_id} UNIQUE) 새 세션을 여는 대신 끝난 세션을 다시 연다.
+   *
+   * <p><b>상한 도달로 끝난 대화만</b> 다시 연다. {@code CHILD_REQUEST}(아이가 그만하겠다고 했다)·{@code
+   * GUARDIAN_REQUEST}·{@code NO_MORE_QUESTION}은 명시적인 종료 의사라, 그림이 바뀌었다는 이유로 되살리지 않는다. 이미 절대 상한까지 올라간
+   * 대화도 다시 열지 않는다 — 그때는 진짜로 끝이다.
+   *
+   * @param absoluteMax 설정으로도 넘을 수 없는 질문 수 절대 상한
+   * @return 재개할 수 있으면 {@code true}
+   */
+  public boolean isReopenEligible(int absoluteMax) {
+    return isCompleted()
+        && completionReason == ConversationCompletionReason.QUESTION_LIMIT_REACHED
+        && maxQuestionCount < absoluteMax;
+  }
+
+  /**
+   * 재개했을 때 적용될 질문 수 상한을 계산한다 — 상태는 바꾸지 않는다.
+   *
+   * <p>{@link #reopen}과 같은 계산을 쓰므로, 재개 전에 "재개하면 몇 문이 되는가"를 알아야 하는 쪽(AI 페이싱 문맥)은 이 값을 쓴다.
+   *
+   * @param increment 재개 시 더할 질문 수
+   * @param absoluteMax 넘을 수 없는 절대 상한
+   * @return 절대 상한으로 자른 재개 후 질문 수 상한
+   */
+  public int reopenedMaxQuestionCount(int increment, int absoluteMax) {
+    return Math.min(maxQuestionCount + increment, absoluteMax);
+  }
+
+  /**
+   * 끝난 대화를 다시 열고 질문 수 상한을 그만큼 늘린다.
+   *
+   * <p>동시 요청 경쟁을 피하려면 세션 비관 잠금 안에서만 호출해야 한다. 호출 측이 미리 {@link #isReopenEligible}로 걸렀더라도 잠금 안에서 조건을
+   * 다시 검증한다.
+   *
+   * @param increment 늘릴 질문 수
+   * @param absoluteMax 넘을 수 없는 절대 상한
+   * @throws IllegalArgumentException 늘릴 질문 수가 1 미만인 경우
+   * @throws IllegalStateException 재개할 수 있는 상태가 아닌 경우
+   */
+  public void reopen(int increment, int absoluteMax) {
+    if (increment < 1) {
+      throw new IllegalArgumentException("increment must be at least 1 but was " + increment);
+    }
+    if (!isReopenEligible(absoluteMax)) {
+      throw new IllegalStateException("상한 도달로 끝난 대화만 다시 열 수 있습니다.");
+    }
+    maxQuestionCount = reopenedMaxQuestionCount(increment, absoluteMax);
+    conversationStatus = "CONVERSING";
+    // 종료 사유·시각은 지운다. 두 값은 "지금 완료 상태다"를 설명하는 값이라 CONVERSING 과 함께
+    //   남으면 행 자체가 모순된다 — getCompletionReason 의 계약(완료 전에는 null)도 여기서 깨진다.
+    //   다시 끝날 때 complete()가 그때의 사유·시각을 기록하고, "한 번 끝났다 다시 열렸다"는 사실은
+    //   종료 행동 이벤트(S15P11B209-973)와 늘어난 max_question_count 에 남는다.
+    completionReason = null;
+    completedAt = null;
+  }
+
+  /**
    * 최초 완료 시 기록된 종료 사유를 반환한다.
    *
    * @return 완료 전에는 {@code null}, 완료 후에는 종료 사유

@@ -1,6 +1,7 @@
 package com.ssafy.b209.conversation.service;
 
 import com.ssafy.b209.analysis.repository.AnalysisObservationResultRepository;
+import com.ssafy.b209.conversation.config.ConversationQuestionLimitProperties;
 import com.ssafy.b209.conversation.domain.AiQuestionTemplate;
 import com.ssafy.b209.conversation.domain.AiQuestionTemplateOption;
 import com.ssafy.b209.conversation.domain.ConversationSession;
@@ -38,6 +39,13 @@ public class ConversationQuestionService {
   private static final Logger log = LoggerFactory.getLogger(ConversationQuestionService.class);
   private static final String FALLBACK_TEMPLATE_TYPE = "FALLBACK";
 
+  /**
+   * 끝난 대화를 다시 열 수 있는 유일한 활동 유형이다({@code DrawingAnalysisActivityType.ART_DIARY}).
+   *
+   * <p>화이트리스트로 둔 것은 의도다 — "HTP만 아니면 연다"로 적으면 나중에 활동 유형이 하나 늘 때 아무도 결정하지 않은 재개가 조용히 켜진다.
+   */
+  private static final String REOPENABLE_ACTIVITY_TYPE = "ART_DIARY";
+
   private final ConversationSessionRepository conversationSessionRepository;
   private final AiQuestionTemplateRepository questionTemplateRepository;
   private final AiQuestionTemplateOptionRepository questionTemplateOptionRepository;
@@ -47,6 +55,8 @@ public class ConversationQuestionService {
   private final AnalysisObservationResultRepository observationResultRepository;
   private final HtpAssessmentRepository htpAssessmentRepository;
   private final ConversationMessageRepository conversationMessageRepository;
+  // 재개 예정 세션의 AI 페이싱 문맥 계산용 — 상한 변경은 QuestionPersistenceService 소관이다.
+  private final ConversationQuestionLimitProperties questionLimits;
 
   /**
    * AI 질문 생성·폴백·저장 흐름의 의존성을 생성한다.
@@ -57,6 +67,7 @@ public class ConversationQuestionService {
    * @param aiQuestionClient 최신 내부 AI 계약 호출 경계
    * @param questionPersistenceService 세션 잠금 기반 원자 저장 경계
    * @param observationResultRepository 그림 서술(VLM) 조회 경계 (S15P11B209-704)
+   * @param questionLimits 활동 유형별 질문 상한 설정(재개 후 상한 계산에 사용)
    */
   public ConversationQuestionService(
       ConversationSessionRepository conversationSessionRepository,
@@ -66,7 +77,8 @@ public class ConversationQuestionService {
       QuestionPersistenceService questionPersistenceService,
       AnalysisObservationResultRepository observationResultRepository,
       HtpAssessmentRepository htpAssessmentRepository,
-      ConversationMessageRepository conversationMessageRepository) {
+      ConversationMessageRepository conversationMessageRepository,
+      ConversationQuestionLimitProperties questionLimits) {
     this.conversationSessionRepository = conversationSessionRepository;
     this.questionTemplateRepository = questionTemplateRepository;
     this.questionTemplateOptionRepository = questionTemplateOptionRepository;
@@ -75,17 +87,19 @@ public class ConversationQuestionService {
     this.observationResultRepository = observationResultRepository;
     this.htpAssessmentRepository = htpAssessmentRepository;
     this.conversationMessageRepository = conversationMessageRepository;
+    this.questionLimits = questionLimits;
   }
 
   /**
    * 내부 AI 계약으로 다음 질문을 생성하고 검증된 결과 또는 폴백 질문을 저장한다.
    *
    * <p>AI 요청에는 계약에 정의된 {@code recentMessages}만 전달하며, 외부의 {@code previousAnswerMessageId}는 JSON 필드로
-   * 추가하지 않고 저장 시 부모 메시지로만 전달한다. 안전 정책 차단은 저장하지 않고 422로 종료하며, schema·연결·timeout 오류는 활성 폴백 템플릿을 저장한다.
+   * 추가하지 않고 저장 시 부모 메시지로만 전달한다. 안전 정책 차단·schema 불일치·연결·timeout 오류는 모두 활성 폴백 템플릿 질문으로 잇는다 — 어느 경우에도
+   * AI가 만든 문장은 저장하지 않는다.
    *
    * @param command 대화·그림·분석·난이도 문맥, 허용 응답 방식, 최근 메시지와 부모 답변 식별자
    * @return 새로 저장된 AI 질문 및 Snapshot
-   * @throws BusinessException 세션 상태·질문 상한·안전 정책·폴백 템플릿 계약을 위반했거나한 경우
+   * @throws BusinessException 세션 상태·질문 상한·폴백 템플릿 계약을 위반한 경우
    */
   public GeneratedQuestion generateQuestion(GenerateQuestionCommand command) {
     validateCommand(command);
@@ -97,18 +111,23 @@ public class ConversationQuestionService {
     if (!session.getDrawingSessionId().equals(command.drawingSessionId())) {
       throw new BusinessException(ConversationErrorCode.CONVERSATION_SESSION_NOT_FOUND);
     }
+    boolean reopenAllowed = isReopenAllowed(command, session);
     if (session.isCompleted()) {
-      throw new BusinessException(ConversationErrorCode.CONVERSATION_ALREADY_COMPLETED);
-    }
-    if (!session.isConversing()) {
+      // 상한 도달로 끝난 그림일기 대화는 캔버스가 바뀌면 다시 열 수 있다. 여기는 잠금 밖이라 통과 여부만
+      //   판정하고, 실제 재개는 QuestionPersistenceService 가 잠금 안에서 한다.
+      //   지금 상태가 COMPLETED 이므로 아래 isConversing·canAskQuestion 검사는 건너뛴다 —
+      //   재개하면 상태는 CONVERSING 이 되고 상한도 함께 올라간다.
+      if (!reopenAllowed) {
+        throw new BusinessException(ConversationErrorCode.CONVERSATION_ALREADY_COMPLETED);
+      }
+    } else if (!session.isConversing()) {
       throw new BusinessException(ConversationStartErrorCode.INVALID_STATE_TRANSITION);
-    }
-    if (!session.canAskQuestion()) {
+    } else if (!session.canAskQuestion()) {
       throw new BusinessException(ConversationErrorCode.QUESTION_LIMIT_REACHED);
     }
 
     String requestId = UUID.randomUUID().toString();
-    AiQuestionRequest request = toAiRequest(command, session);
+    AiQuestionRequest request = toAiRequest(command, session, reopenAllowed);
     try {
       AiQuestionResponse response = aiQuestionClient.generate(request, requestId);
       if (response == null
@@ -117,7 +136,8 @@ public class ConversationQuestionService {
         return saveFallback(
             command.conversationId(),
             command.allowedResponseModes(),
-            command.previousAnswerMessageId());
+            command.previousAnswerMessageId(),
+            reopenAllowed);
       }
       // 종료 확인 신호는 저장하지 않고 이번 응답에만 싣는다(S15P11B209-951). 질문 메시지에
       // 남길 내용이 아니라 "아이가 방금 확인했다"는 관찰 보고이며, 실제 종료는 FE가 한다.
@@ -130,22 +150,47 @@ public class ConversationQuestionService {
                   response.targetObject(),
                   null,
                   response.fallbackUsed(),
-                  command.previousAnswerMessageId()))
+                  command.previousAnswerMessageId(),
+                  reopenAllowed))
           .withConfirmedStopTarget(response.confirmedStopTarget());
     } catch (AiQuestionClientException exception) {
-      if (exception.getType() == AiQuestionClientException.Type.SAFETY_POLICY_BLOCKED) {
-        throw new BusinessException(ConversationErrorCode.AI_SAFETY_POLICY_BLOCKED, exception);
-      }
+      // 안전 차단(SAFETY_POLICY_BLOCKED)도 timeout·연결 실패와 똑같이 폴백으로 잇는다.
+      //   예전에는 이것만 422로 대화를 끝냈는데, 아이가 한마디 거칠게 말하면 그 뒤 AI 응답이
+      //   안전 규칙에 걸릴 확률이 올라가고, 걸리는 순간 재시도 버튼도 없이 대화가 닫혔다.
+      //   ⚠️ 차단된 AI 문장 자체는 여기서 절대 쓰지 않는다 — saveFallback 이 저장하는 것은
+      //      사전 검증된 FALLBACK 템플릿 질문뿐이고, 차단 사유도 아이에게 노출하지 않는다.
       log.warn("AI question call failed. requestId={}, type={}", requestId, exception.getType());
       return saveFallback(
           command.conversationId(),
           command.allowedResponseModes(),
-          command.previousAnswerMessageId());
+          command.previousAnswerMessageId(),
+          reopenAllowed);
     }
   }
 
+  /**
+   * 이 요청이 끝난 대화를 다시 열 수 있는지 판정한다 — 상태는 바꾸지 않는다.
+   *
+   * <p><b>그림일기만</b> 다시 연다. HTP는 주제(집·나무·사람)마다 대화가 따로 열리고 상한까지 다 쓰고 끝나는 것이 정상 흐름인데, 그 대화를 되살리면 모든 단계
+   * 대화가 COMPLETED 여야 하는 HTP 검사 완료가 막힌다. 활동 유형을 확정하지 못한 경우({@code null})도 열지 않는다 — 재개는 이미 닫힌 것을 여는
+   * 동작이라, 모르면 닫아 두는 쪽이 맞다.
+   *
+   * <p><b>그림 활동이 아직 감정 회고 전인 단계일 때만</b> 연다({@code drawingActivityOpen}). 회고·리포트·완료로 넘어간 활동에 대화를 다시
+   * 열면 이미 만들어진 리포트에 없는 말이 완료된 활동에 붙는다. 여기서 막는 것은 AI 호출을 아끼기 위한 조기 차단이고, 실제 방어선은 세션 잠금을 쥔 {@link
+   * QuestionPersistenceService}가 최신 단계를 다시 읽어 세운다 — AI 호출이 도는 몇 초 사이에 활동이 회고로 넘어갈 수 있기 때문이다.
+   *
+   * @param command 활동 유형·활동 단계가 확정돼 실려 온 질문 생성 명령
+   * @param session 조회한 대화 세션
+   * @return 활동 유형·활동 단계·세션 상태가 모두 재개를 허용하면 {@code true}
+   */
+  private boolean isReopenAllowed(GenerateQuestionCommand command, ConversationSession session) {
+    return REOPENABLE_ACTIVITY_TYPE.equals(command.activityType())
+        && command.drawingActivityOpen()
+        && session.isReopenEligible(ConversationQuestionLimitProperties.ABSOLUTE_MAX);
+  }
+
   private AiQuestionRequest toAiRequest(
-      GenerateQuestionCommand command, ConversationSession session) {
+      GenerateQuestionCommand command, ConversationSession session, boolean reopenAllowed) {
     return new AiQuestionRequest(
         command.conversationId(),
         command.drawingSessionId(),
@@ -154,7 +199,7 @@ public class ConversationQuestionService {
         session.getDifficulty(),
         List.copyOf(command.allowedResponseModes()),
         session.getQuestionCount(),
-        session.getMaxQuestionCount(),
+        aiFacingMaxQuestionCount(session, reopenAllowed),
         List.copyOf(command.detectedObjects()),
         drawingDescriptionOf(command.basisAnalysisId()),
         List.copyOf(command.recentMessages()),
@@ -166,14 +211,35 @@ public class ConversationQuestionService {
   }
 
   /**
+   * AI에 알릴 질문 수 상한을 고른다 — 다시 열릴 세션이면 재개 후 값을 미리 싣는다.
+   *
+   * <p>AI는 {@code currentQuestionCount >= maxQuestionCount - 1}을 "마지막 차례"로 읽고 맺음말 성격의 질문을 만든다(AI
+   * {@code _is_last_question}). 재개 대상 세션은 아직 옛 상한(=이미 던진 질문 수)을 들고 있어서, 그대로 실으면 대화를 <b>다시 여는</b> 바로
+   * 그 질문이 맺음말로 나온다.
+   *
+   * <p>상한을 실제로 올리는 것은 잠금을 쥔 {@link QuestionPersistenceService}이며 여기서는 같은 규칙으로 계산만 한다. 재개가 실패해도(경쟁
+   * 요청이 먼저 재개해 상한이 이미 올라간 경우 등) 저장 단계가 상한을 다시 검사하므로 이 값이 앞서 나가도 저장이 느슨해지지 않는다.
+   *
+   * @param session 조회한 대화 세션
+   * @param reopenAllowed 이 요청이 대화를 다시 열 수 있는지 여부
+   * @return 재개 대상이면 재개 후 상한, 아니면 현재 상한
+   */
+  private int aiFacingMaxQuestionCount(ConversationSession session, boolean reopenAllowed) {
+    if (!reopenAllowed) {
+      return session.getMaxQuestionCount();
+    }
+    return session.reopenedMaxQuestionCount(
+        questionLimits.artDiary(), ConversationQuestionLimitProperties.ABSOLUTE_MAX);
+  }
+
+  /**
    * 같은 HTP 활동에서 앞 주제 대화의 아이 답변을 모은다 (S15P11B209-989).
    *
-   * <p>주제마다 대화 세션이 새로 열려 조회 범위가 세션 안으로 닫혀 있다 — 창 크기를 늘려도
-   * 앞 주제는 한 글자도 넘어오지 않는다. 여기서 {@code htp_assessment_steps}로 역추적해
-   * 앞 단계 대화의 <b>아이 답만</b> 압축해 싣는다(질문까지 실으면 프롬프트가 커진다).
+   * <p>주제마다 대화 세션이 새로 열려 조회 범위가 세션 안으로 닫혀 있다 — 창 크기를 늘려도 앞 주제는 한 글자도 넘어오지 않는다. 여기서 {@code
+   * htp_assessment_steps}로 역추적해 앞 단계 대화의 <b>아이 답만</b> 압축해 싣는다(질문까지 실으면 프롬프트가 커진다).
    *
-   * <p>첫 주제·그림일기·역추적 실패는 전부 빈 목록이다 — 이 재료는 보조라, 조회가 실패해도
-   * 질문 생성 자체는 지금과 똑같이 동작해야 한다. 발화 원문은 로그에 남기지 않는다(9절).
+   * <p>첫 주제·그림일기·역추적 실패는 전부 빈 목록이다 — 이 재료는 보조라, 조회가 실패해도 질문 생성 자체는 지금과 똑같이 동작해야 한다. 발화 원문은 로그에 남기지
+   * 않는다(9절).
    *
    * @param command 질문 생성 명령
    * @return 앞 주제 노트 목록(단계 순서), 없으면 빈 목록
@@ -249,7 +315,10 @@ public class ConversationQuestionService {
   }
 
   private GeneratedQuestion saveFallback(
-      Long conversationId, List<ResponseMode> allowedResponseModes, Long previousAnswerMessageId) {
+      Long conversationId,
+      List<ResponseMode> allowedResponseModes,
+      Long previousAnswerMessageId,
+      boolean reopenAllowed) {
     AiQuestionTemplate template =
         questionTemplateRepository
             .findFirstByTemplateTypeAndActiveTrueOrderByIdAsc(FALLBACK_TEMPLATE_TYPE)
@@ -265,7 +334,8 @@ public class ConversationQuestionService {
             null,
             template.getId(),
             true,
-            previousAnswerMessageId));
+            previousAnswerMessageId,
+            reopenAllowed));
   }
 
   private List<QuestionOption> parseTemplateOptions(Long templateId) {
