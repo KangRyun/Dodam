@@ -283,7 +283,8 @@ final class DiaryDevelopmentalObservationDto {
     required this.ageContext,
     required this.observation,
     required this.scopeText,
-    this.sourceIds = const [],
+    this.contextType = "SESSION_ONLY_CONTEXT",
+    this.caregiverQuestion,
     this.evidenceRefs = const [],
   });
 
@@ -296,7 +297,9 @@ final class DiaryDevelopmentalObservationDto {
     ageContext: json['ageContext'] as String? ?? '',
     observation: json['observation'] as String? ?? '',
     scopeText: json['scopeText'] as String? ?? '',
-    sourceIds: _texts(json['sourceIds']),
+    contextType:
+        json['contextType'] as String? ?? 'SESSION_ONLY_CONTEXT',
+    caregiverQuestion: _text(json['caregiverQuestion']),
     evidenceRefs: _refs(json['evidenceRefs']),
   );
 
@@ -319,12 +322,18 @@ final class DiaryDevelopmentalObservationDto {
   /// 범위 고지. 항목에 항상 함께 보여 준다.
   final String scopeText;
 
-  /// 검수 출처 식별자이며 **비어 있을 수 있다.**
+  /// 이 맥락이 무엇을 주장하는지.
   ///
-  /// 서버는 두 종류의 맥락 문장을 보낸다 — 검수 자료에서 온 연령 규준 문장은 출처를
-  /// 달고, 나이를 모르거나 그 도메인에 검수된 규준이 없을 때 쓰는 '이번 활동에서만
-  /// 살펴본다'는 문장은 규준을 주장하지 않아 출처가 없다. 화면은 있을 때만 밝힌다.
-  final List<String> sourceIds;
+  ///   AGE_MILESTONE_CONTEXT               검수된 연령 이정표
+  ///   EARLY_SCHOOL_COMMUNICATION_CONTEXT   학령 초기 참고 맥락. **연령 규준이 아니다**
+  ///   SESSION_ONLY_CONTEXT                 규준을 주장하지 않고 이번 활동만 본다
+  ///
+  /// ⚠️ 출처 식별자는 더 이상 받지 않는다. 보호자 화면에 출처를 밝히지 않기로 했고,
+  /// 식별자가 오면 앱이 그것으로 출처를 그릴 수 있어 약속이 클라이언트 구현에 기대게 된다.
+  final String contextType;
+
+  /// 보호자가 활동에 이어 그대로 물어볼 수 있는 질문이며 없으면 `null`.
+  final String? caregiverQuestion;
 
   /// 이번 활동 관찰의 근거.
   final List<DiaryEvidenceRefDto> evidenceRefs;

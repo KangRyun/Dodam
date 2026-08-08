@@ -37,6 +37,9 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
   DateTime? _birthDate;
   String _relationshipType = 'MOTHER';
   String _questionDifficulty = 'PRESCHOOL';
+
+  /// 아이가 다니는 곳이며 고르지 않았으면 `null`. 필수가 아니다.
+  EducationStageOption? _educationStage;
   bool _submitted = false;
   bool _saving = false;
   bool _pickingPhoto = false;
@@ -82,6 +85,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
       _birthDate = DateTime.tryParse(child.birthDate);
       _relationshipType = child.relationshipType;
       _questionDifficulty = child.questionDifficulty;
+      _educationStage = EducationStageOption.fromWire(child.educationStage);
     }
     widget.controller.resetRegistration();
     if (!_isEditing) widget.controller.loadChildConsentTerms();
@@ -473,6 +477,9 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                   : const ProfileImageUpdate.unchanged(),
               questionDifficulty: _questionDifficulty,
               responseModes: const ['VOICE'],
+              educationStage: _educationStage == null
+                  ? const EducationStageUpdate.clear()
+                  : EducationStageUpdate.replace(_educationStage!),
             ),
           )
         : await widget.controller.registerChild(
@@ -487,6 +494,7 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
               profileImageFileId: uploadedId,
               questionDifficulty: _questionDifficulty,
               responseModes: const ['VOICE'],
+              educationStage: _educationStage?.wireValue,
             ),
             consentAgreements: _consentAgreements,
           );
@@ -676,6 +684,37 @@ class _ChildRegistrationScreenState extends State<ChildRegistrationScreen> {
                     ),
                     const SizedBox(height: AppSpacing.sm),
                   ],
+                  const SizedBox(height: AppSpacing.xl),
+                  const CrayonSectionTitle('현재 다니는 곳'),
+                  const SizedBox(height: AppSpacing.xs),
+                  const Text(
+                    '리포트에서 나이와 함께 볼 때만 써요. 고르지 않아도 괜찮아요.',
+                    style: TextStyle(color: AppColors.inkMuted, fontSize: 13),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                  Wrap(
+                    spacing: AppSpacing.xs,
+                    runSpacing: AppSpacing.xs,
+                    children: [
+                      for (final option in EducationStageOption.values)
+                        ChoiceChip(
+                          key: ValueKey('education-stage-${option.wireValue}'),
+                          label: Text(option.label),
+                          selected: _educationStage == option,
+                          onSelected: (_) =>
+                              setState(() => _educationStage = option),
+                        ),
+                      // 되돌릴 수 있어야 한다. 잘못 골랐을 때 지울 길이 없으면
+                      //   보호자는 틀린 값을 그대로 두게 된다.
+                      ChoiceChip(
+                        key: const ValueKey('education-stage-none'),
+                        label: const Text('선택하지 않을래요'),
+                        selected: _educationStage == null,
+                        onSelected: (_) =>
+                            setState(() => _educationStage = null),
+                      ),
+                    ],
+                  ),
                   if (!_isEditing && _consentTerms.isNotEmpty) ...[
                     const SizedBox(height: AppSpacing.md),
                     _ConsentSection(

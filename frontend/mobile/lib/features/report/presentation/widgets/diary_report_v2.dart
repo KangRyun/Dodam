@@ -119,6 +119,18 @@ class DiaryReportV2Body extends StatelessWidget {
             children: [
               for (final observation in insights.developmentalObservations)
                 _DevelopmentalObservationCard(observation: observation),
+              // 출처는 카드마다 밝히지 않고 여기 한 줄로만 둔다. 카드마다 기관명이 붙으면
+              //   그 문장이 그 기관의 진단처럼 읽힌다.
+              const SizedBox(height: AppSpacing.xs),
+              const Text(
+                key: ValueKey('diary-development-source-notice'),
+                '발달 맥락은 검수된 전문 자료를 참고해 제공하며, 발달선별이나 진단 결과가 아니에요.',
+                style: TextStyle(
+                  color: AppColors.inkMuted,
+                  fontSize: 12,
+                  height: 1.5,
+                ),
+              ),
             ],
           ),
         ),
@@ -683,15 +695,7 @@ class _DevelopmentalObservationCard extends StatelessWidget {
             _Badge(text: diaryDevelopmentStatusLabel(observation.status)),
           ],
         ),
-        const SizedBox(height: AppSpacing.xs),
-        Text(
-          observation.ageContext,
-          style: const TextStyle(
-            color: AppColors.inkMuted,
-            fontSize: 14,
-            height: 1.55,
-          ),
-        ),
+        // 이번 활동에서 확인된 표현이 먼저다. 맥락 문장을 앞세우면 규준 설명으로 읽힌다.
         const SizedBox(height: AppSpacing.xs),
         Text(
           observation.observation,
@@ -701,21 +705,39 @@ class _DevelopmentalObservationCard extends StatelessWidget {
             height: 1.55,
           ),
         ),
+        // 맥락 문장은 비어 있을 수 있다. 감정을 고르기만 한 활동은 붙일 수 있는 말이
+        //   없는 것이 사실이라, 빈 자리를 문구로 메우지 않는다.
+        if (observation.ageContext.isNotEmpty) ...[
+          const SizedBox(height: AppSpacing.xs),
+          Text(
+            observation.ageContext,
+            style: const TextStyle(
+              color: AppColors.inkMuted,
+              fontSize: 14,
+              height: 1.55,
+            ),
+          ),
+        ],
         // 범위 고지. 이 줄이 빠지면 한 회차가 발달 판정으로 읽힌다.
         const SizedBox(height: AppSpacing.sm),
         Text(
           observation.scopeText,
           style: const TextStyle(color: AppColors.inkMuted, fontSize: 13),
         ),
-        // 출처는 있을 때만 밝힌다. 비어 있다는 것은 연령 규준을 주장하지 않는
-        //   문장이라는 뜻이라, 없는 출처를 지어 붙이지 않는다.
-        if (observation.sourceIds.isNotEmpty) ...[
-          const SizedBox(height: 2),
+        // 보호자가 그대로 물어볼 수 있는 질문. 관찰만 주면 무엇을 하라는 것인지 알기 어렵다.
+        if (observation.caregiverQuestion case final question?) ...[
+          const SizedBox(height: AppSpacing.xs),
           Text(
-            '출처 ${observation.sourceIds.join(', ')}',
-            style: const TextStyle(color: AppColors.inkMuted, fontSize: 12),
+            '💬 $question',
+            style: const TextStyle(
+              color: AppColors.ink,
+              fontSize: 14,
+              height: 1.5,
+            ),
           ),
         ],
+        // ⚠️ 출처명·URL·식별자를 여기 적지 않는다 (S15P11B209-1010 v2). 출처 내력은 서버가
+        //   보관하고, 화면에는 섹션 하단의 고지 한 줄만 둔다.
       ],
     ),
   );
