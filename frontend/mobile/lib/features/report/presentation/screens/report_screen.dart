@@ -14,6 +14,7 @@ import '../../domain/repositories/report_repository.dart';
 import '../../domain/services/report_file_actions.dart';
 import '../format/activity_duration_format.dart';
 import '../widgets/diary_report_v2.dart';
+import '../widgets/screening_summary_card.dart';
 import '../widgets/htp_report_gallery.dart';
 import '../widgets/report_mascot.dart';
 
@@ -584,6 +585,11 @@ class _ReportContent extends StatelessWidget {
           ?_drawingStorySection(report, playbackController),
         ],
         if (report.hasNoObservations) _noObservationsCard,
+        // 검사 기록은 관찰 다음, 본문 밖에 둔다. 앱이 만든 관찰과 보호자가 다른 곳에서
+        //   받아 온 검사 결과는 근거의 성격이 전혀 달라서, 한 덩어리로 보이면
+        //   보호자는 앱이 검사를 해 줬다고 읽는다.
+        if (report.screeningSummary?.hasContent ?? false)
+          ScreeningSummaryCard(summary: report.screeningSummary!),
         _ReportActionSection(
           pdfAction: pdfAction,
           onSavePdf: onSavePdf,

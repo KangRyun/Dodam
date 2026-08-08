@@ -85,6 +85,8 @@ import com.ssafy.b209.report.repository.ReportParentGuideRepository;
 import com.ssafy.b209.report.repository.ReportPublicInterpretationRepository;
 import com.ssafy.b209.report.repository.ReportReferenceRepository;
 import com.ssafy.b209.report.repository.ReportSubjectRepository;
+import com.ssafy.b209.screening.dto.response.ScreeningSummaryResponse;
+import com.ssafy.b209.screening.service.ScreeningRecordQueryService;
 import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -159,6 +161,7 @@ public class ReportDetailQueryService {
   private final ReportHtpStepViewRepository htpStepRepository;
   private final ReportChildViewRepository childRepository;
   private final DrawingAssetFileUrlFactory fileUrlFactory;
+  private final ScreeningRecordQueryService screeningRecordQueryService;
   private final ObjectMapper objectMapper;
 
   /**
@@ -190,6 +193,7 @@ public class ReportDetailQueryService {
    * @param htpStepRepository 활동 수치가 여러 활동 합산인지 판정하는 HTP 단계 조회 경계 (S15P11B209-960)
    * @param childRepository 표지용 아동 표시명 조회 경계이며 별명만 읽는다 (S15P11B209-960)
    * @param fileUrlFactory 인증된 그림 파일 조회 URL 생성기
+   * @param screeningRecordQueryService 아동의 검사 기록 요약 조회 경계
    * @param objectMapper 보관해 둔 AI 원문을 응답에 그대로 싣기 위한 Mapper (S15P11B209-980)
    * @param aiRawReportExposed AI 원문 노출 여부이며 기본은 켜짐
    */
@@ -228,8 +232,10 @@ public class ReportDetailQueryService {
       ReportHtpStepViewRepository htpStepRepository,
       ReportChildViewRepository childRepository,
       DrawingAssetFileUrlFactory fileUrlFactory,
+      ScreeningRecordQueryService screeningRecordQueryService,
       ObjectMapper objectMapper,
       @Value("${app.report.ai-raw-report.exposed:true}") boolean aiRawReportExposed) {
+    this.screeningRecordQueryService = screeningRecordQueryService;
     this.objectMapper = objectMapper;
     this.aiRawReportExposed = aiRawReportExposed;
     this.guardianAccessRepository = guardianAccessRepository;
@@ -334,7 +340,24 @@ public class ReportDetailQueryService {
         resolveActivityType(session),
         resolveChildDisplayName(session),
         resolveAiRawReport(report, resolveActivityType(session)),
-        buildDiaryInsights(report.getId()));
+        buildDiaryInsights(report.getId()),
+        buildScreeningSummary(session));
+  }
+
+  /**
+   * 이 아이의 검사 기록 요약을 만든다.
+   *
+   * <p>그림일기 관찰과 <b>자리를 나눠</b> 내보낸다. 앱이 만든 관찰과 보호자가 다른 곳에서 받아 온 검사 결과는 근거의 성격이 전혀 다르고, 한 덩어리로 보이면
+   * 보호자는 앱이 검사를 해 줬다고 읽는다. 기록이 없어도 요약은 나간다 — 침묵이 곧 '앱이 선별을 해 준다'는 오해를 남긴다.
+   *
+   * <p>보호자 권한은 리포트 상세 진입에서 이미 확인했으므로 여기서 다시 보지 않는다.
+   *
+   * @param session 리포트가 가리키는 그림 활동 세션
+   * @return 검사 기록 요약이며 아동을 알 수 없으면 {@code null}
+   */
+  private ScreeningSummaryResponse buildScreeningSummary(ReportDrawingSessionView session) {
+    Long childId = session.getChildId();
+    return childId == null ? null : screeningRecordQueryService.summarize(childId);
   }
 
   /**

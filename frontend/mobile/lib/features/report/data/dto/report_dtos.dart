@@ -1,5 +1,6 @@
 import '../../../../core/network/api_page.dart';
 import 'diary_insights_dto.dart';
+import 'screening_summary_dto.dart';
 import '../../../drawing/data/dto/drawing_dtos.dart' show AnalysisAcceptedDto;
 
 Map<String, dynamic> _map(Object? value) =>
@@ -573,6 +574,7 @@ final class ReportDetailDto {
     this.parentGuides = const [],
     this.references = const [],
     this.diaryInsights,
+    this.screeningSummary,
   });
   factory ReportDetailDto.fromJson(Map<String, dynamic> json) =>
       ReportDetailDto(
@@ -631,6 +633,9 @@ final class ReportDetailDto {
           json['references'],
           ReportReferenceDto.fromJson,
         ),
+        screeningSummary: json['screeningSummary'] is Map
+            ? ScreeningSummaryDto.fromJson(_map(json['screeningSummary']))
+            : null,
         diaryInsights: json['diaryInsights'] is Map
             ? DiaryInsightsDto.fromJson(_map(json['diaryInsights']))
             : null,
@@ -660,6 +665,12 @@ final class ReportDetailDto {
   final List<ReportObservedFeatureDto> observedFeatures;
   final List<ReportParentGuideDto> parentGuides;
   final List<ReportReferenceDto> references;
+
+  /// 이 아이의 검사 기록 요약이며 없으면 `null`.
+  ///
+  /// 앱은 표준화 선별검사를 제공하지 않는다. 담기는 것은 보호자가 다른 곳에서
+  /// 받아 와 직접 옮겨 적은 결과이며, 그림일기 관찰과 자리를 나눠 보여 준다.
+  final ScreeningSummaryDto? screeningSummary;
 
   /// 그림일기 리포트 V2 묶음이며 없으면 `null`.
   ///
