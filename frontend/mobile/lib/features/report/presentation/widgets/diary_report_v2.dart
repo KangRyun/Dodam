@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../../../../design_system/design_system.dart';
+import '../../../conversation/application/voice_answer_playback_controller.dart';
+import '../../../conversation/presentation/widgets/voice_answer_playback_control.dart';
 import '../../data/dto/diary_insights_dto.dart';
+import '../../data/dto/report_dtos.dart';
 
 /// 그림일기 리포트 V2 본문.
 ///
@@ -13,10 +16,29 @@ import '../../data/dto/diary_insights_dto.dart';
 /// 서버 쪽 계약이라, 화면도 같은 규칙을 따른다.
 class DiaryReportV2Body extends StatelessWidget {
   /// 구조화 결과로 본문을 만든다.
-  const DiaryReportV2Body({required this.insights, super.key});
+  const DiaryReportV2Body({
+    required this.insights,
+    this.qaPairs = const [],
+    this.playbackController,
+    super.key,
+  });
 
   /// 서버가 근거와 대조해 남긴 구조화 결과.
   final DiaryInsightsDto insights;
+
+  /// 아이와 나눈 문답 전체.
+  ///
+  /// **질문이 없으면 아이 답이 무슨 말인지 알 수 없다.** 구조화 결과의
+  /// `childVoiceItems` 는 아이 발화만 담고 질문을 담지 않으므로, 대화의 척추는
+  /// 이 목록이 맡는다. 건너뛴 질문도 여기에만 있다 — "넘긴 질문이 있어요"라는
+  /// 문장만으로는 무엇을 넘겼는지 보호자가 알 수 없다.
+  final List<ReportQaPairDto> qaPairs;
+
+  /// 아이 음성 원본 재생기이며 없으면 재생 버튼을 숨긴다.
+  ///
+  /// 아이 목소리가 해석의 최상위 근거인데, 글로 옮긴 문장만 남으면 보호자가
+  /// 원본을 확인할 길이 없다.
+  final VoiceAnswerPlaybackController? playbackController;
 
   @override
   Widget build(BuildContext context) {
@@ -28,7 +50,19 @@ class DiaryReportV2Body extends StatelessWidget {
           title: '이야기 흐름',
           child: _NarrativeTimeline(steps: insights.narrativeFlow),
         ),
-      if (insights.childVoiceItems.isNotEmpty)
+      // 질문과 함께 보여 준다. 아이 답만 늘어놓으면 "보기에서 고름" 같은 라벨이
+      //   무슨 보기였는지 알 수 없고, 건너뛴 질문은 아예 보이지 않는다.
+      if (qaPairs.isNotEmpty)
+        _DiarySection(
+          title: '아이와 나눈 이야기',
+          child: _DiaryTranscript(
+            qaPairs: qaPairs,
+            voices: insights.childVoiceItems,
+            playbackController: playbackController,
+          ),
+        )
+      else if (insights.childVoiceItems.isNotEmpty)
+        // 문답을 주지 않는 구 응답에서는 예전처럼 발화만 보여 준다.
         _DiarySection(
           title: '아이가 들려준 말',
           child: _ChildVoiceList(items: insights.childVoiceItems),
@@ -402,6 +436,144 @@ class _CaregiverQuestionTile extends StatelessWidget {
   );
 }
 
+/// 아이와 나눈 이야기 — 질문·답·재생을 한 줄로 묶는다.
+///
+/// 문답이 척추다. 아이 답만 보여 주면 "보기에서 고름"이 무슨 보기였는지 알 수
+/// 없고, 건너뛴 질문은 화면에서 통째로 사라진다.
+///
+/// 질문 방식 라벨과 재생은 구조화 결과(`childVoiceItems`)에서 온다. 그쪽은
+/// 검증을 통과한 발화만 담으므로 **모든 답에 라벨이 붙지는 않는다** — 라벨이
+/// 없는 답도 대화에는 그대로 남긴다. 없는 것을 지어 붙이지 않는다.
+class _DiaryTranscript extends StatelessWidget {
+  const _DiaryTranscript({
+    required this.qaPairs,
+    required this.voices,
+    required this.playbackController,
+  });
+
+  final List<ReportQaPairDto> qaPairs;
+  final List<DiaryChildVoiceDto> voices;
+  final VoiceAnswerPlaybackController? playbackController;
+
+  @override
+  Widget build(BuildContext context) {
+    // 답 문장으로 짝을 찾는다. 같은 말을 두 번 했을 수 있어 쓴 것은 빼 가며 본다.
+    final remaining = [...voices];
+    final tiles = <Widget>[];
+    for (final pair in qaPairs) {
+      final answer = pair.answer?.trim();
+      DiaryChildVoiceDto? voice;
+      if (answer != null && answer.isNotEmpty) {
+        final index = remaining.indexWhere((item) => item.text.trim() == answer);
+        if (index >= 0) voice = remaining.removeAt(index);
+      }
+      tiles.add(
+        _DiaryQaTile(
+          pair: pair,
+          voice: voice,
+          playbackController: playbackController,
+        ),
+      );
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: tiles);
+  }
+}
+
+/// 문답 한 쌍.
+class _DiaryQaTile extends StatelessWidget {
+  const _DiaryQaTile({
+    required this.pair,
+    required this.voice,
+    required this.playbackController,
+  });
+
+  final ReportQaPairDto pair;
+  final DiaryChildVoiceDto? voice;
+  final VoiceAnswerPlaybackController? playbackController;
+
+  @override
+  Widget build(BuildContext context) {
+    final answer = pair.answer?.trim();
+    final skipped = pair.state == 'SKIPPED' || answer == null || answer.isEmpty;
+    final messageId = int.tryParse(voice?.sourceRef?.id ?? '');
+    final canPlay =
+        !skipped &&
+        pair.inputType == 'VOICE' &&
+        messageId != null &&
+        messageId > 0 &&
+        playbackController != null;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (pair.question case final question?)
+            Text(
+              question,
+              style: const TextStyle(
+                color: AppColors.inkMuted,
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                height: 1.45,
+              ),
+            ),
+          const SizedBox(height: 2),
+          // 건너뛴 질문은 아이가 한 말이 아니다. 인용으로 세우지 않고 흐리게 남긴다.
+          if (skipped)
+            const Text(
+              '이 질문은 건너뛰었어요',
+              style: TextStyle(
+                color: AppColors.inkMuted,
+                fontSize: 15,
+                height: 1.55,
+              ),
+            )
+          else
+            Text(
+              '"$answer"',
+              style: const TextStyle(
+                color: AppColors.ink,
+                fontSize: 16,
+                height: 1.55,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          if (!skipped) ...[
+            const SizedBox(height: 2),
+            Wrap(
+              spacing: AppSpacing.xs,
+              runSpacing: 2,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                if (voice != null)
+                  Text(
+                    diaryElicitationLabel(voice!.elicitationType),
+                    style: const TextStyle(
+                      color: AppColors.inkMuted,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                if (pair.sttNeedsConfirmation)
+                  const _Badge(text: '음성 확인 필요'),
+              ],
+            ),
+          ],
+          if (canPlay) ...[
+            const SizedBox(height: AppSpacing.xxs),
+            VoiceAnswerPlaybackControl(
+              controller: playbackController!,
+              messageId: messageId,
+              // 문답이 줄줄이 이어지는 자리라 "재생이 끝났어요" 줄이 남으면 문단이 끊긴다.
+              showStatusText: false,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
 /// 연령 발달 맥락 카드.
 ///
 /// **세 조각을 항상 함께 그린다** — 연령 맥락 → 이번 활동에서 확인된 것 → 범위 고지.
@@ -425,10 +597,13 @@ class _DevelopmentalObservationCard extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
+        // Wrap 이다. 도메인 이름이 길면('함께 있던 사람 이야기하기') 좁은 화면에서
+        //   Row 가 넘친다 — 실제로 리포트 화면 폭에서 6.4px 넘쳤다.
+        Wrap(
+          spacing: AppSpacing.xs,
+          runSpacing: 4,
           children: [
             _Badge(text: diaryDevelopmentDomainLabel(observation.domain)),
-            const SizedBox(width: AppSpacing.xs),
             _Badge(text: diaryDevelopmentStatusLabel(observation.status)),
           ],
         ),
