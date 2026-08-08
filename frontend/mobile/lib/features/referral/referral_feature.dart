@@ -7,7 +7,9 @@
 /// 켤 때는 이 값 하나만 바꾼다. 진입점·라우팅·화면은 이미 붙어 있다.
 abstract final class ReferralSummaryFeature {
   /// 보호자 화면에 의뢰 요약 진입점을 노출할지.
-  static const bool enabled = false;
+  ///
+  /// 2026-08-09 켰다. 팀이 리포트를 눈으로 확인한 뒤 열기로 한 조건이 충족됐다.
+  static const bool enabled = true;
 
   /// 꺼져 있을 때 화면이 보여 줄 문구.
   ///

@@ -10,18 +10,17 @@ import 'package:flutter_test/flutter_test.dart';
 /// 이 화면이 지켜야 하는 것은 배치가 아니라 **순서와 침묵**이다 — 아이가 한 말이 앱의
 /// 관찰보다 앞에 오고, 근거가 없으면 지어내지 않는다.
 void main() {
-  testWidgets('꺼져 있으면 조회하지 않고 준비 중 안내만 보여 준다', (tester) async {
+  testWidgets('켜져 있으면 요약을 조회해 보여 준다', (tester) async {
     final repository = _Repository();
 
     await _pump(tester, repository);
+    await tester.pumpAndSettle();
 
-    expect(ReferralSummaryFeature.enabled, isFalse);
-    expect(
-      find.byKey(const ValueKey('referral-summary-disabled')),
-      findsOneWidget,
-    );
-    // 준비 중 화면에서 서버를 두드릴 이유가 없다.
-    expect(repository.calls, isEmpty);
+    // 2026-08-09 노출을 켰다. 켜진 상태에서 준비 중 안내가 남아 있으면 진입점만 열리고
+    //   화면은 빈 채로 보인다 — 스위치와 화면이 어긋나지 않는지 여기서 고정한다.
+    expect(ReferralSummaryFeature.enabled, isTrue);
+    expect(find.byKey(const ValueKey('referral-summary-disabled')), findsNothing);
+    expect(repository.calls, isNotEmpty);
   });
 
   group('켜졌을 때 (본문 위젯 직접 렌더)', () {

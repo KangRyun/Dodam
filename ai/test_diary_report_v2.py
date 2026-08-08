@@ -429,8 +429,41 @@ class DiaryReportBuilderTest(unittest.TestCase):
 
         insights = diary_report_v2.build_diary_insights(raw, req, vision_available=True)
 
-        # 관찰이 빠지고 나면 근거로 검증된 구조가 하나도 남지 않는다 → V2 자체를 열지 않는다.
-        #   아이 발화 목록은 요청 문답에서 그대로 파생돼 늘 채워지므로 '남은 내용'으로 세지 않는다.
+        # 고른 답 둘만으로 만든 관찰 카드는 떨어진다 — 이 테스트가 지키는 것은 그것이다.
+        self.assertIsNotNone(insights)
+        self.assertEqual(insights.session_observations, [])
+        self.assertIsNone(insights.story_snapshot)
+
+        # 다만 V2 자체를 접지는 않는다. 발달 맥락(4층)은 서버가 검증된 신호로 조립하므로
+        #   모델 카드가 전부 떨어져도 보호자에게 적을 것이 남는다. 접으면 화면이 옛 레이아웃으로
+        #   떨어져 이야기·인사이트·발달 맥락이 한꺼번에 사라진다(2026-08-09 실측).
+        self.assertTrue(insights.developmental_observations)
+
+    def test_v2_is_folded_when_nothing_at_all_was_confirmed(self):
+        """확인된 것이 하나도 없으면 빈 V2 를 열지 않는다 — 폴백 규칙은 그대로다."""
+        import diary_report_v2
+
+        base = _diary_request()
+        req = base.model_copy(
+            update={
+                "expressed_emotion_text": "",
+                "representative_utterance": "",
+                "selected_emotions": [],
+                "selected_emotion_refs": [],
+                "subject_summaries": [
+                    contracts.SubjectSummary(
+                        drawing_description="",
+                        observation_evidence_source_id=None,
+                        qa_pairs=[],
+                    )
+                ],
+            }
+        )
+
+        insights = diary_report_v2.build_diary_insights(
+            {}, req, vision_available=False
+        )
+
         self.assertIsNone(insights)
 
     def _insight(self, **overrides):
@@ -944,9 +977,10 @@ class DiaryReportPromptV2Test(unittest.TestCase):
     def test_prompt_versions_are_bumped_for_v2(self):
         import prompts_registry
 
-        # 3.1.0 — 3층 인사이트(insightType 3종 + 다른 설명)를 더했다. 구 V2 모양 카드는
-        #   근거 모양에서 종류를 추론해 그대로 통과하므로 minor 다.
-        self.assertEqual(prompts_registry._PROMPT_SEMVER["report_diary"], "3.1.0")
+        # 3.2.0 — 고른 답만 있는 활동에서 모델이 diarySignals 를 통째로 비워 돌려주던 것을
+        #   막았다. 금지("자발적 감정으로 쓰지 마")에 지시("사실로는 골랐다고 적어라")를 붙인
+        #   것이라 규칙이 늘어난 것이 아니라 완성된 것이므로 minor 다.
+        self.assertEqual(prompts_registry._PROMPT_SEMVER["report_diary"], "3.2.0")
         self.assertEqual(prompts_registry._PROMPT_SEMVER["report_review"], "2.1.0")
         self.assertEqual(
             prompts_registry._PROMPT_SEMVER["report_review_diary"], "1.0.0"
