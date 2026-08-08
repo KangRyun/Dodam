@@ -9,9 +9,9 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * {@code report_generation_retries} 대기열을 채우고 선점한다 (S15P11B209 P0-2).
  *
- * <p><strong>대기열은 스스로 채운다.</strong> 실패한 쪽이 "재시도해 줘"를 따로 넣지 않는다 — 넣는 순간과 실패를 기록하는 순간 사이에서 프로세스가
- * 죽으면 그 리포트는 {@code FAILED_RETRYABLE}인 채로 아무도 다시 보지 않는다. 대신 {@link #adopt(int)}가 {@code reports}를 직접
- * 읽어 대기열 행을 만든다. 진실은 리포트 상태 한 곳에만 있고, 이 표는 몇 번 시도했고 다음이 언제인지만 들고 간다.
+ * <p><strong>대기열은 스스로 채운다.</strong> 실패한 쪽이 "재시도해 줘"를 따로 넣지 않는다 — 넣는 순간과 실패를 기록하는 순간 사이에서 프로세스가 죽으면
+ * 그 리포트는 {@code FAILED_RETRYABLE}인 채로 아무도 다시 보지 않는다. 대신 {@link #adopt(int)}가 {@code reports}를 직접 읽어
+ * 대기열 행을 만든다. 진실은 리포트 상태 한 곳에만 있고, 이 표는 몇 번 시도했고 다음이 언제인지만 들고 간다.
  *
  * <p>backend는 replicas 2라 워커가 두 벌 돈다. {@link #claim(int, Duration, int)}의 {@code for update skip
  * locked}가 한 작업을 한 파드만 집게 한다 — 이것 없이 조회 후 갱신하면 두 파드가 같은 리포트를 동시에 다시 만든다.

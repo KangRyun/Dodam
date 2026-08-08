@@ -147,8 +147,8 @@ public class MockObservationReportGenerationService {
   /**
    * 실패를 구조화해 남기고 리포트에 기록한다 (S15P11B209 P0-2).
    *
-   * <p>한 줄에 <strong>분석 ID·단계·분류 코드·재시도 여부·correlationId</strong>가 함께 나온다. 예전에는 실패마다 형식이 달라, 어느
-   * 단계에서 멈췄고 다시 해 볼 값어치가 있는지를 로그만 보고는 알 수 없었다.
+   * <p>한 줄에 <strong>분석 ID·단계·분류 코드·재시도 여부·correlationId</strong>가 함께 나온다. 예전에는 실패마다 형식이 달라, 어느 단계에서
+   * 멈췄고 다시 해 볼 값어치가 있는지를 로그만 보고는 알 수 없었다.
    *
    * <p>여기 나가는 값에 <strong>개인정보·음성 원문·시크릿은 없다</strong>. 분류 이름과 미리 정해 둔 문구, UUID뿐이다. 예외 원인 문자열은 {@code
    * DEBUG}로 내려 두었다.

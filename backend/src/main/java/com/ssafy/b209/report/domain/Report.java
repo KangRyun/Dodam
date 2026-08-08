@@ -318,13 +318,13 @@ public class Report {
   /**
    * 재시도 가능한 실패를 다시 생성 중으로 되돌린다 (S15P11B209 P0-2).
    *
-   * <p>실패 흔적({@code failureReason}, {@code failedAt})을 지우고 한계 문구를 생성 중 문구로 되돌린다. 남겨 두면 다시 성공했을
-   * 때 보호자 화면에 "리포트를 만들지 못했어요" 문구가 결과와 함께 붙어 나간다.
+   * <p>실패 흔적({@code failureReason}, {@code failedAt})을 지우고 한계 문구를 생성 중 문구로 되돌린다. 남겨 두면 다시 성공했을 때
+   * 보호자 화면에 "리포트를 만들지 못했어요" 문구가 결과와 함께 붙어 나간다.
    *
    * <p>⚠️ {@code limitations_text}는 DB에서 NOT NULL이다. 비우지 말고 생성 중 문구로 바꿔야 한다.
    *
-   * <p>{@link ReportStatus#FAILED_FINAL}과 재시도 판단이 없는 옛 {@link ReportStatus#FAILED}는 되돌리지 않는다 —
-   * 다시 해도 같은 자리에서 멈추거나, 그럴지 아닐지를 알 수 없는 값이다.
+   * <p>{@link ReportStatus#FAILED_FINAL}과 재시도 판단이 없는 옛 {@link ReportStatus#FAILED}는 되돌리지 않는다 — 다시
+   * 해도 같은 자리에서 멈추거나, 그럴지 아닐지를 알 수 없는 값이다.
    *
    * @param reopenedAt 재시도를 시작한 UTC 시각
    * @throws IllegalStateException 재시도 가능한 실패 상태가 아닌 경우

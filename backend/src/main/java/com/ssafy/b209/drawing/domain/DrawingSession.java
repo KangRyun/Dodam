@@ -281,8 +281,8 @@ public class DrawingSession {
   /**
    * 그림·감정·대화가 저장된 활동을 완료 상태로 전이한다.
    *
-   * <p><strong>리포트 생성 성공을 기다리지 않는다.</strong> 아이는 그림을 그렸고 마음을 골랐고 대화를 마쳤다 — 그 활동은 끝난 것이다. 리포트는
-   * 그 기록을 읽어 만드는 별개의 일이라, LLM 호출이 실패했다고 아이가 한 활동이 실패가 될 수는 없다.
+   * <p><strong>리포트 생성 성공을 기다리지 않는다.</strong> 아이는 그림을 그렸고 마음을 골랐고 대화를 마쳤다 — 그 활동은 끝난 것이다. 리포트는 그 기록을
+   * 읽어 만드는 별개의 일이라, LLM 호출이 실패했다고 아이가 한 활동이 실패가 될 수는 없다.
    *
    * <p>예전에는 리포트 저장 Transaction 안에서만 완료됐고, 실패하면 세션이 {@code FAILED}로 내려갔다. 그래서 아이 화면에 "활동을 마무리하지
    * 못했어요"가 뜨고 기록에는 '분석 실패'만 남았다(2026-08-08 실측). 리포트 상태는 {@code reports} 행이 따로 들고 간다.
@@ -363,8 +363,8 @@ public class DrawingSession {
   /**
    * 리포트를 다시 만들 수 있는 Session인지 확인한다.
    *
-   * <p><strong>완료된 활동에서도 재생성한다.</strong> 리포트 실패가 더 이상 활동을 실패로 만들지 않으므로, 재생성은 "끝난 활동의 리포트를 다시
-   * 만드는 일"이 됐다. 예전 상태(FAILED·REPORTING)는 그 시절에 생긴 세션이 남아 있을 수 있어 함께 받는다.
+   * <p><strong>완료된 활동에서도 재생성한다.</strong> 리포트 실패가 더 이상 활동을 실패로 만들지 않으므로, 재생성은 "끝난 활동의 리포트를 다시 만드는
+   * 일"이 됐다. 예전 상태(FAILED·REPORTING)는 그 시절에 생긴 세션이 남아 있을 수 있어 함께 받는다.
    *
    * @return 재생성을 접수할 수 있으면 {@code true}
    */
@@ -372,12 +372,10 @@ public class DrawingSession {
     if (deletedAt != null) {
       return false;
     }
-    if (sessionStatus == DrawingSessionStatus.COMPLETED
-        && currentStage == DrawingStage.COMPLETED) {
+    if (sessionStatus == DrawingSessionStatus.COMPLETED && currentStage == DrawingStage.COMPLETED) {
       return true;
     }
-    return sessionStatus == DrawingSessionStatus.FAILED
-        && currentStage == DrawingStage.REPORTING;
+    return sessionStatus == DrawingSessionStatus.FAILED && currentStage == DrawingStage.REPORTING;
   }
 
   /**

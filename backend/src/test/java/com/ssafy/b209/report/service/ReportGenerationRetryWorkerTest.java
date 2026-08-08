@@ -34,8 +34,7 @@ class ReportGenerationRetryWorkerTest {
 
   @Test
   void resolvesJobWhenRegenerationSucceeds() {
-    given(retryRepository.claim(anyInt(), any(Duration.class), anyInt()))
-        .willReturn(List.of(JOB));
+    given(retryRepository.claim(anyInt(), any(Duration.class), anyInt())).willReturn(List.of(JOB));
     given(reopenService.reopen(100L, 200L)).willReturn(true);
     given(reopenService.isCompleted(100L)).willReturn(true);
 
@@ -48,8 +47,7 @@ class ReportGenerationRetryWorkerTest {
   /** 다시 실패했으면 행을 남긴다. 다음 틱이 남은 시도 횟수 안에서 또 집는다. */
   @Test
   void keepsJobQueuedWhenRegenerationFailsAgain() {
-    given(retryRepository.claim(anyInt(), any(Duration.class), anyInt()))
-        .willReturn(List.of(JOB));
+    given(retryRepository.claim(anyInt(), any(Duration.class), anyInt())).willReturn(List.of(JOB));
     given(reopenService.reopen(100L, 200L)).willReturn(true);
     given(reopenService.isCompleted(100L)).willReturn(false);
 
@@ -66,8 +64,7 @@ class ReportGenerationRetryWorkerTest {
    */
   @Test
   void skipsRegenerationWhenReportLeftRetryableState() {
-    given(retryRepository.claim(anyInt(), any(Duration.class), anyInt()))
-        .willReturn(List.of(JOB));
+    given(retryRepository.claim(anyInt(), any(Duration.class), anyInt())).willReturn(List.of(JOB));
     given(reopenService.reopen(100L, 200L)).willReturn(false);
 
     worker().retryFailedReports();

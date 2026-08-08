@@ -14,8 +14,8 @@ import org.springframework.transaction.annotation.Transactional;
 /**
  * 재시도 직전에 분석과 리포트를 다시 생성 중으로 되돌린다 (S15P11B209 P0-2).
  *
- * <p>{@link MockObservationReportGenerationService#generate(Long)}는 <b>PENDING 분석</b>과 <b>GENERATING
- * 리포트</b>만 다룬다. 실패한 상태 그대로 부르면 아무 일도 하지 않고 조용히 끝난다 — 워커가 매번 돌지만 아무것도 고쳐지지 않는 상태가 된다.
+ * <p>{@link MockObservationReportGenerationService#generate(Long)}는 <b>PENDING 분석</b>과
+ * <b>GENERATING 리포트</b>만 다룬다. 실패한 상태 그대로 부르면 아무 일도 하지 않고 조용히 끝난다 — 워커가 매번 돌지만 아무것도 고쳐지지 않는 상태가 된다.
  *
  * <p>워커가 아니라 이 서비스가 Transaction 경계인 이유는, 되돌리기가 커밋된 뒤에야 {@code generate}가 그 상태를 읽을 수 있기 때문이다.
  */

@@ -107,7 +107,7 @@ class MockObservationReportGenerationServiceTest {
                     null, "공룡이 풍선을 들고 있어요.", List.of(), List.of(), 901L, List.of())),
             List.of(new ObservationGenerationContext.SelectedEmotionRef(920L, "HAPPY")),
             List.of(new ObservationGenerationContext.ActivitySessionRef(100L, null)),
-        7);
+            7);
     given(persistenceService.loadContext(ANALYSIS_ID)).willReturn(Optional.of(context));
     given(observationClient.generate(any()))
         .willReturn(new ObservationGeneration(validResult(REQUEST_UUID.toString()), null));
@@ -286,7 +286,8 @@ class MockObservationReportGenerationServiceTest {
     service.generate(ANALYSIS_ID);
 
     verify(persistenceService, never()).complete(any(), any());
-    verify(persistenceService).markFailed(
+    verify(persistenceService)
+        .markFailed(
             eq(ANALYSIS_ID),
             eq(REPORT_ID),
             eq("TIMEOUT"),

@@ -163,9 +163,8 @@ class ReportInterpretationConfidenceIntegrationTest extends IntegrationTestSuppo
   /**
    * 리포트 생성 완료 경로를 실제로 태운다 — 저장 메서드를 직접 부르지 않는 것이 이 테스트의 요점이다.
    *
-   * <p>{@code rawJson} 은 null 로 둔다(S15P11B209-983 이 원문 보관을 더하며 시그니처를 바꿨다). 이
-   * 테스트가 보는 것은 확신도가 계약에서 보호자 응답까지 실려 가는가이고, 원문 보관은 983 이 자기
-   * 테스트로 덮는다.
+   * <p>{@code rawJson} 은 null 로 둔다(S15P11B209-983 이 원문 보관을 더하며 시그니처를 바꿨다). 이 테스트가 보는 것은 확신도가 계약에서
+   * 보호자 응답까지 실려 가는가이고, 원문 보관은 983 이 자기 테스트로 덮는다.
    */
   private void generateReportWith(ObservationGenerationResult result) {
     ObservationGenerationContext context =

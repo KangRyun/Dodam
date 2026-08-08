@@ -52,8 +52,7 @@ class ReportGenerationRetryRepositoryIntegrationTest extends IntegrationTestSupp
 
     assertThat(retryRepository.adopt(10)).isEqualTo(1);
 
-    List<ReportGenerationRetry> claimed =
-        retryRepository.claim(10, Duration.ofMinutes(5), 3);
+    List<ReportGenerationRetry> claimed = retryRepository.claim(10, Duration.ofMinutes(5), 3);
     assertThat(claimed).hasSize(1);
     assertThat(claimed.get(0).reportId()).isEqualTo(retryable);
     assertThat(claimed.get(0).attemptCount()).isEqualTo(1);
@@ -99,8 +98,7 @@ class ReportGenerationRetryRepositoryIntegrationTest extends IntegrationTestSupp
   void stopsClaimingOnceReportLeavesRetryableState() {
     long reportId = seedReport(7L, "FAILED_RETRYABLE");
     retryRepository.adopt(10);
-    jdbcTemplate.update(
-        "UPDATE reports SET report_status = 'COMPLETED' WHERE id = ?", reportId);
+    jdbcTemplate.update("UPDATE reports SET report_status = 'COMPLETED' WHERE id = ?", reportId);
 
     assertThat(retryRepository.claim(10, Duration.ofMinutes(5), 3)).isEmpty();
   }

@@ -387,8 +387,8 @@ public class DrawingAnalysis {
   /**
    * 실패한 최종 분석을 다시 대기 상태로 되돌린다 (S15P11B209 P0-2).
    *
-   * <p>리포트 재시도 워커만 부른다. 실패 코드와 메시지를 지우는 이유는 <strong>다음 시도가 다른 이유로 실패할 수 있기 때문</strong>이다 — 남겨 두면
-   * 두 번째 실패의 원인을 첫 번째 실패의 코드로 읽게 된다. 지난 시도 기록은 {@code report_generation_retries} 행에 남는다.
+   * <p>리포트 재시도 워커만 부른다. 실패 코드와 메시지를 지우는 이유는 <strong>다음 시도가 다른 이유로 실패할 수 있기 때문</strong>이다 — 남겨 두면 두
+   * 번째 실패의 원인을 첫 번째 실패의 코드로 읽게 된다. 지난 시도 기록은 {@code report_generation_retries} 행에 남는다.
    *
    * @throws IllegalStateException 실패 상태가 아닌 경우
    */

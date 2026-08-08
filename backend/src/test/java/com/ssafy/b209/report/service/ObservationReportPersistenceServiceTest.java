@@ -869,8 +869,7 @@ class ObservationReportPersistenceServiceTest {
     given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
     given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
 
-    service.markFailed(
-        ANALYSIS_ID, REPORT_ID, "TIMEOUT", "생성 실패", ReportStatus.FAILED_RETRYABLE);
+    service.markFailed(ANALYSIS_ID, REPORT_ID, "TIMEOUT", "생성 실패", ReportStatus.FAILED_RETRYABLE);
 
     assertThat(report.getStatus()).isEqualTo(ReportStatus.FAILED_RETRYABLE);
     assertThat(analysis.getState()).isEqualTo(DrawingAnalysisState.FAILED);

@@ -708,8 +708,8 @@ public class ObservationReportPersistenceService {
   /**
    * 실패를 재시도 판단과 함께 기록한다 (S15P11B209 P0-2).
    *
-   * <p>재시도 대기열에 따로 등록하지 않는다. {@link ReportGenerationRetryRepository}가 {@code FAILED_RETRYABLE}
-   * 리포트를 직접 읽어 대기열을 채운다 — 여기서 등록까지 하면 상태를 쓴 뒤 등록 전에 죽었을 때 그 리포트를 아무도 다시 보지 않는다.
+   * <p>재시도 대기열에 따로 등록하지 않는다. {@link ReportGenerationRetryRepository}가 {@code FAILED_RETRYABLE} 리포트를
+   * 직접 읽어 대기열을 채운다 — 여기서 등록까지 하면 상태를 쓴 뒤 등록 전에 죽었을 때 그 리포트를 아무도 다시 보지 않는다.
    *
    * @param analysisId 최종 분석 식별자
    * @param reportId 리포트 식별자이며 없으면 {@code null}
