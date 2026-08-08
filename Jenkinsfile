@@ -23,12 +23,13 @@
 //   고르는 방법(우선순위):
 //     ① 빌드 파라미터 DEPLOY_TARGET = compose | k3s   (일회성 강제)
 //     ② auto(기본) → 파일 /var/jenkins_home/DEPLOY_TARGET 의 내용
-//     ③ 파일도 없으면 **k3s**  ← 이 커밋 시점의 실제 운영 형태
-//   ⚠️ 기본값이 k3s 인 것은 의도다. Multibranch 는 새 파라미터를 "한 번 돌린 뒤"에야 인식하므로
-//     파라미터만으로는 컷오버 직후 첫 빌드를 통제할 수 없다. 컷오버 시 파일을 만들어 전환한다:
-//       전환: docker exec dodam-jenkins sh -c 'echo compose > /var/jenkins_home/DEPLOY_TARGET'
-//       복귀: docker exec dodam-jenkins rm -f /var/jenkins_home/DEPLOY_TARGET
-//     (DEPLOY_FREEZE 플래그와 같은 방식 — 런타임에 읽으므로 즉시 적용되고 재시작해도 남는다)
+//     ③ 파일도 없으면 **compose**  ← 컷백 기간 fail-safe (2026-08-08 k3s→compose 로 변경)
+//   ⚠️ 기본값을 k3s→compose 로 뒤집었다. 컷백 기간엔 스위치 파일이 유실돼도 죽은 k3s 가 아니라
+//     현재 현실(compose)로 안전하게 떨어져야 한다. (직전엔 기본이 k3s 라 파일이 없으면 kubectl 로
+//     죽은 클러스터에 배포 시도 → 실패했다 — 이 변경의 이유.) 여전히 파일이 실질 스위치다:
+//       compose 유지: docker exec dodam-jenkins sh -c 'echo compose > /var/jenkins_home/DEPLOY_TARGET'
+//       k3s 롤백:     docker exec dodam-jenkins sh -c 'echo k3s > /var/jenkins_home/DEPLOY_TARGET'
+//     (런타임에 읽으므로 즉시 적용·재시작해도 유지. ★ k3s 로 완전 롤백 시 이 기본값도 k3s 로 되돌릴지 검토)
 
 // 실패 알림에 붙일 "어디서 터졌나" 분석 — 실패 스테이지 + (테스트 실패면) 실패 테스트 요약.
 //   분석이 실패해도 알림 자체는 나가야 하므로 try/catch로 감싼다.
@@ -112,12 +113,12 @@ pipeline {
     // ※ DEPLOY_K8S_STAGING(359)은 제거했다. 컷오버(360) 후 운영 배포 자체가 k3s 로 가므로
     //   "스테이징에만 따로 배포"라는 개념이 사라졌다 — 같은 네임스페이스를 두 번 배포하게 된다.
 
-    // 배포 대상 스위치(컷백). 기본 auto = JENKINS_HOME/DEPLOY_TARGET 파일 값, 없으면 k3s.
+    // 배포 대상 스위치(컷백). 기본 auto = JENKINS_HOME/DEPLOY_TARGET 파일 값, 없으면 compose(2026-08-08 변경).
     //   파라미터 인식 지연(위 주석) 때문에 **파일이 실질 스위치**다 — 파일 헤더 설명 참조.
     choice(
       name: 'DEPLOY_TARGET',
       choices: ['auto', 'compose', 'k3s'],
-      description: '배포 대상. auto = /var/jenkins_home/DEPLOY_TARGET 파일 값(없으면 k3s)'
+      description: '배포 대상. auto = /var/jenkins_home/DEPLOY_TARGET 파일 값(없으면 compose)'
     )
     // compose 는 **이미지 참조가 바뀔 때만** 컨테이너를 재생성한다. 같은 SHA 를 다시 배포하면
     //   재생성이 일어나지 않아 옛 컨테이너가 그대로 남는다. Healthcheck 의 다이제스트 대조가
@@ -167,14 +168,14 @@ pipeline {
           //   사고가 "배포는 성공했는데 엉뚱한 런타임에 갔다"이기 때문이다.
           def target = (params.DEPLOY_TARGET ?: 'auto')
           if (target == 'auto') {
-            target = 'k3s'                                   // 파일이 없으면 컷백 전 상태로 본다
+            target = 'compose'                               // 컷백 기간 fail-safe: 파일이 없어도 죽은 k3s 가 아니라 현재 현실(compose)로 (2026-08-08)
             if (fileExists(env.DEPLOY_TARGET_FLAG)) {
               // 읽기 실패가 빌드를 죽이지 않게 한다(플래그가 root 600 으로 만들어질 수 있다).
               try {
                 def v = readFile(env.DEPLOY_TARGET_FLAG).trim()
                 if (v) { target = v }
               } catch (err) {
-                echo "⚠️ DEPLOY_TARGET 플래그를 읽지 못했다(k3s 로 진행): ${err.message}"
+                echo "⚠️ DEPLOY_TARGET 플래그를 읽지 못했다(compose 로 진행): ${err.message}"
               }
             }
           }
