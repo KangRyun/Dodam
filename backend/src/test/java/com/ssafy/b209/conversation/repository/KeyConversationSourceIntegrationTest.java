@@ -89,6 +89,125 @@ class KeyConversationSourceIntegrationTest extends IntegrationTestSupport {
             });
   }
 
+  @Test
+  void readsChosenOptionLabelsAsTheAnswerText() {
+    // 회귀: 아이가 보기만 고르면 OPTION_ANSWER 의 raw_text 는 비어 있고 고른 문구는 선택 응답
+    //   표에만 남는다. 그 표를 읽지 않아 답이 빈 글로 보였고, 리포트가 "이 질문은 건너뛰었어요"로
+    //   적었다 — 아이는 분명히 골랐는데 넘긴 것으로 남았다(2026-08-09 실측).
+    insertQuestion(1005L, 5, "집에서 무슨 일이 있었어?");
+    insertOption(9001L, 1005L, "played", "놀았어", 0);
+    insertOption(9002L, 1005L, "ate", "밥 먹었어", 1);
+    insertOptionAnswer(1006L, 1005L, 6, null);
+    insertSelectedOption(1006L, 1005L, 9002L, "밥 먹었어", 0);
+    insertSelectedOption(1006L, 1005L, 9001L, "놀았어", 1);
+
+    List<KeyConversationSource> sources =
+        conversationMessageRepository.findKeyConversationSources(CONVERSATION_ID);
+
+    assertThat(sources)
+        .filteredOn(source -> source.getAnswerMessageId() == 1006L)
+        .singleElement()
+        .satisfies(
+            source -> {
+              // 고른 순서대로 이어 붙인다 — 표시 순서가 아니라 아이가 고른 순서다.
+              assertThat(source.getAnswerText()).isEqualTo("밥 먹었어, 놀았어");
+              assertThat(source.getAnswerType()).isEqualTo("OPTION_ANSWER");
+            });
+  }
+
+  @Test
+  void keepsDirectTextAlongsideChosenLabels() {
+    insertQuestion(1007L, 7, "그다음엔 뭐 했어?");
+    insertOption(9003L, 1007L, "played", "놀았어", 0);
+    insertOptionAnswer(1008L, 1007L, 8, "블록으로 성 만들었어");
+    insertSelectedOption(1008L, 1007L, 9003L, "놀았어", 0);
+
+    List<KeyConversationSource> sources =
+        conversationMessageRepository.findKeyConversationSources(CONVERSATION_ID);
+
+    assertThat(sources)
+        .filteredOn(source -> source.getAnswerMessageId() == 1008L)
+        .singleElement()
+        .satisfies(
+            source ->
+                assertThat(source.getAnswerText()).isEqualTo("놀았어 블록으로 성 만들었어"));
+  }
+
+  @Test
+  void dropsVoiceAnswersThatGaveWayToTheChosenAnswer() {
+    // 자동 녹음된 무음 답이 아이가 고른 답에 자리를 내주고도 목록에 남으면(V49), 같은 질문에
+    //   빈 답이 하나 더 붙어 역시 "건너뛰었어요"가 된다. 지우지 않고 남기는 대신 읽는 쪽이 거른다.
+    insertQuestion(1009L, 9, "누구랑 놀았어?");
+    insertSupersededVoiceAnswer(1010L, 1009L, 10, 1012L);
+    insertOption(9004L, 1009L, "friend", "친구", 0);
+    insertOptionAnswer(1012L, 1009L, 11, null);
+    insertSelectedOption(1012L, 1009L, 9004L, "친구", 0);
+
+    List<KeyConversationSource> sources =
+        conversationMessageRepository.findKeyConversationSources(CONVERSATION_ID);
+
+    assertThat(sources).extracting(KeyConversationSource::getAnswerMessageId).doesNotContain(1010L);
+    assertThat(sources)
+        .filteredOn(source -> source.getAnswerMessageId() == 1012L)
+        .singleElement()
+        .satisfies(source -> assertThat(source.getAnswerText()).isEqualTo("친구"));
+  }
+
+  private void insertOption(long id, long questionId, String key, String label, int order) {
+    jdbcTemplate.update(
+        "INSERT INTO conversation_message_options "
+            + "(id, conversation_message_id, option_key, option_type, option_value, label, "
+            + "display_order) VALUES (?, ?, ?, 'PRESET', ?, ?, ?)",
+        id,
+        questionId,
+        key,
+        key,
+        label,
+        order);
+  }
+
+  private void insertOptionAnswer(long id, long parentId, int sequence, String directText) {
+    jdbcTemplate.update(
+        "INSERT INTO conversation_messages "
+            + "(id, conversation_session_id, parent_message_id, message_sequence, sender_type, "
+            + "message_type, raw_text, is_skipped, needs_guardian_confirmation) "
+            + "VALUES (?, ?, ?, ?, 'CHILD', 'OPTION_ANSWER', ?, FALSE, FALSE)",
+        id,
+        CONVERSATION_ID,
+        parentId,
+        sequence,
+        directText);
+  }
+
+  private void insertSelectedOption(
+      long answerId, long questionId, long optionId, String label, int order) {
+    jdbcTemplate.update(
+        "INSERT INTO conversation_message_selected_options "
+            + "(answer_message_id, question_message_id, message_option_id, label_snapshot, "
+            + "selection_order) VALUES (?, ?, ?, ?, ?)",
+        answerId,
+        questionId,
+        optionId,
+        label,
+        order);
+  }
+
+  private void insertSupersededVoiceAnswer(
+      long id, long parentId, int sequence, long supersededBy) {
+    jdbcTemplate.update(
+        "INSERT INTO conversation_messages "
+            + "(id, conversation_session_id, parent_message_id, message_sequence, sender_type, "
+            + "message_type, raw_text, is_skipped, needs_guardian_confirmation, "
+            + "superseded_at, superseded_by_message_id) "
+            + "VALUES (?, ?, ?, ?, 'CHILD', 'VOICE_ANSWER', NULL, FALSE, FALSE, "
+            + "'2026-08-05 01:20:00', ?)",
+        id,
+        CONVERSATION_ID,
+        parentId,
+        sequence,
+        supersededBy);
+  }
+
   private void insertQuestion(long id, int sequence, String text) {
     jdbcTemplate.update(
         "INSERT INTO conversation_messages "
