@@ -785,12 +785,78 @@ class _ReportHero extends StatelessWidget {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       _intro(context),
+      if (_heroQuoteText(report) case final quote?) _HeroQuote(text: quote),
       ?_heroNotice(report),
       if (activity case final activity?) ...[
         const SizedBox(height: AppSpacing.md),
         activity,
       ],
     ],
+  );
+}
+
+/// 표지 아래에 세울 아이의 대표 발화 한 줄을 고른다.
+///
+/// 서버가 고른 대표 발화(representativeUtterances)를 그대로 쓴다 — 아이 발화는
+/// 해석의 최상위 근거이자(CLAUDE.md 2절) 보호자가 가장 오래 기억하는 한 줄이다.
+/// ⚠️ STT 확인이 필요한(오인식 가능) 발화는 얼굴로 올리지 않는다 — 잘못 알아들은
+/// 말을 리포트의 첫 문장으로 내보내면 아이를 오도한다. 쓸 발화가 없으면 null 을
+/// 돌려주고 표지는 그대로 둔다(억지로 채우지 않는다).
+String? _heroQuoteText(ReportDetailDto report) {
+  for (final utterance
+      in report.childExpression?.representativeUtterances ?? const []) {
+    if (utterance.sttNeedsConfirmation) continue;
+    final text = utterance.text?.trim();
+    if (text != null && text.isNotEmpty) return text;
+  }
+  return null;
+}
+
+/// 표지 아래에 아이의 말 한 줄을 '얼굴'로 세우는 인용 블록.
+///
+/// 관찰 목록을 평평하게 나열하는 대신, 이 활동에서 아이가 실제로 한 말 하나를
+/// 크게 앞세운다 — 리포트가 가장 먼저 전할 것은 아이의 목소리라는 신호다.
+/// 각색하지 않고 원문 그대로 인용한다. 같은 발화가 아래 '아이의 표현' 섹션에도
+/// 이어 나오는 것은 의도된 것이다(앞세운 한 줄과 맥락 속 전체는 역할이 다르다).
+class _HeroQuote extends StatelessWidget {
+  const _HeroQuote({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) => Container(
+    key: const ValueKey('report-hero-quote'),
+    margin: const EdgeInsets.only(top: AppSpacing.md),
+    padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
+    decoration: BoxDecoration(
+      color: AppColors.lavenderSoft,
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          '오늘 아이가 들려준 말',
+          style: TextStyle(
+            color: AppColors.lavender,
+            fontSize: 12.5,
+            height: 1.2,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.2,
+          ),
+        ),
+        const SizedBox(height: AppSpacing.xs),
+        Text(
+          '“$text”',
+          style: const TextStyle(
+            color: AppColors.ink,
+            fontSize: 21,
+            height: 1.35,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    ),
   );
 }
 

@@ -52,7 +52,8 @@ void main() {
     expect(find.text('23분'), findsOneWidget);
     // childExpression
     expect(find.text('동생이랑 놀아서 좋았어요'), findsOneWidget);
-    expect(find.textContaining('우리 동생이야.'), findsOneWidget);
+    // 히어로 풀인용 + 섹션 = 2회(의도된 중복)
+    expect(find.textContaining('우리 동생이야.'), findsNWidgets(2));
     expect(find.text('기쁨'), findsOneWidget);
     // activityFacts 블럭은 그림일기에서 빼고 HTP에만 남겼다(S15P11B209-996).
     expect(find.text('사람, 집'), findsNothing);
@@ -226,7 +227,8 @@ void main() {
       ),
     );
 
-    expect(find.textContaining('원본 없는 음성 답변'), findsOneWidget);
+    // 히어로 풀인용 + 섹션 = 2회(의도된 중복)
+    expect(find.textContaining('원본 없는 음성 답변'), findsNWidgets(2));
     expect(find.byKey(const ValueKey('voice-answer-play-804')), findsNothing);
   });
 
@@ -256,7 +258,6 @@ void main() {
       expect(find.byKey(ValueKey('voice-answer-play-$id')), findsNothing);
     }
     for (final text in [
-      '재생 가능한 음성',
       'messageId 없음',
       'messageId 0',
       '음수 messageId',
@@ -265,6 +266,9 @@ void main() {
     ]) {
       expect(find.textContaining(text), findsOneWidget);
     }
+    // '재생 가능한 음성'은 첫 clean 발화라 히어로로 승격된다 —
+    // 히어로 풀인용 + 섹션 = 2회(의도된 중복).
+    expect(find.textContaining('재생 가능한 음성'), findsNWidgets(2));
     expect(playback.messageIds, isEmpty);
   });
 
@@ -371,7 +375,8 @@ void main() {
       findsOneWidget,
     );
     expect(find.text('그림일기'), findsOneWidget);
-    expect(find.textContaining('우리 동생이야.'), findsOneWidget);
+    // 히어로 풀인용 + 섹션 = 2회(의도된 중복)
+    expect(find.textContaining('우리 동생이야.'), findsNWidgets(2));
     expect(find.byKey(const ValueKey('report-save-pdf')), findsOneWidget);
     expect(find.byKey(const ValueKey('report-share-pdf')), findsOneWidget);
 
