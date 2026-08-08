@@ -255,6 +255,34 @@ void main() {
     expect(find.text('이 질문은 건너뛰었어요'), findsOneWidget);
   });
 
+  testWidgets('그림에서 보인 것을 서술로 보여 준다', (tester) async {
+    // 표지에 그림을 싣고도 이 줄이 없으면 그림과 아이 이야기를 잇는 근거가 없다.
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: DiaryReportV2Body(
+              insights: _insights(),
+              visionObservations: const ['블록탑이 무너져 있고 두 아이가 마주 보고 있어요.'],
+              drawnItems: const ['블록', '사람'],
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('그림에서 보인 것'), findsOneWidget);
+    expect(find.textContaining('블록탑이 무너져 있고'), findsOneWidget);
+    expect(find.text('그린 것 · 블록, 사람'), findsOneWidget);
+  });
+
+  testWidgets('그림 서술이 없으면 그 자리를 만들지 않는다', (tester) async {
+    await _pump(tester, _insights());
+
+    expect(find.text('그림에서 보인 것'), findsNothing);
+  });
+
   testWidgets('문답이 없는 구 응답에서는 예전처럼 발화만 보여 준다', (tester) async {
     await _pump(tester, _insights());
 
