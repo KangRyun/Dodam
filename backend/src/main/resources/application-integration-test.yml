@@ -51,3 +51,11 @@ app:
   storage:
     deletion:
       enabled: false
+  # 리포트 재시도 워커(P0-2)도 끈다. 삭제 워커와 같은 이유에 하나가 더 붙는다 — 이 워커는
+  # FAILED_RETRYABLE 리포트를 GENERATING 으로 되돌리고 AI 를 다시 부른다. 컨테이너를 공유하는
+  # 통합테스트에서 이게 돌면, 실패 상태를 단언하는 남의 테스트가 단언 도중 상태를 바꿔치기당한다.
+  # 대기열 SQL·스키마 검증은 ReportGenerationRetryRepositoryIntegrationTest 가 저장소를 직접
+  # 불러 하므로 이 빈을 꺼도 검증 범위는 그대로다.
+  report:
+    retry:
+      enabled: false

@@ -134,7 +134,10 @@ public class DrawingCompletionService {
                   requestedAt));
       Report report =
           reportRepository.saveAndFlush(Report.generating(session, analysis, 1, requestedAt));
-      session.startReporting();
+      // 여기서 활동이 끝난다. 리포트 생성 결과를 기다리지 않는다 — 아이는 그림을 그렸고
+      //   마음을 골랐고 대화를 마쳤다. LLM 호출이 실패했다고 그 활동이 실패가 될 수는 없다.
+      //   리포트 진행 상태는 reports 행이 따로 들고 간다.
+      session.completeActivity(requestedAt);
       eventPublisher.publishEvent(new ReportGenerationRequestedEvent(analysis.getId()));
       return response(session, analysis, report);
     } catch (DataIntegrityViolationException exception) {

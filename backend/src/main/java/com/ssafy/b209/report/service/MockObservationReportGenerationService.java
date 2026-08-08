@@ -90,25 +90,26 @@ public class MockObservationReportGenerationService {
     try {
       generation = observationClient.generate(request);
     } catch (AiObservationClientException exception) {
-      log.warn(
-          "관찰 리포트 생성 호출에 실패했습니다. analysisId={}, failureType={}", analysisId, exception.getType());
-      persistenceService.markFailed(
+      recordFailure(
           analysisId,
           context.reportId(),
-          exception.getType().name(),
-          MockObservationReportErrorCode.OBSERVATION_GENERATION_FAILED.getMessage());
+          ReportGenerationFailure.ofAiCall(
+              exception.getType(),
+              MockObservationReportErrorCode.OBSERVATION_GENERATION_FAILED.getMessage(),
+              requestId));
       return;
     }
 
     ObservationGenerationResult result = generation.result();
     String invalidReason = validate(requestId, result);
     if (invalidReason != null) {
-      log.warn("관찰 리포트 생성 응답이 유효하지 않습니다. analysisId={}, reason={}", analysisId, invalidReason);
-      persistenceService.markFailed(
+      recordFailure(
           analysisId,
           context.reportId(),
-          invalidReason,
-          MockObservationReportErrorCode.OBSERVATION_INVALID_RESPONSE.getMessage());
+          ReportGenerationFailure.ofInvalidResponse(
+              invalidReason,
+              MockObservationReportErrorCode.OBSERVATION_INVALID_RESPONSE.getMessage(),
+              requestId));
       return;
     }
 
@@ -118,26 +119,54 @@ public class MockObservationReportGenerationService {
       // 저장 계층이 이미 분류한 실패다. 여기서 REPORT_STORAGE_FAILED로 덮으면 generation-status의
       // failureReason이 실제 원인과 무관해진다(S15P11B209-815).
       ErrorCode errorCode = exception.getErrorCode();
-      String failureCode = classificationOf(errorCode);
-      log.error(
-          "관찰 리포트 저장에 실패했습니다. analysisId={}, failureCode={}, rootCause={}",
-          analysisId,
-          failureCode,
+      log.debug(
+          "관찰 리포트 저장 실패 원인. correlationId={}, rootCause={}",
+          requestId,
           describeRootCause(exception));
-      persistenceService.markFailed(
-          analysisId, context.reportId(), failureCode, errorCode.getMessage());
-    } catch (RuntimeException exception) {
-      log.error(
-          "관찰 리포트 저장에 실패했습니다. analysisId={}, exceptionType={}, rootCause={}",
-          analysisId,
-          exception.getClass().getSimpleName(),
-          describeRootCause(exception));
-      persistenceService.markFailed(
+      recordFailure(
           analysisId,
           context.reportId(),
-          "REPORT_STORAGE_FAILED",
-          MockObservationReportErrorCode.REPORT_STORAGE_FAILED.getMessage());
+          ReportGenerationFailure.ofPersistence(
+              classificationOf(errorCode), errorCode.getMessage(), requestId));
+    } catch (RuntimeException exception) {
+      log.debug(
+          "관찰 리포트 저장 실패 원인. correlationId={}, exceptionType={}, rootCause={}",
+          requestId,
+          exception.getClass().getSimpleName(),
+          describeRootCause(exception));
+      recordFailure(
+          analysisId,
+          context.reportId(),
+          ReportGenerationFailure.ofPersistence(
+              "REPORT_STORAGE_FAILED",
+              MockObservationReportErrorCode.REPORT_STORAGE_FAILED.getMessage(),
+              requestId));
     }
+  }
+
+  /**
+   * 실패를 구조화해 남기고 리포트에 기록한다 (S15P11B209 P0-2).
+   *
+   * <p>한 줄에 <strong>분석 ID·단계·분류 코드·재시도 여부·correlationId</strong>가 함께 나온다. 예전에는 실패마다 형식이 달라, 어느
+   * 단계에서 멈췄고 다시 해 볼 값어치가 있는지를 로그만 보고는 알 수 없었다.
+   *
+   * <p>여기 나가는 값에 <strong>개인정보·음성 원문·시크릿은 없다</strong>. 분류 이름과 미리 정해 둔 문구, UUID뿐이다. 예외 원인 문자열은 {@code
+   * DEBUG}로 내려 두었다.
+   *
+   * @param analysisId 최종 분석 식별자
+   * @param reportId 리포트 식별자
+   * @param failure 재시도 판단이 담긴 실패 정보
+   */
+  private void recordFailure(Long analysisId, Long reportId, ReportGenerationFailure failure) {
+    log.warn(
+        "리포트 생성 실패. analysisId={}, stage={}, failureCode={}, retryable={}, correlationId={}",
+        analysisId,
+        failure.stage(),
+        failure.code(),
+        failure.retryable(),
+        failure.correlationId());
+    persistenceService.markFailed(
+        analysisId, reportId, failure.code(), failure.message(), failure.reportStatus());
   }
 
   /**

@@ -83,7 +83,7 @@ class DrawingCompletionServiceTest {
     lenient().when(session.getId()).thenReturn(SESSION_ID);
     lenient().when(session.canRequestCompletion()).thenReturn(true);
     lenient().when(session.getSessionStatus()).thenReturn(DrawingSessionStatus.IN_PROGRESS);
-    lenient().when(session.getCurrentStage()).thenReturn(DrawingStage.REPORTING);
+    lenient().when(session.getCurrentStage()).thenReturn(DrawingStage.COMPLETED);
     lenient().when(analysisRepository.findByRequestId(KEY)).thenReturn(Optional.empty());
     lenient()
         .when(
@@ -118,7 +118,7 @@ class DrawingCompletionServiceTest {
         service.complete(SESSION_ID, KEY, new CompleteDrawingSessionRequest(false, true));
 
     verify(accessValidator).requireDrawingSessionAccess(GUARDIAN_ID, SESSION_ID);
-    verify(session).startReporting();
+    verify(session).completeActivity(any());
     verify(eventPublisher).publishEvent(new ReportGenerationRequestedEvent(701L));
     assertThat(response.drawingSessionId()).isEqualTo(SESSION_ID);
     assertThat(response.analysisId()).isEqualTo(701L);
@@ -141,7 +141,7 @@ class DrawingCompletionServiceTest {
     verify(analysisRepository, never()).saveAndFlush(any());
     verify(reportRepository, never()).saveAndFlush(any());
     verify(eventPublisher, never()).publishEvent(any());
-    verify(session, never()).startReporting();
+    verify(session, never()).completeActivity(any());
   }
 
   @Test

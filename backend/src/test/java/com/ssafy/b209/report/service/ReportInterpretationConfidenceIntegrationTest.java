@@ -69,7 +69,8 @@ class ReportInterpretationConfidenceIntegrationTest extends IntegrationTestSuppo
             + "(id, code, name, activity_category, selectable_by, is_active, display_order) "
             + "VALUES (?, 'ART_DIARY', '그림일기', 'GENERAL', 'BOTH', TRUE, 1)",
         DRAWING_TYPE_ID);
-    // 리포트 생성 직전 상태다. complete() 가 세션을 완료로 전이하므로 IN_PROGRESS + REPORTING 이어야 한다.
+    // 리포트 생성 직전 상태다. complete() 는 이 세션 상태를 건드리지 않으므로(P0-2) 어떤 값이든
+    //   이 검증에는 영향이 없다 — 여기서 보는 것은 경향 해석 카드의 확신 등급뿐이다.
     jdbcTemplate.update(
         "INSERT INTO drawing_sessions "
             + "(id, child_id, drawing_type_id, input_method, session_status, current_stage, "

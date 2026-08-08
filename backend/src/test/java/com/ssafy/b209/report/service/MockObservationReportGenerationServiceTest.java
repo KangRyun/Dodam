@@ -13,6 +13,7 @@ import com.ssafy.b209.drawing.service.SubjectStrokeSession;
 import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClient;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClientException;
+import com.ssafy.b209.report.domain.ReportStatus;
 import com.ssafy.b209.report.dto.ObservationGeneration;
 import com.ssafy.b209.report.dto.ObservationGenerationRequest;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
@@ -72,7 +73,7 @@ class MockObservationReportGenerationServiceTest {
     // 프롬프트의 연령 발달 문맥이 실린다. 빠지면 조용히 "나이 없음" 경로가 된다.
     org.assertj.core.api.Assertions.assertThat(request.childAge()).isEqualTo(7);
     verify(persistenceService).complete(any(ObservationGenerationContext.class), any());
-    verify(persistenceService, never()).markFailed(any(), any(), any(), any());
+    verify(persistenceService, never()).markFailed(any(), any(), any(), any(), any());
   }
 
   @Test
@@ -273,7 +274,7 @@ class MockObservationReportGenerationServiceTest {
 
     verify(observationClient, never()).generate(any());
     verify(persistenceService, never()).complete(any(), any());
-    verify(persistenceService, never()).markFailed(any(), any(), any(), any());
+    verify(persistenceService, never()).markFailed(any(), any(), any(), any(), any());
   }
 
   @Test
@@ -285,7 +286,12 @@ class MockObservationReportGenerationServiceTest {
     service.generate(ANALYSIS_ID);
 
     verify(persistenceService, never()).complete(any(), any());
-    verify(persistenceService).markFailed(eq(ANALYSIS_ID), eq(REPORT_ID), eq("TIMEOUT"), any());
+    verify(persistenceService).markFailed(
+            eq(ANALYSIS_ID),
+            eq(REPORT_ID),
+            eq("TIMEOUT"),
+            any(),
+            eq(ReportStatus.FAILED_RETRYABLE));
   }
 
   @Test
@@ -299,7 +305,12 @@ class MockObservationReportGenerationServiceTest {
 
     verify(persistenceService, never()).complete(any(), any());
     verify(persistenceService)
-        .markFailed(eq(ANALYSIS_ID), eq(REPORT_ID), eq("DISCLAIMER_MISSING"), any());
+        .markFailed(
+            eq(ANALYSIS_ID),
+            eq(REPORT_ID),
+            eq("DISCLAIMER_MISSING"),
+            any(),
+            eq(ReportStatus.FAILED_FINAL));
   }
 
   @Test
@@ -312,7 +323,12 @@ class MockObservationReportGenerationServiceTest {
 
     verify(persistenceService, never()).complete(any(), any());
     verify(persistenceService)
-        .markFailed(eq(ANALYSIS_ID), eq(REPORT_ID), eq("REQUEST_ID_MISMATCH"), any());
+        .markFailed(
+            eq(ANALYSIS_ID),
+            eq(REPORT_ID),
+            eq("REQUEST_ID_MISMATCH"),
+            any(),
+            eq(ReportStatus.FAILED_FINAL));
   }
 
   @Test
@@ -327,7 +343,12 @@ class MockObservationReportGenerationServiceTest {
     service.generate(ANALYSIS_ID);
 
     verify(persistenceService)
-        .markFailed(eq(ANALYSIS_ID), eq(REPORT_ID), eq("REPORT_STORAGE_FAILED"), any());
+        .markFailed(
+            eq(ANALYSIS_ID),
+            eq(REPORT_ID),
+            eq("REPORT_STORAGE_FAILED"),
+            any(),
+            eq(ReportStatus.FAILED_RETRYABLE));
   }
 
   @Test
@@ -347,7 +368,12 @@ class MockObservationReportGenerationServiceTest {
     service.generate(ANALYSIS_ID);
 
     verify(persistenceService)
-        .markFailed(eq(ANALYSIS_ID), eq(REPORT_ID), eq("REPORT_STORAGE_CONFLICT"), any());
+        .markFailed(
+            eq(ANALYSIS_ID),
+            eq(REPORT_ID),
+            eq("REPORT_STORAGE_CONFLICT"),
+            any(),
+            eq(ReportStatus.FAILED_FINAL));
   }
 
   @Test
@@ -427,7 +453,7 @@ class MockObservationReportGenerationServiceTest {
 
     verify(observationClient).generate(requestCaptor.capture());
     org.assertj.core.api.Assertions.assertThat(requestCaptor.getValue().behaviorMetrics()).isNull();
-    verify(persistenceService, never()).markFailed(any(), any(), any(), any());
+    verify(persistenceService, never()).markFailed(any(), any(), any(), any(), any());
   }
 
   @Test

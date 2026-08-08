@@ -585,7 +585,7 @@ class MvpFlowIntegrationTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"conversationSkipped\":false,\"requestReport\":true}"))
         .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.currentStage").value("REPORTING"))
+        .andExpect(jsonPath("$.data.currentStage").value("COMPLETED"))
         .andExpect(jsonPath("$.data.reportStatus").value("GENERATING"));
   }
 

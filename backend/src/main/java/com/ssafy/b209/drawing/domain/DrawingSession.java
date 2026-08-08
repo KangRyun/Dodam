@@ -266,6 +266,9 @@ public class DrawingSession {
    *
    * <p>이 전이는 비동기 작업 접수만 나타내므로 세션을 완료 처리하거나 완료 시각을 기록하지 않는다.
    *
+   * <p><strong>HTP 묶음 전용으로 남는다.</strong> 일반 활동은 {@link #completeActivity}로 곧바로 완료되며 REPORTING 단계를
+   * 거치지 않는다 — 아래 이유 참고.
+   *
    * @throws IllegalStateException 현재 세션이 완료 접수를 받을 수 없는 경우
    */
   public void startReporting() {
@@ -273,6 +276,29 @@ public class DrawingSession {
       throw new IllegalStateException("현재 단계에서는 완료 처리를 접수할 수 없습니다.");
     }
     currentStage = DrawingStage.REPORTING;
+  }
+
+  /**
+   * 그림·감정·대화가 저장된 활동을 완료 상태로 전이한다.
+   *
+   * <p><strong>리포트 생성 성공을 기다리지 않는다.</strong> 아이는 그림을 그렸고 마음을 골랐고 대화를 마쳤다 — 그 활동은 끝난 것이다. 리포트는
+   * 그 기록을 읽어 만드는 별개의 일이라, LLM 호출이 실패했다고 아이가 한 활동이 실패가 될 수는 없다.
+   *
+   * <p>예전에는 리포트 저장 Transaction 안에서만 완료됐고, 실패하면 세션이 {@code FAILED}로 내려갔다. 그래서 아이 화면에 "활동을 마무리하지
+   * 못했어요"가 뜨고 기록에는 '분석 실패'만 남았다(2026-08-08 실측). 리포트 상태는 {@code reports} 행이 따로 들고 간다.
+   *
+   * @param completedAt 서버가 결정한 UTC 기준 완료 시각
+   * @throws NullPointerException {@code completedAt}이 {@code null}인 경우
+   * @throws IllegalStateException 완료 접수를 받을 수 없는 상태인 경우
+   */
+  public void completeActivity(LocalDateTime completedAt) {
+    Objects.requireNonNull(completedAt, "completedAt must not be null");
+    if (!canRequestCompletion()) {
+      throw new IllegalStateException("현재 단계에서는 완료 처리를 접수할 수 없습니다.");
+    }
+    sessionStatus = DrawingSessionStatus.COMPLETED;
+    currentStage = DrawingStage.COMPLETED;
+    this.completedAt = completedAt;
   }
 
   /**
@@ -335,20 +361,42 @@ public class DrawingSession {
   }
 
   /**
-   * 리포트 생성에 실패한 Session을 같은 REPORTING 단계에서 재시작한다.
+   * 리포트를 다시 만들 수 있는 Session인지 확인한다.
    *
-   * <p>재생성은 새 Analysis와 Report 버전으로 진행되므로 완료 시각과 이전 생성 결과를 변경하지 않는다.
+   * <p><strong>완료된 활동에서도 재생성한다.</strong> 리포트 실패가 더 이상 활동을 실패로 만들지 않으므로, 재생성은 "끝난 활동의 리포트를 다시
+   * 만드는 일"이 됐다. 예전 상태(FAILED·REPORTING)는 그 시절에 생긴 세션이 남아 있을 수 있어 함께 받는다.
    *
-   * @throws IllegalStateException 삭제됐거나 FAILED/REPORTING 상태가 아닌 경우
+   * @return 재생성을 접수할 수 있으면 {@code true}
+   */
+  public boolean canRestartReporting() {
+    if (deletedAt != null) {
+      return false;
+    }
+    if (sessionStatus == DrawingSessionStatus.COMPLETED
+        && currentStage == DrawingStage.COMPLETED) {
+      return true;
+    }
+    return sessionStatus == DrawingSessionStatus.FAILED
+        && currentStage == DrawingStage.REPORTING;
+  }
+
+  /**
+   * 리포트를 다시 만들 수 있게 Session을 준비한다.
+   *
+   * <p>재생성은 새 Analysis와 Report 버전으로 진행되므로 완료 시각과 이전 생성 결과를 변경하지 않는다. 완료된 활동은 <strong>완료된 채로
+   * 둔다</strong> — 리포트를 다시 만든다고 아이가 끝낸 활동이 다시 진행 중이 되지는 않는다.
+   *
+   * @throws IllegalStateException 재생성을 접수할 수 없는 상태인 경우
    */
   public void restartReporting() {
-    if (deletedAt != null
-        || sessionStatus != DrawingSessionStatus.FAILED
-        || currentStage != DrawingStage.REPORTING) {
+    if (!canRestartReporting()) {
       throw new IllegalStateException(
-          "only a failed reporting session can restart report generation");
+          "only a completed or failed reporting session can restart report generation");
     }
-    sessionStatus = DrawingSessionStatus.IN_PROGRESS;
+    if (sessionStatus == DrawingSessionStatus.FAILED) {
+      // 옛 상태로 남아 있던 세션만 진행 중으로 되돌린다.
+      sessionStatus = DrawingSessionStatus.IN_PROGRESS;
+    }
   }
 
   /**
