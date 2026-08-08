@@ -86,6 +86,11 @@ public class ChildUpdateService {
     if (request.preferredCharacterSpecified()) {
       childUpdateRepository.updatePreferredCharacter(childId, request.preferredCharacter(), now);
     }
+    // ⚠️ null 도 유효한 값이다. "고르지 않을래요"를 고른 것과 요청에 안 담은 것은 다르고,
+    //    specified 로 그 둘을 가른다 (S15P11B209-1010 v2).
+    if (request.educationStageSpecified()) {
+      childUpdateRepository.updateEducationStage(childId, request.educationStage(), now);
+    }
     if (request.profileImageFileIdSpecified()) {
       String profileImageUrl =
           profileImageLinkService.replace(guardianUserId, childId, request.profileImageFileId());

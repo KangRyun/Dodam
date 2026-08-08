@@ -47,11 +47,74 @@ public record ObservationGenerationContext(
     List<SubjectContext> subjectContexts,
     List<SelectedEmotionRef> selectedEmotionRefs,
     List<ActivitySessionRef> activitySessions,
-    Integer childAge) {
+    Integer childAge,
+    Integer ageMonths,
+    String educationStage) {
 
   /** 목록이 {@code null}로 만들어져도 빈 목록으로 정규화한다. */
   public ObservationGenerationContext {
     activitySessions = activitySessions == null ? List.of() : List.copyOf(activitySessions);
+  }
+
+  /**
+   * 개월 나이와 교육단계를 모르는 맥락을 만든다 (S15P11B209-1010 v2).
+   *
+   * <p>두 값은 만 6세 발달 맥락을 고르는 데만 쓰고, 없으면 그 구간에서 연령 맥락을 붙이지 않는다 — 없는 것을
+   * 짐작해 채우는 것보다 안 붙이는 쪽이 맞다. 그래서 기본값이 {@code null} 이어도 안전하다.
+   *
+   * @param analysisId 최종 분석 식별자
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @param reportId 리포트 식별자
+   * @param conversationSessionId 대화 세션 식별자이며 없으면 {@code null}
+   * @param questionDifficulty 질문 난이도
+   * @param questionCount 질문 수
+   * @param answeredCount 답변 수
+   * @param skippedCount 건너뛴 수
+   * @param unrecognizedSpeechCount 음성 인식 실패 수
+   * @param selectedEmotions 선택 감정 코드
+   * @param expressedEmotionText 아이가 말로 표현한 감정
+   * @param keyConversations 주요 문답
+   * @param subjectContexts 주제별 수집 맥락
+   * @param selectedEmotionRefs 선택 감정 근거 참조
+   * @param activitySessions 활동 세션 목록
+   * @param childAge 만 나이(년)
+   */
+  public ObservationGenerationContext(
+      Long analysisId,
+      Long drawingSessionId,
+      Long reportId,
+      Long conversationSessionId,
+      String questionDifficulty,
+      int questionCount,
+      int answeredCount,
+      int skippedCount,
+      int unrecognizedSpeechCount,
+      List<String> selectedEmotions,
+      String expressedEmotionText,
+      List<KeyConversationLine> keyConversations,
+      List<SubjectContext> subjectContexts,
+      List<SelectedEmotionRef> selectedEmotionRefs,
+      List<ActivitySessionRef> activitySessions,
+      Integer childAge) {
+    this(
+        analysisId,
+        drawingSessionId,
+        reportId,
+        conversationSessionId,
+        questionDifficulty,
+        questionCount,
+        answeredCount,
+        skippedCount,
+        unrecognizedSpeechCount,
+        selectedEmotions,
+        expressedEmotionText,
+        keyConversations,
+        subjectContexts,
+        selectedEmotionRefs,
+        activitySessions,
+        childAge,
+        null,
+        null);
   }
 
   /**

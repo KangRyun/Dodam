@@ -489,7 +489,40 @@ public class ObservationReportPersistenceService {
             subjectContexts,
             selectedEmotionRefs,
             contextSessions,
-            childAge));
+            childAge,
+            ageMonthsOf(session),
+            educationStageOf(session)));
+  }
+
+  /**
+   * 활동 시점 기준 만 나이를 개월로 계산한다 (S15P11B209-1010 v2).
+   *
+   * <p>연 × 12 를 대신한다. 그 값은 구간 경계에서 한 해가 통째로 움직여 72~83개월처럼 한 해 안을 가르는 구간을 만들 수 없었다. 계산은 {@code
+   * Child.ageMonthsOn} 이 소유한다(도메인 규칙 중복 금지).
+   *
+   * @param session 아동 관계를 가진 그림 활동 세션
+   * @return 만 나이(개월)이며 아동 관계가 없으면 {@code null}
+   */
+  private Integer ageMonthsOf(DrawingSession session) {
+    return session.getChild() == null
+        ? null
+        : session.getChild().ageMonthsOn(LocalDate.now(clock));
+  }
+
+  /**
+   * 아이가 다니는 곳을 읽는다 (S15P11B209-1010 v2).
+   *
+   * <p>미입력이면 {@code null} 이다. <strong>짐작해 채우지 않는다</strong> — 나이만으로 학년을 확정하면 조기 입학·유예를 틀리게 단정하고, 그
+   * 위에 학년 자료가 붙는다.
+   *
+   * @param session 아동 관계를 가진 그림 활동 세션
+   * @return 교육단계 이름이며 미입력이거나 아동 관계가 없으면 {@code null}
+   */
+  private String educationStageOf(DrawingSession session) {
+    if (session.getChild() == null || session.getChild().getEducationStage() == null) {
+      return null;
+    }
+    return session.getChild().getEducationStage().name();
   }
 
   /**
@@ -1464,9 +1497,11 @@ public class ObservationReportPersistenceService {
     List<DiaryDevelopmentalObservationDraft> developmentDrafts = draft.developmentalObservations();
     for (int index = 0; index < developmentDrafts.size(); index++) {
       DiaryDevelopmentalObservationDraft development = developmentDrafts.get(index);
+      // ⚠️ ageContext 는 비어 있을 수 있다. 감정을 고르기만 한 활동은 붙일 수 있는 맥락
+      //    문장이 없는 것이 사실이라 AI 가 빈 값을 보낸다 — 여기서 버리면 그 관찰이 통째로
+      //    사라진다(S15P11B209-1010 v2). 나머지 넷은 없으면 카드가 성립하지 않는다.
       if (isBlank(development.domain())
           || isBlank(development.status())
-          || isBlank(development.ageContext())
           || isBlank(development.observation())
           || isBlank(development.scopeText())) {
         continue;
@@ -1476,12 +1511,14 @@ public class ObservationReportPersistenceService {
               report,
               development.domain(),
               development.status(),
-              development.ageContext(),
+              development.ageContext() == null ? "" : development.ageContext(),
               development.observation(),
               ColumnTextLimiter.fit(
                   development.scopeText(),
                   200,
                   "report_diary_developmental_observations.scope_text"),
+              development.contextType(),
+              development.caregiverQuestion(),
               index));
       List<String> sourceIds = development.sourceIds();
       for (int order = 0; order < sourceIds.size(); order++) {

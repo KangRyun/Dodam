@@ -29,6 +29,10 @@ import java.util.List;
  *     selectedEmotions}와 같은 재료이며 AI가 근거({@code sourceRef})로 가리킬 수 있는 형태다 (S15P11B209-906)
  * @param behaviorMetrics 캔버스 과정에서 집계한 형식 지표이며 집계하지 못했으면 {@code null} (S15P11B209-837)
  * @param childAge 활동 시점 기준 아동 만 나이이며 없으면 {@code null} (S15P11B209-1001)
+ * @param ageMonths 활동 시점 기준 만 나이(개월)이며 없으면 {@code null}. 생일에서 계산한다 — 연 × 12 는
+ *     구간 경계에서 한 해가 통째로 움직여 72~83개월 같은 구간을 만들 수 없었다 (S15P11B209-1010 v2)
+ * @param educationStage 다니는 곳({@code PRESCHOOL}·{@code KINDERGARTEN}·{@code GRADE_1})이며 미입력이면
+ *     {@code null}. 만 6세 맥락을 나이와 <strong>함께</strong> 고르는 데 쓴다
  */
 public record ObservationGenerationRequest(
     @NotBlank String requestId,
@@ -46,7 +50,9 @@ public record ObservationGenerationRequest(
     List<SubjectSummary> subjectSummaries,
     List<SelectedEmotionRef> selectedEmotionRefs,
     BehaviorMetrics behaviorMetrics,
-    Integer childAge) {
+    Integer childAge,
+    Integer ageMonths,
+    String educationStage) {
 
   /** 목록 필드가 {@code null}로 만들어져도 빈 목록으로 정규화한다(계약: optional·기본 빈 목록). */
   public ObservationGenerationRequest {
@@ -103,6 +109,69 @@ public record ObservationGenerationRequest(
         representativeUtterance,
         subjectSummaries,
         selectedEmotionRefs,
+        null,
+        null,
+        null,
+        null);
+  }
+
+  /**
+   * 개월 나이와 교육단계를 모르는 요청을 만든다 (S15P11B209-1010 v2).
+   *
+   * <p>두 값은 만 6세 발달 맥락을 고르는 데만 쓴다. 없으면 그 구간에서 연령 맥락을 붙이지 않으므로 기본값이
+   * {@code null} 이어도 안전하다 — 짐작해 채우는 것보다 안 붙이는 쪽이 맞다.
+   *
+   * @param requestId 요청 식별자
+   * @param analysisId 최종 분석 식별자
+   * @param drawingSessionId 그림 활동 세션 식별자
+   * @param analysisType 분석 유형
+   * @param questionDifficulty 질문 난이도
+   * @param questionCount 질문 수
+   * @param answeredCount 답변 수
+   * @param skippedCount 건너뛴 수
+   * @param unrecognizedSpeechCount 음성 인식 실패 수
+   * @param selectedEmotions 선택 감정 코드
+   * @param expressedEmotionText 아이가 말로 표현한 감정
+   * @param representativeUtterance 대표 발화
+   * @param subjectSummaries 주제별 요약
+   * @param selectedEmotionRefs 선택 감정 근거 참조
+   * @param behaviorMetrics 형식 지표
+   * @param childAge 만 나이(년)
+   */
+  public ObservationGenerationRequest(
+      String requestId,
+      Long analysisId,
+      Long drawingSessionId,
+      String analysisType,
+      String questionDifficulty,
+      int questionCount,
+      int answeredCount,
+      int skippedCount,
+      int unrecognizedSpeechCount,
+      List<String> selectedEmotions,
+      String expressedEmotionText,
+      String representativeUtterance,
+      List<SubjectSummary> subjectSummaries,
+      List<SelectedEmotionRef> selectedEmotionRefs,
+      BehaviorMetrics behaviorMetrics,
+      Integer childAge) {
+    this(
+        requestId,
+        analysisId,
+        drawingSessionId,
+        analysisType,
+        questionDifficulty,
+        questionCount,
+        answeredCount,
+        skippedCount,
+        unrecognizedSpeechCount,
+        selectedEmotions,
+        expressedEmotionText,
+        representativeUtterance,
+        subjectSummaries,
+        selectedEmotionRefs,
+        behaviorMetrics,
+        childAge,
         null,
         null);
   }

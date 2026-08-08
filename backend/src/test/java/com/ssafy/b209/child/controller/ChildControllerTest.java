@@ -526,6 +526,7 @@ class ChildControllerTest {
         null,
         "BASE",
         QuestionDifficulty.LOWER_ELEMENTARY,
+        "UNKNOWN",
         List.of("VOICE", "EMOJI"),
         ChildTutorialStatus.NOT_STARTED,
         ChildProfileStatus.ACTIVE,

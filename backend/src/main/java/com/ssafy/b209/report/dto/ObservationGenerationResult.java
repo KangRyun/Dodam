@@ -754,12 +754,17 @@ public record ObservationGenerationResult(
       String observation,
       String scopeText,
       List<String> sourceIds,
-      List<DiaryEvidenceRefDraft> evidenceRefs) {
+      List<DiaryEvidenceRefDraft> evidenceRefs,
+      String contextType,
+      String caregiverQuestion) {
 
-    /** 목록은 빈 목록으로 정규화한다. */
+    /** 목록은 빈 목록으로, 맥락 성격은 가장 보수적인 값으로 정규화한다. */
     public DiaryDevelopmentalObservationDraft {
       sourceIds = sourceIds == null ? List.of() : List.copyOf(sourceIds);
       evidenceRefs = evidenceRefs == null ? List.of() : List.copyOf(evidenceRefs);
+      // 구 AI 가 안 보내면 "이번 활동만 본다"로 읽는다. 모르는 것을 규준으로 올리지 않는다.
+      contextType =
+          contextType == null || contextType.isBlank() ? "SESSION_ONLY_CONTEXT" : contextType;
     }
   }
 

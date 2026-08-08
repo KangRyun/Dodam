@@ -3,6 +3,7 @@ package com.ssafy.b209.child.dto.request;
 import com.fasterxml.jackson.annotation.JsonAutoDetect;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonSetter;
+import com.ssafy.b209.child.domain.EducationStage;
 import com.ssafy.b209.child.domain.GuardianRelationshipType;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.child.domain.ResponseMode;
@@ -40,8 +41,17 @@ public class UpdateChildRequest {
   @Size(max = 255)
   private String profileImageFileId;
 
+  /**
+   * 아이가 다니는 곳이며 비우려면 {@code null} (S15P11B209-1010 v2).
+   *
+   * <p>{@code null} 이 유효한 값이라 "안 보냈다"와 구별해야 한다 — 그래서
+   * {@code preferredCharacter} 와 같은 specified 패턴을 쓴다.
+   */
+  private EducationStage educationStage;
+
   @JsonIgnore private boolean profileImageFileIdSpecified;
   @JsonIgnore private boolean preferredCharacterSpecified;
+  @JsonIgnore private boolean educationStageSpecified;
 
   public UpdateChildRequest() {}
 
@@ -82,6 +92,30 @@ public class UpdateChildRequest {
 
   public boolean preferredCharacterSpecified() {
     return preferredCharacterSpecified;
+  }
+
+  /**
+   * @return 아이가 다니는 곳이며 비우려면 {@code null}
+   */
+  public EducationStage educationStage() {
+    return educationStage;
+  }
+
+  /**
+   * @return 요청이 이 값을 담았으면 {@code true}. 담지 않은 것과 비운 것을 가른다
+   */
+  public boolean educationStageSpecified() {
+    return educationStageSpecified;
+  }
+
+  /**
+   * 다니는 곳을 지정한다.
+   *
+   * @param educationStage 새 교육단계이며 비우려면 {@code null}
+   */
+  public void setEducationStage(EducationStage educationStage) {
+    this.educationStage = educationStage;
+    this.educationStageSpecified = true;
   }
 
   public QuestionDifficulty questionDifficulty() {

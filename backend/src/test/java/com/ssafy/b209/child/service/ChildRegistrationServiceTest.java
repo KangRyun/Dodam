@@ -49,7 +49,7 @@ class ChildRegistrationServiceTest {
 
   @Test
   void persistsTheChildRelationAndResponseModesThenReturnsTheProfile() {
-    given(childRegistrationRepository.insertChild(any(), any(), any(), any(), any(), any()))
+    given(childRegistrationRepository.insertChild(any(), any(), any(), any(), any(), any(), any()))
         .willReturn(3L);
 
     ChildRegistrationResponse response =
@@ -63,6 +63,7 @@ class ChildRegistrationServiceTest {
             LocalDate.of(2019, 3, 15),
             "LOWER_ELEMENTARY",
             "BASE",
+            null,
             null,
             LocalDateTime.of(2026, 7, 23, 12, 0, 0));
     verify(childRegistrationRepository).insertGuardianRelation(GUARDIAN_USER_ID, 3L, "MOTHER");
@@ -79,7 +80,7 @@ class ChildRegistrationServiceTest {
 
   @Test
   void removesDuplicateResponseModesWhileKeepingTheFirstOrder() {
-    given(childRegistrationRepository.insertChild(any(), any(), any(), any(), any(), any()))
+    given(childRegistrationRepository.insertChild(any(), any(), any(), any(), any(), any(), any()))
         .willReturn(7L);
 
     ChildRegistrationResponse response =
@@ -125,7 +126,7 @@ class ChildRegistrationServiceTest {
 
   @Test
   void attachesUploadedProfileImageInTheSameRegistrationTransaction() {
-    given(childRegistrationRepository.insertChild(any(), any(), any(), any(), any(), any()))
+    given(childRegistrationRepository.insertChild(any(), any(), any(), any(), any(), any(), any()))
         .willReturn(3L);
     given(profileImageLinkService.attach(GUARDIAN_USER_ID, 3L, "profile-file-id"))
         .willReturn("/api/v1/child-profile-images/profile-file-id/file");
@@ -136,6 +137,7 @@ class ChildRegistrationServiceTest {
             GuardianRelationshipType.MOTHER,
             "BASE",
             QuestionDifficulty.LOWER_ELEMENTARY,
+            null,
             List.of(ResponseMode.VOICE),
             "profile-file-id");
 
@@ -157,6 +159,7 @@ class ChildRegistrationServiceTest {
         GuardianRelationshipType.MOTHER,
         "BASE",
         QuestionDifficulty.LOWER_ELEMENTARY,
+        null,
         responseModes,
         null);
   }

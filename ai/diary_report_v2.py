@@ -678,20 +678,103 @@ def _developmental_observations(
         )
     )
 
+    # ⑤ 대화 참여 — 질문과 답을 몇 차례 주고받았는가.
+    #
+    # ⚠️ 세는 것은 **아이가 자기 말로 만든 답**뿐이다. 고른 답과 STT 미확인 발화는 빼는데,
+    #    앞의 것은 아이가 만든 문장이 아니고 뒤의 것은 무슨 말인지 확정되지 않아서다.
+    if len(spoken) >= 2:
+        findings.append(
+            (
+                developmental_context.CONVERSATION_PARTICIPATION,
+                developmental_context.OBSERVED,
+                f"이번 활동에서 아이는 질문과 답을 {len(spoken)}차례 자기 말로 이어갔어요.",
+                events[:1],
+            )
+        )
+    elif spoken:
+        findings.append(
+            (
+                developmental_context.CONVERSATION_PARTICIPATION,
+                developmental_context.PARTIAL,
+                "이번 활동에서 아이는 질문에 한 번 자기 말로 답했어요.",
+                events[:1],
+            )
+        )
+    else:
+        findings.append(
+            (
+                developmental_context.CONVERSATION_PARTICIPATION,
+                developmental_context.NOT_ASSESSED,
+                developmental_context.NOT_ASSESSED_TEXT,
+                [],
+            )
+        )
+
+    # ⑥ 그림과 말의 연결 — 그림에 담은 것을 말로 이었는가.
+    #
+    # ⚠️ 그림 서술이 있는 것만으로는 부족하다. **아이가 말로 그것을 이어야** 연결이다.
+    #    그림만 보고 "그림과 말을 연결했다"고 쓰면 아이가 하지 않은 일을 적는 것이 된다.
+    has_drawing_description = any(
+        summary.drawing_description.strip() for summary in req.subject_summaries
+    )
+    drew_and_told = has_drawing_description and bool(spoken)
+    findings.append(
+        (
+            developmental_context.DRAWING_LANGUAGE_INTEGRATION,
+            developmental_context.OBSERVED
+            if drew_and_told
+            else developmental_context.NOT_ASSESSED,
+            "이번 활동에서 아이는 그림에 담은 장면을 자기 말로 이어 설명했어요."
+            if drew_and_told
+            else developmental_context.NOT_ASSESSED_TEXT,
+            events[:1],
+        )
+    )
+
     observations: list[contracts.DiaryDevelopmentalObservation] = []
     for domain, status, text, steps in findings:
-        context = developmental_context.contexts_for(req.child_age, domain)
+        # ⚠️ 근거가 없으면 카드를 만들지 않는다. 예전에는 NOT_ASSESSED 카드를 내보내
+        #    "이 나이대에서는 확인하지 않아요"만 줄줄이 남았다 — 보호자에게는 아무것도 아닌
+        #    화면이었고, 자칫 아이가 못 한 것으로도 읽혔다. 확인하지 못한 것은
+        #    unknown_items 가 이름을 붙여 따로 돌려준다.
+        if status == developmental_context.NOT_ASSESSED:
+            continue
+
+        # 감정을 고르기만 한 경우는 연령 맥락을 붙이지 않는다. 보기에서 고른 것을 언어·정서
+        #   발달과 잇는 순간, 고른 답이 말한 답이 된다.
+        emotion_choice_only = (
+            domain == developmental_context.EMOTION_EXPRESSION
+            and status == developmental_context.PARTIAL
+            and not (emotions or said_emotion)
+        )
+        if emotion_choice_only:
+            context = None
+        else:
+            context = developmental_context.contexts_for(
+                domain,
+                age_months=req.age_months,
+                education_stage=req.education_stage,
+            )
+
         if context is not None:
             age_context = context.parent_context
             source_ids = list(context.source_ids)
+            context_type = context.context_type
+        elif emotion_choice_only:
+            # 맥락 문장 자체를 비운다. 붙일 수 있는 말이 없는 것이 사실이다.
+            age_context = ""
+            source_ids = []
+            context_type = developmental_context.SESSION_ONLY_CONTEXT
         else:
-            # 나이를 모르거나 그 도메인에 검수된 규준이 없다 — 규준 없이 이번 활동만 적는다.
-            #   짐작해 붙이면 지어낸 규준이 된다.
+            # 나이를 모르거나, 그 도메인·교육단계에 쓸 수 있는 검수 자료가 없다. 규준을
+            #   주장하지 않고 이번 활동만 적는다 — 짐작해 붙이면 지어낸 규준이 된다.
             fallback = developmental_context.session_only_context(domain)
             if fallback is None:
                 continue
             age_context = fallback
             source_ids = []
+            context_type = developmental_context.SESSION_ONLY_CONTEXT
+
         refs = [ref for step in steps for ref in step.evidence_refs]
         observations.append(
             contracts.DiaryDevelopmentalObservation(
@@ -702,9 +785,25 @@ def _developmental_observations(
                 scope_text=developmental_context.SCOPE_TEXT,
                 source_ids=source_ids,
                 evidence_refs=refs[:2],
+                context_type=context_type,
+                caregiver_question=_DEVELOPMENTAL_QUESTIONS.get(domain),
             )
         )
     return observations
+
+
+# 보호자가 활동에 이어 그대로 물어볼 수 있는 질문. 도메인마다 하나씩 고정한다.
+#
+# ⚠️ 모델이 만들지 않는다. 맡기면 "왜 그렇게 했어?"처럼 아이를 추궁하는 문장이 섞인다.
+_DEVELOPMENTAL_QUESTIONS = {
+    "NARRATIVE_LANGUAGE": "그 일에서 가장 기억나는 순간은 언제였어?",
+    "CONVERSATION_PARTICIPATION": "그 이야기 더 해 줄 수 있어?",
+    "DRAWING_LANGUAGE_INTEGRATION": "그림에서 이 부분은 무슨 이야기야?",
+    "EMOTION_EXPRESSION": "그때 마음이 어땠는지 조금 더 말해 줄래?",
+    "SOCIAL_UNDERSTANDING": "그 사람은 그때 어떤 마음이었을까?",
+    "COPING_HELP_SEEKING": "그럴 때 누구한테 도와 달라고 하면 좋을까?",
+    "SELF_REFLECTION": "다음에는 어떻게 해 보고 싶어?",
+}
 
 
 def _unknown_items(

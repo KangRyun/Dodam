@@ -1006,14 +1006,9 @@ public class ReportDetailQueryService {
    */
   private List<DiaryDevelopmentalObservationResponse> buildDiaryDevelopmentalObservations(
       Long reportId, Map<String, List<DiaryEvidenceRefResponse>> refs) {
-    Map<String, List<String>> sources = new LinkedHashMap<>();
-    diaryDevelopmentSourceRepository
-        .findByReportIdOrderByDomainAscDisplayOrderAsc(reportId)
-        .forEach(
-            source ->
-                sources
-                    .computeIfAbsent(source.getDomain(), key -> new ArrayList<>())
-                    .add(source.getSourceId()));
+    // ⚠️ 출처는 조회하지 않는다 (S15P11B209-1010 v2). 보호자 응답에 출처 식별자를 싣지
+    //    않기로 했고, 안 실을 값을 굳이 읽으면 언젠가 누가 다시 응답에 붙인다. 출처 내력은
+    //    report_diary_development_sources 에 그대로 남아 있고 감사에서 읽는다.
     return diaryDevelopmentalObservationRepository
         .findByReportIdOrderByDisplayOrderAsc(reportId)
         .stream()
@@ -1025,7 +1020,8 @@ public class ReportDetailQueryService {
                     observation.getAgeContext(),
                     observation.getObservation(),
                     observation.getScopeText(),
-                    sources.getOrDefault(observation.getDomain(), List.of()),
+                    observation.getContextType(),
+                    observation.getCaregiverQuestion(),
                     refs.getOrDefault(
                         diaryRefKey(
                             ReportDiaryEvidenceRef.OWNER_DEVELOPMENTAL_OBSERVATION,

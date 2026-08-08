@@ -30,6 +30,7 @@ public interface ChildRepository extends JpaRepository<Child, Long> {
                  c.profile_image_url as profileImageUrl,
                  c.preferred_character as preferredCharacter,
                  c.question_difficulty as questionDifficulty,
+                 c.education_stage as educationStage,
                  c.tutorial_status as tutorialStatus,
                  c.profile_status as profileStatus,
                  relation.relationship_type as relationshipType,

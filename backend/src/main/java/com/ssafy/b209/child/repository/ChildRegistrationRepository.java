@@ -42,6 +42,7 @@ public class ChildRegistrationRepository {
    * @param questionDifficulty 질문 난이도 Enum 이름
    * @param preferredCharacter 선호 캐릭터, 없으면 {@code null}
    * @param profileImageUrl 프로필 이미지 URL, 없으면 {@code null}
+   * @param educationStage 아이가 다니는 곳이며 고르지 않았으면 {@code null}
    * @param createdAt 생성 및 수정 시각으로 사용할 기준 시각
    * @return 생성된 아동 식별자
    */
@@ -51,6 +52,7 @@ public class ChildRegistrationRepository {
       String questionDifficulty,
       String preferredCharacter,
       String profileImageUrl,
+      String educationStage,
       LocalDateTime createdAt) {
     KeyHolder keyHolder = new GeneratedKeyHolder();
     jdbcTemplate.update(
@@ -60,8 +62,9 @@ public class ChildRegistrationRepository {
                   """
                   insert into children (
                       nickname, birth_date, question_difficulty, preferred_character,
-                      profile_image_url, tutorial_status, profile_status, created_at, updated_at)
-                  values (?, ?, ?, ?, ?, 'NOT_STARTED', 'ACTIVE', ?, ?)
+                      profile_image_url, education_stage,
+                      tutorial_status, profile_status, created_at, updated_at)
+                  values (?, ?, ?, ?, ?, ?, 'NOT_STARTED', 'ACTIVE', ?, ?)
                   """,
                   Statement.RETURN_GENERATED_KEYS);
           statement.setString(1, nickname);
@@ -69,8 +72,10 @@ public class ChildRegistrationRepository {
           statement.setString(3, questionDifficulty);
           statement.setString(4, preferredCharacter);
           statement.setString(5, profileImageUrl);
-          statement.setObject(6, createdAt);
+          // null 이 정상이다 — 보호자가 고르지 않았다는 뜻이고 필수 입력이 아니다.
+          statement.setString(6, educationStage);
           statement.setObject(7, createdAt);
+          statement.setObject(8, createdAt);
           return statement;
         },
         keyHolder);

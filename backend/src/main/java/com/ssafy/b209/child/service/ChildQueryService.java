@@ -75,6 +75,9 @@ public class ChildQueryService {
         child.getProfileImageUrl(),
         child.getPreferredCharacter(),
         QuestionDifficulty.valueOf(child.getQuestionDifficulty()),
+        // 저장은 NULL, 응답에서만 UNKNOWN 이다. 값으로 저장하면 "고르지 않음"과
+        //   "모른다고 고름"을 나중에 구별할 수 없다 (S15P11B209-1010 v2).
+        child.getEducationStage() == null ? "UNKNOWN" : child.getEducationStage(),
         childRepository.findResponseModesByChildId(childId),
         ChildTutorialStatus.valueOf(child.getTutorialStatus()),
         ChildProfileStatus.valueOf(child.getProfileStatus()),

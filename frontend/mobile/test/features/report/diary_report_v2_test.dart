@@ -168,7 +168,8 @@ void main() {
             ageContext: '이 시기에는 들었거나 만든 이야기를 두 사건 이상으로 이어 말하는 표현이 발달해 가요.',
             observation: '이번 활동에서 아이는 있었던 일과 그다음 행동을 이어서 이야기했어요.',
             scopeText: '이번 활동에서 확인된 표현이며, 전체 발달 수준을 평가한 결과가 아니에요.',
-            sourceIds: ['CDC_5Y_MILESTONES'],
+            contextType: 'AGE_MILESTONE_CONTEXT',
+            caregiverQuestion: '그 일에서 가장 기억나는 순간은 언제였어?',
           ),
         ],
       ),
@@ -178,7 +179,15 @@ void main() {
     expect(find.textContaining('두 사건 이상으로 이어 말하는'), findsOneWidget);
     expect(find.textContaining('있었던 일과 그다음 행동을 이어서'), findsOneWidget);
     expect(find.textContaining('전체 발달 수준을 평가한 결과가 아니에요'), findsOneWidget);
-    expect(find.text('출처 CDC_5Y_MILESTONES'), findsOneWidget);
+    // ⚠️ 출처는 카드에 밝히지 않는다. 기관명이 카드에 붙으면 그 문장이 그 기관의 진단처럼
+    //    읽힌다 — 섹션 하단 고지 한 줄로만 둔다(S15P11B209-1010 v2).
+    expect(find.textContaining('CDC_5Y_MILESTONES'), findsNothing);
+    expect(find.textContaining('출처'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('diary-development-source-notice')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('그 일에서 가장 기억나는 순간'), findsOneWidget);
   });
 
   testWidgets('확인하지 않은 도메인을 지연으로 보여 주지 않는다', (tester) async {

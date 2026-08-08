@@ -212,7 +212,9 @@ public class MockObservationReportGenerationService {
         toSubjectSummaries(context),
         toSelectedEmotionRefs(context),
         behaviorMetrics(context),
-        context.childAge());
+        context.childAge(),
+        context.ageMonths(),
+        context.educationStage());
   }
 
   /**

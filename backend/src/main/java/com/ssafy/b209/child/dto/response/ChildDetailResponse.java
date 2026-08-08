@@ -19,6 +19,9 @@ import java.util.List;
  * @param profileImageUrl 프로필 이미지 URL, 등록되지 않았으면 {@code null}
  * @param preferredCharacter 선호 캐릭터, 등록되지 않았으면 {@code null}
  * @param questionDifficulty 대화 질문 난이도
+ * @param educationStage 아이가 다니는 곳({@code PRESCHOOL}·{@code KINDERGARTEN}·{@code GRADE_1}). 고르지
+ *     않았으면 {@code UNKNOWN} 이다 — 저장은 {@code NULL} 이고 응답에서만 이 값으로 바꾼다
+ *     (S15P11B209-1010 v2)
  * @param responseModes 아동이 사용할 수 있는 응답 방식 목록
  * @param tutorialStatus Tutorial 진행 상태
  * @param profileStatus 프로필 상태
@@ -34,6 +37,7 @@ public record ChildDetailResponse(
     String profileImageUrl,
     String preferredCharacter,
     QuestionDifficulty questionDifficulty,
+    String educationStage,
     List<String> responseModes,
     ChildTutorialStatus tutorialStatus,
     ChildProfileStatus profileStatus,

@@ -86,6 +86,7 @@ public class ChildRegistrationService {
             request.questionDifficulty().name(),
             request.preferredCharacter(),
             null,
+            request.educationStage() == null ? null : request.educationStage().name(),
             now);
     childRegistrationRepository.insertGuardianRelation(
         guardianUserId, childId, request.relationshipType().name());
