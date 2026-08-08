@@ -1,6 +1,7 @@
 package com.ssafy.b209.report.dto;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.ssafy.b209.screening.dto.response.ScreeningSummaryResponse;
 import io.swagger.v3.oas.annotations.media.Schema;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -35,6 +36,8 @@ import java.util.List;
  *     다른 아동 정보는 이 응답에 싣지 않는다(CLAUDE.md 9절)
  * @param aiRawReport 집·나무·사람 활동에서 AI 가 준 관찰 응답 원문 그대로이며, 그 밖의 활동이나 원문을 보관하지 않은 리포트면 {@code null}
  *     (S15P11B209-980). <b>위 필드들과 달리 안전 선별을 거치지 않은 값이다</b> — 아래 경고 참고
+ * @param screeningSummary 이 아이의 검사 기록 요약이다. <b>그림일기 관찰과 섞이지 않게 자리를 나눠 둔다</b> — 앱이 만든 관찰과 보호자가 다른
+ *     곳에서 받아 온 검사 결과는 근거의 성격이 전혀 다르다. 앱은 표준화 선별검사를 제공하지 않으므로 기록이 없어도 그 사실이 문구로 나간다
  */
 @Schema(description = "보호자용 관찰 리포트 상세")
 public record ReportDetailResponse(
@@ -61,7 +64,8 @@ public record ReportDetailResponse(
     String activityType,
     String childDisplayName,
     JsonNode aiRawReport,
-    ReportDiaryInsightsResponse diaryInsights) {
+    ReportDiaryInsightsResponse diaryInsights,
+    ScreeningSummaryResponse screeningSummary) {
 
   /**
    * 그림일기 V2 확장 이전 형태로 만든다.
@@ -141,6 +145,7 @@ public record ReportDetailResponse(
         activityType,
         childDisplayName,
         aiRawReport,
+        null,
         null);
   }
 
@@ -216,6 +221,7 @@ public record ReportDetailResponse(
         references,
         activityType,
         childDisplayName,
+        null,
         null,
         null);
   }

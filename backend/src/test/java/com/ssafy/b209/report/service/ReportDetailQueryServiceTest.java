@@ -52,6 +52,7 @@ import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideViewRepository;
 import com.ssafy.b209.report.repository.ReportKeyConversationViewRepository;
 import com.ssafy.b209.report.repository.ReportObservedFeatureViewRepository;
+import com.ssafy.b209.screening.service.ScreeningRecordQueryService;
 import java.lang.reflect.Constructor;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -105,6 +106,7 @@ class ReportDetailQueryServiceTest {
   private ReportDiaryDevelopmentalObservationRepository diaryDevelopmentalObservationRepository;
 
   @Mock private ReportDiaryDevelopmentSourceRepository diaryDevelopmentSourceRepository;
+  @Mock private ScreeningRecordQueryService screeningRecordQueryService;
   @Mock private ReportDiaryUnknownItemRepository diaryUnknownItemRepository;
   @Mock private ReportConversationSummaryViewRepository conversationSummaryRepository;
   @Mock private ReportDetectedObjectViewRepository detectedObjectRepository;
@@ -174,6 +176,7 @@ class ReportDetailQueryServiceTest {
             htpStepRepository,
             childRepository,
             new DrawingAssetFileUrlFactory(),
+            screeningRecordQueryService,
             new ObjectMapper(),
             true);
   }
@@ -662,6 +665,7 @@ class ReportDetailQueryServiceTest {
             htpStepRepository,
             childRepository,
             new DrawingAssetFileUrlFactory(),
+            screeningRecordQueryService,
             new ObjectMapper(),
             false);
     givenHtpReportWithRawJson("{\"topic\":\"집 그림\"}");
