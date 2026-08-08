@@ -50,6 +50,19 @@ public class ReportDiaryDevelopmentalObservation {
   @Column(name = "scope_text", nullable = false, length = 200)
   private String scopeText;
 
+  /**
+   * 이 맥락이 무엇을 주장하는지 (S15P11B209-1010 v2).
+   *
+   * <p>문구가 아니라 값으로 구분한다 — 문구로만 나누면 문구를 다듬는 순간 구분이 사라진다.
+   * 화면은 이 값으로 "연령 이정표"와 "학령 초기 참고 맥락"과 "이번 활동만"을 가른다.
+   */
+  @Column(name = "context_type", nullable = false, length = 40)
+  private String contextType;
+
+  /** 보호자가 활동에 이어 그대로 물어볼 수 있는 질문이며 없으면 {@code null}. */
+  @Column(name = "caregiver_question", columnDefinition = "TEXT")
+  private String caregiverQuestion;
+
   @Column(name = "display_order", nullable = false, columnDefinition = "SMALLINT")
   private int displayOrder;
 
@@ -63,6 +76,8 @@ public class ReportDiaryDevelopmentalObservation {
       String ageContext,
       String observation,
       String scopeText,
+      String contextType,
+      String caregiverQuestion,
       int displayOrder) {
     this.report = Objects.requireNonNull(report, "report must not be null");
     this.domain = Objects.requireNonNull(domain, "domain must not be null");
@@ -70,6 +85,8 @@ public class ReportDiaryDevelopmentalObservation {
     this.ageContext = Objects.requireNonNull(ageContext, "ageContext must not be null");
     this.observation = Objects.requireNonNull(observation, "observation must not be null");
     this.scopeText = Objects.requireNonNull(scopeText, "scopeText must not be null");
+    this.contextType = Objects.requireNonNull(contextType, "contextType must not be null");
+    this.caregiverQuestion = caregiverQuestion;
     this.displayOrder = displayOrder;
   }
 
@@ -82,6 +99,8 @@ public class ReportDiaryDevelopmentalObservation {
    * @param ageContext 검수 출처에서 온 연령 맥락 한 줄
    * @param observation 이번 활동에서 확인된 표현
    * @param scopeText 범위 고지이며 화면에 항상 함께 나간다
+   * @param contextType 맥락이 무엇을 주장하는지
+   * @param caregiverQuestion 보호자가 이어서 물어볼 질문이며 없으면 {@code null}
    * @param displayOrder 노출 순서
    * @return 저장 대기 Entity
    */
@@ -92,9 +111,19 @@ public class ReportDiaryDevelopmentalObservation {
       String ageContext,
       String observation,
       String scopeText,
+      String contextType,
+      String caregiverQuestion,
       int displayOrder) {
     return new ReportDiaryDevelopmentalObservation(
-        report, domain, status, ageContext, observation, scopeText, displayOrder);
+        report,
+        domain,
+        status,
+        ageContext,
+        observation,
+        scopeText,
+        contextType,
+        caregiverQuestion,
+        displayOrder);
   }
 
   /**
@@ -137,6 +166,20 @@ public class ReportDiaryDevelopmentalObservation {
    */
   public String getScopeText() {
     return scopeText;
+  }
+
+  /**
+   * @return 이 맥락이 무엇을 주장하는지
+   */
+  public String getContextType() {
+    return contextType;
+  }
+
+  /**
+   * @return 보호자가 이어서 물어볼 질문이며 없으면 {@code null}
+   */
+  public String getCaregiverQuestion() {
+    return caregiverQuestion;
   }
 
   /**

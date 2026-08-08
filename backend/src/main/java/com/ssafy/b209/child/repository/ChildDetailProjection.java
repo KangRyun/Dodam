@@ -53,6 +53,13 @@ public interface ChildDetailProjection {
   String getQuestionDifficulty();
 
   /**
+   * 아이가 다니는 곳을 반환한다 (S15P11B209-1010 v2).
+   *
+   * @return 교육단계 이름이며 고르지 않았으면 {@code null}
+   */
+  String getEducationStage();
+
+  /**
    * Tutorial 진행 상태의 DB 문자열을 반환한다.
    *
    * @return Tutorial 상태 Enum 이름

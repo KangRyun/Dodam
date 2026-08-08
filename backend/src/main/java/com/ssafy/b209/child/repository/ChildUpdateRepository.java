@@ -1,6 +1,7 @@
 package com.ssafy.b209.child.repository;
 
 import com.ssafy.b209.child.domain.ChildTutorialStatus;
+import com.ssafy.b209.child.domain.EducationStage;
 import com.ssafy.b209.child.domain.GuardianRelationshipType;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.child.domain.ResponseMode;
@@ -161,6 +162,25 @@ public class ChildUpdateRepository {
     jdbcTemplate.update(
         "update children set preferred_character = ?, updated_at = ? where id = ?",
         preferredCharacter,
+        updatedAt,
+        childId);
+  }
+
+  /**
+   * 아이가 다니는 곳을 바꾼다 (S15P11B209-1010 v2).
+   *
+   * <p>{@code null} 을 그대로 쓴다 — 보호자가 "고르지 않을래요"를 고른 것이고, 지우는 것도 정상
+   * 동작이다. 호출 여부는 요청이 이 값을 담았는지로 정한다.
+   *
+   * @param childId 대상 아동 식별자
+   * @param educationStage 새 교육단계이며 비우려면 {@code null}
+   * @param updatedAt 수정 시각
+   */
+  public void updateEducationStage(
+      long childId, EducationStage educationStage, LocalDateTime updatedAt) {
+    jdbcTemplate.update(
+        "update children set education_stage = ?, updated_at = ? where id = ?",
+        educationStage == null ? null : educationStage.name(),
         updatedAt,
         childId);
   }

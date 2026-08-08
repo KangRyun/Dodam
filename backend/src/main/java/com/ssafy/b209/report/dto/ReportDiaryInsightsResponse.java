@@ -195,7 +195,9 @@ public record ReportDiaryInsightsResponse(
    * @param ageContext 검수된 공개 자료에서 온 연령 맥락 한 줄
    * @param observation 이번 활동에서 확인된 표현
    * @param scopeText 범위 고지이며 화면에 항상 함께 나간다
-   * @param sourceIds 검수 출처 식별자이며 비어 있을 수 있다. 앱은 있을 때만 출처를 밝힌다 — 비었다는 것은 연령 규준을 주장하지 않는 문장이라는 뜻이다
+   * @param contextType {@code AGE_MILESTONE_CONTEXT}·{@code EARLY_SCHOOL_COMMUNICATION_CONTEXT}·{@code
+   *     SESSION_ONLY_CONTEXT}. 화면이 "연령 이정표"와 "학령 초기 참고 맥락"과 "이번 활동만"을 섞지 않게 한다
+   * @param caregiverQuestion 보호자가 활동에 이어 그대로 물어볼 수 있는 질문이며 없으면 {@code null}
    * @param evidenceRefs 이번 활동 관찰의 근거 식별자
    */
   public record DiaryDevelopmentalObservationResponse(
@@ -204,12 +206,19 @@ public record ReportDiaryInsightsResponse(
       String ageContext,
       String observation,
       String scopeText,
-      List<String> sourceIds,
+      String contextType,
+      String caregiverQuestion,
       List<DiaryEvidenceRefResponse> evidenceRefs) {
 
-    /** 목록은 빈 목록으로 정규화한다. */
+    /**
+     * 목록은 빈 목록으로 정규화한다.
+     *
+     * <p>⚠️ {@code sourceIds} 를 보호자 응답에서 뺐다 (S15P11B209-1010 v2). 문서명·기관명·URL 은 물론
+     * 출처 <strong>식별자</strong>도 화면에 나가지 않는다 — 식별자가 나가면 앱이 그것으로 출처를 그릴 수
+     * 있고, 그러면 "숨긴다"가 클라이언트 구현에 기댄 약속이 된다. 출처 내력은 내부 엔티티
+     * ({@code report_diary_development_sources})와 AI 등록부에 그대로 남는다.
+     */
     public DiaryDevelopmentalObservationResponse {
-      sourceIds = sourceIds == null ? List.of() : List.copyOf(sourceIds);
       evidenceRefs = evidenceRefs == null ? List.of() : List.copyOf(evidenceRefs);
     }
   }

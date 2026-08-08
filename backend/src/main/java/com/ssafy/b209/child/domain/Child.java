@@ -40,6 +40,17 @@ public class Child {
   @Column(name = "question_difficulty", nullable = false)
   private QuestionDifficulty questionDifficulty;
 
+  /**
+   * 아이가 지금 다니는 곳이며 미입력이면 {@code null} (S15P11B209-1010 v2).
+   *
+   * <p><strong>{@code null} 이 정상이다.</strong> 필수로 받지 않고, '모른다'를 값으로 두지도 않는다 — 값으로
+   * 두면 "모른다고 고른 것"과 "고르지 않은 것"을 구별할 수 없다. 응답 DTO 에서만 {@code UNKNOWN} 으로
+   * 바꿔 내보낸다.
+   */
+  @Enumerated(EnumType.STRING)
+  @Column(name = "education_stage", length = 20)
+  private EducationStage educationStage;
+
   @Column(name = "deleted_at")
   private LocalDateTime deletedAt;
 
@@ -92,6 +103,44 @@ public class Child {
   public int ageOn(LocalDate date) {
     Objects.requireNonNull(date, "date must not be null");
     return Period.between(birthDate, date).getYears();
+  }
+
+  /**
+   * 기준일 현재의 만 나이를 <strong>개월</strong>로 계산한다 (S15P11B209-1010 v2).
+   *
+   * <p>연 단위를 12배 하는 방식을 대신한다. 그 값은 구간 경계에서 한 해가 통째로 움직여
+   * <strong>72~83개월처럼 한 해 안을 가르는 구간을 만들 수 없었다.</strong> 생일이 있으니
+   * 개월을 그대로 계산하는 것이 맞다.
+   *
+   * @param date 나이를 계산할 기준일
+   * @return 기준일 현재의 만 나이(개월). 기준일이 생일보다 앞서면 0
+   */
+  public int ageMonthsOn(LocalDate date) {
+    Objects.requireNonNull(date, "date must not be null");
+    if (date.isBefore(birthDate)) {
+      return 0;
+    }
+    Period period = Period.between(birthDate, date);
+    return period.getYears() * 12 + period.getMonths();
+  }
+
+  /**
+   * @return 아이가 다니는 곳이며 미입력이면 {@code null}
+   */
+  public EducationStage getEducationStage() {
+    return educationStage;
+  }
+
+  /**
+   * 다니는 곳을 바꾼다.
+   *
+   * <p>{@code null} 은 "고르지 않음"이며 지우는 것도 정상 동작이다 — 보호자가 잘못 골랐을 때 되돌릴 수 있어야
+   * 한다.
+   *
+   * @param educationStage 새 교육단계이며 비우려면 {@code null}
+   */
+  public void changeEducationStage(EducationStage educationStage) {
+    this.educationStage = educationStage;
   }
 
   /**

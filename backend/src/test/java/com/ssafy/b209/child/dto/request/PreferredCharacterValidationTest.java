@@ -35,6 +35,7 @@ class PreferredCharacterValidationTest {
         GuardianRelationshipType.MOTHER,
         preferredCharacter,
         QuestionDifficulty.LOWER_ELEMENTARY,
+        null,
         List.of(ResponseMode.VOICE),
         null);
   }

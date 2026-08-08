@@ -1,6 +1,7 @@
 package com.ssafy.b209.child.dto.request;
 
 import com.ssafy.b209.child.domain.GuardianRelationshipType;
+import com.ssafy.b209.child.domain.EducationStage;
 import com.ssafy.b209.child.domain.QuestionDifficulty;
 import com.ssafy.b209.child.domain.ResponseMode;
 import io.swagger.v3.oas.annotations.media.ArraySchema;
@@ -48,6 +49,10 @@ public record RegisterChildRequest(
         String preferredCharacter,
     @Schema(description = "대화 질문 난이도", example = "LOWER_ELEMENTARY") @NotNull
         QuestionDifficulty questionDifficulty,
+    @Schema(
+            description = "아이가 다니는 곳. 고르지 않으면 비워 둔다 — 필수가 아니다",
+            example = "KINDERGARTEN")
+        EducationStage educationStage,
     @ArraySchema(schema = @Schema(implementation = ResponseMode.class, example = "EMOJI")) @NotEmpty
         List<@NotNull ResponseMode> responseModes,
     @Schema(description = "사전 업로드 프로필 이미지 식별자") @Size(max = 255) String profileImageFileId) {}
