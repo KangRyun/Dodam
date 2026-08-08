@@ -464,6 +464,17 @@ class ObservationGenerationRequest(_CamelModel):
     # 축(Lowenfeld 규준 — 982에서 계약 부재로 보류)의 재료다.
     #   롤아웃 안전: 구 BE가 안 보내면 None — 프롬프트가 연령 언급 자체를 금지한다.
     child_age: int | None = None
+    # 활동 시점 기준 만 나이(개월). BE 가 birth_date 로 계산해 보낸다 (S15P11B209-1010 v2).
+    #
+    # ⚠️ 연 × 12 를 쓰지 않는다. 그 값은 구간 경계에서 한 해가 통째로 움직여 72~83개월처럼
+    #    한 해 안을 가르는 구간을 만들 수 없었다.
+    #   롤아웃 안전: 구 BE 가 안 보내면 None — 그러면 연령 맥락을 아예 붙이지 않는다.
+    age_months: int | None = None
+    # 다니는 곳. 만 6세 맥락을 고를 때 나이와 **함께** 본다 (S15P11B209-1010 v2).
+    #
+    # ⚠️ ``PRESCHOOL`` 과 미입력에는 어떤 학년 자료도 적용하지 않는다. 나이만 맞다고 유치원
+    #    자료를 씌우면 어린이집에 다니는 아이에게 학년 기준을 적용하는 것이 된다.
+    education_stage: Literal["PRESCHOOL", "KINDERGARTEN", "GRADE_1"] | None = None
     selected_emotions: list[str] = Field(default_factory=list)
     expressed_emotion_text: str | None = Field(default=None, repr=False)
     representative_utterance: str | None = Field(default=None, repr=False)
@@ -827,6 +838,10 @@ class DiaryDevelopmentalObservation(_CamelModel):
         "SOCIAL_UNDERSTANDING",
         "COPING_HELP_SEEKING",
         "SELF_REFLECTION",
+        # 2.0.0 에서 늘린 둘. 기존 다섯의 이름은 바꾸지 않았다 — 저장 행이
+        #   UNIQUE(report_id, domain) 이라 개명하면 지난 리포트의 카드가 고아가 된다.
+        "CONVERSATION_PARTICIPATION",
+        "DRAWING_LANGUAGE_INTEGRATION",
     ]
     status: Literal["OBSERVED_THIS_SESSION", "PARTIALLY_OBSERVED", "NOT_ASSESSED"]
     age_context: str
@@ -834,6 +849,18 @@ class DiaryDevelopmentalObservation(_CamelModel):
     scope_text: str
     source_ids: list[str] = Field(default_factory=list)
     evidence_refs: list[EvidenceSourceRef] = Field(default_factory=list)
+    # 이 카드의 맥락이 무엇을 주장하는지. 화면·로그가 "규준"과 "참고 맥락"을 섞지 않게 한다.
+    #
+    #   AGE_MILESTONE_CONTEXT               검수된 연령 이정표. 출처가 있다.
+    #   EARLY_SCHOOL_COMMUNICATION_CONTEXT  학령 초기 참고 맥락. **연령 규준이 아니다.**
+    #   SESSION_ONLY_CONTEXT                규준을 주장하지 않고 이번 활동만 본다.
+    context_type: Literal[
+        "AGE_MILESTONE_CONTEXT",
+        "EARLY_SCHOOL_COMMUNICATION_CONTEXT",
+        "SESSION_ONLY_CONTEXT",
+    ] = "SESSION_ONLY_CONTEXT"
+    # 보호자가 활동에 이어 그대로 물어볼 수 있는 질문. 없으면 ``None``.
+    caregiver_question: str | None = None
 
 
 class DiaryUnknownItem(_CamelModel):

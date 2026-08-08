@@ -540,10 +540,21 @@ class DiaryReportBuilderTest(unittest.TestCase):
         codes = {item.code for item in insights.unknown_items}
         self.assertFalse({"NO_VOICE_ANSWER", "ONLY_CHOICE_ANSWERS"} <= codes)
 
-    def _development(self, child_age):
+    def _development(self, child_age, *, education_stage=None):
+        """나이를 개월로 넘긴다.
+
+        연 × 12 를 없앤 뒤로 등록부는 개월만 본다(2.0.0). 여기서도 개월로 넘겨야 72~83개월
+        같은 한 해 안의 구간을 시험할 수 있다.
+        """
         import diary_report_v2
 
-        req = _diary_request().model_copy(update={"child_age": child_age})
+        req = _diary_request().model_copy(
+            update={
+                "child_age": child_age,
+                "age_months": None if child_age is None else child_age * 12,
+                "education_stage": education_stage,
+            }
+        )
         insights = diary_report_v2.build_diary_insights(
             _signals(), req, vision_available=True
         )
@@ -559,11 +570,12 @@ class DiaryReportBuilderTest(unittest.TestCase):
         self.assertIn("전체 발달 수준을 평가한 결과가 아니에요", narrative.scope_text)
 
     def test_school_age_gets_no_age_norm(self):
-        """만 6세 이상은 검수된 한국 연령 규준이 없다 — 이번 활동 관찰만 적는다."""
+        """만 7세 이상은 검수된 한국 연령 규준이 없다 — 이번 활동 관찰만 적는다."""
         got = self._development(8)
 
         narrative = got["NARRATIVE_LANGUAGE"]
-        self.assertIn("또래와 견주거나 발달 수준을 판단하지 않아요", narrative.age_context)
+        self.assertIn("이번 활동에서 확인된 표현만 적어요", narrative.age_context)
+        self.assertEqual(narrative.context_type, "SESSION_ONLY_CONTEXT")
         for observation in got.values():
             self.assertNotIn("또래보다", observation.observation)
 
@@ -588,22 +600,33 @@ class DiaryReportBuilderTest(unittest.TestCase):
 
         self.assertEqual(set(known), set(unknown))
 
-    def test_missing_data_is_not_assessed_not_a_delay(self):
-        """무응답·건너뜀은 발달 결함이 아니다 — 확인하지 않았다고 적는다."""
+    def test_missing_data_makes_no_card_at_all(self):
+        """근거가 없으면 카드를 만들지 않는다 — "확인하지 않아요"만 줄줄이 남기지 않는다.
+
+        예전에는 NOT_ASSESSED 카드를 내보내 화면이 "이 나이대에서는 확인하지 않아요"로만
+        채워졌다. 보호자에게 아무것도 아닌 화면이었고, 자칫 아이가 못 한 것으로도 읽혔다.
+        확인하지 못한 것은 unknown_items 가 이름을 붙여 따로 돌려준다.
+        """
         import diary_report_v2
 
         req = _diary_request().model_copy(
-            update={"child_age": 5, "selected_emotion_refs": [], "expressed_emotion_text": ""}
+            update={
+                "child_age": 5,
+                "age_months": 65,
+                "selected_emotion_refs": [],
+                "expressed_emotion_text": "",
+            }
         )
         insights = diary_report_v2.build_diary_insights(
             _signals(narrativeFlow=[]), req, vision_available=False
         )
         got = {o.domain: o for o in insights.developmental_observations}
 
-        social = got["SOCIAL_UNDERSTANDING"]
-        self.assertEqual(social.status, "NOT_ASSESSED")
-        for word in ("느리", "지연", "부족", "못해", "미달"):
-            self.assertNotIn(word, social.observation)
+        self.assertNotIn("SOCIAL_UNDERSTANDING", got)
+        for observation in insights.developmental_observations:
+            self.assertNotEqual(observation.status, "NOT_ASSESSED")
+            for word in ("느리", "지연", "부족", "못해", "미달"):
+                self.assertNotIn(word, observation.observation)
 
     def test_chosen_emotion_alone_is_partial_not_observed(self):
         """감정을 고르기만 한 것을 '자기 말로 표현했다'로 올리지 않는다."""
@@ -1175,9 +1198,12 @@ class ReportClientDiaryV2IntegrationTest(unittest.TestCase):
                     flagged_refs,
                     f"{observation.domain} 이 빠진 단계를 근거로 남았다",
                 )
-        # 다른 근거를 쓰는 항목·근거 없는 항목까지 함께 지워 버리지는 않는다.
+        # 다른 근거를 쓰는 항목까지 함께 지워 버리지는 않는다.
         self.assertIn("EMOTION_EXPRESSION", domains)
-        self.assertIn("SOCIAL_UNDERSTANDING", domains)
+        # ⚠️ SOCIAL_UNDERSTANDING 은 여기 없는 것이 맞다. 이 활동에 다른 사람의 행동·반응을
+        #    아이가 이야기한 근거가 없고, 근거 없는 카드는 만들지 않는다(2.0.0). 예전에는
+        #    NOT_ASSESSED 카드로 남아 "확인하지 않아요"만 화면을 채웠다.
+        self.assertNotIn("SOCIAL_UNDERSTANDING", domains)
 
 
 if __name__ == "__main__":
