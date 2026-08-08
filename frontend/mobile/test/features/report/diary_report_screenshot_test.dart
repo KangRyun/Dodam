@@ -88,6 +88,16 @@ void main() {
     //   보호자가 실제로 보는 화면과 다르다. 화면 그대로 띄워 통째로 찍는다.
     await _captureScreen(tester, 'diary-report-screen.png');
   });
+
+  testWidgets('태블릿 폭 리포트 화면을 PNG 로 남긴다', (tester) async {
+    // 폭 900 이상에서 각 블럭 안이 두 단으로 갈린다. 휴대폰 폭에서는 보이지 않는
+    //   배치라 따로 찍어 둔다 — Medium Tablet 에뮬레이터가 가로 1280dp 다.
+    await _captureScreen(
+      tester,
+      'diary-report-screen-tablet.png',
+      logicalWidth: 1280,
+    );
+  });
 }
 
 /// FLUTTER_ROOT 환경변수가 없을 때 실행 파일 위치에서 SDK 경로를 되짚는다.
@@ -125,8 +135,12 @@ Future<void> _capture(WidgetTester tester, String fileName, Widget child) async 
 }
 
 /// 리포트 화면을 통째로 띄워 PNG 로 저장한다.
-Future<void> _captureScreen(WidgetTester tester, String fileName) async {
-  _sizeViewport(tester);
+Future<void> _captureScreen(
+  WidgetTester tester,
+  String fileName, {
+  double logicalWidth = 390,
+}) async {
+  _sizeViewport(tester, logicalWidth: logicalWidth);
   await tester.pumpWidget(
     MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -153,9 +167,9 @@ ThemeData get _theme => ThemeData(
   scaffoldBackgroundColor: AppColors.canvas,
 );
 
-void _sizeViewport(WidgetTester tester) {
-  // 폭은 흔한 휴대폰 폭, 높이는 넉넉히 잡고 실제 그린 높이만큼만 잘라 낸다.
-  tester.view.physicalSize = const Size(1170, 18000);
+void _sizeViewport(WidgetTester tester, {double logicalWidth = 390}) {
+  // 높이는 넉넉히 잡고 실제 그린 높이만큼만 잘라 낸다.
+  tester.view.physicalSize = Size(logicalWidth * 3, 18000);
   tester.view.devicePixelRatio = 3;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
