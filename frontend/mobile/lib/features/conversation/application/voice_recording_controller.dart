@@ -55,6 +55,12 @@ final class VoiceRecordingController extends ChangeNotifier {
   Timer? _amplitudeTimer;
   bool _readingAmplitude = false;
 
+  /// 취소할 때마다 오르는 세대 번호.
+  ///
+  /// recorder 는 비동기다 — 취소 시점에 이미 떠난 stop() 결과가 나중에 돌아온다.
+  /// 그 결과를 그대로 받으면 아이가 고른 답 위에 무음 녹음이 덮인다.
+  int _generation = 0;
+
   VoiceRecordingStatus _status = VoiceRecordingStatus.idle;
   VoiceRecording? _recording;
   Object? _lastError;
@@ -184,6 +190,7 @@ final class VoiceRecordingController extends ChangeNotifier {
   }) async {
     if (_status != VoiceRecordingStatus.recording) return null;
 
+    final generation = _generation;
     _status = VoiceRecordingStatus.stopping;
     notifyListeners();
     _ticker?.cancel();
@@ -195,6 +202,8 @@ final class VoiceRecordingController extends ChangeNotifier {
     final endedAt = DateTime.now().toUtc();
     try {
       final path = await _recorder.stop();
+      // 멈추는 사이 취소됐다. 아이가 보기를 골랐다는 뜻이라 이 녹음은 답이 아니다.
+      if (generation != _generation) return null;
       if (path == null || path.isEmpty) {
         throw StateError('Recorded file path is missing');
       }
@@ -210,6 +219,7 @@ final class VoiceRecordingController extends ChangeNotifier {
       notifyListeners();
       return result;
     } on Object catch (error) {
+      if (generation != _generation) return null;
       _lastError = error;
       _status = VoiceRecordingStatus.failed;
       notifyListeners();
@@ -226,12 +236,17 @@ final class VoiceRecordingController extends ChangeNotifier {
     await _discardActiveRecording(VoiceRecordingStatus.interrupted);
   }
 
-  // 진행 중인 음성 답변을 폐기하고 대기 상태로 복귀
+  /// 진행 중인 음성 답변을 폐기하고 대기 상태로 복귀한다.
+  ///
+  /// **`stopping`·`completed` 에서도 폐기한다.** 예전에는 `recording`·`starting`
+  /// 에서만 취소돼서, 아이가 보기를 고르는 사이 이미 멈춘 녹음이 그대로 남아 답으로
+  /// 올라갔다. 취소는 "지금 만들던 답을 버린다"는 뜻이라 어느 단계에서든 들어야 한다.
+  ///
+  /// 세대(generation)를 올려 **늦게 도착한 recorder 결과를 무시**한다. `stop()` 이
+  /// 이미 진행 중이면 그 결과는 이 취소 뒤에 도착하는데, 세대가 달라 반영되지 않는다.
   Future<void> cancel() async {
-    if (_status != VoiceRecordingStatus.recording &&
-        _status != VoiceRecordingStatus.starting) {
-      return;
-    }
+    if (_status == VoiceRecordingStatus.idle) return;
+    _generation += 1;
 
     _ticker?.cancel();
     _ticker = null;

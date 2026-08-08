@@ -681,9 +681,9 @@ public class ObservationReportPersistenceService {
               analysis.getDrawingSession().getId());
       if (htpAssessment.isPresent()) {
         htpAssessment.get().completeAnalysis(now);
-      } else {
-        analysis.getDrawingSession().completeReporting(now);
       }
+      // 일반 활동은 완료 접수 시점에 이미 COMPLETED 다. 리포트가 활동 상태를 다시
+      //   건드리지 않는다 — 그러면 리포트의 성패가 곧 활동의 성패가 된다.
       eventPublisher.publishEvent(new AnalysisCompletedEvent(context.reportId()));
     } catch (DataIntegrityViolationException exception) {
       throw new BusinessException(
@@ -702,6 +702,28 @@ public class ObservationReportPersistenceService {
   @Transactional(propagation = Propagation.REQUIRES_NEW)
   public void markFailed(
       Long analysisId, Long reportId, String failureCode, String failureMessage) {
+    markFailed(analysisId, reportId, failureCode, failureMessage, ReportStatus.FAILED_FINAL);
+  }
+
+  /**
+   * 실패를 재시도 판단과 함께 기록한다 (S15P11B209 P0-2).
+   *
+   * <p>재시도 대기열에 따로 등록하지 않는다. {@link ReportGenerationRetryRepository}가 {@code FAILED_RETRYABLE} 리포트를
+   * 직접 읽어 대기열을 채운다 — 여기서 등록까지 하면 상태를 쓴 뒤 등록 전에 죽었을 때 그 리포트를 아무도 다시 보지 않는다.
+   *
+   * @param analysisId 최종 분석 식별자
+   * @param reportId 리포트 식별자이며 없으면 {@code null}
+   * @param failureCode 원문을 포함하지 않는 실패 분류 코드
+   * @param failureMessage 외부에 노출해도 되는 안전한 실패 메시지
+   * @param failureStatus 재시도 가능 여부를 담은 리포트 실패 상태
+   */
+  @Transactional(propagation = Propagation.REQUIRES_NEW)
+  public void markFailed(
+      Long analysisId,
+      Long reportId,
+      String failureCode,
+      String failureMessage,
+      ReportStatus failureStatus) {
     LocalDateTime now = LocalDateTime.now(clock);
     analysisRepository
         .findByIdForUpdate(analysisId)
@@ -718,9 +740,10 @@ public class ObservationReportPersistenceService {
                       analysis.getDrawingSession().getId());
               if (htpAssessment.isPresent()) {
                 htpAssessment.get().failAnalysis();
-              } else {
-                analysis.getDrawingSession().failReporting();
               }
+              // ⚠️ 일반 활동의 세션은 실패로 내리지 않는다. 아이가 한 활동은 이미 끝났고
+              //    실패한 것은 리포트다. 예전에는 여기서 failReporting() 이 세션을 FAILED 로
+              //    만들어, 아이 화면에 "활동을 마무리하지 못했어요"가 떴다(2026-08-08 실측).
             });
     if (reportId != null) {
       reportRepository
@@ -732,7 +755,8 @@ public class ObservationReportPersistenceService {
                       FAILED_LIMITATIONS,
                       ColumnTextLimiter.fit(
                           failureCode, REPORT_FAILURE_REASON_LIMIT, "reports.failure_reason"),
-                      now));
+                      now,
+                      failureStatus));
     }
   }
 

@@ -175,8 +175,31 @@ public class Report {
    * @throws IllegalArgumentException 한계 문구가 비어 있는 경우
    */
   public void fail(String limitationsText, String failureReason, LocalDateTime failedAt) {
+    fail(limitationsText, failureReason, failedAt, ReportStatus.FAILED_FINAL);
+  }
+
+  /**
+   * 실패를 재시도 판단과 함께 기록한다.
+   *
+   * <p>재시도 여부를 상태에 담는 이유가 있다. 활동과 리포트를 떼어 놓은 뒤로 리포트 실패는 아이 화면을 막지 않는다 — 대신 <strong>언젠가 다시 만들어야
+   * 하는지</strong>를 누군가는 알아야 한다. 그 판단을 실패 시점에 아는 쪽(호출부)이 남긴다.
+   *
+   * @param limitationsText 실패 상황을 알리는 필수 한계 문구
+   * @param failureReason 원문을 포함하지 않는 실패 분류 코드이며 없으면 {@code null}
+   * @param failedAt 실패를 기록한 UTC 시각
+   * @param failureStatus 재시도 가능 여부를 담은 실패 상태
+   * @throws IllegalStateException 현재 상태가 GENERATING이 아니거나 실패 상태가 아닌 값을 넘긴 경우
+   */
+  public void fail(
+      String limitationsText,
+      String failureReason,
+      LocalDateTime failedAt,
+      ReportStatus failureStatus) {
     ensureGenerating();
-    this.status = ReportStatus.FAILED;
+    if (failureStatus == null || !failureStatus.isFailure()) {
+      throw new IllegalStateException("failureStatus must be a failure status");
+    }
+    this.status = failureStatus;
     this.expertReviewRecommended = false;
     this.limitationsText = requireText(limitationsText, "limitationsText");
     this.failureReason = failureReason;
@@ -290,6 +313,32 @@ public class Report {
    */
   public LocalDateTime getUpdatedAt() {
     return updatedAt;
+  }
+
+  /**
+   * 재시도 가능한 실패를 다시 생성 중으로 되돌린다 (S15P11B209 P0-2).
+   *
+   * <p>실패 흔적({@code failureReason}, {@code failedAt})을 지우고 한계 문구를 생성 중 문구로 되돌린다. 남겨 두면 다시 성공했을 때
+   * 보호자 화면에 "리포트를 만들지 못했어요" 문구가 결과와 함께 붙어 나간다.
+   *
+   * <p>⚠️ {@code limitations_text}는 DB에서 NOT NULL이다. 비우지 말고 생성 중 문구로 바꿔야 한다.
+   *
+   * <p>{@link ReportStatus#FAILED_FINAL}과 재시도 판단이 없는 옛 {@link ReportStatus#FAILED}는 되돌리지 않는다 — 다시
+   * 해도 같은 자리에서 멈추거나, 그럴지 아닐지를 알 수 없는 값이다.
+   *
+   * @param reopenedAt 재시도를 시작한 UTC 시각
+   * @throws IllegalStateException 재시도 가능한 실패 상태가 아닌 경우
+   */
+  public void reopenForRetry(LocalDateTime reopenedAt) {
+    Objects.requireNonNull(reopenedAt, "reopenedAt must not be null");
+    if (!status.isRetryableFailure()) {
+      throw new IllegalStateException("only retryable failure can be reopened");
+    }
+    this.status = ReportStatus.GENERATING;
+    this.limitationsText = GENERATING_LIMITATIONS;
+    this.failureReason = null;
+    this.failedAt = null;
+    this.updatedAt = reopenedAt;
   }
 
   private void ensureGenerating() {

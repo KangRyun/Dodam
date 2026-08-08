@@ -55,6 +55,28 @@ final class VoiceAnswerUploadController extends ChangeNotifier {
         endpoint: ConversationRequestEndpoint.voiceAnswer,
       );
 
+  /// 답으로 보낼 만한 길이가 아닌 녹음의 상한.
+  ///
+  /// 이보다 짧으면 아이가 말한 것이 아니라 잡음이나 오작동이다. 올려 봐야 STT 가
+  /// 실패하고, 그 사이 아이가 고른 답이 두 번째 답이 된다.
+  static const minimumAnswerDuration = Duration(milliseconds: 700);
+
+  /// 이 녹음을 답변으로 보낼 수 있는지.
+  ///
+  /// **무음·빈 녹음은 답이 아니다.** 2026-08-08 태블릿 실행에서 무음 녹음이 답으로
+  /// 올라가 STT 가 5/5 실패했고, 그 뒤에 아이가 고른 답이 뒤늦게 들어왔다.
+  ///
+  /// @param recording 판단할 녹음
+  /// @param hasDetectedSpeech 녹음기가 사람 말소리를 확정했는지
+  /// @return 보낼 수 있으면 `true`
+  static bool isSubmittableRecording(
+    VoiceRecording recording, {
+    required bool hasDetectedSpeech,
+  }) =>
+      hasDetectedSpeech &&
+      recording.duration >= minimumAnswerDuration &&
+      recording.filePath.isNotEmpty;
+
   Future<bool> submit({
     required int questionMessageId,
     required VoiceRecording recording,

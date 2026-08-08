@@ -161,6 +161,7 @@ class DrawingScreen extends StatefulWidget {
     this.conversationEndRepository,
     this.questionTtsRepository,
     this.questionAudioPlayerFactory,
+    this.questionSpeechSynthesizer,
     this.voiceRecorder,
     this.microphonePermissionService,
     this.voiceNoSpeechTimeout = const Duration(seconds: 3),
@@ -211,6 +212,9 @@ class DrawingScreen extends StatefulWidget {
   final ConversationEndRepository? conversationEndRepository;
   final QuestionTtsRepository? questionTtsRepository;
   final QuestionAudioPlayerFactory? questionAudioPlayerFactory;
+
+  /// 서버 TTS 실패 시 질문을 읽어 줄 기기 음성이다 (P0-3).
+  final QuestionSpeechSynthesizer? questionSpeechSynthesizer;
   final VoiceRecorder? voiceRecorder;
   final MicrophonePermissionService? microphonePermissionService;
   final Duration voiceNoSpeechTimeout;
@@ -321,6 +325,12 @@ class _DrawingScreenState extends State<DrawingScreen>
   AiQuestionController? _questionController;
   late final AiQuestionDisplayController _questionDisplayController;
   late final AiQuestionSelectionController _questionSelectionController;
+
+  /// 한 질문에 답이 하나만 남게 하는 상태 머신.
+  ///
+  /// 자동 녹음·보기·건너뛰기가 각자 답을 만들던 것을 여기로 모은다. 먼저 잡은
+  /// 수단만 답을 만들 수 있고, 늦게 도착한 결과는 전부 무시된다.
+  final AnswerFlowController _answerFlow = AnswerFlowController();
   OptionAnswerSubmissionController? _answerSubmissionController;
   QuestionSkipController? _questionSkipController;
   ConversationEndController? _conversationEndController;
@@ -509,7 +519,10 @@ class _DrawingScreenState extends State<DrawingScreen>
         ttsRepository,
         playerFactory(),
         request: QuestionTtsRequest(voice: _companionSnapshot.ttsVoice),
-      );
+        synthesizer:
+            widget.questionSpeechSynthesizer ??
+            const NoopQuestionSpeechSynthesizer(),
+      )..addListener(_handleQuestionTtsChanged);
     }
     _questionDisplayController = AiQuestionDisplayController()
       ..addListener(_handleQuestionDisplayChanged);
@@ -999,6 +1012,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     _questionSkipController?.dispose();
     _conversationEndController?.removeListener(_handleConversationEndChanged);
     _conversationEndController?.dispose();
+    _questionTtsController?.removeListener(_handleQuestionTtsChanged);
     _questionTtsController?.dispose();
     _voiceRecordingController?.removeListener(_handleVoiceRecordingChanged);
     _voiceRecordingController?.dispose();
@@ -1494,8 +1508,10 @@ class _DrawingScreenState extends State<DrawingScreen>
     final recordingController = _voiceRecordingController;
     if (recordingController == null) return;
 
+    _answerFlow.beginQuestion(question.messageId);
     await recordingController.beginQuestion();
     recordingController.prepareForAutomaticStart();
+    _answerFlow.beginTts();
     try {
       // 오디오 완료 이벤트가 유실되어도 자동 녹음 시작이 막히지 않게 제한시간을 둔다.
       await _questionTtsController
@@ -1507,14 +1523,23 @@ class _DrawingScreenState extends State<DrawingScreen>
         debugPrint('[VOICE_AUTO] tts_timeout messageId=${question.messageId}');
       }
     }
+    // 재생이 성공했든 실패했든 여기서 답할 수 있는 상태가 된다. TTS 실패가 대화를
+    //   멈추면 글 못 읽는 아이는 아무것도 할 수 없다.
+    _answerFlow.markAnswerReady();
     if (!mounted ||
         _conversationEndController?.completed == true ||
         _questionDisplayController.visibleQuestion?.messageId !=
             question.messageId) {
       return;
     }
+    // 재생을 기다리는 사이 아이가 보기를 골랐거나 건너뛰었으면 녹음하지 않는다.
+    if (!_answerFlow.claimVoice(automatic: true)) {
+      await recordingController.cancel();
+      return;
+    }
     _markNoResponseTtsReady(question);
     final started = await recordingController.start();
+    if (!started) _answerFlow.release(AnswerSource.voice);
     if (kDebugMode) {
       debugPrint(
         '[VOICE_AUTO] recording_start messageId=${question.messageId} '
@@ -1526,6 +1551,24 @@ class _DrawingScreenState extends State<DrawingScreen>
   void _handleQuestionDisplayChanged() {
     if (_isConversationFocusMode) _cursorController.hide();
     if (mounted) setState(() {});
+  }
+
+  /// 질문 음성 상태가 바뀌면 다시 그린다 (P0-3).
+  ///
+  /// 이걸 붙이지 않으면 재생이 다 실패해도 '다시 들려줘' 버튼이 나타나지 않는다 — 상태는
+  /// 바뀌었지만 화면이 모른다.
+  void _handleQuestionTtsChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// 아이나 곁에 있는 어른이 '다시 들려줘'를 눌렀을 때 질문을 다시 읽어 준다.
+  ///
+  /// 자동 재생과 달리 messageId 가드를 지나친다. 누를 때마다 실제로 다시 시도해야
+  /// 버튼이 제 역할을 한다.
+  Future<void> _replayQuestionTts() async {
+    final question = _questionDisplayController.visibleQuestion;
+    if (question == null) return;
+    await _questionTtsController?.replayQuestion(question);
   }
 
   void _handleQuestionSelectionChanged() {
@@ -1575,6 +1618,21 @@ class _DrawingScreenState extends State<DrawingScreen>
       final uploadController = _voiceAnswerUploadController;
       if (question == null || recording == null || uploadController == null) {
         _questionDisplayController.dismiss();
+      } else if (!_answerFlow.canSubmit(
+        AnswerSource.voice,
+        messageId: question.messageId,
+      )) {
+        // 이 녹음은 더 이상 답이 아니다 — 아이가 보기를 골랐거나 건너뛰었거나,
+        //   이미 다음 질문으로 넘어갔다. 늦게 도착한 결과를 답으로 만들지 않는다.
+        unawaited(controller.beginQuestion());
+      } else if (!VoiceAnswerUploadController.isSubmittableRecording(
+        recording,
+        hasDetectedSpeech: controller.hasDetectedSpeech,
+      )) {
+        // 무음·너무 짧은 녹음은 올리지 않는다. 아이에게는 보기를 다시 띄운다.
+        _answerFlow.release(AnswerSource.voice);
+        unawaited(controller.beginQuestion());
+        _revealOptionsForPendingQuestion();
       } else if (uploadController.status == VoiceAnswerUploadStatus.idle) {
         unawaited(
           uploadController.submit(
@@ -1667,6 +1725,9 @@ class _DrawingScreenState extends State<DrawingScreen>
     }
     final valid = _questionSelectionController.select(question, optionId);
     if (!valid) return;
+    // 아이가 고른 답이 앱이 켠 자동 녹음을 이긴다. 잡지 못했다면 이미 답이 확정됐거나
+    //   같은 탭이 두 번 들어온 것이라 여기서 끝낸다 — 답이 두 번 나가지 않는다.
+    if (!_answerFlow.claimOption()) return;
     await _questionTtsController?.stop();
     await _voiceRecordingController?.cancel();
     // BE 답변 계약이 선택 시점 스냅샷(type·value·label)을 요구해 객체째 전달
@@ -1677,6 +1738,14 @@ class _DrawingScreenState extends State<DrawingScreen>
       questionMessageId: question.messageId,
       option: option,
     );
+    if (!submitted) {
+      _answerFlow.release(AnswerSource.option);
+    } else {
+      _answerFlow.markSubmitted(
+        AnswerSource.option,
+        messageId: question.messageId,
+      );
+    }
     if (submitted) {
       _questionDisplayController.dismiss();
       if (controller.conversationAlreadyEnded) {
@@ -1721,15 +1790,20 @@ class _DrawingScreenState extends State<DrawingScreen>
     final controller = _questionSkipController;
     if (question == null || controller == null) return;
     _invalidateNoResponseRequest();
+    // 건너뛰기도 아이의 답이다. 잡지 못하면 이미 답이 확정된 뒤라 보내지 않는다.
+    if (!_answerFlow.claimSkip()) return;
     await _questionTtsController?.stop();
     await _voiceRecordingController?.cancel();
     final skipped = await controller.submit(
       questionMessageId: question.messageId,
     );
-    if (skipped) {
-      _questionDisplayController.dismiss();
-      await _requestFollowingQuestion(null);
+    if (!skipped) {
+      _answerFlow.release(AnswerSource.skip);
+      return;
     }
+    _answerFlow.markSubmitted(AnswerSource.skip, messageId: question.messageId);
+    _questionDisplayController.dismiss();
+    await _requestFollowingQuestion(null);
   }
 
   /// 저장된 응답을 문맥으로 전달해 같은 그림의 다음 질문을 요청한다.
@@ -2811,6 +2885,13 @@ class _DrawingScreenState extends State<DrawingScreen>
                       _conversationEndController?.canRetry == true,
                   voiceRetryable:
                       _voiceAnswerUploadController?.canRetry ?? false,
+                  // 소리가 끝내 안 났을 때만 보인다. 서버·재시도·기기 음성이 다
+                  //   실패한 뒤라, 이 버튼이 질문이 아이에게 닿는 마지막 길이다.
+                  showTtsReplay:
+                      _questionTtsController?.needsManualReplay ?? false,
+                  onReplayTts: () {
+                    unawaited(_replayQuestionTts());
+                  },
                 );
                 final sidePanel = _DrawingSidePanel(
                   // 도구·색·굵기·완료는 상단 크레용 툴바가 맡는다.

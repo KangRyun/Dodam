@@ -3,6 +3,7 @@ package com.ssafy.b209.conversation.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -250,6 +251,58 @@ class OptionAnswerServiceTest {
     givenAuthorizedConversingSession();
     given(messageRepository.existsQuestion(QUESTION_ID, CONVERSATION_ID)).willReturn(true);
     given(messageRepository.existsAnswerForQuestion(CONVERSATION_ID, QUESTION_ID)).willReturn(true);
+
+    assertThatThrownBy(() -> service.submit(GUARDIAN_ID, CONVERSATION_ID, request(null)))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception ->
+                assertThat(exception.getErrorCode())
+                    .isEqualTo(OptionAnswerErrorCode.ANSWER_ALREADY_SUBMITTED));
+    verify(messageRepository, never()).saveAndFlush(any());
+  }
+
+  /**
+   * 아이가 고른 답이 아직 글로 바뀌지 않은 음성 답변을 밀어낸다 (P0-1).
+   *
+   * <p>자동 녹음이 먼저 올라가 있고 그 STT가 아직 {@code PENDING}인 사이에 아이가 보기를 누르면, 예전에는 409로 거절됐다. 아이가 <b>직접
+   * 고른</b> 답이 자동으로 켜진 녹음에 밀린 셈이다.
+   *
+   * <p>밀어낸 음성 답변은 지우지 않고 {@code superseded_at}으로 표시한다 — 아이가 실제로 낸 소리이고, 누가 대신했는지도 남아야 한다.
+   */
+  @Test
+  void supersedesPendingVoiceAnswerWhenChildPicksOption() {
+    givenAuthorizedConversingSession();
+    given(messageRepository.existsQuestion(QUESTION_ID, CONVERSATION_ID)).willReturn(true);
+    given(messageRepository.existsAnswerForQuestion(CONVERSATION_ID, QUESTION_ID)).willReturn(true);
+    OptionAnswerMessage staleVoiceAnswer = org.mockito.Mockito.mock(OptionAnswerMessage.class);
+    given(messageRepository.findSupersedableVoiceAnswers(CONVERSATION_ID, QUESTION_ID))
+        .willReturn(List.of(staleVoiceAnswer));
+    givenHappyOption();
+    given(option.getId()).willReturn(OPTION_ROW_ID);
+    given(optionRepository.findByConversationMessageId(QUESTION_ID)).willReturn(List.of(option));
+    given(messageRepository.findMaxMessageSequenceByConversationSessionId(CONVERSATION_ID))
+        .willReturn(4);
+    given(messageRepository.saveAndFlush(any(OptionAnswerMessage.class))).willReturn(savedMessage);
+    given(savedMessage.getId()).willReturn(ANSWER_ID);
+    given(savedMessage.getParentMessageId()).willReturn(QUESTION_ID);
+    given(savedMessage.getMessageSequence()).willReturn(5);
+    given(savedMessage.getSenderType()).willReturn("CHILD");
+    given(savedMessage.getCreatedAt()).willReturn(LocalDateTime.parse("2026-07-23T00:00:00"));
+
+    OptionAnswerResponse response = service.submit(GUARDIAN_ID, CONVERSATION_ID, request(null));
+
+    assertThat(response.messageId()).isEqualTo(ANSWER_ID);
+    verify(staleVoiceAnswer).supersede(eq(ANSWER_ID), any(LocalDateTime.class));
+  }
+
+  /** 이미 확정된 답은 어떤 경우에도 덮어쓰지 않는다 (P0-1). */
+  @Test
+  void rejectsWhenAnsweredAndNothingIsSupersedable() {
+    givenAuthorizedConversingSession();
+    given(messageRepository.existsQuestion(QUESTION_ID, CONVERSATION_ID)).willReturn(true);
+    given(messageRepository.existsAnswerForQuestion(CONVERSATION_ID, QUESTION_ID)).willReturn(true);
+    given(messageRepository.findSupersedableVoiceAnswers(CONVERSATION_ID, QUESTION_ID))
+        .willReturn(List.of());
 
     assertThatThrownBy(() -> service.submit(GUARDIAN_ID, CONVERSATION_ID, request(null)))
         .isInstanceOfSatisfying(

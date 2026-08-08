@@ -39,6 +39,8 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
     this.skipRetryable = true,
     this.endRetryable = true,
     this.voiceRetryable = true,
+    this.showTtsReplay = false,
+    this.onReplayTts,
     this.companion = DodamCostume.base,
     this.compact = false,
     super.key,
@@ -68,6 +70,13 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
   final bool skipRetryable;
   final bool endRetryable;
   final bool voiceRetryable;
+
+  /// 질문 음성이 끝내 나오지 않아 직접 눌러 들을 수 있게 해야 하는지 (P0-3).
+  ///
+  /// 서버 TTS → 짧은 재시도 → 기기 음성이 모두 실패한 뒤에만 켠다. 글을 못 읽는 아이에게
+  /// 질문이 닿는 마지막 길이라, 다른 조작이 잠겨 있어도 이 버튼은 살려 둔다.
+  final bool showTtsReplay;
+  final VoidCallback? onReplayTts;
 
   /// 활동 시작 시 서버 확정 preferredCharacter에서 만든 immutable snapshot.
   final DodamCostume companion;
@@ -160,6 +169,23 @@ final class AiQuestionBubbleOverlay extends StatelessWidget {
                                             text: currentQuestion.text,
                                           ),
                                         ),
+                                      if (showTtsReplay &&
+                                          onReplayTts != null) ...[
+                                        const SizedBox(height: AppSpacing.xs),
+                                        Align(
+                                          alignment: Alignment.centerLeft,
+                                          child: TextButton.icon(
+                                            key: const ValueKey(
+                                              'question-tts-replay',
+                                            ),
+                                            onPressed: onReplayTts,
+                                            icon: const Icon(
+                                              Icons.volume_up_rounded,
+                                            ),
+                                            label: const Text('다시 들려줘'),
+                                          ),
+                                        ),
+                                      ],
                                       if (voiceRecordingController
                                           case final controller?) ...[
                                         const SizedBox(height: AppSpacing.sm),

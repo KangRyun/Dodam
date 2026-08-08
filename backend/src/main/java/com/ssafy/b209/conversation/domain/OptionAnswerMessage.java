@@ -7,6 +7,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import java.util.Objects;
 
 /** DB v1.2 conversation_messages의 OPTION_ANSWER 행만 생성·조회하는 전용 Entity다. */
 @Entity
@@ -51,10 +52,50 @@ public class OptionAnswerMessage {
   @Column(name = "is_skipped", nullable = false)
   private boolean skipped;
 
+  /**
+   * 뒤에 온 명시적 답에 자리를 내준 시각이며 살아 있으면 {@code null}이다.
+   *
+   * <p>아이가 보기를 고르면, 아직 글로 옮겨지지 않은 자동 음성 답이 여기로 물러난다. <strong>지우지 않는다</strong> — 아동 기록에서 무엇이 언제 왜
+   * 물러났는지는 되짚을 수 있어야 한다.
+   */
+  @Column(name = "superseded_at")
+  private LocalDateTime supersededAt;
+
+  /** 자리를 대신한 답 메시지 식별자다. */
+  @Column(name = "superseded_by_message_id")
+  private Long supersededByMessageId;
+
   @Column(name = "created_at", nullable = false)
   private LocalDateTime createdAt;
 
   protected OptionAnswerMessage() {}
+
+  /**
+   * 이 답이 뒤에 온 명시적 답에 자리를 내주게 한다.
+   *
+   * @param supersededByMessageId 자리를 대신한 답 메시지 식별자
+   * @param supersededAt 물러난 시각
+   */
+  public void supersede(Long supersededByMessageId, LocalDateTime supersededAt) {
+    this.supersededByMessageId =
+        Objects.requireNonNull(supersededByMessageId, "supersededByMessageId must not be null");
+    this.supersededAt = Objects.requireNonNull(supersededAt, "supersededAt must not be null");
+  }
+
+  /**
+   * @return 아직 글로 옮겨지지 않은 음성 답이면 {@code true}
+   */
+  public boolean isVoiceAnswerAwaitingTranscript() {
+    return "VOICE_ANSWER".equals(messageType)
+        && ("PENDING".equals(speechStatus) || "PROCESSING".equals(speechStatus));
+  }
+
+  /**
+   * @return 물러난 시각이며 살아 있으면 {@code null}
+   */
+  public LocalDateTime getSupersededAt() {
+    return supersededAt;
+  }
 
   /**
    * 질문에 연결되는 아동 선택형 답변 메시지를 생성한다.

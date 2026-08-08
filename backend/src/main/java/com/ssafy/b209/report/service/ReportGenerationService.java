@@ -177,8 +177,14 @@ public class ReportGenerationService {
     }
   }
 
+  /**
+   * 보호자가 직접 다시 만들 수 있는 리포트인지 판단한다.
+   *
+   * <p>{@link ReportStatus#FAILED_FINAL}도 받는다. 자동 재시도와 달리 이 경로는 <strong>새 분석과 새 버전</strong>을 만들어
+   * 처음부터 다시 하므로, 같은 입력을 되풀이하는 것이 아니다. 자동 재시도가 포기한 실패도 사람이 눌렀을 때는 해 볼 값어치가 있다(P0-2).
+   */
   private boolean isRetryable(Report report, Report latest) {
-    return report.getStatus() == ReportStatus.FAILED && report.getId().equals(latest.getId());
+    return report.getStatus().isFailure() && report.getId().equals(latest.getId());
   }
 
   private ReportGenerationStatusResponse response(Report report, boolean retryable) {

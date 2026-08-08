@@ -27,7 +27,37 @@ void main() {
     expect(find.byKey(const ValueKey('ai-conversation-end')), findsOneWidget);
     expect(find.textContaining('TTS_'), findsNothing);
     expect(find.textContaining('서버'), findsNothing);
-    expect(ttsRepository.messageIds, [9001]);
+    // 한 번 더 시도한다. 실측 실패의 상당수가 순간적인 게이트웨이·네트워크 흔들림이라
+    //   같은 요청을 곧바로 다시 보내면 소리가 난다(P0-3).
+    expect(ttsRepository.messageIds, [9001, 9001]);
+    // 서버도 기기 음성도 실패했으면 직접 눌러 들을 길이 남아야 한다. 글을 못 읽는
+    //   아이에게 이 버튼이 없으면 질문은 화면의 글자로만 남는다.
+    expect(
+      find.byKey(const ValueKey('question-tts-replay')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('다시 들려줘를 누르면 실패한 질문을 다시 읽어 준다', (tester) async {
+    final ttsRepository = _TtsRepository(failure: StateError('failed'));
+
+    await _pumpConversation(
+      tester,
+      ttsRepository: ttsRepository,
+      player: _Player(),
+    );
+    await _waitForNoSpeechActions(tester);
+    expect(ttsRepository.messageIds, [9001, 9001]);
+
+    final replay = find.byKey(const ValueKey('question-tts-replay'));
+    await tester.ensureVisible(replay);
+    await tester.tap(replay);
+    await tester.pump();
+    await tester.pump(const Duration(seconds: 1));
+
+    // 자동 재생 가드를 지나쳐야 버튼이 제 역할을 한다. 예전에는 messageId 가드에
+    //   막혀 눌러도 아무 일도 일어나지 않았다(2026-08-08 실측).
+    expect(ttsRepository.messageIds.length, greaterThan(2));
   });
 
   testWidgets('앱 lifecycle pause는 재생을 중단하고 복귀 시 다시 재생하지 않는다', (tester) async {

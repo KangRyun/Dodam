@@ -104,7 +104,7 @@ class ReportGenerationServiceTest {
     ReportGenerationStatusResponse response = service.getStatus(GUARDIAN_ID, SOURCE_REPORT_ID);
 
     assertThat(response.reportId()).isEqualTo(SOURCE_REPORT_ID);
-    assertThat(response.reportStatus()).isEqualTo(ReportStatus.FAILED);
+    assertThat(response.reportStatus()).isEqualTo(ReportStatus.FAILED_FINAL);
     assertThat(response.retryable()).isTrue();
     assertThat(response.failureReason()).isEqualTo("OBSERVATION_GENERATION_FAILED");
   }

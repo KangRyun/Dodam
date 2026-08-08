@@ -39,7 +39,7 @@ class DrawingCompletionControllerTest {
             new DrawingCompletionResponse(
                 100L,
                 DrawingSessionStatus.IN_PROGRESS,
-                DrawingStage.REPORTING,
+                DrawingStage.COMPLETED,
                 701L,
                 DrawingAnalysisState.PENDING,
                 900L,
@@ -52,7 +52,7 @@ class DrawingCompletionControllerTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"conversationSkipped\":false,\"requestReport\":true}"))
         .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.currentStage").value("REPORTING"))
+        .andExpect(jsonPath("$.data.currentStage").value("COMPLETED"))
         .andExpect(jsonPath("$.data.analysisStatus").value("PENDING"))
         .andExpect(jsonPath("$.data.reportStatus").value("GENERATING"));
   }

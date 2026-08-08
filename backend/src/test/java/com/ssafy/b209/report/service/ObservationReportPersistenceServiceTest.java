@@ -312,7 +312,9 @@ class ObservationReportPersistenceServiceTest {
     assertThat(report.getStatus()).isEqualTo(ReportStatus.COMPLETED);
     assertThat(report.isExpertReviewRecommended()).isFalse();
     assertThat(report.getLimitationsText()).isEqualTo("한계 문구");
-    verify(analysis.getDrawingSession()).completeReporting(LocalDateTime.now(CLOCK));
+    // 리포트는 활동 상태를 건드리지 않는다. 활동은 완료 접수 시점에 이미 COMPLETED 다 —
+    //   여기서 다시 전이하면 리포트의 성패가 곧 활동의 성패가 된다(P0-2).
+    verify(analysis.getDrawingSession(), never()).completeReporting(any());
 
     verify(observationResultRepository).save(observationCaptor.capture());
     assertThat(observationCaptor.getValue().getDisclaimerText()).isEqualTo(DISCLAIMER);
@@ -849,10 +851,29 @@ class ObservationReportPersistenceServiceTest {
 
     assertThat(analysis.getState()).isEqualTo(DrawingAnalysisState.FAILED);
     assertThat(analysis.getErrorCode()).isEqualTo("TIMEOUT");
-    assertThat(report.getStatus()).isEqualTo(ReportStatus.FAILED);
+    // 재시도 판단을 넘기지 않은 호출은 최종 실패로 남는다. 옛 호출부가 어느 쪽인지 모르는 실패를
+    //   재시도 대기열에 올려 AI 를 반복 호출하는 것보다, 안 하는 쪽이 안전하다(P0-2).
+    assertThat(report.getStatus()).isEqualTo(ReportStatus.FAILED_FINAL);
     assertThat(report.getFailureReason()).isEqualTo("TIMEOUT");
     assertThat(report.getFailedAt()).isEqualTo(LocalDateTime.now(CLOCK));
-    verify(analysis.getDrawingSession()).failReporting();
+    // ⚠️ 아이가 한 활동은 실패로 내리지 않는다. 실패한 것은 리포트다. 예전에는 이 호출이
+    //    세션을 FAILED 로 만들어 아이 화면에 "활동을 마무리하지 못했어요"가 떴다(2026-08-08 실측).
+    verify(analysis.getDrawingSession(), never()).failReporting();
+  }
+
+  /** 재시도 가능한 실패는 그 판단을 리포트 상태에 남긴다 (P0-2). */
+  @Test
+  void marksReportRetryableWhenCallerSaysSo() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.markFailed(ANALYSIS_ID, REPORT_ID, "TIMEOUT", "생성 실패", ReportStatus.FAILED_RETRYABLE);
+
+    assertThat(report.getStatus()).isEqualTo(ReportStatus.FAILED_RETRYABLE);
+    assertThat(analysis.getState()).isEqualTo(DrawingAnalysisState.FAILED);
+    verify(analysis.getDrawingSession(), never()).failReporting();
   }
 
   @Test

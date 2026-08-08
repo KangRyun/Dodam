@@ -69,7 +69,8 @@ class ReportInterpretationConfidenceIntegrationTest extends IntegrationTestSuppo
             + "(id, code, name, activity_category, selectable_by, is_active, display_order) "
             + "VALUES (?, 'ART_DIARY', '그림일기', 'GENERAL', 'BOTH', TRUE, 1)",
         DRAWING_TYPE_ID);
-    // 리포트 생성 직전 상태다. complete() 가 세션을 완료로 전이하므로 IN_PROGRESS + REPORTING 이어야 한다.
+    // 리포트 생성 직전 상태다. complete() 는 이 세션 상태를 건드리지 않으므로(P0-2) 어떤 값이든
+    //   이 검증에는 영향이 없다 — 여기서 보는 것은 경향 해석 카드의 확신 등급뿐이다.
     jdbcTemplate.update(
         "INSERT INTO drawing_sessions "
             + "(id, child_id, drawing_type_id, input_method, session_status, current_stage, "
@@ -162,9 +163,8 @@ class ReportInterpretationConfidenceIntegrationTest extends IntegrationTestSuppo
   /**
    * 리포트 생성 완료 경로를 실제로 태운다 — 저장 메서드를 직접 부르지 않는 것이 이 테스트의 요점이다.
    *
-   * <p>{@code rawJson} 은 null 로 둔다(S15P11B209-983 이 원문 보관을 더하며 시그니처를 바꿨다). 이
-   * 테스트가 보는 것은 확신도가 계약에서 보호자 응답까지 실려 가는가이고, 원문 보관은 983 이 자기
-   * 테스트로 덮는다.
+   * <p>{@code rawJson} 은 null 로 둔다(S15P11B209-983 이 원문 보관을 더하며 시그니처를 바꿨다). 이 테스트가 보는 것은 확신도가 계약에서
+   * 보호자 응답까지 실려 가는가이고, 원문 보관은 983 이 자기 테스트로 덮는다.
    */
   private void generateReportWith(ObservationGenerationResult result) {
     ObservationGenerationContext context =

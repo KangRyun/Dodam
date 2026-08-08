@@ -12,6 +12,7 @@ import com.ssafy.b209.infrastructure.ai.observation.AiObservationClient;
 import com.ssafy.b209.infrastructure.ai.observation.AiObservationClientException;
 import com.ssafy.b209.support.IntegrationTestSupport;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -84,11 +85,11 @@ class DrawingCompletionIntegrationTest extends IntegrationTestSupport {
 
   @Test
   void storesCompletionGeneratesMockReportAndStaysIdempotent() throws Exception {
-    // 접수 시점 응답은 여전히 PENDING/GENERATING이다(커밋 후 생성 이전 DTO).
+    // 접수 시점에 활동은 이미 COMPLETED 다. 리포트만 GENERATING 으로 따로 간다(P0-2).
     mockMvc
         .perform(completionRequest("completion-key-143"))
         .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.currentStage").value("REPORTING"))
+        .andExpect(jsonPath("$.data.currentStage").value("COMPLETED"))
         .andExpect(jsonPath("$.data.analysisStatus").value("PENDING"))
         .andExpect(jsonPath("$.data.reportStatus").value("GENERATING"));
 
@@ -148,8 +149,16 @@ class DrawingCompletionIntegrationTest extends IntegrationTestSupport {
     assertThat(count("reports")).isEqualTo(1);
   }
 
+  /**
+   * 리포트가 실패해도 아이가 한 활동은 완료로 남는다 (P0-2).
+   *
+   * <p>예전에는 이 자리에서 그림 세션이 {@code FAILED} 로 내려가, 아이 화면에 "활동을 마무리하지 못했어요"가 떴다(2026-08-08 실측). 그림을 그렸고
+   * 마음을 골랐고 대화를 마친 활동이, 그 뒤에 도는 LLM 호출 하나 때문에 실패가 됐던 것이다.
+   *
+   * <p>{@code TIMEOUT} 은 상대편이 잠깐 흔들린 것이라 리포트는 {@code FAILED_RETRYABLE} 로 남아 재시도 대기열이 집어 간다.
+   */
   @Test
-  void marksSessionFailedWhenReportGenerationFails() throws Exception {
+  void keepsActivityCompletedAndQueuesRetryWhenReportGenerationTimesOut() throws Exception {
     doThrow(new AiObservationClientException(AiObservationClientException.Type.TIMEOUT))
         .when(observationClient)
         .generate(any());
@@ -157,7 +166,7 @@ class DrawingCompletionIntegrationTest extends IntegrationTestSupport {
     mockMvc
         .perform(completionRequest("failure-key-335"))
         .andExpect(status().isAccepted())
-        .andExpect(jsonPath("$.data.currentStage").value("REPORTING"));
+        .andExpect(jsonPath("$.data.currentStage").value("COMPLETED"));
 
     assertThat(
             jdbcTemplate.queryForObject(
@@ -170,15 +179,42 @@ class DrawingCompletionIntegrationTest extends IntegrationTestSupport {
                 "SELECT report_status FROM reports WHERE drawing_session_id = ?",
                 String.class,
                 SESSION_ID))
-        .isEqualTo("FAILED");
+        .isEqualTo("FAILED_RETRYABLE");
+    Map<String, Object> session =
+        jdbcTemplate.queryForMap(
+            "SELECT session_status, current_stage, completed_at "
+                + "FROM drawing_sessions WHERE id = ?",
+            SESSION_ID);
+    assertThat(session)
+        .containsEntry("session_status", "COMPLETED")
+        .containsEntry("current_stage", "COMPLETED");
+    assertThat(session.get("completed_at")).isNotNull();
+  }
+
+  /** 근거·계약 위반은 다시 해도 같은 자리에서 멈추므로 재시도 대상이 아니다 (P0-2). */
+  @Test
+  void marksReportFinalWhenResponseIsInvalid() throws Exception {
+    doThrow(new AiObservationClientException(AiObservationClientException.Type.INVALID_RESPONSE))
+        .when(observationClient)
+        .generate(any());
+
+    mockMvc
+        .perform(completionRequest("invalid-key-335"))
+        .andExpect(status().isAccepted())
+        .andExpect(jsonPath("$.data.currentStage").value("COMPLETED"));
+
     assertThat(
-            jdbcTemplate.queryForMap(
-                "SELECT session_status, current_stage, completed_at "
-                    + "FROM drawing_sessions WHERE id = ?",
+            jdbcTemplate.queryForObject(
+                "SELECT report_status FROM reports WHERE drawing_session_id = ?",
+                String.class,
                 SESSION_ID))
-        .containsEntry("session_status", "FAILED")
-        .containsEntry("current_stage", "REPORTING")
-        .containsEntry("completed_at", null);
+        .isEqualTo("FAILED_FINAL");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT session_status FROM drawing_sessions WHERE id = ?",
+                String.class,
+                SESSION_ID))
+        .isEqualTo("COMPLETED");
   }
 
   @Test

@@ -34,11 +34,38 @@ class ReportCompletionTest {
 
     report.fail("생성에 실패했습니다.", "TIMEOUT", UPDATED_AT);
 
-    assertThat(report.getStatus()).isEqualTo(ReportStatus.FAILED);
+    // 재시도 판단을 넘기지 않은 호출은 최종 실패로 남는다. 어느 쪽인지 모르는 실패를 대기열에
+    //   올려 AI 를 반복 호출하는 것보다, 안 하는 쪽이 안전하다(P0-2).
+    assertThat(report.getStatus()).isEqualTo(ReportStatus.FAILED_FINAL);
     assertThat(report.isExpertReviewRecommended()).isFalse();
     assertThat(report.getUpdatedAt()).isEqualTo(UPDATED_AT);
     assertThat(report.getFailureReason()).isEqualTo("TIMEOUT");
     assertThat(report.getFailedAt()).isEqualTo(UPDATED_AT);
+  }
+
+  /** 재시도 가능한 실패는 되돌려 다시 만들 수 있다 (P0-2). */
+  @Test
+  void reopensRetryableFailureAsGenerating() {
+    Report report = generating();
+    report.fail("생성에 실패했습니다.", "TIMEOUT", UPDATED_AT, ReportStatus.FAILED_RETRYABLE);
+
+    report.reopenForRetry(UPDATED_AT.plusMinutes(5));
+
+    assertThat(report.getStatus()).isEqualTo(ReportStatus.GENERATING);
+    assertThat(report.getFailureReason()).isNull();
+    assertThat(report.getFailedAt()).isNull();
+    // ⚠️ limitations_text 는 DB 에서 NOT NULL 이다. 비우면 flush 에서 터진다.
+    assertThat(report.getLimitationsText()).isNotBlank();
+  }
+
+  /** 다시 해도 같은 실패는 되돌리지 않는다. 옛 FAILED 도 어느 쪽인지 알 수 없어 되돌리지 않는다. */
+  @Test
+  void refusesToReopenNonRetryableFailure() {
+    Report finalFailure = generating();
+    finalFailure.fail("생성에 실패했습니다.", "INVALID_RESPONSE", UPDATED_AT);
+
+    assertThatThrownBy(() -> finalFailure.reopenForRetry(UPDATED_AT))
+        .isInstanceOf(IllegalStateException.class);
   }
 
   @Test
