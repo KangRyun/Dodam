@@ -81,7 +81,8 @@ void main() {
     await _pumpReport(tester, report: _fullReport());
 
     expect(find.text('동생이랑 놀아서 좋았어요'), findsOneWidget);
-    expect(find.textContaining('우리 동생이야.'), findsOneWidget);
+    // 히어로 풀인용 + 섹션 = 2회(의도된 중복)
+    expect(find.textContaining('우리 동생이야.'), findsNWidgets(2));
     expect(find.text('기쁨'), findsOneWidget);
     expect(find.text('그림일기'), findsOneWidget);
     expect(find.text('앱에서 그리기'), findsOneWidget);
@@ -1398,7 +1399,9 @@ void main() {
     expect(find.text('Q. 질문 3'), findsOneWidget);
     expect(find.text('Q. 질문 4'), findsNothing);
     // 대표 발화는 서버가 이미 추린 목록이라 자르지 않는다.
-    expect(find.textContaining('첫 번째 발화'), findsOneWidget);
+    // '첫 번째 발화'는 첫 clean 발화라 히어로로도 승격된다 —
+    // 히어로 풀인용 + 섹션 = 2회(의도된 중복).
+    expect(find.textContaining('첫 번째 발화'), findsNWidgets(2));
     expect(find.textContaining('두 번째 발화'), findsOneWidget);
     expect(find.textContaining('세 번째 발화'), findsOneWidget);
 
