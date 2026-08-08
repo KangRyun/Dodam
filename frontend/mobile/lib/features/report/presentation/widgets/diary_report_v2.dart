@@ -19,6 +19,8 @@ class DiaryReportV2Body extends StatelessWidget {
   const DiaryReportV2Body({
     required this.insights,
     this.qaPairs = const [],
+    this.visionObservations = const [],
+    this.drawnItems = const [],
     this.playbackController,
     super.key,
   });
@@ -34,6 +36,16 @@ class DiaryReportV2Body extends StatelessWidget {
   /// 문장만으로는 무엇을 넘겼는지 보호자가 알 수 없다.
   final List<ReportQaPairDto> qaPairs;
 
+  /// 그림에서 보인 것을 적은 서술.
+  ///
+  /// **해석이 아니라 서술이다.** 색이나 크기로 마음을 읽지 않고, 화면에 무엇이
+  /// 그려져 있는지만 적는다. 표지에 그림을 싣고도 이 줄이 없으면 보호자는 그림과
+  /// 아이 이야기를 잇는 근거를 볼 수 없다.
+  final List<String> visionObservations;
+
+  /// 아이가 그린 것 목록.
+  final List<String> drawnItems;
+
   /// 아이 음성 원본 재생기이며 없으면 재생 버튼을 숨긴다.
   ///
   /// 아이 목소리가 해석의 최상위 근거인데, 글로 옮긴 문장만 남으면 보호자가
@@ -45,6 +57,16 @@ class DiaryReportV2Body extends StatelessWidget {
     final snapshot = insights.storySnapshot;
     final sections = <Widget>[
       if (snapshot != null) _StorySnapshotCard(snapshot: snapshot),
+      // 표지에 그림을 싣고도 이 줄이 없으면, 보호자는 그림과 아이 이야기를 잇는
+      //   근거를 볼 수 없다. 해석이 아니라 화면에 무엇이 그려져 있는지의 서술이다.
+      if (visionObservations.isNotEmpty || drawnItems.isNotEmpty)
+        _DiarySection(
+          title: '그림에서 보인 것',
+          child: _DrawingObservations(
+            observations: visionObservations,
+            drawnItems: drawnItems,
+          ),
+        ),
       if (insights.narrativeFlow.isNotEmpty)
         _DiarySection(
           title: '이야기 흐름',
@@ -433,6 +455,60 @@ class _CaregiverQuestionTile extends StatelessWidget {
         ),
       ],
     ),
+  );
+}
+
+/// 그림에서 보인 것.
+///
+/// **서술이지 해석이 아니다.** 색·크기·위치로 마음을 읽는 문장은 여기 오지 않는다 —
+/// 서버가 그런 표현을 걸러 보내며, 화면도 받은 문장을 그대로만 보여 준다.
+class _DrawingObservations extends StatelessWidget {
+  const _DrawingObservations({
+    required this.observations,
+    required this.drawnItems,
+  });
+
+  final List<String> observations;
+  final List<String> drawnItems;
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (final observation in observations)
+        Padding(
+          padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.only(top: 5),
+                child: Icon(
+                  Icons.image_outlined,
+                  size: 16,
+                  color: AppColors.lavender,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.sm),
+              Expanded(
+                child: Text(
+                  observation,
+                  style: const TextStyle(
+                    color: AppColors.ink,
+                    fontSize: 15,
+                    height: 1.55,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      if (drawnItems.isNotEmpty)
+        Text(
+          '그린 것 · ${drawnItems.join(', ')}',
+          style: const TextStyle(color: AppColors.inkMuted, fontSize: 13),
+        ),
+    ],
   );
 }
 

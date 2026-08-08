@@ -585,6 +585,11 @@ class _ReportContent extends StatelessWidget {
             qaPairs: [
               for (final subject in report.subjectDetails) ...subject.qaPairs,
             ],
+            visionObservations: [
+              for (final subject in report.subjectDetails)
+                ...subject.visionObservations,
+            ],
+            drawnItems: report.activityFacts?.detectedObjects ?? const [],
             playbackController: playbackController,
           ),
         ] else ...[

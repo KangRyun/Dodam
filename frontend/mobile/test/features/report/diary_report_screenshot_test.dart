@@ -70,6 +70,11 @@ void main() {
             qaPairs: [
               for (final subject in report.subjectDetails) ...subject.qaPairs,
             ],
+            visionObservations: [
+              for (final subject in report.subjectDetails)
+                ...subject.visionObservations,
+            ],
+            drawnItems: report.activityFacts?.detectedObjects ?? const [],
           ),
           const SizedBox(height: AppSpacing.lg),
           ScreeningSummaryCard(summary: report.screeningSummary!),
@@ -263,7 +268,10 @@ const Map<String, dynamic> _reportJson = {
     'answeredCount': 4,
     'skippedCount': 1,
   },
-  'activityFacts': {'drawingDurationMs': 720000},
+  'activityFacts': {
+    'drawingDurationMs': 720000,
+    'detectedObjects': ['블록', '사람', '집'],
+  },
   'expertReview': {'status': 'NOT_REQUESTED'},
   'subjectReports': [
     {
