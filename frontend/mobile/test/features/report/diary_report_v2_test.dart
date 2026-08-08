@@ -1,4 +1,5 @@
 import 'package:dodam/features/report/data/dto/diary_insights_dto.dart';
+import 'package:dodam/features/report/data/dto/report_dtos.dart';
 import 'package:dodam/features/report/presentation/widgets/diary_report_v2.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -234,6 +235,33 @@ void main() {
     );
   });
 
+  testWidgets('아이 답을 질문과 함께 보여 준다', (tester) async {
+    // 답만 늘어놓으면 '보기에서 고름'이 무슨 보기였는지 알 수 없다.
+    await _pumpWithTranscript(tester);
+
+    expect(find.text('그때 마음이 어땠어?'), findsOneWidget);
+    expect(find.text('"기뻐"'), findsOneWidget);
+    expect(find.text('보기에서 고름'), findsOneWidget);
+    // 발화만 나열하던 예전 섹션은 문답이 있으면 쓰지 않는다.
+    expect(find.text('아이가 들려준 말'), findsNothing);
+    expect(find.text('아이와 나눈 이야기'), findsOneWidget);
+  });
+
+  testWidgets('건너뛴 질문도 무엇을 넘겼는지 보여 준다', (tester) async {
+    // "넘긴 질문이 있어요"라는 문장만으로는 무엇을 넘겼는지 알 수 없다.
+    await _pumpWithTranscript(tester);
+
+    expect(find.text('블록은 다시 쌓았어?'), findsOneWidget);
+    expect(find.text('이 질문은 건너뛰었어요'), findsOneWidget);
+  });
+
+  testWidgets('문답이 없는 구 응답에서는 예전처럼 발화만 보여 준다', (tester) async {
+    await _pump(tester, _insights());
+
+    expect(find.text('아이가 들려준 말'), findsOneWidget);
+    expect(find.text('아이와 나눈 이야기'), findsNothing);
+  });
+
   test('모르는 주장 세기는 가장 약한 쪽으로 읽는다', () {
     expect(diaryInsightTypeLabel('SOMETHING_NEW'), '더 확인해 볼 것');
   });
@@ -309,3 +337,45 @@ DiaryInsightsDto _insights({
   ],
   listeningTip: '아이가 고른 장난감 이야기를 먼저 들어주세요.',
 );
+
+/// 문답이 함께 있는 화면을 띄운다.
+Future<void> _pumpWithTranscript(WidgetTester tester) async {
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: SingleChildScrollView(
+          child: DiaryReportV2Body(
+            insights: _insights(),
+            qaPairs: const [
+              ReportQaPairDto(
+                question: '이 그림에서는 무슨 일이 일어나고 있어?',
+                answer: '기분이 좋아서 엄마한테 자랑했어',
+                state: 'ANSWERED',
+                inputType: 'VOICE',
+                sttNeedsConfirmation: false,
+                isRepresentative: true,
+              ),
+              ReportQaPairDto(
+                question: '그때 마음이 어땠어?',
+                answer: '기뻐',
+                state: 'ANSWERED',
+                inputType: 'TEXT',
+                sttNeedsConfirmation: false,
+                isRepresentative: false,
+              ),
+              ReportQaPairDto(
+                question: '블록은 다시 쌓았어?',
+                answer: null,
+                state: 'SKIPPED',
+                inputType: 'TEXT',
+                sttNeedsConfirmation: false,
+                isRepresentative: false,
+              ),
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+  await tester.pumpAndSettle();
+}

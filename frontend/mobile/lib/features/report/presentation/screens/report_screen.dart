@@ -578,7 +578,15 @@ class _ReportContent extends StatelessWidget {
           // 그림일기 리포트 V2 — 서버가 근거와 대조해 구조화한 결과가 있을 때만
           // 쓴다. 아이 이야기 중심 본문이 기존 관찰·경향 섹션을 대체한다
           // (diaryInsights 계약: 값이 없으면 아래 기존 화면을 그대로 쓴다).
-          DiaryReportV2Body(insights: report.diaryInsights!),
+          DiaryReportV2Body(
+            insights: report.diaryInsights!,
+            // 문답과 음성 재생이 V2 로 넘어오지 않아 질문 맥락과 아이 목소리가
+            //   화면에서 사라져 있었다. 구조화 결과는 아이 발화만 담는다.
+            qaPairs: [
+              for (final subject in report.subjectDetails) ...subject.qaPairs,
+            ],
+            playbackController: playbackController,
+          ),
         ] else ...[
           // 활동 요약은 표지 안으로 들어갔다(S15P11B209-996).
           ?_observationsSection(report),
