@@ -1153,6 +1153,36 @@ void main() {
     expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
   });
 
+  testWidgets('활동이 그 자리에서 끝나는 완료 응답에도 아이 화면은 완료를 안내한다', (tester) async {
+    // 회귀: 서버가 완료를 REPORTING 접수가 아니라 COMPLETED 종료로 돌려주게 된 뒤에도
+    //   앱이 옛 계약만 검사해, 감정도 저장되고 완료도 접수됐는데 아이 화면에는
+    //   "지금은 잘 안 돼요"만 떴다. 재시도해도 같은 멱등 키로 같은 응답이 와 길이 없었다.
+    final calls = <String>[];
+    final repository = _CompletionRepository(
+      calls: calls,
+      activityCompletedSessionStatus: 'COMPLETED',
+      activityCompletedCurrentStage: 'COMPLETED',
+    );
+    final observer = _CompletionNavigationObserver();
+    await _pumpEmotion(
+      tester,
+      repository: repository,
+      sessionId: 42,
+      navigatorObserver: observer,
+    );
+
+    await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('emotion-submit')));
+    await tester.pumpAndSettle();
+
+    expect(repository.reflectionCalls, 1);
+    expect(repository.activityCompleteCalls, 1);
+    expect(observer.activityCompleteReplacements, 1);
+    expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
+    expect(find.textContaining('지금은 잘 안 돼요'), findsNothing);
+  });
+
   testWidgets('다 했어요는 상세 조회 후 End, Reflection, Complete를 순서대로 호출한다', (
     tester,
   ) async {
@@ -2622,8 +2652,17 @@ final class _CompletionRepository implements DrawingRepository {
     this.existingConversationId,
     this.strokeError,
     this.draftCompleter,
+    this.activityCompletedSessionStatus = 'IN_PROGRESS',
+    this.activityCompletedCurrentStage = 'REPORTING',
   }) : _sessionStatuses = List.of(sessionStatuses),
        _sessionFailures = List.of(sessionFailures);
+
+  /// 활동 완료 접수가 돌려주는 상태. 기본값은 HTP 묶음이 남기는 접수 형태다.
+  ///
+  /// 일반 활동은 이제 `COMPLETED`/`COMPLETED`로 그 자리에서 끝난다 — 그 형태를 앱이
+  /// 거부해 **서버가 성공한 활동이 아이 화면에서 실패로 보인** 적이 있다(2026-08-08 실측).
+  final String activityCompletedSessionStatus;
+  final String activityCompletedCurrentStage;
 
   final Completer<DrawingStageCompleteResponseDto>? completer;
   final DrawingStageCompleteResponseDto completionResponse;
@@ -2690,8 +2729,8 @@ final class _CompletionRepository implements DrawingRepository {
     lastActivityRequest = request;
     return DrawingCompletionResponseDto(
       drawingSessionId: sessionId,
-      sessionStatus: 'IN_PROGRESS',
-      currentStage: 'REPORTING',
+      sessionStatus: activityCompletedSessionStatus,
+      currentStage: activityCompletedCurrentStage,
       analysisId: 801,
       analysisStatus: 'PENDING',
       reportId: 901,
