@@ -161,6 +161,7 @@ class DrawingScreen extends StatefulWidget {
     this.conversationEndRepository,
     this.questionTtsRepository,
     this.questionAudioPlayerFactory,
+    this.questionSpeechSynthesizer,
     this.voiceRecorder,
     this.microphonePermissionService,
     this.voiceNoSpeechTimeout = const Duration(seconds: 3),
@@ -211,6 +212,9 @@ class DrawingScreen extends StatefulWidget {
   final ConversationEndRepository? conversationEndRepository;
   final QuestionTtsRepository? questionTtsRepository;
   final QuestionAudioPlayerFactory? questionAudioPlayerFactory;
+
+  /// 서버 TTS 실패 시 질문을 읽어 줄 기기 음성이다 (P0-3).
+  final QuestionSpeechSynthesizer? questionSpeechSynthesizer;
   final VoiceRecorder? voiceRecorder;
   final MicrophonePermissionService? microphonePermissionService;
   final Duration voiceNoSpeechTimeout;
@@ -515,7 +519,10 @@ class _DrawingScreenState extends State<DrawingScreen>
         ttsRepository,
         playerFactory(),
         request: QuestionTtsRequest(voice: _companionSnapshot.ttsVoice),
-      );
+        synthesizer:
+            widget.questionSpeechSynthesizer ??
+            const NoopQuestionSpeechSynthesizer(),
+      )..addListener(_handleQuestionTtsChanged);
     }
     _questionDisplayController = AiQuestionDisplayController()
       ..addListener(_handleQuestionDisplayChanged);
@@ -1005,6 +1012,7 @@ class _DrawingScreenState extends State<DrawingScreen>
     _questionSkipController?.dispose();
     _conversationEndController?.removeListener(_handleConversationEndChanged);
     _conversationEndController?.dispose();
+    _questionTtsController?.removeListener(_handleQuestionTtsChanged);
     _questionTtsController?.dispose();
     _voiceRecordingController?.removeListener(_handleVoiceRecordingChanged);
     _voiceRecordingController?.dispose();
@@ -1543,6 +1551,24 @@ class _DrawingScreenState extends State<DrawingScreen>
   void _handleQuestionDisplayChanged() {
     if (_isConversationFocusMode) _cursorController.hide();
     if (mounted) setState(() {});
+  }
+
+  /// 질문 음성 상태가 바뀌면 다시 그린다 (P0-3).
+  ///
+  /// 이걸 붙이지 않으면 재생이 다 실패해도 '다시 들려줘' 버튼이 나타나지 않는다 — 상태는
+  /// 바뀌었지만 화면이 모른다.
+  void _handleQuestionTtsChanged() {
+    if (mounted) setState(() {});
+  }
+
+  /// 아이나 곁에 있는 어른이 '다시 들려줘'를 눌렀을 때 질문을 다시 읽어 준다.
+  ///
+  /// 자동 재생과 달리 messageId 가드를 지나친다. 누를 때마다 실제로 다시 시도해야
+  /// 버튼이 제 역할을 한다.
+  Future<void> _replayQuestionTts() async {
+    final question = _questionDisplayController.visibleQuestion;
+    if (question == null) return;
+    await _questionTtsController?.replayQuestion(question);
   }
 
   void _handleQuestionSelectionChanged() {
@@ -2859,6 +2885,13 @@ class _DrawingScreenState extends State<DrawingScreen>
                       _conversationEndController?.canRetry == true,
                   voiceRetryable:
                       _voiceAnswerUploadController?.canRetry ?? false,
+                  // 소리가 끝내 안 났을 때만 보인다. 서버·재시도·기기 음성이 다
+                  //   실패한 뒤라, 이 버튼이 질문이 아이에게 닿는 마지막 길이다.
+                  showTtsReplay:
+                      _questionTtsController?.needsManualReplay ?? false,
+                  onReplayTts: () {
+                    unawaited(_replayQuestionTts());
+                  },
                 );
                 final sidePanel = _DrawingSidePanel(
                   // 도구·색·굵기·완료는 상단 크레용 툴바가 맡는다.

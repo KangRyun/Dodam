@@ -99,6 +99,9 @@ void main() {
       );
 
       await tester.pump(const Duration(milliseconds: 100));
+      // 서버 TTS 재시도(P0-3)가 끝날 때까지 시계를 돌린다. 재시도 중에 무응답
+      //   타이머가 돌면 아이가 질문을 아직 듣지도 못한 채 보기가 열린다.
+      await tester.pump(const Duration(seconds: 1));
       await _pumpUntil(tester, find.text(_candidateQuestion.text));
       expect(repository.requests, hasLength(2));
     });

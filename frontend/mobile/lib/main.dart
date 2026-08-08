@@ -124,6 +124,7 @@ DodamApp createDefaultApp({
     conversationEndRepository: RemoteConversationEndRepository(apiClient),
     questionTtsRepository: RemoteQuestionTtsRepository(apiClient),
     questionAudioPlayerFactory: DeviceQuestionAudioPlayer.new,
+    questionSpeechSynthesizer: DeviceQuestionSpeechSynthesizer(),
     voiceAnswerPlaybackRepository: RemoteVoiceAnswerPlaybackRepository(
       apiClient,
     ),

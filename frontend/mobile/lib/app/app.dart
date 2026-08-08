@@ -71,6 +71,7 @@ class DodamApp extends StatefulWidget {
     this.conversationEndRepository = const MockConversationEndRepository(),
     this.questionTtsRepository,
     this.questionAudioPlayerFactory,
+    this.questionSpeechSynthesizer,
     this.voiceAnswerPlaybackRepository,
     this.voiceAnswerAudioPlayerFactory,
     this.voiceAnswerRepository,
@@ -114,6 +115,11 @@ class DodamApp extends StatefulWidget {
   final ConversationEndRepository? conversationEndRepository;
   final QuestionTtsRepository? questionTtsRepository;
   final QuestionAudioPlayerFactory? questionAudioPlayerFactory;
+
+  /// 서버 TTS가 실패했을 때 질문을 읽어 줄 기기 음성이다 (P0-3).
+  ///
+  /// 비워 두면 기기 음성을 쓰지 않고 수동 재생 버튼만 남는다 — 테스트 기본값이다.
+  final QuestionSpeechSynthesizer? questionSpeechSynthesizer;
   final VoiceAnswerPlaybackRepository? voiceAnswerPlaybackRepository;
   final VoiceAnswerAudioPlayerFactory? voiceAnswerAudioPlayerFactory;
   final VoiceAnswerRepository? voiceAnswerRepository;
@@ -625,6 +631,7 @@ class _DodamAppState extends State<DodamApp> with WidgetsBindingObserver {
       conversationEndRepository: widget.conversationEndRepository,
       questionTtsRepository: widget.questionTtsRepository,
       questionAudioPlayerFactory: widget.questionAudioPlayerFactory,
+      questionSpeechSynthesizer: widget.questionSpeechSynthesizer,
       voiceAnswerPlaybackRepository: widget.voiceAnswerPlaybackRepository,
       voiceAnswerAudioPlayerFactory: widget.voiceAnswerAudioPlayerFactory,
       voiceAnswerRepository: widget.voiceAnswerRepository,
