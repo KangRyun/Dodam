@@ -30,6 +30,8 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -41,6 +43,8 @@ import org.springframework.transaction.annotation.Transactional;
  */
 @Service
 public class OptionAnswerService {
+
+  private static final Logger log = LoggerFactory.getLogger(OptionAnswerService.class);
   private final ConversationSessionRepository conversationSessionRepository;
   private final ConversationStartDrawingSessionRepository drawingSessionRepository;
   private final VoiceAnswerAuthorizationRepository authorizationRepository;
@@ -123,7 +127,18 @@ public class OptionAnswerService {
     if (!messageRepository.existsQuestion(questionMessageId, conversationId)) {
       throw new BusinessException(OptionAnswerErrorCode.QUESTION_MESSAGE_NOT_FOUND);
     }
-    if (messageRepository.existsAnswerForQuestion(conversationId, questionMessageId)) {
+    // 아이가 고른 답은, 아직 글로 옮겨지지 않은 자동 음성 답보다 앞선다.
+    //
+    // 질문이 뜨면 앱이 자동으로 녹음을 시작하는데 조용한 방에서는 무음이 그대로 답으로
+    //   올라간다. 그 답의 STT 가 PENDING 인 몇 초 안에 아이가 보기를 고르면, 예전에는
+    //   "이미 답이 있다"며 거절돼 **아이가 실제로 고른 답이 기록에 남지 않았다.**
+    //
+    // ⚠️ 자리를 내주는 것은 PENDING·PROCESSING 뿐이다. SUCCESS 는 아이가 실제로 말한
+    //    답이라 보기로 덮지 않는다 — 그건 아이의 말을 지우는 일이다.
+    List<OptionAnswerMessage> supersedable =
+        messageRepository.findSupersedableVoiceAnswers(conversationId, questionMessageId);
+    if (messageRepository.existsAnswerForQuestion(conversationId, questionMessageId)
+        && supersedable.isEmpty()) {
       throw new BusinessException(OptionAnswerErrorCode.ANSWER_ALREADY_SUBMITTED);
     }
 
@@ -152,6 +167,21 @@ public class OptionAnswerService {
       }
       selectedOptionRepository.saveAll(selections);
       selectedOptionRepository.flush();
+      // 자리를 내주는 것이지 지우는 것이 아니다. 아동 기록에서 무엇이 언제 왜 물러났는지는
+      //   되짚을 수 있어야 한다 — 조회하는 쪽이 supersededAt 으로 거른다.
+      LocalDateTime supersededAt = LocalDateTime.ofInstant(clock.instant(), ZoneOffset.UTC);
+      for (OptionAnswerMessage stale : supersedable) {
+        stale.supersede(saved.getId(), supersededAt);
+      }
+      if (!supersedable.isEmpty()) {
+        messageRepository.saveAll(supersedable);
+        log.info(
+            "아이가 고른 답이 글로 옮겨지지 않은 음성 답을 대신했습니다. "
+                + "conversationId={}, questionMessageId={}, supersededCount={}",
+            conversationId,
+            questionMessageId,
+            supersedable.size());
+      }
       // 고른 칩의 "개수"와 직접 입력 "유무"만 넘긴다. 라벨·본문은 아이가 한 말이라 행동 로그에 넣지 않는다
       //   (S15P11B209-973 · CLAUDE.md 9절).
       eventRecorder.recordOptionAnswer(

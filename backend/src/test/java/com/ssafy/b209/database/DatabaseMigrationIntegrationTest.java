@@ -52,7 +52,7 @@ class DatabaseMigrationIntegrationTest {
     assertThat(MYSQL_CONTAINER.isRunning()).isTrue();
     // ⚠️ 마이그레이션을 추가하면 이 숫자와 아래 tableCount() 를 함께 확인해야 한다. 960 이 V40 을 더하고
     //    두 숫자를 안 고쳐 CI 가 깨졌다.
-    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("48");
+    assertThat(flyway.info().current().getVersion().getVersion()).isEqualTo("49");
     assertThat(tableExists("flyway_schema_history")).isTrue();
     // V40이 주제별 관찰 4종(report_subjects·observations·qa_pairs·interpretations)과
     // report_references 를 더해 85 → 90 이 됐다(S15P11B209-960).
@@ -66,6 +66,8 @@ class DatabaseMigrationIntegrationTest {
     // report_diary_development_sources).
     // V48 이 보호자 입력 검사 기록 3종을 더해 100 → 103 이 됐다(child_screening_records·
     // child_screening_record_domains·child_screening_referral_options).
+    // V49 는 컬럼만 더해 테이블 수는 103 그대로다(conversation_messages.superseded_at·
+    // superseded_by_message_id).
     // ⚠️ V43 은 983(AI 원문), V44 가 982(확신도)다. 982 는 원래 V43 이었는데 983 이 먼저 머지되며
     //    같은 번호를 써서 밀었다. **Flyway 는 버전이 겹치면 기동 자체가 실패한다** — 리포트 도메인처럼
     //    여러 갈래가 동시에 붙는 곳은 머지 직전에 번호를 다시 확인할 것.

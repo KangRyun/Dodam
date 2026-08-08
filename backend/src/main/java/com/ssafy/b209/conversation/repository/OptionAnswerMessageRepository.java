@@ -1,6 +1,8 @@
 package com.ssafy.b209.conversation.repository;
 
 import com.ssafy.b209.conversation.domain.OptionAnswerMessage;
+import java.util.List;
+import java.util.Optional;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -43,10 +45,33 @@ public interface OptionAnswerMessageRepository extends JpaRepository<OptionAnswe
           + "where message.conversationSessionId = :conversationSessionId "
           + "and message.parentMessageId = :questionMessageId "
           + "and message.messageType in ('VOICE_ANSWER', 'OPTION_ANSWER', 'TEXT_ANSWER') "
+          + "and message.supersededAt is null "
           + "and (message.messageType <> 'VOICE_ANSWER' "
           + "or message.speechStatus is null "
           + "or message.speechStatus <> 'FAILED')")
   boolean existsAnswerForQuestion(
+      @Param("conversationSessionId") Long conversationSessionId,
+      @Param("questionMessageId") Long questionMessageId);
+
+  /**
+   * 이 질문을 막고 있는, 아직 글로 옮겨지지 않은 음성 답을 찾는다.
+   *
+   * <p>아이가 보기를 고르는 순간 이 답이 자리를 내준다. <strong>{@code SUCCESS} 는 여기 오지 않는다</strong> — 아이가 실제로 말한 답이라
+   * 보기로 덮으면 안 된다. {@code FAILED} 도 오지 않는다 — 이미 중복 판정에서 빠져 막고 있지 않다.
+   *
+   * @param conversationSessionId 대화 세션 ID
+   * @param questionMessageId 부모 질문 메시지 ID
+   * @return 자리를 내줄 수 있는 음성 답이며 없으면 빈 {@link Optional}
+   */
+  @Query(
+      "select message from OptionAnswerMessage message "
+          + "where message.conversationSessionId = :conversationSessionId "
+          + "and message.parentMessageId = :questionMessageId "
+          + "and message.messageType = 'VOICE_ANSWER' "
+          + "and message.supersededAt is null "
+          + "and message.speechStatus in ('PENDING', 'PROCESSING') "
+          + "order by message.messageSequence asc")
+  List<OptionAnswerMessage> findSupersedableVoiceAnswers(
       @Param("conversationSessionId") Long conversationSessionId,
       @Param("questionMessageId") Long questionMessageId);
 

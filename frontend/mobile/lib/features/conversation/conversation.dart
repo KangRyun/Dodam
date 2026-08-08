@@ -1,4 +1,5 @@
 export 'application/ai_question_controller.dart';
+export 'application/answer_flow_controller.dart';
 export 'application/ai_question_display_controller.dart';
 export 'application/ai_question_selection_controller.dart';
 export 'application/ai_question_tts_controller.dart';
