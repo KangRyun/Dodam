@@ -20,6 +20,10 @@ Desktop.ini
 /env
 !.env.example
 !**/.env.example
+# 예제 템플릿(시크릿 없음)은 추적한다: .env.compose.example · .env.active.example 등.
+# ⚠️ `.example` 로 끝나는 것만 — 실제 `.env.compose`·`.env.active` 는 계속 무시된다.
+!.env.*.example
+!**/.env.*.example
 *.pem
 *.key
 secrets/
