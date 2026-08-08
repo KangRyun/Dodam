@@ -966,12 +966,25 @@ def build_diary_insights(
     #    파생**되므로 문답이 하나라도 있으면 언제나 채워진다. 세는 순간 이 방어가 늘 참이 되어
     #    "빈 V2 를 만들지 않는다"가 무력해진다 — 2026-08-07 실호출에서 핵심 이야기도 흐름도 없이
     #    발화 목록만 있는 V2 가 실제로 열렸다. 근거로 검증된 구조가 하나는 있어야 한다.
+    #
+    # ⚠️ 발달 맥락(4층)은 **모델이 만들지 않는다.** 서버가 검증된 신호로 조립한다. 그래서
+    #    이 판정에 함께 세운다 — 모델이 아무것도 못 만든 활동에서도 서버가 확인한 것이 있으면
+    #    그건 보호자에게 보여 줄 값어치가 있는 내용이고, 그걸 버리면 화면이 통째로 옛 레이아웃으로
+    #    떨어진다. 2026-08-09 실측: 아이가 보기로만 답한 활동에서 모델이 빈 신호를 돌려주자
+    #    이야기·인사이트·4층이 한꺼번에 사라졌다. 4층은 그 활동에서도 적을 것이 있었다.
+    #
+    #    "빈 V2 를 만들지 않는다"는 그대로 지켜진다 — 확인된 것이 하나도 없으면 4층 카드는
+    #    NOT_ASSESSED 로 전부 걸러져 빈 목록이 되고, 이 판정도 함께 거짓이 된다.
+    developmental = _developmental_observations(
+        req, flow=flow, child_voice=child_voice
+    )
     if not any(
         (
             snapshot is not None,
             bool(flow),
             bool(observations),
             bool(questions),
+            bool(developmental),
         )
     ):
         return None
@@ -984,9 +997,7 @@ def build_diary_insights(
         listening_tip=listening_tip,
         # 연령 발달 맥락(4층). 어떤 맥락 문장이 붙을지는 검수 등록부와 나이가 정하고,
         #   무엇이 확인됐는지는 검증된 신호가 정한다 — 모델은 관여하지 않는다.
-        developmental_observations=_developmental_observations(
-            req, flow=flow, child_voice=child_voice
-        ),
+        developmental_observations=developmental,
         # 확인하지 못한 것은 모델이 아니라 원자료가 정한다. 카드가 비어 나가는 것과
         #   "무엇을 알 수 없었는지"를 적어 보내는 것은 보호자에게 전혀 다르게 읽힌다.
         unknown_items=_unknown_items(
