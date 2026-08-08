@@ -494,7 +494,10 @@ pipeline {
             HOST_UID=1004; HOST_GID=1004                  # host repo 소유자(kr). `stat -c %u:%g infra` 로 확인.
             SOCK_GID=$(stat -c '%g' /var/run/docker.sock)  # docker.sock 그룹 — 비-root uid 의 소켓 접근용(현재 988)
             bg() {   # $@ = bluegreen-deploy.sh 인자 (<서비스> <태그>)
+              # ★ --entrypoint bash: dodam-jenkins:local 의 jenkins 엔트리포인트가 uid 1004 로
+              #   /var/jenkins_home 에 쓰려다 죽던 것을 우회(2026-08-08 빌드321 Deploy 실패 원인).
               docker run --rm \
+                --entrypoint bash \
                 --user "${HOST_UID}:${HOST_GID}" --group-add "$SOCK_GID" \
                 -v /var/run/docker.sock:/var/run/docker.sock \
                 -v "$HOST_REPO/infra":/repo/infra \
@@ -504,7 +507,7 @@ pipeline {
                 -e UPSTREAM_CONF=/repo/infra/nginx/conf.d.compose/upstream-active.conf \
                 -e IMAGE_TAG="$IMAGE_TAG" \
                 dodam-jenkins:local \
-                bash /repo/infra/scripts/bluegreen-deploy.sh "$@"
+                /repo/infra/scripts/bluegreen-deploy.sh "$@"
             }
             # 데이터 계층(mysql·mongo·redis·minio)은 스크립트가 --no-deps 로 절대 건드리지 않는다.
             bg backend "$IMAGE_TAG"
