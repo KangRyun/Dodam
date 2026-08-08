@@ -81,7 +81,9 @@ class ReportListQueryServiceTest {
     given(uploaded.getDrawingSession()).willReturn(session);
 
     given(currentUserResolver.requireUserId()).willReturn(99L);
-    given(reportRepository.findVisiblePage(3L, null, null, null, null, pageable))
+    given(
+            reportRepository.findVisiblePage(
+                3L, null, null, null, ReportStatus.visibleGroupOf(null), pageable))
         .willReturn(new PageImpl<>(List.of(report), pageable, 1));
     // 사진 업로드 세션은 FINAL·THUMBNAIL 없이 UPLOADED 원본만 남는다.
     given(
@@ -152,7 +154,7 @@ class ReportListQueryServiceTest {
                 LocalDateTime.parse("2026-07-01T00:00:00"),
                 LocalDateTime.parse("2026-08-01T00:00:00"),
                 "ART_DIARY",
-                ReportStatus.COMPLETED,
+                ReportStatus.visibleGroupOf(ReportStatus.COMPLETED),
                 pageable))
         .willReturn(new PageImpl<>(List.of(report), pageable, 1));
     given(
@@ -215,7 +217,9 @@ class ReportListQueryServiceTest {
     given(finalAsset.getDrawingSession()).willReturn(session);
 
     given(currentUserResolver.requireUserId()).willReturn(99L);
-    given(reportRepository.findVisiblePage(3L, null, null, null, null, pageable))
+    given(
+            reportRepository.findVisiblePage(
+                3L, null, null, null, ReportStatus.visibleGroupOf(null), pageable))
         .willReturn(new PageImpl<>(List.of(report), pageable, 1));
     given(
             drawingAssetRepository
@@ -238,7 +242,9 @@ class ReportListQueryServiceTest {
   void returnsEmptyPageWithoutAssetOrEmotionQueries() {
     PageRequest pageable = PageRequest.of(0, 20);
     given(currentUserResolver.requireUserId()).willReturn(99L);
-    given(reportRepository.findVisiblePage(3L, null, null, null, null, pageable))
+    given(
+            reportRepository.findVisiblePage(
+                3L, null, null, null, ReportStatus.visibleGroupOf(null), pageable))
         .willReturn(new PageImpl<>(List.of(), pageable, 0));
 
     ReportListPageResponse response = service.getReports(3L, null, null, null, null, pageable);

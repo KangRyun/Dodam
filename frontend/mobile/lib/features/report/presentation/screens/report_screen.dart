@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../../app/router/app_router.dart';
 import '../../../../app/widgets/app_failure_view.dart';
+import '../../../../core/domain/report_status.dart';
 import '../../../../core/network/network.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../activity/domain/repositories/activity_repository.dart';
@@ -211,7 +212,7 @@ class _ReportScreenState extends State<ReportScreen>
       final report = await repository.getReport(reportId);
       if (!_isCurrentLoad(generation, reportId, repository)) return;
       ReportGenerationStatusDto? generationStatus;
-      if (report.reportStatus == 'FAILED') {
+      if (isReportFailureVisibleToGuardian(report.reportStatus)) {
         try {
           generationStatus = await repository.getGenerationStatus(reportId);
           if (!_isCurrentLoad(generation, reportId, repository)) return;
@@ -233,7 +234,9 @@ class _ReportScreenState extends State<ReportScreen>
         _status = switch (report.reportStatus) {
           'COMPLETED' => _ReportViewStatus.completed,
           'GENERATING' => _ReportViewStatus.generating,
-          'FAILED' => _ReportViewStatus.failed,
+          final status when isReportFailureVisibleToGuardian(status) =>
+            _ReportViewStatus.failed,
+          // FAILED_RETRYABLE 을 포함해 나머지는 진행 중으로 둔다.
           _ => _ReportViewStatus.generating,
         };
       });

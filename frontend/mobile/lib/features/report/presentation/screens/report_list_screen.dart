@@ -6,6 +6,7 @@ import '../../../../app/router/app_navigation.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../app/state/guardian_child_controller.dart';
 import '../../../../app/widgets/app_failure_view.dart';
+import '../../../../core/domain/report_status.dart';
 import '../../../../design_system/design_system.dart';
 import '../../data/dto/report_dtos.dart';
 import '../../domain/repositories/report_repository.dart';
@@ -455,7 +456,12 @@ class _ReportStatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final (label, background, foreground) = switch (status) {
       'COMPLETED' => ('리포트 완료', AppColors.leafSoft, AppColors.leaf),
-      'FAILED' => ('다시 확인 필요', AppColors.errorSoft, AppColors.error),
+      final value when isReportFailureVisibleToGuardian(value) => (
+        '다시 확인 필요',
+        AppColors.errorSoft,
+        AppColors.error,
+      ),
+      // FAILED_RETRYABLE 을 포함해 나머지는 분석 중으로 둔다.
       _ => ('분석 중', AppColors.tangerineSoft, AppColors.tangerine),
     };
     return Container(

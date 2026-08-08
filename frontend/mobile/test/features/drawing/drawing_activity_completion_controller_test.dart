@@ -45,6 +45,69 @@ void main() {
     expect(controller.reportId, 501);
   });
 
+  test('활동이 그 자리에서 끝난 COMPLETED 응답을 완료로 받는다', () async {
+    // 회귀: 서버가 완료를 REPORTING 접수가 아니라 COMPLETED 종료로 돌려주도록 바뀐 뒤,
+    //   앱이 옛 계약만 검사해 **서버가 성공한 요청을 실패로 보여줬다**. 감정은 이미
+    //   저장돼 있었고 재시도는 같은 멱등 키로 같은 응답을 받아 빠져나갈 길이 없었다.
+    final calls = <String>[];
+    final drawing = _RecordingDrawingRepository(
+      calls: calls,
+      completedSessionStatus: 'COMPLETED',
+      completedCurrentStage: 'COMPLETED',
+    );
+    final controller = _controllerFor(drawing, conversationId: null);
+
+    final completed = await controller.submit(
+      reflection: _reflection,
+      lastQuestionMessageId: null,
+    );
+
+    expect(completed, isTrue);
+    expect(controller.status, DrawingActivityCompletionStatus.accepted);
+    expect(controller.error, isNull);
+    expect(controller.reportId, 501);
+  });
+
+  test('HTP 묶음의 REPORTING 접수 응답도 완료로 받는다', () async {
+    final calls = <String>[];
+    final drawing = _RecordingDrawingRepository(
+      calls: calls,
+      completedSessionStatus: 'IN_PROGRESS',
+      completedCurrentStage: 'REPORTING',
+    );
+    final controller = _controllerFor(drawing, conversationId: null);
+
+    final completed = await controller.submit(
+      reflection: _reflection,
+      lastQuestionMessageId: null,
+    );
+
+    expect(completed, isTrue);
+    expect(controller.status, DrawingActivityCompletionStatus.accepted);
+  });
+
+  test('정본에 없는 완료 응답은 완료로 받지 않는다', () async {
+    final calls = <String>[];
+    final drawing = _RecordingDrawingRepository(
+      calls: calls,
+      completedSessionStatus: 'IN_PROGRESS',
+      completedCurrentStage: 'CONVERSING',
+    );
+    final controller = _controllerFor(drawing, conversationId: null);
+
+    final completed = await controller.submit(
+      reflection: _reflection,
+      lastQuestionMessageId: null,
+    );
+
+    expect(completed, isFalse);
+    expect(controller.status, DrawingActivityCompletionStatus.failed);
+    expect(
+      controller.failedStep,
+      DrawingActivityCompletionStatus.requestingCompletion,
+    );
+  });
+
   test('대화가 생성되지 않았으면 End를 생략하고 conversationSkipped를 보낸다', () async {
     final calls = <String>[];
     final drawing = _RecordingDrawingRepository(calls: calls);
@@ -391,6 +454,19 @@ void main() {
   });
 }
 
+/// 완료 응답 계약만 보는 테스트용 컨트롤러. 대화는 만들어지지 않은 흐름으로 둔다.
+DrawingActivityCompletionController _controllerFor(
+  _RecordingDrawingRepository drawing, {
+  required int? conversationId,
+}) => DrawingActivityCompletionController(
+  drawingRepository: drawing,
+  sessionId: 42,
+  conversationId: conversationId,
+  conversationAlreadyEnded: false,
+  conversationEndRepository: null,
+  idempotencyKeyProvider: () => 'activity-key',
+);
+
 const _reflection = SaveDrawingReflectionRequestDto(
   title: '우리 가족',
   selectedEmotions: [DrawingEmotionType.happy],
@@ -444,6 +520,8 @@ final class _RecordingDrawingRepository implements DrawingRepository {
     List<Object> reflectionFailures = const [],
     this.completeFailures = 0,
     this.existingConversationId,
+    this.completedSessionStatus = 'COMPLETED',
+    this.completedCurrentStage = 'COMPLETED',
   }) : reflectionFailures = [...reflectionFailures];
 
   final List<String> calls;
@@ -451,6 +529,14 @@ final class _RecordingDrawingRepository implements DrawingRepository {
   final List<Object> reflectionFailures;
   final int completeFailures;
   final int? existingConversationId;
+
+  /// 서버가 완료 접수에 돌려주는 상태. 기본값은 **지금 서버가 실제로 돌려주는 값**이다.
+  ///
+  /// 예전에는 여기에 `IN_PROGRESS`/`REPORTING`이 박혀 있었다. 서버가 완료를 그 자리에서
+  /// 끝내도록 바뀐 뒤에도 이 가짜만 옛 계약을 계속 돌려줘서, **앱이 서버 성공을 거부하는
+  /// 결함이 초록 테스트 뒤에 숨었다**(2026-08-08 실측). 기본값은 정본을 따라간다.
+  final String completedSessionStatus;
+  final String completedCurrentStage;
   int completeCallCount = 0;
   int statusCallCount = 0;
   final List<SaveDrawingReflectionRequestDto> reflectionRequests = [];
@@ -486,8 +572,8 @@ final class _RecordingDrawingRepository implements DrawingRepository {
     }
     return DrawingCompletionResponseDto(
       drawingSessionId: sessionId,
-      sessionStatus: 'IN_PROGRESS',
-      currentStage: 'REPORTING',
+      sessionStatus: completedSessionStatus,
+      currentStage: completedCurrentStage,
       analysisId: 700,
       analysisStatus: 'PENDING',
       reportId: 501,

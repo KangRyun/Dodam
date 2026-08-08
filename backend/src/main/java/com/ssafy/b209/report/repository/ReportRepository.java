@@ -4,6 +4,7 @@ import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportStatus;
 import jakarta.persistence.LockModeType;
 import java.time.LocalDateTime;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
@@ -25,7 +26,8 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
    * @param fromInclusive 활동 시작 일시 하한이며 없으면 {@code null}
    * @param toExclusive 활동 시작 일시 상한이며 없으면 {@code null}
    * @param drawingTypeCode 그림 유형 코드이며 없으면 {@code null}
-   * @param reportStatus 리포트 상태이며 없으면 {@code null}
+   * @param reportStatuses 조회할 리포트 상태 집합이며, 조건이 없으면 전체를 넘긴다. 값 하나가 아니라 집합인 것은 실패가 셋으로 갈라졌기 때문이다 —
+   *     {@link ReportStatus#visibleGroupOf} 참고
    * @param pageable 페이지 조건
    * @return 최신 생성 순으로 정렬된 리포트 페이지
    */
@@ -41,7 +43,7 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
             and (:fromInclusive is null or ds.startedAt >= :fromInclusive)
             and (:toExclusive is null or ds.startedAt < :toExclusive)
             and (:drawingTypeCode is null or dt.code = :drawingTypeCode)
-            and (:reportStatus is null or r.status = :reportStatus)
+            and r.status in :reportStatuses
           order by r.createdAt desc, r.id desc
           """,
       countQuery =
@@ -55,14 +57,14 @@ public interface ReportRepository extends JpaRepository<Report, Long> {
             and (:fromInclusive is null or ds.startedAt >= :fromInclusive)
             and (:toExclusive is null or ds.startedAt < :toExclusive)
             and (:drawingTypeCode is null or dt.code = :drawingTypeCode)
-            and (:reportStatus is null or r.status = :reportStatus)
+            and r.status in :reportStatuses
           """)
   Page<Report> findVisiblePage(
       @Param("childId") Long childId,
       @Param("fromInclusive") LocalDateTime fromInclusive,
       @Param("toExclusive") LocalDateTime toExclusive,
       @Param("drawingTypeCode") String drawingTypeCode,
-      @Param("reportStatus") ReportStatus reportStatus,
+      @Param("reportStatuses") Collection<ReportStatus> reportStatuses,
       Pageable pageable);
 
   /**
