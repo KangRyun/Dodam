@@ -613,17 +613,33 @@ pipeline {
                 compose ps
 
                 fail=0
+                # 컨테이너 health 를 **즉시 1회가 아니라 healthy 될 때까지 폴링**한다.
+                #   nginx 는 배포마다 재생성돼 Healthcheck 가 도는 순간 아직 start_period 의
+                #   'starting' 이라, 단발 검사로는 배포가 성공해도 오탐한다(2026-08-08 빌드324~
+                #   반복 실패 + 색 churn 의 실제 원인 — backend/ai/web 은 deploy 의 wait_healthy 로
+                #   이미 healthy 였지만 nginx 만 기다려주지 않았다).
+                hc_status() { docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$1" 2>/dev/null || echo missing; }
+                hc_wait() {   # $1=컨테이너 · 상태 echo · healthy 면 return 0 (최대 ~60초)
+                  _i=0
+                  while : ; do
+                    _st=$(hc_status "$1")
+                    case "$_st" in
+                      healthy)           echo "$_st"; return 0 ;;
+                      unhealthy|missing) echo "$_st"; return 1 ;;
+                    esac
+                    _i=$((_i+1)); [ "$_i" -ge 30 ] && { echo "$_st"; return 1; }
+                    sleep 2
+                  done
+                }
                 # (a) 앱 — healthy 를 요구한다. "떠 있다"와 "받을 준비가 됐다"는 다르다.
                 #     ★ 블루-그린이라 backend/ai/web 은 **활성 색 컨테이너**를 docker ps 로 찾는다
                 #        (정상 상태엔 색당 1벌만 running · 옛/유휴 색은 정지). nginx 는 단일.
                 for svc in backend ai web; do
                   c=$(docker ps --filter "name=dodam-${svc}-" --filter "status=running" --format '{{.Names}}' | head -1)
                   if [ -z "$c" ]; then echo "   ❌ dodam-${svc}-* 활성 색 컨테이너 없음"; fail=1; continue; fi
-                  st=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' "$c" 2>/dev/null || echo missing)
-                  if [ "$st" = "healthy" ]; then echo "   ✅ $c $st"; else echo "   ❌ $c $st"; fail=1; fi
+                  if st=$(hc_wait "$c"); then echo "   ✅ $c $st"; else echo "   ❌ $c $st"; fail=1; fi
                 done
-                st=$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}' dodam-nginx 2>/dev/null || echo missing)
-                if [ "$st" = "healthy" ]; then echo "   ✅ dodam-nginx $st"; else echo "   ❌ dodam-nginx $st"; fail=1; fi
+                if st=$(hc_wait dodam-nginx); then echo "   ✅ dodam-nginx $st"; else echo "   ❌ dodam-nginx $st"; fail=1; fi
                 # (b) 데이터 4종 — running 이면 된다. 이 스테이지가 배포한 대상이 아니지만,
                 #     하나라도 빠지면 위 앱이 조용히 반쪽으로 동작하므로 함께 단언한다.
                 #     ⚠️ mongodb 는 start_period 300s 라 기동 직후 health=starting 이 정상이다.
