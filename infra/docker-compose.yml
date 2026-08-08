@@ -329,7 +329,16 @@ services:
       timeout: 5s
       retries: 5
       start_period: 120s               # k8s startupProbe 예산(5s × 24)
-    networks: [dodam-net]
+    # ★ 안정 별칭 `backend` (S15P11B209-1014 — 08/08 실장애, 약 30시간 분석·TTS·리포트 전면 중단).
+    #   blue-green 으로 서비스명이 backend-blue/green 이 되면서 컨테이너 별칭도 색이 붙었는데,
+    #   ai 가 이미지를 되가져올 때 쓰는 AI_IMAGE_ACCESS_BASE_URL 은 k3s 시절 이름 `backend` 그대로였다.
+    #   nginx 는 *_active upstream 으로 색을 따라가지만(외부→앱), **앱→앱 내부 호출에는 그 장치가 없다.**
+    #   그래서 색 무관한 이름을 여기서 준다. 유휴 색은 profile 로 떠 있지 않으므로 평시엔 한 곳만 응답한다.
+    #   ⚠️ 배포 순간에만 두 색이 함께 떠 이 이름이 양쪽으로 갈릴 수 있다 — 두 색은 같은 DB·MinIO 를
+    #     보므로 어느 쪽이 받아도 결과는 같다. 색을 갈라야 하는 호출은 backend-blue/green 을 직접 쓸 것.
+    networks:
+      dodam-net:
+        aliases: [backend]
 
   # backend-green — backend 의 두 번째 색. blue 와 다른 것은 이미지 태그·컨테이너명·profile 뿐.
   #   나머지(환경변수·볼륨·시크릿·expose·depends_on·healthcheck)는 &backend-blue 를 병합한다.
@@ -382,7 +391,15 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s                # k8s startupProbe 예산(3s × 20) + 가중치 로드 여유
-    networks: [dodam-net]
+    # ★ 안정 별칭 `ai` — S15P11B209-1014 실장애의 직접 원인이 이 이름의 부재였다.
+    #   backend 의 AI_BASE_URL·AI_TTS_BASE_URL·AI_DRAWING_ANALYSIS_BASE_URL·AI_OBSERVATION_BASE_URL
+    #   넷이 전부 http://ai:8000 인데 별칭은 ai-blue/ai-green 뿐이라 DNS 가 해석되지 않았다.
+    #   증상이 지독했던 이유: 요청이 **AI 에 닿지도 못해** AI 로그에는 health check 만 남고,
+    #   backend 는 ANALYSIS_502_001·TTS_FAILED 로만 보였다(어디서 끊겼는지 로그가 말해주지 않는다).
+    #   자세한 배경은 backend-blue 의 같은 자리 주석 참조.
+    networks:
+      dodam-net:
+        aliases: [ai]
 
   # ai-green — ai 의 두 번째 색. 이미지 태그·컨테이너명·profile 만 다르고 나머지는 &ai-blue 병합.
   ai-green:
@@ -426,7 +443,12 @@ services:
       timeout: 5s
       retries: 5
       start_period: 60s
-    networks: [dodam-net]
+    # ★ 안정 별칭 `web` — 지금 web 을 이름으로 부르는 내부 호출은 없다(외부 진입은 nginx 의 web_active).
+    #   그래도 세 앱에 같은 규칙을 두는 편이 낫다. 셋 중 하나만 빠져 있으면 "여기는 왜 다르지"를
+    #   매번 다시 판단해야 하고, 그 판단이 틀린 것이 이번 장애다.
+    networks:
+      dodam-net:
+        aliases: [web]
 
   # web-green — web 의 두 번째 색. 이미지 태그·컨테이너명·profile 만 다르고 나머지는 &web-blue 병합.
   web-green:
