@@ -91,7 +91,8 @@ public class ReportListQueryService {
             from == null ? null : from.atStartOfDay(),
             toExclusive(to),
             drawingTypeCode,
-            reportStatus,
+            // 고른 값 하나가 아니라 그 값이 화면에서 뜻하는 상태 전부로 넓혀 넘긴다.
+            ReportStatus.visibleGroupOf(reportStatus),
             pageable);
     List<Long> sessionIds =
         page.getContent().stream().map(report -> report.getDrawingSession().getId()).toList();

@@ -6,6 +6,7 @@ import '../../../../app/router/app_navigation.dart';
 import '../../../../app/router/app_routes.dart';
 import '../../../../app/state/guardian_child_controller.dart';
 import '../../../../app/widgets/app_failure_view.dart';
+import '../../../../core/domain/report_status.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../activity/data/dto/activity_dtos.dart';
 import '../../../activity/domain/models/activity_conversation_turn.dart';
@@ -1694,7 +1695,8 @@ Color _spineColor(ActivitySummaryDto activity) {
 _CardStatus _cardStatus(ActivitySummaryDto activity) {
   if (activity.sessionStatus == 'DRAFT') return _CardStatus.draft;
   final reportStatus = activity.report?.reportStatus;
-  if (activity.analysisStatus == 'FAILED' || reportStatus == 'FAILED') {
+  if (activity.analysisStatus == 'FAILED' ||
+      isReportFailureVisibleToGuardian(reportStatus)) {
     return _CardStatus.failed;
   }
   if (reportStatus == 'COMPLETED' ||

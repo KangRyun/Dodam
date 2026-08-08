@@ -530,6 +530,35 @@ void main() {
     expect(find.text('관찰 리포트를 준비하고 있어요'), findsOneWidget);
   });
 
+  testWidgets('FAILED_FINAL 상태도 실패로 보여 주고 실패 사유를 조회한다', (tester) async {
+    // 회귀: 리포트 실패가 셋으로 갈라진 뒤에도 이 화면은 'FAILED' 하나만 알고 있었다.
+    //   그래서 최종 실패로 끝난 리포트가 기본 분기로 빠져 영원히 "준비하고 있어요"로 남았다.
+    final repository = _ReportRepository(
+      report: _report(status: 'FAILED_FINAL', sections: false),
+    );
+    await _openReport(tester, repository);
+
+    expect(find.byKey(const ValueKey('report-failed')), findsOneWidget);
+    expect(find.byKey(const ValueKey('report-generating')), findsNothing);
+    expect(repository.generationStatusCalls, [501]);
+  });
+
+  testWidgets('FAILED_RETRYABLE 상태는 아직 진행 중으로 보여 준다', (tester) async {
+    // 재시도 작업이 집어 갈 수 있는 실패다. 보호자가 지금 할 일이 없는데 "다시 확인 필요"를
+    //   붙이면 없는 문제를 만든다.
+    final repository = _ReportRepository(
+      report: _report(status: 'FAILED_RETRYABLE', sections: false),
+    );
+    // 준비 안내에는 계속 도는 애니메이션이 있어 settle 하면 끝나지 않는다.
+    await _openReport(tester, repository, settle: false);
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.byKey(const ValueKey('report-generating')), findsOneWidget);
+    expect(find.byKey(const ValueKey('report-failed')), findsNothing);
+    expect(repository.generationStatusCalls, isEmpty);
+  });
+
   testWidgets('FAILED 상태에서 실패 사유를 조회하고 재생성을 접수한다', (tester) async {
     final repository = _ReportRepository(
       report: _report(status: 'FAILED', sections: false),
