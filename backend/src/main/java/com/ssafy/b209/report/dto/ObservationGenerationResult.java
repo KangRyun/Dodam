@@ -688,14 +688,26 @@ public record ObservationGenerationResult(
   }
 
   /**
-   * 보호자가 아이에게 그대로 물어볼 수 있는 질문이다.
+   * "오늘 마음 나누기" 교감 카드다. 보호자가 아이와 정서적 교감을 나누도록 감정 앵커 질문과 함께 아이 답에 부모가 마음으로 반응하는 법을 담는다.
    *
-   * @param question 질문 한 문장
+   * <p>{@code responseGuide}·{@code coRegulationAction} 은 AI 서버가 {@code connectionType} 으로 정적 매핑한 값이며 LLM 이
+   * 만들지 않는다.
+   *
+   * @param question 감정 앵커 질문 한 문장
    * @param purpose 이 질문으로 더 들어볼 내용
+   * @param connectionType 교감 유형({@code FEELING_SHARING}·{@code COMFORT_SEEKING}·{@code SHARED_JOY}·{@code
+   *     PERSPECTIVE_TAKING}·{@code GENERAL_CONNECTION})
+   * @param responseGuide 아이 답에 부모가 마음으로 반응하는 법이며 없으면 {@code null}
+   * @param coRegulationAction 함께 해보기 한 줄이며 없으면 {@code null}
    * @param evidenceRefs 이 질문이 이어지는 근거 식별자
    */
   public record DiaryCaregiverQuestionDraft(
-      String question, String purpose, List<DiaryEvidenceRefDraft> evidenceRefs) {
+      String question,
+      String purpose,
+      String connectionType,
+      String responseGuide,
+      String coRegulationAction,
+      List<DiaryEvidenceRefDraft> evidenceRefs) {
 
     /** 근거 목록은 빈 목록으로 정규화한다. */
     public DiaryCaregiverQuestionDraft {

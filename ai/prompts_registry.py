@@ -636,7 +636,13 @@ _PROMPT_SEMVER: dict[str, str] = {
     #   인사이트·발달 맥락이 한꺼번에 사라진다(2026-08-09 실측, 두 번 재현).
     #   고른 답도 아이가 준 답이므로 사실로는 그대로 쓰되 "골랐어요"로 적게 했다. 자발적 발화가
     #   아니라는 것과 아무 일도 확인되지 않았다는 것은 다르다.
-    "report_diary": "3.2.0",
+    # 3.3.0("오늘 마음 나누기" 교감 섹션): caregiverQuestions 를 정서적 교감 전용으로 재설계했다.
+    #   각 질문에 connectionType(FEELING_SHARING·COMFORT_SEEKING·SHARED_JOY·PERSPECTIVE_TAKING)
+    #   을 태그하게 하고, 아이 답에 부모가 어떻게 반응할지(responseGuide)와 함께 해보기
+    #   (coRegulationAction)는 서버가 유형으로 정적 매핑한다 — 모델이 만들지 않는다(공감 문구를
+    #   맡기면 발달 규준 주장·지시형 훈육으로 샌다). 태그가 없거나 무효인 질문은 서버가 버린다.
+    #   기존 질문 형식은 그대로라 minor 다.
+    "report_diary": "3.3.0",
 }
 
 _UNKNOWN_SEMVER = "0.0.0"

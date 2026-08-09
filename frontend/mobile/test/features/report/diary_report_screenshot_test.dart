@@ -408,10 +408,24 @@ const Map<String, dynamic> _reportJson = {
       {
         'question': '엄마한테 말했을 때 어떤 말을 하고 싶었어?',
         'purpose': '아이가 하려던 말을 아이 표현으로 더 들어보기',
+        'connectionType': 'FEELING_SHARING',
+        'responseGuide': '아이가 말하면 먼저 "그랬구나, 그런 마음이었구나" 하고 마음을 그대로 받아 주세요. '
+            '옳고 그름을 판단하거나 해결책을 주기보다, 그 마음을 함께 느껴 주는 것으로 충분해요.',
+        'coRegulationAction': '그때 마음을 색이나 표정으로 같이 그려 볼까요?',
+        'evidenceRefs': [
+          {'kind': 'QA_ANSWER', 'id': '204'},
+        ],
       },
       {
         'question': '블록이 무너졌을 때 제일 속상했던 건 뭐였어?',
         'purpose': '화가 난 이유를 아이 말로 확인하기',
+        'connectionType': 'COMFORT_SEEKING',
+        'responseGuide': '힘들었던 마음을 "많이 속상했겠다" 하고 알아주세요. 바로 다독이려 하기보다 '
+            '아이가 다 말할 때까지 기다려 주면, 아이는 마음을 안전하게 꺼내 놓아요.',
+        'coRegulationAction': '다음에 비슷한 일이 생기면 엄마·아빠한테 어떻게 말하면 좋을지 같이 정해 볼까요?',
+        'evidenceRefs': [
+          {'kind': 'QA_ANSWER', 'id': '201'},
+        ],
       },
     ],
     'listeningTip': '누가 잘못했는지 가리기 전에, 아이가 무엇을 알아주길 바랐는지 먼저 들어주세요.',

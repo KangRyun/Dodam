@@ -37,6 +37,7 @@ import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.Report;
 import com.ssafy.b209.report.domain.ReportActivityNote;
 import com.ssafy.b209.report.domain.ReportActivitySummary;
+import com.ssafy.b209.report.domain.ReportDiaryCaregiverQuestion;
 import com.ssafy.b209.report.domain.ReportDrawnItem;
 import com.ssafy.b209.report.domain.ReportFeatureVisibility;
 import com.ssafy.b209.report.domain.ReportGuardianQuestion;
@@ -46,6 +47,8 @@ import com.ssafy.b209.report.domain.ReportStatus;
 import com.ssafy.b209.report.dto.ObservationGeneration;
 import com.ssafy.b209.report.dto.ObservationGenerationResult;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummaryDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryCaregiverQuestionDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryInsightsDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DrawnItemDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.FollowUpGuideDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.GuardianQuestionDraft;
@@ -155,6 +158,7 @@ class ObservationReportPersistenceServiceTest {
   @Captor private ArgumentCaptor<ReportActivitySummary> activitySummaryCaptor;
   @Captor private ArgumentCaptor<List<ReportActivityNote>> notesCaptor;
   @Captor private ArgumentCaptor<List<ReportDrawnItem>> drawnItemsCaptor;
+  @Captor private ArgumentCaptor<List<ReportDiaryCaregiverQuestion>> caregiverQuestionsCaptor;
   @Captor private ArgumentCaptor<List<ReportObservedFeature>> featuresCaptor;
   @Captor private ArgumentCaptor<List<ReportKeyConversation>> keyConversationsCaptor;
   @Captor private ArgumentCaptor<List<ReportGuardianQuestion>> guardianQuestionsCaptor;
@@ -245,6 +249,27 @@ class ObservationReportPersistenceServiceTest {
         context(List.of(keyLine(0))), new ObservationGeneration(validResult(), rawJson));
 
     assertThat(report.getAiRawReport()).isEqualTo(rawJson);
+  }
+
+  @Test
+  void persistsCaregiverConnectionTypeAndStaticResponseGuide() {
+    // "오늘 마음 나누기" 교감 카드는 유형·공감 반응 안내·함께 해보기를 그대로 저장해야 앱이 카드로 조립한다.
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.complete(
+        context(List.of(keyLine(0))),
+        new ObservationGeneration(resultWithCaregiverConnection(), null));
+
+    verify(diaryCaregiverQuestionRepository).saveAll(caregiverQuestionsCaptor.capture());
+    List<ReportDiaryCaregiverQuestion> saved = caregiverQuestionsCaptor.getValue();
+    assertThat(saved).hasSize(1);
+    ReportDiaryCaregiverQuestion card = saved.get(0);
+    assertThat(card.getConnectionType()).isEqualTo("FEELING_SHARING");
+    assertThat(card.getResponseGuide()).contains("마음을 그대로 받아 주세요");
+    assertThat(card.getCoRegulationAction()).contains("같이 그려 볼까요");
   }
 
   @Test
@@ -1361,6 +1386,47 @@ class ObservationReportPersistenceServiceTest {
         List.of(new FollowUpGuideDraft("개방형 질문을 해보세요.", "정답을 요구하지 마세요.")),
         List.of(new GuardianQuestionDraft("어떤 기분이었어?", "감정 표현 유도")),
         "한계 문구");
+  }
+
+  private ObservationGenerationResult resultWithCaregiverConnection() {
+    ObservationGenerationResult source = validResult();
+    DiaryInsightsDraft diary =
+        new DiaryInsightsDraft(
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(
+                new DiaryCaregiverQuestionDraft(
+                    "그때 네 마음은 어땠어?",
+                    "그때 감정을 아이 말로 더 들어보기",
+                    "FEELING_SHARING",
+                    "아이가 말하면 먼저 마음을 그대로 받아 주세요.",
+                    "그때 마음을 색이나 표정으로 같이 그려 볼까요?",
+                    List.of())),
+            null,
+            List.of(),
+            List.of(),
+            null);
+    return new ObservationGenerationResult(
+        source.requestId(),
+        source.modelName(),
+        source.modelVersion(),
+        source.confidence(),
+        source.observationDraft(),
+        source.conversationSummary(),
+        source.activityNotes(),
+        source.followUpGuides(),
+        source.guardianQuestions(),
+        source.limitationsText(),
+        source.drawnItems(),
+        source.publicInterpretations(),
+        source.evidenceItems(),
+        source.parentGuides(),
+        source.crisisAlert(),
+        source.subjectReports(),
+        source.ragReferences(),
+        diary);
   }
 
   private ObservationGenerationResult resultWithDrawnItems(List<DrawnItemDraft> drawnItems) {

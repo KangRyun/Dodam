@@ -205,11 +205,19 @@ final class DiarySessionObservationDto {
   final List<DiaryEvidenceRefDto> evidenceRefs;
 }
 
-/// 보호자가 아이에게 그대로 물어볼 수 있는 질문.
+/// 보호자가 아이와 마음을 나눌 수 있는 교감 카드 한 장.
+///
+/// 질문만 던지는 카드가 아니라, 아이 답에 어떻게 공감해 주면 좋을지(`responseGuide`)와
+/// 함께 해볼 한 가지(`coRegulationAction`)를 곁들인다. `responseGuide`·
+/// `coRegulationAction` 은 서버가 교감 유형별 정적 문구로 채우며, `GENERAL_CONNECTION`
+/// 은 `coRegulationAction` 이 `null` 이다.
 final class DiaryCaregiverQuestionDto {
   const DiaryCaregiverQuestionDto({
     required this.question,
     this.purpose,
+    this.connectionType = 'GENERAL_CONNECTION',
+    this.responseGuide,
+    this.coRegulationAction,
     this.evidenceRefs = const [],
   });
 
@@ -218,6 +226,10 @@ final class DiaryCaregiverQuestionDto {
       DiaryCaregiverQuestionDto(
         question: json['question'] as String? ?? '',
         purpose: _text(json['purpose']),
+        connectionType:
+            _text(json['connectionType']) ?? 'GENERAL_CONNECTION',
+        responseGuide: _text(json['responseGuide']),
+        coRegulationAction: _text(json['coRegulationAction']),
         evidenceRefs: _refs(json['evidenceRefs']),
       );
 
@@ -226,6 +238,21 @@ final class DiaryCaregiverQuestionDto {
 
   /// 이 질문으로 더 들어볼 내용이며 없으면 `null`.
   final String? purpose;
+
+  /// 교감 유형.
+  ///
+  /// `FEELING_SHARING`·`COMFORT_SEEKING`·`SHARED_JOY`·`PERSPECTIVE_TAKING`·
+  /// `GENERAL_CONNECTION`. **화면에 이 문자열을 그대로 보여 주지 않는다** — 강조색과
+  /// 사용자 문구 힌트로만 쓴다. 값이 비면 `GENERAL_CONNECTION` 으로 읽는다.
+  final String connectionType;
+
+  /// 아이 답에 부모가 공감해 줄 반응(반영적 경청)이며 없으면 `null`.
+  final String? responseGuide;
+
+  /// 함께 해보면 좋은 한 가지이며 없으면 `null`.
+  ///
+  /// `GENERAL_CONNECTION` 은 항상 `null` 이다.
+  final String? coRegulationAction;
 
   /// 이 질문이 이어지는 근거.
   final List<DiaryEvidenceRefDto> evidenceRefs;

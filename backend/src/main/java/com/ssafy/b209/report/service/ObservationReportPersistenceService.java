@@ -1470,12 +1470,20 @@ public class ObservationReportPersistenceService {
     List<DiaryCaregiverQuestionDraft> questionDrafts = draft.caregiverQuestions();
     for (int index = 0; index < questionDrafts.size(); index++) {
       DiaryCaregiverQuestionDraft question = questionDrafts.get(index);
+      // connection_type 은 NOT NULL(CHECK 5종)이다. AI 는 감정 4종 화이트리스트 검증을 통과한 값이나
+      //   빈 상태 폴백(GENERAL_CONNECTION)만 보내지만, 값이 비어 오면 저장 자체가 막히므로 폴백 유형으로
+      //   메운다 — 실제 저장으로 이어지는 유일한 경로다.
+      String connectionType =
+          isBlank(question.connectionType()) ? "GENERAL_CONNECTION" : question.connectionType();
       questions.add(
           ReportDiaryCaregiverQuestion.create(
               report,
               question.question(),
               ColumnTextLimiter.fit(
                   question.purpose(), 300, "report_diary_caregiver_questions.purpose"),
+              connectionType,
+              question.responseGuide(),
+              question.coRegulationAction(),
               index));
       collectDiaryRefs(
           report,

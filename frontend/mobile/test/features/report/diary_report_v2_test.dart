@@ -75,7 +75,7 @@ void main() {
     expect(find.text('오늘 이야기'), findsOneWidget);
     expect(find.text('이야기 흐름'), findsNothing);
     expect(find.text('아이가 들려준 말'), findsNothing);
-    expect(find.text('이어서 물어보면 좋아요'), findsNothing);
+    expect(find.text('오늘 마음 나누기'), findsNothing);
   });
 
   test('보여 줄 것이 하나도 없으면 V2 를 열지 않는다', () {
@@ -299,6 +299,114 @@ void main() {
     expect(find.text('아이와 나눈 이야기'), findsNothing);
   });
 
+  testWidgets('오늘 마음 나누기 섹션 제목과 인트로를 보여 준다', (tester) async {
+    await _pump(tester, _insights());
+
+    expect(find.text('오늘 마음 나누기'), findsOneWidget);
+    expect(find.text('아이 마음을 함께 들여다보는 시간이에요.'), findsOneWidget);
+    // 예전 제목은 더 쓰지 않는다.
+    expect(find.text('이어서 물어보면 좋아요'), findsNothing);
+  });
+
+  testWidgets('듣기 안내는 섹션 인트로 아래 보조 문구로 남는다', (tester) async {
+    // 듣기 안내를 별도 카드로 세우지 않고, 마음 나누기 섹션 안에서 보조 문구로 보여 준다.
+    await _pump(tester, _insights());
+
+    expect(find.text('아이가 고른 장난감 이야기를 먼저 들어주세요.'), findsOneWidget);
+  });
+
+  testWidgets('교감 카드는 질문·공감 반응·함께 해보기를 함께 보여 준다', (tester) async {
+    await _pump(
+      tester,
+      _insights(
+        caregiverQuestions: const [
+          DiaryCaregiverQuestionDto(
+            question: '엄마가 잘했다고 말해줬을 때 네 마음은 어땠어?',
+            connectionType: 'FEELING_SHARING',
+            responseGuide: '아이가 말하면 먼저 "그랬구나" 하고 마음을 그대로 받아 주세요.',
+            coRegulationAction: '그때 마음을 색이나 표정으로 같이 그려 볼까요?',
+          ),
+        ],
+      ),
+    );
+
+    expect(find.text('엄마가 잘했다고 말해줬을 때 네 마음은 어땠어?'), findsOneWidget);
+    expect(find.textContaining('마음을 그대로 받아 주세요'), findsOneWidget);
+    expect(find.textContaining('색이나 표정으로 같이 그려'), findsOneWidget);
+    // 유형은 강조색·라벨 힌트로만. enum 문자열은 화면에 나오지 않는다.
+    expect(find.text('마음 나누기'), findsOneWidget);
+    expect(find.textContaining('FEELING_SHARING'), findsNothing);
+  });
+
+  testWidgets('공감 반응·함께 해보기가 없으면 그 줄을 감춘다', (tester) async {
+    // 서버가 null 로 준 줄은 문구로 메우지 않고 통째로 감춘다. GENERAL 폴백이 그렇다.
+    await _pump(
+      tester,
+      _insights(
+        caregiverQuestions: const [
+          DiaryCaregiverQuestionDto(
+            question: '오늘 그림에서 가장 마음에 남는 부분이 어디야?',
+            connectionType: 'GENERAL_CONNECTION',
+            responseGuide: '아이가 고른 부분을 함께 보면서 그 마음을 따라가 주세요.',
+          ),
+        ],
+      ),
+    );
+
+    expect(find.text('오늘 그림에서 가장 마음에 남는 부분이 어디야?'), findsOneWidget);
+    expect(find.textContaining('그 마음을 따라가 주세요'), findsOneWidget);
+    // GENERAL 은 함께 해보기(coRegulationAction)가 없다 → 🎨 줄이 통째로 빠진다.
+    expect(find.textContaining('🎨'), findsNothing);
+    // GENERAL 폴백은 '함께 보기' 라벨로만 드러난다.
+    expect(find.text('함께 보기'), findsOneWidget);
+    expect(find.textContaining('GENERAL_CONNECTION'), findsNothing);
+  });
+
+  test('교감 카드의 신규 필드를 파싱하고 connectionType 은 기본값으로 채운다', () {
+    final parsed = DiaryInsightsDto.fromJson(const {
+      'storySnapshot': {'headline': '오늘 이야기'},
+      'caregiverQuestions': [
+        {
+          'question': '100점을 받았을 때 뭐가 제일 신났어?',
+          'purpose': '기뻤던 순간을 함께 나눠 보기',
+          'connectionType': 'SHARED_JOY',
+          'responseGuide': '"우와, 정말 신났겠다!" 하고 그 기쁨을 같이 키워 주세요.',
+          'coRegulationAction': '그 즐거웠던 순간을 하나 더 그림에 더해 볼까요?',
+          'evidenceRefs': [
+            {'kind': 'QA_ANSWER', 'id': '101'},
+          ],
+        },
+        {
+          'question': '오늘 그림에서 가장 마음에 남는 부분이 어디야?',
+          'purpose': '',
+          'connectionType': 'GENERAL_CONNECTION',
+          'responseGuide': '아이가 고른 부분을 함께 보면서 그 마음을 따라가 주세요.',
+          'coRegulationAction': null,
+          'evidenceRefs': <Map<String, dynamic>>[],
+        },
+        {'question': 'connectionType 이 비면 기본 교감으로 읽어요'},
+      ],
+    });
+
+    final questions = parsed.caregiverQuestions;
+    expect(questions, hasLength(3));
+
+    expect(questions[0].connectionType, 'SHARED_JOY');
+    expect(questions[0].responseGuide, contains('기쁨을 같이 키워'));
+    expect(questions[0].coRegulationAction, isNotNull);
+    expect(questions[0].evidenceRefs, hasLength(1));
+
+    // GENERAL 은 responseGuide 는 있고 coRegulationAction 은 null 이다.
+    expect(questions[1].connectionType, 'GENERAL_CONNECTION');
+    expect(questions[1].responseGuide, isNotNull);
+    expect(questions[1].coRegulationAction, isNull);
+
+    // connectionType 이 없으면 GENERAL_CONNECTION 으로 채운다.
+    expect(questions[2].connectionType, 'GENERAL_CONNECTION');
+    expect(questions[2].responseGuide, isNull);
+    expect(questions[2].coRegulationAction, isNull);
+  });
+
   test('모르는 주장 세기는 가장 약한 쪽으로 읽는다', () {
     expect(diaryInsightTypeLabel('SOMETHING_NEW'), '더 확인해 볼 것');
   });
@@ -333,6 +441,12 @@ DiaryInsightsDto _insights({
   DiarySessionObservationDto? observation,
   List<DiaryUnknownItemDto> unknownItems = const [],
   List<DiaryDevelopmentalObservationDto> developmentalObservations = const [],
+  List<DiaryCaregiverQuestionDto> caregiverQuestions = const [
+    DiaryCaregiverQuestionDto(
+      question: '엄마한테 자랑했을 때 엄마가 뭐라고 했어?',
+      purpose: '그 장면을 더 들어볼 수 있어요.',
+    ),
+  ],
 }) => DiaryInsightsDto(
   unknownItems: unknownItems,
   developmentalObservations: developmentalObservations,
@@ -366,12 +480,7 @@ DiaryInsightsDto _insights({
           scopeText: '이번 활동에서 확인된 모습이에요.',
         ),
   ],
-  caregiverQuestions: const [
-    DiaryCaregiverQuestionDto(
-      question: '엄마한테 자랑했을 때 엄마가 뭐라고 했어?',
-      purpose: '그 장면을 더 들어볼 수 있어요.',
-    ),
-  ],
+  caregiverQuestions: caregiverQuestions,
   listeningTip: '아이가 고른 장난감 이야기를 먼저 들어주세요.',
 );
 
