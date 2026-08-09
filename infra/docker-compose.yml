@@ -265,6 +265,10 @@ services:
       AI_BASE_URL: ${AI_BASE_URL:-http://ai:8000}
       AI_DRAWING_ANALYSIS_MODE: ${AI_DRAWING_ANALYSIS_MODE:?}
       AI_DRAWING_ANALYSIS_BASE_URL: ${AI_DRAWING_ANALYSIS_BASE_URL:-http://ai:8000}
+      # 그림분석 대기 예산. application.yml 기본 30s 로는 라이브가 못 버틴다 —
+      #   성공 케이스 평균 17.6s·최대 34s(2026-08-09 실측)에 YOLO 콜드 스타트가 겹치면
+      #   전부 타임아웃이고, 그 결과가 INVALID_RESPONSE 로 기록돼 원인을 가린다.
+      AI_DRAWING_ANALYSIS_READ_TIMEOUT: ${AI_DRAWING_ANALYSIS_READ_TIMEOUT:-90s}
       AI_OBSERVATION_MODE: ${AI_OBSERVATION_MODE:?}
       AI_OBSERVATION_BASE_URL: ${AI_OBSERVATION_BASE_URL:-http://ai:8000}
       # 관찰 리포트 생성 대기 예산 (S15P11B209-989/990). 앱 기본값 30s 는 HTP(그림 3장 =
