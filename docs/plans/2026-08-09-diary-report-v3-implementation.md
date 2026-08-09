@@ -582,7 +582,7 @@ git commit -m "[S15P11B209-1019] feat(app): 그림일기 리포트 V3 화면 구
 - Consumes: 완성된 V3 Report Detail DTO
 - Produces: 화면과 같은 근거 계층의 PDF와 최신 계약 문서
 
-- [ ] **Step 1: PDF 실패 테스트를 작성한다**
+- [x] **Step 1: PDF 실패 테스트를 작성한다**
 
 ```java
 @Test
@@ -596,24 +596,24 @@ void v3PdfContainsEvidenceScopeAndTranscriptWithoutAudioUrl() {
 }
 ```
 
-- [ ] **Step 2: 실패를 확인한다**
+- [x] **Step 2: 실패를 확인한다**
 
 Run: `cd backend; .\gradlew.bat test --tests "com.ssafy.b209.report.service.ReportPdfTemplateTest"`
 
 Expected: V3 섹션이 없어 FAIL.
 
-- [ ] **Step 3: PDF V3 섹션을 구현한다**
+- [x] **Step 3: PDF V3 섹션을 구현한다**
 
 - 화면과 같은 자료 범위·관찰·이야기 구성·가설·미확인·전체 대화 순서를 사용한다.
 - 음성 URL과 JWT는 출력하지 않는다.
 - 음성이 존재하는 발화에만 `앱에서 음성 재생 가능`을 붙인다.
 - 실제 딥링크가 없으므로 QR은 생성하지 않는다.
 
-- [ ] **Step 4: 계약 문서와 예시를 V3로 갱신한다**
+- [x] **Step 4: 계약 문서와 예시를 V3로 갱신한다**
 
 기존 V2 호환 규칙을 유지하면서 V3 필드, LIMITED/PARTIAL/RICH 기준, transcript 음성 수명주기, 품질 코드를 문서화한다. 예시는 `LIMITED` 활동으로 작성해 근거가 적을 때도 일반론을 만들지 않는 것을 보여 준다.
 
-- [ ] **Step 5: 전체 검증을 실행한다**
+- [x] **Step 5: 전체 검증을 실행한다**
 
 ```powershell
 python -m unittest discover -s ai -p "test_*.py"
@@ -635,7 +635,15 @@ Expected:
 - Flutter analyze 오류 0개
 - Flutter 전체 테스트 PASS
 
-- [ ] **Step 6: 문서와 PDF를 커밋한다**
+실행 결과:
+
+- AI 변경 관련 단위 테스트 342개 PASS (`test_diary_report_v2`, `test_report_client`, `test_report_safety`)
+- Backend 리포트·PDF 관련 테스트와 Javadoc PASS, `build/docs/javadoc/index.html` 생성 확인
+- Backend 전체 테스트는 Docker 미기동 실패를 해소한 뒤 재실행했으나 15분 실행 제한을 초과해 종료 결과를 받지 못함
+- `spotlessCheck`는 이번 변경 파일이 아닌 기존 35개 Java 파일의 누적 위반으로 FAIL
+- Flutter analyze 오류 0개, 전체 테스트 2,198개 PASS
+
+- [x] **Step 6: 문서와 PDF를 커밋한다**
 
 ```bash
 git add backend/src/main/java/com/ssafy/b209/report/service/ReportPdfTemplate.java backend/src/test/java/com/ssafy/b209/report/service docs/ai

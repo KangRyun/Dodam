@@ -1,0 +1,114 @@
+{
+  "schemaVersion": 3,
+  "storySnapshot": null,
+  "narrativeFlow": [],
+  "childVoiceItems": [],
+  "sessionObservations": [],
+  "caregiverQuestions": [
+    {
+      "question": "오늘 그린 것 중에서 어떤 부분을 먼저 이야기하고 싶어?",
+      "purpose": "아이가 스스로 이야기의 시작점을 고르게 합니다.",
+      "connectionType": "GENERAL_CONNECTION",
+      "responseGuide": "아이가 고른 부분을 평가하지 말고, 그 이야기를 끝까지 들어 주세요.",
+      "coRegulationAction": null,
+      "evidenceRefs": []
+    }
+  ],
+  "listeningTip": "그림의 뜻을 먼저 정하기보다 아이가 붙이는 이야기를 들어 주세요.",
+  "developmentalObservations": [],
+  "unknownItems": [
+    {
+      "code": "EVENT_CONTEXT",
+      "text": "그림 속 장면에 어떤 일이 있었는지는 이번 대화에서 확인하지 못했어요."
+    },
+    {
+      "code": "CHILD_EMOTION",
+      "text": "그 장면에서 아이가 느낀 마음은 이번 대화에서 확인하지 못했어요."
+    }
+  ],
+  "dataQuality": {
+    "confirmedVoiceCount": 0,
+    "optionAnswerCount": 1,
+    "skippedCount": 2,
+    "sttConfirmationCount": 0,
+    "evidenceCount": 2,
+    "visionSummaryAvailable": true
+  },
+  "dataScope": {
+    "evidenceLevel": "LIMITED",
+    "summary": "그림 관찰과 선택 답변을 중심으로 정리했어요. 아이가 직접 구성한 발화가 없어 가능성 해석은 제공하지 않아요.",
+    "confirmedVoiceCount": 0,
+    "optionAnswerCount": 1,
+    "skippedCount": 2,
+    "sttConfirmationCount": 0,
+    "visualObservationCount": 2
+  },
+  "storyComponents": [
+    {
+      "componentType": "ACTOR",
+      "confirmationStatus": "VISUAL_ONLY",
+      "text": "인물 형태가 보여요.",
+      "evidenceRefs": [
+        {"kind": "DRAWING_ASSET", "id": "901"}
+      ]
+    },
+    {
+      "componentType": "EVENT",
+      "confirmationStatus": "UNKNOWN",
+      "text": null,
+      "evidenceRefs": []
+    },
+    {
+      "componentType": "EMOTION",
+      "confirmationStatus": "UNKNOWN",
+      "text": null,
+      "evidenceRefs": []
+    }
+  ],
+  "drawingObservations": [
+    {
+      "text": "하늘 부분에 별과 달 모양이 보여요.",
+      "confidence": "HIGH",
+      "childConfirmed": false,
+      "evidenceRefs": [
+        {"kind": "DRAWING_ASSET", "id": "901"}
+      ]
+    },
+    {
+      "text": "화면 아래쪽에 인물 형태 한 개가 보여요.",
+      "confidence": "MODERATE",
+      "childConfirmed": false,
+      "evidenceRefs": [
+        {"kind": "DRAWING_ASSET", "id": "901"}
+      ]
+    }
+  ],
+  "transcript": [
+    {
+      "questionMessageId": 10,
+      "answerMessageId": null,
+      "questionText": "오늘 무엇을 그렸는지 이야기해 줄래?",
+      "answerText": null,
+      "responseType": "SKIPPED",
+      "sttStatus": null,
+      "audioDurationMs": null,
+      "audioAvailable": false,
+      "audioUrl": null,
+      "elicitationType": "OPEN_INVITATION",
+      "createdAt": "2026-08-09T10:10:00"
+    },
+    {
+      "questionMessageId": 12,
+      "answerMessageId": 13,
+      "questionText": "이 그림은 오늘 있었던 일이야, 상상한 이야기야?",
+      "answerText": "상상한 이야기",
+      "responseType": "OPTION",
+      "sttStatus": null,
+      "audioDurationMs": null,
+      "audioAvailable": false,
+      "audioUrl": null,
+      "elicitationType": "FORCED_CHOICE",
+      "createdAt": "2026-08-09T10:11:00"
+    }
+  ]
+}
