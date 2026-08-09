@@ -783,13 +783,21 @@ public class ObservationReportPersistenceService {
           .findByIdForUpdate(reportId)
           .filter(report -> report.getStatus() == ReportStatus.GENERATING)
           .ifPresent(
-              report ->
-                  report.fail(
-                      FAILED_LIMITATIONS,
-                      ColumnTextLimiter.fit(
-                          failureCode, REPORT_FAILURE_REASON_LIMIT, "reports.failure_reason"),
-                      now,
-                      failureStatus));
+              report -> {
+                report.fail(
+                    FAILED_LIMITATIONS,
+                    ColumnTextLimiter.fit(
+                        failureCode, REPORT_FAILURE_REASON_LIMIT, "reports.failure_reason"),
+                    now,
+                    failureStatus);
+                // 되돌릴 수 없는 실패만 보호자에게 알린다. FAILED_RETRYABLE 은 재시도 작업이 되살릴 수
+                //   있고 보호자 화면에도 '분석 중'으로 보이므로(ReportStatus.visibleGroupOf),
+                //   알리면 "만들지 못했어요" 뒤에 "완료됐어요"가 따라붙는다.
+                // 중복 발송은 위 GENERATING 필터가 막는다 — 리포트 한 건은 이 자리를 한 번만 지난다.
+                if (failureStatus == ReportStatus.FAILED_FINAL) {
+                  eventPublisher.publishEvent(new ReportGenerationFailedEvent(reportId));
+                }
+              });
     }
   }
 

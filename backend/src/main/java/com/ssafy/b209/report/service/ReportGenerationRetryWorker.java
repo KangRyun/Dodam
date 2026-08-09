@@ -5,6 +5,7 @@ import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
@@ -35,19 +36,23 @@ public class ReportGenerationRetryWorker {
   private final ReportGenerationRetryRepository retryRepository;
   private final ReportRetryReopenService reopenService;
   private final MockObservationReportGenerationService generationService;
+  private final ApplicationEventPublisher eventPublisher;
 
   /**
    * @param retryRepository 재시도 대기열 저장소
    * @param reopenService 분석·리포트를 다시 생성 중으로 되돌리는 Transaction 경계
    * @param generationService 실제 재생성을 수행하는 서비스
+   * @param eventPublisher 재시도를 포기한 리포트의 보호자 실패 알림을 요청할 이벤트 발행기
    */
   public ReportGenerationRetryWorker(
       ReportGenerationRetryRepository retryRepository,
       ReportRetryReopenService reopenService,
-      MockObservationReportGenerationService generationService) {
+      MockObservationReportGenerationService generationService,
+      ApplicationEventPublisher eventPublisher) {
     this.retryRepository = retryRepository;
     this.reopenService = reopenService;
     this.generationService = generationService;
+    this.eventPublisher = eventPublisher;
   }
 
   /** 대기열을 채우고, 시각이 된 작업을 다시 생성하고, 한도를 다 쓴 작업을 내린다. */
@@ -55,9 +60,10 @@ public class ReportGenerationRetryWorker {
   public void retryFailedReports() {
     try {
       retryRepository.adopt(BATCH_SIZE);
-      int abandoned = retryRepository.abandonExhausted(MAX_ATTEMPTS);
-      if (abandoned > 0) {
-        log.warn("리포트 재시도를 포기했습니다. count={}, maxAttempts={}", abandoned, MAX_ATTEMPTS);
+      List<Long> abandoned = retryRepository.abandonExhausted(MAX_ATTEMPTS);
+      if (!abandoned.isEmpty()) {
+        log.warn("리포트 재시도를 포기했습니다. count={}, maxAttempts={}", abandoned.size(), MAX_ATTEMPTS);
+        notifyAbandoned(abandoned);
       }
     } catch (RuntimeException exception) {
       log.error("리포트 재시도 대기열 정리에 실패했습니다.", exception);
@@ -67,6 +73,29 @@ public class ReportGenerationRetryWorker {
     List<ReportGenerationRetry> claimed = retryRepository.claim(BATCH_SIZE, LEASE, MAX_ATTEMPTS);
     for (ReportGenerationRetry retry : claimed) {
       retryOne(retry);
+    }
+  }
+
+  /**
+   * 포기한 리포트마다 보호자 실패 알림을 요청한다.
+   *
+   * <p><b>여기서 알리지 않으면 아무도 알리지 않는다.</b> 재시도를 다 쓴 실패는 {@code markFailed}를 지나지 않고 대기열 정리가 상태만 바꾸므로, 그
+   * 경로에 붙은 알림이 이 리포트에는 닿지 않는다. 아이 화면은 리포트를 기다리지 않고 넘어가므로 실패가 어디에도 뜨지 않는다.
+   *
+   * <p><b>알림 실패가 재시도 배치를 멈추지 않게 한다.</b> 한 건이 던지면 뒤의 리포트들이 통째로 재생성 기회를 잃는다 — 알림은 부수효과이고 재시도가 본 일이다.
+   *
+   * @param reportIds 최종 실패로 내려간 리포트 식별자 목록
+   */
+  private void notifyAbandoned(List<Long> reportIds) {
+    for (Long reportId : reportIds) {
+      try {
+        eventPublisher.publishEvent(new ReportGenerationFailedEvent(reportId));
+      } catch (RuntimeException exception) {
+        log.warn(
+            "리포트 재시도 포기 알림 요청에 실패했습니다. reportId={}, reason={}",
+            reportId,
+            exception.getClass().getSimpleName());
+      }
     }
   }
 
