@@ -1548,10 +1548,6 @@ class _ChildModeHomeScreenState extends State<ChildModeHomeScreen>
     await AppNavigation.pushNamed(
       context,
       AppRoutes.activityComplete(widget.child.childId.toString()),
-      arguments: ActivityCompleteRouteArguments(
-        sessionId: resolution.sessionId,
-        repository: widget.drawingRepository,
-      ),
     );
   }
 

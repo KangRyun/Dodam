@@ -71,6 +71,32 @@ class RestClientAiQuestionClientTest {
   }
 
   @Test
+  void serializesTheNewDrawingResumeFlagUnderItsContractName() {
+    // AI(Python)는 이 값을 resumed_by_new_drawing 으로 받는다 — 와이어 키 이름이 곧 계약이다.
+    //   record 컴포넌트명이 그대로 JSON 키가 되므로 이름을 바꾸면 AI 쪽에서 기본값(false)으로
+    //   읽히고, 묵은 종료 의사를 막는 장치가 아무 오류 없이 꺼진다. 그래서 여기서 고정한다.
+    RestClient.Builder builder = RestClient.builder().baseUrl("http://ai.test");
+    MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+    server
+        .expect(requestTo("http://ai.test/internal/ai/v1/conversations/question"))
+        .andExpect(jsonPath("$.resumedByNewDrawing").value(true))
+        .andRespond(
+            withSuccess(
+                "{\"questionText\":\"q\",\"questionPurpose\":\"OBJECT_DESCRIPTION\","
+                    + "\"options\":null,\"targetObject\":null,\"fallbackUsed\":false,"
+                    + "\"safetyResult\":{\"status\":\"PASSED\",\"ruleVersion\":\"safety-2026-07\","
+                    + "\"blockReasonCode\":null},\"modelName\":\"m\",\"modelVersion\":\"v\","
+                    + "\"promptVersion\":\"p\",\"processingTimeMs\":1}",
+                org.springframework.http.MediaType.APPLICATION_JSON));
+
+    RestClientAiQuestionClient client =
+        new RestClientAiQuestionClient(builder.build(), "token", new ObjectMapper());
+
+    client.generate(resumedByNewDrawingRequest(), "request-1");
+    server.verify();
+  }
+
+  @Test
   void classifiesOther422ResponsesAsGeneralAiErrors() {
     RestClient.Builder builder = RestClient.builder().baseUrl("http://ai.test");
     MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
@@ -179,7 +205,8 @@ class RestClientAiQuestionClientTest {
         null,
         null,
         java.util.List.of(),
-        List.of());
+        List.of(),
+        false);
   }
 
   private AiQuestionRequest subjectContextRequest() {
@@ -199,6 +226,29 @@ class RestClientAiQuestionClientTest {
         "HTP",
         "HOUSE",
         java.util.List.of("TREE", "SUN"),
-        List.of());
+        List.of(),
+        false);
+  }
+
+  /** 새 그림이 촉발한 재개 턴 요청 — 와이어 키 이름과 값 전달을 함께 확인한다. */
+  private AiQuestionRequest resumedByNewDrawingRequest() {
+    return new AiQuestionRequest(
+        1L,
+        9L,
+        null,
+        8,
+        QuestionDifficulty.LOWER_ELEMENTARY,
+        java.util.List.of(com.ssafy.b209.conversation.domain.ResponseMode.VOICE),
+        5,
+        10,
+        java.util.List.of(),
+        null,
+        java.util.List.of(),
+        "safety-2026-07",
+        "ART_DIARY",
+        null,
+        java.util.List.of(),
+        List.of(),
+        true);
   }
 }

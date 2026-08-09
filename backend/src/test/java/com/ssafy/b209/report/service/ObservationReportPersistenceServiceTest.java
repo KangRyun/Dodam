@@ -967,6 +967,60 @@ class ObservationReportPersistenceServiceTest {
     verify(analysis.getDrawingSession(), never()).failReporting();
   }
 
+  /**
+   * 최종 실패는 보호자에게 알린다.
+   *
+   * <p>아이 화면은 리포트를 기다리지 않고 넘어가므로, 알리지 않으면 실패가 아무 데도 뜨지 않는다.
+   */
+  @Test
+  void publishesFailureEventWhenReportFailsFinally() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.markFailed(ANALYSIS_ID, REPORT_ID, "TIMEOUT", "생성 실패", ReportStatus.FAILED_FINAL);
+
+    verify(eventPublisher).publishEvent(new ReportGenerationFailedEvent(REPORT_ID));
+  }
+
+  /**
+   * 재시도 가능한 실패는 알리지 않는다.
+   *
+   * <p>재시도 작업이 되살릴 수 있고 보호자 화면에도 '분석 중'으로 보인다. 알리면 "만들지 못했어요" 뒤에 "완료됐어요"가 따라붙어, 할 일이 없는 보호자에게 불안만
+   * 남는다.
+   */
+  @Test
+  void doesNotPublishFailureEventForRetryableFailure() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.markFailed(ANALYSIS_ID, REPORT_ID, "TIMEOUT", "생성 실패", ReportStatus.FAILED_RETRYABLE);
+
+    verify(eventPublisher, never()).publishEvent(any());
+  }
+
+  /**
+   * 이미 실패로 내려간 리포트를 다시 실패시켜도 두 번 알리지 않는다.
+   *
+   * <p>보호자에게 같은 실패로 알림이 두 번 가면 리포트가 두 번 실패한 것처럼 보인다. 중복은 GENERATING 필터가 막는다.
+   */
+  @Test
+  void doesNotPublishFailureEventTwiceForSameReport() {
+    DrawingAnalysis analysis = pendingAnalysis();
+    Report report = generatingReport(analysis);
+    given(analysisRepository.findByIdForUpdate(ANALYSIS_ID)).willReturn(Optional.of(analysis));
+    given(reportRepository.findByIdForUpdate(REPORT_ID)).willReturn(Optional.of(report));
+
+    service.markFailed(ANALYSIS_ID, REPORT_ID, "TIMEOUT", "생성 실패", ReportStatus.FAILED_FINAL);
+    service.markFailed(ANALYSIS_ID, REPORT_ID, "TIMEOUT", "생성 실패", ReportStatus.FAILED_FINAL);
+
+    verify(eventPublisher, org.mockito.Mockito.times(1))
+        .publishEvent(new ReportGenerationFailedEvent(REPORT_ID));
+  }
+
   @Test
   void marksHtpAggregateFailedWithoutFailingCompletedPersonSession() {
     DrawingAnalysis analysis = pendingAnalysis();

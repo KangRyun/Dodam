@@ -207,7 +207,30 @@ public class ConversationQuestionService {
         command.activityType(),
         command.drawingSubject(),
         command.askedObjectCodes(),
-        previousSubjectNotes(command));
+        previousSubjectNotes(command),
+        resumedByNewDrawing(command, reopenAllowed));
+  }
+
+  /**
+   * 이 턴을 <b>아이 발화가 아니라 새 그림이 촉발했는지</b> 판정한다 — AI에만 알리는 값이다.
+   *
+   * <p>재개 판정({@code reopenAllowed})을 그대로 싣지 않고 한 칸 좁힌다. 두 값은 묻는 것이 다르다 — 재개 판정은 "이 대화를 다시 열어도
+   * 되는가"이고, 이 값은 "지금 이 질문을 부른 것이 무엇인가"다. 재개가 허용된 상태에서도 아이가 방금 답을 남겼다면({@code
+   * previousAnswerMessageId != null}) 그 턴을 부른 것은 그림이 아니라 아이의 말이다. 그때 이 값을 켜면 AI는 <b>지금 막 들어온 진짜
+   * "그만할래"를 묵은 의사로 보고 흘려버린다</b> — 고치려던 버그를 반대 방향으로 되풀이하는 셈이다.
+   *
+   * <p>앱은 재개 호출에 답변 식별자를 싣지 않으므로 실제로는 두 값이 갈릴 일이 드물다. 그래도 좁히는 것은 이 브랜치에서 이미 두 번(HTP 차단·활동 단계 가드) 세운
+   * 원칙 때문이다 — <b>방어선을 앱의 행동 하나에 걸지 않는다.</b> 앱이 한 줄 바뀌면 조용히 무너지는 안전은 안전이 아니다.
+   *
+   * <p>저장 계층으로 가는 {@code QuestionCandidate.reopenAllowed}는 좁히지 않는다. 그쪽은 "다시 열어도 되는가"라 아이가 답을 남겼든
+   * 아니든 답이 같다.
+   *
+   * @param command 부모 답변 식별자가 실려 온 질문 생성 명령
+   * @param reopenAllowed 이 요청이 대화를 다시 열 수 있는지 여부
+   * @return 재개 턴이면서 아이 답변이 이 턴을 촉발하지 않았으면 {@code true}
+   */
+  private boolean resumedByNewDrawing(GenerateQuestionCommand command, boolean reopenAllowed) {
+    return reopenAllowed && command.previousAnswerMessageId() == null;
   }
 
   /**

@@ -14,7 +14,6 @@ import '../../../../core/network/api_failure.dart';
 import '../../../../core/network/api_failure_presentation.dart';
 import '../../../../design_system/design_system.dart';
 import '../../../child/domain/repositories/child_repository.dart';
-import '../../../drawing/application/activity_completion_controller.dart';
 import '../../../drawing/application/canvas_tutorial_controller.dart';
 import '../../../drawing/application/drawing_object_detection_controller.dart';
 import '../../../drawing/application/drawing_activity_completion_controller.dart';
@@ -4343,13 +4342,9 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
               widget.idempotencyKeyProvider?.call() ?? _createIdempotencyKey(),
         );
         if (!mounted) return;
-        Navigator.of(context).pushReplacementNamed(
-          AppRoutes.activityComplete(widget.childId),
-          arguments: ActivityCompleteRouteArguments(
-            sessionId: sessionId,
-            repository: repository,
-          ),
-        );
+        Navigator.of(
+          context,
+        ).pushReplacementNamed(AppRoutes.activityComplete(widget.childId));
         return;
       }
       final completed = await completionController!.submit(
@@ -4361,13 +4356,11 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
             StateError('Drawing activity completion failed.');
       }
       if (!mounted) return;
-      Navigator.of(context).pushReplacementNamed(
-        AppRoutes.activityComplete(widget.childId),
-        arguments: ActivityCompleteRouteArguments(
-          sessionId: sessionId,
-          repository: repository,
-        ),
-      );
+      // 서버가 완료를 접수한 뒤에만 여기 온다. 리포트가 만들어지기를 기다리지 않고
+      // 곧바로 전달 화면으로 넘긴다 — 준비·실패 소식은 보호자 알림이 전한다.
+      Navigator.of(
+        context,
+      ).pushReplacementNamed(AppRoutes.activityComplete(widget.childId));
     } on Object catch (failure) {
       if (mounted) {
         setState(() {
@@ -4667,116 +4660,47 @@ class _EmotionSelectScreenState extends State<EmotionSelectScreen> {
   }
 }
 
-final class ActivityCompleteRouteArguments {
-  const ActivityCompleteRouteArguments({
-    required this.sessionId,
-    required this.repository,
-  });
-
-  final int sessionId;
-  final DrawingRepository repository;
-}
-
+/// 아이가 활동을 마치고 기기를 보호자에게 넘기는 마지막 화면.
+///
+/// 이 화면에 오는 길은 하나뿐이다 — **서버가 활동 완료를 접수한 뒤**에만 감정 화면이
+/// 이 화면으로 교체한다. 접수 자체가 실패하면 감정 화면에 남아 그 자리에서 재시도하므로,
+/// 여기 도착했다는 것은 곧 "활동이 서버에 남았다"는 뜻이다.
+///
+/// 그래서 리포트가 만들어지기를 **기다리지 않는다.** 예전에는 세션이 `COMPLETED`가 될
+/// 때까지 2초 간격으로 최대 60초를 조회하고 그동안 아이에게 스피너를 보여 줬는데,
+/// 아이가 기다릴 이유가 없는 대기였고 조회가 실패하거나 세션이 `FAILED`면 아이 화면에
+/// 실패 문구가 떴다(CLAUDE.md 9절 — 실패는 아이가 아니라 보호자에게 간다).
+/// 리포트 준비·실패는 보호자 푸시 알림(`REPORT_COMPLETED`·`ANALYSIS_FAILED`)이 알린다.
 class ActivityCompleteScreen extends StatefulWidget {
-  const ActivityCompleteScreen({
-    required this.childId,
-    this.sessionId,
-    this.drawingRepository,
-    this.pollInterval = const Duration(seconds: 2),
-    this.maxPollAttempts = 30,
-    super.key,
-  });
+  const ActivityCompleteScreen({required this.childId, super.key});
 
   final String childId;
-  final int? sessionId;
-  final DrawingRepository? drawingRepository;
-  final Duration pollInterval;
-  final int maxPollAttempts;
 
   @override
   State<ActivityCompleteScreen> createState() => _ActivityCompleteScreenState();
 }
 
 class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
-  ActivityCompletionController? _completionController;
-
-  /// 이 화면을 떠나기로 확정했는지. 한 번 서면 되돌리지 않는다 — 늦게 도착한
-  /// 상태 조회 결과가 떠나는 화면을 다시 그리거나 polling을 되살리면 안 된다.
+  /// 이 화면을 떠나기로 확정했는지. 한 번 서면 되돌리지 않는다 — 연속 탭이나
+  /// 겹친 입력이 스택을 두 번 세우면 안 된다.
   bool _isLeaving = false;
 
   /// 보호자 전환 확인 Dialog가 열려 있는지. 이동을 확정한 것은 아니므로
   /// 취소하면 되돌리고, 그 사이에 다른 이탈이 겹치는 것만 막는다.
   bool _guardianDialogOpen = false;
 
-  bool get _legacyCompleted =>
-      widget.sessionId == null || widget.drawingRepository == null;
-
-  /// 서버가 세션을 최종 실패로 확정한 상태. 이 상태에서만 이탈을 허용한다.
-  ///
-  /// polling 중·성공 처리 중에는 기존 이탈 방지 정책을 그대로 유지한다 —
-  /// 아이가 실수로 빠져나가면 완료 안내를 다시 볼 방법이 없다.
-  bool get _isTerminalFailure =>
-      !_legacyCompleted &&
-      _completionController?.status == ActivityCompletionStatus.terminalFailure;
-
   /// 이탈 동작을 시작해도 되는지. 이미 떠나기로 했거나 확인 Dialog가 열려 있으면
   /// 두 번째 입력은 조용히 무시한다(연속 탭·back 중복 실행 방지).
   bool get _canStartLeaving => mounted && !_isLeaving && !_guardianDialogOpen;
-
-  @override
-  void initState() {
-    super.initState();
-    final sessionId = widget.sessionId;
-    final repository = widget.drawingRepository;
-    if (sessionId == null || repository == null) return;
-    _completionController = ActivityCompletionController.forStatus(
-      repository,
-      sessionId: sessionId,
-      pollInterval: widget.pollInterval,
-      maxPollAttempts: widget.maxPollAttempts,
-    )..addListener(_handleCompletionStatusChanged);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_completionController?.pollUntilTerminal());
-    });
-  }
-
-  @override
-  void dispose() {
-    _completionController
-      ?..removeListener(_handleCompletionStatusChanged)
-      ..dispose();
-    super.dispose();
-  }
-
-  void _handleCompletionStatusChanged() {
-    // 떠나기로 확정한 뒤 도착한 결과는 버린다. dispose 전이라도 화면을 다시
-    // 그리면 사용자가 이미 벗어난 상태 안내가 한 프레임 깜빡인다.
-    if (mounted && !_isLeaving) setState(() {});
-  }
-
-  void _retryStatusCheck() {
-    if (_isLeaving) return;
-    unawaited(_completionController?.pollUntilTerminal());
-  }
-
-  /// 최종 실패 화면에서 아동 홈으로 돌아간다.
-  ///
-  /// 실패 화면 이전 단계(감정 선택·회고)는 이미 성공해 되돌아갈 곳이 아니고,
-  /// 재진입 복구로 들어온 경우에는 이전 route가 아예 없을 수도 있다. 그래서
-  /// `pop`하지 않고 아동 홈으로 스택을 다시 세운다 — 홈 route가 아동 문맥을
-  /// 확인하므로 문맥이 없으면 라우터가 안전한 화면으로 흘려보낸다.
-  void _leaveToChildHome() {
-    if (!_canStartLeaving) return;
-    setState(() => _isLeaving = true);
-    AppNavigation.resetTo(context, AppRoutes.childModeHome(widget.childId));
-  }
 
   /// 완료 화면에서 같은 아이로 새 그림 활동을 시작한다(S15P11B209-777).
   ///
   /// 새 세션 생성·활동 선택은 아동 홈의 진입 흐름이 담당하므로, 여기서
   /// 세션을 직접 만들지 않고 아동 홈으로 스택을 다시 세운다 — 아이는 홈에서
-  /// 곧바로 다음 그림을 시작할 수 있다. 이미 접수된 이번 활동의 분석·리포트는
-  /// 서버에 남아 보호자가 나중에 확인할 수 있다.
+  /// 곧바로 다음 그림을 시작할 수 있다. `pop`하지 않는 이유는 이전 단계(감정
+  /// 선택·회고)가 이미 끝나 되돌아갈 곳이 아니고, 재진입 복구로 들어온 경우에는
+  /// 이전 route가 아예 없을 수도 있기 때문이다. 이미 접수된 이번 활동의 분석·
+  /// 리포트는 서버에 남아 보호자가 나중에 확인할 수 있다.
   void _drawAgain() {
     if (!_canStartLeaving) return;
     setState(() => _isLeaving = true);
@@ -4785,21 +4709,12 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
 
   @override
   Widget build(BuildContext context) => PopScope(
-    // 계속 직접 처리한다. polling·성공 상태에서는 기존처럼 back을 삼키고,
-    // 최종 실패에서만 아동 홈으로 보낸다.
+    // 뒤로가기는 계속 삼킨다. 아이가 실수로 빠져나가면 완료 안내를 다시 볼
+    // 방법이 없다 — 대신 화면의 두 버튼(또 그리기 · 보호자에게 건넸어요)이
+    // 항상 떠 있어 어느 상태에서도 나갈 길이 막히지 않는다(S15P11B209-820).
     canPop: false,
-    onPopInvokedWithResult: (didPop, _) {
-      if (!didPop && _isTerminalFailure) _leaveToChildHome();
-    },
     child: Scaffold(
       backgroundColor: AppColors.childCanvas,
-      appBar: _isTerminalFailure
-          ? AppTopBar(
-              key: const ValueKey('activity-completion-failure-appbar'),
-              title: '활동 마무리',
-              onBack: _leaveToChildHome,
-            )
-          : null,
       body: SafeArea(
         child: LayoutBuilder(
           builder: (context, constraints) => SingleChildScrollView(
@@ -4818,7 +4733,7 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
                       color: AppColors.surface,
                       borderRadius: BorderRadius.circular(AppRadius.lg),
                     ),
-                    child: _buildStatusContent(context),
+                    child: _buildHandoffContent(context),
                   ),
                 ),
               ),
@@ -4829,107 +4744,62 @@ class _ActivityCompleteScreenState extends State<ActivityCompleteScreen> {
     ),
   );
 
-  Widget _buildStatusContent(BuildContext context) {
-    final status = _completionController?.status;
-    if (_legacyCompleted || status == ActivityCompletionStatus.completed) {
-      return Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 240),
-            child: AspectRatio(
-              aspectRatio: 1,
-              child: Image.asset(
-                DodamDialogAssets.completeThumbsUp,
-                key: const ValueKey('activity-complete-thumbsup-illustration'),
-                fit: BoxFit.contain,
-                filterQuality: FilterQuality.high,
-                excludeFromSemantics: true,
-              ),
-            ),
+  /// 아이가 보는 마무리 안내. 상태에 따라 갈라지지 않는 **한 가지 화면**이다.
+  ///
+  /// 카피 규칙(CLAUDE.md 8·9절):
+  /// - "리포트"·"분석" 같은 어른 말은 쓰지 않는다. 아이에게는 그림을 잘 담아 뒀다는
+  ///   사실과 다음에 할 일만 남긴다.
+  /// - 보호자가 나중에 소식을 받는다는 사실을 아이 말로 한 줄 얹는다("준비가 되면
+  ///   보호자에게 알려 줄게요") — 실제로 리포트가 되든 안 되든 보호자에게는 알림이
+  ///   가므로 두 경우 모두에 대해 참인 문장이다.
+  /// - 실패·오류 문구는 아예 두지 않는다. 리포트가 실패해도 그것은 보호자 알림으로
+  ///   가야 할 소식이지 아이가 볼 화면이 아니다.
+  Widget _buildHandoffContent(BuildContext context) => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 240),
+        child: AspectRatio(
+          aspectRatio: 1,
+          child: Image.asset(
+            DodamDialogAssets.completeThumbsUp,
+            key: const ValueKey('activity-complete-thumbsup-illustration'),
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.high,
+            excludeFromSemantics: true,
           ),
-          const SizedBox(height: AppSpacing.lg),
-          const Text(
-            '그림 활동을 모두 마쳤어요!',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.ink,
-              fontSize: 32,
-              fontWeight: FontWeight.w900,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          const Text(
-            '더 그리고 싶으면 또 그려도 돼요.\n다 했으면 보호자에게 기기를 건네주세요.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.inkMuted,
-              fontSize: 20,
-              height: 1.45,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: AppSpacing.xl),
-          _CompletionResultActions(
-            onDrawAgain: _drawAgain,
-            onGuardianHandoff: () => _confirmGuardianTransition(context),
-          ),
-        ],
-      );
-    }
-
-    if (status == ActivityCompletionStatus.pollingFailure) {
-      return _CompletionStatusMessage(
-        icon: Icons.wifi_off_rounded,
-        title: '완료 상태를 확인하지 못했어요',
-        description: '활동은 접수되어 있어요. 연결을 확인하고 다시 시도해 주세요.',
-        button: AppButton(
-          key: const ValueKey('activity-completion-retry'),
-          label: '다시 확인',
-          variant: AppButtonVariant.child,
-          onPressed: _retryStatusCheck,
         ),
-      );
-    }
-
-    if (status == ActivityCompletionStatus.terminalFailure) {
-      // 실패 안내만 두면 아이가 이 화면에서 나갈 수 없다(S15P11B209-820).
-      // 안내 문구는 그대로 두고 다음 행동만 덧붙인다.
-      return _CompletionStatusMessage(
-        icon: Icons.error_outline_rounded,
-        title: '활동을 마무리하지 못했어요',
-        description: '보호자에게 알려 다시 확인해 주세요.',
-        button: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            AppButton(
-              key: const ValueKey('activity-completion-child-home'),
-              label: '아동 홈으로 돌아가기',
-              variant: AppButtonVariant.child,
-              leading: const Icon(Icons.home_rounded),
-              onPressed: _leaveToChildHome,
-            ),
-            const SizedBox(height: AppSpacing.sm),
-            AppButton(
-              key: const ValueKey('activity-completion-guardian-home'),
-              label: '보호자 화면으로 돌아가기',
-              variant: AppButtonVariant.secondary,
-              leading: const Icon(Icons.family_restroom_rounded),
-              onPressed: () => _confirmGuardianTransition(context),
-            ),
-          ],
+      ),
+      const SizedBox(height: AppSpacing.lg),
+      const Text(
+        '그림 활동을 모두 마쳤어요!',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: AppColors.ink,
+          fontSize: 32,
+          fontWeight: FontWeight.w900,
         ),
-      );
-    }
-
-    return const _CompletionStatusMessage(
-      key: ValueKey('activity-completion-progress'),
-      icon: Icons.hourglass_top_rounded,
-      title: '활동을 마무리하고 있어요',
-      description: '분석과 리포트를 준비하고 있어요. 잠시만 기다려 주세요.',
-      showProgress: true,
-    );
-  }
+      ),
+      const SizedBox(height: AppSpacing.sm),
+      const Text(
+        '오늘 그린 그림은 잘 담아 두었어요.\n'
+        '준비가 되면 보호자에게 알려 줄게요.\n'
+        '더 그려도 되고, 이제 보호자에게 건네줘도 돼요.',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: AppColors.inkMuted,
+          fontSize: 20,
+          height: 1.45,
+          fontWeight: FontWeight.w600,
+        ),
+      ),
+      const SizedBox(height: AppSpacing.xl),
+      _CompletionResultActions(
+        onDrawAgain: _drawAgain,
+        onGuardianHandoff: () => _confirmGuardianTransition(context),
+      ),
+    ],
+  );
 
   Future<void> _confirmGuardianTransition(BuildContext context) async {
     // 확인 Dialog가 열려 있는 동안에는 아동 홈 이탈·두 번째 Dialog를 막는다.
@@ -5098,57 +4968,4 @@ class _CompletionResultButton extends StatelessWidget {
       ),
     );
   }
-}
-
-class _CompletionStatusMessage extends StatelessWidget {
-  const _CompletionStatusMessage({
-    required this.icon,
-    required this.title,
-    required this.description,
-    this.button,
-    this.showProgress = false,
-    super.key,
-  });
-
-  final IconData icon;
-  final String title;
-  final String description;
-  final Widget? button;
-  final bool showProgress;
-
-  @override
-  Widget build(BuildContext context) => Column(
-    mainAxisSize: MainAxisSize.min,
-    children: [
-      Icon(icon, color: AppColors.tangerine, size: 64),
-      const SizedBox(height: AppSpacing.lg),
-      Text(
-        title,
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: AppColors.ink,
-          fontSize: 28,
-          fontWeight: FontWeight.w900,
-        ),
-      ),
-      const SizedBox(height: AppSpacing.sm),
-      Text(
-        description,
-        textAlign: TextAlign.center,
-        style: const TextStyle(
-          color: AppColors.inkMuted,
-          fontSize: 18,
-          height: 1.45,
-        ),
-      ),
-      if (showProgress) ...[
-        const SizedBox(height: AppSpacing.lg),
-        const CircularProgressIndicator(),
-      ],
-      if (button case final action?) ...[
-        const SizedBox(height: AppSpacing.xl),
-        action,
-      ],
-    ],
-  );
 }

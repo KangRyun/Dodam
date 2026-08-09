@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.context.ApplicationEventPublisher;
 
 /**
  * 재시도 워커가 되살릴 것만 되살리고, 끝난 작업은 대기열에서 내리는지 확인한다 (S15P11B209 P0-2).
@@ -27,9 +28,11 @@ class ReportGenerationRetryWorkerTest {
   @Mock private ReportGenerationRetryRepository retryRepository;
   @Mock private ReportRetryReopenService reopenService;
   @Mock private MockObservationReportGenerationService generationService;
+  @Mock private ApplicationEventPublisher eventPublisher;
 
   private ReportGenerationRetryWorker worker() {
-    return new ReportGenerationRetryWorker(retryRepository, reopenService, generationService);
+    return new ReportGenerationRetryWorker(
+        retryRepository, reopenService, generationService, eventPublisher);
   }
 
   @Test
@@ -98,6 +101,53 @@ class ReportGenerationRetryWorkerTest {
 
     verify(retryRepository, never()).claim(anyInt(), any(Duration.class), anyInt());
     verify(generationService, never()).generate(anyLong());
+  }
+
+  /**
+   * 재시도를 다 써서 포기한 리포트는 보호자에게 알린다.
+   *
+   * <p>이 경로가 비면 실패가 조용히 묻힌다 — 포기 처리는 {@code markFailed}를 지나지 않아 그쪽에 붙은 알림이 닿지 않고, 아이 화면은 리포트를 기다리지
+   * 않고 넘어가므로 어디에도 실패가 뜨지 않는다.
+   */
+  @Test
+  void notifiesGuardianForEachAbandonedReport() {
+    given(retryRepository.abandonExhausted(anyInt())).willReturn(List.of(100L, 101L));
+
+    worker().retryFailedReports();
+
+    verify(eventPublisher).publishEvent(new ReportGenerationFailedEvent(100L));
+    verify(eventPublisher).publishEvent(new ReportGenerationFailedEvent(101L));
+  }
+
+  /** 포기한 리포트가 없으면 알리지 않는다. */
+  @Test
+  void doesNotNotifyWhenNothingAbandoned() {
+    given(retryRepository.abandonExhausted(anyInt())).willReturn(List.of());
+
+    worker().retryFailedReports();
+
+    verify(eventPublisher, never()).publishEvent(org.mockito.ArgumentMatchers.<Object>any());
+  }
+
+  /**
+   * 알림 요청이 터져도 재시도 배치는 계속 돈다.
+   *
+   * <p>알림은 부수효과이고 재생성이 본 일이다. 여기서 예외가 새면 그 틱의 리포트들이 통째로 재생성 기회를 잃는다.
+   */
+  @Test
+  void continuesBatchWhenAbandonNotificationFails() {
+    given(retryRepository.abandonExhausted(anyInt())).willReturn(List.of(100L));
+    org.mockito.BDDMockito.willThrow(new IllegalStateException("event bus down"))
+        .given(eventPublisher)
+        .publishEvent(new ReportGenerationFailedEvent(100L));
+    given(retryRepository.claim(anyInt(), any(Duration.class), anyInt())).willReturn(List.of(JOB));
+    given(reopenService.reopen(100L, 200L)).willReturn(true);
+    given(reopenService.isCompleted(100L)).willReturn(true);
+
+    worker().retryFailedReports();
+
+    verify(generationService).generate(200L);
+    verify(retryRepository).resolve(1L);
   }
 
   private static <T> T any(Class<T> type) {

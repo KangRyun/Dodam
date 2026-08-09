@@ -81,9 +81,12 @@ class ReportGenerationRetryRepositoryIntegrationTest extends IntegrationTestSupp
           reportId);
     }
 
-    assertThat(retryRepository.abandonExhausted(3)).isEqualTo(1);
+    // 식별자를 돌려줘야 보호자에게 어느 리포트가 실패했는지 알릴 수 있다.
+    assertThat(retryRepository.abandonExhausted(3)).containsExactly(reportId);
 
     assertThat(reportStatusOf(reportId)).isEqualTo("FAILED_FINAL");
+    // 두 번째 호출은 빈 목록이어야 한다 — 같은 실패로 보호자에게 두 번 알리지 않는다.
+    assertThat(retryRepository.abandonExhausted(3)).isEmpty();
     assertThat(retryRepository.claim(10, Duration.ofMinutes(5), 3)).isEmpty();
     // 포기해도 행은 남는다 — 몇 번 만에 포기했는지가 다음에 이 자리를 볼 사람에게 필요하다.
     assertThat(
