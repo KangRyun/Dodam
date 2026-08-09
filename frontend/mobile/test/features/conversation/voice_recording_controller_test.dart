@@ -220,6 +220,44 @@ void main() {
     expect(recorder.stopCount, 1);
   });
 
+  test('진폭을 읽는 중 dispose되어도 비동기 콜백이 상태를 변경하지 않는다', () async {
+    final recorder = _DeferredAmplitudeVoiceRecorder();
+    final controller = VoiceRecordingController(
+      recorder,
+      noSpeechTimeout: Duration.zero,
+      amplitudeSampleInterval: const Duration(milliseconds: 1),
+    );
+
+    await controller.start();
+    await recorder.readStarted.future.timeout(const Duration(seconds: 1));
+
+    controller.dispose();
+    recorder.completeAmplitude(-80);
+    await recorder.readReturned.future.timeout(const Duration(seconds: 1));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(recorder.cancelCount, 1);
+  });
+
+  test('녹음 취소를 기다리는 중 dispose되어도 상태를 변경하지 않는다', () async {
+    final recorder = _DeferredCancelVoiceRecorder();
+    final controller = VoiceRecordingController(
+      recorder,
+      noSpeechTimeout: Duration.zero,
+      amplitudeSampleInterval: const Duration(milliseconds: 1),
+    );
+
+    await controller.start();
+    await recorder.cancelStarted.future.timeout(const Duration(seconds: 1));
+
+    controller.dispose();
+    recorder.completeCancel();
+    await recorder.cancelReturned.future.timeout(const Duration(seconds: 1));
+    await Future<void>.delayed(Duration.zero);
+
+    expect(recorder.cancelCount, 1);
+  });
+
   test('끊기는 잡음은 몇 번이 와도 발화로 확정하지 않고 선택지로 넘어간다', () async {
     // 실측(2026-08-05): 잡음 한 샘플이 발화로 확정돼 무음 타임아웃이 막히고, 잡음만 담긴
     // 녹음이 업로드돼 STT가 "구독, 좋아요 …"를 만들어 아이 답변으로 저장됐다.
@@ -601,6 +639,66 @@ final class _FakeVoiceRecorder implements VoiceRecorder {
   @override
   Future<void> cancel() async {
     cancelCount += 1;
+  }
+
+  @override
+  Future<void> dispose() async {}
+}
+
+final class _DeferredAmplitudeVoiceRecorder implements VoiceRecorder {
+  final Completer<void> readStarted = Completer<void>();
+  final Completer<void> readReturned = Completer<void>();
+  final Completer<double> _amplitude = Completer<double>();
+  int cancelCount = 0;
+
+  void completeAmplitude(double value) => _amplitude.complete(value);
+
+  @override
+  Future<void> start() async {}
+
+  @override
+  Future<double> readAmplitude() async {
+    if (!readStarted.isCompleted) readStarted.complete();
+    final value = await _amplitude.future;
+    if (!readReturned.isCompleted) readReturned.complete();
+    return value;
+  }
+
+  @override
+  Future<String?> stop() async => '/tmp/deferred-voice-answer.m4a';
+
+  @override
+  Future<void> cancel() async {
+    cancelCount += 1;
+  }
+
+  @override
+  Future<void> dispose() async {}
+}
+
+final class _DeferredCancelVoiceRecorder implements VoiceRecorder {
+  final Completer<void> cancelStarted = Completer<void>();
+  final Completer<void> cancelReturned = Completer<void>();
+  final Completer<void> _cancel = Completer<void>();
+  int cancelCount = 0;
+
+  void completeCancel() => _cancel.complete();
+
+  @override
+  Future<void> start() async {}
+
+  @override
+  Future<double> readAmplitude() async => -80;
+
+  @override
+  Future<String?> stop() async => '/tmp/deferred-cancel-voice-answer.m4a';
+
+  @override
+  Future<void> cancel() async {
+    cancelCount += 1;
+    if (!cancelStarted.isCompleted) cancelStarted.complete();
+    await _cancel.future;
+    if (!cancelReturned.isCompleted) cancelReturned.complete();
   }
 
   @override
