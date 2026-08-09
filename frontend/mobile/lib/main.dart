@@ -97,13 +97,17 @@ DodamApp createDefaultApp({
     'HTP_PHOTO_UPLOAD_ENABLED',
     defaultValue: true,
   );
-  // 보호자 홈 진입 PIN gate(S15P11B209-874). 배포 클러스터에
-  // `GUARDIAN_PIN_PEPPER`가 주입돼 PIN API가 `PIN_UNAVAILABLE` 없이 응답하는
-  // 것이 확인되기 전까지 기본 꺼짐 —
-  // flutter run --dart-define=GUARDIAN_PIN_GATE_ENABLED=true 로 켠다.
+  // 보호자 홈 진입 PIN gate(S15P11B209-874). 기본 켜짐 —
+  // 켤 조건으로 걸어 두었던 것(운영 서버에 `GUARDIAN_PIN_PEPPER` 주입 + PIN API가
+  // `PIN_UNAVAILABLE` 없이 응답)을 2026-08-09 실측으로 확인했다:
+  //   GET /api/v1/users/me/guardian-pin → 401(인증 필요). 기능이 죽어 있으면
+  //   여기서 PIN_UNAVAILABLE 이 온다.
+  // 아이가 아동 모드에서 빠져나와 보호자 화면(리포트·설정)에 닿는 길을 막는 장치라,
+  // 기본값이 꺼짐이면 아무도 켜지 않은 채로 남는다.
+  // 문제가 생기면 --dart-define=GUARDIAN_PIN_GATE_ENABLED=false 로 끈다.
   const guardianPinGateEnabled = bool.fromEnvironment(
     'GUARDIAN_PIN_GATE_ENABLED',
-    defaultValue: false,
+    defaultValue: true,
   );
 
   return DodamApp(
