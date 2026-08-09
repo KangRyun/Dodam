@@ -8,6 +8,7 @@ import 'package:dodam/features/activity/data/dto/activity_dtos.dart';
 import 'package:dodam/features/activity/domain/repositories/activity_repository.dart';
 import 'package:dodam/features/conversation/conversation.dart';
 import 'package:dodam/features/drawing/data/dto/drawing_dtos.dart';
+import 'package:dodam/features/report/data/dto/diary_insights_dto.dart';
 import 'package:dodam/features/report/data/dto/report_dtos.dart';
 import 'package:dodam/features/report/domain/repositories/report_repository.dart';
 import 'package:dodam/features/report/domain/services/report_file_actions.dart';
@@ -72,6 +73,33 @@ void main() {
     // (S15P11B209-996).
     expect(find.textContaining('진단이 아닌 관찰 참고 자료'), findsNothing);
     expect(find.textContaining('나타난 특징을 정리한 자료예요'), findsOneWidget);
+  });
+
+  testWidgets('schemaVersion 3 그림일기는 V3 자료 범위 화면으로 표시한다', (tester) async {
+    final repository = _ReportRepository(
+      report: _report(
+        diaryInsights: const DiaryInsightsDto(
+          schemaVersion: 3,
+          dataScope: DiaryDataScopeDto(
+            evidenceLevel: 'LIMITED',
+            summary: '그림과 선택 감정을 중심으로 정리했어요.',
+            visualObservationCount: 1,
+          ),
+          drawingObservations: [
+            DiaryDrawingObservationDto(
+              text: '하늘에 별 모양이 보여요.',
+              confidence: 'HIGH',
+            ),
+          ],
+        ),
+      ),
+    );
+
+    await _openReport(tester, repository);
+
+    expect(find.text('이번 기록의 자료 범위'), findsOneWidget);
+    expect(find.text('그림에서 확인된 표현'), findsOneWidget);
+    expect(find.text('하늘에 별 모양이 보여요.'), findsOneWidget);
   });
 
   testWidgets('서버가 만든 리포트 PDF를 내려받아 저장한다', (tester) async {
@@ -1095,6 +1123,7 @@ ReportDetailDto _report({
   String status = 'COMPLETED',
   bool sections = true,
   ReportChildExpressionDto? expression,
+  DiaryInsightsDto? diaryInsights,
 }) => ReportDetailDto(
   reportId: reportId,
   reportVersion: 1,
@@ -1155,5 +1184,6 @@ ReportDetailDto _report({
     status: 'NOT_REQUESTED',
     available: false,
   ),
+  diaryInsights: diaryInsights,
   createdAt: '2026-07-20T10:12:00',
 );

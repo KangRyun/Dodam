@@ -32,6 +32,18 @@ public class ReportDiaryInsight {
   @JoinColumn(name = "report_id", nullable = false)
   private Report report;
 
+  @Column(name = "schema_version", nullable = false, columnDefinition = "SMALLINT")
+  private int schemaVersion;
+
+  @Column(name = "evidence_level", length = 20)
+  private String evidenceLevel;
+
+  @Column(name = "data_scope_summary", length = 300)
+  private String dataScopeSummary;
+
+  @Column(name = "visual_observation_count", nullable = false, columnDefinition = "SMALLINT")
+  private int visualObservationCount;
+
   @Column(name = "headline", length = 200)
   private String headline;
 
@@ -86,7 +98,11 @@ public class ReportDiaryInsight {
       int skippedCount,
       int sttConfirmationCount,
       int evidenceCount,
-      boolean visionSummaryAvailable) {
+      boolean visionSummaryAvailable,
+      int schemaVersion,
+      String evidenceLevel,
+      String dataScopeSummary,
+      int visualObservationCount) {
     this.report = Objects.requireNonNull(report, "report must not be null");
     this.headline = headline;
     this.summary = summary;
@@ -100,6 +116,10 @@ public class ReportDiaryInsight {
     this.sttConfirmationCount = sttConfirmationCount;
     this.evidenceCount = evidenceCount;
     this.visionSummaryAvailable = visionSummaryAvailable;
+    this.schemaVersion = schemaVersion;
+    this.evidenceLevel = evidenceLevel;
+    this.dataScopeSummary = dataScopeSummary;
+    this.visualObservationCount = visualObservationCount;
   }
 
   /**
@@ -134,6 +154,66 @@ public class ReportDiaryInsight {
       int sttConfirmationCount,
       int evidenceCount,
       boolean visionSummaryAvailable) {
+    return create(
+        report,
+        headline,
+        summary,
+        realityStatus,
+        timeScope,
+        mainEvent,
+        listeningTip,
+        confirmedVoiceCount,
+        optionAnswerCount,
+        skippedCount,
+        sttConfirmationCount,
+        evidenceCount,
+        visionSummaryAvailable,
+        2,
+        null,
+        null,
+        0);
+  }
+
+  /**
+   * V2 필드와 V3 자료 범위를 함께 가진 그림일기 구조화 결과를 만든다.
+   *
+   * @param report 소속 리포트
+   * @param headline 핵심 이야기 제목
+   * @param summary 이야기 요약
+   * @param realityStatus 실제·상상 구분
+   * @param timeScope 사건 시점
+   * @param mainEvent 중심 사건
+   * @param listeningTip 보호자 경청 안내
+   * @param confirmedVoiceCount 확정 발화 수
+   * @param optionAnswerCount 선택 답변 수
+   * @param skippedCount 건너뛴 질문 수
+   * @param sttConfirmationCount 확인이 필요한 STT 수
+   * @param evidenceCount 근거 수
+   * @param visionSummaryAvailable 그림 관찰 존재 여부
+   * @param schemaVersion 그림일기 구조 버전
+   * @param evidenceLevel LIMITED·PARTIAL·RICH 중 하나이며 V2는 {@code null}
+   * @param dataScopeSummary 자료 범위 설명이며 V2는 {@code null}
+   * @param visualObservationCount 검증된 그림 관찰 수
+   * @return 저장 대기 Entity
+   */
+  public static ReportDiaryInsight create(
+      Report report,
+      String headline,
+      String summary,
+      String realityStatus,
+      String timeScope,
+      String mainEvent,
+      String listeningTip,
+      int confirmedVoiceCount,
+      int optionAnswerCount,
+      int skippedCount,
+      int sttConfirmationCount,
+      int evidenceCount,
+      boolean visionSummaryAvailable,
+      int schemaVersion,
+      String evidenceLevel,
+      String dataScopeSummary,
+      int visualObservationCount) {
     return new ReportDiaryInsight(
         report,
         headline,
@@ -147,7 +227,39 @@ public class ReportDiaryInsight {
         skippedCount,
         sttConfirmationCount,
         evidenceCount,
-        visionSummaryAvailable);
+        visionSummaryAvailable,
+        schemaVersion,
+        evidenceLevel,
+        dataScopeSummary,
+        visualObservationCount);
+  }
+
+  /**
+   * @return 그림일기 구조 버전
+   */
+  public int getSchemaVersion() {
+    return schemaVersion;
+  }
+
+  /**
+   * @return LIMITED·PARTIAL·RICH 중 하나이며 V2는 {@code null}
+   */
+  public String getEvidenceLevel() {
+    return evidenceLevel;
+  }
+
+  /**
+   * @return 보호자에게 보여 줄 자료 범위 설명이며 V2는 {@code null}
+   */
+  public String getDataScopeSummary() {
+    return dataScopeSummary;
+  }
+
+  /**
+   * @return 검증을 통과해 저장된 그림 관찰 건수
+   */
+  public int getVisualObservationCount() {
+    return visualObservationCount;
   }
 
   /** 값이 비면 {@code UNKNOWN} 으로 둔다 — '모른다'가 이 두 축의 정상 상태다. */

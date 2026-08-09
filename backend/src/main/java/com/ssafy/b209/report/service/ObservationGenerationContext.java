@@ -1,6 +1,7 @@
 package com.ssafy.b209.report.service;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -21,9 +22,9 @@ import java.util.List;
  * @param subjectContexts 주제(그림)별 관찰 서술·탐지 코드·문답 묶음이며 HTP는 최대 3건, 그림일기는 1건 (S15P11B209-741)
  * @param selectedEmotionRefs 선택 감정을 행 식별자와 함께 담은 목록이다. {@code selectedEmotions}와 같은 재료이며 근거 참조가 가능한
  *     형태다 (S15P11B209-906)
- * @param childAge 활동 시점 기준 아동 만 나이이며 생년월일이 없으면 {@code null} (S15P11B209-1001). 대화 경로
- *     {@code GenerateQuestionCommand.childAge}와 같은 수준의 정보다 — 리포트가 관찰을 연령 발달 문맥으로
- *     설명할 수 있게 한다(Lowenfeld 규준, 982에서 계약 부재로 보류했던 축)
+ * @param childAge 활동 시점 기준 아동 만 나이이며 생년월일이 없으면 {@code null} (S15P11B209-1001). 대화 경로 {@code
+ *     GenerateQuestionCommand.childAge}와 같은 수준의 정보다 — 리포트가 관찰을 연령 발달 문맥으로 설명할 수 있게 한다(Lowenfeld 규준,
+ *     982에서 계약 부재로 보류했던 축)
  * @param activitySessions 이 리포트가 다루는 그림 활동 세션과 그 <b>주제</b> 목록이다. HTP는 집·나무·사람 세 건, 그림일기·단독 세션은 주제
  *     없는 한 건이다. 행동 요약(S15P11B209-870)을 세션별로 집계해 합칠 때 쓰고, 주제별 그리기 시간(S15P11B209-975)의 이름표가 된다 — HTP
  *     리포트는 세 활동을 합친 기록이다.
@@ -59,8 +60,8 @@ public record ObservationGenerationContext(
   /**
    * 개월 나이와 교육단계를 모르는 맥락을 만든다 (S15P11B209-1010 v2).
    *
-   * <p>두 값은 만 6세 발달 맥락을 고르는 데만 쓰고, 없으면 그 구간에서 연령 맥락을 붙이지 않는다 — 없는 것을
-   * 짐작해 채우는 것보다 안 붙이는 쪽이 맞다. 그래서 기본값이 {@code null} 이어도 안전하다.
+   * <p>두 값은 만 6세 발달 맥락을 고르는 데만 쓰고, 없으면 그 구간에서 연령 맥락을 붙이지 않는다 — 없는 것을 짐작해 채우는 것보다 안 붙이는 쪽이 맞다. 그래서
+   * 기본값이 {@code null} 이어도 안전하다.
    *
    * @param analysisId 최종 분석 식별자
    * @param drawingSessionId 그림 활동 세션 식별자
@@ -157,6 +158,9 @@ public record ObservationGenerationContext(
    * @param answerType 답변 메시지 유형
    * @param sttNeedsConfirmation 음성 인식 결과에 보호자 확인이 필요한 답변인지 여부다. 미확정 발화는 문답 표시에는 남기지만 근거·대표 발화에서는
    *     제외한다(보호자 계약 §4-4)
+   * @param speechStatus 음성 답변의 STT 처리 상태이며 다른 답변은 {@code null}
+   * @param audioAvailableAtGeneration 리포트 생성 당시 원본 음성 참조 존재 여부
+   * @param answerCreatedAt 답변 메시지 생성 시각이며 과거 호출부는 {@code null}
    */
   public record KeyConversationLine(
       Long questionMessageId,
@@ -164,7 +168,35 @@ public record ObservationGenerationContext(
       Long answerMessageId,
       String answerText,
       String answerType,
-      boolean sttNeedsConfirmation) {}
+      boolean sttNeedsConfirmation,
+      String speechStatus,
+      boolean audioAvailableAtGeneration,
+      LocalDateTime answerCreatedAt) {
+
+    /**
+     * V3 대화 스냅샷 메타데이터가 추가되기 전 호출부를 위한 호환 생성자다.
+     *
+     * <p>과거 호출부가 알 수 없는 STT 상태·음성 존재 여부·시각은 추정하지 않고 비운다.
+     */
+    public KeyConversationLine(
+        Long questionMessageId,
+        String questionText,
+        Long answerMessageId,
+        String answerText,
+        String answerType,
+        boolean sttNeedsConfirmation) {
+      this(
+          questionMessageId,
+          questionText,
+          answerMessageId,
+          answerText,
+          answerType,
+          sttNeedsConfirmation,
+          null,
+          false,
+          null);
+    }
+  }
 
   /**
    * 그림에서 탐지된 객체 하나를 <strong>서버가 발급한 행 식별자와 함께</strong> 담는다 (S15P11B209-906).

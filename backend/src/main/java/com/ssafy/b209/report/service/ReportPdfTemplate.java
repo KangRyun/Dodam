@@ -2,6 +2,7 @@ package com.ssafy.b209.report.service;
 
 import com.ssafy.b209.report.dto.ReportActivityFactsResponse;
 import com.ssafy.b209.report.dto.ReportDetailResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse;
 import com.ssafy.b209.report.dto.ReportEvidenceItemResponse;
 import com.ssafy.b209.report.dto.ReportObservedFeatureResponse;
 import com.ssafy.b209.report.dto.ReportParentGuideResponse;
@@ -350,7 +351,10 @@ final class ReportPdfTemplate {
   private String body() {
     StringBuilder body = new StringBuilder();
     boolean htp = isHtpActivity();
-    if (htp) {
+    boolean diaryV3 = isDiaryV3();
+    if (diaryV3) {
+      appendDiaryV3Sections(body);
+    } else if (htp) {
       // 집·나무·사람은 화면과 같은 제목·순서를 쓴다(S15P11B209-960/961). CLAUDE.md 5절 —
       //   집·나무·사람 그리기를 '검사'로 표현하지 않는다. 화면만 바꾸고 PDF 를 두면 보호자가
       //   저장해 남기는 쪽에만 검사 투가 남는다.
@@ -370,9 +374,11 @@ final class ReportPdfTemplate {
       section(body, "활동 기록", Accent.NEUTRAL, activityFactCards());
       section(body, "대화 요약", Accent.SUMMARY, conversationCards());
     }
-    section(body, "보호자 대화 안내", Accent.GUIDE, stepCards(report.guardianConversationGuide()));
-    for (ReportParentGuideResponse guide : nullSafe(report.parentGuides())) {
-      section(body, guideTitle(guide.guideType()), Accent.GUIDE, stepCards(guide.items()));
+    if (!diaryV3) {
+      section(body, "보호자 대화 안내", Accent.GUIDE, stepCards(report.guardianConversationGuide()));
+      for (ReportParentGuideResponse guide : nullSafe(report.parentGuides())) {
+        section(body, guideTitle(guide.guideType()), Accent.GUIDE, stepCards(guide.items()));
+      }
     }
     // 위기 안내는 인쇄물이 제3자에게 노출될 수 있어 본문에 싣지 않는다. 확인 경로만 남긴다.
     if (report.crisisAlert() != null) {
@@ -381,6 +387,267 @@ final class ReportPdfTemplate {
     section(body, "주의 사항", Accent.NEUTRAL, bulletCards(report.limitations()));
     section(body, "참고 자료", Accent.NEUTRAL, referenceCards());
     return body.toString();
+  }
+
+  /** V3 그림일기인지 확인한다. V2와 HTP 문서 구조는 그대로 유지한다. */
+  private boolean isDiaryV3() {
+    return !isHtpActivity()
+        && report.diaryInsights() != null
+        && report.diaryInsights().schemaVersion() >= 3;
+  }
+
+  /** 화면과 같은 근거 계층으로 그림일기 V3 섹션을 쌓는다. */
+  private void appendDiaryV3Sections(StringBuilder body) {
+    ReportDiaryInsightsResponse insights = report.diaryInsights();
+    section(body, "이번 이야기 한눈에", Accent.SUMMARY, diaryStoryCards(insights));
+    section(body, "이번 기록의 자료 범위", Accent.INFO, diaryDataScopeCards(insights));
+    section(body, "그림에서 확인된 표현", Accent.DRAWING, diaryDrawingObservationCards(insights));
+    section(body, "이야기 구성 지도", Accent.SUMMARY, diaryStoryComponentCards(insights));
+    section(body, "아이가 직접 들려준 말", Accent.EXPRESSION, diaryChildVoiceCards(insights));
+    section(body, "이번 활동에서 확인된 표현", Accent.EXPRESSION, diaryConfirmedObservationCards(insights));
+    section(body, "그림과 대화에서 생각해 볼 수 있는 가능성", Accent.EXPRESSION, diaryHypothesisCards(insights));
+    section(body, "이번에는 확인하지 못했어요", Accent.NEUTRAL, diaryUnknownCards(insights));
+    section(body, "오늘 마음 나누기", Accent.GUIDE, diaryCaregiverQuestionCards(insights));
+    section(body, "연령에 비춰 본 이번 활동", Accent.NEUTRAL, diaryDevelopmentCards(insights));
+    section(body, "전체 대화", Accent.SUMMARY, diaryTranscriptCards(insights));
+  }
+
+  private List<String> diaryStoryCards(ReportDiaryInsightsResponse insights) {
+    if (insights.storySnapshot() == null) return List.of();
+    StringBuilder content = new StringBuilder();
+    if (has(insights.storySnapshot().headline())) {
+      content.append(cardTitle(insights.storySnapshot().headline()));
+    }
+    if (has(insights.storySnapshot().summary())) {
+      content.append("<p>").append(escape(insights.storySnapshot().summary())).append("</p>");
+    }
+    return content.isEmpty() ? List.of() : List.of(card(content.toString()));
+  }
+
+  private List<String> diaryDataScopeCards(ReportDiaryInsightsResponse insights) {
+    if (insights.dataScope() == null) return List.of();
+    var scope = insights.dataScope();
+    StringBuilder content = new StringBuilder();
+    content.append(cardTitle(diaryEvidenceLevelText(scope.evidenceLevel())));
+    if (has(scope.summary())) {
+      content.append("<p>").append(escape(scope.summary())).append("</p>");
+    }
+    content
+        .append("<p class=\"muted\">아이 직접 발화 ")
+        .append(scope.confirmedVoiceCount())
+        .append("개 · 선택 답변 ")
+        .append(scope.optionAnswerCount())
+        .append("개 · 그림 관찰 ")
+        .append(scope.visualObservationCount())
+        .append("개 · 건너뜀 ")
+        .append(scope.skippedCount())
+        .append("개</p>");
+    return List.of(card(content.toString()));
+  }
+
+  private List<String> diaryDrawingObservationCards(ReportDiaryInsightsResponse insights) {
+    List<String> cards = new ArrayList<>();
+    for (var observation : nullSafe(insights.drawingObservations())) {
+      if (!has(observation.text())) continue;
+      String confirmed =
+          observation.childConfirmed() ? "<p class=\"muted\">아이의 말로도 확인했어요.</p>" : "";
+      cards.add(card("<p>" + escape(observation.text()) + "</p>" + confirmed));
+    }
+    return cards;
+  }
+
+  private List<String> diaryStoryComponentCards(ReportDiaryInsightsResponse insights) {
+    List<String> cards = new ArrayList<>();
+    for (var component : nullSafe(insights.storyComponents())) {
+      String text = has(component.text()) ? component.text() : "아직 확인하지 못했어요.";
+      cards.add(
+          card(
+              cardTitle(diaryComponentText(component.componentType()))
+                  + "<p>"
+                  + escape(text)
+                  + "</p>"));
+    }
+    return cards;
+  }
+
+  private List<String> diaryChildVoiceCards(ReportDiaryInsightsResponse insights) {
+    List<String> cards = new ArrayList<>();
+    for (var voice : nullSafe(insights.childVoiceItems())) {
+      if (!has(voice.text())) continue;
+      cards.add(
+          card(
+              "<div class=\"quote\">“"
+                  + escape(voice.text())
+                  + "”</div><p class=\"muted\">"
+                  + escape(diaryElicitationText(voice.elicitationType()))
+                  + "</p>"));
+    }
+    return cards;
+  }
+
+  private List<String> diaryConfirmedObservationCards(ReportDiaryInsightsResponse insights) {
+    List<String> cards = new ArrayList<>();
+    for (var observation : nullSafe(insights.sessionObservations())) {
+      if ("SESSION_HYPOTHESIS".equals(observation.insightType())) continue;
+      cards.add(diaryObservationCard(observation, false));
+    }
+    return cards;
+  }
+
+  private List<String> diaryHypothesisCards(ReportDiaryInsightsResponse insights) {
+    if (insights.dataScope() != null && "LIMITED".equals(insights.dataScope().evidenceLevel())) {
+      return List.of();
+    }
+    List<String> cards = new ArrayList<>();
+    for (var observation : nullSafe(insights.sessionObservations())) {
+      if (!"SESSION_HYPOTHESIS".equals(observation.insightType())
+          || !has(observation.hypothesis())
+          || observation.alternativeExplanations().isEmpty()
+          || !has(observation.clarificationQuestion())) {
+        continue;
+      }
+      cards.add(diaryObservationCard(observation, true));
+    }
+    return cards;
+  }
+
+  private String diaryObservationCard(
+      ReportDiaryInsightsResponse.DiarySessionObservationResponse observation,
+      boolean includeReasoning) {
+    StringBuilder content = new StringBuilder();
+    if (has(observation.title())) content.append(cardTitle(observation.title()));
+    if (has(observation.description())) {
+      content.append("<p>").append(escape(observation.description())).append("</p>");
+    }
+    if (includeReasoning) {
+      content.append("<p>").append(escape(observation.hypothesis())).append("</p>");
+      content.append("<div class=\"summary-label\">다르게 볼 수도 있어요</div>");
+      content.append(bulletList(observation.alternativeExplanations()));
+      content
+          .append("<p><b>다음에 이렇게 물어보세요.</b> ")
+          .append(escape(observation.clarificationQuestion()))
+          .append("</p>");
+    }
+    if (has(observation.scopeText())) {
+      content.append("<p class=\"muted\">").append(escape(observation.scopeText())).append("</p>");
+    }
+    return card(content.toString());
+  }
+
+  private List<String> diaryUnknownCards(ReportDiaryInsightsResponse insights) {
+    List<String> items = new ArrayList<>();
+    for (var unknown : nullSafe(insights.unknownItems())) {
+      if (has(unknown.text())) items.add(unknown.text());
+    }
+    return bulletCards(items);
+  }
+
+  private List<String> diaryCaregiverQuestionCards(ReportDiaryInsightsResponse insights) {
+    List<String> cards = new ArrayList<>();
+    for (var question : nullSafe(insights.caregiverQuestions())) {
+      if (!has(question.question())) continue;
+      StringBuilder content = new StringBuilder(cardTitle(question.question()));
+      if (has(question.responseGuide())) {
+        content
+            .append("<p><b>마음으로 답하기</b> · ")
+            .append(escape(question.responseGuide()))
+            .append("</p>");
+      }
+      if (has(question.coRegulationAction())) {
+        content
+            .append("<p><b>함께 해보기</b> · ")
+            .append(escape(question.coRegulationAction()))
+            .append("</p>");
+      }
+      cards.add("<div class=\"card card-guide keep\">" + content + "</div>");
+    }
+    return cards;
+  }
+
+  private List<String> diaryDevelopmentCards(ReportDiaryInsightsResponse insights) {
+    List<String> cards = new ArrayList<>();
+    for (var development : nullSafe(insights.developmentalObservations())) {
+      if (!has(development.ageContext())
+          || !has(development.observation())
+          || !has(development.scopeText())) {
+        continue;
+      }
+      StringBuilder content = new StringBuilder(cardTitle(development.ageContext()));
+      content.append("<p>").append(escape(development.observation())).append("</p>");
+      content.append("<p class=\"muted\">").append(escape(development.scopeText())).append("</p>");
+      cards.add(card(content.toString()));
+    }
+    return cards;
+  }
+
+  private List<String> diaryTranscriptCards(ReportDiaryInsightsResponse insights) {
+    List<String> cards = new ArrayList<>();
+    for (var entry : nullSafe(insights.transcript())) {
+      StringBuilder content = new StringBuilder();
+      if (has(entry.questionText())) {
+        content.append(cardTitle("도담 · " + entry.questionText()));
+      }
+      content
+          .append("<p>")
+          .append(
+              escape(
+                  has(entry.answerText())
+                      ? entry.answerText()
+                      : diaryEmptyAnswerText(entry.responseType())))
+          .append("</p><p class=\"muted\">")
+          .append(escape(diaryResponseTypeText(entry.responseType())));
+      if (entry.audioAvailable()) {
+        content.append(" · 앱에서 음성 재생 가능");
+      }
+      content.append("</p>");
+      cards.add(tallCard(content.toString()));
+    }
+    return cards;
+  }
+
+  private String diaryEvidenceLevelText(String level) {
+    return switch (value(level)) {
+      case "RICH" -> "이야기와 그림을 함께 살펴봤어요";
+      case "PARTIAL" -> "확인된 내용 안에서 살펴봤어요";
+      default -> "확인할 수 있는 자료가 적어요";
+    };
+  }
+
+  private String diaryComponentText(String type) {
+    return switch (value(type)) {
+      case "ACTOR" -> "누가";
+      case "EVENT" -> "무슨 일";
+      case "CHILD_ACTION" -> "아이의 행동";
+      case "OTHER_RESPONSE" -> "상대의 반응";
+      case "EMOTION" -> "마음";
+      case "WISH" -> "바람";
+      case "OUTCOME" -> "그 뒤";
+      default -> "이야기 단서";
+    };
+  }
+
+  private String diaryElicitationText(String type) {
+    return switch (value(type)) {
+      case "OPEN_INVITATION" -> "열린 질문에 스스로 이야기함";
+      case "OPTION", "FORCED_CHOICE" -> "선택지에서 고름";
+      case "YES_NO" -> "예·아니오 질문에 답함";
+      default -> "아이의 답변";
+    };
+  }
+
+  private String diaryResponseTypeText(String type) {
+    return switch (value(type)) {
+      case "VOICE" -> "음성으로 답함";
+      case "OPTION" -> "선택지에서 고름";
+      case "TEXT" -> "글로 답함";
+      case "CORRECTION" -> "음성 인식 내용을 고침";
+      case "SKIPPED" -> "질문을 건너뜀";
+      default -> "답변";
+    };
+  }
+
+  private String diaryEmptyAnswerText(String type) {
+    return "SKIPPED".equals(type) ? "이 질문은 건너뛰었어요." : "남긴 답변이 없어요.";
   }
 
   /**

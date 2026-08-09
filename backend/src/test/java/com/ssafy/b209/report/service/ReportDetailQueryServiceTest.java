@@ -16,6 +16,10 @@ import com.ssafy.b209.global.exception.BusinessException;
 import com.ssafy.b209.report.domain.ReportActivityNoteView;
 import com.ssafy.b209.report.domain.ReportActivitySummaryView;
 import com.ssafy.b209.report.domain.ReportDetailView;
+import com.ssafy.b209.report.domain.ReportDiaryInsight;
+import com.ssafy.b209.report.domain.ReportDiaryStoryComponent;
+import com.ssafy.b209.report.domain.ReportDiaryTranscriptEntry;
+import com.ssafy.b209.report.domain.ReportDiaryVisualObservation;
 import com.ssafy.b209.report.domain.ReportDrawingAssetView;
 import com.ssafy.b209.report.domain.ReportDrawingEmotionView;
 import com.ssafy.b209.report.domain.ReportDrawingSessionView;
@@ -24,6 +28,7 @@ import com.ssafy.b209.report.domain.ReportDrawnItem;
 import com.ssafy.b209.report.domain.ReportFeatureVisibility;
 import com.ssafy.b209.report.domain.ReportFollowUpGuideView;
 import com.ssafy.b209.report.domain.ReportKeyConversationView;
+import com.ssafy.b209.report.domain.ReportMessageConfirmationView;
 import com.ssafy.b209.report.domain.ReportObservedFeatureView;
 import com.ssafy.b209.report.domain.ReportStatus;
 import com.ssafy.b209.report.dto.ReportDetailResponse;
@@ -43,7 +48,10 @@ import com.ssafy.b209.report.repository.ReportDiaryInsightAlternativeRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
 import com.ssafy.b209.report.repository.ReportDiaryNarrativeStepRepository;
 import com.ssafy.b209.report.repository.ReportDiarySessionObservationRepository;
+import com.ssafy.b209.report.repository.ReportDiaryStoryComponentRepository;
+import com.ssafy.b209.report.repository.ReportDiaryTranscriptEntryRepository;
 import com.ssafy.b209.report.repository.ReportDiaryUnknownItemRepository;
+import com.ssafy.b209.report.repository.ReportDiaryVisualObservationRepository;
 import com.ssafy.b209.report.repository.ReportDrawingAssetViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingEmotionViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingSessionViewRepository;
@@ -108,6 +116,9 @@ class ReportDetailQueryServiceTest {
   @Mock private ReportDiaryDevelopmentSourceRepository diaryDevelopmentSourceRepository;
   @Mock private ScreeningRecordQueryService screeningRecordQueryService;
   @Mock private ReportDiaryUnknownItemRepository diaryUnknownItemRepository;
+  @Mock private ReportDiaryStoryComponentRepository diaryStoryComponentRepository;
+  @Mock private ReportDiaryVisualObservationRepository diaryVisualObservationRepository;
+  @Mock private ReportDiaryTranscriptEntryRepository diaryTranscriptEntryRepository;
   @Mock private ReportConversationSummaryViewRepository conversationSummaryRepository;
   @Mock private ReportDetectedObjectViewRepository detectedObjectRepository;
   @Mock private ReportDrawnItemRepository drawnItemRepository;
@@ -162,6 +173,9 @@ class ReportDetailQueryServiceTest {
             diaryDevelopmentalObservationRepository,
             diaryDevelopmentSourceRepository,
             diaryUnknownItemRepository,
+            diaryStoryComponentRepository,
+            diaryVisualObservationRepository,
+            diaryTranscriptEntryRepository,
             conversationSummaryRepository,
             detectedObjectRepository,
             drawnItemRepository,
@@ -189,6 +203,129 @@ class ReportDetailQueryServiceTest {
         .isInstanceOf(BusinessException.class)
         .extracting("errorCode")
         .isEqualTo(ReportDetailErrorCode.REPORT_NOT_FOUND);
+  }
+
+  @Test
+  void assemblesV3ScopeObservationsAndCurrentVoiceProxy() {
+    givenAccessibleReport();
+    com.ssafy.b209.report.domain.Report report = mock(com.ssafy.b209.report.domain.Report.class);
+    ReportDiaryInsight insight =
+        ReportDiaryInsight.create(
+            report,
+            "친구와 함께한 시간",
+            "친구와 공원에서 놀았다고 이야기했어요.",
+            "REAL",
+            "TODAY",
+            "친구와 놀기",
+            "아이 말을 먼저 그대로 들어 주세요.",
+            3,
+            0,
+            0,
+            0,
+            4,
+            true,
+            3,
+            "RICH",
+            "확정된 발화와 그림 관찰을 함께 사용했어요.",
+            1);
+    when(diaryInsightRepository.findById(REPORT_ID)).thenReturn(Optional.of(insight));
+    when(diaryStoryComponentRepository.findByReportIdOrderByDisplayOrderAsc(REPORT_ID))
+        .thenReturn(
+            List.of(
+                ReportDiaryStoryComponent.create(report, "EVENT", "CONFIRMED", "친구와 놀았어요.", 0)));
+    when(diaryVisualObservationRepository.findByReportIdOrderByDisplayOrderAsc(REPORT_ID))
+        .thenReturn(
+            List.of(
+                ReportDiaryVisualObservation.create(report, "두 사람이 나란히 있어요.", "HIGH", true, 0)));
+    when(diaryTranscriptEntryRepository.findByReportIdOrderByDisplayOrderAsc(REPORT_ID))
+        .thenReturn(
+            List.of(
+                ReportDiaryTranscriptEntry.create(
+                    report,
+                    11L,
+                    22L,
+                    "누구와 함께 있었어?",
+                    "친구와 있었어요",
+                    "VOICE",
+                    "SUCCESS",
+                    true,
+                    null,
+                    "OPEN_INVITATION",
+                    LocalDateTime.of(2026, 8, 9, 10, 15),
+                    0)));
+    ReportMessageConfirmationView voice = instantiate(ReportMessageConfirmationView.class);
+    ReflectionTestUtils.setField(voice, "id", 22L);
+    ReflectionTestUtils.setField(voice, "messageType", "VOICE_ANSWER");
+    ReflectionTestUtils.setField(voice, "audioStorageKey", "voice/22.m4a");
+    when(messageConfirmationRepository.findByIdIn(List.of(22L))).thenReturn(List.of(voice));
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.diaryInsights().schemaVersion()).isEqualTo(3);
+    assertThat(response.diaryInsights().dataScope().evidenceLevel()).isEqualTo("RICH");
+    assertThat(response.diaryInsights().storyComponents()).hasSize(1);
+    assertThat(response.diaryInsights().drawingObservations()).hasSize(1);
+    assertThat(response.diaryInsights().transcript())
+        .singleElement()
+        .satisfies(
+            entry -> {
+              assertThat(entry.audioAvailable()).isTrue();
+              assertThat(entry.audioUrl()).isEqualTo("/api/v1/conversation-messages/22/audio");
+            });
+  }
+
+  @Test
+  void keepsTranscriptTextWhenVoiceAudioReferenceIsNoLongerAvailable() {
+    givenAccessibleReport();
+    com.ssafy.b209.report.domain.Report report = mock(com.ssafy.b209.report.domain.Report.class);
+    ReportDiaryInsight insight =
+        ReportDiaryInsight.create(
+            report,
+            "친구와 함께한 시간",
+            "친구와 공원에서 놀았다고 이야기했어요.",
+            "REAL",
+            "TODAY",
+            "친구와 놀기",
+            "아이 말을 먼저 그대로 들어 주세요.",
+            3,
+            0,
+            0,
+            0,
+            4,
+            true,
+            3,
+            "RICH",
+            "확정된 발화와 그림 관찰을 함께 사용했어요.",
+            1);
+    when(diaryInsightRepository.findById(REPORT_ID)).thenReturn(Optional.of(insight));
+    when(diaryTranscriptEntryRepository.findByReportIdOrderByDisplayOrderAsc(REPORT_ID))
+        .thenReturn(
+            List.of(
+                ReportDiaryTranscriptEntry.create(
+                    report,
+                    11L,
+                    22L,
+                    "누구와 함께 있었어?",
+                    "친구와 있었어요",
+                    "VOICE",
+                    "SUCCESS",
+                    true,
+                    null,
+                    "OPEN_INVITATION",
+                    LocalDateTime.of(2026, 8, 9, 10, 15),
+                    0)));
+    when(messageConfirmationRepository.findByIdIn(List.of(22L))).thenReturn(List.of());
+
+    ReportDetailResponse response = service.getReport(GUARDIAN_ID, REPORT_ID);
+
+    assertThat(response.diaryInsights().transcript())
+        .singleElement()
+        .satisfies(
+            entry -> {
+              assertThat(entry.answerText()).isEqualTo("친구와 있었어요");
+              assertThat(entry.audioAvailable()).isFalse();
+              assertThat(entry.audioUrl()).isNull();
+            });
   }
 
   @Test
@@ -651,6 +788,9 @@ class ReportDetailQueryServiceTest {
             diaryDevelopmentalObservationRepository,
             diaryDevelopmentSourceRepository,
             diaryUnknownItemRepository,
+            diaryStoryComponentRepository,
+            diaryVisualObservationRepository,
+            diaryTranscriptEntryRepository,
             conversationSummaryRepository,
             detectedObjectRepository,
             drawnItemRepository,

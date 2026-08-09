@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import com.ssafy.b209.report.dto.ReportChildExpressionResponse;
 import com.ssafy.b209.report.dto.ReportDetailResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse;
 import com.ssafy.b209.report.dto.ReportDrawingResponse;
 import com.ssafy.b209.report.dto.ReportDrawingSessionResponse;
 import com.ssafy.b209.report.dto.ReportExpertReviewResponse;
@@ -112,6 +113,19 @@ class ReportPdfTemplateTest {
     assertThat(html).contains("sec-info").contains("mark-square");
   }
 
+  @Test
+  void v3PdfContainsEvidenceScopeAndTranscriptWithoutAudioUrl() {
+    String html = template(v3Report()).build();
+
+    assertThat(html)
+        .contains("이번 기록의 자료 범위")
+        .contains("그림에서 확인된 표현")
+        .contains("이야기 구성 지도")
+        .contains("전체 대화")
+        .contains("앱에서 음성 재생 가능")
+        .doesNotContain("/api/v1/conversation-messages/22/audio");
+  }
+
   // ── 도구 ────────────────────────────────────────────────────────────
 
   /** 그림 URL 두 개를 모두 읽어 둔 상태로 템플릿을 만든다. */
@@ -167,6 +181,69 @@ class ReportPdfTemplateTest {
         new ReportSubjectResponse(
             "DRAWING", DRAWING_URL, List.of("잔디를 그렸어요."), List.of(), List.of()),
         List.of("오늘 그린 것 중 무엇을 먼저 이야기하고 싶은지 물어봐 주세요."));
+  }
+
+  private ReportDetailResponse v3Report() {
+    ReportDetailResponse base = base(null, null, List.of());
+    ReportDiaryInsightsResponse insights =
+        new ReportDiaryInsightsResponse(
+            null,
+            List.of(),
+            List.of(),
+            List.of(),
+            List.of(),
+            null,
+            List.of(),
+            List.of(),
+            null,
+            3,
+            new ReportDiaryInsightsResponse.DiaryDataScopeResponse(
+                "RICH", "확정된 발화와 그림 관찰을 함께 사용했어요.", 1, 0, 0, 0, 1),
+            List.of(
+                new ReportDiaryInsightsResponse.DiaryStoryComponentResponse(
+                    "EVENT", "CONFIRMED", "친구와 공원에서 놀았어요.", List.of())),
+            List.of(
+                new ReportDiaryInsightsResponse.DiaryDrawingObservationResponse(
+                    "두 사람이 나란히 있어요.", "HIGH", true, List.of())),
+            List.of(
+                new ReportDiaryInsightsResponse.DiaryTranscriptEntryResponse(
+                    11L,
+                    22L,
+                    "누구와 함께 있었어?",
+                    "친구와 있었어요.",
+                    "VOICE",
+                    "SUCCESS",
+                    4200,
+                    true,
+                    "/api/v1/conversation-messages/22/audio",
+                    "OPEN_INVITATION",
+                    LocalDateTime.of(2026, 8, 9, 10, 15))));
+    return new ReportDetailResponse(
+        base.reportId(),
+        base.reportVersion(),
+        base.reportStatus(),
+        base.drawingSession(),
+        base.drawing(),
+        base.childExpression(),
+        base.observedFeatures(),
+        base.activityFacts(),
+        base.conversationSummary(),
+        base.guardianConversationGuide(),
+        base.limitations(),
+        base.expertReview(),
+        base.createdAt(),
+        base.nonDiagnosticNotice(),
+        base.publicInterpretations(),
+        base.evidenceItems(),
+        base.subjectReports(),
+        base.parentGuides(),
+        base.crisisAlert(),
+        base.references(),
+        base.activityType(),
+        base.childDisplayName(),
+        base.aiRawReport(),
+        insights,
+        base.screeningSummary());
   }
 
   private ReportDetailResponse withSubjectAndGuide(

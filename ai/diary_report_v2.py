@@ -449,6 +449,18 @@ _INSIGHT_DOMAINS = frozenset(
     {"STORY", "EMOTION", "RELATIONSHIP", "SELF_EXPRESSION", "COPING", "ACTIVITY_STYLE"}
 )
 
+_DATA_SCOPE_SUMMARIES = {
+    "LIMITED": "이번 기록은 아이가 고른 답과 그림 관찰을 중심으로 구성했어요. 아이가 자기 말로 들려준 이야기는 확인하지 않았어요.",
+    "PARTIAL": "이번 기록에는 아이가 자기 말로 들려준 일부 내용이 있어요. 확인되지 않은 부분은 가능성으로 단정하지 않았어요.",
+    "RICH": "이번 기록에는 아이가 자기 말로 들려준 이야기와 그림 관찰이 함께 있어요. 해석은 이번 활동 범위 안에서만 살펴봐 주세요.",
+}
+_STORY_COMPONENT_TYPES = frozenset(
+    {"ACTOR", "EVENT", "CHILD_ACTION", "EMOTION", "OTHER_RESPONSE", "OUTCOME"}
+)
+_STORY_COMPONENT_STATUSES = frozenset(
+    {"CONFIRMED", "VISUAL_ONLY", "SELECTED", "PARTIAL", "UNKNOWN"}
+)
+
 # 다음에 확인할 단서(EXPLORE_NEXT)에 심리 특성을 적으면 근거 없는 진단이 된다. 단서는
 #   "무엇을 더 들어볼지"까지만 말한다.
 _TRAIT_LANGUAGE = re.compile(
@@ -555,6 +567,127 @@ def _session_observations(
         if len(observations) >= 3:
             break
     return observations
+
+
+def _drawing_observations(
+    raw: object,
+    allowed: frozenset[tuple[str, str]],
+    req: contracts.ObservationGenerationRequest,
+) -> list[contracts.DiaryDrawingObservation]:
+    """그림에서 직접 확인한 사실만 근거 참조와 함께 조립한다."""
+
+    if not isinstance(raw, list):
+        return []
+    elicitation = _elicitation_by_ref(req)
+    observations: list[contracts.DiaryDrawingObservation] = []
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        text = _safe_public_text(item.get("text"), max_len=360)
+        refs = _parse_refs(item.get("evidenceRefs"), allowed)
+        if not text or not refs:
+            continue
+        confidence = _clean_text(item.get("confidence")).upper()
+        if confidence not in {"HIGH", "MODERATE", "LOW"}:
+            confidence = "MODERATE"
+        child_confirmed = any(
+            ref.kind == "QA_ANSWER"
+            and elicitation.get((ref.kind, ref.id)) in _CHILD_COMPOSED
+            for ref in refs
+        )
+        observations.append(
+            contracts.DiaryDrawingObservation(
+                text=text,
+                confidence=confidence,
+                child_confirmed=child_confirmed,
+                evidence_refs=refs,
+            )
+        )
+        if len(observations) >= 8:
+            break
+    return observations
+
+
+def _story_components(
+    raw: object,
+    allowed: frozenset[tuple[str, str]],
+) -> list[contracts.DiaryStoryComponent]:
+    """확인 상태별 이야기 요소를 중복 없이 조립한다."""
+
+    if not isinstance(raw, list):
+        return []
+    components: list[contracts.DiaryStoryComponent] = []
+    seen_types: set[str] = set()
+    for item in raw:
+        if not isinstance(item, Mapping):
+            continue
+        component_type = _clean_text(item.get("componentType")).upper()
+        status = _clean_text(item.get("status")).upper()
+        if (
+            component_type not in _STORY_COMPONENT_TYPES
+            or status not in _STORY_COMPONENT_STATUSES
+            or component_type in seen_types
+        ):
+            continue
+        refs = _parse_refs(item.get("evidenceRefs"), allowed)
+        text = _safe_public_text(item.get("text"), max_len=300) or None
+        if status == "UNKNOWN":
+            text = None
+            refs = []
+        elif not text or not refs:
+            continue
+        components.append(
+            contracts.DiaryStoryComponent(
+                component_type=component_type,
+                status=status,
+                text=text,
+                evidence_refs=refs,
+            )
+        )
+        seen_types.add(component_type)
+        if len(components) >= 6:
+            break
+    return components
+
+
+def _data_scope(
+    req: contracts.ObservationGenerationRequest,
+    *,
+    visual_observation_count: int,
+) -> contracts.DiaryDataScope:
+    """원자료 구성으로 이번 회차에서 허용할 해석 범위를 결정한다."""
+
+    composed = option_count = stt_confirmation = 0
+    for qa in _iter_qas(req):
+        answer = _clean_text(qa.answer_text)
+        if qa.stt_needs_confirmation:
+            stt_confirmation += 1
+            continue
+        if is_option_answer(qa.answer_type) and answer:
+            option_count += 1
+            continue
+        if (
+            is_spoken_answer(qa.answer_type)
+            and answer
+            and classify_elicitation(qa.question, qa.answer_type, answer)
+            in _CHILD_COMPOSED
+        ):
+            composed += 1
+    if composed >= 3 and visual_observation_count > 0:
+        level = "RICH"
+    elif composed > 0:
+        level = "PARTIAL"
+    else:
+        level = "LIMITED"
+    return contracts.DiaryDataScope(
+        evidence_level=level,
+        summary=_DATA_SCOPE_SUMMARIES[level],
+        confirmed_voice_count=composed,
+        option_answer_count=option_count,
+        skipped_count=req.skipped_count,
+        stt_confirmation_count=stt_confirmation,
+        visual_observation_count=visual_observation_count,
+    )
 
 
 # 확인하지 못한 것의 이름표. 문구까지 서버가 정한다 — 모델에게 맡기면 '모르는 것'조차 지어낸다.
@@ -1045,9 +1178,31 @@ def build_diary_insights(
     reality, time_scope = _derive_reality_and_time(req)
     snapshot = _story_snapshot(raw.get("storySnapshot"), allowed, reality, time_scope)
     flow = _narrative_flow(raw.get("narrativeFlow"), allowed)
+    story_components = _story_components(raw.get("storyComponents"), allowed)
+    drawing_observations = _drawing_observations(
+        raw.get("drawingObservations"), allowed, req
+    )
+    data_scope = _data_scope(
+        req, visual_observation_count=len(drawing_observations)
+    )
     observations = _session_observations(
         raw.get("sessionObservations"), allowed, req
     )
+    if data_scope.evidence_level == "LIMITED":
+        observations = [
+            item
+            for item in observations
+            if item.insight_type != "SESSION_HYPOTHESIS"
+        ]
+    hypothesis_count = 0
+    bounded_observations: list[contracts.DiarySessionObservation] = []
+    for item in observations:
+        if item.insight_type == "SESSION_HYPOTHESIS":
+            hypothesis_count += 1
+            if hypothesis_count > 2:
+                continue
+        bounded_observations.append(item)
+    observations = bounded_observations
     questions = _caregiver_questions(raw.get("caregiverQuestions"), allowed)
     listening_tip = _safe_public_text(raw.get("listeningTip"), max_len=260) or None
     child_voice = _child_voice_items(req)
@@ -1074,6 +1229,8 @@ def build_diary_insights(
         (
             snapshot is not None,
             bool(flow),
+            bool(story_components),
+            bool(drawing_observations),
             bool(observations),
             bool(questions),
             bool(developmental),
@@ -1086,6 +1243,10 @@ def build_diary_insights(
     if not questions:
         questions = [_general_connection_card()]
     return contracts.DiaryInsights(
+        schema_version=3,
+        data_scope=data_scope,
+        story_components=story_components,
+        drawing_observations=drawing_observations,
         story_snapshot=snapshot,
         narrative_flow=flow,
         child_voice_items=child_voice,

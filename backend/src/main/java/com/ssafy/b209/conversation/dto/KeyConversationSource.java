@@ -1,5 +1,7 @@
 package com.ssafy.b209.conversation.dto;
 
+import java.time.LocalDateTime;
+
 /** 리포트 대표 대화를 구성하기 위해 조회한 질문·답변 메시지 원본이다. */
 public interface KeyConversationSource {
 
@@ -37,4 +39,19 @@ public interface KeyConversationSource {
    * @return 보호자 확인이 필요하면 {@code true}
    */
   boolean getAnswerNeedsGuardianConfirmation();
+
+  /**
+   * @return 음성 답변의 STT 처리 상태이며 음성 답변이 아니면 {@code null}
+   */
+  String getAnswerSpeechStatus();
+
+  /**
+   * @return 리포트 생성 시점에 원본 음성 저장 참조가 있으면 {@code true}
+   */
+  boolean getAnswerAudioAvailable();
+
+  /**
+   * @return 답변 메시지가 생성된 서버 시각
+   */
+  LocalDateTime getAnswerCreatedAt();
 }
