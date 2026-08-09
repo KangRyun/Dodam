@@ -29,6 +29,8 @@ import '../../features/notification/application/notification_badge_controller.da
 import '../../features/notification/application/push_registration_status_controller.dart';
 import '../../features/notification/domain/repositories/notification_inbox_repository.dart';
 import '../../features/notification/presentation/screens/notification_list_screen.dart';
+import '../../features/permission/application/permission_onboarding_controller.dart';
+import '../../features/permission/presentation/screens/permission_onboarding_screen.dart';
 import '../../features/report/presentation/screens/report_screen.dart';
 import '../../features/report/presentation/screens/report_list_screen.dart';
 import '../../features/report/domain/repositories/report_repository.dart';
@@ -98,6 +100,7 @@ abstract final class AppRouter {
     GuardianUnlockController? guardianUnlock,
     GuardianPinRepository? guardianPinRepository,
     bool guardianPinGateEnabled = false,
+    PermissionOnboardingController? permissionOnboarding,
     Future<bool> Function(BuildContext context)? onReauthenticateGuardian,
   }) {
     final location = settings.name ?? AppRoutes.guardianHome;
@@ -133,17 +136,40 @@ abstract final class AppRouter {
       ['auth', 'bootstrap'] when authRestoreSession != null =>
         AuthBootstrapScreen(
           restoreSession: authRestoreSession,
-          onProfileSelectionRequired: goProfileSelection,
+          onProfileSelectionRequired: _guardianLanding(
+            AppRoutes.profileSelection,
+            permissionOnboarding,
+          ),
           onExpertAuthenticated: goExpertProfile,
           onLoginRequired: goLogin,
+        ),
+      // 권한 안내는 응답이 끝나면 원래 가려던 보호자 착지점으로 이어 준다.
+      // 그 착지점이 보호자 홈이면 이동이 라우트 생성을 다시 지나므로 PIN gate도
+      // 그대로 선다 — 여기서 홈으로 직행하는 우회로가 생기지 않는다.
+      ['auth', 'permissions'] when permissionOnboarding != null =>
+        PermissionOnboardingScreen(
+          controller: permissionOnboarding,
+          onFinished: (context) => AppNavigation.resetTo(
+            context,
+            settings.arguments is PermissionOnboardingRouteArguments
+                ? (settings.arguments! as PermissionOnboardingRouteArguments)
+                      .nextRoute
+                : AppRoutes.profileSelection,
+          ),
         ),
       ['auth', 'login']
           when authSignIn != null && authCompleteOnboarding != null =>
         AuthenticationFlowScreen(
           onSignIn: authSignIn,
           onCompleteOnboarding: authCompleteOnboarding,
-          onProfileSelectionRequired: goProfileSelection,
-          onGuardianOnboardingCompleted: goGuardianHome,
+          onProfileSelectionRequired: _guardianLanding(
+            AppRoutes.profileSelection,
+            permissionOnboarding,
+          ),
+          onGuardianOnboardingCompleted: _guardianLanding(
+            AppRoutes.guardianHome,
+            permissionOnboarding,
+          ),
           onExpertAuthenticated: goExpertProfile,
           // 온보딩 약관 상세 보기용 USER 전문 로더(S15P11B209-884).
           loadConsentTerms: consentRepository == null
@@ -619,6 +645,36 @@ abstract final class AppRouter {
     _ => false,
   };
 
+  /// 로그인·세션 복원이 끝난 보호자를 [destination]으로 보낸다. 아직 권한 안내에
+  /// 응답한 적이 없으면 그 앞에 안내를 한 번 끼운다.
+  ///
+  /// 인증 화면의 이동 콜백은 `void Function(BuildContext)`이라 여기서 저장소를
+  /// 읽을 자리가 없다. 그래서 판정은 이미 읽어 둔 값([PermissionOnboardingController.isPending])만
+  /// 본다 — 읽기는 보호자 세션이 확정되는 지점에서 먼저 끝난다(`app.dart`).
+  ///
+  /// 안내를 **보호자 홈이 아니라 착지점 앞**에 두는 이유:
+  /// 1. PIN gate가 `/guardian/home` 라우트 생성 지점에 있다. 같은 라우트를 둘이
+  ///    가로채면 서로를 밀어낸다.
+  /// 2. 프로필 선택에서 아이를 고르면 기기가 그대로 아이에게 넘어간다. 그 뒤에
+  ///    물으면 보호자용 안내와 시스템 권한 대화상자가 아이 앞에 뜬다.
+  /// 3. gate를 지난 뒤에 물으면 시스템 대화상자가 앱을 배경으로 돌리는 순간
+  ///    재잠금(`_relockGuardian`)이 걸려 보호자가 PIN 화면으로 튕긴다. 아직 잠금이
+  ///    풀리지 않은 이 시점에는 재잠금이 아무 일도 하지 않는다.
+  static void Function(BuildContext context) _guardianLanding(
+    String destination,
+    PermissionOnboardingController? permissionOnboarding,
+  ) => (context) {
+    if (permissionOnboarding != null && permissionOnboarding.isPending) {
+      AppNavigation.resetTo(
+        context,
+        AppRoutes.permissionOnboarding,
+        arguments: PermissionOnboardingRouteArguments(nextRoute: destination),
+      );
+      return;
+    }
+    AppNavigation.resetTo(context, destination);
+  };
+
   /// gate를 세울지 판정한다.
   ///
   /// rollout flag가 꺼져 있거나 PIN 경계를 주입받지 못했으면 gate를 세우지
@@ -679,6 +735,16 @@ class _TabPreparingScreen extends StatelessWidget {
     description: description,
     canPop: false,
   );
+}
+
+/// 권한 안내가 끝난 뒤 이어서 열 보호자 착지점.
+///
+/// 로그인한 기존 보호자는 프로필 선택으로, 온보딩을 막 끝낸 보호자는 보호자 홈으로
+/// 간다. 안내가 그 차이를 지워 버리지 않도록 원래 목적지를 들고 다닌다.
+final class PermissionOnboardingRouteArguments {
+  const PermissionOnboardingRouteArguments({required this.nextRoute});
+
+  final String nextRoute;
 }
 
 final class InputMethodSelectRouteArguments {

@@ -14,6 +14,7 @@ import 'features/child/data/repositories/remote_child_consent_repository.dart';
 import 'features/child/data/repositories/remote_child_repository.dart';
 import 'features/consent/data/repositories/remote_consent_repository.dart';
 import 'features/conversation/conversation.dart';
+import 'features/drawing/data/device_photo_permission_service.dart';
 import 'features/drawing/data/repositories/mock_drawing_repository.dart';
 import 'features/drawing/data/repositories/remote_drawing_repository.dart';
 import 'features/guardian_pin/data/repositories/remote_guardian_pin_repository.dart';
@@ -24,6 +25,8 @@ import 'features/notification/data/services/firebase_push_gateway.dart';
 import 'features/notification/data/services/local_push_presenter.dart';
 import 'features/notification/data/services/push_background_handler.dart';
 import 'features/notification/domain/services/push_setup.dart';
+import 'features/permission/application/permission_onboarding_controller.dart';
+import 'features/permission/data/secure_permission_onboarding_store.dart';
 import 'features/report/data/repositories/remote_report_repository.dart';
 import 'features/settings/data/repositories/remote_account_withdrawal_repository.dart';
 import 'features/settings/data/repositories/remote_data_retention_repository.dart';
@@ -113,6 +116,14 @@ DodamApp createDefaultApp({
   return DodamApp(
     htpPhotoUploadEnabled: htpPhotoUploadEnabled,
     guardianPinGateEnabled: guardianPinGateEnabled,
+    // 로그인 직후 한 번만 세우는 권한 안내. 요청은 각 기능이 이미 쓰는 서비스에
+    // 그대로 위임하므로, 건너뛰거나 거부해도 기존 개별 요청 경로가 살아 있다.
+    permissionOnboarding: PermissionOnboardingController(
+      store: SecurePermissionOnboardingStore(),
+      microphonePermissionService: DeviceMicrophonePermissionService(),
+      photoPermissionService: const DevicePhotoPermissionService(),
+      pushPermissionService: DevicePushPermissionService(),
+    ),
     guardianPinRepository: RemoteGuardianPinRepository(apiClient),
     authRepository: authRepository,
     activityRepository: RemoteActivityRepository(apiClient),
