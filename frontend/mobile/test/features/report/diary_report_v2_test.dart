@@ -97,6 +97,25 @@ void main() {
     expect(voicesOnly.hasContent, isFalse);
   });
 
+  test('발달 맥락만 있어도 V2 를 연다', () {
+    // 회귀: 발달 카드는 모델이 아니라 서버가 검증된 신호로 조립한다. 모델 카드가 하나도
+    //   살아남지 못한 활동에서도 보호자에게 적을 것이 남는데, 이걸 세지 않아 서버가 담아 보낸
+    //   4층이 화면에서만 사라지고 옛 리포트가 열렸다(2026-08-09 실측).
+    const developmentOnly = DiaryInsightsDto(
+      developmentalObservations: [
+        DiaryDevelopmentalObservationDto(
+          domain: 'EMOTION_EXPRESSION',
+          status: 'PARTIALLY_OBSERVED',
+          ageContext: '감정을 말이나 선택으로 표현했는지 이번 활동에서만 살펴봐요.',
+          observation: '이번 활동에서 아이는 감정을 보기에서 골랐어요.',
+          scopeText: '이번 활동에서 확인된 표현이며, 전체 발달 수준을 평가한 결과가 아니에요.',
+        ),
+      ],
+    );
+
+    expect(developmentOnly.hasContent, isTrue);
+  });
+
   testWidgets('가설에는 다른 설명이 함께 보인다', (tester) async {
     // 하나의 해석만 보이면 보호자는 그것을 결론으로 읽는다. 그 한 줄이 가설을 가설로 남긴다.
     await _pump(
