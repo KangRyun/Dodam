@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dodam/features/conversation/conversation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -151,9 +153,13 @@ void main() {
     addTearDown(controller.dispose);
 
     await controller.start();
-    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await _waitUntil(
+      controller,
+      recorder,
+      () => controller.status == VoiceRecordingStatus.awaitingChoice,
+      '무음 타임아웃으로 선택지 표시',
+    );
 
-    expect(controller.status, VoiceRecordingStatus.awaitingChoice);
     expect(controller.shouldShowOptions, isTrue);
     expect(recorder.cancelCount, 1);
   });
@@ -173,7 +179,14 @@ void main() {
     addTearDown(controller.dispose);
 
     await controller.start();
-    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await _waitUntil(
+      controller,
+      recorder,
+      () => controller.hasDetectedSpeech,
+      '발화 확정',
+    );
+    // 무음 타임아웃(300ms = 30샘플)이 걸릴 기회를 충분히 준 뒤에 본다.
+    await _afterSamples(recorder, 50);
 
     expect(controller.hasDetectedSpeech, isTrue);
     expect(controller.status, VoiceRecordingStatus.recording);
@@ -196,9 +209,13 @@ void main() {
     addTearDown(controller.dispose);
 
     await controller.start();
-    await Future<void>.delayed(const Duration(milliseconds: 90));
+    await _waitUntil(
+      controller,
+      recorder,
+      () => controller.status == VoiceRecordingStatus.completed,
+      '침묵으로 자동 완료',
+    );
 
-    expect(controller.status, VoiceRecordingStatus.completed);
     expect(controller.recording?.filePath, '/tmp/voice-answer.m4a');
     expect(recorder.stopCount, 1);
   });
@@ -219,10 +236,14 @@ void main() {
     addTearDown(controller.dispose);
 
     await controller.start();
-    await Future<void>.delayed(const Duration(milliseconds: 300));
+    await _waitUntil(
+      controller,
+      recorder,
+      () => controller.status == VoiceRecordingStatus.awaitingChoice,
+      '잡음만으로는 확정되지 않고 선택지로 넘어감',
+    );
 
     expect(controller.hasDetectedSpeech, isFalse);
-    expect(controller.status, VoiceRecordingStatus.awaitingChoice);
     expect(controller.shouldShowOptions, isTrue);
     expect(recorder.stopCount, 0);
   });
@@ -240,9 +261,13 @@ void main() {
     addTearDown(controller.dispose);
 
     await controller.start();
-    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await _waitUntil(
+      controller,
+      recorder,
+      () => controller.hasDetectedSpeech,
+      '연속 샘플로 발화 확정',
+    );
 
-    expect(controller.hasDetectedSpeech, isTrue);
     expect(controller.status, VoiceRecordingStatus.recording);
     await controller.cancel();
   });
@@ -260,9 +285,13 @@ void main() {
     addTearDown(controller.dispose);
 
     await controller.start();
-    await Future<void>.delayed(const Duration(milliseconds: 100));
+    await _waitUntil(
+      controller,
+      recorder,
+      () => controller.hasDetectedSpeech,
+      '한 샘플로 발화 확정',
+    );
 
-    expect(controller.hasDetectedSpeech, isTrue);
     await controller.cancel();
   });
 
@@ -279,8 +308,12 @@ void main() {
     addTearDown(controller.dispose);
 
     await controller.start();
-    await Future<void>.delayed(const Duration(milliseconds: 200));
-    expect(controller.hasDetectedSpeech, isTrue);
+    await _waitUntil(
+      controller,
+      recorder,
+      () => controller.hasDetectedSpeech,
+      '첫 질문에서 발화 확정',
+    );
 
     await controller.beginQuestion();
     expect(controller.hasDetectedSpeech, isFalse);
@@ -289,10 +322,14 @@ void main() {
     recorder.amplitude = -80;
     recorder.enqueue([-20]);
     await controller.start();
-    await Future<void>.delayed(const Duration(milliseconds: 200));
+    await _waitUntil(
+      controller,
+      recorder,
+      () => controller.status == VoiceRecordingStatus.awaitingChoice,
+      '새 질문에서 잡음 한 샘플로는 확정되지 않음',
+    );
 
     expect(controller.hasDetectedSpeech, isFalse);
-    expect(controller.status, VoiceRecordingStatus.awaitingChoice);
   });
 
   test('최대 녹음 시간이 지나면 발화 파일을 자동으로 완료한다', () async {
@@ -311,9 +348,13 @@ void main() {
     addTearDown(controller.dispose);
 
     await controller.start();
-    await Future<void>.delayed(const Duration(milliseconds: 60));
+    await _waitUntil(
+      controller,
+      recorder,
+      () => controller.status == VoiceRecordingStatus.completed,
+      '최대 시간 초과로 자동 완료',
+    );
 
-    expect(controller.status, VoiceRecordingStatus.completed);
     expect(recorder.stopCount, 1);
     expect(
       controller.recording?.completionReason,
@@ -441,6 +482,67 @@ final class _FakeMicrophonePermissionService
   }
 }
 
+/// [condition] 이 참이 될 때까지 기다린다 — "일어나야 할 일" 을 검증할 때 쓴다.
+///
+/// 왜 고정 시간을 자지 않는가: 원래 이 파일은 `await Future.delayed(90ms)` 뒤에
+/// 상태를 단정했다. 부하가 걸린 CI 에서는 10ms 주기 타이머가 밀려 그 시간 안에
+/// 샘플이 다 돌지 못한다 — 빌드 #347 이 `completed` 를 기다리다 `recording` 을
+/// 보고 실패했고, 프로덕션 코드는 멀쩡했다.
+///
+/// 컨트롤러 알림과 진폭 샘플 **양쪽** 에서 조건을 다시 본다. hasDetectedSpeech 처럼
+/// notifyListeners 없이 바뀌는 값도 다음 샘플에서 잡히고, 1초 티커를 기다리지 않는다.
+Future<void> _waitUntil(
+  VoiceRecordingController controller,
+  _FakeVoiceRecorder recorder,
+  bool Function() condition,
+  String describe,
+) {
+  if (condition()) return Future<void>.value();
+  final done = Completer<void>();
+  void check() {
+    if (!done.isCompleted && condition()) done.complete();
+  }
+
+  controller.addListener(check);
+  recorder.addSampleListener(check);
+  return done.future
+      .timeout(
+        const Duration(seconds: 5),
+        onTimeout: () => throw TimeoutException(
+          '$describe 에 도달하지 못했다 '
+          '(status=${controller.status}, samples=${recorder.sampleCount})',
+        ),
+      )
+      .whenComplete(() {
+        controller.removeListener(check);
+        recorder.removeSampleListener(check);
+      });
+}
+
+/// 지금부터 [count] 개의 진폭 샘플이 더 소비될 때까지 기다린다 —
+/// "일어나면 안 될 일" 을 검증할 때 쓴다.
+///
+/// 부정 단정은 시간이 지나야 의미가 생기는데, 벽시계로 재면 부하가 걸릴 때
+/// "충분히 지났다" 가 무너진다. 샘플 수로 재면 간격이 밀리는 만큼 실제 경과는
+/// 오히려 늘어나므로 보장이 약해지지 않는다(N 샘플 ≥ N × 간격).
+Future<void> _afterSamples(_FakeVoiceRecorder recorder, int count) {
+  final target = recorder.sampleCount + count;
+  final done = Completer<void>();
+  void check() {
+    if (!done.isCompleted && recorder.sampleCount >= target) done.complete();
+  }
+
+  recorder.addSampleListener(check);
+  return done.future
+      .timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw TimeoutException(
+          '샘플 $target 개에 도달하지 못했다 (현재 ${recorder.sampleCount})',
+        ),
+      )
+      .whenComplete(() => recorder.removeSampleListener(check));
+}
+
 final class _FakeVoiceRecorder implements VoiceRecorder {
   _FakeVoiceRecorder({
     this.amplitude = -20,
@@ -463,6 +565,15 @@ final class _FakeVoiceRecorder implements VoiceRecorder {
   int stopCount = 0;
   int cancelCount = 0;
 
+  /// 지금까지 소비한 진폭 샘플 수. 테스트가 진행을 **벽시계 대신 이 값으로** 잰다.
+  int sampleCount = 0;
+  final List<VoidCallback> _sampleListeners = [];
+
+  void addSampleListener(VoidCallback listener) =>
+      _sampleListeners.add(listener);
+  void removeSampleListener(VoidCallback listener) =>
+      _sampleListeners.remove(listener);
+
   @override
   Future<void> start() async {
     startCount += 1;
@@ -471,8 +582,14 @@ final class _FakeVoiceRecorder implements VoiceRecorder {
   }
 
   @override
-  Future<double> readAmplitude() async =>
-      _amplitudes.isEmpty ? amplitude : _amplitudes.removeAt(0);
+  Future<double> readAmplitude() async {
+    sampleCount += 1;
+    // 복사본을 돈다 — 리스너가 자기 자신을 떼어낼 수 있다.
+    for (final listener in [..._sampleListeners]) {
+      listener();
+    }
+    return _amplitudes.isEmpty ? amplitude : _amplitudes.removeAt(0);
+  }
 
   @override
   Future<String?> stop() async {
