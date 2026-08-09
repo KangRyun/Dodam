@@ -424,7 +424,14 @@ Future<_DrawingHarness> _pumpScreen(
           )
         : null,
   );
-  final sync = DrawingSyncCoordinator(sessionId: 42, repository: repository);
+  final sync = DrawingSyncCoordinator(
+    sessionId: 42,
+    repository: repository,
+    // 지우개 동작 테스트는 사용자의 논리 입력 순서를 검증한다. CI 부하로
+    // 벽시계가 3초를 넘겨도 PAUSE/RESUME 이벤트가 끼지 않도록 시간을 고정한다.
+    // 유휴 이벤트 생성 규칙은 DrawingEventJournal 단위 테스트에서 따로 검증한다.
+    journal: DrawingEventJournal(sessionClock: Stopwatch()),
+  );
   final document = DrawingDocumentController();
   final restore = DrawingDraftRestoreController(
     sessionId: 42,
