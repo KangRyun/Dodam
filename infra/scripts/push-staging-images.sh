@@ -74,13 +74,31 @@ fi
 #   반면 `docker push` 는 클라이언트가 아니라 **데몬**이 수행한다. 데몬은 호스트에
 #   있으므로 127.0.0.1:5000 을 제대로 해석한다 → push 주소는 바꿀 필요가 없다.
 #   조회만 호스트 네트워크로 우회하면 된다.
-PROBE_IMAGE="${PROBE_IMAGE:-${IMAGES[0]}:${SRC_TAG}}"
+#
+# ★★ 조회용 이미지는 아무거나 쓰면 안 되고, **엔트리포인트를 반드시 덮어써야 한다.**
+#   `docker run <img> wget ...` 의 뒤쪽은 CMD 로 들어간다. 이미지에 ENTRYPOINT 가
+#   있으면 wget 이 실행되는 게 아니라 **엔트리포인트의 인자로 먹힌다.**
+#     dodam-nginx   : ENTRYPOINT /docker-entrypoint.sh — 끝에서 exec "$@" 라 wget 이 돈다
+#     dodam-backend : ENTRYPOINT java -jar /app/app.jar — `java -jar app.jar wget ...` 이 돼
+#                     스프링 부팅을 시도한다(=조회가 아니라 앱 기동)
+#   실제로 2026-08-09 빌드 #348 이 이걸로 죽었다. 조회 이미지 기본값이
+#   dodam-nginx:local 에서 IMAGES[0](=dodam-backend) 로 바뀌자 조회가 백엔드를 띄웠고,
+#   2분 7초를 태운 뒤 "레지스트리에 닿지 않는다"로 오진했다 — 레지스트리는 멀쩡했다.
+#   → --entrypoint wget 으로 못을 박고, wget 이 있는 이미지만 후보로 둔다.
+#     (dodam-ai 에는 wget 이 없다. 실측 2026-08-09)
+#   → timeout 을 씌워 조회 하나가 빌드를 분 단위로 잡아먹지 못하게 한다.
 registry_get() {
   # 1) 호스트에서 실행된 경우
   curl -fsS -m 5 "http://${REGISTRY}$1" 2>/dev/null && return 0
-  # 2) 컨테이너 안인 경우 — 호스트 네트워크에 붙인 일회용 컨테이너로 조회
-  docker run --rm --network host "$PROBE_IMAGE" \
-    wget -q -O - -T 5 "http://${REGISTRY}$1" 2>/dev/null
+  # 2) 컨테이너 안인 경우 — 호스트 네트워크에 붙인 일회용 컨테이너로 조회.
+  #    변경 범위에 따라 일부 :local 이 없을 수 있어 있는 것부터 차례로 시도한다.
+  for probe in ${PROBE_IMAGE:+"$PROBE_IMAGE"} \
+    "dodam-nginx:${SRC_TAG}" "dodam-web:${SRC_TAG}" "dodam-backend:${SRC_TAG}"; do
+    docker image inspect "$probe" >/dev/null 2>&1 || continue
+    timeout 20 docker run --rm --network host --entrypoint wget "$probe" \
+      -q -O - -T 5 "http://${REGISTRY}$1" 2>/dev/null && return 0
+  done
+  return 1
 }
 
 # ── 1. 레지스트리가 살아 있는가 ────────────────────────────────────────────
