@@ -54,6 +54,8 @@ final class VoiceRecordingController extends ChangeNotifier {
   Timer? _ticker;
   Timer? _amplitudeTimer;
   bool _readingAmplitude = false;
+  bool _disposed = false;
+  Future<void>? _cancelFuture;
 
   /// 취소할 때마다 오르는 세대 번호.
   ///
@@ -88,17 +90,19 @@ final class VoiceRecordingController extends ChangeNotifier {
 
   // 질문 음성을 들려주는 동안 수동 녹음 버튼이 먼저 노출되지 않게 한다.
   void prepareForAutomaticStart() {
-    if (_status != VoiceRecordingStatus.idle) return;
+    if (_disposed || _status != VoiceRecordingStatus.idle) return;
     _status = VoiceRecordingStatus.preparing;
     notifyListeners();
   }
 
   // 새 질문에서는 이전 질문의 녹음 결과와 오류 상태를 재사용하지 않는다.
   Future<void> beginQuestion() async {
+    if (_disposed) return;
     if (_status == VoiceRecordingStatus.starting ||
         _status == VoiceRecordingStatus.recording) {
       await cancel();
     }
+    if (_disposed) return;
     _ticker?.cancel();
     _ticker = null;
     _amplitudeTimer?.cancel();
@@ -118,7 +122,8 @@ final class VoiceRecordingController extends ChangeNotifier {
 
   // 새 음성 답변 녹음 시작
   Future<bool> start() async {
-    if (_status == VoiceRecordingStatus.starting ||
+    if (_disposed ||
+        _status == VoiceRecordingStatus.starting ||
         _status == VoiceRecordingStatus.recording ||
         _status == VoiceRecordingStatus.stopping) {
       return false;
@@ -131,8 +136,9 @@ final class VoiceRecordingController extends ChangeNotifier {
     } on Object {
       // TTS 중단 실패가 아이의 녹음 시작까지 막아서는 안 된다.
     }
-    if (_status != VoiceRecordingStatus.starting) return false;
+    if (_disposed || _status != VoiceRecordingStatus.starting) return false;
     final permissionStatus = await permissionService?.request();
+    if (_disposed || _status != VoiceRecordingStatus.starting) return false;
     if (permissionStatus == MicrophonePermissionStatus.denied) {
       _status = VoiceRecordingStatus.permissionDenied;
       notifyListeners();
@@ -153,8 +159,9 @@ final class VoiceRecordingController extends ChangeNotifier {
     notifyListeners();
     try {
       await _recorder.start();
+      if (_disposed) return false;
       if (_status != VoiceRecordingStatus.starting) {
-        await _recorder.cancel();
+        await _cancelRecorder();
         return false;
       }
       _stopwatch
@@ -162,7 +169,7 @@ final class VoiceRecordingController extends ChangeNotifier {
         ..start();
       _startedAt = DateTime.now().toUtc();
       _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
-        notifyListeners();
+        if (!_disposed) notifyListeners();
       });
       _amplitudeTimer = Timer.periodic(
         amplitudeSampleInterval,
@@ -172,6 +179,7 @@ final class VoiceRecordingController extends ChangeNotifier {
       notifyListeners();
       return true;
     } on Object catch (error) {
+      if (_disposed) return false;
       _lastError = error;
       _status = VoiceRecordingStatus.failed;
       notifyListeners();
@@ -188,7 +196,7 @@ final class VoiceRecordingController extends ChangeNotifier {
     VoiceRecordingCompletionReason reason =
         VoiceRecordingCompletionReason.manual,
   }) async {
-    if (_status != VoiceRecordingStatus.recording) return null;
+    if (_disposed || _status != VoiceRecordingStatus.recording) return null;
 
     final generation = _generation;
     _status = VoiceRecordingStatus.stopping;
@@ -203,7 +211,7 @@ final class VoiceRecordingController extends ChangeNotifier {
     try {
       final path = await _recorder.stop();
       // 멈추는 사이 취소됐다. 아이가 보기를 골랐다는 뜻이라 이 녹음은 답이 아니다.
-      if (generation != _generation) return null;
+      if (_disposed || generation != _generation) return null;
       if (path == null || path.isEmpty) {
         throw StateError('Recorded file path is missing');
       }
@@ -219,7 +227,7 @@ final class VoiceRecordingController extends ChangeNotifier {
       notifyListeners();
       return result;
     } on Object catch (error) {
-      if (generation != _generation) return null;
+      if (_disposed || generation != _generation) return null;
       _lastError = error;
       _status = VoiceRecordingStatus.failed;
       notifyListeners();
@@ -245,8 +253,9 @@ final class VoiceRecordingController extends ChangeNotifier {
   /// 세대(generation)를 올려 **늦게 도착한 recorder 결과를 무시**한다. `stop()` 이
   /// 이미 진행 중이면 그 결과는 이 취소 뒤에 도착하는데, 세대가 달라 반영되지 않는다.
   Future<void> cancel() async {
-    if (_status == VoiceRecordingStatus.idle) return;
+    if (_disposed || _status == VoiceRecordingStatus.idle) return;
     _generation += 1;
+    final generation = _generation;
 
     _ticker?.cancel();
     _ticker = null;
@@ -255,11 +264,14 @@ final class VoiceRecordingController extends ChangeNotifier {
     _stopwatch
       ..stop()
       ..reset();
+    Object? cancelError;
     try {
-      await _recorder.cancel();
+      await _cancelRecorder();
     } on Object catch (error) {
-      _lastError = error;
+      cancelError = error;
     }
+    if (_disposed || generation != _generation) return;
+    if (cancelError != null) _lastError = cancelError;
     _recording = null;
     _status = VoiceRecordingStatus.idle;
     notifyListeners();
@@ -267,10 +279,15 @@ final class VoiceRecordingController extends ChangeNotifier {
 
   // 음성이 없으면 녹음을 폐기하고 선택지 응답으로 전환
   Future<void> _checkAmplitude() async {
-    if (_readingAmplitude || _status != VoiceRecordingStatus.recording) return;
+    if (_disposed ||
+        _readingAmplitude ||
+        _status != VoiceRecordingStatus.recording) {
+      return;
+    }
     _readingAmplitude = true;
     try {
       final amplitude = await _recorder.readAmplitude();
+      if (_disposed || _status != VoiceRecordingStatus.recording) return;
       final elapsed = _stopwatch.elapsed;
       if (amplitude >= speechThreshold) {
         _consecutiveSpeechSamples += 1;
@@ -305,6 +322,7 @@ final class VoiceRecordingController extends ChangeNotifier {
         }
       }
     } on Object catch (error) {
+      if (_disposed) return;
       _lastError = error;
       await _discardActiveRecording(VoiceRecordingStatus.failed);
     } finally {
@@ -318,6 +336,8 @@ final class VoiceRecordingController extends ChangeNotifier {
   }
 
   Future<void> _discardActiveRecording(VoiceRecordingStatus nextStatus) async {
+    if (_disposed) return;
+    final generation = _generation;
     _ticker?.cancel();
     _ticker = null;
     _amplitudeTimer?.cancel();
@@ -325,24 +345,57 @@ final class VoiceRecordingController extends ChangeNotifier {
     _stopwatch
       ..stop()
       ..reset();
+    Object? cancelError;
     try {
-      await _recorder.cancel();
+      await _cancelRecorder();
     } on Object catch (error) {
-      _lastError = error;
+      cancelError = error;
     }
+    if (_disposed || generation != _generation) return;
+    if (cancelError != null) _lastError = cancelError;
     _recording = null;
     _status = nextStatus;
     notifyListeners();
   }
 
+  Future<void> _cancelRecorder() {
+    final pending = _cancelFuture;
+    if (pending != null) return pending;
+
+    late final Future<void> cancellation;
+    cancellation = Future<void>.sync(_recorder.cancel).whenComplete(() {
+      if (identical(_cancelFuture, cancellation)) _cancelFuture = null;
+    });
+    _cancelFuture = cancellation;
+    return cancellation;
+  }
+
+  Future<void> _disposeRecorder() async {
+    try {
+      if (_status == VoiceRecordingStatus.starting ||
+          isRecording ||
+          _status == VoiceRecordingStatus.stopping ||
+          _cancelFuture != null) {
+        await _cancelRecorder();
+      }
+    } on Object {
+      // dispose 이후에는 정리 실패를 상태로 전파할 수 없다.
+    } finally {
+      try {
+        await _recorder.dispose();
+      } on Object {
+        // ChangeNotifier 수명 종료 후의 recorder 오류는 안전하게 종료한다.
+      }
+    }
+  }
+
   @override
   void dispose() {
+    _disposed = true;
+    _generation += 1;
     _ticker?.cancel();
     _amplitudeTimer?.cancel();
-    if (isRecording || _status == VoiceRecordingStatus.stopping) {
-      unawaited(_recorder.cancel());
-    }
-    unawaited(_recorder.dispose());
+    unawaited(_disposeRecorder());
     super.dispose();
   }
 }
