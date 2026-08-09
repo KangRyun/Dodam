@@ -1038,7 +1038,11 @@ void main() {
     expect(repository.lastActivityRequest?.requestReport, isTrue);
     expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
     expect(
-      find.text('더 그리고 싶으면 또 그려도 돼요.\n다 했으면 보호자에게 기기를 건네주세요.'),
+      find.text(
+        '오늘 그린 그림은 잘 담아 두었어요.\n'
+        '준비가 되면 보호자에게 알려 줄게요.\n'
+        '더 그려도 되고, 이제 보호자에게 건네줘도 돼요.',
+      ),
       findsOneWidget,
     );
     expect(
@@ -1249,115 +1253,70 @@ void main() {
     expect(find.text('보호자 화면으로 이동할까요?'), findsNothing);
   });
 
-  testWidgets('REPORTING 상태는 COMPLETED가 될 때까지 조회한 뒤 완료를 안내한다', (tester) async {
-    final repository = _CompletionRepository(
-      sessionStatuses: ['IN_PROGRESS', 'COMPLETED'],
-    );
+  testWidgets('완료가 접수되면 리포트를 기다리지 않고 곧바로 전달 화면을 보여준다', (tester) async {
+    // 서버는 완료를 REPORTING 접수로 돌려준다 — 리포트는 아직 만들어지지 않았다.
+    // 예전에는 이 상태에서 아이가 최대 60초짜리 스피너를 봤다.
+    final repository = _CompletionRepository();
+    final observer = _CompletionNavigationObserver();
 
-    await _pumpComplete(
+    await _pumpEmotion(
       tester,
       repository: repository,
       sessionId: 42,
-      pollInterval: Duration.zero,
+      navigatorObserver: observer,
+      conversationSkipped: false,
     );
+    await tester.tap(find.byKey(const ValueKey('emotion-기쁨')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('emotion-submit')));
+    await tester.pumpAndSettle();
 
-    expect(repository.sessionStatusCalls, 2);
+    expect(repository.activityCompleteCalls, 1);
+    expect(observer.activityCompleteReplacements, 1);
+    expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
     expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
     expect(
-      find.byKey(const ValueKey('activity-completion-progress')),
-      findsNothing,
+      find.byKey(const ValueKey('activity-complete-draw-again')),
+      findsOneWidget,
     );
+    // 완료 화면은 세션 상태를 한 번도 조회하지 않는다 — 리포트 준비는 보호자 알림 몫이다.
+    expect(repository.sessionStatusCalls, 0);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
   });
 
-  testWidgets('REPORTING 다음 FAILED이면 완료 실패 UI를 표시한다', (tester) async {
-    final repository = _CompletionRepository(
-      sessionStatuses: ['IN_PROGRESS', 'FAILED'],
-    );
+  testWidgets('전달 화면에는 기다림·실패 문구도, 리포트 같은 어른 말도 없다', (tester) async {
+    await _pumpComplete(tester);
 
-    await _pumpComplete(
-      tester,
-      repository: repository,
-      sessionId: 42,
-      pollInterval: Duration.zero,
-    );
-
-    expect(repository.sessionStatusCalls, 2);
-    expect(find.text('활동을 마무리하지 못했어요'), findsOneWidget);
-    expect(find.text('보호자에게 알려 다시 확인해 주세요.'), findsOneWidget);
-    expect(find.byKey(const ValueKey('guardian-handoff')), findsNothing);
-    // S15P11B209-820: 실패 안내와 함께 이탈 경로가 항상 있어야 한다.
-    expect(
-      find.byKey(const ValueKey('activity-completion-failure-appbar')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('activity-completion-child-home')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('activity-completion-guardian-home')),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('완료 실패에서 AppBar 뒤로가기는 아동 홈으로 나간다', (tester) async {
-    final repository = _CompletionRepository(sessionStatuses: ['FAILED']);
-    final observer = _LeaveNavigationObserver();
-
-    await _pumpComplete(
-      tester,
-      repository: repository,
-      sessionId: 42,
-      pollInterval: Duration.zero,
-      navigatorObserver: observer,
-    );
-    expect(find.text('활동을 마무리하지 못했어요'), findsOneWidget);
-
-    await tester.tap(find.byTooltip('뒤로 가기'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('아동 홈 테스트'), findsOneWidget);
+    expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
+    expect(find.byType(CircularProgressIndicator), findsNothing);
+    // 리포트 생성이 실패해도 그 소식은 보호자 알림으로 간다(CLAUDE.md 9절).
     expect(find.text('활동을 마무리하지 못했어요'), findsNothing);
-    expect(observer.childHomePushes, 1);
-    expect(repository.sessionStatusCalls, 1);
+    expect(find.text('완료 상태를 확인하지 못했어요'), findsNothing);
+    for (final forbidden in ['리포트', '분석', '실패', '오류', '기다']) {
+      expect(find.textContaining(forbidden), findsNothing, reason: forbidden);
+    }
   });
 
-  testWidgets('완료 실패에서 시스템 뒤로가기는 아동 홈으로 나간다', (tester) async {
-    final repository = _CompletionRepository(sessionStatuses: ['FAILED']);
-    final observer = _LeaveNavigationObserver();
+  testWidgets('전달 화면에는 나갈 길 두 가지가 언제나 함께 있다', (tester) async {
+    // S15P11B209-820: 아이가 이 화면에 갇히면 안 된다. 상태로 갈라지지 않으므로
+    // 두 버튼은 항상 떠 있어야 한다.
+    await _pumpComplete(tester);
 
-    await _pumpComplete(
-      tester,
-      repository: repository,
-      sessionId: 42,
-      pollInterval: Duration.zero,
-      navigatorObserver: observer,
+    expect(
+      find.byKey(const ValueKey('activity-complete-draw-again')),
+      findsOneWidget,
     );
-    expect(find.text('활동을 마무리하지 못했어요'), findsOneWidget);
-
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-
-    expect(find.text('아동 홈 테스트'), findsOneWidget);
-    expect(observer.childHomePushes, 1);
+    expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
   });
 
-  testWidgets('완료 실패에서 아동 홈 CTA를 연달아 눌러도 한 번만 이동한다', (tester) async {
-    final repository = _CompletionRepository(sessionStatuses: ['FAILED']);
+  testWidgets('또 그리기를 연달아 눌러도 한 번만 이동한다', (tester) async {
     final observer = _LeaveNavigationObserver();
-
-    await _pumpComplete(
-      tester,
-      repository: repository,
-      sessionId: 42,
-      pollInterval: Duration.zero,
-      navigatorObserver: observer,
-    );
+    await _pumpComplete(tester, navigatorObserver: observer);
 
     // 같은 좌표로 두 번 누른다. 첫 입력이 이동을 시작한 뒤 도착한 두 번째
     // 입력이 또 한 번 스택을 세우면 안 된다.
     final center = tester.getCenter(
-      find.byKey(const ValueKey('activity-completion-child-home')),
+      find.byKey(const ValueKey('activity-complete-draw-again')),
     );
     await tester.tapAt(center);
     await tester.tapAt(center);
@@ -1368,26 +1327,18 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('완료 실패에서 아동 홈과 보호자 이동을 겹쳐 눌러도 한 번만 이동한다', (tester) async {
-    final repository = _CompletionRepository(sessionStatuses: ['FAILED']);
+  testWidgets('또 그리기와 보호자 이동을 겹쳐 눌러도 한 번만 이동한다', (tester) async {
     final observer = _LeaveNavigationObserver();
-
-    await _pumpComplete(
-      tester,
-      repository: repository,
-      sessionId: 42,
-      pollInterval: Duration.zero,
-      navigatorObserver: observer,
-    );
+    await _pumpComplete(tester, navigatorObserver: observer);
 
     final guardian = tester.getCenter(
-      find.byKey(const ValueKey('activity-completion-guardian-home')),
+      find.byKey(const ValueKey('guardian-handoff')),
     );
-    final childHome = tester.getCenter(
-      find.byKey(const ValueKey('activity-completion-child-home')),
+    final drawAgain = tester.getCenter(
+      find.byKey(const ValueKey('activity-complete-draw-again')),
     );
     // 아동 홈 이동이 먼저 확정되면 뒤이은 보호자 이동은 무시돼야 한다.
-    await tester.tapAt(childHome);
+    await tester.tapAt(drawAgain);
     await tester.tapAt(guardian);
     await tester.pumpAndSettle();
 
@@ -1398,223 +1349,44 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('완료 실패에서 시스템 뒤로가기를 다시 눌러도 아동 홈에 머문다', (tester) async {
-    final repository = _CompletionRepository(sessionStatuses: ['FAILED']);
+  testWidgets('보호자 이동을 취소해도 또 그리기로 나갈 수 있다', (tester) async {
     final observer = _LeaveNavigationObserver();
+    await _pumpComplete(tester, navigatorObserver: observer);
 
-    await _pumpComplete(
-      tester,
-      repository: repository,
-      sessionId: 42,
-      pollInterval: Duration.zero,
-      navigatorObserver: observer,
-    );
-
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-    expect(find.text('아동 홈 테스트'), findsOneWidget);
-
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-
-    expect(find.text('아동 홈 테스트'), findsOneWidget);
-    expect(observer.childHomePushes, 1);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('완료 실패 이탈 뒤에는 추가 상태 조회도 화면 복귀도 없다', (tester) async {
-    final repository = _CompletionRepository(
-      sessionStatuses: ['IN_PROGRESS', 'FAILED'],
-    );
-    final observer = _LeaveNavigationObserver();
-
-    await _pumpComplete(
-      tester,
-      repository: repository,
-      sessionId: 42,
-      pollInterval: Duration.zero,
-      navigatorObserver: observer,
-    );
-    expect(repository.sessionStatusCalls, 2);
-
-    await tester.tap(
-      find.byKey(const ValueKey('activity-completion-child-home')),
-    );
-    await tester.pumpAndSettle();
-
-    for (var pump = 0; pump < 5; pump += 1) {
-      await tester.pump();
-    }
-
-    expect(repository.sessionStatusCalls, 2);
-    expect(repository.activityCompletionCalls, 0);
-    expect(repository.reflectionCalls, 0);
-    expect(repository.completeCalls, 0);
-    expect(find.text('아동 홈 테스트'), findsOneWidget);
-    expect(find.text('활동을 마무리하지 못했어요'), findsNothing);
-    expect(observer.childHomePushes, 1);
-    expect(tester.takeException(), isNull);
-  });
-
-  testWidgets('완료 실패의 보호자 이동은 기존 확인 절차를 거친다', (tester) async {
-    final repository = _CompletionRepository(sessionStatuses: ['FAILED']);
-    final observer = _LeaveNavigationObserver();
-
-    await _pumpComplete(
-      tester,
-      repository: repository,
-      sessionId: 42,
-      pollInterval: Duration.zero,
-      navigatorObserver: observer,
-    );
-
-    await tester.tap(
-      find.byKey(const ValueKey('activity-completion-guardian-home')),
-    );
-    await tester.pumpAndSettle();
-
-    expect(find.text('보호자 화면으로 이동할까요?'), findsOneWidget);
-    expect(find.text('보호자 홈 테스트'), findsNothing);
-    expect(observer.guardianHomePushes, 0);
-  });
-
-  testWidgets('완료 실패의 보호자 이동을 취소하면 실패 화면에 남는다', (tester) async {
-    final repository = _CompletionRepository(sessionStatuses: ['FAILED']);
-    final observer = _LeaveNavigationObserver();
-
-    await _pumpComplete(
-      tester,
-      repository: repository,
-      sessionId: 42,
-      pollInterval: Duration.zero,
-      navigatorObserver: observer,
-    );
-
-    await tester.tap(
-      find.byKey(const ValueKey('activity-completion-guardian-home')),
-    );
+    await tester.tap(find.byKey(const ValueKey('guardian-handoff')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('취소'));
     await tester.pumpAndSettle();
 
-    expect(find.text('활동을 마무리하지 못했어요'), findsOneWidget);
+    expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
     expect(find.text('보호자 화면으로 이동할까요?'), findsNothing);
     expect(observer.guardianHomePushes, 0);
     expect(observer.childHomePushes, 0);
 
     // 취소 뒤에도 이탈 수단이 다시 동작해야 한다.
     await tester.tap(
-      find.byKey(const ValueKey('activity-completion-child-home')),
+      find.byKey(const ValueKey('activity-complete-draw-again')),
     );
     await tester.pumpAndSettle();
     expect(find.text('아동 홈 테스트'), findsOneWidget);
     expect(observer.childHomePushes, 1);
   });
 
-  testWidgets('완료 실패의 보호자 이동을 확인하면 기존 Guardian Home 경로를 탄다', (tester) async {
-    final repository = _CompletionRepository(sessionStatuses: ['FAILED']);
-    final observer = _LeaveNavigationObserver();
-
-    await _pumpComplete(
-      tester,
-      repository: repository,
-      sessionId: 42,
-      pollInterval: Duration.zero,
-      navigatorObserver: observer,
-    );
-
-    await tester.tap(
-      find.byKey(const ValueKey('activity-completion-guardian-home')),
-    );
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('확인'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('보호자 홈 테스트'), findsOneWidget);
-    expect(find.text('활동을 마무리하지 못했어요'), findsNothing);
-    expect(observer.guardianHomePushes, 1);
-    expect(observer.childHomePushes, 0);
-    expect(repository.sessionStatusCalls, 1);
-  });
-
-  testWidgets('완료 polling 중에는 뒤로가기가 계속 차단된다', (tester) async {
-    final sessionCompleter = Completer<DrawingSessionDto>();
-    final repository = _CompletionRepository(
-      sessionCompleter: sessionCompleter,
-    );
-    final observer = _LeaveNavigationObserver();
-
-    await _pumpComplete(
-      tester,
-      repository: repository,
-      sessionId: 42,
-      pollInterval: Duration.zero,
-      navigatorObserver: observer,
-      settle: false,
-    );
-    await tester.pump();
-    expect(
-      find.byKey(const ValueKey('activity-completion-progress')),
-      findsOneWidget,
-    );
-    expect(
-      find.byKey(const ValueKey('activity-completion-failure-appbar')),
-      findsNothing,
-    );
-
-    await tester.binding.handlePopRoute();
-    await tester.pump();
-
-    expect(
-      find.byKey(const ValueKey('activity-completion-progress')),
-      findsOneWidget,
-    );
-    expect(find.text('아동 홈 테스트'), findsNothing);
-    expect(observer.childHomePushes, 0);
-
-    sessionCompleter.complete(_sessionDto(sessionId: 42, status: 'COMPLETED'));
-    await tester.pumpAndSettle();
-  });
-
-  testWidgets('완료 성공 화면에서는 뒤로가기가 계속 차단된다', (tester) async {
-    final repository = _CompletionRepository(sessionStatuses: ['COMPLETED']);
-    final observer = _LeaveNavigationObserver();
-
-    await _pumpComplete(
-      tester,
-      repository: repository,
-      sessionId: 42,
-      pollInterval: Duration.zero,
-      navigatorObserver: observer,
-    );
-    expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
-    expect(
-      find.byKey(const ValueKey('activity-completion-failure-appbar')),
-      findsNothing,
-    );
-
-    await tester.binding.handlePopRoute();
-    await tester.pumpAndSettle();
-
-    expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
-    expect(find.text('아동 홈 테스트'), findsNothing);
-    expect(observer.childHomePushes, 0);
-  });
-
-  testWidgets('세션 식별자 없는 완료 안내에서도 뒤로가기는 차단된다', (tester) async {
+  testWidgets('전달 화면에서는 뒤로가기가 계속 차단된다', (tester) async {
     final observer = _LeaveNavigationObserver();
     await _pumpComplete(tester, navigatorObserver: observer);
 
     expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
+
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
 
     expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
+    expect(find.text('아동 홈 테스트'), findsNothing);
     expect(observer.childHomePushes, 0);
   });
 
-  testWidgets('완료 실패 이탈은 이전 route가 남아 있어도 아동 홈으로 스택을 세운다', (tester) async {
-    final repository = _CompletionRepository(sessionStatuses: ['FAILED']);
+  testWidgets('또 그리기는 이전 route가 남아 있어도 아동 홈으로 스택을 세운다', (tester) async {
     final observer = _LeaveNavigationObserver();
 
     await tester.pumpWidget(
@@ -1634,12 +1406,7 @@ void main() {
                   settings: RouteSettings(
                     name: AppRoutes.activityComplete('3'),
                   ),
-                  builder: (_) => ActivityCompleteScreen(
-                    childId: '3',
-                    sessionId: 42,
-                    drawingRepository: repository,
-                    pollInterval: Duration.zero,
-                  ),
+                  builder: (_) => const ActivityCompleteScreen(childId: '3'),
                 ),
               ),
               child: const Text('완료 화면 열기'),
@@ -1650,10 +1417,10 @@ void main() {
     );
     await tester.tap(find.text('완료 화면 열기'));
     await tester.pumpAndSettle();
-    expect(find.text('활동을 마무리하지 못했어요'), findsOneWidget);
+    expect(find.text('그림 활동을 모두 마쳤어요!'), findsOneWidget);
 
     await tester.tap(
-      find.byKey(const ValueKey('activity-completion-child-home')),
+      find.byKey(const ValueKey('activity-complete-draw-again')),
     );
     await tester.pumpAndSettle();
 
@@ -1665,29 +1432,6 @@ void main() {
     await tester.binding.handlePopRoute();
     await tester.pumpAndSettle();
     expect(find.text('아동 홈 테스트'), findsOneWidget);
-  });
-
-  testWidgets('상태 조회 네트워크 실패 후 완료 화면에서 수동 재확인한다', (tester) async {
-    final repository = _CompletionRepository(
-      sessionFailures: [StateError('network')],
-    );
-
-    await _pumpComplete(
-      tester,
-      repository: repository,
-      sessionId: 42,
-      pollInterval: Duration.zero,
-    );
-    expect(
-      find.byKey(const ValueKey('activity-completion-retry')),
-      findsOneWidget,
-    );
-
-    await tester.tap(find.byKey(const ValueKey('activity-completion-retry')));
-    await tester.pumpAndSettle();
-
-    expect(repository.sessionStatusCalls, 2);
-    expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
   });
 
   testWidgets('또 그리기를 누르면 아동 홈으로 스택을 세워 새 활동을 시작한다', (tester) async {
@@ -2118,11 +1862,10 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('HTTP 202 직후 완료 상태 화면으로 이동하고 그 화면에서만 조회한다', (tester) async {
-    final sessionCompleter = Completer<DrawingSessionDto>();
-    final repository = _CompletionRepository(
-      sessionCompleter: sessionCompleter,
-    );
+  testWidgets('완료 접수 응답이 오면 곧바로 전달 화면으로 교체한다', (tester) async {
+    // 서버가 접수(202)한 순간이 아이에게는 끝이다. 완료 화면은 그 뒤로 서버를
+    // 다시 부르지 않는다 — 리포트 준비·실패는 보호자 푸시 알림이 알린다.
+    final repository = _CompletionRepository();
     final observer = _CompletionNavigationObserver();
     await _pumpEmotion(
       tester,
@@ -2140,43 +1883,12 @@ void main() {
 
     expect(repository.activityCompleteCalls, 1);
     expect(observer.activityCompleteReplacements, 1);
-    expect(
-      find.byKey(const ValueKey('activity-completion-progress')),
-      findsOneWidget,
-    );
-    expect(repository.sessionStatusCalls, 1);
-
-    sessionCompleter.complete(_sessionDto(sessionId: 42, status: 'COMPLETED'));
-    await tester.pumpAndSettle();
     expect(find.byKey(const ValueKey('guardian-handoff')), findsOneWidget);
-  });
+    expect(repository.sessionStatusCalls, 0);
 
-  testWidgets('완료 화면 dispose 후 진행 중 조회가 끝나도 추가 GET이 없다', (tester) async {
-    final sessionCompleter = Completer<DrawingSessionDto>();
-    final repository = _CompletionRepository(
-      sessionCompleter: sessionCompleter,
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        home: ActivityCompleteScreen(
-          childId: '3',
-          sessionId: 42,
-          drawingRepository: repository,
-          pollInterval: Duration.zero,
-        ),
-      ),
-    );
-    await tester.pump();
-    expect(repository.sessionStatusCalls, 1);
-
-    await tester.pumpWidget(const MaterialApp(home: SizedBox.shrink()));
-    sessionCompleter.complete(
-      _sessionDto(sessionId: 42, status: 'IN_PROGRESS'),
-    );
+    // 화면이 살아 있는 동안에도 추가 조회는 생기지 않는다.
     await tester.pumpAndSettle();
-
-    expect(repository.sessionStatusCalls, 1);
-    expect(tester.takeException(), isNull);
+    expect(repository.sessionStatusCalls, 0);
   });
 
   testWidgets('sessionId가 없으면 Reflection을 호출하지 않는다', (tester) async {
@@ -2383,15 +2095,10 @@ Future<void> _pumpEmotion(
       },
       onGenerateRoute: (settings) {
         if (settings.name != AppRoutes.activityComplete('3')) return null;
-        final arguments = settings.arguments! as ActivityCompleteRouteArguments;
+        // 완료 화면은 route 인자를 받지 않는다 — 접수 뒤의 전달 화면이다.
         return MaterialPageRoute<void>(
           settings: settings,
-          builder: (_) => ActivityCompleteScreen(
-            childId: '3',
-            sessionId: arguments.sessionId,
-            drawingRepository: arguments.repository,
-            pollInterval: Duration.zero,
-          ),
+          builder: (_) => const ActivityCompleteScreen(childId: '3'),
         );
       },
       home: EmotionSelectScreen(
@@ -2412,9 +2119,6 @@ Future<void> _pumpComplete(
   WidgetTester tester, {
   String childId = '3',
   Size size = const Size(1200, 800),
-  DrawingRepository? repository,
-  int? sessionId,
-  Duration pollInterval = const Duration(seconds: 2),
   NavigatorObserver? navigatorObserver,
   bool settle = true,
   TextScaler textScaler = TextScaler.noScaling,
@@ -2435,12 +2139,7 @@ Future<void> _pumpComplete(
         AppRoutes.childModeHome(childId): (_) =>
             const Scaffold(body: Text('아동 홈 테스트')),
       },
-      home: ActivityCompleteScreen(
-        childId: childId,
-        sessionId: sessionId,
-        drawingRepository: repository,
-        pollInterval: pollInterval,
-      ),
+      home: ActivityCompleteScreen(childId: childId),
     ),
   );
   if (settle) await tester.pumpAndSettle();
@@ -2647,7 +2346,6 @@ final class _CompletionRepository implements DrawingRepository {
     this.reflectionCompleter,
     List<String> sessionStatuses = const ['COMPLETED'],
     List<Object> sessionFailures = const [],
-    this.sessionCompleter,
     this.calls,
     this.existingConversationId,
     this.strokeError,
@@ -2675,7 +2373,6 @@ final class _CompletionRepository implements DrawingRepository {
   int activityCompleteCalls = 0;
   Object? reflectionError;
   final Completer<void>? reflectionCompleter;
-  final Completer<DrawingSessionDto>? sessionCompleter;
   final List<String>? calls;
   final int? existingConversationId;
   SaveDrawingReflectionRequestDto? lastReflection;
@@ -2785,7 +2482,6 @@ final class _CompletionRepository implements DrawingRepository {
     calls?.add('detail');
     sessionStatusCalls += 1;
     if (_sessionFailures.isNotEmpty) throw _sessionFailures.removeAt(0);
-    if (sessionCompleter case final completer?) return completer.future;
     if (sessionStatusCalls == 1 && existingConversationId != null) {
       return _sessionDto(
         sessionId: sessionId,

@@ -118,11 +118,11 @@ Future<void> _pumpPersonEmotionScreen(
     MaterialApp(
       onGenerateRoute: (settings) {
         if (settings.name != AppRoutes.activityComplete('3')) return null;
-        final arguments = settings.arguments! as ActivityCompleteRouteArguments;
+        // 완료 화면은 route 인자를 받지 않는다 — 접수 뒤의 전달 화면이라 세션
+        // 식별자도 리포지토리도 필요 없다.
         return MaterialPageRoute<void>(
           settings: settings,
-          builder: (_) =>
-              Scaffold(body: Text('activity-complete-${arguments.sessionId}')),
+          builder: (_) => const Scaffold(body: Text('activity-complete')),
         );
       },
       home: EmotionSelectScreen(
@@ -220,7 +220,7 @@ void main() {
     ]);
     // HTP 흐름에서 Drawing Session Reflection은 절대 호출하지 않는다.
     expect(repository.drawingSessionReflectionCalls, 0);
-    expect(find.text('activity-complete-44'), findsOneWidget);
+    expect(find.text('activity-complete'), findsOneWidget);
   });
 
   testWidgets('PERSON skip도 빈 감정 Reflection → steps/next → complete 순서를 유지한다', (
@@ -240,7 +240,7 @@ void main() {
       'complete(91)',
     ]);
     expect(repository.drawingSessionReflectionCalls, 0);
-    expect(find.text('activity-complete-44'), findsOneWidget);
+    expect(find.text('activity-complete'), findsOneWidget);
   });
 
   testWidgets('steps/next에 세션의 실제 inputMethod를 전달한다(CANVAS 하드코딩 없음)', (
@@ -270,7 +270,7 @@ void main() {
     expect(repository.stepCalls, 0);
     expect(repository.completeCalls, 0);
     // 완료 화면으로 넘어가지 않고 감정 화면에 머문다.
-    expect(find.text('activity-complete-44'), findsNothing);
+    expect(find.text('activity-complete'), findsNothing);
   });
 
   testWidgets('complete만 실패한 재시도는 Reflection·steps/next를 다시 부르지 않는다', (
@@ -285,7 +285,7 @@ void main() {
     expect(repository.reflectionCalls, 1);
     expect(repository.stepCalls, 1);
     expect(repository.completeCalls, 1);
-    expect(find.text('activity-complete-44'), findsNothing);
+    expect(find.text('activity-complete'), findsNothing);
 
     // 재시도 — complete만 다시 나가야 한다.
     await tester.tap(find.byKey(const ValueKey('emotion-submit')));
@@ -296,7 +296,7 @@ void main() {
     expect(repository.completeCalls, 2);
     // complete 재시도는 같은 Key를 재사용한다.
     expect(repository.completeKeys.first, repository.completeKeys.last);
-    expect(find.text('activity-complete-44'), findsOneWidget);
+    expect(find.text('activity-complete'), findsOneWidget);
   });
 
   testWidgets('PERSON skip complete 재시도는 Reflection·step과 기존 Key를 재사용한다', (
@@ -310,7 +310,7 @@ void main() {
     expect(repository.reflectionCalls, 1);
     expect(repository.stepCalls, 1);
     expect(repository.completeCalls, 1);
-    expect(find.text('activity-complete-44'), findsNothing);
+    expect(find.text('activity-complete'), findsNothing);
 
     await _skipAndSubmit(tester);
 
@@ -321,7 +321,7 @@ void main() {
     expect(repository.completeKeys.first, repository.completeKeys.last);
     expect(repository.lastReflection?.selectedEmotions, isEmpty);
     expect(repository.lastReflection?.skipped, isTrue);
-    expect(find.text('activity-complete-44'), findsOneWidget);
+    expect(find.text('activity-complete'), findsOneWidget);
   });
 }
 
