@@ -5,7 +5,6 @@ import 'package:dodam/app/router/app_router.dart';
 import 'package:dodam/app/router/app_routes.dart';
 import 'package:dodam/core/network/network.dart';
 import 'package:dodam/design_system/design_system.dart';
-import 'package:dodam/features/activity/presentation/screens/activity_screens.dart';
 import 'package:dodam/features/child/data/dto/child_dtos.dart';
 import 'package:dodam/features/child_mode/data/child_home_intro_store.dart';
 import 'package:dodam/features/child_mode/domain/dodam_costume.dart';
@@ -137,11 +136,10 @@ Widget _wrap(Widget home, {bool htpPhotoUploadEnabled = false}) => MaterialApp(
       );
     }
     if (settings.name == AppRoutes.activityComplete('7')) {
-      final arguments = settings.arguments! as ActivityCompleteRouteArguments;
+      // 완료 화면은 route 인자를 받지 않는다 — 접수 뒤의 전달 화면이다.
       return MaterialPageRoute<void>(
         settings: settings,
-        builder: (_) =>
-            Scaffold(body: Text('activity-complete-${arguments.sessionId}')),
+        builder: (_) => const Scaffold(body: Text('activity-complete')),
       );
     }
     if (settings.name != AppRoutes.drawing('7')) return null;
@@ -2161,7 +2159,7 @@ void main() {
       expect(repository.completeAssessmentCalls, 1);
       // 감정 선택 화면을 띄우지 않고 완료 화면으로 간다.
       expect(find.text('내 마음 고르기'), findsNothing);
-      expect(find.text('activity-complete-812'), findsOneWidget);
+      expect(find.text('activity-complete'), findsOneWidget);
     });
 
     testWidgets('PERSON + COMPLETED + ANALYZING이면 complete를 호출하지 않는다', (
@@ -2191,7 +2189,7 @@ void main() {
       expect(repository.nextStepCalls, 0);
       // UPLOAD 세션이지만 stage가 COMPLETED라 사진 복원으로 가지 않는다.
       expect(find.byKey(const ValueKey('input-method-camera')), findsNothing);
-      expect(find.text('activity-complete-812'), findsOneWidget);
+      expect(find.text('activity-complete'), findsOneWidget);
     });
 
     testWidgets('complete 실패 후 다시 진입하면 complete만 재시도한다', (tester) async {
@@ -2220,7 +2218,7 @@ void main() {
 
       // 첫 시도는 실패해 완료 화면으로 가지 않고 홈에 남는다(오류만 안내).
       expect(repository.completeAssessmentCalls, 1);
-      expect(find.text('activity-complete-812'), findsNothing);
+      expect(find.text('activity-complete'), findsNothing);
       expect(find.byKey(const ValueKey('costume-carousel')), findsOneWidget);
 
       // 복구는 화면 진입 시점에만 판단하므로, 재시도는 아동 모드에 다시
@@ -2241,7 +2239,7 @@ void main() {
       // 재시도에서도 Reflection·steps/next는 0회를 유지한다.
       expect(repository.saveHtpReflectionCalls, 0);
       expect(repository.nextStepCalls, 0);
-      expect(find.text('activity-complete-812'), findsOneWidget);
+      expect(find.text('activity-complete'), findsOneWidget);
     });
   });
 

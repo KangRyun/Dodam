@@ -571,18 +571,9 @@ abstract final class AppRouter {
         ),
       ['child', final childId, 'activity', 'complete']
           when _hasChildContext(childController, childId) =>
-        ActivityCompleteScreen(
-          childId: childId,
-          sessionId: settings.arguments is ActivityCompleteRouteArguments
-              ? (settings.arguments! as ActivityCompleteRouteArguments)
-                    .sessionId
-              : null,
-          drawingRepository:
-              settings.arguments is ActivityCompleteRouteArguments
-              ? (settings.arguments! as ActivityCompleteRouteArguments)
-                    .repository
-              : null,
-        ),
+        // 완료 접수 뒤의 전달 화면이라 route 인자가 없다 — 세션 식별자도, 리포지토리도
+        // 필요하지 않다. 리포트 준비 소식은 보호자 알림이 전한다.
+        ActivityCompleteScreen(childId: childId),
       ['child', _, ...] => const ChildContextGuardScreen(),
       ['guardian', 'home'] => const ChildContextGuardScreen(),
       ['guardian', 'children', 'select'] => const ChildContextGuardScreen(),
