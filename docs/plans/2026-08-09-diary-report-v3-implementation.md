@@ -479,7 +479,7 @@ git commit -m "[S15P11B209-1019] feat(be): 그림일기 전체 대화와 음성 
 - Consumes: Backend `diaryInsights.schemaVersion=3`
 - Produces: 자료 범위·정밀 관찰·이야기 지도·가설·전체 대화/음성 V3 UI
 
-- [ ] **Step 1: DTO 파싱 실패 테스트를 작성한다**
+- [x] **Step 1: DTO 파싱 실패 테스트를 작성한다**
 
 ```dart
 test('V3 자료 범위와 전체 음성 대화를 파싱한다', () {
@@ -494,13 +494,13 @@ test('V3 자료 범위와 전체 음성 대화를 파싱한다', () {
 });
 ```
 
-- [ ] **Step 2: 실패를 확인한다**
+- [x] **Step 2: 실패를 확인한다**
 
 Run: `cd frontend/mobile; flutter test test/features/report/diary_report_v3_test.dart`
 
 Expected: V3 DTO가 없어 컴파일 FAIL.
 
-- [ ] **Step 3: V3 DTO를 추가한다**
+- [x] **Step 3: V3 DTO를 추가한다**
 
 ```dart
 final class DiaryTranscriptEntryDto {
@@ -527,7 +527,7 @@ final class DiaryTranscriptEntryDto {
 
 V2 파싱 기본값은 `schemaVersion=2`, V3 목록은 빈 목록으로 둔다.
 
-- [ ] **Step 4: V3 본문 Widget의 실패 테스트를 작성한다**
+- [x] **Step 4: V3 본문 Widget의 실패 테스트를 작성한다**
 
 ```dart
 testWidgets('LIMITED 리포트는 자료 범위와 미확인 내용을 표시하고 가설을 숨긴다',
@@ -540,11 +540,11 @@ testWidgets('LIMITED 리포트는 자료 범위와 미확인 내용을 표시하
 });
 ```
 
-- [ ] **Step 5: `DiaryReportV3Body`를 구현한다**
+- [x] **Step 5: `DiaryReportV3Body`를 구현한다**
 
 표시 순서는 설계 문서 §8을 그대로 따른다. 음성 버튼은 `audioAvailable && audioUrl != null`일 때만 기존 `VoiceAnswerPlaybackController`를 통해 표시한다. `responseType=OPTION`은 `선택지에서 고름`, `SKIPPED`는 `질문을 건너뜀`으로 구분한다.
 
-- [ ] **Step 6: Report Screen 버전 분기를 연결한다**
+- [x] **Step 6: Report Screen 버전 분기를 연결한다**
 
 ```dart
 if (report.diaryInsights case final insights?) ...[
@@ -555,13 +555,13 @@ if (report.diaryInsights case final insights?) ...[
 ]
 ```
 
-- [ ] **Step 7: Widget·화면 회귀 테스트를 실행한다**
+- [x] **Step 7: Widget·화면 회귀 테스트를 실행한다**
 
 Run: `cd frontend/mobile; flutter test test/features/report/diary_report_v3_test.dart test/features/report/diary_report_v2_test.dart test/features/report/report_screen_test.dart`
 
 Expected: PASS.
 
-- [ ] **Step 8: Flutter V3 화면을 커밋한다**
+- [x] **Step 8: Flutter V3 화면을 커밋한다**
 
 ```bash
 git add frontend/mobile/lib/features/report frontend/mobile/test/features/report

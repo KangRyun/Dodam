@@ -226,8 +226,7 @@ final class DiaryCaregiverQuestionDto {
       DiaryCaregiverQuestionDto(
         question: json['question'] as String? ?? '',
         purpose: _text(json['purpose']),
-        connectionType:
-            _text(json['connectionType']) ?? 'GENERAL_CONNECTION',
+        connectionType: _text(json['connectionType']) ?? 'GENERAL_CONNECTION',
         responseGuide: _text(json['responseGuide']),
         coRegulationAction: _text(json['coRegulationAction']),
         evidenceRefs: _refs(json['evidenceRefs']),
@@ -277,7 +276,8 @@ final class DiaryDataQualityDto {
         skippedCount: _int(json['skippedCount']),
         sttConfirmationCount: _int(json['sttConfirmationCount']),
         evidenceCount: _int(json['evidenceCount']),
-        visionSummaryAvailable: json['visionSummaryAvailable'] as bool? ?? false,
+        visionSummaryAvailable:
+            json['visionSummaryAvailable'] as bool? ?? false,
       );
 
   /// 음성으로 확정된 답변 수.
@@ -324,8 +324,7 @@ final class DiaryDevelopmentalObservationDto {
     ageContext: json['ageContext'] as String? ?? '',
     observation: json['observation'] as String? ?? '',
     scopeText: json['scopeText'] as String? ?? '',
-    contextType:
-        json['contextType'] as String? ?? 'SESSION_ONLY_CONTEXT',
+    contextType: json['contextType'] as String? ?? 'SESSION_ONLY_CONTEXT',
     caregiverQuestion: _text(json['caregiverQuestion']),
     evidenceRefs: _refs(json['evidenceRefs']),
   );
@@ -391,6 +390,139 @@ final class DiaryUnknownItemDto {
   final String text;
 }
 
+/// 그림일기 V3가 실제로 사용한 자료 범위와 근거 개수.
+final class DiaryDataScopeDto {
+  const DiaryDataScopeDto({
+    required this.evidenceLevel,
+    required this.summary,
+    this.confirmedVoiceCount = 0,
+    this.optionAnswerCount = 0,
+    this.skippedCount = 0,
+    this.sttConfirmationCount = 0,
+    this.visualObservationCount = 0,
+  });
+
+  factory DiaryDataScopeDto.fromJson(Map<String, dynamic> json) =>
+      DiaryDataScopeDto(
+        evidenceLevel: json['evidenceLevel'] as String? ?? 'LIMITED',
+        summary: json['summary'] as String? ?? '',
+        confirmedVoiceCount: _int(json['confirmedVoiceCount']),
+        optionAnswerCount: _int(json['optionAnswerCount']),
+        skippedCount: _int(json['skippedCount']),
+        sttConfirmationCount: _int(json['sttConfirmationCount']),
+        visualObservationCount: _int(json['visualObservationCount']),
+      );
+
+  /// `LIMITED`·`PARTIAL`·`RICH` 중 하나.
+  final String evidenceLevel;
+
+  /// 보호자에게 자료 범위를 설명하는 문장.
+  final String summary;
+
+  final int confirmedVoiceCount;
+  final int optionAnswerCount;
+  final int skippedCount;
+  final int sttConfirmationCount;
+  final int visualObservationCount;
+}
+
+/// 사건·행동·감정처럼 이야기 지도를 이루는 구성 요소.
+final class DiaryStoryComponentDto {
+  const DiaryStoryComponentDto({
+    required this.componentType,
+    required this.confirmationStatus,
+    this.text,
+    this.evidenceRefs = const [],
+  });
+
+  factory DiaryStoryComponentDto.fromJson(Map<String, dynamic> json) =>
+      DiaryStoryComponentDto(
+        componentType: json['componentType'] as String? ?? '',
+        confirmationStatus: json['confirmationStatus'] as String? ?? 'UNKNOWN',
+        text: _text(json['text']),
+        evidenceRefs: _refs(json['evidenceRefs']),
+      );
+
+  final String componentType;
+  final String confirmationStatus;
+  final String? text;
+  final List<DiaryEvidenceRefDto> evidenceRefs;
+}
+
+/// 이미지에서 직접 확인한 사실 한 건.
+final class DiaryDrawingObservationDto {
+  const DiaryDrawingObservationDto({
+    required this.text,
+    required this.confidence,
+    this.childConfirmed = false,
+    this.evidenceRefs = const [],
+  });
+
+  factory DiaryDrawingObservationDto.fromJson(Map<String, dynamic> json) =>
+      DiaryDrawingObservationDto(
+        text: json['text'] as String? ?? '',
+        confidence: json['confidence'] as String? ?? 'LOW',
+        childConfirmed: json['childConfirmed'] as bool? ?? false,
+        evidenceRefs: _refs(json['evidenceRefs']),
+      );
+
+  final String text;
+  final String confidence;
+  final bool childConfirmed;
+  final List<DiaryEvidenceRefDto> evidenceRefs;
+}
+
+/// 리포트 생성 시점의 질문·답변과 현재 음성 재생 가능 여부.
+final class DiaryTranscriptEntryDto {
+  const DiaryTranscriptEntryDto({
+    required this.responseType,
+    required this.audioAvailable,
+    this.questionMessageId,
+    this.answerMessageId,
+    this.questionText,
+    this.answerText,
+    this.sttStatus,
+    this.audioDurationMs,
+    this.audioUrl,
+    this.elicitationType,
+    this.createdAt,
+  });
+
+  factory DiaryTranscriptEntryDto.fromJson(Map<String, dynamic> json) =>
+      DiaryTranscriptEntryDto(
+        questionMessageId: _nullableInt(json['questionMessageId']),
+        answerMessageId: _nullableInt(json['answerMessageId']),
+        questionText: _text(json['questionText']),
+        answerText: _text(json['answerText']),
+        responseType: json['responseType'] as String? ?? 'SKIPPED',
+        sttStatus: _text(json['sttStatus']),
+        audioDurationMs: _nullableInt(json['audioDurationMs']),
+        audioAvailable: json['audioAvailable'] as bool? ?? false,
+        audioUrl: _text(json['audioUrl']),
+        elicitationType: _text(json['elicitationType']),
+        createdAt: _text(json['createdAt']),
+      );
+
+  final int? questionMessageId;
+  final int? answerMessageId;
+  final String? questionText;
+  final String? answerText;
+  final String responseType;
+  final String? sttStatus;
+  final int? audioDurationMs;
+  final bool audioAvailable;
+
+  /// JWT 인증이 필요한 상대 Proxy 경로이며 재생할 수 없으면 `null`.
+  final String? audioUrl;
+
+  final String? elicitationType;
+  final String? createdAt;
+
+  /// 현재 음성 재생 UI를 노출할 수 있는가.
+  bool get hasPlayableAudio =>
+      audioAvailable && audioUrl != null && answerMessageId != null;
+}
+
 /// 그림일기 리포트 V2 묶음.
 final class DiaryInsightsDto {
   const DiaryInsightsDto({
@@ -403,6 +535,11 @@ final class DiaryInsightsDto {
     this.developmentalObservations = const [],
     this.unknownItems = const [],
     this.dataQuality = const DiaryDataQualityDto(),
+    this.schemaVersion = 2,
+    this.dataScope,
+    this.storyComponents = const [],
+    this.drawingObservations = const [],
+    this.transcript = const [],
   });
 
   /// JSON 한 건을 읽는다.
@@ -413,8 +550,14 @@ final class DiaryInsightsDto {
                 Map<String, dynamic>.from(json['storySnapshot'] as Map),
               )
             : null,
-        narrativeFlow: _list(json['narrativeFlow'], DiaryNarrativeStepDto.fromJson),
-        childVoiceItems: _list(json['childVoiceItems'], DiaryChildVoiceDto.fromJson),
+        narrativeFlow: _list(
+          json['narrativeFlow'],
+          DiaryNarrativeStepDto.fromJson,
+        ),
+        childVoiceItems: _list(
+          json['childVoiceItems'],
+          DiaryChildVoiceDto.fromJson,
+        ),
         sessionObservations: _list(
           json['sessionObservations'],
           DiarySessionObservationDto.fromJson,
@@ -434,6 +577,23 @@ final class DiaryInsightsDto {
                 Map<String, dynamic>.from(json['dataQuality'] as Map),
               )
             : const DiaryDataQualityDto(),
+        schemaVersion: _int(json['schemaVersion']) == 0
+            ? 2
+            : _int(json['schemaVersion']),
+        dataScope: json['dataScope'] is Map
+            ? DiaryDataScopeDto.fromJson(
+                Map<String, dynamic>.from(json['dataScope'] as Map),
+              )
+            : null,
+        storyComponents: _list(
+          json['storyComponents'],
+          DiaryStoryComponentDto.fromJson,
+        ),
+        drawingObservations: _list(
+          json['drawingObservations'],
+          DiaryDrawingObservationDto.fromJson,
+        ),
+        transcript: _list(json['transcript'], DiaryTranscriptEntryDto.fromJson),
       );
 
   /// 이번 이야기의 핵심이며 없으면 `null`.
@@ -469,6 +629,21 @@ final class DiaryInsightsDto {
   /// 근거 구성 정보.
   final DiaryDataQualityDto dataQuality;
 
+  /// 서버 그림일기 계약 버전이며 구형 응답은 2로 읽는다.
+  final int schemaVersion;
+
+  /// V3 자료 범위이며 V2에서는 `null`.
+  final DiaryDataScopeDto? dataScope;
+
+  /// V3 이야기 지도 구성 요소.
+  final List<DiaryStoryComponentDto> storyComponents;
+
+  /// V3 이미지 기반 관찰 사실.
+  final List<DiaryDrawingObservationDto> drawingObservations;
+
+  /// 리포트 생성 시점의 전체 질문·답변.
+  final List<DiaryTranscriptEntryDto> transcript;
+
   /// 화면에 보여 줄 내용이 하나라도 있는가.
   ///
   /// 서버가 근거 부족이면 아예 `null` 을 주지만, 듣기 안내 한 줄만 남는 경우까지
@@ -488,7 +663,10 @@ final class DiaryInsightsDto {
       narrativeFlow.isNotEmpty ||
       sessionObservations.isNotEmpty ||
       caregiverQuestions.isNotEmpty ||
-      developmentalObservations.isNotEmpty;
+      developmentalObservations.isNotEmpty ||
+      storyComponents.isNotEmpty ||
+      drawingObservations.isNotEmpty ||
+      transcript.isNotEmpty;
 }
 
 String? _text(Object? value) {
@@ -499,11 +677,11 @@ String? _text(Object? value) {
 
 int _int(Object? value) => value is num ? value.toInt() : 0;
 
+int? _nullableInt(Object? value) => value is num ? value.toInt() : null;
+
 List<String> _texts(Object? value) {
   if (value is! List) return const [];
-  return [
-    for (final item in value) ?_text(item),
-  ];
+  return [for (final item in value) ?_text(item)];
 }
 
 List<DiaryEvidenceRefDto> _refs(Object? value) =>
