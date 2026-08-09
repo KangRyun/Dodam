@@ -12,6 +12,7 @@ import com.ssafy.b209.report.domain.ReportConversationSummaryView;
 import com.ssafy.b209.report.domain.ReportCrisisAlert;
 import com.ssafy.b209.report.domain.ReportDetailView;
 import com.ssafy.b209.report.domain.ReportDiaryEvidenceRef;
+import com.ssafy.b209.report.domain.ReportDiaryTranscriptEntry;
 import com.ssafy.b209.report.domain.ReportDrawingAssetView;
 import com.ssafy.b209.report.domain.ReportDrawingEmotionView;
 import com.ssafy.b209.report.domain.ReportDrawingSessionView;
@@ -34,11 +35,15 @@ import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryCaregiverQuestionResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryChildVoiceResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryDataQualityResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryDataScopeResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryDevelopmentalObservationResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryDrawingObservationResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryEvidenceRefResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryNarrativeStepResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiarySessionObservationResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryStoryComponentResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryStorySnapshotResponse;
+import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryTranscriptEntryResponse;
 import com.ssafy.b209.report.dto.ReportDiaryInsightsResponse.DiaryUnknownItemResponse;
 import com.ssafy.b209.report.dto.ReportDrawingResponse;
 import com.ssafy.b209.report.dto.ReportDrawingSessionResponse;
@@ -69,7 +74,10 @@ import com.ssafy.b209.report.repository.ReportDiaryInsightAlternativeRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
 import com.ssafy.b209.report.repository.ReportDiaryNarrativeStepRepository;
 import com.ssafy.b209.report.repository.ReportDiarySessionObservationRepository;
+import com.ssafy.b209.report.repository.ReportDiaryStoryComponentRepository;
+import com.ssafy.b209.report.repository.ReportDiaryTranscriptEntryRepository;
 import com.ssafy.b209.report.repository.ReportDiaryUnknownItemRepository;
+import com.ssafy.b209.report.repository.ReportDiaryVisualObservationRepository;
 import com.ssafy.b209.report.repository.ReportDrawingAssetViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingEmotionViewRepository;
 import com.ssafy.b209.report.repository.ReportDrawingSessionViewRepository;
@@ -91,6 +99,7 @@ import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -147,6 +156,9 @@ public class ReportDetailQueryService {
       diaryDevelopmentalObservationRepository;
   private final ReportDiaryDevelopmentSourceRepository diaryDevelopmentSourceRepository;
   private final ReportDiaryUnknownItemRepository diaryUnknownItemRepository;
+  private final ReportDiaryStoryComponentRepository diaryStoryComponentRepository;
+  private final ReportDiaryVisualObservationRepository diaryVisualObservationRepository;
+  private final ReportDiaryTranscriptEntryRepository diaryTranscriptEntryRepository;
   private final ReportConversationSummaryViewRepository conversationSummaryRepository;
   private final ReportDetectedObjectViewRepository detectedObjectRepository;
   private final ReportDrawnItemRepository drawnItemRepository;
@@ -218,6 +230,9 @@ public class ReportDetailQueryService {
       ReportDiaryDevelopmentalObservationRepository diaryDevelopmentalObservationRepository,
       ReportDiaryDevelopmentSourceRepository diaryDevelopmentSourceRepository,
       ReportDiaryUnknownItemRepository diaryUnknownItemRepository,
+      ReportDiaryStoryComponentRepository diaryStoryComponentRepository,
+      ReportDiaryVisualObservationRepository diaryVisualObservationRepository,
+      ReportDiaryTranscriptEntryRepository diaryTranscriptEntryRepository,
       ReportConversationSummaryViewRepository conversationSummaryRepository,
       ReportDetectedObjectViewRepository detectedObjectRepository,
       ReportDrawnItemRepository drawnItemRepository,
@@ -258,6 +273,9 @@ public class ReportDetailQueryService {
     this.diaryDevelopmentalObservationRepository = diaryDevelopmentalObservationRepository;
     this.diaryDevelopmentSourceRepository = diaryDevelopmentSourceRepository;
     this.diaryUnknownItemRepository = diaryUnknownItemRepository;
+    this.diaryStoryComponentRepository = diaryStoryComponentRepository;
+    this.diaryVisualObservationRepository = diaryVisualObservationRepository;
+    this.diaryTranscriptEntryRepository = diaryTranscriptEntryRepository;
     this.conversationSummaryRepository = conversationSummaryRepository;
     this.detectedObjectRepository = detectedObjectRepository;
     this.drawnItemRepository = drawnItemRepository;
@@ -996,9 +1014,97 @@ public class ReportDetailQueryService {
                       insight.getSkippedCount(),
                       insight.getSttConfirmationCount(),
                       insight.getEvidenceCount(),
-                      insight.isVisionSummaryAvailable()));
+                      insight.isVisionSummaryAvailable()),
+                  insight.getSchemaVersion(),
+                  insight.getSchemaVersion() >= 3 && insight.getEvidenceLevel() != null
+                      ? new DiaryDataScopeResponse(
+                          insight.getEvidenceLevel(),
+                          insight.getDataScopeSummary(),
+                          insight.getConfirmedVoiceCount(),
+                          insight.getOptionAnswerCount(),
+                          insight.getSkippedCount(),
+                          insight.getSttConfirmationCount(),
+                          insight.getVisualObservationCount())
+                      : null,
+                  diaryStoryComponentRepository
+                      .findByReportIdOrderByDisplayOrderAsc(reportId)
+                      .stream()
+                      .map(
+                          component ->
+                              new DiaryStoryComponentResponse(
+                                  component.getComponentType(),
+                                  component.getConfirmationStatus(),
+                                  component.getText(),
+                                  refs.getOrDefault(
+                                      diaryRefKey(
+                                          ReportDiaryEvidenceRef.OWNER_STORY_COMPONENT,
+                                          component.getDisplayOrder()),
+                                      List.of())))
+                      .toList(),
+                  diaryVisualObservationRepository
+                      .findByReportIdOrderByDisplayOrderAsc(reportId)
+                      .stream()
+                      .map(
+                          observation ->
+                              new DiaryDrawingObservationResponse(
+                                  observation.getText(),
+                                  observation.getConfidence(),
+                                  observation.isChildConfirmed(),
+                                  refs.getOrDefault(
+                                      diaryRefKey(
+                                          ReportDiaryEvidenceRef.OWNER_VISUAL_OBSERVATION,
+                                          observation.getDisplayOrder()),
+                                      List.of())))
+                      .toList(),
+                  buildDiaryTranscript(reportId));
             })
         .orElse(null);
+  }
+
+  /**
+   * 생성 시점 대화 스냅샷과 현재 음성 참조를 결합한다.
+   *
+   * <p>스냅샷의 텍스트는 그대로 유지하되, 재생 가능 여부와 URL은 현재 원본 메시지를 기준으로 만든다. 원본이 삭제되면 텍스트는 남고 음성 필드만 비워진다.
+   */
+  private List<DiaryTranscriptEntryResponse> buildDiaryTranscript(Long reportId) {
+    List<ReportDiaryTranscriptEntry> entries =
+        diaryTranscriptEntryRepository.findByReportIdOrderByDisplayOrderAsc(reportId);
+    List<Long> voiceAnswerIds =
+        entries.stream()
+            .filter(entry -> "VOICE".equals(entry.getResponseType()))
+            .map(ReportDiaryTranscriptEntry::getAnswerMessageId)
+            .filter(java.util.Objects::nonNull)
+            .distinct()
+            .toList();
+    Set<Long> playableMessageIds = new LinkedHashSet<>();
+    if (!voiceAnswerIds.isEmpty()) {
+      messageConfirmationRepository.findByIdIn(voiceAnswerIds).stream()
+          .filter(ReportMessageConfirmationView::hasPlayableVoiceAudioReference)
+          .map(ReportMessageConfirmationView::getId)
+          .forEach(playableMessageIds::add);
+    }
+    return entries.stream()
+        .map(
+            entry -> {
+              boolean audioAvailable = playableMessageIds.contains(entry.getAnswerMessageId());
+              String audioUrl =
+                  audioAvailable
+                      ? "/api/v1/conversation-messages/" + entry.getAnswerMessageId() + "/audio"
+                      : null;
+              return new DiaryTranscriptEntryResponse(
+                  entry.getQuestionMessageId(),
+                  entry.getAnswerMessageId(),
+                  entry.getQuestionText(),
+                  entry.getAnswerText(),
+                  entry.getResponseType(),
+                  entry.getSttStatus(),
+                  entry.getAudioDurationMs(),
+                  audioAvailable,
+                  audioUrl,
+                  entry.getElicitationType(),
+                  entry.getOccurredAt());
+            })
+        .toList();
   }
 
   /**

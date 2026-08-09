@@ -392,9 +392,8 @@ git commit -m "[S15P11B209-1019] feat(be): 그림일기 V3 결과 정규화 저�
 
 **Files:**
 - Modify: `backend/src/main/java/com/ssafy/b209/report/dto/ReportDiaryInsightsResponse.java`
-- Modify: `backend/src/main/java/com/ssafy/b209/report/dto/ReportQaPairResponse.java`
+- Modify: `backend/src/main/java/com/ssafy/b209/report/domain/ReportMessageConfirmationView.java`
 - Modify: `backend/src/main/java/com/ssafy/b209/report/service/ReportDetailQueryService.java:900-1010`
-- Modify: `backend/src/main/java/com/ssafy/b209/report/service/ObservationReportPersistenceService.java:1371-1585`
 - Modify: `backend/src/test/java/com/ssafy/b209/report/service/ReportDetailQueryServiceTest.java`
 - Modify: `backend/src/test/java/com/ssafy/b209/report/dto/ReportDetailResponseJsonTest.java`
 
@@ -402,7 +401,7 @@ git commit -m "[S15P11B209-1019] feat(be): 그림일기 V3 결과 정규화 저�
 - Consumes: V3 정규화 행과 기존 Conversation Message·음성 Storage 참조
 - Produces: `DiaryTranscriptEntryResponse`와 JWT Proxy `audioUrl`
 
-- [ ] **Step 1: V3 JSON 계약 실패 테스트를 작성한다**
+- [x] **Step 1: V3 JSON 계약 실패 테스트를 작성한다**
 
 ```java
 @Test
@@ -421,13 +420,13 @@ void serializesVoiceTranscriptWithStableProxyUrl() throws Exception {
 }
 ```
 
-- [ ] **Step 2: 실패를 확인한다**
+- [x] **Step 2: 실패를 확인한다**
 
 Run: `cd backend; .\gradlew.bat test --tests "com.ssafy.b209.report.dto.ReportDetailResponseJsonTest"`
 
 Expected: `transcript` 필드가 없어 FAIL.
 
-- [ ] **Step 3: 응답 DTO를 추가한다**
+- [x] **Step 3: 응답 DTO를 추가한다**
 
 ```java
 public record DiaryTranscriptEntryResponse(
@@ -446,20 +445,20 @@ public record DiaryTranscriptEntryResponse(
 
 `ReportDiaryInsightsResponse`에는 `schemaVersion`, `dataScope`, `storyComponents`, `drawingObservations`, `transcript`를 추가한다. 모든 공개 record와 필드는 실제 nullable·보안 의미를 설명하는 한국어 Javadoc을 갖는다.
 
-- [ ] **Step 4: 조회 조립을 구현한다**
+- [x] **Step 4: 조회 조립을 구현한다**
 
 - DB 스냅샷 순서로 전체 transcript를 반환한다.
 - `answerMessageId`가 있고 음성 Storage 참조가 유효할 때만 `audioAvailable=true`와 Proxy URL을 만든다.
 - 삭제된 음성은 텍스트와 상태를 유지하고 URL만 비운다.
 - V2 행은 `schemaVersion=2`, V3 목록은 빈 목록으로 반환한다.
 
-- [ ] **Step 5: 조회·권한·삭제 음성 테스트를 실행한다**
+- [x] **Step 5: 조회·권한·삭제 음성 테스트를 실행한다**
 
 Run: `cd backend; .\gradlew.bat test --tests "com.ssafy.b209.report.service.ReportDetailQueryServiceTest" --tests "com.ssafy.b209.report.dto.ReportDetailResponseJsonTest" --tests "com.ssafy.b209.report.controller.ReportDetailControllerTest"`
 
 Expected: PASS.
 
-- [ ] **Step 6: Backend 조회 계약을 커밋한다**
+- [x] **Step 6: Backend 조회 계약을 커밋한다**
 
 ```bash
 git add backend/src/main/java/com/ssafy/b209/report backend/src/test/java/com/ssafy/b209/report

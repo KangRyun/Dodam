@@ -6,7 +6,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 
 /**
- * 리포트 조회에서 대화 메시지의 음성 인식 확인 필요 여부만 읽는 읽기 전용 프로젝션이다 (S15P11B209-902).
+ * 리포트 조회에서 대화 메시지의 음성 인식 확인 필요 여부와 음성 재생 참조 존재 여부를 읽는 읽기 전용 프로젝션이다.
  *
  * <p>{@code report_key_conversations}에는 이 값이 없어 원 메시지에서 읽어야 한다. 종전에는 응답의 {@code
  * sttNeedsConfirmation}에 리터럴 {@code false}를 넘겼는데, 그러면 "미확정 발화는 근거·대표 발화에서 제외한다"는 규칙(계약 §4-4)이 조건
@@ -23,6 +23,12 @@ public class ReportMessageConfirmationView {
   @Column(name = "needs_guardian_confirmation", nullable = false)
   private boolean needsGuardianConfirmation;
 
+  @Column(name = "message_type", nullable = false)
+  private String messageType;
+
+  @Column(name = "audio_storage_key")
+  private String audioStorageKey;
+
   /** JPA가 Entity를 복원할 때 사용하는 생성자다. */
   protected ReportMessageConfirmationView() {}
 
@@ -38,5 +44,18 @@ public class ReportMessageConfirmationView {
    */
   public boolean isNeedsGuardianConfirmation() {
     return needsGuardianConfirmation;
+  }
+
+  /**
+   * 현재 메시지가 아이 음성 답변이고 원본 음성 참조가 남아 있는지 확인한다.
+   *
+   * <p>Storage Key 자체는 외부에 반환하지 않으며, 호출자는 이 결과로 인증 Proxy 경로 노출 여부만 정한다.
+   *
+   * @return 음성 재생을 시도할 수 있으면 {@code true}
+   */
+  public boolean hasPlayableVoiceAudioReference() {
+    return "VOICE_ANSWER".equals(messageType)
+        && audioStorageKey != null
+        && !audioStorageKey.isBlank();
   }
 }
