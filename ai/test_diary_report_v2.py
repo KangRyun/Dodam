@@ -201,6 +201,218 @@ class DiaryReportSafetyTest(unittest.TestCase):
 
 
 class DiaryReportBuilderTest(unittest.TestCase):
+    def test_limited_report_exposes_scope_and_visual_observation_without_hypothesis(self):
+        """선택형 답만 있는 회차가 가설로 부풀려지는 회귀를 막는다."""
+
+        import diary_report_v2
+
+        request = _diary_request().model_copy(
+            update={
+                "answered_count": 1,
+                "skipped_count": 3,
+                "representative_utterance": None,
+                "expressed_emotion_text": None,
+                "subject_summaries": [
+                    contracts.SubjectSummary(
+                        drawing_description="종이 가운데에 집 한 채가 보여요.",
+                        observation_evidence_source_id="obs-limited",
+                        qa_pairs=[
+                            contracts.SubjectQaPair(
+                                question="이 그림은 실제 이야기야?",
+                                answer_text="응",
+                                answer_type="OPTION_ANSWER",
+                                answer_message_id=201,
+                            )
+                        ],
+                    )
+                ],
+            }
+        )
+        raw = _signals(
+            storySnapshot={
+                "headline": "집이 있는 그림",
+                "summary": "종이 가운데에 집 한 채가 보여요.",
+                "mainEvent": "집 한 채를 그림",
+                "evidenceRefs": [_ref("VLM_OBSERVATION", "obs-limited")],
+            },
+            narrativeFlow=[],
+            sessionObservations=[
+                {
+                    "observationCode": "HOME_MEANING",
+                    "insightType": "SESSION_HYPOTHESIS",
+                    "title": "집을 중요하게 생각할 수 있어요",
+                    "description": "집을 크게 그린 데에는 의미가 있을 수 있어요.",
+                    "hypothesis": "가족과 집을 중요하게 생각했을 수 있어요.",
+                    "alternativeExplanations": ["그리기 쉬운 대상을 골랐을 수도 있어요."],
+                    "clarificationQuestion": "이 집은 어떤 집이야?",
+                    "evidenceRefs": [
+                        _ref("VLM_OBSERVATION", "obs-limited"),
+                        _ref("QA_ANSWER", "201"),
+                    ],
+                }
+            ],
+            drawingObservations=[
+                {
+                    "text": "종이 가운데에 집 한 채가 보여요.",
+                    "confidence": "HIGH",
+                    "childConfirmed": False,
+                    "evidenceRefs": [_ref("VLM_OBSERVATION", "obs-limited")],
+                }
+            ],
+            caregiverQuestions=[],
+        )
+
+        result = diary_report_v2.build_diary_insights(
+            raw, request, vision_available=True
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.schema_version, 3)
+        self.assertEqual(result.data_scope.evidence_level, "LIMITED")
+        self.assertEqual(result.session_observations, [])
+        self.assertEqual(len(result.drawing_observations), 1)
+
+    def test_one_child_composed_answer_sets_partial_scope(self):
+        """아이의 자기 말 한 건을 선택형 답만 있는 회차와 구분한다."""
+
+        import diary_report_v2
+
+        request = _diary_request().model_copy(
+            update={
+                "answered_count": 1,
+                "skipped_count": 0,
+                "subject_summaries": [
+                    contracts.SubjectSummary(
+                        drawing_description="운동장과 아이가 보여요.",
+                        observation_evidence_source_id="obs-partial",
+                        qa_pairs=[
+                            contracts.SubjectQaPair(
+                                question="이 그림에서는 무슨 일이 일어나고 있어?",
+                                answer_text="친구랑 공놀이를 했어",
+                                answer_type="VOICE_ANSWER",
+                                answer_message_id=301,
+                            )
+                        ],
+                    )
+                ],
+            }
+        )
+        raw = _signals(
+            storySnapshot={
+                "headline": "친구와 공놀이한 이야기",
+                "summary": "친구와 공놀이한 일을 들려주었어요.",
+                "mainEvent": "친구와 공놀이함",
+                "evidenceRefs": [_ref("QA_ANSWER", "301")],
+            },
+            narrativeFlow=[],
+            sessionObservations=[],
+            caregiverQuestions=[],
+        )
+
+        result = diary_report_v2.build_diary_insights(
+            raw, request, vision_available=True
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.data_scope.evidence_level, "PARTIAL")
+        self.assertEqual(result.data_scope.confirmed_voice_count, 1)
+
+    def test_three_child_composed_answers_with_visual_observation_sets_rich_scope(self):
+        """충분한 자기 말과 그림 근거가 함께 있을 때만 RICH로 공개한다."""
+
+        import diary_report_v2
+
+        raw = _signals(
+            drawingObservations=[
+                {
+                    "text": "웃는 사람과 '수학 100'이라는 글자가 보여요.",
+                    "confidence": "HIGH",
+                    "evidenceRefs": [_ref("VLM_OBSERVATION", "obs-1")],
+                }
+            ]
+        )
+
+        result = diary_report_v2.build_diary_insights(
+            raw, _diary_request(), vision_available=True
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(result.data_scope.evidence_level, "RICH")
+        self.assertEqual(result.data_scope.confirmed_voice_count, 3)
+        self.assertEqual(result.data_scope.visual_observation_count, 1)
+
+    def test_story_components_keep_confirmed_and_unknown_slots_separate(self):
+        """확인된 이야기 요소와 확인하지 못한 요소가 같은 사실처럼 합쳐지지 않게 한다."""
+
+        import diary_report_v2
+
+        raw = _signals(
+            storyComponents=[
+                {
+                    "componentType": "EVENT",
+                    "status": "CONFIRMED",
+                    "text": "수학시험에서 100점을 받음",
+                    "evidenceRefs": [_ref("QA_ANSWER", "101")],
+                },
+                {
+                    "componentType": "OUTCOME",
+                    "status": "UNKNOWN",
+                    "text": None,
+                    "evidenceRefs": [],
+                },
+            ]
+        )
+
+        result = diary_report_v2.build_diary_insights(
+            raw, _diary_request(), vision_available=True
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(len(result.story_components), 2)
+        self.assertEqual(result.story_components[0].component_type, "EVENT")
+        self.assertEqual(result.story_components[0].status, "CONFIRMED")
+        self.assertEqual(result.story_components[1].status, "UNKNOWN")
+        self.assertIsNone(result.story_components[1].text)
+
+    def test_session_hypotheses_are_capped_at_two(self):
+        """한 회차의 가능성 카드가 반복되어 결론처럼 보이는 회귀를 막는다."""
+
+        import diary_report_v2
+
+        hypotheses = []
+        for index in range(3):
+            hypotheses.append(
+                {
+                    "observationCode": f"POSSIBILITY_{index}",
+                    "insightType": "SESSION_HYPOTHESIS",
+                    "domain": "STORY",
+                    "title": f"확인해 볼 가능성 {index}",
+                    "description": f"이번 활동에서 확인해 볼 가능성 {index}예요.",
+                    "hypothesis": f"가능성 {index}일 수 있어요.",
+                    "alternativeExplanations": ["다른 이유일 수도 있어요."],
+                    "clarificationQuestion": "아이에게 어떻게 느꼈는지 물어봐 주세요.",
+                    "evidenceRefs": [
+                        _ref("QA_ANSWER", "101"),
+                        _ref("VLM_OBSERVATION", "obs-1"),
+                    ],
+                }
+            )
+
+        result = diary_report_v2.build_diary_insights(
+            _signals(sessionObservations=hypotheses),
+            _diary_request(),
+            vision_available=True,
+        )
+
+        self.assertIsNotNone(result)
+        self.assertEqual(
+            sum(
+                item.insight_type == "SESSION_HYPOTHESIS"
+                for item in result.session_observations
+            ),
+            2,
+        )
+
     def test_builds_grounded_insights_and_derives_reality_and_time(self):
         import diary_report_v2
 

@@ -34,7 +34,7 @@
 - Consumes: `ObservationGenerationRequest.subject_summaries`, `selected_emotion_refs`, `behavior_metrics`
 - Produces: `DiaryInsights.schema_version`, `DiaryDataScope`, `DiaryStoryComponent`, `DiaryDrawingObservation`
 
-- [ ] **Step 1: V3 계약의 실패 테스트를 작성한다**
+- [x] **Step 1: V3 계약의 실패 테스트를 작성한다**
 
 ```python
 def test_limited_report_exposes_data_scope_without_session_hypothesis(self):
@@ -56,13 +56,13 @@ def test_limited_report_exposes_data_scope_without_session_hypothesis(self):
     self.assertEqual(len(result.drawing_observations), 1)
 ```
 
-- [ ] **Step 2: 실패를 확인한다**
+- [x] **Step 2: 실패를 확인한다**
 
 Run: `python -m unittest ai.test_diary_report_v2.DiaryReportV2Test.test_limited_report_exposes_data_scope_without_session_hypothesis -v`
 
 Expected: `DiaryInsights`에 `schema_version` 또는 `data_scope`가 없어 FAIL.
 
-- [ ] **Step 3: Pydantic 계약을 추가한다**
+- [x] **Step 3: Pydantic 계약을 추가한다**
 
 ```python
 class DiaryDataScope(_CamelModel):
@@ -93,7 +93,7 @@ class DiaryDrawingObservation(_CamelModel):
 
 `DiaryInsights`에는 `schema_version=3`, `data_scope`, `story_components`, `drawing_observations`를 추가한다.
 
-- [ ] **Step 4: 자료 범위 계산기를 구현한다**
+- [x] **Step 4: 자료 범위 계산기를 구현한다**
 
 ```python
 def _data_scope(
@@ -127,7 +127,7 @@ def _data_scope(
 
 `LIMITED`이면 조립 단계에서 `SESSION_HYPOTHESIS`를 제거하고, `RICH`여도 가설은 두 개까지만 유지한다.
 
-- [ ] **Step 5: 세 자료 범위와 가설 게이트 테스트를 실행한다**
+- [x] **Step 5: 세 자료 범위와 가설 게이트 테스트를 실행한다**
 
 Run: `python -m unittest ai.test_diary_report_v2 -v`
 

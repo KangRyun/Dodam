@@ -906,12 +906,49 @@ class DiaryDataQuality(_CamelModel):
     vision_summary_available: bool = False
 
 
-class DiaryInsights(_CamelModel):
-    """그림일기 전용 보호자 리포트 V2.
+class DiaryDataScope(_CamelModel):
+    """보호자에게 공개할 이번 회차 원자료의 범위와 해석 상한."""
 
-    전부 optional 확장이라 구 BE는 무시할 수 있다. HTP 응답에서는 None 이다.
+    evidence_level: Literal["LIMITED", "PARTIAL", "RICH"]
+    summary: str
+    confirmed_voice_count: int = 0
+    option_answer_count: int = 0
+    skipped_count: int = 0
+    stt_confirmation_count: int = 0
+    visual_observation_count: int = 0
+
+
+class DiaryDrawingObservation(_CamelModel):
+    """그림에서 직접 확인한 시각적 사실과 그 근거."""
+
+    text: str
+    confidence: Literal["HIGH", "MODERATE", "LOW"] = "MODERATE"
+    child_confirmed: bool = False
+    evidence_refs: list[EvidenceSourceRef] = Field(default_factory=list)
+
+
+class DiaryStoryComponent(_CamelModel):
+    """사건 흐름의 한 요소와 그 확인 상태."""
+
+    component_type: Literal[
+        "ACTOR", "EVENT", "CHILD_ACTION", "EMOTION", "OTHER_RESPONSE", "OUTCOME"
+    ]
+    status: Literal["CONFIRMED", "VISUAL_ONLY", "SELECTED", "PARTIAL", "UNKNOWN"]
+    text: str | None = None
+    evidence_refs: list[EvidenceSourceRef] = Field(default_factory=list)
+
+
+class DiaryInsights(_CamelModel):
+    """그림일기 전용 보호자 리포트.
+
+    ``schema_version``이 없던 기존 응답은 V2로 읽는다. V3는 자료 범위와 그림 관찰을
+    추가하지만 HTP 응답에서는 계속 ``None``이다.
     """
 
+    schema_version: int = 2
+    data_scope: DiaryDataScope | None = None
+    story_components: list[DiaryStoryComponent] = Field(default_factory=list)
+    drawing_observations: list[DiaryDrawingObservation] = Field(default_factory=list)
     story_snapshot: DiaryStorySnapshot | None = None
     narrative_flow: list[DiaryNarrativeStep] = Field(default_factory=list)
     child_voice_items: list[DiaryChildVoiceItem] = Field(default_factory=list)
