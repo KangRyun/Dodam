@@ -421,7 +421,7 @@ public class ObservationReportPersistenceService {
                   source.getAnswerType(),
                   source.getAnswerNeedsGuardianConfirmation(),
                   source.getAnswerSpeechStatus(),
-                  source.getAnswerAudioAvailable(),
+                  Integer.valueOf(1).equals(source.getAnswerAudioAvailable()),
                   source.getAnswerCreatedAt());
           subjectQaPairs.add(line);
           if (keyConversations.size() < MAX_KEY_CONVERSATIONS) {

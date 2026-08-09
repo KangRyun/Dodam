@@ -22,6 +22,9 @@ SRC_TAG="${SRC_TAG:-local}"
 TAG="staging"
 WITH_AI=0
 WITH_WEB=0
+EXPLICIT_SERVICES=0
+LIST_IMAGES=0
+SERVICES=()
 
 log() { printf '\n\033[1m▸ %s\033[0m\n' "$*"; }
 die() { printf '\n❌ %s\n' "$*" >&2; exit 1; }
@@ -31,13 +34,34 @@ while [ $# -gt 0 ]; do
     --tag)      TAG="${2:?--tag 에 값이 필요하다}"; shift 2 ;;
     --with-ai)  WITH_AI=1; shift ;;
     --with-web) WITH_WEB=1; shift ;;
-    *)          die "알 수 없는 인자: $1 (--tag TAG | --with-ai | --with-web)" ;;
+    --service)
+      case "${2:-}" in
+        backend|ai|web|nginx) SERVICES+=("$2"); EXPLICIT_SERVICES=1; shift 2 ;;
+        *) die "--service 는 backend, ai, web, nginx 중 하나여야 한다: '${2:-}'" ;;
+      esac
+      ;;
+    --list-images) LIST_IMAGES=1; shift ;;
+    *)          die "알 수 없는 인자: $1 (--tag TAG | --service SERVICE | --with-ai | --with-web | --list-images)" ;;
   esac
 done
 
-IMAGES=(dodam-backend dodam-nginx)
-[ "$WITH_AI"  = "1" ] && IMAGES+=(dodam-ai)
-[ "$WITH_WEB" = "1" ] && IMAGES+=(dodam-web)
+if [ "$EXPLICIT_SERVICES" = "1" ]; then
+  IMAGES=()
+  for svc in "${SERVICES[@]}"; do
+    candidate="dodam-${svc}"
+    [[ " ${IMAGES[*]} " == *" ${candidate} "* ]] || IMAGES+=("$candidate")
+  done
+else
+  # 기존 호출과의 하위 호환: 기본 backend+nginx, 옵션으로 ai·web 추가.
+  IMAGES=(dodam-backend dodam-nginx)
+  [ "$WITH_AI"  = "1" ] && IMAGES+=(dodam-ai)
+  [ "$WITH_WEB" = "1" ] && IMAGES+=(dodam-web)
+fi
+
+if [ "$LIST_IMAGES" = "1" ]; then
+  printf '%s\n' "${IMAGES[*]}"
+  exit 0
+fi
 
 # ── 레지스트리 HTTP 조회 ───────────────────────────────────────────────────
 # ★ 여기가 이 스크립트에서 제일 헷갈리는 지점이다.
@@ -50,7 +74,7 @@ IMAGES=(dodam-backend dodam-nginx)
 #   반면 `docker push` 는 클라이언트가 아니라 **데몬**이 수행한다. 데몬은 호스트에
 #   있으므로 127.0.0.1:5000 을 제대로 해석한다 → push 주소는 바꿀 필요가 없다.
 #   조회만 호스트 네트워크로 우회하면 된다.
-PROBE_IMAGE="${PROBE_IMAGE:-dodam-nginx:local}"
+PROBE_IMAGE="${PROBE_IMAGE:-${IMAGES[0]}:${SRC_TAG}}"
 registry_get() {
   # 1) 호스트에서 실행된 경우
   curl -fsS -m 5 "http://${REGISTRY}$1" 2>/dev/null && return 0
