@@ -62,10 +62,14 @@ def notifyMattermost(String emoji, String title) {
       // 프리즈 중에는 "배포됨"이라고 쓰면 안 된다 — 알림만 보고 배포된 줄 아는 게 가장 위험하다.
       def deployed = ''
       if (branch == 'develop' && emoji == '✅') {
-        // 컷백 기간에는 "어디에 배포됐는가"가 배포 여부만큼 중요하다 — 알림에 대상을 함께 적는다.
-        deployed = (env.DEPLOY_FROZEN == 'true')
-          ? ' · ⏸️ 배포 프리즈(미배포)'
-          : " · 🚀 서버 배포됨(${env.DEPLOY_TARGET ?: '?'})"
+        if (env.DEPLOY_REQUIRED != 'true') {
+          deployed = ' · ⏭️ 서버 변경 없음(배포 생략)'
+        } else {
+          // 컷백 기간에는 "어디에 배포됐는가"가 배포 여부만큼 중요하다 — 알림에 대상을 함께 적는다.
+          deployed = (env.DEPLOY_FROZEN == 'true')
+            ? ' · ⏸️ 배포 프리즈(미배포)'
+            : " · 🚀 서버 배포됨(${env.DEPLOY_TARGET ?: '?'})"
+        }
       }
       // 빌드 링크 — Jenkins가 https://…/jenkins/ 로 공개(S15P11B209-319)되며 클릭 가능해짐.
       //   BUILD_URL은 Manage Jenkins의 "Jenkins URL" 설정 기반으로 생성됨(로그인 필요).
@@ -110,6 +114,18 @@ pipeline {
       defaultValue: false,
       description: 'frontend/mobile 변경이 없어도 Flutter 앱 테스트를 실행한다 (S15P11B209-642)'
     )
+    booleanParam(
+      name: 'FORCE_FULL_TESTS',
+      defaultValue: false,
+      description: 'MR이 아닌 빌드에서도 Backend Testcontainers 전체 테스트를 실행한다'
+    )
+    // 변경 감지가 비었거나 같은 SHA를 복구 목적으로 다시 배포할 때 쓰는 안전 탈출구다.
+    // 켜면 Backend 전체 테스트와 서버 이미지 4종 build·push·deploy를 모두 수행한다.
+    booleanParam(
+      name: 'FORCE_SERVER_REBUILD',
+      defaultValue: false,
+      description: '변경 감지를 무시하고 서버 전체 테스트·이미지 빌드·배포를 실행한다'
+    )
     // ※ DEPLOY_K8S_STAGING(359)은 제거했다. 컷오버(360) 후 운영 배포 자체가 k3s 로 가므로
     //   "스테이징에만 따로 배포"라는 개념이 사라졌다 — 같은 네임스페이스를 두 번 배포하게 된다.
 
@@ -127,7 +143,7 @@ pipeline {
     booleanParam(
       name: 'COMPOSE_FORCE_RECREATE',
       defaultValue: false,
-      description: 'compose 배포 시 --force-recreate 를 붙인다 (같은 SHA 재배포용)'
+      description: 'compose 배포 시 --force-recreate 를 붙인다 (같은 SHA면 FORCE_SERVER_REBUILD도 함께 선택)'
     )
   }
 
@@ -189,8 +205,48 @@ pipeline {
       }
     }
 
+    stage('Detect Changes') {
+      steps {
+        script {
+          env.CURRENT_STAGE = env.STAGE_NAME
+          sh '''
+            chmod +x infra/scripts/ci-change-scope.sh
+            if [ "$FORCE_SERVER_REBUILD" = "true" ]; then
+              infra/scripts/ci-change-scope.sh --all > .ci-change-scope.env
+            else
+              infra/scripts/ci-change-scope.sh > .ci-change-scope.env
+            fi
+          '''
+
+          def scope = [:]
+          readFile('.ci-change-scope.env').readLines().each { line ->
+            def separator = line.indexOf('=')
+            if (separator > 0) {
+              scope[line.substring(0, separator)] = line.substring(separator + 1)
+            }
+          }
+          ['BACKEND_TEST_REQUIRED', 'BACKEND_IMAGE_CHANGED', 'AI_CHANGED', 'WEB_CHANGED',
+           'MOBILE_TEST_REQUIRED', 'NGINX_CHANGED', 'DEPLOY_REQUIRED', 'BUILD_SERVICES'].each { key ->
+            if (!scope.containsKey(key)) { error "변경 범위 판정 결과에 ${key}가 없다" }
+            env."${key}" = scope[key]
+          }
+
+          def mergeRequestBuild = (env.CHANGE_ID ?: '').trim() || (env.BRANCH_NAME ?: '').startsWith('MR-')
+          env.BACKEND_TEST_TASK = env.BACKEND_TEST_REQUIRED == 'true'
+            ? ((mergeRequestBuild || params.FORCE_FULL_TESTS) ? 'test' : 'quickTest')
+            : ''
+          env.BACKEND_GRADLE_TASKS = env.BACKEND_TEST_TASK +
+            (env.BACKEND_IMAGE_CHANGED == 'true' ? ' bootJar' : '')
+
+          echo "변경범위: backendTest=${env.BACKEND_TEST_TASK ?: 'skip'} · mobileTest=${env.MOBILE_TEST_REQUIRED} · " +
+               "images=[${env.BUILD_SERVICES}] · deploy=${env.DEPLOY_REQUIRED}"
+        }
+      }
+    }
+
     stage('Compose Preflight') {
-      // when 없음 = 모든 브랜치. MR 빌드에서 미리 잡아야 develop 머지 후 장애를 막는다.
+      // 서버 산출물에 영향이 있을 때만 실행하되, MR에서 미리 잡아 develop 머지 후 장애를 막는다.
+      when { expression { env.DEPLOY_REQUIRED == 'true' } }
       steps {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
         // 리포지토리 상대경로를 "호스트 마운트"로 쓰는 선언을 금지한다.
@@ -214,7 +270,10 @@ pipeline {
     }
 
     stage('Secrets Preflight') {
-      when { branch 'develop' }   // 시크릿은 develop(이미지 빌드·배포)에서만 쓰인다 — MR 빌드는 불필요
+      when {
+        branch 'develop'
+        expression { env.DEPLOY_REQUIRED == 'true' }
+      }
       steps {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
         // dodam-env 크리덴셜의 필수 키를 테스트(≈10분) 전에 전수 검증한다.
@@ -330,7 +389,7 @@ pipeline {
     }
 
     stage('Migration Preflight') {
-      // when 없음 = 모든 브랜치. MR 빌드에서 잡아야 의미가 있다 — 머지된 뒤에 알면 늦다.
+      // Backend 변경이 있는 MR 빌드에서 잡아야 의미가 있다 — 머지된 뒤에 알면 늦다.
       // reason: Flyway 는 같은 버전이 둘이면 마이그레이션이 아니라 **애플리케이션 기동**이 실패한다
       //   (`Found more than one migration with version N`). 그런데 파일명이 다르므로 git 은 충돌로
       //   보지 않는다 — 양쪽 다 "새 파일 추가"라 조용히 병합된다.
@@ -340,6 +399,7 @@ pipeline {
       //   테스트라 로컬에서 잘 안 돌리고, 무엇보다 develop 에 머지된 뒤에 터진다.
       // ※ 구조적으로 재발한다: 번호는 브랜치를 딸 때 정해지는데 머지는 며칠 뒤라,
       //   분기 시점에 비어 있던 번호가 머지 시점에는 차 있다.
+      when { expression { env.BACKEND_IMAGE_CHANGED == 'true' } }
       steps {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
         // origin/develop 이 없으면 스크립트가 교차 검사를 건너뛰고 경고만 남긴다(브랜치 내부
@@ -353,22 +413,26 @@ pipeline {
     }
 
     stage('Build & Test — backend') {
+      when { expression { env.BACKEND_TEST_REQUIRED == 'true' } }
       steps {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
         dir('backend') {
-          // 테스트를 여기서 돌린다(이미지 빌드는 -x test로 스킵). 실패 시 파이프라인 중단 = 배포 안 함.
+          // 작업 브랜치와 develop은 quickTest, MR 또는 FORCE_FULL_TESTS 빌드는 전체 test를 실행한다.
+          // MR에서 이미 검증한 전체 테스트를 develop 배포에서 반복하지 않아 피드백과 배포를 빠르게 만든다.
           // clean 제거 + --build-cache: 워크스페이스가 브랜치별로 재사용되므로 증분 컴파일 활용
           //   (S15P11B209-391 — clean은 매번 풀컴파일을 강제해 2~4분 낭비였음)
-          // test와 bootJar를 한 Gradle 호출로 산출(Phase 2): 테스트용 컴파일 결과를 bootJar가
+          // 테스트와 bootJar를 한 Gradle 호출로 산출(Phase 2): 테스트용 컴파일 결과를 bootJar가
           //   그대로 재사용하므로 이미지 빌드에서 재컴파일하지 않는다(이중 컴파일 제거).
           //   backend/build/libs/*.jar 를 Docker가 COPY만 한다(backend/Dockerfile 참조).
-          sh 'chmod +x gradlew && ./gradlew --no-daemon --build-cache test bootJar'
+          // Jenkins 컨트롤러는 장기 실행 agent라 Daemon을 재사용한다. idle timeout과 JVM 상한은
+          // backend/gradle.properties에서 제한해 메모리가 무기한 남지 않게 한다.
+          sh 'chmod +x gradlew && ./gradlew --build-cache $BACKEND_GRADLE_TASKS'
         }
       }
       post {
         // 성공/실패 무관하게 테스트 리포트 수집(Jenkins UI에 추이 표시)
         always {
-          junit testResults: 'backend/build/test-results/test/*.xml', allowEmptyResults: true
+          junit testResults: 'backend/build/test-results/*/*.xml', allowEmptyResults: true
         }
       }
     }
@@ -381,7 +445,7 @@ pipeline {
       //      그 경우 스킵되는 게 정상이고, 다음 빌드부터 정상 판정된다.
       when {
         anyOf {
-          changeset 'frontend/mobile/**'
+          expression { env.MOBILE_TEST_REQUIRED == 'true' }
           expression { params.FORCE_APP_TESTS }
         }
       }
@@ -394,7 +458,10 @@ pipeline {
     }
 
     stage('Docker Build') {
-      when { branch 'develop' }      // develop만 이미지 빌드 — 브랜치 빌드가 :local을 덮어 배포 레이스 만드는 것 차단
+      when {
+        branch 'develop'
+        expression { env.DEPLOY_REQUIRED == 'true' }
+      }
       steps {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
         // 앱 이미지(backend·ai)를 호스트 도커에 바로 빌드(레지스트리 없음). 배포는 :local 사용.
@@ -402,18 +469,20 @@ pipeline {
         // Compose는 build만 실행해도 전체 파일의 필수 변수를 먼저 보간하므로 배포와 같은 Secret File이 필요하다.
         withCredentials([file(credentialsId: 'dodam-env', variable: 'ENV_FILE')]) {
           sh '''
-            docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build
-            docker tag dodam-backend:local dodam-backend:${IMAGE_TAG}
-            docker tag dodam-ai:local      dodam-ai:${IMAGE_TAG}
-            docker tag dodam-nginx:local   dodam-nginx:${IMAGE_TAG}
-            docker tag dodam-web:local     dodam-web:${IMAGE_TAG}
+            docker compose -f "$COMPOSE_FILE" --env-file "$ENV_FILE" build $BUILD_SERVICES
+            for svc in $BUILD_SERVICES; do
+              docker tag "dodam-${svc}:local" "dodam-${svc}:${IMAGE_TAG}"
+            done
           '''
         }
       }
     }
 
     stage('Test — ai (import smoke)') {
-      when { branch 'develop' }      // 빌드된 이미지가 필요해 Docker Build와 세트로 develop 전용
+      when {
+        branch 'develop'
+        expression { env.AI_CHANGED == 'true' }
+      }
       steps {
         script { env.CURRENT_STAGE = env.STAGE_NAME }
         // ai는 아직 유닛테스트 없음 → 빌드된 이미지에서 앱이 import 되는지만 확인. (TODO: 실제 테스트 추가)
@@ -426,6 +495,7 @@ pipeline {
       // 배포된 줄 안다 — 거짓 초록불이 빨간불보다 위험하다.
       when {
         branch 'develop'
+        expression { env.DEPLOY_REQUIRED == 'true' }
         expression { fileExists(env.DEPLOY_FREEZE_FLAG) }
       }
       steps {
@@ -451,6 +521,7 @@ pipeline {
     stage('Deploy — compose (develop only)') {
       when {
         branch 'develop'
+        expression { env.DEPLOY_REQUIRED == 'true' }
         expression { env.DEPLOY_TARGET == 'compose' }
         expression { !fileExists(env.DEPLOY_FREEZE_FLAG) }
       }
@@ -473,8 +544,10 @@ pipeline {
             #   push 는 추적성 문제가 아니라 **배포의 전제**다(이 단계가 빠지면 pull 실패).
             # :prod 도 함께 갱신한다 — k3s 로 되돌아갔을 때 매니페스트 기본값(:prod)이
             #   옛 이미지를 가리켜 **조용히 과거로 롤백**되는 것을 막는다(771 과 같은 사유).
-            infra/scripts/push-staging-images.sh --tag "$IMAGE_TAG" --with-ai --with-web
-            infra/scripts/push-staging-images.sh --tag prod         --with-ai --with-web
+            set --
+            for svc in $BUILD_SERVICES; do set -- "$@" --service "$svc"; done
+            infra/scripts/push-staging-images.sh --tag "$IMAGE_TAG" "$@"
+            infra/scripts/push-staging-images.sh --tag prod         "$@"
 
             # ── 1. 앱 3종(backend·ai·web): 단일 노드형 **블루-그린 무중단 배포** ───────
             # 각 서비스를 유휴 색으로 새 태그에 띄워 **내부 헬스체크 통과 후** nginx 스위치만
@@ -511,27 +584,29 @@ pipeline {
                 /repo/infra/scripts/bluegreen-deploy.sh "$@"
             }
             # 데이터 계층(mysql·mongo·redis·minio)은 스크립트가 --no-deps 로 절대 건드리지 않는다.
-            bg backend "$IMAGE_TAG"
-            bg ai      "$IMAGE_TAG"
-            bg web     "$IMAGE_TAG"
+            changed() { case " $BUILD_SERVICES " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+            changed backend && bg backend "$IMAGE_TAG"
+            changed ai      && bg ai      "$IMAGE_TAG"
+            changed web     && bg web     "$IMAGE_TAG"
 
             # ── 2. nginx 자체: **기존 방식 유지**(블루-그린 대상 아님) ────────────────
             # nginx 이미지/conf 갱신은 재생성으로 반영한다. 블루-그린 스위치가 이미 upstream 을
             #   바꿔 reload 했으므로, 이미지가 안 바뀌면 아래 up 은 no-op 이다. 바뀌면 재생성
             #   (1~3s 순단) — 앱과 달리 nginx 는 단일 인스턴스라 이 짧은 순단은 기존과 동일하게 감수.
             #   --no-deps 로 데이터·앱 색을 건드리지 않고 nginx 만 다룬다.
-            TAG_ENV=.compose-image-tag.env
-            printf 'IMAGE_TAG=%s\\n' "$IMAGE_TAG" > "$TAG_ENV"
-            RECREATE=""
-            [ "${COMPOSE_FORCE_RECREATE:-false}" = "true" ] && RECREATE="--force-recreate"
-            docker compose -f "$COMPOSE_RUN_FILE" --env-file "$COMPOSE_ENV_FILE" --env-file "$TAG_ENV" \
-              up -d --no-deps $RECREATE nginx
-            # 스위치가 이미 reload 했지만, nginx 가 재생성됐을 수도 있어 한 번 더 reload(무해한 no-op).
-            docker exec dodam-nginx nginx -s reload \
-              && echo "   ✅ nginx reload" \
-              || echo "   ⚠️ nginx reload 실패(설정 오류 가능) — Healthcheck e2e 로 판단한다"
+            if changed nginx; then
+              TAG_ENV=.compose-image-tag.env
+              printf 'IMAGE_TAG=%s\\n' "$IMAGE_TAG" > "$TAG_ENV"
+              RECREATE=""
+              [ "${COMPOSE_FORCE_RECREATE:-false}" = "true" ] && RECREATE="--force-recreate"
+              docker compose -f "$COMPOSE_RUN_FILE" --env-file "$COMPOSE_ENV_FILE" --env-file "$TAG_ENV" \
+                up -d --no-deps $RECREATE nginx
+              docker exec dodam-nginx nginx -s reload \
+                && echo "   ✅ nginx reload" \
+                || echo "   ⚠️ nginx reload 실패(설정 오류 가능) — Healthcheck e2e 로 판단한다"
+            fi
 
-            echo "✅ 블루-그린 배포 완료(backend·ai·web 무중단) + nginx 반영 — 태그 :$IMAGE_TAG"
+            echo "✅ 변경 서비스 배포 완료: $BUILD_SERVICES — 태그 :$IMAGE_TAG"
           '''
         }
       }
@@ -542,6 +617,7 @@ pipeline {
       //   하기 때문이다. 컷백이 실패했을 때 파이프라인까지 다시 고치는 상황을 만들지 않는다.
       when {
         branch 'develop'
+        expression { env.DEPLOY_REQUIRED == 'true' }
         expression { env.DEPLOY_TARGET == 'k3s' }
         expression { !fileExists(env.DEPLOY_FREEZE_FLAG) }
       }
@@ -569,22 +645,25 @@ pipeline {
             #     뜨면 kubelet 은 **노드에 캐시된 옛 :prod** 를 재풀 없이 쓴다.
             #     나머지 절반이 base 매니페스트의 `imagePullPolicy: Always` 다.
             #     둘 중 하나만 있으면 막히지 않는다 — 2026-08-02·08-04 두 번 그렇게 터졌다.
-            infra/scripts/push-staging-images.sh --tag "$IMAGE_TAG" --with-ai --with-web
-            infra/scripts/push-staging-images.sh --tag prod         --with-ai --with-web
+            set --
+            for svc in $BUILD_SERVICES; do set -- "$@" --service "$svc"; done
+            infra/scripts/push-staging-images.sh --tag "$IMAGE_TAG" "$@"
+            infra/scripts/push-staging-images.sh --tag prod         "$@"
 
             # 컨테이너 이름은 Deployment 이름과 다를 수 있다 — gateway 의 컨테이너는 nginx 다.
-            kubectl -n dodam set image deployment/backend backend=127.0.0.1:5000/dodam-backend:"$IMAGE_TAG"
-            kubectl -n dodam set image deployment/gateway nginx=127.0.0.1:5000/dodam-nginx:"$IMAGE_TAG"
-            kubectl -n dodam set image deployment/ai      ai=127.0.0.1:5000/dodam-ai:"$IMAGE_TAG"
-            kubectl -n dodam set image deployment/web     web=127.0.0.1:5000/dodam-web:"$IMAGE_TAG"
+            changed() { case " $BUILD_SERVICES " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
+            changed backend && kubectl -n dodam set image deployment/backend backend=127.0.0.1:5000/dodam-backend:"$IMAGE_TAG"
+            changed ai      && kubectl -n dodam set image deployment/ai      ai=127.0.0.1:5000/dodam-ai:"$IMAGE_TAG"
+            changed web     && kubectl -n dodam set image deployment/web     web=127.0.0.1:5000/dodam-web:"$IMAGE_TAG"
+            changed nginx   && kubectl -n dodam set image deployment/gateway nginx=127.0.0.1:5000/dodam-nginx:"$IMAGE_TAG"
 
             # backend 는 replicas 2 + maxUnavailable 0 + preStop 8s 로 무중단이다(362 실증).
-            kubectl -n dodam rollout status deployment/backend --timeout=300s
-            kubectl -n dodam rollout status deployment/gateway --timeout=300s
-            kubectl -n dodam rollout status deployment/ai      --timeout=300s
+            changed backend && kubectl -n dodam rollout status deployment/backend --timeout=300s
+            changed ai      && kubectl -n dodam rollout status deployment/ai      --timeout=300s
             # ★ web 은 gateway 보다 먼저 준비돼야 한다. 순서가 어긋나면 gateway 가 새 conf 로
             #   뜬 뒤 web 이 아직 없어 `/` 가 잠깐 502 가 된다. rollout status 로 기다린다.
-            kubectl -n dodam rollout status deployment/web     --timeout=300s
+            changed web     && kubectl -n dodam rollout status deployment/web     --timeout=300s
+            changed nginx   && kubectl -n dodam rollout status deployment/gateway --timeout=300s
           '''
         }
       }
@@ -595,6 +674,7 @@ pipeline {
       // 뜻일 뿐인데 이번 빌드가 검증된 것처럼 초록불이 뜬다.
       when {
         branch 'develop'
+        expression { env.DEPLOY_REQUIRED == 'true' }
         expression { !fileExists(env.DEPLOY_FREEZE_FLAG) }
       }
       steps {
@@ -652,7 +732,8 @@ pipeline {
                 #     "배포가 성공했다"와 "새 이미지가 떠 있다"는 다르다. 재생성을 건너뛰면
                 #     옛 컨테이너가 그대로 남는데, 태그만 보면 드러나지 않는다(2026-08-04 착시).
                 #     블루-그린이라 backend/ai/web 은 **활성 색 컨테이너**로 대조한다.
-                for svc in backend ai web; do
+                for svc in $BUILD_SERVICES; do
+                  [ "$svc" = "nginx" ] && continue
                   c=$(docker ps --filter "name=dodam-${svc}-" --filter "status=running" --format '{{.Names}}' | head -1)
                   want=$(docker image inspect -f '{{.Id}}' "127.0.0.1:5000/dodam-$svc:$IMAGE_TAG" 2>/dev/null || echo want-missing)
                   got=$(docker inspect -f '{{.Image}}' "$c" 2>/dev/null || echo got-missing)
@@ -664,15 +745,17 @@ pipeline {
                     fail=1
                   fi
                 done
-                # nginx(단일) — 기존 방식이라 같은 SHA 재배포 시 재생성이 안 될 수 있다.
-                want=$(docker image inspect -f '{{.Id}}' "127.0.0.1:5000/dodam-nginx:$IMAGE_TAG" 2>/dev/null || echo want-missing)
-                got=$(docker inspect -f '{{.Image}}' dodam-nginx 2>/dev/null || echo got-missing)
-                if [ "$want" = "$got" ]; then
-                  echo "   ✅ dodam-nginx 이미지 다이제스트 일치"
-                else
-                  echo "   ❌ dodam-nginx 이미지 불일치 — 기대=$want 실제=$got"
-                  echo "      → 같은 SHA 재배포로 nginx 재생성이 안 된 경우. COMPOSE_FORCE_RECREATE=true 로 재실행."
-                  fail=1
+                # nginx(단일) — 이번 빌드에서 변경된 경우에만 새 이미지 다이제스트를 요구한다.
+                if [ "$NGINX_CHANGED" = "true" ]; then
+                  want=$(docker image inspect -f '{{.Id}}' "127.0.0.1:5000/dodam-nginx:$IMAGE_TAG" 2>/dev/null || echo want-missing)
+                  got=$(docker inspect -f '{{.Image}}' dodam-nginx 2>/dev/null || echo got-missing)
+                  if [ "$want" = "$got" ]; then
+                    echo "   ✅ dodam-nginx 이미지 다이제스트 일치"
+                  else
+                    echo "   ❌ dodam-nginx 이미지 불일치 — 기대=$want 실제=$got"
+                    echo "      → 같은 SHA 재배포로 nginx 재생성이 안 된 경우. COMPOSE_FORCE_RECREATE=true 로 재실행."
+                    fail=1
+                  fi
                 fi
                 [ "$fail" = "0" ] || exit 1
               '''
@@ -818,7 +901,11 @@ pipeline {
       //   SHA 태그는 프룬 대상이 아니라 무한 누적됐다(07/24 실측 268개·62GB → 1회 정리 후 이 정책으로 유지).
       //   dangling 프룬은 until=24h 필터로 최근 캐시 레이어를 보존한다.
       sh '''
-        for repo in dodam-backend dodam-ai dodam-nginx; do
+        if [ "${BRANCH_NAME:-}" != "develop" ] || [ "${DEPLOY_REQUIRED:-false}" != "true" ]; then
+          echo "변경 서버 이미지를 배포하지 않은 빌드 — 이미지 정리 생략"
+          exit 0
+        fi
+        for repo in dodam-backend dodam-ai dodam-web dodam-nginx; do
           docker images --format '{{.Repository}}:{{.Tag}}' "$repo" 2>/dev/null \
             | grep -v ':local' | tail -n +4 | xargs -r docker rmi >/dev/null 2>&1 || true
         done

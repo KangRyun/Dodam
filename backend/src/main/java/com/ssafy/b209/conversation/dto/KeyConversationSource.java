@@ -46,9 +46,14 @@ public interface KeyConversationSource {
   String getAnswerSpeechStatus();
 
   /**
-   * @return 리포트 생성 시점에 원본 음성 저장 참조가 있으면 {@code true}
+   * MySQL native query가 반환하는 원본 음성 저장 참조 여부를 숫자 플래그로 제공한다.
+   *
+   * <p>native query의 {@code CASE} 결과는 JDBC에서 {@link Integer}로 반환되므로, projection 단계에서
+   * {@code boolean}으로 직접 변환하지 않는다.
+   *
+   * @return 원본 음성 저장 참조가 있으면 {@code 1}, 없으면 {@code 0}
    */
-  boolean getAnswerAudioAvailable();
+  Integer getAnswerAudioAvailable();
 
   /**
    * @return 답변 메시지가 생성된 서버 시각

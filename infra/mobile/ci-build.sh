@@ -20,10 +20,10 @@ log() { printf '\n\033[1m── %s\033[0m\n' "$*"; }
 # docker cp 는 .gitignore 를 모른다 — 작업 트리를 통째로 가져온다.
 # 특히 android/local.properties 에는 **호스트의** flutter.sdk 경로(/home/kr/flutter)가 박혀 있어
 # 컨테이너 안에서는 존재하지 않는 경로를 가리킨다. 지우면 flutter 가 자기 경로로 다시 만든다.
-# build/·.dart_tool 도 호스트 산출물이라 남겨두면 "왜 옛 코드가 들어갔지"를 만든다.
+# build/·.dart_tool 등 호스트 산출물은 주입 단계에서 제외하고, job별 named volume만 유지한다.
+# Flutter·Gradle이 입력 변경을 판정하므로 정상적인 증분 빌드가 가능하다.
 log "호스트 잔재 정리"
 rm -f  android/local.properties
-rm -rf build .dart_tool android/.gradle android/app/build
 
 # ── 1. 서명 설정 확인 ──────────────────────────────────────────────────────
 if [ -f android/key.properties ]; then
