@@ -449,11 +449,19 @@ final class DiaryInsightsDto {
   ///
   /// `childVoiceItems` 는 세지 않는다. 그 목록은 서버가 요청의 문답에서 그대로
   /// 파생하므로 문답이 있으면 언제나 채워진다 — 세면 이 판단이 늘 참이 된다.
+  ///
+  /// ⚠️ `developmentalObservations` 는 **센다.** 그 카드는 모델이 아니라 서버가 검증된
+  ///    신호로 조립하므로, 모델 카드가 하나도 살아남지 못한 활동에서도 보호자에게 적을 것이
+  ///    남는다. 세지 않았더니 서버가 4층을 담아 보내도 앱이 "내용 없음"으로 보고 옛 화면을
+  ///    열었다 — 서버에는 있는 내용이 화면에서만 사라졌다(2026-08-09 실측).
+  ///    서버의 같은 규칙은 `diary_report_v2.build_diary_insights` 에 있다. 한쪽만 고치면
+  ///    이 화면이 다시 조용히 접힌다.
   bool get hasContent =>
       storySnapshot != null ||
       narrativeFlow.isNotEmpty ||
       sessionObservations.isNotEmpty ||
-      caregiverQuestions.isNotEmpty;
+      caregiverQuestions.isNotEmpty ||
+      developmentalObservations.isNotEmpty;
 }
 
 String? _text(Object? value) {
