@@ -136,6 +136,14 @@ class QuestionRequest(_CamelModel):
     # 앞 주제에서 아이가 한 말 (S15P11B209-989). 롤아웃 안전: 구 BE가 안 보내면 빈 목록 —
     #   첫 주제·그림일기와 같은 경로로 떨어져 기존 동작 그대로다.
     previous_subject_notes: list[PreviousSubjectNote] = Field(default_factory=list)
+    # 이 요청이 **아이 발화가 아니라 새 그림이 붙어서** 촉발됐는가(그림일기 대화 재개).
+    #   True면 recentMessages의 마지막 아이 발화는 **이 턴에 대한 대답이 아니라 이전 라운드의
+    #   잔여물**이다. 그만하기 되묻기에 답한 "응"이 질문 상한 409로 소비되지 못한 채 남아 있다가
+    #   재개 턴에서 종료 확인으로 재생돼, 재개된 대화가 1초 만에 다시 끝나는 사고가 있었다.
+    #   ⚠️ 이 플래그는 **그만하기 의사 해석만** 무력화한다. 위기 감지·인젝션 검사·질문 안전
+    #      판정은 그대로 돈다(question_service.generate 참고).
+    #   롤아웃 안전: 구 BE가 안 보내면 False — 기존 동작 그대로다.
+    resumed_by_new_drawing: bool = False
 
     @model_validator(mode="after")
     def validate_activity_context(self) -> "QuestionRequest":
