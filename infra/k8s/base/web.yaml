@@ -1,0 +1,92 @@
+# 커뮤니티 웹(Next.js standalone) — Deployment (S15P11B209-383)
+#
+# 라이브 루트(`/`)를 임시 페이지(S15P11B209-302)에서 이 서비스로 넘긴다.
+# gateway 의 `location /` 가 여기로 프록시하고, /api/·/ai/·/grafana/·/jenkins/·/download/
+# 는 nginx 최장 접두사 매칭으로 기존 라우트가 계속 우선한다.
+#
+# ⚠️ 무인증 공개면이다(가드레일 9절). Service 는 ClusterIP — 클러스터 밖으로 열지 않는다.
+#    외부 진입은 gateway 하나뿐이어야 한다.
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: dodam
+  labels: { app: web }
+spec:
+  selector: { app: web }
+  ports:
+    - { name: http, port: 3000, targetPort: 3000 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: dodam
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: web }
+  strategy:
+    type: RollingUpdate
+    rollingUpdate: { maxSurge: 1, maxUnavailable: 0 }
+  template:
+    metadata:
+      labels: { app: web }
+    spec:
+      containers:
+        - name: web
+          image: dodam-web          # 태그는 overlay 의 images 트랜스포머가 채운다
+          # ⚠️ Always 인 이유 (S15P11B209-771). 기본값 IfNotPresent 는 여기서 위험하다:
+          #   `apply -k` 는 이미지를 SHA 태그에서 :prod 로 되돌리는데(overlay 의 images),
+          #   그때 kubelet 이 **노드에 캐시된 옛 :prod** 를 재풀 없이 그대로 띄운다.
+          #   Jenkins 가 배포마다 레지스트리 :prod 를 갱신하는 방어(359)는 노드 캐시를 못 이긴다.
+          #   실제로 2026-08-02·08-04 두 번 터졌다(08-04 는 /login 404, 약 10분).
+          #   비용: 레지스트리가 루프백(127.0.0.1:5000)이라 다이제스트만 확인하고 레이어는 캐시 재사용.
+          imagePullPolicy: Always
+          ports:
+            - { name: http, containerPort: 3000 }
+          # ⚠️ 브라우저용 API 주소(NEXT_PUBLIC_API_BASE_URL)는 여기 두지 않는다 — 빌드 시점에
+          #    번들에 구워지므로(상대경로 /api/v1) 런타임 env 로는 안 바뀐다. 바꾸려면 build-arg 로
+          #    **재빌드**해야 한다(frontend/web/Dockerfile 주석). 여기 넣으면 "설정했는데 왜 안 바뀌지"다.
+          #
+          #  ↔ 아래 API_BASE_URL 은 그것과 **다른 것**이다. 소셜 로그인의 code→token 교환은 서버 전용
+          #    Route Handler(/api/oauth/[provider])에서 일어나고, 그 핸들러가 백엔드를 부를 때 쓰는
+          #    주소다. 서버-사이드 fetch 는 상대경로(/api/v1)를 못 쓰므로 클러스터 내부 절대주소가
+          #    필요하다. gateway/TLS 를 거치지 않고 backend 를 직접 부른다 — nginx 의
+          #    `location /api/ { proxy_pass http://backend:8080; }` 와 동일 대상이며, 경로를 떼지
+          #    않으므로 백엔드 컨텍스트 /api/v1 을 포함한다.
+          env:
+            - { name: NODE_ENV, value: production }
+            # 로그 시각을 KST 로 (S15P11B209-736 후속). web 은 dodam-config 를
+            # envFrom 하지 않아 여기서 직접 준다 — backend·ai 는 그 ConfigMap 으로 받는다.
+            - { name: TZ, value: "Asia/Seoul" }
+            - { name: API_BASE_URL, value: "http://backend:8080/api/v1" }
+            # 소셜 로그인 Client Secret(서버 전용) — dodam-secrets 의 동일 키를 참조한다.
+            #   optional: true 인 이유: 값이 아직 동기화 전이어도 web 파드는 떠서 커뮤니티는 정상
+            #   서비스하고 해당 provider 로그인만 실패한다(OAuth secret 하나로 웹 전체가 죽지 않게).
+            #   값 주입: dodam-env 에 키 추가 → infra/scripts/sync-secrets.sh 로 dodam-secrets 갱신.
+            - { name: KAKAO_CLIENT_SECRET,  valueFrom: { secretKeyRef: { name: dodam-secrets, key: KAKAO_CLIENT_SECRET,  optional: true } } }
+            - { name: NAVER_CLIENT_SECRET,  valueFrom: { secretKeyRef: { name: dodam-secrets, key: NAVER_CLIENT_SECRET,  optional: true } } }
+            - { name: GOOGLE_CLIENT_SECRET, valueFrom: { secretKeyRef: { name: dodam-secrets, key: GOOGLE_CLIENT_SECRET, optional: true } } }
+          # `/` 는 /community 로 리다이렉트한다(src/app/page.tsx). 3xx 는 프로브 성공으로
+          # 취급되므로 그대로 쓴다 — 별도 헬스 엔드포인트를 만들 이유가 없다.
+          startupProbe:
+            httpGet: { path: /, port: 3000 }
+            periodSeconds: 3
+            failureThreshold: 20
+          readinessProbe:
+            httpGet: { path: /, port: 3000 }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: 3000 }
+            periodSeconds: 20
+            failureThreshold: 5
+          # standalone 번들은 가볍다. 이 서버는 여유 RAM 이 빠듯하므로(APK 빌드 관문이
+          # 가용 7,168MB 를 요구한다) 상한을 낮게 잡았다. 실측 후 조정할 것.
+          resources:
+            requests: { memory: 128Mi, cpu: 50m }
+            limits:   { memory: 512Mi, cpu: 500m }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false   # Next 가 .next/cache 에 써야 한다

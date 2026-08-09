@@ -1,0 +1,15 @@
+# 축소 스테이징에서는 backend 1벌만 (S15P11B209-358)
+#
+# compose 앱과 k8s 앱이 동시에 떠 있는 구간이고, backend 가 메모리 최대 소비자다
+# (requests 768Mi / limits 1536Mi). 2벌이면 그대로 두 배가 된다.
+#
+# ⚠️ 대신 여기서는 **무중단 롤링을 검증할 수 없다.** replicas 1 + maxUnavailable 0 이면
+#    새 파드가 Ready 될 때까지 옛 파드가 남긴 하지만, "2벌 중 1벌씩 교체"라는 실제
+#    시나리오와는 다르다. 무중단 실증(362)은 컷오버 후 prod 에서 한다.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: dodam
+spec:
+  replicas: 1

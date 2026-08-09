@@ -1,0 +1,168 @@
+# 익스포터 — node-exporter(호스트 지표) · kube-state-metrics(k8s 오브젝트 지표)
+# S15P11B209-361
+#
+# cAdvisor 는 여기 없다. kubelet 이 내장 cAdvisor 를 이미 노출하므로 컨테이너를 하나 더 두지
+# 않는다(compose 판의 dodam-cadvisor 는 컷오버 때 폐기). 스크레이프 설정은
+# monitoring-prometheus.yaml 의 kubelet-cadvisor job 참조.
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-exporter
+  namespace: dodam
+spec:
+  selector: { matchLabels: { app: node-exporter } }
+  template:
+    metadata:
+      labels: { app: node-exporter }
+    spec:
+      # 호스트 프로세스 관점 지표에 필요하다(읽기 전용 관찰). compose 판의 `pid: host` 와 같다.
+      hostPID: true
+      # ⚠️ hostNetwork 는 쓰지 않는다. 켜면 호스트 9100 을 점유해 compose 판 node-exporter 와
+      #    충돌할 수 있다 — 이 스택은 컷오버 전까지 compose 와 **병행**한다.
+      #    ClusterIP Service 로 긁으면 충분하다(단일 노드).
+      automountServiceAccountToken: false   # k8s API 를 부르지 않는다 — 토큰을 들 이유가 없다
+      containers:
+        - name: node-exporter
+          image: prom/node-exporter:v1.9.1   # compose 판과 같은 고정 버전
+          args:
+            - --path.procfs=/host/proc
+            - --path.sysfs=/host/sys
+            - --path.rootfs=/rootfs
+            # 컨테이너·가상 마운트 잡음 제거 — 디스크 지표는 호스트 파일시스템만.
+            #   k8s 판에서는 /var/lib/kubelet 도 제외한다(파드마다 마운트가 늘어 시계열이 폭증한다).
+            - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|var/lib/docker/.+|var/lib/kubelet/.+)($|/)
+          ports:
+            - { name: metrics, containerPort: 9100 }
+          volumeMounts:   # 전부 읽기 전용 — 호스트에 아무것도 쓰지 않는다(가드레일 9절)
+            - { name: proc,   mountPath: /host/proc, readOnly: true }
+            - { name: sys,    mountPath: /host/sys,  readOnly: true }
+            - { name: rootfs, mountPath: /rootfs,    readOnly: true }
+          resources:
+            # 실측 16MiB(compose 판). 상한 64Mi 는 실측의 4배로 충분하다.
+            requests: { memory: 24Mi, cpu: 20m }
+            limits:   { memory: 64Mi, cpu: 200m }
+      volumes:
+        - { name: proc,   hostPath: { path: /proc } }
+        - { name: sys,    hostPath: { path: /sys } }
+        - { name: rootfs, hostPath: { path: / } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: node-exporter
+  namespace: dodam
+spec:
+  type: ClusterIP
+  selector: { app: node-exporter }
+  ports:
+    - { name: metrics, port: 9100, targetPort: 9100 }
+---
+# kube-state-metrics — "파드가 몇 개 Ready 인가 / 상한이 걸려 있는가" 같은 **오브젝트 상태**를
+# 지표로 낸다. cAdvisor(사용량)와 역할이 다르다. 경보 규칙의 ContainerWithoutMemoryLimit 이
+# 이 지표(kube_pod_container_resource_limits)에 의존한다.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-state-metrics
+  namespace: dodam
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dodam-kube-state-metrics
+rules:
+  # 읽기 전용. ⚠️ secrets 는 **일부러 뺐다** — KSM 은 Secret 의 메타데이터만 필요로 하지만,
+  #   이 서비스는 아동 민감정보 스택이라 필요 없는 권한을 넣지 않는다(가드레일 9절).
+  #   그 대가로 kube_secret_* 지표는 나오지 않는다. 쓰지 않는 지표다.
+  - apiGroups: [""]
+    resources: ["pods", "nodes", "services", "endpoints", "persistentvolumeclaims",
+                "replicationcontrollers", "resourcequotas", "namespaces", "configmaps"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "daemonsets", "replicasets", "statefulsets"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["batch"]
+    resources: ["jobs", "cronjobs"]
+    verbs: ["list", "watch"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dodam-kube-state-metrics
+subjects:
+  - kind: ServiceAccount
+    name: kube-state-metrics
+    namespace: dodam
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dodam-kube-state-metrics
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-state-metrics
+  namespace: dodam
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: kube-state-metrics } }
+  template:
+    metadata:
+      labels: { app: kube-state-metrics }
+    spec:
+      serviceAccountName: kube-state-metrics
+      containers:
+        - name: kube-state-metrics
+          image: registry.k8s.io/kube-state-metrics/kube-state-metrics:v2.14.0   # 버전 고정
+          # ★ 수집 대상을 명시적으로 좁힌다 (2026-07-29 컷오버 중 CrashLoopBackOff 로 발견).
+          #   KSM 은 기본적으로 storageclasses·persistentvolumes·ingresses·limitranges 같은
+          #   **클러스터 범위** 리소스까지 list/watch 하려 한다. 위 ClusterRole 은 최소권한으로
+          #   좁혀 뒀으므로 전부 forbidden 이 나고, 그 상태로 exit 2 로 죽는다.
+          #   해법은 두 가지였다: ① 권한을 넓힌다 ② 수집 대상을 좁힌다.
+          #   ②를 택했다 — 우리가 쓰는 지표는 파드/워크로드뿐이고(경보 규칙의
+          #   kube_pod_container_resource_limits), 아동 민감정보 스택에 필요 없는 클러스터
+          #   전역 읽기 권한을 늘리지 않는 편이 낫다(가드레일 9절).
+          #   ⚠️ 이 목록은 위 ClusterRole 과 **짝**이다. 한쪽만 바꾸면 다시 죽는다.
+          args:
+            - --resources=pods,deployments,statefulsets,daemonsets,replicasets,jobs,cronjobs,nodes,services,endpoints,namespaces,configmaps,persistentvolumeclaims,resourcequotas,poddisruptionbudgets
+          ports:
+            - { name: http,     containerPort: 8080 }
+            - { name: telemetry, containerPort: 8081 }
+          # ⚠️ KSM v2.14 는 헬스 엔드포인트를 **두 포트에 나눠** 놓았다. 직관에 반한다 —
+          #   실측(2026-07-30, 파드에 직접 요청):
+          #                 8080(메인)   8081(텔레메트리)
+          #       /livez       200            404
+          #       /healthz     200            404
+          #       /readyz      404            200
+          #   즉 readiness 는 8081, **liveness 는 8080** 이다. 처음엔 둘 다 8081 에 붙였고
+          #   liveness 만 404 를 받아 20초마다 재시작됐다(재시작 11회). k8s 프로브는 404 를
+          #   실패로 세므로, "Running 인데 주기적으로 죽는" 눈에 잘 안 띄는 형태가 된다.
+          readinessProbe:
+            httpGet: { path: /readyz, port: 8081 }
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /livez, port: 8080 }
+            periodSeconds: 20
+            timeoutSeconds: 5     # 기본 1초는 짧다(mongodb 에서 같은 함정을 겪었다)
+            failureThreshold: 5
+          resources:
+            # 오브젝트 수가 적은 단일 노드 클러스터다(파드 10개 안팎). 통상 40MiB 수준.
+            requests: { memory: 32Mi, cpu: 20m }
+            limits:   { memory: 96Mi, cpu: 200m }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-state-metrics
+  namespace: dodam
+spec:
+  type: ClusterIP
+  selector: { app: kube-state-metrics }
+  ports:
+    - { name: http, port: 8080, targetPort: 8080 }

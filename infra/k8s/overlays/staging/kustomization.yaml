@@ -1,0 +1,41 @@
+# 스테이징 overlay — S15P11B209-358 검증용 (S15P11B209-357)
+#
+# ★ 이 overlay 의 존재 이유: **운영 80/443 을 건드리지 않고** k8s 스택을 띄워보는 것.
+#   compose 스택이 그대로 서비스하는 동안 옆에서 돌린다.
+#
+#   gateway → NodePort 30080/30443  (호스트 80/443 미점유)
+#   검증:      curl -I http://127.0.0.1:30080/      → 301 이면 정상
+#             curl -k https://127.0.0.1:30443/ -H 'Host: i15b209.p.ssafy.io'
+#
+# ⚠️ 메모리. 이 구간에서는 compose 앱과 k8s 앱이 **동시에** 떠 있다.
+#   2026-07-28 실측 available 4.4GB / swap 2GB 사용 중이라, backend 를 2벌 띄우면
+#   가장 큰 소비자가 두 배가 된다 → 스테이징에서는 replicas: 1 로 낮춘다.
+#   무중단 롤링 검증(replicas 2)은 컷오버 이후 prod 에서 한다(362).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: dodam
+
+resources:
+  - ../../base
+
+nameSuffix: ""      # 네임스페이스로 이미 분리됨 — 이름은 그대로 둔다(Service 이름 = compose 서비스명 유지)
+
+images:
+  # 356 에서 세운 로컬 레지스트리. 태그는 Jenkins 가 커밋 SHA 로 덮어쓴다(359).
+  - name: dodam-backend
+    newName: 127.0.0.1:5000/dodam-backend
+    newTag: staging
+  - name: dodam-ai
+    newName: 127.0.0.1:5000/dodam-ai
+    newTag: staging
+  - name: dodam-nginx
+    newName: 127.0.0.1:5000/dodam-nginx
+    newTag: staging
+  - name: dodam-web
+    newName: 127.0.0.1:5000/dodam-web
+    newTag: staging
+
+patches:
+  - path: gateway-nodeport.yaml
+  - path: backend-single-replica.yaml

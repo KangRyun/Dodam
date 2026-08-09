@@ -1,0 +1,220 @@
+package com.ssafy.b209.child.service;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
+
+import com.ssafy.b209.child.domain.ChildProfileStatus;
+import com.ssafy.b209.child.domain.ChildTutorialStatus;
+import com.ssafy.b209.child.domain.QuestionDifficulty;
+import com.ssafy.b209.child.dto.response.ChildDetailResponse;
+import com.ssafy.b209.child.dto.response.ChildSummaryResponse;
+import com.ssafy.b209.child.dto.response.ChildTutorialProgressResponse;
+import com.ssafy.b209.child.exception.ChildErrorCode;
+import com.ssafy.b209.child.repository.ChildDetailProjection;
+import com.ssafy.b209.child.repository.ChildRepository;
+import com.ssafy.b209.child.repository.ChildSummaryProjection;
+import com.ssafy.b209.child.repository.ChildTutorialProgressProjection;
+import com.ssafy.b209.global.exception.BusinessException;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import java.util.Optional;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+@ExtendWith(MockitoExtension.class)
+class ChildQueryServiceTest {
+
+  private static final Long GUARDIAN_USER_ID = 10L;
+  private static final Long CHILD_ID = 3L;
+  private static final Clock CLOCK =
+      Clock.fixed(Instant.parse("2026-07-22T12:00:00Z"), ZoneOffset.UTC);
+
+  @Mock private ChildRepository childRepository;
+
+  private ChildQueryService service;
+
+  @BeforeEach
+  void setUp() {
+    service = new ChildQueryService(childRepository, CLOCK);
+  }
+
+  @Test
+  void returnsTheConnectedActiveChildProfile() {
+    ChildDetailProjection projection = projection(LocalDate.of(2019, 7, 23));
+    given(childRepository.findDetailByGuardianUserIdAndChildId(GUARDIAN_USER_ID, CHILD_ID))
+        .willReturn(Optional.of(projection));
+    given(childRepository.findResponseModesByChildId(CHILD_ID))
+        .willReturn(List.of("VOICE", "EMOJI", "COLOR"));
+
+    ChildDetailResponse response = service.getChild(GUARDIAN_USER_ID, CHILD_ID);
+
+    assertThat(response.childId()).isEqualTo(CHILD_ID);
+    assertThat(response.nickname()).isEqualTo("별이");
+    assertThat(response.birthDate()).isEqualTo(LocalDate.of(2019, 7, 23));
+    assertThat(response.age()).isEqualTo(6);
+    assertThat(response.profileImageUrl()).isEqualTo("https://cdn.example/child/3");
+    assertThat(response.preferredCharacter()).isEqualTo("BASE");
+    assertThat(response.questionDifficulty()).isEqualTo(QuestionDifficulty.LOWER_ELEMENTARY);
+    assertThat(response.responseModes()).containsExactly("VOICE", "EMOJI", "COLOR");
+    assertThat(response.tutorialStatus()).isEqualTo(ChildTutorialStatus.IN_PROGRESS);
+    assertThat(response.profileStatus()).isEqualTo(ChildProfileStatus.ACTIVE);
+    assertThat(response.relationshipType()).isEqualTo("MOTHER");
+    assertThat(response.createdAt()).isEqualTo(Instant.parse("2026-07-20T01:02:03Z"));
+    assertThat(response.updatedAt()).isEqualTo(Instant.parse("2026-07-21T04:05:06Z"));
+  }
+
+  @Test
+  void usesFullAgeOnTheChildBirthday() {
+    ChildDetailProjection projection = projection(LocalDate.of(2019, 7, 22));
+    given(childRepository.findDetailByGuardianUserIdAndChildId(GUARDIAN_USER_ID, CHILD_ID))
+        .willReturn(Optional.of(projection));
+    given(childRepository.findResponseModesByChildId(CHILD_ID)).willReturn(List.of());
+
+    ChildDetailResponse response = service.getChild(GUARDIAN_USER_ID, CHILD_ID);
+
+    assertThat(response.age()).isEqualTo(7);
+  }
+
+  @Test
+  void reportsTheSameNotFoundErrorWhenTheAuthorizedQueryReturnsNothing() {
+    given(childRepository.findDetailByGuardianUserIdAndChildId(GUARDIAN_USER_ID, CHILD_ID))
+        .willReturn(Optional.empty());
+
+    assertThatThrownBy(() -> service.getChild(GUARDIAN_USER_ID, CHILD_ID))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception ->
+                assertThat(exception.getErrorCode()).isEqualTo(ChildErrorCode.CHILD_NOT_FOUND));
+    verifyNoMoreInteractions(childRepository);
+  }
+
+  @Test
+  void returnsConnectedChildrenSummariesInRepositoryOrder() {
+    ChildSummaryProjection first =
+        summaryProjection(
+            3L,
+            "별이",
+            LocalDate.of(2019, 7, 23),
+            "MOTHER",
+            "BASE",
+            LocalDateTime.of(2026, 7, 20, 8, 15, 0),
+            12L);
+    ChildSummaryProjection second =
+        summaryProjection(4L, "달이", LocalDate.of(2016, 1, 1), "FATHER", null, null, 0L);
+    given(childRepository.findSummariesByGuardianUserId(GUARDIAN_USER_ID))
+        .willReturn(List.of(first, second));
+
+    List<ChildSummaryResponse> children = service.getChildren(GUARDIAN_USER_ID);
+
+    assertThat(children).hasSize(2);
+    assertThat(children.get(0).childId()).isEqualTo(3L);
+    assertThat(children.get(0).nickname()).isEqualTo("별이");
+    assertThat(children.get(0).age()).isEqualTo(6);
+    assertThat(children.get(0).relationshipType()).isEqualTo("MOTHER");
+    assertThat(children.get(0).questionDifficulty()).isEqualTo(QuestionDifficulty.LOWER_ELEMENTARY);
+    assertThat(children.get(0).tutorialStatus()).isEqualTo(ChildTutorialStatus.IN_PROGRESS);
+    assertThat(children.get(0).profileStatus()).isEqualTo(ChildProfileStatus.ACTIVE);
+    assertThat(children.get(0).preferredCharacter()).isEqualTo("BASE");
+    assertThat(children.get(0).recentActivity().lastActivityAt())
+        .isEqualTo(Instant.parse("2026-07-20T08:15:00Z"));
+    assertThat(children.get(0).recentActivity().totalActivityCount()).isEqualTo(12L);
+    assertThat(children.get(1).childId()).isEqualTo(4L);
+    assertThat(children.get(1).age()).isEqualTo(10);
+    assertThat(children.get(1).preferredCharacter()).isNull();
+    assertThat(children.get(1).recentActivity().lastActivityAt()).isNull();
+    assertThat(children.get(1).recentActivity().totalActivityCount()).isZero();
+  }
+
+  @Test
+  void returnsAnEmptyListWhenNoChildrenAreConnected() {
+    given(childRepository.findSummariesByGuardianUserId(GUARDIAN_USER_ID)).willReturn(List.of());
+
+    assertThat(service.getChildren(GUARDIAN_USER_ID)).isEmpty();
+  }
+
+  @Test
+  void returnsTheConnectedChildTutorialProgressWithoutChangingIt() {
+    ChildTutorialProgressProjection projection = mock(ChildTutorialProgressProjection.class);
+    given(projection.getChildId()).willReturn(CHILD_ID);
+    given(projection.getTutorialStatus()).willReturn("COMPLETED");
+    given(projection.getLastStep()).willReturn("FINISH");
+    given(projection.getCompletedAt()).willReturn(LocalDateTime.of(2026, 7, 30, 1, 2, 3));
+    given(projection.getUpdatedAt()).willReturn(LocalDateTime.of(2026, 7, 30, 1, 2, 4));
+    given(
+            childRepository.findTutorialProgressByGuardianUserIdAndChildId(
+                GUARDIAN_USER_ID, CHILD_ID))
+        .willReturn(Optional.of(projection));
+
+    ChildTutorialProgressResponse response =
+        service.getTutorialProgress(GUARDIAN_USER_ID, CHILD_ID);
+
+    assertThat(response.childId()).isEqualTo(CHILD_ID);
+    assertThat(response.tutorialStatus()).isEqualTo(ChildTutorialStatus.COMPLETED);
+    assertThat(response.lastStep()).isEqualTo("FINISH");
+    assertThat(response.completedAt()).isEqualTo(Instant.parse("2026-07-30T01:02:03Z"));
+    assertThat(response.updatedAt()).isEqualTo(Instant.parse("2026-07-30T01:02:04Z"));
+  }
+
+  @Test
+  void hidesMissingDeletedAndUnlinkedChildrenFromTutorialProgress() {
+    given(
+            childRepository.findTutorialProgressByGuardianUserIdAndChildId(
+                GUARDIAN_USER_ID, CHILD_ID))
+        .willReturn(Optional.empty());
+
+    assertThatThrownBy(() -> service.getTutorialProgress(GUARDIAN_USER_ID, CHILD_ID))
+        .isInstanceOfSatisfying(
+            BusinessException.class,
+            exception ->
+                assertThat(exception.getErrorCode()).isEqualTo(ChildErrorCode.CHILD_NOT_FOUND));
+  }
+
+  private ChildSummaryProjection summaryProjection(
+      Long childId,
+      String nickname,
+      LocalDate birthDate,
+      String relationshipType,
+      String preferredCharacter,
+      LocalDateTime lastActivityAt,
+      long totalActivityCount) {
+    ChildSummaryProjection projection = mock(ChildSummaryProjection.class);
+    given(projection.getChildId()).willReturn(childId);
+    given(projection.getNickname()).willReturn(nickname);
+    given(projection.getBirthDate()).willReturn(birthDate);
+    given(projection.getProfileImageUrl()).willReturn(null);
+    given(projection.getPreferredCharacter()).willReturn(preferredCharacter);
+    given(projection.getQuestionDifficulty()).willReturn("LOWER_ELEMENTARY");
+    given(projection.getTutorialStatus()).willReturn("IN_PROGRESS");
+    given(projection.getProfileStatus()).willReturn("ACTIVE");
+    given(projection.getRelationshipType()).willReturn(relationshipType);
+    given(projection.getLastActivityAt()).willReturn(lastActivityAt);
+    given(projection.getTotalActivityCount()).willReturn(totalActivityCount);
+    return projection;
+  }
+
+  private ChildDetailProjection projection(LocalDate birthDate) {
+    ChildDetailProjection projection = mock(ChildDetailProjection.class);
+    given(projection.getChildId()).willReturn(CHILD_ID);
+    given(projection.getNickname()).willReturn("별이");
+    given(projection.getBirthDate()).willReturn(birthDate);
+    given(projection.getProfileImageUrl()).willReturn("https://cdn.example/child/3");
+    given(projection.getPreferredCharacter()).willReturn("BASE");
+    given(projection.getQuestionDifficulty()).willReturn("LOWER_ELEMENTARY");
+    given(projection.getTutorialStatus()).willReturn("IN_PROGRESS");
+    given(projection.getProfileStatus()).willReturn("ACTIVE");
+    given(projection.getRelationshipType()).willReturn("MOTHER");
+    given(projection.getCreatedAt()).willReturn(LocalDateTime.of(2026, 7, 20, 1, 2, 3));
+    given(projection.getUpdatedAt()).willReturn(LocalDateTime.of(2026, 7, 21, 4, 5, 6));
+    return projection;
+  }
+}

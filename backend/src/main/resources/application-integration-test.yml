@@ -1,0 +1,61 @@
+spring:
+  config:
+    activate:
+      on-profile: integration-test
+
+  jpa:
+    show-sql: false
+    hibernate:
+      ddl-auto: validate
+    properties:
+      hibernate:
+        format_sql: true
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: false
+    validate-on-migrate: true
+    out-of-order: false
+    clean-disabled: true
+
+app:
+  auth:
+    filter:
+      legacy-header-enabled: true
+  # 테스트는 AI 서버로 나가지 않는다. 운영 기본값(application.yml)이 http로 바뀐 뒤(722) 이 프로필이
+  # 값을 고정하지 않으면 배포 기본값을 그대로 상속해 HTTP Client가 생성되고, AI_INTERNAL_TOKEN이 없는
+  # CI에서는 생성자 검증에 걸려 Spring Context 부팅 자체가 깨진다(2026-07-29 develop 빌드 202건 실패).
+  # 환경변수 override를 두지 않는 이유: 테스트 결과가 실행 환경의 env에 따라 달라지면 안 된다.
+  ai:
+    drawing-analysis:
+      mode: mock
+    observation:
+      mode: mock
+    tts:
+      mode: mock
+  cors:
+    allowed-origins: []
+  # 업로드 직후 배경 Thread가 상태를 전이시키면 PENDING 경계를 검증하는 테스트가 흔들린다.
+  # 트리거·회수를 기본 차단하고, 배선 자체는 ConversationVoiceSttTriggerIntegrationTest가 켜서 검증한다.
+  stt:
+    trigger:
+      enabled: false
+    recovery:
+      enabled: false
+  # 삭제 워커(780)도 같은 이유로 끈다. 큐가 비어도 매 틱이 releaseStuck으로 DB를 먼저 쓰므로,
+  # DataSource가 닫힌 컨텍스트에 남은 스케줄러가 던지면 Spring이 JVM 공용 stdout에 ERROR를 찍고
+  # CapturedOutput(JVM 전역)을 보는 남의 테스트가 깨진다(2026-08-04 develop 빌드 189).
+  # SQL·스키마 검증은 StorageDeletionJobRepositoryIntegrationTest가 리포지토리를 직접 불러 하므로
+  # 이 빈을 꺼도 780의 검증 범위는 그대로다.
+  storage:
+    deletion:
+      enabled: false
+  # 리포트 재시도 워커(P0-2)도 끈다. 삭제 워커와 같은 이유에 하나가 더 붙는다 — 이 워커는
+  # FAILED_RETRYABLE 리포트를 GENERATING 으로 되돌리고 AI 를 다시 부른다. 컨테이너를 공유하는
+  # 통합테스트에서 이게 돌면, 실패 상태를 단언하는 남의 테스트가 단언 도중 상태를 바꿔치기당한다.
+  # 대기열 SQL·스키마 검증은 ReportGenerationRetryRepositoryIntegrationTest 가 저장소를 직접
+  # 불러 하므로 이 빈을 꺼도 검증 범위는 그대로다.
+  report:
+    retry:
+      enabled: false

@@ -15,11 +15,20 @@ Desktop.ini
 # ==================================================
 .env
 .env.*
+# 점 없는 'env' 파일도 무시한다. 참조 문서에서 복사해 둔 시크릿 사본이 루트에 놓인 것을
+# 발견했는데(2026-07-27) .env 규칙에 걸리지 않아 add -A 한 번에 커밋될 수 있었다.
+/env
 !.env.example
 !**/.env.example
+# 예제 템플릿(시크릿 없음)은 추적한다: .env.compose.example · .env.active.example 등.
+# ⚠️ `.example` 로 끝나는 것만 — 실제 `.env.compose`·`.env.active` 는 계속 무시된다.
+!.env.*.example
+!**/.env.*.example
 *.pem
 *.key
 secrets/
+application-secret.yml
+application-*-secret.yml
 
 # ==================================================
 # Logs / temporary files
@@ -96,6 +105,22 @@ ai/datasets/
 ai/runs/
 ai/artifacts/
 ai/checkpoints/
+ai/models/data/
+ai/models/prepared/
+ai/models/htp_yolo/
+ai/**/data/
+ai/**/runs/
+
+# TTS/STT 수동 확인으로 생기는 음성 산출물 — 아동 음성이 섞일 수 있어 커밋 금지(가드레일).
+ai/*.mp3
+ai/*.wav
+ai/*.m4a
+ai/*.webm
+
+# Google Drive 업로드용 OAuth 인증 정보 (model_download.ipynb)
+ai/models/client_secrets.json
+ai/models/mycreds.txt
+ai/models/downloaded_models/
 *.pt
 *.pth
 *.ckpt
@@ -107,4 +132,35 @@ ai/checkpoints/
 # ==================================================
 docker-data/
 volumes/
+/storage/
+/backend/storage/
 
+# ==================================================
+# Claude Code harness (개인 도구 — 팀 저장소 비추적)
+# .claude 는 외부 하네스로의 심볼릭 링크이므로 슬래시를 붙이지 않는다.
+# ("dir/" 패턴은 디렉터리만 매칭하고 심링크는 못 잡음)
+# CLAUDE.md 는 개인 하네스를 참조하는 에이전트 메모리라 함께 비추적.
+# ==================================================
+.claude
+_workspace
+CLAUDE.md
+_workspace_prev
+
+# AI 작업 과정에서 생성되는 구현 보조 산출물
+/docs/superpowers/
+/docs/presentations/
+
+# ==================================================
+# 모바일 릴리스 빌드 산출물 (S15P11B209-623)
+# AAB 는 수십 MB 이고 빌드마다 새로 나온다 — 저장소가 아니라 Jenkins 아티팩트로 보관한다.
+# ==================================================
+/build-artifacts/
+
+# ==================================================
+# 클러스터 자격증명 (S15P11B209-359)
+# issue-deployer-kubeconfig.sh 가 저장소 루트에 kubeconfig 를 떨어뜨린다.
+# 안에 **유효한 ServiceAccount 토큰(90일)** 이 들어 있다 — `git add -A` 한 번이면
+# 팀 저장소에 살아 있는 클러스터 접근 권한이 올라간다. 확장자로 통째로 막는다.
+# 정상 경로는 Jenkins Credentials 업로드 후 로컬 파일 삭제(shred -u)다.
+# ==================================================
+*.kubeconfig

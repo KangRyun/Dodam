@@ -1,0 +1,94 @@
+# 공유 볼륨(PVC) — compose 네임드 볼륨 대응 (S15P11B209-357)
+#
+# mysql·redis·minio 는 StatefulSet 의 volumeClaimTemplates 로 각자 만든다.
+# 여기 있는 것은 **여러 워크로드가 함께 쓰거나 Deployment 에 붙는** 볼륨이다.
+#
+# | PVC              | compose 볼륨      | 쓰는 쪽                     |
+# |------------------|-------------------|-----------------------------|
+# | letsencrypt      | letsencrypt       | gateway(읽기) · certbot(쓰기) |
+# | certbot-webroot  | certbot-webroot   | gateway(읽기) · certbot(쓰기) |
+# | apk-dist         | apk-dist          | gateway                      |
+# | backend-storage  | backend-storage   | backend                      |
+# | ai-models        | ai-models         | ai(읽기 전용)                 |
+# | (db-backup)      | 제거됨            | → hostPath /var/backups/dodam (733) |
+#
+# ⚠️ storageClassName: local-path 는 k3s 기본 프로비저너로, **노드의 로컬 디스크**에 만든다.
+#    노드가 하나뿐이라 지금은 문제가 없지만, 노드가 늘면 파드가 다른 노드로 가는 순간
+#    데이터에 접근하지 못한다. 다중 노드로 갈 때 반드시 다시 볼 것.
+#
+# ⚠️ 이 PVC 들은 **비어 있는 채로** 생성된다. compose 볼륨의 내용은 자동으로 넘어오지 않는다.
+#    특히 letsencrypt(인증서)와 backend-storage·minio(아동 데이터)는 360 컷오버에서
+#    명시적으로 이관해야 한다. 이관 절차 없이 prod overlay 를 올리면 TLS 가 깨진다.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: letsencrypt, namespace: dodam }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: certbot-webroot, namespace: dodam }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: { requests: { storage: 1Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: apk-dist, namespace: dodam }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: { requests: { storage: 2Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: backend-storage, namespace: dodam }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: { requests: { storage: 10Gi } }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: ai-models, namespace: dodam }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: { requests: { storage: 5Gi } }
+---
+# ⚠️ db-backup PVC 는 **없다** (S15P11B209-733 에서 제거). 실수가 아니라 결정이다.
+#
+#   원래는 "파드가 호스트 경로에 직접 쓰지 않도록" 20Gi PVC 로 받으려 했다. 그 원칙은
+#   맞지만, 백업에서는 대가가 원칙보다 컸다:
+#     · 기존 백업이 /var/backups/dodam 에 있다. PVC 를 쓰면 산출물이
+#       /var/lib/rancher/k3s/storage/pvc-<uuid>_dodam_db-backup/ 로 갈라져
+#       복원할 때 볼 곳이 두 군데가 된다.
+#     · 그 경로에는 uuid 가 들어가 복원 문서에 적을 수 없다(프로비저닝마다 바뀐다).
+#     · 보관(retention) 정리도 두 디렉터리로 갈린다.
+#   → cronjobs.yaml 의 세 백업 잡이 hostPath /var/backups/dodam 을 직접 쓴다.
+#     대가(노드 로컬 경로 결합)와 근거는 그 파일의 "저장 위치" 주석에 적어 뒀다.
+#
+#   ⚠️ 백업 파일 = 아동 민감정보. 서버 밖 반출 금지(가드레일 9절).
+---
+# Prometheus TSDB (S15P11B209-361). 보관 15일 · 스크레이프 15초 기준으로 잡은 값이다.
+# compose 판의 이력은 잇지 않는다(이슈: "이력 단절 허용") — 빈 볼륨으로 시작한다.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: prometheus-data, namespace: dodam }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: { requests: { storage: 10Gi } }
+---
+# Grafana SQLite(대시보드·계정). 작지만 **잃으면 대시보드를 다시 만들어야 한다.**
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata: { name: grafana-data, namespace: dodam }
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: local-path
+  resources: { requests: { storage: 2Gi } }

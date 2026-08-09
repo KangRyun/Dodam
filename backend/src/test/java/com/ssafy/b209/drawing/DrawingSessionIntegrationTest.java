@@ -1,0 +1,539 @@
+package com.ssafy.b209.drawing;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.ssafy.b209.auth.token.AuthenticatedUser;
+import com.ssafy.b209.child.domain.Child;
+import com.ssafy.b209.child.domain.ChildFixture;
+import com.ssafy.b209.child.domain.ChildProfileStatus;
+import com.ssafy.b209.child.domain.ChildTutorialStatus;
+import com.ssafy.b209.child.repository.ChildRepository;
+import com.ssafy.b209.drawing.document.StrokeBatchDocument;
+import com.ssafy.b209.drawing.domain.DrawingInputMethod;
+import com.ssafy.b209.drawing.domain.DrawingType;
+import com.ssafy.b209.drawing.domain.DrawingTypeFixture;
+import com.ssafy.b209.drawing.domain.DrawingTypeSelectableBy;
+import com.ssafy.b209.drawing.dto.request.CanvasConfigurationRequest;
+import com.ssafy.b209.drawing.dto.request.CreateDrawingSessionRequest;
+import com.ssafy.b209.drawing.dto.response.CreateDrawingSessionResponse;
+import com.ssafy.b209.drawing.exception.DrawingErrorCode;
+import com.ssafy.b209.drawing.repository.DrawingTypeRepository;
+import com.ssafy.b209.drawing.repository.StrokeBatchDocumentRepository;
+import com.ssafy.b209.drawing.service.DrawingSessionService;
+import com.ssafy.b209.global.exception.BusinessException;
+import com.ssafy.b209.support.IntegrationTestSupport;
+import java.time.LocalDate;
+import java.time.OffsetDateTime;
+import java.time.temporal.ChronoUnit;
+import java.util.List;
+import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.test.web.servlet.MockMvc;
+
+@AutoConfigureMockMvc
+class DrawingSessionIntegrationTest extends IntegrationTestSupport {
+
+  private static final Long GUARDIAN_USER_ID = 41L;
+
+  @Autowired private MockMvc mockMvc;
+  @Autowired private JdbcTemplate jdbcTemplate;
+  @Autowired private DrawingSessionService drawingSessionService;
+  @Autowired private ChildRepository childRepository;
+  @Autowired private DrawingTypeRepository drawingTypeRepository;
+  @Autowired private StrokeBatchDocumentRepository strokeBatchDocumentRepository;
+
+  @BeforeEach
+  void setUp() {
+    setAuthenticatedGuardian();
+    // 데이터 정리와 AUTO_INCREMENT 리셋은 IntegrationTestSupport의 TRUNCATE가 담당한다.
+    jdbcTemplate.update(
+        "INSERT INTO users (id, role, nickname, account_status) "
+            + "VALUES (?, 'GUARDIAN', 'drawing-guardian', 'ACTIVE'), "
+            + "(99, 'GUARDIAN', 'another-guardian', 'ACTIVE')",
+        GUARDIAN_USER_ID);
+    jdbcTemplate.update(
+        "INSERT INTO children "
+            + "(id, nickname, birth_date, question_difficulty, tutorial_status, profile_status) "
+            + "VALUES (1, 'child-one', '2020-07-21', 'PRESCHOOL', 'NOT_STARTED', 'ACTIVE'), "
+            + "(2, 'child-two', '2019-07-21', 'PRESCHOOL', 'COMPLETED', 'ACTIVE')");
+    jdbcTemplate.update(
+        "INSERT INTO guardian_child_relations "
+            + "(guardian_user_id, child_id, relationship_type) "
+            + "VALUES (?, 1, 'MOTHER'), (?, 2, 'MOTHER')",
+        GUARDIAN_USER_ID,
+        GUARDIAN_USER_ID);
+    jdbcTemplate.update(
+        "INSERT INTO drawing_types "
+            + "(id, code, name, activity_category, selectable_by, recommended_age_min, "
+            + "recommended_age_max, is_active, display_order) "
+            + "VALUES (1, 'FREE_DRAWING', 'Free Drawing', 'GENERAL', 'BOTH', 3, 12, TRUE, 1)");
+  }
+
+  @AfterEach
+  void clearSecurityContext() {
+    SecurityContextHolder.clearContext();
+  }
+
+  @Test
+  void createsCanvasSessionThroughHttpAndReturnsSameResourceForRetry() throws Exception {
+    String body = canvasJson(1L);
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions")
+                .header("Idempotency-Key", "integration-key-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isCreated())
+        .andExpect(header().string("Location", "/api/v1/drawing-sessions/1"))
+        .andExpect(jsonPath("$.data.sessionStatus").value("IN_PROGRESS"))
+        .andExpect(jsonPath("$.data.currentStage").value("DRAWING"))
+        .andExpect(jsonPath("$.data.tutorialRequired").value(true));
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions")
+                .header("Idempotency-Key", "integration-key-0001")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(body))
+        .andExpect(status().isCreated())
+        .andExpect(header().string("Location", "/api/v1/drawing-sessions/1"));
+
+    assertThat(sessionCount()).isEqualTo(1);
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT session_status, current_stage, completed_at, deleted_at "
+                    + "FROM drawing_sessions WHERE id = 1"))
+        .containsEntry("session_status", "IN_PROGRESS")
+        .containsEntry("current_stage", "DRAWING")
+        .containsEntry("completed_at", null)
+        .containsEntry("deleted_at", null);
+  }
+
+  @Test
+  void cancelsDrawingSessionWithSoftDeleteAndSchedulesStoredFiles() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions")
+                .header("Idempotency-Key", "cancel-session-key")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(canvasJson(1L)))
+        .andExpect(status().isCreated());
+    jdbcTemplate.update(
+        """
+        INSERT INTO drawing_assets
+          (id, drawing_session_id, asset_type, storage_key, mime_type,
+           file_size_bytes, checksum_sha256, captured_at)
+        VALUES
+          (301, 1, 'DRAFT', 'drawing-sessions/1/draft.png', 'image/png', 10,
+           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+           CURRENT_TIMESTAMP(6))
+        """);
+
+    mockMvc
+        .perform(
+            delete("/api/v1/drawing-sessions/1")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"confirmation\":\"DELETE\"}"))
+        .andExpect(status().isNoContent());
+
+    assertThat(
+            jdbcTemplate.queryForMap(
+                "SELECT session_status, current_stage, deleted_at "
+                    + "FROM drawing_sessions WHERE id = 1"))
+        .containsEntry("session_status", "DELETED")
+        .containsEntry("current_stage", "DRAWING");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT deleted_at IS NOT NULL FROM drawing_sessions WHERE id = 1", Boolean.class))
+        .isTrue();
+    assertThat(
+            jdbcTemplate.queryForObject(
+                """
+                SELECT COUNT(*)
+                  FROM storage_deletion_jobs
+                 WHERE storage_key = 'drawing-sessions/1/draft.png'
+                   AND resource_type = 'DRAWING_ASSET'
+                   AND resource_id = 301
+                   AND deletion_status = 'PENDING'
+                """,
+                Integer.class))
+        .isEqualTo(1);
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/1"))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("DRAWING_404_003"));
+  }
+
+  @Test
+  void deletesOnlyDraftAssetsAndSchedulesTheirStoredFiles() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions")
+                .header("Idempotency-Key", "delete-draft-session-key")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(canvasJson(1L)))
+        .andExpect(status().isCreated());
+    jdbcTemplate.update(
+        """
+        INSERT INTO drawing_assets
+          (id, drawing_session_id, asset_type, asset_version, storage_key, mime_type,
+           file_size_bytes, checksum_sha256, captured_at)
+        VALUES
+          (301, 1, 'DRAFT', 1, 'drawing-sessions/1/draft-1.png', 'image/png', 10,
+           'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+           CURRENT_TIMESTAMP(6)),
+          (302, 1, 'DRAFT', 2, 'drawing-sessions/1/draft-2.png', 'image/png', 10,
+           'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+           CURRENT_TIMESTAMP(6)),
+          (303, 1, 'INTERMEDIATE', 1, 'drawing-sessions/1/intermediate.png', 'image/png', 10,
+           'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+           CURRENT_TIMESTAMP(6))
+        """);
+
+    mockMvc.perform(delete("/api/v1/drawing-sessions/1/draft")).andExpect(status().isNoContent());
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM drawing_assets WHERE drawing_session_id = 1 "
+                    + "AND asset_type = 'DRAFT'",
+                Integer.class))
+        .isZero();
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM drawing_assets WHERE id = 303", Integer.class))
+        .isEqualTo(1);
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM storage_deletion_jobs "
+                    + "WHERE resource_type = 'DRAWING_ASSET' AND resource_id IN (301, 302) "
+                    + "AND deletion_status = 'PENDING'",
+                Integer.class))
+        .isEqualTo(2);
+  }
+
+  @Test
+  void storesNormalizedStrokeBatchIdempotentlyAndRejectsSequenceReuse() throws Exception {
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions")
+                .header("Idempotency-Key", "stroke-integration-session")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(canvasJson(1L)))
+        .andExpect(status().isCreated());
+
+    String payload = strokeBatchJson(101);
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/1/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+        .andExpect(status().isCreated())
+        .andExpect(jsonPath("$.data.batchSequence").value(3))
+        .andExpect(jsonPath("$.data.acceptedEventCount").value(1))
+        .andExpect(jsonPath("$.data.lastEventSequence").value(101));
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/1/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(payload))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.batchId").isNumber());
+
+    // 저장소가 MongoDB 로 옮겨갔다(S15P11B209-365). MySQL stroke_* 테이블은 병행 기간 동안 남지만
+    //   더는 쓰이지 않는다 — 옛 경로로 새 데이터가 새지 않는지 함께 확인한다.
+    assertThat(strokeBatchDocumentRepository.count()).isEqualTo(1);
+    StrokeBatchDocument stored =
+        strokeBatchDocumentRepository.findBySessionIdAndBatchSeq(1L, 3).orElseThrow();
+    assertThat(stored.eventCount()).isEqualTo(1);
+    assertThat(stored.pointCount()).isEqualTo(2);
+    assertThat(stored.strokes())
+        .singleElement()
+        .satisfies(
+            event -> {
+              assertThat(event.eventType()).isEqualTo("STROKE");
+              assertThat(event.points()).hasSize(2);
+            });
+    // expireAt 이 없으면 TTL 인덱스가 이 문서를 영원히 지우지 않는다(가드레일 9절).
+    assertThat(stored.expireAt()).isEqualTo(stored.createdAt().plus(180, ChronoUnit.DAYS));
+    assertThat(jdbcTemplate.queryForObject("SELECT COUNT(*) FROM stroke_batches", Integer.class))
+        .isZero();
+
+    mockMvc
+        .perform(
+            post("/api/v1/drawing-sessions/1/stroke-batches")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(strokeBatchJson(102)))
+        .andExpect(status().isConflict())
+        .andExpect(jsonPath("$.code").value("DRAWING_409_019"));
+  }
+
+  @Test
+  void persistsRequiredReferenceColumnsThroughRepositories() {
+    Child child =
+        ChildFixture.create(
+            null,
+            LocalDate.of(2020, 7, 21),
+            ChildTutorialStatus.NOT_STARTED,
+            ChildProfileStatus.ACTIVE,
+            null);
+    DrawingType drawingType =
+        DrawingTypeFixture.create(
+            null, "MYSQL_PERSIST", "MySQL Persist", DrawingTypeSelectableBy.BOTH, 3, 12, true);
+
+    Child savedChild = childRepository.saveAndFlush(child);
+    DrawingType savedType = drawingTypeRepository.saveAndFlush(drawingType);
+
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT nickname FROM children WHERE id = ?", String.class, savedChild.getId()))
+        .isEqualTo("fixture-child");
+    assertThat(
+            jdbcTemplate.queryForObject(
+                "SELECT activity_category FROM drawing_types WHERE id = ?",
+                String.class,
+                savedType.getId()))
+        .isEqualTo("GENERAL");
+  }
+
+  @Test
+  void serializesConcurrentRequestsForSameChildWithDifferentKeys() throws Exception {
+    List<Object> outcomes =
+        invokeConcurrently(
+            () -> create("concurrent-child-key-1", 1L), () -> create("concurrent-child-key-2", 1L));
+
+    assertThat(outcomes).filteredOn(CreateDrawingSessionResponse.class::isInstance).hasSize(1);
+    assertThat(outcomes)
+        .filteredOn(BusinessException.class::isInstance)
+        .singleElement()
+        .satisfies(
+            outcome ->
+                assertThat(((BusinessException) outcome).getErrorCode())
+                    .isEqualTo(DrawingErrorCode.ACTIVE_DRAWING_SESSION_EXISTS));
+    assertThat(sessionCount()).isEqualTo(1);
+  }
+
+  @Test
+  void returnsSameSessionForConcurrentEquivalentRetries() throws Exception {
+    List<Object> outcomes =
+        invokeConcurrently(
+            () -> create("concurrent-same-key", 1L), () -> create("concurrent-same-key", 1L));
+
+    assertThat(outcomes).allMatch(CreateDrawingSessionResponse.class::isInstance);
+    assertThat(outcomes)
+        .extracting(outcome -> ((CreateDrawingSessionResponse) outcome).drawingSessionId())
+        .containsOnly(
+            outcomes.stream()
+                .map(outcome -> ((CreateDrawingSessionResponse) outcome).drawingSessionId())
+                .findFirst()
+                .orElseThrow());
+    assertThat(sessionCount()).isEqualTo(1);
+  }
+
+  @Test
+  void rejectsConcurrentReuseOfSameKeyForDifferentChildren() throws Exception {
+    List<Object> outcomes =
+        invokeConcurrently(
+            () -> create("concurrent-cross-child-key", 1L),
+            () -> create("concurrent-cross-child-key", 2L));
+
+    assertThat(outcomes).filteredOn(CreateDrawingSessionResponse.class::isInstance).hasSize(1);
+    assertThat(outcomes)
+        .filteredOn(BusinessException.class::isInstance)
+        .singleElement()
+        .satisfies(
+            outcome ->
+                assertThat(((BusinessException) outcome).getErrorCode())
+                    .isEqualTo(DrawingErrorCode.IDEMPOTENCY_KEY_CONFLICT));
+    assertThat(sessionCount()).isEqualTo(1);
+  }
+
+  @Test
+  void returnsOwnedDrawingSessionDetailAndHidesInternalStorageKey() throws Exception {
+    Long drawingSessionId = create("detail-integration-key", 1L).drawingSessionId();
+    insertDetailResources(drawingSessionId);
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/{drawingSessionId}", drawingSessionId))
+        .andExpect(status().isOk())
+        .andExpect(jsonPath("$.data.child.childId").value(1))
+        .andExpect(jsonPath("$.data.child.nickname").value("child-one"))
+        .andExpect(jsonPath("$.data.selectedEmotions[0]").value("HAPPY"))
+        .andExpect(jsonPath("$.data.selectedEmotions[1]").value("CALM"))
+        .andExpect(jsonPath("$.data.latestAsset.drawingAssetId").value(21))
+        .andExpect(jsonPath("$.data.latestAsset.storageKey").doesNotExist())
+        .andExpect(jsonPath("$.data.latestAnalysis.drawingAnalysisId").value(30))
+        .andExpect(jsonPath("$.data.conversationId").value(40))
+        .andExpect(jsonPath("$.data.reportId").value(50))
+        .andExpect(jsonPath("$.data.recoverableDraft").value(true));
+  }
+
+  @Test
+  void hidesDrawingSessionExistenceFromUnrelatedGuardian() throws Exception {
+    Long drawingSessionId = create("detail-access-key", 1L).drawingSessionId();
+    setAuthenticatedUser(99L);
+
+    mockMvc
+        .perform(get("/api/v1/drawing-sessions/{drawingSessionId}", drawingSessionId))
+        .andExpect(status().isNotFound())
+        .andExpect(jsonPath("$.code").value("DRAWING_404_003"));
+  }
+
+  private CreateDrawingSessionResponse create(String key, long childId) {
+    return drawingSessionService.createDrawingSession(key, request(childId));
+  }
+
+  private List<Object> invokeConcurrently(Callable<Object> first, Callable<Object> second)
+      throws Exception {
+    CountDownLatch ready = new CountDownLatch(2);
+    CountDownLatch start = new CountDownLatch(1);
+    try (ExecutorService executor = Executors.newFixedThreadPool(2)) {
+      Future<Object> firstResult = executor.submit(guarded(first, ready, start));
+      Future<Object> secondResult = executor.submit(guarded(second, ready, start));
+      ready.await();
+      start.countDown();
+      return List.of(firstResult.get(), secondResult.get());
+    }
+  }
+
+  private Callable<Object> guarded(
+      Callable<Object> action, CountDownLatch ready, CountDownLatch start) {
+    return () -> {
+      setAuthenticatedGuardian();
+      ready.countDown();
+      start.await();
+      try {
+        return action.call();
+      } catch (BusinessException exception) {
+        return exception;
+      } finally {
+        SecurityContextHolder.clearContext();
+      }
+    };
+  }
+
+  private void setAuthenticatedGuardian() {
+    setAuthenticatedUser(GUARDIAN_USER_ID);
+  }
+
+  private void setAuthenticatedUser(Long userId) {
+    SecurityContextHolder.getContext()
+        .setAuthentication(
+            UsernamePasswordAuthenticationToken.authenticated(
+                new AuthenticatedUser(userId), null, List.of()));
+  }
+
+  private void insertDetailResources(Long drawingSessionId) {
+    jdbcTemplate.update(
+        "INSERT INTO drawing_session_emotions "
+            + "(drawing_session_id, emotion_code, selection_order) "
+            + "VALUES (?, 'CALM', 1), (?, 'HAPPY', 0)",
+        drawingSessionId,
+        drawingSessionId);
+    jdbcTemplate.update(
+        "INSERT INTO drawing_assets "
+            + "(id, drawing_session_id, asset_type, asset_version, storage_key, mime_type, "
+            + "file_size_bytes, checksum_sha256, last_event_sequence, captured_at, created_at) "
+            + "VALUES (20, ?, 'DRAFT', 1, 'private/draft-1.png', 'image/png', 1024, "
+            + "REPEAT('a', 64), 1, '2026-07-23 01:01:00', '2026-07-23 01:01:00'), "
+            + "(21, ?, 'DRAFT', 2, 'private/draft-2.png', 'image/png', 2048, "
+            + "REPEAT('b', 64), 2, '2026-07-23 01:02:00', '2026-07-23 01:02:00')",
+        drawingSessionId,
+        drawingSessionId);
+    jdbcTemplate.update(
+        "INSERT INTO analyses "
+            + "(id, drawing_session_id, drawing_asset_id, analysis_type, analysis_task_type, "
+            + "idempotency_key, analysis_status, trigger_reason, requested_at, started_at, "
+            + "completed_at, created_at) "
+            + "VALUES (30, ?, 21, 'INTERMEDIATE', 'OBJECT_DETECTION', "
+            + "'detail-analysis-key', 'SUCCESS', 'INTERVAL', "
+            + "'2026-07-23 01:03:00', '2026-07-23 01:03:00', "
+            + "'2026-07-23 01:03:01', '2026-07-23 01:03:00')",
+        drawingSessionId);
+    jdbcTemplate.update(
+        "INSERT INTO conversation_sessions "
+            + "(id, drawing_session_id, conversation_status, difficulty_snapshot, "
+            + "max_question_count, question_count, started_at) "
+            + "VALUES (40, ?, 'CONVERSING', 'PRESCHOOL', 10, 0, '2026-07-23 01:04:00')",
+        drawingSessionId);
+    jdbcTemplate.update(
+        "INSERT INTO reports "
+            + "(id, drawing_session_id, analysis_id, report_version, report_status, "
+            + "is_expert_review_recommended, limitations_text, pdf_status, created_at, updated_at) "
+            + "VALUES (50, ?, 30, 1, 'GENERATING', FALSE, "
+            + "'생성 중인 리포트입니다.', 'NONE', '2026-07-23 01:05:00', '2026-07-23 01:05:00')",
+        drawingSessionId);
+  }
+
+  private CreateDrawingSessionRequest request(long childId) {
+    return new CreateDrawingSessionRequest(
+        childId,
+        1L,
+        DrawingInputMethod.CANVAS,
+        OffsetDateTime.parse("2026-07-21T11:30:00+09:00"),
+        new CanvasConfigurationRequest(1920, 1080, "#FFFFFF"));
+  }
+
+  private String canvasJson(long childId) {
+    return """
+        {
+          "childId": %d,
+          "drawingTypeId": 1,
+          "inputMethod": "CANVAS",
+          "clientStartedAt": "2026-07-21T11:30:00+09:00",
+          "canvas": {"width": 1920, "height": 1080, "backgroundColor": "#FFFFFF"}
+        }
+        """
+        .formatted(childId);
+  }
+
+  private String strokeBatchJson(long eventSequence) {
+    return """
+        {
+          "batchSequence": 3,
+          "firstEventSequence": %1$d,
+          "lastEventSequence": %1$d,
+          "clientCreatedAt": "2026-07-21T11:32:10.120+09:00",
+          "events": [{
+            "sequence": %1$d,
+            "eventType": "STROKE",
+            "tool": "PEN",
+            "color": "#FFCC00",
+            "width": 8.0,
+            "points": [{"x":0.18,"y":0.42,"t":0},{"x":0.19,"y":0.43,"t":16}]
+          }],
+          "metrics": {
+            "undoCountDelta": 1,
+            "redoCountDelta": 0,
+            "eraseCountDelta": 2,
+            "pauseDurationMsDelta": 3200
+          }
+        }
+        """
+        .formatted(eventSequence);
+  }
+
+  private int sessionCount() {
+    return jdbcTemplate.queryForObject("SELECT COUNT(*) FROM drawing_sessions", Integer.class);
+  }
+}

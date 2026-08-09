@@ -1,0 +1,116 @@
+# 비밀이 아닌 앱 설정 (S15P11B209-357)
+#
+# compose 의 `${VAR:-기본값}` 중 **비밀이 아닌 것**만 여기로 옮긴다.
+# 비밀(`${VAR}` · `${VAR:?}`)은 Secret `dodam-secrets` 로 가며, 이 파일에는 절대 넣지 않는다.
+#   → 값 주입은 infra/scripts/sync-secrets.sh (kustomize 가 Secret 을 건드리지 않는 이유는 README 참조)
+#
+# 값은 infra/.env.example 의 기본값과 compose 의 `:-` 기본값을 그대로 미러링한다.
+# 둘이 어긋나면 "compose 에선 되는데 k8s 에선 안 되는" 상황이 생긴다.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dodam-config
+  namespace: dodam
+data:
+  # ── 내부 서비스 주소 ────────────────────────────────────────────────
+  # Service 이름을 compose 서비스명과 같게 뒀기 때문에 값이 compose 와 동일하다.
+  DB_HOST: "mysql"
+  DB_PORT: "3306"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  # 그리기 과정 데이터(스트로크) 저장소 — S15P11B209-365.
+  #   계정·DB명은 비밀이라 Secret 으로 간다(backend.yaml 의 MONGO_APP_* / MONGO_DATABASE).
+  #   여기에는 주소만 둔다. 기본값(application-local.yml)이 127.0.0.1 이라 이 값이 없으면
+  #   파드가 자기 자신에게 붙으려 한다.
+  MONGO_HOST: "mongodb"
+  MONGO_PORT: "27017"
+  AI_BASE_URL: "http://ai:8000"
+  AI_DRAWING_ANALYSIS_BASE_URL: "http://ai:8000"
+  AI_OBSERVATION_BASE_URL: "http://ai:8000"
+  # 관찰 리포트 생성 대기 시간 (S15P11B209-989).
+  #   ⚠️ 이 키가 없으면 application.yml 기본값 30s 로 돈다 — 매니페스트만 보고는
+  #      얼마인지 알 수 없었다. 값이 실제로 무엇인지 여기 적어 둔다(978 과 같은 결).
+  #   왜 60s 인가: HTP 는 그림 3장이라 VLM 3회 + 리포트 2패스(972 실측 ~11.5s)가
+  #   한 요청 안에서 누적된다. 30s 는 그 합에 여유가 없다.
+  #   늘리는 쪽은 부작용이 작다 — 리포트 생성은 백그라운드라 아이가 기다리지 않는다.
+  #   (대화 경로는 별개다. 그쪽 예산 4s 는 건드리지 않는다.)
+  AI_OBSERVATION_READ_TIMEOUT: "60s"
+  AI_IMAGE_ACCESS_BASE_URL: "http://backend:8080"
+  S3_ENDPOINT: "http://minio:9000"
+
+  # ── 앱 동작 모드 ────────────────────────────────────────────────────
+  # ⚠️ "prod" 가 아니라 "local" 이다. 오타가 아니라 현실이다(2026-07-29 실측).
+  #   `application-prod.yml` 은 **존재하지 않는다.** DataSource·JPA·Flyway 설정은
+  #   전부 `application-local.yml` 에만 있고, compose 는 SPRING_PROFILES_ACTIVE:-local
+  #   기본값으로 운영을 돌리고 있다(infra/.env 에도 local 로 명시).
+  #   여기에 "prod" 를 두면 Spring 이 DataSource URL 을 찾지 못해 기동에 실패한다
+  #   — 스테이징에서 실제로 CrashLoopBackOff 로 확인했다.
+  #
+  # 📌 갚아야 할 빚: 운영을 local 프로파일로 돌리는 것은 정상이 아니다.
+  #   application-local.yml 의 cors.allowed-origins 가 localhost:3000 뿐인 것도
+  #   같은 부작용이다. 제대로 된 prod 프로파일 신설은 BE 소관의 별도 과제.
+  #   그전까지는 **실제로 도는 값**을 여기 적는다 — 매니페스트가 거짓말하면
+  #   컷오버(360) 때 운영이 기동조차 못 한다.
+  SPRING_PROFILES_ACTIVE: "local"
+  AI_DRAWING_ANALYSIS_MODE: "mock"
+  AI_OBSERVATION_MODE: "mock"
+  AI_IMAGE_ACCESS_TOKEN_TTL: "60s"
+
+  # ── 시각 (S15P11B209-736 후속) ───────────────────────────────────────
+  # 컨테이너의 로그 시각을 KST 로 맞춘다. envFrom 으로 backend·ai 가 함께 받는다.
+  #
+  # ⚠️ 이것이 바꾸는 것은 **로그뿐**이다. 애플리케이션 시각 계산과 API 응답은
+  #   영향받지 않는다 — 근거:
+  #     · 코드가 `Clock.systemUTC()` 를 명시적으로 쓴다(systemDefaultZone 사용 0건)
+  #     · 인자 없는 now() 8건은 전부 `Instant.now()` 로 시간대 개념이 없는 절대시각
+  #     · Jackson 기본 타임존이 UTC 라 응답은 규약 S15P11B209-822 대로 ISO-8601 `Z` 유지
+  #   즉 앱·웹 파서는 무영향이다. 응답까지 KST(+09:00) 로 바꾸는 것은 822 계약 개정이
+  #   필요한 **별개 작업**이며 여기서 하지 않는다.
+  #
+  # DB 안의 값은 이미 KST 다(736 이 JDBC 에 sessionVariables=time_zone='+09:00' 를
+  # 넣어 앱 기록분·DB 기본값분을 통일했다). 이 항목은 남아 있던 로그 계층을 맞춘다.
+  #
+  # 📌 ConfigMap 은 envFrom 이라 값만 바꿔서는 **기존 파드에 반영되지 않는다**
+  #   (kustomize 해시 접미사가 붙지 않는 평범한 ConfigMap 이다). 적용 후
+  #   `kubectl -n dodam rollout restart deploy/backend deploy/ai` 가 필요하다.
+  TZ: "Asia/Seoul"
+
+  # ── 저장소 ──────────────────────────────────────────────────────────
+  # ⚠️ MinIO 컷오버(S15P11B209-368~374, 2026-07-28 완료) 이후 s3 가 정상값이다.
+  #    local 로 두면 파일이 파드 로컬 디스크로 떨어져 재시작마다 유실된다.
+  STORAGE_MODE: "s3"
+  S3_REGION: "ap-northeast-2"
+  S3_BUCKET: "dodam"
+  LOCAL_IMAGE_STORAGE_ROOT: "/app/storage/images"
+  LOCAL_AUDIO_STORAGE_ROOT: "/app/storage/audio"
+
+  # ── JWT (비밀은 JWT_SECRET 하나뿐 — 나머지는 정책값) ─────────────────
+  JWT_ISSUER: "dodam-api"
+  JWT_ACCESS_TOKEN_TTL: "30m"
+  JWT_REFRESH_TOKEN_TTL: "14d"
+  OAUTH_CONNECT_TIMEOUT: "3s"
+  OAUTH_READ_TIMEOUT: "5s"
+
+  # ── AI 모델 ─────────────────────────────────────────────────────────
+  # 대화와 리포트는 요구가 정반대라 모델을 나눴다(S15P11B209-972).
+  #   LLM_MODEL(대화)  : 아이가 화면 앞에서 기다리는 경로 — 지연이 곧 UX라 경량 모델.
+  #   REPORT_LLM_MODEL : 그림 서술 + 대화 전체 + 형식 지표를 한 번에 종합하고 자체검토까지
+  #                      도는, 이 서비스에서 가장 무거운 추론 — 보호자가 읽는 최종 문서라 큰 모델.
+  # ⚠️ REPORT_LLM_MODEL 을 빼면 LLM_MODEL 로 폴백한다(ai/config.py). 즉 키가 누락돼도 기동은
+  #   되고 리포트만 조용히 경량 모델로 생성된다 — 위 SKETCH_MODEL_PATH 와 같은 '짝' 계열 함정이다.
+  LLM_MODEL: "gpt-5.4-mini"
+  REPORT_LLM_MODEL: "gpt-5.4"
+  STT_MODEL: "whisper-1"
+  TTS_MODEL: "gpt-4o-mini-tts"
+  TTS_VOICE: "fable"
+  YOLO_MODEL_PATH: "/models/htp_yolo/htp_best.pt"
+  # ⚠️ 두 경로는 **짝**이다. 하나만 넣으면 sketch 쪽이 앱 상대경로 기본값으로 떨어져
+  #   verify_all_models() 가 "가중치를 찾을 수 없어요: sketch" 로 죽고,
+  #   objectDetection 이 NOT_READY 가 된다(= 그림 분석 전체가 동작하지 않는다).
+  #   2026-07-29 컷오버에서 실제로 이 상태로 운영에 올라갔다. 스테이징은 ai 를
+  #   replicas 0 으로 뒀기 때문에 **한 번도 드러나지 않았다** — 띄우지 않은 워크로드의
+  #   설정은 검증된 적이 없다는 뜻이다.
+  SKETCH_MODEL_PATH: "/models/htp_yolo/sketch_base.pt"
+
+  # ── 푸시 ────────────────────────────────────────────────────────────
+  APP_PUSH_FCM_CREDENTIALS_PATH: "/run/secrets/fcm-service-account.json"

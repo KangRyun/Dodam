@@ -1,0 +1,29 @@
+fastapi
+uvicorn[standard]
+openai
+python-dotenv
+python-multipart
+# RAG 인덱스·검색(rag/)이 직접 쓴다 — torch가 전이로 끌어오지만 전이 의존에 기대면
+#   상위 패키지 교체 시 조용히 사라진다(httpx와 동일 원칙). S15P11B209-613.
+numpy
+# 종합 분석(§19.3)에서 BE가 준 signedUrl로 그림을 받아온다. openai가 전이 의존으로 끌어오지만
+#   전이 의존에 기대면 상위 패키지 교체 시 조용히 사라진다 — 직접 쓰는 이상 명시한다.
+httpx
+# 관측 메트릭 노출 (S15P11B209-351) — GMS(LLM/STT/TTS) 호출 지연·에러율 스크레이프용.
+#   버전 고정(핀): 스크레이프 스키마·미들웨어 동작이 배포마다 흔들리지 않도록 재현성 확보.
+prometheus-fastapi-instrumentator==8.0.2
+# RAG 검색 결과 커스텀 카운터(report_client, S15P11B209-615)가 직접 쓴다 —
+#   instrumentator가 전이로 끌어오지만 전이 의존 금지 원칙(numpy·httpx와 동일).
+prometheus-client
+# 그림분석: YOLO(HTP) 객체탐지 (S15P11B209-176). ultralytics가 torch를 견인해 이미지가 무거워진다.
+#   yolo_client가 지연 import하므로 서버 기동/import 자체엔 없어도 되지만, 실제 탐지엔 필요.
+#   (향후 별도 추론 서비스로 분리 여지) VLM 서술은 기존 openai(GMS)로 처리 — 추가 의존성 없음.
+# CPU 전용 torch 핀 (2026-07-24): 기본 GPU 휠이 NVIDIA cu13 라이브러리 수 GB를 견인해
+#   CPU 서버(EC2)에서 이미지 비대 + containerd 거대 레이어 diff 실패(빌드 123~125 연쇄 원인).
+#   추론=EC2 CPU 설계 그대로이므로 연산 결과 동일 · 학습은 SSAFY GPU 서버 별도 환경이라 무영향.
+#   버전은 GPU 휠이 설치하던 것과 동일(2.13.0/0.28.0)을 +cpu로 고정 — 휠 존재 검증 완료(cp311·x86_64).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.13.0+cpu
+torchvision==0.28.0+cpu
+ultralytics
+opencv-python-headless

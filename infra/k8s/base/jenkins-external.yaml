@@ -1,0 +1,56 @@
+# 클러스터 밖 Jenkins 연결 — Service + 수동 Endpoints (S15P11B209-357)
+#
+# 문제: Jenkins 는 k8s 가 아니라 호스트 compose(dodam-cicd)에 있다. 그래서 gateway 의
+#       /jenkins/ 프록시가 가리킬 Service 가 클러스터 안에 존재하지 않는다.
+#
+# 해법: **셀렉터가 없는 Service** 를 만들면 k8s 가 Endpoints 를 자동으로 채우지 않는다.
+#       그 자리에 우리가 손으로 주소를 적어 넣는다. 이러면 클러스터 안에서는
+#       `dodam-jenkins` 라는 평범한 Service 처럼 보이지만 실제 트래픽은 호스트로 나간다.
+#
+# ⚠️ 아래 IP 는 **노드의 실제 주소로 바꿔야 한다.** 자리표시자다.
+#      kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'
+#    그리고 Jenkins 는 지금 127.0.0.1:9090 으로만 바인딩돼 있어(compose ports 참조)
+#    파드에서 접근하려면 **바인딩을 노드 IP 로 여는 작업이 선행**돼야 한다.
+#    이건 359(Jenkins 배포 전환)와 함께 결정할 사안이라 여기서는 배선만 준비한다.
+#    → 그 전까지 /jenkins/ 는 502 다. 이는 알려진 상태이며 게이트웨이 전체를 막지는 않는다
+#      (변수+resolver 패턴 덕분).
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dodam-jenkins
+  namespace: dodam
+spec:
+  # selector 없음 — 이게 핵심이다. 있으면 k8s 가 Endpoints 를 덮어써 버린다.
+  #
+  # ⚠️ 그런데 주석만으로는 못 막았다. kustomize 의 `commonLabels` 는 **Service 의 selector 에도**
+  #   라벨을 주입한다. 그 결과 이 Service 에 `app.kubernetes.io/part-of: dodam` selector 가 생겨
+  #   네임스페이스의 모든 파드가 매치됐고, 엔드포인트 컨트롤러가 아래 수동 Endpoints 를
+  #   파드 IP 11개로 덮어써 /jenkins/ 가 502 가 됐다(2026-07-30 실측).
+  #   → overlay 에서 JSON6902 로 selector 를 제거한다(base/kustomization.yaml 의 patches 참조).
+  #     commonLabels 자체를 걷어내는 방법도 있으나, 이미 떠 있는 Deployment 의
+  #     spec.selector 는 **불변 필드**라 재생성 없이는 바꿀 수 없다.
+  ports:
+    # ⚠️ targetPort 는 **엔드포인트가 실제로 여는 포트**(9090)여야 한다. 8080 으로 두면
+    #   Service 경유 접속이 조용히 실패한다(2026-07-30 실측: 파드에서 10.42.0.1:9090 은
+    #   닿는데 Service DNS 로는 실패). port 8080 은 nginx 가 부르는 주소이고,
+    #   targetPort 9090 은 호스트에서 Jenkins 가 실제로 듣는 포트다.
+    - { name: http, port: 8080, targetPort: 9090, protocol: TCP }
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: dodam-jenkins        # ★ Service 와 이름이 반드시 같아야 연결된다
+  namespace: dodam
+subsets:
+  - addresses:
+      # cni0(파드 대역 게이트웨이). Jenkins compose 가 여기에도 9090 을 게시한다
+      #   (infra/jenkins/docker-compose.yml — 이유는 그쪽 주석 참조).
+      #   노드 사설IP 가 아니라 이 주소인 이유: 클러스터 밖에서는 존재하지 않는 주소라
+      #   노출면이 구조적으로 0 이다.
+      - ip: "10.42.0.1"
+    ports:
+      # ⚠️ Service 의 port(8080)가 아니라 **실제로 열려 있는 포트**를 적는다.
+      #   selector 없는 Service 는 이름(name)으로 Service 포트와 Endpoints 포트를 잇는다:
+      #   요청 → Service:8080 → Endpoints 10.42.0.1:9090 → 컨테이너 8080.
+      - { name: http, port: 9090, protocol: TCP }

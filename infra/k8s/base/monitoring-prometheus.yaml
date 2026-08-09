@@ -1,0 +1,499 @@
+# Prometheus — k3s 재배치 (S15P11B209-361)
+#
+# compose 판(infra/monitoring/)을 옮긴 것이다. 이력은 잇지 않는다(이슈: "이력 단절 허용").
+#
+# ⚠️ 스크레이프 대상이 두 종류로 갈린다
+#   ① 앱 메트릭(backend·ai·minio) — Service DNS 로 그대로. compose 판과 job 이름·경로가 같다
+#   ② 컨테이너/노드 메트릭 — **cAdvisor 컨테이너를 더 두지 않는다.** kubelet 이 내장 cAdvisor 를
+#      이미 노출하므로 그걸 긁는다. compose 의 dodam-cadvisor 는 컷오버 때 함께 폐기한다
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus
+  namespace: dodam
+---
+# kubelet 의 cAdvisor 를 긁으려면 노드 프록시 권한이 필요하다.
+#   ClusterRole 인 이유: node 는 네임스페이스가 없는 리소스다(Role 로는 잡히지 않는다).
+#   읽기 전용만 준다 — Secret 은 포함하지 않는다(가드레일 9절: 최소권한).
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: dodam-prometheus
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/metrics", "nodes/proxy", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dodam-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: dodam
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: dodam-prometheus
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: dodam
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s        # compose 판과 동일 — 대시보드 용도로 충분
+
+    rule_files:
+      - /etc/prometheus/rules/*.yml
+
+    # ★ 이 블록이 없어서 361 이후 경보 룰 3종이 **아무데도 통보되지 않았다**(733 에서 추가).
+    #   Prometheus /alerts 에 FIRING 으로 보이기만 했다 — 룰이 있는 것과 알림이 오는 것은 다르다.
+    #   Alertmanager 는 monitoring-alertmanager.yaml 참조(Mattermost 로 나간다).
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ["alertmanager:9093"]
+
+    scrape_configs:
+      # ── ① 앱 메트릭 — Service DNS ────────────────────────────────────────
+      #   같은 네임스페이스라 짧은 이름으로 해석된다. compose 판과 job 이름을 맞춰
+      #   기존 대시보드 쿼리가 그대로 살아 있게 한다.
+      - job_name: backend
+        metrics_path: /actuator/prometheus   # ⚠️ 8080 아니라 9404 — 8080 은 의도적으로 404
+        static_configs:
+          - targets: ["backend:9404"]
+
+      - job_name: ai
+        metrics_path: /metrics
+        static_configs:
+          - targets: ["ai:8000"]
+
+      - job_name: minio
+        metrics_path: /minio/v2/metrics/cluster
+        static_configs:
+          - targets: ["minio:9000"]
+
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+
+      # ── ② 노드·컨테이너 메트릭 ───────────────────────────────────────────
+      - job_name: node-exporter
+        static_configs:
+          - targets: ["node-exporter:9100"]
+
+      - job_name: kube-state-metrics
+        static_configs:
+          - targets: ["kube-state-metrics:8080"]
+
+      # kubelet 내장 cAdvisor. API 서버를 프록시로 거친다 —
+      #   kubelet(10250)을 직접 치면 인증서·포트 접근 문제를 따로 풀어야 한다.
+      - job_name: kubelet-cadvisor
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __address__
+            replacement: kubernetes.default.svc:443
+          - source_labels: [__meta_kubernetes_node_name]
+            regex: (.+)
+            target_label: __metrics_path__
+            replacement: /api/v1/nodes/${1}/proxy/metrics/cadvisor
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rules
+  namespace: dodam
+data:
+  memory.yml: |
+    # 메모리 압박 알림 — k8s 판 (S15P11B209-361)
+    #
+    # ★ compose 판을 그대로 옮기면 안 된다. container-memory 규칙이 **도커 cAdvisor 의
+    #   `name` 라벨**(`{name=~"dodam-.*"}`)에 걸려 있는데, kubelet 의 cAdvisor 는
+    #   `pod`·`container`·`namespace` 라벨을 쓴다. 그대로 옮기면 규칙은 살아 있는데
+    #   **영원히 발동하지 않는다** — 지표가 있는 것과 경보가 오는 것은 다르다.
+    #
+    # host-memory 그룹은 node-exporter 기반이라 라벨이 같다 — 그대로 옮긴다.
+    groups:
+      - name: host-memory
+        interval: 30s
+        rules:
+          - alert: HostMemoryAvailableLow
+            expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.15
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "호스트 가용 메모리 15% 미만 ({{ $value | humanizePercentage }})"
+              description: "무거운 작업을 새로 시작하지 말 것. docker stats / ps aux --sort=-rss | head"
+
+          - alert: HostMemoryAvailableCritical
+            expr: node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes < 0.08
+            for: 2m
+            labels: { severity: critical }
+            annotations:
+              summary: "🔴 호스트 가용 메모리 8% 미만 — 응답 불능 직전 구간"
+              description: "2026-07-28 과 같은 경로다(thrash → SSH 불가 → 재부팅). 즉시 정리할 것."
+
+          - alert: HostSwapUsageHigh
+            expr: >-
+              node_memory_SwapTotal_bytes > 0
+              and (node_memory_SwapTotal_bytes - node_memory_SwapFree_bytes)
+                  / node_memory_SwapTotal_bytes > 0.5
+            for: 10m
+            labels: { severity: warning }
+            annotations:
+              summary: "스왑 사용 50% 초과 ({{ $value | humanizePercentage }})"
+              description: "스왑은 EBS 위라 여기까지 오면 응답시간이 이미 무너져 있다."
+
+      - name: container-memory
+        interval: 30s
+        rules:
+          # 라벨을 k8s 기준으로 다시 썼다. `container!=""` 로 파드 단위 합계 시계열(container 라벨이
+          # 빈 것)을 제외한다 — 넣으면 같은 사건을 두 번 센다.
+          - alert: ContainerMemoryNearLimit
+            expr: >-
+              container_spec_memory_limit_bytes{namespace="dodam",container!=""} > 0
+              and container_memory_working_set_bytes{namespace="dodam",container!=""}
+                  / container_spec_memory_limit_bytes{namespace="dodam",container!=""} > 0.9
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "{{ $labels.pod }}/{{ $labels.container }} 메모리 상한의 90% 초과"
+              description: >-
+                곧 OOMKilled 된다. 매니페스트의 resources.limits.memory 를 올릴지 누수인지
+                판단할 것. JVM 이라면 MaxRAMPercentage 와 짝이 맞는지 먼저 본다.
+
+          # compose 판의 "상한 없는 컨테이너" 대응. k8s 에서는 kube-state-metrics 로 본다 —
+          # cAdvisor 만으로는 "상한이 없다"와 "지표가 아직 안 왔다"를 구분하지 못한다.
+          - alert: ContainerWithoutMemoryLimit
+            expr: >-
+              count by (namespace, pod, container) (
+                kube_pod_container_info{namespace="dodam"}
+              ) unless count by (namespace, pod, container) (
+                kube_pod_container_resource_limits{namespace="dodam", resource="memory"}
+              )
+            for: 15m
+            labels: { severity: info }
+            annotations:
+              summary: "{{ $labels.pod }}/{{ $labels.container }} 에 메모리 상한이 없다"
+              description: "07-28 사고의 조건 그 자체다. 매니페스트에 resources.limits.memory 를 넣을 것."
+
+  push.yml: |
+    # 푸시 발송 경보 (S15P11B209-631)
+    #
+    # 지표 출처: backend NotificationPushDispatcher 의 dodam.push.send 카운터
+    #   (Prometheus 이름 dodam_push_send_total, outcome=sent|token_invalid|temporary_failure).
+    # token_invalid 는 실패로 세지 않는다 — 앱 삭제·재설치 기기의 정상 정리 경로(계약 §5.3)라
+    #   비율에 넣으면 사용자가 앱을 지울수록 '장애'로 보이는 착시가 생긴다.
+    # `and increase >= 5` 가드: 발송이 드문 시간대에 1~2건 실패로 오탐하지 않기 위한 최소 표본.
+    groups:
+      - name: push-delivery
+        interval: 30s
+        rules:
+          - alert: PushTemporaryFailureRateHigh
+            expr: >-
+              (
+                sum(rate(dodam_push_send_total{outcome="temporary_failure"}[15m]))
+                /
+                sum(rate(dodam_push_send_total[15m]))
+              ) > 0.3
+              and sum(increase(dodam_push_send_total[15m])) >= 5
+            for: 5m
+            labels: { severity: warning }
+            annotations:
+              summary: "푸시 일시 실패율 30% 초과 ({{ $value | humanizePercentage }})"
+              description: >-
+                FCM 연결·자격증명(fcm-service-account)·쿼터를 확인할 것.
+                지표가 아예 없다면 backend 가 발송 자체를 못 하는 상태다(아래 PushSendingDisabled 참조).
+
+          # ★ 이 룰이 없어서 운영 푸시가 몇 주 동안 0건이었다 (S15P11B209-774, 2026-08-04 해소).
+          #   619(compose 기준 시크릿 구성)가 완료로 닫힌 채 360 k3s 컷오버 때 넘어오지 않았는데,
+          #   fcm 볼륨이 optional: true 라 **파드는 정상 기동하고 마운트만 조용히 생략**됐다.
+          #   알림함 행은 계속 생성되니 화면상 멀쩡해 보였고, 헬스체크도 드리프트 점검도 못 잡았다
+          #   (git 에 없는 out-of-band 시크릿이라 "빠졌다"고 판정할 근거가 없다).
+          #   결국 이 게이지 하나가 유일한 관측 지점인데 아무도 보고 있지 않았다.
+          #
+          # expr 은 max 다 — min 이 아니다.
+          #   잡으려는 것은 "설정 누락으로 **모든** 파드가 못 보내는 상태"다. 롤링 배포 중에는
+          #   신·구 파드가 잠깐 섞이는데, min 을 쓰면 그때마다 오탐한다.
+          #   대가: 일부 파드만 꺼진 상태는 못 잡는다. 그건 설정이 파드별로 다를 때뿐이고
+          #   (Secret 은 Deployment 단위라 정상 경로에선 생기지 않는다) 그때는 발송 실패율
+          #   룰이 먼저 운다.
+          # 지표가 **없는** 경우(backend 다운·스크레이프 실패)는 여기서 안 잡힌다 — 비교식은
+          #   샘플이 없으면 발동하지 않는다. 그건 backend 가용성 룰 소관이다.
+          - alert: PushSendingDisabled
+            expr: max(dodam_push_sending_enabled) == 0
+            for: 10m
+            labels: { severity: critical }
+            annotations:
+              summary: "🔴 푸시 발송이 꺼져 있다 — 알림함만 쌓이고 기기로는 안 나간다"
+              description: >-
+                backend 가 NoopPushSender 로 서 있다. 알림 행은 정상 생성되지만 deliveryStatus 가
+                PENDING 에 머물고 기기로는 한 건도 가지 않는다.
+                원인은 둘 중 하나다 — (1) dodam-secrets 의 APP_PUSH_FCM_ENABLED 가 true 가 아니다,
+                (2) Secret dodam-fcm 이 없거나 키 이름이 fcm-service-account.json 이 아니라
+                /run/secrets 에 파일이 안 생겼다.
+                기동 로그의 "FCM 발송" 라인이 INFO 면 (1), ERROR 면 (2) 다.
+                조치 절차: docs/인프라/푸시-실기기-검증.md 7절.
+                ⚠️ 설정을 고쳐도 이미 PENDING 인 알림은 소급 발송되지 않는다.
+
+  backup.yml: |
+    # 백업 경보 (S15P11B209-733)
+    #
+    # ★ 왜 이 룰들이 필요한가 — 2026-07-30 새벽에 겪은 일이 근거다.
+    #   360 컷오버로 MySQL·MinIO 가 k3s 로 갔는데 백업 스크립트 4종이 여전히 정지된
+    #   Docker 컨테이너를 보고 있었다. 스크립트에 `exit 5` 가드가 있어 **깨끗하게 실패**했지만,
+    #   결과가 /var/log/dodam-backup.log 에만 남아 **아무도 몰랐다.**
+    #   "깨끗한 실패"가 곧 "모르는 실패"였다. 통보되지 않는 실패는 실패로 취급되지 않는다.
+    #
+    # ★ 표현식은 반증으로 검증했다(2026-07-30).
+    #   임계를 25h → 1s 로 낮추면 certbot-renew 가 잡히는 것을 확인했다. 이 확인 없이는
+    #   "룰은 살아 있는데 영원히 발동하지 않는" 상태를 구분할 수 없다 — memory.yml 의
+    #   container-memory 주석이 경고하는 바로 그 함정이다.
+    groups:
+      - name: backup
+        interval: 60s        # 하루 한 번 도는 사건이라 촘촘히 볼 이유가 없다
+        rules:
+          # ── ① 잡이 돌았고 실패했다 ────────────────────────────────────────
+          # 스케줄 생성 잡의 이름은 <cronjob>-<epoch> 이다. 접미사까지 포함해 매치한다.
+          - alert: BackupJobFailed
+            expr: kube_job_status_failed{namespace="dodam", job_name=~"(db|mongo|minio)-backup-.*"} > 0
+            for: 1m
+            labels: { severity: critical, category: backup }
+            annotations:
+              summary: "🔴 백업 잡 실패 — {{ $labels.job_name }}"
+              description: >-
+                kubectl -n dodam logs job/{{ $labels.job_name }} 로 원인을 볼 것.
+                산출물은 /var/backups/dodam 에 쌓인다. 실패했다면 그 날짜 백업이 **없다**.
+
+          # ── ② 잡이 아예 돌지 않았다 (★ 732 의 실패 양상) ──────────────────
+          # 이게 이번 사고를 직접 잡는 룰이다. 스케줄은 살아 있는데 산출물이 없는 상태 —
+          # ①은 "실패한 잡"만 잡으므로 **잡이 생성조차 안 되면 침묵한다.**
+          #
+          # 표현식 읽는 법:
+          #   "활성(suspend=0)인 백업 CronJob 중, 25시간 안에 성공한 적이 없는 것"
+          #   unless 를 쓰면 '한 번도 성공한 적 없음'(시계열 부재)도 같이 걸린다.
+          #   absent() 로 쓰면 라벨이 사라져 어느 백업인지 알 수 없다.
+          # suspend 중인 것은 제외한다 — 의도적으로 끈 백업이 매일 울리면 경보를 무시하게 된다.
+          #   대신 ③ 이 "끄고 잊은 것"을 따로 잡는다.
+          - alert: BackupMissing
+            expr: >-
+              kube_cronjob_spec_suspend{namespace="dodam", cronjob=~"(db|mongo|minio)-backup"} == 0
+              unless on(cronjob) (
+                kube_cronjob_status_last_successful_time > time() - 25*3600
+              )
+            for: 10m
+            labels: { severity: critical, category: backup }
+            annotations:
+              summary: "🔴 {{ $labels.cronjob }} — 25시간 내 성공한 백업이 없다"
+              description: >-
+                스케줄이 살아 있는데 산출물이 없는 상태다(2026-07-30 새벽과 같은 양상).
+                kubectl -n dodam get job,cronjob 으로 잡 생성 여부부터 확인할 것.
+                생성조차 안 됐다면 이미지 pull·노드 압박·hostPath 부재를 본다.
+
+          # ── ③ 끄고 잊은 백업 ──────────────────────────────────────────────
+          # "스케줄 유무 ≠ 동작 여부"의 반대편. 점검 창에서 suspend 해 두고 복구를 잊으면
+          # ②가 일부러 침묵하므로 아무 경보도 오지 않는다. 그 구멍을 이 룰이 막는다.
+          - alert: BackupSuspended
+            expr: kube_cronjob_spec_suspend{namespace="dodam", cronjob=~"(db|mongo|minio)-backup"} == 1
+            for: 24h
+            labels: { severity: warning, category: backup }
+            annotations:
+              summary: "{{ $labels.cronjob }} 이 24시간 넘게 suspend 상태다"
+              description: >-
+                점검 창에서 끈 뒤 되돌리지 않았을 수 있다. 의도한 것이면 이슈에 근거를 남길 것.
+                이 기간의 백업은 존재하지 않는다.
+
+  drift.yml: |
+    # 매니페스트 드리프트 경보 (S15P11B209-751)
+    #
+    # ★ 근거 — 2026-07-30 배포 실패.
+    #   365 가 backend.yaml 에 MONGO_APP_* env 를, configmap-app.yaml 에 MONGO_HOST 를
+    #   제대로 넣었는데 **클러스터에는 닿지 않았다.** Jenkins 배포 단계는 `set image` 만 하고
+    #   설정 반영은 사람 몫인데, 그 사실을 알려주는 장치가 없었다.
+    #   새 파드가 빈 비밀번호로 뜨려다 CrashLoopBackOff → 배포 실패로야 알게 됐다.
+    #   구 파드가 계속 서빙해서(maxUnavailable: 0) 장애가 없었고, 그래서 더 늦게 알았다.
+    #
+    # ★ 점검 자체는 infra/scripts/check-manifest-drift.sh 가 한다.
+    #   exit 1 = 드리프트 있음 · exit 2 = 점검 실패. **둘 다 Job 실패로 남는다.**
+    #   메트릭에는 종료 코드가 노출되지 않으므로 어느 쪽인지는 로그로 판별한다.
+    #   둘을 합쳐 하나의 경보로 둔 것은 의도다 — 어느 쪽이든 사람이 봐야 한다.
+    groups:
+      - name: drift
+        interval: 60s
+        rules:
+          # ── ① 드리프트가 있거나, 점검이 깨졌다 ───────────────────────────
+          # ⚠️ 2026-07-31 재작성. 원래는 실패한 **Job 오브젝트**를 셌다:
+          #      kube_job_status_failed{job_name=~"manifest-drift-check-.*"} > 0
+          #   그날 알림이 11건 나갔는데 진짜 매니페스트 미반영은 0건이었다. 두 군데서 무너진다.
+          #     ⓐ 알림이 **잡마다 1건**씩 뜬다. 원인 하나에 4건이 나갔다.
+          #     ⓑ 고쳐도 **스스로 꺼지지 않는다.** 실패한 Job 은 ttlSecondsAfterFinished(3일)
+          #        동안 남고, 이후 성공만 이어지면 failedJobsHistoryLimit 로도 밀려나지 않는다.
+          #        결국 사람이 `kubectl delete job` 을 해야 조용해진다 — 그날 두 번 했다.
+          #   그래서 BackupMissing 과 같은 관례로 바꾼다: **CronJob 의 마지막 성공 시각**을 본다.
+          #     · 알림은 CronJob 당 1건
+          #     · 다음 실행이 성공하는 순간 스스로 해제된다(사람 손 불필요)
+          #     · unless 라서 '한 번도 성공한 적 없음'(시계열 부재)까지 걸린다
+          #
+          # 표현식 읽는 법:
+          #   "활성(suspend=0)이고 최근 3시간 안에 스케줄은 됐는데, 2시간 안에 성공한 적이 없는 것"
+          #   · 스케줄 절(3시간)이 없으면 잡이 아예 안 돌 때 ②와 겹쳐 두 번 운다.
+          #     3시간은 ②의 임계와 **일부러 맞춘** 값이다 — 어긋나면 그 사이 구간을 아무도 안 잡는다.
+          #   · 성공 임계 2시간 = 매시 실행이니 **연속 2회 실패**를 뜻한다. 1회로 잡으면
+          #     clone 순간 장애 같은 일시적 실패(종료 코드 2)에도 운다. 대신 진짜 드리프트를
+          #     알아채는 데 최대 1시간이 걸린다 — 미반영은 장애가 아니라 그 지연을 감수할 값이 있다.
+          #   · 수동 검증 잡(`create job --from=cronjob`)도 CronJob 이 **소유**하므로 성공하면
+          #     이 경보가 해제된다. "지금 드리프트 없음"이 사실이니 의도된 동작이다.
+          - alert: ManifestDriftDetected
+            expr: >-
+              kube_cronjob_spec_suspend{namespace="dodam", cronjob="manifest-drift-check"} == 0
+              and on(cronjob) (
+                kube_cronjob_status_last_schedule_time > time() - 3*3600
+              )
+              unless on(cronjob) (
+                kube_cronjob_status_last_successful_time > time() - 2*3600
+              )
+            for: 10m
+            labels: { severity: warning, category: drift }
+            annotations:
+              summary: "⚠️ 매니페스트 드리프트 점검이 2시간째 성공하지 못했다"
+              description: >-
+                드리프트가 있거나(종료 코드 1) 점검 자체가 깨졌다(종료 코드 2).
+                어느 쪽인지는 로그로만 안다 — kubectl -n dodam get jobs | grep manifest-drift-check
+                로 실패 잡을 찾아 kubectl -n dodam logs job/<이름> 을 볼 것.
+                ⚠️ 반사적으로 apply 하지 말 것 — 클러스터가 옳고 git 이 틀린 경우가 있다.
+                ⚠️ `kubectl apply -k overlays/prod` 통째 실행 금지(이미지 태그가 :prod 로 회귀).
+                📖 대응 절차: docs/인프라/드리프트경보-대응.md
+
+          # ── ② 점검이 아예 돌지 않는다 ────────────────────────────────────
+          # ①과의 분담(2026-07-31 ① 재작성에 맞춰 정리):
+          #   ① = "돌기는 하는데 성공하지 못한다"  → 최근 3시간 안에 스케줄됨 + 2시간 내 성공 없음
+          #   ② = "아예 돌지 않는다"              → 3시간 안에 스케줄된 적 없음
+          # 두 룰의 3시간 임계는 **일부러 같은 값**이다. 어긋나면 그 사이 구간(예: 스케줄이
+          # 2~3시간 전에 멈춘 상태)을 ①도 ②도 잡지 못하는 사각이 생긴다.
+          # ②가 성공 시각이 아니라 **스케줄 시각**을 보는 이유: 드리프트가 며칠 이어지면 성공
+          # 시각은 계속 낡은 채로 남는다. ②까지 성공 기준으로 짜면 ①과 겹쳐 두 번 운다.
+          #
+          # ⚠️ 세 번째 절(생성 유예)이 없으면 **CronJob 을 만든 직후 반드시 오탐이 난다.**
+          #   갓 만든 CronJob 은 last_schedule_time 시계열이 아예 없어서 unless 가 걸러주지
+          #   못하고, 첫 실행(매시 20분)까지 최대 한 시간을 울린다. 실제로 2026-07-30 23:37
+          #   배포 직후 pending 상태로 재현했다. 첫날부터 헛경보가 뜨면 그 경보는 그날로 죽는다.
+          #   유예를 점검 주기와 같은 3시간으로 두되, 유예를 1초로 낮추면 다시 걸리는 것까지
+          #   확인해 "탐지 능력이 죽지 않았음"을 반증했다.
+          - alert: ManifestDriftCheckNotRunning
+            expr: >-
+              kube_cronjob_spec_suspend{namespace="dodam", cronjob="manifest-drift-check"} == 0
+              unless on(cronjob) (
+                kube_cronjob_status_last_schedule_time > time() - 3*3600
+              )
+              unless on(cronjob) (
+                kube_cronjob_created > time() - 3*3600
+              )
+            for: 10m
+            labels: { severity: warning, category: drift }
+            annotations:
+              summary: "⚠️ 드리프트 점검이 3시간 넘게 실행되지 않았다"
+              description: >-
+                매시 실행이어야 한다. kubectl -n dodam get cronjob,job 으로 생성 여부부터 확인할 것.
+                생성조차 안 됐다면 이미지 pull·노드 압박·Secret dodam-drift-git 부재를 본다.
+                📖 대응 절차: docs/인프라/드리프트경보-대응.md (5절)
+
+          # ── ③ 끄고 잊은 점검 ─────────────────────────────────────────────
+          # 기본값이 suspend: true 라(선행 Secret 때문) 켜는 걸 잊기 쉽다. ②는 suspend 를
+          # 일부러 제외하므로 이 룰이 없으면 **아무 경보도 오지 않는다.**
+          - alert: ManifestDriftCheckSuspended
+            expr: kube_cronjob_spec_suspend{namespace="dodam", cronjob="manifest-drift-check"} == 1
+            for: 24h
+            labels: { severity: warning, category: drift }
+            annotations:
+              summary: "드리프트 점검이 24시간 넘게 suspend 상태다"
+              description: >-
+                이 기간에는 매니페스트 미반영을 아무도 감시하지 않는다.
+                해제 절차는 infra/k8s/base/manifest-drift.yaml 의 suspend 주석 참조.
+                ⚠️ kubectl patch 로 풀지 말 것 — overlay 에 선언해야 한다(그러지 않으면 영구 드리프트).
+                📖 대응 절차: docs/인프라/드리프트경보-대응.md
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: dodam
+spec:
+  replicas: 1
+  # TSDB 는 여러 파드가 같은 볼륨을 쓰면 깨진다. 새 파드를 띄우기 전에 옛 파드를 반드시 내린다.
+  strategy: { type: Recreate }
+  selector: { matchLabels: { app: prometheus } }
+  template:
+    metadata:
+      labels: { app: prometheus }
+    spec:
+      serviceAccountName: prometheus   # kubelet cAdvisor 스크레이프용 토큰이 필요하다
+      securityContext:
+        # 이미지가 nobody(65534)로 도는데, PVC 초기 소유자는 root 다.
+        # fsGroup 을 주지 않으면 TSDB 디렉터리에 쓰지 못해 기동 직후 죽는다.
+        fsGroup: 65534
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v3.5.0   # compose 판과 같은 고정 버전 — latest 금지
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time=15d
+            - --web.enable-lifecycle          # 규칙 변경 시 재기동 대신 POST /-/reload
+          ports:
+            - { name: http, containerPort: 9090 }
+          volumeMounts:
+            - { name: config, mountPath: /etc/prometheus/prometheus.yml, subPath: prometheus.yml }
+            - { name: rules,  mountPath: /etc/prometheus/rules }
+            - { name: data,   mountPath: /prometheus }
+          readinessProbe:
+            httpGet: { path: /-/ready, port: 9090 }
+            periodSeconds: 10
+            failureThreshold: 3
+          livenessProbe:
+            httpGet: { path: /-/healthy, port: 9090 }
+            periodSeconds: 20
+            failureThreshold: 5
+          resources:
+            # 실측 기반(2026-07-29). compose 판 prometheus 가 같은 이미지·같은 job 구성으로
+            #   **58MiB** 를 쓰고 있었다. compose 의 700m 을 그대로 베끼면 상한을 예약처럼
+            #   다루는 실수가 된다(preflight 4096→2048 정정과 같은 건).
+            # request 128Mi : 실측의 2배 남짓. 스케줄링에 잡히는 값이라 과하게 잡지 않는다.
+            # limit 768Mi   : ⚠️ 여기만 여유를 크게 뒀다. k8s 로 오면서 스크레이프 대상에
+            #   kubelet cAdvisor 와 kube-state-metrics 가 붙는데, 둘 다 시계열 수가 많아
+            #   compose 판보다 메모리가 몇 배로 뛸 수 있다. 실제 증가폭을 관측하기 전까지는
+            #   조여서 OOMKill 을 만드는 것보다 넉넉히 두고 지켜보는 쪽이 낫다.
+            #   관측 후 재조정할 것 — ContainerMemoryNearLimit 이 90% 구간에서 먼저 알린다.
+            requests: { memory: 128Mi, cpu: 100m }
+            limits:   { memory: 768Mi, cpu: 1000m }
+      volumes:
+        - { name: config, configMap: { name: prometheus-config } }
+        - { name: rules,  configMap: { name: prometheus-rules } }
+        - { name: data,   persistentVolumeClaim: { claimName: prometheus-data } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: dodam
+spec:
+  # ClusterIP 유지 — 외부 노출면은 80/443(nginx)뿐이라는 원칙 그대로다.
+  #   사람이 볼 때는 kubectl port-forward 로 접근한다(NodePort 를 열지 않는다).
+  type: ClusterIP
+  selector: { app: prometheus }
+  ports:
+    - { name: http, port: 9090, targetPort: 9090 }

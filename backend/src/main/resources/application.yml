@@ -1,0 +1,208 @@
+spring:
+  application:
+    name: b209
+  profiles:
+    default: local
+  jpa:
+    open-in-view: false
+  servlet:
+    multipart:
+      max-file-size: 20971520B
+      max-request-size: 22020096B
+  data:
+    redis:
+      host: ${REDIS_HOST:127.0.0.1}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      ssl:
+        enabled: ${REDIS_SSL_ENABLED:false}
+
+server:
+  port: 8080
+
+# 모니터링(actuator/micrometer) — 관리 엔드포인트는 앱 포트(8080)와 분리
+management:
+  server:
+    # 관리 포트 분리: nginx는 8080만 프록시하므로 actuator 외부 노출 경로가 구조적으로 0
+    port: 9404
+  endpoints:
+    web:
+      exposure:
+        # health(프로브용)·prometheus(메트릭 수집)만 노출, 그 외 엔드포인트는 비공개
+        include: health,prometheus
+  endpoint:
+    health:
+      probes:
+        # k8s liveness/readiness 프로브 전환 대비 (/actuator/health/liveness, /readiness)
+        enabled: true
+      # 내부 상태 상세(DB/Redis 등) 비노출 — 아동 서비스 가드레일
+      show-details: never
+
+app:
+  auth:
+    filter:
+      legacy-header-enabled: false
+    jwt:
+      secret: ${JWT_SECRET:}
+      issuer: ${JWT_ISSUER:dodam-api}
+      access-token-ttl: ${JWT_ACCESS_TOKEN_TTL:30m}
+      refresh-token-ttl: ${JWT_REFRESH_TOKEN_TTL:14d}
+    oauth:
+      connect-timeout: ${OAUTH_CONNECT_TIMEOUT:3s}
+      read-timeout: ${OAUTH_READ_TIMEOUT:5s}
+      kakao:
+        app-id: ${KAKAO_APP_ID:}
+      google:
+        client-id: ${GOOGLE_CLIENT_ID:}
+      apple:
+        client-id: ${APPLE_CLIENT_ID:}
+  ai:
+    drawing-analysis:
+      mode: ${AI_DRAWING_ANALYSIS_MODE:http}
+      base-url: ${AI_DRAWING_ANALYSIS_BASE_URL:http://localhost:8000}
+      endpoint-path: ${AI_DRAWING_ANALYSIS_ENDPOINT_PATH:/internal/v1/analyses}
+      connect-timeout: ${AI_DRAWING_ANALYSIS_CONNECT_TIMEOUT:3s}
+      read-timeout: ${AI_DRAWING_ANALYSIS_READ_TIMEOUT:30s}
+    image-access:
+      internal-base-url: ${AI_IMAGE_ACCESS_BASE_URL:http://backend:8080}
+      token-ttl: ${AI_IMAGE_ACCESS_TOKEN_TTL:60s}
+    observation:
+      mode: ${AI_OBSERVATION_MODE:http}
+      base-url: ${AI_OBSERVATION_BASE_URL:http://localhost:8000}
+      endpoint-path: ${AI_OBSERVATION_ENDPOINT_PATH:/internal/v1/observations}
+      connect-timeout: ${AI_OBSERVATION_CONNECT_TIMEOUT:3s}
+      read-timeout: ${AI_OBSERVATION_READ_TIMEOUT:30s}
+    tts:
+      mode: ${AI_TTS_MODE:http}
+      base-url: ${AI_TTS_BASE_URL:http://localhost:8000}
+      endpoint-path: ${AI_TTS_ENDPOINT_PATH:/internal/ai/v1/speech/synthesis}
+      connect-timeout: ${AI_TTS_CONNECT_TIMEOUT:2s}
+      read-timeout: ${AI_TTS_READ_TIMEOUT:30s}
+  report:
+    ai-raw-report:
+      # 집·나무·사람 리포트 조회 응답에 AI 원문(data.aiRawReport)을 실을지 여부다 (S15P11B209-980).
+      #
+      # ⚠️ 이 값만은 보호자 안전 선별을 거치지 않는다. 응답의 다른 필드는 EXPERT_ONLY 관찰·위기
+      #   심각도·AI 추정 감정·신뢰도를 의도적으로 걸러 내는데(CLAUDE.md 9절) 원문에는 그것들이
+      #   들어 있다. 고정 스키마가 무엇을 버리는지 화면에서 대조하려고 켜 둔 상태이며,
+      #   실사용자 공개 전에 false 로 바꾸거나 노출 대상을 좁혀야 한다.
+      exposed: ${REPORT_AI_RAW_REPORT_EXPOSED:true}
+  cors:
+    allowed-origins: []
+  storage:
+    mode: ${STORAGE_MODE:local}
+    s3:
+      endpoint: ${S3_ENDPOINT:http://localhost:9000}
+      region: ${S3_REGION:ap-northeast-2}
+      bucket: ${S3_BUCKET:dodam}
+      access-key: ${MINIO_BE_USER:}
+      secret-key: ${MINIO_BE_PASSWORD:}
+      image-prefix: ${S3_IMAGE_PREFIX:images}
+      audio-prefix: ${S3_AUDIO_PREFIX:audio}
+      tts-prefix: ${S3_TTS_PREFIX:tts-cache}
+      credential-prefix: ${S3_CREDENTIAL_PREFIX:credentials}
+      path-style-access-enabled: ${S3_PATH_STYLE_ACCESS_ENABLED:true}
+    image:
+      root: ${LOCAL_IMAGE_STORAGE_ROOT:./storage/images}
+      max-size: ${LOCAL_IMAGE_MAX_SIZE:10485760}
+    audio:
+      root: ${LOCAL_AUDIO_STORAGE_ROOT:./storage/audio}
+      max-size: ${LOCAL_AUDIO_MAX_SIZE:20971520}
+    credential:
+      root: ${LOCAL_CREDENTIAL_STORAGE_ROOT:./storage/credentials}
+      max-size: ${LOCAL_CREDENTIAL_MAX_SIZE:10485760}
+    # storage_deletion_jobs 소비 워커 (S15P11B209-780).
+    #   끄면 탈퇴·아동 삭제로 등록된 파일 삭제가 멈춘다 — 잡은 계속 쌓인다(유실은 아니다).
+    #   점검 창에서만 잠시 끄고, 끈 사실을 잊지 말 것(가드레일 9절).
+    deletion:
+      enabled: ${STORAGE_DELETION_ENABLED:true}
+      interval: ${STORAGE_DELETION_INTERVAL:60s}
+      batch-size: ${STORAGE_DELETION_BATCH_SIZE:100}
+      max-retry-count: ${STORAGE_DELETION_MAX_RETRY_COUNT:5}
+      stuck-after: ${STORAGE_DELETION_STUCK_AFTER:10m}
+  security:
+    guardian-pin:
+      # PIN 해시 앞단에 적용하는 서버 비밀키. 4자리 PIN 은 조합이 10,000개뿐이라 DB 만 유출돼도
+      # 전수 시도가 가능한데, 이 키가 DB 밖에 있으면 해시만으로는 대조할 입력을 만들 수 없다.
+      # 비어 있으면 PIN API 만 503 으로 거부하고 애플리케이션은 정상 부팅한다(S15P11B209-879).
+      pepper: ${GUARDIAN_PIN_PEPPER:}
+      hash-strength: ${GUARDIAN_PIN_HASH_STRENGTH:12}
+      # PIN 초기화를 허용하는 소셜 재인증 창(분). users.last_login_at 이 이 시간 안이어야 초기화된다.
+      reset-reauth-window-minutes: ${GUARDIAN_PIN_RESET_WINDOW_MINUTES:5}
+  push:
+    device-token:
+      # Base64(32바이트) AES-256 키. 운영은 시크릿으로 주입한다.
+      # 비어 있으면 기기 Token 등록만 503으로 거부하고 애플리케이션은 정상 부팅한다.
+      encryption-key: ${PUSH_DEVICE_TOKEN_ENCRYPTION_KEY:}
+    fcm:
+      # 발송 스위치. false면 알림함 행만 남기고 FCM 발송은 조용히 건너뛴다.
+      enabled: ${APP_PUSH_FCM_ENABLED:false}
+      # 컨테이너 내부 Service Account 경로. enabled=true일 때만 FirebaseApp 초기화에 사용한다.
+      credentials-path: ${APP_PUSH_FCM_CREDENTIALS_PATH:/run/secrets/fcm-service-account.json}
+  stt:
+    trigger:
+      enabled: ${STT_TRIGGER_ENABLED:true}
+    recovery:
+      enabled: ${STT_RECOVERY_ENABLED:true}
+      interval: ${STT_RECOVERY_INTERVAL:60s}
+      minimum-age: ${STT_RECOVERY_MINIMUM_AGE:2m}
+      batch-size: ${STT_RECOVERY_BATCH_SIZE:20}
+  notification:
+    retention:
+      # 보관 만료 임박 알림 발송 스위치. 보관 정책(564/565) 확정 전까지 false로 두어 임시 기준일로 오발송하지 않게 한다.
+      enabled: ${NOTIFICATION_RETENTION_ENABLED:false}
+      interval: ${NOTIFICATION_RETENTION_INTERVAL:1h}
+      # 보관 기간(일)과 만료 며칠 전 안내할지. 보관 정책 확정 전 임시 기준값이다.
+      retention-days: ${NOTIFICATION_RETENTION_DAYS:180}
+      notice-days-before: ${NOTIFICATION_RETENTION_NOTICE_DAYS_BEFORE:30}
+      batch-size: ${NOTIFICATION_RETENTION_BATCH_SIZE:100}
+  stroke:
+    # 그리기 과정 데이터(스트로크) 보관 기간(일). MongoDB `strokes` 의 TTL 인덱스가 쓰는
+    # expireAt = createdAt + 이 값 으로 계산된다 (S15P11B209-365).
+    #   ⚠️ 이 값을 바꿔도 **이미 저장된 문서의 expireAt 은 바뀌지 않는다.** TTL 인덱스는
+    #      문서에 적힌 시각만 보기 때문이다. 정책 변경 시 소급 갱신 여부를 별도로 결정할 것.
+    #   보관 정책(564/565) 확정 전까지 알림 보관 기간과 같은 임시 기준값을 쓴다.
+    retention-days: ${STROKE_RETENTION_DAYS:180}
+    mongo-backfill:
+      # MySQL stroke_* → MongoDB 일회성 이관 러너. 기본은 꺼져 있다.
+      #   운영에서 한 번 켜서 돌리고 즉시 되돌리는 용도다 — 켠 채로 두면 배포·재시작마다 재실행된다
+      #   (upsert 라 데이터는 안 깨지지만 매 기동마다 전량 스캔한다).
+      enabled: ${STROKE_MONGO_BACKFILL:false}
+      batch-size: ${STROKE_MONGO_BACKFILL_BATCH_SIZE:200}
+  conversation-event:
+    # 대화 행동 이벤트 보관 기간(일). MongoDB `conversation_events` 의 TTL 인덱스가 쓰는
+    # expireAt = occurredAt + 이 값 으로 계산된다 (S15P11B209-973).
+    #   ⚠️ 스트로크와 같은 주의: 이 값을 바꿔도 **이미 저장된 문서의 expireAt 은 바뀌지 않는다.**
+    #      TTL 인덱스는 문서에 적힌 시각만 보기 때문이다.
+    #   그리기 과정 데이터와 같은 활동에서 나온 같은 성격의 관측 로그이므로 보관 기간을 스트로크와 맞춘다.
+    #   보관 정책(564/565) 확정 전까지 쓰는 임시 기준값이다.
+    retention-days: ${CONVERSATION_EVENT_RETENTION_DAYS:180}
+  conversation:
+    question-limit:
+      # 대화 한 세션이 아이에게 던질 수 있는 질문 수 상한 (S15P11B209-976).
+      #   단위는 **그림 한 장**이다. HTP는 주제(집·나무·사람)마다 그림 세션과 대화가 따로 열리므로
+      #   HTP 1회 활동의 실제 상한은 htp-per-subject × 3 이다.
+      #   ⚠️ 세션 생성 시 conversation_sessions.max_question_count 로 복사되는 Snapshot이라
+      #      값을 바꿔도 **이미 만들어진 대화에는 소급되지 않는다.**
+      #   왜 이 숫자인가 (S15P11B209-995, 2026-08-07 실측으로 976의 3을 교체):
+      #      새 상한(3)으로 만들어진 HTP 대화 9세션 전부가 3문을 다 썼다(도달률 100%) —
+      #      대화를 끝내는 것이 아이가 아니라 상한이었다. 976이 근거로 쓴 "평균 2.60"은
+      #      닫힌 질문 시대(988 이전)의 이탈 데이터라 적정치의 근거가 못 된다.
+      #      검증된 그림일기(상한 5)는 5~6턴에서도 답이 1턴보다 길었다(19→33→20→20→27→29자,
+      #      2026-08-07). 993이 그 질문 설계를 HTP에 이식했으므로 같은 깊이(5)로 맞춘다.
+      #      아이가 그만하고 싶으면 끊는 stop-intent 경로가 따로 있어, 상한이 자르는 것은
+      #      더 갈 수 있었던 아이뿐이다.
+      htp-per-subject: ${CONVERSATION_QUESTION_LIMIT_HTP_PER_SUBJECT:5}
+      art-diary: ${CONVERSATION_QUESTION_LIMIT_ART_DIARY:5}
+  idempotency:
+    drawing-draft:
+      processing-ttl: ${DRAWING_DRAFT_IDEMPOTENCY_PROCESSING_TTL:30s}
+      completed-ttl: ${DRAWING_DRAFT_IDEMPOTENCY_COMPLETED_TTL:24h}
+      processing-wait: ${DRAWING_DRAFT_IDEMPOTENCY_PROCESSING_WAIT:3s}
+      polling-interval: ${DRAWING_DRAFT_IDEMPOTENCY_POLLING_INTERVAL:50ms}
+    conversation:
+      processing-ttl: ${CONVERSATION_IDEMPOTENCY_PROCESSING_TTL:30s}
+      completed-ttl: ${CONVERSATION_IDEMPOTENCY_COMPLETED_TTL:24h}
+      failure-ttl: ${CONVERSATION_IDEMPOTENCY_FAILURE_TTL:5m}
+      processing-wait: ${CONVERSATION_IDEMPOTENCY_PROCESSING_WAIT:3s}
+      polling-interval: ${CONVERSATION_IDEMPOTENCY_POLLING_INTERVAL:50ms}

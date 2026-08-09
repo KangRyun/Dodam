@@ -1,0 +1,149 @@
+export type CommunityAuthorRole = "GUARDIAN" | "EXPERT" | "ADMIN";
+
+/**
+ * 게시글 유형. 백엔드 `PostType`(DB v1.2 `community_posts.post_type`)과 값이 1:1로 일치한다.
+ * API 명세서 16.2-A 참고.
+ */
+export type CommunityPostCategory =
+  | "GUARDIAN_STORY"
+  | "ACTIVITY_REVIEW"
+  | "EXPERT_COLUMN"
+  | "ART_RESOURCE"
+  | "DRAWING_GUIDE"
+  | "EXPERT_QNA"
+  | "NOTICE";
+
+export type ExpertAnswerStatus = "WAITING" | "ANSWERED";
+
+export type CommunityAuthor = {
+  id: number;
+  nickname: string;
+  role: CommunityAuthorRole;
+  avatar: string;
+  credential?: string;
+};
+
+export type CommunityComment = {
+  id: number;
+  /** 소속 게시글 식별자. 목록 응답(COMM-16)에서 채워진다. */
+  postId?: number;
+  author: CommunityAuthor;
+  content: string;
+  /** 익명 댓글 여부. */
+  anonymous?: boolean;
+  /** 검증 전문가가 작성한 전문가 답변 여부. */
+  isExpertAnswer?: boolean;
+  /** EXPERT_QNA에서 채택된 답변 여부. */
+  accepted?: boolean;
+  helpfulCount: number;
+  /** 현재 로그인 사용자가 수정·삭제할 수 있는 댓글인지(작성자 또는 ADMIN). */
+  editableByMe?: boolean;
+  createdAt: string;
+  updatedAt?: string;
+};
+
+/** 댓글 작성 요청 본문(COMM-08 `POST /posts/{postId}/comments`). */
+export type CreateCommunityCommentInput = {
+  content: string;
+  anonymous: boolean;
+};
+
+/** 댓글 수정 요청 본문(COMM-09 `PATCH /comments/{commentId}`). */
+export type UpdateCommunityCommentInput = {
+  content: string;
+};
+
+export type CommunityPost = {
+  id: number;
+  category: CommunityPostCategory;
+  title: string;
+  excerpt: string;
+  content: string;
+  author: CommunityAuthor;
+  tags: readonly string[];
+  imageUrl?: string;
+  isAnonymous: boolean;
+  isLiked: boolean;
+  likeCount: number;
+  commentCount: number;
+  viewCount: number;
+  createdAt: string;
+  answerStatus?: ExpertAnswerStatus;
+  /** 현재 로그인 사용자가 수정·삭제할 수 있는 글인지. 상세(COMM-03)에서만 채워진다. */
+  editableByMe?: boolean;
+  comments: readonly CommunityComment[];
+};
+
+/** COMM-06 좋아요 등록 결과. */
+export type CommunityPostLikeResult = {
+  postId: number;
+  liked: boolean;
+  likeCount: number;
+};
+
+/** COMM-11 신고 대상. */
+export type CommunityComplaintTargetType = "POST" | "COMMENT";
+
+/** COMM-11 신고 사유 코드. */
+export type CommunityComplaintReason =
+  | "INAPPROPRIATE_CONTENT"
+  | "PERSONAL_INFORMATION"
+  | "MISLEADING_DIAGNOSIS"
+  | "HARASSMENT"
+  | "COPYRIGHT"
+  | "OTHER";
+
+/** COMM-11 `POST /complaints` 요청 본문. */
+export type CreateCommunityComplaintInput = {
+  targetType: CommunityComplaintTargetType;
+  targetId: number;
+  reasonCode: CommunityComplaintReason;
+  description?: string;
+};
+
+export type CommunityProfile = {
+  nickname: string;
+  avatar: string;
+  connectedProvider: "KAKAO" | "GOOGLE" | "NAVER";
+};
+
+export type CommunityFeed = {
+  profile: CommunityProfile;
+  popularTags: readonly string[];
+  posts: readonly CommunityPost[];
+};
+
+export type CommunityPostFilter = {
+  category?: CommunityPostCategory;
+  query?: string;
+  sort?: CommunityPostSort;
+};
+
+/** COMM-01이 허용하는 게시글 정렬 조건. */
+export type CommunityPostSort =
+  | "createdAt,desc"
+  | "createdAt,asc"
+  | "likeCount,desc";
+
+/** 게시글 첨부(COMM-02/04). 현재 백엔드는 형식만 수용하고 저장하지 않는다. */
+export type CommunityPostAttachmentInput = {
+  fileId: string;
+  type: "IMAGE";
+};
+
+/** 게시글 작성 요청 본문(COMM-02 `POST /posts`). */
+export type CreateCommunityPostInput = {
+  postType: CommunityPostCategory;
+  title: string;
+  content: string;
+  anonymous: boolean;
+  templateData?: unknown;
+  attachments?: readonly CommunityPostAttachmentInput[];
+};
+
+/**
+ * 게시글 수정 요청 본문(COMM-04 `PATCH /posts/{postId}`).
+ *
+ * 백엔드가 전체 교체(full replace) 방식이라 작성 요청과 형태가 같다.
+ */
+export type UpdateCommunityPostInput = CreateCommunityPostInput;

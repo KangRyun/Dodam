@@ -1,0 +1,70 @@
+# Jenkins 배포용 ServiceAccount + RBAC (S15P11B209-359)
+#
+# 왜 최소권한이 특히 중요한가
+#   이 Jenkins 는 **호스트 docker.sock 을 마운트**하고 있다 — 이미 사실상 호스트 root 급이다.
+#   거기에 cluster-admin kubeconfig 까지 쥐어주면, Jenkins 를 장악한 사람이 클러스터 전체를
+#   가져간다. 노출면을 늘리지 않으려면 "배포에 필요한 동작"만 정확히 준다.
+#
+# 무엇을 주고 무엇을 안 주나
+#   준다  : Deployment/StatefulSet 의 이미지 교체와 rollout 확인, 파드·로그 조회(디버깅)
+#   안 준다: **Secret 읽기** — 배포에 필요 없다. Secret 은 sync-secrets.sh 가 사람 손으로 만든다.
+#            네임스페이스·RBAC 자체 변경, 다른 네임스페이스 접근, 클러스터 범위 리소스.
+#
+# ⚠️ Role 이지 ClusterRole 이 아니다. dodam 네임스페이스 밖은 아예 보이지 않는다.
+#    staging 검증 단계에서는 이 파일을 dodam-staging 에도 복제해 쓴다(overlay 에서 네임스페이스 치환).
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: jenkins-deployer
+  namespace: dodam
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: jenkins-deployer
+  namespace: dodam
+rules:
+  # 배포 본체 — 이미지 교체(patch)와 롤아웃 상태 확인(get/watch)에 필요하다.
+  #   create/delete 는 주지 않는다: 워크로드 생성·삭제는 kubectl apply -k 로 사람이 한다.
+  #   파이프라인은 "이미 있는 것의 이미지를 바꾸는" 일만 한다(kubectl set image).
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+
+  # rollout status 가 내부적으로 ReplicaSet 을 조회한다. 없으면 "성공했는데 확인 불가"가 된다.
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+
+  # 배포 실패 시 원인을 보려면 파드 상태와 로그가 필요하다.
+  #   ⚠️ pods/log 를 주는 건 트레이드오프다 — 앱 로그에 민감정보가 찍히면 Jenkins 로 흘러간다.
+  #      그래서 애초에 "로그에 아동 데이터·비밀을 남기지 않는다"가 전제다(가드레일 9절).
+  #      이걸 빼면 배포 실패 때 파이프라인이 아무것도 알려주지 못해 사람이 매번 서버에 붙어야 한다.
+  - apiGroups: [""]
+    resources: ["pods", "pods/log"]
+    verbs: ["get", "list", "watch"]
+
+  # 이벤트 — "왜 파드가 안 뜨나"(이미지 pull 실패·스케줄 불가)의 답이 대부분 여기 있다.
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["get", "list", "watch"]
+
+  # Service 조회 — 배포 후 엔드포인트 확인용. 변경 권한은 없다.
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: jenkins-deployer
+  namespace: dodam
+subjects:
+  - kind: ServiceAccount
+    name: jenkins-deployer
+    namespace: dodam
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: jenkins-deployer

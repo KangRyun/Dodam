@@ -1,0 +1,47 @@
+spring:
+  config:
+    activate:
+      on-profile: test
+
+  datasource:
+    url: jdbc:h2:mem:dodam-test-${random.uuid};MODE=MySQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1
+    username: sa
+    password:
+    driver-class-name: org.h2.Driver
+
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    show-sql: false
+    hibernate:
+      ddl-auto: create-drop
+
+  flyway:
+    enabled: false
+
+app:
+  auth:
+    filter:
+      legacy-header-enabled: true
+  # 슬라이스·컨텍스트 테스트도 AI 서버로 나가지 않는다. 고정하지 않으면 운영 기본값 http를 상속한다.
+  # 근거는 application-integration-test.yml의 같은 블록 주석 참고(722 회귀).
+  ai:
+    drawing-analysis:
+      mode: mock
+    observation:
+      mode: mock
+    tts:
+      mode: mock
+  cors:
+    allowed-origins:
+      - http://localhost:3000
+  # 슬라이스·컨텍스트 테스트는 주기 작업 대상이 아니므로 회수 스케줄러를 끈다.
+  stt:
+    recovery:
+      enabled: false
+  # 삭제 워커도 같은 이유로 끈다. 이쪽은 큐가 비어도 매 틱이 releaseStuck으로 DB를 먼저 쓰기 때문에,
+  # DataSource가 닫힌 컨텍스트에 남은 스케줄러가 던지면 Spring이 JVM 공용 stdout에 ERROR를 찍는다.
+  # CapturedOutput은 JVM 전역이라 그 한 줄이 남의 테스트 단언을 깬다
+  # (GlobalExceptionHandlerTest의 "ERROR 없음" 단언 — 2026-08-04 develop 빌드 189).
+  storage:
+    deletion:
+      enabled: false

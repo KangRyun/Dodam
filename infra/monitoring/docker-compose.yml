@@ -1,0 +1,146 @@
+# 도담(dodam) 모니터링 스택 — Prometheus + Grafana + node-exporter + cAdvisor
+# 관련 이슈: S15P11B209-352 (2차 MVP Day 2)
+#
+# 실행 (repo 루트에서 — GRAFANA_ADMIN_PASSWORD 를 infra/.env 에 먼저 추가할 것, README 참조):
+#   docker compose -f infra/monitoring/docker-compose.yml --env-file infra/.env up -d
+#   docker compose -f infra/monitoring/docker-compose.yml ps
+#
+# 원칙 (본 compose infra/docker-compose.yml 와 동일):
+#   - 비밀번호/키는 .env 참조(${...})만 — 이 파일·저장소에 값 없음. latest 금지, 버전 고정.
+#   - 외부 노출면 불변(80/443 = nginx 뿐) — 모니터링 UI는 전부 127.0.0.1 바인딩,
+#     접근은 SSH 터널로만 (가드레일 9절: 아동 민감정보 서비스 — 포트 최소 개방).
+#   - ⚠️ k3s 컷오버(Day 6) 때 재배치 예정 — 과투자 금지, 실용 최소 구성.
+#     reason: healthcheck·Alertmanager·장기보관은 k3s 이전 시 probe/규칙으로 정식 도입.
+
+# 프로젝트 이름 고정 — 본 compose(name: dodam)와 같은 이유:
+#   실행 위치(cwd)와 무관하게 컨테이너/볼륨/네트워크 이름을 'dodam-monitoring_*'로 통일.
+name: dodam-monitoring
+
+services:
+  # ───────────────────────────────────────────────────────────────
+  # prometheus — 메트릭 수집·저장(TSDB).
+  #   backend(9404)·ai(8000)는 기존 스택 내부망(dodam-net) 참여로, node-exporter·cadvisor는
+  #   자체망(monitoring-net)으로 스크레이프. 설정은 ./prometheus/prometheus.yml 참조.
+  # ───────────────────────────────────────────────────────────────
+  prometheus:
+    image: prom/prometheus:v3.5.0     # LTS 라인 버전 고정 — latest 금지(재현성)
+    container_name: dodam-prometheus
+    restart: unless-stopped
+    mem_limit: 700m                   # reason: 공용 EC2 단일 서버 — TSDB 캐시가 앱 메모리를 침범하지 않게 상한
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d   # reason: 디스크 보호 — 2주+α만 보관(k3s 이전까지 임시 운용)
+    volumes:
+      # 설정 bind 마운트 — compose가 상대경로를 "compose 파일 위치 기준"으로 해석하므로 실행 cwd와 무관.
+      #   (2026-07-22 nginx 빈 conf 사고는 Jenkins가 다른 경로에서 돌린 케이스 — 이 스택은 수동 기동 전용이라 다름.
+      #    k3s 이전 시 ConfigMap으로 대체 예정이라 이미지 bake는 과투자로 판단)
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      # 경보 규칙 디렉터리 (S15P11B209-356) — prometheus.yml 의 rule_files 가 여기를 읽는다.
+      #   디렉터리째 마운트하는 이유: 규칙 파일이 늘어도 compose 를 다시 고치지 않게 하려고.
+      #   ⚠️ 규칙만 바꿨다면 재생성 대신 `docker kill -s HUP dodam-prometheus` 로 리로드한다.
+      - ./prometheus/rules:/etc/prometheus/rules:ro
+      - prometheus-data:/prometheus   # TSDB 영속화 — 컨테이너 재생성에도 메트릭 유지
+    ports:
+      # ⚠️ 루프백 전용 바인딩 — 외부 개방 금지, 접근은 SSH 터널(README).
+      #   호스트 포트 9091 사용 reason: 호스트 9090은 이미 점유돼 있음(2026-07-23 ss 실측).
+      - "127.0.0.1:9091:9090"
+    networks:
+      - monitoring-net
+      - dodam-net                     # backend:9404 · ai:8000 스크레이프용 — 기존 스택 내부망 참여
+
+  # ───────────────────────────────────────────────────────────────
+  # grafana — 대시보드 UI. S15P11B209-366부터 dodam-net에도 참여:
+  #   reason: nginx(/grafana/ 프록시)가 닿을 경로 필요. nginx를 모니터링망에 넣는 역방향은
+  #           "모니터링 부재 = 앱 배포 실패"의 의존 역전이라 금지 — 의존 방향은 모니터링→앱만.
+  #   트레이드오프: 앱망에 닿는 컨테이너 +1. 보완: Grafana 자체 인증(익명·가입 차단) + 버전 고정.
+  # ───────────────────────────────────────────────────────────────
+  grafana:
+    image: grafana/grafana:11.6.0     # 버전 고정 — latest 금지. k3s 이전 시 최신 마이너로 재평가
+    container_name: dodam-grafana
+    restart: unless-stopped
+    mem_limit: 256m                   # reason: 대시보드 UI는 경량 — 공용 서버 메모리 보호
+    environment:
+      # 관리자 비번 — 값은 infra/.env 에만 존재(이 파일·저장소엔 없음).
+      #   reason: :? fail-fast — 기본 비번(admin/admin)으로 뜨는 최악을 기동 차단으로 원천 봉쇄
+      #   (본 compose의 REDIS_PASSWORD·JWT_SECRET과 동일 정책).
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be configured in infra/.env}
+      GF_AUTH_ANONYMOUS_ENABLED: "false"   # 익명 접근 차단 — 메트릭에도 내부 구조·트래픽 패턴이 드러남
+      GF_USERS_ALLOW_SIGN_UP: "false"      # 임의 가입 차단 — 계정은 admin이 생성(팀원=Viewer 권한)
+      # ── 웹 경로 노출 (S15P11B209-366) — https://i15b209.p.ssafy.io/grafana/ 서브패스 서빙.
+      #   reason: nginx가 /grafana 접두를 유지한 채 프록시(Jenkins /jenkins/와 동일 패턴)하므로,
+      #           Grafana가 하위 경로를 스스로 인지해야 리다이렉트·정적 자원 경로가 안 깨진다.
+      GF_SERVER_ROOT_URL: "https://i15b209.p.ssafy.io/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+    volumes:
+      - grafana-data:/var/lib/grafana                        # UI에서 import한 대시보드·설정 영속화
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro  # datasource·dashboards provider 자동 등록
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro  # JSON 드롭 시 자동 로드(현재 비어있음 — import는 UI로, README)
+    ports:
+      - "127.0.0.1:3000:3000"         # 루프백 바인딩 유지 — nginx 장애 시 SSH 터널 예비 접근로
+    depends_on:
+      - prometheus                    # 기동 순서만 보장(datasource 연결 대상)
+    networks:
+      - monitoring-net
+      - dodam-net                     # nginx /grafana/ 프록시 도달 경로 (S15P11B209-366 — 위 주석 참조)
+
+  # ───────────────────────────────────────────────────────────────
+  # node-exporter — EC2 호스트 메트릭(CPU/메모리/디스크/스왑). 호스트 포트 미개방(내부 스크레이프 전용).
+  # ───────────────────────────────────────────────────────────────
+  node-exporter:
+    image: prom/node-exporter:v1.9.1  # 버전 고정
+    container_name: dodam-node-exporter
+    restart: unless-stopped
+    mem_limit: 64m                    # reason: 상시 수십 MB 수준 — 여유만 확보
+    pid: host                         # 호스트 프로세스 관점 메트릭에 필요(읽기 전용 관찰)
+    volumes:                          # 필요 최소 3종 — 전부 ro(호스트에 아무것도 쓰지 않음)
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/rootfs
+      # 컨테이너/가상 마운트 잡음 제거 — 디스크 지표는 호스트 파일시스템만
+      - --collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|var/lib/docker/.+)($|/)
+    networks:
+      - monitoring-net
+
+  # ───────────────────────────────────────────────────────────────
+  # cadvisor — 컨테이너별 리소스 메트릭("어느 컨테이너가 메모리를 먹는가"). 호스트 포트 미개방.
+  # ───────────────────────────────────────────────────────────────
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.51.0   # 버전 고정
+    container_name: dodam-cadvisor
+    restart: unless-stopped
+    mem_limit: 256m                   # reason: 컨테이너 수에 비례해 증가 — 상한으로 공용 서버 보호
+    volumes:                          # 전부 ro — 관찰만 하고 호스트에 아무것도 쓰지 않음(가드레일)
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro          # docker.sock 접근(컨테이너 목록 조회용).
+                                      #   ⚠️ ro는 "파일 쓰기"만 막고 소켓 API 호출(중지·삭제 등)은 못 막는다
+                                      #   — cadvisor가 조회 API만 쓰는 것을 신뢰하는 구성. 보완: 이미지 버전
+                                      #   고정 + UI 127.0.0.1 전용이라 외부에서 이 경로를 악용할 진입점 없음.
+                                      #   (safety-review R-352-1: 잘못된 보안 주석 정정)
+      - /sys:/sys:ro
+      - /var/lib/docker:/var/lib/docker:ro
+      - /dev/disk:/dev/disk:ro
+    devices:
+      - /dev/kmsg:/dev/kmsg           # reason: 커널 로그 읽기 — OOM kill 이벤트 감지용(쓰기 없음)
+    command:
+      - --docker_only=true            # reason: docker 컨테이너만 추적 — 소형 EC2 CPU 절감
+      - --housekeeping_interval=30s   # reason: 수집 주기 완화(기본 1s) — 스크레이프 15s에 맞춰 부하 절감
+    networks:
+      - monitoring-net
+
+# 네트워크 — 모니터링 자체망 + 기존 스택 내부망(external) 참여
+networks:
+  monitoring-net:
+    driver: bridge            # prometheus↔grafana↔exporter 전용 내부망
+  dodam-net:
+    name: dodam_dodam-net     # 본 compose(name: dodam)가 만든 dodam-net의 실제 이름 (2026-07-23 docker network ls 실측)
+    external: true            # reason: 이 스택이 만들지 않음 — 본 스택(dodam)이 먼저 떠 있어야 스크레이프 가능
+
+# 네임드 볼륨 — 메트릭·대시보드 영속화
+volumes:
+  prometheus-data:    # TSDB(15d 보관) — 컨테이너 재생성에도 유지
+  grafana-data:       # 대시보드·admin 설정 — UI import 결과 보존

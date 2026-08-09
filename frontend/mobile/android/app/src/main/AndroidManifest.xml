@@ -1,0 +1,109 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- API 호출·커뮤니티 웹뷰 로드에 필요. main에 둬야 release 빌드에서도 네트워크가 살아 있다
+         (debug/profile 매니페스트에만 있으면 release는 네트워크 전멸 — docs/인프라/웹-배포-계획.md §6). -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 사진으로 시작하기에서 시스템 카메라를 사용할 때 필요한 권한 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <!-- 음성 답변 녹음에 필요한 마이크 권한 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 분석 완료 등 보호자 알림 표시에 필요한 권한 (Android 13+ 런타임 요청 · S15P11B209-617).
+         거부돼도 앱과 알림함은 정상 동작한다 — docs/api/push-notification-delivery-contract.md §4.2 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- ── 라이브러리가 끌고 온 미사용 권한 제거 (S15P11B209-765) ──────────────
+         permission_handler 의 매니페스트가 자기가 요청할 수 있는 권한을 전부 선언해
+         병합된다. 우리가 실제로 요청하는 건 camera·microphone·notification·photos 넷뿐이고
+         (lib 전체에서 Permission.* 사용처를 전수 확인), 생체인증은 화면조차 없다.
+
+         왜 굳이 빼나: 원스토어 공식 반려 사유에 "과도한 권한" 이 있고, 이 앱은 아동
+         데이터를 다뤄 청소년 보호 기준 심사가 더 깐깐하다. 쓰지도 않는 지문·생체 권한이
+         목록에 있으면 설명할 수 없다. 상품설명에 고지한 권한 목록과도 어긋난다.
+
+         ⚠️ 아래 4종은 빼지 않는다 — 실제로 필요하다:
+           READ_EXTERNAL_STORAGE  갤러리 선택(image_picker_photo_adapter.dart:20)이
+                                  minSdk 24 기준 Android 12 이하에서 요구한다
+           WRITE_EXTERNAL_STORAGE 이미 maxSdkVersion=28 로 묶여 최소화돼 있다
+           WAKE_LOCK · VIBRATE    flutter_local_notifications 의 알림 표시
+           c2dm.RECEIVE 등        FCM·AndroidX 런타임 필수 -->
+    <uses-permission android:name="android.permission.USE_BIOMETRIC" tools:node="remove" />
+    <uses-permission android:name="android.permission.USE_FINGERPRINT" tools:node="remove" />
+
+    <!-- android:label 은 홈 화면·앱 서랍에 뜨는 이름이다. 스토어 상품 제목(도담)과
+         같아야 한다 — 영문 "dodam" 이면 "도담"을 받았는데 아이콘 밑엔 dodam 이 뜬다. -->
+    <application
+        android:label="도담"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher">
+        <!-- 태블릿 가로 고정(S15P11B209-864): MainActivity를 고정 방향 + 비리사이즈로
+             두어 세로로 들어도 회전하지 않고 가로 레터박스로 표시한다. -->
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity="${applicationId}"
+            android:theme="@style/LaunchTheme"
+            android:screenOrientation="sensorLandscape"
+            android:resizeableActivity="false"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize">
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+              android:name="io.flutter.embedding.android.NormalTheme"
+              android:resource="@style/NormalTheme"
+              />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN"/>
+                <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.kakao.sdk.flutter.auth.AuthCodeHandlerActivity"
+            android:exported="true">
+            <intent-filter android:label="flutter_web_auth">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data
+                    android:host="oauth"
+                    android:scheme="${kakaoScheme}" />
+            </intent-filter>
+        </activity>
+        <!-- OAuth callback이 MainActivity와 같은 Task로 복귀하도록 affinity를 맞춘다. -->
+        <activity
+            android:name="com.navercorp.nid.oauth.activity.NidOAuthBridgeActivity"
+            android:taskAffinity="${applicationId}" />
+        <activity
+            android:name="com.navercorp.nid.oauth.activity.NidOAuthCustomTabActivity"
+            android:taskAffinity="${applicationId}" />
+        <meta-data
+            android:name="com.dodam.naver.clientId"
+            android:value="${naverClientId}" />
+        <meta-data
+            android:name="com.dodam.naver.clientSecret"
+            android:value="${naverClientSecret}" />
+        <meta-data
+            android:name="com.dodam.naver.clientName"
+            android:value="${naverClientName}" />
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data
+            android:name="flutterEmbedding"
+            android:value="2" />
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT"/>
+            <data android:mimeType="text/plain"/>
+        </intent>
+    </queries>
+</manifest>

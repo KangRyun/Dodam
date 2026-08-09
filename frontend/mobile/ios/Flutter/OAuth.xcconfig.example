@@ -1,0 +1,8 @@
+KAKAO_NATIVE_APP_KEY=your-kakao-native-app-key
+GOOGLE_IOS_CLIENT_ID=your-google-ios-client-id
+GOOGLE_SERVER_CLIENT_ID=your-google-web-server-client-id
+GOOGLE_REVERSED_CLIENT_ID=your-google-reversed-client-id
+NAVER_CLIENT_ID=your-naver-client-id
+NAVER_CLIENT_SECRET=your-naver-client-secret
+NAVER_APP_NAME=Dodam
+NAVER_URL_SCHEME=your-naver-url-scheme
