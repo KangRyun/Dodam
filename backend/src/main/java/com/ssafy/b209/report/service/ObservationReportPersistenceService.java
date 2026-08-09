@@ -37,7 +37,10 @@ import com.ssafy.b209.report.domain.ReportDiaryInsight;
 import com.ssafy.b209.report.domain.ReportDiaryInsightAlternative;
 import com.ssafy.b209.report.domain.ReportDiaryNarrativeStep;
 import com.ssafy.b209.report.domain.ReportDiarySessionObservation;
+import com.ssafy.b209.report.domain.ReportDiaryStoryComponent;
+import com.ssafy.b209.report.domain.ReportDiaryTranscriptEntry;
 import com.ssafy.b209.report.domain.ReportDiaryUnknownItem;
+import com.ssafy.b209.report.domain.ReportDiaryVisualObservation;
 import com.ssafy.b209.report.domain.ReportDrawnItem;
 import com.ssafy.b209.report.domain.ReportEvidenceItem;
 import com.ssafy.b209.report.domain.ReportEvidenceSourceKind;
@@ -63,11 +66,14 @@ import com.ssafy.b209.report.dto.ObservationGenerationResult.ConversationSummary
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryCaregiverQuestionDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryChildVoiceItemDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryDataQualityDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryDataScopeDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryDevelopmentalObservationDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryDrawingObservationDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryEvidenceRefDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryInsightsDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryNarrativeStepDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiarySessionObservationDraft;
+import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryStoryComponentDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryStorySnapshotDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DiaryUnknownItemDraft;
 import com.ssafy.b209.report.dto.ObservationGenerationResult.DrawnItemDraft;
@@ -88,7 +94,10 @@ import com.ssafy.b209.report.repository.ReportDiaryInsightAlternativeRepository;
 import com.ssafy.b209.report.repository.ReportDiaryInsightRepository;
 import com.ssafy.b209.report.repository.ReportDiaryNarrativeStepRepository;
 import com.ssafy.b209.report.repository.ReportDiarySessionObservationRepository;
+import com.ssafy.b209.report.repository.ReportDiaryStoryComponentRepository;
+import com.ssafy.b209.report.repository.ReportDiaryTranscriptEntryRepository;
 import com.ssafy.b209.report.repository.ReportDiaryUnknownItemRepository;
+import com.ssafy.b209.report.repository.ReportDiaryVisualObservationRepository;
 import com.ssafy.b209.report.repository.ReportDrawnItemRepository;
 import com.ssafy.b209.report.repository.ReportEvidenceItemRepository;
 import com.ssafy.b209.report.repository.ReportFollowUpGuideRepository;
@@ -193,6 +202,10 @@ public class ObservationReportPersistenceService {
       diaryDevelopmentalObservationRepository;
   private final ReportDiaryDevelopmentSourceRepository diaryDevelopmentSourceRepository;
   private final ReportDiaryUnknownItemRepository diaryUnknownItemRepository;
+  private final ReportDiaryStoryComponentRepository diaryStoryComponentRepository;
+  private final ReportDiaryVisualObservationRepository diaryVisualObservationRepository;
+  private final ReportDiaryTranscriptEntryRepository diaryTranscriptEntryRepository;
+  private final DiaryTranscriptSnapshotFactory diaryTranscriptSnapshotFactory;
   private final ReportGuardianQuestionRepository guardianQuestionRepository;
   private final ConversationSessionRepository conversationSessionRepository;
   private final ConversationMessageRepository conversationMessageRepository;
@@ -261,6 +274,10 @@ public class ObservationReportPersistenceService {
       ReportDiaryDevelopmentalObservationRepository diaryDevelopmentalObservationRepository,
       ReportDiaryDevelopmentSourceRepository diaryDevelopmentSourceRepository,
       ReportDiaryUnknownItemRepository diaryUnknownItemRepository,
+      ReportDiaryStoryComponentRepository diaryStoryComponentRepository,
+      ReportDiaryVisualObservationRepository diaryVisualObservationRepository,
+      ReportDiaryTranscriptEntryRepository diaryTranscriptEntryRepository,
+      DiaryTranscriptSnapshotFactory diaryTranscriptSnapshotFactory,
       ReportGuardianQuestionRepository guardianQuestionRepository,
       ConversationSessionRepository conversationSessionRepository,
       ConversationMessageRepository conversationMessageRepository,
@@ -297,6 +314,10 @@ public class ObservationReportPersistenceService {
     this.diaryDevelopmentalObservationRepository = diaryDevelopmentalObservationRepository;
     this.diaryDevelopmentSourceRepository = diaryDevelopmentSourceRepository;
     this.diaryUnknownItemRepository = diaryUnknownItemRepository;
+    this.diaryStoryComponentRepository = diaryStoryComponentRepository;
+    this.diaryVisualObservationRepository = diaryVisualObservationRepository;
+    this.diaryTranscriptEntryRepository = diaryTranscriptEntryRepository;
+    this.diaryTranscriptSnapshotFactory = diaryTranscriptSnapshotFactory;
     this.guardianQuestionRepository = guardianQuestionRepository;
     this.conversationSessionRepository = conversationSessionRepository;
     this.conversationMessageRepository = conversationMessageRepository;
@@ -398,7 +419,10 @@ public class ObservationReportPersistenceService {
                   source.getAnswerMessageId(),
                   source.getAnswerText(),
                   source.getAnswerType(),
-                  source.getAnswerNeedsGuardianConfirmation());
+                  source.getAnswerNeedsGuardianConfirmation(),
+                  source.getAnswerSpeechStatus(),
+                  source.getAnswerAudioAvailable(),
+                  source.getAnswerCreatedAt());
           subjectQaPairs.add(line);
           if (keyConversations.size() < MAX_KEY_CONVERSATIONS) {
             keyConversations.add(line);
@@ -504,9 +528,7 @@ public class ObservationReportPersistenceService {
    * @return 만 나이(개월)이며 아동 관계가 없으면 {@code null}
    */
   private Integer ageMonthsOf(DrawingSession session) {
-    return session.getChild() == null
-        ? null
-        : session.getChild().ageMonthsOn(LocalDate.now(clock));
+    return session.getChild() == null ? null : session.getChild().ageMonthsOn(LocalDate.now(clock));
   }
 
   /**
@@ -566,7 +588,7 @@ public class ObservationReportPersistenceService {
    * 검증된 관찰 결과를 정규화 테이블에 저장하고 분석·리포트·그림 활동 세션을 완료 상태로 전이한다.
    *
    * @param context 생성 맥락
-   * @param result AI Client가 반환한 관찰 리포트 결과
+   * @param generation AI Client가 반환한 계약 결과와 응답 원문
    * @throws BusinessException 대상이 사라졌거나 저장 충돌이 발생한 경우
    * @throws IllegalStateException 그림 활동 세션이 REPORTING 중인 진행 상태가 아닌 경우
    */
@@ -703,7 +725,7 @@ public class ObservationReportPersistenceService {
       saveReferences(report, safeList(result.ragReferences()));
       // 그림일기 V2 구조화. AI 가 근거와 대조해 살아남은 것만 보내고, 남은 게 없으면 아예
       //   보내지 않는다 — null 이면 저장하지 않고 화면은 레거시 리포트를 연다.
-      saveDiaryInsights(report, result.diaryInsights());
+      saveDiaryInsights(report, result.diaryInsights(), context);
 
       report.complete(draft.expertReviewRequired(), result.limitationsText(), now);
       // AI 원문을 그대로 보관한다. 계약 스키마로 읽는 순간 스키마 밖 서술이 사라지므로, 나중에
@@ -1368,12 +1390,14 @@ public class ObservationReportPersistenceService {
    * <p>비어 있음과 없음을 가른다 — HTP 이거나 근거가 부족해 AI 가 구조화를 포기하면 행 자체를 만들지 않고, 화면은 행의 유무로 V2 를 열지 말지 정한다. 빈
    * 껍데기를 저장하면 아이 이야기가 하나도 없는 V2 화면이 열린다.
    */
-  private void saveDiaryInsights(Report report, DiaryInsightsDraft draft) {
+  private void saveDiaryInsights(
+      Report report, DiaryInsightsDraft draft, ObservationGenerationContext context) {
     if (draft == null) {
       return;
     }
     DiaryStorySnapshotDraft snapshot = draft.storySnapshot();
     DiaryDataQualityDraft quality = draft.dataQuality();
+    DiaryDataScopeDraft dataScope = draft.dataScope();
     diaryInsightRepository.save(
         ReportDiaryInsight.create(
             report,
@@ -1393,7 +1417,14 @@ public class ObservationReportPersistenceService {
             quality == null ? 0 : quality.skippedCount(),
             quality == null ? 0 : quality.sttConfirmationCount(),
             quality == null ? 0 : quality.evidenceCount(),
-            quality != null && quality.visionSummaryAvailable()));
+            quality != null && quality.visionSummaryAvailable(),
+            draft.schemaVersion(),
+            dataScope == null ? null : dataScope.evidenceLevel(),
+            dataScope == null
+                ? null
+                : ColumnTextLimiter.fit(
+                    dataScope.summary(), 300, "report_diary_insights.data_scope_summary"),
+            dataScope == null ? 0 : dataScope.visualObservationCount()));
 
     List<ReportDiaryEvidenceRef> refs = new ArrayList<>();
     if (snapshot != null) {
@@ -1434,6 +1465,14 @@ public class ObservationReportPersistenceService {
     List<DiarySessionObservationDraft> observationDrafts = draft.sessionObservations();
     for (int index = 0; index < observationDrafts.size(); index++) {
       DiarySessionObservationDraft observation = observationDrafts.get(index);
+      boolean hypothesis = "SESSION_HYPOTHESIS".equals(observation.insightType());
+      if (hypothesis
+          && (dataScope == null
+              || "LIMITED".equals(dataScope.evidenceLevel())
+              || observation.alternativeExplanations().isEmpty()
+              || isBlank(observation.clarificationQuestion()))) {
+        continue;
+      }
       observations.add(
           ReportDiarySessionObservation.create(
               report,
@@ -1545,6 +1584,50 @@ public class ObservationReportPersistenceService {
     }
     diaryDevelopmentalObservationRepository.saveAll(developments);
     diaryDevelopmentSourceRepository.saveAll(sources);
+
+    if (draft.schemaVersion() >= 3) {
+      List<ReportDiaryStoryComponent> storyComponents = new ArrayList<>();
+      List<DiaryStoryComponentDraft> componentDrafts = draft.storyComponents();
+      for (int index = 0; index < componentDrafts.size(); index++) {
+        DiaryStoryComponentDraft component = componentDrafts.get(index);
+        if (isBlank(component.componentType()) || isBlank(component.status())) {
+          continue;
+        }
+        storyComponents.add(
+            ReportDiaryStoryComponent.create(
+                report, component.componentType(), component.status(), component.text(), index));
+        collectDiaryRefs(
+            report,
+            refs,
+            ReportDiaryEvidenceRef.OWNER_STORY_COMPONENT,
+            index,
+            component.evidenceRefs());
+      }
+      diaryStoryComponentRepository.saveAll(storyComponents);
+
+      List<ReportDiaryVisualObservation> visualObservations = new ArrayList<>();
+      List<DiaryDrawingObservationDraft> visualDrafts = draft.drawingObservations();
+      for (int index = 0; index < visualDrafts.size(); index++) {
+        DiaryDrawingObservationDraft visual = visualDrafts.get(index);
+        if (isBlank(visual.text()) || isBlank(visual.confidence())) {
+          continue;
+        }
+        visualObservations.add(
+            ReportDiaryVisualObservation.create(
+                report, visual.text(), visual.confidence(), visual.childConfirmed(), index));
+        collectDiaryRefs(
+            report,
+            refs,
+            ReportDiaryEvidenceRef.OWNER_VISUAL_OBSERVATION,
+            index,
+            visual.evidenceRefs());
+      }
+      diaryVisualObservationRepository.saveAll(visualObservations);
+
+      List<ReportDiaryTranscriptEntry> transcript =
+          diaryTranscriptSnapshotFactory.create(report, context);
+      diaryTranscriptEntryRepository.saveAll(transcript);
+    }
 
     diaryEvidenceRefRepository.saveAll(refs);
 

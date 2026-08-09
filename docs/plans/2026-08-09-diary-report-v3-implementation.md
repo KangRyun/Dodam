@@ -251,7 +251,7 @@ git commit -m "[S15P11B209-1019] feat(ai): 그림일기 V3 작성 및 검토 규
 - Consumes: AI `DiaryInsightsDraft` V3 필드
 - Produces: 정규화된 V3 리포트 스냅샷
 
-- [ ] **Step 1: 저장 왕복 실패 테스트를 작성한다**
+- [x] **Step 1: 저장 왕복 실패 테스트를 작성한다**
 
 ```java
 @Test
@@ -268,7 +268,7 @@ void persistsV3ScopeStoryComponentsAndVisualObservations() {
 }
 ```
 
-- [ ] **Step 2: 실패를 확인한다**
+- [x] **Step 2: 실패를 확인한다**
 
 Run: `cd backend && ./gradlew test --tests "com.ssafy.b209.report.service.ObservationReportPersistenceServiceTest"`
 
@@ -276,7 +276,7 @@ Windows: `cd backend; .\gradlew.bat test --tests "com.ssafy.b209.report.service.
 
 Expected: V3 Entity·Repository가 없어 컴파일 FAIL.
 
-- [ ] **Step 3: V53 마이그레이션을 작성한다**
+- [x] **Step 3: V53 마이그레이션을 작성한다**
 
 ```sql
 ALTER TABLE report_diary_insights
@@ -341,7 +341,7 @@ CREATE TABLE report_diary_transcript_entries (
 
 transcript에는 URL이나 JWT를 저장하지 않고 메시지 ID와 텍스트·상태 스냅샷만 저장한다.
 
-- [ ] **Step 4: Entity와 Repository를 구현한다**
+- [x] **Step 4: Entity와 Repository를 구현한다**
 
 ```java
 public static ReportDiaryStoryComponent create(
@@ -371,17 +371,17 @@ List<ReportDiaryTranscriptEntry> create(
 
 선택 답변은 `OPTION`, 건너뜀은 `SKIPPED`, 확인된 음성 답변은 `VOICE`로 저장한다. 답변 원문은 리포트 생성 시점 값으로 보존하고 Storage URL은 저장하지 않는다.
 
-- [ ] **Step 5: `saveDiaryInsights`에 V3 저장을 연결한다**
+- [x] **Step 5: `saveDiaryInsights`에 V3 저장을 연결한다**
 
 V2 필드 저장을 유지한 채 `schemaVersion >= 3`일 때 이야기 구성 요소와 그림 관찰을 저장한다. 가설은 `LIMITED`에서 저장하지 않고, 대안 설명과 질문이 없는 `SESSION_HYPOTHESIS`도 저장하지 않는다.
 
-- [ ] **Step 6: 저장·마이그레이션 테스트를 실행한다**
+- [x] **Step 6: 저장·마이그레이션 테스트를 실행한다**
 
 Run: `cd backend; .\gradlew.bat test --tests "com.ssafy.b209.report.service.ObservationReportPersistenceServiceTest" --tests "com.ssafy.b209.report.service.DiaryTranscriptSnapshotFactoryTest" --tests "com.ssafy.b209.DatabaseMigrationIntegrationTest"`
 
 Expected: PASS, JSON 타입 컬럼 0개.
 
-- [ ] **Step 7: Backend 저장 변경을 커밋한다**
+- [x] **Step 7: Backend 저장 변경을 커밋한다**
 
 ```bash
 git add backend/src/main/resources/db/migration/V53__add_diary_report_v3.sql backend/src/main/java/com/ssafy/b209/report backend/src/test/java/com/ssafy/b209/report/service/ObservationReportPersistenceServiceTest.java

@@ -40,6 +40,12 @@ public class ReportDiaryEvidenceRef {
   /** 연령 발달 맥락 관찰 — 여기 달리는 근거는 '이번 활동에서 확인된 표현' 쪽이지 연령 맥락 문장의 출처가 아니다. */
   public static final String OWNER_DEVELOPMENTAL_OBSERVATION = "DEVELOPMENTAL_OBSERVATION";
 
+  /** V3 이야기 지도 구성 요소. */
+  public static final String OWNER_STORY_COMPONENT = "STORY_COMPONENT";
+
+  /** V3 이미지 기반 관찰 사실. */
+  public static final String OWNER_VISUAL_OBSERVATION = "VISUAL_OBSERVATION";
+
   @Id
   @GeneratedValue(strategy = GenerationType.IDENTITY)
   private Long id;
